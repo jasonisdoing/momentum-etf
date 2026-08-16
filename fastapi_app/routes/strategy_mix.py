@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
 
@@ -15,6 +16,19 @@ def get_strategy_mix_meta(_: None = Depends(require_internal_token)) -> dict:
     from utils.strategy_mix_service import mix_meta
 
     return mix_meta()
+
+
+class MixSettingsPayload(BaseModel):
+    pool: str
+    account_id: str | None = None
+
+
+@router.put("/settings")
+def put_settings(payload: MixSettingsPayload, _: None = Depends(require_internal_token)) -> dict:
+    """선택한 풀에 적용 계좌를 저장한다."""
+    from utils.strategy_mix_service import save_settings
+
+    return save_settings(payload.pool, payload.account_id)
 
 
 @router.get("/positions")

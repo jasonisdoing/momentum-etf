@@ -68,6 +68,43 @@ def _pool_options(pools: list[str]) -> list[dict[str, Any]]:
 # 백테스트 기간 선택지 — 신고가 화면과 동일한 목록 (상한 60개월 = 신고가 엔진의 최대).
 MONTH_OPTIONS = (6, 12, 24, 36, 48, 60)
 
+_CONFIG_COLLECTION = "system_config"
+_SETTINGS_KEY = "strategy_mix_settings"
+# 풀별로 보관하는 설정 — 다른 전략 화면과 같은 `{pool, settings_by_pool}` 구조다.
+PER_POOL_SETTING_KEYS = ("account_id",)
+
+
+def _db():
+    from utils.db_manager import get_db_connection
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결에 실패했습니다.")
+    return db
+
+
+def load_settings_map() -> dict[str, Any]:
+    """풀별 저장 설정 — 화면이 풀 셀렉트를 바꿀 때 즉시 전환하는 데 쓴다."""
+    doc = _db()[_CONFIG_COLLECTION].find_one({"_id": _SETTINGS_KEY}) or {}
+    return dict(doc.get("settings_by_pool") or {})
+
+
+def save_settings(pool: str, account_id: str | None) -> dict[str, Any]:
+    """선택한 풀에 적용 계좌를 저장한다. 다른 풀의 저장분은 건드리지 않는다."""
+    from utils.settings_loader import list_available_accounts
+
+    pool_norm, _, _ = _resolve_pool_and_settings(pool)
+    account_norm = str(account_id or "").strip()
+    if account_norm and account_norm not in list_available_accounts():
+        raise ValueError(f"알 수 없는 계좌입니다: {account_id}")
+    per_pool = {"account_id": account_norm or None}
+    _db()[_CONFIG_COLLECTION].update_one(
+        {"_id": _SETTINGS_KEY},
+        {"$set": {"pool": pool_norm, f"settings_by_pool.{pool_norm}": per_pool}},
+        upsert=True,
+    )
+    return {"pool": pool_norm, **per_pool}
+
 
 def mix_meta() -> dict[str, Any]:
     """화면 초기용 — 풀 셀렉트 목록과 기본 풀만 반환한다 (백테스트 계산 없음)."""
@@ -82,7 +119,32 @@ def mix_meta() -> dict[str, Any]:
         default = [o["ticker_type"] for o in _pool_options(ready)][0]
     else:
         default = all_pools[0] if all_pools else ""
-    return {"pool": default, "pool_options": _pool_options(all_pools), "month_options": list(MONTH_OPTIONS)}
+    from utils.settings_loader import get_account_settings, list_available_accounts
+
+    accounts = []
+    for account_id in list_available_accounts():
+        try:
+            settings = get_account_settings(account_id) or {}
+        except Exception:
+            settings = {}
+        inner = settings.get("settings") or settings
+        accounts.append(
+            {
+                "account_id": account_id,
+                "name": str(inner.get("name") or account_id),
+                "icon": str(inner.get("icon") or ""),
+                "order": inner.get("order"),
+            }
+        )
+    accounts.sort(key=lambda item: (item["order"] is None, item["order"]))
+    return {
+        "pool": default,
+        "pool_options": _pool_options(all_pools),
+        "month_options": list(MONTH_OPTIONS),
+        "accounts": accounts,
+        # 풀별 저장 설정 — 화면이 풀을 바꿀 때 즉시 전환한다.
+        "settings_by_pool": load_settings_map(),
+    }
 
 
 def _resolve_pool_and_settings(pool: str | None) -> tuple[str, dict[str, Any], dict[str, Any]]:
@@ -113,6 +175,34 @@ def _resolve_pool_and_settings(pool: str | None) -> tuple[str, dict[str, Any], d
             f"'{pool_norm}' 풀에 {' · '.join(missing)} 설정이 저장돼 있지 않습니다 — 해당 전략 화면에서 먼저 저장하세요."
         )
     return pool_norm, sm_validate({**sm_saved, "pool": pool_norm}), nh_validate({**nh_saved, "pool": pool_norm})
+
+
+def _load_account_state(account_id: str) -> dict[str, Any]:
+    """적용 계좌의 실제 보유 수량·평단·현금 — portfolio_master 가 단일 소스다."""
+    from utils.portfolio_io import load_portfolio_master
+
+    master = load_portfolio_master(account_id) or {}
+    holdings = {}
+    for row in master.get("holdings") or []:
+        ticker = str(row.get("ticker") or "").strip().upper()
+        if not ticker or ticker in {"IS", "__CASH__"}:
+            continue
+        try:
+            quantity = float(row.get("quantity") or 0)
+        except (TypeError, ValueError):
+            quantity = 0.0
+        if quantity <= 0:
+            continue
+        holdings[ticker] = {
+            "quantity": quantity,
+            "name": str(row.get("name") or ticker),
+            "average_buy_price": float(row.get("average_buy_price") or 0) or None,
+        }
+    try:
+        cash = float(master.get("cash_balance") or 0)
+    except (TypeError, ValueError):
+        cash = 0.0
+    return {"account_id": account_id, "holdings": holdings, "cash_balance": cash}
 
 
 def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str, Any]:
@@ -213,9 +303,61 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     month_days = get_trading_days(month_start.strftime("%Y-%m-%d"), today_local.strftime("%Y-%m-%d"), country)
     sleeve_rebalance_today = bool(month_days) and month_days[0].date() == today_local
 
+    # ── 적용 계좌 — 저장된 연결이 있으면 실제 보유·현금을 붙여 매매 지시를 만든다.
+    account_id = str((load_settings_map().get(pool_norm) or {}).get("account_id") or "").strip()
+    account = _load_account_state(account_id) if account_id else None
+    if account is not None:
+        # 보유 종목 가격 — 목표 목록에 있으면 그 값을, 없으면 가격 캐시에서 마지막 종가를 쓴다.
+        price_by_ticker = {row["ticker"]: row["price"] for row in holdings if row.get("price")}
+        missing = [ticker for ticker in account["holdings"] if ticker not in price_by_ticker]
+        if missing:
+            from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
+
+            for ticker, frame in load_cached_frames_bulk_from_all_ticker_types(missing).items():
+                if frame is None or frame.empty or "Close" not in frame.columns:
+                    continue
+                close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+                if not close.empty:
+                    price_by_ticker[ticker] = float(close.iloc[-1])
+        stock_value = 0.0
+        for ticker, item in account["holdings"].items():
+            price = price_by_ticker.get(ticker)
+            item["price"] = round(float(price), 4) if price else None
+            item["value"] = round(item["quantity"] * float(price), 2) if price else None
+            if price:
+                stock_value += item["quantity"] * float(price)
+        total_assets = stock_value + account["cash_balance"]
+        account["stock_value"] = round(stock_value, 2)
+        account["total_assets"] = round(total_assets, 2)
+        # 종목별 목표 금액·주수 → 현재 보유와의 차이가 그대로 매매 지시가 된다.
+        for row in holdings:
+            held = account["holdings"].get(row["ticker"])
+            row["held_quantity"] = held["quantity"] if held else 0.0
+            target_amount = total_assets * row["weight_pct"] / 100.0
+            row["target_amount"] = round(target_amount, 2)
+            price = row.get("price")
+            target_qty = int(target_amount // float(price)) if price else None
+            row["target_quantity"] = target_qty
+            row["trade_quantity"] = None if target_qty is None else target_qty - int(row["held_quantity"])
+        # 목표에 없는 보유 종목 = 전량 매도 대상.
+        target_tickers = {row["ticker"] for row in holdings}
+        account["sell_all"] = [
+            {
+                "ticker": ticker,
+                "name": item["name"],
+                "quantity": item["quantity"],
+            }
+            for ticker, item in sorted(account["holdings"].items())
+            if ticker not in target_tickers
+        ]
+        account["sell_all"] = [
+            {**row, "value": account["holdings"][row["ticker"]].get("value")} for row in account["sell_all"]
+        ]
+
     return {
         "computed_at": datetime.now().astimezone().isoformat(),
         "pool": pool_norm,
+        "account": account,
         "as_of": nh.get("as_of"),
         "live": bool(nh.get("live")),
         # 과거 날짜 셀렉트용 — 신고가 화면과 같은 날짜 목록을 그대로 쓴다.
