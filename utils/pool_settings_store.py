@@ -533,27 +533,21 @@ def get_pool_delete_impact(pool_id: str) -> dict[str, Any]:
     """종목풀 삭제 전 영향도를 반환한다."""
     norm_id = _normalize_ticker_type(pool_id)
     db = _db()
-    account_count = db["account_settings"].count_documents({"ticker_types": norm_id})
     stock_count = db["stock_meta"].count_documents({"ticker_type": norm_id})
     exists = db[COLLECTION].find_one({"_id": norm_id}, {"_id": 1}) is not None
     return {
         "ticker_type": norm_id,
         "exists": exists,
-        "account_count": account_count,
         "stock_count": stock_count,
-        "can_delete": exists and account_count == 0,
+        "can_delete": exists,
     }
 
 
 def delete_pool(pool_id: str) -> dict[str, Any]:
-    """계좌 연결이 없는 종목풀을 하드 삭제한다. 연결 종목 메타도 함께 제거한다."""
+    """종목풀을 하드 삭제한다. 연결 종목 메타도 함께 제거한다."""
     impact = get_pool_delete_impact(pool_id)
     if not impact["exists"]:
         raise PoolSettingsError(f"알 수 없는 종목풀입니다: {pool_id}")
-    if int(impact["account_count"]) > 0:
-        raise PoolSettingsError(
-            f"계좌 {impact['account_count']}개에 연결된 종목풀은 삭제할 수 없습니다. 계좌 연결을 먼저 해제하세요."
-        )
     norm_id = str(impact["ticker_type"])
     db = _db()
     deleted_pool = db[COLLECTION].delete_one({"_id": norm_id}).deleted_count

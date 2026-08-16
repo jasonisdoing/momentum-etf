@@ -3,7 +3,7 @@
 (구)accounts.json 을 대체한다. 계좌별 1개 문서:
 
     {_id: <account_id>, name, icon, order, country_code, currency,
-     benchmark: {ticker, name}, ticker_types?, market_regime_index?, URL?,
+     benchmark: {ticker, name}, market_regime_index?, URL?,
      ma_*/stoploss_* 알람 설정, updated_at, save_method}
 
 DB 가 유일한 소스다. 문서가 없으면 임의 기본값 없이 **명확히 에러**를 낸다.
@@ -34,7 +34,6 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "currency",
     "cash_currencies",
     "benchmark",
-    "ticker_types",
     "market_regime_index",
     "URL",
     "ma_alarm_enabled",
@@ -178,20 +177,6 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
 
                 ticker = ensure_asx_prefix(ticker)
             cleaned[key] = {"ticker": ticker, "name": bench_name}
-        elif key == "ticker_types":
-            # 후보 출처 종목풀 연결(trend). 유효한 종목풀 id 목록이어야 한다.
-            if not isinstance(raw, list) or not all(isinstance(item, str) and item.strip() for item in raw):
-                raise AccountSettingsStoreError(f"'{account_id}' 의 ticker_types 는 종목풀 id 목록이어야 합니다.")
-            from utils.settings_loader import list_available_ticker_types
-
-            available = set(list_available_ticker_types())
-            normalized = [item.strip().lower() for item in raw]
-            unknown = [item for item in normalized if item not in available]
-            if unknown:
-                raise AccountSettingsStoreError(
-                    f"'{account_id}' 의 ticker_types 에 알 수 없는 종목풀이 있습니다: {', '.join(unknown)}"
-                )
-            cleaned[key] = normalized
         elif key == "market_regime_index":
             # 계좌별 시장 레짐 판정 지수 — 시장추세 지수(INDICES) 중 하나(필수, {ticker, name}).
             if not isinstance(raw, dict):
