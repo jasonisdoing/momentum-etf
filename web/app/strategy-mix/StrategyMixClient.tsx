@@ -74,10 +74,12 @@ type Holding = {
   change_pct: number | null;
   sm_status: string | null;
   nh_status: string | null;
-  /** 적용 계좌가 있을 때만 온다 — 계좌 총자산 기준 목표 금액·주수. */
+  /** 적용 계좌가 있을 때만 온다 — 계좌 총자산 기준 목표 금액·주수와 현재 보유. */
   target_amount?: number | null;
   target_quantity?: number | null;
   held_quantity?: number | null;
+  held_value?: number | null;
+  current_weight_pct?: number;
   trade_quantity?: number | null;
 };
 
@@ -103,14 +105,27 @@ type Positions = {
   summary: {
     stock_pct: number;
     cash_pct: number;
-    sm: { slots_used: number; top_n: number; cash_pct: number };
-    nh: { slots_used: number; top_n: number; cash_pct: number };
+    /** slots_used = 목표가 찬 슬롯, held_count = 지금 실제로 들고 있는 종목 수. */
+    sm: { slots_used: number; held_count: number; top_n: number; cash_pct: number };
+    nh: { slots_used: number; held_count: number; top_n: number; cash_pct: number };
   };
   holdings: Holding[];
   actions: {
     /** 모멘텀 주중 매도 예정 — 보유 자격(장단기 이평선) 상실, 다음 거래일 시가 매도. */
     sm_sells: { ticker: string; name: string; reason: string }[];
-    nh_entries: { ticker: string; name: string; price: number | null; change_pct: number | null; value_mult: number | null }[];
+    /** 진입 예정 — 빈 슬롯을 채울 종목이라 목표 보유와 같은 비중·매매 지시를 갖는다. */
+    nh_entries: {
+      ticker: string;
+      name: string;
+      price: number | null;
+      change_pct: number | null;
+      value_mult: number | null;
+      weight_pct: number;
+      target_amount?: number | null;
+      target_quantity?: number | null;
+      held_quantity?: number | null;
+      trade_quantity?: number | null;
+    }[];
     nh_sells: { ticker: string; name: string; return_pct: number | null; reason: string }[];
     /** 확정된 다음 교체 — 판정은 끝났고 체결만 남았다. */
     sm_rebalance: {
@@ -336,55 +351,32 @@ export function StrategyMixClient() {
 
   const positionRows = useMemo<PositionRow[]>(() => {
     if (!positions) return [];
-    const toAmount = (weightPct: number) => (totalAsset == null ? null : (totalAsset * weightPct) / 100);
-    // 목표 종목 행은 백엔드가 계산한 목표 금액·주수를 그대로 쓴다(계좌가 있을 때만 온다).
-    const rows: PositionRow[] = positions.holdings.map((holding) => ({
-      ...holding,
-      amount: holding.target_amount ?? null,
-      shares: holding.target_quantity ?? null,
-    }));
-    // 빈 슬롯은 슬리브별로 채워 슬롯 수(예: 8+8)가 표에서 그대로 보이게 한다.
-    // 빈 슬롯은 각 전략의 진입 예정 종목부터 채우고(다음 시가 매수), 남으면 현금 슬롯이다.
-    const nhWeight = 50 / positions.summary.nh.top_n;
-    const nhFree = positions.summary.nh.top_n - positions.summary.nh.slots_used;
-    const entries = positions.actions.nh_entries.slice(0, nhFree);
-    for (const entry of entries) {
-      const amount = toAmount(nhWeight);
-      rows.push({
-        ticker: entry.ticker,
-        name: entry.name,
-        sources: ["nh"],
-        weight_pct: nhWeight,
-        price: entry.price,
-        change_pct: entry.change_pct,
-        sm_status: null,
-        nh_status: "진입 예정 (다음 시가 매수)",
-        amount,
-        shares: amount != null && entry.price ? Math.floor(amount / entry.price) : null,
-      });
-    }
-    for (const [source, sleeve, used] of [
-      ["sm", positions.summary.sm, positions.summary.sm.slots_used],
-      ["nh", positions.summary.nh, positions.summary.nh.slots_used + entries.length],
-    ] as const) {
-      const slotWeight = 50 / sleeve.top_n;
-      for (let slot = used; slot < sleeve.top_n; slot += 1) {
-        rows.push({
-          ticker: `__cash_${source}_${slot}__`,
-          name: "현금",
-          sources: [source],
-          weight_pct: slotWeight,
-          price: null,
-          change_pct: null,
-          sm_status: null,
-          nh_status: null,
-          is_cash: true,
-          amount: toAmount(slotWeight),
-          shares: null,
-        });
-      }
-    }
-    return rows;
+    // 현금은 빈 슬롯마다 나누지 않고 한 행으로 맨 위에 둔다 — 계좌 현금은 한 덩어리다.
+    const cashRow: PositionRow = {
+      ticker: "__cash__",
+      name: "현금",
+      sources: [],
+      weight_pct: positions.summary.cash_pct,
+      price: null,
+      change_pct: null,
+      sm_status: null,
+      nh_status: null,
+      is_cash: true,
+      current_weight_pct:
+        totalAsset && positions.account ? (positions.account.cash_balance / totalAsset) * 100 : undefined,
+      held_value: positions.account?.cash_balance ?? null,
+      amount: totalAsset == null ? null : (totalAsset * positions.summary.cash_pct) / 100,
+      shares: null,
+    };
+    // 목표 종목 행은 백엔드가 종목 단위로 합쳐 계산한 값을 그대로 쓴다.
+    return [
+      cashRow,
+      ...positions.holdings.map((holding) => ({
+        ...holding,
+        amount: holding.target_amount ?? null,
+        shares: holding.target_quantity ?? null,
+      })),
+    ];
   }, [positions, totalAsset]);
 
   const positionColumns = useMemo<ColDef<PositionRow>[]>(() => {
@@ -407,10 +399,10 @@ export function StrategyMixClient() {
         field: "sources",
         headerName: "전략",
         width: 110,
-        // 겹치는 종목도 슬리브별 행으로 각각 오므로 전략은 항상 하나다.
+        // 두 전략이 같은 종목을 담으면 한 행에 둘 다 표시된다 (비중은 합산).
         valueFormatter: (p) => {
           const sources = (p.value as string[]) ?? [];
-          return sources.length === 0 ? "-" : SOURCE_LABEL[sources[0]] ?? sources[0];
+          return sources.length === 0 ? "-" : sources.map((s) => SOURCE_LABEL[s] ?? s).join("·");
         },
       },
       {
@@ -420,6 +412,21 @@ export function StrategyMixClient() {
         type: "numericColumn",
         valueFormatter: (p) => (p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`),
         cellStyle: { fontWeight: 600 },
+      },
+      // 현재 비중 = 계좌 평가액 기준. 목표와의 차이가 곧 조정할 양이다.
+      {
+        field: "current_weight_pct",
+        headerName: "현재 비중",
+        width: 110,
+        type: "numericColumn",
+        valueFormatter: (p) => (p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`),
+        cellStyle: (p) => {
+          const current = p.value as number | null;
+          const target = p.data?.weight_pct;
+          if (current == null || target == null) return null;
+          // 목표에서 1%p 넘게 벌어진 행만 눌러 표시한다 — 반올림 오차로 전부 색이 붙는 걸 막는다.
+          return Math.abs(current - target) > 1 ? { color: "var(--text-muted)" } : null;
+        },
       },
       {
         field: "price",
@@ -437,6 +444,7 @@ export function StrategyMixClient() {
         cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
       },
     ];
+    // 계좌를 연결한 풀에서만 매매 지시 컬럼을 붙인다 — 목표와 실제 보유의 차이가 주문 수량이다.
     if (totalAsset != null) {
       columns.push(
         {
@@ -444,15 +452,39 @@ export function StrategyMixClient() {
           headerName: "목표 금액",
           width: 140,
           type: "numericColumn",
-          valueFormatter: (p) =>
-            p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR", { maximumFractionDigits: 0 }),
+          valueFormatter: (p) => formatAmount(p.value as number),
         },
         {
           field: "shares",
-          headerName: "주수",
-          width: 90,
+          headerName: "목표 주수",
+          width: 110,
           type: "numericColumn",
           valueFormatter: (p) => (p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR")),
+        },
+        {
+          field: "held_quantity",
+          headerName: "보유 주수",
+          width: 110,
+          type: "numericColumn",
+          valueFormatter: (p) => (p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR")),
+        },
+        {
+          field: "trade_quantity",
+          headerName: "매매 주수",
+          headerTooltip: "목표 주수 − 보유 주수. +는 매수, −는 매도",
+          width: 110,
+          type: "numericColumn",
+          valueFormatter: (p) => {
+            const value = p.value as number | null;
+            if (value == null) return "-";
+            if (value === 0) return "0";
+            return `${value > 0 ? "+" : ""}${value.toLocaleString("ko-KR")}`;
+          },
+          cellStyle: (p) => {
+            const value = p.value as number | null;
+            if (value == null || value === 0) return null;
+            return { color: value > 0 ? "#2f9e44" : "#d62828", fontWeight: 700 };
+          },
         },
       );
     }
@@ -463,7 +495,7 @@ export function StrategyMixClient() {
       minWidth: 260,
       valueGetter: (p) => {
         if (!p.data) return "";
-        if (p.data.is_cash) return "빈 슬롯 (현금)";
+        if (p.data.is_cash) return "미배분 현금";
         const parts: string[] = [];
         if (p.data.sm_status) parts.push(`모멘텀 ${p.data.sm_status}`);
         if (p.data.nh_status) parts.push(`신고가 ${p.data.nh_status}`);
@@ -571,7 +603,8 @@ export function StrategyMixClient() {
   const actions = positions?.actions ?? null;
   const hasActions =
     actions != null &&
-    (actions.sm_sells.length > 0 ||
+    ((positions?.account?.sell_all ?? []).length > 0 ||
+      actions.sm_sells.length > 0 ||
       actions.nh_entries.length > 0 ||
       actions.nh_sells.length > 0 ||
       actions.sm_rebalance.buys.length > 0 ||
@@ -667,7 +700,14 @@ export function StrategyMixClient() {
                     {/* ① 요약 바 — 오늘 주식·현금을 얼마씩 둬야 하는지. */}
                     <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
                       <span style={{ fontSize: "var(--fs-lg)", fontWeight: 800 }}>
-                        주식 {positions.summary.stock_pct.toFixed(1)}% · 현금 {positions.summary.cash_pct.toFixed(1)}%
+                        목표 주식 {positions.summary.stock_pct.toFixed(1)}% · 현금{" "}
+                        {positions.summary.cash_pct.toFixed(1)}%
+                        {positions.account && totalAsset
+                          ? ` (현재 ${((positions.account.stock_value / totalAsset) * 100).toFixed(1)}% · ${(
+                              (positions.account.cash_balance / totalAsset) *
+                              100
+                            ).toFixed(1)}%)`
+                          : ""}
                       </span>
                       {/* 적용 계좌 — 목표 금액의 기준이 되는 실제 잔고. */}
                       {positions.account ? (
@@ -682,9 +722,9 @@ export function StrategyMixClient() {
                         <span style={hintStyle}>적용 계좌 없음 — 계좌를 저장하면 목표 금액·주수가 나옵니다</span>
                       )}
                       <span style={hintStyle}>
-                        모멘텀 슬리브 {positions.summary.sm.slots_used}/{positions.summary.sm.top_n}종목 보유 (현금{" "}
-                        {positions.summary.sm.cash_pct.toFixed(1)}%) · 신고가 슬리브 {positions.summary.nh.slots_used}/
-                        {positions.summary.nh.top_n}종목 보유 (현금 {positions.summary.nh.cash_pct.toFixed(1)}%)
+                        모멘텀 목표 {positions.summary.sm.slots_used}/{positions.summary.sm.top_n} (보유{" "}
+                        {positions.summary.sm.held_count}) · 신고가 목표 {positions.summary.nh.slots_used}/
+                        {positions.summary.nh.top_n} (보유 {positions.summary.nh.held_count})
                       </span>
                       {actions && !actions.sm_rebalance.is_filled && actions.sm_rebalance.fill_date ? (
                         <span style={hintStyle}>
@@ -714,8 +754,7 @@ export function StrategyMixClient() {
                       columnDefs={positionColumns}
                       theme={gridTheme}
                       minHeight="auto"
-                      // 같은 종목이 두 슬리브에 겹칠 수 있어 티커만으로는 행이 유일하지 않다.
-                      getRowId={(p) => `${p.data.sources[0] ?? "cash"}:${p.data.ticker}`}
+                      getRowId={(p) => p.data.ticker}
                       // 아직 체결 전인 행(진입 예정)과 곧 나갈 행(매도 예정)은 확정 보유와
                       // 구분되게 회색으로 눌러 둔다 — 추세 이탈 행과 같은 공용 클래스.
                       getRowClass={(params) => {
@@ -770,6 +809,13 @@ export function StrategyMixClient() {
                               다시 맞추세요.
                             </li>
                           ) : null}
+                          {(positions.account?.sell_all ?? []).map((row) => (
+                            <li key={`sell-all-${row.ticker}`}>
+                              <strong style={{ color: "#d62828" }}>전량 매도</strong> — {row.name} {formatPrice(row.quantity)}
+                              주{row.value != null ? ` (${formatAmount(row.value)})` : ""} · 목표 포트폴리오에 없는 보유
+                              종목
+                            </li>
+                          ))}
                         </ul>
                       )}
 
