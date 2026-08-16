@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { HoldingChart, type HoldingChartData } from "./HoldingChart";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { BacktestSummary } from "../components/BacktestSummary";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
@@ -19,7 +20,7 @@ import {
   signColor,
   tradeValueMultStyle,
 } from "@/lib/grid-cells";
-import { formatKstDateTime } from "@/lib/datetime";
+import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
 import { renderStockNameCell } from "@/lib/name-highlight";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
@@ -207,13 +208,6 @@ type Backtest = {
 // 장중 자동 갱신 주기. 계산이 수 초 걸려 더 짧게 잡으면 요청이 겹친다.
 const LIVE_REFRESH_MS = 5 * 60 * 1000;
 
-/** 화면 전환 — 지금 상태를 보는 탭과 과거 성과를 보는 탭. */
-const MAIN_TABS = [
-  { key: "current", label: "현재 상태" },
-  { key: "backtest", label: "백테스트" },
-] as const;
-type MainTab = (typeof MAIN_TABS)[number]["key"];
-
 /** 현재 상태 안쪽 탭. 차트는 보유 종목 수만큼 그리므로 열 때만 그린다. */
 const CURRENT_TABS = [
   { key: "list", label: "종목" },
@@ -224,6 +218,7 @@ type CurrentTab = (typeof CURRENT_TABS)[number]["key"];
 const VIEW_MODES = [
   { key: "yearly", label: "연간" },
   { key: "monthly", label: "월간" },
+  { key: "weekly", label: "주간" },
   { key: "daily", label: "일간" },
   { key: "trades", label: "체결" },
 ] as const;
@@ -231,15 +226,24 @@ type ViewMode = (typeof VIEW_MODES)[number]["key"];
 
 type PeriodRow = { period: string; strategy_pct: number; benchmark_pct: number };
 
-/** 누적(%) 시계열을 기간별 수익률로 자른다. 구간 양끝의 누적값 비로 계산한다. */
-function toPeriodRows(daily: Backtest["daily"], keyLength: number): PeriodRow[] {
+/** 그 날짜가 속한 주의 월요일 — 주간 묶음 키. 로컬 기준으로 조립한다(UTC 파싱은 하루 밀린다). */
+function weekKeyOf(date: string): string {
+  const parsed = new Date(`${date}T00:00:00`);
+  parsed.setDate(parsed.getDate() - ((parsed.getDay() + 6) % 7));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
+}
+
+/** 누적(%) 시계열을 기간별 수익률로 자른다. 구간 양끝의 누적값 비로 계산한다.
+ *  주간은 묶음 키(월요일)와 표시 라벨(그 주 마지막 거래일)이 달라 따로 담는다. */
+function toPeriodRows(daily: Backtest["daily"], keyOf: (date: string) => string, labelByLastDate = false): PeriodRow[] {
   if (daily.length === 0) return [];
-  const lastByPeriod = new Map<string, { strategy: number; benchmark: number }>();
+  const lastByPeriod = new Map<string, { strategy: number; benchmark: number; lastDate: string }>();
   const order: string[] = [];
   for (const point of daily) {
-    const key = point.date.slice(0, keyLength);
+    const key = keyOf(point.date);
     if (!lastByPeriod.has(key)) order.push(key);
-    lastByPeriod.set(key, { strategy: point.strategy_pct, benchmark: point.benchmark_pct });
+    lastByPeriod.set(key, { strategy: point.strategy_pct, benchmark: point.benchmark_pct, lastDate: point.date });
   }
   // 첫 구간의 기준은 시작 시점(누적 0%)이다.
   let prev = { strategy: 0, benchmark: 0 };
@@ -248,7 +252,7 @@ function toPeriodRows(daily: Backtest["daily"], keyLength: number): PeriodRow[] 
     const current = lastByPeriod.get(key)!;
     const step = (now: number, before: number) => ((1 + now / 100) / (1 + before / 100) - 1) * 100;
     rows.push({
-      period: key,
+      period: labelByLastDate ? current.lastDate : key,
       strategy_pct: step(current.strategy, prev.strategy),
       benchmark_pct: step(current.benchmark, prev.benchmark),
     });
@@ -323,16 +327,6 @@ function formatMarketCap(value: number | null | undefined): string {
   return `${eok.toLocaleString("ko-KR", { maximumFractionDigits: 0 })}억`;
 }
 
-const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
-
-/** `2026-08-12` → `2026-08-12 (수)`.
- *  UTC 로 파싱하면 하루 밀릴 수 있어 로컬 자정으로 읽는다. */
-function formatDateWithWeekday(date: string): string {
-  const parsed = new Date(`${date}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return date;
-  return `${date} (${WEEKDAYS[parsed.getDay()]})`;
-}
-
 function toDateKey(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -368,7 +362,6 @@ export function NewHighClient() {
   const [draft, setDraft] = useState<Settings | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
   const [notifying, setNotifying] = useState(false);
-  const [mainTab, setMainTab] = useState<MainTab>("current");
   const [currentTab, setCurrentTab] = useState<CurrentTab>("list");
   // 기준일 — 빈 값이면 최신 거래일. 과거 날짜를 고르면 그 시점 상태를 재현한다.
   const [asOf, setAsOf] = useState<string>("");
@@ -492,17 +485,10 @@ export function NewHighClient() {
   // 장중에는 실시간 시세가 움직이므로 주기적으로 다시 받는다.
   // 과거 날짜를 보는 중이거나 장이 닫혀 있으면 갱신할 것이 없어 타이머를 걸지 않는다.
   useEffect(() => {
-    if (!positions?.auto_refresh || asOf || mainTab !== "current" || !draft) return;
+    if (!positions?.auto_refresh || asOf || !draft) return;
     const id = window.setInterval(() => void runPositions(draft, ""), LIVE_REFRESH_MS);
     return () => window.clearInterval(id);
-  }, [positions?.auto_refresh, asOf, mainTab, draft, runPositions]);
-
-  // 백테스트 탭을 처음 열거나 설정이 바뀌어 결과가 비워졌을 때만 돌린다.
-  useEffect(() => {
-    if (mainTab === "backtest" && !backtest && !backtesting && !backtestError) {
-      void handleBacktest();
-    }
-  }, [mainTab, backtest, backtesting, backtestError, handleBacktest]);
+  }, [positions?.auto_refresh, asOf, draft, runPositions]);
 
   // 업종 컬럼 노출 여부 — 표시 중인 결과의 풀 성격(pool_kind)이 1순위(개별주=표시, ETF=숨김),
   // 미설정 풀은 행 값 유무로 추정 (pools-rank·strategy-sm 과 같은 기준).
@@ -613,7 +599,16 @@ export function NewHighClient() {
 
   const periodColumns = useMemo<ColDef<PeriodRow>[]>(
     () => [
-      { field: "period", headerName: viewMode === "yearly" ? "연도" : viewMode === "monthly" ? "월" : "일자", width: 132 },
+      {
+        field: "period",
+        headerName:
+          viewMode === "yearly" ? "연도" : viewMode === "monthly" ? "월" : viewMode === "weekly" ? "주" : "일자",
+        width: 148,
+        valueFormatter: (p) =>
+          viewMode === "weekly" || viewMode === "daily"
+            ? formatDateWithWeekday(String(p.value ?? ""))
+            : String(p.value ?? ""),
+      },
       {
         field: "strategy_pct",
         headerName: "전략",
@@ -647,10 +642,9 @@ export function NewHighClient() {
 
   const periodRows = useMemo<PeriodRow[]>(() => {
     if (!backtest) return [];
-    if (viewMode === "yearly") return toPeriodRows(backtest.daily, 4);
-    if (viewMode === "monthly") return toPeriodRows(backtest.daily, 7);
-    if (viewMode === "daily") return toPeriodRows(backtest.daily, 10);
-    return [];
+    if (viewMode === "weekly") return toPeriodRows(backtest.daily, weekKeyOf, true);
+    const keyLength = viewMode === "yearly" ? 4 : viewMode === "monthly" ? 7 : viewMode === "daily" ? 10 : 0;
+    return keyLength ? toPeriodRows(backtest.daily, (date) => date.slice(0, keyLength)) : [];
   }, [backtest, viewMode]);
 
   // 보유 + 내일 매도 + 내일 매수를 한 표로 합친다 — 이 표만 보고 주문을 낼 수 있게.
@@ -876,22 +870,24 @@ export function NewHighClient() {
     [hasIndustryData],
   );
 
-  if (loading) return <PageFrame title="신고가 돌파" fullWidth><div className="appPageStack">불러오는 중…</div></PageFrame>;
+  if (loading) return <PageFrame title="신고가 돌파 전략" fullWidth><div className="appPageStack">불러오는 중…</div></PageFrame>;
   if (error || !view || !draft || !constraints) {
     return (
-      <PageFrame title="신고가 돌파" fullWidth>
+      <PageFrame title="신고가 돌파 전략" fullWidth>
         <div className="alert alert-danger">{error ?? "설정을 불러오지 못했습니다."}</div>
       </PageFrame>
     );
   }
 
   return (
-    <PageFrame title="신고가 돌파" fullWidth>
+    <PageFrame title="신고가 돌파 전략" fullWidth>
       <div className="appPageStack">
         <section className="appSection">
           <div className="card appCard">
             <div className="card-body appCardBodyTight">
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-end" }}>
+              {/* 메인 헤더 — 주 제어(셀렉터·토글). CRUD 버튼은 아래 보조 액션 헤더로 뺀다. */}
+              <div className="appMainHeader">
+                <div className="appMainHeaderLeft">
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">종목풀</span>
                   <select
@@ -1006,7 +1002,7 @@ export function NewHighClient() {
                 </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">슬랙 알람</span>
-                  <div className="form-check form-switch" style={{ paddingLeft: "2.6em", marginBottom: 0, minHeight: 31, display: "flex", alignItems: "center" }}>
+                  <div className="form-check form-switch" style={{ paddingLeft: "2.6em" }}>
                     <input
                       className="form-check-input"
                       type="checkbox"
@@ -1051,13 +1047,17 @@ export function NewHighClient() {
                     </button>
                   </div>
                 </label>
-                <button
-                  className="btn btn-primary"
-                  type="button"
-                  onClick={() => void persistSettings(draft, "설정을 저장했습니다.")}
-                >
-                  저장
-                </button>
+                </div>
+                {/* CRUD 버튼이 하나뿐이라 별도 줄을 두지 않고 메인 헤더 오른쪽에 둔다. */}
+                <div className="appMainHeaderRight">
+                  <button
+                    className="btn btn-primary btn-sm px-3 fw-bold"
+                    type="button"
+                    onClick={() => void persistSettings(draft, "설정을 저장했습니다.")}
+                  >
+                    저장
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1066,54 +1066,42 @@ export function NewHighClient() {
         <section className="appSection">
           <div className="card appCard">
             <div className="card-header appCardHeader">
-              <NavTabs items={MAIN_TABS} value={mainTab} onChange={setMainTab} variant="card" label="화면 전환" />
+              <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>현재 상태</span>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              {mainTab === "current" && positions ? (
-                <span style={hintStyle}>
-                  {positions.live || positions.pre_market
-                    ? `${formatKstDateTime(positions.quote_at)} 시세 · ${positions.live ? "장중" : "장전"}`
-                    : `${formatKstDateTime(positions.refreshed_at)} 갱신`}
-                </span>
-              ) : null}
-              {mainTab === "current" && positions ? (
-                <select
-                  className="form-select form-select-sm"
-                  style={{ width: "auto" }}
-                  value={asOf}
-                  onChange={(event) => {
-                    setAsOf(event.target.value);
-                    if (draft) void runPositions(draft, event.target.value);
-                  }}
-                >
-                  <option value="">
-                    {positions.auto_refresh
-                      ? `오늘 (${positions.live ? "장중" : "장전"} 자동 갱신)`
-                      : `오늘 (${formatDateWithWeekday(positions.as_of)})`}
-                  </option>
-                  {positions.available_dates.map((d) => (
-                    <option key={d.date} value={d.date}>
-                      {formatDateWithWeekday(d.date)} ({d.candidate_count}종목
-                      {d.breakout_count ? ` · 돌파 ${d.breakout_count}` : ""})
+                {positions ? (
+                  <span style={hintStyle}>
+                    {positions.live || positions.pre_market
+                      ? `${formatKstDateTime(positions.quote_at)} 시세 · ${positions.live ? "장중" : "장전"}`
+                      : `${formatKstDateTime(positions.refreshed_at)} 갱신`}
+                  </span>
+                ) : null}
+                {positions ? (
+                  <select
+                    className="form-select form-select-sm"
+                    style={{ width: "auto" }}
+                    value={asOf}
+                    onChange={(event) => {
+                      setAsOf(event.target.value);
+                      if (draft) void runPositions(draft, event.target.value);
+                    }}
+                  >
+                    <option value="">
+                      {positions.auto_refresh
+                        ? `오늘 (${positions.live ? "장중" : "장전"} 자동 갱신)`
+                        : `오늘 (${formatDateWithWeekday(positions.as_of)})`}
                     </option>
-                  ))}
-                </select>
-              ) : null}
-              {/* 기준일·풀·종목수는 셀렉트와 표에 이미 있어 중복이라 뺐다. */}
-              <span style={hintStyle}>
-                {mainTab === "current"
-                  ? running
-                    ? "계산 중…"
-                    : ""
-                  : backtest
-                    ? `${backtest.start_date} ~ ${backtest.end_date} · ${backtest.months}개월`
-                    : backtesting
-                      ? "실행 중…"
-                      : `${draft.backtest_months}개월`}
-              </span>
+                    {positions.available_dates.map((d) => (
+                      <option key={d.date} value={d.date}>
+                        {formatDateWithWeekday(d.date)} ({d.candidate_count}종목
+                        {d.breakout_count ? ` · 돌파 ${d.breakout_count}` : ""})
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                <span style={hintStyle}>{running ? "계산 중…" : ""}</span>
               </span>
             </div>
-            {mainTab === "current" ? (
-              <div className="card-body appCardBodyTight">
+            <div className="card-body appCardBodyTight">
                 <NavTabs
                   items={CURRENT_TABS}
                   value={currentTab}
@@ -1223,44 +1211,64 @@ export function NewHighClient() {
                     보유 중이거나 진입 예정인 종목이 없습니다.
                   </div>
                 )}
-              </div>
-            ) : (
+            </div>
+          </div>
+        </section>
+
+        {/* 백테스트 — 현재 상태 아래에 나란히 둔다. */}
+        <section className="appSection">
+          <div className="card appCard">
+            <div className="card-header appCardHeader">
+              <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>백테스트</span>
+              <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={hintStyle}>
+                  {backtest
+                    ? `${backtest.months}개월`
+                    : backtesting
+                      ? "실행 중…"
+                      : `${draft.backtest_months}개월`}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-dark"
+                  onClick={() => void handleBacktest()}
+                  disabled={backtesting}
+                >
+                  {backtesting ? "실행 중…" : "실행"}
+                </button>
+              </span>
+            </div>
               <div className="card-body appCardBodyTight">
                 {backtestError ? <div className="alert alert-danger">{backtestError}</div> : null}
                 {!backtest ? (
                   <div style={{ ...hintStyle, padding: "24px 0", textAlign: "center" }}>
-                    {backtesting
-                      ? "체결 내역을 계산하고 있습니다. 구간이 길면 1분 이상 걸립니다."
-                      : "잠시 후 결과가 표시됩니다."}
+                    {backtesting ? "체결 내역을 계산하고 있습니다. 구간이 길면 1분 이상 걸립니다." : "실행을 누르면 결과가 표시됩니다."}
                   </div>
                 ) : (
                 <>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 20, marginBottom: 12 }}>
-                  <span>
-                    전략{" "}
-                    <b style={{ color: signColor(backtest.strategy_total_pct) }}>
-                      {formatSignedPct(backtest.strategy_total_pct, 1)}
-                    </b>
-                    <span style={hintStyle}>
-                      {` (CAGR ${formatSignedPct(backtest.strategy_cagr_pct, 1)} · MDD ${backtest.strategy_mdd_pct.toFixed(1)}%`}
-                      {` · 소르티노 ${backtest.strategy_sortino != null ? backtest.strategy_sortino.toFixed(2) : "-"})`}
-                    </span>
-                  </span>
-                  <span>
-                    {backtest.benchmark_name}{" "}
-                    <b style={{ color: signColor(backtest.benchmark_total_pct) }}>
-                      {formatSignedPct(backtest.benchmark_total_pct, 1)}
-                    </b>
-                    <span style={hintStyle}>
-                      {` (CAGR ${formatSignedPct(backtest.benchmark_cagr_pct, 1)} · MDD ${backtest.benchmark_mdd_pct.toFixed(1)}%)`}
-                    </span>
-                  </span>
-                  <span style={hintStyle}>
-                    {`거래 ${backtest.trade_count}건 · 승률 ${backtest.win_rate_pct ?? "-"}%`}
-                    {` · 평균이익 ${backtest.avg_win_pct != null ? formatSignedPct(backtest.avg_win_pct, 1) : "-"}`}
-                    {` · 평균손실 ${backtest.avg_loss_pct != null ? formatSignedPct(backtest.avg_loss_pct, 1) : "-"}`}
-                    {` · 손절 ${backtest.stop_count} / 이탈 ${backtest.exit_ma_count}`}
-                  </span>
+                <BacktestSummary
+                  startDate={backtest.start_date}
+                  endDate={backtest.end_date}
+                  strategy={{
+                    label: "전략",
+                    totalPct: backtest.strategy_total_pct,
+                    cagrPct: backtest.strategy_cagr_pct,
+                    mddPct: backtest.strategy_mdd_pct,
+                    sortino: backtest.strategy_sortino,
+                  }}
+                  benchmark={{
+                    label: backtest.benchmark_name,
+                    totalPct: backtest.benchmark_total_pct,
+                    cagrPct: backtest.benchmark_cagr_pct,
+                    mddPct: backtest.benchmark_mdd_pct,
+                    sortino: backtest.benchmark_sortino,
+                  }}
+                />
+                <div style={{ ...hintStyle, marginBottom: 12 }}>
+                  {`거래 ${backtest.trade_count}건 · 승률 ${backtest.win_rate_pct ?? "-"}%`}
+                  {` · 평균이익 ${backtest.avg_win_pct != null ? formatSignedPct(backtest.avg_win_pct, 1) : "-"}`}
+                  {` · 평균손실 ${backtest.avg_loss_pct != null ? formatSignedPct(backtest.avg_loss_pct, 1) : "-"}`}
+                  {` · 손절 ${backtest.stop_count} / 이탈 ${backtest.exit_ma_count}`}
                 </div>
                 <NavTabs
                   items={VIEW_MODES}
@@ -1292,7 +1300,6 @@ export function NewHighClient() {
                 </>
                 )}
               </div>
-            )}
           </div>
         </section>
       </div>

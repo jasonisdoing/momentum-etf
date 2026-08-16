@@ -63,6 +63,7 @@ STRUCTURAL_KEYS: tuple[str, ...] = (
     "currency",
     "is_active",
     "pool_kind",
+    "strategy_enabled",
 )
 
 # 풀 성격 — 'stock'(개별주) 또는 'etf'. 섹터·업종 개념이 있는 풀인지 화면들이 이 값으로
@@ -208,6 +209,9 @@ def _normalize_pool_values(values: dict[str, Any], *, require_ticker_type: bool)
         cleaned["currency"] = currency
     if "is_active" in values:
         cleaned["is_active"] = bool(values.get("is_active"))
+    if "strategy_enabled" in values:
+        # 전략 사용 — SM·신고가 등 전략 화면/비교의 대상 풀인지. 기본은 사용 안함.
+        cleaned["strategy_enabled"] = bool(values.get("strategy_enabled"))
     if "pool_kind" in values:
         pool_kind = str(values.get("pool_kind") or "").strip().lower()
         # 빈 값은 '미설정 유지' — 기존 문서와의 하위 호환 (토글은 항상 둘 중 하나를 보낸다).
@@ -241,6 +245,8 @@ def _normalize_pool_doc(doc: dict[str, Any]) -> dict[str, Any]:
     normalized = _normalize_pool_values({**doc, "ticker_type": pool_id}, require_ticker_type=True)
     normalized["ticker_type"] = pool_id
     normalized["is_active"] = bool(doc.get("is_active", True))
+    # 전략 사용 토글 — 기존 문서에 없으면 사용 안함 (명시적으로 켠 풀만 전략 대상).
+    normalized["strategy_enabled"] = bool(doc.get("strategy_enabled", False))
     if doc.get("updated_at") is not None:
         normalized["updated_at"] = doc["updated_at"]
     if doc.get("save_method") is not None:
@@ -267,8 +273,7 @@ def load_pool_definitions(*, include_inactive: bool = False) -> list[dict[str, A
     ]
     if not docs:
         raise PoolSettingsError(
-            "종목풀 설정이 DB(pool_settings)에 없습니다. "
-            "`/pools-settings` 화면에서 종목풀을 생성하세요."
+            "종목풀 설정이 DB(pool_settings)에 없습니다. `/pools-settings` 화면에서 종목풀을 생성하세요."
         )
     docs.sort(key=lambda item: (int(item["order"]), str(item["ticker_type"])))
 
@@ -393,7 +398,9 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
                 allowed = {str(item["yf_ticker"]): str(item["name"]) for item in INDICES}
                 if ticker not in allowed:
                     options = ", ".join(f"{label}({code})" for code, label in allowed.items())
-                    raise PoolSettingsError(f"MARKET_REGIME_INDEX 는 시장추세 지수 중 하나여야 합니다: {options}. 입력값: {ticker}")
+                    raise PoolSettingsError(
+                        f"MARKET_REGIME_INDEX 는 시장추세 지수 중 하나여야 합니다: {options}. 입력값: {ticker}"
+                    )
                 cleaned["MARKET_REGIME_INDEX"] = {"ticker": ticker, "name": allowed[ticker]}
 
     if not cleaned:
@@ -475,7 +482,13 @@ def create_pool(values: dict[str, Any], save_method: str = "사용자") -> dict[
     if db[COLLECTION].find_one({"_id": pool_id}, {"_id": 1}) is not None:
         raise PoolSettingsError(f"이미 존재하는 종목풀입니다: {pool_id}")
     db[COLLECTION].insert_one(
-        {"_id": pool_id, **cleaned, "created_at": datetime.utcnow(), "updated_at": datetime.utcnow(), "save_method": save_method}
+        {
+            "_id": pool_id,
+            **cleaned,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+            "save_method": save_method,
+        }
     )
     invalidate_overlay_cache()
     return {"ticker_type": pool_id, **cleaned}
@@ -501,6 +514,12 @@ def update_pool(pool_id: str, values: dict[str, Any], save_method: str = "사용
     )
     invalidate_overlay_cache()
     return cleaned
+
+
+def strategy_enabled_pools() -> list[str]:
+    """전략 사용을 켠 활성 풀 목록 (order 순) — 전략 비교·백테스트의 대상 풀."""
+    pools = [doc for doc in load_pool_definitions() if doc.get("strategy_enabled")]
+    return [doc["ticker_type"] for doc in sorted(pools, key=lambda doc: doc.get("order") or 0)]
 
 
 def get_pool_delete_impact(pool_id: str) -> dict[str, Any]:

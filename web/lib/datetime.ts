@@ -6,6 +6,16 @@
  * - tz 표기가 없고 `T` 가 포함된 ISO 면 UTC 로 해석하도록 `Z` 를 붙인다.
  * - 항상 `Asia/Seoul` 로 변환하고 요일을 괄호로 함께 표시한다.
  */
+const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+
+/** `2026-08-12` → `2026-08-12 (수)`.
+ *  UTC 로 파싱하면 하루 밀릴 수 있어 로컬 자정으로 읽는다. */
+export function formatDateWithWeekday(date: string): string {
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return `${date} (${WEEKDAYS[parsed.getDay()]})`;
+}
+
 export function formatKstDateTime(input?: string | null): string {
   if (!input) return "-";
   let s = input;

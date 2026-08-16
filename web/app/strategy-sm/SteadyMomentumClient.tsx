@@ -5,10 +5,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingProgress, type LoadingProgress } from "../components/AppLoadingProgress";
+import { BacktestSummary } from "../components/BacktestSummary";
+import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
+import { formatDateWithWeekday } from "@/lib/datetime";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 import { formatKorMarketCap } from "@/lib/market-cap-format";
 import {
@@ -46,13 +49,17 @@ function withSavedValue(options: number[], saved: string | undefined): number[] 
 
 type PickRow = {
   rank: number | null;
-  // 다음달 예상 순위 — 현재 가격 기준으로 같은 선정 규칙을 돌린 순위 (자격 미달은 null).
+  // 다음 주 예상 순위 — 현재 가격 기준으로 같은 선정 규칙을 돌린 순위 (자격 미달은 null).
   expected_rank: number | null;
   is_reserve: boolean;
-  // 현재 표(선정+후보) 밖인데 다음 달 편입이 예상되는 종목 — 하단 별도 행.
+  // 현재 표(선정+후보) 밖인데 다음 주 편입이 예상되는 종목 — 하단 별도 행.
   is_expected_only: boolean;
-  streak_months: number | null;
-  next_month_expected: boolean;
+  // 주중 매도 — 보유 자격(장기>0 & 단기≥0) 상실로 매도됨(체결 완료) / 다음 시가 매도 예정.
+  is_exited?: boolean;
+  is_exit_pending?: boolean;
+  exit_date?: string | null;
+  streak_weeks: number | null;
+  next_week_expected: boolean;
   ticker: string;
   name: string;
   // 종목의 소속 마켓(KOSPI/KOSDAQ) — 한국 통합 풀 구분 표시용, 없으면 빈 값.
@@ -72,7 +79,7 @@ type PickRow = {
 
 type PicksResult = {
   as_of: string;
-  portfolio_month: string;
+  portfolio_week: string;
   rebalance_date: string;
   signal_date: string;
   universe_count: number;
@@ -84,19 +91,39 @@ type PicksResult = {
   rows: PickRow[];
 };
 
+// 월간 행은 집계만 담는다 — 매매 내역(편입·편출·교체율·보유 수)은 주간 행이 담당한다.
 type BacktestMonthRow = {
   month: string;
   strategy_pct: number | null;
-  // 수익인출(고정원금) 누적 순수익 — 원금 대비 %, 월 수익률의 산술 누적.
-  harvest_cum_pct: number | null;
   benchmark_pct: number | null;
   reference_pct: number | null;
-  excess_pp: number | null;
+};
+
+// 주간 행 — 달력 주 단위. 기준일은 그 주 마지막 거래일, 편입·편출은 그 주 체결분.
+type BacktestWeekRow = {
+  week_end: string;
+  strategy_pct: number | null;
+  benchmark_pct: number | null;
+  reference_pct: number | null;
   holdings_count: number;
   turnover_pct: number | null;
   added: string[];
   removed: string[];
+  // 다음 교체일에 실행될 예정 행 — 아직 수익률 없음.
   is_pending?: boolean;
+};
+
+// 체결 행 — 편입~편출 한 쌍. exit_date 가 없으면 아직 보유 중이다.
+type BacktestTradeRow = {
+  ticker: string;
+  name: string;
+  entry_date: string;
+  entry_price: number;
+  exit_date: string | null;
+  exit_price: number | null;
+  return_pct: number | null;
+  days: number;
+  reason: string;
 };
 
 type BacktestDayRow = {
@@ -119,11 +146,6 @@ type BacktestResult = {
   strategy_cagr_pct: number | null;
   benchmark_cagr_pct: number | null;
   reference_cagr_pct: number | null;
-  // 수익인출전략(고정원금) 요약 — 총자산(원금+남은 수익) 경로 기준.
-  harvest_total_pct: number;
-  harvest_mdd_pct: number | null;
-  harvest_sortino: number | null;
-  harvest_cagr_pct: number | null;
   benchmark_name: string;
   benchmark_ticker: string;
   reference_name: string | null;
@@ -131,7 +153,9 @@ type BacktestResult = {
   reference_mdd_pct: number | null;
   reference_sortino: number | null;
   monthly: BacktestMonthRow[];
+  weekly: BacktestWeekRow[];
   daily: BacktestDayRow[];
+  trades: BacktestTradeRow[];
 };
 
 // 풀 옵션 — 공용 라벨 소스에 국가·통화·풀 성격(stock/etf)이 붙는다.
@@ -175,19 +199,19 @@ function needsRepick(before: Settings | null, after: Settings): boolean {
   return PICK_AFFECTING_KEYS.some((key) => before[key] !== after[key]);
 }
 
-// 백테스트 표 보기 단위 — /compare 의 연간·월간·일간 구분과 같은 개념.
+// 백테스트 표 보기 단위 — /compare 의 연간·월간·일간 구분에 주간을 더한 것.
 const VIEW_MODES = [
   { key: "yearly", label: "연간" },
   { key: "monthly", label: "월간" },
+  { key: "weekly", label: "주간" },
   { key: "daily", label: "일간" },
+  { key: "trades", label: "체결" },
 ] as const;
 type ViewMode = (typeof VIEW_MODES)[number]["key"];
 
 type YearRow = {
   year: string;
   strategy_pct: number | null;
-  // 그 해 연말(마지막 데이터 월) 시점의 수익인출전략 누적(%).
-  harvest_cum_pct: number | null;
   benchmark_pct: number | null;
   reference_pct: number | null;
   strategy_partial: boolean;
@@ -209,7 +233,6 @@ function compoundPct(values: (number | null)[]): number | null {
 function toYearRows(monthly: BacktestMonthRow[]): YearRow[] {
   const byYear = new Map<string, BacktestMonthRow[]>();
   for (const row of monthly) {
-    if (row.is_pending) continue;
     const year = row.month.slice(0, 4);
     byYear.set(year, [...(byYear.get(year) ?? []), row]);
   }
@@ -221,12 +244,6 @@ function toYearRows(monthly: BacktestMonthRow[]): YearRow[] {
     .map(([year, rows]) => ({
       year,
       strategy_pct: compoundPct(rows.map((r) => r.strategy_pct)),
-      // 누적값이라 합성하지 않고 그 해 마지막 달(월 문자열 최대) 시점 값을 쓴다 — 행 순서에 의존하지 않는다.
-      harvest_cum_pct:
-        rows
-          .filter((r) => r.harvest_cum_pct != null)
-          .reduce<BacktestMonthRow | null>((a, b) => (a == null || b.month > a.month ? b : a), null)
-          ?.harvest_cum_pct ?? null,
       benchmark_pct: compoundPct(rows.map((r) => r.benchmark_pct)),
       reference_pct: compoundPct(rows.map((r) => r.reference_pct)),
       strategy_partial: countOf(rows, "strategy_pct") < 12,
@@ -247,31 +264,6 @@ function formatNumber(value: number | null | undefined, digits = 0): string {
 const formatSigned = formatSignedPct;
 
 /** 성과 요약 한 덩어리 — 전략·벤치마크·참고 지수를 같은 형식으로 보여준다. */
-function PerformanceSummary({
-  label,
-  totalPct,
-  cagrPct,
-  mddPct,
-  sortino,
-}: {
-  label: string;
-  totalPct: number | null;
-  cagrPct: number | null;
-  mddPct: number | null;
-  sortino: number | null;
-}) {
-  return (
-    <span>
-      {label} <b style={{ color: signColor(totalPct) }}>{formatSigned(totalPct)}</b>
-      <span style={hintStyle}>
-        {` (CAGR ${cagrPct != null ? formatSigned(cagrPct, 1) : "-"}`}
-        {mddPct != null ? ` · MDD ${mddPct.toFixed(1)}%` : ""}
-        {` · 소르티노 ${sortino != null ? sortino.toFixed(2) : "-"})`}
-      </span>
-    </span>
-  );
-}
-
 /**
  * 진행률을 일정 간격으로 90%까지 올린다. 서버가 단일 요청으로 응답해 실제 단계를
  * 알 수 없으므로, 실제 소요 시간(수 초)에 맞춘 완만한 램프만 보여준다.
@@ -297,7 +289,8 @@ export function SteadyMomentumClient() {
   const [pickFailed, setPickFailed] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [backtestProgress, setBacktestProgress] = useState<LoadingProgress | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("monthly");
+  // 기본 보기는 주간 — 매매 내역(편입·편출)이 실제 체결 주에 붙는 표라 주간 점검의 기준이다.
+  const [viewMode, setViewMode] = useState<ViewMode>("weekly");
   const autoPickedRef = useRef(false);
 
   // 설정 입력 초안 (문자열로 보관해 입력 중 상태를 그대로 둔다)
@@ -467,8 +460,8 @@ export function SteadyMomentumClient() {
       const resp = await fetch("/api/strategy-sm/backtest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // 일간 탭에서 실행할 때만 일별 행을 요청한다 (응답이 수천 행이라 무겁다).
-        body: JSON.stringify({ months, include_daily: viewMode === "daily" }),
+        // 한 번 실행으로 연간·월간·주간·일간을 모두 만든다 — 탭 전환 시 재실행이 없도록.
+        body: JSON.stringify({ months, include_daily: true }),
       });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "백테스트에 실패했습니다.");
@@ -481,7 +474,7 @@ export function SteadyMomentumClient() {
       setBacktesting(false);
       setBacktestProgress(null);
     }
-  }, [toast, view?.settings.backtest_months, viewMode]);
+  }, [toast, view?.settings.backtest_months]);
 
   // 저장하지 않은 입력이 있으면 실행 결과가 화면 값과 어긋난다 — 저장을 먼저 요구한다.
   const isDirty = useMemo(() => {
@@ -521,36 +514,41 @@ export function SteadyMomentumClient() {
       {
         headerName: "순위",
         field: "rank",
-        headerTooltip: "판정일 기준 순위 — 선정 1~N, 차순위 그 아래. 표 밖 예상 행은 판정일 후보 밖이라 없음",
-        width: 52,
+        headerTooltip:
+          "판정일 기준 순위 — 선정 1~N, 차순위 그 아래. 매도예정 = 자격 상실로 다음 시가 매도, 매도 = 주중에 이미 매도됨",
+        width: 68,
         type: "numericColumn",
-        valueFormatter: (p) => (p.value == null ? "-" : String(p.value)),
+        cellDataType: "text",
+        cellRenderer: (p: { value?: number | null; data?: PickRow }) => {
+          if (p.data?.is_exited) return <span style={{ color: "var(--text-muted)" }}>매도</span>;
+          if (p.data?.is_exit_pending) return <span style={{ color: "#d62828", fontWeight: 700 }}>매도예정</span>;
+          return <span>{p.value == null ? "-" : String(p.value)}</span>;
+        },
       },
       {
         headerName: "예상",
         field: "expected_rank",
         headerTooltip:
-          "다음달 예상 순위 — 오늘까지의 가격으로 같은 선정 규칙을 돌린 순위 (편입 예상 1~N, 그 아래는 점수순). 자격 미달은 '-'",
+          "다음 주 예상 순위 — 오늘까지의 가격으로 같은 선정 규칙을 돌린 순위 (편입 예상 1~N, 그 아래는 점수순). 자격 미달은 '-'",
         width: 56,
         type: "numericColumn",
         valueFormatter: (p) => (p.value == null ? "-" : String(p.value)),
       },
       {
         headerName: "연속",
-        field: "streak_months",
-        headerTooltip: "이번 포트폴리오까지 몇 달 연속 편입됐는지 (신규 = 이번 달 첫 편입, 최대 12개월 추적)",
+        field: "streak_weeks",
+        headerTooltip: "이번 포트폴리오까지 몇 주 연속 편입됐는지 (신규 = 이번 주 첫 편입, 최대 12주 추적)",
         width: 60,
-        valueFormatter: (p) =>
-          p.value == null ? "-" : p.value <= 1 ? "신규" : p.value >= 12 ? "12+" : `${p.value}개월`,
+        valueFormatter: (p) => (p.value == null ? "-" : p.value <= 1 ? "신규" : p.value >= 12 ? "12+" : `${p.value}주`),
         cellStyle: (p) => ({
           color: p.value != null && p.value <= 1 && !p.data?.is_reserve ? "var(--up-color, #d64545)" : "inherit",
         }),
       },
       {
-        headerName: "다음달",
-        field: "next_month_expected",
+        headerName: "다음주",
+        field: "next_week_expected",
         headerTooltip:
-          "오늘까지의 가격(실시간 반영)으로 같은 규칙을 돌렸을 때의 다음달 예상 — 유지(보유 중·계속 편입) / 신규(새로 편입) / -(편출 예상). 확정은 월말 직전 판정일 종가",
+          "오늘까지의 가격(실시간 반영)으로 같은 규칙을 돌렸을 때의 다음 주 예상 — 유지(보유 중·계속 편입) / 신규(새로 편입) / -(편출 예상). 확정은 교체일 직전 판정일 종가",
         width: 64,
         // boolean 필드는 AG Grid 가 체크박스로 자동 렌더링하므로 텍스트로 강제한다.
         cellDataType: "text",
@@ -707,6 +705,7 @@ export function SteadyMomentumClient() {
     // 월별 라벨·국가·업종 유무가 선정 응답에 실려 온다 — 바뀌면(월 전환·풀 전환) 컬럼도 다시 만든다.
   }, [hasIndustryData, monthlyLabels, picksCountry]);
 
+  // 월간 표 — 연간과 같은 집계형(월/전략/벤치/참고). 매매 내역은 주간 표가 담당한다.
   const backtestColumns = useMemo<ColDef<BacktestMonthRow>[]>(() => {
     if (!backtest) return [];
     const columns: ColDef<BacktestMonthRow>[] = [
@@ -714,34 +713,23 @@ export function SteadyMomentumClient() {
         headerName: "월",
         field: "month",
         width: 116,
-        valueFormatter: (p) => (p.data?.is_pending ? `${p.value} (예정)` : String(p.value ?? "")),
         cellStyle: () => ({ fontWeight: 700 }),
       },
       {
         headerName: "전략(%)",
         field: "strategy_pct",
-        width: 92,
+        width: 110,
         type: "numericColumn",
         valueFormatter: (p) => formatSigned(p.value),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
+        cellStyle: (p) => ({ color: signColor(p.value), fontWeight: 700 }),
       },
       {
-        headerName: `${backtest.benchmark_name}(%)`,
+        headerName: "벤치마크(%)",
         headerTooltip: `벤치마크 ${backtest.benchmark_name}(${backtest.benchmark_ticker})`,
         field: "benchmark_pct",
         width: 140,
         type: "numericColumn",
         valueFormatter: (p) => formatSigned(p.value),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
-      },
-      {
-        headerName: "수익인출전략(%)",
-        field: "harvest_cum_pct",
-        headerTooltip:
-          "고정원금 운용의 누적 순수익 — 매월 원금으로 리셋하고 수익은 잘라내는 방식이라 월 수익률의 산술 누적(원금 대비 %)이다",
-        width: 128,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value, 1),
         cellStyle: (p) => ({ color: signColor(p.value) }),
       },
     ];
@@ -756,12 +744,125 @@ export function SteadyMomentumClient() {
         cellStyle: (p) => ({ color: signColor(p.value) }),
       });
     }
+    return columns;
+  }, [backtest]);
+
+  const dailyColumns = useMemo<ColDef<BacktestDayRow>[]>(() => {
+    if (!backtest) return [];
+    const pctColumn = (headerName: string, field: keyof BacktestDayRow, headerTooltip?: string): ColDef<BacktestDayRow> => ({
+      headerName,
+      field,
+      headerTooltip,
+      flex: 1,
+      minWidth: 110,
+      type: "numericColumn",
+      valueFormatter: (p) => formatSigned(p.value),
+      cellStyle: (p) => ({ color: signColor(p.value), fontWeight: field === "strategy_pct" ? 700 : 400 }),
+    });
+    const columns: ColDef<BacktestDayRow>[] = [
+      { headerName: "날짜", field: "date", width: 128, cellStyle: () => ({ fontWeight: 700 }) },
+      pctColumn("전략(%)", "strategy_pct", "보유 종목 동일가중 일간 변동률 (교체일에는 리밸런싱 비용 반영)"),
+      pctColumn("벤치마크(%)", "benchmark_pct", `${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
+    ];
+    if (backtest.reference_name) {
+      columns.push(
+        pctColumn(
+          `${backtest.reference_name}(%)`,
+          "reference_pct",
+          "참고 지수 — 유사 컨셉 ETF (벤치마크가 아니며 선정에 관여하지 않는다)",
+        ),
+      );
+    }
+    return columns;
+  }, [backtest]);
+
+  const tradeColumns = useMemo<ColDef<BacktestTradeRow>[]>(
+    () => [
+      { headerName: "티커", field: "ticker", width: 96 },
+      { headerName: "종목명", field: "name", flex: 1, minWidth: 180 },
+      { headerName: "편입일", field: "entry_date", width: 116 },
+      {
+        headerName: "매수가",
+        field: "entry_price",
+        width: 110,
+        type: "numericColumn",
+        valueFormatter: (p) => formatPrice(p.value as number, view?.picks?.currency),
+      },
+      {
+        headerName: "청산일",
+        field: "exit_date",
+        width: 116,
+        valueFormatter: (p) => (p.value ? String(p.value) : "-"),
+      },
+      {
+        headerName: "청산가",
+        field: "exit_price",
+        headerTooltip: "보유중 행은 마지막 종가",
+        width: 110,
+        type: "numericColumn",
+        valueFormatter: (p) => formatPrice(p.value as number, view?.picks?.currency),
+      },
+      {
+        headerName: "수익률(%)",
+        field: "return_pct",
+        width: 110,
+        type: "numericColumn",
+        valueFormatter: (p) => formatSigned(p.value),
+        cellStyle: (p) => ({ color: signColor(p.value), fontWeight: 700 }),
+      },
+      { headerName: "보유일", field: "days", width: 84, type: "numericColumn" },
+      { headerName: "사유", field: "reason", width: 110 },
+    ],
+    [view?.picks?.currency],
+  );
+
+  const yearRows = useMemo<YearRow[]>(() => (backtest ? toYearRows(backtest.monthly) : []), [backtest]);
+
+  // 주간 표 — 매매 일지. 주 수익률 + 그 주에 체결된 편입·편출과 주말 보유 수·교체율.
+  const weeklyColumns = useMemo<ColDef<BacktestWeekRow>[]>(() => {
+    if (!backtest) return [];
+    const pctColumn = (headerName: string, field: keyof BacktestWeekRow, headerTooltip?: string): ColDef<BacktestWeekRow> => ({
+      headerName,
+      field,
+      headerTooltip,
+      width: 120,
+      type: "numericColumn",
+      valueFormatter: (p) => formatSigned(p.value as number | null),
+      cellStyle: (p) => ({ color: signColor(p.value as number | null), fontWeight: field === "strategy_pct" ? 700 : 400 }),
+    });
+    const columns: ColDef<BacktestWeekRow>[] = [
+      {
+        headerName: "기준일",
+        field: "week_end",
+        headerTooltip: "그 주 마지막 거래일 — 수익률은 그 주 성과, 편입·편출은 그 주에 체결된 매매",
+        width: 148,
+        valueFormatter: (p) => formatDateWithWeekday(String(p.value ?? "")),
+        cellStyle: () => ({ fontWeight: 700 }),
+      },
+      pctColumn("전략(%)", "strategy_pct", "그 주 보유 포트폴리오의 수익률 (교체 비용 반영)"),
+      pctColumn("벤치마크(%)", "benchmark_pct", `${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
+    ];
+    if (backtest.reference_name) {
+      columns.push(
+        pctColumn(
+          `${backtest.reference_name}(%)`,
+          "reference_pct",
+          "참고 지수 — 유사 컨셉 ETF (벤치마크가 아니며 선정에 관여하지 않는다)",
+        ),
+      );
+    }
     columns.push(
-      { headerName: "종목 수", field: "holdings_count", width: 74, type: "numericColumn" },
+      {
+        headerName: "종목 수",
+        field: "holdings_count",
+        headerTooltip: "다음 교체 직전까지 들고 가는 종목 수 (주중 매도분 제외)",
+        width: 74,
+        type: "numericColumn",
+      },
       {
         headerName: "교체율(%)",
         field: "turnover_pct",
-        headerTooltip: "직전 달 대비 교체된 종목 비중",
+        headerTooltip: "이 교체에서 편입된 슬롯 비중 (편입 수 ÷ 종목 수 설정)",
         width: 84,
         type: "numericColumn",
         valueFormatter: (p) => (p.value == null ? "-" : formatNumber(p.value)),
@@ -792,37 +893,6 @@ export function SteadyMomentumClient() {
     return columns;
   }, [backtest]);
 
-  const dailyColumns = useMemo<ColDef<BacktestDayRow>[]>(() => {
-    if (!backtest) return [];
-    const pctColumn = (headerName: string, field: keyof BacktestDayRow, headerTooltip?: string): ColDef<BacktestDayRow> => ({
-      headerName,
-      field,
-      headerTooltip,
-      flex: 1,
-      minWidth: 110,
-      type: "numericColumn",
-      valueFormatter: (p) => formatSigned(p.value),
-      cellStyle: (p) => ({ color: signColor(p.value), fontWeight: field === "strategy_pct" ? 700 : 400 }),
-    });
-    const columns: ColDef<BacktestDayRow>[] = [
-      { headerName: "날짜", field: "date", width: 128, cellStyle: () => ({ fontWeight: 700 }) },
-      pctColumn("전략(%)", "strategy_pct", "보유 종목 동일가중 일간 변동률 (교체일에는 리밸런싱 비용 반영)"),
-      pctColumn(`${backtest.benchmark_name}(%)`, "benchmark_pct", `벤치마크 ${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
-    ];
-    if (backtest.reference_name) {
-      columns.push(
-        pctColumn(
-          `${backtest.reference_name}(%)`,
-          "reference_pct",
-          "참고 지수 — 유사 컨셉 ETF (벤치마크가 아니며 선정에 관여하지 않는다)",
-        ),
-      );
-    }
-    return columns;
-  }, [backtest]);
-
-  const yearRows = useMemo<YearRow[]>(() => (backtest ? toYearRows(backtest.monthly) : []), [backtest]);
-
   const yearColumns = useMemo<ColDef<YearRow>[]>(() => {
     if (!backtest) return [];
     // 부분 기간은 /compare 와 같은 규칙으로 값 뒤에 `*` 를 붙인다.
@@ -849,21 +919,11 @@ export function SteadyMomentumClient() {
       { headerName: "연도", field: "year", width: 104, cellStyle: () => ({ fontWeight: 700 }) },
       pctColumn("전략(%)", "strategy_pct", "strategy_partial"),
       pctColumn(
-        `${backtest.benchmark_name}(%)`,
+        "벤치마크(%)",
         "benchmark_pct",
         "benchmark_partial",
-        `벤치마크 ${backtest.benchmark_name}(${backtest.benchmark_ticker})`,
+        `${backtest.benchmark_name}(${backtest.benchmark_ticker})`,
       ),
-      {
-        headerName: "수익인출전략(%)",
-        field: "harvest_cum_pct",
-        headerTooltip: "그 해 연말 시점의 고정원금 운용 누적 순수익 (원금 대비 %, 월 수익률 산술 누적)",
-        flex: 1,
-        minWidth: 128,
-        type: "numericColumn",
-        valueFormatter: (p) => (p.value == null ? "-" : formatSigned(p.value, 1)),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
-      },
     ];
     if (backtest.reference_name) {
       columns.push(
@@ -880,7 +940,7 @@ export function SteadyMomentumClient() {
 
   if (loading && !view) {
     return (
-      <PageFrame title="Steady Momentum" fullWidth>
+      <PageFrame title="모멘텀 전략" fullWidth>
         <div style={{ ...hintStyle, padding: 20 }}>불러오는 중…</div>
       </PageFrame>
     );
@@ -888,7 +948,7 @@ export function SteadyMomentumClient() {
   if (!view) {
     // 설정을 못 받은 상태 — 값을 지어내 폼을 그리지 않고 실패와 재시도만 제공한다.
     return (
-      <PageFrame title="Steady Momentum" fullWidth>
+      <PageFrame title="모멘텀 전략" fullWidth>
         <div className="card appCard">
           <div className="card-body" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontWeight: 700 }}>설정을 불러오지 못했습니다.</span>
@@ -902,11 +962,12 @@ export function SteadyMomentumClient() {
     );
   }
 
-  const selectedCount = view.picks?.rows.filter((row) => !row.is_reserve).length ?? 0;
+  // 보유 수 — 판정일 선정 − 주중 매도(체결 완료).
+  const selectedCount = view.picks?.rows.filter((row) => !row.is_reserve && !row.is_exited).length ?? 0;
   const reserveCount = view.picks?.rows.filter((row) => row.is_reserve).length ?? 0;
 
   return (
-    <PageFrame title="Steady Momentum" fullWidth>
+    <PageFrame title="모멘텀 전략" fullWidth>
       <div className="appPageStack">
         {/* ① 변수 설정 */}
         <div className="card appCard">
@@ -1039,9 +1100,6 @@ export function SteadyMomentumClient() {
                 </button>
               </div>
             </div>
-            <div style={hintStyle}>
-              장기 이평선 이격 상위(전략 전용 이평선, 단기 이격 음수 제외)로 선정 · 고정 종목 제외 · 업종 미상 종목은 업종상한 미적용 · 설정은 풀별 저장
-            </div>
           </div>
         </div>
 
@@ -1053,16 +1111,16 @@ export function SteadyMomentumClient() {
                 <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>현재 선정 종목</span>
                 {view.picks ? (
                   <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>
-                    <b style={{ color: "inherit" }}>{view.picks.portfolio_month} 포트폴리오</b> ·{" "}
-                    {view.picks.rebalance_date} 시가 교체 (판정 {view.picks.signal_date} 종가) · 유니버스{" "}
-                    {view.picks.universe_count} → 후보 {view.picks.candidate_count} → 선정 {selectedCount}
-                    {reserveCount > 0 ? ` (+차순위 ${reserveCount})` : ""} · 다음 교체 전까지 결과가 바뀌지 않습니다
+                    <b style={{ color: "inherit" }}>{formatDateWithWeekday(view.picks.portfolio_week)} 포트폴리오</b> ·
+                    체결 {view.picks.rebalance_date} (판정 {view.picks.signal_date}) · {view.picks.universe_count} →{" "}
+                    {view.picks.candidate_count} → {selectedCount}
+                    {reserveCount > 0 ? ` (+${reserveCount})` : ""}
                   </span>
                 ) : (
                   <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>
                     {pickFailed
                       ? "선정 결과를 불러오지 못했습니다. 설정을 저장하거나 새로고침하세요."
-                      : "이번 달 확정 포트폴리오를 계산하고 있습니다."}
+                      : "계산 중…"}
                   </span>
                 )}
               </div>
@@ -1081,6 +1139,10 @@ export function SteadyMomentumClient() {
                   // 추세 이탈은 종목명 뒤 ❗ 와 같은 조건으로 행을 연한 회색으로 눌러 둔다.
                   const classes: string[] = [];
                   if (p.data?.is_reserve) classes.push("steadyReserveRow");
+                  // 주중 매도 예정 — 판정만 끝나고 체결 전 (백테스트 예정 행과 같은 스타일).
+                  if (p.data?.is_exit_pending) classes.push("steadyPendingRow");
+                  // 주중 매도 완료 — 더는 보유가 아니다.
+                  if (p.data?.is_exited) classes.push("appTrendBrokenRow");
                   if (isTrendBroken(p.data?.current_short_pct, p.data?.current_long_pct)) {
                     classes.push("appTrendBrokenRow");
                   }
@@ -1098,28 +1160,6 @@ export function SteadyMomentumClient() {
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
                 <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>백테스트</span>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">보기</span>
-                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="백테스트 보기 단위">
-                    {VIEW_MODES.map((mode) => (
-                      <button
-                        key={mode.key}
-                        type="button"
-                        className={
-                          viewMode === mode.key
-                            ? "btn appSegmentedToggleButton is-active"
-                            : "btn appSegmentedToggleButton"
-                        }
-                        onClick={() => setViewMode(mode.key)}
-                      >
-                        {mode.label}
-                      </button>
-                    ))}
-                  </div>
-                </label>
-                <span style={hintStyle}>
-                  {view.settings.backtest_months}개월 · 매월 교체(월말 직전 거래일 종가 판정 → 월말 시가 체결) · 빈 슬롯은 현금 · 현재 종목풀 기준(생존 편향 있음)
-                </span>
               </div>
               <div className="appMainHeaderRight">
                 {isDirty ? <span style={hintStyle}>설정을 저장해야 실행할 수 있습니다</span> : null}
@@ -1136,51 +1176,63 @@ export function SteadyMomentumClient() {
             {backtesting ? <AppLoadingProgress title="백테스트 실행 중..." progress={backtestProgress} /> : null}
             {backtest && !backtesting ? (
               <>
-                <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: "var(--fs-sm)", padding: "2px 0 8px" }}>
-                  <span>
-                    {backtest.start_date} ~ {backtest.end_date}
-                  </span>
-                  <PerformanceSummary
-                    label="전략"
-                    totalPct={backtest.strategy_total_pct}
-                    cagrPct={backtest.strategy_cagr_pct}
-                    mddPct={backtest.strategy_mdd_pct}
-                    sortino={backtest.strategy_sortino}
+                <BacktestSummary
+                  startDate={backtest.start_date}
+                  endDate={backtest.end_date}
+                  strategy={{
+                    label: "전략",
+                    totalPct: backtest.strategy_total_pct,
+                    cagrPct: backtest.strategy_cagr_pct,
+                    mddPct: backtest.strategy_mdd_pct,
+                    sortino: backtest.strategy_sortino,
+                  }}
+                  benchmark={{
+                    label: `${backtest.benchmark_name}(${backtest.benchmark_ticker})`,
+                    totalPct: backtest.benchmark_total_pct,
+                    cagrPct: backtest.benchmark_cagr_pct,
+                    mddPct: backtest.benchmark_mdd_pct,
+                    sortino: backtest.benchmark_sortino,
+                  }}
+                  extra={
+                    backtest.reference_name && backtest.reference_total_pct != null
+                      ? {
+                          label: `${backtest.reference_name} (참고)`,
+                          totalPct: backtest.reference_total_pct,
+                          cagrPct: backtest.reference_cagr_pct,
+                          mddPct: backtest.reference_mdd_pct,
+                          sortino: backtest.reference_sortino,
+                        }
+                      : null
+                  }
+                />
+                <NavTabs
+                  items={VIEW_MODES}
+                  value={viewMode}
+                  onChange={setViewMode}
+                  label="백테스트 보기 단위"
+                  style={{ marginBottom: 10 }}
+                />
+                {viewMode === "trades" ? (
+                  <AppAgGrid<BacktestTradeRow>
+                    rowData={backtest.trades}
+                    columnDefs={tradeColumns}
+                    theme={gridTheme}
+                    minHeight={0}
+                    height="auto"
+                    gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                    getRowClass={(p) => (p.data?.exit_date ? "" : "steadyPendingRow")}
                   />
-                  <PerformanceSummary
-                    label={`${backtest.benchmark_name}(${backtest.benchmark_ticker})`}
-                    totalPct={backtest.benchmark_total_pct}
-                    cagrPct={backtest.benchmark_cagr_pct}
-                    mddPct={backtest.benchmark_mdd_pct}
-                    sortino={backtest.benchmark_sortino}
+                ) : viewMode === "weekly" ? (
+                  <AppAgGrid<BacktestWeekRow>
+                    rowData={backtest.weekly}
+                    columnDefs={weeklyColumns}
+                    theme={gridTheme}
+                    minHeight={0}
+                    height="auto"
+                    gridOptions={{ domLayout: "autoHeight" }}
+                    getRowClass={(p) => (p.data?.is_pending ? "steadyPendingRow" : "")}
+                    getRowId={(p) => p.data.week_end}
                   />
-                  <PerformanceSummary
-                    label="수익인출전략"
-                    totalPct={backtest.harvest_total_pct}
-                    cagrPct={backtest.harvest_cagr_pct}
-                    mddPct={backtest.harvest_mdd_pct}
-                    sortino={backtest.harvest_sortino}
-                  />
-                  {backtest.reference_name && backtest.reference_total_pct != null ? (
-                    <PerformanceSummary
-                      label={`${backtest.reference_name} (참고)`}
-                      totalPct={backtest.reference_total_pct}
-                      cagrPct={backtest.reference_cagr_pct}
-                      mddPct={backtest.reference_mdd_pct}
-                      sortino={backtest.reference_sortino}
-                    />
-                  ) : null}
-                  <span>
-                    초과{" "}
-                    <b style={{ color: signColor(backtest.strategy_total_pct - backtest.benchmark_total_pct) }}>
-                      {formatSigned(backtest.strategy_total_pct - backtest.benchmark_total_pct)}p
-                    </b>
-                  </span>
-                </div>
-                {viewMode === "daily" && backtest.daily.length === 0 ? (
-                  <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>
-                    일간은 따로 계산합니다. 이 탭에서 실행을 누르면 일별 성과가 표시됩니다.
-                  </span>
                 ) : viewMode === "daily" ? (
                   // 월간·연간과 같이 autoHeight — 카드 안에서 스크롤하지 않고 브라우저 스크롤로 본다.
                   <AppAgGrid<BacktestDayRow>
@@ -1200,7 +1252,6 @@ export function SteadyMomentumClient() {
                     minHeight={0}
                     height="auto"
                     gridOptions={{ domLayout: "autoHeight" }}
-                    getRowClass={(p) => (p.data?.is_pending ? "steadyPendingRow" : "")}
                     getRowId={(p) => p.data.month}
                   />
                 ) : (

@@ -8,12 +8,14 @@
 2. 점수: **장기 이평선 이격(%)** — 계산식은 순위 화면과 같되, 이평선 일수는
    **전략 전용 값**(풀별 설정의 short/long_ma_days)을 쓴다.
    장기 이격 > 0 & 단기 이격 >= 0 만 후보. 점수 순 상위 top_n 동일가중.
-   같은 규칙을 **월간 리듬으로 유지**하는 것이 이 화면의 차이다 —
-   편입·편출을 월 단위로 보고, 한 달 동안 손절 없이 든다.
-3. 월간 리밸런싱: 판정은 교체일 직전 거래일 종가, 체결은 교체일 **시가**.
-   종가 체결은 쓰지 않는다 — 마감 동시호가에 포트폴리오 대부분을 동시에 팔고 사는
-   것이라 체결가를 모른 채 대량을 던지게 되고 미체결을 정정할 시간도 없다.
-   L−1 종가가 확정된 다음날부터 다음 달 포트폴리오를 보여준다(거래일 캘린더 기준).
+   같은 규칙을 **주간 리듬으로 유지**하는 것이 이 화면의 차이다 —
+   편입·편출을 주 단위로 본다.
+3. 주간 리밸런싱: **주 마지막 거래일 종가로 판정하고 다음 주 첫 거래일 시가에 체결**한다.
+   한 주 종가를 모두 보고 판정한 뒤 주말 동안 검토할 시간을 둔다. 종가 체결은 쓰지 않는다 —
+   마감 동시호가에 포트폴리오 대부분을 동시에 팔고 사는 것이라 체결가를 모른 채 대량을
+   던지게 되고 미체결을 정정할 시간도 없다.
+4. 주중 매도: 보유 종목이 자격(장기 이격 > 0 & 단기 이격 >= 0)을 잃으면 다음 거래일
+   시가에 판다. 판 슬롯은 다음 주 교체까지 현금이다(주중 재매수 없음).
 
 벤치마크·국가·통화는 종목풀 설정(DB)을 단일 소스로 쓴다.
 설정은 MongoDB `system_config.steady_momentum_settings` 에 **풀별로** 저장한다
@@ -40,7 +42,7 @@ MAX_PER_INDUSTRY_OPTIONS = (1, 2, 3, 4, 5, 10)
 # 화면은 이 목록을 서버 응답으로 받는다(프론트에 복사본을 두지 않는다).
 TOP_N_OPTIONS = (5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 50, 100)
 # 차순위 후보를 종목 수의 몇 배까지 보여줄지 — 선정과 같은 수(합계 2배)만 보여
-# 표를 짧게 유지한다. 표 밖 '다음달 예상' 종목은 하단에 별도 행으로 붙는다.
+# 표를 짧게 유지한다. 표 밖 '다음 주 예상' 종목은 하단에 별도 행으로 붙는다.
 RESERVE_MULTIPLIER = 1
 # 월↔거래일 환산 — 공용 상수(config, =20)를 재사용한다 (자산헬퍼·시장추세와 동일 기준).
 from config import METRIC_WINDOW_MONTHS, TRADING_DAYS_PER_MONTH  # noqa: E402
@@ -504,7 +506,73 @@ def select_top(
     return picked
 
 
-# ── 월간 리밸런싱 시점 ─────────────────────────────────────────────────────
+# ── 주간 리밸런싱 시점 ─────────────────────────────────────────────────────
+def simulate_intraweek_exits(
+    frames: dict[str, pd.DataFrame],
+    settings: dict[str, Any],
+    holdings: set[str],
+    index: pd.DatetimeIndex,
+    scan_start: pd.Timestamp,
+    scan_end: pd.Timestamp,
+) -> list[dict[str, Any]]:
+    """주중 매도 — 보유 종목이 자격을 잃으면 다음 거래일 시가에 판다.
+
+    [scan_start, scan_end] 의 각 거래일 종가로 보유 자격(hold_eligible_mask 와 같은
+    장기 이격 > 0 그리고 단기 이격 >= 0)을 확인하고, 잃은 종목을 매도 목록에 넣는다.
+    판 슬롯은 **다음 주 교체까지** 현금이다 — 주중 재매수는 하지 않는다(그 자리는
+    다음 주 재선정이 채운다).
+
+    반환 항목의 ``sell_date`` 가 None 이면 아직 체결 전(다음 거래일 시가 매도 예정)이다.
+    선정 화면과 백테스트가 모두 이 함수를 써야 결과가 어긋나지 않는다.
+    """
+    from utils.moving_averages import calculate_moving_average
+
+    short_ma_days = int(settings["short_ma_days"])
+    long_ma_days = int(settings["long_ma_days"])
+
+    # 종목별 이격 시계열 — momentum_metrics 와 같은 이평선을 한 번만 계산해 재사용한다
+    # (SMA/EMA 모두 날짜 d 의 값은 d 이후 데이터와 무관해 as_of 절단과 결과가 같다).
+    disparity_cache: dict[str, tuple[pd.Series, pd.Series] | None] = {}
+
+    def disparity(ticker: str) -> tuple[pd.Series, pd.Series] | None:
+        if ticker not in disparity_cache:
+            frame = frames.get(ticker)
+            close = (
+                pd.to_numeric(frame["Close"], errors="coerce").dropna()
+                if frame is not None and not frame.empty and "Close" in frame.columns
+                else None
+            )
+            if close is None or len(close) < long_ma_days + 4:
+                disparity_cache[ticker] = None
+            else:
+                short_ma = calculate_moving_average(close, short_ma_days, min_periods=short_ma_days)
+                long_ma = calculate_moving_average(close, long_ma_days, min_periods=long_ma_days)
+                disparity_cache[ticker] = ((close / short_ma - 1.0) * 100.0, (close / long_ma - 1.0) * 100.0)
+        return disparity_cache[ticker]
+
+    remaining = set(holdings)
+    exits: list[dict[str, Any]] = []
+    for day in index[(index >= scan_start) & (index <= scan_end)]:
+        later = index[index > day]
+        sell_date = later[0] if len(later) > 0 else None
+        for ticker in sorted(remaining):
+            series = disparity(ticker)
+            if series is None:
+                continue  # 이격을 계산할 데이터가 없으면 신호 없음 — 유지
+            try:
+                short_value = series[0].asof(day)
+                long_value = series[1].asof(day)
+            except Exception:
+                continue
+            if pd.isna(short_value) or pd.isna(long_value):
+                continue
+            if float(long_value) > 0 and float(short_value) >= 0:
+                continue
+            remaining.discard(ticker)
+            exits.append({"ticker": ticker, "signal_date": day, "sell_date": sell_date})
+    return exits
+
+
 def _signal_date_for(benchmark_close: pd.Series, rebalance_date: pd.Timestamp) -> pd.Timestamp:
     """교체일 직전의 캐시 거래일 — 과거 월 판정일 계산용."""
     prior = benchmark_close.index[benchmark_close.index < rebalance_date]
@@ -540,52 +608,78 @@ def available_backtest_months(benchmark_close: pd.Series, long_ma_days: int) -> 
     return max(usable - 1, 1)
 
 
-def completed_month_ends(benchmark_close: pd.Series) -> list[pd.Timestamp]:
-    """지난 달들의 월말 거래일 목록 (오름차순) — 연속 편입 추적 등 과거 이력용."""
-    index = benchmark_close.index
-    today_period = pd.Timestamp.now().to_period("M")
-    month_ends = index.to_series().groupby(index.to_period("M")).max()
-    return [stamp for period, stamp in month_ends.items() if period < today_period]
+def completed_week_starts(benchmark_close: pd.Series) -> list[pd.Timestamp]:
+    """캐시에 있는 주별 교체일(주 첫 거래일) 목록 (오름차순) — 연속 편입 추적 등 과거 이력용.
 
-
-def month_last_two_trading_days(country: str, period: pd.Period) -> tuple[pd.Timestamp, pd.Timestamp] | None:
-    """해당 월의 (마지막 거래일 L, 그 직전 거래일 L−1) — 거래일 캘린더 기준.
-
-    캘린더가 그 달을 커버하지 않거나 거래일이 2일 미만이면 None.
+    어디까지가 '지난 주'인지는 호출부가 기준 교체일로 자른다 (오늘 기준으로 자르면
+    아직 체결 전인 다음 교체를 보여줄 때 직전 주가 빠진다).
     """
-    from utils.data_loader import get_trading_days
+    index = benchmark_close.index
+    return list(index.to_series().groupby(index.to_period("W")).min())
+
+
+def week_last_trading_day(country: str, day: pd.Timestamp) -> str:
+    """그 날짜가 속한 주(월~일)의 마지막 거래일 — 주간 표의 기준일 라벨."""
+    from utils.trading_calendar import get_trading_days
+
+    monday = (pd.Timestamp(day) - pd.Timedelta(days=int(pd.Timestamp(day).weekday()))).normalize()
+    try:
+        days = get_trading_days(
+            monday.strftime("%Y-%m-%d"), (monday + pd.Timedelta(days=6)).strftime("%Y-%m-%d"), country
+        )
+    except Exception:
+        days = []
+    return (pd.Timestamp(days[-1]) if days else pd.Timestamp(day)).strftime("%Y-%m-%d")
+
+
+def week_rebalance_pair(country: str, week_monday: pd.Timestamp) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+    """그 주의 (교체일 L = 첫 거래일, 판정일 L−1 = 직전 거래일) — 거래일 캘린더 기준.
+
+    판정일은 보통 전주 마지막 거래일(금요일)이다 — 한 주의 종가를 모두 보고 판정한 뒤
+    주말 동안 검토하고 다음 주 첫 거래일 시가에 체결한다.
+    캘린더가 그 주를 커버하지 않으면 None.
+    """
+    from utils.trading_calendar import get_trading_days
 
     try:
         days = get_trading_days(
-            period.start_time.strftime("%Y-%m-%d"),
-            period.end_time.strftime("%Y-%m-%d"),
+            week_monday.strftime("%Y-%m-%d"),
+            (week_monday + pd.Timedelta(days=6)).strftime("%Y-%m-%d"),
+            country,
+        )
+        if not days:
+            return None
+        first = pd.Timestamp(days[0]).normalize()
+        prior = get_trading_days(
+            (first - pd.Timedelta(days=14)).strftime("%Y-%m-%d"),
+            (first - pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
             country,
         )
     except Exception:
         return None
-    if len(days) < 2:
+    if not prior:
         return None
-    return days[-1].normalize(), days[-2].normalize()
+    return first, pd.Timestamp(prior[-1]).normalize()
 
 
 def current_portfolio_dates(benchmark_close: pd.Series, country: str) -> tuple[pd.Timestamp, pd.Timestamp]:
-    """현재 보여줄 포트폴리오의 (교체일 L, 판정일 L−1) — 거래일 캘린더 기준.
+    """현재 보여줄 포트폴리오의 (교체일 L, 판정일 L−1) — 주 단위, 거래일 캘린더 기준.
 
-    판정일(L−1) 종가가 확정된 다음날(달력)부터 다음 달 포트폴리오를 보여준다:
-    오늘 > L−1 이고 캐시에 L−1 종가가 있으면 그 달의 교체(L)를 채택한다.
-    예: 8월(L=8/31, L−1=8/28) → 8/29 00시부터 9월 포트폴리오. KRX 12월은
-    캘린더가 연말 휴장을 알아 L=12/30, 12/30 00시부터 1월 포트폴리오.
-    판정일이 고정이므로 같은 기간 안에서는 몇 번을 실행해도 결과가 같다.
+    교체일은 각 주의 **첫 거래일**, 판정일은 그 직전 거래일(= 전주 마지막 거래일)이다.
+    판정일 종가가 확정된 다음날(달력)부터 그 교체분을 보여준다. 판정일이 고정이므로
+    같은 구간 안에서는 몇 번을 실행해도 결과가 같다.
     """
     now = pd.Timestamp.now()
     today = now.normalize()
     index = benchmark_close.index
     cache_max = index[-1].normalize()
+    this_monday = (today - pd.Timedelta(days=int(today.weekday()))).normalize()
 
-    # 이번 달부터 거슬러 올라가며 '판정 종가가 확정된' 가장 최근 월의 교체를 찾는다.
-    for months_back in range(0, 4):
-        period = now.to_period("M") - months_back
-        pair = month_last_two_trading_days(country, period)
+    # 다음 주부터 거슬러 올라가며 '판정 종가가 확정된' 가장 최근 교체를 찾는다.
+    # 금요일 종가로 판정이 끝나면(주말) 아직 체결 전이라도 그 교체분을 보여준다 —
+    # 주말에 검토하라고 만든 리듬이라 확정된 다음 포트폴리오가 보여야 한다.
+    for weeks_back in range(-1, 6):
+        pair = week_rebalance_pair(country, this_monday - pd.Timedelta(weeks=weeks_back))
         if pair is None:
             continue
         rebalance_date, signal_calendar = pair
@@ -595,12 +689,16 @@ def current_portfolio_dates(benchmark_close: pd.Series, country: str) -> tuple[p
         if len(prior) == 0:
             continue
         return rebalance_date, prior[-1]
-    raise RuntimeError("판정 가능한 월말 교체를 찾지 못했습니다 — 캘린더/캐시 데이터를 확인하세요.")
+    raise RuntimeError("판정 가능한 주간 교체를 찾지 못했습니다 — 캘린더/캐시 데이터를 확인하세요.")
 
 
 # ── 선정 (현재 포트폴리오) ─────────────────────────────────────────────────
-def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
-    """현재 적용 중인 월 확정 포트폴리오 — 화면 ③ 카드와 스크립트가 함께 쓴다."""
+def compute_picks(settings: dict[str, Any] | None = None, as_of: str | None = None) -> dict[str, Any]:
+    """현재 적용 중인 월 확정 포트폴리오 — 화면 ③ 카드와 스크립트가 함께 쓴다.
+
+    ``as_of`` 를 주면 그 날짜까지의 데이터만 사용해 그날의 상태를 재현한다
+    (신고가 화면의 과거 날짜 조회와 같은 규칙 — 실시간은 섞지 않는다).
+    """
     if settings is None:
         settings = load_settings()
     settings = validate_settings(settings)
@@ -612,18 +710,27 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     country = info["country"]
     currency = info["currency"]
 
+    cutoff = pd.Timestamp(as_of) if as_of else None
+    if cutoff is not None:
+        frames = {
+            ticker: (frame[frame.index <= cutoff] if frame is not None and not frame.empty else frame)
+            for ticker, frame in frames.items()
+        }
+
     # ── 실시간 반영 (종목풀 화면과 같은 규칙) ──────────────────────────────
     # 유니버스 전체의 종가 시리즈 끝에 실시간 현재가를 붙인다(공용
-    # build_effective_close_series). 이후의 '현재' 기준 계산 — 다음달 예상·예상
+    # build_effective_close_series). 이후의 '현재' 기준 계산 — 다음 주 예상·예상
     # 순위·현재 이격·이번달 수익률·고점 — 이 전부 장중 가격을 본다.
     # 판정일 기준 계산은 as_of 필터가 오늘 행을 잘라내므로 영향이 없다.
+    # 과거 날짜 재현 중에는 실시간을 섞지 않는다 — 그날 상태를 보는 화면이다.
     realtime: dict[str, dict[str, Any]] = {}
-    try:
-        from services.price_service import get_realtime_snapshot
+    if cutoff is None:
+        try:
+            from services.price_service import get_realtime_snapshot
 
-        realtime = get_realtime_snapshot(country, [row["ticker"] for row in universe])
-    except Exception:
-        realtime = {}  # 실시간 실패는 캐시 폴백 — 화면이 값 없이 뜨는 것보단 어제 종가가 낫다.
+            realtime = get_realtime_snapshot(country, [row["ticker"] for row in universe])
+        except Exception:
+            realtime = {}  # 실시간 실패는 캐시 폴백 — 화면이 값 없이 뜨는 것보단 어제 종가가 낫다.
     if realtime:
         from utils.rankings import build_effective_close_series
 
@@ -639,6 +746,10 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         frames = effective_frames
 
     benchmark_close = load_benchmark_close(pool)
+    if cutoff is not None:
+        benchmark_close = benchmark_close[benchmark_close.index <= cutoff]
+        if len(benchmark_close) == 0:
+            raise RuntimeError(f"{as_of} 이전의 벤치마크 데이터가 없습니다.")
     rebalance_date, signal_date = current_portfolio_dates(benchmark_close, info["country"])
     candidates = select_candidates(universe, frames, settings, as_of=signal_date)
     scored = rank_candidates(candidates)
@@ -655,12 +766,16 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     # 차순위 후보는 종목 수의 3배 — 선정 경계 아래 어디까지 올라와 있는지 넉넉히 본다.
     reserve = [item for item in scored if item["ticker"] not in selected_tickers][: top_n * RESERVE_MULTIPLIER]
 
-    # 연속 편입 개월 — 직전 최대 11개월의 판정일마다 같은 규칙으로 선정을 재계산해,
-    # 현재 종목이 연속으로 상위 N 에 들어 있던 횟수(+이번 달)를 센다. 끊기면 중단.
+    # 연속 편입 주 — 직전 최대 11주의 판정일마다 같은 규칙으로 선정을 재계산해,
+    # 현재 종목이 연속으로 상위 N 에 들어 있던 횟수(+이번 주)를 센다. 끊기면 중단.
     streak_lookback = 11
-    prior_rebalances = [stamp for stamp in completed_month_ends(benchmark_close) if stamp < rebalance_date][
-        -streak_lookback:
-    ]
+    # 날짜가 아니라 '주'로 비교한다 — as_of 로 잘린 데이터에서는 교체일이 속한 주의
+    # 마지막 캐시 거래일이 교체일보다 앞서 같은 주가 이중 계산된다.
+    prior_rebalances = [
+        stamp
+        for stamp in completed_week_starts(benchmark_close)
+        if stamp.to_period("W") < rebalance_date.to_period("W")
+    ][-streak_lookback:]
     streaks = {item["ticker"]: 1 for item in selected}
     alive = set(streaks)
     for prior_rebalance in reversed(prior_rebalances):
@@ -678,10 +793,72 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             else:
                 alive.discard(ticker)
 
-    portfolio_month = (rebalance_date.to_period("M") + 1).strftime("%Y-%m")
+    # 이 포트폴리오를 들고 가는 주 — 체결일이 속한 주의 마지막 거래일로 부른다.
+    portfolio_week = week_last_trading_day(info["country"], rebalance_date)
 
-    # 다음 달 예상 — 오늘까지의 가격(실시간 반영 종가)으로 같은 규칙을 한 번 더 돌려,
-    # 지금 교체한다면 뽑힐 종목을 표시한다. 실제 확정은 다음 판정일(월말 직전) 종가다.
+    # ── 주중 매도 (상시) — 보유 자격을 잃으면 다음 거래일 시가에 판다 (백테스트와 동일 함수).
+    # 마지막 확정 종가에서 판정된 것은 아직 체결 전 → '매도 예정' 으로 표시한다.
+    intraweek_exits = simulate_intraweek_exits(
+        frames,
+        settings,
+        {item["ticker"] for item in selected},
+        benchmark_close.index,
+        rebalance_date,
+        benchmark_close.index[-1],
+    )
+    exit_by_ticker = {exit_info["ticker"]: exit_info for exit_info in intraweek_exits}
+
+    # ── 지금 실제로 들고 있는 종목 ──────────────────────────────────────────
+    # 확정된 교체가 아직 체결 전(주말·판정 다음날)이면 **직전 교체분**이 현재 보유다.
+    # 화면이 '보유'와 '체결 예정'을 섞지 않도록 여기서 갈라 준다.
+    selected_tickers_now = [item["ticker"] for item in selected]
+    is_filled = rebalance_date <= pd.Timestamp.now().normalize()
+    if is_filled:
+        held_tickers = [t for t in selected_tickers_now if t not in exit_by_ticker]
+    else:
+        prev_monday = rebalance_date - pd.Timedelta(days=int(rebalance_date.weekday())) - pd.Timedelta(weeks=1)
+        prev_pair = week_rebalance_pair(country, prev_monday)
+        held_tickers = []
+        if prev_pair is not None:
+            prev_rebalance, prev_signal_calendar = prev_pair
+            prior_index = benchmark_close.index[benchmark_close.index <= prev_signal_calendar]
+            if len(prior_index) > 0:
+                prev_selected = {
+                    item["ticker"]
+                    for item in select_top(
+                        rank_candidates(select_candidates(universe, frames, settings, as_of=prior_index[-1])),
+                        top_n,
+                        max_per_industry,
+                        industry_by_ticker,
+                    )
+                }
+                prev_exited = {
+                    info["ticker"]
+                    for info in simulate_intraweek_exits(
+                        frames,
+                        settings,
+                        prev_selected,
+                        benchmark_close.index,
+                        prev_rebalance,
+                        benchmark_close.index[-1],
+                    )
+                }
+                held_tickers = sorted(prev_selected - prev_exited)
+
+    def exit_flags(ticker: str) -> dict[str, Any]:
+        """행에 얹는 주중 매도 상태 — 매도됨(체결 완료) / 매도 예정(다음 시가)."""
+        exit_info = exit_by_ticker.get(ticker)
+        if not exit_info:
+            return {"is_exited": False, "is_exit_pending": False, "exit_date": None}
+        sold = exit_info["sell_date"] is not None
+        return {
+            "is_exited": sold,
+            "is_exit_pending": not sold,
+            "exit_date": exit_info["sell_date"].strftime("%Y-%m-%d") if sold else None,
+        }
+
+    # 다음 주 예상 — 오늘까지의 가격(실시간 반영 종가)으로 같은 규칙을 한 번 더 돌려,
+    # 지금 교체한다면 뽑힐 종목을 표시한다. 실제 확정은 다음 판정일(주 마지막 거래일) 종가다.
     # 현재 기준 단기/장기 이격 — 표의 '현재-단기/장기' 컬럼용. 자격 필터와 무관하게
     # 행에 있는 종목은 전부 계산한다(단기 음수로 후보 탈락한 종목도 값은 보여준다).
     def current_disparity(ticker: str) -> dict[str, float | None]:
@@ -733,7 +910,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         [*current_top, *[c for c in current_scored if c["ticker"] not in next_expected]], start=1
     ):
         expected_rank_by_ticker[item["ticker"]] = expected_rank
-    # 현재 표(선정+후보)에 없는 예상 종목 — 하단에 별도 행으로 붙인다.
+    # 현재 표(선정+차순위)에 없는 예상 종목 — 하단에 별도 행으로 붙인다.
     table_tickers = {item["ticker"] for item in selected + reserve}
     extra_expected = [item for item in current_top if item["ticker"] not in table_tickers]
 
@@ -800,9 +977,26 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             "monthly_returns": build_recent_monthly_return_metrics(close, labels=month_labels),
         }
 
+    name_by_ticker = {row["ticker"]: row.get("name") or row["ticker"] for row in universe}
     return {
         "as_of": signal_date.strftime("%Y-%m-%d"),
-        "portfolio_month": portfolio_month,
+        "portfolio_week": portfolio_week,
+        # 확정 교체가 이미 체결됐는지 — 거짓이면 rows 는 '다음 교체 예정' 목록이다.
+        "is_filled": is_filled,
+        # 지금 실제로 들고 있는 종목 — 화면의 '현재 보유' 표가 이걸 쓴다.
+        "holdings": [
+            {
+                "ticker": ticker,
+                "name": name_by_ticker.get(ticker, ticker),
+                "industry": industry_map_by_ticker.get(ticker, ""),
+                "currency": currency,
+                # 다음 교체에서도 남는지 — 거짓이면 교체일에 매도된다.
+                "keeps_next": ticker in set(selected_tickers_now),
+                **price_info(ticker),
+                **exit_flags(ticker),
+            }
+            for ticker in held_tickers
+        ],
         "rebalance_date": rebalance_date.strftime("%Y-%m-%d"),
         "signal_date": signal_date.strftime("%Y-%m-%d"),
         "universe_count": len(universe),
@@ -819,8 +1013,8 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "is_reserve": rank > top_n,
                 "is_expected_only": False,
                 # 연속 편입은 선정분에만 의미가 있다 — 차순위는 표시하지 않는다(None → '-')
-                "streak_months": streaks.get(item["ticker"], 1) if rank <= top_n else None,
-                "next_month_expected": item["ticker"] in next_expected,
+                "streak_weeks": streaks.get(item["ticker"], 1) if rank <= top_n else None,
+                "next_week_expected": item["ticker"] in next_expected,
                 "ticker": item["ticker"],
                 "name": item["name"],
                 "market": item.get("market", ""),
@@ -830,11 +1024,12 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "signal_short_pct": round(item["short_disparity_pct"], 1),
                 "signal_long_pct": round(item["momentum_score"], 1),
                 **current_disparity(item["ticker"]),
+                **exit_flags(item["ticker"]),
             }
             for rank, item in enumerate([*selected, *reserve], start=1)
         ]
         + [
-            # 표 밖인데 다음 달 편입이 예상되는 종목 — 순위·현재 이격은 '지금' 기준이고,
+            # 표 밖인데 다음 주 편입이 예상되는 종목 — 순위·현재 이격은 '지금' 기준이고,
             # 판정일-단기/장기는 같은 이평선으로 판정일 시점을 재계산해 채운다
             # (후보 필터 밖이었을 뿐 값 자체는 계산된다 — 단기 음수 등 탈락 사유가 그대로 보인다).
             {
@@ -842,8 +1037,8 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "expected_rank": expected_rank_by_ticker.get(item["ticker"]),
                 "is_reserve": True,
                 "is_expected_only": True,
-                "streak_months": None,
-                "next_month_expected": True,
+                "streak_weeks": None,
+                "next_week_expected": True,
                 "ticker": item["ticker"],
                 "name": item["name"],
                 "market": item.get("market", ""),
