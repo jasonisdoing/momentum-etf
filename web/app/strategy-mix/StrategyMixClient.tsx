@@ -206,6 +206,10 @@ const SOURCE_LABEL: Record<string, string> = { sm: "모멘텀", nh: "신고가" 
 /** 보유 표 행 — 현금 행도 같은 표에 넣는다 (비중 합이 100%임을 한눈에 보이게). */
 type PositionRow = Holding & { is_cash?: boolean; amount: number | null; shares: number | null };
 
+/** 오늘의 액션 한 줄. 같은 체결 시점끼리 묶고 묶음 안에서는 매도 → 매수 순서다. */
+type ActionItem = { key: string; side: "sell" | "buy"; title: string; text: string };
+type ActionGroup = { key: string; title: string; items: ActionItem[] };
+
 /** 합성전략 — SM·신고가를 50:50으로 함께 운용하는 화면.
  *  현재 상태 탭은 오늘 보유해야 할 종목과 현금 비중·오늘의 액션을,
  *  백테스트 탭은 매월 50:50 리밸런싱 합성 성과를 보여준다. 설정은 각 전략 화면의 저장값을 그대로 쓴다. */
@@ -612,33 +616,118 @@ export function StrategyMixClient() {
     return found ? formatAccountLabel(found) : id;
   }, [positions?.account?.account_id, accountOptions]);
 
-  // 액션 문구가 쓰는 종목별 수량 — 표와 같은 값을 쓰려고 행을 그대로 참조한다.
-  const rowByTicker = useMemo(
-    () => new Map((positions?.holdings ?? []).map((row) => [row.ticker, row])),
-    [positions],
-  );
-  /** `종목명(티커) N주` — 계좌가 없으면 수량 없이 이름만 나온다. */
-  const labelOf = useCallback(
-    (ticker: string, name: string, kind: "buy" | "sell") => {
-      const base = `${name}(${ticker})`;
-      const row = rowByTicker.get(ticker);
-      const quantity = kind === "buy" ? row?.trade_quantity : (row?.held_quantity ?? null);
-      if (quantity == null || quantity === 0) return base;
-      return `${base} ${Math.abs(quantity).toLocaleString("ko-KR")}주`;
-    },
-    [rowByTicker],
-  );
-
   const actions = positions?.actions ?? null;
-  const hasActions =
-    actions != null &&
-    ((positions?.account?.sell_all ?? []).length > 0 ||
-      actions.sm_sells.length > 0 ||
-      actions.nh_entries.length > 0 ||
-      actions.nh_sells.length > 0 ||
-      actions.sm_rebalance.buys.length > 0 ||
-      actions.sm_rebalance.sells.length > 0 ||
-      actions.sleeve_rebalance_today);
+
+  // 오늘의 액션 — 체결 시점으로 묶고 묶음 안에서는 매도 → 매수 순서로 세운다.
+  // 매도가 끝나야 매수 대금이 생기고, 모멘텀 교체는 교체일 시가에만 체결되기 때문이다.
+  const actionGroups = useMemo<ActionGroup[]>(() => {
+    if (!positions || !actions) return [];
+    const rowByTicker = new Map(positions.holdings.map((row) => [row.ticker, row]));
+    const label = (ticker: string, name: string, quantity?: number | null) => {
+      const base = `${name}(${ticker})`;
+      return quantity == null || quantity === 0
+        ? base
+        : `${base} ${Math.abs(quantity).toLocaleString("ko-KR")}주`;
+    };
+
+    const rebalance = actions.sm_rebalance;
+    const rebalanceBuys = new Set(rebalance.buys.map((row) => row.ticker));
+    const rebalanceSells = new Set(rebalance.sells.map((row) => row.ticker));
+    const entryTickers = new Set(actions.nh_entries.map((row) => row.ticker));
+    const sellPending = new Set([...actions.sm_sells, ...actions.nh_sells].map((row) => row.ticker));
+
+    const now: ActionItem[] = [];
+    // ① 매도 — 목표에 없는 보유(교체일에 파는 것은 ②로 미룬다) → 매도 예정 → 비중 초과분.
+    for (const row of positions.account?.sell_all ?? []) {
+      if (rebalanceSells.has(row.ticker)) continue;
+      now.push({
+        key: `sell-all-${row.ticker}`,
+        side: "sell",
+        title: "전량 매도",
+        text: `${label(row.ticker, row.name, row.quantity)}${row.value != null ? ` (${formatAmount(row.value)})` : ""} · 목표에 없는 보유 종목`,
+      });
+    }
+    for (const row of actions.sm_sells) {
+      now.push({
+        key: `sm-sell-${row.ticker}`,
+        side: "sell",
+        title: "모멘텀 매도 예정",
+        text: `${label(row.ticker, row.name, rowByTicker.get(row.ticker)?.held_quantity)} (${row.reason}) · 슬롯은 다음 교체까지 현금`,
+      });
+    }
+    for (const row of actions.nh_sells) {
+      now.push({
+        key: `nh-sell-${row.ticker}`,
+        side: "sell",
+        title: "신고가 매도 예정",
+        text: `${label(row.ticker, row.name, rowByTicker.get(row.ticker)?.held_quantity)} (${row.reason}${row.return_pct != null ? `, ${formatSignedPct(row.return_pct)}` : ""})`,
+      });
+    }
+    for (const row of positions.holdings) {
+      const trade = row.trade_quantity;
+      if (row.is_sell_all || trade == null || trade >= 0) continue;
+      if (rebalanceSells.has(row.ticker) || sellPending.has(row.ticker)) continue;
+      now.push({
+        key: `trim-${row.ticker}`,
+        side: "sell",
+        title: "비중 조정 매도",
+        text: `${label(row.ticker, row.name, trade)} · 목표 ${row.weight_pct.toFixed(2)}%`,
+      });
+    }
+    // ① 매수 — 신고가 진입 예정 → 비중 부족분(모멘텀 교체 매수는 ②).
+    for (const row of actions.nh_entries) {
+      now.push({
+        key: `entry-${row.ticker}`,
+        side: "buy",
+        title: "신고가 진입 예정",
+        text: `${label(row.ticker, row.name, rowByTicker.get(row.ticker)?.trade_quantity)}${row.price != null ? ` (현재가 ${formatPrice(row.price)})` : ""}`,
+      });
+    }
+    for (const row of positions.holdings) {
+      const trade = row.trade_quantity;
+      if (row.is_sell_all || trade == null || trade <= 0) continue;
+      if (rebalanceBuys.has(row.ticker) || entryTickers.has(row.ticker)) continue;
+      now.push({
+        key: `add-${row.ticker}`,
+        side: "buy",
+        title: "비중 조정 매수",
+        text: `${label(row.ticker, row.name, trade)} · 목표 ${row.weight_pct.toFixed(2)}%`,
+      });
+    }
+
+    // ② 모멘텀 교체 — 판정은 끝났고 교체일 시가에만 체결된다.
+    const rebalanceItems: ActionItem[] = [];
+    for (const row of rebalance.sells) {
+      rebalanceItems.push({
+        key: `reb-sell-${row.ticker}`,
+        side: "sell",
+        title: "교체 매도",
+        text: label(row.ticker, row.name, rowByTicker.get(row.ticker)?.held_quantity),
+      });
+    }
+    for (const row of rebalance.buys) {
+      const target = rowByTicker.get(row.ticker);
+      rebalanceItems.push({
+        key: `reb-buy-${row.ticker}`,
+        side: "buy",
+        title: "교체 매수",
+        text: `${label(row.ticker, row.name, target?.trade_quantity ?? target?.target_quantity)}${row.price != null ? ` (현재가 ${formatPrice(row.price)})` : ""}`,
+      });
+    }
+
+    const groups: ActionGroup[] = [];
+    if (now.length > 0) groups.push({ key: "now", title: "지금 · 다음 거래일 시가", items: now });
+    if (rebalanceItems.length > 0 && !rebalance.is_filled) {
+      groups.push({
+        key: "rebalance",
+        title: `${rebalance.fill_date} 시가 · 모멘텀 교체`,
+        items: rebalanceItems,
+      });
+    }
+    return groups;
+  }, [positions, actions]);
+
+  const hasActions = actionGroups.length > 0 || Boolean(actions?.sleeve_rebalance_today);
 
   return (
     <PageFrame title="합성전략" fullWidth>
@@ -794,65 +883,50 @@ export function StrategyMixClient() {
                       gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
                     />
 
-                    {/* ③ 오늘의 액션 — 사고팔 것과 다음달 교체 예상. */}
+                    {/* ③ 오늘의 액션 — 체결 시점별 묶음, 각 묶음은 매도 → 매수 순서. */}
                     <div>
                       <div style={{ fontWeight: 700, marginBottom: 6 }}>오늘의 액션</div>
                       {!hasActions ? (
                         <div style={hintStyle}>오늘은 할 일이 없습니다 — 보유 목록을 그대로 유지하세요.</div>
                       ) : (
-                        <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
-                          {actions!.sm_sells.map((row) => (
-                            <li key={`sm-sell-${row.ticker}`}>
-                              <strong style={{ color: "#d62828" }}>모멘텀 매도 예정</strong> —{" "}
-                              {labelOf(row.ticker, row.name, "sell")} ({row.reason}) · 다음 시가에 매도, 슬롯은 다음
-                              교체까지 현금
-                            </li>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                          {actionGroups.map((group, groupIndex) => (
+                            <div key={group.key}>
+                              <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                                {groupIndex + 1}. {group.title}
+                                <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
+                                  매도 {group.items.filter((item) => item.side === "sell").length}건 · 매수{" "}
+                                  {group.items.filter((item) => item.side === "buy").length}건
+                                </span>
+                              </div>
+                              <ul
+                                style={{
+                                  margin: 0,
+                                  paddingLeft: 18,
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: 4,
+                                }}
+                              >
+                                {group.items.map((item) => (
+                                  <li key={item.key}>
+                                    <strong style={{ color: item.side === "sell" ? "#d62828" : "#2f9e44" }}>
+                                      {item.title}
+                                    </strong>{" "}
+                                    — {item.text}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
                           ))}
-                          {actions!.nh_sells.map((row) => (
-                            <li key={`sell-${row.ticker}`}>
-                              <strong style={{ color: "#d62828" }}>신고가 매도 예정</strong> —{" "}
-                              {labelOf(row.ticker, row.name, "sell")} ({row.reason}
-                              {row.return_pct != null ? `, ${formatSignedPct(row.return_pct)}` : ""}) · 다음 시가에 매도
-                            </li>
-                          ))}
-                          {actions!.nh_entries.map((row) => (
-                            <li key={`entry-${row.ticker}`}>
-                              <strong style={{ color: "#2f9e44" }}>신고가 진입 예정</strong> —{" "}
-                              {labelOf(row.ticker, row.name, "buy")}
-                              {row.price != null ? ` (현재가 ${formatPrice(row.price)})` : ""} · 다음 시가에 매수
-                            </li>
-                          ))}
-                          {actions!.sm_rebalance.buys.length > 0 ? (
-                            <li>
-                              <strong style={{ color: "#2f9e44" }}>모멘텀 교체 매수</strong> —{" "}
-                              {actions!.sm_rebalance.buys.map((r) => labelOf(r.ticker, r.name, "buy")).join(", ")} ·{" "}
-                              {actions!.sm_rebalance.fill_date} 시가
-                            </li>
-                          ) : null}
-                          {actions!.sm_rebalance.sells.length > 0 ? (
-                            <li>
-                              <strong style={{ color: "#d62828" }}>모멘텀 교체 매도</strong> —{" "}
-                              {actions!.sm_rebalance.sells.map((r) => labelOf(r.ticker, r.name, "sell")).join(", ")} ·{" "}
-                              {actions!.sm_rebalance.fill_date} 시가
-                            </li>
-                          ) : null}
-                          {actions!.sleeve_rebalance_today ? (
-                            <li>
+                          {actions?.sleeve_rebalance_today ? (
+                            <div>
                               <strong>슬리브 리밸런싱</strong> — 매월 첫 거래일입니다. 모멘텀·신고가 슬리브를 각각 50%로
                               다시 맞추세요.
-                            </li>
+                            </div>
                           ) : null}
-                          {(positions.account?.sell_all ?? []).map((row) => (
-                            <li key={`sell-all-${row.ticker}`}>
-                              <strong style={{ color: "#d62828" }}>전량 매도</strong> —{" "}
-                              {labelOf(row.ticker, row.name, "sell")}
-                              {row.value != null ? ` (${formatAmount(row.value)})` : ""} · 목표 포트폴리오에 없는 보유
-                              종목
-                            </li>
-                          ))}
-                        </ul>
+                        </div>
                       )}
-
                     </div>
                   </div>
                 )}
