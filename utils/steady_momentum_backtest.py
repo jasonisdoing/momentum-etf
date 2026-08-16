@@ -30,6 +30,7 @@ from typing import Any
 import pandas as pd
 
 from leverage.engine.backtest.ma_cross import max_drawdown_pct, sortino
+from utils.pool_settings_store import get_pool_slippage
 from utils.pool_signal_backtest_service import get_max_backtest_months
 from utils.steady_momentum_service import (
     available_backtest_months,
@@ -188,7 +189,9 @@ def run_backtest(
     for signal_date in all_signal_dates:
         candidates_by_date.append(select_candidates(universe, frames, settings, as_of=signal_date))
 
-    slippage = float(settings["slippage_pct"]) / 100.0
+    # 슬리피지는 종목풀 설정을 단일 소스로 쓴다 — 매수·매도 편도값을 각각 적용한다.
+    buy_slippage_pct, sell_slippage_pct = get_pool_slippage(pool)
+    buy_slippage, sell_slippage = buy_slippage_pct / 100.0, sell_slippage_pct / 100.0
     top_n = int(settings["top_n"])
 
     # 업종 상한 — 선정 화면과 같은 규칙으로 상위 종목을 고른다.
@@ -331,12 +334,12 @@ def run_backtest(
             buy_notional = sum(target_weight for t in added_tickers) + sum(
                 max(target_weight - drifted[t], 0.0) for t in holdings_set & previous_holdings
             )
-            traded_notional = sell_notional + buy_notional
         else:
-            traded_notional = len(holdings) * target_weight  # 첫 구간은 투자분만 신규 매수
+            sell_notional = 0.0
+            buy_notional = len(holdings) * target_weight  # 첫 구간은 투자분만 신규 매수
         # 주중 매도도 매매 금액에 넣는다 (슬롯당 1/N).
-        traded_notional += len(exits) * target_weight
-        cost = slippage * traded_notional
+        sell_notional += len(exits) * target_weight
+        cost = buy_slippage * buy_notional + sell_slippage * sell_notional
 
         # 보유 구간 — 주중 매도된 종목은 매도 체결일 시가까지만 수익이 발생한다.
         period_returns: dict[str, float] = {}

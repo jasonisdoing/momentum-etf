@@ -516,6 +516,23 @@ def update_pool(pool_id: str, values: dict[str, Any], save_method: str = "사용
     return cleaned
 
 
+def get_pool_slippage(pool: str) -> tuple[float, float]:
+    """종목풀 설정의 (매수, 매도) 편도 슬리피지(%) — 전략 백테스트가 공용으로 쓴다.
+
+    미설정이면 임의값으로 대체하지 않고 명시적으로 실패한다(비용을 조용히 0으로
+    두면 백테스트가 과대평가된다).
+    """
+    from utils.settings_loader import get_ticker_type_settings
+
+    settings = get_ticker_type_settings(pool) or {}
+    missing = [key for key in SLIPPAGE_KEYS if settings.get(key) in (None, "")]
+    if missing:
+        raise PoolSettingsError(
+            f"종목풀({pool}) 설정에 {', '.join(missing)} 가 없습니다 — `/pools-settings` 에서 먼저 저장하세요."
+        )
+    return float(settings["BUY_SLIPPAGE_PCT"]), float(settings["SELL_SLIPPAGE_PCT"])
+
+
 def strategy_enabled_pools() -> list[str]:
     """전략 사용을 켠 활성 풀 목록 (order 순) — 전략 비교·백테스트의 대상 풀."""
     pools = [doc for doc in load_pool_definitions() if doc.get("strategy_enabled")]

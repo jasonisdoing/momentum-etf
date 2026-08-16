@@ -51,6 +51,8 @@ ENTRY_PRIORITY_OPTIONS = ("value_surge", "market_cap")
 # 거래대금이 실리지 않은 돌파는 실패 확률이 높다(오닐의 '돌파는 거래량 증가와 함께').
 # None 은 '조건 없음'. 배수를 모르는 종목(상장 직후 등)도 자격 미달로 본다 — 추정하지 않는다.
 MIN_VALUE_MULT_OPTIONS: tuple[float | None, ...] = (5.0, 4.0, 3.0, 2.0, 1.0, None)
+# 백테스트 기간 기본값 — 화면에서 실행할 때 고르고, 저장하지 않는다.
+DEFAULT_BACKTEST_MONTHS = 12
 
 # 한 업종에서 최대 몇 종목까지 담을지. None 은 '제한 없음'.
 # 돌파는 주도 섹터에서 무더기로 나오는데, 그대로 담으면 계좌가 한 업황에 걸린다.
@@ -65,12 +67,12 @@ _SETTINGS_KEY = "new_high_settings"
 # 풀을 바꾸면 그 풀의 값으로 전환되는 항목.
 # 풀별로 따로 보관하는 설정. 여기 빠진 키는 저장을 눌러도 버려진다 — 설정을 추가하면
 # 반드시 같이 넣어야 한다.
+# 슬리피지는 종목풀 설정(BUY/SELL_SLIPPAGE_PCT)을 쓰고, 백테스트 기간은 실행할 때
+# 화면에서 고른다 — 둘 다 여기 저장하지 않는다.
 PER_POOL_SETTING_KEYS = (
     "top_n",
     "stop_loss_pct",
     "exit_ma_days",
-    "slippage_pct",
-    "backtest_months",
     "entry_priority",
     "min_value_mult",
     "max_per_industry",
@@ -81,8 +83,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "top_n": 8,
     "stop_loss_pct": -8.0,
     "exit_ma_days": 20,
-    "slippage_pct": 0.25,
-    "backtest_months": 12,
     "entry_priority": "value_surge",
     # 기본은 조건 없음 — 풀마다 적정값이 달라 사용자가 시험해 보고 저장한다.
     "min_value_mult": None,
@@ -348,13 +348,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"{key} 는 {list(options)} 중 하나여야 합니다 (받은 값: {value})")
         return value
 
-    slippage = float(settings.get("slippage_pct", DEFAULT_SETTINGS["slippage_pct"]))
-    if not 0.0 <= slippage <= 5.0:
-        raise ValueError(f"슬리피지는 0~5% 사이여야 합니다 (받은 값: {slippage})")
-    months = int(settings.get("backtest_months", DEFAULT_SETTINGS["backtest_months"]))
-    if not 1 <= months <= 120:
-        raise ValueError(f"백테스트 기간은 1~120개월이어야 합니다 (받은 값: {months})")
-
     priority = str(settings.get("entry_priority") or DEFAULT_SETTINGS["entry_priority"]).strip()
     if priority not in ENTRY_PRIORITY_OPTIONS:
         raise ValueError(f"entry_priority 는 {list(ENTRY_PRIORITY_OPTIONS)} 중 하나여야 합니다 (받은 값: {priority})")
@@ -379,8 +372,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "top_n": pick("top_n", TOP_N_OPTIONS, int),
         "stop_loss_pct": pick("stop_loss_pct", STOP_LOSS_OPTIONS, float),
         "exit_ma_days": pick("exit_ma_days", EXIT_MA_OPTIONS, int),
-        "slippage_pct": slippage,
-        "backtest_months": months,
         "slack_enabled": bool(settings.get("slack_enabled", DEFAULT_SETTINGS["slack_enabled"])),
     }
 
@@ -420,6 +411,7 @@ __all__ = [
     "DEFAULT_SETTINGS",
     "ENTRY_PRIORITY_OPTIONS",
     "MAX_PER_INDUSTRY_OPTIONS",
+    "DEFAULT_BACKTEST_MONTHS",
     "MIN_VALUE_MULT_OPTIONS",
     "EXIT_MA_OPTIONS",
     "HIGH_WINDOW_WEEKS",

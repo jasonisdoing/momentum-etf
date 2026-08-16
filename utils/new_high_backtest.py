@@ -13,6 +13,7 @@ from typing import Any
 import pandas as pd
 
 from utils.new_high_service import (
+    DEFAULT_BACKTEST_MONTHS,
     HIGH_WINDOW_WEEKS,
     benchmark_info,
     build_price_panel,
@@ -23,6 +24,7 @@ from utils.new_high_service import (
     load_universe,
     validate_settings,
 )
+from utils.pool_settings_store import get_pool_slippage
 
 logger = logging.getLogger(__name__)
 
@@ -126,14 +128,15 @@ def run_backtest(
     ``as_of`` 를 주면 그 거래일까지만 돌린다 — 과거 시점의 보유·신호를 재현할 때 쓴다.
     """
     settings = validate_settings(settings or load_settings())
-    months = int(months or settings["backtest_months"])
+    months = int(months or DEFAULT_BACKTEST_MONTHS)
     if not 1 <= months <= MAX_BACKTEST_MONTHS:
         raise ValueError(f"'months' 는 1~{MAX_BACKTEST_MONTHS} 사이여야 합니다.")
 
     pool = settings["pool"]
     slots = int(settings["top_n"])
     stop_pct = float(settings["stop_loss_pct"])
-    slippage = float(settings["slippage_pct"])
+    # 슬리피지는 종목풀 설정을 단일 소스로 쓴다 — 매수·매도 편도값을 각각 적용한다.
+    buy_slippage, sell_slippage = get_pool_slippage(pool)
 
     context = context or load_context(settings)
     universe = context["universe"]
@@ -193,7 +196,7 @@ def run_backtest(
             exit_price = open_df.at[nxt, ticker]
             if pd.isna(exit_price):
                 exit_price = price  # 다음 날 시가가 없으면(거래정지) 오늘 종가로 본다
-            ret = (float(exit_price) * (1 - slippage / 100)) / position["entry"] - 1
+            ret = (float(exit_price) * (1 - sell_slippage / 100)) / position["entry"] - 1
             equity *= 1 + ret / slots
             trades.append(
                 {
@@ -235,7 +238,7 @@ def run_backtest(
                 holdings[ticker] = {
                     "open": entry_open,
                     # 손익 계산에는 슬리피지를 얹은 값을 쓴다(표시용 가격과 구분).
-                    "entry": entry_open * (1 + slippage / 100),
+                    "entry": entry_open * (1 + buy_slippage / 100),
                     "date": nxt,
                 }
 
@@ -455,9 +458,7 @@ def _should_auto_refresh(pool: str, quotes: dict[str, Any]) -> bool:
         return False
     try:
         now_local = pd.Timestamp.now(tz=tz_name)
-        opens_at = pd.Timestamp(
-            f"{now_local.date()} {open_time.hour:02d}:{open_time.minute:02d}", tz=tz_name
-        )
+        opens_at = pd.Timestamp(f"{now_local.date()} {open_time.hour:02d}:{open_time.minute:02d}", tz=tz_name)
     except Exception:
         return False
     return opens_at - pd.Timedelta(minutes=_PRE_MARKET_REFRESH_LEAD_MINUTES) <= now_local <= opens_at
