@@ -392,7 +392,7 @@ def delete_active_stock(ticker_type: str, ticker: str) -> None:
     from utils.stock_list_io import get_active_holding_tickers
 
     try:
-        is_currently_held = ticker_norm in get_active_holding_tickers().get(type_norm, set())
+        is_currently_held = ticker_norm in get_active_holding_tickers()
     except Exception:
         is_currently_held = False
 
