@@ -2,7 +2,7 @@
 
 MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 보관한다.
 
-    구조: ticker_type, name, icon, order, country_code, currency, is_active
+    구조: ticker_type, name, icon, order, country_code, currency
     편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, SLOPE_DAYS,
           BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT,
           BENCHMARK, MARKET_REGIME_INDEX (선택 — 비우면 미설정)
@@ -14,7 +14,7 @@ MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 
 컬렉션 문서 형태:
     {
       _id: <ticker_type>, name, icon, order, country_code, currency,
-      is_active, TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, SLOPE_DAYS,
+      TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, SLOPE_DAYS,
       BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, BENCHMARK, MARKET_REGIME_INDEX, updated_at
     }
 """
@@ -61,7 +61,6 @@ STRUCTURAL_KEYS: tuple[str, ...] = (
     "order",
     "country_code",
     "currency",
-    "is_active",
     "pool_kind",
     "strategy_enabled",
 )
@@ -207,8 +206,6 @@ def _normalize_pool_values(values: dict[str, Any], *, require_ticker_type: bool)
             allowed = ", ".join(sorted(_ALLOWED_CURRENCIES))
             raise PoolSettingsError(f"currency 는 {allowed} 중 하나여야 합니다: {currency}")
         cleaned["currency"] = currency
-    if "is_active" in values:
-        cleaned["is_active"] = bool(values.get("is_active"))
     if "strategy_enabled" in values:
         # 전략 사용 — SM·신고가 등 전략 화면/비교의 대상 풀인지. 기본은 사용 안함.
         cleaned["strategy_enabled"] = bool(values.get("strategy_enabled"))
@@ -244,7 +241,6 @@ def _normalize_pool_doc(doc: dict[str, Any]) -> dict[str, Any]:
 
     normalized = _normalize_pool_values({**doc, "ticker_type": pool_id}, require_ticker_type=True)
     normalized["ticker_type"] = pool_id
-    normalized["is_active"] = bool(doc.get("is_active", True))
     # 전략 사용 토글 — 기존 문서에 없으면 사용 안함 (명시적으로 켠 풀만 전략 대상).
     normalized["strategy_enabled"] = bool(doc.get("strategy_enabled", False))
     if doc.get("updated_at") is not None:
@@ -256,20 +252,16 @@ def _normalize_pool_doc(doc: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def load_pool_definitions(*, include_inactive: bool = False) -> list[dict[str, Any]]:
-    """DB에서 종목풀 정의를 읽는다. 기본은 활성 풀만 반환한다."""
+def load_pool_definitions() -> list[dict[str, Any]]:
+    """DB에서 종목풀 정의를 읽는다. 쓰지 않을 풀은 비활성이 아니라 삭제로 관리한다."""
     global _pool_docs_cache
     now = monotonic()
-    if not include_inactive:
-        with _pool_docs_lock:
-            if _pool_docs_cache is not None and now - _pool_docs_cache[0] < _CACHE_TTL_SECONDS:
-                return [dict(doc) for doc in _pool_docs_cache[1]]
+    with _pool_docs_lock:
+        if _pool_docs_cache is not None and now - _pool_docs_cache[0] < _CACHE_TTL_SECONDS:
+            return [dict(doc) for doc in _pool_docs_cache[1]]
 
-    query: dict[str, Any] = {} if include_inactive else {"is_active": {"$ne": False}}
     docs = [
-        _normalize_pool_doc(dict(doc))
-        for doc in _db()[COLLECTION].find(query)
-        if not _is_internal_pool_id(doc.get("_id"))
+        _normalize_pool_doc(dict(doc)) for doc in _db()[COLLECTION].find({}) if not _is_internal_pool_id(doc.get("_id"))
     ]
     if not docs:
         raise PoolSettingsError(
@@ -277,9 +269,8 @@ def load_pool_definitions(*, include_inactive: bool = False) -> list[dict[str, A
         )
     docs.sort(key=lambda item: (int(item["order"]), str(item["ticker_type"])))
 
-    if not include_inactive:
-        with _pool_docs_lock:
-            _pool_docs_cache = (now, [dict(doc) for doc in docs])
+    with _pool_docs_lock:
+        _pool_docs_cache = (now, [dict(doc) for doc in docs])
     return docs
 
 
@@ -287,7 +278,7 @@ def _load_overrides_from_db() -> dict[str, dict[str, Any]]:
     """pool_settings 컬렉션 전체를 {pool_id: {key: value}} 로 읽는다. 실패 시 {}."""
     try:
         result: dict[str, dict[str, Any]] = {}
-        for doc in _db()[COLLECTION].find({"is_active": {"$ne": False}}):
+        for doc in _db()[COLLECTION].find({}):
             if _is_internal_pool_id(doc.get("_id")):
                 continue
             pool_id = str(doc.get("_id") or "").strip()
@@ -476,7 +467,6 @@ def create_pool(values: dict[str, Any], save_method: str = "사용자") -> dict[
         raise PoolSettingsError(f"신규 종목풀에 필수 값이 없습니다: {', '.join(missing)}")
     cleaned = _normalize_pool_values(values, require_ticker_type=True)
     pool_id = cleaned.pop("ticker_type")
-    cleaned["is_active"] = True
 
     db = _db()
     if db[COLLECTION].find_one({"_id": pool_id}, {"_id": 1}) is not None:

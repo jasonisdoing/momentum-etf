@@ -11,7 +11,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from core.strategy.scoring import build_composite_rank_scores
 from utils.logger import get_app_logger
 from utils.perf_metrics import curve_metrics, mdd_span
 
@@ -23,13 +22,9 @@ from utils.asset_helper_market_data import (
     _resolve_backtest_currency,
 )
 from utils.asset_helper_service import (
-    _allocate_deviation_filtered_weights,
-    _build_asset_helper_ma_rule,
     _clean_backtest_settings,
     _clean_settings,
     _clean_tickers,
-    _filter_rank_excluded_tickers,
-    _with_account_asset_helper_basis,
 )
 
 
@@ -64,44 +59,6 @@ def _select_friday_history_dates(index: pd.DatetimeIndex) -> set[pd.Timestamp]:
     res = set(selected.values())
     res.add(index[-1])
     return res
-
-
-def _build_asset_helper_weight_engine(
-    close_frame: pd.DataFrame,
-    tickers: list[dict[str, Any]],
-    settings: dict[str, Any],
-) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
-    ma_rules = [_build_asset_helper_ma_rule(settings)]
-    composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
-    return composite_frame, trend_by_order
-
-
-def _calculate_asset_helper_weights_on_date(
-    eval_date: pd.Timestamp,
-    tickers: list[dict[str, Any]],
-    settings: dict[str, Any],
-    composite_frame: pd.DataFrame,
-    trend_frame: pd.DataFrame,
-) -> dict[str, float] | None:
-    eligible_dates = composite_frame.index[composite_frame.index <= eval_date]
-    if eligible_dates.empty:
-        return None
-
-    score_date = eligible_dates.max()
-    composite_row = composite_frame.loc[score_date]
-    trend_row = trend_frame.loc[score_date] if score_date in trend_frame.index else pd.Series(dtype=float)
-    deviation_pct_by_ticker: dict[str, float | None] = {}
-    for item in tickers:
-        ticker = str(item.get("ticker") or "").strip().upper()
-        score_value = composite_row.get(ticker)
-        deviation_pct = trend_row.get(ticker)
-        if pd.isna(score_value) or pd.isna(deviation_pct):
-            deviation_pct_by_ticker[ticker] = None
-        elif float(deviation_pct) > 0:
-            deviation_pct_by_ticker[ticker] = float(deviation_pct)
-        else:
-            deviation_pct_by_ticker[ticker] = float(deviation_pct)
-    return _allocate_deviation_filtered_weights(deviation_pct_by_ticker, float(settings["STOCK_MAX_WEIGHT"]))
 
 
 def _resolve_slippage_by_ticker(clean_tickers: list[dict[str, Any]]) -> dict[str, tuple[float, float]]:
@@ -141,22 +98,13 @@ def run_asset_helper_backtest(
     tickers: list[dict[str, Any]],
     settings: dict[str, Any] | None = None,
     backtest_settings: dict[str, Any] | None = None,
-    weight_mode: str = "variable",
 ) -> dict[str, Any]:
-    # weight_mode="fixed"(고정 보유)는 이평선·종목풀 연결이 필요 없다. 그 외는 동일 슬롯 + 개별 이평선 필터.
-    # 백테스트는 전달받은 "현재 종목"만 검증한다 — trend 라도 풀 전체를 재선정하지 않는다
-    # (풀 백테스트는 종목풀 화면에 별도로 있음).
+    # 비중은 사용자가 지정한 고정 비중만 쓴다. 백테스트는 전달받은 "현재 종목"만 검증하며
+    # 풀 전체를 재선정하지 않는다(풀 백테스트는 종목풀 화면에 별도로 있음).
     clean_tickers = _clean_tickers(tickers)
-    clean_settings = _with_account_asset_helper_basis(_clean_settings(settings), weight_mode=weight_mode)
-    # 고정 비중(사용자가 직접 고른 종목)은 순위 고정(exclude_from_ranking) 제외를 적용하지 않는다.
-    # 변동 모드에서만 순위 유니버스에서 고정 종목을 뺀다(비중 계산부와 동일 규칙).
-    if weight_mode == "fixed":
-        excluded_fixed_tickers = []
-    else:
-        clean_tickers, excluded_fixed_tickers = _filter_rank_excluded_tickers(clean_tickers, clean_settings)
+    clean_settings = _clean_settings(settings)
     if len(clean_tickers) < 3:
-        suffix = f" 고정 종목 제외: {', '.join(excluded_fixed_tickers)}" if excluded_fixed_tickers else ""
-        raise ValueError(f"백테스트에는 고정 종목 제외 후 확인된 종목이 3개 이상 필요합니다.{suffix}")
+        raise ValueError("백테스트에는 확인된 종목이 3개 이상 필요합니다.")
     clean_backtest = _clean_backtest_settings(backtest_settings, require_benchmark=False)
     # 결과 비교용 벤치마크 — 계좌 설정(/account-settings)의 벤치마크를 쓴다(계좌별로 다름).
     account_id = str(clean_settings.get("ACCOUNT_ID") or "").strip()
@@ -198,7 +146,6 @@ def run_asset_helper_backtest(
 
     today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
     start_target = (today - pd.DateOffset(months=months)).normalize()
-    candidate_close = close_frame[ticker_order].sort_index()
 
     simulation_columns = list(dict.fromkeys(ticker_order + [benchmark["ticker"]]))
     simulation_frame = close_frame[simulation_columns].sort_index()
@@ -210,34 +157,16 @@ def run_asset_helper_backtest(
     requested_rebalance_dates = _select_rebalance_dates(simulation_frame.index, rebalance)
     weights_by_date: dict[pd.Timestamp, dict[str, float]] = {}
 
-    if weight_mode == "fixed":
-        fixed_weights = {item["ticker"]: float(item.get("fixed_weight_pct") or 0.0) / 100.0 for item in clean_tickers}
-        sum_fixed = sum(fixed_weights.values())
-        if sum_fixed > 1.0:
-            for tk in fixed_weights:
-                fixed_weights[tk] /= sum_fixed
-            cash_weight = 0.0
-        else:
-            cash_weight = 1.0 - sum_fixed
-        fixed_weights["__CASH__"] = cash_weight
-
-        weights_by_date = {date: fixed_weights for date in requested_rebalance_dates}
+    fixed_weights = {item["ticker"]: float(item.get("fixed_weight_pct") or 0.0) / 100.0 for item in clean_tickers}
+    sum_fixed = sum(fixed_weights.values())
+    if sum_fixed > 1.0:
+        for tk in fixed_weights:
+            fixed_weights[tk] /= sum_fixed
+        cash_weight = 0.0
     else:
-        composite_frame, trend_by_order = _build_asset_helper_weight_engine(
-            candidate_close, clean_tickers, clean_settings
-        )
-        trend_frame = trend_by_order[1]
-
-        for date in requested_rebalance_dates:
-            weights = _calculate_asset_helper_weights_on_date(
-                date,
-                clean_tickers,
-                clean_settings,
-                composite_frame,
-                trend_frame,
-            )
-            if weights is not None:
-                weights_by_date[date] = weights
+        cash_weight = 1.0 - sum_fixed
+    fixed_weights["__CASH__"] = cash_weight
+    weights_by_date = {date: fixed_weights for date in requested_rebalance_dates}
 
     if not weights_by_date:
         raise ValueError("백테스트 기간에 계산 가능한 비중이 없습니다.")
@@ -431,5 +360,4 @@ def run_asset_helper_backtest(
         ]
         + [{"key": "__CASH__", "label": "현금"}],
         "missing_tickers": missing,
-        "excluded_fixed_tickers": excluded_fixed_tickers,
     }
