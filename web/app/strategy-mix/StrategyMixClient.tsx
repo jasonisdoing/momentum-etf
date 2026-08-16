@@ -4,6 +4,7 @@ import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppAgGrid } from "../components/AppAgGrid";
+import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { NavTabs } from "../components/NavTabs";
 import { TickerDetailLink } from "../components/TickerDetailLink";
@@ -174,6 +175,7 @@ export function StrategyMixClient() {
   const [positions, setPositions] = useState<Positions | null>(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
   const [positionsError, setPositionsError] = useState<string | null>(null);
+  const [positionsProgress, setPositionsProgress] = useState<LoadingProgress | null>(null);
   const [totalAssetText, setTotalAssetText] = useState<string>("");
   /** 과거 날짜 조회 — 빈 값이면 오늘. */
   const [asOf, setAsOf] = useState<string>("");
@@ -183,6 +185,7 @@ export function StrategyMixClient() {
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [backtestProgress, setBacktestProgress] = useState<LoadingProgress | null>(null);
 
   // 진입 시에는 풀 목록만 받는다 — 계산은 탭·버튼이 시작한다.
   useEffect(() => {
@@ -211,6 +214,8 @@ export function StrategyMixClient() {
     let alive = true;
     setPositionsLoading(true);
     setPositionsError(null);
+    setPositionsProgress({ percent: 10, message: "두 전략의 현재 상태를 계산하는 중" });
+    const stopRamp = startProgressRamp(setPositionsProgress);
     void (async () => {
       try {
         const params = new URLSearchParams({ pool });
@@ -227,11 +232,16 @@ export function StrategyMixClient() {
             positionsFetchError instanceof Error ? positionsFetchError.message : "합성 운영 상태를 불러오지 못했습니다.",
           );
       } finally {
-        if (alive) setPositionsLoading(false);
+        stopRamp();
+        if (alive) {
+          setPositionsLoading(false);
+          setPositionsProgress(null);
+        }
       }
     })();
     return () => {
       alive = false;
+      stopRamp();
     };
   }, [pool, asOf]);
 
@@ -239,19 +249,24 @@ export function StrategyMixClient() {
     if (!pool) return;
     setLoading(true);
     setError(null);
+    setBacktestProgress({ percent: 10, message: "두 전략의 백테스트를 계산하는 중" });
+    const stopRamp = startProgressRamp(setBacktestProgress);
     try {
       const response = await fetch(`/api/strategy-mix?pool=${encodeURIComponent(pool)}&months=${months}`, {
         cache: "no-store",
       });
       const payload = (await response.json()) as View & { error?: string };
       if (!response.ok || payload.error) throw new Error(payload.error ?? "합성 백테스트를 불러오지 못했습니다.");
+      setBacktestProgress({ percent: 100, message: "결과 반영 중" });
       setView(payload);
     } catch (runError) {
       const message = runError instanceof Error ? runError.message : "합성 백테스트를 불러오지 못했습니다.";
       setError(message);
       toast.error(message);
     } finally {
+      stopRamp();
       setLoading(false);
+      setBacktestProgress(null);
     }
   }, [pool, months, toast]);
 
@@ -713,9 +728,7 @@ export function StrategyMixClient() {
               {error ? (
                 <div className="alert alert-danger" style={{ marginBottom: 0 }}>{error}</div>
               ) : loading ? (
-                <div style={{ ...hintStyle, textAlign: "center", padding: "48px 0" }}>
-                  두 전략의 백테스트를 계산하고 있습니다… (수 분 걸릴 수 있습니다)
-                </div>
+                <AppLoadingProgress title="백테스트 실행 중..." progress={backtestProgress} />
               ) : view ? (
                 <>
                   <BacktestSummary
