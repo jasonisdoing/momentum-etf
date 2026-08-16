@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from utils.logger import get_app_logger
@@ -59,6 +59,8 @@ def _pool_options(pools: list[str]) -> list[dict[str, Any]]:
                 "name": str(settings.get("name") or pool),
                 "icon": str(settings.get("icon") or ""),
                 "order": settings.get("order"),
+                # 적용 계좌 셀렉터가 같은 통화의 계좌만 보여주는 데 쓴다.
+                "currency": str(settings.get("currency") or "").strip().upper(),
             }
         )
     options.sort(key=lambda o: (o["order"] is None, o["order"]))
@@ -91,12 +93,21 @@ def load_settings_map() -> dict[str, Any]:
 
 def save_settings(pool: str, account_id: str | None) -> dict[str, Any]:
     """선택한 풀에 적용 계좌를 저장한다. 다른 풀의 저장분은 건드리지 않는다."""
-    from utils.settings_loader import list_available_accounts
+    from utils.settings_loader import get_account_settings, list_available_accounts
 
     pool_norm, _, _ = _resolve_pool_and_settings(pool)
     account_norm = str(account_id or "").strip()
     if account_norm and account_norm not in list_available_accounts():
         raise ValueError(f"알 수 없는 계좌입니다: {account_id}")
+    if account_norm:
+        # 통화가 다르면 총자산을 그 풀의 종목 가격으로 나눌 수 없다 — 저장 자체를 막는다.
+        from utils.settings_loader import get_ticker_type_settings
+
+        pool_currency = str((get_ticker_type_settings(pool_norm) or {}).get("currency") or "").strip().upper()
+        account_settings = get_account_settings(account_norm) or {}
+        account_currency = str((account_settings.get("settings") or account_settings).get("currency") or "").strip().upper()
+        if pool_currency and account_currency and pool_currency != account_currency:
+            raise ValueError(f"통화가 다른 계좌입니다: 종목풀 {pool_currency} / 계좌 {account_currency}")
     per_pool = {"account_id": account_norm or None}
     _db()[_CONFIG_COLLECTION].update_one(
         {"_id": _SETTINGS_KEY},
@@ -134,6 +145,8 @@ def mix_meta() -> dict[str, Any]:
                 "name": str(inner.get("name") or account_id),
                 "icon": str(inner.get("icon") or ""),
                 "order": inner.get("order"),
+                # 통화가 다른 계좌는 목표 금액·주수를 낼 수 없다 — 화면이 풀별로 걸러 쓴다.
+                "currency": str(inner.get("currency") or "").strip().upper(),
             }
         )
     accounts.sort(key=lambda item: (item["order"] is None, item["order"]))
@@ -319,6 +332,13 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     month_days = get_trading_days(month_start.strftime("%Y-%m-%d"), today_local.strftime("%Y-%m-%d"), country)
     sleeve_rebalance_today = bool(month_days) and month_days[0].date() == today_local
 
+    # 다음 거래일 — 모든 체결은 시가라 액션 묶음의 실제 날짜가 된다. 연휴가 끼면
+    # 이 날짜가 모멘텀 교체일과 같아질 수 있고, 그러면 화면이 한 묶음으로 합친다.
+    ahead = get_trading_days(
+        today_local.strftime("%Y-%m-%d"), (today_local + timedelta(days=21)).strftime("%Y-%m-%d"), country
+    )
+    next_trading_day = next((str(day.date()) for day in ahead if day.date() > today_local), None)
+
     # ── 적용 계좌 — 저장된 연결이 있으면 실제 보유·현금을 붙여 매매 지시를 만든다.
     account_id = str((load_settings_map().get(pool_norm) or {}).get("account_id") or "").strip()
     account = _load_account_state(account_id) if account_id else None
@@ -400,6 +420,7 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
         "pool": pool_norm,
         "account": account,
         "as_of": nh.get("as_of"),
+        "next_trading_day": next_trading_day,
         "live": bool(nh.get("live")),
         # 과거 날짜 셀렉트용 — 신고가 화면과 같은 날짜 목록을 그대로 쓴다.
         "available_dates": [str(d.get("date")) for d in (nh.get("available_dates") or [])],
