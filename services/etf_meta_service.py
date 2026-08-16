@@ -7,8 +7,7 @@ import pandas as pd
 import requests
 
 DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 NAVER_ETF_BASE_URL = "https://stock.naver.com/api/domestic/detail/{ticker}/ETFBase"
 NAVER_ETF_DIVIDEND_URL = "https://stock.naver.com/api/domestic/detail/{ticker}/ETFDividend"

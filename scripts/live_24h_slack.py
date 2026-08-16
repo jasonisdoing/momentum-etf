@@ -148,9 +148,7 @@ def main():
 
     # 급변 종목이 없으면 보내지 않는다 — 알릴 것이 있을 때만(@channel) 발송한다.
     if not alerts:
-        logger.info(
-            "24H 시세 급변 없음 — 슬랙 발송 생략 (%d종목, 임계 %.1f%%)", len(rows), LIVE_24H_ALERT_PCT
-        )
+        logger.info("24H 시세 급변 없음 — 슬랙 발송 생략 (%d종목, 임계 %.1f%%)", len(rows), LIVE_24H_ALERT_PCT)
         return
 
     # 최근 1시간 급변 종목을 맨 위에 @channel 핑으로 알린다.

@@ -1,5 +1,5 @@
 /**
- * AG Grid 공용 셀 헬퍼 — 여러 화면(pools-rank, strategy-sm 등)이 같은 표기를 쓰는
+ * AG Grid 공용 셀 헬퍼 — 여러 화면(pools-rank, strategy-momentum 등)이 같은 표기를 쓰는
  * 셀의 단일 소스. 화면별 고유 스타일(클래스 기반 색 등)은 각 화면에 남긴다.
  */
 

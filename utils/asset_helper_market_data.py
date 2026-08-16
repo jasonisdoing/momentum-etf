@@ -4,7 +4,6 @@
 임포트하며, 이 모듈은 서비스에 의존하지 않는다(단방향).
 """
 
-
 from __future__ import annotations
 
 from collections import defaultdict

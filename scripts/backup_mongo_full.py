@@ -136,7 +136,7 @@ def main() -> None:
     _rotate_backups(args.keep)
 
     restore_gzip = " --gzip" if args.gzip else ""
-    print(f"\n복원: mongorestore --uri=\"<접속문자열>\" --drop{restore_gzip} {dumped}")
+    print(f'\n복원: mongorestore --uri="<접속문자열>" --drop{restore_gzip} {dumped}')
 
 
 if __name__ == "__main__":

@@ -169,7 +169,7 @@ type View = {
   // 풀별 저장 설정 맵 — 셀렉트 전환 시 즉시 그 풀의 값으로 폼을 채운다.
   settings_by_pool?: Record<string, PoolSettings>;
   pool_options?: PoolOption[];
-  // 전략 전용 이평선 — steady_momentum_settings 에 저장되며 종목풀 설정과 무관하다.
+  // 전략 전용 이평선 — momentum_settings 에 저장되며 종목풀 설정과 무관하다.
   ma_rule?: {
     short_ma_days: number;
     long_ma_days: number;
@@ -276,7 +276,7 @@ function startProgressRamp(
   return () => window.clearInterval(timer);
 }
 
-export function SteadyMomentumClient() {
+export function MomentumClient() {
   const toast = useToast();
   const [view, setView] = useState<View | null>(null);
   const [loading, setLoading] = useState(true);
@@ -298,7 +298,7 @@ export function SteadyMomentumClient() {
   // 설정을 못 받으면 폼 자체를 그리지 않으므로 이 값이 화면에 보이는 경우는 없다.
   const [draftPool, setDraftPool] = useState<string>("");
   const [draftMaxPerIndustry, setDraftMaxPerIndustry] = useState<number>(0);
-  // 이평선 초안 — 전략 전용 값(steady_momentum_settings)으로 풀별 저장되며 종목풀 설정과 무관하다.
+  // 이평선 초안 — 전략 전용 값(momentum_settings)으로 풀별 저장되며 종목풀 설정과 무관하다.
   const [draftMaRule, setDraftMaRule] = useState<{ short: number; long: number } | null>(null);
 
   // 풀별 설정을 폼 초안에 채운다 — 풀 셀렉트 전환과 응답 반영이 같은 경로를 쓴다.
@@ -324,7 +324,7 @@ export function SteadyMomentumClient() {
   const load = useCallback(async (): Promise<boolean> => {
     setLoading(true);
     try {
-      const resp = await fetch("/api/strategy-sm", { cache: "no-store" });
+      const resp = await fetch("/api/strategy-momentum", { cache: "no-store" });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "설정을 불러오지 못했습니다.");
       setLoadError(null);
@@ -348,7 +348,7 @@ export function SteadyMomentumClient() {
     setPickProgress({ percent: 10, message: "월 확정 포트폴리오 계산 중" });
     const stopRamp = startProgressRamp(setPickProgress);
     try {
-      const resp = await fetch("/api/strategy-sm/picks", { method: "POST" });
+      const resp = await fetch("/api/strategy-momentum/picks", { method: "POST" });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "선정에 실패했습니다.");
       setPickProgress({ percent: 100, message: "선정 결과 반영 중" });
@@ -383,7 +383,7 @@ export function SteadyMomentumClient() {
           view?.ma_rule != null &&
           (settings.short_ma_days !== view.ma_rule.short_ma_days ||
             settings.long_ma_days !== view.ma_rule.long_ma_days);
-        const resp = await fetch("/api/strategy-sm", {
+        const resp = await fetch("/api/strategy-momentum", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ settings }),
@@ -450,7 +450,7 @@ export function SteadyMomentumClient() {
     setBacktestProgress({ percent: 10, message: "월별 리밸런싱 시뮬레이션 중" });
     const stopRamp = startProgressRamp(setBacktestProgress);
     try {
-      const resp = await fetch("/api/strategy-sm/backtest", {
+      const resp = await fetch("/api/strategy-momentum/backtest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // 한 번 실행으로 연간·월간·주간·일간을 모두 만든다 — 탭 전환 시 재실행이 없도록.
@@ -865,7 +865,7 @@ export function SteadyMomentumClient() {
         minWidth: 200,
         wrapText: true,
         autoHeight: true,
-        cellClass: "steadyWrapCell",
+        cellClass: "momentumWrapCell",
         valueFormatter: (p) => (p.value?.length ? p.value.join(", ") : "-"),
         cellStyle: () => ({ color: "var(--up-color, #d64545)" }),
       },
@@ -876,7 +876,7 @@ export function SteadyMomentumClient() {
         minWidth: 200,
         wrapText: true,
         autoHeight: true,
-        cellClass: "steadyWrapCell",
+        cellClass: "momentumWrapCell",
         valueFormatter: (p) => (p.value?.length ? p.value.join(", ") : "-"),
         cellStyle: () => ({ color: "var(--down-color, #2f6fd0)" }),
       },
@@ -1103,9 +1103,9 @@ export function SteadyMomentumClient() {
                 getRowClass={(p) => {
                   // 추세 이탈은 종목명 뒤 ❗ 와 같은 조건으로 행을 연한 회색으로 눌러 둔다.
                   const classes: string[] = [];
-                  if (p.data?.is_reserve) classes.push("steadyReserveRow");
+                  if (p.data?.is_reserve) classes.push("momentumReserveRow");
                   // 주중 매도 예정 — 판정만 끝나고 체결 전 (백테스트 예정 행과 같은 스타일).
-                  if (p.data?.is_exit_pending) classes.push("steadyPendingRow");
+                  if (p.data?.is_exit_pending) classes.push("momentumPendingRow");
                   // 주중 매도 완료 — 더는 보유가 아니다.
                   if (p.data?.is_exited) classes.push("appTrendBrokenRow");
                   if (isTrendBroken(p.data?.current_short_pct, p.data?.current_long_pct)) {
@@ -1198,7 +1198,7 @@ export function SteadyMomentumClient() {
                     minHeight={0}
                     height="auto"
                     gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
-                    getRowClass={(p) => (p.data?.exit_date ? "" : "steadyPendingRow")}
+                    getRowClass={(p) => (p.data?.exit_date ? "" : "momentumPendingRow")}
                   />
                 ) : viewMode === "weekly" ? (
                   <AppAgGrid<BacktestWeekRow>
@@ -1208,7 +1208,7 @@ export function SteadyMomentumClient() {
                     minHeight={0}
                     height="auto"
                     gridOptions={{ domLayout: "autoHeight" }}
-                    getRowClass={(p) => (p.data?.is_pending ? "steadyPendingRow" : "")}
+                    getRowClass={(p) => (p.data?.is_pending ? "momentumPendingRow" : "")}
                     getRowId={(p) => p.data.week_end}
                   />
                 ) : viewMode === "daily" ? (

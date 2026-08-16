@@ -640,7 +640,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
 
   // 업종 컬럼 노출 여부 — 종목풀 설정의 풀 성격(pool_kind) 토글이 1순위
-  // (개별주=표시, ETF=숨김), 미설정 풀은 행 값 유무로 추정 (strategy-sm 과 같은 기준).
+  // (개별주=표시, ETF=숨김), 미설정 풀은 행 값 유무로 추정 (strategy-momentum 과 같은 기준).
   const hasIndustryData = useMemo(() => {
     const poolKind = String(selectedTickerTypeItem?.pool_kind ?? "");
     if (poolKind === "stock") return true;
@@ -759,7 +759,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         minWidth: 80,
         width: 80,
         type: "rightAligned",
-        // 공용 고점 렌더러 (strategy-sm 과 동일) — 0 이면 ⭐신고점.
+        // 공용 고점 렌더러 (strategy-momentum 과 동일) — 0 이면 ⭐신고점.
         cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) =>
           renderHighDrawdownCell(params.value, 2),
       },
@@ -897,7 +897,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             headerName: "마켓",
             minWidth: 80,
             width: 80,
-            // 공용 마켓 배지 스타일 (strategy-sm 과 동일).
+            // 공용 마켓 배지 스타일 (strategy-momentum 과 동일).
             cellStyle: (params) => marketBadgeCellStyle(params.value),
           } as ColDef<RankGridRow>,
         ]

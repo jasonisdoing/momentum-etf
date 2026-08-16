@@ -69,9 +69,7 @@ def _determine_start_date() -> str:
     settings = load_common_settings() or {}
     start = settings.get("CACHE_START_DATE")
     if not start:
-        raise RuntimeError(
-            "CACHE_START_DATE 가 설정되지 않았습니다. config.py 또는 공용 설정을 확인하세요."
-        )
+        raise RuntimeError("CACHE_START_DATE 가 설정되지 않았습니다. config.py 또는 공용 설정을 확인하세요.")
     return str(start)
 
 
@@ -424,19 +422,29 @@ def _refresh_portfolio_change_cache_for_target(
             if result:
                 logger.info(
                     " -> 포트폴리오 변동 캐시 갱신 완료: %d/%d - %s | 소요 %.1fs",
-                    idx, len(candidates), ticker, elapsed,
+                    idx,
+                    len(candidates),
+                    ticker,
+                    elapsed,
                 )
                 return True, ticker
             logger.warning(
                 " -> 포트폴리오 변동 캐시 계산 불가: %d/%d - %s | 소요 %.1fs",
-                idx, len(candidates), ticker, elapsed,
+                idx,
+                len(candidates),
+                ticker,
+                elapsed,
             )
             return False, ticker
         except Exception as exc:
             elapsed = time.perf_counter() - started_at
             logger.warning(
                 " -> 포트폴리오 변동 캐시 갱신 실패: %d/%d - %s: %s | 소요 %.1fs",
-                idx, len(candidates), ticker, exc, elapsed,
+                idx,
+                len(candidates),
+                ticker,
+                exc,
+                elapsed,
             )
             return False, ticker
 
@@ -451,10 +459,7 @@ def _refresh_portfolio_change_cache_for_target(
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(_process_one_bundle, i + 1, t)
-                for i, (t, _) in enumerate(candidates)
-            ]
+            futures = [executor.submit(_process_one_bundle, i + 1, t) for i, (t, _) in enumerate(candidates)]
             for future in as_completed(futures):
                 try:
                     ok, t = future.result()
@@ -755,8 +760,7 @@ def refresh_cache_for_target(
                     logger.warning(msg)
                 else:
                     msg = (
-                        f" -> 가격 캐시 갱신 완료: {idx}/{total_tickers} - {n}({t})"
-                        f" | 소요 {elapsed:.1f}s{sleep_suffix}"
+                        f" -> 가격 캐시 갱신 완료: {idx}/{total_tickers} - {n}({t}) | 소요 {elapsed:.1f}s{sleep_suffix}"
                     )
                     logger.info(msg)
                 return True, t, msg
@@ -791,8 +795,7 @@ def refresh_cache_for_target(
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_idx = {
-                    executor.submit(_process_one, i + 1, etf): (i + 1, etf)
-                    for i, etf in enumerate(target_items)
+                    executor.submit(_process_one, i + 1, etf): (i + 1, etf) for i, etf in enumerate(target_items)
                 }
                 completed = 0
                 for future in as_completed(future_to_idx):
@@ -843,8 +846,9 @@ def refresh_cache_for_target(
             if orphans:
                 preview = ", ".join(orphans[:10])
                 suffix = " ..." if len(orphans) > 10 else ""
-                logger.info("[%s] 갱신 대상 밖 캐시 %d건 제거: %s%s",
-                            target_norm.upper(), len(orphans), preview, suffix)
+                logger.info(
+                    "[%s] 갱신 대상 밖 캐시 %d건 제거: %s%s", target_norm.upper(), len(orphans), preview, suffix
+                )
         except Exception as exc:
             logger.warning("[%s] 고아 캐시 정리 중 오류: %s", target_norm.upper(), exc)
 

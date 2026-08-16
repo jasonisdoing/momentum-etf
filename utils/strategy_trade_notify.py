@@ -157,13 +157,11 @@ def build_message(view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
                 buy_text = f"{row['buy_limit']:,.0f}" if row["buy_limit"] is not None else "-"
                 if is_triggered:
                     lines.append(
-                        f"🔵 {row['round']}호 {row['name']} *지금 매수!* "
-                        f"지정가 {buy_text} 도달 (현재 {close_text})"
+                        f"🔵 {row['round']}호 {row['name']} *지금 매수!* 지정가 {buy_text} 도달 (현재 {close_text})"
                     )
                 else:
                     lines.append(
-                        f"⏳ {row['round']}호 {row['name']} 다음 매수 대기 · "
-                        f"지정가 {buy_text} (현재 {close_text})"
+                        f"⏳ {row['round']}호 {row['name']} 다음 매수 대기 · 지정가 {buy_text} (현재 {close_text})"
                     )
             else:
                 buy_text = f"{row['buy_limit']:,.0f}" if row["buy_limit"] is not None else "-"

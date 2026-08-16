@@ -1,4 +1,4 @@
-"""Steady Momentum — 시장 대비 '꾸준한 모멘텀' 선정 서비스 (UI/API/스크립트 공용).
+"""모멘텀 전략 — 시장 대비 '꾸준한 모멘텀' 선정 서비스 (UI/API/스크립트 공용).
 
 전략 규칙
 --------
@@ -18,7 +18,7 @@
    시가에 판다. 판 슬롯은 다음 주 교체까지 현금이다(주중 재매수 없음).
 
 벤치마크·국가·통화는 종목풀 설정(DB)을 단일 소스로 쓴다.
-설정은 MongoDB `system_config.steady_momentum_settings` 에 **풀별로** 저장한다
+설정은 MongoDB `system_config.momentum_settings` 에 **풀별로** 저장한다
 (`{pool, settings_by_pool: {풀: {top_n, ...}}}`) — 풀을 바꾸면 그 풀의 설정으로 전환된다.
 """
 
@@ -48,7 +48,7 @@ RESERVE_MULTIPLIER = 1
 from config import METRIC_WINDOW_MONTHS, TRADING_DAYS_PER_MONTH  # noqa: E402
 
 _CONFIG_COLLECTION = "system_config"
-_SETTINGS_KEY = "steady_momentum_settings"
+_SETTINGS_KEY = "momentum_settings"
 
 # ── 룩백 4 · 종목 수 6 · 업종 상한 2 를 쓰는 근거 ──────────────────────────
 # ⚠ 아래 표는 **옛 점수 방식(연율화 상대기울기 × R²)·미국 풀** 기준이다. 점수를
@@ -89,7 +89,7 @@ _SETTINGS_KEY = "steady_momentum_settings"
 # 여기에 강세장 편중과 생존 편향(유니버스가 현재 종목풀 기준)이 더해진다.
 # 조합을 바꿀 때는 순위 몇 계단 차이가 아니라 성격 차이(회전 속도·낙폭)를 보고 정한다.
 #
-# 설정의 단일 소스는 DB(`system_config.steady_momentum_settings`)다. 코드에 기본값을
+# 설정의 단일 소스는 DB(`system_config.momentum_settings`)다. 코드에 기본값을
 # 두지 않는다 — 값이 없거나 깨졌으면 임의 값으로 대체하지 않고 에러를 낸다.
 
 
@@ -208,12 +208,12 @@ def _load_settings_doc() -> dict[str, Any]:
 
     db = get_db_connection()
     if db is None:
-        raise RuntimeError("DB 연결에 실패해 Steady Momentum 설정을 읽을 수 없습니다.")
+        raise RuntimeError("DB 연결에 실패해 모멘텀 전략 설정을 읽을 수 없습니다.")
     doc = db[_CONFIG_COLLECTION].find_one({"_id": _SETTINGS_KEY}) or {}
     stored = doc.get("settings")
     if not isinstance(stored, dict):
         raise RuntimeError(
-            f"저장된 Steady Momentum 설정이 없습니다 ({_CONFIG_COLLECTION}.{_SETTINGS_KEY} 문서를 먼저 저장하세요)."
+            f"저장된 모멘텀 전략 설정이 없습니다 ({_CONFIG_COLLECTION}.{_SETTINGS_KEY} 문서를 먼저 저장하세요)."
         )
 
     if isinstance(stored.get("settings_by_pool"), dict) and isinstance(stored.get("pool"), str):
@@ -225,7 +225,7 @@ def _load_settings_doc() -> dict[str, Any]:
     elif isinstance(stored.get("pool"), str):
         pool = str(stored["pool"]).strip().lower()
     else:
-        raise RuntimeError("저장된 Steady Momentum 설정에서 종목풀을 알 수 없습니다.")
+        raise RuntimeError("저장된 모멘텀 전략 설정에서 종목풀을 알 수 없습니다.")
     per_pool = {key: stored[key] for key in PER_POOL_SETTING_KEYS if key in stored}
     validate_settings({"pool": pool, **per_pool})  # 승계 값 검증 — 깨진 값은 여기서 드러난다
     upgraded = {"pool": pool, "settings_by_pool": {pool: per_pool}}
@@ -251,11 +251,11 @@ def load_settings() -> dict[str, Any]:
     pool = str(stored["pool"]).strip().lower()
     per_pool = stored["settings_by_pool"].get(pool)
     if not isinstance(per_pool, dict):
-        raise RuntimeError(f"종목풀({pool})의 Steady Momentum 설정이 없습니다 — 화면에서 저장하세요.")
+        raise RuntimeError(f"종목풀({pool})의 모멘텀 전략 설정이 없습니다 — 화면에서 저장하세요.")
     try:
         return validate_settings({"pool": pool, **per_pool})
     except ValueError as error:
-        raise ValueError(f"저장된 Steady Momentum 설정이 올바르지 않습니다: {error}") from error
+        raise ValueError(f"저장된 모멘텀 전략 설정이 올바르지 않습니다: {error}") from error
 
 
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:

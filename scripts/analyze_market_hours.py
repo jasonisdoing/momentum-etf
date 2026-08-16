@@ -23,7 +23,6 @@ load_dotenv()
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
 
-
 class OutputCollector:
     """print() 출력을 가로채서 문자열로 모으는 헬퍼 클래스"""
 

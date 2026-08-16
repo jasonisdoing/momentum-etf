@@ -48,19 +48,27 @@ COLLECTION_NAME = "market_breadth_daily"
 # `index_symbol` 은 그 시장의 거래일 달력으로 쓰는 지수다(별도 거래일 달력이 없다).
 MARKETS: dict[str, dict[str, Any]] = {
     "KOSPI": {
-        "name": "코스피", "source": "naver", "universe_size": 200,
+        "name": "코스피",
+        "source": "naver",
+        "universe_size": 200,
         "index_symbol": "KOSPI",
     },
     "KOSDAQ": {
-        "name": "코스닥", "source": "naver", "universe_size": 150,
+        "name": "코스닥",
+        "source": "naver",
+        "universe_size": 150,
         "index_symbol": "KOSDAQ",
     },
     "SP500": {
-        "name": "S&P 500", "source": "constituents", "index_key": "SP500",
+        "name": "S&P 500",
+        "source": "constituents",
+        "index_key": "SP500",
         "index_symbol": "^GSPC",
     },
     "NDX100": {
-        "name": "나스닥 100", "source": "constituents", "index_key": "NDX100",
+        "name": "나스닥 100",
+        "source": "constituents",
+        "index_key": "NDX100",
         "index_symbol": "^NDX",
     },
 }
@@ -156,12 +164,17 @@ def _download_us_closes(tickers: list[str], period: str) -> pd.DataFrame:
     """미국 종목 종가를 묶음으로 받아 (날짜 × 티커) 표로 만든다. 저장하지 않는다."""
     columns: dict[str, pd.Series] = {}
     for start in range(0, len(tickers), _YF_BATCH_SIZE):
-        batch = tickers[start: start + _YF_BATCH_SIZE]
+        batch = tickers[start : start + _YF_BATCH_SIZE]
         try:
             with yfinance_lock():
                 downloaded = yf.download(
-                    batch, period=period, interval="1d",
-                    group_by="column", progress=False, auto_adjust=True, threads=True,
+                    batch,
+                    period=period,
+                    interval="1d",
+                    group_by="column",
+                    progress=False,
+                    auto_adjust=True,
+                    threads=True,
                 )
         except Exception:
             logger.exception("[market_breadth] yfinance 묶음 조회 실패 (%s…)", batch[0])
@@ -217,9 +230,7 @@ def _counts_from_ratios(ratios: dict[str, float]) -> dict[str, int]:
     }
 
 
-def _daily_counts_light(
-    market: str, spec: dict[str, Any], target_date: str
-) -> tuple[list[str], dict[str, int]] | None:
+def _daily_counts_light(market: str, spec: dict[str, Any], target_date: str) -> tuple[list[str], dict[str, int]] | None:
     """평상시 경로 — 하루치 등락만 받아 센다. 가격은 저장하지 않는다.
 
     미국은 마지막 봉의 날짜가 기준일과 다르면 None 을 돌려준다. 다른 날 값을
@@ -238,7 +249,9 @@ def _daily_counts_light(
     if last_date != target_date:
         logger.warning(
             "[market_breadth] %s 최신 봉(%s)이 기준일(%s)과 달라 기록하지 않습니다.",
-            market, last_date, target_date,
+            market,
+            last_date,
+            target_date,
         )
         return None
     counts = _count_daily_moves(closes).iloc[-1]
@@ -334,9 +347,7 @@ def refresh_market_breadth() -> dict[str, Any]:
                 collection.update_one({"market": market, "date": date}, {"$set": doc}, upsert=True)
                 updated += 1
                 continue
-            result = collection.update_one(
-                {"market": market, "date": date}, {"$setOnInsert": doc}, upsert=True
-            )
+            result = collection.update_one({"market": market, "date": date}, {"$setOnInsert": doc}, upsert=True)
             if result.upserted_id is not None:
                 inserted += 1
 
@@ -349,7 +360,12 @@ def refresh_market_breadth() -> dict[str, Any]:
         }
         logger.info(
             "[market_breadth] %s 대상 %d종목 · 신규 %d일 · 갱신 %d일 · 표본부족 %d일 (기준일 %s)",
-            market, len(tickers), inserted, updated, skipped, target_date,
+            market,
+            len(tickers),
+            inserted,
+            updated,
+            skipped,
+            target_date,
         )
 
     return summary
@@ -358,11 +374,7 @@ def refresh_market_breadth() -> dict[str, Any]:
 def load_adr_series(market: str, limit_days: int | None = None) -> list[dict[str, Any]]:
     """일별 ADR 시계열. 창이 다 차기 전 구간은 ``adr=None`` 으로 둔다(보정하지 않는다)."""
     db = _require_db()
-    docs = list(
-        db[COLLECTION_NAME]
-        .find({"market": market}, {"_id": 0})
-        .sort("date", 1)
-    )
+    docs = list(db[COLLECTION_NAME].find({"market": market}, {"_id": 0}).sort("date", 1))
     if not docs:
         return []
 
@@ -371,7 +383,7 @@ def load_adr_series(market: str, limit_days: int | None = None) -> list[dict[str
     for position, doc in enumerate(docs):
         adr: float | None = None
         if position >= window - 1:
-            chunk = docs[position - window + 1: position + 1]
+            chunk = docs[position - window + 1 : position + 1]
             advance_sum = sum(int(item.get("advance") or 0) for item in chunk)
             decline_sum = sum(int(item.get("decline") or 0) for item in chunk)
             # 하락 종목이 하나도 없으면 나눌 수 없다. 큰 값으로 대체하지 않는다.
@@ -451,9 +463,10 @@ def load_adr_for_index(yf_ticker: str, limit_days: int | None = None) -> dict[st
         return None
 
     # 대상 종목 수는 적립 당시 값을 그대로 쓴다 — 구성종목이 바뀌면 수도 달라진다.
-    latest_doc = _require_db()[COLLECTION_NAME].find_one(
-        {"market": market}, {"_id": 0, "universe_size": 1}, sort=[("date", -1)]
-    ) or {}
+    latest_doc = (
+        _require_db()[COLLECTION_NAME].find_one({"market": market}, {"_id": 0, "universe_size": 1}, sort=[("date", -1)])
+        or {}
+    )
 
     latest = next((item for item in reversed(points) if item["adr"] is not None), None)
     level, level_days = _count_level_streak(points)

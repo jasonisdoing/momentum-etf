@@ -209,9 +209,7 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
     # 전략 필수 필드가 하나라도 없으면 코드 기본값으로 대체하지 않고 명시적 에러(fail loud).
     missing_required = [key for key in REQUIRED_SETTING_KEYS if source.get(key) is None]
     if missing_required:
-        raise ValueError(
-            f"설정값이 없습니다(DB 미설정): {', '.join(missing_required)}. 설정 화면에서 저장해주세요."
-        )
+        raise ValueError(f"설정값이 없습니다(DB 미설정): {', '.join(missing_required)}. 설정 화면에서 저장해주세요.")
     cleaned: dict[str, Any] = {}
 
     # 계좌별 편입 티커 슬롯 수. 변동/고정은 관리용 구분이며 계산에는 합산 슬롯을 사용한다.
@@ -442,9 +440,7 @@ def _clean_backtest_settings(values: Any, *, base: Any = None, require_benchmark
 
     allowed_months = get_month_options()
     if months not in allowed_months:
-        raise ValueError(
-            f"백테스트 기간(개월)은 {', '.join(map(str, allowed_months))} 중 하나여야 합니다."
-        )
+        raise ValueError(f"백테스트 기간(개월)은 {', '.join(map(str, allowed_months))} 중 하나여야 합니다.")
 
     rebalance = str(source.get("rebalance") or "none").strip().lower()
     if rebalance not in ALLOWED_BACKTEST_REBALANCE:
@@ -530,9 +526,11 @@ def load_asset_helper_settings_for_edit(account_id: str) -> dict[str, Any]:
     settings_base.setdefault("FIXED_TICKERS", len(weight_tickers))
     settings_base.setdefault("MAX_TICKERS", len(weight_tickers) or None)
     settings_base["ACCOUNT_ID"] = resolved
-    settings = _clean_settings({}, base={k: v for k, v in settings_base.items() if v is not None}) if helper_doc else {
-        key: (resolved if key == "ACCOUNT_ID" else None) for key in SETTING_KEYS
-    }
+    settings = (
+        _clean_settings({}, base={k: v for k, v in settings_base.items() if v is not None})
+        if helper_doc
+        else {key: (resolved if key == "ACCOUNT_ID" else None) for key in SETTING_KEYS}
+    )
     backtest_settings = (
         _clean_backtest_settings(helper_doc.get("backtest_settings"), require_benchmark=False) if helper_doc else None
     )
@@ -1145,8 +1143,7 @@ def calculate_asset_helper_weights_for(
         master = load_portfolio_master(str(settings.get("ACCOUNT_ID") or "").strip()) or {}
         holdings_sorted = sorted(master.get("holdings") or [], key=lambda h: int(h.get("sort_order") or 0))
         ordered_tickers = [
-            str(h.get("ticker") or "").strip().upper().replace("KR:", "").replace("ASX:", "")
-            for h in holdings_sorted
+            str(h.get("ticker") or "").strip().upper().replace("KR:", "").replace("ASX:", "") for h in holdings_sorted
         ]
     except Exception:
         pass

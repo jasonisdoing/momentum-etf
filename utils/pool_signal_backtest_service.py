@@ -158,9 +158,7 @@ def _rule_performance(
 
     pool_settings = get_ticker_type_settings(pool_id)
     missing_slippage = [
-        key
-        for key in ("BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT")
-        if pool_settings.get(key) in (None, "")
+        key for key in ("BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT") if pool_settings.get(key) in (None, "")
     ]
     if missing_slippage:
         raise ValueError(
@@ -299,7 +297,9 @@ def _rule_performance(
                     # 매도 후 생긴 현금은 다음 리밸런싱일까지 대기한다.
                     for ticker in list(holdings):
                         short_disparity = (
-                            short_disparity_wide.at[current_date, ticker] if ticker in short_disparity_wide.columns else np.nan
+                            short_disparity_wide.at[current_date, ticker]
+                            if ticker in short_disparity_wide.columns
+                            else np.nan
                         )
                         if pd.notna(short_disparity) and float(short_disparity) < 0:
                             emergency_sell_amount = holdings.pop(ticker)
@@ -442,7 +442,9 @@ def _load_market_regime_map(pool_settings: dict[str, Any], *, require: bool) -> 
     if st.empty or "direction" not in st:
         raise ValueError(f"시장 레짐 지수 '{index['name']}'({ticker}) 의 레짐 계산 결과가 없습니다.")
 
-    series = pd.Series(np.where(st["direction"] == 1, "up", "down"), index=pd.to_datetime(st.index).normalize()).sort_index()
+    series = pd.Series(
+        np.where(st["direction"] == 1, "up", "down"), index=pd.to_datetime(st.index).normalize()
+    ).sort_index()
     return {"index": index, "series": series}
 
 

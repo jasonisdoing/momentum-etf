@@ -278,9 +278,11 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         enriched["보수"] = None
         enriched["순자산총액"] = None
         enriched["상장일"] = None
-        enriched["거래대금"] = enriched["티커"].map(
-            lambda t: mult_map.get(str(t or "").strip().upper())
-        ) if "티커" in enriched.columns else None
+        enriched["거래대금"] = (
+            enriched["티커"].map(lambda t: mult_map.get(str(t or "").strip().upper()))
+            if "티커" in enriched.columns
+            else None
+        )
         enriched.attrs.update(dict(dataframe.attrs))
         return enriched
 

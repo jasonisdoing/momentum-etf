@@ -101,9 +101,7 @@ def load_account_docs() -> list[dict[str, Any]]:
         entry["account_id"] = str(entry.pop("_id"))
         docs.append(entry)
     if not docs:
-        raise AccountSettingsStoreError(
-            "계좌 설정이 DB(account_settings)에 없습니다. 계좌 문서를 먼저 등록해주세요."
-        )
+        raise AccountSettingsStoreError("계좌 설정이 DB(account_settings)에 없습니다. 계좌 문서를 먼저 등록해주세요.")
     docs.sort(key=lambda item: (int(item.get("order") or 0), str(item["account_id"])))
 
     with _cache_lock:
@@ -158,9 +156,7 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
                     normalized.append(code)
             if not normalized:
                 raise AccountSettingsStoreError(f"'{account_id}' 의 cash_currencies 는 최소 1개 이상이어야 합니다.")
-            base_currency = str(
-                values.get("currency") or existing_doc.get("currency") or ""
-            ).strip().upper()
+            base_currency = str(values.get("currency") or existing_doc.get("currency") or "").strip().upper()
             if base_currency and base_currency not in normalized:
                 raise AccountSettingsStoreError(
                     f"'{account_id}' 의 주 통화({base_currency})는 외화 잔액에 반드시 포함되어야 합니다."
@@ -176,9 +172,7 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             # 호주 계좌는 `ASX:` 를 붙여 저장한다. 가격 캐시가 호주 종목을 그 형태로 보관하고,
             # 미국에도 같은 티커가 있어(예: IVV) 접두사가 없으면 구분되지 않는다.
             # 이 값이 없으면 자산 헬퍼 백테스트가 "가격 캐시 누락: IVV" 로 실패한다.
-            country = str(
-                values.get("country_code") or existing_doc.get("country_code") or ""
-            ).strip().lower()
+            country = str(values.get("country_code") or existing_doc.get("country_code") or "").strip().lower()
             if country == "au":
                 from utils.asx_ticker import ensure_asx_prefix
 
@@ -201,10 +195,14 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
         elif key == "market_regime_index":
             # 계좌별 시장 레짐 판정 지수 — 시장추세 지수(INDICES) 중 하나(필수, {ticker, name}).
             if not isinstance(raw, dict):
-                raise AccountSettingsStoreError(f"'{account_id}' 의 market_regime_index 는 {{ticker, name}} 객체여야 합니다.")
+                raise AccountSettingsStoreError(
+                    f"'{account_id}' 의 market_regime_index 는 {{ticker, name}} 객체여야 합니다."
+                )
             ticker = str(raw.get("ticker") or "").strip()
             if not ticker:
-                raise AccountSettingsStoreError(f"'{account_id}' 의 market_regime_index 는 필수입니다(시장 레짐 지수를 선택하세요).")
+                raise AccountSettingsStoreError(
+                    f"'{account_id}' 의 market_regime_index 는 필수입니다(시장 레짐 지수를 선택하세요)."
+                )
             from utils.market_trend_service import INDICES
 
             allowed = {str(item["yf_ticker"]): str(item["name"]) for item in INDICES}
@@ -232,9 +230,13 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             try:
                 pct = round(float(raw), 2)
             except (TypeError, ValueError) as exc:
-                raise AccountSettingsStoreError(f"'{account_id}' 의 stoploss_threshold_pct 는 숫자여야 합니다: {raw}") from exc
+                raise AccountSettingsStoreError(
+                    f"'{account_id}' 의 stoploss_threshold_pct 는 숫자여야 합니다: {raw}"
+                ) from exc
             if pct >= 0:
-                raise AccountSettingsStoreError(f"'{account_id}' 의 stoploss_threshold_pct 는 음수여야 합니다(예: -7): {pct}")
+                raise AccountSettingsStoreError(
+                    f"'{account_id}' 의 stoploss_threshold_pct 는 음수여야 합니다(예: -7): {pct}"
+                )
             cleaned[key] = pct
         elif key in ("ma_alarm_icon", "stoploss_alarm_icon"):
             # 화면 배지용 아이콘(이모지). 빈 문자열 = 배지 미표시(명시적 미설정).
@@ -290,7 +292,9 @@ def create_account(
         raise AccountSettingsStoreError("계좌 이름을 입력하세요.")
     ccode = str(country_code or "").strip().lower()
     if ccode not in _ALLOWED_COUNTRY_CODES:
-        raise AccountSettingsStoreError(f"country_code 는 {', '.join(sorted(_ALLOWED_COUNTRY_CODES))} 중 하나여야 합니다: {country_code}")
+        raise AccountSettingsStoreError(
+            f"country_code 는 {', '.join(sorted(_ALLOWED_COUNTRY_CODES))} 중 하나여야 합니다: {country_code}"
+        )
     curr = str(currency or "").strip().upper()
     if len(curr) != 3:
         raise AccountSettingsStoreError(f"currency 는 3자리 코드여야 합니다: {currency}")
@@ -363,7 +367,9 @@ def delete_account(account_id: str) -> dict[str, Any]:
 
 
 def get_account_settings_updated_at(account_id: str) -> str | None:
-    doc = _db()[COLLECTION].find_one({"_id": str(account_id or "").strip().lower()}, {"updated_at": 1, "save_method": 1})
+    doc = _db()[COLLECTION].find_one(
+        {"_id": str(account_id or "").strip().lower()}, {"updated_at": 1, "save_method": 1}
+    )
     if not doc or doc.get("updated_at") is None:
         return None
     ua = doc["updated_at"]

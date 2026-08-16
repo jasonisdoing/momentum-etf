@@ -38,9 +38,9 @@ def load_ticker_type_configs() -> list[dict[str, Any]]:
         if not icon:
             raise AccountSettingsError(f"종목풀 '{t_id}' 설정에 icon이 필요합니다.")
         is_default = bool(settings.get("default", False))
-        
+
         order = int(settings["order"])
-        
+
         name = f"{int(order)}. {base_name}"
 
         configs.append(

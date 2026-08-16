@@ -7,7 +7,7 @@
   채우지 않으므로 구성종목에서 가져와야 한다.
 
 종목풀이 국가별로 나뉘어 있어 한 풀 안에서는 항상 한 체계다.
-순위(`/pools-rank`)·전략 SM(`/strategy-sm`)·신고점(`/strategy-new-high`)이 같은 값을
+순위(`/pools-rank`)·전략 SM(`/strategy-momentum`)·신고점(`/strategy-new-high`)이 같은 값을
 보도록 여기서만 정의한다.
 """
 

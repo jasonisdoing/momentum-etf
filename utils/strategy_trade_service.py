@@ -63,9 +63,7 @@ def load_settings() -> dict[str, Any]:
         if not isinstance(entry, dict):
             raise RuntimeError(f"'{sid}' 전략 설정이 없습니다 — 마이그레이션/저장이 필요합니다.")
         try:
-            strategies[sid] = validate_strategy_trade_config(
-                {key: entry.get(key) for key in EDITABLE_PCT_KEYS}
-            )
+            strategies[sid] = validate_strategy_trade_config({key: entry.get(key) for key in EDITABLE_PCT_KEYS})
         except ValueError as error:
             raise ValueError(f"'{sid}' 전략 설정이 올바르지 않습니다: {error}") from error
 
@@ -175,9 +173,7 @@ def _load_unheld_closes(tickers: list[str]) -> dict[str, float]:
     return closes
 
 
-def _index_level_for(
-    limit_price: float | None, close: float | None, index_close: float
-) -> float | None:
+def _index_level_for(limit_price: float | None, close: float | None, index_close: float) -> float | None:
     """지정가에 닿을 때의 대략적인 지수 수준.
 
     회차 ETF 가격은 추종 지수에 비례하므로 ``지수 x (지정가 / 현재가)`` 로 환산한다.
@@ -231,9 +227,7 @@ def _build_strategy_view(
     names = {code: name for code, name in meta["round_tickers"]}
     tickers = [code for code, _ in meta["round_tickers"]]
 
-    unheld_tickers = [
-        t for t in tickers if not ((account_rows.get(t) or {}).get("quantity") or 0)
-    ]
+    unheld_tickers = [t for t in tickers if not ((account_rows.get(t) or {}).get("quantity") or 0)]
     unheld_closes = _load_unheld_closes(unheld_tickers)
     trigger_pct = float(strategy_settings["trigger_pct"])
     index_status = _load_index_status(meta["index_ticker"], meta["index_name"], trigger_pct)
@@ -281,9 +275,7 @@ def _build_strategy_view(
                 "round": display_round,
                 "held": True,
                 "profit_pct": (
-                    round((close / avg_price - 1.0) * 100.0, 2)
-                    if close is not None and avg_price > 0
-                    else None
+                    round((close / avg_price - 1.0) * 100.0, 2) if close is not None and avg_price > 0 else None
                 ),
                 "avg_price": round(avg_price, 2),
                 "sell_limit": round(sell_limit, 2),
@@ -326,9 +318,7 @@ def _build_strategy_view(
                 "sell_reached": False,
                 "buy_limit": round(buy_limit, 2) if buy_limit is not None else None,
                 "buy_index": _index_level_for(buy_limit, close, index_status["close"]),
-                "buy_reached": bool(
-                    buy_limit is not None and close is not None and close <= buy_limit
-                ),
+                "buy_reached": bool(buy_limit is not None and close is not None and close <= buy_limit),
                 "is_next": is_next,
             }
         )
@@ -385,7 +375,5 @@ def load_strategy_trade_view() -> dict[str, Any]:
     return {
         "account_id": ACCOUNT_ID,
         "slack_enabled": settings["slack_enabled"],
-        "strategies": [
-            _build_strategy_view(sid, settings["strategies"][sid], account_rows) for sid in STRATEGY_IDS
-        ],
+        "strategies": [_build_strategy_view(sid, settings["strategies"][sid], account_rows) for sid in STRATEGY_IDS],
     }

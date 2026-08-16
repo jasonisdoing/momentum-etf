@@ -491,7 +491,7 @@ export function NewHighClient() {
   }, [positions?.auto_refresh, asOf, draft, runPositions]);
 
   // 업종 컬럼 노출 여부 — 표시 중인 결과의 풀 성격(pool_kind)이 1순위(개별주=표시, ETF=숨김),
-  // 미설정 풀은 행 값 유무로 추정 (pools-rank·strategy-sm 과 같은 기준).
+  // 미설정 풀은 행 값 유무로 추정 (pools-rank·strategy-momentum 과 같은 기준).
   const hasIndustryData = useMemo(() => {
     const pool = positions?.pool ?? view?.settings.pool ?? "";
     const poolKind = String(view?.pool_options?.find((option) => option.ticker_type === pool)?.pool_kind ?? "");
@@ -530,7 +530,7 @@ export function NewHighClient() {
         cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
       },
       // 업종 컬럼 노출 여부 — 종목풀 설정의 풀 성격(pool_kind)이 1순위(개별주=표시, ETF=숨김),
-      // 미설정 풀은 행 값 유무로 추정 (pools-rank·strategy-sm 과 같은 기준).
+      // 미설정 풀은 행 값 유무로 추정 (pools-rank·strategy-momentum 과 같은 기준).
       {
         field: "industry",
         headerName: "업종",

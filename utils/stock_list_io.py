@@ -160,11 +160,7 @@ def _load_domestic_etf_ticker_set() -> set[str]:
     df, _ = load_cached_kis_domestic_etf_master()
     if "티커" not in df.columns:
         raise RuntimeError("KIS ETF 마스터 캐시에 티커 컬럼이 없습니다.")
-    return {
-        str(value or "").strip().upper()
-        for value in df["티커"].tolist()
-        if str(value or "").strip()
-    }
+    return {str(value or "").strip().upper() for value in df["티커"].tolist() if str(value or "").strip()}
 
 
 def infer_ticker_type_for_ticker(ticker: str) -> str:
@@ -267,7 +263,9 @@ def infer_ticker_type_for_account_ticker(account_id: str, ticker: str) -> str:
         return "us"
 
     joined = ", ".join(allowed_types)
-    raise RuntimeError(f"계좌 '{account_id}'의 허용 종목풀({joined})에서 {ticker_norm}의 ticker_type을 추론할 수 없습니다.")
+    raise RuntimeError(
+        f"계좌 '{account_id}'의 허용 종목풀({joined})에서 {ticker_norm}의 ticker_type을 추론할 수 없습니다."
+    )
 
 
 def get_etfs(ticker_type: str, include_extra_tickers: Iterable[str] | None = None) -> list[dict[str, str]]:

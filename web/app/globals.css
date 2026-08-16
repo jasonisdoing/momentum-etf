@@ -3598,14 +3598,14 @@ a {
   font-weight: 700;
 }
 
-/* Steady Momentum 차순위 후보 행 — 선정과 구분되게 흐리게 */
-.ag-row.steadyReserveRow {
+/* 모멘텀 전략 차순위 후보 행 — 선정과 구분되게 흐리게 */
+.ag-row.momentumReserveRow {
   background: rgba(148, 163, 184, 0.08);
   opacity: 0.75;
 }
 
-/* Steady Momentum 백테스트 예정 행 — 판정만 끝나고 체결 전인 달 */
-.ag-row.steadyPendingRow {
+/* 모멘텀 전략 백테스트 예정 행 — 판정만 끝나고 체결 전인 달 */
+.ag-row.momentumPendingRow {
   background: rgba(11, 123, 220, 0.07);
   font-style: italic;
 }
@@ -3613,15 +3613,15 @@ a {
 /* 긴 목록(편입·편출 종목명)을 줄바꿈으로 전부 보여주는 셀.
    공통 그리드 테마가 .ag-cell 을 flex 로 두기 때문에, 값 요소에 min-width:0 을
    주지 않으면 줄바꿈되지 않고 옆 칸으로 넘쳐 흐른다. */
-.appAgGridTheme .ag-cell.steadyWrapCell,
-.appAgGridThemeLegacy .ag-cell.steadyWrapCell {
+.appAgGridTheme .ag-cell.momentumWrapCell,
+.appAgGridThemeLegacy .ag-cell.momentumWrapCell {
   align-items: flex-start;
   padding-top: 6px;
   padding-bottom: 6px;
 }
 
-.appAgGridTheme .ag-cell.steadyWrapCell .ag-cell-value,
-.appAgGridThemeLegacy .ag-cell.steadyWrapCell .ag-cell-value {
+.appAgGridTheme .ag-cell.momentumWrapCell .ag-cell-value,
+.appAgGridThemeLegacy .ag-cell.momentumWrapCell .ag-cell-value {
   width: 100%;
   min-width: 0;
   white-space: normal;
@@ -4503,7 +4503,7 @@ a {
   flex: 0 0 16rem;
 }
 
-/* 이평선 단기·장기 셀렉트 한 쌍 (`/pools-rank`, `/strategy-sm` 공용).
+/* 이평선 단기·장기 셀렉트 한 쌍 (`/pools-rank`, `/strategy-momentum` 공용).
 
    폭: `단기 240일` 이 가장 긴 값이다. Tabler 의 `.form-select` 는 화살표 자리로
    오른쪽에만 3rem 을 써서 좌우 패딩만 4rem 이라, 글자 폭(약 5rem)을 더해 9.25rem 이 필요하다.

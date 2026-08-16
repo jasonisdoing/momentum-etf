@@ -408,7 +408,7 @@ def main():
             acc["cash"],
             acc["valuation"],
             acc.get("valuation", 0.0) - acc.get("stock_profit", 0.0),
-            holding_details=holding_list
+            holding_details=holding_list,
         )
 
     save_daily_snapshot(

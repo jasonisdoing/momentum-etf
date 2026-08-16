@@ -752,7 +752,7 @@ export function StrategyMixClient() {
                       theme={gridTheme}
                       minHeight="auto"
                       gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
-                      getRowClass={(p) => (p.data?.exit_date ? "" : "steadyPendingRow")}
+                      getRowClass={(p) => (p.data?.exit_date ? "" : "momentumPendingRow")}
                     />
                   ) : (
                     <AppAgGrid<PeriodRow>

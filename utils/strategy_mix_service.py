@@ -1,4 +1,4 @@
-"""합성전략 — SM(Steady Momentum) + 신고가 돌파를 매월 50:50 리밸런싱으로 합친 백테스트.
+"""합성전략 — SM(모멘텀 전략) + 신고가 돌파를 매월 50:50 리밸런싱으로 합친 백테스트.
 
 `/strategy-mix` 열람 전용 화면의 백엔드. 설정은 이 화면이 갖지 않는다 —
 **선택한 풀의 각 전략 화면 저장 설정**을 그대로 가져와 두 백테스트를 돌리고,
@@ -20,7 +20,7 @@ logger = get_app_logger()
 
 def _sm_settings_map() -> dict[str, Any]:
     # SM 은 `{pool, settings_by_pool}` 래핑 구조라 풀 맵만 꺼낸다 (신고가는 평면 풀 맵).
-    from utils.steady_momentum_service import load_settings_map
+    from utils.momentum_service import load_settings_map
 
     return dict(load_settings_map().get("settings_by_pool") or {})
 
@@ -73,7 +73,7 @@ def mix_meta() -> dict[str, Any]:
     """화면 초기용 — 풀 셀렉트 목록과 기본 풀만 반환한다 (백테스트 계산 없음)."""
     all_pools = _all_active_pools()
     ready = available_mix_pools()
-    from utils.steady_momentum_service import load_settings_map as sm_map
+    from utils.momentum_service import load_settings_map as sm_map
 
     sm_current = str(sm_map().get("pool") or "").strip().lower()
     if sm_current in ready:
@@ -87,8 +87,8 @@ def mix_meta() -> dict[str, Any]:
 
 def _resolve_pool_and_settings(pool: str | None) -> tuple[str, dict[str, Any], dict[str, Any]]:
     """풀을 확정하고 그 풀의 SM·신고가 저장 설정을 검증해 돌려준다 (백테스트·운영 공용)."""
+    from utils.momentum_service import validate_settings as sm_validate
     from utils.new_high_service import validate_settings as nh_validate
-    from utils.steady_momentum_service import validate_settings as sm_validate
 
     all_pools = _all_active_pools()
     ready = available_mix_pools()
@@ -97,7 +97,7 @@ def _resolve_pool_and_settings(pool: str | None) -> tuple[str, dict[str, Any], d
     pool_norm = str(pool or "").strip().lower()
     if not pool_norm:
         # 기본 풀 — SM 화면이 현재 보고 있는 풀 (양쪽 설정이 없으면 번호가 가장 빠른 준비된 풀).
-        from utils.steady_momentum_service import load_settings_map as sm_map
+        from utils.momentum_service import load_settings_map as sm_map
 
         sm_current = str(sm_map().get("pool") or "").strip().lower()
         ordered_ready = [o["ticker_type"] for o in _pool_options(ready)]
@@ -107,7 +107,7 @@ def _resolve_pool_and_settings(pool: str | None) -> tuple[str, dict[str, Any], d
 
     sm_saved = _sm_settings_map().get(pool_norm)
     nh_saved = _nh_settings_map().get(pool_norm)
-    missing = [name for name, saved in (("Steady Momentum", sm_saved), ("신고가 돌파", nh_saved)) if not saved]
+    missing = [name for name, saved in (("모멘텀 전략", sm_saved), ("신고가 돌파", nh_saved)) if not saved]
     if missing:
         raise RuntimeError(
             f"'{pool_norm}' 풀에 {' · '.join(missing)} 설정이 저장돼 있지 않습니다 — 해당 전략 화면에서 먼저 저장하세요."
@@ -125,8 +125,8 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     """
     import pandas as pd
 
+    from utils.momentum_service import compute_picks
     from utils.new_high_backtest import current_positions
-    from utils.steady_momentum_service import compute_picks
 
     pool_norm, sm_settings, nh_settings = _resolve_pool_and_settings(pool)
 
@@ -327,8 +327,8 @@ def run_mix_backtest(pool: str | None = None, months: int | None = None) -> dict
     """
     import pandas as pd
 
+    from utils.momentum_backtest import run_backtest as sm_backtest
     from utils.new_high_backtest import run_backtest as nh_backtest
-    from utils.steady_momentum_backtest import run_backtest as sm_backtest
 
     pool_norm, sm_settings, nh_settings = _resolve_pool_and_settings(pool)
     if months is None:
