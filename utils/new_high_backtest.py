@@ -608,7 +608,7 @@ def available_dates(
         rows.append(
             {
                 "date": str(day.date()),
-                "candidate_count": int((breakout | ((row >= -12) & (row < 0))).sum()),
+                "candidate_count": int((breakout | ((row >= -7) & (row < 0))).sum()),
                 "breakout_count": count,
             }
         )
@@ -894,8 +894,8 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
         "auto_refresh": _should_auto_refresh(pool, quotes),
         "quote_at": quotes["traded_at"],
         "breakouts": [r for r in rows if r["gap_pct"] >= 0],
-        # 임박(-3% 이내) → 근접(-7% 이내) → 관찰(-12% 이내) 순으로 후보를 보여준다.
-        "candidates": [r for r in rows if -12 <= r["gap_pct"] < 0][:30],
+        # 임박(-3% 이내) → 근접(-7% 이내) 순으로 후보를 보여준다.
+        "candidates": [r for r in rows if -7 <= r["gap_pct"] < 0][:30],
     }
 
 

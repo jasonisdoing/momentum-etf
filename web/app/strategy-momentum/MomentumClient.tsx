@@ -2,6 +2,7 @@
 
 import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { IconCheck } from "@tabler/icons-react";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
@@ -1043,11 +1044,12 @@ export function MomentumClient() {
                 ) : null}
                 <button
                   type="button"
-                  className="btn btn-sm btn-primary"
+                  className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                   onClick={() => void saveSettings()}
                   disabled={saving || !isDirty}
                 >
-                  {saving ? "저장 중…" : "저장"}
+                  <IconCheck size={16} />
+                  <span>{saving ? "저장 중…" : "저장"}</span>
                 </button>
               </div>
             </div>

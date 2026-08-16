@@ -2,6 +2,7 @@
 
 import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { IconCheck } from "@tabler/icons-react";
 
 import { HoldingChart, type HoldingChartData } from "./HoldingChart";
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -262,7 +263,7 @@ function toPeriodRows(daily: Backtest["daily"], keyOf: (date: string) => string,
 
 /** 상태 단계 — 색·설명을 여기 한 곳에서만 정한다.
  *
- * 거리 척도(관찰 → 근접 → 임박 → 돌파)는 회색·초록·주황·빨강으로 온도가 올라가고,
+ * 거리 척도(근접 → 임박 → 돌파)는 초록·주황·빨강으로 온도가 올라가고,
  * 척도 밖의 두 상태(터치 후 밀림·돌파 미달)는 계열이 다른 색을 써서 구분한다.
  * 파랑 계열은 쓰지 않는다 — 이 앱에서 파랑은 하락을 뜻해 헷갈린다.
  */
@@ -272,7 +273,6 @@ const STAGE_STYLE = {
   pullback: { color: "#7048e8", text: "장중 고가는 최고 종가선에 닿았지만 종가가 다시 아래로 내려온 상태입니다." },
   imminent: { color: "#e8590c", text: "최고 종가까지 3% 이내로 남은 종목입니다." },
   near: { color: "#2f9e44", text: "최고 종가까지 3% 초과 7% 이내로 남은 종목입니다." },
-  watch: { color: "#868e96", text: "7%보다 많이 남았지만 후보 범위인 12% 이내에 들어온 종목입니다." },
   held: { color: "#495057", text: "이미 보유 중이라 다시 사지 않습니다. 신고가를 계속 갱신하면 돌파 신호가 매일 나오므로 목록에는 남습니다." },
 } as const;
 
@@ -290,8 +290,7 @@ function describeStage(row: PositionRow, live: boolean): { label: string; color:
   // 장중에 선을 건드렸다가 밀린 것은 그냥 '임박'과 성격이 달라 따로 표시한다.
   if (row.touched) return { label: "터치 후 밀림", color: STAGE_STYLE.pullback.color };
   if (row.gap_pct > -3) return { label: "임박", color: STAGE_STYLE.imminent.color };
-  if (row.gap_pct > -7) return { label: "근접", color: STAGE_STYLE.near.color };
-  return { label: "관찰", color: STAGE_STYLE.watch.color };
+  return { label: "근접", color: STAGE_STYLE.near.color };
 }
 
 /** 상태 단계 설명 — 진입 후보를 펼치면 보여준다. 색·문구는 STAGE_STYLE 이 단일 소스다. */
@@ -301,7 +300,6 @@ const STAGE_GUIDE: { label: string; key: keyof typeof STAGE_STYLE }[] = [
   { label: "터치 후 밀림", key: "pullback" },
   { label: "임박", key: "imminent" },
   { label: "근접", key: "near" },
-  { label: "관찰", key: "watch" },
   { label: "보유중", key: "held" },
 ];
 
@@ -1051,11 +1049,12 @@ export function NewHighClient() {
                 {/* CRUD 버튼이 하나뿐이라 별도 줄을 두지 않고 메인 헤더 오른쪽에 둔다. */}
                 <div className="appMainHeaderRight">
                   <button
-                    className="btn btn-primary btn-sm px-3 fw-bold"
                     type="button"
+                    className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                     onClick={() => void persistSettings(draft, "설정을 저장했습니다.")}
                   >
-                    저장
+                    <IconCheck size={16} />
+                    <span>저장</span>
                   </button>
                 </div>
               </div>
