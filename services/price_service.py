@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from config import MARKET_SCHEDULES
+from config import CACHE_TTL_COMPUTE, CACHE_TTL_LIVE, CACHE_TTL_SLOW, MARKET_SCHEDULES
 from utils.data_loader import (
     fetch_au_quoteapi_snapshot,
     fetch_naver_etf_inav_snapshot,
@@ -29,13 +29,13 @@ logger = get_app_logger()
 # key: "{country}:{ticker}" → {"data": {...}, "fetched_at": dt, "expires_at": dt, "source": str}
 _TICKER_PRICE_CACHE: dict[str, dict[str, Any]] = {}
 
-_KOR_ACTIVE_TTL_SECONDS = 60
-_AU_ACTIVE_TTL_SECONDS = 60
-_US_ACTIVE_TTL_SECONDS = 60
-_WORLDSTOCK_TTL_SECONDS = 900
-_YAHOO_SYMBOL_TTL_SECONDS = 900
-_IDLE_TTL_SECONDS = 60
-_FX_TTL_SECONDS = 3600
+_KOR_ACTIVE_TTL_SECONDS = CACHE_TTL_LIVE
+_AU_ACTIVE_TTL_SECONDS = CACHE_TTL_LIVE
+_US_ACTIVE_TTL_SECONDS = CACHE_TTL_LIVE
+_WORLDSTOCK_TTL_SECONDS = CACHE_TTL_COMPUTE
+_YAHOO_SYMBOL_TTL_SECONDS = CACHE_TTL_COMPUTE
+_IDLE_TTL_SECONDS = CACHE_TTL_LIVE
+_FX_TTL_SECONDS = CACHE_TTL_SLOW
 # 환율 조회 재시도 횟수. `_FX_CACHE` 는 프로세스 메모리라 매번 새로 뜨는 배치에서는
 # stale 폴백이 없다 — 배치가 기댈 수 있는 건 이 재시도뿐이다.
 _FX_FETCH_MAX_ATTEMPTS = 3

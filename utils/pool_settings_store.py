@@ -26,6 +26,7 @@ from datetime import datetime
 from time import monotonic
 from typing import Any
 
+from config import CACHE_TTL_LIVE
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -85,7 +86,7 @@ _ALLOWED_CURRENCIES = {"KRW", "AUD", "USD"}
 # 나중에 추가된 선택 키 → 기본값. DB 문서에 없어도 에러 없이 이 값으로 채운다(하위 호환).
 _OPTIONAL_DEFAULTS: dict[str, Any] = {"SLOPE_DAYS": 5}
 
-_CACHE_TTL_SECONDS = 30.0
+_CACHE_TTL_SECONDS = CACHE_TTL_LIVE
 _overlay_cache: dict[str, dict[str, Any]] | None = None
 _overlay_cached_at: float = 0.0
 _overlay_lock = threading.Lock()

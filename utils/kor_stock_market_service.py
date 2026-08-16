@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 import requests
 
-from config import NAVER_FINANCE_HEADERS
+from config import CACHE_TTL_COMPUTE, NAVER_FINANCE_HEADERS
 from services.price_service import get_realtime_snapshot
 from utils.industry_map import industry_map
 from utils.market_service import load_ticker_pool_map
@@ -227,7 +227,7 @@ def _apply_kor_history_metrics(rows: list[dict[str, Any]]) -> None:
 
 # 티커→시가총액 맵은 화면 재방문마다 페이지 순회를 반복하지 않게 짧은 TTL 로 캐시한다.
 _MARKET_CAP_CACHE: dict[str, tuple[float, dict[str, int]]] = {}
-_MARKET_CAP_CACHE_TTL_SEC = 600.0
+_MARKET_CAP_CACHE_TTL_SEC = CACHE_TTL_COMPUTE
 
 
 def load_kor_market_caps(tickers: list[str]) -> dict[str, int]:

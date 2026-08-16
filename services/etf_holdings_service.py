@@ -8,6 +8,7 @@ import requests
 import yfinance as yf
 from pykrx import stock
 
+from config import CACHE_TTL_COMPUTE, CACHE_TTL_SLOW
 from utils.data_loader import get_trading_days
 from utils.logger import get_app_logger
 from utils.yfinance_guard import yfinance_lock
@@ -19,11 +20,11 @@ DEFAULT_USER_AGENT = (
 )
 NAVER_ETF_COMPONENT_URL = "https://stock.naver.com/api/domestic/detail/{ticker}/ETFComponent"
 _NAVER_ETF_COMPONENT_CACHE: dict[str, dict[str, Any]] = {}
-_NAVER_ETF_COMPONENT_TTL_SECONDS = 300
+_NAVER_ETF_COMPONENT_TTL_SECONDS = CACHE_TTL_COMPUTE
 _FOREIGN_PRICE_CACHE: dict[str, dict[str, Any]] = {}
-_FOREIGN_PRICE_TTL_SECONDS = 300
+_FOREIGN_PRICE_TTL_SECONDS = CACHE_TTL_COMPUTE
 _YAHOO_SYMBOL_RESOLUTION_CACHE: dict[str, dict[str, Any]] = {}
-_YAHOO_SYMBOL_RESOLUTION_TTL_SECONDS = 3600
+_YAHOO_SYMBOL_RESOLUTION_TTL_SECONDS = CACHE_TTL_SLOW
 
 
 def _normalize_ticker(ticker: str) -> str:

@@ -6,6 +6,8 @@ from typing import Any
 import pandas as pd
 import requests
 
+from config import CACHE_TTL_COMPUTE
+
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
@@ -17,7 +19,7 @@ NAVER_ETF_DIVIDEND_HIST_URL = (
 )
 _DIVIDEND_HISTORY_PAGE_SIZE = 20
 _NAVER_ETF_INFO_CACHE: dict[str, dict[str, Any]] = {}
-_NAVER_ETF_INFO_TTL_SECONDS = 300
+_NAVER_ETF_INFO_TTL_SECONDS = CACHE_TTL_COMPUTE
 
 
 def _normalize_ticker(ticker: str) -> str:

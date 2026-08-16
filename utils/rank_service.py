@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from datetime import datetime
-from threading import Lock
-from time import monotonic
 from typing import Any
 
 import pandas as pd
 
+from config import CACHE_TTL_COMPUTE
 from services.stock_cache_service import get_stock_cache_meta_map
 from utils.data_loader import get_trading_days
 from utils.rankings import (
@@ -18,12 +16,10 @@ from utils.rankings import (
 )
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
+from utils.ttl_cache import TtlCache
 
-_RANK_DATA_CACHE_TTL_SECONDS = 300.0
 _RankCacheKey = tuple[str, str, tuple[tuple[int, int], ...]]
-_RANK_DATA_CACHE: dict[_RankCacheKey, tuple[float, dict[str, Any]]] = {}
-_RANK_DATA_CACHE_LOCK = Lock()
-_RANK_DATA_INFLIGHT_LOCKS: dict[_RankCacheKey, Lock] = {}
+_RANK_DATA_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="rank_data")
 
 
 def _build_rank_cache_key(
@@ -46,46 +42,15 @@ def _build_rank_cache_key(
 def invalidate_rank_data_cache(ticker_type: str | None = None) -> None:
     """랭킹 응답 메모리 캐시를 무효화한다."""
 
-    with _RANK_DATA_CACHE_LOCK:
-        if ticker_type is None:
-            _RANK_DATA_CACHE.clear()
-            return
+    if ticker_type is None:
+        _RANK_DATA_CACHE.invalidate()
+        return
 
-        target = str(ticker_type or "").strip().lower()
-        if not target:
-            return
+    target = str(ticker_type or "").strip().lower()
+    if not target:
+        return
 
-        for cache_key in list(_RANK_DATA_CACHE):
-            if cache_key[0] == target:
-                _RANK_DATA_CACHE.pop(cache_key, None)
-
-
-def _get_rank_data_cache(cache_key: _RankCacheKey) -> dict[str, Any] | None:
-    with _RANK_DATA_CACHE_LOCK:
-        cached = _RANK_DATA_CACHE.get(cache_key)
-        if cached is None:
-            return None
-
-        cached_at, payload = cached
-        if monotonic() - cached_at > _RANK_DATA_CACHE_TTL_SECONDS:
-            _RANK_DATA_CACHE.pop(cache_key, None)
-            return None
-
-        return deepcopy(payload)
-
-
-def _set_rank_data_cache(cache_key: _RankCacheKey, payload: dict[str, Any]) -> None:
-    with _RANK_DATA_CACHE_LOCK:
-        _RANK_DATA_CACHE[cache_key] = (monotonic(), deepcopy(payload))
-
-
-def _get_rank_data_inflight_lock(cache_key: _RankCacheKey) -> Lock:
-    with _RANK_DATA_CACHE_LOCK:
-        lock = _RANK_DATA_INFLIGHT_LOCKS.get(cache_key)
-        if lock is None:
-            lock = Lock()
-            _RANK_DATA_INFLIGHT_LOCKS[cache_key] = lock
-        return lock
+    _RANK_DATA_CACHE.invalidate(lambda cache_key: cache_key[0] == target)
 
 
 def _serialize_datetime(value: Any) -> str | None:
@@ -709,22 +674,13 @@ def load_rank_data(
         raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
 
     cache_key = _build_rank_cache_key(selected_ticker_type, selected_as_of_date, ma_rules)
-    cached_payload = _get_rank_data_cache(cache_key)
-    if cached_payload is not None:
-        return cached_payload
-
-    inflight_lock = _get_rank_data_inflight_lock(cache_key)
-    with inflight_lock:
-        cached_payload = _get_rank_data_cache(cache_key)
-        if cached_payload is not None:
-            return cached_payload
-
-        payload = _compute_rank_data_payload(
+    return _RANK_DATA_CACHE.get_or_compute(
+        cache_key,
+        lambda: _compute_rank_data_payload(
             configs_payload=configs_payload,
             selected_ticker_type=selected_ticker_type,
             country_code=country_code,
             ma_rules=ma_rules,
             selected_as_of_date=selected_as_of_date,
-        )
-        _set_rank_data_cache(cache_key, payload)
-        return payload
+        ),
+    )

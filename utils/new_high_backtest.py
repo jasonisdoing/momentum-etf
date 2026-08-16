@@ -12,6 +12,7 @@ from typing import Any
 
 import pandas as pd
 
+from config import CACHE_TTL_COMPUTE
 from utils.new_high_service import (
     DEFAULT_BACKTEST_MONTHS,
     HIGH_WINDOW_WEEKS,
@@ -25,6 +26,7 @@ from utils.new_high_service import (
     validate_settings,
 )
 from utils.pool_settings_store import get_pool_slippage
+from utils.ttl_cache import TtlCache
 
 logger = logging.getLogger(__name__)
 
@@ -615,6 +617,11 @@ def available_dates(
     return rows[::-1]
 
 
+# 유니버스 전체를 현재까지 돌리는 계산이라 수십 초 걸린다 — 설정·기준일이 같으면
+# 결과도 같으므로 짧게 재사용한다(설정을 바꾸면 키가 달라져 새로 계산한다).
+_POSITIONS_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="new_high_positions")
+
+
 def current_positions(settings: dict[str, Any] | None = None, as_of: str | None = None) -> dict[str, Any]:
     """지금 들고 있어야 할 종목(보유·오늘 이탈)과 오늘 신호(돌파·후보).
 
@@ -622,6 +629,11 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
     다른 코드로 갈라지면 표시된 보유와 성과가 어긋나므로 계산을 나누지 않는다.
     """
     settings = validate_settings(settings or load_settings())
+    cache_key = _POSITIONS_CACHE.make_key(settings, as_of or "")
+    return _POSITIONS_CACHE.get_or_compute(cache_key, lambda: _current_positions(settings, as_of))
+
+
+def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str, Any]:
     pool = settings["pool"]
     context = load_context(settings)
     universe = context["universe"]

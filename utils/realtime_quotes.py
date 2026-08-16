@@ -26,6 +26,8 @@ from config import (
     AU_QUOTEAPI_APP_ID,
     AU_QUOTEAPI_HEADERS,
     AU_QUOTEAPI_URL,
+    CACHE_TTL_COMPUTE,
+    CACHE_TTL_LIVE,
     NAVER_FINANCE_ETF_API_URL,
     NAVER_FINANCE_HEADERS,
     TOSS_INVEST_API_BASE_URL,
@@ -76,7 +78,7 @@ def fetch_naver_realtime_price(ticker: str) -> float | None:
 # ─── ETF iNAV 글로벌 캐시 ───
 # etfItemList.nhn은 전체 ETF 목록을 반환하므로 글로벌로 캐시하고 공유한다.
 _ETF_INAV_GLOBAL_CACHE: dict[str, Any] = {}
-_ETF_INAV_GLOBAL_TTL_SECONDS = 30
+_ETF_INAV_GLOBAL_TTL_SECONDS = CACHE_TTL_LIVE
 
 
 def _fetch_etf_inav_all() -> dict[str, dict[str, float]]:
@@ -186,7 +188,7 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
 # 해외 ETF NAV 캐시 — 종목별로 조회하므로 티커 단위로 담는다(한국은 전체 목록 1회 조회).
 # (모듈 상단에서 datetime.time 을 import 하고 있어 시간 비교는 datetime 으로 한다.)
 _OVERSEAS_NAV_CACHE: dict[str, tuple[datetime, dict[str, float]]] = {}
-_OVERSEAS_NAV_TTL_SECONDS = 300
+_OVERSEAS_NAV_TTL_SECONDS = CACHE_TTL_COMPUTE
 
 
 def fetch_overseas_etf_nav_snapshot(ticker: str, country_code: str) -> dict[str, float]:
@@ -822,7 +824,7 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
 
 # 토스 국내 스냅샷 TTL — 앱 표준 실시간 주기(60초)에 맞춘다.
 # 신고가 화면과 종목풀 순위가 같은 종목을 잇달아 조회하므로 프로세스 전역으로 공유한다.
-_TOSS_KR_SNAPSHOT_TTL_SECONDS = 60
+_TOSS_KR_SNAPSHOT_TTL_SECONDS = CACHE_TTL_LIVE
 _TOSS_KR_SNAPSHOT_CACHE: dict[str, tuple[datetime, dict[str, float]]] = {}
 
 

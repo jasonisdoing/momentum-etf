@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from time import monotonic
 from typing import Any
 
+from config import CACHE_TTL_LIVE
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -48,7 +49,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 _ALLOWED_CASH_CURRENCIES = {"KRW", "USD", "AUD"}
 
-_CACHE_TTL_SECONDS = 30.0
+_CACHE_TTL_SECONDS = CACHE_TTL_LIVE
 _cache: tuple[float, list[dict[str, Any]]] | None = None
 _cache_lock = threading.Lock()
 

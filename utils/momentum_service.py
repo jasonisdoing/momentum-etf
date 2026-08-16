@@ -45,7 +45,8 @@ TOP_N_OPTIONS = (5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 50, 100)
 # 표를 짧게 유지한다. 표 밖 '다음 주 예상' 종목은 하단에 별도 행으로 붙는다.
 RESERVE_MULTIPLIER = 1
 # 월↔거래일 환산 — 공용 상수(config, =20)를 재사용한다 (자산헬퍼·시장추세와 동일 기준).
-from config import METRIC_WINDOW_MONTHS, TRADING_DAYS_PER_MONTH  # noqa: E402
+from config import CACHE_TTL_COMPUTE, METRIC_WINDOW_MONTHS, TRADING_DAYS_PER_MONTH  # noqa: E402
+from utils.ttl_cache import TtlCache  # noqa: E402
 
 _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "momentum_settings"
@@ -673,6 +674,11 @@ def current_portfolio_dates(benchmark_close: pd.Series, country: str) -> tuple[p
 
 
 # ── 선정 (현재 포트폴리오) ─────────────────────────────────────────────────
+# 유니버스 전체의 가격 프레임을 읽고 판정까지 하는 계산이라 수십 초 걸린다.
+# 설정·기준일이 같으면 결과도 같으므로 짧게 재사용한다(설정을 바꾸면 키가 달라진다).
+_PICKS_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="momentum_picks")
+
+
 def compute_picks(settings: dict[str, Any] | None = None, as_of: str | None = None) -> dict[str, Any]:
     """현재 적용 중인 월 확정 포트폴리오 — 화면 ③ 카드와 스크립트가 함께 쓴다.
 
@@ -682,7 +688,11 @@ def compute_picks(settings: dict[str, Any] | None = None, as_of: str | None = No
     if settings is None:
         settings = load_settings()
     settings = validate_settings(settings)
+    cache_key = _PICKS_CACHE.make_key(settings, as_of or "")
+    return _PICKS_CACHE.get_or_compute(cache_key, lambda: _compute_picks(settings, as_of))
 
+
+def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any]:
     pool = str(settings["pool"])
     info = pool_info(pool)
     universe = load_universe(pool)
