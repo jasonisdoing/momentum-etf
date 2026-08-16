@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 
 from config import MIN_TRADING_DAYS, TRADING_DAYS_PER_MONTH
-from core.strategy.scoring import build_composite_rank_scores
 from utils.logger import get_app_logger
 from utils.moving_averages import calculate_moving_average
 
@@ -62,7 +61,6 @@ DEFAULT_BACKTEST_SETTINGS: dict[str, Any] = {
     "initial_amount_manwon": 10000,
 }
 ALLOWED_BACKTEST_REBALANCE = {"none", "weekly", "monthly", "quarterly", "yearly"}
-ALLOWED_WEIGHT_MODES = {"variable", "fixed"}
 
 
 def _db():
@@ -72,13 +70,6 @@ def _db():
     if db is None:
         raise RuntimeError("MongoDB 연결 실패 (자산 헬퍼 설정)")
     return db
-
-
-def _clean_weight_mode(value: Any) -> str:
-    mode = str(value or "").strip().lower()
-    if mode not in ALLOWED_WEIGHT_MODES:
-        raise ValueError("비중 방식은 variable 또는 fixed여야 합니다.")
-    return mode
 
 
 def _load_unique_stock_meta_by_ticker(tickers: list[str]) -> dict[str, dict[str, Any]]:
@@ -249,61 +240,6 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
     cleaned["ACCOUNT_ID"] = account_id
 
     return cleaned
-
-
-def _with_account_asset_helper_basis(settings: dict[str, Any], *, weight_mode: str | None = None) -> dict[str, Any]:
-    """설정 응답에 계좌별 이평선 기준을 결합한다.
-
-    weight_mode="fixed"(고정 보유)는 이평선·종목풀 연결이 필요 없으므로 그 필드는 비운 채 반환한다
-    (계좌-풀 연결을 요구하지 않는다). trend 계좌는 연결 풀 이평선 + 보유개수를 붙인다.
-    """
-    account_id = str(settings.get("ACCOUNT_ID") or "").strip()
-    if weight_mode == "fixed":
-        ma_context = {"POOL_TICKER_TYPE": None, "POOL_NAME": None, "SHORT_MA_DAYS": None, "LONG_MA_DAYS": None}
-    else:
-        ma_context = _load_account_pool_ma_context(account_id)
-    return {**settings, **ma_context}
-
-
-def _load_account_pool_ma_context(account_id: str) -> dict[str, Any]:
-    """계좌에 연결된 단일 종목풀의 이평선 설정을 계산 기준으로 반환한다."""
-    normalized_account_id = str(account_id or "").strip()
-    if not normalized_account_id:
-        return {"POOL_TICKER_TYPE": None, "POOL_NAME": None, "SHORT_MA_DAYS": None, "LONG_MA_DAYS": None}
-
-    from utils.settings_loader import get_account_settings, get_ticker_type_settings
-
-    account_settings = get_account_settings(normalized_account_id)
-    ticker_types = account_settings.get("ticker_types")
-    if not isinstance(ticker_types, list) or len(ticker_types) != 1 or not str(ticker_types[0] or "").strip():
-        raise ValueError(f"계좌 '{normalized_account_id}'에 연결된 종목풀이 1개여야 합니다.")
-
-    ticker_type = str(ticker_types[0]).strip().lower()
-    pool_settings = get_ticker_type_settings(ticker_type)
-    try:
-        short_ma_days = int(pool_settings["SHORT_MA_DAYS"])
-        long_ma_days = int(pool_settings["LONG_MA_DAYS"])
-    except KeyError as exc:
-        raise ValueError(f"종목풀 '{ticker_type}'에 이평선 설정(SHORT_MA_DAYS/LONG_MA_DAYS)이 없습니다.") from exc
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"종목풀 '{ticker_type}'의 이평선 설정은 정수여야 합니다.") from exc
-    if short_ma_days <= 0 or long_ma_days <= 0:
-        raise ValueError(f"종목풀 '{ticker_type}'의 이평선 설정은 1일 이상이어야 합니다.")
-
-    return {
-        "POOL_TICKER_TYPE": ticker_type,
-        "POOL_NAME": str(pool_settings.get("name") or ticker_type),
-        "SHORT_MA_DAYS": short_ma_days,
-        "LONG_MA_DAYS": long_ma_days,
-    }
-
-
-def _build_asset_helper_ma_rule(settings: dict[str, Any]) -> dict[str, Any]:
-    long_ma_days = settings.get("LONG_MA_DAYS")
-    if long_ma_days is None:
-        account_id = str(settings.get("ACCOUNT_ID") or "").strip()
-        long_ma_days = _load_account_pool_ma_context(account_id)["LONG_MA_DAYS"]
-    return {"order": 1, "long_ma_days": int(long_ma_days), "score_column": "이격"}
 
 
 def _filter_rank_excluded_tickers(
@@ -517,7 +453,6 @@ def load_asset_helper_settings_for_edit(account_id: str) -> dict[str, Any]:
         if h.get("target_ratio") is not None
     ]
 
-    stored_weight_mode = _clean_weight_mode(helper_doc.get("weight_mode")) if helper_doc else "fixed"
     settings_base = {
         key: helper_doc[key] for key in (*SETTING_KEYS, "CASH_MAX_WEIGHT") if helper_doc.get(key) is not None
     }
@@ -539,8 +474,7 @@ def load_asset_helper_settings_for_edit(account_id: str) -> dict[str, Any]:
     return {
         "tickers": weight_tickers,
         "cash_weight_pct": helper_doc.get("cash_weight_pct"),
-        "weight_mode": stored_weight_mode,
-        "settings": _with_account_asset_helper_basis(settings, weight_mode=stored_weight_mode),
+        "settings": settings,
         "backtest_settings": backtest_settings,
         "updated_at": (
             (updated_at.replace(tzinfo=timezone.utc) if updated_at.tzinfo is None else updated_at).isoformat()
@@ -552,7 +486,6 @@ def load_asset_helper_settings_for_edit(account_id: str) -> dict[str, Any]:
 
 def save_asset_helper_settings(
     tickers: list[dict[str, Any]],
-    weight_mode: str,
     settings: dict[str, Any] | None = None,
     backtest_settings: dict[str, Any] | None = None,
     account_id: str | None = None,
@@ -561,7 +494,6 @@ def save_asset_helper_settings(
     from utils.portfolio_io import load_portfolio_master, update_account_asset_helper
 
     resolved = _resolve_account_id(account_id)
-    clean_weight_mode = _clean_weight_mode(weight_mode)
     clean_tickers = _clean_tickers(_clean_ticker_slots(tickers))
     if len(clean_tickers) < 1:
         raise ValueError("저장할 종목이 1개 이상 필요합니다.")
@@ -606,7 +538,6 @@ def save_asset_helper_settings(
         resolved,
         target_ratio_by_ticker=target_ratio_by_ticker,
         helper_settings={
-            "weight_mode": clean_weight_mode,
             **clean_settings,
             "backtest_settings": clean_backtest_settings,
             "cash_weight_pct": clean_cash_weight,
@@ -615,8 +546,7 @@ def save_asset_helper_settings(
     )
     return {
         "tickers": clean_tickers,
-        "weight_mode": clean_weight_mode,
-        "settings": _with_account_asset_helper_basis(clean_settings, weight_mode=clean_weight_mode),
+        "settings": clean_settings,
         "backtest_settings": clean_backtest_settings,
         "updated_at": updated_at.isoformat(),
     }
@@ -958,27 +888,15 @@ def _allocate_deviation_filtered_weights(
 def calculate_asset_helper_weights_for(
     tickers: list[dict[str, Any]],
     settings: dict[str, Any],
-    weight_mode: str = "variable",
     *,
     metric_months: int,
 ) -> dict[str, Any]:
-    # weight_mode="fixed"(고정 보유)는 추세/이평선이 필요 없다 — 계좌-풀 연결도 요구하지 않는다.
-    # 그 외(variable/trend)는 계좌에 연결된 풀의 이평선 설정을 쓴다.
-    # trend 계좌는 후보군 = 연결 풀의 종목 전체(get_etfs)로 대체한다.
+    # 비중은 사용자가 지정한 고정 비중만 쓴다 — 이평선·계좌-풀 연결이 필요 없다.
     account_id = str(settings.get("ACCOUNT_ID") or "").strip()
     if not account_id:
         raise ValueError("비중 계산에는 적용 계좌가 필요합니다.")
-
-    is_fixed = weight_mode == "fixed"
-    if is_fixed:
-        excluded_fixed_tickers: list[str] = []
-    else:
-        ma_context = _load_account_pool_ma_context(account_id)
-        settings = {**settings, **ma_context}
-        tickers, excluded_fixed_tickers = _filter_rank_excluded_tickers(tickers, settings)
     if len(tickers) < 3:
-        suffix = f" 고정 종목 제외: {', '.join(excluded_fixed_tickers)}" if excluded_fixed_tickers else ""
-        raise ValueError(f"비중 계산에는 고정 종목 제외 후 확인된 종목이 3개 이상 필요합니다.{suffix}")
+        raise ValueError("비중 계산에는 확인된 종목이 3개 이상 필요합니다.")
 
     close_frame, missing = _load_close_frame(tickers)
     if close_frame.empty:
@@ -993,24 +911,8 @@ def calculate_asset_helper_weights_for(
     return_map = _build_return_map(close_frame)
     daily_change_map = _build_daily_change_map(tickers, close_frame)
 
-    if is_fixed:
-        # 고정 보유는 추세 점수·이평선 배열이 필요 없다(관련 표시 컬럼은 전부 None으로 남긴다).
-        composite_row: pd.Series = pd.Series(dtype=float)
-        trend_row: pd.Series = pd.Series(dtype=float)
-        slope_map: dict[str, float] = {}
-        alignment_map: dict[str, str | None] = {}
-    else:
-        ma_rules = [_build_asset_helper_ma_rule(settings)]
-        composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
-        composite_row = composite_frame.loc[eval_date] if eval_date in composite_frame.index else pd.Series(dtype=float)
-        trend_frame = trend_by_order[1]
-        trend_row = trend_frame.loc[eval_date] if eval_date in trend_frame.index else pd.Series(dtype=float)
-        slope_map, alignment_map = _build_current_ma_state_maps(
-            close_frame,
-            eval_date,
-            short_ma_days=int(settings["SHORT_MA_DAYS"]),
-            long_ma_days=int(settings["LONG_MA_DAYS"]),
-        )
+    # 고정 보유만 쓰므로 추세 점수·이평선 배열이 필요 없다(관련 표시 컬럼은 None으로 남긴다).
+    alignment_map: dict[str, str | None] = {}
 
     rows: list[dict[str, Any]] = []
     ticker_meta = {item["ticker"]: item for item in tickers}
@@ -1021,34 +923,15 @@ def calculate_asset_helper_weights_for(
         sortino_raw_value = sortino_raw_row.get(ticker)
         meta = ticker_meta[ticker]
 
-        if is_fixed:
-            # 고정 보유는 가격 캐시 존재만 확인한다(이격/추세 요구 없음).
-            close_count = int(close_frame[ticker].dropna().shape[0]) if ticker in close_frame.columns else 0
-            if close_count <= 0:
-                excluded_reasons.append(f"{ticker}: 가격 캐시 없음")
-            point_deviation = None
-            score = None
-            deviation_pct_value = None
-            slope_value = None
-        else:
-            deviation_score_value = composite_row.get(ticker)
-            point_deviation = None if pd.isna(deviation_score_value) else float(deviation_score_value)
-            score = point_deviation
-            if score is None:
-                close_count = int(close_frame[ticker].dropna().shape[0]) if ticker in close_frame.columns else 0
-                if close_count <= 0:
-                    excluded_reasons.append(f"{ticker}: 가격 캐시 없음")
-                elif close_count < int(MIN_TRADING_DAYS):
-                    excluded_reasons.append(f"{ticker}: 가격 데이터 {close_count}개로 부족(최소 {MIN_TRADING_DAYS}개)")
-                else:
-                    excluded_reasons.append(f"{ticker}: 이격 계산 불가")
-
-            deviation_pct = trend_row.get(ticker)
-            deviation_pct_value = None if pd.isna(deviation_pct) else float(deviation_pct)
-            if score is not None and deviation_pct_value is None:
-                excluded_reasons.append(f"{ticker}: 이격 계산 불가")
-            deviation_pct_by_ticker[ticker] = deviation_pct_value
-            slope_value = slope_map.get(ticker)
+        # 고정 보유는 가격 캐시 존재만 확인한다(이격/추세 요구 없음).
+        close_count = int(close_frame[ticker].dropna().shape[0]) if ticker in close_frame.columns else 0
+        if close_count <= 0:
+            excluded_reasons.append(f"{ticker}: 가격 캐시 없음")
+        point_deviation = None
+        score = None
+        deviation_pct_value = None
+        deviation_pct_by_ticker[ticker] = None
+        slope_value = None
 
         rows.append(
             {
@@ -1087,22 +970,15 @@ def calculate_asset_helper_weights_for(
     if excluded_reasons:
         raise ValueError("비중 계산에서 제외되는 종목이 있습니다. " + " / ".join(excluded_reasons))
 
-    if weight_mode == "fixed":
-        fixed_weights = {}
-        for item in tickers:
-            tk = item["ticker"]
-            fixed_weights[tk] = float(item.get("fixed_weight_pct") or 0.0) / 100.0
-
-        sum_fixed = sum(fixed_weights.values())
-        if sum_fixed > 1.0:
-            for tk in fixed_weights:
-                fixed_weights[tk] /= sum_fixed
-            cash_weight = 0.0
-        else:
-            cash_weight = 1.0 - sum_fixed
-        weights = {**fixed_weights, "__CASH__": cash_weight}
+    fixed_weights = {item["ticker"]: float(item.get("fixed_weight_pct") or 0.0) / 100.0 for item in tickers}
+    sum_fixed = sum(fixed_weights.values())
+    if sum_fixed > 1.0:
+        for tk in fixed_weights:
+            fixed_weights[tk] /= sum_fixed
+        cash_weight = 0.0
     else:
-        weights = _allocate_deviation_filtered_weights(deviation_pct_by_ticker, float(settings["STOCK_MAX_WEIGHT"]))
+        cash_weight = 1.0 - sum_fixed
+    weights = {**fixed_weights, "__CASH__": cash_weight}
 
     for row in rows:
         weight = weights.get(row["ticker"])
@@ -1168,7 +1044,6 @@ def calculate_asset_helper_weights_for(
         "settings": settings,
         "rows": rows,
         "missing_tickers": missing,
-        "excluded_fixed_tickers": excluded_fixed_tickers,
         "trade_summary": trade_summary,
     }
 
@@ -1177,18 +1052,15 @@ def run_asset_helper_weights(
     tickers: list[dict[str, Any]],
     settings: dict[str, Any] | None = None,
     backtest_settings: dict[str, Any] | None = None,
-    weight_mode: str = "variable",
 ) -> dict[str, Any]:
     clean_settings = _clean_settings(settings)
     clean_tickers = _clean_tickers(tickers)
     if len(clean_tickers) < 1:
         raise ValueError("계산할 종목이 1개 이상 필요합니다.")
-    response_settings = _with_account_asset_helper_basis(clean_settings, weight_mode=weight_mode)
     clean_backtest = _clean_backtest_settings(backtest_settings, require_benchmark=False)
     return calculate_asset_helper_weights_for(
         clean_tickers,
-        response_settings,
-        weight_mode=weight_mode,
+        clean_settings,
         metric_months=int(clean_backtest["months"]),
     )
 

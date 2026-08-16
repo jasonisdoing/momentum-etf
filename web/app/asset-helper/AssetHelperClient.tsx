@@ -249,7 +249,6 @@ async function fetchMetrics(validList: HelperTicker[], settingsArg: HelperSettin
       body: JSON.stringify({
         tickers: validList,
         settings: settingsArg,
-        weight_mode: "fixed",
         backtest_settings: { months: 12, rebalance: "none", initial_amount_manwon: 10000 },
       }),
     });
@@ -686,7 +685,6 @@ export function AssetHelperClient() {
         body: JSON.stringify({
           account_id: selectedAccount,
           tickers: validTickers.filter((t) => !t.is_fixed_asset),
-          weight_mode: "fixed",
           settings,
           cash_weight_pct: cashWeight,
         }),
@@ -726,7 +724,6 @@ export function AssetHelperClient() {
         body: JSON.stringify({
           tickers: validTickers,
           settings,
-          weight_mode: "fixed",
           backtest_settings: { months: Number(btMonths), rebalance: btRebalance, initial_amount_manwon: Number(btAmount) },
         }),
       });
