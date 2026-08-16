@@ -407,19 +407,27 @@ export function StrategyMixClient() {
           return sources.length === 0 ? "-" : sources.map((s) => SOURCE_LABEL[s] ?? s).join("·");
         },
       },
+      // 아래 순서·명칭은 /assets 계좌 보유 표와 맞춘다 (일간→현재가→비중→목표비중→목표수량→수량).
       {
-        field: "weight_pct",
-        headerName: "목표 비중",
-        width: 110,
+        field: "change_pct",
+        headerName: "일간(%)",
+        width: 92,
         type: "numericColumn",
-        valueFormatter: (p) => (p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`),
-        cellStyle: { fontWeight: 600 },
+        valueFormatter: (p) => formatSignedPct(p.value as number),
+        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
       },
-      // 현재 비중 = 계좌 평가액 기준. 목표와의 차이가 곧 조정할 양이다.
+      {
+        field: "price",
+        headerName: "현재가",
+        width: 104,
+        type: "numericColumn",
+        valueFormatter: (p) => formatPrice(p.value as number),
+      },
+      // 비중 = 계좌 평가액 기준 현재 비중. 목표와의 차이가 곧 조정할 양이다.
       {
         field: "current_weight_pct",
-        headerName: "현재 비중",
-        width: 110,
+        headerName: "비중",
+        width: 88,
         type: "numericColumn",
         valueFormatter: (p) => (p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`),
         cellStyle: (p) => {
@@ -431,50 +439,37 @@ export function StrategyMixClient() {
         },
       },
       {
-        field: "price",
-        headerName: "현재가",
-        width: 120,
+        field: "weight_pct",
+        headerName: "목표비중",
+        width: 88,
         type: "numericColumn",
-        valueFormatter: (p) => formatPrice(p.value as number),
-      },
-      {
-        field: "change_pct",
-        headerName: "일간(%)",
-        width: 100,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSignedPct(p.value as number),
-        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
+        valueFormatter: (p) => (p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`),
+        cellStyle: { fontWeight: 600 },
       },
     ];
     // 계좌를 연결한 풀에서만 매매 지시 컬럼을 붙인다 — 목표와 실제 보유의 차이가 주문 수량이다.
     if (totalAsset != null) {
       columns.push(
         {
-          field: "amount",
-          headerName: "목표 금액",
-          width: 140,
-          type: "numericColumn",
-          valueFormatter: (p) => formatAmount(p.value as number),
-        },
-        {
           field: "shares",
-          headerName: "목표 주수",
-          width: 110,
+          headerName: "목표수량",
+          headerTooltip: "목표비중 × 총자산 ÷ 현재가",
+          width: 88,
           type: "numericColumn",
           valueFormatter: (p) => (p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR")),
         },
         {
           field: "held_quantity",
-          headerName: "보유 주수",
-          width: 110,
+          headerName: "수량",
+          width: 80,
           type: "numericColumn",
           valueFormatter: (p) => (p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR")),
         },
         {
           field: "trade_quantity",
-          headerName: "매매 주수",
-          headerTooltip: "목표 주수 − 보유 주수. +는 매수, −는 매도",
-          width: 110,
+          headerName: "매매수량",
+          headerTooltip: "목표수량 − 수량. +는 매수, −는 매도",
+          width: 92,
           type: "numericColumn",
           valueFormatter: (p) => {
             const value = p.value as number | null;
@@ -487,6 +482,20 @@ export function StrategyMixClient() {
             if (value == null || value === 0) return null;
             return { color: value > 0 ? "#2f9e44" : "#d62828", fontWeight: 700 };
           },
+        },
+        {
+          field: "held_value",
+          headerName: "평가 금액",
+          width: 120,
+          type: "numericColumn",
+          valueFormatter: (p) => formatAmount(p.value as number),
+        },
+        {
+          field: "amount",
+          headerName: "목표 금액",
+          width: 120,
+          type: "numericColumn",
+          valueFormatter: (p) => formatAmount(p.value as number),
         },
       );
     }
