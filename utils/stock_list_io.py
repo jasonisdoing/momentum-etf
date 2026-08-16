@@ -133,7 +133,6 @@ def _load_ticker_type_stocks_raw(ticker_type: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 from utils.settings_loader import (  # noqa: E402
-    get_account_settings,
     get_ticker_type_settings,
     list_available_ticker_types,
 )
@@ -184,88 +183,6 @@ def infer_ticker_type_for_ticker(ticker: str) -> str:
         return "us"
 
     raise RuntimeError(f"{ticker_norm}의 ticker_type을 추론할 수 없습니다.")
-
-
-def _get_account_allowed_ticker_types(account_id: str) -> list[str]:
-    """계좌 설정에 명시된 보유 가능 종목풀 목록을 반환한다."""
-    account_norm = str(account_id or "").strip().lower()
-    if not account_norm:
-        raise ValueError("account_id가 필요합니다.")
-
-    settings = get_account_settings(account_norm)
-    raw_types = settings.get("ticker_types")
-    if raw_types is None:
-        return []
-    if not isinstance(raw_types, list):
-        raise RuntimeError(f"계좌 '{account_norm}'의 ticker_types는 배열이어야 합니다.")
-
-    allowed: list[str] = []
-    valid_types = set(list_available_ticker_types())
-    for raw_type in raw_types:
-        ticker_type = str(raw_type or "").strip().lower()
-        if not ticker_type:
-            continue
-        if ticker_type not in valid_types:
-            raise RuntimeError(f"계좌 '{account_norm}'의 ticker_types에 알 수 없는 종목풀이 있습니다: {ticker_type}")
-        if ticker_type not in allowed:
-            allowed.append(ticker_type)
-    return allowed
-
-
-def _is_korean_etf_ticker_type(ticker_type: str) -> bool:
-    """국내 상장 ETF 종목풀인지 확인한다."""
-    try:
-        settings = get_ticker_type_settings(ticker_type)
-    except Exception:
-        return False
-    return str(settings.get("country_code") or "").strip().lower() == "kor"
-
-
-def infer_ticker_type_for_account_ticker(account_id: str, ticker: str) -> str:
-    """계좌별 허용 종목풀을 우선 사용해 보유 종목의 ticker_type을 추론한다."""
-    ticker_norm = str(ticker or "").strip().upper()
-    if not ticker_norm:
-        raise ValueError("ticker가 필요합니다.")
-
-    allowed_types = _get_account_allowed_ticker_types(account_id)
-    if not allowed_types:
-        return infer_ticker_type_for_ticker(ticker_norm)
-
-    active_matches = [
-        ticker_type
-        for ticker_type in _build_active_pool_ticker_map().get(ticker_norm, [])
-        if ticker_type in allowed_types
-    ]
-    if len(active_matches) == 1:
-        return active_matches[0]
-    if len(active_matches) > 1:
-        joined = ", ".join(sorted(active_matches))
-        raise RuntimeError(f"계좌 '{account_id}'에서 동일한 티커 {ticker_norm}가 여러 종목풀에 있습니다: {joined}")
-
-    if len(allowed_types) == 1:
-        return allowed_types[0]
-
-    if ticker_norm.isdigit() and len(ticker_norm) == 6:
-        is_domestic_etf = ticker_norm in _load_domestic_etf_ticker_set()
-        if is_domestic_etf:
-            etf_candidates = [ticker_type for ticker_type in allowed_types if _is_korean_etf_ticker_type(ticker_type)]
-            if len(etf_candidates) == 1:
-                return etf_candidates[0]
-            if len(etf_candidates) > 1:
-                joined = ", ".join(sorted(etf_candidates))
-                raise RuntimeError(f"계좌 '{account_id}'에서 ETF 티커 {ticker_norm}의 종목풀이 모호합니다: {joined}")
-        elif "kor" in allowed_types:
-            return "kor"
-
-    if ticker_norm.endswith(".AX") and "aus" in allowed_types:
-        return "aus"
-    if (ticker_norm.isalpha() or "." in ticker_norm) and "us" in allowed_types:
-        return "us"
-
-    joined = ", ".join(allowed_types)
-    raise RuntimeError(
-        f"계좌 '{account_id}'의 허용 종목풀({joined})에서 {ticker_norm}의 ticker_type을 추론할 수 없습니다."
-    )
 
 
 def get_etfs(ticker_type: str, include_extra_tickers: Iterable[str] | None = None) -> list[dict[str, str]]:
@@ -405,7 +322,7 @@ def get_active_holding_tickers() -> dict[str, set[str]]:
             if qty <= 0:
                 continue
             try:
-                inferred_type = infer_ticker_type_for_account_ticker(account_id, t)
+                inferred_type = infer_ticker_type_for_ticker(t)
             except Exception as exc:
                 logger.warning("보유 종목 ticker_type 추론 실패, 건너뜀 (%s/%s): %s", account_id, t, exc)
                 continue
