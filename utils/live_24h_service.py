@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from config import HYPERLIQUID_DEX, HYPERLIQUID_INFO_URL, HYPERLIQUID_SYMBOLS, MARKET_SCHEDULES
+from config import CACHE_TTL_LIVE, HYPERLIQUID_DEX, HYPERLIQUID_INFO_URL, HYPERLIQUID_SYMBOLS, MARKET_SCHEDULES
 from services.price_service import get_exchange_rates, get_realtime_snapshot
 from utils.data_loader import fetch_toss_kr_stock_snapshot, resolve_toss_us_product_codes
 from utils.market_trend_service import _fetch_naver_kor_index_close
@@ -476,7 +476,7 @@ def load_live_24h_quotes() -> dict[str, Any]:
 
 
 _REGULAR_CLOSE_CACHE: dict[tuple[str, bool], tuple[tuple[float | None, float | None, float | None], float]] = {}
-_REGULAR_CLOSE_TTL = 60.0  # 정규장 종가는 하루 1회만 바뀌므로 짧은 TTL 로 yfinance 호출을 줄인다.
+_REGULAR_CLOSE_TTL = CACHE_TTL_LIVE  # 정규장 종가는 하루 1회만 바뀌므로 짧은 TTL 로 yfinance 호출을 줄인다.
 
 
 def _regular_close_from_series(

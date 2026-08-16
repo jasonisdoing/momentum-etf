@@ -8,6 +8,7 @@ from functools import lru_cache
 from time import monotonic
 from typing import Any
 
+from config import CACHE_TTL_LIVE
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 
@@ -64,7 +65,7 @@ def ensure_stock_meta_readable() -> None:
 # ---------------------------------------------------------------------------
 _TICKER_TYPE_STOCKS_CACHE: dict[str, tuple[float, list[dict]]] = {}
 _LISTING_CACHE: dict[tuple[str, str], str | None] = {}
-_CACHE_TTL_SECONDS = 60.0
+_CACHE_TTL_SECONDS = CACHE_TTL_LIVE
 
 
 def _invalidate_cache(ticker_type: str | None = None) -> None:

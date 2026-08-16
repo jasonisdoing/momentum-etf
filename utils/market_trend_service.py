@@ -21,6 +21,7 @@ import pandas as pd
 import yfinance as yf
 
 from config import (
+    CACHE_TTL_LIVE,
     MARKET_TREND_SCORE_ANCHOR_PERCENTILE,
     MARKET_TREND_SCORE_MA_DAYS,
     MARKET_TREND_SUPERTREND_MULTIPLIER,
@@ -80,7 +81,7 @@ def _fetch_naver_kor_index_close(symbol: str, count: int) -> pd.Series | None:
 # 락으로 직렬화하면 홈의 지수 4개가 순차 다운로드가 되어 느려지므로,
 # 짧은 TTL 캐시를 함께 둔다 — 같은 화면의 뒤이은 요청은 캐시로 즉시 응답한다.
 _OHLC_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}
-_OHLC_CACHE_TTL_SEC = 60.0
+_OHLC_CACHE_TTL_SEC = CACHE_TTL_LIVE
 
 
 def _fetch_yf_intraday_last_close(yf_ticker: str) -> tuple[pd.Timestamp, float] | None:

@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from fastapi import APIRouter, Body, Depends, Query
 
-from config import MARKET_SCHEDULES
+from config import CACHE_TTL_LIVE, MARKET_SCHEDULES
 from fastapi_app.dependencies import require_internal_token
 from services.component_price_service import build_component_price_snapshot, enrich_component_prices
 from services.portfolio_change_service import (
@@ -53,7 +53,7 @@ router = APIRouter(prefix="/internal/ticker-detail", tags=["ticker-detail"])
 # 하지 않도록 짧은 TTL 로 캐시한다(타임아웃 후 재시도도 즉시 응답).
 _COMPARE_CACHE: dict[str, tuple[dict[str, object], float]] = {}
 _COMPARE_CACHE_LOCK = threading.Lock()
-_COMPARE_CACHE_TTL = 20.0
+_COMPARE_CACHE_TTL = CACHE_TTL_LIVE
 
 
 def _load_us_pool_ticker_set() -> set[str]:

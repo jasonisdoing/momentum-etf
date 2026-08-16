@@ -18,6 +18,7 @@ from typing import Any
 
 import pandas as pd
 
+from config import CACHE_TTL_COMPUTE
 from utils.account_settings_store import load_account_docs, save_account_settings
 from utils.data_loader import fetch_ohlcv
 from utils.holdings_detail_service import load_all_holdings_detail
@@ -196,7 +197,7 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
 
 # 배지 계산은 보유 종목별 가격 시계열 조회라 수 초 걸린다 — 계좌별 TTL 캐시로 재계산을 줄인다.
 # (알람 설정 저장 시 무효화. 판정 기반인 종가·실시간 스냅샷은 이 TTL 내 변화가 미미하다.)
-_BADGES_CACHE_TTL_SECONDS = 120.0
+_BADGES_CACHE_TTL_SECONDS = CACHE_TTL_COMPUTE
 _badges_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 

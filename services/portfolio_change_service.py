@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from config import CACHE_TTL_COMPUTE
 from services.component_price_service import enrich_component_prices
 from services.price_service import get_exchange_rate_series, get_exchange_rates
 from services.stock_cache_service import get_stock_cache_meta, refresh_stock_portfolio_change_cache
@@ -23,7 +24,7 @@ from utils.stock_cache_meta_io import get_previous_stock_cache_meta
 logger = logging.getLogger(__name__)
 
 _HOLDINGS_PRICE_FETCH_LIMIT = 100
-_TTL_SECONDS = 300
+_TTL_SECONDS = CACHE_TTL_COMPUTE
 _PORTFOLIO_CHANGE_CALC_VERSION = 4  # 합계 계산을 base_date 누적(cumulative_change_pct)로 전환
 
 _PORTFOLIO_CHANGE_CACHE: dict[str, dict[str, Any]] = {}

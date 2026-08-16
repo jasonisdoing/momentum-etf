@@ -14,11 +14,12 @@ import threading
 from datetime import datetime, timezone
 from time import monotonic
 
+from config import CACHE_TTL_LIVE
 from leverage.engine.backtest.settings import normalize_settings
 
 _CONFIG_COLLECTION = "leverage_config"
 _STATE_COLLECTION = "leverage_state"
-_CACHE_TTL_SECONDS = 30.0
+_CACHE_TTL_SECONDS = CACHE_TTL_LIVE
 
 _lock = threading.Lock()
 _config_cache: dict[str, tuple[dict, float]] = {}  # profile -> (raw_config, cached_at)

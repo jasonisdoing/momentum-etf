@@ -12,6 +12,7 @@ from typing import Any
 
 import requests
 
+from config import CACHE_TTL_COMPUTE
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -29,7 +30,7 @@ _HEADERS = {
 }
 
 # 메모리 캐시 (5분)
-_CACHE_TTL = 300
+_CACHE_TTL = CACHE_TTL_COMPUTE
 _cache: dict[str, Any] = {
     "data": None,
     "expires_at": 0.0,

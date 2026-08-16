@@ -8,6 +8,7 @@ import pandas as pd
 import requests  # noqa: F401  # 타입 힌트/하위 호환을 위해 유지
 import yfinance as yf
 
+from config import CACHE_TTL_META
 from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
 from services.etf_meta_service import fetch_korean_etf_info_from_naver
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
@@ -206,7 +207,7 @@ from utils.stock_list_io import bulk_update_stocks, get_all_etfs_including_delet
 
 # ETF 메타(info) 캐시 TTL — 이 시간 안에 갱신된 메타가 있으면 네이버 info 호출을 스킵.
 # 사용자 정책: info 는 변경 빈도가 낮으므로 1일 TTL, holdings 는 항상 갱신.
-_ETF_INFO_CACHE_TTL = timedelta(days=1)
+_ETF_INFO_CACHE_TTL = timedelta(seconds=CACHE_TTL_META)
 
 
 def _is_meta_cache_fresh(existing_doc: dict[str, Any] | None) -> bool:
