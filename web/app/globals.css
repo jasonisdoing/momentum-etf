@@ -4293,10 +4293,6 @@ a {
   margin-left: auto;
 }
 
-.appMainHeader .form-select,
-.appMainHeader .form-control,
-.appMainHeader .field,
-.appMainHeader .btn,
 .appSegmentedToggleButton,
 .appActionHeaderInner .btn {
   min-height: 36px;
@@ -4304,11 +4300,46 @@ a {
   font-weight: 700;
 }
 
+/* 메인 헤더 컨트롤 — 한 줄에 나란히 놓이므로 높이를 30px 로 통일한다.
+   높이를 화면에서 인라인으로 잡으면 줄이 어긋난다(developer_guide 6장).
+   토글은 껍데기가 30px 이고 안쪽 버튼은 그보다 작다 — 아래에서 따로 잡는다. */
+.appMainHeader .form-select,
+.appMainHeader .form-control,
+.appMainHeader .field,
+.appMainHeader .btn,
+.appMainHeader .appSegmentedToggle {
+  min-height: 30px;
+  height: 30px;
+  font-size: var(--fs-base);
+  font-weight: 700;
+}
+
 .appMainHeader .form-select,
 .appMainHeader .form-control,
 .appMainHeader .field {
-  padding-top: 0.45rem;
-  padding-bottom: 0.45rem;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* 껍데기 30px = 버튼 24px + 패딩 2px×2 + 테두리 1px×2. */
+.appMainHeader .appSegmentedToggle {
+  padding: 2px;
+}
+
+.appMainHeader .appSegmentedToggleButton {
+  min-height: 24px;
+  height: 24px;
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 1.2;
+}
+
+/* 스위치도 같은 줄에 서므로 높이를 맞춘다. */
+.appMainHeader .form-check.form-switch {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  margin-bottom: 0;
 }
 
 .appSegmentedToggle {

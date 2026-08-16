@@ -20,9 +20,7 @@ def _month_options(settings: dict) -> list[int]:
     from utils.pool_signal_backtest_service import get_month_options
     from utils.steady_momentum_service import available_backtest_months, load_benchmark_close
 
-    limit = available_backtest_months(
-        load_benchmark_close(settings["pool"]), int(settings["long_ma_days"])
-    )
+    limit = available_backtest_months(load_benchmark_close(settings["pool"]), int(settings["long_ma_days"]))
     options = [month for month in get_month_options() if month <= limit]
     if limit not in options:
         options.append(limit)
@@ -112,7 +110,7 @@ def post_strategy_sm_backtest(
     payload: dict = Body(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """월간 리밸런싱 백테스트.
+    """주간 리밸런싱 백테스트.
 
     body: ``{"months": 12, "include_daily": false}``.
     ``include_daily`` 는 일간 탭을 볼 때만 참으로 보낸다 — 일별 계산은 응답이

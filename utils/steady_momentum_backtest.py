@@ -1,15 +1,18 @@
-"""Steady Momentum 월간 리밸런싱 백테스트.
+"""Steady Momentum 주간 리밸런싱 백테스트.
 
 방식
 ----
-- 판정과 체결을 분리한다: **월말 전 거래일(T−1) 종가까지의 데이터**로 선정을
-  계산하고, **월말(T) 종가**에 교체를 체결한다. 종가로 판정한 것을 같은 종가에
-  체결하는 동시성 편향(look-ahead)을 없앤 것 — 실제로는 전일 밤 신호 계산 후
-  다음날 종가 주문에 해당한다.
+- **매주 재선정한다.** 판정과 체결을 분리한다: **주 마지막 거래일 종가**까지의
+  데이터로 선정을 계산하고, **다음 주 첫 거래일 시가**에 체결한다. 한 주 종가를
+  모두 보고 판정한 뒤 주말 동안 검토할 시간을 두는 리듬이며, 종가로 판정한 것을
+  같은 종가에 체결하는 동시성 편향(look-ahead)도 없다.
 - 선정은 꾸준한 모멘텀 점수(연율화 상대기울기 × R²) 순 — 화면 선정과 같은
   ``rank_candidates`` 를 써서 두 화면이 항상 일치한다.
 - 슬롯 고정 비중: 종목당 1/top_n 로 배분하고, 자격 종목이 top_n 보다 적으면
-  **빈 슬롯은 현금(수익 0)** 으로 남긴다 — 약세로 후보가 줄면 자동 현금 방어.
+  빈 슬롯은 현금으로 남긴다.
+- **주중 매도**(simulate_intraweek_exits): 보유 종목이 보유 자격(장기 이격 > 0 &
+  단기 이격 >= 0, hold_eligible_mask 와 동일)을 잃으면 다음 거래일 시가에 판다.
+  판 슬롯은 다음 주 교체까지 현금이다 — 주중 재매수는 하지 않는다.
 - 슬리피지는 편도(%)로, 리밸런싱에서 실제 매매되는 금액 전체에 부과한다:
   편출 전량 매도 + 편입 1/N 매수 + **유지 종목의 1/N 재조정 매매**(한 달간
   흘러간 비중과 목표 1/N 의 차이)까지 포함 — 완전 리밸런싱 모델과 비용이 일치한다.
@@ -36,12 +39,14 @@ from utils.steady_momentum_service import (
     load_price_frames,
     load_settings,
     load_universe,
-    month_last_two_trading_days,
     pool_info,
     rank_candidates,
     select_candidates,
     select_top,
+    simulate_intraweek_exits,
     validate_settings,
+    week_last_trading_day,
+    week_rebalance_pair,
 )
 
 # 미국 풀 참고 지수 — 유사 컨셉 ETF(FMTM)와 같은 구간을 나란히 비교한다 (벤치마크 아님).
@@ -49,12 +54,20 @@ US_REFERENCE_TICKER = "FMTM"
 
 
 def _rebalance_dates(benchmark_close: pd.Series, months: int) -> list[pd.Timestamp]:
-    """월말 거래일 목록 — 마지막 항목은 최신 거래일(진행 중인 달 포함)."""
+    """주 교체일(각 주의 첫 거래일) 목록 — 최근 ``months`` 개월 구간.
+
+    판정은 그 직전 거래일(= 전주 마지막 거래일) 종가다. 마지막 항목은 최신 거래일이라
+    진행 중인 구간의 성과까지 보여준다.
+    """
     index = benchmark_close.index
-    month_ends = index.to_series().groupby(index.to_period("M")).max().tolist()
-    if len(month_ends) < months + 1:
+    week_ends = index.to_series().groupby(index.to_period("W")).min().tolist()
+    start_bound = index[-1] - pd.DateOffset(months=months)
+    dates = [stamp for stamp in week_ends if stamp >= start_bound]
+    if index[-1] not in dates:
+        dates.append(index[-1])
+    if len(dates) < 2:
         raise ValueError(f"백테스트 {months}개월에 필요한 데이터가 부족합니다.")
-    return month_ends[-(months + 1) :]
+    return dates
 
 
 def _open_series(frame: pd.DataFrame) -> pd.Series | None:
@@ -101,7 +114,7 @@ def run_backtest(
     시계열을 재색인해야 하고 응답도 수천 행이 되므로, 화면에서 일간 탭을 볼 때만
     요청한다. 동작이 달라지는 값이라 기본값을 두지 않는다.
 
-"""
+    """
     max_months = get_max_backtest_months()
     if not isinstance(months, int) or not 1 <= months <= max_months:
         raise ValueError(f"'months' 는 1~{max_months} 사이의 정수여야 합니다.")
@@ -125,8 +138,7 @@ def run_backtest(
     pool_max = available_backtest_months(benchmark_close, int(settings["long_ma_days"]))
     if months > pool_max:
         raise ValueError(
-            f"장기 이평선 기준으로 이 종목풀은 최대 {pool_max}개월까지 "
-            f"백테스트할 수 있습니다 (요청 {months}개월)."
+            f"장기 이평선 기준으로 이 종목풀은 최대 {pool_max}개월까지 백테스트할 수 있습니다 (요청 {months}개월)."
         )
 
     # 참고 지수 — 미국 풀은 유사 컨셉 ETF(FMTM)를 나란히 보여준다
@@ -136,15 +148,13 @@ def run_backtest(
     reference_close: pd.Series | None = None
     reference_name: str | None = None
     if pool_info(pool)["country"] == "us":
-        reference_frame = load_cached_frames_bulk_from_all_ticker_types([US_REFERENCE_TICKER]).get(
-            US_REFERENCE_TICKER
-        )
+        reference_frame = load_cached_frames_bulk_from_all_ticker_types([US_REFERENCE_TICKER]).get(US_REFERENCE_TICKER)
         if reference_frame is not None and not reference_frame.empty:
             reference_close = pd.to_numeric(reference_frame["Close"], errors="coerce").dropna()
             reference_name = US_REFERENCE_TICKER
     dates = _rebalance_dates(benchmark_close, months)
 
-    # 판정 시점 = 각 리밸런싱일(체결일)의 직전 거래일. 벤치마크 달력 기준.
+    # 판정 시점 = 각 교체일(체결일)의 직전 거래일. 벤치마크 달력 기준.
     bench_index = benchmark_close.index
     signal_dates: list[pd.Timestamp] = []
     for date in dates[:-1]:
@@ -153,27 +163,30 @@ def run_backtest(
             raise ValueError("판정 기준일(직전 거래일)을 구할 수 없습니다 — 데이터가 부족합니다.")
         signal_dates.append(prior[-1])
 
-    # '예정' 행 — 마지막 데이터 날짜가 완결된 월말이면(예: 8/1 시점의 7/31),
-    # 그 월말 종가 교체분(다음 달 포트폴리오)을 함께 계산해 표 맨 위에 보여준다.
-    # 진행 중인 달(부분 월)에서는 마지막 행이 이미 현재 포트폴리오라 예정 행이 없다.
+    # '예정' 행 — 다음 교체일의 판정일(= 이번 주 마지막 거래일) 종가가 이미 확정됐으면
+    # 그 판정으로 뽑힐 종목을 미리 보여준다.
+    country = pool_info(pool)["country"]
     pending_signal: pd.Timestamp | None = None
-    pair = month_last_two_trading_days(
-        pool_info(pool)["country"], dates[-1].to_period("M")
-    )
-    if pair is not None:
-        _, signal_calendar = pair
-        if pd.Timestamp.now().normalize() > signal_calendar:
-            prior = bench_index[bench_index <= signal_calendar]
-            if len(prior) > 0:
-                pending_signal = prior[-1]
+    next_rebalance: pd.Timestamp | None = None
+    last_cached = dates[-1]
+    next_monday = (last_cached - pd.Timedelta(days=int(last_cached.weekday())) + pd.Timedelta(weeks=1)).normalize()
+    for monday in (last_cached - pd.Timedelta(days=int(last_cached.weekday())), next_monday):
+        pair = week_rebalance_pair(country, monday)
+        if pair is None:
+            continue
+        rebalance_day, signal_day = pair
+        if rebalance_day <= last_cached:
+            continue  # 이미 지난 교체일
+        next_rebalance = rebalance_day
+        if signal_day <= last_cached:
+            pending_signal = bench_index[bench_index <= signal_day][-1]
+        break
 
-    # 리밸런싱 시점별 후보 (모멘텀은 가격 캐시만 쓰므로 즉시 계산된다)
+    # 교체 시점별 후보 (모멘텀은 가격 캐시만 쓰므로 즉시 계산된다)
     candidates_by_date: list[list[dict[str, Any]]] = []
     all_signal_dates = signal_dates + ([pending_signal] if pending_signal is not None else [])
     for signal_date in all_signal_dates:
-        candidates_by_date.append(
-            select_candidates(universe, frames, settings, as_of=signal_date)
-        )
+        candidates_by_date.append(select_candidates(universe, frames, settings, as_of=signal_date))
 
     slippage = float(settings["slippage_pct"]) / 100.0
     top_n = int(settings["top_n"])
@@ -189,45 +202,122 @@ def run_backtest(
     clean_reference: pd.Series | None = None
     if include_daily:
         clean_closes = {
-            ticker: pd.to_numeric(frame["Close"], errors="coerce").dropna()
-            for ticker, frame in frames.items()
+            ticker: pd.to_numeric(frame["Close"], errors="coerce").dropna() for ticker, frame in frames.items()
         }
         clean_benchmark = pd.to_numeric(benchmark_close, errors="coerce").dropna()
         clean_reference = (
-            pd.to_numeric(reference_close, errors="coerce").dropna()
-            if reference_close is not None
-            else None
+            pd.to_numeric(reference_close, errors="coerce").dropna() if reference_close is not None else None
         )
     daily: list[dict[str, Any]] = []
 
-    monthly: list[dict[str, Any]] = []
-    # 수익인출(고정원금) 누적 순수익(%) — 월 수익률의 산술 합 (아래 monthly 루프 주석 참고).
-    harvest_cum_pct = 0.0
+    monthly_by_key: dict[str, list[float]] = {}
+    monthly_bench: dict[str, list[float]] = {}
+    monthly_ref: dict[str, list[float]] = {}
+    monthly_order: list[str] = []
+    weekly: list[dict[str, Any]] = []
+    # 주간 표용 매매 이벤트 — 체결일 기준. 주 행이 이걸로 그 주의 편입·편출을 만든다.
+    trade_events: list[dict[str, Any]] = []
+    # 체결 목록 — 편입~편출 한 쌍이 한 행. 아직 안 판 종목은 보유중 행으로 남는다.
+    open_positions: dict[str, dict[str, Any]] = {}
+    trades: list[dict[str, Any]] = []
+
+    def _open_price(ticker: str, day: pd.Timestamp) -> float | None:
+        frame = frames.get(ticker)
+        opens = _open_series(frame) if frame is not None else None
+        if opens is None:
+            return None
+        value = opens.asof(day)
+        return float(value) if pd.notna(value) else None
+
+    def _open_trade(ticker: str, day: pd.Timestamp) -> None:
+        price = _open_price(ticker, day)
+        if price:
+            open_positions[ticker] = {"entry_date": day, "entry_price": price}
+
+    def _open_position_row(ticker: str, position: dict[str, Any]) -> dict[str, Any]:
+        """아직 안 판 종목 — 마지막 종가로 평가한 보유중 행."""
+        frame = frames.get(ticker)
+        close = (
+            pd.to_numeric(frame["Close"], errors="coerce").dropna()
+            if frame is not None and not frame.empty and "Close" in frame.columns
+            else None
+        )
+        price = float(close.iloc[-1]) if close is not None and not close.empty else None
+        return {
+            "ticker": ticker,
+            "name": name_by_ticker.get(ticker, ticker),
+            "entry_date": position["entry_date"].strftime("%Y-%m-%d"),
+            "entry_price": round(position["entry_price"], 4),
+            "exit_date": None,
+            "exit_price": round(price, 4) if price is not None else None,
+            "return_pct": round((price / position["entry_price"] - 1) * 100, 2) if price is not None else None,
+            "days": int((dates[-1] - position["entry_date"]).days),
+            "reason": "보유중",
+        }
+
+    def _close_trade(ticker: str, day: pd.Timestamp, reason: str) -> None:
+        position = open_positions.pop(ticker, None)
+        price = _open_price(ticker, day)
+        if position is None or not price:
+            return
+        trades.append(
+            {
+                "ticker": ticker,
+                "name": name_by_ticker.get(ticker, ticker),
+                "entry_date": position["entry_date"].strftime("%Y-%m-%d"),
+                "entry_price": round(position["entry_price"], 4),
+                "exit_date": day.strftime("%Y-%m-%d"),
+                "exit_price": round(price, 4),
+                "return_pct": round((price / position["entry_price"] - 1) * 100, 2),
+                "days": int((day - position["entry_date"]).days),
+                "reason": reason,
+            }
+        )
+
     strategy_returns: list[float] = []
     benchmark_returns: list[float] = []
     reference_returns: list[float] = []
     previous_holdings: set[str] = set()
-    # 직전 보유 구간의 종목별 성장배수(1+수익률) — 리밸런싱 시점의 드리프트 비중 계산용.
+    # 직전 보유 구간의 종목별 성장배수(1+수익률) — 교체 시점의 드리프트 비중 계산용.
     previous_growth: dict[str, float] = {}
 
-    # 구간 수는 교체일 개수에서 나온다 — 매주는 months(달력 기간)보다 훨씬 많다.
     for position in range(len(dates) - 1):
         start = dates[position]
         end = dates[position + 1]
-        # 판정은 전 거래일(signal_dates) 기준, 체결·보유 구간은 월말 종가(start→end).
+        # 판정은 교체일 직전 거래일(signal_dates), 체결·보유 구간은 교체일 시가(start→end).
         scored = rank_candidates(candidates_by_date[position])
-        holdings = [
-            item["ticker"]
-            for item in select_top(scored, top_n, max_per_industry, industry_by_ticker)
-        ]
+        holdings = [item["ticker"] for item in select_top(scored, top_n, max_per_industry, industry_by_ticker)]
         holdings_set = set(holdings)
         added_tickers = sorted(holdings_set - previous_holdings)
         removed_tickers = sorted(previous_holdings - holdings_set)
-        # 슬롯 고정 비중 — 선정이 top_n 보다 적으면 빈 슬롯은 현금(수익 0)으로 남긴다.
+        # 슬롯 고정 비중 — 선정이 top_n 보다 적으면 빈 슬롯은 현금으로 남긴다.
         target_weight = 1.0 / top_n
 
-        # ── 리밸런싱 매매 금액(포트폴리오 대비 비율) ──
-        # 유지 종목도 매월 1/N 로 재조정하므로, 드리프트 비중과 목표의 차이가 전부 매매다.
+        # ── 주중 매도 — 자격 상실 종목은 다음 거래일 시가 매도 (선정 화면과 같은 함수).
+        # 완결된 주는 마지막 판정일(교체일 직전)을 스캔에서 제외한다 — 그 판정의 체결은
+        # 주 교체가 대신하기 때문이다(이중 계산 방지). 마지막 구간은 끝까지 스캔해
+        # 마지막 종가 판정분을 '다음 거래일 매도 예정'으로 남긴다.
+        scan_days = bench_index[(bench_index >= start) & (bench_index < end)]
+        exits: list[dict[str, Any]] = []
+        if len(scan_days) >= 2:
+            exits = simulate_intraweek_exits(frames, settings, holdings_set, bench_index, start, scan_days[-2])
+        exited_tickers = {x["ticker"] for x in exits}
+        sell_date_by_ticker = {x["ticker"]: x["sell_date"] for x in exits}
+        # 이 구간을 끝까지 들고 가는 종목 — 다음 교체·표시가 이 기준을 쓴다.
+        survivors = holdings_set - exited_tickers
+
+        for ticker in added_tickers:
+            trade_events.append({"date": start, "action": "add", "ticker": ticker})
+            _open_trade(ticker, start)
+        for ticker in removed_tickers:
+            trade_events.append({"date": start, "action": "remove", "ticker": ticker})
+            _close_trade(ticker, start, "주간 교체")
+        for exit_info in exits:
+            trade_events.append({"date": exit_info["sell_date"], "action": "remove", "ticker": exit_info["ticker"]})
+            _close_trade(exit_info["ticker"], exit_info["sell_date"], "주중 이탈")
+
+        # ── 교체 매매 금액(포트폴리오 대비 비율) ──
+        # 유지 종목도 매주 1/N 로 재조정하므로, 드리프트 비중과 목표의 차이가 전부 매매다.
         # 현금 슬롯(__CASH__)은 비중 분모에는 들어가지만 매매 비용은 없다.
         if position > 0:
             growth = {ticker: previous_growth.get(ticker, 1.0) for ticker in previous_holdings}
@@ -242,24 +332,25 @@ def run_backtest(
                 max(target_weight - drifted[t], 0.0) for t in holdings_set & previous_holdings
             )
             traded_notional = sell_notional + buy_notional
-            turnover_pct = round(len(added_tickers) / top_n * 100.0, 1)
         else:
-            traded_notional = len(holdings) * target_weight  # 첫 달은 투자분만 신규 매수
-            turnover_pct = None
+            traded_notional = len(holdings) * target_weight  # 첫 구간은 투자분만 신규 매수
+        # 주중 매도도 매매 금액에 넣는다 (슬롯당 1/N).
+        traded_notional += len(exits) * target_weight
         cost = slippage * traded_notional
 
+        # 보유 구간 — 주중 매도된 종목은 매도 체결일 시가까지만 수익이 발생한다.
         period_returns: dict[str, float] = {}
         for ticker in holdings:
             frame = frames.get(ticker)
             opens = _open_series(frame) if frame is not None else None
             if opens is None:
                 continue
-            value = _open_return(opens, start, end)
+            value = _open_return(opens, start, sell_date_by_ticker.get(ticker, end))
             if value is not None:
                 period_returns[ticker] = value
         # 슬롯 모델: 보유 종목은 각 1/N, 빈 슬롯은 현금(0%) — 분모는 항상 top_n.
         if not holdings:
-            gross: float | None = 0.0  # 전량 현금인 달
+            gross: float | None = 0.0  # 전량 현금인 주
         elif period_returns:
             gross = sum(period_returns.values()) / top_n
         else:
@@ -268,9 +359,7 @@ def run_backtest(
         strategy_pct = (gross - cost) * 100.0 if gross is not None else None
         benchmark_return = _period_return(benchmark_close, start, end)
         benchmark_pct = benchmark_return * 100.0 if benchmark_return is not None else None
-        reference_return = (
-            _period_return(reference_close, start, end) if reference_close is not None else None
-        )
+        reference_return = _period_return(reference_close, start, end) if reference_close is not None else None
         reference_pct = reference_return * 100.0 if reference_return is not None else None
 
         if strategy_pct is not None:
@@ -282,10 +371,20 @@ def run_backtest(
 
         # ── 일간 행 ──
         # 이 구간(start→end)의 보유 종목은 고정이다. start 종가를 1 로 두고 매일의
-        # 동일가중 포트폴리오 가치를 구한 뒤 전일 대비 변동률을 낸다. 리밸런싱 비용은
-        # 구간 첫날에 한 번 반영한다(월간 계산과 같은 방식).
+        # 동일가중 포트폴리오 가치를 구한 뒤 전일 대비 변동률을 낸다. 교체 비용은
+        # 구간 첫날에 한 번 반영한다(주간 계산과 같은 방식).
         window = bench_index[(bench_index > start) & (bench_index <= end)] if include_daily else []
         if len(window) > 0:
+
+            def freeze_after_sell(curve: pd.Series, ticker: str) -> pd.Series:
+                """주중 매도된 종목은 매도일 이후 가치를 고정한다 (현금이 된 슬롯)."""
+                sell_date = sell_date_by_ticker.get(ticker)
+                if sell_date is None:
+                    return curve
+                before = curve[window <= sell_date]
+                frozen = float(before.iloc[-1]) if len(before) > 0 else 1.0
+                return curve.where(window <= sell_date, frozen)
+
             ratios = []
             for ticker in holdings:
                 series = clean_closes.get(ticker)
@@ -295,12 +394,12 @@ def run_backtest(
                 if pd.isna(base) or float(base) <= 0:
                     continue
                 curve = series.reindex(window, method="ffill") / float(base)
-                ratios.append(curve)
+                ratios.append(freeze_after_sell(curve, ticker))
             # 슬롯 모델 — 보유 곡선 합 + 현금 슬롯(가치 1 고정), 분모는 top_n.
             if ratios:
                 portfolio = (pd.concat(ratios, axis=1).sum(axis=1) + float(top_n - len(ratios))) / top_n
             elif not holdings:
-                portfolio = pd.Series(1.0, index=window)  # 전량 현금인 달 — 변동 없음
+                portfolio = pd.Series(1.0, index=window)  # 전량 현금인 주 — 변동 없음
             else:
                 portfolio = None
 
@@ -343,95 +442,178 @@ def run_backtest(
                     }
                 )
 
-        # 수익인출(고정원금) 누적 — 매월 원금으로 리셋하고 수익은 잘라내는 운용이라
-        # 원금 대비 누적 순수익 = 월 수익률의 **산술 합**이다 (복리 총수익과 비교용).
-        # 그 달의 인출/입금 흐름 자체는 전략(%)과 같은 값이라 따로 싣지 않는다.
+        # ── 월간 집계 — 구간 수익률을 구간 종료일이 속한 달로 복리 합산한다.
+        month_key = end.strftime("%Y-%m")
+        if month_key not in monthly_by_key:
+            monthly_order.append(month_key)
+            monthly_by_key[month_key], monthly_bench[month_key], monthly_ref[month_key] = [], [], []
         if strategy_pct is not None:
-            harvest_cum_pct += strategy_pct
+            monthly_by_key[month_key].append(strategy_pct)
+        if benchmark_pct is not None:
+            monthly_bench[month_key].append(benchmark_pct)
+        if reference_pct is not None:
+            monthly_ref[month_key].append(reference_pct)
 
-        monthly.append(
-            {
-                "month": end.strftime("%Y-%m"),
-                "strategy_pct": round(strategy_pct, 2) if strategy_pct is not None else None,
-                "harvest_cum_pct": round(harvest_cum_pct, 2) if strategy_pct is not None else None,
-                "benchmark_pct": round(benchmark_pct, 2) if benchmark_pct is not None else None,
-                "reference_pct": round(reference_pct, 2) if reference_pct is not None else None,
-                "excess_pp": (
-                    round(strategy_pct - benchmark_pct, 2)
-                    if strategy_pct is not None and benchmark_pct is not None
-                    else None
-                ),
-                "holdings_count": len(holdings),
-                "turnover_pct": turnover_pct,
-                # 이 달 시작(직전 월말 종가)에 교체한 종목 — 첫 달은 전량 편입.
-                "added": [holding_label(ticker) for ticker in added_tickers],
-                "removed": [holding_label(ticker) for ticker in removed_tickers],
-            }
-        )
-        previous_holdings = holdings_set
-        previous_growth = {
-            ticker: 1.0 + period_returns.get(ticker, 0.0) for ticker in previous_holdings
-        }
-        # 현금 = 빈 슬롯(각 성장배수 1.0) — 다음 교체일 비중 분모에 남긴다.
-        cash_multiplier = float(top_n - len(holdings))
+        previous_holdings = survivors
+        previous_growth = {ticker: 1.0 + period_returns.get(ticker, 0.0) for ticker in previous_holdings}
+        # 현금 = 빈 슬롯 + 주중 매도 슬롯(근사 1.0) — 다음 교체일 비중 분모에 남긴다.
+        cash_multiplier = float(top_n - len(previous_holdings))
         if cash_multiplier > 0:
             previous_growth["__CASH__"] = cash_multiplier
 
-    # 예정 행 — 마지막 월말 종가에 실행될 교체 (수익률은 아직 없음)
+    def _compound(values: list[float]) -> float | None:
+        if not values:
+            return None
+        growth = 1.0
+        for value in values:
+            growth *= 1.0 + value / 100.0
+        return round((growth - 1.0) * 100.0, 2)
+
+    monthly: list[dict[str, Any]] = [
+        {
+            "month": key,
+            "strategy_pct": _compound(monthly_by_key[key]),
+            "benchmark_pct": _compound(monthly_bench[key]),
+            "reference_pct": _compound(monthly_ref[key]),
+        }
+        for key in monthly_order
+    ]
+
+    # ── 이미 체결된 최신 교체 — 마지막 캐시 거래일이 그 주의 교체일이면 그날 시가에
+    # 체결이 끝났다. 구간 루프는 이 날을 구간 끝으로만 보므로 여기서 반영한다.
+    current_holdings = previous_holdings
+    last_pair = week_rebalance_pair(country, last_cached - pd.Timedelta(days=int(last_cached.weekday())))
+    if last_pair is not None and last_pair[0] == last_cached:
+        selection = {
+            item["ticker"]
+            for item in select_top(
+                rank_candidates(
+                    select_candidates(universe, frames, settings, as_of=bench_index[bench_index < last_cached][-1])
+                ),
+                top_n,
+                max_per_industry,
+                industry_by_ticker,
+            )
+        }
+        for ticker in sorted(selection - previous_holdings):
+            trade_events.append({"date": last_cached, "action": "add", "ticker": ticker})
+            _open_trade(ticker, last_cached)
+        for ticker in sorted(previous_holdings - selection):
+            trade_events.append({"date": last_cached, "action": "remove", "ticker": ticker})
+            _close_trade(ticker, last_cached, "주간 교체")
+        current_holdings = selection
+
+    # ── 주간 행 — 달력 주(월~일) 단위. 기준일은 그 주 마지막 거래일, 수익률은 그 주의
+    # 성과, 편입·편출은 그 주에 체결된 매매다.
+    if include_daily and daily:
+
+        def _week_monday(stamp: pd.Timestamp) -> pd.Timestamp:
+            return (stamp - pd.Timedelta(days=int(stamp.weekday()))).normalize()
+
+        def _compound_daily(values: list[float | None]) -> float | None:
+            usable = [value for value in values if value is not None]
+            if not usable:
+                return None
+            growth = 1.0
+            for value in usable:
+                growth *= 1.0 + value / 100.0
+            return round((growth - 1.0) * 100.0, 2)
+
+        buckets: dict[pd.Timestamp, dict[str, Any]] = {}
+        for row in daily:
+            stamp = pd.Timestamp(row["date"])
+            bucket = buckets.setdefault(
+                _week_monday(stamp), {"end": stamp, "strategy": [], "benchmark": [], "reference": []}
+            )
+            bucket["end"] = max(bucket["end"], stamp)
+            bucket["strategy"].append(row["strategy_pct"])
+            bucket["benchmark"].append(row["benchmark_pct"])
+            bucket["reference"].append(row["reference_pct"])
+
+        events_sorted = sorted(trade_events, key=lambda event: event["date"])
+        event_index = 0
+        holdings_running = 0
+        for key in sorted(buckets):
+            bucket = buckets[key]
+            added_labels: list[str] = []
+            removed_labels: list[str] = []
+            while event_index < len(events_sorted) and events_sorted[event_index]["date"] <= bucket["end"]:
+                event = events_sorted[event_index]
+                if event["action"] == "add":
+                    holdings_running += 1
+                    added_labels.append(holding_label(event["ticker"]))
+                else:
+                    holdings_running -= 1
+                    removed_labels.append(holding_label(event["ticker"]))
+                event_index += 1
+            weekly.append(
+                {
+                    "week_end": bucket["end"].strftime("%Y-%m-%d"),
+                    "strategy_pct": _compound_daily(bucket["strategy"]),
+                    "benchmark_pct": _compound_daily(bucket["benchmark"]),
+                    "reference_pct": _compound_daily(bucket["reference"]),
+                    "holdings_count": holdings_running,
+                    "turnover_pct": round(len(added_labels) / top_n * 100.0, 1),
+                    "added": added_labels,
+                    "removed": removed_labels,
+                }
+            )
+
+    # ── 예정 행 — 다음 주. 매매가 없어도 '보유 N 유지'가 보이도록 항상 붙인다.
     if pending_signal is not None:
-        scored = rank_candidates(candidates_by_date[-1])
+        # 다음 교체 판정일 종가가 이미 확정됐다 — 그 선정을 그대로 보여준다.
         pending_holdings = {
             item["ticker"]
-            for item in select_top(scored, top_n, max_per_industry, industry_by_ticker)
+            for item in select_top(rank_candidates(candidates_by_date[-1]), top_n, max_per_industry, industry_by_ticker)
         }
-        monthly.append(
-            {
-                "month": (dates[-1].to_period("M") + 1).strftime("%Y-%m"),
-                "strategy_pct": None,
-                "harvest_cum_pct": None,
-                "benchmark_pct": None,
-                "reference_pct": None,
-                "excess_pp": None,
-                "holdings_count": len(pending_holdings),
-                "turnover_pct": round(len(pending_holdings - previous_holdings) / top_n * 100.0, 1),
-                "added": [holding_label(t) for t in sorted(pending_holdings - previous_holdings)],
-                "removed": [holding_label(t) for t in sorted(previous_holdings - pending_holdings)],
-                "stopped": [],
-                "is_pending": True,
-            }
+        pending_added = sorted(pending_holdings - current_holdings)
+        pending_removed = sorted(current_holdings - pending_holdings)
+        pending_count = len(pending_holdings)
+    else:
+        # 판정일이 아직 오지 않았다 — 마지막 종가로 판정한 주중 매도 예정만 반영한다.
+        pending_exits = simulate_intraweek_exits(
+            frames, settings, current_holdings, bench_index, last_cached, last_cached
         )
+        pending_added = []
+        pending_removed = sorted(x["ticker"] for x in pending_exits)
+        pending_count = len(current_holdings) - len(pending_removed)
+
+    weekly.append(
+        {
+            "week_end": week_last_trading_day(country, next_rebalance or (last_cached + pd.Timedelta(days=7))),
+            "strategy_pct": None,
+            "benchmark_pct": None,
+            "reference_pct": None,
+            "holdings_count": pending_count,
+            "turnover_pct": round(len(pending_added) / top_n * 100.0, 1),
+            "added": [holding_label(t) for t in pending_added],
+            "removed": [holding_label(t) for t in pending_removed],
+            "is_pending": True,
+        }
+    )
 
     def _summarize(returns: list[float]) -> tuple[float, float | None, float | None, float | None]:
         curve = pd.Series([1.0] + list(pd.Series(returns).add(1.0).cumprod()))
         total = (float(curve.iloc[-1]) - 1.0) * 100.0
-        # CAGR — 월별 표본 수 기준 연율화 (12개월 미만이면 연 환산이라 과장될 수 있음)
+        # CAGR — 주별 표본 수 기준 연율화 (1년 미만이면 연 환산이라 과장될 수 있음)
         sample_periods = len(returns)
         cagr = (
-            ((1.0 + total / 100.0) ** (12.0 / sample_periods) - 1.0) * 100.0
+            ((1.0 + total / 100.0) ** (52.0 / sample_periods) - 1.0) * 100.0
             if sample_periods > 0 and total > -100.0
             else None
         )
-        # 소르티노는 월별 수익률 기준 연율화 (레버리지 엔진 공용 함수 재사용).
-        # 표본 3개 미만이거나 하락 달이 없으면 None → 화면에서 '-'.
+        # 소르티노는 주별 수익률 기준 연율화 (레버리지 엔진 공용 함수 재사용).
+        # 표본 3개 미만이거나 하락 주가 없으면 None → 화면에서 '-'.
         return (
             round(total, 2),
             max_drawdown_pct(curve),
-            sortino(pd.Series(returns), periods_per_year=12),
+            sortino(pd.Series(returns), periods_per_year=52),
             round(cagr, 1) if cagr is not None else None,
         )
 
     strategy_total, strategy_mdd, strategy_sortino, strategy_cagr = _summarize(strategy_returns)
     benchmark_total, benchmark_mdd, benchmark_sortino, benchmark_cagr = _summarize(benchmark_returns)
 
-    # 수익인출전략 요약 — 총자산(원금+남은 수익) 경로 기준. 자산 = 1 + 월 수익률의
-    # 산술 누적이고, 월별 자산 수익률 = 그 달 손익 ÷ 직전 총자산 (자산이 커질수록
-    # 같은 손익도 비율로는 작아진다 — 고정원금 운용의 실제 체감 경로).
-    harvest_wealth_returns: list[float] = []
-    wealth = 1.0
-    for monthly_return in strategy_returns:
-        harvest_wealth_returns.append(monthly_return / wealth)
-        wealth += monthly_return
-    harvest_total, harvest_mdd, harvest_sortino, harvest_cagr = _summarize(harvest_wealth_returns)
     if reference_close is not None and reference_returns:
         reference_total, reference_mdd, reference_sortino, reference_cagr = _summarize(reference_returns)
     else:
@@ -450,10 +632,6 @@ def run_backtest(
         "strategy_cagr_pct": strategy_cagr,
         "benchmark_cagr_pct": benchmark_cagr,
         "reference_cagr_pct": reference_cagr,
-        "harvest_total_pct": harvest_total,
-        "harvest_mdd_pct": harvest_mdd,
-        "harvest_sortino": harvest_sortino,
-        "harvest_cagr_pct": harvest_cagr,
         "benchmark_name": benchmark_info(pool)["name"],
         "benchmark_ticker": benchmark_info(pool)["ticker"],
         "reference_name": reference_name if reference_close is not None else None,
@@ -462,6 +640,14 @@ def run_backtest(
         "reference_sortino": reference_sortino,
         # 최신 달이 위로 오게 뒤집는다 (화면 표)
         "monthly": list(reversed(monthly)),
+        # 주간 표 — 매매 내역(편입·편출·교체율·보유 수)을 담는다. 최신 주가 위.
+        "weekly": list(reversed(weekly)),
         # 일간 표 — 최신 날짜가 위로 오게 뒤집는다
         "daily": list(reversed(daily)),
+        # 체결 목록 — 보유중(청산 전) 행이 위, 그 아래는 청산일 최신순.
+        "trades": [
+            _open_position_row(ticker, position)
+            for ticker, position in sorted(open_positions.items(), key=lambda item: item[1]["entry_date"], reverse=True)
+        ]
+        + sorted(trades, key=lambda trade: trade["exit_date"], reverse=True),
     }

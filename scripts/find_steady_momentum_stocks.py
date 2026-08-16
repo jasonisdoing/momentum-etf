@@ -47,8 +47,8 @@ def main() -> int:
 
     rows = []
     for row in result["rows"]:
-        streak = row["streak_months"]
-        streak_label = "-" if streak is None else ("신규" if streak <= 1 else f"{streak}개월")
+        streak = row["streak_weeks"]
+        streak_label = "-" if streak is None else ("신규" if streak <= 1 else f"{streak}주")
         rank_label = "예상" if row["is_expected_only"] else str(row["rank"]) + ("*" if row["is_reserve"] else "")
         rows.append(
             [
@@ -65,10 +65,10 @@ def main() -> int:
 
     print()
     print(
-        f"Steady Momentum {result['portfolio_month']} 포트폴리오 · 교체 {result['rebalance_date']} "
+        f"Steady Momentum {result['portfolio_week']} 주 포트폴리오 · 교체 {result['rebalance_date']} "
         f"(판정 {result['signal_date']}) · 유니버스 {result['universe_count']} → 후보 {result['candidate_count']}"
     )
-    print("점수 = 장기 이평선 이격(%) (전략 전용 이평선) · 순위* = 차순위 후보 · 예상 = 다음달 편입 예상")
+    print("점수 = 장기 이평선 이격(%) (전략 전용 이평선) · 순위* = 차순위 후보 · 예상 = 다음 주 편입 예상")
     for line in render_table_eaw(headers, rows, aligns):
         print(line)
     return 0
