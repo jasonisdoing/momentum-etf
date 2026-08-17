@@ -231,7 +231,8 @@ function excessColumn<T extends { strategy_pct: number | null; benchmark_pct: nu
   return {
     headerName: "초과",
     colId: "excess_pp",
-    width: 110,
+    flex: 1,
+    minWidth: 100,
     type: "numericColumn",
     valueGetter: (p) =>
       p.data && p.data.strategy_pct != null && p.data.benchmark_pct != null
@@ -717,13 +718,14 @@ export function MomentumClient() {
       {
         headerName: "월",
         field: "month",
-        width: 116,
+        width: 148,
         cellStyle: () => ({ fontWeight: 700 }),
       },
       {
         headerName: "전략",
         field: "strategy_pct",
-        width: 110,
+        flex: 1,
+        minWidth: 110,
         type: "numericColumn",
         valueFormatter: (p) => formatSigned(p.value),
         cellStyle: (p) => ({ color: signColor(p.value), fontWeight: 700 }),
@@ -732,7 +734,8 @@ export function MomentumClient() {
         headerName: benchmarkLabel,
         headerTooltip: `벤치마크 ${backtest.benchmark_name}(${backtest.benchmark_ticker})`,
         field: "benchmark_pct",
-        width: 140,
+        flex: 1,
+        minWidth: 110,
         type: "numericColumn",
         valueFormatter: (p) => formatSigned(p.value),
         cellStyle: (p) => ({ color: signColor(p.value) }),
@@ -743,7 +746,8 @@ export function MomentumClient() {
         headerName: referenceLabel,
         headerTooltip: "참고 지수 — 유사 컨셉 ETF (벤치마크가 아니며 선정에 관여하지 않는다)",
         field: "reference_pct",
-        width: 104,
+        flex: 1,
+        minWidth: 110,
         type: "numericColumn",
         valueFormatter: (p) => formatSigned(p.value),
         cellStyle: (p) => ({ color: signColor(p.value) }),
@@ -766,7 +770,7 @@ export function MomentumClient() {
       cellStyle: (p) => ({ color: signColor(p.value), fontWeight: field === "strategy_pct" ? 700 : 400 }),
     });
     const columns: ColDef<BacktestDayRow>[] = [
-      { headerName: "날짜", field: "date", width: 128, cellStyle: () => ({ fontWeight: 700 }) },
+      { headerName: "날짜", field: "date", width: 148, cellStyle: () => ({ fontWeight: 700 }) },
       pctColumn("전략", "strategy_pct", "보유 종목 동일가중 일간 변동률 (교체일에는 리밸런싱 비용 반영)"),
       pctColumn(benchmarkLabel, "benchmark_pct", `${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
     ];
@@ -914,7 +918,7 @@ export function MomentumClient() {
       field,
       headerTooltip,
       flex: 1,
-      minWidth: 120,
+      minWidth: 110,
       type: "numericColumn",
       valueFormatter: (p) =>
         p.value == null ? "-" : `${formatSigned(p.value)}${p.data?.[partialField] ? "*" : ""}`,
@@ -924,7 +928,7 @@ export function MomentumClient() {
     });
 
     const columns: ColDef<YearRow>[] = [
-      { headerName: "연도", field: "year", width: 104, cellStyle: () => ({ fontWeight: 700 }) },
+      { headerName: "연도", field: "year", width: 148, cellStyle: () => ({ fontWeight: 700 }) },
       pctColumn("전략", "strategy_pct", "strategy_partial"),
       pctColumn(
         benchmarkLabel,
