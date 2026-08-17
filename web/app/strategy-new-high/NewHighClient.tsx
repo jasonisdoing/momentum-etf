@@ -8,6 +8,7 @@ import { HoldingChart, type HoldingChartData } from "./HoldingChart";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
+import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
@@ -198,8 +199,8 @@ type Backtest = {
   win_rate_pct: number | null;
   avg_win_pct: number | null;
   avg_loss_pct: number | null;
-  stop_count: number;
-  exit_ma_count: number;
+  /** 청산 사유별 건수 — 전략마다 사유가 달라 서버가 준 그대로 쓴다. */
+  reason_counts?: Record<string, number>;
   trades: Trade[];
   /** 일별 누적 수익률(%) — 월간·연간은 이 값에서 만든다. */
   daily: { date: string; strategy_pct: number; benchmark_pct: number }[];
@@ -1271,12 +1272,7 @@ export function NewHighClient() {
                     sortino: backtest.benchmark_sortino,
                   }}
                 />
-                <div style={{ ...hintStyle, marginBottom: 12 }}>
-                  {`거래 ${backtest.trade_count}건 · 승률 ${backtest.win_rate_pct ?? "-"}%`}
-                  {` · 평균이익 ${backtest.avg_win_pct != null ? formatSignedPct(backtest.avg_win_pct, 1) : "-"}`}
-                  {` · 평균손실 ${backtest.avg_loss_pct != null ? formatSignedPct(backtest.avg_loss_pct, 1) : "-"}`}
-                  {` · 손절 ${backtest.stop_count} / 이탈 ${backtest.exit_ma_count}`}
-                </div>
+                <BacktestTradeStats stats={backtest} style={{ marginBottom: 12 }} />
                 <NavTabs
                   items={VIEW_MODES}
                   value={viewMode}

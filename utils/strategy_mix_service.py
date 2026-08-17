@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from utils.logger import get_app_logger
+from utils.trade_stats import summarize_trades
 
 logger = get_app_logger()
 
@@ -624,6 +625,7 @@ def run_mix_backtest(pool: str | None = None, months: int | None = None) -> dict
     strategy_curve = pd.Series([1 + row["strategy_pct"] / 100 for row in daily_rows])
     benchmark_curve = pd.Series([1 + row["benchmark_pct"] / 100 for row in daily_rows])
     strategy_stats, benchmark_stats = _summarize(strategy_curve), _summarize(benchmark_curve)
+    merged_trades = _merge_trades(sm, nh)
 
     return {
         "computed_at": datetime.now().astimezone().isoformat(),
@@ -644,5 +646,7 @@ def run_mix_backtest(pool: str | None = None, months: int | None = None) -> dict
         # 일별 누적(%) — 화면이 연간·월간·주간·일간 표를 이 시계열에서 만든다.
         "daily": daily_rows,
         # 체결 목록 — 두 전략을 합쳐 보여준다(보유중 행이 위, 그 아래 청산일 최신순).
-        "trades": _merge_trades(sm, nh),
+        "trades": merged_trades,
+        # 거래 수·승률·평균 손익 — 각 전략 화면과 같은 공용 계산.
+        **summarize_trades(merged_trades),
     }
