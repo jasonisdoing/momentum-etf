@@ -30,10 +30,20 @@ export type MobileTotals = {
   net_profit_pct: number;
 };
 
+/** 기간 손익 — 대시보드가 계산한 값을 그대로 쓴다(입출금 제거 기준). */
+export type PeriodProfit = { profit: number; return_pct: number };
+export type MobilePeriods = {
+  daily?: PeriodProfit;
+  weekly?: PeriodProfit;
+  monthly?: PeriodProfit;
+  yearly?: PeriodProfit;
+};
+
 export type MobileSnapshot = {
   accounts: MobileAccount[];
   totals: MobileTotals;
   rows: HoldingsRow[];
+  periods: MobilePeriods;
 };
 
 type DashboardAccount = {
@@ -63,6 +73,7 @@ export async function loadMobileSnapshot(): Promise<MobileSnapshot> {
   const dashboard = (await dashboardResponse.json()) as {
     accounts?: DashboardAccount[];
     totals?: Partial<MobileTotals> & { total_assets?: number; total_principal?: number };
+    period_profits?: MobilePeriods;
     error?: string;
   };
   if (!dashboardResponse.ok || dashboard.error) {
@@ -93,6 +104,7 @@ export async function loadMobileSnapshot(): Promise<MobileSnapshot> {
   return {
     accounts,
     rows: assets.rows ?? [],
+    periods: dashboard.period_profits ?? {},
     totals: {
       total_assets: totalAssets,
       daily_profit: dashboard.totals?.daily_profit ?? 0,
