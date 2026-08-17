@@ -73,11 +73,38 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  width: 100%;
   border: 1px solid var(--border-color, #e9ecef);
   border-radius: 12px;
   padding: 12px 14px;
   text-decoration: none;
   color: inherit;
+  background: none;
+  text-align: left;
+  font: inherit;
+}
+
+/* 계좌 한 묶음 — 헤더(버튼)와 펼친 종목 목록. */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.children {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 12px;
+}
+
+.childRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--border-color, #e9ecef);
 }
 
 .rowMain {
@@ -114,6 +141,35 @@
 .rowPct {
   font-size: var(--fs-sm);
   font-weight: 700;
+}
+
+/* 홈(런처) — 위는 비우고 버튼은 아래에 둔다(엄지가 닿는 자리). */
+.homePage {
+  min-height: 100dvh;
+  justify-content: space-between;
+}
+
+.homeTop {
+  flex: 1;
+}
+
+.homeMenu {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.homeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 64px;
+  border: 1px solid var(--border-color, #e9ecef);
+  border-radius: 14px;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  text-decoration: none;
+  color: inherit;
 }
 
 .state {
