@@ -1,4 +1,4 @@
-"""합성전략(SM + 신고가 50:50) 백테스트 API — `/strategy-mix` 열람 전용 화면."""
+"""합성 전략(SM + 신고가 50:50) 백테스트 API — `/strategy-mix` 열람 전용 화면."""
 
 from __future__ import annotations
 
