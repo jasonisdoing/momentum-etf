@@ -8,6 +8,7 @@ import { BUCKET_COLORS } from "@/lib/bucket-theme";
 import { MobileFrame, useMaskedAmount } from "./MobileFrame";
 import styles from "./mobile.module.css";
 import {
+  accountLabel,
   formatCompactKrw,
   formatKrw,
   formatPct,
@@ -67,7 +68,7 @@ export function MobileHomeClient() {
     return [...accounts]
       .sort((a, b) => b.total_assets_krw - a.total_assets_krw)
       .map((account) => ({
-        name: account.name,
+        name: accountLabel(account),
         value: account.total_assets_krw,
         weight_pct: (account.total_assets_krw / total) * 100,
       }));
@@ -92,69 +93,76 @@ export function MobileHomeClient() {
               </span>
             </div>
 
-            <div className={styles.pieBlock}>
-              <PieChart
-                width={150}
-                height={150}
-                margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
-              >
-                <Pie
-                  data={pieData}
-                  dataKey="weight_pct"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={38}
-                  outerRadius={68}
-                  paddingAngle={2}
-                  strokeWidth={0}
-                  isAnimationActive={false}
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>계좌 비중</h2>
+              <div className={styles.pieBlock}>
+                <PieChart
+                  width={150}
+                  height={150}
+                  margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
                 >
-                  {pieData.map((_, index) => (
-                    <Cell
-                      key={index}
-                      fill={BUCKET_COLORS[index % BUCKET_COLORS.length]}
-                    />
-                  ))}
-                </Pie>
-              </PieChart>
-              <div className={styles.pieLegend}>
-                {pieData.map((item, index) => (
-                  <span key={item.name} className={styles.legendRow}>
-                    <span
-                      className={styles.legendDot}
-                      style={{
-                        background: BUCKET_COLORS[index % BUCKET_COLORS.length],
-                      }}
-                    />
-                    <span className={styles.legendName}>{item.name}</span>
-                    <span className={styles.legendValue}>
-                      {item.weight_pct.toFixed(1)}%
-                    </span>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div className={styles.periodCard}>
-              {PERIOD_LABELS.map(({ key, label }) => {
-                const item = periods[key];
-                return (
-                  <div key={key} className={styles.periodRow}>
-                    <span className={styles.metricLabel}>{label}</span>
-                    <span
-                      className={styles.periodValue}
-                      style={{ color: signColorOf(item?.return_pct) }}
-                    >
-                      {formatPct(item?.return_pct)}
-                      <span className={styles.periodProfit}>
-                        {mask(formatCompactKrw(item?.profit))}
+                  <Pie
+                    data={pieData}
+                    dataKey="weight_pct"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={38}
+                    outerRadius={68}
+                    paddingAngle={2}
+                    strokeWidth={0}
+                    isAnimationActive={false}
+                  >
+                    {pieData.map((_, index) => (
+                      <Cell
+                        key={index}
+                        fill={BUCKET_COLORS[index % BUCKET_COLORS.length]}
+                      />
+                    ))}
+                  </Pie>
+                </PieChart>
+                <div className={styles.pieLegend}>
+                  {pieData.map((item, index) => (
+                    <span key={item.name} className={styles.legendRow}>
+                      <span
+                        className={styles.legendDot}
+                        style={{
+                          background:
+                            BUCKET_COLORS[index % BUCKET_COLORS.length],
+                        }}
+                      />
+                      <span className={styles.legendName}>{item.name}</span>
+                      <span className={styles.legendValue}>
+                        {item.weight_pct.toFixed(1)}%
                       </span>
                     </span>
-                  </div>
-                );
-              })}
-            </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <section className={styles.section}>
+              <h2 className={styles.sectionTitle}>수익률</h2>
+              <div className={styles.periodCard}>
+                {PERIOD_LABELS.map(({ key, label }) => {
+                  const item = periods[key];
+                  return (
+                    <div key={key} className={styles.periodRow}>
+                      <span className={styles.metricLabel}>{label}</span>
+                      <span
+                        className={styles.periodValue}
+                        style={{ color: signColorOf(item?.return_pct) }}
+                      >
+                        {formatPct(item?.return_pct)}
+                        <span className={styles.periodProfit}>
+                          {mask(formatCompactKrw(item?.profit))}
+                        </span>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
 
             <div className={styles.homeMenu}>
               <Link href="/m/assets" className={styles.homeButton}>

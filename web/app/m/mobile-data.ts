@@ -115,6 +115,12 @@ export async function loadMobileSnapshot(): Promise<MobileSnapshot> {
   };
 }
 
+/** 계좌 표기 — `아이콘 이름`. API 이름 앞에 붙은 순번(`12. `)은 폰 화면에서 폭만 먹어 뗀다. */
+export function accountLabel(account: Pick<MobileAccount, "name" | "icon">): string {
+  const name = account.name.replace(/^\s*\d+\.\s*/, "");
+  return account.icon ? `${account.icon} ${name}` : name;
+}
+
 export function formatKrw(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return "-";
   return new Intl.NumberFormat("ko-KR").format(Math.round(value));

@@ -30,12 +30,10 @@ type Props = {
   children: ReactNode;
 };
 
+/** `22시 10분 32초` — 초까지 적는다. 같은 분에 새로고침해도 갱신됐는지 보이게. */
 function formatTime(value: Date): string {
-  return value.toLocaleTimeString("ko-KR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(value.getHours())}시 ${pad(value.getMinutes())}분 ${pad(value.getSeconds())}초`;
 }
 
 /** 모바일 화면 공용 틀 — 헤더(제목·금액 숨김) + 본문 + 푸터(기준 시각·새로고침). */

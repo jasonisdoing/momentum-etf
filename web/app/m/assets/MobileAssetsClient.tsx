@@ -6,6 +6,7 @@ import type { HoldingsRow } from "../../assets/assets-helpers";
 import { MobileFrame, useMaskedAmount } from "../MobileFrame";
 import styles from "../mobile.module.css";
 import {
+  accountLabel,
   formatCompactKrw,
   formatKrw,
   formatPct,
@@ -123,9 +124,7 @@ export function MobileAssetsClient() {
                     >
                       <span className={styles.rowMain}>
                         <span className={styles.rowName}>
-                          {expanded ? "▾" : "▸"}{" "}
-                          {account.icon ? `${account.icon} ` : ""}
-                          {account.name}
+                          {expanded ? "▾" : "▸"} {accountLabel(account)}
                         </span>
                         <span className={styles.rowSub}>
                           {holdings.length}종목 · 현금{" "}

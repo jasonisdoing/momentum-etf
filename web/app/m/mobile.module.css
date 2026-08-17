@@ -290,3 +290,18 @@
   font-size: var(--fs-sm);
   font-weight: 600;
 }
+
+/* 화면 안의 묶음 — 제목 + 내용. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sectionTitle {
+  margin: 0;
+  padding-left: 2px;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text-muted);
+}
