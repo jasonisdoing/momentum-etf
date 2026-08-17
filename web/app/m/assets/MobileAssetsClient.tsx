@@ -7,7 +7,7 @@ import { MobileFrame, useMaskedAmount } from "../MobileFrame";
 import styles from "../mobile.module.css";
 import {
   accountLabel,
-  formatCompactKrw,
+  formatKoreanMoney,
   formatKrw,
   formatPct,
   loadMobileSnapshot,
@@ -101,7 +101,7 @@ export function MobileAssetsClient() {
                     style={{ color: signColorOf(totals.net_profit_pct) }}
                   >
                     {formatPct(totals.net_profit_pct)} (
-                    {mask(formatCompactKrw(totals.net_profit))})
+                    {mask(formatKoreanMoney(totals.net_profit))})
                   </span>
                 </span>
               </div>
@@ -128,12 +128,12 @@ export function MobileAssetsClient() {
                         </span>
                         <span className={styles.rowSub}>
                           {holdings.length}종목 · 현금{" "}
-                          {mask(formatCompactKrw(account.cash_balance_krw))}
+                          {mask(formatKoreanMoney(account.cash_balance_krw))}
                         </span>
                       </span>
                       <span className={styles.rowSide}>
                         <span className={styles.rowAmount}>
-                          {mask(formatKrw(account.total_assets_krw))}
+                          {mask(formatKoreanMoney(account.total_assets_krw))}
                         </span>
                         <span
                           className={styles.rowPct}
@@ -175,7 +175,7 @@ export function MobileAssetsClient() {
                                 </span>
                                 <span className={styles.rowSide}>
                                   <span className={styles.rowAmount}>
-                                    {mask(formatKrw(row.valuation_krw))}
+                                    {mask(formatKoreanMoney(row.valuation_krw))}
                                   </span>
                                   <span
                                     className={styles.rowPct}

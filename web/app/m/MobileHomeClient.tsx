@@ -4,12 +4,12 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Cell, Pie, PieChart } from "recharts";
 
-import { BUCKET_COLORS } from "@/lib/bucket-theme";
 import { MobileFrame, useMaskedAmount } from "./MobileFrame";
 import styles from "./mobile.module.css";
 import {
+  ACCOUNT_COLORS,
   accountLabel,
-  formatCompactKrw,
+  formatKoreanMoney,
   formatKrw,
   formatPct,
   loadMobileSnapshot,
@@ -69,7 +69,7 @@ export function MobileHomeClient() {
       .sort((a, b) => b.total_assets_krw - a.total_assets_krw)
       .map((account) => ({
         name: accountLabel(account),
-        value: account.total_assets_krw,
+        amount: account.total_assets_krw,
         weight_pct: (account.total_assets_krw / total) * 100,
       }));
   }, [accounts]);
@@ -116,7 +116,7 @@ export function MobileHomeClient() {
                     {pieData.map((_, index) => (
                       <Cell
                         key={index}
-                        fill={BUCKET_COLORS[index % BUCKET_COLORS.length]}
+                        fill={ACCOUNT_COLORS[index % ACCOUNT_COLORS.length]}
                       />
                     ))}
                   </Pie>
@@ -128,10 +128,13 @@ export function MobileHomeClient() {
                         className={styles.legendDot}
                         style={{
                           background:
-                            BUCKET_COLORS[index % BUCKET_COLORS.length],
+                            ACCOUNT_COLORS[index % ACCOUNT_COLORS.length],
                         }}
                       />
                       <span className={styles.legendName}>{item.name}</span>
+                      <span className={styles.legendAmount}>
+                        {mask(formatKoreanMoney(item.amount))}
+                      </span>
                       <span className={styles.legendValue}>
                         {item.weight_pct.toFixed(1)}%
                       </span>
@@ -155,7 +158,7 @@ export function MobileHomeClient() {
                       >
                         {formatPct(item?.return_pct)}
                         <span className={styles.periodProfit}>
-                          {mask(formatCompactKrw(item?.profit))}
+                          {mask(formatKoreanMoney(item?.profit))}
                         </span>
                       </span>
                     </div>
