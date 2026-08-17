@@ -206,12 +206,19 @@
   align-items: center;
   justify-content: center;
   min-height: 64px;
-  border: 1px solid var(--border-color, #e9ecef);
+  border: 0;
   border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
   font-size: var(--fs-lg);
   font-weight: 700;
   text-decoration: none;
-  color: inherit;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+}
+
+.homeButton:active {
+  transform: translateY(1px);
+  box-shadow: none;
 }
 
 .state {
