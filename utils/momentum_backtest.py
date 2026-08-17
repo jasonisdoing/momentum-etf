@@ -49,6 +49,7 @@ from utils.momentum_service import (
 )
 from utils.pool_settings_store import get_pool_slippage
 from utils.pool_signal_backtest_service import get_max_backtest_months
+from utils.trade_stats import summarize_trades
 
 # 미국 풀 참고 지수 — 유사 컨셉 ETF(FMTM)와 같은 구간을 나란히 비교한다 (벤치마크 아님).
 US_REFERENCE_TICKER = "FMTM"
@@ -653,4 +654,6 @@ def run_backtest(
             for ticker, position in sorted(open_positions.items(), key=lambda item: item[1]["entry_date"], reverse=True)
         ]
         + sorted(trades, key=lambda trade: trade["exit_date"], reverse=True),
+        # 거래 수·승률·평균 손익 — 세 전략이 같은 공용 계산을 쓴다(청산분만 센다).
+        **summarize_trades(trades),
     }

@@ -26,6 +26,7 @@ from utils.new_high_service import (
     validate_settings,
 )
 from utils.pool_settings_store import get_pool_slippage
+from utils.trade_stats import summarize_trades
 from utils.ttl_cache import TtlCache
 
 logger = logging.getLogger(__name__)
@@ -282,8 +283,6 @@ def run_backtest(
     benchmark = load_benchmark_close(pool).reindex(strategy.index).ffill()
     benchmark = benchmark / benchmark.iloc[0]
 
-    wins = [t for t in trades if t["return_pct"] > 0]
-    losses = [t for t in trades if t["return_pct"] <= 0]
     strategy_total = float((strategy.iloc[-1] - 1) * 100)
     benchmark_total = float((benchmark.iloc[-1] - 1) * 100)
 
@@ -300,12 +299,7 @@ def run_backtest(
         "benchmark_mdd_pct": round(_drawdown_pct(benchmark), 2),
         "benchmark_sortino": _sortino(benchmark.pct_change().dropna()),
         "benchmark_name": benchmark_info(pool)["name"],
-        "trade_count": len(trades),
-        "win_rate_pct": round(len(wins) / len(trades) * 100, 1) if trades else None,
-        "avg_win_pct": round(sum(t["return_pct"] for t in wins) / len(wins), 2) if wins else None,
-        "avg_loss_pct": round(sum(t["return_pct"] for t in losses) / len(losses), 2) if losses else None,
-        "stop_count": sum(1 for t in trades if t["reason"] == "손절"),
-        "exit_ma_count": sum(1 for t in trades if t["reason"] == "이탈"),
+        **summarize_trades(trades),
         "trades": sorted(trades, key=lambda t: t["exit_date"], reverse=True),
         "as_of": str(last_day.date()),
         "open_positions": open_positions,

@@ -14,6 +14,7 @@ import {
   type LoadingProgress,
 } from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
+import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { NavTabs } from "../components/NavTabs";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { PageFrame } from "../components/PageFrame";
@@ -66,6 +67,12 @@ type View = {
   daily: { date: string; strategy_pct: number; benchmark_pct: number }[];
   /** 체결 목록 — 두 전략 합본. exit_date 가 없으면 보유중. */
   trades: MixTradeRow[];
+  /** 체결 통계 — 백엔드 공용 계산(utils/trade_stats.py). 청산분만 센다. */
+  trade_count: number;
+  win_rate_pct: number | null;
+  avg_win_pct: number | null;
+  avg_loss_pct: number | null;
+  reason_counts?: Record<string, number>;
 };
 
 type MixTradeRow = {
@@ -1253,6 +1260,7 @@ export function StrategyMixClient() {
                       sortino: view.benchmark_sortino,
                     }}
                   />
+                  <BacktestTradeStats stats={view} style={{ marginBottom: 12 }} />
                   <NavTabs
                     items={VIEW_MODES}
                     value={viewMode}

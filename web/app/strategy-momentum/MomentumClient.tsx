@@ -7,6 +7,7 @@ import { IconCheck } from "@tabler/icons-react";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
+import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
@@ -156,6 +157,12 @@ type BacktestResult = {
   weekly: BacktestWeekRow[];
   daily: BacktestDayRow[];
   trades: BacktestTradeRow[];
+  /** 체결 통계 — 백엔드 공용 계산(utils/trade_stats.py). 청산분만 센다. */
+  trade_count: number;
+  win_rate_pct: number | null;
+  avg_win_pct: number | null;
+  avg_loss_pct: number | null;
+  reason_counts?: Record<string, number>;
 };
 
 // 풀 옵션 — 공용 라벨 소스에 국가·통화·풀 성격(stock/etf)이 붙는다.
@@ -1171,6 +1178,7 @@ export function MomentumClient() {
                       : null
                   }
                 />
+                <BacktestTradeStats stats={backtest} style={{ marginBottom: 12 }} />
                 <NavTabs
                   items={VIEW_MODES}
                   value={viewMode}
