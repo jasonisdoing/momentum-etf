@@ -837,13 +837,19 @@ export function StrategyMixClient() {
         rebalanceBuys.has(row.ticker) || rebalanceSells.has(row.ticker);
       const date = isRebalance ? rebalanceDate : nextOpen;
       const reason = sellReason.get(row.ticker);
+      // 제목은 **계좌 관점**으로 붙인다 — 이미 들고 있는 종목이면 실제로 하는 일이
+      // '몇 주 더 사기'라 "교체 매수"로 적으면 새로 사는 것처럼 읽힌다.
+      // (한 전략에 새로 편입돼도 다른 전략으로 이미 보유 중일 수 있다. 전략 맥락은 표의 상태 칸에 있다.)
+      const held = Number(row.held_quantity ?? 0) > 0;
       let title: string;
       if (row.is_sell_all)
         title = rebalanceSells.has(row.ticker) ? "교체 매도" : "전량 매도";
       else if (reason) title = "매도 예정";
-      else if (isRebalance) title = trade > 0 ? "교체 매수" : "교체 비중 조정";
+      else if (trade < 0) title = "비중 조정 매도";
+      else if (held) title = "비중 조정 매수";
+      else if (rebalanceBuys.has(row.ticker)) title = "교체 매수";
       else if (entryTickers.has(row.ticker)) title = "신고가 진입";
-      else title = trade > 0 ? "비중 조정 매수" : "비중 조정 매도";
+      else title = "신규 매수";
       const note = reason
         ? `(${reason})`
         : row.is_sell_all
