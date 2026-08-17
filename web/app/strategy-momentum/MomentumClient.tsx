@@ -226,6 +226,22 @@ type YearRow = {
   reference_partial: boolean;
 };
 
+/** 초과(%p) 컬럼 — 전략 − 벤치마크. 신고가·합성 화면과 같은 정의를 쓴다. */
+function excessColumn<T extends { strategy_pct: number | null; benchmark_pct: number | null }>(): ColDef<T> {
+  return {
+    headerName: "초과",
+    colId: "excess_pp",
+    width: 110,
+    type: "numericColumn",
+    valueGetter: (p) =>
+      p.data && p.data.strategy_pct != null && p.data.benchmark_pct != null
+        ? p.data.strategy_pct - p.data.benchmark_pct
+        : null,
+    valueFormatter: (p) => (p.value == null ? "-" : `${formatSignedPct(p.value as number, 2)}p`),
+    cellStyle: (p) => ({ color: signColor(p.value as number) }),
+  };
+}
+
 /** 월별 수익률을 복리로 합성한다. 값이 하나도 없으면 null. */
 function compoundPct(values: (number | null)[]): number | null {
   const usable = values.filter((v): v is number => v != null && Number.isFinite(v));
@@ -691,6 +707,10 @@ export function MomentumClient() {
   }, [hasIndustryData, monthlyLabels, picksCountry]);
 
   // 월간 표 — 연간과 같은 집계형(월/전략/벤치/참고). 매매 내역은 주간 표가 담당한다.
+  // 표 헤더의 지수 이름 — 신고가·합성 화면과 같은 표기(값에 % 가 붙으므로 헤더엔 붙이지 않는다).
+  const benchmarkLabel = backtest?.benchmark_name ?? "벤치마크";
+  const referenceLabel = backtest?.reference_name ?? "참고";
+
   const backtestColumns = useMemo<ColDef<BacktestMonthRow>[]>(() => {
     if (!backtest) return [];
     const columns: ColDef<BacktestMonthRow>[] = [
@@ -701,7 +721,7 @@ export function MomentumClient() {
         cellStyle: () => ({ fontWeight: 700 }),
       },
       {
-        headerName: "전략(%)",
+        headerName: "전략",
         field: "strategy_pct",
         width: 110,
         type: "numericColumn",
@@ -709,7 +729,7 @@ export function MomentumClient() {
         cellStyle: (p) => ({ color: signColor(p.value), fontWeight: 700 }),
       },
       {
-        headerName: "벤치마크(%)",
+        headerName: benchmarkLabel,
         headerTooltip: `벤치마크 ${backtest.benchmark_name}(${backtest.benchmark_ticker})`,
         field: "benchmark_pct",
         width: 140,
@@ -720,7 +740,7 @@ export function MomentumClient() {
     ];
     if (backtest.reference_name) {
       columns.push({
-        headerName: `${backtest.reference_name}(%)`,
+        headerName: referenceLabel,
         headerTooltip: "참고 지수 — 유사 컨셉 ETF (벤치마크가 아니며 선정에 관여하지 않는다)",
         field: "reference_pct",
         width: 104,
@@ -729,6 +749,7 @@ export function MomentumClient() {
         cellStyle: (p) => ({ color: signColor(p.value) }),
       });
     }
+    columns.push(excessColumn<BacktestMonthRow>());
     return columns;
   }, [backtest]);
 
@@ -746,18 +767,19 @@ export function MomentumClient() {
     });
     const columns: ColDef<BacktestDayRow>[] = [
       { headerName: "날짜", field: "date", width: 128, cellStyle: () => ({ fontWeight: 700 }) },
-      pctColumn("전략(%)", "strategy_pct", "보유 종목 동일가중 일간 변동률 (교체일에는 리밸런싱 비용 반영)"),
-      pctColumn("벤치마크(%)", "benchmark_pct", `${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
+      pctColumn("전략", "strategy_pct", "보유 종목 동일가중 일간 변동률 (교체일에는 리밸런싱 비용 반영)"),
+      pctColumn(benchmarkLabel, "benchmark_pct", `${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
     ];
     if (backtest.reference_name) {
       columns.push(
         pctColumn(
-          `${backtest.reference_name}(%)`,
+          referenceLabel,
           "reference_pct",
           "참고 지수 — 유사 컨셉 ETF (벤치마크가 아니며 선정에 관여하지 않는다)",
         ),
       );
     }
+    columns.push(excessColumn<BacktestDayRow>());
     return columns;
   }, [backtest]);
 
@@ -824,13 +846,13 @@ export function MomentumClient() {
         valueFormatter: (p) => formatDateWithWeekday(String(p.value ?? "")),
         cellStyle: () => ({ fontWeight: 700 }),
       },
-      pctColumn("전략(%)", "strategy_pct", "그 주 보유 포트폴리오의 수익률 (교체 비용 반영)"),
-      pctColumn("벤치마크(%)", "benchmark_pct", `${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
+      pctColumn("전략", "strategy_pct", "그 주 보유 포트폴리오의 수익률 (교체 비용 반영)"),
+      pctColumn(benchmarkLabel, "benchmark_pct", `${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
     ];
     if (backtest.reference_name) {
       columns.push(
         pctColumn(
-          `${backtest.reference_name}(%)`,
+          referenceLabel,
           "reference_pct",
           "참고 지수 — 유사 컨셉 ETF (벤치마크가 아니며 선정에 관여하지 않는다)",
         ),
@@ -875,6 +897,7 @@ export function MomentumClient() {
         cellStyle: () => ({ color: "var(--down-color, #2f6fd0)" }),
       },
     );
+    columns.push(excessColumn<BacktestWeekRow>());
     return columns;
   }, [backtest]);
 
@@ -902,9 +925,9 @@ export function MomentumClient() {
 
     const columns: ColDef<YearRow>[] = [
       { headerName: "연도", field: "year", width: 104, cellStyle: () => ({ fontWeight: 700 }) },
-      pctColumn("전략(%)", "strategy_pct", "strategy_partial"),
+      pctColumn("전략", "strategy_pct", "strategy_partial"),
       pctColumn(
-        "벤치마크(%)",
+        benchmarkLabel,
         "benchmark_pct",
         "benchmark_partial",
         `${backtest.benchmark_name}(${backtest.benchmark_ticker})`,
@@ -913,13 +936,14 @@ export function MomentumClient() {
     if (backtest.reference_name) {
       columns.push(
         pctColumn(
-          `${backtest.reference_name}(%)`,
+          referenceLabel,
           "reference_pct",
           "reference_partial",
           "참고 지수 — 유사 컨셉 ETF (벤치마크가 아니며 선정에 관여하지 않는다)",
         ),
       );
     }
+    columns.push(excessColumn<YearRow>());
     return columns;
   }, [backtest]);
 
