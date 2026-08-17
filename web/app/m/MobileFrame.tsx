@@ -1,21 +1,45 @@
 "use client";
 
 import Link from "next/link";
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
 import styles from "./mobile.module.css";
 
-/** 금액 가림 — `/m` 전용 상태다. 기본은 **가림**이고 눈 아이콘으로 잠깐 연다.
- *  데스크톱의 전역 설정(HideMoneyProvider)과 분리한다 — 폰은 남이 볼 수 있어 기본값이 반대다.
- *  저장하지 않으므로 앱을 다시 열면 다시 가려진다. */
+/** 금액 가림 — `/m` 화면들이 공유하는 상태. 저장값이 없으면 **가림**으로 시작한다.
+ *  데스크톱 전역 설정(`jason-invest-hide-money`)과는 키를 나눈다 — 폰은 남이 볼 수 있어
+ *  기본값이 반대이고, 한쪽을 바꿨다고 다른 쪽이 따라 바뀌면 안 된다. */
+const MASK_STORAGE_KEY = "momentum-etf:m:hide-money";
+
 const MobileMaskContext = createContext<{ hidden: boolean; toggle: () => void }>({
   hidden: true,
   toggle: () => {},
 });
 
 export function MobileMaskProvider({ children }: { children: ReactNode }) {
+  // 서버 렌더와 첫 그림을 맞추려고 가림으로 시작하고, 저장값은 마운트 후 읽는다.
   const [hidden, setHidden] = useState(true);
-  const toggle = useCallback(() => setHidden((current) => !current), []);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(MASK_STORAGE_KEY);
+      if (stored === "0") setHidden(false);
+    } catch {
+      // 저장소를 못 읽으면 기본값(가림)을 쓴다.
+    }
+  }, []);
+
+  const toggle = useCallback(() => {
+    setHidden((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem(MASK_STORAGE_KEY, next ? "1" : "0");
+      } catch {
+        // 저장 실패해도 이번 세션 동작은 유지한다.
+      }
+      return next;
+    });
+  }, []);
+
   return <MobileMaskContext.Provider value={{ hidden, toggle }}>{children}</MobileMaskContext.Provider>;
 }
 
@@ -30,10 +54,12 @@ type Props = {
   children: ReactNode;
 };
 
-/** `22시 10분 32초` — 초까지 적는다. 같은 분에 새로고침해도 갱신됐는지 보이게. */
 function formatTime(value: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(value.getHours())}시 ${pad(value.getMinutes())}분 ${pad(value.getSeconds())}초`;
+  return value.toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 /** 모바일 화면 공용 틀 — 헤더(제목·금액 숨김) + 본문 + 푸터(기준 시각·새로고침). */
