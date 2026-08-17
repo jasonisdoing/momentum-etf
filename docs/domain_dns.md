@@ -97,6 +97,8 @@ docker logs nginx-proxy-acme --tail 50
 
 | 증상 | 원인 | 조치 |
 |------|------|------|
+| 호스트를 바꿨는데 인증서가 안 나옴 | acme-companion 의 `/app/letsencrypt_service_data` 가 옛 컨테이너 기준으로 굳어 있음 (`signal_le_service` 로는 재생성되지 않음) | `docker restart nginx-proxy-acme` |
+| 로그인만 `redirect_uri_mismatch` | `node_app` 컨테이너가 옛 `APP_BASE_URL` 을 들고 있음 (배포가 이미지 동일 시 재생성하지 않음) | `docker compose up -d --no-deps --force-recreate node_app` |
 | 인증서가 발급되지 않음 | Cloudflare 프록시 ON + Always Use HTTPS | 회색 구름으로 바꾸고 acme 로그 확인 |
 | 무한 리다이렉트 | Cloudflare SSL 모드 Flexible | Full (strict) 로 변경 |
 | 로그인만 실패 | 구글 OAuth 리디렉션 URI 미등록 | 콘솔에 새 도메인 콜백 추가 |
