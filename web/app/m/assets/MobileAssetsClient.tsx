@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { HoldingsRow } from "../../assets/assets-helpers";
+import { MobileFrame, useMaskedAmount } from "../MobileFrame";
 import styles from "../mobile.module.css";
 import {
   formatCompactKrw,
@@ -21,8 +21,10 @@ export function MobileAssetsClient() {
   const [totals, setTotals] = useState<MobileTotals | null>(null);
   const [rows, setRows] = useState<HoldingsRow[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const mask = useMaskedAmount();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -32,8 +34,11 @@ export function MobileAssetsClient() {
       setAccounts(snapshot.accounts);
       setTotals(snapshot.totals);
       setRows(snapshot.rows);
+      setLoadedAt(new Date());
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "불러오지 못했습니다.");
+      setError(
+        loadError instanceof Error ? loadError.message : "불러오지 못했습니다.",
+      );
     } finally {
       setLoading(false);
     }
@@ -59,102 +64,142 @@ export function MobileAssetsClient() {
   }, [rows]);
 
   return (
-    <div className={styles.page}>
-      <div className={styles.header}>
-        <Link href="/m" className={styles.backLink}>
-          ← 홈
-        </Link>
-        <span className={styles.headerTitle}>자산</span>
-      </div>
-
-      {error ? (
-        <div className={styles.state}>{error}</div>
-      ) : loading || !totals ? (
-        <div className={styles.state}>불러오는 중…</div>
-      ) : (
-        <>
-          <div className={styles.summaryCard}>
-            <span className={styles.summaryLabel}>총자산</span>
-            <span className={styles.summaryValue}>{formatKrw(totals.total_assets)}</span>
-            <div className={styles.summaryMetrics}>
-              <span>
-                <span className={styles.metricLabel}>금일</span>
-                <span className={styles.metricValue} style={{ color: signColorOf(totals.daily_return_pct) }}>
-                  {formatPct(totals.daily_return_pct)}
-                </span>
+    <MobileFrame
+      title="자산"
+      backHref="/m"
+      loadedAt={loadedAt}
+      onRefresh={() => void load()}
+      refreshing={loading}
+    >
+      <div className={styles.page}>
+        {error ? (
+          <div className={styles.state}>{error}</div>
+        ) : loading || !totals ? (
+          <div className={styles.state}>불러오는 중…</div>
+        ) : (
+          <>
+            <div className={styles.summaryCard}>
+              <span className={styles.summaryLabel}>총자산</span>
+              <span className={styles.summaryValue}>
+                {mask(formatKrw(totals.total_assets))}
               </span>
-              <span>
-                <span className={styles.metricLabel}>누적</span>
-                <span className={styles.metricValue} style={{ color: signColorOf(totals.net_profit_pct) }}>
-                  {formatPct(totals.net_profit_pct)} ({formatCompactKrw(totals.net_profit)})
-                </span>
-              </span>
-            </div>
-          </div>
-
-          <div className={styles.list}>
-            {accounts.map((account) => {
-              const expanded = expandedId === account.account_id;
-              const holdings = holdingsByAccount.get(account.account_id) ?? [];
-              return (
-                <div key={account.account_id} className={styles.group}>
-                  <button
-                    type="button"
-                    className={styles.row}
-                    aria-expanded={expanded}
-                    onClick={() => setExpandedId(expanded ? null : account.account_id)}
+              <div className={styles.summaryMetrics}>
+                <span>
+                  <span className={styles.metricLabel}>금일</span>
+                  <span
+                    className={styles.metricValue}
+                    style={{ color: signColorOf(totals.daily_return_pct) }}
                   >
-                    <span className={styles.rowMain}>
-                      <span className={styles.rowName}>
-                        {expanded ? "▾" : "▸"} {account.icon ? `${account.icon} ` : ""}
-                        {account.name}
-                      </span>
-                      <span className={styles.rowSub}>
-                        {holdings.length}종목 · 현금 {formatCompactKrw(account.cash_balance_krw)}
-                      </span>
-                    </span>
-                    <span className={styles.rowSide}>
-                      <span className={styles.rowAmount}>{formatKrw(account.total_assets_krw)}</span>
-                      <span className={styles.rowPct} style={{ color: signColorOf(account.daily_return_pct) }}>
-                        {formatPct(account.daily_return_pct)}
-                      </span>
-                    </span>
-                  </button>
+                    {formatPct(totals.daily_return_pct)}
+                  </span>
+                </span>
+                <span>
+                  <span className={styles.metricLabel}>누적</span>
+                  <span
+                    className={styles.metricValue}
+                    style={{ color: signColorOf(totals.net_profit_pct) }}
+                  >
+                    {formatPct(totals.net_profit_pct)} (
+                    {mask(formatCompactKrw(totals.net_profit))})
+                  </span>
+                </span>
+              </div>
+            </div>
 
-                  {expanded ? (
-                    <div className={styles.children}>
-                      {holdings.length === 0 ? (
-                        <div className={styles.state}>보유 종목이 없습니다.</div>
-                      ) : (
-                        holdings.map((row) => {
-                          const weight =
-                            account.total_assets_krw > 0 ? (row.valuation_krw / account.total_assets_krw) * 100 : 0;
-                          return (
-                            <div key={`${account.account_id}:${row.ticker}`} className={styles.childRow}>
-                              <span className={styles.rowMain}>
-                                <span className={styles.rowName}>{row.name}</span>
-                                <span className={styles.rowSub}>
-                                  {row.ticker} · {weight.toFixed(1)}%
+            <div className={styles.list}>
+              {accounts.map((account) => {
+                const expanded = expandedId === account.account_id;
+                const holdings =
+                  holdingsByAccount.get(account.account_id) ?? [];
+                return (
+                  <div key={account.account_id} className={styles.group}>
+                    <button
+                      type="button"
+                      className={styles.row}
+                      aria-expanded={expanded}
+                      onClick={() =>
+                        setExpandedId(expanded ? null : account.account_id)
+                      }
+                    >
+                      <span className={styles.rowMain}>
+                        <span className={styles.rowName}>
+                          {expanded ? "▾" : "▸"}{" "}
+                          {account.icon ? `${account.icon} ` : ""}
+                          {account.name}
+                        </span>
+                        <span className={styles.rowSub}>
+                          {holdings.length}종목 · 현금{" "}
+                          {mask(formatCompactKrw(account.cash_balance_krw))}
+                        </span>
+                      </span>
+                      <span className={styles.rowSide}>
+                        <span className={styles.rowAmount}>
+                          {mask(formatKrw(account.total_assets_krw))}
+                        </span>
+                        <span
+                          className={styles.rowPct}
+                          style={{
+                            color: signColorOf(account.daily_return_pct),
+                          }}
+                        >
+                          {formatPct(account.daily_return_pct)}
+                        </span>
+                      </span>
+                    </button>
+
+                    {expanded ? (
+                      <div className={styles.children}>
+                        {holdings.length === 0 ? (
+                          <div className={styles.state}>
+                            보유 종목이 없습니다.
+                          </div>
+                        ) : (
+                          holdings.map((row) => {
+                            const weight =
+                              account.total_assets_krw > 0
+                                ? (row.valuation_krw /
+                                    account.total_assets_krw) *
+                                  100
+                                : 0;
+                            return (
+                              <div
+                                key={`${account.account_id}:${row.ticker}`}
+                                className={styles.childRow}
+                              >
+                                <span className={styles.rowMain}>
+                                  <span className={styles.rowName}>
+                                    {row.name}
+                                  </span>
+                                  <span className={styles.rowSub}>
+                                    {row.ticker} · {weight.toFixed(1)}%
+                                  </span>
                                 </span>
-                              </span>
-                              <span className={styles.rowSide}>
-                                <span className={styles.rowAmount}>{formatKrw(row.valuation_krw)}</span>
-                                <span className={styles.rowPct} style={{ color: signColorOf(row.return_pct) }}>
-                                  {formatPct(row.return_pct)}
+                                <span className={styles.rowSide}>
+                                  <span className={styles.rowAmount}>
+                                    {mask(formatKrw(row.valuation_krw))}
+                                  </span>
+                                  <span
+                                    className={styles.rowPct}
+                                    style={{
+                                      color: signColorOf(row.return_pct),
+                                    }}
+                                  >
+                                    {formatPct(row.return_pct)}
+                                  </span>
                                 </span>
-                              </span>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-    </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    </MobileFrame>
   );
 }
