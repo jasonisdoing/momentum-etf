@@ -3,10 +3,9 @@
 .page {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 12px 12px 32px;
-  max-width: 640px;
-  margin: 0 auto;
+  gap: 8px;
+  padding: 8px 6px 24px;
+  width: 100%;
 }
 
 .header {
@@ -28,12 +27,12 @@
 }
 
 .summaryCard {
-  border: 1px solid var(--border-color, #e9ecef);
-  border-radius: 12px;
-  padding: 14px 16px;
+  background: var(--bg-muted, rgba(0, 0, 0, 0.03));
+  border-radius: 10px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .summaryLabel {
@@ -74,9 +73,10 @@
   justify-content: space-between;
   gap: 12px;
   width: 100%;
-  border: 1px solid var(--border-color, #e9ecef);
-  border-radius: 12px;
-  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--border-color, #e9ecef);
+  border-radius: 0;
+  padding: 10px 6px;
   text-decoration: none;
   color: inherit;
   background: none;
@@ -95,7 +95,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding-left: 12px;
+  padding-left: 8px;
 }
 
 .childRow {
@@ -103,7 +103,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 12px;
+  padding: 6px 6px 6px 10px;
   border-left: 2px solid var(--border-color, #e9ecef);
 }
 
@@ -165,7 +165,7 @@
   justify-content: center;
   min-height: 64px;
   border: 1px solid var(--border-color, #e9ecef);
-  border-radius: 14px;
+  border-radius: 12px;
   font-size: var(--fs-lg);
   font-weight: 700;
   text-decoration: none;
