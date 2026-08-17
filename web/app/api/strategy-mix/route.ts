@@ -5,7 +5,7 @@ import { jsonNoStore } from "../../../lib/no-store-response";
 
 export const dynamic = "force-dynamic";
 
-/** 합성전략 백테스트 — pool 쿼리를 넘겨야 해서 팩토리 대신 직접 구현.
+/** 합성 전략 백테스트 — pool 쿼리를 넘겨야 해서 팩토리 대신 직접 구현.
  *  두 전략 백테스트를 요청 시 계산하므로 오래 걸린다 (다른 전략 화면과 같은 패턴, 캐시 없음). */
 export async function GET(request: NextRequest) {
   try {

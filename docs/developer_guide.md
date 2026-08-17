@@ -132,8 +132,8 @@ python infra/server_scheduler.py
 ### 모듈 구조
 *   `core/strategy/`: 지표/추세/비중 계산 공용 전략 유틸
 *   `services/`: **외부 API/데이터 연동 통합 계층**
-    *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시. 환율은 USD/KRW 만 토스 실시간(REAL_TIME, 5초 TTL) 우선 + 실패 시 야후(KRW=X) 백업이며, AUD 등 나머지 통화는 야후(1시간 TTL).
-    *   `toss_market_service.py`: 토스 시장지표(mini-chart)·차트(c-chart) 연동 — /live-24h 카드(나스닥 100 선물·달러 환율·VIX), 헤더 나스닥선물, USD 환율, market-trend 나스닥 선물 최신 봉 보강에 사용
+    *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시. 환율은 **8개 통화 모두 야후 일괄 조회**(`KRW=X` 등, 5분 TTL) — 현재가와 전일 종가가 같은 소스라 변동률 기준이 어긋나지 않습니다. (토스 USD 오버레이는 스팟과 7원가량 벌어져 제거)
+    *   `toss_market_service.py`: 토스 시장지표(mini-chart)·차트(c-chart) 연동 — /live-24h 카드(나스닥 100 선물·VIX), 헤더 나스닥선물, market-trend 나스닥 선물 최신 봉 보강에 사용 (환율은 쓰지 않습니다)
     *   `reference_data_service.py`: KIS ETF 마스터, 종목 메타데이터, 상장일 조회
     *   `etf_holdings_service.py`: 한국 ETF 구성종목 비중을 네이버 `ETFComponent` API로 조회해 메타 캐시에 저장할 형태로 정규화합니다. 국내 구성종목은 6자리 종목코드, 해외 구성종목은 `componentReutersCode`에서 추출한 심볼을 표시용 `ticker`로 사용하고, 원본 ISIN은 `raw_code`에 저장합니다. 해외 구성종목 가격 조회는 응답 시점에 Yahoo를 사용하고 서비스 메모리 TTL 캐시를 적용합니다.
     *   `vkospi_service.py`: VKOSPI 등 외부 시장 지표 연동 및 메모리 캐시
@@ -156,6 +156,11 @@ python infra/server_scheduler.py
 *   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
 *   계좌 메타데이터: MongoDB `account_settings` 컬렉션이 단일 소스입니다(`utils/account_settings_store.py`). 웹 `/account-settings` 화면에서 값 수정만 지원하며(`account_id` 불변), 계좌 추가/삭제는 화면에서 지원하지 않습니다(DB 문서 직접 추가/삭제로 관리).
 *   Next API 프록시: 로직 없는 순수 FastAPI 프록시 라우트는 `web/lib/fastapi-proxy.ts` 의 `createFastApiProxy`(경로·에러 문구·body 전달·타임아웃 선언)로 작성합니다. 쿼리 가공·body 재구성 등 로직이 있는 라우트만 직접 구현합니다.
+*   모바일 화면(`/m`): 폰 전용 경로. 데스크톱 화면은 손대지 않는다.
+    *   `web/app/m/mobile-data.ts`: `/api/assets` + `/api/dashboard` 를 합치는 공용 로더와 표기 함수(`formatKoreanMoney` = `5억 5,817만원`, `accountLabel`, `ACCOUNT_COLORS`). **모바일 전용 API 는 만들지 않는다.**
+    *   `web/app/m/MobileFrame.tsx`: 공용 헤더(제목·금액 가림)와 푸터(기준 시각·새로고침). 금액 가림은 `/m` 전용 로컬스토리지 키(`momentum-etf:m:hide-money`)로 데스크톱 설정과 분리하고 기본은 가림이다.
+    *   `web/app/AppShell.tsx` 는 `/m` 이하에서 사이드바·상단 지표바를 렌더하지 않는다(`isBareLayout`).
+*   PWA: `web/app/manifest.ts`(`start_url: "/"`), `web/public/sw.js`(캐시 없음 — 설치 조건용 fetch 핸들러만), `web/app/components/ServiceWorkerRegistrar.tsx`. 좁은 화면(≤768px)으로 `/` 에 들어오면 `MobileEntryRedirect` 가 `/m` 으로 보낸다(`/?desktop=1` 로 우회). 설치 파일(`manifest.webmanifest`·아이콘·`sw.js`)은 `proxy.ts` 에서 인증 예외다.
 *   그리드 공용 셀: 여러 화면이 공유하는 셀 표기(부호 %, KOSPI/KOSDAQ 마켓 배지, ⭐신고점)는 `web/lib/grid-cells.tsx` 가 단일 소스입니다. 섹터·업종 UI 노출은 종목풀 설정의 풀 성격(`pool_kind`, 개별주/ETF 토글)을 우선 기준으로 씁니다(pools-rank·strategy-momentum 공통).
 
 ### 데이터 파이프라인 및 캐싱
@@ -167,6 +172,21 @@ python infra/server_scheduler.py
     *   `services/etf_holdings_service.py`가 한국 ETF 구성종목 비중을 네이버 `ETFComponent` API로 수집하고, 응답 시점에는 메타 캐시에 저장된 구성종목에 해외 가격만 Yahoo TTL 캐시로 보조합니다.
 4.  **지표 계산**: `core/strategy/metrics.py`가 이동평균과 추세(%)를 계산.
 5.  **순위 생성**: `utils/rankings.py`가 종목별 추세(%), RSI, 기간 수익률을 합쳐 화면용 DataFrame 생성.
+
+### 캐시 TTL (단일 소스)
+
+메모리 TTL 캐시는 값을 직접 적지 않고 `config.py` 의 상수 4개 중 하나를 고른다.
+
+| 상수 | 값 | 쓰는 곳 |
+|------|----|---------|
+| `CACHE_TTL_LIVE` | 60초 | 시세·설정·목록 (실시간성 필요) |
+| `CACHE_TTL_COMPUTE` | 300초 | 무거운 계산·집계 — 랭킹, 전략 현재 상태, 환율 |
+| `CACHE_TTL_SLOW` | 3600초 | 느리게 변하는 외부 값 — 야후 심볼 해석 |
+| `CACHE_TTL_META` | 86400초 | 사실상 고정된 메타 — ETF 기본 정보 |
+
+구현은 `utils/ttl_cache.py` 의 `TtlCache` 하나를 쓴다(값 복사 반환 + 동시 중복 계산 방지 + 선택적 무효화).
+전략 3개의 현재 상태(`compute_picks`·`current_positions`)와 랭킹이 이걸로 캐시된다 — 설정·기준일이
+키라서 설정을 바꾸면 즉시 새로 계산된다.
 
 ### 일별 원장 원칙
 

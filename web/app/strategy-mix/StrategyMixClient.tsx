@@ -274,7 +274,7 @@ type ActionItem = {
 };
 type ActionGroup = { key: string; title: string; items: ActionItem[] };
 
-/** 합성전략 — SM·신고가를 50:50으로 함께 운용하는 화면.
+/** 합성 전략 — SM·신고가를 50:50으로 함께 운용하는 화면.
  *  현재 상태 탭은 오늘 보유해야 할 종목과 현금 비중·오늘의 액션을,
  *  백테스트 탭은 매월 50:50 리밸런싱 합성 성과를 보여준다. 설정은 각 전략 화면의 저장값을 그대로 쓴다. */
 export function StrategyMixClient() {
@@ -896,7 +896,7 @@ export function StrategyMixClient() {
     actionGroups.length > 0 || Boolean(actions?.sleeve_rebalance_today);
 
   return (
-    <PageFrame title="합성전략" fullWidth>
+    <PageFrame title="합성 전략" fullWidth>
       <div className="appPageStack">
         <section className="appSection">
           <div className="card appCard">
@@ -1015,9 +1015,9 @@ export function StrategyMixClient() {
                       {positions.summary.cash_pct.toFixed(1)}%
                       {positions.account && totalAsset
                         ? ` (현재 ${((positions.account.stock_value / totalAsset) * 100).toFixed(1)}% · ${(
-                            (positions.account.cash_balance / totalAsset) *
-                            100
-                          ).toFixed(1)}%)`
+                          (positions.account.cash_balance / totalAsset) *
+                          100
+                        ).toFixed(1)}%)`
                         : ""}
                     </span>
                     {/* 적용 계좌 — 목표 금액의 기준이 되는 실제 잔고. */}
@@ -1053,8 +1053,8 @@ export function StrategyMixClient() {
                       {positions.summary.nh.held_count})
                     </span>
                     {actions &&
-                    !actions.sm_rebalance.is_filled &&
-                    actions.sm_rebalance.fill_date ? (
+                      !actions.sm_rebalance.is_filled &&
+                      actions.sm_rebalance.fill_date ? (
                       <span style={hintStyle}>
                         모멘텀 {actions.sm_rebalance.portfolio_week} 포트폴리오
                         · 체결 {actions.sm_rebalance.fill_date} (판정{" "}
