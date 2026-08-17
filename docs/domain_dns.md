@@ -10,7 +10,6 @@
 | 네임서버 · DNS 관리 | Cloudflare |
 | DNS 레코드 | A `invest` → 134.185.109.82, **DNS 전용(회색 구름)** |
 | 인증서 | Let's Encrypt, acme-companion 자동 발급·갱신 |
-| 옛 주소 | etf.dojason.com — 사용 중단 |
 
 등록기관(가비아)과 DNS 관리처(Cloudflare)가 다르다. **레코드는 Cloudflare 에서만 바꾼다** —
 가비아 DNS 화면에 넣어도 반영되지 않는다.
