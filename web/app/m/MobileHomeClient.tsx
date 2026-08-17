@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Cell, Pie, PieChart } from "recharts";
 
 import { MobileFrame, useMaskedAmount } from "./MobileFrame";
+import { signColor } from "@/lib/grid-cells";
 import styles from "./mobile.module.css";
 import {
   ACCOUNT_COLORS,
@@ -13,7 +14,6 @@ import {
   formatKrw,
   formatPct,
   loadMobileSnapshot,
-  signColorOf,
   type MobileAccount,
   type MobilePeriods,
   type MobileTotals,
@@ -154,7 +154,7 @@ export function MobileHomeClient() {
                       <span className={styles.metricLabel}>{label}</span>
                       <span
                         className={styles.periodValue}
-                        style={{ color: signColorOf(item?.return_pct) }}
+                        style={{ color: signColor(item?.return_pct) }}
                       >
                         {formatPct(item?.return_pct)}
                         <span className={styles.periodProfit}>

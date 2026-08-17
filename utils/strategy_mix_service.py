@@ -256,7 +256,6 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     sm_rebalance_sells = [row for row in sm_current if str(row["ticker"]).strip() not in sm_selected_tickers]
     # 주중 매도 예정 — 자격 상실 판정(이미 보유 중인 종목만 해당).
     sm_sell_pending = [row for row in sm_selected if row.get("is_exit_pending")]
-    sm_holdings = sm_selected
     nh_holdings = list(nh.get("holdings") or [])
 
     # 신고가 빈 슬롯을 채울 진입 예정 — 다음 시가에 사므로 목표 포트폴리오에 포함한다.
@@ -294,6 +293,8 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
             row["change_pct"] = change_pct
         row[f"{source}_status"] = status
 
+    # 매도 예정(자격 상실·이탈)은 목표 비중 0 이다 — 다음 시가에 전량 팔고 그 슬롯은
+    # 다음 교체까지 현금이다. 비중을 남겨두면 팔아야 할 종목의 매매수량이 0 으로 보인다.
     for row in sm_selected:
         ticker = str(row["ticker"]).strip()
         if ticker in sm_current_tickers:
@@ -301,23 +302,29 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
             status = f"유지 ({streak}주째)" if streak else "유지"
         else:
             status = f"매수 예정 ({sm.get('rebalance_date')} 시가)"
-        if row.get("is_exit_pending"):
+        exiting = bool(row.get("is_exit_pending"))
+        if exiting:
             status += " · 매도 예정(자격 상실)"
-        add_target(ticker, row.get("name"), "sm", weight_sm, row.get("price"), row.get("daily_change_pct"), status)
+        weight = 0.0 if exiting else weight_sm
+        add_target(ticker, row.get("name"), "sm", weight, row.get("price"), row.get("daily_change_pct"), status)
     for row in nh_holdings:
         status = "오늘 진입" if row.get("is_new") else f"{row.get('days')}일째"
-        if str(row.get("status")) == "sell":
+        exiting = str(row.get("status")) == "sell"
+        if exiting:
             reason = str(row.get("exit_reason") or "이탈")
             status += f" · 매도 예정({reason})"
-        add_target(row["ticker"], row.get("name"), "nh", weight_nh, row.get("price"), row.get("change_pct"), status)
+        weight = 0.0 if exiting else weight_nh
+        add_target(row["ticker"], row.get("name"), "nh", weight, row.get("price"), row.get("change_pct"), status)
     for row in nh_planned:
         add_target(
             row["ticker"], row.get("name"), "nh", weight_nh, row.get("price"), row.get("change_pct"), "진입 예정 (다음 시가 매수)"
         )
 
+    sm_active = [row for row in sm_selected if not row.get("is_exit_pending")]
+    nh_active = [row for row in nh_holdings if str(row.get("status")) != "sell"]
     stock_pct = sum(row["weight_pct"] for row in holdings)
-    sm_cash = (sm_top_n - len(sm_holdings)) * weight_sm
-    nh_cash = (nh_top_n - len(nh_holdings) - len(nh_planned)) * weight_nh
+    sm_cash = (sm_top_n - len(sm_active)) * weight_sm
+    nh_cash = (nh_top_n - len(nh_active) - len(nh_planned)) * weight_nh
 
     # 매월 첫 거래일 = 슬리브 50:50 리밸런싱 날 (그 시장 달력 기준).
     from config import MARKET_SCHEDULES
@@ -430,13 +437,13 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
             # slots_used = 목표가 찬 슬롯, held_count = 지금 실제로 들고 있는 종목 수.
             # 둘이 다르면 아직 체결 전이라는 뜻이라 화면이 구분해서 보여준다.
             "sm": {
-                "slots_used": len(sm_holdings),
+                "slots_used": len(sm_active),
                 "held_count": len(sm_current),
                 "top_n": sm_top_n,
                 "cash_pct": round(sm_cash, 2),
             },
             "nh": {
-                "slots_used": len(nh_holdings) + len(nh_planned),
+                "slots_used": len(nh_active) + len(nh_planned),
                 "held_count": len(nh_holdings),
                 "top_n": nh_top_n,
                 "cash_pct": round(nh_cash, 2),
