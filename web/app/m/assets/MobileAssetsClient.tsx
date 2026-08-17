@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { HoldingsRow } from "../../assets/assets-helpers";
 import { MobileFrame, useMaskedAmount } from "../MobileFrame";
+import { signColor } from "@/lib/grid-cells";
 import styles from "../mobile.module.css";
 import {
   accountLabel,
@@ -11,7 +12,6 @@ import {
   formatKrw,
   formatPct,
   loadMobileSnapshot,
-  signColorOf,
   type MobileAccount,
   type MobileTotals,
 } from "../mobile-data";
@@ -89,7 +89,7 @@ export function MobileAssetsClient() {
                   <span className={styles.metricLabel}>금일</span>
                   <span
                     className={styles.metricValue}
-                    style={{ color: signColorOf(totals.daily_return_pct) }}
+                    style={{ color: signColor(totals.daily_return_pct) }}
                   >
                     {formatPct(totals.daily_return_pct)}
                   </span>
@@ -98,7 +98,7 @@ export function MobileAssetsClient() {
                   <span className={styles.metricLabel}>누적</span>
                   <span
                     className={styles.metricValue}
-                    style={{ color: signColorOf(totals.net_profit_pct) }}
+                    style={{ color: signColor(totals.net_profit_pct) }}
                   >
                     {formatPct(totals.net_profit_pct)} (
                     {mask(formatKoreanMoney(totals.net_profit))})
@@ -138,7 +138,7 @@ export function MobileAssetsClient() {
                         <span
                           className={styles.rowPct}
                           style={{
-                            color: signColorOf(account.daily_return_pct),
+                            color: signColor(account.daily_return_pct),
                           }}
                         >
                           {formatPct(account.daily_return_pct)}
@@ -180,7 +180,7 @@ export function MobileAssetsClient() {
                                   <span
                                     className={styles.rowPct}
                                     style={{
-                                      color: signColorOf(row.return_pct),
+                                      color: signColor(row.return_pct),
                                     }}
                                   >
                                     {formatPct(row.return_pct)}

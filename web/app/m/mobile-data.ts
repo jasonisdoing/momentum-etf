@@ -159,9 +159,3 @@ export function formatPct(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return "-";
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
-
-/** 등락 색 — 전략 화면과 같은 기준(양수 초록·음수 빨강). */
-export function signColorOf(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value) || value === 0) return "var(--text-muted)";
-  return value > 0 ? "#2f9e44" : "#d62828";
-}

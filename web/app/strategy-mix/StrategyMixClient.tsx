@@ -3,9 +3,16 @@
 import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import AccountSelect, { formatAccountLabel, type AccountOptionBase } from "../components/AccountSelect";
+import AccountSelect, {
+  formatAccountLabel,
+  type AccountOptionBase,
+} from "../components/AccountSelect";
 import { AppAgGrid } from "../components/AppAgGrid";
-import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
+import {
+  AppLoadingProgress,
+  startProgressRamp,
+  type LoadingProgress,
+} from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { NavTabs } from "../components/NavTabs";
 import { TickerDetailLink } from "../components/TickerDetailLink";
@@ -13,11 +20,18 @@ import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
-import { STOCK_NAME_COLUMN_MIN_WIDTH, formatSignedPct, signColor } from "@/lib/grid-cells";
+import {
+  STOCK_NAME_COLUMN_MIN_WIDTH,
+  formatSignedPct,
+  signColor,
+} from "@/lib/grid-cells";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
 const gridTheme = createAppGridTheme();
-const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--fs-sm)" };
+const hintStyle: React.CSSProperties = {
+  color: "var(--text-muted)",
+  fontSize: "var(--fs-sm)",
+};
 
 /** 통화가 다른 계좌는 목표 금액·주수를 낼 수 없어 셀렉터에서 걸러낸다. */
 type AccountOption = AccountOptionBase & { currency?: string };
@@ -94,7 +108,12 @@ type AccountState = {
   stock_value: number;
   total_assets: number;
   /** 목표에 없는 보유 종목 = 전량 매도 대상. */
-  sell_all: { ticker: string; name: string; quantity: number; value: number | null }[];
+  sell_all: {
+    ticker: string;
+    name: string;
+    quantity: number;
+    value: number | null;
+  }[];
 };
 
 type Positions = {
@@ -112,8 +131,18 @@ type Positions = {
     stock_pct: number;
     cash_pct: number;
     /** slots_used = 목표가 찬 슬롯, held_count = 지금 실제로 들고 있는 종목 수. */
-    sm: { slots_used: number; held_count: number; top_n: number; cash_pct: number };
-    nh: { slots_used: number; held_count: number; top_n: number; cash_pct: number };
+    sm: {
+      slots_used: number;
+      held_count: number;
+      top_n: number;
+      cash_pct: number;
+    };
+    nh: {
+      slots_used: number;
+      held_count: number;
+      top_n: number;
+      cash_pct: number;
+    };
   };
   holdings: Holding[];
   actions: {
@@ -132,7 +161,12 @@ type Positions = {
       held_quantity?: number | null;
       trade_quantity?: number | null;
     }[];
-    nh_sells: { ticker: string; name: string; return_pct: number | null; reason: string }[];
+    nh_sells: {
+      ticker: string;
+      name: string;
+      return_pct: number | null;
+      reason: string;
+    }[];
     /** 확정된 다음 교체 — 판정은 끝났고 체결만 남았다. */
     sm_rebalance: {
       is_filled: boolean;
@@ -155,7 +189,12 @@ const VIEW_MODES = [
 ] as const;
 type ViewMode = (typeof VIEW_MODES)[number]["key"];
 
-type PeriodRow = { period: string; strategy_pct: number; benchmark_pct: number; excess_pp: number };
+type PeriodRow = {
+  period: string;
+  strategy_pct: number;
+  benchmark_pct: number;
+  excess_pp: number;
+};
 
 /** 그 날짜가 속한 주의 월요일 — 주간 묶음 키. 로컬 기준으로 조립한다(UTC 파싱은 하루 밀린다). */
 function weekKeyOf(date: string): string {
@@ -167,21 +206,33 @@ function weekKeyOf(date: string): string {
 
 /** 누적(%) 시계열을 기간별 수익률로 자른다 — 신고가 화면과 같은 계산.
  *  주간은 묶음 키(월요일)와 표시 라벨(그 주 마지막 거래일)이 달라 따로 담는다. */
-function toPeriodRows(daily: View["daily"], keyOf: (date: string) => string, labelByLastDate = false): PeriodRow[] {
+function toPeriodRows(
+  daily: View["daily"],
+  keyOf: (date: string) => string,
+  labelByLastDate = false,
+): PeriodRow[] {
   if (daily.length === 0) return [];
-  const lastByPeriod = new Map<string, { strategy: number; benchmark: number; lastDate: string }>();
+  const lastByPeriod = new Map<
+    string,
+    { strategy: number; benchmark: number; lastDate: string }
+  >();
   const order: string[] = [];
   for (const point of daily) {
     const key = keyOf(point.date);
     if (!lastByPeriod.has(key)) order.push(key);
-    lastByPeriod.set(key, { strategy: point.strategy_pct, benchmark: point.benchmark_pct, lastDate: point.date });
+    lastByPeriod.set(key, {
+      strategy: point.strategy_pct,
+      benchmark: point.benchmark_pct,
+      lastDate: point.date,
+    });
   }
   // 첫 구간의 기준은 시작 시점(누적 0%)이다.
   let prev = { strategy: 0, benchmark: 0 };
   const rows: PeriodRow[] = [];
   for (const key of order) {
     const current = lastByPeriod.get(key)!;
-    const step = (now: number, before: number) => ((1 + now / 100) / (1 + before / 100) - 1) * 100;
+    const step = (now: number, before: number) =>
+      ((1 + now / 100) / (1 + before / 100) - 1) * 100;
     const strategy = step(current.strategy, prev.strategy);
     const benchmark = step(current.benchmark, prev.benchmark);
     rows.push({
@@ -208,10 +259,19 @@ function formatAmount(value: number | null | undefined): string {
 const SOURCE_LABEL: Record<string, string> = { sm: "모멘텀", nh: "신고가" };
 
 /** 보유 표 행 — 현금 행도 같은 표에 넣는다 (비중 합이 100%임을 한눈에 보이게). */
-type PositionRow = Holding & { is_cash?: boolean; amount: number | null; shares: number | null };
+type PositionRow = Holding & {
+  is_cash?: boolean;
+  amount: number | null;
+  shares: number | null;
+};
 
 /** 오늘의 액션 한 줄. 같은 체결 시점끼리 묶고 묶음 안에서는 매도 → 매수 순서다. */
-type ActionItem = { key: string; side: "sell" | "buy"; title: string; text: string };
+type ActionItem = {
+  key: string;
+  side: "sell" | "buy";
+  title: string;
+  text: string;
+};
 type ActionGroup = { key: string; title: string; items: ActionItem[] };
 
 /** 합성전략 — SM·신고가를 50:50으로 함께 운용하는 화면.
@@ -225,7 +285,9 @@ export function StrategyMixClient() {
   const [monthOptions, setMonthOptions] = useState<number[]>([]);
   const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
   // 풀별 저장 설정 — 저장 전 초안과 비교해 저장 버튼 활성화를 정한다.
-  const [savedByPool, setSavedByPool] = useState<Record<string, { account_id: string | null }>>({});
+  const [savedByPool, setSavedByPool] = useState<
+    Record<string, { account_id: string | null }>
+  >({});
   const [accountId, setAccountId] = useState<string>("");
   const [saving, setSaving] = useState(false);
 
@@ -233,7 +295,8 @@ export function StrategyMixClient() {
   const [positions, setPositions] = useState<Positions | null>(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
   const [positionsError, setPositionsError] = useState<string | null>(null);
-  const [positionsProgress, setPositionsProgress] = useState<LoadingProgress | null>(null);
+  const [positionsProgress, setPositionsProgress] =
+    useState<LoadingProgress | null>(null);
   /** 과거 날짜 조회 — 빈 값이면 오늘. */
   const [asOf, setAsOf] = useState<string>("");
   /** 계좌를 저장하면 목표 금액이 달라지므로 현재 상태를 다시 계산한다. */
@@ -244,25 +307,38 @@ export function StrategyMixClient() {
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [backtestProgress, setBacktestProgress] = useState<LoadingProgress | null>(null);
+  const [backtestProgress, setBacktestProgress] =
+    useState<LoadingProgress | null>(null);
 
   // 진입 시에는 풀 목록만 받는다 — 계산은 탭·버튼이 시작한다.
   useEffect(() => {
     let alive = true;
     void (async () => {
       try {
-        const response = await fetch("/api/strategy-mix/meta", { cache: "no-store" });
+        const response = await fetch("/api/strategy-mix/meta", {
+          cache: "no-store",
+        });
         const payload = (await response.json()) as Meta & { error?: string };
-        if (!response.ok || payload.error) throw new Error(payload.error ?? "종목풀 목록을 불러오지 못했습니다.");
+        if (!response.ok || payload.error)
+          throw new Error(
+            payload.error ?? "종목풀 목록을 불러오지 못했습니다.",
+          );
         if (!alive) return;
         setPoolOptions(payload.pool_options);
         setPool(payload.pool);
         setMonthOptions(payload.month_options);
         setAccountOptions(payload.accounts ?? []);
         setSavedByPool(payload.settings_by_pool ?? {});
-        setAccountId((payload.settings_by_pool ?? {})[payload.pool]?.account_id ?? "");
+        setAccountId(
+          (payload.settings_by_pool ?? {})[payload.pool]?.account_id ?? "",
+        );
       } catch (metaError) {
-        if (alive) setError(metaError instanceof Error ? metaError.message : "종목풀 목록을 불러오지 못했습니다.");
+        if (alive)
+          setError(
+            metaError instanceof Error
+              ? metaError.message
+              : "종목풀 목록을 불러오지 못했습니다.",
+          );
       }
     })();
     return () => {
@@ -276,22 +352,35 @@ export function StrategyMixClient() {
     let alive = true;
     setPositionsLoading(true);
     setPositionsError(null);
-    setPositionsProgress({ percent: 10, message: "두 전략의 현재 상태를 계산하는 중" });
+    setPositionsProgress({
+      percent: 10,
+      message: "두 전략의 현재 상태를 계산하는 중",
+    });
     const stopRamp = startProgressRamp(setPositionsProgress);
     void (async () => {
       try {
         const params = new URLSearchParams({ pool });
         if (asOf) params.set("as_of", asOf);
-        const response = await fetch(`/api/strategy-mix/positions?${params.toString()}`, {
-          cache: "no-store",
-        });
-        const payload = (await response.json()) as Positions & { error?: string };
-        if (!response.ok || payload.error) throw new Error(payload.error ?? "합성 운영 상태를 불러오지 못했습니다.");
+        const response = await fetch(
+          `/api/strategy-mix/positions?${params.toString()}`,
+          {
+            cache: "no-store",
+          },
+        );
+        const payload = (await response.json()) as Positions & {
+          error?: string;
+        };
+        if (!response.ok || payload.error)
+          throw new Error(
+            payload.error ?? "합성 운영 상태를 불러오지 못했습니다.",
+          );
         if (alive) setPositions(payload);
       } catch (positionsFetchError) {
         if (alive)
           setPositionsError(
-            positionsFetchError instanceof Error ? positionsFetchError.message : "합성 운영 상태를 불러오지 못했습니다.",
+            positionsFetchError instanceof Error
+              ? positionsFetchError.message
+              : "합성 운영 상태를 불러오지 못했습니다.",
           );
       } finally {
         stopRamp();
@@ -308,7 +397,10 @@ export function StrategyMixClient() {
   }, [pool, asOf, positionsReloadKey]);
 
   // 저장 전 초안과 저장분이 다른지 — 다르면 저장 버튼이 열린다.
-  const isDirty = useMemo(() => (savedByPool[pool]?.account_id ?? "") !== accountId, [savedByPool, pool, accountId]);
+  const isDirty = useMemo(
+    () => (savedByPool[pool]?.account_id ?? "") !== accountId,
+    [savedByPool, pool, accountId],
+  );
 
   const saveSettings = useCallback(async () => {
     if (!pool) return;
@@ -320,12 +412,20 @@ export function StrategyMixClient() {
         body: JSON.stringify({ pool, account_id: accountId || null }),
       });
       const payload = (await response.json()) as { error?: string };
-      if (!response.ok || payload.error) throw new Error(payload.error ?? "설정을 저장하지 못했습니다.");
-      setSavedByPool((prev) => ({ ...prev, [pool]: { account_id: accountId || null } }));
+      if (!response.ok || payload.error)
+        throw new Error(payload.error ?? "설정을 저장하지 못했습니다.");
+      setSavedByPool((prev) => ({
+        ...prev,
+        [pool]: { account_id: accountId || null },
+      }));
       setPositionsReloadKey((key) => key + 1);
       toast.success("설정을 저장했습니다.");
     } catch (saveError) {
-      toast.error(saveError instanceof Error ? saveError.message : "설정을 저장하지 못했습니다.");
+      toast.error(
+        saveError instanceof Error
+          ? saveError.message
+          : "설정을 저장하지 못했습니다.",
+      );
     } finally {
       setSaving(false);
     }
@@ -335,18 +435,30 @@ export function StrategyMixClient() {
     if (!pool) return;
     setLoading(true);
     setError(null);
-    setBacktestProgress({ percent: 10, message: "두 전략의 백테스트를 계산하는 중" });
+    setBacktestProgress({
+      percent: 10,
+      message: "두 전략의 백테스트를 계산하는 중",
+    });
     const stopRamp = startProgressRamp(setBacktestProgress);
     try {
-      const response = await fetch(`/api/strategy-mix?pool=${encodeURIComponent(pool)}&months=${months}`, {
-        cache: "no-store",
-      });
+      const response = await fetch(
+        `/api/strategy-mix?pool=${encodeURIComponent(pool)}&months=${months}`,
+        {
+          cache: "no-store",
+        },
+      );
       const payload = (await response.json()) as View & { error?: string };
-      if (!response.ok || payload.error) throw new Error(payload.error ?? "합성 백테스트를 불러오지 못했습니다.");
+      if (!response.ok || payload.error)
+        throw new Error(
+          payload.error ?? "합성 백테스트를 불러오지 못했습니다.",
+        );
       setBacktestProgress({ percent: 100, message: "결과 반영 중" });
       setView(payload);
     } catch (runError) {
-      const message = runError instanceof Error ? runError.message : "합성 백테스트를 불러오지 못했습니다.";
+      const message =
+        runError instanceof Error
+          ? runError.message
+          : "합성 백테스트를 불러오지 못했습니다.";
       setError(message);
       toast.error(message);
     } finally {
@@ -373,9 +485,14 @@ export function StrategyMixClient() {
       nh_status: null,
       is_cash: true,
       current_weight_pct:
-        totalAsset && positions.account ? (positions.account.cash_balance / totalAsset) * 100 : undefined,
+        totalAsset && positions.account
+          ? (positions.account.cash_balance / totalAsset) * 100
+          : undefined,
       held_value: positions.account?.cash_balance ?? null,
-      amount: totalAsset == null ? null : (totalAsset * positions.summary.cash_pct) / 100,
+      amount:
+        totalAsset == null
+          ? null
+          : (totalAsset * positions.summary.cash_pct) / 100,
       shares: null,
     };
     // 목표 종목 행은 백엔드가 종목 단위로 합쳐 계산한 값을 그대로 쓴다.
@@ -396,14 +513,21 @@ export function StrategyMixClient() {
         headerName: "티커",
         width: 108,
         cellRenderer: (p: { value?: string; data?: PositionRow }) =>
-          p.data?.is_cash ? <span>-</span> : <TickerDetailLink ticker={p.value} />,
+          p.data?.is_cash ? (
+            <span>-</span>
+          ) : (
+            <TickerDetailLink ticker={p.value} />
+          ),
       },
       {
         field: "name",
         headerName: "종목명",
         flex: 1.4,
         minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
-        cellStyle: (p) => ({ fontWeight: 700, ...(p.data?.is_cash ? { color: "var(--text-muted)" } : null) }),
+        cellStyle: (p) => ({
+          fontWeight: 700,
+          ...(p.data?.is_cash ? { color: "var(--text-muted)" } : null),
+        }),
       },
       {
         field: "sources",
@@ -412,7 +536,9 @@ export function StrategyMixClient() {
         // 두 전략이 같은 종목을 담으면 한 행에 둘 다 표시된다 (비중은 합산).
         valueFormatter: (p) => {
           const sources = (p.value as string[]) ?? [];
-          return sources.length === 0 ? "-" : sources.map((s) => SOURCE_LABEL[s] ?? s).join("·");
+          return sources.length === 0
+            ? "-"
+            : sources.map((s) => SOURCE_LABEL[s] ?? s).join("·");
         },
       },
       // 아래 순서·명칭은 /assets 계좌 보유 표와 맞춘다 (일간→현재가→비중→목표비중→목표수량→수량).
@@ -422,7 +548,10 @@ export function StrategyMixClient() {
         width: 92,
         type: "numericColumn",
         valueFormatter: (p) => formatSignedPct(p.value as number),
-        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
+        cellStyle: (p) => ({
+          color: signColor(p.value as number),
+          fontWeight: 600,
+        }),
       },
       {
         field: "price",
@@ -437,13 +566,16 @@ export function StrategyMixClient() {
         headerName: "비중",
         width: 88,
         type: "numericColumn",
-        valueFormatter: (p) => (p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`),
+        valueFormatter: (p) =>
+          p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`,
         cellStyle: (p) => {
           const current = p.value as number | null;
           const target = p.data?.weight_pct;
           if (current == null || target == null) return null;
           // 목표에서 1%p 넘게 벌어진 행만 눌러 표시한다 — 반올림 오차로 전부 색이 붙는 걸 막는다.
-          return Math.abs(current - target) > 1 ? { color: "var(--text-muted)" } : null;
+          return Math.abs(current - target) > 1
+            ? { color: "var(--text-muted)" }
+            : null;
         },
       },
       {
@@ -451,7 +583,8 @@ export function StrategyMixClient() {
         headerName: "목표비중",
         width: 88,
         type: "numericColumn",
-        valueFormatter: (p) => (p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`),
+        valueFormatter: (p) =>
+          p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`,
         cellStyle: { fontWeight: 600 },
       },
     ];
@@ -464,14 +597,16 @@ export function StrategyMixClient() {
           headerTooltip: "목표비중 × 총자산 ÷ 현재가",
           width: 88,
           type: "numericColumn",
-          valueFormatter: (p) => (p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR")),
+          valueFormatter: (p) =>
+            p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR"),
         },
         {
           field: "held_quantity",
           headerName: "수량",
           width: 80,
           type: "numericColumn",
-          valueFormatter: (p) => (p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR")),
+          valueFormatter: (p) =>
+            p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR"),
         },
         {
           field: "trade_quantity",
@@ -485,11 +620,11 @@ export function StrategyMixClient() {
             if (value === 0) return "0";
             return `${value > 0 ? "+" : ""}${value.toLocaleString("ko-KR")}`;
           },
-          cellStyle: (p) => {
-            const value = p.value as number | null;
-            if (value == null || value === 0) return null;
-            return { color: value > 0 ? "#2f9e44" : "#d62828", fontWeight: 700 };
-          },
+          // 매수(+)·매도(−) 색은 사이트 공용 기준을 따른다 — 한국 관례로 매수 빨강·매도 파랑.
+          cellStyle: (p) => ({
+            color: signColor(p.value as number),
+            fontWeight: 700,
+          }),
         },
         {
           field: "held_value",
@@ -523,8 +658,10 @@ export function StrategyMixClient() {
       },
       cellStyle: (p) => {
         const text = String(p.value ?? "");
-        if (text.includes("매도 예정")) return { color: "#d62828", fontWeight: 600 };
-        if (text.includes("진입 예정") || text.includes("매수 예정")) return { color: "#2f9e44", fontWeight: 600 };
+        if (text.includes("매도 예정"))
+          return { color: "var(--down-color, #2f6fd0)", fontWeight: 600 };
+        if (text.includes("진입 예정") || text.includes("매수 예정"))
+          return { color: "var(--up-color, #d64545)", fontWeight: 600 };
         return null;
       },
     });
@@ -534,7 +671,8 @@ export function StrategyMixClient() {
   const periodRows = useMemo<PeriodRow[]>(() => {
     if (!view || viewMode === "trades") return [];
     if (viewMode === "weekly") return toPeriodRows(view.daily, weekKeyOf, true);
-    const keyLength = viewMode === "yearly" ? 4 : viewMode === "monthly" ? 7 : 10;
+    const keyLength =
+      viewMode === "yearly" ? 4 : viewMode === "monthly" ? 7 : 10;
     return toPeriodRows(view.daily, (date) => date.slice(0, keyLength));
   }, [view, viewMode]);
 
@@ -544,7 +682,10 @@ export function StrategyMixClient() {
         headerName: "전략",
         field: "strategy",
         width: 92,
-        cellStyle: (p) => ({ fontWeight: 700, color: p.value === "모멘텀" ? "#1c7ed6" : "#e8590c" }),
+        cellStyle: (p) => ({
+          fontWeight: 700,
+          color: p.value === "모멘텀" ? "#1c7ed6" : "#e8590c",
+        }),
       },
       { headerName: "티커", field: "ticker", width: 96 },
       { headerName: "종목명", field: "name", flex: 1, minWidth: 180 },
@@ -576,7 +717,10 @@ export function StrategyMixClient() {
         width: 110,
         type: "numericColumn",
         valueFormatter: (p) => formatSignedPct(p.value as number),
-        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
+        cellStyle: (p) => ({
+          color: signColor(p.value as number),
+          fontWeight: 700,
+        }),
       },
       { headerName: "보유일", field: "days", width: 84, type: "numericColumn" },
       { headerName: "사유", field: "reason", width: 110 },
@@ -585,20 +729,36 @@ export function StrategyMixClient() {
   );
 
   const periodColumns = useMemo<ColDef<PeriodRow>[]>(() => {
-    const pct = (field: keyof PeriodRow, headerName: string, suffix = "%"): ColDef<PeriodRow> => ({
+    const pct = (
+      field: keyof PeriodRow,
+      headerName: string,
+      suffix = "%",
+    ): ColDef<PeriodRow> => ({
       field,
       headerName,
       flex: 1,
       minWidth: 120,
       type: "numericColumn",
       valueFormatter: (p) =>
-        p.value == null ? "-" : `${(p.value as number) >= 0 ? "+" : ""}${(p.value as number).toFixed(2)}${suffix}`,
-      cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
+        p.value == null
+          ? "-"
+          : `${(p.value as number) >= 0 ? "+" : ""}${(p.value as number).toFixed(2)}${suffix}`,
+      cellStyle: (p) => ({
+        color: signColor(p.value as number),
+        fontWeight: 600,
+      }),
     });
     return [
       {
         field: "period",
-        headerName: viewMode === "yearly" ? "연도" : viewMode === "monthly" ? "월" : viewMode === "weekly" ? "주" : "일자",
+        headerName:
+          viewMode === "yearly"
+            ? "연도"
+            : viewMode === "monthly"
+              ? "월"
+              : viewMode === "weekly"
+                ? "주"
+                : "일자",
         width: 148,
         valueFormatter: (p) =>
           viewMode === "weekly" || viewMode === "daily"
@@ -621,10 +781,14 @@ export function StrategyMixClient() {
   }, [positions?.account?.account_id, accountOptions]);
 
   // 적용 계좌 후보 — 선택한 풀과 통화가 같은 계좌만. 다르면 목표 금액·주수를 낼 수 없다.
-  const poolCurrency = poolOptions.find((option) => option.ticker_type === pool)?.currency ?? "";
+  const poolCurrency =
+    poolOptions.find((option) => option.ticker_type === pool)?.currency ?? "";
   const accountChoices = useMemo(
     () =>
-      accountOptions.filter((option) => !poolCurrency || !option.currency || option.currency === poolCurrency),
+      accountOptions.filter(
+        (option) =>
+          !poolCurrency || !option.currency || option.currency === poolCurrency,
+      ),
     [accountOptions, poolCurrency],
   );
 
@@ -634,7 +798,9 @@ export function StrategyMixClient() {
   // 매도가 끝나야 매수 대금이 생기고, 모멘텀 교체는 교체일 시가에만 체결되기 때문이다.
   const actionGroups = useMemo<ActionGroup[]>(() => {
     if (!positions || !actions) return [];
-    const rowByTicker = new Map(positions.holdings.map((row) => [row.ticker, row]));
+    const rowByTicker = new Map(
+      positions.holdings.map((row) => [row.ticker, row]),
+    );
     const label = (ticker: string, name: string, quantity?: number | null) => {
       const base = `${name}(${ticker})`;
       return quantity == null || quantity === 0
@@ -646,14 +812,20 @@ export function StrategyMixClient() {
     const rebalanceBuys = new Set(rebalance.buys.map((row) => row.ticker));
     const rebalanceSells = new Set(rebalance.sells.map((row) => row.ticker));
     const entryTickers = new Set(actions.nh_entries.map((row) => row.ticker));
-    const sellPending = new Set([...actions.sm_sells, ...actions.nh_sells].map((row) => row.ticker));
+    const sellPending = new Set(
+      [...actions.sm_sells, ...actions.nh_sells].map((row) => row.ticker),
+    );
 
-    const rebalanceDate = !rebalance.is_filled && rebalance.fill_date ? rebalance.fill_date : null;
+    const rebalanceDate =
+      !rebalance.is_filled && rebalance.fill_date ? rebalance.fill_date : null;
     const nextOpen = positions.next_trading_day;
     const sellReason = new Map<string, string>();
     for (const row of actions.sm_sells) sellReason.set(row.ticker, row.reason);
     for (const row of actions.nh_sells) {
-      sellReason.set(row.ticker, `${row.reason}${row.return_pct != null ? `, ${formatSignedPct(row.return_pct)}` : ""}`);
+      sellReason.set(
+        row.ticker,
+        `${row.reason}${row.return_pct != null ? `, ${formatSignedPct(row.return_pct)}` : ""}`,
+      );
     }
 
     // 종목마다 항목은 하나다 — 매매수량 부호가 매도/매수를 정하고, 0이면 할 일이 없다.
@@ -661,11 +833,13 @@ export function StrategyMixClient() {
     for (const row of positions.holdings) {
       const trade = row.trade_quantity;
       if (trade == null || trade === 0) continue;
-      const isRebalance = rebalanceBuys.has(row.ticker) || rebalanceSells.has(row.ticker);
+      const isRebalance =
+        rebalanceBuys.has(row.ticker) || rebalanceSells.has(row.ticker);
       const date = isRebalance ? rebalanceDate : nextOpen;
       const reason = sellReason.get(row.ticker);
       let title: string;
-      if (row.is_sell_all) title = rebalanceSells.has(row.ticker) ? "교체 매도" : "전량 매도";
+      if (row.is_sell_all)
+        title = rebalanceSells.has(row.ticker) ? "교체 매도" : "전량 매도";
       else if (reason) title = "매도 예정";
       else if (isRebalance) title = trade > 0 ? "교체 매수" : "교체 비중 조정";
       else if (entryTickers.has(row.ticker)) title = "신고가 진입";
@@ -712,11 +886,14 @@ export function StrategyMixClient() {
           ? `${formatDateWithWeekday(date)} 시가${date === rebalanceDate ? " · 모멘텀 교체 포함" : ""}`
           : "체결일 미정",
         // 매도가 끝나야 매수 대금이 생긴다.
-        items: [...groupItems].sort((a, b) => (a.side === b.side ? 0 : a.side === "sell" ? -1 : 1)),
+        items: [...groupItems].sort((a, b) =>
+          a.side === b.side ? 0 : a.side === "sell" ? -1 : 1,
+        ),
       }));
   }, [positions, actions]);
 
-  const hasActions = actionGroups.length > 0 || Boolean(actions?.sleeve_rebalance_today);
+  const hasActions =
+    actionGroups.length > 0 || Boolean(actions?.sleeve_rebalance_today);
 
   return (
     <PageFrame title="합성전략" fullWidth>
@@ -727,46 +904,54 @@ export function StrategyMixClient() {
               {/* 메인 헤더 — 셀렉터·모드 전환 같은 주 제어. */}
               <div className="appMainHeader">
                 <div className="appMainHeaderLeft">
-                <label className="appLabeledField" style={{ marginBottom: 0 }}>
-                  <span className="appLabeledFieldLabel">종목풀</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={pool}
-                    disabled={loading || positionsLoading || poolOptions.length === 0}
-                    onChange={(event) => {
-                      const next = event.target.value;
-                      setPool(next);
-                      setAccountId(savedByPool[next]?.account_id ?? "");
-                      setPositions(null);
-                      setView(null);
-                      setAsOf("");
-                    }}
+                  <label
+                    className="appLabeledField"
+                    style={{ marginBottom: 0 }}
                   >
-                    {poolOptions.map((option) => (
-                      <option key={option.ticker_type} value={option.ticker_type}>
-                        {formatPoolLabel(option)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <AccountSelect
-                  label="적용 계좌"
-                  accounts={accountChoices}
-                  value={accountId}
-                  onChange={setAccountId}
-                  disabled={saving}
-                  emptyLabel="선택 안 함"
-                  style={{ width: "auto" }}
-                  labelStyle={{ marginBottom: 0 }}
-                />
-                <button
-                  className="btn btn-sm btn-primary"
-                  type="button"
-                  disabled={saving || !pool || !isDirty}
-                  onClick={() => void saveSettings()}
-                >
-                  {saving ? "저장 중…" : "저장"}
-                </button>
+                    <span className="appLabeledFieldLabel">종목풀</span>
+                    <select
+                      className="form-select form-select-sm"
+                      value={pool}
+                      disabled={
+                        loading || positionsLoading || poolOptions.length === 0
+                      }
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        setPool(next);
+                        setAccountId(savedByPool[next]?.account_id ?? "");
+                        setPositions(null);
+                        setView(null);
+                        setAsOf("");
+                      }}
+                    >
+                      {poolOptions.map((option) => (
+                        <option
+                          key={option.ticker_type}
+                          value={option.ticker_type}
+                        >
+                          {formatPoolLabel(option)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <AccountSelect
+                    label="적용 계좌"
+                    accounts={accountChoices}
+                    value={accountId}
+                    onChange={setAccountId}
+                    disabled={saving}
+                    emptyLabel="선택 안 함"
+                    style={{ width: "auto" }}
+                    labelStyle={{ marginBottom: 0 }}
+                  />
+                  <button
+                    className="btn btn-sm btn-primary"
+                    type="button"
+                    disabled={saving || !pool || !isDirty}
+                    onClick={() => void saveSettings()}
+                  >
+                    {saving ? "저장 중…" : "저장"}
+                  </button>
                 </div>
               </div>
             </div>
@@ -776,149 +961,225 @@ export function StrategyMixClient() {
         <section className="appSection">
           <div className="card appCard">
             <div className="card-header appCardHeader">
-              <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>현재 상태</span>
+              <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>
+                현재 상태
+              </span>
               {/* 기준일 셀렉트 — 신고가 화면과 같은 자리(카드 헤더 오른쪽). */}
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <select
-                    className="form-select form-select-sm"
-                    style={{ width: "auto" }}
-                    value={asOf}
-                    disabled={positionsLoading}
-                    onChange={(event) => setAsOf(event.target.value)}
-                  >
-                    <option value="">
-                      오늘{positions && !asOf ? ` (${formatDateWithWeekday(positions.as_of)})` : ""}
+                <select
+                  className="form-select form-select-sm"
+                  style={{ width: "auto" }}
+                  value={asOf}
+                  disabled={positionsLoading}
+                  onChange={(event) => setAsOf(event.target.value)}
+                >
+                  <option value="">
+                    오늘
+                    {positions && !asOf
+                      ? ` (${formatDateWithWeekday(positions.as_of)})`
+                      : ""}
+                  </option>
+                  {(positions?.available_dates ?? []).map((date) => (
+                    <option key={date} value={date}>
+                      {formatDateWithWeekday(date)}
                     </option>
-                    {(positions?.available_dates ?? []).map((date) => (
-                      <option key={date} value={date}>
-                        {formatDateWithWeekday(date)}
-                      </option>
-                    ))}
-                  </select>
+                  ))}
+                </select>
               </span>
             </div>
             <div className="card-body appCardBodyTight">
               {positionsError ? (
-                  <div className="alert alert-danger" style={{ marginBottom: 0 }}>{positionsError}</div>
-                ) : positionsLoading || !positions ? (
-                  <AppLoadingProgress title="현재 상태 계산 중..." progress={positionsProgress} />
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                    {/* ① 요약 바 — 오늘 주식·현금을 얼마씩 둬야 하는지. */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: "var(--fs-lg)", fontWeight: 800 }}>
-                        목표 주식 {positions.summary.stock_pct.toFixed(1)}% · 현금{" "}
-                        {positions.summary.cash_pct.toFixed(1)}%
-                        {positions.account && totalAsset
-                          ? ` (현재 ${((positions.account.stock_value / totalAsset) * 100).toFixed(1)}% · ${(
-                              (positions.account.cash_balance / totalAsset) *
-                              100
-                            ).toFixed(1)}%)`
-                          : ""}
-                      </span>
-                      {/* 적용 계좌 — 목표 금액의 기준이 되는 실제 잔고. */}
-                      {positions.account ? (
-                        <span style={{ fontSize: "var(--fs-base)", fontWeight: 700 }}>
-                          {accountLabel} 총자산 {formatAmount(positions.account.total_assets)}
-                          <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
-                            (주식 {formatAmount(positions.account.stock_value)} · 현금{" "}
-                            {formatAmount(positions.account.cash_balance)})
-                          </span>
-                        </span>
-                      ) : (
-                        <span style={hintStyle}>적용 계좌 없음 — 계좌를 저장하면 목표 금액·주수가 나옵니다</span>
-                      )}
-                      <span style={hintStyle}>
-                        모멘텀 목표 {positions.summary.sm.slots_used}/{positions.summary.sm.top_n} (보유{" "}
-                        {positions.summary.sm.held_count}) · 신고가 목표 {positions.summary.nh.slots_used}/
-                        {positions.summary.nh.top_n} (보유 {positions.summary.nh.held_count})
-                      </span>
-                      {actions && !actions.sm_rebalance.is_filled && actions.sm_rebalance.fill_date ? (
-                        <span style={hintStyle}>
-                          모멘텀 {actions.sm_rebalance.portfolio_week} 포트폴리오 · 체결{" "}
-                          {actions.sm_rebalance.fill_date} (판정 {actions.sm_rebalance.signal_date})
-                        </span>
-                      ) : null}
-                      {actions?.sleeve_rebalance_today ? (
+                <div className="alert alert-danger" style={{ marginBottom: 0 }}>
+                  {positionsError}
+                </div>
+              ) : positionsLoading || !positions ? (
+                <AppLoadingProgress
+                  title="현재 상태 계산 중..."
+                  progress={positionsProgress}
+                />
+              ) : (
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 14 }}
+                >
+                  {/* ① 요약 바 — 오늘 주식·현금을 얼마씩 둬야 하는지. */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 18,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span style={{ fontSize: "var(--fs-lg)", fontWeight: 800 }}>
+                      목표 주식 {positions.summary.stock_pct.toFixed(1)}% · 현금{" "}
+                      {positions.summary.cash_pct.toFixed(1)}%
+                      {positions.account && totalAsset
+                        ? ` (현재 ${((positions.account.stock_value / totalAsset) * 100).toFixed(1)}% · ${(
+                            (positions.account.cash_balance / totalAsset) *
+                            100
+                          ).toFixed(1)}%)`
+                        : ""}
+                    </span>
+                    {/* 적용 계좌 — 목표 금액의 기준이 되는 실제 잔고. */}
+                    {positions.account ? (
+                      <span
+                        style={{ fontSize: "var(--fs-base)", fontWeight: 700 }}
+                      >
+                        {accountLabel} 총자산{" "}
+                        {formatAmount(positions.account.total_assets)}
                         <span
                           style={{
-                            fontSize: "var(--fs-sm)",
-                            fontWeight: 700,
-                            color: "#d9480f",
-                            background: "rgba(247, 103, 7, 0.12)",
-                            padding: "4px 10px",
-                            borderRadius: 999,
+                            ...hintStyle,
+                            marginLeft: 8,
+                            fontWeight: 500,
                           }}
                         >
-                          오늘은 매월 첫 거래일 — 두 슬리브를 50:50으로 리밸런싱하세요
+                          (주식 {formatAmount(positions.account.stock_value)} ·
+                          현금 {formatAmount(positions.account.cash_balance)})
                         </span>
-                      ) : null}
+                      </span>
+                    ) : (
+                      <span style={hintStyle}>
+                        적용 계좌 없음 — 계좌를 저장하면 목표 금액·주수가
+                        나옵니다
+                      </span>
+                    )}
+                    <span style={hintStyle}>
+                      모멘텀 목표 {positions.summary.sm.slots_used}/
+                      {positions.summary.sm.top_n} (보유{" "}
+                      {positions.summary.sm.held_count}) · 신고가 목표{" "}
+                      {positions.summary.nh.slots_used}/
+                      {positions.summary.nh.top_n} (보유{" "}
+                      {positions.summary.nh.held_count})
+                    </span>
+                    {actions &&
+                    !actions.sm_rebalance.is_filled &&
+                    actions.sm_rebalance.fill_date ? (
+                      <span style={hintStyle}>
+                        모멘텀 {actions.sm_rebalance.portfolio_week} 포트폴리오
+                        · 체결 {actions.sm_rebalance.fill_date} (판정{" "}
+                        {actions.sm_rebalance.signal_date})
+                      </span>
+                    ) : null}
+                    {actions?.sleeve_rebalance_today ? (
+                      <span
+                        style={{
+                          fontSize: "var(--fs-sm)",
+                          fontWeight: 700,
+                          color: "#d9480f",
+                          background: "rgba(247, 103, 7, 0.12)",
+                          padding: "4px 10px",
+                          borderRadius: 999,
+                        }}
+                      >
+                        오늘은 매월 첫 거래일 — 두 슬리브를 50:50으로
+                        리밸런싱하세요
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {/* ② 보유 목록 — 현금까지 한 표로, 비중 합 100%. */}
+                  <AppAgGrid<PositionRow>
+                    rowData={positionRows}
+                    columnDefs={positionColumns}
+                    theme={gridTheme}
+                    minHeight="auto"
+                    getRowId={(p) => p.data.ticker}
+                    // 아직 체결 전인 행(진입 예정)과 곧 나갈 행(매도 예정)은 확정 보유와
+                    // 구분되게 회색으로 눌러 둔다 — 추세 이탈 행과 같은 공용 클래스.
+                    getRowClass={(params) => {
+                      if (params.data?.is_sell_all) return "appTrendBrokenRow";
+                      const status = `${params.data?.sm_status ?? ""} ${params.data?.nh_status ?? ""}`;
+                      return status.includes("예정") ? "appTrendBrokenRow" : "";
+                    }}
+                    gridOptions={{
+                      domLayout: "autoHeight",
+                      suppressMovableColumns: true,
+                    }}
+                  />
+
+                  {/* ③ 오늘의 액션 — 체결 시점별 묶음, 각 묶음은 매도 → 매수 순서. */}
+                  <div>
+                    <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                      오늘의 액션
                     </div>
-
-                    {/* ② 보유 목록 — 현금까지 한 표로, 비중 합 100%. */}
-                    <AppAgGrid<PositionRow>
-                      rowData={positionRows}
-                      columnDefs={positionColumns}
-                      theme={gridTheme}
-                      minHeight="auto"
-                      getRowId={(p) => p.data.ticker}
-                      // 아직 체결 전인 행(진입 예정)과 곧 나갈 행(매도 예정)은 확정 보유와
-                      // 구분되게 회색으로 눌러 둔다 — 추세 이탈 행과 같은 공용 클래스.
-                      getRowClass={(params) => {
-                        if (params.data?.is_sell_all) return "appTrendBrokenRow";
-                        const status = `${params.data?.sm_status ?? ""} ${params.data?.nh_status ?? ""}`;
-                        return status.includes("예정") ? "appTrendBrokenRow" : "";
-                      }}
-                      gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
-                    />
-
-                    {/* ③ 오늘의 액션 — 체결 시점별 묶음, 각 묶음은 매도 → 매수 순서. */}
-                    <div>
-                      <div style={{ fontWeight: 700, marginBottom: 6 }}>오늘의 액션</div>
-                      {!hasActions ? (
-                        <div style={hintStyle}>오늘은 할 일이 없습니다 — 보유 목록을 그대로 유지하세요.</div>
-                      ) : (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                          {actionGroups.map((group, groupIndex) => (
-                            <div key={group.key}>
-                              <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                                {groupIndex + 1}. {group.title}
-                                <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
-                                  매도 {group.items.filter((item) => item.side === "sell").length}건 · 매수{" "}
-                                  {group.items.filter((item) => item.side === "buy").length}건
-                                </span>
-                              </div>
-                              <ul
+                    {!hasActions ? (
+                      <div style={hintStyle}>
+                        오늘은 할 일이 없습니다 — 보유 목록을 그대로 유지하세요.
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 10,
+                        }}
+                      >
+                        {actionGroups.map((group, groupIndex) => (
+                          <div key={group.key}>
+                            <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                              {groupIndex + 1}. {group.title}
+                              <span
                                 style={{
-                                  margin: 0,
-                                  paddingLeft: 18,
-                                  display: "flex",
-                                  flexDirection: "column",
-                                  gap: 4,
+                                  ...hintStyle,
+                                  marginLeft: 8,
+                                  fontWeight: 500,
                                 }}
                               >
-                                {group.items.map((item) => (
-                                  <li key={item.key}>
-                                    <strong style={{ color: item.side === "sell" ? "#d62828" : "#2f9e44" }}>
-                                      {item.title}
-                                    </strong>{" "}
-                                    — {item.text}
-                                  </li>
-                                ))}
-                              </ul>
+                                매도{" "}
+                                {
+                                  group.items.filter(
+                                    (item) => item.side === "sell",
+                                  ).length
+                                }
+                                건 · 매수{" "}
+                                {
+                                  group.items.filter(
+                                    (item) => item.side === "buy",
+                                  ).length
+                                }
+                                건
+                              </span>
                             </div>
-                          ))}
-                          {actions?.sleeve_rebalance_today ? (
-                            <div>
-                              <strong>슬리브 리밸런싱</strong> — 매월 첫 거래일입니다. 모멘텀·신고가 슬리브를 각각 50%로
-                              다시 맞추세요.
-                            </div>
-                          ) : null}
-                        </div>
-                      )}
-                    </div>
+                            <ul
+                              style={{
+                                margin: 0,
+                                paddingLeft: 18,
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 4,
+                              }}
+                            >
+                              {group.items.map((item) => (
+                                <li key={item.key}>
+                                  <strong
+                                    style={{
+                                      color:
+                                        item.side === "sell"
+                                          ? "var(--down-color, #2f6fd0)"
+                                          : "var(--up-color, #d64545)",
+                                    }}
+                                  >
+                                    {item.title}
+                                  </strong>{" "}
+                                  — {item.text}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                        {actions?.sleeve_rebalance_today ? (
+                          <div>
+                            <strong>슬리브 리밸런싱</strong> — 매월 첫
+                            거래일입니다. 모멘텀·신고가 슬리브를 각각 50%로 다시
+                            맞추세요.
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
+              )}
             </div>
           </div>
         </section>
@@ -927,7 +1188,9 @@ export function StrategyMixClient() {
         <section className="appSection">
           <div className="card appCard">
             <div className="card-header appCardHeader">
-              <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>백테스트</span>
+              <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>
+                백테스트
+              </span>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <select
                   className="form-select form-select-sm"
@@ -937,7 +1200,9 @@ export function StrategyMixClient() {
                   onChange={(event) => setMonths(Number(event.target.value))}
                 >
                   {monthOptions.map((n) => (
-                    <option key={n} value={n}>{n}개월</option>
+                    <option key={n} value={n}>
+                      {n}개월
+                    </option>
                   ))}
                 </select>
                 <button
@@ -952,9 +1217,14 @@ export function StrategyMixClient() {
             </div>
             <div className="card-body appCardBodyTight">
               {error ? (
-                <div className="alert alert-danger" style={{ marginBottom: 0 }}>{error}</div>
+                <div className="alert alert-danger" style={{ marginBottom: 0 }}>
+                  {error}
+                </div>
               ) : loading ? (
-                <AppLoadingProgress title="백테스트 실행 중..." progress={backtestProgress} />
+                <AppLoadingProgress
+                  title="백테스트 실행 중..."
+                  progress={backtestProgress}
+                />
               ) : view ? (
                 <>
                   <BacktestSummary
@@ -990,8 +1260,13 @@ export function StrategyMixClient() {
                       columnDefs={tradeColumns}
                       theme={gridTheme}
                       minHeight="auto"
-                      gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
-                      getRowClass={(p) => (p.data?.exit_date ? "" : "momentumPendingRow")}
+                      gridOptions={{
+                        domLayout: "autoHeight",
+                        suppressMovableColumns: true,
+                      }}
+                      getRowClass={(p) =>
+                        p.data?.exit_date ? "" : "momentumPendingRow"
+                      }
                     />
                   ) : (
                     <AppAgGrid<PeriodRow>
@@ -1000,12 +1275,21 @@ export function StrategyMixClient() {
                       theme={gridTheme}
                       minHeight="auto"
                       getRowId={(p) => p.data.period}
-                      gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                      gridOptions={{
+                        domLayout: "autoHeight",
+                        suppressMovableColumns: true,
+                      }}
                     />
                   )}
                 </>
               ) : (
-                <div style={{ ...hintStyle, padding: "32px 0", textAlign: "center" }}>
+                <div
+                  style={{
+                    ...hintStyle,
+                    padding: "32px 0",
+                    textAlign: "center",
+                  }}
+                >
                   실행을 누르면 결과가 표시됩니다.
                 </div>
               )}
