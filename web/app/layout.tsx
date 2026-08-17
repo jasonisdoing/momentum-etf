@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
 // Pretendard 가변 폰트. dynamic-subset 은 unicode-range 로 잘게 쪼갠 woff2 라
@@ -16,6 +16,17 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Jason Momentum",
   description: "투자는 원칙에 맞춰서 합시다",
+  // 홈 화면에 추가했을 때 사파리 UI 없이 앱처럼 뜨게 한다(아이콘은 public/apple-touch-icon.png).
+  appleWebApp: { capable: true, title: "Invest", statusBarStyle: "default" },
+  icons: { apple: "/apple-touch-icon.png" },
+};
+
+// 폰에서 확대·축소로 레이아웃이 흔들리지 않게 하고, 노치 영역까지 배경을 채운다.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#206bc4",
 };
 
 type RootLayoutProps = {

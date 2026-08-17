@@ -11,7 +11,12 @@ function isStaticPath(pathname: string): boolean {
     pathname.startsWith("/_next/") ||
     pathname.startsWith("/favicon") ||
     pathname.startsWith("/static/") ||
-    pathname === "/robots.txt"
+    pathname === "/robots.txt" ||
+    // PWA 설치 파일 — 로그인 화면으로 돌려보내면 홈 화면 추가가 아이콘 없이 붙는다.
+    // 앱 이름·색·아이콘뿐이라 가려야 할 내용이 없다.
+    pathname === "/manifest.webmanifest" ||
+    pathname === "/apple-touch-icon.png" ||
+    pathname.startsWith("/icon-")
   );
 }
 

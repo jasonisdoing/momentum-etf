@@ -54,12 +54,11 @@ type Props = {
   children: ReactNode;
 };
 
+/** `23시 24분 23초` — 초까지 적는다. 새로고침을 눌렀을 때 값이 실제로 바뀌었는지
+ *  분 단위로는 구분이 안 된다. */
 function formatTime(value: Date): string {
-  return value.toLocaleTimeString("ko-KR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(value.getHours())}시 ${pad(value.getMinutes())}분 ${pad(value.getSeconds())}초`;
 }
 
 /** 모바일 화면 공용 틀 — 헤더(제목·금액 숨김) + 본문 + 푸터(기준 시각·새로고침). */
