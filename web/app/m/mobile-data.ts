@@ -115,6 +115,21 @@ export async function loadMobileSnapshot(): Promise<MobileSnapshot> {
   };
 }
 
+/** 계좌 비중 파이 색 — 앞 5색은 버킷 테마와 같고, 계좌가 더 많을 때를 위해 5색을 덧댔다.
+ *  버킷 팔레트(5색)만 쓰면 6번째 계좌가 첫 색으로 돌아와 같은 색이 두 조각 생긴다. */
+export const ACCOUNT_COLORS = [
+  "#e74c3c",
+  "#3498db",
+  "#2ecc71",
+  "#f39c12",
+  "#95a5a6",
+  "#9b59b6",
+  "#16a085",
+  "#e67e22",
+  "#34495e",
+  "#c2185b",
+];
+
 /** 계좌 표기 — `아이콘 이름`. API 이름 앞에 붙은 순번(`12. `)은 폰 화면에서 폭만 먹어 뗀다. */
 export function accountLabel(account: Pick<MobileAccount, "name" | "icon">): string {
   const name = account.name.replace(/^\s*\d+\.\s*/, "");
@@ -126,14 +141,18 @@ export function formatKrw(value: number | null | undefined): string {
   return new Intl.NumberFormat("ko-KR").format(Math.round(value));
 }
 
-/** 큰 금액은 폰 폭에 맞게 억·만 단위로 줄여 쓴다. */
-export function formatCompactKrw(value: number | null | undefined): string {
+/** 목록·보조 금액 표기 — `5억 5,817만원`. 만 단위 미만은 버린다(폰 한 줄에 들어가야 한다).
+ *  대표 금액(총자산 카드)은 원 단위 그대로 쓰는 `formatKrw` 를 쓴다. */
+export function formatKoreanMoney(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return "-";
-  const abs = Math.abs(value);
   const sign = value < 0 ? "-" : "";
-  if (abs >= 100_000_000) return `${sign}${(abs / 100_000_000).toFixed(2)}억`;
-  if (abs >= 10_000) return `${sign}${Math.round(abs / 10_000).toLocaleString("ko-KR")}만`;
-  return `${sign}${Math.round(abs).toLocaleString("ko-KR")}`;
+  const abs = Math.floor(Math.abs(value));
+  const eok = Math.floor(abs / 100_000_000);
+  const man = Math.floor((abs % 100_000_000) / 10_000);
+  const comma = (n: number) => n.toLocaleString("ko-KR");
+  if (eok > 0) return man > 0 ? `${sign}${comma(eok)}억 ${comma(man)}만원` : `${sign}${comma(eok)}억원`;
+  if (man > 0) return `${sign}${comma(man)}만원`;
+  return `${sign}${comma(abs)}원`;
 }
 
 export function formatPct(value: number | null | undefined): string {

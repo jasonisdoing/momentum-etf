@@ -264,8 +264,14 @@
   white-space: nowrap;
 }
 
+.legendAmount {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .legendValue {
   font-weight: 700;
+  white-space: nowrap;
 }
 
 /* 홈 — 기간 수익률(금일·금주·금월·금년). */
