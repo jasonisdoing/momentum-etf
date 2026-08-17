@@ -183,9 +183,12 @@ export function AppShell({ children }: AppShellProps) {
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => getDefaultOpenGroups(pathname));
   const [isDbError, setIsDbError] = useState(false);
   const isLoginPage = pathname === "/login";
+  // 모바일 전용 화면(/m)은 데스크톱 레이아웃(사이드바·상단 지표바)을 쓰지 않는다.
+  const isMobileApp = pathname === "/m" || Boolean(pathname?.startsWith("/m/"));
+  const isBareLayout = isLoginPage || isMobileApp;
 
   const loadTopBarData = useCallback(async (initial = false) => {
-    if (isLoginPage) {
+    if (isBareLayout) {
       return;
     }
 
@@ -233,7 +236,7 @@ export function AppShell({ children }: AppShellProps) {
         setIsNqLoading(false);
       }
     }
-  }, [isLoginPage]);
+  }, [isBareLayout]);
 
   useEffect(() => {
     void loadTopBarData(true);
@@ -255,7 +258,7 @@ export function AppShell({ children }: AppShellProps) {
   }, [loadTopBarData]);
 
   useEffect(() => {
-    if (isLoginPage) return;
+    if (isBareLayout) return;
 
     const errorHandler = () => {
       setIsDbError(true);
@@ -269,7 +272,7 @@ export function AppShell({ children }: AppShellProps) {
   }, [isLoginPage]);
 
   useEffect(() => {
-    if (isLoginPage) return;
+    if (isBareLayout) return;
 
     async function checkHealth() {
       try {
@@ -314,8 +317,8 @@ export function AppShell({ children }: AppShellProps) {
     setOpenGroups((current) => ({ ...current, [groupId]: !current[groupId] }));
   }
 
-  if (isLoginPage) {
-    return <div className="appContent loginAppContent">{children}</div>;
+  if (isBareLayout) {
+    return <div className={isMobileApp ? "appContent" : "appContent loginAppContent"}>{children}</div>;
   }
 
   const fearGreedDelta =
