@@ -7,7 +7,7 @@
 | IP | ***.***.***.** |
 | OS 사용자 | ubuntu |
 | SSH 키 경로 | {SSH 키 파일 경로} |
-| 도메인 | etf.dojason.com |
+| 도메인 | invest.jason.ai.kr ([domain_dns.md](domain_dns.md)) |
 
 ```bash
 ssh -i {SSH 키 파일 경로} ubuntu@***.***.***.**
@@ -56,7 +56,7 @@ docker restart nginx-proxy
 
 ### 예시: robots.txt 응답 추가
 
-파일: `/home/ubuntu/apps/nginx-proxy/vhost.d/etf.dojason.com`
+파일: `/home/ubuntu/apps/nginx-proxy/vhost.d/invest.jason.ai.kr`
 
 ```nginx
 location = /robots.txt {
@@ -72,7 +72,7 @@ location = /robots.txt {
 - Node 웹 앱이 컨테이너 내부 포트 80으로 실행
 - FastAPI 내부 API가 컨테이너 내부 포트 8000으로 실행
 - Node 앱이 내부 네트워크에서 FastAPI를 호출
-- nginx-proxy가 `etf.dojason.com` 요청을 momentum-etf-app-1 컨테이너로 프록시
+- nginx-proxy가 `invest.jason.ai.kr` 요청을 momentum-etf-app-1 컨테이너로 프록시
 - SSL은 acme-companion이 Let's Encrypt 인증서로 자동 처리
 
 ---
