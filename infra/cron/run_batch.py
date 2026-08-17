@@ -187,6 +187,18 @@ def _format_tail(stdout: str, stderr: str) -> str:
     return tail
 
 
+# 잠자기 판정 여유 — 벽시계 경과가 측정 경과보다 이만큼 더 길면 그 사이 시스템이 잤다고 본다.
+# `time.monotonic()` 은 macOS 잠자기 동안 멈추므로 두 값이 벌어진다.
+# 노트북에서 밤새 배치를 돌릴 때 잠자기로 끊긴 실패까지 알리면 소음만 된다.
+_SLEEP_GAP_SECONDS = 120
+
+
+def _slept_during_run(started_wall: datetime, elapsed: float) -> bool:
+    """실행 도중 시스템이 잠들었는지. 벽시계와 측정 경과의 차이로 본다."""
+    wall = (datetime.now(KST) - started_wall).total_seconds()
+    return wall - elapsed >= _SLEEP_GAP_SECONDS
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 3:
         print(
@@ -198,7 +210,8 @@ def main(argv: list[str]) -> int:
     job_name = argv[1]
     command = argv[2:]
 
-    started_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
+    started_wall = datetime.now(KST)
+    started_at = started_wall.strftime("%Y-%m-%d %H:%M:%S KST")
     started_monotonic = time.monotonic()
 
     # 배포 진행 중에도 cron 시도. fastapi_app 재시작 시점엔 실패하지만 다음 슬롯에 자동 재시도.
@@ -312,7 +325,12 @@ def main(argv: list[str]) -> int:
     app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
 
     already_notified_failure = exit_code == EXIT_ALREADY_NOTIFIED
-    should_notify = (not success) and (not already_notified_failure)
+    # 잠자기로 끊긴 실패는 알리지 않는다 — 사용자가 맥을 재운 결과라 조치할 것이 없고,
+    # 다음 예약 시각에 정상적으로 다시 돈다. 로그에는 사유를 남긴다.
+    slept = (not success) and _slept_during_run(started_wall, elapsed)
+    if slept:
+        _append_log_line(job_name, "[run_batch] SKIP-NOTIFY 시스템 잠자기로 중단된 실패 — 알림 생략")
+    should_notify = (not success) and (not already_notified_failure) and (not slept)
     if should_notify:
         job_display = _format_job_display(job_name)
         _notify(
