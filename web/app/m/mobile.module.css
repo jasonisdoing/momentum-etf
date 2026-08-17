@@ -1,0 +1,123 @@
+/* 모바일 전용(`/m`) 스타일 — 폰 폭 기준. 데스크톱 화면 CSS 와 섞이지 않게 모듈로 둔다. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 12px 32px;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+}
+
+.headerTitle {
+  font-size: var(--fs-lg);
+  font-weight: 800;
+}
+
+.backLink {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: var(--fs-base);
+}
+
+.summaryCard {
+  border: 1px solid var(--border-color, #e9ecef);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.summaryLabel {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.summaryValue {
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.summaryMetrics {
+  display: flex;
+  gap: 20px;
+}
+
+.metricLabel {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  margin-right: 6px;
+}
+
+.metricValue {
+  font-weight: 700;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border-color, #e9ecef);
+  border-radius: 12px;
+  padding: 12px 14px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.rowMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rowName {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowSub {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.rowSide {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.rowAmount {
+  font-weight: 700;
+}
+
+.rowPct {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+
+.state {
+  color: var(--text-muted);
+  padding: 24px 4px;
+  text-align: center;
+}
