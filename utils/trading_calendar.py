@@ -6,7 +6,7 @@ data_loader 가 re-export 로 유지한다.
 
 import functools
 import json
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -181,8 +181,19 @@ def get_trading_days_any(start_date: str, end_date: str, countries: list[str]) -
 
 
 # 자산 집계의 기준일로 쓰는 국가 조합 — 한국 또는 호주 중 하나라도 열린 날.
-# (미국 장은 한국시간으로 다음 날 새벽에 끝나 별도 거래일을 만들지 않는다)
 ASSET_TRADING_COUNTRIES = ["kor", "au"]
+
+# 미국 장은 한국시간으로 **다음 날 새벽**에 끝나므로 거래일을 하루 밀어서 합친다.
+# 이 합집합이 없으면 한국·호주가 둘 다 쉬는 평일(설 연휴 임시공휴일 등)에 행이 안 생겨,
+# 그날 미국 몫이 직전 거래일 행에 얹혀 그 행의 손익이 실제보다 커진다.
+ASSET_TRADING_SHIFTED_COUNTRY = "us"
+
+
+def _shift_to_weekday(day: date) -> date:
+    """주말이면 다음 평일로 민다. 토·일에는 행을 만들지 않는다."""
+    while day.weekday() >= 5:
+        day += timedelta(days=1)
+    return day
 
 
 def resolve_active_trading_date() -> str:
@@ -193,15 +204,23 @@ def resolve_active_trading_date() -> str:
     토요일에 스냅샷만 새 행이 생겼고, 그 탓에 `/assets` 의 금일 손익 합계와
     계좌별 값이 서로 다른 구간을 비교했다.
 
-    주말·휴일에도 직전 거래일을 돌려주므로 그 날짜의 행이 계속 갱신된다.
+    기준일 후보는 **한국 ∪ 호주 ∪ (미국 거래일 + 1일, 주말이면 다음 평일)** 이다.
+    주말·휴일에도 직전 거래일을 돌려주므로 그 날짜의 행이 계속 갱신된다 —
     미국·호주 장이 한국시간 새벽까지 이어지는 몫을 그 거래일에 담기 위한 것이다.
     """
     today = _now_with_zone("Asia/Seoul").date()
     search_start = today - timedelta(days=370)
-    trading_days = get_trading_days_any(str(search_start), str(today), ASSET_TRADING_COUNTRIES)
-    if not trading_days:
-        raise RuntimeError("오늘 이하의 한국/호주 거래일을 찾지 못했습니다.")
-    return max(day.date().isoformat() for day in trading_days)
+    candidates = {
+        day.date() for day in get_trading_days_any(str(search_start), str(today), ASSET_TRADING_COUNTRIES)
+    }
+    # 미국은 오늘 이후로 밀릴 수 있어 조회 구간을 하루 넉넉히 잡고, 밀린 뒤 오늘 이하만 남긴다.
+    for day in get_trading_days(str(search_start), str(today), ASSET_TRADING_SHIFTED_COUNTRY):
+        shifted = _shift_to_weekday(day.date() + timedelta(days=1))
+        if shifted <= today:
+            candidates.add(shifted)
+    if not candidates:
+        raise RuntimeError("오늘 이하의 자산 거래일을 찾지 못했습니다.")
+    return max(candidates).isoformat()
 
 
 def is_trading_day(
