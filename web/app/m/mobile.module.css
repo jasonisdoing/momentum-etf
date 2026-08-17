@@ -13,17 +13,23 @@
   flex-direction: column;
   flex: 1;
   gap: 8px;
-  padding: 8px 6px 16px;
+  padding: 8px calc(6px + env(safe-area-inset-left)) 16px calc(6px + env(safe-area-inset-right));
   width: 100%;
 }
 
+/* 헤더 — 홈 화면에 추가한 앱(standalone)에서는 화면이 상태바 아래까지 올라온다.
+   safe-area 만큼 위를 띄우지 않으면 제목이 시계·배터리와 겹친다. */
 .header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   min-height: 40px;
-  padding: 0 6px;
+  padding: calc(6px + env(safe-area-inset-top)) 6px 6px;
+  background: var(--bg);
   border-bottom: 1px solid var(--border-color, #e9ecef);
 }
 
@@ -46,13 +52,19 @@
   font-size: var(--fs-sm);
 }
 
+/* 헤더·푸터의 아이콘 버튼 — 손가락으로 누르는 자리라 최소 44px 를 확보한다(애플 권장 최소 터치 영역). */
 .iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
   border: 0;
   background: none;
   font: inherit;
-  font-size: var(--fs-lg);
+  font-size: var(--fs-2xl);
   line-height: 1;
-  padding: 6px 8px;
+  padding: 4px 8px;
   color: inherit;
   cursor: pointer;
 }
