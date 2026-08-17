@@ -16,6 +16,7 @@ function isStaticPath(pathname: string): boolean {
     // 앱 이름·색·아이콘뿐이라 가려야 할 내용이 없다.
     pathname === "/manifest.webmanifest" ||
     pathname === "/apple-touch-icon.png" ||
+    pathname === "/sw.js" ||
     pathname.startsWith("/icon-")
   );
 }

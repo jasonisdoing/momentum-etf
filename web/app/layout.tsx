@@ -9,6 +9,7 @@ import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 import "@tabler/core/dist/css/tabler.min.css";
 import { AppShell } from "./AppShell";
 import { buildBucketCssVariables } from "../lib/bucket-theme";
+import { ServiceWorkerRegistrar } from "./components/ServiceWorkerRegistrar";
 import { ToastProvider } from "./components/ToastProvider";
 import { HideMoneyProvider } from "@/lib/hide-money-context";
 import "./globals.css";
@@ -38,6 +39,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
     <html lang="ko" data-scroll-behavior="smooth">
       <body>
         <style>{buildBucketCssVariables()}</style>
+        <ServiceWorkerRegistrar />
         <ToastProvider>
           <HideMoneyProvider>
             <AppShell>{children}</AppShell>

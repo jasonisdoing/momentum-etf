@@ -1,13 +1,14 @@
 import type { MetadataRoute } from "next";
 
-/** PWA 매니페스트 — 홈 화면에 추가했을 때 모바일 화면(`/m`)으로 바로 열린다.
- *  데스크톱 화면은 브라우저에서 그대로 쓰고, 앱으로 쓰는 건 모바일 쪽이다. */
+/** PWA 매니페스트 — 데스크톱·모바일이 같은 앱을 쓴다.
+ *  시작 주소는 `/` 하나이고, 좁은 화면이면 홈에서 `/m` 으로 보낸다
+ *  (`MobileEntryRedirect`) — manifest 는 사이트당 하나라 기기별로 나눌 수 없다. */
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Jason Invest",
     short_name: "Invest",
     description: "자산 현황과 전략 운영 상태",
-    start_url: "/m",
+    start_url: "/",
     scope: "/",
     display: "standalone",
     orientation: "portrait",
