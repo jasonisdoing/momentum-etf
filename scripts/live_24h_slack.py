@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import LIVE_24H_ALERT_PCT
 from utils.env import load_env_if_present
 from utils.live_24h_service import load_live_24h_quotes
-from utils.notification import send_slack_message_v2
+from utils.notification import app_link, send_slack_message_v2
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -156,7 +156,7 @@ def main():
     lines = [f"<!channel> 🚨 *최근 1시간 급변* — {tags}"]
     lines.extend(body)
     # 타이틀(링크)은 목록 아래에 — 클릭 시 live-24h 페이지로 이동
-    lines.append("*<https://etf.dojason.com/live-24h|🌐 24H 시세>*")
+    lines.append(f"*{app_link('live-24h', '🌐 24H 시세')}*")
 
     send_slack_message_v2("\n".join(lines))
     logger.info("24H 시세 슬랙 전송 완료 (%d종목, 1시간 급변 %d건)", len(rows), len(alerts))
