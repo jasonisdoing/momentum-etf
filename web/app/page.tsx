@@ -1,6 +1,7 @@
 import { fetchFastApiJson } from "../lib/internal-api";
 import { PageFrame } from "./components/PageFrame";
 import { HomeTrendCharts } from "./components/HomeTrendCharts";
+import { MobileEntryRedirect } from "./components/MobileEntryRedirect";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,7 @@ export default async function HomePage() {
 
   return (
     <PageFrame title="홈" fullWidth>
+      <MobileEntryRedirect />
       {trendDefaults ? (
         <HomeTrendCharts maDays={trendDefaults.ma_days} maType={trendDefaults.ma_type} />
       ) : (
