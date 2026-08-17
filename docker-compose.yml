@@ -55,9 +55,8 @@ services:
     expose:
       - "80"
     environment:
-      # 도메인 이전 기간에는 두 호스트를 함께 받는다 — 옛 주소로 온 요청도 그대로 열린다.
-      - VIRTUAL_HOST=invest.jason.ai.kr,etf.dojason.com
-      - LETSENCRYPT_HOST=invest.jason.ai.kr,etf.dojason.com
+      - VIRTUAL_HOST=invest.jason.ai.kr
+      - LETSENCRYPT_HOST=invest.jason.ai.kr
       - LETSENCRYPT_EMAIL=kimwootak@catholic.ac.kr
       - TZ=Asia/Seoul
     volumes:
