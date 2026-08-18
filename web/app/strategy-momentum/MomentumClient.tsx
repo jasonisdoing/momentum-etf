@@ -38,6 +38,8 @@ type PoolSettings = {
   max_per_industry: number;
   short_ma_days: number;
   long_ma_days: number;
+  /** 주중 이탈 — 보유 자격을 잃으면 다음 거래일 시가에 판다. 풀 성격에 따라 끄고 켠다. */
+  intraweek_exit: boolean;
 };
 
 type Settings = PoolSettings & { pool: string };
@@ -312,6 +314,7 @@ export function MomentumClient() {
   const [draftMaxPerIndustry, setDraftMaxPerIndustry] = useState<number>(0);
   // 이평선 초안 — 전략 전용 값(momentum_settings)으로 풀별 저장되며 종목풀 설정과 무관하다.
   const [draftMaRule, setDraftMaRule] = useState<{ short: number; long: number } | null>(null);
+  const [draftIntraweekExit, setDraftIntraweekExit] = useState(true);
 
   // 풀별 설정을 폼 초안에 채운다 — 풀 셀렉트 전환과 응답 반영이 같은 경로를 쓴다.
   const fillDrafts = useCallback((values: PoolSettings) => {
@@ -320,6 +323,7 @@ export function MomentumClient() {
       top_n: String(values.top_n),
     });
     setDraftMaRule({ short: values.short_ma_days, long: values.long_ma_days });
+    setDraftIntraweekExit(values.intraweek_exit);
   }, []);
 
   const applyView = useCallback(
@@ -437,10 +441,11 @@ export function MomentumClient() {
         // 이평선은 전략 전용 값 — 설정의 일부로 풀별 저장한다(종목풀 설정과 무관).
         short_ma_days: draftMaRule.short,
         long_ma_days: draftMaRule.long,
+        intraweek_exit: draftIntraweekExit,
       },
       "설정을 저장했습니다.",
     );
-  }, [draft, draftMaRule, draftMaxPerIndustry, draftPool, persistSettings, toast]);
+  }, [draft, draftIntraweekExit, draftMaRule, draftMaxPerIndustry, draftPool, persistSettings, toast]);
 
   // 풀 셀렉트 변경 — 그 풀의 저장 설정이 있으면 **즉시 전환·저장·재선정**한다
   // (전환은 초안이 아니라 컨텍스트 스위치다). 저장분이 없는 풀(첫 설정)만 초안으로
@@ -493,12 +498,13 @@ export function MomentumClient() {
       draftPool !== saved.pool ||
       draftMaxPerIndustry !== saved.max_per_industry ||
       draft.top_n !== String(saved.top_n) ||
+      draftIntraweekExit !== saved.intraweek_exit ||
       (draftMaRule != null &&
         view.ma_rule != null &&
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
           draftMaRule.long !== view.ma_rule.long_ma_days))
     );
-  }, [draft, draftMaRule, draftMaxPerIndustry, draftPool, view]);
+  }, [draft, draftIntraweekExit, draftMaRule, draftMaxPerIndustry, draftPool, view]);
 
   const monthlyLabels = view?.picks?.monthly_return_labels ?? [];
   // 선정 결과 풀의 국가 — 마켓·시가총액 컬럼 표시와 티커 표기(ASX:)를 정한다.
@@ -1068,6 +1074,19 @@ export function MomentumClient() {
                           ))}
                         </select>
                       </span>
+                    </label>
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">주중 이탈</span>
+                      <select
+                        className="form-select form-select-sm"
+                        style={{ width: 96 }}
+                        value={draftIntraweekExit ? "on" : "off"}
+                        onChange={(e) => setDraftIntraweekExit(e.target.value === "on")}
+                        title="보유 자격(장기 이격 > 0 · 단기 이격 ≥ 0)을 잃으면 다음 거래일 시가에 매도한다. 끄면 주 교체일에만 정리한다."
+                      >
+                        <option value="on">사용</option>
+                        <option value="off">미사용</option>
+                      </select>
                     </label>
                   </>
                 ) : null}
