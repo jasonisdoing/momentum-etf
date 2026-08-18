@@ -893,8 +893,10 @@ export function StrategyMixClient() {
     for (const ticker of sellPending) {
       if (items.some((item) => item.key === `act-${ticker}`)) continue;
       const row = rowByTicker.get(ticker);
-      // 팔 물량이 있어야 매도 지시다 — 보유가 없으면(다른 슬리브만 담고 있던 종목) 할 일이 없다.
-      if (!row || Number(row.held_quantity ?? 0) <= 0) continue;
+      // 팔 물량이 있어야 매도 지시다 — 보유가 없으면 할 일이 없다.
+      // 목표 비중이 남아 있으면(다른 슬리브가 계속 담는 종목) 전량 매도가 아니다 —
+      // 그때 실제 할 일은 매매수량이 이미 말해 주므로 여기서 따로 만들지 않는다.
+      if (!row || Number(row.held_quantity ?? 0) <= 0 || row.weight_pct > 0) continue;
       items.push({
         key: `act-${ticker}`,
         side: "sell",
