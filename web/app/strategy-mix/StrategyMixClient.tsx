@@ -834,6 +834,9 @@ export function StrategyMixClient() {
     const rebalanceDate =
       !rebalance.is_filled && rebalance.fill_date ? rebalance.fill_date : null;
     const nextOpen = positions.next_trading_day;
+    // 다음 체결일이 모멘텀 교체일인가 / 오늘이 슬리브 50:50 재조정일(매월 첫 거래일)인가.
+    const momentumRebalanceDay = rebalanceDate != null && rebalanceDate === nextOpen;
+    const sleeveRebalanceDay = Boolean(actions.sleeve_rebalance_today);
     const sellReason = new Map<string, string>();
     for (const row of actions.sm_sells) sellReason.set(row.ticker, row.reason);
     for (const row of actions.nh_sells) {
@@ -1131,12 +1134,53 @@ export function StrategyMixClient() {
                     }}
                   />
 
-                  {/* ③ 오늘의 액션 — 체결 시점별 묶음, 각 묶음은 매도 → 매수 순서. */}
+                  {/* ③ 배분 — 합계 · 모멘텀 · 신고가 세 줄. 각 줄에 배정 금액과 주식·현금. */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {(() => {
+                      const sm = positions.summary.sm;
+                      const nh = positions.summary.nh;
+                      const amount = (pct: number) => (totalAsset == null ? null : (totalAsset * pct) / 100);
+                      // 슬리브는 절반(50%)씩 갖고, 그 안에서 채운 슬롯이 주식·빈 슬롯이 현금이다.
+                      const rows = [
+                        {
+                          key: "sm",
+                          label: "모멘텀",
+                          allocPct: 50,
+                          stockPct: 50 - sm.cash_pct,
+                          cashPct: sm.cash_pct,
+                          slots: `${sm.slots_used}/${sm.top_n}`,
+                        },
+                        {
+                          key: "nh",
+                          label: "신고가",
+                          allocPct: 50,
+                          stockPct: 50 - nh.cash_pct,
+                          cashPct: nh.cash_pct,
+                          slots: `${nh.slots_used}/${nh.top_n}`,
+                        },
+                      ];
+                      return rows.map((row) => (
+                        <div key={row.key} style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                          <strong style={{ minWidth: 52 }}>{row.label}</strong>
+                          <span style={hintStyle}>
+                            {totalAsset != null ? `${formatAmount(amount(row.allocPct))} · ` : ""}
+                            주식 {row.stockPct.toFixed(1)}%
+                            {totalAsset != null ? ` ${formatAmount(amount(row.stockPct))}` : ""} · 현금{" "}
+                            {row.cashPct.toFixed(1)}%
+                            {totalAsset != null ? ` ${formatAmount(amount(row.cashPct))}` : ""} · 슬롯 {row.slots}
+                          </span>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+
+                  {/* ④ 오늘의 액션 — 체결 시점별 묶음, 각 묶음은 매도 → 매수 순서. */}
                   <div>
                     <div style={{ fontWeight: 700, marginBottom: 6 }}>
                       오늘의 액션
                       <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
-                        목표 비중과 {REBALANCE_BAND_PCT}%p 미만 차이는 제외
+                        백테스트가 매매하는 날에만 조정 (모멘텀 교체일 · 신고가 진입·이탈 ·
+                        매월 첫 거래일) · 목표 비중과 {REBALANCE_BAND_PCT}%p 미만 차이는 제외
                       </span>
                     </div>
                     {!hasActions ? (
