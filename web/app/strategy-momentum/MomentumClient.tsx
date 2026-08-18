@@ -337,7 +337,7 @@ export function MomentumClient() {
 
   const isNewPoolDraft = view != null && draftPool !== "" && view.settings_by_pool?.[draftPool] == null;
 
-  const load = useCallback(async (): Promise<boolean> => {
+  const load = useCallback(async (): Promise<string | null> => {
     setLoading(true);
     try {
       // 마지막으로 고른 풀은 브라우저에 기억한다(다른 화면들과 같은 공용 키).
@@ -347,8 +347,9 @@ export function MomentumClient() {
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "설정을 불러오지 못했습니다.");
       setLoadError(null);
-      applyView(payload as View);
-      return true;
+      const data = payload as View;
+      applyView(data);
+      return data.settings.pool;
     } catch (error) {
       // 설정을 못 받으면 값을 지어내지 않는다 — 폼을 그리지 않고 실패만 알린다.
       // (기본값을 그렸다가 그대로 저장되면 저장돼 있던 설정이 덮어써진다.)
@@ -361,13 +362,16 @@ export function MomentumClient() {
     }
   }, [applyView, toast]);
 
-  const runPicks = useCallback(async () => {
+  const runPicks = useCallback(async (pool: string) => {
     setPicking(true);
     setPickFailed(false);
     setPickProgress({ percent: 10, message: "월 확정 포트폴리오 계산 중" });
     const stopRamp = startProgressRamp(setPickProgress);
     try {
-      const resp = await fetch("/api/strategy-momentum/picks", { method: "POST" });
+      // 지금 화면이 고른 풀로 계산한다 — 안 넘기면 서버가 기본 풀로 돌린다.
+      const resp = await fetch(`/api/strategy-momentum/picks?pool=${encodeURIComponent(pool)}`, {
+        method: "POST",
+      });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "선정에 실패했습니다.");
       setPickProgress({ percent: 100, message: "선정 결과 반영 중" });
@@ -385,10 +389,10 @@ export function MomentumClient() {
   // 진입 시 저장된 설정으로 선정을 한 번 자동 실행한다 (가격 캐시 기반이라 수 초).
   useEffect(() => {
     void (async () => {
-      const ok = await load();
-      if (ok && !autoPickedRef.current) {
+      const appliedPool = await load();
+      if (appliedPool && !autoPickedRef.current) {
         autoPickedRef.current = true;
-        await runPicks();
+        await runPicks(appliedPool);
       }
     })();
   }, [load, runPicks]);
@@ -417,7 +421,7 @@ export function MomentumClient() {
         // 백테스트는 어느 설정이 바뀌든 결과가 달라지므로 비운다.
         setBacktest(null);
         toast.success(repick ? `${successMessage} 선정을 다시 계산합니다.` : successMessage);
-        if (repick) await runPicks();
+        if (repick) await runPicks(saved.settings.pool);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "설정을 저장하지 못했습니다.");
       } finally {
@@ -471,7 +475,7 @@ export function MomentumClient() {
     setBacktestProgress({ percent: 10, message: "월별 리밸런싱 시뮬레이션 중" });
     const stopRamp = startProgressRamp(setBacktestProgress);
     try {
-      const resp = await fetch("/api/strategy-momentum/backtest", {
+      const resp = await fetch(`/api/strategy-momentum/backtest?pool=${encodeURIComponent(draftPool)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // 한 번 실행으로 연간·월간·주간·일간을 모두 만든다 — 탭 전환 시 재실행이 없도록.
@@ -488,7 +492,7 @@ export function MomentumClient() {
       setBacktesting(false);
       setBacktestProgress(null);
     }
-  }, [toast, backtestMonths]);
+  }, [backtestMonths, draftPool, toast]);
 
   // 저장하지 않은 입력이 있으면 실행 결과가 화면 값과 어긋난다 — 저장을 먼저 요구한다.
   const isDirty = useMemo(() => {
