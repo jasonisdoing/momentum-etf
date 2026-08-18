@@ -272,6 +272,11 @@ type PositionRow = Holding & {
   shares: number | null;
 };
 
+/** 리밸런싱 밴드(%p) — 목표 비중과 이만큼 미만으로 벌어진 종목은 오늘의 액션에서 뺀다.
+ *  장중 가격이 조금만 움직여도 목표수량이 ±1주씩 흔들려 목록이 계속 바뀌기 때문이다.
+ *  표에는 정확한 목표수량이 그대로 남는다(표는 대조용, 액션은 실행용). */
+const REBALANCE_BAND_PCT = 0.5;
+
 /** 오늘의 액션 한 줄. 같은 체결 시점끼리 묶고 묶음 안에서는 매도 → 매수 순서다. */
 type ActionItem = {
   key: string;
@@ -664,7 +669,7 @@ export function StrategyMixClient() {
         const parts: string[] = [];
         if (p.data.sm_status) parts.push(`모멘텀 ${p.data.sm_status}`);
         if (p.data.nh_status) parts.push(`신고가 ${p.data.nh_status}`);
-        return parts.join(" / ");
+        return parts.join(" · ");
       },
       cellStyle: (p) => {
         const text = String(p.value ?? "");
@@ -847,6 +852,12 @@ export function StrategyMixClient() {
         rebalanceBuys.has(row.ticker) || rebalanceSells.has(row.ticker);
       const date = isRebalance ? rebalanceDate : nextOpen;
       const reason = sellReason.get(row.ticker);
+      // 목표에 이미 근접한 종목은 건너뛴다 — 1주짜리 조정은 장중 내내 붙었다 떨어진다.
+      // 규칙상 팔아야 하는 것(전량 매도·자격 상실·이탈)은 금액과 무관하게 남긴다.
+      if (!row.is_sell_all && !reason) {
+        const gap = Math.abs(row.weight_pct - (row.current_weight_pct ?? 0));
+        if (gap < REBALANCE_BAND_PCT) continue;
+      }
       // 제목은 **계좌 관점**으로 붙인다 — 이미 들고 있는 종목이면 실제로 하는 일이
       // '몇 주 더 사기'라 "교체 매수"로 적으면 새로 사는 것처럼 읽힌다.
       // (한 전략에 새로 편입돼도 다른 전략으로 이미 보유 중일 수 있다. 전략 맥락은 표의 상태 칸에 있다.)
@@ -904,9 +915,7 @@ export function StrategyMixClient() {
           ? `${formatDateWithWeekday(date)} 시가${date === rebalanceDate ? " · 모멘텀 교체 포함" : ""}`
           : "체결일 미정",
         // 매도가 끝나야 매수 대금이 생긴다.
-        items: [...groupItems].sort((a, b) =>
-          a.side === b.side ? 0 : a.side === "sell" ? -1 : 1,
-        ),
+        items: [...groupItems].sort((a, b) => (a.side === b.side ? 0 : a.side === "sell" ? -1 : 1)),
       }));
   }, [positions, actions]);
 
@@ -1120,6 +1129,9 @@ export function StrategyMixClient() {
                   <div>
                     <div style={{ fontWeight: 700, marginBottom: 6 }}>
                       오늘의 액션
+                      <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
+                        목표 비중과 {REBALANCE_BAND_PCT}%p 미만 차이는 제외
+                      </span>
                     </div>
                     {!hasActions ? (
                       <div style={hintStyle}>
