@@ -3,7 +3,7 @@
 import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import AccountSelect, {
+import {
   formatAccountLabel,
   type AccountOptionBase,
 } from "../components/AccountSelect";
@@ -900,24 +900,34 @@ export function StrategyMixClient() {
               {/* 메인 헤더 — 셀렉터·모드 전환 같은 주 제어. */}
               <div className="appMainHeader">
                 <div className="appMainHeaderLeft">
-                  <AccountSelect
-                    label="계좌"
-                    accounts={accountOptions}
-                    value={accountId}
-                    onChange={(next) => {
-                      setAccountId(next);
-                      writeRememberedMomentumEtfAccountId(next);
-                      setPositions(null);
-                      setView(null);
-                      setAsOf("");
-                    }}
-                    disabled={loading || positionsLoading || accountOptions.length === 0}
-                    style={{ width: "auto" }}
-                    labelStyle={{ marginBottom: 0 }}
-                  />
+                  {/* 종목풀을 고르고, 그 풀을 운용하는 계좌를 옆에 보여준다.
+                      연결은 계좌 설정(`mix_pool`)에서 만든다 — 여기서는 고르기만 한다. */}
+                  <label className="appLabeledField" style={{ marginBottom: 0 }}>
+                    <span className="appLabeledFieldLabel">종목풀</span>
+                    <select
+                      className="form-select form-select-sm"
+                      style={{ width: "auto" }}
+                      value={accountId}
+                      disabled={loading || positionsLoading || accountOptions.length === 0}
+                      onChange={(event) => {
+                        const next = event.target.value;
+                        setAccountId(next);
+                        writeRememberedMomentumEtfAccountId(next);
+                        setPositions(null);
+                        setView(null);
+                        setAsOf("");
+                      }}
+                    >
+                      {accountOptions.map((option) => (
+                        <option key={option.account_id} value={option.account_id}>
+                          {option.pool_label ? formatPoolLabel(option.pool_label) : option.pool}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <span style={hintStyle}>
-                    {selectedAccount?.pool_label
-                      ? `종목풀 ${formatPoolLabel(selectedAccount.pool_label)}`
+                    {selectedAccount
+                      ? `계좌 ${formatAccountLabel(selectedAccount)}`
                       : "계좌 설정에서 합성 전략 종목풀을 지정하세요"}
                   </span>
                 </div>
