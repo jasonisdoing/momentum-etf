@@ -123,6 +123,7 @@ PER_POOL_SETTING_KEYS = (
     "max_per_industry",
     "short_ma_days",
     "long_ma_days",
+    "intraweek_exit",
 )
 
 
@@ -160,12 +161,19 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     if short_ma_days >= long_ma_days:
         raise ValueError("'short_ma_days' 는 'long_ma_days' 보다 작아야 합니다.")
 
+    # 주중 이탈 — 풀 성격에 따라 켜고 끈다. 개별주는 급락 방어가 필요하고,
+    # ETF 는 20일선 부근을 오르내리며 하루짜리 이탈이 잦아 왕복 비용만 커진다.
+    intraweek_exit = settings.get("intraweek_exit")
+    if not isinstance(intraweek_exit, bool):
+        raise ValueError("'intraweek_exit' 는 true/false 여야 합니다.")
+
     return {
         "pool": pool,
         "top_n": top_n,
         "max_per_industry": max_per_industry,
         "short_ma_days": short_ma_days,
         "long_ma_days": long_ma_days,
+        "intraweek_exit": intraweek_exit,
     }
 
 
@@ -518,7 +526,14 @@ def simulate_intraweek_exits(
 
     반환 항목의 ``sell_date`` 가 None 이면 아직 체결 전(다음 거래일 시가 매도 예정)이다.
     선정 화면과 백테스트가 모두 이 함수를 써야 결과가 어긋나지 않는다.
+
+    설정의 ``intraweek_exit`` 이 꺼져 있으면 주중에는 팔지 않는다(주 교체일에만 정리).
+    ETF 풀처럼 20일선 부근을 오르내리는 종목이 많으면 하루짜리 이탈이 잦아 왕복
+    비용만 커지기 때문이다 — 풀 성격에 맞춰 화면에서 켜고 끈다.
     """
+    if not settings.get("intraweek_exit", True):
+        return []
+
     from utils.moving_averages import calculate_moving_average
 
     short_ma_days = int(settings["short_ma_days"])
