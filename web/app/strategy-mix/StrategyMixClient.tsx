@@ -854,7 +854,7 @@ export function StrategyMixClient() {
       const reason = sellReason.get(row.ticker);
       // 목표에 이미 근접한 종목은 건너뛴다 — 1주짜리 조정은 장중 내내 붙었다 떨어진다.
       // 규칙상 팔아야 하는 것(전량 매도·자격 상실·이탈)은 금액과 무관하게 남긴다.
-      if (!row.is_sell_all && !reason) {
+      if (!row.is_sell_all && !(reason && trade < 0 && row.weight_pct <= 0)) {
         const gap = Math.abs(row.weight_pct - (row.current_weight_pct ?? 0));
         if (gap < REBALANCE_BAND_PCT) continue;
       }
@@ -862,18 +862,21 @@ export function StrategyMixClient() {
       // '몇 주 더 사기'라 "교체 매수"로 적으면 새로 사는 것처럼 읽힌다.
       // (한 전략에 새로 편입돼도 다른 전략으로 이미 보유 중일 수 있다. 전략 맥락은 표의 상태 칸에 있다.)
       const held = Number(row.held_quantity ?? 0) > 0;
+      // 매도 사유(손절·이탈)는 **그 슬리브**의 사정이다. 다른 슬리브가 그 종목을 계속
+      // 담고 있으면(목표 비중이 남아 있으면) 실제 행위는 전량 정리가 아니라 비중 조정이라,
+      // 사유는 목표가 0 이 된 종목에만 붙인다. 슬리브별 사유는 표의 상태 칸에 그대로 있다.
+      const sellReasonApplies = Boolean(reason) && trade < 0 && row.weight_pct <= 0;
       let title: string;
       if (row.is_sell_all)
         title = rebalanceSells.has(row.ticker) ? "교체 매도" : "전량 매도";
-      else if (reason) title = "매도 예정";
-      else if (trade < 0) title = "비중 조정 매도";
+      else if (trade < 0) title = sellReasonApplies ? "매도 예정" : "비중 조정 매도";
       else if (held) title = "비중 조정 매수";
       else if (rebalanceBuys.has(row.ticker)) title = "교체 매수";
       else if (entryTickers.has(row.ticker)) title = "신고가 진입";
       else title = "신규 매수";
       // 체결 뒤 남는 수량 = 목표수량. 몇 주를 사고파는지만 보면 남는 양을 암산해야 한다.
       const after = row.target_quantity != null ? ` → 목표 ${row.target_quantity.toLocaleString("ko-KR")}주` : "";
-      const note = reason
+      const note = sellReasonApplies
         ? `${after} (${reason})`.trim()
         : row.is_sell_all
           ? `${row.held_value != null ? `(${formatAmount(row.held_value)}) ` : ""}· 목표에 없는 보유 종목`
@@ -890,7 +893,8 @@ export function StrategyMixClient() {
     for (const ticker of sellPending) {
       if (items.some((item) => item.key === `act-${ticker}`)) continue;
       const row = rowByTicker.get(ticker);
-      if (!row) continue;
+      // 팔 물량이 있어야 매도 지시다 — 보유가 없으면(다른 슬리브만 담고 있던 종목) 할 일이 없다.
+      if (!row || Number(row.held_quantity ?? 0) <= 0) continue;
       items.push({
         key: `act-${ticker}`,
         side: "sell",
