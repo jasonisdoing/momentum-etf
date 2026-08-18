@@ -385,14 +385,28 @@ def load_settings_map() -> dict[str, Any]:
     return dict(_load_doc().get("settings_by_pool") or {})
 
 
-def load_settings() -> dict[str, Any]:
+def default_pool() -> str:
+    """설정이 저장된 풀 중 목록에서 가장 앞선 풀 — 화면이 기억한 값이 없을 때의 기준점.
+
+    "마지막으로 고른 풀"은 브라우저 취향이라 DB 에 두지 않는다(화면이 로컬스토리지에 기억).
+    """
+    saved = set(_load_doc().get("settings_by_pool") or {})
+    pools = available_pools()
+    for pool in pools:
+        if pool in saved:
+            return pool
+    return pools[0] if pools else ""
+
+
+def load_settings(pool: str | None = None) -> dict[str, Any]:
+    """그 풀의 설정을 반환한다. 풀을 주지 않으면 `default_pool()` 을 쓴다."""
     doc = _load_doc()
     pools = available_pools()
-    pool = str(doc.get("pool") or "").strip()
-    if pool not in pools:
-        pool = pools[0] if pools else ""
-    stored = dict((doc.get("settings_by_pool") or {}).get(pool) or {})
-    return validate_settings({"pool": pool, **DEFAULT_SETTINGS, **stored})
+    selected = str(pool or default_pool()).strip()
+    if selected not in pools:
+        raise ValueError(f"지원하지 않는 종목풀입니다: {pool}")
+    stored = dict((doc.get("settings_by_pool") or {}).get(selected) or {})
+    return validate_settings({"pool": selected, **DEFAULT_SETTINGS, **stored})
 
 
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
@@ -401,7 +415,7 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
     per_pool = {key: normalized[key] for key in PER_POOL_SETTING_KEYS}
     _db()[_CONFIG_COLLECTION].update_one(
         {"_id": _SETTINGS_KEY},
-        {"$set": {"pool": pool, f"settings_by_pool.{pool}": per_pool}},
+        {"$set": {f"settings_by_pool.{pool}": per_pool}},
         upsert=True,
     )
     return normalized

@@ -7,6 +7,7 @@ import AccountSelect, {
   formatAccountLabel,
   type AccountOptionBase,
 } from "../components/AccountSelect";
+import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
 import {
   AppLoadingProgress,
@@ -337,7 +338,13 @@ export function StrategyMixClient() {
           );
         if (!alive) return;
         setPoolOptions(payload.pool_options);
-        setPool(payload.pool);
+        // 마지막으로 고른 풀은 브라우저에 기억한다(다른 화면들과 같은 공용 키).
+        const remembered = readRememberedTickerType();
+        const initialPool =
+          remembered && payload.pool_options.some((option) => option.ticker_type === remembered)
+            ? remembered
+            : payload.pool;
+        setPool(initialPool);
         setMonthOptions(payload.month_options);
         setAccountOptions(payload.accounts ?? []);
         setSavedByPool(payload.settings_by_pool ?? {});

@@ -23,6 +23,8 @@ type MethodSpec = {
   forwardBody?: boolean;
   /** 기본(30초)보다 긴 타임아웃이 필요한 호출용 (ms). */
   timeoutMs?: number;
+  /** 여기 적은 쿼리 파라미터만 그대로 FastAPI 로 넘긴다(예: 화면이 고른 종목풀). */
+  forwardQuery?: readonly string[];
 };
 
 type ProxyHandler = (request: NextRequest) => Promise<Response>;
@@ -34,14 +36,24 @@ export function createFastApiProxy(
     return async (request: NextRequest) => {
       try {
         const init: RequestInit = method === "GET" ? {} : { method };
+        let path = methodSpec.path;
+        if (methodSpec.forwardQuery?.length) {
+          const forwarded = new URLSearchParams();
+          for (const key of methodSpec.forwardQuery) {
+            const value = request.nextUrl.searchParams.get(key);
+            if (value) forwarded.set(key, value);
+          }
+          const query = forwarded.toString();
+          if (query) path = `${path}?${query}`;
+        }
         if (methodSpec.forwardBody) {
           const body = await request.json();
           init.headers = { "Content-Type": "application/json" };
           init.body = JSON.stringify(body);
         }
         const data = methodSpec.timeoutMs
-          ? await fetchFastApiJson(methodSpec.path, init, methodSpec.timeoutMs)
-          : await fetchFastApiJson(methodSpec.path, init);
+          ? await fetchFastApiJson(path, init, methodSpec.timeoutMs)
+          : await fetchFastApiJson(path, init);
         return jsonNoStore(data);
       } catch (error) {
         const message = error instanceof Error ? error.message : methodSpec.error;

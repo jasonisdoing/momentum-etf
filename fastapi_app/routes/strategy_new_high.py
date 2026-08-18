@@ -1,6 +1,6 @@
 """신고가 돌파 전략 설정·선정 API."""
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
 from utils.new_high_service import (
@@ -52,9 +52,15 @@ def _view(settings: dict) -> dict:
 
 
 @router.get("")
-def get_strategy_new_high(_: None = Depends(require_internal_token)) -> dict:
-    """저장된 설정과 화면 선택지를 반환한다."""
-    return _view(load_settings())
+def get_strategy_new_high(
+    pool: str | None = Query(default=None),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """저장된 설정과 화면 선택지를 반환한다.
+
+    ``pool`` 은 화면이 로컬스토리지에 기억해 둔 선택이다 — 없으면 저장분이 있는 첫 풀.
+    """
+    return _view(load_settings(pool))
 
 
 @router.put("/settings")
