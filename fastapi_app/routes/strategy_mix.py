@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
 
@@ -12,23 +11,10 @@ router = APIRouter(prefix="/internal/strategy-mix", tags=["strategy-mix"])
 
 @router.get("/meta")
 def get_strategy_mix_meta(_: None = Depends(require_internal_token)) -> dict:
-    """풀 셀렉트 목록과 기본 풀 — 화면 진입 시 쓰는 가벼운 조회 (계산 없음)."""
+    """합성을 운용하는 계좌 목록 — 화면 진입 시 쓰는 가벼운 조회 (계산 없음)."""
     from utils.strategy_mix_service import mix_meta
 
     return mix_meta()
-
-
-class MixSettingsPayload(BaseModel):
-    pool: str
-    account_id: str | None = None
-
-
-@router.put("/settings")
-def put_settings(payload: MixSettingsPayload, _: None = Depends(require_internal_token)) -> dict:
-    """선택한 풀에 적용 계좌를 저장한다."""
-    from utils.strategy_mix_service import save_settings
-
-    return save_settings(payload.pool, payload.account_id)
 
 
 @router.get("/positions")

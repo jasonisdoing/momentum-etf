@@ -36,6 +36,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "cash_currencies",
     "benchmark",
     "market_regime_index",
+    "mix_pool",
     "URL",
     "ma_alarm_enabled",
     "ma_short_days",
@@ -178,6 +179,21 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
 
                 ticker = ensure_asx_prefix(ticker)
             cleaned[key] = {"ticker": ticker, "name": bench_name}
+        elif key == "mix_pool":
+            # 합성 전략에서 이 계좌로 운용할 종목풀. 기본은 없음 — 값이 있는 계좌만
+            # `/strategy-mix` 목록에 오른다(계좌 하나에 풀 하나).
+            pool = str(raw or "").strip().lower()
+            if not pool:
+                cleaned[key] = None
+                continue
+            from utils.settings_loader import list_available_ticker_types
+
+            allowed = list_available_ticker_types()
+            if pool not in allowed:
+                raise AccountSettingsStoreError(
+                    f"'{account_id}' 의 mix_pool 은 {', '.join(allowed)} 중 하나여야 합니다: {raw}"
+                )
+            cleaned[key] = pool
         elif key == "market_regime_index":
             # 계좌별 시장 레짐 판정 지수 — 시장추세 지수(INDICES) 중 하나(필수, {ticker, name}).
             if not isinstance(raw, dict):

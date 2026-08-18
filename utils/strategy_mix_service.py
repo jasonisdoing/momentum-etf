@@ -71,90 +71,48 @@ def _pool_options(pools: list[str]) -> list[dict[str, Any]]:
 # 백테스트 기간 선택지 — 신고가 화면과 동일한 목록 (상한 60개월 = 신고가 엔진의 최대).
 MONTH_OPTIONS = (6, 12, 24, 36, 48, 60)
 
-_CONFIG_COLLECTION = "system_config"
-_SETTINGS_KEY = "strategy_mix_settings"
-# 풀별로 보관하는 설정 — 다른 전략 화면과 같은 `{pool, settings_by_pool}` 구조다.
-PER_POOL_SETTING_KEYS = ("account_id",)
 
+def mix_accounts() -> list[dict[str, Any]]:
+    """합성 전략을 운용하는 계좌 목록 — 계좌 설정의 `mix_pool` 이 지정된 계좌만.
 
-def _db():
-    from utils.db_manager import get_db_connection
-
-    db = get_db_connection()
-    if db is None:
-        raise RuntimeError("MongoDB 연결에 실패했습니다.")
-    return db
-
-
-def load_settings_map() -> dict[str, Any]:
-    """풀별 저장 설정 — 화면이 풀 셀렉트를 바꿀 때 즉시 전환하는 데 쓴다."""
-    doc = _db()[_CONFIG_COLLECTION].find_one({"_id": _SETTINGS_KEY}) or {}
-    return dict(doc.get("settings_by_pool") or {})
-
-
-def save_settings(pool: str, account_id: str | None) -> dict[str, Any]:
-    """선택한 풀에 적용 계좌를 저장한다. 다른 풀의 저장분은 건드리지 않는다."""
+    계좌 하나에 종목풀 하나다(계좌 설정 화면에서 지정). 지정이 없으면 이 화면에 오르지 않는다.
+    """
     from utils.settings_loader import get_account_settings, list_available_accounts
 
-    pool_norm, _, _ = _resolve_pool_and_settings(pool)
-    account_norm = str(account_id or "").strip()
-    if account_norm and account_norm not in list_available_accounts():
-        raise ValueError(f"알 수 없는 계좌입니다: {account_id}")
-    if account_norm:
-        # 통화가 다르면 총자산을 그 풀의 종목 가격으로 나눌 수 없다 — 저장 자체를 막는다.
-        from utils.settings_loader import get_ticker_type_settings
-
-        pool_currency = str((get_ticker_type_settings(pool_norm) or {}).get("currency") or "").strip().upper()
-        account_settings = get_account_settings(account_norm) or {}
-        account_currency = str((account_settings.get("settings") or account_settings).get("currency") or "").strip().upper()
-        if pool_currency and account_currency and pool_currency != account_currency:
-            raise ValueError(f"통화가 다른 계좌입니다: 종목풀 {pool_currency} / 계좌 {account_currency}")
-    per_pool = {"account_id": account_norm or None}
-    _db()[_CONFIG_COLLECTION].update_one(
-        {"_id": _SETTINGS_KEY},
-        {"$set": {f"settings_by_pool.{pool_norm}": per_pool}},
-        upsert=True,
-    )
-    return {"pool": pool_norm, **per_pool}
-
-
-def mix_meta() -> dict[str, Any]:
-    """화면 초기용 — 풀 셀렉트 목록과 기본 풀만 반환한다 (백테스트 계산 없음)."""
-    all_pools = _all_active_pools()
-    ready = available_mix_pools()
-    # 기본 풀 — 두 전략 설정이 모두 있는 풀 중 번호가 가장 빠른 것.
-    # "마지막으로 고른 풀"은 화면이 로컬스토리지에 기억한다(DB 에 두지 않는다).
-    if ready:
-        default = [o["ticker_type"] for o in _pool_options(ready)][0]
-    else:
-        default = all_pools[0] if all_pools else ""
-    from utils.settings_loader import get_account_settings, list_available_accounts
-
-    accounts = []
+    pool_names = {option["ticker_type"]: option for option in _pool_options(_all_active_pools())}
+    accounts: list[dict[str, Any]] = []
     for account_id in list_available_accounts():
         try:
             settings = get_account_settings(account_id) or {}
         except Exception:
-            settings = {}
+            continue
         inner = settings.get("settings") or settings
+        pool = str(inner.get("mix_pool") or "").strip().lower()
+        if not pool:
+            continue
         accounts.append(
             {
                 "account_id": account_id,
                 "name": str(inner.get("name") or account_id),
                 "icon": str(inner.get("icon") or ""),
                 "order": inner.get("order"),
-                # 통화가 다른 계좌는 목표 금액·주수를 낼 수 없다 — 화면이 풀별로 걸러 쓴다.
                 "currency": str(inner.get("currency") or "").strip().upper(),
+                "pool": pool,
+                "pool_label": pool_names.get(pool),
             }
         )
     accounts.sort(key=lambda item: (item["order"] is None, item["order"]))
+    return accounts
+
+
+def mix_meta() -> dict[str, Any]:
+    """화면 초기용 — 운용 계좌 목록과 기간 선택지 (백테스트 계산 없음)."""
+    accounts = mix_accounts()
     return {
-        "pool": default,
-        "pool_options": _pool_options(all_pools),
-        "month_options": list(MONTH_OPTIONS),
         "accounts": accounts,
-        # 풀별 저장 설정 — 화면이 풀을 바꿀 때 즉시 전환한다.
-        "settings_by_pool": load_settings_map(),
+        "month_options": list(MONTH_OPTIONS),
+        # 기본 선택 — 목록의 첫 계좌. 화면이 마지막 선택을 로컬스토리지에 기억한다.
+        "account_id": accounts[0]["account_id"] if accounts else "",
     }
 
 
@@ -340,8 +298,8 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     )
     next_trading_day = next((str(day.date()) for day in ahead if day.date() > today_local), None)
 
-    # ── 적용 계좌 — 저장된 연결이 있으면 실제 보유·현금을 붙여 매매 지시를 만든다.
-    account_id = str((load_settings_map().get(pool_norm) or {}).get("account_id") or "").strip()
+    # ── 적용 계좌 — 이 풀로 합성을 운용하는 계좌(계좌 설정의 mix_pool)를 찾는다.
+    account_id = next((row["account_id"] for row in mix_accounts() if row["pool"] == pool_norm), "")
     account = _load_account_state(account_id) if account_id else None
     if account is not None:
         # 보유 종목 가격 — 목표 목록에 있으면 그 값을, 없으면 가격 캐시에서 마지막 종가를 쓴다.
