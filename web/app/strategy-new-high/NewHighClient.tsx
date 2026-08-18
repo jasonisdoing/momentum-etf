@@ -25,6 +25,7 @@ import {
 } from "@/lib/grid-cells";
 import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
 import { renderStockNameCell } from "@/lib/name-highlight";
+import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
 const gridTheme = createAppGridTheme();
@@ -382,7 +383,10 @@ export function NewHighClient() {
     let alive = true;
     (async () => {
       try {
-        const response = await fetch("/api/strategy-new-high", { cache: "no-store" });
+        // 마지막으로 고른 풀은 브라우저에 기억한다(다른 화면들과 같은 공용 키).
+        const remembered = readRememberedTickerType();
+        const query = remembered ? `?pool=${encodeURIComponent(remembered)}` : "";
+        const response = await fetch(`/api/strategy-new-high${query}`, { cache: "no-store" });
         const payload = (await response.json()) as View & { error?: string };
         if (!response.ok) throw new Error(payload.error ?? "설정을 불러오지 못했습니다.");
         if (!alive) return;
@@ -457,6 +461,7 @@ export function NewHighClient() {
   const handlePoolChange = useCallback(
     (pool: string) => {
       if (!view) return;
+      writeRememberedTickerType(pool);
       const saved = view.settings_by_pool?.[pool];
       void persistSettings(
         { ...view.default_settings, ...(saved ?? {}), pool },

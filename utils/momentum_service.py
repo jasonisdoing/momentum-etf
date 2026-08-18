@@ -217,7 +217,9 @@ def _load_settings_doc() -> dict[str, Any]:
             f"저장된 모멘텀 전략 설정이 없습니다 ({_CONFIG_COLLECTION}.{_SETTINGS_KEY} 문서를 먼저 저장하세요)."
         )
 
-    if isinstance(stored.get("settings_by_pool"), dict) and isinstance(stored.get("pool"), str):
+    # 풀별 맵이 있으면 정상 스키마다. 선택 풀(`pool`)은 화면이 로컬스토리지에 기억하므로
+    # 문서에 없어도 된다(옛 문서에 남아 있으면 무시한다).
+    if isinstance(stored.get("settings_by_pool"), dict):
         return stored
 
     # ── 일회성 마이그레이션 → 풀별 맵 스키마 ──
@@ -242,14 +244,26 @@ def load_settings_map() -> dict[str, Any]:
     return _load_settings_doc()
 
 
-def load_settings() -> dict[str, Any]:
-    """현재 선택된 풀의 설정을 평면 dict 로 반환한다 (`{pool, top_n, ...}`).
+def default_pool() -> str:
+    """설정이 저장된 풀 중 번호가 가장 빠른 풀 — 화면이 기억한 값이 없을 때의 기준점.
 
-    선택 풀의 저장분이 없거나 깨졌으면 대체값 없이 에러 — 기본값으로 슬쩍 넘어가면
-    그대로 저장되는 순간 실제 설정이 덮어써지기 때문이다.
+    "마지막으로 고른 풀"은 브라우저 취향이라 DB 에 두지 않는다(화면이 로컬스토리지에 기억).
+    """
+    saved = set(_load_settings_doc()["settings_by_pool"])
+    for option in pool_options():
+        if option["ticker_type"] in saved:
+            return str(option["ticker_type"])
+    raise RuntimeError("모멘텀 전략 설정이 저장된 종목풀이 없습니다 — 화면에서 먼저 저장하세요.")
+
+
+def load_settings(pool: str | None = None) -> dict[str, Any]:
+    """그 풀의 설정을 평면 dict 로 반환한다 (`{pool, top_n, ...}`).
+
+    풀을 주지 않으면 `default_pool()` 을 쓴다. 저장분이 없거나 깨졌으면 대체값 없이
+    에러 — 기본값으로 슬쩍 넘어가면 그대로 저장되는 순간 실제 설정이 덮어써진다.
     """
     stored = _load_settings_doc()
-    pool = str(stored["pool"]).strip().lower()
+    pool = str(pool or default_pool()).strip().lower()
     per_pool = stored["settings_by_pool"].get(pool)
     if not isinstance(per_pool, dict):
         raise RuntimeError(f"종목풀({pool})의 모멘텀 전략 설정이 없습니다 — 화면에서 저장하세요.")
@@ -276,7 +290,6 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
         {"_id": _SETTINGS_KEY},
         {
             "$set": {
-                "settings.pool": pool,
                 f"settings.settings_by_pool.{pool}": per_pool,
                 "updated_at": datetime.now().isoformat(),
             }

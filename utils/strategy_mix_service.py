@@ -112,7 +112,7 @@ def save_settings(pool: str, account_id: str | None) -> dict[str, Any]:
     per_pool = {"account_id": account_norm or None}
     _db()[_CONFIG_COLLECTION].update_one(
         {"_id": _SETTINGS_KEY},
-        {"$set": {"pool": pool_norm, f"settings_by_pool.{pool_norm}": per_pool}},
+        {"$set": {f"settings_by_pool.{pool_norm}": per_pool}},
         upsert=True,
     )
     return {"pool": pool_norm, **per_pool}
@@ -122,12 +122,9 @@ def mix_meta() -> dict[str, Any]:
     """화면 초기용 — 풀 셀렉트 목록과 기본 풀만 반환한다 (백테스트 계산 없음)."""
     all_pools = _all_active_pools()
     ready = available_mix_pools()
-    from utils.momentum_service import load_settings_map as sm_map
-
-    sm_current = str(sm_map().get("pool") or "").strip().lower()
-    if sm_current in ready:
-        default = sm_current
-    elif ready:
+    # 기본 풀 — 두 전략 설정이 모두 있는 풀 중 번호가 가장 빠른 것.
+    # "마지막으로 고른 풀"은 화면이 로컬스토리지에 기억한다(DB 에 두지 않는다).
+    if ready:
         default = [o["ticker_type"] for o in _pool_options(ready)][0]
     else:
         default = all_pools[0] if all_pools else ""
@@ -172,12 +169,8 @@ def _resolve_pool_and_settings(pool: str | None) -> tuple[str, dict[str, Any], d
         raise RuntimeError("두 전략 모두 설정이 저장된 종목풀이 없습니다 — 각 전략 화면에서 먼저 저장하세요.")
     pool_norm = str(pool or "").strip().lower()
     if not pool_norm:
-        # 기본 풀 — SM 화면이 현재 보고 있는 풀 (양쪽 설정이 없으면 번호가 가장 빠른 준비된 풀).
-        from utils.momentum_service import load_settings_map as sm_map
-
-        sm_current = str(sm_map().get("pool") or "").strip().lower()
-        ordered_ready = [o["ticker_type"] for o in _pool_options(ready)]
-        pool_norm = sm_current if sm_current in ready else ordered_ready[0]
+        # 기본 풀 — 두 전략 설정이 모두 있는 풀 중 번호가 가장 빠른 것.
+        pool_norm = [o["ticker_type"] for o in _pool_options(ready)][0]
     if pool_norm not in all_pools:
         raise ValueError(f"알 수 없는 종목풀입니다: {pool_norm}")
 

@@ -1,6 +1,6 @@
 """모멘텀 전략(전략-ST) 설정·선정 API."""
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
 from utils.momentum_service import (
@@ -50,10 +50,14 @@ def _constraints_payload() -> dict:
 
 @router.get("")
 def get_strategy_momentum(
+    pool: str | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """저장된 설정을 반환한다. 저장된 값이 없거나 깨졌으면 에러다(기본값 대체 없음)."""
-    settings = load_settings()
+    """저장된 설정을 반환한다. 저장된 값이 없거나 깨졌으면 에러다(기본값 대체 없음).
+
+    ``pool`` 은 화면이 로컬스토리지에 기억해 둔 선택이다 — 없으면 저장분이 있는 첫 풀.
+    """
+    settings = load_settings(pool)
     return {
         "settings": settings,
         # 풀별 저장 설정 맵 — 화면이 풀 셀렉트 전환 시 즉시 그 풀의 값을 채운다.

@@ -14,6 +14,7 @@ import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { formatDateWithWeekday } from "@/lib/datetime";
+import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 import { formatKorMarketCap } from "@/lib/market-cap-format";
 import {
@@ -335,7 +336,10 @@ export function MomentumClient() {
   const load = useCallback(async (): Promise<boolean> => {
     setLoading(true);
     try {
-      const resp = await fetch("/api/strategy-momentum", { cache: "no-store" });
+      // 마지막으로 고른 풀은 브라우저에 기억한다(다른 화면들과 같은 공용 키).
+      const remembered = readRememberedTickerType();
+      const query = remembered ? `?pool=${encodeURIComponent(remembered)}` : "";
+      const resp = await fetch(`/api/strategy-momentum${query}`, { cache: "no-store" });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "설정을 불러오지 못했습니다.");
       setLoadError(null);
@@ -444,6 +448,7 @@ export function MomentumClient() {
   const handlePoolChange = useCallback(
     (pool: string) => {
       setDraftPool(pool);
+      writeRememberedTickerType(pool);
       const saved = view?.settings_by_pool?.[pool];
       if (saved) {
         fillDrafts(saved);
