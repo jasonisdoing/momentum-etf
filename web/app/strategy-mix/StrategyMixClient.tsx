@@ -503,13 +503,16 @@ export function StrategyMixClient() {
       shares: null,
     };
     // 목표 종목 행은 백엔드가 종목 단위로 합쳐 계산한 값을 그대로 쓴다.
+    // 현금만 맨 위에 두고 나머지는 티커 순 — 계좌·증권사 화면과 같은 순서로 대조하기 쉽게.
     return [
       cashRow,
-      ...positions.holdings.map((holding) => ({
-        ...holding,
-        amount: holding.target_amount ?? null,
-        shares: holding.target_quantity ?? null,
-      })),
+      ...positions.holdings
+        .map((holding) => ({
+          ...holding,
+          amount: holding.target_amount ?? null,
+          shares: holding.target_quantity ?? null,
+        }))
+        .sort((a, b) => a.ticker.localeCompare(b.ticker)),
     ];
   }, [positions, totalAsset]);
 
@@ -857,11 +860,13 @@ export function StrategyMixClient() {
       else if (rebalanceBuys.has(row.ticker)) title = "교체 매수";
       else if (entryTickers.has(row.ticker)) title = "신고가 진입";
       else title = "신규 매수";
+      // 체결 뒤 남는 수량 = 목표수량. 몇 주를 사고파는지만 보면 남는 양을 암산해야 한다.
+      const after = row.target_quantity != null ? ` → 목표 ${row.target_quantity.toLocaleString("ko-KR")}주` : "";
       const note = reason
-        ? `(${reason})`
+        ? `${after} (${reason})`.trim()
         : row.is_sell_all
           ? `${row.held_value != null ? `(${formatAmount(row.held_value)}) ` : ""}· 목표에 없는 보유 종목`
-          : `· 목표 ${row.weight_pct.toFixed(2)}%`;
+          : `${after} · ${row.weight_pct.toFixed(2)}%`.trim();
       items.push({
         key: `act-${row.ticker}`,
         side: trade > 0 ? "buy" : "sell",
