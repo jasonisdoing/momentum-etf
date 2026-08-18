@@ -387,7 +387,9 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
             target_amount = total_assets * row["weight_pct"] / 100.0
             row["target_amount"] = round(target_amount, 2)
             price = row.get("price")
-            target_qty = int(target_amount // float(price)) if price else None
+            # 반올림 — 버림이면 1주 값이 목표 금액보다 조금만 커도 목표가 0 이 되어 슬롯이
+            # 통째로 빈다(비중 0% vs 목표 5%). 반올림이 목표 비중에 더 가깝다.
+            target_qty = round(target_amount / float(price)) if price else None
             row["target_quantity"] = target_qty
             row["trade_quantity"] = None if target_qty is None else target_qty - int(row["held_quantity"])
         # 목표 포트폴리오에 없는 보유 종목 = 전량 매도 대상. 목표 비중 0% 행으로 표에 함께 넣는다
