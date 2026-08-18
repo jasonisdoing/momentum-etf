@@ -252,8 +252,15 @@ def run_backtest(
         )
         curve.append(equity * (1 + open_pnl))
 
-    # 마지막 날은 루프가 판정하지 않는다(체결할 다음 날이 없어서). 보유 목록만 남겨 둔다.
+    # 마지막 날은 판정·체결이 없다(체결할 다음 거래일이 없어서). 다만 그날 종가로
+    # **평가**는 해야 곡선이 하루 짧아지지 않는다 — 모멘텀 엔진과 같은 기준.
     held_by_day[str(last_day.date())] = list(holdings)
+    last_open_pnl = sum(
+        (float(close_df.at[last_day, t]) / p["entry"] - 1) / slots
+        for t, p in holdings.items()
+        if pd.notna(close_df.at[last_day, t])
+    )
+    curve.append(equity * (1 + last_open_pnl))
 
     # 아직 청산하지 않은 종목 — 성과에는 평가손익으로 이미 반영돼 있지만 체결 내역에는 없다.
     open_positions = []
@@ -279,7 +286,7 @@ def run_backtest(
     open_positions.sort(key=lambda row: row["entry_date"], reverse=True)
     exited_today = [t for t in trades if t["exit_date"] == str(last_day.date())]
 
-    strategy = pd.Series(curve, index=span[:-1])
+    strategy = pd.Series(curve, index=span)  # 마지막 날은 평가만 한 값이 들어간다
     benchmark = load_benchmark_close(pool).reindex(strategy.index).ffill()
     benchmark = benchmark / benchmark.iloc[0]
 
