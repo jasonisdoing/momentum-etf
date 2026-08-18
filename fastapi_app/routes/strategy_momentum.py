@@ -98,15 +98,20 @@ def put_strategy_momentum_settings(
 
 @router.post("/picks")
 def post_strategy_momentum_picks(
+    pool: str | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """현재 월 확정 포트폴리오 선정을 실행한다 (가격 캐시 기반 — 수 초)."""
-    return compute_picks()
+    """현재 주 확정 포트폴리오 선정을 실행한다 (가격 캐시 기반 — 수 초).
+
+    ``pool`` 은 화면이 고른 종목풀이다 — 없으면 저장분이 있는 첫 풀.
+    """
+    return compute_picks(load_settings(pool))
 
 
 @router.post("/backtest")
 def post_strategy_momentum_backtest(
     payload: dict = Body(...),
+    pool: str | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict:
     """주간 리밸런싱 백테스트.
@@ -123,4 +128,4 @@ def post_strategy_momentum_backtest(
     include_daily = payload.get("include_daily") if isinstance(payload, dict) else None
     if not isinstance(include_daily, bool):
         raise ValueError("'include_daily' 는 참/거짓이어야 합니다.")
-    return run_backtest(months, include_daily=include_daily)
+    return run_backtest(months, settings=load_settings(pool), include_daily=include_daily)
