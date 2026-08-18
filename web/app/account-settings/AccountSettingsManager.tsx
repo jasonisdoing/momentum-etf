@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { formatKstDateTime } from "@/lib/datetime";
+import { formatPoolLabel } from "@/lib/pool-label";
 import { ensureAsxPrefix } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 
@@ -19,12 +20,21 @@ type AccountEntry = {
   cash_currencies?: string[];
   benchmark?: Benchmark;
   market_regime_index?: MarketIndexOption | null;
+  /** 합성 전략에서 이 계좌로 운용할 종목풀 — 없으면 `/strategy-mix` 목록에 오르지 않는다. */
+  mix_pool?: string | null;
   URL?: string;
   updated_at?: string | null;
   save_method?: string | null;
 };
 
-type ApiResponse = { accounts?: AccountEntry[]; market_indices?: MarketIndexOption[]; error?: string };
+type PoolOption = { ticker_type: string; name?: string | null; icon?: string | null; order?: number | null };
+
+type ApiResponse = {
+  accounts?: AccountEntry[];
+  market_indices?: MarketIndexOption[];
+  pool_options?: PoolOption[];
+  error?: string;
+};
 
 // 시장 레짐 지수 기본값 — S&P 500 (yf_ticker ^GSPC). 필수값이라 미설정 계좌는 이 값으로 시작한다.
 const DEFAULT_REGIME_TICKER = "^GSPC";
@@ -44,11 +54,13 @@ const labelStyle: React.CSSProperties = { color: "var(--text-muted)", fontWeight
 function AccountRow({
   account,
   marketIndices,
+  poolOptions,
   onSaved,
   onDeleted,
 }: {
   account: AccountEntry;
   marketIndices: MarketIndexOption[];
+  poolOptions: PoolOption[];
   onSaved: () => void;
   onDeleted: () => void;
 }) {
@@ -87,6 +99,7 @@ function AccountRow({
   const [url, setUrl] = useState(account.URL ?? "");
   // 시장 레짐 지수(필수) — 미설정 계좌는 S&P 500 기본값으로 시작.
   const [regimeTicker, setRegimeTicker] = useState(account.market_regime_index?.ticker || DEFAULT_REGIME_TICKER);
+  const [mixPool, setMixPool] = useState(account.mix_pool ?? "");
   const [benchTicker, setBenchTicker] = useState(account.benchmark?.ticker ?? "");
   const [benchName, setBenchName] = useState(account.benchmark?.name ?? "");
   const [benchEditing, setBenchEditing] = useState(!(account.benchmark?.ticker && account.benchmark?.name));
@@ -154,6 +167,8 @@ function AccountRow({
           ticker: regimeTicker,
           name: marketIndices.find((item) => item.ticker === regimeTicker)?.name ?? "",
         },
+        // 합성 전략 종목풀 — 없음이면 null 로 저장한다(그 계좌는 합성 화면에 안 뜬다).
+        mix_pool: mixPool || null,
         URL: url.trim(),
       };
       // 벤치마크는 선택 — 둘 다 채워졌을 때만 저장(빈 값이면 백엔드 검증에 걸리므로 생략).
@@ -328,6 +343,24 @@ function AccountRow({
         </select>
       </div>
 
+      <div style={rowStyle}>
+        <span style={{ ...labelStyle, width: 60 }}>합성 전략</span>
+        <select
+          className="form-select form-select-sm"
+          style={{ width: 240 }}
+          value={mixPool}
+          onChange={(e) => setMixPool(e.target.value)}
+          title="이 계좌로 합성 전략을 운용할 종목풀. 지정한 계좌만 /strategy-mix 목록에 오른다."
+        >
+          <option value="">없음</option>
+          {poolOptions.map((pool) => (
+            <option key={pool.ticker_type} value={pool.ticker_type}>
+              {formatPoolLabel(pool)}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <div style={{ ...rowStyle, marginBottom: 0 }}>
         <span style={{ ...labelStyle, width: 60 }}>URL</span>
         <input style={{ ...inputStyle, flex: 1, minWidth: 220 }} placeholder="증권사 접속 URL (선택)" value={url} onChange={(e) => setUrl(e.target.value)} />
@@ -434,6 +467,7 @@ export function AccountSettingsManager() {
   const toast = useToast();
   const [accounts, setAccounts] = useState<AccountEntry[]>([]);
   const [marketIndices, setMarketIndices] = useState<MarketIndexOption[]>([]);
+  const [poolOptions, setPoolOptions] = useState<PoolOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
 
@@ -445,6 +479,7 @@ export function AccountSettingsManager() {
       if (!accResp.ok || accData.error) throw new Error(accData.error ?? "계좌 설정을 불러오지 못했습니다.");
       setAccounts(accData.accounts ?? []);
       setMarketIndices(accData.market_indices ?? []);
+      setPoolOptions(accData.pool_options ?? []);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "계좌 설정을 불러오지 못했습니다.");
     } finally {
@@ -473,7 +508,14 @@ export function AccountSettingsManager() {
           <div style={{ color: "var(--text-muted)", padding: 12 }}>등록된 계좌가 없습니다.</div>
         ) : (
           accounts.map((a) => (
-            <AccountRow key={a.account_id} account={a} marketIndices={marketIndices} onSaved={() => {}} onDeleted={() => void load()} />
+            <AccountRow
+              key={a.account_id}
+              account={a}
+              marketIndices={marketIndices}
+              poolOptions={poolOptions}
+              onSaved={() => {}}
+              onDeleted={() => void load()}
+            />
           ))
         )}
       </div>

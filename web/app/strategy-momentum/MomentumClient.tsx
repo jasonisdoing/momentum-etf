@@ -356,7 +356,7 @@ export function MomentumClient() {
       const message = error instanceof Error ? error.message : "설정을 불러오지 못했습니다.";
       setLoadError(message);
       toast.error(message);
-      return false;
+      return null;
     } finally {
       setLoading(false);
     }

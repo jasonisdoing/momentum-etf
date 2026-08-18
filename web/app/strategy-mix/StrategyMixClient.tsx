@@ -7,7 +7,10 @@ import AccountSelect, {
   formatAccountLabel,
   type AccountOptionBase,
 } from "../components/AccountSelect";
-import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
+import {
+  readRememberedMomentumEtfAccountId,
+  writeRememberedMomentumEtfAccountId,
+} from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
 import {
   AppLoadingProgress,
@@ -36,16 +39,18 @@ const hintStyle: React.CSSProperties = {
 };
 
 /** 통화가 다른 계좌는 목표 금액·주수를 낼 수 없어 셀렉터에서 걸러낸다. */
-type AccountOption = AccountOptionBase & { currency?: string };
-type PoolOption = PoolLabelSource & { currency?: string };
-
-type Meta = {
+type AccountOption = AccountOptionBase & {
+  currency?: string;
+  /** 이 계좌가 운용하는 종목풀 — 계좌 설정에서 지정한다. */
   pool: string;
-  pool_options: PoolOption[];
-  month_options: number[];
+  pool_label?: PoolLabelSource | null;
+};
+type Meta = {
+  /** 합성을 운용하는 계좌(계좌 설정의 `mix_pool` 지정) 목록. */
   accounts: AccountOption[];
-  /** 풀별 저장 설정 — 풀을 바꾸면 그 풀의 계좌로 전환한다. */
-  settings_by_pool: Record<string, { account_id: string | null }>;
+  month_options: number[];
+  /** 기본 선택 계좌 — 목록의 첫 계좌. */
+  account_id: string;
 };
 
 type View = {
@@ -292,17 +297,15 @@ type ActionGroup = { key: string; title: string; items: ActionItem[] };
  *  백테스트 탭은 매월 50:50 리밸런싱 합성 성과를 보여준다. 설정은 각 전략 화면의 저장값을 그대로 쓴다. */
 export function StrategyMixClient() {
   const toast = useToast();
-  const [pool, setPool] = useState<string>("");
-  const [poolOptions, setPoolOptions] = useState<PoolOption[]>([]);
+  // 계좌 하나만 고른다 — 종목풀은 계좌 설정(`mix_pool`)에 붙어 있다.
+  const [accountId, setAccountId] = useState<string>("");
+  const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
   const [months, setMonths] = useState<number>(12);
   const [monthOptions, setMonthOptions] = useState<number[]>([]);
-  const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
-  // 풀별 저장 설정 — 저장 전 초안과 비교해 저장 버튼 활성화를 정한다.
-  const [savedByPool, setSavedByPool] = useState<
-    Record<string, { account_id: string | null }>
-  >({});
-  const [accountId, setAccountId] = useState<string>("");
-  const [saving, setSaving] = useState(false);
+
+  // 선택한 계좌가 운용하는 종목풀 — 계좌 설정(`mix_pool`)이 단일 소스다.
+  const selectedAccount = accountOptions.find((option) => option.account_id === accountId) ?? null;
+  const pool = selectedAccount?.pool ?? "";
 
   // 현재 상태 탭.
   const [positions, setPositions] = useState<Positions | null>(null);
@@ -337,20 +340,16 @@ export function StrategyMixClient() {
             payload.error ?? "종목풀 목록을 불러오지 못했습니다.",
           );
         if (!alive) return;
-        setPoolOptions(payload.pool_options);
-        // 마지막으로 고른 풀은 브라우저에 기억한다(다른 화면들과 같은 공용 키).
-        const remembered = readRememberedTickerType();
-        const initialPool =
-          remembered && payload.pool_options.some((option) => option.ticker_type === remembered)
-            ? remembered
-            : payload.pool;
-        setPool(initialPool);
+        const accounts = payload.accounts ?? [];
+        setAccountOptions(accounts);
         setMonthOptions(payload.month_options);
-        setAccountOptions(payload.accounts ?? []);
-        setSavedByPool(payload.settings_by_pool ?? {});
-        setAccountId(
-          (payload.settings_by_pool ?? {})[payload.pool]?.account_id ?? "",
-        );
+        // 마지막으로 고른 계좌는 브라우저에 기억한다(다른 화면의 계좌 셀렉터와 같은 공용 키).
+        const remembered = readRememberedMomentumEtfAccountId();
+        const initial =
+          remembered && accounts.some((option) => option.account_id === remembered)
+            ? remembered
+            : payload.account_id;
+        setAccountId(initial);
       } catch (metaError) {
         if (alive)
           setError(
@@ -415,40 +414,6 @@ export function StrategyMixClient() {
     };
   }, [pool, asOf, positionsReloadKey]);
 
-  // 저장 전 초안과 저장분이 다른지 — 다르면 저장 버튼이 열린다.
-  const isDirty = useMemo(
-    () => (savedByPool[pool]?.account_id ?? "") !== accountId,
-    [savedByPool, pool, accountId],
-  );
-
-  const saveSettings = useCallback(async () => {
-    if (!pool) return;
-    setSaving(true);
-    try {
-      const response = await fetch("/api/strategy-mix/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pool, account_id: accountId || null }),
-      });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok || payload.error)
-        throw new Error(payload.error ?? "설정을 저장하지 못했습니다.");
-      setSavedByPool((prev) => ({
-        ...prev,
-        [pool]: { account_id: accountId || null },
-      }));
-      setPositionsReloadKey((key) => key + 1);
-      toast.success("설정을 저장했습니다.");
-    } catch (saveError) {
-      toast.error(
-        saveError instanceof Error
-          ? saveError.message
-          : "설정을 저장하지 못했습니다.",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }, [pool, accountId, toast]);
 
   const runBacktest = useCallback(async () => {
     if (!pool) return;
@@ -802,18 +767,6 @@ export function StrategyMixClient() {
     return found ? formatAccountLabel(found) : id;
   }, [positions?.account?.account_id, accountOptions]);
 
-  // 적용 계좌 후보 — 선택한 풀과 통화가 같은 계좌만. 다르면 목표 금액·주수를 낼 수 없다.
-  const poolCurrency =
-    poolOptions.find((option) => option.ticker_type === pool)?.currency ?? "";
-  const accountChoices = useMemo(
-    () =>
-      accountOptions.filter(
-        (option) =>
-          !poolCurrency || !option.currency || option.currency === poolCurrency,
-      ),
-    [accountOptions, poolCurrency],
-  );
-
   const actions = positions?.actions ?? null;
 
   // 오늘의 액션 — 체결 시점으로 묶고 묶음 안에서는 매도 → 매수 순서로 세운다.
@@ -947,54 +900,26 @@ export function StrategyMixClient() {
               {/* 메인 헤더 — 셀렉터·모드 전환 같은 주 제어. */}
               <div className="appMainHeader">
                 <div className="appMainHeaderLeft">
-                  <label
-                    className="appLabeledField"
-                    style={{ marginBottom: 0 }}
-                  >
-                    <span className="appLabeledFieldLabel">종목풀</span>
-                    <select
-                      className="form-select form-select-sm"
-                      value={pool}
-                      disabled={
-                        loading || positionsLoading || poolOptions.length === 0
-                      }
-                      onChange={(event) => {
-                        const next = event.target.value;
-                        setPool(next);
-                        setAccountId(savedByPool[next]?.account_id ?? "");
-                        setPositions(null);
-                        setView(null);
-                        setAsOf("");
-                      }}
-                    >
-                      {poolOptions.map((option) => (
-                        <option
-                          key={option.ticker_type}
-                          value={option.ticker_type}
-                        >
-                          {formatPoolLabel(option)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                   <AccountSelect
-                    label="적용 계좌"
-                    accounts={accountChoices}
+                    label="계좌"
+                    accounts={accountOptions}
                     value={accountId}
-                    onChange={setAccountId}
-                    disabled={saving}
-                    emptyLabel="선택 안 함"
+                    onChange={(next) => {
+                      setAccountId(next);
+                      writeRememberedMomentumEtfAccountId(next);
+                      setPositions(null);
+                      setView(null);
+                      setAsOf("");
+                    }}
+                    disabled={loading || positionsLoading || accountOptions.length === 0}
                     style={{ width: "auto" }}
                     labelStyle={{ marginBottom: 0 }}
                   />
-                  <button
-                    className="btn btn-sm btn-primary"
-                    type="button"
-                    disabled={saving || !pool || !isDirty}
-                    onClick={() => void saveSettings()}
-                  >
-                    {saving ? "저장 중…" : "저장"}
-                  </button>
+                  <span style={hintStyle}>
+                    {selectedAccount?.pool_label
+                      ? `종목풀 ${formatPoolLabel(selectedAccount.pool_label)}`
+                      : "계좌 설정에서 합성 전략 종목풀을 지정하세요"}
+                  </span>
                 </div>
               </div>
             </div>
