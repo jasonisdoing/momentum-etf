@@ -345,6 +345,8 @@ type ActionItem = {
   side: "sell" | "buy";
   title: string;
   text: string;
+  /** 정렬용 — 표(티커 순)와 같은 기준으로 세운다. */
+  ticker: string;
 };
 type ActionGroup = { key: string; title: string; items: ActionItem[] };
 
@@ -946,6 +948,7 @@ export function StrategyMixClient() {
           : `${after} · ${row.weight_pct.toFixed(2)}%`.trim();
       items.push({
         key: `act-${row.ticker}`,
+        ticker: row.ticker,
         side: trade > 0 ? "buy" : "sell",
         title,
         text: `${label(row.ticker, row.name, trade)} ${note}`.trim(),
@@ -962,6 +965,7 @@ export function StrategyMixClient() {
       if (!row || Number(row.held_quantity ?? 0) <= 0 || row.weight_pct > 0) continue;
       items.push({
         key: `act-${ticker}`,
+        ticker,
         side: "sell",
         title: "매도 예정",
         text: `${label(ticker, row.name, row.held_quantity)} (${sellReason.get(ticker) ?? "이탈"})`,
@@ -983,8 +987,10 @@ export function StrategyMixClient() {
         title: date
           ? `${formatDateWithWeekday(date)} 시가${date === rebalanceDate ? " · 모멘텀 교체 포함" : ""}`
           : "체결일 미정",
-        // 매도가 끝나야 매수 대금이 생긴다.
-        items: [...groupItems].sort((a, b) => (a.side === b.side ? 0 : a.side === "sell" ? -1 : 1)),
+        // 매도가 끝나야 매수 대금이 생긴다. 같은 방향 안에서는 표와 같은 티커 순.
+        items: [...groupItems].sort((a, b) =>
+          a.side === b.side ? a.ticker.localeCompare(b.ticker) : a.side === "sell" ? -1 : 1,
+        ),
       }));
   }, [positions, actions]);
 
