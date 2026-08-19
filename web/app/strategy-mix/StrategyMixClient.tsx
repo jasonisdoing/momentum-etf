@@ -809,9 +809,13 @@ export function StrategyMixClient() {
     const rebalanceDate =
       !rebalance.is_filled && rebalance.fill_date ? rebalance.fill_date : null;
     const nextOpen = positions.next_trading_day;
-    // 다음 체결일이 모멘텀 교체일인가 / 오늘이 슬리브 50:50 재조정일(매월 첫 거래일)인가.
-    const momentumRebalanceDay = rebalanceDate != null && rebalanceDate === nextOpen;
+    // 오늘이 슬리브 50:50 재조정일(매월 첫 거래일)인가.
     const sleeveRebalanceDay = Boolean(actions.sleeve_rebalance_today);
+    // 신고가 슬리브가 이번에 실제로 건드리는 종목 — 진입과 이탈뿐이다.
+    const nhEventTickers = new Set([
+      ...entryTickers,
+      ...actions.nh_sells.map((row) => row.ticker),
+    ]);
     const sellReason = new Map<string, string>();
     for (const row of actions.sm_sells) sellReason.set(row.ticker, row.reason);
     for (const row of actions.nh_sells) {
@@ -828,7 +832,19 @@ export function StrategyMixClient() {
       if (trade == null || trade === 0) continue;
       const isRebalance =
         rebalanceBuys.has(row.ticker) || rebalanceSells.has(row.ticker);
-      const date = isRebalance ? rebalanceDate : nextOpen;
+      // 백테스트가 실제로 매매하는 시점에만 조정을 연다. 매일 목표 비중으로 되돌리면
+      // 백테스트에 없는 매매가 생기고, 오른 종목을 깎고 내린 종목을 사는 반대 방향이 된다.
+      //  · 모멘텀: 교체일에 슬리브 **전체**를 동일가중으로 되돌린다(엔진이 구간 시작마다
+      //    보유를 1 로 정규화한다 — `momentum_backtest` 의 슬롯 모델).
+      //  · 신고가: 그 종목이 들어오고 나갈 때만. 보유 중에는 비중을 건드리지 않는다.
+      //  · 슬리브 50:50: 매월 첫 거래일에 전 종목.
+      //  · 목표에 없는 보유(전량 매도)는 날짜와 무관하게 항상 남긴다.
+      const nhEvent = nhEventTickers.has(row.ticker);
+      const momentumDay = rebalanceDate != null && row.sources.includes("sm");
+      // 다음 거래일에 바로 할 일 — 나머지는 모멘텀 교체일에 함께 처리한다.
+      const immediate = row.is_sell_all || nhEvent || sleeveRebalanceDay;
+      if (!isRebalance && !immediate && !momentumDay) continue;
+      const date = isRebalance || !immediate ? rebalanceDate : nextOpen;
       const reason = sellReason.get(row.ticker);
       // 목표에 이미 근접한 종목은 건너뛴다 — 1주짜리 조정은 장중 내내 붙었다 떨어진다.
       // 규칙상 팔아야 하는 것(전량 매도·자격 상실·이탈)은 금액과 무관하게 남긴다.
@@ -1136,8 +1152,9 @@ export function StrategyMixClient() {
                     <div style={{ fontWeight: 700, marginBottom: 6 }}>
                       오늘의 액션
                       <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
-                        백테스트가 매매하는 날에만 조정 (모멘텀 교체일 · 신고가 진입·이탈 ·
-                        매월 첫 거래일) · 목표 비중과 {REBALANCE_BAND_PCT}%p 미만 차이는 제외
+                        백테스트가 매매하는 날에만 조정 (모멘텀 교체일 — 슬리브 전체 · 신고가
+                        진입·이탈 — 해당 종목 · 매월 첫 거래일 — 전 종목) · 목표 비중과{" "}
+                        {REBALANCE_BAND_PCT}%p 미만 차이는 제외
                       </span>
                     </div>
                     {!hasActions ? (
