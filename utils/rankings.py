@@ -22,9 +22,9 @@ from utils.cache_utils import (
 )
 from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
-from utils.moving_averages import calculate_moving_average, get_moving_average_type
+from utils.moving_averages import get_moving_average_type
 from utils.perf_metrics import single_stock_backtest_stats
-from utils.pool_settings_store import MA_DAY_OPTIONS, SLOPE_DAY_OPTIONS, get_pool_benchmark_ticker
+from utils.pool_settings_store import MA_DAY_OPTIONS, get_pool_benchmark_ticker
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
 
@@ -43,33 +43,26 @@ def _normalize_ma_rule(ticker_type: str, ma_rule_raw: Any) -> dict[str, Any]:
 
     short_raw = ma_rule_raw.get("SHORT_MA_DAYS")
     long_raw = ma_rule_raw.get("LONG_MA_DAYS")
-    slope_raw = ma_rule_raw.get("SLOPE_DAYS")
     if short_raw is None:
         raise AccountSettingsError(f"'{ticker_type}' 설정의 'SHORT_MA_DAYS'가 누락되었습니다.")
     if long_raw is None:
         raise AccountSettingsError(f"'{ticker_type}' 설정의 'LONG_MA_DAYS'가 누락되었습니다.")
-    if slope_raw is None:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 'SLOPE_DAYS'가 누락되었습니다.")
     try:
         short_days = int(short_raw)
         long_days = int(long_raw)
-        slope_days = int(slope_raw)
     except (TypeError, ValueError) as exc:
         raise AccountSettingsError(
-            f"'{ticker_type}' 설정의 MA 일수는 정수여야 합니다: SHORT={short_raw}, LONG={long_raw}, SLOPE={slope_raw}"
+            f"'{ticker_type}' 설정의 MA 일수는 정수여야 합니다: SHORT={short_raw}, LONG={long_raw}"
         ) from exc
     if short_days not in MA_DAY_OPTIONS:
         raise AccountSettingsError(f"'{ticker_type}' 설정의 'SHORT_MA_DAYS'가 허용값이 아닙니다: {short_days}")
     if long_days not in MA_DAY_OPTIONS:
         raise AccountSettingsError(f"'{ticker_type}' 설정의 'LONG_MA_DAYS'가 허용값이 아닙니다: {long_days}")
-    if slope_days not in SLOPE_DAY_OPTIONS:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 'SLOPE_DAYS'가 허용값이 아닙니다: {slope_days}")
 
     return {
         "order": 1,
         "short_ma_days": short_days,
         "long_ma_days": long_days,
-        "slope_days": slope_days,
         "score_column": _build_ma_rule_score_column(),
         "ma_type": get_moving_average_type(),
     }
@@ -78,7 +71,7 @@ def _normalize_ma_rule(ticker_type: str, ma_rule_raw: Any) -> dict[str, Any]:
 def get_ticker_type_ma_rules(ticker_type: str) -> list[dict[str, Any]]:
     """종목풀 설정의 단일 MA 파라미터를 내부 규칙 리스트로 변환한다."""
     settings = get_ticker_type_settings(ticker_type)
-    for key in ("SHORT_MA_DAYS", "LONG_MA_DAYS", "SLOPE_DAYS"):
+    for key in ("SHORT_MA_DAYS", "LONG_MA_DAYS"):
         if key not in settings:
             raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 '{key}'가 누락되었습니다.")
     return [
@@ -87,7 +80,6 @@ def get_ticker_type_ma_rules(ticker_type: str) -> list[dict[str, Any]]:
             {
                 "SHORT_MA_DAYS": settings["SHORT_MA_DAYS"],
                 "LONG_MA_DAYS": settings["LONG_MA_DAYS"],
-                "SLOPE_DAYS": settings["SLOPE_DAYS"],
             },
         )
     ]
@@ -106,7 +98,6 @@ def build_effective_ma_rules(
             {
                 "SHORT_MA_DAYS": override.get("short_ma_days") or base_rule["short_ma_days"],
                 "LONG_MA_DAYS": override.get("long_ma_days") or base_rule["long_ma_days"],
-                "SLOPE_DAYS": override.get("slope_days") or base_rule["slope_days"],
             },
         )
     ]
@@ -531,7 +522,7 @@ def _normalize_ranking_values(
         *(monthly_labels or []),
     ]
     one_decimal_columns = ["RSI"]
-    score_columns = ["추세", "이격", "단기이격", "기울기"]
+    score_columns = ["추세", "이격", "단기이격"]
     score_columns.extend(
         str(column) for column in normalized.columns if str(column).startswith("추세(") and str(column).endswith(")")
     )
@@ -616,7 +607,6 @@ def _apply_common_rank_scores(
         df["추세"] = pd.NA
         df["이격"] = pd.NA
         df["단기이격"] = pd.NA
-        df["기울기"] = pd.NA
         for column in score_columns:
             if column not in df.columns:
                 df[column] = pd.NA
@@ -636,7 +626,6 @@ def _apply_common_rank_scores(
         df["추세"] = pd.NA
         df["이격"] = pd.NA
         df["단기이격"] = pd.NA
-        df["기울기"] = pd.NA
         for column in score_columns:
             df[column] = pd.NA
         return df
@@ -693,34 +682,6 @@ def _apply_common_rank_scores(
 
     main_rule = ma_rules[0]
     short_days = int(main_rule["short_ma_days"])
-    short_ma_cols: dict[str, pd.Series] = {}
-    for ticker in close_frame.columns:
-        series = close_frame[ticker].dropna()
-        if series.empty:
-            short_ma_cols[ticker] = pd.Series(float("nan"), index=close_frame.index, dtype="float64")
-            continue
-        short_ma_cols[ticker] = calculate_moving_average(series, short_days).reindex(close_frame.index)
-
-    short_ma_frame = pd.DataFrame(short_ma_cols, index=close_frame.index)
-    short_ma_row = short_ma_frame.loc[eval_date]
-
-    # 기울기 = 단기 이평선의 k(설정: SLOPE_DAYS)일 전 대비 변화율(%).
-    # 1일 변화는 SMA 특성상 (P_t − P_{t−n})/n 이라 창에서 빠지는 옛 한 봉이 부호를 좌우해 노이즈가 크다.
-    slope_days = int(main_rule["slope_days"])
-    eval_pos = short_ma_frame.index.get_loc(eval_date)
-    past_pos = eval_pos - slope_days
-    past_short_ma_row = short_ma_frame.iloc[past_pos] if past_pos >= 0 else pd.Series(dtype="float64")
-
-    slope_map: dict[str, float | None] = {}
-    for ticker in close_frame.columns:
-        short_value = short_ma_row.get(ticker)
-        past_short_value = past_short_ma_row.get(ticker)
-        if pd.isna(short_value) or pd.isna(past_short_value) or float(past_short_value) == 0.0:
-            slope_map[ticker] = None
-        else:
-            slope_map[ticker] = ((float(short_value) / float(past_short_value)) - 1.0) * 100.0
-    df["기울기"] = tickers_col.map(slope_map).astype("object")
-    df.loc[composite_missing, "기울기"] = None
 
     # 단기이격 = 종가와 단기 이평선의 이격률(%). 이격(장기 기준)과 같은 함수를 써서
     # 두 값이 항상 동일한 지표의 기간만 다른 버전이 되도록 한다.

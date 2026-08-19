@@ -13,7 +13,6 @@ from utils.pool_settings_store import (
     MA_DAY_OPTIONS,
     POOL_EDITABLE_KEYS,
     SLIPPAGE_PCT_OPTIONS,
-    SLOPE_DAY_OPTIONS,
     PoolSettingsError,
     create_pool,
     delete_pool,
@@ -73,7 +72,6 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
         "pools": pools,
         "constraints": {
             "ma_day_options": list(MA_DAY_OPTIONS),
-            "slope_day_options": list(SLOPE_DAY_OPTIONS),
             "slippage_pct_options": list(SLIPPAGE_PCT_OPTIONS),
             "editable_keys": list(POOL_EDITABLE_KEYS),
             "market_indices": [{"ticker": item["yf_ticker"], "name": item["name"]} for item in INDICES],

@@ -3,12 +3,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { formatKstDateTime } from "@/lib/datetime";
-import { MA_DAY_OPTIONS, SLOPE_DAY_OPTIONS } from "@/lib/ma-day-options";
+import { MA_DAY_OPTIONS } from "@/lib/ma-day-options";
 import { useToast } from "../components/ToastProvider";
 import { AppModal } from "../components/AppModal";
 
 /** 숫자 셀렉트/입력으로 편집하는 키. */
-const NUMERIC_KEYS = ["TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS", "SLOPE_DAYS", "BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT"] as const;
+const NUMERIC_KEYS = ["TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS", "BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT"] as const;
 
 /** 화면 표시 순서 = 헤더 순서. 셀도 반드시 이 순서로 그려야 한다. */
 const EDITABLE_KEYS = [...NUMERIC_KEYS, "BENCHMARK", "MARKET_REGIME_INDEX"] as const;
@@ -20,7 +20,6 @@ const KEY_LABELS: Record<EditableKey, string> = {
   TOP_N_HOLD: "보유 종목수",
   SHORT_MA_DAYS: "단기 이평선",
   LONG_MA_DAYS: "장기 이평선",
-  SLOPE_DAYS: "기울기 일수",
   BUY_SLIPPAGE_PCT: "매수 슬리피지(%)",
   SELL_SLIPPAGE_PCT: "매도 슬리피지(%)",
   BENCHMARK: "벤치마크",
@@ -57,7 +56,6 @@ type PoolSettingsResponse = {
   pools: PoolEntry[];
   constraints: {
     ma_day_options: number[];
-    slope_day_options?: number[];
     slippage_pct_options?: number[];
     market_indices?: MarketIndexOption[];
     editable_keys: string[];
@@ -95,7 +93,6 @@ const EMPTY_DRAFT: PoolDraft = {
   TOP_N_HOLD: "10",
   SHORT_MA_DAYS: "10",
   LONG_MA_DAYS: "20",
-  SLOPE_DAYS: "5",
   BUY_SLIPPAGE_PCT: "0.25",
   SELL_SLIPPAGE_PCT: "0.25",
   benchmarkTicker: "",
@@ -139,7 +136,6 @@ function toDraft(pool: PoolEntry): PoolDraft {
     TOP_N_HOLD: String(pool.settings.TOP_N_HOLD?.value ?? ""),
     SHORT_MA_DAYS: String(pool.settings.SHORT_MA_DAYS?.value ?? ""),
     LONG_MA_DAYS: String(pool.settings.LONG_MA_DAYS?.value ?? ""),
-    SLOPE_DAYS: String(pool.settings.SLOPE_DAYS?.value ?? ""),
     BUY_SLIPPAGE_PCT: String(pool.settings.BUY_SLIPPAGE_PCT?.value ?? ""),
     SELL_SLIPPAGE_PCT: String(pool.settings.SELL_SLIPPAGE_PCT?.value ?? ""),
     benchmarkTicker: toBenchmark(pool.settings.BENCHMARK).ticker ?? "",
@@ -163,7 +159,6 @@ function draftToValues(draft: PoolDraft) {
     TOP_N_HOLD: Number(draft.TOP_N_HOLD),
     SHORT_MA_DAYS: Number(draft.SHORT_MA_DAYS),
     LONG_MA_DAYS: Number(draft.LONG_MA_DAYS),
-    SLOPE_DAYS: Number(draft.SLOPE_DAYS),
     BUY_SLIPPAGE_PCT: Number(draft.BUY_SLIPPAGE_PCT),
     SELL_SLIPPAGE_PCT: Number(draft.SELL_SLIPPAGE_PCT),
     // 티커/이름이 모두 비면 미설정(null). 하나만 있으면 백엔드가 거부한다.
@@ -433,9 +428,6 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
   }
   if (!data) return null;
   const maDayOptions = data.constraints.ma_day_options?.length ? data.constraints.ma_day_options : MA_DAY_OPTIONS;
-  const slopeDayOptions = data.constraints.slope_day_options?.length
-    ? data.constraints.slope_day_options
-    : SLOPE_DAY_OPTIONS;
   const slippageOptions = data.constraints.slippage_pct_options?.length
     ? data.constraints.slippage_pct_options
     : DEFAULT_SLIPPAGE_PCT_OPTIONS;
@@ -569,11 +561,6 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       </div>
 
       <div style={rowStyle}>
-        {renderField(
-          "기울기",
-          <SelectField value={draft.SLOPE_DAYS} options={slopeDayOptions} width={82} onChange={(value) => onChange("SLOPE_DAYS", value)} />,
-          { minWidth: 154, labelWidth: 56 },
-        )}
         {renderField(
           "매수 슬리피지",
           <SelectField value={draft.BUY_SLIPPAGE_PCT} options={slippageOptions} width={90} onChange={(value) => onChange("BUY_SLIPPAGE_PCT", value)} />,

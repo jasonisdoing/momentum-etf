@@ -14,7 +14,6 @@ type RankTickerType = {
 type RankMaRule = {
   short_ma_days: number;
   long_ma_days: number;
-  slope_days: number;
   score_column: string;
 };
 
@@ -94,7 +93,6 @@ export async function loadRankToolbarData(params?: {
 type RankMaRuleOverride = {
   short_ma_days?: number;
   long_ma_days?: number;
-  slope_days?: number;
 };
 
 export async function loadRankData(params?: {
@@ -111,7 +109,7 @@ export async function loadRankData(params?: {
   }
   const override = params?.ma_rule_override;
   if (override) {
-    for (const key of ["short_ma_days", "long_ma_days", "slope_days"] as const) {
+    for (const key of ["short_ma_days", "long_ma_days"] as const) {
       const value = override[key];
       if (value != null) {
         search.set(key, String(value));

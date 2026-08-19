@@ -65,7 +65,7 @@ type PoolOption = {
   name: string;
   order: number;
   icon: string;
-  settings?: Partial<Record<"TOP_N_HOLD" | "SHORT_MA_DAYS" | "LONG_MA_DAYS" | "SLOPE_DAYS", PoolSettingField>>;
+  settings?: Partial<Record<"TOP_N_HOLD" | "SHORT_MA_DAYS" | "LONG_MA_DAYS", PoolSettingField>>;
 };
 type PoolSettingsResponse = {
   pools?: PoolOption[];
