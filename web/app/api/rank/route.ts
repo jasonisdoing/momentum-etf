@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { loadRankData } from "../../../lib/rank-store";
+import { loadRankData, type RankMaRuleOverride } from "../../../lib/rank-store";
 import { jsonNoStore } from "../../../lib/no-store-response";
 
 export const dynamic = "force-dynamic";
@@ -10,19 +10,23 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const tickerType = searchParams.get("ticker_type") ?? undefined;
     const asOfDate = searchParams.get("as_of_date") ?? undefined;
-    const shortMaDaysRaw = searchParams.get("short_ma_days");
-    const longMaDaysRaw = searchParams.get("long_ma_days");
-    const maRuleOverride =
-      shortMaDaysRaw || longMaDaysRaw
-        ? {
-            short_ma_days: shortMaDaysRaw ? Number(shortMaDaysRaw) : 0,
-            long_ma_days: longMaDaysRaw ? Number(longMaDaysRaw) : 0,
-            score_column: "추세(수동)",
-          }
-        : undefined;
+    // 화면에서 임시로 바꾼 이평선 값. 넘어온 항목만 실어 보내고, 없는 항목은 저장 규칙을 그대로 쓴다.
+    const maRuleOverride: RankMaRuleOverride = {};
+    for (const key of ["short_ma_days", "long_ma_days", "slope_days"] as const) {
+      const raw = searchParams.get(key);
+      if (raw === null || raw === "") {
+        continue;
+      }
+      const value = Number(raw);
+      if (!Number.isInteger(value) || value <= 0) {
+        throw new Error(`이평선 일수 '${key}' 값이 올바르지 않습니다: ${raw}`);
+      }
+      maRuleOverride[key] = value;
+    }
+    const hasMaRuleOverride = Object.keys(maRuleOverride).length > 0;
     const data = await loadRankData({
       ticker_type: tickerType,
-      ma_rule_override: maRuleOverride,
+      ma_rule_override: hasMaRuleOverride ? maRuleOverride : undefined,
       as_of_date: asOfDate,
     }, request.signal);
     return jsonNoStore(data);
