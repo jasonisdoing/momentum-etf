@@ -1,8 +1,9 @@
-"""합성 전략 — SM(모멘텀 전략) + 신고가 돌파를 매월 50:50 리밸런싱으로 합친 백테스트.
+"""합성 전략 — SM(모멘텀 전략) + 신고가 돌파를 한 계좌에서 함께 굴린 백테스트.
 
 `/strategy-mix` 열람 전용 화면의 백엔드. 설정은 이 화면이 갖지 않는다 —
 **선택한 풀의 각 전략 화면 저장 설정**을 그대로 가져와 두 백테스트를 돌리고,
-일별 곡선을 **매월 50:50 리밸런싱**으로 합성한 누적 시계열을 돌려준다.
+매월 첫 거래일에 두 슬리브를 50:50 으로 되돌리되, **현금 우선**으로 이관한다 —
+넘기는 슬리브의 현금부터 쓰고, 모자랄 때만 주식을 비례 매도한다(오르는 종목 유지).
 화면은 신고가 화면과 같은 방식으로 이 일별 누적에서 연간·월간·일간 표를 만든다.
 
 캐시는 두지 않는다 — 각 전략 화면의 백테스트와 같은 패턴(요청 시 계산)이다.
@@ -170,6 +171,52 @@ def _load_account_state(account_id: str) -> dict[str, Any]:
     return {"account_id": account_id, "holdings": holdings, "cash_balance": cash}
 
 
+def _sleeve_shares(
+    pool: str, sm_settings: dict[str, Any], nh_settings: dict[str, Any], as_of: str | None
+) -> tuple[float, float]:
+    """(모멘텀 몫 %, 신고가 몫 %) — 직전 월초 50:50 이후 두 슬리브가 흘러간 비율.
+
+    각 엔진의 일별 곡선에서 이번 달 첫 거래일 이후 성장률을 읽어 나눈다. 곡선을 못
+    구하면(데이터 부족 등) 50:50 으로 둔다 — 임의 보정 대신 기본 배분으로 명시한다.
+    """
+    from utils.momentum_backtest import run_backtest as sm_backtest
+    from utils.new_high_backtest import run_backtest as nh_backtest
+
+    try:
+        sm_daily = sm_backtest(2, sm_settings, include_daily=True)["daily"]
+        nh_daily = nh_backtest(2, nh_settings)["daily"]
+    except Exception:
+        logger.warning("[STRATEGY-MIX] %s 슬리브 몫 계산 실패 — 50:50 으로 둔다", pool, exc_info=True)
+        return 50.0, 50.0
+
+    cutoff = as_of or "9999-12-31"
+    sm_rows = sorted((r for r in sm_daily if r["date"] <= cutoff), key=lambda r: r["date"])
+    nh_rows = sorted((r for r in nh_daily if r["date"] <= cutoff), key=lambda r: r["date"])
+    if not sm_rows or not nh_rows:
+        return 50.0, 50.0
+    month = sm_rows[-1]["date"][:7]
+
+    # 모멘텀 일별은 전일 대비 변동률 — 월초 첫 거래일 **다음 날부터** 곱한다
+    # (첫 거래일 종가가 기준점이라, 그날까지의 변동은 직전 달 몫이다).
+    sm_month = [r for r in sm_rows if r["date"][:7] == month and r.get("strategy_pct") is not None]
+    sm_growth = 1.0
+    for row in sm_month[1:]:
+        sm_growth *= 1.0 + row["strategy_pct"] / 100.0
+
+    # 신고가 일별은 구간 시작 대비 누적 — 월초 첫 거래일 값을 기준으로 나눈다.
+    nh_month = [r for r in nh_rows if r["date"][:7] == month and r.get("strategy_pct") is not None]
+    nh_growth = 1.0
+    if len(nh_month) >= 2:
+        base = 1.0 + nh_month[0]["strategy_pct"] / 100.0
+        if base > 0:
+            nh_growth = (1.0 + nh_month[-1]["strategy_pct"] / 100.0) / base
+
+    total = sm_growth + nh_growth
+    if total <= 0:
+        return 50.0, 50.0
+    return round(sm_growth / total * 100.0, 4), round(nh_growth / total * 100.0, 4)
+
+
 def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str, Any]:
     """오늘 기준 합성 운영 상태 — 보유 목록(목표 비중)·현금 비중·오늘의 액션.
 
@@ -189,8 +236,32 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     nh = current_positions(nh_settings, as_of=as_of)
     sm_top_n = int(sm_settings["top_n"])
     nh_top_n = int(nh_settings["top_n"])
-    weight_sm = 50.0 / sm_top_n
-    weight_nh = 50.0 / nh_top_n
+
+    # ── 슬리브 몫 — 월초 50:50 에서 두 슬리브가 각자 흘러간 비율을 역산한다 ──
+    # 재조정은 매월 첫 거래일에만 하므로, 그 사이에는 잘 나간 슬리브의 몫이 커진 채로
+    # 가는 것이 백테스트다. 항상 50:50 으로 보면 승자 슬리브를 매주 깎는 지시가 나온다.
+    sm_share, nh_share = _sleeve_shares(pool_norm, sm_settings, nh_settings, as_of)
+
+    # 새로 담는 슬롯의 몫 — 진입·교체 시점에는 그 슬리브 몫의 1/N 을 배정한다.
+    weight_sm = sm_share / sm_top_n
+    weight_nh = nh_share / nh_top_n
+
+    # 이미 들고 있는 종목은 **흘러간 실제 비중**을 목표로 쓴다. 진입할 때 1/N 이었다가
+    # 시세대로 벌어진 값이고, 백테스트도 그 상태를 그대로 들고 간다. 고정 1/N 을 목표로
+    # 두면 목표와 보유가 매일 어긋나 실제로는 하지 않을 매매가 지시로 나온다.
+    # 다만 모멘텀 교체가 확정됐는데 아직 체결 전이면(is_filled=False) 그 교체분은
+    # 체결일에 1/N 으로 다시 맞춰지므로 균등 몫을 쓴다.
+    sm_drift_weight: dict[str, float] = {}
+    if sm.get("is_filled"):
+        for row in sm.get("holdings") or []:
+            weight = row.get("sleeve_weight_pct")
+            if weight is not None:
+                sm_drift_weight[str(row["ticker"]).strip()] = sm_share * float(weight) / 100.0
+    nh_drift_weight: dict[str, float] = {}
+    for row in nh.get("holdings") or []:
+        weight = row.get("sleeve_weight_pct")
+        if weight is not None:
+            nh_drift_weight[str(row["ticker"]).strip()] = nh_share * float(weight) / 100.0
 
     # SM 목표 포트폴리오 — 확정된 선정(다음 교체분)을 기준으로 보여준다. 이 화면은
     # '무엇을 보유해야 하는지'를 보는 곳이고, 신고가 슬리브도 진입 예정이 슬롯을
@@ -231,6 +302,9 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
                 "name": name or ticker,
                 "sources": [],
                 "weight_pct": 0.0,
+                # 슬리브별 몫 — 현금 비중과 화면 요약이 이 값을 쓴다.
+                "sm_weight": 0.0,
+                "nh_weight": 0.0,
                 "price": price,
                 "change_pct": change_pct,
                 "sm_status": None,
@@ -241,6 +315,7 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
         if source not in row["sources"]:
             row["sources"].append(source)
         row["weight_pct"] += weight
+        row[f"{source}_weight"] += weight
         if row.get("price") is None:
             row["price"] = price
         if row.get("change_pct") is None:
@@ -259,7 +334,7 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
         exiting = bool(row.get("is_exit_pending"))
         if exiting:
             status += " · 매도 예정(자격 상실)"
-        weight = 0.0 if exiting else weight_sm
+        weight = 0.0 if exiting else sm_drift_weight.get(ticker, weight_sm)
         add_target(ticker, row.get("name"), "sm", weight, row.get("price"), row.get("daily_change_pct"), status)
     for row in nh_holdings:
         status = "오늘 진입" if row.get("is_new") else f"{row.get('days')}일째"
@@ -267,8 +342,9 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
         if exiting:
             reason = str(row.get("exit_reason") or "이탈")
             status += f" · 매도 예정({reason})"
-        weight = 0.0 if exiting else weight_nh
-        add_target(row["ticker"], row.get("name"), "nh", weight, row.get("price"), row.get("change_pct"), status)
+        ticker_nh = str(row["ticker"]).strip()
+        weight = 0.0 if exiting else nh_drift_weight.get(ticker_nh, weight_nh)
+        add_target(ticker_nh, row.get("name"), "nh", weight, row.get("price"), row.get("change_pct"), status)
     for row in nh_planned:
         add_target(
             row["ticker"],
@@ -282,9 +358,6 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
 
     sm_active = [row for row in sm_selected if not row.get("is_exit_pending")]
     nh_active = [row for row in nh_holdings if str(row.get("status")) != "sell"]
-    stock_pct = sum(row["weight_pct"] for row in holdings)
-    sm_cash = (sm_top_n - len(sm_active)) * weight_sm
-    nh_cash = (nh_top_n - len(nh_active) - len(nh_planned)) * weight_nh
 
     # 매월 첫 거래일 = 슬리브 50:50 리밸런싱 날 (그 시장 달력 기준).
     from config import MARKET_SCHEDULES
@@ -298,6 +371,30 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     month_start = today_local.replace(day=1)
     month_days = get_trading_days(month_start.strftime("%Y-%m-%d"), today_local.strftime("%Y-%m-%d"), country)
     sleeve_rebalance_today = bool(month_days) and month_days[0].date() == today_local
+
+    # ── 월초 50:50 은 **현금 우선**으로 이관한다 (백테스트와 같은 규칙) ──
+    # 종목 비중은 흘러간 그대로 두고(오르는 종목 유지), 장부상 현금만 슬리브 사이에서
+    # 옮긴다. 한 슬리브의 주식만으로 50% 를 넘을 때만 — 현금으로 이관액을 다 못 채울
+    # 때만 — 초과분을 비례 매도한다. 그래서 여기서는 주식 비중을 50 에 맞춰 깎고,
+    # 슬리브 몫 표시는 50:50 으로 되돌린다.
+    if sleeve_rebalance_today:
+        for prefix in ("sm", "nh"):
+            sleeve_stock = sum(row[f"{prefix}_weight"] for row in holdings)
+            if sleeve_stock > 50.0:
+                scale = 50.0 / sleeve_stock
+                for row in holdings:
+                    trimmed = row[f"{prefix}_weight"] * scale
+                    row["weight_pct"] += trimmed - row[f"{prefix}_weight"]
+                    row[f"{prefix}_weight"] = trimmed
+        sm_share = nh_share = 50.0
+
+    stock_pct = sum(row["weight_pct"] for row in holdings)
+    # 슬리브 현금 = 그 슬리브 몫에서 담긴 종목 비중을 뺀 나머지. 빈 슬롯 수로 세면
+    # 흘러간 비중과 맞지 않는다(종목이 오르면 남는 현금은 그만큼 줄어든다).
+    sm_stock = sum(row["sm_weight"] for row in holdings)
+    nh_stock = sum(row["nh_weight"] for row in holdings)
+    sm_cash = max(sm_share - sm_stock, 0.0)
+    nh_cash = max(nh_share - nh_stock, 0.0)
 
     # 다음 거래일 — 모든 체결은 시가라 액션 묶음의 실제 날짜가 된다. 연휴가 끼면
     # 이 날짜가 모멘텀 교체일과 같아질 수 있고, 그러면 화면이 한 묶음으로 합친다.
@@ -401,12 +498,14 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
             # slots_used = 목표가 찬 슬롯, held_count = 지금 실제로 들고 있는 종목 수.
             # 둘이 다르면 아직 체결 전이라는 뜻이라 화면이 구분해서 보여준다.
             "sm": {
+                "alloc_pct": round(sm_share, 2),
                 "slots_used": len(sm_active),
                 "held_count": len(sm_current),
                 "top_n": sm_top_n,
                 "cash_pct": round(sm_cash, 2),
             },
             "nh": {
+                "alloc_pct": round(nh_share, 2),
                 "slots_used": len(nh_active) + len(nh_planned),
                 "held_count": len(nh_holdings),
                 "top_n": nh_top_n,
@@ -506,6 +605,214 @@ def _merge_trades(sm: dict[str, Any], nh: dict[str, Any]) -> list[dict[str, Any]
     return holding + closed
 
 
+def _simulate_mix_daily(
+    sm: dict[str, Any],
+    nh_settings: dict[str, Any],
+    nh_context: dict[str, Any],
+    months: int,
+) -> Any:  # 반환은 pandas.Series — 임포트는 함수 안에서 한다(모듈 로드를 가볍게 유지)
+    """한 계좌(현금·주수)에서 두 슬리브를 함께 굴린 일별 자산 곡선(시작 1.0).
+
+    - 모멘텀: **엔진 체결 내역으로 보유를 복원**한다(진입·청산일이 명시돼 있고, 선정은
+      순위 기반이라 포지션 크기와 무관 — 후보 재계산 없이 정확히 재현된다).
+      교체일마다 슬리브 자산/N 으로 동일가중, 주중 매도는 체결일에 판다.
+    - 신고가: 신호(돌파·손절·이탈)에서 다시 판정한다 — 진입 가능 여부가 슬리브
+      현금에 달려 있어, 이관으로 현금이 달라지면 엔진 체결 내역과 어긋날 수 있다.
+    - 매월 첫 거래일 시가에 50:50 — **현금 우선** 이관. 넘기는 쪽 현금부터 쓰고,
+      모자랄 때만 주식을 비례 매도한다. 받는 쪽은 현금으로만 받는다(기존 보유 불변).
+    모든 체결은 시가, 편도 슬리피지를 물린다.
+    """
+    import pandas as pd
+
+    from utils.momentum_backtest import _rebalance_dates
+    from utils.new_high_backtest import _cap_by_industry, _meets_min_mult
+    from utils.pool_settings_store import get_pool_slippage
+
+    pool = nh_context["pool"]
+    panel, signals = nh_context["panel"], nh_context["signals"]
+    close_df, open_df = panel["close"], panel["open"]
+    breakout, below_ma = signals["breakout"], signals["below_ma"]
+    value_mult = signals["value_mult"]
+    industry_by = nh_context["industry_by"]
+
+    buy_slip, sell_slip = get_pool_slippage(pool)
+    buy_slip, sell_slip = buy_slip / 100.0, sell_slip / 100.0
+    nh_slots = int(nh_settings["top_n"])
+    stop_pct = float(nh_settings["stop_loss_pct"])
+    min_mult = nh_settings["min_value_mult"]
+    use_market_cap = nh_settings["entry_priority"] == "market_cap"
+    caps: dict[str, float] = {}
+    if use_market_cap:
+        from utils.new_high_backtest import _market_caps
+
+        caps = _market_caps(pool, list(close_df.columns))
+
+    # ── 모멘텀 이벤트 복원 — 체결 목록의 진입·청산일이 곧 매매 일정이다 ──
+    sm_slots = 0
+    sm_buys: dict[str, list[str]] = {}
+    sm_sells: dict[str, list[str]] = {}
+    for trade in sm["trades"]:
+        sm_buys.setdefault(trade["entry_date"], []).append(trade["ticker"])
+        if trade.get("exit_date"):
+            sm_sells.setdefault(trade["exit_date"], []).append(trade["ticker"])
+    from utils.momentum_service import load_benchmark_close
+
+    benchmark_close = load_benchmark_close(pool)
+    rebalance_days = {str(d.date()) for d in _rebalance_dates(benchmark_close, months)}
+    from utils.momentum_service import load_settings as _sm_load
+
+    sm_slots = int(_sm_load(pool)["top_n"])
+
+    first = pd.Timestamp(min(sm_buys)) if sm_buys else close_df.index[0]
+    span = [d for d in close_df.index if d >= first]
+
+    sm_shares: dict[str, float] = {}
+    nh_shares: dict[str, float] = {}
+    nh_entry: dict[str, float] = {}
+    cash_sm = cash_nh = 0.5
+    prev_month: str | None = None
+    curve: dict[str, float] = {}
+
+    def px(df: pd.DataFrame, day: pd.Timestamp, ticker: str) -> float | None:
+        if ticker not in df.columns:
+            return None
+        value = df.at[day, ticker]
+        return float(value) if pd.notna(value) else None
+
+    def sleeve_value(shares: dict[str, float], cash: float, day: pd.Timestamp, df: pd.DataFrame) -> float:
+        total = cash
+        for ticker, qty in shares.items():
+            price = px(df, day, ticker) or px(close_df, day, ticker)
+            if price:
+                total += qty * price
+        return total
+
+    for i in range(1, len(span)):
+        prev, day = span[i - 1], span[i]
+        day_key = str(day.date())
+
+        # 1) 신고가 청산 — prev 종가 판정 → 오늘 시가 체결
+        for ticker in list(nh_shares):
+            price = px(close_df, prev, ticker)
+            if price is None:
+                continue
+            hit_stop = (price / nh_entry[ticker] - 1) * 100 <= stop_pct
+            if not (hit_stop or bool(below_ma.at[prev, ticker])):
+                continue
+            fill = px(open_df, day, ticker) or price
+            cash_nh += nh_shares.pop(ticker) * fill * (1 - sell_slip)
+            nh_entry.pop(ticker, None)
+
+        # 2) 모멘텀 매도 체결(교체 편출·주중 이탈 — 체결 내역의 청산일)
+        for ticker in sm_sells.get(day_key, []):
+            if ticker in sm_shares:
+                fill = px(open_df, day, ticker) or px(close_df, prev, ticker)
+                if fill:
+                    cash_sm += sm_shares.pop(ticker) * fill * (1 - sell_slip)
+                else:
+                    sm_shares.pop(ticker)
+
+        # 3) 월초 50:50 — 현금 우선 이관(시가). 교체·진입보다 먼저.
+        if prev_month is not None and day_key[:7] != prev_month:
+            sm_value = sleeve_value(sm_shares, cash_sm, day, open_df)
+            nh_value = sleeve_value(nh_shares, cash_nh, day, open_df)
+            target = (sm_value + nh_value) / 2
+            if nh_value > target:
+                transfer = nh_value - target
+                from_cash = min(cash_nh, transfer)
+                cash_nh -= from_cash
+                remain = transfer - from_cash
+                proceeds = 0.0
+                stock_value = nh_value - cash_nh - from_cash
+                if remain > 1e-12 and stock_value > 0:
+                    fraction = min(remain / stock_value, 1.0)
+                    for ticker in list(nh_shares):
+                        fill = px(open_df, day, ticker) or px(close_df, prev, ticker)
+                        if not fill:
+                            continue
+                        sell_qty = nh_shares[ticker] * fraction
+                        proceeds += sell_qty * fill * (1 - sell_slip)
+                        nh_shares[ticker] -= sell_qty
+                cash_sm += from_cash + proceeds
+            elif sm_value > target:
+                transfer = sm_value - target
+                from_cash = min(cash_sm, transfer)
+                cash_sm -= from_cash
+                remain = transfer - from_cash
+                proceeds = 0.0
+                stock_value = sm_value - cash_sm - from_cash
+                if remain > 1e-12 and stock_value > 0:
+                    fraction = min(remain / stock_value, 1.0)
+                    for ticker in list(sm_shares):
+                        fill = px(open_df, day, ticker) or px(close_df, prev, ticker)
+                        if not fill:
+                            continue
+                        sell_qty = sm_shares[ticker] * fraction
+                        proceeds += sell_qty * fill * (1 - sell_slip)
+                        sm_shares[ticker] -= sell_qty
+                cash_nh += from_cash + proceeds
+        prev_month = day_key[:7]
+
+        # 4) 모멘텀 편입 + 교체일 동일가중(슬리브 자산/N, 시가)
+        for ticker in sm_buys.get(day_key, []):
+            sm_shares.setdefault(ticker, 0.0)
+        if day_key in rebalance_days:
+            sm_value = sleeve_value(sm_shares, cash_sm, day, open_df)
+            unit = sm_value / sm_slots if sm_slots else 0.0
+            for ticker in list(sm_shares):
+                fill = px(open_df, day, ticker)
+                if not fill:
+                    continue
+                delta = unit / fill - sm_shares[ticker]
+                if delta > 0:
+                    cost = delta * fill * (1 + buy_slip)
+                    if cost > cash_sm:
+                        delta = cash_sm / (fill * (1 + buy_slip))
+                        cost = delta * fill * (1 + buy_slip)
+                    cash_sm -= cost
+                    sm_shares[ticker] += delta
+                elif delta < 0:
+                    cash_sm += -delta * fill * (1 - sell_slip)
+                    sm_shares[ticker] += delta
+
+        # 5) 신고가 진입 — prev 돌파 → 오늘 시가, 배정은 min(슬리브/N, 현금)
+        free = nh_slots - len(nh_shares)
+        if free > 0:
+            row = breakout.loc[prev]
+            picks = [
+                t
+                for t in row[row].index
+                if t not in nh_shares
+                and px(open_df, day, t) is not None
+                and _meets_min_mult(value_mult.at[prev, t], min_mult)
+            ]
+            score_row = value_mult.loc[prev]
+
+            def nh_priority(ticker: str) -> float:
+                if use_market_cap:
+                    return float(caps.get(ticker, 0.0))
+                score = score_row.get(ticker)
+                return float(score) if pd.notna(score) else 0.0
+
+            picks.sort(key=nh_priority, reverse=True)
+            picks, _ = _cap_by_industry(picks, list(nh_shares), industry_by, nh_settings["max_per_industry"], free)
+            nh_open_value = sleeve_value(nh_shares, cash_nh, day, open_df)
+            for ticker in picks:
+                alloc = min(nh_open_value / nh_slots, cash_nh)
+                if alloc <= 0:
+                    break
+                fill = px(open_df, day, ticker) * (1 + buy_slip)
+                nh_shares[ticker] = alloc / fill
+                nh_entry[ticker] = fill
+                cash_nh -= alloc
+
+        curve[day_key] = sleeve_value(sm_shares, cash_sm, day, close_df) + sleeve_value(
+            nh_shares, cash_nh, day, close_df
+        )
+
+    return pd.Series(curve).sort_index()
+
+
 def run_mix_backtest(pool: str | None = None, months: int | None = None) -> dict[str, Any]:
     """선택한 풀의 저장 설정으로 SM·신고가 백테스트를 돌려 50:50 합성 결과를 만든다.
 
@@ -525,48 +832,36 @@ def run_mix_backtest(pool: str | None = None, months: int | None = None) -> dict
         raise ValueError(f"'months' 는 {list(MONTH_OPTIONS)} 중 하나여야 합니다 (받은 값: {months})")
 
     logger.info("[STRATEGY-MIX] %s 합성 백테스트 시작 (%d개월)", pool_norm, months)
-    sm = sm_backtest(months, sm_settings, include_daily=True)
-    nh = nh_backtest(months, nh_settings)
+    from utils.new_high_backtest import load_context as nh_load_context
 
-    # 형식 주의 — SM 의 daily 는 **일간 변동률(%)**, 신고가의 daily 는 **누적(%)** 이다.
-    # 둘 다 누적 곡선(시작=1.0)으로 만든 뒤 날짜를 맞춘다. 벤치마크는 SM 결과의 것(같은 풀).
-    sm_curve: dict[str, float] = {}
+    nh_context = nh_load_context(nh_settings)
+    sm = sm_backtest(months, sm_settings, include_daily=True)
+    nh = nh_backtest(months, nh_settings, nh_context)
+
+    # 벤치마크 곡선은 SM 결과의 것(같은 풀). SM daily 는 일간 변동률(%)·최신 날짜가 앞.
     bench_curve: dict[str, float] = {}
-    s_value = b_value = 1.0
-    # SM 의 daily 는 화면 표시용으로 **최신 날짜가 앞** — 복리 전에 반드시 날짜순으로 정렬한다.
+    b_value = 1.0
     for row in sorted(sm["daily"], key=lambda r: r["date"]):
-        if row.get("strategy_pct") is not None:
-            s_value *= 1 + row["strategy_pct"] / 100
         if row.get("benchmark_pct") is not None:
             b_value *= 1 + row["benchmark_pct"] / 100
-        sm_curve[row["date"]] = s_value
         bench_curve[row["date"]] = b_value
 
-    nh_curve = {row["date"]: 1 + row["strategy_pct"] / 100 for row in nh["daily"]}
-
-    dates = sorted(set(sm_curve) & set(nh_curve))
+    # 합성 곡선 — 한 계좌 금액 기반 시뮬레이션(월초 50:50 은 현금 우선 이관).
+    mix_curve = _simulate_mix_daily(sm, nh_settings, nh_context, months)
+    dates = [d for d in mix_curve.index if d in bench_curve]
     if len(dates) < 2:
         raise RuntimeError("두 전략의 공통 백테스트 구간이 부족합니다.")
 
-    # 매월 50:50 리밸런싱 합성 — 월이 바뀌는 첫 거래일에 두 슬리브를 절반씩으로 되돌린다.
-    daily_rows = []
-    mix = 1.0
-    base_sm = base_nh = base_mix = None
-    prev_month = None
+    first_mix = float(mix_curve[dates[0]])
     first_bench = bench_curve[dates[0]]
-    for date in dates:
-        s, n = sm_curve[date], nh_curve[date]
-        if date[:7] != prev_month:
-            base_sm, base_nh, base_mix = s, n, mix
-            prev_month = date[:7]
-        mix = base_mix * (0.5 * (s / base_sm) + 0.5 * (n / base_nh))
-        daily_rows.append(
-            {
-                "date": date,
-                "strategy_pct": round((mix - 1) * 100, 2),
-                "benchmark_pct": round((bench_curve[date] / first_bench - 1) * 100, 2),
-            }
-        )
+    daily_rows = [
+        {
+            "date": date,
+            "strategy_pct": round((float(mix_curve[date]) / first_mix - 1) * 100, 2),
+            "benchmark_pct": round((bench_curve[date] / first_bench - 1) * 100, 2),
+        }
+        for date in dates
+    ]
 
     # 요약 지표 — 일별 누적 곡선 기준. 계산은 신고가 엔진과 같은 방식이다
     # (총수익·기간 CAGR·일별 곡선 MDD·일별 수익률 소르티노).

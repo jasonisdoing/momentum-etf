@@ -148,12 +148,15 @@ type Positions = {
     cash_pct: number;
     /** slots_used = 목표가 찬 슬롯, held_count = 지금 실제로 들고 있는 종목 수. */
     sm: {
+      /** 슬리브 몫(%) — 월초 50:50 에서 흘러간 비율. */
+      alloc_pct: number;
       slots_used: number;
       held_count: number;
       top_n: number;
       cash_pct: number;
     };
     nh: {
+      alloc_pct: number;
       slots_used: number;
       held_count: number;
       top_n: number;
@@ -837,7 +840,8 @@ export function StrategyMixClient() {
       //  · 모멘텀: 교체일에 슬리브 **전체**를 동일가중으로 되돌린다(엔진이 구간 시작마다
       //    보유를 1 로 정규화한다 — `momentum_backtest` 의 슬롯 모델).
       //  · 신고가: 그 종목이 들어오고 나갈 때만. 보유 중에는 비중을 건드리지 않는다.
-      //  · 슬리브 50:50: 매월 첫 거래일에 전 종목.
+      //  · 슬리브 50:50: 매월 첫 거래일 — 현금 우선 이관이라 보통은 지시가 없고,
+      //    한 슬리브의 주식만으로 50% 를 넘을 때만 초과분 매도가 나온다(서버가 목표를 깎는다).
       //  · 목표에 없는 보유(전량 매도)는 날짜와 무관하게 항상 남긴다.
       const nhEvent = nhEventTickers.has(row.ticker);
       const momentumDay = rebalanceDate != null && row.sources.includes("sm");
@@ -1081,8 +1085,8 @@ export function StrategyMixClient() {
                           borderRadius: 999,
                         }}
                       >
-                        오늘은 매월 첫 거래일 — 두 슬리브를 50:50으로
-                        리밸런싱하세요
+                        오늘은 매월 첫 거래일 — 슬리브 50:50은 현금으로 이관
+                        (주식 매도 지시는 현금이 모자랄 때만 나옵니다)
                       </span>
                     ) : null}
                   </div>
@@ -1113,21 +1117,22 @@ export function StrategyMixClient() {
                       const sm = positions.summary.sm;
                       const nh = positions.summary.nh;
                       const amount = (pct: number) => (totalAsset == null ? null : (totalAsset * pct) / 100);
-                      // 슬리브는 절반(50%)씩 갖고, 그 안에서 채운 슬롯이 주식·빈 슬롯이 현금이다.
+                      // 슬리브 몫은 월초 50:50 에서 각자 흘러간 비율(alloc_pct)이다.
+                      // 그 안에서 채운 슬롯이 주식·빈 슬롯이 현금이다.
                       const rows = [
                         {
                           key: "sm",
                           label: "모멘텀",
-                          allocPct: 50,
-                          stockPct: 50 - sm.cash_pct,
+                          allocPct: sm.alloc_pct,
+                          stockPct: sm.alloc_pct - sm.cash_pct,
                           cashPct: sm.cash_pct,
                           slots: `${sm.slots_used}/${sm.top_n}`,
                         },
                         {
                           key: "nh",
                           label: "신고가",
-                          allocPct: 50,
-                          stockPct: 50 - nh.cash_pct,
+                          allocPct: nh.alloc_pct,
+                          stockPct: nh.alloc_pct - nh.cash_pct,
                           cashPct: nh.cash_pct,
                           slots: `${nh.slots_used}/${nh.top_n}`,
                         },
@@ -1153,7 +1158,7 @@ export function StrategyMixClient() {
                       오늘의 액션
                       <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
                         백테스트가 매매하는 날에만 조정 (모멘텀 교체일 — 슬리브 전체 · 신고가
-                        진입·이탈 — 해당 종목 · 매월 첫 거래일 — 전 종목) · 목표 비중과{" "}
+                        진입·이탈 — 해당 종목 · 매월 첫 거래일 — 현금 우선 이관) · 목표 비중과{" "}
                         {REBALANCE_BAND_PCT}%p 미만 차이는 제외
                       </span>
                     </div>

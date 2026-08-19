@@ -286,11 +286,15 @@ def run_backtest(
     curve.append(_value_at(last_day))
 
     # 아직 청산하지 않은 종목 — 성과에는 평가손익으로 이미 반영돼 있지만 체결 내역에는 없다.
+    # 슬리브 안에서의 현재 비중도 함께 담는다. 진입할 때 1/slots 였다가 시세대로 흘러간
+    # 값이라, 합성 화면이 '지금 이 종목이 몇 % 여야 하는지' 를 이 값으로 잡는다.
+    sleeve_value = _value_at(last_day)
     open_positions = []
     for ticker, position in holdings.items():
         price = close_df.at[last_day, ticker]
         if pd.isna(price):
             continue
+        value = position["shares"] * float(price)
         open_positions.append(
             {
                 "ticker": ticker,
@@ -304,9 +308,13 @@ def run_backtest(
                 "days": len(close_df.loc[position["date"] : last_day]) - 1,
                 # 오늘 편입된 종목은 목록에서 따로 표시한다.
                 "is_new": position["date"] == last_day,
+                # 이 슬리브 안에서의 비중(%) — 슬리브 전체를 100 으로 본다.
+                "sleeve_weight_pct": round(value / sleeve_value * 100, 4) if sleeve_value > 0 else 0.0,
             }
         )
     open_positions.sort(key=lambda row: row["entry_date"], reverse=True)
+    # 빈 슬롯·잔여 현금 비중 — 종목 비중과 합쳐 100 이 된다.
+    sleeve_cash_weight_pct = round(cash / sleeve_value * 100, 4) if sleeve_value > 0 else 100.0
     exited_today = [t for t in trades if t["exit_date"] == str(last_day.date())]
 
     strategy = pd.Series(curve, index=span)  # 마지막 날은 평가만 한 값이 들어간다
@@ -333,6 +341,7 @@ def run_backtest(
         "trades": sorted(trades, key=lambda t: t["exit_date"], reverse=True),
         "as_of": str(last_day.date()),
         "open_positions": open_positions,
+        "sleeve_cash_weight_pct": sleeve_cash_weight_pct,
         "exited_today": exited_today,
         # 날짜 셀렉트가 '그날 실제로 살 수 있던 돌파' 만 세는 데 쓴다.
         "held_by_day": held_by_day,

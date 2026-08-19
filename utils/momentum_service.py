@@ -31,6 +31,8 @@ from typing import Any
 
 import pandas as pd
 
+from utils.price_series import positive_prices
+
 warnings.filterwarnings("ignore")
 
 # ── 상수 ──────────────────────────────────────────────────────────────────
@@ -735,6 +737,10 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             for ticker, frame in frames.items()
         }
 
+    # 실시간을 얹기 전 원본 — 체결가(시가)가 필요한 계산은 이 프레임을 쓴다.
+    # 아래 실시간 반영본은 Close 만 남기므로 시가가 사라진다.
+    cached_frames = frames
+
     # ── 실시간 반영 (종목풀 화면과 같은 규칙) ──────────────────────────────
     # 유니버스 전체의 종가 시리즈 끝에 실시간 현재가를 붙인다(공용
     # build_effective_close_series). 이후의 '현재' 기준 계산 — 다음 주 예상·예상
@@ -831,8 +837,15 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
     # 화면이 '보유'와 '체결 예정'을 섞지 않도록 여기서 갈라 준다.
     selected_tickers_now = [item["ticker"] for item in selected]
     is_filled = rebalance_date <= pd.Timestamp.now().normalize()
+    # 현재 보유가 체결된 날과 그 구간에 주중 매도된 종목 — 슬리브 비중 계산이 쓴다.
+    held_since: pd.Timestamp | None = None
+    period_exits: dict[str, Any] = {}
     if is_filled:
+        held_since = rebalance_date
         held_tickers = [t for t in selected_tickers_now if t not in exit_by_ticker]
+        period_exits = {
+            ticker: info.get("sell_date") for ticker, info in exit_by_ticker.items() if ticker in selected_tickers_now
+        }
     else:
         prev_monday = rebalance_date - pd.Timedelta(days=int(rebalance_date.weekday())) - pd.Timedelta(weeks=1)
         prev_pair = week_rebalance_pair(country, prev_monday)
@@ -850,18 +863,70 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
                         industry_by_ticker,
                     )
                 }
-                prev_exited = {
-                    info["ticker"]
-                    for info in simulate_intraweek_exits(
-                        frames,
-                        settings,
-                        prev_selected,
-                        benchmark_close.index,
-                        prev_rebalance,
-                        benchmark_close.index[-1],
-                    )
-                }
+                prev_exit_list = simulate_intraweek_exits(
+                    frames,
+                    settings,
+                    prev_selected,
+                    benchmark_close.index,
+                    prev_rebalance,
+                    benchmark_close.index[-1],
+                )
+                prev_exited = {info["ticker"] for info in prev_exit_list}
                 held_tickers = sorted(prev_selected - prev_exited)
+                held_since = prev_rebalance
+                period_exits = {info["ticker"]: info["sell_date"] for info in prev_exit_list}
+
+    def _sleeve_weights() -> tuple[dict[str, float], float]:
+        """슬리브 안에서의 현재 비중(%) — (종목별, 현금).
+
+        체결일에 모든 슬롯이 1/top_n 이었고 그 뒤 시세대로 흘러간 값이다. 합성 화면이
+        '지금 이 종목이 몇 % 여야 하는지' 를 이 값으로 잡는다 — 고정 1/N 을 쓰면 목표와
+        보유가 매일 어긋나 실제로는 하지 않을 매매가 계속 지시로 나온다.
+        주중 매도된 슬롯은 매도 시가에서 멈춘 현금으로 남는다(다음 교체까지 재매수 없음).
+        """
+        if held_since is None:
+            return {}, 100.0
+
+        def open_at(ticker: str, day: Any) -> float | None:
+            frame = cached_frames.get(ticker)
+            if day is None or frame is None or frame.empty or "Open" not in frame.columns:
+                return None
+            series = positive_prices(frame["Open"]).dropna()
+            if series.empty:
+                return None
+            value = series.asof(day)
+            return float(value) if pd.notna(value) else None
+
+        def price_now(ticker: str) -> float | None:
+            frame = frames.get(ticker)
+            if frame is None or frame.empty or "Close" not in frame.columns:
+                return None
+            close = positive_prices(frame["Close"]).dropna()
+            return float(close.iloc[-1]) if not close.empty else None
+
+        # 슬롯 단위로 센다 — 시작은 전부 현금(top_n 슬롯), 채운 슬롯만 종목으로 옮긴다.
+        units: dict[str, float] = {}
+        cash_units = float(top_n)
+        for ticker in held_tickers:
+            base, price = open_at(ticker, held_since), price_now(ticker)
+            if not base or not price:
+                continue
+            units[ticker] = price / base
+            cash_units -= 1.0
+        for ticker, sell_date in period_exits.items():
+            base, sold = open_at(ticker, held_since), open_at(ticker, sell_date)
+            if not base or not sold:
+                continue
+            cash_units += sold / base - 1.0  # 그 슬롯은 매도 시가에서 멈춘 현금이다
+        total = sum(units.values()) + cash_units
+        if total <= 0:
+            return {}, 100.0
+        return (
+            {ticker: round(value / total * 100, 4) for ticker, value in units.items()},
+            round(cash_units / total * 100, 4),
+        )
+
+    sleeve_weight_by_ticker, sleeve_cash_weight_pct = _sleeve_weights()
 
     def exit_flags(ticker: str) -> dict[str, Any]:
         """행에 얹는 주중 매도 상태 — 매도됨(체결 완료) / 매도 예정(다음 시가)."""
@@ -1010,11 +1075,15 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
                 "currency": currency,
                 # 다음 교체에서도 남는지 — 거짓이면 교체일에 매도된다.
                 "keeps_next": ticker in set(selected_tickers_now),
+                # 이 슬리브 안에서의 비중(%) — 슬리브 전체를 100 으로 본다.
+                "sleeve_weight_pct": sleeve_weight_by_ticker.get(ticker, 0.0),
                 **price_info(ticker),
                 **exit_flags(ticker),
             }
             for ticker in held_tickers
         ],
+        # 빈 슬롯·주중 매도분 현금 비중 — 종목 비중과 합쳐 100 이 된다.
+        "sleeve_cash_weight_pct": sleeve_cash_weight_pct,
         "rebalance_date": rebalance_date.strftime("%Y-%m-%d"),
         "signal_date": signal_date.strftime("%Y-%m-%d"),
         "universe_count": len(universe),
