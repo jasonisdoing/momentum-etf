@@ -25,6 +25,7 @@ from .routes.monthly import router as monthly_router
 from .routes.note import router as note_router
 from .routes.pool_backtest import router as pool_backtest_router
 from .routes.pool_settings import router as pool_settings_router
+from .routes.quotes import router as quotes_router
 from .routes.rank import router as rank_router
 from .routes.snapshots import router as snapshots_router
 from .routes.stocks import router as stocks_router
@@ -90,6 +91,7 @@ app.include_router(note_router)
 app.include_router(pool_settings_router)
 app.include_router(pool_backtest_router)
 app.include_router(account_settings_router)
+app.include_router(quotes_router)
 app.include_router(rank_router)
 app.include_router(snapshots_router)
 app.include_router(stocks_router)
