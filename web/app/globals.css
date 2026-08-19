@@ -3584,12 +3584,12 @@ a {
    판정 기준은 화면마다 각자다(종목풀은 화면 이평선, 계좌는 계좌별 알람 설정).
    보유 강조(녹색)보다 약해야 하므로 아래에 두지 않고, 보유 행에는 덧칠하지 않는다. */
 .ag-row.appTrendBrokenRow {
-  background: rgba(148, 163, 184, 0.14);
+  background: rgba(148, 163, 184, 0.26);
   color: var(--text-muted, #64748b);
 }
 
 .ag-row.appTrendBrokenRow:hover {
-  background: rgba(148, 163, 184, 0.22);
+  background: rgba(148, 163, 184, 0.36);
 }
 
 /* 튜닝 표 상단 고정행: 지수/레버리지 단순보유 벤치마크 */
@@ -3716,12 +3716,12 @@ a {
    위 흰색 규칙이 모든 행을 덮는다. 편집 중인 행은 편집 색이 계속 우선한다(아래에 정의). */
 .assetsAgGrid .ag-row.appTrendBrokenRow,
 .assetsAgGrid .ag-row.appTrendBrokenRow.appHeldRow {
-  background: rgba(148, 163, 184, 0.14);
+  background: rgba(148, 163, 184, 0.26);
 }
 
 .assetsAgGrid .ag-row.appTrendBrokenRow:hover,
 .assetsAgGrid .ag-row.appTrendBrokenRow.appHeldRow:hover {
-  background: rgba(148, 163, 184, 0.22);
+  background: rgba(148, 163, 184, 0.36);
 }
 
 .assetsAgGrid .ag-row.assetsEditingRow,

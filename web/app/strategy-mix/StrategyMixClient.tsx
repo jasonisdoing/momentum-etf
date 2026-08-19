@@ -51,10 +51,11 @@ const CURRENT_NOTES = [
       "고정 비율이 아니며, 두 전략이 같은 종목을 담으면 합산합니다. 입출금이 없으면 지시가 거의 나오지 않습니다.",
   },
   {
-    title: "액션 시점",
+    title: "액션",
     body:
-      "모멘텀 교체일(슬리브 전체 동일가중) · 신고가 진입·이탈(그 종목만) · 매월 첫 거래일 · " +
-      "목표에 없는 보유(전량 매도)는 항상. 목표와 0.5%p 미만 차이는 지시에서 제외합니다.",
+      "목표와 보유의 차이가 0.5%p 이상이면 매일 지시로 나옵니다. 목표가 흘러간 비중을 따라가므로 " +
+      "평소에는 차이가 없고, 지시가 나오는 건 입출금·모멘텀 교체·신고가 진입·이탈·월초 이관 같은 실변화뿐입니다. " +
+      "모멘텀 교체 확정분은 교체일 시가 그룹으로 묶입니다.",
   },
   {
     title: "월초 50:50",
@@ -884,9 +885,7 @@ export function StrategyMixClient() {
     const rebalanceDate =
       !rebalance.is_filled && rebalance.fill_date ? rebalance.fill_date : null;
     const nextOpen = positions.next_trading_day;
-    // 오늘이 슬리브 50:50 재조정일(매월 첫 거래일)인가.
-    const sleeveRebalanceDay = Boolean(actions.sleeve_rebalance_today);
-    // 신고가 슬리브가 이번에 실제로 건드리는 종목 — 진입과 이탈뿐이다.
+    // 신고가 이벤트(진입·이탈) 종목 — 교체일 그룹이 아니라 다음 시가 그룹으로 간다.
     const nhEventTickers = new Set([
       ...entryTickers,
       ...actions.nh_sells.map((row) => row.ticker),
@@ -907,20 +906,14 @@ export function StrategyMixClient() {
       if (trade == null || trade === 0) continue;
       const isRebalance =
         rebalanceBuys.has(row.ticker) || rebalanceSells.has(row.ticker);
-      // 백테스트가 실제로 매매하는 시점에만 조정을 연다. 매일 목표 비중으로 되돌리면
-      // 백테스트에 없는 매매가 생기고, 오른 종목을 깎고 내린 종목을 사는 반대 방향이 된다.
-      //  · 모멘텀: 교체일에 슬리브 **전체**를 동일가중으로 되돌린다(엔진이 구간 시작마다
-      //    보유를 1 로 정규화한다 — `momentum_backtest` 의 슬롯 모델).
-      //  · 신고가: 그 종목이 들어오고 나갈 때만. 보유 중에는 비중을 건드리지 않는다.
-      //  · 슬리브 50:50: 매월 첫 거래일 — 현금 우선 이관이라 보통은 지시가 없고,
-      //    한 슬리브의 주식만으로 50% 를 넘을 때만 초과분 매도가 나온다(서버가 목표를 깎는다).
-      //  · 목표에 없는 보유(전량 매도)는 날짜와 무관하게 항상 남긴다.
-      const nhEvent = nhEventTickers.has(row.ticker);
-      const momentumDay = rebalanceDate != null && row.sources.includes("sm");
-      // 다음 거래일에 바로 할 일 — 나머지는 모멘텀 교체일에 함께 처리한다.
-      const immediate = row.is_sell_all || nhEvent || sleeveRebalanceDay;
-      if (!isRebalance && !immediate && !momentumDay) continue;
-      const date = isRebalance || !immediate ? rebalanceDate : nextOpen;
+      // 목표는 슬리브 몫 × 흘러간 실제 비중이라, 이벤트가 없는 날에는 목표 ≈ 보유다.
+      // 그래서 차이가 밴드를 넘으면 매일 그대로 지시한다 — 남는 차이는 시세가 아니라
+      // 입출금·체결 어긋남 같은 실차이고, 입금분은 다음날 바로 비율대로 배분돼야 한다.
+      // 예외 하나: 모멘텀 교체가 확정되고 아직 체결 전이면(momentumPending) 그 슬리브의
+      // 조정은 교체일 시가에 함께 체결되므로 교체일 날짜 그룹으로 보낸다.
+      const momentumPending =
+        rebalanceDate != null && row.sources.includes("sm") && !nhEventTickers.has(row.ticker) && !row.is_sell_all;
+      const date = momentumPending || isRebalance ? rebalanceDate : nextOpen;
       const reason = sellReason.get(row.ticker);
       // 목표에 이미 근접한 종목은 건너뛴다 — 1주짜리 조정은 장중 내내 붙었다 떨어진다.
       // 규칙상 팔아야 하는 것(전량 매도·자격 상실·이탈)은 금액과 무관하게 남긴다.
@@ -1230,9 +1223,9 @@ export function StrategyMixClient() {
                     <div style={{ fontWeight: 700, marginBottom: 6 }}>
                       오늘의 액션
                       <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
-                        백테스트가 매매하는 날에만 조정 (모멘텀 교체일 — 슬리브 전체 · 신고가
-                        진입·이탈 — 해당 종목 · 매월 첫 거래일 — 현금 우선 이관) · 목표 비중과{" "}
-                        {REBALANCE_BAND_PCT}%p 미만 차이는 제외
+                        목표 비중과 {REBALANCE_BAND_PCT}%p 이상 차이를 지시로 표시 (목표가 흘러간
+                        비중을 따라가므로 평소에는 지시가 없고, 입출금·교체·진입·이탈·월초 이관 때
+                        나옵니다) · 모멘텀 교체 확정분은 교체일 그룹
                       </span>
                     </div>
                     {!hasActions ? (
