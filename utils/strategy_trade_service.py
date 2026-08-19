@@ -201,6 +201,9 @@ def _load_index_status(index_ticker: str, index_name: str, trigger_pct: float) -
 
     entry_ratio = 1.0 - float(trigger_pct) / 100.0
     last_close = float(close.iloc[-1])
+    # 일간 변동률 — 알림이 "코스피 6,472.32 (-2.34%)" 처럼 지수 기준으로 말하는 데 쓴다.
+    prev_close = float(close.iloc[-2]) if len(close) >= 2 else 0.0
+    change_pct = ((last_close / prev_close) - 1.0) * 100.0 if prev_close > 0 else None
 
     # 최근 3개월(92일) 저점 — 회차 지정가가 지수 어느 층에 걸리는지 가늠하는 기준선.
     low_window = close[close.index >= close.index[-1] - pd.Timedelta(days=92)]
@@ -210,6 +213,7 @@ def _load_index_status(index_ticker: str, index_name: str, trigger_pct: float) -
         "name": index_name,
         "as_of": close.index[-1].strftime("%Y-%m-%d"),
         "close": round(last_close, 2),
+        "change_pct": round(change_pct, 2) if change_pct is not None else None,
         "buy_trigger": round(last_close * entry_ratio, 2),
         "recent_low": round(float(low_window.min()), 2),
         "recent_low_date": low_date.strftime("%Y-%m-%d"),
