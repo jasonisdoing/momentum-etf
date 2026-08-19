@@ -10,6 +10,7 @@ import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
+import { StrategyNotes } from "../components/StrategyNotes";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
@@ -175,7 +176,7 @@ type Trade = {
   name: string;
   industry: string;
   change_pct?: number | null;
-  /** 청산 후 현재 시세 — 현재 상태 표에서만 쓴다(백테스트 체결 목록에는 없다). */
+  /** 청산 후 현재 시세 — 운용 현황 표에서만 쓴다(백테스트 체결 목록에는 없다). */
   price?: number | null;
   entry_date: string;
   entry_price: number;
@@ -213,7 +214,7 @@ type Backtest = {
 // 장중 자동 갱신 주기. 계산이 수 초 걸려 더 짧게 잡으면 요청이 겹친다.
 const LIVE_REFRESH_MS = 5 * 60 * 1000;
 
-/** 현재 상태 안쪽 탭. 차트는 보유 종목 수만큼 그리므로 열 때만 그린다. */
+/** 운용 현황 안쪽 탭. 차트는 보유 종목 수만큼 그리므로 열 때만 그린다. */
 const CURRENT_TABS = [
   { key: "list", label: "종목" },
   { key: "chart", label: "차트" },
@@ -306,6 +307,57 @@ const STAGE_GUIDE: { label: string; key: keyof typeof STAGE_STYLE }[] = [
   { label: "임박", key: "imminent" },
   { label: "근접", key: "near" },
   { label: "보유중", key: "held" },
+];
+
+/** 접이식 전략 설명 — 운용 현황·백테스트 섹션 상단(기본 접힘). */
+const CURRENT_NOTES = [
+  {
+    title: "진입",
+    body:
+      "종가가 직전 52주 최고 종가를 넘고 거래대금 급증 배수가 하한 이상이면 다음 거래일 시가에 매수합니다. " +
+      "빈 슬롯만큼, 우선순위(거래대금 급증 또는 시가총액) 순으로 담고 업종 상한을 적용합니다.",
+  },
+  {
+    title: "청산",
+    body:
+      "종가가 손절선(진입가 대비) 아래거나 이탈 이동평균을 하회하면 다음 거래일 시가에 전량 매도합니다. " +
+      "부분 매도와 목표가(익절)는 없습니다.",
+  },
+  {
+    title: "보유 중",
+    body:
+      "보유 중에는 비중을 건드리지 않습니다 — 오르는 종목은 커진 채 갑니다. " +
+      "슬롯이 꽉 차면 새 돌파가 와도 교체하지 않습니다.",
+  },
+  {
+    title: "장중 표시",
+    body:
+      "장중에는 현재가를 잠정 종가로 넣어 돌파·이탈을 미리 판정합니다 — 종가 확정 전에는 결과가 뒤집힐 수 있습니다. " +
+      "현재가·일간(%)은 60초마다 갱신됩니다.",
+  },
+];
+
+const BACKTEST_NOTES = [
+  {
+    title: "자산 모델",
+    body:
+      "현금과 주수로 계산합니다. 진입할 때 그 시점 자산의 1/N을 배정하고, " +
+      "살 현금이 모자라면 있는 만큼만 삽니다(팔지 않은 평가익으로는 못 삽니다).",
+  },
+  {
+    title: "체결·비용",
+    body: "판정은 종가, 체결은 다음 거래일 시가입니다. 슬리피지는 편도(%)로 매매 금액에 부과합니다.",
+  },
+  {
+    title: "기간",
+    body: "신고가 판정에 52주 창이 필요해 최대 60개월까지 돌릴 수 있습니다.",
+  },
+  {
+    title: "알아둘 것",
+    body:
+      "현재 종목풀 기준이라 상장폐지·풀 이탈 종목이 빠진 생존 편향이 있습니다. " +
+      "진입 우선순위를 시가총액으로 두면 현재 시총을 전 구간에 써서 미래 정보가 섞입니다.",
+  },
 ];
 
 /** 일간(%)·현재가 컬럼 — 보유 종목 표와 진입 후보 표가 같은 정의를 쓴다. */
@@ -1095,7 +1147,7 @@ export function NewHighClient() {
         <section className="appSection">
           <div className="card appCard">
             <div className="card-header appCardHeader">
-              <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>현재 상태</span>
+              <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>운용 현황</span>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 {positions ? (
                   <span style={hintStyle}>
@@ -1131,15 +1183,16 @@ export function NewHighClient() {
               </span>
             </div>
             <div className="card-body appCardBodyTight">
+                <StrategyNotes items={CURRENT_NOTES} />
                 <NavTabs
                   items={CURRENT_TABS}
                   value={currentTab}
                   onChange={setCurrentTab}
-                  label="현재 상태 보기"
+                  label="운용 현황 보기"
                   style={{ marginBottom: 12 }}
                 />
                 {running && !positions ? (
-                  <AppLoadingProgress title="현재 상태 계산 중..." progress={positionsProgress} />
+                  <AppLoadingProgress title="운용 현황 계산 중..." progress={positionsProgress} />
                 ) : currentTab === "list" ? (
                   <>
                     <div style={{ ...hintStyle, fontWeight: 700, margin: "4px 0 6px" }}>
@@ -1246,7 +1299,7 @@ export function NewHighClient() {
           </div>
         </section>
 
-        {/* 백테스트 — 현재 상태 아래에 나란히 둔다. */}
+        {/* 백테스트 — 운용 현황 아래에 나란히 둔다. */}
         <section className="appSection">
           <div className="card appCard">
             <div className="card-header appCardHeader">
@@ -1274,6 +1327,7 @@ export function NewHighClient() {
               </span>
             </div>
               <div className="card-body appCardBodyTight">
+                <StrategyNotes items={BACKTEST_NOTES} />
                 {backtestError ? <div className="alert alert-danger">{backtestError}</div> : null}
                 {backtesting ? (
                   <AppLoadingProgress title="백테스트 실행 중..." progress={backtestProgress} />

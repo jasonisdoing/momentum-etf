@@ -180,12 +180,12 @@ python infra/server_scheduler.py
 | 상수 | 값 | 쓰는 곳 |
 |------|----|---------|
 | `CACHE_TTL_LIVE` | 60초 | 시세·설정·목록 (실시간성 필요) |
-| `CACHE_TTL_COMPUTE` | 300초 | 무거운 계산·집계 — 랭킹, 전략 현재 상태, 환율 |
+| `CACHE_TTL_COMPUTE` | 300초 | 무거운 계산·집계 — 랭킹, 전략 운용 현황, 환율 |
 | `CACHE_TTL_SLOW` | 3600초 | 느리게 변하는 외부 값 — 야후 심볼 해석 |
 | `CACHE_TTL_META` | 86400초 | 사실상 고정된 메타 — ETF 기본 정보 |
 
 구현은 `utils/ttl_cache.py` 의 `TtlCache` 하나를 쓴다(값 복사 반환 + 동시 중복 계산 방지 + 선택적 무효화).
-전략 3개의 현재 상태(`compute_picks`·`current_positions`)와 랭킹이 이걸로 캐시된다 — 설정·기준일이
+전략 3개의 운용 현황(`compute_picks`·`current_positions`)와 랭킹이 이걸로 캐시된다 — 설정·기준일이
 키라서 설정을 바꾸면 즉시 새로 계산된다.
 
 ### 일별 원장 원칙

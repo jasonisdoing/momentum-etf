@@ -20,6 +20,7 @@ import {
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
+import { StrategyNotes } from "../components/StrategyNotes";
 import { NavTabs } from "../components/NavTabs";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { PageFrame } from "../components/PageFrame";
@@ -34,6 +35,51 @@ import {
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
 const gridTheme = createAppGridTheme();
+
+/** 접이식 전략 설명 — 운용 현황·백테스트 섹션 상단(기본 접힘). */
+const CURRENT_NOTES = [
+  {
+    title: "구성",
+    body:
+      "모멘텀·신고가 두 전략 화면의 저장 설정을 그대로 합쳐 한 계좌로 운용합니다. " +
+      "슬리브 몫은 월초 50:50에서 각자 흘러간 비율을 백테스트 곡선에서 역산합니다.",
+  },
+  {
+    title: "목표 비중",
+    body:
+      "종목 목표 = 슬리브 몫 × 슬리브 안 실제 비중입니다. 진입할 때 1/N을 배정하고 이후 시세대로 흘러간 값이라 " +
+      "고정 비율이 아니며, 두 전략이 같은 종목을 담으면 합산합니다. 입출금이 없으면 지시가 거의 나오지 않습니다.",
+  },
+  {
+    title: "액션 시점",
+    body:
+      "모멘텀 교체일(슬리브 전체 동일가중) · 신고가 진입·이탈(그 종목만) · 매월 첫 거래일 · " +
+      "목표에 없는 보유(전량 매도)는 항상. 목표와 0.5%p 미만 차이는 지시에서 제외합니다.",
+  },
+  {
+    title: "월초 50:50",
+    body:
+      "슬리브 재조정은 현금 우선으로 이관합니다 — 종목은 그대로 두고 장부상 현금만 옮깁니다. " +
+      "한 슬리브의 주식만으로 총자산의 50%를 넘을 때만 초과분 매도 지시가 나옵니다.",
+  },
+];
+
+const BACKTEST_NOTES = [
+  {
+    title: "방식",
+    body:
+      "계좌 하나(현금·주수)에서 두 슬리브를 함께 굴린 시뮬레이션입니다. " +
+      "모멘텀은 엔진 체결 내역으로 복원하고, 신고가는 진입 여부가 슬리브 현금에 달려 있어 신호로 다시 판정합니다.",
+  },
+  {
+    title: "월초 50:50",
+    body: "매월 첫 거래일 시가에 현금 우선으로 이관하고, 모자랄 때만 주식을 비례 매도합니다.",
+  },
+  {
+    title: "체결 목록",
+    body: "두 전략의 체결을 합쳐 보여줍니다. 손익률은 각 포지션의 진입·청산 가격 기준입니다.",
+  },
+];
 const hintStyle: React.CSSProperties = {
   color: "var(--text-muted)",
   fontSize: "var(--fs-sm)",
@@ -299,7 +345,7 @@ type ActionItem = {
 type ActionGroup = { key: string; title: string; items: ActionItem[] };
 
 /** 합성 전략 — SM·신고가를 50:50으로 함께 운용하는 화면.
- *  현재 상태 탭은 오늘 보유해야 할 종목과 현금 비중·오늘의 액션을,
+ *  운용 현황 탭은 오늘 보유해야 할 종목과 현금 비중·오늘의 액션을,
  *  백테스트 탭은 매월 50:50 리밸런싱 합성 성과를 보여준다. 설정은 각 전략 화면의 저장값을 그대로 쓴다. */
 export function StrategyMixClient() {
   const toast = useToast();
@@ -313,7 +359,7 @@ export function StrategyMixClient() {
   const selectedAccount = accountOptions.find((option) => option.account_id === accountId) ?? null;
   const pool = selectedAccount?.pool ?? "";
 
-  // 현재 상태 탭.
+  // 운용 현황 탭.
   const [positions, setPositions] = useState<Positions | null>(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
   const [positionsError, setPositionsError] = useState<string | null>(null);
@@ -321,7 +367,7 @@ export function StrategyMixClient() {
     useState<LoadingProgress | null>(null);
   /** 과거 날짜 조회 — 빈 값이면 오늘. */
   const [asOf, setAsOf] = useState<string>("");
-  /** 계좌를 저장하면 목표 금액이 달라지므로 현재 상태를 다시 계산한다. */
+  /** 계좌를 저장하면 목표 금액이 달라지므로 운용 현황를 다시 계산한다. */
   const [positionsReloadKey, setPositionsReloadKey] = useState(0);
 
   // 백테스트 탭.
@@ -370,7 +416,7 @@ export function StrategyMixClient() {
     };
   }, []);
 
-  // 현재 상태 — 풀이 정해지면 자동 계산한다 (매일 보는 운영 화면이라 버튼을 두지 않는다).
+  // 운용 현황 — 풀이 정해지면 자동 계산한다 (매일 보는 운영 화면이라 버튼을 두지 않는다).
   useEffect(() => {
     if (!pool) return;
     let alive = true;
@@ -378,7 +424,7 @@ export function StrategyMixClient() {
     setPositionsError(null);
     setPositionsProgress({
       percent: 10,
-      message: "두 전략의 현재 상태를 계산하는 중",
+      message: "두 전략의 운용 현황를 계산하는 중",
     });
     const stopRamp = startProgressRamp(setPositionsProgress);
     void (async () => {
@@ -975,7 +1021,7 @@ export function StrategyMixClient() {
           <div className="card appCard">
             <div className="card-header appCardHeader">
               <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>
-                현재 상태
+                운용 현황
               </span>
               {/* 기준일 셀렉트 — 신고가 화면과 같은 자리(카드 헤더 오른쪽). */}
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1001,13 +1047,14 @@ export function StrategyMixClient() {
               </span>
             </div>
             <div className="card-body appCardBodyTight">
+              <StrategyNotes items={CURRENT_NOTES} />
               {positionsError ? (
                 <div className="alert alert-danger" style={{ marginBottom: 0 }}>
                   {positionsError}
                 </div>
               ) : positionsLoading || !positions ? (
                 <AppLoadingProgress
-                  title="현재 상태 계산 중..."
+                  title="운용 현황 계산 중..."
                   progress={positionsProgress}
                 />
               ) : (
@@ -1243,7 +1290,7 @@ export function StrategyMixClient() {
           </div>
         </section>
 
-        {/* 백테스트 — 현재 상태 아래에 나란히 둔다. */}
+        {/* 백테스트 — 운용 현황 아래에 나란히 둔다. */}
         <section className="appSection">
           <div className="card appCard">
             <div className="card-header appCardHeader">
@@ -1275,6 +1322,7 @@ export function StrategyMixClient() {
               </span>
             </div>
             <div className="card-body appCardBodyTight">
+              <StrategyNotes items={BACKTEST_NOTES} />
               {error ? (
                 <div className="alert alert-danger" style={{ marginBottom: 0 }}>
                   {error}
