@@ -879,8 +879,12 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
 
     # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.
     fill_base = pd.Timestamp(str(quotes["traded_at"])[:10]) if quotes["live"] else last
+    from utils.settings_loader import get_ticker_type_settings
+
     return {
         "as_of": str(last.date()),
+        # 화면이 표시용 시세를 60초마다 갱신할 때 쓰는 국가 코드(시세 소스가 국가별로 다르다).
+        "country": str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower(),
         # 진입 예정·매도 예정이 실제로 체결되는 날. 화면이 '오늘/내일' 을 이 값으로 가른다.
         "next_session": _next_session(pool, fill_base),
         "holdings": holdings,

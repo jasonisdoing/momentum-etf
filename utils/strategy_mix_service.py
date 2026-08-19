@@ -220,7 +220,9 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     holdings: list[dict[str, Any]] = []
     by_ticker: dict[str, dict[str, Any]] = {}
 
-    def add_target(ticker: str, name: str, source: str, weight: float, price: Any, change_pct: Any, status: str) -> None:
+    def add_target(
+        ticker: str, name: str, source: str, weight: float, price: Any, change_pct: Any, status: str
+    ) -> None:
         ticker = str(ticker).strip()
         row = by_ticker.get(ticker)
         if row is None:
@@ -269,7 +271,13 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
         add_target(row["ticker"], row.get("name"), "nh", weight, row.get("price"), row.get("change_pct"), status)
     for row in nh_planned:
         add_target(
-            row["ticker"], row.get("name"), "nh", weight_nh, row.get("price"), row.get("change_pct"), "진입 예정 (다음 시가 매수)"
+            row["ticker"],
+            row.get("name"),
+            "nh",
+            weight_nh,
+            row.get("price"),
+            row.get("change_pct"),
+            "진입 예정 (다음 시가 매수)",
         )
 
     sm_active = [row for row in sm_selected if not row.get("is_exit_pending")]
@@ -379,6 +387,8 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     return {
         "computed_at": datetime.now().astimezone().isoformat(),
         "pool": pool_norm,
+        # 화면이 표시용 시세를 60초마다 갱신할 때 쓴다(시세 소스가 국가별로 다르다).
+        "country": country,
         "account": account,
         "as_of": nh.get("as_of"),
         "next_trading_day": next_trading_day,

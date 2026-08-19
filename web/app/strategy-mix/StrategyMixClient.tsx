@@ -19,6 +19,7 @@ import {
 } from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
+import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
 import { NavTabs } from "../components/NavTabs";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { PageFrame } from "../components/PageFrame";
@@ -132,6 +133,8 @@ type AccountState = {
 type Positions = {
   computed_at: string;
   pool: string;
+  /** 표시용 시세 갱신에 쓰는 국가 코드(시세 소스가 국가별로 다르다). */
+  country: string;
   as_of: string;
   live: boolean;
   /** 다음 거래일 — 모든 체결이 시가라 액션 묶음의 날짜가 된다. */
@@ -455,6 +458,12 @@ export function StrategyMixClient() {
   // 목표 금액의 기준 = 적용 계좌의 총자산(주식 평가액 + 현금). 계좌가 없으면 비중만 보여준다.
   const totalAsset = positions?.account?.total_assets ?? null;
 
+  // 표시용 현재가·일간(%)만 60초마다 갱신한다 — 목표·매매수량은 5분 캐시된 판정 결과다.
+  const quotes = useRealtimeQuotes(
+    positions?.country ?? "",
+    (positions?.holdings ?? []).map((row) => row.ticker),
+  );
+
   const positionRows = useMemo<PositionRow[]>(() => {
     if (!positions) return [];
     // 현금은 빈 슬롯마다 나누지 않고 한 행으로 맨 위에 둔다 — 계좌 현금은 한 덩어리다.
@@ -484,14 +493,20 @@ export function StrategyMixClient() {
     return [
       cashRow,
       ...positions.holdings
-        .map((holding) => ({
-          ...holding,
-          amount: holding.target_amount ?? null,
-          shares: holding.target_quantity ?? null,
-        }))
+        .map((holding) => {
+          // 표시용 가격만 실시간으로 덮어쓴다 — 목표·매매수량은 판정 결과 그대로.
+          const quote = quotes[holding.ticker];
+          return {
+            ...holding,
+            price: quote ? quote.price : holding.price,
+            change_pct: quote ? quote.change_pct : holding.change_pct,
+            amount: holding.target_amount ?? null,
+            shares: holding.target_quantity ?? null,
+          };
+        })
         .sort((a, b) => a.ticker.localeCompare(b.ticker)),
     ];
-  }, [positions, totalAsset]);
+  }, [positions, quotes, totalAsset]);
 
   const positionColumns = useMemo<ColDef<PositionRow>[]>(() => {
     const columns: ColDef<PositionRow>[] = [
