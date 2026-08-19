@@ -129,6 +129,25 @@ type HoldingRow = {
   weight_pct?: number | null;
 };
 
+type AccountSummary = {
+  account_id?: string;
+  cash_balance_krw?: number | null;
+  total_assets_krw?: number | null;
+};
+
+// 현금의 '현재 비중'(%) = 현금 잔고 / 총자산. 종목 행의 weight_pct 와 같은 분모(현금 포함 총자산)를 쓴다.
+// 총자산이 없거나 0이면 null 로 두어 화면이 '-' 를 보여준다 — `100 - 종목합` 으로 대신하지 않는다
+// (행별 반올림 오차가 쌓이고, 종목이 일부만 잡힌 상태에서는 틀린 값이 된다).
+function currentCashWeightPct(summaries: AccountSummary[] | undefined, accountId: string): number | null {
+  const summary = (summaries ?? []).find((item) => String(item.account_id ?? "") === accountId);
+  const total = Number(summary?.total_assets_krw);
+  const cash = Number(summary?.cash_balance_krw);
+  if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(cash)) {
+    return null;
+  }
+  return Math.round((cash / total) * 10_000) / 100;
+}
+
 // 보유 티커의 시장 접두어(ASX:/KR: 등)를 제거한다. 가격 캐시·비중 계산은 접두어 없는 티커를 쓴다.
 function stripMarketPrefix(ticker: string): string {
   return String(ticker ?? "").replace(/^[A-Za-z]+:/, "").trim().toUpperCase();
@@ -314,6 +333,8 @@ export function AssetHelperClient() {
   const [noteUpdatedAt, setNoteUpdatedAt] = useState<string | null>(null);
   const [tickers, setTickers] = useState<HelperTicker[]>(() => buildRows(undefined));
   const [cashWeight, setCashWeight] = useState(100); // 현금 비중(%) — 편집 가능. 로드 시 100-종목합으로 초기화.
+  // 현금의 '현재 비중'(%) — 계좌 요약의 현금/총자산. 총자산을 못 받으면 null(=화면에 '-').
+  const [cashCurrentWeight, setCashCurrentWeight] = useState<number | null>(null);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]); // 삭제 선택(내부 티커=접두어 없음)
   const [settings, setSettings] = useState<HelperSettings | null>(null);
   const [metricByTicker, setMetricByTicker] = useState<Record<string, WeightRow>>({});
@@ -396,7 +417,11 @@ export function AssetHelperClient() {
           error?: string;
         };
         if (!settingsResp.ok || data.error) throw new Error(data.error ?? "포트폴리오를 불러오지 못했습니다.");
-        const holdingsData = (await holdingsResp.json()) as { rows?: HoldingRow[]; error?: string };
+        const holdingsData = (await holdingsResp.json()) as {
+          rows?: HoldingRow[];
+          account_summaries?: AccountSummary[];
+          error?: string;
+        };
         if (!holdingsResp.ok || holdingsData.error) throw new Error(holdingsData.error ?? "보유 종목을 불러오지 못했습니다.");
         const noteData = (await noteResp.json()) as { content?: string; updated_at?: string };
         const noteContent = noteResp.ok ? String(noteData.content ?? "") : "";
@@ -406,6 +431,7 @@ export function AssetHelperClient() {
         setNoteUpdatedAt(noteResp.ok ? noteData.updated_at ?? null : null);
         const loadedTickers = mergeHoldingsWithWeights(holdingsData.rows ?? [], data.tickers);
         setTickers(loadedTickers);
+        setCashCurrentWeight(currentCashWeightPct(holdingsData.account_summaries, target));
         // 현금 비중은 저장값이 원본 — IS(자동)가 변해 합이 100에서 어긋나면 저장이 차단되고
         // 사용자가 직접 조정한다(현금 자동 흡수 금지). 저장값이 없는 계좌만 나머지로 초기화.
         setCashWeight(
@@ -731,7 +757,14 @@ export function AssetHelperClient() {
 
   const gridRows = useMemo<GridRow[]>(() => {
     // 맨 위 고정 현금 행(읽기전용, row_index=-1 로 종목·추가행과 구분).
-    const cashRow: GridRow = { ticker: CASH_TICKER, name: "현금", row_index: -1, is_adding: false, fixed_weight_pct: cashWeight };
+    const cashRow: GridRow = {
+      ticker: CASH_TICKER,
+      name: "현금",
+      row_index: -1,
+      is_adding: false,
+      fixed_weight_pct: cashWeight,
+      current_weight_pct: cashCurrentWeight,
+    };
     const committed = tickers.map((item, idx) => ({
       ...item,
       ...(metricByTicker[item.ticker.trim().toUpperCase()] ?? {}),
@@ -742,7 +775,7 @@ export function AssetHelperClient() {
       ? [{ ticker: add.addingRow.ticker, name: add.addingRow.name, row_index: 0, is_adding: true }]
       : [];
     return [cashRow, ...addingRows, ...committed];
-  }, [tickers, metricByTicker, add.addingRow, cashWeight]);
+  }, [tickers, metricByTicker, add.addingRow, cashWeight, cashCurrentWeight]);
 
   const columnDefs = useMemo<ColDef<GridRow>[]>(
     () => [
