@@ -50,6 +50,36 @@ def _save_sent_log(sent_log: dict[str, str]) -> None:
     )
 
 
+# 같은 신호가 계속 살아 있을 때 다시 알리는 주기. 10분마다 도는 배치가 매번 보내면
+# 소음이라 첫 발송 뒤에는 이 간격으로만 한 줄 리마인더를 보낸다.
+_REPEAT_INTERVAL_SECONDS = 60 * 60
+
+
+def _trigger_key(trigger: dict[str, Any]) -> str:
+    return f"{trigger['strategy_id']}:{trigger['round']}-{trigger['action']}"
+
+
+def _parse_sent_at(value: str | None) -> datetime | None:
+    """발송 시각. 날짜만 담긴 옛 기록은 그날 자정으로 읽어 하루 뒤 자연히 정리되게 둔다."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=KST)
+
+
+def build_repeat_line(trigger: dict[str, Any]) -> str:
+    """재알림 한 줄 — 무엇을 얼마에 사고팔지만 담는다. 본문은 첫 발송에서 이미 보냈다."""
+    emoji = "🔴" if trigger["action"] == "sell" else "🔵"
+    word = "지금 매도!" if trigger["action"] == "sell" else "지금 매수!"
+    return (
+        f"<!channel> {emoji} *{trigger['round']}호 {trigger['name']} {word}* "
+        f"지정가 {trigger['limit_price']:,.0f} 도달 (현재 {trigger['close']:,.0f})"
+    )
+
+
 def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
     """전략 하나에서 지정가에 닿은 회차를 모은다. 없으면 빈 리스트."""
     sid = strategy_view["strategy_id"]
@@ -200,20 +230,38 @@ def notify_strategy_trade(*, force: bool = False) -> dict[str, Any]:
     if not triggers:
         return {"sent": False, "reason": "매수·매도 신호가 없습니다.", "triggers": []}
 
-    today = datetime.now(KST).strftime("%Y-%m-%d")
+    now = datetime.now(KST)
+    today = now.strftime("%Y-%m-%d")
     sent_log = _load_sent_log()
-    fresh = [t for t in triggers if sent_log.get(f"{t['strategy_id']}:{t['round']}-{t['action']}") != today]
-    if not fresh:
+
+    # 처음 보는 신호는 전 회차 현황이 담긴 본문으로, 이미 보낸 신호는 아직 살아 있는 동안
+    # 한 시간마다 한 줄 리마인더로 보낸다. 지정가에 닿아 있는데 주문을 안 넣은 채로
+    # 하루가 지나가는 것을 막기 위한 것이다.
+    fresh: list[dict[str, Any]] = []
+    repeats: list[dict[str, Any]] = []
+    for trigger in triggers:
+        last = _parse_sent_at(sent_log.get(_trigger_key(trigger)))
+        if last is None or last.strftime("%Y-%m-%d") != today:
+            fresh.append(trigger)
+        elif (now - last).total_seconds() >= _REPEAT_INTERVAL_SECONDS:
+            repeats.append(trigger)
+    if not fresh and not repeats:
         return {"sent": False, "reason": "오늘 이미 발송한 신호입니다.", "triggers": triggers}
 
-    message = build_message(view, fresh)
+    if fresh:
+        message = build_message(view, fresh)
+    else:
+        message = "\n".join(build_repeat_line(trigger) for trigger in repeats)
     if not send_slack_message_v2(message):
-        return {"sent": False, "reason": "슬랙 전송에 실패했습니다.", "triggers": fresh}
+        return {"sent": False, "reason": "슬랙 전송에 실패했습니다.", "triggers": fresh or repeats}
 
-    for trigger in fresh:
-        sent_log[f"{trigger['strategy_id']}:{trigger['round']}-{trigger['action']}"] = today
+    stamp = now.isoformat()
+    for trigger in fresh + repeats:
+        sent_log[_trigger_key(trigger)] = stamp
     # 지난 날짜 이력은 정리해 문서가 커지지 않게 한다.
-    sent_log = {key: value for key, value in sent_log.items() if value == today}
+    sent_log = {key: value for key, value in sent_log.items() if str(value).startswith(today)}
     _save_sent_log(sent_log)
 
-    return {"sent": True, "reason": f"신호 {len(fresh)}건 발송", "triggers": fresh}
+    if fresh:
+        return {"sent": True, "reason": f"신호 {len(fresh)}건 발송", "triggers": fresh}
+    return {"sent": True, "reason": f"재알림 {len(repeats)}건 발송", "triggers": repeats}
