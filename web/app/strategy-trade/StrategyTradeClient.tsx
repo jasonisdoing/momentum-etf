@@ -140,7 +140,27 @@ function ReachedBadge() {
   );
 }
 
-/** 최근 저점 기준선 행 — 회차 지정가의 지수 환산이 이 아래로 내려가는 경계에 긋는다. */
+/** 마지막 회차와 기준선 사이의 빈 구간 — 저점까지 얼마나 더 내려가야 하는지 적는다.
+ *  선만 있으면 "표 밖 어딘가 아래"라는 것만 보이고 거리가 안 보인다. */
+function BelowLastGapRow({ gap }: { gap: { round: number; pct: number } }) {
+  return (
+    <tr>
+      <td colSpan={9} style={{ padding: "22px 8px", textAlign: "center" }}>
+        <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
+          {gap.round}호에서 <b style={{ color: "var(--up-color, #d64545)" }}>{formatSigned(gap.pct)}</b> 더 내려가야
+          기준선
+        </span>
+      </td>
+    </tr>
+  );
+}
+
+/** 최근 저점 기준선 행 — 회차 지정가의 지수 환산이 이 아래로 내려가는 경계에 긋는다.
+ *
+ *  회차 사이에 들어가지 못하면(= 저점이 마지막 회차보다도 아래) 표 맨 아래에 긋고,
+ *  마지막 회차에서 얼마나 더 내려가야 저점인지 `belowLast` 로 함께 적는다 —
+ *  선만 보고는 "얼마나 남았나"를 알 수 없다.
+ */
 function RecentLowRow({ index }: { index: IndexStatus }) {
   return (
     <tr>
@@ -169,6 +189,15 @@ function StrategySection({
 }) {
   const toast = useToast();
   const { config, status, index } = view;
+  // 기준선이 회차 사이에 못 들어가는 경우 — 마지막 회차의 지수 환산에서 저점까지 남은 하락률.
+  const lastLeveledRound = [...view.rounds].reverse().find((row) => row.buy_index != null) ?? null;
+  const belowLastRound =
+    lastLeveledRound?.buy_index != null && lastLeveledRound.buy_index > 0
+      ? {
+          round: lastLeveledRound.round,
+          pct: Number(((index.recent_low / lastLeveledRound.buy_index - 1) * 100).toFixed(2)),
+        }
+      : null;
   const [draft, setDraft] = useState(String(config.trigger_pct));
   const [saving, setSaving] = useState(false);
 
@@ -348,7 +377,10 @@ function StrategySection({
             })}
             {view.rounds.length > 0 &&
             view.rounds.every((r) => r.buy_index == null || r.buy_index >= index.recent_low) ? (
-              <RecentLowRow index={index} />
+              <>
+                {belowLastRound ? <BelowLastGapRow gap={belowLastRound} /> : null}
+                <RecentLowRow index={index} />
+              </>
             ) : null}
           </tbody>
         </table>
