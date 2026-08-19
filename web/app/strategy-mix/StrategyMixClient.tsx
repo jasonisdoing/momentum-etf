@@ -146,6 +146,9 @@ type Holding = {
   name: string;
   sources: ("sm" | "nh")[];
   weight_pct: number;
+  /** 슬리브별 몫(%) — 합이 목표비중이다. 전량 매도 행에는 없다. */
+  sm_weight?: number;
+  nh_weight?: number;
   price: number | null;
   change_pct: number | null;
   sm_status: string | null;
@@ -521,6 +524,9 @@ export function StrategyMixClient() {
       name: "현금",
       sources: [],
       weight_pct: positions.summary.cash_pct,
+      // 현금도 슬리브별로 나눠 보여준다 — 합이 목표비중(현금 전체)이다.
+      sm_weight: positions.summary.sm.cash_pct,
+      nh_weight: positions.summary.nh.cash_pct,
       price: null,
       change_pct: null,
       sm_status: null,
@@ -629,9 +635,29 @@ export function StrategyMixClient() {
             : null;
         },
       },
+      // 슬리브별 몫 — 두 값의 합이 목표비중이다. 그 슬리브에 없는 종목은 '-'.
+      {
+        field: "sm_weight",
+        headerName: "모멘텀",
+        width: 88,
+        type: "numericColumn",
+        valueFormatter: (p) =>
+          p.value == null || (p.value as number) === 0 ? "-" : `${(p.value as number).toFixed(2)}%`,
+        cellStyle: { color: "var(--text-muted)" },
+      },
+      {
+        field: "nh_weight",
+        headerName: "신고가",
+        width: 88,
+        type: "numericColumn",
+        valueFormatter: (p) =>
+          p.value == null || (p.value as number) === 0 ? "-" : `${(p.value as number).toFixed(2)}%`,
+        cellStyle: { color: "var(--text-muted)" },
+      },
       {
         field: "weight_pct",
         headerName: "목표비중",
+        headerTooltip: "모멘텀 + 신고가 슬리브 몫의 합",
         width: 88,
         type: "numericColumn",
         valueFormatter: (p) =>
