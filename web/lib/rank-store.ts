@@ -14,6 +14,7 @@ type RankTickerType = {
 type RankMaRule = {
   short_ma_days: number;
   long_ma_days: number;
+  slope_days: number;
   score_column: string;
 };
 
@@ -89,9 +90,16 @@ export async function loadRankToolbarData(params?: {
   return fetchFastApiJson<RankToolbarData>(`/internal/rank/toolbar${query}`, { signal });
 }
 
+// 화면에서 임시로 바꿔 보는 이평선 값. 넘긴 항목만 저장 규칙을 대신하고, 빠진 항목은 저장값을 쓴다.
+type RankMaRuleOverride = {
+  short_ma_days?: number;
+  long_ma_days?: number;
+  slope_days?: number;
+};
+
 export async function loadRankData(params?: {
   ticker_type?: string;
-  ma_rule_override?: RankMaRule;
+  ma_rule_override?: RankMaRuleOverride;
   as_of_date?: string;
 }, signal?: AbortSignal): Promise<RankData> {
   const search = new URLSearchParams();
@@ -101,13 +109,18 @@ export async function loadRankData(params?: {
   if (params?.as_of_date) {
     search.set("as_of_date", params.as_of_date);
   }
-  if (params?.ma_rule_override) {
-    search.set("short_ma_days", String(params.ma_rule_override.short_ma_days));
-    search.set("long_ma_days", String(params.ma_rule_override.long_ma_days));
+  const override = params?.ma_rule_override;
+  if (override) {
+    for (const key of ["short_ma_days", "long_ma_days", "slope_days"] as const) {
+      const value = override[key];
+      if (value != null) {
+        search.set(key, String(value));
+      }
+    }
   }
 
   const query = search.size > 0 ? `?${search.toString()}` : "";
   return fetchFastApiJson<RankData>(`/internal/rank${query}`, { signal });
 }
 
-export type { RankTickerType, RankMaRule, RankData, RankRow };
+export type { RankTickerType, RankMaRule, RankMaRuleOverride, RankData, RankRow };
