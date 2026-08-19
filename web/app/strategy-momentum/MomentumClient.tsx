@@ -494,6 +494,54 @@ export function MomentumClient() {
     }
   }, [backtestMonths, draftPool, toast]);
 
+  // 표시용 가격만 60초마다 갱신한다 — 선정 판정은 종가 기준이라 5분 캐시로 두고,
+  // 장중에 움직이는 현재가·일간(%)만 시세 API 로 덮어쓴다(무거운 재계산을 피한다).
+  // 의존성은 티커 문자열로 잡는다 — 행 배열을 그대로 쓰면 가격을 덮어쓸 때마다
+  // 이펙트가 다시 걸려 타이머가 초기화된다.
+  const quoteCountry = view?.picks?.country ?? "";
+  const quoteTickerKey = (view?.picks?.rows ?? []).map((row) => row.ticker).join(",");
+  useEffect(() => {
+    const country = quoteCountry;
+    const tickers = quoteTickerKey ? quoteTickerKey.split(",") : [];
+    if (!country || tickers.length === 0) return;
+
+    let alive = true;
+    const refresh = async () => {
+      try {
+        const params = new URLSearchParams({ country, tickers: tickers.join(",") });
+        const resp = await fetch(`/api/quotes?${params.toString()}`, { cache: "no-store" });
+        const payload = (await resp.json()) as {
+          quotes?: Record<string, { price: number; change_pct: number | null }>;
+          error?: string;
+        };
+        if (!resp.ok || payload.error || !alive) return;
+        const quotes = payload.quotes ?? {};
+        setView((prev) => {
+          if (!prev?.picks) return prev;
+          return {
+            ...prev,
+            picks: {
+              ...prev.picks,
+              rows: prev.picks.rows.map((row) => {
+                const quote = quotes[row.ticker];
+                if (!quote) return row;
+                return { ...row, price: quote.price, daily_change_pct: quote.change_pct };
+              }),
+            },
+          };
+        });
+      } catch {
+        // 시세 갱신 실패는 조용히 넘긴다 — 화면의 판정 값은 그대로 유효하다.
+      }
+    };
+
+    const timer = setInterval(() => void refresh(), 60_000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [quoteCountry, quoteTickerKey]);
+
   // 저장하지 않은 입력이 있으면 실행 결과가 화면 값과 어긋난다 — 저장을 먼저 요구한다.
   const isDirty = useMemo(() => {
     if (!view) return false;
