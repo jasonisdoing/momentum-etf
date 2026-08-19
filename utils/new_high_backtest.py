@@ -3,6 +3,10 @@
 이벤트 기반이라 월간 리밸런싱과 리듬이 다르다 — 돌파한 날 사고, 손절선이나 이탈
 이동평균에 걸린 날 판다. 판정은 종가, 체결은 다음 거래일 **시가**다. 종가 체결은
 쓰지 않는다: 마감 동시호가에 대량을 던지면 체결가를 모른 채 거래하게 된다.
+
+자산은 **현금과 주수로** 들고 간다. 진입할 때 그 시점 자산의 1/slots 를 배정하고,
+보유 중에는 비중을 건드리지 않는다(오른 종목은 커진 채로 간다). 살 현금이 모자라면
+있는 만큼만 산다 — 팔지 않은 평가익으로는 새 종목을 살 수 없기 때문이다.
 """
 
 from __future__ import annotations
@@ -174,11 +178,23 @@ def run_backtest(
     if len(span) < 2:
         raise RuntimeError("백테스트할 구간의 가격 데이터가 부족합니다.")
 
-    equity = 1.0
+    # 자산은 현금 + 보유 주수로 들고 간다(시작 자산 1.0). 포지션 손익을 자산에 곱하면
+    # 동시에 들고 있던 종목의 손익이 합산이 아니라 곱으로 쌓여 수익이 부풀려진다.
+    cash = 1.0
     holdings: dict[str, dict[str, Any]] = {}
     trades: list[dict[str, Any]] = []
     curve: list[float] = []
     last_day = span[-1]
+
+    def _value_at(day: pd.Timestamp) -> float:
+        """그날 종가로 평가한 총자산 — 현금 + 보유 평가액."""
+        total = cash
+        for ticker, position in holdings.items():
+            price = close_df.at[day, ticker]
+            if pd.notna(price):
+                total += position["shares"] * float(price)
+        return total
+
     # 날짜별 '그날 이미 들고 있어서 살 수 없던 종목'. 날짜 셀렉트의 돌파 수가 이걸 빼고 센다.
     # 최근 구간만 담는다 — 셀렉트가 쓰는 범위 밖은 payload 만 키운다.
     held_by_day: dict[str, list[str]] = {}
@@ -201,7 +217,7 @@ def run_backtest(
             if pd.isna(exit_price):
                 exit_price = price  # 다음 날 시가가 없으면(거래정지) 오늘 종가로 본다
             ret = (float(exit_price) * (1 - sell_slippage / 100)) / position["entry"] - 1
-            equity *= 1 + ret / slots
+            cash += position["shares"] * float(exit_price) * (1 - sell_slippage / 100)
             trades.append(
                 {
                     "ticker": ticker,
@@ -227,6 +243,15 @@ def run_backtest(
         # 2) 진입 — 빈 자리만큼, 거래대금 급증이 큰 순
         free = slots - len(holdings)
         if free > 0:
+            # 배정 기준은 **체결 시점(다음 거래일 시가)의 자산**이다. 청산 대금이 이미
+            # 현금에 들어와 있으므로 파는 쪽과 사는 쪽이 같은 시점으로 맞는다.
+            fill_value = cash
+            for held_ticker, held_position in holdings.items():
+                held_price = open_df.at[nxt, held_ticker]
+                if pd.isna(held_price):
+                    held_price = close_df.at[day, held_ticker]
+                if pd.notna(held_price):
+                    fill_value += held_position["shares"] * float(held_price)
             row = breakout.loc[day]
             picks = [
                 t
@@ -239,29 +264,26 @@ def run_backtest(
             picks, _ = _cap_by_industry(picks, list(holdings), industry_by, settings["max_per_industry"], free)
             for ticker in picks:
                 entry_open = float(open_df.at[nxt, ticker])
+                # 살 현금이 모자라면 있는 만큼만 산다 — 팔지 않은 평가익으로는 못 산다.
+                alloc = min(fill_value / slots, cash)
+                if alloc <= 0:
+                    break
+                # 손익 계산에는 슬리피지를 얹은 값을 쓴다(표시용 가격과 구분).
+                fill_price = entry_open * (1 + buy_slippage / 100)
                 holdings[ticker] = {
                     "open": entry_open,
-                    # 손익 계산에는 슬리피지를 얹은 값을 쓴다(표시용 가격과 구분).
-                    "entry": entry_open * (1 + buy_slippage / 100),
+                    "entry": fill_price,
                     "date": nxt,
+                    "shares": alloc / fill_price,
                 }
+                cash -= alloc
 
-        open_pnl = sum(
-            (float(close_df.at[day, t]) / p["entry"] - 1) / slots
-            for t, p in holdings.items()
-            if pd.notna(close_df.at[day, t])
-        )
-        curve.append(equity * (1 + open_pnl))
+        curve.append(_value_at(day))
 
     # 마지막 날은 판정·체결이 없다(체결할 다음 거래일이 없어서). 다만 그날 종가로
     # **평가**는 해야 곡선이 하루 짧아지지 않는다 — 모멘텀 엔진과 같은 기준.
     held_by_day[str(last_day.date())] = list(holdings)
-    last_open_pnl = sum(
-        (float(close_df.at[last_day, t]) / p["entry"] - 1) / slots
-        for t, p in holdings.items()
-        if pd.notna(close_df.at[last_day, t])
-    )
-    curve.append(equity * (1 + last_open_pnl))
+    curve.append(_value_at(last_day))
 
     # 아직 청산하지 않은 종목 — 성과에는 평가손익으로 이미 반영돼 있지만 체결 내역에는 없다.
     open_positions = []
