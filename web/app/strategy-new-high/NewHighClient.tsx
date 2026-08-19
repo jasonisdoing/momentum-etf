@@ -9,6 +9,7 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
+import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
@@ -143,6 +144,8 @@ type PlanRow = {
 
 type Positions = {
   as_of: string;
+  /** 표시용 시세 갱신에 쓰는 국가 코드(시세 소스가 국가별로 다르다). */
+  country: string;
   /** 진입·청산이 체결되는 거래일. 캘린더가 답하지 못하면 null. */
   next_session: string | null;
   holdings: Holding[];
@@ -664,6 +667,27 @@ export function NewHighClient() {
   }, [backtest, viewMode]);
 
   // 보유 + 내일 매도 + 내일 매수를 한 표로 합친다 — 이 표만 보고 주문을 낼 수 있게.
+  // 표시용 현재가·일간(%)만 60초마다 갱신한다 — 돌파 판정은 종가 기준이라 다시 계산하지 않는다.
+  const quoteTickers = useMemo(
+    () =>
+      [
+        ...(positions?.holdings ?? []).map((row) => row.ticker),
+        ...(positions?.planned_entries ?? []).map((row) => row.ticker),
+        ...(positions?.breakouts ?? []).map((row) => row.ticker),
+        ...(positions?.candidates ?? []).map((row) => row.ticker),
+      ].filter((ticker, index, all) => all.indexOf(ticker) === index),
+    [positions],
+  );
+  const quotes = useRealtimeQuotes(positions?.country ?? "", quoteTickers);
+  /** 시세가 들어온 종목만 현재가·등락률을 덮어쓴다(나머지 값은 판정 결과 그대로). */
+  const withQuote = useCallback(
+    <T extends { ticker: string; price: number | null; change_pct: number | null }>(row: T): T => {
+      const quote = quotes[row.ticker];
+      return quote ? { ...row, price: quote.price, change_pct: quote.change_pct } : row;
+    },
+    [quotes],
+  );
+
   const planRows = useMemo<PlanRow[]>(() => {
     if (!positions) return [];
     const held: PlanRow[] = positions.holdings.map((h) => ({
@@ -1129,7 +1153,7 @@ export function NewHighClient() {
                       {positions?.exited_today.length ? ` · 오늘 이탈 ${positions.exited_today.length}` : ""}
                     </div>
                     <AppAgGrid<PlanRow>
-                      rowData={planRows}
+                      rowData={planRows.map(withQuote)}
                       columnDefs={holdingColumns}
                       loading={running}
                       theme={gridTheme}
@@ -1170,7 +1194,7 @@ export function NewHighClient() {
                       </div>
                     ) : null}
                     <AppAgGrid<PositionRow>
-                      rowData={[...(positions?.breakouts ?? []), ...(positions?.candidates ?? [])]}
+                      rowData={[...(positions?.breakouts ?? []), ...(positions?.candidates ?? [])].map(withQuote)}
                       columnDefs={positionColumns}
                       loading={running}
                       theme={gridTheme}
