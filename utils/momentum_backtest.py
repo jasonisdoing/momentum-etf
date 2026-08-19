@@ -49,6 +49,7 @@ from utils.momentum_service import (
 )
 from utils.pool_settings_store import get_pool_slippage
 from utils.pool_signal_backtest_service import get_max_backtest_months
+from utils.price_series import positive_prices
 from utils.trade_stats import summarize_trades
 
 # 미국 풀 참고 지수 — 유사 컨셉 ETF(FMTM)와 같은 구간을 나란히 비교한다 (벤치마크 아님).
@@ -73,10 +74,14 @@ def _rebalance_dates(benchmark_close: pd.Series, months: int) -> list[pd.Timesta
 
 
 def _open_series(frame: pd.DataFrame) -> pd.Series | None:
-    """체결가로 쓰는 시가 시계열. 시가가 없는 데이터면 None."""
+    """체결가로 쓰는 시가 시계열. 시가가 없는 데이터면 None.
+
+    0 은 거래정지 칸이라 결측으로 돌린다 — 그대로 두면 체결가 0 에 판 것이 되어
+    그 구간이 -100% 로 잡힌다(국내 개별주 캐시에 실제로 들어 있다).
+    """
     if frame is None or "Open" not in frame.columns:
         return None
-    series = pd.to_numeric(frame["Open"], errors="coerce").dropna()
+    series = positive_prices(frame["Open"]).dropna()
     return series if not series.empty else None
 
 
@@ -93,7 +98,7 @@ def _open_return(opens: pd.Series, start: pd.Timestamp, end: pd.Timestamp) -> fl
 
 
 def _period_return(close: pd.Series, start: pd.Timestamp, end: pd.Timestamp) -> float | None:
-    series = pd.to_numeric(close, errors="coerce").dropna()
+    series = positive_prices(close).dropna()
     try:
         start_price = series.asof(start)
         end_price = series.asof(end)
@@ -200,19 +205,24 @@ def run_backtest(
     industry_by_ticker = industry_map(pool)
 
     # 일간 표용 — 보유 구간 안에서 매일의 동일가중 포트폴리오 수익률.
-    # 종가는 한 번만 정제해 재사용한다(구간마다 다시 정제하면 느리다).
+    # 가격은 한 번만 정제해 재사용한다(구간마다 다시 정제하면 느리다).
     clean_closes: dict[str, pd.Series] = {}
+    clean_opens: dict[str, pd.Series] = {}
     clean_benchmark: pd.Series | None = None
     clean_reference: pd.Series | None = None
     if include_daily:
-        clean_closes = {
-            ticker: pd.to_numeric(frame["Close"], errors="coerce").dropna() for ticker, frame in frames.items()
-        }
+        clean_closes = {ticker: positive_prices(frame["Close"]).dropna() for ticker, frame in frames.items()}
+        for ticker, frame in frames.items():
+            opens = _open_series(frame)
+            if opens is not None:
+                clean_opens[ticker] = opens
         clean_benchmark = pd.to_numeric(benchmark_close, errors="coerce").dropna()
         clean_reference = (
             pd.to_numeric(reference_close, errors="coerce").dropna() if reference_close is not None else None
         )
     daily: list[dict[str, Any]] = []
+    # 날짜 -> 그날의 성장배수. 구간 경계일(교체일)은 두 구간이 함께 쓰므로 곱해서 합친다.
+    daily_growth: dict[str, float] = {}
 
     monthly_by_key: dict[str, list[float]] = {}
     monthly_bench: dict[str, list[float]] = {}
@@ -374,31 +384,33 @@ def run_backtest(
             reference_returns.append(reference_pct / 100.0)
 
         # ── 일간 행 ──
-        # 이 구간(start→end)의 보유 종목은 고정이다. start 종가를 1 로 두고 매일의
-        # 동일가중 포트폴리오 가치를 구한 뒤 전일 대비 변동률을 낸다. 교체 비용은
-        # 구간 첫날에 한 번 반영한다(주간 계산과 같은 방식).
-        window = bench_index[(bench_index > start) & (bench_index <= end)] if include_daily else []
+        # 이 구간(start→end)의 보유 종목은 고정이다. 체결이 시가이므로 **start 시가**를 1 로
+        # 두고, 마지막 날(또는 주중 매도일)은 그날 **시가**로 끊는다 — 종가로 재면 교체일
+        # 당일 수익이 통째로 빠져 일별 곡선이 구간 수익률과 어긋난다.
+        # start 는 직전 구간의 end 와 같은 날이라 날짜가 겹친다. 겹치는 날은 곱해서 하나로
+        # 합친다(직전 구간의 '전일 종가 → 시가' 와 이번 구간의 '시가 → 종가').
+        # 교체 비용은 구간 첫날에 한 번 반영한다(주간 계산과 같은 방식).
+        window = bench_index[(bench_index >= start) & (bench_index <= end)] if include_daily else []
         if len(window) > 0:
 
-            def freeze_after_sell(curve: pd.Series, ticker: str) -> pd.Series:
-                """주중 매도된 종목은 매도일 이후 가치를 고정한다 (현금이 된 슬롯)."""
-                sell_date = sell_date_by_ticker.get(ticker)
-                if sell_date is None:
-                    return curve
-                before = curve[window <= sell_date]
-                frozen = float(before.iloc[-1]) if len(before) > 0 else 1.0
-                return curve.where(window <= sell_date, frozen)
-
-            ratios = []
-            for ticker in holdings:
-                series = clean_closes.get(ticker)
-                if series is None:
-                    continue
-                base = series.asof(start)
+            def position_curve(ticker: str) -> pd.Series | None:
+                """구간 시작 시가를 1 로 둔 종목별 가치. 매도일부터는 매도 시가로 고정한다."""
+                closes = clean_closes.get(ticker)
+                opens = clean_opens.get(ticker)
+                if closes is None or opens is None:
+                    return None
+                base = opens.asof(start)
                 if pd.isna(base) or float(base) <= 0:
-                    continue
-                curve = series.reindex(window, method="ffill") / float(base)
-                ratios.append(freeze_after_sell(curve, ticker))
+                    return None
+                curve = closes.reindex(window, method="ffill") / float(base)
+                # 이 종목이 나가는 날 — 주중 매도일이 없으면 구간 종료일(교체일)이다.
+                stop_day = sell_date_by_ticker.get(ticker, end)
+                exit_price = opens.asof(stop_day)
+                if pd.isna(exit_price) or float(exit_price) <= 0:
+                    return curve
+                return curve.where(window < stop_day, float(exit_price) / float(base))
+
+            ratios = [curve for curve in (position_curve(t) for t in holdings) if curve is not None]
             # 슬롯 모델 — 보유 곡선 합 + 현금 슬롯(가치 1 고정), 분모는 top_n.
             if ratios:
                 portfolio = (pd.concat(ratios, axis=1).sum(axis=1) + float(top_n - len(ratios))) / top_n
@@ -407,44 +419,17 @@ def run_backtest(
             else:
                 portfolio = None
 
-            def _daily_series(source: pd.Series | None) -> pd.Series | None:
-                """구간 시작 종가를 1 로 정규화한 일별 가치."""
-                if source is None:
-                    return None
-                base_value = source.asof(start)
-                if pd.isna(base_value) or float(base_value) <= 0:
-                    return None
-                return source.reindex(window, method="ffill") / float(base_value)
-
-            bench_curve = _daily_series(clean_benchmark)
-            ref_curve = _daily_series(clean_reference)
-
-            def _step(curve: pd.Series | None, position_index: int) -> float | None:
-                """전일 대비(첫날은 구간 시작 종가 대비) 변동률(%)."""
-                if curve is None:
-                    return None
-                value = curve.iloc[position_index]
-                prior = 1.0 if position_index == 0 else curve.iloc[position_index - 1]
-                if pd.isna(value) or pd.isna(prior) or float(prior) <= 0:
-                    return None
-                return (float(value) / float(prior) - 1.0) * 100.0
-
-            for day_index, day in enumerate(window):
-                strategy_day = _step(portfolio, day_index)
-                if strategy_day is not None and day_index == 0:
-                    strategy_day -= cost * 100.0
-                daily.append(
-                    {
-                        "date": day.strftime("%Y-%m-%d"),
-                        "strategy_pct": round(strategy_day, 2) if strategy_day is not None else None,
-                        "benchmark_pct": (
-                            round(value, 2) if (value := _step(bench_curve, day_index)) is not None else None
-                        ),
-                        "reference_pct": (
-                            round(value, 2) if (value := _step(ref_curve, day_index)) is not None else None
-                        ),
-                    }
-                )
+            if portfolio is not None:
+                for day_index, day in enumerate(window):
+                    value = portfolio.iloc[day_index]
+                    prior = 1.0 if day_index == 0 else portfolio.iloc[day_index - 1]
+                    if pd.isna(value) or pd.isna(prior) or float(prior) <= 0:
+                        continue
+                    growth = float(value) / float(prior)
+                    if day_index == 0:
+                        growth -= cost  # 교체 매매 비용은 체결일에 한 번
+                    key = day.strftime("%Y-%m-%d")
+                    daily_growth[key] = daily_growth.get(key, 1.0) * growth
 
         # ── 월간 집계 — 구간 수익률을 구간 종료일이 속한 달로 복리 합산한다.
         month_key = end.strftime("%Y-%m")
@@ -506,6 +491,32 @@ def run_backtest(
             trade_events.append({"date": last_cached, "action": "remove", "ticker": ticker})
             _close_trade(ticker, last_cached, "주간 교체")
         current_holdings = selection
+
+    # ── 일간 행 조립 — 구간별로 모은 성장배수를 날짜순 행으로 편다.
+    # 벤치마크·참조는 구간과 무관하므로 전체 시계열에서 한 번에 일별 변동률을 만든다
+    # (구간마다 정규화하면 경계일이 두 번 세어진다).
+    if include_daily and daily_growth:
+        prior_days = bench_index[bench_index < dates[0]]
+        first = prior_days[-1] if len(prior_days) > 0 else dates[0]
+        span_index = bench_index[(bench_index >= first) & (bench_index <= dates[-1])]
+
+        def _daily_changes(source: pd.Series | None) -> dict[str, float]:
+            if source is None:
+                return {}
+            changes = source.reindex(span_index, method="ffill").pct_change()
+            return {day.strftime("%Y-%m-%d"): float(v) * 100.0 for day, v in changes.items() if pd.notna(v)}
+
+        bench_changes = _daily_changes(clean_benchmark)
+        ref_changes = _daily_changes(clean_reference)
+        for key in sorted(daily_growth):
+            daily.append(
+                {
+                    "date": key,
+                    "strategy_pct": round((daily_growth[key] - 1.0) * 100.0, 2),
+                    "benchmark_pct": round(bench_changes[key], 2) if key in bench_changes else None,
+                    "reference_pct": round(ref_changes[key], 2) if key in ref_changes else None,
+                }
+            )
 
     # ── 주간 행 — 달력 주(월~일) 단위. 기준일은 그 주 마지막 거래일, 수익률은 그 주의
     # 성과, 편입·편출은 그 주에 체결된 매매다.
