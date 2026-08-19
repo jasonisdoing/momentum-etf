@@ -7,6 +7,7 @@ import { IconCheck } from "@tabler/icons-react";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
+import { StrategyNotes } from "../components/StrategyNotes";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { NavTabs } from "../components/NavTabs";
@@ -31,6 +32,55 @@ import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { formatPrice } from "../../lib/price-format";
 
 const gridTheme = createAppGridTheme();
+
+/** 접이식 전략 설명 — 운용 현황·백테스트 섹션 상단(기본 접힘). */
+const CURRENT_NOTES = [
+  {
+    title: "선정",
+    body:
+      "주 마지막 거래일 종가까지의 데이터로 모멘텀 점수(연율화 상대기울기 × R²)를 매겨 상위 N종목을 고릅니다. " +
+      "업종당 종목 수 상한을 적용합니다.",
+  },
+  {
+    title: "체결",
+    body:
+      "다음 주 첫 거래일 시가에 교체합니다. 유지 종목도 슬리브 자산의 1/N로 되돌립니다(동일가중) — " +
+      "오른 종목은 초과분을 팔고 내린 종목은 미달분을 삽니다.",
+  },
+  {
+    title: "주중 이탈",
+    body:
+      "보유 자격(장기 이격 > 0, 단기 이격 ≥ 0)을 잃으면 다음 거래일 시가에 전량 매도합니다. " +
+      "판 슬롯은 다음 교체까지 현금입니다(풀별 설정으로 켜고 끕니다).",
+  },
+  {
+    title: "표시",
+    body: "판정 결과는 5분 캐시이고, 현재가·일간(%)만 60초마다 갱신됩니다.",
+  },
+];
+
+const BACKTEST_NOTES = [
+  {
+    title: "체결 모델",
+    body:
+      "판정은 주 마지막 거래일 종가, 체결은 다음 주 첫 거래일 시가입니다 — " +
+      "같은 종가로 판정하고 체결하는 선행 편향이 없습니다.",
+  },
+  {
+    title: "비용",
+    body:
+      "슬리피지는 편도(%)로 실제 매매 금액 전체에 부과합니다 — " +
+      "편출 전량 매도 + 편입 1/N 매수 + 유지 종목의 재조정 매매까지 포함합니다.",
+  },
+  {
+    title: "빈 슬롯",
+    body: "자격 종목이 N보다 적으면 빈 슬롯은 현금(수익률 0)이고, 분모는 항상 N입니다.",
+  },
+  {
+    title: "알아둘 것",
+    body: "현재 종목풀 기준이라 상장폐지·풀 이탈 종목이 빠진 생존 편향이 있습니다.",
+  },
+];
 
 // 풀별로 따로 저장되는 설정 — 풀 셀렉트를 바꾸면 그 풀의 저장분으로 폼이 전환된다.
 // 슬리피지는 종목풀 설정을, 백테스트 기간은 실행할 때 고른 값을 쓴다 — 여기 없다.
@@ -1131,12 +1181,12 @@ export function MomentumClient() {
           </div>
         </div>
 
-        {/* ② 현재 선정 종목 */}
+        {/* ② 운용 현황 */}
         <div className="card appCard">
           <div className="card-body">
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
-                <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>현재 선정 종목</span>
+                <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>운용 현황</span>
                 {view.picks ? (
                   <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>
                     <b style={{ color: "inherit" }}>{formatDateWithWeekday(view.picks.portfolio_week)} 포트폴리오</b> ·
@@ -1153,6 +1203,7 @@ export function MomentumClient() {
                 )}
               </div>
             </div>
+            <StrategyNotes items={CURRENT_NOTES} />
             {picking ? <AppLoadingProgress title="선정 계산 중..." progress={pickProgress} /> : null}
             {view.picks && !picking ? (
               // autoHeight — 그리드가 행 수만큼만 높이를 차지해 하단 낭비가 없다.
@@ -1214,6 +1265,7 @@ export function MomentumClient() {
                 </button>
               </div>
             </div>
+            <StrategyNotes items={BACKTEST_NOTES} />
             {backtesting ? <AppLoadingProgress title="백테스트 실행 중..." progress={backtestProgress} /> : null}
             {backtest && !backtesting ? (
               <>
