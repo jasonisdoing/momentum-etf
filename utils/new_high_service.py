@@ -28,6 +28,8 @@ from typing import Any
 
 import pandas as pd
 
+from utils.price_series import positive_prices as _positive
+
 # 신고가 판정 창 — 거래일 수가 아니라 달력 기간으로 자른다. 거래일로 고정하면
 # 공휴일 수에 따라 실제 기간이 흔들려 이름과 어긋난다(12개월 × 20거래일 = 240거래일은
 # 실제 52주보다 짧아서, 1년 전 고점이 창 밖으로 일찍 밀려난다).
@@ -204,15 +206,6 @@ def load_benchmark_close(pool: str) -> pd.Series:
 
 
 # ── 가격 ───────────────────────────────────────────────────────────────────
-def _positive(series: pd.Series) -> pd.Series:
-    """0 이하 가격을 결측으로 돌린다.
-
-    거래정지 구간에서 0 이 들어온 칸이 있다. 그대로 쓰면 진입가가 0 이 되어 수익률이
-    무한대가 되고, 신고가 판정도 어긋난다. 값을 지어내지 않고 없는 것으로 둔다.
-    """
-    return pd.to_numeric(series, errors="coerce").where(lambda x: x > 0)
-
-
 def build_price_panel(universe: list[dict[str, str]], frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
     """(날짜 × 티커) 종가·시가·고가·거래대금 표. 백테스트와 선정이 같은 값을 쓴다."""
     closes, opens, highs, values = {}, {}, {}, {}
