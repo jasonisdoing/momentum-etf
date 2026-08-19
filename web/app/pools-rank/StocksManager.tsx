@@ -5,7 +5,7 @@ import type { ColDef, RowClassParams } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
-import { MA_DAY_OPTIONS, SLOPE_DAY_OPTIONS } from "@/lib/ma-day-options";
+import { MA_DAY_OPTIONS } from "@/lib/ma-day-options";
 import { formatPoolLabel } from "@/lib/pool-label";
 import {
   INDUSTRY_COLUMN_MIN_WIDTH,
@@ -46,7 +46,6 @@ type RankTickerType = {
 type RankMaRule = {
   short_ma_days: number;
   long_ma_days: number;
-  slope_days: number;
   score_column: string;
   ma_type: string;
 };
@@ -75,7 +74,6 @@ type RankRow = {
   추세: number | null;
   이격?: number | null;
   단기이격?: number | null;
-  기울기?: number | null;
   보유대상?: boolean;
   보유: string;
   현재가: number | null;
@@ -478,8 +476,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       if (next?.ma_rule_override) {
         search.set("short_ma_days", String(next.ma_rule_override.short_ma_days));
         search.set("long_ma_days", String(next.ma_rule_override.long_ma_days));
-        search.set("slope_days", String(next.ma_rule_override.slope_days));
-      }
+          }
 
       const query = search.size > 0 ? `?${search.toString()}` : "";
       const sessionCacheKey = buildRankSessionCacheKey(query);
@@ -596,7 +593,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         추세: null,
         이격: null,
         단기이격: null,
-        기울기: null,
         보유: "",
         보유대상: false,
         현재가: null,
@@ -634,7 +630,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [addingRow, gridRows, pageMode]);
 
   const maRuleSummary = useMemo(
-    () => (maRule ? [`${maRule.ma_type} 단기 ${maRule.short_ma_days}일 · 장기 ${maRule.long_ma_days}일 · 기울기 ${maRule.slope_days}일`] : []),
+    () => (maRule ? [`${maRule.ma_type} 단기 ${maRule.short_ma_days}일 · 장기 ${maRule.long_ma_days}일`] : []),
     [maRule],
   );
 
@@ -1047,14 +1043,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
       },
       {
-        field: "기울기",
-        headerName: "기울기",
-        minWidth: 92,
-        width: 92,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
-      },
-      {
         field: "RSI",
         headerName: "RSI",
         minWidth: 68,
@@ -1271,7 +1259,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     });
   }
 
-  function handleMaRuleDaysChange(key: "short_ma_days" | "long_ma_days" | "slope_days", nextDays: number) {
+  function handleMaRuleDaysChange(key: "short_ma_days" | "long_ma_days", nextDays: number) {
     if (!maRule) {
       return;
     }
@@ -1613,22 +1601,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                           ))}
                         </select>
                       </div>
-                    </label>
-                  ) : null}
-                  {pageMode === "rank" && maRule ? (
-                    <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">기울기 일수</span>
-                      <select
-                        className="form-select"
-                        value={String(maRule.slope_days)}
-                        onChange={(event) => handleMaRuleDaysChange("slope_days", Number(event.target.value))}
-                      >
-                        {SLOPE_DAY_OPTIONS.map((day) => (
-                          <option key={day} value={day}>
-                            {day}일
-                          </option>
-                        ))}
-                      </select>
                     </label>
                   ) : null}
                   <label className="appLabeledField">

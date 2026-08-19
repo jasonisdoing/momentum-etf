@@ -3,7 +3,7 @@
 MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 보관한다.
 
     구조: ticker_type, name, icon, order, country_code, currency
-    편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, SLOPE_DAYS,
+    편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS,
           BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT,
           BENCHMARK, MARKET_REGIME_INDEX (선택 — 비우면 미설정)
 
@@ -14,7 +14,7 @@ MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 
 컬렉션 문서 형태:
     {
       _id: <ticker_type>, name, icon, order, country_code, currency,
-      TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, SLOPE_DAYS,
+      TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS,
       BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, BENCHMARK, MARKET_REGIME_INDEX, updated_at
     }
 """
@@ -39,7 +39,6 @@ OVERRIDABLE_KEYS: tuple[str, ...] = (
     "TOP_N_HOLD",
     "SHORT_MA_DAYS",
     "LONG_MA_DAYS",
-    "SLOPE_DAYS",
 )
 
 # 종목풀별 거래비용 설정. 기존 문서에 없어도 설정 화면은 열려야 하므로 로딩 필수값은 아니다.
@@ -71,20 +70,13 @@ STRUCTURAL_KEYS: tuple[str, ...] = (
 POOL_KIND_OPTIONS: tuple[str, ...] = ("stock", "etf")
 
 MA_DAY_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60, 120, 160, 180, 240)
-# 기울기 측정 일수(k): 단기 이평선의 k일 전 대비 변화율.
-# 단기·장기 이평선과 같은 선택지를 쓴다 — 셋 다 '며칠'을 고르는 값이라 눈금이 다르면
-# 화면에서 비교가 어렵고, 예전 목록에 있던 1~3일은 노이즈가 커 권장하지 않았다.
-SLOPE_DAY_OPTIONS: tuple[int, ...] = MA_DAY_OPTIONS
 # 편도 슬리피지(%) 선택지: 0.05 ~ 0.50, 0.05 단위. 필수라 빈 값 불가.
 SLIPPAGE_PCT_OPTIONS: tuple[float, ...] = (0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)
 
-_INT_KEYS = ("TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS", "SLOPE_DAYS")
+_INT_KEYS = ("TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS")
 _FLOAT_KEYS = ("BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT")
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 _ALLOWED_CURRENCIES = {"KRW", "AUD", "USD"}
-
-# 나중에 추가된 선택 키 → 기본값. DB 문서에 없어도 에러 없이 이 값으로 채운다(하위 호환).
-_OPTIONAL_DEFAULTS: dict[str, Any] = {"SLOPE_DAYS": 5}
 
 _CACHE_TTL_SECONDS = CACHE_TTL_LIVE
 _overlay_cache: dict[str, dict[str, Any]] | None = None
@@ -227,11 +219,7 @@ def _normalize_pool_values(values: dict[str, Any], *, require_ticker_type: bool)
 
 def _normalize_pool_doc(doc: dict[str, Any]) -> dict[str, Any]:
     pool_id = _normalize_ticker_type(doc.get("_id") or doc.get("ticker_type"))
-    # 나중에 추가된 선택 키는 기존 문서에 없을 수 있으므로 기본값으로 채운다(하위 호환).
     doc = dict(doc)
-    for optional_key, default_value in _OPTIONAL_DEFAULTS.items():
-        if doc.get(optional_key) in (None, ""):
-            doc[optional_key] = default_value
     required_keys = ("name", "icon", "order", "country_code", "currency", *OVERRIDABLE_KEYS)
     missing = [key for key in required_keys if key not in doc or doc[key] in (None, "")]
     if missing:
@@ -331,10 +319,6 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
             if num not in MA_DAY_OPTIONS:
                 options = ", ".join(str(day) for day in MA_DAY_OPTIONS)
                 raise PoolSettingsError(f"{key} 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
-        elif key == "SLOPE_DAYS":
-            if num not in SLOPE_DAY_OPTIONS:
-                options = ", ".join(str(day) for day in SLOPE_DAY_OPTIONS)
-                raise PoolSettingsError(f"SLOPE_DAYS 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
         elif key == "TOP_N_HOLD":
             if not (1 <= num <= 100):
                 raise PoolSettingsError(f"TOP_N_HOLD 는 1 ~ 100 범위여야 합니다: {num}")

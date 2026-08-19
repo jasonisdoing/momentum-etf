@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     const asOfDate = searchParams.get("as_of_date") ?? undefined;
     // 화면에서 임시로 바꾼 이평선 값. 넘어온 항목만 실어 보내고, 없는 항목은 저장 규칙을 그대로 쓴다.
     const maRuleOverride: RankMaRuleOverride = {};
-    for (const key of ["short_ma_days", "long_ma_days", "slope_days"] as const) {
+    for (const key of ["short_ma_days", "long_ma_days"] as const) {
       const raw = searchParams.get(key);
       if (raw === null || raw === "") {
         continue;
