@@ -15,6 +15,7 @@ import pandas as pd
 from config import CACHE_TTL_COMPUTE
 from utils.new_high_service import (
     DEFAULT_BACKTEST_MONTHS,
+    HIGH_WINDOW,
     HIGH_WINDOW_WEEKS,
     benchmark_info,
     build_price_panel,
@@ -823,10 +824,22 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
             )
 
         _apply_display_quotes(rows, holdings, quotes["by_ticker"])
+        # 기준선도 하루 앞당긴다 — 오늘이 새 거래일이므로 '직전' 최고는 어제 종가까지다.
+        # `prior_high` 는 캐시 마지막 날 자신을 뺀 값이라(`shift(1)`) 그대로 쓰면 어제 종가가
+        # 빠져, 어제 신고가를 찍은 종목의 돌파 거리가 그만큼 부풀려진다.
+        window = close_df.loc[(close_df.index > last - pd.Timedelta(HIGH_WINDOW)) & (close_df.index <= last)]
+        base_close = window.max()
+        base_intraday = panel["high"].loc[window.index].max()
         for row in rows:
             live = quotes["by_ticker"].get(row["ticker"])
             if not live:
                 continue
+            high = base_close.get(row["ticker"])
+            if pd.notna(high) and float(high) > 0:
+                row["prior_high"] = float(high)
+            intraday = base_intraday.get(row["ticker"])
+            if pd.notna(intraday) and float(intraday) > 0:
+                row["prior_high_intraday"] = float(intraday)
             price = live["price"]
             row["gap_pct"] = round((price / row["prior_high"] - 1) * 100, 2)
             if row["prior_high_intraday"]:
