@@ -166,3 +166,39 @@ def fetch_broker_balance(provider: str, account_no: str) -> dict[str, Any]:
 def cached_broker_balance(provider: str, account_no: str) -> dict[str, Any] | None:
     """가장 최근 불러오기 결과 — '적용' 이 재호출 없이 쓴다. 없으면 None."""
     return _FETCH_CACHE.get(_FETCH_CACHE.make_key(provider, account_no))
+
+
+def apply_fetched_balance(account_id: str, provider: str, fetched: dict[str, Any]) -> dict[str, Any]:
+    """불러온 잔고를 portfolio_master 에 반영한다 — 수동 '덮어쓰기' 와 배치가 공용.
+
+    기존 보유의 메모·매수일·정렬은 보존하고 수량·평단·현금만 증권사 값으로 바꾼다.
+    변경 주체(updated_by)는 커넥터 id 로 남는다.
+    """
+    from utils.portfolio_io import load_portfolio_master, save_portfolio_master
+    from utils.settings_loader import get_account_settings
+
+    current = load_portfolio_master(account_id) or {"holdings": []}
+    existing_by_ticker = {str(row.get("ticker") or ""): row for row in current.get("holdings") or []}
+    currency = str((get_account_settings(account_id) or {}).get("currency") or "KRW").strip().upper()
+
+    holdings = []
+    for index, row in enumerate(fetched["holdings"]):
+        base = existing_by_ticker.get(row["ticker"], {})
+        holdings.append(
+            {
+                "ticker": row["ticker"],
+                "name": row["name"] or base.get("name") or row["ticker"],
+                "quantity": row["quantity"],
+                "average_buy_price": row["average_buy_price"],
+                "currency": base.get("currency") or currency,
+                "first_buy_date": base.get("first_buy_date") or "",
+                "last_buy_date": base.get("last_buy_date") or "",
+                "memo": base.get("memo") or "",
+                "sort_order": base.get("sort_order", index),
+            }
+        )
+
+    ok = save_portfolio_master(account_id, holdings, cash_balance=fetched["cash"], updated_by=provider)
+    if not ok:
+        raise BrokerApiError("portfolio_master 저장에 실패했습니다.")
+    return {"cash": fetched["cash"], "holdings_count": len(holdings)}

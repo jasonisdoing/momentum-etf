@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from fastapi_app.dependencies import require_internal_token
 from services.broker_api_service import (
     BrokerApiError,
+    apply_fetched_balance,
     cached_broker_balance,
     fetch_broker_balance,
     list_broker_accounts,
@@ -97,36 +98,13 @@ def apply_balance(payload: ApplyPayload, _: None = Depends(require_internal_toke
     값이 어긋나면 안 된다.
     기존 보유의 메모·매수일·정렬은 보존하고, 수량·평단·현금만 API 값으로 바꾼다.
     """
-    from utils.portfolio_io import load_portfolio_master, save_portfolio_master
-    from utils.settings_loader import get_account_settings
-
     provider, account_no = _linked_account(payload.account_id)
     fetched = cached_broker_balance(provider, account_no)
     if fetched is None:
         raise HTTPException(status_code=409, detail="불러온 잔고가 만료됐습니다 — '잔고 불러오기'를 다시 눌러주세요.")
 
-    current = load_portfolio_master(payload.account_id) or {"holdings": []}
-    existing_by_ticker = {str(row.get("ticker") or ""): row for row in current.get("holdings") or []}
-    currency = str((get_account_settings(payload.account_id) or {}).get("currency") or "KRW").strip().upper()
-
-    holdings = []
-    for index, row in enumerate(fetched["holdings"]):
-        base = existing_by_ticker.get(row["ticker"], {})
-        holdings.append(
-            {
-                "ticker": row["ticker"],
-                "name": row["name"] or base.get("name") or row["ticker"],
-                "quantity": row["quantity"],
-                "average_buy_price": row["average_buy_price"],
-                "currency": base.get("currency") or currency,
-                "first_buy_date": base.get("first_buy_date") or "",
-                "last_buy_date": base.get("last_buy_date") or "",
-                "memo": base.get("memo") or "",
-                "sort_order": base.get("sort_order", index),
-            }
-        )
-
-    ok = save_portfolio_master(payload.account_id, holdings, cash_balance=fetched["cash"], updated_by=provider)
-    if not ok:
-        raise HTTPException(status_code=500, detail="portfolio_master 저장에 실패했습니다.")
-    return {"ok": True, "cash": fetched["cash"], "holdings_count": len(holdings)}
+    try:
+        result = apply_fetched_balance(payload.account_id, provider, fetched)
+    except BrokerApiError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"ok": True, **result}

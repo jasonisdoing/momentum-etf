@@ -16,6 +16,7 @@ load_env_if_present()
 
 SystemAction = Literal[
     "data_aggregate",
+    "broker_balance_sync",
     "cache_refresh",
     "cache_refresh_full",
     "market_hours_analysis",
@@ -42,6 +43,13 @@ _WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6]
 
 # 전략 사고팔기 알림 슬롯 — 평일 09:10~15:20 을 10분 간격으로.
 # 한국 장중(09:00~15:30)에서 개시 직후·마감 직전을 뺀 구간이다.
+_BROKER_SYNC_SLOTS = [
+    {"hour": hour, "minute": minute}
+    for hour in range(9, 16)
+    for minute in range(0, 60, 10)
+    if (hour, minute) <= (15, 40)
+]
+
 _STRATEGY_TRADE_SLOTS = [
     {"hour": hour, "minute": minute}
     for hour in range(9, 16)
@@ -77,10 +85,21 @@ SCHEDULE_ROWS = [
         "command": "python scripts/stock_price_cache_updater.py",
         "schedule": {"minutes": [20], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
-    # ② 장중 알림 — 사람이 보고 바로 반응해야 하는 것들.
+    # ② 장중 실행 — 장중에 도는 것들. 알림과 데이터 동기화가 섞여 있다.
+    {
+        "key": "broker_balance_sync",
+        "group": "장중 실행",
+        "job": "증권사 잔고 동기화",
+        "target": "API 연동(broker_api) 저장된 계좌",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 09:00~15:40 KST 10분 간격",
+        "command": "python scripts/broker_balance_sync.py",
+        # 15:40 마지막 회가 마감(15:30) 후 확정 상태를 담는다. 실패 슬랙은 시작·복구 1회씩.
+        "schedule": {"slots": _BROKER_SYNC_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+    },
     {
         "key": "strategy_trade_notify",
-        "group": "장중 알림",
+        "group": "장중 실행",
         "job": "전략 사고팔기 알림",
         "target": "kor_account 코스피200·코스닥150 ETF 각 6종",
         "run_location": "SERVER/LOCAL",
@@ -91,7 +110,7 @@ SCHEDULE_ROWS = [
     },
     {
         "key": "new_high_notify",
-        "group": "장중 알림",
+        "group": "장중 실행",
         "job": "신고가 알림",
         "target": "슬랙 알람 켠 종목풀 (진입·매도 예정 변화)",
         "run_location": "SERVER/LOCAL",
@@ -102,7 +121,7 @@ SCHEDULE_ROWS = [
     },
     {
         "key": "holdings_alarm",
-        "group": "장중 알림",
+        "group": "장중 실행",
         "job": "보유종목 알람",
         "target": "알람 On 계좌의 보유 종목",
         "run_location": "SERVER/LOCAL",
@@ -112,7 +131,7 @@ SCHEDULE_ROWS = [
     },
     {
         "key": "leverage_ma_cross",
-        "group": "장중 알림",
+        "group": "장중 실행",
         "job": "레버리지 스위칭",
         "target": "한국/미국 지수(코스피·나스닥100)",
         "run_location": "SERVER/LOCAL",
@@ -128,7 +147,7 @@ SCHEDULE_ROWS = [
     },
     {
         "key": "asset_summary",
-        "group": "장중 알림",
+        "group": "장중 실행",
         "job": "전체 자산 요약 알림",
         "target": "전체 계좌",
         "run_location": "SERVER/LOCAL",
@@ -255,6 +274,7 @@ SCHEDULE_ROWS = [
 # action 키 → 실행할 스크립트 경로
 _SCRIPT_BY_ACTION: dict[str, str] = {
     "data_aggregate": "scripts/collect_data.py",
+    "broker_balance_sync": "scripts/broker_balance_sync.py",
     "cache_refresh": "scripts/stock_price_cache_updater.py",
     "cache_refresh_full": "scripts/stock_price_cache_updater.py",
     "market_hours_analysis": "scripts/analyze_market_hours.py",
