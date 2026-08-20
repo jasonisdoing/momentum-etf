@@ -22,12 +22,25 @@ type AccountEntry = {
   market_regime_index?: MarketIndexOption | null;
   /** 합성 전략에서 이 계좌로 운용할 종목풀 — 없으면 `/strategy-mix` 목록에 오르지 않는다. */
   mix_pool?: string | null;
+  /** 증권사 API 연동 — 잔고 수동 불러오기·배치 동기화가 이 값으로 동작한다. */
+  broker_api?: { provider: string; account_no: string } | null;
   URL?: string;
   updated_at?: string | null;
   save_method?: string | null;
 };
 
 type PoolOption = { ticker_type: string; name?: string | null; icon?: string | null; order?: number | null };
+
+type BrokerProvider = { id: string; name: string; env_ok: boolean };
+type BrokerAccountRow = {
+  account_no: string;
+  masked: string;
+  acct_type: string;
+  ok: boolean;
+  cash?: number;
+  holdings_count?: number;
+  error?: string;
+};
 
 type ApiResponse = {
   accounts?: AccountEntry[];
@@ -100,6 +113,48 @@ function AccountRow({
   // 시장 레짐 지수(필수) — 미설정 계좌는 S&P 500 기본값으로 시작.
   const [regimeTicker, setRegimeTicker] = useState(account.market_regime_index?.ticker || DEFAULT_REGIME_TICKER);
   const [mixPool, setMixPool] = useState(account.mix_pool ?? "");
+  // 증권사 API 연동 — provider 를 고르고 '확인' 으로 계좌를 나열한 뒤 하나를 고른다.
+  const [brokerProvider, setBrokerProvider] = useState(account.broker_api?.provider ?? "");
+  const [brokerAccountNo, setBrokerAccountNo] = useState(account.broker_api?.account_no ?? "");
+  const [brokerProviders, setBrokerProviders] = useState<BrokerProvider[]>([]);
+  const [brokerAccounts, setBrokerAccounts] = useState<BrokerAccountRow[] | null>(null);
+  const [brokerChecking, setBrokerChecking] = useState(false);
+
+  useEffect(() => {
+    // 커넥터 목록 — 등록된 것만 셀렉트에 올려 오타를 원천 차단한다.
+    fetch("/api/broker-api/providers", { cache: "no-store" })
+      .then((resp) => resp.json())
+      .then((data: { providers?: BrokerProvider[] }) => setBrokerProviders(data.providers ?? []))
+      .catch(() => setBrokerProviders([]));
+  }, []);
+
+  const checkBroker = async () => {
+    if (!brokerProvider) return;
+    try {
+      setBrokerChecking(true);
+      setBrokerAccounts(null);
+      const resp = await fetch(`/api/broker-api/accounts?provider=${encodeURIComponent(brokerProvider)}`, {
+        cache: "no-store",
+      });
+      const data = (await resp.json()) as { accounts?: BrokerAccountRow[]; error?: string };
+      if (!resp.ok || data.error) {
+        toast.error(data.error ?? "증권사 계좌 조회에 실패했습니다.");
+        return;
+      }
+      const rows = data.accounts ?? [];
+      setBrokerAccounts(rows);
+      const usable = rows.filter((row) => row.ok);
+      toast.success(`연결 확인 — 계좌 ${rows.length}개 (조회 가능 ${usable.length}개)`);
+      // 저장된 계좌가 목록에 없으면 선택을 비운다(계좌가 사라진 경우 그대로 두면 저장이 헛값이 된다).
+      if (brokerAccountNo && !rows.some((row) => row.account_no === brokerAccountNo)) {
+        setBrokerAccountNo("");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "증권사 계좌 조회 중 오류가 발생했습니다.");
+    } finally {
+      setBrokerChecking(false);
+    }
+  };
   const [benchTicker, setBenchTicker] = useState(account.benchmark?.ticker ?? "");
   const [benchName, setBenchName] = useState(account.benchmark?.name ?? "");
   const [benchEditing, setBenchEditing] = useState(!(account.benchmark?.ticker && account.benchmark?.name));
@@ -169,6 +224,11 @@ function AccountRow({
         },
         // 합성 전략 종목풀 — 없음이면 null 로 저장한다(그 계좌는 합성 화면에 안 뜬다).
         mix_pool: mixPool || null,
+        // 증권사 API 연동 — provider·계좌 둘 다 있어야 저장, 아니면 해제(null).
+        broker_api:
+          brokerProvider && brokerAccountNo
+            ? { provider: brokerProvider, account_no: brokerAccountNo }
+            : null,
         URL: url.trim(),
       };
       // 벤치마크는 선택 — 둘 다 채워졌을 때만 저장(빈 값이면 백엔드 검증에 걸리므로 생략).
@@ -359,6 +419,62 @@ function AccountRow({
             </option>
           ))}
         </select>
+      </div>
+
+      <div style={rowStyle}>
+        <span style={{ ...labelStyle, width: 60 }}>API</span>
+        <select
+          className="form-select form-select-sm"
+          style={{ width: 200 }}
+          value={brokerProvider}
+          onChange={(e) => {
+            setBrokerProvider(e.target.value);
+            setBrokerAccounts(null);
+            setBrokerAccountNo("");
+          }}
+          title="증권사 API 연동 — 잔고 불러오기·배치 동기화가 이 연동으로 동작한다."
+        >
+          <option value="">없음</option>
+          {brokerProviders.map((provider) => (
+            <option key={provider.id} value={provider.id} disabled={!provider.env_ok}>
+              {provider.name}
+              {provider.env_ok ? "" : " (.env 키 없음)"}
+            </option>
+          ))}
+        </select>
+        {brokerProvider ? (
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            disabled={brokerChecking}
+            onClick={() => void checkBroker()}
+          >
+            {brokerChecking ? "확인 중…" : "확인"}
+          </button>
+        ) : null}
+        {/* 확인이 나열한 계좌 중 선택 — 조회 불가 계좌(종합/CMA 등)는 비활성. */}
+        {brokerAccounts ? (
+          <select
+            className="form-select form-select-sm"
+            style={{ width: 300 }}
+            value={brokerAccountNo}
+            onChange={(e) => setBrokerAccountNo(e.target.value)}
+          >
+            <option value="">계좌 선택</option>
+            {brokerAccounts.map((row) => (
+              <option key={row.account_no} value={row.account_no} disabled={!row.ok}>
+                {row.masked}
+                {row.ok
+                  ? ` — 예수금 ${(row.cash ?? 0).toLocaleString("ko-KR")} · ${row.holdings_count}종목`
+                  : " — 조회 불가"}
+              </option>
+            ))}
+          </select>
+        ) : brokerAccountNo ? (
+          <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)" }}>
+            저장된 계좌: {brokerAccountNo.slice(0, 3)}***{brokerAccountNo.slice(-2)}
+          </span>
+        ) : null}
       </div>
 
       <div style={{ ...rowStyle, marginBottom: 0 }}>
