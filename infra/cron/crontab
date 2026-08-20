@@ -69,3 +69,9 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 10,20,30,40,50 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py new_high_notify python scripts/new_high_notify.py >> logs/cron/new_high_notify.log 2>&1
 0,10,20,30,40,50 10-14 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py new_high_notify python scripts/new_high_notify.py >> logs/cron/new_high_notify.log 2>&1
 0,10,20 15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py new_high_notify python scripts/new_high_notify.py >> logs/cron/new_high_notify.log 2>&1
+
+# ── 증권사 잔고 동기화 (평일 09:00~15:40, 10분 간격) ──────────────────────
+# API 연동(broker_api) 저장된 계좌의 잔고·보유를 증권사 값으로 덮어쓴다.
+# 15:40 마지막 회가 장 마감 후 확정 상태를 담는다. 실패 슬랙은 시작·복구 1회씩만.
+0,10,20,30,40,50 9-14 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py broker_balance_sync python scripts/broker_balance_sync.py >> logs/cron/broker_balance_sync.log 2>&1
+0,10,20,30,40 15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py broker_balance_sync python scripts/broker_balance_sync.py >> logs/cron/broker_balance_sync.log 2>&1
