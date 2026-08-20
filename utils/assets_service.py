@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from utils.account_registry import load_account_configs
 from utils.cash_model import resolve_cash_currencies, resolve_cash_native_map
 from utils.db_manager import get_db_connection
 from utils.normalization import normalize_nullable_number, normalize_number, to_iso_string
+
+KST = ZoneInfo("Asia/Seoul")
 
 
 def _require_db():
@@ -81,7 +84,9 @@ def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, str]:
     collection = db.portfolio_master
     doc = collection.find_one({"master_id": "GLOBAL"}) or {"master_id": "GLOBAL", "accounts": []}
     accounts = list(doc.get("accounts") or [])
-    now = datetime.datetime.now()
+    # tz 를 붙여 저장한다 — naive 로 넣으면 Mongo 가 그 값을 UTC 로 보관하고, 읽는 쪽
+    # (to_iso_string)도 UTC 로 해석해 화면에 9시간 뒤(미래)로 찍힌다.
+    now = datetime.datetime.now(KST)
 
     for update in updates:
         account_id = str(update.get("account_id") or "").strip()

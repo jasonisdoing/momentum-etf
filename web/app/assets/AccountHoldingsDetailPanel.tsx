@@ -15,6 +15,7 @@ import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { reorderHoldings } from "@/lib/holdings-store";
 import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
+import { formatKstDateTime } from "@/lib/datetime";
 
 import {
   AccountSummary,
@@ -1219,7 +1220,7 @@ export function AccountHoldingsDetailPanel({
             </button>
             {summary.updated_at ? (
               <span className="text-muted small">
-                최종 변경 {new Date(summary.updated_at).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} · {formatUpdatedBy(summary.updated_by)}
+                최종 변경 {formatKstDateTime(summary.updated_at)} · {formatUpdatedBy(summary.updated_by)}
               </span>
             ) : null}
           </div>
