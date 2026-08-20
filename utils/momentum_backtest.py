@@ -328,7 +328,7 @@ def run_backtest(
             _close_trade(ticker, start, "주간 교체")
         for exit_info in exits:
             trade_events.append({"date": exit_info["sell_date"], "action": "remove", "ticker": exit_info["ticker"]})
-            _close_trade(exit_info["ticker"], exit_info["sell_date"], "주중 이탈")
+            _close_trade(exit_info["ticker"], exit_info["sell_date"], exit_info.get("reason") or "주중 이탈")
 
         # ── 교체 매매 금액(포트폴리오 대비 비율) ──
         # 유지 종목도 매주 1/N 로 재조정하므로, 드리프트 비중과 목표의 차이가 전부 매매다.

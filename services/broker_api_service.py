@@ -46,14 +46,19 @@ def _mask(account_no: str) -> str:
     return account_no[:3] + "***" + account_no[-2:] if len(account_no) > 5 else "***"
 
 
-def _namu_call(path: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """nhplug 호출 — SDK 는 NHPLUG_* 환경변수를 보므로 우리 규칙(NAMU_PLUG_*)을 매핑한다."""
+def _ensure_env() -> None:
+    """우리 규칙(NAMU_PLUG_*)의 키를 SDK 가 보는 NHPLUG_* 로 매핑한다."""
     key_name, secret_name = _env_keys("NAMU_PLUG")
     key, secret = os.environ.get(key_name), os.environ.get(secret_name)
     if not key or not secret:
         raise BrokerApiError(f".env 에 {key_name} / {secret_name} 가 필요합니다.")
     os.environ.setdefault("NHPLUG_APP_KEY", key)
     os.environ.setdefault("NHPLUG_APP_SECRET", secret)
+
+
+def _namu_call(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """nhplug 단건 호출 (연속조회 없는 API 용)."""
+    _ensure_env()
     try:
         from nhplug import NhplugError, call
     except ImportError as exc:
@@ -64,9 +69,74 @@ def _namu_call(path: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise BrokerApiError(f"나무증권 API 오류: {exc.message} (코드 {exc.code})") from exc
 
 
+def _namu_call_paged(path: str, payload: dict[str, Any], list_key: str = "Output_1") -> dict[str, Any]:
+    """연속조회(rsp_cd 00218) 지원 호출 — 목록(list_key)을 전 페이지 이어 붙여 돌려준다.
+
+    NH 규약: 한 페이지를 넘는 목록은 rsp_cd=00218 로 오고, **응답 헤더 `cts`** 의
+    연속키를 다음 요청 헤더에 실어 이어서 받는다. SDK 의 `call()` 은 응답 헤더를
+    노출하지 않아 여기서만 requests 로 직접 호출한다 — 인증(토큰 캐시)·성공 판정은
+    SDK 것을 그대로 재사용해 동작이 어긋나지 않게 한다.
+    """
+    import json
+
+    import requests
+
+    _ensure_env()
+    from nhplug import clear_token, get_base_url, get_token
+    from nhplug.client import is_success
+
+    url = f"{get_base_url()}{path}"
+    body = json.dumps({"Input_0": payload})
+    merged: dict[str, Any] = {}
+    items: list[Any] = []
+    cts = ""
+    refreshed = False
+    for _page in range(20):  # 폭주 방지 — 잔고가 20페이지를 넘을 일은 없다
+        headers = {
+            "x-client-id": os.environ["NHPLUG_APP_KEY"],
+            "x-client-secret": os.environ["NHPLUG_APP_SECRET"],
+            "authorization": f"Bearer {get_token()}",
+            "content-type": "application/json; charset=UTF-8",
+        }
+        if cts:
+            headers["cts"] = cts
+        try:
+            res = requests.post(url, headers=headers, data=body, timeout=10)
+        except requests.RequestException as exc:
+            raise BrokerApiError(f"나무증권 API 네트워크 오류: {exc}") from exc
+        if res.status_code == 401 and not refreshed:
+            clear_token()
+            refreshed = True
+            continue
+        try:
+            data = res.json()
+        except Exception as exc:
+            raise BrokerApiError(f"나무증권 API 응답 해석 실패 (HTTP {res.status_code})") from exc
+        if not res.ok:
+            raise BrokerApiError(
+                f"나무증권 API 오류: {data.get('rsp_msg') or res.status_code} (코드 {data.get('rsp_cd')})"
+            )
+        code = str(data.get("rsp_cd") or "")
+        has_more = code == "00218"
+        if not has_more and not is_success(code, data.get("rsp_msg")):
+            raise BrokerApiError(f"나무증권 API 오류: {data.get('rsp_msg') or '업무 오류'} (코드 {code})")
+        if not merged:
+            merged = {k: v for k, v in data.items() if k != list_key}
+        items.extend(data.get(list_key) or [])
+        if not has_more:
+            break
+        cts = res.headers.get("cts", "")
+        if not cts:
+            raise BrokerApiError("나무증권 API 연속조회 키(cts)가 응답 헤더에 없습니다.")
+    else:
+        raise BrokerApiError("나무증권 API 연속조회가 20페이지를 넘었습니다 — 응답을 확인하세요.")
+    merged[list_key] = items
+    return merged
+
+
 def _namu_balance(account_no: str) -> dict[str, Any]:
-    """국내주식 잔고 원본 응답 — Output_0 요약, Output_1 보유 목록."""
-    return _namu_call(
+    """국내주식 잔고 원본 응답 — Output_0 요약, Output_1 보유 목록(연속조회 병합)."""
+    return _namu_call_paged(
         "/krstock/inquiry/v1/balance",
         {
             "act_no": account_no,

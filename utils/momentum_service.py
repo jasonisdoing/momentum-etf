@@ -623,7 +623,16 @@ def simulate_intraweek_exits(
             if eligible and not hit_stop:
                 continue
             remaining.discard(ticker)
-            exits.append({"ticker": ticker, "signal_date": day, "sell_date": sell_date})
+            exits.append(
+                {
+                    "ticker": ticker,
+                    "signal_date": day,
+                    "sell_date": sell_date,
+                    # 발동 사유 — 화면·체결 목록이 그대로 쓴다. 둘 다 걸리면 손절을 앞세운다
+                    # (손절이 더 급한 신호이고, 이평선 문구로 표시하면 원인을 오해한다).
+                    "reason": "주중 손절" if hit_stop else "주중 이탈",
+                }
+            )
     return exits
 
 
@@ -983,12 +992,13 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
         """행에 얹는 주중 매도 상태 — 매도됨(체결 완료) / 매도 예정(다음 시가)."""
         exit_info = exit_by_ticker.get(ticker)
         if not exit_info:
-            return {"is_exited": False, "is_exit_pending": False, "exit_date": None}
+            return {"is_exited": False, "is_exit_pending": False, "exit_date": None, "exit_reason": None}
         sold = exit_info["sell_date"] is not None
         return {
             "is_exited": sold,
             "is_exit_pending": not sold,
             "exit_date": exit_info["sell_date"].strftime("%Y-%m-%d") if sold else None,
+            "exit_reason": exit_info.get("reason"),
         }
 
     # 다음 주 예상 — 오늘까지의 가격(실시간 반영 종가)으로 같은 규칙을 한 번 더 돌려,
