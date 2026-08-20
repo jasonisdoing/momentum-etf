@@ -45,7 +45,6 @@ type Settings = {
   /** 한 업종 최대 보유 종목 수. null 이면 제한 없음. */
   max_per_industry: number | null;
   /** 슬랙 알람 — 켠 풀만 장중 감시 배치가 진입·매도 예정 변화를 발송한다. */
-  slack_enabled: boolean;
 };
 
 const ENTRY_PRIORITY_LABEL: Record<Settings["entry_priority"], string> = {
@@ -419,7 +418,6 @@ export function NewHighClient() {
   const [backtestError, setBacktestError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
-  const [notifying, setNotifying] = useState(false);
   const [currentTab, setCurrentTab] = useState<CurrentTab>("list");
   // 기준일 — 빈 값이면 최신 거래일. 과거 날짜를 고르면 그 시점 상태를 재현한다.
   const [asOf, setAsOf] = useState<string>("");
@@ -1079,53 +1077,6 @@ export function NewHighClient() {
                       </option>
                     ))}
                   </select>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">슬랙 알람</span>
-                  <div className="form-check form-switch" style={{ paddingLeft: "2.6em" }}>
-                    <input
-                      className="form-check-input"
-                      type="checkbox"
-                      role="switch"
-                      id="newHighSlackToggle"
-                      style={{ width: "2.2em", height: "1.2em" }}
-                      checked={draft.slack_enabled}
-                      onChange={(event) => setDraft({ ...draft, slack_enabled: event.target.checked })}
-                    />
-                    <span style={{ fontWeight: 700, marginLeft: 8, fontSize: "var(--fs-sm)", color: draft.slack_enabled ? "inherit" : "var(--text-muted)" }}>
-                      {draft.slack_enabled ? "켜짐" : "꺼짐"}
-                    </span>
-                    <button
-                      className="btn btn-sm btn-outline-secondary"
-                      type="button"
-                      style={{ marginLeft: 10, whiteSpace: "nowrap" }}
-                      disabled={notifying}
-                      title="저장된 설정 기준으로 현재 진입·매도 예정 전체를 즉시 발송합니다 (토글과 무관)"
-                      onClick={() => {
-                        setNotifying(true);
-                        void (async () => {
-                          try {
-                            const response = await fetch("/api/strategy-new-high/notify", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({ pool: draft.pool }),
-                            });
-                            const payload = (await response.json()) as {
-                              sent?: boolean; entries?: number; sells?: number; error?: string;
-                            };
-                            if (!response.ok || payload.error) throw new Error(payload.error ?? "슬랙 발송에 실패했습니다.");
-                            toast.success(`슬랙 발송 완료 — 진입 예정 ${payload.entries ?? 0} · 매도 예정 ${payload.sells ?? 0}`);
-                          } catch (notifyError) {
-                            toast.error(notifyError instanceof Error ? notifyError.message : "슬랙 발송에 실패했습니다.");
-                          } finally {
-                            setNotifying(false);
-                          }
-                        })();
-                      }}
-                    >
-                      {notifying ? "발송 중…" : "지금 발송(테스트)"}
-                    </button>
-                  </div>
                 </label>
                 </div>
                 {/* CRUD 버튼이 하나뿐이라 별도 줄을 두지 않고 메인 헤더 오른쪽에 둔다. */}
