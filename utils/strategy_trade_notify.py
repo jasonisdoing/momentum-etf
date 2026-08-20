@@ -3,12 +3,18 @@
 거래시간 중 10분마다 실행돼, **매수·매도 지정가에 현재가가 닿은 회차가 있을 때만**
 슬랙을 보낸다. 트리거가 없으면 아무것도 보내지 않는다.
 
-중복 방지
---------
-10분 간격으로 판정하므로 같은 조건이 유지되면 하루에 수십 번 발송될 수 있다.
-그래서 ``전략:회차-동작`` 단위로 **하루 1회만** 보낸다. 발송 이력은
-``system_config.strategy_trade_settings.sent_log`` 에 ``{"kospi200:4-buy": "2026-07-30"}``
-형태로 남긴다. 이력은 발송에 성공했을 때만 갱신한다.
+중복 방지 · 체결 확인
+--------------------
+10분 간격으로 판정하므로 같은 조건이 유지되면 하루에 수십 번 발송될 수 있다. 그래서
+``전략:회차-동작`` 단위로 처음 한 번만 전체 메시지를 보내고, 신호가 살아 있는 동안에는
+한 시간 간격으로 한 줄 리마인더만 보낸다. 발송 이력은
+``system_config.strategy_trade_settings.sent_log`` 에
+``{"kospi200:2-buy": {"at": ..., "ticker": ..., "name": ..., "round": ..., "index_text": ...}}``
+형태로 남기며, 발송에 성공했을 때만 갱신한다.
+
+이력에 남은 주문이 실제로 체결되면 확인 한 줄을 보내고 이력을 지운다. 이 확인은
+**신호가 없어도** 매번 검사한다 — 주문을 넣는 순간 그 회차가 보유로 바뀌어 바로 그 신호가
+사라지기 때문에, 신호가 있을 때만 검사하면 확인은 영영 나가지 못한다.
 """
 
 from __future__ import annotations
@@ -272,9 +278,6 @@ def notify_strategy_trade(*, force: bool = False) -> dict[str, Any]:
             "triggers": triggers,
         }
 
-    if not triggers:
-        return {"sent": False, "reason": "매수·매도 신호가 없습니다.", "triggers": []}
-
     now = datetime.now(KST)
     today = now.strftime("%Y-%m-%d")
     sent_log = _load_sent_log()
@@ -284,6 +287,8 @@ def notify_strategy_trade(*, force: bool = False) -> dict[str, Any]:
     # 하루가 지나가는 것을 막기 위한 것이다.
     # ① 요청해 둔 주문이 체결됐는지 먼저 본다. 체결됐으면 확인 한 줄을 보내고 기록을 지운다 —
     #    지워야 다음에 같은 회차 신호가 나면 다시 전체 메시지로 나간다.
+    #    이 검사는 트리거 유무와 무관하게 돌아야 한다: 주문을 넣는 순간 그 회차가 보유로 바뀌어
+    #    바로 그 트리거가 사라지므로, 신호가 있을 때만 검사하면 확인은 영영 나가지 못한다.
     held = _held_state(view)
     index_by_ticker = {
         row["ticker"]: strategy["index"]
@@ -319,6 +324,9 @@ def notify_strategy_trade(*, force: bool = False) -> dict[str, Any]:
     else:
         lines.extend(build_repeat_line(trigger) for trigger in repeats)
     if not lines:
+        if not triggers:
+            # 확인할 체결도 신호도 없다 — 10분마다 도는 배치라 여기서 DB 를 건드리면 무의미한 쓰기만 쌓인다.
+            return {"sent": False, "reason": "매수·매도 신호가 없습니다.", "triggers": []}
         _save_sent_log(sent_log)
         return {"sent": False, "reason": "오늘 이미 발송한 신호입니다.", "triggers": triggers}
 
