@@ -624,38 +624,41 @@ export function MomentumClient() {
         },
       },
       {
-        headerName: "예상",
-        field: "expected_rank",
-        headerTooltip:
-          "다음 주 예상 순위 — 오늘까지의 가격으로 같은 선정 규칙을 돌린 순위 (편입 예상 1~N, 그 아래는 점수순). 자격 미달은 '-'",
-        width: 56,
-        type: "numericColumn",
-        valueFormatter: (p) => (p.value == null ? "-" : String(p.value)),
-      },
-      {
         headerName: "연속",
         field: "streak_weeks",
-        headerTooltip: "이번 포트폴리오까지 몇 주 연속 편입됐는지 (신규 = 이번 주 첫 편입, 최대 12주 추적)",
-        width: 60,
-        valueFormatter: (p) => (p.value == null ? "-" : p.value <= 1 ? "신규" : p.value >= 12 ? "12+" : `${p.value}주`),
-        cellStyle: (p) => ({
-          color: p.value != null && p.value <= 1 && !p.data?.is_reserve ? "var(--up-color, #d64545)" : "inherit",
-        }),
+        headerTooltip:
+          "이번 포트폴리오까지 몇 주 연속 편입됐는지 (신규 = 이번 주 첫 편입, 최대 12주 추적). " +
+          "화살표는 다음 주 예상 — →유지/→신규(초록), →편출(빨강). 확정은 교체일 직전 판정일 종가.",
+        width: 108,
+        cellDataType: "text",
+        cellRenderer: (p: { value?: number | null; data?: PickRow }) => {
+          const streak =
+            p.value == null ? "-" : p.value <= 1 ? "신규" : p.value >= 12 ? "12+" : `${p.value}주`;
+          const isNewPick = p.value != null && p.value <= 1 && !p.data?.is_reserve;
+          const held = Boolean(p.data && !p.data.is_reserve && !p.data.is_expected_only);
+          // 다음 주 예상 — 보유(선정) 행은 유지/편출, 그 밖(차순위·예상 전용)은 신규 예상만 표시.
+          let next: React.ReactNode = null;
+          if (p.data?.next_week_expected) {
+            next = <span style={{ color: "#2f9e44", fontWeight: 700 }}> →{held ? "유지" : "신규"}</span>;
+          } else if (held) {
+            next = <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}> →편출</span>;
+          }
+          return (
+            <span>
+              <span style={{ color: isNewPick ? "var(--up-color, #d64545)" : "inherit" }}>{streak}</span>
+              {next}
+            </span>
+          );
+        },
       },
       {
-        headerName: "다음주",
-        field: "next_week_expected",
-        headerTooltip:
-          "오늘까지의 가격(실시간 반영)으로 같은 규칙을 돌렸을 때의 다음 주 예상 — 유지(보유 중·계속 편입) / 신규(새로 편입) / -(편출 예상). 확정은 교체일 직전 판정일 종가",
-        width: 64,
-        // boolean 필드는 AG Grid 가 체크박스로 자동 렌더링하므로 텍스트로 강제한다.
-        cellDataType: "text",
-        cellRenderer: (p: { value?: boolean; data?: PickRow }) => {
-          if (!p.value) return <span style={{ color: "var(--text-muted)" }}>-</span>;
-          // 이번 달 보유(선정분)면 계속 편입 예상 = 유지, 차순위·표 밖 예상 행은 새로 편입 예상 = 신규.
-          const label = p.data && !p.data.is_reserve && !p.data.is_expected_only ? "유지" : "신규";
-          return <span style={{ color: "#2f9e44", fontWeight: 700 }}>{label}</span>;
-        },
+        headerName: "수익률",
+        field: "entry_return_pct",
+        headerTooltip: "편입 후 수익률 — 연속 편입이 시작된 교체일 시가 대비 현재가. 보유 중인 종목만 표시.",
+        width: 92,
+        type: "numericColumn",
+        valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number)),
+        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
       },
       {
         headerName: "고점",
@@ -735,15 +738,6 @@ export function MomentumClient() {
         type: "numericColumn",
         valueFormatter: (p) => formatPrice(p.value, p.data?.currency),
       },
-      {
-        headerName: "수익률",
-        field: "entry_return_pct",
-        headerTooltip: "편입 후 수익률 — 연속 편입이 시작된 교체일 시가 대비 현재가. 보유 중인 종목만 표시.",
-        width: 92,
-        type: "numericColumn",
-        valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number)),
-        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
-      },
       // 시가총액 소스(네이버)가 한국 전용이라 한국 풀에서만 보여준다.
       ...(picksCountry === "kor"
         ? [
@@ -771,43 +765,6 @@ export function MomentumClient() {
           cellStyle: (p) => ({ color: signColor(p.value) }),
         }),
       ),
-      {
-        headerName: "판정일-단기",
-        field: "signal_short_pct",
-        headerTooltip: "판정일 종가 기준 단기 이평선 이격 — 이번 달 선정에 쓰인 값 (음수면 후보 제외)",
-        width: 108,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value, 1),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
-      },
-      {
-        headerName: "판정일-장기",
-        field: "signal_long_pct",
-        headerTooltip: "판정일 종가 기준 장기 이평선 이격 = 이번 달 선정 점수",
-        width: 108,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value, 1),
-        // 선정 점수라 볼드 유지, 색은 부호 색 규칙.
-        cellStyle: (p) => ({ fontWeight: 700, color: signColor(p.value) }),
-      },
-      {
-        headerName: "현재-단기",
-        field: "current_short_pct",
-        headerTooltip: "오늘까지의 가격(실시간 반영) 기준 단기 이격 — 다음달 예상 판정에 쓰이는 값",
-        width: 100,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value, 1),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
-      },
-      {
-        headerName: "현재-장기",
-        field: "current_long_pct",
-        headerTooltip: "오늘까지의 가격(실시간 반영) 기준 장기 이격 — 다음달 예상 판정에 쓰이는 값",
-        width: 100,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value, 1),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
-      },
     ];
     // 월별 라벨·국가·업종 유무가 선정 응답에 실려 온다 — 바뀌면(월 전환·풀 전환) 컬럼도 다시 만든다.
   }, [hasIndustryData, monthlyLabels, picksCountry]);
