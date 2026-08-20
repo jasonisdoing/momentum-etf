@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
 from typing import Any
 
 from config import CACHE_TTL_COMPUTE
@@ -20,6 +22,22 @@ logger = get_app_logger()
 
 # 불러오기 결과를 잠시 보관 — '적용' 이 재호출 없이 이 값을 쓴다(일일 호출 제한 절약).
 _FETCH_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="broker-balance")
+
+# NH API 호출 간격 — 유량 제한(IGW42902, 엔드포인트별 초당 제한)에 걸리지 않게
+# **모든 호출을 최소 1초 간격**으로 직렬화한다. 연속조회 페이지·계좌 순회 포함.
+_MIN_CALL_INTERVAL_SECONDS = 1.0
+_throttle_lock = threading.Lock()
+_last_call_at = 0.0
+
+
+def _throttle() -> None:
+    global _last_call_at
+    with _throttle_lock:
+        wait = _last_call_at + _MIN_CALL_INTERVAL_SECONDS - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _last_call_at = time.monotonic()
+
 
 # 등록된 커넥터 — 화면 셀렉트가 이 목록을 그대로 쓴다.
 PROVIDERS: tuple[dict[str, str], ...] = ({"id": "NAMU_PLUG", "name": "나무증권 (NH PLUG)"},)
@@ -64,6 +82,7 @@ def _namu_call(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     except ImportError as exc:
         raise BrokerApiError("nhplug 패키지가 설치돼 있지 않습니다 (pip install nhplug).") from exc
     try:
+        _throttle()
         return call(path, payload)
     except NhplugError as exc:
         raise BrokerApiError(f"나무증권 API 오류: {exc.message} (코드 {exc.code})") from exc
@@ -99,8 +118,12 @@ def _namu_call_paged(path: str, payload: dict[str, Any], list_key: str = "Output
             "content-type": "application/json; charset=UTF-8",
         }
         if cts:
+            # 연속 요청은 키(cts)와 플래그(cts_flag=Y) **둘 다** 필요하다 — 키만 보내면
+            # 서버가 같은 첫 페이지를 반복해 돌려준다(실측).
             headers["cts"] = cts
+            headers["cts_flag"] = "Y"
         try:
+            _throttle()
             res = requests.post(url, headers=headers, data=body, timeout=10)
         except requests.RequestException as exc:
             raise BrokerApiError(f"나무증권 API 네트워크 오류: {exc}") from exc
@@ -172,22 +195,40 @@ def list_broker_accounts(provider: str) -> list[dict[str, Any]]:
         }
         # 계좌 유형에 따라 잔고 API 가 거부하는 계좌가 있다(종합/CMA 등) — 표시로 구분한다.
         try:
-            data = _namu_balance(account_no)
-            summary = data.get("Output_0", {}) or {}
-            holdings = data.get("Output_1", []) or []
-            row.update(
-                {
-                    "ok": True,
-                    "cash": float(summary.get("dca") or 0),
-                    "holdings_count": len(holdings),
-                }
-            )
+            cash, holdings = _normalize_balance(_namu_balance(account_no))
+            row.update({"ok": True, "cash": cash, "holdings_count": len(holdings)})
         except BrokerApiError as exc:
             row["error"] = str(exc)
         rows.append(row)
     # 조회 가능한 계좌를 위로
     rows.sort(key=lambda r: (not r["ok"], r["account_no"]))
     return rows
+
+
+def _normalize_balance(data: dict[str, Any]) -> tuple[float, list[dict[str, Any]]]:
+    """잔고 원본 → (현금 D+2, 실보유 목록). 확인 미리보기와 동기화가 같은 기준을 쓴다.
+
+    빈 티커 행(집계/공백)과 잔량 0 행(당일 전량 매도)은 보유가 아니다 — 원시 행을
+    그대로 세면 종목 수가 부풀려 보인다.
+    """
+    summary = data.get("Output_0", {}) or {}
+    holdings: list[dict[str, Any]] = []
+    for item in data.get("Output_1", []) or []:
+        ticker = str(item.get("iem_cd") or "").strip()
+        quantity = float(item.get("rsdl_qty") or 0)
+        if not ticker or quantity <= 0:
+            continue
+        holdings.append(
+            {
+                "ticker": ticker,
+                "name": str(item.get("iem_nm") or "").strip(),
+                "quantity": quantity,
+                "average_buy_price": float(item.get("phs_pr") or 0),
+                "current_price": float(item.get("now_pr") or 0) or None,
+                "value": float(item.get("eal_amt") or 0) or None,
+            }
+        )
+    return float(summary.get("nxt2_dd_dca") or 0), holdings
 
 
 def fetch_broker_balance(provider: str, account_no: str) -> dict[str, Any]:
@@ -203,27 +244,12 @@ def fetch_broker_balance(provider: str, account_no: str) -> dict[str, Any]:
         raise BrokerApiError(f"등록되지 않은 커넥터입니다: {provider}")
     data = _namu_balance(account_no)
     summary = data.get("Output_0", {}) or {}
-
-    holdings: list[dict[str, Any]] = []
-    for item in data.get("Output_1", []) or []:
-        quantity = float(item.get("rsdl_qty") or 0)
-        if quantity <= 0:
-            continue
-        holdings.append(
-            {
-                "ticker": str(item.get("iem_cd") or "").strip(),
-                "name": str(item.get("iem_nm") or "").strip(),
-                "quantity": quantity,
-                "average_buy_price": float(item.get("phs_pr") or 0),
-                "current_price": float(item.get("now_pr") or 0) or None,
-                "value": float(item.get("eal_amt") or 0) or None,
-            }
-        )
+    cash, holdings = _normalize_balance(data)
 
     result = {
         "provider": provider,
         "account_no": account_no,
-        "cash": float(summary.get("nxt2_dd_dca") or 0),
+        "cash": cash,
         # 참고용 원본 요약 — 화면이 어떤 값을 썼는지 확인할 수 있게 함께 담는다.
         "cash_d0": float(summary.get("dca") or 0),
         "total_asset": float(summary.get("tot_aet_amt") or 0),
