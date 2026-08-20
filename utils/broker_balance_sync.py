@@ -63,7 +63,9 @@ def _diff_lines(current: dict[str, Any] | None, fetched: dict[str, Any]) -> list
     """
     lines: list[str] = []
     current = current or {"cash_balance": 0.0, "holdings": []}
-    cash_before = round(float(current.get("cash_balance") or 0))
+    # 자산 화면과 같은 기준 — 다통화 맵의 KRW 값 우선(맵이 화면 표시의 단일 소스다).
+    cash_map = current.get("cash") or {}
+    cash_before = round(float(cash_map.get("KRW", current.get("cash_balance") or 0)))
     cash_after = round(float(fetched["cash"]))
     if cash_before != cash_after:
         lines.append(f"현금: {cash_before:,} → {cash_after:,}")

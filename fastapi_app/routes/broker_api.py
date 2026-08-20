@@ -68,10 +68,16 @@ def get_balance(
     except BrokerApiError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     current = load_portfolio_master(account_id) or {"cash_balance": 0.0, "holdings": []}
+    # 현금은 자산 화면과 같은 기준 — 다통화 맵의 계좌 통화 값 우선, 없으면 레거시.
+    from utils.settings_loader import get_account_settings
+
+    currency = str((get_account_settings(account_id) or {}).get("currency") or "KRW").strip().upper()
+    cash_map = current.get("cash") or {}
+    current_cash = float(cash_map.get(currency, current.get("cash_balance") or 0))
     return {
         "fetched": fetched,
         "current": {
-            "cash": float(current.get("cash_balance") or 0),
+            "cash": current_cash,
             "holdings": [
                 {
                     "ticker": str(row.get("ticker") or ""),
