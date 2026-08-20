@@ -66,9 +66,6 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 10,20,30,40,50 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
 0,10,20,30,40,50 10-14 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
 0,10,20 15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
-10,20,30,40,50 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py new_high_notify python scripts/new_high_notify.py >> logs/cron/new_high_notify.log 2>&1
-0,10,20,30,40,50 10-14 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py new_high_notify python scripts/new_high_notify.py >> logs/cron/new_high_notify.log 2>&1
-0,10,20 15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py new_high_notify python scripts/new_high_notify.py >> logs/cron/new_high_notify.log 2>&1
 
 # ── 합성 액션 알림 (평일 09:10~15:20, 10분 간격) ──────────────────────────
 # 합성 알람(mix_slack_enabled) 켠 계좌의 오늘의 액션을 감시해, 새 지시·수량 증가가

@@ -31,7 +31,6 @@ SystemAction = Literal[
     "leverage_ma_cross",
     "holdings_alarm",
     "strategy_trade_notify",
-    "new_high_notify",
     "db_backup",
 ]
 
@@ -106,17 +105,6 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "key": "new_high_notify",
-        "group": "장중 실행",
-        "job": "신고가 알림",
-        "target": "슬랙 알람 켠 종목풀 (진입·매도 예정 변화)",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:10~15:20 KST 10분 간격",
-        "command": "python scripts/new_high_notify.py",
-        # 전략 사고팔기 알림과 같은 슬롯 — 한국 장중만 감시한다(미국 풀을 켜면 시간대 재검토).
-        "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
-    },
-    {
         "key": "strategy_mix_notify",
         "group": "장중 실행",
         "job": "합성 액션 알림",
@@ -124,7 +112,7 @@ SCHEDULE_ROWS = [
         "run_location": "SERVER/LOCAL",
         "cadence": "평일 09:10~15:20 KST 10분 간격",
         "command": "python scripts/strategy_mix_notify.py",
-        # 신고가 알림과 같은 슬롯 — 지시가 줄어드는 변화(체결 반영)는 보내지 않는다.
+        # 전략 사고팔기 알림과 같은 슬롯 — 지시가 줄어드는 변화(체결 반영)는 보내지 않는다.
         "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
@@ -297,7 +285,6 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "leverage_ma_cross": "scripts/leverage_recommend_ma_cross.py",
     "holdings_alarm": "scripts/holdings_alarm.py",
     "strategy_trade_notify": "scripts/strategy_trade_notify.py",
-    "new_high_notify": "scripts/new_high_notify.py",
     "db_backup": "scripts/backup_mongo_full.py",
 }
 

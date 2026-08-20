@@ -94,23 +94,6 @@ def post_strategy_new_high_positions(
     )
 
 
-@router.post("/notify")
-def post_strategy_new_high_notify(
-    payload: dict = Body(default={}),
-    _: None = Depends(require_internal_token),
-) -> dict:
-    """지정 풀의 진입·매도 예정을 즉시 슬랙 발송한다 (화면 테스트 버튼 — 변화 비교 없이 전체).
-
-    body: ``{"pool": "kor"}``.
-    """
-    from utils.new_high_notify import notify_pool
-
-    pool = str((payload or {}).get("pool") or "").strip()
-    if not pool:
-        raise ValueError("'pool' 이 필요합니다.")
-    return notify_pool(pool, force=True)
-
-
 @router.post("/charts")
 def post_strategy_new_high_charts(
     payload: dict = Body(default={}),
