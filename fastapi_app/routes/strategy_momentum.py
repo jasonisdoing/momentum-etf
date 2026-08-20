@@ -56,9 +56,19 @@ def get_strategy_momentum(
     """저장된 설정을 반환한다. 저장된 값이 없거나 깨졌으면 에러다(기본값 대체 없음).
 
     ``pool`` 은 화면이 로컬스토리지에 기억해 둔 선택이다 — 없으면 저장분이 있는 첫 풀.
+    기억된 풀에 저장분이 없으면(다른 화면에서 고른 새 풀) 실패 대신 저장분이 있는 첫
+    풀의 설정을 돌려주고 ``requested_pool`` 로 알린다 — 화면이 그 풀을 '첫 설정 초안'
+    으로 띄운다(풀 셀렉트 전환과 같은 흐름). 새 풀의 값을 지어내는 게 아니다.
     """
-    settings = load_settings(pool)
+    requested = str(pool or "").strip().lower() or None
+    try:
+        settings = load_settings(requested)
+    except RuntimeError:
+        if requested is None:
+            raise  # 저장된 풀이 하나도 없음 — 진짜 에러
+        settings = load_settings(None)
     return {
+        "requested_pool": requested or settings["pool"],
         "settings": settings,
         # 풀별 저장 설정 맵 — 화면이 풀 셀렉트 전환 시 즉시 그 풀의 값을 채운다.
         "settings_by_pool": load_settings_map()["settings_by_pool"],
