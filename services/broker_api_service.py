@@ -195,8 +195,18 @@ def list_broker_accounts(provider: str) -> list[dict[str, Any]]:
         }
         # 계좌 유형에 따라 잔고 API 가 거부하는 계좌가 있다(종합/CMA 등) — 표시로 구분한다.
         try:
-            cash, holdings = _normalize_balance(_namu_balance(account_no))
-            row.update({"ok": True, "cash": cash, "holdings_count": len(holdings)})
+            data = _namu_balance(account_no)
+            cash, holdings = _normalize_balance(data)
+            summary = data.get("Output_0", {}) or {}
+            row.update(
+                {
+                    "ok": True,
+                    "cash": cash,
+                    # 순자산금액(nas_amt) — 평가액+현금. 미리보기가 계좌 규모를 한눈에 보여준다.
+                    "net_asset": float(summary.get("nas_amt") or 0),
+                    "holdings_count": len(holdings),
+                }
+            )
         except BrokerApiError as exc:
             row["error"] = str(exc)
         rows.append(row)

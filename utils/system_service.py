@@ -43,12 +43,8 @@ _WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6]
 
 # 전략 사고팔기 알림 슬롯 — 평일 09:10~15:20 을 10분 간격으로.
 # 한국 장중(09:00~15:30)에서 개시 직후·마감 직전을 뺀 구간이다.
-_BROKER_SYNC_SLOTS = [
-    {"hour": hour, "minute": minute}
-    for hour in range(9, 16)
-    for minute in range(0, 60, 10)
-    if (hour, minute) <= (15, 40)
-]
+# 20분 간격(09:00~15:40) — 계좌당 2콜·1초 직렬화라 하루 42콜 수준. 15:40 이 마감 후 1회.
+_BROKER_SYNC_SLOTS = [{"hour": hour, "minute": minute} for hour in range(9, 16) for minute in (0, 20, 40)]
 
 _STRATEGY_TRADE_SLOTS = [
     {"hour": hour, "minute": minute}
@@ -92,7 +88,7 @@ SCHEDULE_ROWS = [
         "job": "증권사 잔고 동기화",
         "target": "API 연동(broker_api) 저장된 계좌",
         "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:00~15:40 KST 10분 간격",
+        "cadence": "평일 09:00~15:40 KST 20분 간격",
         "command": "python scripts/broker_balance_sync.py",
         # 15:40 마지막 회가 마감(15:30) 후 확정 상태를 담는다. 실패 슬랙은 시작·복구 1회씩.
         "schedule": {"slots": _BROKER_SYNC_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},

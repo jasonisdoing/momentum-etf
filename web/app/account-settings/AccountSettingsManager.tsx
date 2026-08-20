@@ -38,6 +38,7 @@ type BrokerAccountRow = {
   acct_type: string;
   ok: boolean;
   cash?: number;
+  net_asset?: number;
   holdings_count?: number;
   error?: string;
 };
@@ -517,7 +518,7 @@ function AccountRow({
               <option key={row.account_no} value={row.account_no} disabled={!row.ok}>
                 {row.masked}
                 {row.ok
-                  ? ` — D+2 예수금 ${(row.cash ?? 0).toLocaleString("ko-KR")} · ${row.holdings_count}종목`
+                  ? ` — 순자산 ${(row.net_asset ?? 0).toLocaleString("ko-KR")} · 예수금 ${(row.cash ?? 0).toLocaleString("ko-KR")} · ${row.holdings_count}종목`
                   : " — 조회 불가"}
               </option>
             ))}
