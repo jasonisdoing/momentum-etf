@@ -17,6 +17,7 @@ load_env_if_present()
 SystemAction = Literal[
     "data_aggregate",
     "broker_balance_sync",
+    "strategy_mix_notify",
     "cache_refresh",
     "cache_refresh_full",
     "market_hours_analysis",
@@ -113,6 +114,17 @@ SCHEDULE_ROWS = [
         "cadence": "평일 09:10~15:20 KST 10분 간격",
         "command": "python scripts/new_high_notify.py",
         # 전략 사고팔기 알림과 같은 슬롯 — 한국 장중만 감시한다(미국 풀을 켜면 시간대 재검토).
+        "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
+        "key": "strategy_mix_notify",
+        "group": "장중 실행",
+        "job": "합성 액션 알림",
+        "target": "합성 알람 켠 계좌 (오늘의 액션 신규·증가)",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 09:10~15:20 KST 10분 간격",
+        "command": "python scripts/strategy_mix_notify.py",
+        # 신고가 알림과 같은 슬롯 — 지시가 줄어드는 변화(체결 반영)는 보내지 않는다.
         "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
@@ -271,6 +283,7 @@ SCHEDULE_ROWS = [
 _SCRIPT_BY_ACTION: dict[str, str] = {
     "data_aggregate": "scripts/collect_data.py",
     "broker_balance_sync": "scripts/broker_balance_sync.py",
+    "strategy_mix_notify": "scripts/strategy_mix_notify.py",
     "cache_refresh": "scripts/stock_price_cache_updater.py",
     "cache_refresh_full": "scripts/stock_price_cache_updater.py",
     "market_hours_analysis": "scripts/analyze_market_hours.py",

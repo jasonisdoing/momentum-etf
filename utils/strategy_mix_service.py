@@ -99,6 +99,8 @@ def mix_accounts() -> list[dict[str, Any]]:
                 "order": inner.get("order"),
                 "currency": str(inner.get("currency") or "").strip().upper(),
                 "pool": pool,
+                # 오늘의 액션 슬랙 알람 토글 상태 — 화면 헤더가 그대로 보여준다.
+                "mix_slack_enabled": bool(inner.get("mix_slack_enabled")),
                 "pool_label": pool_names.get(pool),
             }
         )
@@ -215,6 +217,144 @@ def _sleeve_shares(
     if total <= 0:
         return 50.0, 50.0
     return round(sm_growth / total * 100.0, 4), round(nh_growth / total * 100.0, 4)
+
+
+_REBALANCE_BAND_PCT = 0.5  # 목표 비중과 이 미만 차이는 지시로 만들지 않는다(반올림·소액 잡음)
+
+_WEEKDAYS_KO = ("월", "화", "수", "목", "금", "토", "일")
+
+
+def _format_date_weekday(date: str) -> str:
+    from datetime import date as date_cls
+
+    try:
+        parsed = date_cls.fromisoformat(date)
+    except ValueError:
+        return date
+    return f"{date} ({_WEEKDAYS_KO[parsed.weekday()]})"
+
+
+def _build_action_groups(
+    holdings: list[dict[str, Any]],
+    actions: dict[str, Any],
+    next_trading_day: str | None,
+) -> list[dict[str, Any]]:
+    """오늘의 액션 — 체결일 묶음(매도 먼저, 같은 방향은 티커 순).
+
+    화면과 슬랙 알람이 **이 결과를 그대로** 쓴다 — 조립을 한 곳에 두어 둘이 어긋나지
+    않게 한다. 규칙은 화면에 있던 것 그대로:
+      · 목표는 흘러간 비중을 따라가므로, 밴드(0.5%p) 이상 차이만 지시로 만든다.
+      · 모멘텀 교체 확정분(미체결)은 교체일 시가 그룹, 나머지는 다음 거래일 그룹.
+      · 전량 매도·손절·이탈은 금액과 무관하게 항상 남긴다.
+    """
+    rebalance = actions["sm_rebalance"]
+    rebalance_buys = {row["ticker"] for row in rebalance["buys"]}
+    rebalance_sells = {row["ticker"] for row in rebalance["sells"]}
+    entry_tickers = {row["ticker"] for row in actions["nh_entries"]}
+    nh_event_tickers = entry_tickers | {row["ticker"] for row in actions["nh_sells"]}
+    sell_pending = [row["ticker"] for row in actions["sm_sells"]] + [row["ticker"] for row in actions["nh_sells"]]
+
+    rebalance_date = rebalance["fill_date"] if (not rebalance["is_filled"] and rebalance["fill_date"]) else None
+
+    sell_reason: dict[str, str] = {row["ticker"]: row["reason"] for row in actions["sm_sells"]}
+    for row in actions["nh_sells"]:
+        suffix = f", {row['return_pct']:+.2f}%" if row.get("return_pct") is not None else ""
+        sell_reason[row["ticker"]] = f"{row['reason']}{suffix}"
+
+    def label(ticker: str, name: str, quantity: float | None) -> str:
+        base = f"{name}({ticker})"
+        return base if not quantity else f"{base} {abs(int(quantity)):,}주"
+
+    row_by_ticker = {row["ticker"]: row for row in holdings}
+    items: list[dict[str, Any]] = []
+    for row in holdings:
+        trade = row.get("trade_quantity")
+        if not trade:
+            continue
+        ticker = row["ticker"]
+        is_rebalance = ticker in rebalance_buys or ticker in rebalance_sells
+        momentum_pending = (
+            rebalance_date is not None
+            and "sm" in (row.get("sources") or [])
+            and ticker not in nh_event_tickers
+            and not row.get("is_sell_all")
+        )
+        date = rebalance_date if (momentum_pending or is_rebalance) else next_trading_day
+        reason = sell_reason.get(ticker)
+        weight = float(row.get("weight_pct") or 0)
+        if not row.get("is_sell_all") and not (reason and trade < 0 and weight <= 0):
+            gap = abs(weight - float(row.get("current_weight_pct") or 0))
+            if gap < _REBALANCE_BAND_PCT:
+                continue
+        held = float(row.get("held_quantity") or 0) > 0
+        sell_reason_applies = bool(reason) and trade < 0 and weight <= 0
+        if row.get("is_sell_all"):
+            title = "교체 매도" if ticker in rebalance_sells else "전량 매도"
+        elif trade < 0:
+            title = "매도 예정" if sell_reason_applies else "비중 조정 매도"
+        elif held:
+            title = "비중 조정 매수"
+        elif ticker in rebalance_buys:
+            title = "교체 매수"
+        elif ticker in entry_tickers:
+            title = "신고가 진입"
+        else:
+            title = "신규 매수"
+        after = f" → 목표 {int(row['target_quantity']):,}주" if row.get("target_quantity") is not None else ""
+        if sell_reason_applies:
+            note = f"{after} ({reason})".strip()
+        elif row.get("is_sell_all"):
+            value = row.get("held_value")
+            note = (f"({value:,.0f}) " if value is not None else "") + "· 목표에 없는 보유 종목"
+        else:
+            note = f"{after} · {weight:.2f}%".strip()
+        items.append(
+            {
+                "key": f"act-{ticker}",
+                "ticker": ticker,
+                "side": "buy" if trade > 0 else "sell",
+                "title": title,
+                "text": f"{label(ticker, row.get('name') or ticker, trade)} {note}".strip(),
+                "date": date,
+                # 알람 비교용 — 새 지시·수량 증가만 발송하고 감소(체결 반영)는 조용히 넘긴다.
+                "quantity": abs(int(trade)),
+            }
+        )
+
+    # 매도 예정인데 매매수량이 0인 경우(목표가 아직 그대로라 차이가 없음)도 알려야 한다.
+    seen_keys = {item["key"] for item in items}
+    for ticker in sell_pending:
+        if f"act-{ticker}" in seen_keys:
+            continue
+        row = row_by_ticker.get(ticker)
+        if not row or float(row.get("held_quantity") or 0) <= 0 or float(row.get("weight_pct") or 0) > 0:
+            continue
+        items.append(
+            {
+                "key": f"act-{ticker}",
+                "ticker": ticker,
+                "side": "sell",
+                "title": "매도 예정",
+                "text": f"{label(ticker, row.get('name') or ticker, row.get('held_quantity'))} ({sell_reason.get(ticker) or '이탈'})",
+                "date": next_trading_day,
+                "quantity": abs(int(float(row.get("held_quantity") or 0))),
+            }
+        )
+        seen_keys.add(f"act-{ticker}")
+
+    by_date: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        by_date.setdefault(item["date"] or "", []).append(item)
+    groups = []
+    for date in sorted(by_date):
+        group_items = sorted(by_date[date], key=lambda x: (0 if x["side"] == "sell" else 1, x["ticker"]))
+        title = (
+            f"{_format_date_weekday(date)} 시가" + (" · 모멘텀 교체 포함" if date == rebalance_date else "")
+            if date
+            else "체결일 미정"
+        )
+        groups.append({"key": date or "unscheduled", "title": title, "items": group_items})
+    return groups
 
 
 def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str, Any]:
@@ -481,7 +621,7 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
                 }
             )
 
-    return {
+    payload = {
         "computed_at": datetime.now().astimezone().isoformat(),
         "pool": pool_norm,
         # 화면이 표시용 시세를 60초마다 갱신할 때 쓴다(시세 소스가 국가별로 다르다).
@@ -564,6 +704,9 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
             "sleeve_rebalance_today": sleeve_rebalance_today,
         },
     }
+    # 오늘의 액션 — 화면·슬랙 알람이 같은 결과를 쓴다(조립 단일 소스).
+    payload["actions"]["groups"] = _build_action_groups(payload["holdings"], payload["actions"], next_trading_day)
+    return payload
 
 
 def _merge_trades(sm: dict[str, Any], nh: dict[str, Any]) -> list[dict[str, Any]]:

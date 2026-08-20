@@ -37,6 +37,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "benchmark",
     "market_regime_index",
     "mix_pool",
+    "mix_slack_enabled",
     "broker_api",
     "URL",
     "ma_alarm_enabled",
@@ -195,6 +196,9 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
                     f"'{account_id}' 의 mix_pool 은 {', '.join(allowed)} 중 하나여야 합니다: {raw}"
                 )
             cleaned[key] = pool
+        elif key == "mix_slack_enabled":
+            # 합성 오늘의 액션 슬랙 알람 — 새 지시·수량 증가가 생기면 발송한다.
+            cleaned[key] = bool(raw)
         elif key == "broker_api":
             # 증권사 API 연동 — {provider, account_no}. 없음이면 null.
             # provider 는 커넥터 레지스트리에 있어야 하고, 계좌번호는 화면의 '확인' 이

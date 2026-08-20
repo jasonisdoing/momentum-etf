@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
 
@@ -45,3 +46,18 @@ def get_strategy_mix_backtest(
     from utils.strategy_mix_service import run_mix_backtest
 
     return run_mix_backtest(pool, months)
+
+
+class SlackTestPayload(BaseModel):
+    account_id: str
+
+
+@router.post("/slack-test")
+def post_slack_test(payload: SlackTestPayload, _: None = Depends(require_internal_token)) -> dict:
+    """오늘의 액션을 즉시 슬랙으로 발송한다(테스트) — 변화 여부와 무관, 상태 미변경."""
+    from utils.strategy_mix_notify import send_test
+
+    try:
+        return send_test(payload.account_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
