@@ -6,9 +6,16 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
-from services.broker_api_service import BrokerApiError, list_broker_accounts, list_providers
+from services.broker_api_service import (
+    BrokerApiError,
+    cached_broker_balance,
+    fetch_broker_balance,
+    list_broker_accounts,
+    list_providers,
+)
 
 router = APIRouter(prefix="/internal/broker-api", tags=["broker-api"])
 
@@ -28,3 +35,98 @@ def get_accounts(
         return {"accounts": list_broker_accounts(provider.strip().upper())}
     except BrokerApiError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _linked_account(account_id: str) -> tuple[str, str]:
+    """계좌 설정에서 연동 정보(provider, account_no)를 찾는다 — 없으면 400."""
+    from utils.settings_loader import get_account_settings
+
+    try:
+        settings = get_account_settings(account_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"계좌 설정을 찾을 수 없습니다: {account_id}") from exc
+    linked = settings.get("broker_api") or {}
+    provider = str(linked.get("provider") or "").strip().upper()
+    account_no = str(linked.get("account_no") or "").strip()
+    if not provider or not account_no:
+        raise HTTPException(status_code=400, detail=f"'{account_id}' 에 증권사 API 연동이 저장돼 있지 않습니다.")
+    return provider, account_no
+
+
+@router.get("/balance")
+def get_balance(
+    account_id: str = Query(...),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """연동 계좌의 잔고를 불러와 현재 저장값과 나란히 돌려준다 — 화면이 차이를 보여준다."""
+    from utils.portfolio_io import load_portfolio_master
+
+    provider, account_no = _linked_account(account_id)
+    try:
+        fetched = fetch_broker_balance(provider, account_no)
+    except BrokerApiError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    current = load_portfolio_master(account_id) or {"cash_balance": 0.0, "holdings": []}
+    return {
+        "fetched": fetched,
+        "current": {
+            "cash": float(current.get("cash_balance") or 0),
+            "holdings": [
+                {
+                    "ticker": str(row.get("ticker") or ""),
+                    "name": str(row.get("name") or ""),
+                    "quantity": float(row.get("quantity") or 0),
+                    "average_buy_price": float(row.get("average_buy_price") or 0),
+                }
+                for row in current.get("holdings") or []
+            ],
+        },
+    }
+
+
+class ApplyPayload(BaseModel):
+    account_id: str
+
+
+@router.post("/apply")
+def apply_balance(payload: ApplyPayload, _: None = Depends(require_internal_token)) -> dict:
+    """가장 최근 불러온 잔고를 portfolio_master 에 반영한다.
+
+    재호출하지 않고 불러오기 캐시를 쓴다(일일 호출 제한 절약). 캐시가 만료됐으면
+    임의로 다시 부르지 않고 다시 불러오라고 안내한다 — 사용자가 본 값과 저장되는
+    값이 어긋나면 안 된다.
+    기존 보유의 메모·매수일·정렬은 보존하고, 수량·평단·현금만 API 값으로 바꾼다.
+    """
+    from utils.portfolio_io import load_portfolio_master, save_portfolio_master
+    from utils.settings_loader import get_account_settings
+
+    provider, account_no = _linked_account(payload.account_id)
+    fetched = cached_broker_balance(provider, account_no)
+    if fetched is None:
+        raise HTTPException(status_code=409, detail="불러온 잔고가 만료됐습니다 — '잔고 불러오기'를 다시 눌러주세요.")
+
+    current = load_portfolio_master(payload.account_id) or {"holdings": []}
+    existing_by_ticker = {str(row.get("ticker") or ""): row for row in current.get("holdings") or []}
+    currency = str((get_account_settings(payload.account_id) or {}).get("currency") or "KRW").strip().upper()
+
+    holdings = []
+    for index, row in enumerate(fetched["holdings"]):
+        base = existing_by_ticker.get(row["ticker"], {})
+        holdings.append(
+            {
+                "ticker": row["ticker"],
+                "name": row["name"] or base.get("name") or row["ticker"],
+                "quantity": row["quantity"],
+                "average_buy_price": row["average_buy_price"],
+                "currency": base.get("currency") or currency,
+                "first_buy_date": base.get("first_buy_date") or "",
+                "last_buy_date": base.get("last_buy_date") or "",
+                "memo": base.get("memo") or "",
+                "sort_order": base.get("sort_order", index),
+            }
+        )
+
+    ok = save_portfolio_master(payload.account_id, holdings, cash_balance=fetched["cash"], updated_by=provider)
+    if not ok:
+        raise HTTPException(status_code=500, detail="portfolio_master 저장에 실패했습니다.")
+    return {"ok": True, "cash": fetched["cash"], "holdings_count": len(holdings)}

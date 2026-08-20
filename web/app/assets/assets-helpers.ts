@@ -69,6 +69,8 @@ export type AccountSummary = {
   intl_shares_value: number | null;
   intl_shares_change: number | null;
   updated_at: string | null;
+  /** 마지막 변경 주체 — "user"(수기) 또는 커넥터 id(예: "NAMU_PLUG"). */
+  updated_by?: string | null;
   valuation_krw: number;
   total_assets_krw: number;
   holdings_count: number;
@@ -460,3 +462,10 @@ export function stopActionButtonClick(event: ReactMouseEvent<HTMLButtonElement>)
   event.stopPropagation();
 }
 
+
+/** 변경 주체 표시명 — 커넥터 id 를 사람이 읽는 이름으로. */
+export function formatUpdatedBy(updatedBy: string | null | undefined): string {
+  if (!updatedBy || updatedBy === "user") return "사용자";
+  if (updatedBy === "NAMU_PLUG") return "나무증권";
+  return updatedBy;
+}

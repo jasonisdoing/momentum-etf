@@ -26,6 +26,7 @@ import {
   assetsGridTheme,
   buildAutoSaveToastMessage,
   buildCashGridRow,
+  formatUpdatedBy,
   buildDirtyCellKey,
   buildGridRowId,
   buildHoldingEditableSnapshot,
@@ -1216,6 +1217,11 @@ export function AccountHoldingsDetailPanel({
             >
               현금 저장
             </button>
+            {summary.updated_at ? (
+              <span className="text-muted small">
+                최종 변경 {new Date(summary.updated_at).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} · {formatUpdatedBy(summary.updated_by)}
+              </span>
+            ) : null}
           </div>
           <div className="d-flex align-items-center gap-2 ms-auto">
             <GridToolbarButton

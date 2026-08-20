@@ -667,6 +667,7 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
                 "asset_helper": acc.get("asset_helper"),
                 "intl_shares_sort_order": acc.get("intl_shares_sort_order"),
                 "updated_at": acc.get("updated_at"),
+                "updated_by": acc.get("updated_by"),
             }
     return None
 
@@ -681,8 +682,13 @@ def save_portfolio_master(
     intl_shares_value: float | None = None,
     intl_shares_change: float | None = None,
     intl_shares_sort_order: int | None = None,
+    updated_by: str = "user",
 ) -> bool:
-    """Save/Update one account's balance within the consolidated portfolio_master document."""
+    """Save/Update one account's balance within the consolidated portfolio_master document.
+
+    ``updated_by`` — 마지막 변경 주체. 수기 경로는 기본값 "user", 증권사 동기화·배치는
+    커넥터 id(예: "NAMU_PLUG")를 넘긴다. 화면이 '누가 언제 바꿨는지' 를 이 값으로 보여준다.
+    """
     db = get_db_connection()
     if db is None:
         return False
@@ -720,6 +726,7 @@ def save_portfolio_master(
 
                 acc["holdings"] = holdings
                 acc["updated_at"] = _now_kst()
+                acc["updated_by"] = str(updated_by or "user")
                 found = True
                 break
 
@@ -736,6 +743,7 @@ def save_portfolio_master(
                 "cash_balance": float(cash_balance or 0.0),
                 "holdings": holdings,
                 "updated_at": _now_kst(),
+                "updated_by": str(updated_by or "user"),
             }
             if cash_balance_native is not None:
                 new_acc["cash_balance_native"] = float(cash_balance_native)

@@ -42,6 +42,12 @@ type BrokerAccountRow = {
   error?: string;
 };
 
+type BrokerHolding = { ticker: string; name: string; quantity: number; average_buy_price: number };
+type BrokerBalanceDiff = {
+  fetched: { cash: number; cash_d0: number; holdings: BrokerHolding[] };
+  current: { cash: number; holdings: BrokerHolding[] };
+};
+
 type ApiResponse = {
   accounts?: AccountEntry[];
   market_indices?: MarketIndexOption[];
@@ -119,6 +125,52 @@ function AccountRow({
   const [brokerProviders, setBrokerProviders] = useState<BrokerProvider[]>([]);
   const [brokerAccounts, setBrokerAccounts] = useState<BrokerAccountRow[] | null>(null);
   const [brokerChecking, setBrokerChecking] = useState(false);
+  // 잔고 불러오기 — 저장된 연동으로 API 잔고를 받아 현재 저장값과의 차이를 보여준다.
+  const [balanceDiff, setBalanceDiff] = useState<BrokerBalanceDiff | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState(false);
+  const [applying, setApplying] = useState(false);
+
+  const fetchBalance = async () => {
+    try {
+      setBalanceLoading(true);
+      setBalanceDiff(null);
+      const resp = await fetch(`/api/broker-api/balance?account_id=${encodeURIComponent(account.account_id)}`, {
+        cache: "no-store",
+      });
+      const data = (await resp.json()) as (BrokerBalanceDiff & { error?: string }) | { error?: string };
+      if (!resp.ok || "error" in data && data.error) {
+        toast.error(("error" in data && data.error) || "잔고를 불러오지 못했습니다.");
+        return;
+      }
+      setBalanceDiff(data as BrokerBalanceDiff);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "잔고 조회 중 오류가 발생했습니다.");
+    } finally {
+      setBalanceLoading(false);
+    }
+  };
+
+  const applyBalance = async () => {
+    try {
+      setApplying(true);
+      const resp = await fetch("/api/broker-api/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_id: account.account_id }),
+      });
+      const data = (await resp.json()) as { ok?: boolean; holdings_count?: number; error?: string };
+      if (!resp.ok || data.error || !data.ok) {
+        toast.error(data.error ?? "잔고 반영에 실패했습니다.");
+        return;
+      }
+      toast.success(`반영 완료 — 보유 ${data.holdings_count}종목 · 현금 갱신`);
+      setBalanceDiff(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "잔고 반영 중 오류가 발생했습니다.");
+    } finally {
+      setApplying(false);
+    }
+  };
 
   useEffect(() => {
     // 커넥터 목록 — 등록된 것만 셀렉트에 올려 오타를 원천 차단한다.
@@ -475,7 +527,121 @@ function AccountRow({
             저장된 계좌: {brokerAccountNo.slice(0, 3)}***{brokerAccountNo.slice(-2)}
           </span>
         ) : null}
+        {/* 저장된 연동이 있어야 불러올 수 있다 — 셀렉트만 바꾼 상태에서는 먼저 저장. */}
+        {account.broker_api?.account_no ? (
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-primary"
+            disabled={balanceLoading}
+            onClick={() => void fetchBalance()}
+          >
+            {balanceLoading ? "동기화 중…" : "잔고 동기화"}
+          </button>
+        ) : null}
       </div>
+
+      {balanceDiff ? (
+        <div
+          style={{
+            margin: "4px 0 10px",
+            padding: "10px 12px",
+            borderRadius: 8,
+            background: "var(--bs-secondary-bg, #f1f5f9)",
+            fontSize: "var(--fs-sm)",
+          }}
+        >
+          {(() => {
+            const fetchedBy = new Map(balanceDiff.fetched.holdings.map((h) => [h.ticker, h]));
+            const currentBy = new Map(balanceDiff.current.holdings.map((h) => [h.ticker, h]));
+            const tickers = [...new Set([...fetchedBy.keys(), ...currentBy.keys()])].sort();
+            const stateOf = (tk: string): string => {
+              const f = fetchedBy.get(tk);
+              const c = currentBy.get(tk);
+              if (!c) return "추가";
+              if (!f) return "삭제";
+              if (f.quantity !== c.quantity) return "수량 차이";
+              if (Math.round(f.average_buy_price) !== Math.round(c.average_buy_price)) return "평단 차이";
+              return "일치";
+            };
+            const diffCount = tickers.filter((tk) => stateOf(tk) !== "일치").length;
+            const cashChanged = Math.round(balanceDiff.fetched.cash) !== Math.round(balanceDiff.current.cash);
+            const number = (v: number | undefined) => (v == null ? "-" : v.toLocaleString("ko-KR"));
+            const cellStyle: React.CSSProperties = { padding: "2px 10px 2px 0", textAlign: "right" };
+            const diffColor = "var(--bs-danger, #dc3545)";
+            return (
+              <>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                  시스템 vs 증권사 API{" "}
+                  <span style={{ fontWeight: 500, color: "var(--text-muted)" }}>
+                    (현금은 D+2 예수금 기준 · 종목 차이 {diffCount}건{cashChanged ? " · 현금 차이" : ""})
+                  </span>
+                </div>
+                <div style={{ marginBottom: 6, color: cashChanged ? diffColor : "var(--text-muted)" }}>
+                  현금 — 시스템 {number(balanceDiff.current.cash)} · API {number(balanceDiff.fetched.cash)}
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ borderCollapse: "collapse", whiteSpace: "nowrap" }}>
+                    <thead>
+                      <tr style={{ color: "var(--text-muted)" }}>
+                        <th style={{ ...cellStyle, textAlign: "left" }}>종목</th>
+                        <th style={cellStyle}>시스템 수량</th>
+                        <th style={cellStyle}>API 수량</th>
+                        <th style={cellStyle}>시스템 평단</th>
+                        <th style={cellStyle}>API 평단</th>
+                        <th style={{ ...cellStyle, textAlign: "left" }}>상태</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tickers.map((tk) => {
+                        const f = fetchedBy.get(tk);
+                        const c = currentBy.get(tk);
+                        const state = stateOf(tk);
+                        const changed = state !== "일치";
+                        const qtyDiff = f && c && f.quantity !== c.quantity;
+                        const avgDiff = f && c && Math.round(f.average_buy_price) !== Math.round(c.average_buy_price);
+                        return (
+                          <tr key={tk} style={changed ? { fontWeight: 600 } : undefined}>
+                            <td style={{ ...cellStyle, textAlign: "left" }}>
+                              {(f?.name || c?.name || tk)}({tk})
+                            </td>
+                            <td style={cellStyle}>{number(c?.quantity)}</td>
+                            <td style={{ ...cellStyle, color: !c || qtyDiff ? diffColor : undefined }}>
+                              {number(f?.quantity)}
+                            </td>
+                            <td style={cellStyle}>{number(c?.average_buy_price)}</td>
+                            <td style={{ ...cellStyle, color: !c || avgDiff ? diffColor : undefined }}>
+                              {number(f?.average_buy_price)}
+                            </td>
+                            <td style={{ ...cellStyle, textAlign: "left", color: changed ? diffColor : "var(--text-muted)" }}>
+                              {state}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center" }}>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary"
+                    disabled={applying || (diffCount === 0 && !cashChanged)}
+                    onClick={() => void applyBalance()}
+                  >
+                    {applying ? "반영 중…" : "증권사 값으로 반영"}
+                  </button>
+                  <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setBalanceDiff(null)}>
+                    닫기
+                  </button>
+                  {diffCount === 0 && !cashChanged ? (
+                    <span style={{ color: "var(--text-muted)" }}>차이가 없습니다.</span>
+                  ) : null}
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      ) : null}
 
       <div style={{ ...rowStyle, marginBottom: 0 }}>
         <span style={{ ...labelStyle, width: 60 }}>URL</span>

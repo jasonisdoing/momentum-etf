@@ -12,9 +12,14 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from config import CACHE_TTL_COMPUTE
 from utils.logger import get_app_logger
+from utils.ttl_cache import TtlCache
 
 logger = get_app_logger()
+
+# 불러오기 결과를 잠시 보관 — '적용' 이 재호출 없이 이 값을 쓴다(일일 호출 제한 절약).
+_FETCH_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="broker-balance")
 
 # 등록된 커넥터 — 화면 셀렉트가 이 목록을 그대로 쓴다.
 PROVIDERS: tuple[dict[str, str], ...] = ({"id": "NAMU_PLUG", "name": "나무증권 (NH PLUG)"},)
@@ -113,3 +118,51 @@ def list_broker_accounts(provider: str) -> list[dict[str, Any]]:
     # 조회 가능한 계좌를 위로
     rows.sort(key=lambda r: (not r["ok"], r["account_no"]))
     return rows
+
+
+def fetch_broker_balance(provider: str, account_no: str) -> dict[str, Any]:
+    """잔고를 표준형으로 정규화해 돌려주고, '적용' 용으로 잠시 캐시한다.
+
+    필드 근거 (공식 openapi.json — /krstock/inquiry/v1/balance):
+      - 현금 = `nxt2_dd_dca` (D+2 예수금) — 미결제 매수·매도가 반영된 실질 현금.
+        `dca`(예수금)는 결제 전 금액이라 매수 직후에는 실제보다 크게 나온다.
+      - 수량 = `rsdl_qty` (잔량수량) — 미결제 포함 현재 잔량.
+      - 평단 = `phs_pr` (매입가격).
+    """
+    if provider != "NAMU_PLUG":
+        raise BrokerApiError(f"등록되지 않은 커넥터입니다: {provider}")
+    data = _namu_balance(account_no)
+    summary = data.get("Output_0", {}) or {}
+
+    holdings: list[dict[str, Any]] = []
+    for item in data.get("Output_1", []) or []:
+        quantity = float(item.get("rsdl_qty") or 0)
+        if quantity <= 0:
+            continue
+        holdings.append(
+            {
+                "ticker": str(item.get("iem_cd") or "").strip(),
+                "name": str(item.get("iem_nm") or "").strip(),
+                "quantity": quantity,
+                "average_buy_price": float(item.get("phs_pr") or 0),
+                "current_price": float(item.get("now_pr") or 0) or None,
+                "value": float(item.get("eal_amt") or 0) or None,
+            }
+        )
+
+    result = {
+        "provider": provider,
+        "account_no": account_no,
+        "cash": float(summary.get("nxt2_dd_dca") or 0),
+        # 참고용 원본 요약 — 화면이 어떤 값을 썼는지 확인할 수 있게 함께 담는다.
+        "cash_d0": float(summary.get("dca") or 0),
+        "total_asset": float(summary.get("tot_aet_amt") or 0),
+        "holdings": holdings,
+    }
+    _FETCH_CACHE.set(_FETCH_CACHE.make_key(provider, account_no), result)
+    return result
+
+
+def cached_broker_balance(provider: str, account_no: str) -> dict[str, Any] | None:
+    """가장 최근 불러오기 결과 — '적용' 이 재호출 없이 쓴다. 없으면 None."""
+    return _FETCH_CACHE.get(_FETCH_CACHE.make_key(provider, account_no))
