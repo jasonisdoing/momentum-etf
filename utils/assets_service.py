@@ -66,6 +66,7 @@ def load_cash_accounts() -> dict[str, list[dict[str, Any]]]:
                     else None
                 ),
                 "updated_at": to_iso_string(account_doc.get("updated_at")),
+                "updated_by": str(account_doc.get("updated_by") or ""),
             }
         )
 
@@ -97,6 +98,7 @@ def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, str]:
             "intl_shares_value": normalize_nullable_number(update.get("intl_shares_value")),
             "intl_shares_change": normalize_nullable_number(update.get("intl_shares_change")),
             "updated_at": now,
+            "updated_by": "user",
         }
 
         # 통화별 native 현금 맵 동기화 (신 형식 우선, 없으면 레거시 필드에서 합성).

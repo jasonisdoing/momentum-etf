@@ -330,6 +330,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                 "intl_shares_value": (cash_info or {}).get("intl_shares_value"),
                 "intl_shares_change": (cash_info or {}).get("intl_shares_change"),
                 "updated_at": (cash_info or {}).get("updated_at"),
+                "updated_by": (cash_info or {}).get("updated_by"),
                 "valuation_krw": valuation_krw,
                 "total_assets_krw": valuation_krw + cash_balance_krw,
                 "holdings_count": len([r for r in account_rows if str(r.get("ticker") or "") != "IS"]),
