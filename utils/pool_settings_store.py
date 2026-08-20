@@ -69,7 +69,7 @@ STRUCTURAL_KEYS: tuple[str, ...] = (
 # 판단한다(예: 전략 SM 의 업종상한 노출). 기존 문서는 미설정일 수 있다(선택 값).
 POOL_KIND_OPTIONS: tuple[str, ...] = ("stock", "etf")
 
-MA_DAY_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60, 120, 160, 180, 240)
+MA_DAY_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60, 80, 100, 120, 140, 160, 180, 240)
 # 편도 슬리피지(%) 선택지: 0.05 ~ 0.50, 0.05 단위. 필수라 빈 값 불가.
 SLIPPAGE_PCT_OPTIONS: tuple[float, ...] = (0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)
 
