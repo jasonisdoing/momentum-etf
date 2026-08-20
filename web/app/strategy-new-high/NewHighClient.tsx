@@ -1061,23 +1061,26 @@ export function NewHighClient() {
                     ))}
                   </select>
                 </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">업종 상한</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={draft.max_per_industry == null ? "" : String(draft.max_per_industry)}
-                    onChange={(event) => setDraft({
-                      ...draft,
-                      max_per_industry: event.target.value === "" ? null : Number(event.target.value),
-                    })}
-                  >
-                    {constraints.max_per_industry_options.map((value) => (
-                      <option key={String(value)} value={value == null ? "" : String(value)}>
-                        {value == null ? "제한 없음" : `${value}종목`}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {/* 업종 개념이 없는 풀(ETF)에서는 상한이 판정에 걸리지 않으므로 숨긴다 — 모멘텀 화면과 같은 기준. */}
+                {hasIndustryData ? (
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">업종 상한</span>
+                    <select
+                      className="form-select form-select-sm"
+                      value={draft.max_per_industry == null ? "" : String(draft.max_per_industry)}
+                      onChange={(event) => setDraft({
+                        ...draft,
+                        max_per_industry: event.target.value === "" ? null : Number(event.target.value),
+                      })}
+                    >
+                      {constraints.max_per_industry_options.map((value) => (
+                        <option key={String(value)} value={value == null ? "" : String(value)}>
+                          {value == null ? "제한 없음" : `${value}종목`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 </div>
                 {/* CRUD 버튼이 하나뿐이라 별도 줄을 두지 않고 메인 헤더 오른쪽에 둔다. */}
                 <div className="appMainHeaderRight">
