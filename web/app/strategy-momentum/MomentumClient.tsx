@@ -51,6 +51,7 @@ const CURRENT_NOTES = [
     title: "주중 이탈",
     body:
       "보유 자격(장기 이격 > 0, 단기 이격 ≥ 0)을 잃으면 다음 거래일 시가에 전량 매도합니다. " +
+      "주중 손절선을 설정하면 교체일 시가 대비 낙폭이 그 이하일 때도 팝니다. " +
       "판 슬롯은 다음 교체까지 현금입니다(풀별 설정으로 켜고 끕니다).",
   },
   {
@@ -91,6 +92,8 @@ type PoolSettings = {
   long_ma_days: number;
   /** 주중 이탈 — 보유 자격을 잃으면 다음 거래일 시가에 판다. 풀 성격에 따라 끄고 켠다. */
   intraweek_exit: boolean;
+  /** 주중 손절선(%) — 교체일 시가 대비 낙폭. null 은 손절 없음. 주중 이탈이 켜진 풀만 의미 있다. */
+  intraweek_stop_pct?: number | null;
 };
 
 type Settings = PoolSettings & { pool: string };
@@ -243,6 +246,7 @@ type View = {
   constraints?: {
     top_n_options: number[];
     max_per_industry_options: number[];
+    intraweek_stop_options?: (number | null)[];
   };
   picks: PicksResult | null;
 };
@@ -366,6 +370,8 @@ export function MomentumClient() {
   // 이평선 초안 — 전략 전용 값(momentum_settings)으로 풀별 저장되며 종목풀 설정과 무관하다.
   const [draftMaRule, setDraftMaRule] = useState<{ short: number; long: number } | null>(null);
   const [draftIntraweekExit, setDraftIntraweekExit] = useState(true);
+  // 주중 손절선 — "" 은 손절 없음. 주중 이탈이 켜졌을 때만 셀렉트를 노출한다.
+  const [draftIntraweekStop, setDraftIntraweekStop] = useState<string>("");
 
   // 풀별 설정을 폼 초안에 채운다 — 풀 셀렉트 전환과 응답 반영이 같은 경로를 쓴다.
   const fillDrafts = useCallback((values: PoolSettings) => {
@@ -375,6 +381,7 @@ export function MomentumClient() {
     });
     setDraftMaRule({ short: values.short_ma_days, long: values.long_ma_days });
     setDraftIntraweekExit(values.intraweek_exit);
+    setDraftIntraweekStop(values.intraweek_stop_pct == null ? "" : String(values.intraweek_stop_pct));
   }, []);
 
   const applyView = useCallback(
@@ -504,10 +511,12 @@ export function MomentumClient() {
         short_ma_days: draftMaRule.short,
         long_ma_days: draftMaRule.long,
         intraweek_exit: draftIntraweekExit,
+        // 주중 이탈을 끄면 손절선도 함께 해제한다 — 이탈의 추가 조건이라 홀로는 의미가 없다.
+        intraweek_stop_pct: draftIntraweekExit && draftIntraweekStop !== "" ? Number(draftIntraweekStop) : null,
       },
       "설정을 저장했습니다.",
     );
-  }, [draft, draftIntraweekExit, draftMaRule, draftMaxPerIndustry, draftPool, persistSettings, toast]);
+  }, [draft, draftIntraweekExit, draftIntraweekStop, draftMaRule, draftMaxPerIndustry, draftPool, persistSettings, toast]);
 
   // 풀 셀렉트 변경 — 그 풀의 저장 설정이 있으면 **즉시 전환·저장·재선정**한다
   // (전환은 초안이 아니라 컨텍스트 스위치다). 저장분이 없는 풀(첫 설정)만 초안으로
@@ -572,12 +581,13 @@ export function MomentumClient() {
       draftMaxPerIndustry !== saved.max_per_industry ||
       draft.top_n !== String(saved.top_n) ||
       draftIntraweekExit !== saved.intraweek_exit ||
+      (draftIntraweekStop === "" ? null : Number(draftIntraweekStop)) !== (saved.intraweek_stop_pct ?? null) ||
       (draftMaRule != null &&
         view.ma_rule != null &&
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
           draftMaRule.long !== view.ma_rule.long_ma_days))
     );
-  }, [draft, draftIntraweekExit, draftMaRule, draftMaxPerIndustry, draftPool, view]);
+  }, [draft, draftIntraweekExit, draftIntraweekStop, draftMaRule, draftMaxPerIndustry, draftPool, view]);
 
   const monthlyLabels = view?.picks?.monthly_return_labels ?? [];
   // 선정 결과 풀의 국가 — 마켓·시가총액 컬럼 표시와 티커 표기(ASX:)를 정한다.
@@ -1161,6 +1171,27 @@ export function MomentumClient() {
                         <option value="off">미사용</option>
                       </select>
                     </label>
+                    {draftIntraweekExit ? (
+                      <label className="appLabeledField">
+                        <span className="appLabeledFieldLabel">주중 손절선</span>
+                        <select
+                          className="form-select form-select-sm"
+                          style={{ width: 96 }}
+                          value={draftIntraweekStop}
+                          onChange={(e) => setDraftIntraweekStop(e.target.value)}
+                          title="교체일 시가 대비 종가 낙폭이 이 값 이하면 자격과 무관하게 다음 거래일 시가에 매도한다."
+                        >
+                          <option value="">없음</option>
+                          {(view.constraints?.intraweek_stop_options ?? [])
+                            .filter((v): v is number => v != null)
+                            .map((v) => (
+                              <option key={v} value={String(v)}>
+                                {v}%
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                    ) : null}
                   </>
                 ) : null}
               </div>

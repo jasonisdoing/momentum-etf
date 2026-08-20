@@ -126,7 +126,12 @@ PER_POOL_SETTING_KEYS = (
     "short_ma_days",
     "long_ma_days",
     "intraweek_exit",
+    "intraweek_stop_pct",
 )
+
+# 주중 손절선 선택지(%) — 교체일 시가 대비 낙폭. None 은 '손절 없음'.
+# kor·kospi200 24개월 백테스트에서 -10 이 공통 피크였다(-5 는 휩쏘 손실, -15 는 효과 소멸).
+INTRAWEEK_STOP_OPTIONS: tuple[float | None, ...] = (None, -5.0, -7.0, -8.0, -10.0, -12.0, -15.0)
 
 
 def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
@@ -169,6 +174,20 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(intraweek_exit, bool):
         raise ValueError("'intraweek_exit' 는 true/false 여야 합니다.")
 
+    # 주중 손절선 — 주중 이탈의 추가 조건이라 이탈이 켜져 있을 때만 의미가 있다.
+    # 미설정(None)은 '손절 없음'. 저장돼 있던 값이 선택지 밖이면 명시적으로 에러.
+    stop_raw = settings.get("intraweek_stop_pct")
+    if stop_raw in (None, ""):
+        intraweek_stop_pct = None
+    else:
+        try:
+            intraweek_stop_pct = float(stop_raw)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"'intraweek_stop_pct' 는 숫자여야 합니다: {stop_raw}") from error
+        if intraweek_stop_pct not in INTRAWEEK_STOP_OPTIONS:
+            allowed = ", ".join(str(v) for v in INTRAWEEK_STOP_OPTIONS if v is not None)
+            raise ValueError(f"'intraweek_stop_pct' 는 {allowed} 중 하나여야 합니다.")
+
     return {
         "pool": pool,
         "top_n": top_n,
@@ -176,6 +195,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "short_ma_days": short_ma_days,
         "long_ma_days": long_ma_days,
         "intraweek_exit": intraweek_exit,
+        "intraweek_stop_pct": intraweek_stop_pct,
     }
 
 
@@ -540,6 +560,8 @@ def simulate_intraweek_exits(
 
     short_ma_days = int(settings["short_ma_days"])
     long_ma_days = int(settings["long_ma_days"])
+    stop_raw = settings.get("intraweek_stop_pct")
+    stop_pct = float(stop_raw) if stop_raw is not None else None
 
     # 종목별 이격 시계열 — momentum_metrics 와 같은 이평선을 한 번만 계산해 재사용한다
     # (SMA/EMA 모두 날짜 d 의 값은 d 이후 데이터와 무관해 as_of 절단과 결과가 같다).
@@ -558,7 +580,20 @@ def simulate_intraweek_exits(
             else:
                 short_ma = calculate_moving_average(close, short_ma_days, min_periods=short_ma_days)
                 long_ma = calculate_moving_average(close, long_ma_days, min_periods=long_ma_days)
-                disparity_cache[ticker] = ((close / short_ma - 1.0) * 100.0, (close / long_ma - 1.0) * 100.0)
+                # 손절선 기준가 — 이번 구간(주) 시작 체결가(교체일 시가). 0 가격은 거래정지 칸.
+                entry_price = None
+                if stop_pct is not None and frame is not None and not frame.empty and "Open" in frame.columns:
+                    opens = positive_prices(frame["Open"]).dropna()
+                    if len(opens):
+                        entry_raw = opens.asof(scan_start)
+                        if pd.notna(entry_raw) and float(entry_raw) > 0:
+                            entry_price = float(entry_raw)
+                disparity_cache[ticker] = (
+                    (close / short_ma - 1.0) * 100.0,
+                    (close / long_ma - 1.0) * 100.0,
+                    close,
+                    entry_price,
+                )
         return disparity_cache[ticker]
 
     remaining = set(holdings)
@@ -577,7 +612,15 @@ def simulate_intraweek_exits(
                 continue
             if pd.isna(short_value) or pd.isna(long_value):
                 continue
-            if float(long_value) > 0 and float(short_value) >= 0:
+            eligible = float(long_value) > 0 and float(short_value) >= 0
+            # 주중 손절 — 교체일 시가 대비 종가 낙폭이 손절선 이하면 자격과 무관하게 판다.
+            # kor·kospi200 백테스트에서 -10% 부근이 수익·MDD·소르티노를 함께 개선했다.
+            hit_stop = False
+            if stop_pct is not None and series[3] is not None:
+                price = series[2].asof(day)
+                if pd.notna(price):
+                    hit_stop = (float(price) / series[3] - 1.0) * 100.0 <= stop_pct
+            if eligible and not hit_stop:
                 continue
             remaining.discard(ticker)
             exits.append({"ticker": ticker, "signal_date": day, "sell_date": sell_date})
@@ -766,7 +809,15 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
                 continue
             cached_close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
             eff_close = build_effective_close_series(cached_close, entry)
-            effective_frames[frame_ticker] = frame if eff_close is None else pd.DataFrame({"Close": eff_close})
+            if eff_close is None:
+                effective_frames[frame_ticker] = frame
+            else:
+                # 시가는 원본을 보존한다 — 주중 손절선 기준가(교체일 시가)가 여기서 나온다.
+                # 종가만 남기면 손절 판정이 조용히 무력화된다(오늘 행의 시가는 없음으로 둔다).
+                columns = {"Close": eff_close}
+                if "Open" in frame.columns:
+                    columns["Open"] = pd.to_numeric(frame["Open"], errors="coerce")
+                effective_frames[frame_ticker] = pd.DataFrame(columns)
         frames = effective_frames
 
     benchmark_close = load_benchmark_close(pool)
