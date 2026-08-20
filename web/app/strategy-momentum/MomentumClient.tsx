@@ -400,6 +400,13 @@ export function MomentumClient() {
       setLoadError(null);
       const data = payload as View;
       applyView(data);
+      // 기억된 풀에 저장분이 없으면(첫 설정) 그 풀을 초안으로 띄운다 — 폼 값은 저장된
+      // 첫 풀의 설정을 시작점으로 쓰고, 선정은 저장 전이라 실행하지 않는다(null 반환).
+      const requested = (payload as { requested_pool?: string }).requested_pool;
+      if (requested && data.settings_by_pool?.[requested] == null) {
+        setDraftPool(requested);
+        return null;
+      }
       return data.settings.pool;
     } catch (error) {
       // 설정을 못 받으면 값을 지어내지 않는다 — 폼을 그리지 않고 실패만 알린다.
