@@ -76,7 +76,13 @@ def load_cash_accounts() -> dict[str, list[dict[str, Any]]]:
     return {"accounts": rows}
 
 
-def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, str]:
+def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, Any]:
+    """현금·원금을 저장하고, 저장된 계좌의 현금 상태를 함께 돌려준다.
+
+    반환의 ``accounts`` 는 화면이 **전체 리로드 없이** 현금 칸과 파생값(총자산·현금비중)을
+    바로 갱신하는 데 쓴다. 통화별 native 맵을 원화로 합치려면 환율이 필요해 화면이
+    스스로 계산할 수 없다 — 그래서 서버가 계산한 값을 그대로 내려준다.
+    """
     if not updates:
         raise ValueError("저장할 계좌 데이터가 없습니다.")
 
@@ -88,6 +94,7 @@ def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, str]:
     # (to_iso_string)도 UTC 로 해석해 화면에 9시간 뒤(미래)로 찍힌다.
     now = datetime.datetime.now(KST)
 
+    saved: list[dict[str, Any]] = []
     for update in updates:
         account_id = str(update.get("account_id") or "").strip()
         if not account_id:
@@ -146,8 +153,22 @@ def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, str]:
             row["holdings"] = []
             accounts.append(row)
 
+        merged = accounts[index] if index >= 0 else row
+        saved.append(
+            {
+                "account_id": account_id,
+                "cash": merged.get("cash") or {},
+                "cash_balance_krw": normalize_number(merged.get("cash_balance")),
+                "cash_balance_native": normalize_nullable_number(merged.get("cash_balance_native")),
+                "cash_target_ratio": normalize_number(merged.get("cash_target_ratio")),
+                "total_principal": normalize_number(merged.get("total_principal")),
+                "updated_at": to_iso_string(now),
+                "updated_by": "user",
+            }
+        )
+
     collection.update_one({"master_id": "GLOBAL"}, {"$set": {"accounts": accounts}}, upsert=True)
     from utils.snapshot_service import update_today_snapshot_all_accounts
 
     update_today_snapshot_all_accounts()
-    return {"message": "자산 관리 저장 완료"}
+    return {"message": "자산 관리 저장 완료", "accounts": saved}
