@@ -862,6 +862,8 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
     ][-streak_lookback:]
     streaks = {item["ticker"]: 1 for item in selected}
     alive = set(streaks)
+    # 연속 편입이 시작된 교체일 — '편입 후 수익률'(그날 시가 대비)의 기준점이다.
+    streak_entry = {item["ticker"]: rebalance_date for item in selected}
     for prior_rebalance in reversed(prior_rebalances):
         if not alive:
             break
@@ -874,8 +876,11 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
         for ticker in list(alive):
             if ticker in prior_top:
                 streaks[ticker] += 1
+                streak_entry[ticker] = prior_rebalance
             else:
                 alive.discard(ticker)
+    # 조회 창(11주)을 다 써도 살아 있으면 시작점을 모른다 — 수익률을 지어내지 않는다.
+    streak_capped = alive if len(prior_rebalances) >= streak_lookback else set()
 
     # 이 포트폴리오를 들고 가는 주 — 체결일이 속한 주의 마지막 거래일로 부른다.
     portfolio_week = week_last_trading_day(info["country"], rebalance_date)
@@ -935,6 +940,32 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
                 held_tickers = sorted(prev_selected - prev_exited)
                 held_since = prev_rebalance
                 period_exits = {info["ticker"]: info["sell_date"] for info in prev_exit_list}
+
+    def entry_return_pct(ticker: str) -> float | None:
+        """편입 후 수익률(%) — 연속 편입 시작 교체일의 **시가** 대비 현재가.
+
+        실제로 들고 있는 종목만 계산한다(신규 선정·미체결은 None). 조회 창(11주)을
+        넘겨 시작점을 모르는 종목도 None — 값을 지어내지 않는다.
+        """
+        if ticker not in set(held_tickers) or ticker in streak_capped:
+            return None
+        entry_date = streak_entry.get(ticker)
+        if entry_date is None or entry_date > benchmark_close.index[-1]:
+            return None
+        frame = cached_frames.get(ticker)
+        if frame is None or frame.empty or "Open" not in frame.columns:
+            return None
+        opens = positive_prices(frame["Open"]).dropna()
+        if opens.empty:
+            return None
+        entry_open = opens.asof(entry_date)
+        if pd.isna(entry_open) or float(entry_open) <= 0:
+            return None
+        current = frames.get(ticker)
+        close = pd.to_numeric(current["Close"], errors="coerce").dropna() if current is not None else None
+        if close is None or close.empty:
+            return None
+        return round((float(close.iloc[-1]) / float(entry_open) - 1) * 100, 2)
 
     def _sleeve_weights() -> tuple[dict[str, float], float]:
         """슬리브 안에서의 현재 비중(%) — (종목별, 현금).
@@ -1136,6 +1167,7 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
                 "currency": currency,
                 # 다음 교체에서도 남는지 — 거짓이면 교체일에 매도된다.
                 "keeps_next": ticker in set(selected_tickers_now),
+                "entry_return_pct": entry_return_pct(ticker),
                 # 이 슬리브 안에서의 비중(%) — 슬리브 전체를 100 으로 본다.
                 "sleeve_weight_pct": sleeve_weight_by_ticker.get(ticker, 0.0),
                 **price_info(ticker),
@@ -1162,6 +1194,8 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
                 "is_expected_only": False,
                 # 연속 편입은 선정분에만 의미가 있다 — 차순위는 표시하지 않는다(None → '-')
                 "streak_weeks": streaks.get(item["ticker"], 1) if rank <= top_n else None,
+                # 편입 후 수익률 — 보유 중인 종목만(연속 편입 시작 교체일 시가 대비).
+                "entry_return_pct": entry_return_pct(item["ticker"]),
                 "next_week_expected": item["ticker"] in next_expected,
                 "ticker": item["ticker"],
                 "name": item["name"],
