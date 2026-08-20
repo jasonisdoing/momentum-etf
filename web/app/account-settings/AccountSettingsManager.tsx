@@ -625,10 +625,10 @@ function AccountRow({
                   <button
                     type="button"
                     className="btn btn-sm btn-primary"
-                    disabled={applying || (diffCount === 0 && !cashChanged)}
+                    disabled={applying}
                     onClick={() => void applyBalance()}
                   >
-                    {applying ? "반영 중…" : "증권사 값으로 반영"}
+                    {applying ? "반영 중…" : "증권사 데이터 덮어쓰기"}
                   </button>
                   <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setBalanceDiff(null)}>
                     닫기
