@@ -24,9 +24,11 @@ def main() -> int:
         print("[broker_balance_sync] 연동된 계좌 없음")
         return 0
     for row in rows:
-        if row["ok"]:
+        if row["ok"] and not row.get("changed"):
+            print(f"[broker_balance_sync] {row['account_id']} 변화 없음 — 저장·알림 생략")
+        elif row["ok"]:
             print(
-                f"[broker_balance_sync] {row['account_id']} OK — 현금 {row['cash']:,.0f} · {row['holdings_count']}종목"
+                f"[broker_balance_sync] {row['account_id']} 반영 — 현금 {row['cash']:,.0f} · {row['holdings_count']}종목"
             )
         else:
             print(f"[broker_balance_sync] {row['account_id']} 실패 — {row['error']}")
