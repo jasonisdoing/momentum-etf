@@ -37,6 +37,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "benchmark",
     "market_regime_index",
     "mix_pool",
+    "broker_api",
     "URL",
     "ma_alarm_enabled",
     "ma_short_days",
@@ -194,6 +195,27 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
                     f"'{account_id}' 의 mix_pool 은 {', '.join(allowed)} 중 하나여야 합니다: {raw}"
                 )
             cleaned[key] = pool
+        elif key == "broker_api":
+            # 증권사 API 연동 — {provider, account_no}. 없음이면 null.
+            # provider 는 커넥터 레지스트리에 있어야 하고, 계좌번호는 화면의 '확인' 이
+            # API 로 나열한 목록에서 고른 값이다(형식 검증만 하고 실조회는 하지 않는다).
+            if raw in (None, "", {}):
+                cleaned[key] = None
+                continue
+            if not isinstance(raw, dict):
+                raise AccountSettingsStoreError(f"'{account_id}' 의 broker_api 는 객체여야 합니다.")
+            provider = str(raw.get("provider") or "").strip().upper()
+            account_no = str(raw.get("account_no") or "").strip()
+            from services.broker_api_service import PROVIDERS
+
+            allowed_providers = {p["id"] for p in PROVIDERS}
+            if provider not in allowed_providers:
+                raise AccountSettingsStoreError(
+                    f"'{account_id}' 의 broker_api.provider 는 {', '.join(sorted(allowed_providers))} 중 하나여야 합니다: {raw}"
+                )
+            if not account_no:
+                raise AccountSettingsStoreError(f"'{account_id}' 의 broker_api.account_no 가 비어 있습니다.")
+            cleaned[key] = {"provider": provider, "account_no": account_no}
         elif key == "market_regime_index":
             # 계좌별 시장 레짐 판정 지수 — 시장추세 지수(INDICES) 중 하나(필수, {ticker, name}).
             if not isinstance(raw, dict):
