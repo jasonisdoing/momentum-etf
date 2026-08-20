@@ -92,6 +92,8 @@ type AccountOption = AccountOptionBase & {
   /** 이 계좌가 운용하는 종목풀 — 계좌 설정에서 지정한다. */
   pool: string;
   pool_label?: PoolLabelSource | null;
+  /** 오늘의 액션 슬랙 알람 — 새 지시·수량 증가 시 발송. */
+  mix_slack_enabled?: boolean;
 };
 type Meta = {
   /** 합성을 운용하는 계좌(계좌 설정의 `mix_pool` 지정) 목록. */
@@ -246,6 +248,8 @@ type Positions = {
       sells: { ticker: string; name: string }[];
     };
     sleeve_rebalance_today: boolean;
+    /** 오늘의 액션 — 서버가 조립한 체결일 묶음(화면·슬랙 알람 공용 단일 소스). */
+    groups: ActionGroup[];
   };
 };
 
@@ -862,137 +866,60 @@ export function StrategyMixClient() {
 
   const actions = positions?.actions ?? null;
 
-  // 오늘의 액션 — 체결 시점으로 묶고 묶음 안에서는 매도 → 매수 순서로 세운다.
-  // 매도가 끝나야 매수 대금이 생기고, 모멘텀 교체는 교체일 시가에만 체결되기 때문이다.
-  const actionGroups = useMemo<ActionGroup[]>(() => {
-    if (!positions || !actions) return [];
-    const rowByTicker = new Map(
-      positions.holdings.map((row) => [row.ticker, row]),
-    );
-    const label = (ticker: string, name: string, quantity?: number | null) => {
-      const base = `${name}(${ticker})`;
-      return quantity == null || quantity === 0
-        ? base
-        : `${base} ${Math.abs(quantity).toLocaleString("ko-KR")}주`;
-    };
+  // 슬랙 알람 토글·테스트 — 저장은 계좌 설정(mix_slack_enabled)으로 보낸다.
+  const [slackEnabled, setSlackEnabled] = useState(false);
+  const [slackSaving, setSlackSaving] = useState(false);
+  const [slackTesting, setSlackTesting] = useState(false);
+  useEffect(() => {
+    setSlackEnabled(Boolean(selectedAccount?.mix_slack_enabled));
+  }, [selectedAccount?.account_id, selectedAccount?.mix_slack_enabled]);
 
-    const rebalance = actions.sm_rebalance;
-    const rebalanceBuys = new Set(rebalance.buys.map((row) => row.ticker));
-    const rebalanceSells = new Set(rebalance.sells.map((row) => row.ticker));
-    const entryTickers = new Set(actions.nh_entries.map((row) => row.ticker));
-    const sellPending = new Set(
-      [...actions.sm_sells, ...actions.nh_sells].map((row) => row.ticker),
-    );
-
-    const rebalanceDate =
-      !rebalance.is_filled && rebalance.fill_date ? rebalance.fill_date : null;
-    const nextOpen = positions.next_trading_day;
-    // 신고가 이벤트(진입·이탈) 종목 — 교체일 그룹이 아니라 다음 시가 그룹으로 간다.
-    const nhEventTickers = new Set([
-      ...entryTickers,
-      ...actions.nh_sells.map((row) => row.ticker),
-    ]);
-    const sellReason = new Map<string, string>();
-    for (const row of actions.sm_sells) sellReason.set(row.ticker, row.reason);
-    for (const row of actions.nh_sells) {
-      sellReason.set(
-        row.ticker,
-        `${row.reason}${row.return_pct != null ? `, ${formatSignedPct(row.return_pct)}` : ""}`,
-      );
-    }
-
-    // 종목마다 항목은 하나다 — 매매수량 부호가 매도/매수를 정하고, 0이면 할 일이 없다.
-    const items: (ActionItem & { date: string | null })[] = [];
-    for (const row of positions.holdings) {
-      const trade = row.trade_quantity;
-      if (trade == null || trade === 0) continue;
-      const isRebalance =
-        rebalanceBuys.has(row.ticker) || rebalanceSells.has(row.ticker);
-      // 목표는 슬리브 몫 × 흘러간 실제 비중이라, 이벤트가 없는 날에는 목표 ≈ 보유다.
-      // 그래서 차이가 밴드를 넘으면 매일 그대로 지시한다 — 남는 차이는 시세가 아니라
-      // 입출금·체결 어긋남 같은 실차이고, 입금분은 다음날 바로 비율대로 배분돼야 한다.
-      // 예외 하나: 모멘텀 교체가 확정되고 아직 체결 전이면(momentumPending) 그 슬리브의
-      // 조정은 교체일 시가에 함께 체결되므로 교체일 날짜 그룹으로 보낸다.
-      const momentumPending =
-        rebalanceDate != null && row.sources.includes("sm") && !nhEventTickers.has(row.ticker) && !row.is_sell_all;
-      const date = momentumPending || isRebalance ? rebalanceDate : nextOpen;
-      const reason = sellReason.get(row.ticker);
-      // 목표에 이미 근접한 종목은 건너뛴다 — 1주짜리 조정은 장중 내내 붙었다 떨어진다.
-      // 규칙상 팔아야 하는 것(전량 매도·자격 상실·이탈)은 금액과 무관하게 남긴다.
-      if (!row.is_sell_all && !(reason && trade < 0 && row.weight_pct <= 0)) {
-        const gap = Math.abs(row.weight_pct - (row.current_weight_pct ?? 0));
-        if (gap < REBALANCE_BAND_PCT) continue;
-      }
-      // 제목은 **계좌 관점**으로 붙인다 — 이미 들고 있는 종목이면 실제로 하는 일이
-      // '몇 주 더 사기'라 "교체 매수"로 적으면 새로 사는 것처럼 읽힌다.
-      // (한 전략에 새로 편입돼도 다른 전략으로 이미 보유 중일 수 있다. 전략 맥락은 표의 상태 칸에 있다.)
-      const held = Number(row.held_quantity ?? 0) > 0;
-      // 매도 사유(손절·이탈)는 **그 슬리브**의 사정이다. 다른 슬리브가 그 종목을 계속
-      // 담고 있으면(목표 비중이 남아 있으면) 실제 행위는 전량 정리가 아니라 비중 조정이라,
-      // 사유는 목표가 0 이 된 종목에만 붙인다. 슬리브별 사유는 표의 상태 칸에 그대로 있다.
-      const sellReasonApplies = Boolean(reason) && trade < 0 && row.weight_pct <= 0;
-      let title: string;
-      if (row.is_sell_all)
-        title = rebalanceSells.has(row.ticker) ? "교체 매도" : "전량 매도";
-      else if (trade < 0) title = sellReasonApplies ? "매도 예정" : "비중 조정 매도";
-      else if (held) title = "비중 조정 매수";
-      else if (rebalanceBuys.has(row.ticker)) title = "교체 매수";
-      else if (entryTickers.has(row.ticker)) title = "신고가 진입";
-      else title = "신규 매수";
-      // 체결 뒤 남는 수량 = 목표수량. 몇 주를 사고파는지만 보면 남는 양을 암산해야 한다.
-      const after = row.target_quantity != null ? ` → 목표 ${row.target_quantity.toLocaleString("ko-KR")}주` : "";
-      const note = sellReasonApplies
-        ? `${after} (${reason})`.trim()
-        : row.is_sell_all
-          ? `${row.held_value != null ? `(${formatAmount(row.held_value)}) ` : ""}· 목표에 없는 보유 종목`
-          : `${after} · ${row.weight_pct.toFixed(2)}%`.trim();
-      items.push({
-        key: `act-${row.ticker}`,
-        ticker: row.ticker,
-        side: trade > 0 ? "buy" : "sell",
-        title,
-        text: `${label(row.ticker, row.name, trade)} ${note}`.trim(),
-        date,
+  const saveSlackEnabled = async (next: boolean) => {
+    if (!selectedAccount) return;
+    setSlackEnabled(next);
+    try {
+      setSlackSaving(true);
+      const resp = await fetch("/api/account-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          account_id: selectedAccount.account_id,
+          values: { mix_slack_enabled: next },
+        }),
       });
+      const data = (await resp.json()) as { error?: string };
+      if (!resp.ok || data.error) throw new Error(data.error ?? "저장에 실패했습니다.");
+      toast.success(next ? "슬랙 알람을 켰습니다." : "슬랙 알람을 껐습니다.");
+    } catch (err) {
+      setSlackEnabled(!next);
+      toast.error(err instanceof Error ? err.message : "슬랙 알람 저장에 실패했습니다.");
+    } finally {
+      setSlackSaving(false);
     }
-    // 매도 예정인데 매매수량이 0인 경우(목표가 아직 그대로라 차이가 없음)도 알려야 한다.
-    for (const ticker of sellPending) {
-      if (items.some((item) => item.key === `act-${ticker}`)) continue;
-      const row = rowByTicker.get(ticker);
-      // 팔 물량이 있어야 매도 지시다 — 보유가 없으면 할 일이 없다.
-      // 목표 비중이 남아 있으면(다른 슬리브가 계속 담는 종목) 전량 매도가 아니다 —
-      // 그때 실제 할 일은 매매수량이 이미 말해 주므로 여기서 따로 만들지 않는다.
-      if (!row || Number(row.held_quantity ?? 0) <= 0 || row.weight_pct > 0) continue;
-      items.push({
-        key: `act-${ticker}`,
-        ticker,
-        side: "sell",
-        title: "매도 예정",
-        text: `${label(ticker, row.name, row.held_quantity)} (${sellReason.get(ticker) ?? "이탈"})`,
-        date: nextOpen,
-      });
-    }
+  };
 
-    // 체결일이 같으면 한 묶음이다 — 연휴가 끼면 다음 거래일과 교체일이 같은 날이 된다.
-    const byDate = new Map<string, (ActionItem & { date: string | null })[]>();
-    for (const item of items) {
-      const key = item.date ?? "";
-      if (!byDate.has(key)) byDate.set(key, []);
-      byDate.get(key)!.push(item);
+  const sendSlackTest = async () => {
+    if (!selectedAccount) return;
+    try {
+      setSlackTesting(true);
+      const resp = await fetch("/api/strategy-mix/slack-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_id: selectedAccount.account_id }),
+      });
+      const data = (await resp.json()) as { sent?: boolean; items?: number; error?: string };
+      if (!resp.ok || data.error || !data.sent) throw new Error(data.error ?? "발송에 실패했습니다.");
+      toast.success(`슬랙 발송 완료 (지시 ${data.items ?? 0}건)`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "슬랙 테스트 발송에 실패했습니다.");
+    } finally {
+      setSlackTesting(false);
     }
-    return [...byDate.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, groupItems]) => ({
-        key: date || "unscheduled",
-        title: date
-          ? `${formatDateWithWeekday(date)} 시가${date === rebalanceDate ? " · 모멘텀 교체 포함" : ""}`
-          : "체결일 미정",
-        // 매도가 끝나야 매수 대금이 생긴다. 같은 방향 안에서는 표와 같은 티커 순.
-        items: [...groupItems].sort((a, b) =>
-          a.side === b.side ? a.ticker.localeCompare(b.ticker) : a.side === "sell" ? -1 : 1,
-        ),
-      }));
-  }, [positions, actions]);
+  };
+
+  // 오늘의 액션 — 조립은 서버(`_build_action_groups`)가 한다. 슬랙 알람과 같은 결과를
+  // 쓰기 위한 단일 소스라, 화면은 받은 그대로 그리기만 한다.
+  const actionGroups = actions?.groups ?? [];
 
   const hasActions =
     actionGroups.length > 0 || Boolean(actions?.sleeve_rebalance_today);
@@ -1036,6 +963,33 @@ export function StrategyMixClient() {
                       ? `계좌 ${formatAccountLabel(selectedAccount)}`
                       : "계좌 설정에서 합성 전략 종목풀을 지정하세요"}
                   </span>
+                  {selectedAccount ? (
+                    <label className="appLabeledField" style={{ marginBottom: 0 }}>
+                      <span className="appLabeledFieldLabel">슬랙 알람</span>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <div className="form-check form-switch" style={{ marginBottom: 0 }}>
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                            checked={slackEnabled}
+                            disabled={slackSaving}
+                            onChange={(e) => void saveSlackEnabled(e.target.checked)}
+                            title="오늘의 액션에 새 지시나 수량 증가가 생기면 슬랙으로 보낸다 (장중 10분 간격 감시)."
+                          />
+                        </div>
+                        <span style={hintStyle}>{slackEnabled ? "켜짐" : "꺼짐"}</span>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary"
+                          disabled={slackTesting}
+                          onClick={() => void sendSlackTest()}
+                        >
+                          {slackTesting ? "발송 중…" : "지금 발송(테스트)"}
+                        </button>
+                      </span>
+                    </label>
+                  ) : null}
                 </div>
               </div>
             </div>
