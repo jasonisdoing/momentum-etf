@@ -117,6 +117,8 @@ type PickRow = {
   is_exit_pending?: boolean;
   exit_date?: string | null;
   streak_weeks: number | null;
+  /** 편입 후 수익률(%) — 연속 편입 시작 교체일 시가 대비. 보유 중인 종목만 값이 있다. */
+  entry_return_pct?: number | null;
   next_week_expected: boolean;
   ticker: string;
   name: string;
@@ -732,6 +734,15 @@ export function MomentumClient() {
         width: 100,
         type: "numericColumn",
         valueFormatter: (p) => formatPrice(p.value, p.data?.currency),
+      },
+      {
+        headerName: "수익률",
+        field: "entry_return_pct",
+        headerTooltip: "편입 후 수익률 — 연속 편입이 시작된 교체일 시가 대비 현재가. 보유 중인 종목만 표시.",
+        width: 92,
+        type: "numericColumn",
+        valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number)),
+        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
       },
       // 시가총액 소스(네이버)가 한국 전용이라 한국 풀에서만 보여준다.
       ...(picksCountry === "kor"
