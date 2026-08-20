@@ -24,6 +24,7 @@ import {
   GridRow,
   HoldingEditableSnapshot,
   HoldingsRow,
+  SavedCashAccount,
   assetsGridTheme,
   buildAutoSaveToastMessage,
   buildCashGridRow,
@@ -59,9 +60,9 @@ export function AccountHoldingsDetailPanel({
   summary: AccountSummary;
   initialRows: HoldingsRow[];
   onRowsSync: (accountId: string, rows: HoldingsRow[]) => void;
-  onCashSync: (accountId: string, balance: number, targetRatio: number) => void;
+  onCashSync: (accountId: string, balance: number, targetRatio: number, saved?: SavedCashAccount) => void;
   onSortStateChange: (accountId: string, sortState: ColumnState[]) => void;
-  onReload: () => Promise<void>;
+  onReload: (options?: { silent?: boolean }) => Promise<void>;
   showAmounts: boolean;
 }) {
   const toast = useToast();
@@ -133,6 +134,7 @@ export function AccountHoldingsDetailPanel({
   // 통화별 현금 native 입력 초안(상단 박스). summary.cash 로 시드하고 입력 시 갱신.
   const cashMapDraftRef = useRef<Record<string, number>>({ ...(summary.cash ?? {}) });
   const [cashMapDirty, setCashMapDirty] = useState(false);
+  const [cashMapSaving, setCashMapSaving] = useState(false);
   // 이 계좌가 보유하는 현금 통화 목록(설정). 없으면 주 통화 1개.
   const cashCurrencyList =
     summary.cash_currencies && summary.cash_currencies.length > 0
@@ -439,7 +441,7 @@ export function AccountHoldingsDetailPanel({
   }, [summary]);
 
   // 통화별 native 현금 맵 저장. 원화 합계(cash_balance)는 백엔드가 환율로 계산한다.
-  const processCashMapUpdate = useCallback(async (cashMap: Record<string, number>) => {
+  const processCashMapUpdate = useCallback(async (cashMap: Record<string, number>): Promise<SavedCashAccount | null> => {
     const response = await fetch("/api/assets", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -453,10 +455,12 @@ export function AccountHoldingsDetailPanel({
         intl_shares_change: summary.account_id === "aus_account" ? summary.intl_shares_change : null,
       }),
     });
-    const payload = await response.json();
+    const payload = (await response.json()) as { accounts?: SavedCashAccount[]; error?: string };
     if (!response.ok) {
       throw new Error(payload.error || "현금 저장에 실패했습니다.");
     }
+    // 통화별 native 를 원화로 합친 값은 환율이 필요해 화면이 못 만든다 — 서버 계산값을 쓴다.
+    return payload.accounts?.find((item) => item.account_id === summary.account_id) ?? null;
   }, [summary]);
 
   const clearDirtyRowState = useCallback((rowId: string) => {
@@ -1202,21 +1206,33 @@ export function AccountHoldingsDetailPanel({
             <button
               type="button"
               className="btn btn-success btn-sm px-2"
-              disabled={!cashMapDirty}
+              disabled={!cashMapDirty || cashMapSaving}
               onMouseDown={stopActionButtonMouseDown}
               onClick={async () => {
+                setCashMapSaving(true);
                 try {
-                  await processCashMapUpdate({ ...(summary.cash ?? {}), ...cashMapDraftRef.current });
+                  const saved = await processCashMapUpdate({ ...(summary.cash ?? {}), ...cashMapDraftRef.current });
                   setCashMapDirty(false);
-                  await onReload();
-                  toast.success("현금 저장 완료");
+                  if (saved) {
+                    // 저장 응답으로 화면을 바로 맞춘다. 전체 리로드(≈2초)를 기다리지 않는다.
+                    onCashSync(summary.account_id, saved.cash_balance_krw, saved.cash_target_ratio, saved);
+                    toast.success("현금 저장 완료");
+                    // 스냅샷 기준으로 계산되는 금일·주간 손익만 뒤에서 따라오게 한다(화면은 덮지 않는다).
+                    void onReload({ silent: true });
+                  } else {
+                    // 응답에 저장 결과가 없으면 화면을 임의로 맞추지 않고 정상 리로드로 확인한다.
+                    await onReload();
+                    toast.success("현금 저장 완료");
+                  }
                 } catch (error) {
                   await onReload();
                   toast.error(error instanceof Error ? error.message : "현금 저장에 실패했습니다.");
+                } finally {
+                  setCashMapSaving(false);
                 }
               }}
             >
-              현금 저장
+              {cashMapSaving ? "저장 중…" : "현금 저장"}
             </button>
             {summary.updated_at ? (
               <span className="text-muted small">

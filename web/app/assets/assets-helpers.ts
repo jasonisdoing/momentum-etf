@@ -48,6 +48,18 @@ export type HoldingsRow = {
 
 export type GridRow = HoldingsRow & { id: string };
 
+/** 현금 저장 응답(`PUT /api/assets`) — 화면이 전체 리로드 없이 즉시 반영하는 값. */
+export type SavedCashAccount = {
+  account_id: string;
+  cash: Record<string, number>;
+  cash_balance_krw: number;
+  cash_balance_native: number | null;
+  cash_target_ratio: number;
+  total_principal: number;
+  updated_at: string | null;
+  updated_by: string;
+};
+
 export type AccountSummary = {
   account_id: string;
   order: number;

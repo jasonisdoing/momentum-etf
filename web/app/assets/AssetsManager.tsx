@@ -56,8 +56,13 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const parentQueuedAccountIdsRef = useRef<Set<string>>(new Set());
   const childSortStatesRef = useRef<Record<string, ColumnState[]>>({});
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // silent: 로딩 화면으로 덮지 않고 뒤에서 값만 갱신한다. 현금 저장처럼 화면을 이미
+  // 로컬로 맞춰 둔 뒤 정확한 값(금일 손익 등)만 따라오게 할 때 쓴다.
+  const load = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = Boolean(options?.silent);
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const [response, dashResponse] = await Promise.all([
         fetch("/api/assets", { cache: "no-store" }),
@@ -94,12 +99,18 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       }));
       setAllRows(payload.rows ?? []);
       setSummaries(mergedSummaries);
-      setParentDirtyCellKeys([]);
-      setEditingParentId(null);
+      if (!silent) {
+        setParentDirtyCellKeys([]);
+        setEditingParentId(null);
+      }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "자산 정보를 불러오지 못했습니다.");
+      if (!silent) {
+        toast.error(error instanceof Error ? error.message : "자산 정보를 불러오지 못했습니다.");
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [toast]);
 
@@ -383,7 +394,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           summary={data.summary}
           initialRows={data.rows}
           onRowsSync={handleChildRowsSync}
-          onCashSync={(accountId, cashBalanceKrw, cashTargetRatio) => {
+          onCashSync={(accountId, cashBalanceKrw, cashTargetRatio, saved) => {
             setSummaries((previous) =>
               previous.map((summary) => {
                 if (summary.account_id !== accountId) {
@@ -392,15 +403,29 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 const currentCashKrw = Number(summary.cash_balance_krw ?? 0);
                 const currentCashNative = Number(summary.cash_balance_native ?? 0);
                 const nextCashNative =
-                  String(summary.currency || "KRW").toUpperCase() === "AUD" && currentCashKrw > 0 && currentCashNative > 0
-                    ? (cashBalanceKrw / currentCashKrw) * currentCashNative
-                    : summary.cash_balance_native;
+                  saved?.cash_balance_native != null
+                    ? saved.cash_balance_native
+                    : String(summary.currency || "KRW").toUpperCase() === "AUD" && currentCashKrw > 0 && currentCashNative > 0
+                      ? (cashBalanceKrw / currentCashKrw) * currentCashNative
+                      : summary.cash_balance_native;
+                // 현금에서 곧바로 나오는 값들은 여기서 다시 계산한다 — 대시보드가 내려주는
+                // 값을 그대로 두면 리로드 전까지 현금 비중·평가손익이 옛 현금 기준으로 남는다.
+                const nextTotalAssets = Number(summary.valuation_krw ?? 0) + cashBalanceKrw;
+                const nextPrincipal = Number(saved?.total_principal ?? summary.total_principal ?? 0);
+                const nextNetProfit = nextTotalAssets - nextPrincipal;
                 return {
                   ...summary,
+                  ...(saved?.cash ? { cash: saved.cash } : {}),
+                  ...(saved?.updated_at !== undefined ? { updated_at: saved.updated_at } : {}),
+                  ...(saved?.updated_by !== undefined ? { updated_by: saved.updated_by } : {}),
                   cash_balance_krw: cashBalanceKrw,
                   cash_balance_native: nextCashNative,
                   cash_target_ratio: cashTargetRatio,
-                  total_assets_krw: Number(summary.valuation_krw ?? 0) + cashBalanceKrw,
+                  total_principal: nextPrincipal,
+                  total_assets_krw: nextTotalAssets,
+                  cash_ratio: nextTotalAssets > 0 ? (cashBalanceKrw / nextTotalAssets) * 100 : 0,
+                  net_profit: nextNetProfit,
+                  net_profit_pct: nextPrincipal > 0 ? (nextNetProfit / nextPrincipal) * 100 : 0,
                 };
               }),
             );

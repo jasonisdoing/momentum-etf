@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { fetchFastApiJson } from "@/lib/internal-api";
 import { jsonNoStore } from "@/lib/no-store-response";
+import type { SavedCashAccount } from "../../assets/assets-helpers";
 
 type HoldingsRow = {
   account_id?: string;
@@ -64,7 +65,8 @@ export async function DELETE(request: Request) {
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
-    const payload = await fetchFastApiJson<{ message?: string; error?: string }>(
+    // 응답의 accounts 는 화면이 전체 리로드 없이 현금 칸을 즉시 갱신하는 데 쓴다.
+    const payload = await fetchFastApiJson<{ message?: string; accounts?: SavedCashAccount[]; error?: string }>(
       "/internal/cash",
       {
         method: "POST",
