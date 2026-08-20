@@ -333,7 +333,7 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
             status = f"매수 예정 ({sm.get('rebalance_date')} 시가)"
         exiting = bool(row.get("is_exit_pending"))
         if exiting:
-            status += " · 매도 예정(자격 상실)"
+            status += f" · 매도 예정({row.get('exit_reason') or '주중 이탈'})"
         weight = 0.0 if exiting else sm_drift_weight.get(ticker, weight_sm)
         add_target(ticker, row.get("name"), "sm", weight, row.get("price"), row.get("daily_change_pct"), status)
     for row in nh_holdings:
@@ -519,7 +519,10 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
                 {
                     "ticker": str(row["ticker"]).strip(),
                     "name": row.get("name") or row["ticker"],
-                    "reason": "자격 상실(이평선 하회)",
+                    # 발동 사유 — 손절선과 이평선 이탈을 구분한다(판정 함수가 정한 값).
+                    "reason": {"주중 손절": "주중 손절선 하회", "주중 이탈": "자격 상실(이평선 하회)"}.get(
+                        str(row.get("exit_reason") or ""), "자격 상실(이평선 하회)"
+                    ),
                 }
                 for row in sm_sell_pending
             ],
