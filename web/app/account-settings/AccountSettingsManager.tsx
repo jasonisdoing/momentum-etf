@@ -517,7 +517,7 @@ function AccountRow({
               <option key={row.account_no} value={row.account_no} disabled={!row.ok}>
                 {row.masked}
                 {row.ok
-                  ? ` — 예수금 ${(row.cash ?? 0).toLocaleString("ko-KR")} · ${row.holdings_count}종목`
+                  ? ` — D+2 예수금 ${(row.cash ?? 0).toLocaleString("ko-KR")} · ${row.holdings_count}종목`
                   : " — 조회 불가"}
               </option>
             ))}
