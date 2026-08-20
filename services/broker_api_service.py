@@ -304,7 +304,14 @@ def apply_fetched_balance(account_id: str, provider: str, fetched: dict[str, Any
             }
         )
 
-    ok = save_portfolio_master(account_id, holdings, cash_balance=fetched["cash"], updated_by=provider)
+    ok = save_portfolio_master(
+        account_id,
+        holdings,
+        cash_balance=fetched["cash"],
+        # 자산 화면이 우선하는 다통화 맵도 함께 — 계좌 통화만 갱신(다른 통화 잔액 보존).
+        cash_map={currency: fetched["cash"]},
+        updated_by=provider,
+    )
     if not ok:
         raise BrokerApiError("portfolio_master 저장에 실패했습니다.")
     return {"cash": fetched["cash"], "holdings_count": len(holdings)}

@@ -668,6 +668,8 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
                 "intl_shares_sort_order": acc.get("intl_shares_sort_order"),
                 "updated_at": acc.get("updated_at"),
                 "updated_by": acc.get("updated_by"),
+                # 통화별 현금 맵 — 자산 화면이 우선하는 값. 증권사 동기화의 차이 비교도 이걸 쓴다.
+                "cash": acc.get("cash") or {},
             }
     return None
 
@@ -683,11 +685,16 @@ def save_portfolio_master(
     intl_shares_change: float | None = None,
     intl_shares_sort_order: int | None = None,
     updated_by: str = "user",
+    cash_map: dict[str, float] | None = None,
 ) -> bool:
     """Save/Update one account's balance within the consolidated portfolio_master document.
 
     ``updated_by`` — 마지막 변경 주체. 수기 경로는 기본값 "user", 증권사 동기화·배치는
     커넥터 id(예: "NAMU_PLUG")를 넘긴다. 화면이 '누가 언제 바꿨는지' 를 이 값으로 보여준다.
+
+    ``cash_map`` — 통화별 현금({"KRW": 4409108}). 자산 화면은 다통화 `cash` 맵을 레거시
+    `cash_balance` 보다 우선해서 읽으므로, 현금을 바꿀 때 맵도 함께 갱신해야 화면에
+    반영된다. **병합**한다 — 다른 통화(USD 등)의 잔액은 건드리지 않는다.
     """
     db = get_db_connection()
     if db is None:
@@ -724,6 +731,8 @@ def save_portfolio_master(
                 for h in holdings:
                     h["quantity"] = int(math.floor(float(h.get("quantity", 0.0))))
 
+                if cash_map:
+                    acc["cash"] = {**(acc.get("cash") or {}), **{k.upper(): float(v) for k, v in cash_map.items()}}
                 acc["holdings"] = holdings
                 acc["updated_at"] = _now_kst()
                 acc["updated_by"] = str(updated_by or "user")
@@ -745,6 +754,8 @@ def save_portfolio_master(
                 "updated_at": _now_kst(),
                 "updated_by": str(updated_by or "user"),
             }
+            if cash_map:
+                new_acc["cash"] = {k.upper(): float(v) for k, v in cash_map.items()}
             if cash_balance_native is not None:
                 new_acc["cash_balance_native"] = float(cash_balance_native)
             if cash_currency is not None:
