@@ -1087,7 +1087,10 @@ def get_ticker_detail_compare(
     with _COMPARE_CACHE_LOCK:
         cached = _COMPARE_CACHE.get(cache_key)
         if cached and now_ts - cached[1] < _COMPARE_CACHE_TTL:
-            return cached[0]
+            # 캐시 키는 종목 집합(정렬)이라 **순서가 달라도 같은 키**다. 화면이 카드 순서를
+            # 바꿔 다시 요청하면 옛 순서 결과가 그대로 나가므로, 여기서 요청 순서로 맞춘다.
+            # (맞추지 않으면 화면이 이름과 시세를 다른 종목끼리 짝지어 보여준다.)
+            return {"results": _order_compare_results(cached[0].get("results") or [], items)}
 
     # 1) 한국 ETF 구성종목 합집합 → 공유 가격 스냅샷 1회 구성 (build_component_price_snapshot 가 중복 제거)
     #    구성종목이 필요 없는 호출이면 이 조회 자체를 건너뛴다(성과분석 탭 초기 로딩 단축).
@@ -1108,17 +1111,49 @@ def get_ticker_detail_compare(
     # 2) ETF 별 detail 을 공유 스냅샷으로 계산 (캐시 우회 → 종목당 동일 값 보장)
     results: list[dict[str, object]] = []
     for item in items:
-        results.append(
-            build_ticker_detail_payload(
-                str(item.get("ticker") or ""),
-                str(item.get("ticker_type") or ""),
-                str(item.get("country_code") or "kor"),
-                component_price_snapshot=shared_snapshot,
-                use_bundle_cache=False,
-                include_holdings=include_holdings,
-            )
+        detail = build_ticker_detail_payload(
+            str(item.get("ticker") or ""),
+            str(item.get("ticker_type") or ""),
+            str(item.get("country_code") or "kor"),
+            component_price_snapshot=shared_snapshot,
+            use_bundle_cache=False,
+            include_holdings=include_holdings,
         )
+        # 어느 요청 항목의 결과인지 응답에 실어 둔다 — 화면이 순서(인덱스)가 아니라
+        # 이 값으로 짝을 지어야 순서가 바뀌어도 이름과 시세가 어긋나지 않는다.
+        detail["ticker_type"] = str(item.get("ticker_type") or "")
+        detail["country_code"] = str(item.get("country_code") or "kor")
+        results.append(detail)
     result = {"results": results}
     with _COMPARE_CACHE_LOCK:
         _COMPARE_CACHE[cache_key] = (result, now_ts)
     return result
+
+
+def _compare_result_key(ticker: object, ticker_type: object, country_code: object) -> tuple[str, str, str]:
+    """비교 결과를 요청 항목과 이어 붙일 때 쓰는 키."""
+    return (
+        str(ticker or "").strip().upper(),
+        str(ticker_type or "").strip().lower(),
+        str(country_code or "kor").strip().lower(),
+    )
+
+
+def _order_compare_results(results: list[dict[str, object]], items: list[dict[str, object]]) -> list[dict[str, object]]:
+    """캐시된 결과를 이번 요청의 종목 순서로 다시 세운다.
+
+    짝을 못 찾은 항목이 하나라도 있으면 순서를 못 맞춘다는 뜻이므로 원본을 그대로 둔다 —
+    임의로 채워 넣으면 다른 종목의 값이 붙는다.
+    """
+    by_key = {
+        _compare_result_key(row.get("ticker"), row.get("ticker_type"), row.get("country_code")): row
+        for row in results
+        if isinstance(row, dict)
+    }
+    ordered: list[dict[str, object]] = []
+    for item in items:
+        row = by_key.get(_compare_result_key(item.get("ticker"), item.get("ticker_type"), item.get("country_code")))
+        if row is None:
+            return results
+        ordered.append(row)
+    return ordered
