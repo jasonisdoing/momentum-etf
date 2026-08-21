@@ -457,10 +457,17 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     # SM 목표 포트폴리오 — 확정된 선정(다음 교체분)을 기준으로 보여준다. 이 화면은
     # '무엇을 보유해야 하는지'를 보는 곳이고, 신고가 슬리브도 진입 예정이 슬롯을
     # 채우는 방식이라 두 슬리브의 기준을 맞춘 것이다. 매도분은 오늘의 액션에만 남는다.
+    #
+    # 주중에 **이미 팔린** 종목(`is_exited`)은 뺀다. 선정 목록에는 자리를 유지한 채로
+    # 남아 있는데(모멘텀 화면이 '매도' 로 표시하는 그 행), 계좌 수량은 0 이라 그대로
+    # 두면 방금 판 종목을 다시 사라는 지시가 나온다. 그 슬롯은 다음 교체까지 현금이다.
     sm_selected = [
         row
         for row in sm["rows"]
-        if not row.get("is_reserve") and not row.get("is_expected_only") and (row.get("rank") or 999) <= sm_top_n
+        if not row.get("is_reserve")
+        and not row.get("is_expected_only")
+        and not row.get("is_exited")
+        and (row.get("rank") or 999) <= sm_top_n
     ]
     sm_current = list(sm.get("holdings") or [])
     sm_current_tickers = {str(row["ticker"]).strip() for row in sm_current}
