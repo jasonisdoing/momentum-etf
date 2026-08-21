@@ -399,8 +399,6 @@ export function StrategyMixClient() {
   const [positionsError, setPositionsError] = useState<string | null>(null);
   const [positionsProgress, setPositionsProgress] =
     useState<LoadingProgress | null>(null);
-  /** 과거 날짜 조회 — 빈 값이면 오늘. */
-  const [asOf, setAsOf] = useState<string>("");
   /** 계좌를 저장하면 목표 금액이 달라지므로 운용 현황를 다시 계산한다. */
   const [positionsReloadKey, setPositionsReloadKey] = useState(0);
 
@@ -464,7 +462,6 @@ export function StrategyMixClient() {
     void (async () => {
       try {
         const params = new URLSearchParams({ pool });
-        if (asOf) params.set("as_of", asOf);
         const response = await fetch(
           `/api/strategy-mix/positions?${params.toString()}`,
           {
@@ -498,7 +495,7 @@ export function StrategyMixClient() {
       alive = false;
       stopRamp();
     };
-  }, [pool, asOf, positionsReloadKey]);
+  }, [pool, positionsReloadKey]);
 
 
   const runBacktest = useCallback(async () => {
@@ -1031,7 +1028,6 @@ export function StrategyMixClient() {
                         writeRememberedMomentumEtfAccountId(next);
                         setPositions(null);
                         setView(null);
-                        setAsOf("");
                       }}
                     >
                       {accountOptions.map((option) => (
@@ -1127,27 +1123,10 @@ export function StrategyMixClient() {
               <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>
                 운용 현황
               </span>
-              {/* 기준일 셀렉트 — 신고가 화면과 같은 자리(카드 헤더 오른쪽). */}
-              <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <select
-                  className="form-select form-select-sm"
-                  style={{ width: "auto" }}
-                  value={asOf}
-                  disabled={positionsLoading}
-                  onChange={(event) => setAsOf(event.target.value)}
-                >
-                  <option value="">
-                    오늘
-                    {positions && !asOf
-                      ? ` (${formatDateWithWeekday(positions.as_of)})`
-                      : ""}
-                  </option>
-                  {(positions?.available_dates ?? []).map((date) => (
-                    <option key={date} value={date}>
-                      {formatDateWithWeekday(date)}
-                    </option>
-                  ))}
-                </select>
+              {/* 과거 날짜 셀렉트는 두지 않는다 — 계좌 수량이 현재 기준이라 과거 목표와
+                  섞이면 액션·수량이 틀린 값이 된다 (판정 기록은 각 전략 화면에서 본다). */}
+              <span style={{ ...hintStyle, fontWeight: 500 }}>
+                {positions ? formatDateWithWeekday(positions.as_of) : ""}
               </span>
             </div>
             <div className="card-body appCardBodyTight">
