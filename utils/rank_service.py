@@ -8,6 +8,7 @@ import pandas as pd
 from config import CACHE_TTL_COMPUTE
 from services.stock_cache_service import get_stock_cache_meta_map
 from utils.data_loader import get_trading_days
+from utils.pool_settings_store import MA_DAY_OPTIONS
 from utils.rankings import (
     MONTHLY_RETURN_LABEL_COUNT,
     build_effective_ma_rules,
@@ -547,6 +548,9 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
         "ticker_types": configs_payload,
         "ticker_type": selected_ticker_type,
         "ma_rules": ma_rules,
+        # 이평선 일수 선택지 — 백엔드 상수가 단일 소스. 화면이 복사본을 들고 있으면
+        # 여기에 값이 추가될 때 그 화면만 옛 목록을 계속 보여준다.
+        "ma_day_options": list(MA_DAY_OPTIONS),
     }
 
 
@@ -615,6 +619,7 @@ def _compute_rank_data_payload(
         "ticker_types": configs_payload,
         "ticker_type": selected_ticker_type,
         "ma_rules": ma_rules,
+        "ma_day_options": list(MA_DAY_OPTIONS),
         "as_of_date": _serialize_datetime(effective_as_of_date),
         "monthly_return_labels": get_recent_monthly_return_labels(
             MONTHLY_RETURN_LABEL_COUNT,

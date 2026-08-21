@@ -114,6 +114,8 @@ type RankResponse = {
   ticker_types?: RankTickerType[];
   ticker_type?: string;
   ma_rules?: RankMaRule[];
+  /** 이평선 일수 선택지 — 백엔드 상수가 단일 소스. */
+  ma_day_options?: number[];
   as_of_date?: string | null;
   monthly_return_labels?: string[];
   rows?: RankRow[];
@@ -163,6 +165,7 @@ type RankToolbarCache = {
   ticker_types: RankTickerType[];
   ticker_type: string;
   ma_rule: RankMaRule | null;
+  ma_day_options: number[];
 };
 
 type RankHeaderSummary = {
@@ -338,6 +341,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     rankToolbarCache?.ticker_type ?? DEFAULT_TICKER_TYPE,
   );
   const [maRule, setMaRule] = useState<RankMaRule | null>(rankToolbarCache?.ma_rule ?? null);
+  // 백엔드가 내려주는 선택지를 쓴다 — 화면이 복사본을 들고 있으면 값이 추가될 때 여기만 옛 목록이 남는다.
+  const [maDayOptions, setMaDayOptions] = useState<number[]>(rankToolbarCache?.ma_day_options ?? MA_DAY_OPTIONS);
   const [metricMode, setMetricMode] = useState<MetricMode>("basic");
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
@@ -376,12 +381,15 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setSelectedAccountId(nextAccountId);
     writeRememberedTickerType(nextAccountId);
     setMaRule(payload.ma_rules?.[0] ?? null);
+    const nextMaDayOptions = payload.ma_day_options?.length ? payload.ma_day_options : MA_DAY_OPTIONS;
+    setMaDayOptions(nextMaDayOptions);
     setSelectedAsOfDate(toDateInputValue(payload.as_of_date));
     setMonthlyReturnLabels(payload.monthly_return_labels ?? []);
     rankToolbarCache = {
       ticker_types: payload.ticker_types ?? [],
       ticker_type: nextAccountId,
       ma_rule: payload.ma_rules?.[0] ?? null,
+      ma_day_options: nextMaDayOptions,
     };
     setAddingRow(null);
     addingTickerDraftRef.current = "";
@@ -408,11 +416,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       writeRememberedTickerType(nextAccountId);
     }
     setMaRule(payload.ma_rules?.[0] ?? null);
+    const nextMaDayOptions = payload.ma_day_options?.length ? payload.ma_day_options : MA_DAY_OPTIONS;
+    setMaDayOptions(nextMaDayOptions);
 
     rankToolbarCache = {
       ticker_types: nextTickerTypes,
       ticker_type: nextAccountId,
       ma_rule: payload.ma_rules?.[0] ?? null,
+      ma_day_options: nextMaDayOptions,
     };
   }
 
@@ -1583,7 +1594,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                           value={String(maRule.short_ma_days)}
                           onChange={(event) => handleMaRuleDaysChange("short_ma_days", Number(event.target.value))}
                         >
-                          {MA_DAY_OPTIONS.map((day) => (
+                          {maDayOptions.map((day) => (
                             <option key={day} value={day}>
                               단기 {day}일
                             </option>
@@ -1594,7 +1605,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                           value={String(maRule.long_ma_days)}
                           onChange={(event) => handleMaRuleDaysChange("long_ma_days", Number(event.target.value))}
                         >
-                          {MA_DAY_OPTIONS.map((day) => (
+                          {maDayOptions.map((day) => (
                             <option key={day} value={day}>
                               장기 {day}일
                             </option>
