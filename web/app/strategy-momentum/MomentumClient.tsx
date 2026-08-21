@@ -29,6 +29,7 @@ import {
   signColor,
 } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
+import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { formatPrice } from "../../lib/price-format";
 
 const gridTheme = createAppGridTheme();
@@ -1169,11 +1170,9 @@ export function MomentumClient() {
                   <span style={{ ...hintStyle, color: "var(--up-color, #d64545)", fontWeight: 700 }}>
                     이 풀은 첫 설정 — 저장해야 선정·백테스트가 실행됩니다
                   </span>
-                ) : isDirty ? (
-                  <span style={{ ...hintStyle, color: "var(--up-color, #d64545)", fontWeight: 700 }}>
-                    저장하지 않은 변경
-                  </span>
-                ) : null}
+                ) : (
+                  <UnsavedChangesBadge show={isDirty} />
+                )}
                 <button
                   type="button"
                   className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
