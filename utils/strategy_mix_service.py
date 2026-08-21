@@ -407,33 +407,138 @@ def _build_action_groups(
     return groups
 
 
+def _attach_account_targets(holdings: list[dict[str, Any]], account: dict[str, Any]) -> list[dict[str, Any]]:
+    """계좌 보유와 목표를 대조해 수량 지시를 붙인다. 전량 매도 요약 목록을 돌려준다.
+
+    종목별 목표 금액·주수 → 현재 보유와의 차이가 그대로 매매 지시가 된다.
+    행이 종목 단위라 계좌 보유와 1:1 로 비교된다(겹치는 종목도 한 번만 센다).
+    목표 포트폴리오에 없는 보유 종목은 전량 매도 대상 — 목표 비중 0% 행으로 표에
+    함께 넣는다 (팔아야 할 종목이 표 밖에 있으면 계좌를 표 하나로 대조할 수 없다).
+    """
+    total_assets = float(account.get("total_assets") or 0)
+    for row in holdings:
+        held = account["holdings"].get(row["ticker"])
+        row["held_quantity"] = held["quantity"] if held else 0.0
+        row["held_value"] = (held or {}).get("value")
+        row["current_weight_pct"] = (
+            round(float(row["held_value"]) / total_assets * 100.0, 2)
+            if row.get("held_value") and total_assets > 0
+            else 0.0
+        )
+        target_amount = total_assets * row["weight_pct"] / 100.0
+        row["target_amount"] = round(target_amount, 2)
+        price = row.get("price")
+        # 반올림 — 버림이면 1주 값이 목표 금액보다 조금만 커도 목표가 0 이 되어 슬롯이
+        # 통째로 빈다(비중 0% vs 목표 5%). 반올림이 목표 비중에 더 가깝다.
+        target_qty = round(target_amount / float(price)) if price else None
+        row["target_quantity"] = target_qty
+        row["trade_quantity"] = None if target_qty is None else target_qty - int(row["held_quantity"])
+    target_tickers = {row["ticker"] for row in holdings}
+    sell_all: list[dict[str, Any]] = []
+    for ticker, item in sorted(account["holdings"].items()):
+        if ticker in target_tickers:
+            continue
+        value = item.get("value")
+        sell_all.append({"ticker": ticker, "name": item["name"], "quantity": item["quantity"], "value": value})
+        holdings.append(
+            {
+                "ticker": ticker,
+                "name": item["name"],
+                "sources": [],
+                "weight_pct": 0.0,
+                "price": item.get("price"),
+                "change_pct": None,
+                "sm_status": None,
+                "nh_status": None,
+                "is_sell_all": True,
+                "held_quantity": item["quantity"],
+                "held_value": value,
+                "current_weight_pct": round(float(value) / total_assets * 100.0, 2)
+                if value and total_assets > 0
+                else 0.0,
+                "target_amount": 0.0,
+                "target_quantity": 0,
+                "trade_quantity": -int(item["quantity"]),
+            }
+        )
+    return sell_all
+
+
 def _build_next_week_preview(
     sm: dict[str, Any],
-    sm_selected: list[dict[str, Any]],
     holdings: list[dict[str, Any]],
+    actions: dict[str, Any],
     weight_sm: float,
     account: dict[str, Any] | None,
     ahead: list,
     today_local,
 ) -> dict[str, Any] | None:
-    """다음주 교체를 **지금 순위 그대로 확정된다고 가정**했을 때의 예상 액션.
+    """다음주 교체를 **지금 순위 그대로 확정된다고 가정**했을 때의 월요일 전체 액션.
 
-    금요일쯤 '다음주에 뭘 사고팔게 되나'를 미리 보는 용도다. 모멘텀 슬리브만 주간
-    교체가 있으므로 모멘텀의 다음주 예상(`next_week_expected` — 실시간 순위 기준)만
-    본다. 신고가는 주간 리듬이 없어 여기 나오지 않는다.
+    오늘의 액션과 **같은 조립기**(`_build_action_groups`)를 다음주 가정 목표에
+    돌린다 — 전량 매도(목표에 없는 보유 종목)까지 포함한 완전한 그림이라, 종목
+    교체가 없으면 오늘의 액션과 똑같이 나온다. 모멘텀 슬리브만 주간 교체가 있으므로
+    다음주 예상(`next_week_expected` — 실시간 순위 기준)으로 모멘텀 목표만 바꾼다.
 
     이번 교체가 아직 체결 전이면(오늘의 액션에 교체일 그룹이 이미 있으면) 만들지
-    않는다 — 같은 교체가 두 번 보이면 헷갈린다. 예상 수량은 현재가·현재 총자산
-    기준 추정치라 실제 체결 수량과 다를 수 있다.
+    않는다 — 같은 교체가 두 번 보이면 헷갈린다. 수량은 현재가·현재 총자산 기준
+    추정치라 실제 체결 수량과 다를 수 있다.
     """
-    if not sm.get("is_filled"):
+    if not sm.get("is_filled") or account is None:
         return None
 
-    expected = {
+    expected_rows = {
         str(row["ticker"]).strip(): row for row in (sm.get("rows") or []) if row.get("next_week_expected")
     }
-    selected_by = {str(row["ticker"]).strip(): row for row in sm_selected}
-    holdings_by = {row["ticker"]: row for row in holdings}
+
+    # ── 다음주 가정 목표 — 현재 목표에서 모멘텀 슬리브만 다음주 예상으로 바꾼다 ──
+    hypo: list[dict[str, Any]] = []
+    for row in holdings:
+        if row.get("is_sell_all"):
+            continue  # 전량 매도 행은 계좌 대조가 다시 만든다
+        copy = {
+            "ticker": row["ticker"],
+            "name": row.get("name"),
+            "sources": list(row.get("sources") or []),
+            "weight_pct": float(row.get("weight_pct") or 0),
+            "sm_weight": float(row.get("sm_weight") or 0),
+            "nh_weight": float(row.get("nh_weight") or 0),
+            "price": row.get("price"),
+        }
+        if "sm" in copy["sources"] and copy["ticker"] not in expected_rows:
+            # 편출 예상 — 모멘텀 몫을 뺀다. 신고가 몫이 없으면 행 자체가 빠진다.
+            copy["weight_pct"] -= copy["sm_weight"]
+            copy["sm_weight"] = 0.0
+            copy["sources"] = [s for s in copy["sources"] if s != "sm"]
+            if not copy["sources"] and copy["weight_pct"] <= 0:
+                continue
+        hypo.append(copy)
+    hypo_tickers = {row["ticker"] for row in hypo}
+    preview_buys: list[dict[str, Any]] = []
+    for ticker in sorted(expected_rows):
+        if ticker in hypo_tickers and any(
+            row["ticker"] == ticker and "sm" in row["sources"] for row in hypo
+        ):
+            continue  # 유지 — 이미 모멘텀 몫이 있다
+        row = expected_rows[ticker]
+        existing = next((r for r in hypo if r["ticker"] == ticker), None)
+        if existing is None:
+            existing = {
+                "ticker": ticker,
+                "name": row.get("name") or ticker,
+                "sources": [],
+                "weight_pct": 0.0,
+                "sm_weight": 0.0,
+                "nh_weight": 0.0,
+                "price": row.get("price"),
+            }
+            hypo.append(existing)
+        existing["sources"].append("sm")
+        existing["weight_pct"] += weight_sm
+        existing["sm_weight"] += weight_sm
+        preview_buys.append({"ticker": ticker, "name": row.get("name") or ticker, "price": row.get("price")})
+
+    _attach_account_targets(hypo, account)
 
     # 다음주 첫 거래일 = 다음 교체 체결일 (모멘텀 주간 리듬).
     this_week = today_local.isocalendar()[:2]
@@ -441,46 +546,26 @@ def _build_next_week_preview(
         (str(day.date()) for day in ahead if day.date().isocalendar()[:2] > tuple(this_week)), None
     )
 
-    sells: list[dict[str, Any]] = []
-    for ticker in sorted(selected_by):
-        row = selected_by[ticker]
-        # 주중 매도 예정은 이미 오늘의 액션에 있다 — 다음주 예상에서 겹쳐 보이지 않게 뺀다.
-        if ticker in expected or row.get("is_exit_pending"):
-            continue
-        held = holdings_by.get(ticker) or {}
-        quantity = held.get("held_quantity")
-        sells.append(
-            {
-                "ticker": ticker,
-                "name": row.get("name") or ticker,
-                "quantity": int(quantity) if quantity else None,
-                "value": held.get("held_value"),
-            }
-        )
-
-    total_assets = float((account or {}).get("total_assets") or 0)
-    buys: list[dict[str, Any]] = []
-    for ticker in sorted(expected):
-        if ticker in selected_by:  # 유지 — 액션 없음
-            continue
-        row = expected[ticker]
-        price = row.get("price")
-        quantity = (
-            round(total_assets * weight_sm / 100.0 / float(price)) if price and total_assets > 0 else None
-        )
-        buys.append(
-            {
-                "ticker": ticker,
-                "name": row.get("name") or ticker,
-                "price": price,
-                "quantity": quantity,
-                "expected_rank": row.get("expected_rank"),
-            }
-        )
-
-    if not sells and not buys:
-        return None
-    return {"fill_date": fill_date, "sells": sells, "buys": buys}
+    # 오늘의 액션과 같은 조립 — 교체 예상분만 rebalance 로 넘겨 '교체 매수/매도' 라벨을 받는다.
+    hypo_actions = {
+        "sm_sells": actions["sm_sells"],
+        "nh_entries": actions["nh_entries"],
+        "nh_sells": actions["nh_sells"],
+        "sm_rebalance": {
+            "is_filled": True,
+            "fill_date": None,
+            "buys": preview_buys,
+            "sells": [
+                {"ticker": row["ticker"], "name": row.get("name") or row["ticker"]}
+                for row in holdings
+                if not row.get("is_sell_all")
+                and "sm" in (row.get("sources") or [])
+                and row["ticker"] not in expected_rows
+            ],
+        },
+    }
+    groups = _build_action_groups(hypo, hypo_actions, fill_date)
+    return {"fill_date": fill_date, "groups": groups}
 
 
 def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str, Any]:
@@ -705,57 +790,7 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
         total_assets = stock_value + account["cash_balance"]
         account["stock_value"] = round(stock_value, 2)
         account["total_assets"] = round(total_assets, 2)
-        # 종목별 목표 금액·주수 → 현재 보유와의 차이가 그대로 매매 지시가 된다.
-        # 행이 종목 단위라 계좌 보유와 1:1 로 비교된다(겹치는 종목도 한 번만 센다).
-        for row in holdings:
-            held = account["holdings"].get(row["ticker"])
-            row["held_quantity"] = held["quantity"] if held else 0.0
-            row["held_value"] = (held or {}).get("value")
-            row["current_weight_pct"] = (
-                round(float(row["held_value"]) / total_assets * 100.0, 2)
-                if row.get("held_value") and total_assets > 0
-                else 0.0
-            )
-            target_amount = total_assets * row["weight_pct"] / 100.0
-            row["target_amount"] = round(target_amount, 2)
-            price = row.get("price")
-            # 반올림 — 버림이면 1주 값이 목표 금액보다 조금만 커도 목표가 0 이 되어 슬롯이
-            # 통째로 빈다(비중 0% vs 목표 5%). 반올림이 목표 비중에 더 가깝다.
-            target_qty = round(target_amount / float(price)) if price else None
-            row["target_quantity"] = target_qty
-            row["trade_quantity"] = None if target_qty is None else target_qty - int(row["held_quantity"])
-        # 목표 포트폴리오에 없는 보유 종목 = 전량 매도 대상. 목표 비중 0% 행으로 표에 함께 넣는다
-        # — 팔아야 할 종목이 표 밖에 있으면 계좌를 표 하나로 대조할 수 없다.
-        target_tickers = {row["ticker"] for row in holdings}
-        account["sell_all"] = []
-        for ticker, item in sorted(account["holdings"].items()):
-            if ticker in target_tickers:
-                continue
-            value = item.get("value")
-            account["sell_all"].append(
-                {"ticker": ticker, "name": item["name"], "quantity": item["quantity"], "value": value}
-            )
-            holdings.append(
-                {
-                    "ticker": ticker,
-                    "name": item["name"],
-                    "sources": [],
-                    "weight_pct": 0.0,
-                    "price": item.get("price"),
-                    "change_pct": None,
-                    "sm_status": None,
-                    "nh_status": None,
-                    "is_sell_all": True,
-                    "held_quantity": item["quantity"],
-                    "held_value": value,
-                    "current_weight_pct": round(float(value) / total_assets * 100.0, 2)
-                    if value and total_assets > 0
-                    else 0.0,
-                    "target_amount": 0.0,
-                    "target_quantity": 0,
-                    "trade_quantity": -int(item["quantity"]),
-                }
-            )
+        account["sell_all"] = _attach_account_targets(holdings, account)
 
     payload = {
         "computed_at": datetime.now().astimezone().isoformat(),
@@ -852,7 +887,9 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     payload["actions"]["groups"] = _build_action_groups(payload["holdings"], payload["actions"], next_trading_day)
     # 다음주 교체 가정 미리보기 — 실시간 순위 기준 잠정치라 과거 재현(as_of)에는 없다.
     payload["actions"]["next_week_preview"] = (
-        _build_next_week_preview(sm, sm_selected, payload["holdings"], weight_sm, account, ahead, today_local)
+        _build_next_week_preview(
+            sm, payload["holdings"], payload["actions"], weight_sm, account, ahead, today_local
+        )
         if not as_of
         else None
     )

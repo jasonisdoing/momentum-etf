@@ -261,17 +261,11 @@ type Positions = {
     sleeve_rebalance_today: boolean;
     /** 오늘의 액션 — 서버가 조립한 체결일 묶음(화면·슬랙 알람 공용 단일 소스). */
     groups: ActionGroup[];
-    /** 다음주 교체 가정 미리보기 — 지금 순위가 그대로 확정될 때의 예상(잠정). 과거 조회면 null. */
+    /** 다음주 교체 가정 미리보기 — 오늘의 액션과 같은 조립을 다음주 가정 목표로 돌린 결과.
+     *  종목 교체가 없으면 오늘의 액션과 똑같다. 과거 조회면 null. */
     next_week_preview: {
       fill_date: string | null;
-      sells: { ticker: string; name: string; quantity: number | null; value: number | null }[];
-      buys: {
-        ticker: string;
-        name: string;
-        price: number | null;
-        quantity: number | null;
-        expected_rank: number | null;
-      }[];
+      groups: ActionGroup[];
     } | null;
   };
 };
@@ -401,6 +395,8 @@ export function StrategyMixClient() {
     useState<LoadingProgress | null>(null);
   /** 계좌를 저장하면 목표 금액이 달라지므로 운용 현황를 다시 계산한다. */
   const [positionsReloadKey, setPositionsReloadKey] = useState(0);
+  /** 다음주 교체 가정 — 기본 접힘 (참고 정보). */
+  const [nextWeekOpen, setNextWeekOpen] = useState(false);
 
   // 백테스트 탭.
   const [view, setView] = useState<View | null>(null);
@@ -1369,60 +1365,94 @@ export function StrategyMixClient() {
                     )}
                   </div>
 
-                  {/* ⑤ 다음주 교체 가정 — 지금 순위 그대로 확정될 때의 예상 (모멘텀 슬리브만). */}
+                  {/* ⑤ 다음주 교체 가정 — 지금 순위 그대로 확정될 때의 예상 (모멘텀 슬리브만).
+                      기본 접힘 — 금요일쯤 궁금할 때 열어 보는 참고 정보라 평소에는 줄만 차지한다. */}
                   {nextWeekPreview ? (
                     <div>
-                      <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                        다음주 교체 가정
-                        <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
-                          지금 순위가 그대로 확정된다고 가정한 모멘텀 교체 예상 —
-                          판정은 이번주 마지막 거래일 종가로 확정되므로 그때까지
-                          바뀔 수 있습니다. 수량은 현재가·현재 총자산 기준 추정치입니다.
-                        </span>
-                      </div>
-                      <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                        {nextWeekPreview.fill_date
-                          ? `${formatDateWithWeekday(nextWeekPreview.fill_date)} 시가 (예상)`
-                          : "다음 교체일 (예상)"}
-                        <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
-                          매도 {nextWeekPreview.sells.length}건 · 매수{" "}
-                          {nextWeekPreview.buys.length}건
-                        </span>
-                      </div>
-                      <ul
+                      <button
+                        type="button"
+                        onClick={() => setNextWeekOpen((value) => !value)}
                         style={{
+                          fontWeight: 700,
                           margin: 0,
-                          paddingLeft: 18,
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
+                          padding: 0,
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          color: "inherit",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
                         }}
                       >
-                        {nextWeekPreview.sells.map((row) => (
-                          <li key={`nw-sell-${row.ticker}`}>
-                            <strong style={{ color: "var(--down-color, #2f6fd0)" }}>
-                              교체 매도 예상
-                            </strong>{" "}
-                            — {row.name}({row.ticker})
-                            {row.quantity ? ` ${row.quantity.toLocaleString()}주` : ""}
-                            {row.value != null
-                              ? ` (${Math.round(row.value).toLocaleString()})`
-                              : ""}
-                          </li>
-                        ))}
-                        {nextWeekPreview.buys.map((row) => (
-                          <li key={`nw-buy-${row.ticker}`}>
-                            <strong style={{ color: "var(--up-color, #d64545)" }}>
-                              교체 매수 예상
-                            </strong>{" "}
-                            — {row.name}({row.ticker})
-                            {row.quantity ? ` 약 ${row.quantity.toLocaleString()}주` : ""}
-                            {row.expected_rank != null
-                              ? ` · 예상순위 ${row.expected_rank}위`
-                              : ""}
-                          </li>
-                        ))}
-                      </ul>
+                        <span>{nextWeekOpen ? "▾" : "▸"}</span>
+                        다음주 교체 가정
+                        <span style={{ ...hintStyle, fontWeight: 500 }}>
+                          매도{" "}
+                          {nextWeekPreview.groups.reduce(
+                            (n, g) =>
+                              n + g.items.filter((i) => i.side === "sell").length,
+                            0,
+                          )}
+                          건 · 매수{" "}
+                          {nextWeekPreview.groups.reduce(
+                            (n, g) =>
+                              n + g.items.filter((i) => i.side === "buy").length,
+                            0,
+                          )}
+                          건 (예상)
+                        </span>
+                      </button>
+                      {nextWeekOpen ? (
+                        <div style={{ marginTop: 6 }}>
+                          <div style={{ ...hintStyle, marginBottom: 6 }}>
+                            지금 순위가 그대로 다음주 교체로 확정된다고 가정하고,
+                            오늘의 액션과 같은 방식으로 조립한 월요일 예상입니다 —
+                            종목 교체가 없으면 오늘의 액션과 똑같습니다. 판정은
+                            이번주 마지막 거래일 종가로 확정되므로 그때까지 바뀔 수
+                            있고, 수량은 현재가·현재 총자산 기준 추정치입니다.
+                          </div>
+                          {nextWeekPreview.groups.length === 0 ? (
+                            <div style={hintStyle}>
+                              예상되는 매매가 없습니다 — 보유 목록이 그대로
+                              유지됩니다.
+                            </div>
+                          ) : (
+                            nextWeekPreview.groups.map((group) => (
+                              <div key={`nw-${group.key}`}>
+                                <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                                  {group.title} (예상)
+                                </div>
+                                <ul
+                                  style={{
+                                    margin: 0,
+                                    paddingLeft: 18,
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: 4,
+                                  }}
+                                >
+                                  {group.items.map((item) => (
+                                    <li key={`nw-${item.key}`}>
+                                      <strong
+                                        style={{
+                                          color:
+                                            item.side === "sell"
+                                              ? "var(--down-color, #2f6fd0)"
+                                              : "var(--up-color, #d64545)",
+                                        }}
+                                      >
+                                        {item.title}
+                                      </strong>{" "}
+                                      — {item.text}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
