@@ -8,12 +8,12 @@
 
 지수 원문(2020-04 Construction Rules)의 정의와 이 스크립트의 대응
   · 배당수익률   : 데이터 기준일 직전 **12개월** 주당배당금 합 ÷ 주가
-                   → yfinance 배당 이력(수정주가 기준)의 최근 12개월 합 ÷ 현재가
+                   → OpenDART 배당 공시의 **최근 확정 회계연도** 보통주 주당 현금배당금 ÷ 현재가.
+                      (지급일 기준 12개월 합 대신 회계연도 기준 — 국내 연 1~2회 배당에서는
+                      사실상 같고, 공식 공시 값이라 더 정확하다)
   · 자사주수익률 : 최근 **8분기** 순증자현금흐름 합의 부호를 뒤집어 **÷ 2 ÷ 시가총액**
-                   → yfinance 연간 현금흐름표 `Net Common Stock Issuance` **최근 2개 회계연도**
-                      합의 부호를 뒤집어 ÷ 2 ÷ 시가총액.
-                      8분기 합 ÷ 2 = 2년 합 ÷ 2 = 연평균이라 값이 같다(yfinance 한국 종목은
-                      분기 현금흐름표를 5분기까지만 주므로 연간으로 계산한다).
+                   → OpenDART 현금흐름표 **최근 2개 회계연도**의
+                      (자기주식 취득 − 자기주식 처분 − 주식 발행) 합 ÷ 2 ÷ 시가총액.
                       **순매입**이라 자사주를 사도 그만큼 증자하면 상쇄된다(발행이 더 많으면 음수).
   · 편입 조건    : 총주주환원율 **0.1% 초과**. 배당·자사주 중 **하나만 해도** 편입된다.
 
@@ -25,9 +25,11 @@
     순매입액을 그 종목 시가총액으로 나누게 되어 우선주만 값이 부풀려진다(짝이 안 맞는다).
 
 데이터 소스
-  - 유니버스: kor 종목풀(코스피 200 + 코스닥 150 등록분) — 종목풀 화면이 단일 소스
+  - 유니버스: kospi200 + kosdaq150 종목풀 합집합 — 종목풀 화면이 단일 소스
+    (예전의 kor 통합 풀이 국가별 풀로 나뉘어 두 풀을 합쳐 쓴다)
   - 시가총액·현재가: 네이버 시가총액 순위 API (/kor-market-stock 화면과 동일 함수)
-  - 주당배당금·현금흐름표: yfinance
+  - 주당배당금·현금흐름표: OpenDART 사업보고서 (services/opendart_service —
+    공식 API, .env 에 DART_API_KEY 필요)
 
 사용 예
     python scripts/find_shareholder_yield_in_kor.py
@@ -44,7 +46,6 @@ import sys
 from typing import Any
 
 import pandas as pd
-import yfinance as yf
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # noqa: E402
 
@@ -56,14 +57,11 @@ from utils.stock_list_io import get_etfs  # noqa: E402
 logger = get_app_logger()
 
 # ── 조정 가능한 기준 ────────────────────────────────────────────────────────
-# 유니버스로 쓸 종목풀. 종목풀 화면에서 관리하는 목록이 그대로 대상이 된다.
-UNIVERSE_POOL = "kor"
+# 유니버스로 쓸 종목풀들 — 합집합으로 쓴다. 종목풀 화면에서 관리하는 목록이 그대로 대상이 된다.
+UNIVERSE_POOLS = ("kospi200", "kosdaq150")
 
 # 편입 하한 — 지수 원문의 "total shareholder yield above 0.1%".
 MIN_SHAREHOLDER_YIELD = 0.001
-
-# 배당수익률 계산 창(개월) — 지수 원문의 trailing 12-month.
-DIVIDEND_WINDOW_MONTHS = 12
 
 # 자사주수익률 계산 창(회계연도 수) — 지수 원문의 8분기(2년)에 대응. 합을 이 값으로 나눠 연율화한다.
 BUYBACK_WINDOW_YEARS = 2
@@ -73,9 +71,6 @@ EXCLUDE_PREFERRED = True
 
 # 네이버 시총 순위에서 가져올 시장별 상위 종목 수 — 종목풀 종목의 시가총액을 여기서 찾는다.
 MARKET_CAP_FETCH_LIMIT = 200
-
-# 순증자현금흐름 항목명 후보. 음수 = 순매입(자사주), 양수 = 순발행(증자).
-NET_ISSUANCE_KEYS = ("Net Common Stock Issuance", "Repurchase Of Capital Stock")
 
 
 def _year_of(label: Any) -> str:
@@ -106,58 +101,45 @@ def _is_preferred_stock(ticker: str) -> bool:
     return len(code) == 6 and not code.endswith("0")
 
 
-def _yf_symbol(ticker: str, market: str) -> str:
-    """yfinance 심볼 — 코스닥은 .KQ, 그 외는 .KS."""
-    return f"{ticker}.KQ" if str(market or "").upper() == "KOSDAQ" else f"{ticker}.KS"
+# OpenDART 조회에 쓰는 공유 상태 — main() 이 채운 뒤 워커(_analyze)들이 읽기만 한다.
+_CORP_CODES: dict[str, str] = {}
+_LATEST_YEAR: int = 0
 
 
-def _trailing_dividend_per_share(ticker_obj: yf.Ticker) -> tuple[float, int]:
-    """최근 DIVIDEND_WINDOW_MONTHS 개월간 지급된 주당배당금 합과 지급 횟수.
+def _latest_confirmed_dps(corp_code: str) -> tuple[float, int | None]:
+    """최근 확정 회계연도의 보통주 주당 현금배당금과 그 연도. 공시가 없으면 (0, None)."""
+    from services.opendart_service import dps_history
 
-    yfinance 배당 이력은 액면분할 등 기업행위가 반영된 값이라 지수 정의(corporate action-
-    adjusted dividends per-share)와 같다. 지급일 기준이므로 회계연도와는 어긋날 수 있는데,
-    지수도 "지급된" 배당을 세므로 그대로 둔다.
-    """
-    series = ticker_obj.dividends
-    if series is None or len(series) == 0:
-        return 0.0, 0
-    index = series.index.tz_localize(None) if series.index.tz is not None else series.index
-    cutoff = pd.Timestamp.today().normalize() - pd.DateOffset(months=DIVIDEND_WINDOW_MONTHS)
-    recent = series[index >= cutoff]
-    return float(recent.sum()), int(len(recent))
+    history = dps_history(corp_code, _LATEST_YEAR)
+    for year in sorted(history, reverse=True):
+        return float(history[year]), year
+    return 0.0, None
 
 
-def _annualized_net_buyback(cashflow: pd.DataFrame | None) -> tuple[float, list[str]]:
+def _annualized_net_buyback(corp_code: str) -> tuple[float, list[str]]:
     """최근 BUYBACK_WINDOW_YEARS 개 회계연도의 **연평균 순매입액**과 사용한 연도 목록.
 
     지수 정의는 8분기 순증자현금흐름 합의 부호를 뒤집어 2로 나눈 값이다. 연간 값 2개년을
-    쓰면 같은 결과가 된다. 값이 비어 있는 해는 그 해에 주식 발행·매입이 없었다는 뜻이라
-    0 으로 본다(그 해를 빼고 평균 내면 창 길이가 종목마다 달라진다).
+    쓰면 같은 결과가 된다. 순매입 = 자기주식 취득 − 자기주식 처분 − 주식 발행.
+    항목이 없는 해는 그 해에 해당 활동이 없었다는 뜻이라 0 으로 본다.
 
     반환값이 음수면 순발행(증자)이 더 많았다는 뜻이고, 지수도 그대로 환원율을 깎는다.
     """
-    if cashflow is None or cashflow.empty:
-        return 0.0, []
-
-    years = sorted({_year_of(label) for label in cashflow.columns}, reverse=True)[:BUYBACK_WINDOW_YEARS]
-    if not years:
-        return 0.0, []
+    from services.opendart_service import annual_financials
 
     total = 0.0
-    for year in years:
-        for key in NET_ISSUANCE_KEYS:
-            if key not in cashflow.index:
-                continue
-            found = False
-            for label, value in cashflow.loc[key].items():
-                if _year_of(label) == year and pd.notna(value):
-                    total += float(value)
-                    found = True
-                    break
-            if found:
-                break
-    # 순증자현금흐름은 매입이 음수다. 부호를 뒤집어 '돌려준 금액'으로 만든 뒤 창 길이로 나눈다.
-    return -total / BUYBACK_WINDOW_YEARS, sorted(years)
+    years: list[str] = []
+    for year in range(_LATEST_YEAR - BUYBACK_WINDOW_YEARS + 1, _LATEST_YEAR + 1):
+        financials = annual_financials(corp_code, year)
+        if financials is None:  # 그 연도 사업보고서 자체가 없음 (신규 상장 등)
+            continue
+        years.append(str(year))
+        total += (
+            financials.get("buyback", 0.0)
+            - financials.get("buyback_disposal", 0.0)
+            - financials.get("share_issuance", 0.0)
+        )
+    return total / BUYBACK_WINDOW_YEARS, years
 
 
 def _analyze(row: dict[str, Any]) -> dict[str, Any] | None:
@@ -175,15 +157,17 @@ def _analyze(row: dict[str, Any]) -> dict[str, Any] | None:
     # 네이버 시총은 억원 단위라 현금흐름표(원)와 자릿수를 맞춘다.
     market_cap_won = float(market_cap) * 1e8
 
+    corp_code = _CORP_CODES.get(ticker)
+    if not corp_code:
+        return {**base, "excluded_reason": "DART 고유번호 없음"}
     try:
-        ticker_obj = yf.Ticker(_yf_symbol(ticker, str(row.get("market") or "")))
-        dps, dividend_count = _trailing_dividend_per_share(ticker_obj)
-        buyback_amount, buyback_years = _annualized_net_buyback(ticker_obj.cashflow)
+        dps, dps_year = _latest_confirmed_dps(corp_code)
+        buyback_amount, buyback_years = _annualized_net_buyback(corp_code)
     except Exception as exc:
         logger.debug("재무 조회 실패 (%s): %s", ticker, exc)
         return {**base, "excluded_reason": "재무 조회 실패"}
 
-    if not buyback_years and dividend_count == 0:
+    if not buyback_years and dps_year is None:
         return {**base, "excluded_reason": "재무 조회 실패"}
 
     dividend_yield = dps / float(price)
@@ -200,7 +184,7 @@ def _analyze(row: dict[str, Any]) -> dict[str, Any] | None:
         "market_cap_won": market_cap_won,
         "current_price": float(price),
         "dps": dps,
-        "dividend_count": dividend_count,
+        "dps_year": dps_year,
         "buyback_amount": buyback_amount,
         "buyback_years": buyback_years,
         "dividend_yield": dividend_yield,
@@ -212,14 +196,22 @@ def _analyze(row: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _load_universe() -> list[dict[str, Any]]:
-    """kor 종목풀 종목에 네이버 시가총액·현재가를 붙인 목록.
+    """kospi200 + kosdaq150 종목풀 합집합에 네이버 시가총액·현재가를 붙인 목록.
 
     종목풀 문서에는 시가총액이 없어(가격지표 배치가 담당하지 않는다) 네이버 시총 순위에서
     가져와 티커로 맞춘다. 시총 순위 밖의 종목은 값 없음으로 남겨 관문에서 걸린다.
     """
-    pool_items = [item for item in get_etfs(UNIVERSE_POOL) if not item.get("is_etf")]
+    pool_items: list[dict[str, Any]] = []
+    seen_tickers: set[str] = set()
+    for pool in UNIVERSE_POOLS:
+        for item in get_etfs(pool):
+            ticker = str(item.get("ticker") or "").strip()
+            if item.get("is_etf") or not ticker or ticker in seen_tickers:
+                continue
+            seen_tickers.add(ticker)
+            pool_items.append(item)
     if not pool_items:
-        raise SystemExit(f"'{UNIVERSE_POOL}' 종목풀에 종목이 없습니다.")
+        raise SystemExit(f"{UNIVERSE_POOLS} 종목풀에 종목이 없습니다.")
 
     cap_by_ticker: dict[str, dict[str, Any]] = {}
     for market in ("KOSPI", "KOSDAQ"):
@@ -255,7 +247,7 @@ def _print_detail(rank: int, item: dict[str, Any]) -> None:
     rows = [
         [
             "배당",
-            f"최근 {DIVIDEND_WINDOW_MONTHS}개월 {item['dividend_count']}회",
+            f"{item['dps_year']}년 확정" if item.get("dps_year") else "-",
             f"주당 {item['dps']:,.0f}원",
             f"{item['dividend_yield'] * 100:.2f}%",
         ],
@@ -273,15 +265,24 @@ def _print_detail(rank: int, item: dict[str, Any]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="kor 종목풀 주주환원 수익률 상위 종목 찾기 (한국판 DIVB)")
+    global _LATEST_YEAR
+
+    parser = argparse.ArgumentParser(description="국내 종목풀 주주환원 수익률 상위 종목 찾기 (한국판 DIVB)")
     parser.add_argument("--top", type=int, default=30, help="출력할 상위 종목 수 (기본 30).")
-    parser.add_argument("--workers", type=int, default=8, help="yfinance 병렬 조회 워커 수 (기본 8).")
+    parser.add_argument("--workers", type=int, default=8, help="OpenDART 병렬 조회 워커 수 (기본 8).")
     parser.add_argument("--detail", type=int, default=5, help="환원 내역을 출력할 상위 종목 수 (기본 5).")
     args = parser.parse_args()
 
-    print(f"'{UNIVERSE_POOL}' 종목풀 명단과 시가총액을 불러옵니다...")
+    from services.opendart_service import corp_code_by_stock, latest_annual_year
+    from utils.env import load_env_if_present
+
+    load_env_if_present()  # DART_API_KEY
+    _CORP_CODES.update(corp_code_by_stock())
+    _LATEST_YEAR = latest_annual_year()
+
+    print(f"{'+'.join(UNIVERSE_POOLS)} 종목풀 명단과 시가총액을 불러옵니다...")
     universe = _load_universe()
-    print(f"  {len(universe)}종목 확보 — 재무 데이터 조회 시작 (워커 {args.workers}개)")
+    print(f"  {len(universe)}종목 확보 — 재무 데이터 조회 시작 (워커 {args.workers}개, 최근 사업연도 {_LATEST_YEAR})")
 
     results: list[dict[str, Any]] = []
     excluded: list[dict[str, Any]] = []
@@ -335,12 +336,12 @@ def main() -> None:
     # ── 2. 항목 설명 ────────────────────────────────────────────────
     print(
         "\n항목 설명 — 환원률: 배당률 + 자사주률. 이 값 하나로 순위를 매긴다(DIVB 지수 정의)"
-        f"\n           배당률: 최근 {DIVIDEND_WINDOW_MONTHS}개월 주당배당금 합 / 현재가"
-        f"\n           자사주률: 최근 {BUYBACK_WINDOW_YEARS}개 회계연도 **순매입**(매입 − 발행) 연평균 / 시가총액"
+        "\n           배당률: 최근 확정 회계연도 주당 현금배당금(DART 공시) / 현재가"
+        f"\n           자사주률: 최근 {BUYBACK_WINDOW_YEARS}개 회계연도 **순매입**(취득 − 처분 − 발행) 연평균 / 시가총액"
         "\n                     증자가 매입보다 많으면 음수가 되어 환원률을 깎는다"
         "\n           주당배당·자사주: 위 두 값의 분자 — 배당은 1주 기준, 자사주는 회사 전체 금액"
         "\n           환원액: 환원률 × 시가총액 (지수의 total shareholder payout dollars)"
-        f"\n대상: '{UNIVERSE_POOL}' 종목풀 중 환원률이 {MIN_SHAREHOLDER_YIELD * 100:.1f}% 를 넘는 보통주"
+        f"\n대상: {'+'.join(UNIVERSE_POOLS)} 종목풀 중 환원률이 {MIN_SHAREHOLDER_YIELD * 100:.1f}% 를 넘는 보통주"
         "\n      (지수와 달리 90% 커버리지 선정·환원액 가중은 쓰지 않고 환원률 순으로 나열한다)"
         "\n유니버스나 기준을 바꾸려면 스크립트 상단의 상수를 수정하세요."
     )
