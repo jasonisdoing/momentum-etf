@@ -117,6 +117,8 @@ type PickRow = {
   is_exited?: boolean;
   is_exit_pending?: boolean;
   exit_date?: string | null;
+  /** 주중 매도 사유 — "주중 손절"(손절선 도달) 또는 "주중 이탈"(자격 상실). */
+  exit_reason?: string | null;
   streak_weeks: number | null;
   /** 편입 후 수익률(%) — 연속 편입 시작 교체일 시가 대비. 보유 중인 종목만 값이 있다. */
   entry_return_pct?: number | null;
@@ -630,7 +632,9 @@ export function MomentumClient() {
         field: "streak_weeks",
         headerTooltip:
           "이번 포트폴리오까지 몇 주 연속 편입됐는지 (신규 = 이번 주 첫 편입, 최대 12주 추적). " +
-          "화살표는 다음 주 예상 — →유지/→신규(초록), →편출(빨강). 확정은 교체일 직전 판정일 종가.",
+          "화살표 — →유지/→신규(초록)는 다음 주 예상, 확정은 교체일 직전 판정일 종가. " +
+          "빨강은 빠지는 종목이며 굵기가 '이미 팔렸는지'를 뜻한다: →매도예정(가늘게)은 아직 보유 중, " +
+          "→손절·→이탈(굵게)은 주중에 이미 매도된 것.",
         width: 108,
         cellDataType: "text",
         cellRenderer: (p: { value?: number | null; data?: PickRow }) => {
@@ -638,12 +642,19 @@ export function MomentumClient() {
             p.value == null ? "-" : p.value <= 1 ? "신규" : p.value >= 12 ? "12+" : `${p.value}주`;
           const isNewPick = p.value != null && p.value <= 1 && !p.data?.is_reserve;
           const held = Boolean(p.data && !p.data.is_reserve && !p.data.is_expected_only);
-          // 다음 주 예상 — 보유(선정) 행은 유지/편출, 그 밖(차순위·예상 전용)은 신규 예상만 표시.
+          // 빠지는 종목은 빨강으로 쓰되 **굵기로 '이미 팔렸는지'를 가른다** — 굵게는 주중에
+          // 이미 매도된 것(사유까지 표시), 가늘게는 아직 들고 있는 것. 초록 화살표만
+          // '다음 주 예상' 이고, 빨강은 지금 상태다.
           let next: React.ReactNode = null;
-          if (p.data?.next_week_expected) {
+          if (p.data?.is_exited) {
+            const reason = String(p.data.exit_reason ?? "").includes("손절") ? "손절" : "이탈";
+            next = <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}> →{reason}</span>;
+          } else if (p.data?.is_exit_pending) {
+            next = <span style={{ color: "var(--up-color, #d64545)" }}> →매도예정</span>;
+          } else if (p.data?.next_week_expected) {
             next = <span style={{ color: "#2f9e44", fontWeight: 700 }}> →{held ? "유지" : "신규"}</span>;
           } else if (held) {
-            next = <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}> →편출</span>;
+            next = <span style={{ color: "var(--up-color, #d64545)" }}> →매도예정</span>;
           }
           return (
             <span>
