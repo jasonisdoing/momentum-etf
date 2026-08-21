@@ -45,6 +45,10 @@ INDICES: list[dict[str, str]] = [
     {"name": "S&P 500", "yf_ticker": "^GSPC"},
     {"name": "나스닥 100", "yf_ticker": "^NDX"},
     {"name": "나스닥 100 선물", "yf_ticker": "NQ=F"},  # 이력=yfinance, 최신 봉=토스(RFU.NQc1) 보강
+    # 원/달러 환율. 지수는 아니지만 같은 추세 판정을 쓴다 — 달러 투자 계좌에서는
+    # 환율 상승이 곧 유리한 방향이라 '강세'가 그 계좌 기준으로 맞는 해석이 된다.
+    # (원화 자산 기준으로 읽으면 강세 = 원화 약세다.)
+    {"name": "미국달러", "yf_ticker": "KRW=X"},
 ]
 
 # 네이버 차트 (legacy XML) — 일봉 OHLCV 조회는 공통 헬퍼(utils/naver_chart.py)를 쓴다.
