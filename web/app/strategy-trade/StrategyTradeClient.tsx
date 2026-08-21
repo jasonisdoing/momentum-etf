@@ -8,6 +8,8 @@ import { useToast } from "../components/ToastProvider";
 type StrategyConfig = {
   // 매매 간격(%) 하나로 진입·추가·매도를 모두 관리한다.
   trigger_pct: number;
+  // 회차당 매수 수량(주) — 수량이 고정이어야 계좌에서 회차 상태를 역산할 수 있다.
+  round_quantity: number;
   rounds: number;
   index_name: string;
 };
@@ -26,6 +28,9 @@ type IndexStatus = {
 type Status = {
   held_count: number;
   waiting_first_entry: boolean;
+  // 보유 수량이 회차×회차수량과 다르면 역산이 근사가 된다 — 경고 표시용.
+  quantity_mismatch: boolean;
+  held_quantity: number;
   next_round: number | null;
   next_ticker: string | null;
   next_name: string | null;
@@ -145,7 +150,7 @@ function ReachedBadge() {
 function BelowLastGapRow({ gap }: { gap: { round: number; pct: number } }) {
   return (
     <tr>
-      <td colSpan={9} style={{ padding: "22px 8px", textAlign: "center" }}>
+      <td colSpan={7} style={{ padding: "22px 8px", textAlign: "center" }}>
         <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
           {gap.round}호에서 <b style={{ color: "var(--up-color, #d64545)" }}>{formatSigned(gap.pct)}</b> 더 내려가야
           기준선
@@ -164,11 +169,11 @@ function BelowLastGapRow({ gap }: { gap: { round: number; pct: number } }) {
 function RecentLowRow({ index }: { index: IndexStatus }) {
   return (
     <tr>
-      <td colSpan={9} style={{ padding: "2px 8px" }}>
+      <td colSpan={7} style={{ padding: "2px 8px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--up-color, #d64545)", fontSize: "var(--fs-sm)", fontWeight: 700 }}>
           <span style={{ flex: 1, borderTop: "2px dashed var(--up-color, #d64545)", opacity: 0.55 }} />
           <span>
-            {index.name} {index.recent_low_label} {formatNumber(index.recent_low, 2)} ({index.recent_low_date})
+            {index.name} {index.recent_low_label} {formatNumber(index.recent_low)} ({index.recent_low_date})
           </span>
           <span style={{ flex: 1, borderTop: "2px dashed var(--up-color, #d64545)", opacity: 0.55 }} />
         </div>
@@ -177,7 +182,7 @@ function RecentLowRow({ index }: { index: IndexStatus }) {
   );
 }
 
-/** 전략 하나(규칙 편집 + 현재 판단 표) — 코스피200/코스닥150 이 같은 구성을 쓴다. */
+/** 전략 하나(규칙 편집 + 현재 판단 표) — 4개 전략이 같은 구성을 쓴다. */
 function StrategySection({
   view,
   accountId,
@@ -199,14 +204,21 @@ function StrategySection({
         }
       : null;
   const [draft, setDraft] = useState(String(config.trigger_pct));
+  const [qtyDraft, setQtyDraft] = useState(String(config.round_quantity));
+  const [roundsDraft, setRoundsDraft] = useState(String(config.rounds));
   const [saving, setSaving] = useState(false);
 
   // 서버가 최신 값을 돌려주면(다른 전략 저장 포함) 초안도 그 값으로 동기화한다.
   useEffect(() => {
     setDraft(String(config.trigger_pct));
-  }, [config.trigger_pct]);
+    setQtyDraft(String(config.round_quantity));
+    setRoundsDraft(String(config.rounds));
+  }, [config.trigger_pct, config.round_quantity, config.rounds]);
 
-  const isDraftDirty = Number(draft) !== config.trigger_pct;
+  const isDraftDirty =
+    Number(draft) !== config.trigger_pct ||
+    Number(qtyDraft) !== config.round_quantity ||
+    Number(roundsDraft) !== config.rounds;
 
   const saveConfig = useCallback(async () => {
     const value = Number(draft);
@@ -214,7 +226,17 @@ function StrategySection({
       toast.error(`매매 간격은 ${PCT_MIN}~${PCT_MAX} 사이 숫자여야 합니다.`);
       return;
     }
-    const parsed = { trigger_pct: value };
+    const qty = Number(qtyDraft);
+    if (!Number.isInteger(qty) || qty < 1) {
+      toast.error("회차당 수량은 1 이상의 정수여야 합니다.");
+      return;
+    }
+    const rounds = Number(roundsDraft);
+    if (!Number.isInteger(rounds) || rounds < 1 || rounds > 12) {
+      toast.error("회차 수는 1~12 사이 정수여야 합니다.");
+      return;
+    }
+    const parsed = { trigger_pct: value, round_quantity: qty, rounds };
     setSaving(true);
     try {
       const resp = await fetch("/api/strategy-trade", {
@@ -231,7 +253,7 @@ function StrategySection({
     } finally {
       setSaving(false);
     }
-  }, [draft, onSaved, toast, view.label, view.strategy_id]);
+  }, [draft, qtyDraft, roundsDraft, onSaved, toast, view.label, view.strategy_id]);
 
   return (
     <div className="card appCard" style={cardStyle}>
@@ -252,9 +274,36 @@ function StrategySection({
           />
           %
         </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          회차당 수량
+          <input
+            type="number"
+            step="1"
+            min={1}
+            style={pctInputStyle}
+            value={qtyDraft}
+            disabled={saving}
+            onChange={(event) => setQtyDraft(event.target.value)}
+          />
+          주
+        </span>
         <span style={{ color: "var(--text-muted)" }}>
-          1호 진입 {config.index_name} 일간 −{config.trigger_pct}% · 추가 진입 마지막 매수가 −{config.trigger_pct}% ·
-          매도 평균단가 +{config.trigger_pct}%
+          1호 진입 전일 종가 −{config.trigger_pct}% · 추가 진입 마지막 매수가 −{config.trigger_pct}% ·
+          매도 진입가 +{config.trigger_pct}%
+        </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          회차 수
+          <input
+            type="number"
+            step="1"
+            min={1}
+            max={12}
+            style={pctInputStyle}
+            value={roundsDraft}
+            disabled={saving}
+            onChange={(event) => setRoundsDraft(event.target.value)}
+          />
+          회
         </span>
         <button
           type="button"
@@ -264,25 +313,28 @@ function StrategySection({
         >
           {saving ? "저장 중…" : "저장"}
         </button>
-        <span>
-          회차: <b>{config.rounds}회</b>
-        </span>
         <span style={{ color: "var(--text-muted)" }}>계좌 {accountId}</span>
       </div>
 
       {/* 현재 판단 요약 */}
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: "var(--fs-sm)" }}>
         <span>
-          {index.name} <b>{formatNumber(index.close, 2)}</b>
+          {index.name} <b>{formatNumber(index.close)}</b>
           <span style={{ color: "var(--text-muted)" }}> ({index.as_of})</span>
         </span>
         <span>
-          {index.recent_low_label} <b>{formatNumber(index.recent_low, 2)}</b>
+          {index.recent_low_label} <b>{formatNumber(index.recent_low)}</b>
           <span style={{ color: "var(--text-muted)" }}> ({index.recent_low_date})</span>
         </span>
         <span>
           보유 <b>{status.held_count}</b>/{config.rounds}회차
         </span>
+        {status.quantity_mismatch ? (
+          <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}>
+            ⚠️ 보유 {formatNumber(status.held_quantity)}주가 회차당 수량의 배수가 아님 — 회차
+            역산이 근사값입니다
+          </span>
+        ) : null}
         {status.last_buy_price != null ? (
           <span>
             마지막 매수가 <b>{formatNumber(status.last_buy_price)}</b>
@@ -290,7 +342,7 @@ function StrategySection({
         ) : null}
         {status.waiting_first_entry ? (
           <span style={{ fontWeight: 700 }}>
-            1호 진입 대기 — {index.name} {formatNumber(index.buy_trigger, 2)} 이하
+            1호 진입 대기 — {index.name} {formatNumber(index.buy_trigger)} 이하
           </span>
         ) : status.next_round != null ? (
           <span style={{ fontWeight: 700 }}>
@@ -322,13 +374,11 @@ function StrategySection({
             <tr style={{ color: "var(--text-muted)" }}>
               <th style={{ ...thStyle, textAlign: "left" }}>회차</th>
               <th style={{ ...thStyle, textAlign: "left" }}>종목</th>
-              <th style={thStyle}>평균단가</th>
+              <th style={thStyle}>진입가</th>
               <th style={thStyle}>현재가</th>
               <th style={thStyle}>손익</th>
               <th style={thStyle}>매수 지정가</th>
-              <th style={thStyle}>매수 {index.name}</th>
               <th style={thStyle}>매도 지정가</th>
-              <th style={thStyle}>매도 {index.name}</th>
             </tr>
           </thead>
           <tbody>
@@ -342,7 +392,7 @@ function StrategySection({
                 ownLevel < index.recent_low &&
                 (prevLevels.length === 0 || prevLevels[prevLevels.length - 1] >= index.recent_low);
               return (
-              <React.Fragment key={row.ticker}>
+              <React.Fragment key={row.round}>
               {lowLineHere ? <RecentLowRow index={index} /> : null}
               <tr style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
                 <td style={{ ...tdStyle, textAlign: "left", fontWeight: 700 }}>
@@ -365,12 +415,10 @@ function StrategySection({
                   {formatNumber(row.buy_limit)}
                   {row.buy_reached ? <ReachedBadge /> : null}
                 </td>
-                <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatNumber(row.buy_index, 2)}</td>
                 <td style={{ ...tdStyle, fontWeight: row.sell_limit != null ? 700 : undefined }}>
                   {formatNumber(row.sell_limit)}
                   {row.sell_reached ? <ReachedBadge /> : null}
                 </td>
-                <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatNumber(row.sell_index, 2)}</td>
               </tr>
               </React.Fragment>
               );
@@ -469,16 +517,16 @@ export function StrategyTradeClient() {
   return (
     <PageFrame title="전략 사고팔기">
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* 전략 섹션 — 상단 코스피200, 하단 코스닥150 (백엔드 정의 순서) */}
+        {/* 전략 섹션 — 백엔드 정의 순서(KODEX 200 · 코스닥150 · 삼성전자 · 하이닉스) */}
         {view.strategies.map((strategy) => (
           <StrategySection key={strategy.strategy_id} view={strategy} accountId={view.account_id} onSaved={setView} />
         ))}
 
-        {/* 슬랙 알림 (두 전략 공용) */}
+        {/* 슬랙 알림 (전역 스위치) */}
         <div className="card appCard" style={cardStyle}>
           <div style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>슬랙 알람</div>
           <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", lineHeight: 1.45, margin: 0 }}>
-            켜두면 배치가 평일 09:10~15:20 을 10분 간격으로 판정해, 두 전략에서 매수·매도 지정가에 닿은
+            켜두면 배치가 평일 09:10~15:20 을 10분 간격으로 판정해, 매수·매도 지정가에 닿은
             회차가 있을 때만 슬랙을 보냅니다. 같은 전략·회차·동작은 하루 1회입니다.
           </p>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>

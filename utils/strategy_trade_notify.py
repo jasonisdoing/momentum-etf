@@ -10,16 +10,15 @@
 한 시간 간격으로 한 줄 리마인더만 보낸다. 발송 이력은
 ``system_config.strategy_trade_settings.sent_log`` 에
 ``{"kospi200:2-buy": {"at": ..., "strategy_id": ..., "ticker": ..., "name": ..., "round": ...,
-"index_text": ..., "held_tickers": [...]}}`` 형태로 남기며, 발송에 성공했을 때만 갱신한다.
+"index_text": ..., "held_count": ...}}`` 형태로 남기며, 발송에 성공했을 때만 갱신한다.
 
 이력에 남은 주문이 실제로 체결되면 확인 한 줄을 보내고 이력을 지운다. 이 확인은
 **신호가 없어도** 매번 검사한다 — 주문을 넣는 순간 그 회차가 보유로 바뀌어 바로 그 신호가
 사라지기 때문에, 신호가 있을 때만 검사하면 확인은 영영 나가지 못한다.
 
-체결 판정은 티커가 아니라 **보유 회차 수**로 한다. 회차 슬롯은 같은 지수를 추종하는 4개
-상품 중 아무거나로 채울 수 있어서, 알림이 찍어 준 상품 대신 다른 운용사 상품을 사도
-그 회차는 채워진 것이다. 발송 시점의 보유 목록(``held_tickers``)은 확인 메시지에 실제로
-산 종목명을 적기 위해 남긴다.
+체결 판정은 **보유 회차 수**로 한다. 전략마다 종목이 하나뿐이라(같은 종목을 회차로
+나눠 담는다) 티커 증감으로는 어느 회차가 사고팔렸는지 알 수 없다 — 매수 N호는 보유
+회차 수가 N 에 닿았는지, 매도 N호는 N 미만으로 줄었는지로 본다.
 """
 
 from __future__ import annotations
@@ -83,22 +82,21 @@ def _parse_sent_at(value: str | None) -> datetime | None:
 
 
 def _level(value: float | None) -> str:
-    """지수 환산값 — 없으면 '-'."""
-    return f"{value:,.2f}" if value is not None else "-"
+    """가격 표기(원 단위) — 없으면 '-'."""
+    return f"{value:,.0f}" if value is not None else "-"
 
 
 def _index_text(index: dict[str, Any]) -> str:
-    """`6,472.32 (-2.34%)` — 지수 종가와 일간 변동률."""
+    """`262,870 (-2.34%)` — 종목 현재가와 일간 변동률."""
     change = index.get("change_pct")
-    base = f"{index['close']:,.2f}"
+    base = f"{index['close']:,.0f}"
     return f"{base} ({change:+.2f}%)" if change is not None else base
 
 
 def build_confirm_line(pending: dict[str, Any], index_text: str) -> str:
     """확인 한 줄 — 요청한 주문이 실제로 체결됐을 때 한 번만 보낸다.
 
-    조치가 이미 끝난 뒤라 `@channel` 은 붙이지 않는다. 회차 번호는 평균단가에 따라
-    다시 매겨지므로 **알림 당시 번호**를 그대로 쓰고, 종목명으로 무엇인지 알린다.
+    조치가 이미 끝난 뒤라 `@channel` 은 붙이지 않는다.
     """
     word = "매도 확인" if pending["action"] == "sell" else "매수 확인"
     asked = pending.get("index_text")
@@ -106,48 +104,23 @@ def build_confirm_line(pending: dict[str, Any], index_text: str) -> str:
     return f"✅ *{pending['round']}호 {pending['name']} {word}*{tail}"
 
 
-def _held_by_strategy(view: dict[str, Any]) -> dict[str, dict[str, str]]:
-    """전략별 ``{보유 티커: 종목명}``. 미보유 티커는 키가 없다.
-
-    회차 슬롯은 같은 지수를 추종하는 여러 운용사 상품 중 아무거나로 채울 수 있어서,
-    체결 확인은 개별 티커가 아니라 **이 전략의 보유가 늘었는지**로 판정한다.
-    """
-    return {
-        strategy["strategy_id"]: {row["ticker"]: row["name"] for row in strategy["rounds"] if row["held"]}
-        for strategy in view["strategies"]
-    }
+def _held_counts(view: dict[str, Any]) -> dict[str, int]:
+    """전략별 보유 회차 수 — 전략마다 종목이 하나라 체결 확인은 회차 수 증감으로 본다."""
+    return {strategy["strategy_id"]: int(strategy["status"]["held_count"]) for strategy in view["strategies"]}
 
 
-def _confirm_fill(pending: dict[str, Any], held_now: dict[str, str]) -> dict[str, Any] | None:
+def _confirm_fill(pending: dict[str, Any], held_count: int) -> dict[str, Any] | None:
     """대기 중인 주문이 체결됐는지 판정한다. 체결이면 메시지에 덮어쓸 값, 아니면 None.
 
-    매수는 **그 전략의 보유 회차 수가 목표 회차에 닿았는지**로 본다 — 알림은 1호 상품을
-    찍어 주지만 같은 지수를 추종하는 4개 중 아무거나 사도 회차는 채워지기 때문이다.
-    확인 메시지에는 알림 당시 종목명이 아니라 **실제로 산 종목명**을 적는다.
-
-    매도는 팔 종목이 이미 특정돼 있으므로 그 티커가 보유에서 빠졌는지로 본다.
+    매수 N호는 **보유 회차 수가 N 에 닿았는지**, 매도 N호는 **N 미만으로 줄었는지**로
+    본다 — 같은 종목을 회차로 나눠 담으므로(마지막 회차부터 팔림) 회차 수가 곧 상태다.
     """
-    ticker = str(pending.get("ticker") or "")
-    if pending.get("action") != "buy":
-        if not ticker or ticker in held_now:
-            return None
-        return {}
-
-    # N호 매수 신호는 N-1 회차를 들고 있을 때만 나온다 — 보유가 N 이 되면 체결된 것이다.
-    # 어떤 상품을 샀는지와 무관하므로 옛 기록에도 그대로 적용된다.
     round_no = pending.get("round")
-    if not isinstance(round_no, int) or len(held_now) < round_no:
+    if not isinstance(round_no, int):
         return None
-
-    before = pending.get("held_tickers")
-    if before is None:
-        # 보유 목록을 남기기 전의 옛 기록 — 무엇을 샀는지 특정할 수 없어 알림 당시 이름을 쓴다.
-        return {}
-    added = [code for code in held_now if code not in set(before)]
-    if not added:
-        return {}
-    bought = added[0]
-    return {"ticker": bought, "name": held_now.get(bought) or pending.get("name")}
+    if pending.get("action") != "buy":
+        return {} if held_count < round_no else None
+    return {} if held_count >= round_no else None
 
 
 def build_repeat_line(trigger: dict[str, Any]) -> str:
@@ -328,13 +301,12 @@ def notify_strategy_trade(*, force: bool = False) -> dict[str, Any]:
     #    지워야 다음에 같은 회차 신호가 나면 다시 전체 메시지로 나간다.
     #    이 검사는 트리거 유무와 무관하게 돌아야 한다: 주문을 넣는 순간 그 회차가 보유로 바뀌어
     #    바로 그 트리거가 사라지므로, 신호가 있을 때만 검사하면 확인은 영영 나가지 못한다.
-    held_by_strategy = _held_by_strategy(view)
+    held_counts = _held_counts(view)
     index_by_strategy = {strategy["strategy_id"]: strategy["index"] for strategy in view["strategies"]}
     confirmed: list[dict[str, Any]] = []
     for key, pending in list(sent_log.items()):
         strategy_id = str(pending.get("strategy_id") or key.split(":", 1)[0])
-        held_now = held_by_strategy.get(strategy_id) or {}
-        filled = _confirm_fill(pending, held_now)
+        filled = _confirm_fill(pending, held_counts.get(strategy_id, 0))
         if filled is None:
             continue
         index = index_by_strategy.get(strategy_id)
@@ -378,8 +350,8 @@ def notify_strategy_trade(*, force: bool = False) -> dict[str, Any]:
             "name": trigger["name"],
             "round": trigger["round"],
             "index_text": f"{trigger['index_name']} {_index_text(trigger['index'])}",
-            # 발송 시점의 보유 목록 — 체결 확인은 여기서 무엇이 늘었는지로 판정한다.
-            "held_tickers": sorted(held_by_strategy.get(trigger["strategy_id"]) or {}),
+            # 발송 시점의 보유 회차 수 — 체결 확인은 회차 수 증감으로 판정한다(참고 기록).
+            "held_count": held_counts.get(trigger["strategy_id"], 0),
         }
     # 지난 날짜 이력은 정리해 문서가 커지지 않게 한다.
     sent_log = {k: v for k, v in sent_log.items() if str(v.get("at", "")).startswith(today)}
