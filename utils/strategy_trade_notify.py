@@ -9,12 +9,17 @@
 ``전략:회차-동작`` 단위로 처음 한 번만 전체 메시지를 보내고, 신호가 살아 있는 동안에는
 한 시간 간격으로 한 줄 리마인더만 보낸다. 발송 이력은
 ``system_config.strategy_trade_settings.sent_log`` 에
-``{"kospi200:2-buy": {"at": ..., "ticker": ..., "name": ..., "round": ..., "index_text": ...}}``
-형태로 남기며, 발송에 성공했을 때만 갱신한다.
+``{"kospi200:2-buy": {"at": ..., "strategy_id": ..., "ticker": ..., "name": ..., "round": ...,
+"index_text": ..., "held_tickers": [...]}}`` 형태로 남기며, 발송에 성공했을 때만 갱신한다.
 
 이력에 남은 주문이 실제로 체결되면 확인 한 줄을 보내고 이력을 지운다. 이 확인은
 **신호가 없어도** 매번 검사한다 — 주문을 넣는 순간 그 회차가 보유로 바뀌어 바로 그 신호가
 사라지기 때문에, 신호가 있을 때만 검사하면 확인은 영영 나가지 못한다.
+
+체결 판정은 티커가 아니라 **보유 회차 수**로 한다. 회차 슬롯은 같은 지수를 추종하는 4개
+상품 중 아무거나로 채울 수 있어서, 알림이 찍어 준 상품 대신 다른 운용사 상품을 사도
+그 회차는 채워진 것이다. 발송 시점의 보유 목록(``held_tickers``)은 확인 메시지에 실제로
+산 종목명을 적기 위해 남긴다.
 """
 
 from __future__ import annotations
@@ -101,14 +106,48 @@ def build_confirm_line(pending: dict[str, Any], index_text: str) -> str:
     return f"✅ *{pending['round']}호 {pending['name']} {word}*{tail}"
 
 
-def _held_state(view: dict[str, Any]) -> dict[str, float | None]:
-    """보유 중인 티커 → 평균단가. 미보유 티커는 키가 없다."""
+def _held_by_strategy(view: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """전략별 ``{보유 티커: 종목명}``. 미보유 티커는 키가 없다.
+
+    회차 슬롯은 같은 지수를 추종하는 여러 운용사 상품 중 아무거나로 채울 수 있어서,
+    체결 확인은 개별 티커가 아니라 **이 전략의 보유가 늘었는지**로 판정한다.
+    """
     return {
-        row["ticker"]: row.get("avg_price")
+        strategy["strategy_id"]: {row["ticker"]: row["name"] for row in strategy["rounds"] if row["held"]}
         for strategy in view["strategies"]
-        for row in strategy["rounds"]
-        if row["held"]
     }
+
+
+def _confirm_fill(pending: dict[str, Any], held_now: dict[str, str]) -> dict[str, Any] | None:
+    """대기 중인 주문이 체결됐는지 판정한다. 체결이면 메시지에 덮어쓸 값, 아니면 None.
+
+    매수는 **그 전략의 보유 회차 수가 목표 회차에 닿았는지**로 본다 — 알림은 1호 상품을
+    찍어 주지만 같은 지수를 추종하는 4개 중 아무거나 사도 회차는 채워지기 때문이다.
+    확인 메시지에는 알림 당시 종목명이 아니라 **실제로 산 종목명**을 적는다.
+
+    매도는 팔 종목이 이미 특정돼 있으므로 그 티커가 보유에서 빠졌는지로 본다.
+    """
+    ticker = str(pending.get("ticker") or "")
+    if pending.get("action") != "buy":
+        if not ticker or ticker in held_now:
+            return None
+        return {}
+
+    # N호 매수 신호는 N-1 회차를 들고 있을 때만 나온다 — 보유가 N 이 되면 체결된 것이다.
+    # 어떤 상품을 샀는지와 무관하므로 옛 기록에도 그대로 적용된다.
+    round_no = pending.get("round")
+    if not isinstance(round_no, int) or len(held_now) < round_no:
+        return None
+
+    before = pending.get("held_tickers")
+    if before is None:
+        # 보유 목록을 남기기 전의 옛 기록 — 무엇을 샀는지 특정할 수 없어 알림 당시 이름을 쓴다.
+        return {}
+    added = [code for code in held_now if code not in set(before)]
+    if not added:
+        return {}
+    bought = added[0]
+    return {"ticker": bought, "name": held_now.get(bought) or pending.get("name")}
 
 
 def build_repeat_line(trigger: dict[str, Any]) -> str:
@@ -289,22 +328,18 @@ def notify_strategy_trade(*, force: bool = False) -> dict[str, Any]:
     #    지워야 다음에 같은 회차 신호가 나면 다시 전체 메시지로 나간다.
     #    이 검사는 트리거 유무와 무관하게 돌아야 한다: 주문을 넣는 순간 그 회차가 보유로 바뀌어
     #    바로 그 트리거가 사라지므로, 신호가 있을 때만 검사하면 확인은 영영 나가지 못한다.
-    held = _held_state(view)
-    index_by_ticker = {
-        row["ticker"]: strategy["index"]
-        for strategy in view["strategies"]
-        for row in strategy["rounds"]
-    }
+    held_by_strategy = _held_by_strategy(view)
+    index_by_strategy = {strategy["strategy_id"]: strategy["index"] for strategy in view["strategies"]}
     confirmed: list[dict[str, Any]] = []
     for key, pending in list(sent_log.items()):
-        ticker = pending.get("ticker")
-        if not ticker:
+        strategy_id = str(pending.get("strategy_id") or key.split(":", 1)[0])
+        held_now = held_by_strategy.get(strategy_id) or {}
+        filled = _confirm_fill(pending, held_now)
+        if filled is None:
             continue
-        done = (ticker in held) if pending.get("action") == "buy" else (ticker not in held)
-        if done:
-            index = index_by_ticker.get(ticker)
-            confirmed.append({**pending, "now_text": _index_text(index) if index else "-"})
-            sent_log.pop(key, None)
+        index = index_by_strategy.get(strategy_id)
+        confirmed.append({**pending, **filled, "now_text": _index_text(index) if index else "-"})
+        sent_log.pop(key, None)
 
     # ② 남은 신호 — 처음이면 전체 메시지, 이미 보냈으면 한 시간 간격으로 한 줄 재알림.
     fresh: list[dict[str, Any]] = []
@@ -338,10 +373,13 @@ def notify_strategy_trade(*, force: bool = False) -> dict[str, Any]:
         sent_log[_trigger_key(trigger)] = {
             "at": stamp,
             "action": trigger["action"],
+            "strategy_id": trigger["strategy_id"],
             "ticker": trigger["ticker"],
             "name": trigger["name"],
             "round": trigger["round"],
             "index_text": f"{trigger['index_name']} {_index_text(trigger['index'])}",
+            # 발송 시점의 보유 목록 — 체결 확인은 여기서 무엇이 늘었는지로 판정한다.
+            "held_tickers": sorted(held_by_strategy.get(trigger["strategy_id"]) or {}),
         }
     # 지난 날짜 이력은 정리해 문서가 커지지 않게 한다.
     sent_log = {k: v for k, v in sent_log.items() if str(v.get("at", "")).startswith(today)}
