@@ -72,6 +72,22 @@ def _pool_options(pools: list[str]) -> list[dict[str, Any]]:
 # 백테스트 기간 선택지 — 신고가 화면과 동일한 목록 (상한 60개월 = 신고가 엔진의 최대).
 MONTH_OPTIONS = (6, 12, 24, 36, 48, 60)
 
+# 배분 기본값(%) — 계좌 설정에 저장이 없을 때 쓰는 시스템 기본 배분이며, 지금까지의
+# 동작(모멘텀 50 : 신고가 50, 비워 두는 현금 없음)과 같다. 화면이 이 값을 그대로 보여준다.
+DEFAULT_MIX_WEIGHTS: dict[str, float] = {"sm_pct": 50.0, "nh_pct": 50.0, "cash_pct": 0.0}
+
+
+def mix_weights(account_settings: dict[str, Any]) -> dict[str, float]:
+    """계좌 설정의 합성 배분(%) — 저장이 없으면 `DEFAULT_MIX_WEIGHTS`.
+
+    셋은 항상 함께 저장되므로(계좌 설정 검증), 하나라도 없으면 미저장으로 보고
+    기본 배분을 쓴다 — 일부만 읽어 섞으면 합이 100 이 아닌 배분이 만들어진다.
+    """
+    keys = (("sm_pct", "mix_sm_pct"), ("nh_pct", "mix_nh_pct"), ("cash_pct", "mix_cash_pct"))
+    if any(account_settings.get(stored) is None for _, stored in keys):
+        return dict(DEFAULT_MIX_WEIGHTS)
+    return {name: float(account_settings[stored]) for name, stored in keys}
+
 
 def mix_accounts() -> list[dict[str, Any]]:
     """합성 전략을 운용하는 계좌 목록 — 계좌 설정의 `mix_pool` 이 지정된 계좌만.
@@ -101,6 +117,8 @@ def mix_accounts() -> list[dict[str, Any]]:
                 "pool": pool,
                 # 오늘의 액션 슬랙 알람 토글 상태 — 화면 헤더가 그대로 보여준다.
                 "mix_slack_enabled": bool(inner.get("mix_slack_enabled")),
+                # 합성 배분(%) — 저장이 없으면 기본 배분(50:50:0).
+                **{f"mix_{name}": value for name, value in mix_weights(inner).items()},
                 "pool_label": pool_names.get(pool),
             }
         )

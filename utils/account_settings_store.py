@@ -38,6 +38,9 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "market_regime_index",
     "mix_pool",
     "mix_slack_enabled",
+    "mix_sm_pct",
+    "mix_nh_pct",
+    "mix_cash_pct",
     "broker_api",
     "URL",
     "ma_alarm_enabled",
@@ -48,6 +51,9 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "stoploss_threshold_pct",
     "stoploss_alarm_icon",
 )
+
+# 합성 전략 배분(%) — 모멘텀·신고가·현금. 셋을 항상 함께 저장하고 합은 100 이어야 한다.
+MIX_WEIGHT_KEYS: tuple[str, ...] = ("mix_sm_pct", "mix_nh_pct", "mix_cash_pct")
 
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 _ALLOWED_CASH_CURRENCIES = {"KRW", "USD", "AUD"}
@@ -199,6 +205,15 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
         elif key == "mix_slack_enabled":
             # 합성 오늘의 액션 슬랙 알람 — 새 지시·수량 증가가 생기면 발송한다.
             cleaned[key] = bool(raw)
+        elif key in MIX_WEIGHT_KEYS:
+            # 합성 배분(%) — 모멘텀·신고가·현금. 셋의 합은 아래에서 100 인지 검사한다.
+            try:
+                pct = float(raw)
+            except (TypeError, ValueError) as exc:
+                raise AccountSettingsStoreError(f"'{account_id}' 의 {key} 는 숫자여야 합니다: {raw}") from exc
+            if not 0.0 <= pct <= 100.0:
+                raise AccountSettingsStoreError(f"'{account_id}' 의 {key} 는 0~100 이어야 합니다: {pct}")
+            cleaned[key] = round(pct, 2)
         elif key == "broker_api":
             # 증권사 API 연동 — {provider, account_no}. 없음이면 null.
             # provider 는 커넥터 레지스트리에 있어야 하고, 계좌번호는 화면의 '확인' 이
@@ -272,6 +287,21 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             if len(icon) > 8:
                 raise AccountSettingsStoreError(f"'{account_id}' 의 {key} 는 8자 이하여야 합니다: {icon}")
             cleaned[key] = icon
+    # 합성 배분은 셋이 한 묶음이다 — 하나만 바꾸면 나머지와 합이 어긋난 채로 저장된다.
+    if any(key in cleaned for key in MIX_WEIGHT_KEYS):
+        missing = [key for key in MIX_WEIGHT_KEYS if key not in cleaned]
+        if missing:
+            raise AccountSettingsStoreError(
+                f"'{account_id}' 의 합성 배분은 {', '.join(MIX_WEIGHT_KEYS)} 을 함께 보내야 합니다. 빠짐: {', '.join(missing)}"
+            )
+        total = sum(float(cleaned[key]) for key in MIX_WEIGHT_KEYS)
+        # 0.01 은 소수 둘째 자리 반올림 오차만 허용하는 폭이다(예: 33.33+33.33+33.34).
+        if abs(total - 100.0) > 0.01:
+            raise AccountSettingsStoreError(
+                f"'{account_id}' 의 합성 배분 합계가 100%가 아닙니다: "
+                f"모멘텀 {cleaned['mix_sm_pct']}% + 신고가 {cleaned['mix_nh_pct']}% + "
+                f"현금 {cleaned['mix_cash_pct']}% = {round(total, 2)}%"
+            )
     if not cleaned:
         raise AccountSettingsStoreError("저장할 값이 없습니다.")
     return cleaned
