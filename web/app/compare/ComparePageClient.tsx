@@ -95,6 +95,9 @@ type TickerHoldingRow = {
 
 type TickerDetailResponse = {
   ticker: string;
+  /** 어느 요청 항목의 결과인지 — 순서가 아니라 이 값으로 짝을 짓는다. */
+  ticker_type?: string;
+  country_code?: string;
   rows: PriceRow[];
   etf_info?: TickerEtfInfo | null;
   holdings: TickerHoldingRow[];
@@ -194,6 +197,11 @@ const BASIC_INFO_METRICS = [
 
 function tickerKey(item: TickerItem): string {
   return `${item.ticker_type}::${item.country_code}::${item.ticker}`;
+}
+
+/** 비교 응답 한 건의 짝짓기 키 — `tickerKey` 와 같은 형식이어야 한다. */
+function detailKey(detail: TickerDetailResponse): string {
+  return `${detail.ticker_type ?? ""}::${detail.country_code ?? ""}::${detail.ticker}`;
 }
 
 function readCompareGroups(): CompareGroupMap {
@@ -1008,7 +1016,18 @@ export function ComparePageClient() {
       // 같은 종목은 ETF 간 동일 값이 되고, 중복 조회/전역 lock 직렬화 문제도 사라진다.
       const details = await loadTickerDetailsBatch(items, includeHoldings);
       setLoadingProgress({ percent: 100, message: "비교 데이터 반영 중" });
-      setProducts(items.map((item, index) => ({ item, detail: details[index] })));
+      // 인덱스가 아니라 티커로 짝을 짓는다 — 서버 캐시가 순서를 다르게 돌려줘도
+      // 이름과 시세가 다른 종목끼리 붙지 않는다(카드 순서를 바꿀 때 실제로 겪은 문제).
+      const detailByKey = new Map(details.map((detail) => [detailKey(detail), detail] as const));
+      setProducts(
+        items
+          .map((item) => {
+            const detail = detailByKey.get(tickerKey(item));
+            // 짝이 없으면 그 종목은 빼고 보여준다 — 다른 종목의 값을 붙이는 것보다 낫다.
+            return detail ? { item, detail } : null;
+          })
+          .filter((product): product is SelectedProduct => product !== null),
+      );
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "비교 데이터를 불러오지 못했습니다.");
       loadedSignatureRef.current = null; // 실패한 요청은 '로드됨'으로 두지 않는다(재시도 가능하게).
