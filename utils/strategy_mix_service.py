@@ -407,6 +407,82 @@ def _build_action_groups(
     return groups
 
 
+def _build_next_week_preview(
+    sm: dict[str, Any],
+    sm_selected: list[dict[str, Any]],
+    holdings: list[dict[str, Any]],
+    weight_sm: float,
+    account: dict[str, Any] | None,
+    ahead: list,
+    today_local,
+) -> dict[str, Any] | None:
+    """다음주 교체를 **지금 순위 그대로 확정된다고 가정**했을 때의 예상 액션.
+
+    금요일쯤 '다음주에 뭘 사고팔게 되나'를 미리 보는 용도다. 모멘텀 슬리브만 주간
+    교체가 있으므로 모멘텀의 다음주 예상(`next_week_expected` — 실시간 순위 기준)만
+    본다. 신고가는 주간 리듬이 없어 여기 나오지 않는다.
+
+    이번 교체가 아직 체결 전이면(오늘의 액션에 교체일 그룹이 이미 있으면) 만들지
+    않는다 — 같은 교체가 두 번 보이면 헷갈린다. 예상 수량은 현재가·현재 총자산
+    기준 추정치라 실제 체결 수량과 다를 수 있다.
+    """
+    if not sm.get("is_filled"):
+        return None
+
+    expected = {
+        str(row["ticker"]).strip(): row for row in (sm.get("rows") or []) if row.get("next_week_expected")
+    }
+    selected_by = {str(row["ticker"]).strip(): row for row in sm_selected}
+    holdings_by = {row["ticker"]: row for row in holdings}
+
+    # 다음주 첫 거래일 = 다음 교체 체결일 (모멘텀 주간 리듬).
+    this_week = today_local.isocalendar()[:2]
+    fill_date = next(
+        (str(day.date()) for day in ahead if day.date().isocalendar()[:2] > tuple(this_week)), None
+    )
+
+    sells: list[dict[str, Any]] = []
+    for ticker in sorted(selected_by):
+        row = selected_by[ticker]
+        # 주중 매도 예정은 이미 오늘의 액션에 있다 — 다음주 예상에서 겹쳐 보이지 않게 뺀다.
+        if ticker in expected or row.get("is_exit_pending"):
+            continue
+        held = holdings_by.get(ticker) or {}
+        quantity = held.get("held_quantity")
+        sells.append(
+            {
+                "ticker": ticker,
+                "name": row.get("name") or ticker,
+                "quantity": int(quantity) if quantity else None,
+                "value": held.get("held_value"),
+            }
+        )
+
+    total_assets = float((account or {}).get("total_assets") or 0)
+    buys: list[dict[str, Any]] = []
+    for ticker in sorted(expected):
+        if ticker in selected_by:  # 유지 — 액션 없음
+            continue
+        row = expected[ticker]
+        price = row.get("price")
+        quantity = (
+            round(total_assets * weight_sm / 100.0 / float(price)) if price and total_assets > 0 else None
+        )
+        buys.append(
+            {
+                "ticker": ticker,
+                "name": row.get("name") or ticker,
+                "price": price,
+                "quantity": quantity,
+                "expected_rank": row.get("expected_rank"),
+            }
+        )
+
+    if not sells and not buys:
+        return None
+    return {"fill_date": fill_date, "sells": sells, "buys": buys}
+
+
 def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str, Any]:
     """오늘 기준 합성 운영 상태 — 보유 목록(목표 비중)·현금 비중·오늘의 액션.
 
@@ -774,6 +850,12 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     }
     # 오늘의 액션 — 화면·슬랙 알람이 같은 결과를 쓴다(조립 단일 소스).
     payload["actions"]["groups"] = _build_action_groups(payload["holdings"], payload["actions"], next_trading_day)
+    # 다음주 교체 가정 미리보기 — 실시간 순위 기준 잠정치라 과거 재현(as_of)에는 없다.
+    payload["actions"]["next_week_preview"] = (
+        _build_next_week_preview(sm, sm_selected, payload["holdings"], weight_sm, account, ahead, today_local)
+        if not as_of
+        else None
+    )
     return payload
 
 
