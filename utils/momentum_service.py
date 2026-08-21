@@ -1153,6 +1153,86 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
         }
 
     name_by_ticker = {row["ticker"]: row.get("name") or row["ticker"] for row in universe}
+
+    # 선정분(1~N) — 판정일 종가로 확정된 순서 그대로. 이 주에 실제로 들고 가는 목록이라
+    # 지금 값으로 다시 세우면 확정된 편입 순서가 흔들린다.
+    selected_rows = [
+        {
+            "rank": rank,
+            "expected_rank": expected_rank_by_ticker.get(item["ticker"]),
+            "is_reserve": False,
+            "is_expected_only": False,
+            "streak_weeks": streaks.get(item["ticker"], 1),
+            # 편입 후 수익률 — 보유 중인 종목만(연속 편입 시작 교체일 시가 대비).
+            "entry_return_pct": entry_return_pct(item["ticker"]),
+            "next_week_expected": item["ticker"] in next_expected,
+            "ticker": item["ticker"],
+            "name": item["name"],
+            "market": item.get("market", ""),
+            "industry": industry_map_by_ticker.get(item["ticker"], ""),
+            "currency": currency,
+            **price_info(item["ticker"]),
+            "signal_short_pct": round(item["short_disparity_pct"], 1),
+            "signal_long_pct": round(item["momentum_score"], 1),
+            **current_disparity(item["ticker"]),
+            **exit_flags(item["ticker"]),
+        }
+        for rank, item in enumerate(selected, start=1)
+    ]
+
+    # 선정 밖(차순위 + 예상 전용) — **지금 이격** 내림차순으로 다시 세운다. 이 구간의
+    # 관심사는 '다음 교체에 무엇이 올라오는가' 라서 판정일 순서로는 답이 안 나온다.
+    # 이격을 못 구한 종목은 임의 값으로 끼워 넣지 않고 맨 뒤로 보낸다.
+    other_rows = [
+        {
+            "rank": None,
+            "expected_rank": expected_rank_by_ticker.get(item["ticker"]),
+            "is_reserve": True,
+            "is_expected_only": False,
+            # 연속 편입은 선정분에만 의미가 있다 — 차순위는 표시하지 않는다(None → '-')
+            "streak_weeks": None,
+            "entry_return_pct": entry_return_pct(item["ticker"]),
+            "next_week_expected": item["ticker"] in next_expected,
+            "ticker": item["ticker"],
+            "name": item["name"],
+            "market": item.get("market", ""),
+            "industry": industry_map_by_ticker.get(item["ticker"], ""),
+            "currency": currency,
+            **price_info(item["ticker"]),
+            "signal_short_pct": round(item["short_disparity_pct"], 1),
+            "signal_long_pct": round(item["momentum_score"], 1),
+            **current_disparity(item["ticker"]),
+            **exit_flags(item["ticker"]),
+        }
+        for item in reserve
+    ] + [
+        # 표 밖인데 다음 주 편입이 예상되는 종목 — 순위·현재 이격은 '지금' 기준이고,
+        # 판정일-단기/장기는 같은 이평선으로 판정일 시점을 재계산해 채운다
+        # (후보 필터 밖이었을 뿐 값 자체는 계산된다 — 단기 음수 등 탈락 사유가 그대로 보인다).
+        {
+            "rank": None,
+            "expected_rank": expected_rank_by_ticker.get(item["ticker"]),
+            "is_reserve": True,
+            "is_expected_only": True,
+            "streak_weeks": None,
+            "next_week_expected": True,
+            "ticker": item["ticker"],
+            "name": item["name"],
+            "market": item.get("market", ""),
+            "industry": industry_map_by_ticker.get(item["ticker"], ""),
+            "currency": currency,
+            **price_info(item["ticker"]),
+            # 판정일 기준 이격 — 후보 밖이었어도 같은 이평선으로 재계산해 보여준다.
+            **signal_disparity(item["ticker"]),
+            "current_short_pct": round(item["short_disparity_pct"], 1),
+            "current_long_pct": round(item["momentum_score"], 1),
+        }
+        for item in extra_expected
+    ]
+    other_rows.sort(key=lambda row: (row["current_long_pct"] is None, -(row["current_long_pct"] or 0.0)))
+    for offset, row in enumerate(other_rows, start=len(selected_rows) + 1):
+        row["rank"] = offset
+
     return {
         "as_of": signal_date.strftime("%Y-%m-%d"),
         "portfolio_week": portfolio_week,
@@ -1186,52 +1266,5 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
         "currency": currency,
         # 월별 컬럼 라벨(최근 6개월, pools-rank 와 같은 형식) — 화면이 이 순서로 컬럼을 만든다.
         "monthly_return_labels": month_labels,
-        "rows": [
-            {
-                "rank": rank,
-                "expected_rank": expected_rank_by_ticker.get(item["ticker"]),
-                "is_reserve": rank > top_n,
-                "is_expected_only": False,
-                # 연속 편입은 선정분에만 의미가 있다 — 차순위는 표시하지 않는다(None → '-')
-                "streak_weeks": streaks.get(item["ticker"], 1) if rank <= top_n else None,
-                # 편입 후 수익률 — 보유 중인 종목만(연속 편입 시작 교체일 시가 대비).
-                "entry_return_pct": entry_return_pct(item["ticker"]),
-                "next_week_expected": item["ticker"] in next_expected,
-                "ticker": item["ticker"],
-                "name": item["name"],
-                "market": item.get("market", ""),
-                "industry": industry_map_by_ticker.get(item["ticker"], ""),
-                "currency": currency,
-                **price_info(item["ticker"]),
-                "signal_short_pct": round(item["short_disparity_pct"], 1),
-                "signal_long_pct": round(item["momentum_score"], 1),
-                **current_disparity(item["ticker"]),
-                **exit_flags(item["ticker"]),
-            }
-            for rank, item in enumerate([*selected, *reserve], start=1)
-        ]
-        + [
-            # 표 밖인데 다음 주 편입이 예상되는 종목 — 순위·현재 이격은 '지금' 기준이고,
-            # 판정일-단기/장기는 같은 이평선으로 판정일 시점을 재계산해 채운다
-            # (후보 필터 밖이었을 뿐 값 자체는 계산된다 — 단기 음수 등 탈락 사유가 그대로 보인다).
-            {
-                "rank": None,
-                "expected_rank": expected_rank_by_ticker.get(item["ticker"]),
-                "is_reserve": True,
-                "is_expected_only": True,
-                "streak_weeks": None,
-                "next_week_expected": True,
-                "ticker": item["ticker"],
-                "name": item["name"],
-                "market": item.get("market", ""),
-                "industry": industry_map_by_ticker.get(item["ticker"], ""),
-                "currency": currency,
-                **price_info(item["ticker"]),
-                # 판정일 기준 이격 — 후보 밖이었어도 같은 이평선으로 재계산해 보여준다.
-                **signal_disparity(item["ticker"]),
-                "current_short_pct": round(item["short_disparity_pct"], 1),
-                "current_long_pct": round(item["momentum_score"], 1),
-            }
-            for item in extra_expected
-        ],
+        "rows": selected_rows + other_rows,
     }

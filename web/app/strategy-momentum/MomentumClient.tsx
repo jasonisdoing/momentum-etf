@@ -613,7 +613,8 @@ export function MomentumClient() {
         headerName: "순위",
         field: "rank",
         headerTooltip:
-          "판정일 기준 순위 — 선정 1~N, 차순위 그 아래. 매도예정 = 자격 상실로 다음 시가 매도, 매도 = 주중에 이미 매도됨",
+          "선정 1~N 은 판정일 종가 이격 순(확정된 편입 순서). 그 아래(차순위·예상)는 현재 이격 순 — " +
+          "다음 교체에 무엇이 올라오는지 보기 위함. 매도예정 = 자격 상실로 다음 시가 매도, 매도 = 주중에 이미 매도됨",
         width: 68,
         type: "numericColumn",
         cellDataType: "text",
