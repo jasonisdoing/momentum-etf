@@ -94,6 +94,10 @@ type AccountOption = AccountOptionBase & {
   pool_label?: PoolLabelSource | null;
   /** 오늘의 액션 슬랙 알람 — 새 지시·수량 증가 시 발송. */
   mix_slack_enabled?: boolean;
+  /** 합성 배분(%) — 모멘텀·신고가·비워 두는 현금. 셋의 합이 100 이다. */
+  mix_sm_pct: number;
+  mix_nh_pct: number;
+  mix_cash_pct: number;
 };
 type Meta = {
   /** 합성을 운용하는 계좌(계좌 설정의 `mix_pool` 지정) 목록. */
@@ -866,35 +870,93 @@ export function StrategyMixClient() {
 
   const actions = positions?.actions ?? null;
 
-  // 슬랙 알람 토글·테스트 — 저장은 계좌 설정(mix_slack_enabled)으로 보낸다.
+  // 헤더 설정 — 합성 배분(%) 3칸과 슬랙 알람을 한 버튼으로 저장한다(계좌 설정에 보관).
   const [slackEnabled, setSlackEnabled] = useState(false);
-  const [slackSaving, setSlackSaving] = useState(false);
+  const [smPct, setSmPct] = useState("50");
+  const [nhPct, setNhPct] = useState("50");
+  const [cashPct, setCashPct] = useState("0");
+  const [settingsSaving, setSettingsSaving] = useState(false);
   const [slackTesting, setSlackTesting] = useState(false);
   useEffect(() => {
     setSlackEnabled(Boolean(selectedAccount?.mix_slack_enabled));
-  }, [selectedAccount?.account_id, selectedAccount?.mix_slack_enabled]);
+    setSmPct(selectedAccount ? String(selectedAccount.mix_sm_pct) : "50");
+    setNhPct(selectedAccount ? String(selectedAccount.mix_nh_pct) : "50");
+    setCashPct(selectedAccount ? String(selectedAccount.mix_cash_pct) : "0");
+  }, [
+    selectedAccount,
+    selectedAccount?.account_id,
+    selectedAccount?.mix_slack_enabled,
+    selectedAccount?.mix_sm_pct,
+    selectedAccount?.mix_nh_pct,
+    selectedAccount?.mix_cash_pct,
+  ]);
 
-  const saveSlackEnabled = async (next: boolean) => {
-    if (!selectedAccount) return;
-    setSlackEnabled(next);
+  // 합계 — 100 이 아니면 저장을 막는다. 모자란 만큼을 현금으로 채우면 사용자가 의도한
+  // 배분이 조용히 바뀌므로 보정하지 않고 그대로 알린다.
+  const weightSum = useMemo(() => {
+    const parts = [smPct, nhPct, cashPct].map((value) => Number(value));
+    return parts.some((value) => !Number.isFinite(value)) ? null : Math.round(parts.reduce((a, b) => a + b, 0) * 100) / 100;
+  }, [smPct, nhPct, cashPct]);
+  const weightOk = weightSum !== null && Math.abs(weightSum - 100) <= 0.01;
+  const settingsDirty = Boolean(
+    selectedAccount &&
+      (slackEnabled !== Boolean(selectedAccount.mix_slack_enabled) ||
+        Number(smPct) !== selectedAccount.mix_sm_pct ||
+        Number(nhPct) !== selectedAccount.mix_nh_pct ||
+        Number(cashPct) !== selectedAccount.mix_cash_pct),
+  );
+
+  // 배분 입력 3칸 — 라벨·상태만 다르고 나머지는 같아 한 곳에 모아 둔다.
+  const mixWeightFields = [
+    { key: "sm", label: "모멘텀", value: smPct, set: setSmPct, hint: "모멘텀 전략에 배분할 몫(%)." },
+    { key: "nh", label: "신고가", value: nhPct, set: setNhPct, hint: "신고가 돌파 전략에 배분할 몫(%)." },
+    {
+      key: "cash",
+      label: "현금",
+      value: cashPct,
+      set: setCashPct,
+      hint: "두 전략에 주지 않고 늘 비워 두는 몫(%). 빈 슬롯에서 생기는 현금은 여기에 더해진다.",
+    },
+  ];
+
+  const saveHeaderSettings = async () => {
+    if (!selectedAccount || !weightOk) return;
     try {
-      setSlackSaving(true);
+      setSettingsSaving(true);
       const resp = await fetch("/api/account-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           account_id: selectedAccount.account_id,
-          values: { mix_slack_enabled: next },
+          values: {
+            mix_slack_enabled: slackEnabled,
+            mix_sm_pct: Number(smPct),
+            mix_nh_pct: Number(nhPct),
+            mix_cash_pct: Number(cashPct),
+          },
         }),
       });
-      const data = (await resp.json()) as { error?: string };
-      if (!resp.ok || data.error) throw new Error(data.error ?? "저장에 실패했습니다.");
-      toast.success(next ? "슬랙 알람을 켰습니다." : "슬랙 알람을 껐습니다.");
+      const data = (await resp.json()) as { error?: string; detail?: string };
+      if (!resp.ok || data.error) throw new Error(data.error ?? data.detail ?? "저장에 실패했습니다.");
+      // 저장된 값을 목록에 바로 반영한다 — 다시 받아오지 않아도 입력칸·변경 표시가 맞아진다.
+      setAccountOptions((previous) =>
+        previous.map((option) =>
+          option.account_id === selectedAccount.account_id
+            ? {
+                ...option,
+                mix_slack_enabled: slackEnabled,
+                mix_sm_pct: Number(smPct),
+                mix_nh_pct: Number(nhPct),
+                mix_cash_pct: Number(cashPct),
+              }
+            : option,
+        ),
+      );
+      toast.success("합성 설정 저장 완료");
     } catch (err) {
-      setSlackEnabled(!next);
-      toast.error(err instanceof Error ? err.message : "슬랙 알람 저장에 실패했습니다.");
+      toast.error(err instanceof Error ? err.message : "합성 설정 저장에 실패했습니다.");
     } finally {
-      setSlackSaving(false);
+      setSettingsSaving(false);
     }
   };
 
@@ -964,31 +1026,66 @@ export function StrategyMixClient() {
                       : "계좌 설정에서 합성 전략 종목풀을 지정하세요"}
                   </span>
                   {selectedAccount ? (
-                    <label className="appLabeledField" style={{ marginBottom: 0 }}>
-                      <span className="appLabeledFieldLabel">슬랙 알람</span>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                        <div className="form-check form-switch" style={{ marginBottom: 0 }}>
-                          <input
-                            className="form-check-input"
-                            type="checkbox"
-                            role="switch"
-                            checked={slackEnabled}
-                            disabled={slackSaving}
-                            onChange={(e) => void saveSlackEnabled(e.target.checked)}
-                            title="오늘의 액션에 새 지시나 수량 증가가 생기면 슬랙으로 보낸다 (장중 10분 간격 감시)."
-                          />
-                        </div>
-                        <span style={hintStyle}>{slackEnabled ? "켜짐" : "꺼짐"}</span>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline-secondary"
-                          disabled={slackTesting}
-                          onClick={() => void sendSlackTest()}
-                        >
-                          {slackTesting ? "발송 중…" : "지금 발송(테스트)"}
-                        </button>
+                    <>
+                      {mixWeightFields.map((field) => (
+                        <label key={field.key} className="appLabeledField" style={{ marginBottom: 0 }}>
+                          <span className="appLabeledFieldLabel">{field.label}</span>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            <input
+                              className="form-control form-control-sm"
+                              style={{ width: 72, textAlign: "right" }}
+                              type="number"
+                              min={0}
+                              max={100}
+                              step={1}
+                              value={field.value}
+                              disabled={settingsSaving}
+                              onChange={(event) => field.set(event.target.value)}
+                              title={field.hint}
+                            />
+                            <span style={hintStyle}>%</span>
+                          </span>
+                        </label>
+                      ))}
+                      <span style={{ ...hintStyle, color: weightOk ? "var(--text-muted)" : "#d62828", fontWeight: weightOk ? 400 : 700 }}>
+                        합계 {weightSum === null ? "-" : `${weightSum}%`}
+                        {weightOk ? " ✓" : " (100% 필요)"}
                       </span>
-                    </label>
+                      <label className="appLabeledField" style={{ marginBottom: 0 }}>
+                        <span className="appLabeledFieldLabel">슬랙 알람</span>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <div className="form-check form-switch" style={{ marginBottom: 0 }}>
+                            <input
+                              className="form-check-input"
+                              type="checkbox"
+                              role="switch"
+                              checked={slackEnabled}
+                              disabled={settingsSaving}
+                              onChange={(e) => setSlackEnabled(e.target.checked)}
+                              title="오늘의 액션에 새 지시나 수량 증가가 생기면 슬랙으로 보낸다 (장중 10분 간격 감시). 저장 버튼을 눌러야 반영된다."
+                            />
+                          </div>
+                          <span style={hintStyle}>{slackEnabled ? "켜짐" : "꺼짐"}</span>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-secondary"
+                            disabled={slackTesting}
+                            onClick={() => void sendSlackTest()}
+                          >
+                            {slackTesting ? "발송 중…" : "지금 발송(테스트)"}
+                          </button>
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-success"
+                        disabled={settingsSaving || !weightOk || !settingsDirty}
+                        onClick={() => void saveHeaderSettings()}
+                        title={weightOk ? "배분과 슬랙 알람을 함께 저장한다." : "배분 합계가 100%가 아니면 저장할 수 없다."}
+                      >
+                        {settingsSaving ? "저장 중…" : "저장"}
+                      </button>
+                    </>
                   ) : null}
                 </div>
               </div>
