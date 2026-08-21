@@ -21,13 +21,13 @@
 
 데이터 소스
   - 종목 명단·시가총액·현재가: 네이버 시가총액 순위 API (/kor-market-stock 화면과 동일 함수)
-  - 확정 재무(연도별): yfinance income_stmt / cashflow
+  - 확정 재무(연도별): **OpenDART 사업보고서** (services/opendart_service — 공식 API,
+    .env 에 DART_API_KEY 필요). 영업이익·순이익·배당지급·자사주매입을 연도별로 받는다
   - 주당배당금(DPS): 네이버 연간 재무의 회계연도 기준 값 (빈 연도는 무배당 0원으로 간주,
-    네이버에 없으면 yfinance 배당 이력을 지급일 기준으로 합산해 폴백)
+    네이버에 없으면 OpenDART 배당 공시(alotMatter)의 보통주 주당 현금배당금으로 폴백)
   - 2026 컨센서스: 네이버 연간 재무 API (m.stock.naver.com/api/stock/{티커}/finance/annual)
     · isConsensus=Y 연도의 영업이익·당기순이익·주당배당금·PER 을 쓴다 (금액 단위: 억원)
     · 자사주매입·배당지급총액은 컨센서스가 존재하지 않는 항목이라 확정치만 쓴다
-  - pykrx 의 지수 구성종목·펀더멘털 API 는 현재 KRX 응답 변경으로 빈 값이라 쓰지 않는다
 
 출력
   1) 전체 순위 표 → 2) 항목 설명 → 3) 상위 N개 연도별 상세 (--detail, 기본 5)
@@ -101,23 +101,18 @@ PER_FULL_SCORE = 8.0
 PER_ZERO_SCORE = 20.0
 # 배당수익률 만점 기준 — 이 값 이상이면 배점 만점 (0% 는 0점, 사이는 선형).
 DIVIDEND_YIELD_FULL_SCORE = 0.03
-# 현금흐름표에서 자사주 매입액을 담는 항목명 (yfinance 표기).
-BUYBACK_KEYS = ("Repurchase Of Capital Stock", "Common Stock Payments")
-DIVIDEND_PAID_KEYS = ("Cash Dividends Paid", "Common Stock Dividend Paid")
-NET_INCOME_KEYS = ("Net Income", "Net Income Common Stockholders")
-OPERATING_INCOME_KEYS = ("Operating Income", "EBIT")
+
+# OpenDART 조회에 쓰는 공유 상태 — main() 이 채운 뒤 워커(_analyze)들이 읽기만 한다.
+_CORP_CODES: dict[str, str] = {}
+_LATEST_YEAR: int = 0
 
 
-def _pick_row(frame: pd.DataFrame | None, keys: tuple[str, ...]) -> pd.Series | None:
-    """여러 후보 항목명 중 프레임에 존재하는 첫 행을 돌려준다."""
-    if frame is None or frame.empty:
+def _dart_series(by_year: dict[int, dict[str, float] | None], field: str) -> pd.Series | None:
+    """연도별 DART 재무에서 한 항목을 뽑아 시리즈로 만든다 (최신 연도가 앞)."""
+    values = {year: fin[field] for year, fin in by_year.items() if fin and field in fin}
+    if not values:
         return None
-    for key in keys:
-        if key in frame.index:
-            series = pd.to_numeric(frame.loc[key], errors="coerce").dropna()
-            if not series.empty:
-                return series
-    return None
+    return pd.Series(values).sort_index(ascending=False)
 
 
 def _values_from_start_year(series: pd.Series | None) -> list[float]:
@@ -176,60 +171,38 @@ def _apply_filters(
     return None
 
 
-def _value_at_year(frame: pd.DataFrame | None, keys: tuple[str, ...], year: str) -> float:
-    """특정 회계연도의 값. 해당 연도에 값이 없으면 0.
-
-    `_pick_row` 는 NaN 을 제거하므로 `iloc[0]` 이 종목마다 다른 연도를 가리킬 수 있다.
-    배당·자사주·순이익을 같은 연도로 맞추기 위해 연도를 명시해 조회한다.
-    """
-    if frame is None or frame.empty:
-        return 0.0
-    for key in keys:
-        if key not in frame.index:
-            continue
-        for label, value in frame.loc[key].items():
-            if _year_of(label) == year and pd.notna(value):
-                return float(value)
-    return 0.0
-
-
 def _payout_ratio(
-    cashflow: pd.DataFrame | None, income: pd.DataFrame | None
+    net_series: pd.Series | None,
+    dividend_paid_series: pd.Series | None,
+    buyback_series: pd.Series | None,
 ) -> tuple[float | None, float, float, str | None]:
     """최근 회계연도 주주환원율 = (배당 + 자사주매입) / 순이익.
 
     기준 연도는 '순이익이 있는 가장 최근 회계연도' 하나로 고정하고, 배당·자사주도
-    같은 연도 값만 쓴다. 현금흐름표의 지출은 음수로 들어오므로 절댓값으로 바꿔 더한다.
+    같은 연도 값만 쓴다 (DART 값은 이미 절댓값·원 단위로 정규화돼 있다).
     """
-    net_income_row = _pick_row(income, NET_INCOME_KEYS)
-    if net_income_row is None or net_income_row.empty:
+    if net_series is None or net_series.empty:
         return None, 0.0, 0.0, None
 
-    base_year = _year_of(net_income_row.index[0])
-    dividend_amount = abs(_value_at_year(cashflow, DIVIDEND_PAID_KEYS, base_year))
-    buyback_amount = abs(_value_at_year(cashflow, BUYBACK_KEYS, base_year))
+    base_year = int(net_series.index[0])
+    dividend_amount = float(dividend_paid_series.get(base_year, 0.0)) if dividend_paid_series is not None else 0.0
+    buyback_amount = float(buyback_series.get(base_year, 0.0)) if buyback_series is not None else 0.0
 
-    net_income = float(net_income_row.iloc[0])
+    net_income = float(net_series.iloc[0])
     if net_income <= 0:
-        return None, dividend_amount, buyback_amount, base_year
+        return None, dividend_amount, buyback_amount, str(base_year)
     ratio = (dividend_amount + buyback_amount) / net_income
-    return ratio, dividend_amount, buyback_amount, base_year
+    return ratio, dividend_amount, buyback_amount, str(base_year)
 
 
-def _yearly_dividend_series(ticker_obj: Any) -> pd.Series | None:
-    """[폴백] yfinance 배당 이력을 지급일 기준으로 연도 합산한다 (최신 연도가 앞).
+def _dart_dps_series(corp_code: str) -> pd.Series | None:
+    """[폴백] OpenDART 배당 공시의 보통주 주당 현금배당금 (회계연도 기준, 최신이 앞)."""
+    from services.opendart_service import dps_history
 
-    지급일이 회계연도와 어긋나는 회사(배당기준일을 12월 → 이듬해 3월로 옮긴 경우)는
-    특정 연도가 비어 보이므로, 기본 소스는 `_naver_dps_series`(회계연도 기준)를 쓴다.
-    """
-    dividends = getattr(ticker_obj, "dividends", None)
-    if dividends is None or dividends.empty:
+    history = dps_history(corp_code, _LATEST_YEAR)
+    if not history:
         return None
-    yearly = dividends.groupby(dividends.index.year).sum().sort_index(ascending=False)
-    if yearly.empty:
-        return None
-    current_year = pd.Timestamp.now().year
-    return yearly[yearly.index < current_year]
+    return pd.Series(history).sort_index(ascending=False)
 
 
 def _naver_dps_series(consensus: dict[str, Any]) -> pd.Series | None:
@@ -328,30 +301,39 @@ def _fetch_naver_consensus(ticker: str) -> dict[str, Any] | None:
 
 def _analyze(row: dict[str, Any]) -> dict[str, Any] | None:
     """종목 1개의 재무 지표를 조회해 점수를 계산한다."""
-    import yfinance as yf
+    from services.opendart_service import annual_financials
 
     ticker = str(row.get("ticker") or "").strip()
     if not ticker:
         return None
+    corp_code = _CORP_CODES.get(ticker)
+    if not corp_code and len(ticker) == 6 and not ticker.endswith("0"):
+        corp_code = _CORP_CODES.get(ticker[:5] + "0")  # 우선주 → 보통주(회사) 재무
+    if not corp_code:
+        return {"ticker": ticker, "name": str(row.get("name") or "-"), "excluded_reason": "DART 고유번호 없음"}
     try:
-        ticker_obj = yf.Ticker(f"{ticker}.KS")
-        income = ticker_obj.income_stmt
-        cashflow = ticker_obj.cashflow
+        # 사업보고서는 연도당 1건 — TREND_START_YEAR 부터 최근 확정연도까지.
+        by_year = {year: annual_financials(corp_code, year) for year in range(TREND_START_YEAR, _LATEST_YEAR + 1)}
     except Exception as exc:
         logger.debug("%s 재무 조회 실패: %s", ticker, exc)
-        return None
+        return {"ticker": ticker, "name": str(row.get("name") or "-"), "excluded_reason": "재무 조회 실패"}
+
+    operating_series = _dart_series(by_year, "operating_income")
+    net_series = _dart_series(by_year, "net_income")
+    dividend_paid_series = _dart_series(by_year, "dividends_paid")
+    buyback_series = _dart_series(by_year, "buyback")
 
     # 네이버 연간 재무 — 컨센서스 + 회계연도 기준 DPS. 관문 판정에 DPS 가 필요해 먼저 조회한다.
     consensus = _fetch_naver_consensus(ticker) or {}
-    # DPS 소스: 네이버(회계연도 기준) 우선, 없으면 yfinance 지급일 합산으로 폴백.
+    # DPS 소스: 네이버(회계연도 기준) 우선, 없으면 OpenDART 배당 공시로 폴백.
     dividend_series = _naver_dps_series(consensus)
     if dividend_series is None:
-        dividend_series = _yearly_dividend_series(ticker_obj)
+        dividend_series = _dart_dps_series(corp_code)
 
     # ── 1차 관문(필터): 확정 실적 기준. 탈락하면 사유만 담아 돌려준다. ──
     metric_series: dict[str, pd.Series | None] = {
-        "operating_income": _pick_row(income, OPERATING_INCOME_KEYS),
-        "net_income": _pick_row(income, NET_INCOME_KEYS),
+        "operating_income": operating_series,
+        "net_income": net_series,
         "dividend": dividend_series,
     }
     excluded_reason = _apply_filters(metric_series)
@@ -393,7 +375,9 @@ def _analyze(row: dict[str, Any]) -> dict[str, Any] | None:
         dividend_series, SCORE_WEIGHTS["dividend"], consensus_value=consensus.get("dps")
     )
 
-    payout, dividend_amount, buyback_amount, payout_year = _payout_ratio(cashflow, income)
+    payout, dividend_amount, buyback_amount, payout_year = _payout_ratio(
+        net_series, dividend_paid_series, buyback_series
+    )
     if payout is None:
         payout_score = 0.0
     else:
@@ -408,8 +392,7 @@ def _analyze(row: dict[str, Any]) -> dict[str, Any] | None:
     per = consensus.get("per")
     per_is_consensus = per is not None
     if per is None:
-        net_income_row = _pick_row(income, NET_INCOME_KEYS)
-        recent_net_income = float(net_income_row.iloc[0]) if net_income_row is not None else 0.0
+        recent_net_income = float(net_series.iloc[0]) if net_series is not None and not net_series.empty else 0.0
         market_cap_eok = row.get("market_cap")
         if market_cap_eok and recent_net_income > 0:
             per = float(market_cap_eok) * 1e8 / recent_net_income
@@ -464,10 +447,10 @@ def _analyze(row: dict[str, Any]) -> dict[str, Any] | None:
             "dividend_yield": yield_score,
         },
         "series": {
-            "영업이익": _pick_row(income, OPERATING_INCOME_KEYS),
-            "순이익": _pick_row(income, NET_INCOME_KEYS),
-            "배당지급액": _pick_row(cashflow, DIVIDEND_PAID_KEYS),
-            "자사주매입": _pick_row(cashflow, BUYBACK_KEYS),
+            "영업이익": operating_series,
+            "순이익": net_series,
+            "배당지급액": dividend_paid_series,
+            "자사주매입": buyback_series,
         },
         "dividend_series": dividend_series,
     }
@@ -569,19 +552,28 @@ def _print_detail(rank: int, item: dict[str, Any]) -> None:
 
 
 def main() -> None:
+    global _LATEST_YEAR
+
     parser = argparse.ArgumentParser(description="코스피200 주주환원 우수 종목 찾기")
     parser.add_argument("--top", type=int, default=30, help="출력할 상위 종목 수 (기본 30).")
     parser.add_argument("--limit", type=int, default=200, help="조사할 시가총액 상위 종목 수 (기본 200).")
-    parser.add_argument("--workers", type=int, default=8, help="yfinance 병렬 조회 워커 수 (기본 8).")
+    parser.add_argument("--workers", type=int, default=8, help="OpenDART 병렬 조회 워커 수 (기본 8).")
     parser.add_argument("--detail", type=int, default=5, help="연도별 상세를 출력할 상위 종목 수 (기본 5).")
     args = parser.parse_args()
+
+    from services.opendart_service import corp_code_by_stock, latest_annual_year
+    from utils.env import load_env_if_present
+
+    load_env_if_present()  # DART_API_KEY
+    _CORP_CODES.update(corp_code_by_stock())
+    _LATEST_YEAR = latest_annual_year()
 
     print(f"코스피 시가총액 상위 {args.limit}종목 명단을 불러옵니다...")
     market = load_kor_stock_market("KOSPI", limit=args.limit, min_market_cap_jo=0)
     rows = market.get("rows") or market.get("items") or []
     if not rows:
         raise SystemExit("코스피 종목 목록을 가져오지 못했습니다.")
-    print(f"  {len(rows)}종목 확보 — 재무 데이터 조회 시작 (워커 {args.workers}개)")
+    print(f"  {len(rows)}종목 확보 — 재무 데이터 조회 시작 (워커 {args.workers}개, 최근 사업연도 {_LATEST_YEAR})")
 
     results: list[dict[str, Any]] = []
     excluded: list[dict[str, Any]] = []
