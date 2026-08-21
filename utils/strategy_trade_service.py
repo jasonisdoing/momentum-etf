@@ -201,9 +201,15 @@ def _load_index_status(index_ticker: str, index_name: str, trigger_pct: float) -
 
     entry_ratio = 1.0 - float(trigger_pct) / 100.0
     last_close = float(close.iloc[-1])
+    if len(close) < 2:
+        raise RuntimeError(f"{index_name} 지수의 직전 거래일 종가가 없습니다.")
+    # 1호 진입 판정의 기준은 **직전 거래일 종가**다. 장중 값에 -간격% 를 걸면 지수가
+    # 내릴 때마다 기준선도 같이 내려가 영영 닿지 않는다(움직이는 과녁).
+    prev_close = float(close.iloc[-2])
+    if prev_close <= 0:
+        raise RuntimeError(f"{index_name} 지수의 직전 거래일 종가가 올바르지 않습니다: {prev_close}")
     # 일간 변동률 — 알림이 "코스피 6,472.32 (-2.34%)" 처럼 지수 기준으로 말하는 데 쓴다.
-    prev_close = float(close.iloc[-2]) if len(close) >= 2 else 0.0
-    change_pct = ((last_close / prev_close) - 1.0) * 100.0 if prev_close > 0 else None
+    change_pct = ((last_close / prev_close) - 1.0) * 100.0
 
     # 최근 3개월(92일) 저점 — 회차 지정가가 지수 어느 층에 걸리는지 가늠하는 기준선.
     low_window = close[close.index >= close.index[-1] - pd.Timedelta(days=92)]
@@ -213,8 +219,10 @@ def _load_index_status(index_ticker: str, index_name: str, trigger_pct: float) -
         "name": index_name,
         "as_of": close.index[-1].strftime("%Y-%m-%d"),
         "close": round(last_close, 2),
-        "change_pct": round(change_pct, 2) if change_pct is not None else None,
-        "buy_trigger": round(last_close * entry_ratio, 2),
+        "prev_close": round(prev_close, 2),
+        "change_pct": round(change_pct, 2),
+        # 1호 진입선 — 직전 종가 대비 -간격%.
+        "buy_trigger": round(prev_close * entry_ratio, 2),
         "recent_low": round(float(low_window.min()), 2),
         "recent_low_date": low_date.strftime("%Y-%m-%d"),
         "recent_low_label": "3개월 저점",
@@ -293,13 +301,17 @@ def _build_strategy_view(
             }
         )
 
-    entry_ratio = 1.0 - trigger_pct / 100.0
     # 하락 판정은 **마지막 매수 종목**의 가격으로 한다(규칙: 직전 회차 종목이 자기
     # 진입가 대비 -간격% 하락하면 다음 회차 매수). 같은 지수 추종이라도 운용사마다
     # 가격 스케일이 다르므로(예: TIGER 코스닥150 이 KODEX 보다 +2%), 체인 지정가를
     # 다른 종목 가격에 그대로 대면 필요 하락률이 왜곡된다 — 각 회차의 표시 지정가는
     # '필요 하락 비율'을 자기 현재가에 곱해 자기 스케일로 환산한다.
     monitored_close = held[-1]["close"] if held else None
+    # 1호 진입까지 지수가 지금부터 더 움직여야 하는 비율 — (직전 종가 x (1-간격%)) / 현재 지수.
+    # 1 이상이면 이미 진입선 아래로 내려온 것이다.
+    index_first_entry_ratio = (
+        index_status["buy_trigger"] / index_status["close"] if index_status["close"] else None
+    )
     for offset, item in enumerate(unheld):
         is_next = next_target is not None and item["ticker"] == next_target["ticker"]
         close = item["close"]
@@ -309,8 +321,12 @@ def _build_strategy_view(
             required_ratio = (chain_level / monitored_close) if monitored_close else None
             buy_limit = close * required_ratio if (close and required_ratio is not None) else None
         else:
-            # 보유가 없으면 1호는 자기 현재가 -간격% 가 기준(자기 스케일이라 왜곡 없음).
-            buy_limit = close * entry_ratio * (add_ratio**offset) if close else None
+            # 보유가 없으면 1호 진입은 **지수가 직전 종가 대비 -간격%** 인지로 본다.
+            # 자기 현재가에 -간격% 를 걸면 값이 내릴 때 기준선도 같이 내려가 절대 닿지
+            # 않는다. 지수 기준으로 '지금부터 더 내려야 하는 비율'을 구해, 체인 회차와
+            # 같은 방식으로 각 종목 스케일의 지정가로 환산한다(이미 도달했으면 비율 >= 1).
+            required_ratio = index_first_entry_ratio
+            buy_limit = close * required_ratio * (add_ratio**offset) if (close and required_ratio) else None
         rows.append(
             {
                 **item,
