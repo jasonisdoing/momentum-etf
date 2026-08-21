@@ -1,21 +1,20 @@
 """전략 사고팔기 운용 현황 조회 서비스 (UI/API 용).
 
-전략 2개(코스피200 / 코스닥150)를 같은 계좌에서 독립 운용한다. 전략별 파라미터(%)는
+전략 4개(KODEX 200 / KODEX 코스닥150 / 삼성전자 / SK하이닉스)를 같은 계좌에서
+독립 운용한다. 각 전략은 **자기 종목 하나만** 설정된 회차 수까지 분할 매수한다.
+파라미터(매매 간격 %·회차당 수량·회차 수)는
 DB(``system_config.strategy_trade_settings.strategies``)가 단일 소스이며 화면에서
-편집한다. 회차 티커는 전략별 코드 고정이고, 슬랙 스위치는 전역 1개다.
+편집한다. 슬랙 스위치는 전역 1개다.
 
 보유 현황은 백테스트가 아니라 ``ACCOUNT_ID`` 계좌의 **실제 보유 수량·평균단가**를
-읽어 계산한다. 배치는 없다 — 화면을 열 때마다 즉시 계산한다.
+읽어 계산한다. 배치·원장은 없다 — 화면을 열 때마다 즉시 역산한다.
 
-회차 부여 규칙 (전략별 동일)
----------------------------
-- 보유 종목은 **평균단가 내림차순**으로 1호부터 다시 번호를 매긴다.
-- 매도 지정가는 각 종목의 자기 평균단가 ``+take_profit_pct``.
-- 다음 매수는 **가장 마지막에 매수한 가격(= 보유 중 최저 평균단가)** 의
-  ``-add_drop_pct`` 이며, 종목은 미보유 중 고정 회차가 가장 빠른 것을 쓴다.
-  (회차 종목이 모두 같은 지수를 추종해 가격 차이가 작다는 전제)
-- 보유가 하나도 없으면 1호 진입 대기 상태다 — 판정 지수가 ``entry_drop_pct``
-  이상 하락한 날 고정 1호 종목을 매수한다.
+회차 역산 규칙 (자세한 근거는 strategy_trade_config 모듈 설명 참고)
+---------------------------------------------------------------
+- 진입 회차 수 m = 보유 수량 ÷ 회차당 수량 (반올림, 1~회차 수로 제한).
+- 1호가 P1 = 평균단가 × m ÷ (1 + r + … + r^(m-1)),  r = 1 − 간격%.
+- k호 진입가 = P1 × r^(k-1) · 매도 지정가 = 진입가 × (1 + 간격%).
+- 다음 매수 = 마지막 매수가 × r. 보유가 없으면 1호 진입 = 전일 종가 × r.
 """
 
 from __future__ import annotations
@@ -25,8 +24,8 @@ from typing import Any
 
 from utils.strategy_trade_config import (
     ACCOUNT_ID,
-    EDITABLE_PCT_KEYS,
-    PRICE_CACHE_TICKER_TYPE,
+    EDITABLE_CONFIG_KEYS,
+    PRICE_CACHE_TICKER_TYPES,
     STRATEGIES,
     STRATEGY_IDS,
     validate_strategy_trade_config,
@@ -37,12 +36,12 @@ _SETTINGS_KEY = "strategy_trade_settings"
 
 
 def load_settings() -> dict[str, Any]:
-    """저장된 슬랙 스위치 + 전략별 파라미터(%)를 반환한다.
+    """저장된 슬랙 스위치 + 전략별 파라미터를 반환한다.
 
     전략 항목이 없거나 깨졌으면 시드값으로 슬쩍 넘어가지 않고 에러를 낸다 —
     그럴듯한 값이 화면에 떴다가 그대로 저장돼 실제 설정이 덮어써지는 것을 막는다.
 
-    반환: ``{"slack_enabled", "strategies": {sid: {"trigger_pct": float}}}``
+    반환: ``{"slack_enabled", "strategies": {sid: {"trigger_pct", "round_quantity"}}}``
     """
     from utils.db_manager import get_db_connection
 
@@ -63,7 +62,7 @@ def load_settings() -> dict[str, Any]:
         if not isinstance(entry, dict):
             raise RuntimeError(f"'{sid}' 전략 설정이 없습니다 — 마이그레이션/저장이 필요합니다.")
         try:
-            strategies[sid] = validate_strategy_trade_config({key: entry.get(key) for key in EDITABLE_PCT_KEYS})
+            strategies[sid] = validate_strategy_trade_config({key: entry.get(key) for key in EDITABLE_CONFIG_KEYS})
         except ValueError as error:
             raise ValueError(f"'{sid}' 전략 설정이 올바르지 않습니다: {error}") from error
 
@@ -71,7 +70,7 @@ def load_settings() -> dict[str, Any]:
 
 
 def save_strategy_settings(strategy_id: str, *, config: dict[str, Any]) -> dict[str, Any]:
-    """전략 하나의 파라미터(%)를 저장하고, 전체 설정을 반환한다."""
+    """전략 하나의 파라미터를 저장하고, 전체 설정을 반환한다."""
     from utils.db_manager import get_db_connection
 
     sid = str(strategy_id or "").strip()
@@ -105,7 +104,7 @@ def save_slack_enabled(enabled: bool) -> dict[str, Any]:
 
 
 def _load_account_rows() -> dict[str, dict[str, float]]:
-    """계좌에서 보유 종목의 수량·평균단가·현재가를 읽는다 (두 전략 공용, 1회 조회).
+    """계좌에서 보유 종목의 수량·평균단가·현재가를 읽는다 (전 전략 공용, 1회 조회).
 
     ``load_real_holdings_table`` 은 실시간 시세를 반영한 현재가까지 채워준다.
     """
@@ -135,11 +134,11 @@ def _load_account_rows() -> dict[str, dict[str, float]]:
 
 
 def _load_unheld_closes(tickers: list[str]) -> dict[str, float]:
-    """미보유 회차 종목의 현재가 — 실시간 시세 우선, 실패분은 가격 캐시 폴백.
+    """미보유 종목의 현재가 — 실시간 시세 우선, 실패분은 가격 캐시 폴백.
 
-    다음 회차 매수 판정에는 아직 안 산 종목의 현재가가 필요하다(없으면 매수 신호가
-    영원히 안 뜬다). 코스닥150 회차 종목은 종목풀(가격 캐시) 밖에 있는 것이 많아
-    실시간(pools-rank 와 같은 소스)을 1순위로 쓴다.
+    1호 진입 판정에는 아직 안 산 종목의 현재가가 필요하다(없으면 매수 신호가
+    영원히 안 뜬다). 실시간(pools-rank 와 같은 소스)을 1순위로 쓰고, 캐시 폴백은
+    ETF(kor_kr)·개별주(kospi200) 풀을 함께 본다.
     """
     closes: dict[str, float] = {}
     if not tickers:
@@ -162,7 +161,7 @@ def _load_unheld_closes(tickers: list[str]) -> dict[str, float]:
 
         from utils.cache_utils import load_cached_frames_bulk_from_ticker_types
 
-        frames = load_cached_frames_bulk_from_ticker_types([PRICE_CACHE_TICKER_TYPE], remaining)
+        frames = load_cached_frames_bulk_from_ticker_types(list(PRICE_CACHE_TICKER_TYPES), remaining)
         for ticker in remaining:
             frame = frames.get(ticker)
             if frame is None or frame.empty or "Close" not in frame.columns:
@@ -173,57 +172,72 @@ def _load_unheld_closes(tickers: list[str]) -> dict[str, float]:
     return closes
 
 
-def _index_level_for(limit_price: float | None, close: float | None, index_close: float) -> float | None:
-    """지정가에 닿을 때의 대략적인 지수 수준.
+def _round_to_tick(price: float, is_etf: bool) -> float:
+    """KRX 호가 단위로 반올림한다 — 지정가는 이 단위로만 주문할 수 있다.
 
-    회차 ETF 가격은 추종 지수에 비례하므로 ``지수 x (지정가 / 현재가)`` 로 환산한다.
-    추종 지수(코스피200/코스닥150)와 표시 지수(코스피/코스닥)가 달라 정확한 값은
-    아니다 — 참고용.
+    ETF 는 5원 고정, 주식은 가격대별(2023-01 개편 기준).
     """
-    if limit_price is None or close is None or close <= 0:
-        return None
-    return round(index_close * (limit_price / close), 2)
+    if is_etf:
+        tick = 5
+    elif price < 2_000:
+        tick = 1
+    elif price < 5_000:
+        tick = 5
+    elif price < 20_000:
+        tick = 10
+    elif price < 50_000:
+        tick = 50
+    elif price < 200_000:
+        tick = 100
+    elif price < 500_000:
+        tick = 500
+    else:
+        tick = 1_000
+    return round(price / tick) * tick
 
 
-def _load_index_status(index_ticker: str, index_name: str, trigger_pct: float) -> dict[str, Any]:
-    """1호 진입 판정용 지수 현황 — 최근 종가와 진입 트리거 가격."""
-    from utils.market_trend_service import load_index_ohlc
+def _load_ticker_status(
+    ticker: str, name: str, trigger_pct: float, live_close: float | None, is_etf: bool
+) -> dict[str, Any]:
+    """판정 기준 시세 — 이 전략 종목 자신의 현재가·전일 종가·1호 진입선·최근 저점.
 
-    frame = load_index_ohlc(index_ticker)
-    if frame is None or frame.empty:
-        raise RuntimeError(f"{index_name} 지수 데이터를 불러올 수 없습니다.")
-
+    (이전에는 코스피/코스닥 지수를 썼지만, 이제 판정·표시 모두 자기 종목 가격이다)
+    """
     import pandas as pd
 
+    from utils.cache_utils import load_cached_frames_bulk_from_ticker_types
+
+    frames = load_cached_frames_bulk_from_ticker_types(list(PRICE_CACHE_TICKER_TYPES), [ticker])
+    frame = frames.get(ticker)
+    if frame is None or frame.empty or "Close" not in frame.columns:
+        raise RuntimeError(f"{name}({ticker}) 가격 캐시를 불러올 수 없습니다.")
     close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
-    if close.empty:
-        raise RuntimeError(f"{index_name} 지수 종가가 없습니다.")
-
-    entry_ratio = 1.0 - float(trigger_pct) / 100.0
-    last_close = float(close.iloc[-1])
     if len(close) < 2:
-        raise RuntimeError(f"{index_name} 지수의 직전 거래일 종가가 없습니다.")
-    # 1호 진입 판정의 기준은 **직전 거래일 종가**다. 장중 값에 -간격% 를 걸면 지수가
-    # 내릴 때마다 기준선도 같이 내려가 영영 닿지 않는다(움직이는 과녁).
-    prev_close = float(close.iloc[-2])
-    if prev_close <= 0:
-        raise RuntimeError(f"{index_name} 지수의 직전 거래일 종가가 올바르지 않습니다: {prev_close}")
-    # 일간 변동률 — 알림이 "코스피 6,472.32 (-2.34%)" 처럼 지수 기준으로 말하는 데 쓴다.
-    change_pct = ((last_close / prev_close) - 1.0) * 100.0
+        raise RuntimeError(f"{name}({ticker}) 종가 데이터가 부족합니다.")
 
-    # 최근 3개월(92일) 저점 — 회차 지정가가 지수 어느 층에 걸리는지 가늠하는 기준선.
+    # 1호 진입 판정의 기준은 **직전 거래일 종가**다. 현재가에 -간격% 를 걸면 값이
+    # 내릴 때마다 기준선도 같이 내려가 영영 닿지 않는다(움직이는 과녁).
+    today = pd.Timestamp.now().normalize()
+    prev_close = float(close.iloc[-2]) if close.index[-1].normalize() >= today else float(close.iloc[-1])
+    if prev_close <= 0:
+        raise RuntimeError(f"{name}({ticker}) 의 직전 거래일 종가가 올바르지 않습니다: {prev_close}")
+
+    current = float(live_close) if live_close else float(close.iloc[-1])
+    change_pct = (current / prev_close - 1.0) * 100.0
+
+    # 최근 3개월(92일) 저점 — 회차 지정가가 어느 층에 걸리는지 가늠하는 기준선.
     low_window = close[close.index >= close.index[-1] - pd.Timedelta(days=92)]
     low_date = low_window.idxmin()
 
     return {
-        "name": index_name,
+        "name": name,
         "as_of": close.index[-1].strftime("%Y-%m-%d"),
-        "close": round(last_close, 2),
-        "prev_close": round(prev_close, 2),
+        "close": round(current),
+        "prev_close": round(prev_close),
         "change_pct": round(change_pct, 2),
-        # 1호 진입선 — 직전 종가 대비 -간격%.
-        "buy_trigger": round(prev_close * entry_ratio, 2),
-        "recent_low": round(float(low_window.min()), 2),
+        # 1호 진입선 — 전일 종가 대비 -간격%, 호가 단위 반올림.
+        "buy_trigger": _round_to_tick(prev_close * (1.0 - float(trigger_pct) / 100.0), is_etf),
+        "recent_low": round(float(low_window.min())),
         "recent_low_date": low_date.strftime("%Y-%m-%d"),
         "recent_low_label": "3개월 저점",
     }
@@ -234,162 +248,139 @@ def _build_strategy_view(
     strategy_settings: dict[str, Any],
     account_rows: dict[str, dict[str, float]],
 ) -> dict[str, Any]:
-    """전략 하나의 운용 현황(회차 표·상태)을 계산한다."""
+    """전략 하나의 운용 현황(회차 표·상태)을 계좌 보유에서 역산한다."""
     meta = STRATEGIES[strategy_id]
-    names = {code: name for code, name in meta["round_tickers"]}
-    tickers = [code for code, _ in meta["round_tickers"]]
-
-    unheld_tickers = [t for t in tickers if not ((account_rows.get(t) or {}).get("quantity") or 0)]
-    unheld_closes = _load_unheld_closes(unheld_tickers)
+    ticker = str(meta["ticker"])
+    name = str(meta["name"])
     trigger_pct = float(strategy_settings["trigger_pct"])
-    index_status = _load_index_status(meta["index_ticker"], meta["index_name"], trigger_pct)
+    round_quantity = int(strategy_settings["round_quantity"])
+    max_rounds = int(strategy_settings["rounds"])
+    down_ratio = 1.0 - trigger_pct / 100.0
+    up_ratio = 1.0 + trigger_pct / 100.0
 
-    take_profit = 1.0 + trigger_pct / 100.0
-    add_ratio = 1.0 - trigger_pct / 100.0
+    is_etf = bool(meta["is_etf"])
+    account = account_rows.get(ticker) or {}
+    quantity = int(account.get("quantity") or 0)
+    avg_price = float(account.get("avg_price") or 0)
+    live_close = float(account.get("close") or 0) or _load_unheld_closes([ticker]).get(ticker)
+    index_status = _load_ticker_status(ticker, name, trigger_pct, live_close, is_etf)
+    close = float(index_status["close"])
 
-    # 계좌에 없는 티커는 미보유로 다룬다(0주로 등록된 경우도 동일).
-    held: list[dict[str, Any]] = []
-    unheld: list[dict[str, Any]] = []
-    for fixed_round, ticker in enumerate(tickers, start=1):
-        row = account_rows.get(ticker) or {}
-        quantity = int(row.get("quantity") or 0)
-        avg_price = float(row.get("avg_price") or 0)
-        # 보유분은 실시간이 반영된 보유 테이블 값을, 미보유분은 실시간/캐시 값을 쓴다.
-        close = float(row.get("close") or 0) or float(unheld_closes.get(ticker) or 0)
-        entry = {
-            "ticker": ticker,
-            "name": names.get(ticker, ticker),
-            "fixed_round": fixed_round,
-            "avg_price": avg_price if avg_price > 0 else None,
-            "close": round(close, 2) if close > 0 else None,
-        }
-        if quantity > 0 and avg_price > 0:
-            held.append(entry)
-        else:
-            unheld.append(entry)
+    # ── 회차 역산 — 수량으로 진입 회차 수, 평균단가로 1호가 ──
+    held_rounds = 0
+    first_entry: float | None = None
+    quantity_mismatch = False
+    if quantity > 0 and avg_price > 0:
+        held_rounds = max(1, min(max_rounds, round(quantity / round_quantity)))
+        quantity_mismatch = quantity != held_rounds * round_quantity
+        ladder_sum = sum(down_ratio**i for i in range(held_rounds))
+        first_entry = avg_price * held_rounds / ladder_sum
 
-    # 보유분은 평균단가 내림차순 — 비싸게 잡힌 것이 1호다.
-    held.sort(key=lambda item: item["avg_price"], reverse=True)
-    # 가장 마지막에 매수한 가격 = 보유 중 최저 평균단가.
-    last_buy_price = held[-1]["avg_price"] if held else None
-    # 다음 매수 종목은 미보유 중 고정 회차가 가장 빠른 것.
-    unheld.sort(key=lambda item: item["fixed_round"])
-    next_target = unheld[0] if unheld else None
+    def entry_price(round_no: int) -> float | None:
+        if first_entry is None:
+            return None
+        return first_entry * down_ratio ** (round_no - 1)
 
     rows: list[dict[str, Any]] = []
-    for display_round, item in enumerate(held, start=1):
-        avg_price = float(item["avg_price"])
-        close = item["close"]
-        sell_limit = avg_price * take_profit
-        rows.append(
-            {
-                **item,
-                "round": display_round,
-                "held": True,
-                "profit_pct": (
-                    round((close / avg_price - 1.0) * 100.0, 2) if close is not None and avg_price > 0 else None
-                ),
-                "avg_price": round(avg_price, 2),
-                "sell_limit": round(sell_limit, 2),
-                "sell_index": _index_level_for(sell_limit, close, index_status["close"]),
-                "sell_reached": bool(close is not None and close >= sell_limit),
-                "buy_limit": None,
-                # 이미 매수한 회차는 평균단가가 어느 지수 수준이었는지 환산해 보여준다.
-                "buy_index": _index_level_for(avg_price, close, index_status["close"]),
-                "buy_reached": False,
-                "is_next": False,
-            }
-        )
-
-    # 하락 판정은 **마지막 매수 종목**의 가격으로 한다(규칙: 직전 회차 종목이 자기
-    # 진입가 대비 -간격% 하락하면 다음 회차 매수). 같은 지수 추종이라도 운용사마다
-    # 가격 스케일이 다르므로(예: TIGER 코스닥150 이 KODEX 보다 +2%), 체인 지정가를
-    # 다른 종목 가격에 그대로 대면 필요 하락률이 왜곡된다 — 각 회차의 표시 지정가는
-    # '필요 하락 비율'을 자기 현재가에 곱해 자기 스케일로 환산한다.
-    monitored_close = held[-1]["close"] if held else None
-    # 1호 진입까지 지수가 지금부터 더 움직여야 하는 비율 — (직전 종가 x (1-간격%)) / 현재 지수.
-    # 1 이상이면 이미 진입선 아래로 내려온 것이다.
-    index_first_entry_ratio = (
-        index_status["buy_trigger"] / index_status["close"] if index_status["close"] else None
-    )
-    for offset, item in enumerate(unheld):
-        is_next = next_target is not None and item["ticker"] == next_target["ticker"]
-        close = item["close"]
-        if last_buy_price is not None:
-            # 감시 종목 기준 체인 레벨 → 지금부터 필요한 하락 비율 → 자기 스케일 지정가.
-            chain_level = last_buy_price * (add_ratio ** (offset + 1))
-            required_ratio = (chain_level / monitored_close) if monitored_close else None
-            buy_limit = close * required_ratio if (close and required_ratio is not None) else None
+    for round_no in range(1, max_rounds + 1):
+        held = round_no <= held_rounds
+        is_next = round_no == held_rounds + 1
+        entry = entry_price(round_no)
+        if held and entry is not None:
+            sell_limit = _round_to_tick(entry * up_ratio, is_etf)
+            rows.append(
+                {
+                    "round": round_no,
+                    "fixed_round": round_no,
+                    "ticker": ticker,
+                    "name": name,
+                    "held": True,
+                    "avg_price": round(entry),
+                    "close": round(close) if close > 0 else None,
+                    "profit_pct": round((close / entry - 1.0) * 100.0, 2) if close > 0 else None,
+                    "buy_limit": None,
+                    "buy_index": round(entry),  # 이미 산 회차 — 진입가 자리를 참고로 남긴다
+                    "sell_limit": sell_limit,
+                    "sell_index": sell_limit,
+                    "sell_reached": bool(close > 0 and close >= sell_limit),
+                    "buy_reached": False,
+                    "is_next": False,
+                }
+            )
+            continue
+        # 미보유 회차 — 사다리 자리(보유가 있으면 1호가 기준, 없으면 전일 종가 기준).
+        # 지정가로 바로 쓸 수 있게 호가 단위로 반올림한다.
+        if first_entry is not None:
+            buy_limit = first_entry * down_ratio ** (round_no - 1)
         else:
-            # 보유가 없으면 1호 진입은 **지수가 직전 종가 대비 -간격%** 인지로 본다.
-            # 자기 현재가에 -간격% 를 걸면 값이 내릴 때 기준선도 같이 내려가 절대 닿지
-            # 않는다. 지수 기준으로 '지금부터 더 내려야 하는 비율'을 구해, 체인 회차와
-            # 같은 방식으로 각 종목 스케일의 지정가로 환산한다(이미 도달했으면 비율 >= 1).
-            required_ratio = index_first_entry_ratio
-            buy_limit = close * required_ratio * (add_ratio**offset) if (close and required_ratio) else None
+            buy_limit = float(index_status["prev_close"]) * down_ratio**round_no
+        buy_limit = _round_to_tick(buy_limit, is_etf)
         rows.append(
             {
-                **item,
-                "round": len(held) + offset + 1,
+                "round": round_no,
+                "fixed_round": round_no,
+                "ticker": ticker,
+                "name": name,
                 "held": False,
+                "avg_price": None,
+                "close": round(close) if close > 0 else None,
                 "profit_pct": None,
+                "buy_limit": buy_limit,
+                "buy_index": buy_limit,
                 "sell_limit": None,
                 "sell_index": None,
                 "sell_reached": False,
-                "buy_limit": round(buy_limit, 2) if buy_limit is not None else None,
-                "buy_index": _index_level_for(buy_limit, close, index_status["close"]),
-                "buy_reached": bool(buy_limit is not None and close is not None and close <= buy_limit),
+                "buy_reached": bool(is_next and close > 0 and close <= buy_limit),
                 "is_next": is_next,
             }
         )
 
-    # 다음 회차 매수까지 남은 하락률(%) — 다음 대상 회차의 지정가 ÷ 현재가.
-    # ETF 가격과 지수는 비례하므로 '지수가 이만큼 내리면 산다'와 같은 값이다.
-    # 이미 도달했으면 0 이상(+)이 나온다. 다음 대상이 없거나 가격이 없으면 None.
+    # 다음 회차 매수까지 남은 하락률(%) — 도달했으면 0 이상(+). 회차 소진이면 None.
     next_buy_drop_pct = None
     next_row = next((r for r in rows if r["is_next"]), None)
-    if next_row is not None and next_row["buy_limit"] is not None and next_row["close"]:
-        next_buy_drop_pct = round((next_row["buy_limit"] / next_row["close"] - 1.0) * 100.0, 2)
+    if next_row is not None and next_row["buy_limit"] is not None and close > 0:
+        next_buy_drop_pct = round((next_row["buy_limit"] / close - 1.0) * 100.0, 2)
 
-    # 가장 가까운 매도 회차 — 보유 중 목표가까지 남은 상승률이 최소인 회차.
-    # 값이 0 이하면 이미 도달. 보유가 없으면 None.
+    # 가장 가까운 매도 = 마지막(가장 싼) 회차 — 사다리 구조상 항상 먼저 도달한다.
     next_sell_round = None
     next_sell_rise_pct = None
-    sell_candidates = [
-        (r["round"], (r["sell_limit"] / r["close"] - 1.0) * 100.0)
-        for r in rows
-        if r["held"] and r["sell_limit"] is not None and r["close"]
-    ]
-    if sell_candidates:
-        next_sell_round, rise = min(sell_candidates, key=lambda pair: pair[1])
-        next_sell_rise_pct = round(rise, 2)
+    held_rows = [r for r in rows if r["held"] and r["sell_limit"] is not None and close > 0]
+    if held_rows:
+        deepest = held_rows[-1]
+        next_sell_round = deepest["round"]
+        next_sell_rise_pct = round((deepest["sell_limit"] / close - 1.0) * 100.0, 2)
 
+    last_entry = entry_price(held_rounds) if held_rounds else None
     return {
         "strategy_id": strategy_id,
         "label": meta["label"],
         "config": {
             "trigger_pct": trigger_pct,
-            "rounds": len(tickers),
-            "index_name": meta["index_name"],
+            "round_quantity": round_quantity,
+            "rounds": max_rounds,
+            "index_name": name,
         },
         "index": index_status,
         "status": {
-            "held_count": len(held),
-            "waiting_first_entry": not held,
-            "next_round": (len(held) + 1) if next_target is not None else None,
-            "next_ticker": next_target["ticker"] if next_target else None,
-            "next_name": next_target["name"] if next_target else None,
-            "last_buy_price": round(last_buy_price, 2) if last_buy_price is not None else None,
+            "held_count": held_rounds,
+            "waiting_first_entry": held_rounds == 0,
+            "next_round": (held_rounds + 1) if held_rounds < max_rounds else None,
+            "next_ticker": ticker if held_rounds < max_rounds else None,
+            "next_name": name if held_rounds < max_rounds else None,
+            "last_buy_price": round(last_entry) if last_entry is not None else None,
             "next_buy_drop_pct": next_buy_drop_pct,
             "next_sell_round": next_sell_round,
             "next_sell_rise_pct": next_sell_rise_pct,
+            # 보유 수량이 회차×수량과 다르면 역산이 근사가 된다 — 화면이 경고를 띄운다.
+            "quantity_mismatch": quantity_mismatch,
+            "held_quantity": quantity,
         },
         "rounds": rows,
     }
 
 
 def load_strategy_trade_view() -> dict[str, Any]:
-    """두 전략의 운용 현황을 화면용으로 묶어 반환한다."""
+    """전 전략의 운용 현황을 화면용으로 묶어 반환한다."""
     settings = load_settings()
     account_rows = _load_account_rows()
     return {
