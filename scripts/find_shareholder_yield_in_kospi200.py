@@ -1,4 +1,4 @@
-"""kor 종목풀에서 **주주환원 수익률**이 높은 종목을 뽑아 콘솔에 출력한다 (한국판 DIVB).
+"""kospi200 종목풀에서 **주주환원 수익률**이 높은 종목을 뽑아 콘솔에 출력한다 (한국판 DIVB).
 
 미국 DIVB(iShares U.S. Dividend and Buyback ETF)가 추종하는
 **Morningstar US Dividend and Buyback Index** 의 계산 정의를 그대로 옮겼다.
@@ -25,16 +25,15 @@
     순매입액을 그 종목 시가총액으로 나누게 되어 우선주만 값이 부풀려진다(짝이 안 맞는다).
 
 데이터 소스
-  - 유니버스: kospi200 + kosdaq150 종목풀 합집합 — 종목풀 화면이 단일 소스
-    (예전의 kor 통합 풀이 국가별 풀로 나뉘어 두 풀을 합쳐 쓴다)
+  - 유니버스: kospi200 종목풀 — 종목풀 화면이 단일 소스
   - 시가총액·현재가: 네이버 시가총액 순위 API (/kor-market-stock 화면과 동일 함수)
   - 주당배당금·현금흐름표: OpenDART 사업보고서 (services/opendart_service —
     공식 API, .env 에 DART_API_KEY 필요)
 
 사용 예
-    python scripts/find_shareholder_yield_in_kor.py
-    python scripts/find_shareholder_yield_in_kor.py --top 50 --workers 8
-    python scripts/find_shareholder_yield_in_kor.py --detail 10
+    python scripts/find_shareholder_yield_in_kospi200.py
+    python scripts/find_shareholder_yield_in_kospi200.py --top 50 --workers 8
+    python scripts/find_shareholder_yield_in_kospi200.py --detail 10
 """
 
 from __future__ import annotations
@@ -58,7 +57,7 @@ logger = get_app_logger()
 
 # ── 조정 가능한 기준 ────────────────────────────────────────────────────────
 # 유니버스로 쓸 종목풀들 — 합집합으로 쓴다. 종목풀 화면에서 관리하는 목록이 그대로 대상이 된다.
-UNIVERSE_POOLS = ("kospi200", "kosdaq150")
+UNIVERSE_POOLS = ("kospi200",)
 
 # 편입 하한 — 지수 원문의 "total shareholder yield above 0.1%".
 MIN_SHAREHOLDER_YIELD = 0.001
@@ -196,7 +195,7 @@ def _analyze(row: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _load_universe() -> list[dict[str, Any]]:
-    """kospi200 + kosdaq150 종목풀 합집합에 네이버 시가총액·현재가를 붙인 목록.
+    """kospi200 종목풀 종목에 네이버 시가총액·현재가를 붙인 목록.
 
     종목풀 문서에는 시가총액이 없어(가격지표 배치가 담당하지 않는다) 네이버 시총 순위에서
     가져와 티커로 맞춘다. 시총 순위 밖의 종목은 값 없음으로 남겨 관문에서 걸린다.
@@ -214,7 +213,7 @@ def _load_universe() -> list[dict[str, Any]]:
         raise SystemExit(f"{UNIVERSE_POOLS} 종목풀에 종목이 없습니다.")
 
     cap_by_ticker: dict[str, dict[str, Any]] = {}
-    for market in ("KOSPI", "KOSDAQ"):
+    for market in ("KOSPI",):
         payload = load_kor_stock_market(market, limit=MARKET_CAP_FETCH_LIMIT, min_market_cap_jo=0)
         for row in payload.get("rows") or []:
             key = str(row.get("ticker") or "").strip()
