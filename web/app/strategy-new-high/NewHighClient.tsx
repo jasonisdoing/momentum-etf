@@ -14,6 +14,7 @@ import { StrategyNotes } from "../components/StrategyNotes";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
+import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import {
@@ -417,6 +418,7 @@ export function NewHighClient() {
   const [error, setError] = useState<string | null>(null);
   const [backtestError, setBacktestError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
+  const [saving, setSaving] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
   const [currentTab, setCurrentTab] = useState<CurrentTab>("list");
   // 기준일 — 빈 값이면 최신 거래일. 과거 날짜를 고르면 그 시점 상태를 재현한다.
@@ -486,6 +488,7 @@ export function NewHighClient() {
 
   const persistSettings = useCallback(
     async (settings: Settings, message: string) => {
+      setSaving(true);
       try {
         const response = await fetch("/api/strategy-new-high", {
           method: "PUT",
@@ -504,10 +507,20 @@ export function NewHighClient() {
         void runPositions(payload.settings, "");
       } catch (saveError) {
         toast.error(saveError instanceof Error ? saveError.message : "설정을 저장하지 못했습니다.");
+      } finally {
+        setSaving(false);
       }
     },
     [runPositions, toast],
   );
+
+  // 저장하지 않은 입력이 있으면 아래 결과가 화면 값과 어긋난다 — 저장을 먼저 요구한다(SM 과 같은 규칙).
+  // 저장 응답을 그대로 초안에 넣으므로 두 객체의 키 구성은 항상 같다.
+  const isDirty = useMemo(() => {
+    const saved = view?.settings;
+    if (!draft || !saved) return false;
+    return (Object.keys(draft) as (keyof Settings)[]).some((key) => draft[key] !== saved[key]);
+  }, [draft, view?.settings]);
 
   /** 풀을 바꾸면 그 풀에 저장된 설정으로 전환한다. 저장 이력이 없으면 **기본값**으로 채운다 —
    *  직전 풀의 값을 물려받으면 다른 풀의 설정이 섞여 풀별로 보관하는 의미가 없어진다. */
@@ -1036,7 +1049,7 @@ export function NewHighClient() {
                         key={key}
                         type="button"
                         className={draft.entry_priority === key ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => void persistSettings({ ...draft, entry_priority: key }, "진입 우선순위를 바꿨습니다.")}
+                        onClick={() => setDraft({ ...draft, entry_priority: key })}
                       >
                         {ENTRY_PRIORITY_LABEL[key]}
                       </button>
@@ -1084,13 +1097,15 @@ export function NewHighClient() {
                 </div>
                 {/* CRUD 버튼이 하나뿐이라 별도 줄을 두지 않고 메인 헤더 오른쪽에 둔다. */}
                 <div className="appMainHeaderRight">
+                  <UnsavedChangesBadge show={isDirty} />
                   <button
                     type="button"
                     className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                     onClick={() => void persistSettings(draft, "설정을 저장했습니다.")}
+                    disabled={saving || !isDirty}
                   >
                     <IconCheck size={16} />
-                    <span>저장</span>
+                    <span>{saving ? "저장 중…" : "저장"}</span>
                   </button>
                 </div>
               </div>

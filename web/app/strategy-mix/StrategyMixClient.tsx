@@ -2,6 +2,7 @@
 
 import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { IconCheck } from "@tabler/icons-react";
 
 import {
   formatAccountLabel,
@@ -23,6 +24,7 @@ import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
 import { StrategyNotes } from "../components/StrategyNotes";
 import { NavTabs } from "../components/NavTabs";
 import { TickerDetailLink } from "../components/TickerDetailLink";
+import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
@@ -42,7 +44,8 @@ const CURRENT_NOTES = [
     title: "구성",
     body:
       "모멘텀·신고가 두 전략 화면의 저장 설정을 그대로 합쳐 한 계좌로 운용합니다. " +
-      "슬리브 몫은 월초 50:50에서 각자 흘러간 비율을 백테스트 곡선에서 역산합니다.",
+      "슬리브 몫은 월초 배분(위 입력칸)에서 각자 흘러간 비율을 백테스트 곡선에서 역산합니다. " +
+      "현금 몫은 두 전략에 주지 않고 늘 비워 두는 부분입니다.",
   },
   {
     title: "목표 비중",
@@ -58,10 +61,10 @@ const CURRENT_NOTES = [
       "모멘텀 교체 확정분은 교체일 시가 그룹으로 묶입니다.",
   },
   {
-    title: "월초 50:50",
+    title: "월초 배분 복구",
     body:
       "슬리브 재조정은 현금 우선으로 이관합니다 — 종목은 그대로 두고 장부상 현금만 옮깁니다. " +
-      "한 슬리브의 주식만으로 총자산의 50%를 넘을 때만 초과분 매도 지시가 나옵니다.",
+      "한 슬리브의 주식만으로 그 슬리브 몫을 넘을 때만 초과분 매도 지시가 나옵니다.",
   },
 ];
 
@@ -73,8 +76,8 @@ const BACKTEST_NOTES = [
       "모멘텀은 엔진 체결 내역으로 복원하고, 신고가는 진입 여부가 슬리브 현금에 달려 있어 신호로 다시 판정합니다.",
   },
   {
-    title: "월초 50:50",
-    body: "매월 첫 거래일 시가에 현금 우선으로 이관하고, 모자랄 때만 주식을 비례 매도합니다.",
+    title: "월초 배분 복구",
+    body: "매월 첫 거래일 시가에 저장된 배분으로 되돌립니다. 현금 우선으로 이관하고, 모자랄 때만 주식을 비례 매도합니다.",
   },
   {
     title: "체결 목록",
@@ -202,9 +205,13 @@ type Positions = {
   summary: {
     stock_pct: number;
     cash_pct: number;
+    /** 총 현금 중 두 전략에 주지 않고 비워 둔 몫(%). 나머지는 빈 슬롯에서 생긴다. */
+    reserved_cash_pct: number;
+    /** 월초에 되돌릴 배분(%) — 화면 헤더에서 저장한 값. */
+    base_weights: { sm_pct: number; nh_pct: number; cash_pct: number };
     /** slots_used = 목표가 찬 슬롯, held_count = 지금 실제로 들고 있는 종목 수. */
     sm: {
-      /** 슬리브 몫(%) — 월초 50:50 에서 흘러간 비율. */
+      /** 슬리브 몫(%) — 월초 배분에서 흘러간 비율. */
       alloc_pct: number;
       slots_used: number;
       held_count: number;
@@ -358,9 +365,10 @@ type ActionItem = {
 };
 type ActionGroup = { key: string; title: string; items: ActionItem[] };
 
-/** 합성 전략 — SM·신고가를 50:50으로 함께 운용하는 화면.
+/** 합성 전략 — SM·신고가를 저장된 배분으로 함께 운용하는 화면.
  *  운용 현황 탭은 오늘 보유해야 할 종목과 현금 비중·오늘의 액션을,
- *  백테스트 탭은 매월 50:50 리밸런싱 합성 성과를 보여준다. 설정은 각 전략 화면의 저장값을 그대로 쓴다. */
+ *  백테스트 탭은 매월 배분 복구 리밸런싱 합성 성과를 보여준다. 전략 설정은 각 전략 화면의 저장값을 쓰고,
+ *  배분은 이 화면 헤더에서 정한다. */
 export function StrategyMixClient() {
   const toast = useToast();
   // 계좌 하나만 고른다 — 종목풀은 계좌 설정(`mix_pool`)에 붙어 있다.
@@ -1076,18 +1084,25 @@ export function StrategyMixClient() {
                           </button>
                         </span>
                       </label>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-success"
-                        disabled={settingsSaving || !weightOk || !settingsDirty}
-                        onClick={() => void saveHeaderSettings()}
-                        title={weightOk ? "배분과 슬랙 알람을 함께 저장한다." : "배분 합계가 100%가 아니면 저장할 수 없다."}
-                      >
-                        {settingsSaving ? "저장 중…" : "저장"}
-                      </button>
                     </>
                   ) : null}
                 </div>
+                {/* 저장은 세 전략 화면 모두 메인 헤더 오른쪽 끝에 둔다. */}
+                {selectedAccount ? (
+                  <div className="appMainHeaderRight">
+                    <UnsavedChangesBadge show={settingsDirty} />
+                    <button
+                      type="button"
+                      className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                      disabled={settingsSaving || !weightOk || !settingsDirty}
+                      onClick={() => void saveHeaderSettings()}
+                      title={weightOk ? "배분과 슬랙 알람을 함께 저장한다." : "배분 합계가 100%가 아니면 저장할 수 없다."}
+                    >
+                      <IconCheck size={16} />
+                      <span>{settingsSaving ? "저장 중…" : "저장"}</span>
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -1208,7 +1223,7 @@ export function StrategyMixClient() {
                           borderRadius: 999,
                         }}
                       >
-                        오늘은 매월 첫 거래일 — 슬리브 50:50은 현금으로 이관
+                        오늘은 매월 첫 거래일 — 슬리브 배분 복구는 현금으로 이관
                         (주식 매도 지시는 현금이 모자랄 때만 나옵니다)
                       </span>
                     ) : null}
@@ -1240,7 +1255,7 @@ export function StrategyMixClient() {
                       const sm = positions.summary.sm;
                       const nh = positions.summary.nh;
                       const amount = (pct: number) => (totalAsset == null ? null : (totalAsset * pct) / 100);
-                      // 슬리브 몫은 월초 50:50 에서 각자 흘러간 비율(alloc_pct)이다.
+                      // 슬리브 몫은 월초 배분에서 각자 흘러간 비율(alloc_pct)이다.
                       // 그 안에서 채운 슬롯이 주식·빈 슬롯이 현금이다.
                       const rows = [
                         {
@@ -1352,9 +1367,10 @@ export function StrategyMixClient() {
                         ))}
                         {actions?.sleeve_rebalance_today ? (
                           <div>
-                            <strong>슬리브 리밸런싱</strong> — 매월 첫
-                            거래일입니다. 모멘텀·신고가 슬리브를 각각 50%로 다시
-                            맞추세요.
+                            <strong>슬리브 리밸런싱</strong> — 매월 첫 거래일입니다.
+                            {positions?.summary?.base_weights
+                              ? ` 모멘텀 ${positions.summary.base_weights.sm_pct}% · 신고가 ${positions.summary.base_weights.nh_pct}% · 현금 ${positions.summary.base_weights.cash_pct}% 로 다시 맞추세요.`
+                              : " 저장된 배분으로 다시 맞추세요."}
                           </div>
                         ) : null}
                       </div>
