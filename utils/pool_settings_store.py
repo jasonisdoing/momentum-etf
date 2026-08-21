@@ -136,9 +136,9 @@ def _invalidate_dependent_caches() -> None:
     except Exception as exc:
         logger.warning("종목풀 로더 캐시 무효화 실패: %s", exc)
     try:
-        from utils.rank_service import invalidate_rank_data_cache
+        from utils.cache_invalidation import invalidate_pool_caches
 
-        invalidate_rank_data_cache()
+        invalidate_pool_caches()
     except Exception as exc:
         logger.warning("랭킹 캐시 무효화 실패: %s", exc)
 
@@ -435,9 +435,9 @@ def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = 
     # 오버라이드 캐시 + 이 값에 의존하는 랭킹 캐시 무효화
     invalidate_overlay_cache()
     try:
-        from utils.rank_service import invalidate_rank_data_cache
+        from utils.cache_invalidation import invalidate_pool_caches
 
-        invalidate_rank_data_cache()
+        invalidate_pool_caches()
     except Exception as exc:
         logger.warning("랭킹 캐시 무효화 실패(설정 저장 후): %s", exc)
 

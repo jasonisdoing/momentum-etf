@@ -407,6 +407,11 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
         {"$set": {f"settings_by_pool.{pool}": per_pool}},
         upsert=True,
     )
+    # 설정을 바꿨다 되돌리면 옛 키에 그대로 걸린다 — 그 사이 달라진 종목 목록이
+    # 반영되지 않은 결과가 다시 나오므로, 저장할 때마다 비우고 새로 계산하게 한다.
+    from utils.cache_invalidation import invalidate_strategy_caches
+
+    invalidate_strategy_caches()
     return normalized
 
 
