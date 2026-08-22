@@ -30,7 +30,6 @@ SystemAction = Literal[
     "live_24h_slack",
     "leverage_ma_cross",
     "holdings_alarm",
-    "strategy_trade_notify",
     "db_backup",
 ]
 
@@ -41,12 +40,12 @@ _WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
 _WEEKDAYS_TUE_SAT = [1, 2, 3, 4, 5]
 _WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6]
 
-# 전략 사고팔기 알림 슬롯 — 평일 09:10~15:20 을 10분 간격으로.
-# 한국 장중(09:00~15:30)에서 개시 직후·마감 직전을 뺀 구간이다.
-# 20분 간격(09:00~15:40) — 계좌당 2콜·1초 직렬화라 하루 42콜 수준. 15:40 이 마감 후 1회.
+# 증권사 잔고 동기화 슬롯 — 20분 간격(09:00~15:40). 계좌당 2콜·1초 직렬화라 하루 42콜 수준.
+# 15:40 이 마감 후 1회.
 _BROKER_SYNC_SLOTS = [{"hour": hour, "minute": minute} for hour in range(9, 16) for minute in (0, 20, 40)]
 
-_STRATEGY_TRADE_SLOTS = [
+# 장중 10분 슬롯 — 평일 09:10~15:20. 한국 장중(09:00~15:30)에서 개시 직후·마감 직전을 뺀 구간.
+_INTRADAY_10MIN_SLOTS = [
     {"hour": hour, "minute": minute}
     for hour in range(9, 16)
     for minute in range(0, 60, 10)
@@ -94,17 +93,6 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _BROKER_SYNC_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "key": "strategy_trade_notify",
-        "group": "장중 실행",
-        "job": "전략 사고팔기 알림",
-        "target": "kor_account 코스피200·코스닥150 ETF 각 6종",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:10~15:20 KST 10분 간격",
-        "command": "python scripts/strategy_trade_notify.py",
-        # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
-        "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
-    },
-    {
         "key": "strategy_mix_notify",
         "group": "장중 실행",
         "job": "합성 액션 알림",
@@ -112,8 +100,9 @@ SCHEDULE_ROWS = [
         "run_location": "SERVER/LOCAL",
         "cadence": "평일 09:10~15:20 KST 10분 간격",
         "command": "python scripts/strategy_mix_notify.py",
-        # 전략 사고팔기 알림과 같은 슬롯 — 지시가 줄어드는 변화(체결 반영)는 보내지 않는다.
-        "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+        # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
+        # 지시가 줄어드는 변화(체결 반영)는 보내지 않는다.
+        "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "key": "holdings_alarm",
@@ -284,7 +273,6 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "live_24h_slack": "scripts/live_24h_slack.py",
     "leverage_ma_cross": "scripts/leverage_recommend_ma_cross.py",
     "holdings_alarm": "scripts/holdings_alarm.py",
-    "strategy_trade_notify": "scripts/strategy_trade_notify.py",
     "db_backup": "scripts/backup_mongo_full.py",
 }
 
