@@ -8,7 +8,8 @@ import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { INDUSTRY_COLUMN_MIN_WIDTH, INDUSTRY_COLUMN_WIDTH, renderIndustryCell } from "@/lib/grid-cells";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { useLatestRequest } from "@/lib/use-latest-request";
-import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
+import { loadStocksTable } from "@/lib/stocks-store";
+import { addTickersToPool, describePoolAddPlan } from "@/lib/pool-add";
 import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
@@ -24,6 +25,8 @@ import {
 type UsMarketStockRow = {
   rank: number;
   ticker: string;
+  /** 이 종목이 이미 들어 있는 종목풀 id 목록 — 추가 시 중복을 미리 거른다. */
+  ticker_pool_types?: string[];
   name: string;
   english_name: string;
   industry: string;
@@ -299,38 +302,23 @@ export function UsMarketStockManager({
     }
 
     setAdding(true);
-    let addedCount = 0;
-    let duplicateCount = 0;
-    const failedTickers: string[] = [];
-
-    for (const ticker of selectedTickers) {
-      try {
-        await addStockCandidate(tickerPool, ticker, bucketId);
-        addedCount += 1;
-      } catch (addError) {
-        const message = addError instanceof Error ? addError.message : "종목 추가 처리에 실패했습니다.";
-        if (message.includes("이미 등록된 종목입니다.")) {
-          duplicateCount += 1;
-          continue;
-        }
-        failedTickers.push(ticker);
-      }
-    }
+    // 이미 그 풀에 있는 종목은 보내지 않는다 — 표가 풀 목록을 들고 있어 조회가 필요 없다.
+    const { added, skipped, failed } = await addTickersToPool(selectedTickers, rows, tickerPool, bucketId);
 
     setAdding(false);
     setAddModalOpen(false);
 
-    if (addedCount > 0) {
-      toast.success(`종목 ${addedCount}개를 추가했습니다.`);
+    if (added > 0) {
+      toast.success(`종목 ${added}개를 추가했습니다.`);
     }
-    if (duplicateCount > 0) {
-      toast.error(`이미 등록된 종목 ${duplicateCount}개는 건너뛰었습니다.`);
+    if (skipped > 0) {
+      toast.warning(`선택한 ${selectedTickers.length}개 중 이미 있는 ${skipped}개는 제외했습니다.`);
     }
-    if (failedTickers.length > 0) {
-      toast.error(`추가 실패: ${failedTickers.join(", ")}`);
+    if (failed.length > 0) {
+      toast.error(`추가 실패: ${failed.join(", ")}`);
     }
 
-    if (addedCount > 0) {
+    if (added > 0) {
       setSelectedTickers([]);
       await load(view, minMarketCapUkm);
     }
@@ -615,7 +603,7 @@ export function UsMarketStockManager({
       <AppModal
         open={addModalOpen}
         title="종목풀 추가"
-        subtitle={`선택한 종목 ${selectedTickers.length}개를 추가합니다.`}
+        subtitle={describePoolAddPlan(selectedTickers, rows, selectedTickerPool)}
         onClose={handleCloseAddModal}
         footer={
           <>

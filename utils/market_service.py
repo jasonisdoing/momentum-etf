@@ -52,6 +52,34 @@ def load_ticker_pool_map(country_code: str | None = None) -> dict[str, list[str]
     return ticker_pool_map
 
 
+def load_ticker_pool_type_map(country_code: str | None = None) -> dict[str, list[str]]:
+    """종목 티커 → 종목풀 **id**(ticker_type) 매핑.
+
+    `load_ticker_pool_map` 은 화면에 보여줄 풀 이름을 주는데, 이름은 표시용으로 번호
+    접두어가 떨어져 있어 화면이 풀 id 와 짝지을 수 없다. "이미 이 풀에 있는 종목"을
+    골라내려면 id 가 필요해서 따로 둔다.
+    """
+    from utils.stock_list_io import get_etfs
+    from utils.ticker_registry import load_ticker_type_configs
+
+    result: dict[str, list[str]] = {}
+    for config in load_ticker_type_configs():
+        ticker_type = str(config.get("ticker_type") or "").strip().lower()
+        pool_country = str(config.get("country_code") or "").strip().lower()
+        if not ticker_type:
+            continue
+        if country_code is not None and pool_country != country_code.strip().lower():
+            continue
+        for item in get_etfs(ticker_type):
+            ticker = normalize_text(item.get("ticker")).upper()
+            if not ticker:
+                continue
+            result.setdefault(ticker, [])
+            if ticker_type not in result[ticker]:
+                result[ticker].append(ticker_type)
+    return result
+
+
 def _load_kor_etf_realtime_snapshot(tickers: list[str]) -> dict[str, dict[str, float | None]]:
     if not tickers:
         return {}
