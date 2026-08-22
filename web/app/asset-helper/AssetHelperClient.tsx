@@ -1068,10 +1068,12 @@ export function AssetHelperClient() {
                   {noteSaving ? "저장 중..." : "메모 저장"}
                 </GridToolbarButton>
               </div>
+              {/* 계좌 운영 규칙을 스크롤 없이 한눈에 보는 자리라 기본 높이를 넉넉히 준다
+                  (20줄 남짓 = 32rem). 오른쪽 아래 손잡이로 더 늘릴 수 있다. */}
               <textarea
                 className="form-control"
-                style={{ fontSize: "var(--fs-base)", minHeight: "16rem" }}
-                rows={12}
+                style={{ fontSize: "var(--fs-base)", minHeight: "32rem" }}
+                rows={22}
                 placeholder="이 계좌에 대한 투자 전략이나 주의사항을 메모하세요. AI가 요약할 때 함께 참고합니다."
                 value={memo}
                 onChange={(e) => setMemo(e.target.value)}
