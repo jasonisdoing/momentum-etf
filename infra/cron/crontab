@@ -60,13 +60,6 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 # 개시 직후라 판정은 직전(어제) 확정 종가/수익률 기준 — 오늘 매매 전 아침 알림.
 10 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py holdings_alarm python scripts/holdings_alarm.py >> logs/cron/holdings_alarm.log 2>&1
 
-# ── 전략 사고팔기 알림 (평일 09:10~15:20, 10분 간격) ──────────────────────
-# kor_account 의 코스피200 ETF 6종을 회차로 보고, 매수/매도 지정가에 현재가가
-# 닿은 회차가 있을 때만 슬랙 1건 발송(없으면 미발송). 같은 회차-동작은 하루 1회.
-10,20,30,40,50 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
-0,10,20,30,40,50 10-14 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
-0,10,20 15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
-
 # ── 합성 액션 알림 (평일 09:10~15:20, 10분 간격) ──────────────────────────
 # 합성 알람(mix_slack_enabled) 켠 계좌의 오늘의 액션을 감시해, 새 지시·수량 증가가
 # 있을 때만 슬랙 발송. 지시가 줄어드는 변화(체결 반영)는 조용히 넘긴다.
