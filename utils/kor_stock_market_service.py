@@ -12,7 +12,7 @@ import requests
 from config import CACHE_TTL_COMPUTE, NAVER_FINANCE_HEADERS
 from services.price_service import get_realtime_snapshot
 from utils.industry_map import industry_map_for_country
-from utils.market_service import load_ticker_pool_map
+from utils.market_service import load_ticker_pool_map, load_ticker_pool_type_map
 from utils.naver_chart import fetch_naver_daily_ohlc
 from utils.portfolio_io import load_all_holding_tickers
 
@@ -80,6 +80,8 @@ def load_kor_stock_market(
 
     # 종목풀 및 보유 정보 로드
     ticker_pool_map = load_ticker_pool_map()
+    # 화면이 "이미 이 풀에 있는 종목"을 걸러내려면 이름이 아니라 풀 id 가 필요하다.
+    ticker_pool_type_map = load_ticker_pool_type_map()
     held_tickers = load_all_holding_tickers()
     # 업종 — 신고가·순위 화면과 같은 소스를 쓰되, 이 화면은 종목풀이 아니라 시장 전체
     # 상위 종목을 받아 오므로 **한국 풀 전체**를 합쳐 읽는다. 풀 하나를 박아 두면 그
@@ -122,6 +124,7 @@ def load_kor_stock_market(
                     "name": name,
                     "industry": industry_by.get(ticker, ""),
                     "ticker_pools": ", ".join(ticker_pool_map.get(ticker, [])),
+                    "ticker_pool_types": ticker_pool_type_map.get(ticker, []),
                     "is_held": ticker in held_tickers,
                     "current_price": close_price,
                     "change_pct": change_ratio,

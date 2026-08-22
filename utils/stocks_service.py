@@ -211,12 +211,21 @@ def validate_stock_candidate(ticker_type: str, ticker: str) -> dict[str, Any]:
         },
     )
 
-    stock_info = fetch_stock_info(ticker_norm, country_code)
-    if not stock_info or not str(stock_info.get("name") or "").strip():
-        raise RuntimeError("유효한 티커를 찾지 못했습니다.")
-
     is_deleted = bool(existing and existing.get("is_deleted") is True)
     is_active = bool(existing and existing.get("is_deleted") is not True)
+
+    # 이미 등록돼 있는 종목은 외부 조회를 건너뛴다 — 어차피 "이미 등록된 종목입니다" 로
+    # 끝나서 받아온 값을 쓰지도 않는다. 여러 종목을 한꺼번에 추가할 때 대부분이 중복인데,
+    # 이 호출 때문에 종목당 수백 ms~수 초씩 걸렸다.
+    # 저장된 이름이 비어 있으면(옛 문서) 건너뛸 근거가 없으므로 그대로 조회한다.
+    existing_name = normalize_text((existing or {}).get("name"), "") if is_active else ""
+    if is_active and existing_name:
+        stock_info = {"name": existing_name, "listing_date": (existing or {}).get("listing_date")}
+    else:
+        stock_info = fetch_stock_info(ticker_norm, country_code)
+        if not stock_info or not str(stock_info.get("name") or "").strip():
+            raise RuntimeError("유효한 티커를 찾지 못했습니다.")
+
     deleted_reason = normalize_text(existing.get("deleted_reason"), "") if existing else ""
     listing_date = normalize_text(stock_info.get("listing_date") or (existing or {}).get("listing_date"), "-")
     bucket_id = int((existing or {}).get("bucket") or 1)

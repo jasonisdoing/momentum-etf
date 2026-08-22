@@ -10,7 +10,7 @@ import requests
 
 from config import NAVER_FINANCE_HEADERS, NAVER_US_STOCK_MARKET_VALUE_URL
 from utils.index_constituents_loader import load_index_constituents, load_index_meta
-from utils.market_service import load_ticker_pool_map
+from utils.market_service import load_ticker_pool_map, load_ticker_pool_type_map
 from utils.portfolio_io import load_all_holding_tickers
 
 logger = logging.getLogger(__name__)
@@ -83,6 +83,8 @@ def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -
 
     # 미국 풀만 매칭 (호주 동일 심볼과 혼동 방지)
     ticker_pool_map = load_ticker_pool_map(country_code="us")
+    # 화면이 "이미 이 풀에 있는 종목"을 걸러내려면 이름이 아니라 풀 id 가 필요하다.
+    ticker_pool_type_map = load_ticker_pool_type_map(country_code="us")
     held_tickers = load_all_holding_tickers(country_code="us")
 
     target_count = limit
@@ -121,6 +123,7 @@ def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -
                     "industry": item.get("reutersIndustryName") or "",
                     "market": exchange_code,
                     "ticker_pools": ", ".join(ticker_pool_map.get(ticker, [])),
+                    "ticker_pool_types": ticker_pool_type_map.get(ticker, []),
                     "is_held": ticker in held_tickers,
                     "current_price": current_price,
                     "change_pct": change_pct,
@@ -163,6 +166,8 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
     meta = load_index_meta(index)
 
     ticker_pool_map = load_ticker_pool_map(country_code="us")
+    # 화면이 "이미 이 풀에 있는 종목"을 걸러내려면 이름이 아니라 풀 id 가 필요하다.
+    ticker_pool_type_map = load_ticker_pool_type_map(country_code="us")
     held_tickers = load_all_holding_tickers(country_code="us")
 
     min_market_cap_usd = min_market_cap_ukm * 100_000_000
@@ -185,6 +190,7 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
                 "sector": item.get("sector") or "",
                 "market": "",
                 "ticker_pools": ", ".join(ticker_pool_map.get(ticker, [])),
+                    "ticker_pool_types": ticker_pool_type_map.get(ticker, []),
                 "is_held": ticker in held_tickers,
                 "current_price": None,
                 "change_pct": None,
