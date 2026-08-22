@@ -80,6 +80,31 @@ function viewIndices(view: ViewOption): readonly string[] {
 // null 이면 전체(절단 없음).
 // 통합은 두 지수를 합쳐 600 종목에 가까워 100 단위로는 구간이 너무 성기다 → 50 단위.
 // 단일 지수는 종목 수가 적어 100 단위 그대로 둔다.
+// 마지막으로 고른 상위 N — 다음 방문에도 같은 범위로 열리게 기억한다.
+// 키 형식은 시스템 공통(`momentum-etf:<화면>:<항목>`)을 따른다.
+const US_MARKET_TOP_COUNT_KEY = "momentum-etf:us-market-stock:top-count";
+
+/** 저장된 상위 N. `"all"`(전체)이거나 값이 없으면 null. */
+function readRememberedTopCount(): number | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const raw = window.localStorage.getItem(US_MARKET_TOP_COUNT_KEY);
+  if (!raw || raw === "all") {
+    return null;
+  }
+  const parsed = Number(raw);
+  // 못 읽는 값은 전체로 둔다 — 임의의 숫자로 잘라 보여주면 무엇이 적용됐는지 알 수 없다.
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function writeRememberedTopCount(value: number | null): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(US_MARKET_TOP_COUNT_KEY, value === null ? "all" : String(value));
+}
+
 const COMBINED_TOP_STEP = 50;
 const SINGLE_TOP_OPTIONS: readonly (number | null)[] = [null, 100, 200, 300, 400, 500];
 
@@ -163,6 +188,12 @@ export function UsMarketStockManager({
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // 마지막으로 고른 상위 N 복원 — 서버 렌더에는 localStorage 가 없어 초기값으로 못 쓴다.
+  // 상위 N 은 이미 받아둔 행을 자르기만 해서(재조회 없음) 늦게 반영돼도 값싸다.
+  useEffect(() => {
+    setTopCount(readRememberedTopCount());
+  }, []);
 
   const toast = useToast();
   const { begin, isLatest } = useLatestRequest();
@@ -540,9 +571,11 @@ export function UsMarketStockManager({
                     ))}
                     <select
                       value={topCount === null ? "all" : String(topCount)}
-                      onChange={(event) =>
-                        setTopCount(event.target.value === "all" ? null : Number(event.target.value))
-                      }
+                      onChange={(event) => {
+                        const next = event.target.value === "all" ? null : Number(event.target.value);
+                        setTopCount(next);
+                        writeRememberedTopCount(next);
+                      }}
                       style={{
                         border: "1px solid rgba(148,163,184,0.4)",
                         borderRadius: 6,
