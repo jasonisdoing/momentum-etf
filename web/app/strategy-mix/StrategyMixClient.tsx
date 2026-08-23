@@ -14,6 +14,7 @@ import {
 } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { MonthsSelect } from "../components/MonthsSelect";
+import { renderStockNameCell } from "@/lib/name-highlight";
 import {
   AppLoadingProgress,
   startProgressRamp,
@@ -590,10 +591,12 @@ export function StrategyMixClient() {
         headerName: "종목명",
         flex: 1.4,
         minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
-        cellStyle: (p) => ({
-          fontWeight: 700,
-          ...(p.data?.is_cash ? { color: "var(--text-muted)" } : null),
-        }),
+        // 굵기는 주지 않는다 — 다른 화면의 종목명과 같은 무게로 보여야 표가 한 벌로 읽힌다.
+        cellStyle: (p) => (p.data?.is_cash ? { color: "var(--text-muted)" } : null),
+        // 종목명 표기는 순위·전략 화면과 같은 공용 렌더러를 쓴다 — 레버리지 강조(💣)와
+        // 긴 이름 2줄 줄임이 여기서만 빠져 있었다. 현금 행은 종목이 아니라 그대로 둔다.
+        cellRenderer: (p: { value?: string | null; data?: PositionRow }) =>
+          p.data?.is_cash ? <span>{p.value ?? "-"}</span> : renderStockNameCell(p.value),
       },
       {
         field: "sources",
@@ -774,7 +777,13 @@ export function StrategyMixClient() {
         }),
       },
       { headerName: "티커", field: "ticker", width: 96 },
-      { headerName: "종목명", field: "name", flex: 1, minWidth: 180 },
+      {
+        headerName: "종목명",
+        field: "name",
+        flex: 1,
+        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
+        cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
+      },
       { headerName: "편입일", field: "entry_date", width: 116 },
       {
         headerName: "매수가",
