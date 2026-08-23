@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconCheck } from "@tabler/icons-react";
 
 import { AppAgGrid } from "../components/AppAgGrid";
+import { MonthsSelect } from "../components/MonthsSelect";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
 import { StrategyNotes } from "../components/StrategyNotes";
@@ -1195,19 +1196,12 @@ export function MomentumClient() {
               </div>
               <div className="appMainHeaderRight">
                 {isDirty ? <span style={hintStyle}>설정을 저장해야 실행할 수 있습니다</span> : null}
-                <select
-                  className="form-select form-select-sm"
-                  style={{ width: "auto" }}
-                  value={String(backtestMonths)}
+                <MonthsSelect
+                  value={backtestMonths}
+                  options={view.month_options ?? [12]}
                   disabled={backtesting}
-                  onChange={(event) => setBacktestMonths(Number(event.target.value))}
-                >
-                  {(view.month_options ?? [12]).map((m) => (
-                    <option key={m} value={m}>
-                      {m}개월
-                    </option>
-                  ))}
-                </select>
+                  onChange={setBacktestMonths}
+                />
                 <button
                   type="button"
                   className="btn btn-sm btn-dark"

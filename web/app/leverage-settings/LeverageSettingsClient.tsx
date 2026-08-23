@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatKstDateTime } from "@/lib/datetime";
 import { formatSignedPct, signColor } from "@/lib/grid-cells";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { MonthsSelect } from "../components/MonthsSelect";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
@@ -667,13 +668,7 @@ export function LeverageSettingsClient() {
                 <div style={{ display: "flex", gap: "10px 12px", alignItems: "flex-end", flexWrap: "wrap" }}>
                   <label className="appLabeledField" style={{ minWidth: 130, flex: "0 0 auto" }}>
                     <span className="appLabeledFieldLabel">기간(개월)</span>
-                    <select className="form-select form-select-sm" value={tuneMonths} onChange={(e) => setTuneMonths(Number(e.target.value))}>
-                      {TUNE_MONTH_OPTIONS.map((m) => (
-                        <option key={m} value={m}>
-                          최근 {m}개월
-                        </option>
-                      ))}
-                    </select>
+                    <MonthsSelect value={tuneMonths} options={[...TUNE_MONTH_OPTIONS]} onChange={setTuneMonths} />
                   </label>
                   <div style={{ display: "flex", gap: 7, alignItems: "flex-end", flexWrap: "wrap" }}>
                     <span style={{ color: "var(--text-muted)", fontWeight: 700, paddingBottom: 7, fontSize: "var(--fs-sm)" }}>이동선</span>

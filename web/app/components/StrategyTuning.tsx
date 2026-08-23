@@ -4,6 +4,7 @@ import type { ColDef } from "ag-grid-community";
 import { useCallback, useMemo, useState } from "react";
 
 import { AppAgGrid } from "./AppAgGrid";
+import { MonthsSelect } from "./MonthsSelect";
 import { AppLoadingProgress, type LoadingProgress } from "./AppLoadingProgress";
 import { useToast } from "./ToastProvider";
 import { createAppGridTheme } from "./app-grid-theme";
@@ -248,19 +249,7 @@ export function StrategyTuning({
               </span>
             </div>
             <div className="appMainHeaderRight">
-              <select
-                className="form-select form-select-sm"
-                style={{ width: "auto" }}
-                value={String(months)}
-                disabled={running || monthOptions.length === 0}
-                onChange={(event) => setMonths(Number(event.target.value))}
-              >
-                {monthOptions.map((n) => (
-                  <option key={n} value={n}>
-                    {n}개월
-                  </option>
-                ))}
-              </select>
+              <MonthsSelect value={months} options={monthOptions} disabled={running} onChange={setMonths} />
               <button type="button" className="btn btn-sm btn-dark" disabled={disabled || running} onClick={() => void execute()}>
                 {running ? "실행 중…" : "실행"}
               </button>
