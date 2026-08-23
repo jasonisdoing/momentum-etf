@@ -32,6 +32,7 @@ from typing import Any
 import pandas as pd
 
 from utils.price_series import positive_prices
+from utils.strategy_settings import coerce_to_options
 
 warnings.filterwarnings("ignore")
 
@@ -310,11 +311,19 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
         raise ValueError(f"저장된 모멘텀 전략 설정이 올바르지 않습니다: {error}") from error
 
 
+# 화면 로드 때 선택지 밖 저장값을 보정할 항목 — (키, 라벨, 선택지)
+_OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
+    ("top_n", "종목 수", TOP_N_OPTIONS),
+    ("max_per_industry", "업종 상한", MAX_PER_INDUSTRY_OPTIONS),
+    ("short_ma_days", "단기 이평", SHORT_MA_OPTIONS),
+    ("long_ma_days", "장기 이평", LONG_MA_OPTIONS),
+    ("intraweek_stop_pct", "주중 손절선", INTRAWEEK_STOP_OPTIONS),
+)
+
+
 def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], list[str]]:
-    """화면용 로드 — 선택지가 바뀌어 저장값이 목록 밖이면 **첫 선택지로 보정**하고 무엇을
-    바꿨는지 돌려준다. 화면은 이를 '저장되지 않은 변경'으로 표시해 사용자가 고쳐 저장하게
-    한다. 배치·백테스트는 그대로 ``load_settings`` 를 써서 깨진 값이면 실패한다.
-    """
+    """화면용 로드 — 선택지 밖 저장값은 첫 선택지로 보정하고 내역을 함께 돌려준다
+    (``utils.strategy_settings.coerce_to_options``). 배치·백테스트는 ``load_settings`` 를 쓴다."""
     stored = _load_settings_doc()
     pool = str(pool or default_pool()).strip().lower()
     per_pool = stored["settings_by_pool"].get(pool)
@@ -322,24 +331,9 @@ def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], lis
         raise RuntimeError(f"종목풀({pool})의 모멘텀 전략 설정이 없습니다 — 화면에서 저장하세요.")
     merged = {"pool": pool, **per_pool}
     try:
-        return validate_settings(merged), []
-    except ValueError:
-        coerced: list[str] = []
-        for key, label, options in (
-            ("top_n", "종목 수", TOP_N_OPTIONS),
-            ("max_per_industry", "업종 상한", MAX_PER_INDUSTRY_OPTIONS),
-            ("short_ma_days", "단기 이평", SHORT_MA_OPTIONS),
-            ("long_ma_days", "장기 이평", LONG_MA_OPTIONS),
-            ("intraweek_stop_pct", "주중 손절선", INTRAWEEK_STOP_OPTIONS),
-        ):
-            value = merged.get(key)
-            if value not in options:
-                coerced.append(f"{label} {value if value is not None else '없음'} → {options[0] if options[0] is not None else '없음'}")
-                merged[key] = options[0]
-        try:
-            return validate_settings(merged), coerced
-        except ValueError as error:
-            raise ValueError(f"저장된 모멘텀 전략 설정이 올바르지 않습니다: {error}") from error
+        return coerce_to_options(merged, _OPTION_FIELDS, validate_settings)
+    except ValueError as error:
+        raise ValueError(f"저장된 모멘텀 전략 설정이 올바르지 않습니다: {error}") from error
 
 
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:

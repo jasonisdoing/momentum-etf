@@ -151,8 +151,12 @@ python infra/server_scheduler.py
     *   `weekly_service.py`: `daily_fund_data` 기준 주별 재집계 및 `weekly_fund_data` 조회/비고 수정
     *   `monthly_service.py`: `daily_fund_data` 기준 월별 재집계 및 `monthly_fund_data` 조회/비고 수정
     *   `asset_helper_service.py`: 자산 헬퍼 설정 저장·정리와 적용 계좌 기준 목표 비중·목표수량 계산. 시장 데이터 층(`asset_helper_market_data.py` — 종가 프레임·KRW 환산·수익률/MDD/실시간 맵·계좌 스냅샷)과 백테스트(`asset_helper_backtest.py` — 리밸런싱 시뮬레이션·금요일 `weight_history`)는 분리 모듈이며, 기존 임포트 경로는 서비스가 re-export 로 유지합니다. Next API `/api/asset-helper-settings/backtest`는 FastAPI `/internal/asset-helper/backtest`로 프록시합니다.
-    *   `momentum_service.py`: 모멘텀 전략(`/strategy-momentum`) 설정 저장·검증(**풀별 저장** — `{pool, settings_by_pool}` 스키마), 유니버스 로드, 장기 이평 이격 점수 계산(`momentum_metrics` — 이평 일수는 전략 전용), 점수 순위(`rank_candidates`), 월 확정 포트폴리오 선정(`compute_picks`)의 단일 소스입니다. 판정일/체결일 산출도 여기(`month_last_two_trading_days`, `current_portfolio_dates`)에 있으며, 풀 국가·통화는 종목풀 설정(DB)을 따릅니다(`pool_info`).
-    *   `momentum_backtest.py`: 같은 선정 규칙을 과거 리밸런싱 시점마다 적용하는 월간 백테스트(`run_backtest`)입니다. 후보 선정·순위는 반드시 `momentum_service` 함수를 재사용해 화면 선정 결과와 어긋나지 않게 합니다. Next API `/api/strategy-momentum/*`는 FastAPI `/internal/strategy-momentum/*`로 프록시합니다.
+    *   `momentum_service.py`: 모멘텀 전략(`/strategy-momentum`) 설정 저장·검증(**풀별 저장** — `{pool, settings_by_pool}` 스키마, 선택지 상수 `TOP_N_OPTIONS`/`MAX_PER_INDUSTRY_OPTIONS`/`SHORT_MA_OPTIONS`/`LONG_MA_OPTIONS`/`INTRAWEEK_STOP_OPTIONS` 가 화면·검증·튜닝의 단일 소스), 유니버스 로드, 장기 이평 이격 점수(`momentum_metrics`), 순위(`rank_candidates`), 업종 상한 선정(`select_top`), 주간 판정·체결일 산출의 단일 소스입니다. 풀 국가·통화·벤치마크는 종목풀 설정(DB)을 따릅니다(`pool_info`).
+    *   `momentum_backtest.py`: 같은 선정 규칙을 과거 주간 교체 시점마다 적용하는 백테스트(`run_backtest`, `context` 캐시로 튜닝 시 조합당 비용 절감). 후보 선정·순위는 반드시 `momentum_service` 함수를 재사용합니다.
+    *   `new_high_service.py` / `new_high_backtest.py`: 신고가 돌파 전략(`/strategy-new-high`) 신호·설정·백테스트·운용 현황. 설정은 `system_config.new_high_settings` 풀별 저장, 선택지 상수는 모멘텀과 같은 구조입니다.
+    *   `strategy_settings.py`: 선택지 밖 저장값을 첫 선택지로 보정하고 내역을 돌려주는 공용 `coerce_to_options` — 두 전략의 `load_settings_for_view` 가 씁니다(배치·백테스트는 엄격 검증 유지).
+    *   `strategy_tuning.py` + `momentum_tuning.py` / `new_high_tuning.py`: 선택지 전 조합 백테스트(튜닝). 부모가 가격·종목·설정을 프리로드해 spawn 워커에 넘기고(워커는 DB 미접근), 지표·분기승수·축별 평균을 공용 모듈이 계산합니다.
+    *   `strategy_mix_service.py`: 합성 전략(`/strategy-mix`) — 두 전략의 저장 설정과 계좌 배분으로 목표 비중·오늘의 액션(화면·슬랙 공용 조립 `_build_action_groups`)·다음주 교체 가정·일별 합성 백테스트를 만듭니다.
 *   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
 *   계좌 메타데이터: MongoDB `account_settings` 컬렉션이 단일 소스입니다(`utils/account_settings_store.py`). 웹 `/account-settings` 화면에서 값 수정만 지원하며(`account_id` 불변), 계좌 추가/삭제는 화면에서 지원하지 않습니다(DB 문서 직접 추가/삭제로 관리).
 *   Next API 프록시: 로직 없는 순수 FastAPI 프록시 라우트는 `web/lib/fastapi-proxy.ts` 의 `createFastApiProxy`(경로·에러 문구·body 전달·타임아웃 선언)로 작성합니다. 쿼리 가공·body 재구성 등 로직이 있는 라우트만 직접 구현합니다.
