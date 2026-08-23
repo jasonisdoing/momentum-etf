@@ -678,6 +678,15 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
     value_mult = signals["value_mult"].loc[last]
     trade_value = panel["value"].loc[last]
     market_cap_by = _market_caps(pool, [row["ticker"] for row in universe])
+    # 시총 순위 — 배치 B 가 메타 캐시에 적어 둔 시장 전체 순위(개별주 풀만 값 있음).
+    from utils.market_cap_rank import market_cap_rank_of
+    from utils.stock_cache_meta_io import get_stock_cache_meta_docs
+
+    try:
+        meta_docs = get_stock_cache_meta_docs(pool, [row["ticker"] for row in universe])
+    except Exception:
+        meta_docs = {}
+    rank_by_ticker = {t: market_cap_rank_of((doc or {}).get("meta_cache")) for t, doc in meta_docs.items()}
     # 일간 등락률 — 다른 화면(순위·시장추세)과 같은 기준으로 직전 거래일 종가 대비.
     prev_close = close_df.loc[dates[-2]] if len(dates) >= 2 else None
 
@@ -707,6 +716,7 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
                 "industry": industry_by.get(ticker, ""),
                 "change_pct": change_pct,
                 "market_cap": market_cap_by.get(ticker),
+                "market_cap_rank": rank_by_ticker.get(ticker),
                 "trade_value": float(trade_value.get(ticker)) if pd.notna(trade_value.get(ticker)) else None,
                 "price": float(price),
                 "prior_high": float(high),
@@ -907,6 +917,9 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
     price_by = {row["ticker"]: row["price"] for row in rows}
     for item in simulated["exited_today"]:
         item["price"] = price_by.get(item["ticker"])
+    # 보유·이탈 행에도 시총 순위(화면 공용 컬럼).
+    for item in [*holdings, *simulated["exited_today"]]:
+        item["market_cap_rank"] = rank_by_ticker.get(item["ticker"])
 
     # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.
     fill_base = pd.Timestamp(str(quotes["traded_at"])[:10]) if quotes["live"] else last

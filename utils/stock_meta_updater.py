@@ -982,6 +982,14 @@ def update_stock_reference_metadata(ticker_type: str | None = None):
             failures_by_pool[type_norm] = pool_failures
     logger.info("[배치 B] 식별·상세 메타 업데이트 완료.")
 
+    # 시총 순위 — 종목별 갱신이 meta_cache 를 통째로 덮으므로 반드시 그 뒤에 적는다.
+    try:
+        from utils.market_cap_rank import update_market_cap_ranks
+
+        update_market_cap_ranks(targets)
+    except Exception as exc:
+        logger.error("[배치 B] 시총 순위 기록 실패: %s", exc)
+
     # 부분 실패 슬랙 보고 — 어떤 풀/종목/단계에서 실패했는지 명시한다.
     # (배치 자체는 계속 진행되므로 run_batch 의 exit!=0 실패 알림으로는 잡히지 않는 케이스)
     if failures_by_pool:

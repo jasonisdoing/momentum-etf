@@ -3,6 +3,7 @@
  * 셀의 단일 소스. 화면별 고유 스타일(클래스 기반 색 등)은 각 화면에 남긴다.
  */
 
+import type { ColDef, ColDefField } from "ag-grid-community";
 import type React from "react";
 
 /** 부호를 붙인 퍼센트 표기: +1.23% / -4.56% / "-"(값 없음). */
@@ -76,4 +77,20 @@ export function tradeValueMultStyle(
   if (value >= 2) return { color: "rgba(214, 40, 40, 0.7)", ...weight };
   if (value >= 1.5) return { color: "rgba(214, 40, 40, 0.5)", ...weight };
   return { color: "var(--text-muted)", ...weight };
+}
+
+/** 시총 순위 컬럼 — 순위·모멘텀·신고가 화면 공용. 배치 B 가 메타 캐시에 적어 둔 국가별 시장 전체
+ *  시총 순위(한국=KOSPI+KOSDAQ, 미국=S&P500∪NDX100, 호주=ASX200)다. 개별주 풀에서만 보이고
+ *  (`hide`), 값이 없으면 "-". 티커 컬럼 바로 앞에 둔다. */
+export function marketCapRankColumn<T>(field: ColDefField<T>, hide: boolean): ColDef<T> {
+  return {
+    headerName: "시총",
+    field,
+    width: 72,
+    type: "numericColumn",
+    hide,
+    headerTooltip: "시장 전체 시가총액 순위 (배치 기준, 하루 1회 갱신)",
+    valueFormatter: (p) => (p.value == null ? "-" : String(p.value)),
+    cellStyle: () => ({ color: "var(--text-muted)" }),
+  };
 }

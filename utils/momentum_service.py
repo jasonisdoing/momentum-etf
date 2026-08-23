@@ -1148,6 +1148,15 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             market_caps = load_kor_market_caps(row_tickers)
         except Exception:
             market_caps = {}  # 보조 정보 — 실패해도 선정 표는 그대로 뜬다.
+    # 시총 순위 — 배치 B 가 메타 캐시에 적어 둔 시장 전체 순위(개별주 풀만 값 있음). 화면은 읽기만 한다.
+    from utils.market_cap_rank import market_cap_rank_of
+    from utils.stock_cache_meta_io import get_stock_cache_meta_docs
+
+    try:
+        meta_docs = get_stock_cache_meta_docs(pool, row_tickers)
+    except Exception:
+        meta_docs = {}
+    rank_by_ticker = {t: market_cap_rank_of((doc or {}).get("meta_cache")) for t, doc in meta_docs.items()}
 
     def price_info(ticker: str) -> dict[str, Any]:
         frame = frames.get(ticker)
@@ -1157,6 +1166,7 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
                 "daily_change_pct": None,
                 "high_drawdown_pct": None,
                 "market_cap_eok": None,
+                "market_cap_rank": rank_by_ticker.get(ticker),
                 "monthly_returns": {label: None for label in month_labels},
             }
         close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
@@ -1187,6 +1197,7 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             "daily_change_pct": daily_change_pct,
             "high_drawdown_pct": high_drawdown_pct,
             "market_cap_eok": market_caps.get(ticker),
+            "market_cap_rank": rank_by_ticker.get(ticker),
             "monthly_returns": build_recent_monthly_return_metrics(close, labels=month_labels),
         }
 

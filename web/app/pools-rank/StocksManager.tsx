@@ -14,6 +14,7 @@ import {
   renderHighDrawdownCell,
   renderIndustryCell,
   tradeValueMultStyle,
+  marketCapRankColumn,
 } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { readSessionTtlCache, writeSessionTtlCache } from "@/lib/session-ttl-cache";
@@ -68,6 +69,7 @@ type RankRow = {
   버킷: string;
   bucket: number;
   티커: string;
+  시총순위?: number | null;
   마켓?: string;
   종목명: string;
   상장일: string;
@@ -909,6 +911,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           } as ColDef<RankGridRow>,
         ]
         : []),
+      marketCapRankColumn<RankGridRow>("시총순위", !hasIndustryData),
       {
         field: "티커",
         headerName: "티커",
