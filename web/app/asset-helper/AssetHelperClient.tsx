@@ -5,6 +5,7 @@ import type { ColDef, GridOptions } from "ag-grid-community";
 
 import AccountSelect from "../components/AccountSelect";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { MonthsSelect } from "../components/MonthsSelect";
 import { GridToolbarButton } from "../components/GridToolbarButton";
 import { PageFrame } from "../components/PageFrame";
 import { StableInlineInput } from "../components/StableInlineInput";
@@ -1142,13 +1143,7 @@ export function AssetHelperClient() {
               </label>
               <label className="appLabeledField">
                 <span className="appLabeledFieldLabel">기간(개월)</span>
-                <select className="form-select form-select-sm" value={btMonths} onChange={(e) => setBtMonths(e.target.value)}>
-                  {monthOptions.map((m) => (
-                    <option key={m} value={m}>
-                      최근 {m}개월
-                    </option>
-                  ))}
-                </select>
+                <MonthsSelect value={Number(btMonths)} options={monthOptions} onChange={(m) => setBtMonths(String(m))} />
               </label>
               <label className="appLabeledField">
                 <span className="appLabeledFieldLabel">리밸런싱</span>

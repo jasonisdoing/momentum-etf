@@ -6,6 +6,7 @@ import { IconCheck } from "@tabler/icons-react";
 
 import { HoldingChart, type HoldingChartData } from "./HoldingChart";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { MonthsSelect } from "../components/MonthsSelect";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
@@ -1253,17 +1254,12 @@ export function NewHighClient() {
             <div className="card-header appCardHeader">
               <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>백테스트</span>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <select
-                  className="form-select form-select-sm"
-                  style={{ width: "auto" }}
-                  value={String(backtestMonths)}
+                <MonthsSelect
+                  value={backtestMonths}
+                  options={constraints.month_options}
                   disabled={backtesting}
-                  onChange={(event) => setBacktestMonths(Number(event.target.value))}
-                >
-                  {constraints.month_options.map((n) => (
-                    <option key={n} value={n}>{n}개월</option>
-                  ))}
-                </select>
+                  onChange={setBacktestMonths}
+                />
                 <button
                   type="button"
                   className="btn btn-sm btn-dark"

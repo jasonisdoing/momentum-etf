@@ -13,6 +13,7 @@ import {
   writeRememberedMomentumEtfAccountId,
 } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { MonthsSelect } from "../components/MonthsSelect";
 import {
   AppLoadingProgress,
   startProgressRamp,
@@ -1453,19 +1454,7 @@ export function StrategyMixClient() {
                 백테스트
               </span>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <select
-                  className="form-select form-select-sm"
-                  style={{ width: "auto" }}
-                  value={String(months)}
-                  disabled={loading || monthOptions.length === 0}
-                  onChange={(event) => setMonths(Number(event.target.value))}
-                >
-                  {monthOptions.map((n) => (
-                    <option key={n} value={n}>
-                      {n}개월
-                    </option>
-                  ))}
-                </select>
+                <MonthsSelect value={months} options={monthOptions} disabled={loading} onChange={setMonths} />
                 <button
                   className="btn btn-sm btn-dark"
                   type="button"

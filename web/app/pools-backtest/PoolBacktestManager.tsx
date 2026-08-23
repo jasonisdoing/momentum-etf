@@ -5,6 +5,7 @@ import type { ColDef, GridOptions } from "ag-grid-community";
 
 import { formatPoolLabel } from "@/lib/pool-label";
 import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
+import { MonthsSelect } from "../components/MonthsSelect";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
@@ -265,13 +266,7 @@ export function PoolBacktestManager() {
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 130, flex: "0 0 auto" }}>
                   <span className="appLabeledFieldLabel">기간(개월)</span>
-                  <select className="form-select form-select-sm" value={months} onChange={(e) => setMonths(Number(e.target.value))}>
-                    {monthOptions.map((m) => (
-                      <option key={m} value={m}>
-                        최근 {m}개월
-                      </option>
-                    ))}
-                  </select>
+                  <MonthsSelect value={months} options={monthOptions} onChange={setMonths} />
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 84, flex: "0 0 auto" }}>
                   <span className="appLabeledFieldLabel">리밸런싱 주기</span>
