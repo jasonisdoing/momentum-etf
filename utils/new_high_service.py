@@ -28,6 +28,7 @@ from typing import Any
 
 import pandas as pd
 
+from utils.ma_options import SHORT_MA_OPTIONS
 from utils.price_series import positive_prices as _positive
 from utils.strategy_settings import coerce_to_options
 
@@ -43,7 +44,7 @@ HIGH_WINDOW_MIN_DAYS = 230
 # 화면 셀렉트 선택지 — 백엔드가 단일 소스이고 화면은 응답으로 받는다.
 TOP_N_OPTIONS = (5, 8, 10)
 STOP_LOSS_OPTIONS = (-7.0, -10.0)
-EXIT_MA_OPTIONS = (20, 30, 40)
+EXIT_MA_OPTIONS = SHORT_MA_OPTIONS  # 이탈 이평선 = 시스템 공용 단기 이평 선택지
 
 # 신호가 자리보다 많을 때는 20일 평균 대비 거래대금 배수가 큰 쪽(돌파에 자금이 실린 종목)부터 담는다.
 # (시가총액 우선 옵션은 과거 시총 이력이 없어 검증이 불가능하고 결과 차이도 없어 제거했다.)

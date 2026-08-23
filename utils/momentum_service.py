@@ -31,6 +31,7 @@ from typing import Any
 
 import pandas as pd
 
+from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
 from utils.price_series import positive_prices
 from utils.strategy_settings import coerce_to_options
 
@@ -136,8 +137,7 @@ INTRAWEEK_STOP_OPTIONS: tuple[float | None, ...] = (None, -7.0, -10.0)
 
 # 전략 전용 이평선 선택지 — 화면 셀렉트와 튜닝 축이 같은 값을 쓴다.
 # 그리드 결과(kor_kr·kospi200·us)에서 장기 60~120 이 고원, 140 부터 열위라 140 까지만 둔다.
-SHORT_MA_OPTIONS: tuple[int, ...] = (20, 30, 40)
-LONG_MA_OPTIONS: tuple[int, ...] = (60, 90, 120)
+# 이평선 선택지는 시스템 공용(utils/ma_options) — 여기서 따로 정하지 않는다.
 
 
 def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:

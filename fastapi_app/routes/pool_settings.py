@@ -8,9 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
+from utils.ma_options import ma_options_by_country
 from utils.market_trend_service import INDICES
 from utils.pool_settings_store import (
-    MA_DAY_OPTIONS,
     POOL_EDITABLE_KEYS,
     SLIPPAGE_PCT_OPTIONS,
     PoolSettingsError,
@@ -71,7 +71,7 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
     return {
         "pools": pools,
         "constraints": {
-            "ma_day_options": list(MA_DAY_OPTIONS),
+            "ma_options_by_country": ma_options_by_country(),
             "slippage_pct_options": list(SLIPPAGE_PCT_OPTIONS),
             "editable_keys": list(POOL_EDITABLE_KEYS),
             "market_indices": [{"ticker": item["yf_ticker"], "name": item["name"]} for item in INDICES],

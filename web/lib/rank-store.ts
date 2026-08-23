@@ -57,8 +57,9 @@ type RankData = {
   ticker_types: RankTickerType[];
   ticker_type: string;
   ma_rules: RankMaRule[];
-  /** 이평선 일수 선택지 — 백엔드 상수가 단일 소스. */
-  ma_day_options: number[];
+  /** 이평선 일수 선택지 — 백엔드 상수(utils/ma_options)가 단일 소스. */
+  short_ma_options: number[];
+  long_ma_options: number[];
   as_of_date: string | null;
   monthly_return_labels: string[];
   rows: RankRow[];
@@ -77,7 +78,8 @@ type RankToolbarData = {
   ticker_types: RankTickerType[];
   ticker_type: string;
   ma_rules: RankMaRule[];
-  ma_day_options: number[];
+  short_ma_options: number[];
+  long_ma_options: number[];
 };
 
 export async function loadRankToolbarData(params?: {

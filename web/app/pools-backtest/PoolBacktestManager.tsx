@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ColDef, GridOptions } from "ag-grid-community";
 
 import { formatPoolLabel } from "@/lib/pool-label";
-import { MA_DAY_OPTIONS } from "@/lib/ma-day-options";
+import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
@@ -69,7 +69,7 @@ type PoolOption = {
 };
 type PoolSettingsResponse = {
   pools?: PoolOption[];
-  constraints?: { ma_day_options?: number[] };
+  constraints?: Partial<MaOptionsPayload>;
   error?: string;
 };
 type BacktestOptions = { forward_day_options?: number[]; month_options?: number[]; max_months?: number; error?: string };
@@ -120,7 +120,7 @@ export function PoolBacktestManager() {
   const [longMa, setLongMa] = useState<number | null>(null);
   const [holdK, setHoldK] = useState<number | null>(null); // 상대 임계(보유 유지). null=끔(매 회차 재선택)
   const [downMarketInvestPct, setDownMarketInvestPct] = useState(100);
-  const [maDayOptions, setMaDayOptions] = useState(MA_DAY_OPTIONS);
+  const [maOptions, setMaOptions] = useState<Partial<MaOptionsPayload>>({});
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -178,7 +178,7 @@ export function PoolBacktestManager() {
           const list = payload.pools ?? [];
           const loadedMonthOptions = (options.month_options ?? []).filter((month) => Number.isFinite(month) && month > 0);
           setPools(list);
-          if (payload.constraints?.ma_day_options?.length) setMaDayOptions(payload.constraints.ma_day_options);
+          if (payload.constraints) setMaOptions(payload.constraints);
           if (loadedMonthOptions.length > 0) {
             setMonthOptions(loadedMonthOptions);
             setMonths((current) =>
@@ -300,31 +300,11 @@ export function PoolBacktestManager() {
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 104, flex: "0 0 auto" }}>
                   <span className="appLabeledFieldLabel">단기 이평선</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={shortMa ?? ""}
-                    onChange={(e) => setShortMa(e.target.value === "" ? null : Number(e.target.value))}
-                  >
-                    {maDayOptions.map((d) => (
-                      <option key={d} value={d}>
-                        {d}일
-                      </option>
-                    ))}
-                  </select>
+                  <MaDaysSelect value={shortMa} options={maOptions.short_ma_options} onChange={setShortMa} />
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 104, flex: "0 0 auto" }}>
                   <span className="appLabeledFieldLabel">장기 이평선</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={longMa ?? ""}
-                    onChange={(e) => setLongMa(e.target.value === "" ? null : Number(e.target.value))}
-                  >
-                    {maDayOptions.map((d) => (
-                      <option key={d} value={d}>
-                        {d}일
-                      </option>
-                    ))}
-                  </select>
+                  <MaDaysSelect value={longMa} options={maOptions.long_ma_options} onChange={setLongMa} />
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 120, flex: "0 0 auto" }}>
                   <span

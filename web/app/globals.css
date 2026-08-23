@@ -4518,10 +4518,11 @@ a {
   gap: 0.5rem;
 }
 
-/* Tabler 기본은 화살표 자리로 오른쪽에만 3rem 을 비워 둔다. 값이 짧아 그만큼 필요 없으므로
-   줄이고, 그 덕에 셀렉트를 좁게 두고도 `장기 240일` 이 잘리지 않는다. */
-.appMaRuleSelect {
-  min-width: 8rem;
+/* 이평선 일수 셀렉트(MaDaysSelect) — 모든 화면이 이 폭 하나를 쓴다. 화면에서 폭을 따로 주지 않는다.
+   Tabler 기본은 화살표 자리로 오른쪽에 3rem 을 비워 두는데 값이 짧아 그만큼 필요 없으므로 줄인다. */
+.appMaDaysSelect {
+  width: 6.5rem;
+  min-width: 6.5rem;
   padding-right: 1.75rem;
   background-position: right 0.5rem center;
 }

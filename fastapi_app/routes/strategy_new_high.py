@@ -5,7 +5,6 @@ from fastapi import APIRouter, Body, Depends, Query
 from fastapi_app.dependencies import require_internal_token
 from utils.new_high_service import (
     DEFAULT_SETTINGS,
-    EXIT_MA_OPTIONS,
     HIGH_WINDOW_WEEKS,
     MAX_PER_INDUSTRY_OPTIONS,
     MIN_VALUE_MULT_OPTIONS,
@@ -24,12 +23,17 @@ router = APIRouter(prefix="/internal/strategy-new-high", tags=["strategy-new-hig
 _MONTH_OPTIONS = [6, 12, 24, 36, 48, 60]
 
 
-def _constraints() -> dict:
+def _constraints(pool: str) -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다)."""
+    from utils.ma_options import short_ma_options
+    from utils.settings_loader import get_ticker_type_settings
+
+    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
     return {
         "top_n_options": list(TOP_N_OPTIONS),
         "stop_loss_options": list(STOP_LOSS_OPTIONS),
-        "exit_ma_options": list(EXIT_MA_OPTIONS),
+        # 이탈 이평선 = 그 풀 국가의 단기 이평 선택지
+        "exit_ma_options": list(short_ma_options(country)),
         "min_value_mult_options": list(MIN_VALUE_MULT_OPTIONS),
         "max_per_industry_options": list(MAX_PER_INDUSTRY_OPTIONS),
         "month_options": list(_MONTH_OPTIONS),
@@ -46,7 +50,7 @@ def _view(settings: dict) -> dict:
         "default_settings": dict(DEFAULT_SETTINGS),
         "settings_by_pool": load_settings_map(),
         "pool_options": pool_options(),
-        "constraints": _constraints(),
+        "constraints": _constraints(settings["pool"]),
     }
 
 

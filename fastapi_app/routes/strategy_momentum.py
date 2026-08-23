@@ -29,13 +29,13 @@ def _month_options(settings: dict) -> list[int]:
 
 def _ma_rule_payload(settings: dict) -> dict:
     """전략 전용 이평선 + 선택지 — momentum_settings 가 단일 소스다."""
-    from utils.momentum_service import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
+    from utils.ma_options import ma_options_payload
+    from utils.momentum_service import pool_info
 
     return {
         "short_ma_days": int(settings["short_ma_days"]),
         "long_ma_days": int(settings["long_ma_days"]),
-        "short_ma_options": list(SHORT_MA_OPTIONS),
-        "long_ma_options": list(LONG_MA_OPTIONS),
+        **ma_options_payload(pool_info(settings["pool"])["country"]),
     }
 
 

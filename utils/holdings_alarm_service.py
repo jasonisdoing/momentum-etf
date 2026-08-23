@@ -23,6 +23,7 @@ from utils.account_settings_store import load_account_docs, save_account_setting
 from utils.data_loader import fetch_ohlcv
 from utils.holdings_detail_service import load_all_holdings_detail
 from utils.logger import get_app_logger
+from utils.ma_options import ma_options_by_country
 from utils.moving_averages import calculate_moving_average, get_moving_average_type
 from utils.notification import send_slack_message_v2
 from utils.rankings import build_effective_close_series
@@ -34,7 +35,6 @@ _DEFAULT_MA_SHORT_DAYS = 20
 _DEFAULT_MA_LONG_DAYS = 120
 _DEFAULT_STOPLOSS_PCT = -7.0
 # 화면 셀렉트 선택지(백엔드는 값만 검증하고, 목록은 화면과 공유)
-MA_DAYS_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60, 120, 200)
 STOPLOSS_PCT_OPTIONS: tuple[float, ...] = (-7.0, -10.0)  # 전략 손절선 선택지와 통일
 
 
@@ -262,15 +262,15 @@ def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
 def get_alarm_view() -> dict[str, Any]:
     """알람 화면용: 계좌별 알람 On/Off + 기준(이평선 일수·손절 %) 목록(시세 계산 없음)."""
     return {
-        "ma_days_options": list(MA_DAYS_OPTIONS),
+        "ma_options_by_country": ma_options_by_country(),
         "stoploss_pct_options": list(STOPLOSS_PCT_OPTIONS),
-        "ma_type": get_moving_average_type(),
         "accounts": [
             {
                 "account_id": doc["account_id"],
                 "name": str(doc.get("name") or doc["account_id"]),
                 "icon": str(doc.get("icon") or ""),
                 "order": int(doc.get("order") or 0),
+                "country_code": str(doc.get("country_code") or "").strip().lower(),
                 "ma_enabled": bool(doc.get("ma_alarm_enabled", False)),
                 "ma_short_days": _account_ma_days(doc)[0],
                 "ma_long_days": _account_ma_days(doc)[1],

@@ -31,6 +31,7 @@ import {
   marketCapRankColumn,
 } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
+import { MaDaysSelect } from "../components/MaDaysSelect";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { formatPrice } from "../../lib/price-format";
 
@@ -1060,28 +1061,18 @@ export function MomentumClient() {
                     <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">선정 이평선</span>
                       <span className="appMaRuleRow">
-                        <select
-                          className="form-select appMaRuleSelect"
+                        <MaDaysSelect
+                          title="단기 이평선"
                           value={draftMaRule.short}
-                          onChange={(e) => setDraftMaRule((r) => r && { ...r, short: Number(e.target.value) })}
-                        >
-                          {view.ma_rule.short_ma_options.map((d) => (
-                            <option key={d} value={d}>
-                              단기 {d}일
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          className="form-select appMaRuleSelect"
+                          options={view.ma_rule.short_ma_options}
+                          onChange={(days) => setDraftMaRule((r) => r && { ...r, short: days })}
+                        />
+                        <MaDaysSelect
+                          title="장기 이평선"
                           value={draftMaRule.long}
-                          onChange={(e) => setDraftMaRule((r) => r && { ...r, long: Number(e.target.value) })}
-                        >
-                          {view.ma_rule.long_ma_options.map((d) => (
-                            <option key={d} value={d}>
-                              장기 {d}일
-                            </option>
-                          ))}
-                        </select>
+                          options={view.ma_rule.long_ma_options}
+                          onChange={(days) => setDraftMaRule((r) => r && { ...r, long: days })}
+                        />
                       </span>
                     </label>
                     <label className="appLabeledField">
