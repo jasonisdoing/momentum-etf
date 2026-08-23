@@ -103,7 +103,8 @@ export type ParentGridRow =
   | (AccountSummary & {
     id: string;
     rowType: "main";
-    cash_edit_value: number;
+    /** 표시용 현금(원화 환산). 이 그리드에서는 편집하지 않는다. */
+    cash_krw: number;
   })
   | {
     id: string;
@@ -112,7 +113,8 @@ export type ParentGridRow =
     total_assets_krw: number;
     valuation_krw: number;
     total_principal: number;
-    cash_edit_value: number;
+    /** 표시용 현금(원화 환산). 이 그리드에서는 편집하지 않는다. */
+    cash_krw: number;
     target_ratio_total: number | null;
     holdings_count: number;
     cash_ratio: number;
