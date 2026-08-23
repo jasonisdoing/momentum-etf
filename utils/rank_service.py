@@ -8,6 +8,7 @@ import pandas as pd
 from config import CACHE_TTL_COMPUTE
 from services.stock_cache_service import get_stock_cache_meta_map
 from utils.data_loader import get_trading_days
+from utils.market_cap_rank import market_cap_rank_of
 from utils.pool_settings_store import MA_DAY_OPTIONS
 from utils.rankings import (
     MONTHLY_RETURN_LABEL_COUNT,
@@ -243,6 +244,7 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         enriched["보수"] = None
         enriched["순자산총액"] = None
         enriched["상장일"] = None
+        enriched["시총순위"] = None
         enriched["거래대금"] = (
             enriched["티커"].map(lambda t: mult_map.get(str(t or "").strip().upper()))
             if "티커" in enriched.columns
@@ -260,6 +262,7 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         row["배당률"] = meta_cache.get("dividend_yield_ttm")
         row["보수"] = meta_cache.get("expense_ratio")
         row["순자산총액"] = meta_cache.get("total_net_assets")
+        row["시총순위"] = market_cap_rank_of(meta_cache)  # 배치 B 가 적어 둔 시장 전체 시총 순위(개별주 풀만 값 있음)
         row["상장일"] = _format_listed_date(meta_cache.get("listed_date") or row.get("상장일"))
         row["거래대금"] = mult_map.get(ticker)
 

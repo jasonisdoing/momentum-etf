@@ -28,6 +28,7 @@ import {
   renderHighDrawdownCell,
   renderIndustryCell,
   signColor,
+  marketCapRankColumn,
 } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
@@ -113,6 +114,7 @@ type PickRow = {
   daily_change_pct: number | null;
   high_drawdown_pct: number | null;
   market_cap_eok: number | null;
+  market_cap_rank: number | null;
   signal_short_pct: number | null;
   signal_long_pct: number | null;
   current_short_pct: number | null;
@@ -673,6 +675,7 @@ export function MomentumClient() {
             } as ColDef<PickRow>,
           ]
         : []),
+      marketCapRankColumn<PickRow>("market_cap_rank", !hasIndustryData),
       {
         headerName: "티커",
         field: "ticker",

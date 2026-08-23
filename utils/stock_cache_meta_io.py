@@ -253,3 +253,20 @@ def delete_stock_cache_meta_doc(ticker_type: str, ticker: str) -> None:
         raise RuntimeError("MongoDB 연결 실패 — stock_cache_meta 컬렉션에 쓸 수 없습니다.")
 
     coll.delete_one({"ticker_type": type_norm, "ticker": ticker_norm})
+
+
+def set_stock_cache_meta_field(ticker_type: str, ticker: str, key: str, value: Any) -> None:
+    """``meta_cache`` 의 한 필드만 바꾼다(문서 전체를 덮지 않는다). ``value`` 가 None 이면 필드를 지운다.
+
+    배치 B 의 종목별 갱신 뒤에 붙는 파생값(시총 순위 등)용 — 문서가 없으면 만들지 않는다.
+    """
+    type_norm = (ticker_type or "").strip().lower()
+    ticker_norm = str(ticker or "").strip().upper()
+    if not type_norm or not ticker_norm or not key:
+        raise ValueError("ticker_type, ticker, key must be provided")
+    coll = _get_collection()
+    if coll is None:
+        raise RuntimeError("MongoDB 연결 실패 — stock_cache_meta 컬렉션에 쓸 수 없습니다.")
+    field = f"meta_cache.{key}"
+    update = {"$unset": {field: ""}} if value is None else {"$set": {field: value}}
+    coll.update_one({"ticker_type": type_norm, "ticker": ticker_norm}, update)

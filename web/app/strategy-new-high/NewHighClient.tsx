@@ -26,6 +26,7 @@ import {
   renderIndustryCell,
   signColor,
   tradeValueMultStyle,
+  marketCapRankColumn,
 } from "@/lib/grid-cells";
 import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
 import { renderStockNameCell } from "@/lib/name-highlight";
@@ -80,6 +81,7 @@ type PositionRow = {
   change_pct: number | null;
   /** 오늘 기준 시가총액(순위 화면과 같은 소스). 과거 이력이 없어 백테스트에는 쓰지 않는다. */
   market_cap: number | null;
+  market_cap_rank: number | null;
   trade_value: number | null;
   /** 돌파했더라도 거짓이면 사지 않는다(배수 하한 미달). */
   qualifies: boolean;
@@ -124,6 +126,7 @@ type PlanRow = {
   ticker: string;
   name: string;
   industry: string;
+  market_cap_rank?: number | null;
   change_pct: number | null;
   /** 현재 시세 — 이탈 행도 지금 값이다(청산가는 exit_price). */
   price: number | null;
@@ -583,6 +586,7 @@ export function NewHighClient() {
           return <strong style={{ color: stage.color }}>{stage.label}</strong>;
         },
       },
+      marketCapRankColumn<PositionRow>("market_cap_rank", !hasIndustryData),
       {
         field: "ticker",
         headerName: "티커",
@@ -830,6 +834,7 @@ export function NewHighClient() {
           return <span>{p.data.is_new ? "진입" : `${p.data.days}일`}</span>;
         },
       },
+      marketCapRankColumn<PlanRow>("market_cap_rank", !hasIndustryData),
       {
         field: "ticker",
         headerName: "티커",
