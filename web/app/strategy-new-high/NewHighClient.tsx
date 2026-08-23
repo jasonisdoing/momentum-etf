@@ -11,6 +11,7 @@ import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
 import { StrategyNotes } from "../components/StrategyNotes";
+import { StrategyTuning, type TuningResult } from "../components/StrategyTuning";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
@@ -39,18 +40,11 @@ type Settings = {
   top_n: number;
   stop_loss_pct: number;
   exit_ma_days: number;
-  /** 신호가 자리보다 많을 때의 진입 우선순위. */
-  entry_priority: "value_surge" | "market_cap";
   /** 진입 자격 — 거래대금 급증 배수 하한. null 이면 조건 없음. */
   min_value_mult: number | null;
   /** 한 업종 최대 보유 종목 수. null 이면 제한 없음. */
   max_per_industry: number | null;
   /** 슬랙 알람 — 켠 풀만 장중 감시 배치가 진입·매도 예정 변화를 발송한다. */
-};
-
-const ENTRY_PRIORITY_LABEL: Record<Settings["entry_priority"], string> = {
-  value_surge: "거래대금 급증",
-  market_cap: "시가총액",
 };
 
 type PoolOption = PoolLabelSource & { country_code?: string; currency?: string; pool_kind?: string | null };
@@ -60,7 +54,6 @@ type Constraints = {
   top_n_options: number[];
   stop_loss_options: number[];
   exit_ma_options: number[];
-  entry_priority_options: Settings["entry_priority"][];
   min_value_mult_options: (number | null)[];
   max_per_industry_options: (number | null)[];
   month_options: number[];
@@ -69,6 +62,8 @@ type Constraints = {
 };
 
 type View = {
+  /** 선택지 밖 저장값을 첫 선택지로 보정한 내역 — 있으면 화면이 저장을 요구한다. */
+  coerced?: string[];
   settings: Settings;
   /** 저장 이력이 없는 풀로 전환할 때 채울 값 (백엔드 기본값). */
   default_settings: Omit<Settings, "pool">;
@@ -337,28 +332,6 @@ const CURRENT_NOTES = [
   },
 ];
 
-const BACKTEST_NOTES = [
-  {
-    title: "자산 모델",
-    body:
-      "현금과 주수로 계산합니다. 진입할 때 그 시점 자산의 1/N을 배정하고, " +
-      "살 현금이 모자라면 있는 만큼만 삽니다(팔지 않은 평가익으로는 못 삽니다).",
-  },
-  {
-    title: "체결·비용",
-    body: "판정은 종가, 체결은 다음 거래일 시가입니다. 슬리피지는 편도(%)로 매매 금액에 부과합니다.",
-  },
-  {
-    title: "기간",
-    body: "신고가 판정에 52주 창이 필요해 최대 60개월까지 돌릴 수 있습니다.",
-  },
-  {
-    title: "알아둘 것",
-    body:
-      "현재 종목풀 기준이라 상장폐지·풀 이탈 종목이 빠진 생존 편향이 있습니다. " +
-      "진입 우선순위를 시가총액으로 두면 현재 시총을 전 구간에 써서 미래 정보가 섞입니다.",
-  },
-];
 
 /** 일간(%)·현재가 컬럼 — 보유 종목 표와 진입 후보 표가 같은 정의를 쓴다. */
 function dailyChangeColumn<T extends { change_pct?: number | null }>(): ColDef<T> {
@@ -447,6 +420,9 @@ export function NewHighClient() {
         if (!alive) return;
         setView(payload);
         setDraft(payload.settings);
+        if (payload.coerced?.length) {
+          toast.warning(`저장값이 선택지에 없어 보정했습니다: ${payload.coerced.join(", ")} — 확인 후 저장하세요.`);
+        }
       } catch (loadError) {
         if (alive) setError(loadError instanceof Error ? loadError.message : "설정을 불러오지 못했습니다.");
       } finally {
@@ -516,11 +492,32 @@ export function NewHighClient() {
 
   // 저장하지 않은 입력이 있으면 아래 결과가 화면 값과 어긋난다 — 저장을 먼저 요구한다(SM 과 같은 규칙).
   // 저장 응답을 그대로 초안에 넣으므로 두 객체의 키 구성은 항상 같다.
+  // 업종 컬럼 노출 여부 — 표시 중인 결과의 풀 성격(pool_kind)이 1순위(개별주=표시, ETF=숨김),
+  // 미설정 풀은 행 값 유무로 추정 (pools-rank·strategy-momentum 과 같은 기준).
+  const hasIndustryData = useMemo(() => {
+    const pool = positions?.pool ?? view?.settings.pool ?? "";
+    const poolKind = String(view?.pool_options?.find((option) => option.ticker_type === pool)?.pool_kind ?? "");
+    if (poolKind === "stock") return true;
+    if (poolKind === "etf") return false;
+    return [...(positions?.breakouts ?? []), ...(positions?.candidates ?? [])].some(
+      (row) => String(row.industry ?? "").trim() !== "",
+    );
+  }, [positions, view?.settings.pool, view?.pool_options]);
+
+  // 업종 데이터가 없는 풀은 상한을 **없음(null)으로 고정**한다 — 저장·변경 감지·튜닝이 모두 이 값을 쓴다
+  // (모멘텀 화면과 같은 규칙. 저장값이 숫자로 남아 있으면 '저장하지 않은 변경'으로 떠서 없음으로 저장하게 된다).
+  const effectiveDraft = useMemo<Settings | null>(
+    () => (draft == null ? null : hasIndustryData ? draft : { ...draft, max_per_industry: null }),
+    [draft, hasIndustryData],
+  );
+
   const isDirty = useMemo(() => {
     const saved = view?.settings;
-    if (!draft || !saved) return false;
-    return (Object.keys(draft) as (keyof Settings)[]).some((key) => draft[key] !== saved[key]);
-  }, [draft, view?.settings]);
+    if (!effectiveDraft || !saved) return false;
+    // 서버가 선택지 밖 저장값을 보정해 보낸 경우도 '저장 필요'로 본다 (저장하면 coerced 가 비워진다).
+    if (view?.coerced?.length) return true;
+    return (Object.keys(effectiveDraft) as (keyof Settings)[]).some((key) => effectiveDraft[key] !== saved[key]);
+  }, [effectiveDraft, view?.settings, view?.coerced]);
 
   /** 풀을 바꾸면 그 풀에 저장된 설정으로 전환한다. 저장 이력이 없으면 **기본값**으로 채운다 —
    *  직전 풀의 값을 물려받으면 다른 풀의 설정이 섞여 풀별로 보관하는 의미가 없어진다. */
@@ -571,18 +568,6 @@ export function NewHighClient() {
     const id = window.setInterval(() => void runPositions(draft, ""), LIVE_REFRESH_MS);
     return () => window.clearInterval(id);
   }, [positions?.auto_refresh, asOf, draft, runPositions]);
-
-  // 업종 컬럼 노출 여부 — 표시 중인 결과의 풀 성격(pool_kind)이 1순위(개별주=표시, ETF=숨김),
-  // 미설정 풀은 행 값 유무로 추정 (pools-rank·strategy-momentum 과 같은 기준).
-  const hasIndustryData = useMemo(() => {
-    const pool = positions?.pool ?? view?.settings.pool ?? "";
-    const poolKind = String(view?.pool_options?.find((option) => option.ticker_type === pool)?.pool_kind ?? "");
-    if (poolKind === "stock") return true;
-    if (poolKind === "etf") return false;
-    return [...(positions?.breakouts ?? []), ...(positions?.candidates ?? [])].some(
-      (row) => String(row.industry ?? "").trim() !== "",
-    );
-  }, [positions, view?.settings.pool, view?.pool_options]);
 
   const positionColumns = useMemo<ColDef<PositionRow>[]>(
     () => [
@@ -1006,7 +991,7 @@ export function NewHighClient() {
                   </select>
                 </label>
                 <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">보유 종목수</span>
+                  <span className="appLabeledFieldLabel">종목 수</span>
                   <select
                     className="form-select form-select-sm"
                     value={String(draft.top_n)}
@@ -1018,16 +1003,28 @@ export function NewHighClient() {
                   </select>
                 </label>
                 <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">손절선</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={String(draft.stop_loss_pct)}
-                    onChange={(event) => setDraft({ ...draft, stop_loss_pct: Number(event.target.value) })}
-                  >
-                    {constraints.stop_loss_options.map((n) => (
-                      <option key={n} value={n}>{n}%</option>
-                    ))}
-                  </select>
+                  <span className="appLabeledFieldLabel">업종 상한</span>
+                  {hasIndustryData ? (
+                    <select
+                      className="form-select form-select-sm"
+                      value={draft.max_per_industry == null ? "" : String(draft.max_per_industry)}
+                      onChange={(event) => setDraft({
+                        ...draft,
+                        max_per_industry: event.target.value === "" ? null : Number(event.target.value),
+                      })}
+                    >
+                      {constraints.max_per_industry_options.map((value) => (
+                        <option key={String(value)} value={value == null ? "" : String(value)}>
+                          {value == null ? "없음" : `${value}종목`}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    // 업종 데이터가 없는 풀(ETF 모음 등)은 상한이 무의미 — '없음'으로 고정해 보여준다 (모멘텀 화면과 동일).
+                    <select className="form-select form-select-sm" value="" disabled title="업종 데이터가 없는 종목풀은 업종 상한을 쓰지 않습니다">
+                      <option value="">없음</option>
+                    </select>
+                  )}
                 </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">이탈 이평선</span>
@@ -1042,22 +1039,7 @@ export function NewHighClient() {
                   </select>
                 </label>
                 <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">진입 우선순위</span>
-                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="진입 우선순위">
-                    {constraints.entry_priority_options.map((key) => (
-                      <button
-                        key={key}
-                        type="button"
-                        className={draft.entry_priority === key ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => setDraft({ ...draft, entry_priority: key })}
-                      >
-                        {ENTRY_PRIORITY_LABEL[key]}
-                      </button>
-                    ))}
-                  </div>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">거래대금 급증 하한</span>
+                  <span className="appLabeledFieldLabel">급증 하한</span>
                   <select
                     className="form-select form-select-sm"
                     // '없음'(null)은 빈 문자열로 실어 보낸다 — select 의 value 는 문자열만 받는다.
@@ -1074,26 +1056,18 @@ export function NewHighClient() {
                     ))}
                   </select>
                 </label>
-                {/* 업종 개념이 없는 풀(ETF)에서는 상한이 판정에 걸리지 않으므로 숨긴다 — 모멘텀 화면과 같은 기준. */}
-                {hasIndustryData ? (
-                  <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">업종 상한</span>
-                    <select
-                      className="form-select form-select-sm"
-                      value={draft.max_per_industry == null ? "" : String(draft.max_per_industry)}
-                      onChange={(event) => setDraft({
-                        ...draft,
-                        max_per_industry: event.target.value === "" ? null : Number(event.target.value),
-                      })}
-                    >
-                      {constraints.max_per_industry_options.map((value) => (
-                        <option key={String(value)} value={value == null ? "" : String(value)}>
-                          {value == null ? "제한 없음" : `${value}종목`}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">손절선</span>
+                  <select
+                    className="form-select form-select-sm"
+                    value={String(draft.stop_loss_pct)}
+                    onChange={(event) => setDraft({ ...draft, stop_loss_pct: Number(event.target.value) })}
+                  >
+                    {constraints.stop_loss_options.map((n) => (
+                      <option key={n} value={n}>{n}%</option>
+                    ))}
+                  </select>
+                </label>
                 </div>
                 {/* CRUD 버튼이 하나뿐이라 별도 줄을 두지 않고 메인 헤더 오른쪽에 둔다. */}
                 <div className="appMainHeaderRight">
@@ -1101,7 +1075,7 @@ export function NewHighClient() {
                   <button
                     type="button"
                     className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
-                    onClick={() => void persistSettings(draft, "설정을 저장했습니다.")}
+                    onClick={() => void persistSettings(effectiveDraft ?? draft, "설정을 저장했습니다.")}
                     disabled={saving || !isDirty}
                   >
                     <IconCheck size={16} />
@@ -1215,15 +1189,18 @@ export function NewHighClient() {
                         ))}
                       </div>
                     ) : null}
-                    <AppAgGrid<PositionRow>
-                      rowData={[...(positions?.breakouts ?? []), ...(positions?.candidates ?? [])].map(withQuote)}
-                      columnDefs={positionColumns}
-                      loading={running}
-                      theme={gridTheme}
-                      minHeight={0}
-                      height="auto"
-                      gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
-                    />
+                    {/* 진입 후보 표 — 설명과 함께 접고 펼친다 (접힌 상태에서는 보유 표만 남는다). */}
+                    {candidatesOpen ? (
+                      <AppAgGrid<PositionRow>
+                        rowData={[...(positions?.breakouts ?? []), ...(positions?.candidates ?? [])].map(withQuote)}
+                        columnDefs={positionColumns}
+                        loading={running}
+                        theme={gridTheme}
+                        minHeight={0}
+                        height="auto"
+                        gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                      />
+                    ) : null}
                   </>
                 ) : chartsLoading || (!charts && !chartsError) ? (
                   <div style={{ ...hintStyle, padding: "24px 0", textAlign: "center" }}>차트를 불러오는 중…</div>
@@ -1296,7 +1273,6 @@ export function NewHighClient() {
               </span>
             </div>
               <div className="card-body appCardBodyTight">
-                <StrategyNotes items={BACKTEST_NOTES} />
                 {backtestError ? <div className="alert alert-danger">{backtestError}</div> : null}
                 {backtesting ? (
                   <AppLoadingProgress title="백테스트 실행 중..." progress={backtestProgress} />
@@ -1357,6 +1333,73 @@ export function NewHighClient() {
               </div>
           </div>
         </section>
+
+        {/* 튜닝 — 백테스트 아래. 축 밖의 설정은 현재 화면 값으로 고정하고 범위 조합을 전부 돌린다. */}
+        <StrategyTuning
+          monthOptions={constraints.month_options}
+          defaultMonths={backtestMonths}
+          disabled={backtesting}
+          secondsPerCombo={0.04}
+          extraSeconds={50}
+          fixedLabel={`현재 화면 값 기준${hasIndustryData ? "" : " · 업종 상한 없음(업종 데이터 없는 풀)"}`}
+          current={{
+            top_n: draft.top_n,
+            stop_loss_pct: draft.stop_loss_pct,
+            exit_ma_days: draft.exit_ma_days,
+            min_value_mult: draft.min_value_mult ?? null,
+            max_per_industry: hasIndustryData ? (draft.max_per_industry ?? null) : null,
+          }}
+          axes={[
+            // 축 값 = 상단 셀렉트 선택지(서버 상수) — 순서·이름도 상단 설정과 같다.
+            { key: "top_n", label: "종목 수", values: constraints.top_n_options.map((n) => ({ value: n, label: `${n}종목` })) },
+            // 업종 데이터가 없는 풀은 상한 축을 돌리지 않는다(결과가 전부 같아 조합만 는다).
+            ...(hasIndustryData
+              ? [
+                  {
+                    key: "max_per_industry",
+                    label: "업종 상한",
+                    values: constraints.max_per_industry_options.map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: `${n}종목` })),
+                  },
+                ]
+              : []),
+            { key: "exit_ma_days", label: "이탈 이평선", values: constraints.exit_ma_options.map((n) => ({ value: n, label: `${n}일` })) },
+            {
+              key: "min_value_mult",
+              label: "급증 하한",
+              values: constraints.min_value_mult_options.map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: `${n}배` })),
+            },
+            { key: "stop_loss_pct", label: "손절선", values: constraints.stop_loss_options.map((n) => ({ value: n, label: `${n}%` })) },
+          ]}
+          onApply={async (params) => {
+            // 조합을 상단 폼에 넣고 그대로 저장한다 (저장 응답이 폼·운용 현황을 갱신한다).
+            await persistSettings(
+              {
+                ...draft,
+                top_n: Number(params.top_n),
+                stop_loss_pct: Number(params.stop_loss_pct),
+                exit_ma_days: Number(params.exit_ma_days),
+                min_value_mult: params.min_value_mult == null ? null : Number(params.min_value_mult),
+                max_per_industry: !hasIndustryData || params.max_per_industry == null ? null : Number(params.max_per_industry),
+              },
+              "튜닝 조합을 적용해 저장했습니다.",
+            );
+          }}
+          run={async (months, ranges) => {
+            const response = await fetch("/api/strategy-new-high/tuning", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              // 업종 데이터가 없는 풀은 상한 축을 '없음' 하나로 고정해 보낸다.
+              body: JSON.stringify({
+                months,
+                settings: effectiveDraft ?? draft,
+                ranges: hasIndustryData ? ranges : { ...ranges, max_per_industry: [null] },
+              }),
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error ?? "튜닝에 실패했습니다.");
+            return payload as TuningResult;
+          }}
+        />
       </div>
     </PageFrame>
   );

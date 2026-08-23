@@ -973,12 +973,6 @@ def _simulate_mix_daily(
     nh_slots = int(nh_settings["top_n"])
     stop_pct = float(nh_settings["stop_loss_pct"])
     min_mult = nh_settings["min_value_mult"]
-    use_market_cap = nh_settings["entry_priority"] == "market_cap"
-    caps: dict[str, float] = {}
-    if use_market_cap:
-        from utils.new_high_backtest import _market_caps
-
-        caps = _market_caps(pool, list(close_df.columns))
 
     # ── 모멘텀 이벤트 복원 — 체결 목록의 진입·청산일이 곧 매매 일정이다 ──
     sm_slots = 0
@@ -1138,8 +1132,6 @@ def _simulate_mix_daily(
             score_row = value_mult.loc[prev]
 
             def nh_priority(ticker: str) -> float:
-                if use_market_cap:
-                    return float(caps.get(ticker, 0.0))
                 score = score_row.get(ticker)
                 return float(score) if pd.notna(score) else 0.0
 

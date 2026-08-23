@@ -147,25 +147,17 @@ def run_backtest(
     buy_slippage, sell_slippage = get_pool_slippage(pool)
 
     context = context or load_context(settings)
-    universe = context["universe"]
     name_by, industry_by = context["name_by"], context["industry_by"]
     panel, signals = context["panel"], context["signals"]
 
     close_df, open_df = panel["close"], panel["open"]
     breakout, below_ma = signals["breakout"], signals["below_ma"]
 
-    # 진입 우선순위. `market_cap` 은 **현재 시가총액**을 전 구간에 그대로 쓴다.
-    # 과거 시가총액 이력이 없어(상장주식수 이력 부재) 이렇게 할 수밖에 없는데,
-    # 그 결과 "나중에 대형주가 되는 종목"이 과거에도 우대받는 미래 정보가 섞인다.
-    # 사용자가 이 왜곡을 알고 선택한 방식이다 — 결과를 실제 기대값으로 읽으면 안 된다.
+    # 진입 우선순위 — 거래대금 급증 배수가 큰 쪽부터 (자리가 모자랄 때의 정렬 기준).
     min_mult = settings["min_value_mult"]
-    use_market_cap = settings["entry_priority"] == "market_cap"
-    caps = _market_caps(pool, [row["ticker"] for row in universe]) if use_market_cap else {}
     value_mult = signals["value_mult"]
 
     def priority_of(day: pd.Timestamp, ticker: str) -> float:
-        if use_market_cap:
-            return float(caps.get(ticker, 0.0))
         score = value_mult.at[day, ticker]
         return float(score) if pd.notna(score) else 0.0
 
@@ -746,8 +738,6 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
     stop_pct = float(settings["stop_loss_pct"])
     exit_ma_days = int(settings["exit_ma_days"])
     below_ma_last = signals["below_ma"].loc[last]
-    use_market_cap = settings["entry_priority"] == "market_cap"
-    caps = _market_caps(pool, [row["ticker"] for row in universe]) if use_market_cap else {}
 
     def mark_exits(price_of) -> None:
         """청산 여부를 표시한다. price_of 가 None 을 돌려주면 판정하지 않는다."""
@@ -773,10 +763,7 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
             for row in rows
             if row["gap_pct"] >= 0 and row["qualifies"] and row["ticker"] not in {h["ticker"] for h in holdings}
         ]
-        ready.sort(
-            key=lambda row: caps.get(row["ticker"], 0.0) if use_market_cap else (row["value_mult"] or 0.0),
-            reverse=True,
-        )
+        ready.sort(key=lambda row: row["value_mult"] or 0.0, reverse=True)
         by_ticker = {row["ticker"]: row for row in ready}
         chosen, blocked = _cap_by_industry(
             list(by_ticker),

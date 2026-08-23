@@ -162,6 +162,10 @@ export function AlarmsClient() {
             {(view?.stoploss_pct_options ?? []).map((o) => (
               <option key={o} value={o}>{`${o}%`}</option>
             ))}
+            {/* 선택지가 바뀌어 저장값이 목록 밖이면 숨기지 않고 그대로 보여줘 사용자가 바꾸게 한다 */}
+            {!(view?.stoploss_pct_options ?? []).includes(a.stoploss_threshold_pct) && (
+              <option value={a.stoploss_threshold_pct}>{`${a.stoploss_threshold_pct}% (선택지 밖)`}</option>
+            )}
           </select>
         )}
         <input

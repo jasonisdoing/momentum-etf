@@ -5,7 +5,6 @@ from fastapi import APIRouter, Body, Depends, Query
 from fastapi_app.dependencies import require_internal_token
 from utils.new_high_service import (
     DEFAULT_SETTINGS,
-    ENTRY_PRIORITY_OPTIONS,
     EXIT_MA_OPTIONS,
     HIGH_WINDOW_WEEKS,
     MAX_PER_INDUSTRY_OPTIONS,
@@ -13,6 +12,7 @@ from utils.new_high_service import (
     STOP_LOSS_OPTIONS,
     TOP_N_OPTIONS,
     load_settings,
+    load_settings_for_view,
     load_settings_map,
     pool_options,
     save_settings,
@@ -30,7 +30,6 @@ def _constraints() -> dict:
         "top_n_options": list(TOP_N_OPTIONS),
         "stop_loss_options": list(STOP_LOSS_OPTIONS),
         "exit_ma_options": list(EXIT_MA_OPTIONS),
-        "entry_priority_options": list(ENTRY_PRIORITY_OPTIONS),
         "min_value_mult_options": list(MIN_VALUE_MULT_OPTIONS),
         "max_per_industry_options": list(MAX_PER_INDUSTRY_OPTIONS),
         "month_options": list(_MONTH_OPTIONS),
@@ -60,7 +59,9 @@ def get_strategy_new_high(
 
     ``pool`` 은 화면이 로컬스토리지에 기억해 둔 선택이다 — 없으면 저장분이 있는 첫 풀.
     """
-    return _view(load_settings(pool))
+    settings, coerced = load_settings_for_view(pool)
+    # 선택지 밖 저장값을 보정했으면 화면이 '저장되지 않은 변경'으로 띄운다.
+    return {**_view(settings), "coerced": coerced}
 
 
 @router.put("/settings")
@@ -136,3 +137,28 @@ def post_strategy_new_high_backtest(
         raise ValueError("'months' 는 정수여야 합니다.")
     settings = payload.get("settings") if isinstance(payload, dict) else None
     return run_backtest(months, settings if isinstance(settings, dict) else None)
+
+
+@router.post("/tuning")
+def post_strategy_new_high_tuning(
+    payload: dict = Body(...),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """튜닝 — 설정 항목 범위의 모든 조합을 백테스트한다.
+
+    body: ``{"months": 12, "settings": {...현재 화면 값}, "ranges": {"top_n": [...],
+    "stop_loss_pct": [...], "exit_ma_days": [...], "min_value_mult": [...], "max_per_industry": [...]}}``
+    축 밖의 설정은 ``settings`` 값으로 고정한다.
+    """
+    from utils.new_high_tuning import run_tuning
+
+    if not isinstance(payload, dict):
+        raise ValueError("요청 형식이 올바르지 않습니다.")
+    months = payload.get("months")
+    if not isinstance(months, int) or isinstance(months, bool):
+        raise ValueError("'months' 는 정수여야 합니다.")
+    settings = payload.get("settings")
+    ranges = payload.get("ranges")
+    if not isinstance(ranges, dict) or not all(isinstance(v, list) for v in ranges.values()):
+        raise ValueError("'ranges' 는 축별 값 목록이어야 합니다.")
+    return run_tuning(months, settings if isinstance(settings, dict) else None, ranges)

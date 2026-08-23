@@ -40,19 +40,17 @@ HIGH_WINDOW = f"{HIGH_WINDOW_WEEKS * 7}D"
 HIGH_WINDOW_MIN_DAYS = 230
 
 # 화면 셀렉트 선택지 — 백엔드가 단일 소스이고 화면은 응답으로 받는다.
-TOP_N_OPTIONS = (3, 5, 8, 10, 12, 15, 20)
-STOP_LOSS_OPTIONS = (-5.0, -6.0, -7.0, -8.0, -10.0, -12.0)
-EXIT_MA_OPTIONS = (5, 10, 20, 40, 60)
+TOP_N_OPTIONS = (5, 8, 10)
+STOP_LOSS_OPTIONS = (-7.0, -10.0)
+EXIT_MA_OPTIONS = (20, 30, 40)
 
-# 신호가 자리보다 많을 때 무엇을 먼저 담을지 (표시 순서 = 화면 토글 순서).
-#   value_surge — 20일 평균 대비 거래대금이 크게 는 쪽. 돌파에 자금이 실린 종목.
-#   market_cap  — 규모가 큰 쪽. 유동성이 좋아 실제로 담기 쉽다.
-ENTRY_PRIORITY_OPTIONS = ("value_surge", "market_cap")
+# 신호가 자리보다 많을 때는 20일 평균 대비 거래대금 배수가 큰 쪽(돌파에 자금이 실린 종목)부터 담는다.
+# (시가총액 우선 옵션은 과거 시총 이력이 없어 검증이 불가능하고 결과 차이도 없어 제거했다.)
 
 # 진입 자격 — 20일 평균 대비 거래대금 배수가 이 값 미만이면 돌파해도 사지 않는다.
 # 거래대금이 실리지 않은 돌파는 실패 확률이 높다(오닐의 '돌파는 거래량 증가와 함께').
 # None 은 '조건 없음'. 배수를 모르는 종목(상장 직후 등)도 자격 미달로 본다 — 추정하지 않는다.
-MIN_VALUE_MULT_OPTIONS: tuple[float | None, ...] = (5.0, 4.0, 3.0, 2.0, 1.0, None)
+MIN_VALUE_MULT_OPTIONS: tuple[float | None, ...] = (5.0, 2.5, None)
 # 백테스트 기간 기본값 — 화면에서 실행할 때 고르고, 저장하지 않는다.
 DEFAULT_BACKTEST_MONTHS = 12
 
@@ -61,7 +59,7 @@ DEFAULT_BACKTEST_MONTHS = 12
 # kor 60개월 기준 상한 2 가 7749% → 9416% 로 오르고 MDD 도 -29% → -27% 로 낮아진다.
 # 상한 1 은 과하다(1330%). 8종목에 상한 5 이상은 걸릴 일이 없어 '제한 없음' 과 같다.
 # 업종을 모르는 종목(ETF 풀 등)은 묶을 근거가 없어 상한을 적용하지 않는다.
-MAX_PER_INDUSTRY_OPTIONS: tuple[int | None, ...] = (1, 2, 3, 4, 5, None)
+MAX_PER_INDUSTRY_OPTIONS: tuple[int | None, ...] = (1, 2, 3, None)
 
 _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "new_high_settings"
@@ -75,16 +73,14 @@ PER_POOL_SETTING_KEYS = (
     "top_n",
     "stop_loss_pct",
     "exit_ma_days",
-    "entry_priority",
     "min_value_mult",
     "max_per_industry",
 )
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "top_n": 8,
-    "stop_loss_pct": -8.0,
+    "stop_loss_pct": -7.0,
     "exit_ma_days": 20,
-    "entry_priority": "value_surge",
     # 기본은 조건 없음 — 풀마다 적정값이 달라 사용자가 시험해 보고 저장한다.
     "min_value_mult": None,
     # 기본은 제한 없음 — 하한과 마찬가지로 풀마다 적정값이 다르다. kor 은 상한 2 가
@@ -231,7 +227,7 @@ def build_price_panel(universe: list[dict[str, str]], frames: dict[str, pd.DataF
 
 
 def compute_signals(panel: dict[str, pd.DataFrame], exit_ma_days: int) -> dict[str, pd.DataFrame]:
-    """돌파·이탈 신호와 진입 우선순위를 한 번에 만든다."""
+    """돌파·이탈 신호와 거래대금 급증 배수(진입 정렬 기준)를 한 번에 만든다."""
     close_df = panel["close"]
     # 진입 판정은 **직전 최고 종가** 기준이다. 종가끼리 비교하므로 종가가 오르는 동안
     # 신호가 끊기지 않는다. 장중 고가와 비교하면 전날 꼬리를 못 넘는 날 신호가 끊겨
@@ -338,10 +334,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"{key} 는 {list(options)} 중 하나여야 합니다 (받은 값: {value})")
         return value
 
-    priority = str(settings.get("entry_priority") or DEFAULT_SETTINGS["entry_priority"]).strip()
-    if priority not in ENTRY_PRIORITY_OPTIONS:
-        raise ValueError(f"entry_priority 는 {list(ENTRY_PRIORITY_OPTIONS)} 중 하나여야 합니다 (받은 값: {priority})")
-
     raw_min = settings.get("min_value_mult", DEFAULT_SETTINGS["min_value_mult"])
     min_value_mult = None if raw_min in (None, "", "none") else float(raw_min)
     if min_value_mult not in MIN_VALUE_MULT_OPTIONS:
@@ -356,7 +348,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "pool": pool,
-        "entry_priority": priority,
         "min_value_mult": min_value_mult,
         "max_per_industry": max_per_industry,
         "top_n": pick("top_n", TOP_N_OPTIONS, int),
@@ -398,6 +389,40 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
     return validate_settings({"pool": selected, **DEFAULT_SETTINGS, **stored})
 
 
+# 화면 로드 때 선택지 밖 저장값을 보정할 항목 — (키, 라벨, 선택지)
+_OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
+    ("top_n", "종목 수", TOP_N_OPTIONS),
+    ("max_per_industry", "업종 상한", MAX_PER_INDUSTRY_OPTIONS),
+    ("exit_ma_days", "이탈 이평선", EXIT_MA_OPTIONS),
+    ("min_value_mult", "급증 하한", MIN_VALUE_MULT_OPTIONS),
+    ("stop_loss_pct", "손절선", STOP_LOSS_OPTIONS),
+)
+
+
+def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], list[str]]:
+    """화면용 로드 — 선택지가 바뀌어 저장값이 목록 밖이면 **첫 선택지로 보정**하고 무엇을
+    바꿨는지 돌려준다. 화면은 이를 '저장되지 않은 변경'으로 표시해 사용자가 고쳐 저장하게
+    한다. 조용한 대체가 아니라 보정 내역을 함께 알리는 것이고, 배치·백테스트는 그대로
+    ``load_settings`` 를 써서 깨진 값이면 실패한다.
+    """
+    doc = _load_doc()
+    pools = available_pools()
+    selected = str(pool or default_pool()).strip()
+    if selected not in pools:
+        raise ValueError(f"지원하지 않는 종목풀입니다: {pool}")
+    merged = {"pool": selected, **DEFAULT_SETTINGS, **dict((doc.get("settings_by_pool") or {}).get(selected) or {})}
+    try:
+        return validate_settings(merged), []
+    except ValueError:
+        coerced: list[str] = []
+        for key, label, options in _OPTION_FIELDS:
+            value = merged.get(key)
+            if value not in options:
+                coerced.append(f"{label} {value if value is not None else '없음'} → {options[0] if options[0] is not None else '없음'}")
+                merged[key] = options[0]
+        return validate_settings(merged), coerced
+
+
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
     normalized = validate_settings(settings)
     pool = normalized["pool"]
@@ -417,7 +442,6 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "DEFAULT_SETTINGS",
-    "ENTRY_PRIORITY_OPTIONS",
     "MAX_PER_INDUSTRY_OPTIONS",
     "DEFAULT_BACKTEST_MONTHS",
     "MIN_VALUE_MULT_OPTIONS",

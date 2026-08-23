@@ -11,7 +11,7 @@
  *   - `card`      : 카드 헤더에 붙는 최상위 탭 (card-header-tabs)
  *   - `underline` : 패널 안쪽 탭
  *
- * 설정값을 고르는 선택지(예: 진입 우선순위)는 탭이 아니라 토글(appSegmentedToggle)로 둔다 —
+ * 설정값을 고르는 선택지(예: 일별 보기 방식)는 탭이 아니라 토글(appSegmentedToggle)로 둔다 —
  * 화면 전환이 아니라 값 입력이기 때문이다.
  */
 

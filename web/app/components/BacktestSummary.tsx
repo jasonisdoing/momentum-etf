@@ -36,14 +36,11 @@ export function BacktestSummary({
   endDate,
   strategy,
   benchmark,
-  extra,
 }: {
   startDate: string;
   endDate: string;
   strategy: BacktestStats;
   benchmark: BacktestStats;
-  /** 참고 지수 등 추가로 나란히 둘 항목 (미국 풀의 FMTM 등). */
-  extra?: BacktestStats | null;
 }) {
   const excess =
     strategy.totalPct != null && benchmark.totalPct != null ? strategy.totalPct - benchmark.totalPct : null;
@@ -54,7 +51,6 @@ export function BacktestSummary({
       </span>
       <StatItem {...strategy} />
       <StatItem {...benchmark} />
-      {extra ? <StatItem {...extra} /> : null}
       {excess != null ? (
         <span>
           초과 <b style={{ color: signColor(excess) }}>{formatSignedPct(excess)}p</b>
