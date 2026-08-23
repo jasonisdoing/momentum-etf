@@ -8,8 +8,15 @@ import pandas as pd
 from config import CACHE_TTL_COMPUTE
 from services.stock_cache_service import get_stock_cache_meta_map
 from utils.data_loader import get_trading_days
+from utils.ma_options import ma_options_payload
+
+
+def _pool_country(ticker_type: str) -> str:
+    """풀 설정의 국가 — 이평선 선택지가 국가별이라 응답마다 실어 보낸다."""
+    from utils.settings_loader import get_ticker_type_settings
+
+    return str((get_ticker_type_settings(ticker_type) or {}).get("country_code") or "").strip().lower()
 from utils.market_cap_rank import market_cap_rank_of
-from utils.pool_settings_store import MA_DAY_OPTIONS
 from utils.rankings import (
     MONTHLY_RETURN_LABEL_COUNT,
     build_effective_ma_rules,
@@ -551,9 +558,8 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
         "ticker_types": configs_payload,
         "ticker_type": selected_ticker_type,
         "ma_rules": ma_rules,
-        # 이평선 일수 선택지 — 백엔드 상수가 단일 소스. 화면이 복사본을 들고 있으면
-        # 여기에 값이 추가될 때 그 화면만 옛 목록을 계속 보여준다.
-        "ma_day_options": list(MA_DAY_OPTIONS),
+        # 이평선 일수 선택지 — 백엔드 상수가 단일 소스(풀 국가별).
+        **ma_options_payload(_pool_country(selected_ticker_type)),
     }
 
 
@@ -622,7 +628,7 @@ def _compute_rank_data_payload(
         "ticker_types": configs_payload,
         "ticker_type": selected_ticker_type,
         "ma_rules": ma_rules,
-        "ma_day_options": list(MA_DAY_OPTIONS),
+        **ma_options_payload(_pool_country(selected_ticker_type)),
         "as_of_date": _serialize_datetime(effective_as_of_date),
         "monthly_return_labels": get_recent_monthly_return_labels(
             MONTHLY_RETURN_LABEL_COUNT,

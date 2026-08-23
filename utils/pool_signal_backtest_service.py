@@ -22,9 +22,9 @@ import pandas as pd
 from config import CACHE_START_DATE
 from utils.cache_utils import load_cached_close_series_bulk
 from utils.logger import get_app_logger
+from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
 from utils.moving_averages import calculate_moving_average
 from utils.pool_settings_store import (
-    MA_DAY_OPTIONS,
     get_pool_benchmark_ticker,
     get_pool_market_regime_index,
 )
@@ -535,8 +535,8 @@ def compute_pool_signal_backtest(
     # MA/보유수 파라미터는 종목풀 설정이 기본. 화면에서 넘긴 오버라이드가 있으면 그 값으로
     # 실험한다(저장은 하지 않음). 오버라이드도 허용값인지 반드시 검증한다.
     rule = get_ticker_type_ma_rules(pool_id)[0]
-    short_days = _resolve_int_override(short_ma_days, rule["short_ma_days"], MA_DAY_OPTIONS, "단기 이평선")
-    long_days = _resolve_int_override(long_ma_days, rule["long_ma_days"], MA_DAY_OPTIONS, "장기 이평선")
+    short_days = _resolve_int_override(short_ma_days, rule["short_ma_days"], SHORT_MA_OPTIONS, "단기 이평선")
+    long_days = _resolve_int_override(long_ma_days, rule["long_ma_days"], LONG_MA_OPTIONS, "장기 이평선")
     window = int(months) * _TRADING_DAYS_PER_MONTH
 
     pool_settings = get_ticker_type_settings(pool_id)

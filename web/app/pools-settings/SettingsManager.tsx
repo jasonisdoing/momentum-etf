@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { formatKstDateTime } from "@/lib/datetime";
-import { MA_DAY_OPTIONS } from "@/lib/ma-day-options";
+import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
 import { useToast } from "../components/ToastProvider";
 import { AppModal } from "../components/AppModal";
 
@@ -55,7 +55,8 @@ type PoolEntry = {
 type PoolSettingsResponse = {
   pools: PoolEntry[];
   constraints: {
-    ma_day_options: number[];
+    /** 이평선 선택지 — 국가별(풀의 country_code 로 고른다). 백엔드 utils/ma_options 가 단일 소스. */
+    ma_options_by_country: Record<string, MaOptionsPayload>;
     slippage_pct_options?: number[];
     market_indices?: MarketIndexOption[];
     editable_keys: string[];
@@ -427,7 +428,6 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     );
   }
   if (!data) return null;
-  const maDayOptions = data.constraints.ma_day_options?.length ? data.constraints.ma_day_options : MA_DAY_OPTIONS;
   const slippageOptions = data.constraints.slippage_pct_options?.length
     ? data.constraints.slippage_pct_options
     : DEFAULT_SLIPPAGE_PCT_OPTIONS;
@@ -550,13 +550,13 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         )}
         {renderField(
           "단기",
-          <SelectField value={draft.SHORT_MA_DAYS} options={maDayOptions} width={82} onChange={(value) => onChange("SHORT_MA_DAYS", value)} />,
-          { minWidth: 144, labelWidth: 44 },
+          <MaDaysSelect value={Number(draft.SHORT_MA_DAYS) || null} options={data.constraints.ma_options_by_country[draft.country_code]?.short_ma_options} onChange={(days) => onChange("SHORT_MA_DAYS", String(days))} />,
+          { minWidth: 160, labelWidth: 44 },
         )}
         {renderField(
           "장기",
-          <SelectField value={draft.LONG_MA_DAYS} options={maDayOptions} width={82} onChange={(value) => onChange("LONG_MA_DAYS", value)} />,
-          { minWidth: 144, labelWidth: 44 },
+          <MaDaysSelect value={Number(draft.LONG_MA_DAYS) || null} options={data.constraints.ma_options_by_country[draft.country_code]?.long_ma_options} onChange={(days) => onChange("LONG_MA_DAYS", String(days))} />,
+          { minWidth: 160, labelWidth: 44 },
         )}
       </div>
 

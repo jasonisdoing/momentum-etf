@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/run-next.mjs dev",
-    "prebuild": "node scripts/check-font-tokens.mjs && node scripts/check-ma-day-options.mjs",
+    "prebuild": "node scripts/check-font-tokens.mjs",
     "build": "next build",
     "start": "node scripts/run-next.mjs start"
   },

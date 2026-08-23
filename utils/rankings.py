@@ -24,7 +24,7 @@ from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
 from utils.moving_averages import get_moving_average_type
 from utils.perf_metrics import single_stock_backtest_stats
-from utils.pool_settings_store import MA_DAY_OPTIONS, get_pool_benchmark_ticker
+from utils.pool_settings_store import get_pool_benchmark_ticker
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
 
@@ -54,10 +54,10 @@ def _normalize_ma_rule(ticker_type: str, ma_rule_raw: Any) -> dict[str, Any]:
         raise AccountSettingsError(
             f"'{ticker_type}' 설정의 MA 일수는 정수여야 합니다: SHORT={short_raw}, LONG={long_raw}"
         ) from exc
-    if short_days not in MA_DAY_OPTIONS:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 'SHORT_MA_DAYS'가 허용값이 아닙니다: {short_days}")
-    if long_days not in MA_DAY_OPTIONS:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 'LONG_MA_DAYS'가 허용값이 아닙니다: {long_days}")
+    # 선택지 포함 여부는 종목풀 설정 **저장** 때만 검사한다(pool_settings_store). 읽기에서 막으면
+    # 선택지가 바뀐 직후 옛 값이 남은 풀 하나 때문에 순위·배치가 전부 죽는다.
+    if short_days < 1 or long_days < 1:
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 MA 일수는 1 이상이어야 합니다: SHORT={short_days}, LONG={long_days}")
 
     return {
         "order": 1,

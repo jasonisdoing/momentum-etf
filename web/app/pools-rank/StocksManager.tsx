@@ -5,7 +5,7 @@ import type { ColDef, RowClassParams } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
-import { MA_DAY_OPTIONS } from "@/lib/ma-day-options";
+import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
 import { formatPoolLabel } from "@/lib/pool-label";
 import {
   INDUSTRY_COLUMN_MIN_WIDTH,
@@ -116,8 +116,9 @@ type RankResponse = {
   ticker_types?: RankTickerType[];
   ticker_type?: string;
   ma_rules?: RankMaRule[];
-  /** 이평선 일수 선택지 — 백엔드 상수가 단일 소스. */
-  ma_day_options?: number[];
+  /** 이평선 일수 선택지 — 백엔드 상수(utils/ma_options)가 단일 소스. */
+  short_ma_options?: number[];
+  long_ma_options?: number[];
   as_of_date?: string | null;
   monthly_return_labels?: string[];
   rows?: RankRow[];
@@ -167,7 +168,7 @@ type RankToolbarCache = {
   ticker_types: RankTickerType[];
   ticker_type: string;
   ma_rule: RankMaRule | null;
-  ma_day_options: number[];
+  ma_options: Partial<MaOptionsPayload>;
 };
 
 type RankHeaderSummary = {
@@ -344,7 +345,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   );
   const [maRule, setMaRule] = useState<RankMaRule | null>(rankToolbarCache?.ma_rule ?? null);
   // 백엔드가 내려주는 선택지를 쓴다 — 화면이 복사본을 들고 있으면 값이 추가될 때 여기만 옛 목록이 남는다.
-  const [maDayOptions, setMaDayOptions] = useState<number[]>(rankToolbarCache?.ma_day_options ?? MA_DAY_OPTIONS);
+  const [maOptions, setMaOptions] = useState<Partial<MaOptionsPayload>>(rankToolbarCache?.ma_options ?? {});
   const [metricMode, setMetricMode] = useState<MetricMode>("basic");
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
@@ -383,15 +384,15 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setSelectedAccountId(nextAccountId);
     writeRememberedTickerType(nextAccountId);
     setMaRule(payload.ma_rules?.[0] ?? null);
-    const nextMaDayOptions = payload.ma_day_options?.length ? payload.ma_day_options : MA_DAY_OPTIONS;
-    setMaDayOptions(nextMaDayOptions);
+    const nextMaOptions = { short_ma_options: payload.short_ma_options, long_ma_options: payload.long_ma_options };
+    setMaOptions(nextMaOptions);
     setSelectedAsOfDate(toDateInputValue(payload.as_of_date));
     setMonthlyReturnLabels(payload.monthly_return_labels ?? []);
     rankToolbarCache = {
       ticker_types: payload.ticker_types ?? [],
       ticker_type: nextAccountId,
       ma_rule: payload.ma_rules?.[0] ?? null,
-      ma_day_options: nextMaDayOptions,
+      ma_options: nextMaOptions,
     };
     setAddingRow(null);
     addingTickerDraftRef.current = "";
@@ -418,14 +419,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       writeRememberedTickerType(nextAccountId);
     }
     setMaRule(payload.ma_rules?.[0] ?? null);
-    const nextMaDayOptions = payload.ma_day_options?.length ? payload.ma_day_options : MA_DAY_OPTIONS;
-    setMaDayOptions(nextMaDayOptions);
+    const nextMaOptions = { short_ma_options: payload.short_ma_options, long_ma_options: payload.long_ma_options };
+    setMaOptions(nextMaOptions);
 
     rankToolbarCache = {
       ticker_types: nextTickerTypes,
       ticker_type: nextAccountId,
       ma_rule: payload.ma_rules?.[0] ?? null,
-      ma_day_options: nextMaDayOptions,
+      ma_options: nextMaOptions,
     };
   }
 
@@ -1592,28 +1593,18 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                     <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">이평선</span>
                       <div className="appMaRuleRow">
-                        <select
-                          className="form-select appMaRuleSelect"
-                          value={String(maRule.short_ma_days)}
-                          onChange={(event) => handleMaRuleDaysChange("short_ma_days", Number(event.target.value))}
-                        >
-                          {maDayOptions.map((day) => (
-                            <option key={day} value={day}>
-                              단기 {day}일
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          className="form-select appMaRuleSelect"
-                          value={String(maRule.long_ma_days)}
-                          onChange={(event) => handleMaRuleDaysChange("long_ma_days", Number(event.target.value))}
-                        >
-                          {maDayOptions.map((day) => (
-                            <option key={day} value={day}>
-                              장기 {day}일
-                            </option>
-                          ))}
-                        </select>
+                        <MaDaysSelect
+                          title="단기 이평선"
+                          value={maRule.short_ma_days}
+                          options={maOptions.short_ma_options}
+                          onChange={(days) => handleMaRuleDaysChange("short_ma_days", days)}
+                        />
+                        <MaDaysSelect
+                          title="장기 이평선"
+                          value={maRule.long_ma_days}
+                          options={maOptions.long_ma_options}
+                          onChange={(days) => handleMaRuleDaysChange("long_ma_days", days)}
+                        />
                       </div>
                     </label>
                   ) : null}

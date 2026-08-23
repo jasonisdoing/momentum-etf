@@ -15,6 +15,7 @@ import { StrategyTuning, type TuningResult } from "../components/StrategyTuning"
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
+import { MaDaysSelect } from "../components/MaDaysSelect";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
@@ -1033,15 +1034,11 @@ export function NewHighClient() {
                 </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">이탈 이평선</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={String(draft.exit_ma_days)}
-                    onChange={(event) => setDraft({ ...draft, exit_ma_days: Number(event.target.value) })}
-                  >
-                    {constraints.exit_ma_options.map((n) => (
-                      <option key={n} value={n}>{n}일</option>
-                    ))}
-                  </select>
+                  <MaDaysSelect
+                    value={draft.exit_ma_days}
+                    options={constraints.exit_ma_options}
+                    onChange={(days) => setDraft({ ...draft, exit_ma_days: days })}
+                  />
                 </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">급증 하한</span>

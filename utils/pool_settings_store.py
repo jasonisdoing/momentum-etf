@@ -28,6 +28,7 @@ from typing import Any
 
 from config import CACHE_TTL_LIVE
 from utils.logger import get_app_logger
+from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
 
 logger = get_app_logger()
 
@@ -69,7 +70,6 @@ STRUCTURAL_KEYS: tuple[str, ...] = (
 # 판단한다(예: 전략 SM 의 업종상한 노출). 기존 문서는 미설정일 수 있다(선택 값).
 POOL_KIND_OPTIONS: tuple[str, ...] = ("stock", "etf")
 
-MA_DAY_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60, 80, 100, 120, 140, 160, 180, 240)
 # 편도 슬리피지(%) 선택지: 0.05 ~ 0.50, 0.05 단위. 필수라 빈 값 불가.
 SLIPPAGE_PCT_OPTIONS: tuple[float, ...] = (0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)
 
@@ -167,7 +167,7 @@ def _is_internal_pool_id(value: Any) -> bool:
     return str(value or "").strip().lower().startswith(INTERNAL_POOL_ID_PREFIX)
 
 
-def _normalize_pool_values(values: dict[str, Any], *, require_ticker_type: bool) -> dict[str, Any]:
+def _normalize_pool_values(values: dict[str, Any], *, require_ticker_type: bool, check_options: bool = True) -> dict[str, Any]:
     cleaned: dict[str, Any] = {}
     if require_ticker_type or "ticker_type" in values:
         cleaned["ticker_type"] = _normalize_ticker_type(values.get("ticker_type"))
@@ -212,7 +212,7 @@ def _normalize_pool_values(values: dict[str, Any], *, require_ticker_type: bool)
             cleaned["pool_kind"] = pool_kind
 
     editable_input = {k: values[k] for k in POOL_EDITABLE_KEYS if k in values}
-    cleaned.update(_validate_values(editable_input) if editable_input else {})
+    cleaned.update(_validate_values(editable_input, check_options=check_options) if editable_input else {})
 
     return cleaned
 
@@ -228,7 +228,8 @@ def _normalize_pool_doc(doc: dict[str, Any]) -> dict[str, Any]:
             f"`/pools-settings` 화면에서 값을 수정하세요."
         )
 
-    normalized = _normalize_pool_values({**doc, "ticker_type": pool_id}, require_ticker_type=True)
+    # 읽기 — 타입만 본다. 선택지 검사는 저장 경로(_validate_values(check_options=True))에서만.
+    normalized = _normalize_pool_values({**doc, "ticker_type": pool_id}, require_ticker_type=True, check_options=False)
     normalized["ticker_type"] = pool_id
     # 전략 사용 토글 — 기존 문서에 없으면 사용 안함 (명시적으로 켠 풀만 전략 대상).
     normalized["strategy_enabled"] = bool(doc.get("strategy_enabled", False))
@@ -301,8 +302,14 @@ def get_overrides() -> dict[str, dict[str, Any]]:
         return loaded
 
 
-def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
-    """저장 입력값을 검증/정규화한다. 잘못된 값은 PoolSettingsError."""
+def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> dict[str, Any]:
+    """입력값을 검증/정규화한다. 잘못된 값은 PoolSettingsError.
+
+    ``check_options`` — 선택지(이평선·슬리피지) 포함 여부 검사. **저장할 때만** 켠다.
+    DB 에서 읽을 때는 끈다: 선택지가 바뀐 뒤 옛 값이 남아 있거나(또는 서버가 옛 코드를 돌리거나)
+    하면, 읽기에서 막는 순간 그 풀을 쓰지 않는 배치·화면까지 전부 죽는다. 선택지 밖 값은
+    화면이 "(선택지 밖)"으로 보여주고 사용자가 고쳐 저장한다.
+    """
     cleaned: dict[str, Any] = {}
 
     for key in _INT_KEYS:
@@ -315,9 +322,10 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError) as exc:
             raise PoolSettingsError(f"{key} 은 정수여야 합니다: {raw}") from exc
 
-        if key in ("SHORT_MA_DAYS", "LONG_MA_DAYS"):
-            if num not in MA_DAY_OPTIONS:
-                options = ", ".join(str(day) for day in MA_DAY_OPTIONS)
+        if key in ("SHORT_MA_DAYS", "LONG_MA_DAYS") and check_options:
+            allowed = SHORT_MA_OPTIONS if key == "SHORT_MA_DAYS" else LONG_MA_OPTIONS
+            if num not in allowed:
+                options = ", ".join(str(day) for day in allowed)
                 raise PoolSettingsError(f"{key} 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
         elif key == "TOP_N_HOLD":
             if not (1 <= num <= 100):
@@ -332,7 +340,7 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
             num = round(float(raw), 2)
         except (TypeError, ValueError) as exc:
             raise PoolSettingsError(f"{key} 은 숫자여야 합니다: {raw}") from exc
-        if num not in {round(option, 2) for option in SLIPPAGE_PCT_OPTIONS}:
+        if check_options and num not in {round(option, 2) for option in SLIPPAGE_PCT_OPTIONS}:
             options = ", ".join(f"{option:g}" for option in SLIPPAGE_PCT_OPTIONS)
             raise PoolSettingsError(f"{key} 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
         cleaned[key] = num

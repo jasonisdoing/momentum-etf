@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { MaDaysSelect } from "../components/MaDaysSelect";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 
@@ -10,6 +11,7 @@ type AlarmAccount = {
   name: string;
   icon: string;
   order: number;
+  country_code: string;
   ma_enabled: boolean;
   ma_short_days: number;
   ma_long_days: number;
@@ -19,9 +21,9 @@ type AlarmAccount = {
   stoploss_icon: string;
 };
 type AlarmView = {
-  ma_days_options: number[];
+  /** 이평선 선택지 — 국가별(계좌의 country_code 로 고른다). */
+  ma_options_by_country: Record<string, { short_ma_options: number[]; long_ma_options: number[] }>;
   stoploss_pct_options: number[];
-  ma_type: string;
   accounts: AlarmAccount[];
   error?: string;
 };
@@ -113,20 +115,15 @@ export function AlarmsClient() {
       ? { short_days: a.ma_short_days, long_days: a.ma_long_days }
       : { threshold_pct: a.stoploss_threshold_pct };
 
+    // 다른 화면과 같은 공용 이평선 셀렉트 — 표기는 "20일"로 통일(단기/장기는 툴팁).
     const daysSelect = (key: "short_days" | "long_days", label: string) => (
-      <select
-        style={selectStyle}
+      <MaDaysSelect
         title={`${label} 이평선`}
         value={currentValues[key]}
+        options={view?.ma_options_by_country[a.country_code]?.[key === "short_days" ? "short_ma_options" : "long_ma_options"]}
         disabled={isBusy}
-        onChange={(e) =>
-          void saveAccount(a.account_id, alarm_type, enabled, { ...currentValues, [key]: Number(e.target.value) })
-        }
-      >
-        {(view?.ma_days_options ?? []).map((o) => (
-          <option key={o} value={o}>{`${label} ${view?.ma_type ?? ""} ${o}일`}</option>
-        ))}
-      </select>
+        onChange={(days) => void saveAccount(a.account_id, alarm_type, enabled, { ...currentValues, [key]: days })}
+      />
     );
 
     return (
@@ -152,7 +149,8 @@ export function AlarmsClient() {
           </>
         ) : (
           <select
-            style={selectStyle}
+            className="form-select form-select-sm"
+            style={{ width: 96 }}
             value={a.stoploss_threshold_pct}
             disabled={isBusy}
             onChange={(e) =>
