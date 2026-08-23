@@ -28,7 +28,6 @@ import {
   formatHiddenAmount,
   formatKrw,
   formatNumber,
-  formatPrice,
   getSignedClass,
   isDetailRow,
   isTotalRow,
@@ -193,7 +192,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       total_assets_krw: totalAssets,
       valuation_krw: totalValuation,
       total_principal: totalPrincipal,
-      cash_edit_value: totalCash,
+      cash_krw: totalCash,
       target_ratio_total: null,
       holdings_count: totalHoldingsCount,
       cash_ratio: totalAssets > 0 ? (totalCash / totalAssets) * 100 : 0,
@@ -212,10 +211,10 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         ...summary,
         id: summary.account_id,
         rowType: "main",
-        cash_edit_value:
-          String(summary.currency || "KRW").toUpperCase() === "AUD"
-            ? Number(summary.cash_balance_native ?? 0)
-            : Number(summary.cash_balance_krw ?? 0),
+        // 다른 금액 열(총자산·평가액·원금)과 같은 원화 기준. 예전에는 계좌 통화의 native
+        // 금액을 섞어 넣고 통화 기호로 찍어서, 미국 계좌의 원화 현금이 "$60,927,623.99"
+        // 처럼 달러로 보였다. 통화별 잔액은 계좌를 펼쳐 상단 박스에서 본다.
+        cash_krw: Number(summary.cash_balance_krw ?? 0),
       };
 
       if (expandedId !== summary.account_id) {
@@ -329,14 +328,11 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return summary;
         }
 
-        const cashEditValue = Number((row as Extract<ParentGridRow, { rowType: "main" }>).cash_edit_value ?? 0);
-        const isAud = String(summary.currency || "KRW").toUpperCase() === "AUD";
+        // 이 그리드에서 편집 가능한 값은 '총 원금' 뿐이다 — 현금은 계좌를 펼쳐 통화별로
+        // 저장하므로 여기서 건드리지 않는다(건드리면 원화·native 가 서로 어긋난다).
         return {
           ...summary,
           total_principal: Number(row.total_principal ?? summary.total_principal),
-          cash_balance_krw: isAud ? summary.cash_balance_krw : cashEditValue,
-          cash_balance_native: isAud ? cashEditValue : summary.cash_balance_native,
-          total_assets_krw: summary.valuation_krw + (isAud ? summary.cash_balance_krw : cashEditValue),
         };
       }),
     );
@@ -648,20 +644,15 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         params.data && !isDetailRow(params.data) ? formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0)) : "",
     },
     {
-      field: "cash_edit_value",
+      field: "cash_krw",
       headerName: "현금",
       minWidth: 124,
       flex: 1,
       type: "rightAligned",
-      cellRenderer: (params: { data?: ParentGridRow; value?: number }) => {
-        if (!params.data || isDetailRow(params.data)) {
-          return "";
-        }
-        if (isTotalRow(params.data)) {
-          return formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0));
-        }
-        return formatHiddenAmount(showAmounts, formatPrice(params.value ?? 0, params.data.currency));
-      },
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data)
+          ? formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0))
+          : "",
     },
     {
       field: "daily_profit",
