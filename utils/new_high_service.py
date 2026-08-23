@@ -7,7 +7,7 @@
    창은 거래일 수가 아니라 **달력 52주**다(`HIGH_WINDOW_WEEKS`). 화면 문구도 이
    값에서 만들어, 창을 바꾸면 문구가 따라온다.
 3. 청산: 아래 둘 중 **먼저 걸리는 쪽**. 판정은 종가, 체결은 다음 거래일 시가.
-     ① 진입가 대비 손절선(기본 -8%)
+     ① 진입가 대비 손절선(−7% 또는 −10%)
      ② 이탈 이동평균(기본 20일) 종가 하회
    목표가(익절)는 두지 않는다 — 오르는 종목은 계속 들고 간다.
 4. 자리 배분: 동시 보유 상한 top_n, 균등 배분. 신호가 자리보다 많으면
@@ -18,8 +18,8 @@
    손절·이탈에 안 걸린 살아있는 추세라는 뜻이라, 교체는 청산 규칙을 앞질러 이익
    종목을 자르고 슬리피지 왕복 비용만 쌓는다.
 
-`/strategy-momentum` 의 구조를 본떴지만 공용 모듈로 묶지 않았다 — 그쪽은 폐기 예정이라
-지금 묶으면 나중에 그 연결을 다시 끊어야 한다.
+설정은 MongoDB `system_config.new_high_settings` 에 풀별로 저장한다(`settings_by_pool`).
+선택지 밖 저장값 보정·튜닝은 모멘텀과 같은 공용 모듈(`strategy_settings`, `strategy_tuning`)을 쓴다.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from typing import Any
 import pandas as pd
 
 from utils.price_series import positive_prices as _positive
+from utils.strategy_settings import coerce_to_options
 
 # 신고가 판정 창 — 거래일 수가 아니라 달력 기간으로 자른다. 거래일로 고정하면
 # 공휴일 수에 따라 실제 기간이 흔들려 이름과 어긋난다(12개월 × 20거래일 = 240거래일은
@@ -400,27 +401,15 @@ _OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
 
 
 def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], list[str]]:
-    """화면용 로드 — 선택지가 바뀌어 저장값이 목록 밖이면 **첫 선택지로 보정**하고 무엇을
-    바꿨는지 돌려준다. 화면은 이를 '저장되지 않은 변경'으로 표시해 사용자가 고쳐 저장하게
-    한다. 조용한 대체가 아니라 보정 내역을 함께 알리는 것이고, 배치·백테스트는 그대로
-    ``load_settings`` 를 써서 깨진 값이면 실패한다.
-    """
+    """화면용 로드 — 선택지 밖 저장값은 첫 선택지로 보정하고 내역을 함께 돌려준다
+    (``utils.strategy_settings.coerce_to_options``). 배치·백테스트는 ``load_settings`` 를 쓴다."""
     doc = _load_doc()
     pools = available_pools()
     selected = str(pool or default_pool()).strip()
     if selected not in pools:
         raise ValueError(f"지원하지 않는 종목풀입니다: {pool}")
     merged = {"pool": selected, **DEFAULT_SETTINGS, **dict((doc.get("settings_by_pool") or {}).get(selected) or {})}
-    try:
-        return validate_settings(merged), []
-    except ValueError:
-        coerced: list[str] = []
-        for key, label, options in _OPTION_FIELDS:
-            value = merged.get(key)
-            if value not in options:
-                coerced.append(f"{label} {value if value is not None else '없음'} → {options[0] if options[0] is not None else '없음'}")
-                merged[key] = options[0]
-        return validate_settings(merged), coerced
+    return coerce_to_options(merged, _OPTION_FIELDS, validate_settings)
 
 
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
