@@ -16,11 +16,10 @@ from utils.new_high_service import (
     pool_options,
     save_settings,
 )
+from utils.pool_signal_backtest_service import get_month_options
 
 router = APIRouter(prefix="/internal/strategy-new-high", tags=["strategy-new-high"])
 
-# 백테스트 기간 선택지 — 짧은 구간은 표본이 모자라 의미가 없다.
-_MONTH_OPTIONS = [6, 12, 24, 36, 48, 60]
 
 
 def _constraints(pool: str) -> dict:
@@ -36,7 +35,8 @@ def _constraints(pool: str) -> dict:
         "exit_ma_options": list(short_ma_options(country)),
         "min_value_mult_options": list(MIN_VALUE_MULT_OPTIONS),
         "max_per_industry_options": list(MAX_PER_INDUSTRY_OPTIONS),
-        "month_options": list(_MONTH_OPTIONS),
+        # 기간 선택지 — 종목풀 백테스트와 같은 목록이 단일 소스(전략별로 따로 두지 않는다).
+        "month_options": get_month_options(),
         # 신고가 창 — 화면 문구("52주 신고가")를 이 값에서 만든다.
         "high_window_weeks": HIGH_WINDOW_WEEKS,
     }

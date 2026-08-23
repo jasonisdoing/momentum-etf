@@ -71,7 +71,15 @@ def _pool_options(pools: list[str]) -> list[dict[str, Any]]:
 
 
 # 백테스트 기간 선택지 — 신고가 화면과 동일한 목록 (상한 60개월 = 신고가 엔진의 최대).
-MONTH_OPTIONS = (6, 12, 24, 36, 48, 60)
+def month_options() -> list[int]:
+    """기간 선택지 — 종목풀 백테스트와 같은 목록(`get_month_options`)이 단일 소스.
+
+    전략별로 목록을 따로 두면 화면마다 고를 수 있는 기간이 달라진다.
+    """
+    from utils.pool_signal_backtest_service import get_month_options
+
+    return get_month_options()
+
 
 # 배분 기본값(%) — 계좌 설정에 저장이 없을 때 쓰는 시스템 기본 배분이며, 지금까지의
 # 동작(모멘텀 50 : 신고가 50, 비워 두는 현금 없음)과 같다. 화면이 이 값을 그대로 보여준다.
@@ -132,7 +140,7 @@ def mix_meta() -> dict[str, Any]:
     accounts = mix_accounts()
     return {
         "accounts": accounts,
-        "month_options": list(MONTH_OPTIONS),
+        "month_options": month_options(),
         # 기본 선택 — 목록의 첫 계좌. 화면이 마지막 선택을 로컬스토리지에 기억한다.
         "account_id": accounts[0]["account_id"] if accounts else "",
     }
@@ -1172,8 +1180,9 @@ def run_mix_backtest(pool: str | None = None, months: int | None = None) -> dict
     if months is None:
         months = min(int(sm_settings["backtest_months"]), int(nh_settings["backtest_months"]))
     months = int(months)
-    if months not in MONTH_OPTIONS:
-        raise ValueError(f"'months' 는 {list(MONTH_OPTIONS)} 중 하나여야 합니다 (받은 값: {months})")
+    allowed = month_options()
+    if months not in allowed:
+        raise ValueError(f"'months' 는 {allowed} 중 하나여야 합니다 (받은 값: {months})")
 
     logger.info("[STRATEGY-MIX] %s 합성 백테스트 시작 (%d개월)", pool_norm, months)
     from utils.new_high_backtest import load_context as nh_load_context

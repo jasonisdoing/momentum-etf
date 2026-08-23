@@ -15,16 +15,16 @@ router = APIRouter(prefix="/internal/strategy-momentum", tags=["strategy-momentu
 
 
 def _month_options(settings: dict) -> list[int]:
-    """기간 선택지 — 종목풀 백테스트와 같은 목록을 쓰되, 이 전략이 실제로 돌릴 수
-    있는 개월 수까지만 남긴다. 상한은 벤치마크 데이터와 전략 장기 이평선이 정한다."""
+    """기간 선택지 — 시스템 공용 목록에서 이 전략이 실제로 돌릴 수 있는 개월 수까지만 남긴다.
+
+    상한은 벤치마크 데이터와 전략 장기 이평선이 정한다. 예전에는 그 상한값 자체(예 87개월)를
+    선택지 끝에 덧붙였는데, 풀·이평선에 따라 값이 달라져 화면마다 선택지가 어긋났다.
+    """
     from utils.momentum_service import available_backtest_months, load_benchmark_close
     from utils.pool_signal_backtest_service import get_month_options
 
     limit = available_backtest_months(load_benchmark_close(settings["pool"]), int(settings["long_ma_days"]))
-    options = [month for month in get_month_options() if month <= limit]
-    if limit not in options:
-        options.append(limit)
-    return sorted(options)
+    return [month for month in get_month_options() if month <= limit]
 
 
 def _ma_rule_payload(settings: dict) -> dict:
