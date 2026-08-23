@@ -1,420 +1,102 @@
-# 개발자 가이드 (Developer Guide)
+# 개발자 가이드
 
-이 문서는 Momentum ETF 순위 시스템의 아키텍처, 데이터 흐름, 그리고 개발 시 반드시 지켜야 할 정합성 원칙을 설명합니다.
+유지보수를 위한 문서다. 무엇이 있고 어디가 단일 소스인지, 코드만 봐서는 알 수 없는 결정만 적는다.
+화면 사용법·설정값·컬럼은 적지 않는다 — 코드가 단일 소스다.
 
-## ⚠️ 호주 티커(ASX) 식별 규칙 — 모든 경로에서 일관 적용
+## 1. 구조
 
-호주 시장(ASX) 의 종목/ETF 는 미국 티커와 영문 알파벳이 겹치는 경우가 흔하다 (예: `TECH`, `HACK`, `ACDC` 는 호주 ASX 와 미국 양쪽에 다른 종목으로 존재). **티커만으로는 둘을 구분할 수 없으므로**, 다음 규칙을 시스템 전 구간에서 반드시 지킨다.
-
-### 규칙
-
-1. **저장·전달 시점부터 호주 종목 ticker 는 `ASX:` 접두사를 강제** 부착한다.
-   - 예: `TECH` (X) / `ASX:TECH` (O)
-   - 예: `HACK` (X) / `ASX:HACK` (O)
-2. **모든 내부 데이터에서** 호주 종목은 `ASX:` 가 붙은 형태로 유통된다. 메모리·캐시뿐 아니라
-   **DB 저장 값과 API 응답까지 포함**한다. ETF 자체는 물론 **ETF 구성종목(holdings)** 도 같다
-   (예: SYI 의 구성종목은 `NAB` 이 아니라 `ASX:NAB` 으로 저장한다).
-3. **화면에도 `ASX:` 를 그대로 노출**한다. 표시 단계에서 접두사를 벗기지 않는다 —
-   사용자가 미국 동명 티커와 구분할 수 있어야 한다.
-4. **접두사를 벗기는 것은 외부로 나갈 때뿐**이다. 외부 소스마다 요구 형식이 다르므로
-   `utils/asx_ticker.py` 의 변환 함수를 쓴다.
-   - yfinance: `to_yahoo_symbol("ASX:NAB")` → `NAB.AX`
-   - BetaShares CSV / Vanguard API / QuoteAPI: `strip_asx_prefix("ASX:NAB")` → `NAB`
-5. **국가 분류 / 가격 조회 분기 / 라우팅** 은 ticker 의 `ASX:` 패턴을 직접 보고 호주로 식별한다.
-6. **위반 시 미국 종목과 혼동되어 잘못된 가격이 표시**된다 (실제로 과거에 `TECH`, `HACK`, `ACDC` 등이 미국 토스 API 로 조회되어 호주 시장 미개장임에도 미국 변동률이 표시되는 버그 발생).
-
-### 공용 유틸 — `utils/asx_ticker.py`
-
-접두사 부착·제거를 각 파일에서 `.replace("ASX:", "")` 로 인라인 처리하지 말고 이 모듈을 쓴다.
-
-| 함수 | 용도 |
-| --- | --- |
-| `ensure_asx_prefix(t)` | `NAB` / `NAB.AX` / `ASX:NAB` → `ASX:NAB` (호주임을 아는 경우에만 사용) |
-| `strip_asx_prefix(t)` | `ASX:NAB` → `NAB` (외부 API 호출 직전) |
-| `to_yahoo_symbol(t)` | `ASX:NAB` → `NAB.AX` (yfinance 조회) |
-| `from_yahoo_symbol(s)` | `NAB.AX` → `ASX:NAB`, 호주가 아니면 `None` |
-| `is_asx_ticker(t)` | 호주 종목 여부 |
-
-### 구성종목의 상장 국가 판별
-
-구성종목 티커만으로는 상장 시장을 알 수 없다(`NAB` 은 점 없는 영문이라 미국과 구분 불가).
-**수집 소스가 알려주는 국가 정보를 반드시 보존**하고, 그걸 근거로 `ASX:` 를 붙인다. 추정하지 않는다.
-
-| 소스 | 국가 신호 | 보존 필드 |
+| 층 | 위치 | 역할 |
 | --- | --- | --- |
-| yfinance | 원본 심볼 접미사 (`NAB.AX`) | `yahoo_symbol` |
-| BetaShares CSV | `Currency` / `Country` / `Asset Class` 열 | `listing_currency`, `listing_country`, `asset_class` |
-| Vanguard API | `countryCode` 필드 | `listing_country_code` |
+| 웹 | `web/app/<화면>/`, `web/app/api/` | Next.js 화면과 API 프록시. 로직 없는 프록시는 `web/lib/fastapi-proxy.ts` 의 `createFastApiProxy` 로 쓴다 |
+| 백엔드 | `fastapi_app/routes/` | 내부 FastAPI(`/internal/...`). 웹만 호출한다 |
+| 도메인 서비스 | `utils/<도메인>_service.py` | 화면·API·스크립트가 공용으로 쓰는 계산·오케스트레이션 |
+| 저장/IO | `utils/<도메인>_store.py` · `_io.py` | DB·파일 읽기/쓰기 |
+| 외부 연동 | `services/` | 외부 API 1소스 1파일, 자체 TTL 캐시 포함. 화면·유틸은 외부를 직접 부르지 않는다 |
+| 순수 계산 | `core/strategy/` | 네트워크·DB 없는 지표 계산 |
+| 배치 | `scripts/` + `infra/cron/crontab` + `infra/server_scheduler.py` | 운영은 [server_infrastructure.md](server_infrastructure.md) |
+| 정적 데이터 | `data/` | 거래일 캘린더 등 연 단위로만 바뀌는 것. 서버에선 읽기 전용 마운트 |
+| 레버리지 | `leverage/` | 폐기된 `leverage-switching` 앱에서 이전. 자체 엔진, 시세·슬랙은 `utils` 재사용 |
 
-`Asset Class` 가 `Cash` 인 항목(`AUD - AUSTRALIA DOLLAR`)은 상장 종목이 아니므로 접두사를 붙이지 않는다.
+기존 파일은 옮기지 않는다 — 신규 코드부터 위 기준으로 수렴시킨다.
 
-### 적용 위치
-
-- `_normalize_ticker` 류의 정규화 함수: ASX 종목 진입 시 접두사 부착
-- `_append_account_components` 등 ETF·구성종목 통합 진입점: row 의 country_code 또는 currency 가 호주이면 ticker 에 `ASX:` 자동 부착
-- `utils/stock_meta_updater.fetch_*_holdings`: 구성종목 수집 시 호주 상장이면 `ASX:` 부착
-- `services/component_price_service.enrich_component_prices`: 가격 조회 분기에서 `ASX:` 접두사 인식 → 호주 QuoteAPI 로 라우팅 (`.AX` 와 동등 처리)
-- `_classify_holding_country`: ticker 가 `ASX:` 로 시작하면 즉시 `au` 로 분류
-
-### 새 진입점 추가 시 체크리스트
-
-- [ ] 외부에서 들어오는 호주 종목 ticker 에 `ASX:` 가 붙어 있는가?
-- [ ] 정규화 함수가 `ASX:` 를 보존하는가? (대문자/소문자 변환은 prefix 도 정규화)
-- [ ] 가격 조회 시 `ASX:` 접두사로 호주 시장 라우팅이 되는가?
-- [ ] 외부 API 호출 직전에만 `utils/asx_ticker` 변환 함수로 벗기는가?
-- [ ] DB 에 저장하는 값에도 접두사가 붙어 있는가? (화면 표시용으로 벗겨 저장하지 않는다)
-
-## 0. 로컬 실행
-
-개발과 자동 배치는 **두 개의 터미널** 로 나누어 실행합니다.
+### 로컬 실행
 
 ```bash
-# 터미널 1 — 웹 (FastAPI + Next dev)
-python run_local_dev.py
-
-# 터미널 2 — 배치 스케줄러 (APScheduler)
-python infra/server_scheduler.py
+python run_local_dev.py            # FastAPI(8000) + Next dev(3000)
+python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APScheduler)
 ```
 
-- `run_local_dev.py` 는 FastAPI(`uvicorn`, 포트 8000) 와 Next dev(`npm run dev`, 포트 3000) 를 함께 띄웁니다.
-- `infra/server_scheduler.py` 는 `infra/cron/crontab` 을 파싱해 APScheduler 로 자동 배치를 돌립니다.
-  - `APP_TYPE=Local` 로 자동 설정되어 `batch_locks` 의 owner 가 구분됩니다.
-  - 노트북이 꺼져 있었던 시간의 누락 분은 따라잡지 않습니다 (다음 예약 시각부터 동작).
-  - Ctrl+C 로 깔끔히 종료됩니다.
-- VM 의 cron 은 제거되어 있으므로, **자동 배치를 돌리려면 터미널 2 가 켜져 있어야** 합니다.
-- 수동 1회 실행은 `/system` 화면의 버튼으로도 가능하며, 동일한 `batch_locks` 락을 사용하므로 자동 실행과 충돌하지 않습니다.
+## 2. 화면과 모듈
 
-### ⚠️ 배치 추가·삭제 시 반드시 함께 고쳐야 하는 곳
-
-배치 목록(action 키)이 **백엔드·프론트 4곳에 각각 하드코딩**돼 있습니다. 한 곳만 고치면
-`/batch` 화면에는 보이지만 버튼을 누를 때 **"유효하지 않은 action 입니다"(400)** 가 납니다.
-백엔드에서 목록을 내려주지 않으므로, 아래를 모두 같은 값으로 맞춰야 합니다.
-
-| 위치 | 심볼 | 역할 |
+| 화면 | 역할 | 서비스 |
 | --- | --- | --- |
-| `utils/system_service.py` | `SystemAction` (Literal) | 서버 검증 |
-| `utils/system_service.py` | `SCHEDULE_ROWS` | `/batch` 화면 표시·다음 실행 계산 |
-| `utils/system_service.py` | `_SCRIPT_BY_ACTION` | action → 실행 스크립트 |
-| `web/app/api/system/route.ts` | `allowed` Set | **여기서 400 이 난다** |
-| `web/lib/system-store.ts` | `SystemAction` 타입 | 프록시 타입 |
-| `web/app/batch/SystemManager.tsx` | `SystemJobKey` 타입 | 화면 버튼 타입 |
-| `infra/cron/crontab` | cron 라인 | **자동 실행의 단일 진실 소스** |
+| `/pools-rank` | 종목풀 순위(추세%)와 종목 관리 | `utils/rankings.py`, `core/strategy/metrics.py` |
+| `/pools-settings` | 종목풀 설정 | `utils/pool_settings_store.py` |
+| `/pools-backtest` | 종목풀 백테스트 | `utils/pool_signal_backtest_service.py` |
+| `/strategy-momentum` | 모멘텀 전략(주간) 선정·백테스트·튜닝 | `utils/momentum_service.py`, `momentum_backtest.py`, `momentum_tuning.py` |
+| `/strategy-new-high` | 신고가 돌파 전략 선정·백테스트·튜닝 | `utils/new_high_service.py`, `new_high_backtest.py`, `new_high_tuning.py` |
+| `/strategy-mix` | 두 전략 합성 — 목표 비중·오늘의 액션·백테스트(열람 전용) | `utils/strategy_mix_service.py` |
+| `/leverage-settings` | 레버리지 이동평균 크로스 설정·튜닝 | `leverage/` |
+| `/alarms` | 보유종목 이동선 이탈·손절 알림 설정 | `utils/holdings_alarm_service.py` |
+| `/assets`, `/asset-helper`, `/holdings*` | 자산·보유·목표 비중 | `utils/asset_helper_service.py`, `portfolio_master` |
+| `/daily`, `/weekly`, `/monthly`, `/yearly`, `/dashboard`, `/snapshots` | 일별 원장과 집계 | `utils/daily_fund_service.py` 등 |
+| `/market-trend`, `/market`, `/live-24h` | 시장 지수 추세·지표 | `services/toss_market_service.py` 등 |
+| `/kor-market-stock`, `/us-market-stock`, `/aus-market-stock`, `/kor-market-etf` | 시장별 종목 탐색·종목풀 추가 | `index_constituents`, KIS 마스터 |
+| `/ticker`, `/compare` | 개별 종목 상세·비교 | `services/etf_holdings_service.py` |
+| `/batch`, `/system` | 배치 수동 실행·상태 | `utils/system_service.py`, `utils/batch_queue.py` |
+| `/m` | 폰 전용. 모바일 전용 API 는 만들지 않는다(`web/app/m/mobile-data.ts` 가 기존 API 합성) | |
 
-체크리스트:
+전략 공용 모듈:
+- `utils/strategy_settings.py` — 선택지 밖 저장값을 첫 선택지로 보정하고 내역을 돌려준다(화면만; 배치·백테스트는 엄격 검증).
+- `utils/strategy_tuning.py` — 선택지 전 조합 백테스트의 지표·축별 평균·병렬 실행. 부모가 데이터를 프리로드해 spawn 워커에 넘긴다(워커 동시 DB 읽기로 Mongo 타임아웃 났던 것 때문).
 
-- [ ] 위 7곳을 모두 갱신했는가? (`SCHEDULE_ROWS` 의 `schedule` 은 `crontab` 과 동기화)
-- [ ] `crontab` 의 job name 이 action 키와 정확히 같은가? (스케줄러가 이 값으로 큐에 넣는다)
-- [ ] 스케줄러가 무인자 스크립트만 실행하므로 `scripts/` 래퍼를 만들었는가?
-- [ ] `/batch` 화면에서 수동 실행 버튼이 400 없이 동작하는가?
+## 3. DB 단일 소스
 
-과거 누락 사례: `aus_market_stocks` 가 `system-store.ts` 에, `live_24h_slack` 이
-`SystemManager.tsx` 에 빠져 있었습니다(2026-07-30 일괄 보완).
+| 컬렉션 / 문서 | 내용 |
+| --- | --- |
+| `pool_settings` | 종목풀 정의(국가·통화·벤치마크·풀 성격 stock/etf·순위용 이평). 화면 `/pools-settings` |
+| `account_settings` | 계좌 정의·합성 배분. 추가/삭제는 DB 직접 |
+| `stock_meta` | 종목 관리 원본(버킷·종목명). 삭제는 즉시 하드 딜리트 |
+| `stock_cache_meta` | 저빈도 메타(`meta_cache`)·ETF 구성종목(`holdings_cache`) |
+| 가격 캐시 | `utils/cache_utils.py` Parquet → Mongo. 요청한 풀만 읽고 다른 풀로 fallback 하지 않는다 |
+| `index_constituents` | SP500/NDX100/ASX200 구성종목. 파일이 아닌 DB 인 이유: 서버 `data/` 가 읽기 전용 |
+| `system_config.momentum_settings` / `new_high_settings` | 전략 설정, 풀별 `settings_by_pool` |
+| `leverage_config` / `leverage_state` | 레버리지 전략 설정·상태 |
+| `portfolio_master` | 계좌 보유·목표 비중·자산 헬퍼 설정(단일 컬렉션) |
+| `daily_fund_data` → `weekly_fund_data` / `monthly_fund_data` | 일별 원장이 기준, 주/월은 재집계 |
+| `batch_locks`, `batch_queue` | 배치 락·큐 |
 
-## 1. 시스템 아키텍처
+거래일 캘린더만 파일(`data/country/<국가>/market_calendars.json`)이다. 없거나 범위 밖이면 에러.
 
-### 새 파일 배치 규칙 (신규 코드부터 적용)
+## 4. 지켜야 할 규칙
 
-새 모듈을 만들 때는 아래 기준으로 위치를 정합니다. **기존 파일은 옮기지 않습니다** —
-대이동은 임포트 회귀·이력 단절 비용이 이득보다 크므로, 신규부터 이 규칙으로 수렴시킵니다.
+- **암묵적 기본값 금지.** 설정이 없으면 에러. 화면은 폼 대신 실패 사유를 보여준다.
+- **호주 티커는 `ASX:` 접두사.** 미국과 영문 티커가 겹친다(`TECH`, `HACK`). DB·API·화면까지 붙인 채로 유통하고, 외부 호출 직전에만 `utils/asx_ticker.py` 로 벗긴다. 구성종목의 상장 국가는 수집 소스 신호로만 판별(추정 금지).
+- **캐시 TTL 은 `config.py` 상수 4개**(`CACHE_TTL_LIVE/COMPUTE/SLOW/META`)와 `utils/ttl_cache.TtlCache` 만 쓴다.
+- **실시간 가격 외에는 종목 캐시에서 읽는다.** 화면 진입 시 외부 원천을 다시 부르지 않는다.
+- **최신 거래일 기준 날짜는 모든 시장 공통 한국 날짜.**
+- **고정 종목(`exclude_from_ranking`)** 은 비교 기준일 뿐 — 모든 선정·백테스트 유니버스에서 제외.
+- **배치 추가·삭제는 7곳을 함께 고친다**: `utils/system_service.py` 의 `SystemAction`·`SCHEDULE_ROWS`·`_SCRIPT_BY_ACTION`, `web/app/api/system/route.ts` 의 `allowed`, `web/lib/system-store.ts`, `web/app/batch/SystemManager.tsx`, `infra/cron/crontab`. 한 곳이 빠지면 `/batch` 에서 400.
+- **폐기는 코드·DB·crontab·문서까지 전부 제거.**
+- 실시간 값을 주는 Next API 는 응답에 `Cache-Control: no-store`.
 
-| 성격 | 위치 | 예 |
+### 자산 수익률 정의
+
+- 기간 수익률 = `period_profit / 직전 기간 총자산`. 분자는 누적손익 차분이라 입출금이 제거된다.
+- 누적 수익률 = `cumulative_profit / total_principal` (ROI).
+- 합계 행은 `/daily` 입력 입출금으로 정확하고, 계좌별 행은 스냅샷 원금 차이로 추정한다 — 인출일에 원금 수정을 같은 날 반영하지 않으면 왜곡된다.
+- 프론트는 백엔드 값을 그대로 쓴다(자체 계산 금지).
+
+## 5. 화면 UI 표준
+
+`/pools-rank` 레이아웃이 기준. 메뉴 헤더(메뉴명 / 요약) → 메인 헤더(`appMainHeader`: 주 제어 / 특별 버튼) → CRUD 액션 헤더(버튼 2개 이상일 때만 별도 줄) → 테이블(AG Grid, `AppAgGrid`).
+컨트롤 높이 30px 은 `globals.css` 공통 클래스에서만 정한다. 공용 셀 표기는 `web/lib/grid-cells.tsx`. 업종·섹터 노출은 풀 성격(`pool_kind`)이 기준.
+
+## 6. 겪은 문제
+
+| 증상 | 원인 | 조치 |
 | --- | --- | --- |
-| 순수 계산 (네트워크·DB 없음) | `core/` | `core/strategy/metrics.py` |
-| 외부 API 어댑터 (1소스 1파일) | `services/` | `services/price_service.py` |
-| 화면·도메인 오케스트레이션 | `utils/<도메인>_service.py` | `utils/momentum_service.py` |
-| 저장/IO (DB·파일) | `utils/<도메인>_store.py` · `_io.py` | `utils/pool_settings_store.py` |
-| 웹 공용 로직/표기 | `web/lib/` | `web/lib/grid-cells.tsx` |
-| 설정 파일(정적 데이터) | `data/` | `data/market_holiday_overrides.json` |
-
-참고: `web/lib/bucket_theme.json` 은 버킷 테마의 단일 소스로, 웹(정적 임포트)과
-파이썬(`config.py`)이 같은 파일을 읽습니다.
-
-### 모듈 구조
-*   `core/strategy/`: 지표/추세/비중 계산 공용 전략 유틸
-*   `services/`: **외부 API/데이터 연동 통합 계층**
-    *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시. 환율은 **8개 통화 모두 야후 일괄 조회**(`KRW=X` 등, 5분 TTL) — 현재가와 전일 종가가 같은 소스라 변동률 기준이 어긋나지 않습니다. (토스 USD 오버레이는 스팟과 7원가량 벌어져 제거)
-    *   `toss_market_service.py`: 토스 시장지표(mini-chart)·차트(c-chart) 연동 — /live-24h 카드(나스닥 100 선물·VIX), 헤더 나스닥선물, market-trend 나스닥 선물 최신 봉 보강에 사용 (환율은 쓰지 않습니다)
-    *   `reference_data_service.py`: KIS ETF 마스터, 종목 메타데이터, 상장일 조회
-    *   `etf_holdings_service.py`: 한국 ETF 구성종목 비중을 네이버 `ETFComponent` API로 조회해 메타 캐시에 저장할 형태로 정규화합니다. 국내 구성종목은 6자리 종목코드, 해외 구성종목은 `componentReutersCode`에서 추출한 심볼을 표시용 `ticker`로 사용하고, 원본 ISIN은 `raw_code`에 저장합니다. 해외 구성종목 가격 조회는 응답 시점에 Yahoo를 사용하고 서비스 메모리 TTL 캐시를 적용합니다.
-    *   `vkospi_service.py`: VKOSPI 등 외부 시장 지표 연동 및 메모리 캐시
-    *   `fear_greed_service.py`: CNN 공포탐욕지수 연동 및 메모리 캐시
-    *   **원칙**: 새로운 시장 지표, 가격 정보, 외부 데이터 크롤링 등은 혼동을 막기 위해 모두 이 폴더에서 각각의 서비스로 관리하고, 자체 캐시 시스템(TTL 등)을 구축합니다.
-*   `utils/rankings.py`: 순위 테이블 계산 전용 유틸
-*   `scripts/`: 데이터 수집, 캐시 갱신, 일별 원장 시드/집계 생성 등 유틸리티 스크립트
-*   `utils/`:
-    *   `cache_utils.py`: **Parquet 기반 캐시 I/O** 및 직렬화 관리
-    *   `data_loader.py`: OHLCV 수집/보완 및 원천 fetch 함수. 거래일 캘린더와 실시간 시세는 아래 두 모듈로 분리됐고 기존 임포트 경로는 re-export 로 유지됩니다.
-    *   `trading_calendar.py`: 거래일 캘린더(`data/country/<국가>/market_calendars.json`) 조회 — `get_trading_days`, `get_latest_trading_day`, `resolve_active_trading_date` 등
-    *   `realtime_quotes.py`: 실시간 시세 스냅샷(네이버·토스·호주 quoteapi·iNAV) — `fetch_naver_stock_realtime_snapshot`, `fetch_toss_*` 등
-    *   `ai_summary.py`: AI용 요약 데이터 생성 공용 유틸
-    *   `daily_fund_service.py`: `daily_fund_data` 일별 원장 조회/수정/주별 시드 이관
-    *   `weekly_service.py`: `daily_fund_data` 기준 주별 재집계 및 `weekly_fund_data` 조회/비고 수정
-    *   `monthly_service.py`: `daily_fund_data` 기준 월별 재집계 및 `monthly_fund_data` 조회/비고 수정
-    *   `asset_helper_service.py`: 자산 헬퍼 설정 저장·정리와 적용 계좌 기준 목표 비중·목표수량 계산. 시장 데이터 층(`asset_helper_market_data.py` — 종가 프레임·KRW 환산·수익률/MDD/실시간 맵·계좌 스냅샷)과 백테스트(`asset_helper_backtest.py` — 리밸런싱 시뮬레이션·금요일 `weight_history`)는 분리 모듈이며, 기존 임포트 경로는 서비스가 re-export 로 유지합니다. Next API `/api/asset-helper-settings/backtest`는 FastAPI `/internal/asset-helper/backtest`로 프록시합니다.
-    *   `momentum_service.py`: 모멘텀 전략(`/strategy-momentum`) 설정 저장·검증(**풀별 저장** — `{pool, settings_by_pool}` 스키마, 선택지 상수 `TOP_N_OPTIONS`/`MAX_PER_INDUSTRY_OPTIONS`/`SHORT_MA_OPTIONS`/`LONG_MA_OPTIONS`/`INTRAWEEK_STOP_OPTIONS` 가 화면·검증·튜닝의 단일 소스), 유니버스 로드, 장기 이평 이격 점수(`momentum_metrics`), 순위(`rank_candidates`), 업종 상한 선정(`select_top`), 주간 판정·체결일 산출의 단일 소스입니다. 풀 국가·통화·벤치마크는 종목풀 설정(DB)을 따릅니다(`pool_info`).
-    *   `momentum_backtest.py`: 같은 선정 규칙을 과거 주간 교체 시점마다 적용하는 백테스트(`run_backtest`, `context` 캐시로 튜닝 시 조합당 비용 절감). 후보 선정·순위는 반드시 `momentum_service` 함수를 재사용합니다.
-    *   `new_high_service.py` / `new_high_backtest.py`: 신고가 돌파 전략(`/strategy-new-high`) 신호·설정·백테스트·운용 현황. 설정은 `system_config.new_high_settings` 풀별 저장, 선택지 상수는 모멘텀과 같은 구조입니다.
-    *   `strategy_settings.py`: 선택지 밖 저장값을 첫 선택지로 보정하고 내역을 돌려주는 공용 `coerce_to_options` — 두 전략의 `load_settings_for_view` 가 씁니다(배치·백테스트는 엄격 검증 유지).
-    *   `strategy_tuning.py` + `momentum_tuning.py` / `new_high_tuning.py`: 선택지 전 조합 백테스트(튜닝). 부모가 가격·종목·설정을 프리로드해 spawn 워커에 넘기고(워커는 DB 미접근), 지표·분기승수·축별 평균을 공용 모듈이 계산합니다.
-    *   `strategy_mix_service.py`: 합성 전략(`/strategy-mix`) — 두 전략의 저장 설정과 계좌 배분으로 목표 비중·오늘의 액션(화면·슬랙 공용 조립 `_build_action_groups`)·다음주 교체 가정·일별 합성 백테스트를 만듭니다.
-*   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
-*   계좌 메타데이터: MongoDB `account_settings` 컬렉션이 단일 소스입니다(`utils/account_settings_store.py`). 웹 `/account-settings` 화면에서 값 수정만 지원하며(`account_id` 불변), 계좌 추가/삭제는 화면에서 지원하지 않습니다(DB 문서 직접 추가/삭제로 관리).
-*   Next API 프록시: 로직 없는 순수 FastAPI 프록시 라우트는 `web/lib/fastapi-proxy.ts` 의 `createFastApiProxy`(경로·에러 문구·body 전달·타임아웃 선언)로 작성합니다. 쿼리 가공·body 재구성 등 로직이 있는 라우트만 직접 구현합니다.
-*   모바일 화면(`/m`): 폰 전용 경로. 데스크톱 화면은 손대지 않는다.
-    *   `web/app/m/mobile-data.ts`: `/api/assets` + `/api/dashboard` 를 합치는 공용 로더와 표기 함수(`formatKoreanMoney` = `5억 5,817만원`, `accountLabel`, `ACCOUNT_COLORS`). **모바일 전용 API 는 만들지 않는다.**
-    *   `web/app/m/MobileFrame.tsx`: 공용 헤더(제목·금액 가림)와 푸터(기준 시각·새로고침). 금액 가림은 `/m` 전용 로컬스토리지 키(`momentum-etf:m:hide-money`)로 데스크톱 설정과 분리하고 기본은 가림이다.
-    *   `web/app/AppShell.tsx` 는 `/m` 이하에서 사이드바·상단 지표바를 렌더하지 않는다(`isBareLayout`).
-*   PWA: `web/app/manifest.ts`(`start_url: "/"`), `web/public/sw.js`(캐시 없음 — 설치 조건용 fetch 핸들러만), `web/app/components/ServiceWorkerRegistrar.tsx`. 좁은 화면(≤768px)으로 `/` 에 들어오면 `MobileEntryRedirect` 가 `/m` 으로 보낸다(`/?desktop=1` 로 우회). 설치 파일(`manifest.webmanifest`·아이콘·`sw.js`)은 `proxy.ts` 에서 인증 예외다.
-*   그리드 공용 셀: 여러 화면이 공유하는 셀 표기(부호 %, KOSPI/KOSDAQ 마켓 배지, ⭐신고점)는 `web/lib/grid-cells.tsx` 가 단일 소스입니다. 섹터·업종 UI 노출은 종목풀 설정의 풀 성격(`pool_kind`, 개별주/ETF 토글)을 우선 기준으로 씁니다(pools-rank·strategy-momentum 공통).
-
-### 데이터 파이프라인 및 캐싱
-1.  **데이터 수집**: `pykrx`, `yfinance` 등을 통해 원천 데이터 수집.
-2.  **Parquet 캐싱**: 수집된 데이터는 `utils/cache_utils.py`를 통해 **Apache Parquet** 포맷으로 MongoDB에 저장됩니다. (기존 Pickle 방식의 버전 충돌 문제를 해결)
-3.  **서비스 오케스트레이션**:
-    *   `services/price_service.py`가 실시간 가격/환율과 TTL 캐시를 관리합니다.
-    *   `services/reference_data_service.py`가 KIS ETF 목록과 메타데이터 조회를 관리합니다.
-    *   `services/etf_holdings_service.py`가 한국 ETF 구성종목 비중을 네이버 `ETFComponent` API로 수집하고, 응답 시점에는 메타 캐시에 저장된 구성종목에 해외 가격만 Yahoo TTL 캐시로 보조합니다.
-4.  **지표 계산**: `core/strategy/metrics.py`가 이동평균과 추세(%)를 계산.
-5.  **순위 생성**: `utils/rankings.py`가 종목별 추세(%), RSI, 기간 수익률을 합쳐 화면용 DataFrame 생성.
-
-### 캐시 TTL (단일 소스)
-
-메모리 TTL 캐시는 값을 직접 적지 않고 `config.py` 의 상수 4개 중 하나를 고른다.
-
-| 상수 | 값 | 쓰는 곳 |
-|------|----|---------|
-| `CACHE_TTL_LIVE` | 60초 | 시세·설정·목록 (실시간성 필요) |
-| `CACHE_TTL_COMPUTE` | 300초 | 무거운 계산·집계 — 랭킹, 전략 운용 현황, 환율 |
-| `CACHE_TTL_SLOW` | 3600초 | 느리게 변하는 외부 값 — 야후 심볼 해석 |
-| `CACHE_TTL_META` | 86400초 | 사실상 고정된 메타 — ETF 기본 정보 |
-
-구현은 `utils/ttl_cache.py` 의 `TtlCache` 하나를 쓴다(값 복사 반환 + 동시 중복 계산 방지 + 선택적 무효화).
-전략 3개의 운용 현황(`compute_picks`·`current_positions`)와 랭킹이 이걸로 캐시된다 — 설정·기준일이
-키라서 설정을 바꾸면 즉시 새로 계산된다.
-
-### 일별 원장 원칙
-
-*   `daily_fund_data`는 앞으로 일/주/월 집계의 기준이 될 일별 원장 컬렉션입니다.
-*   현재 초기 단계에서는 기존 `weekly_fund_data`의 종료일 row를 `daily_fund_data.date`로 시드 이관해 sparse 일별 원장으로 사용합니다.
-*   이 시드 데이터는 과거 일별 복원값이 아니라, **주별 종료일 스냅샷을 일별 원장에 옮긴 값**으로 취급합니다.
-*   초기 시드는 명시 스크립트 `./.venv/bin/python scripts/seed_daily_fund_data.py`로만 생성합니다. 런타임에서 자동 시드를 만들지 않습니다.
-*   통합 데이터 집계는 `./.venv/bin/python scripts/collect_data.py`가 담당하며, 미래 `daily_fund_data` row를 먼저 정리한 뒤 오늘 row를 upsert 하고 이어서 `daily_fund_data`에서 주별/월별 마지막 영업일 snapshot을 읽어 `weekly_fund_data`, `monthly_fund_data`를 다시 생성합니다.
-*   주별/월별 수동 수정은 `memo`만 허용하며, 금액 관련 필드는 모두 일별 원장에서 유도됩니다.
-
-### 종목 캐시 용어
-
-이 프로젝트에서 **종목 캐시**는 다음 두 가지를 합친 상위 개념으로 사용합니다.
-
-1.  **가격 캐시**
-    *   OHLCV, 종가 시계열, 실시간 스냅샷
-    *   `utils/cache_utils.py`, `utils/data_loader.py`, `services/price_service.py`
-    *   `scripts/stock_price_cache_updater.py`는 종목풀 인자를 받지 않고 항상 전체 종목풀의 가격 캐시를 갱신합니다.
-2.  **메타 캐시**
-    *   상장일, 배당률, 보수, 순자산총액/시가총액, 업종, ETF 구성종목 같은 저빈도 정보
-    *   Mongo `stock_cache_meta` 컬렉션
-    *   `utils/stock_cache_meta_io.py`, `services/stock_cache_service.py`
-    *   한국 ETF 저빈도 메타와 구성종목은 `scripts/stock_reference_meta_updater.py`(배치 B)가 네이버 `ETFBase`, `ETFDividend`, `ETFComponent`를 조회해 `stock_cache_meta.meta_cache`, `stock_cache_meta.holdings_cache`로 저장합니다. 거래량·기간수익률·backtest 등 가격 파생 지표는 `scripts/stock_price_metrics_updater.py`(배치 A)가 담당합니다.
-    *   미국 개별주는 네이버 `foreign/market/stock/global`에서 업종, 배당률, 시가총액을 조회해 `stock_meta.etf_category`와 `stock_cache_meta.meta_cache`에 저장합니다. 미국 개별주에는 보수 개념을 적용하지 않습니다.
-    *   종목풀에 등록되지 않았더라도 포트폴리오 마스터에서 현재 보유 중인 티커는 계좌 `ticker_types` 기준으로 종목 메타/가격 캐시 갱신 대상에 포함됩니다.
-
-`stock_meta` 컬렉션은 종목 관리 원본(버킷, 종목명 등)으로 유지하고, 저빈도 메타 캐시는 `stock_cache_meta`로 분리하는 것을 기본 방향으로 삼습니다. 종목 삭제는 별도 휴지통 없이 즉시 하드 딜리트를 기본으로 합니다.
-
-국가별 거래일 캘린더는 DB가 아니라 파일 캐시로 관리합니다(연 단위로만 바뀌는 정적 데이터). 반면 **지수 구성종목은 매일 갱신되므로 MongoDB `index_constituents` 컬렉션**에 둡니다 — 서버 컨테이너의 `data/` 가 읽기 전용 마운트라 파일로 두면 서버에서 갱신할 수 없기 때문입니다. 런타임은 `data/country/{country}/market_calendars.json`만 읽고, 파일이 없거나 범위를 벗어나면 즉시 에러를 발생시킵니다.
-
-### 서비스 사용 원칙
-
-1.  실시간 가격/환율 조회는 `services/price_service.py`를 먼저 사용합니다.
-2.  KIS ETF 마스터, 종목 메타데이터, 상장일 조회는 `services/reference_data_service.py`를 먼저 사용합니다.
-3.  **외부 연동 일원화**: 시장 지표나 새로운 데이터를 외부에서 파싱/API 통신해야 한다면 `services/` 하위에 위치시키며, 무분별한 요청을 방지하기 위한 캐싱 로직을 포함해야 합니다.
-4.  화면 계층과 일반 유틸은 외부 데이터 소스를 직접 호출하지 않고, 가능하면 `services/` 계층을 통해 접근합니다.
-5.  `utils/data_loader.py`는 원천 fetch 함수와 OHLCV 보완 로직을 포함하지만, 신규 호출부를 작성할 때는 직접 진입점으로 우선 사용하지 않습니다.
-6.  실시간 가격데이터를 제외한 값은 우선 `종목 캐시`에 저장하고 읽습니다. 화면 진입 시 외부 원천을 다시 호출하지 않고, 캐시된 메타/구성종목을 한꺼번에 읽어 응답 속도를 유지하는 것을 기본 원칙으로 삼습니다.
-7.  한국 ETF 구성종목 비중은 `stock_cache_meta.holdings_cache`를 우선 사용합니다. `/ticker`는 구성종목 목록/비중을 실시간 조회하지 않습니다.
-8.  배당률, 보수, 순자산총액/시가총액, 상장일 같은 저빈도 메타는 `stock_cache_meta.meta_cache`를 우선 사용합니다.
-9.  앞으로 새로운 저빈도 항목(예: ETF 메타, 구성종목 속성, 기초지수 관련 부가정보)을 발견하면, 실시간 가격데이터가 아닌 이상 먼저 `stock_cache_meta`에 저장하는 방향을 우선 원칙으로 삼습니다.
-10. 실시간 또는 준실시간 값을 내려주는 Next API 라우트는 요청 fetch뿐 아니라 응답 헤더에도 `Cache-Control: no-store`를 명시해 브라우저/중간 계층 캐시를 차단합니다.
-11. 가격 캐시 조회는 요청한 `ticker_type` 또는 국가 캐시만 엄격하게 조회합니다. 다른 종목풀 캐시로 자동 fallback 하지 않습니다. 계좌 보유 화면처럼 여러 종목풀이 섞인 경우에만 호출부에서 전체 종목풀 조회를 명시적으로 선택합니다.
-
-### 자산 수익률 계산 정책 (단일 출처)
-
-자산 화면(자산 관리 `/assets`, 일별 `/daily`, 주별 `/weekly`, 월별 `/monthly`, 연별 `/yearly`, 대시보드 `/dashboard`)의 모든 수익률 지표는 아래 규칙을 따릅니다. 분모/분자 정의를 바꾸려면 이 절을 먼저 수정하고 코드를 동기화합니다.
-
-- **기간 수익률 (일/주/월/년) — 입출금 제거 1기간 수익률**
-  - 공식: `period_return_pct = period_profit / previous_total_assets × 100`
-  - 분자(`period_profit`)는 `cumulative_profit`의 차분으로 계산되며, `total_principal` 누적이 입출금을 흡수해 입출금 영향이 자동 제거됩니다.
-  - 분모는 직전 기간 종료 시점의 총자산으로 고정해, 입금/출금 자체가 해당 기간 수익률 기준금액을 흔들지 않게 합니다.
-- **누적 수익률 — ROI(Return on Investment)**
-  - 공식: `cumulative_return_pct = cumulative_profit / total_principal × 100`
-  - `cumulative_profit = total_assets - total_principal - total_expense_누적`.
-  - 기간 수익률을 복리 누적한 값이 아니라 투입 원금 대비 총 수익을 보는 단순 비율입니다.
-
-화면별 매핑:
-
-| 화면 | 일(%) | 주(%) | 월(%) | 년(%) | 누적(%) |
-|------|-------|-------|-------|-------|---------|
-| /daily | 입출금 제거 1일 | — | — | — | ROI |
-| /weekly | — | 입출금 제거 1주 | — | — | ROI |
-| /monthly | — | — | 입출금 제거 1월 | — | ROI |
-| /yearly | — | — | — | 입출금 제거 1년 | ROI |
-| /assets | 입출금 제거 1일 | 입출금 제거 1주 | — | — | ROI |
-| /dashboard | 입출금 제거 1일 | 입출금 제거 1주 | 입출금 제거 1월 | 입출금 제거 1년 | ROI |
-
-같은 일자에서는 모든 화면의 일(%) 값이 동일합니다.
-
-#### 합계 행 vs 계좌별 행의 현금흐름 처리 차이 (`/assets`, `/dashboard`)
-
-- **합계 행 (정확)**: `daily_fund_data` / `weekly_fund_data` 최신 doc 의 `daily_profit` / `weekly_profit` 을 그대로 사용합니다. 사용자가 `/daily` 화면에서 입력한 `deposit_withdrawal`, `withdrawal_personal`, `withdrawal_mom`, `nh_principal_interest` 가 분자에서 직접 차감되어 **시장 변동분만** 손익으로 잡힙니다.
-- **계좌별 행 (추정)**: 계좌별 입출금 명시 데이터가 없어, `daily_snapshots` 에서 `오늘 total_principal − 어제 total_principal` 차이를 입출금으로 **추정** 합니다. 추정 한계:
-  - 사용자가 인출 전에 `portfolio_master.total_principal` 을 미리 수정해버리면, 어제·오늘 스냅샷의 원금이 같아 입출금 추정이 0 으로 잡히고, 실제 인출액이 계좌별 손익에 통째로 손실로 표시될 수 있습니다.
-  - 반대로 원금 단순 정정(입출금 없음)을 한 경우에도 그 차이가 입출금으로 잡혀 손익을 왜곡할 수 있습니다.
-- 따라서 **계좌별 일(%) / 주(%) 는 참고용**이며, 정확한 일/주 손익은 **합계 행** 또는 `/daily` / `/weekly` 화면을 기준으로 합니다.
-- 인출/입금이 발생했을 때 계좌별 행도 정확하게 보고 싶다면, 인출 발생일에는 **포트폴리오 원금 수정을 그날 안에 함께** 반영하는 운영 규칙이 필요합니다 (당일 원금 차이 = 당일 입출금).
-
-구현 위치:
-
-- 백엔드(Python): `utils/daily_fund_service.py`, `utils/weekly_service.py`, `utils/monthly_service.py`, `utils/yearly_service.py`, `utils/dashboard_service.py` 의 `calculate_period_return_pct` / `_apply_running_total_principal` / `_calculate_weekly_docs` / `load_dashboard_data`.
-- 프론트엔드: `/assets`(`web/app/assets/AssetsManager.tsx`)는 백엔드의 `daily_return_pct`/`weekly_return_pct` 값을 그대로 사용합니다(자체 계산 금지).
-- `/ticker`의 "포트폴리오 변동(%)"은 별도 지표(ETF 구성종목 가중평균)이며 본 정책과 무관합니다.
-
-데이터 무결성:
-
-- `total_principal`은 입출금 발생 시 즉시 반영되어야 합니다. 누락 시 모든 기간 수익률이 왜곡됩니다.
-- 정책 변경 시 raw 데이터(`total_assets`, `total_principal`, `deposit_withdrawal`, `total_expense`)는 그대로 유지되고 파생 필드만 계산식이 바뀌므로, 정책 변경 자체에는 재집계가 필요하지 않습니다. 화면 새로고침 시점부터 적용됩니다.
-- 과거 일별 입출금 값을 수정한 경우에는 주/월/년 raw 집계(`deposit_withdrawal`, `total_assets` 등)를 다시 만들기 위해 관련 집계 버튼을 눌러야 합니다.
-
-자산 헬퍼 데이터 (단일 컬렉션 원칙):
-
-- `/assets` 와 `/asset-helper` 는 **portfolio_master 하나만** 저장소로 쓴다. 별도 컬렉션을 만들지 않는다.
-- 종목별 목표비중: `accounts[].holdings[].target_ratio` (%). 미설정이면 필드 자체가 없다(임의 0 보정 금지).
-  `/asset-helper` 의 "비중" 컬럼에서 편집하고, `/assets` 의 "목표비중" 컬럼은 같은 값을 읽기 전용으로 보여준다.
-- 계좌 단위 헬퍼 설정(weight_mode·STOCK_MAX_WEIGHT·백테스트 설정): `accounts[].asset_helper` 하위 객체.
-- 현금 목표 비중: `accounts[].asset_helper.cash_weight_pct` — 저장값이 원본. 로드 시 나머지로
-  자동 초기화하지 않으며, IS(자동 비중)가 변해 합이 100에서 어긋나면 저장이 차단된다.
-- IS(International Shares, 호주 수동 고정자산): `/assets` 에서는 기존대로 수동 입력·표기.
-  자산 헬퍼에서는 VGS 정식 명칭으로 표시하고 비중은 평가액 기반 자동값(편집 불가),
-  백테스트는 VGS 가격 시계열로 대리한다(`asset_helper_service.IS_PRICE_PROXY`).
-- 과거의 `asset_helper_settings` / `account_targets` 컬렉션은 2026-07 통합 마이그레이션으로 삭제됐다.
-
-## 2. 순위 화면 정합성 원칙
-
-> **Critical**: 이 시스템은 **순위 화면이 단일 진실 원천(single source of truth)** 입니다. 화면에서 보이는 값은 계좌 종목 목록, 가격 캐시, 실제 보유 데이터로 직접 계산되어야 합니다.
-
-### 핵심 구조
-| 파일/경로 | 역할 |
-|-----------------|------|
-| `web/app/*` | Next.js 기반 사용자 화면과 API 라우트 |
-| `utils/rankings.py` | 순위 계산과 정렬 |
-| `core/strategy/metrics.py` | 이동평균 추세 계산 |
-| `services/price_service.py` | 실시간 가격/환율 조회의 공식 진입점 |
-| `services/reference_data_service.py` | ETF 마스터/메타데이터/상장일 조회의 공식 진입점 |
-| `utils/account_notes.py` | 계좌 메모 저장/조회 |
-
-### 핵심 일관성 체크리스트
-
-1.  **입력 단순화**: 추세 타입은 config(SMA/EMA)로 고정하고, 종목풀 설정의 `SHORT_MA_DAYS`와 `LONG_MA_DAYS`만 사용한다.
-2.  **정렬 기준 고정**: `추세(%)`가 있는 종목을 `추세(%)` 내림차순으로 정렬하고, 계산 불가 종목은 맨 아래로 보낸다.
-3.  **데이터 기준**:
-    *   모든 의사결정은 **판단 시점의 전일 종가 데이터**를 기준으로 함
-    *   "오늘"의 순위는 "어제까지의 마감 데이터"를 보고 계산된 것임
-    *   최신 거래일 판단의 기준 날짜는 모든 시장 공통으로 **한국 날짜**를 사용함
-4.  **엄격한 설정 원칙 (Rule 7)**:
-    *   코드에 암묵적인 기본값(fallback)을 사용하지 않습니다.
-    *   필수 순위 파라미터가 누락된 경우 명확한 `ValueError`를 발생시킵니다.
-
-## 3. 전략 설정 규칙
-
-종목풀 설정(DB `pool_settings`):
-
-```json
-{
-  "_id": "kor_kr",
-  "name": "국내상장 국내",
-  "icon": "🇰🇷",
-  "order": 1,
-  "country_code": "kor",
-  "currency": "KRW",
-  "TOP_N_HOLD": 10,
-  "SHORT_MA_DAYS": 10,
-  "LONG_MA_DAYS": 20,
-  "is_active": true
-}
-```
-
-런타임 종목풀 목록은 DB `pool_settings`가 단일 소스입니다. 종목풀 설정 화면(`/pools-settings`)에서 종목풀 추가·수정·삭제와 `TOP_N_HOLD`/`SHORT_MA_DAYS`/`LONG_MA_DAYS` 편집을 수행합니다.
-
-종목풀 설정의 `country_code`는 현재 `kor`, `au`, `us`를 허용합니다.
-
-검증 원칙(현재 운영):
-
-* 개별 종목풀: `SHORT_MA_DAYS`, `LONG_MA_DAYS` 필수
-* 필수값 누락 시 fallback 없이 명시적 에러
-* 종목풀 구조와 편집값(`TOP_N_HOLD`/`SHORT_MA_DAYS`/`LONG_MA_DAYS`)은 **DB `pool_settings`** 가 단일 소스다. `/pools-settings` 화면에서 추가·수정·삭제하며, 삭제는 연결 계좌가 없을 때만 허용한다.
-
-#### 선정 기준 = 추세(%)
-
-순위 선정 기준은 추세(%)만 사용한다. 보조지표(Sortino/Sharpe)와 보유 여부는 종목 선정에 사용하지 않는다.
-
-* **추세(%)**: `(종가 ÷ MA − 1) × 100`.
-* 라이브(`utils/rankings.py`)가 추세(%)를 계산한다.
-
-## 4. 테스트 및 검증
-
-코드를 수정할 때는 다음 절차를 따르세요.
-
-1.  **로직 수정**: `utils/rankings.py`, `core/strategy/metrics.py`, `web/app/*`, `web/lib/*`를 우선 확인
-    *   가격/환율 문제면 `services/price_service.py`를 함께 확인
-    *   KIS ETF 목록/메타데이터/상장일 문제면 `services/reference_data_service.py`를 함께 확인
-2.  **검증**:
-    *   순위 화면에서 종목풀 변경 또는 `MA` 변경 시 컬럼과 추세(%)가 즉시 갱신되는지 확인
-    *   실제 보유 종목이 녹색 행으로 표시되는지 확인
-3.  **확인**:
-    *   `추세(%)` 컬럼이 `현재가` 뒤에 표시되는지 확인(`보유` 컬럼은 숨김)
-
-## 5. 순위 화면의 정의
-
-**"순위(Rank)"**는 종목풀의 현재 종목 유니버스에서 이동평균 고정 장기 이평선(`LONG_MA_DAYS`) 기준 추세(%)를 계산한 결과입니다.
-
-### 핵심 원칙
-1.  **화면 기준 계산**: 순위는 별도 저장 결과를 읽지 않고, 가격 캐시와 계좌 종목으로 즉시 계산합니다.
-2.  **실보유 구분**: 실제 보유 종목만 행 색상으로 표시합니다.
-3.  **정렬 규칙**: `추세(%)` 내림차순, `추세(%)` 계산 불가 종목은 맨 아래입니다.
-4.  **계좌 종목 직접 관리**: 계좌가 자신의 종목 유니버스를 직접 보유하며, 별도 종목풀 fallback은 사용하지 않습니다.
-5.  **고정 종목 표시**: `exclude_from_ranking=true`인 고정 종목은 다른 종목의 순위 비교용 참고 기준입니다. 순위 번호 없이 현재 위치만 보여주며, 종목풀 보유 계산과 종목을 대상으로 하는 모든 백테스트·시뮬레이션 투자 유니버스에서는 제외합니다.
-
-## 6. 화면 UI 표준
-
-AG Grid 기반 주요 화면은 현재 `/pools-rank`에서 정리한 레이아웃을 공통 기준으로 사용합니다.
-
-### 공통 레이아웃 순서
-1.  **메뉴 헤더**
-    *   왼쪽: 메뉴명
-    *   오른쪽: 총 개수, 선택 개수, 활성 주차 같은 정보
-2.  **메인 헤더**
-    *   왼쪽: 계좌 셀렉터, 보기 전환 토글, 검색/필터 같은 주 제어
-    *   오른쪽: CRUD가 아닌 특별한 버튼, 예를 들어서 금액 가리기
-    *   **컨트롤 높이는 30px 로 통일한다.** 셀렉트·입력·스위치는 바깥 상자 기준,
-        토글(`appSegmentedToggle`)은 껍데기 기준으로 30px 이다(안쪽 버튼이 아니라).
-        높이를 화면에서 따로 지정하지 말고 `globals.css` 공통 클래스에서만 정한다.
-3.  **보조 액션 헤더**
-    *   `추가`, `저장`, `삭제` 같은 CRUD 액션만 둔다
-    *   **CRUD 버튼이 2개 이상일 때만 별도 줄로 둔다.**
-        1개면 메인 헤더 오른쪽(`appMainHeaderRight`)에 넣는다 —
-        버튼 하나에 줄 하나를 통째로 쓰지 않는다.
-    *   어느 쪽에 두든 항상 오른쪽 정렬
-4.  **테이블**
-    *   카드 내부 스크롤을 사용
-
-### 공통 스타일 규칙
-
-1.  헤더 높이, 버튼 높이, 입력창 높이는 `web/app/globals.css`의 공통 클래스 기준으로 맞춘다.
-2.  새 화면을 만들 때 개별 인라인 스타일보다 공통 클래스(`appMainHeader`, `appActionHeader`, `appHeaderMetrics`, `appSegmentedToggle`)를 우선 사용한다.
-3.  토글 버튼은 글자 길이에 맞는 폭을 사용하고, 불필요한 고정 최소폭을 두지 않는다.
-4.  컬럼 헤더 텍스트는 가운데 정렬, 데이터 셀은 텍스트 왼쪽 정렬 / 숫자 오른쪽 정렬을 유지한다.
-5.  수정 가능한 셀 강조, 수정된 셀 강조, 선택/삭제 버튼 배치는 화면마다 임의로 다르게 만들지 않는다.
-6.  종목 관리 삭제는 즉시 하드 딜리트로 처리하고, 삭제 사유/삭제일자/휴지통 개념을 새로 만들지 않는다.
-
-### 화면별 예외 원칙
-
-1.  `/market`처럼 검색 입력이 여러 개인 화면은 메인 헤더 한 줄을 유지하는 전용 예외 클래스를 둘 수 있다.
-2.  예외를 추가하더라도 메인 헤더, 보조 액션 헤더, 테이블의 3단 구조 자체는 최대한 유지한다.
-3.  새 예외 스타일을 만들면 먼저 공통 클래스 확장으로 해결 가능한지 검토하고, 불가할 때만 화면 전용 클래스를 추가한다.
+| 튜닝 중 Mongo 타임아웃, 다른 화면까지 실패 | 워커 여러 개가 동시에 DB 읽음 | 부모 프리로드 + 워커 캐시 시딩(`strategy_tuning.seed_worker_caches`) |
+| 호주 종목이 미국 변동률로 표시 | 티커만으로 시장 구분 불가 | `ASX:` 접두사 규칙 |
+| NASDAQ100 갱신이 한 달간 조용히 실패 | 위키 문서 이동 | 구성종목 수 범위 검증, 벗어나면 실패 처리·슬랙 |
+| `/batch` 버튼 400 | 배치 목록 7곳 중 누락 | 위 체크리스트 |
