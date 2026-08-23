@@ -13,6 +13,12 @@
  * 화면은 값과 핸들러만 준다.
  */
 
+/**
+ * 기간 선택지 폴백 — 백엔드(`utils/pool_signal_backtest_service.MONTH_OPTIONS`)와 같은 값.
+ * 화면은 응답으로 받은 목록을 우선 쓰고, 아직 못 받았을 때만 이 값을 보여준다.
+ */
+export const MONTH_OPTIONS: number[] = [1, 2, 3, 4, 5, 6, 12, 24, 36, 48, 60];
+
 export function MonthsSelect({
   value,
   options,

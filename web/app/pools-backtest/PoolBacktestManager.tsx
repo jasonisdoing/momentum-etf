@@ -5,7 +5,7 @@ import type { ColDef, GridOptions } from "ag-grid-community";
 
 import { formatPoolLabel } from "@/lib/pool-label";
 import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
-import { MonthsSelect } from "../components/MonthsSelect";
+import { MONTH_OPTIONS, MonthsSelect } from "../components/MonthsSelect";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
@@ -76,7 +76,6 @@ type PoolSettingsResponse = {
 type BacktestOptions = { forward_day_options?: number[]; month_options?: number[]; max_months?: number; error?: string };
 
 const FORWARD_DAY_OPTIONS = [5, 10, 20, 40, 60];
-const DEFAULT_MONTH_OPTIONS = [1, 2, 3, 4, 5, 6, 12, 24, 36, 48, 60];
 const DOWN_MARKET_INVEST_OPTIONS = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
 
 /** 종목풀 설정 필드에서 정수를 꺼낸다. 값이 없으면 null. */
@@ -114,7 +113,7 @@ export function PoolBacktestManager() {
   const [poolId, setPoolId] = useState("");
   const [forwardDays, setForwardDays] = useState(5);
   const [months, setMonths] = useState(12);
-  const [monthOptions, setMonthOptions] = useState(DEFAULT_MONTH_OPTIONS);
+  const [monthOptions, setMonthOptions] = useState(MONTH_OPTIONS);
   // 파라미터 오버라이드(실험용). 종목풀 선택 시 그 설정값으로 채워지고, 사용자가 바꿀 수 있다.
   const [topN, setTopN] = useState<number | null>(null);
   const [shortMa, setShortMa] = useState<number | null>(null);

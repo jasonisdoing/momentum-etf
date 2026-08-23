@@ -48,13 +48,18 @@ def get_max_backtest_months(today: date | None = None) -> int:
     return max(months, 1)
 
 
+# 기간 셀렉트 선택지 — 시스템 전체가 이 목록 하나만 쓴다(전략·화면별로 따로 두지 않는다).
+MONTH_OPTIONS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 12, 24, 36, 48, 60)
+
+
 def get_month_options() -> list[int]:
-    """기간 셀렉트 옵션. 60개월보다 긴 구간은 현재 캐시 기준 최대값만 노출한다."""
+    """기간 셀렉트 옵션. 가격 캐시가 못 채우는 구간은 뺀다.
+
+    예전에는 캐시가 60개월보다 길면 그 최대값(예 91개월)을 끝에 덧붙였는데, 캐시가
+    자랄수록 값이 매달 달라져 화면마다 선택지가 어긋났다. 고정 목록만 노출한다.
+    """
     max_months = get_max_backtest_months()
-    options = [1, 2, 3, 4, 5, 6, 12, 24, 36, 48, 60]
-    if max_months > 60:
-        options.append(max_months)
-    return [month for month in options if month <= max_months]
+    return [month for month in MONTH_OPTIONS if month <= max_months]
 
 
 def _format_date(value: Any) -> str:

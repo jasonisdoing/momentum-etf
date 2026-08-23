@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatKstDateTime } from "@/lib/datetime";
 import { formatSignedPct, signColor } from "@/lib/grid-cells";
 import { AppAgGrid } from "../components/AppAgGrid";
-import { MonthsSelect } from "../components/MonthsSelect";
+import { MONTH_OPTIONS, MonthsSelect } from "../components/MonthsSelect";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
@@ -35,7 +35,6 @@ const compactLabelStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-const TUNE_MONTH_OPTIONS = [1, 2, 3, 4, 5, 6, 12, 24, 36, 48, 60] as const;
 // 슬리피지 편도(%). 종목풀 설정과 동일한 0.05~0.5 (0.05 단위).
 const SLIPPAGE_OPTIONS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5] as const;
 const leverageTuneGridTheme = createAppGridTheme();
@@ -668,7 +667,7 @@ export function LeverageSettingsClient() {
                 <div style={{ display: "flex", gap: "10px 12px", alignItems: "flex-end", flexWrap: "wrap" }}>
                   <label className="appLabeledField" style={{ minWidth: 130, flex: "0 0 auto" }}>
                     <span className="appLabeledFieldLabel">기간(개월)</span>
-                    <MonthsSelect value={tuneMonths} options={[...TUNE_MONTH_OPTIONS]} onChange={setTuneMonths} />
+                    <MonthsSelect value={tuneMonths} options={MONTH_OPTIONS} onChange={setTuneMonths} />
                   </label>
                   <div style={{ display: "flex", gap: 7, alignItems: "flex-end", flexWrap: "wrap" }}>
                     <span style={{ color: "var(--text-muted)", fontWeight: 700, paddingBottom: 7, fontSize: "var(--fs-sm)" }}>이동선</span>
