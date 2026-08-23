@@ -415,6 +415,40 @@ def _build_action_groups(
     return groups
 
 
+def _attach_disparity(holdings: list[dict[str, Any]], sm_settings: dict[str, Any]) -> None:
+    """행마다 단기·장기 이격(%)을 붙인다 — 종목풀 설정의 이평선이 기준.
+
+    순위·모멘텀 화면과 같은 계산(`momentum_metrics`)을 그대로 쓴다. 화면은 이 값으로
+    종목명 옆 추세 이탈 배지(❗)를 붙이므로, 다른 기준으로 계산하면 화면마다 다른
+    종목에 배지가 붙는다. 값을 못 구하면 None 으로 둔다(임의 값으로 채우지 않는다).
+    """
+    import pandas as pd
+
+    from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
+    from utils.momentum_service import momentum_metrics
+
+    tickers = [str(row["ticker"]).strip() for row in holdings if row.get("ticker")]
+    if not tickers:
+        return
+    short_days = int(sm_settings["short_ma_days"])
+    long_days = int(sm_settings["long_ma_days"])
+    frames = load_cached_frames_bulk_from_all_ticker_types(tickers)
+    for row in holdings:
+        row["current_short_pct"] = None
+        row["current_long_pct"] = None
+        frame = frames.get(str(row.get("ticker") or "").strip())
+        if frame is None or frame.empty or "Close" not in frame.columns:
+            continue
+        close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+        if close.empty:
+            continue
+        metrics = momentum_metrics(close, short_ma_days=short_days, long_ma_days=long_days, as_of=None)
+        if not metrics:
+            continue
+        row["current_short_pct"] = round(metrics["short_disparity_pct"], 1)
+        row["current_long_pct"] = round(metrics["disparity_pct"], 1)
+
+
 def _krw_rate(currency: str) -> float:
     """종목 통화 → 원화 환율. 원화면 1.0.
 
@@ -835,6 +869,9 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
         account["stock_value"] = round(stock_value, 2)
         account["total_assets"] = round(total_assets, 2)
         account["sell_all"] = _attach_account_targets(holdings, account, krw_rate)
+
+    # 종목명 옆 추세 이탈 배지(❗)용 — 종목풀 설정 이평선 기준 이격.
+    _attach_disparity(holdings, sm_settings)
 
     payload = {
         "computed_at": datetime.now().astimezone().isoformat(),

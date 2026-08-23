@@ -14,7 +14,7 @@ import {
 } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { MonthsSelect } from "../components/MonthsSelect";
-import { renderStockNameCell } from "@/lib/name-highlight";
+import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import {
   AppLoadingProgress,
   startProgressRamp,
@@ -156,6 +156,9 @@ type Holding = {
   held_value?: number | null;
   current_weight_pct?: number;
   trade_quantity?: number | null;
+  /** 종목풀 설정 이평선 기준 이격(%) — 종목명 옆 추세 이탈 배지(❗)에 쓴다. */
+  current_short_pct?: number | null;
+  current_long_pct?: number | null;
   /** 목표 포트폴리오에 없는 보유 종목 — 목표 비중 0% 행으로 표 하단에 온다. */
   is_sell_all?: boolean;
 };
@@ -596,7 +599,13 @@ export function StrategyMixClient() {
         // 종목명 표기는 순위·전략 화면과 같은 공용 렌더러를 쓴다 — 레버리지 강조(💣)와
         // 긴 이름 2줄 줄임이 여기서만 빠져 있었다. 현금 행은 종목이 아니라 그대로 둔다.
         cellRenderer: (p: { value?: string | null; data?: PositionRow }) =>
-          p.data?.is_cash ? <span>{p.value ?? "-"}</span> : renderStockNameCell(p.value),
+          p.data?.is_cash ? (
+            <span>{p.value ?? "-"}</span>
+          ) : (
+            renderStockNameCell(p.value, {
+              trendBroken: isTrendBroken(p.data?.current_short_pct, p.data?.current_long_pct),
+            })
+          ),
       },
       {
         field: "sources",
