@@ -35,7 +35,7 @@ _DEFAULT_MA_LONG_DAYS = 120
 _DEFAULT_STOPLOSS_PCT = -7.0
 # 화면 셀렉트 선택지(백엔드는 값만 검증하고, 목록은 화면과 공유)
 MA_DAYS_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60, 120, 200)
-STOPLOSS_PCT_OPTIONS: tuple[float, ...] = (-3.0, -5.0, -7.0, -8.0, -10.0, -15.0, -20.0)
+STOPLOSS_PCT_OPTIONS: tuple[float, ...] = (-7.0, -10.0)  # 전략 손절선 선택지와 통일
 
 
 # 화면 배지용 기본 아이콘 — 계좌별로 저장해 덮어쓸 수 있다(빈값 저장 = 배지 미표시).

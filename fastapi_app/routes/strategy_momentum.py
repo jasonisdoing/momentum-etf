@@ -29,12 +29,13 @@ def _month_options(settings: dict) -> list[int]:
 
 def _ma_rule_payload(settings: dict) -> dict:
     """전략 전용 이평선 + 선택지 — momentum_settings 가 단일 소스다."""
-    from utils.pool_settings_store import MA_DAY_OPTIONS
+    from utils.momentum_service import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
 
     return {
         "short_ma_days": int(settings["short_ma_days"]),
         "long_ma_days": int(settings["long_ma_days"]),
-        "ma_day_options": list(MA_DAY_OPTIONS),
+        "short_ma_options": list(SHORT_MA_OPTIONS),
+        "long_ma_options": list(LONG_MA_OPTIONS),
     }
 
 
@@ -62,16 +63,20 @@ def get_strategy_momentum(
     풀의 설정을 돌려주고 ``requested_pool`` 로 알린다 — 화면이 그 풀을 '첫 설정 초안'
     으로 띄운다(풀 셀렉트 전환과 같은 흐름). 새 풀의 값을 지어내는 게 아니다.
     """
+    from utils.momentum_service import load_settings_for_view
+
     requested = str(pool or "").strip().lower() or None
     try:
-        settings = load_settings(requested)
+        settings, coerced = load_settings_for_view(requested)
     except RuntimeError:
         if requested is None:
             raise  # 저장된 풀이 하나도 없음 — 진짜 에러
-        settings = load_settings(None)
+        settings, coerced = load_settings_for_view(None)
     return {
         "requested_pool": requested or settings["pool"],
         "settings": settings,
+        # 선택지 밖 저장값을 보정했으면 화면이 '저장되지 않은 변경'으로 띄운다.
+        "coerced": coerced,
         # 풀별 저장 설정 맵 — 화면이 풀 셀렉트 전환 시 즉시 그 풀의 값을 채운다.
         "settings_by_pool": load_settings_map()["settings_by_pool"],
         "pool_options": pool_options(),
@@ -141,3 +146,27 @@ def post_strategy_momentum_backtest(
     if not isinstance(include_daily, bool):
         raise ValueError("'include_daily' 는 참/거짓이어야 합니다.")
     return run_backtest(months, settings=load_settings(pool), include_daily=include_daily)
+
+
+@router.post("/tuning")
+def post_strategy_momentum_tuning(
+    payload: dict = Body(...),
+    pool: str | None = Query(default=None),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """튜닝 — 설정 항목 범위의 모든 조합을 백테스트한다 (저장된 설정 기준).
+
+    body: ``{"months": 12, "ranges": {"top_n": [...], "max_per_industry": [...],
+    "short_ma_days": [...], "long_ma_days": [...], "intraweek": ["off", "none", -5, ...]}}``
+    """
+    from utils.momentum_tuning import run_tuning
+
+    if not isinstance(payload, dict):
+        raise ValueError("요청 형식이 올바르지 않습니다.")
+    months = payload.get("months")
+    if not isinstance(months, int) or isinstance(months, bool):
+        raise ValueError("'months' 는 정수여야 합니다.")
+    ranges = payload.get("ranges")
+    if not isinstance(ranges, dict) or not all(isinstance(v, list) for v in ranges.values()):
+        raise ValueError("'ranges' 는 축별 값 목록이어야 합니다.")
+    return run_tuning(months, load_settings(pool), ranges)

@@ -39,10 +39,10 @@ warnings.filterwarnings("ignore")
 # 종목풀은 DB(pool_settings)의 활성 풀 전체 중 1개를 선택한다 — 목록·국가·통화의
 # 단일 소스는 종목풀 설정이다 (하드코딩 목록을 두지 않는다).
 # 한 업종에서 최대 몇 종목까지 담을지 — 화면 셀렉트와 검증이 같은 목록을 쓴다.
-MAX_PER_INDUSTRY_OPTIONS = (1, 2, 3, 4, 5, 10)
+MAX_PER_INDUSTRY_OPTIONS: tuple[int | None, ...] = (1, 2, 3, None)  # None = 제한없음 (신고가와 동일)
 # 종목 수 셀렉트 선택지 — 검증 범위(5~100) 안에서 자주 쓰는 값만 노출한다.
 # 화면은 이 목록을 서버 응답으로 받는다(프론트에 복사본을 두지 않는다).
-TOP_N_OPTIONS = (5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 50, 100)
+TOP_N_OPTIONS = (5, 8, 10)
 # 차순위 후보를 종목 수의 몇 배까지 보여줄지 — 선정과 같은 수(합계 2배)만 보여
 # 표를 짧게 유지한다. 표 밖 '다음 주 예상' 종목은 하단에 별도 행으로 붙는다.
 RESERVE_MULTIPLIER = 1
@@ -131,7 +131,12 @@ PER_POOL_SETTING_KEYS = (
 
 # 주중 손절선 선택지(%) — 교체일 시가 대비 낙폭. None 은 '손절 없음'.
 # kor·kospi200 24개월 백테스트에서 -10 이 공통 피크였다(-5 는 휩쏘 손실, -15 는 효과 소멸).
-INTRAWEEK_STOP_OPTIONS: tuple[float | None, ...] = (None, -5.0, -7.0, -8.0, -10.0, -12.0, -15.0)
+INTRAWEEK_STOP_OPTIONS: tuple[float | None, ...] = (None, -7.0, -10.0)
+
+# 전략 전용 이평선 선택지 — 화면 셀렉트와 튜닝 축이 같은 값을 쓴다.
+# 그리드 결과(kor_kr·kospi200·us)에서 장기 60~120 이 고원, 140 부터 열위라 140 까지만 둔다.
+SHORT_MA_OPTIONS: tuple[int, ...] = (20, 30, 40)
+LONG_MA_OPTIONS: tuple[int, ...] = (60, 90, 120)
 
 
 def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
@@ -148,22 +153,24 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     top_n = int(_num("top_n"))
     if not 5 <= top_n <= 100:
         raise ValueError("'top_n' 은 5~100 사이여야 합니다.")
-    max_per_industry = int(_num("max_per_industry"))
+    raw_cap = settings.get("max_per_industry")
+    max_per_industry = None if raw_cap in (None, "", "none") else int(_num("max_per_industry"))
     if max_per_industry not in MAX_PER_INDUSTRY_OPTIONS:
-        allowed = ", ".join(str(v) for v in MAX_PER_INDUSTRY_OPTIONS)
-        raise ValueError(f"'max_per_industry' 는 {allowed} 중 하나여야 합니다.")
+        allowed = ", ".join("없음" if v is None else str(v) for v in MAX_PER_INDUSTRY_OPTIONS)
+        raise ValueError(f"'max_per_industry' 는 {allowed} 중 하나여야 합니다 (받은 값: {raw_cap}).")
     pool = str(settings.get("pool") or "").strip().lower()
     if pool not in available_pools():
         raise ValueError(f"지원하지 않는 종목풀입니다: {settings.get('pool')}")
 
-    # 전략 전용 이평선 — 종목풀 설정과 별개다. 허용 일수 목록은 공용 상수를 재사용한다.
-    from utils.pool_settings_store import MA_DAY_OPTIONS
-
+    # 전략 전용 이평선 — 종목풀 설정과 별개다. 단기·장기 각자의 선택지만 허용한다.
     short_ma_days = int(_num("short_ma_days"))
     long_ma_days = int(_num("long_ma_days"))
-    for key, value in (("short_ma_days", short_ma_days), ("long_ma_days", long_ma_days)):
-        if value not in MA_DAY_OPTIONS:
-            allowed = ", ".join(str(v) for v in MA_DAY_OPTIONS)
+    for key, value, options in (
+        ("short_ma_days", short_ma_days, SHORT_MA_OPTIONS),
+        ("long_ma_days", long_ma_days, LONG_MA_OPTIONS),
+    ):
+        if value not in options:
+            allowed = ", ".join(str(v) for v in options)
             raise ValueError(f"'{key}' 는 {allowed} 중 하나여야 합니다.")
     if short_ma_days >= long_ma_days:
         raise ValueError("'short_ma_days' 는 'long_ma_days' 보다 작아야 합니다.")
@@ -301,6 +308,38 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
         return validate_settings({"pool": pool, **per_pool})
     except ValueError as error:
         raise ValueError(f"저장된 모멘텀 전략 설정이 올바르지 않습니다: {error}") from error
+
+
+def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], list[str]]:
+    """화면용 로드 — 선택지가 바뀌어 저장값이 목록 밖이면 **첫 선택지로 보정**하고 무엇을
+    바꿨는지 돌려준다. 화면은 이를 '저장되지 않은 변경'으로 표시해 사용자가 고쳐 저장하게
+    한다. 배치·백테스트는 그대로 ``load_settings`` 를 써서 깨진 값이면 실패한다.
+    """
+    stored = _load_settings_doc()
+    pool = str(pool or default_pool()).strip().lower()
+    per_pool = stored["settings_by_pool"].get(pool)
+    if not isinstance(per_pool, dict):
+        raise RuntimeError(f"종목풀({pool})의 모멘텀 전략 설정이 없습니다 — 화면에서 저장하세요.")
+    merged = {"pool": pool, **per_pool}
+    try:
+        return validate_settings(merged), []
+    except ValueError:
+        coerced: list[str] = []
+        for key, label, options in (
+            ("top_n", "종목 수", TOP_N_OPTIONS),
+            ("max_per_industry", "업종 상한", MAX_PER_INDUSTRY_OPTIONS),
+            ("short_ma_days", "단기 이평", SHORT_MA_OPTIONS),
+            ("long_ma_days", "장기 이평", LONG_MA_OPTIONS),
+            ("intraweek_stop_pct", "주중 손절선", INTRAWEEK_STOP_OPTIONS),
+        ):
+            value = merged.get(key)
+            if value not in options:
+                coerced.append(f"{label} {value if value is not None else '없음'} → {options[0] if options[0] is not None else '없음'}")
+                merged[key] = options[0]
+        try:
+            return validate_settings(merged), coerced
+        except ValueError as error:
+            raise ValueError(f"저장된 모멘텀 전략 설정이 올바르지 않습니다: {error}") from error
 
 
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
@@ -512,7 +551,7 @@ def rank_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def select_top(
     scored: list[dict[str, Any]],
     top_n: int,
-    max_per_industry: int,
+    max_per_industry: int | None,
     industry_by_ticker: dict[str, str],
 ) -> list[dict[str, Any]]:
     """점수 순서를 지키되 **한 업종이 상한을 넘지 않도록** 상위 top_n 을 고른다.
@@ -527,7 +566,7 @@ def select_top(
         if len(picked) >= top_n:
             break
         industry = industry_by_ticker.get(item["ticker"], "")
-        if industry:
+        if industry and max_per_industry is not None:  # None = 제한없음
             if counts.get(industry, 0) >= max_per_industry:
                 continue
             counts[industry] = counts.get(industry, 0) + 1
@@ -844,7 +883,7 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
     scored = rank_candidates(candidates)
 
     top_n = int(settings["top_n"])
-    max_per_industry = int(settings["max_per_industry"])
+    max_per_industry = settings["max_per_industry"]  # None = 제한없음
     industry_map_by_ticker = industry_map(pool)
     industry_by_ticker = industry_map_by_ticker
 

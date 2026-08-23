@@ -60,7 +60,8 @@ const barStyle: React.CSSProperties = {
 };
 
 export function AppLoadingProgress({ title, progress, fallbackMessage }: AppLoadingProgressProps) {
-  const percent = progress?.percent ?? 0;
+  // 표시는 항상 정수 % — 램프가 소수로 올라와도(튜닝처럼 느린 램프) 화면은 같은 형식을 쓴다.
+  const percent = Math.round(progress?.percent ?? 0);
   return (
     <div style={boxStyle}>
       <div style={textRowStyle}>

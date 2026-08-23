@@ -68,22 +68,6 @@ const CURRENT_NOTES = [
   },
 ];
 
-const BACKTEST_NOTES = [
-  {
-    title: "방식",
-    body:
-      "계좌 하나(현금·주수)에서 두 슬리브를 함께 굴린 시뮬레이션입니다. " +
-      "모멘텀은 엔진 체결 내역으로 복원하고, 신고가는 진입 여부가 슬리브 현금에 달려 있어 신호로 다시 판정합니다.",
-  },
-  {
-    title: "월초 배분 복구",
-    body: "매월 첫 거래일 시가에 저장된 배분으로 되돌립니다. 현금 우선으로 이관하고, 모자랄 때만 주식을 비례 매도합니다.",
-  },
-  {
-    title: "체결 목록",
-    body: "두 전략의 체결을 합쳐 보여줍니다. 손익률은 각 포지션의 진입·청산 가격 기준입니다.",
-  },
-];
 const hintStyle: React.CSSProperties = {
   color: "var(--text-muted)",
   fontSize: "var(--fs-sm)",
@@ -1493,7 +1477,6 @@ export function StrategyMixClient() {
               </span>
             </div>
             <div className="card-body appCardBodyTight">
-              <StrategyNotes items={BACKTEST_NOTES} />
               {error ? (
                 <div className="alert alert-danger" style={{ marginBottom: 0 }}>
                   {error}

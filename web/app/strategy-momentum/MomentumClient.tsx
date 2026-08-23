@@ -8,6 +8,7 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
 import { StrategyNotes } from "../components/StrategyNotes";
+import { StrategyTuning, type TuningResult } from "../components/StrategyTuning";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { NavTabs } from "../components/NavTabs";
@@ -61,34 +62,12 @@ const CURRENT_NOTES = [
   },
 ];
 
-const BACKTEST_NOTES = [
-  {
-    title: "체결 모델",
-    body:
-      "판정은 주 마지막 거래일 종가, 체결은 다음 주 첫 거래일 시가입니다 — " +
-      "같은 종가로 판정하고 체결하는 선행 편향이 없습니다.",
-  },
-  {
-    title: "비용",
-    body:
-      "슬리피지는 편도(%)로 실제 매매 금액 전체에 부과합니다 — " +
-      "편출 전량 매도 + 편입 1/N 매수 + 유지 종목의 재조정 매매까지 포함합니다.",
-  },
-  {
-    title: "빈 슬롯",
-    body: "자격 종목이 N보다 적으면 빈 슬롯은 현금(수익률 0)이고, 분모는 항상 N입니다.",
-  },
-  {
-    title: "알아둘 것",
-    body: "현재 종목풀 기준이라 상장폐지·풀 이탈 종목이 빠진 생존 편향이 있습니다.",
-  },
-];
 
 // 풀별로 따로 저장되는 설정 — 풀 셀렉트를 바꾸면 그 풀의 저장분으로 폼이 전환된다.
 // 슬리피지는 종목풀 설정을, 백테스트 기간은 실행할 때 고른 값을 쓴다 — 여기 없다.
 type PoolSettings = {
   top_n: number;
-  max_per_industry: number;
+  max_per_industry: number | null;
   short_ma_days: number;
   long_ma_days: number;
   /** 주중 이탈 — 보유 자격을 잃으면 다음 거래일 시가에 판다. 풀 성격에 따라 끄고 켠다. */
@@ -159,7 +138,6 @@ type BacktestMonthRow = {
   month: string;
   strategy_pct: number | null;
   benchmark_pct: number | null;
-  reference_pct: number | null;
 };
 
 // 주간 행 — 달력 주 단위. 기준일은 그 주 마지막 거래일, 편입·편출은 그 주 체결분.
@@ -167,7 +145,6 @@ type BacktestWeekRow = {
   week_end: string;
   strategy_pct: number | null;
   benchmark_pct: number | null;
-  reference_pct: number | null;
   holdings_count: number;
   turnover_pct: number | null;
   added: string[];
@@ -193,7 +170,6 @@ type BacktestDayRow = {
   date: string;
   strategy_pct: number | null;
   benchmark_pct: number | null;
-  reference_pct: number | null;
 };
 
 type BacktestResult = {
@@ -208,13 +184,8 @@ type BacktestResult = {
   benchmark_sortino: number | null;
   strategy_cagr_pct: number | null;
   benchmark_cagr_pct: number | null;
-  reference_cagr_pct: number | null;
   benchmark_name: string;
   benchmark_ticker: string;
-  reference_name: string | null;
-  reference_total_pct: number | null;
-  reference_mdd_pct: number | null;
-  reference_sortino: number | null;
   monthly: BacktestMonthRow[];
   weekly: BacktestWeekRow[];
   daily: BacktestDayRow[];
@@ -235,6 +206,8 @@ type PoolOption = PoolLabelSource & {
 };
 
 type View = {
+  /** 선택지 밖 저장값을 첫 선택지로 보정한 내역 — 있으면 화면이 저장을 요구한다. */
+  coerced?: string[];
   settings: Settings;
   // 풀별 저장 설정 맵 — 셀렉트 전환 시 즉시 그 풀의 값으로 폼을 채운다.
   settings_by_pool?: Record<string, PoolSettings>;
@@ -243,14 +216,15 @@ type View = {
   ma_rule?: {
     short_ma_days: number;
     long_ma_days: number;
-    ma_day_options: number[];
+    short_ma_options: number[];
+    long_ma_options: number[];
   };
   // 기간 선택지는 서버가 가격 캐시 범위로 계산해 내려준다 (종목풀 백테스트와 동일).
   month_options?: number[];
   // 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다).
   constraints?: {
     top_n_options: number[];
-    max_per_industry_options: number[];
+    max_per_industry_options: (number | null)[];
     intraweek_stop_options?: (number | null)[];
   };
   picks: PicksResult | null;
@@ -283,10 +257,8 @@ type YearRow = {
   year: string;
   strategy_pct: number | null;
   benchmark_pct: number | null;
-  reference_pct: number | null;
   strategy_partial: boolean;
   benchmark_partial: boolean;
-  reference_partial: boolean;
 };
 
 /** 초과(%p) 컬럼 — 전략 − 벤치마크. 신고가·합성 화면과 같은 정의를 쓴다. */
@@ -332,10 +304,8 @@ function toYearRows(monthly: BacktestMonthRow[]): YearRow[] {
       year,
       strategy_pct: compoundPct(rows.map((r) => r.strategy_pct)),
       benchmark_pct: compoundPct(rows.map((r) => r.benchmark_pct)),
-      reference_pct: compoundPct(rows.map((r) => r.reference_pct)),
       strategy_partial: countOf(rows, "strategy_pct") < 12,
       benchmark_partial: countOf(rows, "benchmark_pct") < 12,
-      reference_partial: countOf(rows, "reference_pct") < 12,
     }));
 }
 
@@ -371,7 +341,7 @@ export function MomentumClient() {
   // 초안 초기값은 자리만 잡는다 — 설정을 받은 뒤 applyView 가 항상 덮어쓰며,
   // 설정을 못 받으면 폼 자체를 그리지 않으므로 이 값이 화면에 보이는 경우는 없다.
   const [draftPool, setDraftPool] = useState<string>("");
-  const [draftMaxPerIndustry, setDraftMaxPerIndustry] = useState<number>(0);
+  const [draftMaxPerIndustry, setDraftMaxPerIndustry] = useState<number | null>(null);
   // 이평선 초안 — 전략 전용 값(momentum_settings)으로 풀별 저장되며 종목풀 설정과 무관하다.
   const [draftMaRule, setDraftMaRule] = useState<{ short: number; long: number } | null>(null);
   const [draftIntraweekExit, setDraftIntraweekExit] = useState(true);
@@ -412,6 +382,9 @@ export function MomentumClient() {
       setLoadError(null);
       const data = payload as View;
       applyView(data);
+      if (data.coerced?.length) {
+        toast.warning(`저장값이 선택지에 없어 보정했습니다: ${data.coerced.join(", ")} — 확인 후 저장하세요.`);
+      }
       // 기억된 풀에 저장분이 없으면(첫 설정) 그 풀을 초안으로 띄운다 — 폼 값은 저장된
       // 첫 풀의 설정을 시작점으로 쓰고, 선정은 저장 전이라 실행하지 않는다(null 반환).
       const requested = (payload as { requested_pool?: string }).requested_pool;
@@ -501,6 +474,22 @@ export function MomentumClient() {
     [applyView, runPicks, toast, view],
   );
 
+  // 업종 UI 노출 — 종목풀 설정의 풀 성격(pool_kind) 토글이 1순위:
+  // 개별주(stock)면 표시, ETF 면 숨김. 미설정(구 문서)이면 선정 행에 값이 있는지로
+  // 추정한다(pools-rank 와 같은 패턴). 업종을 모르는 종목엔 상한이 원래 미적용이라
+  // 숨겨도 동작은 그대로다.
+  const poolKind = view?.pool_options?.find((option) => option.ticker_type === view?.settings.pool)?.pool_kind ?? "";
+  const hasIndustryData =
+    poolKind === "stock"
+      ? true
+      : poolKind === "etf"
+        ? false
+        : view?.picks
+          ? view.picks.rows.some((row) => row.industry)
+          : true;
+  // 업종 데이터가 없는 풀은 상한이 무의미하므로 **없음(null)으로 고정**한다 — 저장·변경 감지·튜닝이
+  // 모두 이 값을 쓴다(저장값이 숫자로 남아 있으면 '저장하지 않은 변경'으로 떠서 없음으로 저장하게 된다).
+  const effectiveMaxPerIndustry = hasIndustryData ? draftMaxPerIndustry : null;
   const saveSettings = useCallback(async () => {
     const topN = Number(draft.top_n);
     if (!Number.isFinite(topN) || draftMaRule == null) {
@@ -511,7 +500,7 @@ export function MomentumClient() {
       {
         pool: draftPool,
         top_n: topN,
-        max_per_industry: draftMaxPerIndustry,
+        max_per_industry: effectiveMaxPerIndustry,
         // 이평선은 전략 전용 값 — 설정의 일부로 풀별 저장한다(종목풀 설정과 무관).
         short_ma_days: draftMaRule.short,
         long_ma_days: draftMaRule.long,
@@ -521,7 +510,7 @@ export function MomentumClient() {
       },
       "설정을 저장했습니다.",
     );
-  }, [draft, draftIntraweekExit, draftIntraweekStop, draftMaRule, draftMaxPerIndustry, draftPool, persistSettings, toast]);
+  }, [draft, draftIntraweekExit, draftIntraweekStop, draftMaRule, effectiveMaxPerIndustry, draftPool, persistSettings, toast]);
 
   // 풀 셀렉트 변경 — 그 풀의 저장 설정이 있으면 **즉시 전환·저장·재선정**한다
   // (전환은 초안이 아니라 컨텍스트 스위치다). 저장분이 없는 풀(첫 설정)만 초안으로
@@ -581,9 +570,11 @@ export function MomentumClient() {
   const isDirty = useMemo(() => {
     if (!view) return false;
     const saved = view.settings;
+    // 서버가 선택지 밖 저장값을 보정해 보낸 경우도 '저장 필요'로 본다 (저장하면 coerced 가 비워진다).
+    if (view.coerced?.length) return true;
     return (
       draftPool !== saved.pool ||
-      draftMaxPerIndustry !== saved.max_per_industry ||
+      effectiveMaxPerIndustry !== saved.max_per_industry ||
       draft.top_n !== String(saved.top_n) ||
       draftIntraweekExit !== saved.intraweek_exit ||
       (draftIntraweekStop === "" ? null : Number(draftIntraweekStop)) !== (saved.intraweek_stop_pct ?? null) ||
@@ -592,24 +583,11 @@ export function MomentumClient() {
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
           draftMaRule.long !== view.ma_rule.long_ma_days))
     );
-  }, [draft, draftIntraweekExit, draftIntraweekStop, draftMaRule, draftMaxPerIndustry, draftPool, view]);
+  }, [draft, draftIntraweekExit, draftIntraweekStop, draftMaRule, effectiveMaxPerIndustry, draftPool, view]);
 
   const monthlyLabels = view?.picks?.monthly_return_labels ?? [];
   // 선정 결과 풀의 국가 — 마켓·시가총액 컬럼 표시와 티커 표기(ASX:)를 정한다.
   const picksCountry = view?.picks?.country ?? "";
-  // 업종 UI 노출 — 종목풀 설정의 풀 성격(pool_kind) 토글이 1순위:
-  // 개별주(stock)면 표시, ETF 면 숨김. 미설정(구 문서)이면 선정 행에 값이 있는지로
-  // 추정한다(pools-rank 와 같은 패턴). 업종을 모르는 종목엔 상한이 원래 미적용이라
-  // 숨겨도 동작은 그대로다.
-  const poolKind = view?.pool_options?.find((option) => option.ticker_type === view?.settings.pool)?.pool_kind ?? "";
-  const hasIndustryData =
-    poolKind === "stock"
-      ? true
-      : poolKind === "etf"
-        ? false
-        : view?.picks
-          ? view.picks.rows.some((row) => row.industry)
-          : true;
   const pickColumns = useMemo<ColDef<PickRow>[]>(() => {
     return [
       {
@@ -782,10 +760,9 @@ export function MomentumClient() {
     // 월별 라벨·국가·업종 유무가 선정 응답에 실려 온다 — 바뀌면(월 전환·풀 전환) 컬럼도 다시 만든다.
   }, [hasIndustryData, monthlyLabels, picksCountry]);
 
-  // 월간 표 — 연간과 같은 집계형(월/전략/벤치/참고). 매매 내역은 주간 표가 담당한다.
+  // 월간 표 — 연간과 같은 집계형(월/전략/벤치). 매매 내역은 주간 표가 담당한다.
   // 표 헤더의 지수 이름 — 신고가·합성 화면과 같은 표기(값에 % 가 붙으므로 헤더엔 붙이지 않는다).
   const benchmarkLabel = backtest?.benchmark_name ?? "벤치마크";
-  const referenceLabel = backtest?.reference_name ?? "참고";
 
   const backtestColumns = useMemo<ColDef<BacktestMonthRow>[]>(() => {
     if (!backtest) return [];
@@ -816,18 +793,6 @@ export function MomentumClient() {
         cellStyle: (p) => ({ color: signColor(p.value) }),
       },
     ];
-    if (backtest.reference_name) {
-      columns.push({
-        headerName: referenceLabel,
-        headerTooltip: "참고 지수 — 유사 컨셉 ETF (벤치마크가 아니며 선정에 관여하지 않는다)",
-        field: "reference_pct",
-        flex: 1,
-        minWidth: 110,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
-      });
-    }
     columns.push(excessColumn<BacktestMonthRow>());
     return columns;
   }, [backtest]);
@@ -849,15 +814,6 @@ export function MomentumClient() {
       pctColumn("전략", "strategy_pct", "보유 종목 동일가중 일간 변동률 (교체일에는 리밸런싱 비용 반영)"),
       pctColumn(benchmarkLabel, "benchmark_pct", `${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
     ];
-    if (backtest.reference_name) {
-      columns.push(
-        pctColumn(
-          referenceLabel,
-          "reference_pct",
-          "참고 지수 — 유사 컨셉 ETF (벤치마크가 아니며 선정에 관여하지 않는다)",
-        ),
-      );
-    }
     columns.push(excessColumn<BacktestDayRow>());
     return columns;
   }, [backtest]);
@@ -928,15 +884,6 @@ export function MomentumClient() {
       pctColumn("전략", "strategy_pct", "그 주 보유 포트폴리오의 수익률 (교체 비용 반영)"),
       pctColumn(benchmarkLabel, "benchmark_pct", `${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
     ];
-    if (backtest.reference_name) {
-      columns.push(
-        pctColumn(
-          referenceLabel,
-          "reference_pct",
-          "참고 지수 — 유사 컨셉 ETF (벤치마크가 아니며 선정에 관여하지 않는다)",
-        ),
-      );
-    }
     columns.push(
       {
         headerName: "종목 수",
@@ -985,8 +932,8 @@ export function MomentumClient() {
     // 부분 기간은 /compare 와 같은 규칙으로 값 뒤에 `*` 를 붙인다.
     const pctColumn = (
       headerName: string,
-      field: "strategy_pct" | "benchmark_pct" | "reference_pct",
-      partialField: "strategy_partial" | "benchmark_partial" | "reference_partial",
+      field: "strategy_pct" | "benchmark_pct",
+      partialField: "strategy_partial" | "benchmark_partial",
       headerTooltip?: string,
     ): ColDef<YearRow> => ({
       headerName,
@@ -1012,16 +959,6 @@ export function MomentumClient() {
         `${backtest.benchmark_name}(${backtest.benchmark_ticker})`,
       ),
     ];
-    if (backtest.reference_name) {
-      columns.push(
-        pctColumn(
-          referenceLabel,
-          "reference_pct",
-          "reference_partial",
-          "참고 지수 — 유사 컨셉 ETF (벤치마크가 아니며 선정에 관여하지 않는다)",
-        ),
-      );
-    }
     columns.push(excessColumn<YearRow>());
     return columns;
   }, [backtest]);
@@ -1092,35 +1029,40 @@ export function MomentumClient() {
                     ))}
                   </select>
                 </label>
-                {/* 업종 데이터가 없는 풀(ETF 모음 등)은 상한이 무의미하므로 셀렉트를 숨긴다 (저장값은 유지). */}
-                {hasIndustryData ? (
-                  <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">업종별 최대 보유</span>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">업종 상한</span>
+                  {hasIndustryData ? (
                     <select
                       className="form-select form-select-sm"
-                      style={{ width: 80 }}
-                      value={draftMaxPerIndustry}
-                      onChange={(e) => setDraftMaxPerIndustry(Number(e.target.value))}
+                      style={{ width: 96 }}
+                      // '없음'(null)은 빈 문자열로 실어 보낸다 — select 의 value 는 문자열만 받는다.
+                      value={draftMaxPerIndustry == null ? "" : String(draftMaxPerIndustry)}
+                      onChange={(e) => setDraftMaxPerIndustry(e.target.value === "" ? null : Number(e.target.value))}
                     >
-                      {withSavedValue(view.constraints?.max_per_industry_options ?? [], String(draftMaxPerIndustry)).map((count) => (
-                        <option key={count} value={count}>
-                          {count}
+                      {(view.constraints?.max_per_industry_options ?? []).map((count) => (
+                        <option key={String(count)} value={count == null ? "" : String(count)}>
+                          {count == null ? "없음" : count}
                         </option>
                       ))}
                     </select>
-                  </label>
-                ) : null}
+                  ) : (
+                    // 업종 데이터가 없는 풀(ETF 모음 등)은 상한이 무의미 — '없음'으로 고정해 보여준다.
+                    <select className="form-select form-select-sm" style={{ width: 96 }} value="" disabled title="업종 데이터가 없는 종목풀은 업종 상한을 쓰지 않습니다">
+                      <option value="">없음</option>
+                    </select>
+                  )}
+                </label>
                 {draftMaRule != null && view.ma_rule != null ? (
                   <>
                     <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">이평선</span>
+                      <span className="appLabeledFieldLabel">선정 이평선</span>
                       <span className="appMaRuleRow">
                         <select
                           className="form-select appMaRuleSelect"
                           value={draftMaRule.short}
                           onChange={(e) => setDraftMaRule((r) => r && { ...r, short: Number(e.target.value) })}
                         >
-                          {view.ma_rule.ma_day_options.map((d) => (
+                          {view.ma_rule.short_ma_options.map((d) => (
                             <option key={d} value={d}>
                               단기 {d}일
                             </option>
@@ -1131,7 +1073,7 @@ export function MomentumClient() {
                           value={draftMaRule.long}
                           onChange={(e) => setDraftMaRule((r) => r && { ...r, long: Number(e.target.value) })}
                         >
-                          {view.ma_rule.ma_day_options.map((d) => (
+                          {view.ma_rule.long_ma_options.map((d) => (
                             <option key={d} value={d}>
                               장기 {d}일
                             </option>
@@ -1143,7 +1085,7 @@ export function MomentumClient() {
                       <span className="appLabeledFieldLabel">주중 이탈</span>
                       <select
                         className="form-select form-select-sm"
-                        style={{ width: 96 }}
+                        style={{ width: 112 }}
                         value={draftIntraweekExit ? "on" : "off"}
                         onChange={(e) => setDraftIntraweekExit(e.target.value === "on")}
                         title="보유 자격(장기 이격 > 0 · 단기 이격 ≥ 0)을 잃으면 다음 거래일 시가에 매도한다. 끄면 주 교체일에만 정리한다."
@@ -1282,7 +1224,6 @@ export function MomentumClient() {
                 </button>
               </div>
             </div>
-            <StrategyNotes items={BACKTEST_NOTES} />
             {backtesting ? <AppLoadingProgress title="백테스트 실행 중..." progress={backtestProgress} /> : null}
             {backtest && !backtesting ? (
               <>
@@ -1303,17 +1244,6 @@ export function MomentumClient() {
                     mddPct: backtest.benchmark_mdd_pct,
                     sortino: backtest.benchmark_sortino,
                   }}
-                  extra={
-                    backtest.reference_name && backtest.reference_total_pct != null
-                      ? {
-                          label: `${backtest.reference_name} (참고)`,
-                          totalPct: backtest.reference_total_pct,
-                          cagrPct: backtest.reference_cagr_pct,
-                          mddPct: backtest.reference_mdd_pct,
-                          sortino: backtest.reference_sortino,
-                        }
-                      : null
-                  }
                 />
                 <BacktestTradeStats stats={backtest} style={{ marginBottom: 12 }} />
                 <NavTabs
@@ -1377,7 +1307,7 @@ export function MomentumClient() {
                       getRowId={(p) => p.data.year}
                     />
                     {yearRows.some(
-                      (row) => row.strategy_partial || row.benchmark_partial || row.reference_partial,
+                      (row) => row.strategy_partial || row.benchmark_partial,
                     ) ? (
                       <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>
                         * 12개월이 다 차지 않은 해 — 있는 달만 합성한 부분 기간입니다.
@@ -1393,6 +1323,82 @@ export function MomentumClient() {
             ) : null}
           </div>
         </div>
+
+        {/* 튜닝 — 백테스트 아래. 백테스트와 같이 **저장된** 설정을 기준으로 아래 범위의 조합을
+            전부 돌린다. 이평 축은 상단 셀렉트와 같은 선택지(서버 상수)를 쓴다. */}
+        <StrategyTuning
+          monthOptions={view.month_options ?? [backtestMonths]}
+          defaultMonths={backtestMonths}
+          disabled={backtesting}
+          secondsPerCombo={0.06}
+          extraSeconds={90}
+          fixedLabel={`저장된 설정 기준 (종목풀 ${draftPool})${hasIndustryData ? "" : " · 업종 상한 없음(업종 데이터 없는 풀)"}`}
+          current={{
+            top_n: view.settings.top_n,
+            max_per_industry: hasIndustryData ? view.settings.max_per_industry : null,
+            short_ma_days: view.settings.short_ma_days,
+            long_ma_days: view.settings.long_ma_days,
+            intraweek: !view.settings.intraweek_exit
+              ? "off"
+              : view.settings.intraweek_stop_pct == null
+                ? "none"
+                : view.settings.intraweek_stop_pct,
+          }}
+          axes={[
+            // 축 값 = 상단 셀렉트 선택지(서버 상수) — 여기서 따로 정하지 않는다.
+            { key: "top_n", label: "종목 수", values: (view.constraints?.top_n_options ?? []).map((n) => ({ value: n, label: `${n}` })) },
+            // 업종 데이터가 없는 풀은 상한 축을 돌리지 않는다(결과가 전부 같아 조합만 3배로 는다).
+            ...(hasIndustryData
+              ? [
+                  {
+                    key: "max_per_industry",
+                    label: "업종 상한",
+                    values: (view.constraints?.max_per_industry_options ?? []).map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: `${n}` })),
+                  },
+                ]
+              : []),
+            { key: "short_ma_days", label: "단기 이평", values: (view.ma_rule?.short_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },
+            { key: "long_ma_days", label: "장기 이평", values: (view.ma_rule?.long_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },
+            {
+              key: "intraweek",
+              label: "주중 손절선",
+              values: [
+                { value: "off", label: "이탈 미사용" },
+                ...(view.constraints?.intraweek_stop_options ?? []).map((n) =>
+                  n == null ? { value: "none", label: "이탈만(손절 없음)" } : { value: n, label: `${n}%` },
+                ),
+              ],
+            },
+          ]}
+          onApply={async (params) => {
+            // 조합을 상단 폼에 넣고 그대로 저장한다 (저장 응답이 폼·선정을 갱신한다).
+            const intraweekExit = params.intraweek !== "off";
+            const stop = typeof params.intraweek === "number" ? params.intraweek : null;
+            const next = {
+              ...view.settings,
+              pool: draftPool,
+              top_n: Number(params.top_n),
+              max_per_industry: !hasIndustryData || params.max_per_industry == null ? null : Number(params.max_per_industry),
+              short_ma_days: Number(params.short_ma_days),
+              long_ma_days: Number(params.long_ma_days),
+              intraweek_exit: intraweekExit,
+              intraweek_stop_pct: intraweekExit ? stop : null,
+            };
+            fillDrafts(next);
+            await persistSettings(next, "튜닝 조합을 적용해 저장했습니다.");
+          }}
+          run={async (months, ranges) => {
+            const resp = await fetch(`/api/strategy-momentum/tuning?pool=${encodeURIComponent(draftPool)}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              // 업종 데이터가 없는 풀은 상한 축을 '없음' 하나로 고정해 보낸다.
+              body: JSON.stringify({ months, ranges: hasIndustryData ? ranges : { ...ranges, max_per_industry: [null] } }),
+            });
+            const payload = await resp.json();
+            if (!resp.ok) throw new Error(payload?.error ?? "튜닝에 실패했습니다.");
+            return payload as TuningResult;
+          }}
+        />
       </div>
     </PageFrame>
   );

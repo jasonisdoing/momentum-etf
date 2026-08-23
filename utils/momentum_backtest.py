@@ -52,9 +52,6 @@ from utils.pool_signal_backtest_service import get_max_backtest_months
 from utils.price_series import positive_prices
 from utils.trade_stats import summarize_trades
 
-# 미국 풀 참고 지수 — 유사 컨셉 ETF(FMTM)와 같은 구간을 나란히 비교한다 (벤치마크 아님).
-US_REFERENCE_TICKER = "FMTM"
-
 
 def _rebalance_dates(benchmark_close: pd.Series, months: int) -> list[pd.Timestamp]:
     """주 교체일(각 주의 첫 거래일) 목록 — 최근 ``months`` 개월 구간.
@@ -114,6 +111,7 @@ def run_backtest(
     settings: dict[str, Any] | None = None,
     *,
     include_daily: bool,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """월간 리밸런싱 백테스트. 월별 전략 vs 벤치마크 수익률을 반환한다.
 
@@ -121,7 +119,12 @@ def run_backtest(
     시계열을 재색인해야 하고 응답도 수천 행이 되므로, 화면에서 일간 탭을 볼 때만
     요청한다. 동작이 달라지는 값이라 기본값을 두지 않는다.
 
+    ``context`` 는 튜닝처럼 같은 풀로 여러 설정을 연달아 돌릴 때 쓰는 공유 캐시다
+    (universe·frames·benchmark_close·정제 시계열·판정일별 후보). 비어 있는
+    항목은 여기서 채워 넣으므로 빈 dict 를 넘기고 재사용하면 된다. 후보는 단기·장기
+    이평에만 의존하므로 (판정일, 단기, 장기) 키로 캐시한다.
     """
+    context = context if context is not None else {}
     max_months = get_max_backtest_months()
     if not isinstance(months, int) or not 1 <= months <= max_months:
         raise ValueError(f"'months' 는 1~{max_months} 사이의 정수여야 합니다.")
@@ -130,7 +133,9 @@ def run_backtest(
     settings = validate_settings(settings)
     pool = str(settings["pool"])
 
-    universe = load_universe(pool)
+    if context.get("universe") is None:
+        context["universe"] = load_universe(pool)
+    universe = context["universe"]
     name_by_ticker = {row["ticker"]: row["name"] for row in universe}
 
     def holding_label(ticker: str) -> str:
@@ -138,8 +143,12 @@ def run_backtest(
         name = name_by_ticker.get(ticker)
         return f"{name}({ticker})" if name else ticker
 
-    frames = load_price_frames(universe)
-    benchmark_close = load_benchmark_close(pool)
+    if context.get("frames") is None:
+        context["frames"] = load_price_frames(universe)
+    frames = context["frames"]
+    if context.get("benchmark_close") is None:
+        context["benchmark_close"] = load_benchmark_close(pool)
+    benchmark_close = context["benchmark_close"]
 
     # 실제 한계는 종목풀 데이터가 정한다 — 판정일 여유까지 반영해 여기서 다시 막는다.
     pool_max = available_backtest_months(benchmark_close, int(settings["long_ma_days"]))
@@ -148,17 +157,6 @@ def run_backtest(
             f"장기 이평선 기준으로 이 종목풀은 최대 {pool_max}개월까지 백테스트할 수 있습니다 (요청 {months}개월)."
         )
 
-    # 참고 지수 — 미국 풀은 유사 컨셉 ETF(FMTM)를 나란히 보여준다
-    # (벤치마크가 아니며 선정에 관여하지 않는다).
-    from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
-
-    reference_close: pd.Series | None = None
-    reference_name: str | None = None
-    if pool_info(pool)["country"] == "us":
-        reference_frame = load_cached_frames_bulk_from_all_ticker_types([US_REFERENCE_TICKER]).get(US_REFERENCE_TICKER)
-        if reference_frame is not None and not reference_frame.empty:
-            reference_close = pd.to_numeric(reference_frame["Close"], errors="coerce").dropna()
-            reference_name = US_REFERENCE_TICKER
     dates = _rebalance_dates(benchmark_close, months)
 
     # 판정 시점 = 각 교체일(체결일)의 직전 거래일. 벤치마크 달력 기준.
@@ -192,8 +190,14 @@ def run_backtest(
     # 교체 시점별 후보 (모멘텀은 가격 캐시만 쓰므로 즉시 계산된다)
     candidates_by_date: list[list[dict[str, Any]]] = []
     all_signal_dates = signal_dates + ([pending_signal] if pending_signal is not None else [])
+    candidate_cache: dict = context.setdefault("candidate_cache", {})
+    ma_key = (int(settings["short_ma_days"]), int(settings["long_ma_days"]))
     for signal_date in all_signal_dates:
-        candidates_by_date.append(select_candidates(universe, frames, settings, as_of=signal_date))
+        cache_key = (signal_date, *ma_key)
+        if cache_key not in candidate_cache:
+            candidate_cache[cache_key] = select_candidates(universe, frames, settings, as_of=signal_date)
+        # 아래 단계가 후보 dict 를 손대더라도 캐시는 그대로 남게 복사본을 준다.
+        candidates_by_date.append([dict(item) for item in candidate_cache[cache_key]])
 
     # 슬리피지는 종목풀 설정을 단일 소스로 쓴다 — 매수·매도 편도값을 각각 적용한다.
     buy_slippage_pct, sell_slippage_pct = get_pool_slippage(pool)
@@ -201,32 +205,35 @@ def run_backtest(
     top_n = int(settings["top_n"])
 
     # 업종 상한 — 선정 화면과 같은 규칙으로 상위 종목을 고른다.
-    max_per_industry = int(settings["max_per_industry"])
-    industry_by_ticker = industry_map(pool)
+    max_per_industry = settings["max_per_industry"]  # None = 제한없음
+    if context.get("industry_by") is None:
+        context["industry_by"] = industry_map(pool)
+    industry_by_ticker = context["industry_by"]
 
     # 일간 표용 — 보유 구간 안에서 매일의 동일가중 포트폴리오 수익률.
     # 가격은 한 번만 정제해 재사용한다(구간마다 다시 정제하면 느리다).
     clean_closes: dict[str, pd.Series] = {}
     clean_opens: dict[str, pd.Series] = {}
     clean_benchmark: pd.Series | None = None
-    clean_reference: pd.Series | None = None
     if include_daily:
-        clean_closes = {ticker: positive_prices(frame["Close"]).dropna() for ticker, frame in frames.items()}
-        for ticker, frame in frames.items():
-            opens = _open_series(frame)
-            if opens is not None:
-                clean_opens[ticker] = opens
-        clean_benchmark = pd.to_numeric(benchmark_close, errors="coerce").dropna()
-        clean_reference = (
-            pd.to_numeric(reference_close, errors="coerce").dropna() if reference_close is not None else None
-        )
+        if "clean_closes" not in context:
+            context["clean_closes"] = {ticker: positive_prices(frame["Close"]).dropna() for ticker, frame in frames.items()}
+            opens_by: dict[str, pd.Series] = {}
+            for ticker, frame in frames.items():
+                opens = _open_series(frame)
+                if opens is not None:
+                    opens_by[ticker] = opens
+            context["clean_opens"] = opens_by
+            context["clean_benchmark"] = pd.to_numeric(benchmark_close, errors="coerce").dropna()
+        clean_closes = context["clean_closes"]
+        clean_opens = context["clean_opens"]
+        clean_benchmark = context["clean_benchmark"]
     daily: list[dict[str, Any]] = []
     # 날짜 -> 그날의 성장배수. 구간 경계일(교체일)은 두 구간이 함께 쓰므로 곱해서 합친다.
     daily_growth: dict[str, float] = {}
 
     monthly_by_key: dict[str, list[float]] = {}
     monthly_bench: dict[str, list[float]] = {}
-    monthly_ref: dict[str, list[float]] = {}
     monthly_order: list[str] = []
     weekly: list[dict[str, Any]] = []
     # 주간 표용 매매 이벤트 — 체결일 기준. 주 행이 이걸로 그 주의 편입·편출을 만든다.
@@ -290,7 +297,6 @@ def run_backtest(
 
     strategy_returns: list[float] = []
     benchmark_returns: list[float] = []
-    reference_returns: list[float] = []
     previous_holdings: set[str] = set()
     # 직전 보유 구간의 종목별 성장배수(1+수익률) — 교체 시점의 드리프트 비중 계산용.
     previous_growth: dict[str, float] = {}
@@ -373,15 +379,11 @@ def run_backtest(
         strategy_pct = (gross - cost) * 100.0 if gross is not None else None
         benchmark_return = _period_return(benchmark_close, start, end)
         benchmark_pct = benchmark_return * 100.0 if benchmark_return is not None else None
-        reference_return = _period_return(reference_close, start, end) if reference_close is not None else None
-        reference_pct = reference_return * 100.0 if reference_return is not None else None
 
         if strategy_pct is not None:
             strategy_returns.append(strategy_pct / 100.0)
         if benchmark_pct is not None:
             benchmark_returns.append(benchmark_pct / 100.0)
-        if reference_pct is not None:
-            reference_returns.append(reference_pct / 100.0)
 
         # ── 일간 행 ──
         # 이 구간(start→end)의 보유 종목은 고정이다. 체결이 시가이므로 **start 시가**를 1 로
@@ -435,13 +437,11 @@ def run_backtest(
         month_key = end.strftime("%Y-%m")
         if month_key not in monthly_by_key:
             monthly_order.append(month_key)
-            monthly_by_key[month_key], monthly_bench[month_key], monthly_ref[month_key] = [], [], []
+            monthly_by_key[month_key], monthly_bench[month_key] = [], []
         if strategy_pct is not None:
             monthly_by_key[month_key].append(strategy_pct)
         if benchmark_pct is not None:
             monthly_bench[month_key].append(benchmark_pct)
-        if reference_pct is not None:
-            monthly_ref[month_key].append(reference_pct)
 
         previous_holdings = survivors
         previous_growth = {ticker: 1.0 + period_returns.get(ticker, 0.0) for ticker in previous_holdings}
@@ -463,7 +463,6 @@ def run_backtest(
             "month": key,
             "strategy_pct": _compound(monthly_by_key[key]),
             "benchmark_pct": _compound(monthly_bench[key]),
-            "reference_pct": _compound(monthly_ref[key]),
         }
         for key in monthly_order
     ]
@@ -507,14 +506,12 @@ def run_backtest(
             return {day.strftime("%Y-%m-%d"): float(v) * 100.0 for day, v in changes.items() if pd.notna(v)}
 
         bench_changes = _daily_changes(clean_benchmark)
-        ref_changes = _daily_changes(clean_reference)
         for key in sorted(daily_growth):
             daily.append(
                 {
                     "date": key,
                     "strategy_pct": round((daily_growth[key] - 1.0) * 100.0, 2),
                     "benchmark_pct": round(bench_changes[key], 2) if key in bench_changes else None,
-                    "reference_pct": round(ref_changes[key], 2) if key in ref_changes else None,
                 }
             )
 
@@ -538,12 +535,11 @@ def run_backtest(
         for row in daily:
             stamp = pd.Timestamp(row["date"])
             bucket = buckets.setdefault(
-                _week_monday(stamp), {"end": stamp, "strategy": [], "benchmark": [], "reference": []}
+                _week_monday(stamp), {"end": stamp, "strategy": [], "benchmark": []}
             )
             bucket["end"] = max(bucket["end"], stamp)
             bucket["strategy"].append(row["strategy_pct"])
             bucket["benchmark"].append(row["benchmark_pct"])
-            bucket["reference"].append(row["reference_pct"])
 
         events_sorted = sorted(trade_events, key=lambda event: event["date"])
         event_index = 0
@@ -566,7 +562,6 @@ def run_backtest(
                     "week_end": bucket["end"].strftime("%Y-%m-%d"),
                     "strategy_pct": _compound_daily(bucket["strategy"]),
                     "benchmark_pct": _compound_daily(bucket["benchmark"]),
-                    "reference_pct": _compound_daily(bucket["reference"]),
                     "holdings_count": holdings_running,
                     "turnover_pct": round(len(added_labels) / top_n * 100.0, 1),
                     "added": added_labels,
@@ -598,7 +593,6 @@ def run_backtest(
             "week_end": week_last_trading_day(country, next_rebalance or (last_cached + pd.Timedelta(days=7))),
             "strategy_pct": None,
             "benchmark_pct": None,
-            "reference_pct": None,
             "holdings_count": pending_count,
             "turnover_pct": round(len(pending_added) / top_n * 100.0, 1),
             "added": [holding_label(t) for t in pending_added],
@@ -629,11 +623,6 @@ def run_backtest(
     strategy_total, strategy_mdd, strategy_sortino, strategy_cagr = _summarize(strategy_returns)
     benchmark_total, benchmark_mdd, benchmark_sortino, benchmark_cagr = _summarize(benchmark_returns)
 
-    if reference_close is not None and reference_returns:
-        reference_total, reference_mdd, reference_sortino, reference_cagr = _summarize(reference_returns)
-    else:
-        reference_total = reference_mdd = reference_sortino = reference_cagr = None
-
     return {
         "start_date": dates[0].strftime("%Y-%m-%d"),
         "end_date": dates[-1].strftime("%Y-%m-%d"),
@@ -646,13 +635,8 @@ def run_backtest(
         "benchmark_sortino": benchmark_sortino,
         "strategy_cagr_pct": strategy_cagr,
         "benchmark_cagr_pct": benchmark_cagr,
-        "reference_cagr_pct": reference_cagr,
         "benchmark_name": benchmark_info(pool)["name"],
         "benchmark_ticker": benchmark_info(pool)["ticker"],
-        "reference_name": reference_name if reference_close is not None else None,
-        "reference_total_pct": reference_total,
-        "reference_mdd_pct": reference_mdd,
-        "reference_sortino": reference_sortino,
         # 최신 달이 위로 오게 뒤집는다 (화면 표)
         "monthly": list(reversed(monthly)),
         # 주간 표 — 매매 내역(편입·편출·교체율·보유 수)을 담는다. 최신 주가 위.
