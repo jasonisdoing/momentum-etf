@@ -24,6 +24,7 @@ import { formatKorMarketCap } from "@/lib/market-cap-format";
 import {
   INDUSTRY_COLUMN_MIN_WIDTH,
   INDUSTRY_COLUMN_WIDTH,
+  STOCK_NAME_COLUMN_MIN_WIDTH,
   formatSignedPct,
   marketBadgeCellStyle,
   renderHighDrawdownCell,
@@ -826,7 +827,13 @@ export function MomentumClient() {
   const tradeColumns = useMemo<ColDef<BacktestTradeRow>[]>(
     () => [
       { headerName: "티커", field: "ticker", width: 96 },
-      { headerName: "종목명", field: "name", flex: 1, minWidth: 180 },
+      {
+        headerName: "종목명",
+        field: "name",
+        flex: 1,
+        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
+        cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
+      },
       { headerName: "편입일", field: "entry_date", width: 116 },
       {
         headerName: "매수가",

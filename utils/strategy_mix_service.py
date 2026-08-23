@@ -415,7 +415,29 @@ def _build_action_groups(
     return groups
 
 
-def _attach_account_targets(holdings: list[dict[str, Any]], account: dict[str, Any]) -> list[dict[str, Any]]:
+def _krw_rate(currency: str) -> float:
+    """종목 통화 → 원화 환율. 원화면 1.0.
+
+    계좌 원장의 현금·평가액은 전부 원화 기준인데 종목 가격은 그 시장 통화다. 섞어서
+    더하거나 나누면 미국·호주 풀에서 총자산과 목표 수량이 환율 배수만큼 어긋난다.
+    환율을 못 받으면 0 을 돌려 호출부가 '계산 불가' 로 명시한다 — 1.0 으로 두면
+    달러 가격을 원화로 착각한 값이 조용히 나간다.
+    """
+    code = str(currency or "KRW").strip().upper()
+    if code == "KRW":
+        return 1.0
+    from services.price_service import get_exchange_rates
+
+    try:
+        return float(((get_exchange_rates() or {}).get(code) or {}).get("rate") or 0.0)
+    except Exception:
+        logger.warning("[STRATEGY-MIX] %s 환율 조회 실패 — 목표 수량을 계산하지 않는다", code, exc_info=True)
+        return 0.0
+
+
+def _attach_account_targets(
+    holdings: list[dict[str, Any]], account: dict[str, Any], krw_rate: float = 1.0
+) -> list[dict[str, Any]]:
     """계좌 보유와 목표를 대조해 수량 지시를 붙인다. 전량 매도 요약 목록을 돌려준다.
 
     종목별 목표 금액·주수 → 현재 보유와의 차이가 그대로 매매 지시가 된다.
@@ -435,10 +457,16 @@ def _attach_account_targets(holdings: list[dict[str, Any]], account: dict[str, A
         )
         target_amount = total_assets * row["weight_pct"] / 100.0
         row["target_amount"] = round(target_amount, 2)
+        # 목표 금액은 원화, 가격은 그 시장 통화다 — 환율로 맞춘 뒤 나눠야 한다.
         price = row.get("price")
+        price_krw = float(price) * krw_rate if price and krw_rate > 0 else None
         # 반올림 — 버림이면 1주 값이 목표 금액보다 조금만 커도 목표가 0 이 되어 슬롯이
         # 통째로 빈다(비중 0% vs 목표 5%). 반올림이 목표 비중에 더 가깝다.
-        target_qty = round(target_amount / float(price)) if price else None
+        target_qty = round(target_amount / price_krw) if price_krw else None
+        # 1주 값이 목표 금액보다 커서 0 이 된 경우에는 최소 1주를 목표로 둔다 — 비중을
+        # 배정받은 슬롯이 0주로 비는 것보다 낫다. 비중이 0 인 행(전량 매도 등)은 그대로 0.
+        if target_qty == 0 and row["weight_pct"] > 0:
+            target_qty = 1
         row["target_quantity"] = target_qty
         row["trade_quantity"] = None if target_qty is None else target_qty - int(row["held_quantity"])
     target_tickers = {row["ticker"] for row in holdings}
@@ -731,7 +759,10 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     from utils.settings_loader import get_ticker_type_settings
     from utils.trading_calendar import get_trading_days
 
-    country = str((get_ticker_type_settings(pool_norm) or {}).get("country_code") or "kor").strip().lower()
+    pool_settings = get_ticker_type_settings(pool_norm) or {}
+    country = str(pool_settings.get("country_code") or "kor").strip().lower()
+    # 종목 가격의 통화 — 계좌 원장(원화)과 맞추려면 환율이 필요하다.
+    pool_currency = str(pool_settings.get("currency") or "KRW").strip().upper()
     tz_name = str((MARKET_SCHEDULES.get(country) or {}).get("timezone") or "Asia/Seoul")
     # 과거 날짜 조회면 그 날짜 기준으로 첫 거래일 여부를 판정한다.
     today_local = pd.Timestamp(as_of).date() if as_of else pd.Timestamp.now(tz=tz_name).date()
@@ -788,17 +819,22 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
                 close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
                 if not close.empty:
                     price_by_ticker[ticker] = float(close.iloc[-1])
+        # 계좌 원장의 현금은 원화다 — 종목 평가액도 원화로 맞춰야 총자산이 성립한다.
+        # (환율을 못 받으면 0 이라 평가액이 비고, 목표 수량도 계산하지 않는다.)
+        krw_rate = _krw_rate(pool_currency)
         stock_value = 0.0
         for ticker, item in account["holdings"].items():
             price = price_by_ticker.get(ticker)
+            # 화면에 보이는 현재가는 그 시장 통화 그대로 둔다(달러 종목은 달러로 본다).
             item["price"] = round(float(price), 4) if price else None
-            item["value"] = round(item["quantity"] * float(price), 2) if price else None
-            if price:
-                stock_value += item["quantity"] * float(price)
+            value_krw = item["quantity"] * float(price) * krw_rate if price and krw_rate > 0 else None
+            item["value"] = round(value_krw, 2) if value_krw is not None else None
+            if value_krw:
+                stock_value += value_krw
         total_assets = stock_value + account["cash_balance"]
         account["stock_value"] = round(stock_value, 2)
         account["total_assets"] = round(total_assets, 2)
-        account["sell_all"] = _attach_account_targets(holdings, account)
+        account["sell_all"] = _attach_account_targets(holdings, account, krw_rate)
 
     payload = {
         "computed_at": datetime.now().astimezone().isoformat(),
