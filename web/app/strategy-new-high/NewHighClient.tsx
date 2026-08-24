@@ -826,9 +826,11 @@ export function NewHighClient() {
         valueGetter: (p) => p.data?.plan ?? "",
         cellRenderer: (p: { data?: PlanRow }) => {
           if (!p.data) return null;
-          if (p.data.plan === "buy") return <strong style={{ color: "#d62828" }}>진입 예정</strong>;
+          // 장중 판정은 오늘 종가로 확정되기 전이라 (예상) — 종가 확정 후에는 꼬리표가 빠진다.
+          const tag = positions?.live ? "(예상)" : "";
+          if (p.data.plan === "buy") return <strong style={{ color: "#d62828" }}>진입 예정{tag}</strong>;
           if (p.data.plan === "sell") {
-            return <strong style={{ color: "#1971c2" }}>매도 예정{p.data.exit_reason ? ` (${p.data.exit_reason})` : ""}</strong>;
+            return <strong style={{ color: "#1971c2" }}>매도 예정{tag}{p.data.exit_reason ? ` (${p.data.exit_reason})` : ""}</strong>;
           }
           if (p.data.plan === "exited") {
             return <span style={{ color: "var(--text-muted)" }}>이탈{p.data.exit_reason ? ` (${p.data.exit_reason})` : ""}</span>;
@@ -901,7 +903,7 @@ export function NewHighClient() {
         cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
       },
     ],
-    [hasIndustryData, fillDay],
+    [hasIndustryData, fillDay, positions?.live],
   );
 
   const tradeColumns = useMemo<ColDef<Trade>[]>(
