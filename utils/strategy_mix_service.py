@@ -438,7 +438,8 @@ def _build_action_groups(
                 "title": "매도 예정(예상)",
                 "text": f"{label(ticker, row.get('name') or ticker, held.get('held_quantity'))} ({row.get('reason')})",
                 "date": next_trading_day,
-                "quantity": 0,  # 예상 — 알람 상태 비교에 얹히지 않게 0
+                # 알람 상태 비교용 — 예상도 '처음 등장할 때 1건' 발송되도록 실제 수량을 싣는다.
+                "quantity": abs(int(float(held.get("held_quantity") or 0))),
             }
         )
     if forecast_items and next_trading_day:
