@@ -1088,6 +1088,48 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             "exit_reason": exit_info.get("reason"),
         }
 
+    def exit_forecast(ticker: str, current: dict[str, Any]) -> dict[str, Any]:
+        """주중 이탈·손절 **예상** — 현재(장중) 가격으로 확정 판정(simulate_intraweek_exits)과
+        같은 두 조건을 미리 본다: ① 자격 상실(장기 ≤ 0 또는 단기 < 0) ② 교체일 시가 대비
+        낙폭이 손절선 이하. 오늘 종가로 확정되기 전의 예보라 화면 표시 전용이다.
+        """
+        none = {"is_exit_forecast": False, "exit_forecast_reason": None}
+        if not settings.get("intraweek_exit", True) or cutoff is not None:
+            return none
+        if ticker not in set(held_tickers) or ticker in exit_by_ticker:
+            return none
+        # ② 손절 — 기준가는 이번 구간 시작 체결가(교체일 시가). 확정 판정과 같은 소스(캐시 시가)를
+        #    쓰되, 체결 당일이라 캐시에 없으면 실시간 스냅샷의 오늘 시가로 대신한다.
+        stop_raw = settings.get("intraweek_stop_pct")
+        hit_stop = False
+        if stop_raw is not None and held_since is not None:
+            entry_price = None
+            frame = cached_frames.get(ticker)
+            if frame is not None and not frame.empty and "Open" in frame.columns:
+                opens = positive_prices(frame["Open"]).dropna()
+                if len(opens):
+                    entry_raw = opens.asof(held_since)
+                    if pd.notna(entry_raw) and float(entry_raw) > 0 and opens.index.asof(held_since) == held_since:
+                        entry_price = float(entry_raw)
+            if entry_price is None and held_since == pd.Timestamp.now().normalize():
+                snap_open = (realtime.get(ticker) or {}).get("open")
+                if snap_open and float(snap_open) > 0:
+                    entry_price = float(snap_open)
+            frame_now = frames.get(ticker)
+            close_now = (
+                pd.to_numeric(frame_now["Close"], errors="coerce").dropna() if frame_now is not None else None
+            )
+            if entry_price and close_now is not None and not close_now.empty:
+                hit_stop = (float(close_now.iloc[-1]) / entry_price - 1.0) * 100.0 <= float(stop_raw)
+        # ① 자격 상실 — 현재 이격(전략 이평선 기준).
+        short_now, long_now = current.get("current_short_pct"), current.get("current_long_pct")
+        lost = short_now is not None and long_now is not None and (float(long_now) <= 0 or float(short_now) < 0)
+        if hit_stop:
+            return {"is_exit_forecast": True, "exit_forecast_reason": "주중 손절 예상"}
+        if lost:
+            return {"is_exit_forecast": True, "exit_forecast_reason": "주중 이탈 예상(이평선 하회)"}
+        return none
+
     # 다음 주 예상 — 오늘까지의 가격(실시간 반영 종가)으로 같은 규칙을 한 번 더 돌려,
     # 지금 교체한다면 뽑힐 종목을 표시한다. 실제 확정은 다음 판정일(주 마지막 거래일) 종가다.
     # 현재 기준 단기/장기 이격 — 표의 '현재-단기/장기' 컬럼용. 자격 필터와 무관하게
@@ -1241,8 +1283,9 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             **price_info(item["ticker"]),
             "signal_short_pct": round(item["short_disparity_pct"], 1),
             "signal_long_pct": round(item["momentum_score"], 1),
-            **current_disparity(item["ticker"]),
+            **(current := current_disparity(item["ticker"])),
             **exit_flags(item["ticker"]),
+            **exit_forecast(item["ticker"], current),
         }
         for rank, item in enumerate(selected, start=1)
     ]
