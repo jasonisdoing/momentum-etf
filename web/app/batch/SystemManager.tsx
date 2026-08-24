@@ -185,6 +185,19 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
   // 가장 긴 작업명이 "종목 가격지표 업데이트"(11자)라 고정 폭으로 두고, 남는 폭은 실행 명령이 가져간다.
   { field: "job", headerName: "작업", minWidth: 150, width: 170, maxWidth: 190 },
   {
+    field: "run_location",
+    headerName: "실행 위치",
+    width: 104,
+    headerTooltip: "이 잡을 잡을 수 있는 워커 — LOCAL 전용은 큐의 LOCAL_ONLY_JOBS(백엔드)가 단일 소스",
+    cellStyle: { textAlign: "center" },
+    cellRenderer: (p: { value?: string }) =>
+      p.value === "LOCAL" ? (
+        <span style={{ fontWeight: 700, color: "#b45309" }}>로컬 전용</span>
+      ) : (
+        <span style={{ color: "var(--text-muted)" }}>서버·로컬</span>
+      ),
+  },
+  {
     field: "cadence",
     headerName: "자동 주기",
     minWidth: 220,
