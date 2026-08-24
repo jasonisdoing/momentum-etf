@@ -793,6 +793,9 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
         return None if pd.isna(price) else float(price)
 
     mark_exits(confirmed_close)
+    # 확정 종가 기준 판정 — 장중이면 아래에서 잠정 종가로 다시 판정하며 예상으로 바꾼다.
+    for held in holdings:
+        held["is_exit_forecast"] = False
     entries = pick_entries()
 
     if quotes["live"]:
@@ -890,6 +893,10 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
             if len(window) == exit_ma_days and not any(pd.isna(v) for v in window):
                 below_ma_last[held["ticker"]] = live["price"] < sum(window) / exit_ma_days
         mark_exits(lambda ticker: (quotes["by_ticker"].get(ticker) or {}).get("price"))
+        # 장중 판정은 **오늘 잠정 종가** 기준이라 확정이 아니다. 종가가 바뀌면 결과도 바뀌므로
+        # 화면·합성이 '(예상)' 으로 구분할 수 있게 표시한다(모멘텀의 `is_exit_forecast` 와 같은 뜻).
+        for held in holdings:
+            held["is_exit_forecast"] = held.get("status") == "sell"
         entries = pick_entries()
 
     else:

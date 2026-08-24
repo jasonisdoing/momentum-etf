@@ -159,6 +159,8 @@ type Holding = {
   /** 주중 이탈 예상(오늘 종가 확정 시) — 매매수량·상태에 예상으로 겹쳐 보여준다. */
   is_exit_forecast?: boolean;
   forecast_trade_quantity?: number | null;
+  /** 이탈 후 남을 목표수량 — 목표수량 칸에 (예상)으로 겹쳐 쓴다. */
+  forecast_target_quantity?: number | null;
   /** 종목풀 설정 이평선 기준 이격(%) — 종목명 옆 추세 이탈 배지(❗)에 쓴다. */
   current_short_pct?: number | null;
   current_long_pct?: number | null;
@@ -694,11 +696,23 @@ export function StrategyMixClient() {
         {
           field: "shares",
           headerName: "목표수량",
-          headerTooltip: "목표비중 × 총자산 ÷ 현재가",
-          width: 88,
+          headerTooltip:
+            "목표비중 × 총자산 ÷ 현재가. 주중 이탈·손절이 예상되는 종목은 이탈 후 남을 목표를 (예상)으로 보여준다.",
+          width: 104,
           type: "numericColumn",
-          valueFormatter: (p) =>
-            p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR"),
+          valueFormatter: (p) => {
+            // 예상 이벤트(주중 이탈·손절)가 있는 행만 예상 목표로 겹쳐 쓴다.
+            // 가격 변동으로 목표와 조금 어긋나는 것은 예상이 아니라 그대로 둔다.
+            const forecast = p.data?.forecast_target_quantity;
+            if (p.data?.is_exit_forecast && forecast != null) {
+              return `${forecast.toLocaleString("ko-KR")} (예상)`;
+            }
+            return p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR");
+          },
+          cellStyle: (p) =>
+            p.data?.is_exit_forecast && p.data?.forecast_target_quantity != null
+              ? { color: "var(--down-color, #2f6fd0)", fontWeight: 600, opacity: 0.65 }
+              : null,
         },
         {
           field: "held_quantity",

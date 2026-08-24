@@ -301,6 +301,8 @@ def _build_action_groups(
     holdings: list[dict[str, Any]],
     actions: dict[str, Any],
     next_trading_day: str | None,
+    *,
+    nh_live: bool = False,
 ) -> list[dict[str, Any]]:
     """오늘의 액션 — 체결일 묶음(매도 먼저, 같은 방향은 티커 순).
 
@@ -321,9 +323,14 @@ def _build_action_groups(
     rebalance_date = rebalance["fill_date"] if (not rebalance["is_filled"] and rebalance["fill_date"]) else None
 
     sell_reason: dict[str, str] = {row["ticker"]: row["reason"] for row in actions["sm_sells"]}
+    # 신고가의 장중 판정은 오늘 종가로 확정되기 전이라 **예상**이다 — 문구로 구분한다.
+    nh_tag = " · 예상" if nh_live else ""
+    nh_forecast_tickers: set[str] = set()
     for row in actions["nh_sells"]:
         suffix = f", {row['return_pct']:+.2f}%" if row.get("return_pct") is not None else ""
-        sell_reason[row["ticker"]] = f"{row['reason']}{suffix}"
+        sell_reason[row["ticker"]] = f"{row['reason']}{suffix}{nh_tag}"
+        if nh_live:
+            nh_forecast_tickers.add(row["ticker"])
 
     def label(ticker: str, name: str, quantity: float | None) -> str:
         base = f"{name}({ticker})"
@@ -356,13 +363,16 @@ def _build_action_groups(
         if row.get("is_sell_all"):
             title = "교체 매도" if ticker in rebalance_sells else "전량 매도"
         elif trade < 0:
-            title = "매도 예정" if sell_reason_applies else "비중 조정 매도"
+            if sell_reason_applies:
+                title = "매도 예정(예상)" if ticker in nh_forecast_tickers else "매도 예정"
+            else:
+                title = "비중 조정 매도"
         elif held:
             title = "비중 조정 매수"
         elif ticker in rebalance_buys:
             title = "교체 매수"
         elif ticker in entry_tickers:
-            title = "신고가 진입"
+            title = "신고가 진입(예상)" if nh_live else "신고가 진입"
         else:
             title = "신규 매수"
         after = f" → 목표 {int(row['target_quantity']):,}주" if row.get("target_quantity") is not None else ""
@@ -423,19 +433,38 @@ def _build_action_groups(
     # 주중 이탈 **예상** 그룹 — 판정(오늘 종가) 확정 전의 미리보기. 같은 체결일(다음 거래일)
     # 시가지만 확정 지시와 섞이지 않게 별도 그룹으로 뒤에 둔다. 슬랙 알람은 이 그룹을 보내지
     # 않는다(장중 출렁일 때마다 알람이 나가면 노이즈 — notify 가 forecast 그룹을 거른다).
-    confirmed = {item["ticker"] for group in groups for item in group["items"]}
+    # 이탈 예상 종목의 **매수** 지시는 유예한다 — "오늘 사서 내일 팔라"가 된다. 조용히 지우지
+    # 않고 '(예상)' 그룹에 유예 사유를 남긴다(수량이 부족해 보여도 오늘은 사지 말라는 안내).
+    forecast_tickers = {row["ticker"] for row in actions.get("sm_exit_forecast") or []}
+    suspended_buys: list[dict[str, Any]] = []
+    if forecast_tickers:
+        for group in groups:
+            kept = []
+            for item in group["items"]:
+                if item["side"] == "buy" and item["ticker"] in forecast_tickers:
+                    suspended_buys.append(item)
+                else:
+                    kept.append(item)
+            group["items"] = kept
+        groups = [group for group in groups if group["items"]]
+
+    confirmed_sells = {
+        item["ticker"] for group in groups for item in group["items"] if item["side"] == "sell"
+    }
     forecast_items = []
     for row in actions.get("sm_exit_forecast") or []:
         ticker = row["ticker"]
         held = row_by_ticker.get(ticker)
-        if ticker in confirmed or not held or float(held.get("held_quantity") or 0) <= 0:
+        if ticker in confirmed_sells or not held:
             continue
-        # 파는 건 **모멘텀 몫**뿐이다 — 신고가 슬리브는 자체 기준(진입가 손절·이탈선)으로 따로
-        # 판정된다. 두 슬리브가 같이 든 종목에서 전량으로 적으면 과대 지시가 된다.
+        # 파는 건 **모멘텀 몫**뿐이다 — 예상 수량 = 보유 − 이탈 후 남을 목표(신고가 몫 등).
+        # 계좌가 이미 모멘텀 몫을 팔아뒀으면 0 이 되어 자동으로 표시되지 않는다.
         held_qty = float(held.get("held_quantity") or 0)
+        target_qty = float(held.get("target_quantity") or 0)
         weight_all = float(held.get("weight_pct") or 0)
         sm_weight = float(held.get("sm_weight") or 0)
-        sm_qty = int(round(held_qty * (sm_weight / weight_all))) if weight_all > 0 and sm_weight > 0 else int(held_qty)
+        remain_qty = round(target_qty * (weight_all - sm_weight) / weight_all) if weight_all > 0 else 0
+        sm_qty = int(round(held_qty - remain_qty))
         if sm_qty <= 0:
             continue
         both = sm_weight > 0 and float(held.get("nh_weight") or 0) > 0
@@ -450,6 +479,16 @@ def _build_action_groups(
                 "date": next_trading_day,
                 # 알람 상태 비교용 — 예상도 '처음 등장할 때 1건' 발송되도록 실제 수량을 싣는다.
                 "quantity": abs(sm_qty),
+            }
+        )
+    for item in suspended_buys:
+        forecast_items.append(
+            {
+                **item,
+                "key": f"suspend-{item['ticker']}",
+                "title": "매수 유예(예상)",
+                "text": f"{item['text']} — 내일 모멘텀 몫 매도 예상이라 오늘은 사지 않음",
+                "date": next_trading_day,
             }
         )
     if forecast_items and next_trading_day:
@@ -1043,16 +1082,24 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     for row in payload["holdings"]:
         if row["ticker"] in forecast_exit_tickers and float(row.get("held_quantity") or 0) > 0:
             held_qty = float(row["held_quantity"])
+            target_qty = float(row.get("target_quantity") or 0)
             weight_all = float(row.get("weight_pct") or 0)
             sm_weight = float(row.get("sm_weight") or 0)
-            sm_qty = int(round(held_qty * (sm_weight / weight_all))) if weight_all > 0 and sm_weight > 0 else int(held_qty)
-            if sm_qty > 0:
-                row["is_exit_forecast"] = True
-                # 모멘텀 몫만 — 신고가 몫은 자체 기준으로 따로 판정된다.
-                row["forecast_trade_quantity"] = -sm_qty
+            # 예상 수량 = 보유 − 이탈 후 남을 목표(신고가 몫 등). 이미 팔아뒀으면 0 → 표시 없음.
+            remain_qty = round(target_qty * (weight_all - sm_weight) / weight_all) if weight_all > 0 else 0
+            sm_qty = int(round(held_qty - remain_qty))
+            row["is_exit_forecast"] = True
+            # 이탈 후 남을 목표수량 — 화면이 목표수량 칸에 이 값을 '(예상)' 으로 겹쳐 쓴다.
+            # 확정 목표(target_quantity)는 그대로 둔다: 예상이 풀리면 그 값으로 돌아간다.
+            row["forecast_target_quantity"] = int(remain_qty)
+            # 매매수량(예상) — 이대로 끝나면 오늘 할 일: 팔 게 남았으면 그 수량, 이미 반영됐으면
+            # 0 (매수는 유예되므로 부족분을 사라는 지시가 아니다).
+            row["forecast_trade_quantity"] = -sm_qty if sm_qty > 0 else 0
 
     # 오늘의 액션 — 화면·슬랙 알람이 같은 결과를 쓴다(조립 단일 소스).
-    payload["actions"]["groups"] = _build_action_groups(payload["holdings"], payload["actions"], next_trading_day)
+    payload["actions"]["groups"] = _build_action_groups(
+        payload["holdings"], payload["actions"], next_trading_day, nh_live=bool(nh.get("live"))
+    )
     # 다음주 교체 가정 미리보기 — 실시간 순위 기준 잠정치라 과거 재현(as_of)에는 없다.
     payload["actions"]["next_week_preview"] = (
         _build_next_week_preview(
