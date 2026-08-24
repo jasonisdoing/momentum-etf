@@ -430,16 +430,26 @@ def _build_action_groups(
         held = row_by_ticker.get(ticker)
         if ticker in confirmed or not held or float(held.get("held_quantity") or 0) <= 0:
             continue
+        # 파는 건 **모멘텀 몫**뿐이다 — 신고가 슬리브는 자체 기준(진입가 손절·이탈선)으로 따로
+        # 판정된다. 두 슬리브가 같이 든 종목에서 전량으로 적으면 과대 지시가 된다.
+        held_qty = float(held.get("held_quantity") or 0)
+        weight_all = float(held.get("weight_pct") or 0)
+        sm_weight = float(held.get("sm_weight") or 0)
+        sm_qty = int(round(held_qty * (sm_weight / weight_all))) if weight_all > 0 and sm_weight > 0 else int(held_qty)
+        if sm_qty <= 0:
+            continue
+        both = sm_weight > 0 and float(held.get("nh_weight") or 0) > 0
+        reason = f"{row.get('reason')} · 모멘텀 몫" if both else str(row.get("reason"))
         forecast_items.append(
             {
                 "key": f"forecast-{ticker}",
                 "ticker": ticker,
                 "side": "sell",
                 "title": "매도 예정(예상)",
-                "text": f"{label(ticker, row.get('name') or ticker, held.get('held_quantity'))} ({row.get('reason')})",
+                "text": f"{label(ticker, row.get('name') or ticker, sm_qty)} ({reason})",
                 "date": next_trading_day,
                 # 알람 상태 비교용 — 예상도 '처음 등장할 때 1건' 발송되도록 실제 수량을 싣는다.
-                "quantity": abs(int(float(held.get("held_quantity") or 0))),
+                "quantity": abs(sm_qty),
             }
         )
     if forecast_items and next_trading_day:
@@ -982,23 +992,10 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
                 {
                     "ticker": str(row["ticker"]).strip(),
                     "name": row.get("name") or row["ticker"],
-                    "reason": (
-                        "주중 손절 예상"
-                        if (
-                            sm_settings.get("intraweek_stop_pct") is not None
-                            and row.get("entry_return_pct") is not None
-                            and float(row["entry_return_pct"]) <= float(sm_settings["intraweek_stop_pct"])
-                        )
-                        else "주중 이탈 예상(이평선 하회)"
-                    ),
+                    "reason": row.get("exit_forecast_reason") or "주중 이탈 예상",
                 }
                 for row in sm_selected
-                if bool(sm_settings.get("intraweek_exit"))
-                and not row.get("is_exit_pending")
-                and not row.get("is_exited")
-                and row.get("current_long_pct") is not None
-                and row.get("current_short_pct") is not None
-                and (float(row["current_long_pct"]) <= 0 or float(row["current_short_pct"]) < 0)
+                if row.get("is_exit_forecast")
             ]
             if not as_of
             else [],
@@ -1045,8 +1042,14 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     forecast_exit_tickers = {row["ticker"] for row in payload["actions"].get("sm_exit_forecast") or []}
     for row in payload["holdings"]:
         if row["ticker"] in forecast_exit_tickers and float(row.get("held_quantity") or 0) > 0:
-            row["is_exit_forecast"] = True
-            row["forecast_trade_quantity"] = -int(float(row["held_quantity"]))
+            held_qty = float(row["held_quantity"])
+            weight_all = float(row.get("weight_pct") or 0)
+            sm_weight = float(row.get("sm_weight") or 0)
+            sm_qty = int(round(held_qty * (sm_weight / weight_all))) if weight_all > 0 and sm_weight > 0 else int(held_qty)
+            if sm_qty > 0:
+                row["is_exit_forecast"] = True
+                # 모멘텀 몫만 — 신고가 몫은 자체 기준으로 따로 판정된다.
+                row["forecast_trade_quantity"] = -sm_qty
 
     # 오늘의 액션 — 화면·슬랙 알람이 같은 결과를 쓴다(조립 단일 소스).
     payload["actions"]["groups"] = _build_action_groups(payload["holdings"], payload["actions"], next_trading_day)
