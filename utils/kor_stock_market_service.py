@@ -52,6 +52,22 @@ def _fetch_market_value_page(market: str, page: int, page_size: int) -> dict[str
         raise RuntimeError(f"네이버 주식 리스트 조회에 실패했습니다: {exc}") from exc
 
 
+def is_individual_stock_item(item: dict[str, Any]) -> bool:
+    """네이버 주식 리스트 항목이 **개별주**인지 — ETF·ETN 은 제외.
+
+    시장 화면(`/kor-market-stock`)과 시총 순위(`market_cap_rank`)가 같은 분모를 쓰도록
+    여기서만 정의한다. 예전에는 화면에만 이 규칙이 있어서, 순위표에는 ETF 가 섞인 채로
+    번호가 매겨져 두 화면의 시총 순위가 달랐다.
+
+    `stockEndType` 이 1차 기준이고, 이름의 ETF/ETN 키워드는 유형이 잘못 온 항목까지
+    걸러 내는 보조 조건이다.
+    """
+    if str(item.get("stockEndType") or "").strip().lower() != "stock":
+        return False
+    name = str(item.get("stockName") or "").upper()
+    return not any(keyword in name for keyword in ("ETF", "ETN"))
+
+
 def load_kor_stock_market(
     market: str,
     limit: int,
@@ -95,14 +111,11 @@ def load_kor_stock_market(
     for page in range(1, total_pages + 1):
         stocks = payload.get("stocks") or []
         for item in stocks:
-            # 종목 유형 필터링 (stockEndType이 'stock'인 것만 포함)
-            stock_type = str(item.get("stockEndType", "")).lower()
-            name = item.get("stockName", "")
-
-            # ETF, ETN 제외 (필드값 및 명칭 키워드 체크)
-            if stock_type != "stock" or any(k in name.upper() for k in ["ETF", "ETN"]):
+            # 개별주만 — ETF·ETN 제외(시총 순위와 같은 기준).
+            if not is_individual_stock_item(item):
                 continue
 
+            name = item.get("stockName", "")
             ticker = item.get("itemCode", "")
             close_price = _parse_number(item.get("closePrice"))
             change_ratio = _parse_float(item.get("fluctuationsRatio"))
