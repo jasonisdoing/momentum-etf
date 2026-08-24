@@ -74,6 +74,80 @@ def _ensure_env() -> None:
     os.environ.setdefault("NHPLUG_APP_SECRET", secret)
 
 
+# ── 토큰 공유(DB) ─────────────────────────────────────────────────────────
+# NH 는 앱키당 유효 토큰이 1개다(새 발급 = 이전 토큰 무효 + 고객 알림톡). 로컬·서버 워커가
+# 각자 파일 캐시로 발급하면 서로 토큰을 죽이는 핑퐁이 되므로, **DB 문서 하나를 단일 소스**로
+# 두고 호출 전 nhplug 파일 캐시에 심는다(SDK 단건 call() 과 연속조회가 같은 캐시를 읽는다).
+# 발급이 일어나면(파일 캐시 값이 DB 와 달라짐) DB 에 올린다. 배치 큐가 잡을 한 워커만
+# claim 하므로 동시 발급 경합은 없다.
+_TOKEN_DOC_ID = "nhplug_token"
+
+
+def _token_db():
+    from utils.db_manager import get_db_connection
+
+    db = get_db_connection()
+    return db["system_config"] if db is not None else None
+
+
+def _read_local_token() -> tuple[str, float] | None:
+    import json
+
+    from nhplug.auth import cache_path
+
+    try:
+        data = json.loads(cache_path().read_text(encoding="utf-8"))
+        if data.get("token"):
+            return str(data["token"]), float(data.get("exp", 0))
+    except Exception:
+        return None
+    return None
+
+
+def _seed_token_from_db() -> None:
+    """DB 의 공유 토큰이 유효하면 nhplug 파일 캐시에 심는다 (없으면 아무것도 안 함)."""
+    import json
+
+    from nhplug.auth import cache_path
+
+    coll = _token_db()
+    if coll is None:
+        return
+    doc = coll.find_one({"_id": _TOKEN_DOC_ID}) or {}
+    token, exp = doc.get("token"), float(doc.get("exp") or 0)
+    if not token or exp <= time.time() + 60:
+        return
+    local = _read_local_token()
+    if local and local[0] == token:
+        return
+    try:
+        path = cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps({"token": token, "exp": exp}), encoding="utf-8")
+        os.replace(tmp, path)
+        # 메모리 캐시가 옛 토큰을 들고 있으면 파일을 안 읽는다 — 비워서 파일을 다시 읽게 한다.
+        from nhplug.auth import _cache
+
+        _cache["token"] = None
+        _cache["exp"] = 0.0
+    except Exception as exc:  # 공유 실패는 치명적이지 않다 — 각자 발급으로 동작은 한다
+        logger.warning("[BROKER-SYNC] 공유 토큰 시딩 실패: %s", exc)
+
+
+def _publish_token_to_db() -> None:
+    """이번 호출에서 토큰이 새로 발급됐으면 DB 에 올린다."""
+    local = _read_local_token()
+    coll = _token_db()
+    if not local or coll is None:
+        return
+    token, exp = local
+    doc = coll.find_one({"_id": _TOKEN_DOC_ID}) or {}
+    if doc.get("token") != token:
+        coll.update_one({"_id": _TOKEN_DOC_ID}, {"$set": {"token": token, "exp": exp}}, upsert=True)
+        logger.info("[BROKER-SYNC] 새 나무증권 토큰을 DB 에 공유했습니다 (만료 %s)", time.strftime("%m-%d %H:%M", time.localtime(exp)))
+
+
 def _namu_call(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     """nhplug 단건 호출 (연속조회 없는 API 용)."""
     _ensure_env()
@@ -81,11 +155,14 @@ def _namu_call(path: str, payload: dict[str, Any]) -> dict[str, Any]:
         from nhplug import NhplugError, call
     except ImportError as exc:
         raise BrokerApiError("nhplug 패키지가 설치돼 있지 않습니다 (pip install nhplug).") from exc
+    _seed_token_from_db()
     try:
         _throttle()
-        return call(path, payload)
+        result = call(path, payload)
     except NhplugError as exc:
         raise BrokerApiError(f"나무증권 API 오류: {exc.message} (코드 {exc.code})") from exc
+    _publish_token_to_db()
+    return result
 
 
 def _namu_call_paged(path: str, payload: dict[str, Any], list_key: str = "Output_1") -> dict[str, Any]:
@@ -103,6 +180,8 @@ def _namu_call_paged(path: str, payload: dict[str, Any], list_key: str = "Output
     _ensure_env()
     from nhplug import clear_token, get_base_url, get_token
     from nhplug.client import _is_invalid_token, is_success
+
+    _seed_token_from_db()
 
     url = f"{get_base_url()}{path}"
     body = json.dumps({"Input_0": payload})
@@ -156,6 +235,7 @@ def _namu_call_paged(path: str, payload: dict[str, Any], list_key: str = "Output
     else:
         raise BrokerApiError("나무증권 API 연속조회가 20페이지를 넘었습니다 — 응답을 확인하세요.")
     merged[list_key] = items
+    _publish_token_to_db()
     return merged
 
 
