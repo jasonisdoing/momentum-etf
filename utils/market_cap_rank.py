@@ -103,15 +103,28 @@ def update_market_cap_ranks(ticker_types: list[str] | None = None) -> dict[str, 
         ranks = rank_by_country[country]
         if not ranks:
             continue
-        count = 0
+        # 반복 횟수가 아니라 **실제로 기록된 건수**를 센다 — 예전에는 한 건도 안 써져도
+        # "201종목 기록" 으로 찍혀서 화면의 시총 컬럼이 비어 있는 걸 로그로 못 잡았다.
+        written = 0
+        missing = 0
         for stock in get_etfs(pool) or []:
             ticker = str(stock.get("ticker") or "").strip().upper()
             if not ticker:
                 continue
-            set_stock_cache_meta_field(pool, ticker, META_FIELD, ranks.get(ticker))
-            count += 1
-        updated[pool] = count
-        logger.info("[배치 B] 시총 순위 기록: %s %d종목 (국가 %s, 순위표 %d종목)", pool, count, country, len(ranks))
+            rank = ranks.get(ticker)
+            if rank is None:
+                missing += 1
+            if set_stock_cache_meta_field(pool, ticker, META_FIELD, rank):
+                written += 1
+        updated[pool] = written
+        logger.info(
+            "[배치 B] 시총 순위 기록: %s %d건 (국가 %s, 순위표 %d종목, 순위 없음 %d종목)",
+            pool,
+            written,
+            country,
+            len(ranks),
+            missing,
+        )
     return updated
 
 

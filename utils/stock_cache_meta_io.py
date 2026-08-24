@@ -255,10 +255,18 @@ def delete_stock_cache_meta_doc(ticker_type: str, ticker: str) -> None:
     coll.delete_one({"ticker_type": type_norm, "ticker": ticker_norm})
 
 
-def set_stock_cache_meta_field(ticker_type: str, ticker: str, key: str, value: Any) -> None:
+def set_stock_cache_meta_field(ticker_type: str, ticker: str, key: str, value: Any) -> bool:
     """``meta_cache`` 의 한 필드만 바꾼다(문서 전체를 덮지 않는다). ``value`` 가 None 이면 필드를 지운다.
 
-    배치 B 의 종목별 갱신 뒤에 붙는 파생값(시총 순위 등)용 — 문서가 없으면 만들지 않는다.
+    배치 B 의 종목별 갱신 뒤에 붙는 파생값(시총 순위 등)용.
+
+    값이 있으면 문서가 없어도 만든다. 예전에는 "배치 B 가 먼저 문서를 만든다"고 보고
+    만들지 않았는데, 한국 **개별주** 풀은 ETF 상세가 없어 `stock_cache_meta` 문서 자체가
+    생기지 않는다. 그래서 시총 순위가 한 건도 안 써졌고 화면의 시총 컬럼이 통째로 비었다.
+
+    Returns:
+        실제로 문서가 바뀌었는지. 호출부가 "몇 건 기록"을 정확히 셀 수 있게 돌려준다
+        (반복 횟수로 세면 한 건도 안 써져도 성공처럼 보인다).
     """
     type_norm = (ticker_type or "").strip().lower()
     ticker_norm = str(ticker or "").strip().upper()
@@ -268,5 +276,13 @@ def set_stock_cache_meta_field(ticker_type: str, ticker: str, key: str, value: A
     if coll is None:
         raise RuntimeError("MongoDB 연결 실패 — stock_cache_meta 컬렉션에 쓸 수 없습니다.")
     field = f"meta_cache.{key}"
-    update = {"$unset": {field: ""}} if value is None else {"$set": {field: value}}
-    coll.update_one({"ticker_type": type_norm, "ticker": ticker_norm}, update)
+    if value is None:
+        # 지우는 쪽은 문서를 만들지 않는다 — 빈 문서만 남는다.
+        result = coll.update_one({"ticker_type": type_norm, "ticker": ticker_norm}, {"$unset": {field: ""}})
+    else:
+        result = coll.update_one(
+            {"ticker_type": type_norm, "ticker": ticker_norm},
+            {"$set": {field: value}, "$setOnInsert": {"ticker_type": type_norm, "ticker": ticker_norm}},
+            upsert=True,
+        )
+    return bool(result.modified_count or getattr(result, "upserted_id", None))
