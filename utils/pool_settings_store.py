@@ -63,7 +63,6 @@ STRUCTURAL_KEYS: tuple[str, ...] = (
     "country_code",
     "currency",
     "pool_kind",
-    "strategy_enabled",
 )
 
 # 풀 성격 — 'stock'(개별주) 또는 'etf'. 섹터·업종 개념이 있는 풀인지 화면들이 이 값으로
@@ -199,9 +198,6 @@ def _normalize_pool_values(values: dict[str, Any], *, require_ticker_type: bool,
             allowed = ", ".join(sorted(_ALLOWED_CURRENCIES))
             raise PoolSettingsError(f"currency 는 {allowed} 중 하나여야 합니다: {currency}")
         cleaned["currency"] = currency
-    if "strategy_enabled" in values:
-        # 전략 사용 — SM·신고가 등 전략 화면/비교의 대상 풀인지. 기본은 사용 안함.
-        cleaned["strategy_enabled"] = bool(values.get("strategy_enabled"))
     if "pool_kind" in values:
         pool_kind = str(values.get("pool_kind") or "").strip().lower()
         # 빈 값은 '미설정 유지' — 기존 문서와의 하위 호환 (토글은 항상 둘 중 하나를 보낸다).
@@ -231,8 +227,6 @@ def _normalize_pool_doc(doc: dict[str, Any]) -> dict[str, Any]:
     # 읽기 — 타입만 본다. 선택지 검사는 저장 경로(_validate_values(check_options=True))에서만.
     normalized = _normalize_pool_values({**doc, "ticker_type": pool_id}, require_ticker_type=True, check_options=False)
     normalized["ticker_type"] = pool_id
-    # 전략 사용 토글 — 기존 문서에 없으면 사용 안함 (명시적으로 켠 풀만 전략 대상).
-    normalized["strategy_enabled"] = bool(doc.get("strategy_enabled", False))
     if doc.get("updated_at") is not None:
         normalized["updated_at"] = doc["updated_at"]
     if doc.get("save_method") is not None:
@@ -514,12 +508,6 @@ def get_pool_slippage(pool: str) -> tuple[float, float]:
             f"종목풀({pool}) 설정에 {', '.join(missing)} 가 없습니다 — `/pools-settings` 에서 먼저 저장하세요."
         )
     return float(settings["BUY_SLIPPAGE_PCT"]), float(settings["SELL_SLIPPAGE_PCT"])
-
-
-def strategy_enabled_pools() -> list[str]:
-    """전략 사용을 켠 활성 풀 목록 (order 순) — 전략 비교·백테스트의 대상 풀."""
-    pools = [doc for doc in load_pool_definitions() if doc.get("strategy_enabled")]
-    return [doc["ticker_type"] for doc in sorted(pools, key=lambda doc: doc.get("order") or 0)]
 
 
 def get_pool_delete_impact(pool_id: str) -> dict[str, Any]:
