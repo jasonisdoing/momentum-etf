@@ -79,7 +79,8 @@ def notify_all() -> dict[str, Any]:
             logger.warning("[MIX-NOTIFY] %s 계산 실패: %s", pool, exc)
             results.append({"pool": pool, "error": str(exc)})
             continue
-        groups = positions["actions"]["groups"]
+        # (예상) 그룹은 장중 미리보기라 알람에서 뺀다 — 종가 확정 후 확정 그룹으로 오면 그때 나간다.
+        groups = [g for g in positions["actions"]["groups"] if not g.get("forecast")]
         current = {item["key"]: int(item.get("quantity") or 0) for group in groups for item in group["items"]}
         stored = _load_state(pool)
         grown = {key: qty for key, qty in current.items() if qty > int(stored.get(key, 0))}
