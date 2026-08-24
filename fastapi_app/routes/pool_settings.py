@@ -51,8 +51,6 @@ def _pool_payload(settings: dict[str, Any]) -> dict[str, Any]:
         "currency": settings["currency"],
         # 풀 성격(stock/etf) — 미설정이면 None (화면이 '미설정' 으로 보여준다).
         "pool_kind": settings.get("pool_kind"),
-        # 전략 사용 — 전략 화면·비교의 대상 풀인지 (기본 사용 안함).
-        "strategy_enabled": bool(settings.get("strategy_enabled", False)),
         "type_source": settings.get("type_source"),
         "settings": _editable(settings),
         "updated_at": settings.get("updated_at"),

@@ -46,8 +46,6 @@ type PoolEntry = {
   currency?: string;
   // 풀 성격(stock/etf) — 미설정이면 null. 전략 SM 등이 섹터·업종 UI 노출에 쓴다.
   pool_kind?: string | null;
-  // 전략 사용 — 전략 화면·비교의 대상 풀인지 (기본 사용 안함).
-  strategy_enabled?: boolean;
   settings: SettingsMap;
   updated_at?: string;
 };
@@ -73,8 +71,6 @@ type PoolDraft = {
   currency: string;
   // 풀 성격 — "stock"(개별주) / "etf" / ""(미설정, 구 문서 하위 호환).
   pool_kind: string;
-  // 전략 사용 — "1"(사용) / ""(사용 안함). 초안은 문자열로 통일한다.
-  strategy_enabled: string;
   // 벤치마크는 {ticker, name} 이라 초안에서는 두 값으로 나눠 든다. 이름은 조회로만 채운다.
   benchmarkTicker: string;
   benchmarkName: string;
@@ -90,7 +86,6 @@ const EMPTY_DRAFT: PoolDraft = {
   country_code: "kor",
   currency: "KRW",
   pool_kind: "etf",
-  strategy_enabled: "",
   TOP_N_HOLD: "10",
   SHORT_MA_DAYS: "10",
   LONG_MA_DAYS: "20",
@@ -133,7 +128,6 @@ function toDraft(pool: PoolEntry): PoolDraft {
     country_code: pool.country_code ?? "kor",
     currency: pool.currency ?? "KRW",
     pool_kind: pool.pool_kind ?? "",
-    strategy_enabled: pool.strategy_enabled ? "1" : "",
     TOP_N_HOLD: String(pool.settings.TOP_N_HOLD?.value ?? ""),
     SHORT_MA_DAYS: String(pool.settings.SHORT_MA_DAYS?.value ?? ""),
     LONG_MA_DAYS: String(pool.settings.LONG_MA_DAYS?.value ?? ""),
@@ -156,7 +150,6 @@ function draftToValues(draft: PoolDraft) {
     currency: draft.currency,
     // 빈 값(미설정)은 보내지 않아 기존 상태를 유지한다 — 토글은 항상 stock/etf 를 보낸다.
     ...(draft.pool_kind ? { pool_kind: draft.pool_kind } : {}),
-    strategy_enabled: Boolean(draft.strategy_enabled),
     TOP_N_HOLD: Number(draft.TOP_N_HOLD),
     SHORT_MA_DAYS: Number(draft.SHORT_MA_DAYS),
     LONG_MA_DAYS: Number(draft.LONG_MA_DAYS),
@@ -521,20 +514,6 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
             <option value="etf">ETF</option>
           </select>,
           { minWidth: 158, labelWidth: 44 },
-        )}
-        {renderField(
-          "전략 사용",
-          // 전략 화면·비교의 대상 풀인지 — 기본 사용 안함, 켠 풀만 전략 대상이 된다.
-          <div className="form-check form-switch" style={{ marginBottom: 0, minHeight: 0, display: "flex", alignItems: "center" }}>
-            <input
-              className="form-check-input"
-              type="checkbox"
-              role="switch"
-              checked={Boolean(draft.strategy_enabled)}
-              onChange={(event) => onChange("strategy_enabled", event.target.checked ? "1" : "")}
-            />
-          </div>,
-          { minWidth: 132, labelWidth: 66 },
         )}
         {renderField(
           "보유 종목수",
