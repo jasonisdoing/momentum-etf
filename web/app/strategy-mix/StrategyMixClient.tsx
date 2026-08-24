@@ -152,6 +152,9 @@ type Holding = {
   /** 전략 수익률(이론값) — 모멘텀: 연속 시작 교체일 시가 대비 · 신고가: 진입가 대비. */
   sm_return_pct?: number | null;
   nh_return_pct?: number | null;
+  /** 보유 기간 — 모멘텀: 연속 편입 주수 · 신고가: 보유 일수. */
+  sm_weeks?: number | null;
+  nh_days?: number | null;
   /** 적용 계좌가 있을 때만 온다 — 계좌 총자산 기준 목표 금액·주수와 현재 보유. */
   target_amount?: number | null;
   target_quantity?: number | null;
@@ -681,6 +684,20 @@ export function StrategyMixClient() {
         valueFormatter: (p) =>
           p.value == null || (p.value as number) === 0 ? "-" : `${(p.value as number).toFixed(2)}%`,
         cellStyle: { color: "var(--text-muted)" },
+      },
+      {
+        colId: "held_for",
+        headerName: "보유일",
+        width: 96,
+        headerTooltip: "모멘텀: 연속 편입 주수 · 신고가: 보유 일수 (진입 예정은 -)",
+        cellStyle: { color: "var(--text-muted)", textAlign: "center" },
+        valueGetter: (p) => {
+          if (!p.data) return "";
+          const bits: string[] = [];
+          if (p.data.sm_weeks != null) bits.push(p.data.sm_weeks <= 1 ? "신규" : `${p.data.sm_weeks}주`);
+          if (p.data.nh_days != null) bits.push(p.data.nh_days === 0 ? "진입" : `${p.data.nh_days}일`);
+          return bits.join(" · ") || "-";
+        },
       },
       {
         colId: "strategy_return",
