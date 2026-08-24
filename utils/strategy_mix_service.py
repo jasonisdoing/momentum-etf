@@ -419,6 +419,37 @@ def _build_action_groups(
             else "체결일 미정"
         )
         groups.append({"key": date or "unscheduled", "title": title, "items": group_items})
+
+    # 주중 이탈 **예상** 그룹 — 판정(오늘 종가) 확정 전의 미리보기. 같은 체결일(다음 거래일)
+    # 시가지만 확정 지시와 섞이지 않게 별도 그룹으로 뒤에 둔다. 슬랙 알람은 이 그룹을 보내지
+    # 않는다(장중 출렁일 때마다 알람이 나가면 노이즈 — notify 가 forecast 그룹을 거른다).
+    confirmed = {item["ticker"] for group in groups for item in group["items"]}
+    forecast_items = []
+    for row in actions.get("sm_exit_forecast") or []:
+        ticker = row["ticker"]
+        held = row_by_ticker.get(ticker)
+        if ticker in confirmed or not held or float(held.get("held_quantity") or 0) <= 0:
+            continue
+        forecast_items.append(
+            {
+                "key": f"forecast-{ticker}",
+                "ticker": ticker,
+                "side": "sell",
+                "title": "매도 예정(예상)",
+                "text": f"{label(ticker, row.get('name') or ticker, held.get('held_quantity'))} ({row.get('reason')})",
+                "date": next_trading_day,
+                "quantity": 0,  # 예상 — 알람 상태 비교에 얹히지 않게 0
+            }
+        )
+    if forecast_items and next_trading_day:
+        groups.append(
+            {
+                "key": f"{next_trading_day}-forecast",
+                "title": f"{_format_date_weekday(next_trading_day)} 시가 (예상 — 오늘 종가 확정 시)",
+                "forecast": True,
+                "items": sorted(forecast_items, key=lambda x: x["ticker"]),
+            }
+        )
     return groups
 
 
@@ -642,6 +673,16 @@ def _build_next_week_preview(
         },
     }
     groups = _build_action_groups(hypo, hypo_actions, fill_date)
+    # 주중 이탈 예상 종목은 뺀다 — 다음주가 아니라 내일 시가에 팔릴 예상이라 오늘의 액션의
+    # '(예상)' 그룹이 담당한다. 여기 두면 '교체 매도 · 체결일 미정' 으로 잘못 안내된다.
+    forecast_tickers = {row["ticker"] for row in actions.get("sm_exit_forecast") or []}
+    if forecast_tickers:
+        groups = [
+            {**group, "items": [item for item in group["items"] if item["ticker"] not in forecast_tickers]}
+            for group in groups
+            if not group.get("forecast")
+        ]
+        groups = [group for group in groups if group["items"]]
     return {"fill_date": fill_date, "groups": groups}
 
 
@@ -933,6 +974,33 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
                 }
                 for row in sm_sell_pending
             ],
+            # SM 주중 이탈 **예상** — 현재(장중) 가격 기준으로 보유 자격을 잃은 종목.
+            # 판정은 오늘 종가로 확정되므로 화면에만 '(예상)' 그룹으로 보여주고 알람은 안 보낸다.
+            # 종가 확정·캐시 갱신 후에는 위 sm_sells(확정)로 올라온다.
+            "sm_exit_forecast": [
+                {
+                    "ticker": str(row["ticker"]).strip(),
+                    "name": row.get("name") or row["ticker"],
+                    "reason": (
+                        "주중 손절 예상"
+                        if (
+                            sm_settings.get("intraweek_stop_pct") is not None
+                            and row.get("entry_return_pct") is not None
+                            and float(row["entry_return_pct"]) <= float(sm_settings["intraweek_stop_pct"])
+                        )
+                        else "주중 이탈 예상(이평선 하회)"
+                    ),
+                }
+                for row in sm_selected
+                if bool(sm_settings.get("intraweek_exit"))
+                and not row.get("is_exit_pending")
+                and not row.get("is_exited")
+                and row.get("current_long_pct") is not None
+                and row.get("current_short_pct") is not None
+                and (float(row["current_long_pct"]) <= 0 or float(row["current_short_pct"]) < 0)
+            ]
+            if not as_of
+            else [],
             "nh_entries": [
                 {
                     "ticker": str(row["ticker"]).strip(),
