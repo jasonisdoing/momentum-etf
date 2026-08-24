@@ -1045,6 +1045,8 @@ export function StrategyMixClient() {
         ),
       );
       toast.success("합성 설정 저장 완료");
+      // 배분이 바뀌면 목표 비중·오늘의 액션이 달라진다 — 운용 현황을 다시 계산한다.
+      setPositionsReloadKey((k) => k + 1);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "합성 설정 저장에 실패했습니다.");
     } finally {
