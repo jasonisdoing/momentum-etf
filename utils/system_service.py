@@ -18,7 +18,8 @@ load_env_if_present()
 SystemAction = Literal[
     "data_aggregate",
     "broker_balance_sync",
-    "strategy_mix_notify",
+    "strategy_mix_notify_kor",
+    "strategy_mix_notify_us",
     "cache_refresh",
     "cache_refresh_full",
     "market_hours_analysis",
@@ -44,6 +45,15 @@ _WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6]
 # 증권사 잔고 동기화 슬롯 — 20분 간격(09:00~15:40). 계좌당 2콜·1초 직렬화라 하루 42콜 수준.
 # 15:40 이 마감 후 1회.
 _BROKER_SYNC_SLOTS = [{"hour": hour, "minute": minute} for hour in range(9, 16) for minute in (0, 20, 40)]
+
+# 미국 장중 10분 슬롯 — 22:40~23:50 + 00:00~04:50 KST (서머타임 정규장 22:30~05:00 에서
+# 개장 직후·마감 직전 10분을 뺀 구간). 자정을 넘는 구간이라 요일은 월~토로 잡는다.
+_US_INTRADAY_10MIN_SLOTS = [
+    {"hour": hour, "minute": minute}
+    for hour in (22, 23, 0, 1, 2, 3, 4)
+    for minute in range(0, 60, 10)
+    if (hour, minute) >= (22, 40) or hour < 5
+]
 
 # 장중 10분 슬롯 — 평일 09:10~15:20. 한국 장중(09:00~15:30)에서 개시 직후·마감 직전을 뺀 구간.
 _INTRADAY_10MIN_SLOTS = [
@@ -91,15 +101,26 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _BROKER_SYNC_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "key": "strategy_mix_notify",
+        "key": "strategy_mix_notify_kor",
         "group": "장중 실행",
-        "job": "합성 액션 알림",
-        "target": "합성 알람 켠 계좌 (오늘의 액션 신규·증가)",
+        "job": "한국 합성 액션 알림",
+        "target": "합성 알람 켠 한국 풀 계좌 (오늘의 액션 신규·증가)",
         "cadence": "평일 09:10~15:20 KST 10분 간격",
-        "command": "python scripts/strategy_mix_notify.py",
+        "command": "python scripts/strategy_mix_notify.py kor",
         # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
         # 지시가 줄어드는 변화(체결 반영)는 보내지 않는다.
         "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
+        "key": "strategy_mix_notify_us",
+        "group": "장중 실행",
+        "job": "미국 합성 액션 알림",
+        "target": "합성 알람 켠 미국 풀 계좌 (오늘의 액션 신규·증가)",
+        # 미국 정규장(서머타임 22:30~05:00 KST)의 개장 10분 후 ~ 마감 10분 전.
+        # 겨울 시간에는 1시간 밀린다 — crontab 이 KST 고정이라 그 구간은 장전 공회전(발송 없음).
+        "cadence": "평일 22:40~04:50 KST 10분 간격",
+        "command": "python scripts/strategy_mix_notify.py us",
+        "schedule": {"slots": _US_INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
         "key": "holdings_alarm",
@@ -245,7 +266,8 @@ SCHEDULE_ROWS = [
 _SCRIPT_BY_ACTION: dict[str, str] = {
     "data_aggregate": "scripts/collect_data.py",
     "broker_balance_sync": "scripts/broker_balance_sync.py",
-    "strategy_mix_notify": "scripts/strategy_mix_notify.py",
+    "strategy_mix_notify_kor": "scripts/strategy_mix_notify.py",
+    "strategy_mix_notify_us": "scripts/strategy_mix_notify.py",
     "cache_refresh": "scripts/stock_price_cache_updater.py",
     "cache_refresh_full": "scripts/stock_price_cache_updater.py",
     "market_hours_analysis": "scripts/analyze_market_hours.py",
@@ -265,6 +287,8 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
 _ARGS_BY_ACTION: dict[str, list[str]] = {
     "cache_refresh_full": ["--full"],
     "db_backup": ["--gzip"],
+    "strategy_mix_notify_kor": ["kor"],
+    "strategy_mix_notify_us": ["us"],
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}

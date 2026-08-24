@@ -845,7 +845,10 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     nh_holdings = list(nh.get("holdings") or [])
 
     # 신고가 빈 슬롯을 채울 진입 예정 — 다음 시가에 사므로 목표 포트폴리오에 포함한다.
-    nh_free = max(nh_top_n - len(nh_holdings), 0)
+    # 매도 예정(이탈·손절) 종목은 같은 시가에 슬롯이 비므로 빈 슬롯으로 센다 — 엔진의
+    # pick_entries 와 같은 계산이라 신고가 화면의 '진입 예정'과 어긋나지 않는다.
+    nh_exiting = sum(1 for row in nh_holdings if str(row.get("status")) == "sell")
+    nh_free = max(nh_top_n - (len(nh_holdings) - nh_exiting), 0)
     nh_planned = list(nh.get("planned_entries") or [])[:nh_free]
 
     # 목표 포트폴리오는 **종목 단위**다. 두 슬리브가 같은 종목을 담으면 비중을 합쳐
@@ -855,7 +858,14 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     by_ticker: dict[str, dict[str, Any]] = {}
 
     def add_target(
-        ticker: str, name: str, source: str, weight: float, price: Any, change_pct: Any, status: str
+        ticker: str,
+        name: str,
+        source: str,
+        weight: float,
+        price: Any,
+        change_pct: Any,
+        status: str,
+        return_pct: Any = None,
     ) -> None:
         ticker = str(ticker).strip()
         row = by_ticker.get(ticker)
@@ -872,6 +882,9 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
                 "change_pct": change_pct,
                 "sm_status": None,
                 "nh_status": None,
+                # 전략 수익률(이론값) — 모멘텀은 연속 시작 교체일 시가 대비, 신고가는 진입가 대비.
+                "sm_return_pct": None,
+                "nh_return_pct": None,
             }
             by_ticker[ticker] = row
             holdings.append(row)
@@ -884,6 +897,8 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
         if row.get("change_pct") is None:
             row["change_pct"] = change_pct
         row[f"{source}_status"] = status
+        if return_pct is not None:
+            row[f"{source}_return_pct"] = round(float(return_pct), 2)
 
     # 매도 예정(자격 상실·이탈)은 목표 비중 0 이다 — 다음 시가에 전량 팔고 그 슬롯은
     # 다음 교체까지 현금이다. 비중을 남겨두면 팔아야 할 종목의 매매수량이 0 으로 보인다.
@@ -898,7 +913,16 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
         if exiting:
             status += f" · 매도 예정({row.get('exit_reason') or '주중 이탈'})"
         weight = 0.0 if exiting else sm_drift_weight.get(ticker, weight_sm)
-        add_target(ticker, row.get("name"), "sm", weight, row.get("price"), row.get("daily_change_pct"), status)
+        add_target(
+            ticker,
+            row.get("name"),
+            "sm",
+            weight,
+            row.get("price"),
+            row.get("daily_change_pct"),
+            status,
+            row.get("entry_return_pct"),
+        )
     for row in nh_holdings:
         status = "오늘 진입" if row.get("is_new") else f"{row.get('days')}일째"
         exiting = str(row.get("status")) == "sell"
@@ -907,7 +931,16 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
             status += f" · 매도 예정({reason})"
         ticker_nh = str(row["ticker"]).strip()
         weight = 0.0 if exiting else nh_drift_weight.get(ticker_nh, weight_nh)
-        add_target(ticker_nh, row.get("name"), "nh", weight, row.get("price"), row.get("change_pct"), status)
+        add_target(
+            ticker_nh,
+            row.get("name"),
+            "nh",
+            weight,
+            row.get("price"),
+            row.get("change_pct"),
+            status,
+            row.get("return_pct"),
+        )
     for row in nh_planned:
         add_target(
             row["ticker"],
