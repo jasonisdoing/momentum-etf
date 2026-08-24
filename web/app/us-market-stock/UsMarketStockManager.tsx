@@ -231,9 +231,12 @@ export function UsMarketStockManager({
           if (!merged.has(row.ticker)) merged.set(row.ticker, row);
         }
       }
-      const mergedRows = [...merged.values()].sort(
-        (a, b) => (b.market_cap ?? 0) - (a.market_cap ?? 0),
-      );
+      // 시총 내림차순으로 세운 뒤 1번부터 다시 번호를 붙인다. 서버는 지수별로 번호를
+      // 매기므로(SP500 7위 · NDX100 7위), 합쳐 놓고 그대로 두면 같은 번호가 두 번 나오고
+      // 아래로 갈수록 순서와 어긋난다.
+      const mergedRows = [...merged.values()]
+        .sort((a, b) => (b.market_cap ?? 0) - (a.market_cap ?? 0))
+        .map((row, index) => ({ ...row, rank: index + 1 }));
       if (!isLatest(token)) return;
       setRows(mergedRows);
       setTotalCount(mergedRows.length);
