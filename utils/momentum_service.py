@@ -988,8 +988,18 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
         if ticker not in set(held_tickers) or ticker in streak_capped:
             return None
         entry_date = streak_entry.get(ticker)
-        if entry_date is None or entry_date > benchmark_close.index[-1]:
+        if entry_date is None:
             return None
+        if entry_date > benchmark_close.index[-1]:
+            # 체결 당일 — 오늘 일봉이 아직 가격 캐시에 없다. 실시간 스냅샷의 오늘 시가가
+            # 곧 체결가이므로 그 대비로 계산한다(시가가 안 온 종목만 None).
+            if entry_date != pd.Timestamp.now().normalize():
+                return None
+            snap = realtime.get(ticker) or {}
+            today_open, price_now = snap.get("open"), snap.get("price")
+            if not today_open or not price_now or float(today_open) <= 0:
+                return None
+            return round((float(price_now) / float(today_open) - 1) * 100, 2)
         frame = cached_frames.get(ticker)
         if frame is None or frame.empty or "Open" not in frame.columns:
             return None

@@ -6,7 +6,7 @@
 이미 읽는 메타 캐시에서 꺼내기만 한다(런타임 비용 0). 순위 기준 시각은 배치 시각이다.
 
 순위의 분모(국가별 "시장"):
-  - kor: 네이버 시총 목록 KOSPI + KOSDAQ 전체
+  - kor: 네이버 시총 목록 KOSPI + KOSDAQ 전체 (ETF·ETN 제외 — 개별주만)
   - us : ``index_constituents`` 의 SP500 ∪ NDX100 (시총은 배치가 채운 yfinance 값)
   - au : ``index_constituents`` 의 ASX200
 목록에 없는 종목은 순위 없음(None) — 임의 보정 없이 화면은 '-'.
@@ -29,7 +29,11 @@ def _rank_by_cap(caps: dict[str, float]) -> dict[str, int]:
 
 def _kor_caps() -> dict[str, float]:
     """KOSPI·KOSDAQ 전체를 네이버 시총 목록에서 페이지 단위로 받는다 (배치 전용 — 화면에서 부르지 않는다)."""
-    from utils.kor_stock_market_service import _fetch_market_value_page, _parse_number
+    from utils.kor_stock_market_service import (
+        _fetch_market_value_page,
+        _parse_number,
+        is_individual_stock_item,
+    )
 
     caps: dict[str, float] = {}
     page_size = 100
@@ -40,6 +44,10 @@ def _kor_caps() -> dict[str, float]:
         payload = first
         for page in range(1, total_pages + 1):
             for item in payload.get("stocks") or []:
+                # ETF·ETN 은 분모에서 뺀다 — 개별주 순위인데 섞이면 그만큼 번호가 밀린다
+                # (KOSPI 상위 100 중 10건이 ETF 다).
+                if not is_individual_stock_item(item):
+                    continue
                 ticker = str(item.get("itemCode") or "").strip()
                 cap = _parse_number(item.get("marketValue"))
                 if ticker and cap is not None:
