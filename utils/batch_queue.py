@@ -38,7 +38,10 @@ _HEARTBEAT_STALE_MINUTES = 5
 
 # 무거운 계산이라 서버(약한 VM)에서 돌리면 안 되고, 로컬 워커(APP_TYPE=Local)만 픽하게 하는 잡들.
 # (서버 워커는 이 잡들을 claim 하지 않는다 → 로컬이 꺼져 있으면 pending 으로 대기)
-LOCAL_ONLY_JOBS: set[str] = {"db_backup"}  # 백업 폴더가 로컬 디스크라 서버 워커가 잡으면 안 된다
+# db_backup: 백업 폴더가 로컬 디스크라 서버 워커가 잡으면 안 된다.
+# broker_balance_sync: NH 토큰이 앱키당 1개뿐이라(새 발급 = 이전 토큰 무효 + 알림톡),
+#   두 머신이 번갈아 잡으면 서로 토큰을 죽이는 핑퐁이 된다 — 발급 주체를 로컬 하나로 고정.
+LOCAL_ONLY_JOBS: set[str] = {"db_backup", "broker_balance_sync"}
 
 
 def _now_utc() -> datetime:
