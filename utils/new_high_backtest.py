@@ -917,8 +917,11 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
     price_by = {row["ticker"]: row["price"] for row in rows}
     for item in simulated["exited_today"]:
         item["price"] = price_by.get(item["ticker"])
-    # 보유·이탈 행에도 시총 순위(화면 공용 컬럼).
+    # 보유·이탈 행에도 시가총액·시총 순위(화면 공용 컬럼).
+    # 시총은 원래 진입 우선순위 판정용이라 후보 행에만 채웠는데, 화면은 보유 표에도 같은
+    # 컬럼을 두고 있어 통째로 비어 보였다.
     for item in [*holdings, *simulated["exited_today"]]:
+        item["market_cap"] = market_cap_by.get(item["ticker"])
         item["market_cap_rank"] = rank_by_ticker.get(item["ticker"])
 
     # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.
