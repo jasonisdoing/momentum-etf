@@ -1039,6 +1039,14 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
             "sleeve_rebalance_today": sleeve_rebalance_today,
         },
     }
+    # 주중 이탈 예상 — 표의 매매수량·상태 칸에 예상을 겹쳐 보여주기 위한 행 플래그.
+    # 목표수량·목표비중은 확정 기준 그대로 둔다(장중 값으로 표 전체를 뒤집지 않는다).
+    forecast_exit_tickers = {row["ticker"] for row in payload["actions"].get("sm_exit_forecast") or []}
+    for row in payload["holdings"]:
+        if row["ticker"] in forecast_exit_tickers and float(row.get("held_quantity") or 0) > 0:
+            row["is_exit_forecast"] = True
+            row["forecast_trade_quantity"] = -int(float(row["held_quantity"]))
+
     # 오늘의 액션 — 화면·슬랙 알람이 같은 결과를 쓴다(조립 단일 소스).
     payload["actions"]["groups"] = _build_action_groups(payload["holdings"], payload["actions"], next_trading_day)
     # 다음주 교체 가정 미리보기 — 실시간 순위 기준 잠정치라 과거 재현(as_of)에는 없다.
