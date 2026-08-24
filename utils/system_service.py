@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+from utils.batch_queue import LOCAL_ONLY_JOBS
 from utils.db_manager import get_db_connection
 from utils.env import load_env_if_present
 from utils.ticker_registry import load_ticker_type_configs
@@ -64,7 +65,6 @@ SCHEDULE_ROWS = [
         "group": "상시 집계",
         "job": "데이터 집계",
         "target": "일별/주별/월별/년별 데이터",
-        "run_location": "SERVER/LOCAL",
         "cadence": "월~토 24시간 10분 간격 KST",
         "command": "python scripts/collect_data.py",
         # 1분이면 끝나는 가벼운 집계라 촘촘히 돌린다(00·10·20·30·40·50분).
@@ -75,7 +75,6 @@ SCHEDULE_ROWS = [
         "group": "상시 집계",
         "job": "가격 캐시 업데이트",
         "target": "모든 종목 가격",
-        "run_location": "SERVER/LOCAL",
         "cadence": "월~토 24시간 매시 20분 KST",
         "command": "python scripts/stock_price_cache_updater.py",
         "schedule": {"minutes": [20], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
@@ -86,7 +85,6 @@ SCHEDULE_ROWS = [
         "group": "장중 실행",
         "job": "증권사 잔고 동기화",
         "target": "API 연동(broker_api) 저장된 계좌",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 09:00~15:40 KST 20분 간격",
         "command": "python scripts/broker_balance_sync.py",
         # 15:40 마지막 회가 마감(15:30) 후 확정 상태를 담는다. 실패 슬랙은 시작·복구 1회씩.
@@ -97,7 +95,6 @@ SCHEDULE_ROWS = [
         "group": "장중 실행",
         "job": "합성 액션 알림",
         "target": "합성 알람 켠 계좌 (오늘의 액션 신규·증가)",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 09:10~15:20 KST 10분 간격",
         "command": "python scripts/strategy_mix_notify.py",
         # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
@@ -109,7 +106,6 @@ SCHEDULE_ROWS = [
         "group": "장중 실행",
         "job": "보유종목 알람",
         "target": "알람 On 계좌의 보유 종목",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 09:10 KST (한국 개시 직후)",
         "command": "python scripts/holdings_alarm.py",
         "schedule": {"minutes": [10], "hours": [9], "weekdays": _WEEKDAYS_MON_FRI},
@@ -119,7 +115,6 @@ SCHEDULE_ROWS = [
         "group": "장중 실행",
         "job": "레버리지 스위칭",
         "target": "한국/미국 지수(코스피·나스닥100)",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 09:10 · 15:00 · 16:00 KST",
         "command": "python scripts/leverage_recommend_ma_cross.py",
         # 한국·미국 두 시장의 마감을 각각 커버해야 해서 여러 번 돈다. 09:10 은 미국 마감
@@ -135,7 +130,6 @@ SCHEDULE_ROWS = [
         "group": "장중 실행",
         "job": "전체 자산 요약 알림",
         "target": "전체 계좌",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 09:40 · 16:10 / 토 09:40 KST",
         "command": "python scripts/slack_asset_summary.py",
         # 토요일 09:40 은 금요일 미국 장 마감(한국시간 토 05~06시)을 반영하기 위한 것이다.
@@ -155,7 +149,6 @@ SCHEDULE_ROWS = [
         "group": "마감 후 지표",
         "job": "시장 폭(ADR) 집계",
         "target": "코스피 200 · 코스닥 150",
-        "run_location": "SERVER/LOCAL",
         "cadence": "월~금 16:30 · 화~토 07:00 KST",
         "command": "python scripts/collect_market_breadth.py",
         # 16:30 = 한국 마감(15:30) 뒤 종가 확정. 07:00 = 미국 마감(KST 새벽 05~06시) 뒤.
@@ -175,7 +168,6 @@ SCHEDULE_ROWS = [
         "group": "마감 후 지표",
         "job": "가격 캐시 전체 재수집",
         "target": "모든 종목 가격 (전체 히스토리)",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 17:10 KST",
         # 매시 증분(가격 캐시 업데이트)이 다루지 않는 과거 행 변경(수정주가 — 배당·분할)을
         # 하루 1회 전체 재수집으로 되돌린다.
@@ -188,7 +180,6 @@ SCHEDULE_ROWS = [
         "group": "개장 전 준비",
         "job": "장 시간 분석",
         "target": "시장 스케줄",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 07:00 KST",
         "command": "python scripts/analyze_market_hours.py",
         "schedule": {"minutes": [0], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
@@ -198,7 +189,6 @@ SCHEDULE_ROWS = [
         "group": "개장 전 준비",
         "job": "종목 메타 업데이트",
         "target": "이름·상장일·마켓·업종 + ETF holdings·배당",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 07:45 KST",
         "command": "python scripts/stock_reference_meta_updater.py",
         "schedule": {"minutes": [45], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
@@ -208,7 +198,6 @@ SCHEDULE_ROWS = [
         "group": "개장 전 준비",
         "job": "종목 가격지표 업데이트",
         "target": "거래량·기간수익률·backtest",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 07:50 KST",
         "command": "python scripts/stock_price_metrics_updater.py",
         "schedule": {"minutes": [50], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
@@ -218,7 +207,6 @@ SCHEDULE_ROWS = [
         "group": "개장 전 준비",
         "job": "미국 개별주 업데이트",
         "target": "S&P500, NASDAQ100",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 08:00 KST",
         "command": "python scripts/update_us_market_stocks.py",
         "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
@@ -228,7 +216,6 @@ SCHEDULE_ROWS = [
         "group": "개장 전 준비",
         "job": "호주 개별주 업데이트",
         "target": "S&P/ASX 200",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 08:10 KST",
         "command": "python scripts/update_aus_market_stocks.py",
         "schedule": {"minutes": [10], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
@@ -239,7 +226,6 @@ SCHEDULE_ROWS = [
         "group": "상시 운영",
         "job": "24H 시세 알림",
         "target": "하이퍼리퀴드/바이낸스",
-        "run_location": "SERVER/LOCAL",
         "cadence": "매일 24시간 매시 0분 KST",
         "command": "python scripts/live_24h_slack.py",
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
@@ -249,7 +235,6 @@ SCHEDULE_ROWS = [
         "group": "상시 운영",
         "job": "DB 백업",
         "target": "MongoDB 전체 → backups/ (최근 30개 보존)",
-        "run_location": "LOCAL",
         "cadence": "매일 24시간 매시 40분 KST",
         # 매시 fresh 백업 — 임시 폴더에 받고 성공 시에만 오늘 폴더로 교체. 백업 폴더가 로컬이라 LOCAL 전용.
         "command": "python scripts/backup_mongo_full.py --gzip",
@@ -1071,7 +1056,11 @@ def load_system_data() -> dict[str, object]:
 
     return {
         "pool_rows": _build_pool_summary_rows(),
-        "schedule_rows": SCHEDULE_ROWS,
+        # 실행 위치는 큐의 LOCAL_ONLY_JOBS 가 단일 소스 — 로컬 전용이 아니면 서버·로컬 둘 다 잡는다.
+        "schedule_rows": [
+            {**row, "run_location": "LOCAL" if row["key"] in LOCAL_ONLY_JOBS else "SERVER/LOCAL"}
+            for row in SCHEDULE_ROWS
+        ],
         "schedule_note": (
             "cron 스케줄 트리거는 서버 scheduler 컨테이너의 APScheduler 가 담당하며, "
             "`infra/cron/crontab` 파일이 단일 진실 소스입니다. "
