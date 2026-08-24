@@ -481,7 +481,12 @@ def _build_action_groups(
                 "quantity": abs(sm_qty),
             }
         )
+    # 매수 유예 안내는 매도 예상이 **없는** 종목에만 — 전량 매도 예상이 이미 '사지 말라'를
+    # 내포하므로 같은 종목에 두 줄이 나오면 소음이다.
+    forecast_sell_tickers = {item["ticker"] for item in forecast_items}
     for item in suspended_buys:
+        if item["ticker"] in forecast_sell_tickers:
+            continue
         forecast_items.append(
             {
                 **item,
