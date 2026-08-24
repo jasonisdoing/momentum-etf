@@ -156,6 +156,9 @@ type Holding = {
   held_value?: number | null;
   current_weight_pct?: number;
   trade_quantity?: number | null;
+  /** 주중 이탈 예상(오늘 종가 확정 시) — 매매수량·상태에 예상으로 겹쳐 보여준다. */
+  is_exit_forecast?: boolean;
+  forecast_trade_quantity?: number | null;
   /** 종목풀 설정 이평선 기준 이격(%) — 종목명 옆 추세 이탈 배지(❗)에 쓴다. */
   current_short_pct?: number | null;
   current_long_pct?: number | null;
@@ -712,16 +715,23 @@ export function StrategyMixClient() {
           width: 92,
           type: "numericColumn",
           valueFormatter: (p) => {
+            const forecast = p.data?.forecast_trade_quantity;
+            if (p.data?.is_exit_forecast && forecast != null) {
+              return `${forecast.toLocaleString("ko-KR")} (예상)`;
+            }
             const value = p.value as number | null;
             if (value == null) return "-";
             if (value === 0) return "0";
             return `${value > 0 ? "+" : ""}${value.toLocaleString("ko-KR")}`;
           },
           // 매수(+)·매도(−) 색은 사이트 공용 기준을 따른다 — 한국 관례로 매수 빨강·매도 파랑.
-          cellStyle: (p) => ({
-            color: signColor(p.value as number),
-            fontWeight: 700,
-          }),
+          // 주중 이탈 예상은 확정이 아니므로 흐리게 구분한다.
+          cellStyle: (p) => {
+            if (p.data?.is_exit_forecast && p.data?.forecast_trade_quantity != null) {
+              return { color: "var(--down-color, #2f6fd0)", fontWeight: 600, opacity: 0.65 };
+            }
+            return { color: signColor(p.value as number), fontWeight: 700, opacity: 1 };
+          },
         },
         {
           field: "held_value",
@@ -751,6 +761,7 @@ export function StrategyMixClient() {
         const parts: string[] = [];
         if (p.data.sm_status) parts.push(`모멘텀 ${p.data.sm_status}`);
         if (p.data.nh_status) parts.push(`신고가 ${p.data.nh_status}`);
+        if (p.data.is_exit_forecast) parts.push("매도 예정(예상)");
         return parts.join(" · ");
       },
       cellStyle: (p) => {
