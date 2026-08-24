@@ -102,7 +102,7 @@ def _namu_call_paged(path: str, payload: dict[str, Any], list_key: str = "Output
 
     _ensure_env()
     from nhplug import clear_token, get_base_url, get_token
-    from nhplug.client import is_success
+    from nhplug.client import _is_invalid_token, is_success
 
     url = f"{get_base_url()}{path}"
     body = json.dumps({"Input_0": payload})
@@ -127,7 +127,9 @@ def _namu_call_paged(path: str, payload: dict[str, Any], list_key: str = "Output
             res = requests.post(url, headers=headers, data=body, timeout=10)
         except requests.RequestException as exc:
             raise BrokerApiError(f"나무증권 API 네트워크 오류: {exc}") from exc
-        if res.status_code == 401 and not refreshed:
+        # 토큰 무효는 401 뿐 아니라 **업무 응답(IGW40043)** 으로도 온다 — 다른 머신이 새 토큰을
+        # 발급하면 이쪽 캐시 토큰이 죽는 케이스. SDK 단건 call() 과 같은 판별로 1회 재발급 재시도.
+        if _is_invalid_token(res.status_code, res.text) and not refreshed:
             clear_token()
             refreshed = True
             continue
