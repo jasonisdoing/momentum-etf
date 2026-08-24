@@ -556,6 +556,22 @@ def delete_pool(pool_id: str) -> dict[str, Any]:
     except Exception as exc:
         logger.warning("가격 캐시 삭제 실패(종목풀 삭제 후): %s", exc)
 
+    # 전략 설정(모멘텀·신고가)의 풀별 항목과 종목 메타 캐시도 함께 지운다 — 남겨두면
+    # 합성 풀 목록 등에 유령 풀로 떠서 선택 시 에러가 난다(폐기는 흔적 없이).
+    cleanup: dict[str, int] = {}
+    try:
+        result = db["system_config"].update_one(
+            {"_id": "momentum_settings"}, {"$unset": {f"settings.settings_by_pool.{norm_id}": ""}}
+        )
+        cleanup["momentum_settings"] = result.modified_count
+        result = db["system_config"].update_one(
+            {"_id": "new_high_settings"}, {"$unset": {f"settings_by_pool.{norm_id}": ""}}
+        )
+        cleanup["new_high_settings"] = result.modified_count
+        cleanup["stock_cache_meta"] = db["stock_cache_meta"].delete_many({"ticker_type": norm_id}).deleted_count
+    except Exception as exc:
+        logger.warning("전략 설정·메타 캐시 정리 실패(종목풀 삭제 후): %s", exc)
+
     invalidate_overlay_cache()
     try:
         from utils.stock_list_io import invalidate_ticker_type_cache
@@ -567,4 +583,5 @@ def delete_pool(pool_id: str) -> dict[str, Any]:
         "ticker_type": norm_id,
         "deleted_pool": deleted_pool,
         "deleted_stocks": deleted_stocks,
+        **cleanup,
     }
