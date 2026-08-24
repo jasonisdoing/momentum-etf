@@ -303,6 +303,7 @@ def _build_action_groups(
     next_trading_day: str | None,
     *,
     nh_live: bool = False,
+    currency: str = "KRW",
 ) -> list[dict[str, Any]]:
     """오늘의 액션 — 체결일 묶음(매도 먼저, 같은 방향은 티커 순).
 
@@ -376,13 +377,14 @@ def _build_action_groups(
         else:
             title = "신규 매수"
         after = f" → 목표 {int(row['target_quantity']):,}주" if row.get("target_quantity") is not None else ""
+        amount = _format_trade_amount(trade, row.get("price"), currency)
+        amount_note = f" · {amount}" if amount else ""
         if sell_reason_applies:
-            note = f"{after} ({reason})".strip()
+            note = f"{after} ({reason}){amount_note}".strip()
         elif row.get("is_sell_all"):
-            value = row.get("held_value")
-            note = (f"({value:,.0f}) " if value is not None else "") + "· 목표에 없는 보유 종목"
+            note = f"· 목표에 없는 보유 종목{amount_note}"
         else:
-            note = f"{after} · {weight:.2f}%".strip()
+            note = f"{after} · {weight:.2f}%{amount_note}".strip()
         items.append(
             {
                 "key": f"act-{ticker}",
@@ -410,7 +412,15 @@ def _build_action_groups(
                 "ticker": ticker,
                 "side": "sell",
                 "title": "매도 예정",
-                "text": f"{label(ticker, row.get('name') or ticker, row.get('held_quantity'))} ({sell_reason.get(ticker) or '이탈'})",
+                "text": (
+                    f"{label(ticker, row.get('name') or ticker, row.get('held_quantity'))}"
+                    f" ({sell_reason.get(ticker) or '이탈'})"
+                    + (
+                        f" · {amt}"
+                        if (amt := _format_trade_amount(row.get("held_quantity"), row.get("price"), currency))
+                        else ""
+                    )
+                ),
                 "date": next_trading_day,
                 "quantity": abs(int(float(row.get("held_quantity") or 0))),
             }
@@ -475,7 +485,10 @@ def _build_action_groups(
                 "ticker": ticker,
                 "side": "sell",
                 "title": "매도 예정(예상)",
-                "text": f"{label(ticker, row.get('name') or ticker, sm_qty)} ({reason})",
+                "text": (
+                    f"{label(ticker, row.get('name') or ticker, sm_qty)} ({reason})"
+                    + (f" · {amt}" if (amt := _format_trade_amount(sm_qty, held.get("price"), currency)) else "")
+                ),
                 "date": next_trading_day,
                 # 알람 상태 비교용 — 예상도 '처음 등장할 때 1건' 발송되도록 실제 수량을 싣는다.
                 "quantity": abs(sm_qty),
@@ -540,6 +553,24 @@ def _attach_disparity(holdings: list[dict[str, Any]], sm_settings: dict[str, Any
             continue
         row["current_short_pct"] = round(metrics["short_disparity_pct"], 1)
         row["current_long_pct"] = round(metrics["disparity_pct"], 1)
+
+
+def _format_trade_amount(quantity: float | None, price: float | None, currency: str) -> str:
+    """지시 금액 표기 — 원화는 'N억 1,234만원', 미국·호주는 현지 통화($ / A$)."""
+    if not quantity or not price or float(price) <= 0:
+        return ""
+    amount = abs(float(quantity)) * float(price)
+    code = str(currency or "KRW").strip().upper()
+    if code == "KRW":
+        if amount >= 1_0000_0000:
+            uk = int(amount // 1_0000_0000)
+            man = int(round((amount - uk * 1_0000_0000) / 1_0000))
+            return f"{uk}억 {man:,}만원" if man else f"{uk}억원"
+        if amount >= 1_0000:
+            return f"{int(round(amount / 1_0000)):,}만원"
+        return f"{amount:,.0f}원"
+    symbol = {"USD": "$", "AUD": "A$"}.get(code, f"{code} ")
+    return f"{symbol}{amount:,.0f}"
 
 
 def _krw_rate(currency: str) -> float:
@@ -727,7 +758,7 @@ def _build_next_week_preview(
             ],
         },
     }
-    groups = _build_action_groups(hypo, hypo_actions, fill_date)
+    groups = _build_action_groups(hypo, hypo_actions, fill_date, currency=str(sm.get("currency") or "KRW"))
     # 주중 이탈 예상 종목은 뺀다 — 다음주가 아니라 내일 시가에 팔릴 예상이라 오늘의 액션의
     # '(예상)' 그룹이 담당한다. 여기 두면 '교체 매도 · 체결일 미정' 으로 잘못 안내된다.
     forecast_tickers = {row["ticker"] for row in actions.get("sm_exit_forecast") or []}
@@ -1102,8 +1133,9 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
             row["forecast_trade_quantity"] = -sm_qty if sm_qty > 0 else 0
 
     # 오늘의 액션 — 화면·슬랙 알람이 같은 결과를 쓴다(조립 단일 소스).
+    currency = str(sm.get("currency") or "KRW")
     payload["actions"]["groups"] = _build_action_groups(
-        payload["holdings"], payload["actions"], next_trading_day, nh_live=bool(nh.get("live"))
+        payload["holdings"], payload["actions"], next_trading_day, nh_live=bool(nh.get("live")), currency=currency
     )
     # 다음주 교체 가정 미리보기 — 실시간 순위 기준 잠정치라 과거 재현(as_of)에는 없다.
     payload["actions"]["next_week_preview"] = (
