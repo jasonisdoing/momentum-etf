@@ -347,7 +347,6 @@ type PositionRow = Holding & {
 /** 리밸런싱 밴드(%p) — 목표 비중과 이만큼 미만으로 벌어진 종목은 오늘의 액션에서 뺀다.
  *  장중 가격이 조금만 움직여도 목표수량이 ±1주씩 흔들려 목록이 계속 바뀌기 때문이다.
  *  표에는 정확한 목표수량이 그대로 남는다(표는 대조용, 액션은 실행용). */
-const REBALANCE_BAND_PCT = 0.5;
 
 /** 오늘의 액션 한 줄. 같은 체결 시점끼리 묶고 묶음 안에서는 매도 → 매수 순서다. */
 type ActionItem = {
@@ -1286,9 +1285,9 @@ export function StrategyMixClient() {
                     <div style={{ fontWeight: 700, marginBottom: 6 }}>
                       오늘의 액션
                       <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
-                        목표 비중과 {REBALANCE_BAND_PCT}%p 이상 차이를 지시로 표시 (목표가 흘러간
-                        비중을 따라가므로 평소에는 지시가 없고, 입출금·교체·진입·이탈·월초 이관 때
-                        나옵니다) · 모멘텀 교체 확정분은 교체일 그룹
+                        목표 비중과 슬롯 크기의 15%p(최소 0.5%p) 이상 차이만 지시로 표시 — 가격
+                        변동(드리프트)으로는 지시가 없고, 큰 단위 입출금·교체·진입·이탈·월초 이관 때
+                        나옵니다 · 모멘텀 교체 확정분은 교체일 그룹
                       </span>
                     </div>
                     {!hasActions ? (

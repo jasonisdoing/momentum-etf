@@ -277,7 +277,12 @@ def _sleeve_shares(
     )
 
 
-_REBALANCE_BAND_PCT = 0.5  # 목표 비중과 이 미만 차이는 지시로 만들지 않는다(반올림·소액 잡음)
+# 비중 조정 지시 밴드 — **슬롯 크기에 비례**한다(슬롯 목표비중 × 비율, 최소 0.5%p).
+# 고정 0.5%p 로 두면 슬롯이 큰 종목은 하루 가격 변동(드리프트)만으로 지시가 떠서, 백테스트에
+# 없는 주중 재조정 매매를 시키게 된다. 드리프트는 지시로 만들지 않는 게 전략 규칙이고,
+# 입출금은 큰 단위로 들어오므로(총자산 15%+) 이 밴드를 넘어 지시가 생성된다.
+_REBALANCE_BAND_RATIO = 0.15
+_REBALANCE_BAND_MIN_PCT = 0.5
 
 _WEEKDAYS_KO = ("월", "화", "수", "목", "금", "토", "일")
 
@@ -301,7 +306,8 @@ def _build_action_groups(
 
     화면과 슬랙 알람이 **이 결과를 그대로** 쓴다 — 조립을 한 곳에 두어 둘이 어긋나지
     않게 한다. 규칙은 화면에 있던 것 그대로:
-      · 목표는 흘러간 비중을 따라가므로, 밴드(0.5%p) 이상 차이만 지시로 만든다.
+      · 목표는 흘러간 비중을 따라가므로, 밴드(슬롯 비중의 15%, 최소 0.5%p) 이상 차이만 지시로 만든다
+        — 가격 드리프트는 지시가 안 되고, 큰 단위 입출금·교체·진입·이탈만 지시가 된다.
       · 모멘텀 교체 확정분(미체결)은 교체일 시가 그룹, 나머지는 다음 거래일 그룹.
       · 전량 매도·손절·이탈은 금액과 무관하게 항상 남긴다.
     """
@@ -342,7 +348,8 @@ def _build_action_groups(
         weight = float(row.get("weight_pct") or 0)
         if not row.get("is_sell_all") and not (reason and trade < 0 and weight <= 0):
             gap = abs(weight - float(row.get("current_weight_pct") or 0))
-            if gap < _REBALANCE_BAND_PCT:
+            band = max(_REBALANCE_BAND_MIN_PCT, weight * _REBALANCE_BAND_RATIO)
+            if gap < band:
                 continue
         held = float(row.get("held_quantity") or 0) > 0
         sell_reason_applies = bool(reason) and trade < 0 and weight <= 0
