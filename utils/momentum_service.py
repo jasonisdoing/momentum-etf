@@ -996,9 +996,17 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             if entry_date != pd.Timestamp.now().normalize():
                 return None
             snap = realtime.get(ticker) or {}
-            today_open, price_now = snap.get("open"), snap.get("price")
-            if not today_open or not price_now or float(today_open) <= 0:
+            today_open = snap.get("open")
+            if not today_open or float(today_open) <= 0:
                 return None
+            # 현재가 — 스냅샷 값이 없으면(장 마감 직후 등) 화면 현재가와 같은 실시간 반영 종가.
+            price_now = snap.get("price")
+            if not price_now:
+                current = frames.get(ticker)
+                close = pd.to_numeric(current["Close"], errors="coerce").dropna() if current is not None else None
+                if close is None or close.empty:
+                    return None
+                price_now = float(close.iloc[-1])
             return round((float(price_now) / float(today_open) - 1) * 100, 2)
         frame = cached_frames.get(ticker)
         if frame is None or frame.empty or "Open" not in frame.columns:
