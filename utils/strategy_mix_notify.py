@@ -50,28 +50,36 @@ def _format_message(pool: str, account_name: str, groups: list[dict[str, Any]]) 
     return "\n".join(lines)
 
 
-def _watch_targets() -> list[dict[str, Any]]:
-    """감시 대상 — mix_pool 과 슬랙 알람이 모두 설정된 계좌."""
+def _pool_country(pool: str) -> str:
+    from utils.settings_loader import get_ticker_type_settings
+
+    return str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+
+
+def _watch_targets(country: str | None = None) -> list[dict[str, Any]]:
+    """감시 대상 — mix_pool 과 슬랙 알람이 모두 설정된 계좌. ``country`` 를 주면 그 국가 풀만
+    (한국·미국 장 시간이 달라 배치를 국가별로 나눠 돌린다)."""
     from utils.account_settings_store import load_account_docs
 
     targets = []
     for doc in load_account_docs():
         pool = str(doc.get("mix_pool") or "").strip().lower()
-        if pool and bool(doc.get("mix_slack_enabled")):
-            targets.append(
-                {"account_id": doc["account_id"], "name": doc.get("name") or doc["account_id"], "pool": pool}
-            )
+        if not pool or not bool(doc.get("mix_slack_enabled")):
+            continue
+        if country and _pool_country(pool) != country:
+            continue
+        targets.append({"account_id": doc["account_id"], "name": doc.get("name") or doc["account_id"], "pool": pool})
     return targets
 
 
-def notify_all() -> dict[str, Any]:
+def notify_all(country: str | None = None) -> dict[str, Any]:
     """감시 계좌 순회 — 새 지시·수량 증가가 있을 때만 슬랙 1건 발송."""
     from utils.notification import send_slack_message_v2
     from utils.strategy_mix_service import mix_positions
 
     results = []
     sent = 0
-    for target in _watch_targets():
+    for target in _watch_targets(country):
         pool = target["pool"]
         try:
             positions = mix_positions(pool)

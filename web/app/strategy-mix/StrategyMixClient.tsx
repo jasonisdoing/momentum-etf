@@ -149,6 +149,9 @@ type Holding = {
   change_pct: number | null;
   sm_status: string | null;
   nh_status: string | null;
+  /** 전략 수익률(이론값) — 모멘텀: 연속 시작 교체일 시가 대비 · 신고가: 진입가 대비. */
+  sm_return_pct?: number | null;
+  nh_return_pct?: number | null;
   /** 적용 계좌가 있을 때만 온다 — 계좌 총자산 기준 목표 금액·주수와 현재 보유. */
   target_amount?: number | null;
   target_quantity?: number | null;
@@ -678,6 +681,38 @@ export function StrategyMixClient() {
         valueFormatter: (p) =>
           p.value == null || (p.value as number) === 0 ? "-" : `${(p.value as number).toFixed(2)}%`,
         cellStyle: { color: "var(--text-muted)" },
+      },
+      {
+        colId: "strategy_return",
+        headerName: "전략수익률",
+        width: 104,
+        type: "numericColumn",
+        headerTooltip:
+          "전략 이론값(계좌 실손익 아님) — 모멘텀: 연속 편입 시작 교체일 시가 대비 · 신고가: 진입가 대비. 두 슬리브 보유면 몫 가중 평균.",
+        valueGetter: (p) => {
+          if (!p.data) return null;
+          const parts: { w: number; r: number }[] = [];
+          if (p.data.sm_return_pct != null && (p.data.sm_weight ?? 0) > 0)
+            parts.push({ w: p.data.sm_weight ?? 0, r: p.data.sm_return_pct });
+          if (p.data.nh_return_pct != null && (p.data.nh_weight ?? 0) > 0)
+            parts.push({ w: p.data.nh_weight ?? 0, r: p.data.nh_return_pct });
+          if (!parts.length) {
+            // 몫이 0(매도 예정 등)이어도 수익률 자체는 보여준다.
+            const single = p.data.sm_return_pct ?? p.data.nh_return_pct;
+            return single ?? null;
+          }
+          const total = parts.reduce((a, x) => a + x.w, 0);
+          return parts.reduce((a, x) => a + (x.r * x.w) / total, 0);
+        },
+        valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
+        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
+        tooltipValueGetter: (p) => {
+          if (!p.data) return "";
+          const bits: string[] = [];
+          if (p.data.sm_return_pct != null) bits.push(`모멘텀 ${formatSignedPct(p.data.sm_return_pct, 2)} (교체일 시가 대비)`);
+          if (p.data.nh_return_pct != null) bits.push(`신고가 ${formatSignedPct(p.data.nh_return_pct, 2)} (진입가 대비)`);
+          return bits.join(" · ");
+        },
       },
       {
         field: "weight_pct",
