@@ -111,6 +111,8 @@ type Holding = {
   ticker: string;
   name: string;
   industry: string;
+  /** 시장 전체 시총 순위 — 진입 후보 표와 같은 값(배치 B 가 메타 캐시에 적어 둔다). */
+  market_cap_rank?: number | null;
   /** 직전 거래일 종가 대비 등락률 — 진입 후보 표와 같은 값. */
   change_pct: number | null;
   entry_date: string;
@@ -177,6 +179,8 @@ type Trade = {
   ticker: string;
   name: string;
   industry: string;
+  /** 시장 전체 시총 순위 — 운용 현황 표에서만 쓴다(백테스트 체결 목록에는 없다). */
+  market_cap_rank?: number | null;
   change_pct?: number | null;
   /** 청산 후 현재 시세 — 운용 현황 표에서만 쓴다(백테스트 체결 목록에는 없다). */
   price?: number | null;
@@ -759,20 +763,23 @@ export function NewHighClient() {
   const planRows = useMemo<PlanRow[]>(() => {
     if (!positions) return [];
     const held: PlanRow[] = positions.holdings.map((h) => ({
-      ticker: h.ticker, name: h.name, industry: h.industry, change_pct: h.change_pct, price: h.price,
+      ticker: h.ticker, name: h.name, industry: h.industry, market_cap_rank: h.market_cap_rank ?? null,
+      change_pct: h.change_pct, price: h.price,
       exit_price: null,
       entry_date: h.entry_date, entry_price: h.entry_price, return_pct: h.return_pct,
       plan: h.status, days: h.days, is_new: h.is_new, exit_reason: h.exit_reason,
     }));
     const buys: PlanRow[] = positions.planned_entries.map((row) => ({
-      ticker: row.ticker, name: row.name, industry: row.industry, change_pct: row.change_pct, price: row.price,
+      ticker: row.ticker, name: row.name, industry: row.industry, market_cap_rank: row.market_cap_rank ?? null,
+      change_pct: row.change_pct, price: row.price,
       exit_price: null,
       entry_date: null, entry_price: null, return_pct: null,
       plan: "buy", days: null, is_new: false, exit_reason: null,
     }));
     // 오늘 이미 청산된 종목 — 현재가는 지금 시세, 청산가는 따로 담는다.
     const exited: PlanRow[] = positions.exited_today.map((t) => ({
-      ticker: t.ticker, name: t.name, industry: t.industry, change_pct: t.change_pct ?? null,
+      ticker: t.ticker, name: t.name, industry: t.industry, market_cap_rank: t.market_cap_rank ?? null,
+      change_pct: t.change_pct ?? null,
       price: t.price ?? null, exit_price: t.exit_price,
       entry_date: t.entry_date, entry_price: t.entry_price, return_pct: t.return_pct,
       plan: "exited", days: t.days, is_new: false, exit_reason: t.reason,
