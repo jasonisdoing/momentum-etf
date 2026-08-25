@@ -23,10 +23,13 @@ def invalidate_pool_caches(ticker_type: str | None = None) -> None:
             설정 묶음이라 풀만 뽑아낼 수 없어 통째로 지운다 — 항목이 몇 개뿐이라
             다시 계산해도 손해가 없고, 잘못된 값을 보여주는 쪽이 훨씬 비싸다.
     """
+    from utils.holdings_alarm_service import _invalidate_badges_cache
     from utils.rank_service import invalidate_rank_data_cache
 
     invalidate_rank_data_cache(ticker_type)
     invalidate_strategy_caches()
+    # 이동선 이탈 배지는 종목풀의 이평선으로 판정한다 — 풀 설정·종목이 바뀌면 다시 계산해야 한다.
+    _invalidate_badges_cache()
 
 
 def invalidate_strategy_caches() -> None:

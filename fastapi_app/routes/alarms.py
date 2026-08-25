@@ -17,12 +17,11 @@ def get_alarms(_: None = Depends(require_internal_token)) -> dict:
 
 @router.post("/account")
 def post_account(payload: dict = Body(...), _: None = Depends(require_internal_token)) -> dict:
-    """계좌별 알람 저장. body: ``{account_id, alarm_type, enabled: bool, values: {...}, icon?: str}``.
+    """계좌별 알람 저장. body: ``{account_id, alarm_type, enabled: bool, values: {...}}``.
 
     values 는 알람 종류가 요구하는 기준값 전부다 (부족하면 에러 — 임의로 채우지 않는다).
-      ma       : ``{"short_days": int, "long_days": int}`` — 단기·장기 이평선 일수
+      ma       : ``{}`` — 이평선 일수는 종목이 속한 종목풀 설정에서 온다
       stoploss : ``{"threshold_pct": float}`` — 손절 기준(%, 음수)
-    icon 은 자산 화면 종목명 배지용 이모지(생략 시 미변경, 빈 문자열 = 배지 끔).
     """
     from utils.holdings_alarm_service import set_account_alarm
 
@@ -32,15 +31,13 @@ def post_account(payload: dict = Body(...), _: None = Depends(require_internal_t
         raise ValueError("account_id 가 필요합니다.")
     if alarm_type not in ("ma", "stoploss"):
         raise ValueError("알 수 없는 알람 종류입니다.")
-    values = payload.get("values")
-    if not isinstance(values, dict) or not values:
-        raise ValueError("기준 values 는 비어있지 않은 객체여야 합니다.")
+    values = payload.get("values") or {}
+    if not isinstance(values, dict):
+        raise ValueError("기준 values 는 객체여야 합니다.")
     for key, value in values.items():
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             raise ValueError(f"기준 values.{key} 는 숫자여야 합니다.")
-    raw_icon = payload.get("icon")
-    icon = str(raw_icon) if isinstance(raw_icon, str) else None
-    return set_account_alarm(account_id, alarm_type, enabled=bool(payload.get("enabled")), values=values, icon=icon)
+    return set_account_alarm(account_id, alarm_type, enabled=bool(payload.get("enabled")), values=values)
 
 
 @router.get("/badges")
