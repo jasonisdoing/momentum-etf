@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from utils.logger import get_app_logger
-from utils.share_allocation import ShareTarget, allocate_integer_shares
+from utils.share_allocation import ShareTarget, allocate_integer_shares, backtest_initial_capital
 from utils.trade_stats import summarize_trades
 
 logger = get_app_logger()
@@ -1285,9 +1285,14 @@ def _simulate_mix_daily(
     first = pd.Timestamp(min(sm_buys)) if sm_buys else close_df.index[0]
     span = [d for d in close_df.index if d >= first]
 
-    # 시작 배분 — 계좌 설정의 합성 배분(합 100)을 1.0 기준으로 쪼갠다.
+    # 시작 배분 — 계좌 설정의 합성 배분(합 100)을 시작 자본 기준으로 쪼갠다.
+    # 자본을 두는 이유는 주수를 정수로 세기 위해서다(운용 현황과 같은 배분 함수를 쓴다).
+    # 곡선은 마지막에 시작 자본으로 나눠 예전과 같은 배수로 돌려준다.
+    capital = backtest_initial_capital(pool)
     weights = mix_weights_for_pool(pool)
-    sm_w, nh_w, cash_w = weights["sm_pct"] / 100.0, weights["nh_pct"] / 100.0, weights["cash_pct"] / 100.0
+    sm_w = weights["sm_pct"] / 100.0 * capital
+    nh_w = weights["nh_pct"] / 100.0 * capital
+    cash_w = weights["cash_pct"] / 100.0 * capital
 
     sm_shares: dict[str, float] = {}
     nh_shares: dict[str, float] = {}
@@ -1394,21 +1399,39 @@ def _simulate_mix_daily(
         if day_key in rebalance_days:
             sm_value = sleeve_value(sm_shares, cash_sm, day, open_df)
             unit = sm_value / sm_slots if sm_slots else 0.0
-            for ticker in list(sm_shares):
-                fill = px(open_df, day, ticker)
+            # 목표 주수는 운용 현황과 **같은 함수**로 낸다. 매도가 먼저 현금을 만들고
+            # 그 현금으로 매수하므로, 예산은 슬리브 전체 자산(sm_value)이다.
+            buy_prices = {t: px(open_df, day, t) for t in list(sm_shares)}
+            targets = allocate_integer_shares(
+                [
+                    ShareTarget(key=ticker, target_amount=unit, price=fill * (1 + buy_slip))
+                    for ticker, fill in buy_prices.items()
+                    if fill
+                ],
+                budget=sm_value,
+            )
+            # 매도 먼저 — 대금이 있어야 매수가 체결된다.
+            for ticker, fill in buy_prices.items():
                 if not fill:
                     continue
-                delta = unit / fill - sm_shares[ticker]
-                if delta > 0:
-                    cost = delta * fill * (1 + buy_slip)
-                    if cost > cash_sm:
-                        delta = cash_sm / (fill * (1 + buy_slip))
-                        cost = delta * fill * (1 + buy_slip)
-                    cash_sm -= cost
-                    sm_shares[ticker] += delta
-                elif delta < 0:
+                delta = targets.get(ticker, 0) - sm_shares[ticker]
+                if delta < 0:
                     cash_sm += -delta * fill * (1 - sell_slip)
                     sm_shares[ticker] += delta
+            for ticker, fill in buy_prices.items():
+                if not fill:
+                    continue
+                delta = targets.get(ticker, 0) - sm_shares[ticker]
+                if delta <= 0:
+                    continue
+                cost = delta * fill * (1 + buy_slip)
+                if cost > cash_sm:  # 슬리피지 때문에 예산을 살짝 넘을 수 있다
+                    delta = int(cash_sm // (fill * (1 + buy_slip)))
+                    cost = delta * fill * (1 + buy_slip)
+                if delta <= 0:
+                    continue
+                cash_sm -= cost
+                sm_shares[ticker] += delta
 
         # 5) 신고가 진입 — prev 돌파 → 오늘 시가, 배정은 min(슬리브/N, 현금)
         free = nh_slots - len(nh_shares)
@@ -1430,14 +1453,21 @@ def _simulate_mix_daily(
             picks.sort(key=nh_priority, reverse=True)
             picks, _ = _cap_by_industry(picks, list(nh_shares), industry_by, nh_settings["max_per_industry"], free)
             nh_open_value = sleeve_value(nh_shares, cash_nh, day, open_df)
+            # 신고가 슬리브도 같은 배분 함수. 예산은 살 수 있는 현금까지만이다
+            # (팔지 않은 평가익으로는 못 산다).
+            slot_amount = nh_open_value / nh_slots if nh_slots else 0.0
+            fills = {t: px(open_df, day, t) * (1 + buy_slip) for t in picks}
+            entered = allocate_integer_shares(
+                [ShareTarget(key=t, target_amount=slot_amount, price=f) for t, f in fills.items() if f],
+                budget=min(slot_amount * len(picks), cash_nh),
+            )
             for ticker in picks:
-                alloc = min(nh_open_value / nh_slots, cash_nh)
-                if alloc <= 0:
-                    break
-                fill = px(open_df, day, ticker) * (1 + buy_slip)
-                nh_shares[ticker] = alloc / fill
-                nh_entry[ticker] = fill
-                cash_nh -= alloc
+                shares = entered.get(ticker, 0)
+                if shares <= 0:
+                    continue
+                nh_shares[ticker] = shares
+                nh_entry[ticker] = fills[ticker]
+                cash_nh -= shares * fills[ticker]
 
         # 비워 둔 현금도 계좌 자산이다 — 곡선에서 빼면 배분을 늘릴수록 총자산이 줄어 보인다.
         curve[day_key] = (
@@ -1446,7 +1476,9 @@ def _simulate_mix_daily(
             + cash_reserved
         )
 
-    return pd.Series(curve).sort_index()
+    # 시작 1.0 배수로 되돌린다 — 시작 자본은 정수 주수를 세기 위한 것이고, 성과 지표는
+    # 예전과 같은 배수 기준으로 읽어야 한다.
+    return pd.Series(curve).sort_index() / capital
 
 
 def run_mix_backtest(pool: str | None = None, months: int | None = None) -> dict[str, Any]:

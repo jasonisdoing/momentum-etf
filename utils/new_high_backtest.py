@@ -31,6 +31,7 @@ from utils.new_high_service import (
     validate_settings,
 )
 from utils.pool_settings_store import get_pool_slippage
+from utils.share_allocation import ShareTarget, allocate_integer_shares, backtest_initial_capital
 from utils.trade_stats import summarize_trades
 from utils.ttl_cache import TtlCache
 
@@ -170,9 +171,14 @@ def run_backtest(
     if len(span) < 2:
         raise RuntimeError("백테스트할 구간의 가격 데이터가 부족합니다.")
 
-    # 자산은 현금 + 보유 주수로 들고 간다(시작 자산 1.0). 포지션 손익을 자산에 곱하면
-    # 동시에 들고 있던 종목의 손익이 합산이 아니라 곱으로 쌓여 수익이 부풀려진다.
-    cash = 1.0
+    # 자산은 현금 + 보유 주수로 들고 간다. 포지션 손익을 자산에 곱하면 동시에 들고 있던
+    # 종목의 손익이 합산이 아니라 곱으로 쌓여 수익이 부풀려진다.
+    #
+    # 시작 자본은 통화별 상수(config.BACKTEST_INITIAL_CAPITAL)다. 예전에는 1.0 상대곡선이라
+    # 주수가 소수(4.503주)로 나왔는데, 실제로는 정수 주수만 살 수 있어 운용 현황과 결과가
+    # 어긋났다. 곡선은 마지막에 시작 자본으로 나눠 예전과 같은 배수로 돌려준다.
+    initial_capital = backtest_initial_capital(pool)
+    cash = float(initial_capital)
     holdings: dict[str, dict[str, Any]] = {}
     trades: list[dict[str, Any]] = []
     curve: list[float] = []
@@ -254,21 +260,31 @@ def run_backtest(
             ]
             picks.sort(key=lambda t: priority_of(day, t), reverse=True)
             picks, _ = _cap_by_industry(picks, list(holdings), industry_by, settings["max_per_industry"], free)
+            # 주수 배분은 운용 현황과 **같은 함수**를 쓴다 — 규칙이 갈라지면 백테스트가
+            # 실제로 못 내는 성과를 내게 된다. 예산은 살 수 있는 현금까지만(팔지 않은
+            # 평가익으로는 못 산다). 손익 계산에는 슬리피지를 얹은 값을 쓴다.
+            fill_price_by_ticker = {t: float(open_df.at[nxt, t]) * (1 + buy_slippage / 100) for t in picks}
+            slot_amount = fill_value / slots if slots else 0.0
+            quantities = allocate_integer_shares(
+                [
+                    ShareTarget(key=ticker, target_amount=slot_amount, price=price)
+                    for ticker, price in fill_price_by_ticker.items()
+                    if price > 0
+                ],
+                budget=min(slot_amount * len(picks), cash),
+            )
             for ticker in picks:
-                entry_open = float(open_df.at[nxt, ticker])
-                # 살 현금이 모자라면 있는 만큼만 산다 — 팔지 않은 평가익으로는 못 산다.
-                alloc = min(fill_value / slots, cash)
-                if alloc <= 0:
-                    break
-                # 손익 계산에는 슬리피지를 얹은 값을 쓴다(표시용 가격과 구분).
-                fill_price = entry_open * (1 + buy_slippage / 100)
+                shares = quantities.get(ticker, 0)
+                if shares <= 0:
+                    continue
+                fill_price = fill_price_by_ticker[ticker]
                 holdings[ticker] = {
-                    "open": entry_open,
+                    "open": float(open_df.at[nxt, ticker]),
                     "entry": fill_price,
                     "date": nxt,
-                    "shares": alloc / fill_price,
+                    "shares": shares,
                 }
-                cash -= alloc
+                cash -= shares * fill_price
 
         curve.append(_value_at(day))
 
@@ -309,7 +325,9 @@ def run_backtest(
     sleeve_cash_weight_pct = round(cash / sleeve_value * 100, 4) if sleeve_value > 0 else 100.0
     exited_today = [t for t in trades if t["exit_date"] == str(last_day.date())]
 
-    strategy = pd.Series(curve, index=span)  # 마지막 날은 평가만 한 값이 들어간다
+    # 곡선은 시작 1.0 배수로 되돌린다 — 시작 자본은 정수 주수를 세기 위한 것이고,
+    # 성과 지표(수익률·MDD·벤치마크 대비)는 예전과 같은 배수 기준으로 읽어야 한다.
+    strategy = pd.Series(curve, index=span) / initial_capital  # 마지막 날은 평가만 한 값이 들어간다
     benchmark = load_benchmark_close(pool).reindex(strategy.index).ffill()
     benchmark = benchmark / benchmark.iloc[0]
 
