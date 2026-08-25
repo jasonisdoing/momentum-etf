@@ -8,6 +8,7 @@ import { formatPoolLabel } from "@/lib/pool-label";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { AppModal } from "../components/AppModal";
+import { LastSavedCell } from "../components/LastSavedCell";
 import { ensureAsxPrefix } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
@@ -372,6 +373,16 @@ function AccountDetailModal({
             </label>
           );
         })}
+      </div>
+
+      <div style={rowStyle}>
+        <span style={{ ...labelStyle, width: 72 }}>URL</span>
+        <input
+          style={{ ...inputStyle, flex: 1, minWidth: 260 }}
+          placeholder="증권사 접속 URL (선택)"
+          value={draft.URL}
+          onChange={(e) => onChange({ URL: e.target.value })}
+        />
       </div>
 
       <div style={rowStyle}>
@@ -822,21 +833,21 @@ export function AccountSettingsManager() {
   const columnDefs: ColDef<AccountGridRow>[] = [
     { field: "account_id", headerName: "ID", width: 130, pinned: "left" },
     { field: "name", headerName: "이름", width: 150, editable: true },
-    { field: "icon", headerName: "아이콘", width: 80, editable: true },
-    { field: "order", headerName: "순서", width: 78, editable: true, cellEditor: "agNumberCellEditor", type: "numericColumn" },
+    { field: "icon", headerName: "아이콘", width: 62, editable: true },
+    { field: "order", headerName: "순서", width: 64, editable: true, cellEditor: "agNumberCellEditor", type: "numericColumn" },
     selectCol("country_code", "국가", 82, () => [...COUNTRY_OPTIONS]),
-    selectCol("currency", "통화", 82, () => [...CURRENCY_OPTIONS]),
+    selectCol("currency", "통화", 70, () => [...CURRENCY_OPTIONS]),
     {
       field: "cash_currencies",
       headerName: "현금",
-      width: 110,
+      width: 94,
       sortable: false,
       valueFormatter: (params) => (Array.isArray(params.value) ? params.value.join(" · ") : ""),
     },
     {
       field: "benchmarkTicker",
       headerName: "벤치마크",
-      width: 190,
+      width: 250,
       sortable: false,
       valueFormatter: (params) => {
         const row = params.data;
@@ -847,7 +858,7 @@ export function AccountSettingsManager() {
       valueFormatter: (params) =>
         marketIndices.find((item) => item.ticker === params.value)?.name ?? (params.value ? String(params.value) : "미설정"),
     }),
-    selectCol("mix_pool", "합성 전략", 150, () => ["", ...poolOptions.map((pool) => pool.ticker_type)], {
+    selectCol("mix_pool", "합성 전략", 250, () => ["", ...poolOptions.map((pool) => pool.ticker_type)], {
       valueFormatter: (params) => {
         const pool = poolOptions.find((item) => item.ticker_type === params.value);
         return pool ? formatPoolLabel(pool) : "없음";
@@ -856,7 +867,7 @@ export function AccountSettingsManager() {
     {
       field: "brokerProvider",
       headerName: "증권사 API",
-      width: 130,
+      width: 190,
       sortable: false,
       valueFormatter: (params) => {
         const row = params.data;
@@ -866,31 +877,32 @@ export function AccountSettingsManager() {
           : `${row.brokerProvider} (계좌 미선택)`;
       },
     },
-    { field: "URL", headerName: "URL", width: 150, editable: true },
     {
       field: "ma_alarm_enabled",
-      headerName: "이동선 알림",
-      width: 110,
+      headerName: "이평선🔔",
+      width: 96,
       editable: true,
       cellDataType: "boolean",
       headerTooltip: "보유 종목의 종가가 그 종목이 속한 종목풀의 단기·장기 이평선 중 하나라도 아래면 알립니다.",
     },
     {
       field: "stoploss_alarm_enabled",
-      headerName: "손절 알림",
-      width: 100,
+      headerName: "손절🔔",
+      width: 88,
       editable: true,
       cellDataType: "boolean",
       headerTooltip: "보유 종목의 수익률이 손절 기준 이하면 알립니다.",
     },
-    selectCol("stoploss_threshold_pct", "손절 기준", 110, () => ["", ...stoplossPctOptions], {
-      valueFormatter: (params) => (params.value ? `${params.value}% 이하` : "기준 선택"),
+    selectCol("stoploss_threshold_pct", "손절기준", 90, () => ["", ...stoplossPctOptions], {
+      valueFormatter: (params) => (params.value ? `${params.value}%` : "기준 선택"),
       cellClass: (params) => (params.data?.stoploss_alarm_enabled && !params.value ? "settingsMissingCell" : ""),
     }),
     {
       headerName: "상세",
-      width: 84,
+      width: 64,
       sortable: false,
+      headerClass: "settingsCenterHeader",
+      cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
       // 셀 한 칸에 담기지 않는 설정(현금·벤치마크·증권사 API·잔고 동기화)을 여기서 연다.
       cellRenderer: (params: ICellRendererParams<AccountGridRow>) =>
         params.data ? (
@@ -909,8 +921,9 @@ export function AccountSettingsManager() {
       field: "__updatedAt",
       headerName: "마지막 저장",
       flex: 1,
-      minWidth: 180,
+      minWidth: 320,
       valueFormatter: (params) => (params.value ? formatKstDateTime(String(params.value)) : "저장 이력 없음"),
+      cellRenderer: (params: ICellRendererParams<AccountGridRow>) => <LastSavedCell value={params.value} />,
     },
   ];
 
@@ -953,9 +966,6 @@ export function AccountSettingsManager() {
                 <button type="button" className="btn btn-sm btn-primary" onClick={() => setAddOpen(true)}>
                   계좌 추가
                 </button>
-                <button type="button" className="btn btn-sm btn-outline-secondary" disabled={loading} onClick={() => void load()}>
-                  새로고침
-                </button>
                 <button
                   type="button"
                   className="btn btn-sm btn-dark"
@@ -986,6 +996,12 @@ export function AccountSettingsManager() {
                 getRowClass={(params) => (params.data?.__dirty ? "settingsDirtyRow" : "")}
                 gridOptions={{
                   suppressMovableColumns: true,
+                  // 폭에 맞춰 말줄임하므로, 잘린 값은 마우스를 올려 전체를 본다.
+                  defaultColDef: {
+                    sortable: true,
+                    resizable: true,
+                    tooltipValueGetter: (params) => params.valueFormatted ?? params.value,
+                  },
                   // AppAgGrid 기본값은 셀 포커스를 막는다(읽기 전용 표 기준). 편집하려면 켜야 한다.
                   suppressCellFocus: false,
                   singleClickEdit: true,
@@ -997,9 +1013,9 @@ export function AccountSettingsManager() {
                     enableClickSelection: false,
                   },
                   selectionColumnDef: {
-                    width: 52,
-                    minWidth: 52,
-                    maxWidth: 52,
+                    width: 40,
+                    minWidth: 40,
+                    maxWidth: 40,
                     pinned: "left",
                     sortable: false,
                     resizable: false,
