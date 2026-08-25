@@ -570,14 +570,16 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         );
       },
     },
-    selectCol("marketRegimeTicker", "시장 레짐", 180, () => marketIndices.map((item) => item.ticker), {
+    selectCol("marketRegimeTicker", "시장 레짐", 120, () => marketIndices.map((item) => item.ticker), {
       valueFormatter: (params) =>
         marketIndices.find((item) => item.ticker === params.value)?.name ?? (params.value ? String(params.value) : "미설정"),
     }),
     {
+      // 마지막 컬럼이 남는 가로를 채운다 — 오른쪽에 빈 공간이 남지 않게.
       field: "__updatedAt",
       headerName: "마지막 저장",
-      width: 160,
+      flex: 1,
+      minWidth: 180,
       valueFormatter: (params) => (params.value ? formatKstDateTime(String(params.value)) : "저장 이력 없음"),
     },
   ];
