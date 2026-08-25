@@ -83,3 +83,5 @@ Cloudflare 프록시(주황 구름)는 쓰지 않는다 — HTTP-01 검증이 �
 | 로그인만 `redirect_uri_mismatch` | `node_app` 이 옛 `APP_BASE_URL` | 컨테이너 재생성 |
 | robots.txt 가 404 HTML | `vhost.d/` 파일명이 옛 도메인 | 파일명을 새 호스트로 |
 | DNS 레코드가 반영 안 됨 | 가비아에 등록함 | Cloudflare 에 등록 |
+| 배포 실패 `DISK_USE: 100%` | compose 가 `:latest` 를 참조해 배포마다 직전 이미지가 dangling 으로 남는데 정리하는 곳이 없었다(2026-04 에 넣은 `prune -af` 를 2026-05 에 부하 때문에 제거). 3개월간 1,140개 32.6GB 누적 | 배포 끝에 `docker image prune -f` 복원(`-a` 없이 — 태그 이미지까지 지우면 다음 배포에 다시 받아 1 OCPU 에 부하). 배포 **전** 디스크 5GB 미만이면 서버를 건드리기 전에 실패 |
+| 디스크를 비웠는데도 배포가 계속 실패 (fastapi 헬스체크 30초 초과) | 디스크 100% 때 mongodb 컨테이너가 재시작하며 네트워크 엔드포인트를 못 붙였다. `inspect` 에 네트워크 이름은 있는데 **IP 가 빈 값**이라 `mongodb` DNS 해석 실패 | `docker compose up -d --force-recreate mongodb` 로 컨테이너 재생성(데이터는 볼륨이라 보존). `docker network inspect momentum-etf_default` 의 Containers 목록에 mongodb 가 있는지로 판별 |
