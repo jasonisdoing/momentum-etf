@@ -24,7 +24,7 @@ export function KorMarketStockPageClient() {
           <span className="appHeaderMetricValue">{summary.count}개</span>
         </div>
         <div className="appHeaderMetric">
-          <span>{summary.market} 전체:</span>
+          <span>{summary.market === "KOSPI200" ? "KODEX 200 구성" : `${summary.market} 전체`}:</span>
           <span className="appHeaderMetricValue">{new Intl.NumberFormat("ko-KR").format(summary.totalCount)}개</span>
         </div>
       </div>

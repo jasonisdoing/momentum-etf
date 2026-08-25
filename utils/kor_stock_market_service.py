@@ -68,6 +68,90 @@ def is_individual_stock_item(item: dict[str, Any]) -> bool:
     return not any(keyword in name for keyword in ("ETF", "ETN"))
 
 
+def _build_row(item: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    """네이버 시총 항목 → 화면 행. 시세·시총이 없으면 호출부가 걸러야 한다."""
+    ticker = item.get("itemCode", "")
+    change_ratio = _parse_float(item.get("fluctuationsRatio"))
+    compare_code = (item.get("compareToPreviousPrice") or {}).get("code", "")
+    # code "5"=하락 → 등락률을 음수로
+    if compare_code == "5" and change_ratio is not None and change_ratio > 0:
+        change_ratio = -change_ratio
+
+    return {
+        "rank": 0,
+        "ticker": ticker,
+        "name": item.get("stockName", ""),
+        "industry": context["industry_by"].get(ticker, ""),
+        "ticker_pools": ", ".join(context["ticker_pool_map"].get(ticker, [])),
+        "ticker_pool_types": context["ticker_pool_type_map"].get(ticker, []),
+        "is_held": ticker in context["held_tickers"],
+        "current_price": _parse_number(item.get("closePrice")),
+        "change_pct": change_ratio,
+        "volume": _parse_number(item.get("accumulatedTradingVolume")),
+        # 네이버 marketValue는 이미 억 단위다.
+        "market_cap": _parse_number(item.get("marketValue")),
+    }
+
+
+def _lookup_context() -> dict[str, Any]:
+    """행에 붙일 공통 정보(종목풀·보유·업종)를 한 번만 읽는다."""
+    return {
+        "ticker_pool_map": load_ticker_pool_map(),
+        # 화면이 "이미 이 풀에 있는 종목"을 걸러내려면 이름이 아니라 풀 id 가 필요하다.
+        "ticker_pool_type_map": load_ticker_pool_type_map(),
+        "held_tickers": load_all_holding_tickers(),
+        # 업종 — 신고가·순위 화면과 같은 소스를 쓰되, 이 화면은 종목풀이 아니라 시장 전체
+        # 상위 종목을 받아 오므로 **한국 풀 전체**를 합쳐 읽는다. 풀 하나를 박아 두면 그
+        # 풀을 지울 때 화면이 깨지고, 다른 풀에만 있는 종목은 업종이 비어 버린다.
+        # 분류가 없는 종목은 빈 문자열로 두고 임의 값으로 묶지 않는다.
+        "industry_by": industry_map_for_country("kor"),
+    }
+
+
+def _load_kospi200(min_market_cap_eok: int) -> dict[str, Any]:
+    """KOSPI200 구성종목 전체. 시총 순위와 달리 **상위 N 을 자르지 않는다**.
+
+    구성종목 명단은 배치가 KODEX 200 보유종목으로 적재해 둔 것(`index_constituents`)이고,
+    시세·시총은 코스피 전체 페이지에서 찾아 붙인다. 시총 상위 200 페이지만 보면 지수에
+    들어 있는 중형주가 빠지기 때문에 명단을 다 채울 때까지 페이지를 넘긴다.
+    """
+    from utils.kor_dividend_service import load_universe
+
+    constituents = load_universe()
+    wanted = {str(item["ticker"]).strip().upper() for item in constituents}
+    context = _lookup_context()
+
+    page_size = 100
+    payload = _fetch_market_value_page("KOSPI", page=1, page_size=page_size)
+    total_count = int(payload.get("totalCount") or 0)
+    total_pages = max(1, math.ceil(total_count / page_size)) if total_count > 0 else 1
+
+    rows: list[dict[str, Any]] = []
+    found: set[str] = set()
+    for page in range(1, total_pages + 1):
+        for item in payload.get("stocks") or []:
+            ticker = str(item.get("itemCode") or "").strip().upper()
+            if ticker not in wanted or ticker in found:
+                continue
+            row = _build_row(item, context)
+            if row["market_cap"] is None or row["market_cap"] < min_market_cap_eok:
+                found.add(ticker)  # 조건 미달도 '찾음' — 다음 페이지에서 또 보지 않는다
+                continue
+            found.add(ticker)
+            rows.append(row)
+        if len(found) >= len(wanted) or page >= total_pages:
+            break
+        payload = _fetch_market_value_page("KOSPI", page=page + 1, page_size=page_size)
+
+    _apply_kor_realtime_overlay(rows)
+    _apply_kor_history_metrics(rows)
+    rows.sort(key=lambda row: -(row["market_cap"] or 0))
+    for idx, row in enumerate(rows, start=1):
+        row["rank"] = idx
+
+    return {"market": "KOSPI200", "total_count": len(wanted), "count": len(rows), "rows": rows}
+
+
 def load_kor_stock_market(
     market: str,
     limit: int,
@@ -76,11 +160,11 @@ def load_kor_stock_market(
     """네이버 API에서 시가총액 상위 종목 리스트를 가져온다.
 
     Args:
-        market: "KOSPI" 또는 "KOSDAQ"
-        limit: 가져올 종목 수 (최대 200)
+        market: "KOSPI" · "KOSDAQ" · "KOSPI200"
+        limit: 가져올 종목 수 (최대 200). KOSPI200 은 구성종목 전체라 무시한다.
         min_market_cap_jo: 최소 시가총액(조)
     """
-    if market not in ("KOSPI", "KOSDAQ"):
+    if market not in ("KOSPI", "KOSDAQ", "KOSPI200"):
         raise ValueError(f"지원하지 않는 마켓입니다: {market}")
     if limit <= 0:
         raise ValueError(f"가져올 종목 수는 1 이상이어야 합니다: {limit}")
@@ -88,22 +172,15 @@ def load_kor_stock_market(
         raise ValueError(f"최소 시가총액은 음수일 수 없습니다: {min_market_cap_jo}")
 
     min_market_cap_eok = min_market_cap_jo * 10000
+    if market == "KOSPI200":
+        return _load_kospi200(min_market_cap_eok)
 
     page_size = 100
     first_payload = _fetch_market_value_page(market, page=1, page_size=page_size)
     total_count = int(first_payload.get("totalCount") or 0)
     total_pages = max(1, math.ceil(total_count / page_size)) if total_count > 0 else 1
 
-    # 종목풀 및 보유 정보 로드
-    ticker_pool_map = load_ticker_pool_map()
-    # 화면이 "이미 이 풀에 있는 종목"을 걸러내려면 이름이 아니라 풀 id 가 필요하다.
-    ticker_pool_type_map = load_ticker_pool_type_map()
-    held_tickers = load_all_holding_tickers()
-    # 업종 — 신고가·순위 화면과 같은 소스를 쓰되, 이 화면은 종목풀이 아니라 시장 전체
-    # 상위 종목을 받아 오므로 **한국 풀 전체**를 합쳐 읽는다. 풀 하나를 박아 두면 그
-    # 풀을 지울 때 화면이 깨지고, 다른 풀에만 있는 종목은 업종이 비어 버린다.
-    # 분류가 없는 종목은 빈 문자열로 두고 임의 값으로 묶지 않는다.
-    industry_by = industry_map_for_country("kor")
+    context = _lookup_context()
 
     target_count = min(limit, 200)
     rows: list[dict[str, Any]] = []
@@ -114,37 +191,10 @@ def load_kor_stock_market(
             # 개별주만 — ETF·ETN 제외(시총 순위와 같은 기준).
             if not is_individual_stock_item(item):
                 continue
-
-            name = item.get("stockName", "")
-            ticker = item.get("itemCode", "")
-            close_price = _parse_number(item.get("closePrice"))
-            change_ratio = _parse_float(item.get("fluctuationsRatio"))
-            volume = _parse_number(item.get("accumulatedTradingVolume"))
-            # 네이버 marketValue는 이미 억 단위다.
-            market_cap_eok = _parse_number(item.get("marketValue"))
-            if market_cap_eok is None or market_cap_eok < min_market_cap_eok:
+            row = _build_row(item, context)
+            if row["market_cap"] is None or row["market_cap"] < min_market_cap_eok:
                 continue
-
-            compare_code = (item.get("compareToPreviousPrice") or {}).get("code", "")
-            # code "5"=하락 → 등락률을 음수로
-            if compare_code == "5" and change_ratio is not None and change_ratio > 0:
-                change_ratio = -change_ratio
-
-            rows.append(
-                {
-                    "rank": 0,
-                    "ticker": ticker,
-                    "name": name,
-                    "industry": industry_by.get(ticker, ""),
-                    "ticker_pools": ", ".join(ticker_pool_map.get(ticker, [])),
-                    "ticker_pool_types": ticker_pool_type_map.get(ticker, []),
-                    "is_held": ticker in held_tickers,
-                    "current_price": close_price,
-                    "change_pct": change_ratio,
-                    "volume": volume,
-                    "market_cap": market_cap_eok,
-                }
-            )
+            rows.append(row)
             if len(rows) >= target_count:
                 break
         if len(rows) >= target_count:

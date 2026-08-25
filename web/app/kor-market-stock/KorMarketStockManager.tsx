@@ -76,7 +76,15 @@ function formatVolume(value: number | null): string {
 }
 
 
-const MARKET_OPTIONS = ["KOSPI", "KOSDAQ"] as const;
+// KOSPI200 은 시총 순위가 아니라 **지수 구성종목 전체**라 상위 N 을 고르지 않는다.
+const MARKET_OPTIONS = ["KOSPI", "KOSDAQ", "KOSPI200"] as const;
+const MARKET_LABELS: Record<(typeof MARKET_OPTIONS)[number], string> = {
+  KOSPI: "코스피",
+  KOSDAQ: "코스닥",
+  KOSPI200: "KODEX 200(069500)",
+};
+/** 상위 N 을 고르는 마켓인지 — KOSPI200 은 구성종목이 정해져 있어 자를 이유가 없다. */
+const usesTopLimit = (market: (typeof MARKET_OPTIONS)[number]): boolean => market !== "KOSPI200";
 const KOSPI_LIMIT_OPTIONS = [200, 150, 100, 50] as const;
 const KOSDAQ_LIMIT_OPTIONS = [150, 100, 50] as const;
 
@@ -145,15 +153,15 @@ export function KorMarketStockManager({
   }, [market, limit, minMarketCapJo, load]);
 
   const limitOptions = useMemo<number[]>(
-    () => (market === "KOSPI" ? [...KOSPI_LIMIT_OPTIONS] : [...KOSDAQ_LIMIT_OPTIONS]),
+    () => (market === "KOSDAQ" ? [...KOSDAQ_LIMIT_OPTIONS] : [...KOSPI_LIMIT_OPTIONS]),
     [market],
   );
 
   useEffect(() => {
-    if (!limitOptions.includes(limit)) {
+    if (usesTopLimit(market) && !limitOptions.includes(limit)) {
       setLimit(limitOptions[0]);
     }
-  }, [limit, limitOptions]);
+  }, [limit, limitOptions, market]);
 
   useEffect(() => {
     onSummaryChange?.({ market, count: rows.length, totalCount });
@@ -446,29 +454,32 @@ export function KorMarketStockManager({
                         className={market === opt ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
                         onClick={() => {
                           setMarket(opt);
-                          setLimit(opt === "KOSPI" ? 200 : 150);
+                          setLimit(opt === "KOSDAQ" ? 150 : 200);
                         }}
                       >
-                        {opt === "KOSPI" ? "코스피" : "코스닥"}
+                        {MARKET_LABELS[opt]}
                       </button>
                     ))}
                   </div>
                 </label>
 
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">시가총액 상위</span>
-                  <select
-                    className="form-select"
-                    value={limit}
-                    onChange={(e) => setLimit(Number(e.target.value))}
-                  >
-                    {limitOptions.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {market} {opt}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {/* KOSPI200 은 구성종목 전체를 보여주므로 상위 N 셀렉트를 두지 않는다. */}
+                {usesTopLimit(market) ? (
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">시가총액 상위</span>
+                    <select
+                      className="form-select"
+                      value={limit}
+                      onChange={(e) => setLimit(Number(e.target.value))}
+                    >
+                      {limitOptions.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {market} {opt}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
 
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">최소 시가총액(조)</span>
