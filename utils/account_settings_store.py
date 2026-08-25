@@ -43,13 +43,11 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "mix_cash_pct",
     "broker_api",
     "URL",
+    # 보유종목 알림 — On/Off 는 계좌별, 손절 기준(%)도 계좌별.
+    # 이평선 일수는 종목이 속한 종목풀 설정에서 오므로 계좌에 두지 않는다.
     "ma_alarm_enabled",
-    "ma_short_days",
-    "ma_long_days",
-    "ma_alarm_icon",
     "stoploss_alarm_enabled",
     "stoploss_threshold_pct",
-    "stoploss_alarm_icon",
 )
 
 # 합성 전략 배분(%) — 모멘텀·신고가·현금. 셋을 항상 함께 저장하고 합은 100 이어야 한다.
@@ -251,14 +249,6 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             cleaned[key] = str(raw or "").strip()
         elif key == "ma_alarm_enabled":
             cleaned[key] = bool(raw)
-        elif key in ("ma_short_days", "ma_long_days"):
-            try:
-                days = int(raw)
-            except (TypeError, ValueError) as exc:
-                raise AccountSettingsStoreError(f"'{account_id}' 의 {key} 는 정수여야 합니다: {raw}") from exc
-            if days < 2:
-                raise AccountSettingsStoreError(f"'{account_id}' 의 {key} 는 2 이상이어야 합니다: {days}")
-            cleaned[key] = days
         elif key == "stoploss_alarm_enabled":
             cleaned[key] = bool(raw)
         elif key == "stoploss_threshold_pct":
@@ -273,12 +263,6 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
                     f"'{account_id}' 의 stoploss_threshold_pct 는 음수여야 합니다(예: -7): {pct}"
                 )
             cleaned[key] = pct
-        elif key in ("ma_alarm_icon", "stoploss_alarm_icon"):
-            # 화면 배지용 아이콘(이모지). 빈 문자열 = 배지 미표시(명시적 미설정).
-            icon = str(raw or "").strip()
-            if len(icon) > 8:
-                raise AccountSettingsStoreError(f"'{account_id}' 의 {key} 는 8자 이하여야 합니다: {icon}")
-            cleaned[key] = icon
     # 합성 배분은 셋이 한 묶음이다 — 하나만 바꾸면 나머지와 합이 어긋난 채로 저장된다.
     if any(key in cleaned for key in MIX_WEIGHT_KEYS):
         missing = [key for key in MIX_WEIGHT_KEYS if key not in cleaned]
