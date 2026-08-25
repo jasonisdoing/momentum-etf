@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any
 
 COLLECTION = "index_constituents"
-SUPPORTED_INDICES = {"SP500", "NDX100", "ASX200"}
+SUPPORTED_INDICES = {"SP500", "NDX100", "ASX200", "KOSPI200"}
 
 
 def _normalize_index(index: str) -> str:
@@ -37,8 +37,8 @@ def load_index_constituents(index: str) -> list[dict[str, Any]]:
     if not doc:
         raise LookupError(
             f"{key} 구성종목이 DB 에 없습니다 (컬렉션 {COLLECTION}).\n"
-            "미국은 scripts/update_us_market_stocks.py, 호주는 scripts/update_aus_market_stocks.py "
-            "를 실행해 저장하세요."
+            "미국은 scripts/update_us_market_stocks.py, 호주는 scripts/update_aus_market_stocks.py, "
+            "한국은 scripts/update_kor_dividend_stocks.py 를 실행해 저장하세요."
         )
     return list(doc.get("tickers") or [])
 
