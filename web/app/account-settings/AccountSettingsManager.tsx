@@ -830,11 +830,42 @@ export function AccountSettingsManager() {
     ...extra,
   });
 
+  /** 숫자 편집 컬럼 — 초안은 문자열로 들지만 그리드에는 숫자로 넘긴다.
+   *
+   * 문자열인 채로 두면 AG Grid 가 셀 타입을 `text` 로 추론해 `agNumberCellEditor` 가
+   * 호환되지 않는 것으로 판정돼 **편집 자체가 되지 않는다**. valueGetter/valueSetter 로
+   * 그리드 쪽만 숫자로 바꿔 준다. (`field` 대신 `colId` 를 쓰므로 onCellValueChanged 는
+   * 이 컬럼을 건너뛴다 — 저장은 valueSetter 가 이미 했다.)
+   */
+  const numberCol = (
+    field: "order",
+    headerName: string,
+    width: number,
+  ): ColDef<AccountGridRow> => ({
+    colId: field,
+    headerName,
+    width,
+    editable: true,
+    cellDataType: "number",
+    type: "numericColumn",
+    valueGetter: (params) => {
+      const raw = params.data?.[field];
+      return raw === "" || raw === undefined ? null : Number(raw);
+    },
+    valueSetter: (params) => {
+      if (!params.data) return false;
+      const next = params.newValue === null || params.newValue === "" ? "" : String(Math.trunc(Number(params.newValue)));
+      if (next === params.data[field]) return false;
+      updateDraft(params.data.account_id, { [field]: next });
+      return true;
+    },
+  });
+
   const columnDefs: ColDef<AccountGridRow>[] = [
     { field: "account_id", headerName: "ID", width: 130, pinned: "left" },
     { field: "name", headerName: "이름", width: 150, editable: true },
     { field: "icon", headerName: "아이콘", width: 62, editable: true },
-    { field: "order", headerName: "순서", width: 64, editable: true, cellEditor: "agNumberCellEditor", type: "numericColumn" },
+    numberCol("order", "순서", 64),
     selectCol("country_code", "국가", 82, () => [...COUNTRY_OPTIONS]),
     selectCol("currency", "통화", 70, () => [...CURRENCY_OPTIONS]),
     {
