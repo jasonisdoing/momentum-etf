@@ -53,7 +53,7 @@ def get_badges(account_id: str, _: None = Depends(require_internal_token)) -> di
 
 @router.post("/send")
 def post_send(_: None = Depends(require_internal_token)) -> dict:
-    """지금 수동 발송(켜진 계좌·종류 중 조건 충족 종목만). 화면 '슬랙 테스트' 버튼용."""
+    """지금 수동 발송(켜진 계좌·종류 중 조건 충족 종목만). 계좌 설정의 '슬랙 알람 테스트' 버튼용."""
     from utils.holdings_alarm_service import send_holdings_alarms
 
     return send_holdings_alarms(manual=True)

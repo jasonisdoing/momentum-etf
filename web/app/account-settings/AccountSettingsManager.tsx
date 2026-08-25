@@ -877,6 +877,23 @@ export function AccountSettingsManager() {
   const [stoplossPctOptions, setStoplossPctOptions] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
+  const [sendingAlarm, setSendingAlarm] = useState(false);
+
+  /** 지금 조건을 만족하는 종목이 있으면 슬랙으로 보낸다 — 저장된 설정 그대로 확인용. */
+  const sendAlarmTest = async () => {
+    setSendingAlarm(true);
+    try {
+      const resp = await fetch("/api/alarms/send", { method: "POST" });
+      const payload = (await resp.json()) as { sent?: boolean; reason?: string; accounts?: number; error?: string };
+      if (!resp.ok || payload.error) throw new Error(payload.error ?? "발송에 실패했습니다.");
+      if (payload.sent) toast.success(`슬랙 발송 완료 (${payload.accounts ?? 0}개 계좌)`);
+      else toast.error(payload.reason ?? "발송 대상이 없습니다.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "발송에 실패했습니다.");
+    } finally {
+      setSendingAlarm(false);
+    }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -905,7 +922,18 @@ export function AccountSettingsManager() {
       <div className="card-body">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
           <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 800, margin: 0 }}>계좌 설정</h2>
-          <button type="button" className="btn btn-sm btn-primary" onClick={() => setAddOpen(true)}>+ 계좌 추가</button>
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              className="btn btn-sm btn-dark"
+              disabled={sendingAlarm}
+              title="저장된 알림 설정 그대로 지금 판정해, 조건을 만족하는 종목이 있으면 슬랙으로 보냅니다."
+              onClick={() => void sendAlarmTest()}
+            >
+              {sendingAlarm ? "발송 중…" : "슬랙 알람 테스트"}
+            </button>
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => setAddOpen(true)}>+ 계좌 추가</button>
+          </span>
         </div>
         <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginBottom: 12 }}>
           계좌 메타(이름/순서/벤치마크 등)는 DB(account_settings)가 단일 소스입니다. 삭제는 보유종목이 없는 계좌만 가능합니다.

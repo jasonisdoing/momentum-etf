@@ -42,7 +42,6 @@ export function AlarmsClient() {
   const [view, setView] = useState<AlarmView | null>(null);
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
-  const [sending, setSending] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => setMounted(true), []);
@@ -87,21 +86,6 @@ export function AlarmsClient() {
       await load();
     } finally {
       setBusy(null);
-    }
-  };
-
-  const sendManual = async () => {
-    setSending(true);
-    try {
-      const resp = await fetch("/api/alarms/send", { method: "POST" });
-      const payload = (await resp.json()) as { sent?: boolean; reason?: string; accounts?: number; error?: string };
-      if (!resp.ok || payload.error) throw new Error(payload.error ?? "발송에 실패했습니다.");
-      if (payload.sent) toast.success(`슬랙 발송 완료 (${payload.accounts ?? 0}개 계좌)`);
-      else toast.error(payload.reason ?? "발송 대상이 없습니다.");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "발송에 실패했습니다.");
-    } finally {
-      setSending(false);
     }
   };
 
@@ -193,12 +177,6 @@ export function AlarmsClient() {
   return (
     <PageFrame title="알람">
       <div className="appPageStack" style={{ maxWidth: 640, display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button type="button" className="btn btn-sm btn-dark" disabled={sending} onClick={() => void sendManual()}>
-            {sending ? "발송 중…" : "슬랙 테스트"}
-          </button>
-        </div>
-
         {/* 이동선 이탈 */}
         <div className="card appCard">
           <div className="card-body">
