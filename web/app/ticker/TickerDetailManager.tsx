@@ -775,11 +775,14 @@ export function TickerDetailManager({
     return map;
   }, [chartRows]);
 
+  // 제목 옆 현재가·등락률 — **항상 전일 대비**(일봉 마지막)다.
+  // 차트 기간(일/주/월)을 따라가면 월봉을 볼 때 한 달 등락률이 제목에 떠서, 옆 ETF정보의
+  // 전일 대비와 값이 어긋난다. 제목은 종목의 지금 상태를 알리는 자리라 기간과 무관해야 한다.
   const lastInfo = useMemo<CrosshairInfo | null>(() => {
-    if (chartRows.length === 0) return null;
-    const last = chartRows[chartRows.length - 1];
+    if (rows.length === 0) return null;
+    const last = rows[rows.length - 1];
     return { open: last.open, high: last.high, low: last.low, close: last.close, change_pct: last.change_pct };
-  }, [chartRows]);
+  }, [rows]);
 
   useEffect(() => {
     if (!chartContainerRef.current || chartRows.length === 0) {
