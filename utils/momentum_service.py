@@ -885,8 +885,6 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
     # 차순위 후보 — 선정에 못 든 종목 중 점수 상위 N개 (화면에서 흐리게 붙여 보여준다).
     # 선정에서 빠진 자리를 메울 후보라 업종 상한은 적용하지 않는다.
     selected_tickers = {item["ticker"] for item in selected}
-    # 차순위 후보는 종목 수의 3배 — 선정 경계 아래 어디까지 올라와 있는지 넉넉히 본다.
-    reserve = [item for item in scored if item["ticker"] not in selected_tickers][: top_n * RESERVE_MULTIPLIER]
 
     # 연속 편입 주 — 직전 최대 11주의 판정일마다 같은 규칙으로 선정을 재계산해,
     # 현재 종목이 연속으로 상위 N 에 들어 있던 횟수(+이번 주)를 센다. 끊기면 중단.
@@ -1183,6 +1181,9 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
         [*current_top, *[c for c in current_scored if c["ticker"] not in next_expected]], start=1
     ):
         expected_rank_by_ticker[item["ticker"]] = expected_rank
+    # 차순위 후보 — **현재 이격 기준** 선정 제외 상위 N. 주중에 새로 올라온 종목이
+    # 보이도록 판정일이 아니라 지금 순위로 뽑는다(판정일 값은 컬럼에 재계산으로 표시).
+    reserve = [item for item in current_scored if item["ticker"] not in selected_tickers][: top_n * RESERVE_MULTIPLIER]
     # 현재 표(선정+차순위)에 없는 예상 종목 — 하단에 별도 행으로 붙인다.
     table_tickers = {item["ticker"] for item in selected + reserve}
     extra_expected = [item for item in current_top if item["ticker"] not in table_tickers]
@@ -1290,9 +1291,10 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
         for rank, item in enumerate(selected, start=1)
     ]
 
-    # 선정 밖(차순위 + 예상 전용) — **지금 이격** 내림차순으로 다시 세운다. 이 구간의
-    # 관심사는 '다음 교체에 무엇이 올라오는가' 라서 판정일 순서로는 답이 안 나온다.
-    # 이격을 못 구한 종목은 임의 값으로 끼워 넣지 않고 맨 뒤로 보낸다.
+    # 선정 밖(차순위 + 예상 전용) — 구성원도 정렬도 **지금 이격** 기준이다. 이 구간의
+    # 관심사는 '다음 교체에 무엇이 올라오는가' 라서, 판정일 기준으로 뽑으면 주중에 새로
+    # 치고 올라온 종목(판정일엔 순위권 밖)이 정작 필요할 때 안 보인다. 판정일 이격은
+    # 컬럼(판정일-단기/장기)에 재계산으로 채운다.
     other_rows = [
         {
             "rank": None,
@@ -1309,9 +1311,10 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             "industry": industry_map_by_ticker.get(item["ticker"], ""),
             "currency": currency,
             **price_info(item["ticker"]),
-            "signal_short_pct": round(item["short_disparity_pct"], 1),
-            "signal_long_pct": round(item["momentum_score"], 1),
-            **current_disparity(item["ticker"]),
+            # 판정일 기준 이격 — 현재 기준 후보라 판정일 값은 같은 이평선으로 재계산한다.
+            **signal_disparity(item["ticker"]),
+            "current_short_pct": round(item["short_disparity_pct"], 1),
+            "current_long_pct": round(item["momentum_score"], 1),
             **exit_flags(item["ticker"]),
         }
         for item in reserve
