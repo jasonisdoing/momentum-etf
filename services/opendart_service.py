@@ -1,7 +1,7 @@
 """OpenDART(전자공시) API 공용 서비스 — 상장사 확정 재무 데이터의 공식 소스.
 
-find_shareholder_yield_in_kor.py / find_undervalued_company_in_kospi200.py 가
-yfinance 대신 쓰는 확정 재무 소스다. 컨센서스(예상치)는 DART 에 없으므로 네이버를 유지한다.
+한국 배당주 배치(`utils/kor_dividend_service`)가 yfinance 대신 쓰는 확정 재무 소스다.
+컨센서스(예상치)는 DART 에 없으므로 네이버를 함께 쓴다.
 
 필요 환경변수: DART_API_KEY (.env — https://opendart.fss.or.kr 에서 무료 발급)
 호출 한도: 키당 일 20,000건 — 200종목 × 연 3~4콜 수준이라 여유가 크다.
