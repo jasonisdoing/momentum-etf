@@ -154,6 +154,9 @@ type BacktestWeekRow = {
   strategy_pct: number | null;
   benchmark_pct: number | null;
   holdings_count: number;
+  holdings_start?: number;
+  /** 주중 이탈·손절 매도 — "종목명(코드) · 사유" 형식. */
+  exited?: string[];
   turnover_pct: number | null;
   added: string[];
   removed: string[];
@@ -912,9 +915,16 @@ export function MomentumClient() {
       {
         headerName: "종목 수",
         field: "holdings_count",
-        headerTooltip: "다음 교체 직전까지 들고 가는 종목 수 (주중 매도분 제외)",
-        width: 74,
+        headerTooltip: "교체 직후 → 주말 종목 수. 화살표가 있으면 주중 이탈·손절로 줄어든 것(이탈 컬럼 참고).",
+        width: 84,
         type: "numericColumn",
+        cellDataType: "text",
+        valueFormatter: (p) => {
+          const start = p.data?.holdings_start;
+          const end = p.value as number | null;
+          if (end == null) return "-";
+          return start != null && start !== end ? `${start} → ${end}` : String(end);
+        },
       },
       {
         headerName: "교체율(%)",
@@ -945,6 +955,18 @@ export function MomentumClient() {
         cellClass: "momentumWrapCell",
         valueFormatter: (p) => (p.value?.length ? p.value.join(", ") : "-"),
         cellStyle: () => ({ color: "var(--down-color, #2f6fd0)" }),
+      },
+      {
+        headerName: "이탈·손절",
+        field: "exited",
+        headerTooltip: "주중에 자격 상실·손절선으로 매도된 종목 (교체 편출과 별개, 판 슬롯은 다음 교체까지 현금)",
+        flex: 1,
+        minWidth: 200,
+        wrapText: true,
+        autoHeight: true,
+        cellClass: "momentumWrapCell",
+        valueFormatter: (p) => (p.value?.length ? p.value.join(", ") : "-"),
+        cellStyle: () => ({ color: "var(--down-color, #2f6fd0)", opacity: 0.8 }),
       },
     );
     columns.push(excessColumn<BacktestWeekRow>());
