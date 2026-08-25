@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { formatKstDateTime } from "@/lib/datetime";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { ensureAsxPrefix } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
+import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 
 type Benchmark = { ticker?: string; name?: string };
 type MarketIndexOption = { ticker: string; name: string };
@@ -25,6 +26,11 @@ type AccountEntry = {
   /** 증권사 API 연동 — 잔고 수동 불러오기·배치 동기화가 이 값으로 동작한다. */
   broker_api?: { provider: string; account_no: string } | null;
   URL?: string;
+  /** 보유종목 알림 — 이동선 이탈은 On/Off 만(기준은 종목의 종목풀 이평선). */
+  ma_alarm_enabled?: boolean;
+  /** 보유종목 알림 — 손절은 계좌마다 기준(%)이 다르다. */
+  stoploss_alarm_enabled?: boolean;
+  stoploss_threshold_pct?: number | null;
   updated_at?: string | null;
   save_method?: string | null;
 };
@@ -53,6 +59,7 @@ type ApiResponse = {
   accounts?: AccountEntry[];
   market_indices?: MarketIndexOption[];
   pool_options?: PoolOption[];
+  stoploss_pct_options?: number[];
   error?: string;
 };
 
@@ -75,12 +82,14 @@ function AccountRow({
   account,
   marketIndices,
   poolOptions,
+  stoplossPctOptions,
   onSaved,
   onDeleted,
 }: {
   account: AccountEntry;
   marketIndices: MarketIndexOption[];
   poolOptions: PoolOption[];
+  stoplossPctOptions: number[];
   onSaved: () => void;
   onDeleted: () => void;
 }) {
@@ -211,6 +220,13 @@ function AccountRow({
   const [benchTicker, setBenchTicker] = useState(account.benchmark?.ticker ?? "");
   const [benchName, setBenchName] = useState(account.benchmark?.name ?? "");
   const [benchEditing, setBenchEditing] = useState(!(account.benchmark?.ticker && account.benchmark?.name));
+  // 보유종목 알림 — 이동선 이탈은 On/Off 만(판정 기준은 종목이 속한 종목풀의 이평선).
+  const [maAlarm, setMaAlarm] = useState(Boolean(account.ma_alarm_enabled));
+  const [stoplossAlarm, setStoplossAlarm] = useState(Boolean(account.stoploss_alarm_enabled));
+  // 미설정이면 빈 문자열 — 임의 기본값을 넣지 않고 사용자가 고르게 한다.
+  const [stoplossPct, setStoplossPct] = useState(
+    typeof account.stoploss_threshold_pct === "number" ? String(account.stoploss_threshold_pct) : "",
+  );
   const [updatedAt, setUpdatedAt] = useState<string | null | undefined>(account.updated_at);
   const [saving, setSaving] = useState(false);
   const [resolving, setResolving] = useState(false);
@@ -257,37 +273,76 @@ function AccountRow({
     });
   };
 
+  // 저장할 값 한 벌 — 저장과 「저장하지 않은 변경」 판정이 같은 것을 본다.
+  const draft = useMemo(() => {
+    // 주 통화는 반드시 현금 잔액에 포함(백엔드 검증과 동일). 순서 보존 + 중복 제거.
+    const finalCashCurrencies = cashCurrencies.includes(baseCurrency)
+      ? cashCurrencies
+      : [baseCurrency, ...cashCurrencies];
+    const values: Record<string, unknown> = {
+      name: name.trim(),
+      icon: icon.trim(),
+      order: Math.trunc(Number(order)),
+      country_code: countryCode,
+      currency: baseCurrency,
+      cash_currencies: finalCashCurrencies,
+      market_regime_index: {
+        ticker: regimeTicker,
+        name: marketIndices.find((item) => item.ticker === regimeTicker)?.name ?? "",
+      },
+      // 합성 전략 종목풀 — 없음이면 null 로 저장한다(그 계좌는 합성 화면에 안 뜬다).
+      mix_pool: mixPool || null,
+      // 증권사 API 연동 — provider·계좌 둘 다 있어야 저장, 아니면 해제(null).
+      broker_api:
+        brokerProvider && brokerAccountNo ? { provider: brokerProvider, account_no: brokerAccountNo } : null,
+      URL: url.trim(),
+      ma_alarm_enabled: maAlarm,
+      stoploss_alarm_enabled: stoplossAlarm,
+    };
+    // 벤치마크는 선택 — 둘 다 채워졌을 때만 저장(빈 값이면 백엔드 검증에 걸리므로 생략).
+    if (benchTicker.trim() && benchName.trim()) {
+      values.benchmark = { ticker: benchTicker.trim(), name: benchName.trim() };
+    }
+    // 손절 기준은 고른 값이 있을 때만 보낸다(미설정을 임의 값으로 채우지 않는다).
+    if (stoplossPct) {
+      values.stoploss_threshold_pct = Number(stoplossPct);
+    }
+    return values;
+  }, [
+    baseCurrency,
+    benchName,
+    benchTicker,
+    brokerAccountNo,
+    brokerProvider,
+    cashCurrencies,
+    countryCode,
+    icon,
+    maAlarm,
+    marketIndices,
+    mixPool,
+    name,
+    order,
+    regimeTicker,
+    stoplossAlarm,
+    stoplossPct,
+    url,
+  ]);
+
+  // 마지막으로 저장된 값의 스냅샷. 첫 렌더에서 현재 초안으로 채워 「변경 없음」에서 시작한다.
+  const draftJson = JSON.stringify(draft);
+  const [savedDraft, setSavedDraft] = useState<string | null>(null);
+  useEffect(() => {
+    if (savedDraft === null) setSavedDraft(draftJson);
+  }, [draftJson, savedDraft]);
+  const dirty = savedDraft !== null && draftJson !== savedDraft;
+
+  // 손절 알림을 켰으면 기준(%)이 반드시 있어야 한다 — 없으면 판정 기준이 없다.
+  const stoplossMissing = stoplossAlarm && !stoplossPct;
+
   const save = async () => {
     try {
       setSaving(true);
-      // 주 통화는 반드시 현금 잔액에 포함(백엔드 검증과 동일). 순서 보존 + 중복 제거.
-      const finalCashCurrencies = cashCurrencies.includes(baseCurrency)
-        ? cashCurrencies
-        : [baseCurrency, ...cashCurrencies];
-      const values: Record<string, unknown> = {
-        name: name.trim(),
-        icon: icon.trim(),
-        order: Math.trunc(Number(order)),
-        country_code: countryCode,
-        currency: baseCurrency,
-        cash_currencies: finalCashCurrencies,
-        market_regime_index: {
-          ticker: regimeTicker,
-          name: marketIndices.find((item) => item.ticker === regimeTicker)?.name ?? "",
-        },
-        // 합성 전략 종목풀 — 없음이면 null 로 저장한다(그 계좌는 합성 화면에 안 뜬다).
-        mix_pool: mixPool || null,
-        // 증권사 API 연동 — provider·계좌 둘 다 있어야 저장, 아니면 해제(null).
-        broker_api:
-          brokerProvider && brokerAccountNo
-            ? { provider: brokerProvider, account_no: brokerAccountNo }
-            : null,
-        URL: url.trim(),
-      };
-      // 벤치마크는 선택 — 둘 다 채워졌을 때만 저장(빈 값이면 백엔드 검증에 걸리므로 생략).
-      if (benchTicker.trim() && benchName.trim()) {
-        values.benchmark = { ticker: benchTicker.trim(), name: benchName.trim() };
-      }
+      const values = draft;
       const resp = await fetch("/api/account-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -296,6 +351,7 @@ function AccountRow({
       const data = (await resp.json()) as { updated_at?: string | null; error?: string; detail?: string };
       if (!resp.ok || data.error) throw new Error(data.error ?? data.detail ?? "저장에 실패했습니다.");
       setUpdatedAt(data.updated_at);
+      setSavedDraft(draftJson);
       toast.success(`[계좌] ${account.account_id} 저장 완료`);
       onSaved();
     } catch (err) {
@@ -314,13 +370,15 @@ function AccountRow({
           {icon} {name} <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>({account.account_id})</span>
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <UnsavedChangesBadge show={dirty} />
           <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
             마지막 저장: {updatedAt ? formatKstDateTime(updatedAt) : "저장 이력 없음"}
           </span>
           <button
             type="button"
             className="btn btn-sm btn-dark"
-            disabled={saving || !name.trim()}
+            disabled={saving || !name.trim() || stoplossMissing}
+            title={stoplossMissing ? "손절 알림을 켰으면 기준(%)을 골라야 합니다." : undefined}
             onClick={() => void save()}
           >
             {saving ? "저장 중…" : "저장"}
@@ -644,11 +702,76 @@ function AccountRow({
         </div>
       ) : null}
 
-      <div style={{ ...rowStyle, marginBottom: 0 }}>
+      <div style={rowStyle}>
         <span style={{ ...labelStyle, width: 60 }}>URL</span>
         <input style={{ ...inputStyle, flex: 1, minWidth: 220 }} placeholder="증권사 접속 URL (선택)" value={url} onChange={(e) => setUrl(e.target.value)} />
       </div>
+
+      <div style={{ ...rowStyle, marginBottom: 0 }}>
+        <span style={{ ...labelStyle, width: 60 }}>알림</span>
+        <AlarmSwitch
+          label="📉 이동선 이탈"
+          title="보유 종목의 종가가 그 종목이 속한 종목풀의 단기·장기 이평선 중 하나라도 아래면 알립니다."
+          checked={maAlarm}
+          onChange={setMaAlarm}
+        />
+        <AlarmSwitch
+          label="🛑 손절"
+          title="보유 종목의 수익률이 아래 기준 이하면 알립니다."
+          checked={stoplossAlarm}
+          onChange={setStoplossAlarm}
+        />
+        {/* 손절은 계좌마다 기준이 다르다 — 켰을 때만 고르게 한다. */}
+        {stoplossAlarm ? (
+          <select
+            className="form-select form-select-sm"
+            style={{ width: 130, borderColor: stoplossMissing ? "var(--up-color, #d64545)" : undefined }}
+            value={stoplossPct}
+            onChange={(e) => setStoplossPct(e.target.value)}
+          >
+            <option value="">기준 선택</option>
+            {stoplossPctOptions.map((pct) => (
+              <option key={pct} value={String(pct)}>{`${pct}% 이하`}</option>
+            ))}
+            {/* 선택지가 바뀌어 저장값이 목록 밖이면 숨기지 않고 그대로 보여줘 사용자가 바꾸게 한다 */}
+            {stoplossPct && !stoplossPctOptions.some((pct) => String(pct) === stoplossPct) ? (
+              <option value={stoplossPct}>{`${stoplossPct}% (선택지 밖)`}</option>
+            ) : null}
+          </select>
+        ) : null}
+      </div>
     </div>
+  );
+}
+
+/** 알림 On/Off 스위치 — 계좌 설정 안에서만 쓰는 작은 공용 조각. */
+function AlarmSwitch({
+  label,
+  title,
+  checked,
+  onChange,
+}: {
+  label: string;
+  title: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <label
+      className="form-check form-switch"
+      style={{ display: "inline-flex", alignItems: "center", gap: 6, paddingLeft: "2.6em", marginBottom: 0, cursor: "pointer" }}
+      title={title}
+    >
+      <input
+        className="form-check-input"
+        type="checkbox"
+        role="switch"
+        style={{ width: "2.2em", height: "1.2em", marginTop: 0 }}
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span style={{ fontSize: "var(--fs-sm)", fontWeight: 600 }}>{label}</span>
+    </label>
   );
 }
 
@@ -751,6 +874,7 @@ export function AccountSettingsManager() {
   const [accounts, setAccounts] = useState<AccountEntry[]>([]);
   const [marketIndices, setMarketIndices] = useState<MarketIndexOption[]>([]);
   const [poolOptions, setPoolOptions] = useState<PoolOption[]>([]);
+  const [stoplossPctOptions, setStoplossPctOptions] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
 
@@ -763,6 +887,7 @@ export function AccountSettingsManager() {
       setAccounts(accData.accounts ?? []);
       setMarketIndices(accData.market_indices ?? []);
       setPoolOptions(accData.pool_options ?? []);
+      setStoplossPctOptions(accData.stoploss_pct_options ?? []);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "계좌 설정을 불러오지 못했습니다.");
     } finally {
@@ -796,6 +921,7 @@ export function AccountSettingsManager() {
               account={a}
               marketIndices={marketIndices}
               poolOptions={poolOptions}
+              stoplossPctOptions={stoplossPctOptions}
               onSaved={() => {}}
               onDeleted={() => void load()}
             />
