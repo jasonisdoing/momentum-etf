@@ -6,6 +6,7 @@ import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
 import type {
   CellClassParams,
   ColDef,
+  ColGroupDef,
   GridOptions,
   RowClassParams,
   Theme,
@@ -16,7 +17,8 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 
 type AppAgGridProps<TData> = {
   rowData: TData[];
-  columnDefs: ColDef<TData>[];
+  /** AG Grid 는 평범한 컬럼과 컬럼 그룹을 섞어 받는다(2단 헤더). */
+  columnDefs: (ColDef<TData> | ColGroupDef<TData>)[];
   loading?: boolean;
   minHeight?: string | number;
   height?: string | number;

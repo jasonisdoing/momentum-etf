@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CellStyle, ColDef } from "ag-grid-community";
+import type { CellStyle, ColDef, ColGroupDef } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
@@ -35,8 +35,11 @@ type DividendRow = {
   returns: Record<string, number | null>;
   /** 연도 → 배당률(%). 지난 해는 연말 종가, 올해는 현재가 기준. */
   dividend_yield_by_year: Record<string, number | null>;
+  /** 연도 → 자사주률(%). 그 해 자사주 순매입 ÷ 그 해 시가총액. */
+  buyback_yield_by_year: Record<string, number | null>;
+  /** 연도 → 총환원율(%) = 배당률 + 자사주률. 같은 해, 같은 분모라 기준이 섞이지 않는다. */
+  shareholder_yield_by_year: Record<string, number | null>;
   dividend_yield: number | null;
-  dividend_yield_is_forward: boolean;
   buyback_yield: number | null;
   shareholder_yield: number | null;
   payout_ratio_gross: number | null;
@@ -71,9 +74,15 @@ const NUMERIC_FILTERS: readonly {
   step: number;
   title: string;
 }[] = [
-  { key: "minDividendYield", label: "배당률 ≥", placeholder: "4", step: 0.1, title: "지금 사면 받을 배당수익률(%) 하한" },
+  {
+    key: "minDividendYield",
+    label: "2026(예상) 배당률 ≥",
+    placeholder: "4",
+    step: 0.1,
+    title: "컨센서스 연도 배당률(%) 하한 — 표의 2026(예상) 칸과 같은 값. 그 칸이 빈 종목은 조건을 걸면 빠집니다.",
+  },
   { key: "minShareholderYield", label: "총환원율 ≥", placeholder: "0", step: 0.1, title: "배당률 + 자사주률(%) 하한" },
-  { key: "minPayoutRatio", label: "환원율 ≥", placeholder: "30", step: 1, title: "(배당지급 + 자사주취득) ÷ 순이익(%) 하한" },
+  { key: "minPayoutRatio", label: "이익대비 환원 ≥", placeholder: "30", step: 1, title: "(배당지급 + 자사주취득) ÷ 당기순이익(%) 하한" },
   { key: "maxPer", label: "PER ≤", placeholder: "20", step: 0.5, title: "PER 상한 (컨센서스 연도 기준)" },
   { key: "maxPbr", label: "PBR ≤", placeholder: "1", step: 0.1, title: "PBR 상한 (컨센서스 연도 기준)" },
 ];
@@ -100,6 +109,33 @@ const formatEok = (value: number): string => `${Math.round(value / 1e8).toLocale
 
 /** 툴팁용 — 주당배당금은 원 단위 그대로. */
 const formatWon = (value: number): string => `${Math.round(value).toLocaleString("ko-KR")}원`;
+
+/**
+ * 표를 읽을 때 알아야 하는 것 — 숫자만 봐서는 **오해하는** 항목만 남긴다.
+ * (컬럼별 정의는 각 헤더의 툴팁에 있으므로 여기서 되풀이하지 않는다.)
+ */
+const TABLE_NOTES: readonly { title: string; body: string }[] = [
+  {
+    title: "배당률 분모는 해마다 다름",
+    body: "지난 해는 그 해 연말 종가, 올해(예상)는 현재가. 배당이 늘어도 주가가 더 오르면 배당률은 떨어집니다.",
+  },
+  {
+    title: "환원율 = 그 해 배당률 + 자사주률",
+    body: "같은 해, 같은 분모(그 해 시가총액)로 냅니다. 유상증자가 자사주 취득보다 크면 음수가 됩니다. 2026 은 자사주 컨센서스가 없어 배당률만 있습니다.",
+  },
+  {
+    title: "이익대비 환원은 기준연도가 한 해 전",
+    body: "(배당지급 + 자사주취득) ÷ 순이익입니다. 현금흐름표의 배당 지급은 전년도 결산배당이라 귀속연도로 되돌리며, 최근 확정연도는 다음 사업보고서가 나와야 채워집니다. 값 옆 괄호가 기준연도입니다.",
+  },
+  {
+    title: "추세 막대",
+    body: "높이가 값, 색은 전년 대비(증가 빨강·감소 파랑·유지 회색). 옅은 막대는 예상치. 마우스를 올리면 연도별 값이 보입니다.",
+  },
+  {
+    title: "우선주 없음 · 빈 값은 제외",
+    body: "코스피 200 이 보통주로만 구성되고, 자사주률이 우선주에서 부풀려지는 문제도 함께 피합니다. 필터를 걸면 값이 없어 판정 못 하는 종목은 빠집니다.",
+  },
+];
 
 export function KorDividendManager({ onSummaryChange }: { onSummaryChange?: (count: number) => void }) {
   const toast = useToast();
@@ -155,10 +191,10 @@ export function KorDividendManager({ onSummaryChange }: { onSummaryChange?: (cou
     onSummaryChange?.(rows.length);
   }, [rows.length, onSummaryChange]);
 
-  const columnDefs = useMemo<ColDef<DividendRow>[]>(() => {
+  const columnDefs = useMemo<(ColDef<DividendRow> | ColGroupDef<DividendRow>)[]>(() => {
     const consensusYear = data?.consensus_year ?? null;
-    // 배당률 연도 컬럼 — 최신(컨센서스) → 과거. 표가 넓어지지 않게 3개만.
-    const years = (data?.years ?? []).slice(0, 3);
+    // 연도 그룹 — 최신(컨센서스) → 과거 4개.
+    const years = (data?.years ?? []).slice(0, 4);
     const returnMonths = data?.return_months ?? ["1", "3", "6", "12"];
 
     /** 추세 컬럼 — 연도별 원시값을 막대그래프로. 정렬은 최근 확정연도 값 기준. */
@@ -244,55 +280,68 @@ export function KorDividendManager({ onSummaryChange }: { onSummaryChange?: (cou
                 ? "metricNegative"
                 : "",
       })),
-      ...years.map<ColDef<DividendRow>>((year) => ({
-        colId: `dy_${year}`,
-        headerName: year === consensusYear ? `${year}(예상)` : year,
-        width: year === consensusYear ? 108 : 92,
-        type: "numericColumn",
-        valueGetter: (params) => params.data?.dividend_yield_by_year?.[year] ?? null,
-        valueFormatter: (params) => percent(params.value),
-        // 연도별 배당률은 이 화면의 본론이라 값을 굵게 둔다.
-        cellStyle: { fontWeight: 700 },
-        headerTooltip:
-          year === consensusYear
-            ? "컨센서스 예상 주당배당금 ÷ 현재가"
-            : `${year}년 확정 주당배당금 ÷ ${year}년 연말 종가 (그 해에 실제로 받았을 수익률)`,
-      })),
+      // 연도별 배당률·총환원율 — 여러 해를 평균 내면 배당은 예상, 자사주는 지난 실적이 되어
+      // 기준이 섞인다. 같은 해, 같은 분모(그 해 시가총액)로 나란히 둔다.
+      ...years.map<ColGroupDef<DividendRow>>((year) => {
+        const isConsensus = year === consensusYear;
+        return {
+          groupId: `year_${year}`,
+          headerName: isConsensus ? `${year}(예상)` : year,
+          marryChildren: true,
+          children: [
+            {
+              colId: `dy_${year}`,
+              headerName: "배당률",
+              // 컨센서스 연도는 그룹 헤더('2026(예상)')가 자식 하나뿐이라, 자식 폭이 좁으면
+              // 그룹 헤더 글자가 잘린다. 그 해만 넓게 둔다.
+              width: isConsensus ? 104 : 92,
+              type: "numericColumn",
+              valueGetter: (params) => params.data?.dividend_yield_by_year?.[year] ?? null,
+              valueFormatter: (params) => percent(params.value),
+              // 배당률은 이 화면의 본론이라 값을 굵게 둔다.
+              cellStyle: { fontWeight: 700 },
+              headerTooltip: isConsensus
+                ? "컨센서스 예상 주당배당금 ÷ 현재가"
+                : `${year}년 확정 주당배당금 ÷ ${year}년 연말 종가 (그 해에 실제로 받았을 수익률)`,
+            },
+            // 컨센서스 연도는 자사주 예상치가 없어(DART·네이버 모두) 환원율 컬럼을 두지 않는다.
+            ...(isConsensus
+              ? []
+              : [
+                  {
+                    colId: `sy_${year}`,
+                    headerName: "환원율",
+                    width: 92,
+                    type: "numericColumn",
+                    valueGetter: (params) => params.data?.shareholder_yield_by_year?.[year] ?? null,
+                    valueFormatter: (params) => percent(params.value),
+                    headerTooltip: `${year}년 배당률 + 자사주률 (자사주 순매입 ÷ ${year}년 시가총액). 유상증자가 자사주 취득보다 크면 음수`,
+                    cellClass: (params) =>
+                      params.value !== null && params.value !== undefined && params.value < 0 ? "metricNegative" : "",
+                  } satisfies ColDef<DividendRow>,
+                ]),
+          ],
+        };
+      }),
       {
-        field: "shareholder_yield",
-        headerName: "총환원율",
-        width: 96,
-        type: "numericColumn",
-        valueFormatter: (params) => percent(params.value),
-        headerTooltip: "배당률 + 자사주률 (DIVB 지수 정의)",
-      },
-      {
-        field: "dividend_yield",
-        headerName: "배당률",
-        width: 90,
-        type: "numericColumn",
-        valueFormatter: (params) => percent(params.value),
-        headerTooltip: "지금 사면 받을 배당수익률 — 컨센서스 예상 DPS 우선, 없으면 최근 확정 DPS ÷ 현재가",
-      },
-      {
-        field: "buyback_yield",
-        headerName: "자사주률",
-        width: 96,
-        type: "numericColumn",
-        valueFormatter: (params) => percent(params.value),
-        headerTooltip: "최근 2개 회계연도 자사주 순매입(취득−처분−발행) 연평균 ÷ 시가총액. 증자가 크면 음수",
-      },
-      {
+        // 연도 그룹의 '환원율'(시가총액 대비)과 이름이 겹치지 않게 '이익대비 환원'으로 둔다.
+        // 기준연도가 종목마다 다를 수 있어(배당지급이 이듬해 공시라) 값 옆에 연도를 붙인다.
         field: "payout_ratio_gross",
-        headerName: "환원율",
-        width: 92,
+        headerName: "이익대비 환원",
+        width: 132,
         type: "numericColumn",
         valueGetter: (params) =>
           params.data?.payout_ratio_gross === null || params.data?.payout_ratio_gross === undefined
             ? null
             : params.data.payout_ratio_gross * 100,
-        valueFormatter: (params) => percent(params.value, 1),
-        headerTooltip: "(배당지급 + 자사주취득) ÷ 순이익. 배당은 이듬해 현금흐름표에서 온 귀속연도 기준",
+        valueFormatter: (params) => {
+          if (params.value === null || params.value === undefined) return "-";
+          const year = params.data?.payout_base_year;
+          return `${params.value.toFixed(1)}%${year ? ` (${year})` : ""}`;
+        },
+        headerTooltip:
+          "(배당지급 + 자사주취득) ÷ 당기순이익 — 번 돈의 몇 %를 주주에게 돌려줬나. 괄호는 기준 회계연도. " +
+          "배당지급은 이듬해 현금흐름표에서 와 귀속연도로 되돌린 값이라, 가장 최근 확정연도는 아직 채워지지 않는다.",
       },
       {
         field: "per",
@@ -322,9 +371,16 @@ export function KorDividendManager({ onSummaryChange }: { onSummaryChange?: (cou
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
                 {/* 화면 이름은 PageFrame 제목이 이미 보여준다 — 여기서는 기준만 밝힌다. */}
-                <div className="tableFooterMeta" style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
+                {/* tableFooterMeta 는 표 하단용이라 우측 정렬이 걸려 있다 — 헤더 설명에는 쓰지 않는다. */}
+                <div style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--fs-sm)", textAlign: "left" }}>
                   코스피 200 기준 · 재무는 매일 배치가 적재하고 배당률·자사주률은 현재가로 계산합니다.
-                  지난 해 배당률의 분모는 그 해 연말 종가, 올해는 현재가입니다.
+                  <ul style={{ margin: "4px 0 0", paddingLeft: 16, lineHeight: 1.6 }}>
+                    {TABLE_NOTES.map((note) => (
+                      <li key={note.title}>
+                        <strong>{note.title}</strong> — {note.body}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

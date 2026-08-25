@@ -44,9 +44,19 @@ export function readRememberedFilters(): DividendFilters {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return EMPTY_FILTERS;
-    const parsed = JSON.parse(raw) as Partial<DividendFilters>;
-    // 저장 형식이 바뀌어도 모르는 키는 무시하고 아는 키만 채운다.
-    return { ...EMPTY_FILTERS, ...parsed };
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // **아는 키만** 골라 담는다. 통째로 펼치면 없어진 필터(점수·지수비중 등)가 그대로 살아나
+    // 「조건 N개」에는 세어지는데 판정에는 쓰이지 않는 유령 조건이 된다.
+    const restored = { ...EMPTY_FILTERS };
+    for (const key of Object.keys(EMPTY_FILTERS) as (keyof DividendFilters)[]) {
+      const value = parsed[key];
+      if (typeof EMPTY_FILTERS[key] === "boolean") {
+        if (typeof value === "boolean") restored[key] = value as never;
+      } else if (typeof value === "string") {
+        restored[key] = value as never;
+      }
+    }
+    return restored;
   } catch {
     return EMPTY_FILTERS;
   }
