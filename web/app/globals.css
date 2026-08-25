@@ -5276,3 +5276,20 @@ a {
   font-weight: 700;
   letter-spacing: 0.02em;
 }
+
+/* 설정 그리드 — 셀 렌더러(벤치마크 등)가 셀 폭을 넘지 않게 한다.
+   AG Grid 기본 .ag-cell-value 는 폭이 auto 라, 안에 flex 를 써도 옆 컬럼을 덮는다. */
+.settingsAgGrid .ag-cell-value {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* 설정 그리드 — 저장하지 않은 변경이 있는 행. 상단 「저장하지 않은 변경 N개」와 짝을 이룬다. */
+.ag-row.settingsDirtyRow {
+  background: rgba(250, 204, 21, 0.22);
+}
+
+.ag-row.settingsDirtyRow:hover {
+  background: rgba(250, 204, 21, 0.32);
+}
