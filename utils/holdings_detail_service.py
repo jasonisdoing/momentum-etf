@@ -14,6 +14,7 @@ from utils.asx_ticker import ensure_asx_prefix, strip_asx_prefix
 from utils.cash_model import cash_total_krw
 from utils.logger import get_app_logger
 from utils.portfolio_io import load_portfolio_master, load_real_holdings_table, save_portfolio_master
+from utils.share_allocation import ShareTarget, allocate_integer_shares
 
 logger = get_app_logger()
 
@@ -61,18 +62,6 @@ def _compute_account_total_assets_native(
     return total_valuation_krw
 
 
-def _compute_target_quantity(target_amount: float, current_price: float, currency: str) -> float | int | None:
-    # NaN 은 `<= 0` 비교를 통과하므로(NaN 비교는 항상 False) 유한성 검사를 먼저 한다.
-    # 가격·목표금액을 알 수 없으면 목표수량도 계산 불가(None → 화면 '-') 로 명시한다.
-    if not math.isfinite(current_price) or current_price <= 0 or not math.isfinite(target_amount):
-        return None
-    quantity = target_amount / current_price
-    currency_code = str(currency or "KRW").strip().upper()
-    if currency_code == "AUD":
-        return round(quantity, 4)
-    return max(math.floor(quantity), 0)
-
-
 def _apply_target_metrics(
     rows: list[dict[str, Any]],
     account_id: str,
@@ -107,6 +96,7 @@ def _apply_target_metrics(
         return rate if rate > 0 else None
 
     enriched_rows: list[dict[str, Any]] = []
+    allocation_targets: list[ShareTarget] = []
     for row in rows:
         target_ratio = target_map.get(_normalize_target_ticker(str(row.get("ticker") or "")))
         next_row = dict(row)
@@ -115,17 +105,31 @@ def _apply_target_metrics(
             next_row["target_amount"] = None
             next_row["target_quantity"] = None
         else:
-            target_amount = round(account_total_assets * (target_ratio / 100.0), 2)
-            next_row["target_amount"] = target_amount
-            # 목표수량 = KRW 목표금액 ÷ (현재가 × 종목 통화 환율). 환율이 없으면 계산 불가(None).
+            next_row["target_amount"] = round(account_total_assets * (target_ratio / 100.0), 2)
+            # 목표수량은 아래에서 전 종목을 **한 번에** 배분한다 — 여기서 개별로 나누지 않는다.
+            # 목표금액·1주값은 통화 혼합 계좌(KRW 계좌의 USD 종목 등)를 위해 KRW 로 맞춘다.
             fx_rate = _row_fx_rate_krw(str(next_row.get("currency") or ""))
             price_krw = float(next_row.get("current_price_num") or 0.0) * fx_rate if fx_rate else 0.0
-            next_row["target_quantity"] = _compute_target_quantity(
-                account_total_krw * (target_ratio / 100.0),
-                price_krw,
-                str(next_row.get("currency") or account_currency),
-            )
+            # NaN 은 `<= 0` 비교를 통과하므로(NaN 비교는 항상 False) 유한성 검사를 먼저 한다.
+            if math.isfinite(price_krw) and price_krw > 0:
+                allocation_targets.append(
+                    ShareTarget(
+                        key=str(next_row.get("ticker") or ""),
+                        target_amount=account_total_krw * (target_ratio / 100.0),
+                        price=price_krw,
+                    )
+                )
+            next_row["target_quantity"] = None  # 배분 후 채운다
         enriched_rows.append(next_row)
+
+    # 종목마다 따로 내림하면 1주 값에 걸려 남은 몫이 현금으로 놀고 아무도 다시 쓰지 않는다.
+    # 합성 전략·백테스트와 **같은 함수**로 한 번에 배분한다.
+    quantities = allocate_integer_shares(
+        allocation_targets, budget=sum(item.target_amount for item in allocation_targets)
+    )
+    for row in enriched_rows:
+        if row.get("target_ratio") is not None and str(row.get("ticker") or "") in quantities:
+            row["target_quantity"] = quantities[str(row["ticker"])]
     return enriched_rows
 
 
