@@ -7,7 +7,6 @@
 import type { ComponentType } from "react";
 import {
   IconActivity,
-  IconBell,
   IconCash,
   IconChartHistogram,
   IconChartInfographic,
@@ -109,7 +108,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     title: "시스템",
     icon: IconSettings,
     items: [
-      { href: "/alarms", label: "알람", icon: IconBell },
       { href: "/memos", label: "메모", icon: IconNotes },
       { href: "/data_source", label: "데이터 소스", icon: IconDatabase },
       { href: "/batch", label: "배치", icon: IconListDetails },

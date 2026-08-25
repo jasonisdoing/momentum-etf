@@ -24,7 +24,7 @@ from typing import Any
 import pandas as pd
 
 from config import CACHE_TTL_COMPUTE
-from utils.account_settings_store import load_account_docs, save_account_settings
+from utils.account_settings_store import load_account_docs
 from utils.data_loader import fetch_ohlcv
 from utils.holdings_detail_service import load_all_holdings_detail
 from utils.logger import get_app_logger
@@ -261,49 +261,6 @@ def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
     }
     _badges_cache[norm_id] = (_time.monotonic(), dict(result))
     return result
-
-
-def get_alarm_view() -> dict[str, Any]:
-    """알람 화면용: 계좌별 알람 On/Off + 손절 기준 목록(시세 계산 없음).
-
-    이평선 일수는 계좌가 아니라 종목의 종목풀에서 오므로 여기 없다.
-    """
-    return {
-        "stoploss_pct_options": list(STOPLOSS_PCT_OPTIONS),
-        "accounts": [
-            {
-                "account_id": doc["account_id"],
-                "name": str(doc.get("name") or doc["account_id"]),
-                "icon": str(doc.get("icon") or ""),
-                "order": int(doc.get("order") or 0),
-                "country_code": str(doc.get("country_code") or "").strip().lower(),
-                "ma_enabled": bool(doc.get("ma_alarm_enabled", False)),
-                "stoploss_enabled": bool(doc.get("stoploss_alarm_enabled", False)),
-                "stoploss_threshold_pct": _account_stoploss_pct(doc),
-            }
-            for doc in load_account_docs()
-        ],
-    }
-
-
-def set_account_alarm(account_id: str, alarm_type: str, *, enabled: bool, values: dict[str, Any]) -> dict[str, Any]:
-    """계좌별 알람 On/Off + 기준값 저장. alarm_type: 'ma'|'stoploss'.
-
-    values 는 알람 종류가 요구하는 기준값 전부다 — 없는 키는 채우지 않고 에러를 낸다.
-      ma       : {} (기준이 종목풀에 있어 계좌가 저장할 값이 없다)
-      stoploss : {"threshold_pct": float}
-    """
-    if alarm_type == "ma":
-        payload: dict[str, Any] = {"ma_alarm_enabled": bool(enabled)}
-    elif alarm_type == "stoploss":
-        if "threshold_pct" not in values:
-            raise ValueError("'stoploss' 알람에는 'threshold_pct' 값이 필요합니다.")
-        payload = {"stoploss_alarm_enabled": bool(enabled), "stoploss_threshold_pct": float(values["threshold_pct"])}
-    else:
-        raise ValueError(f"알 수 없는 알람 종류입니다: {alarm_type}")
-    save_account_settings(account_id, payload, save_method="알람 센터")
-    _invalidate_badges_cache()  # 설정(기준·On/Off) 변경 즉시 배지에 반영
-    return get_alarm_view()
 
 
 def _post_slack(sections: list[dict[str, Any]], *, manual: bool) -> bool:
