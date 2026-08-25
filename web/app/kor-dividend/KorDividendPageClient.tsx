@@ -18,7 +18,7 @@ export function KorDividendPageClient() {
   );
 
   return (
-    <PageFrame title="🇰🇷 한국 배당주" fullHeight fullWidth titleRight={titleRight}>
+    <PageFrame title="한국 배당주" fullHeight fullWidth titleRight={titleRight}>
       <KorDividendManager onSummaryChange={setTotalCount} />
     </PageFrame>
   );

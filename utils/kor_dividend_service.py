@@ -483,37 +483,6 @@ def refresh_kor_dividend_stocks() -> dict[str, Any]:
 # 기간 수익률 구간(개월).
 RETURN_MONTHS = (1, 3, 6, 12)
 
-# 점수 배점 (합계 100) — 품질(실적·배당·환원) 60 + 가격(저평가) 40.
-SCORE_WEIGHTS = {
-    "operating_income": 15,
-    "net_income": 15,
-    "dividend": 15,
-    "payout": 15,
-    "per": 20,
-    "dividend_yield": 20,
-}
-# 주주환원율 만점 기준 — 이 값 이상이면 만점.
-PAYOUT_FULL_SCORE_RATIO = 0.8
-# PER: FULL 이하 만점, ZERO 이상 0점 (사이는 선형). 적자(PER 없음)는 0점.
-PER_FULL_SCORE = 8.0
-PER_ZERO_SCORE = 20.0
-# 배당수익률 만점 기준(%) — 이 값 이상이면 만점.
-DIVIDEND_YIELD_FULL_SCORE = 3.0
-
-
-def _linear_score(value: float | None, full: float, zero: float, weight: int) -> float:
-    """full 쪽이 만점, zero 쪽이 0점인 선형 배점. 값이 없으면 0점."""
-    if value is None:
-        return 0.0
-    if full < zero:  # 낮을수록 좋다 (PER)
-        if value <= full:
-            return float(weight)
-        if value >= zero:
-            return 0.0
-        return weight * (zero - value) / (zero - full)
-    # 높을수록 좋다 (배당수익률·환원율)
-    return weight * min(max(value, 0.0) / full, 1.0)
-
 
 def _live_prices(tickers: list[str]) -> dict[str, float]:
     """현재가 — 종목풀 순위·알림과 같은 실시간 스냅샷 소스. 실패한 종목은 키가 빠진다."""
@@ -596,19 +565,9 @@ def _build_row(doc: dict[str, Any], price: float | None, past: dict[int, float])
     reference_year = consensus_year if consensus_year in by_year else (confirmed[0] if confirmed else None)
     reference = by_year.get(reference_year) or {}
 
-    score = (
-        SCORE_WEIGHTS["operating_income"] * (trends.get("operating", {}).get("ratio") or 0.0)
-        + SCORE_WEIGHTS["net_income"] * (trends.get("net", {}).get("ratio") or 0.0)
-        + SCORE_WEIGHTS["dividend"] * (trends.get("dividend", {}).get("ratio") or 0.0)
-        + _linear_score(payout.get("ratio_gross"), PAYOUT_FULL_SCORE_RATIO, 0.0, SCORE_WEIGHTS["payout"])
-        + _linear_score(reference.get("per"), PER_FULL_SCORE, PER_ZERO_SCORE, SCORE_WEIGHTS["per"])
-        + _linear_score(dividend_yield, DIVIDEND_YIELD_FULL_SCORE, 0.0, SCORE_WEIGHTS["dividend_yield"])
-    )
-
     return {
         "ticker": doc["ticker"],
         "name": doc.get("name"),
-        "index_weight": doc.get("index_weight"),
         "current_price": price,
         "market_cap": market_cap,
         "returns": {str(months): value for months, value in returns.items()},
@@ -620,16 +579,12 @@ def _build_row(doc: dict[str, Any], price: float | None, past: dict[int, float])
         "payout_ratio_gross": payout.get("ratio_gross"),
         "payout_ratio_net": payout.get("ratio_net"),
         "payout_base_year": payout.get("base_year"),
-        "trend_operating": trends.get("operating", {}).get("label"),
-        "trend_net": trends.get("net", {}).get("label"),
-        "trend_dividend": trends.get("dividend", {}).get("label"),
-        # 화면 필터가 "우상향만" 을 판정하려면 라벨(3/3)이 아니라 비율이 필요하다.
+        # 화면은 연도별 원시값을 막대그래프로 그리고, 필터는 이 비율로 "우상향만" 을 판정한다.
         "trend_operating_ratio": trends.get("operating", {}).get("ratio"),
         "trend_net_ratio": trends.get("net", {}).get("ratio"),
         "trend_dividend_ratio": trends.get("dividend", {}).get("ratio"),
         "per": reference.get("per"),
         "pbr": reference.get("pbr"),
-        "score": round(score, 1),
         "by_year": by_year,
         "notes": doc.get("notes") or [],
     }
