@@ -72,7 +72,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         throw new Error(payload.error ?? "자산 정보를 불러오지 못했습니다.");
       }
       const dashData = dashResponse?.ok ? await dashResponse.json() : null;
-      const dashAccounts: Record<string, { cash_ratio: number; net_profit: number; net_profit_pct: number; daily_profit: number; daily_return_pct: number; benchmark_name: string | null; benchmark_pct: number | null; index_result: "win" | "lose" | "draw" | null; weekly_profit: number; weekly_return_pct: number }> = {};
+      const dashAccounts: Record<string, { cash_ratio: number; net_profit: number; net_profit_pct: number; daily_profit: number; daily_return_pct: number; benchmark_name: string | null; benchmark_label: string | null; benchmark_pct: number | null; index_result: "win" | "lose" | "draw" | null; weekly_profit: number; weekly_return_pct: number }> = {};
       if (dashData?.accounts) {
         for (const a of dashData.accounts) {
           dashAccounts[a.account_id] = {
@@ -82,6 +82,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             daily_profit: a.daily_profit ?? 0,
             daily_return_pct: a.daily_return_pct ?? 0,
             benchmark_name: a.benchmark_name ?? null,
+            benchmark_label: a.benchmark_label ?? null,
             benchmark_pct: a.benchmark_pct ?? null,
             index_result: a.index_result ?? null,
             weekly_profit: a.weekly_profit ?? 0,
@@ -91,7 +92,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       }
       const dashTotals = dashData?.totals ?? null;
       setDashTotals(dashTotals);
-      const defaultDash = { cash_ratio: 0, net_profit: 0, net_profit_pct: 0, daily_profit: 0, daily_return_pct: 0, benchmark_name: null, benchmark_pct: null, index_result: null, weekly_profit: 0, weekly_return_pct: 0 };
+      const defaultDash = { cash_ratio: 0, net_profit: 0, net_profit_pct: 0, daily_profit: 0, daily_return_pct: 0, benchmark_name: null, benchmark_label: null, benchmark_pct: null, index_result: null, weekly_profit: 0, weekly_return_pct: 0 };
       const mergedSummaries = (payload.account_summaries ?? []).map((s) => ({
         ...s,
         ...(dashAccounts[s.account_id] ?? defaultDash),
@@ -521,8 +522,9 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     {
       colId: "benchmark_pct",
       headerName: "지수(%)",
-      minWidth: 88,
-      flex: 0.7,
+      // 등락률 뒤에 벤치마크 표기(국내는 종목명)가 붙어 다른 % 컬럼보다 훨씬 넓어야 한다.
+      minWidth: 230,
+      flex: 1.4,
       type: "rightAligned",
       valueGetter: (params) => {
         const data = params.data;
@@ -538,8 +540,13 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         const v = params.value;
         if (v === null || v === undefined) return <span style={{ color: "var(--text-muted)" }}>-</span>;
         const name = isTotalRow(data) ? "비중 가중 지수" : (data as AccountSummary).benchmark_name ?? "";
+        // 어떤 지수와 견준 값인지 바로 보이게 옆에 붙인다(국내는 종목명, 해외는 티커 — 백엔드가 정한다).
+        const label = isTotalRow(data) ? "" : (data as AccountSummary).benchmark_label ?? "";
         return (
-          <span className={getSignedClass(v)} title={name}>{`${v.toFixed(2)}%`}</span>
+          <span title={name}>
+            <span className={getSignedClass(v)}>{`${v.toFixed(2)}%`}</span>
+            {label ? <span style={{ color: "var(--text-muted)" }}>{`(${label})`}</span> : null}
+          </span>
         );
       },
     },
