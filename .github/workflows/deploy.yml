@@ -61,6 +61,29 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
+      # 서버를 건드리기 **전에** 디스크를 본다. 여유가 없으면 이미지를 받다가 중간에 터져
+      # 컨테이너가 반쯤 교체된 채 죽는다. 아무것도 손대지 않은 상태로 실패시키는 편이 낫다.
+      - name: Check Oracle VM free disk
+        env:
+          ORACLE_VM_HOST: ${{ secrets.ORACLE_VM_HOST }}
+          ORACLE_VM_USERNAME: ${{ secrets.ORACLE_VM_USERNAME }}
+          ORACLE_VM_SSH_KEY: ${{ secrets.ORACLE_VM_SSH_KEY }}
+          # fastapi(624MB) + node(889MB) 를 받고 압축을 푸는 동안 그 이상을 쓴다. 3배 여유.
+          MIN_FREE_MB: "5000"
+        run: |
+          set -euo pipefail
+          KEY_PATH="$(mktemp)"
+          printf '%s\n' "$ORACLE_VM_SSH_KEY" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          AVAIL_MB=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no \
+            "$ORACLE_VM_USERNAME@$ORACLE_VM_HOST" "df -Pm / | awk 'NR==2 {print \$4}'")
+          rm -f "$KEY_PATH"
+          echo "free disk: ${AVAIL_MB}MB (minimum ${MIN_FREE_MB}MB)"
+          if [ "${AVAIL_MB:-0}" -lt "$MIN_FREE_MB" ]; then
+            echo "::error::Oracle VM 디스크 여유 ${AVAIL_MB}MB — ${MIN_FREE_MB}MB 미만이라 배포를 중단합니다."
+            exit 1
+          fi
+
       - name: Deploy to Oracle VM (pull & up)
         uses: appleboy/ssh-action@master
         # scheduler 컨테이너의 stop_grace_period (30분) 동안 진행 중 배치가 끝나길 기다리므로,
@@ -130,7 +153,12 @@ jobs:
             # scheduler 도 새 이미지로 재배포. fastapi 가 health check 통과한 다음에 띄워
             # mongodb/fastapi 가 안정된 후 worker 가 큐 처리를 시작하도록 한다.
             sudo docker compose up -d --no-deps scheduler
-            # 이미지 정리는 배포 중 CPU/디스크 I/O 피크를 만들기 때문에 배포 경로에서는 실행하지 않는다.
+            # 방금 태그를 잃은 옛 이미지를 지운다. compose 가 :latest 를 참조해, 배포마다
+            # 직전 이미지가 <none> 으로 남는다 — 안 지우면 배포 1회당 2개씩 쌓여 디스크가 찬다.
+            # `-a` 는 쓰지 않는다. 컨테이너가 안 쓰는 **태그 이미지까지** 지워서 다음 배포에
+            # 다시 받게 되고, 그게 1 OCPU 에서 부하가 됐다(2026-05-20 에 -af 를 뺀 이유).
+            # dangling 만이면 고유분 50MB 남짓이라 체감이 없다.
+            sudo docker image prune -f
             # ⚠️ VM cron 자동 설치 비활성화. 자동 배치는 서버 scheduler 컨테이너
             # (`infra/server_scheduler.py`) 의 APScheduler 가 큐에 enqueue 한다.
             # 과거: bash infra/cron/install.sh (VM 1 OCPU 부하로 비활성)
