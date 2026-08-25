@@ -535,24 +535,40 @@ def _build_row(doc: dict[str, Any], price: float | None, past: dict[int, float])
         base = price if year == consensus_year else entry.get("year_end_close")
         dividend_yield_by_year[year] = (dps / base * 100.0) if (dps is not None and base) else None
 
-    # 지금 사면 받을 배당수익률 — 컨센서스 DPS 우선, 없으면 최근 확정 DPS.
+    # 필터·정렬용 배당률 — **컨센서스 연도 값 그대로**다. 없으면 None.
+    #
+    # 예전에는 컨센서스가 없으면 최근 확정 DPS ÷ 현재가로 대신했는데, 그 값은 화면 어느
+    # 칸에도 없다(지난 해 컬럼은 분모가 그 해 연말 종가다). 보이는 숫자와 걸러지는 숫자가
+    # 달라 "5.33% 인데 왜 4% 필터에서 빠지나" 가 된다. 대신하지 않고 비워 둔다.
     confirmed = sorted((y for y, e in by_year.items() if not e.get("is_consensus")), reverse=True)
-    forward_dps = (by_year.get(consensus_year) or {}).get("dps") if consensus_year else None
-    latest_dps = next((by_year[y]["dps"] for y in confirmed if by_year[y].get("dps") is not None), None)
-    current_dps = forward_dps if forward_dps is not None else latest_dps
-    dividend_yield = (current_dps / price * 100.0) if (current_dps is not None and price) else None
+    dividend_yield = dividend_yield_by_year.get(consensus_year) if consensus_year else None
 
-    # 자사주률 = 연평균 자사주 ÷ 시가총액. 시총은 상장주식수 × 현재가.
+    # 자사주률·총환원율을 **연도별로** 낸다 — 배당률과 같은 해, 같은 분모(그 해 시가총액)를 쓴다.
+    # 여러 해를 평균 내 하나로 굳히면 배당은 올해 예상, 자사주는 지난 2년 실적이 되어 기준이 섞인다.
+    #
+    # 상장주식수는 지금 값이라 지난 해 시총은 근사치다(그 사이 증자·소각이 있으면 어긋난다).
+    # 정확한 과거 주식수는 소스가 없어 추정하지 않고 이 한계를 그대로 둔다.
     share_count = doc.get("share_count")
     market_cap = share_count * price if (share_count and price) else None
-    buyback_yield = None
-    buyback_annual = doc.get("buyback_net_annual")
-    if buyback_annual is not None and market_cap:
-        buyback_yield = buyback_annual / market_cap * 100.0
-    # 총주주환원율 = 배당률 + 자사주률 (DIVB 지수 정의).
-    shareholder_yield = None
-    if dividend_yield is not None or buyback_yield is not None:
-        shareholder_yield = (dividend_yield or 0.0) + (buyback_yield or 0.0)
+
+    buyback_yield_by_year: dict[str, float | None] = {}
+    shareholder_yield_by_year: dict[str, float | None] = {}
+    for year, entry in by_year.items():
+        base = price if year == consensus_year else entry.get("year_end_close")
+        year_cap = share_count * base if (share_count and base) else None
+        net = entry.get("buyback_net")
+        # 컨센서스 연도는 자사주 예상치가 없다(DART·네이버 어디에도) — 배당만으로 남는다.
+        buyback = (net / year_cap * 100.0) if (net is not None and year_cap) else None
+        buyback_yield_by_year[year] = buyback
+        dividend = dividend_yield_by_year.get(year)
+        shareholder_yield_by_year[year] = (
+            (dividend or 0.0) + (buyback or 0.0) if (dividend is not None or buyback is not None) else None
+        )
+
+    # 필터·정렬용 대표값 — 배당·자사주가 **둘 다 있는** 가장 최근 확정연도. 기준이 섞이지 않는다.
+    latest_confirmed = next((year for year in confirmed if shareholder_yield_by_year.get(year) is not None), None)
+    shareholder_yield = shareholder_yield_by_year.get(latest_confirmed) if latest_confirmed else None
+    buyback_yield = buyback_yield_by_year.get(latest_confirmed) if latest_confirmed else None
 
     returns = {
         months: ((price / base - 1.0) * 100.0 if (price and (base := past.get(months))) else None)
@@ -572,10 +588,12 @@ def _build_row(doc: dict[str, Any], price: float | None, past: dict[int, float])
         "market_cap": market_cap,
         "returns": {str(months): value for months, value in returns.items()},
         "dividend_yield_by_year": dividend_yield_by_year,
+        "buyback_yield_by_year": buyback_yield_by_year,
+        "shareholder_yield_by_year": shareholder_yield_by_year,
         "dividend_yield": dividend_yield,
-        "dividend_yield_is_forward": forward_dps is not None,
         "buyback_yield": buyback_yield,
         "shareholder_yield": shareholder_yield,
+        "shareholder_yield_base_year": latest_confirmed,
         "payout_ratio_gross": payout.get("ratio_gross"),
         "payout_ratio_net": payout.get("ratio_net"),
         "payout_base_year": payout.get("base_year"),
