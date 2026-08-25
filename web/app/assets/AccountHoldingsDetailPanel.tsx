@@ -84,7 +84,7 @@ export function AccountHoldingsDetailPanel({
   // 입력 중인 티커 초안 — 타이핑마다 setState 하면 그리드 셀이 리마운트돼 포커스가 튄다(1글자만 입력됨).
   // draft 는 ref 에만 쌓고, 검증 시점에만 읽는다.
   const addingTickerDraftRef = useRef("");
-  // 종목명 알람 배지(이동선 이탈·손절 아이콘) — /alarms 설정·판정 그대로. 보조 정보라 실패 시 빈 맵.
+  // 종목명 알람 배지(이동선 이탈·손절 아이콘) — 계좌 설정의 알람 On/Off·판정 그대로. 보조 정보라 실패 시 빈 맵.
   const [alertBadges, setAlertBadges] = useState<AlertBadges>({});
   // 이동선 이탈 종목 — 배지와 같은 조건으로 행을 회색 처리한다.
   const [maBrokenTickers, setMaBrokenTickers] = useState<Set<string>>(new Set());

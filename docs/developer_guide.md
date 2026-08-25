@@ -37,7 +37,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | `/strategy-new-high` | 신고가 돌파 전략 선정·백테스트·튜닝 | `utils/new_high_service.py`, `new_high_backtest.py`, `new_high_tuning.py` |
 | `/strategy-mix` | 두 전략 합성 — 목표 비중·오늘의 액션·백테스트(열람 전용) | `utils/strategy_mix_service.py` |
 | `/leverage-settings` | 레버리지 이동평균 크로스 설정·튜닝 | `leverage/` |
-| `/alarms` | 보유종목 이동선 이탈·손절 알림 설정 | `utils/holdings_alarm_service.py` |
+| `/account-settings` | 계좌 메타·증권사 연동·보유종목 알림(이동선 이탈·손절) 설정 | `utils/account_settings_store.py`, `utils/holdings_alarm_service.py` |
 | `/assets`, `/asset-helper`, `/holdings*` | 자산·보유·목표 비중 | `utils/asset_helper_service.py`, `portfolio_master` |
 | `/daily`, `/weekly`, `/monthly`, `/yearly`, `/dashboard`, `/snapshots` | 일별 원장과 집계 | `utils/daily_fund_service.py` 등 |
 | `/market-trend`, `/market`, `/live-24h` | 시장 지수 추세·지표 | `services/toss_market_service.py` 등 |
