@@ -495,25 +495,48 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     ...extra,
   });
 
+  /** 숫자 편집 컬럼 — 초안은 문자열로 들지만 그리드에는 숫자로 넘긴다.
+   *
+   * 문자열인 채로 두면 AG Grid 가 셀 타입을 `text` 로 추론해 `agNumberCellEditor` 가
+   * 호환되지 않는 것으로 판정돼 **편집 자체가 되지 않는다**. valueGetter/valueSetter 로
+   * 그리드 쪽만 숫자로 바꿔 준다. (`field` 대신 `colId` 를 쓰므로 onCellValueChanged 는
+   * 이 컬럼을 건너뛴다 — 저장은 valueSetter 가 이미 했다.)
+   */
+  const numberCol = (
+    field: "order" | "TOP_N_HOLD",
+    headerName: string,
+    width: number,
+  ): ColDef<PoolGridRow> => ({
+    colId: field,
+    headerName,
+    width,
+    editable: true,
+    cellDataType: "number",
+    type: "numericColumn",
+    valueGetter: (params) => {
+      const raw = params.data?.[field];
+      return raw === "" || raw === undefined ? null : Number(raw);
+    },
+    valueSetter: (params) => {
+      if (!params.data) return false;
+      const next = params.newValue === null || params.newValue === "" ? "" : String(Math.trunc(Number(params.newValue)));
+      if (next === params.data[field]) return false;
+      updateDraft(params.data.ticker_type, field, next);
+      return true;
+    },
+  });
+
   const columnDefs: ColDef<PoolGridRow>[] = [
     { field: "ticker_type", headerName: "ID", width: 130, pinned: "left" },
     { field: "name", headerName: "이름", width: 150, editable: true },
     selectCol("icon", "아이콘", 90, () => ["🇰🇷", "🇦🇺", "🇺🇸"]),
-    { field: "order", headerName: "순서", width: 80, editable: true, cellEditor: "agNumberCellEditor", type: "numericColumn" },
+    numberCol("order", "순서", 80),
     selectCol("country_code", "국가", 88, () => [...COUNTRY_OPTIONS]),
     selectCol("currency", "통화", 88, () => [...CURRENCY_OPTIONS]),
     selectCol("pool_kind", "구분", 96, () => ["stock", "etf"], {
       valueFormatter: (params) => ({ stock: "개별주", etf: "ETF" })[String(params.value)] ?? "미설정",
     }),
-    {
-      field: "TOP_N_HOLD",
-      headerName: "종목수",
-      width: 90,
-      editable: true,
-      cellEditor: "agNumberCellEditor",
-      cellEditorParams: { min: 1, max: 100 },
-      type: "numericColumn",
-    },
+    numberCol("TOP_N_HOLD", "종목수", 90),
     selectCol(
       "SHORT_MA_DAYS",
       "단기 이평선",
