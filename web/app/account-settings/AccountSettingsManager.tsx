@@ -862,7 +862,7 @@ export function AccountSettingsManager() {
   });
 
   const columnDefs: ColDef<AccountGridRow>[] = [
-    { field: "account_id", headerName: "ID", width: 130, pinned: "left" },
+    { field: "account_id", headerName: "ID", width: 130 },
     { field: "name", headerName: "이름", width: 150, editable: true },
     { field: "icon", headerName: "아이콘", width: 62, editable: true },
     numberCol("order", "순서", 64),

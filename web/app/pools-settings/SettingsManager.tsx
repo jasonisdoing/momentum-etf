@@ -527,7 +527,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
   });
 
   const columnDefs: ColDef<PoolGridRow>[] = [
-    { field: "ticker_type", headerName: "ID", width: 130, pinned: "left" },
+    { field: "ticker_type", headerName: "ID", width: 130 },
     { field: "name", headerName: "이름", width: 150, editable: true },
     selectCol("icon", "아이콘", 90, () => ["🇰🇷", "🇦🇺", "🇺🇸"]),
     numberCol("order", "순서", 80),

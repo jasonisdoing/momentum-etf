@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CellStyle, ColDef, ColGroupDef } from "ag-grid-community";
 
+import { marketCapRankColumn, renderHighDrawdownCell } from "@/lib/grid-cells";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { TickerDetailLink } from "../components/TickerDetailLink";
@@ -29,6 +30,10 @@ type YearEntry = {
 type DividendRow = {
   ticker: string;
   name: string | null;
+  /** 시장 전체 시가총액 순위 (배치 기준). */
+  market_cap_rank: number | null;
+  /** 최근 12개월 최고가 대비(%). 0 이면 신고점. */
+  high_drawdown: number | null;
   current_price: number | null;
   market_cap: number | null;
   /** 개월 → 수익률(%). 키는 문자열("1","3","6","12"). */
@@ -231,9 +236,19 @@ export function KorDividendManager({ onSummaryChange }: { onSummaryChange?: (cou
         headerName: "순위",
         colId: "rank",
         width: 68,
-        pinned: "left",
         valueGetter: (params) => (params.node?.rowIndex ?? 0) + 1,
         type: "numericColumn",
+      },
+      // 시총 순위·고점 대비 — 종목풀 순위(/pools-rank) 화면과 같은 공용 컬럼·같은 정의.
+      marketCapRankColumn<DividendRow>("market_cap_rank", false),
+      {
+        field: "high_drawdown",
+        headerName: "고점",
+        width: 80,
+        minWidth: 80,
+        type: "rightAligned",
+        headerTooltip: "최근 12개월 최고가 대비(%) — 0 이면 신고점",
+        cellRenderer: (params: { value: number | null | undefined }) => renderHighDrawdownCell(params.value, 2),
       },
       {
         // 티커·종목명 표기는 다른 시장 화면(/kor-market-stock 등)과 같은 방식을 쓴다.
@@ -241,7 +256,6 @@ export function KorDividendManager({ onSummaryChange }: { onSummaryChange?: (cou
         headerName: "티커",
         width: 100,
         minWidth: 84,
-        pinned: "left",
         cellStyle: {
           fontFamily: "var(--font-mono, monospace)",
           fontSize: "var(--fs-sm)",
@@ -254,7 +268,6 @@ export function KorDividendManager({ onSummaryChange }: { onSummaryChange?: (cou
         headerName: "종목명",
         flex: 1,
         minWidth: 180,
-        pinned: "left",
       },
       {
         field: "current_price",
