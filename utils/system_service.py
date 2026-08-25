@@ -241,6 +241,15 @@ SCHEDULE_ROWS = [
         "command": "python scripts/update_aus_market_stocks.py",
         "schedule": {"minutes": [10], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
+    {
+        "key": "kor_dividend_stocks",
+        "group": "개장 전 준비",
+        "job": "한국 배당주 지표",
+        "target": "KOSPI200 (KODEX 200 보유종목)",
+        "cadence": "평일 08:20 KST",
+        "command": "python scripts/update_kor_dividend_stocks.py",
+        "schedule": {"minutes": [20], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
+    },
     # ⑤ 상시 운영 — 자동으로 돌고 손댈 일이 거의 없다.
     {
         "key": "live_24h_slack",
