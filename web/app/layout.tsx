@@ -10,6 +10,7 @@ import "@tabler/core/dist/css/tabler.min.css";
 import { AppShell } from "./AppShell";
 import { buildBucketCssVariables } from "../lib/bucket-theme";
 import { ServiceWorkerRegistrar } from "./components/ServiceWorkerRegistrar";
+import { SessionExpiryWatcher } from "./components/SessionExpiryWatcher";
 import { ToastProvider } from "./components/ToastProvider";
 import { HideMoneyProvider } from "@/lib/hide-money-context";
 import "./globals.css";
@@ -40,6 +41,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
       <body>
         <style>{buildBucketCssVariables()}</style>
         <ServiceWorkerRegistrar />
+        <SessionExpiryWatcher />
         <ToastProvider>
           <HideMoneyProvider>
             <AppShell>{children}</AppShell>
