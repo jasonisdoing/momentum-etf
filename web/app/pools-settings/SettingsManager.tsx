@@ -6,6 +6,7 @@ import type { ColDef, ICellRendererParams } from "ag-grid-community";
 import { formatKstDateTime } from "@/lib/datetime";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
+import { LastSavedCell } from "../components/LastSavedCell";
 import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
@@ -579,8 +580,9 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       field: "__updatedAt",
       headerName: "마지막 저장",
       flex: 1,
-      minWidth: 180,
+      minWidth: 320,
       valueFormatter: (params) => (params.value ? formatKstDateTime(String(params.value)) : "저장 이력 없음"),
+      cellRenderer: (params: ICellRendererParams<PoolGridRow>) => <LastSavedCell value={params.value} />,
     },
   ];
 
@@ -795,6 +797,12 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
                 getRowClass={(params) => (params.data?.__dirty ? "settingsDirtyRow" : "")}
                 gridOptions={{
                   suppressMovableColumns: true,
+                  // 폭에 맞춰 말줄임하므로, 잘린 값은 마우스를 올려 전체를 본다.
+                  defaultColDef: {
+                    sortable: true,
+                    resizable: true,
+                    tooltipValueGetter: (params) => params.valueFormatted ?? params.value,
+                  },
                   // AppAgGrid 기본값은 셀 포커스를 막는다(읽기 전용 표 기준). 편집하려면 켜야 한다.
                   suppressCellFocus: false,
                   singleClickEdit: true,
@@ -806,9 +814,9 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
                     enableClickSelection: false,
                   },
                   selectionColumnDef: {
-                    width: 52,
-                    minWidth: 52,
-                    maxWidth: 52,
+                    width: 40,
+                    minWidth: 40,
+                    maxWidth: 40,
                     pinned: "left",
                     sortable: false,
                     resizable: false,

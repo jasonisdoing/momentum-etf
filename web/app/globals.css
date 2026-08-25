@@ -5279,10 +5279,21 @@ a {
 
 /* 설정 그리드 — 셀 렌더러(벤치마크 등)가 셀 폭을 넘지 않게 한다.
    AG Grid 기본 .ag-cell-value 는 폭이 auto 라, 안에 flex 를 써도 옆 컬럼을 덮는다. */
+.settingsAgGrid .ag-cell,
+.settingsAgGrid .ag-cell-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .settingsAgGrid .ag-cell-value {
   width: 100%;
   min-width: 0;
-  overflow: hidden;
+}
+
+/* 설정 그리드 — 버튼만 있는 컬럼(상세)은 헤더도 가운데로. */
+.settingsAgGrid .ag-header-cell.settingsCenterHeader .ag-header-cell-label {
+  justify-content: center;
 }
 
 /* 설정 그리드 — 값이 반드시 필요한데 비어 있는 셀(손절 알림을 켰는데 기준 미선택 등). */
