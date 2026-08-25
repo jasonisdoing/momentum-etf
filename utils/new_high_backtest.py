@@ -920,6 +920,20 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
     for item in [*holdings, *simulated["exited_today"]]:
         item["change_pct"] = change_pct_by.get(item["ticker"])
 
+    # 실계좌 보유 여부 — 전략상 보유(is_held)와 별개로 "지금 계좌에 실제로 있는가".
+    # 시장 화면(`/kor-market-stock` 등)의 '보유' 컬럼과 같은 소스·같은 기준(그 국가의 모든 계좌).
+    from utils.portfolio_io import load_all_holding_tickers
+    from utils.settings_loader import get_ticker_type_settings as _pool_settings
+
+    country = str((_pool_settings(pool) or {}).get("country_code") or "").strip().lower()
+    try:
+        account_held = load_all_holding_tickers(country_code=country or None)
+    except Exception:
+        logger.warning("[신고가] 실계좌 보유 조회 실패 — '보유' 컬럼을 비운다", exc_info=True)
+        account_held = set()
+    for item in [*rows, *holdings, *simulated["exited_today"]]:
+        item["account_held"] = str(item.get("ticker") or "").strip().upper() in account_held
+
     # 이탈 행은 청산가와 별개로 현재 시세도 담는다 — 판 뒤로 얼마나 더 갔는지 보이게.
     price_by = {row["ticker"]: row["price"] for row in rows}
     for item in simulated["exited_today"]:
