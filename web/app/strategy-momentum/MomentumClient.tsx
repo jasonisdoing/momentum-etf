@@ -623,7 +623,7 @@ export function MomentumClient() {
           "이번 포트폴리오까지 몇 주 연속 편입됐는지 (신규 = 이번 주 첫 편입, 최대 12주 추적). " +
           "화살표 — →유지/→신규(초록)는 다음 주 예상, 확정은 교체일 직전 판정일 종가. " +
           "빨강은 빠지는 종목이며 굵기가 '이미 팔렸는지'를 뜻한다: →매도예정(가늘게)은 아직 보유 중, " +
-          "→손절·→이탈(굵게)은 주중에 이미 매도된 것. →손절/이탈예정(예상)은 장중 가격 기준 예보로 " +
+          "→손절·→이탈(굵게)은 주중에 이미 매도된 것. →손절(예상)/→이탈(예상)은 장중 가격 기준 예보로 " +
           "오늘 종가로 확정되면 다음 거래일 시가에 판다.",
         width: 108,
         cellDataType: "text",
@@ -646,7 +646,7 @@ export function MomentumClient() {
             const reason = String(p.data.exit_forecast_reason ?? "").includes("손절") ? "손절" : "이탈";
             next = (
               <span style={{ color: "var(--up-color, #d64545)", opacity: 0.75 }} title="오늘 종가로 확정 시 다음 거래일 시가 매도">
-                {" "}→{reason}예정(예상)
+                {" "}→{reason}(예상)
               </span>
             );
           } else if (p.data?.next_week_expected) {
