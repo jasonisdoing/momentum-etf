@@ -18,7 +18,8 @@ export function SettingsPageClient() {
   );
 
   return (
-    <PageFrame title="설정" titleRight={titleRight}>
+    // 항목이 많아 가로를 최대한 쓴다 — 그리드가 14개 컬럼을 한 화면에 놓는다.
+    <PageFrame title="설정" fullHeight fullWidth titleRight={titleRight}>
       <SettingsManager onSummaryChange={setTotalCount} />
     </PageFrame>
   );
