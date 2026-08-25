@@ -395,6 +395,34 @@ def save_etfs(ticker_type: str, data: list[dict]) -> None:
     _invalidate_cache(type_norm)
 
 
+def pools_by_ticker(tickers: Iterable[str]) -> dict[str, str]:
+    """티커 → 소속 종목풀(ticker_type). 어느 풀에도 없는 티커는 키가 없다.
+
+    한 티커는 한 종목풀에만 들어간다(``add_active_stock`` 이 중복 등록을 막는다). 그래서
+    계좌 보유 종목의 소속 풀이 유일하게 정해지고, 그 풀의 이평선으로 이탈을 판정할 수 있다.
+
+    티커는 저장된 형태 그대로 본다 — 호주는 ``ASX:`` 접두사가 붙어 미국의 같은 티커와 구분된다.
+    """
+    normalized = sorted({str(t or "").strip().upper() for t in tickers if str(t or "").strip()})
+    if not normalized:
+        return {}
+
+    coll = _get_collection()
+    if coll is None:
+        raise RuntimeError("MongoDB 연결 실패 — stock_meta 컬렉션을 읽을 수 없습니다.")
+
+    result: dict[str, str] = {}
+    for doc in coll.find(
+        {"ticker": {"$in": normalized}, "is_deleted": {"$ne": True}},
+        {"_id": 0, "ticker": 1, "ticker_type": 1},
+    ):
+        ticker = str(doc.get("ticker") or "").strip().upper()
+        pool = str(doc.get("ticker_type") or "").strip().lower()
+        if ticker and pool:
+            result[ticker] = pool
+    return result
+
+
 def add_stock(ticker_type: str, ticker: str, name: str = "", **extra_fields: Any) -> bool:
     """
     단일 종목을 stock_meta 컬렉션에 추가한다.

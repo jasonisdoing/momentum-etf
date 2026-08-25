@@ -5,11 +5,16 @@
   회색 처리 기준과 같다 — 둘 중 하나만 꺾여도 보유 대상이 아니라고 본다)
 - 손절: 보유 수익률 <= 계좌별 손절 기준(예: -7%)
 
-설정은 **계좌별**이다(각 계좌 문서):
-    ma_alarm_enabled / ma_short_days / ma_long_days,
-    stoploss_alarm_enabled / stoploss_threshold_pct
-계좌마다 On/Off 와 기준(이평선 일수·손절 %)을 다르게 둘 수 있다. 새 알람 종류는 계산 로직만
-추가하면 함께 발송된다. 이격은 종목풀 순위와 동일하게 실시간 스냅샷을 종가에 반영해 계산한다.
+**On/Off 는 계좌별**이다(각 계좌 문서의 ``ma_alarm_enabled`` / ``stoploss_alarm_enabled``).
+기준은 알람 종류마다 소속이 다르다.
+- 이평선 일수: **종목이 속한 종목풀**의 ``SHORT_MA_DAYS`` / ``LONG_MA_DAYS``.
+  한 티커는 한 풀에만 들어가므로(``add_active_stock`` 이 중복을 막는다) 보유 종목의 소속 풀이
+  유일하게 정해진다. 계좌가 여러 풀의 종목을 섞어 들고 있으면 종목마다 기준이 달라진다.
+- 손절 기준(%): 계좌별(``stoploss_threshold_pct``).
+
+기준을 정할 수 없는 종목은 조용히 넘기지 않고 **판정 불가**로 모아 슬랙에 함께 알린다
+(소속 종목풀 없음 / 가격 데이터 부족). 이격은 종목풀 순위와 동일하게 실시간 스냅샷을 종가에
+반영해 계산한다.
 """
 
 from __future__ import annotations
@@ -23,49 +28,50 @@ from utils.account_settings_store import load_account_docs, save_account_setting
 from utils.data_loader import fetch_ohlcv
 from utils.holdings_detail_service import load_all_holdings_detail
 from utils.logger import get_app_logger
-from utils.ma_options import ma_options_by_country
 from utils.moving_averages import calculate_moving_average, get_moving_average_type
 from utils.notification import send_slack_message_v2
 from utils.rankings import build_effective_close_series
+from utils.stock_list_io import pools_by_ticker
 
 logger = get_app_logger()
 
 _WARMUP_EXTRA_BDAYS = 40
-_DEFAULT_MA_SHORT_DAYS = 20
-_DEFAULT_MA_LONG_DAYS = 120
-_DEFAULT_STOPLOSS_PCT = -7.0
 # 화면 셀렉트 선택지(백엔드는 값만 검증하고, 목록은 화면과 공유)
 STOPLOSS_PCT_OPTIONS: tuple[float, ...] = (-7.0, -10.0)  # 전략 손절선 선택지와 통일
 
-
-# 화면 배지용 기본 아이콘 — 계좌별로 저장해 덮어쓸 수 있다(빈값 저장 = 배지 미표시).
-_DEFAULT_MA_ICON = "❗"  # 이동선 이탈(단기·장기 공용)
-_DEFAULT_STOPLOSS_ICON = "🚫"
-
-
-def _account_ma_days(doc: dict[str, Any]) -> tuple[int, int]:
-    """계좌의 (단기, 장기) 이평선 일수. 단기 >= 장기로 저장돼 있으면 그대로 두고 판정만 한다."""
-    short = doc.get("ma_short_days")
-    long = doc.get("ma_long_days")
-    return (
-        int(short) if isinstance(short, (int, float)) and int(short) >= 2 else _DEFAULT_MA_SHORT_DAYS,
-        int(long) if isinstance(long, (int, float)) and int(long) >= 2 else _DEFAULT_MA_LONG_DAYS,
-    )
+# 자산 화면 종목명 배지 아이콘. 계좌마다 다르게 둘 이유가 없어 코드에 고정한다.
+_MA_ICON = "❗"  # 이동선 이탈(단기·장기 공용)
+_STOPLOSS_ICON = "🚫"
 
 
-def _account_ma_icon(doc: dict[str, Any]) -> str:
-    value = doc.get("ma_alarm_icon")
-    return str(value).strip() if isinstance(value, str) else _DEFAULT_MA_ICON
+def _pool_ma_days(pool: str) -> tuple[int, int]:
+    """종목풀의 (단기, 장기) 이평선 일수. 설정이 없으면 에러 — 임의 기본값을 쓰지 않는다."""
+    from utils.settings_loader import get_ticker_type_settings
+
+    config = get_ticker_type_settings(pool) or {}
+    short = config.get("SHORT_MA_DAYS")
+    long = config.get("LONG_MA_DAYS")
+    if not isinstance(short, (int, float)) or not isinstance(long, (int, float)):
+        raise ValueError(f"종목풀 '{pool}' 에 이평선 설정이 없습니다.")
+    return int(short), int(long)
 
 
-def _account_stoploss_icon(doc: dict[str, Any]) -> str:
-    value = doc.get("stoploss_alarm_icon")
-    return str(value).strip() if isinstance(value, str) else _DEFAULT_STOPLOSS_ICON
+def _pool_country(pool: str) -> str:
+    """종목풀의 국가 코드. 종목이 실제로 거래되는 시장이라 시세 조회는 이 값을 쓴다."""
+    from utils.settings_loader import get_ticker_type_settings
+
+    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+    if not country:
+        raise ValueError(f"종목풀 '{pool}' 에 국가 코드가 없습니다.")
+    return country
 
 
-def _account_stoploss_pct(doc: dict[str, Any]) -> float:
+def _account_stoploss_pct(doc: dict[str, Any]) -> float | None:
+    """계좌의 손절 기준(%). 미설정/양수면 None — 판정 기준이 없다는 뜻."""
     value = doc.get("stoploss_threshold_pct")
-    return float(value) if isinstance(value, (int, float)) and float(value) < 0 else _DEFAULT_STOPLOSS_PCT
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and float(value) < 0:
+        return float(value)
+    return None
 
 
 def _safe_realtime_snapshot(country: str, tickers: list[str]) -> dict[str, dict[str, float]]:
@@ -128,71 +134,79 @@ def _ma_status(
 
 
 def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    """한 계좌의 (켜진) 알람 종류별 트리거와 실패 사유를 계좌 자체 기준으로 계산한다."""
+    """한 계좌의 (켜진) 알람 종류별 트리거·판정 불가 종목과 실패 사유를 계산한다.
+
+    이평선 일수는 **종목이 속한 종목풀** 설정에서 가져온다. 소속 풀을 찾지 못하거나 가격이
+    모자라 판정할 수 없는 종목은 조용히 빠지지 않고 ``unknown`` 으로 모아 슬랙에 함께 알린다.
+    """
     account_id = account_doc["account_id"]
     detail = load_all_holdings_detail(account_id)
     rows = [
         r for r in detail.get("rows", []) if str(r.get("ticker") or "").strip() and str(r.get("ticker")).strip() != "IS"
     ]
 
-    ma_days = _account_ma_days(account_doc)
     threshold = _account_stoploss_pct(account_doc)
     ma_on = bool(account_doc.get("ma_alarm_enabled"))
     stoploss_on = bool(account_doc.get("stoploss_alarm_enabled"))
 
     ma_hits: list[dict[str, Any]] = []
     stoploss_hits: list[dict[str, Any]] = []
+    unknown: list[dict[str, Any]] = []
     errors: list[str] = []
+
+    def _label(row: dict[str, Any]) -> dict[str, str]:
+        return {"ticker": str(row["ticker"]).strip(), "name": str(row.get("name") or row["ticker"])}
+
+    def _unknown(row: dict[str, Any], reason: str) -> None:
+        unknown.append({**_label(row), "reason": reason})
+        errors.append(f"{str(row['ticker']).strip()}: {reason}")
 
     # 손절: 보유 수익률(return_pct) 기준 — 시세 재조회 불필요.
     if stoploss_on:
-        for row in rows:
-            ret = row.get("return_pct")
-            if isinstance(ret, (int, float)) and not isinstance(ret, bool) and ret <= threshold:
-                stoploss_hits.append(
-                    {
-                        "ticker": str(row["ticker"]).strip(),
-                        "name": str(row.get("name") or row["ticker"]),
-                        "return_pct": round(float(ret), 2),
-                    }
-                )
+        if threshold is None:
+            errors.append("손절 기준(%)이 설정되지 않아 손절 알림을 건너뜁니다.")
+        else:
+            for row in rows:
+                ret = row.get("return_pct")
+                if isinstance(ret, (int, float)) and not isinstance(ret, bool) and ret <= threshold:
+                    stoploss_hits.append({**_label(row), "return_pct": round(float(ret), 2)})
 
     # 이동선 이탈: 종가 vs 이동평균. 종목풀 순위와 동일하게 실시간 스냅샷을 국가별로 미리 조회해 반영.
     if ma_on:
-        candidates: list[tuple[dict[str, Any], str, str, str]] = []  # (row, fetch_ticker, ticker_type, country)
+        pool_by_ticker = pools_by_ticker(str(r.get("ticker") or "") for r in rows)
+        candidates: list[tuple[dict[str, Any], str, str, str, tuple[int, int]]] = []
         by_country: dict[str, list[str]] = {}
         for row in rows:
-            ticker_type = str(row.get("ticker_type") or "").strip()
-            country = str(row.get("country_code") or "").strip().lower()
-            if not ticker_type or not country:
-                errors.append(f"{str(row['ticker']).strip()}: ticker_type/country 정보 없음")
+            ticker = str(row["ticker"]).strip().upper()
+            pool = pool_by_ticker.get(ticker)
+            if not pool:
+                # 종목풀에서 빠졌는데 계좌가 아직 들고 있는 경우 — 기준으로 삼을 이평선이 없다.
+                _unknown(row, "소속 종목풀 없음")
                 continue
-            fetch_ticker = str(row["ticker"]).strip().split(":")[-1]  # 'ASX:XXX' → 'XXX'
-            candidates.append((row, fetch_ticker, ticker_type, country))
+            try:
+                ma_days = _pool_ma_days(pool)
+                country = _pool_country(pool)
+            except Exception as exc:
+                _unknown(row, str(exc))
+                continue
+            fetch_ticker = ticker.split(":")[-1]  # 'ASX:XXX' → 'XXX'
+            candidates.append((row, fetch_ticker, pool, country, ma_days))
             by_country.setdefault(country, []).append(fetch_ticker)
 
         snapshots = {c: _safe_realtime_snapshot(c, tks) for c, tks in by_country.items()}
-        for row, fetch_ticker, ticker_type, country in candidates:
+        for row, fetch_ticker, pool, country, ma_days in candidates:
             entry = snapshots.get(country, {}).get(fetch_ticker)
             try:
-                status = _ma_status(fetch_ticker, ticker_type, country, ma_days, entry)
+                status = _ma_status(fetch_ticker, pool, country, ma_days, entry)
             except Exception as exc:  # 한 종목 실패가 전체를 막지 않게
-                errors.append(f"{fetch_ticker}: {exc}")
-                status = None
+                _unknown(row, f"판정 실패 ({exc})")
+                continue
             if status is None:
-                errors.append(f"{fetch_ticker}: 가격 데이터 부족")
+                _unknown(row, "가격 데이터 부족")
             elif status["below"]:
-                ma_hits.append(
-                    {"ticker": str(row["ticker"]).strip(), "name": str(row.get("name") or row["ticker"]), **status}
-                )
+                ma_hits.append({**_label(row), **status})
 
-    return {
-        "ma": ma_hits,
-        "stoploss": stoploss_hits,
-        "ma_short_days": ma_days[0],
-        "ma_long_days": ma_days[1],
-        "threshold": threshold,
-    }, errors
+    return {"ma": ma_hits, "stoploss": stoploss_hits, "unknown": unknown, "threshold": threshold}, errors
 
 
 # 배지 계산은 보유 종목별 가격 시계열 조회라 수 초 걸린다 — 계좌별 TTL 캐시로 재계산을 줄인다.
@@ -208,8 +222,8 @@ def _invalidate_badges_cache() -> None:
 def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
     """자산 화면(종목명 배지)용: 계좌의 알람 트리거를 티커→아이콘 문자열 맵으로 반환한다.
 
-    슬랙 알람(compute_account_alerts)과 **같은 설정·같은 판정**을 쓴다. 꺼진 알람 종류나
-    아이콘이 빈값(미설정)이면 해당 배지는 붙지 않는다. 티커는 접두사 없는 형태로 정규화한다.
+    슬랙 알람(compute_account_alerts)과 **같은 설정·같은 판정**을 쓴다. 꺼진 알람 종류의
+    배지는 붙지 않는다. 티커는 접두사 없는 형태로 정규화한다.
     """
     norm_id = str(account_id or "").strip().lower()
     import time as _time
@@ -221,8 +235,6 @@ def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
     if account_doc is None:
         raise ValueError(f"알 수 없는 계좌입니다: {account_id}")
 
-    ma_icon = _account_ma_icon(account_doc)
-    stoploss_icon = _account_stoploss_icon(account_doc)
     alerts, _errors = compute_account_alerts(account_doc)
 
     badge_by_ticker: dict[str, str] = {}
@@ -231,38 +243,32 @@ def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
         return str(value or "").strip().upper().split(":")[-1]
 
     # 이동선 이탈 종목 — 배지와 별개로 화면이 행 전체를 회색 처리하는 데 쓴다.
-    # 아이콘을 비운 계좌는 배지가 안 붙으므로 회색도 하지 않는다(같은 조건으로 묶는다).
     ma_tickers: list[str] = []
-    if ma_icon:
-        for hit in alerts["ma"]:
-            key = _norm_ticker(hit["ticker"])
-            if key:
-                badge_by_ticker[key] = badge_by_ticker.get(key, "") + ma_icon
-                ma_tickers.append(key)
-    if stoploss_icon:
-        for hit in alerts["stoploss"]:
-            key = _norm_ticker(hit["ticker"])
-            if key:
-                badge_by_ticker[key] = badge_by_ticker.get(key, "") + stoploss_icon
+    for hit in alerts["ma"]:
+        key = _norm_ticker(hit["ticker"])
+        if key:
+            badge_by_ticker[key] = badge_by_ticker.get(key, "") + _MA_ICON
+            ma_tickers.append(key)
+    for hit in alerts["stoploss"]:
+        key = _norm_ticker(hit["ticker"])
+        if key:
+            badge_by_ticker[key] = badge_by_ticker.get(key, "") + _STOPLOSS_ICON
 
     result = {
         "account_id": norm_id,
         "badge_by_ticker": badge_by_ticker,
         "ma_tickers": sorted(set(ma_tickers)),
-        "ma_icon": ma_icon,
-        "stoploss_icon": stoploss_icon,
-        "ma_short_days": alerts["ma_short_days"],
-        "ma_long_days": alerts["ma_long_days"],
-        "threshold": alerts["threshold"],
     }
     _badges_cache[norm_id] = (_time.monotonic(), dict(result))
     return result
 
 
 def get_alarm_view() -> dict[str, Any]:
-    """알람 화면용: 계좌별 알람 On/Off + 기준(이평선 일수·손절 %) 목록(시세 계산 없음)."""
+    """알람 화면용: 계좌별 알람 On/Off + 손절 기준 목록(시세 계산 없음).
+
+    이평선 일수는 계좌가 아니라 종목의 종목풀에서 오므로 여기 없다.
+    """
     return {
-        "ma_options_by_country": ma_options_by_country(),
         "stoploss_pct_options": list(STOPLOSS_PCT_OPTIONS),
         "accounts": [
             {
@@ -272,49 +278,31 @@ def get_alarm_view() -> dict[str, Any]:
                 "order": int(doc.get("order") or 0),
                 "country_code": str(doc.get("country_code") or "").strip().lower(),
                 "ma_enabled": bool(doc.get("ma_alarm_enabled", False)),
-                "ma_short_days": _account_ma_days(doc)[0],
-                "ma_long_days": _account_ma_days(doc)[1],
-                "ma_icon": _account_ma_icon(doc),
                 "stoploss_enabled": bool(doc.get("stoploss_alarm_enabled", False)),
                 "stoploss_threshold_pct": _account_stoploss_pct(doc),
-                "stoploss_icon": _account_stoploss_icon(doc),
             }
             for doc in load_account_docs()
         ],
     }
 
 
-def set_account_alarm(
-    account_id: str, alarm_type: str, *, enabled: bool, values: dict[str, Any], icon: str | None = None
-) -> dict[str, Any]:
-    """계좌별 알람 On/Off + 기준값(+화면 배지 아이콘) 저장. alarm_type: 'ma'|'stoploss'.
+def set_account_alarm(account_id: str, alarm_type: str, *, enabled: bool, values: dict[str, Any]) -> dict[str, Any]:
+    """계좌별 알람 On/Off + 기준값 저장. alarm_type: 'ma'|'stoploss'.
 
     values 는 알람 종류가 요구하는 기준값 전부다 — 없는 키는 채우지 않고 에러를 낸다.
-      ma       : {"short_days": int, "long_days": int}
+      ma       : {} (기준이 종목풀에 있어 계좌가 저장할 값이 없다)
       stoploss : {"threshold_pct": float}
     """
-
-    def _need(key: str) -> Any:
-        if key not in values:
-            raise ValueError(f"'{alarm_type}' 알람에는 '{key}' 값이 필요합니다.")
-        return values[key]
-
     if alarm_type == "ma":
-        payload: dict[str, Any] = {
-            "ma_alarm_enabled": bool(enabled),
-            "ma_short_days": int(_need("short_days")),
-            "ma_long_days": int(_need("long_days")),
-        }
-        if icon is not None:
-            payload["ma_alarm_icon"] = str(icon).strip()
+        payload: dict[str, Any] = {"ma_alarm_enabled": bool(enabled)}
     elif alarm_type == "stoploss":
-        payload = {"stoploss_alarm_enabled": bool(enabled), "stoploss_threshold_pct": float(_need("threshold_pct"))}
-        if icon is not None:
-            payload["stoploss_alarm_icon"] = str(icon).strip()
+        if "threshold_pct" not in values:
+            raise ValueError("'stoploss' 알람에는 'threshold_pct' 값이 필요합니다.")
+        payload = {"stoploss_alarm_enabled": bool(enabled), "stoploss_threshold_pct": float(values["threshold_pct"])}
     else:
         raise ValueError(f"알 수 없는 알람 종류입니다: {alarm_type}")
     save_account_settings(account_id, payload, save_method="알람 센터")
-    _invalidate_badges_cache()  # 설정(기준·아이콘·On/Off) 변경 즉시 배지에 반영
+    _invalidate_badges_cache()  # 설정(기준·On/Off) 변경 즉시 배지에 반영
     return get_alarm_view()
 
 
@@ -326,8 +314,8 @@ def _post_slack(sections: list[dict[str, Any]], *, manual: bool) -> bool:
     for s in sections:
         parts: list[str] = [f"*{s['account']}*"]
         if s["ma"]:
-            ma_type = get_moving_average_type()
-            parts.append(f"📉 *이동선 이탈* ({ma_type} 단기 {s['ma_short_days']}일 · 장기 {s['ma_long_days']}일)")
+            # 기준(이평선 일수)이 종목의 종목풀마다 달라 계좌 헤더에 못 쓴다 — 종목 줄 끝에 붙인다.
+            parts.append(f"📉 *이동선 이탈* ({get_moving_average_type()})")
             for b in s["ma"]:
                 # 어느 쪽이 꺾였는지 보이게 이탈한 선만 표시한다.
                 broken = [
@@ -335,10 +323,16 @@ def _post_slack(sections: list[dict[str, Any]], *, manual: bool) -> bool:
                     for key, label in (("short", "단기"), ("long", "장기"))
                     if b[f"{key}_below"]
                 ]
-                parts.append(f"  • {b['name']}({b['ticker']}): {' / '.join(broken)}")
+                parts.append(
+                    f"  • {b['name']}({b['ticker']}): {' / '.join(broken)}  `[{b['short_days']}/{b['long_days']}]`"
+                )
         if s["stoploss"]:
             parts.append(f"🛑 *손절* ({s['threshold']:.1f}% 이하)")
             parts += [f"  • {b['name']}({b['ticker']}): 수익률 {b['return_pct']:+.2f}%" for b in s["stoploss"]]
+        if s["unknown"]:
+            # 조용히 빠지면 알림이 안 온 건지 판정이 안 된 건지 구분되지 않는다 — 사유까지 알린다.
+            parts.append("⚠️ *판정 불가*")
+            parts += [f"  • {b['name']}({b['ticker']}): {b['reason']}" for b in s["unknown"]]
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(parts)}})
     blocks.append(
         {"type": "context", "elements": [{"type": "mrkdwn", "text": f"총 {len(sections)}개 계좌 · {total}건"}]}
@@ -364,7 +358,8 @@ def send_holdings_alarms(*, manual: bool = False) -> dict[str, Any]:
             continue
         alerts, errors = compute_account_alerts(doc)
         all_errors.extend(f"{doc['account_id']}/{e}" for e in errors)
-        if alerts["ma"] or alerts["stoploss"]:
+        # 판정 불가도 알려야 할 내용이라 발송 대상에 넣는다(정리가 필요하다는 신호다).
+        if alerts["ma"] or alerts["stoploss"] or alerts["unknown"]:
             sections.append({"account": str(doc.get("name") or doc["account_id"]), **alerts})
 
     if not sections:
