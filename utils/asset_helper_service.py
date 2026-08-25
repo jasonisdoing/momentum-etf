@@ -12,6 +12,7 @@ import pandas as pd
 from config import MIN_TRADING_DAYS, TRADING_DAYS_PER_MONTH
 from utils.logger import get_app_logger
 from utils.moving_averages import calculate_moving_average
+from utils.share_allocation import ShareTarget, allocate_integer_shares
 
 logger = get_app_logger()
 
@@ -590,6 +591,23 @@ def _apply_trade_plan(
     target_asset_amount = 0.0
     target_tickers: set[str] = set()
 
+    # 목표 주수는 종목마다 따로 내림하지 않고 **한 번에 배분**한다 (합성 전략·백테스트와 같은 함수).
+    # 따로 내림하면 1주 값에 걸려 남은 몫이 아무도 쓰지 않는 현금으로 놀아, 목표 현금비중이
+    # 0 이어도 채워지지 않는다. 예산은 목표 금액의 합이다.
+    allocation_targets: list[ShareTarget] = []
+    for row in rows:
+        ticker = str(row.get("ticker") or "").strip().upper()
+        price = current_price_map.get(ticker)
+        weight = row.get("target_weight_pct")
+        if ticker == "__CASH__" or not price or float(price) <= 0 or weight is None or account_amount_krw <= 0:
+            continue
+        allocation_targets.append(
+            ShareTarget(key=ticker, target_amount=account_amount_krw * float(weight) / 100.0, price=float(price))
+        )
+    target_quantity_by_ticker = allocate_integer_shares(
+        allocation_targets, budget=sum(item.target_amount for item in allocation_targets)
+    )
+
     for row in rows:
         ticker = str(row.get("ticker") or "").strip().upper()
         if ticker and ticker != "__CASH__":
@@ -648,7 +666,7 @@ def _apply_trade_plan(
         if target_amount is None or current_price is None or current_price <= 0:
             continue
 
-        quantity = int(target_amount // current_price)
+        quantity = target_quantity_by_ticker.get(ticker, 0)
         raw_target_buy_amount = quantity * current_price
         target_buy_amount = round(raw_target_buy_amount, 2) if native_mode else int(round(raw_target_buy_amount))
         row["target_quantity"] = quantity
