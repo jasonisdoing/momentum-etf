@@ -93,6 +93,8 @@ export type AccountSummary = {
   daily_profit: number;
   daily_return_pct: number;
   benchmark_name?: string | null;
+  /** 지수(%) 옆 괄호 표기 — 국내는 종목명, 해외는 티커(백엔드가 정한다). */
+  benchmark_label?: string | null;
   benchmark_pct?: number | null;
   index_result?: "win" | "lose" | "draw" | null;
   weekly_profit: number;

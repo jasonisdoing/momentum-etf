@@ -33,7 +33,10 @@ def _load_account_benchmarks(configs: list[dict[str, Any]]) -> dict[str, dict[st
     환율을 못 구하면 환산 못 한 값을 그대로 쓰지 않고 pct=None 으로 둔다 — 기준이 다른 값을
     비교하면 승부가 조용히 틀리기 때문이다.
 
-    반환: {account_id: {"name": 표시명, "pct": 원화기준 일간%|None}}
+    반환: {account_id: {"name": 표시명, "label": 화면 표기, "pct": 원화기준 일간%|None}}
+
+    ``label`` 은 지수(%) 옆에 괄호로 붙는 짧은 표기다. **국내는 종목명, 해외는 티커** —
+    국내 ETF 이름은 티커(숫자 6자리)만으로 뭔지 알 수 없고, 해외는 티커가 곧 통용 이름이다.
     """
     from services.price_service import get_exchange_rates, get_realtime_snapshot
     from utils.cash_model import currency_for_country
@@ -50,10 +53,13 @@ def _load_account_benchmarks(configs: list[dict[str, Any]]) -> dict[str, dict[st
         # au 소스는 bare 코드를 받으므로 .AX 접미사는 제거.
         fetch_ticker = ticker[:-3] if country == "au" and ticker.endswith(".AX") else ticker
         tickers_by_country.setdefault(country, set()).add(fetch_ticker)
+        name = str(bench.get("name") or ticker)
         acc_meta[config["account_id"]] = {
             "country": country,
             "fetch_ticker": fetch_ticker,
-            "name": str(bench.get("name") or ticker),
+            "name": name,
+            # 국내는 종목명(티커가 숫자라 알아볼 수 없다), 해외는 티커(그 자체가 통용 이름).
+            "label": name if country == "kor" else ticker,
         }
 
     snap_by_country: dict[str, dict[str, Any]] = {}
@@ -89,7 +95,7 @@ def _load_account_benchmarks(configs: list[dict[str, Any]]) -> dict[str, dict[st
             else:
                 pct = ((1.0 + pct / 100.0) * (1.0 + float(fx_change_pct) / 100.0) - 1.0) * 100.0
 
-        result[account_id] = {"name": meta["name"], "pct": pct}
+        result[account_id] = {"name": meta["name"], "label": meta["label"], "pct": pct}
     return result
 
 
@@ -292,6 +298,7 @@ def load_dashboard_data() -> dict[str, Any]:
                 "daily_profit": daily_profit,
                 "daily_return_pct": daily_return_pct_acc,
                 "benchmark_name": (account_benchmarks.get(config["account_id"]) or {}).get("name"),
+                "benchmark_label": (account_benchmarks.get(config["account_id"]) or {}).get("label"),
                 "benchmark_pct": (account_benchmarks.get(config["account_id"]) or {}).get("pct"),
                 "index_result": _index_result(
                     daily_return_pct_acc, (account_benchmarks.get(config["account_id"]) or {}).get("pct")
