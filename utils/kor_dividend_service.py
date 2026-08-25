@@ -501,28 +501,36 @@ def _live_prices(tickers: list[str]) -> dict[str, float]:
     return result
 
 
-def _past_closes(tickers: list[str]) -> dict[str, dict[int, float]]:
-    """티커별 {개월: N개월 전 종가}. 그 날이 휴장이면 직전 거래일을 쓴다."""
+def _price_history(tickers: list[str]) -> dict[str, dict[str, Any]]:
+    """티커별 {"past": {개월: N개월 전 종가}, "high": 최근 12개월 최고가}.
+
+    고점 창은 종목풀 순위(`utils/rankings`)와 같은 ``METRIC_WINDOW_MONTHS`` 를 쓴다 —
+    화면마다 창이 다르면 같은 종목의 '고점 대비'가 화면마다 달라진다.
+    """
+    from config import METRIC_WINDOW_MONTHS
     from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
 
     frames = load_cached_frames_bulk_from_all_ticker_types(tickers)
     today = pd.Timestamp.today().normalize()
-    result: dict[str, dict[int, float]] = {}
+    result: dict[str, dict[str, Any]] = {}
     for ticker, frame in frames.items():
         if frame is None or frame.empty or "Close" not in frame.columns:
             continue
         close = frame["Close"].astype(float).dropna()
         close.index = pd.to_datetime(close.index)
+        if close.empty:
+            continue
         by_months: dict[int, float] = {}
         for months in RETURN_MONTHS:
             earlier = close[close.index <= today - pd.DateOffset(months=months)]
             if len(earlier):
                 by_months[months] = float(earlier.iloc[-1])
-        result[ticker] = by_months
+        window = close.loc[close.index[-1] - pd.DateOffset(months=METRIC_WINDOW_MONTHS) :]
+        result[ticker] = {"past": by_months, "high": float(window.max()) if not window.empty else None}
     return result
 
 
-def _build_row(doc: dict[str, Any], price: float | None, past: dict[int, float]) -> dict[str, Any]:
+def _build_row(doc: dict[str, Any], price: float | None, history: dict[str, Any]) -> dict[str, Any]:
     """저장 문서 + 현재가 → 화면 한 행."""
     by_year = doc.get("by_year") or {}
     consensus_year = doc.get("consensus_year")
@@ -570,10 +578,14 @@ def _build_row(doc: dict[str, Any], price: float | None, past: dict[int, float])
     shareholder_yield = shareholder_yield_by_year.get(latest_confirmed) if latest_confirmed else None
     buyback_yield = buyback_yield_by_year.get(latest_confirmed) if latest_confirmed else None
 
+    past = history.get("past") or {}
     returns = {
         months: ((price / base - 1.0) * 100.0 if (price and (base := past.get(months))) else None)
         for months in RETURN_MONTHS
     }
+    # 고점 대비(%) — 0 이면 신고점. 종목풀 순위 화면과 같은 정의다.
+    high = history.get("high")
+    high_drawdown = (price / high - 1.0) * 100.0 if (price and high) else None
 
     trends = doc.get("trends") or {}
     payout = doc.get("payout") or {}
@@ -584,6 +596,8 @@ def _build_row(doc: dict[str, Any], price: float | None, past: dict[int, float])
     return {
         "ticker": doc["ticker"],
         "name": doc.get("name"),
+        "market_cap_rank": doc.get("market_cap_rank"),
+        "high_drawdown": high_drawdown,
         "current_price": price,
         "market_cap": market_cap,
         "returns": {str(months): value for months, value in returns.items()},
@@ -624,9 +638,15 @@ def load_kor_dividend_rows() -> dict[str, Any]:
 
     tickers = [doc["ticker"] for doc in documents]
     prices = _live_prices(tickers)
-    past_closes = _past_closes(tickers)
+    histories = _price_history(tickers)
+    # 시총 순위는 배치 B 가 stock_cache_meta 에 적어 둔 시장 전체 순위 — 순위 화면과 같은 소스.
+    from utils.market_cap_rank import load_market_cap_rank_map
 
-    rows = [_build_row(doc, prices.get(doc["ticker"]), past_closes.get(doc["ticker"]) or {}) for doc in documents]
+    rank_by_ticker = load_market_cap_rank_map("kor")
+    for doc in documents:
+        doc["market_cap_rank"] = rank_by_ticker.get(doc["ticker"])
+
+    rows = [_build_row(doc, prices.get(doc["ticker"]), histories.get(doc["ticker"]) or {}) for doc in documents]
     rows.sort(key=lambda row: (row["dividend_yield"] is None, -(row["dividend_yield"] or 0.0)))
 
     years = sorted({year for doc in documents for year in (doc.get("by_year") or {})}, reverse=True)
