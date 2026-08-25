@@ -50,6 +50,7 @@ from utils.momentum_service import (
 from utils.pool_settings_store import get_pool_slippage
 from utils.pool_signal_backtest_service import get_max_backtest_months
 from utils.price_series import positive_prices
+from utils.share_allocation import ShareTarget, allocate_integer_shares, backtest_initial_capital
 from utils.trade_stats import summarize_trades
 
 
@@ -217,7 +218,9 @@ def run_backtest(
     clean_benchmark: pd.Series | None = None
     if include_daily:
         if "clean_closes" not in context:
-            context["clean_closes"] = {ticker: positive_prices(frame["Close"]).dropna() for ticker, frame in frames.items()}
+            context["clean_closes"] = {
+                ticker: positive_prices(frame["Close"]).dropna() for ticker, frame in frames.items()
+            }
             opens_by: dict[str, pd.Series] = {}
             for ticker, frame in frames.items():
                 opens = _open_series(frame)
@@ -300,6 +303,9 @@ def run_backtest(
     previous_holdings: set[str] = set()
     # 직전 보유 구간의 종목별 성장배수(1+수익률) — 교체 시점의 드리프트 비중 계산용.
     previous_growth: dict[str, float] = {}
+    # 굴리는 자산 — 정수 주수 배분의 예산이다. 시작 자본은 통화별 상수(config).
+    # 성과 지표는 예전처럼 배수로 내므로 이 값 자체는 결과에 안 나온다.
+    equity = backtest_initial_capital(settings["pool"])
 
     for position in range(len(dates) - 1):
         start = dates[position]
@@ -371,11 +377,39 @@ def run_backtest(
             value = _open_return(opens, start, sell_date_by_ticker.get(ticker, end))
             if value is not None:
                 period_returns[ticker] = value
-        # 슬롯 모델: 보유 종목은 각 1/N, 빈 슬롯은 현금(0%) — 분모는 항상 top_n.
+        # ── 슬롯 비중 — **정수 주수**로 정한다 (운용 현황·다른 백테스트와 같은 함수).
+        #
+        # 예전에는 보유 종목마다 정확히 1/N 을 줬는데, 실제로는 소수점 주식을 못 사서
+        # 1주 값에 걸린 만큼이 현금으로 남는다. 비싼 종목일수록·자본이 작을수록 커지는
+        # 마찰이라, 1/N 로 두면 백테스트가 실제로 못 내는 성과를 낸다.
+        # 자본은 지금까지 굴린 자산(equity)이다 — 정수 마찰은 자본 크기에 달렸다.
+        unit = equity / top_n if top_n else 0.0
+        # 가격은 period_returns 와 **같은 소스**(frames)에서 읽는다. clean_opens 는
+        # include_daily 일 때만 채워져서, 그걸 쓰면 일간 탭을 안 볼 때 비중이 통째로 비었다.
+        entry_price_by_ticker: dict[str, float] = {}
+        for ticker in holdings:
+            frame = frames.get(ticker)
+            opens = _open_series(frame) if frame is not None else None
+            if opens is None:
+                continue
+            entry = opens.asof(start)
+            if pd.notna(entry) and float(entry) > 0:
+                entry_price_by_ticker[ticker] = float(entry)
+        quantities = allocate_integer_shares(
+            [ShareTarget(key=t, target_amount=unit, price=p) for t, p in entry_price_by_ticker.items()],
+            budget=equity,
+        )
+        # 실제 비중 — 남는 현금은 수익률 0 인 슬롯이 된다(분모를 top_n 으로 두던 것과 같은 효과).
+        weight_by_ticker = {
+            ticker: quantities.get(ticker, 0) * price / equity
+            for ticker, price in entry_price_by_ticker.items()
+            if equity > 0
+        }
+
         if not holdings:
             gross: float | None = 0.0  # 전량 현금인 주
         elif period_returns:
-            gross = sum(period_returns.values()) / top_n
+            gross = sum(weight_by_ticker.get(t, 0.0) * value for t, value in period_returns.items())
         else:
             gross = None  # 보유 종목의 가격 데이터가 전혀 없음 — 데이터 문제를 그대로 드러낸다
 
@@ -415,10 +449,17 @@ def run_backtest(
                     return curve
                 return curve.where(window < stop_day, float(exit_price) / float(base))
 
-            ratios = [curve for curve in (position_curve(t) for t in holdings) if curve is not None]
-            # 슬롯 모델 — 보유 곡선 합 + 현금 슬롯(가치 1 고정), 분모는 top_n.
-            if ratios:
-                portfolio = (pd.concat(ratios, axis=1).sum(axis=1) + float(top_n - len(ratios))) / top_n
+            # 일별 곡선도 같은 정수 주수 비중으로 합친다 — 주간 수익률과 기준이 갈리면
+            # 두 탭의 값이 어긋난다.
+            weighted = [
+                curve * weight_by_ticker.get(ticker, 0.0)
+                for ticker, curve in ((t, position_curve(t)) for t in holdings)
+                if curve is not None
+            ]
+            invested = sum(weight_by_ticker.get(t, 0.0) for t in holdings if position_curve(t) is not None)
+            if weighted:
+                # 투자되지 않은 몫은 현금(가치 1 고정).
+                portfolio = pd.concat(weighted, axis=1).sum(axis=1) + float(1.0 - invested)
             elif not holdings:
                 portfolio = pd.Series(1.0, index=window)  # 전량 현금인 주 — 변동 없음
             else:
@@ -445,6 +486,10 @@ def run_backtest(
             monthly_by_key[month_key].append(strategy_pct)
         if benchmark_pct is not None:
             monthly_bench[month_key].append(benchmark_pct)
+
+        # 다음 구간의 배분 예산 — 이번 구간 성과를 반영한다.
+        if strategy_pct is not None:
+            equity *= 1.0 + strategy_pct / 100.0
 
         previous_holdings = survivors
         previous_growth = {ticker: 1.0 + period_returns.get(ticker, 0.0) for ticker in previous_holdings}
@@ -537,9 +582,7 @@ def run_backtest(
         buckets: dict[pd.Timestamp, dict[str, Any]] = {}
         for row in daily:
             stamp = pd.Timestamp(row["date"])
-            bucket = buckets.setdefault(
-                _week_monday(stamp), {"end": stamp, "strategy": [], "benchmark": []}
-            )
+            bucket = buckets.setdefault(_week_monday(stamp), {"end": stamp, "strategy": [], "benchmark": []})
             bucket["end"] = max(bucket["end"], stamp)
             bucket["strategy"].append(row["strategy_pct"])
             bucket["benchmark"].append(row["benchmark_pct"])
