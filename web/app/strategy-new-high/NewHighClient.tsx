@@ -79,6 +79,8 @@ type PositionRow = {
   ticker: string;
   name: string;
   industry: string;
+  /** 지금 계좌에 실제로 들고 있는지 — 전략상 보유(is_held)와 뜻이 다르다. */
+  account_held?: boolean;
   /** 직전 거래일 종가 대비 등락률 — 다른 화면과 같은 기준. */
   change_pct: number | null;
   /** 오늘 기준 시가총액(순위 화면과 같은 소스). 과거 이력이 없어 백테스트에는 쓰지 않는다. */
@@ -279,12 +281,13 @@ const STAGE_STYLE = {
   pullback: { color: "#7048e8", text: "장중 고가는 최고 종가선에 닿았지만 종가가 다시 아래로 내려온 상태입니다." },
   imminent: { color: "#e8590c", text: "최고 종가까지 3% 이내로 남은 종목입니다." },
   near: { color: "#2f9e44", text: "최고 종가까지 3% 초과 7% 이내로 남은 종목입니다." },
-  held: { color: "#495057", text: "이미 보유 중이라 다시 사지 않습니다. 신고가를 계속 갱신하면 돌파 신호가 매일 나오므로 목록에는 남습니다." },
+  held: { color: "#495057", text: "전략이 이미 들고 있는 종목이 신고가를 다시 넘은 상태입니다. 돌파 신호는 매일 나오지만 재매수하지 않아 목록에만 남습니다." },
 } as const;
 
 function describeStage(row: PositionRow, live: boolean): { label: string; color: string } {
-  // 보유 중이면 상태보다 '못 산다'는 사실이 먼저다.
-  if (row.is_held) return { label: "보유중", color: STAGE_STYLE.held.color };
+  // 전략이 이미 들고 있으면 상태보다 '못 산다'는 사실이 먼저다.
+  // (실계좌 보유 여부는 별도 '보유' 컬럼이 담당한다 — 뜻이 달라 섞지 않는다.)
+  if (row.is_held) return { label: "신고가 갱신", color: STAGE_STYLE.held.color };
   if (row.gap_pct >= 0) {
     // 장중에는 종가가 아직 안 나왔으니 '돌파중' — 마감 뒤 확정되면 '돌파성공'.
     const label = live ? "돌파중" : "돌파성공";
@@ -306,7 +309,7 @@ const STAGE_GUIDE: { label: string; key: keyof typeof STAGE_STYLE }[] = [
   { label: "터치 후 밀림", key: "pullback" },
   { label: "임박", key: "imminent" },
   { label: "근접", key: "near" },
-  { label: "보유중", key: "held" },
+  { label: "신고가 갱신", key: "held" },
 ];
 
 /** 접이식 전략 설명 — 운용 현황·백테스트 섹션 상단(기본 접힘). */
@@ -588,6 +591,17 @@ export function NewHighClient() {
           return <strong style={{ color: stage.color }}>{stage.label}</strong>;
         },
       },
+      {
+        field: "account_held",
+        headerName: "보유중",
+        headerTooltip: "지금 계좌에 실제로 들고 있는 종목 — 시장 화면의 '보유' 와 같은 기준(그 국가의 모든 계좌).",
+        width: 74,
+        minWidth: 66,
+        cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+        // 보유가 아니면 공백 — '-' 를 채우면 보유 표시가 눈에 안 들어온다.
+        cellRenderer: (p: { value?: boolean }) =>
+          p.value ? <strong style={{ color: "#2f9e44" }}>보유</strong> : null,
+      },
       marketCapRankColumn<PositionRow>("market_cap_rank", !hasIndustryData),
       {
         field: "ticker",
@@ -820,8 +834,9 @@ export function NewHighClient() {
     () => [
       {
         headerName: "상태",
-        width: 110,
-        minWidth: 100,
+        // 가장 긴 문구가 "매도 예정(예상) (손절)" 이라 잘리지 않을 만큼 준다.
+        width: 172,
+        minWidth: 156,
         cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
         valueGetter: (p) => p.data?.plan ?? "",
         cellRenderer: (p: { data?: PlanRow }) => {
