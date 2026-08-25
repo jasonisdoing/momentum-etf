@@ -330,11 +330,14 @@ def run_backtest(
             trade_events.append({"date": start, "action": "add", "ticker": ticker})
             _open_trade(ticker, start)
         for ticker in removed_tickers:
-            trade_events.append({"date": start, "action": "remove", "ticker": ticker})
+            trade_events.append({"date": start, "action": "remove", "ticker": ticker, "reason": "주간 교체"})
             _close_trade(ticker, start, "주간 교체")
         for exit_info in exits:
-            trade_events.append({"date": exit_info["sell_date"], "action": "remove", "ticker": exit_info["ticker"]})
-            _close_trade(exit_info["ticker"], exit_info["sell_date"], exit_info.get("reason") or "주중 이탈")
+            reason = exit_info.get("reason") or "주중 이탈"
+            trade_events.append(
+                {"date": exit_info["sell_date"], "action": "remove", "ticker": exit_info["ticker"], "reason": reason}
+            )
+            _close_trade(exit_info["ticker"], exit_info["sell_date"], reason)
 
         # ── 교체 매매 금액(포트폴리오 대비 비율) ──
         # 유지 종목도 매주 1/N 로 재조정하므로, 드리프트 비중과 목표의 차이가 전부 매매다.
@@ -548,6 +551,7 @@ def run_backtest(
             bucket = buckets[key]
             added_labels: list[str] = []
             removed_labels: list[str] = []
+            exited_labels: list[str] = []  # 주중 이탈·손절 — 교체 편출과 구분해 보여준다
             while event_index < len(events_sorted) and events_sorted[event_index]["date"] <= bucket["end"]:
                 event = events_sorted[event_index]
                 if event["action"] == "add":
@@ -555,17 +559,24 @@ def run_backtest(
                     added_labels.append(holding_label(event["ticker"]))
                 else:
                     holdings_running -= 1
-                    removed_labels.append(holding_label(event["ticker"]))
+                    reason = str(event.get("reason") or "주간 교체")
+                    if reason == "주간 교체":
+                        removed_labels.append(holding_label(event["ticker"]))
+                    else:
+                        exited_labels.append(f"{holding_label(event['ticker'])} · {reason}")
                 event_index += 1
             weekly.append(
                 {
                     "week_end": bucket["end"].strftime("%Y-%m-%d"),
                     "strategy_pct": _compound_daily(bucket["strategy"]),
                     "benchmark_pct": _compound_daily(bucket["benchmark"]),
+                    # 교체 직후(주 시작) 종목 수 — 주중 이탈로 줄면 화면이 "5 → 0" 로 보여준다.
+                    "holdings_start": holdings_running + len(exited_labels),
                     "holdings_count": holdings_running,
                     "turnover_pct": round(len(added_labels) / top_n * 100.0, 1),
                     "added": added_labels,
                     "removed": removed_labels,
+                    "exited": exited_labels,
                 }
             )
 
@@ -587,16 +598,21 @@ def run_backtest(
         pending_added = []
         pending_removed = sorted(x["ticker"] for x in pending_exits)
         pending_count = len(current_holdings) - len(pending_removed)
+        pending_exit_reason = {x["ticker"]: x.get("reason") or "주중 이탈" for x in pending_exits}
 
     weekly.append(
         {
             "week_end": week_last_trading_day(country, next_rebalance or (last_cached + pd.Timedelta(days=7))),
             "strategy_pct": None,
             "benchmark_pct": None,
+            "holdings_start": pending_count + len(pending_removed) if pending_signal is None else pending_count,
             "holdings_count": pending_count,
             "turnover_pct": round(len(pending_added) / top_n * 100.0, 1),
             "added": [holding_label(t) for t in pending_added],
-            "removed": [holding_label(t) for t in pending_removed],
+            "removed": [holding_label(t) for t in pending_removed] if pending_signal is not None else [],
+            "exited": []
+            if pending_signal is not None
+            else [f"{holding_label(t)} · {pending_exit_reason[t]} 예정" for t in pending_removed],
             "is_pending": True,
         }
     )
