@@ -101,6 +101,46 @@ def _load_stock_meta_doc(ticker_type: str, ticker: str) -> dict[str, Any] | None
     )
 
 
+def _find_other_pool_with_ticker(ticker_type: str, ticker: str) -> str | None:
+    """같은 티커를 이미 담고 있는 **다른** 종목풀의 ticker_type. 없으면 None.
+
+    한 티커가 여러 풀에 있으면 계좌 보유 종목의 소속 풀을 특정할 수 없고
+    (``portfolio_io._pick_meta_doc`` 이 통화로만 골라 같은 통화의 풀끼리는 구분이 안 된다),
+    그러면 그 풀의 이평선으로 이탈을 판정할 수 없다. 그래서 추가 단계에서 막는다.
+
+    호주는 ``ASX:`` 접두사를 붙여 저장하므로(예: ``ASX:IOO`` vs ``IOO``) 미국에 같은 티커가
+    있어도 문자열이 달라 자연히 구분된다 — 국가를 따로 볼 필요가 없다.
+    """
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결에 실패했습니다.")
+
+    doc = db.stock_meta.find_one(
+        {
+            "ticker": str(ticker or "").strip().upper(),
+            "ticker_type": {"$ne": str(ticker_type or "").strip().lower()},
+            "is_deleted": {"$ne": True},
+        },
+        {"ticker_type": 1},
+    )
+    return str(doc["ticker_type"]) if doc else None
+
+
+def _pool_label(ticker_type: str) -> str:
+    """오류 문구용 종목풀 표기 — '🇰🇷 국내상장 국내 ETF (kor_kr)'."""
+    from utils.settings_loader import get_ticker_type_settings
+
+    try:
+        config = get_ticker_type_settings(ticker_type) or {}
+    except Exception:
+        return ticker_type
+    icon = str(config.get("icon") or "").strip()
+    name = str(config.get("name") or "").strip()
+    if not name:
+        return ticker_type
+    return f"{icon} {name} ({ticker_type})".strip()
+
+
 def load_active_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
     ticker_types = _load_ticker_types_payload()
     target_ticker_type = _pick_ticker_type(ticker_types, ticker_type)
@@ -301,6 +341,11 @@ def add_active_stock(ticker_type: str, ticker: str, bucket_id: int) -> dict[str,
     bucket_value = int(bucket_id or 0)
     if bucket_value not in BUCKETS:
         raise RuntimeError("버킷을 선택하세요.")
+
+    # 한 티커는 한 종목풀에만 — 계좌 보유 종목의 소속 풀이 유일해야 그 풀의 이평선으로 판정할 수 있다.
+    other_pool = _find_other_pool_with_ticker(ticker_type_norm, ticker_norm)
+    if other_pool:
+        raise RuntimeError(f"이미 다른 종목풀에 있습니다: {_pool_label(other_pool)}")
 
     created = add_stock(
         ticker_type_norm,
