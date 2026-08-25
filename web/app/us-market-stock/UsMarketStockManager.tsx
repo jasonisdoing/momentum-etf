@@ -335,20 +335,20 @@ export function UsMarketStockManager({
       return;
     }
 
-    // 이미 그 풀에 있는 종목은 보내지 않는다 — 표가 풀 목록을 들고 있어 조회가 필요 없다.
+    // 이미 어딘가의 풀에 있는 종목은 보내지 않는다 — 표가 풀 목록을 들고 있어 조회가 필요 없다.
     // 건너뛰는 건 정상 동작이라 시작 전에 노란색으로 알린다.
-    const { fresh, already } = splitByPoolMembership(selectedTickers, rows, tickerPool);
-    const skipNotice = buildPoolAddSkipNotice(selectedTickers.length, already.length);
+    const split = splitByPoolMembership(selectedTickers, rows, tickerPool);
+    const skipNotice = buildPoolAddSkipNotice(selectedTickers.length, split);
     if (skipNotice) {
       toast.warning(skipNotice);
     }
-    if (fresh.length === 0) {
+    if (split.fresh.length === 0) {
       setAddModalOpen(false);
       return;
     }
 
     setAdding(true);
-    const { added, skipped, failed } = await addTickersToPool(fresh, tickerPool, bucketId);
+    const { added, skipped, blocked, failed } = await addTickersToPool(split.fresh, tickerPool, bucketId);
 
     setAdding(false);
     setAddModalOpen(false);
@@ -358,6 +358,9 @@ export function UsMarketStockManager({
     }
     if (skipped > 0) {
       toast.error(`이미 등록된 종목 ${skipped}개는 건너뛰었습니다.`);
+    }
+    if (blocked > 0) {
+      toast.error(`다른 종목풀에 있는 ${blocked}개는 건너뛰었습니다.`);
     }
     if (failed.length > 0) {
       toast.error(`추가 실패: ${failed.join(", ")}`);
