@@ -13,7 +13,14 @@ import { useToast } from "../components/ToastProvider";
 import { AppModal } from "../components/AppModal";
 
 /** 숫자 셀렉트/입력으로 편집하는 키. */
-const NUMERIC_KEYS = ["TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS", "BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT"] as const;
+const NUMERIC_KEYS = [
+  "TOP_N_HOLD",
+  "SHORT_MA_DAYS",
+  "LONG_MA_DAYS",
+  "BUY_SLIPPAGE_PCT",
+  "SELL_SLIPPAGE_PCT",
+  "STOPLOSS_THRESHOLD_PCT",
+] as const;
 
 /** 화면 표시 순서 = 헤더 순서. 셀도 반드시 이 순서로 그려야 한다. */
 const EDITABLE_KEYS = [...NUMERIC_KEYS, "BENCHMARK", "MARKET_REGIME_INDEX"] as const;
@@ -27,11 +34,14 @@ const KEY_LABELS: Record<EditableKey, string> = {
   LONG_MA_DAYS: "장기 이평선",
   BUY_SLIPPAGE_PCT: "매수 슬리피지(%)",
   SELL_SLIPPAGE_PCT: "매도 슬리피지(%)",
+  STOPLOSS_THRESHOLD_PCT: "손절 기준(%)",
   BENCHMARK: "벤치마크",
   MARKET_REGIME_INDEX: "시장 레짐",
 };
 
 const DEFAULT_SLIPPAGE_PCT_OPTIONS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5];
+// 손절 기준(%) — 백엔드 pool_settings_store.STOPLOSS_PCT_OPTIONS 가 단일 소스. 응답이 없을 때만 쓰는 대체값.
+const DEFAULT_STOPLOSS_PCT_OPTIONS = [-7, -10];
 const COUNTRY_OPTIONS = ["kor", "us", "au"] as const;
 const CURRENCY_OPTIONS = ["KRW", "USD", "AUD"] as const;
 
@@ -61,6 +71,7 @@ type PoolSettingsResponse = {
     /** 이평선 선택지 — 국가별(풀의 country_code 로 고른다). 백엔드 utils/ma_options 가 단일 소스. */
     ma_options_by_country: Record<string, MaOptionsPayload>;
     slippage_pct_options?: number[];
+    stoploss_pct_options?: number[];
     market_indices?: MarketIndexOption[];
     editable_keys: string[];
   };
@@ -96,6 +107,7 @@ const EMPTY_DRAFT: PoolDraft = {
   LONG_MA_DAYS: "20",
   BUY_SLIPPAGE_PCT: "0.25",
   SELL_SLIPPAGE_PCT: "0.25",
+  STOPLOSS_THRESHOLD_PCT: "-10",
   benchmarkTicker: "",
   benchmarkName: "",
   marketRegimeTicker: "",
@@ -144,6 +156,7 @@ function toDraft(pool: PoolEntry): PoolDraft {
     LONG_MA_DAYS: String(pool.settings.LONG_MA_DAYS?.value ?? ""),
     BUY_SLIPPAGE_PCT: String(pool.settings.BUY_SLIPPAGE_PCT?.value ?? ""),
     SELL_SLIPPAGE_PCT: String(pool.settings.SELL_SLIPPAGE_PCT?.value ?? ""),
+    STOPLOSS_THRESHOLD_PCT: String(pool.settings.STOPLOSS_THRESHOLD_PCT?.value ?? ""),
     benchmarkTicker: toBenchmark(pool.settings.BENCHMARK).ticker ?? "",
     benchmarkName: toBenchmark(pool.settings.BENCHMARK).name ?? "",
     marketRegimeTicker: toMarketRegimeIndex(pool.settings.MARKET_REGIME_INDEX)?.ticker ?? "",
@@ -166,6 +179,7 @@ function draftToValues(draft: PoolDraft) {
     LONG_MA_DAYS: Number(draft.LONG_MA_DAYS),
     BUY_SLIPPAGE_PCT: Number(draft.BUY_SLIPPAGE_PCT),
     SELL_SLIPPAGE_PCT: Number(draft.SELL_SLIPPAGE_PCT),
+    STOPLOSS_THRESHOLD_PCT: Number(draft.STOPLOSS_THRESHOLD_PCT),
     // 티커/이름이 모두 비면 미설정(null). 하나만 있으면 백엔드가 거부한다.
     BENCHMARK: draft.benchmarkTicker.trim()
       ? { ticker: draft.benchmarkTicker.trim().toUpperCase(), name: draft.benchmarkName.trim() }
@@ -472,6 +486,9 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
   const slippageOptions = data.constraints.slippage_pct_options?.length
     ? data.constraints.slippage_pct_options
     : DEFAULT_SLIPPAGE_PCT_OPTIONS;
+  const stoplossOptions = data.constraints.stoploss_pct_options?.length
+    ? data.constraints.stoploss_pct_options
+    : DEFAULT_STOPLOSS_PCT_OPTIONS;
   const marketIndices = data.constraints.market_indices ?? [];
 
   /** 셀렉트 편집 컬럼 — 목록 밖 저장값도 후보에 남겨 빈 셀렉트가 되지 않게 한다. */
@@ -556,6 +573,10 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     }),
     selectCol("SELL_SLIPPAGE_PCT", "매도 슬리피지", 120, () => slippageOptions, {
       valueFormatter: (params) => (params.value === "" ? "미설정" : `${params.value}%`),
+    }),
+    selectCol("STOPLOSS_THRESHOLD_PCT", "손절기준", 100, () => stoplossOptions, {
+      valueFormatter: (params) => (params.value === "" ? "미설정" : `${params.value}%`),
+      headerTooltip: "보유 종목의 수익률이 이 값 이하면 손절 알림을 보냅니다(계좌에서 손절🔔을 켠 경우).",
     }),
     {
       field: "benchmarkTicker",
@@ -731,6 +752,11 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         {renderField(
           "매도 슬리피지",
           <SelectField value={draft.SELL_SLIPPAGE_PCT} options={slippageOptions} width={90} onChange={(value) => onChange("SELL_SLIPPAGE_PCT", value)} />,
+          { minWidth: 196, labelWidth: 94 },
+        )}
+        {renderField(
+          "손절 기준",
+          <SelectField value={draft.STOPLOSS_THRESHOLD_PCT} options={stoplossOptions} width={90} onChange={(value) => onChange("STOPLOSS_THRESHOLD_PCT", value)} />,
           { minWidth: 196, labelWidth: 94 },
         )}
         <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>% 단위</span>

@@ -42,6 +42,14 @@ OVERRIDABLE_KEYS: tuple[str, ...] = (
     "LONG_MA_DAYS",
 )
 
+# 보유종목 손절 알림 기준(%). 이평선과 같은 성격의 **종목 판정 기준**이라 계좌가 아니라
+# 여기에 둔다 — 같은 종목을 두 계좌가 들어도 손절선이 갈리면 안 된다.
+# 기존 문서에 없을 수 있어 로딩 필수값은 아니다(미설정이면 알림이 판정 불가로 남는다).
+STOPLOSS_KEYS: tuple[str, ...] = ("STOPLOSS_THRESHOLD_PCT",)
+
+# 손절 기준 선택지 — 신고가 전략의 손절선(new_high_service.STOP_LOSS_OPTIONS)과 같은 목록.
+STOPLOSS_PCT_OPTIONS: tuple[float, ...] = (-7.0, -10.0)
+
 # 종목풀별 거래비용 설정. 기존 문서에 없어도 설정 화면은 열려야 하므로 로딩 필수값은 아니다.
 # 단, 슬리피지를 실제로 사용하는 백테스트/계산 로직은 누락 시 명시적으로 실패한다.
 SLIPPAGE_KEYS: tuple[str, ...] = (
@@ -54,7 +62,7 @@ SLIPPAGE_KEYS: tuple[str, ...] = (
 OPTIONAL_EDITABLE_KEYS: tuple[str, ...] = ("BENCHMARK", "MARKET_REGIME_INDEX")
 
 # 종목풀 설정 화면에서 편집하는 전체 키(순서 = 화면 표시 순서).
-POOL_EDITABLE_KEYS: tuple[str, ...] = (*OVERRIDABLE_KEYS, *SLIPPAGE_KEYS, *OPTIONAL_EDITABLE_KEYS)
+POOL_EDITABLE_KEYS: tuple[str, ...] = (*OVERRIDABLE_KEYS, *SLIPPAGE_KEYS, *STOPLOSS_KEYS, *OPTIONAL_EDITABLE_KEYS)
 
 STRUCTURAL_KEYS: tuple[str, ...] = (
     "name",
@@ -73,7 +81,7 @@ POOL_KIND_OPTIONS: tuple[str, ...] = ("stock", "etf")
 SLIPPAGE_PCT_OPTIONS: tuple[float, ...] = (0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)
 
 _INT_KEYS = ("TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS")
-_FLOAT_KEYS = ("BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT")
+_FLOAT_KEYS = ("BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT", "STOPLOSS_THRESHOLD_PCT")
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 _ALLOWED_CURRENCIES = {"KRW", "AUD", "USD"}
 
@@ -166,7 +174,9 @@ def _is_internal_pool_id(value: Any) -> bool:
     return str(value or "").strip().lower().startswith(INTERNAL_POOL_ID_PREFIX)
 
 
-def _normalize_pool_values(values: dict[str, Any], *, require_ticker_type: bool, check_options: bool = True) -> dict[str, Any]:
+def _normalize_pool_values(
+    values: dict[str, Any], *, require_ticker_type: bool, check_options: bool = True
+) -> dict[str, Any]:
     cleaned: dict[str, Any] = {}
     if require_ticker_type or "ticker_type" in values:
         cleaned["ticker_type"] = _normalize_ticker_type(values.get("ticker_type"))
@@ -334,8 +344,9 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
             num = round(float(raw), 2)
         except (TypeError, ValueError) as exc:
             raise PoolSettingsError(f"{key} 은 숫자여야 합니다: {raw}") from exc
-        if check_options and num not in {round(option, 2) for option in SLIPPAGE_PCT_OPTIONS}:
-            options = ", ".join(f"{option:g}" for option in SLIPPAGE_PCT_OPTIONS)
+        allowed_options = STOPLOSS_PCT_OPTIONS if key in STOPLOSS_KEYS else SLIPPAGE_PCT_OPTIONS
+        if check_options and num not in {round(option, 2) for option in allowed_options}:
+            options = ", ".join(f"{option:g}" for option in allowed_options)
             raise PoolSettingsError(f"{key} 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
         cleaned[key] = num
 
