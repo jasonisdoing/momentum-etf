@@ -9,9 +9,11 @@ import { formatPoolLabel } from "@/lib/pool-label";
 import { useLatestRequest } from "@/lib/use-latest-request";
 import { loadStocksTable } from "@/lib/stocks-store";
 import { addTickersToPool, buildPoolAddSkipNotice, splitByPoolMembership } from "@/lib/pool-add";
+import type { PoolAddProgress } from "@/lib/pool-add";
 import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
+import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
@@ -126,6 +128,8 @@ export function AusMarketStockManager({
   const [selectedTickerPool, setSelectedTickerPool] = useState("");
   const [selectedBucketId, setSelectedBucketId] = useState<number | "">("");
   const [adding, setAdding] = useState(false);
+  // 종목당 수 초씩 걸려서 진행도를 보여주지 않으면 멈춘 것처럼 보인다.
+  const [addProgress, setAddProgress] = useState<PoolAddProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -246,9 +250,11 @@ export function AusMarketStockManager({
     }
 
     setAdding(true);
-    const { added, skipped, blocked, failed } = await addTickersToPool(split.fresh, tickerPool, bucketId);
+    setAddProgress(null);
+    const { added, skipped, blocked, failed } = await addTickersToPool(split.fresh, tickerPool, bucketId, setAddProgress);
 
     setAdding(false);
+    setAddProgress(null);
     setAddModalOpen(false);
 
     if (added > 0) toast.success(`종목 ${added}개를 추가했습니다.`);
@@ -554,6 +560,7 @@ export function AusMarketStockManager({
               ))}
             </select>
           </label>
+          <PoolAddProgressBar progress={addProgress} />
         </div>
       </AppModal>
     </section>
