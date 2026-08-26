@@ -52,7 +52,7 @@ EXIT_MA_OPTIONS = SHORT_MA_OPTIONS  # 이탈 이평선 = 시스템 공용 단기
 # 진입 자격 — 20일 평균 대비 거래대금 배수가 이 값 미만이면 돌파해도 사지 않는다.
 # 거래대금이 실리지 않은 돌파는 실패 확률이 높다(오닐의 '돌파는 거래량 증가와 함께').
 # None 은 '조건 없음'. 배수를 모르는 종목(상장 직후 등)도 자격 미달로 본다 — 추정하지 않는다.
-MIN_VALUE_MULT_OPTIONS: tuple[float | None, ...] = (5.0, 2.5, 1.5, None)
+MIN_VALUE_MULT_OPTIONS: tuple[float | None, ...] = (5.0, 2.0, None)
 # 백테스트 기간 기본값 — 화면에서 실행할 때 고르고, 저장하지 않는다.
 DEFAULT_BACKTEST_MONTHS = 12
 
