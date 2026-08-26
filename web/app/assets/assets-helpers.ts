@@ -158,6 +158,7 @@ export const CASH_ROW_TICKER = "__CASH__";
 export type HoldingEditableSnapshot = {
   quantity: number;
   average_buy_price: number;
+  memo: string;
 };
 
 export const assetsGridTheme = createAppGridTheme();
@@ -228,10 +229,13 @@ export function parseEditableQuantity(value: unknown): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-export function buildHoldingEditableSnapshot(row: Pick<HoldingsRow, "quantity" | "average_buy_price">): HoldingEditableSnapshot {
+export function buildHoldingEditableSnapshot(
+  row: Pick<HoldingsRow, "quantity" | "average_buy_price" | "memo">,
+): HoldingEditableSnapshot {
   return {
     quantity: parseEditableQuantity(row.quantity),
     average_buy_price: safeParseFloat(row.average_buy_price),
+    memo: String(row.memo ?? "").trim(),
   };
 }
 
@@ -249,6 +253,9 @@ export function buildAutoSaveToastMessage(row: Pick<HoldingsRow, "name" | "curre
   }
   if (before.average_buy_price !== after.average_buy_price) {
     changes.push(`매입단가 ${formatPrice(before.average_buy_price, row.currency)}→${formatPrice(after.average_buy_price, row.currency)}`);
+  }
+  if (before.memo !== after.memo) {
+    changes.push(`메모 ${before.memo || "(없음)"}→${after.memo || "(없음)"}`);
   }
   if (changes.length === 0) {
     return null;

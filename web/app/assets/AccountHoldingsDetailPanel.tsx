@@ -383,6 +383,7 @@ export function AccountHoldingsDetailPanel({
         ticker: row.ticker,
         quantity,
         average_buy_price: averageBuyPrice,
+        memo: String(row.memo ?? "").trim(),
       }),
     });
     const payload = await response.json();
@@ -500,6 +501,7 @@ export function AccountHoldingsDetailPanel({
         id: rowId,
         quantity: typeof sourceRow.quantity === "number" ? sourceRow.quantity : parseInt(String(sourceRow.quantity), 10) || 0,
         average_buy_price: safeParseFloat(sourceRow.average_buy_price),
+        memo: String(sourceRow.memo ?? "").trim(),
       });
       lastSavedSnapshotsRef.current.set(rowId, nextSnapshot);
       const message = buildAutoSaveToastMessage(sourceRow, previousSnapshot, nextSnapshot);
@@ -643,6 +645,7 @@ export function AccountHoldingsDetailPanel({
           quantity: typeof row.quantity === "number" ? row.quantity : parseInt(String(row.quantity), 10) || 0,
           average_buy_price: safeParseFloat(row.average_buy_price),
           target_ratio: row.target_ratio ?? 0,
+          memo: String(row.memo ?? "").trim(),
         }))
         .filter((row) => dirtyRowIds.includes(row.id));
 
@@ -779,6 +782,7 @@ export function AccountHoldingsDetailPanel({
         ...currentRow,
         quantity: parseEditableQuantity(row.quantity),
         average_buy_price: safeParseFloat(row.average_buy_price),
+        memo: String(row.memo ?? "").trim(),
       };
     });
     rowsRef.current = nextRows;
@@ -914,7 +918,7 @@ export function AccountHoldingsDetailPanel({
     {
       field: "daily_change_pct",
       headerName: "일간(%)",
-      width: 92,
+      width: 88,
       type: "rightAligned",
       cellRenderer: (params: { value?: number | null }) => (
         <span className={getSignedClass(params.value ?? 0)}>
@@ -927,7 +931,7 @@ export function AccountHoldingsDetailPanel({
     {
       field: "current_price",
       headerName: "현재가",
-      width: 104,
+      width: 96,
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: string }) => (
         <span>{formatPrice(safeParseFloat(params.value), params.data?.currency || "KRW")}</span>
@@ -935,8 +939,9 @@ export function AccountHoldingsDetailPanel({
     },
     {
       field: "weight_pct",
+      // 값("100.00%")이 헤더보다 넓다 — 폭은 값 기준으로 잡는다.
       headerName: "비중",
-      width: 80,
+      width: 82,
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow }) => {
         if (!params.data) {
@@ -954,7 +959,7 @@ export function AccountHoldingsDetailPanel({
     {
       colId: "target_weight_pct",
       headerName: "목표비중",
-      width: 88,
+      width: 84,
       type: "rightAligned",
       sortable: false,
       cellStyle: { backgroundColor: "#f1f3f5" },
@@ -977,7 +982,7 @@ export function AccountHoldingsDetailPanel({
     {
       colId: "target_quantity",
       headerName: "목표수량",
-      width: 88,
+      width: 84,
       type: "rightAligned",
       sortable: false,
       cellStyle: { backgroundColor: "#f1f3f5" },
@@ -996,8 +1001,9 @@ export function AccountHoldingsDetailPanel({
     },
     {
       field: "quantity",
+      // 다섯 자리 + 천 단위 쉼표("12,345")까지 안 잘리게. 헤더보다 값이 넓다.
       headerName: "수량",
-      width: 64,
+      width: 72,
       type: "rightAligned",
       editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
       cellClass: (params) => {
@@ -1041,7 +1047,7 @@ export function AccountHoldingsDetailPanel({
     {
       field: "average_buy_price",
       headerName: "매입 단가",
-      width: 112,
+      width: 106,
       type: "rightAligned",
       editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
       cellClass: (params) => {
@@ -1083,6 +1089,34 @@ export function AccountHoldingsDetailPanel({
       },
     },
     {
+      // 메모 — 매입 단가 옆의 수기 칸. 저장 경로는 수량·매입단가와 같다
+      // (셀을 벗어나면 0.7초 뒤 자동 저장 + 상단 저장 버튼도 같은 PATCH 를 쓴다).
+      field: "memo",
+      headerName: "메모",
+      // 한글 10자(14px × 10) + 셀 좌우 패딩(24px). 넘치면 말줄임으로 둔다.
+      width: 164,
+      // 빈 문자열이 많아 자동 추론이 흔들린다 — 문자열 에디터를 명시한다.
+      cellDataType: "text",
+      sortable: false,
+      editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
+      cellClass: (params) => {
+        if (!isEditableHoldingRow(params.data)) {
+          return undefined;
+        }
+        return isDirtyEditableCell(params.data?.id, "memo")
+          ? "assetsEditableCell assetsDirtyCell"
+          : "assetsEditableCell";
+      },
+      valueParser: (params) => String(params.newValue ?? "").trim(),
+      cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
+        if (!isEditableHoldingRow(params.data)) {
+          return <span>-</span>;
+        }
+        const text = String(params.value ?? "").trim();
+        return text ? <span>{text}</span> : <span style={{ color: "var(--text-muted)" }}>-</span>;
+      },
+    },
+    {
       field: "return_pct",
       headerName: "수익률",
       width: 88,
@@ -1097,7 +1131,7 @@ export function AccountHoldingsDetailPanel({
     {
       field: "pnl_krw",
       headerName: "평가손익",
-      width: 124,
+      width: 120,
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number }) => (
         params.data?.ticker === CASH_ROW_TICKER ? <span>-</span> :
