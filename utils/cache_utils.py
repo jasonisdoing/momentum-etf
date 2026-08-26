@@ -120,8 +120,23 @@ def _get_cache_start_date() -> pd.Timestamp | None:
     return None
 
 
+# 종목풀·계좌가 아닌 **참조 시세**의 저장 위치.
+# 이들은 OHLCV 저장 코드를 재사용하려고 같은 함수에 토큰만 다르게 넘겨 쓴다. 그런데 수명이
+# 정반대다 — 소유자 캐시(`cache_<소유자>_stocks`)는 종목풀·계좌가 사라지면 함께 지워야 하고,
+# 참조 시세는 소유자가 없어 절대 지우면 안 된다. 이름 형식이 같으면 구분이 불가능해서
+# 고아 점검이 환율을 '주인 없는 데이터' 로 잡았다(예외 목록으로 막다가 형식을 분리했다).
+_REFERENCE_COLLECTIONS = {
+    "fx": "reference_fx_prices",
+    "etf": "reference_index_prices",
+}
+
+
 def _resolve_collection_name(account_id: str) -> str:
     token = (account_id or "global").strip().lower() or "global"
+
+    # 참조 시세는 소유자 캐시와 다른 이름 형식을 쓴다(위 주석 참고).
+    if token in _REFERENCE_COLLECTIONS:
+        return _REFERENCE_COLLECTIONS[token]
 
     # Temporary collection handling
     if "_tmp_" in token:
@@ -830,25 +845,32 @@ _ANOMALY_ALERT_PCT = 60.0
 _ANOMALY_ALERT_COLLECTION = "price_anomaly_alerts"
 
 
-def _lookup_ticker_name(account_id: str, ticker: str) -> str:
-    """알림 표시용 종목명 — 풀 문서에서 찾고 없으면 다른 풀, 그래도 없으면 빈 값."""
+def _lookup_ticker_name(cache_owner: str, ticker: str) -> str:
+    """알림 표시용 종목명 — 풀 문서에서 찾고 없으면 다른 풀, 그래도 없으면 빈 값.
+
+    `cache_owner` 가 종목풀이 아니면(환율 `fx` 등) stock_meta 에 없으므로 빈 값이 된다.
+    """
     try:
         db = get_db_connection()
         if db is None:
             return ""
         doc = db.stock_meta.find_one(
-            {"ticker_type": str(account_id).strip().lower(), "ticker": ticker}, {"name": 1}
+            {"ticker_type": str(cache_owner).strip().lower(), "ticker": ticker}, {"name": 1}
         ) or db.stock_meta.find_one({"ticker": ticker, "name": {"$nin": [None, ""]}}, {"name": 1})
         return str((doc or {}).get("name") or "").strip()
     except Exception:
         return ""
 
 
-def _alert_price_anomalies(account_id: str, ticker: str, df: pd.DataFrame) -> None:
+def _alert_price_anomalies(cache_owner: str, ticker: str, df: pd.DataFrame) -> None:
     """저장 직전 종가의 하루 등락을 검사해 한도 초과를 슬랙으로 경고한다.
 
-    같은 (풀, 티커, 날짜) 조합은 한 번만 보낸다 — 오염된 프레임이 매시 재저장돼도
+    같은 (캐시 소유자, 티커, 날짜) 조합은 한 번만 보낸다 — 오염된 프레임이 매시 재저장돼도
     슬랙이 도배되지 않게 DB 에 알림 이력을 남긴다. 검사·발송 실패는 저장을 막지 않는다.
+
+    `cache_owner` 는 가격 캐시의 소유자 토큰이다 — 보통 종목풀이지만 환율(`fx`)·레버리지
+    지수(`etf`)처럼 종목풀이 아닌 값도 온다. 그래서 저장 필드도 `ticker_type` 이 아니라
+    `cache_owner` 다(예전 이름 `account_id` 는 계좌와 풀이 같은 개념이던 시절의 잔재였다).
     """
     try:
         close_column = _resolve_close_column(df.columns.astype(str).tolist())
@@ -871,7 +893,7 @@ def _alert_price_anomalies(account_id: str, ticker: str, df: pd.DataFrame) -> No
         lines = []
         for stamp, pct in jumps.items():
             key = {
-                "account_id": str(account_id).strip().lower(),
+                "cache_owner": str(cache_owner).strip().lower(),
                 "ticker": (ticker or "").strip().upper(),
                 "date": pd.Timestamp(stamp).strftime("%Y-%m-%d"),
             }
@@ -880,7 +902,7 @@ def _alert_price_anomalies(account_id: str, ticker: str, df: pd.DataFrame) -> No
                 {"$setOnInsert": {**key, "pct": round(float(pct), 1), "created_at": datetime.utcnow()}},
                 upsert=True,
             )
-            if marked.upserted_id is not None:  # 처음 보는 (풀, 티커, 날짜)만 알린다
+            if marked.upserted_id is not None:  # 처음 보는 (캐시 소유자, 티커, 날짜)만 알린다
                 position = close.index.get_loc(stamp)
                 before = float(close.iloc[position - 1])
                 lines.append(f"· {key['date']} {before:,.2f} → {float(close.loc[stamp]):,.2f} ({pct:+.0f}%)")
@@ -889,8 +911,8 @@ def _alert_price_anomalies(account_id: str, ticker: str, df: pd.DataFrame) -> No
 
         from utils.notification import send_slack_message_v2
 
-        name = _lookup_ticker_name(account_id, key["ticker"])
-        title = f"{key['account_id'].upper()}/{key['ticker']}" + (f" {name}" if name else "")
+        name = _lookup_ticker_name(cache_owner, key["ticker"])
+        title = f"{key['cache_owner'].upper()}/{key['ticker']}" + (f" {name}" if name else "")
         send_slack_message_v2(
             f":rotating_light: 가격 캐시 이상치 감지 — {title}\n"
             + "\n".join(lines)
@@ -898,9 +920,9 @@ def _alert_price_anomalies(account_id: str, ticker: str, df: pd.DataFrame) -> No
             "분할·병합이면 정상이지만, yfinance 동시 호출 오염이나 원천 데이터 사고일 수 있어 "
             "확인이 필요합니다. 저장은 그대로 진행됐습니다."
         )
-        logger.warning("[CACHE] 가격 이상치 감지 %s/%s: %s", account_id, ticker, "; ".join(lines))
+        logger.warning("[CACHE] 가격 이상치 감지 %s/%s: %s", cache_owner, ticker, "; ".join(lines))
     except Exception as exc:  # 경고 실패가 저장을 막으면 안 된다
-        logger.warning("[CACHE] 가격 이상치 검사 실패 (%s/%s): %s", account_id, ticker, exc)
+        logger.warning("[CACHE] 가격 이상치 검사 실패 (%s/%s): %s", cache_owner, ticker, exc)
 
 
 def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
@@ -1105,36 +1127,6 @@ def get_cached_date_range(account_id: str, ticker: str) -> tuple[pd.Timestamp, p
     if df is None or df.empty:
         return None
     return df.index.min(), df.index.max()
-
-
-def list_available_cache_keys() -> list[str]:
-    """캐시된 계정(또는 국가) 키 목록을 반환합니다."""
-    db = get_db_connection()
-    if db is None:
-        return []
-
-    available: list[str] = []
-    try:
-        existing = set(db.list_collection_names())
-    except Exception:
-        existing = set()
-
-    # 동적 컬렉션 패턴 체크 (cache_{account}_stocks)
-    # cache_ 로 시작하고 _stocks 로 끝나는 컬렉션 탐색
-    # 단, _tmp_ 가 포함된 건 임시 컬렉션이므로 제외
-    for coll_name in existing:
-        if coll_name.startswith("cache_") and coll_name.endswith("_stocks"):
-            # cache_{account}_stocks
-            # account 부분을 추출
-            # prefix "cache_" (len 6), suffix "_stocks" (len 7)
-            if len(coll_name) > 13:
-                inner = coll_name[6:-7]  # extract "account"
-                if "_tmp_" in inner:
-                    continue
-                available.append(inner)
-
-    # 중복 제거 및 정렬. 컬렉션이 하나도 없으면 빈 목록 — 임의 기본값을 지어내지 않는다.
-    return sorted(set(available))
 
 
 def list_cached_tickers(account_id: str) -> list[str]:

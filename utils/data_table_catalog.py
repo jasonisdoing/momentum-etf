@@ -83,8 +83,8 @@ _POOL_TABLES: tuple[TableSpec, ...] = (
         "price_anomaly_alerts",
         "pool",
         "가격 캐시 갱신 중 발견한 이상 변동 기록",
-        owner_field="account_id",
-        owner_note="필드명은 account_id 지만 값은 종목풀(ticker_type) 이다 — 계좌와 풀이 같은 개념이던 시절의 잔재.",
+        owner_field="cache_owner",
+        owner_note="어느 가격 캐시에서 난 이상인지. 보통 종목풀이지만 참조 시세(fx·etf) 기록도 여기 남는다.",
     ),
     TableSpec(
         "cache_<종목풀>_stocks",
@@ -132,8 +132,8 @@ _REFERENCE_TABLES: tuple[TableSpec, ...] = (
     TableSpec("etf_market_master", "reference", "KIS 국내 ETF 마스터 캐시"),
     TableSpec("kor_dividend_stocks", "reference", "한국 배당주 화면의 종목별 재무·배당 지표"),
     TableSpec("yahoo_baseline_prices", "reference", "yfinance 기준가 캐시(전일 종가 대조용)"),
-    TableSpec("cache_fx_stocks", "reference", "환율 일봉 캐시"),
-    TableSpec("cache_etf_stocks", "reference", "레버리지 추천이 쓰는 지수·ETF 일봉 캐시"),
+    TableSpec("reference_fx_prices", "reference", "환율 일봉 캐시"),
+    TableSpec("reference_index_prices", "reference", "레버리지 추천이 쓰는 지수·ETF 일봉 캐시"),
 )
 
 # ── 실행 상태 — 큐·락·진행 기록 ────────────────────────────────────────────
@@ -207,9 +207,10 @@ OWNED_ARRAY_SPECS: tuple[OwnedArrayItemSpec, ...] = (
 )
 
 
-# 종목풀·계좌가 아니면서 소유자 자리에 들어가는 **예약 이름**.
-# 환율(fx)·지수/레버리지 ETF(etf) 캐시가 같은 저장 경로를 쓰기 때문에 생긴다.
-# 주인이 없다고 지우면 환율·레버리지 데이터가 통째로 사라지므로 고아로 보지 않는다.
+# 종목풀·계좌가 아니면서 소유자 자리에 들어가는 이름.
+# 참조 시세(환율 `fx`·레버리지 지수 `etf`)는 저장 컬렉션을 `reference_*` 로 분리했지만
+# (`cache_utils._REFERENCE_COLLECTIONS`), 이상치 기록(`price_anomaly_alerts`)에는 여전히
+# 같은 토큰이 남는다 — 어느 캐시에서 난 이상인지 적는 칸이라 그렇다.
 RESERVED_OWNERS: frozenset[str] = frozenset({"fx", "etf"})
 
 TABLE_SPECS: tuple[TableSpec, ...] = (
@@ -328,15 +329,12 @@ def scan_orphans() -> dict[str, Any]:
         )
 
     # 이름이 소유자에서 파생되는 컬렉션 — 소유자가 풀·계좌 어디에도 없으면 통째로 고아다.
-    # 카탈로그에 이름으로 직접 등록된 컬렉션(cache_fx_stocks 등)은 형식이 같아도 제외한다.
-    named = {spec.name for spec in TABLE_SPECS if not spec.name_pattern}
+    # 참조 시세는 `reference_*` 라 이 형식에 걸리지 않는다(예외 판정이 필요 없다).
     collections: list[dict[str, Any]] = []
     for spec in TABLE_SPECS:
         if not spec.name_pattern or spec.category != "pool":
             continue  # 같은 형식을 풀·계좌가 공유하므로 한 번만 훑는다
         for match in _pattern_instances(existing, spec):
-            if match.name in named or match.owner in RESERVED_OWNERS:
-                continue
             if match.owner in live["pool"] or match.owner in live["account"]:
                 continue
             stats = _collection_stats(db, match.name)
@@ -428,8 +426,6 @@ def purge_owner(owner_kind: str, owner_id: str) -> dict[str, int]:
         if spec.category != owner_kind or not spec.name_pattern:
             continue
         name = spec.name_pattern.format(owner=owner_id)
-        if name in {other.name for other in TABLE_SPECS if not other.name_pattern}:
-            continue  # 이름으로 직접 등록된 컬렉션(환율·레버리지 캐시)은 소유자 것이 아니다
         try:
             if name in db.list_collection_names():
                 db.drop_collection(name)

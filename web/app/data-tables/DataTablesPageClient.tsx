@@ -162,16 +162,8 @@ export function DataTablesPageClient() {
         field: "owner_field",
         headerName: "소유자 필드",
         width: 118,
-        cellRenderer: (params: { data?: TableRow; value?: string }) => {
-          if (!params.value) return <span style={{ color: "var(--text-muted)" }}>-</span>;
-          // 필드명과 실제 내용이 다른 경우(옛 명명 잔재)는 주의 표시를 붙인다.
-          return (
-            <span title={params.data?.owner_note || undefined}>
-              <code>{params.value}</code>
-              {params.data?.owner_note ? " ⚠️" : ""}
-            </span>
-          );
-        },
+        cellRenderer: (params: { value?: string }) =>
+          params.value ? <code>{params.value}</code> : <span style={{ color: "var(--text-muted)" }}>-</span>,
       },
       {
         field: "count",
@@ -213,7 +205,28 @@ export function DataTablesPageClient() {
         },
       },
       { field: "policy", headerName: "삭제 정책", width: 190 },
-      { field: "purpose", headerName: "설명", flex: 1, minWidth: 320, tooltipField: "purpose" },
+      {
+        field: "purpose",
+        headerName: "설명",
+        flex: 1,
+        minWidth: 360,
+        // 소유자 필드에 덧붙일 참고사항(`owner_note`)도 여기 이어 쓴다 — 아이콘 뒤에 숨기면
+        // 있는 줄도 모른다. 잘리면 마우스를 올려 전체를 본다.
+        valueGetter: (params) =>
+          [params.data?.purpose, params.data?.owner_note].filter(Boolean).join("  ·  "),
+        cellRenderer: (params: { data?: TableRow }) => {
+          const row = params.data;
+          if (!row) return null;
+          return (
+            <span>
+              {row.purpose}
+              {row.owner_note ? (
+                <span style={{ color: "var(--text-muted)" }}>{`  ·  ${row.owner_note}`}</span>
+              ) : null}
+            </span>
+          );
+        },
+      },
     ],
     [orphanByLocation],
   );
