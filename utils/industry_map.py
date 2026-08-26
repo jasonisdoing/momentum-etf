@@ -1,8 +1,9 @@
 """종목풀 업종 맵 — 업종 컬럼이 있는 모든 화면의 단일 소스.
 
 시장마다 분류 체계가 다르고 수집 경로도 다르다.
-- 한국·호주: 종목 문서(`stock_meta.industry`). 한국 개별주는 네이버 분류(한국어 원본)를
-  메타 배치가 채운다.
+- 한국: 종목 문서(`stock_meta.industry`). 네이버 분류(한국어 원본)를 메타 배치가 채운다.
+- 호주: 종목 문서(`stock_meta.industry`). 메타 배치가 yfinance `.info` 로 채운다 —
+  미국과 **같은 분류 체계**라 계열 묶음(`group_yf_industry`)도 같이 쓴다.
 - 미국: 지수 구성종목(SP500/NDX100)의 yfinance 분류. 미국 종목 문서에는 이 필드를
   채우지 않으므로 구성종목에서 가져와야 한다.
 
@@ -22,11 +23,11 @@ logger = get_app_logger()
 # 미국 업종을 가져올 지수 구성종목. 앞선 지수의 값을 우선한다(중복 종목은 먼저 만난 값 유지).
 _US_INDEX_SOURCES = ("SP500", "NDX100")
 
-# 미국 업종 묶음 — yfinance 분류(111개)는 한 계열을 잘게 쪼개서(`Oil & Gas E&P`·`Midstream`·
+# yfinance 업종 묶음 — 분류(111개)는 한 계열을 잘게 쪼개서(`Oil & Gas E&P`·`Midstream`·
 # `Refining & Marketing` …) 업종 상한 1 을 걸어도 같은 계열 3~5 종목이 통과한다. 접미어를 떼어
 # 계열 단위로 묶는다(111 → 87). 섹터(11개)까지 올리면 반도체와 소프트웨어가 한 묶음이 되어
-# 상한이 과하게 걸리므로 그 중간을 쓴다.
-_US_INDUSTRY_FAMILIES = (
+# 상한이 과하게 걸리므로 그 중간을 쓴다. 미국·호주가 같은 체계라 함께 쓴다.
+_YF_INDUSTRY_FAMILIES = (
     "Oil & Gas",
     "Real Estate",
     "REIT",
@@ -39,17 +40,21 @@ _US_INDUSTRY_FAMILIES = (
 )
 
 
-def group_us_industry(industry: str) -> str:
-    """yfinance 업종 → 계열 묶음. `Oil & Gas Midstream` → `Oil & Gas`."""
+def group_yf_industry(industry: str) -> str:
+    """yfinance 업종 → 계열 묶음. `Oil & Gas Midstream` → `Oil & Gas`. (미국·호주 공용)"""
     base = str(industry or "").split(" - ")[0].strip()
-    for family in _US_INDUSTRY_FAMILIES:
+    for family in _YF_INDUSTRY_FAMILIES:
         if base.startswith(family):
             return family
     return base
 
 
-def _pool_industry_map(pool: str) -> dict[str, str]:
-    """한 풀의 종목 문서에서 티커 → 업종을 읽는다 (한국·호주용)."""
+def _pool_industry_map(pool: str, *, group: bool = False) -> dict[str, str]:
+    """한 풀의 종목 문서에서 티커 → 업종을 읽는다 (한국·호주용).
+
+    `group=True` 면 yfinance 분류를 계열로 묶는다(호주) — 미국과 같은 세밀도가 되도록.
+    한국은 네이버 분류라 묶지 않는다(체계가 달라 접미어 규칙이 맞지 않는다).
+    """
     from utils.stock_list_io import _load_ticker_type_stocks_raw
 
     result: dict[str, str] = {}
@@ -57,7 +62,7 @@ def _pool_industry_map(pool: str) -> dict[str, str]:
         ticker = str(item.get("ticker") or "").strip()
         industry = str(item.get("industry") or "").strip()
         if ticker and industry:
-            result[ticker] = industry
+            result[ticker] = group_yf_industry(industry) if group else industry
     return result
 
 
@@ -81,7 +86,7 @@ def industry_map(pool: str) -> dict[str, str]:
     country = str(settings.get("country_code") or "").strip().lower()
 
     if country != "us":
-        return _pool_industry_map(pool)
+        return _pool_industry_map(pool, group=country == "au")
 
     return us_industry_map()
 
@@ -110,7 +115,7 @@ def industry_map_for_country(country_code: str) -> dict[str, str]:
             continue
         if str(settings.get("country_code") or "").strip().lower() != country:
             continue
-        for ticker, industry in _pool_industry_map(pool).items():
+        for ticker, industry in _pool_industry_map(pool, group=country == "au").items():
             result.setdefault(ticker, industry)
     return result
 
@@ -119,7 +124,7 @@ def us_industry_map() -> dict[str, str]:
     """미국 티커 → 업종 계열 (지수 구성종목의 yfinance 분류를 묶은 값). 풀과 무관하게 같다.
 
     업종 상한 그룹핑과 화면 표시가 **같은 값**을 써야 "상한 1인데 왜 같은 계열이 3개냐"
-    같은 어긋남이 생기지 않는다(`group_us_industry`).
+    같은 어긋남이 생기지 않는다(`group_yf_industry`).
     """
     from utils.index_constituents_loader import load_index_constituents
 
@@ -135,5 +140,5 @@ def us_industry_map() -> dict[str, str]:
             ticker = str(item.get("ticker") or "").strip().upper()
             industry = str(item.get("industry") or "").strip()
             if ticker and industry and ticker not in result:
-                result[ticker] = group_us_industry(industry)
+                result[ticker] = group_yf_industry(industry)
     return result
