@@ -1597,6 +1597,20 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
             b_value *= 1 + row["benchmark_pct"] / 100
         bench_curve[row["date"]] = b_value
 
+    # 슬리브별 곡선 — 화면이 "합성 vs 각 전략 단독" 을 한 표에서 비교한다.
+    # **각 전략을 혼자 굴렸을 때의 곡선**이다(슬리브 간 월초 이관이 없는 상태). 그래야 각
+    # 전략 화면의 백테스트와 값이 같고, 합성이 단독보다 나은지가 바로 읽힌다.
+    # 모멘텀 일별은 전일 대비 변동률(%), 신고가 일별은 구간 시작 대비 누적(%) 이라 형태가 다르다.
+    sm_curve: dict[str, float] = {}
+    sm_value = 1.0
+    for row in sorted(sm["daily"], key=lambda r: r["date"]):
+        if row.get("strategy_pct") is not None:
+            sm_value *= 1 + row["strategy_pct"] / 100
+        sm_curve[row["date"]] = sm_value
+    nh_curve: dict[str, float] = {
+        row["date"]: 1 + row["strategy_pct"] / 100 for row in nh["daily"] if row.get("strategy_pct") is not None
+    }
+
     # 합성 곡선 — 한 계좌 금액 기반 시뮬레이션(월초 배분 복구는 현금 우선 이관).
     mix_curve = _simulate_mix_daily(ctx, sm, nh_context, months)
     dates = [d for d in mix_curve.index if d in bench_curve]
@@ -1605,10 +1619,23 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
 
     first_mix = float(mix_curve[dates[0]])
     first_bench = bench_curve[dates[0]]
+    first_sm = sm_curve.get(dates[0])
+    first_nh = nh_curve.get(dates[0])
+
+    def _rebased(curve: dict[str, float], base: float | None, date: str) -> float | None:
+        """시작일을 0% 로 맞춘 누적(%). 그 날짜 값이 없으면 None — 임의로 채우지 않는다."""
+        value = curve.get(date)
+        if value is None or not base:
+            return None
+        return round((value / base - 1) * 100, 2)
+
     daily_rows = [
         {
             "date": date,
             "strategy_pct": round((float(mix_curve[date]) / first_mix - 1) * 100, 2),
+            # 슬리브 단독 누적(%) — 합성과 같은 시작일 기준으로 다시 맞춘다.
+            "sm_pct": _rebased(sm_curve, first_sm, date),
+            "nh_pct": _rebased(nh_curve, first_nh, date),
             "benchmark_pct": round((bench_curve[date] / first_bench - 1) * 100, 2),
         }
         for date in dates
