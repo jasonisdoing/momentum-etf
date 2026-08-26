@@ -197,7 +197,6 @@ type BacktestResult = {
   benchmark_cagr_pct: number | null;
   benchmark_name: string;
   benchmark_ticker: string;
-  monthly: BacktestMonthRow[];
   weekly: BacktestWeekRow[];
   daily: BacktestDayRow[];
   trades: BacktestTradeRow[];
@@ -294,6 +293,32 @@ function compoundPct(values: (number | null)[]): number | null {
   const usable = values.filter((v): v is number => v != null && Number.isFinite(v));
   if (usable.length === 0) return null;
   return (usable.reduce((acc, v) => acc * (1 + v / 100), 1) - 1) * 100;
+}
+
+/** 일간 변동률(%)을 **달력 월**로 복리 합산한다.
+ *
+ *  엔진이 내려주는 `backtest.monthly` 를 쓰지 않는 이유: 그쪽은 주간 교체 구간 수익률을
+ *  **구간 종료일이 속한 달**로 몰아 넣는다(momentum_backtest 의 `month_key = end`). 그래서
+ *  월을 걸친 구간의 앞달치가 뒷달로 넘어가고, `2026-07` 행이 달력 7월 수익률이 아니게 된다.
+ *  실제로 같은 기간이 신고가·합성 화면에서는 -16.62%, 여기서는 -9.20% 로 갈렸다.
+ *  주간 탭은 매매 내역(편입·편출)이 붙어야 해서 교체 구간 기준을 그대로 둔다.
+ */
+function toCalendarMonthRows(daily: BacktestDayRow[]): BacktestMonthRow[] {
+  const byMonth = new Map<string, { strategy: number[]; benchmark: number[] }>();
+  for (const row of daily) {
+    const month = row.date.slice(0, 7);
+    const bucket = byMonth.get(month) ?? { strategy: [], benchmark: [] };
+    if (row.strategy_pct != null) bucket.strategy.push(row.strategy_pct);
+    if (row.benchmark_pct != null) bucket.benchmark.push(row.benchmark_pct);
+    byMonth.set(month, bucket);
+  }
+  return [...byMonth.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0])) // 최신 달이 위
+    .map(([month, bucket]) => ({
+      month,
+      strategy_pct: compoundPct(bucket.strategy),
+      benchmark_pct: compoundPct(bucket.benchmark),
+    }));
 }
 
 /**
@@ -889,7 +914,12 @@ export function MomentumClient() {
     [view?.picks?.currency],
   );
 
-  const yearRows = useMemo<YearRow[]>(() => (backtest ? toYearRows(backtest.monthly) : []), [backtest]);
+  // 월간·연간은 **달력 기준**으로 다시 만든다(신고가·합성 화면과 같은 경계).
+  const monthRows = useMemo<BacktestMonthRow[]>(
+    () => (backtest ? toCalendarMonthRows(backtest.daily) : []),
+    [backtest],
+  );
+  const yearRows = useMemo<YearRow[]>(() => toYearRows(monthRows), [monthRows]);
 
   // 주간 표 — 매매 일지. 주 수익률 + 그 주에 체결된 편입·편출과 주말 보유 수·교체율.
   const weeklyColumns = useMemo<ColDef<BacktestWeekRow>[]>(() => {
@@ -1320,7 +1350,7 @@ export function MomentumClient() {
                   />
                 ) : viewMode === "monthly" ? (
                   <AppAgGrid<BacktestMonthRow>
-                    rowData={backtest.monthly}
+                    rowData={monthRows}
                     columnDefs={backtestColumns}
                     theme={gridTheme}
                     minHeight={0}
