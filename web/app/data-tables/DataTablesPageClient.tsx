@@ -22,6 +22,8 @@ type TableRow = {
   is_place?: boolean;
   /** 「건수」의 단위 — 컬렉션은 문서, 문서 안쪽 자리는 키·항목. */
   count_unit: string;
+  /** 소유자별로 무엇으로 나뉘는지 — 소유자 값 또는 구분 필드명. */
+  split_by: string;
   /** 이름이 소유자에서 파생되는 컬렉션(`cache_<풀>_stocks`)만 붙는다. */
   owner?: string;
   /** 카탈로그에는 있는데 DB 에 아직 없는 경우. */
@@ -47,7 +49,7 @@ type Payload = {
   orphans: { items: OrphanItem[]; total: number };
   category_order: string[];
   category_labels: Record<string, string>;
-  totals: { collections: number; count: number; size: number; index_size: number };
+  totals: { collections: number; places: number; count: number; size: number; index_size: number };
   pools: string[];
   accounts: string[];
 };
@@ -71,9 +73,7 @@ const CATEGORY_TONE: Record<string, { bg: string; fg: string }> = {
   unclassified: { bg: "#fee2e2", fg: "#991b1b" },
 };
 
-// 위치 값(`system_config › momentum_settings.settings.settings_by_pool`)이 길어 두 줄로
-// 접히므로 행 높이를 두 줄에 맞춘다.
-const gridTheme = createAppGridTheme({ rowHeight: 50 });
+const gridTheme = createAppGridTheme();
 
 function formatBytes(value: number): string {
   if (!value) return "-";
@@ -134,9 +134,9 @@ export function DataTablesPageClient() {
     () => [
       {
         field: "deleted_with_label",
-        headerName: "언제 지워지나",
-        width: 124,
-        headerTooltip: "종목풀·계좌를 지울 때 이 자리가 함께 지워지는지 여부입니다.",
+        headerName: "삭제 트리거",
+        width: 116,
+        headerTooltip: "무엇을 지울 때 이 자리가 함께 지워지는지입니다.",
         cellRenderer: (params: { data?: TableRow }) => {
           const row = params.data;
           if (!row) return null;
@@ -162,12 +162,17 @@ export function DataTablesPageClient() {
       },
       {
         field: "category_label",
-        headerName: "분류",
-        width: 104,
+        headerName: "성격",
+        width: 96,
+        headerTooltip: "무슨 성격의 데이터인지. 삭제 트리거가 '없음' 인 행에서 특히 중요합니다.",
         cellRenderer: (params: { data?: TableRow }) => {
           const row = params.data;
           if (!row) return null;
           const tone = CATEGORY_TONE[row.category] ?? CATEGORY_TONE.reference;
+          // 집계·이력은 '절대 지우면 안 되는 것' 이라 유일하게 배지로 강조한다.
+          if (row.category !== "aggregate" && row.category !== "unclassified") {
+            return <span style={{ color: "var(--text-muted)" }}>{row.category_label}</span>;
+          }
           return (
             <span
               style={{
@@ -189,27 +194,24 @@ export function DataTablesPageClient() {
       {
         field: "name",
         headerName: "위치",
-        width: 300,
+        width: 420,
         headerTooltip: "컬렉션 이름. `›` 가 있으면 컬렉션이 아니라 그 문서 안쪽 자리입니다.",
-        // 값이 길어 한 줄에 안 들어간다 — 잘라 버리면 어느 자리인지 알 수 없으므로 접는다.
-        wrapText: true,
-        autoHeight: true,
         cellStyle: { fontWeight: 600 },
         cellRenderer: (params: { data?: TableRow; value?: string }) => (
-          <span style={{ lineHeight: 1.35, whiteSpace: "normal", wordBreak: "break-all" }}>
+          <span>
             {params.value}
             {params.data?.missing ? <span style={{ color: "var(--text-muted)" }}> (DB 에 없음)</span> : null}
           </span>
         ),
       },
       {
-        field: "owner",
-        headerName: "소유자",
-        width: 116,
-        valueGetter: (params) => params.data?.owner ?? "",
+        field: "split_by",
+        headerName: "구분",
+        width: 132,
+        headerTooltip:
+          "소유자별로 무엇으로 나뉘는지. 컬렉션이 통째로 나뉘면 소유자 이름, 한 컬렉션 안에서 나뉘면 그 필드명입니다.",
         cellRenderer: (params: { value?: string }) =>
-          params.value ? <span>{params.value}</span> : <span style={{ color: "var(--text-muted)" }}>-</span>,
-        headerTooltip: "이름이 소유자에서 파생되는 컬렉션(cache_<소유자>_stocks)만 값이 있습니다.",
+          params.value ? <code>{params.value}</code> : <span style={{ color: "var(--text-muted)" }}>-</span>,
       },
       {
         field: "count",
@@ -268,13 +270,6 @@ export function DataTablesPageClient() {
         },
       },
       {
-        field: "owner_field",
-        headerName: "소유자 필드",
-        width: 118,
-        cellRenderer: (params: { value?: string }) =>
-          params.value ? <code>{params.value}</code> : <span style={{ color: "var(--text-muted)" }}>-</span>,
-      },
-      {
         field: "purpose",
         headerName: "설명",
         flex: 1,
@@ -305,6 +300,10 @@ export function DataTablesPageClient() {
       <div className="appHeaderMetric">
         <span>컬렉션:</span>
         <span className="appHeaderMetricValue is-primary">{data.totals.collections}개</span>
+      </div>
+      <div className="appHeaderMetric">
+        <span>안쪽 자리:</span>
+        <span className="appHeaderMetricValue">{data.totals.places}곳</span>
       </div>
       <div className="appHeaderMetric">
         <span>문서:</span>
