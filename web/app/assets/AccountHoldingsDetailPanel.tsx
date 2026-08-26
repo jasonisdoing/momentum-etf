@@ -916,6 +916,34 @@ export function AccountHoldingsDetailPanel({
       },
     },
     {
+      // 메모 — 종목명 옆의 수기 칸. 값은 계좌가 아니라 **종목**에 붙는다(순위 화면과 공용).
+      // 저장 경로는 수량·매입단가와 같다(셀을 벗어나면 0.7초 뒤 자동 저장 + 상단 저장 버튼).
+      field: "memo",
+      headerName: "메모",
+      // 한글 10자(14px × 10) + 셀 좌우 패딩(24px). 넘치면 말줄임으로 둔다.
+      width: 164,
+      // 빈 문자열이 많아 자동 추론이 흔들린다 — 문자열 에디터를 명시한다.
+      cellDataType: "text",
+      sortable: false,
+      editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
+      cellClass: (params) => {
+        if (!isEditableHoldingRow(params.data)) {
+          return undefined;
+        }
+        return isDirtyEditableCell(params.data?.id, "memo")
+          ? "assetsEditableCell assetsDirtyCell"
+          : "assetsEditableCell";
+      },
+      valueParser: (params) => String(params.newValue ?? "").trim(),
+      cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
+        if (!isEditableHoldingRow(params.data)) {
+          return <span>-</span>;
+        }
+        const text = String(params.value ?? "").trim();
+        return text ? <span>{text}</span> : <span style={{ color: "var(--text-muted)" }}>-</span>;
+      },
+    },
+    {
       field: "daily_change_pct",
       headerName: "일간(%)",
       width: 88,
@@ -1086,34 +1114,6 @@ export function AccountHoldingsDetailPanel({
           );
         }
         return <span>{formatPrice(safeParseFloat(params.value), row.currency || "KRW")}</span>;
-      },
-    },
-    {
-      // 메모 — 매입 단가 옆의 수기 칸. 저장 경로는 수량·매입단가와 같다
-      // (셀을 벗어나면 0.7초 뒤 자동 저장 + 상단 저장 버튼도 같은 PATCH 를 쓴다).
-      field: "memo",
-      headerName: "메모",
-      // 한글 10자(14px × 10) + 셀 좌우 패딩(24px). 넘치면 말줄임으로 둔다.
-      width: 164,
-      // 빈 문자열이 많아 자동 추론이 흔들린다 — 문자열 에디터를 명시한다.
-      cellDataType: "text",
-      sortable: false,
-      editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
-      cellClass: (params) => {
-        if (!isEditableHoldingRow(params.data)) {
-          return undefined;
-        }
-        return isDirtyEditableCell(params.data?.id, "memo")
-          ? "assetsEditableCell assetsDirtyCell"
-          : "assetsEditableCell";
-      },
-      valueParser: (params) => String(params.newValue ?? "").trim(),
-      cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
-        if (!isEditableHoldingRow(params.data)) {
-          return <span>-</span>;
-        }
-        const text = String(params.value ?? "").trim();
-        return text ? <span>{text}</span> : <span style={{ color: "var(--text-muted)" }}>-</span>;
       },
     },
     {

@@ -37,7 +37,7 @@ def _nh_settings_map() -> dict[str, Any]:
 
 
 def _all_active_pools() -> list[str]:
-    """활성 종목풀 전체 — 셀렉트에는 전부 보여주고, 설정 없는 풀은 선택 시 명시적 에러를 낸다."""
+    """활성 종목풀 전체 — 계좌가 가리키는 슬리브 풀의 표기(이름·아이콘)를 붙이는 데 쓴다."""
     from utils.settings_loader import list_available_ticker_types
 
     return list(list_available_ticker_types())
@@ -59,8 +59,6 @@ def _pool_options(pools: list[str]) -> list[dict[str, Any]]:
                 "name": str(settings.get("name") or pool),
                 "icon": str(settings.get("icon") or ""),
                 "order": settings.get("order"),
-                # 적용 계좌 셀렉터가 같은 통화의 계좌만 보여주는 데 쓴다.
-                "currency": str(settings.get("currency") or "").strip().upper(),
             }
         )
     options.sort(key=lambda o: (o["order"] is None, o["order"]))
