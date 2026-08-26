@@ -82,9 +82,8 @@ _POOL_TABLES: tuple[TableSpec, ...] = (
     TableSpec(
         "price_anomaly_alerts",
         "pool",
-        "가격 캐시 갱신 중 발견한 이상 변동 기록",
+        "종목풀 가격 캐시에서 발견한 이상 변동 기록(슬랙 중복 발송 방지용)",
         owner_field="cache_owner",
-        owner_note="어느 가격 캐시에서 난 이상인지. 보통 종목풀이지만 참조 시세(fx·etf) 기록도 여기 남는다.",
     ),
     TableSpec(
         "cache_<종목풀>_stocks",
@@ -134,6 +133,7 @@ _REFERENCE_TABLES: tuple[TableSpec, ...] = (
     TableSpec("yahoo_baseline_prices", "reference", "yfinance 기준가 캐시(전일 종가 대조용)"),
     TableSpec("reference_fx_prices", "reference", "환율 일봉 캐시"),
     TableSpec("reference_index_prices", "reference", "레버리지 추천이 쓰는 지수·ETF 일봉 캐시"),
+    TableSpec("reference_price_anomalies", "reference", "참조 시세에서 발견한 이상 변동 기록"),
 )
 
 # ── 실행 상태 — 큐·락·진행 기록 ────────────────────────────────────────────
@@ -207,12 +207,6 @@ OWNED_ARRAY_SPECS: tuple[OwnedArrayItemSpec, ...] = (
 )
 
 
-# 종목풀·계좌가 아니면서 소유자 자리에 들어가는 이름.
-# 참조 시세(환율 `fx`·레버리지 지수 `etf`)는 저장 컬렉션을 `reference_*` 로 분리했지만
-# (`cache_utils._REFERENCE_COLLECTIONS`), 이상치 기록(`price_anomaly_alerts`)에는 여전히
-# 같은 토큰이 남는다 — 어느 캐시에서 난 이상인지 적는 칸이라 그렇다.
-RESERVED_OWNERS: frozenset[str] = frozenset({"fx", "etf"})
-
 TABLE_SPECS: tuple[TableSpec, ...] = (
     *_POOL_TABLES,
     *_ACCOUNT_TABLES,
@@ -222,6 +216,19 @@ TABLE_SPECS: tuple[TableSpec, ...] = (
     *_RUNTIME_TABLES,
     *_PERSONAL_TABLES,
 )
+
+# 삭제 시점 — 이 화면이 답해야 하는 질문. 모든 행이 셋 중 하나를 갖는다.
+# 분류(category)는 '무슨 성격의 데이터인가' 이고, 이건 '언제 지워지는가' 다. 축이 다르다.
+DELETED_WITH_LABELS: dict[str, str] = {
+    "pool": "종목풀 삭제 시",
+    "account": "계좌 삭제 시",
+    "keep": "삭제 안 함",
+}
+
+
+def _deleted_with(category: str) -> str:
+    return category if category in ("pool", "account") else "keep"
+
 
 # 화면 그룹 순서 — 소유자별 → 보존 → 나머지.
 CATEGORY_ORDER: tuple[str, ...] = ("pool", "account", "aggregate", "config", "reference", "runtime", "personal")
@@ -314,7 +321,7 @@ def scan_orphans() -> dict[str, Any]:
     for spec in TABLE_SPECS:
         if spec.category not in ("pool", "account") or spec.name_pattern:
             continue
-        dead = sorted(v for v in _owner_values(db, spec) if v not in live[spec.category] and v not in RESERVED_OWNERS)
+        dead = sorted(v for v in _owner_values(db, spec) if v not in live[spec.category])
         if not dead:
             continue
         field_name = "_id" if spec.owner_is_id else spec.owner_field
@@ -498,6 +505,8 @@ def build_data_table_payload() -> dict[str, Any]:
         base = {
             "name": spec.name,
             "category": spec.category,
+            "deleted_with": _deleted_with(spec.category),
+            "deleted_with_label": DELETED_WITH_LABELS[_deleted_with(spec.category)],
             "category_label": CATEGORY_LABELS.get(spec.category, spec.category),
             "policy": CATEGORY_POLICIES.get(spec.category, ""),
             "purpose": spec.purpose,
@@ -524,11 +533,63 @@ def build_data_table_payload() -> dict[str, Any]:
             continue
         rows.append({**base, **_collection_stats(db, spec.name)})
 
+    # ── 컬렉션 통째가 아니라 **문서 안쪽 자리**들 ──────────────────────────
+    # `system_config` 처럼 컬렉션 자체는 남지만 소유자별 키·항목·참조만 지워지는 곳이다.
+    # 컬렉션 단위로만 보여주면 "설정이라 안 지워지는구나" 로 잘못 읽힌다(실제로는 지워진다).
+    def _place(location: str, owner: str, purpose: str, count: int) -> dict[str, Any]:
+        return {
+            "name": location,
+            "category": owner,
+            "category_label": CATEGORY_LABELS.get(owner, owner),
+            "deleted_with": owner,
+            "deleted_with_label": DELETED_WITH_LABELS[owner],
+            "policy": CATEGORY_POLICIES.get(owner, ""),
+            "purpose": purpose,
+            "owner_field": "",
+            "owner_note": "",
+            "is_place": True,
+            "count": count,
+            "size": 0,
+            "index_size": 0,
+        }
+
+    for key_spec in OWNED_KEY_SPECS:
+        doc = db["system_config"].find_one({"_id": key_spec.doc_id}) or {}
+        rows.append(
+            _place(
+                f"system_config › {key_spec.doc_id}.{key_spec.path}.<{key_spec.owner}>",
+                key_spec.owner,
+                key_spec.purpose,
+                len(_dig(doc, key_spec.path)),
+            )
+        )
+    for array_spec in OWNED_ARRAY_SPECS:
+        doc = db[array_spec.collection].find_one({array_spec.doc_key: array_spec.doc_value}) or {}
+        rows.append(
+            _place(
+                f"{array_spec.collection}.{array_spec.array_field}[]",
+                array_spec.owner,
+                array_spec.purpose,
+                len(doc.get(array_spec.array_field) or []),
+            )
+        )
+    for ref in OWNER_REF_SPECS:
+        rows.append(
+            _place(
+                f"{ref.collection}.{ref.field}",
+                ref.owner,
+                f"{ref.purpose} — 그 종목풀이 사라지면 이 값을 비운다",
+                db[ref.collection].count_documents({ref.field: {"$nin": [None, ""]}}),
+            )
+        )
+
     unclassified = [
         {
             "name": name,
             "category": "unclassified",
             "category_label": "미분류",
+            "deleted_with": "keep",
+            "deleted_with_label": "확인 필요",
             "policy": "카탈로그에 등록되지 않음",
             "purpose": "",
             "owner_field": "",
@@ -544,6 +605,7 @@ def build_data_table_payload() -> dict[str, Any]:
         # 주인 없는 데이터 — 같은 카탈로그로 찾는다(삭제와 점검이 갈리지 않게).
         "orphans": scan_orphans(),
         "category_order": list(CATEGORY_ORDER),
+        "deleted_with_labels": dict(DELETED_WITH_LABELS),
         "category_labels": dict(CATEGORY_LABELS),
         "totals": {
             "collections": len(rows) + len(unclassified),

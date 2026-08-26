@@ -842,7 +842,11 @@ def set_cache_refresh_completed_at(target_id: str, completed_at: datetime) -> No
 # 나올 수 없어 데이터 사고(+542%, +1998% 등)만 걸린다.
 _ANOMALY_ALERT_WINDOW_DAYS = 40
 _ANOMALY_ALERT_PCT = 60.0
+# 이상치 기록도 시세 캐시와 같은 기준으로 나눈다 — 소유자(종목풀·계좌) 것은 소유자가
+# 사라질 때 함께 지워야 하고, 참조 시세 것은 지울 주인이 없다. 한 표에 섞으면 삭제·고아
+# 점검이 값을 보고 예외를 판정해야 한다(그 예외가 환율 기록을 지울 뻔했다).
 _ANOMALY_ALERT_COLLECTION = "price_anomaly_alerts"
+_REFERENCE_ANOMALY_COLLECTION = "reference_price_anomalies"
 
 
 def _lookup_ticker_name(cache_owner: str, ticker: str) -> str:
@@ -868,9 +872,9 @@ def _alert_price_anomalies(cache_owner: str, ticker: str, df: pd.DataFrame) -> N
     같은 (캐시 소유자, 티커, 날짜) 조합은 한 번만 보낸다 — 오염된 프레임이 매시 재저장돼도
     슬랙이 도배되지 않게 DB 에 알림 이력을 남긴다. 검사·발송 실패는 저장을 막지 않는다.
 
-    `cache_owner` 는 가격 캐시의 소유자 토큰이다 — 보통 종목풀이지만 환율(`fx`)·레버리지
-    지수(`etf`)처럼 종목풀이 아닌 값도 온다. 그래서 저장 필드도 `ticker_type` 이 아니라
-    `cache_owner` 다(예전 이름 `account_id` 는 계좌와 풀이 같은 개념이던 시절의 잔재였다).
+    기록 위치는 시세 캐시와 같은 기준으로 나뉜다 — 종목풀·계좌 것은 `price_anomaly_alerts`,
+    참조 시세(환율·레버리지 지수) 것은 `reference_price_anomalies`. 소유자가 사라질 때
+    함께 지워야 하는지가 정반대라서다.
     """
     try:
         close_column = _resolve_close_column(df.columns.astype(str).tolist())
@@ -889,7 +893,9 @@ def _alert_price_anomalies(cache_owner: str, ticker: str, df: pd.DataFrame) -> N
         db = get_db_connection()
         if db is None:
             return
-        alerts = db[_ANOMALY_ALERT_COLLECTION]
+        alerts = db[
+            _REFERENCE_ANOMALY_COLLECTION if cache_owner in _REFERENCE_COLLECTIONS else _ANOMALY_ALERT_COLLECTION
+        ]
         lines = []
         for stamp, pct in jumps.items():
             key = {
