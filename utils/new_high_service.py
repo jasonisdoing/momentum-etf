@@ -42,7 +42,7 @@ HIGH_WINDOW = f"{HIGH_WINDOW_WEEKS * 7}D"
 HIGH_WINDOW_MIN_DAYS = 230
 
 # 화면 셀렉트 선택지 — 백엔드가 단일 소스이고 화면은 응답으로 받는다.
-TOP_N_OPTIONS = (5, 8, 10)
+TOP_N_OPTIONS = (2, 5, 8, 10)
 STOP_LOSS_OPTIONS = (-7.0, -10.0)
 EXIT_MA_OPTIONS = SHORT_MA_OPTIONS  # 이탈 이평선 = 시스템 공용 단기 이평 선택지
 

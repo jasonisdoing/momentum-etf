@@ -42,9 +42,9 @@ warnings.filterwarnings("ignore")
 # 단일 소스는 종목풀 설정이다 (하드코딩 목록을 두지 않는다).
 # 한 업종에서 최대 몇 종목까지 담을지 — 화면 셀렉트와 검증이 같은 목록을 쓴다.
 MAX_PER_INDUSTRY_OPTIONS: tuple[int | None, ...] = (1, 2, 3, None)  # None = 제한없음 (신고가와 동일)
-# 종목 수 셀렉트 선택지 — 검증 범위(5~100) 안에서 자주 쓰는 값만 노출한다.
+# 종목 수 셀렉트 선택지 — **검증도 이 목록으로 한다**(별도 범위 없음).
 # 화면은 이 목록을 서버 응답으로 받는다(프론트에 복사본을 두지 않는다).
-TOP_N_OPTIONS = (5, 8, 10)
+TOP_N_OPTIONS = (2, 5, 8, 10)
 # 차순위 후보를 종목 수의 몇 배까지 보여줄지 — 선정과 같은 수(합계 2배)만 보여
 # 표를 짧게 유지한다. 표 밖 '다음 주 예상' 종목은 하단에 별도 행으로 붙는다.
 RESERVE_MULTIPLIER = 1
@@ -151,9 +151,12 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"'{key}' 는 숫자여야 합니다.")
         return float(value)
 
+    # 선택지 목록이 단일 소스다 — 여기에 범위를 따로 두면 목록을 늘려도 저장이 막힌다
+    # (실제로 2 를 추가했을 때 하한 5 에 걸렸다). 아래 다른 값들과 같은 방식으로 검증한다.
     top_n = int(_num("top_n"))
-    if not 5 <= top_n <= 100:
-        raise ValueError("'top_n' 은 5~100 사이여야 합니다.")
+    if top_n not in TOP_N_OPTIONS:
+        allowed = ", ".join(str(v) for v in TOP_N_OPTIONS)
+        raise ValueError(f"'top_n' 은 {allowed} 중 하나여야 합니다 (받은 값: {top_n}).")
     raw_cap = settings.get("max_per_industry")
     max_per_industry = None if raw_cap in (None, "", "none") else int(_num("max_per_industry"))
     if max_per_industry not in MAX_PER_INDUSTRY_OPTIONS:
