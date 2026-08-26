@@ -123,6 +123,9 @@ def mix_accounts() -> list[dict[str, Any]]:
         b_pool = str(inner.get("mix_b_pool") or "").strip().lower()
         a_strategy = str(inner.get("mix_a_strategy") or "").strip().lower()
         b_strategy = str(inner.get("mix_b_strategy") or "").strip().lower()
+        # 슬리브 표시 이름 — 비면 전략 이름을 쓴다(「A. 모멘텀」).
+        a_name = str(inner.get("mix_a_name") or "").strip()
+        b_name = str(inner.get("mix_b_name") or "").strip()
         accounts.append(
             {
                 "account_id": account_id,
@@ -135,8 +138,11 @@ def mix_accounts() -> list[dict[str, Any]]:
                 "b_pool": b_pool,
                 "a_strategy": a_strategy,
                 "b_strategy": b_strategy,
-                "a_strategy_label": STRATEGY_LABELS.get(a_strategy, a_strategy),
-                "b_strategy_label": STRATEGY_LABELS.get(b_strategy, b_strategy),
+                "a_name": a_name,
+                "b_name": b_name,
+                # 화면에 실제로 쓸 이름 — 사용자가 붙인 이름이 있으면 그것, 없으면 전략 이름.
+                "a_strategy_label": a_name or STRATEGY_LABELS.get(a_strategy, a_strategy),
+                "b_strategy_label": b_name or STRATEGY_LABELS.get(b_strategy, b_strategy),
                 # 조합이 다 갖춰졌는지 — 화면이 "고르세요" 상태를 판단하는 데 쓴다.
                 "mix_ready": bool(a_pool and b_pool and a_strategy and b_strategy),
                 # 오늘의 액션 슬랙 알람 토글 상태 — 화면 헤더가 그대로 보여준다.
@@ -215,12 +221,14 @@ def _resolve_mix_account(account_id: str | None) -> dict[str, Any]:
 
     # 슬리브 둘 — (키, 전략, 풀). 키는 합성 안에서 이 슬리브를 가리키는 이름이다.
     wanted = [
-        ("a", account["a_strategy"], account["a_pool"]),
-        ("b", account["b_strategy"], account["b_pool"]),
+        ("a", account["a_strategy"], account["a_pool"], account["a_name"]),
+        ("b", account["b_strategy"], account["b_pool"], account["b_name"]),
     ]
-    saved_by_slot = {key: settings_map(strategy).get(pool) for key, strategy, pool in wanted}
+    saved_by_slot = {key: settings_map(strategy).get(pool) for key, strategy, pool, _ in wanted}
     missing = [
-        f"{STRATEGY_LABELS.get(strategy, strategy)}({pool})" for key, strategy, pool in wanted if not saved_by_slot[key]
+        f"{STRATEGY_LABELS.get(strategy, strategy)}({pool})"
+        for key, strategy, pool, _ in wanted
+        if not saved_by_slot[key]
     ]
     if missing:
         raise RuntimeError(f"{' · '.join(missing)} 설정이 저장돼 있지 않습니다 — 해당 전략 화면에서 먼저 저장하세요.")
@@ -245,8 +253,9 @@ def _resolve_mix_account(account_id: str | None) -> dict[str, Any]:
             strategy=strategy,
             pool=pool,
             settings=validate_settings(strategy, {**saved_by_slot[key], "pool": pool}),
+            name=name,
         )
-        for key, strategy, pool in wanted
+        for key, strategy, pool, name in wanted
     ]
 
     a_pool_settings = get_ticker_type_settings(slots[0].pool) or {}

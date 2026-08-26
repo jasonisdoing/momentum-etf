@@ -81,6 +81,10 @@ type AccountOption = AccountOptionBase & {
   /** 이 계좌의 슬리브 둘 — (전략, 종목풀) 쌍. 이 화면에서 고른다. */
   a_strategy: string;
   b_strategy: string;
+  /** 사용자가 붙인 표시 이름 — 비면 전략 이름을 쓴다. */
+  a_name: string;
+  b_name: string;
+  /** 화면에 실제로 쓸 이름 — 위 이름이 있으면 그것, 없으면 전략 이름. */
   a_strategy_label: string;
   b_strategy_label: string;
   a_pool: string;
@@ -1033,6 +1037,9 @@ export function StrategyMixClient() {
   const [aPool, setAPool] = useState("");
   const [bStrategy, setBStrategy] = useState("");
   const [bPool, setBPool] = useState("");
+  // 슬리브 표시 이름 — 비우면 전략 이름을 쓴다(「A. 모멘텀」 ↔ 「A. 상승 개별주」).
+  const [aName, setAName] = useState("");
+  const [bName, setBName] = useState("");
   const [aPct, setAPct] = useState("50");
   const [bPct, setBPct] = useState("50");
   const [cashPct, setCashPct] = useState("0");
@@ -1044,6 +1051,8 @@ export function StrategyMixClient() {
     setAPool(selectedAccount?.a_pool ?? "");
     setBStrategy(selectedAccount?.b_strategy ?? "");
     setBPool(selectedAccount?.b_pool ?? "");
+    setAName(selectedAccount?.a_name ?? "");
+    setBName(selectedAccount?.b_name ?? "");
     setAPct(selectedAccount ? String(selectedAccount.mix_a_pct) : "50");
     setBPct(selectedAccount ? String(selectedAccount.mix_b_pct) : "50");
     setCashPct(selectedAccount ? String(selectedAccount.mix_cash_pct) : "0");
@@ -1070,6 +1079,8 @@ export function StrategyMixClient() {
         aPool !== selectedAccount.a_pool ||
         bStrategy !== selectedAccount.b_strategy ||
         bPool !== selectedAccount.b_pool ||
+        aName !== (selectedAccount.a_name ?? "") ||
+        bName !== (selectedAccount.b_name ?? "") ||
         Number(aPct) !== selectedAccount.mix_a_pct ||
         Number(bPct) !== selectedAccount.mix_b_pct ||
         Number(cashPct) !== selectedAccount.mix_cash_pct),
@@ -1079,8 +1090,20 @@ export function StrategyMixClient() {
   const strategyLabelOf = (value: string) =>
     meta?.strategy_options.find((option) => option.value === value)?.label ?? value;
   const mixWeightFields = [
-    { key: "a", label: `A ${strategyLabelOf(aStrategy)}`.trim(), value: aPct, set: setAPct, hint: "A 슬리브에 배분할 몫(%)." },
-    { key: "b", label: `B ${strategyLabelOf(bStrategy)}`.trim(), value: bPct, set: setBPct, hint: "B 슬리브에 배분할 몫(%)." },
+    {
+      key: "a",
+      label: `A ${aName.trim() || strategyLabelOf(aStrategy)}`.trim(),
+      value: aPct,
+      set: setAPct,
+      hint: "A 슬리브에 배분할 몫(%).",
+    },
+    {
+      key: "b",
+      label: `B ${bName.trim() || strategyLabelOf(bStrategy)}`.trim(),
+      value: bPct,
+      set: setBPct,
+      hint: "B 슬리브에 배분할 몫(%).",
+    },
     {
       key: "cash",
       label: "현금",
@@ -1103,8 +1126,10 @@ export function StrategyMixClient() {
             mix_slack_enabled: slackEnabled,
             mix_a_strategy: aStrategy || null,
             mix_a_pool: aPool || null,
+            mix_a_name: aName.trim() || null,
             mix_b_strategy: bStrategy || null,
             mix_b_pool: bPool || null,
+            mix_b_name: bName.trim() || null,
             mix_a_pct: Number(aPct),
             mix_b_pct: Number(bPct),
             mix_cash_pct: Number(cashPct),
@@ -1124,6 +1149,11 @@ export function StrategyMixClient() {
                 a_pool: aPool,
                 b_strategy: bStrategy,
                 b_pool: bPool,
+                a_name: aName.trim(),
+                b_name: bName.trim(),
+                // 라벨도 즉시 반영 — 이름을 지우면 전략 이름으로 돌아간다.
+                a_strategy_label: aName.trim() || strategyLabelOf(aStrategy),
+                b_strategy_label: bName.trim() || strategyLabelOf(bStrategy),
                 mix_ready: Boolean(aStrategy && aPool && bStrategy && bPool),
                 mix_a_pct: Number(aPct),
                 mix_b_pct: Number(bPct),
@@ -1208,6 +1238,8 @@ export function StrategyMixClient() {
                         const pool = slot === "a" ? aPool : bPool;
                         const setStrategy = slot === "a" ? setAStrategy : setBStrategy;
                         const setPool = slot === "a" ? setAPool : setBPool;
+                        const name = slot === "a" ? aName : bName;
+                        const setName = slot === "a" ? setAName : setBName;
                         // 계좌와 국가가 같은 풀만 — 거래 달력·통화가 갈리면 합성이 성립하지 않는다.
                         const pools = (meta?.pool_options ?? []).filter(
                           (option) => (option.country_code ?? "") === selectedAccount.country_code,
@@ -1244,6 +1276,19 @@ export function StrategyMixClient() {
                                   </option>
                                 ))}
                               </select>
+                              {/* 표시 이름 — 비우면 전략 이름을 쓴다. 같은 전략을 두 슬롯에
+                                  올릴 수 있어 이름 없이는 화면에서 둘을 구분할 수 없다. */}
+                              <input
+                                className="form-control form-control-sm"
+                                style={{ width: 120 }}
+                                type="text"
+                                maxLength={20}
+                                value={name}
+                                disabled={settingsSaving}
+                                placeholder={strategyLabelOf(strategy) || "이름"}
+                                title="비우면 전략 이름으로 보입니다."
+                                onChange={(event) => setName(event.target.value)}
+                              />
                             </span>
                           </label>
                         );
