@@ -74,7 +74,9 @@ function rangeLabel(axis: TuningAxis): string {
  *  같은 자리(헤더 오른쪽)에 두고, 실행은 부모가 넘긴 `run` 으로 한다.
  *  결과 표의 컬럼 순서는 `axes` 순서(= 화면 설정 항목 순서)를 따른다.
  *  `current` 와 같은 조합 행은 굵게 표시해 지금 설정이 어디쯤인지 보여준다.
- *  진행도는 백테스트와 같은 램프(조합 수 × 조합당 예상 초)로 보여준다. */
+ *  진행도는 백테스트와 같은 램프(조합 수 × 조합당 예상 초)로 보여준다.
+ *  결과는 이 컴포넌트 내부 state 라 부모가 비울 수 없다 — 종목풀처럼 결과의 전제가 바뀌는 값은
+ *  호출부가 `key` 로 넘겨 재마운트시켜 비운다(백테스트 결과를 비우는 것과 같은 시점). */
 export function StrategyTuning({
   axes,
   monthOptions,
@@ -86,6 +88,7 @@ export function StrategyTuning({
   run,
   onApply,
   disabled,
+  disabledHint,
 }: {
   axes: TuningAxis[];
   /** 기간 선택지 — 백테스트와 같은 목록을 받는다. */
@@ -101,7 +104,10 @@ export function StrategyTuning({
   run: (months: number, ranges: Record<string, TuningValue[]>) => Promise<TuningResult>;
   /** 행의 조합을 상단 설정에 넣고 저장까지 한다 — 부모가 자기 저장 흐름으로 처리한다. */
   onApply: (params: Record<string, TuningValue>) => Promise<void> | void;
+  /** 실행 차단 — 부모가 **백테스트 버튼과 같은 조건**을 넘긴다(두 실행의 기준이 갈리면 안 된다). */
   disabled?: boolean;
+  /** 차단 사유 — 백테스트 헤더와 같은 문구를 같은 자리에 보여준다. 없으면 표시하지 않는다. */
+  disabledHint?: string;
 }) {
   const toast = useToast();
   const [months, setMonths] = useState(defaultMonths);
@@ -249,6 +255,7 @@ export function StrategyTuning({
               </span>
             </div>
             <div className="appMainHeaderRight">
+              {disabledHint && !running ? <span style={hint}>{disabledHint}</span> : null}
               <MonthsSelect value={months} options={monthOptions} disabled={running} onChange={setMonths} />
               <button type="button" className="btn btn-sm btn-dark" disabled={disabled || running} onClick={() => void execute()}>
                 {running ? "실행 중…" : "실행"}

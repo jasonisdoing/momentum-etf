@@ -1358,8 +1358,11 @@ export function NewHighClient() {
 
         {/* 튜닝 — 백테스트 아래. 축 밖의 설정은 현재 화면 값으로 고정하고 범위 조합을 전부 돌린다. */}
         <StrategyTuning
+          // 풀이 바뀌면 재마운트 — 이전 풀의 튜닝 결과가 남지 않게 한다(백테스트와 같은 시점).
+          key={draft.pool}
           monthOptions={constraints.month_options}
           defaultMonths={backtestMonths}
+          // 튜닝도 백테스트와 같이 **화면 초안** 기준이라(fixedLabel 참고) 실행 조건을 같게 둔다.
           disabled={backtesting}
           secondsPerCombo={0.04}
           extraSeconds={50}
