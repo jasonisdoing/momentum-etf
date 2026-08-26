@@ -71,7 +71,9 @@ const CATEGORY_TONE: Record<string, { bg: string; fg: string }> = {
   unclassified: { bg: "#fee2e2", fg: "#991b1b" },
 };
 
-const gridTheme = createAppGridTheme();
+// 위치 값(`system_config › momentum_settings.settings.settings_by_pool`)이 길어 두 줄로
+// 접히므로 행 높이를 두 줄에 맞춘다.
+const gridTheme = createAppGridTheme({ rowHeight: 50 });
 
 function formatBytes(value: number): string {
   if (!value) return "-";
@@ -187,11 +189,14 @@ export function DataTablesPageClient() {
       {
         field: "name",
         headerName: "위치",
-        width: 330,
+        width: 300,
         headerTooltip: "컬렉션 이름. `›` 가 있으면 컬렉션이 아니라 그 문서 안쪽 자리입니다.",
+        // 값이 길어 한 줄에 안 들어간다 — 잘라 버리면 어느 자리인지 알 수 없으므로 접는다.
+        wrapText: true,
+        autoHeight: true,
         cellStyle: { fontWeight: 600 },
         cellRenderer: (params: { data?: TableRow; value?: string }) => (
-          <span>
+          <span style={{ lineHeight: 1.35, whiteSpace: "normal", wordBreak: "break-all" }}>
             {params.value}
             {params.data?.missing ? <span style={{ color: "var(--text-muted)" }}> (DB 에 없음)</span> : null}
           </span>
