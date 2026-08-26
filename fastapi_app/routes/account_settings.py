@@ -49,7 +49,6 @@ def get_account_settings_list(_: None = Depends(require_internal_token)) -> dict
         accounts = load_account_docs()
     except AccountSettingsStoreError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    from utils.holdings_alarm_service import STOPLOSS_PCT_OPTIONS
     from utils.momentum_service import pool_options
 
     return {
@@ -58,8 +57,6 @@ def get_account_settings_list(_: None = Depends(require_internal_token)) -> dict
         "market_indices": [{"ticker": item["yf_ticker"], "name": item["name"]} for item in INDICES],
         # 합성 전략 종목풀 선택지 — 다른 화면의 풀 셀렉터와 같은 표기 필드를 쓴다.
         "pool_options": pool_options(),
-        # 손절 알림 기준(%) 선택지 — 전략 손절선 선택지와 같은 목록.
-        "stoploss_pct_options": list(STOPLOSS_PCT_OPTIONS),
     }
 
 

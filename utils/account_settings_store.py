@@ -43,11 +43,11 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "mix_cash_pct",
     "broker_api",
     "URL",
-    # 보유종목 알림 — On/Off 는 계좌별, 손절 기준(%)도 계좌별.
-    # 이평선 일수는 종목이 속한 종목풀 설정에서 오므로 계좌에 두지 않는다.
+    # 보유종목 알림 — 계좌는 **On/Off 만** 갖는다.
+    # 이평선 일수·손절 기준(%)은 종목이 속한 종목풀 설정에서 온다 — 같은 종목을 여러 계좌가
+    # 들어도 판정 기준이 갈리면 안 되기 때문이다.
     "ma_alarm_enabled",
     "stoploss_alarm_enabled",
-    "stoploss_threshold_pct",
 )
 
 # 합성 전략 배분(%) — 모멘텀·신고가·현금. 셋을 항상 함께 저장하고 합은 100 이어야 한다.
@@ -251,18 +251,6 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             cleaned[key] = bool(raw)
         elif key == "stoploss_alarm_enabled":
             cleaned[key] = bool(raw)
-        elif key == "stoploss_threshold_pct":
-            try:
-                pct = round(float(raw), 2)
-            except (TypeError, ValueError) as exc:
-                raise AccountSettingsStoreError(
-                    f"'{account_id}' 의 stoploss_threshold_pct 는 숫자여야 합니다: {raw}"
-                ) from exc
-            if pct >= 0:
-                raise AccountSettingsStoreError(
-                    f"'{account_id}' 의 stoploss_threshold_pct 는 음수여야 합니다(예: -7): {pct}"
-                )
-            cleaned[key] = pct
     # 합성 배분은 셋이 한 묶음이다 — 하나만 바꾸면 나머지와 합이 어긋난 채로 저장된다.
     if any(key in cleaned for key in MIX_WEIGHT_KEYS):
         missing = [key for key in MIX_WEIGHT_KEYS if key not in cleaned]

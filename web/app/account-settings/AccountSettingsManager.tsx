@@ -33,9 +33,8 @@ type AccountEntry = {
   URL?: string;
   /** 보유종목 알림 — 이동선 이탈은 On/Off 만(기준은 종목의 종목풀 이평선). */
   ma_alarm_enabled?: boolean;
-  /** 보유종목 알림 — 손절은 계좌마다 기준(%)이 다르다. */
+  /** 보유종목 알림 — 손절도 On/Off 만(기준 %는 종목의 종목풀 손절 기준). */
   stoploss_alarm_enabled?: boolean;
-  stoploss_threshold_pct?: number | null;
   updated_at?: string | null;
   save_method?: string | null;
 };
@@ -64,7 +63,6 @@ type ApiResponse = {
   accounts?: AccountEntry[];
   market_indices?: MarketIndexOption[];
   pool_options?: PoolOption[];
-  stoploss_pct_options?: number[];
   error?: string;
 };
 
@@ -102,8 +100,6 @@ type AccountDraft = {
   URL: string;
   ma_alarm_enabled: boolean;
   stoploss_alarm_enabled: boolean;
-  /** 미설정이면 빈 문자열 — 임의 기본값을 넣지 않고 사용자가 고르게 한다. */
-  stoploss_threshold_pct: string;
 };
 
 /** 그리드 행 — 편집 중인 초안 그대로에 표시용 필드를 얹는다. */
@@ -135,8 +131,6 @@ function toDraft(account: AccountEntry): AccountDraft {
     URL: account.URL ?? "",
     ma_alarm_enabled: Boolean(account.ma_alarm_enabled),
     stoploss_alarm_enabled: Boolean(account.stoploss_alarm_enabled),
-    stoploss_threshold_pct:
-      typeof account.stoploss_threshold_pct === "number" ? String(account.stoploss_threshold_pct) : "",
   };
 }
 
@@ -172,10 +166,6 @@ function draftToValues(draft: AccountDraft, marketIndices: MarketIndexOption[]):
   // 벤치마크는 선택 — 둘 다 채워졌을 때만 저장(빈 값이면 백엔드 검증에 걸리므로 생략).
   if (draft.benchmarkTicker.trim() && draft.benchmarkName.trim()) {
     values.benchmark = { ticker: draft.benchmarkTicker.trim(), name: draft.benchmarkName.trim() };
-  }
-  // 손절 기준은 고른 값이 있을 때만 보낸다(미설정을 임의 값으로 채우지 않는다).
-  if (draft.stoploss_threshold_pct) {
-    values.stoploss_threshold_pct = Number(draft.stoploss_threshold_pct);
   }
   return values;
 }
@@ -656,7 +646,6 @@ export function AccountSettingsManager() {
   const [accounts, setAccounts] = useState<AccountEntry[]>([]);
   const [marketIndices, setMarketIndices] = useState<MarketIndexOption[]>([]);
   const [poolOptions, setPoolOptions] = useState<PoolOption[]>([]);
-  const [stoplossPctOptions, setStoplossPctOptions] = useState<number[]>([]);
   const [drafts, setDrafts] = useState<Record<string, AccountDraft>>({});
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
@@ -677,7 +666,6 @@ export function AccountSettingsManager() {
       setAccounts(list);
       setMarketIndices(data.market_indices ?? []);
       setPoolOptions(data.pool_options ?? []);
-      setStoplossPctOptions(data.stoploss_pct_options ?? []);
       const nextDrafts: Record<string, AccountDraft> = {};
       list.forEach((account) => {
         nextDrafts[account.account_id] = toDraft(account);
@@ -708,10 +696,6 @@ export function AccountSettingsManager() {
     [drafts, rows],
   );
   const dirtyCount = gridRows.filter((row) => row.__dirty).length;
-  // 손절 알림을 켰으면 기준(%)이 반드시 있어야 한다 — 없으면 판정 기준이 없다.
-  const stoplossMissingIds = gridRows
-    .filter((row) => row.stoploss_alarm_enabled && !row.stoploss_threshold_pct)
-    .map((row) => row.account_id);
 
   const updateDraft = useCallback((id: string, patch: Partial<AccountDraft>) => {
     setDrafts((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
@@ -922,12 +906,8 @@ export function AccountSettingsManager() {
       width: 88,
       editable: true,
       cellDataType: "boolean",
-      headerTooltip: "보유 종목의 수익률이 손절 기준 이하면 알립니다.",
+      headerTooltip: "보유 종목의 수익률이 그 종목이 속한 종목풀의 손절 기준 이하면 알립니다.",
     },
-    selectCol("stoploss_threshold_pct", "손절기준", 90, () => ["", ...stoplossPctOptions], {
-      valueFormatter: (params) => (params.value ? `${params.value}%` : "기준 선택"),
-      cellClass: (params) => (params.data?.stoploss_alarm_enabled && !params.value ? "settingsMissingCell" : ""),
-    }),
     {
       headerName: "상세",
       width: 64,
@@ -1000,12 +980,7 @@ export function AccountSettingsManager() {
                 <button
                   type="button"
                   className="btn btn-sm btn-dark"
-                  disabled={dirtyCount === 0 || saving || stoplossMissingIds.length > 0}
-                  title={
-                    stoplossMissingIds.length > 0
-                      ? `손절 알림을 켠 계좌는 기준(%)을 골라야 합니다: ${stoplossMissingIds.join(", ")}`
-                      : undefined
-                  }
+                  disabled={dirtyCount === 0 || saving}
                   onClick={() => void handleSaveAll()}
                 >
                   {saving ? "저장 중…" : "저장"}

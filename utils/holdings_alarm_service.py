@@ -3,14 +3,15 @@
 여러 알람 종류를 한 번에 처리해 **한 건의 슬랙 메시지**로 보낸다.
 - 이동선 이탈: 보유 종가가 **단기·장기 이평선 중 하나라도** 아래 (종목풀 순위 화면의
   회색 처리 기준과 같다 — 둘 중 하나만 꺾여도 보유 대상이 아니라고 본다)
-- 손절: 보유 수익률 <= 계좌별 손절 기준(예: -7%)
+- 손절: 보유 수익률 <= 종목풀별 손절 기준(예: -10%)
 
 **On/Off 는 계좌별**이다(각 계좌 문서의 ``ma_alarm_enabled`` / ``stoploss_alarm_enabled``).
 기준은 알람 종류마다 소속이 다르다.
 - 이평선 일수: **종목이 속한 종목풀**의 ``SHORT_MA_DAYS`` / ``LONG_MA_DAYS``.
   한 티커는 한 풀에만 들어가므로(``add_active_stock`` 이 중복을 막는다) 보유 종목의 소속 풀이
   유일하게 정해진다. 계좌가 여러 풀의 종목을 섞어 들고 있으면 종목마다 기준이 달라진다.
-- 손절 기준(%): 계좌별(``stoploss_threshold_pct``).
+- 손절 기준(%): **종목이 속한 종목풀**의 ``STOPLOSS_THRESHOLD_PCT``. 이평선과 같은 이유로
+  계좌가 아니라 풀에 둔다 — 같은 종목을 여러 계좌가 들어도 손절선이 갈리면 안 된다.
 
 기준을 정할 수 없는 종목은 조용히 넘기지 않고 **판정 불가**로 모아 슬랙에 함께 알린다
 (소속 종목풀 없음 / 가격 데이터 부족). 이격은 종목풀 순위와 동일하게 실시간 스냅샷을 종가에
@@ -35,9 +36,6 @@ from utils.rankings import build_effective_close_series
 from utils.stock_list_io import pools_by_ticker
 
 logger = get_app_logger()
-
-# 화면 셀렉트 선택지(백엔드는 값만 검증하고, 목록은 화면과 공유)
-STOPLOSS_PCT_OPTIONS: tuple[float, ...] = (-7.0, -10.0)  # 전략 손절선 선택지와 통일
 
 # 자산 화면 종목명 배지 아이콘. 계좌마다 다르게 둘 이유가 없어 코드에 고정한다.
 _MA_ICON = "❗"  # 이동선 이탈(단기·장기 공용)
@@ -66,9 +64,15 @@ def _pool_country(pool: str) -> str:
     return country
 
 
-def _account_stoploss_pct(doc: dict[str, Any]) -> float | None:
-    """계좌의 손절 기준(%). 미설정/양수면 None — 판정 기준이 없다는 뜻."""
-    value = doc.get("stoploss_threshold_pct")
+def _pool_stoploss_pct(pool: str) -> float | None:
+    """종목풀의 손절 기준(%). 미설정/양수면 None — 판정 기준이 없다는 뜻.
+
+    이평선과 같은 **종목 판정 기준**이라 계좌가 아니라 풀에 둔다. 한 티커는 한 풀에만
+    들어가므로 종목당 손절선이 유일하게 정해지고, 같은 종목을 여러 계좌가 들어도 갈리지 않는다.
+    """
+    from utils.settings_loader import get_ticker_type_settings
+
+    value = (get_ticker_type_settings(pool) or {}).get("STOPLOSS_THRESHOLD_PCT")
     if isinstance(value, (int, float)) and not isinstance(value, bool) and float(value) < 0:
         return float(value)
     return None
@@ -147,7 +151,8 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
         r for r in detail.get("rows", []) if str(r.get("ticker") or "").strip() and str(r.get("ticker")).strip() != "IS"
     ]
 
-    threshold = _account_stoploss_pct(account_doc)
+    # 종목별 소속 풀 — 이평선·손절 기준 둘 다 여기서 온다.
+    pool_by_ticker = pools_by_ticker(str(r.get("ticker") or "") for r in rows)
     ma_on = bool(account_doc.get("ma_alarm_enabled"))
     stoploss_on = bool(account_doc.get("stoploss_alarm_enabled"))
 
@@ -164,18 +169,26 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
         errors.append(f"{str(row['ticker']).strip()}: {reason}")
 
     # 손절: 보유 수익률(return_pct) 기준 — 시세 재조회 불필요.
+    # 기준(%)은 **그 종목이 속한 풀**의 값이라 종목마다 다를 수 있다.
     if stoploss_on:
-        if threshold is None:
-            errors.append("손절 기준(%)이 설정되지 않아 손절 알림을 건너뜁니다.")
-        else:
-            for row in rows:
-                ret = row.get("return_pct")
-                if isinstance(ret, (int, float)) and not isinstance(ret, bool) and ret <= threshold:
-                    stoploss_hits.append({**_label(row), "return_pct": round(float(ret), 2)})
+        for row in rows:
+            ret = row.get("return_pct")
+            if not isinstance(ret, (int, float)) or isinstance(ret, bool):
+                continue
+            pool = pool_by_ticker.get(str(row["ticker"]).strip().upper())
+            if not pool:
+                continue  # 이평선 쪽에서 '소속 종목풀 없음' 으로 이미 알린다
+            threshold = _pool_stoploss_pct(pool)
+            if threshold is None:
+                errors.append(f"{str(row['ticker']).strip()}: 종목풀 '{pool}' 에 손절 기준(%)이 없습니다.")
+                continue
+            if ret <= threshold:
+                stoploss_hits.append(
+                    {**_label(row), "return_pct": round(float(ret), 2), "threshold": round(threshold, 1)}
+                )
 
     # 이동선 이탈: 종가 vs 이동평균. 종목풀 순위와 동일하게 실시간 스냅샷을 국가별로 미리 조회해 반영.
     if ma_on:
-        pool_by_ticker = pools_by_ticker(str(r.get("ticker") or "") for r in rows)
         candidates: list[tuple[dict[str, Any], str, str, str, str, tuple[int, int]]] = []
         by_country: dict[str, list[str]] = {}
         for row in rows:
@@ -219,7 +232,7 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
             elif status["below"]:
                 ma_hits.append({**_label(row), **status})
 
-    return {"ma": ma_hits, "stoploss": stoploss_hits, "unknown": unknown, "threshold": threshold}, errors
+    return {"ma": ma_hits, "stoploss": stoploss_hits, "unknown": unknown}, errors
 
 
 # 배지 계산은 보유 종목별 가격 시계열 조회라 수 초 걸린다 — 계좌별 TTL 캐시로 재계산을 줄인다.
@@ -297,8 +310,12 @@ def _post_slack(sections: list[dict[str, Any]], *, manual: bool) -> bool:
                     f"  • {b['name']}({b['ticker']}): {' / '.join(broken)}  `[{b['short_days']}/{b['long_days']}]`"
                 )
         if s["stoploss"]:
-            parts.append(f"🛑 *손절* ({s['threshold']:.1f}% 이하)")
-            parts += [f"  • {b['name']}({b['ticker']}): 수익률 {b['return_pct']:+.2f}%" for b in s["stoploss"]]
+            # 기준(%)이 종목풀마다 달라 계좌 헤더에 못 쓴다 — 종목 줄 끝에 붙인다.
+            parts.append("🛑 *손절*")
+            parts += [
+                f"  • {b['name']}({b['ticker']}): 수익률 {b['return_pct']:+.2f}%  `[{b['threshold']:.0f}% 이하]`"
+                for b in s["stoploss"]
+            ]
         if s["unknown"]:
             # 조용히 빠지면 알림이 안 온 건지 판정이 안 된 건지 구분되지 않는다 — 사유까지 알린다.
             parts.append("⚠️ *판정 불가*")

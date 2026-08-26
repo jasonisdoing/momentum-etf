@@ -13,6 +13,7 @@ from utils.market_trend_service import INDICES
 from utils.pool_settings_store import (
     POOL_EDITABLE_KEYS,
     SLIPPAGE_PCT_OPTIONS,
+    STOPLOSS_PCT_OPTIONS,
     PoolSettingsError,
     create_pool,
     delete_pool,
@@ -71,6 +72,7 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
         "constraints": {
             "ma_options_by_country": ma_options_by_country(),
             "slippage_pct_options": list(SLIPPAGE_PCT_OPTIONS),
+            "stoploss_pct_options": list(STOPLOSS_PCT_OPTIONS),
             "editable_keys": list(POOL_EDITABLE_KEYS),
             "market_indices": [{"ticker": item["yf_ticker"], "name": item["name"]} for item in INDICES],
         },
