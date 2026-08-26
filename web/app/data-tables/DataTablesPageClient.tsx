@@ -15,6 +15,11 @@ type TableRow = {
   purpose: string;
   owner_field: string;
   owner_note: string;
+  /** 이 자리가 언제 지워지는지 — 이 화면의 본래 질문. */
+  deleted_with: string;
+  deleted_with_label: string;
+  /** 컬렉션 통째가 아니라 문서 안쪽 자리(키·배열 항목·참조)인 경우. */
+  is_place?: boolean;
   /** 이름이 소유자에서 파생되는 컬렉션(`cache_<풀>_stocks`)만 붙는다. */
   owner?: string;
   /** 카탈로그에는 있는데 DB 에 아직 없는 경우. */
@@ -47,6 +52,12 @@ type Payload = {
 
 /** 분류 배지 색 — 삭제 정책의 성격을 색으로 구분한다.
  *  소유자별(파랑 계열) · 보존(초록) · 설정(보라) · 재생성 가능(회색) · 미분류(빨강). */
+const DELETED_WITH_TONE: Record<string, { bg: string; fg: string }> = {
+  pool: { bg: "#dbeafe", fg: "#1e40af" },
+  account: { bg: "#e0e7ff", fg: "#3730a3" },
+  keep: { bg: "#f1f5f9", fg: "#334155" },
+};
+
 const CATEGORY_TONE: Record<string, { bg: string; fg: string }> = {
   pool: { bg: "#dbeafe", fg: "#1e40af" },
   account: { bg: "#e0e7ff", fg: "#3730a3" },
@@ -90,13 +101,19 @@ export function DataTablesPageClient() {
     void load();
   }, [load]);
 
-  // 미분류를 **맨 위**에 둔다 — 등록 누락이 목적이라 눈에 먼저 들어와야 한다.
+  // 정렬 축은 **삭제 시점** — 이 화면의 질문 그대로 읽히게 한다.
+  // (미분류는 등록 누락을 드러내는 게 목적이라 맨 위에 둔다.)
   const gridRows = useMemo<TableRow[]>(() => {
     if (!data) return [];
-    const order = new Map(data.category_order.map((key, index) => [key, index]));
+    const deleteOrder: Record<string, number> = { pool: 0, account: 1, keep: 2 };
+    const categoryOrder = new Map(data.category_order.map((key, index) => [key, index]));
     const rest = [...data.rows].sort((a, b) => {
-      const byCategory = (order.get(a.category) ?? 99) - (order.get(b.category) ?? 99);
+      const byDelete = (deleteOrder[a.deleted_with] ?? 9) - (deleteOrder[b.deleted_with] ?? 9);
+      if (byDelete !== 0) return byDelete;
+      const byCategory = (categoryOrder.get(a.category) ?? 99) - (categoryOrder.get(b.category) ?? 99);
       if (byCategory !== 0) return byCategory;
+      // 컬렉션을 먼저, 그 안쪽 자리를 뒤에. 같은 종류면 큰 것부터.
+      if (Boolean(a.is_place) !== Boolean(b.is_place)) return a.is_place ? 1 : -1;
       return b.size - a.size;
     });
     return [...data.unclassified, ...rest];
@@ -111,6 +128,33 @@ export function DataTablesPageClient() {
 
   const columnDefs = useMemo<ColDef<TableRow>[]>(
     () => [
+      {
+        field: "deleted_with_label",
+        headerName: "언제 지워지나",
+        width: 124,
+        headerTooltip: "종목풀·계좌를 지울 때 이 자리가 함께 지워지는지 여부입니다.",
+        cellRenderer: (params: { data?: TableRow }) => {
+          const row = params.data;
+          if (!row) return null;
+          const tone = DELETED_WITH_TONE[row.deleted_with] ?? DELETED_WITH_TONE.keep;
+          return (
+            <span
+              style={{
+                display: "inline-block",
+                padding: "0.1rem 0.45rem",
+                borderRadius: "0.35rem",
+                background: tone.bg,
+                color: tone.fg,
+                fontSize: "var(--fs-sm)",
+                fontWeight: 700,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {row.deleted_with_label}
+            </span>
+          );
+        },
+      },
       {
         field: "category_label",
         headerName: "분류",
@@ -139,8 +183,9 @@ export function DataTablesPageClient() {
       },
       {
         field: "name",
-        headerName: "컬렉션",
-        width: 260,
+        headerName: "위치",
+        width: 330,
+        headerTooltip: "컬렉션 이름. `›` 가 있으면 컬렉션이 아니라 그 문서 안쪽 자리입니다.",
         cellStyle: { fontWeight: 600 },
         cellRenderer: (params: { data?: TableRow; value?: string }) => (
           <span>
@@ -157,13 +202,6 @@ export function DataTablesPageClient() {
         cellRenderer: (params: { value?: string }) =>
           params.value ? <span>{params.value}</span> : <span style={{ color: "var(--text-muted)" }}>-</span>,
         headerTooltip: "이름이 소유자에서 파생되는 컬렉션(cache_<소유자>_stocks)만 값이 있습니다.",
-      },
-      {
-        field: "owner_field",
-        headerName: "소유자 필드",
-        width: 118,
-        cellRenderer: (params: { value?: string }) =>
-          params.value ? <code>{params.value}</code> : <span style={{ color: "var(--text-muted)" }}>-</span>,
       },
       {
         field: "count",
@@ -194,15 +232,28 @@ export function DataTablesPageClient() {
         sortable: true,
         valueGetter: (params) => orphanByLocation.get(params.data?.name ?? "")?.count ?? null,
         headerTooltip: "살아있는 종목풀·계좌 어디에도 속하지 않는 데이터. 소유자를 지울 때 함께 정리되지 않은 것입니다.",
-        cellRenderer: (params: { data?: TableRow; value?: number | null }) => {
-          const item = orphanByLocation.get(params.data?.name ?? "");
-          if (!item) return <span style={{ color: "var(--text-muted)" }}>-</span>;
-          return (
-            <span style={{ color: "#991b1b", fontWeight: 700 }} title={item.detail}>
-              {item.count.toLocaleString("ko-KR")}
-            </span>
-          );
+        cellRenderer: (params: { data?: TableRow }) => {
+          const row = params.data;
+          if (!row) return null;
+          const item = orphanByLocation.get(row.name);
+          if (item) {
+            return (
+              <span style={{ color: "#991b1b", fontWeight: 700 }} title={item.detail}>
+                {item.count.toLocaleString("ko-KR")}
+              </span>
+            );
+          }
+          // 소유자 개념이 있는 자리는 '0'(깨끗함), 없는 자리는 '-'(해당 없음)로 구분한다.
+          const hasOwner = row.deleted_with !== "keep";
+          return <span style={{ color: "var(--text-muted)" }}>{hasOwner ? "0" : "-"}</span>;
         },
+      },
+      {
+        field: "owner_field",
+        headerName: "소유자 필드",
+        width: 118,
+        cellRenderer: (params: { value?: string }) =>
+          params.value ? <code>{params.value}</code> : <span style={{ color: "var(--text-muted)" }}>-</span>,
       },
       { field: "policy", headerName: "삭제 정책", width: 190 },
       {
