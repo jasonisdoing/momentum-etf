@@ -197,15 +197,27 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
                 raise AccountSettingsStoreError(
                     f"'{account_id}' 의 {key} 는 {', '.join(allowed)} 중 하나여야 합니다: {raw}"
                 )
-            # 계좌와 국가가 같아야 한다 — 거래 달력(월초 리밸런싱 판정)과 통화 환산이
-            # 슬리브마다 갈리면 합성 곡선 자체가 성립하지 않는다.
-            account_country = str(values.get("country_code") or existing_doc.get("country_code") or "").strip().lower()
-            pool_country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
-            if account_country and pool_country and pool_country != account_country:
-                raise AccountSettingsStoreError(
-                    f"'{account_id}'({account_country}) 의 {key} 는 같은 국가의 종목풀이어야 합니다: "
-                    f"{pool}({pool_country})"
-                )
+            # 계좌와 국가·통화가 같아야 한다. 국가가 다르면 거래 달력이 갈려 월초 리밸런싱
+            # 판정일이 슬리브마다 달라지고, 통화가 다르면 원화 환산율(`_krw_rate`)과 백테스트
+            # 시작 자본이 한 값으로 정해지지 않는다 — 어느 쪽이든 합성 곡선이 성립하지 않는다.
+            pool_config = get_ticker_type_settings(pool) or {}
+            for label, account_value, pool_value in (
+                (
+                    "국가",
+                    str(values.get("country_code") or existing_doc.get("country_code") or "").strip().lower(),
+                    str(pool_config.get("country_code") or "").strip().lower(),
+                ),
+                (
+                    "통화",
+                    str(values.get("currency") or existing_doc.get("currency") or "").strip().upper(),
+                    str(pool_config.get("currency") or "").strip().upper(),
+                ),
+            ):
+                if account_value and pool_value and pool_value != account_value:
+                    raise AccountSettingsStoreError(
+                        f"'{account_id}'({account_value}) 의 {key} 는 같은 {label}의 종목풀이어야 합니다: "
+                        f"{pool}({pool_value})"
+                    )
             cleaned[key] = pool
         elif key == "mix_slack_enabled":
             # 합성 오늘의 액션 슬랙 알람 — 새 지시·수량 증가가 생기면 발송한다.

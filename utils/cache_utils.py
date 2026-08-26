@@ -19,10 +19,6 @@ logger = get_app_logger()
 
 _CLOSE_SERIES_MEMORY_CACHE: dict[tuple[str, str], tuple[datetime | None, pd.Series]] = {}
 
-_COLLECTION_NAME_MAP = {
-    "kor": "cache_kor_stocks",
-    "us": "cache_us_stocks",
-}
 _REFRESH_STATUS_COLLECTION = "cache_refresh_status"
 
 _TEMP_SUFFIX_SANITIZE = re.compile(r"[^a-z0-9_-]", re.IGNORECASE)
@@ -126,10 +122,6 @@ def _get_cache_start_date() -> pd.Timestamp | None:
 
 def _resolve_collection_name(account_id: str) -> str:
     token = (account_id or "global").strip().lower() or "global"
-
-    # Static map check (legacy support or specific overrides)
-    if token in _COLLECTION_NAME_MAP:
-        return _COLLECTION_NAME_MAP[token]
 
     # Temporary collection handling
     if "_tmp_" in token:
@@ -1050,7 +1042,7 @@ def clean_temp_cache_collections(account_id: str, *, max_age_seconds: int | None
     db = get_db_connection()
     if db is None:
         return 0
-    base_name = _COLLECTION_NAME_MAP.get(account_id.strip().lower(), f"cache_{account_id}_stocks")
+    base_name = _resolve_collection_name(account_id)
     removed = 0
     try:
         threshold = None
@@ -1127,11 +1119,6 @@ def list_available_cache_keys() -> list[str]:
     except Exception:
         existing = set()
 
-    # 정적 맵 먼저 체크
-    for key, coll in _COLLECTION_NAME_MAP.items():
-        if coll in existing:
-            available.append(key)
-
     # 동적 컬렉션 패턴 체크 (cache_{account}_stocks)
     # cache_ 로 시작하고 _stocks 로 끝나는 컬렉션 탐색
     # 단, _tmp_ 가 포함된 건 임시 컬렉션이므로 제외
@@ -1146,14 +1133,8 @@ def list_available_cache_keys() -> list[str]:
                     continue
                 available.append(inner)
 
-    # 중복 제거 및 정렬
-    available = sorted(list(set(available)))
-
-    if not available:
-        # DB 연결 실패 또는 없으면 정적 맵 키라도 반환
-        available = sorted(_COLLECTION_NAME_MAP.keys())
-
-    return available
+    # 중복 제거 및 정렬. 컬렉션이 하나도 없으면 빈 목록 — 임의 기본값을 지어내지 않는다.
+    return sorted(set(available))
 
 
 def list_cached_tickers(account_id: str) -> list[str]:

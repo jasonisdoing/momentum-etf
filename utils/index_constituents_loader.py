@@ -23,6 +23,17 @@ KOR_INDEX_SOURCES: dict[str, dict[str, Any]] = {
 }
 
 
+# 지수별 적재 배치 — 명단이 없을 때 "무엇을 돌려야 하는지" 를 정확히 알려주기 위한 것이다.
+# 배치를 옮기면 여기도 함께 고쳐야 한다(안 그러면 화면이 없는 스크립트를 안내한다).
+_REFRESH_SCRIPT_BY_INDEX: dict[str, str] = {
+    "SP500": "scripts/update_us_market_stocks.py",
+    "NDX100": "scripts/update_us_market_stocks.py",
+    "ASX200": "scripts/update_aus_market_stocks.py",
+    "KOSPI200": "scripts/update_kor_market_stocks.py",
+    "KOSDAQ150": "scripts/update_kor_market_stocks.py",
+}
+
+
 def _normalize_index(index: str) -> str:
     key = str(index or "").strip().upper()
     if key not in SUPPORTED_INDICES:
@@ -44,11 +55,8 @@ def load_index_constituents(index: str) -> list[dict[str, Any]]:
     key = _normalize_index(index)
     doc = _load_document(key)
     if not doc:
-        raise LookupError(
-            f"{key} 구성종목이 DB 에 없습니다 (컬렉션 {COLLECTION}).\n"
-            "미국은 scripts/update_us_market_stocks.py, 호주는 scripts/update_aus_market_stocks.py, "
-            "한국은 scripts/update_kor_dividend_stocks.py 를 실행해 저장하세요."
-        )
+        script = _REFRESH_SCRIPT_BY_INDEX.get(key, "해당 시장의 구성종목 배치")
+        raise LookupError(f"{key} 구성종목이 DB 에 없습니다 (컬렉션 {COLLECTION}). {script} 를 실행해 저장하세요.")
     return list(doc.get("tickers") or [])
 
 

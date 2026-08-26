@@ -367,6 +367,7 @@ def _build_missing_ticker_rows(
             {
                 "티커": ticker,
                 "종목명": _name_of(source, ticker),
+                "메모": "",
                 "source_ticker_type": source,
                 "순번": "-",
                 "순위": None,

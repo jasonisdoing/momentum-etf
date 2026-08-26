@@ -544,14 +544,16 @@ def _build_action_groups(
 
 
 def _attach_disparity(holdings: list[dict[str, Any]], pool_by_source: dict[str, str]) -> None:
-    """행마다 단기·장기 이격(%)을 붙인다 — **그 행이 속한 종목풀 설정**의 이평선이 기준.
+    """행마다 단기·장기 이격(%)을 붙인다 — **그 종목이 속한 종목풀 설정**의 이평선이 기준.
 
     순위 화면(`/pools-rank`)·보유종목 알림과 같은 기준이다. 화면은 이 값으로 종목명 옆
     추세 이탈 배지(❗)를 붙이므로, 다른 기준으로 계산하면 같은 종목에 화면마다 다른
     배지가 붙는다. 계산 자체도 같은 함수(`momentum_metrics`)를 쓴다.
 
-    슬리브마다 풀이 다를 수 있어 행의 `sources`(sm/nh)로 풀을 정한다. 두 슬리브에
-    모두 잡힌 종목은 모멘텀 풀을 쓴다(같은 풀일 때만 생기는 경우다).
+    행의 풀을 정하는 순서:
+      1) 슬리브 목표 행 — `sources`(sm/nh)가 가리키는 풀. 둘 다면 모멘텀 풀(같은 풀일 때만 생긴다).
+      2) 전량 매도 대상 행 — 슬리브 어디에도 없는 계좌 보유분이라 `sources` 가 비어 있다.
+         한 티커는 한 풀에만 들어가므로 소속 풀을 직접 찾는다(보유종목 알림과 같은 함수).
     이평선이나 가격을 못 구하면 None 으로 둔다(임의 값으로 채우지 않는다).
     """
     import pandas as pd
@@ -559,28 +561,43 @@ def _attach_disparity(holdings: list[dict[str, Any]], pool_by_source: dict[str, 
     from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
     from utils.momentum_service import momentum_metrics
     from utils.settings_loader import get_ticker_type_settings
+    from utils.stock_list_io import pools_by_ticker
 
     tickers = [str(row["ticker"]).strip() for row in holdings if row.get("ticker")]
     if not tickers:
         return
 
-    # 풀별 이평선 — 풀 수가 둘뿐이라 한 번씩만 읽는다.
+    # 슬리브에 안 잡힌 행(전량 매도 대상)의 소속 풀 — 없으면 조회하지 않는다.
+    orphan_tickers = [
+        str(row["ticker"]).strip() for row in holdings if row.get("ticker") and not (row.get("sources") or [])
+    ]
+    pool_by_ticker = pools_by_ticker(orphan_tickers) if orphan_tickers else {}
+
     ma_by_pool: dict[str, tuple[int, int] | None] = {}
-    for pool in set(pool_by_source.values()):
-        config = get_ticker_type_settings(pool) or {}
-        short, long = config.get("SHORT_MA_DAYS"), config.get("LONG_MA_DAYS")
-        ma_by_pool[pool] = (int(short), int(long)) if short and long else None
+
+    def ma_days_of(pool: str) -> tuple[int, int] | None:
+        if pool not in ma_by_pool:
+            config = get_ticker_type_settings(pool) or {}
+            short, long = config.get("SHORT_MA_DAYS"), config.get("LONG_MA_DAYS")
+            ma_by_pool[pool] = (int(short), int(long)) if short and long else None
+        return ma_by_pool[pool]
 
     frames = load_cached_frames_bulk_from_all_ticker_types(tickers)
     for row in holdings:
         row["current_short_pct"] = None
         row["current_long_pct"] = None
+        ticker = str(row.get("ticker") or "").strip()
         sources = row.get("sources") or []
-        source = "sm" if "sm" in sources else ("nh" if "nh" in sources else None)
-        days = ma_by_pool.get(pool_by_source.get(source or "", "")) if source else None
+        if "sm" in sources:
+            pool = pool_by_source.get("sm", "")
+        elif "nh" in sources:
+            pool = pool_by_source.get("nh", "")
+        else:
+            pool = pool_by_ticker.get(ticker.upper(), "")
+        days = ma_days_of(pool) if pool else None
         if days is None:
             continue
-        frame = frames.get(str(row.get("ticker") or "").strip())
+        frame = frames.get(ticker)
         if frame is None or frame.empty or "Close" not in frame.columns:
             continue
         close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
