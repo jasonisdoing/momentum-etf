@@ -556,15 +556,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         params.data && !isDetailRow(params.data) ? formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0)) : "",
     },
     {
-      field: "valuation_krw",
-      headerName: "평가액",
-      minWidth: 132,
-      flex: 1,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data) ? formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0)) : "",
-    },
-    {
       field: "cash_krw",
       headerName: "현금",
       minWidth: 124,
