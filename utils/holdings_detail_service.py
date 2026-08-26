@@ -194,7 +194,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
         # 종목 메모 — 계좌가 아니라 종목에 붙는다(utils/stock_memo_store). 계좌 안 종목을 한 번에 읽는다.
         from utils.stock_memo_store import get_stock_memos
 
-        memo_by_ticker = get_stock_memos([str(r.get("티커") or "").strip() for _, r in df.iterrows()])
+        memo_by_ticker = get_stock_memos([str(t or "").strip() for t in df.get("티커", [])])
 
         for _, row in df.iterrows():
             ticker_raw = str(row.get("티커") or "").strip()
@@ -274,7 +274,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                     "daily_change_pct": float(row.get("일간(%)") or 0) if row.get("일간(%)") is not None else None,
                     "buy_amount_krw": buy_amount,
                     "valuation_krw": val_amount,
-                    "memo": memo_by_ticker.get(str(row.get("ticker") or "").strip(), ""),
+                    "memo": memo_by_ticker.get(ticker_raw, ""),
                     "sort_order": safe_int(row.get("sort_order")),
                     "ticker_type": str(row.get("ticker_type") or "").strip(),
                     "country_code": str(row.get("country_code") or "").strip(),
