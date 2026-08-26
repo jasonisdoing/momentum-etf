@@ -22,9 +22,13 @@ export function PoolAddProgressBar({ progress }: { progress: PoolAddProgress | n
         <span style={{ fontWeight: 700 }}>
           {progress.done} / {progress.total}
         </span>
-        {/* 지금 처리 중인 티커 — 어디서 멈췄는지 바로 보인다. */}
+        {/* 지금 처리 중인 종목 — 어디서 멈췄는지 바로 보인다. 티커만으로는 알아보기 어렵다. */}
         <span style={{ color: "var(--text-muted)" }}>
-          {progress.done < progress.total ? progress.ticker : "마무리 중…"}
+          {progress.done < progress.total
+            ? progress.name
+              ? `${progress.name}(${progress.ticker})`
+              : progress.ticker
+            : "마무리 중…"}
         </span>
       </div>
       <div
