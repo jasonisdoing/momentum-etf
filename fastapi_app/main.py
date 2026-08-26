@@ -14,6 +14,7 @@ from .routes.broker_api import router as broker_api_router
 from .routes.daily import router as daily_router
 from .routes.dashboard import router as dashboard_router
 from .routes.data_sources import router as data_sources_router
+from .routes.data_tables import router as data_tables_router
 from .routes.holdings import router as holdings_router
 from .routes.holdings_components import router as holdings_components_router
 from .routes.kor_dividend import router as kor_dividend_router
@@ -84,6 +85,7 @@ app.include_router(holdings_components_router)
 app.include_router(dashboard_router)
 app.include_router(daily_router)
 app.include_router(data_sources_router)
+app.include_router(data_tables_router)
 app.include_router(kor_dividend_router)
 app.include_router(kor_market_stocks_router)
 app.include_router(market_router)
