@@ -117,7 +117,14 @@ type View = {
   benchmark_mdd_pct: number | null;
   benchmark_sortino: number | null;
   /** 일별 누적(%) — 연간·월간·주간·일간 표를 이 시계열에서 만든다 (신고가 화면과 동일 방식). */
-  daily: { date: string; strategy_pct: number; benchmark_pct: number }[];
+  /** 일별 누적(%) — 합성·슬리브별 단독·벤치마크. 슬리브 값은 그 날짜 데이터가 없으면 null. */
+  daily: {
+    date: string;
+    strategy_pct: number;
+    sm_pct: number | null;
+    nh_pct: number | null;
+    benchmark_pct: number;
+  }[];
   /** 체결 목록 — 두 전략 합본. exit_date 가 없으면 보유중. */
   trades: MixTradeRow[];
   /** 체결 통계 — 백엔드 공용 계산(utils/trade_stats.py). 청산분만 센다. */
@@ -287,8 +294,13 @@ type ViewMode = (typeof VIEW_MODES)[number]["key"];
 
 type PeriodRow = {
   period: string;
+  /** 합성(두 슬리브를 한 계좌에서 굴린 결과). */
   strategy_pct: number;
+  /** 각 전략을 **혼자** 굴렸을 때 — 합성이 단독보다 나은지 바로 읽으라고 함께 둔다. */
+  sm_pct: number | null;
+  nh_pct: number | null;
   benchmark_pct: number;
+  /** 합성 − 벤치마크. */
   excess_pp: number;
 };
 
@@ -308,32 +320,42 @@ function toPeriodRows(
   labelByLastDate = false,
 ): PeriodRow[] {
   if (daily.length === 0) return [];
-  const lastByPeriod = new Map<
-    string,
-    { strategy: number; benchmark: number; lastDate: string }
-  >();
+  type Snapshot = {
+    strategy: number;
+    sm: number | null;
+    nh: number | null;
+    benchmark: number;
+    lastDate: string;
+  };
+  const lastByPeriod = new Map<string, Snapshot>();
   const order: string[] = [];
   for (const point of daily) {
     const key = keyOf(point.date);
     if (!lastByPeriod.has(key)) order.push(key);
     lastByPeriod.set(key, {
       strategy: point.strategy_pct,
+      sm: point.sm_pct,
+      nh: point.nh_pct,
       benchmark: point.benchmark_pct,
       lastDate: point.date,
     });
   }
   // 첫 구간의 기준은 시작 시점(누적 0%)이다.
-  let prev = { strategy: 0, benchmark: 0 };
+  let prev: Snapshot = { strategy: 0, sm: 0, nh: 0, benchmark: 0, lastDate: "" };
   const rows: PeriodRow[] = [];
+  // 누적(%) 두 점 사이의 구간 수익률. 어느 한쪽이라도 값이 없으면 null — 0 으로 채우면
+  // 데이터가 없는 구간이 '보합' 으로 보인다.
+  const step = (now: number | null, before: number | null): number | null =>
+    now == null || before == null ? null : ((1 + now / 100) / (1 + before / 100) - 1) * 100;
   for (const key of order) {
     const current = lastByPeriod.get(key)!;
-    const step = (now: number, before: number) =>
-      ((1 + now / 100) / (1 + before / 100) - 1) * 100;
-    const strategy = step(current.strategy, prev.strategy);
-    const benchmark = step(current.benchmark, prev.benchmark);
+    const strategy = step(current.strategy, prev.strategy) ?? 0;
+    const benchmark = step(current.benchmark, prev.benchmark) ?? 0;
     rows.push({
       period: labelByLastDate ? current.lastDate : key,
       strategy_pct: strategy,
+      sm_pct: step(current.sm, prev.sm),
+      nh_pct: step(current.nh, prev.nh),
       benchmark_pct: benchmark,
       excess_pp: strategy - benchmark,
     });
@@ -926,11 +948,13 @@ export function StrategyMixClient() {
       field: keyof PeriodRow,
       headerName: string,
       suffix = "%",
+      headerTooltip?: string,
     ): ColDef<PeriodRow> => ({
       field,
       headerName,
+      headerTooltip,
       flex: 1,
-      minWidth: 120,
+      minWidth: 108,
       type: "numericColumn",
       valueFormatter: (p) =>
         p.value == null
@@ -959,9 +983,18 @@ export function StrategyMixClient() {
             : String(p.value ?? ""),
         cellStyle: { fontWeight: 700 },
       },
-      pct("strategy_pct", "전략"),
-      pct("benchmark_pct", view?.benchmark_name ?? "벤치마크"),
-      pct("excess_pp", "초과", "%p"),
+      pct(
+        "strategy_pct",
+        "전략통합",
+        "%",
+        "두 전략을 한 계좌에서 함께 굴린 결과 — 매월 첫 거래일에 배분을 되돌린다(현금 우선 이관).",
+      ),
+      // 각 전략을 혼자 굴렸을 때 — 합성이 단독보다 나은지 같은 줄에서 비교한다.
+      // 이관이 없는 곡선이라 전략통합은 두 값의 단순 평균과 일치하지 않는다.
+      pct("sm_pct", "모멘텀", "%", "모멘텀 전략만 혼자 굴렸을 때 — 각 전략 화면의 백테스트와 같은 값."),
+      pct("nh_pct", "신고가", "%", "신고가 전략만 혼자 굴렸을 때 — 각 전략 화면의 백테스트와 같은 값."),
+      pct("benchmark_pct", view?.benchmark_name ?? "벤치마크", "%", "모멘텀 풀의 벤치마크."),
+      pct("excess_pp", "초과", "%p", "전략통합 − 벤치마크."),
     ];
   }, [viewMode, view?.benchmark_name]);
 
