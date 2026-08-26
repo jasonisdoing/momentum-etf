@@ -20,6 +20,7 @@ import {
   IconNotes,
   IconReceipt2,
   IconSettings,
+  IconTable,
   IconTrendingUp,
 } from "@tabler/icons-react";
 
@@ -111,6 +112,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { href: "/memos", label: "메모", icon: IconNotes },
       { href: "/data_source", label: "데이터 소스", icon: IconDatabase },
+      { href: "/data-tables", label: "테이블", icon: IconTable },
       { href: "/batch", label: "배치", icon: IconListDetails },
     ],
   },
