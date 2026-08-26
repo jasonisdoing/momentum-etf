@@ -27,6 +27,8 @@ type RankRow = {
   bucket: number;
   티커: string;
   종목명: string;
+  /** 종목 메모 — 자산 관리 화면과 같은 값(종목에 붙는다). */
+  메모?: string;
   상장일: string;
   현재가: number | null;
   "괴리율": number | null;

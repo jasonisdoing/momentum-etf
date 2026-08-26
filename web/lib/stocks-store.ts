@@ -112,6 +112,16 @@ export async function loadStocksTable(tickerType?: string): Promise<StocksTableD
   );
 }
 
+/** 종목 메모 저장 — 계좌가 아니라 종목에 붙는다(자산 관리 화면과 같은 값). */
+export async function updateStockMemo(ticker: string, memo: string): Promise<void> {
+  const body = JSON.stringify({ ticker, memo });
+  if (typeof window !== "undefined") {
+    await fetchClientJson("/api/stocks/memo", { method: "PATCH", body });
+    return;
+  }
+  await fetchFastApiJson("/internal/stocks/memo", { method: "PATCH", body });
+}
+
 export async function updateStockBucket(tickerType: string, ticker: string, bucketId: number): Promise<void> {
   if (typeof window !== "undefined") {
     await fetchClientJson("/api/stocks", {

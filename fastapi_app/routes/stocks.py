@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
@@ -54,6 +54,11 @@ class StockValidationPayload(BaseModel):
     ticker: str
 
 
+class StockMemoPayload(BaseModel):
+    ticker: str
+    memo: str = ""
+
+
 class StockCreatePayload(BaseModel):
     ticker_type: str
     ticker: str
@@ -71,6 +76,16 @@ def get_active_stocks(
 @router.patch("")
 def patch_active_stock(payload: BucketUpdatePayload, _: None = Depends(require_internal_token)) -> dict[str, bool]:
     update_stock_bucket(payload.ticker_type, payload.ticker, payload.bucket_id)
+    return {"ok": True}
+
+
+@router.patch("/memo")
+def patch_stock_memo(payload: StockMemoPayload, _: None = Depends(require_internal_token)) -> dict[str, bool]:
+    """종목 메모 — 계좌가 아니라 종목에 붙는다(자산 관리·순위 화면 공용)."""
+    from utils.stock_memo_store import set_stock_memo
+
+    if not set_stock_memo(payload.ticker, payload.memo):
+        raise HTTPException(status_code=404, detail=f"종목을 찾을 수 없습니다: {payload.ticker}")
     return {"ok": True}
 
 

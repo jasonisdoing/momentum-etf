@@ -18,7 +18,7 @@ import {
 } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { readSessionTtlCache, writeSessionTtlCache } from "@/lib/session-ttl-cache";
-import { addStockCandidate, deleteStock, updateStockBucket, validateStockCandidate, updateStockExclude } from "@/lib/stocks-store";
+import { addStockCandidate, deleteStock, updateStockBucket, updateStockMemo, validateStockCandidate, updateStockExclude } from "@/lib/stocks-store";
 import {
   readRememberedTickerType,
   writeRememberedTickerType,
@@ -72,6 +72,8 @@ type RankRow = {
   시총순위?: number | null;
   마켓?: string;
   종목명: string;
+  /** 종목 메모 — 자산 관리 화면과 같은 값(종목에 붙는다). */
+  메모?: string;
   상장일: string;
   추세: number | null;
   이격?: number | null;
@@ -994,6 +996,29 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
       },
       {
+        // 종목 메모 — 자산 관리(`/assets`)의 매입단가 옆 칸과 같은 값(종목에 붙는다).
+        // 순위와 무관한 수기 칸이라 모드와 상관없이 바로 고칠 수 있다(셀을 벗어나면 저장).
+        field: "메모",
+        headerName: "메모",
+        width: 150,
+        sortable: false,
+        cellDataType: "text",
+        editable: (params) => !params.data?.__isAddingRow,
+        cellClass: "assetsEditableCell",
+        valueParser: (params) => String(params.newValue ?? "").trim(),
+        valueSetter: (params) => {
+          const next = String(params.newValue ?? "").trim();
+          if (!params.data || params.data.__isAddingRow || next === String(params.data.메모 ?? "")) {
+            return false;
+          }
+          params.data.메모 = next;
+          void handleMemoChange(String(params.data.티커 ?? ""), next);
+          return true;
+        },
+        cellRenderer: (params: { value?: string | null }) =>
+          params.value ? <span>{params.value}</span> : <span className="text-muted">-</span>,
+      },
+      {
         field: "업종",
         headerName: "업종",
         hide: !hasIndustryData,
@@ -1395,6 +1420,18 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     const dirtyRows = rows.filter((row) => dirtyRowIds.includes(getRowId(row)));
     for (const row of dirtyRows) {
       await updateStockBucket(selectedTickerType, String(row.티커 ?? ""), Number(row.bucket ?? 1));
+    }
+  }
+
+  async function handleMemoChange(ticker: string, memo: string) {
+    if (!ticker) return;
+    try {
+      await updateStockMemo(ticker, memo);
+      // 행 데이터도 갱신해 재조회 전까지 값이 유지되게 한다.
+      setRows((prev) => prev.map((row) => (String(row.티커 ?? "") === ticker ? { ...row, 메모: memo } : row)));
+      toast.success("메모 저장 완료");
+    } catch (error) {
+      showErrorToast(error instanceof Error ? error.message : "메모 저장에 실패했습니다.");
     }
   }
 

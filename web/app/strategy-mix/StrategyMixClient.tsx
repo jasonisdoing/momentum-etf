@@ -178,7 +178,7 @@ type Holding = {
   is_sell_all?: boolean;
 };
 
-/** 적용 계좌의 실제 상태 — 계좌가 연결된 풀에서만 온다. */
+/** 적용 계좌의 실제 상태 — 계산 기준 계좌의 원장(portfolio_master)에서 온다. */
 type AccountState = {
   account_id: string;
   cash_balance: number;
@@ -204,7 +204,7 @@ type Positions = {
   live: boolean;
   /** 다음 거래일 — 모든 체결이 시가라 액션 묶음의 날짜가 된다. */
   next_trading_day: string | null;
-  /** 적용 계좌를 저장한 풀에서만 온다. 없으면 비중만 보여준다. */
+  /** 계산 기준 계좌의 원장 상태. 없으면 비중만 보여준다. */
   account: AccountState | null;
   /** 과거 날짜 셀렉트용 — 신고가 화면과 같은 날짜 목록. */
   available_dates: string[];
@@ -418,7 +418,7 @@ export function StrategyMixClient() {
   const [backtestProgress, setBacktestProgress] =
     useState<LoadingProgress | null>(null);
 
-  // 진입 시에는 풀 목록만 받는다 — 계산은 탭·버튼이 시작한다.
+  // 진입 시에는 계좌 목록만 받는다 — 계산은 탭·버튼이 시작한다.
   useEffect(() => {
     let alive = true;
     void (async () => {
@@ -429,7 +429,7 @@ export function StrategyMixClient() {
         const payload = (await response.json()) as Meta & { error?: string };
         if (!response.ok || payload.error)
           throw new Error(
-            payload.error ?? "종목풀 목록을 불러오지 못했습니다.",
+            payload.error ?? "합성 운용 계좌 목록을 불러오지 못했습니다.",
           );
         if (!alive) return;
         const accounts = payload.accounts ?? [];
@@ -447,7 +447,7 @@ export function StrategyMixClient() {
           setError(
             metaError instanceof Error
               ? metaError.message
-              : "종목풀 목록을 불러오지 못했습니다.",
+              : "합성 운용 계좌 목록을 불러오지 못했습니다.",
           );
       }
     })();
@@ -755,7 +755,7 @@ export function StrategyMixClient() {
         cellStyle: { fontWeight: 600 },
       },
     ];
-    // 계좌를 연결한 풀에서만 매매 지시 컬럼을 붙인다 — 목표와 실제 보유의 차이가 주문 수량이다.
+    // 계좌 총자산을 알 때만 매매 지시 컬럼을 붙인다 — 목표와 실제 보유의 차이가 주문 수량이다.
     if (totalAsset != null) {
       columns.push(
         {

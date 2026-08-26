@@ -191,6 +191,10 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
             selected_cash_info = cash_info
 
         account_rows: list[dict[str, Any]] = []
+        # 종목 메모 — 계좌가 아니라 종목에 붙는다(utils/stock_memo_store). 계좌 안 종목을 한 번에 읽는다.
+        from utils.stock_memo_store import get_stock_memos
+
+        memo_by_ticker = get_stock_memos([str(r.get("티커") or "").strip() for _, r in df.iterrows()])
 
         for _, row in df.iterrows():
             ticker_raw = str(row.get("티커") or "").strip()
@@ -270,7 +274,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                     "daily_change_pct": float(row.get("일간(%)") or 0) if row.get("일간(%)") is not None else None,
                     "buy_amount_krw": buy_amount,
                     "valuation_krw": val_amount,
-                    "memo": str(row.get("memo") or "").strip(),
+                    "memo": memo_by_ticker.get(str(row.get("ticker") or "").strip(), ""),
                     "sort_order": safe_int(row.get("sort_order")),
                     "ticker_type": str(row.get("ticker_type") or "").strip(),
                     "country_code": str(row.get("country_code") or "").strip(),
@@ -429,7 +433,10 @@ def update_holding(
             if average_buy_price is not None:
                 h["average_buy_price"] = float(average_buy_price)
             if memo is not None:
-                h["memo"] = str(memo).strip()
+                # 메모는 계좌 보유가 아니라 **종목**에 붙는다(utils/stock_memo_store).
+                from utils.stock_memo_store import set_stock_memo
+
+                set_stock_memo(h.get("ticker") or ticker, memo)
             if target_ratio is not None:
                 _set_holding_target_ratio(h, float(target_ratio))
             found = True
@@ -498,7 +505,6 @@ def add_holding(
         "currency": currency,
         "first_buy_date": datetime.now().strftime("%Y-%m-%d"),
         "last_buy_date": datetime.now().strftime("%Y-%m-%d"),
-        "memo": str(memo or "").strip(),
         "sort_order": next_sort_order,
     }
 

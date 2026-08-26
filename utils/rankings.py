@@ -824,6 +824,8 @@ def build_ticker_type_rankings(
             "bucket": int(etf.get("bucket") or 0),
             "티커": ticker,
             "종목명": etf.get("name", ""),
+            # 종목 메모 — 자산 관리 화면과 같은 값(stock_meta.memo, utils/stock_memo_store).
+            "메모": str(etf.get("memo") or ""),
             "마켓": etf.get("market", ""),
             "country_code": country_code,
             "currency": str(settings.get("currency") or ""),
