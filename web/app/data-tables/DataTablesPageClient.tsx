@@ -20,6 +20,8 @@ type TableRow = {
   deleted_with_label: string;
   /** 컬렉션 통째가 아니라 문서 안쪽 자리(키·배열 항목·참조)인 경우. */
   is_place?: boolean;
+  /** 「건수」의 단위 — 컬렉션은 문서, 문서 안쪽 자리는 키·항목. */
+  count_unit: string;
   /** 이름이 소유자에서 파생되는 컬렉션(`cache_<풀>_stocks`)만 붙는다. */
   owner?: string;
   /** 카탈로그에는 있는데 DB 에 아직 없는 경우. */
@@ -139,6 +141,7 @@ export function DataTablesPageClient() {
           const tone = DELETED_WITH_TONE[row.deleted_with] ?? DELETED_WITH_TONE.keep;
           return (
             <span
+              title={row.policy}
               style={{
                 display: "inline-block",
                 padding: "0.1rem 0.45rem",
@@ -205,10 +208,21 @@ export function DataTablesPageClient() {
       },
       {
         field: "count",
-        headerName: "문서",
-        width: 96,
+        headerName: "건수",
+        width: 112,
         type: "numericColumn",
-        valueFormatter: (params) => (params.value ? Number(params.value).toLocaleString("ko-KR") : "-"),
+        headerTooltip: "단위가 행마다 다릅니다 — 컬렉션은 문서 수, 문서 안쪽 자리는 키·항목 수입니다.",
+        cellRenderer: (params: { data?: TableRow; value?: number }) => {
+          const row = params.data;
+          if (!row) return null;
+          if (!row.count) return <span style={{ color: "var(--text-muted)" }}>-</span>;
+          return (
+            <span>
+              {row.count.toLocaleString("ko-KR")}
+              <span style={{ color: "var(--text-muted)" }}>{` ${row.count_unit}`}</span>
+            </span>
+          );
+        },
       },
       {
         field: "size",
@@ -255,7 +269,6 @@ export function DataTablesPageClient() {
         cellRenderer: (params: { value?: string }) =>
           params.value ? <code>{params.value}</code> : <span style={{ color: "var(--text-muted)" }}>-</span>,
       },
-      { field: "policy", headerName: "삭제 정책", width: 190 },
       {
         field: "purpose",
         headerName: "설명",

@@ -57,6 +57,10 @@ class TableSpec:
         name_pattern: 컬렉션 **이름 자체**가 소유자에서 파생될 때의 형식(`cache_{owner}_stocks`).
             이 경우 풀·계좌가 늘어도 카탈로그를 고칠 필요가 없다.
         owner_note: 소유자 필드 이름이 실제 내용과 다를 때의 설명(옛 명명 잔재 등).
+        deleted_with: 삭제 시점을 분류에서 유추하지 않고 **직접** 지정할 때 쓴다.
+            소유자 레지스트리(`pool_settings`·`account_settings`)가 그렇다 — 성격은 '설정'
+            이지만 종목풀·계좌를 지우면 그 문서가 사라진다. 비워 두면 분류에서 유추한다.
+        count_unit: 「건수」 칸의 단위. 컬렉션은 문서 수지만 문서 안쪽 자리는 키·항목 수다.
     """
 
     name: str
@@ -66,6 +70,8 @@ class TableSpec:
     owner_is_id: bool = False
     name_pattern: str = ""
     owner_note: str = ""
+    deleted_with: str = ""
+    count_unit: str = "문서"
 
 
 # ── 종목풀이 소유하는 것 ────────────────────────────────────────────────────
@@ -118,8 +124,22 @@ _AGGREGATE_TABLES: tuple[TableSpec, ...] = (
 
 # ── 설정 — 시스템의 단일 소스 ──────────────────────────────────────────────
 _CONFIG_TABLES: tuple[TableSpec, ...] = (
-    TableSpec("pool_settings", "config", "종목풀 정의와 설정(이평선·슬리피지·손절)", owner_is_id=True),
-    TableSpec("account_settings", "config", "계좌 정의와 설정(합성 풀·알람·증권사 API)", owner_is_id=True),
+    # 소유자 그 자체를 담는 문서 — 종목풀·계좌를 지우면 이 문서가 사라진다.
+    # 성격은 '설정' 이지만 삭제 시점은 소유자와 같아서 따로 지정한다.
+    TableSpec(
+        "pool_settings",
+        "config",
+        "종목풀 정의와 설정(이평선·슬리피지·손절). 문서 하나가 종목풀 하나다",
+        owner_is_id=True,
+        deleted_with="pool",
+    ),
+    TableSpec(
+        "account_settings",
+        "config",
+        "계좌 정의와 설정(합성 풀·알람·증권사 API). 문서 하나가 계좌 하나다",
+        owner_is_id=True,
+        deleted_with="account",
+    ),
     TableSpec("portfolio_master", "config", "계좌 원장 — 보유 수량·평단·현금"),
     TableSpec("system_config", "config", "전략 설정·알림 상태·토큰 등 시스템 키/값"),
     TableSpec("leverage_config", "config", "레버리지 추천 설정"),
@@ -226,8 +246,17 @@ DELETED_WITH_LABELS: dict[str, str] = {
 }
 
 
-def _deleted_with(category: str) -> str:
-    return category if category in ("pool", "account") else "keep"
+def _deleted_with(spec: TableSpec) -> str:
+    if spec.deleted_with:
+        return spec.deleted_with
+    return spec.category if spec.category in ("pool", "account") else "keep"
+
+
+def _policy_of(deleted_with: str, category: str) -> str:
+    """삭제 정책 한 줄 — 지워지는 것은 시점이, 남는 것은 성격이 이유다."""
+    if deleted_with in ("pool", "account"):
+        return CATEGORY_POLICIES[deleted_with]
+    return CATEGORY_POLICIES.get(category, "")
 
 
 # 화면 그룹 순서 — 소유자별 → 보존 → 나머지.
@@ -505,10 +534,11 @@ def build_data_table_payload() -> dict[str, Any]:
         base = {
             "name": spec.name,
             "category": spec.category,
-            "deleted_with": _deleted_with(spec.category),
-            "deleted_with_label": DELETED_WITH_LABELS[_deleted_with(spec.category)],
+            "deleted_with": _deleted_with(spec),
+            "deleted_with_label": DELETED_WITH_LABELS[_deleted_with(spec)],
+            "count_unit": spec.count_unit,
             "category_label": CATEGORY_LABELS.get(spec.category, spec.category),
-            "policy": CATEGORY_POLICIES.get(spec.category, ""),
+            "policy": _policy_of(_deleted_with(spec), spec.category),
             "purpose": spec.purpose,
             "owner_field": "_id" if spec.owner_is_id else spec.owner_field,
             "owner_note": spec.owner_note,
@@ -536,7 +566,7 @@ def build_data_table_payload() -> dict[str, Any]:
     # ── 컬렉션 통째가 아니라 **문서 안쪽 자리**들 ──────────────────────────
     # `system_config` 처럼 컬렉션 자체는 남지만 소유자별 키·항목·참조만 지워지는 곳이다.
     # 컬렉션 단위로만 보여주면 "설정이라 안 지워지는구나" 로 잘못 읽힌다(실제로는 지워진다).
-    def _place(location: str, owner: str, purpose: str, count: int) -> dict[str, Any]:
+    def _place(location: str, owner: str, purpose: str, count: int, unit: str) -> dict[str, Any]:
         return {
             "name": location,
             "category": owner,
@@ -548,6 +578,7 @@ def build_data_table_payload() -> dict[str, Any]:
             "owner_field": "",
             "owner_note": "",
             "is_place": True,
+            "count_unit": unit,
             "count": count,
             "size": 0,
             "index_size": 0,
@@ -561,6 +592,7 @@ def build_data_table_payload() -> dict[str, Any]:
                 key_spec.owner,
                 key_spec.purpose,
                 len(_dig(doc, key_spec.path)),
+                "키",
             )
         )
     for array_spec in OWNED_ARRAY_SPECS:
@@ -571,6 +603,7 @@ def build_data_table_payload() -> dict[str, Any]:
                 array_spec.owner,
                 array_spec.purpose,
                 len(doc.get(array_spec.array_field) or []),
+                "항목",
             )
         )
     for ref in OWNER_REF_SPECS:
@@ -580,6 +613,7 @@ def build_data_table_payload() -> dict[str, Any]:
                 ref.owner,
                 f"{ref.purpose} — 그 종목풀이 사라지면 이 값을 비운다",
                 db[ref.collection].count_documents({ref.field: {"$nin": [None, ""]}}),
+                "문서",
             )
         )
 
@@ -590,6 +624,7 @@ def build_data_table_payload() -> dict[str, Any]:
             "category_label": "미분류",
             "deleted_with": "keep",
             "deleted_with_label": "확인 필요",
+            "count_unit": "문서",
             "policy": "카탈로그에 등록되지 않음",
             "purpose": "",
             "owner_field": "",
