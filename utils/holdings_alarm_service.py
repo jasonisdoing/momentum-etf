@@ -25,7 +25,7 @@ import pandas as pd
 
 from config import CACHE_TTL_COMPUTE
 from utils.account_settings_store import load_account_docs
-from utils.data_loader import fetch_ohlcv
+from utils.cache_utils import load_cached_close_series_bulk_with_fallback
 from utils.holdings_detail_service import load_all_holdings_detail
 from utils.logger import get_app_logger
 from utils.moving_averages import calculate_moving_average, get_moving_average_type
@@ -35,7 +35,6 @@ from utils.stock_list_io import pools_by_ticker
 
 logger = get_app_logger()
 
-_WARMUP_EXTRA_BDAYS = 40
 # 화면 셀렉트 선택지(백엔드는 값만 검증하고, 목록은 화면과 공유)
 STOPLOSS_PCT_OPTIONS: tuple[float, ...] = (-7.0, -10.0)  # 전략 손절선 선택지와 통일
 
@@ -88,28 +87,28 @@ def _safe_realtime_snapshot(country: str, tickers: list[str]) -> dict[str, dict[
 
 
 def _ma_status(
-    fetch_ticker: str,
-    ticker_type: str,
-    country: str,
+    close_series: pd.Series | None,
     ma_days: tuple[int, int],
     realtime_entry: dict[str, float] | None = None,
 ) -> dict[str, Any] | None:
     """종가와 단기·장기 이평선을 계산해 이탈 여부를 반환한다. 데이터 부족/실패 시 None.
 
-    종목풀 순위 화면과 **동일하게** 실시간 현재가(스냅샷)를 종가 시리즈에 덮어씌워 계산하고
-    (``build_effective_close_series``), **하나라도 아래면 이탈**로 본다(순위 화면 회색 기준).
-    실시간이 없으면 캐시 일봉 종가만으로 계산한다.
+    종목풀 순위 화면과 **같은 가격 시리즈**(캐시 전체)를 받아 쓴다. 예전에는 여기서
+    `max(단기, 장기) + 40` 영업일만 잘라 왔는데, 이 시스템의 이동평균은 EMA 라 전체 이력에
+    지수적으로 의존해서 값이 어긋났다 — 잘린 창의 시작값 영향이 남는다.
+    (TIGER 지주회사 MA90: 전체 이력 21,686 vs 130봉 22,044 → 이격 -0.22% vs -1.83%.
+    순위 화면은 이탈이 아닌데 알림만 ❗ 가 붙었다.)
+
+    실시간 현재가(스냅샷)를 종가 시리즈에 덮어씌우는 것도 순위 화면과 같다
+    (``build_effective_close_series``). **하나라도 아래면 이탈**로 본다(순위 화면 회색 기준).
 
     둘 중 하나라도 이평선을 못 구하면(상장 직후 등) 판정 불가로 None — 절반만 보고
     이탈 여부를 정하면 장기가 꺾인 종목을 놓치기 때문이다.
     """
     short_days, long_days = ma_days
-    warmup_days = max(short_days, long_days) + _WARMUP_EXTRA_BDAYS
-    start = (pd.Timestamp.today().normalize() - pd.offsets.BDay(warmup_days)).strftime("%Y-%m-%d")
-    df = fetch_ohlcv(fetch_ticker, country, months_back=None, date_range=[start, None], ticker_type=ticker_type)
-    if df is None or df.empty or "Close" not in df.columns:
+    if close_series is None or close_series.empty:
         return None
-    close = df["Close"].astype(float).dropna()
+    close = close_series.astype(float).dropna()
     close.index = pd.to_datetime(close.index)
     effective = build_effective_close_series(close, realtime_entry)
     if effective is not None and not effective.empty:
@@ -174,7 +173,7 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
     # 이동선 이탈: 종가 vs 이동평균. 종목풀 순위와 동일하게 실시간 스냅샷을 국가별로 미리 조회해 반영.
     if ma_on:
         pool_by_ticker = pools_by_ticker(str(r.get("ticker") or "") for r in rows)
-        candidates: list[tuple[dict[str, Any], str, str, str, tuple[int, int]]] = []
+        candidates: list[tuple[dict[str, Any], str, str, str, str, tuple[int, int]]] = []
         by_country: dict[str, list[str]] = {}
         for row in rows:
             ticker = str(row["ticker"]).strip().upper()
@@ -189,15 +188,26 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
             except Exception as exc:
                 _unknown(row, str(exc))
                 continue
-            fetch_ticker = ticker.split(":")[-1]  # 'ASX:XXX' → 'XXX'
-            candidates.append((row, fetch_ticker, pool, country, ma_days))
-            by_country.setdefault(country, []).append(fetch_ticker)
+            # 실시간 스냅샷은 접두사 없는 코드를 받고, 가격 캐시는 저장된 형태(ASX:XXX) 그대로다.
+            # 둘을 섞으면 호주 종목이 통째로 조회되지 않는다.
+            quote_ticker = ticker.split(":")[-1]  # 'ASX:XXX' → 'XXX'
+            candidates.append((row, ticker, quote_ticker, pool, country, ma_days))
+            by_country.setdefault(country, []).append(quote_ticker)
 
         snapshots = {c: _safe_realtime_snapshot(c, tks) for c, tks in by_country.items()}
-        for row, fetch_ticker, pool, country, ma_days in candidates:
-            entry = snapshots.get(country, {}).get(fetch_ticker)
+        # 가격은 순위 화면과 **같은 소스·같은 함수**(종목풀 캐시 전체)로 읽는다.
+        # 구간을 자르면 EMA 가 어긋나고, 종목마다 따로 조회하면 느리다.
+        # 캐시 키는 계좌가 아니라 **종목풀**이다 — 계좌 보유는 여러 풀에 걸쳐 있어 풀별로 묶는다.
+        tickers_by_pool: dict[str, list[str]] = {}
+        for _, cache_ticker, _, pool, _, _ in candidates:
+            tickers_by_pool.setdefault(pool, []).append(cache_ticker)
+        close_by_ticker: dict[str, pd.Series] = {}
+        for pool, pool_tickers in tickers_by_pool.items():
+            close_by_ticker.update(load_cached_close_series_bulk_with_fallback(pool, pool_tickers))
+        for row, cache_ticker, quote_ticker, pool, country, ma_days in candidates:
+            entry = snapshots.get(country, {}).get(quote_ticker)
             try:
-                status = _ma_status(fetch_ticker, pool, country, ma_days, entry)
+                status = _ma_status(close_by_ticker.get(cache_ticker), ma_days, entry)
             except Exception as exc:  # 한 종목 실패가 전체를 막지 않게
                 _unknown(row, f"판정 실패 ({exc})")
                 continue
