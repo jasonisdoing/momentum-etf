@@ -403,16 +403,20 @@ def delete_account(account_id: str) -> dict[str, Any]:
         raise AccountSettingsStoreError(
             f"보유종목이 {holding_count}건 있어 삭제할 수 없습니다. 먼저 보유를 비운 뒤 삭제하세요."
         )
+    # 딸림 데이터는 카탈로그(`utils/data_table_catalog`)가 단일 소스다 — 계좌 메모·가격 캐시
+    # 컬렉션·알림 상태의 계좌별 키·원장의 빈 항목까지 한 번에 지운다. 지울 자리를 이 함수가
+    # 직접 들고 있으면 컬렉션이 늘 때마다 조용히 빠진다.
+    # 과거 자산 기록(`daily_snapshots` 등 집계 분류)은 카탈로그가 보존으로 못박아 뒀다 —
+    # 계좌를 지웠다고 지난 수익률 그래프가 바뀌면 안 된다.
+    from utils.data_table_catalog import purge_owner
+
+    cleanup = purge_owner("account", norm_id)
+
+    # 계좌 문서 자체는 딸림 데이터를 다 지운 뒤에 없앤다.
     db[COLLECTION].delete_one({"_id": norm_id})
     invalidate_account_settings_cache()
 
-    # 보유 원장의 빈 항목도 함께 제거(보유가 있으면 위에서 이미 차단됨).
-    try:
-        db["portfolio_master"].update_one({"master_id": "GLOBAL"}, {"$pull": {"accounts": {"account_id": norm_id}}})
-    except Exception as exc:
-        get_app_logger().warning("[계좌 삭제] portfolio_master 정리 실패 (%s): %s", norm_id, exc)
-
-    return {"account_id": norm_id, "deleted": True}
+    return {"account_id": norm_id, "deleted": True, **cleanup}
 
 
 def get_account_settings_updated_at(account_id: str) -> str | None:
