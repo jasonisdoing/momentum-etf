@@ -235,9 +235,6 @@ def run_backtest(
     # 날짜 -> 그날의 성장배수. 구간 경계일(교체일)은 두 구간이 함께 쓰므로 곱해서 합친다.
     daily_growth: dict[str, float] = {}
 
-    monthly_by_key: dict[str, list[float]] = {}
-    monthly_bench: dict[str, list[float]] = {}
-    monthly_order: list[str] = []
     weekly: list[dict[str, Any]] = []
     # 주간 표용 매매 이벤트 — 체결일 기준. 주 행이 이걸로 그 주의 편입·편출을 만든다.
     trade_events: list[dict[str, Any]] = []
@@ -477,15 +474,9 @@ def run_backtest(
                     key = day.strftime("%Y-%m-%d")
                     daily_growth[key] = daily_growth.get(key, 1.0) * growth
 
-        # ── 월간 집계 — 구간 수익률을 구간 종료일이 속한 달로 복리 합산한다.
-        month_key = end.strftime("%Y-%m")
-        if month_key not in monthly_by_key:
-            monthly_order.append(month_key)
-            monthly_by_key[month_key], monthly_bench[month_key] = [], []
-        if strategy_pct is not None:
-            monthly_by_key[month_key].append(strategy_pct)
-        if benchmark_pct is not None:
-            monthly_bench[month_key].append(benchmark_pct)
+        # 월간·연간 표는 화면이 `daily` 를 **달력 월**로 잘라 만든다. 여기서 교체 구간 기준
+        # 월별을 따로 만들지 않는다 — 구간이 월을 걸치면 앞달치가 뒷달로 넘어가서, 같은 기간이
+        # 신고가·합성 화면과 다른 숫자로 보였다(2026-07: -9.20% vs -16.62%).
 
         # 다음 구간의 배분 예산 — 이번 구간 성과를 반영한다.
         if strategy_pct is not None:
@@ -497,23 +488,6 @@ def run_backtest(
         cash_multiplier = float(top_n - len(previous_holdings))
         if cash_multiplier > 0:
             previous_growth["__CASH__"] = cash_multiplier
-
-    def _compound(values: list[float]) -> float | None:
-        if not values:
-            return None
-        growth = 1.0
-        for value in values:
-            growth *= 1.0 + value / 100.0
-        return round((growth - 1.0) * 100.0, 2)
-
-    monthly: list[dict[str, Any]] = [
-        {
-            "month": key,
-            "strategy_pct": _compound(monthly_by_key[key]),
-            "benchmark_pct": _compound(monthly_bench[key]),
-        }
-        for key in monthly_order
-    ]
 
     # ── 이미 체결된 최신 교체 — 마지막 캐시 거래일이 그 주의 교체일이면 그날 시가에
     # 체결이 끝났다. 구간 루프는 이 날을 구간 끝으로만 보므로 여기서 반영한다.
@@ -696,8 +670,6 @@ def run_backtest(
         "benchmark_cagr_pct": benchmark_cagr,
         "benchmark_name": benchmark_info(pool)["name"],
         "benchmark_ticker": benchmark_info(pool)["ticker"],
-        # 최신 달이 위로 오게 뒤집는다 (화면 표)
-        "monthly": list(reversed(monthly)),
         # 주간 표 — 매매 내역(편입·편출·교체율·보유 수)을 담는다. 최신 주가 위.
         "weekly": list(reversed(weekly)),
         # 일간 표 — 최신 날짜가 위로 오게 뒤집는다
