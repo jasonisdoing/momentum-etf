@@ -186,6 +186,27 @@ OWNER_REF_SPECS: tuple[OwnerRefSpec, ...] = (
     OwnerRefSpec("account_settings", "mix_nh_pool", "pool", "합성 신고가 슬리브가 쓰는 종목풀"),
 )
 
+
+@dataclass(frozen=True)
+class OwnedArrayItemSpec:
+    """배열 필드 안에 소유자별 항목이 들어 있는 자리. 소유자가 사라지면 그 항목만 빼낸다."""
+
+    collection: str
+    doc_key: str
+    doc_value: str
+    array_field: str
+    match_field: str
+    owner: str  # "pool" | "account"
+    purpose: str
+
+
+OWNED_ARRAY_SPECS: tuple[OwnedArrayItemSpec, ...] = (
+    OwnedArrayItemSpec(
+        "portfolio_master", "master_id", "GLOBAL", "accounts", "account_id", "account", "계좌 원장 항목"
+    ),
+)
+
+
 # 종목풀·계좌가 아니면서 소유자 자리에 들어가는 **예약 이름**.
 # 환율(fx)·지수/레버리지 ETF(etf) 캐시가 같은 저장 경로를 쓰기 때문에 생긴다.
 # 주인이 없다고 지우면 환율·레버리지 데이터가 통째로 사라지므로 고아로 보지 않는다.
@@ -365,6 +386,101 @@ def scan_orphans() -> dict[str, Any]:
 
     items = docs + collections + keys + refs
     return {"items": items, "total": sum(int(i["count"]) for i in items)}
+
+
+def purge_owner(owner_kind: str, owner_id: str) -> dict[str, int]:
+    """소유자(종목풀·계좌) 하나에 딸린 데이터를 카탈로그대로 전부 지운다.
+
+    `delete_pool` / `delete_account` 가 이 함수를 부른다 — 지울 자리를 각자 들고 있으면
+    컬렉션이 늘 때마다 한쪽만 갱신되어 찌꺼기가 남는다(그래서 이 카탈로그를 만들었다).
+
+    **소유자 문서 자체**(`pool_settings` / `account_settings`)는 건드리지 않는다. 삭제 전
+    검증(계좌의 보유종목 확인 등)이 호출부에 있어서, 그쪽이 순서를 쥐는 편이 안전하다.
+    `aggregate` 분류(과거 기록)는 어떤 경우에도 손대지 않는다.
+
+    Returns:
+        {지운 자리: 건수} — 호출부가 로그·응답에 그대로 싣는다.
+    """
+    owner_id = str(owner_id or "").strip()
+    if owner_kind not in ("pool", "account") or not owner_id:
+        raise ValueError(f"소유자 종류·id 가 올바르지 않습니다: {owner_kind} / {owner_id}")
+
+    db = _db()
+    removed: dict[str, int] = {}
+
+    # 1) 소유자 필드로 묶인 문서
+    for spec in TABLE_SPECS:
+        if spec.category != owner_kind or spec.name_pattern:
+            continue
+        field_name = "_id" if spec.owner_is_id else spec.owner_field
+        if not field_name:
+            continue
+        try:
+            count = db[spec.name].delete_many({field_name: owner_id}).deleted_count
+        except Exception as exc:
+            logger.warning("[정리] %s 삭제 실패 (%s=%s): %s", spec.name, field_name, owner_id, exc)
+            continue
+        if count:
+            removed[spec.name] = count
+
+    # 2) 이름이 소유자에서 파생되는 컬렉션 — 통째로 drop
+    for spec in TABLE_SPECS:
+        if spec.category != owner_kind or not spec.name_pattern:
+            continue
+        name = spec.name_pattern.format(owner=owner_id)
+        if name in {other.name for other in TABLE_SPECS if not other.name_pattern}:
+            continue  # 이름으로 직접 등록된 컬렉션(환율·레버리지 캐시)은 소유자 것이 아니다
+        try:
+            if name in db.list_collection_names():
+                db.drop_collection(name)
+                removed[name] = 1
+        except Exception as exc:
+            logger.warning("[정리] %s 컬렉션 삭제 실패: %s", name, exc)
+
+    # 3) 설정 문서 안쪽 키
+    for key_spec in OWNED_KEY_SPECS:
+        if key_spec.owner != owner_kind:
+            continue
+        try:
+            result = db["system_config"].update_one(
+                {"_id": key_spec.doc_id}, {"$unset": {f"{key_spec.path}.{owner_id}": ""}}
+            )
+        except Exception as exc:
+            logger.warning("[정리] system_config/%s 키 삭제 실패: %s", key_spec.doc_id, exc)
+            continue
+        if result.modified_count:
+            removed[f"system_config › {key_spec.doc_id}.{key_spec.path}"] = 1
+
+    # 4) 배열 안 항목
+    for array_spec in OWNED_ARRAY_SPECS:
+        if array_spec.owner != owner_kind:
+            continue
+        try:
+            result = db[array_spec.collection].update_one(
+                {array_spec.doc_key: array_spec.doc_value},
+                {"$pull": {array_spec.array_field: {array_spec.match_field: owner_id}}},
+            )
+        except Exception as exc:
+            logger.warning("[정리] %s.%s 항목 삭제 실패: %s", array_spec.collection, array_spec.array_field, exc)
+            continue
+        if result.modified_count:
+            removed[f"{array_spec.collection}.{array_spec.array_field}"] = 1
+
+    # 5) 이 소유자를 가리키던 참조 — 비운다(가리키는 대상이 사라졌으므로 '미설정'이 맞다)
+    for ref in OWNER_REF_SPECS:
+        if ref.owner != owner_kind:
+            continue
+        try:
+            count = db[ref.collection].update_many({ref.field: owner_id}, {"$set": {ref.field: None}}).modified_count
+        except Exception as exc:
+            logger.warning("[정리] %s.%s 참조 해제 실패: %s", ref.collection, ref.field, exc)
+            continue
+        if count:
+            removed[f"{ref.collection}.{ref.field}"] = count
+
+    if removed:
+        logger.info("[정리] %s '%s' 딸림 데이터 제거: %s", owner_kind, owner_id, removed)
+    return removed
 
 
 def build_data_table_payload() -> dict[str, Any]:

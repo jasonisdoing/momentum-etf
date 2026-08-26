@@ -542,34 +542,18 @@ def delete_pool(pool_id: str) -> dict[str, Any]:
         raise PoolSettingsError(f"알 수 없는 종목풀입니다: {pool_id}")
     norm_id = str(impact["ticker_type"])
     db = _db()
+
+    # 딸림 데이터는 카탈로그(`utils/data_table_catalog`)가 단일 소스다 — 종목·메타 캐시·
+    # 가격 캐시 컬렉션·전략 설정의 풀별 항목·이 풀을 가리키던 계좌 참조까지 한 번에 지운다.
+    # 예전에는 지울 자리를 이 함수가 직접 들고 있어서, 컬렉션이 늘 때마다 조용히 빠졌다.
+    from utils.data_table_catalog import purge_owner
+
+    cleanup = purge_owner("pool", norm_id)
+
+    # 종목풀 문서 자체는 딸림 데이터를 다 지운 뒤에 없앤다(순서가 뒤집히면 소유자를 잃은
+    # 데이터가 중간 상태로 남는다).
     deleted_pool = db[COLLECTION].delete_one({"_id": norm_id}).deleted_count
-    deleted_stocks = db["stock_meta"].delete_many({"ticker_type": norm_id}).deleted_count
-
-    # 가격 캐시 컬렉션(`cache_<ticker_type>_stocks`)도 함께 지운다.
-    # 남겨두면 갱신 배치가 그 종목풀을 더 이상 돌지 않아 그 시점에 얼어붙은 채로 남는다.
-    # 종목풀이 없어졌으니 되살릴 때는 어차피 처음부터 다시 받는다.
-    try:
-        from utils.cache_utils import drop_cache_collection
-
-        drop_cache_collection(norm_id)
-    except Exception as exc:
-        logger.warning("가격 캐시 삭제 실패(종목풀 삭제 후): %s", exc)
-
-    # 전략 설정(모멘텀·신고가)의 풀별 항목과 종목 메타 캐시도 함께 지운다 — 남겨두면
-    # 합성 풀 목록 등에 유령 풀로 떠서 선택 시 에러가 난다(폐기는 흔적 없이).
-    cleanup: dict[str, int] = {}
-    try:
-        result = db["system_config"].update_one(
-            {"_id": "momentum_settings"}, {"$unset": {f"settings.settings_by_pool.{norm_id}": ""}}
-        )
-        cleanup["momentum_settings"] = result.modified_count
-        result = db["system_config"].update_one(
-            {"_id": "new_high_settings"}, {"$unset": {f"settings_by_pool.{norm_id}": ""}}
-        )
-        cleanup["new_high_settings"] = result.modified_count
-        cleanup["stock_cache_meta"] = db["stock_cache_meta"].delete_many({"ticker_type": norm_id}).deleted_count
-    except Exception as exc:
-        logger.warning("전략 설정·메타 캐시 정리 실패(종목풀 삭제 후): %s", exc)
+    deleted_stocks = int(cleanup.get("stock_meta", 0))
 
     invalidate_overlay_cache()
     try:
