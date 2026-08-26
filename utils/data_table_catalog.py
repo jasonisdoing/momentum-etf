@@ -246,6 +246,20 @@ DELETED_WITH_LABELS: dict[str, str] = {
 }
 
 
+def owned_key_location(key_spec: OwnedKeySpec) -> str:
+    """설정 문서 안쪽 자리의 표시 이름. **표의 행과 고아 스캔이 같은 문자열을 써야** 한다
+    — 따로 만들면 문자열이 어긋나 고아 숫자가 그 행에 붙지 않는다."""
+    return f"system_config › {key_spec.doc_id}.{key_spec.path}"
+
+
+def owned_array_location(array_spec: OwnedArrayItemSpec) -> str:
+    return f"{array_spec.collection}.{array_spec.array_field}[]"
+
+
+def owner_ref_location(ref: OwnerRefSpec) -> str:
+    return f"{ref.collection}.{ref.field}"
+
+
 def _deleted_with(spec: TableSpec) -> str:
     if spec.deleted_with:
         return spec.deleted_with
@@ -392,9 +406,32 @@ def scan_orphans() -> dict[str, Any]:
         if dead:
             keys.append(
                 {
-                    "location": f"system_config › {key_spec.doc_id}.{key_spec.path}",
+                    "location": owned_key_location(key_spec),
                     "owner_kind": key_spec.owner,
                     "detail": f"키 {', '.join(dead)}",
+                    "owners": dead,
+                    "count": len(dead),
+                }
+            )
+
+    # 배열 안 항목 — 소유자가 사라졌는데 항목이 남아 있는 경우.
+    arrays: list[dict[str, Any]] = []
+    for array_spec in OWNED_ARRAY_SPECS:
+        doc = db[array_spec.collection].find_one({array_spec.doc_key: array_spec.doc_value}) or {}
+        dead = sorted(
+            {
+                str(item.get(array_spec.match_field) or "").strip()
+                for item in (doc.get(array_spec.array_field) or [])
+                if str(item.get(array_spec.match_field) or "").strip() not in live[array_spec.owner]
+                and str(item.get(array_spec.match_field) or "").strip()
+            }
+        )
+        if dead:
+            arrays.append(
+                {
+                    "location": owned_array_location(array_spec),
+                    "owner_kind": array_spec.owner,
+                    "detail": f"사라진 소유자의 항목: {', '.join(dead)}",
                     "owners": dead,
                     "count": len(dead),
                 }
@@ -410,7 +447,7 @@ def scan_orphans() -> dict[str, Any]:
         if dead_docs:
             refs.append(
                 {
-                    "location": f"{ref.collection}.{ref.field}",
+                    "location": owner_ref_location(ref),
                     "owner_kind": ref.owner,
                     "detail": f"사라진 소유자를 가리키는 문서: {', '.join(dead_docs)}",
                     "owners": dead_docs,
@@ -418,7 +455,7 @@ def scan_orphans() -> dict[str, Any]:
                 }
             )
 
-    items = docs + collections + keys + refs
+    items = docs + collections + keys + arrays + refs
     return {"items": items, "total": sum(int(i["count"]) for i in items)}
 
 
@@ -588,7 +625,7 @@ def build_data_table_payload() -> dict[str, Any]:
         doc = db["system_config"].find_one({"_id": key_spec.doc_id}) or {}
         rows.append(
             _place(
-                f"system_config › {key_spec.doc_id}.{key_spec.path}.<{key_spec.owner}>",
+                owned_key_location(key_spec),
                 key_spec.owner,
                 key_spec.purpose,
                 len(_dig(doc, key_spec.path)),
@@ -599,7 +636,7 @@ def build_data_table_payload() -> dict[str, Any]:
         doc = db[array_spec.collection].find_one({array_spec.doc_key: array_spec.doc_value}) or {}
         rows.append(
             _place(
-                f"{array_spec.collection}.{array_spec.array_field}[]",
+                owned_array_location(array_spec),
                 array_spec.owner,
                 array_spec.purpose,
                 len(doc.get(array_spec.array_field) or []),
@@ -609,7 +646,7 @@ def build_data_table_payload() -> dict[str, Any]:
     for ref in OWNER_REF_SPECS:
         rows.append(
             _place(
-                f"{ref.collection}.{ref.field}",
+                owner_ref_location(ref),
                 ref.owner,
                 f"{ref.purpose} — 그 종목풀이 사라지면 이 값을 비운다",
                 db[ref.collection].count_documents({ref.field: {"$nin": [None, ""]}}),
