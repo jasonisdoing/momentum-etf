@@ -78,9 +78,11 @@ const hintStyle: React.CSSProperties = {
 /** 통화가 다른 계좌는 목표 금액·주수를 낼 수 없어 셀렉터에서 걸러낸다. */
 type AccountOption = AccountOptionBase & {
   currency?: string;
-  /** 이 계좌가 운용하는 종목풀 — 계좌 설정에서 지정한다. */
-  pool: string;
-  pool_label?: PoolLabelSource | null;
+  /** 이 계좌의 슬리브별 종목풀 — 계좌 설정에서 각각 지정한다(둘 다 계좌와 같은 국가). */
+  sm_pool: string;
+  nh_pool: string;
+  sm_pool_label?: PoolLabelSource | null;
+  nh_pool_label?: PoolLabelSource | null;
   /** 오늘의 액션 슬랙 알람 — 새 지시·수량 증가 시 발송. */
   mix_slack_enabled?: boolean;
   /** 합성 배분(%) — 모멘텀·신고가·비워 두는 현금. 셋의 합이 100 이다. */
@@ -89,7 +91,7 @@ type AccountOption = AccountOptionBase & {
   mix_cash_pct: number;
 };
 type Meta = {
-  /** 합성을 운용하는 계좌(계좌 설정의 `mix_pool` 지정) 목록. */
+  /** 합성을 운용하는 계좌 — 모멘텀·신고가 종목풀이 둘 다 지정된 계좌만 온다. */
   accounts: AccountOption[];
   month_options: number[];
   /** 기본 선택 계좌 — 목록의 첫 계좌. */
@@ -98,7 +100,9 @@ type Meta = {
 
 type View = {
   computed_at: string;
-  pool: string;
+  account_id: string;
+  sm_pool: string;
+  nh_pool: string;
   months: number;
   start_date: string;
   end_date: string;
@@ -191,7 +195,9 @@ type AccountState = {
 
 type Positions = {
   computed_at: string;
-  pool: string;
+  account_id: string;
+  sm_pool: string;
+  nh_pool: string;
   /** 표시용 시세 갱신에 쓰는 국가 코드(시세 소스가 국가별로 다르다). */
   country: string;
   as_of: string;
@@ -376,15 +382,22 @@ type ActionGroup = { key: string; title: string; items: ActionItem[] };
  *  배분은 이 화면 헤더에서 정한다. */
 export function StrategyMixClient() {
   const toast = useToast();
-  // 계좌 하나만 고른다 — 종목풀은 계좌 설정(`mix_pool`)에 붙어 있다.
+  // 계좌 하나만 고른다 — 슬리브별 종목풀은 계좌 설정에 붙어 있다.
   const [accountId, setAccountId] = useState<string>("");
   const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
   const [months, setMonths] = useState<number>(12);
   const [monthOptions, setMonthOptions] = useState<number[]>([]);
 
-  // 선택한 계좌가 운용하는 종목풀 — 계좌 설정(`mix_pool`)이 단일 소스다.
+  // 계산 기준은 계좌다 — 슬리브별 풀은 서버가 계좌 설정에서 꺼낸다(계좌 설정이 단일 소스).
   const selectedAccount = accountOptions.find((option) => option.account_id === accountId) ?? null;
-  const pool = selectedAccount?.pool ?? "";
+  /** 셀렉트 아래에 보여줄 슬리브별 풀 표기. 계좌가 없으면 빈 문자열. */
+  const sleevePoolsLabel = selectedAccount
+    ? `모멘텀 ${
+        selectedAccount.sm_pool_label ? formatPoolLabel(selectedAccount.sm_pool_label) : selectedAccount.sm_pool
+      } · 신고가 ${
+        selectedAccount.nh_pool_label ? formatPoolLabel(selectedAccount.nh_pool_label) : selectedAccount.nh_pool
+      }`
+    : "";
 
   // 운용 현황 탭.
   const [positions, setPositions] = useState<Positions | null>(null);
@@ -443,9 +456,9 @@ export function StrategyMixClient() {
     };
   }, []);
 
-  // 운용 현황 — 풀이 정해지면 자동 계산한다 (매일 보는 운영 화면이라 버튼을 두지 않는다).
+  // 운용 현황 — 계좌가 정해지면 자동 계산한다 (매일 보는 운영 화면이라 버튼을 두지 않는다).
   useEffect(() => {
-    if (!pool) return;
+    if (!accountId) return;
     let alive = true;
     setPositionsLoading(true);
     setPositionsError(null);
@@ -456,7 +469,7 @@ export function StrategyMixClient() {
     const stopRamp = startProgressRamp(setPositionsProgress);
     void (async () => {
       try {
-        const params = new URLSearchParams({ pool });
+        const params = new URLSearchParams({ account_id: accountId });
         const response = await fetch(
           `/api/strategy-mix/positions?${params.toString()}`,
           {
@@ -490,11 +503,11 @@ export function StrategyMixClient() {
       alive = false;
       stopRamp();
     };
-  }, [pool, positionsReloadKey]);
+  }, [accountId, positionsReloadKey]);
 
 
   const runBacktest = useCallback(async () => {
-    if (!pool) return;
+    if (!accountId) return;
     setLoading(true);
     setError(null);
     setBacktestProgress({
@@ -504,7 +517,7 @@ export function StrategyMixClient() {
     const stopRamp = startProgressRamp(setBacktestProgress);
     try {
       const response = await fetch(
-        `/api/strategy-mix?pool=${encodeURIComponent(pool)}&months=${months}`,
+        `/api/strategy-mix?account_id=${encodeURIComponent(accountId)}&months=${months}`,
         {
           cache: "no-store",
         },
@@ -528,7 +541,7 @@ export function StrategyMixClient() {
       setLoading(false);
       setBacktestProgress(null);
     }
-  }, [pool, months, toast]);
+  }, [accountId, months, toast]);
 
   // 목표 금액의 기준 = 적용 계좌의 총자산(주식 평가액 + 현금). 계좌가 없으면 비중만 보여준다.
   const totalAsset = positions?.account?.total_assets ?? null;
@@ -1090,10 +1103,10 @@ export function StrategyMixClient() {
               {/* 메인 헤더 — 셀렉터·모드 전환 같은 주 제어. */}
               <div className="appMainHeader">
                 <div className="appMainHeaderLeft">
-                  {/* 종목풀을 고르고, 그 풀을 운용하는 계좌를 옆에 보여준다.
-                      연결은 계좌 설정(`mix_pool`)에서 만든다 — 여기서는 고르기만 한다. */}
+                  {/* 계좌를 고르고, 그 계좌의 슬리브별 종목풀을 옆에 보여준다.
+                      연결은 계좌 설정에서 만든다 — 여기서는 고르기만 한다. */}
                   <label className="appLabeledField" style={{ marginBottom: 0 }}>
-                    <span className="appLabeledFieldLabel">종목풀</span>
+                    <span className="appLabeledFieldLabel">계좌</span>
                     <select
                       className="form-select form-select-sm"
                       style={{ width: "auto" }}
@@ -1109,15 +1122,15 @@ export function StrategyMixClient() {
                     >
                       {accountOptions.map((option) => (
                         <option key={option.account_id} value={option.account_id}>
-                          {option.pool_label ? formatPoolLabel(option.pool_label) : option.pool}
+                          {formatAccountLabel(option)}
                         </option>
                       ))}
                     </select>
                   </label>
                   <span style={hintStyle}>
                     {selectedAccount
-                      ? `계좌 ${formatAccountLabel(selectedAccount)}`
-                      : "계좌 설정에서 합성 전략 종목풀을 지정하세요"}
+                      ? sleevePoolsLabel
+                      : "계좌 설정에서 모멘텀·신고가 종목풀을 지정하세요"}
                   </span>
                   {selectedAccount ? (
                     <>
@@ -1554,7 +1567,7 @@ export function StrategyMixClient() {
                 <button
                   className="btn btn-sm btn-dark"
                   type="button"
-                  disabled={loading || !pool}
+                  disabled={loading || !accountId}
                   onClick={() => void runBacktest()}
                 >
                   {loading ? "실행 중…" : "실행"}

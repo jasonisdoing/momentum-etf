@@ -78,15 +78,19 @@ function formatVolume(value: number | null): string {
 }
 
 
-// KOSPI200 은 시총 순위가 아니라 **지수 구성종목 전체**라 상위 N 을 고르지 않는다.
-const MARKET_OPTIONS = ["KOSPI", "KOSDAQ", "KOSPI200"] as const;
-const MARKET_LABELS: Record<(typeof MARKET_OPTIONS)[number], string> = {
+// 지수 구성종목(KOSPI200·KOSDAQ150)은 시총 순위가 아니라 **명단 전체**라 상위 N 을 고르지 않는다.
+// 명단 소스(추종 ETF)는 백엔드 `index_constituents_loader.KOR_INDEX_SOURCES` 가 단일 소스다.
+const MARKET_OPTIONS = ["KOSPI", "KOSDAQ", "KOSPI200", "KOSDAQ150"] as const;
+type MarketOption = (typeof MARKET_OPTIONS)[number];
+const MARKET_LABELS: Record<MarketOption, string> = {
   KOSPI: "코스피",
   KOSDAQ: "코스닥",
   KOSPI200: "KODEX 200(069500)",
+  KOSDAQ150: "KODEX 코스닥150(229200)",
 };
-/** 상위 N 을 고르는 마켓인지 — KOSPI200 은 구성종목이 정해져 있어 자를 이유가 없다. */
-const usesTopLimit = (market: (typeof MARKET_OPTIONS)[number]): boolean => market !== "KOSPI200";
+/** 지수 구성종목 마켓 — 명단이 정해져 있어 상위 N 을 자를 이유가 없다. */
+const INDEX_MARKETS: readonly MarketOption[] = ["KOSPI200", "KOSDAQ150"];
+const usesTopLimit = (market: MarketOption): boolean => !INDEX_MARKETS.includes(market);
 const KOSPI_LIMIT_OPTIONS = [200, 150, 100, 50] as const;
 const KOSDAQ_LIMIT_OPTIONS = [150, 100, 50] as const;
 
@@ -95,7 +99,7 @@ export function KorMarketStockManager({
 }: {
   onSummaryChange?: (summary: { market: string; count: number; totalCount: number }) => void;
 }) {
-  const [market, setMarket] = useState<(typeof MARKET_OPTIONS)[number]>("KOSPI");
+  const [market, setMarket] = useState<MarketOption>("KOSPI");
   const [limit, setLimit] = useState<number>(200);
   const [minMarketCapJo, setMinMarketCapJo] = useState("");
   const [rows, setRows] = useState<KorMarketStockRow[]>([]);
@@ -476,7 +480,7 @@ export function KorMarketStockManager({
                   </div>
                 </label>
 
-                {/* KOSPI200 은 구성종목 전체를 보여주므로 상위 N 셀렉트를 두지 않는다. */}
+                {/* 지수 구성종목 마켓은 명단 전체를 보여주므로 상위 N 셀렉트를 두지 않는다. */}
                 {usesTopLimit(market) ? (
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">시가총액 상위</span>

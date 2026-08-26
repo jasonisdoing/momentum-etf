@@ -108,21 +108,21 @@ def _lookup_context() -> dict[str, Any]:
     }
 
 
-def _load_kospi200(min_market_cap_eok: int) -> dict[str, Any]:
-    """KOSPI200 구성종목 전체. 시총 순위와 달리 **상위 N 을 자르지 않는다**.
+def _load_index_constituents_market(index_key: str, min_market_cap_eok: int) -> dict[str, Any]:
+    """지수 구성종목 전체. 시총 순위와 달리 **상위 N 을 자르지 않는다**.
 
-    구성종목 명단은 배치가 KODEX 200 보유종목으로 적재해 둔 것(`index_constituents`)이고,
-    시세·시총은 코스피 전체 페이지에서 찾아 붙인다. 시총 상위 200 페이지만 보면 지수에
+    구성종목 명단은 배치가 추종 ETF 보유종목으로 적재해 둔 것(`index_constituents`)이고,
+    시세·시총은 그 시장의 전체 페이지에서 찾아 붙인다. 시총 상위 페이지만 보면 지수에
     들어 있는 중형주가 빠지기 때문에 명단을 다 채울 때까지 페이지를 넘긴다.
     """
-    from utils.kor_dividend_service import load_universe
+    from utils.index_constituents_loader import KOR_INDEX_SOURCES, load_index_constituents
 
-    constituents = load_universe()
-    wanted = {str(item["ticker"]).strip().upper() for item in constituents}
+    naver_market = str(KOR_INDEX_SOURCES[index_key]["market"])
+    wanted = {str(item["ticker"]).strip().upper() for item in load_index_constituents(index_key)}
     context = _lookup_context()
 
     page_size = 100
-    payload = _fetch_market_value_page("KOSPI", page=1, page_size=page_size)
+    payload = _fetch_market_value_page(naver_market, page=1, page_size=page_size)
     total_count = int(payload.get("totalCount") or 0)
     total_pages = max(1, math.ceil(total_count / page_size)) if total_count > 0 else 1
 
@@ -141,7 +141,7 @@ def _load_kospi200(min_market_cap_eok: int) -> dict[str, Any]:
             rows.append(row)
         if len(found) >= len(wanted) or page >= total_pages:
             break
-        payload = _fetch_market_value_page("KOSPI", page=page + 1, page_size=page_size)
+        payload = _fetch_market_value_page(naver_market, page=page + 1, page_size=page_size)
 
     _apply_kor_realtime_overlay(rows)
     _apply_kor_history_metrics(rows)
@@ -149,7 +149,7 @@ def _load_kospi200(min_market_cap_eok: int) -> dict[str, Any]:
     for idx, row in enumerate(rows, start=1):
         row["rank"] = idx
 
-    return {"market": "KOSPI200", "total_count": len(wanted), "count": len(rows), "rows": rows}
+    return {"market": index_key, "total_count": len(wanted), "count": len(rows), "rows": rows}
 
 
 def load_kor_stock_market(
@@ -160,11 +160,13 @@ def load_kor_stock_market(
     """네이버 API에서 시가총액 상위 종목 리스트를 가져온다.
 
     Args:
-        market: "KOSPI" · "KOSDAQ" · "KOSPI200"
-        limit: 가져올 종목 수 (최대 200). KOSPI200 은 구성종목 전체라 무시한다.
+        market: "KOSPI" · "KOSDAQ" 은 시총 상위 N, "KOSPI200" · "KOSDAQ150" 은 지수 구성종목 전체
+        limit: 가져올 종목 수 (최대 200). 지수 구성종목은 명단이 정해져 있어 무시한다.
         min_market_cap_jo: 최소 시가총액(조)
     """
-    if market not in ("KOSPI", "KOSDAQ", "KOSPI200"):
+    from utils.index_constituents_loader import KOR_INDEX_SOURCES
+
+    if market not in ("KOSPI", "KOSDAQ", *KOR_INDEX_SOURCES):
         raise ValueError(f"지원하지 않는 마켓입니다: {market}")
     if limit <= 0:
         raise ValueError(f"가져올 종목 수는 1 이상이어야 합니다: {limit}")
@@ -172,8 +174,8 @@ def load_kor_stock_market(
         raise ValueError(f"최소 시가총액은 음수일 수 없습니다: {min_market_cap_jo}")
 
     min_market_cap_eok = min_market_cap_jo * 10000
-    if market == "KOSPI200":
-        return _load_kospi200(min_market_cap_eok)
+    if market in KOR_INDEX_SOURCES:
+        return _load_index_constituents_market(market, min_market_cap_eok)
 
     page_size = 100
     first_payload = _fetch_market_value_page(market, page=1, page_size=page_size)

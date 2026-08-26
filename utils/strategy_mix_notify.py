@@ -1,6 +1,6 @@
 """합성 전략 오늘의 액션 슬랙 알람 — 화면과 같은 지시(`actions.groups`)를 보낸다.
 
-계좌 설정에서 `mix_pool` + `mix_slack_enabled` 가 켜진 계좌만 감시한다.
+계좌 설정에서 모멘텀·신고가 종목풀이 둘 다 지정되고 `mix_slack_enabled` 가 켜진 계좌만 감시한다.
 발송 조건은 **새 지시 또는 수량 증가**다 — 지시가 줄거나 사라지는 변화(체결 반영,
 증권사 동기화)는 조용히 넘긴다. 매번 전체 목록을 보내면 체결할 때마다 알람이 와서
 소음이 된다. 상태는 DB(system_config)에 남긴다(신고가 알림과 같은 패턴).
@@ -27,21 +27,21 @@ def _db():
     return db
 
 
-def _load_state(pool: str) -> dict[str, int]:
+def _load_state(account_id: str) -> dict[str, int]:
     doc = _db().system_config.find_one({"_id": _STATE_KEY}) or {}
-    return (doc.get("pools") or {}).get(pool, {}).get("quantities") or {}
+    return (doc.get("accounts") or {}).get(account_id, {}).get("quantities") or {}
 
 
-def _save_state(pool: str, quantities: dict[str, int]) -> None:
+def _save_state(account_id: str, quantities: dict[str, int]) -> None:
     _db().system_config.update_one(
         {"_id": _STATE_KEY},
-        {"$set": {f"pools.{pool}": {"quantities": quantities, "updated_at": datetime.utcnow().isoformat()}}},
+        {"$set": {f"accounts.{account_id}": {"quantities": quantities, "updated_at": datetime.utcnow().isoformat()}}},
         upsert=True,
     )
 
 
-def _format_message(pool: str, account_name: str, groups: list[dict[str, Any]]) -> str:
-    lines = [f"🧭 합성 오늘의 액션 — {account_name} ({pool})"]
+def _format_message(account_name: str, groups: list[dict[str, Any]]) -> str:
+    lines = [f"🧭 합성 오늘의 액션 — {account_name}"]
     for group in groups:
         lines.append(f"*{group['title']}*")
         for item in group["items"]:
@@ -50,25 +50,23 @@ def _format_message(pool: str, account_name: str, groups: list[dict[str, Any]]) 
     return "\n".join(lines)
 
 
-def _pool_country(pool: str) -> str:
-    from utils.settings_loader import get_ticker_type_settings
-
-    return str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
-
-
 def _watch_targets(country: str | None = None) -> list[dict[str, Any]]:
-    """감시 대상 — mix_pool 과 슬랙 알람이 모두 설정된 계좌. ``country`` 를 주면 그 국가 풀만
-    (한국·미국 장 시간이 달라 배치를 국가별로 나눠 돌린다)."""
+    """감시 대상 — 슬리브별 풀과 슬랙 알람이 모두 설정된 계좌. ``country`` 를 주면 그 국가만
+    (한국·미국 장 시간이 달라 배치를 국가별로 나눠 돌린다).
+
+    국가는 계좌 값을 쓴다 — 두 풀이 계좌와 같은 국가인 것은 계좌 설정 저장이 보장한다.
+    """
     from utils.account_settings_store import load_account_docs
 
     targets = []
     for doc in load_account_docs():
-        pool = str(doc.get("mix_pool") or "").strip().lower()
-        if not pool or not bool(doc.get("mix_slack_enabled")):
+        if not doc.get("mix_sm_pool") or not doc.get("mix_nh_pool"):
             continue
-        if country and _pool_country(pool) != country:
+        if not bool(doc.get("mix_slack_enabled")):
             continue
-        targets.append({"account_id": doc["account_id"], "name": doc.get("name") or doc["account_id"], "pool": pool})
+        if country and str(doc.get("country_code") or "").strip().lower() != country:
+            continue
+        targets.append({"account_id": doc["account_id"], "name": doc.get("name") or doc["account_id"]})
     return targets
 
 
@@ -80,28 +78,28 @@ def notify_all(country: str | None = None) -> dict[str, Any]:
     results = []
     sent = 0
     for target in _watch_targets(country):
-        pool = target["pool"]
+        account_id = target["account_id"]
         try:
-            positions = mix_positions(pool)
+            positions = mix_positions(account_id)
         except Exception as exc:
-            logger.warning("[MIX-NOTIFY] %s 계산 실패: %s", pool, exc)
-            results.append({"pool": pool, "error": str(exc)})
+            logger.warning("[MIX-NOTIFY] %s 계산 실패: %s", account_id, exc)
+            results.append({"account_id": account_id, "error": str(exc)})
             continue
         # (예상) 그룹도 포함 — 처음 등장할 때 1건 발송되고, 종가 확정 후 확정 지시로 바뀌면
         # 키가 달라져 다시 1건 나간다. 경계에서 빠졌다 재진입하면 재발송된다(예상 알림의 비용).
         groups = positions["actions"]["groups"]
         current = {item["key"]: int(item.get("quantity") or 0) for group in groups for item in group["items"]}
-        stored = _load_state(pool)
+        stored = _load_state(account_id)
         grown = {key: qty for key, qty in current.items() if qty > int(stored.get(key, 0))}
         # 저장은 항상 한다 — 지시가 줄어든 것도 다음 비교의 기준이 되어야, 같은 지시가
         # 다시 커졌을 때(재발) 알림이 나간다.
-        _save_state(pool, current)
+        _save_state(account_id, current)
         if not grown:
-            results.append({"pool": pool, "changed": False, "items": len(current)})
+            results.append({"account_id": account_id, "changed": False, "items": len(current)})
             continue
-        send_slack_message_v2(_format_message(pool, target["name"], groups))
+        send_slack_message_v2(_format_message(target["name"], groups))
         sent += 1
-        results.append({"pool": pool, "changed": True, "new_or_grown": len(grown), "items": len(current)})
+        results.append({"account_id": account_id, "changed": True, "new_or_grown": len(grown), "items": len(current)})
     return {"sent": sent, "targets": results}
 
 
@@ -112,13 +110,12 @@ def send_test(account_id: str) -> dict[str, Any]:
     from utils.strategy_mix_service import mix_positions
 
     settings = get_account_settings(account_id)
-    pool = str(settings.get("mix_pool") or "").strip().lower()
-    if not pool:
-        raise ValueError(f"'{account_id}' 에 합성 종목풀(mix_pool)이 설정돼 있지 않습니다.")
-    positions = mix_positions(pool)
+    if not settings.get("mix_sm_pool") or not settings.get("mix_nh_pool"):
+        raise ValueError(f"'{account_id}' 에 합성 모멘텀·신고가 종목풀이 모두 설정돼 있지 않습니다.")
+    positions = mix_positions(account_id)
     groups = positions["actions"]["groups"]
     name = str(settings.get("name") or account_id)
-    message = _format_message(pool, name, groups) if groups else f"🧭 합성 오늘의 액션 — {name} ({pool})\n(지시 없음)"
+    message = _format_message(name, groups) if groups else f"🧭 합성 오늘의 액션 — {name}\n(지시 없음)"
     send_slack_message_v2("[테스트] " + message)
     item_count = sum(len(group["items"]) for group in groups)
     return {"sent": True, "items": item_count}

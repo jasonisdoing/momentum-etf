@@ -12,7 +12,7 @@ router = APIRouter(prefix="/internal/kor-market-stocks", tags=["kor-market-stock
 
 @router.get("")
 def get_kor_market_stocks(
-    market: Annotated[str, Query(pattern="^(KOSPI|KOSDAQ|KOSPI200)$")],
+    market: Annotated[str, Query(pattern="^(KOSPI|KOSDAQ|KOSPI200|KOSDAQ150)$")],
     limit: Annotated[int, Query(ge=1, le=200)],
     min_market_cap_jo: Annotated[int, Query(ge=0)],
     _: None = Depends(require_internal_token),
@@ -20,5 +20,5 @@ def get_kor_market_stocks(
     try:
         return load_kor_stock_market(market=market, limit=limit, min_market_cap_jo=min_market_cap_jo)
     except LookupError as exc:
-        # KOSPI200 구성종목 배치가 아직 안 돌았다는 뜻 — 서버 오류가 아니라 준비 안 됨이다.
+        # 지수 구성종목 배치가 아직 안 돌았다는 뜻 — 서버 오류가 아니라 준비 안 됨이다.
         raise HTTPException(status_code=404, detail=str(exc)) from exc

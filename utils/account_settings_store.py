@@ -36,7 +36,10 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "cash_currencies",
     "benchmark",
     "market_regime_index",
-    "mix_pool",
+    # 합성 슬리브별 종목풀 — 모멘텀·신고가가 서로 다른 풀을 볼 수 있다.
+    # 둘은 **계좌와 같은 국가**여야 한다(거래 달력·통화가 갈리면 합성이 성립하지 않는다).
+    "mix_sm_pool",
+    "mix_nh_pool",
     "mix_slack_enabled",
     "mix_sm_pct",
     "mix_nh_pct",
@@ -52,6 +55,9 @@ EDITABLE_KEYS: tuple[str, ...] = (
 
 # 합성 전략 배분(%) — 모멘텀·신고가·현금. 셋을 항상 함께 저장하고 합은 100 이어야 한다.
 MIX_WEIGHT_KEYS: tuple[str, ...] = ("mix_sm_pct", "mix_nh_pct", "mix_cash_pct")
+
+# 합성 슬리브별 종목풀 — 계좌와 같은 국가여야 한다.
+MIX_SLEEVE_POOL_KEYS: tuple[str, ...] = ("mix_sm_pool", "mix_nh_pool")
 
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 _ALLOWED_CASH_CURRENCIES = {"KRW", "USD", "AUD"}
@@ -177,19 +183,28 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
 
                 ticker = ensure_asx_prefix(ticker)
             cleaned[key] = {"ticker": ticker, "name": bench_name}
-        elif key == "mix_pool":
-            # 합성 전략에서 이 계좌로 운용할 종목풀. 기본은 없음 — 값이 있는 계좌만
-            # `/strategy-mix` 목록에 오른다(계좌 하나에 풀 하나).
+        elif key in MIX_SLEEVE_POOL_KEYS:
+            # 합성 전략에서 이 슬리브가 볼 종목풀. 기본은 없음(미지정) — 둘 다 지정된
+            # 계좌만 `/strategy-mix` 목록에 오른다.
             pool = str(raw or "").strip().lower()
             if not pool:
                 cleaned[key] = None
                 continue
-            from utils.settings_loader import list_available_ticker_types
+            from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
 
             allowed = list_available_ticker_types()
             if pool not in allowed:
                 raise AccountSettingsStoreError(
-                    f"'{account_id}' 의 mix_pool 은 {', '.join(allowed)} 중 하나여야 합니다: {raw}"
+                    f"'{account_id}' 의 {key} 는 {', '.join(allowed)} 중 하나여야 합니다: {raw}"
+                )
+            # 계좌와 국가가 같아야 한다 — 거래 달력(월초 리밸런싱 판정)과 통화 환산이
+            # 슬리브마다 갈리면 합성 곡선 자체가 성립하지 않는다.
+            account_country = str(values.get("country_code") or existing_doc.get("country_code") or "").strip().lower()
+            pool_country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+            if account_country and pool_country and pool_country != account_country:
+                raise AccountSettingsStoreError(
+                    f"'{account_id}'({account_country}) 의 {key} 는 같은 국가의 종목풀이어야 합니다: "
+                    f"{pool}({pool_country})"
                 )
             cleaned[key] = pool
         elif key == "mix_slack_enabled":
