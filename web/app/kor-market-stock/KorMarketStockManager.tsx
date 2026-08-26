@@ -252,7 +252,14 @@ export function KorMarketStockManager({
 
     setAdding(true);
     setAddProgress(null);
-    const { added, skipped, blocked, failed } = await addTickersToPool(split.fresh, tickerPool, bucketId, setAddProgress);
+    const { added, skipped, blocked, failed } = await addTickersToPool(
+      split.fresh,
+      tickerPool,
+      bucketId,
+      setAddProgress,
+      // 진행도에 종목명을 보여주기 위한 표의 이름 — 추가 조회 없이 넘긴다.
+      new Map(rows.map((row) => [String(row.ticker).trim().toUpperCase(), row.name])),
+    );
 
     setAdding(false);
     setAddProgress(null);

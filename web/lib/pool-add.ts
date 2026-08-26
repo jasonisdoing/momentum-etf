@@ -90,14 +90,18 @@ export function buildPoolAddSkipNotice(total: number, split: PoolMembershipSplit
 
 /** 한 종목을 처리할 때마다 불린다. 서버가 종목당 시세·메타 캐시까지 채워 수 초씩 걸려서,
  *  진행도를 알리지 않으면 화면이 멈춘 것처럼 보인다. */
-export type PoolAddProgress = { done: number; total: number; ticker: string };
+export type PoolAddProgress = { done: number; total: number; ticker: string; name?: string };
 
-/** 걸러낸 신규 종목만 실제로 담는다. 호출부가 `splitByPoolMembership` 으로 미리 나눈다. */
+/** 걸러낸 신규 종목만 실제로 담는다. 호출부가 `splitByPoolMembership` 으로 미리 나눈다.
+ *
+ * `nameByTicker` 는 진행도 표시에만 쓴다 — 티커만 보이면 무엇을 담는 중인지 알기 어렵다.
+ * 표가 이미 종목명을 들고 있으므로 추가 조회 없이 넘긴다. */
 export async function addTickersToPool(
   tickers: string[],
   tickerType: string,
   bucketId: number,
   onProgress?: (progress: PoolAddProgress) => void,
+  nameByTicker?: Map<string, string>,
 ): Promise<PoolAddResult> {
   let added = 0;
   let skipped = 0;
@@ -105,7 +109,8 @@ export async function addTickersToPool(
   const failed: string[] = [];
 
   for (const [index, ticker] of tickers.entries()) {
-    onProgress?.({ done: index, total: tickers.length, ticker });
+    const name = nameByTicker?.get(String(ticker || "").trim().toUpperCase());
+    onProgress?.({ done: index, total: tickers.length, ticker, name });
     try {
       await addStockCandidate(tickerType, ticker, bucketId);
       added += 1;
@@ -122,7 +127,7 @@ export async function addTickersToPool(
       }
       failed.push(ticker);
     } finally {
-      onProgress?.({ done: index + 1, total: tickers.length, ticker });
+      onProgress?.({ done: index + 1, total: tickers.length, ticker, name });
     }
   }
 
