@@ -258,14 +258,11 @@ def load_real_holdings_table(
         "bucket",
         "first_buy_date",
         "last_buy_date",
-        "memo",
     ]:
         if col not in df_holdings.columns:
             df_holdings[col] = (
-                "" if col in ("ticker", "name", "currency", "first_buy_date", "last_buy_date", "memo") else 0
+                "" if col in ("ticker", "name", "currency", "first_buy_date", "last_buy_date") else 0
             )
-
-    df_holdings["memo"] = df_holdings["memo"].fillna("").astype(str)
 
     df_holdings["quantity"] = (
         pd.to_numeric(df_holdings["quantity"], errors="coerce").fillna(0.0).apply(np.floor).astype(int)

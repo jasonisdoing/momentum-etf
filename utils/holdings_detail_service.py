@@ -510,6 +510,11 @@ def add_holding(
 
     if target_ratio is not None:
         _set_holding_target_ratio(new_holding, float(target_ratio))
+    if memo is not None:
+        # 메모는 계좌 보유가 아니라 **종목**에 붙는다(utils/stock_memo_store).
+        from utils.stock_memo_store import set_stock_memo
+
+        set_stock_memo(raw_ticker, memo)
     holdings.append(new_holding)
     save_portfolio_master(account_id, _assign_sort_order(holdings))
 
