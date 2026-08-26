@@ -155,8 +155,6 @@ def main():
     tags = ", ".join(f"{name} {mv:+.1f}%" for name, mv in alerts)
     lines = [f"<!channel> 🚨 *최근 1시간 급변* — {tags}"]
     lines.extend(body)
-    # 타이틀(링크)은 목록 아래에 — 클릭 시 live-24h 페이지로 이동
-    lines.append(f"*{app_link('live-24h', '🌐 24H 시세')}*")
 
     send_slack_message_v2("\n".join(lines))
     logger.info("24H 시세 슬랙 전송 완료 (%d종목, 1시간 급변 %d건)", len(rows), len(alerts))
