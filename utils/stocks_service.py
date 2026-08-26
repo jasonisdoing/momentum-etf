@@ -464,6 +464,96 @@ def delete_active_stock(ticker_type: str, ticker: str) -> None:
     invalidate_pool_caches(type_norm)
 
 
+def movable_pools(ticker_type: str) -> list[dict[str, Any]]:
+    """그 종목풀에서 종목을 옮길 수 있는 대상 풀 목록.
+
+    **같은 국가 + 같은 구분(`pool_kind`)** 만 허용한다. 국가가 다르면 거래 달력·통화가 갈리고,
+    구분이 다르면(개별주 ↔ ETF) 업종 상한 같은 설정의 의미가 달라진다. 자기 자신은 뺀다.
+    구분이 미설정인 풀은 무엇과도 같다고 볼 수 없어 대상에서 제외한다(추정하지 않는다).
+    """
+    from utils.momentum_service import pool_options
+    from utils.settings_loader import get_ticker_type_settings
+
+    source = get_ticker_type_settings(str(ticker_type or "").strip().lower()) or {}
+    country = str(source.get("country_code") or "").strip().lower()
+    kind = str(source.get("pool_kind") or "").strip().lower()
+    if not country or not kind:
+        return []
+    return [
+        option
+        for option in pool_options()
+        if option["ticker_type"] != str(ticker_type or "").strip().lower()
+        and option.get("country_code") == country
+        and option.get("pool_kind") == kind
+    ]
+
+
+def move_active_stock(from_pool: str, to_pool: str, ticker: str) -> dict[str, Any]:
+    """종목 하나를 다른 종목풀로 옮긴다 — 옛 풀에서 빼고 새 풀에 담는다.
+
+    한 티커는 한 종목풀에만 있어야 하므로(계좌 보유 종목의 소속 풀이 유일해야 그 풀의
+    이평선·손절 기준으로 판정할 수 있다) '양쪽에 두기' 가 아니라 이동이다.
+
+    **다시 받는 것 없이 옮기기만 한다.** 종목 메타(이름·상장일·업종·메모)·가격 캐시·배치
+    계산값이 전부 같은 값이라 원천 조회가 필요 없다. 예전에는 삭제 후 신규 추가로 처리해
+    종목당 10초(메타 9초 + 시세 1.6초)가 들었다.
+    """
+    source = str(from_pool or "").strip().lower()
+    target = str(to_pool or "").strip().lower()
+    ticker_norm = str(ticker or "").strip().upper()
+    if not source or not target or not ticker_norm:
+        raise RuntimeError("출발 종목풀·대상 종목풀·티커가 모두 필요합니다.")
+    if source == target:
+        raise RuntimeError("출발 종목풀과 대상 종목풀이 같습니다.")
+    if target not in {option["ticker_type"] for option in movable_pools(source)}:
+        raise RuntimeError(
+            f"'{_pool_label(source)}' 에서 '{_pool_label(target)}' 로는 옮길 수 없습니다 — "
+            "국가와 구분(개별주/ETF)이 같은 종목풀로만 옮길 수 있습니다."
+        )
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결에 실패했습니다.")
+
+    current = db.stock_meta.find_one({"ticker_type": source, "ticker": ticker_norm, "is_deleted": {"$ne": True}})
+    if not current:
+        raise RuntimeError(f"'{_pool_label(source)}' 에 없는 종목입니다: {ticker_norm}")
+    bucket_value = int(current.get("bucket") or 1)
+
+    # 이름·상장일·마켓·업종·메모는 종목풀이 바뀐다고 달라지지 않는다 — 옛 문서 값을 그대로
+    # 가져간다. 원천에서 다시 받으면 종목당 9초가 더 든다.
+    carried = {
+        key: value
+        for key, value in current.items()
+        if key not in ("_id", "ticker", "ticker_type", "is_deleted", "deleted_at", "deleted_reason", "created_at")
+    }
+
+    from utils.cache_utils import move_cached_frame
+    from utils.stock_list_io import add_stock
+
+    # 옛 풀에서 먼저 뺀다 — 남겨 두면 '이미 다른 종목풀에 있습니다' 로 막힌다.
+    # 가격 캐시·배치 계산값은 지우지 않고 새 풀로 옮긴다(같은 시세라 다시 받을 이유가 없다).
+    if not hard_remove_stock(source, ticker_norm):
+        raise RuntimeError(f"'{_pool_label(source)}' 에서 빼지 못했습니다: {ticker_norm}")
+    try:
+        if not add_stock(target, ticker_norm, name=str(carried.get("name") or ticker_norm), **carried):
+            raise RuntimeError("대상 종목풀에 담지 못했습니다.")
+        move_cached_frame(source, target, ticker_norm)
+        for meta_coll in ("stock_cache_meta", "previous_stock_cache_meta"):
+            db[meta_coll].update_many({"ticker_type": source, "ticker": ticker_norm}, {"$set": {"ticker_type": target}})
+    except Exception as exc:
+        # 새 풀에 담지 못했으면 옛 풀로 되돌려 종목이 사라지는 것을 막는다.
+        try:
+            add_stock(source, ticker_norm, name=str(carried.get("name") or ticker_norm), **carried)
+        except Exception:
+            get_app_logger().error("[이동] %s 복구 실패 — %s 에서 빠진 채로 남았습니다", ticker_norm, source)
+        raise RuntimeError(f"{ticker_norm} 이동 실패: {exc}") from exc
+
+    invalidate_pool_caches(source)
+    invalidate_pool_caches(target)
+    return {"ticker": ticker_norm, "from": source, "to": target, "bucket_id": bucket_value}
+
+
 def load_deleted_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
     ticker_types = _load_ticker_types_payload()
     target_ticker_type = _pick_ticker_type(ticker_types, ticker_type)

@@ -186,6 +186,27 @@ export async function deleteStock(tickerType: string, ticker: string): Promise<v
   });
 }
 
+/** 옮길 수 있는 대상 종목풀 — 같은 국가·구분(개별주/ETF)만 서버가 돌려준다. */
+export async function loadMovablePools(tickerType: string): Promise<StocksAccountItem[]> {
+  const query = `?ticker_type=${encodeURIComponent(tickerType)}`;
+  if (typeof window !== "undefined") {
+    const payload = await fetchClientJson<{ pools?: StocksAccountItem[] }>(`/api/stocks/movable-pools${query}`);
+    return payload.pools ?? [];
+  }
+  const payload = await fetchFastApiJson<{ pools?: StocksAccountItem[] }>(`/internal/stocks/movable-pools${query}`);
+  return payload.pools ?? [];
+}
+
+/** 종목 하나를 다른 종목풀로 옮긴다. 옛 풀에서 빠지고 새 풀에 담긴다(양쪽에 두지 않는다). */
+export async function moveStockToPool(fromPool: string, toPool: string, ticker: string): Promise<void> {
+  const body = JSON.stringify({ from_pool: fromPool, to_pool: toPool, ticker });
+  if (typeof window !== "undefined") {
+    await fetchClientJson("/api/stocks/move", { method: "POST", body });
+    return;
+  }
+  await fetchFastApiJson("/internal/stocks/move", { method: "POST", body });
+}
+
 export async function validateStockCandidate(tickerType: string, ticker: string): Promise<StockValidationResult> {
   if (typeof window !== "undefined") {
     return fetchClientJson<StockValidationResult>("/api/stocks", {

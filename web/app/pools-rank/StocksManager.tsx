@@ -1,6 +1,6 @@
 "use client";
 
-import { IconDeviceFloppy, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconArrowsExchange, IconDeviceFloppy, IconPlus, IconTrash } from "@tabler/icons-react";
 import type { ColDef, RowClassParams } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
@@ -18,7 +18,9 @@ import {
 } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { readSessionTtlCache, writeSessionTtlCache } from "@/lib/session-ttl-cache";
-import { addStockCandidate, deleteStock, updateStockBucket, updateStockMemo, validateStockCandidate, updateStockExclude } from "@/lib/stocks-store";
+import type { PoolAddProgress } from "@/lib/pool-add";
+import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
+import { addStockCandidate, deleteStock, loadMovablePools, moveStockToPool, updateStockBucket, updateStockMemo, validateStockCandidate, updateStockExclude, type StocksAccountItem } from "@/lib/stocks-store";
 import {
   readRememberedTickerType,
   writeRememberedTickerType,
@@ -362,6 +364,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [dirtyRowIds, setDirtyRowIds] = useState<string[]>([]);
   const [dirtyCellKeys, setDirtyCellKeys] = useState<string[]>([]);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
+  // 종목 이동 — 지금 보고 있는 풀에서 같은 국가·구분의 다른 풀로 옮긴다.
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [movablePools, setMovablePools] = useState<StocksAccountItem[] | null>(null);
+  const [moveTarget, setMoveTarget] = useState("");
+  const [moveProgress, setMoveProgress] = useState<PoolAddProgress | null>(null);
 
   // gridRows의 id 계산과 동일한 방식으로 row id를 생성한다.
   const getRowId = useCallback(
@@ -1461,6 +1468,65 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     });
   }
 
+  /** 이동 모달 열기 — 대상 풀 목록은 서버가 국가·구분으로 걸러 준다. */
+  function handleMoveSelected() {
+    if (selectedTickers.length === 0) return;
+    setMoveTarget("");
+    setMovablePools(null);
+    setMoveOpen(true);
+    void (async () => {
+      try {
+        setMovablePools(await loadMovablePools(selectedTickerType));
+      } catch (error) {
+        setMovablePools([]);
+        toast.error(error instanceof Error ? error.message : "옮길 수 있는 종목풀을 불러오지 못했습니다.");
+      }
+    })();
+  }
+
+  function handleConfirmMove() {
+    const target = moveTarget.trim();
+    if (!target || selectedTickers.length === 0) return;
+    const selectedRows = rows.filter((row) => selectedTickers.includes(getRowId(row)));
+    // 진행도는 transition **밖에서** 먼저 세운다 — 안에서 세우면 React 가 렌더를 미뤄
+    // 첫 종목이 끝날 때까지(10초 안팎) 화면에 아무것도 안 나온다.
+    const firstRow = selectedRows[0];
+    setMoveProgress({
+      done: 0,
+      total: selectedRows.length,
+      ticker: String(firstRow?.티커 ?? ""),
+      name: String(firstRow?.종목명 ?? ""),
+    });
+    startTransition(async () => {
+      let movedCount = 0;
+      const failed: string[] = [];
+      for (const [index, row] of selectedRows.entries()) {
+        const ticker = String(row.티커 ?? "");
+        setMoveProgress({ done: index, total: selectedRows.length, ticker, name: String(row.종목명 ?? "") });
+        try {
+          await moveStockToPool(selectedTickerType, target, ticker);
+          movedCount += 1;
+        } catch {
+          failed.push(ticker);
+        } finally {
+          setMoveProgress({ done: index + 1, total: selectedRows.length, ticker, name: String(row.종목명 ?? "") });
+        }
+      }
+      setMoveProgress(null);
+      setMoveOpen(false);
+      setSelectedTickers([]);
+      if (movedCount > 0) toast.success(`[순위] ${movedCount}개 종목을 옮겼습니다.`);
+      if (failed.length > 0) toast.error(`이동 실패: ${failed.join(", ")}`);
+      clearCacheWarningState();
+      void load({
+        ticker_type: selectedTickerType,
+        ma_rule_override: maRule ?? undefined,
+        as_of_date: selectedAsOfDate,
+        skip_session_cache: true,
+      });
+    });
+  }
+
   function handleDeleteSelected() {
     if (selectedTickers.length === 0) {
       return;
@@ -1687,6 +1753,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   <span>저장</span>
                 </button>
                 <button
+                  className="btn btn-outline-secondary btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                  type="button"
+                  onClick={handleMoveSelected}
+                  disabled={loading || isPending || selectedTickers.length === 0 || isAllTickerType}
+                  title="같은 국가·구분(개별주/ETF)의 다른 종목풀로 옮깁니다."
+                >
+                  <IconArrowsExchange size={16} stroke={2} />
+                  <span>이동</span>
+                </button>
+                <button
                   className="btn btn-outline-danger btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                   type="button"
                   onClick={handleDeleteSelected}
@@ -1801,6 +1877,75 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
               : `${selectedTickers.length}개 종목을 삭제합니다.`}
           </div>
           <div className="text-secondary small">삭제된 종목은 복구되지 않으며 즉시 제거됩니다.</div>
+        </div>
+      </AppModal>
+
+      {/* 종목 이동 — 지금 풀에서 빼고 고른 풀에 담는다. 한 티커는 한 풀에만 있을 수 있어
+          '양쪽에 두기' 가 아니라 이동이다. */}
+      <AppModal
+        open={moveOpen}
+        title="종목풀 이동"
+        subtitle={`선택한 종목 ${selectedTickers.length}개를 다른 종목풀로 옮깁니다.`}
+        onClose={() => {
+          if (!isPending) setMoveOpen(false);
+        }}
+        footer={(
+          <>
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              onClick={() => setMoveOpen(false)}
+              disabled={isPending}
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleConfirmMove}
+              disabled={isPending || !moveTarget}
+            >
+              {isPending ? "옮기는 중…" : "이동"}
+            </button>
+          </>
+        )}
+      >
+        <div className="d-flex flex-column gap-2">
+          {movablePools === null ? (
+            <div className="text-secondary small">옮길 수 있는 종목풀을 확인하는 중…</div>
+          ) : movablePools.length === 0 ? (
+            <div className="alert alert-warning mb-0">
+              옮길 수 있는 종목풀이 없습니다.
+              <div className="small mt-1">
+                국가와 구분(개별주/ETF)이 같은 종목풀로만 옮길 수 있습니다.
+              </div>
+            </div>
+          ) : (
+            <>
+              <label className="appLabeledField">
+                <span className="appLabeledFieldLabel">옮길 종목풀</span>
+                <select
+                  className="field compactField"
+                  value={moveTarget}
+                  disabled={isPending}
+                  onChange={(event) => setMoveTarget(event.target.value)}
+                >
+                  <option value="">종목풀 선택</option>
+                  {movablePools.map((pool) => (
+                    <option key={pool.ticker_type} value={pool.ticker_type}>
+                      {formatPoolLabel(pool)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="text-secondary small">
+                기존 종목풀에서 빠지고 새 종목풀에 담깁니다. 버킷은 그대로 유지됩니다.
+                새 종목풀에서 가격 캐시와 메타데이터를 다시 받으므로 <b>종목당 10초 안팎</b> 걸립니다
+                {selectedTickers.length > 1 ? ` (${selectedTickers.length}개 = 약 ${Math.ceil((selectedTickers.length * 10) / 60)}분)` : ""}.
+              </div>
+              <PoolAddProgressBar progress={moveProgress} />
+            </>
+          )}
         </div>
       </AppModal>
     </div>
