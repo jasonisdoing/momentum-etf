@@ -1010,6 +1010,26 @@ def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
         )
 
 
+def move_cached_frame(from_owner: str, to_owner: str, ticker: str) -> bool:
+    """가격 캐시 문서를 다른 소유자 컬렉션으로 **그대로 옮긴다**.
+
+    종목풀 이동에 쓴다 — 원천에서 다시 받으면 종목당 1~2초가 드는데, 같은 시세를 옮기는
+    것뿐이라 받을 이유가 없다. 대상에 이미 있으면 덮어쓴다.
+    """
+    db = get_db_connection()
+    if db is None:
+        return False
+    ticker_norm = str(ticker or "").strip().upper()
+    source = db[_resolve_collection_name(from_owner)]
+    doc = source.find_one({"ticker": ticker_norm})
+    if not doc:
+        return False
+    doc.pop("_id", None)
+    db[_resolve_collection_name(to_owner)].replace_one({"ticker": ticker_norm}, doc, upsert=True)
+    source.delete_one({"ticker": ticker_norm})
+    return True
+
+
 def delete_cached_frame(account_id: str, ticker: str) -> None:
     collection = _get_collection(account_id)
     if collection is None:

@@ -9,6 +9,8 @@ from utils.stocks_service import (
     hard_delete_stocks,
     load_active_stocks_table,
     load_deleted_stocks_table,
+    movable_pools,
+    move_active_stock,
     refresh_single_stock,
     restore_deleted_stocks,
     toggle_exclude_from_ranking,
@@ -65,6 +67,12 @@ class StockCreatePayload(BaseModel):
     bucket_id: int
 
 
+class StockMovePayload(BaseModel):
+    from_pool: str
+    to_pool: str
+    ticker: str
+
+
 @router.get("")
 def get_active_stocks(
     ticker_type: str | None = Query(default=None),
@@ -116,6 +124,18 @@ def post_validate_stock(
 @router.post("")
 def post_active_stock(payload: StockCreatePayload, _: None = Depends(require_internal_token)) -> dict[str, object]:
     return add_active_stock(payload.ticker_type, payload.ticker, payload.bucket_id)
+
+
+@router.get("/movable-pools")
+def get_movable_pools(ticker_type: str = Query(...), _: None = Depends(require_internal_token)) -> dict[str, object]:
+    """그 종목풀에서 옮길 수 있는 대상 풀 목록 (같은 국가·구분만)."""
+    return {"pools": movable_pools(ticker_type)}
+
+
+@router.post("/move")
+def post_move_stock(payload: StockMovePayload, _: None = Depends(require_internal_token)) -> dict[str, object]:
+    """종목 하나를 다른 종목풀로 옮긴다. 종목마다 한 번씩 호출한다(화면이 진행도를 보여준다)."""
+    return move_active_stock(payload.from_pool, payload.to_pool, payload.ticker)
 
 
 @router.get("/deleted")
