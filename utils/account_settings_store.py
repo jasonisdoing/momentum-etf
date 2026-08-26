@@ -43,8 +43,10 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "mix_enabled",
     "mix_a_strategy",
     "mix_a_pool",
+    "mix_a_name",
     "mix_b_strategy",
     "mix_b_pool",
+    "mix_b_name",
     "mix_slack_enabled",
     "mix_a_pct",
     "mix_b_pct",
@@ -65,6 +67,11 @@ MIX_WEIGHT_KEYS: tuple[str, ...] = ("mix_a_pct", "mix_b_pct", "mix_cash_pct")
 MIX_SLEEVE_POOL_KEYS: tuple[str, ...] = ("mix_a_pool", "mix_b_pool")
 # 슬리브가 굴릴 전략 — 값은 `utils/mix_sleeve.STRATEGY_OPTIONS` 가 단일 소스다.
 MIX_SLEEVE_STRATEGY_KEYS: tuple[str, ...] = ("mix_a_strategy", "mix_b_strategy")
+# 슬리브 표시 이름 — 비워 두면 전략 이름(「A. 모멘텀」)을 쓴다. 같은 전략을 두 슬롯에
+# 올릴 수 있어, 화면에서 무엇이 무엇인지 구분하려면 사용자가 직접 붙일 이름이 필요하다.
+MIX_SLEEVE_NAME_KEYS: tuple[str, ...] = ("mix_a_name", "mix_b_name")
+# 이름 길이 상한 — 표 헤더·액션 문구에 들어가므로 짧게 제한한다.
+MIX_SLEEVE_NAME_MAX_LEN = 20
 
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 _ALLOWED_CASH_CURRENCIES = {"KRW", "USD", "AUD"}
@@ -203,6 +210,17 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
                     f"'{account_id}' 의 {key} 는 {', '.join(STRATEGY_OPTIONS)} 중 하나여야 합니다: {raw}"
                 )
             cleaned[key] = strategy
+        elif key in MIX_SLEEVE_NAME_KEYS:
+            # 슬리브 표시 이름 — 비면 미설정(None)으로 두고 화면이 전략 이름을 쓴다.
+            name = str(raw or "").strip()
+            if not name:
+                cleaned[key] = None
+                continue
+            if len(name) > MIX_SLEEVE_NAME_MAX_LEN:
+                raise AccountSettingsStoreError(
+                    f"'{account_id}' 의 {key} 는 {MIX_SLEEVE_NAME_MAX_LEN}자 이내여야 합니다: {name}"
+                )
+            cleaned[key] = name
         elif key in MIX_SLEEVE_POOL_KEYS:
             # 합성 전략에서 이 슬리브가 볼 종목풀. 기본은 없음(미지정) — 둘 다 지정된
             # 계좌만 `/strategy-mix` 목록에 오른다.

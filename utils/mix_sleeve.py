@@ -41,10 +41,13 @@ class SleeveSpec:
     strategy: str
     pool: str
     settings: dict[str, Any]
+    # 사용자가 붙인 표시 이름 — 비면 전략 이름을 쓴다. 같은 전략을 두 슬롯에 올릴 수
+    # 있어서, 화면에서 둘을 구분하려면 이름을 직접 붙일 수 있어야 한다.
+    name: str = ""
 
     @property
     def label(self) -> str:
-        return STRATEGY_LABELS.get(self.strategy, self.strategy)
+        return self.name or STRATEGY_LABELS.get(self.strategy, self.strategy)
 
 
 def normalize_strategy(value: Any) -> str:
