@@ -237,12 +237,12 @@ TABLE_SPECS: tuple[TableSpec, ...] = (
     *_PERSONAL_TABLES,
 )
 
-# 삭제 시점 — 이 화면이 답해야 하는 질문. 모든 행이 셋 중 하나를 갖는다.
-# 분류(category)는 '무슨 성격의 데이터인가' 이고, 이건 '언제 지워지는가' 다. 축이 다르다.
+# 삭제 트리거 — 이 화면이 답해야 하는 질문. 모든 행이 셋 중 하나를 갖는다.
+# 분류(category)는 '무슨 성격의 데이터인가' 이고, 이건 '무엇을 지울 때 함께 지워지는가' 다.
 DELETED_WITH_LABELS: dict[str, str] = {
-    "pool": "종목풀 삭제 시",
-    "account": "계좌 삭제 시",
-    "keep": "삭제 안 함",
+    "pool": "종목풀 삭제",
+    "account": "계좌 삭제",
+    "keep": "없음",
 }
 
 
@@ -579,6 +579,9 @@ def build_data_table_payload() -> dict[str, Any]:
             "purpose": spec.purpose,
             "owner_field": "_id" if spec.owner_is_id else spec.owner_field,
             "owner_note": spec.owner_note,
+            # 이 자리가 소유자별로 어떻게 나뉘는지 — 컬렉션이 통째로 나뉘면 소유자 값이,
+            # 한 컬렉션 안에서 필드로 나뉘면 그 필드명이 들어간다.
+            "split_by": "_id" if spec.owner_is_id else spec.owner_field,
         }
         if spec.name_pattern:
             # 소유자별 컬렉션 — 실제로 있는 것만 펼쳐서 각각 한 행으로 보여준다.
@@ -590,7 +593,15 @@ def build_data_table_payload() -> dict[str, Any]:
                 if match.owner not in owners:
                     continue
                 known.add(match.name)
-                rows.append({**base, "name": match.name, "owner": match.owner, **_collection_stats(db, match.name)})
+                rows.append(
+                    {
+                        **base,
+                        "name": match.name,
+                        "owner": match.owner,
+                        "split_by": match.owner,
+                        **_collection_stats(db, match.name),
+                    }
+                )
             continue
 
         known.add(spec.name)
@@ -615,6 +626,7 @@ def build_data_table_payload() -> dict[str, Any]:
             "owner_field": "",
             "owner_note": "",
             "is_place": True,
+            "split_by": f"<{owner}>",
             "count_unit": unit,
             "count": count,
             "size": 0,
@@ -666,6 +678,7 @@ def build_data_table_payload() -> dict[str, Any]:
             "purpose": "",
             "owner_field": "",
             "owner_note": "",
+            "split_by": "",
             **_collection_stats(db, name),
         }
         for name in sorted(existing - known)
@@ -680,8 +693,10 @@ def build_data_table_payload() -> dict[str, Any]:
         "deleted_with_labels": dict(DELETED_WITH_LABELS),
         "category_labels": dict(CATEGORY_LABELS),
         "totals": {
-            "collections": len(rows) + len(unclassified),
-            "count": sum(int(r.get("count") or 0) for r in rows + unclassified),
+            # 안쪽 자리(문서 키·배열 항목·참조)는 컬렉션이 아니므로 컬렉션 수에서 뺀다.
+            "collections": sum(1 for r in rows if not r.get("is_place")) + len(unclassified),
+            "places": sum(1 for r in rows if r.get("is_place")),
+            "count": sum(int(r.get("count") or 0) for r in rows + unclassified if not r.get("is_place")),
             "size": sum(int(r.get("size") or 0) for r in rows + unclassified),
             "index_size": sum(int(r.get("index_size") or 0) for r in rows + unclassified),
         },
