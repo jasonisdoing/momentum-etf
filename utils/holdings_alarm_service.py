@@ -24,11 +24,12 @@ from typing import Any
 import pandas as pd
 
 from config import CACHE_TTL_COMPUTE
+from core.strategy.scoring import compute_ma_disparity
 from utils.account_settings_store import load_account_docs
 from utils.cache_utils import load_cached_close_series_bulk_with_fallback
 from utils.holdings_detail_service import load_all_holdings_detail
 from utils.logger import get_app_logger
-from utils.moving_averages import calculate_moving_average, get_moving_average_type
+from utils.moving_averages import get_moving_average_type
 from utils.notification import send_slack_message_v2
 from utils.rankings import build_effective_close_series
 from utils.stock_list_io import pools_by_ticker
@@ -100,9 +101,13 @@ def _ma_status(
     순위 화면은 이탈이 아닌데 알림만 ❗ 가 붙었다.)
 
     실시간 현재가(스냅샷)를 종가 시리즈에 덮어씌우는 것도 순위 화면과 같다
-    (``build_effective_close_series``). **하나라도 아래면 이탈**로 본다(순위 화면 회색 기준).
+    (``build_effective_close_series``). **하나라도 아래면 이탈**로 본다 — 순위 화면의
+    회색 처리(`isTrendBroken`)·보유 자격(`hold_eligible_mask`)과 같은 조건이다.
 
-    둘 중 하나라도 이평선을 못 구하면(상장 직후 등) 판정 불가로 None — 절반만 보고
+    이격률은 ``compute_ma_disparity`` 로 낸다 — 순위 화면의 ``compute_trend_frame`` 과
+    같은 계산의 1종목 버전이라, 두 화면이 같은 값을 보장한다.
+
+    둘 중 하나라도 이격을 못 구하면(상장 직후 등) 판정 불가로 None — 절반만 보고
     이탈 여부를 정하면 장기가 꺾인 종목을 놓치기 때문이다.
     """
     short_days, long_days = ma_days
@@ -113,20 +118,18 @@ def _ma_status(
     effective = build_effective_close_series(close, realtime_entry)
     if effective is not None and not effective.empty:
         close = effective
-    if len(close) < max(short_days, long_days):
+    if close.empty:
         return None
 
-    # 이동평균 종류는 config(SMA/EMA). 최신 봉의 이동평균 값으로 이탈을 판정한다.
     last = float(close.iloc[-1])
     result: dict[str, Any] = {"last": last}
     for label, days in (("short", short_days), ("long", long_days)):
-        ma = float(calculate_moving_average(close, days, min_periods=days).iloc[-1])
-        if ma == 0.0:
+        disparity = compute_ma_disparity(close, days)
+        if disparity is None:
             return None
         result[f"{label}_days"] = days
-        result[f"{label}_ma"] = round(ma, 2)
-        result[f"{label}_deviation_pct"] = round((last / ma - 1.0) * 100.0, 2)
-        result[f"{label}_below"] = last < ma
+        result[f"{label}_deviation_pct"] = round(disparity, 2)
+        result[f"{label}_below"] = disparity < 0
 
     result["below"] = bool(result["short_below"] or result["long_below"])
     return result

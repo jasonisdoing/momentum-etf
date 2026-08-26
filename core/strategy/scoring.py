@@ -118,6 +118,26 @@ def compute_trend_frame(
     return trend
 
 
+def compute_ma_disparity(close_series: pd.Series, ma_days: int) -> float | None:
+    """종목 하나의 **최신 이격률(%)** — 종가가 이동평균보다 몇 % 위/아래인가.
+
+    `compute_trend_frame` 의 1종목 버전이다. 순위 화면(프레임 단위)과 보유종목 알림(종목
+    단위)이 같은 정의를 쓰도록 계산을 여기 한 곳에 둔다 — 예전에는 알림이 따로 계산하면서
+    가격 구간을 잘라(EMA 워밍업 부족) 순위 화면과 다른 값을 냈다.
+
+    ``min_periods`` 를 두지 않는 것도 프레임 버전과 같다 — 상장 직후라도 있는 종가로
+    부분 계산한다. 랭킹 포함 여부는 ``compute_eligibility_mask`` 가 따로 판정한다.
+    """
+    series = close_series.dropna()
+    if series.empty:
+        return None
+    ma_series = calculate_moving_average(series, int(ma_days))
+    score = calculate_maps_score(series, ma_series)
+    if score.empty or pd.isna(score.iloc[-1]):
+        return None
+    return float(score.iloc[-1])
+
+
 def compute_rule_percentile_frame(
     close_frame: pd.DataFrame,
     ma_days: int,
