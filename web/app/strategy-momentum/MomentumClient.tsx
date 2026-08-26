@@ -530,6 +530,10 @@ export function MomentumClient() {
     (pool: string) => {
       setDraftPool(pool);
       writeRememberedTickerType(pool);
+      // 풀이 바뀌면 이전 풀의 백테스트 결과는 의미가 없다 — 저장 이력이 없어 아래 분기를 타지
+      // 않는 풀(그 풀 첫 진입)도 마찬가지라 분기 밖에서 비운다.
+      // 튜닝 결과는 StrategyTuning 이 key={draftPool} 로 재마운트되며 함께 비워진다.
+      setBacktest(null);
       const saved = view?.settings_by_pool?.[pool];
       if (saved) {
         fillDrafts(saved);
@@ -1356,9 +1360,13 @@ export function MomentumClient() {
         {/* 튜닝 — 백테스트 아래. 백테스트와 같이 **저장된** 설정을 기준으로 아래 범위의 조합을
             전부 돌린다. 이평 축은 상단 셀렉트와 같은 선택지(서버 상수)를 쓴다. */}
         <StrategyTuning
+          // 풀이 바뀌면 재마운트 — 이전 풀의 튜닝 결과가 남지 않게 한다(백테스트와 같은 시점).
+          key={draftPool}
           monthOptions={view.month_options ?? [backtestMonths]}
           defaultMonths={backtestMonths}
-          disabled={backtesting}
+          // 튜닝도 백테스트와 같이 **저장된 설정** 기준이라 실행 조건을 같게 둔다.
+          disabled={backtesting || isDirty}
+          disabledHint={isDirty ? "설정을 저장해야 실행할 수 있습니다" : undefined}
           secondsPerCombo={0.06}
           extraSeconds={90}
           fixedLabel={`저장된 설정 기준 (종목풀 ${draftPool})${hasIndustryData ? "" : " · 업종 상한 없음(업종 데이터 없는 풀)"}`}
