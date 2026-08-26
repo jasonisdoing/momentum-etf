@@ -1292,10 +1292,10 @@ def update_single_stock_metadata(
                     logger.debug(f"[{account_norm.upper()}/{ticker}] 업종 획득: {industry}")
 
     elif country_code in ("us", "au"):
-        # 호주 풀은 ETF 전용. 미국은 종목 자체 속성(yfinance quoteType)으로 판정한다 — 아래 .info 블록에서 설정.
-        # (어느 풀에 넣었는지로 추정하면 같은 종목이 풀마다 다른 값을 갖게 되므로 쓰지 않는다.)
-        if country_code == "au":
-            stock["is_etf"] = True
+        # 미국·호주 모두 종목 자체 속성(yfinance quoteType)으로 ETF 를 판정한다 — 아래 .info 블록에서 설정.
+        # (어느 풀에 넣었는지로 추정하면 같은 종목이 풀마다 다른 값을 갖게 되므로 쓰지 않는다.
+        #  호주를 ETF 전용으로 가정하던 코드가 있었는데, 개별주 풀(aus_stock)이 생기면서
+        #  그 종목들이 ETF 경로를 타 시총·업종이 통째로 비었다.)
 
         if country_code == "us" and naver_us_stock_map:
             naver_entry = naver_us_stock_map.get(str(ticker).strip().upper(), {})
@@ -1322,12 +1322,13 @@ def update_single_stock_metadata(
                 else yf.Ticker(yfinance_ticker)
             )
 
-            # 미국: 종목 자체 속성으로 ETF 판정(quoteType == "ETF"). 이름 보완도 같은 .info 로 처리.
+            # 종목 자체 속성으로 ETF 판정(quoteType == "ETF"). 이름 보완·시총·업종도 같은 .info 로
+            # 처리한다 — 한 종목당 .info 는 한 번만 부른다.
             need_name = not stock.get("name") or stock.get("name") == ticker
-            if country_code == "us" or need_name:
+            if country_code in ("us", "au") or need_name:
                 try:
                     info = t.info
-                    if country_code == "us":
+                    if country_code in ("us", "au"):
                         is_etf = str(info.get("quoteType") or "").strip().upper() == "ETF"
                         if not is_etf:
                             # Yahoo 가 신생 ETF 를 EQUITY 로 잘못 분류하는 경우가 있다
@@ -1343,6 +1344,18 @@ def update_single_stock_metadata(
                                     f"종목명({yahoo_name})이 ETF 로 끝나 ETF 로 판정합니다."
                                 )
                         stock["is_etf"] = is_etf
+                    # 호주 개별주의 시총·업종 — 미국은 네이버 맵에서 받으므로 여기서 채우지 않는다.
+                    # 통화는 그 시장 통화 그대로다(호주=AUD). 국가를 섞어 비교하면 안 된다.
+                    if country_code == "au":
+                        cap = info.get("marketCap")
+                        if isinstance(cap, (int, float)) and not isinstance(cap, bool) and cap > 0:
+                            stock["market_cap"] = int(cap)
+                        sector = str(info.get("sector") or "").strip()
+                        if sector:
+                            stock["sector"] = sector
+                        industry = str(info.get("industry") or "").strip()
+                        if industry:
+                            stock["industry"] = industry
                     if need_name:
                         fetched_name = info.get("longName") or info.get("shortName")
                         if fetched_name:
