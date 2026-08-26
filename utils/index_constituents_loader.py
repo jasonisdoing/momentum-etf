@@ -11,7 +11,16 @@ from datetime import datetime
 from typing import Any
 
 COLLECTION = "index_constituents"
-SUPPORTED_INDICES = {"SP500", "NDX100", "ASX200", "KOSPI200"}
+SUPPORTED_INDICES = {"SP500", "NDX100", "ASX200", "KOSPI200", "KOSDAQ150"}
+
+# 한국 지수는 공식 구성종목 API 가 없어 **추종 ETF 의 보유종목**을 명단으로 쓴다.
+# 배치가 하루 한 번 여기 목록대로 적재하고, 화면(`/kor-market-stock`·`/kor-dividend`)은
+# 저장된 명단만 읽는다. 다른 ETF 로 대체하지 않는다 — 조회가 깨지면 배치가 죽어야 한다.
+#   market: 시세·시총을 붙일 때 넘길 네이버 시장 코드(구성종목이 그 시장에 상장돼 있다).
+KOR_INDEX_SOURCES: dict[str, dict[str, Any]] = {
+    "KOSPI200": {"etf_ticker": "069500", "etf_name": "KODEX 200", "min_count": 150, "market": "KOSPI"},
+    "KOSDAQ150": {"etf_ticker": "229200", "etf_name": "KODEX 코스닥150", "min_count": 120, "market": "KOSDAQ"},
+}
 
 
 def _normalize_index(index: str) -> str:
@@ -49,6 +58,64 @@ def load_index_meta(index: str) -> dict[str, Any]:
     if not doc:
         return {}
     return {k: v for k, v in doc.items() if k not in ("tickers", "_id")}
+
+
+def refresh_kor_index_from_etf(index: str) -> dict[str, Any]:
+    """추종 ETF 의 보유종목을 읽어 그 지수의 구성종목으로 저장한다 (한국 지수 공용).
+
+    Returns:
+        {"index": 지수 키, "count": 저장 종목 수, "as_of_date": ETF 보유종목 기준일|None}
+
+    Raises:
+        RuntimeError: 보유종목을 못 가져왔거나 수가 비정상일 때. 배치는 여기서 죽어야 한다
+            — 조용히 넘기면 명단이 낡은 채로 화면에 계속 쓰인다.
+    """
+    from datetime import date
+
+    from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
+
+    key = _normalize_index(index)
+    source = KOR_INDEX_SOURCES.get(key)
+    if source is None:
+        raise ValueError(f"ETF 기반 적재를 지원하지 않는 지수입니다: {index}")
+
+    payload = fetch_korean_etf_holdings_from_naver(source["etf_ticker"])
+    holdings = (payload or {}).get("holdings") or []
+
+    tickers: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in holdings:
+        ticker = str(item.get("ticker") or "").strip().upper()
+        # 현금·선물 등 종목코드가 아닌 항목이 섞여 오므로 6자리 코드만 남긴다.
+        if len(ticker) != 6 or ticker in seen:
+            continue
+        seen.add(ticker)
+        tickers.append(
+            {
+                "ticker": ticker,
+                "name": str(item.get("name") or ticker).strip(),
+                # 지수 내 비중 — 규모·유동성의 대리 지표라 화면 필터에 쓴다.
+                "weight": float(item["weight"]) if item.get("weight") is not None else None,
+            }
+        )
+
+    if len(tickers) < int(source["min_count"]):
+        raise RuntimeError(
+            f"{source['etf_name']}({source['etf_ticker']}) 보유종목이 {len(tickers)}개뿐입니다 "
+            f"(최소 {source['min_count']}개 기대). 네이버 응답이 바뀌었거나 조회에 실패했습니다."
+        )
+
+    as_of_date = (payload or {}).get("as_of_date")
+    save_index_constituents(
+        key,
+        tickers,
+        {
+            "updated_at": date.today().isoformat(),
+            "source": f"{source['etf_name']}({source['etf_ticker']}) ETF 보유종목",
+            "as_of_date": as_of_date,
+        },
+    )
+    return {"index": key, "count": len(tickers), "as_of_date": as_of_date}
 
 
 def save_index_constituents(index: str, tickers: list[dict[str, Any]], meta: dict[str, Any]) -> None:

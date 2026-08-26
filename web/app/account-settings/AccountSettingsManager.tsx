@@ -27,7 +27,9 @@ type AccountEntry = {
   benchmark?: Benchmark;
   market_regime_index?: MarketIndexOption | null;
   /** 합성 전략에서 이 계좌로 운용할 종목풀 — 없으면 `/strategy-mix` 목록에 오르지 않는다. */
-  mix_pool?: string | null;
+  /** 합성 슬리브별 종목풀 — 모멘텀·신고가가 서로 다른 풀을 볼 수 있다(계좌와 같은 국가). */
+  mix_sm_pool?: string | null;
+  mix_nh_pool?: string | null;
   /** 증권사 API 연동 — 잔고 수동 불러오기·배치 동기화가 이 값으로 동작한다. */
   broker_api?: { provider: string; account_no: string } | null;
   URL?: string;
@@ -39,7 +41,14 @@ type AccountEntry = {
   save_method?: string | null;
 };
 
-type PoolOption = { ticker_type: string; name?: string | null; icon?: string | null; order?: number | null };
+type PoolOption = {
+  ticker_type: string;
+  name?: string | null;
+  icon?: string | null;
+  order?: number | null;
+  /** 계좌 국가와 맞는 풀만 셀렉트에 뿌리는 데 쓴다. */
+  country_code?: string | null;
+};
 
 type BrokerProvider = { id: string; name: string; env_ok: boolean };
 type BrokerAccountRow = {
@@ -94,7 +103,8 @@ type AccountDraft = {
   benchmarkTicker: string;
   benchmarkName: string;
   regimeTicker: string;
-  mix_pool: string;
+  mix_sm_pool: string;
+  mix_nh_pool: string;
   brokerProvider: string;
   brokerAccountNo: string;
   URL: string;
@@ -125,7 +135,8 @@ function toDraft(account: AccountEntry): AccountDraft {
     benchmarkName: account.benchmark?.name ?? "",
     // 시장 레짐 지수(필수) — 미설정 계좌는 S&P 500 기본값으로 시작.
     regimeTicker: account.market_regime_index?.ticker || DEFAULT_REGIME_TICKER,
-    mix_pool: account.mix_pool ?? "",
+    mix_sm_pool: account.mix_sm_pool ?? "",
+    mix_nh_pool: account.mix_nh_pool ?? "",
     brokerProvider: account.broker_api?.provider ?? "",
     brokerAccountNo: account.broker_api?.account_no ?? "",
     URL: account.URL ?? "",
@@ -153,7 +164,8 @@ function draftToValues(draft: AccountDraft, marketIndices: MarketIndexOption[]):
       name: marketIndices.find((item) => item.ticker === draft.regimeTicker)?.name ?? "",
     },
     // 합성 전략 종목풀 — 없음이면 null 로 저장한다(그 계좌는 합성 화면에 안 뜬다).
-    mix_pool: draft.mix_pool || null,
+    mix_sm_pool: draft.mix_sm_pool || null,
+    mix_nh_pool: draft.mix_nh_pool || null,
     // 증권사 API 연동 — provider·계좌 둘 다 있어야 저장, 아니면 해제(null).
     broker_api:
       draft.brokerProvider && draft.brokerAccountNo
@@ -798,7 +810,7 @@ export function AccountSettingsManager() {
     field: keyof AccountDraft & ColDef<AccountGridRow>["field"],
     headerName: string,
     width: number,
-    values: () => (string | number)[],
+    values: (row: AccountGridRow) => (string | number)[],
     extra?: Partial<ColDef<AccountGridRow>>,
   ): ColDef<AccountGridRow> => ({
     field,
@@ -807,7 +819,7 @@ export function AccountSettingsManager() {
     editable: true,
     cellEditor: "agSelectCellEditor",
     cellEditorParams: (params: { data: AccountGridRow }) => {
-      const list = values().map(String);
+      const list = values(params.data).map(String);
       const current = String(params.data[field] ?? "");
       return { values: current && !list.includes(current) ? [current, ...list] : list };
     },
@@ -845,6 +857,30 @@ export function AccountSettingsManager() {
     },
   });
 
+  /** 계좌 국가의 풀만 — 거래 달력·통화가 갈리면 합성이 성립하지 않는다(백엔드도 같은 규칙으로 막는다). */
+  const poolOptionsForCountry = (countryCode: string) =>
+    poolOptions.filter(
+      (pool) => String(pool.country_code ?? "").trim().toLowerCase() === String(countryCode ?? "").trim().toLowerCase(),
+    );
+  const formatPoolCell = (value: unknown) => {
+    const pool = poolOptions.find((item) => item.ticker_type === value);
+    return pool ? formatPoolLabel(pool) : "없음";
+  };
+  const mixSleevePoolColumns: ColDef<AccountGridRow>[] = (
+    [
+      ["mix_sm_pool", "모멘텀 풀"],
+      ["mix_nh_pool", "신고가 풀"],
+    ] as const
+  ).map(([field, headerName]) =>
+    selectCol(
+      field,
+      headerName,
+      220,
+      (row) => ["", ...poolOptionsForCountry(row.country_code).map((pool) => pool.ticker_type)],
+      { valueFormatter: (params) => formatPoolCell(params.value) },
+    ),
+  );
+
   const columnDefs: ColDef<AccountGridRow>[] = [
     { field: "account_id", headerName: "ID", width: 130 },
     { field: "name", headerName: "이름", width: 150, editable: true },
@@ -873,12 +909,8 @@ export function AccountSettingsManager() {
       valueFormatter: (params) =>
         marketIndices.find((item) => item.ticker === params.value)?.name ?? (params.value ? String(params.value) : "미설정"),
     }),
-    selectCol("mix_pool", "합성 전략", 250, () => ["", ...poolOptions.map((pool) => pool.ticker_type)], {
-      valueFormatter: (params) => {
-        const pool = poolOptions.find((item) => item.ticker_type === params.value);
-        return pool ? formatPoolLabel(pool) : "없음";
-      },
-    }),
+    // 합성 슬리브별 풀 — 계좌 국가의 풀만 고를 수 있다(어긋난 조합은 애초에 목록에 없다).
+    ...mixSleevePoolColumns,
     {
       field: "brokerProvider",
       headerName: "증권사 API",

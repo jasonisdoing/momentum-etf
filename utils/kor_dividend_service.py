@@ -15,23 +15,21 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import urllib.request
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
 
-from utils.index_constituents_loader import load_index_constituents, save_index_constituents
+from utils.index_constituents_loader import load_index_constituents
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
 
 # 유니버스로 쓸 지수와 그 지수를 추종하는 ETF. 이 ETF 의 보유종목이 곧 구성종목이다.
+# 유니버스로 쓰는 지수. 명단 적재는 `scripts/update_kor_market_stocks.py` 담당이고
+# (출처·최소 종목 수는 `index_constituents_loader.KOR_INDEX_SOURCES` 가 단일 소스),
+# 이 화면은 저장된 명단을 읽기만 한다 — 한국 시장 화면도 같은 명단을 본다.
 INDEX_KEY = "KOSPI200"
-SOURCE_ETF_TICKER = "069500"  # KODEX 200
-SOURCE_ETF_NAME = "KODEX 200"
-
-# 구성종목 수가 이보다 적으면 응답이 깨진 것으로 본다 (KOSPI200 은 200종목 안팎).
-MIN_CONSTITUENTS = 150
 
 # 배치가 적재하는 컬렉션 — 종목당 문서 1개.
 COLLECTION = "kor_dividend_stocks"
@@ -57,59 +55,12 @@ _NAVER_HEADERS = {
 _NAVER_ROWS = {"주당배당금": "dps", "PER": "per", "PBR": "pbr"}
 
 
-def refresh_kospi200_constituents() -> dict[str, Any]:
-    """KODEX 200 보유종목을 읽어 ``index_constituents`` 에 KOSPI200 으로 저장한다.
-
-    Returns:
-        {"count": 저장 종목 수, "as_of_date": ETF 보유종목 기준일|None}
-
-    Raises:
-        RuntimeError: 보유종목을 못 가져왔거나 수가 비정상일 때. 배치는 여기서 죽어야 한다.
-    """
-    from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
-
-    payload = fetch_korean_etf_holdings_from_naver(SOURCE_ETF_TICKER)
-    holdings = (payload or {}).get("holdings") or []
-
-    tickers: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for item in holdings:
-        ticker = str(item.get("ticker") or "").strip().upper()
-        # 현금·선물 등 종목코드가 아닌 항목이 섞여 오므로 6자리 코드만 남긴다.
-        if len(ticker) != 6 or ticker in seen:
-            continue
-        seen.add(ticker)
-        tickers.append(
-            {
-                "ticker": ticker,
-                "name": str(item.get("name") or ticker).strip(),
-                # 지수 내 비중 — 규모·유동성의 대리 지표라 화면 필터에 쓴다.
-                "weight": float(item["weight"]) if item.get("weight") is not None else None,
-            }
-        )
-
-    if len(tickers) < MIN_CONSTITUENTS:
-        raise RuntimeError(
-            f"{SOURCE_ETF_NAME}({SOURCE_ETF_TICKER}) 보유종목이 {len(tickers)}개뿐입니다 "
-            f"(최소 {MIN_CONSTITUENTS}개 기대). 네이버 응답이 바뀌었거나 조회에 실패했습니다."
-        )
-
-    as_of_date = (payload or {}).get("as_of_date")
-    save_index_constituents(
-        INDEX_KEY,
-        tickers,
-        {
-            "updated_at": date.today().isoformat(),
-            "source": f"{SOURCE_ETF_NAME}({SOURCE_ETF_TICKER}) ETF 보유종목",
-            "as_of_date": as_of_date,
-        },
-    )
-    logger.info("[KOR DIVIDEND] %s 구성종목 %d개 저장 (기준일 %s)", INDEX_KEY, len(tickers), as_of_date or "-")
-    return {"count": len(tickers), "as_of_date": as_of_date}
-
-
 def load_universe() -> list[dict[str, Any]]:
-    """저장된 KOSPI200 구성종목. 배치가 아직 안 돌았으면 LookupError 가 난다."""
+    """저장된 KOSPI200 구성종목. 적재는 `scripts/update_kor_market_stocks.py` 가 한다.
+
+    그 배치가 아직 안 돌았으면 LookupError 가 난다 — 여기서 대신 받아 오지 않는다
+    (명단 적재는 한 곳에서만 해야 두 화면이 같은 명단을 본다).
+    """
     return load_index_constituents(INDEX_KEY)
 
 
