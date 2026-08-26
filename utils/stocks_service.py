@@ -525,8 +525,11 @@ def move_active_stock(from_pool: str, to_pool: str, ticker: str) -> dict[str, An
     carried = {
         key: value
         for key, value in current.items()
-        if key not in ("_id", "ticker", "ticker_type", "is_deleted", "deleted_at", "deleted_reason", "created_at")
+        # name 은 add_stock 이 별도 인자로 받으므로 여기서 뺀다(중복 전달 방지).
+        if key
+        not in ("_id", "ticker", "ticker_type", "name", "is_deleted", "deleted_at", "deleted_reason", "created_at")
     }
+    carried_name = str(current.get("name") or ticker_norm)
 
     from utils.cache_utils import move_cached_frame
     from utils.stock_list_io import add_stock
@@ -536,17 +539,29 @@ def move_active_stock(from_pool: str, to_pool: str, ticker: str) -> dict[str, An
     if not hard_remove_stock(source, ticker_norm):
         raise RuntimeError(f"'{_pool_label(source)}' 에서 빼지 못했습니다: {ticker_norm}")
     try:
-        if not add_stock(target, ticker_norm, name=str(carried.get("name") or ticker_norm), **carried):
+        if not add_stock(target, ticker_norm, name=carried_name, **carried):
             raise RuntimeError("대상 종목풀에 담지 못했습니다.")
         move_cached_frame(source, target, ticker_norm)
         for meta_coll in ("stock_cache_meta", "previous_stock_cache_meta"):
             db[meta_coll].update_many({"ticker_type": source, "ticker": ticker_norm}, {"$set": {"ticker_type": target}})
     except Exception as exc:
-        # 새 풀에 담지 못했으면 옛 풀로 되돌려 종목이 사라지는 것을 막는다.
+        # 새 풀에 담지 못했으면 옛 풀로 되돌린다 — 이미 뺀 뒤라 되돌리지 않으면 종목이 사라진다.
         try:
-            add_stock(source, ticker_norm, name=str(carried.get("name") or ticker_norm), **carried)
-        except Exception:
-            get_app_logger().error("[이동] %s 복구 실패 — %s 에서 빠진 채로 남았습니다", ticker_norm, source)
+            restored = add_stock(source, ticker_norm, name=carried_name, **carried)
+        except Exception as restore_error:
+            restored = False
+            get_app_logger().error("[이동] %s 복구 중 오류: %s", ticker_norm, restore_error)
+        if not restored:
+            # 조용히 넘기면 안 된다 — 종목이 어느 풀에도 없는 상태로 남는다.
+            get_app_logger().error(
+                "[이동] %s 복구 실패 — '%s' 에서 빠진 채로 남았습니다. 수동 재등록이 필요합니다.",
+                ticker_norm,
+                source,
+            )
+            raise RuntimeError(
+                f"{ticker_norm} 이동에 실패했고 '{_pool_label(source)}' 로 되돌리지도 못했습니다. "
+                f"이 종목은 지금 어느 종목풀에도 없습니다 — 다시 추가해 주세요. (원인: {exc})"
+            ) from exc
         raise RuntimeError(f"{ticker_norm} 이동 실패: {exc}") from exc
 
     invalidate_pool_caches(source)

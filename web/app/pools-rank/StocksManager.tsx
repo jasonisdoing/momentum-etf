@@ -1939,9 +1939,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 </select>
               </label>
               <div className="text-secondary small">
-                기존 종목풀에서 빠지고 새 종목풀에 담깁니다. 버킷은 그대로 유지됩니다.
-                새 종목풀에서 가격 캐시와 메타데이터를 다시 받으므로 <b>종목당 10초 안팎</b> 걸립니다
-                {selectedTickers.length > 1 ? ` (${selectedTickers.length}개 = 약 ${Math.ceil((selectedTickers.length * 10) / 60)}분)` : ""}.
+                기존 종목풀에서 빠지고 새 종목풀에 담깁니다. 버킷·메모·가격 캐시는 그대로 옮겨집니다.
               </div>
               <PoolAddProgressBar progress={moveProgress} />
             </>
