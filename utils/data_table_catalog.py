@@ -202,8 +202,8 @@ class OwnerRefSpec:
 
 
 OWNER_REF_SPECS: tuple[OwnerRefSpec, ...] = (
-    OwnerRefSpec("account_settings", "mix_sm_pool", "pool", "합성 모멘텀 슬리브가 쓰는 종목풀"),
-    OwnerRefSpec("account_settings", "mix_nh_pool", "pool", "합성 신고가 슬리브가 쓰는 종목풀"),
+    OwnerRefSpec("account_settings", "mix_a_pool", "pool", "합성 A 슬리브가 쓰는 종목풀"),
+    OwnerRefSpec("account_settings", "mix_b_pool", "pool", "합성 B 슬리브가 쓰는 종목풀"),
 )
 
 
