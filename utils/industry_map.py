@@ -22,6 +22,31 @@ logger = get_app_logger()
 # 미국 업종을 가져올 지수 구성종목. 앞선 지수의 값을 우선한다(중복 종목은 먼저 만난 값 유지).
 _US_INDEX_SOURCES = ("SP500", "NDX100")
 
+# 미국 업종 묶음 — yfinance 분류(111개)는 한 계열을 잘게 쪼개서(`Oil & Gas E&P`·`Midstream`·
+# `Refining & Marketing` …) 업종 상한 1 을 걸어도 같은 계열 3~5 종목이 통과한다. 접미어를 떼어
+# 계열 단위로 묶는다(111 → 87). 섹터(11개)까지 올리면 반도체와 소프트웨어가 한 묶음이 되어
+# 상한이 과하게 걸리므로 그 중간을 쓴다.
+_US_INDUSTRY_FAMILIES = (
+    "Oil & Gas",
+    "Real Estate",
+    "REIT",
+    "Insurance",
+    "Banks",
+    "Utilities",
+    "Software",
+    "Metals & Mining",
+    "Drug Manufacturers",
+)
+
+
+def group_us_industry(industry: str) -> str:
+    """yfinance 업종 → 계열 묶음. `Oil & Gas Midstream` → `Oil & Gas`."""
+    base = str(industry or "").split(" - ")[0].strip()
+    for family in _US_INDUSTRY_FAMILIES:
+        if base.startswith(family):
+            return family
+    return base
+
 
 def _pool_industry_map(pool: str) -> dict[str, str]:
     """한 풀의 종목 문서에서 티커 → 업종을 읽는다 (한국·호주용)."""
@@ -91,7 +116,11 @@ def industry_map_for_country(country_code: str) -> dict[str, str]:
 
 
 def us_industry_map() -> dict[str, str]:
-    """미국 티커 → yfinance 업종 (지수 구성종목 기준). 풀과 무관하게 같은 값이다."""
+    """미국 티커 → 업종 계열 (지수 구성종목의 yfinance 분류를 묶은 값). 풀과 무관하게 같다.
+
+    업종 상한 그룹핑과 화면 표시가 **같은 값**을 써야 "상한 1인데 왜 같은 계열이 3개냐"
+    같은 어긋남이 생기지 않는다(`group_us_industry`).
+    """
     from utils.index_constituents_loader import load_index_constituents
 
     result: dict[str, str] = {}
@@ -106,5 +135,5 @@ def us_industry_map() -> dict[str, str]:
             ticker = str(item.get("ticker") or "").strip().upper()
             industry = str(item.get("industry") or "").strip()
             if ticker and industry and ticker not in result:
-                result[ticker] = industry
+                result[ticker] = group_us_industry(industry)
     return result
