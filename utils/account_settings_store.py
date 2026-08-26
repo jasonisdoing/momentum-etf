@@ -38,11 +38,16 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "market_regime_index",
     # 합성 슬리브별 종목풀 — 모멘텀·신고가가 서로 다른 풀을 볼 수 있다.
     # 둘은 **계좌와 같은 국가**여야 한다(거래 달력·통화가 갈리면 합성이 성립하지 않는다).
-    "mix_sm_pool",
-    "mix_nh_pool",
+    # 합성 전략 사용 여부 — 계좌 설정에서는 이 체크만 하고, 실제 조합(전략·종목풀·배분)은
+    # `/strategy-mix` 화면에서 정한다. 조합과 배분은 함께 보며 맞추는 값이라 한 화면에 둔다.
+    "mix_enabled",
+    "mix_a_strategy",
+    "mix_a_pool",
+    "mix_b_strategy",
+    "mix_b_pool",
     "mix_slack_enabled",
-    "mix_sm_pct",
-    "mix_nh_pct",
+    "mix_a_pct",
+    "mix_b_pct",
     "mix_cash_pct",
     "broker_api",
     "URL",
@@ -54,10 +59,12 @@ EDITABLE_KEYS: tuple[str, ...] = (
 )
 
 # 합성 전략 배분(%) — 모멘텀·신고가·현금. 셋을 항상 함께 저장하고 합은 100 이어야 한다.
-MIX_WEIGHT_KEYS: tuple[str, ...] = ("mix_sm_pct", "mix_nh_pct", "mix_cash_pct")
+MIX_WEIGHT_KEYS: tuple[str, ...] = ("mix_a_pct", "mix_b_pct", "mix_cash_pct")
 
 # 합성 슬리브별 종목풀 — 계좌와 같은 국가여야 한다.
-MIX_SLEEVE_POOL_KEYS: tuple[str, ...] = ("mix_sm_pool", "mix_nh_pool")
+MIX_SLEEVE_POOL_KEYS: tuple[str, ...] = ("mix_a_pool", "mix_b_pool")
+# 슬리브가 굴릴 전략 — 값은 `utils/mix_sleeve.STRATEGY_OPTIONS` 가 단일 소스다.
+MIX_SLEEVE_STRATEGY_KEYS: tuple[str, ...] = ("mix_a_strategy", "mix_b_strategy")
 
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 _ALLOWED_CASH_CURRENCIES = {"KRW", "USD", "AUD"}
@@ -183,6 +190,19 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
 
                 ticker = ensure_asx_prefix(ticker)
             cleaned[key] = {"ticker": ticker, "name": bench_name}
+        elif key in MIX_SLEEVE_STRATEGY_KEYS:
+            # 슬리브가 굴릴 전략(모멘텀/신고가). 비면 미설정 — 둘 다 있어야 합성이 성립한다.
+            strategy = str(raw or "").strip().lower()
+            if not strategy:
+                cleaned[key] = None
+                continue
+            from utils.mix_sleeve import STRATEGY_OPTIONS
+
+            if strategy not in STRATEGY_OPTIONS:
+                raise AccountSettingsStoreError(
+                    f"'{account_id}' 의 {key} 는 {', '.join(STRATEGY_OPTIONS)} 중 하나여야 합니다: {raw}"
+                )
+            cleaned[key] = strategy
         elif key in MIX_SLEEVE_POOL_KEYS:
             # 합성 전략에서 이 슬리브가 볼 종목풀. 기본은 없음(미지정) — 둘 다 지정된
             # 계좌만 `/strategy-mix` 목록에 오른다.
@@ -219,6 +239,9 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
                         f"{pool}({pool_value})"
                     )
             cleaned[key] = pool
+        elif key == "mix_enabled":
+            # 켜면 `/strategy-mix` 목록에 오른다. 조합이 아직 없으면 그 화면에서 고르게 한다.
+            cleaned[key] = bool(raw)
         elif key == "mix_slack_enabled":
             # 합성 오늘의 액션 슬랙 알람 — 새 지시·수량 증가가 생기면 발송한다.
             cleaned[key] = bool(raw)
@@ -279,6 +302,16 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
         elif key == "stoploss_alarm_enabled":
             cleaned[key] = bool(raw)
     # 합성 배분은 셋이 한 묶음이다 — 하나만 바꾸면 나머지와 합이 어긋난 채로 저장된다.
+    # 두 슬리브가 (전략, 종목풀) 까지 똑같으면 막는다 — 같은 종목이 양쪽에 잡혀 계좌 보유
+    # 수량이 두 번 세어진다. 전략이나 풀 중 하나만 달라도 허용한다.
+    merged = {**existing_doc, **cleaned}
+    a_combo = (merged.get("mix_a_strategy"), merged.get("mix_a_pool"))
+    b_combo = (merged.get("mix_b_strategy"), merged.get("mix_b_pool"))
+    if all(a_combo) and a_combo == b_combo:
+        raise AccountSettingsStoreError(
+            f"'{account_id}' 의 두 합성 슬리브가 완전히 같습니다 — 전략이나 종목풀 중 하나는 달라야 합니다."
+        )
+
     if any(key in cleaned for key in MIX_WEIGHT_KEYS):
         missing = [key for key in MIX_WEIGHT_KEYS if key not in cleaned]
         if missing:
@@ -290,7 +323,7 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
         if abs(total - 100.0) > 0.01:
             raise AccountSettingsStoreError(
                 f"'{account_id}' 의 합성 배분 합계가 100%가 아닙니다: "
-                f"모멘텀 {cleaned['mix_sm_pct']}% + 신고가 {cleaned['mix_nh_pct']}% + "
+                f"A {cleaned['mix_a_pct']}% + B {cleaned['mix_b_pct']}% + "
                 f"현금 {cleaned['mix_cash_pct']}% = {round(total, 2)}%"
             )
     if not cleaned:

@@ -60,7 +60,7 @@ def _watch_targets(country: str | None = None) -> list[dict[str, Any]]:
 
     targets = []
     for doc in load_account_docs():
-        if not doc.get("mix_sm_pool") or not doc.get("mix_nh_pool"):
+        if not doc.get("mix_a_pool") or not doc.get("mix_b_pool"):
             continue
         if not bool(doc.get("mix_slack_enabled")):
             continue
@@ -110,8 +110,8 @@ def send_test(account_id: str) -> dict[str, Any]:
     from utils.strategy_mix_service import mix_positions
 
     settings = get_account_settings(account_id)
-    if not settings.get("mix_sm_pool") or not settings.get("mix_nh_pool"):
-        raise ValueError(f"'{account_id}' 에 합성 모멘텀·신고가 종목풀이 모두 설정돼 있지 않습니다.")
+    if not settings.get("mix_a_pool") or not settings.get("mix_b_pool"):
+        raise ValueError(f"'{account_id}' 에 합성 A·B 슬리브가 모두 설정돼 있지 않습니다.")
     positions = mix_positions(account_id)
     groups = positions["actions"]["groups"]
     name = str(settings.get("name") or account_id)

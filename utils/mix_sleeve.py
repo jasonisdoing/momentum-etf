@@ -1,0 +1,376 @@
+"""합성 슬리브 어댑터 — 모멘텀·신고가 엔진을 **같은 얼굴**로 감싼다.
+
+합성(`utils/strategy_mix_service`)은 예전에 슬리브 둘을 `sm`/`nh` 로 하드코딩했다. 그래서
+"모멘텀 2개" 나 "신고가 2개" 같은 조합을 만들 수 없었다. 여기서 두 엔진의 차이를 흡수해,
+합성은 **슬롯 목록**만 알고 어느 전략인지는 신경 쓰지 않게 한다.
+
+두 엔진이 원래 다른 점(이 모듈이 흡수하는 것):
+  - 현재 상태 함수 이름과 반환 형태 (`compute_picks` vs `current_positions`)
+  - 일별 곡선 형태 — 모멘텀은 전일 대비 변동률(%), 신고가는 구간 시작 대비 누적(%)
+  - 사전 준비 — 신고가만 가격 패널(`load_context`)이 필요하다
+  - 백테스트 인자 순서
+
+일별 곡선은 **누적 배수**(시작 1.0)로 통일해서 돌려준다 — 합성이 형태를 다시 따질 일이 없다.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from utils.logger import get_app_logger
+
+logger = get_app_logger()
+
+MOMENTUM = "momentum"
+NEW_HIGH = "new_high"
+
+# 화면 셀렉트·라벨의 단일 소스. 값은 계좌 설정에 그대로 저장된다.
+STRATEGY_OPTIONS: tuple[str, ...] = (MOMENTUM, NEW_HIGH)
+STRATEGY_LABELS: dict[str, str] = {MOMENTUM: "모멘텀", NEW_HIGH: "신고가"}
+
+
+@dataclass(frozen=True)
+class SleeveSpec:
+    """슬리브 하나 — 어떤 전략을 어떤 종목풀로 굴리는지.
+
+    `key` 는 합성 안에서 이 슬리브를 가리키는 이름이다(행의 `sources`, 배분 필드 등).
+    """
+
+    key: str
+    strategy: str
+    pool: str
+    settings: dict[str, Any]
+
+    @property
+    def label(self) -> str:
+        return STRATEGY_LABELS.get(self.strategy, self.strategy)
+
+
+def normalize_strategy(value: Any) -> str:
+    """전략 이름을 정규화한다. 모르는 값은 명시적 에러 — 임의로 고르지 않는다."""
+    strategy = str(value or "").strip().lower()
+    if strategy not in STRATEGY_OPTIONS:
+        raise ValueError(f"알 수 없는 전략입니다: {value} (가능: {', '.join(STRATEGY_OPTIONS)})")
+    return strategy
+
+
+def settings_map(strategy: str) -> dict[str, Any]:
+    """그 전략의 풀별 저장 설정 {풀: 설정}."""
+    if normalize_strategy(strategy) == MOMENTUM:
+        from utils.momentum_service import load_settings_map
+
+        # 모멘텀은 `{pool, settings_by_pool}` 로 한 겹 감싸 저장한다(신고가는 평면).
+        return dict(load_settings_map().get("settings_by_pool") or {})
+    from utils.new_high_service import load_settings_map
+
+    return dict(load_settings_map())
+
+
+def validate_settings(strategy: str, settings: dict[str, Any]) -> dict[str, Any]:
+    if normalize_strategy(strategy) == MOMENTUM:
+        from utils.momentum_service import validate_settings as validate
+
+        return validate(settings)
+    from utils.new_high_service import validate_settings as validate
+
+    return validate(settings)
+
+
+def load_context(spec: SleeveSpec) -> dict[str, Any] | None:
+    """백테스트·현재 상태가 함께 쓰는 무거운 준비물(가격 패널). 필요 없는 전략은 None.
+
+    신고가는 패널 생성이 이 계산에서 가장 비싼 부분이라, 한 번 만들어 재사용해야 한다.
+    """
+    if spec.strategy == NEW_HIGH:
+        from utils.new_high_backtest import load_context as nh_load_context
+
+        return nh_load_context(spec.settings)
+    return None
+
+
+def current_state(spec: SleeveSpec, as_of: str | None = None) -> dict[str, Any]:
+    """오늘(또는 `as_of`) 기준 이 슬리브의 선정·보유 상태 — 엔진 원본 형태 그대로."""
+    if spec.strategy == MOMENTUM:
+        from utils.momentum_service import compute_picks
+
+        return compute_picks(spec.settings, as_of=as_of)
+    from utils.new_high_backtest import current_positions
+
+    return current_positions(spec.settings, as_of=as_of)
+
+
+def _held_label(value: Any, *, unit: str, zero: str) -> str:
+    """보유 기간 표기 — 전략마다 단위가 다르다(모멘텀 "주", 신고가 "일").
+
+    화면이 슬롯 A·B 만 알고 어느 전략인지 모르게 하려면, 숫자가 아니라 단위까지 붙은
+    문자열로 내려줘야 한다. 값이 없으면 빈 문자열(표시 안 함).
+    """
+    if value is None:
+        return ""
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return ""
+    return zero if count <= 0 else f"{count}{unit}"
+
+
+@dataclass
+class SlotState:
+    """슬리브 하나의 **오늘 상태**를 전략과 무관한 한 형태로 담는다.
+
+    합성 운용 현황(`mix_positions`)이 이것만 보고 돈다. 전략마다 다른 것:
+      - 슬롯을 채우는 방식 — 모멘텀은 순위 상위 N, 신고가는 보유 + 진입 예정
+      - 매도 리듬 — 모멘텀은 주간 교체 + 주중 자격 상실, 신고가는 이탈·손절
+      - 보유 기간 단위 — "주" vs "일"
+    이 차이는 전부 `slot_state()` 안에서 흡수하고, 밖으로는 아래 필드만 낸다.
+    """
+
+    spec: SleeveSpec
+    top_n: int
+    currency: str
+    # 목표 슬롯 — 이 슬리브가 (다음 체결 후) 들고 있어야 할 종목들.
+    # ticker·name·price·change_pct·status·return_pct·held_label·is_exiting·drift_pct
+    targets: list[dict[str, Any]] = field(default_factory=list)
+    held_tickers: set[str] = field(default_factory=set)
+    held_count: int = 0
+    # 슬롯을 실제로 채운 수 — 나머지는 그 슬리브의 현금이다.
+    active_count: int = 0
+    # 다음 거래일 시가에 파는 것(확정) — {ticker, name, reason, return_pct}
+    sells: list[dict[str, Any]] = field(default_factory=list)
+    # 장중 판정 기준 이탈 **예상** — 오늘 종가로 확정된다. 화면 전용(알람 제외).
+    exit_forecast: list[dict[str, Any]] = field(default_factory=list)
+    # 다음 거래일 시가에 새로 담는 것 — {ticker, name, price, change_pct, value_mult}
+    entries: list[dict[str, Any]] = field(default_factory=list)
+    # 주기적 교체가 있는 전략만 — {is_filled, fill_date, signal_date, portfolio_week, buys, sells}
+    rebalance: dict[str, Any] | None = None
+    # 다음 교체 예상 종목 {ticker: row} — 교체가 있는 전략만. 다음주 가정 미리보기가 쓴다.
+    next_expected: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # 과거 날짜 재현·장중 반영 — 이 정보를 주는 전략만 채운다.
+    as_of: str | None = None
+    live: bool = False
+    available_dates: list[str] = field(default_factory=list)
+
+
+def slot_state(spec: SleeveSpec, as_of: str | None = None) -> SlotState:
+    """엔진 원본 상태를 `SlotState` 로 정규화한다 — 합성이 전략을 가리지 않게."""
+    raw = current_state(spec, as_of=as_of)
+    top_n = int(spec.settings["top_n"])
+    if spec.strategy == MOMENTUM:
+        return _momentum_slot_state(spec, raw, top_n)
+    return _new_high_slot_state(spec, raw, top_n)
+
+
+def _momentum_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> SlotState:
+    # 확정된 다음 교체분을 목표로 본다 — 이 화면은 '무엇을 보유해야 하는지' 를 본다.
+    # 주중에 **이미 팔린** 종목(`is_exited`)은 뺀다. 선정 목록에는 자리를 유지한 채로
+    # 남아 있는데 계좌 수량은 0 이라, 두면 방금 판 종목을 다시 사라는 지시가 나온다.
+    selected = [
+        row
+        for row in raw["rows"]
+        if not row.get("is_reserve")
+        and not row.get("is_expected_only")
+        and not row.get("is_exited")
+        and (row.get("rank") or 999) <= top_n
+    ]
+    held = list(raw.get("holdings") or [])
+    held_tickers = {str(row["ticker"]).strip() for row in held}
+    selected_tickers = {str(row["ticker"]).strip() for row in selected}
+
+    # 교체가 확정됐지만 아직 체결 전이면(is_filled=False) 교체분은 체결일에 1/N 으로
+    # 다시 맞춰지므로 흘러간 비중이 아니라 균등 몫을 쓴다.
+    drift_by_ticker: dict[str, float] = {}
+    if raw.get("is_filled"):
+        for row in held:
+            weight = row.get("sleeve_weight_pct")
+            if weight is not None:
+                drift_by_ticker[str(row["ticker"]).strip()] = float(weight)
+
+    targets: list[dict[str, Any]] = []
+    for row in selected:
+        ticker = str(row["ticker"]).strip()
+        if ticker in held_tickers:
+            streak = row.get("streak_weeks")
+            status = f"유지 ({streak}주째)" if streak else "유지"
+        else:
+            status = f"매수 예정 ({raw.get('rebalance_date')} 시가)"
+        exiting = bool(row.get("is_exit_pending"))
+        if exiting:
+            status += f" · 매도 예정({row.get('exit_reason') or '주중 이탈'})"
+        targets.append(
+            {
+                "ticker": ticker,
+                "name": row.get("name"),
+                "price": row.get("price"),
+                "change_pct": row.get("daily_change_pct"),
+                "status": status,
+                "return_pct": row.get("entry_return_pct"),
+                "held_label": _held_label(row.get("streak_weeks"), unit="주", zero="신규"),
+                "is_exiting": exiting,
+                "drift_pct": drift_by_ticker.get(ticker),
+            }
+        )
+
+    return SlotState(
+        spec=spec,
+        top_n=top_n,
+        currency=str(raw.get("currency") or "KRW"),
+        targets=targets,
+        held_tickers=held_tickers,
+        held_count=len(held),
+        active_count=sum(1 for row in targets if not row["is_exiting"]),
+        sells=[
+            {
+                "ticker": str(row["ticker"]).strip(),
+                "name": row.get("name") or row["ticker"],
+                # 발동 사유 — 손절선과 이평선 이탈을 구분한다(판정 함수가 정한 값).
+                "reason": {"주중 손절": "주중 손절선 하회", "주중 이탈": "자격 상실(이평선 하회)"}.get(
+                    str(row.get("exit_reason") or ""), "자격 상실(이평선 하회)"
+                ),
+                "return_pct": None,
+            }
+            for row in selected
+            if row.get("is_exit_pending")
+        ],
+        exit_forecast=[
+            {
+                "ticker": str(row["ticker"]).strip(),
+                "name": row.get("name") or row["ticker"],
+                "reason": row.get("exit_forecast_reason") or "주중 이탈 예상",
+            }
+            for row in selected
+            if row.get("is_exit_forecast")
+        ],
+        entries=[],
+        rebalance={
+            "is_filled": bool(raw.get("is_filled")),
+            "fill_date": raw.get("rebalance_date"),
+            "signal_date": raw.get("signal_date"),
+            "portfolio_week": raw.get("portfolio_week"),
+            "buys": [
+                {"ticker": str(r["ticker"]).strip(), "name": r.get("name") or r["ticker"], "price": r.get("price")}
+                for r in selected
+                if str(r["ticker"]).strip() not in held_tickers
+            ],
+            "sells": [
+                {"ticker": str(r["ticker"]).strip(), "name": r.get("name") or r["ticker"]}
+                for r in held
+                if str(r["ticker"]).strip() not in selected_tickers
+            ],
+        },
+        next_expected={
+            str(row["ticker"]).strip(): row for row in (raw.get("rows") or []) if row.get("next_week_expected")
+        },
+    )
+
+
+def _new_high_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> SlotState:
+    held = list(raw.get("holdings") or [])
+    # 빈 슬롯을 채울 진입 예정 — 다음 시가에 사므로 목표에 포함한다. 매도 예정(이탈·손절)
+    # 종목은 같은 시가에 슬롯이 비므로 빈 슬롯으로 센다 — 엔진의 pick_entries 와 같은
+    # 계산이라 신고가 화면의 '진입 예정' 과 어긋나지 않는다.
+    exiting_count = sum(1 for row in held if str(row.get("status")) == "sell")
+    free = max(top_n - (len(held) - exiting_count), 0)
+    planned = list(raw.get("planned_entries") or [])[:free]
+
+    targets: list[dict[str, Any]] = []
+    for row in held:
+        status = "오늘 진입" if row.get("is_new") else f"{row.get('days')}일째"
+        exiting = str(row.get("status")) == "sell"
+        if exiting:
+            status += f" · 매도 예정({row.get('exit_reason') or '이탈'})"
+        weight = row.get("sleeve_weight_pct")
+        targets.append(
+            {
+                "ticker": str(row["ticker"]).strip(),
+                "name": row.get("name"),
+                "price": row.get("price"),
+                "change_pct": row.get("change_pct"),
+                "status": status,
+                "return_pct": row.get("return_pct"),
+                "held_label": _held_label(row.get("days"), unit="일", zero="진입"),
+                "is_exiting": exiting,
+                "drift_pct": float(weight) if weight is not None else None,
+            }
+        )
+    for row in planned:
+        targets.append(
+            {
+                "ticker": str(row["ticker"]).strip(),
+                "name": row.get("name"),
+                "price": row.get("price"),
+                "change_pct": row.get("change_pct"),
+                "status": "진입 예정 (다음 시가 매수)",
+                "return_pct": None,
+                "held_label": "",
+                "is_exiting": False,
+                "drift_pct": None,
+            }
+        )
+
+    return SlotState(
+        spec=spec,
+        top_n=top_n,
+        currency=str(raw.get("currency") or "KRW"),
+        targets=targets,
+        held_tickers={str(row["ticker"]).strip() for row in held},
+        held_count=len(held),
+        active_count=sum(1 for row in targets if not row["is_exiting"]),
+        sells=[
+            {
+                "ticker": str(row["ticker"]).strip(),
+                "name": row.get("name") or row["ticker"],
+                "reason": row.get("exit_reason") or "이탈",
+                "return_pct": row.get("return_pct"),
+            }
+            for row in held
+            if str(row.get("status")) == "sell"
+        ],
+        exit_forecast=[],
+        entries=[
+            {
+                "ticker": str(row["ticker"]).strip(),
+                "name": row.get("name") or row["ticker"],
+                "price": row.get("price"),
+                "change_pct": row.get("change_pct"),
+                "value_mult": row.get("value_mult"),
+            }
+            for row in planned
+        ],
+        rebalance=None,
+        as_of=raw.get("as_of"),
+        live=bool(raw.get("live")),
+        available_dates=[str(d.get("date")) for d in (raw.get("available_dates") or [])],
+    )
+
+
+def run_backtest(spec: SleeveSpec, months: int, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    """이 슬리브를 **혼자** 굴린 백테스트 — 엔진 원본 형태 그대로."""
+    if spec.strategy == MOMENTUM:
+        from utils.momentum_backtest import run_backtest as sm_backtest
+
+        return sm_backtest(months, spec.settings, include_daily=True)
+    from utils.new_high_backtest import run_backtest as nh_backtest
+
+    return nh_backtest(months, spec.settings, context)
+
+
+def daily_curve(spec: SleeveSpec, result: dict[str, Any]) -> dict[str, float]:
+    """백테스트 결과의 일별을 **누적 배수(시작 1.0)** 로 통일한다.
+
+    모멘텀은 전일 대비 변동률(%)이라 곱해 나가고, 신고가는 구간 시작 대비 누적(%)이라
+    그대로 배수로 바꾼다. 합성은 이 함수만 쓰고 형태 차이를 알 필요가 없다.
+    """
+    rows = sorted(result.get("daily") or [], key=lambda row: row["date"])
+    curve: dict[str, float] = {}
+    if spec.strategy == MOMENTUM:
+        value = 1.0
+        for row in rows:
+            if row.get("strategy_pct") is not None:
+                value *= 1 + row["strategy_pct"] / 100
+            curve[row["date"]] = value
+        return curve
+    for row in rows:
+        if row.get("strategy_pct") is not None:
+            curve[row["date"]] = 1 + row["strategy_pct"] / 100
+    return curve

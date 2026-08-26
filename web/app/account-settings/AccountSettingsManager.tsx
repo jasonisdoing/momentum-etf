@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
 
 import { formatKstDateTime } from "@/lib/datetime";
-import { formatPoolLabel } from "@/lib/pool-label";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { AppModal } from "../components/AppModal";
@@ -28,8 +27,8 @@ type AccountEntry = {
   market_regime_index?: MarketIndexOption | null;
   /** 합성 전략에서 이 계좌로 운용할 종목풀 — 없으면 `/strategy-mix` 목록에 오르지 않는다. */
   /** 합성 슬리브별 종목풀 — 모멘텀·신고가가 서로 다른 풀을 볼 수 있다(계좌와 같은 국가). */
-  mix_sm_pool?: string | null;
-  mix_nh_pool?: string | null;
+  /** 합성 전략 사용 여부 — 실제 조합(전략·종목풀·배분)은 `/strategy-mix` 에서 정한다. */
+  mix_enabled?: boolean;
   /** 증권사 API 연동 — 잔고 수동 불러오기·배치 동기화가 이 값으로 동작한다. */
   broker_api?: { provider: string; account_no: string } | null;
   URL?: string;
@@ -39,15 +38,6 @@ type AccountEntry = {
   stoploss_alarm_enabled?: boolean;
   updated_at?: string | null;
   save_method?: string | null;
-};
-
-type PoolOption = {
-  ticker_type: string;
-  name?: string | null;
-  icon?: string | null;
-  order?: number | null;
-  /** 계좌 국가와 맞는 풀만 셀렉트에 뿌리는 데 쓴다. */
-  country_code?: string | null;
 };
 
 type BrokerProvider = { id: string; name: string; env_ok: boolean };
@@ -71,7 +61,6 @@ type BrokerBalanceDiff = {
 type ApiResponse = {
   accounts?: AccountEntry[];
   market_indices?: MarketIndexOption[];
-  pool_options?: PoolOption[];
   error?: string;
 };
 
@@ -103,8 +92,7 @@ type AccountDraft = {
   benchmarkTicker: string;
   benchmarkName: string;
   regimeTicker: string;
-  mix_sm_pool: string;
-  mix_nh_pool: string;
+  mix_enabled: boolean;
   brokerProvider: string;
   brokerAccountNo: string;
   URL: string;
@@ -135,8 +123,7 @@ function toDraft(account: AccountEntry): AccountDraft {
     benchmarkName: account.benchmark?.name ?? "",
     // 시장 레짐 지수(필수) — 미설정 계좌는 S&P 500 기본값으로 시작.
     regimeTicker: account.market_regime_index?.ticker || DEFAULT_REGIME_TICKER,
-    mix_sm_pool: account.mix_sm_pool ?? "",
-    mix_nh_pool: account.mix_nh_pool ?? "",
+    mix_enabled: Boolean(account.mix_enabled),
     brokerProvider: account.broker_api?.provider ?? "",
     brokerAccountNo: account.broker_api?.account_no ?? "",
     URL: account.URL ?? "",
@@ -164,8 +151,7 @@ function draftToValues(draft: AccountDraft, marketIndices: MarketIndexOption[]):
       name: marketIndices.find((item) => item.ticker === draft.regimeTicker)?.name ?? "",
     },
     // 합성 전략 종목풀 — 없음이면 null 로 저장한다(그 계좌는 합성 화면에 안 뜬다).
-    mix_sm_pool: draft.mix_sm_pool || null,
-    mix_nh_pool: draft.mix_nh_pool || null,
+    mix_enabled: draft.mix_enabled,
     // 증권사 API 연동 — provider·계좌 둘 다 있어야 저장, 아니면 해제(null).
     broker_api:
       draft.brokerProvider && draft.brokerAccountNo
@@ -657,7 +643,6 @@ export function AccountSettingsManager() {
   const toast = useToast();
   const [accounts, setAccounts] = useState<AccountEntry[]>([]);
   const [marketIndices, setMarketIndices] = useState<MarketIndexOption[]>([]);
-  const [poolOptions, setPoolOptions] = useState<PoolOption[]>([]);
   const [drafts, setDrafts] = useState<Record<string, AccountDraft>>({});
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
@@ -677,7 +662,6 @@ export function AccountSettingsManager() {
       const list = data.accounts ?? [];
       setAccounts(list);
       setMarketIndices(data.market_indices ?? []);
-      setPoolOptions(data.pool_options ?? []);
       const nextDrafts: Record<string, AccountDraft> = {};
       list.forEach((account) => {
         nextDrafts[account.account_id] = toDraft(account);
@@ -857,29 +841,38 @@ export function AccountSettingsManager() {
     },
   });
 
-  /** 계좌 국가의 풀만 — 거래 달력·통화가 갈리면 합성이 성립하지 않는다(백엔드도 같은 규칙으로 막는다). */
-  const poolOptionsForCountry = (countryCode: string) =>
-    poolOptions.filter(
-      (pool) => String(pool.country_code ?? "").trim().toLowerCase() === String(countryCode ?? "").trim().toLowerCase(),
-    );
-  const formatPoolCell = (value: unknown) => {
-    const pool = poolOptions.find((item) => item.ticker_type === value);
-    return pool ? formatPoolLabel(pool) : "없음";
-  };
-  const mixSleevePoolColumns: ColDef<AccountGridRow>[] = (
-    [
-      ["mix_sm_pool", "모멘텀 풀"],
-      ["mix_nh_pool", "신고가 풀"],
-    ] as const
-  ).map(([field, headerName]) =>
-    selectCol(
-      field,
-      headerName,
-      220,
-      (row) => ["", ...poolOptionsForCountry(row.country_code).map((pool) => pool.ticker_type)],
-      { valueFormatter: (params) => formatPoolCell(params.value) },
-    ),
-  );
+  /** 체크박스 컬럼 — AG Grid 편집 사이클을 거치지 않고 **직접 그린다**.
+   *
+   *  `cellDataType: "boolean"` + `editable` 로 두면 클릭이 편집 시작과 값 토글을 겸하는데,
+   *  `stopEditingWhenCellsLoseFocus` 와 맞물려 켤 때 편집 중 상태가 남아 체크 표시가 보이지
+   *  않았다(값은 바뀌어 저장은 됐다). 초안 값을 그대로 그리고 onChange 로만 바꾸면
+   *  화면과 값이 항상 같다. */
+  const booleanCol = (
+    field: "mix_enabled" | "ma_alarm_enabled" | "stoploss_alarm_enabled",
+    headerName: string,
+    width: number,
+    headerTooltip: string,
+  ): ColDef<AccountGridRow> => ({
+    field,
+    headerName,
+    width,
+    headerTooltip,
+    editable: false,
+    cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+    cellRenderer: (params: { data?: AccountGridRow }) => {
+      const row = params.data;
+      if (!row) return null;
+      return (
+        <input
+          type="checkbox"
+          className="form-check-input"
+          style={{ margin: 0, cursor: "pointer" }}
+          checked={Boolean(row[field])}
+          onChange={(event) => updateDraft(row.account_id, { [field]: event.target.checked })}
+        />
+      );
+    },
+  });
 
   const columnDefs: ColDef<AccountGridRow>[] = [
     { field: "account_id", headerName: "ID", width: 130 },
@@ -909,8 +902,14 @@ export function AccountSettingsManager() {
       valueFormatter: (params) =>
         marketIndices.find((item) => item.ticker === params.value)?.name ?? (params.value ? String(params.value) : "미설정"),
     }),
-    // 합성 슬리브별 풀 — 계좌 국가의 풀만 고를 수 있다(어긋난 조합은 애초에 목록에 없다).
-    ...mixSleevePoolColumns,
+    // 켜면 `/strategy-mix` 목록에 오른다. 어떤 전략을 어떤 풀로 굴릴지는 그 화면에서 고른다
+    // — 배분(%)과 함께 보며 맞추는 값이라 한 화면에 모아 둔다.
+    booleanCol(
+      "mix_enabled",
+      "합성",
+      76,
+      "합성 전략을 운용할 계좌입니다. 전략·종목풀·배분은 /strategy-mix 에서 정합니다.",
+    ),
     {
       field: "brokerProvider",
       headerName: "증권사 API",
@@ -924,22 +923,18 @@ export function AccountSettingsManager() {
           : `${row.brokerProvider} (계좌 미선택)`;
       },
     },
-    {
-      field: "ma_alarm_enabled",
-      headerName: "이평선🔔",
-      width: 96,
-      editable: true,
-      cellDataType: "boolean",
-      headerTooltip: "보유 종목의 종가가 그 종목이 속한 종목풀의 단기·장기 이평선 중 하나라도 아래면 알립니다.",
-    },
-    {
-      field: "stoploss_alarm_enabled",
-      headerName: "손절🔔",
-      width: 88,
-      editable: true,
-      cellDataType: "boolean",
-      headerTooltip: "보유 종목의 수익률이 그 종목이 속한 종목풀의 손절 기준 이하면 알립니다.",
-    },
+    booleanCol(
+      "ma_alarm_enabled",
+      "이평선🔔",
+      96,
+      "보유 종목의 종가가 그 종목이 속한 종목풀의 단기·장기 이평선 중 하나라도 아래면 알립니다.",
+    ),
+    booleanCol(
+      "stoploss_alarm_enabled",
+      "손절🔔",
+      88,
+      "보유 종목의 수익률이 그 종목이 속한 종목풀의 손절 기준 이하면 알립니다.",
+    ),
     {
       headerName: "상세",
       width: 64,
