@@ -17,6 +17,7 @@ from typing import Any
 import pandas as pd
 
 from config import CACHE_TTL_COMPUTE
+from core.strategy.scoring import cap_by_industry
 from utils.new_high_service import (
     DEFAULT_BACKTEST_MONTHS,
     HIGH_WINDOW,
@@ -51,39 +52,12 @@ def _cap_by_industry(
     cap: int | None,
     free: int,
 ) -> tuple[list[str], list[str]]:
-    """우선순위를 지키되 **한 업종이 상한을 넘지 않도록** 빈 자리만큼 고른다.
+    """업종 상한 적용 — 규칙은 모멘텀과 **같은 함수**(`core.strategy.scoring.cap_by_industry`).
 
-    `(고른 것, 상한에 걸려 밀린 것)` 을 돌려준다. 밀린 목록은 화면이 '돌파했지만
-    업종 상한 때문에 못 산다' 를 표시하는 데 쓴다 — 그냥 '돌파성공' 으로 두면
-    살 것처럼 보인다.
-
-    이미 보유 중인 종목이 상한을 차지한다 — 오늘 새로 담는 것만 세면 계좌 전체로는
-    한 업종에 몰릴 수 있다. 상한에 걸린 종목은 건너뛰고 다음 순위가 그 자리를 채운다.
-    업종을 모르는 종목(ETF 풀 등)은 묶을 근거가 없어 상한을 적용하지 않는다.
-    백테스트와 화면이 같은 함수를 써야 표시된 진입 예정과 성과가 어긋나지 않는다.
+    이 래퍼는 인자 순서만 기존 호출부에 맞춰 준다. 백테스트와 화면이 같은 함수를 써야
+    표시된 진입 예정과 성과가 어긋나지 않는다.
     """
-    if free <= 0:
-        return [], []
-    if not cap:
-        return candidates[:free], []
-    counts: dict[str, int] = {}
-    for ticker in held:
-        key = industry_by.get(ticker, "")
-        if key:
-            counts[key] = counts.get(key, 0) + 1
-    picked: list[str] = []
-    blocked: list[str] = []
-    for ticker in candidates:
-        if len(picked) >= free:
-            break
-        key = industry_by.get(ticker, "")
-        if key:
-            if counts.get(key, 0) >= cap:
-                blocked.append(ticker)
-                continue
-            counts[key] = counts.get(key, 0) + 1
-        picked.append(ticker)
-    return picked, blocked
+    return cap_by_industry(candidates, industry_by, cap, free, held=held)
 
 
 def _drawdown_pct(series: pd.Series) -> float:

@@ -9,13 +9,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from config import MIN_TRADING_DAYS
+from config import METRIC_WINDOW_MONTHS, MIN_TRADING_DAYS
 from utils.moving_averages import calculate_moving_average
 
 
@@ -162,6 +162,78 @@ def rank_score(long_disparity_pct: Any, short_disparity_pct: Any) -> Any:
     return (float(long_disparity_pct) + float(short_disparity_pct)) / 2.0
 
 
+def drawdown_from_high_pct(
+    close_series: pd.Series,
+    current_price: float | None = None,
+    *,
+    window_months: int = METRIC_WINDOW_MONTHS,
+) -> float | None:
+    """고점 대비(%) — 최근 ``window_months`` 최고가 대비 현재가. 0 이면 신고점.
+
+    순위 화면(`/pools-rank`)과 모멘텀 전략이 같은 값을 쓰도록 여기서만 정의한다.
+    창을 캐시 전 기간이 아니라 12개월로 자르는 것이 규칙의 핵심이라, 각자 계산하면
+    창 길이가 갈려 같은 종목에 화면마다 다른 값이 붙는다.
+
+    ``current_price`` 를 주면 그 값으로 비교한다(실시간 반영가). 없으면 마지막 종가.
+    """
+    series = pd.to_numeric(close_series, errors="coerce").dropna()
+    if series.empty:
+        return None
+    price = float(series.iloc[-1]) if current_price is None else float(current_price)
+    window = series.loc[series.index[-1] - pd.DateOffset(months=int(window_months)) :]
+    if window.empty:
+        return None
+    max_price = float(window.max())
+    if max_price <= 0:
+        return None
+    return (price / max_price - 1.0) * 100.0
+
+
+def cap_by_industry(
+    candidates: list[str],
+    industry_by: Mapping[str, str],
+    cap: int | None,
+    limit: int,
+    *,
+    held: Sequence[str] = (),
+) -> tuple[list[str], list[str]]:
+    """우선순위를 지키되 **한 업종이 상한을 넘지 않도록** ``limit`` 개를 고른다.
+
+    모멘텀·신고가 두 전략이 이 함수 하나만 쓴다. 예전에는 각자 구현을 들고 있어서
+    같은 「업종 상한」 설정이 전략마다 다르게 동작했다(보유분을 세느냐가 갈렸다).
+
+    `(고른 것, 상한에 걸려 밀린 것)` 을 돌려준다. 밀린 목록은 화면이 '조건은 맞지만
+    업종 상한 때문에 못 산다' 를 표시하는 데 쓴다 — 그냥 후보로 두면 살 것처럼 보인다.
+
+    ``held`` 를 주면 **이미 보유 중인 종목이 상한을 차지한다** — 오늘 새로 담는 것만
+    세면 계좌 전체로는 한 업종에 몰릴 수 있다. 상한에 걸린 종목은 건너뛰고 다음 순위가
+    그 자리를 채운다. 업종을 모르는 종목(ETF 풀 등)은 묶을 근거가 없어 상한을 적용하지 않는다.
+    ``cap`` 이 None/0 이면 제한 없음이다.
+    """
+    if limit <= 0:
+        return [], []
+    if not cap:
+        return candidates[:limit], []
+    counts: dict[str, int] = {}
+    for ticker in held:
+        key = industry_by.get(ticker, "")
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    picked: list[str] = []
+    blocked: list[str] = []
+    for ticker in candidates:
+        if len(picked) >= limit:
+            break
+        key = industry_by.get(ticker, "")
+        if key:
+            if counts.get(key, 0) >= cap:
+                blocked.append(ticker)
+                continue
+            counts[key] = counts.get(key, 0) + 1
+        picked.append(ticker)
+    return picked, blocked
+
+
 def compute_rule_percentile_frame(
     close_frame: pd.DataFrame,
     ma_days: int,
@@ -236,6 +308,8 @@ __all__ = [
     "calculate_signed_percentile_score",
     "compute_trend_frame",
     "rank_score",
+    "cap_by_industry",
+    "drawdown_from_high_pct",
     "compute_rule_percentile_frame",
     "compute_eligibility_mask",
     "combine_rule_percentiles",

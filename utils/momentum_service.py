@@ -32,7 +32,12 @@ from typing import Any
 import pandas as pd
 
 from config import MAX_PER_INDUSTRY_OPTIONS, STOP_LOSS_PCT_OPTIONS, TOP_N_OPTIONS
-from core.strategy.scoring import rank_score
+from core.strategy.scoring import (
+    cap_by_industry,
+    compute_ma_disparity,
+    drawdown_from_high_pct,
+    rank_score,
+)
 from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
 from utils.price_series import positive_prices
 from utils.strategy_settings import coerce_to_options
@@ -49,7 +54,7 @@ warnings.filterwarnings("ignore")
 # 표를 짧게 유지한다. 표 밖 '다음 주 예상' 종목은 하단에 별도 행으로 붙는다.
 RESERVE_MULTIPLIER = 1
 # 월↔거래일 환산 — 공용 상수(config, =20)를 재사용한다 (자산헬퍼·시장추세와 동일 기준).
-from config import CACHE_TTL_COMPUTE, METRIC_WINDOW_MONTHS, TRADING_DAYS_PER_MONTH  # noqa: E402
+from config import CACHE_TTL_COMPUTE, TRADING_DAYS_PER_MONTH  # noqa: E402
 from utils.ttl_cache import TtlCache  # noqa: E402
 
 _CONFIG_COLLECTION = "system_config"
@@ -476,22 +481,17 @@ def momentum_metrics(
     if as_of is not None:
         series = series[series.index <= as_of]
 
-    aligned = pd.DataFrame({"stock": series})
-    min_rows = long_ma_days + 4
-    if len(aligned) < min_rows:
+    # 이평선이 자리 잡을 만큼 가격이 쌓이지 않았으면 점수를 내지 않는다 — 부분 계산으로
+    # 낸 값은 그 종목만 유리·불리해진다. 이 문턱을 넘으면 마지막 값은 창이 꽉 찬 상태다.
+    if len(series) < long_ma_days + 4:
         return None
 
-    # 이격 — 순위 화면과 같은 계산(공통 이동평균 헬퍼, min_periods=일수).
-    from utils.moving_averages import calculate_moving_average
-
-    stock_close = aligned["stock"]
-    long_ma = float(calculate_moving_average(stock_close, long_ma_days, min_periods=long_ma_days).iloc[-1])
-    short_ma = float(calculate_moving_average(stock_close, short_ma_days, min_periods=short_ma_days).iloc[-1])
-    if long_ma <= 0 or short_ma <= 0:
+    # 이격률 — 순위 화면·보유종목 알림과 **같은 함수**(core.strategy.scoring.compute_ma_disparity).
+    # 예전에는 여기서 따로 계산해 경계 종목에서 순위 화면과 값이 갈렸다.
+    disparity_pct = compute_ma_disparity(series, long_ma_days)
+    short_disparity_pct = compute_ma_disparity(series, short_ma_days)
+    if disparity_pct is None or short_disparity_pct is None:
         return None
-    last_price = float(stock_close.iloc[-1])
-    disparity_pct = (last_price / long_ma - 1.0) * 100.0
-    short_disparity_pct = (last_price / short_ma - 1.0) * 100.0
 
     return {
         "disparity_pct": disparity_pct,
@@ -557,22 +557,19 @@ def select_top(
 ) -> list[dict[str, Any]]:
     """점수 순서를 지키되 **한 업종이 상한을 넘지 않도록** 상위 top_n 을 고른다.
 
-    상한에 걸린 종목은 건너뛰고 다음 순위가 그 자리를 채운다. 업종을 모르는
-    종목(구성종목 파일에 없는 경우)은 묶을 근거가 없으므로 상한을 적용하지 않는다.
+    상한 규칙 자체는 신고가 전략과 **같은 함수**(`core.strategy.scoring.cap_by_industry`)다 —
+    같은 「업종 상한」 설정이 전략마다 다르게 동작하지 않도록 한 곳에서만 정의한다.
+    여기서는 점수 순 dict 목록을 티커 순서로 바꿔 넘기고 결과를 다시 dict 로 되돌린다.
     선정·백테스트·연속 추적이 모두 이 함수를 써야 결과가 서로 어긋나지 않는다.
     """
-    counts: dict[str, int] = {}
-    picked: list[dict[str, Any]] = []
-    for item in scored:
-        if len(picked) >= top_n:
-            break
-        industry = industry_by_ticker.get(item["ticker"], "")
-        if industry and max_per_industry is not None:  # None = 제한없음
-            if counts.get(industry, 0) >= max_per_industry:
-                continue
-            counts[industry] = counts.get(industry, 0) + 1
-        picked.append(item)
-    return picked
+    by_ticker = {item["ticker"]: item for item in scored}
+    picked, _blocked = cap_by_industry(
+        [item["ticker"] for item in scored],
+        industry_by_ticker,
+        max_per_industry,
+        top_n,
+    )
+    return [by_ticker[ticker] for ticker in picked]
 
 
 # ── 주간 리밸런싱 시점 ─────────────────────────────────────────────────────
@@ -1236,14 +1233,10 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
                 "monthly_returns": {label: None for label in month_labels},
             }
         close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
-        # 고점 대비(%) — pools-rank 와 같은 규칙: 최근 METRIC_WINDOW_MONTHS(12개월) 최고가 대비 마지막 종가.
-        # 0 이면 신고점. frames 에 실시간 현재가가 반영돼 있어 pools-rank 와 일치한다.
-        high_drawdown_pct = None
-        if not close.empty:
-            high_window = close.loc[close.index[-1] - pd.DateOffset(months=METRIC_WINDOW_MONTHS) :]
-            max_price = float(high_window.max()) if not high_window.empty else 0.0
-            if max_price > 0:
-                high_drawdown_pct = round((float(close.iloc[-1]) / max_price - 1.0) * 100.0, 2)
+        # 고점 대비(%) — 순위 화면과 **같은 함수**(core.strategy.scoring.drawdown_from_high_pct).
+        # frames 에 실시간 현재가가 반영돼 있어 pools-rank 와 값이 일치한다.
+        raw_drawdown = drawdown_from_high_pct(close)
+        high_drawdown_pct = None if raw_drawdown is None else round(raw_drawdown, 2)
         snap = realtime.get(ticker) or {}
         now_val = snap.get("nowVal")
         change_rate = snap.get("changeRate")
