@@ -728,8 +728,9 @@ def build_ticker_type_rankings(
     ma_rules: list[dict[str, Any]] | None = None,
     as_of_date: pd.Timestamp | None = None,
     realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
-    # 화면 상단에서 임시로 바꿔 보는 업종 상한. None 이면 종목풀 저장값을 쓴다.
-    # `-1` 은 '제한 없음' 이다 — None(미지정)과 구분해야 저장값으로 되돌아가지 않는다.
+    # 화면 상단에서 임시로 바꿔 보는 값. None 이면 종목풀 저장값을 쓴다(저장하지 않는다).
+    # 업종 상한의 `-1` 은 '제한 없음' 이다 — None(미지정)과 구분해야 저장값으로 되돌아가지 않는다.
+    top_n_override: int | None = None,
     max_per_industry_override: int | None = None,
     status_callback: Any | None = None,
 ) -> pd.DataFrame:
@@ -938,7 +939,8 @@ def build_ticker_type_rankings(
     from utils.industry_map import industry_map
 
     industry_by = {str(key).strip().upper(): value for key, value in industry_map(ticker_type).items()}
-    df = _mark_hold_targets(df, int(settings["TOP_N_HOLD"]), max_per_industry, industry_by)
+    top_n = int(settings["TOP_N_HOLD"]) if top_n_override is None else int(top_n_override)
+    df = _mark_hold_targets(df, top_n, max_per_industry, industry_by)
     df = _normalize_ranking_values(df, country_code, monthly_labels=monthly_labels)
     df.attrs["realtime_active"] = realtime_active
     df.attrs["ranking_computed_at"] = ranking_computed_at

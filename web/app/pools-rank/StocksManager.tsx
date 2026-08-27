@@ -157,6 +157,9 @@ type RankAddingRowState = {
   is_validated: boolean;
 };
 
+/** 종목 수 선택지 — 백엔드 `config.TOP_N_OPTIONS` 와 같은 목록. */
+const TOP_N_CHOICES: number[] = [2, 5, 8, 10];
+
 /** 업종 상한 선택지 — 백엔드 `config.MAX_PER_INDUSTRY_OPTIONS` 와 같은 목록.
  *  `-1` 이 '없음'(제한 없음)이다 — 쿼리로 넘길 때 '미지정' 과 구분하려고 숫자로 둔다. */
 const MAX_PER_INDUSTRY_CHOICES: number[] = [1, 2, 3, -1];
@@ -356,8 +359,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     rankToolbarCache?.ticker_type ?? DEFAULT_TICKER_TYPE,
   );
   const [maRule, setMaRule] = useState<RankMaRule | null>(rankToolbarCache?.ma_rule ?? null);
-  // 업종 상한 — 화면에서 바꿔 보는 값(저장하지 않는다). null = 아직 종목풀 저장값 그대로.
-  // `-1` 이 '제한 없음' 이다 — null(미지정)과 구분해야 저장값으로 되돌아가지 않는다.
+  // 종목 수·업종 상한 — 화면에서 바꿔 보는 값(저장하지 않는다). null = 아직 종목풀 저장값 그대로.
+  // 업종 상한의 `-1` 이 '제한 없음' 이다 — null(미지정)과 구분해야 저장값으로 되돌아가지 않는다.
+  const [topN, setTopN] = useState<number | null>(null);
   const [maxPerIndustry, setMaxPerIndustry] = useState<number | null>(null);
 
   // 백엔드가 내려주는 선택지를 쓴다 — 화면이 복사본을 들고 있으면 값이 추가될 때 여기만 옛 목록이 남는다.
@@ -491,6 +495,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     ticker_type?: string;
     ma_rule_override?: RankMaRule;
     as_of_date?: string;
+    /** 종목 수 — 화면에서 바꿔 본 값. */
+    top_n?: number;
     /** 업종 상한 — 화면에서 바꿔 본 값. -1 = 제한 없음. */
     max_per_industry?: number;
     bootstrap?: boolean;
@@ -513,6 +519,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       if (next?.ma_rule_override) {
         search.set("short_ma_days", String(next.ma_rule_override.short_ma_days));
         search.set("long_ma_days", String(next.ma_rule_override.long_ma_days));
+      }
+      if (next?.top_n != null) {
+        search.set("top_n", String(next.top_n));
       }
       if (next?.max_per_industry != null) {
         search.set("max_per_industry", String(next.max_per_industry));
@@ -679,7 +688,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   // (개별주=표시, ETF=숨김), 미설정 풀은 행 값 유무로 추정 (strategy-momentum 과 같은 기준).
   // 업종 컬럼·업종 상한 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
   const hasIndustryData = poolHasIndustry(selectedTickerTypeItem);
-  // 화면에서 바꾼 값이 있으면 그것, 없으면 종목풀 저장값. 저장값이 없으면 '없음'(-1).
+  // 화면에서 바꾼 값이 있으면 그것, 없으면 종목풀 저장값.
+  const effectiveTopN = topN ?? selectedTickerTypeItem?.top_n_hold ?? 0;
+  // 업종 상한은 저장값이 없으면 '없음'(-1).
   const effectiveMaxPerIndustry =
     maxPerIndustry ?? (selectedTickerTypeItem?.max_per_industry == null ? -1 : selectedTickerTypeItem.max_per_industry);
   const hasMarketCap = poolHasMarketCap(selectedTickerTypeItem);
@@ -1332,12 +1343,24 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     });
   }
 
+  function handleTopNChange(next: number) {
+    setTopN(next);
+    void load({
+      ticker_type: selectedTickerType,
+      ma_rule_override: maRule ?? undefined,
+      as_of_date: selectedAsOfDate,
+      top_n: next,
+      max_per_industry: effectiveMaxPerIndustry,
+    });
+  }
+
   function handleMaxPerIndustryChange(next: number) {
     setMaxPerIndustry(next);
     void load({
       ticker_type: selectedTickerType,
       ma_rule_override: maRule ?? undefined,
       as_of_date: selectedAsOfDate,
+      top_n: effectiveTopN,
       max_per_industry: next,
     });
   }
@@ -1715,6 +1738,29 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       </button>
                     </div>
                   </label>
+                  {/* 종목 수 — 추천(✅) 을 몇 개까지 붙일지. 기본값은 종목풀 저장값이고,
+                      여기서 바꾼 값은 화면에서만 쓴다(저장 안 함). 모멘텀 화면과 같은 순서로 둔다. */}
+                  {pageMode === "rank" && selectedTickerTypeItem ? (
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">종목 수</span>
+                      <select
+                        className="form-select form-select-sm"
+                        style={{ width: "auto" }}
+                        title="추천(✅)을 몇 종목까지 붙일지"
+                        value={String(effectiveTopN)}
+                        onChange={(event) => handleTopNChange(Number(event.target.value))}
+                      >
+                        {(TOP_N_CHOICES.includes(effectiveTopN)
+                          ? TOP_N_CHOICES
+                          : [effectiveTopN, ...TOP_N_CHOICES].sort((a, b) => a - b)
+                        ).map((option) => (
+                          <option key={option} value={String(option)}>
+                            {option}종목
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                   {/* 업종 상한 — 추천(✅) 이 한 업종에 몰리지 않게 자르는 기준.
                       기본값은 종목풀 저장값이고, 여기서 바꾼 값은 화면에서만 쓴다(저장 안 함). */}
                   {pageMode === "rank" && hasIndustryData ? (

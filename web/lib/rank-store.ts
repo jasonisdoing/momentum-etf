@@ -108,6 +108,8 @@ export async function loadRankData(params?: {
   ticker_type?: string;
   ma_rule_override?: RankMaRuleOverride;
   as_of_date?: string;
+  /** 종목 수 — 화면 상단에서 바꿔 보는 값. 생략하면 종목풀 저장값. */
+  top_n?: number | null;
   /** 업종 상한 — 화면 상단에서 바꿔 보는 값. 생략하면 종목풀 저장값, -1 은 '제한 없음'. */
   max_per_industry?: number | null;
 }, signal?: AbortSignal): Promise<RankData> {
@@ -128,6 +130,9 @@ export async function loadRankData(params?: {
     }
   }
 
+  if (params?.top_n != null) {
+    search.set("top_n", String(params.top_n));
+  }
   if (params?.max_per_industry != null) {
     search.set("max_per_industry", String(params.max_per_industry));
   }
