@@ -29,7 +29,7 @@ from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
 from utils.ttl_cache import TtlCache
 
-_RankCacheKey = tuple[str, str, tuple[tuple[int, int], ...], int | None]
+_RankCacheKey = tuple[str, str, tuple[tuple[int, int], ...], int | None, int | None]
 _RANK_DATA_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="rank_data")
 
 
@@ -37,6 +37,7 @@ def _build_rank_cache_key(
     ticker_type: str,
     as_of_date: pd.Timestamp | None,
     ma_rules: list[dict[str, Any]],
+    top_n_override: int | None,
     max_per_industry_override: int | None,
 ) -> _RankCacheKey:
     as_of_date_key = as_of_date.date().isoformat() if as_of_date is not None else ""
@@ -47,7 +48,7 @@ def _build_rank_cache_key(
         )
         for rule in ma_rules
     )
-    return (ticker_type, as_of_date_key, ma_rule_key, max_per_industry_override)
+    return (ticker_type, as_of_date_key, ma_rule_key, top_n_override, max_per_industry_override)
 
 
 def invalidate_rank_data_cache(ticker_type: str | None = None) -> None:
@@ -582,12 +583,14 @@ def _compute_rank_data_payload(
     country_code: str,
     ma_rules: list[dict[str, Any]],
     selected_as_of_date: pd.Timestamp | None,
+    top_n_override: int | None = None,
     max_per_industry_override: int | None = None,
 ) -> dict[str, Any]:
     dataframe = build_ticker_type_rankings(
         selected_ticker_type,
         ma_rules=ma_rules,
         as_of_date=selected_as_of_date,
+        top_n_override=top_n_override,
         max_per_industry_override=max_per_industry_override,
     )
     effective_as_of_date = selected_as_of_date
@@ -670,7 +673,8 @@ def load_rank_data(
     ticker_type: str | None = None,
     ma_rule_override: dict[str, Any] | None = None,
     as_of_date: str | None = None,
-    # 화면 상단에서 바꿔 보는 업종 상한. None = 저장값, -1 = 제한 없음.
+    # 화면 상단에서 바꿔 보는 값. None = 종목풀 저장값. 업종 상한의 -1 = 제한 없음.
+    top_n_override: int | None = None,
     max_per_industry_override: int | None = None,
 ) -> dict[str, Any]:
     configs_payload, default_config = _build_configs_payload()
@@ -702,7 +706,9 @@ def load_rank_data(
     if selected_config is None:
         raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
 
-    cache_key = _build_rank_cache_key(selected_ticker_type, selected_as_of_date, ma_rules, max_per_industry_override)
+    cache_key = _build_rank_cache_key(
+        selected_ticker_type, selected_as_of_date, ma_rules, top_n_override, max_per_industry_override
+    )
     return _RANK_DATA_CACHE.get_or_compute(
         cache_key,
         lambda: _compute_rank_data_payload(
@@ -711,6 +717,7 @@ def load_rank_data(
             country_code=country_code,
             ma_rules=ma_rules,
             selected_as_of_date=selected_as_of_date,
+            top_n_override=top_n_override,
             max_per_industry_override=max_per_industry_override,
         ),
     )

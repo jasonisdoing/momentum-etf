@@ -24,20 +24,23 @@ export async function GET(request: NextRequest) {
       maRuleOverride[key] = value;
     }
     const hasMaRuleOverride = Object.keys(maRuleOverride).length > 0;
-    // 업종 상한 — 화면에서 바꿔 본 값. 없으면 종목풀 저장값, -1 은 '제한 없음'.
-    const rawCap = searchParams.get("max_per_industry");
-    let maxPerIndustry: number | undefined;
-    if (rawCap !== null && rawCap !== "") {
-      const value = Number(rawCap);
+    // 종목 수·업종 상한 — 화면에서 바꿔 본 값. 없으면 종목풀 저장값(업종 상한의 -1 = 제한 없음).
+    const readIntParam = (key: string, label: string): number | undefined => {
+      const raw = searchParams.get(key);
+      if (raw === null || raw === "") return undefined;
+      const value = Number(raw);
       if (!Number.isInteger(value)) {
-        throw new Error(`업종 상한 값이 올바르지 않습니다: ${rawCap}`);
+        throw new Error(`${label} 값이 올바르지 않습니다: ${raw}`);
       }
-      maxPerIndustry = value;
-    }
+      return value;
+    };
+    const topN = readIntParam("top_n", "종목 수");
+    const maxPerIndustry = readIntParam("max_per_industry", "업종 상한");
     const data = await loadRankData({
       ticker_type: tickerType,
       ma_rule_override: hasMaRuleOverride ? maRuleOverride : undefined,
       as_of_date: asOfDate,
+      top_n: topN,
       max_per_industry: maxPerIndustry,
     }, request.signal);
     return jsonNoStore(data);
