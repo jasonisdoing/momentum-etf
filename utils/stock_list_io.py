@@ -67,6 +67,18 @@ def ensure_stock_meta_readable() -> None:
 # stock_meta 조회는 풀당 문서 수백 건이라 매번 읽어도 부담이 없다.
 _LISTING_CACHE: dict[tuple[str, str], str | None] = {}
 
+# 튜닝 워커 전용 읽기 전용 사본 — 부모 프로세스가 미리 읽어 넘긴 종목 목록이다.
+# **캐시가 아니다**: 만료도 무효화도 없고, 워커가 DB 를 건드리지 않게 하려고 채운다
+# (utils/strategy_tuning.seed_worker_caches). 웹·배치 프로세스에서는 항상 비어 있다.
+_SEEDED_POOL_STOCKS: dict[str, list[dict]] = {}
+
+
+def seed_pool_stocks(stocks_by_pool: dict[str, list[dict]]) -> None:
+    """워커 프로세스에 종목 목록 사본을 심는다 (튜닝 전용, 부모에서는 부르지 않는다)."""
+    _SEEDED_POOL_STOCKS.clear()
+    for pool, docs in stocks_by_pool.items():
+        _SEEDED_POOL_STOCKS[str(pool).strip().lower()] = list(docs)
+
 
 def _invalidate_cache(ticker_type: str | None = None) -> None:
     """종목 목록 변경에 딸린 캐시를 모두 무효화한다.
@@ -96,6 +108,10 @@ def _load_ticker_type_stocks_raw(ticker_type: str) -> list[dict]:
     **캐시하지 않는다** — 추가·삭제·이동이 즉시 보여야 한다(위 주석 참고).
     """
     type_norm = (ticker_type or "").strip().lower()
+    seeded = _SEEDED_POOL_STOCKS.get(type_norm)
+    if seeded is not None:
+        return seeded
+
     coll = _get_collection()
     if coll is None:
         logger.error("MongoDB 연결 실패 — stock_meta 컬렉션을 읽을 수 없습니다.")
