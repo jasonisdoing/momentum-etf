@@ -345,7 +345,7 @@ export function PoolBacktestManager() {
 
           <div className="card-body appCardBodyTight appTableCardBodyFill" style={{ overflowY: "auto", padding: "16px 20px" }}>
             <p style={{ fontSize: "var(--fs-base)", color: "var(--text-muted)", lineHeight: 1.6, margin: "0 0 16px" }}>
-              등급은 <strong>같은 날짜 안에서 종목끼리 상대비교</strong>해 나눕니다(시장 타이밍 효과 제거 — 순위 화면과 같은 관점). <strong>1등급 = 신호 상위</strong>. 고정 보유 종목 제외.
+              등급은 <strong>같은 날짜 안에서 종목끼리 상대비교</strong>해 나눕니다(시장 타이밍 효과 제거 — 순위 화면과 같은 관점). <strong>1등급 = 신호 상위</strong>. 제외 종목 제외.
               <br />
               주 지표는 <strong>평균수익</strong>입니다 — 모멘텀은 승률이 아니라 손익비로 벌기 때문에 상승확률로는 안 잡힙니다.{" "}
               <strong>기저 대비 차이가 오차(±)를 넘어야만 의미</strong>가 있습니다.

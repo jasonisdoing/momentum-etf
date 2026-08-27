@@ -520,7 +520,7 @@ def compute_pool_signal_backtest(
     단기 이평선 기준이며, 두 이평선의 역할(선택/손절)로 포트폴리오를 시뮬레이션한다.
 
     MA 파라미터(단기/장기 이평선)는 해당 종목풀 설정을 기본으로 쓰되 화면 오버라이드가 있으면
-    그 값으로 실험한다. 고정 보유 종목(exclude_from_ranking)은 투자 후보가 아니므로 제외한다.
+    그 값으로 실험한다. 제외 종목(exclude_from_ranking)은 투자 후보가 아니므로 제외한다.
     """
     if forward_days not in FORWARD_DAY_OPTIONS:
         options = ", ".join(str(day) for day in FORWARD_DAY_OPTIONS)
@@ -556,7 +556,7 @@ def compute_pool_signal_backtest(
     ]
     excluded_count = len(all_etfs) - len(etfs)
     if not etfs:
-        raise ValueError(f"'{pool_id}' 종목풀에 분석 가능한 종목이 없습니다(고정 보유·벤치마크 제외 후 0개).")
+        raise ValueError(f"'{pool_id}' 종목풀에 분석 가능한 종목이 없습니다(제외 종목·벤치마크를 뺀 후 0개).")
 
     series_map = load_cached_close_series_bulk(pool_id, [item["ticker"] for item in etfs])
     frames: list[pd.DataFrame] = []

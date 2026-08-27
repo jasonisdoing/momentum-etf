@@ -79,7 +79,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 - **캐시 TTL 은 `config.py` 상수 4개**(`CACHE_TTL_LIVE/COMPUTE/SLOW/META`)와 `utils/ttl_cache.TtlCache` 만 쓴다.
 - **실시간 가격 외에는 종목 캐시에서 읽는다.** 화면 진입 시 외부 원천을 다시 부르지 않는다.
 - **최신 거래일 기준 날짜는 모든 시장 공통 한국 날짜.**
-- **고정 종목(`exclude_from_ranking`)** 은 비교 기준일 뿐 — 모든 선정·백테스트 유니버스에서 제외.
+- **제외 종목(`exclude_from_ranking`)** 은 비교 기준일 뿐 — 모든 선정·백테스트 유니버스에서 제외.
 - **배치 추가·삭제는 7곳을 함께 고친다**: `utils/system_service.py` 의 `SystemAction`·`SCHEDULE_ROWS`·`_SCRIPT_BY_ACTION`, `web/app/api/system/route.ts` 의 `allowed`, `web/lib/system-store.ts`, `web/app/batch/SystemManager.tsx`, `infra/cron/crontab`. 한 곳이 빠지면 `/batch` 에서 400.
 - **새 컬렉션은 `utils/data_table_catalog.py` 에 등록한다.** 종목풀·계좌 삭제(`purge_owner`)와 고아 점검(`scan_orphans`)이 이 카탈로그 하나만 본다. 등록하지 않으면 `/data-tables` 에 **미분류**로 뜨고, 소유자를 지울 때 함께 정리되지 않는다.
 - **종목풀·계좌 삭제는 `purge_owner()` 를 쓴다.** 지울 자리를 삭제 함수가 직접 들고 있으면 컬렉션이 늘 때마다 한쪽만 갱신돼 찌꺼기가 남는다(§6).
