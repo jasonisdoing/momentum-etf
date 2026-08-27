@@ -520,6 +520,14 @@ def move_active_stock(from_pool: str, to_pool: str, ticker: str) -> dict[str, An
         raise RuntimeError(f"'{_pool_label(source)}' 에 없는 종목입니다: {ticker_norm}")
     bucket_value = int(current.get("bucket") or 1)
 
+    # 대상 풀에 이미 활성으로 있으면 여기서 막는다. 아래 이동은 '먼저 빼고 담는' 순서라
+    # 담기에서 걸리면 되돌리기까지 돌아야 하고, 화면에는 원인 없이 '이동 실패'만 남는다.
+    if db.stock_meta.find_one({"ticker_type": target, "ticker": ticker_norm, "is_deleted": {"$ne": True}}):
+        raise RuntimeError(
+            f"'{_pool_label(target)}' 에 {ticker_norm} 가 이미 있습니다 — 한 티커는 한 종목풀에만 둡니다. "
+            "대상 종목풀에서 먼저 지운 뒤 옮겨주세요."
+        )
+
     # 이름·상장일·마켓·업종·메모는 종목풀이 바뀐다고 달라지지 않는다 — 옛 문서 값을 그대로
     # 가져간다. 원천에서 다시 받으면 종목당 9초가 더 든다.
     carried = {

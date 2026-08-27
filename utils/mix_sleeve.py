@@ -24,10 +24,11 @@ logger = get_app_logger()
 
 MOMENTUM = "momentum"
 NEW_HIGH = "new_high"
+PORTFOLIO = "portfolio"
 
 # 화면 셀렉트·라벨의 단일 소스. 값은 계좌 설정에 그대로 저장된다.
-STRATEGY_OPTIONS: tuple[str, ...] = (MOMENTUM, NEW_HIGH)
-STRATEGY_LABELS: dict[str, str] = {MOMENTUM: "모멘텀", NEW_HIGH: "신고가"}
+STRATEGY_OPTIONS: tuple[str, ...] = (MOMENTUM, NEW_HIGH, PORTFOLIO)
+STRATEGY_LABELS: dict[str, str] = {MOMENTUM: "모멘텀", NEW_HIGH: "신고가", PORTFOLIO: "포트폴리오"}
 
 
 @dataclass(frozen=True)
@@ -60,21 +61,31 @@ def normalize_strategy(value: Any) -> str:
 
 def settings_map(strategy: str) -> dict[str, Any]:
     """그 전략의 풀별 저장 설정 {풀: 설정}."""
-    if normalize_strategy(strategy) == MOMENTUM:
+    strategy = normalize_strategy(strategy)
+    if strategy == MOMENTUM:
         from utils.momentum_service import load_settings_map
 
-        # 모멘텀은 `{pool, settings_by_pool}` 로 한 겹 감싸 저장한다(신고가는 평면).
+        # 모멘텀은 `{pool, settings_by_pool}` 로 한 겹 감싸 저장한다(나머지는 평면).
         return dict(load_settings_map().get("settings_by_pool") or {})
+    if strategy == PORTFOLIO:
+        from utils.portfolio_service import load_settings_map as portfolio_map
+
+        return dict(portfolio_map())
     from utils.new_high_service import load_settings_map
 
     return dict(load_settings_map())
 
 
 def validate_settings(strategy: str, settings: dict[str, Any]) -> dict[str, Any]:
-    if normalize_strategy(strategy) == MOMENTUM:
+    strategy = normalize_strategy(strategy)
+    if strategy == MOMENTUM:
         from utils.momentum_service import validate_settings as validate
 
         return validate(settings)
+    if strategy == PORTFOLIO:
+        from utils.portfolio_service import validate_settings as validate_portfolio
+
+        return validate_portfolio(settings)
     from utils.new_high_service import validate_settings as validate
 
     return validate(settings)
@@ -98,6 +109,9 @@ def current_state(spec: SleeveSpec, as_of: str | None = None) -> dict[str, Any]:
         from utils.momentum_service import compute_picks
 
         return compute_picks(spec.settings, as_of=as_of)
+    if spec.strategy == PORTFOLIO:
+        # 포트폴리오는 판정이 없다 — 저장된 목표 비중이 곧 현재 상태다.
+        return dict(spec.settings)
     from utils.new_high_backtest import current_positions
 
     return current_positions(spec.settings, as_of=as_of)
@@ -158,9 +172,12 @@ class SlotState:
 def slot_state(spec: SleeveSpec, as_of: str | None = None) -> SlotState:
     """엔진 원본 상태를 `SlotState` 로 정규화한다 — 합성이 전략을 가리지 않게."""
     raw = current_state(spec, as_of=as_of)
-    top_n = int(spec.settings["top_n"])
+    # 포트폴리오는 슬롯 개수 개념이 없다 — 담은 종목 수가 곧 슬롯 수다.
+    top_n = len(spec.settings.get("weights") or []) if spec.strategy == PORTFOLIO else int(spec.settings["top_n"])
     if spec.strategy == MOMENTUM:
         return _momentum_slot_state(spec, raw, top_n)
+    if spec.strategy == PORTFOLIO:
+        return _portfolio_slot_state(spec, raw)
     return _new_high_slot_state(spec, raw, top_n)
 
 
@@ -267,6 +284,53 @@ def _momentum_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> S
     )
 
 
+def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
+    """포트폴리오 — 저장된 목표 비중이 그대로 슬롯이다.
+
+    이 전략에는 판정이 없어 `SlotState` 의 대부분이 빈다: 교체(`rebalance`)·이탈(`sells`)·
+    진입 예정(`entries`)·이탈 예상이 모두 없다. 대신 **종목마다 비중이 다르므로**
+    `drift_pct` 에 저장 비중을 그대로 싣는다 — 합성이 `슬리브 몫 × drift_pct / 100` 으로
+    목표를 잡으므로 균등 분배 전략과 같은 코드로 굴러간다.
+
+    남는 몫(현금)은 슬롯을 채우지 않는 것으로 표현된다 — 합성이 이미 그렇게 센다.
+    """
+    from utils.portfolio_service import load_universe
+
+    name_by = {row["ticker"]: row["name"] for row in load_universe(spec.pool)}
+    weights = list(raw.get("weights") or [])
+    targets = [
+        {
+            "ticker": str(row["ticker"]).strip(),
+            "name": name_by.get(str(row["ticker"]).strip(), str(row["ticker"]).strip()),
+            "price": None,
+            "change_pct": None,
+            "status": f"목표 {float(row['weight_pct']):.2f}%",
+            "return_pct": None,
+            "held_label": "",
+            "is_exiting": False,
+            # 저장 비중을 그대로 싣는다 — 합성이 `슬리브 몫 × drift_pct / 100` 으로 목표를
+            # 잡으므로, 종목 30% + 현금 10% 는 슬리브 몫의 30%·10% 가 된다(비율 유지).
+            "drift_pct": float(row["weight_pct"]),
+        }
+        for row in weights
+    ]
+    # 종목 비중 합이 100 미만이면 나머지가 현금이다 — 슬리브 몫에서 그만큼이 안 채워진다
+    # (합성이 `슬리브 몫 − 담긴 종목 비중 합` 을 그 슬리브의 현금으로 센다).
+    return SlotState(
+        spec=spec,
+        top_n=len(targets),
+        currency="",
+        targets=targets,
+        held_tickers={row["ticker"] for row in targets},
+        held_count=len(targets),
+        active_count=len(targets),
+        sells=[],
+        exit_forecast=[],
+        entries=[],
+        rebalance=None,
+    )
+
+
 def _new_high_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> SlotState:
     held = list(raw.get("holdings") or [])
     # 빈 슬롯을 채울 진입 예정 — 다음 시가에 사므로 목표에 포함한다. 매도 예정(이탈·손절)
@@ -349,6 +413,10 @@ def _new_high_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> S
 
 def run_backtest(spec: SleeveSpec, months: int, context: dict[str, Any] | None = None) -> dict[str, Any]:
     """이 슬리브를 **혼자** 굴린 백테스트 — 엔진 원본 형태 그대로."""
+    if spec.strategy == PORTFOLIO:
+        from utils.portfolio_backtest import run_backtest as portfolio_backtest
+
+        return portfolio_backtest(months, spec.settings)
     if spec.strategy == MOMENTUM:
         from utils.momentum_backtest import run_backtest as sm_backtest
 
@@ -356,6 +424,56 @@ def run_backtest(spec: SleeveSpec, months: int, context: dict[str, Any] | None =
     from utils.new_high_backtest import run_backtest as nh_backtest
 
     return nh_backtest(months, spec.settings, context)
+
+
+def trade_rows(spec: SleeveSpec, result: dict[str, Any]) -> list[dict[str, Any]]:
+    """백테스트 결과의 체결을 **한 형태로** 맞춘다 — 합성 화면의 체결 목록이 이걸 쓴다.
+
+    엔진마다 다른 것:
+      - 모멘텀은 보유중 행을 `trades` 안에 섞어 넣고, 신고가는 `open_positions` 로 따로 준다.
+      - 포트폴리오는 '보유 기간' 개념이 없다 — 체결이 종목 교체가 아니라 **비중 되돌리기**다.
+        그래서 진입·청산일이 같은 한 줄로 만든다(매매 기록으로 읽힌다).
+
+    공통 키: ticker · name · entry_date · entry_price · exit_date · exit_price ·
+             return_pct · days · reason
+    """
+    if spec.strategy == PORTFOLIO:
+        rows: list[dict[str, Any]] = []
+        for row in result.get("trades") or []:
+            side = "매수" if row.get("side") == "buy" else "매도"
+            rows.append(
+                {
+                    "ticker": row["ticker"],
+                    "name": row.get("name") or row["ticker"],
+                    "entry_date": row["date"],
+                    "entry_price": row.get("price"),
+                    "exit_date": row["date"],
+                    "exit_price": row.get("price"),
+                    "return_pct": None,
+                    "days": None,
+                    "reason": f"{row.get('reason') or '리밸런싱'} {side} "
+                    f"({row.get('weight_before_pct')}% → {row.get('weight_after_pct')}%)",
+                }
+            )
+        return rows
+
+    rows = []
+    for row in result.get("open_positions") or []:
+        rows.append(
+            {
+                "ticker": row["ticker"],
+                "name": row["name"],
+                "entry_date": row["entry_date"],
+                "entry_price": row["entry_price"],
+                "exit_date": None,
+                "exit_price": row.get("price"),
+                "return_pct": row.get("return_pct"),
+                "days": row.get("days"),
+                "reason": "보유중",
+            }
+        )
+    rows.extend(dict(row) for row in result.get("trades") or [])
+    return rows
 
 
 def daily_curve(spec: SleeveSpec, result: dict[str, Any]) -> dict[str, float]:
