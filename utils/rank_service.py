@@ -379,6 +379,7 @@ def _build_missing_ticker_rows(
                 "bucket": None,
                 "상장일": "-",
                 "추세": None,
+                "점수": None,
                 "보유": "",
                 "보유대상": False,
                 "현재가": None,
@@ -468,29 +469,34 @@ def _normalize_trend_value(value: Any) -> float | None:
 
 
 def _build_score_ranked_rows(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
+    """순위 번호(「순위」 컬럼)를 매긴다 — 기준은 순위 점수(`core.strategy.scoring.rank_score`).
+
+    표시용 「장기」(이격)·「단기」(단기이격)는 원천 값 그대로 두고, 줄 세우기만 점수로 한다.
+    벤치마크 대비 표시(`is_below_benchmark`)도 같은 점수로 비교해야 순위와 어긋나지 않는다.
+    """
     rows_with_index: list[dict[str, Any]] = []
     for index, row in enumerate(dataframe.to_dict(orient="records")):
-        trend = _normalize_trend_value(row.get("추세"))
         rows_with_index.append(
             {
                 **row,
-                "추세": trend,
+                "추세": _normalize_trend_value(row.get("추세")),
+                "점수": _normalize_trend_value(row.get("점수")),
                 "__base_index": index,
             }
         )
 
     rows_with_index.sort(
         key=lambda row: (
-            1 if row.get("추세") is None else 0,
-            -(float(row["추세"]) if row.get("추세") is not None else 0.0),
+            1 if row.get("점수") is None else 0,
+            -(float(row["점수"]) if row.get("점수") is not None else 0.0),
             int(row["__base_index"]),
         )
     )
 
     bm_score = None
     for row in rows_with_index:
-        if row.get("is_benchmark") and row.get("추세") is not None:
-            bm_score = float(row["추세"])
+        if row.get("is_benchmark") and row.get("점수") is not None:
+            bm_score = float(row["점수"])
             break
 
     ranked_rows: list[dict[str, Any]] = []
@@ -498,7 +504,7 @@ def _build_score_ranked_rows(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
     for row in rows_with_index:
         normalized = dict(row)
         normalized.pop("__base_index", None)
-        score = normalized.get("추세")
+        score = normalized.get("점수")
 
         is_below_bm = False
         if bm_score is not None and score is not None:
