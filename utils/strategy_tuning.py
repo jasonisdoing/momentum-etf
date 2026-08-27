@@ -34,13 +34,11 @@ def seed_worker_caches(pool_configs: list[dict[str, Any]], stocks_by_pool: dict[
     타임아웃이 나고 화면의 다른 요청까지 실패한다 — 그래서 워커는 읽기 전용 사본만 쓴다.
     """
     import os
-    from time import monotonic
 
     from utils import settings_loader, stock_list_io
 
     settings_loader._load_pool_configs = lambda: pool_configs  # type: ignore[assignment]
-    for pool, docs in stocks_by_pool.items():
-        stock_list_io._TICKER_TYPE_STOCKS_CACHE[pool] = (monotonic(), docs)
+    stock_list_io.seed_pool_stocks(stocks_by_pool)
     try:
         os.nice(5)  # 화면·DB 가 워커에 밀리지 않게 우선순위를 조금 낮춘다
     except OSError:
