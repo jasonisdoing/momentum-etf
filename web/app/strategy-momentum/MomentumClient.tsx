@@ -226,7 +226,7 @@ type View = {
   // 풀별 저장 설정 맵 — 셀렉트 전환 시 즉시 그 풀의 값으로 폼을 채운다.
   settings_by_pool?: Record<string, PoolSettings>;
   pool_options?: PoolOption[];
-  // 전략 전용 이평선 — momentum_settings 에 저장되며 종목풀 설정과 무관하다.
+  // 이평선 — 종목풀 설정(`pool_settings`)에 저장된다. 순위 화면·보유종목 알림과 같은 값이다.
   ma_rule?: {
     short_ma_days: number;
     long_ma_days: number;
@@ -394,7 +394,7 @@ export function MomentumClient() {
   // 설정을 못 받으면 폼 자체를 그리지 않으므로 이 값이 화면에 보이는 경우는 없다.
   const [draftPool, setDraftPool] = useState<string>("");
   const [draftMaxPerIndustry, setDraftMaxPerIndustry] = useState<number | null>(null);
-  // 이평선 초안 — 전략 전용 값(momentum_settings)으로 풀별 저장되며 종목풀 설정과 무관하다.
+  // 이평선 초안 — 종목풀 설정에 풀별로 저장된다(순위 화면·보유종목 알림과 같은 값).
   const [draftMaRule, setDraftMaRule] = useState<{ short: number; long: number } | null>(null);
   const [draftIntraweekExit, setDraftIntraweekExit] = useState(true);
   // 주중 손절선 — "" 은 손절 없음. 주중 이탈이 켜졌을 때만 셀렉트를 노출한다.

@@ -18,7 +18,7 @@
    시가에 판다. 판 슬롯은 다음 주 교체까지 현금이다(주중 재매수 없음).
 
 벤치마크·국가·통화는 종목풀 설정(DB)을 단일 소스로 쓴다.
-설정은 MongoDB `system_config.momentum_settings` 에 **풀별로** 저장한다
+설정은 MongoDB `pool_settings` 의 **각 풀 문서**에 저장한다
 (`{pool, settings_by_pool: {풀: {top_n, ...}}}`) — 풀을 바꾸면 그 풀의 설정으로 전환된다.
 """
 
@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import math
 import warnings
-from datetime import datetime
 from typing import Any
 
 import pandas as pd
@@ -56,9 +55,6 @@ RESERVE_MULTIPLIER = 1
 # 월↔거래일 환산 — 공용 상수(config, =20)를 재사용한다 (자산헬퍼·시장추세와 동일 기준).
 from config import CACHE_TTL_COMPUTE, TRADING_DAYS_PER_MONTH  # noqa: E402
 from utils.ttl_cache import TtlCache  # noqa: E402
-
-_CONFIG_COLLECTION = "system_config"
-_SETTINGS_KEY = "momentum_settings"
 
 # ── 룩백 4 · 종목 수 6 · 업종 상한 2 를 쓰는 근거 ──────────────────────────
 # ⚠ 아래 표는 **옛 점수 방식(연율화 상대기울기 × R²)·미국 풀** 기준이다. 점수를
@@ -99,7 +95,7 @@ _SETTINGS_KEY = "momentum_settings"
 # 여기에 강세장 편중과 생존 편향(유니버스가 현재 종목풀 기준)이 더해진다.
 # 조합을 바꿀 때는 순위 몇 계단 차이가 아니라 성격 차이(회전 속도·낙폭)를 보고 정한다.
 #
-# 설정의 단일 소스는 DB(`system_config.momentum_settings`)다. 코드에 기본값을
+# 설정의 단일 소스는 DB(`pool_settings` 의 풀 문서)다. 코드에 기본값을
 # 두지 않는다 — 값이 없거나 깨졌으면 임의 값으로 대체하지 않고 에러를 낸다.
 
 
@@ -246,48 +242,58 @@ def pool_options() -> list[dict[str, Any]]:
     return sorted(options, key=lambda item: (item["order"] is None, item["order"]))
 
 
+# 풀 설정 문서의 대문자 키 ↔ 전략 설정의 소문자 키. 저장 위치는 `pool_settings` 문서 하나다
+# (예전에는 `system_config.momentum_settings` 에 따로 저장돼 같은 풀의 값이 갈렸다).
+_POOL_KEY_BY_SETTING: dict[str, str] = {
+    "top_n": "TOP_N_HOLD",
+    "max_per_industry": "MAX_PER_INDUSTRY",
+    "short_ma_days": "SHORT_MA_DAYS",
+    "long_ma_days": "LONG_MA_DAYS",
+    "intraweek_exit": "INTRAWEEK_EXIT",
+    "intraweek_stop_pct": "INTRAWEEK_STOP_PCT",
+}
+
+
+def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
+    """풀 설정 문서 → 전략 설정(평면). 필수 키가 하나라도 없으면 None(미설정)."""
+    result: dict[str, Any] = {}
+    for setting_key, pool_key in _POOL_KEY_BY_SETTING.items():
+        if pool_key not in config:
+            # None 을 값으로 갖는 항목(업종 상한·주중 손절선)은 키 자체는 있어야 한다.
+            if setting_key in ("max_per_industry", "intraweek_stop_pct", "intraweek_exit"):
+                continue
+            return None
+        result[setting_key] = config[pool_key]
+    # 없는 선택 항목은 '미설정' 기본값으로 채운다 — 임의 보정이 아니라 스키마 기본이다.
+    result.setdefault("max_per_industry", None)
+    result.setdefault("intraweek_exit", False)
+    result.setdefault("intraweek_stop_pct", None)
+    return result
+
+
 def _load_settings_doc() -> dict[str, Any]:
-    """저장 문서를 새 스키마(`{pool, settings_by_pool}`)로 읽는다. 구 스키마는 1회 마이그레이션.
+    """모든 풀의 전략 설정 — `{settings_by_pool: {풀: {...}}}`.
 
-    마이그레이션 대상: ① 2풀 배열 스키마(`pools: [..]`) ② 단일 pool 평면 스키마.
-    둘 다 선택 풀의 설정으로 승계하고, 원본은 백업 필드로 보존한다.
+    각 풀의 `pool_settings` 문서에서 읽는다. 설정이 없는 풀은 맵에서 빠진다.
     """
-    from utils.db_manager import get_db_connection
+    from utils.settings_loader import get_ticker_type_settings
 
-    db = get_db_connection()
-    if db is None:
-        raise RuntimeError("DB 연결에 실패해 모멘텀 전략 설정을 읽을 수 없습니다.")
-    doc = db[_CONFIG_COLLECTION].find_one({"_id": _SETTINGS_KEY}) or {}
-    stored = doc.get("settings")
-    if not isinstance(stored, dict):
-        raise RuntimeError(
-            f"저장된 모멘텀 전략 설정이 없습니다 ({_CONFIG_COLLECTION}.{_SETTINGS_KEY} 문서를 먼저 저장하세요)."
-        )
-
-    # 풀별 맵이 있으면 정상 스키마다. 선택 풀(`pool`)은 화면이 로컬스토리지에 기억하므로
-    # 문서에 없어도 된다(옛 문서에 남아 있으면 무시한다).
-    if isinstance(stored.get("settings_by_pool"), dict):
-        return stored
-
-    # ── 일회성 마이그레이션 → 풀별 맵 스키마 ──
-    if isinstance(stored.get("pools"), (list, tuple)) and stored["pools"]:
-        pool = str(stored["pools"][0]).strip().lower()
-    elif isinstance(stored.get("pool"), str):
-        pool = str(stored["pool"]).strip().lower()
-    else:
-        raise RuntimeError("저장된 모멘텀 전략 설정에서 종목풀을 알 수 없습니다.")
-    per_pool = {key: stored[key] for key in PER_POOL_SETTING_KEYS if key in stored}
-    validate_settings({"pool": pool, **per_pool})  # 승계 값 검증 — 깨진 값은 여기서 드러난다
-    upgraded = {"pool": pool, "settings_by_pool": {pool: per_pool}}
-    update: dict[str, Any] = {"settings": upgraded, "updated_at": datetime.now().isoformat()}
-    if "settings_before_per_pool_migration" not in doc:
-        update["settings_before_per_pool_migration"] = stored
-    db[_CONFIG_COLLECTION].update_one({"_id": _SETTINGS_KEY}, {"$set": update})
-    return upgraded
+    by_pool: dict[str, Any] = {}
+    for pool in available_pools():
+        try:
+            config = get_ticker_type_settings(pool) or {}
+        except Exception:
+            continue
+        per_pool = _settings_from_pool_doc(config)
+        if per_pool is not None:
+            by_pool[pool] = per_pool
+    if not by_pool:
+        raise RuntimeError("모멘텀 전략 설정이 저장된 종목풀이 없습니다 — 종목풀 설정에서 먼저 저장하세요.")
+    return {"settings_by_pool": by_pool}
 
 
 def load_settings_map() -> dict[str, Any]:
-    """`{pool, settings_by_pool}` — 화면이 풀 전환 시 즉시 그 풀의 설정을 채우는 데 쓴다."""
+    """`{settings_by_pool}` — 화면이 풀 전환 시 즉시 그 풀의 설정을 채우는 데 쓴다."""
     return _load_settings_doc()
 
 
@@ -300,7 +306,7 @@ def default_pool() -> str:
     for option in pool_options():
         if option["ticker_type"] in saved:
             return str(option["ticker_type"])
-    raise RuntimeError("모멘텀 전략 설정이 저장된 종목풀이 없습니다 — 화면에서 먼저 저장하세요.")
+    raise RuntimeError("모멘텀 전략 설정이 저장된 종목풀이 없습니다 — 종목풀 설정에서 먼저 저장하세요.")
 
 
 def load_settings(pool: str | None = None) -> dict[str, Any]:
@@ -346,33 +352,22 @@ def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], lis
 
 
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
-    """검증 후 선택 풀의 설정으로 저장하고 정규화된 평면 설정을 반환한다.
+    """검증 후 그 풀의 **종목풀 설정 문서**에 저장하고 정규화된 평면 설정을 반환한다.
 
-    다른 풀의 저장분은 건드리지 않는다(풀별 독립).
+    다른 풀의 저장분은 건드리지 않는다(풀별 독립). 저장이 풀 문서에 들어가므로 순위 화면·
+    보유종목 알림·종목풀 백테스트가 곧바로 같은 값을 본다 — 튜닝 「적용」의 목적이다.
     """
     normalized = validate_settings(settings)
-    from utils.db_manager import get_db_connection
+    from utils.pool_settings_store import save_pool_settings
 
-    db = get_db_connection()
-    if db is None:
-        raise RuntimeError("DB 연결에 실패했습니다.")
     pool = normalized["pool"]
-    per_pool = {key: normalized[key] for key in PER_POOL_SETTING_KEYS}
-    db[_CONFIG_COLLECTION].update_one(
-        {"_id": _SETTINGS_KEY},
-        {
-            "$set": {
-                f"settings.settings_by_pool.{pool}": per_pool,
-                "updated_at": datetime.now().isoformat(),
-            }
-        },
-        upsert=True,
-    )
+    values = {pool_key: normalized[setting_key] for setting_key, pool_key in _POOL_KEY_BY_SETTING.items()}
+    save_pool_settings(pool, values, save_method="모멘텀 전략")
     # 설정을 바꿨다 되돌리면 옛 키에 그대로 걸린다 — 그 사이 달라진 종목 목록이
     # 반영되지 않은 결과가 다시 나오므로, 저장할 때마다 비우고 새로 계산하게 한다.
-    from utils.cache_invalidation import invalidate_strategy_caches
+    from utils.cache_invalidation import invalidate_pool_caches
 
-    invalidate_strategy_caches()
+    invalidate_pool_caches(pool)
     return normalized
 
 
