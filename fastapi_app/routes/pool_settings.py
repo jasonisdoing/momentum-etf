@@ -29,10 +29,14 @@ router = APIRouter(prefix="/internal/pool-settings", tags=["pool-settings"])
 class PoolSettingsUpdatePayload(BaseModel):
     pool_id: str
     values: dict[str, Any]
-    save_method: str = "신규"
+    # 저장 경로 — 화면의 「마지막 저장」 배지에 그대로 뜬다.
+    # 사용자(사람이 화면에서 저장) / 모멘텀 전략(전략 화면·튜닝 적용)
+    save_method: str = "사용자"
 
 
 class PoolDefinitionPayload(BaseModel):
+    """풀 생성·수정 — 둘 다 사람이 화면에서 한 일이라 저장 경로는 「사용자」다."""
+
     values: dict[str, Any]
     save_method: str = "사용자"
 

@@ -63,7 +63,7 @@ type PoolEntry = {
   pool_kind?: string | null;
   settings: SettingsMap;
   updated_at?: string;
-  /** 저장 경로 — "수동"(종목풀 설정 화면) / "모멘텀 전략"(전략 화면·튜닝 적용) 등. */
+  /** 저장 경로 — "사용자"(사람이 화면에서 저장) / "모멘텀 전략"(전략 화면·튜닝 적용). */
   save_method?: string;
 };
 

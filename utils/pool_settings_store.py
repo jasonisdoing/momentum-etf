@@ -498,7 +498,7 @@ def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = 
     return cleaned
 
 
-def create_pool(values: dict[str, Any], save_method: str = "신규") -> dict[str, Any]:
+def create_pool(values: dict[str, Any], save_method: str = "사용자") -> dict[str, Any]:
     """신규 종목풀을 생성한다. 생성 후 ticker_type 은 변경할 수 없다."""
     required = ("ticker_type", "name", "icon", "order", "country_code", "currency", *OVERRIDABLE_KEYS)
     missing = [key for key in required if key not in values or values[key] in (None, "")]
