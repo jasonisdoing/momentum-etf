@@ -877,7 +877,11 @@ def _update_reference_meta_for_type(
         if update_doc is None:
             logger.error(f"[{type_norm.upper()}/{ticker}] 식별 메타 업데이트 실패: {failures}")
         else:
-            logger.info(f"  -> 식별 메타 획득: {done_count}/{total_count} - {name}({ticker})")
+            # 「(병렬)」 표기 — 워커 여러 개가 동시에 도는 구조라 로그 순서가 종목 순서와 다르고,
+            # 끝물에 남은 한두 건은 병렬 이득이 사라져 오래 멈춘 것처럼 보인다. 보는 사람이 알아야 한다.
+            logger.info(
+                f"  -> 식별 메타 획득(병렬 워커 {META_FETCH_WORKERS}개): {done_count}/{total_count} - {name}({ticker})"
+            )
             updates_for_db.append(update_doc)
         if len(updates_for_db) >= 100:
             try:
