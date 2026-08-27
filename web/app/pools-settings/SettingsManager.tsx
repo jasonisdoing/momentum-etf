@@ -15,6 +15,7 @@ import { AppModal } from "../components/AppModal";
 /** 숫자 셀렉트/입력으로 편집하는 키. */
 const NUMERIC_KEYS = [
   "TOP_N_HOLD",
+  "MAX_PER_INDUSTRY",
   "SHORT_MA_DAYS",
   "LONG_MA_DAYS",
   "BUY_SLIPPAGE_PCT",
@@ -30,6 +31,7 @@ type EditableKey = (typeof EDITABLE_KEYS)[number];
 
 const KEY_LABELS: Record<EditableKey, string> = {
   TOP_N_HOLD: "보유 종목수",
+  MAX_PER_INDUSTRY: "업종 상한",
   SHORT_MA_DAYS: "단기 이평선",
   LONG_MA_DAYS: "장기 이평선",
   BUY_SLIPPAGE_PCT: "매수 슬리피지(%)",
@@ -105,6 +107,7 @@ const EMPTY_DRAFT: PoolDraft = {
   currency: "KRW",
   pool_kind: "etf",
   TOP_N_HOLD: "10",
+  MAX_PER_INDUSTRY: "",
   SHORT_MA_DAYS: "10",
   LONG_MA_DAYS: "20",
   BUY_SLIPPAGE_PCT: "0.25",
@@ -154,6 +157,8 @@ function toDraft(pool: PoolEntry): PoolDraft {
     currency: pool.currency ?? "KRW",
     pool_kind: pool.pool_kind ?? "",
     TOP_N_HOLD: String(pool.settings.TOP_N_HOLD?.value ?? ""),
+    // 업종 상한 — null 이 '없음'(제한 없음)이라 빈 문자열로 다룬다.
+    MAX_PER_INDUSTRY: pool.settings.MAX_PER_INDUSTRY?.value == null ? "" : String(pool.settings.MAX_PER_INDUSTRY.value),
     SHORT_MA_DAYS: String(pool.settings.SHORT_MA_DAYS?.value ?? ""),
     LONG_MA_DAYS: String(pool.settings.LONG_MA_DAYS?.value ?? ""),
     BUY_SLIPPAGE_PCT: String(pool.settings.BUY_SLIPPAGE_PCT?.value ?? ""),
@@ -177,6 +182,7 @@ function draftToValues(draft: PoolDraft) {
     // 빈 값(미설정)은 보내지 않아 기존 상태를 유지한다 — 토글은 항상 stock/etf 를 보낸다.
     ...(draft.pool_kind ? { pool_kind: draft.pool_kind } : {}),
     TOP_N_HOLD: Number(draft.TOP_N_HOLD),
+    MAX_PER_INDUSTRY: draft.MAX_PER_INDUSTRY === "" ? null : Number(draft.MAX_PER_INDUSTRY),
     SHORT_MA_DAYS: Number(draft.SHORT_MA_DAYS),
     LONG_MA_DAYS: Number(draft.LONG_MA_DAYS),
     BUY_SLIPPAGE_PCT: Number(draft.BUY_SLIPPAGE_PCT),
@@ -556,6 +562,11 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       valueFormatter: (params) => ({ stock: "개별주", etf: "ETF" })[String(params.value)] ?? "미설정",
     }),
     numberCol("TOP_N_HOLD", "종목", 64),
+    // 업종 상한 — 순위 화면 추천(✅)과 모멘텀 선정이 함께 쓴다. 빈 값 = 제한 없음.
+    selectCol("MAX_PER_INDUSTRY", "업종상한", 88, () => ["1", "2", "3", ""], {
+      valueFormatter: (params) => (params.value === "" || params.value == null ? "없음" : `${params.value}종목`),
+      headerTooltip: "한 업종에서 최대 몇 종목까지 담을지. 순위 화면의 ✅ 와 모멘텀 선정이 같은 값을 씁니다.",
+    }),
     selectCol(
       "SHORT_MA_DAYS",
       "단기",

@@ -24,10 +24,21 @@ export async function GET(request: NextRequest) {
       maRuleOverride[key] = value;
     }
     const hasMaRuleOverride = Object.keys(maRuleOverride).length > 0;
+    // 업종 상한 — 화면에서 바꿔 본 값. 없으면 종목풀 저장값, -1 은 '제한 없음'.
+    const rawCap = searchParams.get("max_per_industry");
+    let maxPerIndustry: number | undefined;
+    if (rawCap !== null && rawCap !== "") {
+      const value = Number(rawCap);
+      if (!Number.isInteger(value)) {
+        throw new Error(`업종 상한 값이 올바르지 않습니다: ${rawCap}`);
+      }
+      maxPerIndustry = value;
+    }
     const data = await loadRankData({
       ticker_type: tickerType,
       ma_rule_override: hasMaRuleOverride ? maRuleOverride : undefined,
       as_of_date: asOfDate,
+      max_per_industry: maxPerIndustry,
     }, request.signal);
     return jsonNoStore(data);
   } catch (error) {

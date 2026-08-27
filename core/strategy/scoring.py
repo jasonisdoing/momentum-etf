@@ -189,6 +189,27 @@ def drawdown_from_high_pct(
     return (price / max_price - 1.0) * 100.0
 
 
+def hold_eligible(long_disparity_pct: Any, short_disparity_pct: Any) -> Any:
+    """보유 가능 조건 — **장기 이격 > 0 이고 단기 이격 >= 0**.
+
+    장기 이평선은 종목 선택, 단기 이평선은 손절/익절을 담당한다. 장기 추세가 죽었거나
+    단기 추세가 꺾이면 보유하지 않는다. 순위 화면의 추천(✅)·모멘텀 선정·백테스트가
+    같은 규칙을 쓰도록 여기서만 정의한다.
+
+    스칼라와 Series 둘 다 받는다 — `rank_score` 와 같다. 종목풀 조건(고정 보유)은
+    호출부에서 따로 건다.
+    """
+    if isinstance(long_disparity_pct, pd.Series) or isinstance(short_disparity_pct, pd.Series):
+        long_series = pd.to_numeric(long_disparity_pct, errors="coerce")
+        short_series = pd.to_numeric(short_disparity_pct, errors="coerce")
+        return long_series.notna() & (long_series > 0) & short_series.notna() & (short_series >= 0)
+    if long_disparity_pct is None or short_disparity_pct is None:
+        return False
+    if pd.isna(long_disparity_pct) or pd.isna(short_disparity_pct):
+        return False
+    return float(long_disparity_pct) > 0 and float(short_disparity_pct) >= 0
+
+
 def cap_by_industry(
     candidates: list[str],
     industry_by: Mapping[str, str],
@@ -232,6 +253,48 @@ def cap_by_industry(
             counts[key] = counts.get(key, 0) + 1
         picked.append(ticker)
     return picked, blocked
+
+
+def select_holdings(
+    candidates: Sequence[Mapping[str, Any]],
+    *,
+    top_n: int,
+    max_per_industry: int | None = None,
+    industry_by: Mapping[str, str] | None = None,
+) -> list[str]:
+    """**보유 대상 선정 — 순위 화면과 모멘텀 전략이 함께 쓰는 단 하나의 규칙.**
+
+    ① 자격(`hold_eligible`) → ② 순위 점수(`rank_score`) 내림차순 → ③ 업종 상한
+    (`cap_by_industry`) 을 적용해 최대 `top_n` 개의 티커를 돌려준다.
+
+    예전에는 순위 화면이 ①②만 하고 업종 상한을 빼먹어서, 상한이 걸린 풀에서 표의 ✅ 와
+    실제 전략 선정이 어긋났다. 셋을 한 함수로 묶어 그런 누락이 다시 생기지 않게 한다.
+
+    `candidates` 의 각 항목에 필요한 키:
+        ticker · long_disparity_pct · short_disparity_pct
+    이미 자격을 거른 목록을 넘겨도 된다(조건을 다시 통과할 뿐이다).
+    """
+    scored: list[tuple[float, str]] = []
+    for row in candidates:
+        ticker = str(row.get("ticker") or "").strip()
+        if not ticker:
+            continue
+        long_pct, short_pct = row.get("long_disparity_pct"), row.get("short_disparity_pct")
+        if not hold_eligible(long_pct, short_pct):
+            continue
+        score = rank_score(long_pct, short_pct)
+        if score is None:
+            continue
+        scored.append((float(score), ticker))
+    # 점수 내림차순. 동점은 티커 순으로 못 박아 실행할 때마다 순서가 흔들리지 않게 한다.
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    picked, _blocked = cap_by_industry(
+        [ticker for _, ticker in scored],
+        industry_by or {},
+        max_per_industry,
+        top_n,
+    )
+    return picked
 
 
 def compute_rule_percentile_frame(
@@ -308,7 +371,9 @@ __all__ = [
     "calculate_signed_percentile_score",
     "compute_trend_frame",
     "rank_score",
+    "hold_eligible",
     "cap_by_industry",
+    "select_holdings",
     "drawdown_from_high_pct",
     "compute_rule_percentile_frame",
     "compute_eligibility_mask",

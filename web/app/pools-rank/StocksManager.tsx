@@ -44,6 +44,8 @@ type RankTickerType = {
   // 풀 성격(stock/etf) — 종목풀 설정의 '구분' 토글. 미설정이면 빈 값.
   pool_kind?: string;
   top_n_hold?: number;
+  /** 업종 상한 — 종목풀 저장값. null/미설정 = 제한 없음. */
+  max_per_industry?: number | null;
   currency?: string;
   include?: string[];
 };
@@ -154,6 +156,10 @@ type RankAddingRowState = {
   is_validating: boolean;
   is_validated: boolean;
 };
+
+/** 업종 상한 선택지 — 백엔드 `config.MAX_PER_INDUSTRY_OPTIONS` 와 같은 목록.
+ *  `-1` 이 '없음'(제한 없음)이다 — 쿼리로 넘길 때 '미지정' 과 구분하려고 숫자로 둔다. */
+const MAX_PER_INDUSTRY_CHOICES: number[] = [1, 2, 3, -1];
 
 const rankGridTheme = createAppGridTheme();
 const RANK_SESSION_CACHE_TTL_MS = 60_000;
@@ -350,6 +356,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     rankToolbarCache?.ticker_type ?? DEFAULT_TICKER_TYPE,
   );
   const [maRule, setMaRule] = useState<RankMaRule | null>(rankToolbarCache?.ma_rule ?? null);
+  // 업종 상한 — 화면에서 바꿔 보는 값(저장하지 않는다). null = 아직 종목풀 저장값 그대로.
+  // `-1` 이 '제한 없음' 이다 — null(미지정)과 구분해야 저장값으로 되돌아가지 않는다.
+  const [maxPerIndustry, setMaxPerIndustry] = useState<number | null>(null);
+
   // 백엔드가 내려주는 선택지를 쓴다 — 화면이 복사본을 들고 있으면 값이 추가될 때 여기만 옛 목록이 남는다.
   const [maOptions, setMaOptions] = useState<Partial<MaOptionsPayload>>(rankToolbarCache?.ma_options ?? {});
   const [metricMode, setMetricMode] = useState<MetricMode>("basic");
@@ -481,6 +491,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     ticker_type?: string;
     ma_rule_override?: RankMaRule;
     as_of_date?: string;
+    /** 업종 상한 — 화면에서 바꿔 본 값. -1 = 제한 없음. */
+    max_per_industry?: number;
     bootstrap?: boolean;
     skip_session_cache?: boolean;
   }) {
@@ -501,7 +513,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       if (next?.ma_rule_override) {
         search.set("short_ma_days", String(next.ma_rule_override.short_ma_days));
         search.set("long_ma_days", String(next.ma_rule_override.long_ma_days));
-          }
+      }
+      if (next?.max_per_industry != null) {
+        search.set("max_per_industry", String(next.max_per_industry));
+      }
 
       const query = search.size > 0 ? `?${search.toString()}` : "";
       const sessionCacheKey = buildRankSessionCacheKey(query);
@@ -664,6 +679,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   // (개별주=표시, ETF=숨김), 미설정 풀은 행 값 유무로 추정 (strategy-momentum 과 같은 기준).
   // 업종 컬럼·업종 상한 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
   const hasIndustryData = poolHasIndustry(selectedTickerTypeItem);
+  // 화면에서 바꾼 값이 있으면 그것, 없으면 종목풀 저장값. 저장값이 없으면 '없음'(-1).
+  const effectiveMaxPerIndustry =
+    maxPerIndustry ?? (selectedTickerTypeItem?.max_per_industry == null ? -1 : selectedTickerTypeItem.max_per_industry);
   const hasMarketCap = poolHasMarketCap(selectedTickerTypeItem);
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
@@ -1314,6 +1332,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     });
   }
 
+  function handleMaxPerIndustryChange(next: number) {
+    setMaxPerIndustry(next);
+    void load({
+      ticker_type: selectedTickerType,
+      ma_rule_override: maRule ?? undefined,
+      as_of_date: selectedAsOfDate,
+      max_per_industry: next,
+    });
+  }
+
   function handleAsOfDateChange(nextAsOfDate: string) {
     setSelectedAsOfDate(nextAsOfDate);
     void load({
@@ -1687,6 +1715,26 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       </button>
                     </div>
                   </label>
+                  {/* 업종 상한 — 추천(✅) 이 한 업종에 몰리지 않게 자르는 기준.
+                      기본값은 종목풀 저장값이고, 여기서 바꾼 값은 화면에서만 쓴다(저장 안 함). */}
+                  {pageMode === "rank" && hasIndustryData ? (
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">업종 상한</span>
+                      <select
+                        className="form-select form-select-sm"
+                        style={{ width: "auto" }}
+                        title="한 업종에서 최대 몇 종목까지 ✅ 를 붙일지"
+                        value={String(effectiveMaxPerIndustry)}
+                        onChange={(event) => handleMaxPerIndustryChange(Number(event.target.value))}
+                      >
+                        {MAX_PER_INDUSTRY_CHOICES.map((option) => (
+                          <option key={option} value={String(option)}>
+                            {option < 0 ? "없음" : `${option}종목`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                   {pageMode === "rank" && maRule ? (
                     <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">이평선</span>
