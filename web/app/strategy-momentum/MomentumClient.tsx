@@ -34,6 +34,7 @@ import {
 } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { updateStockMemo } from "@/lib/stocks-store";
+import { poolHasIndustry } from "@/lib/pool-industry";
 import { MaDaysSelect } from "../components/MaDaysSelect";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { formatPrice } from "../../lib/price-format";
@@ -529,15 +530,10 @@ export function MomentumClient() {
   // 개별주(stock)면 표시, ETF 면 숨김. 미설정(구 문서)이면 선정 행에 값이 있는지로
   // 추정한다(pools-rank 와 같은 패턴). 업종을 모르는 종목엔 상한이 원래 미적용이라
   // 숨겨도 동작은 그대로다.
-  const poolKind = view?.pool_options?.find((option) => option.ticker_type === view?.settings.pool)?.pool_kind ?? "";
-  const hasIndustryData =
-    poolKind === "stock"
-      ? true
-      : poolKind === "etf"
-        ? false
-        : view?.picks
-          ? view.picks.rows.some((row) => row.industry)
-          : true;
+  const selectedPoolOption = view?.pool_options?.find((option) => option.ticker_type === view?.settings.pool);
+  const poolKind = selectedPoolOption?.pool_kind ?? "";
+  // 업종 컬럼·업종 상한 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
+  const hasIndustryData = poolHasIndustry(selectedPoolOption);
   // 업종 데이터가 없는 풀은 상한이 무의미하므로 **없음(null)으로 고정**한다 — 저장·변경 감지·튜닝이
   // 모두 이 값을 쓴다(저장값이 숫자로 남아 있으면 '저장하지 않은 변경'으로 떠서 없음으로 저장하게 된다).
   const effectiveMaxPerIndustry = hasIndustryData ? draftMaxPerIndustry : null;

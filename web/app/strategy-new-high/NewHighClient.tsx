@@ -31,6 +31,7 @@ import {
   marketCapRankColumn,
 } from "@/lib/grid-cells";
 import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
+import { poolHasIndustry } from "@/lib/pool-industry";
 import { renderStockNameCell } from "@/lib/name-highlight";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
@@ -506,15 +507,11 @@ export function NewHighClient() {
   // 저장 응답을 그대로 초안에 넣으므로 두 객체의 키 구성은 항상 같다.
   // 업종 컬럼 노출 여부 — 표시 중인 결과의 풀 성격(pool_kind)이 1순위(개별주=표시, ETF=숨김),
   // 미설정 풀은 행 값 유무로 추정 (pools-rank·strategy-momentum 과 같은 기준).
+  // 업종 컬럼·업종 상한 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
   const hasIndustryData = useMemo(() => {
     const pool = positions?.pool ?? view?.settings.pool ?? "";
-    const poolKind = String(view?.pool_options?.find((option) => option.ticker_type === pool)?.pool_kind ?? "");
-    if (poolKind === "stock") return true;
-    if (poolKind === "etf") return false;
-    return [...(positions?.breakouts ?? []), ...(positions?.candidates ?? [])].some(
-      (row) => String(row.industry ?? "").trim() !== "",
-    );
-  }, [positions, view?.settings.pool, view?.pool_options]);
+    return poolHasIndustry(view?.pool_options?.find((option) => option.ticker_type === pool));
+  }, [positions?.pool, view?.settings.pool, view?.pool_options]);
 
   // 업종 데이터가 없는 풀은 상한을 **없음(null)으로 고정**한다 — 저장·변경 감지·튜닝이 모두 이 값을 쓴다
   // (모멘텀 화면과 같은 규칙. 저장값이 숫자로 남아 있으면 '저장하지 않은 변경'으로 떠서 없음으로 저장하게 된다).

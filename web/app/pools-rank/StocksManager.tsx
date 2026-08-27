@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
 import { formatPoolLabel } from "@/lib/pool-label";
+import { poolHasIndustry } from "@/lib/pool-industry";
 import {
   INDUSTRY_COLUMN_MIN_WIDTH,
   INDUSTRY_COLUMN_WIDTH,
@@ -661,12 +662,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   // 업종 컬럼 노출 여부 — 종목풀 설정의 풀 성격(pool_kind) 토글이 1순위
   // (개별주=표시, ETF=숨김), 미설정 풀은 행 값 유무로 추정 (strategy-momentum 과 같은 기준).
-  const hasIndustryData = useMemo(() => {
-    const poolKind = String(selectedTickerTypeItem?.pool_kind ?? "");
-    if (poolKind === "stock") return true;
-    if (poolKind === "etf") return false;
-    return displayGridRows.some((row) => String(row.업종 ?? "").trim() !== "");
-  }, [displayGridRows, selectedTickerTypeItem?.pool_kind]);
+  // 업종 컬럼·업종 상한 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
+  const hasIndustryData = poolHasIndustry(selectedTickerTypeItem);
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
     const leadingColumns: ColDef<RankGridRow>[] = [
