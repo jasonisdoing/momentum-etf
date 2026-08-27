@@ -188,6 +188,8 @@ type Holding = {
   target_amount?: number | null;
   target_quantity?: number | null;
   held_quantity?: number | null;
+  /** 실제 수익률 — 계좌 매입 평단 대비. 전략수익률(이론값)과 별개이고 종목당 하나다. */
+  return_pct?: number | null;
   held_value?: number | null;
   current_weight_pct?: number;
   trade_quantity?: number | null;
@@ -710,7 +712,8 @@ export function StrategyMixClient() {
             : sources.map((source) => slotLabel(source)).join("·");
         },
       },
-      // 아래 순서·명칭은 /assets 계좌 보유 표와 맞춘다 (일간→현재가→비중→목표비중→목표수량→수량).
+      // 아래 순서·명칭은 /assets 계좌 보유 표와 맞춘다
+      // (일간→현재가→비중→목표비중→목표수량→수량→수익률→평가 금액).
       {
         field: "change_pct",
         headerName: "일간(%)",
@@ -848,14 +851,6 @@ export function StrategyMixClient() {
               : null,
         },
         {
-          field: "held_quantity",
-          headerName: "수량",
-          width: 80,
-          type: "numericColumn",
-          valueFormatter: (p) =>
-            p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR"),
-        },
-        {
           field: "trade_quantity",
           headerName: "매매수량",
           headerTooltip: "목표수량 − 수량. +는 매수, −는 매도",
@@ -879,6 +874,23 @@ export function StrategyMixClient() {
             }
             return { color: signColor(p.value as number), fontWeight: 700, opacity: 1 };
           },
+        },
+        {
+          field: "held_quantity",
+          headerName: "수량",
+          width: 80,
+          type: "numericColumn",
+          valueFormatter: (p) =>
+            p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR"),
+        },
+        {
+          field: "return_pct",
+          headerName: "수익률",
+          headerTooltip: "계좌 매입 평단 대비 실제 수익률. 아직 사지 않은 종목은 평단이 없어 비어 있다.",
+          width: 88,
+          type: "numericColumn",
+          valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
+          cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
         },
         {
           field: "held_value",

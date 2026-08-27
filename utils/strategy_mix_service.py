@@ -753,6 +753,8 @@ def _attach_account_targets(
     목표 포트폴리오에 없는 보유 종목은 전량 매도 대상 — 목표 비중 0% 행으로 표에
     함께 넣는다 (팔아야 할 종목이 표 밖에 있으면 계좌를 표 하나로 대조할 수 없다).
     """
+    from utils.portfolio_io import return_pct_from_avg_price
+
     total_assets = float(account.get("total_assets") or 0)
     # 목표 금액은 원화, 가격은 그 시장 통화다 — 환율로 맞춘 뒤 나눠야 한다.
     price_krw_by_ticker: dict[str, float] = {}
@@ -760,6 +762,11 @@ def _attach_account_targets(
         held = account["holdings"].get(row["ticker"])
         row["held_quantity"] = held["quantity"] if held else 0.0
         row["held_value"] = (held or {}).get("value")
+        # 실제 수익률 — 계좌 매입 평단 대비. 전략수익률(이론 편입가 대비)과 별개 컬럼이고,
+        # 종목당 하나뿐이라 슬리브(A/B)로 나누지 않는다. 아직 안 산 종목은 평단이 없어 빈다.
+        # 계산은 /assets 계좌 보유 표와 **같은 공용 함수**(utils.portfolio_io).
+        actual = return_pct_from_avg_price(row.get("price"), (held or {}).get("average_buy_price"))
+        row["return_pct"] = None if actual is None else round(actual, 2)
         row["current_weight_pct"] = (
             round(float(row["held_value"]) / total_assets * 100.0, 2)
             if row.get("held_value") and total_assets > 0
@@ -805,6 +812,11 @@ def _attach_account_targets(
                 "is_sell_all": True,
                 "held_quantity": item["quantity"],
                 "held_value": value,
+                "return_pct": (
+                    None
+                    if (actual := return_pct_from_avg_price(item.get("price"), item.get("average_buy_price"))) is None
+                    else round(actual, 2)
+                ),
                 "current_weight_pct": round(float(value) / total_assets * 100.0, 2)
                 if value and total_assets > 0
                 else 0.0,
