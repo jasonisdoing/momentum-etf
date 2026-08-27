@@ -21,6 +21,22 @@ def _now_kst() -> datetime.datetime:
     return datetime.datetime.now(KST)
 
 
+def return_pct_from_avg_price(price: Any, average_buy_price: Any) -> float | None:
+    """매입 평단 대비 현재가 수익률(%). 계좌 보유 표·합성 화면이 함께 쓴다.
+
+    평단이나 현재가가 없으면 **None** — 0% 로 채우면 '본전' 과 '모른다' 가 구분되지 않는다.
+    반올림은 하지 않는다: 화면마다 자릿수가 달라서 호출부가 정한다.
+    """
+    try:
+        buy = float(average_buy_price or 0)
+        current = float(price or 0)
+    except (TypeError, ValueError):
+        return None
+    if buy <= 0 or current <= 0:
+        return None
+    return (current / buy - 1.0) * 100.0
+
+
 def _round_snapshot_money(value: Any) -> int:
     """스냅샷 KRW 금액을 정수로 반올림한다."""
     try:
@@ -419,13 +435,11 @@ def load_real_holdings_table(
 
     df_holdings["현재가"] = df_holdings.apply(_get_current_price, axis=1)
 
-    # 수익률 계산 (매입 단가 대비 현재가, 소수점 1자리)
+    # 수익률 계산 (매입 단가 대비 현재가, 소수점 1자리) — 공용 함수를 쓴다.
     def _calc_return_pct(row):
-        buy = float(row.get("average_buy_price") or 0)
-        curr = float(row.get("현재가") or 0)
-        if buy > 0:
-            return round(((curr / buy) - 1.0) * 100.0, 1)
-        return 0.0
+        value = return_pct_from_avg_price(row.get("현재가"), row.get("average_buy_price"))
+        # 이 표는 숫자 컬럼이라 빈 값을 못 받는다 — 평단이 없으면 0.0 (기존 동작 유지).
+        return 0.0 if value is None else round(value, 1)
 
     df_holdings["return_pct"] = df_holdings.apply(_calc_return_pct, axis=1)
 
