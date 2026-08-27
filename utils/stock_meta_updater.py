@@ -814,7 +814,6 @@ def _update_reference_meta_for_type(
             "listing_date",
             "market",
             "is_etf",
-            "etf_category",
             "dividend_yield_ttm",
             "market_cap",
             "sector",
@@ -1198,7 +1197,6 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
         "listing_date",
         "market",
         "is_etf",
-        "etf_category",
         "dividend_yield_ttm",
         "market_cap",
         "sector",
@@ -1299,9 +1297,6 @@ def update_single_stock_metadata(
 
         if country_code == "us" and naver_us_stock_map:
             naver_entry = naver_us_stock_map.get(str(ticker).strip().upper(), {})
-            industry = str(naver_entry.get("industry") or "").strip()
-            if industry:
-                stock["etf_category"] = industry
             market = str(naver_entry.get("market") or "").strip().upper()
             if market:
                 stock["market"] = market
