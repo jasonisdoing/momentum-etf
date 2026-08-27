@@ -28,7 +28,7 @@ def _month_options(settings: dict) -> list[int]:
 
 
 def _ma_rule_payload(settings: dict) -> dict:
-    """전략 전용 이평선 + 선택지 — momentum_settings 가 단일 소스다."""
+    """전략 이평선 + 선택지 — 종목풀 설정(`pool_settings`)이 단일 소스다."""
     from utils.ma_options import ma_options_payload
     from utils.momentum_service import pool_info
 

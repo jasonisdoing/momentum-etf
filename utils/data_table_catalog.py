@@ -183,7 +183,6 @@ class OwnedKeySpec:
 
 # 설정 문서 안에 소유자 id 가 **키**로 들어가는 자리 (전부 system_config 컬렉션).
 OWNED_KEY_SPECS: tuple[OwnedKeySpec, ...] = (
-    OwnedKeySpec("momentum_settings", "settings.settings_by_pool", "pool", "모멘텀 전략의 풀별 저장 설정"),
     OwnedKeySpec("new_high_settings", "settings_by_pool", "pool", "신고가 전략의 풀별 저장 설정"),
     OwnedKeySpec("new_high_notify_state", "pools", "pool", "신고가 알림 발송 상태(풀별)"),
     OwnedKeySpec("strategy_mix_notify_state", "accounts", "account", "합성 액션 알림 발송 상태(계좌별)"),

@@ -2,10 +2,16 @@
 
 MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 보관한다.
 
-    구조: ticker_type, name, icon, order, country_code, currency
-    편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS,
-          BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT,
+    구조: ticker_type, name, icon, order, country_code, currency, pool_kind
+    편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS,            ← 모멘텀 전략 설정이기도 하다
+          MAX_PER_INDUSTRY, INTRAWEEK_EXIT, INTRAWEEK_STOP_PCT,  ← 모멘텀 전용
+          BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, STOPLOSS_THRESHOLD_PCT,
           BENCHMARK, MARKET_REGIME_INDEX (선택 — 비우면 미설정)
+
+모멘텀 전략 설정을 여기 두는 이유: 이 프로젝트에서 모멘텀은 **그 풀의 기본 판정 기준**이다.
+전략 화면에서 튜닝 결과를 적용하면 순위 화면·보유종목 알림·종목풀 백테스트가 같은 값을
+쓴다(예전에는 `system_config.momentum_settings` 에 따로 저장돼 8개 풀에서 값이 갈렸다).
+신고가는 한 풀을 다른 설정으로 굴리는 별도 전략이라 자기 설정 문서를 그대로 쓴다.
 
 런타임 로딩은 DB 문서가 없거나 필수 키가 누락되면 명확히 에러를 낸다.
 캐시: 멀티프로세스(fastapi/scheduler/worker)에서 변경이 반영되도록 짧은 TTL(30초) 캐시를
@@ -26,7 +32,13 @@ from datetime import datetime
 from time import monotonic
 from typing import Any
 
-from config import CACHE_TTL_LIVE, POOL_KIND_OPTIONS, SLIPPAGE_PCT_OPTIONS
+from config import (
+    CACHE_TTL_LIVE,
+    MAX_PER_INDUSTRY_OPTIONS,
+    POOL_KIND_OPTIONS,
+    SLIPPAGE_PCT_OPTIONS,
+    STOP_LOSS_PCT_OPTIONS,
+)
 from config import STOP_LOSS_PCT_OPTIONS as STOPLOSS_PCT_OPTIONS
 from utils.logger import get_app_logger
 from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
@@ -37,10 +49,21 @@ COLLECTION = "pool_settings"
 INTERNAL_POOL_ID_PREFIX = "__"
 
 # DB 오버라이드 대상 키 — 전부 필수이며 비어 있으면 로딩 자체가 실패한다.
+# 이 셋은 **모멘텀 전략 설정이기도 하다** — 이 프로젝트에서 모멘텀은 그 풀의 기본 판정
+# 기준이라, 전략 설정을 따로 두지 않고 풀 문서 하나에 모은다(순위 화면·보유종목 알림·
+# 종목풀 백테스트가 같은 값을 본다). 신고가는 자기 설정 문서를 따로 쓴다.
 OVERRIDABLE_KEYS: tuple[str, ...] = (
     "TOP_N_HOLD",
     "SHORT_MA_DAYS",
     "LONG_MA_DAYS",
+)
+
+# 모멘텀 전략 전용 값 — 위 셋과 함께 한 풀의 전략 설정을 이룬다. 기존 문서에 없을 수 있어
+# 로딩 필수값은 아니다(미설정이면 전략 화면에서 저장해야 한다).
+MOMENTUM_KEYS: tuple[str, ...] = (
+    "MAX_PER_INDUSTRY",  # None = 제한없음
+    "INTRAWEEK_EXIT",
+    "INTRAWEEK_STOP_PCT",  # None = 손절 없음
 )
 
 # 보유종목 손절 알림 기준(%). 이평선과 같은 성격의 **종목 판정 기준**이라 계좌가 아니라
@@ -61,7 +84,13 @@ SLIPPAGE_KEYS: tuple[str, ...] = (
 OPTIONAL_EDITABLE_KEYS: tuple[str, ...] = ("BENCHMARK", "MARKET_REGIME_INDEX")
 
 # 종목풀 설정 화면에서 편집하는 전체 키(순서 = 화면 표시 순서).
-POOL_EDITABLE_KEYS: tuple[str, ...] = (*OVERRIDABLE_KEYS, *SLIPPAGE_KEYS, *STOPLOSS_KEYS, *OPTIONAL_EDITABLE_KEYS)
+POOL_EDITABLE_KEYS: tuple[str, ...] = (
+    *OVERRIDABLE_KEYS,
+    *MOMENTUM_KEYS,
+    *SLIPPAGE_KEYS,
+    *STOPLOSS_KEYS,
+    *OPTIONAL_EDITABLE_KEYS,
+)
 
 STRUCTURAL_KEYS: tuple[str, ...] = (
     "name",
@@ -328,6 +357,25 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
             if not (0 <= num <= 100):
                 raise PoolSettingsError(f"TOP_N_HOLD 는 1 ~ 100 범위여야 합니다: {num}")
         cleaned[key] = num
+
+    # 모멘텀 전용 — 숫자/불리언이 섞여 있고 None 이 '없음' 을 뜻한다(임의 보정하지 않는다).
+    if "MAX_PER_INDUSTRY" in values:
+        raw = values["MAX_PER_INDUSTRY"]
+        cap = None if raw in (None, "", "none") else int(raw)
+        if cap not in MAX_PER_INDUSTRY_OPTIONS:
+            allowed = ", ".join("없음" if v is None else str(v) for v in MAX_PER_INDUSTRY_OPTIONS)
+            raise PoolSettingsError(f"MAX_PER_INDUSTRY 는 {allowed} 중 하나여야 합니다: {raw}")
+        cleaned["MAX_PER_INDUSTRY"] = cap
+    if "INTRAWEEK_EXIT" in values:
+        cleaned["INTRAWEEK_EXIT"] = bool(values["INTRAWEEK_EXIT"])
+    if "INTRAWEEK_STOP_PCT" in values:
+        raw = values["INTRAWEEK_STOP_PCT"]
+        stop = None if raw in (None, "", "none") else round(float(raw), 2)
+        allowed_stops = {None, *(round(v, 2) for v in STOP_LOSS_PCT_OPTIONS)}
+        if stop not in allowed_stops:
+            allowed = ", ".join("없음" if v is None else f"{v:g}" for v in (None, *STOP_LOSS_PCT_OPTIONS))
+            raise PoolSettingsError(f"INTRAWEEK_STOP_PCT 는 {allowed} 중 하나여야 합니다: {raw}")
+        cleaned["INTRAWEEK_STOP_PCT"] = stop
 
     for key in _FLOAT_KEYS:
         if key not in values:

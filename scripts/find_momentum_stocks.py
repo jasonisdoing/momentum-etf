@@ -2,7 +2,7 @@
 
 전략 규칙·계산은 `utils/momentum_service.py` 가 단일 소스이며,
 이 스크립트는 화면(/strategy-momentum)과 같은 월 확정 포트폴리오를 콘솔에서 보는
-얇은 래퍼다. 설정은 화면에서 저장한 값(system_config.momentum_settings)을
+얇은 래퍼다. 설정은 화면에서 저장한 값(pool_settings 의 풀 문서)을
 쓴다. 저장된 설정이 없으면 기본값으로 넘어가지 않고 에러로 중단한다.
 
 사용법
