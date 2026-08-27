@@ -59,10 +59,15 @@ def set_stock_memo(ticker: str, memo: str | None) -> bool:
         logger.warning("종목 메모 저장 실패 %s: %s", ticker_norm, exc)
         return False
     # 종목 목록 캐시가 메모를 그대로 실어 나르므로 비워서 다음 조회에 반영되게 한다.
+    # 순위 캐시(5분)도 메모를 실어 나르므로 함께 지운다 — 목록 캐시만 지우면
+    # `/assets` 에서 고친 메모가 `/pools-rank` 에 최대 5분간 옛 값으로 남는다.
+    # 어느 풀인지는 티커만으로 알 수 없어(같은 티커가 여러 풀에 있을 수 있다) 전체를 지운다.
     try:
+        from utils.cache_invalidation import invalidate_pool_caches
         from utils.stock_list_io import invalidate_ticker_type_cache
 
         invalidate_ticker_type_cache()  # 인자 없으면 전체 무효화
+        invalidate_pool_caches()
     except Exception:
         pass
     return True
