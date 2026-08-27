@@ -7,6 +7,8 @@ type RankTickerType = {
   icon: string;
   country_code: string;
   top_n_hold?: number;
+  /** 업종 상한 — 종목풀 저장값. null/미설정 = 제한 없음. */
+  max_per_industry?: number | null;
   currency?: string;
   include?: string[];
 };
@@ -106,6 +108,8 @@ export async function loadRankData(params?: {
   ticker_type?: string;
   ma_rule_override?: RankMaRuleOverride;
   as_of_date?: string;
+  /** 업종 상한 — 화면 상단에서 바꿔 보는 값. 생략하면 종목풀 저장값, -1 은 '제한 없음'. */
+  max_per_industry?: number | null;
 }, signal?: AbortSignal): Promise<RankData> {
   const search = new URLSearchParams();
   if (params?.ticker_type) {
@@ -122,6 +126,10 @@ export async function loadRankData(params?: {
         search.set(key, String(value));
       }
     }
+  }
+
+  if (params?.max_per_industry != null) {
+    search.set("max_per_industry", String(params.max_per_industry));
   }
 
   const query = search.size > 0 ? `?${search.toString()}` : "";

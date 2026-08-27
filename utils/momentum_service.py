@@ -32,10 +32,11 @@ import pandas as pd
 
 from config import MAX_PER_INDUSTRY_OPTIONS, STOP_LOSS_PCT_OPTIONS, TOP_N_OPTIONS
 from core.strategy.scoring import (
-    cap_by_industry,
     compute_ma_disparity,
     drawdown_from_high_pct,
+    hold_eligible,
     rank_score,
+    select_holdings,
 )
 from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
 from utils.price_series import positive_prices
@@ -504,13 +505,10 @@ def select_candidates(
     *,
     as_of: pd.Timestamp | None = None,
 ) -> list[dict[str, Any]]:
-    """이격 후보 목록 — 보유 가능 조건은 순위 화면과 같은 hold_eligible_mask 를 쓴다.
+    """이격 후보 목록 — 보유 가능 조건은 순위 화면과 **같은 공용 함수**(`hold_eligible`)다.
 
-    이평선 일수는 **전략 전용 설정**(short/long_ma_days)이다 — 두 풀을 섞어도
-    같은 이평선으로 점수를 매겨 공정하게 비교된다.
+    이평선 일수는 종목풀 설정(short/long_ma_days)이라 순위 화면·보유종목 알림과 같다.
     """
-    from utils.rankings import hold_eligible_mask
-
     short_ma_days = int(settings["short_ma_days"])
     long_ma_days = int(settings["long_ma_days"])
 
@@ -529,14 +527,8 @@ def select_candidates(
             continue
         candidates.append({**row, **metrics})
 
-    if not candidates:
-        return []
     # 장기 이격 > 0 & 단기 이격 >= 0 — 순위/종목풀 백테스트와 같은 단일 규칙.
-    eligible = hold_eligible_mask(
-        pd.Series([c["disparity_pct"] for c in candidates]),
-        pd.Series([c["short_disparity_pct"] for c in candidates]),
-    )
-    return [c for c, ok in zip(candidates, eligible, strict=True) if ok]
+    return [c for c in candidates if hold_eligible(c["disparity_pct"], c["short_disparity_pct"])]
 
 
 def rank_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -550,19 +542,26 @@ def select_top(
     max_per_industry: int | None,
     industry_by_ticker: dict[str, str],
 ) -> list[dict[str, Any]]:
-    """점수 순서를 지키되 **한 업종이 상한을 넘지 않도록** 상위 top_n 을 고른다.
+    """자격·점수·업종 상한을 적용해 상위 top_n 을 고른다.
 
-    상한 규칙 자체는 신고가 전략과 **같은 함수**(`core.strategy.scoring.cap_by_industry`)다 —
-    같은 「업종 상한」 설정이 전략마다 다르게 동작하지 않도록 한 곳에서만 정의한다.
-    여기서는 점수 순 dict 목록을 티커 순서로 바꿔 넘기고 결과를 다시 dict 로 되돌린다.
+    규칙 자체는 순위 화면(`/pools-rank` 의 ✅)과 **같은 공용 함수**
+    (`core.strategy.scoring.select_holdings`)다 — 한쪽만 고쳐져 표와 선정이 갈리지
+    않게 한 곳에서만 정의한다. 여기서는 dict 목록을 넘기고 결과를 다시 dict 로 되돌린다.
     선정·백테스트·연속 추적이 모두 이 함수를 써야 결과가 서로 어긋나지 않는다.
     """
     by_ticker = {item["ticker"]: item for item in scored}
-    picked, _blocked = cap_by_industry(
-        [item["ticker"] for item in scored],
-        industry_by_ticker,
-        max_per_industry,
-        top_n,
+    picked = select_holdings(
+        [
+            {
+                "ticker": item["ticker"],
+                "long_disparity_pct": item["disparity_pct"],
+                "short_disparity_pct": item["short_disparity_pct"],
+            }
+            for item in scored
+        ],
+        top_n=top_n,
+        max_per_industry=max_per_industry,
+        industry_by=industry_by_ticker,
     )
     return [by_ticker[ticker] for ticker in picked]
 

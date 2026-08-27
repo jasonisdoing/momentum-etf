@@ -21,7 +21,6 @@ from utils.pool_signal_backtest_service import get_month_options
 router = APIRouter(prefix="/internal/strategy-new-high", tags=["strategy-new-high"])
 
 
-
 def _constraints(pool: str) -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다)."""
     from utils.ma_options import short_ma_options
