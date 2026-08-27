@@ -31,6 +31,7 @@ from typing import Any
 
 import pandas as pd
 
+from config import MAX_PER_INDUSTRY_OPTIONS, STOP_LOSS_PCT_OPTIONS, TOP_N_OPTIONS
 from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
 from utils.price_series import positive_prices
 from utils.strategy_settings import coerce_to_options
@@ -41,10 +42,8 @@ warnings.filterwarnings("ignore")
 # 종목풀은 DB(pool_settings)의 활성 풀 전체 중 1개를 선택한다 — 목록·국가·통화의
 # 단일 소스는 종목풀 설정이다 (하드코딩 목록을 두지 않는다).
 # 한 업종에서 최대 몇 종목까지 담을지 — 화면 셀렉트와 검증이 같은 목록을 쓴다.
-MAX_PER_INDUSTRY_OPTIONS: tuple[int | None, ...] = (1, 2, 3, None)  # None = 제한없음 (신고가와 동일)
-# 종목 수 셀렉트 선택지 — **검증도 이 목록으로 한다**(별도 범위 없음).
-# 화면은 이 목록을 서버 응답으로 받는다(프론트에 복사본을 두지 않는다).
-TOP_N_OPTIONS = (2, 5, 8, 10)
+# 종목 수·업종 상한은 신고가와 **의미가 같아** 전략 공용 상수를 그대로 쓴다
+# (`utils/strategy_options`). 여기서 다시 정의하면 한쪽만 고쳐져 두 화면이 갈린다.
 # 차순위 후보를 종목 수의 몇 배까지 보여줄지 — 선정과 같은 수(합계 2배)만 보여
 # 표를 짧게 유지한다. 표 밖 '다음 주 예상' 종목은 하단에 별도 행으로 붙는다.
 RESERVE_MULTIPLIER = 1
@@ -133,7 +132,8 @@ PER_POOL_SETTING_KEYS = (
 
 # 주중 손절선 선택지(%) — 교체일 시가 대비 낙폭. None 은 '손절 없음'.
 # kor·kospi200 24개월 백테스트에서 -10 이 공통 피크였다(-5 는 휩쏘 손실, -15 는 효과 소멸).
-INTRAWEEK_STOP_OPTIONS: tuple[float | None, ...] = (None, -7.0, -10.0)
+# 주중 손절 — 공용 손절 목록에 '안 씀(None)' 을 더한 것이다. 퍼센트 자체는 한 곳에서만 정한다.
+INTRAWEEK_STOP_OPTIONS: tuple[float | None, ...] = (None, *STOP_LOSS_PCT_OPTIONS)
 
 # 전략 전용 이평선 선택지 — 화면 셀렉트와 튜닝 축이 같은 값을 쓴다.
 # 그리드 결과(kor_kr·kospi200·us)에서 장기 60~120 이 고원, 140 부터 열위라 140 까지만 둔다.
@@ -1117,9 +1117,7 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
                 if snap_open and float(snap_open) > 0:
                     entry_price = float(snap_open)
             frame_now = frames.get(ticker)
-            close_now = (
-                pd.to_numeric(frame_now["Close"], errors="coerce").dropna() if frame_now is not None else None
-            )
+            close_now = pd.to_numeric(frame_now["Close"], errors="coerce").dropna() if frame_now is not None else None
             if entry_price and close_now is not None and not close_now.empty:
                 hit_stop = (float(close_now.iloc[-1]) / entry_price - 1.0) * 100.0 <= float(stop_raw)
         # ① 자격 상실 — 현재 이격(전략 이평선 기준).

@@ -26,7 +26,8 @@ from datetime import datetime
 from time import monotonic
 from typing import Any
 
-from config import CACHE_TTL_LIVE
+from config import CACHE_TTL_LIVE, POOL_KIND_OPTIONS, SLIPPAGE_PCT_OPTIONS
+from config import STOP_LOSS_PCT_OPTIONS as STOPLOSS_PCT_OPTIONS
 from utils.logger import get_app_logger
 from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
 
@@ -47,8 +48,6 @@ OVERRIDABLE_KEYS: tuple[str, ...] = (
 # 기존 문서에 없을 수 있어 로딩 필수값은 아니다(미설정이면 알림이 판정 불가로 남는다).
 STOPLOSS_KEYS: tuple[str, ...] = ("STOPLOSS_THRESHOLD_PCT",)
 
-# 손절 기준 선택지 — 신고가 전략의 손절선(new_high_service.STOP_LOSS_OPTIONS)과 같은 목록.
-STOPLOSS_PCT_OPTIONS: tuple[float, ...] = (-7.0, -10.0)
 
 # 종목풀별 거래비용 설정. 기존 문서에 없어도 설정 화면은 열려야 하므로 로딩 필수값은 아니다.
 # 단, 슬리피지를 실제로 사용하는 백테스트/계산 로직은 누락 시 명시적으로 실패한다.
@@ -73,12 +72,6 @@ STRUCTURAL_KEYS: tuple[str, ...] = (
     "pool_kind",
 )
 
-# 풀 성격 — 'stock'(개별주) 또는 'etf'. 섹터·업종 개념이 있는 풀인지 화면들이 이 값으로
-# 판단한다(예: 전략 SM 의 업종상한 노출). 기존 문서는 미설정일 수 있다(선택 값).
-POOL_KIND_OPTIONS: tuple[str, ...] = ("stock", "etf")
-
-# 편도 슬리피지(%) 선택지: 0.05 ~ 0.50, 0.05 단위. 필수라 빈 값 불가.
-SLIPPAGE_PCT_OPTIONS: tuple[float, ...] = (0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)
 
 _INT_KEYS = ("TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS")
 _FLOAT_KEYS = ("BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT", "STOPLOSS_THRESHOLD_PCT")
@@ -332,7 +325,7 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
                 options = ", ".join(str(day) for day in allowed)
                 raise PoolSettingsError(f"{key} 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
         elif key == "TOP_N_HOLD":
-            if not (1 <= num <= 100):
+            if not (0 <= num <= 100):
                 raise PoolSettingsError(f"TOP_N_HOLD 는 1 ~ 100 범위여야 합니다: {num}")
         cleaned[key] = num
 

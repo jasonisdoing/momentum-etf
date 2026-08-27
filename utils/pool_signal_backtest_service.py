@@ -19,7 +19,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from config import CACHE_START_DATE
+from config import BACKTEST_MONTH_OPTIONS as MONTH_OPTIONS
+from config import CACHE_START_DATE, FORWARD_DAY_OPTIONS
 from utils.cache_utils import load_cached_close_series_bulk
 from utils.logger import get_app_logger
 from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
@@ -34,7 +35,6 @@ from utils.stock_list_io import get_etfs
 
 logger = get_app_logger()
 
-FORWARD_DAY_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60)
 _TRADING_DAYS_PER_MONTH = 21
 
 
@@ -46,10 +46,6 @@ def get_max_backtest_months(today: date | None = None) -> int:
     if end.day < start.day:
         months -= 1
     return max(months, 1)
-
-
-# 기간 셀렉트 선택지 — 시스템 전체가 이 목록 하나만 쓴다(전략·화면별로 따로 두지 않는다).
-MONTH_OPTIONS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 12, 24, 36, 48, 60)
 
 
 def get_month_options() -> list[int]:

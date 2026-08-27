@@ -16,6 +16,8 @@ def _pool_country(ticker_type: str) -> str:
     from utils.settings_loader import get_ticker_type_settings
 
     return str((get_ticker_type_settings(ticker_type) or {}).get("country_code") or "").strip().lower()
+
+
 from utils.market_cap_rank import market_cap_rank_of
 from utils.rankings import (
     MONTHLY_RETURN_LABEL_COUNT,

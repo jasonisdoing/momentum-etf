@@ -111,7 +111,9 @@ def cagr_pct(returns_pct: pd.Series) -> float | None:
     return round((growth ** (365.0 / days) - 1) * 100, 1)
 
 
-def summarize_combo(params: dict[str, Any], returns_pct: pd.Series, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+def summarize_combo(
+    params: dict[str, Any], returns_pct: pd.Series, extra: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """조합 하나의 요약 행. ``extra`` 는 전략별 부가 지표(거래 수·승률 등)."""
     return {
         "params": params,

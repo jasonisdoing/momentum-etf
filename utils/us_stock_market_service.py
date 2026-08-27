@@ -190,7 +190,7 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
                 "sector": item.get("sector") or "",
                 "market": "",
                 "ticker_pools": ", ".join(ticker_pool_map.get(ticker, [])),
-                    "ticker_pool_types": ticker_pool_type_map.get(ticker, []),
+                "ticker_pool_types": ticker_pool_type_map.get(ticker, []),
                 "is_held": ticker in held_tickers,
                 "current_price": None,
                 "change_pct": None,

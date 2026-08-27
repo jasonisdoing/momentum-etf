@@ -210,9 +210,7 @@ def resolve_active_trading_date() -> str:
     """
     today = _now_with_zone("Asia/Seoul").date()
     search_start = today - timedelta(days=370)
-    candidates = {
-        day.date() for day in get_trading_days_any(str(search_start), str(today), ASSET_TRADING_COUNTRIES)
-    }
+    candidates = {day.date() for day in get_trading_days_any(str(search_start), str(today), ASSET_TRADING_COUNTRIES)}
     # 미국은 오늘 이후로 밀릴 수 있어 조회 구간을 하루 넉넉히 잡고, 밀린 뒤 오늘 이하만 남긴다.
     for day in get_trading_days(str(search_start), str(today), ASSET_TRADING_SHIFTED_COUNTRY):
         shifted = _shift_to_weekday(day.date() + timedelta(days=1))
