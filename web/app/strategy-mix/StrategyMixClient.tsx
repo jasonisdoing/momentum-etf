@@ -640,7 +640,9 @@ export function StrategyMixClient() {
       shares: null,
     };
     // 목표 종목 행은 백엔드가 종목 단위로 합쳐 계산한 값을 그대로 쓴다.
-    // 현금만 맨 위에 두고 나머지는 티커 순 — 계좌·증권사 화면과 같은 순서로 대조하기 쉽게.
+    // 현금만 맨 위에 두고, 나머지는 **백엔드가 준 순서 그대로** 둔다 — A 슬리브의 선정 순위,
+    // 그 다음 B 슬리브, 마지막이 목표에 없는 보유(전량 매도)다. 각 전략 화면과 같은 순서라
+    // 두 화면을 나란히 놓고 대조할 수 있다. 티커 순으로 다시 세우면 그 순위가 사라진다.
     return [
       cashRow,
       ...positions.holdings
@@ -654,8 +656,7 @@ export function StrategyMixClient() {
             amount: holding.target_amount ?? null,
             shares: holding.target_quantity ?? null,
           };
-        })
-        .sort((a, b) => a.ticker.localeCompare(b.ticker)),
+        }),
     ];
   }, [positions, quotes, totalAsset]);
 
