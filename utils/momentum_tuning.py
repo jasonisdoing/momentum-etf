@@ -92,7 +92,14 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
     for top_n, cap, value in product(top_ns, caps, intraweeks):
-        combo = dict(base, top_n=top_n, max_per_industry=cap, short_ma_days=short, long_ma_days=long, **_intraweek_settings(value))
+        combo = dict(
+            base,
+            top_n=top_n,
+            max_per_industry=cap,
+            short_ma_days=short,
+            long_ma_days=long,
+            **_intraweek_settings(value),
+        )
         try:
             result = run_backtest(months, combo, include_daily=True, context=context)
         except ValueError as error:  # 장기 이평이 길어 기간이 모자라는 조합 — 그 이평 쌍은 통째로 건너뛴다
@@ -103,7 +110,13 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
         returns = daily.set_index("date")["strategy_pct"].dropna()
         rows.append(
             summarize_combo(
-                {"top_n": top_n, "max_per_industry": cap, "short_ma_days": short, "long_ma_days": long, "intraweek": value},
+                {
+                    "top_n": top_n,
+                    "max_per_industry": cap,
+                    "short_ma_days": short,
+                    "long_ma_days": long,
+                    "intraweek": value,
+                },
                 returns,
             )
         )
@@ -127,12 +140,7 @@ def run_tuning(months: int, settings: dict[str, Any] | None, ranges: dict[str, l
 
     # 작업을 잘게 쪼개 코어가 놀지 않게 한다 — 이평 쌍마다 종목수를 두 묶음으로.
     halves = [top_ns[: (len(top_ns) + 1) // 2], top_ns[(len(top_ns) + 1) // 2 :]]
-    tasks = [
-        (months, base, short, long, part, caps, intraweeks)
-        for short, long in ma_pairs
-        for part in halves
-        if part
-    ]
+    tasks = [(months, base, short, long, part, caps, intraweeks) for short, long in ma_pairs for part in halves if part]
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
     bundle = _preload(str(base["pool"]))

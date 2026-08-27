@@ -88,7 +88,14 @@ def _run_group(task: tuple) -> list[dict[str, Any]]:
     for stop in stops:
         for mult in mults:
             for cap in caps:
-                combo = dict(base, top_n=top_n, stop_loss_pct=stop, exit_ma_days=exit_ma, min_value_mult=mult, max_per_industry=cap)
+                combo = dict(
+                    base,
+                    top_n=top_n,
+                    stop_loss_pct=stop,
+                    exit_ma_days=exit_ma,
+                    min_value_mult=mult,
+                    max_per_industry=cap,
+                )
                 result = run_backtest(months, combo, context)
                 daily = pd.DataFrame(result["daily"])
                 daily["date"] = pd.to_datetime(daily["date"])
@@ -118,7 +125,12 @@ def run_tuning(months: int, settings: dict[str, Any] | None, ranges: dict[str, l
     caps = _checked(ranges.get("max_per_industry", []), MAX_PER_INDUSTRY_OPTIONS, "업종 상한", cast=int)
 
     # 작업을 잘게 쪼개 코어가 놀지 않게 한다 — (이탈선, 종목수, 손절선)마다 하나.
-    tasks = [(months, base, exit_ma, top_n, [stop], mults, caps) for exit_ma in exit_mas for top_n in top_ns for stop in stops]
+    tasks = [
+        (months, base, exit_ma, top_n, [stop], mults, caps)
+        for exit_ma in exit_mas
+        for top_n in top_ns
+        for stop in stops
+    ]
     rows: list[dict[str, Any]] = []
     bundle = _preload(str(base["pool"]))
     for group_rows in run_groups(_run_group, tasks, initializer=_init_worker, initargs=(bundle,)):
