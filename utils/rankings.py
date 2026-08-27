@@ -556,7 +556,7 @@ def hold_eligible_mask(disparity: pd.Series, short_disparity: pd.Series) -> pd.S
     (이격 <= 0) 단기 추세가 꺾이면(단기이격 < 0) 보유하지 않는다.
 
     순위 화면의 추천(✅)과 백테스트 실적이 같은 규칙을 쓰도록 여기서만 정의한다.
-    종목풀/계좌 조건(고정 보유·벤치마크)은 호출부에서 따로 건다.
+    종목풀 조건(고정 보유)은 호출부에서 따로 건다.
     """
     return disparity.notna() & (disparity > 0) & short_disparity.notna() & (short_disparity >= 0)
 
@@ -566,8 +566,10 @@ def _mark_hold_targets(df: pd.DataFrame, top_n: int) -> pd.DataFrame:
 
     조건을 모두 만족하는 종목 중 ``점수``(장기·단기 이격률 평균) 상위 ``top_n`` 개:
 
-    * 고정 보유(``exclude_from_ranking``)가 아님 — 투자 후보가 아니다
-    * 벤치마크가 아님 — 비교 기준일 뿐 매수 대상이 아니다
+    * 고정 보유(``exclude_from_ranking``)가 아님 — 투자 후보가 아니다.
+      **제외는 이 조건 하나뿐이다** — 벤치마크도 종목풀에 있으면 매수 후보다
+      (모멘텀·신고가 전략도 고정 보유만 뺀다). 벤치마크를 빼면 그 자리가 아래 순위로
+      밀려, 순위표의 ✅ 가 실제 전략 선정과 어긋난다.
     * ``이격`` 이 양수 — 장기 이평선 아래면 추세가 죽은 것으로 본다
     * ``단기이격`` 이 음수가 아님 — 단기 이평선은 손절/익절을 담당하므로,
       장기 추세가 살아있어도(이격 상위) 단기이격이 음수면 보유 대상에서 뺀다
@@ -580,11 +582,7 @@ def _mark_hold_targets(df: pd.DataFrame, top_n: int) -> pd.DataFrame:
 
     disparity = pd.to_numeric(df["이격"], errors="coerce")
     short_disparity = pd.to_numeric(df["단기이격"], errors="coerce")
-    eligible = (
-        ~df["exclude_from_ranking"].astype(bool)
-        & ~df["is_benchmark"].astype(bool)
-        & hold_eligible_mask(disparity, short_disparity)
-    )
+    eligible = ~df["exclude_from_ranking"].astype(bool) & hold_eligible_mask(disparity, short_disparity)
     # 상위 선정은 정렬과 같은 순위 점수를 쓴다 — 표의 위에서부터 ✅ 가 붙어야 한다.
     score = (
         pd.to_numeric(df["점수"], errors="coerce") if "점수" in df.columns else rank_score(disparity, short_disparity)

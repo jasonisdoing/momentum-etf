@@ -1057,6 +1057,17 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     // 순위 산정에 직접 쓰이는 지표들. 종목을 고르는 눈으로 볼 때만 필요하다.
     const rankingColumns: ColDef<RankGridRow>[] = [
       {
+        // 순위 점수 — 표를 줄 세우는 값 자체(core/strategy/scoring.rank_score).
+        // 단기·장기 왼쪽에 둬서 "이 둘로 이 점수가 나왔다" 가 읽히게 한다.
+        field: "점수",
+        headerName: "점수",
+        minWidth: 86,
+        width: 86,
+        type: "rightAligned",
+        headerTooltip: "순위 점수 — 단기·장기 이격률의 평균. 이 값 내림차순이 표의 순위다.",
+        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
+      },
+      {
         field: "단기이격",
         headerName: "단기",
         minWidth: 86,
@@ -1071,7 +1082,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         minWidth: 86,
         width: 86,
         type: "rightAligned",
-        headerTooltip: "종가와 메인 이평선의 이격률. 순위 정렬과 보유 후보 판단에 사용한다.",
+        headerTooltip: "종가와 장기 이평선의 이격률. 단기와 함께 순위 점수를 이룬다.",
         cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
       },
       {
