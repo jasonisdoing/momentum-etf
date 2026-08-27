@@ -34,7 +34,7 @@ import {
 } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { updateStockMemo } from "@/lib/stocks-store";
-import { poolHasIndustry } from "@/lib/pool-industry";
+import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
 import { MaDaysSelect } from "../components/MaDaysSelect";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { formatPrice } from "../../lib/price-format";
@@ -534,6 +534,7 @@ export function MomentumClient() {
   const poolKind = selectedPoolOption?.pool_kind ?? "";
   // 업종 컬럼·업종 상한 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
   const hasIndustryData = poolHasIndustry(selectedPoolOption);
+  const hasMarketCap = poolHasMarketCap(selectedPoolOption);
   // 업종 데이터가 없는 풀은 상한이 무의미하므로 **없음(null)으로 고정**한다 — 저장·변경 감지·튜닝이
   // 모두 이 값을 쓴다(저장값이 숫자로 남아 있으면 '저장하지 않은 변경'으로 떠서 없음으로 저장하게 된다).
   const effectiveMaxPerIndustry = hasIndustryData ? draftMaxPerIndustry : null;
@@ -720,7 +721,8 @@ export function MomentumClient() {
         // `/pools-rank` 고점 컬럼과 같은 공용 렌더러 — 0 이면 ⭐신고점.
         cellRenderer: (p: { value?: number | null }) => renderHighDrawdownCell(p.value, 1),
       },
-      marketCapRankColumn<PickRow>("market_cap_rank", !hasIndustryData),
+      // 시총은 개별주에만 있는 값이라 업종과 판정이 다르다(`@/lib/pool-industry`).
+      marketCapRankColumn<PickRow>("market_cap_rank", !hasMarketCap),
       {
         headerName: "티커",
         field: "ticker",

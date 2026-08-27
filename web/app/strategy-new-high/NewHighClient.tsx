@@ -31,7 +31,7 @@ import {
   marketCapRankColumn,
 } from "@/lib/grid-cells";
 import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
-import { poolHasIndustry } from "@/lib/pool-industry";
+import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
 import { renderStockNameCell } from "@/lib/name-highlight";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
@@ -508,10 +508,12 @@ export function NewHighClient() {
   // 업종 컬럼 노출 여부 — 표시 중인 결과의 풀 성격(pool_kind)이 1순위(개별주=표시, ETF=숨김),
   // 미설정 풀은 행 값 유무로 추정 (pools-rank·strategy-momentum 과 같은 기준).
   // 업종 컬럼·업종 상한 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
-  const hasIndustryData = useMemo(() => {
+  const selectedPoolOption = useMemo(() => {
     const pool = positions?.pool ?? view?.settings.pool ?? "";
-    return poolHasIndustry(view?.pool_options?.find((option) => option.ticker_type === pool));
+    return view?.pool_options?.find((option) => option.ticker_type === pool);
   }, [positions?.pool, view?.settings.pool, view?.pool_options]);
+  const hasIndustryData = poolHasIndustry(selectedPoolOption);
+  const hasMarketCap = poolHasMarketCap(selectedPoolOption);
 
   // 업종 데이터가 없는 풀은 상한을 **없음(null)으로 고정**한다 — 저장·변경 감지·튜닝이 모두 이 값을 쓴다
   // (모멘텀 화면과 같은 규칙. 저장값이 숫자로 남아 있으면 '저장하지 않은 변경'으로 떠서 없음으로 저장하게 된다).
@@ -603,7 +605,8 @@ export function NewHighClient() {
         cellRenderer: (p: { value?: boolean }) =>
           p.value ? <strong style={{ color: "#2f9e44" }}>보유</strong> : null,
       },
-      marketCapRankColumn<PositionRow>("market_cap_rank", !hasIndustryData),
+      // 시총은 개별주에만 있는 값이라 업종과 판정이 다르다(`@/lib/pool-industry`).
+      marketCapRankColumn<PositionRow>("market_cap_rank", !hasMarketCap),
       {
         field: "ticker",
         headerName: "티커",
@@ -857,7 +860,7 @@ export function NewHighClient() {
           return <span>{p.data.is_new ? "진입" : `${p.data.days}일`}</span>;
         },
       },
-      marketCapRankColumn<PlanRow>("market_cap_rank", !hasIndustryData),
+      marketCapRankColumn<PlanRow>("market_cap_rank", !hasMarketCap),
       {
         field: "ticker",
         headerName: "티커",
