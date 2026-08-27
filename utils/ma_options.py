@@ -1,7 +1,7 @@
-"""이평선 일수 선택지 — 시스템 전체의 단일 소스. **국가별**로 다르다.
+"""이평선 일수 선택지를 국가별로 골라 주는 곳 — 시스템 전체가 여기로 받는다.
 
-한국은 거래일 기준 3·4.5·6·9개월(60·90·120·180), 미국·호주는 관례(50·100일선)에 맞춘 50·75·100·150 —
-한국:미국 = 1.2 배로 칸마다 짝이 맞아 두 시장 결과를 같은 자리끼리 비교할 수 있다. 단기는 공통.
+**목록 자체는 `config.SHORT_MA_DAYS_BY_COUNTRY` / `LONG_MA_DAYS_BY_COUNTRY` 가 단일
+소스다** — 값을 늘리거나 줄일 때는 config 만 고친다. 이 모듈은 국가 판정과 응답 형태만 맡는다.
 
 종목풀 설정·순위·종목풀 백테스트·모멘텀·신고가(이탈선)·보유종목 알림이 모두 여기서 받는다.
 국가는 종목풀/계좌 설정의 ``country_code`` 를 그대로 쓰고, 모르는 국가면 에러(임의 기본값 없음).
@@ -10,16 +10,8 @@
 
 from __future__ import annotations
 
-_SHORT_BY_COUNTRY: dict[str, tuple[int, ...]] = {
-    "kor": (20, 30, 40),
-    "us": (20, 30, 40),
-    "au": (20, 30, 40),
-}
-_LONG_BY_COUNTRY: dict[str, tuple[int, ...]] = {
-    "kor": (60, 90, 120, 180),
-    "us": (50, 75, 100, 150),
-    "au": (50, 75, 100, 150),
-}
+from config import LONG_MA_DAYS_BY_COUNTRY as _LONG_BY_COUNTRY
+from config import SHORT_MA_DAYS_BY_COUNTRY as _SHORT_BY_COUNTRY
 
 
 def _norm(country_code: str | None) -> str:
