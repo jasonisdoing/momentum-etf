@@ -83,7 +83,7 @@ def notify_all(country: str | None = None) -> dict[str, Any]:
             positions = mix_positions(account_id)
         except Exception as exc:
             logger.warning("[MIX-NOTIFY] %s 계산 실패: %s", account_id, exc)
-            results.append({"account_id": account_id, "error": str(exc)})
+            results.append({"account_id": account_id, "name": target["name"], "error": str(exc)})
             continue
         # (예상) 그룹도 포함 — 처음 등장할 때 1건 발송되고, 종가 확정 후 확정 지시로 바뀌면
         # 키가 달라져 다시 1건 나간다. 경계에서 빠졌다 재진입하면 재발송된다(예상 알림의 비용).
@@ -95,11 +95,21 @@ def notify_all(country: str | None = None) -> dict[str, Any]:
         # 다시 커졌을 때(재발) 알림이 나간다.
         _save_state(account_id, current)
         if not grown:
-            results.append({"account_id": account_id, "changed": False, "items": len(current)})
+            results.append(
+                {"account_id": account_id, "name": target["name"], "changed": False, "items": len(current)}
+            )
             continue
         send_slack_message_v2(_format_message(target["name"], groups))
         sent += 1
-        results.append({"account_id": account_id, "changed": True, "new_or_grown": len(grown), "items": len(current)})
+        results.append(
+            {
+                "account_id": account_id,
+                "name": target["name"],
+                "changed": True,
+                "new_or_grown": len(grown),
+                "items": len(current),
+            }
+        )
     return {"sent": sent, "targets": results}
 
 
