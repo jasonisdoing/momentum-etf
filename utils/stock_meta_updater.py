@@ -753,10 +753,21 @@ def _update_reference_meta_for_type(
 
     # [KOR] 전체 종목(일반주/ETF) 맵 구성하여 루프 내 호출 최소화
     naver_etf_map: dict[str, str] = {}
+    # 국내 ETF 업종 — 네이버 「(주식)섹터」 중분류 11종을 한 번에 받아 티커 → 업종명 맵을 만든다.
+    # 개별주는 종목마다 조회하지만(fetch_industry) ETF 는 분류별 목록이라 배치 앞에서 한 번이면 된다.
+    # 섹터형이 아닌 ETF(대표지수·레버리지·인버스 등)는 맵에 없다 — 업종이 없는 게 맞다.
+    kor_etf_industry_map: dict[str, str] = {}
     if country_code == "kor":
         logger.info("네이버 API에서 한국 ETF/종목 정보를 수집합니다 (배치 캐시)...")
         naver_etf_map = dict(_get_cached_naver_etf_names_map())
         fetch_naver_kor_stock_map()  # 캐시 워밍 (일반주/ETN 이름·시장 조회 대비)
+        try:
+            from services.naver_etf_category_service import fetch_etf_industry_map
+
+            kor_etf_industry_map = fetch_etf_industry_map()
+        except Exception as exc:
+            # 업종은 표시·업종 상한용이라 없으면 그만큼 상한이 안 걸릴 뿐, 배치는 계속한다.
+            logger.warning(f"[{type_norm.upper()}] 국내 ETF 업종 맵 수집 실패 — 업종 없이 진행: {exc}")
 
     # 한국 종목풀: 기존 메타 캐시 문서를 1회 일괄 로드해 ETF 상세 TTL 판정에 사용한다.
     existing_meta_cache_map: dict[str, dict[str, Any]] = {}
@@ -801,6 +812,7 @@ def _update_reference_meta_for_type(
                 naver_etf_map,
                 type_norm,
                 naver_us_stock_map=naver_us_stock_map,
+                kor_etf_industry_map=kor_etf_industry_map,
             )
         except Exception as e:
             failures.append(f"식별 메타: {str(e)[:80]}")
@@ -1220,6 +1232,7 @@ def update_single_stock_metadata(
     account_norm: str = "",
     *,
     naver_us_stock_map: dict[str, Any] | None = None,
+    kor_etf_industry_map: dict[str, str] | None = None,
 ):
     """단일 종목의 메타데이터를 업데이트합니다."""
     logger = get_app_logger()
@@ -1288,6 +1301,12 @@ def update_single_stock_metadata(
                 stock["industry"] = industry
                 if account_norm:
                     logger.debug(f"[{account_norm.upper()}/{ticker}] 업종 획득: {industry}")
+
+        # 5. ETF 업종 — 네이버 「(주식)섹터」 중분류(소재·IT·헬스케어 …). 배치 앞에서 만든
+        # 맵에서 꺼낸다. 개별주 업종과 달리 **매번 덮어쓴다** — 분류가 바뀌면 따라가야 하고,
+        # 맵에 없으면(섹터형이 아닌 ETF) 비운다. 임의 값으로 채우면 업종 상한이 엉뚱하게 묶인다.
+        if stock.get("is_etf"):
+            stock["industry"] = (kor_etf_industry_map or {}).get(str(ticker).strip(), "")
 
     elif country_code in ("us", "au"):
         # 미국·호주 모두 종목 자체 속성(yfinance quoteType)으로 ETF 를 판정한다 — 아래 .info 블록에서 설정.
