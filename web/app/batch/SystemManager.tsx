@@ -75,8 +75,9 @@ type SystemResponse = {
 
 type SystemScheduleGridRow = SystemScheduleRow & {
   id: string;
-  // 표시 순번. 그룹 구분줄이 섞여 rowIndex 로는 셀 수 없다.
-  seq: number;
+  // 표시 번호 — 백엔드 배치 정의(`utils/system_service.SCHEDULE_ROWS`)의 `no` 가 단일 소스다.
+  // 목록 순서로 매기면 중간에 배치를 추가할 때 뒤 번호가 전부 밀린다.
+  no?: number | null;
   running: boolean;
   anyRunning: boolean;
   isDeploying: boolean;
@@ -179,8 +180,8 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
     sortable: false,
     suppressMovable: true,
     type: "rightAligned",
-    // 구분줄은 번호에서 빼야 하므로 rowIndex 대신 미리 매긴 순번을 쓴다.
-    valueGetter: (params) => (isGroupRow(params.data) ? "" : (params.data?.seq ?? "")),
+    // 구분줄에는 번호가 없다. 배치 번호는 백엔드 정의의 `no` 를 그대로 쓴다.
+    valueGetter: (params) => (isGroupRow(params.data) ? "" : (params.data?.no ?? "")),
   },
   // 가장 긴 작업명이 "종목 가격지표 업데이트"(11자)라 고정 폭으로 두고, 남는 폭은 실행 명령이 가져간다.
   { field: "job", headerName: "작업", minWidth: 150, width: 170, maxWidth: 190 },
@@ -435,7 +436,7 @@ export function SystemManager({
     return parts.join(" | ");
   };
 
-  const scheduleGridRows: SystemScheduleGridRow[] = scheduleRows.map((row, rowIndex) => {
+  const scheduleGridRows: SystemScheduleGridRow[] = scheduleRows.map((row) => {
     const nextRunAt = nextRunByJob[row.key]?.at ?? null;
     const fallbackDisplay = String(nextRunByJob[row.key]?.display ?? "-");
     const isRunning = isJobRunning(row.key);
@@ -458,7 +459,6 @@ export function SystemManager({
     return {
       ...row,
       id: row.key,
-      seq: rowIndex + 1,
       running: isRunning,
       anyRunning,
       isDeploying,

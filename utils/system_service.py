@@ -66,6 +66,9 @@ _INTRADAY_10MIN_SLOTS = [
 ]
 
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
+# `no` 는 화면(`/batch`)에 보이는 번호다 — 목록 순서로 자동 매기면 중간에 배치를 추가할 때
+# 뒤 번호가 전부 밀려서 "12번 돌려줘" 같은 대화가 어긋난다. 여기서 명시적으로 매기고,
+# 배치를 추가하면 그 자리부터 번호를 다시 적는다(10·20·100 식으로 띄우지 않는다 — 연속 번호).
 # schedule 필드는 infra/cron/crontab 과 동기화해야 합니다.
 # 운영 방식: VM cron 은 제거됐고, 서버 docker scheduler 컨테이너의 infra/server_scheduler.py
 # 가 infra/cron/crontab 을 읽어 APScheduler 로 큐에 enqueue 합니다. worker 는
@@ -73,6 +76,7 @@ _INTRADAY_10MIN_SLOTS = [
 SCHEDULE_ROWS = [
     # ① 상시 집계 — 가장 자주 돌고 짧다. 실패하면 화면 전체가 틀어진다.
     {
+        "no": 1,
         "key": "data_aggregate",
         "group": "상시 집계",
         "job": "데이터 집계",
@@ -83,6 +87,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": list(range(0, 60, 10)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
+        "no": 2,
         "key": "cache_refresh",
         "group": "상시 집계",
         "job": "가격 캐시 업데이트",
@@ -93,6 +98,7 @@ SCHEDULE_ROWS = [
     },
     # ② 장중 실행 — 장중에 도는 것들. 알림과 데이터 동기화가 섞여 있다.
     {
+        "no": 3,
         "key": "broker_balance_sync",
         "group": "장중 실행",
         "job": "증권사 잔고 동기화",
@@ -103,6 +109,7 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _BROKER_SYNC_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "no": 4,
         "key": "strategy_mix_notify_kor",
         "group": "장중 실행",
         "job": "한국 합성 액션 알림",
@@ -114,6 +121,7 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "no": 5,
         "key": "strategy_mix_notify_us",
         "group": "장중 실행",
         "job": "미국 합성 액션 알림",
@@ -125,6 +133,7 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _US_INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
+        "no": 6,
         "key": "holdings_alarm",
         "group": "장중 실행",
         "job": "보유종목 알람",
@@ -134,6 +143,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [10], "hours": [9], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "no": 7,
         "key": "leverage_ma_cross",
         "group": "장중 실행",
         "job": "레버리지 스위칭",
@@ -149,6 +159,7 @@ SCHEDULE_ROWS = [
         },
     },
     {
+        "no": 8,
         "key": "asset_summary",
         "group": "장중 실행",
         "job": "전체 자산 요약 알림",
@@ -168,6 +179,7 @@ SCHEDULE_ROWS = [
     },
     # ③ 마감 후 지표 — 하루 1~2회.
     {
+        "no": 9,
         "key": "market_breadth",
         "group": "마감 후 지표",
         "job": "시장 폭(ADR) 집계",
@@ -187,6 +199,7 @@ SCHEDULE_ROWS = [
         },
     },
     {
+        "no": 10,
         "key": "cache_refresh_full",
         "group": "마감 후 지표",
         "job": "가격 캐시 전체 재수집",
@@ -199,6 +212,7 @@ SCHEDULE_ROWS = [
     },
     # ④ 개장 전 준비 — 아침에 한 번, 오래 걸린다(실행 시각 순).
     {
+        "no": 11,
         "key": "market_hours_analysis",
         "group": "개장 전 준비",
         "job": "장 시간 분석",
@@ -208,6 +222,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "no": 12,
         "key": "reference_meta_updater",
         "group": "개장 전 준비",
         "job": "종목 메타 업데이트",
@@ -217,6 +232,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [45], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "no": 13,
         "key": "price_metrics_updater",
         "group": "개장 전 준비",
         "job": "종목 가격지표 업데이트",
@@ -226,6 +242,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [50], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "no": 14,
         "key": "us_market_stocks",
         "group": "개장 전 준비",
         "job": "미국 개별주 업데이트",
@@ -235,6 +252,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "no": 15,
         "key": "aus_market_stocks",
         "group": "개장 전 준비",
         "job": "호주 개별주 업데이트",
@@ -244,6 +262,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [10], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "no": 16,
         "key": "kor_market_stocks",
         "group": "개장 전 준비",
         "job": "한국 지수 구성종목",
@@ -253,6 +272,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [20], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "no": 17,
         "key": "kor_dividend_stocks",
         "group": "개장 전 준비",
         "job": "한국 배당주 지표",
@@ -264,6 +284,7 @@ SCHEDULE_ROWS = [
     },
     # ⑤ 상시 운영 — 자동으로 돌고 손댈 일이 거의 없다.
     {
+        "no": 18,
         "key": "live_24h_slack",
         "group": "상시 운영",
         "job": "24H 시세 알림",
@@ -273,6 +294,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
     },
     {
+        "no": 19,
         "key": "db_backup",
         "group": "상시 운영",
         "job": "DB 백업",

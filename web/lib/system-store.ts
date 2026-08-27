@@ -13,6 +13,8 @@ type SystemPoolRow = {
 };
 
 type SystemScheduleRow = {
+  /** 화면 표시 번호 — 백엔드 배치 정의(`SCHEDULE_ROWS`)의 `no` 가 단일 소스다. */
+  no?: number | null;
   key: string;
   job: string;
   target: string;

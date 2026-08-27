@@ -160,9 +160,10 @@ def _get_job_display(job_name: str) -> tuple[int | None, str]:
     try:
         from utils.system_service import SCHEDULE_ROWS  # 지연 임포트
 
-        for idx, row in enumerate(SCHEDULE_ROWS, start=1):
+        for row in SCHEDULE_ROWS:
             if row.get("key") == job_name:
-                return idx, str(row.get("job") or job_name)
+                # 번호는 정의에 박힌 `no` 다 — 목록 순서로 세면 화면 번호와 어긋난다.
+                return row.get("no"), str(row.get("job") or job_name)
     except Exception:
         pass
     return None, job_name
