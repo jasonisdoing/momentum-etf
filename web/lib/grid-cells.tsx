@@ -94,3 +94,55 @@ export function marketCapRankColumn<T>(field: ColDefField<T>, hide: boolean): Co
     cellStyle: () => ({ color: "var(--text-muted)" }),
   };
 }
+
+/** 종목 메모 컬럼 — 순위·모멘텀·합성·자산 관리가 **같은 값**을 보여주는 수기 칸.
+ *  메모는 계좌가 아니라 **종목**에 붙는다(`utils/stock_memo_store`). 화면마다 컬럼을
+ *  새로 짜면 라벨·폭·빈 값 표기·문자열 에디터 지정이 갈리므로 여기서만 정의한다.
+ *
+ *  저장 방식은 화면마다 다르다:
+ *   · `onSave` 를 주면 셀을 벗어날 때 바로 저장한다(순위·모멘텀·합성).
+ *   · 안 주면 그리드 값만 바뀐다 — 화면이 자기 저장 흐름을 태운다(자산 관리의 일괄 저장).
+ *  `editable` 이 false 인 행은 편집도 안 되고 빈 값도 흐리게 표시하지 않는다(현금 행 등). */
+export function stockMemoColumn<T>(options: {
+  field: ColDefField<T>;
+  width?: number;
+  editable?: (row: T | undefined) => boolean;
+  cellClass?: (row: T | undefined) => string | undefined;
+  onSave?: (row: T, memo: string) => void;
+}): ColDef<T> {
+  const { field, width = 150, editable, cellClass, onSave } = options;
+  const canEdit = (row: T | undefined) => (editable ? editable(row) : true);
+  const column: ColDef<T> = {
+    field,
+    headerName: "메모",
+    headerTooltip: "종목에 붙는 메모 — 자산 관리·순위·전략 화면이 같은 값을 본다",
+    width,
+    sortable: false,
+    // 빈 문자열이 많아 자동 추론이 흔들린다 — 문자열 에디터를 명시한다.
+    cellDataType: "text",
+    editable: (params) => canEdit(params.data),
+    cellClass: (params) =>
+      cellClass ? cellClass(params.data) : canEdit(params.data) ? "appEditableCell" : undefined,
+    valueParser: (params) => String(params.newValue ?? "").trim(),
+    cellRenderer: (params: { data?: T; value?: string | null }) => {
+      const text = String(params.value ?? "").trim();
+      if (text) return <span>{text}</span>;
+      if (!canEdit(params.data)) return <span>-</span>;
+      return <span style={{ color: "var(--text-muted)" }}>-</span>;
+    },
+  };
+  if (!onSave) return column;
+  return {
+    ...column,
+    valueSetter: (params) => {
+      const row = params.data;
+      const next = String(params.newValue ?? "").trim();
+      if (!row || !canEdit(row) || next === String((row as Record<string, unknown>)[field as string] ?? "")) {
+        return false;
+      }
+      (row as Record<string, unknown>)[field as string] = next;
+      onSave(row, next);
+      return true;
+    },
+  };
+}

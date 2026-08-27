@@ -15,6 +15,7 @@ import {
   renderIndustryCell,
   tradeValueMultStyle,
   marketCapRankColumn,
+  stockMemoColumn,
 } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { readSessionTtlCache, writeSessionTtlCache } from "@/lib/session-ttl-cache";
@@ -1002,29 +1003,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           });
         },
       },
-      {
-        // 종목 메모 — 자산 관리(`/assets`)의 매입단가 옆 칸과 같은 값(종목에 붙는다).
-        // 순위와 무관한 수기 칸이라 모드와 상관없이 바로 고칠 수 있다(셀을 벗어나면 저장).
+      // 종목 메모 — 전 화면 공용 컬럼(`@/lib/grid-cells`). 순위와 무관한 수기 칸이라
+      // 모드와 상관없이 바로 고칠 수 있다(셀을 벗어나면 저장).
+      stockMemoColumn<RankGridRow>({
         field: "메모",
-        headerName: "메모",
-        width: 150,
-        sortable: false,
-        cellDataType: "text",
-        editable: (params) => !params.data?.__isAddingRow,
-        cellClass: "assetsEditableCell",
-        valueParser: (params) => String(params.newValue ?? "").trim(),
-        valueSetter: (params) => {
-          const next = String(params.newValue ?? "").trim();
-          if (!params.data || params.data.__isAddingRow || next === String(params.data.메모 ?? "")) {
-            return false;
-          }
-          params.data.메모 = next;
-          void handleMemoChange(String(params.data.티커 ?? ""), next);
-          return true;
-        },
-        cellRenderer: (params: { value?: string | null }) =>
-          params.value ? <span>{params.value}</span> : <span className="text-muted">-</span>,
-      },
+        onSave: (row, memo) => void handleMemoChange(String(row.티커 ?? ""), memo),
+        editable: (row) => !row?.__isAddingRow,
+      }),
       {
         field: "업종",
         headerName: "업종",

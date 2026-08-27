@@ -3678,6 +3678,31 @@ a {
   color: #fff;
 }
 
+/* 편집 가능한 셀 — 녹색 배경. **그리드 클래스에 매이지 않는 전역 표준**이다.
+   예전에는 `.assetsAgGrid` 안에서만 정의돼서, 같은 메모 칸이 자산 관리에서는 녹색이고
+   순위·전략 화면에서는 흰색이었다. 새 화면에 편집 셀을 넣을 때 이 클래스만 붙이면 된다.
+   `appDirtyCell` 은 저장 전 변경분 강조(자산 관리의 일괄 저장 흐름). */
+.ag-cell.appEditableCell {
+  background: rgba(46, 160, 67, 0.08);
+}
+
+.ag-cell.appEditableCell:hover {
+  background: rgba(46, 160, 67, 0.14);
+}
+
+.ag-cell.appEditableCell.appDirtyCell {
+  background: rgba(46, 160, 67, 0.22);
+  font-weight: 700;
+}
+
+.ag-cell.appEditableCell.appDirtyCell:hover {
+  background: rgba(46, 160, 67, 0.28);
+}
+
+.ag-cell.appEditableCell.ag-cell-inline-editing {
+  background: rgba(46, 160, 67, 0.18);
+}
+
 .assetsAgGrid .ag-cell.assetsEditableCell {
   background: rgba(46, 160, 67, 0.08);
 }
