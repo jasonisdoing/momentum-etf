@@ -15,6 +15,7 @@ import {
 import { AppAgGrid } from "../components/AppAgGrid";
 import { MonthsSelect } from "../components/MonthsSelect";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
+import { updateStockMemo } from "@/lib/stocks-store";
 import {
   AppLoadingProgress,
   startProgressRamp,
@@ -33,6 +34,7 @@ import { createAppGridTheme } from "../components/app-grid-theme";
 import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
 import {
   STOCK_NAME_COLUMN_MIN_WIDTH,
+  stockMemoColumn,
   formatSignedPct,
   signColor,
 } from "@/lib/grid-cells";
@@ -395,6 +397,8 @@ const SLOT_KEYS = ["a", "b"] as const;
 /** 보유 표 행 — 현금 행도 같은 표에 넣는다 (비중 합이 100%임을 한눈에 보이게). */
 type PositionRow = Holding & {
   is_cash?: boolean;
+  /** 종목 메모 — 계좌가 아니라 종목에 붙는다(자산 관리·순위 화면과 같은 값). */
+  memo?: string;
   amount: number | null;
   shares: number | null;
 };
@@ -420,6 +424,18 @@ type ActionGroup = { key: string; title: string; items: ActionItem[] };
  *  배분은 이 화면 헤더에서 정한다. */
 export function StrategyMixClient() {
   const toast = useToast();
+  /** 종목 메모 저장 — 순위·모멘텀 화면과 같은 API(종목에 붙는다). */
+  const saveMemo = useCallback(
+    async (ticker: string, memo: string) => {
+      try {
+        await updateStockMemo(ticker, memo);
+        toast.success("메모 저장 완료");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "메모 저장에 실패했습니다.");
+      }
+    },
+    [toast],
+  );
   // 계좌 하나만 고른다 — 슬리브별 종목풀은 계좌 설정에 붙어 있다.
   const [accountId, setAccountId] = useState<string>("");
   const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
@@ -674,6 +690,13 @@ export function StrategyMixClient() {
             })
           ),
       },
+      // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다).
+      // 현금 행은 종목이 아니라 편집 대상이 아니다.
+      stockMemoColumn<PositionRow>({
+        field: "memo",
+        editable: (row) => !row?.is_cash,
+        onSave: (row, memo) => void saveMemo(row.ticker, memo),
+      }),
       {
         field: "sources",
         headerName: "전략",
@@ -897,7 +920,7 @@ export function StrategyMixClient() {
       },
     });
     return columns;
-  }, [totalAsset, labelA, labelB]);
+  }, [totalAsset, labelA, labelB, saveMemo]);
 
   const periodRows = useMemo<PeriodRow[]>(() => {
     if (!view || viewMode === "trades") return [];

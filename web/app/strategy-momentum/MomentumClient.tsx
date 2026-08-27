@@ -26,13 +26,14 @@ import {
   INDUSTRY_COLUMN_WIDTH,
   STOCK_NAME_COLUMN_MIN_WIDTH,
   formatSignedPct,
-  marketBadgeCellStyle,
   renderHighDrawdownCell,
   renderIndustryCell,
   signColor,
   marketCapRankColumn,
+  stockMemoColumn,
 } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
+import { updateStockMemo } from "@/lib/stocks-store";
 import { MaDaysSelect } from "../components/MaDaysSelect";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { formatPrice } from "../../lib/price-format";
@@ -121,6 +122,8 @@ type PickRow = {
   high_drawdown_pct: number | null;
   market_cap_eok: number | null;
   market_cap_rank: number | null;
+  /** 종목 메모 — 계좌가 아니라 종목에 붙는다(자산 관리·순위 화면과 같은 값). */
+  memo?: string;
   signal_short_pct: number | null;
   signal_long_pct: number | null;
   current_short_pct: number | null;
@@ -358,6 +361,18 @@ const formatSigned = formatSignedPct;
 
 export function MomentumClient() {
   const toast = useToast();
+  /** 종목 메모 저장 — 계좌가 아니라 종목에 붙는다(순위·자산 관리 화면과 같은 값·같은 API). */
+  const saveMemo = useCallback(
+    async (ticker: string, memo: string) => {
+      try {
+        await updateStockMemo(ticker, memo);
+        toast.success("메모 저장 완료");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "메모 저장에 실패했습니다.");
+      }
+    },
+    [toast],
+  );
   const [view, setView] = useState<View | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -709,19 +724,6 @@ export function MomentumClient() {
         // `/pools-rank` 고점 컬럼과 같은 공용 렌더러 — 0 이면 ⭐신고점.
         cellRenderer: (p: { value?: number | null }) => renderHighDrawdownCell(p.value, 1),
       },
-      // 마켓(KOSPI/KOSDAQ)은 한국 풀에서만 의미가 있다 — 통합 풀 구분 표시용.
-      ...(picksCountry === "kor"
-        ? [
-            {
-              headerName: "마켓",
-              field: "market",
-              headerTooltip: "종목의 소속 마켓 — 코스피+코스닥 통합 풀 구분용",
-              width: 80,
-              // `/pools-rank` 마켓 컬럼과 같은 공용 배지 스타일.
-              cellStyle: (p) => marketBadgeCellStyle(p.value),
-            } as ColDef<PickRow>,
-          ]
-        : []),
       marketCapRankColumn<PickRow>("market_cap_rank", !hasIndustryData),
       {
         headerName: "티커",
@@ -749,6 +751,11 @@ export function MomentumClient() {
             trendBroken: isTrendBroken(p.data?.current_short_pct, p.data?.current_long_pct),
           }),
       },
+      // 종목 메모 — 순위·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
+      stockMemoColumn<PickRow>({
+        field: "memo",
+        onSave: (row, memo) => void saveMemo(row.ticker, memo),
+      }),
       // 업종 데이터가 아예 없는 풀(ETF 모음 등)에서는 빈 컬럼을 숨긴다.
       ...(hasIndustryData
         ? [
@@ -808,7 +815,7 @@ export function MomentumClient() {
       ),
     ];
     // 월별 라벨·국가·업종 유무가 선정 응답에 실려 온다 — 바뀌면(월 전환·풀 전환) 컬럼도 다시 만든다.
-  }, [hasIndustryData, monthlyLabels, picksCountry]);
+  }, [hasIndustryData, monthlyLabels, picksCountry, saveMemo]);
 
   // 월간 표 — 연간과 같은 집계형(월/전략/벤치). 매매 내역은 주간 표가 담당한다.
   // 표 헤더의 지수 이름 — 신고가·합성 화면과 같은 표기(값에 % 가 붙으므로 헤더엔 붙이지 않는다).

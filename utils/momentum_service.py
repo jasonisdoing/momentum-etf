@@ -1262,6 +1262,12 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
 
     name_by_ticker = {row["ticker"]: row.get("name") or row["ticker"] for row in universe}
 
+    # 종목 메모 — 계좌가 아니라 **종목**에 붙는다(utils/stock_memo_store). 순위·자산 관리
+    # 화면과 같은 값이고, 유니버스 전체를 한 번에 읽는다.
+    from utils.stock_memo_store import get_stock_memos
+
+    memo_by_ticker = get_stock_memos([row["ticker"] for row in universe])
+
     # 선정분(1~N) — 판정일 종가로 확정된 순서 그대로. 이 주에 실제로 들고 가는 목록이라
     # 지금 값으로 다시 세우면 확정된 편입 순서가 흔들린다.
     selected_rows = [
@@ -1277,11 +1283,14 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             "ticker": item["ticker"],
             "name": item["name"],
             "market": item.get("market", ""),
+            "memo": memo_by_ticker.get(item["ticker"], ""),
             "industry": industry_map_by_ticker.get(item["ticker"], ""),
             "currency": currency,
             **price_info(item["ticker"]),
             "signal_short_pct": round(item["short_disparity_pct"], 1),
-            "signal_long_pct": round(item["momentum_score"], 1),
+            "signal_long_pct": round(item["disparity_pct"], 1),
+            # 순위 점수(장기·단기 평균) — 줄 세우기 기준. 이격률과 다른 값이라 따로 싣는다.
+            "score": round(item["momentum_score"], 1),
             **(current := current_disparity(item["ticker"])),
             **exit_flags(item["ticker"]),
             **exit_forecast(item["ticker"], current),
@@ -1306,13 +1315,15 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             "ticker": item["ticker"],
             "name": item["name"],
             "market": item.get("market", ""),
+            "memo": memo_by_ticker.get(item["ticker"], ""),
             "industry": industry_map_by_ticker.get(item["ticker"], ""),
             "currency": currency,
             **price_info(item["ticker"]),
             # 판정일 기준 이격 — 현재 기준 후보라 판정일 값은 같은 이평선으로 재계산한다.
             **signal_disparity(item["ticker"]),
             "current_short_pct": round(item["short_disparity_pct"], 1),
-            "current_long_pct": round(item["momentum_score"], 1),
+            "current_long_pct": round(item["disparity_pct"], 1),
+            "score": round(item["momentum_score"], 1),
             **exit_flags(item["ticker"]),
         }
         for item in reserve
@@ -1330,17 +1341,19 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             "ticker": item["ticker"],
             "name": item["name"],
             "market": item.get("market", ""),
+            "memo": memo_by_ticker.get(item["ticker"], ""),
             "industry": industry_map_by_ticker.get(item["ticker"], ""),
             "currency": currency,
             **price_info(item["ticker"]),
             # 판정일 기준 이격 — 후보 밖이었어도 같은 이평선으로 재계산해 보여준다.
             **signal_disparity(item["ticker"]),
             "current_short_pct": round(item["short_disparity_pct"], 1),
-            "current_long_pct": round(item["momentum_score"], 1),
+            "current_long_pct": round(item["disparity_pct"], 1),
+            "score": round(item["momentum_score"], 1),
         }
         for item in extra_expected
     ]
-    other_rows.sort(key=lambda row: (row["current_long_pct"] is None, -(row["current_long_pct"] or 0.0)))
+    other_rows.sort(key=lambda row: (row["score"] is None, -(row["score"] or 0.0)))
     for offset, row in enumerate(other_rows, start=len(selected_rows) + 1):
         row["rank"] = offset
 
