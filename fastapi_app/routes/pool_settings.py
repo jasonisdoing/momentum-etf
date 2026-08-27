@@ -29,7 +29,7 @@ router = APIRouter(prefix="/internal/pool-settings", tags=["pool-settings"])
 class PoolSettingsUpdatePayload(BaseModel):
     pool_id: str
     values: dict[str, Any]
-    save_method: str = "수동"
+    save_method: str = "신규"
 
 
 class PoolDefinitionPayload(BaseModel):

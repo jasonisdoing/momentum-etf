@@ -101,7 +101,7 @@ type AccountDraft = {
 };
 
 /** 그리드 행 — 편집 중인 초안 그대로에 표시용 필드를 얹는다. */
-type AccountGridRow = AccountDraft & { __dirty: boolean; __updatedAt?: string | null };
+type AccountGridRow = AccountDraft & { __dirty: boolean; __updatedAt?: string | null; __saveMethod?: string | null };
 
 // 셀렉트·체크박스 에디터가 들어가는 행이라 기본(34px)보다 조금 높인다.
 const accountGridTheme = createAppGridTheme({ rowHeight: 38 });
@@ -687,7 +687,7 @@ export function AccountSettingsManager() {
     () =>
       rows.map((account) => {
         const draft = drafts[account.account_id] ?? toDraft(account);
-        return { ...draft, __dirty: isDirty(draft, account), __updatedAt: account.updated_at };
+        return { ...draft, __dirty: isDirty(draft, account), __updatedAt: account.updated_at, __saveMethod: account.save_method };
       }),
     [drafts, rows],
   );
@@ -961,7 +961,9 @@ export function AccountSettingsManager() {
       flex: 1,
       minWidth: 320,
       valueFormatter: (params) => (params.value ? formatKstDateTime(String(params.value)) : "저장 이력 없음"),
-      cellRenderer: (params: ICellRendererParams<AccountGridRow>) => <LastSavedCell value={params.value} />,
+      cellRenderer: (params: ICellRendererParams<AccountGridRow>) => (
+        <LastSavedCell value={params.value} method={params.data?.__saveMethod} />
+      ),
     },
   ];
 

@@ -63,6 +63,8 @@ type PoolEntry = {
   pool_kind?: string | null;
   settings: SettingsMap;
   updated_at?: string;
+  /** 저장 경로 — "수동"(종목풀 설정 화면) / "모멘텀 전략"(전략 화면·튜닝 적용) 등. */
+  save_method?: string;
 };
 
 type PoolSettingsResponse = {
@@ -115,7 +117,7 @@ const EMPTY_DRAFT: PoolDraft = {
 };
 
 /** 그리드 행 — 편집 중인 초안 그대로에 표시용 필드를 얹는다. */
-type PoolGridRow = PoolDraft & { __dirty: boolean; __updatedAt?: string };
+type PoolGridRow = PoolDraft & { __dirty: boolean; __updatedAt?: string; __saveMethod?: string };
 
 // 셀렉트 에디터가 들어가는 행이라 기본(34px)보다 조금 높인다.
 const poolSettingsGridTheme = createAppGridTheme({ rowHeight: 38 });
@@ -325,7 +327,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     () =>
       rows.map((pool) => {
         const draft = drafts[pool.ticker_type] ?? toDraft(pool);
-        return { ...draft, __dirty: isDirty(draft, pool), __updatedAt: pool.updated_at };
+        return { ...draft, __dirty: isDirty(draft, pool), __updatedAt: pool.updated_at, __saveMethod: pool.save_method };
       }),
     [drafts, rows],
   );
@@ -544,44 +546,44 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
   });
 
   const columnDefs: ColDef<PoolGridRow>[] = [
-    { field: "ticker_type", headerName: "ID", width: 130 },
-    { field: "name", headerName: "이름", width: 150, editable: true },
-    selectCol("icon", "아이콘", 90, () => ["🇰🇷", "🇦🇺", "🇺🇸"]),
-    numberCol("order", "순서", 80),
-    selectCol("country_code", "국가", 88, () => [...COUNTRY_OPTIONS]),
-    selectCol("currency", "통화", 88, () => [...CURRENCY_OPTIONS]),
-    selectCol("pool_kind", "구분", 96, () => ["stock", "etf"], {
+    { field: "ticker_type", headerName: "ID", width: 112 },
+    { field: "name", headerName: "이름", width: 176, editable: true },
+    selectCol("icon", "아이콘", 72, () => ["🇰🇷", "🇦🇺", "🇺🇸"]),
+    numberCol("order", "순서", 64),
+    selectCol("country_code", "국가", 76, () => [...COUNTRY_OPTIONS]),
+    selectCol("currency", "통화", 76, () => [...CURRENCY_OPTIONS]),
+    selectCol("pool_kind", "구분", 80, () => ["stock", "etf"], {
       valueFormatter: (params) => ({ stock: "개별주", etf: "ETF" })[String(params.value)] ?? "미설정",
     }),
-    numberCol("TOP_N_HOLD", "종목수", 90),
+    numberCol("TOP_N_HOLD", "종목", 64),
     selectCol(
       "SHORT_MA_DAYS",
-      "단기 이평선",
-      110,
+      "단기",
+      76,
       (row) => data.constraints.ma_options_by_country[row.country_code]?.short_ma_options ?? [],
       { valueFormatter: (params) => (params.value ? `${params.value}일` : "미설정") },
     ),
     selectCol(
       "LONG_MA_DAYS",
-      "장기 이평선",
-      110,
+      "장기",
+      76,
       (row) => data.constraints.ma_options_by_country[row.country_code]?.long_ma_options ?? [],
       { valueFormatter: (params) => (params.value ? `${params.value}일` : "미설정") },
     ),
-    selectCol("BUY_SLIPPAGE_PCT", "매수 슬리피지", 120, () => slippageOptions, {
+    selectCol("BUY_SLIPPAGE_PCT", "매수", 72, () => slippageOptions, {
       valueFormatter: (params) => (params.value === "" ? "미설정" : `${params.value}%`),
     }),
-    selectCol("SELL_SLIPPAGE_PCT", "매도 슬리피지", 120, () => slippageOptions, {
+    selectCol("SELL_SLIPPAGE_PCT", "매도", 72, () => slippageOptions, {
       valueFormatter: (params) => (params.value === "" ? "미설정" : `${params.value}%`),
     }),
-    selectCol("STOPLOSS_THRESHOLD_PCT", "손절기준", 100, () => stoplossOptions, {
+    selectCol("STOPLOSS_THRESHOLD_PCT", "손절", 72, () => stoplossOptions, {
       valueFormatter: (params) => (params.value === "" ? "미설정" : `${params.value}%`),
       headerTooltip: "보유 종목의 수익률이 이 값 이하면 손절 알림을 보냅니다(계좌에서 손절🔔을 켠 경우).",
     }),
     {
       field: "benchmarkTicker",
       headerName: "벤치마크",
-      width: 260,
+      width: 290,
       sortable: false,
       cellRenderer: (params: ICellRendererParams<PoolGridRow>) => {
         const row = params.data;
@@ -615,7 +617,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         );
       },
     },
-    selectCol("marketRegimeTicker", "시장 레짐", 120, () => marketIndices.map((item) => item.ticker), {
+    selectCol("marketRegimeTicker", "시장 레짐", 104, () => marketIndices.map((item) => item.ticker), {
       valueFormatter: (params) =>
         marketIndices.find((item) => item.ticker === params.value)?.name ?? (params.value ? String(params.value) : "미설정"),
     }),
@@ -624,9 +626,12 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       field: "__updatedAt",
       headerName: "마지막 저장",
       flex: 1,
-      minWidth: 320,
+      minWidth: 330,
       valueFormatter: (params) => (params.value ? formatKstDateTime(String(params.value)) : "저장 이력 없음"),
-      cellRenderer: (params: ICellRendererParams<PoolGridRow>) => <LastSavedCell value={params.value} />,
+      // 저장 경로(사용자 수동 / 모멘텀 전략·튜닝)를 함께 보여준다 — 누가 바꾼 값인지 알아야 한다.
+      cellRenderer: (params: ICellRendererParams<PoolGridRow>) => (
+        <LastSavedCell value={params.value} method={params.data?.__saveMethod} />
+      ),
     },
   ];
 
