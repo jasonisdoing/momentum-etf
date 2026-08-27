@@ -24,14 +24,14 @@ def main() -> int:
     country = (sys.argv[1].strip().lower() if len(sys.argv) > 1 else None) or None
     result = notify_all(country)
     for row in result["targets"]:
+        # 감시 단위는 계좌다 — 합성 A·B 종목풀은 계좌 설정에 딸려 있다.
+        label = row.get("name") or row["account_id"]
         if "error" in row:
-            print(f"[strategy_mix_notify] {row['pool']} 실패 — {row['error']}")
+            print(f"[strategy_mix_notify] {label} 실패 — {row['error']}")
         elif row.get("changed"):
-            print(
-                f"[strategy_mix_notify] {row['pool']} 발송 — 신규·증가 {row['new_or_grown']}건 (전체 {row['items']}건)"
-            )
+            print(f"[strategy_mix_notify] {label} 발송 — 신규·증가 {row['new_or_grown']}건 (전체 {row['items']}건)")
         else:
-            print(f"[strategy_mix_notify] {row['pool']} 변화 없음 ({row['items']}건 유지)")
+            print(f"[strategy_mix_notify] {label} 변화 없음 ({row['items']}건 유지)")
     if not result["targets"]:
         print("[strategy_mix_notify] 감시 대상 계좌 없음")
     return 0
