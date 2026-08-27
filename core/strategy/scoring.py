@@ -196,7 +196,7 @@ def hold_eligible(long_disparity_pct: Any, short_disparity_pct: Any) -> Any:
     단기 추세가 꺾이면 보유하지 않는다. 순위 화면의 추천(✅)·모멘텀 선정·백테스트가
     같은 규칙을 쓰도록 여기서만 정의한다.
 
-    스칼라와 Series 둘 다 받는다 — `rank_score` 와 같다. 종목풀 조건(고정 보유)은
+    스칼라와 Series 둘 다 받는다 — `rank_score` 와 같다. 종목풀 조건(제외 종목)은
     호출부에서 따로 건다.
     """
     if isinstance(long_disparity_pct, pd.Series) or isinstance(short_disparity_pct, pd.Series):

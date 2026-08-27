@@ -3,7 +3,7 @@
 전략 규칙
 --------
 1. 유니버스: 설정에서 고른 종목풀 1개(전체 활성 풀 중 선택 — 한국·미국·호주 등).
-   고정 보유 종목(exclude_from_ranking)은 제외. 코스피+코스닥 통합 같은 혼합
+   제외 종목(exclude_from_ranking)은 제외. 코스피+코스닥 통합 같은 혼합
    유니버스는 종목풀 자체를 합쳐 만든다(풀 관리 화면).
 2. 점수: **장기 이평선 이격(%)** — 계산식은 순위 화면과 같되, 이평선 일수는
    **전략 전용 값**(풀별 설정의 short/long_ma_days)을 쓴다.
@@ -378,7 +378,7 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
 def load_universe(pool: str) -> list[dict[str, str]]:
     """선택한 종목풀 1개의 종목 목록. [{ticker, name, pool}]
 
-    고정 보유 종목(exclude_from_ranking)은 투자 후보가 아니므로 제외한다
+    제외 종목(exclude_from_ranking)은 투자 후보가 아니므로 제외한다
     (순위·종목풀 백테스트와 같은 규칙).
     """
     from utils.stock_list_io import _load_ticker_type_stocks_raw

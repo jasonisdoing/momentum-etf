@@ -720,7 +720,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   maxWidth: "100%",
                 }}
               >
-                📌고정 {params.value == null ? "-" : formatNumber(params.value, 0)}
+                📌제외 {params.value == null ? "-" : formatNumber(params.value, 0)}
               </span>
             );
           }
@@ -777,7 +777,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         colId: "추천",
         headerName: "✓",
-        headerTooltip: "추천 — 고정 종목·벤치마크가 아니고, 장기가 양수이며, 단기가 음수가 아닌 종목 중 장기 상위 N개(보유 종목수)",
+        headerTooltip: "추천 — 제외 종목·벤치마크가 아니고, 장기가 양수이며, 단기가 음수가 아닌 종목 중 장기 상위 N개(보유 종목수)",
         minWidth: 44,
         width: 44,
         sortable: true,
@@ -862,7 +862,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         ? [
           {
             field: "exclude_from_ranking",
-            headerName: "고정 종목",
+            headerName: "제외 종목",
             minWidth: 84,
             width: 84,
             cellStyle: { textAlign: "center" },
@@ -882,7 +882,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       startTransition(async () => {
                         try {
                           await updateStockExclude(selectedTickerType, ticker, checked);
-                          toast.success(`[${ticker}] 고정 종목 ${checked ? "설정" : "해제"} 완료`);
+                          toast.success(`[${ticker}] 제외 종목 ${checked ? "설정" : "해제"} 완료`);
                           void load({
                             ticker_type: selectedTickerType,
                             ma_rule_override: maRule ?? undefined,
@@ -890,7 +890,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                             skip_session_cache: true,
                           });
                         } catch (error) {
-                          showErrorToast(error instanceof Error ? error.message : "고정 종목 설정에 실패했습니다.");
+                          showErrorToast(error instanceof Error ? error.message : "제외 종목 설정에 실패했습니다.");
                         }
                       });
                     }}

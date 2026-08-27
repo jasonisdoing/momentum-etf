@@ -184,7 +184,7 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
     value_clean = {key: value for key, value in (values or {}).items() if value is not None}
     # 코드 기본값 없음 — 값은 base(DB)/values(요청)에서만 온다.
     source = {**base_clean, **value_clean}
-    # 기존 문서에는 MAX_TICKERS 하나만 있다. 새 구조에서는 기존 슬롯을 모두 고정 종목으로 간주한다.
+    # 기존 문서에는 MAX_TICKERS 하나만 있다. 새 구조에서는 기존 슬롯을 모두 제외 종목으로 간주한다.
     if (
         source.get("VARIABLE_TICKERS") is None
         and source.get("FIXED_TICKERS") is None
@@ -246,7 +246,7 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
 def _filter_rank_excluded_tickers(
     tickers: list[dict[str, Any]], settings: dict[str, Any]
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """순위 고정 종목(exclude_from_ranking=true)을 계산/백테스트 유니버스에서 제외한다."""
+    """순위 제외 종목(exclude_from_ranking=true)을 계산/백테스트 유니버스에서 제외한다."""
     if not tickers:
         return [], []
 
@@ -929,7 +929,7 @@ def calculate_asset_helper_weights_for(
     return_map = _build_return_map(close_frame)
     daily_change_map = _build_daily_change_map(tickers, close_frame)
 
-    # 고정 보유만 쓰므로 추세 점수·이평선 배열이 필요 없다(관련 표시 컬럼은 None으로 남긴다).
+    # 제외 종목만 쓰므로 추세 점수·이평선 배열이 필요 없다(관련 표시 컬럼은 None으로 남긴다).
     alignment_map: dict[str, str | None] = {}
 
     rows: list[dict[str, Any]] = []
@@ -941,7 +941,7 @@ def calculate_asset_helper_weights_for(
         sortino_raw_value = sortino_raw_row.get(ticker)
         meta = ticker_meta[ticker]
 
-        # 고정 보유는 가격 캐시 존재만 확인한다(이격/추세 요구 없음).
+        # 제외 종목은 가격 캐시 존재만 확인한다(이격/추세 요구 없음).
         close_count = int(close_frame[ticker].dropna().shape[0]) if ticker in close_frame.columns else 0
         if close_count <= 0:
             excluded_reasons.append(f"{ticker}: 가격 캐시 없음")
