@@ -1,4 +1,4 @@
-/** 종목풀에 업종이 들어오는지 — 업종 컬럼·업종 상한을 쓰는 모든 화면의 단일 소스.
+/** 종목풀에 어떤 값이 들어오는지 — 업종·시총 컬럼을 쓰는 모든 화면의 단일 소스.
  *
  * 순위(`/pools-rank`)·모멘텀(`/strategy-momentum`)·신고가(`/strategy-new-high`)가 각자
  * 같은 판정을 들고 있었고, 조건이 하나씩 어긋나 화면마다 업종 컬럼이 다르게 보였다.
@@ -26,4 +26,17 @@ export function poolHasIndustry(pool: PoolIndustrySource | null | undefined): bo
   if (poolKind === "etf") return country === "kor";
   // 풀 성격이 미설정인 풀은 판단 근거가 없다 — 없는 것으로 본다(임의로 켜지 않는다).
   return false;
+}
+
+/** 종목풀에 **시가총액**이 들어오는지 — 시총·시총순위 컬럼을 쓰는 화면의 단일 소스.
+ *
+ * 업종(`poolHasIndustry`)과 **기준이 다르다.** 지금까지는 업종 플래그를 시총 컬럼에도
+ * 그대로 재사용했는데(`marketCapRankColumn(field, !hasIndustryData)`), 한국 ETF 에 업종이
+ * 들어오면서 시총이 없는데도 시총 컬럼이 열리게 됐다.
+ *
+ * 시총은 **개별주에만 있는 값**이다. ETF 에 대응하는 건 시가총액이 아니라 순자산총액
+ * (`total_net_assets`)이고, 그건 별도 컬럼으로 보여준다.
+ */
+export function poolHasMarketCap(pool: PoolIndustrySource | null | undefined): boolean {
+  return String(pool?.pool_kind ?? "").trim().toLowerCase() === "stock";
 }

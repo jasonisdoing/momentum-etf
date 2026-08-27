@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
 import { formatPoolLabel } from "@/lib/pool-label";
-import { poolHasIndustry } from "@/lib/pool-industry";
+import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
 import {
   INDUSTRY_COLUMN_MIN_WIDTH,
   INDUSTRY_COLUMN_WIDTH,
@@ -664,6 +664,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   // (개별주=표시, ETF=숨김), 미설정 풀은 행 값 유무로 추정 (strategy-momentum 과 같은 기준).
   // 업종 컬럼·업종 상한 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
   const hasIndustryData = poolHasIndustry(selectedTickerTypeItem);
+  const hasMarketCap = poolHasMarketCap(selectedTickerTypeItem);
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
     const leadingColumns: ColDef<RankGridRow>[] = [
@@ -919,7 +920,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           } as ColDef<RankGridRow>,
         ]
         : []),
-      marketCapRankColumn<RankGridRow>("시총순위", !hasIndustryData),
+      // 시총은 개별주에만 있는 값이라 업종과 판정이 다르다(`@/lib/pool-industry`).
+      marketCapRankColumn<RankGridRow>("시총순위", !hasMarketCap),
       {
         field: "티커",
         headerName: "티커",
