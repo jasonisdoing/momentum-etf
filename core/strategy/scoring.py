@@ -138,6 +138,30 @@ def compute_ma_disparity(close_series: pd.Series, ma_days: int) -> float | None:
     return float(score.iloc[-1])
 
 
+def rank_score(long_disparity_pct: Any, short_disparity_pct: Any) -> Any:
+    """**순위 점수** — 종목을 줄 세우는 단일 기준.
+
+    순위 화면(`/pools-rank`)의 정렬·추천(✅)과 모멘텀 전략(`/strategy-momentum`)의 선정이
+    이 함수 하나만 쓴다. 예전에는 두 곳이 각자 "장기 이격률" 을 점수로 삼아, 정의를 바꾸려면
+    양쪽을 따로 고쳐야 했고 한쪽만 고치면 두 화면의 순서가 조용히 갈렸다.
+
+    현재 정의: **장기·단기 이격률의 평균**. 장기만 보면 장기 추세는 좋지만 지금 밀리는
+    종목이 위에 남고, 단기만 보면 반등 한 번에 순위가 뒤집힌다. 둘을 같은 무게로 본다.
+
+    스칼라(종목 하나)와 Series(프레임 전체) 둘 다 받는다 — 호출부가 형태를 맞출 필요가 없다.
+    값이 없으면 None/NaN 을 그대로 돌려준다(임의 값으로 채우지 않는다).
+    """
+    if isinstance(long_disparity_pct, pd.Series) or isinstance(short_disparity_pct, pd.Series):
+        long_series = pd.to_numeric(long_disparity_pct, errors="coerce")
+        short_series = pd.to_numeric(short_disparity_pct, errors="coerce")
+        return (long_series + short_series) / 2.0
+    if long_disparity_pct is None or short_disparity_pct is None:
+        return None
+    if pd.isna(long_disparity_pct) or pd.isna(short_disparity_pct):
+        return None
+    return (float(long_disparity_pct) + float(short_disparity_pct)) / 2.0
+
+
 def compute_rule_percentile_frame(
     close_frame: pd.DataFrame,
     ma_days: int,
@@ -211,6 +235,7 @@ __all__ = [
     "calculate_maps_score",
     "calculate_signed_percentile_score",
     "compute_trend_frame",
+    "rank_score",
     "compute_rule_percentile_frame",
     "compute_eligibility_mask",
     "combine_rule_percentiles",

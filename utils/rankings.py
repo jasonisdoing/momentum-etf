@@ -13,7 +13,7 @@ from config import (
     MARKET_SCHEDULES,
     METRIC_WINDOW_MONTHS,
 )
-from core.strategy.scoring import build_composite_rank_scores, compute_trend_frame
+from core.strategy.scoring import build_composite_rank_scores, compute_trend_frame, rank_score
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
 from utils.asx_ticker import ensure_asx_prefix
 from utils.cache_utils import (
@@ -524,7 +524,7 @@ def _normalize_ranking_values(
         *(monthly_labels or []),
     ]
     one_decimal_columns = ["RSI"]
-    score_columns = ["추세", "이격", "단기이격"]
+    score_columns = ["추세", "이격", "단기이격", "점수"]
     score_columns.extend(
         str(column) for column in normalized.columns if str(column).startswith("추세(") and str(column).endswith(")")
     )
@@ -563,7 +563,7 @@ def hold_eligible_mask(disparity: pd.Series, short_disparity: pd.Series) -> pd.S
 def _mark_hold_targets(df: pd.DataFrame, top_n: int) -> pd.DataFrame:
     """규칙상 보유 대상인 종목에 ``보유대상`` 을 표시한다. 화면의 추천(✅) 기준.
 
-    조건을 모두 만족하는 종목 중 ``이격``(장기 이평선 기준) 상위 ``top_n`` 개:
+    조건을 모두 만족하는 종목 중 ``점수``(장기·단기 이격률 평균) 상위 ``top_n`` 개:
 
     * 고정 보유(``exclude_from_ranking``)가 아님 — 투자 후보가 아니다
     * 벤치마크가 아님 — 비교 기준일 뿐 매수 대상이 아니다
@@ -584,7 +584,11 @@ def _mark_hold_targets(df: pd.DataFrame, top_n: int) -> pd.DataFrame:
         & ~df["is_benchmark"].astype(bool)
         & hold_eligible_mask(disparity, short_disparity)
     )
-    df.loc[disparity[eligible].nlargest(int(top_n)).index, "보유대상"] = True
+    # 상위 선정은 정렬과 같은 순위 점수를 쓴다 — 표의 위에서부터 ✅ 가 붙어야 한다.
+    score = (
+        pd.to_numeric(df["점수"], errors="coerce") if "점수" in df.columns else rank_score(disparity, short_disparity)
+    )
+    df.loc[score[eligible].nlargest(int(top_n)).index, "보유대상"] = True
     return df
 
 
@@ -609,6 +613,7 @@ def _apply_common_rank_scores(
         df["추세"] = pd.NA
         df["이격"] = pd.NA
         df["단기이격"] = pd.NA
+        df["점수"] = pd.NA
         for column in score_columns:
             if column not in df.columns:
                 df[column] = pd.NA
@@ -628,6 +633,7 @@ def _apply_common_rank_scores(
         df["추세"] = pd.NA
         df["이격"] = pd.NA
         df["단기이격"] = pd.NA
+        df["점수"] = pd.NA
         for column in score_columns:
             df[column] = pd.NA
         return df
@@ -697,6 +703,11 @@ def _apply_common_rank_scores(
         }
     ).astype("object")
     df.loc[composite_missing, "단기이격"] = None
+
+    # 순위 점수 — 정렬과 추천(✅)이 쓰는 단일 기준. 모멘텀 전략과 **같은 함수**다.
+    # 표시용 「장기」(이격)·「단기」(단기이격)는 원천 값 그대로 두고, 점수만 따로 붙인다.
+    df["점수"] = rank_score(pd.to_numeric(df["이격"], errors="coerce"), pd.to_numeric(df["단기이격"], errors="coerce"))
+    df.loc[composite_missing, "점수"] = None
 
     return df
 
@@ -872,10 +883,11 @@ def build_ticker_type_rankings(
         return float(value)
 
     def _sort_key(row: pd.Series) -> tuple[int, float, str]:
-        trend = row.get("추세")
+        # 순위 점수(장기·단기 이격률 평균) 내림차순. 값이 없는 종목은 뒤로.
+        score = row.get("점수")
         return (
-            1 if trend is None or pd.isna(trend) else 0,
-            _to_sortable_score(trend),
+            1 if score is None or pd.isna(score) else 0,
+            _to_sortable_score(score),
             str(row.get("티커", "")),
         )
 

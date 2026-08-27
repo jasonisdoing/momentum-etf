@@ -32,6 +32,7 @@ from typing import Any
 import pandas as pd
 
 from config import MAX_PER_INDUSTRY_OPTIONS, STOP_LOSS_PCT_OPTIONS, TOP_N_OPTIONS
+from core.strategy.scoring import rank_score
 from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
 from utils.price_series import positive_prices
 from utils.strategy_settings import coerce_to_options
@@ -464,10 +465,11 @@ def momentum_metrics(
 ) -> dict[str, float] | None:
     """종목풀 설정 이평선 기준 이격 — 순위 화면과 같은 신호의 월간 버전.
 
-    점수 = **장기 이평선 이격(%)** = (종가 ÷ 장기 이평 − 1) × 100. 이평선 일수는
-    종목풀 설정(SHORT_MA_DAYS/LONG_MA_DAYS)을, 이평 종류(SMA/EMA)는 공통 설정을
-    그대로 쓴다 — 순위/종목풀 백테스트와 신호가 같고 리듬(월간 유지)만 다르다.
-    단기 이격은 후보 자격 판정(hold_eligible_mask)에 쓴다.
+    이격률 계산은 (종가 ÷ 이평 − 1) × 100 이고, 이평선 일수는 종목풀 설정
+    (SHORT_MA_DAYS/LONG_MA_DAYS)을, 이평 종류(SMA/EMA)는 공통 설정을 그대로 쓴다 —
+    순위/종목풀 백테스트와 신호가 같고 리듬(월간 유지)만 다르다.
+    순위 점수(`momentum_score`)는 순위 화면과 같은 `rank_score` 가 정한다.
+    단기 이격은 후보 자격 판정(hold_eligible_mask)에도 쓴다.
     ``as_of`` 를 주면 그 날짜까지의 데이터만 사용한다(백테스트·판정일 재현).
     """
     series = pd.to_numeric(close, errors="coerce").dropna()
@@ -494,7 +496,9 @@ def momentum_metrics(
     return {
         "disparity_pct": disparity_pct,
         "short_disparity_pct": short_disparity_pct,
-        "momentum_score": disparity_pct,
+        # 순위 점수 — 순위 화면과 **같은 함수**를 쓴다(core.strategy.scoring.rank_score).
+        # 정의를 바꾸려면 그 함수 하나만 고친다.
+        "momentum_score": rank_score(disparity_pct, short_disparity_pct),
     }
 
 
