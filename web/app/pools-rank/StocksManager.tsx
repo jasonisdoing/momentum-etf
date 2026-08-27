@@ -19,7 +19,6 @@ import {
   stockMemoColumn,
 } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
-import { readSessionTtlCache, writeSessionTtlCache } from "@/lib/session-ttl-cache";
 import type { PoolAddProgress } from "@/lib/pool-add";
 import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { addStockCandidate, deleteStock, loadMovablePools, moveStockToPool, updateStockBucket, updateStockMemo, validateStockCandidate, updateStockExclude, type StocksAccountItem } from "@/lib/stocks-store";
@@ -165,8 +164,6 @@ const TOP_N_CHOICES: number[] = [2, 5, 8, 10];
 const MAX_PER_INDUSTRY_CHOICES: number[] = [1, 2, 3, -1];
 
 const rankGridTheme = createAppGridTheme();
-const RANK_SESSION_CACHE_TTL_MS = 60_000;
-const RANK_SESSION_CACHE_PREFIX = "stocks:rank";
 const DEFAULT_TICKER_TYPE = "";
 
 /** 그리드에 어떤 컬럼 묶음을 보여줄지. 화면 전환용 `pageMode` 와는 다른 축이다. */
@@ -340,11 +337,6 @@ function formatAudMarketCap(value: number | null): string {
   return `${formatNumber(value, 0)} AUD`;
 }
 
-function buildRankSessionCacheKey(query: string): string {
-  return `${RANK_SESSION_CACHE_PREFIX}:${query || "default"}`;
-}
-
-
 export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
   const toast = useToast();
   const lastBlockedToastRef = useRef<string | null>(null);
@@ -500,13 +492,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     /** 업종 상한 — 화면에서 바꿔 본 값. -1 = 제한 없음. */
     max_per_industry?: number;
     bootstrap?: boolean;
-    skip_session_cache?: boolean;
   }) {
     const requestSequence = ++loadSequenceRef.current;
     setLoading(true);
     setError(null);
     clearCacheWarningState();
-    let showedCachedPayload = false;
 
     try {
       const search = new URLSearchParams();
@@ -528,15 +518,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       }
 
       const query = search.size > 0 ? `?${search.toString()}` : "";
-      const sessionCacheKey = buildRankSessionCacheKey(query);
-      if (!next?.skip_session_cache) {
-        const cachedPayload = readSessionTtlCache<RankResponse>(sessionCacheKey, RANK_SESSION_CACHE_TTL_MS);
-        if (cachedPayload && requestSequence === loadSequenceRef.current) {
-          applyRankPayload(cachedPayload);
-          setLoading(false);
-          showedCachedPayload = true;
-        }
-      }
 
       rankFetchAbortRef.current?.abort();
       const abortController = new AbortController();
@@ -554,16 +535,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         return;
       }
 
-      writeSessionTtlCache(sessionCacheKey, payload);
       applyRankPayload(payload);
     } catch (loadError) {
       if (loadError instanceof DOMException && loadError.name === "AbortError") {
         return;
       }
       if (requestSequence !== loadSequenceRef.current) {
-        return;
-      }
-      if (showedCachedPayload) {
         return;
       }
       let msg = loadError instanceof Error ? loadError.message : "순위 데이터를 불러오지 못했습니다.";
@@ -898,7 +875,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                             ticker_type: selectedTickerType,
                             ma_rule_override: maRule ?? undefined,
                             as_of_date: selectedAsOfDate,
-                            skip_session_cache: true,
                           });
                         } catch (error) {
                           showErrorToast(error instanceof Error ? error.message : "제외 종목 설정에 실패했습니다.");
@@ -1506,7 +1482,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ticker_type: selectedTickerType,
           ma_rule_override: maRule ?? undefined,
           as_of_date: selectedAsOfDate,
-          skip_session_cache: true,
         });
       } catch (saveError) {
         showErrorToast(saveError instanceof Error ? saveError.message : "변경사항 저장에 실패했습니다.");
@@ -1568,7 +1543,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         ticker_type: selectedTickerType,
         ma_rule_override: maRule ?? undefined,
         as_of_date: selectedAsOfDate,
-        skip_session_cache: true,
       });
     });
   }
@@ -1609,7 +1583,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ticker_type: selectedTickerType,
           ma_rule_override: maRule ?? undefined,
           as_of_date: selectedAsOfDate,
-          skip_session_cache: true,
         });
       } catch (deleteError) {
         showErrorToast(deleteError instanceof Error ? deleteError.message : "종목 삭제에 실패했습니다.");

@@ -5,10 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from functools import lru_cache
-from time import monotonic
 from typing import Any
 
-from config import CACHE_TTL_LIVE
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 
@@ -61,30 +59,30 @@ def ensure_stock_meta_readable() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 인메모리 캐시 (기존 호환)
+# 인메모리 캐시
 # ---------------------------------------------------------------------------
-_TICKER_TYPE_STOCKS_CACHE: dict[str, tuple[float, list[dict]]] = {}
+# **종목 목록에는 TTL 캐시를 두지 않는다.** 종목을 추가·삭제·이동하면 그 즉시 화면에
+# 보여야 하는데, TTL 이 있으면 만료 전까지 옛 목록이 남아 "고쳤는데 반영이 안 된다"가
+# 된다(이동 직후 출발 풀에 그대로 남고 도착 풀에 안 보이는 증상이 여기서 나왔다).
+# stock_meta 조회는 풀당 문서 수백 건이라 매번 읽어도 부담이 없다.
 _LISTING_CACHE: dict[tuple[str, str], str | None] = {}
-_CACHE_TTL_SECONDS = CACHE_TTL_LIVE
 
 
 def _invalidate_cache(ticker_type: str | None = None) -> None:
-    """캐시를 무효화한다. ticker_type가 None이면 전체 캐시를 초기화한다."""
-    if ticker_type is None:
-        _TICKER_TYPE_STOCKS_CACHE.clear()
-        _LISTING_CACHE.clear()
-    else:
-        norm = (ticker_type or "").strip().lower()
-        _TICKER_TYPE_STOCKS_CACHE.pop(norm, None)
-        # listing 캐시에서 해당 계좌 관련 항목 제거는 비용이 크므로 전체 초기화
-        _LISTING_CACHE.clear()
+    """종목 목록 변경에 딸린 캐시를 모두 무효화한다.
+
+    ``_build_active_pool_ticker_map`` 은 만료가 없는 ``lru_cache`` 라 여기서 지우지 않으면
+    영영 옛 상태로 남는다 — 이 모듈의 쓰기 함수들이 모두 이 하나만 부르므로 여기에 둔다.
+    """
+    del ticker_type  # 두 캐시 모두 풀 구분이 없어 항상 전체를 지운다
+    _LISTING_CACHE.clear()
+    _build_active_pool_ticker_map.cache_clear()
 
 
 # 외부 모듈(예: stocks_service)에서 stock_meta 를 직접 갱신한 뒤 호출할 수 있도록
 # 공개 alias 를 제공한다.
 def invalidate_ticker_type_cache(ticker_type: str | None = None) -> None:
     _invalidate_cache(ticker_type)
-    _build_active_pool_ticker_map.cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -93,18 +91,14 @@ def invalidate_ticker_type_cache(ticker_type: str | None = None) -> None:
 
 
 def _load_ticker_type_stocks_raw(ticker_type: str) -> list[dict]:
-    """DB에서 해당 종목풀의 활성(is_deleted!=True) 종목 메타데이터를 로드한다 (TTL 캐시 적용)."""
-    type_norm = (ticker_type or "").strip().lower()
-    cached = _TICKER_TYPE_STOCKS_CACHE.get(type_norm)
-    if cached is not None:
-        cached_at, cached_docs = cached
-        if monotonic() - cached_at < _CACHE_TTL_SECONDS:
-            return cached_docs
+    """DB에서 해당 종목풀의 활성(is_deleted!=True) 종목 메타데이터를 로드한다.
 
+    **캐시하지 않는다** — 추가·삭제·이동이 즉시 보여야 한다(위 주석 참고).
+    """
+    type_norm = (ticker_type or "").strip().lower()
     coll = _get_collection()
     if coll is None:
         logger.error("MongoDB 연결 실패 — stock_meta 컬렉션을 읽을 수 없습니다.")
-        _TICKER_TYPE_STOCKS_CACHE[type_norm] = (monotonic(), [])
         return []
 
     try:
@@ -121,11 +115,9 @@ def _load_ticker_type_stocks_raw(ticker_type: str) -> list[dict]:
             doc.pop("updated_at", None)
             doc.pop("is_deleted", None)
             doc.pop("deleted_at", None)
-        _TICKER_TYPE_STOCKS_CACHE[type_norm] = (monotonic(), docs)
         return docs
     except Exception as exc:
         logger.error("stock_meta 컬렉션 조회 실패 (type=%s): %s", type_norm, exc)
-        _TICKER_TYPE_STOCKS_CACHE[type_norm] = (monotonic(), [])
         return []
 
 

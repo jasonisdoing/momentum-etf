@@ -27,13 +27,10 @@ MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 
 
 from __future__ import annotations
 
-import threading
 from datetime import datetime
-from time import monotonic
 from typing import Any
 
 from config import (
-    CACHE_TTL_LIVE,
     MAX_PER_INDUSTRY_OPTIONS,
     POOL_KIND_OPTIONS,
     SLIPPAGE_PCT_OPTIONS,
@@ -107,12 +104,10 @@ _FLOAT_KEYS = ("BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT", "STOPLOSS_THRESHOLD_PCT"
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 _ALLOWED_CURRENCIES = {"KRW", "AUD", "USD"}
 
-_CACHE_TTL_SECONDS = CACHE_TTL_LIVE
-_overlay_cache: dict[str, dict[str, Any]] | None = None
-_overlay_cached_at: float = 0.0
-_overlay_lock = threading.Lock()
-_pool_docs_cache: tuple[float, list[dict[str, Any]]] | None = None
-_pool_docs_lock = threading.Lock()
+# **종목풀 정의·오버라이드에는 TTL 캐시를 두지 않는다.** 설정을 고치면 그 즉시 화면에
+# 반영돼야 하는데, TTL 이 있으면 만료 전까지 옛 값이 남아 "저장했는데 안 바뀐다"가 된다.
+# pool_settings 는 풀 수십 건짜리 작은 컬렉션이라 매번 읽어도 부담이 없다.
+# 설정 변경에 딸린 무거운 캐시(랭킹·전략)는 invalidate_overlay_cache() 가 계속 지운다.
 
 
 class PoolSettingsError(ValueError):
@@ -146,13 +141,10 @@ def get_pool_market_regime_index(settings: dict[str, Any]) -> dict[str, str] | N
 
 
 def invalidate_overlay_cache() -> None:
-    """오버라이드 캐시를 비운다 (저장 직후 호출)."""
-    global _overlay_cache, _overlay_cached_at, _pool_docs_cache
-    with _overlay_lock:
-        _overlay_cache = None
-        _overlay_cached_at = 0.0
-    with _pool_docs_lock:
-        _pool_docs_cache = None
+    """종목풀 설정 변경에 딸린 캐시를 비운다 (저장 직후 호출).
+
+    설정 자체는 캐시하지 않으므로 지울 것이 없고, 설정에 의존하는 로더·랭킹 캐시만 비운다.
+    """
     _invalidate_dependent_caches()
 
 
@@ -270,12 +262,6 @@ def _normalize_pool_doc(doc: dict[str, Any]) -> dict[str, Any]:
 
 def load_pool_definitions() -> list[dict[str, Any]]:
     """DB에서 종목풀 정의를 읽는다. 쓰지 않을 풀은 비활성이 아니라 삭제로 관리한다."""
-    global _pool_docs_cache
-    now = monotonic()
-    with _pool_docs_lock:
-        if _pool_docs_cache is not None and now - _pool_docs_cache[0] < _CACHE_TTL_SECONDS:
-            return [dict(doc) for doc in _pool_docs_cache[1]]
-
     docs = [
         _normalize_pool_doc(dict(doc)) for doc in _db()[COLLECTION].find({}) if not _is_internal_pool_id(doc.get("_id"))
     ]
@@ -284,9 +270,6 @@ def load_pool_definitions() -> list[dict[str, Any]]:
             "종목풀 설정이 DB(pool_settings)에 없습니다. `/pools-settings` 화면에서 종목풀을 생성하세요."
         )
     docs.sort(key=lambda item: (int(item["order"]), str(item["ticker_type"])))
-
-    with _pool_docs_lock:
-        _pool_docs_cache = (now, [dict(doc) for doc in docs])
     return docs
 
 
@@ -314,18 +297,8 @@ def _load_overrides_from_db() -> dict[str, dict[str, Any]]:
 
 
 def get_overrides() -> dict[str, dict[str, Any]]:
-    """TTL 캐시된 전체 오버라이드 맵을 반환한다 ({pool_id: {key: value}})."""
-    global _overlay_cache, _overlay_cached_at
-    now = monotonic()
-    with _overlay_lock:
-        if _overlay_cache is not None and (now - _overlay_cached_at) < _CACHE_TTL_SECONDS:
-            return _overlay_cache
-    # 락 밖에서 DB 조회 (느린 I/O 동안 락 보유 방지)
-    loaded = _load_overrides_from_db()
-    with _overlay_lock:
-        _overlay_cache = loaded
-        _overlay_cached_at = monotonic()
-        return loaded
+    """전체 오버라이드 맵을 반환한다 ({pool_id: {key: value}}). 캐시하지 않는다."""
+    return _load_overrides_from_db()
 
 
 def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> dict[str, Any]:
