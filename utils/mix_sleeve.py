@@ -294,32 +294,41 @@ def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
 
     남는 몫(현금)은 슬롯을 채우지 않는 것으로 표현된다 — 합성이 이미 그렇게 센다.
     """
-    from utils.portfolio_service import load_universe
+    # 현재가·일간은 /strategy-portfolio 화면과 **같은 공용 함수**로 구한다. 판정이 없다고
+    # 시세까지 비워 두면 합성이 목표수량·매매수량을 못 내고(가격 없는 종목은 수량 계산에서
+    # 빠진다) 그 슬롯의 오늘의 액션이 통째로 사라진다.
+    from utils.portfolio_service import universe_metrics
 
-    name_by = {row["ticker"]: row["name"] for row in load_universe(spec.pool)}
-    weights = list(raw.get("weights") or [])
-    targets = [
-        {
-            "ticker": str(row["ticker"]).strip(),
-            "name": name_by.get(str(row["ticker"]).strip(), str(row["ticker"]).strip()),
-            "price": None,
-            "change_pct": None,
-            "status": f"목표 {float(row['weight_pct']):.2f}%",
-            "return_pct": None,
-            "held_label": "",
-            "is_exiting": False,
-            # 저장 비중을 그대로 싣는다 — 합성이 `슬리브 몫 × drift_pct / 100` 으로 목표를
-            # 잡으므로, 종목 30% + 현금 10% 는 슬리브 몫의 30%·10% 가 된다(비율 유지).
-            "drift_pct": float(row["weight_pct"]),
-        }
-        for row in weights
-    ]
+    metrics_by = {row["ticker"]: row for row in universe_metrics(spec.pool)}
+    targets: list[dict[str, Any]] = []
+    for row in list(raw.get("weights") or []):
+        ticker = str(row["ticker"]).strip()
+        metrics = metrics_by.get(ticker) or {}
+        targets.append(
+            {
+                "ticker": ticker,
+                "name": metrics.get("name") or ticker,
+                "price": metrics.get("current_price"),
+                "change_pct": metrics.get("daily_change_pct"),
+                "status": f"목표 {float(row['weight_pct']):.2f}%",
+                "return_pct": None,
+                "held_label": "",
+                "is_exiting": False,
+                # 저장 비중을 그대로 싣는다 — 합성이 `슬리브 몫 × drift_pct / 100` 으로 목표를
+                # 잡으므로, 종목 30% + 현금 10% 는 슬리브 몫의 30%·10% 가 된다(비율 유지).
+                "drift_pct": float(row["weight_pct"]),
+            }
+        )
     # 종목 비중 합이 100 미만이면 나머지가 현금이다 — 슬리브 몫에서 그만큼이 안 채워진다
     # (합성이 `슬리브 몫 − 담긴 종목 비중 합` 을 그 슬리브의 현금으로 센다).
+    # 통화는 종목풀 설정 것 — 비워 두면 두 슬롯이 모두 포트폴리오일 때 합성이 KRW 로
+    # 떨어져 미국 풀의 액션 금액이 원화로 찍힌다.
+    from utils.settings_loader import get_ticker_type_settings
+
     return SlotState(
         spec=spec,
         top_n=len(targets),
-        currency="",
+        currency=str((get_ticker_type_settings(spec.pool) or {}).get("currency") or "KRW").strip().upper(),
         targets=targets,
         held_tickers={row["ticker"] for row in targets},
         held_count=len(targets),
