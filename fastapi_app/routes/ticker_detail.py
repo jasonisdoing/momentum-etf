@@ -132,6 +132,14 @@ def _resolve_ticker_meta_item(
         if not ticker_key:
             raise ValueError("ETF: 뒤에 티커가 필요합니다.")
 
+    # 호주 종목은 stock_meta 에 `ASX:MVR` 로 저장된다(시스템 표준 표기, utils/asx_ticker).
+    # 접두사를 뗀 `MVR` 로 비교하면 호주 풀에서 한 건도 매칭되지 않고, 아래 폴백에서
+    # 미국 티커로 넘어가 yfinance 가 `$MVR` 를 조회하다 실패한다.
+    from utils.asx_ticker import ensure_asx_prefix
+
+    def _pool_ticker(country_code: str) -> str:
+        return ensure_asx_prefix(ticker_key) if str(country_code).strip().lower() == "au" else ticker_key
+
     configs = load_ticker_type_configs()
     matches: list[dict[str, object]] = []
     for config in configs:
@@ -147,11 +155,12 @@ def _resolve_ticker_meta_item(
         country_code = config.get("country_code", "")
         for item in get_etfs(ticker_type):
             item_ticker = str(item.get("ticker") or "").strip().upper()
-            if item_ticker != ticker_key:
+            if item_ticker != _pool_ticker(country_code):
                 continue
             matches.append(
                 {
-                    "ticker": ticker_key,
+                    # 저장 표기를 그대로 돌려준다 — 이 값이 계좌 보유·실험 포트폴리오에 그대로 쓰인다.
+                    "ticker": item_ticker,
                     "name": str(item.get("name") or "").strip() or ticker_key,
                     "ticker_type": ticker_type,
                     "country_code": country_code,
@@ -192,7 +201,7 @@ def _resolve_ticker_meta_item(
     # ASX: 접두사로 호주를 명시했는데 풀에 없으면 즉시 호주로 결정 (미국 폴백 차단)
     if forced_ticker_type == "aus" and _allowed("aus"):
         return {
-            "ticker": ticker_key,
+            "ticker": ensure_asx_prefix(ticker_key),
             "name": ticker_key,
             "ticker_type": "aus",
             "country_code": "au",
@@ -220,7 +229,7 @@ def _resolve_ticker_meta_item(
 
     if ticker_key.endswith(".AX") and _allowed("aus"):
         return {
-            "ticker": ticker_key,
+            "ticker": ensure_asx_prefix(ticker_key),
             "name": ticker_key,
             "ticker_type": "aus",
             "country_code": "au",
