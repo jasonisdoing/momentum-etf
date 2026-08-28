@@ -99,7 +99,13 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
     apiPath: "/api/market/us-etf",
     errorLabel: "미국 ETF 마켓 데이터를 불러오지 못했습니다.",
     exclusionGroups: {
-      채권: ["BOND", "TREASURY"],
+      // 채권·현금성 — 이름 표기가 다양해 키워드를 넓게 건다. 앞뒤 공백이 있는 키워드는
+      // 단어 단위 매칭이다(비교 시 이름 양끝에 공백을 붙인다) — "CLO" 를 그냥 걸면 CLOUD 가 걸린다.
+      채권: [
+        "BOND", "TREASURY", "T-BILL", "TBILL", " CLO ", "MUNICIPAL", " MUNI ", "CORPORATE",
+        "HIGH YIELD", "FLOATING RATE", " GOVT ", "GOVERNMENT", "AGGREGATE", "FIXED INCOME",
+        "CREDIT", "1-3M BOX", "MORTGAGE", " MBS ", "BANK LOAN", "SENIOR LOAN", "PREFERRED",
+      ],
       "인버스/숏": ["INVERSE", "SHORT", "BEAR", "-0.5X", "-1X"],
       // 배수 표기가 제각각이라(2X·4X ETN·1.5X) 배수 키워드를 넓게 건다. "-2X" 류는 2X 에 걸린다.
       레버리지: ["1.5X", "2X", "3X", "4X", "5X", "LEVERAGED", "ULTRA", "레버리지"],
@@ -118,7 +124,7 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
     showNavColumns: false,
     showListing: false,
     capHeader: "거래대금($M)",
-    capFilterDefault: "10",
+    capFilterDefault: "50",
     volumeFilterDefault: "500000",
   },
 };
@@ -260,7 +266,8 @@ export function MarketManager({
           return false;
         }
 
-        const nameUpper = row.name.toUpperCase();
+        // 양끝 공백 패딩 — 공백 포함 키워드(" CLO " 등)가 이름 첫/끝 단어에도 걸리게 한다.
+        const nameUpper = ` ${row.name.toUpperCase()} `;
         if (!newOnly && expandedKeywords.some((keyword) => nameUpper.includes(keyword.toUpperCase()))) {
           return false;
         }
