@@ -768,6 +768,8 @@ def current_portfolio_dates(benchmark_close: pd.Series, country: str) -> tuple[p
     판정일 종가가 확정된 다음날(달력)부터 그 교체분을 보여준다. 판정일이 고정이므로
     같은 구간 안에서는 몇 번을 실행해도 결과가 같다.
     """
+    from utils.trading_calendar import is_market_day_completed
+
     now = pd.Timestamp.now()
     today = now.normalize()
     index = benchmark_close.index
@@ -775,14 +777,16 @@ def current_portfolio_dates(benchmark_close: pd.Series, country: str) -> tuple[p
     this_monday = (today - pd.Timedelta(days=int(today.weekday()))).normalize()
 
     # 다음 주부터 거슬러 올라가며 '판정 종가가 확정된' 가장 최근 교체를 찾는다.
-    # 금요일 종가로 판정이 끝나면(주말) 아직 체결 전이라도 그 교체분을 보여준다 —
-    # 주말에 검토하라고 만든 리듬이라 확정된 다음 포트폴리오가 보여야 한다.
+    # 판정일 **장이 끝나면 그날 바로** 그 교체분을 보여준다(체결은 다음 교체일 시가다).
+    # 예전에는 달력으로 하루가 지나야 반영해서, 금요일 마감 후 토요일까지 옛 포트폴리오가
+    # 남았다 — 그 사이 오늘의 액션이 이번주 목표로 나와 월요일에 사자마자 파는 지시가 됐다.
     for weeks_back in range(-1, 6):
         pair = week_rebalance_pair(country, this_monday - pd.Timedelta(weeks=weeks_back))
         if pair is None:
             continue
         rebalance_date, signal_calendar = pair
-        if today <= signal_calendar or cache_max < signal_calendar:
+        # 종가 확정(장 마감) + 가격 캐시 반영, 둘 다 돼야 판정할 수 있다.
+        if cache_max < signal_calendar or not is_market_day_completed(country, signal_calendar):
             continue
         prior = index[index <= signal_calendar]
         if len(prior) == 0:
