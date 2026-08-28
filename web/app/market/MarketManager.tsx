@@ -6,8 +6,11 @@ import type { ColDef, RowClassParams } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { formatPoolLabel } from "@/lib/pool-label";
-import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
+import { addTickersToPool, buildPoolAddSkipNotice, splitByPoolMembership } from "@/lib/pool-add";
+import type { PoolAddProgress } from "@/lib/pool-add";
+import { loadStocksTable } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { AppModal } from "../components/AppModal";
 import { TickerDetailLink } from "../components/TickerDetailLink";
@@ -21,6 +24,7 @@ import {
 type MarketRowItem = {
   ticker: string;
   ticker_pools: string;
+  ticker_pool_types?: string[];
   name: string;
   listed_at: string;
   daily_change_pct: number | null;
@@ -99,8 +103,17 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
       "인버스/숏": ["INVERSE", "SHORT", "BEAR", "-1X"],
       레버리지: ["2X", "3X", "LEVERAGED", "ULTRA", "레버리지"],
       커버드콜: ["COVERED CALL", "BUYWRITE", "PREMIUM INCOME", "OPTION INCOME", "커버드콜"],
+      // 가상자산 — 국내 증권사가 현물 ETF 중개를 못 해 거래 불가. 이름 키워드라 선물형(BITO)도
+      // 같이 빠진다(현물/선물을 이름만으로 구분할 수 없음). 코인명은 신상품을 못 쫓아가므로
+      // 가상자산 전문 운용사명(BITWISE 등)을 함께 건다 — BHYP("BITWISE HYPERLIQUID") 같은 케이스.
+      가상자산: [
+        "BITCOIN", "ETHEREUM", "ETHER", "SOLANA", "XRP", "CRYPTO", "STAKING",
+        "BITWISE", "GRAYSCALE", "21SHARES", "HASHDEX", "CANARY", "OSPREY",
+        "HYPERLIQUID", "DOGECOIN", "LITECOIN", "AVALANCHE", "CHAINLINK", "CARDANO", "DIGITAL ASSET",
+        "비트코인", "이더리움",
+      ],
     },
-    defaultExcluded: ["채권", "인버스/숏", "레버리지", "커버드콜"],
+    defaultExcluded: ["채권", "인버스/숏", "레버리지", "커버드콜", "가상자산"],
     showNavColumns: false,
     showListing: false,
     capHeader: "거래대금($M)",
@@ -182,6 +195,7 @@ export function MarketManager({
   const [selectedTickerPool, setSelectedTickerPool] = useState("");
   const [selectedBucketId, setSelectedBucketId] = useState<number | "">("");
   const [adding, setAdding] = useState(false);
+  const [addProgress, setAddProgress] = useState<PoolAddProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const previousMarketFiltersRef = useRef<{
@@ -352,43 +366,50 @@ export function MarketManager({
       return;
     }
 
-    setAdding(true);
-    let addedCount = 0;
-    let duplicateCount = 0;
-    const failedTickers: string[] = [];
-
-    for (const ticker of selectedTickers) {
-      try {
-        await addStockCandidate(tickerPool, ticker, bucketId);
-        addedCount += 1;
-      } catch (addError) {
-        const message = addError instanceof Error ? addError.message : "종목 추가 처리에 실패했습니다.";
-        if (message.includes("이미 등록된 종목입니다.")) {
-          duplicateCount += 1;
-          continue;
-        }
-        failedTickers.push(ticker);
-      }
+    // 이미 어딘가의 풀에 있는 종목은 보내지 않는다 — 개별주 화면들과 같은 공용 흐름(pool-add).
+    const split = splitByPoolMembership(selectedTickers, rows, tickerPool);
+    const skipNotice = buildPoolAddSkipNotice(selectedTickers.length, split);
+    if (skipNotice) {
+      toast.warning(skipNotice);
     }
+    if (split.fresh.length === 0) {
+      setAddModalOpen(false);
+      return;
+    }
+
+    setAdding(true);
+    setAddProgress(null);
+    const { added, skipped, blocked, failed } = await addTickersToPool(
+      split.fresh,
+      tickerPool,
+      bucketId,
+      setAddProgress,
+      // 진행도에 종목명을 보여주기 위한 표의 이름 — 추가 조회 없이 넘긴다.
+      new Map(rows.map((row) => [String(row.ticker).trim().toUpperCase(), row.name])),
+    );
 
     setAdding(false);
+    setAddProgress(null);
     setAddModalOpen(false);
 
-    if (addedCount > 0) {
-      toast.success(`종목 ${addedCount}개를 추가했습니다.`);
+    if (added > 0) {
+      toast.success(`종목 ${added}개를 추가했습니다.`);
     }
-    if (duplicateCount > 0) {
-      toast.error(`이미 등록된 종목 ${duplicateCount}개는 건너뛰었습니다.`);
+    if (skipped > 0) {
+      toast.error(`이미 등록된 종목 ${skipped}개는 건너뛰었습니다.`);
     }
-    if (failedTickers.length > 0) {
-      toast.error(`추가 실패: ${failedTickers.join(", ")}`);
+    if (blocked > 0) {
+      toast.error(`다른 종목풀에 있는 ${blocked}개는 건너뛰었습니다.`);
+    }
+    if (failed.length > 0) {
+      toast.error(`추가 실패: ${failed.join(", ")}`);
     }
 
-    if (addedCount > 0) {
+    if (added > 0) {
       setSelectedTickers([]);
       await load();
     }
-  }, [load, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
+  }, [load, rows, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
 
   const columns = useMemo<ColDef<MarketGridRow>[]>(
     () => [
@@ -822,6 +843,7 @@ export function MarketManager({
               ))}
             </select>
           </label>
+          <PoolAddProgressBar progress={addProgress} />
         </div>
       </AppModal>
     </div>

@@ -218,7 +218,7 @@ def us_etf_name_of(ticker: str) -> str | None:
 
 def load_us_etf_market_data() -> dict[str, Any]:
     """화면용 목록 — 배치가 저장한 값에 종목풀·보유 표시만 붙인다."""
-    from utils.market_service import load_ticker_pool_map
+    from utils.market_service import load_ticker_pool_map, load_ticker_pool_type_map
     from utils.portfolio_io import load_all_holding_tickers
 
     db = get_db_connection()
@@ -230,12 +230,15 @@ def load_us_etf_market_data() -> dict[str, Any]:
         raise RuntimeError("미국 ETF 마켓 캐시가 없습니다. update_us_market_etfs 를 먼저 실행하세요.")
 
     ticker_pool_map = load_ticker_pool_map()
+    ticker_pool_type_map = load_ticker_pool_type_map()
     held_tickers = load_all_holding_tickers()
 
     result_rows = [
         {
             **row,
             "ticker_pools": ", ".join(ticker_pool_map.get(row["ticker"], [])),
+            # 종목풀 추가 사전 필터(공용 pool-add)가 풀 id 로 판별한다 — 이름은 표시용.
+            "ticker_pool_types": ticker_pool_type_map.get(row["ticker"], []),
             "is_held": row["ticker"] in held_tickers,
             "listed_at": "",  # 미국 마스터에는 상장일이 없다
             "nav": None,

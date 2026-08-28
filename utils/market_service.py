@@ -154,6 +154,7 @@ def load_market_data() -> dict[str, Any]:
     ]
 
     ticker_pool_map = load_ticker_pool_map()
+    ticker_pool_type_map = load_ticker_pool_type_map()
     snapshot = _load_kor_etf_realtime_snapshot([row["ticker"] for row in normalized_rows if row["ticker"]])
 
     from utils.portfolio_io import load_all_holding_tickers
@@ -176,6 +177,8 @@ def load_market_data() -> dict[str, Any]:
             {
                 **row,
                 "ticker_pools": ", ".join(ticker_pool_map.get(row["ticker"], [])),
+                # 종목풀 추가 사전 필터(공용 pool-add)가 풀 id 로 판별한다 — 이름은 표시용.
+                "ticker_pool_types": ticker_pool_type_map.get(row["ticker"], []),
                 "is_held": row["ticker"] in held_tickers,
                 "daily_change_pct": snap.get("changeRate"),
                 "current_price": now_val,
