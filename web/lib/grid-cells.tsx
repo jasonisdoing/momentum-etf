@@ -66,6 +66,25 @@ export function renderHighDrawdownCell(value: number | null | undefined, digits 
  *  `bold` 를 주면 농도와 별개로 굵기를 강제한다. 신고가 화면이 '진입 자격 통과' 를
  *  이걸로 표시한다 — 자격 하한은 설정값이라 농도 단계와 일치하지 않는다.
  */
+/** 거래대금 배수 표기 — 순위·신고가 화면 공용.
+ *
+ *  `value` 는 전략이 판정에 쓰는 배수(KRX 정규시장 확정)이고, `live` 는 토스 실시간
+ *  배수다. 토스는 대체거래소(NXT) 거래분까지 합산해서 주므로 같은 날이라도 KRX 확정값보다
+ *  크다 — 어느 쪽도 틀린 값이 아니라 **재는 범위가 다르다**. 그래서 둘이 다를 때만
+ *  `3.2배 (4.6)` 처럼 나란히 보여준다(장중에는 둘이 같아 괄호가 안 붙는다).
+ */
+export function formatTradeValueMult(
+  value: number | null | undefined,
+  live?: number | null,
+): string {
+  const hasLive = live != null && !Number.isNaN(live);
+  if (value == null || Number.isNaN(value)) return hasLive ? `- (${live.toFixed(1)})` : "-";
+  const main = `${value.toFixed(1)}배`;
+  // 0.05 미만 차이는 반올림 오차라 괄호를 붙이지 않는다.
+  if (!hasLive || Math.abs(live - value) < 0.05) return main;
+  return `${main} (${live.toFixed(1)})`;
+}
+
 export function tradeValueMultStyle(
   value: number | null | undefined,
   bold?: boolean,

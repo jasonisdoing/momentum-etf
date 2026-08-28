@@ -161,17 +161,21 @@ def _apply_industry_labels(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
     return dataframe
 
 
-def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> dict[str, float]:
-    """티커별 거래대금 배수(20일 평균 대비).
+def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> tuple[dict[str, float], dict[str, float]]:
+    """티커별 거래대금 배수(20일 평균 대비) — `(판정 기준, 실시간 합산)` 두 벌.
 
-    기본은 가격 캐시 배치가 저장해 둔 **직전 거래일** 값이다. 국내 상장 종목은 여기에
-    오늘 누적 거래대금을 실시간으로 받아 덮어써서, 장중에도 지금 값이 보이게 한다
-    (배치 값만 쓰면 마감 후 갱신될 때까지 하루 종일 어제 숫자가 남는다).
+    **판정 기준**은 가격 캐시 배치가 저장해 둔 값이다(KRX 정규시장 확정). 장중에는 오늘
+    확정값이 아직 없으므로 실시간 값으로 채운다 — 마감 후 배치가 돌면 확정값으로 바뀐다.
+
+    **실시간 합산**은 토스 스냅샷 기준이다. 토스는 KRX 에 더해 대체거래소(NXT) 거래분까지
+    합산해서 준다(응답의 `nxtSinglePrice`). 그래서 같은 날이라도 KRX 확정값보다 크다
+    (씨젠 2026-08-28: KRX 393억 → 3.20배, 합산 711억 → 4.57배). 어느 쪽도 틀린 값이
+    아니라 **재는 범위가 다르다** — 화면이 둘을 나란히 보여주고 판정은 확정값으로 한다.
 
     배치가 안 돌았거나 20일치가 없는 종목은 키가 없다 — 화면은 '-' 로 둔다.
     """
     if not tickers:
-        return {}
+        return {}, {}
     try:
         from utils.db_manager import get_db_connection
 
@@ -185,7 +189,7 @@ def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> dict[str, fl
             )
         )
     except Exception:
-        return {}
+        return {}, {}
 
     result = {
         str(doc["ticker"]).strip().upper(): float(doc["trade_value_mult"])
@@ -197,8 +201,11 @@ def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> dict[str, fl
         for doc in docs
         if doc.get("trade_value_sum19") is not None
     }
-    result.update(_live_trade_value_mult(ticker_type, sum19))
-    return result
+    live = _live_trade_value_mult(ticker_type, sum19)
+    # 배치 값이 없는 종목(오늘 상장 등)은 실시간이라도 보여준다.
+    for ticker, value in live.items():
+        result.setdefault(ticker, value)
+    return result, live
 
 
 def _live_trade_value_mult(ticker_type: str, sum19: dict[str, float]) -> dict[str, float]:
@@ -246,7 +253,7 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
     ]
     # 거래대금 배수는 가격 캐시 배치가 stock_meta 에 미리 넣어둔 값을 읽는다.
     # 여기서 직접 계산하려면 거래량이 든 큰 blob 을 받아야 해서 순위 계산이 3초 더 걸린다.
-    mult_map = _load_trade_value_mult(ticker_type, tickers)
+    mult_map, live_mult_map = _load_trade_value_mult(ticker_type, tickers)
 
     cache_map = get_stock_cache_meta_map(ticker_type, tickers)
     if not cache_map:
@@ -256,11 +263,13 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         enriched["순자산총액"] = None
         enriched["상장일"] = None
         enriched["시총순위"] = None
-        enriched["거래대금"] = (
-            enriched["티커"].map(lambda t: mult_map.get(str(t or "").strip().upper()))
-            if "티커" in enriched.columns
-            else None
-        )
+        if "티커" in enriched.columns:
+            keys = enriched["티커"].map(lambda t: str(t or "").strip().upper())
+            enriched["거래대금"] = keys.map(mult_map.get)
+            enriched["거래대금(실시간)"] = keys.map(live_mult_map.get)
+        else:
+            enriched["거래대금"] = None
+            enriched["거래대금(실시간)"] = None
         enriched.attrs.update(dict(dataframe.attrs))
         return enriched
 
@@ -276,6 +285,8 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         row["시총순위"] = market_cap_rank_of(meta_cache)  # 배치 B 가 적어 둔 시장 전체 시총 순위(개별주 풀만 값 있음)
         row["상장일"] = _format_listed_date(meta_cache.get("listed_date") or row.get("상장일"))
         row["거래대금"] = mult_map.get(ticker)
+        # 대체거래소(NXT) 합산 실시간 배수 — 화면이 확정값 옆에 괄호로 보여준다.
+        row["거래대금(실시간)"] = live_mult_map.get(ticker)
 
         rows.append(row)
 

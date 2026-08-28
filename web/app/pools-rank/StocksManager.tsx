@@ -14,6 +14,7 @@ import {
   marketBadgeCellStyle,
   renderHighDrawdownCell,
   renderIndustryCell,
+  formatTradeValueMult,
   tradeValueMultStyle,
   marketCapRankColumn,
   stockMemoColumn,
@@ -86,8 +87,10 @@ type RankRow = {
   보유대상?: boolean;
   보유: string;
   현재가: number | null;
-  /** 20일 평균 거래대금 대비 배수. 신고가 돌파 화면과 같은 값이다. */
+  /** 20일 평균 거래대금 대비 배수(KRX 확정) — 전략이 판정에 쓰는 값. */
   거래대금: number | null;
+  /** 같은 배수를 토스 실시간(KRX+NXT 합산)으로 낸 값. 확정값과 다르면 괄호로 보여준다. */
+  "거래대금(실시간)"?: number | null;
   "괴리율": number | null;
   "일간(%)": number | null;
   "1주(%)": number | null;
@@ -1048,12 +1051,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         field: "거래대금",
         headerName: "거래대금",
         hide: metricMode !== "basic",
-        minWidth: 88,
-        width: 88,
         type: "rightAligned",
+        minWidth: 112,
+        width: 112,
         headerTooltip:
-          "20일 평균 거래대금 대비 배수 — 신고가 돌파 화면과 같은 값. 국내 상장은 장중 실시간, 그 외는 직전 마감 기준.",
-        valueFormatter: (params) => (params.value == null ? "-" : `${(params.value as number).toFixed(1)}배`),
+          "20일 평균 거래대금 대비 배수 — 신고가 돌파 화면과 같은 값(전략 판정 기준). " +
+          "괄호는 토스 실시간 배수로, 대체거래소(NXT) 거래분까지 합산한 값이라 확정값보다 큽니다.",
+        valueFormatter: (params) =>
+          formatTradeValueMult(params.value as number | null, params.data?.["거래대금(실시간)"] ?? null),
         cellStyle: (params) => tradeValueMultStyle(params.value as number | null | undefined),
       },
     ];

@@ -27,6 +27,7 @@ import {
   formatSignedPct,
   renderIndustryCell,
   signColor,
+  formatTradeValueMult,
   tradeValueMultStyle,
   marketCapRankColumn,
 } from "@/lib/grid-cells";
@@ -105,7 +106,10 @@ type PositionRow = {
   is_held: boolean;
   /** 돌파·자격을 다 통과했지만 업종 상한에 밀려 이번에는 사지 않는다. */
   industry_blocked: boolean;
+  /** 전략이 판정에 쓰는 배수(KRX 정규시장 확정). */
   value_mult: number | null;
+  /** 같은 배수를 토스 실시간(KRX+NXT 합산)으로 낸 값. 확정값과 다르면 괄호로 보여준다. */
+  value_mult_live?: number | null;
 };
 
 type Holding = {
@@ -676,10 +680,13 @@ export function NewHighClient() {
       {
         field: "value_mult",
         headerName: "거래대금",
-        width: 104,
+        width: 124,
         type: "numericColumn",
-        headerTooltip: "20일 평균 거래대금 대비 배수 — 하한 이상이어야 진입한다. 굵은 글씨가 자격 통과다.",
-        valueFormatter: (p) => (p.value == null ? "-" : `${(p.value as number).toFixed(1)}배`),
+        headerTooltip:
+          "20일 평균 거래대금 대비 배수 — 하한 이상이어야 진입한다. 굵은 글씨가 자격 통과다. " +
+          "괄호는 토스 실시간 배수로, 대체거래소(NXT) 거래분까지 합산한 값이라 확정값보다 큽니다.",
+        valueFormatter: (p) =>
+          formatTradeValueMult(p.value as number | null, (p.data as PositionRow | undefined)?.value_mult_live ?? null),
         // 농도는 배수 크기, 굵기는 진입 자격. 자격 하한은 설정값이라 농도 단계와 다를 수 있다.
         cellStyle: (p) => tradeValueMultStyle(p.value as number | null, (p.data as PositionRow | undefined)?.qualifies),
       },
