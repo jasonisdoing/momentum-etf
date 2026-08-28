@@ -53,19 +53,61 @@ type MarketGridRow = MarketRowItem & {
   __selected__?: boolean;
 };
 
-const EXCLUSION_KEYWORD_GROUPS: Record<string, string[]> = {
-  "채권(모든종류)": ["채권", "미국채", "국채", "회사채", "단기채", "장기채"],
-  혼합: ["혼합"],
-  리츠: ["리츠"],
-  인버스: ["인버스"],
-  "2X": ["2X"],
-  레버리지: ["레버리지"],
-  합성: ["합성"],
-  커버드콜: ["커버드콜"],
-  선물: ["선물"],
+// 시장별 차이(데이터 원천·컬럼 구성·제외 키워드)는 전부 여기서만 정한다 — 화면은 하나다.
+type MarketCode = "kor" | "us";
+
+type MarketVariantConfig = {
+  apiPath: string;
+  errorLabel: string;
+  // 이름 키워드 제외 필터 — 대소문자 무시 비교이므로 키워드는 대문자로 적는다.
+  exclusionGroups: Record<string, string[]>;
+  defaultExcluded: string[];
+  showNavColumns: boolean; // Nav·괴리율 — 한국 실시간 스냅샷에만 있다
+  showListing: boolean; // 상장일 컬럼 + 신규 필터 — 미국 마스터에는 상장일이 없다
+  capHeader: string; // 규모 컬럼: 한국은 시가총액, 미국은 20일 평균 거래대금
+  capFilterDefault: string; // 규모 최소값 필터 초기값 ("" = 없음)
+  volumeFilterDefault: string; // 거래량 최소값 필터 초기값 ("" = 없음)
 };
 
-const DEFAULT_EXCLUDED_GROUPS = ["채권(모든종류)", "혼합", "리츠", "인버스", "2X", "레버리지"];
+const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
+  kor: {
+    apiPath: "/api/market",
+    errorLabel: "ETF 마켓 데이터를 불러오지 못했습니다.",
+    exclusionGroups: {
+      "채권(모든종류)": ["채권", "미국채", "국채", "회사채", "단기채", "장기채"],
+      혼합: ["혼합"],
+      리츠: ["리츠"],
+      인버스: ["인버스"],
+      "2X": ["2X"],
+      레버리지: ["레버리지"],
+      합성: ["합성"],
+      커버드콜: ["커버드콜"],
+      선물: ["선물"],
+    },
+    defaultExcluded: ["채권(모든종류)", "혼합", "리츠", "인버스", "2X", "레버리지"],
+    showNavColumns: true,
+    showListing: true,
+    capHeader: "시가총액(억)",
+    capFilterDefault: "",
+    volumeFilterDefault: "",
+  },
+  us: {
+    apiPath: "/api/market/us-etf",
+    errorLabel: "미국 ETF 마켓 데이터를 불러오지 못했습니다.",
+    exclusionGroups: {
+      채권: ["BOND", "TREASURY"],
+      "인버스/숏": ["INVERSE", "SHORT", "BEAR", "-1X"],
+      레버리지: ["2X", "3X", "LEVERAGED", "ULTRA", "레버리지"],
+      커버드콜: ["COVERED CALL", "BUYWRITE", "PREMIUM INCOME", "OPTION INCOME", "커버드콜"],
+    },
+    defaultExcluded: ["채권", "인버스/숏", "레버리지", "커버드콜"],
+    showNavColumns: false,
+    showListing: false,
+    capHeader: "거래대금($M)",
+    capFilterDefault: "10",
+    volumeFilterDefault: "500000",
+  },
+};
 
 const marketGridTheme = createAppGridTheme();
 
@@ -118,18 +160,21 @@ function getDeviationClass(value: number | null): string | undefined {
 }
 
 export function MarketManager({
+  market = "kor",
   onHeaderSummaryChange,
 }: {
+  market?: MarketCode;
   onHeaderSummaryChange?: (summary: { filteredCount: number; totalCount: number; updatedAt: string | null }) => void;
 }) {
+  const variant = MARKET_VARIANTS[market];
   const toast = useToast();
   const [rows, setRows] = useState<MarketRowItem[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [tickerPools, setTickerPools] = useState<MarketTickerPool[]>([]);
   const [query, setQuery] = useState("");
-  const [minMarketCap, setMinMarketCap] = useState(""); // 시가총액(억)
-  const [minPrevVolume, setMinPrevVolume] = useState(""); // 거래량(주)
-  const [excludedGroups, setExcludedGroups] = useState<string[]>(DEFAULT_EXCLUDED_GROUPS);
+  const [minMarketCap, setMinMarketCap] = useState(variant.capFilterDefault); // 규모(시총/거래대금) 최소값
+  const [minPrevVolume, setMinPrevVolume] = useState(variant.volumeFilterDefault); // 거래량(주)
+  const [excludedGroups, setExcludedGroups] = useState<string[]>(variant.defaultExcluded);
   const [newOnly, setNewOnly] = useState(false);
   const [newListingDays, setNewListingDays] = useState("14");
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
@@ -150,7 +195,7 @@ export function MarketManager({
     setError(null);
     try {
       const [marketResponse, stocksPayload] = await Promise.all([
-        fetch("/api/market", { cache: "no-store" }),
+        fetch(variant.apiPath, { cache: "no-store" }),
         loadStocksTable().catch(
           () =>
             ({
@@ -162,17 +207,17 @@ export function MarketManager({
       ]);
       const payload = (await marketResponse.json()) as MarketResponse;
       if (!marketResponse.ok) {
-        throw new Error(payload.error ?? "ETF 마켓 데이터를 불러오지 못했습니다.");
+        throw new Error(payload.error ?? variant.errorLabel);
       }
       setRows(payload.rows ?? []);
       setUpdatedAt(payload.updated_at ?? null);
       setTickerPools(stocksPayload.ticker_types ?? []);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "ETF 마켓 데이터를 불러오지 못했습니다.");
+      setError(loadError instanceof Error ? loadError.message : variant.errorLabel);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [variant]);
 
   useEffect(() => {
     void load();
@@ -180,7 +225,7 @@ export function MarketManager({
 
   const filteredRows = useMemo(() => {
     const normalizedQuery = query.trim().toUpperCase();
-    const expandedKeywords = excludedGroups.flatMap((group) => EXCLUSION_KEYWORD_GROUPS[group] ?? []);
+    const expandedKeywords = excludedGroups.flatMap((group) => variant.exclusionGroups[group] ?? []);
     const marketCapFilter = Number(minMarketCap || 0);
     const volumeFilter = Number(minPrevVolume || 0);
     const today = new Date();
@@ -200,7 +245,8 @@ export function MarketManager({
           return false;
         }
 
-        if (!newOnly && expandedKeywords.some((keyword) => row.name.includes(keyword))) {
+        const nameUpper = row.name.toUpperCase();
+        if (!newOnly && expandedKeywords.some((keyword) => nameUpper.includes(keyword.toUpperCase()))) {
           return false;
         }
 
@@ -396,22 +442,26 @@ export function MarketManager({
         type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => formatNullableNumber(params.value),
       },
-      {
-        field: "nav",
-        headerName: "Nav",
-        width: 110,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatNullableNumber(params.value),
-      },
-      {
-        field: "deviation",
-        headerName: "괴리율",
-        width: 96,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => (
-          <span className={getDeviationClass(params.value)}>{formatPercent(params.value)}</span>
-        ),
-      },
+      ...(variant.showNavColumns
+        ? ([
+            {
+              field: "nav",
+              headerName: "Nav",
+              width: 110,
+              type: "rightAligned",
+              cellRenderer: (params: { value: number | null }) => formatNullableNumber(params.value),
+            },
+            {
+              field: "deviation",
+              headerName: "괴리율",
+              width: 96,
+              type: "rightAligned",
+              cellRenderer: (params: { value: number | null }) => (
+                <span className={getDeviationClass(params.value)}>{formatPercent(params.value)}</span>
+              ),
+            },
+          ] as ColDef<MarketGridRow>[])
+        : []),
       {
         field: "return_1m_pct",
         headerName: "1달(%)",
@@ -441,7 +491,7 @@ export function MarketManager({
           <span className={getSignedMetricClass(params.value)}>{formatPercent(params.value)}</span>
         ),
       },
-      { field: "listed_at", headerName: "상장일", width: 112 },
+      ...(variant.showListing ? ([{ field: "listed_at", headerName: "상장일", width: 112 }] as ColDef<MarketGridRow>[]) : []),
       {
         field: "prev_volume",
         headerName: "전일거래량(주)",
@@ -451,7 +501,7 @@ export function MarketManager({
       },
       {
         field: "market_cap",
-        headerName: "시가총액(억)",
+        headerName: variant.capHeader,
         width: 128,
         type: "rightAligned",
         cellRenderer: (params: { value: number }) => formatKrwEok(params.value),
@@ -490,7 +540,7 @@ export function MarketManager({
         },
       },
     ],
-    [allVisibleSelected, selectedTickers, toggleSelectAllVisible, toggleTickerSelection],
+    [allVisibleSelected, selectedTickers, toggleSelectAllVisible, toggleTickerSelection, variant],
   );
 
   function toggleGroup(group: string) {
@@ -516,7 +566,7 @@ export function MarketManager({
       const previous = previousMarketFiltersRef.current;
       setMinMarketCap(previous?.minMarketCap ?? "500");
       setMinPrevVolume(previous?.minPrevVolume ?? "100000");
-      setExcludedGroups(previous?.excludedGroups ?? DEFAULT_EXCLUDED_GROUPS);
+      setExcludedGroups(previous?.excludedGroups ?? variant.defaultExcluded);
       previousMarketFiltersRef.current = null;
       return false;
     });
@@ -558,11 +608,11 @@ export function MarketManager({
                     />
                   </label>
                   <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">시가총액(억)</span>
+                    <span className="appLabeledFieldLabel">{variant.capHeader}</span>
                     <input
                       className="field compactField"
                       type="number"
-                      placeholder="최소 시가총액"
+                      placeholder="최소값"
                       value={minMarketCap}
                       onChange={(event) => setMinMarketCap(event.target.value)}
                     />
@@ -577,6 +627,7 @@ export function MarketManager({
                         value={minPrevVolume}
                         onChange={(event) => setMinPrevVolume(event.target.value)}
                       />
+                      {variant.showListing ? (
                       <div className="marketNewOnlyRow">
                         <button
                           type="button"
@@ -602,6 +653,7 @@ export function MarketManager({
                           <span className="marketNewOnlyHint">최근 {Math.max(1, Number.parseInt(newListingDays || "14", 10) || 14)}일 상장 ETF</span>
                         ) : null}
                       </div>
+                      ) : null}
                     </div>
                   </label>
                 </div>
@@ -621,7 +673,7 @@ export function MarketManager({
           </div>
           <div className="card-body appCardBodyTight appTableCardBodyFill">
             <div className="pillRow">
-              {Object.keys(EXCLUSION_KEYWORD_GROUPS).map((group) => {
+              {Object.keys(variant.exclusionGroups).map((group) => {
                 const isActive = excludedGroups.includes(group);
                 return (
                   <button

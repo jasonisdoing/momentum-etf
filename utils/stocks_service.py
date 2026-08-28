@@ -262,7 +262,17 @@ def validate_stock_candidate(ticker_type: str, ticker: str) -> dict[str, Any]:
     if is_active and existing_name:
         stock_info = {"name": existing_name, "listing_date": (existing or {}).get("listing_date")}
     else:
-        stock_info = fetch_stock_info(ticker_norm, country_code)
+        stock_info = None
+        # 미국은 ETF 마켓 캐시(KIS 마스터 이름)를 먼저 본다 — yfinance info 는 레이트리밋에
+        # 자주 걸려서(배치 직후 등) 캐시에 있는 종목까지 추가 실패로 끝났다.
+        if country_code == "us":
+            from utils.us_etf_market_service import us_etf_name_of
+
+            cached_name = us_etf_name_of(ticker_norm)
+            if cached_name:
+                stock_info = {"name": cached_name, "listing_date": None}
+        if stock_info is None:
+            stock_info = fetch_stock_info(ticker_norm, country_code)
         if not stock_info or not str(stock_info.get("name") or "").strip():
             raise RuntimeError("유효한 티커를 찾지 못했습니다.")
 

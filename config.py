@@ -104,6 +104,14 @@ AU_QUOTEAPI_HEADERS = {
 # KIS 종목정보파일 다운로드 URL
 KIS_KOSPI_MASTER_URL = "https://new.real.download.dws.co.kr/common/master/kospi_code.mst.zip"
 KIS_KOSDAQ_MASTER_URL = "https://new.real.download.dws.co.kr/common/master/kosdaq_code.mst.zip"
+# 미국 3개 거래소 종목 마스터 (같은 KIS 배포 서버) — /us-market-etf 유니버스.
+KIS_US_MASTER_URLS = {
+    "NAS": "https://new.real.download.dws.co.kr/common/master/nasmst.cod.zip",
+    "NYS": "https://new.real.download.dws.co.kr/common/master/nysmst.cod.zip",
+    "AMS": "https://new.real.download.dws.co.kr/common/master/amsmst.cod.zip",
+}
+# 미국 ETF 마켓 목록 규모 — 전체 약 6천 개 중 거래대금 상위만 담는다(배치·화면 부하).
+US_ETF_MARKET_TOP_COUNT = 1000
 
 # Hyperliquid (24시간 토큰화 주식 시세) — /hyperliquid 화면.
 # 빌더 DEX `xyz` 가 SMSN(삼성전자)/SKHX(SK하이닉스)/MU(마이크론) 등 perp 을 24h 거래한다.

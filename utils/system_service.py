@@ -27,6 +27,7 @@ SystemAction = Literal[
     "price_metrics_updater",
     "asset_summary",
     "us_market_stocks",
+    "us_market_etfs",
     "aus_market_stocks",
     "kor_market_stocks",
     "kor_dividend_stocks",
@@ -282,9 +283,19 @@ SCHEDULE_ROWS = [
         "command": "python scripts/update_kor_dividend_stocks.py",
         "schedule": {"minutes": [30], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
-    # ⑤ 상시 운영 — 자동으로 돌고 손댈 일이 거의 없다.
     {
         "no": 18,
+        "key": "us_market_etfs",
+        "group": "개장 전 준비",
+        "job": "미국 ETF 업데이트",
+        "target": "KIS 미국 마스터 → 거래대금 상위 1,000개 수익률",
+        "cadence": "평일 08:40 KST",
+        "command": "python scripts/update_us_market_etfs.py",
+        "schedule": {"minutes": [40], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    # ⑤ 상시 운영 — 자동으로 돌고 손댈 일이 거의 없다.
+    {
+        "no": 19,
         "key": "live_24h_slack",
         "group": "상시 운영",
         "job": "24H 시세 알림",
@@ -294,7 +305,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
     },
     {
-        "no": 19,
+        "no": 20,
         "key": "db_backup",
         "group": "상시 운영",
         "job": "DB 백업",
@@ -318,6 +329,7 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "price_metrics_updater": "scripts/stock_price_metrics_updater.py",
     "asset_summary": "scripts/slack_asset_summary.py",
     "us_market_stocks": "scripts/update_us_market_stocks.py",
+    "us_market_etfs": "scripts/update_us_market_etfs.py",
     "aus_market_stocks": "scripts/update_aus_market_stocks.py",
     "kor_market_stocks": "scripts/update_kor_market_stocks.py",
     "kor_dividend_stocks": "scripts/update_kor_dividend_stocks.py",

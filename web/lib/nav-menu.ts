@@ -81,6 +81,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { href: "/us-market-stock", label: "미국 개별주", icon: "🇺🇸" },
       { href: "/aus-market-stock", label: "호주 개별주", icon: "🇦🇺" },
       { href: "/kor-market-etf", label: "한국 ETF", icon: "🇰🇷" },
+      { href: "/us-market-etf", label: "미국 ETF", icon: "🇺🇸" },
       { href: "/live-24h", label: "24H 시세", icon: "⏰" },
       { href: "/kor-dividend", label: "한국 배당주", icon: "🇰🇷" },
     ],
@@ -140,6 +141,7 @@ export const FULL_WIDTH_ROUTES: readonly string[] = [
   "/us-market-stock",
   "/aus-market-stock",
   "/kor-market-etf",
+  "/us-market-etf",
   "/kor-dividend",
   "/holdings_details",
 ];

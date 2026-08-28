@@ -53,7 +53,13 @@ function formatUpdatedAtWithElapsed(value: string | null | undefined): string {
   return `${absolute}(${elapsedParts.join(" ")}전)`;
 }
 
-export function MarketPageClient({ title = "🇰🇷 ETF 마켓" }: { title?: string }) {
+export function MarketPageClient({
+  title = "🇰🇷 ETF 마켓",
+  market = "kor",
+}: {
+  title?: string;
+  market?: "kor" | "us";
+}) {
   const [summary, setSummary] = useState<MarketHeaderSummary>(DEFAULT_SUMMARY);
 
   const titleRight = useMemo(
@@ -78,7 +84,7 @@ export function MarketPageClient({ title = "🇰🇷 ETF 마켓" }: { title?: st
 
   return (
     <PageFrame title={title} fullHeight fullWidth titleRight={titleRight}>
-      <MarketManager onHeaderSummaryChange={setSummary} />
+      <MarketManager market={market} onHeaderSummaryChange={setSummary} />
     </PageFrame>
   );
 }
