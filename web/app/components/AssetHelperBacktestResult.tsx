@@ -6,8 +6,10 @@ import { ColorType, LineSeries, createChart, createSeriesMarkers } from "lightwe
 import type { Time } from "lightweight-charts";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { cumulativeToDailyRows } from "@/lib/backtest-periods";
 import { BUCKET_COLORS, BUCKET_THEME } from "@/lib/bucket-theme";
 import { AppAgGrid } from "./AppAgGrid";
+import { BacktestPeriodTables } from "./BacktestPeriodTables";
 import { TickerDetailLink } from "./TickerDetailLink";
 import { createAppGridTheme } from "./app-grid-theme";
 
@@ -269,6 +271,12 @@ function AssetHelperWeightHistoryChart({
 }
 
 export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
+  // 기간별 표(연간·월간·주간·일간)의 입력 — 이 엔진은 누적 수익률(%) 곡선만 내려주므로
+  // 전략 화면과 같은 일간 변동률 형태로 되돌린다(공용 함수, @/lib/backtest-periods).
+  const dailyRows = useMemo(
+    () => cumulativeToDailyRows(result.chart.dates, result.chart.portfolio_pct, result.chart.benchmark_pct),
+    [result.chart.dates, result.chart.portfolio_pct, result.chart.benchmark_pct],
+  );
   const columns = useMemo<ColDef<LabPosition>[]>(
     () => [
       {
@@ -494,6 +502,16 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
             items={result.weight_items ?? []}
           />
         </div>
+      </div>
+      <div className="assetHelperBacktestPerformancePanel">
+        <h3 style={{ fontSize: "var(--fs-base)", fontWeight: 800, marginBottom: 8 }}>기간별 수익률</h3>
+        {/* 전략 화면(모멘텀·신고가)과 **같은 컴포넌트**다 — 같은 단위, 같은 컬럼으로 본다.
+            엔진이 누적 곡선만 주므로 여기서 일간 변동률로 되돌려 넘긴다. */}
+        <BacktestPeriodTables
+          daily={dailyRows}
+          benchmarkLabel={result.benchmark.name ?? result.benchmark.ticker}
+          benchmarkTooltip={`벤치마크 ${result.benchmark.name ?? result.benchmark.ticker}(${result.benchmark.ticker})`}
+        />
       </div>
       <div className="assetHelperBacktestPerformancePanel">
         <h3 style={{ fontSize: "var(--fs-base)", fontWeight: 800, marginBottom: 8 }}>백테스트 종목별 성과</h3>
