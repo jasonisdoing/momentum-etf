@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconCheck } from "@tabler/icons-react";
 
 import { AppAgGrid } from "../components/AppAgGrid";
+import { excessColumn } from "../components/BacktestPeriodTables";
 import { MonthsSelect } from "../components/MonthsSelect";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
@@ -21,6 +22,13 @@ import { formatDateWithWeekday } from "@/lib/datetime";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 import { formatKorMarketCap } from "@/lib/market-cap-format";
+import {
+  type BacktestDayRow,
+  type BacktestMonthRow,
+  type BacktestYearRow,
+  toCalendarMonthRows,
+  toYearRows,
+} from "@/lib/backtest-periods";
 import {
   INDUSTRY_COLUMN_MIN_WIDTH,
   INDUSTRY_COLUMN_WIDTH,
@@ -146,11 +154,7 @@ type PicksResult = {
 };
 
 // 월간 행은 집계만 담는다 — 매매 내역(편입·편출·교체율·보유 수)은 주간 행이 담당한다.
-type BacktestMonthRow = {
-  month: string;
-  strategy_pct: number | null;
-  benchmark_pct: number | null;
-};
+// 타입·집계는 자산 헬퍼와 공용(@/lib/backtest-periods).
 
 // 주간 행 — 달력 주 단위. 기준일은 그 주 마지막 거래일, 편입·편출은 그 주 체결분.
 type BacktestWeekRow = {
@@ -179,12 +183,6 @@ type BacktestTradeRow = {
   return_pct: number | null;
   days: number;
   reason: string;
-};
-
-type BacktestDayRow = {
-  date: string;
-  strategy_pct: number | null;
-  benchmark_pct: number | null;
 };
 
 type BacktestResult = {
@@ -266,88 +264,6 @@ const VIEW_MODES = [
   { key: "trades", label: "체결" },
 ] as const;
 type ViewMode = (typeof VIEW_MODES)[number]["key"];
-
-type YearRow = {
-  year: string;
-  strategy_pct: number | null;
-  benchmark_pct: number | null;
-  strategy_partial: boolean;
-  benchmark_partial: boolean;
-};
-
-/** 초과(%p) 컬럼 — 전략 − 벤치마크. 신고가·합성 화면과 같은 정의를 쓴다. */
-function excessColumn<T extends { strategy_pct: number | null; benchmark_pct: number | null }>(): ColDef<T> {
-  return {
-    headerName: "초과",
-    colId: "excess_pp",
-    flex: 1,
-    minWidth: 100,
-    type: "numericColumn",
-    valueGetter: (p) =>
-      p.data && p.data.strategy_pct != null && p.data.benchmark_pct != null
-        ? p.data.strategy_pct - p.data.benchmark_pct
-        : null,
-    valueFormatter: (p) => (p.value == null ? "-" : `${formatSignedPct(p.value as number, 2)}p`),
-    cellStyle: (p) => ({ color: signColor(p.value as number) }),
-  };
-}
-
-/** 월별 수익률을 복리로 합성한다. 값이 하나도 없으면 null. */
-function compoundPct(values: (number | null)[]): number | null {
-  const usable = values.filter((v): v is number => v != null && Number.isFinite(v));
-  if (usable.length === 0) return null;
-  return (usable.reduce((acc, v) => acc * (1 + v / 100), 1) - 1) * 100;
-}
-
-/** 일간 변동률(%)을 **달력 월**로 복리 합산한다.
- *
- *  엔진이 내려주는 `backtest.monthly` 를 쓰지 않는 이유: 그쪽은 주간 교체 구간 수익률을
- *  **구간 종료일이 속한 달**로 몰아 넣는다(momentum_backtest 의 `month_key = end`). 그래서
- *  월을 걸친 구간의 앞달치가 뒷달로 넘어가고, `2026-07` 행이 달력 7월 수익률이 아니게 된다.
- *  실제로 같은 기간이 신고가·합성 화면에서는 -16.62%, 여기서는 -9.20% 로 갈렸다.
- *  주간 탭은 매매 내역(편입·편출)이 붙어야 해서 교체 구간 기준을 그대로 둔다.
- */
-function toCalendarMonthRows(daily: BacktestDayRow[]): BacktestMonthRow[] {
-  const byMonth = new Map<string, { strategy: number[]; benchmark: number[] }>();
-  for (const row of daily) {
-    const month = row.date.slice(0, 7);
-    const bucket = byMonth.get(month) ?? { strategy: [], benchmark: [] };
-    if (row.strategy_pct != null) bucket.strategy.push(row.strategy_pct);
-    if (row.benchmark_pct != null) bucket.benchmark.push(row.benchmark_pct);
-    byMonth.set(month, bucket);
-  }
-  return [...byMonth.entries()]
-    .sort((a, b) => b[0].localeCompare(a[0])) // 최신 달이 위
-    .map(([month, bucket]) => ({
-      month,
-      strategy_pct: compoundPct(bucket.strategy),
-      benchmark_pct: compoundPct(bucket.benchmark),
-    }));
-}
-
-/**
- * 월별 행을 연도별로 묶는다. 12개월이 다 차지 않은 해는 `partial` 로 표시한다
- * (/compare 의 부분 기간 `*` 표기와 같은 규칙). 예정 행은 수익률이 없어 제외한다.
- */
-function toYearRows(monthly: BacktestMonthRow[]): YearRow[] {
-  const byYear = new Map<string, BacktestMonthRow[]>();
-  for (const row of monthly) {
-    const year = row.month.slice(0, 4);
-    byYear.set(year, [...(byYear.get(year) ?? []), row]);
-  }
-  const countOf = (rows: BacktestMonthRow[], key: keyof BacktestMonthRow) =>
-    rows.filter((r) => r[key] != null).length;
-
-  return [...byYear.entries()]
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([year, rows]) => ({
-      year,
-      strategy_pct: compoundPct(rows.map((r) => r.strategy_pct)),
-      benchmark_pct: compoundPct(rows.map((r) => r.benchmark_pct)),
-      strategy_partial: countOf(rows, "strategy_pct") < 12,
-      benchmark_partial: countOf(rows, "benchmark_pct") < 12,
-    }));
-}
 
 const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--fs-sm)" };
 const numberInputStyle: React.CSSProperties = { width: 88, textAlign: "right" };
@@ -924,7 +840,7 @@ export function MomentumClient() {
     () => (backtest ? toCalendarMonthRows(backtest.daily) : []),
     [backtest],
   );
-  const yearRows = useMemo<YearRow[]>(() => toYearRows(monthRows), [monthRows]);
+  const yearRows = useMemo<BacktestYearRow[]>(() => toYearRows(monthRows), [monthRows]);
 
   // 주간 표 — 매매 일지. 주 수익률 + 그 주에 체결된 편입·편출과 주말 보유 수·교체율.
   const weeklyColumns = useMemo<ColDef<BacktestWeekRow>[]>(() => {
@@ -1012,7 +928,7 @@ export function MomentumClient() {
     return columns;
   }, [backtest]);
 
-  const yearColumns = useMemo<ColDef<YearRow>[]>(() => {
+  const yearColumns = useMemo<ColDef<BacktestYearRow>[]>(() => {
     if (!backtest) return [];
     // 부분 기간은 /compare 와 같은 규칙으로 값 뒤에 `*` 를 붙인다.
     const pctColumn = (
@@ -1020,7 +936,7 @@ export function MomentumClient() {
       field: "strategy_pct" | "benchmark_pct",
       partialField: "strategy_partial" | "benchmark_partial",
       headerTooltip?: string,
-    ): ColDef<YearRow> => ({
+    ): ColDef<BacktestYearRow> => ({
       headerName,
       field,
       headerTooltip,
@@ -1034,7 +950,7 @@ export function MomentumClient() {
         p.data?.[partialField] ? "12개월이 다 차지 않은 해 — 있는 달만 합성한 부분 기간" : undefined,
     });
 
-    const columns: ColDef<YearRow>[] = [
+    const columns: ColDef<BacktestYearRow>[] = [
       { headerName: "연도", field: "year", width: 148, cellStyle: () => ({ fontWeight: 700 }) },
       pctColumn("전략", "strategy_pct", "strategy_partial"),
       pctColumn(
@@ -1044,7 +960,7 @@ export function MomentumClient() {
         `${backtest.benchmark_name}(${backtest.benchmark_ticker})`,
       ),
     ];
-    columns.push(excessColumn<YearRow>());
+    columns.push(excessColumn<BacktestYearRow>());
     return columns;
   }, [backtest]);
 
@@ -1365,7 +1281,7 @@ export function MomentumClient() {
                   />
                 ) : (
                   <>
-                    <AppAgGrid<YearRow>
+                    <AppAgGrid<BacktestYearRow>
                       rowData={yearRows}
                       columnDefs={yearColumns}
                       theme={gridTheme}
