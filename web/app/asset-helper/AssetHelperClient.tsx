@@ -575,10 +575,11 @@ export function AssetHelperClient() {
   // /assets 와 동일: 확인 시 즉시 저장하지 않고 상단에 '미저장(pending)' 행으로 둔다.
   // 실제 보유목록 등록·비중 저장은 '저장' 버튼에서 한 번에 처리하고, 저장 전 새로고침하면 사라진다.
   const addOnValidated = useCallback(
-    (resolved: HelperTicker) => {
+    (resolved: HelperTicker & { name: string }) => {
       const key = resolved.ticker.trim().toUpperCase();
-      // 종목풀에 없는 티커는 resolve 가 이름 대신 티커를 돌려준다 — 그 경우 티커를 이름으로 쓴다(저장 후 실제 이름 확정).
-      const nm = resolved.name && resolved.name.trim() ? resolved.name.trim() : resolved.ticker;
+      // 이름은 항상 있다 — 종목풀에 있는 티커만 통과하고(addResolve 가 이름 없으면 에러),
+      // 종목풀에 없는 티커는 조회 단계에서 막힌다. 티커로 이름을 대신하지 않는다.
+      const nm = resolved.name.trim();
       setTickers((cur) =>
         cur.some((t) => t.ticker.trim().toUpperCase() === key)
           ? cur
