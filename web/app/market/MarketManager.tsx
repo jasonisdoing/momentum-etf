@@ -100,8 +100,9 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
     errorLabel: "미국 ETF 마켓 데이터를 불러오지 못했습니다.",
     exclusionGroups: {
       채권: ["BOND", "TREASURY"],
-      "인버스/숏": ["INVERSE", "SHORT", "BEAR", "-1X"],
-      레버리지: ["2X", "3X", "LEVERAGED", "ULTRA", "레버리지"],
+      "인버스/숏": ["INVERSE", "SHORT", "BEAR", "-0.5X", "-1X"],
+      // 배수 표기가 제각각이라(2X·4X ETN·1.5X) 배수 키워드를 넓게 건다. "-2X" 류는 2X 에 걸린다.
+      레버리지: ["1.5X", "2X", "3X", "4X", "5X", "LEVERAGED", "ULTRA", "레버리지"],
       커버드콜: ["COVERED CALL", "BUYWRITE", "PREMIUM INCOME", "OPTION INCOME", "커버드콜"],
       // 가상자산 — 국내 증권사가 현물 ETF 중개를 못 해 거래 불가. 이름 키워드라 선물형(BITO)도
       // 같이 빠진다(현물/선물을 이름만으로 구분할 수 없음). 코인명은 신상품을 못 쫓아가므로
