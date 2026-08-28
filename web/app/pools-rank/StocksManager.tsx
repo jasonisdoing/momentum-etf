@@ -129,6 +129,9 @@ type RankResponse = {
   /** 이평선 일수 선택지 — 백엔드 상수(utils/ma_options)가 단일 소스. */
   short_ma_options?: number[];
   long_ma_options?: number[];
+  /** 종목 수·업종 상한 선택지 — 백엔드 `config` 가 단일 소스(-1 = 제한 없음). */
+  top_n_options?: number[];
+  max_per_industry_options?: number[];
   as_of_date?: string | null;
   monthly_return_labels?: string[];
   rows?: RankRow[];
@@ -160,11 +163,6 @@ type RankAddingRowState = {
 };
 
 /** 종목 수 선택지 — 백엔드 `config.TOP_N_OPTIONS` 와 같은 목록. */
-const TOP_N_CHOICES: number[] = [2, 5, 8, 10];
-
-/** 업종 상한 선택지 — 백엔드 `config.MAX_PER_INDUSTRY_OPTIONS` 와 같은 목록.
- *  `-1` 이 '없음'(제한 없음)이다 — 쿼리로 넘길 때 '미지정' 과 구분하려고 숫자로 둔다. */
-const MAX_PER_INDUSTRY_CHOICES: number[] = [1, 2, 3, -1];
 
 const rankGridTheme = createAppGridTheme();
 const DEFAULT_TICKER_TYPE = "";
@@ -184,6 +182,9 @@ type RankToolbarCache = {
   ticker_type: string;
   ma_rule: RankMaRule | null;
   ma_options: Partial<MaOptionsPayload>;
+  /** 종목 수·업종 상한 선택지 — 백엔드 config 가 단일 소스. */
+  top_n_options: number[];
+  max_per_industry_options: number[];
 };
 
 type RankHeaderSummary = {
@@ -361,6 +362,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   // 백엔드가 내려주는 선택지를 쓴다 — 화면이 복사본을 들고 있으면 값이 추가될 때 여기만 옛 목록이 남는다.
   const [maOptions, setMaOptions] = useState<Partial<MaOptionsPayload>>(rankToolbarCache?.ma_options ?? {});
+  // 종목 수·업종 상한 선택지 — 화면에 목록을 복사해 두지 않고 백엔드에서 받는다.
+  const [topNChoices, setTopNChoices] = useState<number[]>(rankToolbarCache?.top_n_options ?? []);
+  const [industryCapChoices, setIndustryCapChoices] = useState<number[]>(
+    rankToolbarCache?.max_per_industry_options ?? [],
+  );
   const [metricMode, setMetricMode] = useState<MetricMode>("basic");
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
@@ -406,6 +412,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setMaRule(payload.ma_rules?.[0] ?? null);
     const nextMaOptions = { short_ma_options: payload.short_ma_options, long_ma_options: payload.long_ma_options };
     setMaOptions(nextMaOptions);
+    const nextTopNOptions = payload.top_n_options ?? [];
+    const nextCapOptions = payload.max_per_industry_options ?? [];
+    setTopNChoices(nextTopNOptions);
+    setIndustryCapChoices(nextCapOptions);
     setSelectedAsOfDate(toDateInputValue(payload.as_of_date));
     setMonthlyReturnLabels(payload.monthly_return_labels ?? []);
     rankToolbarCache = {
@@ -413,6 +423,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ticker_type: nextAccountId,
       ma_rule: payload.ma_rules?.[0] ?? null,
       ma_options: nextMaOptions,
+      top_n_options: nextTopNOptions,
+      max_per_industry_options: nextCapOptions,
     };
     setAddingRow(null);
     addingTickerDraftRef.current = "";
@@ -441,12 +453,18 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setMaRule(payload.ma_rules?.[0] ?? null);
     const nextMaOptions = { short_ma_options: payload.short_ma_options, long_ma_options: payload.long_ma_options };
     setMaOptions(nextMaOptions);
+    const nextTopNOptions = payload.top_n_options ?? [];
+    const nextCapOptions = payload.max_per_industry_options ?? [];
+    setTopNChoices(nextTopNOptions);
+    setIndustryCapChoices(nextCapOptions);
 
     rankToolbarCache = {
       ticker_types: nextTickerTypes,
       ticker_type: nextAccountId,
       ma_rule: payload.ma_rules?.[0] ?? null,
       ma_options: nextMaOptions,
+      top_n_options: nextTopNOptions,
+      max_per_industry_options: nextCapOptions,
     };
   }
 
@@ -1718,10 +1736,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                         value={String(effectiveTopN)}
                         onChange={(event) => handleTopNChange(Number(event.target.value))}
                       >
-                        {(TOP_N_CHOICES.includes(effectiveTopN)
-                          ? TOP_N_CHOICES
-                          : [effectiveTopN, ...TOP_N_CHOICES].sort((a, b) => a - b)
-                        ).map((option) => (
+                        {/* 저장값이 선택지 밖이면(선택지가 바뀐 뒤) 그 값도 목록에 남긴다 —
+                            빈 셀렉트가 되어 저장값이 조용히 바뀌는 것을 막는다. */}
+                        {(topNChoices.includes(effectiveTopN)
+                          ? topNChoices
+                          : [effectiveTopN, ...topNChoices].sort((a, b) => a - b)
+                        ).map((option: number) => (
                           <option key={option} value={String(option)}>
                             {option}종목
                           </option>
@@ -1741,7 +1761,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                         value={String(effectiveMaxPerIndustry)}
                         onChange={(event) => handleMaxPerIndustryChange(Number(event.target.value))}
                       >
-                        {MAX_PER_INDUSTRY_CHOICES.map((option) => (
+                        {(industryCapChoices.includes(effectiveMaxPerIndustry)
+                          ? industryCapChoices
+                          : [...industryCapChoices, effectiveMaxPerIndustry]
+                        ).map((option: number) => (
                           <option key={option} value={String(option)}>
                             {option < 0 ? "없음" : `${option}종목`}
                           </option>
