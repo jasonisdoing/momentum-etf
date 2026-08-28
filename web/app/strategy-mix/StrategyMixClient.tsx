@@ -731,12 +731,18 @@ export function StrategyMixClient() {
         field: "sources",
         headerName: "전략",
         width: 110,
-        // 두 전략이 같은 종목을 담으면 한 행에 둘 다 표시된다 (비중은 합산).
-        valueFormatter: (p) => {
-          const sources = (p.value as string[]) ?? [];
-          return sources.length === 0
-            ? "-"
-            : sources.map((source) => slotLabel(source)).join("·");
+        cellClass: "appWrapCell",
+        // 슬리브 이름은 사용자가 붙이는 값이라 길어질 수 있다. 종목명과 같은 공용 클래스로
+        // 최대 2줄까지 보여주고 넘치면 말줄임한다(칸 폭을 늘리면 표가 옆으로 밀린다).
+        cellRenderer: (p: { value?: string[] | null; data?: PositionRow }) => {
+          const sources = p.value ?? [];
+          // 여러 슬리브가 같은 종목을 담으면 한 행에 모두 표시된다 (비중은 합산).
+          const text = sources.length === 0 ? "-" : sources.map((source) => slotLabel(source)).join("·");
+          return (
+            <span className="appNameCellText" title={text}>
+              {text}
+            </span>
+          );
         },
       },
       // 아래 순서·명칭은 /assets 계좌 보유 표와 맞춘다

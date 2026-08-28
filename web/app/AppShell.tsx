@@ -16,6 +16,7 @@ import { useHideMoney } from "@/lib/hide-money-context";
 import { HOME_ITEM, NAV_GROUPS, ROOT_ITEMS, isNavItemActive } from "@/lib/nav-menu";
 import { HubMenu } from "./components/HubMenu";
 import { GlobalTickerSearch } from "./components/GlobalTickerSearch";
+import { MarketSessionBar, type MarketSession } from "./components/MarketSessionBar";
 import { RecentPages } from "./components/RecentPages";
 import { useFitOneLine } from "@/lib/use-fit-one-line";
 
@@ -166,6 +167,8 @@ export function AppShell({ children }: AppShellProps) {
   const [fx, setFx] = useState<FxSummary | null>(null);
   const [isFxLoading, setIsFxLoading] = useState(true);
   const [fearGreed, setFearGreed] = useState<FearGreedSummary | null>(null);
+  // 시장 세션(프리·본장·애프터·마감) — 헤더 왼쪽에 세 시장을 나란히 보여준다.
+  const [marketSessions, setMarketSessions] = useState<MarketSession[]>([]);
   const [isFearGreedLoading, setIsFearGreedLoading] = useState(true);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [isDashboardSummaryLoading, setIsDashboardSummaryLoading] = useState(true);
@@ -200,11 +203,12 @@ export function AppShell({ children }: AppShellProps) {
         setIsNqLoading(true);
       }
 
-      const [fxResponse, fearGreedSummary, dashboardResponse, nqResponse] = await Promise.all([
+      const [fxResponse, fearGreedSummary, dashboardResponse, nqResponse, sessionsResponse] = await Promise.all([
         fetch("/api/fx", { cache: "no-store" }),
         loadFearGreedSummary().catch(() => null),
         fetch("/api/dashboard", { cache: "no-store" }).catch(() => null),
         fetch("/api/nq-future", { cache: "no-store" }).catch(() => null),
+        fetch("/api/market-sessions", { cache: "no-store" }).catch(() => null),
       ]);
 
       const payload = fxResponse.ok ? ((await fxResponse.json()) as FxSummary) : null;
@@ -217,6 +221,10 @@ export function AppShell({ children }: AppShellProps) {
       setFearGreed(fearGreedSummary);
       setDashboardSummary(dashboardPayload);
       setNqFuture(nqPayload);
+      if (sessionsResponse?.ok) {
+        const payload = (await sessionsResponse.json()) as { sessions?: MarketSession[] };
+        setMarketSessions(payload.sessions ?? []);
+      }
 
       if (initial) {
         setIsFxLoading(false);
@@ -502,6 +510,8 @@ export function AppShell({ children }: AppShellProps) {
                   🚧 배포 진행 중
                 </span>
               ) : null}
+              {/* 시장 세션 — 홈 버튼과 티커 검색 사이의 빈 자리에 둔다. */}
+              <MarketSessionBar sessions={marketSessions} />
             </div>
             <div className="appMobileHeader">
               <button

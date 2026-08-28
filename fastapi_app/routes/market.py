@@ -20,6 +20,14 @@ def get_fx_data(_: None = Depends(require_internal_token)) -> dict[str, object]:
     return get_exchange_rates()
 
 
+@router.get("/sessions")
+def get_market_sessions(_: None = Depends(require_internal_token)) -> dict[str, object]:
+    """시장별 세션 상태(프리·정규·애프터·마감)와 다음 전환 시각 — 화면 상단 표시용."""
+    from utils.market_session import market_sessions
+
+    return {"sessions": market_sessions()}
+
+
 @router.get("/fear-greed")
 def get_fear_greed_data(_: None = Depends(require_internal_token)) -> dict[str, object]:
     from services.fear_greed_service import get_fear_greed_summary

@@ -142,20 +142,32 @@ HYPERLIQUID_SYMBOLS = [
 # 통합 시장 거래 시간표
 from datetime import time
 
+# `premarket_open`·`aftermarket_close` 는 정규장 밖 거래 시간이다(현지 시각).
+# 없는 시장(호주)은 키를 두지 않는다 — 값을 지어내면 화면이 없는 세션을 보여준다.
 MARKET_SCHEDULES = {
     "kor": {
         "open": time(9, 0),
         "close": time(15, 30),
         "open_offset_minutes": 30,
         "close_offset_minutes": 30,
+        "premarket_open": time(8, 0),
+        "aftermarket_close": time(20, 0),
         "timezone": "Asia/Seoul",
+        "name": "한국",
     },
     "us": {
         "open": time(9, 30),
         "close": time(16, 0),
         "open_offset_minutes": 30,
         "close_offset_minutes": 30,
+        "premarket_open": time(4, 0),
+        "aftermarket_close": time(20, 0),
+        # 데이장(오버나이트) — 애프터가 끝난 20:00 부터 다음 거래일 새벽까지. 한국 주간에
+        # 미국 주식이 거래되는 구간이다. 자정을 넘기므로 시작·종료가 다른 날짜에 있다.
+        "daymarket_open": time(20, 0),
+        "daymarket_close": time(3, 50),
         "timezone": "America/New_York",
+        "name": "미국",
     },
     "au": {
         "open": time(10, 0),
@@ -163,6 +175,7 @@ MARKET_SCHEDULES = {
         "open_offset_minutes": 30,
         "close_offset_minutes": 30,
         "timezone": "Australia/Sydney",
+        "name": "호주",
     },
 }
 
