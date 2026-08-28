@@ -882,6 +882,7 @@ def _build_next_week_preview(
     ahead: list,
     today_local,
     currency: str,
+    krw_rate: float,
 ) -> dict[str, Any] | None:
     """다음 교체를 **지금 순위 그대로 확정된다고 가정**했을 때의 전체 액션.
 
@@ -959,7 +960,9 @@ def _build_next_week_preview(
             if not row.get("is_sell_all") and key in (row.get("sources") or []) and row["ticker"] not in expected
         )
 
-    _attach_account_targets(hypo, account, slot_keys=keys)
+    # 환율을 반드시 넘긴다 — 계좌 원장은 원화이고 종목 가격은 그 시장 통화라, 빠뜨리면
+    # 원화 총자산을 달러 가격으로 나눠 수량이 환율 배수만큼 부풀어 오른다.
+    _attach_account_targets(hypo, account, krw_rate, slot_keys=keys)
 
     # 다음 교체 체결일 — 주간 리듬 기준 다음주 첫 거래일.
     this_week = today_local.isocalendar()[:2]
@@ -1265,7 +1268,15 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
     # 다음주 교체 가정 미리보기 — 실시간 순위 기준 잠정치라 과거 재현(as_of)에는 없다.
     payload["actions"]["next_week_preview"] = (
         _build_next_week_preview(
-            states, payload["holdings"], payload["actions"], slot_weight, account, ahead, today_local, currency
+            states,
+            payload["holdings"],
+            payload["actions"],
+            slot_weight,
+            account,
+            ahead,
+            today_local,
+            currency,
+            _krw_rate(pool_currency),
         )
         if not as_of
         else None
