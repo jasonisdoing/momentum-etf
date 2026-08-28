@@ -186,7 +186,7 @@ MIN_TRADING_DAYS = 5
 # 화면 셀렉트는 API 응답으로 받은 목록만 렌더한다(프론트에 복사본을 두지 않는다).
 
 # 종목 수(동시 보유 슬롯) — 저장 검증도 이 목록으로 한다(별도 범위 없음).
-TOP_N_OPTIONS: tuple[int, ...] = (5, 8, 10)
+TOP_N_OPTIONS: tuple[int, ...] = (5, 6, 8, 10)
 
 # 한 업종에서 담을 수 있는 최대 종목 수. None = 제한 없음.
 MAX_PER_INDUSTRY_OPTIONS: tuple[int | None, ...] = (1, 2, 3, None)

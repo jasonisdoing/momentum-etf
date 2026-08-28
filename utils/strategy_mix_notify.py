@@ -54,13 +54,14 @@ def _watch_targets(country: str | None = None) -> list[dict[str, Any]]:
     """감시 대상 — 슬리브별 풀과 슬랙 알람이 모두 설정된 계좌. ``country`` 를 주면 그 국가만
     (한국·미국 장 시간이 달라 배치를 국가별로 나눠 돌린다).
 
-    국가는 계좌 값을 쓴다 — 두 풀이 계좌와 같은 국가인 것은 계좌 설정 저장이 보장한다.
+    국가는 계좌 값을 쓴다 — 슬리브 풀이 계좌와 같은 국가인 것은 계좌 설정 저장이 보장한다.
     """
-    from utils.account_settings_store import load_account_docs
+    from utils.account_settings_store import load_account_docs, mix_sleeves_of
 
     targets = []
     for doc in load_account_docs():
-        if not doc.get("mix_a_pool") or not doc.get("mix_b_pool"):
+        sleeves = mix_sleeves_of(doc)
+        if not sleeves or not all(row["strategy"] and row["pool"] for row in sleeves):
             continue
         if not bool(doc.get("mix_slack_enabled")):
             continue
@@ -115,13 +116,15 @@ def notify_all(country: str | None = None) -> dict[str, Any]:
 
 def send_test(account_id: str) -> dict[str, Any]:
     """테스트 발송 — 변화 여부와 무관하게 지금 액션을 즉시 보낸다(상태는 건드리지 않는다)."""
+    from utils.account_settings_store import mix_sleeves_of
     from utils.notification import send_slack_message_v2
     from utils.settings_loader import get_account_settings
     from utils.strategy_mix_service import mix_positions
 
     settings = get_account_settings(account_id)
-    if not settings.get("mix_a_pool") or not settings.get("mix_b_pool"):
-        raise ValueError(f"'{account_id}' 에 합성 A·B 슬리브가 모두 설정돼 있지 않습니다.")
+    sleeves = mix_sleeves_of(settings.get("settings") or settings)
+    if not sleeves or not all(row["strategy"] and row["pool"] for row in sleeves):
+        raise ValueError(f"'{account_id}' 에 합성 슬리브가 설정돼 있지 않습니다.")
     positions = mix_positions(account_id)
     groups = positions["actions"]["groups"]
     name = str(settings.get("name") or account_id)

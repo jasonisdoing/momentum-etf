@@ -1,7 +1,7 @@
 """합성 전략 — 슬리브(전략 + 종목풀) 둘을 한 계좌에서 함께 굴린 백테스트·운용 현황.
 
 `/strategy-mix` 열람 전용 화면의 백엔드. 설정은 이 화면이 갖지 않는다 —
-**선택한 계좌의 슬리브 둘**(계좌 설정의 `mix_a_strategy`/`mix_a_pool` 과 B 쌍)에 저장된
+**선택한 계좌의 슬리브들**(계좌 설정의 `mix_sleeves` 배열)에 저장된
 각 전략 화면 설정을 그대로 가져와 두 백테스트를 돌리고,
 매월 첫 거래일에 계좌 설정의 배분(A·B·비워 두는 현금)으로 되돌리되,
 **현금 우선**으로 이관한다 —
@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -83,19 +84,20 @@ def month_options() -> list[int]:
 
 # 배분 기본값(%) — 계좌 설정에 저장이 없을 때 쓰는 시스템 기본 배분이며, 지금까지의
 # 동작(모멘텀 50 : 신고가 50, 비워 두는 현금 없음)과 같다. 화면이 이 값을 그대로 보여준다.
-DEFAULT_MIX_WEIGHTS: dict[str, float] = {"a_pct": 50.0, "b_pct": 50.0, "cash_pct": 0.0}
-
-
 def mix_weights(account_settings: dict[str, Any]) -> dict[str, float]:
-    """계좌 설정의 합성 배분(%) — 저장이 없으면 `DEFAULT_MIX_WEIGHTS`.
+    """계좌 설정의 합성 배분(%) — {슬롯키_pct: 값} + cash_pct. 저장이 없으면 빈 배분.
 
-    셋은 항상 함께 저장되므로(계좌 설정 검증), 하나라도 없으면 미저장으로 보고
-    기본 배분을 쓴다 — 일부만 읽어 섞으면 합이 100 이 아닌 배분이 만들어진다.
+    슬리브와 현금은 항상 함께 저장되므로(계좌 설정 검증), 슬리브가 없으면 미저장으로 보고
+    현금 100% 를 돌려준다 — 일부만 읽어 섞으면 합이 100 이 아닌 배분이 만들어진다.
     """
-    keys = (("a_pct", "mix_a_pct"), ("b_pct", "mix_b_pct"), ("cash_pct", "mix_cash_pct"))
-    if any(account_settings.get(stored) is None for _, stored in keys):
-        return dict(DEFAULT_MIX_WEIGHTS)
-    return {name: float(account_settings[stored]) for name, stored in keys}
+    from utils.account_settings_store import mix_sleeves_of
+
+    sleeves = mix_sleeves_of(account_settings)
+    if not sleeves or account_settings.get("mix_cash_pct") is None:
+        return {"cash_pct": 100.0}
+    weights = {f"{row['key']}_pct": float(row["weight_pct"]) for row in sleeves}
+    weights["cash_pct"] = float(account_settings["mix_cash_pct"])
+    return weights
 
 
 def mix_accounts() -> list[dict[str, Any]]:
@@ -107,6 +109,7 @@ def mix_accounts() -> list[dict[str, Any]]:
     **조합이 아직 없어도 목록에 올린다** — 그래야 그 화면에서 고를 수 있다. 계산은
     `_resolve_mix_account` 가 조합이 갖춰졌는지 확인하고, 없으면 명시적으로 알린다.
     """
+    from utils.account_settings_store import mix_sleeves_of
     from utils.settings_loader import get_account_settings, list_available_accounts
 
     pool_names = {option["ticker_type"]: option for option in _pool_options(_all_active_pools())}
@@ -119,13 +122,16 @@ def mix_accounts() -> list[dict[str, Any]]:
         inner = settings.get("settings") or settings
         if not bool(inner.get("mix_enabled")):
             continue
-        a_pool = str(inner.get("mix_a_pool") or "").strip().lower()
-        b_pool = str(inner.get("mix_b_pool") or "").strip().lower()
-        a_strategy = str(inner.get("mix_a_strategy") or "").strip().lower()
-        b_strategy = str(inner.get("mix_b_strategy") or "").strip().lower()
-        # 슬리브 표시 이름 — 비면 전략 이름을 쓴다(「A. 모멘텀」).
-        a_name = str(inner.get("mix_a_name") or "").strip()
-        b_name = str(inner.get("mix_b_name") or "").strip()
+        # 슬리브 목록 — 순서가 곧 슬롯(A·B·C). 키 부여는 계좌 설정 저장소가 한 곳에서 한다.
+        sleeves = [
+            {
+                **row,
+                # 화면에 실제로 쓸 이름 — 사용자가 붙인 이름이 있으면 그것, 없으면 전략 이름.
+                "label": row["name"] or STRATEGY_LABELS.get(row["strategy"], row["strategy"]),
+                "pool_label": pool_names.get(row["pool"]),
+            }
+            for row in mix_sleeves_of(inner)
+        ]
         accounts.append(
             {
                 "account_id": account_id,
@@ -134,37 +140,46 @@ def mix_accounts() -> list[dict[str, Any]]:
                 "order": inner.get("order"),
                 "currency": str(inner.get("currency") or "").strip().upper(),
                 "country_code": str(inner.get("country_code") or "").strip().lower(),
-                "a_pool": a_pool,
-                "b_pool": b_pool,
-                "a_strategy": a_strategy,
-                "b_strategy": b_strategy,
-                "a_name": a_name,
-                "b_name": b_name,
-                # 화면에 실제로 쓸 이름 — 사용자가 붙인 이름이 있으면 그것, 없으면 전략 이름.
-                "a_strategy_label": a_name or STRATEGY_LABELS.get(a_strategy, a_strategy),
-                "b_strategy_label": b_name or STRATEGY_LABELS.get(b_strategy, b_strategy),
+                "sleeves": sleeves,
                 # 조합이 다 갖춰졌는지 — 화면이 "고르세요" 상태를 판단하는 데 쓴다.
-                "mix_ready": bool(a_pool and b_pool and a_strategy and b_strategy),
+                "mix_ready": bool(sleeves) and all(row["strategy"] and row["pool"] for row in sleeves),
                 # 오늘의 액션 슬랙 알람 토글 상태 — 화면 헤더가 그대로 보여준다.
                 "mix_slack_enabled": bool(inner.get("mix_slack_enabled")),
-                # 합성 배분(%) — 저장이 없으면 기본 배분(50:50:0).
-                **{f"mix_{name}": value for name, value in mix_weights(inner).items()},
-                "a_pool_label": pool_names.get(a_pool),
-                "b_pool_label": pool_names.get(b_pool),
+                # 비워 두는 현금 몫(%) — 슬리브 배분은 sleeves 안에 있다.
+                "mix_cash_pct": mix_weights(inner)["cash_pct"],
             }
         )
     accounts.sort(key=lambda item: (item["order"] is None, item["order"]))
     return accounts
 
 
+def default_sleeves() -> list[dict[str, Any]]:
+    """저장 이력이 없는 계좌에서 화면이 채울 슬리브 초안 — 최소 개수만큼 균등 배분.
+
+    저장값이 아니라 **입력 초안**이다. 전략·종목풀은 비워 둔다(사용자가 고른다).
+    """
+    from utils.account_settings_store import MIN_MIX_SLEEVES, MIX_SLEEVE_KEYS
+
+    share = round(100.0 / MIN_MIX_SLEEVES, 2)
+    return [
+        {"key": MIX_SLEEVE_KEYS[index], "strategy": "", "pool": "", "name": "", "weight_pct": share, "label": ""}
+        for index in range(MIN_MIX_SLEEVES)
+    ]
+
+
 def mix_meta() -> dict[str, Any]:
     """화면 초기용 — 운용 계좌 목록과 기간 선택지 (백테스트 계산 없음)."""
-    accounts = mix_accounts()
+    from utils.account_settings_store import MAX_MIX_SLEEVES, MIN_MIX_SLEEVES
     from utils.mix_sleeve import STRATEGY_OPTIONS
 
+    accounts = mix_accounts()
     return {
         "accounts": accounts,
         "month_options": month_options(),
+        # 슬리브 개수 제한·초안 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다).
+        "min_sleeves": MIN_MIX_SLEEVES,
+        "max_sleeves": MAX_MIX_SLEEVES,
+        "default_sleeves": default_sleeves(),
         # 조합 셀렉트 선택지 — 이 화면에서 전략·종목풀을 고른다(계좌 설정은 사용 여부만).
         "strategy_options": [{"value": key, "label": STRATEGY_LABELS[key]} for key in STRATEGY_OPTIONS],
         # 풀은 계좌 국가에 맞는 것만 고를 수 있어야 해서 국가 코드를 함께 준다.
@@ -175,7 +190,7 @@ def mix_meta() -> dict[str, Any]:
 
 
 def mix_weights_for_account(account_id: str) -> dict[str, float]:
-    """그 계좌의 합성 배분(%). 목록에 없으면 기본 배분.
+    """그 계좌의 합성 배분(%) — {슬롯키_pct: 값} + cash_pct. 목록에 없으면 현금 100%.
 
     슬리브마다 풀이 다를 수 있으므로 풀로 계좌를 되찾을 수 없다 — 계좌가 기준이다.
     백테스트·운영 화면·슬랙이 모두 같은 배분을 쓰도록 여기서만 읽는다.
@@ -183,12 +198,10 @@ def mix_weights_for_account(account_id: str) -> dict[str, float]:
     target = str(account_id or "").strip()
     for account in mix_accounts():
         if account["account_id"] == target:
-            return {
-                "a_pct": float(account["mix_a_pct"]),
-                "b_pct": float(account["mix_b_pct"]),
-                "cash_pct": float(account["mix_cash_pct"]),
-            }
-    return dict(DEFAULT_MIX_WEIGHTS)
+            weights = {f"{row['key']}_pct": float(row["weight_pct"]) for row in account["sleeves"]}
+            weights["cash_pct"] = float(account["mix_cash_pct"])
+            return weights
+    return {"cash_pct": 100.0}
 
 
 def _resolve_mix_account(account_id: str | None) -> dict[str, Any]:
@@ -196,14 +209,14 @@ def _resolve_mix_account(account_id: str | None) -> dict[str, Any]:
 
     반환 컨텍스트를 두 진입점(`mix_positions`·`run_mix_backtest`)이 그대로 쓴다 —
     풀을 각자 다시 꺼내면 슬리브 배정이 갈릴 수 있다.
-    국가·통화는 두 풀이 같도록 계좌 설정이 강제하므로 A 슬리브 풀에서 대표로 읽는다.
+    국가·통화는 모든 풀이 같도록 계좌 설정이 강제하므로 첫 슬리브 풀에서 대표로 읽는다.
     """
     from utils.mix_sleeve import settings_map, validate_settings
     from utils.settings_loader import get_ticker_type_settings
 
     accounts = mix_accounts()
     if not accounts:
-        raise RuntimeError("합성 전략을 운용하는 계좌가 없습니다 — 계좌 설정에서 A·B 슬리브를 지정하세요.")
+        raise RuntimeError("합성 전략을 운용하는 계좌가 없습니다 — 계좌 설정에서 합성 사용을 켜세요.")
     target = str(account_id or "").strip()
     if target:
         account = next((row for row in accounts if row["account_id"] == target), None)
@@ -216,19 +229,16 @@ def _resolve_mix_account(account_id: str | None) -> dict[str, Any]:
     if not account.get("mix_ready"):
         raise RuntimeError(
             f"'{account['account_id']}' 의 합성 조합이 아직 정해지지 않았습니다 — "
-            "화면 상단에서 A·B 슬리브의 전략과 종목풀을 고르고 저장하세요."
+            "화면 상단에서 각 슬리브의 전략과 종목풀을 고르고 저장하세요."
         )
 
-    # 슬리브 둘 — (키, 전략, 풀). 키는 합성 안에서 이 슬리브를 가리키는 이름이다.
-    wanted = [
-        ("a", account["a_strategy"], account["a_pool"], account["a_name"]),
-        ("b", account["b_strategy"], account["b_pool"], account["b_name"]),
-    ]
-    saved_by_slot = {key: settings_map(strategy).get(pool) for key, strategy, pool, _ in wanted}
+    # 슬리브 — 키는 합성 안에서 이 슬리브를 가리키는 이름이다(순서대로 a·b·c).
+    wanted = account["sleeves"]
+    saved_by_slot = {row["key"]: settings_map(row["strategy"]).get(row["pool"]) for row in wanted}
     missing = [
-        f"{STRATEGY_LABELS.get(strategy, strategy)}({pool})"
-        for key, strategy, pool, _ in wanted
-        if not saved_by_slot[key]
+        f"{STRATEGY_LABELS.get(row['strategy'], row['strategy'])}({row['pool']})"
+        for row in wanted
+        if not saved_by_slot[row["key"]]
     ]
     if missing:
         raise RuntimeError(f"{' · '.join(missing)} 설정이 저장돼 있지 않습니다 — 해당 전략 화면에서 먼저 저장하세요.")
@@ -249,27 +259,24 @@ def _resolve_mix_account(account_id: str | None) -> dict[str, Any]:
     # 무관하게 시뮬레이션·백테스트가 같은 코드로 돈다.
     slots = [
         SleeveSpec(
-            key=key,
-            strategy=strategy,
-            pool=pool,
-            settings=validate_settings(strategy, {**saved_by_slot[key], "pool": pool}),
-            name=name,
+            key=row["key"],
+            strategy=row["strategy"],
+            pool=row["pool"],
+            settings=validate_settings(row["strategy"], {**saved_by_slot[row["key"]], "pool": row["pool"]}),
+            name=row["name"],
         )
-        for key, strategy, pool, name in wanted
+        for row in wanted
     ]
 
-    a_pool_settings = get_ticker_type_settings(slots[0].pool) or {}
+    # 국가·통화는 모든 슬리브 풀이 같도록 계좌 설정이 강제하므로 첫 슬리브에서 대표로 읽는다.
+    first_pool_settings = get_ticker_type_settings(slots[0].pool) or {}
     return {
         "slots": slots,
         "account_id": account["account_id"],
         "account_name": account["name"],
-        "a_pool": slots[0].pool,
-        "b_pool": slots[1].pool,
-        "a_settings": slots[0].settings,
-        "b_settings": slots[1].settings,
         # 국가·통화 — 거래 달력(월초 리밸런싱 판정)과 원화 환산에 쓴다.
-        "country": str(a_pool_settings.get("country_code") or "kor").strip().lower(),
-        "currency": str(a_pool_settings.get("currency") or "KRW").strip().upper(),
+        "country": str(first_pool_settings.get("country_code") or "kor").strip().lower(),
+        "currency": str(first_pool_settings.get("currency") or "KRW").strip().upper(),
         "benchmark_ticker": benchmark_ticker,
         "benchmark_name": str(benchmark.get("name") or benchmark_ticker).strip(),
     }
@@ -303,12 +310,12 @@ def _load_account_state(account_id: str) -> dict[str, Any]:
     return {"account_id": account_id, "holdings": holdings, "cash_balance": cash}
 
 
-def _sleeve_shares(ctx: dict[str, Any], as_of: str | None) -> tuple[float, float, float]:
-    """(A 몫 %, B 몫 %, 현금 몫 %) — 직전 월초 배분 이후 흘러간 비율.
+def _sleeve_shares(ctx: dict[str, Any], as_of: str | None) -> dict[str, float]:
+    """{슬롯키: 몫 %} + cash_pct — 직전 월초 배분 이후 흘러간 비율.
 
     각 슬리브의 일별 곡선에서 이번 달 첫 거래일 이후 성장률을 읽어, 월초 배분에 곱한 뒤
-    셋을 100 으로 정규화한다. 비워 두는 현금은 자라지 않으므로 그 몫은 그대로 두고,
-    두 슬리브가 오르면 상대적으로 현금 비중이 줄어든다.
+    전체를 100 으로 정규화한다. 비워 두는 현금은 자라지 않으므로 그 몫은 그대로 두고,
+    슬리브가 오르면 상대적으로 현금 비중이 줄어든다.
 
     곡선 형태(전일 대비 vs 누적)는 어댑터가 **누적 배수**로 통일해 주므로 전략을 가리지 않는다.
     곡선을 못 구하면(데이터 부족 등) 저장된 월초 배분을 그대로 쓴다 — 임의 보정 대신
@@ -316,8 +323,7 @@ def _sleeve_shares(ctx: dict[str, Any], as_of: str | None) -> tuple[float, float
     """
     from utils.mix_sleeve import daily_curve, load_context, run_backtest
 
-    weights = mix_weights_for_account(ctx["account_id"])
-    base = (weights["a_pct"], weights["b_pct"], weights["cash_pct"])
+    base = mix_weights_for_account(ctx["account_id"])
 
     try:
         curves = {spec.key: daily_curve(spec, run_backtest(spec, 2, load_context(spec))) for spec in ctx["slots"]}
@@ -329,10 +335,10 @@ def _sleeve_shares(ctx: dict[str, Any], as_of: str | None) -> tuple[float, float
 
     cutoff = as_of or "9999-12-31"
     trimmed = {key: {d: v for d, v in curve.items() if d <= cutoff} for key, curve in curves.items()}
-    if not all(trimmed.values()):
+    if not trimmed or not all(trimmed.values()):
         return base
     # 기준 달 — 어느 슬리브든 마지막 날짜가 같은 달이다(같은 국가 달력).
-    month = max(trimmed["a"])[:7]
+    month = max(max(curve) for curve in trimmed.values())[:7]
 
     growths: dict[str, float] = {}
     for key, curve in trimmed.items():
@@ -340,16 +346,14 @@ def _sleeve_shares(ctx: dict[str, Any], as_of: str | None) -> tuple[float, float
         # 월초 첫 거래일 값이 기준점이다 — 그날까지의 변동은 직전 달 몫이다.
         growths[key] = curve[days[-1]] / curve[days[0]] if len(days) >= 2 and curve[days[0]] > 0 else 1.0
 
-    values = {key: weights[f"{key}_pct"] * growths[key] for key in growths}
-    cash_value = weights["cash_pct"]  # 비워 둔 현금은 자라지 않는다.
+    values = {key: base[f"{key}_pct"] * growths[key] for key in growths}
+    cash_value = base["cash_pct"]  # 비워 둔 현금은 자라지 않는다.
     total = sum(values.values()) + cash_value
     if total <= 0:
         return base
-    return (
-        round(values["a"] / total * 100.0, 4),
-        round(values["b"] / total * 100.0, 4),
-        round(cash_value / total * 100.0, 4),
-    )
+    shares = {f"{key}_pct": round(value / total * 100.0, 4) for key, value in values.items()}
+    shares["cash_pct"] = round(cash_value / total * 100.0, 4)
+    return shares
 
 
 # 비중 조정 지시 밴드 — **슬롯 크기에 비례**한다(슬롯 목표비중 × 비율, 최소 0.5%p).
@@ -682,13 +686,11 @@ def _attach_disparity(holdings: list[dict[str, Any]], pool_by_source: dict[str, 
         row["current_short_pct"] = None
         row["current_long_pct"] = None
         ticker = str(row.get("ticker") or "").strip()
+        # 여러 슬리브에 함께 잡힌 종목은 **첫 슬리브**의 풀 이평선으로 본다 — 배지가
+        # 하나뿐이라 기준도 하나여야 한다(슬롯 순서가 그 우선순위다).
         sources = row.get("sources") or []
-        if "a" in sources:
-            pool = pool_by_source.get("a", "")
-        elif "b" in sources:
-            pool = pool_by_source.get("b", "")
-        else:
-            pool = pool_by_ticker.get(ticker.upper(), "")
+        source = next((key for key in pool_by_source if key in sources), "")
+        pool = pool_by_source.get(source, "") if source else pool_by_ticker.get(ticker.upper(), "")
         days = ma_days_of(pool) if pool else None
         if days is None:
             continue
@@ -743,8 +745,27 @@ def _krw_rate(currency: str) -> float:
         return 0.0
 
 
+# 슬리브별 값이 붙는 자리 — 내부 계산은 `a_weight` 처럼 평평하게 들고 다니고(키가 늘어도
+# 코드가 그대로다), 화면에 내보낼 때만 `slots` 아래로 모은다. 화면은 슬롯 키를 돌며 읽는다.
+_SLOT_ROW_FIELDS: tuple[str, ...] = ("weight", "status", "return_pct", "held_label")
+
+
+def _holding_payload(row: dict[str, Any], slot_keys: Sequence[str]) -> dict[str, Any]:
+    """보유 행 하나를 화면 형태로 — 슬리브별 값(`a_weight` …)을 `slots[키]` 로 모은다."""
+    flat_keys = {f"{key}_{field}" for key in slot_keys for field in _SLOT_ROW_FIELDS}
+    payload = {name: value for name, value in row.items() if name not in flat_keys}
+    payload["weight_pct"] = round(float(row["weight_pct"]), 2)
+    payload["slots"] = {
+        key: {field: row.get(f"{key}_{field}") for field in _SLOT_ROW_FIELDS} for key in slot_keys
+    }
+    return payload
+
+
 def _attach_account_targets(
-    holdings: list[dict[str, Any]], account: dict[str, Any], krw_rate: float = 1.0
+    holdings: list[dict[str, Any]],
+    account: dict[str, Any],
+    krw_rate: float = 1.0,
+    slot_keys: Sequence[str] = (),
 ) -> list[dict[str, Any]]:
     """계좌 보유와 목표를 대조해 수량 지시를 붙인다. 전량 매도 요약 목록을 돌려준다.
 
@@ -810,8 +831,8 @@ def _attach_account_targets(
                 "weight_pct": 0.0,
                 "price": item.get("price"),
                 "change_pct": None,
-                "a_status": None,
-                "b_status": None,
+                # 슬리브별 상태 칸 — 이 행은 목표에 없는 보유라 어느 슬리브에도 안 걸린다.
+                **{f"{key}_status": None for key in slot_keys},
                 "is_sell_all": True,
                 "held_quantity": item["quantity"],
                 "held_value": value,
@@ -918,7 +939,7 @@ def _build_next_week_preview(
             if not row.get("is_sell_all") and key in (row.get("sources") or []) and row["ticker"] not in expected
         )
 
-    _attach_account_targets(hypo, account)
+    _attach_account_targets(hypo, account, slot_keys=keys)
 
     # 다음 교체 체결일 — 주간 리듬 기준 다음주 첫 거래일.
     this_week = today_local.isocalendar()[:2]
@@ -973,12 +994,13 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
     labels = _slot_labels(slots)
     states = {spec.key: slot_state(spec, as_of=as_of) for spec in slots}
 
-    # ── 슬리브 몫 — 월초 배분에서 두 슬리브가 각자 흘러간 비율을 역산한다 ──
+    # ── 슬리브 몫 — 월초 배분에서 각 슬리브가 흘러간 비율을 역산한다 ──
     # 재조정은 매월 첫 거래일에만 하므로, 그 사이에는 잘 나간 슬리브의 몫이 커진 채로
     # 가는 것이 백테스트다. 항상 월초 배분으로 보면 승자 슬리브를 매주 깎는 지시가 나온다.
     base_weights = mix_weights_for_account(ctx["account_id"])
-    a_share, b_share, reserved_cash_share = _sleeve_shares(ctx, as_of)
-    shares = {"a": a_share, "b": b_share}
+    drifted = _sleeve_shares(ctx, as_of)
+    reserved_cash_share = drifted["cash_pct"]
+    shares = {key: drifted[f"{key}_pct"] for key in keys}
 
     # 새로 담는 슬롯의 몫 — 진입·교체 시점에는 그 슬리브 몫의 1/N 을 배정한다.
     # 이미 들고 있는 종목은 **흘러간 실제 비중**(drift_pct)을 목표로 쓴다. 진입할 때
@@ -1069,7 +1091,6 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
                     row["weight_pct"] += trimmed - row[f"{key}_weight"]
                     row[f"{key}_weight"] = trimmed
         shares = {key: base_weights[f"{key}_pct"] for key in keys}
-        a_share, b_share = shares["a"], shares["b"]
         reserved_cash_share = base_weights["cash_pct"]
 
     stock_pct = sum(row["weight_pct"] for row in holdings)
@@ -1114,7 +1135,7 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
         total_assets = stock_value + account["cash_balance"]
         account["stock_value"] = round(stock_value, 2)
         account["total_assets"] = round(total_assets, 2)
-        account["sell_all"] = _attach_account_targets(holdings, account, krw_rate)
+        account["sell_all"] = _attach_account_targets(holdings, account, krw_rate, slot_keys=keys)
 
     # 종목명 옆 추세 이탈 배지(❗)용 — 행이 속한 슬리브의 **종목풀 설정** 이평선 기준.
     _attach_disparity(holdings, {spec.key: spec.pool for spec in slots})
@@ -1137,8 +1158,6 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
     payload = {
         "computed_at": datetime.now().astimezone().isoformat(),
         "account_id": ctx["account_id"],
-        "a_pool": ctx["a_pool"],
-        "b_pool": ctx["b_pool"],
         # 화면이 표시용 시세를 60초마다 갱신할 때 쓴다(시세 소스가 국가별로 다르다).
         "country": country,
         "account": account,
@@ -1153,14 +1172,11 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
             # 총 현금 중 **두 전략에 아예 주지 않고 비워 둔 몫**. 나머지는 빈 슬롯에서 생긴다.
             "reserved_cash_pct": round(reserved_cash_share, 2),
             # 월초에 되돌릴 배분 — 화면이 "지금 몫"과 "목표 배분"을 함께 보여준다.
-            "base_weights": {
-                "a_pct": round(base_weights["a_pct"], 2),
-                "b_pct": round(base_weights["b_pct"], 2),
-                "cash_pct": round(base_weights["cash_pct"], 2),
-            },
+            "base_weights": {name: round(value, 2) for name, value in base_weights.items()},
+            # 슬리브별 현황 — 슬롯 키로 담는다(화면이 키 목록을 돌며 그린다).
             # slots_used = 목표가 찬 슬롯, held_count = 지금 실제로 들고 있는 종목 수.
             # 둘이 다르면 아직 체결 전이라는 뜻이라 화면이 구분해서 보여준다.
-            **{
+            "slots": {
                 key: {
                     "alloc_pct": round(shares[key], 2),
                     "slots_used": states[key].active_count,
@@ -1171,7 +1187,9 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
                 for key in keys
             },
         },
-        "holdings": [{**row, "weight_pct": round(row["weight_pct"], 2)} for row in holdings],
+        # 슬리브별 값은 여기서는 평평한 채로 둔다 — 아래 액션 조립이 그 형태를 읽는다.
+        # 화면 형태(`slots`)로 모으는 것은 return 직전이다.
+        "holdings": holdings,
         "actions": {
             # 슬리브별 액션 — 슬롯 키로 담는다. 전략에 없는 항목은 빈 목록/None 이다.
             "slots": {
@@ -1232,6 +1250,8 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
         if not as_of
         else None
     )
+    # 슬리브별 값을 `slots[키]` 로 모아 내보낸다 — 화면은 슬롯 키를 돌며 읽는다.
+    payload["holdings"] = [_holding_payload(row, keys) for row in payload["holdings"]]
     return payload
 
 
@@ -1656,15 +1676,14 @@ def _simulate_mix_daily(
 def run_mix_backtest(account_id: str | None = None, months: int | None = None) -> dict[str, Any]:
     """선택한 계좌의 슬리브별 저장 설정으로 A·B 백테스트를 각각 돌려 합성 결과를 만든다.
 
-    ``months`` 를 주면 그 기간으로 두 백테스트를 돌린다(화면의 기간 셀렉트). 없으면
-    두 저장 설정 중 짧은 쪽.
+    ``months`` 를 주면 그 기간으로 슬리브 백테스트를 모두 돌린다(화면의 기간 셀렉트).
+    없으면 저장 설정 중 **가장 짧은** 기간 — 한 슬리브라도 데이터가 없으면 합성이 안 된다.
     """
     import pandas as pd
 
     ctx = _resolve_mix_account(account_id)
-    a_settings, b_settings = ctx["a_settings"], ctx["b_settings"]
     if months is None:
-        months = min(int(a_settings["backtest_months"]), int(b_settings["backtest_months"]))
+        months = min(int(spec.settings["backtest_months"]) for spec in ctx["slots"])
     months = int(months)
     allowed = month_options()
     if months not in allowed:
@@ -1704,18 +1723,17 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
     from utils.mix_sleeve import daily_curve as sleeve_curve
 
     curves = {spec.key: sleeve_curve(spec, results[spec.key]) for spec in ctx["slots"]}
-    a_curve, b_curve = curves["a"], curves["b"]
 
     # 합성 곡선 — 한 계좌 금액 기반 시뮬레이션(월초 배분 복구는 현금 우선 이관).
     mix_curve = _simulate_mix_daily(ctx, results, contexts, months)
     dates = [d for d in mix_curve.index if d in bench_curve]
     if len(dates) < 2:
-        raise RuntimeError("두 전략의 공통 백테스트 구간이 부족합니다.")
+        raise RuntimeError("슬리브 전략들의 공통 백테스트 구간이 부족합니다.")
 
     first_mix = float(mix_curve[dates[0]])
     first_bench = bench_curve[dates[0]]
-    first_a = a_curve.get(dates[0])
-    first_b = b_curve.get(dates[0])
+    # 슬리브별 시작값 — 합성과 같은 시작일로 다시 맞추는 기준점.
+    first_by_slot = {key: curve.get(dates[0]) for key, curve in curves.items()}
 
     def _rebased(curve: dict[str, float], base: float | None, date: str) -> float | None:
         """시작일을 0% 로 맞춘 누적(%). 그 날짜 값이 없으면 None — 임의로 채우지 않는다."""
@@ -1729,8 +1747,8 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
             "date": date,
             "strategy_pct": round((float(mix_curve[date]) / first_mix - 1) * 100, 2),
             # 슬리브 단독 누적(%) — 합성과 같은 시작일 기준으로 다시 맞춘다.
-            "a_pct": _rebased(a_curve, first_a, date),
-            "b_pct": _rebased(b_curve, first_b, date),
+            # 슬롯 키로 담는다(화면이 키 목록을 돌며 표를 만든다).
+            "slots": {key: _rebased(curve, first_by_slot[key], date) for key, curve in curves.items()},
             "benchmark_pct": round((bench_curve[date] / first_bench - 1) * 100, 2),
         }
         for date in dates
@@ -1761,8 +1779,6 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
     return {
         "computed_at": datetime.now().astimezone().isoformat(),
         "account_id": ctx["account_id"],
-        "a_pool": ctx["a_pool"],
-        "b_pool": ctx["b_pool"],
         "months": months,
         "start_date": dates[0],
         "end_date": dates[-1],

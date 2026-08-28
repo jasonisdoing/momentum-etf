@@ -4290,6 +4290,42 @@ a {
   white-space: nowrap;
 }
 
+/* 합성 슬리브 줄 — 메인 헤더 아래 전용 영역. 슬롯 하나가 한 줄이라
+   전략·종목풀·이름·배분이 짝지어 읽힌다(헤더에 늘어놓으면 짝이 안 보인다). */
+.mixSleeveRows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--app-border, rgba(148, 163, 184, 0.35));
+}
+
+.mixSleeveRow {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+}
+
+/* 슬롯 기호(A·B·C) — 줄 맨 앞에서 폭을 고정해 아래 줄과 세로가 맞는다. */
+.mixSleeveMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  flex-shrink: 0;
+  color: #5b6778;
+  font-size: var(--fs-sm);
+  font-weight: 800;
+}
+
+.mixSleeveWeight {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .appInlineField {
   display: inline-flex;
   align-items: center;

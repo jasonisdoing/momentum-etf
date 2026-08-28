@@ -77,30 +77,30 @@ const hintStyle: React.CSSProperties = {
   fontSize: "var(--fs-sm)",
 };
 
+/** 합성 슬리브 하나 — 슬롯 키(a·b·c)는 저장 순서대로 백엔드가 붙인다. */
+type MixSleeve = {
+  key: string;
+  strategy: string;
+  pool: string;
+  /** 사용자가 붙인 표시 이름 — 비면 전략 이름을 쓴다. */
+  name: string;
+  /** 화면에 실제로 쓸 이름 — 위 이름이 있으면 그것, 없으면 전략 이름. */
+  label: string;
+  weight_pct: number;
+  pool_label?: PoolLabelSource | null;
+};
+
 /** 통화가 다른 계좌는 목표 금액·주수를 낼 수 없어 셀렉터에서 걸러낸다. */
 type AccountOption = AccountOptionBase & {
   currency?: string;
-  /** 이 계좌의 슬리브 둘 — (전략, 종목풀) 쌍. 이 화면에서 고른다. */
-  a_strategy: string;
-  b_strategy: string;
-  /** 사용자가 붙인 표시 이름 — 비면 전략 이름을 쓴다. */
-  a_name: string;
-  b_name: string;
-  /** 화면에 실제로 쓸 이름 — 위 이름이 있으면 그것, 없으면 전략 이름. */
-  a_strategy_label: string;
-  b_strategy_label: string;
-  a_pool: string;
-  b_pool: string;
-  a_pool_label?: PoolLabelSource | null;
-  b_pool_label?: PoolLabelSource | null;
+  /** 이 계좌의 슬리브 — 순서가 곧 슬롯(A·B·C). 이 화면에서 고른다. */
+  sleeves: MixSleeve[];
   /** 조합이 다 정해졌는지 — 아니면 계산 대신 "고르세요" 를 보여준다. */
   mix_ready: boolean;
   country_code: string;
   /** 오늘의 액션 슬랙 알람 — 새 지시·수량 증가 시 발송. */
   mix_slack_enabled?: boolean;
-  /** 합성 배분(%) — 모멘텀·신고가·비워 두는 현금. 셋의 합이 100 이다. */
-  mix_a_pct: number;
-  mix_b_pct: number;
+  /** 비워 두는 현금 몫(%) — 슬리브 배분과 합이 100 이다. */
   mix_cash_pct: number;
 };
 type StrategyOption = { value: string; label: string };
@@ -112,6 +112,11 @@ type Meta = {
   month_options: number[];
   strategy_options: StrategyOption[];
   pool_options: MixPoolOption[];
+  /** 슬리브 개수 제한 — 백엔드 상수가 단일 소스. */
+  min_sleeves: number;
+  max_sleeves: number;
+  /** 조합이 아직 없는 계좌에서 채울 입력 초안(전략·종목풀은 비어 있다). */
+  default_sleeves: MixSleeve[];
   /** 기본 선택 계좌 — 목록의 첫 계좌. */
   account_id: string;
 };
@@ -119,8 +124,6 @@ type Meta = {
 type View = {
   computed_at: string;
   account_id: string;
-  a_pool: string;
-  b_pool: string;
   months: number;
   start_date: string;
   end_date: string;
@@ -139,8 +142,8 @@ type View = {
   daily: {
     date: string;
     strategy_pct: number;
-    a_pct: number | null;
-    b_pct: number | null;
+    /** 슬리브 단독 누적(%) — 슬롯 키로 담긴다. 그 날짜 데이터가 없으면 null. */
+    slots: Record<string, number | null>;
     benchmark_pct: number;
   }[];
   /** 체결 목록 — 두 전략 합본. exit_date 가 없으면 보유중. */
@@ -166,24 +169,26 @@ type MixTradeRow = {
   reason: string;
 };
 
+/** 한 행에서 슬리브 하나가 차지하는 값. 그 슬리브에 안 걸린 행은 전부 비어 있다. */
+type HoldingSlot = {
+  /** 슬리브별 몫(%) — 슬롯 합이 목표비중이다. */
+  weight?: number | null;
+  status?: string | null;
+  /** 전략 수익률(이론값) — 모멘텀: 연속 시작 교체일 시가 대비 · 신고가: 진입가 대비. */
+  return_pct?: number | null;
+  /** 보유 기간 — 전략마다 단위가 달라 백엔드가 완성된 문자열로 내려준다("3주"·"12일"·"신규"). */
+  held_label?: string | null;
+};
+
 type Holding = {
   ticker: string;
   name: string;
-  sources: ("a" | "b")[];
+  sources: string[];
   weight_pct: number;
-  /** 슬리브별 몫(%) — 합이 목표비중이다. 전량 매도 행에는 없다. */
-  a_weight?: number;
-  b_weight?: number;
+  /** 슬리브별 값 — 슬롯 키로 담긴다(a·b·c). */
+  slots: Record<string, HoldingSlot>;
   price: number | null;
   change_pct: number | null;
-  a_status: string | null;
-  b_status: string | null;
-  /** 전략 수익률(이론값) — 모멘텀: 연속 시작 교체일 시가 대비 · 신고가: 진입가 대비. */
-  a_return_pct?: number | null;
-  b_return_pct?: number | null;
-  /** 보유 기간 — 전략마다 단위가 달라 백엔드가 완성된 문자열로 내려준다("3주"·"12일"·"신규"). */
-  a_held_label?: string | null;
-  b_held_label?: string | null;
   /** 적용 계좌가 있을 때만 온다 — 계좌 총자산 기준 목표 금액·주수와 현재 보유. */
   target_amount?: number | null;
   target_quantity?: number | null;
@@ -225,8 +230,6 @@ type AccountState = {
 type Positions = {
   computed_at: string;
   account_id: string;
-  a_pool: string;
-  b_pool: string;
   /** 표시용 시세 갱신에 쓰는 국가 코드(시세 소스가 국가별로 다르다). */
   country: string;
   as_of: string;
@@ -242,24 +245,21 @@ type Positions = {
     cash_pct: number;
     /** 총 현금 중 두 전략에 주지 않고 비워 둔 몫(%). 나머지는 빈 슬롯에서 생긴다. */
     reserved_cash_pct: number;
-    /** 월초에 되돌릴 배분(%) — 화면 헤더에서 저장한 값. */
-    base_weights: { a_pct: number; b_pct: number; cash_pct: number };
-    /** slots_used = 목표가 찬 슬롯, held_count = 지금 실제로 들고 있는 종목 수. */
-    a: {
-      /** 슬리브 몫(%) — 월초 배분에서 흘러간 비율. */
-      alloc_pct: number;
-      slots_used: number;
-      held_count: number;
-      top_n: number;
-      cash_pct: number;
-    };
-    b: {
-      alloc_pct: number;
-      slots_used: number;
-      held_count: number;
-      top_n: number;
-      cash_pct: number;
-    };
+    /** 월초에 되돌릴 배분(%) — 화면 헤더에서 저장한 값. `{슬롯키}_pct` 와 `cash_pct`. */
+    base_weights: Record<string, number>;
+    /** 슬리브별 현황 — 슬롯 키로 담긴다.
+     *  slots_used = 목표가 찬 슬롯, held_count = 지금 실제로 들고 있는 종목 수. */
+    slots: Record<
+      string,
+      {
+        /** 슬리브 몫(%) — 월초 배분에서 흘러간 비율. */
+        alloc_pct: number;
+        slots_used: number;
+        held_count: number;
+        top_n: number;
+        cash_pct: number;
+      }
+    >;
   };
   holdings: Holding[];
   actions: {
@@ -315,11 +315,10 @@ type ViewMode = (typeof VIEW_MODES)[number]["key"];
 
 type PeriodRow = {
   period: string;
-  /** 합성(두 슬리브를 한 계좌에서 굴린 결과). */
+  /** 합성(슬리브들을 한 계좌에서 굴린 결과). */
   strategy_pct: number;
   /** 각 전략을 **혼자** 굴렸을 때 — 합성이 단독보다 나은지 바로 읽으라고 함께 둔다. */
-  a_pct: number | null;
-  b_pct: number | null;
+  slots: Record<string, number | null>;
   benchmark_pct: number;
   /** 합성 − 벤치마크. */
   excess_pp: number;
@@ -343,8 +342,7 @@ function toPeriodRows(
   if (daily.length === 0) return [];
   type Snapshot = {
     strategy: number;
-    a: number | null;
-    b: number | null;
+    slots: Record<string, number | null>;
     benchmark: number;
     lastDate: string;
   };
@@ -355,14 +353,19 @@ function toPeriodRows(
     if (!lastByPeriod.has(key)) order.push(key);
     lastByPeriod.set(key, {
       strategy: point.strategy_pct,
-      a: point.a_pct,
-      b: point.b_pct,
+      slots: point.slots,
       benchmark: point.benchmark_pct,
       lastDate: point.date,
     });
   }
-  // 첫 구간의 기준은 시작 시점(누적 0%)이다.
-  let prev: Snapshot = { strategy: 0, a: 0, b: 0, benchmark: 0, lastDate: "" };
+  // 첫 구간의 기준은 시작 시점(누적 0%)이다 — 슬롯도 모두 0 에서 시작한다.
+  const slotKeys = Object.keys(daily[0].slots ?? {});
+  let prev: Snapshot = {
+    strategy: 0,
+    slots: Object.fromEntries(slotKeys.map((key) => [key, 0])),
+    benchmark: 0,
+    lastDate: "",
+  };
   const rows: PeriodRow[] = [];
   // 누적(%) 두 점 사이의 구간 수익률. 어느 한쪽이라도 값이 없으면 null — 0 으로 채우면
   // 데이터가 없는 구간이 '보합' 으로 보인다.
@@ -375,8 +378,9 @@ function toPeriodRows(
     rows.push({
       period: labelByLastDate ? current.lastDate : key,
       strategy_pct: strategy,
-      a_pct: step(current.a, prev.a),
-      b_pct: step(current.b, prev.b),
+      slots: Object.fromEntries(
+        slotKeys.map((slot) => [slot, step(current.slots?.[slot] ?? null, prev.slots?.[slot] ?? null)]),
+      ),
       benchmark_pct: benchmark,
       excess_pp: strategy - benchmark,
     });
@@ -395,8 +399,9 @@ function formatAmount(value: number | null | undefined): string {
   return value.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
 }
 
-/** 행이 어느 슬리브에서 왔는지 — 라벨은 계좌가 고른 전략명으로 채운다(고정 문구 금지). */
-const SLOT_KEYS = ["a", "b"] as const;
+/** 슬롯 키는 순서가 정한다 — 백엔드 `MIX_SLEEVE_KEYS` 와 같은 순서여야 한다. */
+const SLOT_KEY_ORDER = ["a", "b", "c"] as const;
+
 
 /** 보유 표 행 — 현금 행도 같은 표에 넣는다 (비중 합이 100%임을 한눈에 보이게). */
 type PositionRow = Holding & {
@@ -450,17 +455,22 @@ export function StrategyMixClient() {
 
   // 계산 기준은 계좌다 — 슬리브별 풀은 서버가 계좌 설정에서 꺼낸다(계좌 설정이 단일 소스).
   const selectedAccount = accountOptions.find((option) => option.account_id === accountId) ?? null;
-  /** 슬롯(a/b) → 「A. 모멘텀」처럼 슬롯 기호 + 계좌가 고른 전략 이름.
-   *  두 슬리브가 같은 전략일 수 있으므로 전략 이름만으로는 구분되지 않는다. */
+  // 저장된 슬리브. 아직 고르지 않은 계좌는 백엔드가 준 빈 초안을 채운다 — 슬롯 칸이
+  // 하나도 안 뜨면 조합을 고를 수가 없다.
+  const sleeves = useMemo(
+    () => (selectedAccount?.sleeves?.length ? selectedAccount.sleeves : (meta?.default_sleeves ?? [])),
+    [selectedAccount, meta?.default_sleeves],
+  );
+  /** 슬롯(a/b/c) → 「A. 모멘텀」처럼 슬롯 기호 + 계좌가 고른 전략 이름.
+   *  슬리브가 같은 전략일 수 있으므로 전략 이름만으로는 구분되지 않는다. */
   const slotLabel = (slot: string) => {
-    const strategy =
-      slot === "a" ? selectedAccount?.a_strategy_label : slot === "b" ? selectedAccount?.b_strategy_label : null;
-    if (slot !== "a" && slot !== "b") return slot;
+    const sleeve = sleeves.find((row) => row.key === slot);
     const mark = slot.toUpperCase();
-    return strategy ? `${mark}. ${strategy}` : mark;
+    if (!sleeve) return mark;
+    return sleeve.label ? `${mark}. ${sleeve.label}` : mark;
   };
-  const labelA = slotLabel("a");
-  const labelB = slotLabel("b");
+  /** 이 계좌의 슬롯 키 — 표·요약·액션이 모두 이 목록을 돌며 그린다(고정 배열 금지). */
+  const slotKeys = useMemo(() => sleeves.map((row) => row.key), [sleeves]);
 
   // 운용 현황 탭.
   const [positions, setPositions] = useState<Positions | null>(null);
@@ -625,12 +635,11 @@ export function StrategyMixClient() {
       sources: [],
       weight_pct: positions.summary.cash_pct,
       // 현금도 슬리브별로 나눠 보여준다 — 합이 목표비중(현금 전체)이다.
-      a_weight: positions.summary.a.cash_pct,
-      b_weight: positions.summary.b.cash_pct,
+      slots: Object.fromEntries(
+        Object.entries(positions.summary.slots).map(([key, slot]) => [key, { weight: slot.cash_pct }]),
+      ),
       price: null,
       change_pct: null,
-      a_status: null,
-      b_status: null,
       is_cash: true,
       current_weight_pct:
         totalAsset && positions.account
@@ -760,36 +769,28 @@ export function StrategyMixClient() {
             : null;
         },
       },
-      // 슬리브별 몫 — 두 값의 합이 목표비중이다. 그 슬리브에 없는 종목은 '-'.
-      {
-        field: "a_weight",
-        headerName: labelA,
+      // 슬리브별 몫 — 슬롯 값의 합이 목표비중이다. 그 슬리브에 없는 종목은 '-'.
+      ...slotKeys.map<ColDef<PositionRow>>((slot) => ({
+        colId: `slot_weight_${slot}`,
+        headerName: slotLabel(slot),
         width: 104,
         type: "numericColumn",
+        valueGetter: (p) => p.data?.slots?.[slot]?.weight ?? null,
         valueFormatter: (p) =>
           p.value == null || (p.value as number) === 0 ? "-" : `${(p.value as number).toFixed(2)}%`,
         cellStyle: { color: "var(--text-muted)" },
-      },
-      {
-        field: "b_weight",
-        headerName: labelB,
-        width: 104,
-        type: "numericColumn",
-        valueFormatter: (p) =>
-          p.value == null || (p.value as number) === 0 ? "-" : `${(p.value as number).toFixed(2)}%`,
-        cellStyle: { color: "var(--text-muted)" },
-      },
+      })),
       {
         colId: "held_for",
         headerName: "보유일",
         width: 96,
-        headerTooltip: `${labelA} · ${labelB} 슬리브의 보유 기간 (진입 예정은 -)`,
+        headerTooltip: `${slotKeys.map(slotLabel).join(" · ")} 슬리브의 보유 기간 (진입 예정은 -)`,
         cellStyle: { color: "var(--text-muted)", textAlign: "center" },
         valueGetter: (p) => {
           if (!p.data) return "";
-          const bits: string[] = [];
-          if (p.data.a_held_label) bits.push(p.data.a_held_label);
-          if (p.data.b_held_label) bits.push(p.data.b_held_label);
+          const bits = slotKeys
+            .map((slot) => p.data?.slots?.[slot]?.held_label)
+            .filter((label): label is string => Boolean(label));
           return bits.join(" · ") || "-";
         },
       },
@@ -799,18 +800,16 @@ export function StrategyMixClient() {
         width: 104,
         type: "numericColumn",
         headerTooltip:
-          "전략 이론값(계좌 실손익 아님) — 각 전략이 잡은 편입가 대비. 두 슬리브 보유면 몫 가중 평균.",
+          "전략 이론값(계좌 실손익 아님) — 각 전략이 잡은 편입가 대비. 여러 슬리브에 걸치면 몫 가중 평균.",
         valueGetter: (p) => {
           if (!p.data) return null;
-          const parts: { w: number; r: number }[] = [];
-          if (p.data.a_return_pct != null && (p.data.a_weight ?? 0) > 0)
-            parts.push({ w: p.data.a_weight ?? 0, r: p.data.a_return_pct });
-          if (p.data.b_return_pct != null && (p.data.b_weight ?? 0) > 0)
-            parts.push({ w: p.data.b_weight ?? 0, r: p.data.b_return_pct });
+          const slots = slotKeys.map((slot) => p.data?.slots?.[slot]).filter(Boolean);
+          const parts = slots
+            .filter((slot) => slot?.return_pct != null && (slot?.weight ?? 0) > 0)
+            .map((slot) => ({ w: slot?.weight ?? 0, r: slot?.return_pct ?? 0 }));
           if (!parts.length) {
             // 몫이 0(매도 예정 등)이어도 수익률 자체는 보여준다.
-            const single = p.data.a_return_pct ?? p.data.b_return_pct;
-            return single ?? null;
+            return slots.find((slot) => slot?.return_pct != null)?.return_pct ?? null;
           }
           const total = parts.reduce((a, x) => a + x.w, 0);
           return parts.reduce((a, x) => a + (x.r * x.w) / total, 0);
@@ -819,16 +818,19 @@ export function StrategyMixClient() {
         cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
         tooltipValueGetter: (p) => {
           if (!p.data) return "";
-          const bits: string[] = [];
-          if (p.data.a_return_pct != null) bits.push(`${labelA} ${formatSignedPct(p.data.a_return_pct, 2)}`);
-          if (p.data.b_return_pct != null) bits.push(`${labelB} ${formatSignedPct(p.data.b_return_pct, 2)}`);
+          const bits = slotKeys
+            .map((slot) => {
+              const value = p.data?.slots?.[slot]?.return_pct;
+              return value == null ? null : `${slotLabel(slot)} ${formatSignedPct(value, 2)}`;
+            })
+            .filter((text): text is string => Boolean(text));
           return bits.join(" · ");
         },
       },
       {
         field: "weight_pct",
         headerName: "목표비중",
-        headerTooltip: `${labelA} + ${labelB} 슬리브 몫의 합`,
+        headerTooltip: `${slotKeys.map(slotLabel).join(" + ")} 슬리브 몫의 합`,
         width: 88,
         type: "numericColumn",
         valueFormatter: (p) =>
@@ -927,9 +929,12 @@ export function StrategyMixClient() {
         if (!p.data) return "";
         if (p.data.is_cash) return "미배분 현금";
         if (p.data.is_sell_all) return "전량 매도 (목표에 없음)";
-        const parts: string[] = [];
-        if (p.data.a_status) parts.push(`${labelA} ${p.data.a_status}`);
-        if (p.data.b_status) parts.push(`${labelB} ${p.data.b_status}`);
+        const parts = slotKeys
+          .map((slot) => {
+            const status = p.data?.slots?.[slot]?.status;
+            return status ? `${slotLabel(slot)} ${status}` : null;
+          })
+          .filter((text): text is string => Boolean(text));
         if (p.data.is_exit_forecast) parts.push("매도 예정(예상)");
         return parts.join(" · ");
       },
@@ -943,7 +948,8 @@ export function StrategyMixClient() {
       },
     });
     return columns;
-  }, [totalAsset, labelA, labelB, saveMemo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
+  }, [totalAsset, slotKeys, sleeves, saveMemo]);
 
   const periodRows = useMemo<PeriodRow[]>(() => {
     if (!view || viewMode === "trades") return [];
@@ -1013,13 +1019,16 @@ export function StrategyMixClient() {
   );
 
   const periodColumns = useMemo<ColDef<PeriodRow>[]>(() => {
-    const pct = (
-      field: keyof PeriodRow,
+    /** 수익률 컬럼 — 값을 꺼내는 방법만 다르고 표시는 같다(슬리브 값은 slots 안에 있다). */
+    const pctColumn = (
+      colId: string,
       headerName: string,
+      getValue: (row: PeriodRow) => number | null,
       suffix = "%",
       headerTooltip?: string,
     ): ColDef<PeriodRow> => ({
-      field,
+      colId,
+      valueGetter: (p) => (p.data ? getValue(p.data) : null),
       headerName,
       headerTooltip,
       flex: 1,
@@ -1052,20 +1061,29 @@ export function StrategyMixClient() {
             : String(p.value ?? ""),
         cellStyle: { fontWeight: 700 },
       },
-      pct(
+      pctColumn(
         "strategy_pct",
         "전략통합",
+        (row) => row.strategy_pct,
         "%",
-        "두 전략을 한 계좌에서 함께 굴린 결과 — 매월 첫 거래일에 배분을 되돌린다(현금 우선 이관).",
+        "슬리브들을 한 계좌에서 함께 굴린 결과 — 매월 첫 거래일에 배분을 되돌린다(현금 우선 이관).",
       ),
       // 각 전략을 혼자 굴렸을 때 — 합성이 단독보다 나은지 같은 줄에서 비교한다.
-      // 이관이 없는 곡선이라 전략통합은 두 값의 단순 평균과 일치하지 않는다.
-      pct("a_pct", labelA, "%", `${labelA} 슬리브만 혼자 굴렸을 때 — 그 전략 화면의 백테스트와 같은 값.`),
-      pct("b_pct", labelB, "%", `${labelB} 슬리브만 혼자 굴렸을 때 — 그 전략 화면의 백테스트와 같은 값.`),
-      pct("benchmark_pct", view?.benchmark_name ?? "벤치마크", "%", "계좌의 벤치마크."),
-      pct("excess_pp", "초과", "%p", "전략통합 − 벤치마크."),
+      // 이관이 없는 곡선이라 전략통합은 슬리브 값들의 단순 평균과 일치하지 않는다.
+      ...slotKeys.map((slot) =>
+        pctColumn(
+          `slot_${slot}`,
+          slotLabel(slot),
+          (row) => row.slots?.[slot] ?? null,
+          "%",
+          `${slotLabel(slot)} 슬리브만 혼자 굴렸을 때 — 그 전략 화면의 백테스트와 같은 값.`,
+        ),
+      ),
+      pctColumn("benchmark_pct", view?.benchmark_name ?? "벤치마크", (row) => row.benchmark_pct, "%", "계좌의 벤치마크."),
+      pctColumn("excess_pp", "초과", (row) => row.excess_pp, "%p", "전략통합 − 벤치마크."),
     ];
-  }, [viewMode, view?.benchmark_name, labelA, labelB]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
+  }, [viewMode, view?.benchmark_name, slotKeys, sleeves]);
 
   // 요약 바에 쓰는 계좌 표기 — 셀렉터와 같은 형식.
   const accountLabel = useMemo(() => {
@@ -1079,85 +1097,73 @@ export function StrategyMixClient() {
 
   // 헤더 설정 — 합성 배분(%) 3칸과 슬랙 알람을 한 버튼으로 저장한다(계좌 설정에 보관).
   const [slackEnabled, setSlackEnabled] = useState(false);
-  const [aStrategy, setAStrategy] = useState("");
-  const [aPool, setAPool] = useState("");
-  const [bStrategy, setBStrategy] = useState("");
-  const [bPool, setBPool] = useState("");
-  // 슬리브 표시 이름 — 비우면 전략 이름을 쓴다(「A. 모멘텀」 ↔ 「A. 상승 개별주」).
-  const [aName, setAName] = useState("");
-  const [bName, setBName] = useState("");
-  const [aPct, setAPct] = useState("50");
-  const [bPct, setBPct] = useState("50");
+  // 슬리브 초안 — 저장된 배열 그대로 편집한다. 순서가 곧 슬롯(A·B·C)이라 인덱스로 고친다.
+  const [draftSleeves, setDraftSleeves] = useState<MixSleeve[]>([]);
   const [cashPct, setCashPct] = useState("0");
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [slackTesting, setSlackTesting] = useState(false);
+  // 슬롯 개수 제한 — 백엔드 상수가 단일 소스(응답으로 받는다).
+  const minSleeves = meta?.min_sleeves ?? 2;
+  const maxSleeves = meta?.max_sleeves ?? SLOT_KEY_ORDER.length;
   useEffect(() => {
     setSlackEnabled(Boolean(selectedAccount?.mix_slack_enabled));
-    setAStrategy(selectedAccount?.a_strategy ?? "");
-    setAPool(selectedAccount?.a_pool ?? "");
-    setBStrategy(selectedAccount?.b_strategy ?? "");
-    setBPool(selectedAccount?.b_pool ?? "");
-    setAName(selectedAccount?.a_name ?? "");
-    setBName(selectedAccount?.b_name ?? "");
-    setAPct(selectedAccount ? String(selectedAccount.mix_a_pct) : "50");
-    setBPct(selectedAccount ? String(selectedAccount.mix_b_pct) : "50");
+    setDraftSleeves(sleeves.map((row) => ({ ...row })));
     setCashPct(selectedAccount ? String(selectedAccount.mix_cash_pct) : "0");
-  }, [
-    selectedAccount,
-    selectedAccount?.account_id,
-    selectedAccount?.mix_slack_enabled,
-    selectedAccount?.mix_a_pct,
-    selectedAccount?.mix_b_pct,
-    selectedAccount?.mix_cash_pct,
-  ]);
+  }, [selectedAccount, sleeves]);
+
+  /** 슬리브 한 칸 수정 — 배열을 통째로 다시 만든다(초안이라 참조 공유를 피한다). */
+  const updateSleeve = (index: number, patch: Partial<MixSleeve>) =>
+    setDraftSleeves((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+
+  /** 슬롯 키는 **순서**가 정한다 — 중간을 지워도 남은 것이 a·b·c 로 다시 매겨진다.
+   *  서버도 같은 규칙으로 붙이므로(mix_sleeves_of) 화면과 저장이 어긋나지 않는다. */
+  const rekey = (rows: MixSleeve[]): MixSleeve[] =>
+    rows.map((row, index) => ({ ...row, key: SLOT_KEY_ORDER[index] ?? row.key }));
+
+  const addSleeve = () =>
+    setDraftSleeves((current) =>
+      current.length >= maxSleeves
+        ? current
+        : rekey([
+            ...current,
+            { key: "", strategy: "", pool: "", name: "", label: "", weight_pct: 0, pool_label: null },
+          ]),
+    );
+
+  const removeSleeve = (index: number) =>
+    setDraftSleeves((current) => (current.length <= minSleeves ? current : rekey(current.filter((_, i) => i !== index))));
+
+  const strategyLabelOf = (value: string) =>
+    meta?.strategy_options.find((option) => option.value === value)?.label ?? value;
 
   // 합계 — 100 이 아니면 저장을 막는다. 모자란 만큼을 현금으로 채우면 사용자가 의도한
   // 배분이 조용히 바뀌므로 보정하지 않고 그대로 알린다.
   const weightSum = useMemo(() => {
-    const parts = [aPct, bPct, cashPct].map((value) => Number(value));
-    return parts.some((value) => !Number.isFinite(value)) ? null : Math.round(parts.reduce((a, b) => a + b, 0) * 100) / 100;
-  }, [aPct, bPct, cashPct]);
+    const parts = [...draftSleeves.map((row) => row.weight_pct), Number(cashPct)];
+    return parts.some((value) => !Number.isFinite(value))
+      ? null
+      : Math.round(parts.reduce((a, b) => a + b, 0) * 100) / 100;
+  }, [draftSleeves, cashPct]);
   const weightOk = weightSum !== null && Math.abs(weightSum - 100) <= 0.01;
   const settingsDirty = Boolean(
     selectedAccount &&
-      (slackEnabled !== Boolean(selectedAccount.mix_slack_enabled) ||
-        aStrategy !== selectedAccount.a_strategy ||
-        aPool !== selectedAccount.a_pool ||
-        bStrategy !== selectedAccount.b_strategy ||
-        bPool !== selectedAccount.b_pool ||
-        aName !== (selectedAccount.a_name ?? "") ||
-        bName !== (selectedAccount.b_name ?? "") ||
-        Number(aPct) !== selectedAccount.mix_a_pct ||
-        Number(bPct) !== selectedAccount.mix_b_pct ||
-        Number(cashPct) !== selectedAccount.mix_cash_pct),
+      // 저장 이력이 없으면(초안 표시 중) 고르는 순간부터 '변경됨' 이다.
+      (!selectedAccount.sleeves?.length ||
+        slackEnabled !== Boolean(selectedAccount.mix_slack_enabled) ||
+        Number(cashPct) !== selectedAccount.mix_cash_pct ||
+        draftSleeves.length !== sleeves.length ||
+        draftSleeves.some((row, index) => {
+          const saved = sleeves[index];
+          return (
+            !saved ||
+            row.strategy !== saved.strategy ||
+            row.pool !== saved.pool ||
+            row.name !== saved.name ||
+            row.weight_pct !== saved.weight_pct
+          );
+        })),
   );
 
-  // 배분 입력 3칸 — 라벨·상태만 다르고 나머지는 같아 한 곳에 모아 둔다.
-  const strategyLabelOf = (value: string) =>
-    meta?.strategy_options.find((option) => option.value === value)?.label ?? value;
-  const mixWeightFields = [
-    {
-      key: "a",
-      label: `A ${aName.trim() || strategyLabelOf(aStrategy)}`.trim(),
-      value: aPct,
-      set: setAPct,
-      hint: "A 슬리브에 배분할 몫(%).",
-    },
-    {
-      key: "b",
-      label: `B ${bName.trim() || strategyLabelOf(bStrategy)}`.trim(),
-      value: bPct,
-      set: setBPct,
-      hint: "B 슬리브에 배분할 몫(%).",
-    },
-    {
-      key: "cash",
-      label: "현금",
-      value: cashPct,
-      set: setCashPct,
-      hint: "두 전략에 주지 않고 늘 비워 두는 몫(%). 빈 슬롯에서 생기는 현금은 여기에 더해진다.",
-    },
-  ];
 
   const saveHeaderSettings = async () => {
     if (!selectedAccount || !weightOk) return;
@@ -1170,14 +1176,13 @@ export function StrategyMixClient() {
           account_id: selectedAccount.account_id,
           values: {
             mix_slack_enabled: slackEnabled,
-            mix_a_strategy: aStrategy || null,
-            mix_a_pool: aPool || null,
-            mix_a_name: aName.trim() || null,
-            mix_b_strategy: bStrategy || null,
-            mix_b_pool: bPool || null,
-            mix_b_name: bName.trim() || null,
-            mix_a_pct: Number(aPct),
-            mix_b_pct: Number(bPct),
+            // 순서가 곧 슬롯이라 키는 보내지 않는다 — 서버가 순서대로 다시 붙인다.
+            mix_sleeves: draftSleeves.map((row) => ({
+              strategy: row.strategy,
+              pool: row.pool,
+              name: row.name.trim() || null,
+              weight_pct: row.weight_pct,
+            })),
             mix_cash_pct: Number(cashPct),
           },
         }),
@@ -1191,18 +1196,13 @@ export function StrategyMixClient() {
             ? {
                 ...option,
                 mix_slack_enabled: slackEnabled,
-                a_strategy: aStrategy,
-                a_pool: aPool,
-                b_strategy: bStrategy,
-                b_pool: bPool,
-                a_name: aName.trim(),
-                b_name: bName.trim(),
                 // 라벨도 즉시 반영 — 이름을 지우면 전략 이름으로 돌아간다.
-                a_strategy_label: aName.trim() || strategyLabelOf(aStrategy),
-                b_strategy_label: bName.trim() || strategyLabelOf(bStrategy),
-                mix_ready: Boolean(aStrategy && aPool && bStrategy && bPool),
-                mix_a_pct: Number(aPct),
-                mix_b_pct: Number(bPct),
+                sleeves: draftSleeves.map((row) => ({
+                  ...row,
+                  name: row.name.trim(),
+                  label: row.name.trim() || strategyLabelOf(row.strategy),
+                })),
+                mix_ready: draftSleeves.every((row) => row.strategy && row.pool),
                 mix_cash_pct: Number(cashPct),
               }
             : option,
@@ -1278,92 +1278,27 @@ export function StrategyMixClient() {
                       ))}
                     </select>
                   </label>
-                  {selectedAccount
-                    ? (["a", "b"] as const).map((slot) => {
-                        const strategy = slot === "a" ? aStrategy : bStrategy;
-                        const pool = slot === "a" ? aPool : bPool;
-                        const setStrategy = slot === "a" ? setAStrategy : setBStrategy;
-                        const setPool = slot === "a" ? setAPool : setBPool;
-                        const name = slot === "a" ? aName : bName;
-                        const setName = slot === "a" ? setAName : setBName;
-                        // 계좌와 국가가 같은 풀만 — 거래 달력·통화가 갈리면 합성이 성립하지 않는다.
-                        const pools = (meta?.pool_options ?? []).filter(
-                          (option) => (option.country_code ?? "") === selectedAccount.country_code,
-                        );
-                        return (
-                          <label key={slot} className="appLabeledField" style={{ marginBottom: 0 }}>
-                            <span className="appLabeledFieldLabel">{slot.toUpperCase()}</span>
-                            <span style={{ display: "inline-flex", gap: 4 }}>
-                              <select
-                                className="form-select form-select-sm"
-                                style={{ width: "auto" }}
-                                value={strategy}
-                                disabled={settingsSaving}
-                                onChange={(event) => setStrategy(event.target.value)}
-                              >
-                                <option value="">전략</option>
-                                {(meta?.strategy_options ?? []).map((option) => (
-                                  <option key={option.value} value={option.value}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                              <select
-                                className="form-select form-select-sm"
-                                style={{ width: "auto" }}
-                                value={pool}
-                                disabled={settingsSaving}
-                                onChange={(event) => setPool(event.target.value)}
-                              >
-                                <option value="">종목풀</option>
-                                {pools.map((option) => (
-                                  <option key={option.ticker_type} value={option.ticker_type}>
-                                    {formatPoolLabel(option)}
-                                  </option>
-                                ))}
-                              </select>
-                              {/* 표시 이름 — 비우면 전략 이름을 쓴다. 같은 전략을 두 슬롯에
-                                  올릴 수 있어 이름 없이는 화면에서 둘을 구분할 수 없다. */}
-                              <input
-                                className="form-control form-control-sm"
-                                style={{ width: 120 }}
-                                type="text"
-                                maxLength={20}
-                                value={name}
-                                disabled={settingsSaving}
-                                placeholder={strategyLabelOf(strategy) || "이름"}
-                                title="비우면 전략 이름으로 보입니다."
-                                onChange={(event) => setName(event.target.value)}
-                              />
-                            </span>
-                          </label>
-                        );
-                      })
-                    : (
-                      <span style={hintStyle}>계좌 설정에서 «합성» 을 켠 계좌가 여기 보입니다.</span>
-                    )}
                   {selectedAccount ? (
                     <>
-                      {mixWeightFields.map((field) => (
-                        <label key={field.key} className="appLabeledField" style={{ marginBottom: 0 }}>
-                          <span className="appLabeledFieldLabel">{field.label}</span>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                            <input
-                              className="form-control form-control-sm"
-                              style={{ width: 72, textAlign: "right" }}
-                              type="number"
-                              min={0}
-                              max={100}
-                              step={1}
-                              value={field.value}
-                              disabled={settingsSaving}
-                              onChange={(event) => field.set(event.target.value)}
-                              title={field.hint}
-                            />
-                            <span style={hintStyle}>%</span>
-                          </span>
-                        </label>
-                      ))}
+                      {/* 슬리브 배분(%)은 아래 슬리브 영역의 각 줄에 있다 — 여기는 현금만. */}
+                      <label className="appLabeledField" style={{ marginBottom: 0 }}>
+                        <span className="appLabeledFieldLabel">현금</span>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          <input
+                            className="form-control form-control-sm"
+                            style={{ width: 72, textAlign: "right" }}
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={cashPct}
+                            disabled={settingsSaving}
+                            onChange={(event) => setCashPct(event.target.value)}
+                            title="어느 슬리브에도 주지 않고 늘 비워 두는 몫(%). 빈 슬롯에서 생기는 현금은 여기에 더해진다."
+                          />
+                          <span style={hintStyle}>%</span>
+                        </span>
+                      </label>
                       <span style={{ ...hintStyle, color: weightOk ? "var(--text-muted)" : "#d62828", fontWeight: weightOk ? 400 : 700 }}>
                         합계 {weightSum === null ? "-" : `${weightSum}%`}
                         {weightOk ? " ✓" : " (100% 필요)"}
@@ -1413,6 +1348,110 @@ export function StrategyMixClient() {
                   </div>
                 ) : null}
               </div>
+              {/* 슬리브 — 슬롯 하나가 한 줄. 전략·종목풀·이름·배분이 한 줄에 모여야
+                  "이 조합에 몇 %" 가 한눈에 읽힌다(헤더에 늘어놓으면 짝이 안 보인다). */}
+              {selectedAccount ? (
+                <div className="mixSleeveRows">
+                  {draftSleeves.map((sleeve, index) => {
+                    const { strategy, pool, name } = sleeve;
+                    // 계좌와 국가가 같은 풀만 — 거래 달력·통화가 갈리면 합성이 성립하지 않는다.
+                    const pools = (meta?.pool_options ?? []).filter(
+                      (option) => (option.country_code ?? "") === selectedAccount.country_code,
+                    );
+                    return (
+                      <div key={sleeve.key} className="mixSleeveRow">
+                        <span className="mixSleeveMark">{sleeve.key.toUpperCase()}</span>
+                        <select
+                          className="form-select form-select-sm"
+                          style={{ width: "auto" }}
+                          value={strategy}
+                          disabled={settingsSaving}
+                          onChange={(event) => updateSleeve(index, { strategy: event.target.value })}
+                        >
+                          <option value="">전략</option>
+                          {(meta?.strategy_options ?? []).map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          className="form-select form-select-sm"
+                          style={{ width: "auto" }}
+                          value={pool}
+                          disabled={settingsSaving}
+                          onChange={(event) => updateSleeve(index, { pool: event.target.value })}
+                        >
+                          <option value="">종목풀</option>
+                          {pools.map((option) => (
+                            <option key={option.ticker_type} value={option.ticker_type}>
+                              {formatPoolLabel(option)}
+                            </option>
+                          ))}
+                        </select>
+                        {/* 표시 이름 — 비우면 전략 이름을 쓴다. 같은 전략을 여러 슬롯에
+                            올릴 수 있어 이름 없이는 화면에서 구분할 수 없다. */}
+                        <input
+                          className="form-control form-control-sm"
+                          style={{ width: 140 }}
+                          type="text"
+                          maxLength={20}
+                          value={name}
+                          disabled={settingsSaving}
+                          placeholder={strategyLabelOf(strategy) || "이름"}
+                          title="비우면 전략 이름으로 보입니다."
+                          onChange={(event) => updateSleeve(index, { name: event.target.value })}
+                        />
+                        <span className="mixSleeveWeight">
+                          <input
+                            className="form-control form-control-sm"
+                            style={{ width: 72, textAlign: "right" }}
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={String(sleeve.weight_pct)}
+                            disabled={settingsSaving}
+                            title={`${sleeve.key.toUpperCase()} 슬리브에 배분할 몫(%).`}
+                            onChange={(event) => updateSleeve(index, { weight_pct: Number(event.target.value) })}
+                          />
+                          <span style={hintStyle}>%</span>
+                        </span>
+                        {/* 슬롯 삭제 — 최소 개수까지만. 지우면 남은 슬롯이 A·B 로 다시 매겨진다. */}
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary"
+                          style={{ padding: "0 10px" }}
+                          disabled={settingsSaving || draftSleeves.length <= minSleeves}
+                          title={
+                            draftSleeves.length <= minSleeves
+                              ? `슬리브는 최소 ${minSleeves}개입니다.`
+                              : "이 슬리브를 뺍니다."
+                          }
+                          onClick={() => removeSleeve(index)}
+                        >
+                          −
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {draftSleeves.length < maxSleeves ? (
+                    <div className="mixSleeveRow">
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-dark"
+                        disabled={settingsSaving}
+                        title={`슬리브를 추가합니다 (최대 ${maxSleeves}개). 배분 합이 100%가 되게 다시 나눠주세요.`}
+                        onClick={addSleeve}
+                      >
+                        + 슬리브
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <span style={hintStyle}>계좌 설정에서 «합성» 을 켠 계좌가 여기 보입니다.</span>
+              )}
             </div>
           </div>
         </section>
@@ -1488,15 +1527,17 @@ export function StrategyMixClient() {
                       </span>
                     )}
                     <span style={hintStyle}>
-                      {labelA} 목표 {positions.summary.a.slots_used}/
-                      {positions.summary.a.top_n} (보유{" "}
-                      {positions.summary.a.held_count}) · {labelB} 목표{" "}
-                      {positions.summary.b.slots_used}/
-                      {positions.summary.b.top_n} (보유{" "}
-                      {positions.summary.b.held_count})
+                      {slotKeys
+                        .map((slot) => {
+                          const summary = positions.summary.slots[slot];
+                          if (!summary) return null;
+                          return `${slotLabel(slot)} 목표 ${summary.slots_used}/${summary.top_n} (보유 ${summary.held_count})`;
+                        })
+                        .filter(Boolean)
+                        .join(" · ")}
                     </span>
-                    {/* 미체결 교체 안내 — 교체가 있는 슬리브마다 한 줄. 계좌에 둘일 수 있다. */}
-                    {SLOT_KEYS.map((slot) => {
+                    {/* 미체결 교체 안내 — 교체가 있는 슬리브마다 한 줄. 계좌에 여럿일 수 있다. */}
+                    {slotKeys.map((slot) => {
                       const rebalance = actions?.slots?.[slot]?.rebalance;
                       if (!rebalance || rebalance.is_filled || !rebalance.fill_date) return null;
                       return (
@@ -1534,7 +1575,9 @@ export function StrategyMixClient() {
                     // 구분되게 회색으로 눌러 둔다 — 추세 이탈 행과 같은 공용 클래스.
                     getRowClass={(params) => {
                       if (params.data?.is_sell_all) return "appTrendBrokenRow";
-                      const status = `${params.data?.a_status ?? ""} ${params.data?.b_status ?? ""}`;
+                      const status = slotKeys
+                        .map((slot) => params.data?.slots?.[slot]?.status ?? "")
+                        .join(" ");
                       return status.includes("예정") ? "appTrendBrokenRow" : "";
                     }}
                     gridOptions={{
@@ -1546,24 +1589,23 @@ export function StrategyMixClient() {
                   {/* ③ 배분 — 합계 · 모멘텀 · 신고가 세 줄. 각 줄에 배정 금액과 주식·현금. */}
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {(() => {
-                      const slotA = positions.summary.a;
-                      const slotB = positions.summary.b;
                       const amount = (pct: number) => (totalAsset == null ? null : (totalAsset * pct) / 100);
                       // 슬리브 몫은 월초 배분에서 각자 흘러간 비율(alloc_pct)이다.
                       // 그 안에서 채운 슬롯이 주식·빈 슬롯이 현금이다.
-                      const rows = [
-                        ...SLOT_KEYS.map((slot) => {
-                          const summary = slot === "a" ? slotA : slotB;
-                          return {
+                      const rows = slotKeys.flatMap((slot) => {
+                        const summary = positions.summary.slots[slot];
+                        if (!summary) return [];
+                        return [
+                          {
                             key: slot,
                             label: slotLabel(slot),
                             allocPct: summary.alloc_pct,
                             stockPct: summary.alloc_pct - summary.cash_pct,
                             cashPct: summary.cash_pct,
                             slots: `${summary.slots_used}/${summary.top_n}`,
-                          };
-                        }),
-                      ];
+                          },
+                        ];
+                      });
                       return rows.map((row) => (
                         <div key={row.key} style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                           <strong style={{ minWidth: 52 }}>{row.label}</strong>
@@ -1658,7 +1700,13 @@ export function StrategyMixClient() {
                           <div>
                             <strong>슬리브 리밸런싱</strong> — 매월 첫 거래일입니다.
                             {positions?.summary?.base_weights
-                              ? ` ${labelA} ${positions.summary.base_weights.a_pct}% · ${labelB} ${positions.summary.base_weights.b_pct}% · 현금 ${positions.summary.base_weights.cash_pct}% 로 다시 맞추세요.`
+                              ? ` ${[
+                                  ...slotKeys.map(
+                                    (slot) =>
+                                      `${slotLabel(slot)} ${positions.summary.base_weights[`${slot}_pct`] ?? 0}%`,
+                                  ),
+                                  `현금 ${positions.summary.base_weights.cash_pct ?? 0}%`,
+                                ].join(" · ")} 로 다시 맞추세요.`
                               : " 저장된 배분으로 다시 맞추세요."}
                           </div>
                         ) : null}
