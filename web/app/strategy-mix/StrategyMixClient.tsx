@@ -210,6 +210,8 @@ type Holding = {
   current_long_pct?: number | null;
   /** 목표 포트폴리오에 없는 보유 종목 — 목표 비중 0% 행으로 표 하단에 온다. */
   is_sell_all?: boolean;
+  /** 고정 자산(IS) 행 — 총자산에는 들어가지만 합성이 사고팔지 않는다. */
+  is_fixed_asset?: boolean;
 };
 
 /** 적용 계좌의 실제 상태 — 계산 기준 계좌의 원장(portfolio_master)에서 온다. */
@@ -218,6 +220,9 @@ type AccountState = {
   cash_balance: number;
   stock_value: number;
   total_assets: number;
+  /** 고정 자산(IS) — 총자산에는 들어가지만 합성이 매매하지 않는다. 없는 계좌는 0. */
+  fixed_asset_value?: number;
+  fixed_asset_pct?: number;
   /** 목표에 없는 보유 종목 = 전량 매도 대상. */
   sell_all: {
     ticker: string;
@@ -688,9 +693,8 @@ export function StrategyMixClient() {
         headerName: "티커",
         width: 108,
         cellRenderer: (p: { value?: string; data?: PositionRow }) =>
-          p.data?.is_cash ? (
-            <span>-</span>
-          ) : (
+          // 현금·고정 자산은 종목이 아니라 상세 링크를 걸지 않는다.
+          p.data?.is_cash || p.data?.is_fixed_asset ? <span>{p.data?.is_cash ? "-" : p.value}</span> : (
             <TickerDetailLink ticker={p.value} />
           ),
       },
@@ -700,11 +704,11 @@ export function StrategyMixClient() {
         flex: 1.4,
         minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
         // 굵기는 주지 않는다 — 다른 화면의 종목명과 같은 무게로 보여야 표가 한 벌로 읽힌다.
-        cellStyle: (p) => (p.data?.is_cash ? { color: "var(--text-muted)" } : null),
+        cellStyle: (p) => (p.data?.is_cash || p.data?.is_fixed_asset ? { color: "var(--text-muted)" } : null),
         // 종목명 표기는 순위·전략 화면과 같은 공용 렌더러를 쓴다 — 레버리지 강조(💣)와
         // 긴 이름 2줄 줄임이 여기서만 빠져 있었다. 현금 행은 종목이 아니라 그대로 둔다.
         cellRenderer: (p: { value?: string | null; data?: PositionRow }) =>
-          p.data?.is_cash ? (
+          p.data?.is_cash || p.data?.is_fixed_asset ? (
             <span>{p.value ?? "-"}</span>
           ) : (
             renderStockNameCell(p.value, {
@@ -716,7 +720,7 @@ export function StrategyMixClient() {
       // 현금 행은 종목이 아니라 편집 대상이 아니다.
       stockMemoColumn<PositionRow>({
         field: "memo",
-        editable: (row) => !row?.is_cash,
+        editable: (row) => !row?.is_cash && !row?.is_fixed_asset,
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
       }),
       {
@@ -928,6 +932,7 @@ export function StrategyMixClient() {
       valueGetter: (p) => {
         if (!p.data) return "";
         if (p.data.is_cash) return "미배분 현금";
+        if (p.data.is_fixed_asset) return "고정 자산 (합성이 매매하지 않음)";
         if (p.data.is_sell_all) return "전량 매도 (목표에 없음)";
         const parts = slotKeys
           .map((slot) => {
@@ -1496,10 +1501,13 @@ export function StrategyMixClient() {
                       목표 주식 {positions.summary.stock_pct.toFixed(1)}% · 현금{" "}
                       {positions.summary.cash_pct.toFixed(1)}%
                       {positions.account && totalAsset
-                        ? ` (현재 ${((positions.account.stock_value / totalAsset) * 100).toFixed(1)}% · ${(
-                          (positions.account.cash_balance / totalAsset) *
-                          100
-                        ).toFixed(1)}%)`
+                        ? // 고정 자산(IS)도 주식으로 센다 — 목표 주식%에 그 몫이 들어 있어
+                          // 빼면 목표와 현재가 짝이 안 맞는다.
+                          ` (현재 ${(
+                            ((positions.account.stock_value + (positions.account.fixed_asset_value ?? 0)) /
+                              totalAsset) *
+                            100
+                          ).toFixed(1)}% · ${((positions.account.cash_balance / totalAsset) * 100).toFixed(1)}%)`
                         : ""}
                     </span>
                     {/* 적용 계좌 — 목표 금액의 기준이 되는 실제 잔고. */}
