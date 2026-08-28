@@ -673,15 +673,15 @@ export function MomentumClient() {
       // 업종 데이터가 아예 없는 풀(ETF 모음 등)에서는 빈 컬럼을 숨긴다.
       ...(hasIndustryData
         ? [
-            {
-              headerName: "업종",
-              field: "industry",
-              headerTooltip: "한국은 네이버 분류, 미국은 지수 구성종목의 yfinance 분류",
-              width: INDUSTRY_COLUMN_WIDTH,
-              minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
-              cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
-            } as ColDef<PickRow>,
-          ]
+          {
+            headerName: "업종",
+            field: "industry",
+            headerTooltip: "한국은 네이버 분류, 미국은 지수 구성종목의 yfinance 분류",
+            width: INDUSTRY_COLUMN_WIDTH,
+            minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
+            cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
+          } as ColDef<PickRow>,
+        ]
         : []),
       {
         headerName: "일간(%)",
@@ -703,15 +703,15 @@ export function MomentumClient() {
       // 시가총액 소스(네이버)가 한국 전용이라 한국 풀에서만 보여준다.
       ...(picksCountry === "kor"
         ? [
-            {
-              headerName: "시가총액",
-              field: "market_cap_eok",
-              headerTooltip: "네이버 시가총액 (/kor-market-stock 과 같은 소스, 10분 캐시)",
-              width: 120,
-              type: "numericColumn",
-              valueFormatter: (p) => formatKorMarketCap(p.value),
-            } as ColDef<PickRow>,
-          ]
+          {
+            headerName: "시가총액",
+            field: "market_cap_eok",
+            headerTooltip: "네이버 시가총액 (/kor-market-stock 과 같은 소스, 10분 캐시)",
+            width: 120,
+            type: "numericColumn",
+            valueFormatter: (p) => formatKorMarketCap(p.value),
+          } as ColDef<PickRow>,
+        ]
         : []),
       // 월별 수익률 — pools-rank 월별과 같은 계산(전월 말 종가 대비, 이번 달은 마지막
       // 종가까지)의 최근 6개월. 라벨은 서버가 내려주고 헤더는 (%) 없이 표시한다.
@@ -1056,7 +1056,7 @@ export function MomentumClient() {
                 {draftMaRule != null && view.ma_rule != null ? (
                   <>
                     <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">선정 이평선</span>
+                      <span className="appLabeledFieldLabel">이평선</span>
                       <span className="appMaRuleRow">
                         <MaDaysSelect
                           title="단기 이평선"
@@ -1338,12 +1338,12 @@ export function MomentumClient() {
             // 업종 데이터가 없는 풀은 상한 축을 돌리지 않는다(결과가 전부 같아 조합만 3배로 는다).
             ...(hasIndustryData
               ? [
-                  {
-                    key: "max_per_industry",
-                    label: "업종 상한",
-                    values: (view.constraints?.max_per_industry_options ?? []).map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: `${n}` })),
-                  },
-                ]
+                {
+                  key: "max_per_industry",
+                  label: "업종 상한",
+                  values: (view.constraints?.max_per_industry_options ?? []).map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: `${n}` })),
+                },
+              ]
               : []),
             { key: "short_ma_days", label: "단기 이평", values: (view.ma_rule?.short_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },
             { key: "long_ma_days", label: "장기 이평", values: (view.ma_rule?.long_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },

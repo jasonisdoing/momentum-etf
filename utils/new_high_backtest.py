@@ -25,7 +25,6 @@ from utils.new_high_service import (
     benchmark_info,
     build_price_panel,
     compute_signals,
-    load_benchmark_close,
     load_price_frames,
     load_settings,
     load_universe,
@@ -302,8 +301,10 @@ def run_backtest(
     # 곡선은 시작 1.0 배수로 되돌린다 — 시작 자본은 정수 주수를 세기 위한 것이고,
     # 성과 지표(수익률·MDD·벤치마크 대비)는 예전과 같은 배수 기준으로 읽어야 한다.
     strategy = pd.Series(curve, index=span) / initial_capital  # 마지막 날은 평가만 한 값이 들어간다
-    benchmark = load_benchmark_close(pool).reindex(strategy.index).ffill()
-    benchmark = benchmark / benchmark.iloc[0]
+    # 벤치마크는 **시작일 시가**를 1 로 둔다 — 전략도 그날 시가에 사기 때문이다(공용 함수).
+    from utils.benchmark_curve import benchmark_growth
+
+    benchmark = benchmark_growth(pool, strategy.index)
 
     strategy_total = float((strategy.iloc[-1] - 1) * 100)
     benchmark_total = float((benchmark.iloc[-1] - 1) * 100)
