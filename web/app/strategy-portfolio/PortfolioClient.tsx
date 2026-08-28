@@ -8,6 +8,7 @@ import { BacktestSummary } from "../components/BacktestSummary";
 import { IconCheck } from "@tabler/icons-react";
 
 import { GridToolbarButton } from "../components/GridToolbarButton";
+import { useAddingTickerRow } from "../components/useAddingTickerRow";
 import { MonthsSelect } from "../components/MonthsSelect";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
@@ -172,7 +173,7 @@ export function PortfolioClient() {
   const [saving, setSaving] = useState(false);
 
   const [selected, setSelected] = useState<string[]>([]);
-  const [addingTicker, setAddingTicker] = useState<string | null>(null);
+
 
   // 백테스트 — 기본 12개월(모멘텀·신고가 화면과 같다).
   const [backtestMonths, setBacktestMonths] = useState(DEFAULT_BACKTEST_MONTHS);
@@ -220,7 +221,6 @@ export function PortfolioClient() {
       setBacktest(null);
       setBacktestError(null);
       setSelected([]);
-      setAddingTicker(null);
       writeRememberedTickerType(nextPool);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "설정을 불러오지 못했습니다.");
@@ -323,10 +323,45 @@ export function PortfolioClient() {
     sortino: null,
   };
 
+  /** 종목 추가 — `/assets`·`/asset-helper` 와 **같은 훅·같은 조회 API** 를 쓴다.
+   *  화면마다 검증을 따로 만들면 호주 티커(`ASX:` 표기) 같은 규칙이 한쪽에만 반영된다. */
+  const addResolve = useCallback(
+    async (raw: string): Promise<{ ticker: string; name: string }> => {
+      // 조회 범위를 이 종목풀로 제한한다 — 담을 수 있는 종목이 그 풀 것뿐이다.
+      const pool = encodeURIComponent(draft?.pool ?? "");
+      const resp = await fetch(`/api/ticker-resolve?ticker=${encodeURIComponent(raw)}&ticker_types=${pool}`);
+      const data = (await resp.json()) as { ticker?: string; name?: string; error?: string; detail?: string };
+      if (!resp.ok || data.error || !data.ticker || !data.name) {
+        throw new Error(data.error ?? data.detail ?? "이 종목풀에 없는 종목입니다.");
+      }
+      if ((draft?.weights ?? []).some((row) => row.ticker === data.ticker)) {
+        throw new Error(`이미 담은 종목입니다: ${data.ticker}`);
+      }
+      return { ticker: data.ticker, name: data.name };
+    },
+    [draft?.pool, draft?.weights],
+  );
+  const addOnValidated = useCallback(
+    (resolved: { ticker: string; name: string }) => {
+      setWeights([...(draft?.weights ?? []), { ticker: resolved.ticker, weight_pct: 0 }]);
+      toast.success(`조회 성공: ${resolved.name}`);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setWeights 는 draft 에서 파생된다
+    [draft?.weights, toast],
+  );
+  const add = useAddingTickerRow({
+    resolve: addResolve,
+    onValidated: addOnValidated,
+    onError: (message) => toast.error(message),
+    normalize: (raw) => raw.trim().toUpperCase(),
+    resetOnValidated: true,
+  });
+
   /** 현금 고정행 — **표 맨 위**(`/asset-helper` 와 같은 순서). 비중은 직접 편집한다. */
   const cashRow: WeightRow = { ticker: CASH_TICKER, name: "현금", fixed_weight_pct: cashPct, ...emptyMetrics };
-  const addingRow: WeightRow | null =
-    addingTicker === null ? null : { ticker: addingTicker, name: "", fixed_weight_pct: 0, is_adding: true, ...emptyMetrics };
+  const addingRow: WeightRow | null = add.addingRow
+    ? { ticker: add.addingRow.ticker, name: add.addingRow.name, fixed_weight_pct: 0, is_adding: true, ...emptyMetrics }
+    : null;
   const gridRows: WeightRow[] = [
     cashRow,
     ...(addingRow ? [addingRow] : []),
@@ -354,25 +389,6 @@ export function PortfolioClient() {
       };
     }),
   ];
-
-  /** 티커를 확정한다 — 그 종목풀에 있는 종목만 담을 수 있다(백엔드 검증과 같은 규칙). */
-  const commitAdding = () => {
-    const ticker = String(addingTicker ?? "").trim().toUpperCase();
-    if (!ticker) {
-      setAddingTicker(null);
-      return;
-    }
-    if (!nameByTicker[ticker]) {
-      toast.error(`이 종목풀에 없는 종목입니다: ${ticker}`);
-      return;
-    }
-    if ((draft?.weights ?? []).some((row) => row.ticker === ticker)) {
-      toast.error(`이미 담은 종목입니다: ${ticker}`);
-      return;
-    }
-    setWeights([...(draft?.weights ?? []), { ticker, weight_pct: 0 }]);
-    setAddingTicker(null);
-  };
 
   const columns = useMemo<ColDef<WeightRow>[]>(
     () => [
@@ -407,8 +423,8 @@ export function PortfolioClient() {
                 placeholder="티커"
                 initialValue={row.ticker}
                 submitOnBlur={false}
-                onChange={(value) => setAddingTicker(value)}
-                onSave={() => commitAdding()}
+                onChange={(value) => add.setTicker(value)}
+                onSave={() => void add.validate()}
               />
             );
           }
@@ -427,12 +443,13 @@ export function PortfolioClient() {
             return (
               <div className="assetsNameLookup">
                 <span className="assetsNameLookupStatus">
-                  {nameByTicker[String(row.ticker).toUpperCase()] ?? "티커를 입력한 뒤 확인하세요."}
+                  {add.addingRow?.isValidating ? "조회 중…" : (row.name || "티커를 입력한 뒤 확인하세요.")}
                 </span>
                 <button
                   type="button"
                   className="btn btn-outline-primary btn-sm assetsInlineButton d-inline-flex align-items-center gap-1"
-                  onClick={() => commitAdding()}
+                  disabled={add.addingRow?.isValidating}
+                  onClick={() => void add.validate()}
                 >
                   확인
                 </button>
@@ -496,7 +513,7 @@ export function PortfolioClient() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [draft?.weights, nameByTicker, universeByTicker, addingTicker, saveMemo],
+    [draft?.weights, nameByTicker, universeByTicker, add, saveMemo],
   );
 
   const periodRows = useMemo<PeriodRow[]>(() => {
@@ -659,8 +676,8 @@ export function PortfolioClient() {
               <div className="appMainHeaderRight">
                 <GridToolbarButton
                   variant="add"
-                  onClick={() => setAddingTicker("")}
-                  disabled={addingTicker !== null || draft.weights.length >= view.constraints.max_holdings}
+                  onClick={() => add.start()}
+                  disabled={add.addingRow !== null || draft.weights.length >= view.constraints.max_holdings}
                 />
                 <GridToolbarButton
                   variant="delete"
