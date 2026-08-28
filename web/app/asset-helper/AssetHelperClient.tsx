@@ -13,7 +13,7 @@ import { useAddingTickerRow } from "../components/useAddingTickerRow";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { AssetHelperBacktestResult, type LabResult } from "../components/AssetHelperBacktestResult";
 import { BUCKET_THEME } from "@/lib/bucket-theme";
-import { FIXED_ASSET_CELL_CLASS, FIXED_ASSET_NAME, FIXED_ASSET_TICKER } from "@/lib/fixed-asset";
+import { FIXED_ASSET_NAME, FIXED_ASSET_ROW_CLASS, FIXED_ASSET_TICKER } from "@/lib/fixed-asset";
 import { renderStockNameCell } from "@/lib/name-highlight";
 import { reorderHoldings } from "@/lib/holdings-store";
 import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
@@ -808,8 +808,6 @@ export function AssetHelperClient() {
         minWidth: 110,
         width: 110,
         pinned: "left",
-        // 고정 자산 행은 티커·종목명 칸을 배경색으로 구분한다(매매 대상이 아니다).
-        cellClass: (params) => (params.data?.is_fixed_asset ? FIXED_ASSET_CELL_CLASS : undefined),
         cellRenderer: (params: { data?: GridRow; value?: string }) => {
           const row = params.data;
           if (!row) return "-";
@@ -842,7 +840,6 @@ export function AssetHelperClient() {
         headerName: "종목명",
         minWidth: 220,
         flex: 1,
-        cellClass: (params) => (params.data?.is_fixed_asset ? FIXED_ASSET_CELL_CLASS : undefined),
         cellRenderer: (params: { data?: GridRow; value?: string }) => {
           const row = params.data;
           if (!row) return null;
@@ -1129,10 +1126,12 @@ export function AssetHelperClient() {
               getRowId={(params) =>
                 params.data.is_adding ? "__adding__" : String(params.data.ticker || `row_${params.data.row_index}`)
               }
-              getRowClass={(params) =>
+              getRowClass={(params) => {
+                // 고정 자산은 사고팔 수 없는 줄이라 전체를 노랗게 구분한다.
+                if (params.data?.is_fixed_asset) return FIXED_ASSET_ROW_CLASS;
                 // 이동선 이탈은 종목명 뒤 배지와 같은 조건으로 행을 연한 회색으로 눌러 둔다.
-                maBrokenTickers.has(normalizeBadgeTicker(params.data?.ticker ?? "")) ? "appTrendBrokenRow" : ""
-              }
+                return maBrokenTickers.has(normalizeBadgeTicker(params.data?.ticker ?? "")) ? "appTrendBrokenRow" : "";
+              }}
             />
           </div>
         </div>

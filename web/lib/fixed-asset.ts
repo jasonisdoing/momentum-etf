@@ -11,9 +11,9 @@
 export const FIXED_ASSET_TICKER = "IS";
 export const FIXED_ASSET_NAME = "International Shares";
 
-/** 티커·종목명 칸의 `cellClass` 로 준다 — 매매 대상이 아닌 행임을 배경색으로 구분한다.
- *  (셀 배경이라 `<span>` 이 아니라 컬럼 정의의 cellClass 에 붙여야 칠해진다.) */
-export const FIXED_ASSET_CELL_CLASS = "appFixedAssetCell";
+/** 그리드의 `getRowClass` 로 준다 — 사고팔 수 없는 항목이라 **줄 전체**를 노랗게 칠한다
+ *  (추세 이탈 행이 회색 줄로 구분되는 것과 같은 방식). */
+export const FIXED_ASSET_ROW_CLASS = "appFixedAssetRow";
 
 export function isFixedAssetTicker(ticker: unknown): boolean {
   return String(ticker ?? "").trim().toUpperCase() === FIXED_ASSET_TICKER;
