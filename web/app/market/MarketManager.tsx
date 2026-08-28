@@ -109,7 +109,8 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
       "인버스/숏": ["INVERSE", "SHORT", "BEAR", "-0.5X", "-1X"],
       // 배수 표기가 제각각이라(2X·4X ETN·1.5X) 배수 키워드를 넓게 건다. "-2X" 류는 2X 에 걸린다.
       레버리지: ["1.5X", "2X", "3X", "4X", "5X", "LEVERAGED", "ULTRA", "레버리지"],
-      커버드콜: ["COVERED CALL", "BUYWRITE", "PREMIUM INCOME", "OPTION INCOME", "커버드콜"],
+      // INCOME 은 옵션 인컴·채권형·배당형에 섞여 쓰이지만 전부 모멘텀 관점의 제외 대상이라 같이 건다.
+      "커버드콜/인컴": ["COVERED CALL", "BUYWRITE", "INCOME", "커버드콜"],
       // 가상자산 — 국내 증권사가 현물 ETF 중개를 못 해 거래 불가. 이름 키워드라 선물형(BITO)도
       // 같이 빠진다(현물/선물을 이름만으로 구분할 수 없음). 코인명은 신상품을 못 쫓아가므로
       // 가상자산 전문 운용사명(BITWISE 등)을 함께 건다 — BHYP("BITWISE HYPERLIQUID") 같은 케이스.
@@ -120,7 +121,7 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
         "비트코인", "이더리움",
       ],
     },
-    defaultExcluded: ["채권", "인버스/숏", "레버리지", "커버드콜", "가상자산"],
+    defaultExcluded: ["채권", "인버스/숏", "레버리지", "커버드콜/인컴", "가상자산"],
     showNavColumns: false,
     showListing: false,
     capHeader: "거래대금($M)",
