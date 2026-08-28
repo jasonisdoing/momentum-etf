@@ -210,7 +210,7 @@ MIN_TRADING_DAYS = 5
 TOP_N_OPTIONS: tuple[int, ...] = (5, 6, 8, 10)
 
 # 한 업종에서 담을 수 있는 최대 종목 수. None = 제한 없음.
-MAX_PER_INDUSTRY_OPTIONS: tuple[int | None, ...] = (1, 2, 3, None)
+MAX_PER_INDUSTRY_OPTIONS: tuple[int | None, ...] = (1, 2, 3, 4, None)
 
 # 손절 기준(%) — 진입가·평단 대비 하락률. 세 군데가 같은 목록을 쓴다:
 #   · 신고가 전략의 손절선          (new_high_service.STOP_LOSS_OPTIONS)

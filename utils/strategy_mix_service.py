@@ -1841,6 +1841,7 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
     if bench_close.empty:
         raise RuntimeError(f"벤치마크({ctx['benchmark_name']}) 종가가 비어 있습니다.")
     bench_curve: dict[str, float] = {str(day.date()): float(value) for day, value in bench_close.items()}
+    bench_index = bench_close.index
 
     # 슬리브별 곡선 — 화면이 "합성 vs 각 전략 단독" 을 한 표에서 비교한다.
     # **각 전략을 혼자 굴렸을 때의 곡선**이다(슬리브 간 월초 이관이 없는 상태). 그래야 각
@@ -1857,7 +1858,16 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
         raise RuntimeError("슬리브 전략들의 공통 백테스트 구간이 부족합니다.")
 
     first_mix = float(mix_curve[dates[0]])
-    first_bench = bench_curve[dates[0]]
+    # 벤치마크는 **시작일 시가**를 1 로 둔다 — 전략도 그날 시가에 사기 때문이다(공용 함수).
+    from utils.benchmark_curve import growth_from_frame
+
+    bench_growth = growth_from_frame(
+        bench_frame,
+        bench_index[bench_index.isin(pd.to_datetime(dates))],
+        label=f"벤치마크({ctx['benchmark_name']})",
+    )
+    bench_curve = {str(day.date()): float(value) for day, value in bench_growth.items()}
+    first_bench = 1.0  # 시작 기준이 이미 시가라 곡선 자체가 1 에서 출발한다
     # 슬리브별 시작값 — 합성과 같은 시작일로 다시 맞추는 기준점.
     first_by_slot = {key: curve.get(dates[0]) for key, curve in curves.items()}
 

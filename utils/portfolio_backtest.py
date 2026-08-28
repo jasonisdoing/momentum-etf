@@ -112,17 +112,10 @@ def run_backtest(
 
     close_df = _load_close_frame(pool, tickers)
     # 벤치마크는 종목풀 설정 것 — 다른 전략 화면과 같은 대조군이다.
-    benchmark_ticker = benchmark_info(pool)["ticker"]
-    benchmark_df = _load_close_frame(pool, [benchmark_ticker]) if benchmark_ticker in tickers else None
-    if benchmark_df is None:
-        from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
+    from utils.benchmark_curve import load_benchmark_frame
 
-        frame = load_cached_frames_bulk_from_all_ticker_types([benchmark_ticker]).get(benchmark_ticker)
-        if frame is None or frame.empty or "Close" not in frame.columns:
-            raise RuntimeError(f"벤치마크({benchmark_ticker}) 가격 캐시를 불러올 수 없습니다.")
-        benchmark_close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
-    else:
-        benchmark_close = benchmark_df[benchmark_ticker]
+    benchmark_frame = load_benchmark_frame(pool)
+    benchmark_close = pd.to_numeric(benchmark_frame["Close"], errors="coerce").dropna()
 
     # 구간 — 종목·벤치마크가 모두 있는 날만 쓴다.
     index = close_df.dropna().index.intersection(benchmark_close.index)
@@ -193,7 +186,10 @@ def run_backtest(
         curve.append(cash + sum(shares.get(t, 0.0) * float(prices[t]) for t in tickers))
 
     strategy = pd.Series(curve, index=index)
-    benchmark = benchmark_close / float(benchmark_close.iloc[0])
+    # 벤치마크는 **시작일 시가**를 1 로 둔다 — 전략도 그날 시가에 사기 때문이다(공용 함수).
+    from utils.benchmark_curve import benchmark_growth
+
+    benchmark = benchmark_growth(pool, index)
     strategy_total = float((strategy.iloc[-1] / strategy.iloc[0] - 1) * 100)
     benchmark_total = float((benchmark.iloc[-1] - 1) * 100)
     strategy_norm = strategy / float(strategy.iloc[0])

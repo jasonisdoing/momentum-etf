@@ -95,10 +95,16 @@ def _open_return(opens: pd.Series, start: pd.Timestamp, end: pd.Timestamp) -> fl
     return float(end_price) / float(start_price) - 1.0
 
 
-def _period_return(close: pd.Series, start: pd.Timestamp, end: pd.Timestamp) -> float | None:
+def _period_return(
+    close: pd.Series,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    start_open: float | None = None,
+) -> float | None:
+    """구간 수익률. ``start_open`` 을 주면 그 값을 시작가로 쓴다(전략처럼 시가에 산 경우)."""
     series = positive_prices(close).dropna()
     try:
-        start_price = series.asof(start)
+        start_price = float(start_open) if start_open is not None and float(start_open) > 0 else series.asof(start)
         end_price = series.asof(end)
     except Exception:
         return None
@@ -297,6 +303,13 @@ def run_backtest(
 
     strategy_returns: list[float] = []
     benchmark_returns: list[float] = []
+    # 벤치마크 시가 — 첫 구간의 시작가로 쓴다(전략이 그날 시가에 체결하므로 조건을 맞춘다).
+    from utils.benchmark_curve import load_benchmark_frame
+
+    _bench_frame = load_benchmark_frame(pool)
+    bench_open = (
+        positive_prices(_bench_frame["Open"]).dropna() if "Open" in _bench_frame.columns else pd.Series(dtype=float)
+    )
     previous_holdings: set[str] = set()
     # 직전 보유 구간의 종목별 성장배수(1+수익률) — 교체 시점의 드리프트 비중 계산용.
     previous_growth: dict[str, float] = {}
@@ -411,7 +424,11 @@ def run_backtest(
             gross = None  # 보유 종목의 가격 데이터가 전혀 없음 — 데이터 문제를 그대로 드러낸다
 
         strategy_pct = (gross - cost) * 100.0 if gross is not None else None
-        benchmark_return = _period_return(benchmark_close, start, end)
+        # 벤치마크도 전략과 **같은 시점**에 산 것으로 잰다 — 첫 구간만 시작일 시가가 기준이다
+        # (전략은 그날 시가에 체결한다). 종가로 재면 시작일 갭만큼 벤치마크가 유·불리해진다.
+        benchmark_return = _period_return(
+            benchmark_close, start, end, start_open=bench_open.get(start) if not strategy_returns else None
+        )
         benchmark_pct = benchmark_return * 100.0 if benchmark_return is not None else None
 
         if strategy_pct is not None:
@@ -517,23 +534,36 @@ def run_backtest(
     # 벤치마크·참조는 구간과 무관하므로 전체 시계열에서 한 번에 일별 변동률을 만든다
     # (구간마다 정규화하면 경계일이 두 번 세어진다).
     if include_daily and daily_growth:
-        prior_days = bench_index[bench_index < dates[0]]
-        first = prior_days[-1] if len(prior_days) > 0 else dates[0]
-        span_index = bench_index[(bench_index >= first) & (bench_index <= dates[-1])]
+        span_index = bench_index[(bench_index >= dates[0]) & (bench_index <= dates[-1])]
 
         def _daily_changes(source: pd.Series | None) -> dict[str, float]:
+            """일별 변동률(%) — **첫날은 그날 시가 대비**다.
+
+            전략은 시작일 시가에 체결하므로 벤치마크도 같은 시점에서 출발해야 한다.
+            예전에는 시작일 **직전 거래일**부터 시계열을 잡아, 첫 행이 '전날 종가 → 시작일
+            종가' 였다. 그 하루가 통째로 여분이라 연간·월간 표의 합계가 총수익과 어긋났다
+            (VOO 24개월 기준 -2.9%p).
+            """
             if source is None:
                 return {}
-            changes = source.reindex(span_index, method="ffill").pct_change()
+            series = source.reindex(span_index, method="ffill")
+            changes = series.pct_change()
+            first_day = span_index[0]
+            base = bench_open.get(first_day)
+            if base is not None and pd.notna(base) and float(base) > 0 and pd.notna(series.iloc[0]):
+                changes.iloc[0] = float(series.iloc[0]) / float(base) - 1.0
             return {day.strftime("%Y-%m-%d"): float(v) * 100.0 for day, v in changes.items() if pd.notna(v)}
 
         bench_changes = _daily_changes(clean_benchmark)
+        # 소수 6자리 — 화면은 2자리로 보여주지만, 연간·월간·주간 표는 이 값을 **복리로 합성**한다.
+        # 2자리로 잘라 보내면 하루치 오차(최대 0.005%p)가 250일 쌓여 합계가 총수익과 어긋난다
+        # (12개월 기준 전략 0.5%p·벤치마크 0.9%p 차이가 났다).
         for key in sorted(daily_growth):
             daily.append(
                 {
                     "date": key,
-                    "strategy_pct": round((daily_growth[key] - 1.0) * 100.0, 2),
-                    "benchmark_pct": round(bench_changes[key], 2) if key in bench_changes else None,
+                    "strategy_pct": round((daily_growth[key] - 1.0) * 100.0, 6),
+                    "benchmark_pct": round(bench_changes[key], 6) if key in bench_changes else None,
                 }
             )
 
