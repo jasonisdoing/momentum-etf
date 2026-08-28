@@ -578,12 +578,19 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
 
     ma_rules = build_effective_ma_rules(selected_ticker_type, None)
 
+    from config import MAX_PER_INDUSTRY_OPTIONS, TOP_N_OPTIONS
+
     return {
         "ticker_types": configs_payload,
         "ticker_type": selected_ticker_type,
         "ma_rules": ma_rules,
         # 이평선 일수 선택지 — 백엔드 상수가 단일 소스(풀 국가별).
         **ma_options_payload(_pool_country(selected_ticker_type)),
+        # 종목 수·업종 상한 선택지도 같은 단일 소스(`config`)다. 화면에 복사본을 두면
+        # config 를 고쳐도 이 화면만 옛 목록이 남는다(실제로 업종 상한 4 가 빠져 있었다).
+        # 업종 상한의 None(제한 없음)은 쿼리로 넘길 수 있게 -1 로 바꿔 보낸다.
+        "top_n_options": list(TOP_N_OPTIONS),
+        "max_per_industry_options": [-1 if value is None else value for value in MAX_PER_INDUSTRY_OPTIONS],
     }
 
 
