@@ -79,23 +79,6 @@ def _load_domestic_etf_ticker_set() -> set[str]:
     return {str(value or "").strip().upper() for value in df["티커"].tolist() if str(value or "").strip()}
 
 
-def _lookup_domestic_etf_name(ticker: str) -> str | None:
-    df, _ = load_cached_kis_domestic_etf_master()
-    if "티커" not in df.columns:
-        raise RuntimeError("KIS ETF 마스터 캐시에 티커 컬럼이 없습니다.")
-    name_column = "종목명" if "종목명" in df.columns else "한글종목명" if "한글종목명" in df.columns else None
-    if name_column is None:
-        raise RuntimeError("KIS ETF 마스터 캐시에 종목명 컬럼이 없습니다.")
-
-    ticker_norm = str(ticker or "").strip().upper()
-    matched = df[df["티커"].astype(str).str.strip().str.upper() == ticker_norm]
-    if matched.empty:
-        return None
-
-    name = str(matched.iloc[0].get(name_column) or "").strip()
-    return name or None
-
-
 def _resolve_ticker_meta_item(
     ticker: str,
     allowed_ticker_types: set[str] | None = None,
@@ -198,53 +181,10 @@ def _resolve_ticker_meta_item(
         sorted_matches = sorted(matches, key=lambda match: (int(match["_pool_order"]), str(match["ticker_type"])))
         return _public_match(sorted_matches[0])
 
-    # ASX: 접두사로 호주를 명시했는데 풀에 없으면 즉시 호주로 결정 (미국 폴백 차단)
-    if forced_ticker_type == "aus" and _allowed("aus"):
-        return {
-            "ticker": ensure_asx_prefix(ticker_key),
-            "name": ticker_key,
-            "ticker_type": "aus",
-            "country_code": "au",
-            "is_etf": True,
-        }
-
-    if ticker_key.isdigit() and len(ticker_key) == 6:
-        domestic_etf_tickers = _load_domestic_etf_ticker_set()
-        if ticker_key in domestic_etf_tickers and _allowed("kor_kr"):
-            return {
-                "ticker": ticker_key,
-                "name": _lookup_domestic_etf_name(ticker_key) or ticker_key,
-                "ticker_type": "kor_kr",
-                "country_code": "kor",
-                "is_etf": True,
-            }
-        if ticker_key not in domestic_etf_tickers and _allowed("kor"):
-            return {
-                "ticker": ticker_key,
-                "name": ticker_key,
-                "ticker_type": "kor",
-                "country_code": "kor",
-                "is_etf": False,
-            }
-
-    if ticker_key.endswith(".AX") and _allowed("aus"):
-        return {
-            "ticker": ensure_asx_prefix(ticker_key),
-            "name": ticker_key,
-            "ticker_type": "aus",
-            "country_code": "au",
-            "is_etf": True,
-        }
-
-    if (ticker_key.isalpha() or "." in ticker_key) and _allowed("us"):
-        return {
-            "ticker": ticker_key,
-            "name": ticker_key,
-            "ticker_type": "us",
-            "country_code": "us",
-            "is_etf": False,
-        }
-
+    # 종목풀에 없으면 여기서 끝난다 — 티커 **형식**으로 국가·종목풀을 추측하지 않는다.
+    # (6자리 숫자면 한국, 알파벳이면 미국 … 식의 폴백이 있었는데, 호주 종목이 전부 미국으로
+    #  넘어가 yfinance 가 `$MVR` 를 조회하다 죽었다. 잘못 찍은 시장으로 저장되는 쪽이
+    #  "못 찾았다" 보다 훨씬 비싸다.)
     if allowed_ticker_types is not None:
         joined = ", ".join(sorted(allowed_ticker_types)) or "없음"
         raise RuntimeError(f"{ticker_key} 티커를 연결된 종목풀({joined})에서 찾지 못했습니다.")
