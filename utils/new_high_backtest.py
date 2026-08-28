@@ -539,12 +539,17 @@ def _apply_live_trade_values(
     value_df: pd.DataFrame,
     last: pd.Timestamp,
     min_value_mult: float | None,
+    *,
+    confirmed_today: bool,
 ) -> None:
     """진행 중인 세션의 누적 거래대금으로 `trade_value`·`value_mult`·`qualifies` 를 다시 쓴다.
 
     분모는 확정된 직전 19거래일 합에 오늘을 더한 20일 평균이다 — 백테스트가 쓰는 식과 같다.
     백테스트는 확정된 과거만 보므로 여기서 바꾼 값이 성과 계산에 섞이지 않는다.
     국내 상장이 아니거나 조회에 실패하면 아무것도 바꾸지 않는다(캐시 값 유지).
+
+    실시간 배수는 `value_mult_live` 에 **항상** 따로 남긴다 — 토스는 대체거래소(NXT)
+    거래분까지 합산해 주므로 KRX 확정값보다 크고, 화면이 둘을 나란히 보여준다.
     """
     from utils.settings_loader import get_ticker_type_settings
 
@@ -574,9 +579,23 @@ def _apply_live_trade_values(
         base = (float(history.sum()) + float(today)) / 20
         if base <= 0:
             continue
-        row["trade_value"] = float(today)
-        row["value_mult"] = round(float(today) / base, 2)
-        row["qualifies"] = _meets_min_mult(row["value_mult"], min_value_mult)
+        live_mult = round(float(today) / base, 2)
+        row["value_mult_live"] = live_mult
+        if not confirmed_today:
+            # 오늘 확정값이 아직 없다 — 실시간이 유일한 오늘 값이라 판정에도 쓴다.
+            row["trade_value"] = float(today)
+            row["value_mult"] = live_mult
+            row["qualifies"] = _meets_min_mult(live_mult, min_value_mult)
+
+
+def _market_today(pool: str) -> str:
+    """그 시장의 오늘 날짜(YYYY-MM-DD). 캐시가 오늘까지 확정됐는지 판단하는 기준이다."""
+    from config import MARKET_SCHEDULES
+    from utils.settings_loader import get_ticker_type_settings
+
+    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+    tz_name = str((MARKET_SCHEDULES.get(country) or {}).get("timezone") or "Asia/Seoul")
+    return str(pd.Timestamp.now(tz=tz_name).date())
 
 
 def _cache_refreshed_at(pool: str) -> str | None:
@@ -784,6 +803,18 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
         price = close_df.at[last, ticker]
         return None if pd.isna(price) else float(price)
 
+    # 거래대금 배수 — 실시간(토스, KRX+NXT 합산) 값을 **항상** 함께 담는다. 화면이 확정값
+    # 옆에 괄호로 보여준다. 오늘 확정값이 아직 없으면(장중) 실시간이 판정 기준이 된다 —
+    # 오늘 돌파한 종목을 어제 자금 유입으로 판정할 수는 없기 때문이다.
+    _apply_live_trade_values(
+        rows,
+        pool,
+        panel["value"],
+        last,
+        settings["min_value_mult"],
+        confirmed_today=str(last.date()) >= str(_market_today(pool)),
+    )
+
     mark_exits(confirmed_close)
     # 확정 종가 기준 판정 — 장중이면 아래에서 잠정 종가로 다시 판정하며 예상으로 바꾼다.
     for held in holdings:
@@ -869,10 +900,6 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
                 row["gap_high_pct"] = round((price / row["prior_high_intraday"] - 1) * 100, 2)
             # 장중 고가가 선을 건드렸는지도 실시간 고가로 다시 본다.
             row["touched"] = bool(live["high"] >= row["prior_high"] and price < row["prior_high"])
-
-        # 거래대금·배수도 오늘 값으로 바꾼다. 캐시 값(어제)을 그대로 두면 진입 자격을
-        # 어제 자금 유입으로 판정하게 된다 — 오늘 돌파한 종목을 오늘 거래대금으로 봐야 한다.
-        _apply_live_trade_values(rows, pool, panel["value"], last, settings["min_value_mult"])
 
         # 남은 보유·후보는 이제 **오늘 잠정 종가** 기준으로 다시 판정한다 — 내일 할 일이다.
         # 이탈 이평선도 오늘 잠정 종가를 넣어 다시 계산한다(어제 선으로 보면 하루 뒤처진다).
