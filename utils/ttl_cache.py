@@ -22,11 +22,17 @@ def _normalize(part: Any) -> Any:
 
 
 class TtlCache:
-    """키별로 TTL 동안 값을 보관하는 캐시. 반환값은 항상 복사본이다."""
+    """키별로 TTL 동안 값을 보관하는 캐시. 반환값은 항상 복사본이다.
 
-    def __init__(self, ttl_seconds: float, *, name: str = "") -> None:
+    ``max_entries`` 를 주면 그 수를 넘을 때 가장 오래 담긴 항목부터 버린다. 값 하나가
+    무거운 캐시(가격 프레임 등)에 쓴다 — 만료는 그 키를 다시 볼 때만 걷히므로, 상한이
+    없으면 아무도 안 찾는 옛 항목이 TTL 이 지나도 메모리에 남는다.
+    """
+
+    def __init__(self, ttl_seconds: float, *, name: str = "", max_entries: int | None = None) -> None:
         self.ttl_seconds = float(ttl_seconds)
         self.name = name
+        self.max_entries = max_entries
         self._entries: dict[Hashable, tuple[float, Any]] = {}
         self._lock = Lock()
         self._inflight_locks: dict[Hashable, Lock] = {}
@@ -49,7 +55,16 @@ class TtlCache:
 
     def set(self, key: Hashable, payload: Any) -> None:
         with self._lock:
+            # 다시 넣는 키는 맨 뒤로 — dict 는 삽입 순서를 지키므로 그게 곧 나이 순서다.
+            self._entries.pop(key, None)
             self._entries[key] = (monotonic(), deepcopy(payload))
+            if self.max_entries is None:
+                return
+            now = monotonic()
+            for stale in [k for k, (at, _) in self._entries.items() if now - at > self.ttl_seconds]:
+                self._entries.pop(stale, None)
+            while len(self._entries) > self.max_entries:
+                self._entries.pop(next(iter(self._entries)))
 
     def invalidate(self, predicate: Callable[[Any], bool] | None = None) -> None:
         """캐시를 비운다. ``predicate`` 를 주면 참인 키만 지운다."""

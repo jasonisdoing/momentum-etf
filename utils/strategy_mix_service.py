@@ -18,10 +18,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
+from config import CACHE_TTL_COMPUTE
 from utils.logger import get_app_logger
 from utils.mix_sleeve import MOMENTUM, NEW_HIGH, PORTFOLIO, STRATEGY_LABELS, SleeveSpec
 from utils.share_allocation import ShareTarget, allocate_integer_shares, backtest_initial_capital
 from utils.trade_stats import summarize_trades
+from utils.ttl_cache import TtlCache
 
 logger = get_app_logger()
 
@@ -310,6 +312,12 @@ def _load_account_state(account_id: str) -> dict[str, Any]:
     return {"account_id": account_id, "holdings": holdings, "cash_balance": cash}
 
 
+# 슬리브 몫 캐시 — 이 값은 **종가 기준 백테스트 곡선**에서 나오므로 장중에는 바뀌지 않는데,
+# 캐시가 없을 때는 요청마다 슬리브 수만큼 2개월 백테스트를 새로 돌려 17초 넘게 썼다.
+# 계좌 잔고·보유 수량은 이 캐시 밖이라 그대로 매 요청 새로 읽는다.
+_SHARES_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="mix_sleeve_shares")
+
+
 def _sleeve_shares(ctx: dict[str, Any], as_of: str | None) -> dict[str, float]:
     """{슬롯키: 몫 %} + cash_pct — 직전 월초 배분 이후 흘러간 비율.
 
@@ -321,6 +329,18 @@ def _sleeve_shares(ctx: dict[str, Any], as_of: str | None) -> dict[str, float]:
     곡선을 못 구하면(데이터 부족 등) 저장된 월초 배분을 그대로 쓴다 — 임의 보정 대신
     '아직 안 흘러간 상태' 로 명시한다.
     """
+    # 캐시 키는 계좌·기준일 + **슬리브 구성**이다. 조합이나 배분을 바꾸면 몫이 달라지므로
+    # 구성까지 키에 넣어야 저장 직후 옛 몫이 그대로 나오지 않는다.
+    key = _SHARES_CACHE.make_key(
+        ctx["account_id"],
+        as_of or "",
+        [(spec.key, spec.strategy, spec.pool) for spec in ctx["slots"]],
+        mix_weights_for_account(ctx["account_id"]),
+    )
+    return _SHARES_CACHE.get_or_compute(key, lambda: _compute_sleeve_shares(ctx, as_of))
+
+
+def _compute_sleeve_shares(ctx: dict[str, Any], as_of: str | None) -> dict[str, float]:
     from utils.mix_sleeve import daily_curve, load_context, run_backtest
 
     base = mix_weights_for_account(ctx["account_id"])
