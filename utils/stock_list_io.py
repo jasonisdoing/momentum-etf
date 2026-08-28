@@ -228,6 +228,24 @@ def get_etfs(ticker_type: str, include_extra_tickers: Iterable[str] | None = Non
     return all_etfs
 
 
+def count_stocks_by_pool() -> dict[str, int]:
+    """종목풀별 담긴 종목 수 — {ticker_type: 개수}. 삭제된 종목은 세지 않는다.
+
+    풀마다 목록을 읽어 세면 풀 수만큼 쿼리가 나가므로 집계 한 번으로 끝낸다.
+    한 건도 없는 풀은 키가 없다 — 호출부가 0 으로 읽는다.
+    """
+    coll = _get_collection()
+    if coll is None:
+        raise RuntimeError("MongoDB 연결 실패 — stock_meta 컬렉션을 읽을 수 없습니다.")
+    rows = coll.aggregate(
+        [
+            {"$match": {"is_deleted": {"$ne": True}}},
+            {"$group": {"_id": "$ticker_type", "count": {"$sum": 1}}},
+        ]
+    )
+    return {str(row["_id"]).strip().lower(): int(row["count"]) for row in rows if row.get("_id")}
+
+
 def get_etfs_by_country(country: str) -> list[dict[str, Any]]:
     """
     (Legacy Helper) 해당 country_code를 가진 모든 계좌의 종목을 합산하여 반환합니다.
