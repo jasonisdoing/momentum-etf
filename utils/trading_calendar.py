@@ -88,6 +88,34 @@ def is_market_day_completed(country_code: str, trading_day: pd.Timestamp) -> boo
     return now_minutes >= cutoff_minutes
 
 
+def is_market_day_started(country_code: str, trading_day: pd.Timestamp) -> bool:
+    """그 시장의 `trading_day` 정규장이 시작됐는가 (개장 시각 기준).
+
+    과거 날짜면 True, 미래면 False, 오늘이면 현지 개장 시각이 지났는지로 본다.
+    **시가 체결이 아직 가능한가**를 묻는 곳이 쓴다 — 개장 전이면 오늘 시가에 체결할 수
+    있고, 개장한 뒤에는 그 시가가 이미 지나 다음 거래일이 체결일이 된다.
+    """
+    country_key = (country_code or "").strip().lower()
+    schedule = (MARKET_SCHEDULES or {}).get(country_key)
+    if not isinstance(schedule, dict):
+        return True
+
+    tz_name = str(schedule.get("timezone") or "").strip() or "UTC"
+    open_time = schedule.get("open") or time(0, 0)
+    try:
+        now_local = _now_with_zone(tz_name)
+    except Exception:
+        return True
+
+    trading_day_norm = pd.Timestamp(trading_day).normalize()
+    now_local_day = pd.Timestamp(now_local.date()).normalize()
+    if trading_day_norm < now_local_day:
+        return True
+    if trading_day_norm > now_local_day:
+        return False
+    return now_local.time() >= open_time
+
+
 # 옛 이름 — data_loader 가 이 이름으로 가져다 쓴다.
 _is_market_day_completed = is_market_day_completed
 

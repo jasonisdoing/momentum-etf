@@ -472,6 +472,45 @@ a {
   min-width: 0;
 }
 
+/* 시장 세션 표시 — 홈 버튼과 티커 검색 사이. 세 시장을 한 줄로 나란히 둔다. */
+.marketSessionBar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  margin-left: 0.5rem;
+  white-space: nowrap;
+}
+
+.marketSessionItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: var(--fs-sm);
+  line-height: 1;
+}
+
+.marketSessionItem strong {
+  font-weight: 700;
+}
+
+/* 세션 이름 + 괄호를 한 덩어리로 — 국기와만 띄운다. */
+.marketSessionText {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.marketSessionRemaining {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 좁은 화면에서는 남은 시간을 접는다 — 세션 이름만 남겨 헤더가 밀리지 않게 한다. */
+@media (max-width: 1200px) {
+  .marketSessionRemaining {
+    display: none;
+  }
+}
+
 .appMobileHeader {
   display: none;
   align-items: center;
@@ -3942,6 +3981,15 @@ a {
 
 .rankAgGrid .ag-cell[col-id="종목명"],
 .assetsAgGrid .ag-cell[col-id="name"] {
+  overflow: hidden;
+}
+
+/* 2줄 줄임을 쓰는 셀 — 자식(.appNameCellText)이 넘칠 수 있게 셀이 자리를 내준다.
+   AG Grid 셀은 flex 라 min-width 를 0 으로 내려야 자식이 줄어든다.
+   종목명 외의 칸(합성 화면의 전략 이름 등)도 이 클래스를 달아 같은 규칙을 쓴다. */
+.ag-cell.appWrapCell,
+.ag-cell.appWrapCell .ag-cell-value {
+  min-width: 0;
   overflow: hidden;
 }
 

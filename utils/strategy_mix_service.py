@@ -1146,7 +1146,19 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
     ahead = get_trading_days(
         today_local.strftime("%Y-%m-%d"), (today_local + timedelta(days=21)).strftime("%Y-%m-%d"), country
     )
-    next_trading_day = next((str(day.date()) for day in ahead if day.date() > today_local), None)
+    # 체결은 **시가**다 — 오늘 장이 아직 안 열렸으면 오늘 시가에 체결할 수 있다.
+    # 오늘을 무조건 건너뛰면 개장 전인 시장에서 지시가 하루 뒤로 밀린다
+    # (뉴욕 06:35 에 보는데 체결일이 다음 거래일로 나왔다).
+    from utils.trading_calendar import is_market_day_started
+
+    def _can_fill_at_open(day) -> bool:
+        if day > today_local:
+            return True
+        if day < today_local:
+            return False
+        return not is_market_day_started(country, pd.Timestamp(day))
+
+    next_trading_day = next((str(day.date()) for day in ahead if _can_fill_at_open(day.date())), None)
 
     # ── 적용 계좌 — 이 계산의 기준 계좌 그대로다(슬리브별 풀이 여기서 나왔다).
     account = _load_account_state(ctx["account_id"])
