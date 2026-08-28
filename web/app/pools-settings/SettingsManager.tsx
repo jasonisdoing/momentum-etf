@@ -63,6 +63,8 @@ type PoolEntry = {
   currency?: string;
   // 풀 성격(stock/etf) — 미설정이면 null. 전략 SM 등이 섹터·업종 UI 노출에 쓴다.
   pool_kind?: string | null;
+  /** 그 풀에 담긴 종목 수 — 현황이라 편집 대상이 아니다(설정 초안에 넣지 않는다). */
+  stock_count?: number;
   settings: SettingsMap;
   updated_at?: string;
   /** 저장 경로 — "사용자"(사람이 화면에서 저장) / "모멘텀 전략"(전략 화면·튜닝 적용). */
@@ -120,7 +122,12 @@ const EMPTY_DRAFT: PoolDraft = {
 };
 
 /** 그리드 행 — 편집 중인 초안 그대로에 표시용 필드를 얹는다. */
-type PoolGridRow = PoolDraft & { __dirty: boolean; __updatedAt?: string; __saveMethod?: string };
+type PoolGridRow = PoolDraft & {
+  __dirty: boolean;
+  __updatedAt?: string;
+  __saveMethod?: string;
+  __stockCount?: number;
+};
 
 // 셀렉트 에디터가 들어가는 행이라 기본(34px)보다 조금 높인다.
 const poolSettingsGridTheme = createAppGridTheme({ rowHeight: 38 });
@@ -333,7 +340,13 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     () =>
       rows.map((pool) => {
         const draft = drafts[pool.ticker_type] ?? toDraft(pool);
-        return { ...draft, __dirty: isDirty(draft, pool), __updatedAt: pool.updated_at, __saveMethod: pool.save_method };
+        return {
+          ...draft,
+          __dirty: isDirty(draft, pool),
+          __updatedAt: pool.updated_at,
+          __saveMethod: pool.save_method,
+          __stockCount: pool.stock_count,
+        };
       }),
     [drafts, rows],
   );
@@ -531,10 +544,12 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     field: "order" | "TOP_N_HOLD",
     headerName: string,
     width: number,
+    headerTooltip?: string,
   ): ColDef<PoolGridRow> => ({
     colId: field,
     headerName,
     width,
+    headerTooltip,
     editable: true,
     cellDataType: "number",
     type: "numericColumn",
@@ -561,7 +576,17 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     selectCol("pool_kind", "구분", 80, () => ["stock", "etf"], {
       valueFormatter: (params) => ({ stock: "개별주", etf: "ETF" })[String(params.value)] ?? "미설정",
     }),
-    numberCol("TOP_N_HOLD", "종목", 64),
+    numberCol("TOP_N_HOLD", "보유", 64, "전략이 동시에 들고 갈 종목 수(TOP_N). 담긴 종목 수가 아닙니다."),
+    {
+      // 그 풀에 담긴 종목 수 — 설정이 아니라 현황이라 편집할 수 없다.
+      colId: "stock_count",
+      headerName: "종목수",
+      width: 76,
+      type: "numericColumn",
+      headerTooltip: "이 종목풀에 담긴 종목 수. 설정이 아니라 현황이라 편집할 수 없습니다.",
+      valueGetter: (params) => params.data?.__stockCount ?? null,
+      valueFormatter: (params) => (params.value == null ? "-" : Number(params.value).toLocaleString("ko-KR")),
+    },
     // 업종 상한 — 순위 화면 추천(✅)과 모멘텀 선정이 함께 쓴다. 빈 값 = 제한 없음.
     selectCol("MAX_PER_INDUSTRY", "업종상한", 88, () => ["1", "2", "3", ""], {
       valueFormatter: (params) => (params.value === "" || params.value == null ? "없음" : `${params.value}종목`),

@@ -46,8 +46,10 @@ def _editable(settings: dict[str, Any]) -> dict[str, Any]:
     return {key: {"value": settings.get(key)} for key in POOL_EDITABLE_KEYS}
 
 
-def _pool_payload(settings: dict[str, Any]) -> dict[str, Any]:
+def _pool_payload(settings: dict[str, Any], stock_counts: dict[str, int]) -> dict[str, Any]:
     return {
+        # 그 풀에 담긴 종목 수 — 설정이 아니라 현황이라 편집할 수 없다.
+        "stock_count": stock_counts.get(str(settings["ticker_type"]).strip().lower(), 0),
         "ticker_type": settings["ticker_type"],
         "name": settings["name"],
         "icon": settings["icon"],
@@ -66,8 +68,11 @@ def _pool_payload(settings: dict[str, Any]) -> dict[str, Any]:
 @router.get("")
 def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, object]:
     """풀별 편집 가능 설정과 입력 제약을 반환한다."""
+    from utils.stock_list_io import count_stocks_by_pool
+
     try:
-        pools = [_pool_payload(settings) for settings in load_pool_definitions()]
+        stock_counts = count_stocks_by_pool()
+        pools = [_pool_payload(settings, stock_counts) for settings in load_pool_definitions()]
     except PoolSettingsError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
