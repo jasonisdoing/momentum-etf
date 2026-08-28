@@ -84,8 +84,13 @@ def month_options() -> list[int]:
     return get_month_options()
 
 
-# 배분 기본값(%) — 계좌 설정에 저장이 없을 때 쓰는 시스템 기본 배분이며, 지금까지의
-# 동작(모멘텀 50 : 신고가 50, 비워 두는 현금 없음)과 같다. 화면이 이 값을 그대로 보여준다.
+# 고정 자산(IS, International Shares) — 사용자가 화면에서 수량을 못 바꾸는 호주 계좌 항목이다.
+# 원장 holdings 가 아니라 `intl_shares_value` 필드에 계좌 통화로 들어 있고, 합성은 이걸
+# **굴리지 않되 총자산에는 넣는다**(자산 관리 화면과 같은 취급).
+FIXED_ASSET_TICKER = "IS"
+FIXED_ASSET_NAME = "International Shares"
+
+
 def mix_weights(account_settings: dict[str, Any]) -> dict[str, float]:
     """계좌 설정의 합성 배분(%) — {슬롯키_pct: 값} + cash_pct. 저장이 없으면 빈 배분.
 
@@ -292,7 +297,7 @@ def _load_account_state(account_id: str) -> dict[str, Any]:
     holdings = {}
     for row in master.get("holdings") or []:
         ticker = str(row.get("ticker") or "").strip().upper()
-        if not ticker or ticker in {"IS", "__CASH__"}:
+        if not ticker or ticker in {FIXED_ASSET_TICKER, "__CASH__"}:
             continue
         try:
             quantity = float(row.get("quantity") or 0)
@@ -309,7 +314,19 @@ def _load_account_state(account_id: str) -> dict[str, Any]:
         cash = float(master.get("cash_balance") or 0)
     except (TypeError, ValueError):
         cash = 0.0
-    return {"account_id": account_id, "holdings": holdings, "cash_balance": cash}
+    # 고정 자산(IS) — 원장 holdings 가 아니라 별도 필드에 계좌 통화로 들어 있다.
+    # 합성이 굴리지는 않지만 **총자산에는 들어간다** — 빼면 목표 금액이 그만큼 작아져
+    # 화면의 비중 합이 실제 계좌와 어긋난다.
+    try:
+        fixed_native = float(master.get("intl_shares_value") or 0)
+    except (TypeError, ValueError):
+        fixed_native = 0.0
+    return {
+        "account_id": account_id,
+        "holdings": holdings,
+        "cash_balance": cash,
+        "fixed_asset_native": fixed_native,
+    }
 
 
 # 슬리브 몫 캐시 — 이 값은 **종가 기준 백테스트 곡선**에서 나오므로 장중에는 바뀌지 않는데,
@@ -851,7 +868,9 @@ def _attach_account_targets(
                 "weight_pct": 0.0,
                 "price": item.get("price"),
                 "change_pct": None,
-                # 슬리브별 상태 칸 — 이 행은 목표에 없는 보유라 어느 슬리브에도 안 걸린다.
+                # 슬리브별 칸 — 이 행은 목표에 없는 보유라 어느 슬리브에도 안 걸린다.
+                # 몫 0 을 명시해야 슬리브 현금 합계가 이 행에서 KeyError 없이 계산된다.
+                **{f"{key}_weight": 0.0 for key in slot_keys},
                 **{f"{key}_status": None for key in slot_keys},
                 "is_sell_all": True,
                 "held_quantity": item["quantity"],
@@ -1116,11 +1135,6 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
         shares = {key: base_weights[f"{key}_pct"] for key in keys}
         reserved_cash_share = base_weights["cash_pct"]
 
-    stock_pct = sum(row["weight_pct"] for row in holdings)
-    # 슬리브 현금 = 그 슬리브 몫에서 담긴 종목 비중을 뺀 나머지. 빈 슬롯 수로 세면
-    # 흘러간 비중과 맞지 않는다(종목이 오르면 남는 현금은 그만큼 줄어든다).
-    sleeve_cash = {key: max(shares[key] - sum(row[f"{key}_weight"] for row in holdings), 0.0) for key in keys}
-
     # 다음 거래일 — 모든 체결은 시가라 액션 묶음의 실제 날짜가 된다. 연휴가 끼면
     # 이 날짜가 교체일과 같아질 수 있고, 그러면 화면이 한 묶음으로 합친다.
     ahead = get_trading_days(
@@ -1155,10 +1169,66 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
             item["value"] = round(value_krw, 2) if value_krw is not None else None
             if value_krw:
                 stock_value += value_krw
-        total_assets = stock_value + account["cash_balance"]
+        # 고정 자산(IS)은 계좌 통화로 들어 있어 여기서 원화로 맞춘다. 슬리브가 굴리지 않지만
+        # 총자산에는 들어간다 — 빼면 목표 금액이 그만큼 작아져 실제 계좌와 합이 안 맞는다.
+        fixed_value = float(account.get("fixed_asset_native") or 0) * krw_rate if krw_rate > 0 else 0.0
+        account["fixed_asset_value"] = round(fixed_value, 2) if fixed_value else 0.0
+        total_assets = stock_value + fixed_value + account["cash_balance"]
         account["stock_value"] = round(stock_value, 2)
         account["total_assets"] = round(total_assets, 2)
+        # 고정 자산 몫(%) — 사용자가 정하는 값이 아니라 평가액에서 나온다.
+        # 슬리브·현금 배분은 이 몫을 뺀 나머지에 비례한다(아래 _scale_for_fixed_asset).
+        account["fixed_asset_pct"] = round(fixed_value / total_assets * 100.0, 4) if total_assets > 0 else 0.0
+
+        # ── 고정 자산 몫만큼 슬리브·현금 비중을 줄인다 ──
+        # 슬리브 배분(50:50 등)은 **고정 자산을 뺀 나머지**에 대한 비율이다. 고정 자산은
+        # 사용자가 못 바꾸는 값이라 배분 대상이 아니고, 총자산 대비로 두면 슬리브 합 + 고정
+        # 자산이 100% 를 넘는다. 여기서 줄여야 목표 금액이 실제 계좌와 맞는다.
+        fixed_pct = float(account["fixed_asset_pct"])
+        if fixed_pct > 0:
+            scale = max(1.0 - fixed_pct / 100.0, 0.0)
+            for row in holdings:
+                row["weight_pct"] *= scale
+                for key in keys:
+                    row[f"{key}_weight"] *= scale
+            shares = {key: value * scale for key, value in shares.items()}
+            reserved_cash_share *= scale
+            base_weights = {name: value * scale for name, value in base_weights.items()}
+            # 고정 자산 행 — 표에서 비중 합이 100% 가 되게 한다. 목표 = 현재라 매매 지시가
+            # 나오지 않는다(수량·목표수량을 아래에서 같은 값으로 채운다).
+            holdings.append(
+                {
+                    "ticker": FIXED_ASSET_TICKER,
+                    "name": FIXED_ASSET_NAME,
+                    "sources": [],
+                    "weight_pct": fixed_pct,
+                    "price": None,
+                    "change_pct": None,
+                    **{f"{key}_weight": 0.0 for key in keys},
+                    **{f"{key}_status": None for key in keys},
+                    "is_fixed_asset": True,
+                }
+            )
+
         account["sell_all"] = _attach_account_targets(holdings, account, krw_rate, slot_keys=keys)
+
+        # 고정 자산 행 마무리 — 목표 대조(위)는 계좌 원장 holdings 만 보므로 이 행은 비어 있다.
+        # 평가액은 그대로 채우고 수량 지시는 만들지 않는다(살 수도 팔 수도 없는 자산이다).
+        for row in holdings:
+            if not row.get("is_fixed_asset"):
+                continue
+            row["held_value"] = account["fixed_asset_value"]
+            row["current_weight_pct"] = fixed_pct
+            row["target_amount"] = account["fixed_asset_value"]
+            row["held_quantity"] = None
+            row["target_quantity"] = None
+            row["trade_quantity"] = None
+
+    # 비중 합계·슬리브 현금 — 고정 자산 축소가 끝난 뒤의 값이라야 실제 계좌와 맞는다.
+    stock_pct = sum(row["weight_pct"] for row in holdings)
+    # 슬리브 현금 = 그 슬리브 몫에서 담긴 종목 비중을 뺀 나머지. 빈 슬롯 수로 세면
+    # 흘러간 비중과 맞지 않는다(종목이 오르면 남는 현금은 그만큼 줄어든다).
+    sleeve_cash = {key: max(shares[key] - sum(row[f"{key}_weight"] for row in holdings), 0.0) for key in keys}
 
     # 종목명 옆 추세 이탈 배지(❗)용 — 행이 속한 슬리브의 **종목풀 설정** 이평선 기준.
     _attach_disparity(holdings, {spec.key: spec.pool for spec in slots})
