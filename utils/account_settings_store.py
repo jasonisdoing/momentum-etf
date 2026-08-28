@@ -41,15 +41,10 @@ EDITABLE_KEYS: tuple[str, ...] = (
     # 합성 전략 사용 여부 — 계좌 설정에서는 이 체크만 하고, 실제 조합(전략·종목풀·배분)은
     # `/strategy-mix` 화면에서 정한다. 조합과 배분은 함께 보며 맞추는 값이라 한 화면에 둔다.
     "mix_enabled",
-    "mix_a_strategy",
-    "mix_a_pool",
-    "mix_a_name",
-    "mix_b_strategy",
-    "mix_b_pool",
-    "mix_b_name",
+    # 합성 슬리브 목록 — 슬롯마다 (전략, 종목풀, 표시 이름, 배분%). 슬롯 수가 늘어도
+    # 필드를 추가하지 않도록 배열 하나로 둔다. 순서가 곧 슬롯 순서(A·B·C)다.
+    "mix_sleeves",
     "mix_slack_enabled",
-    "mix_a_pct",
-    "mix_b_pct",
     "mix_cash_pct",
     "broker_api",
     "URL",
@@ -60,17 +55,17 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "stoploss_alarm_enabled",
 )
 
-# 합성 전략 배분(%) — 모멘텀·신고가·현금. 셋을 항상 함께 저장하고 합은 100 이어야 한다.
-MIX_WEIGHT_KEYS: tuple[str, ...] = ("mix_a_pct", "mix_b_pct", "mix_cash_pct")
+# 합성 슬롯 — 최소 둘(합성이려면 섞을 것이 둘은 있어야 한다), 최대 셋.
+# 슬롯을 가리키는 키는 배열 순서로 준다(첫째 "a", 둘째 "b", 셋째 "c") — 저장하지 않는다.
+MIN_MIX_SLEEVES = 2
+MAX_MIX_SLEEVES = 3
+MIX_SLEEVE_KEYS: tuple[str, ...] = ("a", "b", "c")
 
-# 합성 슬리브별 종목풀 — 계좌와 같은 국가여야 한다.
-MIX_SLEEVE_POOL_KEYS: tuple[str, ...] = ("mix_a_pool", "mix_b_pool")
-# 슬리브가 굴릴 전략 — 값은 `utils/mix_sleeve.STRATEGY_OPTIONS` 가 단일 소스다.
-MIX_SLEEVE_STRATEGY_KEYS: tuple[str, ...] = ("mix_a_strategy", "mix_b_strategy")
-# 슬리브 표시 이름 — 비워 두면 전략 이름(「A. 모멘텀」)을 쓴다. 같은 전략을 두 슬롯에
-# 올릴 수 있어, 화면에서 무엇이 무엇인지 구분하려면 사용자가 직접 붙일 이름이 필요하다.
-MIX_SLEEVE_NAME_KEYS: tuple[str, ...] = ("mix_a_name", "mix_b_name")
+# 슬리브 항목의 필드 — 전략·종목풀·표시 이름·배분(%).
+MIX_SLEEVE_FIELDS: tuple[str, ...] = ("strategy", "pool", "name", "weight_pct")
 # 이름 길이 상한 — 표 헤더·액션 문구에 들어가므로 짧게 제한한다.
+# 비워 두면 전략 이름(「A. 모멘텀」)을 쓴다. 같은 전략을 여러 슬롯에 올릴 수 있어,
+# 화면에서 무엇이 무엇인지 구분하려면 사용자가 직접 붙일 이름이 필요하다.
 MIX_SLEEVE_NAME_MAX_LEN = 20
 
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
@@ -126,6 +121,135 @@ def load_account_docs() -> list[dict[str, Any]]:
     with _cache_lock:
         _cache = (now, [dict(d) for d in docs])
     return docs
+
+
+def _validate_pct(account_id: str, label: str, raw: Any) -> float:
+    """배분(%) 한 값 — 0~100 의 숫자. 합계 검사는 호출부가 따로 한다."""
+    try:
+        pct = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise AccountSettingsStoreError(f"'{account_id}' 의 {label} 는 숫자여야 합니다: {raw}") from exc
+    if not 0.0 <= pct <= 100.0:
+        raise AccountSettingsStoreError(f"'{account_id}' 의 {label} 는 0~100 이어야 합니다: {pct}")
+    return round(pct, 2)
+
+
+def _validate_mix_pool(account_id: str, label: str, raw: Any, values: dict[str, Any], existing_doc: dict[str, Any]) -> str:
+    """슬리브가 볼 종목풀 — 등록된 풀이고 계좌와 국가·통화가 같아야 한다.
+
+    국가가 다르면 거래 달력이 갈려 월초 리밸런싱 판정일이 슬리브마다 달라지고, 통화가
+    다르면 원화 환산율(`_krw_rate`)과 백테스트 시작 자본이 한 값으로 정해지지 않는다 —
+    어느 쪽이든 합성 곡선이 성립하지 않는다.
+    """
+    from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
+
+    pool = str(raw or "").strip().lower()
+    if not pool:
+        raise AccountSettingsStoreError(f"'{account_id}' 의 {label} 종목풀을 고르세요.")
+    allowed = list_available_ticker_types()
+    if pool not in allowed:
+        raise AccountSettingsStoreError(f"'{account_id}' 의 {label} 종목풀은 {', '.join(allowed)} 중 하나여야 합니다: {raw}")
+
+    pool_config = get_ticker_type_settings(pool) or {}
+    for name, account_value, pool_value in (
+        (
+            "국가",
+            str(values.get("country_code") or existing_doc.get("country_code") or "").strip().lower(),
+            str(pool_config.get("country_code") or "").strip().lower(),
+        ),
+        (
+            "통화",
+            str(values.get("currency") or existing_doc.get("currency") or "").strip().upper(),
+            str(pool_config.get("currency") or "").strip().upper(),
+        ),
+    ):
+        if account_value and pool_value and pool_value != account_value:
+            raise AccountSettingsStoreError(
+                f"'{account_id}'({account_value}) 의 {label} 종목풀은 같은 {name}의 것이어야 합니다: {pool}({pool_value})"
+            )
+    return pool
+
+
+def _validate_mix_sleeves(
+    account_id: str, raw: Any, values: dict[str, Any], existing_doc: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """합성 슬리브 목록 — [{strategy, pool, name, weight_pct}] 를 검증해 정규화한다.
+
+    순서가 곧 슬롯 순서다(첫째 A, 둘째 B, 셋째 C). 키는 저장하지 않고 읽을 때 순서로
+    붙인다(`mix_sleeves_of`) — 저장된 키와 순서가 어긋날 여지를 아예 없앤다.
+    """
+    from utils.mix_sleeve import STRATEGY_OPTIONS
+
+    if not isinstance(raw, list):
+        raise AccountSettingsStoreError(f"'{account_id}' 의 mix_sleeves 는 목록이어야 합니다.")
+    if not MIN_MIX_SLEEVES <= len(raw) <= MAX_MIX_SLEEVES:
+        raise AccountSettingsStoreError(
+            f"'{account_id}' 의 합성 슬리브는 {MIN_MIX_SLEEVES}~{MAX_MIX_SLEEVES}개여야 합니다: {len(raw)}개"
+        )
+
+    sleeves: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for index, item in enumerate(raw):
+        label = MIX_SLEEVE_KEYS[index].upper()
+        if not isinstance(item, dict):
+            raise AccountSettingsStoreError(f"'{account_id}' 의 {label} 슬리브는 객체여야 합니다.")
+
+        strategy = str(item.get("strategy") or "").strip().lower()
+        if strategy not in STRATEGY_OPTIONS:
+            raise AccountSettingsStoreError(
+                f"'{account_id}' 의 {label} 전략은 {', '.join(STRATEGY_OPTIONS)} 중 하나여야 합니다: {item.get('strategy')}"
+            )
+        pool = _validate_mix_pool(account_id, label, item.get("pool"), values, existing_doc)
+
+        # 같은 (전략, 종목풀) 이 두 슬롯에 오면 같은 종목이 양쪽에 잡혀 계좌 보유 수량이
+        # 두 번 세어진다. 전략이나 풀 중 하나만 달라도 허용한다.
+        if (strategy, pool) in seen:
+            raise AccountSettingsStoreError(
+                f"'{account_id}' 에 같은 조합의 슬리브가 둘 있습니다 — 전략이나 종목풀 중 하나는 달라야 합니다: "
+                f"{strategy}({pool})"
+            )
+        seen.add((strategy, pool))
+
+        name = str(item.get("name") or "").strip()
+        if len(name) > MIX_SLEEVE_NAME_MAX_LEN:
+            raise AccountSettingsStoreError(
+                f"'{account_id}' 의 {label} 슬리브 이름은 {MIX_SLEEVE_NAME_MAX_LEN}자 이내여야 합니다: {name}"
+            )
+        sleeves.append(
+            {
+                "strategy": strategy,
+                "pool": pool,
+                # 빈 이름은 None — 화면이 전략 이름을 대신 쓴다.
+                "name": name or None,
+                "weight_pct": _validate_pct(account_id, f"{label} 배분", item.get("weight_pct")),
+            }
+        )
+    return sleeves
+
+
+def mix_sleeves_of(account_settings: dict[str, Any]) -> list[dict[str, Any]]:
+    """저장된 합성 슬리브 — [{key, strategy, pool, name, weight_pct}]. 없으면 빈 목록.
+
+    키(a·b·c)는 여기서 순서대로 붙인다. 합성 계산·화면·알림이 모두 이 함수로 읽어야
+    슬롯 순서가 한 곳에서만 정해진다.
+    """
+    raw = account_settings.get("mix_sleeves")
+    if not isinstance(raw, list):
+        return []
+    sleeves: list[dict[str, Any]] = []
+    for index, item in enumerate(raw[:MAX_MIX_SLEEVES]):
+        if not isinstance(item, dict):
+            continue
+        sleeves.append(
+            {
+                "key": MIX_SLEEVE_KEYS[index],
+                "strategy": str(item.get("strategy") or "").strip().lower(),
+                "pool": str(item.get("pool") or "").strip().lower(),
+                "name": str(item.get("name") or "").strip(),
+                "weight_pct": float(item.get("weight_pct") or 0.0),
+            }
+        )
+    return sleeves
 
 
 def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict[str, Any]) -> dict[str, Any]:
@@ -197,81 +321,17 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
 
                 ticker = ensure_asx_prefix(ticker)
             cleaned[key] = {"ticker": ticker, "name": bench_name}
-        elif key in MIX_SLEEVE_STRATEGY_KEYS:
-            # 슬리브가 굴릴 전략(모멘텀/신고가). 비면 미설정 — 둘 다 있어야 합성이 성립한다.
-            strategy = str(raw or "").strip().lower()
-            if not strategy:
-                cleaned[key] = None
-                continue
-            from utils.mix_sleeve import STRATEGY_OPTIONS
-
-            if strategy not in STRATEGY_OPTIONS:
-                raise AccountSettingsStoreError(
-                    f"'{account_id}' 의 {key} 는 {', '.join(STRATEGY_OPTIONS)} 중 하나여야 합니다: {raw}"
-                )
-            cleaned[key] = strategy
-        elif key in MIX_SLEEVE_NAME_KEYS:
-            # 슬리브 표시 이름 — 비면 미설정(None)으로 두고 화면이 전략 이름을 쓴다.
-            name = str(raw or "").strip()
-            if not name:
-                cleaned[key] = None
-                continue
-            if len(name) > MIX_SLEEVE_NAME_MAX_LEN:
-                raise AccountSettingsStoreError(
-                    f"'{account_id}' 의 {key} 는 {MIX_SLEEVE_NAME_MAX_LEN}자 이내여야 합니다: {name}"
-                )
-            cleaned[key] = name
-        elif key in MIX_SLEEVE_POOL_KEYS:
-            # 합성 전략에서 이 슬리브가 볼 종목풀. 기본은 없음(미지정) — 둘 다 지정된
-            # 계좌만 `/strategy-mix` 목록에 오른다.
-            pool = str(raw or "").strip().lower()
-            if not pool:
-                cleaned[key] = None
-                continue
-            from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
-
-            allowed = list_available_ticker_types()
-            if pool not in allowed:
-                raise AccountSettingsStoreError(
-                    f"'{account_id}' 의 {key} 는 {', '.join(allowed)} 중 하나여야 합니다: {raw}"
-                )
-            # 계좌와 국가·통화가 같아야 한다. 국가가 다르면 거래 달력이 갈려 월초 리밸런싱
-            # 판정일이 슬리브마다 달라지고, 통화가 다르면 원화 환산율(`_krw_rate`)과 백테스트
-            # 시작 자본이 한 값으로 정해지지 않는다 — 어느 쪽이든 합성 곡선이 성립하지 않는다.
-            pool_config = get_ticker_type_settings(pool) or {}
-            for label, account_value, pool_value in (
-                (
-                    "국가",
-                    str(values.get("country_code") or existing_doc.get("country_code") or "").strip().lower(),
-                    str(pool_config.get("country_code") or "").strip().lower(),
-                ),
-                (
-                    "통화",
-                    str(values.get("currency") or existing_doc.get("currency") or "").strip().upper(),
-                    str(pool_config.get("currency") or "").strip().upper(),
-                ),
-            ):
-                if account_value and pool_value and pool_value != account_value:
-                    raise AccountSettingsStoreError(
-                        f"'{account_id}'({account_value}) 의 {key} 는 같은 {label}의 종목풀이어야 합니다: "
-                        f"{pool}({pool_value})"
-                    )
-            cleaned[key] = pool
+        elif key == "mix_sleeves":
+            cleaned[key] = _validate_mix_sleeves(account_id, raw, values, existing_doc)
         elif key == "mix_enabled":
             # 켜면 `/strategy-mix` 목록에 오른다. 조합이 아직 없으면 그 화면에서 고르게 한다.
             cleaned[key] = bool(raw)
         elif key == "mix_slack_enabled":
             # 합성 오늘의 액션 슬랙 알람 — 새 지시·수량 증가가 생기면 발송한다.
             cleaned[key] = bool(raw)
-        elif key in MIX_WEIGHT_KEYS:
-            # 합성 배분(%) — 모멘텀·신고가·현금. 셋의 합은 아래에서 100 인지 검사한다.
-            try:
-                pct = float(raw)
-            except (TypeError, ValueError) as exc:
-                raise AccountSettingsStoreError(f"'{account_id}' 의 {key} 는 숫자여야 합니다: {raw}") from exc
-            if not 0.0 <= pct <= 100.0:
-                raise AccountSettingsStoreError(f"'{account_id}' 의 {key} 는 0~100 이어야 합니다: {pct}")
-            cleaned[key] = round(pct, 2)
+        elif key == "mix_cash_pct":
+            # 합성에서 비워 두는 현금 몫(%). 슬리브 배분과의 합이 100 인지는 아래에서 본다.
+            cleaned[key] = _validate_pct(account_id, key, raw)
         elif key == "broker_api":
             # 증권사 API 연동 — {provider, account_no}. 없음이면 null.
             # provider 는 커넥터 레지스트리에 있어야 하고, 계좌번호는 화면의 '확인' 이
@@ -319,31 +379,23 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             cleaned[key] = bool(raw)
         elif key == "stoploss_alarm_enabled":
             cleaned[key] = bool(raw)
-    # 합성 배분은 셋이 한 묶음이다 — 하나만 바꾸면 나머지와 합이 어긋난 채로 저장된다.
-    # 두 슬리브가 (전략, 종목풀) 까지 똑같으면 막는다 — 같은 종목이 양쪽에 잡혀 계좌 보유
-    # 수량이 두 번 세어진다. 전략이나 풀 중 하나만 달라도 허용한다.
-    merged = {**existing_doc, **cleaned}
-    a_combo = (merged.get("mix_a_strategy"), merged.get("mix_a_pool"))
-    b_combo = (merged.get("mix_b_strategy"), merged.get("mix_b_pool"))
-    if all(a_combo) and a_combo == b_combo:
+    # 슬리브 배분과 현금은 한 묶음이다 — 하나만 바꾸면 나머지와 합이 어긋난 채로 저장된다.
+    # 슬리브별 (전략, 종목풀) 중복 검사는 `_validate_mix_sleeves` 가 이미 했다.
+    if ("mix_sleeves" in cleaned) != ("mix_cash_pct" in cleaned):
         raise AccountSettingsStoreError(
-            f"'{account_id}' 의 두 합성 슬리브가 완전히 같습니다 — 전략이나 종목풀 중 하나는 달라야 합니다."
+            f"'{account_id}' 의 합성 배분은 mix_sleeves 와 mix_cash_pct 를 함께 보내야 합니다."
         )
-
-    if any(key in cleaned for key in MIX_WEIGHT_KEYS):
-        missing = [key for key in MIX_WEIGHT_KEYS if key not in cleaned]
-        if missing:
-            raise AccountSettingsStoreError(
-                f"'{account_id}' 의 합성 배분은 {', '.join(MIX_WEIGHT_KEYS)} 을 함께 보내야 합니다. 빠짐: {', '.join(missing)}"
-            )
-        total = sum(float(cleaned[key]) for key in MIX_WEIGHT_KEYS)
+    if "mix_sleeves" in cleaned:
+        parts = [(MIX_SLEEVE_KEYS[i].upper(), row["weight_pct"]) for i, row in enumerate(cleaned["mix_sleeves"])]
+        total = sum(pct for _, pct in parts) + float(cleaned["mix_cash_pct"])
         # 0.01 은 소수 둘째 자리 반올림 오차만 허용하는 폭이다(예: 33.33+33.33+33.34).
         if abs(total - 100.0) > 0.01:
+            joined = " + ".join(f"{label} {pct}%" for label, pct in parts)
             raise AccountSettingsStoreError(
                 f"'{account_id}' 의 합성 배분 합계가 100%가 아닙니다: "
-                f"A {cleaned['mix_a_pct']}% + B {cleaned['mix_b_pct']}% + "
-                f"현금 {cleaned['mix_cash_pct']}% = {round(total, 2)}%"
+                f"{joined} + 현금 {cleaned['mix_cash_pct']}% = {round(total, 2)}%"
             )
+
     if not cleaned:
         raise AccountSettingsStoreError("저장할 값이 없습니다.")
     return cleaned

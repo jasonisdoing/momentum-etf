@@ -193,17 +193,38 @@ OWNED_KEY_SPECS: tuple[OwnedKeySpec, ...] = (
 
 @dataclass(frozen=True)
 class OwnerRefSpec:
-    """다른 문서가 소유자를 **값으로 가리키는** 자리. 소유자가 사라지면 참조를 비워야 한다."""
+    """다른 문서가 소유자를 **값으로 가리키는** 자리. 소유자가 사라지면 참조를 비워야 한다.
+
+    ``array_field`` 를 주면 그 배열 안 항목들의 ``field`` 를 본다. 이때 정리는 항목 하나가
+    아니라 **배열 전체**를 비운다 — 합성 슬리브처럼 항목이 서로 짝을 이루는 자리는 하나만
+    빠지면 남은 것으로 성립하지 않기 때문이다(사용자가 화면에서 다시 고른다).
+    """
 
     collection: str
     field: str
     owner: str  # "pool" | "account"
     purpose: str
+    array_field: str = ""
+
+    @property
+    def query_path(self) -> str:
+        """Mongo 조회 경로 — 배열이면 `배열.필드`."""
+        return f"{self.array_field}.{self.field}" if self.array_field else self.field
+
+    def owner_ids(self, doc: dict[str, Any]) -> list[str]:
+        """그 문서가 가리키는 소유자 id 들."""
+        if not self.array_field:
+            return [value] if (value := str(doc.get(self.field) or "").strip()) else []
+        items = doc.get(self.array_field)
+        if not isinstance(items, list):
+            return []
+        return [
+            value for item in items if isinstance(item, dict) and (value := str(item.get(self.field) or "").strip())
+        ]
 
 
 OWNER_REF_SPECS: tuple[OwnerRefSpec, ...] = (
-    OwnerRefSpec("account_settings", "mix_a_pool", "pool", "합성 A 슬리브가 쓰는 종목풀"),
-    OwnerRefSpec("account_settings", "mix_b_pool", "pool", "합성 B 슬리브가 쓰는 종목풀"),
+    OwnerRefSpec("account_settings", "pool", "pool", "합성 슬리브가 쓰는 종목풀", array_field="mix_sleeves"),
 )
 
 
@@ -257,7 +278,7 @@ def owned_array_location(array_spec: OwnedArrayItemSpec) -> str:
 
 
 def owner_ref_location(ref: OwnerRefSpec) -> str:
-    return f"{ref.collection}.{ref.field}"
+    return f"{ref.collection}.{ref.query_path}"
 
 
 def _deleted_with(spec: TableSpec) -> str:
@@ -441,8 +462,8 @@ def scan_orphans() -> dict[str, Any]:
     for ref in OWNER_REF_SPECS:
         dead_docs = [
             str(d["_id"])
-            for d in db[ref.collection].find({ref.field: {"$nin": [None, ""]}}, {ref.field: 1})
-            if str(d.get(ref.field) or "").strip() not in live[ref.owner]
+            for d in db[ref.collection].find({ref.query_path: {"$nin": [None, ""]}}, {ref.query_path: 1})
+            if any(owner_id not in live[ref.owner] for owner_id in ref.owner_ids(d))
         ]
         if dead_docs:
             refs.append(
@@ -540,12 +561,19 @@ def purge_owner(owner_kind: str, owner_id: str) -> dict[str, int]:
         if ref.owner != owner_kind:
             continue
         try:
-            count = db[ref.collection].update_many({ref.field: owner_id}, {"$set": {ref.field: None}}).modified_count
+            # 배열이면 항목 하나가 아니라 배열 전체를 비운다(위 dataclass 주석 참고).
+            cleared = [] if ref.array_field else None
+            target = ref.array_field or ref.field
+            count = (
+                db[ref.collection]
+                .update_many({ref.query_path: owner_id}, {"$set": {target: cleared}})
+                .modified_count
+            )
         except Exception as exc:
-            logger.warning("[정리] %s.%s 참조 해제 실패: %s", ref.collection, ref.field, exc)
+            logger.warning("[정리] %s.%s 참조 해제 실패: %s", ref.collection, ref.query_path, exc)
             continue
         if count:
-            removed[f"{ref.collection}.{ref.field}"] = count
+            removed[f"{ref.collection}.{ref.query_path}"] = count
 
     if removed:
         logger.info("[정리] %s '%s' 딸림 데이터 제거: %s", owner_kind, owner_id, removed)
@@ -661,7 +689,7 @@ def build_data_table_payload() -> dict[str, Any]:
                 owner_ref_location(ref),
                 ref.owner,
                 f"{ref.purpose} — 그 종목풀이 사라지면 이 값을 비운다",
-                db[ref.collection].count_documents({ref.field: {"$nin": [None, ""]}}),
+                db[ref.collection].count_documents({ref.query_path: {"$nin": [None, ""]}}),
                 "문서",
             )
         )
