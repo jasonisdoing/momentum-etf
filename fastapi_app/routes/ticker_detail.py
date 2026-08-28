@@ -79,6 +79,10 @@ def _load_domestic_etf_ticker_set() -> set[str]:
     return {str(value or "").strip().upper() for value in df["티커"].tolist() if str(value or "").strip()}
 
 
+# 시장 명시 접두사 → 국가 코드. 값은 종목풀 설정의 `country_code` 와 같은 어휘다.
+_PREFIX_COUNTRIES: dict[str, str] = {"ASX:": "au", "US:": "us", "KOR:": "kor"}
+
+
 def _resolve_ticker_meta_item(
     ticker: str,
     allowed_ticker_types: set[str] | None = None,
@@ -92,28 +96,18 @@ def _resolve_ticker_meta_item(
     def _allowed(ticker_type: str) -> bool:
         return allowed_ticker_types is None or ticker_type in allowed_ticker_types
 
-    # 시장 명시 접두사가 있으면 해당 시장으로 강제 지정. 동일 심볼이 여러 풀에 있을 때 구분.
-    forced_ticker_type: str | None = None
-    if ticker_key.startswith("ASX:"):
-        ticker_key = ticker_key[len("ASX:") :]
-        forced_ticker_type = "aus"
-        if not ticker_key:
-            raise ValueError("ASX: 뒤에 티커가 필요합니다.")
-    elif ticker_key.startswith("US:"):
-        ticker_key = ticker_key[len("US:") :]
-        forced_ticker_type = "us"
-        if not ticker_key:
-            raise ValueError("US: 뒤에 티커가 필요합니다.")
-    elif ticker_key.startswith("KOR:"):
-        ticker_key = ticker_key[len("KOR:") :]
-        forced_ticker_type = "kor"
-        if not ticker_key:
-            raise ValueError("KOR: 뒤에 티커가 필요합니다.")
-    elif ticker_key.startswith("ETF:"):
-        ticker_key = ticker_key[len("ETF:") :]
-        forced_ticker_type = "etf"
-        if not ticker_key:
-            raise ValueError("ETF: 뒤에 티커가 필요합니다.")
+    # 시장 명시 접두사가 있으면 그 **국가**로 범위를 좁힌다. 동일 심볼이 여러 시장에 있을 때
+    # 구분하려는 것이라, 접두사가 가리키는 것은 국가지 종목풀 이름이 아니다.
+    # (예전에는 "ASX:" 를 풀 이름 "aus" 로 못 박아 뒀는데, 풀 이름을 `aus_etf` 로 바꾸자
+    #  호주 종목이 한 건도 안 잡혔다 — 설정에서 바뀌는 값을 코드에 적어 두면 이렇게 깨진다.)
+    forced_country: str | None = None
+    for prefix, country in _PREFIX_COUNTRIES.items():
+        if ticker_key.startswith(prefix):
+            ticker_key = ticker_key[len(prefix) :]
+            forced_country = country
+            if not ticker_key:
+                raise ValueError(f"{prefix} 뒤에 티커가 필요합니다.")
+            break
 
     # 호주 종목은 stock_meta 에 `ASX:MVR` 로 저장된다(시스템 표준 표기, utils/asx_ticker).
     # 접두사를 뗀 `MVR` 로 비교하면 호주 풀에서 한 건도 매칭되지 않고, 아래 폴백에서
@@ -131,7 +125,7 @@ def _resolve_ticker_meta_item(
             pool_order = int(config["order"])
         except (KeyError, TypeError, ValueError) as exc:
             raise RuntimeError(f"종목풀 {ticker_type}의 우선순위(order)가 없습니다.") from exc
-        if forced_ticker_type is not None and ticker_type != forced_ticker_type:
+        if forced_country is not None and str(config.get("country_code") or "").strip().lower() != forced_country:
             continue
         if not _allowed(str(ticker_type)):
             continue
