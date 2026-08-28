@@ -469,8 +469,8 @@ def momentum_metrics(
     이격률 계산은 (종가 ÷ 이평 − 1) × 100 이고, 이평선 일수는 종목풀 설정
     (SHORT_MA_DAYS/LONG_MA_DAYS)을, 이평 종류(SMA/EMA)는 공통 설정을 그대로 쓴다 —
     순위/종목풀 백테스트와 신호가 같고 리듬(월간 유지)만 다르다.
-    순위 점수(`momentum_score`)는 순위 화면과 같은 `rank_score` 가 정한다.
-    단기 이격은 후보 자격 판정(hold_eligible_mask)에도 쓴다.
+    순위 점수(`momentum_score`)는 순위 화면과 같은 `rank_score` 가 정한다 — **장기 이격률**이다.
+    단기 이격은 순위에 넣지 않고 후보 자격 판정(hold_eligible_mask)에만 쓴다.
     ``as_of`` 를 주면 그 날짜까지의 데이터만 사용한다(백테스트·판정일 재현).
     """
     series = pd.to_numeric(close, errors="coerce").dropna()
@@ -1283,7 +1283,7 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             **price_info(item["ticker"]),
             "signal_short_pct": round(item["short_disparity_pct"], 1),
             "signal_long_pct": round(item["disparity_pct"], 1),
-            # 순위 점수(장기·단기 평균) — 줄 세우기 기준. 이격률과 다른 값이라 따로 싣는다.
+            # 순위 점수 — 줄 세우기 기준(rank_score). 화면에는 안 쓰고 아래 정렬에만 쓴다.
             "score": round(item["momentum_score"], 1),
             **(current := current_disparity(item["ticker"])),
             **exit_flags(item["ticker"]),
