@@ -3592,6 +3592,17 @@ a {
   background: rgba(148, 163, 184, 0.36);
 }
 
+/* 고정 자산(IS) 행 — 사고팔 수 없는 항목이라 **줄 전체**를 노란 배경으로 구분한다.
+   추세 이탈 행(.appTrendBrokenRow)이 회색 줄로 구분되는 것과 같은 방식이다.
+   자산 관리·자산 헬퍼·합성 화면이 같은 클래스를 쓴다(web/lib/fixed-asset.ts). */
+.ag-row.appFixedAssetRow {
+  background: rgba(243, 156, 18, 0.18);
+}
+
+.ag-row.appFixedAssetRow:hover {
+  background: rgba(243, 156, 18, 0.28);
+}
+
 /* 튜닝 표 상단 고정행: 지수/레버리지 단순보유 벤치마크 */
 .ag-row.appBenchmarkRow {
   background: rgba(148, 163, 184, 0.16);
@@ -3742,6 +3753,11 @@ a {
 .assetsAgGrid .ag-row.appTrendBrokenRow,
 .assetsAgGrid .ag-row.appTrendBrokenRow.appHeldRow {
   background: rgba(148, 163, 184, 0.26);
+}
+
+.assetsAgGrid .ag-row.appFixedAssetRow,
+.assetsAgGrid .ag-row.appFixedAssetRow.appHeldRow {
+  background: rgba(243, 156, 18, 0.18);
 }
 
 .assetsAgGrid .ag-row.appTrendBrokenRow:hover,
@@ -4290,13 +4306,7 @@ a {
   white-space: nowrap;
 }
 
-/* 고정 자산(IS) 셀 — 사고팔 수 없는 행임을 티커·종목명 **배경색**으로 구분한다.
-   메모 칸(.appEditableCell)과 같은 방식이라 표 안에서 같은 무게로 읽힌다.
-   자산 관리·자산 헬퍼·합성 화면이 같은 클래스를 쓴다(web/lib/fixed-asset.ts). */
-.ag-cell.appFixedAssetCell {
-  background: rgba(243, 156, 18, 0.18);
-  font-weight: 700;
-}
+
 
 /* 합성 슬리브 줄 — 메인 헤더 아래 전용 영역. 슬롯 하나가 한 줄이라
    전략·종목풀·이름·배분이 짝지어 읽힌다(헤더에 늘어놓으면 짝이 안 보인다). */

@@ -32,7 +32,7 @@ import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
-import { FIXED_ASSET_CELL_CLASS, FIXED_ASSET_NAME, FIXED_ASSET_TICKER } from "@/lib/fixed-asset";
+import { FIXED_ASSET_NAME, FIXED_ASSET_ROW_CLASS, FIXED_ASSET_TICKER } from "@/lib/fixed-asset";
 import {
   STOCK_NAME_COLUMN_MIN_WIDTH,
   stockMemoColumn,
@@ -693,8 +693,6 @@ export function StrategyMixClient() {
         field: "ticker",
         headerName: "티커",
         width: 108,
-        // 고정 자산 행은 티커·종목명 칸을 배경색으로 구분한다(매매 대상이 아니다).
-        cellClass: (p) => (p.data?.is_fixed_asset ? FIXED_ASSET_CELL_CLASS : undefined),
         cellRenderer: (p: { value?: string; data?: PositionRow }) => {
           // 현금·고정 자산은 종목이 아니라 상세 링크를 걸지 않는다.
           if (p.data?.is_cash) return <span>-</span>;
@@ -709,7 +707,6 @@ export function StrategyMixClient() {
         minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
         // 굵기는 주지 않는다 — 다른 화면의 종목명과 같은 무게로 보여야 표가 한 벌로 읽힌다.
         cellStyle: (p) => (p.data?.is_cash ? { color: "var(--text-muted)" } : null),
-        cellClass: (p) => (p.data?.is_fixed_asset ? FIXED_ASSET_CELL_CLASS : undefined),
         // 종목명 표기는 순위·전략 화면과 같은 공용 렌더러를 쓴다 — 레버리지 강조(💣)와
         // 긴 이름 2줄 줄임이 여기서만 빠져 있었다. 현금 행은 종목이 아니라 그대로 둔다.
         cellRenderer: (p: { value?: string | null; data?: PositionRow }) =>
@@ -1589,6 +1586,8 @@ export function StrategyMixClient() {
                     // 아직 체결 전인 행(진입 예정)과 곧 나갈 행(매도 예정)은 확정 보유와
                     // 구분되게 회색으로 눌러 둔다 — 추세 이탈 행과 같은 공용 클래스.
                     getRowClass={(params) => {
+                      // 고정 자산은 사고팔 수 없는 줄이라 전체를 노랗게 구분한다.
+                      if (params.data?.is_fixed_asset) return FIXED_ASSET_ROW_CLASS;
                       if (params.data?.is_sell_all) return "appTrendBrokenRow";
                       const status = slotKeys
                         .map((slot) => params.data?.slots?.[slot]?.status ?? "")

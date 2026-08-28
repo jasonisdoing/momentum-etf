@@ -18,8 +18,8 @@ import { reorderHoldings } from "@/lib/holdings-store";
 import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
 import { formatKstDateTime } from "@/lib/datetime";
 import {
-  FIXED_ASSET_CELL_CLASS,
   FIXED_ASSET_NAME,
+  FIXED_ASSET_ROW_CLASS,
   FIXED_ASSET_TICKER,
   isFixedAssetTicker,
 } from "@/lib/fixed-asset";
@@ -832,8 +832,6 @@ export function AccountHoldingsDetailPanel({
       field: "ticker",
       headerName: "티커",
       width: 98,
-      // 고정 자산 행은 티커·종목명 칸을 배경색으로 구분한다(매매 대상이 아니다).
-      cellClass: (params) => (isFixedAssetTicker(params.data?.ticker) ? FIXED_ASSET_CELL_CLASS : undefined),
       cellRenderer: (params: { data?: GridRow; value?: string }) => {
         const row = params.data;
         if (!row) {
@@ -872,7 +870,6 @@ export function AccountHoldingsDetailPanel({
       headerName: "종목명",
       minWidth: 248,
       flex: 1.35,
-      cellClass: (params) => (isFixedAssetTicker(params.data?.ticker) ? FIXED_ASSET_CELL_CLASS : undefined),
       cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
         if (params.data?.id === "__adding__") {
           return (
@@ -1350,7 +1347,9 @@ export function AccountHoldingsDetailPanel({
           theme={assetsGridTheme}
           getRowClass={(params: RowClassParams<GridRow>) => {
             const classes: string[] = [];
-            if (params.data?.ticker === "IS") {
+            // 고정 자산은 사고팔 수 없는 줄이라 전체를 노랗게 구분한다(보유·이탈 표시 대신).
+            if (isFixedAssetTicker(params.data?.ticker)) {
+              classes.push(FIXED_ASSET_ROW_CLASS);
               return classes.join(" ");
             }
             if (Number(params.data?.quantity ?? 0) > 0) {
