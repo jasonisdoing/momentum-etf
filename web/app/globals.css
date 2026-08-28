@@ -4290,6 +4290,14 @@ a {
   white-space: nowrap;
 }
 
+/* 고정 자산(IS) 셀 — 사고팔 수 없는 행임을 티커·종목명 **배경색**으로 구분한다.
+   메모 칸(.appEditableCell)과 같은 방식이라 표 안에서 같은 무게로 읽힌다.
+   자산 관리·자산 헬퍼·합성 화면이 같은 클래스를 쓴다(web/lib/fixed-asset.ts). */
+.ag-cell.appFixedAssetCell {
+  background: rgba(243, 156, 18, 0.18);
+  font-weight: 700;
+}
+
 /* 합성 슬리브 줄 — 메인 헤더 아래 전용 영역. 슬롯 하나가 한 줄이라
    전략·종목풀·이름·배분이 짝지어 읽힌다(헤더에 늘어놓으면 짝이 안 보인다). */
 .mixSleeveRows {

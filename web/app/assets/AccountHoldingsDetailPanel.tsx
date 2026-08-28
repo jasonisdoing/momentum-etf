@@ -17,6 +17,12 @@ import { createAppGridTheme } from "../components/app-grid-theme";
 import { reorderHoldings } from "@/lib/holdings-store";
 import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
 import { formatKstDateTime } from "@/lib/datetime";
+import {
+  FIXED_ASSET_CELL_CLASS,
+  FIXED_ASSET_NAME,
+  FIXED_ASSET_TICKER,
+  isFixedAssetTicker,
+} from "@/lib/fixed-asset";
 
 import {
   AccountSummary,
@@ -826,6 +832,8 @@ export function AccountHoldingsDetailPanel({
       field: "ticker",
       headerName: "티커",
       width: 98,
+      // 고정 자산 행은 티커·종목명 칸을 배경색으로 구분한다(매매 대상이 아니다).
+      cellClass: (params) => (isFixedAssetTicker(params.data?.ticker) ? FIXED_ASSET_CELL_CLASS : undefined),
       cellRenderer: (params: { data?: GridRow; value?: string }) => {
         const row = params.data;
         if (!row) {
@@ -846,9 +854,9 @@ export function AccountHoldingsDetailPanel({
           );
         }
         if (row.ticker === CASH_ROW_TICKER) return <span>-</span>;
-        // IS 고정자산은 가격 프록시(VGS) 티커로 표시하고 상세도 VGS 로 연결한다(자산 헬퍼와 동일).
-        if (row.ticker === "IS") {
-          return <TickerDetailLink ticker="ASX:VGS" displayTicker="ASX:VGS" className="assetsTickerLink" />;
+        // 고정 자산(IS) — 실제 상장 종목이 아니라 상세로 연결하지 않는다. 표기는 전 화면 공용.
+        if (isFixedAssetTicker(row.ticker)) {
+          return <span>{FIXED_ASSET_TICKER}</span>;
         }
         return (
           <TickerDetailLink
@@ -864,6 +872,7 @@ export function AccountHoldingsDetailPanel({
       headerName: "종목명",
       minWidth: 248,
       flex: 1.35,
+      cellClass: (params) => (isFixedAssetTicker(params.data?.ticker) ? FIXED_ASSET_CELL_CLASS : undefined),
       cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
         if (params.data?.id === "__adding__") {
           return (
@@ -910,6 +919,9 @@ export function AccountHoldingsDetailPanel({
           );
         }
 
+        if (isFixedAssetTicker(params.data?.ticker)) {
+          return <span>{FIXED_ASSET_NAME}</span>;
+        }
         // 종목명 표기 규칙은 전 화면 공통(`@/lib/name-highlight`).
         return renderStockNameCell(params.value, {
           badge: alertBadges[normalizeBadgeTicker(params.data?.ticker ?? "")] ?? "",
