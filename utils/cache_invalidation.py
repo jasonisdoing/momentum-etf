@@ -23,9 +23,12 @@ def invalidate_pool_caches(ticker_type: str | None = None) -> None:
             설정 묶음이라 풀만 뽑아낼 수 없어 통째로 지운다 — 항목이 몇 개뿐이라
             다시 계산해도 손해가 없고, 잘못된 값을 보여주는 쪽이 훨씬 비싸다.
     """
+    from utils.cache_utils import invalidate_frames_cache
     from utils.holdings_alarm_service import _invalidate_badges_cache
     from utils.rank_service import invalidate_rank_data_cache
 
+    # 가격 프레임 — 종목이 빠지거나 들어오면 다시 읽어야 한다(짧은 TTL 이지만 기다리지 않는다).
+    invalidate_frames_cache()
     invalidate_rank_data_cache(ticker_type)
     invalidate_strategy_caches()
     # 이동선 이탈 배지는 종목풀의 이평선으로 판정한다 — 풀 설정·종목이 바뀌면 다시 계산해야 한다.
@@ -40,6 +43,9 @@ def invalidate_strategy_caches() -> None:
     """
     from utils.momentum_service import _PICKS_CACHE
     from utils.new_high_backtest import _POSITIONS_CACHE
+    from utils.strategy_mix_service import _SHARES_CACHE
 
     _PICKS_CACHE.invalidate()
     _POSITIONS_CACHE.invalidate()
+    # 합성 슬리브 몫 — 슬리브 백테스트 곡선에서 나오므로 전략 설정·종목풀이 바뀌면 다시 계산해야 한다.
+    _SHARES_CACHE.invalidate()

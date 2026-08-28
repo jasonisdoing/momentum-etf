@@ -12,8 +12,10 @@ import pandas as pd
 from bson.binary import Binary
 from pymongo.errors import PyMongoError
 
+from config import CACHE_TTL_LIVE
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
+from utils.ttl_cache import TtlCache
 
 logger = get_app_logger()
 
@@ -360,8 +362,30 @@ def load_cached_frame_with_fallback(account_id: str, ticker: str) -> pd.DataFram
     return None
 
 
+# 가격 프레임 캐시 — **한 요청 안의 중복 조회**를 없애려고 둔다.
+# 합성 화면은 슬리브마다 판정과 백테스트를 돌리는데, 같은 종목풀을 보는 슬리브가 여럿이면
+# 같은 프레임을 그 수만큼 다시 읽었다(kor_stock 424종목을 4번, 24초). 역직렬화까지 매번
+# 다시 하므로 DB 왕복만의 문제가 아니다.
+# 종목 추가·삭제·이동은 `invalidate_pool_caches` 가 이 캐시도 지우므로 만료를 기다리지 않는다.
+# 항목 하나가 종목풀 전체 프레임(한국 개별주 424종목 = 38MB)일 수 있어 개수를 제한한다.
+# 실제로 붐비는 것은 풀별 전체 조회 몇 건과 소수 티커 조회들이라 이 정도면 충분히 덮는다.
+_FRAMES_CACHE = TtlCache(CACHE_TTL_LIVE, name="cached_frames", max_entries=24)
+
+
+def invalidate_frames_cache() -> None:
+    """가격 프레임 캐시를 비운다 (종목풀 내용·가격 캐시가 바뀌었을 때)."""
+    _FRAMES_CACHE.invalidate()
+
+
 def load_cached_frames_bulk(account_id: str, tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
-    """다수의 티커를 한 번의 질의로 가져와 역직렬화합니다."""
+    """다수의 티커를 한 번의 질의로 가져와 역직렬화합니다 (짧은 TTL 캐시)."""
+    key = _FRAMES_CACHE.make_key(
+        str(account_id or "").strip().lower(), sorted({(t or "").strip().upper() for t in tickers if (t or "").strip()})
+    )
+    return _FRAMES_CACHE.get_or_compute(key, lambda: _load_cached_frames_bulk_uncached(account_id, tickers))
+
+
+def _load_cached_frames_bulk_uncached(account_id: str, tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
     normalized = []
     for t in tickers:
         norm = (t or "").strip().upper()
@@ -1009,6 +1033,9 @@ def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
             f"저장된 캐시 행 수가 다릅니다 ({ticker_norm}): expected={expected_count}, actual={saved_count}"
         )
 
+    # 방금 저장한 가격이 곧바로 보이게 한다 — 읽기 캐시에 옛 프레임이 남으면 안 된다.
+    invalidate_frames_cache()
+
 
 def move_cached_frame(from_owner: str, to_owner: str, ticker: str) -> bool:
     """가격 캐시 문서를 다른 소유자 컬렉션으로 **그대로 옮긴다**.
@@ -1027,6 +1054,7 @@ def move_cached_frame(from_owner: str, to_owner: str, ticker: str) -> bool:
     doc.pop("_id", None)
     db[_resolve_collection_name(to_owner)].replace_one({"ticker": ticker_norm}, doc, upsert=True)
     source.delete_one({"ticker": ticker_norm})
+    invalidate_frames_cache()
     return True
 
 
@@ -1038,6 +1066,7 @@ def delete_cached_frame(account_id: str, ticker: str) -> None:
         collection.delete_one({"ticker": (ticker or "").strip().upper()})
     except Exception:
         return
+    invalidate_frames_cache()
 
 
 def prune_cache_to_tickers(account_id: str, keep_tickers: Iterable[str]) -> list[str]:
@@ -1068,6 +1097,7 @@ def prune_cache_to_tickers(account_id: str, keep_tickers: Iterable[str]) -> list
         ]
         if orphans:
             collection.delete_many({"ticker": {"$in": orphans}})
+            invalidate_frames_cache()
     except Exception as exc:
         logger.warning("[%s] 고아 캐시 정리 실패: %s", account_id, exc)
         return []
@@ -1078,6 +1108,7 @@ def drop_cache_collection(account_id: str) -> None:
     db = get_db_connection()
     if db is None:
         return
+    invalidate_frames_cache()
     collection_name = _resolve_collection_name(account_id)
     try:
         db[collection_name].drop()
