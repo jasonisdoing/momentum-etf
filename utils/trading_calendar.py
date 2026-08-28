@@ -55,8 +55,13 @@ def _build_market_open_info() -> dict[str, tuple[str, time]]:
 MARKET_OPEN_INFO = _build_market_open_info()
 
 
-def _is_market_day_completed(country_code: str, trading_day: pd.Timestamp) -> bool:
-    """해당 시장의 현지 마감 시간이 지나야 최신 거래일로 인정한다."""
+def is_market_day_completed(country_code: str, trading_day: pd.Timestamp) -> bool:
+    """그 시장의 `trading_day` 정규장이 끝났는가 (마감 + 오프셋 기준).
+
+    과거 날짜면 True, 미래면 False, 오늘이면 현지 마감 시각이 지났는지로 본다.
+    "종가가 확정됐는가" 를 묻는 곳이 모두 이 함수를 쓴다 — 주간 교체 판정(모멘텀)과
+    가격 배치가 같은 기준을 써야 '장 끝났는데 아직 어제 기준' 같은 어긋남이 안 생긴다.
+    """
     country_key = (country_code or "").strip().lower()
     schedule = (MARKET_SCHEDULES or {}).get(country_key)
     if not isinstance(schedule, dict):
@@ -81,6 +86,10 @@ def _is_market_day_completed(country_code: str, trading_day: pd.Timestamp) -> bo
     cutoff_minutes = (close_time.hour * 60) + close_time.minute + close_offset_minutes
     now_minutes = (now_local.hour * 60) + now_local.minute
     return now_minutes >= cutoff_minutes
+
+
+# 옛 이름 — data_loader 가 이 이름으로 가져다 쓴다.
+_is_market_day_completed = is_market_day_completed
 
 
 def _should_skip_today_range(country_code: str, target_end: pd.Timestamp) -> bool:
@@ -290,7 +299,7 @@ def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp
         if trading_days:
             normalized_days = sorted(pd.Timestamp(day).normalize() for day in trading_days)
             latest_trading_day = normalized_days[-1]
-            if _is_market_day_completed(country_code, latest_trading_day):
+            if is_market_day_completed(country_code, latest_trading_day):
                 return latest_trading_day
             if len(normalized_days) >= 2:
                 return normalized_days[-2]
