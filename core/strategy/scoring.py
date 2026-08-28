@@ -138,28 +138,29 @@ def compute_ma_disparity(close_series: pd.Series, ma_days: int) -> float | None:
     return float(score.iloc[-1])
 
 
-def rank_score(long_disparity_pct: Any, short_disparity_pct: Any) -> Any:
-    """**순위 점수** — 종목을 줄 세우는 단일 기준.
+def rank_score(long_disparity_pct: Any, short_disparity_pct: Any = None) -> Any:
+    """**순위 점수** — 종목을 줄 세우는 단일 기준. 정의는 **장기 이격률**이다.
 
     순위 화면(`/pools-rank`)의 정렬·추천(✅)과 모멘텀 전략(`/strategy-momentum`)의 선정이
-    이 함수 하나만 쓴다. 예전에는 두 곳이 각자 "장기 이격률" 을 점수로 삼아, 정의를 바꾸려면
-    양쪽을 따로 고쳐야 했고 한쪽만 고치면 두 화면의 순서가 조용히 갈렸다.
+    이 함수 하나만 쓴다. 예전에는 두 곳이 각자 계산해서, 정의를 바꾸려면 양쪽을 따로
+    고쳐야 했고 한쪽만 고치면 두 화면의 순서가 조용히 갈렸다.
 
-    현재 정의: **장기·단기 이격률의 평균**. 장기만 보면 장기 추세는 좋지만 지금 밀리는
-    종목이 위에 남고, 단기만 보면 반등 한 번에 순위가 뒤집힌다. 둘을 같은 무게로 본다.
+    **단기는 순위에 넣지 않는다.** 두 이평선의 역할이 다르기 때문이다 — 장기는 종목을
+    고르고(순위), 단기는 들고 있을지만 본다(이탈). 한때 둘의 평균을 점수로 썼는데,
+    단기 반등만으로 순위가 오르내려 장기 추세로 줄 세운다는 뜻이 흐려졌다.
+    단기 이격률은 `hold_eligible` 이 계속 본다 — 둘 중 하나라도 깨지면 이탈이다.
+
+    `short_disparity_pct` 는 호출부 시그니처를 유지하려고 남긴 자리다(점수에 쓰지 않는다).
 
     스칼라(종목 하나)와 Series(프레임 전체) 둘 다 받는다 — 호출부가 형태를 맞출 필요가 없다.
     값이 없으면 None/NaN 을 그대로 돌려준다(임의 값으로 채우지 않는다).
     """
-    if isinstance(long_disparity_pct, pd.Series) or isinstance(short_disparity_pct, pd.Series):
-        long_series = pd.to_numeric(long_disparity_pct, errors="coerce")
-        short_series = pd.to_numeric(short_disparity_pct, errors="coerce")
-        return (long_series + short_series) / 2.0
-    if long_disparity_pct is None or short_disparity_pct is None:
+    del short_disparity_pct  # 순위는 장기만 본다 (이탈 판정은 hold_eligible 이 따로 한다)
+    if isinstance(long_disparity_pct, pd.Series):
+        return pd.to_numeric(long_disparity_pct, errors="coerce")
+    if long_disparity_pct is None or pd.isna(long_disparity_pct):
         return None
-    if pd.isna(long_disparity_pct) or pd.isna(short_disparity_pct):
-        return None
-    return (float(long_disparity_pct) + float(short_disparity_pct)) / 2.0
+    return float(long_disparity_pct)
 
 
 def drawdown_from_high_pct(
@@ -192,9 +193,11 @@ def drawdown_from_high_pct(
 def hold_eligible(long_disparity_pct: Any, short_disparity_pct: Any) -> Any:
     """보유 가능 조건 — **장기 이격 > 0 이고 단기 이격 >= 0**.
 
-    장기 이평선은 종목 선택, 단기 이평선은 손절/익절을 담당한다. 장기 추세가 죽었거나
-    단기 추세가 꺾이면 보유하지 않는다. 순위 화면의 추천(✅)·모멘텀 선정·백테스트가
-    같은 규칙을 쓰도록 여기서만 정의한다.
+    장기 이평선은 종목 선택, 단기 이평선은 손절/익절을 담당한다. **둘 중 하나라도
+    이탈하면 이탈**이다 — 장기 추세가 죽었거나 단기 추세가 꺾이면 보유하지 않는다.
+    순위 화면의 추천(✅)·모멘텀 선정·백테스트가 같은 규칙을 쓰도록 여기서만 정의한다.
+
+    순위(`rank_score`)는 장기만 본다 — 이 함수와 역할이 다르다.
 
     스칼라와 Series 둘 다 받는다 — `rank_score` 와 같다. 종목풀 조건(제외 종목)은
     호출부에서 따로 건다.

@@ -715,8 +715,10 @@ def _apply_common_rank_scores(
     df.loc[composite_missing, "단기이격"] = None
 
     # 순위 점수 — 정렬과 추천(✅)이 쓰는 단일 기준. 모멘텀 전략과 **같은 함수**다.
-    # 표시용 「장기」(이격)·「단기」(단기이격)는 원천 값 그대로 두고, 점수만 따로 붙인다.
-    df["점수"] = rank_score(pd.to_numeric(df["이격"], errors="coerce"), pd.to_numeric(df["단기이격"], errors="coerce"))
+    # 정의는 장기 이격률이라 「장기」와 같은 값이고, 화면에는 컬럼으로 내보내지 않는다.
+    # 그래도 따로 두는 이유: 줄 세우는 기준을 정의 한 곳(rank_score)에만 두기 위해서다 —
+    # 정렬이 「이격」 컬럼을 직접 읽으면 정의를 바꿀 때 이 파일까지 고쳐야 한다.
+    df["점수"] = rank_score(pd.to_numeric(df["이격"], errors="coerce"))
     df.loc[composite_missing, "점수"] = None
 
     return df
