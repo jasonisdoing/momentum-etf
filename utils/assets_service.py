@@ -168,7 +168,7 @@ def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, Any]:
         )
 
     collection.update_one({"master_id": "GLOBAL"}, {"$set": {"accounts": accounts}}, upsert=True)
-    from utils.snapshot_service import update_today_snapshot_all_accounts
+    from utils.snapshot_service import refresh_today_snapshot_async
 
-    update_today_snapshot_all_accounts()
+    refresh_today_snapshot_async()
     return {"message": "자산 관리 저장 완료", "accounts": saved}

@@ -390,11 +390,11 @@ def delete_holding(account_id: str, ticker: str) -> dict[str, str]:
 
     save_portfolio_master(account_id, _assign_sort_order(new_holdings))
 
-    # 변경 사항을 스냅샷에 즉시 동기화
+    # 변경 사항을 통합 스냅샷에 반영 — 전 계좌 재계산이라 무거워서 백그라운드로 돌린다.
     try:
-        from utils.snapshot_service import update_today_snapshot_all_accounts
+        from utils.snapshot_service import refresh_today_snapshot_async
 
-        update_today_snapshot_all_accounts()
+        refresh_today_snapshot_async()
     except Exception as e:
         from utils.logger import get_app_logger
 
@@ -447,11 +447,11 @@ def update_holding(
 
     save_portfolio_master(account_id, _assign_sort_order(holdings))
 
-    # 변경 사항을 스냅샷에 즉시 동기화
+    # 변경 사항을 통합 스냅샷에 반영 — 전 계좌 재계산이라 무거워서 백그라운드로 돌린다.
     try:
-        from utils.snapshot_service import update_today_snapshot_all_accounts
+        from utils.snapshot_service import refresh_today_snapshot_async
 
-        update_today_snapshot_all_accounts()
+        refresh_today_snapshot_async()
     except Exception as e:
         from utils.logger import get_app_logger
 
@@ -518,11 +518,11 @@ def add_holding(
     holdings.append(new_holding)
     save_portfolio_master(account_id, _assign_sort_order(holdings))
 
-    # 변경 사항을 스냅샷에 즉시 동기화
+    # 변경 사항을 통합 스냅샷에 반영 — 전 계좌 재계산이라 무거워서 백그라운드로 돌린다.
     try:
-        from utils.snapshot_service import update_today_snapshot_all_accounts
+        from utils.snapshot_service import refresh_today_snapshot_async
 
-        update_today_snapshot_all_accounts()
+        refresh_today_snapshot_async()
     except Exception as e:
         from utils.logger import get_app_logger
 
@@ -584,9 +584,9 @@ def reorder_holdings(account_id: str, ordered_tickers: list[str]) -> dict[str, A
     )
 
     try:
-        from utils.snapshot_service import update_today_snapshot_all_accounts
+        from utils.snapshot_service import refresh_today_snapshot_async
 
-        update_today_snapshot_all_accounts()
+        refresh_today_snapshot_async()
     except Exception as e:
         from utils.logger import get_app_logger
 
@@ -596,101 +596,33 @@ def reorder_holdings(account_id: str, ordered_tickers: list[str]) -> dict[str, A
 
 
 def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
-    """계좌에 추가할 수 있는 유효한 티커인지 검증한다."""
+    """계좌에 추가할 수 있는 유효한 티커인지 검증한다.
+
+    해석은 `/asset-helper`·`/strategy-portfolio` 와 **같은 공용 함수**(`utils.ticker_resolver`)다.
+    예전에는 여기서 종목풀 10개를 하나씩 돌며 원천 조회를 해서 티커 하나에 19초가 걸렸다 —
+    한국 종목인데 미국·호주 풀 차례에 yfinance 로 찾다가 404 를 반복했다.
+
+    계좌가 여러 통화를 들면 같은 티커가 여러 시장에 있을 수 있다. 그 좁히기(현금 통화 기준)도
+    공용 함수가 한다 — `account_id` 를 넘기면 계좌 통화로 후보를 고른다.
+    """
     account_id = str(account_id or "").strip()
     ticker = str(ticker or "").strip().upper()
 
     if not account_id or not ticker:
         raise RuntimeError("계좌 ID와 종목코드가 필요합니다.")
 
-    # 시장 접두어(ASX:/US:/KOR:)로 시장을 명시할 수 있다(같은 티커가 여러 시장에 있을 때 구분용).
-    forced_country: str | None = None
-    if ticker.startswith("ASX:"):
-        forced_country, raw_ticker = "au", ticker[len("ASX:") :].strip().upper()
-    elif ticker.startswith("US:"):
-        forced_country, raw_ticker = "us", ticker[len("US:") :].strip().upper()
-    elif ticker.startswith("KOR:"):
-        forced_country, raw_ticker = "kor", ticker[len("KOR:") :].strip().upper()
-    else:
-        raw_ticker = ticker.strip().upper()
-    if not raw_ticker:
-        raise RuntimeError("유효한 티커를 입력하세요.")
+    from utils.ticker_resolver import resolve_ticker_meta
 
-    from utils.settings_loader import get_account_settings
-    from utils.stocks_service import validate_stock_candidate
-
-    # 1. 계좌 설정 로드 (DB account_settings 읽기)
     try:
-        settings = get_account_settings(account_id)
-        # account_settings["settings"]가 아닌 top-level에 있는 경우가 많음
-        inner_settings = settings.get("settings") or settings
-    except Exception as e:
-        raise RuntimeError(f"계좌 설정을 찾을 수 없습니다: {account_id} ({e})")
-
-    # 2. 전체 종목풀을 대상으로 종목 추가 가능 여부를 검사한다.
-    from utils.settings_loader import list_available_ticker_types
-
-    ticker_types = list_available_ticker_types()
-    if not ticker_types:
-        raise RuntimeError("사용 가능한 종목풀이 없습니다.")
-
-    # 3. 종목풀(stock_meta)에 이미 등록된 종목만 계좌에 담을 수 있다.
-    #    미등록 종목(status="new": fetch 는 되지만 stock_meta 부재)은 여기서 막고,
-    #    최초 등록 창구인 '종목 순위(pools-rank)' 로 안내한다. (pools-rank 는 이 함수를 거치지 않는다.)
-    last_error = None
-    saw_unregistered = False
-    # 시장(country_code)별 최초 active 후보. 같은 시장의 여러 종목풀 중복은 하나로 취급.
-    candidates_by_country: dict[str, dict[str, Any]] = {}
-
-    for tt in ticker_types:
-        try:
-            # StocksManager가 사용하는 동일한 함수 호출
-            candidate = validate_stock_candidate(tt, raw_ticker)
-        except Exception as e:
-            last_error = str(e)
-            continue
-        if candidate.get("status") == "active":
-            cc = str(candidate.get("country_code") or "").strip().lower()
-            candidates_by_country.setdefault(cc, candidate)
-        else:
-            saw_unregistered = True
-
-    if not candidates_by_country:
-        if saw_unregistered:
-            raise RuntimeError(
-                f"종목풀에 등록되지 않은 종목입니다: {raw_ticker}. "
-                "'종목 순위' 화면에서 먼저 종목을 추가한 뒤 계좌에 담아주세요."
-            )
-        raise RuntimeError(last_error or f"등록되지 않은 종목입니다: {raw_ticker}")
-
-    # 시장 결정: 접두어 지정 > 단일 시장 > 계좌 현금 통화로 후보 필터(A).
-    if forced_country is not None:
-        if forced_country not in candidates_by_country:
-            raise RuntimeError(f"'{raw_ticker}' 는 지정한 시장({forced_country})에 등록돼 있지 않습니다.")
-        validated_res = candidates_by_country[forced_country]
-    elif len(candidates_by_country) == 1:
-        validated_res = next(iter(candidates_by_country.values()))
-    else:
-        # 같은 티커가 여러 시장에 존재 — 계좌가 보유하는 현금 통화로 후보를 좁힌다.
-        from utils.cash_model import currency_for_country, resolve_cash_currencies
-
-        account_currencies = set(resolve_cash_currencies(inner_settings))
-        matched = {
-            cc: cand for cc, cand in candidates_by_country.items() if currency_for_country(cc) in account_currencies
-        }
-        if len(matched) == 1:
-            validated_res = next(iter(matched.values()))
-        else:
-            markets = " / ".join(sorted(f"{currency_for_country(cc)}({cc})" for cc in candidates_by_country))
-            raise RuntimeError(
-                f"'{raw_ticker}' 는 여러 시장에 등록돼 있습니다: {markets}. "
-                f"'US:{raw_ticker}' 또는 'ASX:{raw_ticker}' 처럼 시장을 지정해 주세요."
-            )
+        resolved = resolve_ticker_meta(ticker, account_id=account_id)
+    except RuntimeError as exc:
+        # 종목풀에 없는 티커 — 최초 등록 창구(`/pools-rank`)로 안내한다.
+        raise RuntimeError(f"{exc} '종목 순위' 화면에서 먼저 종목을 추가한 뒤 계좌에 담아주세요.") from exc
 
     return {
-        "ticker": validated_res["ticker"],
-        "name": validated_res["name"],
-        "bucket_id": validated_res.get("bucket_id") or 1,
-        "country_code": str(validated_res.get("country_code") or "").strip().lower(),
+        "ticker": str(resolved["ticker"]),
+        "name": str(resolved["name"]),
+        "bucket_id": int(resolved.get("bucket") or 1),
+        "country_code": str(resolved.get("country_code") or "").strip().lower(),
         "status": "success",
     }
