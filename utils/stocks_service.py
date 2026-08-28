@@ -527,6 +527,9 @@ def move_active_stock(from_pool: str, to_pool: str, ticker: str) -> dict[str, An
             f"'{_pool_label(target)}' 에 {ticker_norm} 가 이미 있습니다 — 한 티커는 한 종목풀에만 둡니다. "
             "대상 종목풀에서 먼저 지운 뒤 옮겨주세요."
         )
+    # 대상 풀에 **삭제 상태로** 남아 있던 문서 — add_stock 이 이걸 되살린다. 이동이 실패하면
+    # 되살아난 문서를 원래대로 돌려놔야 한다(안 그러면 출발·대상 양쪽에 종목이 남는다).
+    target_before = db.stock_meta.find_one({"ticker_type": target, "ticker": ticker_norm})
 
     # 이름·상장일·마켓·업종·메모는 종목풀이 바뀐다고 달라지지 않는다 — 옛 문서 값을 그대로
     # 가져간다. 원천에서 다시 받으면 종목당 9초가 더 든다.
@@ -551,9 +554,21 @@ def move_active_stock(from_pool: str, to_pool: str, ticker: str) -> dict[str, An
             raise RuntimeError("대상 종목풀에 담지 못했습니다.")
         move_cached_frame(source, target, ticker_norm)
         for meta_coll in ("stock_cache_meta", "previous_stock_cache_meta"):
+            # 대상 풀에 남아 있던 옛 계산값은 먼저 지운다 — (ticker_type, ticker) 유일 인덱스가
+            # 걸려 있어 그대로 두면 이동이 중복 키로 실패한다. 옮겨오는 쪽이 실제 종목의 값이다.
+            db[meta_coll].delete_many({"ticker_type": target, "ticker": ticker_norm})
             db[meta_coll].update_many({"ticker_type": source, "ticker": ticker_norm}, {"$set": {"ticker_type": target}})
     except Exception as exc:
         # 새 풀에 담지 못했으면 옛 풀로 되돌린다 — 이미 뺀 뒤라 되돌리지 않으면 종목이 사라진다.
+        # 대상 풀 문서도 이동 전 상태로 돌린다. add_stock 이 성공한 뒤 그 다음 단계에서
+        # 실패하면 종목이 출발·대상 양쪽에 활성으로 남는다(실제로 그렇게 됐다).
+        try:
+            if target_before is None:
+                hard_remove_stock(target, ticker_norm)
+            else:
+                db.stock_meta.replace_one({"_id": target_before["_id"]}, target_before, upsert=True)
+        except Exception as revert_error:
+            get_app_logger().error("[이동] %s 대상 풀 되돌리기 실패: %s", ticker_norm, revert_error)
         try:
             restored = add_stock(source, ticker_norm, name=carried_name, **carried)
         except Exception as restore_error:
