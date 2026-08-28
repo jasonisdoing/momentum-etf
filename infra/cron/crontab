@@ -40,6 +40,7 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 20 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py kor_market_stocks python scripts/update_kor_market_stocks.py >> logs/cron/kor_market_stocks.log 2>&1
 # 한국 배당주 지표 — 위 배치가 적재한 KOSPI200 명단을 유니버스로 읽으므로 반드시 그 뒤에 돈다.
 30 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py kor_dividend_stocks python scripts/update_kor_dividend_stocks.py >> logs/cron/kor_dividend_stocks.log 2>&1
+40 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py us_market_etfs python scripts/update_us_market_etfs.py >> logs/cron/us_market_etfs.log 2>&1
 # 시장 폭(ADR) — 한국 마감(15:30) 뒤 종가 확정 시각. 코스피 200 / 코스닥 150 의 일별 상승·하락 종목수를 적립한다.
 30 16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_breadth python scripts/collect_market_breadth.py >> logs/cron/market_breadth.log 2>&1
 # 07:00 은 미국 마감(KST 새벽 05~06시) 뒤. 금요일 미국 장은 토요일 새벽에 끝나므로 화~토(2-6)에 돈다.

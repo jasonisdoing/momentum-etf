@@ -13,6 +13,13 @@ def get_market_data(_: None = Depends(require_internal_token)) -> dict[str, obje
     return load_market_data()
 
 
+@router.get("/us-etf")
+def get_us_etf_market_data(_: None = Depends(require_internal_token)) -> dict[str, object]:
+    from utils.us_etf_market_service import load_us_etf_market_data
+
+    return load_us_etf_market_data()
+
+
 @router.get("/fx")
 def get_fx_data(_: None = Depends(require_internal_token)) -> dict[str, object]:
     from services.price_service import get_exchange_rates
