@@ -526,8 +526,9 @@ def load_real_holdings_table(
         # We append a row to df_holdings
         pseudo_row = {
             "ticker": "IS",
-            # 표시명은 가격 프록시(VGS)의 정식 명칭으로 통일한다 — 내부 티커·고정자산 역할은 IS 유지.
-            "name": "Vanguard MSCI Index International Shares ETF",
+            # 표시명은 이 항목의 이름 그대로다. 예전에는 가격 프록시(VGS)의 정식 명칭을 썼는데,
+            # 실제 VGS 를 따로 사서 등록하면 같은 이름이 두 줄이 되어 구분이 안 됐다.
+            "name": "International Shares",
             "quantity": is_quantity,
             "average_buy_price": is_avg_price,
             "currency": "AUD",

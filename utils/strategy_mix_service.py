@@ -321,11 +321,17 @@ def _load_account_state(account_id: str) -> dict[str, Any]:
         fixed_native = float(master.get("intl_shares_value") or 0)
     except (TypeError, ValueError):
         fixed_native = 0.0
+    # 손익도 함께 저장돼 있다 — 원금 = 평가액 − 손익 (자산 관리 화면과 같은 규칙).
+    try:
+        fixed_change = float(master.get("intl_shares_change") or 0)
+    except (TypeError, ValueError):
+        fixed_change = 0.0
     return {
         "account_id": account_id,
         "holdings": holdings,
         "cash_balance": cash,
         "fixed_asset_native": fixed_native,
+        "fixed_asset_change_native": fixed_change,
     }
 
 
@@ -1223,6 +1229,13 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
             row["held_quantity"] = None
             row["target_quantity"] = None
             row["trade_quantity"] = None
+            # 수익률 — 평단이 없는 항목이라 평가액과 손익으로 낸다(원금 = 평가액 − 손익).
+            principal = float(account.get("fixed_asset_native") or 0) - float(
+                account.get("fixed_asset_change_native") or 0
+            )
+            row["return_pct"] = (
+                round(float(account["fixed_asset_change_native"]) / principal * 100.0, 2) if principal > 0 else None
+            )
 
     # 비중 합계·슬리브 현금 — 고정 자산 축소가 끝난 뒤의 값이라야 실제 계좌와 맞는다.
     stock_pct = sum(row["weight_pct"] for row in holdings)

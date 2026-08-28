@@ -13,6 +13,7 @@ import { useAddingTickerRow } from "../components/useAddingTickerRow";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { AssetHelperBacktestResult, type LabResult } from "../components/AssetHelperBacktestResult";
 import { BUCKET_THEME } from "@/lib/bucket-theme";
+import { FIXED_ASSET_CELL_CLASS, FIXED_ASSET_NAME, FIXED_ASSET_TICKER } from "@/lib/fixed-asset";
 import { renderStockNameCell } from "@/lib/name-highlight";
 import { reorderHoldings } from "@/lib/holdings-store";
 import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
@@ -37,13 +38,10 @@ import {
 // 현금 행은 편집 가능하며, 종목합 + 현금 = 100% 여야 유효하다(백엔드는 종목만 저장, 현금=100-종목합 파생).
 const CASH_TICKER = "__CASH__";
 // IS(International Shares) — /assets 에서 수동 입력하는 호주 고정자산.
-// 내부 티커는 IS 를 유지하되, 화면·백테스트에서는 VGS(가격 프록시)의 정식 명칭으로 보여준다.
-// 비중은 편집 불가(실제 평가액 기반 자동 계산)이고, 백테스트는 VGS 가격 시계열을 쓴다.
-const IS_TICKER = "IS";
-const IS_DISPLAY_NAME = "Vanguard MSCI Index International Shares ETF";
-// 화면 표기용 티커. 예전에는 가격 프록시인 `ASX:VGS` 로 보여줬는데, 실제 VGS 를 따로
-// 매수해 등록하면 같은 티커가 두 줄이 되어 구분이 안 됐다. 특수 티커 그대로 보여준다.
-const IS_DISPLAY_TICKER = "ASX:IS";
+// 티커·이름 표기는 전 화면 공용(`@/lib/fixed-asset`)이다. 비중은 편집 불가(실제 평가액
+// 기반 자동 계산)이고, 백테스트는 VGS 가격 시계열을 프록시로 쓴다.
+const IS_TICKER = FIXED_ASSET_TICKER;
+const IS_DISPLAY_NAME = FIXED_ASSET_NAME;
 
 // 저장된 종목들의 고정비중 합의 나머지를 현금(%)으로 계산한다(로드 시 현금 초기화용).
 function cashFromTickers(rows: Array<{ ticker: string; name?: string; fixed_weight_pct?: number | null }>): number {
@@ -810,6 +808,8 @@ export function AssetHelperClient() {
         minWidth: 110,
         width: 110,
         pinned: "left",
+        // 고정 자산 행은 티커·종목명 칸을 배경색으로 구분한다(매매 대상이 아니다).
+        cellClass: (params) => (params.data?.is_fixed_asset ? FIXED_ASSET_CELL_CLASS : undefined),
         cellRenderer: (params: { data?: GridRow; value?: string }) => {
           const row = params.data;
           if (!row) return "-";
@@ -828,10 +828,9 @@ export function AssetHelperClient() {
             );
           }
           {
-            // IS 고정자산은 상장 종목이 아니라 상세 화면이 없다 — 내부 티커(IS)를 넘겨
-            // TickerDetailLink 의 비활성 경로를 태우고, 표기만 ASX:IS 로 한다(링크 없음).
+            // 고정 자산(IS)은 상장 종목이 아니라 상세 화면이 없다 — 링크 없이 표기만 한다.
             if (row.is_fixed_asset) {
-              return <TickerDetailLink ticker={IS_TICKER} displayTicker={IS_DISPLAY_TICKER} />;
+              return <span>{FIXED_ASSET_TICKER}</span>;
             }
             const dt = displayTickerFor(row.ticker, row.country_code);
             return <TickerDetailLink ticker={dt} displayTicker={dt} />;
@@ -843,6 +842,7 @@ export function AssetHelperClient() {
         headerName: "종목명",
         minWidth: 220,
         flex: 1,
+        cellClass: (params) => (params.data?.is_fixed_asset ? FIXED_ASSET_CELL_CLASS : undefined),
         cellRenderer: (params: { data?: GridRow; value?: string }) => {
           const row = params.data;
           if (!row) return null;
@@ -862,6 +862,9 @@ export function AssetHelperClient() {
                 </button>
               </div>
             );
+          }
+          if (row.is_fixed_asset) {
+            return <span>{FIXED_ASSET_NAME}</span>;
           }
           return renderStockNameCell(params.value, {
             badge: alertBadges[normalizeBadgeTicker(row.ticker)] ?? "",
