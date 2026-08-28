@@ -765,7 +765,10 @@ def _attach_account_targets(
         # 실제 수익률 — 계좌 매입 평단 대비. 전략수익률(이론 편입가 대비)과 별개 컬럼이고,
         # 종목당 하나뿐이라 슬리브(A/B)로 나누지 않는다. 아직 안 산 종목은 평단이 없어 빈다.
         # 계산은 /assets 계좌 보유 표와 **같은 공용 함수**(utils.portfolio_io).
-        actual = return_pct_from_avg_price(row.get("price"), (held or {}).get("average_buy_price"))
+        # 평단도 함께 내려보낸다 — 화면이 현재가를 실시간으로 덮어쓰므로 그때 같은 평단으로
+        # 다시 계산해야 한다. 안 그러면 현재가는 장중인데 수익률만 어제 종가 기준으로 남는다.
+        row["average_buy_price"] = (held or {}).get("average_buy_price")
+        actual = return_pct_from_avg_price(row.get("price"), row["average_buy_price"])
         row["return_pct"] = None if actual is None else round(actual, 2)
         row["current_weight_pct"] = (
             round(float(row["held_value"]) / total_assets * 100.0, 2)
@@ -812,6 +815,7 @@ def _attach_account_targets(
                 "is_sell_all": True,
                 "held_quantity": item["quantity"],
                 "held_value": value,
+                "average_buy_price": item.get("average_buy_price"),
                 "return_pct": (
                     None
                     if (actual := return_pct_from_avg_price(item.get("price"), item.get("average_buy_price"))) is None

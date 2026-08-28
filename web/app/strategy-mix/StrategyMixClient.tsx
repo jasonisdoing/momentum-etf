@@ -188,6 +188,8 @@ type Holding = {
   target_amount?: number | null;
   target_quantity?: number | null;
   held_quantity?: number | null;
+  /** 계좌 매입 평단 — 현재가를 실시간으로 덮어쓸 때 수익률을 다시 계산하는 데 쓴다. */
+  average_buy_price?: number | null;
   /** 실제 수익률 — 계좌 매입 평단 대비. 전략수익률(이론값)과 별개이고 종목당 하나다. */
   return_pct?: number | null;
   held_value?: number | null;
@@ -651,10 +653,18 @@ export function StrategyMixClient() {
         .map((holding) => {
           // 표시용 가격만 실시간으로 덮어쓴다 — 목표·매매수량은 판정 결과 그대로.
           const quote = quotes[holding.ticker];
+          const price = quote ? quote.price : holding.price;
+          // 수익률은 **화면에 보이는 현재가**로 다시 낸다. 백엔드 값은 판정 시점(전날 종가)
+          // 기준이라, 가격만 실시간으로 바꾸면 한 행에서 현재가와 수익률의 기준이 갈린다
+          // (장중 +7.77% 인 종목이 수익률 칸에서는 -6.19% 로 보였다).
+          const avg = holding.average_buy_price;
+          const returnPct =
+            price != null && price > 0 && avg != null && avg > 0 ? (price / avg - 1) * 100 : holding.return_pct ?? null;
           return {
             ...holding,
-            price: quote ? quote.price : holding.price,
+            price,
             change_pct: quote ? quote.change_pct : holding.change_pct,
+            return_pct: returnPct,
             amount: holding.target_amount ?? null,
             shares: holding.target_quantity ?? null,
           };
