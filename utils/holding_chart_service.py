@@ -51,6 +51,22 @@ def holding_charts(
     pool_currency = str((get_ticker_type_settings(pool) or {}).get("currency") or "").strip()
     avg_buy_by = average_buy_price_by_ticker(wanted, currency=pool_currency or None)
 
+    # 한 요청의 차트들이 **같은 날짜 축**을 쓰도록, 이 풀의 거래일을 먼저 모은다.
+    # 이게 없으면 상장한 지 얼마 안 된 종목이 캔들 열몇 개로 가로 폭을 다 채워, 다른 종목과
+    # 같은 기간을 보는 것처럼 보인다(실제로는 2주치인데 6개월치처럼 보인다).
+    all_dates: set[pd.Timestamp] = set()
+    for frame in frames.values():
+        if frame is None or frame.empty:
+            continue
+        index = frame.index if cutoff is None else frame.index[frame.index <= cutoff]
+        all_dates.update(index)
+    window_dates: list[pd.Timestamp] = []
+    if all_dates:
+        ordered_dates = sorted(all_dates)
+        window_start = ordered_dates[-1] - pd.DateOffset(months=months)
+        window_dates = [day for day in ordered_dates if day >= window_start]
+    date_position = {day: position for position, day in enumerate(window_dates)}
+
     charts: list[dict[str, Any]] = []
     for ticker in wanted:
         frame = frames.get(ticker)
@@ -65,8 +81,12 @@ def holding_charts(
         # 화면이 보는 구간만 잘라 보내되, 이평선은 잘린 앞부분까지 써서 계산한다.
         ma_by_days = {days: close.rolling(days, min_periods=days).mean() for days in ma_days_list}
         span = frame.index[frame.index >= frame.index[-1] - pd.DateOffset(months=months)]
+        if window_dates:
+            # 공용 창 밖(이 종목만 더 과거를 들고 있는 경우)은 잘라 축을 맞춘다.
+            span = span[span >= window_dates[0]]
 
         candles: list[dict[str, Any]] = []
+        candle_dates: list[pd.Timestamp] = []
         points_by_days: dict[int, list[dict[str, Any]]] = {days: [] for days in ma_days_list}
         for day in span:
             values = [cols[key].get(day) for key in _CANDLE_KEYS]
@@ -74,6 +94,7 @@ def holding_charts(
                 continue
             date = str(day.date())
             candles.append(dict(zip(("open", "high", "low", "close"), (float(v) for v in values)), time=date))
+            candle_dates.append(day)
             for days, ma in ma_by_days.items():
                 if pd.notna(ma.get(day)):
                     points_by_days[days].append({"time": date, "value": float(ma[day])})
@@ -89,6 +110,12 @@ def holding_charts(
                 "avg_buy_price": avg_buy_by.get(ticker),
                 # 통화 — 화면이 가격에 기호를 붙인다(원 · $ · A$). 풀마다 다르므로 함께 보낸다.
                 "currency": pool_currency,
+                # 공용 날짜 축 — 화면이 보이는 구간을 이 값으로 잡는다.
+                #   window_bars  이 창의 전체 거래일 수
+                #   leading_bars 창 시작부터 이 종목의 첫 캔들까지 비어 있는 칸 수
+                # 신규 상장 종목은 leading_bars 가 커서, 캔들이 오른쪽 일부만 채우고 왼쪽은 빈다.
+                "window_bars": len(window_dates),
+                "leading_bars": date_position.get(candle_dates[0], 0) if window_dates and candle_dates else 0,
             }
         )
     return charts

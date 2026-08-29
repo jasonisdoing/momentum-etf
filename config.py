@@ -347,4 +347,4 @@ TUNING_WORKERS: int | None = 10
 # 이평선은 잘린 앞부분까지 써서 계산하므로, 이 값을 줄여도 MA240 같은 장기선은 그대로
 # 그려진다. 다만 창이 짧으면 장기선이 거의 직선으로 보여 판정선 구실을 못 한다 —
 # 장기 이평선이 240일인 풀(kor_div_etf)은 12개월 이상이 읽을 만하다.
-HOLDING_CHART_MONTHS = 12
+HOLDING_CHART_MONTHS = 13
