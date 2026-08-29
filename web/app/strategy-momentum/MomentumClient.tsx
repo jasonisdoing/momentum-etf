@@ -1209,6 +1209,7 @@ export function MomentumClient() {
                         <HoldingChart
                           key={item.ticker}
                           chart={item}
+                          strategyLabel="모멘텀"
                           entryDate={row?.entry_date}
                           returnPct={row?.entry_return_pct}
                           days={row?.streak_weeks}

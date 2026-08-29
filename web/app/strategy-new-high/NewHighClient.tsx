@@ -1246,6 +1246,7 @@ export function NewHighClient() {
                           <HoldingChart
                             key={item.ticker}
                             chart={item}
+                            strategyLabel="신고가"
                             entryDate={row?.entry_date}
                             entryPrice={row?.entry_price}
                             returnPct={row?.return_pct}
