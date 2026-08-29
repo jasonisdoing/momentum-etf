@@ -71,7 +71,6 @@ Cloudflare 프록시(주황 구름)는 쓰지 않는다 — HTTP-01 검증이 �
 | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` | 알림 |
 | `DART_API_KEY` | OpenDART 재무 조회 |
 | `KRX_DATA_ID`, `KRX_DATA_PW` | KRX 로그인 헬퍼(보관용, 자동 수집은 약관 금지) |
-| `TUNING_WORKERS` | 튜닝 병렬 수 덮어쓰기(기본 코어 수) |
 | MongoDB 접속 | `utils/db_manager.py` 참조 |
 
 ## 겪은 문제

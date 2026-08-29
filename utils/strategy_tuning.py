@@ -16,14 +16,15 @@ from typing import Any
 
 import pandas as pd
 
+from config import TUNING_WORKERS
+
 
 def tuning_workers(task_count: int) -> int:
-    """병렬 프로세스 수 — 코어 수 전부(최대 32), 작업 수보다 크지 않게. TUNING_WORKERS 로 덮어쓸 수 있다."""
-    override = os.environ.get("TUNING_WORKERS")
-    if override and override.isdigit():
-        workers = int(override)
-    else:
-        workers = min(32, max(1, os.cpu_count() or 1))
+    """병렬 프로세스 수 — `config.TUNING_WORKERS`(None 이면 코어 수), 작업 수보다 크지 않게.
+
+    왜 코어 수 전부가 기본이 아닌지는 config 쪽 주석에 적어 두었다.
+    """
+    workers = TUNING_WORKERS if TUNING_WORKERS is not None else (os.cpu_count() or 1)
     return max(1, min(workers, task_count))
 
 
