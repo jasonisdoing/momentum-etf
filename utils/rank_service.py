@@ -5,7 +5,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import CACHE_TTL_COMPUTE
+from config import CACHE_TTL_COMPUTE, TOP_N_HOLD
 from services.stock_cache_service import get_stock_cache_meta_map
 from utils.data_loader import get_trading_days
 from utils.ma_options import ma_options_payload
@@ -310,7 +310,8 @@ def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "country_code": str(cfg.get("country_code") or ""),
             # 풀 성격(stock/etf) — 미설정이면 빈 값(화면이 행 값으로 추정).
             "pool_kind": str(cfg.get("pool_kind") or ""),
-            "top_n_hold": int(cfg["settings"].get("TOP_N_HOLD", 0)),
+            # 시스템 공통 보유 종목 수(config) — 풀별 설정은 폐기했다.
+            "top_n_hold": TOP_N_HOLD,
             # 업종 상한 — 화면 상단 셀렉트의 기본값(저장값). None = 제한 없음.
             "max_per_industry": cfg["settings"].get("MAX_PER_INDUSTRY"),
             "currency": str(cfg["settings"].get("currency") or ""),

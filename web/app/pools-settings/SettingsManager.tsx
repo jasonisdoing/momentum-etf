@@ -15,7 +15,6 @@ import { AppModal } from "../components/AppModal";
 
 /** 숫자 셀렉트/입력으로 편집하는 키. */
 const NUMERIC_KEYS = [
-  "TOP_N_HOLD",
   "MAX_PER_INDUSTRY",
   "SHORT_MA_DAYS",
   "LONG_MA_DAYS",
@@ -31,7 +30,6 @@ type NumericKey = (typeof NUMERIC_KEYS)[number];
 type EditableKey = (typeof EDITABLE_KEYS)[number];
 
 const KEY_LABELS: Record<EditableKey, string> = {
-  TOP_N_HOLD: "보유 종목수",
   MAX_PER_INDUSTRY: "업종 상한",
   SHORT_MA_DAYS: "단기 이평선",
   LONG_MA_DAYS: "장기 이평선",
@@ -111,7 +109,6 @@ const EMPTY_DRAFT: PoolDraft = {
   country_code: "kor",
   currency: "KRW",
   pool_kind: "etf",
-  TOP_N_HOLD: "10",
   MAX_PER_INDUSTRY: "",
   SHORT_MA_DAYS: "10",
   LONG_MA_DAYS: "20",
@@ -166,7 +163,6 @@ function toDraft(pool: PoolEntry): PoolDraft {
     country_code: pool.country_code ?? "kor",
     currency: pool.currency ?? "KRW",
     pool_kind: pool.pool_kind ?? "",
-    TOP_N_HOLD: String(pool.settings.TOP_N_HOLD?.value ?? ""),
     // 업종 상한 — null 이 '없음'(제한 없음)이라 빈 문자열로 다룬다.
     MAX_PER_INDUSTRY: pool.settings.MAX_PER_INDUSTRY?.value == null ? "" : String(pool.settings.MAX_PER_INDUSTRY.value),
     SHORT_MA_DAYS: String(pool.settings.SHORT_MA_DAYS?.value ?? ""),
@@ -191,7 +187,6 @@ function draftToValues(draft: PoolDraft) {
     currency: draft.currency,
     // 빈 값(미설정)은 보내지 않아 기존 상태를 유지한다 — 토글은 항상 stock/etf 를 보낸다.
     ...(draft.pool_kind ? { pool_kind: draft.pool_kind } : {}),
-    TOP_N_HOLD: Number(draft.TOP_N_HOLD),
     MAX_PER_INDUSTRY: draft.MAX_PER_INDUSTRY === "" ? null : Number(draft.MAX_PER_INDUSTRY),
     SHORT_MA_DAYS: Number(draft.SHORT_MA_DAYS),
     LONG_MA_DAYS: Number(draft.LONG_MA_DAYS),
@@ -548,7 +543,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
    * 이 컬럼을 건너뛴다 — 저장은 valueSetter 가 이미 했다.)
    */
   const numberCol = (
-    field: "order" | "TOP_N_HOLD",
+    field: "order",
     headerName: string,
     width: number,
     headerTooltip?: string,
@@ -583,7 +578,6 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     selectCol("pool_kind", "구분", 80, () => ["stock", "etf"], {
       valueFormatter: (params) => ({ stock: "개별주", etf: "ETF" })[String(params.value)] ?? "미설정",
     }),
-    numberCol("TOP_N_HOLD", "보유", 64, "전략이 동시에 들고 갈 종목 수(TOP_N). 담긴 종목 수가 아닙니다."),
     {
       // 그 풀에 담긴 종목 수 — 설정이 아니라 현황이라 편집할 수 없다.
       colId: "stock_count",
@@ -767,18 +761,6 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
             <option value="etf">ETF</option>
           </select>,
           { minWidth: 158, labelWidth: 44 },
-        )}
-        {renderField(
-          "보유 종목수",
-          <input
-            type="number"
-            min={1}
-            max={100}
-            style={{ ...inputStyle, width: 76, textAlign: "right" }}
-            value={draft.TOP_N_HOLD}
-            onChange={(event) => onChange("TOP_N_HOLD", event.target.value)}
-          />,
-          { minWidth: 164, labelWidth: 82 },
         )}
         {renderField(
           "단기",
