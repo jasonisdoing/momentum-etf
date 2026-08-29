@@ -223,7 +223,7 @@ STOP_LOSS_PCT_OPTIONS: tuple[float, ...] = (-7.0, -10.0)
 MIN_VALUE_MULT_OPTIONS: tuple[float | None, ...] = (5.0, 2.0, 1.0, None)
 
 # 편도 슬리피지(%) — 0.05 ~ 0.50, 0.05 단위. 종목풀 설정에서 고른다.
-SLIPPAGE_PCT_OPTIONS: tuple[float, ...] = (0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)
+SLIPPAGE_PCT_OPTIONS: tuple[float, ...] = (0.2, 0.3, 0.4, 0.5, 1.0)
 
 # 종목풀 성격 — 'stock'(개별주) 또는 'etf'. 업종 개념이 있는 풀인지 화면들이 이 값으로 본다.
 POOL_KIND_OPTIONS: tuple[str, ...] = ("stock", "etf")
