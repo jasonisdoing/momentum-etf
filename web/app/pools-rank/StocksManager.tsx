@@ -5,7 +5,6 @@ import type { ColDef, RowClassParams } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
-import { industryCapLabel, withCurrentIndustryCap } from "@/lib/industry-cap";
 import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
@@ -46,7 +45,6 @@ type RankTickerType = {
   pool_kind?: string;
   top_n_hold?: number;
   /** 업종 상한 — 종목풀 저장값. null/미설정 = 제한 없음. */
-  max_per_industry?: number | null;
   currency?: string;
   include?: string[];
 };
@@ -131,8 +129,6 @@ type RankResponse = {
   short_ma_options?: number[];
   long_ma_options?: number[];
   /** 종목 수·업종 상한 선택지 — 백엔드 `config` 가 단일 소스(-1 = 제한 없음). */
-  top_n_options?: number[];
-  max_per_industry_options?: number[];
   as_of_date?: string | null;
   monthly_return_labels?: string[];
   rows?: RankRow[];
@@ -183,9 +179,6 @@ type RankToolbarCache = {
   ticker_type: string;
   ma_rule: RankMaRule | null;
   ma_options: Partial<MaOptionsPayload>;
-  /** 종목 수·업종 상한 선택지 — 백엔드 config 가 단일 소스. */
-  top_n_options: number[];
-  max_per_industry_options: number[];
 };
 
 type RankHeaderSummary = {
@@ -356,18 +349,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     rankToolbarCache?.ticker_type ?? DEFAULT_TICKER_TYPE,
   );
   const [maRule, setMaRule] = useState<RankMaRule | null>(rankToolbarCache?.ma_rule ?? null);
-  // 종목 수·업종 상한 — 화면에서 바꿔 보는 값(저장하지 않는다). null = 아직 종목풀 저장값 그대로.
-  // 업종 상한의 `-1` 이 '제한 없음' 이다 — null(미지정)과 구분해야 저장값으로 되돌아가지 않는다.
-  const [topN, setTopN] = useState<number | null>(null);
-  const [maxPerIndustry, setMaxPerIndustry] = useState<number | null>(null);
 
   // 백엔드가 내려주는 선택지를 쓴다 — 화면이 복사본을 들고 있으면 값이 추가될 때 여기만 옛 목록이 남는다.
   const [maOptions, setMaOptions] = useState<Partial<MaOptionsPayload>>(rankToolbarCache?.ma_options ?? {});
-  // 종목 수·업종 상한 선택지 — 화면에 목록을 복사해 두지 않고 백엔드에서 받는다.
-  const [topNChoices, setTopNChoices] = useState<number[]>(rankToolbarCache?.top_n_options ?? []);
-  const [industryCapChoices, setIndustryCapChoices] = useState<number[]>(
-    rankToolbarCache?.max_per_industry_options ?? [],
-  );
   const [metricMode, setMetricMode] = useState<MetricMode>("basic");
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
@@ -413,10 +397,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setMaRule(payload.ma_rules?.[0] ?? null);
     const nextMaOptions = { short_ma_options: payload.short_ma_options, long_ma_options: payload.long_ma_options };
     setMaOptions(nextMaOptions);
-    const nextTopNOptions = payload.top_n_options ?? [];
-    const nextCapOptions = payload.max_per_industry_options ?? [];
-    setTopNChoices(nextTopNOptions);
-    setIndustryCapChoices(nextCapOptions);
     setSelectedAsOfDate(toDateInputValue(payload.as_of_date));
     setMonthlyReturnLabels(payload.monthly_return_labels ?? []);
     rankToolbarCache = {
@@ -424,8 +404,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ticker_type: nextAccountId,
       ma_rule: payload.ma_rules?.[0] ?? null,
       ma_options: nextMaOptions,
-      top_n_options: nextTopNOptions,
-      max_per_industry_options: nextCapOptions,
     };
     setAddingRow(null);
     addingTickerDraftRef.current = "";
@@ -454,18 +432,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setMaRule(payload.ma_rules?.[0] ?? null);
     const nextMaOptions = { short_ma_options: payload.short_ma_options, long_ma_options: payload.long_ma_options };
     setMaOptions(nextMaOptions);
-    const nextTopNOptions = payload.top_n_options ?? [];
-    const nextCapOptions = payload.max_per_industry_options ?? [];
-    setTopNChoices(nextTopNOptions);
-    setIndustryCapChoices(nextCapOptions);
-
     rankToolbarCache = {
       ticker_types: nextTickerTypes,
       ticker_type: nextAccountId,
       ma_rule: payload.ma_rules?.[0] ?? null,
       ma_options: nextMaOptions,
-      top_n_options: nextTopNOptions,
-      max_per_industry_options: nextCapOptions,
     };
   }
 
@@ -509,10 +480,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     ticker_type?: string;
     ma_rule_override?: RankMaRule;
     as_of_date?: string;
-    /** 종목 수 — 화면에서 바꿔 본 값. */
-    top_n?: number;
-    /** 업종 상한 — 화면에서 바꿔 본 값. -1 = 제한 없음. */
-    max_per_industry?: number;
     bootstrap?: boolean;
   }) {
     const requestSequence = ++loadSequenceRef.current;
@@ -531,12 +498,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       if (next?.ma_rule_override) {
         search.set("short_ma_days", String(next.ma_rule_override.short_ma_days));
         search.set("long_ma_days", String(next.ma_rule_override.long_ma_days));
-      }
-      if (next?.top_n != null) {
-        search.set("top_n", String(next.top_n));
-      }
-      if (next?.max_per_industry != null) {
-        search.set("max_per_industry", String(next.max_per_industry));
       }
 
       const query = search.size > 0 ? `?${search.toString()}` : "";
@@ -687,11 +648,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   // (개별주=표시, ETF=숨김), 미설정 풀은 행 값 유무로 추정 (strategy-momentum 과 같은 기준).
   // 업종 컬럼·업종 상한 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
   const hasIndustryData = poolHasIndustry(selectedTickerTypeItem);
-  // 화면에서 바꾼 값이 있으면 그것, 없으면 종목풀 저장값.
-  const effectiveTopN = topN ?? selectedTickerTypeItem?.top_n_hold ?? 0;
-  // 업종 상한은 저장값이 없으면 '없음'(-1).
-  const effectiveMaxPerIndustry =
-    maxPerIndustry ?? (selectedTickerTypeItem?.max_per_industry == null ? -1 : selectedTickerTypeItem.max_per_industry);
   const hasMarketCap = poolHasMarketCap(selectedTickerTypeItem);
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
@@ -1333,28 +1289,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     });
   }
 
-  function handleTopNChange(next: number) {
-    setTopN(next);
-    void load({
-      ticker_type: selectedTickerType,
-      ma_rule_override: maRule ?? undefined,
-      as_of_date: selectedAsOfDate,
-      top_n: next,
-      max_per_industry: effectiveMaxPerIndustry,
-    });
-  }
-
-  function handleMaxPerIndustryChange(next: number) {
-    setMaxPerIndustry(next);
-    void load({
-      ticker_type: selectedTickerType,
-      ma_rule_override: maRule ?? undefined,
-      as_of_date: selectedAsOfDate,
-      top_n: effectiveTopN,
-      max_per_industry: next,
-    });
-  }
-
   function handleAsOfDateChange(nextAsOfDate: string) {
     setSelectedAsOfDate(nextAsOfDate);
     void load({
@@ -1725,51 +1659,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       </button>
                     </div>
                   </label>
-                  {/* 종목 수 — 추천(✅) 을 몇 개까지 붙일지. 기본값은 종목풀 저장값이고,
-                      여기서 바꾼 값은 화면에서만 쓴다(저장 안 함). 모멘텀 화면과 같은 순서로 둔다. */}
-                  {pageMode === "rank" && selectedTickerTypeItem ? (
-                    <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">종목 수</span>
-                      <select
-                        className="form-select form-select-sm"
-                        style={{ width: "auto" }}
-                        title="추천(✅)을 몇 종목까지 붙일지"
-                        value={String(effectiveTopN)}
-                        onChange={(event) => handleTopNChange(Number(event.target.value))}
-                      >
-                        {/* 저장값이 선택지 밖이면(선택지가 바뀐 뒤) 그 값도 목록에 남긴다 —
-                            빈 셀렉트가 되어 저장값이 조용히 바뀌는 것을 막는다. */}
-                        {(topNChoices.includes(effectiveTopN)
-                          ? topNChoices
-                          : [effectiveTopN, ...topNChoices].sort((a, b) => a - b)
-                        ).map((option: number) => (
-                          <option key={option} value={String(option)}>
-                            {option}종목
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-                  {/* 업종 상한 — 추천(✅) 이 한 업종에 몰리지 않게 자르는 기준.
-                      기본값은 종목풀 저장값이고, 여기서 바꾼 값은 화면에서만 쓴다(저장 안 함). */}
-                  {pageMode === "rank" && hasIndustryData ? (
-                    <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">업종 상한</span>
-                      <select
-                        className="form-select form-select-sm"
-                        style={{ width: "auto" }}
-                        title="한 업종에서 최대 몇 종목까지 ✅ 를 붙일지"
-                        value={String(effectiveMaxPerIndustry)}
-                        onChange={(event) => handleMaxPerIndustryChange(Number(event.target.value))}
-                      >
-                        {withCurrentIndustryCap(industryCapChoices, effectiveMaxPerIndustry).map((option: number) => (
-                          <option key={option} value={String(option)}>
-                            {industryCapLabel(option)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
                   {pageMode === "rank" && maRule ? (
                     <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">이평선</span>

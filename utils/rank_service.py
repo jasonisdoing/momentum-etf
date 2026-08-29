@@ -37,8 +37,6 @@ def _build_rank_cache_key(
     ticker_type: str,
     as_of_date: pd.Timestamp | None,
     ma_rules: list[dict[str, Any]],
-    top_n_override: int | None,
-    max_per_industry_override: int | None,
 ) -> _RankCacheKey:
     as_of_date_key = as_of_date.date().isoformat() if as_of_date is not None else ""
     ma_rule_key = tuple(
@@ -48,7 +46,7 @@ def _build_rank_cache_key(
         )
         for rule in ma_rules
     )
-    return (ticker_type, as_of_date_key, ma_rule_key, top_n_override, max_per_industry_override)
+    return (ticker_type, as_of_date_key, ma_rule_key)
 
 
 def invalidate_rank_data_cache(ticker_type: str | None = None) -> None:
@@ -312,8 +310,6 @@ def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "pool_kind": str(cfg.get("pool_kind") or ""),
             # 시스템 공통 보유 종목 수(config) — 풀별 설정은 폐기했다.
             "top_n_hold": TOP_N_HOLD,
-            # 업종 상한 — 화면 상단 셀렉트의 기본값(저장값). None = 제한 없음.
-            "max_per_industry": cfg["settings"].get("MAX_PER_INDUSTRY"),
             "currency": str(cfg["settings"].get("currency") or ""),
         }
         for cfg in configs
@@ -579,8 +575,6 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
 
     ma_rules = build_effective_ma_rules(selected_ticker_type, None)
 
-    from config import TOP_N_OPTIONS
-    from utils.pool_settings_store import max_per_industry_options
 
     return {
         "ticker_types": configs_payload,
@@ -591,8 +585,6 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
         # 종목 수·업종 상한 선택지도 같은 단일 소스(`config`)다. 화면에 복사본을 두면
         # config 를 고쳐도 이 화면만 옛 목록이 남는다(실제로 업종 상한 4 가 빠져 있었다).
         # 업종 상한의 None(제한 없음)은 쿼리로 넘길 수 있게 -1 로 바꿔 보낸다.
-        "top_n_options": list(TOP_N_OPTIONS),
-        "max_per_industry_options": max_per_industry_options(),
     }
 
 
@@ -603,15 +595,11 @@ def _compute_rank_data_payload(
     country_code: str,
     ma_rules: list[dict[str, Any]],
     selected_as_of_date: pd.Timestamp | None,
-    top_n_override: int | None = None,
-    max_per_industry_override: int | None = None,
 ) -> dict[str, Any]:
     dataframe = build_ticker_type_rankings(
         selected_ticker_type,
         ma_rules=ma_rules,
         as_of_date=selected_as_of_date,
-        top_n_override=top_n_override,
-        max_per_industry_override=max_per_industry_override,
     )
     effective_as_of_date = selected_as_of_date
     raw_as_of_date = dataframe.attrs.get("as_of_date")
@@ -693,9 +681,6 @@ def load_rank_data(
     ticker_type: str | None = None,
     ma_rule_override: dict[str, Any] | None = None,
     as_of_date: str | None = None,
-    # 화면 상단에서 바꿔 보는 값. None = 종목풀 저장값. 업종 상한의 -1 = 제한 없음.
-    top_n_override: int | None = None,
-    max_per_industry_override: int | None = None,
 ) -> dict[str, Any]:
     configs_payload, default_config = _build_configs_payload()
 
@@ -726,9 +711,7 @@ def load_rank_data(
     if selected_config is None:
         raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
 
-    cache_key = _build_rank_cache_key(
-        selected_ticker_type, selected_as_of_date, ma_rules, top_n_override, max_per_industry_override
-    )
+    cache_key = _build_rank_cache_key(selected_ticker_type, selected_as_of_date, ma_rules)
     return _RANK_DATA_CACHE.get_or_compute(
         cache_key,
         lambda: _compute_rank_data_payload(
@@ -737,7 +720,5 @@ def load_rank_data(
             country_code=country_code,
             ma_rules=ma_rules,
             selected_as_of_date=selected_as_of_date,
-            top_n_override=top_n_override,
-            max_per_industry_override=max_per_industry_override,
         ),
     )

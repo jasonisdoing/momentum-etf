@@ -44,25 +44,21 @@ const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "
 
 type Settings = {
   pool: string;
+  /** 서버가 config.TOP_N_HOLD 로 채워 주는 공통값 — 화면에 입력은 없고 표시·계산에만 쓴다. */
   top_n: number;
   stop_loss_pct: number;
   exit_ma_days: number;
   /** 진입 자격 — 거래대금 급증 배수 하한. null 이면 조건 없음. */
   min_value_mult: number | null;
-  /** 한 업종 최대 보유 종목 수. null 이면 제한 없음. */
-  max_per_industry: number | null;
-  /** 슬랙 알람 — 켠 풀만 장중 감시 배치가 진입·매도 예정 변화를 발송한다. */
 };
 
 type PoolOption = PoolLabelSource & { country_code?: string; currency?: string; pool_kind?: string | null };
 // PoolLabelSource 가 ticker_type·name·icon·order 를 갖는다 — 번호는 order 에서 나온다.
 
 type Constraints = {
-  top_n_options: number[];
   stop_loss_options: number[];
   exit_ma_options: number[];
   min_value_mult_options: (number | null)[];
-  max_per_industry_options: (number | null)[];
   month_options: number[];
   /** 신고가 창 — "52주" 같은 문구를 이 값에서 만든다(화면에 숫자를 박지 않는다). */
   high_window_weeks: number;
@@ -106,8 +102,6 @@ type PositionRow = {
   touched: boolean;
   /** 이미 보유 중 — 다시 사지 않는다. */
   is_held: boolean;
-  /** 돌파·자격을 다 통과했지만 업종 상한에 밀려 이번에는 사지 않는다. */
-  industry_blocked: boolean;
   /** 전략이 판정에 쓰는 배수(KRX 정규시장 확정). */
   value_mult: number | null;
   /** 같은 배수를 토스 실시간(KRX+NXT 합산)으로 낸 값. 확정값과 다르면 괄호로 보여준다. */
@@ -296,7 +290,7 @@ function toPeriodRows(daily: Backtest["daily"], keyOf: (date: string) => string,
  */
 const STAGE_STYLE = {
   breakout: { color: "#d62828", text: "장중 현재가가 직전 최고 종가 이상이면 돌파중, 장 마감 후 종가가 그 이상이면 돌파성공입니다. 다음 거래일 시가에 매수합니다." },
-  blocked: { color: "#0c8599", text: "최고 종가는 넘었지만 사지 않는 종목입니다. (미달)은 거래대금 급증 하한에 못 미친 것이고, (상한)은 그 업종을 이미 상한만큼 들고 있어 다음 순위에 자리를 넘긴 것입니다. 날짜 목록의 돌파 수에서도 빠집니다." },
+  blocked: { color: "#0c8599", text: "최고 종가는 넘었지만 사지 않는 종목입니다. (미달)은 거래대금 급증 하한에 못 미친 것입니다. 날짜 목록의 돌파 수에서도 빠집니다." },
   pullback: { color: "#7048e8", text: "장중 고가는 최고 종가선에 닿았지만 종가가 다시 아래로 내려온 상태입니다." },
   imminent: { color: "#e8590c", text: "최고 종가까지 3% 이내로 남은 종목입니다." },
   near: { color: "#2f9e44", text: "최고 종가까지 3% 초과 7% 이내로 남은 종목입니다." },
@@ -311,8 +305,6 @@ function describeStage(row: PositionRow, live: boolean): { label: string; color:
     // 장중에는 종가가 아직 안 나왔으니 '돌파중' — 마감 뒤 확정되면 '돌파성공'.
     const label = live ? "돌파중" : "돌파성공";
     if (!row.qualifies) return { label: `${label}(미달)`, color: STAGE_STYLE.blocked.color };
-    // 자격은 통과했는데 업종 상한에 밀린 종목 — 그냥 '돌파성공'으로 두면 살 것처럼 보인다.
-    if (row.industry_blocked) return { label: `${label}(상한)`, color: STAGE_STYLE.blocked.color };
     return { label, color: STAGE_STYLE.breakout.color };
   }
   // 장중에 선을 건드렸다가 밀린 것은 그냥 '임박'과 성격이 달라 따로 표시한다.
@@ -324,7 +316,7 @@ function describeStage(row: PositionRow, live: boolean): { label: string; color:
 /** 상태 단계 설명 — 진입 후보를 펼치면 보여준다. 색·문구는 STAGE_STYLE 이 단일 소스다. */
 const STAGE_GUIDE: { label: string; key: keyof typeof STAGE_STYLE }[] = [
   { label: "돌파중 / 돌파성공", key: "breakout" },
-  { label: "돌파(미달) · 돌파(상한)", key: "blocked" },
+  { label: "돌파(미달)", key: "blocked" },
   { label: "터치 후 밀림", key: "pullback" },
   { label: "임박", key: "imminent" },
   { label: "근접", key: "near" },
@@ -337,7 +329,7 @@ const CURRENT_NOTES = [
     title: "진입",
     body:
       "종가가 직전 52주 최고 종가를 넘고 거래대금 급증 배수가 하한 이상이면 다음 거래일 시가에 매수합니다. " +
-      "빈 슬롯만큼, 우선순위(거래대금 급증 또는 시가총액) 순으로 담고 업종 상한을 적용합니다.",
+      "빈 슬롯만큼, 거래대금 급증 배수 순으로 담습니다.",
   },
   {
     title: "청산",
@@ -541,12 +533,7 @@ export function NewHighClient() {
   const hasIndustryData = poolHasIndustry(selectedPoolOption);
   const hasMarketCap = poolHasMarketCap(selectedPoolOption);
 
-  // 업종 데이터가 없는 풀은 상한을 **없음(null)으로 고정**한다 — 저장·변경 감지·튜닝이 모두 이 값을 쓴다
-  // (모멘텀 화면과 같은 규칙. 저장값이 숫자로 남아 있으면 '저장하지 않은 변경'으로 떠서 없음으로 저장하게 된다).
-  const effectiveDraft = useMemo<Settings | null>(
-    () => (draft == null ? null : hasIndustryData ? draft : { ...draft, max_per_industry: null }),
-    [draft, hasIndustryData],
-  );
+  const effectiveDraft = draft;
 
   const isDirty = useMemo(() => {
     const saved = view?.settings;
@@ -1064,42 +1051,6 @@ export function NewHighClient() {
                   </select>
                 </label>
                 <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">종목 수</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={String(draft.top_n)}
-                    onChange={(event) => setDraft({ ...draft, top_n: Number(event.target.value) })}
-                  >
-                    {constraints.top_n_options.map((n) => (
-                      <option key={n} value={n}>{n}종목</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">업종 상한</span>
-                  {hasIndustryData ? (
-                    <select
-                      className="form-select form-select-sm"
-                      value={draft.max_per_industry == null ? "" : String(draft.max_per_industry)}
-                      onChange={(event) => setDraft({
-                        ...draft,
-                        max_per_industry: event.target.value === "" ? null : Number(event.target.value),
-                      })}
-                    >
-                      {constraints.max_per_industry_options.map((value) => (
-                        <option key={String(value)} value={value == null ? "" : String(value)}>
-                          {value == null ? "없음" : `${value}종목`}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    // 업종 데이터가 없는 풀(ETF 모음 등)은 상한이 무의미 — '없음'으로 고정해 보여준다 (모멘텀 화면과 동일).
-                    <select className="form-select form-select-sm" value="" disabled title="업종 데이터가 없는 종목풀은 업종 상한을 쓰지 않습니다">
-                      <option value="">없음</option>
-                    </select>
-                  )}
-                </label>
-                <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">이탈 이평선</span>
                   <MaDaysSelect
                     value={draft.exit_ma_days}
@@ -1408,27 +1359,15 @@ export function NewHighClient() {
           disabled={backtesting}
           secondsPerCombo={0.04}
           extraSeconds={50}
-          fixedLabel={`현재 화면 값 기준${hasIndustryData ? "" : " · 업종 상한 없음(업종 데이터 없는 풀)"}`}
+          fixedLabel={`현재 화면 값 기준 (종목 수 ${draft.top_n} 공통 고정)`}
           current={{
-            top_n: draft.top_n,
             stop_loss_pct: draft.stop_loss_pct,
             exit_ma_days: draft.exit_ma_days,
             min_value_mult: draft.min_value_mult ?? null,
-            max_per_industry: hasIndustryData ? (draft.max_per_industry ?? null) : null,
           }}
           axes={[
             // 축 값 = 상단 셀렉트 선택지(서버 상수) — 순서·이름도 상단 설정과 같다.
-            { key: "top_n", label: "종목 수", values: constraints.top_n_options.map((n) => ({ value: n, label: `${n}종목` })) },
-            // 업종 데이터가 없는 풀은 상한 축을 돌리지 않는다(결과가 전부 같아 조합만 는다).
-            ...(hasIndustryData
-              ? [
-                  {
-                    key: "max_per_industry",
-                    label: "업종 상한",
-                    values: constraints.max_per_industry_options.map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: `${n}종목` })),
-                  },
-                ]
-              : []),
+            // 종목 수(공통 고정)·업종 상한(폐기)은 축이 아니다 — 튜닝은 시장의 반응 속도와 급증·손절 기준만 잰다.
             { key: "exit_ma_days", label: "이탈 이평선", values: constraints.exit_ma_options.map((n) => ({ value: n, label: `${n}일` })) },
             {
               key: "min_value_mult",
@@ -1442,11 +1381,9 @@ export function NewHighClient() {
             await persistSettings(
               {
                 ...draft,
-                top_n: Number(params.top_n),
                 stop_loss_pct: Number(params.stop_loss_pct),
                 exit_ma_days: Number(params.exit_ma_days),
                 min_value_mult: params.min_value_mult == null ? null : Number(params.min_value_mult),
-                max_per_industry: !hasIndustryData || params.max_per_industry == null ? null : Number(params.max_per_industry),
               },
               "튜닝 조합을 적용해 저장했습니다.",
             );
@@ -1455,12 +1392,7 @@ export function NewHighClient() {
             const response = await fetch("/api/strategy-new-high/tuning", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              // 업종 데이터가 없는 풀은 상한 축을 '없음' 하나로 고정해 보낸다.
-              body: JSON.stringify({
-                months,
-                settings: effectiveDraft ?? draft,
-                ranges: hasIndustryData ? ranges : { ...ranges, max_per_industry: [null] },
-              }),
+              body: JSON.stringify({ months, settings: effectiveDraft ?? draft, ranges }),
             });
             const payload = await response.json();
             if (!response.ok) throw new Error(payload.error ?? "튜닝에 실패했습니다.");

@@ -213,65 +213,15 @@ def hold_eligible(long_disparity_pct: Any, short_disparity_pct: Any) -> Any:
     return float(long_disparity_pct) > 0 and float(short_disparity_pct) >= 0
 
 
-def cap_by_industry(
-    candidates: list[str],
-    industry_by: Mapping[str, str],
-    cap: int | None,
-    limit: int,
-    *,
-    held: Sequence[str] = (),
-) -> tuple[list[str], list[str]]:
-    """우선순위를 지키되 **한 업종이 상한을 넘지 않도록** ``limit`` 개를 고른다.
-
-    모멘텀·신고가 두 전략이 이 함수 하나만 쓴다. 예전에는 각자 구현을 들고 있어서
-    같은 「업종 상한」 설정이 전략마다 다르게 동작했다(보유분을 세느냐가 갈렸다).
-
-    `(고른 것, 상한에 걸려 밀린 것)` 을 돌려준다. 밀린 목록은 화면이 '조건은 맞지만
-    업종 상한 때문에 못 산다' 를 표시하는 데 쓴다 — 그냥 후보로 두면 살 것처럼 보인다.
-
-    ``held`` 를 주면 **이미 보유 중인 종목이 상한을 차지한다** — 오늘 새로 담는 것만
-    세면 계좌 전체로는 한 업종에 몰릴 수 있다. 상한에 걸린 종목은 건너뛰고 다음 순위가
-    그 자리를 채운다. 업종을 모르는 종목(ETF 풀 등)은 묶을 근거가 없어 상한을 적용하지 않는다.
-    ``cap`` 이 None/0 이면 제한 없음이다.
-    """
-    if limit <= 0:
-        return [], []
-    if not cap:
-        return candidates[:limit], []
-    counts: dict[str, int] = {}
-    for ticker in held:
-        key = industry_by.get(ticker, "")
-        if key:
-            counts[key] = counts.get(key, 0) + 1
-    picked: list[str] = []
-    blocked: list[str] = []
-    for ticker in candidates:
-        if len(picked) >= limit:
-            break
-        key = industry_by.get(ticker, "")
-        if key:
-            if counts.get(key, 0) >= cap:
-                blocked.append(ticker)
-                continue
-            counts[key] = counts.get(key, 0) + 1
-        picked.append(ticker)
-    return picked, blocked
-
-
 def select_holdings(
     candidates: Sequence[Mapping[str, Any]],
     *,
     top_n: int,
-    max_per_industry: int | None = None,
-    industry_by: Mapping[str, str] | None = None,
 ) -> list[str]:
     """**보유 대상 선정 — 순위 화면과 모멘텀 전략이 함께 쓰는 단 하나의 규칙.**
 
-    ① 자격(`hold_eligible`) → ② 순위 점수(`rank_score`) 내림차순 → ③ 업종 상한
-    (`cap_by_industry`) 을 적용해 최대 `top_n` 개의 티커를 돌려준다.
-
-    예전에는 순위 화면이 ①②만 하고 업종 상한을 빼먹어서, 상한이 걸린 풀에서 표의 ✅ 와
-    실제 전략 선정이 어긋났다. 셋을 한 함수로 묶어 그런 누락이 다시 생기지 않게 한다.
+    ① 자격(`hold_eligible`) → ② 순위 점수(`rank_score`) 내림차순으로 최대 `top_n` 개의
+    티커를 돌려준다. (업종 상한은 폐기 — 집중 완화는 합성 배분이 맡는다.)
 
     `candidates` 의 각 항목에 필요한 키:
         ticker · long_disparity_pct · short_disparity_pct
@@ -291,13 +241,7 @@ def select_holdings(
         scored.append((float(score), ticker))
     # 점수 내림차순. 동점은 티커 순으로 못 박아 실행할 때마다 순서가 흔들리지 않게 한다.
     scored.sort(key=lambda item: (-item[0], item[1]))
-    picked, _blocked = cap_by_industry(
-        [ticker for _, ticker in scored],
-        industry_by or {},
-        max_per_industry,
-        top_n,
-    )
-    return picked
+    return [ticker for _, ticker in scored[: int(top_n)]]
 
 
 def compute_rule_percentile_frame(
@@ -375,7 +319,6 @@ __all__ = [
     "compute_trend_frame",
     "rank_score",
     "hold_eligible",
-    "cap_by_industry",
     "select_holdings",
     "drawdown_from_high_pct",
     "compute_rule_percentile_frame",

@@ -1423,11 +1423,9 @@ class _SlotRuntime:
     breakout: Any = None
     below_ma: Any = None
     value_mult: Any = None
-    industry_by: dict[str, str] = field(default_factory=dict)
     entry: dict[str, float] = field(default_factory=dict)
     stop_pct: float = 0.0
     min_mult: Any = None
-    max_per_industry: Any = None
 
 
 def _portfolio_period_key(day: Any, rebalance: str) -> str | None:
@@ -1495,10 +1493,8 @@ def _build_slot_runtime(
     runtime.breakout = signals["breakout"]
     runtime.below_ma = signals["below_ma"]
     runtime.value_mult = signals["value_mult"]
-    runtime.industry_by = (context or {})["industry_by"]
     runtime.stop_pct = float(spec.settings["stop_loss_pct"])
     runtime.min_mult = spec.settings["min_value_mult"]
-    runtime.max_per_industry = spec.settings["max_per_industry"]
     return runtime
 
 
@@ -1520,7 +1516,7 @@ def _simulate_mix_daily(
     """
     import pandas as pd
 
-    from utils.new_high_backtest import _cap_by_industry, _meets_min_mult
+    from utils.new_high_backtest import _meets_min_mult
 
     slots: list[SleeveSpec] = ctx["slots"]
     capital = backtest_initial_capital(slots[0].pool)
@@ -1766,7 +1762,7 @@ def _simulate_mix_daily(
                 return float(score) if pd.notna(score) else 0.0
 
             picks.sort(key=priority, reverse=True)
-            picks, _ = _cap_by_industry(picks, list(rt.shares), rt.industry_by, rt.max_per_industry, free)
+            picks = picks[:free]
             open_value = value_at(rt, day, rt.open_df)
             # 신고가 슬리브도 같은 배분 함수. 예산은 살 수 있는 현금까지만이다
             # (팔지 않은 평가익으로는 못 산다).

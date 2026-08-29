@@ -562,15 +562,11 @@ def hold_eligible_mask(disparity: pd.Series, short_disparity: pd.Series) -> pd.S
 def _mark_hold_targets(
     df: pd.DataFrame,
     top_n: int,
-    max_per_industry: int | None = None,
-    industry_by: dict[str, str] | None = None,
 ) -> pd.DataFrame:
     """규칙상 보유 대상인 종목에 ``보유대상`` 을 표시한다. 화면의 추천(✅) 기준.
 
     선정 자체는 **모멘텀 전략과 같은 공용 함수**(`core.strategy.scoring.select_holdings`)가
-    한다 — 자격(장기 이격 > 0, 단기 이격 >= 0) → 순위 점수 → 업종 상한 순이다.
-    예전에는 여기서 자격·점수만 보고 업종 상한을 빼먹어, 상한이 걸린 풀에서 표의 ✅ 와
-    실제 전략 선정이 어긋났다.
+    한다 — 자격(장기 이격 > 0, 단기 이격 >= 0) → 순위 점수 순이다.
 
     여기서 따로 거는 건 **제외**(`exclude_from_ranking`)뿐이다 — 투자 후보가 아니다.
     벤치마크는 빼지 않는다(종목풀에 있으면 매수 후보다. 모멘텀·신고가도 같다).
@@ -589,14 +585,7 @@ def _mark_hold_targets(
         for _, row in df.iterrows()
         if not bool(row.get("exclude_from_ranking"))
     ]
-    picked = set(
-        select_holdings(
-            candidates,
-            top_n=int(top_n),
-            max_per_industry=max_per_industry,
-            industry_by=industry_by or {},
-        )
-    )
+    picked = set(select_holdings(candidates, top_n=int(top_n)))
     if picked:
         df.loc[df["티커"].astype(str).str.strip().str.upper().isin(picked), "보유대상"] = True
     return df
@@ -730,10 +719,6 @@ def build_ticker_type_rankings(
     ma_rules: list[dict[str, Any]] | None = None,
     as_of_date: pd.Timestamp | None = None,
     realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
-    # 화면 상단에서 임시로 바꿔 보는 값. None 이면 종목풀 저장값을 쓴다(저장하지 않는다).
-    # 업종 상한의 `-1` 은 '제한 없음' 이다 — None(미지정)과 구분해야 저장값으로 되돌아가지 않는다.
-    top_n_override: int | None = None,
-    max_per_industry_override: int | None = None,
     status_callback: Any | None = None,
 ) -> pd.DataFrame:
     if callable(status_callback):
@@ -932,20 +917,10 @@ def build_ticker_type_rankings(
         ]
     )
     # 업종 상한 — 화면에서 바꿔 보는 값이 있으면 그것, 없으면 종목풀 저장값(모멘텀과 같은 값).
-    if max_per_industry_override is None:
-        max_per_industry = settings.get("MAX_PER_INDUSTRY")
-    else:
-        max_per_industry = None if int(max_per_industry_override) < 0 else int(max_per_industry_override)
-    # 업종 맵은 공용 소스(`utils/industry_map`)에서 직접 읽는다 — 화면의 「업종」 컬럼은
-    # 이 함수보다 뒤(`rank_service._apply_industry_labels`)에서 붙어 여기서는 아직 없다.
-    from utils.industry_map import industry_map
-
-    industry_by = {str(key).strip().upper(): value for key, value in industry_map(ticker_type).items()}
     from config import TOP_N_HOLD
 
     # 보유 종목 수는 풀별 설정이 아니라 시스템 공통(config) — 순위 추천 ✅ 개수의 기준.
-    top_n = TOP_N_HOLD if top_n_override is None else int(top_n_override)
-    df = _mark_hold_targets(df, top_n, max_per_industry, industry_by)
+    df = _mark_hold_targets(df, TOP_N_HOLD)
     df = _normalize_ranking_values(df, country_code, monthly_labels=monthly_labels)
     df.attrs["realtime_active"] = realtime_active
     df.attrs["ranking_computed_at"] = ranking_computed_at

@@ -30,7 +30,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import MAX_PER_INDUSTRY_OPTIONS, STOP_LOSS_PCT_OPTIONS, TOP_N_OPTIONS
+from config import STOP_LOSS_PCT_OPTIONS, TOP_N_HOLD
 from core.strategy.scoring import (
     compute_ma_disparity,
     drawdown_from_high_pct,
@@ -126,8 +126,6 @@ def pool_info(pool: str) -> dict[str, str]:
 # 슬리피지는 종목풀 설정(BUY/SELL_SLIPPAGE_PCT)을 쓰고, 백테스트 기간은 화면에서
 # 실행할 때 고른다 — 둘 다 전략 설정으로 저장하지 않는다.
 PER_POOL_SETTING_KEYS = (
-    "top_n",
-    "max_per_industry",
     "short_ma_days",
     "long_ma_days",
     "intraweek_exit",
@@ -155,17 +153,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"'{key}' 는 숫자여야 합니다.")
         return float(value)
 
-    # 선택지 목록이 단일 소스다 — 여기에 범위를 따로 두면 목록을 늘려도 저장이 막힌다
-    # (실제로 2 를 추가했을 때 하한 5 에 걸렸다). 아래 다른 값들과 같은 방식으로 검증한다.
-    top_n = int(_num("top_n"))
-    if top_n not in TOP_N_OPTIONS:
-        allowed = ", ".join(str(v) for v in TOP_N_OPTIONS)
-        raise ValueError(f"'top_n' 은 {allowed} 중 하나여야 합니다 (받은 값: {top_n}).")
-    raw_cap = settings.get("max_per_industry")
-    max_per_industry = None if raw_cap in (None, "", "none") else int(_num("max_per_industry"))
-    if max_per_industry not in MAX_PER_INDUSTRY_OPTIONS:
-        allowed = ", ".join("없음" if v is None else str(v) for v in MAX_PER_INDUSTRY_OPTIONS)
-        raise ValueError(f"'max_per_industry' 는 {allowed} 중 하나여야 합니다 (받은 값: {raw_cap}).")
     pool = str(settings.get("pool") or "").strip().lower()
     if pool not in available_pools():
         raise ValueError(f"지원하지 않는 종목풀입니다: {settings.get('pool')}")
@@ -205,8 +192,10 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "pool": pool,
-        "top_n": top_n,
-        "max_per_industry": max_per_industry,
+        # 종목 수는 풀별 설정이 아니라 시스템 공통(config.TOP_N_HOLD) — 과적합을 피하려고
+        # 튜닝·저장 대상에서 뺐다. 업종 상한도 같은 이유로 개념째 제거(집중 완화는
+        # 합성 배분 — 모멘텀·신고가 50% + 배당주 50% — 가 맡는다).
+        "top_n": TOP_N_HOLD,
         "short_ma_days": short_ma_days,
         "long_ma_days": long_ma_days,
         "intraweek_exit": intraweek_exit,
@@ -247,8 +236,6 @@ def pool_options() -> list[dict[str, Any]]:
 # 풀 설정 문서의 대문자 키 ↔ 전략 설정의 소문자 키. 저장 위치는 `pool_settings` 문서 하나다
 # (예전에는 `system_config.momentum_settings` 에 따로 저장돼 같은 풀의 값이 갈렸다).
 _POOL_KEY_BY_SETTING: dict[str, str] = {
-    "top_n": "TOP_N_HOLD",
-    "max_per_industry": "MAX_PER_INDUSTRY",
     "short_ma_days": "SHORT_MA_DAYS",
     "long_ma_days": "LONG_MA_DAYS",
     "intraweek_exit": "INTRAWEEK_EXIT",
@@ -261,13 +248,12 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
     result: dict[str, Any] = {}
     for setting_key, pool_key in _POOL_KEY_BY_SETTING.items():
         if pool_key not in config:
-            # None 을 값으로 갖는 항목(업종 상한·주중 손절선)은 키 자체는 있어야 한다.
-            if setting_key in ("max_per_industry", "intraweek_stop_pct", "intraweek_exit"):
+            # None 을 값으로 갖는 항목(주중 손절선 등)은 키 자체는 있어야 한다.
+            if setting_key in ("intraweek_stop_pct", "intraweek_exit"):
                 continue
             return None
         result[setting_key] = config[pool_key]
     # 없는 선택 항목은 '미설정' 기본값으로 채운다 — 임의 보정이 아니라 스키마 기본이다.
-    result.setdefault("max_per_industry", None)
     result.setdefault("intraweek_exit", False)
     result.setdefault("intraweek_stop_pct", None)
     return result
@@ -330,8 +316,6 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
 
 # 화면 로드 때 선택지 밖 저장값을 보정할 항목 — (키, 라벨, 선택지)
 _OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
-    ("top_n", "종목 수", TOP_N_OPTIONS),
-    ("max_per_industry", "업종 상한", MAX_PER_INDUSTRY_OPTIONS),
     ("short_ma_days", "단기 이평", SHORT_MA_OPTIONS),
     ("long_ma_days", "장기 이평", LONG_MA_OPTIONS),
     ("intraweek_stop_pct", "주중 손절선", INTRAWEEK_STOP_OPTIONS),
@@ -540,10 +524,8 @@ def rank_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def select_top(
     scored: list[dict[str, Any]],
     top_n: int,
-    max_per_industry: int | None,
-    industry_by_ticker: dict[str, str],
 ) -> list[dict[str, Any]]:
-    """자격·점수·업종 상한을 적용해 상위 top_n 을 고른다.
+    """자격·점수를 적용해 상위 top_n 을 고른다.
 
     규칙 자체는 순위 화면(`/pools-rank` 의 ✅)과 **같은 공용 함수**
     (`core.strategy.scoring.select_holdings`)다 — 한쪽만 고쳐져 표와 선정이 갈리지
@@ -561,8 +543,6 @@ def select_top(
             for item in scored
         ],
         top_n=top_n,
-        max_per_industry=max_per_industry,
-        industry_by=industry_by_ticker,
     )
     return [by_ticker[ticker] for ticker in picked]
 
@@ -883,11 +863,10 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
     scored = rank_candidates(candidates)
 
     top_n = int(settings["top_n"])
-    max_per_industry = settings["max_per_industry"]  # None = 제한없음
+    # 업종 맵은 화면의 「업종」 컬럼 표시용으로만 쓴다 — 업종 상한은 폐기했다.
     industry_map_by_ticker = industry_map(pool)
-    industry_by_ticker = industry_map_by_ticker
 
-    selected = select_top(scored, top_n, max_per_industry, industry_by_ticker)
+    selected = select_top(scored, top_n)
     # 차순위 후보 — 선정에 못 든 종목 중 점수 상위 N개 (화면에서 흐리게 붙여 보여준다).
     # 선정에서 빠진 자리를 메울 후보라 업종 상한은 적용하지 않는다.
     selected_tickers = {item["ticker"] for item in selected}
@@ -913,7 +892,7 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
         prior_candidates = select_candidates(universe, frames, settings, as_of=prior_signal)
         prior_top = {
             item["ticker"]
-            for item in select_top(rank_candidates(prior_candidates), top_n, max_per_industry, industry_by_ticker)
+            for item in select_top(rank_candidates(prior_candidates), top_n)
         }
         for ticker in list(alive):
             if ticker in prior_top:
@@ -966,8 +945,6 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
                     for item in select_top(
                         rank_candidates(select_candidates(universe, frames, settings, as_of=prior_index[-1])),
                         top_n,
-                        max_per_industry,
-                        industry_by_ticker,
                     )
                 }
                 prev_exit_list = simulate_intraweek_exits(
@@ -1176,7 +1153,7 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
         }
 
     current_scored = rank_candidates(select_candidates(universe, frames, settings, as_of=None))
-    current_top = select_top(current_scored, top_n, max_per_industry, industry_by_ticker)
+    current_top = select_top(current_scored, top_n)
     next_expected: set[str] = {item["ticker"] for item in current_top}
     # 예상 순위 — 판정일 순위와 같은 규칙의 '현재 기준' 버전: 선정분 1~top_n,
     # 그 아래는 점수순으로 이어 붙인다(상한 미적용). 자격 미달(후보 밖)은 없음(None).
