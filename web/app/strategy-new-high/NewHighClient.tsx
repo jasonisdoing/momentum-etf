@@ -4,7 +4,7 @@ import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconCheck } from "@tabler/icons-react";
 
-import { HoldingChart, type HoldingChartData } from "./HoldingChart";
+import { HoldingChart, type HoldingChartData } from "../components/HoldingChart";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { MonthsSelect } from "../components/MonthsSelect";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
@@ -1250,7 +1250,6 @@ export function NewHighClient() {
                             entryPrice={row?.entry_price}
                             returnPct={row?.return_pct}
                             days={row?.days}
-                            maDays={draft.exit_ma_days}
                           />
                         );
                       })}

@@ -240,73 +240,6 @@ def compute_signals(panel: dict[str, pd.DataFrame], exit_ma_days: int) -> dict[s
     }
 
 
-_CANDLE_KEYS = ("Open", "High", "Low", "Close")
-
-
-def holding_charts(
-    pool: str,
-    tickers: list[str],
-    exit_ma_days: int,
-    as_of: str | None = None,
-    months: int = 6,
-) -> list[dict[str, Any]]:
-    """차트 탭이 그릴 일봉 — 캔들 + 이탈 이평선 + 직전 최고 종가선.
-
-    판정은 하지 않는다. 진입 시점 표시는 화면이 이미 들고 있는 보유 정보로 찍는다.
-    `build_price_panel` 을 쓰지 않고 원본 프레임을 읽는 것은 저가(Low)가 필요해서다 —
-    패널은 판정에 쓰는 네 가지(종가·시가·고가·거래대금)만 담는다.
-    """
-    wanted = [ticker for ticker in dict.fromkeys(tickers) if ticker]
-    if not wanted:
-        return []
-    universe = [row for row in load_universe(pool) if row["ticker"] in set(wanted)]
-    if not universe:
-        return []
-    frames = load_price_frames(universe)
-    name_by = {row["ticker"]: row["name"] for row in universe}
-    cutoff = pd.Timestamp(as_of) if as_of else None
-
-    charts: list[dict[str, Any]] = []
-    for ticker in wanted:
-        frame = frames.get(ticker)
-        if frame is None or frame.empty or any(key not in frame for key in _CANDLE_KEYS):
-            continue
-        if cutoff is not None:
-            frame = frame[frame.index <= cutoff]
-        if frame.empty:
-            continue
-        cols = {key: _positive(frame[key]) for key in _CANDLE_KEYS}
-        close = cols["Close"]
-        # 화면이 보는 구간만 잘라 보내되, 이평선·신고가선은 잘린 앞부분까지 써서 계산한다.
-        ma = close.rolling(exit_ma_days, min_periods=exit_ma_days).mean()
-        prior_high = close.rolling(HIGH_WINDOW, min_periods=HIGH_WINDOW_MIN_DAYS).max().shift(1)
-        span = frame.index[frame.index >= frame.index[-1] - pd.DateOffset(months=months)]
-
-        candles, ma_line, high_line = [], [], []
-        for day in span:
-            values = [cols[key].get(day) for key in _CANDLE_KEYS]
-            if any(pd.isna(value) for value in values):
-                continue
-            date = str(day.date())
-            candles.append(dict(zip(("open", "high", "low", "close"), (float(v) for v in values)), time=date))
-            if pd.notna(ma.get(day)):
-                ma_line.append({"time": date, "value": float(ma[day])})
-            if pd.notna(prior_high.get(day)):
-                high_line.append({"time": date, "value": float(prior_high[day])})
-        if not candles:
-            continue
-        charts.append(
-            {
-                "ticker": ticker,
-                "name": name_by.get(ticker, ticker),
-                "candles": candles,
-                "ma": ma_line,
-                "prior_high": high_line,
-            }
-        )
-    return charts
-
-
 # ── 설정 ───────────────────────────────────────────────────────────────────
 def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """화면·API 가 넘긴 설정을 검증한다. 선택지 밖의 값은 받지 않는다."""
@@ -417,7 +350,6 @@ __all__ = [
     "benchmark_info",
     "build_price_panel",
     "compute_signals",
-    "holding_charts",
     "load_benchmark_close",
     "load_price_frames",
     "load_settings",

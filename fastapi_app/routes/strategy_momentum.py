@@ -168,3 +168,34 @@ def post_strategy_momentum_tuning(
     if not isinstance(ranges, dict) or not all(isinstance(v, list) for v in ranges.values()):
         raise ValueError("'ranges' 는 축별 값 목록이어야 합니다.")
     return run_tuning(months, load_settings(pool), ranges)
+
+
+@router.post("/charts")
+def post_strategy_momentum_charts(
+    payload: dict = Body(default={}),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """선정 종목 일봉 + 단기·장기 이평선. body: ``{"pool": "...", "tickers": [...], "as_of": ...}``.
+
+    티커는 화면이 이미 받아둔 선정 목록에서 그대로 넘긴다 — 여기서 선정을 다시 계산하면
+    같은 시뮬레이션을 두 번 돌리게 된다.
+    """
+    from utils.holding_chart_service import holding_charts
+    from utils.momentum_service import load_settings
+
+    pool = str(payload.get("pool") or "") if isinstance(payload, dict) else ""
+    settings = load_settings(pool or None)
+    tickers = payload.get("tickers") if isinstance(payload, dict) else None
+    if not isinstance(tickers, list):
+        raise ValueError("'tickers' 는 목록이어야 합니다.")
+    as_of = payload.get("as_of") if isinstance(payload, dict) else None
+    return {
+        "charts": holding_charts(
+            settings["pool"],
+            [str(ticker) for ticker in tickers],
+            [int(settings["short_ma_days"]), int(settings["long_ma_days"])],
+            as_of=str(as_of) if as_of else None,
+        ),
+        "short_ma_days": int(settings["short_ma_days"]),
+        "long_ma_days": int(settings["long_ma_days"]),
+    }

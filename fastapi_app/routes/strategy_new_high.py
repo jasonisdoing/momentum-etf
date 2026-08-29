@@ -104,7 +104,8 @@ def post_strategy_new_high_charts(
     티커는 화면이 이미 받아둔 보유 목록에서 그대로 넘긴다 — 여기서 보유를 다시 계산하면
     같은 시뮬레이션을 두 번 돌리게 된다.
     """
-    from utils.new_high_service import holding_charts, validate_settings
+    from utils.holding_chart_service import holding_charts
+    from utils.new_high_service import validate_settings
 
     settings = payload.get("settings") if isinstance(payload, dict) else None
     settings = validate_settings(settings if isinstance(settings, dict) else load_settings())
@@ -116,7 +117,7 @@ def post_strategy_new_high_charts(
         "charts": holding_charts(
             settings["pool"],
             [str(ticker) for ticker in tickers],
-            int(settings["exit_ma_days"]),
+            [int(settings["exit_ma_days"])],
             as_of=str(as_of) if as_of else None,
         ),
         "exit_ma_days": int(settings["exit_ma_days"]),

@@ -13,6 +13,7 @@ import { StrategyNotes } from "../components/StrategyNotes";
 import { StrategyTuning, type TuningResult } from "../components/StrategyTuning";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
+import { HoldingChart, type HoldingChartData } from "../components/HoldingChart";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
@@ -106,6 +107,8 @@ type PickRow = {
   /** 주중 매도 사유 — "주중 손절"(손절선 도달) 또는 "주중 이탈"(자격 상실). */
   exit_reason?: string | null;
   streak_weeks: number | null;
+  /** 연속 편입이 시작된 교체일 — 차트 탭의 Buy 마커 위치. 선정분만 값이 있다. */
+  entry_date?: string | null;
   /** 편입 후 수익률(%) — 연속 편입 시작 교체일 시가 대비. 보유 중인 종목만 값이 있다. */
   entry_return_pct?: number | null;
   next_week_expected: boolean;
@@ -243,6 +246,13 @@ function needsRepick(before: Settings | null, after: Settings): boolean {
   if (!before) return true;
   return PICK_AFFECTING_KEYS.some((key) => before[key] !== after[key]);
 }
+
+// 운용 현황 안쪽 탭 — 신고가 화면과 같은 구성. 차트는 선정 종목 수만큼 그리므로 열 때만 그린다.
+const CURRENT_TABS = [
+  { key: "list", label: "종목" },
+  { key: "chart", label: "차트" },
+] as const;
+type CurrentTab = (typeof CURRENT_TABS)[number]["key"];
 
 // 백테스트 표 보기 단위 — /compare 의 연간·월간·일간 구분에 주간을 더한 것.
 const VIEW_MODES = [
@@ -514,6 +524,53 @@ export function MomentumClient() {
       return quote ? { ...row, price: quote.price, daily_change_pct: quote.change_pct } : row;
     });
   }, [view?.picks?.rows, quotes]);
+
+  // ── 차트 탭 (신고가 화면과 같은 구성 — 공용 HoldingChart) ──
+  const [currentTab, setCurrentTab] = useState<CurrentTab>("list");
+  const [charts, setCharts] = useState<HoldingChartData[] | null>(null);
+  const [chartsLoading, setChartsLoading] = useState(false);
+  const [chartsError, setChartsError] = useState<string | null>(null);
+  // 차트를 그릴 대상 — 선정분(1~N)만. 차순위·예상 전용·이미 매도된 종목은 뺀다.
+  const chartRows = useMemo(
+    () => pickRows.filter((row) => !row.is_reserve && !row.is_expected_only && !row.is_exited),
+    [pickRows],
+  );
+  // 풀·구성이 바뀌면 이전 차트는 버린다.
+  const chartKey = useMemo(
+    () => `${view?.settings.pool ?? ""}|${chartRows.map((row) => row.ticker).join(",")}`,
+    [view?.settings.pool, chartRows],
+  );
+  useEffect(() => {
+    setCharts(null);
+    setChartsError(null);
+  }, [chartKey]);
+  // 차트 탭을 열 때만 받는다 — 선정 종목 수만큼 일봉을 실어 오므로 목록 탭에서는 낭비다.
+  useEffect(() => {
+    if (currentTab !== "chart" || !view?.picks || charts || chartsLoading || chartsError) return;
+    if (chartRows.length === 0) {
+      setCharts([]);
+      return;
+    }
+    setChartsLoading(true);
+    void (async () => {
+      try {
+        const response = await fetch("/api/strategy-momentum/charts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pool: view.settings.pool, tickers: chartRows.map((row) => row.ticker) }),
+        });
+        const payload = (await response.json()) as { charts?: HoldingChartData[]; error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "차트를 불러오지 못했습니다.");
+        setCharts(payload.charts ?? []);
+      } catch (chartError) {
+        const message = chartError instanceof Error ? chartError.message : "차트를 불러오지 못했습니다.";
+        setChartsError(message);
+        toast.error(message);
+      } finally {
+        setChartsLoading(false);
+      }
+    })();
+  }, [currentTab, view?.picks, charts, chartsLoading, chartsError, chartRows, toast]);
 
   // 저장하지 않은 입력이 있으면 실행 결과가 화면 값과 어긋난다 — 저장을 먼저 요구한다.
   const isDirty = useMemo(() => {
@@ -1095,8 +1152,15 @@ export function MomentumClient() {
               </div>
             </div>
             <StrategyNotes items={CURRENT_NOTES} />
+            <NavTabs
+              items={CURRENT_TABS}
+              value={currentTab}
+              onChange={setCurrentTab}
+              label="운용 현황 보기"
+              style={{ marginBottom: 12 }}
+            />
             {picking ? <AppLoadingProgress title="선정 계산 중..." progress={pickProgress} /> : null}
-            {view.picks && !picking ? (
+            {view.picks && !picking && currentTab === "list" ? (
               // autoHeight — 그리드가 행 수만큼만 높이를 차지해 하단 낭비가 없다.
               <AppAgGrid<PickRow>
                 rowData={pickRows}
@@ -1120,6 +1184,43 @@ export function MomentumClient() {
                 }}
                 getRowId={(p) => p.data.ticker}
               />
+            ) : null}
+            {view.picks && !picking && currentTab === "chart" ? (
+              chartsLoading || (!charts && !chartsError) ? (
+                <div style={{ ...hintStyle, padding: "24px 0", textAlign: "center" }}>차트를 불러오는 중…</div>
+              ) : chartsError ? (
+                <div className="alert alert-danger">{chartsError}</div>
+              ) : charts && charts.length > 0 ? (
+                <>
+                  <div style={{ ...hintStyle, margin: "4px 0 10px" }}>
+                    최근 6개월 일봉입니다. 장기선 위 & 단기선 위(자격)를 잃으면 편출되고,
+                    편입이 시작된 교체일에 Buy 화살표가 표시됩니다.
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                      gap: "18px 20px",
+                    }}
+                  >
+                    {charts.map((item) => {
+                      const row = chartRows.find((candidate) => candidate.ticker === item.ticker);
+                      return (
+                        <HoldingChart
+                          key={item.ticker}
+                          chart={item}
+                          entryDate={row?.entry_date}
+                          returnPct={row?.entry_return_pct}
+                          days={row?.streak_weeks}
+                          daysUnit="주"
+                        />
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <div style={{ ...hintStyle, padding: "24px 0", textAlign: "center" }}>선정된 종목이 없습니다.</div>
+              )
             ) : null}
           </div>
         </div>

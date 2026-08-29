@@ -1250,6 +1250,8 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             "is_reserve": False,
             "is_expected_only": False,
             "streak_weeks": streaks.get(item["ticker"], 1),
+            # 연속 편입이 시작된 교체일 — 차트 탭의 Buy 마커 위치.
+            "entry_date": str(streak_entry[item["ticker"]].date()) if item["ticker"] in streak_entry else None,
             # 편입 후 수익률 — 보유 중인 종목만(연속 편입 시작 교체일 시가 대비).
             "entry_return_pct": entry_return_pct(item["ticker"]),
             "next_week_expected": item["ticker"] in next_expected,

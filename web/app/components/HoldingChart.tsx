@@ -1,5 +1,12 @@
 "use client";
 
+/** 보유 종목 차트 카드 — 전략 화면(신고가·모멘텀·합성) 공용.
+ *
+ *  캔들 + 이동평균선(들) + 진입(Buy) 마커 + 수익률·보유기간 배지.
+ *  어떤 선을 그릴지는 백엔드(`utils/holding_chart_service.py`)가 `ma_lines` 로 내려준다 —
+ *  신고가는 이탈 이평선 1줄, 모멘텀은 단기·장기 2줄. 색은 여기 팔레트 순서로 정한다.
+ */
+
 import { useEffect, useRef } from "react";
 import {
   CandlestickSeries,
@@ -14,8 +21,7 @@ export type HoldingChartData = {
   ticker: string;
   name: string;
   candles: { time: string; open: number; high: number; low: number; close: number }[];
-  ma: { time: string; value: number }[];
-  prior_high: { time: string; value: number }[];
+  ma_lines: { ma_days: number; points: { time: string; value: number }[] }[];
 };
 
 type Props = {
@@ -25,24 +31,24 @@ type Props = {
   entryPrice?: number | null;
   /** 보유 수익률(%) — 진입 예정 종목은 없다. */
   returnPct?: number | null;
-  /** 보유일 — 진입 예정 종목은 없다. */
+  /** 보유 기간 — 신고가는 일, 모멘텀은 주. 단위 문구는 `daysUnit`. */
   days?: number | null;
-  maDays: number;
+  daysUnit?: string;
   height?: number;
 };
 
 // 한국 관례 — 상승 빨강, 하락 파랑. 다른 화면(티커 상세)과 같은 색을 쓴다.
 const UP = "#e03131";
 const DOWN = "#206bc4";
-// 이탈 이평선 — 참고 스타일과 같은 청록 계열 녹색.
-const MA_COLOR = "#12b886";
+// 이평선 팔레트 — 첫 선(단기/이탈선)은 청록, 둘째 선(장기)은 주황.
+const MA_COLORS = ["#12b886", "#f76707", "#7048e8"];
 const BUY_MARKER_COLOR = "#111827";
 
 function formatPrice(value: number): string {
   return value.toLocaleString("ko-KR", { maximumFractionDigits: value >= 1000 ? 0 : 2 });
 }
 
-export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, maDays, height = 320 }: Props) {
+export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, daysUnit = "일", height = 320 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
 
@@ -71,11 +77,12 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, ma
     });
     candles.setData(chart.candles.map((row) => ({ ...row, time: row.time as Time })));
 
-    // 이탈 이평선 — 종가가 이 선을 하회하면 청산한다.
-    api.addSeries(LineSeries, {
-      color: MA_COLOR, lineWidth: 2,
-      priceLineVisible: false, lastValueVisible: false,
-    }).setData(chart.ma.map((row) => ({ ...row, time: row.time as Time })));
+    chart.ma_lines.forEach((line, index) => {
+      api.addSeries(LineSeries, {
+        color: MA_COLORS[index % MA_COLORS.length], lineWidth: 2,
+        priceLineVisible: false, lastValueVisible: false,
+      }).setData(line.points.map((row) => ({ ...row, time: row.time as Time })));
+    });
 
     // 진입 마커 — 매수가를 함께 적는다 (별도 매수가 점선은 두지 않는다).
     // 차트 구간보다 진입일이 이르면 마커를 못 찍는다 — 없는 자리에 찍지 않는다.
@@ -144,26 +151,32 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, ma
                 color: "#0ca678",
               }}
             >
-              {days}일
+              {days}
+              {daysUnit}
             </span>
           ) : null}
         </span>
       </div>
       <div style={{ position: "relative" }}>
-        {/* 이평선 범례 — 참고 스타일처럼 차트 안 좌상단에 겹쳐 둔다. */}
+        {/* 이평선 범례 — 차트 안 좌상단에 겹쳐 둔다. 선 순서 = 색 순서. */}
         <span
           style={{
             position: "absolute",
             top: 6,
             left: 8,
             zIndex: 2,
+            display: "flex",
+            gap: 10,
             fontSize: "var(--fs-sm)",
             fontWeight: 700,
-            color: MA_COLOR,
             pointerEvents: "none",
           }}
         >
-          MA{maDays}
+          {chart.ma_lines.map((line, index) => (
+            <span key={line.ma_days} style={{ color: MA_COLORS[index % MA_COLORS.length] }}>
+              MA{line.ma_days}
+            </span>
+          ))}
         </span>
         <div ref={containerRef} />
       </div>
