@@ -20,7 +20,6 @@ def get_rank_toolbar_data(
 @router.get("")
 def get_rank_data(
     ticker_type: str | None = Query(default=None),
-    as_of_date: str | None = Query(default=None),
     short_ma_days: int | None = Query(default=None),
     long_ma_days: int | None = Query(default=None),
     _: None = Depends(require_internal_token),
@@ -34,7 +33,6 @@ def get_rank_data(
     return load_rank_data(
         ticker_type=ticker_type,
         ma_rule_override=ma_rule_override,
-        as_of_date=as_of_date,
     )
 
 

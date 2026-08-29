@@ -40,9 +40,6 @@ logger = logging.getLogger(__name__)
 # 백테스트 기간 상한 — 신고가 창(52주)만큼 앞선 데이터가 있어야 판정이 된다.
 MAX_BACKTEST_MONTHS = 60
 
-# 날짜별 보유 목록을 남겨 둘 최근 거래일 수. 날짜 셀렉트가 쓰는 범위(20일)보다 넉넉히 잡는다.
-_HELD_HISTORY_DAYS = 40
-
 
 def _drawdown_pct(series: pd.Series) -> float:
     return float(((series / series.cummax()) - 1).min() * 100)
@@ -88,11 +85,9 @@ def run_backtest(
     months: int | None = None,
     settings: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
-    as_of: str | None = None,
 ) -> dict[str, Any]:
     """돌파 전략 백테스트. 일별 자산곡선과 체결 내역을 함께 돌려준다.
 
-    ``as_of`` 를 주면 그 거래일까지만 돌린다 — 과거 시점의 보유·신호를 재현할 때 쓴다.
     """
     settings = validate_settings(settings or load_settings())
     months = int(months or DEFAULT_BACKTEST_MONTHS)
@@ -121,10 +116,6 @@ def run_backtest(
         return float(score) if pd.notna(score) else 0.0
 
     dates = close_df.index
-    if as_of:
-        dates = dates[dates <= pd.Timestamp(as_of)]
-        if len(dates) == 0:
-            raise RuntimeError(f"{as_of} 이전의 가격 데이터가 없습니다.")
     span = [d for d in dates if d >= dates[-1] - pd.DateOffset(months=months)]
     if len(span) < 2:
         raise RuntimeError("백테스트할 구간의 가격 데이터가 부족합니다.")
@@ -150,11 +141,6 @@ def run_backtest(
             if pd.notna(price):
                 total += position["shares"] * float(price)
         return total
-
-    # 날짜별 '그날 이미 들고 있어서 살 수 없던 종목'. 날짜 셀렉트의 돌파 수가 이걸 빼고 센다.
-    # 최근 구간만 담는다 — 셀렉트가 쓰는 범위 밖은 payload 만 키운다.
-    held_by_day: dict[str, list[str]] = {}
-    held_from = span[-_HELD_HISTORY_DAYS] if len(span) > _HELD_HISTORY_DAYS else span[0]
 
     for index, day in enumerate(span[:-1]):
         nxt = span[index + 1]
@@ -191,10 +177,6 @@ def run_backtest(
                 }
             )
             del holdings[ticker]
-
-        # 청산으로 자리가 빈 뒤의 보유 목록이 곧 '오늘 살 수 없는 종목' 이다.
-        if day >= held_from:
-            held_by_day[str(day.date())] = list(holdings)
 
         # 2) 진입 — 빈 자리만큼, 거래대금 급증이 큰 순
         free = slots - len(holdings)
@@ -248,7 +230,6 @@ def run_backtest(
 
     # 마지막 날은 판정·체결이 없다(체결할 다음 거래일이 없어서). 다만 그날 종가로
     # **평가**는 해야 곡선이 하루 짧아지지 않는다 — 모멘텀 엔진과 같은 기준.
-    held_by_day[str(last_day.date())] = list(holdings)
     curve.append(_value_at(last_day))
 
     # 아직 청산하지 않은 종목 — 성과에는 평가손익으로 이미 반영돼 있지만 체결 내역에는 없다.
@@ -313,8 +294,6 @@ def run_backtest(
         "open_positions": open_positions,
         "sleeve_cash_weight_pct": sleeve_cash_weight_pct,
         "exited_today": exited_today,
-        # 날짜 셀렉트가 '그날 실제로 살 수 있던 돌파' 만 세는 데 쓴다.
-        "held_by_day": held_by_day,
         "daily": [
             {
                 "date": str(d.date()),
@@ -592,55 +571,20 @@ def _cache_refreshed_at(pool: str) -> str | None:
     return completed.isoformat() if completed else None
 
 
-def available_dates(
-    context: dict[str, Any],
-    min_value_mult: float | None,
-    limit: int = 20,
-    held_by_day: dict[str, list[str]] | None = None,
-) -> list[dict[str, Any]]:
-    """최근 거래일 목록과 그날의 후보·돌파 종목 수. 날짜 셀렉트가 이 값을 쓴다.
-
-    돌파 수는 **그날 실제로 살 수 있던 것만** 센다. 거래대금 하한에 걸린 종목이나 이미
-    보유 중이던 종목까지 세면 "돌파 4"인데 진입은 3건인 날이 생겨 사람을 오해하게 만든다.
-    """
-    panel, signals = context["panel"], context["signals"]
-    close_df, prior_high, value_mult = panel["close"], signals["prior_high"], signals["value_mult"]
-    gap = (close_df / prior_high - 1) * 100
-    qualified = value_mult >= min_value_mult if min_value_mult is not None else value_mult.notna() | True
-
-    rows: list[dict[str, Any]] = []
-    for day in close_df.index[-limit:]:
-        row, ok = gap.loc[day], qualified.loc[day]
-        breakout = row >= 0
-        buyable = breakout & ok
-        held = (held_by_day or {}).get(str(day.date())) or []
-        if held:
-            buyable = buyable & ~buyable.index.isin(held)
-        count = int(buyable.sum())
-        rows.append(
-            {
-                "date": str(day.date()),
-                "candidate_count": int((breakout | ((row >= -7) & (row < 0))).sum()),
-                "breakout_count": count,
-            }
-        )
-    return rows[::-1]
-
-
-# 유니버스 전체를 현재까지 돌리는 계산이라 수십 초 걸린다 — 설정·기준일이 같으면
+# 유니버스 전체를 현재까지 돌리는 계산이라 수십 초 걸린다 — 설정이 같으면
 # 결과도 같으므로 짧게 재사용한다(설정을 바꾸면 키가 달라져 새로 계산한다).
 _POSITIONS_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="new_high_positions")
 
 
-def current_positions(settings: dict[str, Any] | None = None, as_of: str | None = None) -> dict[str, Any]:
+def current_positions(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     """지금 들고 있어야 할 종목(보유·오늘 이탈)과 오늘 신호(돌파·후보).
 
     보유는 **백테스트와 같은 엔진**을 현재까지 돌린 마지막 상태다. 화면과 백테스트가
     다른 코드로 갈라지면 표시된 보유와 성과가 어긋나므로 계산을 나누지 않는다.
     """
     settings = validate_settings(settings or load_settings())
-    cache_key = _POSITIONS_CACHE.make_key(settings, as_of or "")
-    result = _POSITIONS_CACHE.get_or_compute(cache_key, lambda: _current_positions(settings, as_of))
+    cache_key = _POSITIONS_CACHE.make_key(settings)
+    result = _POSITIONS_CACHE.get_or_compute(cache_key, lambda: _current_positions(settings))
     # 종목 메모는 **캐시 밖**에서 붙인다 — 다른 화면에서 고친 값이 즉시 보여야 한다.
     attach_stock_memos(
         result["breakouts"], result["candidates"], result["holdings"], result["planned_entries"], result["exited_today"]
@@ -648,7 +592,7 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
     return result
 
 
-def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str, Any]:
+def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     pool = settings["pool"]
     context = load_context(settings)
     universe = context["universe"]
@@ -656,12 +600,7 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
     panel, signals = context["panel"], context["signals"]
 
     close_df = panel["close"]
-    dates = close_df.index
-    if as_of:
-        dates = dates[dates <= pd.Timestamp(as_of)]
-        if len(dates) == 0:
-            raise RuntimeError(f"{as_of} 이전의 가격 데이터가 없습니다.")
-    last = dates[-1]
+    last = close_df.index[-1]
     prior_high = signals["prior_high"].loc[last]
     prior_high_intraday = signals["prior_high_intraday"].loc[last]
     today_high = panel["high"].loc[last]
@@ -678,7 +617,7 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
         meta_docs = {}
     rank_by_ticker = {t: market_cap_rank_of((doc or {}).get("meta_cache")) for t, doc in meta_docs.items()}
     # 일간 등락률 — 다른 화면(순위·시장추세)과 같은 기준으로 직전 거래일 종가 대비.
-    prev_close = close_df.loc[dates[-2]] if len(dates) >= 2 else None
+    prev_close = close_df.loc[close_df.index[-2]] if len(close_df.index) >= 2 else None
 
     rows = []
     for ticker in close_df.columns:
@@ -723,15 +662,10 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
         )
 
     # 보유·이탈은 백테스트 엔진의 마지막 상태를 그대로 쓴다.
-    simulated = run_backtest(_HOLDINGS_LOOKBACK_MONTHS, settings, context, as_of=str(last.date()))
+    simulated = run_backtest(_HOLDINGS_LOOKBACK_MONTHS, settings, context)
     holdings = simulated["open_positions"]
 
-    # 과거 날짜를 보는 중이면 실시간을 섞지 않는다 — 그날 상태를 재현하는 화면이다.
-    quotes = (
-        _live_quotes(pool, [r["ticker"] for r in rows] + [h["ticker"] for h in holdings], last)
-        if not as_of
-        else {"live": False, "pre_market": False, "traded_at": None, "by_ticker": {}}
-    )
+    quotes = _live_quotes(pool, [r["ticker"] for r in rows] + [h["ticker"] for h in holdings], last)
     # 마지막 거래일 종가로 '다음 시가에 할 일' 을 판정한다. 백테스트 루프는 마지막 날을
     # 판정하지 않는다(체결할 다음 날이 없어서). 그래서 여기서 한 번 더 본다 — 이게 없으면
     # 화면에 살 종목만 보이고 팔 종목이 안 보인다.
@@ -815,7 +749,7 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
             )
         holdings[:] = stayed
 
-        # ② 남은 보유의 보유일을 하루 늘린다. 백테스트가 매긴 값은 as_of(마지막 확정 거래일)
+        # ② 남은 보유의 보유일을 하루 늘린다. 백테스트가 매긴 값은 마지막 확정 거래일
         #    기준이고, 오늘은 그 다음 거래일이다. 이걸 안 하면 어제 산 종목이 계속 '진입' 으로 보인다.
         for held in holdings:
             held["days"] = int(held["days"]) + 1
@@ -947,11 +881,6 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
         "universe_count": len(rows),
         "window_weeks": HIGH_WINDOW_WEEKS,
         "min_value_mult": settings["min_value_mult"],
-        "available_dates": available_dates(
-            context,
-            settings["min_value_mult"],
-            held_by_day=simulated["held_by_day"],
-        ),
         # 가격 캐시가 마지막으로 갱신된 시각 — 화면이 "언제 기준인지"를 알린다.
         "refreshed_at": _cache_refreshed_at(pool),
         # 진행 중인 세션의 시세를 얹었는지 — 화면이 '돌파중/돌파성공'을 가르는 데 쓴다.

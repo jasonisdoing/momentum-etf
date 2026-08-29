@@ -176,7 +176,7 @@ def post_strategy_momentum_charts(
     payload: dict = Body(default={}),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """선정 종목 일봉 + 단기·장기 이평선. body: ``{"pool": "...", "tickers": [...], "as_of": ...}``.
+    """선정 종목 일봉 + 단기·장기 이평선. body: ``{"pool": "...", "tickers": [...]}``.
 
     티커는 화면이 이미 받아둔 선정 목록에서 그대로 넘긴다 — 여기서 선정을 다시 계산하면
     같은 시뮬레이션을 두 번 돌리게 된다.
@@ -189,13 +189,11 @@ def post_strategy_momentum_charts(
     tickers = payload.get("tickers") if isinstance(payload, dict) else None
     if not isinstance(tickers, list):
         raise ValueError("'tickers' 는 목록이어야 합니다.")
-    as_of = payload.get("as_of") if isinstance(payload, dict) else None
     return {
         "charts": holding_charts(
             settings["pool"],
             [str(ticker) for ticker in tickers],
             [int(settings["short_ma_days"]), int(settings["long_ma_days"])],
-            as_of=str(as_of) if as_of else None,
         ),
         # 화면 안내 문구("최근 N개월 일봉입니다")가 쓰는 값 — 프론트에 복사본을 두지 않는다.
         "months": HOLDING_CHART_MONTHS,

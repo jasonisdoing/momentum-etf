@@ -24,7 +24,6 @@ def holding_charts(
     pool: str,
     tickers: list[str],
     ma_days_list: list[int],
-    as_of: str | None = None,
     months: int | None = None,
 ) -> list[dict[str, Any]]:
     """티커별 {ticker, name, candles, ma_lines} 목록. 순서는 넘긴 티커 순서.
@@ -46,7 +45,6 @@ def holding_charts(
         for item in _load_ticker_type_stocks_raw(pool)
     }
     frames = load_cached_frames_bulk_from_ticker_types([pool], wanted)
-    cutoff = pd.Timestamp(as_of) if as_of else None
     # 내 평균 매입가 — 전 계좌 합산. 같은 티커가 다른 시장에도 있으면(IOO) 이 풀의 통화만 센다.
     pool_currency = str((get_ticker_type_settings(pool) or {}).get("currency") or "").strip()
     avg_buy_by = average_buy_price_by_ticker(wanted, currency=pool_currency or None)
@@ -58,8 +56,7 @@ def holding_charts(
     for frame in frames.values():
         if frame is None or frame.empty:
             continue
-        index = frame.index if cutoff is None else frame.index[frame.index <= cutoff]
-        all_dates.update(index)
+        all_dates.update(frame.index)
     window_dates: list[pd.Timestamp] = []
     if all_dates:
         ordered_dates = sorted(all_dates)
@@ -71,10 +68,6 @@ def holding_charts(
     for ticker in wanted:
         frame = frames.get(ticker)
         if frame is None or frame.empty or any(key not in frame for key in _CANDLE_KEYS):
-            continue
-        if cutoff is not None:
-            frame = frame[frame.index <= cutoff]
-        if frame.empty:
             continue
         cols = {key: _positive(frame[key]) for key in _CANDLE_KEYS}
         close = cols["Close"]

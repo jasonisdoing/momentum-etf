@@ -130,8 +130,6 @@ type RankResponse = {
   /** 이평선 일수 선택지 — 백엔드 상수(utils/ma_options)가 단일 소스. */
   short_ma_options?: number[];
   long_ma_options?: number[];
-  /** 종목 수·업종 상한 선택지 — 백엔드 `config` 가 단일 소스(-1 = 제한 없음). */
-  as_of_date?: string | null;
   monthly_return_labels?: string[];
   rows?: RankRow[];
   cache_blocked?: boolean;
@@ -195,17 +193,6 @@ type RankHeaderSummary = {
 let rankToolbarCache: RankToolbarCache | null = null;
 
 
-
-function getTodayDateInputValue(): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
-}
-
-function toDateInputValue(value: string | null | undefined): string {
-  if (!value) {
-    return getTodayDateInputValue();
-  }
-  return String(value).slice(0, 10);
-}
 
 function formatNumber(value: number | null, digits = 0): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
@@ -367,7 +354,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [maOptions, setMaOptions] = useState<Partial<MaOptionsPayload>>(rankToolbarCache?.ma_options ?? {});
   const [metricMode, setMetricMode] = useState<MetricMode>("basic");
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
-  const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [rows, setRows] = useState<RankRow[]>([]);
   const [cacheBlocked, setCacheBlocked] = useState(false);
   const [rankingComputedAt, setRankingComputedAt] = useState<string | null>(null);
@@ -394,7 +380,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const todayDateInputValue = useMemo(() => getTodayDateInputValue(), []);
   function clearCacheWarningState() {
     setCacheBlocked(false);
     setMissingTickers([]);
@@ -410,7 +395,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setMaRule(payload.ma_rules?.[0] ?? null);
     const nextMaOptions = { short_ma_options: payload.short_ma_options, long_ma_options: payload.long_ma_options };
     setMaOptions(nextMaOptions);
-    setSelectedAsOfDate(toDateInputValue(payload.as_of_date));
     setMonthlyReturnLabels(payload.monthly_return_labels ?? []);
     rankToolbarCache = {
       ticker_types: payload.ticker_types ?? [],
@@ -492,7 +476,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   async function load(next?: {
     ticker_type?: string;
     ma_rule_override?: RankMaRule;
-    as_of_date?: string;
     bootstrap?: boolean;
   }) {
     const requestSequence = ++loadSequenceRef.current;
@@ -504,9 +487,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       const search = new URLSearchParams();
       if (next?.ticker_type) {
         search.set("ticker_type", next.ticker_type);
-      }
-      if (next?.as_of_date) {
-        search.set("as_of_date", next.as_of_date);
       }
       if (next?.ma_rule_override) {
         search.set("short_ma_days", String(next.ma_rule_override.short_ma_days));
@@ -563,7 +543,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     void loadToolbar();
     void load({
       ticker_type: readRememberedTickerType() ?? undefined,
-      as_of_date: getTodayDateInputValue(),
       bootstrap: true,
     });
   }, []);
@@ -612,8 +591,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   );
   // 풀·기준일·이평선·표시 순서가 바뀌면 이전 차트는 버린다.
   const chartKey = useMemo(
-    () => `${selectedTickerType}|${selectedAsOfDate}|${maRule?.short_ma_days}|${maRule?.long_ma_days}|${chartTickers.join(",")}`,
-    [selectedTickerType, selectedAsOfDate, maRule?.short_ma_days, maRule?.long_ma_days, chartTickers],
+    () => `${selectedTickerType}|${maRule?.short_ma_days}|${maRule?.long_ma_days}|${chartTickers.join(",")}`,
+    [selectedTickerType, maRule?.short_ma_days, maRule?.long_ma_days, chartTickers],
   );
   useEffect(() => {
     setCharts(null);
@@ -622,7 +601,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   // 종목풀·정렬을 바꾸면 다시 20개부터 본다 — 앞서 100개를 펼쳐 뒀다고 새 목록도 100개를 받을 이유가 없다.
   useEffect(() => {
     setChartLimit(RANK_CHART_PAGE_SIZE);
-  }, [selectedTickerType, selectedAsOfDate]);
+  }, [selectedTickerType]);
   // 차트 모드일 때만 받는다 — 종목 수만큼 일봉을 실어 오므로 순위·관리 모드에서는 낭비다.
   useEffect(() => {
     if (pageMode !== "chart" || charts || chartsLoading || chartsError) return;
@@ -956,7 +935,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                           void load({
                             ticker_type: selectedTickerType,
                             ma_rule_override: maRule ?? undefined,
-                            as_of_date: selectedAsOfDate,
                           });
                         } catch (error) {
                           showErrorToast(error instanceof Error ? error.message : "제외 종목 설정에 실패했습니다.");
@@ -1375,7 +1353,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     }
     void load({
       ticker_type: accountId,
-      as_of_date: selectedAsOfDate,
       bootstrap: true,
     });
   }
@@ -1389,16 +1366,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     void load({
       ticker_type: selectedTickerType,
       ma_rule_override: nextRule,
-      as_of_date: selectedAsOfDate,
-    });
-  }
-
-  function handleAsOfDateChange(nextAsOfDate: string) {
-    setSelectedAsOfDate(nextAsOfDate);
-    void load({
-      ticker_type: selectedTickerType,
-      ma_rule_override: maRule ?? undefined,
-      as_of_date: nextAsOfDate,
     });
   }
 
@@ -1533,8 +1500,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         void load({
           ticker_type: selectedTickerType,
           ma_rule_override: maRule ?? undefined,
-          as_of_date: selectedAsOfDate,
-        });
+            });
       } catch (saveError) {
         showErrorToast(saveError instanceof Error ? saveError.message : "변경사항 저장에 실패했습니다.");
       }
@@ -1594,8 +1560,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       void load({
         ticker_type: selectedTickerType,
         ma_rule_override: maRule ?? undefined,
-        as_of_date: selectedAsOfDate,
-      });
+        });
     });
   }
 
@@ -1634,8 +1599,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         void load({
           ticker_type: selectedTickerType,
           ma_rule_override: maRule ?? undefined,
-          as_of_date: selectedAsOfDate,
-        });
+            });
       } catch (deleteError) {
         showErrorToast(deleteError instanceof Error ? deleteError.message : "종목 삭제에 실패했습니다.");
       }
@@ -1709,16 +1673,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             <ResponsiveFiltersSection>
               <div className="appMainHeader">
                 <div className="appMainHeaderLeft rankMainHeaderLeft">
-                  <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">기준일</span>
-                    <input
-                      className="form-control"
-                      type="date"
-                      value={selectedAsOfDate}
-                      max={getTodayDateInputValue()}
-                      onChange={(event) => handleAsOfDateChange(event.target.value)}
-                    />
-                  </label>
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">종목풀</span>
                     <select
@@ -1891,7 +1845,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           <div className="card-body appCardBodyTight appTableCardBodyFill">
             <div className="appGridFillWrap">
               <AppAgGrid
-                key={`${selectedTickerType}:${selectedAsOfDate}:${maRule?.short_ma_days}:${maRule?.long_ma_days}`}
+                key={`${selectedTickerType}:${maRule?.short_ma_days}:${maRule?.long_ma_days}`}
                 className="rankAgGrid"
                 rowData={displayGridRows}
                 columnDefs={columns}
