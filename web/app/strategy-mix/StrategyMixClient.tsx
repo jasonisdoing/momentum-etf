@@ -722,6 +722,9 @@ export function StrategyMixClient() {
   // 차트 탭을 열 때만 받는다 — 보유 종목 수만큼 일봉을 실어 오므로 목록 탭에서는 낭비다.
   useEffect(() => {
     if (holdingsTab !== "chart" || !positions || charts || chartsLoading || chartsError) return;
+    // 계좌를 막 바꾼 직후에는 `positions` 가 아직 이전 계좌 것이다 — 그 목록으로 차트를
+    // 받으면 다른 계좌의 종목이 뜬다. 새 결과가 올 때까지 기다린다.
+    if (positionsLoading || positions.account_id !== accountId) return;
     if (chartRows.length === 0) {
       setCharts([]);
       return;
@@ -745,7 +748,7 @@ export function StrategyMixClient() {
         setChartsLoading(false);
       }
     })();
-  }, [holdingsTab, positions, charts, chartsLoading, chartsError, chartRows, accountId]);
+  }, [holdingsTab, positions, charts, chartsLoading, chartsError, chartRows, accountId, positionsLoading]);
 
   const positionColumns = useMemo<ColDef<PositionRow>[]>(() => {
     const columns: ColDef<PositionRow>[] = [
@@ -1653,7 +1656,7 @@ export function StrategyMixClient() {
                   {holdingsTab === "chart" ? (
                     <StrategyHoldingCharts
                       charts={charts}
-                      loading={chartsLoading}
+                      loading={chartsLoading || positionsLoading}
                       error={chartsError}
                       emptyMessage="보유 종목이 없습니다."
                       hint="이평선은 그 종목 슬리브의 기준선 — 모멘텀은 단기·장기, 신고가는 이탈선입니다."

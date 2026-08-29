@@ -823,9 +823,11 @@ export function NewHighClient() {
   // 차트를 그릴 대상 — 이미 나간 종목은 뺀다. 표와 같은 순서로 그린다.
   const chartRows = useMemo(() => planRows.filter((row) => row.plan !== "exited"), [planRows]);
   // 풀·기준일·구성이 바뀌면 이전 차트는 버린다.
+  // 사용자가 고른 풀(draft.pool)을 앞에 둔다 — `positions` 는 새 결과가 와야 바뀌므로,
+  // 그것만 보면 풀을 바꾼 뒤 결과가 오기까지 **이전 풀의 차트가 그대로 남는다**.
   const chartKey = useMemo(
-    () => `${positions?.pool ?? ""}|${positions?.as_of ?? ""}|${chartRows.map((row) => row.ticker).join(",")}`,
-    [positions?.pool, positions?.as_of, chartRows],
+    () => `${draft?.pool ?? ""}|${positions?.pool ?? ""}|${positions?.as_of ?? ""}|${chartRows.map((row) => row.ticker).join(",")}`,
+    [draft?.pool, positions?.pool, positions?.as_of, chartRows],
   );
 
   useEffect(() => {
@@ -836,6 +838,8 @@ export function NewHighClient() {
   // 차트 탭을 열 때만 받는다 — 보유 종목 수만큼 일봉을 실어 오므로 목록 탭에서는 낭비다.
   useEffect(() => {
     if (currentTab !== "chart" || !draft || !positions || charts || chartsLoading || chartsError) return;
+    // 재계산 중이면 목록이 옛 풀 것이거나 비어 있다 — 여기서 확정하지 않는다.
+    if (running || saving) return;
     if (chartRows.length === 0) {
       setCharts([]);
       return;
@@ -1230,7 +1234,7 @@ export function NewHighClient() {
                 ) : (
                   <StrategyHoldingCharts
                     charts={charts}
-                    loading={chartsLoading}
+                    loading={chartsLoading || running || saving}
                     error={chartsError}
                     emptyMessage="보유 중이거나 진입 예정인 종목이 없습니다."
                     months={chartMonths}

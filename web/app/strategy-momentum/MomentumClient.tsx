@@ -541,9 +541,11 @@ export function MomentumClient() {
     [pickRows],
   );
   // 풀·구성이 바뀌면 이전 차트는 버린다.
+  // 사용자가 고른 풀(draftPool)을 앞에 둔다 — `view` 는 저장 응답이 와야 바뀌므로,
+  // 그것만 보면 풀을 바꾼 뒤 응답이 오기까지 이전 풀의 차트가 그대로 남는다.
   const chartKey = useMemo(
-    () => `${view?.settings.pool ?? ""}|${chartRows.map((row) => row.ticker).join(",")}`,
-    [view?.settings.pool, chartRows],
+    () => `${draftPool}|${view?.settings.pool ?? ""}|${chartRows.map((row) => row.ticker).join(",")}`,
+    [draftPool, view?.settings.pool, chartRows],
   );
   useEffect(() => {
     setCharts(null);
@@ -552,6 +554,9 @@ export function MomentumClient() {
   // 차트 탭을 열 때만 받는다 — 선정 종목 수만큼 일봉을 실어 오므로 목록 탭에서는 낭비다.
   useEffect(() => {
     if (currentTab !== "chart" || !view?.picks || charts || chartsLoading || chartsError) return;
+    // 풀을 막 바꾼 직후에는 `view` 가 아직 이전 풀 것이다 — 그 목록으로 차트를 받으면
+    // 다른 풀의 종목이 뜬다. 저장 응답이 와서 두 값이 맞을 때까지 기다린다.
+    if (saving || picking || view.settings.pool !== draftPool) return;
     if (chartRows.length === 0) {
       setCharts([]);
       return;
@@ -576,7 +581,7 @@ export function MomentumClient() {
         setChartsLoading(false);
       }
     })();
-  }, [currentTab, view?.picks, charts, chartsLoading, chartsError, chartRows, toast]);
+  }, [currentTab, view, charts, chartsLoading, chartsError, chartRows, draftPool, saving, picking, toast]);
 
   // 저장하지 않은 입력이 있으면 실행 결과가 화면 값과 어긋난다 — 저장을 먼저 요구한다.
   const isDirty = useMemo(() => {
@@ -1194,7 +1199,7 @@ export function MomentumClient() {
             {view.picks && !picking && currentTab === "chart" ? (
               <StrategyHoldingCharts
                 charts={charts}
-                loading={chartsLoading}
+                loading={chartsLoading || saving || picking}
                 error={chartsError}
                 emptyMessage="선정된 종목이 없습니다."
                 hint="장기선 위 & 단기선 위(자격)를 잃으면 편출되고, 편입이 시작된 교체일에 Buy 화살표가 표시됩니다."
