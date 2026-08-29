@@ -33,7 +33,7 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 */10 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py data_aggregate python scripts/collect_data.py >> logs/cron/data_aggregate.log 2>&1
 40 9 * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
 10 16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
-0 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_hours_analysis python scripts/analyze_market_hours.py >> logs/cron/market_hours_analysis.log 2>&1
+30 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_hours_analysis python scripts/analyze_market_hours.py >> logs/cron/market_hours_analysis.log 2>&1
 0 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py us_market_stocks python scripts/update_us_market_stocks.py >> logs/cron/us_market_stocks.log 2>&1
 10 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py aus_market_stocks python scripts/update_aus_market_stocks.py >> logs/cron/aus_market_stocks.log 2>&1
 # 한국 지수 구성종목 — 공식 API 가 없어 추종 ETF(KODEX 200 / KODEX 코스닥150) 보유종목을 명단으로 쓴다.
@@ -45,8 +45,9 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 30 16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_breadth python scripts/collect_market_breadth.py >> logs/cron/market_breadth.log 2>&1
 # 07:00 은 미국 마감(KST 새벽 05~06시) 뒤. 금요일 미국 장은 토요일 새벽에 끝나므로 화~토(2-6)에 돈다.
 0 7 * * 2-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_breadth python scripts/collect_market_breadth.py >> logs/cron/market_breadth.log 2>&1
-# DB 백업 — 매시 fresh 백업(임시 폴더 → 성공 시 교체), 최근 30개 보존. 백업 폴더가 로컬(맥)이라 LOCAL 전용.
-40 * * * * cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py db_backup python scripts/backup_mongo_full.py --gzip >> logs/cron/db_backup.log 2>&1
+# DB 백업 — 하루 1회 fresh 백업(임시 폴더 → 성공 시 교체), 최근 30개(=30일) 보존. 백업 폴더가 로컬(맥)이라 LOCAL 전용.
+# 전체 덤프라 DB 부하가 커서 매시 → 매일 07:00 으로 줄였다. 장 시간 분석(07:30)과 겹치지 않는다.
+0 7 * * * cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py db_backup python scripts/backup_mongo_full.py --gzip >> logs/cron/db_backup.log 2>&1
 
 # 최근 1시간 |변동| >= LIVE_24H_ALERT_PCT 인 종목이 있을 때만 <!channel> 로 발송(없으면 스킵).
 0 * * * * cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py live_24h_slack python scripts/live_24h_slack.py >> logs/cron/live_24h_slack.log 2>&1
