@@ -218,9 +218,10 @@ SCHEDULE_ROWS = [
         "group": "개장 전 준비",
         "job": "장 시간 분석",
         "target": "시장 스케줄",
-        "cadence": "평일 07:00 KST",
+        # DB 백업(20번)이 07:00 에 도니 겹치지 않게 30분 뒤로 뺀다.
+        "cadence": "평일 07:30 KST",
         "command": "python scripts/analyze_market_hours.py",
-        "schedule": {"minutes": [0], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
+        "schedule": {"minutes": [30], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "no": 12,
@@ -310,10 +311,11 @@ SCHEDULE_ROWS = [
         "group": "상시 운영",
         "job": "DB 백업",
         "target": "MongoDB 전체 → backups/ (최근 30개 보존)",
-        "cadence": "매일 24시간 매시 40분 KST",
-        # 매시 fresh 백업 — 임시 폴더에 받고 성공 시에만 오늘 폴더로 교체. 백업 폴더가 로컬이라 LOCAL 전용.
+        "cadence": "매일 07:00 KST",
+        # 하루 1회 fresh 백업 — 임시 폴더에 받고 성공 시에만 오늘 폴더로 교체. 백업 폴더가 로컬이라 LOCAL 전용.
+        # 예전에는 매시 돌았는데 전체 덤프라 DB 부하가 커서 하루 한 번으로 줄였다(보존 30개 = 30일).
         "command": "python scripts/backup_mongo_full.py --gzip",
-        "schedule": {"minutes": [40], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
+        "schedule": {"minutes": [0], "hours": [7], "weekdays": _WEEKDAYS_ALL},
     },
 ]
 # action 키 → 실행할 스크립트 경로

@@ -21,6 +21,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from pymongo.errors import DuplicateKeyError
+
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 
@@ -43,8 +45,29 @@ _HEARTBEAT_STALE_MINUTES = 5
 LOCAL_ONLY_JOBS: set[str] = {"db_backup"}
 
 
+# running 을 1건으로 묶는 부분 유니크 인덱스 이름.
+_SINGLE_RUNNING_INDEX = "only_one_running"
+
+
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _ensure_single_running_index(coll: Any) -> None:
+    """running 1건 제한 인덱스를 만든다. 이미 2건 이상 running 이면 만들 수 없다.
+
+    워커가 병렬로 돌던 시점에 걸쳐 있으면 생성이 실패한다 — 그때는 stale 정리 뒤
+    다음 워커 시작에서 다시 시도한다(실패해도 워커는 계속 떠야 하므로 예외를 삼킨다).
+    """
+    try:
+        coll.create_index(
+            [("status", 1)],
+            unique=True,
+            partialFilterExpression={"status": STATUS_RUNNING},
+            name=_SINGLE_RUNNING_INDEX,
+        )
+    except Exception as exc:
+        logger.warning("[배치큐] 직렬화 인덱스 생성 실패 — 병렬 실행이 남을 수 있음: %s", exc)
 
 
 def ensure_indexes() -> None:
@@ -57,6 +80,11 @@ def ensure_indexes() -> None:
     coll.create_index([("status", 1), ("triggered_at", 1)])
     # 중복 enqueue 체크용
     coll.create_index([("job_name", 1), ("status", 1)])
+    # 전역 직렬화 — running 상태 문서를 컬렉션 전체에서 1건으로 제한한다.
+    # 서버 워커와 로컬 워커가 각자 claim 하면 배치 2건이 동시에 DB 를 때린다. standalone
+    # MongoDB 라 트랜잭션을 못 쓰므로, 부분 유니크 인덱스로 DB 가 직접 막게 한다.
+    # 두 번째 워커의 claim 은 DuplicateKeyError 로 튕기고 다음 폴링에서 다시 시도한다.
+    _ensure_single_running_index(coll)
     # TTL — expires_at 이 지나면 자동 삭제 (모든 상태에 적용)
     try:
         coll.create_index("expires_at", expireAfterSeconds=0)
@@ -122,19 +150,24 @@ def claim_next_pending() -> dict[str, Any] | None:
     claim_filter: dict[str, Any] = {"status": STATUS_PENDING}
     if worker_app_type != "Local":
         claim_filter["local_only"] = {"$ne": True}
-    return coll.find_one_and_update(
-        claim_filter,
-        {
-            "$set": {
-                "status": STATUS_RUNNING,
-                "started_at": now,
-                "last_heartbeat": now,
-                "app_type": worker_app_type,
-            }
-        },
-        sort=[("triggered_at", 1)],
-        return_document=True,  # type: ignore[arg-type]
-    )
+    try:
+        return coll.find_one_and_update(
+            claim_filter,
+            {
+                "$set": {
+                    "status": STATUS_RUNNING,
+                    "started_at": now,
+                    "last_heartbeat": now,
+                    "app_type": worker_app_type,
+                }
+            },
+            sort=[("triggered_at", 1)],
+            return_document=True,  # type: ignore[arg-type]
+        )
+    except DuplicateKeyError:
+        # 다른 워커가 이미 1건을 돌리고 있다 — 전역 직렬화가 막은 정상 경로다.
+        # 아무것도 집지 않고 다음 폴링(1초)에서 다시 시도한다.
+        return None
 
 
 def update_heartbeat(item_id: Any) -> None:
