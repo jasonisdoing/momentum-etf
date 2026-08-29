@@ -16,6 +16,14 @@ export function formatDateWithWeekday(date: string): string {
   return `${date} (${WEEKDAYS[parsed.getDay()]})`;
 }
 
+/** `2026-08-23` → `8월 23일(월)`. 연도를 빼는 짧은 표기 — 좁은 자리(차트 카드 배지)용.
+ *  긴 표기가 필요하면 `formatDateWithWeekday` 를 쓴다. */
+export function formatMonthDayWithWeekday(date: string): string {
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return `${parsed.getMonth() + 1}월 ${parsed.getDate()}일(${WEEKDAYS[parsed.getDay()]})`;
+}
+
 export function formatKstDateTime(input?: string | null): string {
   if (!input) return "-";
   let s = input;

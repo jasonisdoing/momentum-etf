@@ -17,6 +17,8 @@ import {
 } from "lightweight-charts";
 import type { IChartApi, Time } from "lightweight-charts";
 
+import { formatMonthDayWithWeekday } from "@/lib/datetime";
+
 export type HoldingChartData = {
   ticker: string;
   name: string;
@@ -49,6 +51,14 @@ const DOWN = "#206bc4";
 // 이평선 팔레트 — 첫 선(단기/이탈선)은 청록, 둘째 선(장기)은 주황.
 const MA_COLORS = ["#12b886", "#f76707", "#7048e8"];
 const BUY_MARKER_COLOR = "#111827";
+
+// 카드 오른쪽 배지 공통 모양 — 색만 배지마다 다르다.
+const badgeStyle: React.CSSProperties = {
+  borderRadius: 8,
+  padding: "3px 10px",
+  fontSize: "var(--fs-sm)",
+  fontWeight: 700,
+};
 
 function formatPrice(value: number): string {
   return value.toLocaleString("ko-KR", { maximumFractionDigits: value >= 1000 ? 0 : 2 });
@@ -125,47 +135,25 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
             return `${label ? `[${label}] ` : ""}${chart.ticker} ${chart.name}`;
           })()}
         </strong>
+        {/* 오른쪽 배지 — 산 날 → 들고 있는 기간 → 수익률 순. 왼쪽부터 시간 순으로 읽힌다. */}
         <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-          {returnPct != null ? (
-            <span
-              style={{
-                border: "1px solid rgba(148,163,184,0.45)",
-                borderRadius: 8,
-                padding: "3px 10px",
-                fontSize: "var(--fs-sm)",
-                fontWeight: 700,
-              }}
-            >
-              수익률 <span style={{ color: returnColor }}>{`${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(2)}%`}</span>
+          {entryDate ? (
+            <span style={{ ...badgeStyle, background: "#f1f3f5", color: "var(--text-muted)" }}>
+              {formatMonthDayWithWeekday(entryDate)}
             </span>
-          ) : (
-            <span
-              style={{
-                borderRadius: 8,
-                padding: "3px 10px",
-                fontSize: "var(--fs-sm)",
-                fontWeight: 700,
-                background: "#fff0f0",
-                color: UP,
-              }}
-            >
-              진입 예정
-            </span>
-          )}
+          ) : null}
           {daysLabel != null || days != null ? (
-            <span
-              style={{
-                borderRadius: 8,
-                padding: "3px 10px",
-                fontSize: "var(--fs-sm)",
-                fontWeight: 700,
-                background: "#e6fcf1",
-                color: "#0ca678",
-              }}
-            >
+            <span style={{ ...badgeStyle, background: "#e6fcf1", color: "#0ca678" }}>
               {daysLabel ?? `${days}${daysUnit}`}
             </span>
           ) : null}
+          {returnPct != null ? (
+            <span style={{ ...badgeStyle, border: "1px solid rgba(148,163,184,0.45)" }}>
+              수익률 <span style={{ color: returnColor }}>{`${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(2)}%`}</span>
+            </span>
+          ) : (
+            <span style={{ ...badgeStyle, background: "#fff0f0", color: UP }}>진입 예정</span>
+          )}
         </span>
       </div>
       <div style={{ position: "relative" }}>
