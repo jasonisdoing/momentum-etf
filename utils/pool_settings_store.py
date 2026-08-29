@@ -3,8 +3,8 @@
 MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 보관한다.
 
     구조: ticker_type, name, icon, order, country_code, currency, pool_kind
-    편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS,            ← 모멘텀 전략 설정이기도 하다
-          MAX_PER_INDUSTRY, INTRAWEEK_EXIT, INTRAWEEK_STOP_PCT,  ← 모멘텀 전용
+    편집: SHORT_MA_DAYS, LONG_MA_DAYS,                         ← 모멘텀 전략 설정이기도 하다
+          INTRAWEEK_EXIT, INTRAWEEK_STOP_PCT,                   ← 모멘텀 전용
           BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, STOPLOSS_THRESHOLD_PCT,
           BENCHMARK, MARKET_REGIME_INDEX (선택 — 비우면 미설정)
 
@@ -20,7 +20,7 @@ MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 
 컬렉션 문서 형태:
     {
       _id: <ticker_type>, name, icon, order, country_code, currency,
-      TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS,
+      SHORT_MA_DAYS, LONG_MA_DAYS,
       BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, BENCHMARK, MARKET_REGIME_INDEX, updated_at
     }
 """
@@ -31,7 +31,6 @@ from datetime import datetime
 from typing import Any
 
 from config import (
-    MAX_PER_INDUSTRY_OPTIONS,
     POOL_KIND_OPTIONS,
     SLIPPAGE_PCT_OPTIONS,
     STOP_LOSS_PCT_OPTIONS,
@@ -44,18 +43,6 @@ logger = get_app_logger()
 
 COLLECTION = "pool_settings"
 
-# '제한 없음'은 파이썬에서 None 이지만 JSON 응답·쿼리스트링에는 숫자로 실어야 한다.
-INDUSTRY_CAP_NONE = -1
-
-
-def max_per_industry_options() -> list[int]:
-    """업종 상한 선택지를 API 로 내보낼 형태로. None(제한 없음) 은 -1 로 바꾼다.
-
-    화면이 목록을 베껴 두면 어긋난다 — `/pools-rank` 는 4 가 빠져 있었고
-    `/pools-settings` 는 ["1","2","3",""] 로 굳어 있었다. 두 화면 모두 이 함수를 탄다.
-    """
-    return [INDUSTRY_CAP_NONE if value is None else int(value) for value in MAX_PER_INDUSTRY_OPTIONS]
-
 
 INTERNAL_POOL_ID_PREFIX = "__"
 
@@ -64,7 +51,6 @@ INTERNAL_POOL_ID_PREFIX = "__"
 # 기준이라, 전략 설정을 따로 두지 않고 풀 문서 하나에 모은다(순위 화면·보유종목 알림·
 # 종목풀 백테스트가 같은 값을 본다). 신고가는 자기 설정 문서를 따로 쓴다.
 OVERRIDABLE_KEYS: tuple[str, ...] = (
-    "TOP_N_HOLD",
     "SHORT_MA_DAYS",
     "LONG_MA_DAYS",
 )
@@ -72,7 +58,6 @@ OVERRIDABLE_KEYS: tuple[str, ...] = (
 # 모멘텀 전략 전용 값 — 위 셋과 함께 한 풀의 전략 설정을 이룬다. 기존 문서에 없을 수 있어
 # 로딩 필수값은 아니다(미설정이면 전략 화면에서 저장해야 한다).
 MOMENTUM_KEYS: tuple[str, ...] = (
-    "MAX_PER_INDUSTRY",  # None = 제한없음
     "INTRAWEEK_EXIT",
     "INTRAWEEK_STOP_PCT",  # None = 손절 없음
 )
@@ -113,7 +98,7 @@ STRUCTURAL_KEYS: tuple[str, ...] = (
 )
 
 
-_INT_KEYS = ("TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS")
+_INT_KEYS = ("SHORT_MA_DAYS", "LONG_MA_DAYS")
 _FLOAT_KEYS = ("BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT", "STOPLOSS_THRESHOLD_PCT")
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 _ALLOWED_CURRENCIES = {"KRW", "AUD", "USD"}
@@ -340,19 +325,9 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
             if num not in allowed:
                 options = ", ".join(str(day) for day in allowed)
                 raise PoolSettingsError(f"{key} 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
-        elif key == "TOP_N_HOLD":
-            if not (0 <= num <= 100):
-                raise PoolSettingsError(f"TOP_N_HOLD 는 1 ~ 100 범위여야 합니다: {num}")
         cleaned[key] = num
 
     # 모멘텀 전용 — 숫자/불리언이 섞여 있고 None 이 '없음' 을 뜻한다(임의 보정하지 않는다).
-    if "MAX_PER_INDUSTRY" in values:
-        raw = values["MAX_PER_INDUSTRY"]
-        cap = None if raw in (None, "", "none") else int(raw)
-        if check_options and cap not in MAX_PER_INDUSTRY_OPTIONS:
-            allowed = ", ".join("없음" if v is None else str(v) for v in MAX_PER_INDUSTRY_OPTIONS)
-            raise PoolSettingsError(f"MAX_PER_INDUSTRY 는 {allowed} 중 하나여야 합니다: {raw}")
-        cleaned["MAX_PER_INDUSTRY"] = cap
     if "INTRAWEEK_EXIT" in values:
         cleaned["INTRAWEEK_EXIT"] = bool(values["INTRAWEEK_EXIT"])
     if "INTRAWEEK_STOP_PCT" in values:

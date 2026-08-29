@@ -8,7 +8,6 @@ type RankTickerType = {
   country_code: string;
   top_n_hold?: number;
   /** 업종 상한 — 종목풀 저장값. null/미설정 = 제한 없음. */
-  max_per_industry?: number | null;
   currency?: string;
   include?: string[];
 };
@@ -85,8 +84,6 @@ type RankToolbarData = {
   short_ma_options: number[];
   long_ma_options: number[];
   /** 종목 수·업종 상한 선택지 — 백엔드 `config` 가 단일 소스(-1 = 제한 없음). */
-  top_n_options: number[];
-  max_per_industry_options: number[];
 };
 
 export async function loadRankToolbarData(params?: {
@@ -111,10 +108,6 @@ export async function loadRankData(params?: {
   ticker_type?: string;
   ma_rule_override?: RankMaRuleOverride;
   as_of_date?: string;
-  /** 종목 수 — 화면 상단에서 바꿔 보는 값. 생략하면 종목풀 저장값. */
-  top_n?: number | null;
-  /** 업종 상한 — 화면 상단에서 바꿔 보는 값. 생략하면 종목풀 저장값, -1 은 '제한 없음'. */
-  max_per_industry?: number | null;
 }, signal?: AbortSignal): Promise<RankData> {
   const search = new URLSearchParams();
   if (params?.ticker_type) {
@@ -131,13 +124,6 @@ export async function loadRankData(params?: {
         search.set(key, String(value));
       }
     }
-  }
-
-  if (params?.top_n != null) {
-    search.set("top_n", String(params.top_n));
-  }
-  if (params?.max_per_industry != null) {
-    search.set("max_per_industry", String(params.max_per_industry));
   }
 
   const query = search.size > 0 ? `?${search.toString()}` : "";

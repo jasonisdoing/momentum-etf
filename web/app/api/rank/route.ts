@@ -34,14 +34,10 @@ export async function GET(request: NextRequest) {
       }
       return value;
     };
-    const topN = readIntParam("top_n", "종목 수");
-    const maxPerIndustry = readIntParam("max_per_industry", "업종 상한");
     const data = await loadRankData({
       ticker_type: tickerType,
       ma_rule_override: hasMaRuleOverride ? maRuleOverride : undefined,
       as_of_date: asOfDate,
-      top_n: topN,
-      max_per_industry: maxPerIndustry,
     }, request.signal);
     return jsonNoStore(data);
   } catch (error) {

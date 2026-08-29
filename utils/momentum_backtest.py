@@ -33,7 +33,6 @@ from leverage.engine.backtest.ma_cross import max_drawdown_pct, sortino
 from utils.momentum_service import (
     available_backtest_months,
     benchmark_info,
-    industry_map,
     load_benchmark_close,
     load_price_frames,
     load_settings,
@@ -209,13 +208,7 @@ def run_backtest(
     # 슬리피지는 종목풀 설정을 단일 소스로 쓴다 — 매수·매도 편도값을 각각 적용한다.
     buy_slippage_pct, sell_slippage_pct = get_pool_slippage(pool)
     buy_slippage, sell_slippage = buy_slippage_pct / 100.0, sell_slippage_pct / 100.0
-    top_n = int(settings["top_n"])
-
-    # 업종 상한 — 선정 화면과 같은 규칙으로 상위 종목을 고른다.
-    max_per_industry = settings["max_per_industry"]  # None = 제한없음
-    if context.get("industry_by") is None:
-        context["industry_by"] = industry_map(pool)
-    industry_by_ticker = context["industry_by"]
+    top_n = int(settings["top_n"])  # validate_settings 가 config.TOP_N_HOLD 로 채운다
 
     # 일간 표용 — 보유 구간 안에서 매일의 동일가중 포트폴리오 수익률.
     # 가격은 한 번만 정제해 재사용한다(구간마다 다시 정제하면 느리다).
@@ -322,7 +315,7 @@ def run_backtest(
         end = dates[position + 1]
         # 판정은 교체일 직전 거래일(signal_dates), 체결·보유 구간은 교체일 시가(start→end).
         scored = rank_candidates(candidates_by_date[position])
-        holdings = [item["ticker"] for item in select_top(scored, top_n, max_per_industry, industry_by_ticker)]
+        holdings = [item["ticker"] for item in select_top(scored, top_n)]
         holdings_set = set(holdings)
         added_tickers = sorted(holdings_set - previous_holdings)
         removed_tickers = sorted(previous_holdings - holdings_set)
@@ -518,8 +511,6 @@ def run_backtest(
                     select_candidates(universe, frames, settings, as_of=bench_index[bench_index < last_cached][-1])
                 ),
                 top_n,
-                max_per_industry,
-                industry_by_ticker,
             )
         }
         for ticker in sorted(selection - previous_holdings):
@@ -632,7 +623,7 @@ def run_backtest(
         # 다음 교체 판정일 종가가 이미 확정됐다 — 그 선정을 그대로 보여준다.
         pending_holdings = {
             item["ticker"]
-            for item in select_top(rank_candidates(candidates_by_date[-1]), top_n, max_per_industry, industry_by_ticker)
+            for item in select_top(rank_candidates(candidates_by_date[-1]), top_n)
         }
         pending_added = sorted(pending_holdings - current_holdings)
         pending_removed = sorted(current_holdings - pending_holdings)

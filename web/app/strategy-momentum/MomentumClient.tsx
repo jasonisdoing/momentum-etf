@@ -80,8 +80,8 @@ const CURRENT_NOTES = [
 // 풀별로 따로 저장되는 설정 — 풀 셀렉트를 바꾸면 그 풀의 저장분으로 폼이 전환된다.
 // 슬리피지는 종목풀 설정을, 백테스트 기간은 실행할 때 고른 값을 쓴다 — 여기 없다.
 type PoolSettings = {
+  /** 서버가 config.TOP_N_HOLD 로 채워 주는 공통값 — 화면에 입력은 없고 표시·계산에만 쓴다. */
   top_n: number;
-  max_per_industry: number | null;
   short_ma_days: number;
   long_ma_days: number;
   /** 주중 이탈 — 보유 자격을 잃으면 다음 거래일 시가에 판다. 풀 성격에 따라 끄고 켠다. */
@@ -91,13 +91,6 @@ type PoolSettings = {
 };
 
 type Settings = PoolSettings & { pool: string };
-
-/** 저장된 값이 선택지에 없으면 함께 노출한다 — 빼면 셀렉트가 빈칸이 되어 무엇이 저장돼 있는지 알 수 없다. */
-function withSavedValue(options: number[], saved: string | undefined): number[] {
-  const value = Number(saved);
-  if (!Number.isFinite(value) || options.includes(value)) return options;
-  return [...options, value].sort((a, b) => a - b);
-}
 
 type PickRow = {
   rank: number | null;
@@ -235,8 +228,6 @@ type View = {
   month_options?: number[];
   // 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다).
   constraints?: {
-    top_n_options: number[];
-    max_per_industry_options: (number | null)[];
     intraweek_stop_options?: (number | null)[];
   };
   picks: PicksResult | null;
@@ -246,8 +237,6 @@ type View = {
 // 슬리피지와 백테스트 기간은 백테스트에만 쓰이므로 선정을 다시 돌릴 이유가 없다.
 const PICK_AFFECTING_KEYS = [
   "pool",
-  "top_n",
-  "max_per_industry",
 ] as const;
 
 function needsRepick(before: Settings | null, after: Settings): boolean {
@@ -309,7 +298,6 @@ export function MomentumClient() {
   // 초안 초기값은 자리만 잡는다 — 설정을 받은 뒤 applyView 가 항상 덮어쓰며,
   // 설정을 못 받으면 폼 자체를 그리지 않으므로 이 값이 화면에 보이는 경우는 없다.
   const [draftPool, setDraftPool] = useState<string>("");
-  const [draftMaxPerIndustry, setDraftMaxPerIndustry] = useState<number | null>(null);
   // 이평선 초안 — 종목풀 설정에 풀별로 저장된다(순위 화면·보유종목 알림과 같은 값).
   const [draftMaRule, setDraftMaRule] = useState<{ short: number; long: number } | null>(null);
   const [draftIntraweekExit, setDraftIntraweekExit] = useState(true);
@@ -318,10 +306,7 @@ export function MomentumClient() {
 
   // 풀별 설정을 폼 초안에 채운다 — 풀 셀렉트 전환과 응답 반영이 같은 경로를 쓴다.
   const fillDrafts = useCallback((values: PoolSettings) => {
-    setDraftMaxPerIndustry(values.max_per_industry);
-    setDraft({
-      top_n: String(values.top_n),
-    });
+    setDraft({});
     setDraftMaRule({ short: values.short_ma_days, long: values.long_ma_days });
     setDraftIntraweekExit(values.intraweek_exit);
     setDraftIntraweekStop(values.intraweek_stop_pct == null ? "" : String(values.intraweek_stop_pct));
@@ -451,20 +436,16 @@ export function MomentumClient() {
   // 업종 컬럼·업종 상한 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
   const hasIndustryData = poolHasIndustry(selectedPoolOption);
   const hasMarketCap = poolHasMarketCap(selectedPoolOption);
-  // 업종 데이터가 없는 풀은 상한이 무의미하므로 **없음(null)으로 고정**한다 — 저장·변경 감지·튜닝이
-  // 모두 이 값을 쓴다(저장값이 숫자로 남아 있으면 '저장하지 않은 변경'으로 떠서 없음으로 저장하게 된다).
-  const effectiveMaxPerIndustry = hasIndustryData ? draftMaxPerIndustry : null;
   const saveSettings = useCallback(async () => {
-    const topN = Number(draft.top_n);
-    if (!Number.isFinite(topN) || draftMaRule == null) {
+    if (draftMaRule == null) {
       toast.error("설정 값이 올바르지 않습니다.");
       return;
     }
     await persistSettings(
       {
         pool: draftPool,
-        top_n: topN,
-        max_per_industry: effectiveMaxPerIndustry,
+        // 종목 수(공통 config)·업종 상한(폐기)은 더 이상 보내지 않는다.
+        top_n: view?.settings.top_n ?? 0,
         // 이평선은 전략 전용 값 — 설정의 일부로 풀별 저장한다(종목풀 설정과 무관).
         short_ma_days: draftMaRule.short,
         long_ma_days: draftMaRule.long,
@@ -474,7 +455,7 @@ export function MomentumClient() {
       },
       "설정을 저장했습니다.",
     );
-  }, [draft, draftIntraweekExit, draftIntraweekStop, draftMaRule, effectiveMaxPerIndustry, draftPool, persistSettings, toast]);
+  }, [draftIntraweekExit, draftIntraweekStop, draftMaRule, draftPool, persistSettings, toast, view?.settings.top_n]);
 
   // 풀 셀렉트 변경 — 그 풀의 저장 설정이 있으면 **즉시 전환·저장·재선정**한다
   // (전환은 초안이 아니라 컨텍스트 스위치다). 저장분이 없는 풀(첫 설정)만 초안으로
@@ -542,8 +523,6 @@ export function MomentumClient() {
     if (view.coerced?.length) return true;
     return (
       draftPool !== saved.pool ||
-      effectiveMaxPerIndustry !== saved.max_per_industry ||
-      draft.top_n !== String(saved.top_n) ||
       draftIntraweekExit !== saved.intraweek_exit ||
       (draftIntraweekStop === "" ? null : Number(draftIntraweekStop)) !== (saved.intraweek_stop_pct ?? null) ||
       (draftMaRule != null &&
@@ -551,7 +530,7 @@ export function MomentumClient() {
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
           draftMaRule.long !== view.ma_rule.long_ma_days))
     );
-  }, [draft, draftIntraweekExit, draftIntraweekStop, draftMaRule, effectiveMaxPerIndustry, draftPool, view]);
+  }, [draftIntraweekExit, draftIntraweekStop, draftMaRule, draftPool, view]);
 
   const monthlyLabels = view?.picks?.monthly_return_labels ?? [];
   // 선정 결과 풀의 국가 — 마켓·시가총액 컬럼 표시와 티커 표기(ASX:)를 정한다.
@@ -1015,44 +994,6 @@ export function MomentumClient() {
                     ))}
                   </select>
                 </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">종목 수</span>
-                  <select
-                    className="form-select form-select-sm"
-                    style={{ width: 80 }}
-                    value={draft.top_n ?? ""}
-                    onChange={(e) => setDraft((d) => ({ ...d, top_n: e.target.value }))}
-                  >
-                    {withSavedValue(view.constraints?.top_n_options ?? [], draft.top_n).map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">업종 상한</span>
-                  {hasIndustryData ? (
-                    <select
-                      className="form-select form-select-sm"
-                      style={{ width: 96 }}
-                      // '없음'(null)은 빈 문자열로 실어 보낸다 — select 의 value 는 문자열만 받는다.
-                      value={draftMaxPerIndustry == null ? "" : String(draftMaxPerIndustry)}
-                      onChange={(e) => setDraftMaxPerIndustry(e.target.value === "" ? null : Number(e.target.value))}
-                    >
-                      {(view.constraints?.max_per_industry_options ?? []).map((count) => (
-                        <option key={String(count)} value={count == null ? "" : String(count)}>
-                          {count == null ? "없음" : count}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    // 업종 데이터가 없는 풀(ETF 모음 등)은 상한이 무의미 — '없음'으로 고정해 보여준다.
-                    <select className="form-select form-select-sm" style={{ width: 96 }} value="" disabled title="업종 데이터가 없는 종목풀은 업종 상한을 쓰지 않습니다">
-                      <option value="">없음</option>
-                    </select>
-                  )}
-                </label>
                 {draftMaRule != null && view.ma_rule != null ? (
                   <>
                     <label className="appLabeledField">
@@ -1320,10 +1261,8 @@ export function MomentumClient() {
           disabledHint={isDirty ? "설정을 저장해야 실행할 수 있습니다" : undefined}
           secondsPerCombo={0.06}
           extraSeconds={90}
-          fixedLabel={`저장된 설정 기준 (종목풀 ${draftPool})${hasIndustryData ? "" : " · 업종 상한 없음(업종 데이터 없는 풀)"}`}
+          fixedLabel={`저장된 설정 기준 (종목풀 ${draftPool} · 종목 수 ${view.settings.top_n} 공통 고정)`}
           current={{
-            top_n: view.settings.top_n,
-            max_per_industry: hasIndustryData ? view.settings.max_per_industry : null,
             short_ma_days: view.settings.short_ma_days,
             long_ma_days: view.settings.long_ma_days,
             intraweek: !view.settings.intraweek_exit
@@ -1334,17 +1273,7 @@ export function MomentumClient() {
           }}
           axes={[
             // 축 값 = 상단 셀렉트 선택지(서버 상수) — 여기서 따로 정하지 않는다.
-            { key: "top_n", label: "종목 수", values: (view.constraints?.top_n_options ?? []).map((n) => ({ value: n, label: `${n}` })) },
-            // 업종 데이터가 없는 풀은 상한 축을 돌리지 않는다(결과가 전부 같아 조합만 3배로 는다).
-            ...(hasIndustryData
-              ? [
-                {
-                  key: "max_per_industry",
-                  label: "업종 상한",
-                  values: (view.constraints?.max_per_industry_options ?? []).map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: `${n}` })),
-                },
-              ]
-              : []),
+            // 종목 수(공통 고정)·업종 상한(폐기)은 축이 아니다 — 튜닝은 시장의 이평 반응과 손절 기준만 잰다.
             { key: "short_ma_days", label: "단기 이평", values: (view.ma_rule?.short_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },
             { key: "long_ma_days", label: "장기 이평", values: (view.ma_rule?.long_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },
             {
@@ -1365,8 +1294,6 @@ export function MomentumClient() {
             const next = {
               ...view.settings,
               pool: draftPool,
-              top_n: Number(params.top_n),
-              max_per_industry: !hasIndustryData || params.max_per_industry == null ? null : Number(params.max_per_industry),
               short_ma_days: Number(params.short_ma_days),
               long_ma_days: Number(params.long_ma_days),
               intraweek_exit: intraweekExit,
@@ -1380,7 +1307,7 @@ export function MomentumClient() {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               // 업종 데이터가 없는 풀은 상한 축을 '없음' 하나로 고정해 보낸다.
-              body: JSON.stringify({ months, ranges: hasIndustryData ? ranges : { ...ranges, max_per_industry: [null] } }),
+              body: JSON.stringify({ months, ranges }),
             });
             const payload = await resp.json();
             if (!resp.ok) throw new Error(payload?.error ?? "튜닝에 실패했습니다.");

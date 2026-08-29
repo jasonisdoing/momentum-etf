@@ -28,11 +28,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import (
-    MAX_PER_INDUSTRY_OPTIONS,
-    MIN_VALUE_MULT_OPTIONS,
-    TOP_N_OPTIONS,
-)
+from config import MIN_VALUE_MULT_OPTIONS, TOP_N_HOLD
 from config import STOP_LOSS_PCT_OPTIONS as STOP_LOSS_OPTIONS
 from utils.ma_options import SHORT_MA_OPTIONS
 from utils.price_series import positive_prices as _positive
@@ -48,7 +44,6 @@ HIGH_WINDOW = f"{HIGH_WINDOW_WEEKS * 7}D"
 HIGH_WINDOW_MIN_DAYS = 230
 
 # 화면 셀렉트 선택지 — 백엔드가 단일 소스이고 화면은 응답으로 받는다.
-# 종목 수·업종 상한은 모멘텀과 의미가 같아 전략 공용 상수를 쓴다(`utils/strategy_options`).
 EXIT_MA_OPTIONS = SHORT_MA_OPTIONS  # 이탈 이평선 = 시스템 공용 단기 이평 선택지
 
 # 신호가 자리보다 많을 때는 20일 평균 대비 거래대금 배수가 큰 쪽(돌파에 자금이 실린 종목)부터 담는다.
@@ -60,12 +55,6 @@ EXIT_MA_OPTIONS = SHORT_MA_OPTIONS  # 이탈 이평선 = 시스템 공용 단기
 # 백테스트 기간 기본값 — 화면에서 실행할 때 고르고, 저장하지 않는다.
 DEFAULT_BACKTEST_MONTHS = 12
 
-# 한 업종에서 최대 몇 종목까지 담을지. None 은 '제한 없음'.
-# 돌파는 주도 섹터에서 무더기로 나오는데, 그대로 담으면 계좌가 한 업황에 걸린다.
-# kor 60개월 기준 상한 2 가 7749% → 9416% 로 오르고 MDD 도 -29% → -27% 로 낮아진다.
-# 상한 1 은 과하다(1330%). 8종목에 상한 5 이상은 걸릴 일이 없어 '제한 없음' 과 같다.
-# 업종을 모르는 종목(ETF 풀 등)은 묶을 근거가 없어 상한을 적용하지 않는다.
-
 _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "new_high_settings"
 
@@ -75,23 +64,16 @@ _SETTINGS_KEY = "new_high_settings"
 # 슬리피지는 종목풀 설정(BUY/SELL_SLIPPAGE_PCT)을 쓰고, 백테스트 기간은 실행할 때
 # 화면에서 고른다 — 둘 다 여기 저장하지 않는다.
 PER_POOL_SETTING_KEYS = (
-    "top_n",
     "stop_loss_pct",
     "exit_ma_days",
     "min_value_mult",
-    "max_per_industry",
 )
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "top_n": 8,
     "stop_loss_pct": -7.0,
     "exit_ma_days": 20,
     # 기본은 조건 없음 — 풀마다 적정값이 달라 사용자가 시험해 보고 저장한다.
     "min_value_mult": None,
-    # 기본은 제한 없음 — 하한과 마찬가지로 풀마다 적정값이 다르다. kor 은 상한 2 가
-    # 세 구간 모두에서 가장 좋았지만(60개월 7749% → 9416%), us 는 종목이 100개뿐이라
-    # 상한에 걸리면 대체할 후보가 없어 자리를 놀린다(240% → 113%). ETF 풀은 업종 자체가 없다.
-    "max_per_industry": None,
 }
 
 
@@ -344,18 +326,12 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     if min_value_mult not in MIN_VALUE_MULT_OPTIONS:
         raise ValueError(f"min_value_mult 는 {list(MIN_VALUE_MULT_OPTIONS)} 중 하나여야 합니다 (받은 값: {raw_min})")
 
-    raw_cap = settings.get("max_per_industry", DEFAULT_SETTINGS["max_per_industry"])
-    max_per_industry = None if raw_cap in (None, "", "none") else int(raw_cap)
-    if max_per_industry not in MAX_PER_INDUSTRY_OPTIONS:
-        raise ValueError(
-            f"max_per_industry 는 {list(MAX_PER_INDUSTRY_OPTIONS)} 중 하나여야 합니다 (받은 값: {raw_cap})"
-        )
-
     return {
         "pool": pool,
         "min_value_mult": min_value_mult,
-        "max_per_industry": max_per_industry,
-        "top_n": pick("top_n", TOP_N_OPTIONS, int),
+        # 종목 수(슬롯)는 풀별 설정이 아니라 시스템 공통(config.TOP_N_HOLD) — 업종 상한은
+        # 개념째 폐기했다(집중 완화는 합성 배분 몫).
+        "top_n": TOP_N_HOLD,
         "stop_loss_pct": pick("stop_loss_pct", STOP_LOSS_OPTIONS, float),
         "exit_ma_days": pick("exit_ma_days", EXIT_MA_OPTIONS, int),
     }
@@ -396,8 +372,6 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
 
 # 화면 로드 때 선택지 밖 저장값을 보정할 항목 — (키, 라벨, 선택지)
 _OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
-    ("top_n", "종목 수", TOP_N_OPTIONS),
-    ("max_per_industry", "업종 상한", MAX_PER_INDUSTRY_OPTIONS),
     ("exit_ma_days", "이탈 이평선", EXIT_MA_OPTIONS),
     ("min_value_mult", "급증 하한", MIN_VALUE_MULT_OPTIONS),
     ("stop_loss_pct", "손절선", STOP_LOSS_OPTIONS),
@@ -435,13 +409,11 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "DEFAULT_SETTINGS",
-    "MAX_PER_INDUSTRY_OPTIONS",
     "DEFAULT_BACKTEST_MONTHS",
     "MIN_VALUE_MULT_OPTIONS",
     "EXIT_MA_OPTIONS",
     "HIGH_WINDOW_WEEKS",
     "STOP_LOSS_OPTIONS",
-    "TOP_N_OPTIONS",
     "benchmark_info",
     "build_price_panel",
     "compute_signals",

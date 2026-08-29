@@ -41,11 +41,9 @@ def _ma_rule_payload(settings: dict) -> dict:
 
 def _constraints_payload() -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트 복사본 제거)."""
-    from utils.momentum_service import INTRAWEEK_STOP_OPTIONS, MAX_PER_INDUSTRY_OPTIONS, TOP_N_OPTIONS
+    from utils.momentum_service import INTRAWEEK_STOP_OPTIONS
 
     return {
-        "top_n_options": list(TOP_N_OPTIONS),
-        "max_per_industry_options": list(MAX_PER_INDUSTRY_OPTIONS),
         # 주중 손절선(%) — 주중 이탈이 켜진 풀에서만 화면에 노출한다. None = 손절 없음.
         "intraweek_stop_options": list(INTRAWEEK_STOP_OPTIONS),
     }
@@ -156,7 +154,7 @@ def post_strategy_momentum_tuning(
 ) -> dict:
     """튜닝 — 설정 항목 범위의 모든 조합을 백테스트한다 (저장된 설정 기준).
 
-    body: ``{"months": 12, "ranges": {"top_n": [...], "max_per_industry": [...],
+    body: ``{"months": 12, "ranges": {
     "short_ma_days": [...], "long_ma_days": [...], "intraweek": ["off", "none", -5, ...]}}``
     """
     from utils.momentum_tuning import run_tuning

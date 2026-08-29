@@ -1,6 +1,8 @@
 """모멘텀 전략 튜닝 — 설정 항목들의 범위 조합을 한 번에 백테스트해 비교한다.
 
-화면 '튜닝' 섹션용. 축(화면 순서): 종목 수 · 업종 상한 · 선정 이평(단기·장기) · 주중 손절선.
+화면 '튜닝' 섹션용. 축(화면 순서): 선정 이평(단기·장기) · 주중 손절선.
+종목 수는 시스템 공통(config.TOP_N_HOLD) 고정, 업종 상한은 폐기 — 튜닝은 "그 시장이 어떤
+이동평균에 반응하는가"와 손절 기준을 재는 용도로만 쓴다(종목 수까지 돌리면 과적합 탐색이 된다).
 (단기, 장기) 쌍을 작업 단위로 별도 프로세스에서 병렬로 돌린다 — 각 프로세스는 가격·판정일별
 후보를 한 번 읽어 그 쌍의 전 조합에 공유(run_backtest 의 context)하므로 조합당 0.5초 수준이고,
 병렬 수(코어 수 − 1)만큼 전체 시간이 줄어든다.
@@ -13,7 +15,6 @@
 
 from __future__ import annotations
 
-from itertools import product
 from typing import Any
 
 import pandas as pd
@@ -21,15 +22,13 @@ import pandas as pd
 from utils.momentum_service import (
     INTRAWEEK_STOP_OPTIONS,
     LONG_MA_OPTIONS,
-    MAX_PER_INDUSTRY_OPTIONS,
     SHORT_MA_OPTIONS,
-    TOP_N_OPTIONS,
     load_settings,
     validate_settings,
 )
 from utils.strategy_tuning import finalize, run_groups, seed_worker_caches, summarize_combo
 
-TUNING_AXES = ("top_n", "max_per_industry", "short_ma_days", "long_ma_days", "intraweek")
+TUNING_AXES = ("short_ma_days", "long_ma_days", "intraweek")
 
 
 def _intraweek_settings(value: Any) -> dict[str, Any]:
@@ -65,7 +64,6 @@ def _init_worker(bundle: dict[str, Any]) -> None:
 
 def _preload(pool: str) -> dict[str, Any]:
     """부모가 한 번 읽는 공유 데이터 — 워커 초기화 때 통째로 넘긴다."""
-    from utils.industry_map import industry_map
     from utils.momentum_service import load_benchmark_close, load_price_frames, load_universe
     from utils.settings_loader import _load_pool_configs
     from utils.stock_list_io import _load_ticker_type_stocks_raw
@@ -77,25 +75,22 @@ def _preload(pool: str) -> dict[str, Any]:
         "universe": universe,
         "frames": load_price_frames(universe),
         "benchmark_close": load_benchmark_close(pool),
-        "industry_by": industry_map(pool),
     }
 
 
 def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
-    """(단기, 장기) 쌍 × 종목수 묶음 하나의 조합 — 별도 프로세스에서 돈다."""
-    months, base, short, long, top_ns, caps, intraweeks = task
+    """(단기, 장기) 쌍 하나의 조합 — 별도 프로세스에서 돈다."""
+    months, base, short, long, intraweeks = task
     from utils.momentum_backtest import run_backtest
 
     context = _WORKER_CONTEXT
     if not context:
-        context.update({k: _PRELOAD[k] for k in ("universe", "frames", "benchmark_close", "industry_by")})
+        context.update({k: _PRELOAD[k] for k in ("universe", "frames", "benchmark_close")})
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
-    for top_n, cap, value in product(top_ns, caps, intraweeks):
+    for value in intraweeks:
         combo = dict(
             base,
-            top_n=top_n,
-            max_per_industry=cap,
             short_ma_days=short,
             long_ma_days=long,
             **_intraweek_settings(value),
@@ -111,8 +106,6 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
         rows.append(
             summarize_combo(
                 {
-                    "top_n": top_n,
-                    "max_per_industry": cap,
                     "short_ma_days": short,
                     "long_ma_days": long,
                     "intraweek": value,
@@ -126,8 +119,6 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
 
 def run_tuning(months: int, settings: dict[str, Any] | None, ranges: dict[str, list[Any]]) -> dict[str, Any]:
     base = validate_settings(settings or load_settings())
-    top_ns = _checked(ranges.get("top_n", []), TOP_N_OPTIONS, "종목 수")
-    caps = _checked(ranges.get("max_per_industry", []), MAX_PER_INDUSTRY_OPTIONS, "업종별 최대 보유")
     shorts = _checked(ranges.get("short_ma_days", []), SHORT_MA_OPTIONS, "단기 이평")
     longs = _checked(ranges.get("long_ma_days", []), LONG_MA_OPTIONS, "장기 이평")
     intraweeks = list(dict.fromkeys(ranges.get("intraweek", [])))
@@ -139,9 +130,7 @@ def run_tuning(months: int, settings: dict[str, Any] | None, ranges: dict[str, l
     if not ma_pairs:
         raise ValueError("단기 이평이 장기 이평보다 작은 조합이 없습니다.")
 
-    # 작업을 잘게 쪼개 코어가 놀지 않게 한다 — 이평 쌍마다 종목수를 두 묶음으로.
-    halves = [top_ns[: (len(top_ns) + 1) // 2], top_ns[(len(top_ns) + 1) // 2 :]]
-    tasks = [(months, base, short, long, part, caps, intraweeks) for short, long in ma_pairs for part in halves if part]
+    tasks = [(months, base, short, long, intraweeks) for short, long in ma_pairs]
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
     bundle = _preload(str(base["pool"]))

@@ -17,7 +17,6 @@ from typing import Any
 import pandas as pd
 
 from config import CACHE_TTL_COMPUTE
-from core.strategy.scoring import cap_by_industry
 from utils.new_high_service import (
     DEFAULT_BACKTEST_MONTHS,
     HIGH_WINDOW,
@@ -44,20 +43,6 @@ MAX_BACKTEST_MONTHS = 60
 # 날짜별 보유 목록을 남겨 둘 최근 거래일 수. 날짜 셀렉트가 쓰는 범위(20일)보다 넉넉히 잡는다.
 _HELD_HISTORY_DAYS = 40
 
-
-def _cap_by_industry(
-    candidates: list[str],
-    held: list[str],
-    industry_by: dict[str, str],
-    cap: int | None,
-    free: int,
-) -> tuple[list[str], list[str]]:
-    """업종 상한 적용 — 규칙은 모멘텀과 **같은 함수**(`core.strategy.scoring.cap_by_industry`).
-
-    이 래퍼는 인자 순서만 기존 호출부에 맞춰 준다. 백테스트와 화면이 같은 함수를 써야
-    표시된 진입 예정과 성과가 어긋나지 않는다.
-    """
-    return cap_by_industry(candidates, industry_by, cap, free, held=held)
 
 
 def _drawdown_pct(series: pd.Series) -> float:
@@ -233,7 +218,7 @@ def run_backtest(
                 and _meets_min_mult(value_mult.at[day, t], min_mult)
             ]
             picks.sort(key=lambda t: priority_of(day, t), reverse=True)
-            picks, _ = _cap_by_industry(picks, list(holdings), industry_by, settings["max_per_industry"], free)
+            picks = picks[:free]
             # 주수 배분은 운용 현황과 **같은 함수**를 쓴다 — 규칙이 갈라지면 백테스트가
             # 실제로 못 내는 성과를 내게 된다. 예산은 살 수 있는 현금까지만(팔지 않은
             # 평가익으로는 못 산다). 손익 계산에는 슬리피지를 얹은 값을 쓴다.
@@ -613,7 +598,6 @@ def available_dates(
     min_value_mult: float | None,
     limit: int = 20,
     held_by_day: dict[str, list[str]] | None = None,
-    max_per_industry: int | None = None,
 ) -> list[dict[str, Any]]:
     """최근 거래일 목록과 그날의 후보·돌파 종목 수. 날짜 셀렉트가 이 값을 쓴다.
 
@@ -621,7 +605,6 @@ def available_dates(
     보유 중이던 종목까지 세면 "돌파 4"인데 진입은 3건인 날이 생겨 사람을 오해하게 만든다.
     """
     panel, signals = context["panel"], context["signals"]
-    industry_by = context["industry_by"]
     close_df, prior_high, value_mult = panel["close"], signals["prior_high"], signals["value_mult"]
     gap = (close_df / prior_high - 1) * 100
     qualified = value_mult >= min_value_mult if min_value_mult is not None else value_mult.notna() | True
@@ -635,16 +618,6 @@ def available_dates(
         if held:
             buyable = buyable & ~buyable.index.isin(held)
         count = int(buyable.sum())
-        if max_per_industry:
-            # 업종 상한에 밀리는 종목은 살 수 없으니 빼고 센다. 우선순위는 진입과 같은
-            # 거래대금 배수 순 — 상한에 걸리면 다음 순위가 그 자리를 채운다.
-            ranked = sorted(
-                buyable[buyable].index,
-                key=lambda t: float(value_mult.at[day, t]) if pd.notna(value_mult.at[day, t]) else 0.0,
-                reverse=True,
-            )
-            picked, _ = _cap_by_industry(ranked, list(held), industry_by, max_per_industry, len(ranked))
-            count = len(picked)
         rows.append(
             {
                 "date": str(day.date()),
@@ -782,8 +755,6 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
         """자리·자격·우선순위를 적용해 다음 시가에 살 종목을 고른다."""
         planned_exits = sum(1 for h in holdings if h.get("status") == "sell")
         free = int(settings["top_n"]) - (len(holdings) - planned_exits)
-        for row in rows:
-            row["industry_blocked"] = False
         if free <= 0:
             return []
         ready = [
@@ -792,19 +763,7 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
             if row["gap_pct"] >= 0 and row["qualifies"] and row["ticker"] not in {h["ticker"] for h in holdings}
         ]
         ready.sort(key=lambda row: row["value_mult"] or 0.0, reverse=True)
-        by_ticker = {row["ticker"]: row for row in ready}
-        chosen, blocked = _cap_by_industry(
-            list(by_ticker),
-            # 오늘 팔 종목은 자리를 비우므로 업종 상한도 차지하지 않는다(`free` 계산과 같은 기준).
-            [h["ticker"] for h in holdings if h.get("status") != "sell"],
-            industry_by,
-            settings["max_per_industry"],
-            free,
-        )
-        # 돌파했고 자격도 통과했는데 업종 상한에 밀린 종목 — 화면이 따로 표시한다.
-        for ticker in blocked:
-            by_ticker[ticker]["industry_blocked"] = True
-        return [by_ticker[ticker] for ticker in chosen]
+        return ready[:free]
 
     def confirmed_close(ticker: str) -> float | None:
         price = close_df.at[last, ticker]
@@ -993,7 +952,6 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
             context,
             settings["min_value_mult"],
             held_by_day=simulated["held_by_day"],
-            max_per_industry=settings["max_per_industry"],
         ),
         # 가격 캐시가 마지막으로 갱신된 시각 — 화면이 "언제 기준인지"를 알린다.
         "refreshed_at": _cache_refreshed_at(pool),

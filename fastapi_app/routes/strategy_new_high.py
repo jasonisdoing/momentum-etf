@@ -6,10 +6,8 @@ from fastapi_app.dependencies import require_internal_token
 from utils.new_high_service import (
     DEFAULT_SETTINGS,
     HIGH_WINDOW_WEEKS,
-    MAX_PER_INDUSTRY_OPTIONS,
     MIN_VALUE_MULT_OPTIONS,
     STOP_LOSS_OPTIONS,
-    TOP_N_OPTIONS,
     load_settings,
     load_settings_for_view,
     load_settings_map,
@@ -28,12 +26,10 @@ def _constraints(pool: str) -> dict:
 
     country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
     return {
-        "top_n_options": list(TOP_N_OPTIONS),
         "stop_loss_options": list(STOP_LOSS_OPTIONS),
         # 이탈 이평선 = 그 풀 국가의 단기 이평 선택지
         "exit_ma_options": list(short_ma_options(country)),
         "min_value_mult_options": list(MIN_VALUE_MULT_OPTIONS),
-        "max_per_industry_options": list(MAX_PER_INDUSTRY_OPTIONS),
         # 기간 선택지 — 종목풀 백테스트와 같은 목록이 단일 소스(전략별로 따로 두지 않는다).
         "month_options": get_month_options(),
         # 신고가 창 — 화면 문구("52주 신고가")를 이 값에서 만든다.
@@ -150,7 +146,7 @@ def post_strategy_new_high_tuning(
     """튜닝 — 설정 항목 범위의 모든 조합을 백테스트한다.
 
     body: ``{"months": 12, "settings": {...현재 화면 값}, "ranges": {"top_n": [...],
-    "stop_loss_pct": [...], "exit_ma_days": [...], "min_value_mult": [...], "max_per_industry": [...]}}``
+    "stop_loss_pct": [...], "exit_ma_days": [...], "min_value_mult": [...]}}``
     축 밖의 설정은 ``settings`` 값으로 고정한다.
     """
     from utils.new_high_tuning import run_tuning

@@ -1,7 +1,8 @@
 """신고가 전략 튜닝 — 설정 항목들의 범위 조합을 한 번에 백테스트해 비교한다.
 
-화면 '튜닝' 섹션용. 축(화면 순서): 종목 수 · 업종 상한 · 이탈 이평선 · 급증 하한 · 손절선.
-축 밖의 설정은 전달받은 설정(= 화면의 현재 값)으로 고정한다. (이탈 이평선, 종목수, 손절선)을 작업
+화면 '튜닝' 섹션용. 축(화면 순서): 이탈 이평선 · 급증 하한 · 손절선.
+종목 수는 시스템 공통(config.TOP_N_HOLD) 고정, 업종 상한은 폐기 — 튜닝은 시장의 이평 반응과
+급증·손절 기준을 재는 용도로만 쓴다. 축 밖의 설정은 전달받은 설정으로 고정하고, (이탈 이평선, 손절선)을 작업
 단위로 별도 프로세스에서 병렬로 돌리며, 각 프로세스가 패널·신호를 한 번 만들어 그 안의 조합에
 공유한다. 병렬 수(코어 수)만큼 전체 시간이 줄어든다.
 """
@@ -14,10 +15,8 @@ import pandas as pd
 
 from utils.new_high_service import (
     EXIT_MA_OPTIONS,
-    MAX_PER_INDUSTRY_OPTIONS,
     MIN_VALUE_MULT_OPTIONS,
     STOP_LOSS_OPTIONS,
-    TOP_N_OPTIONS,
     build_price_panel,
     compute_signals,
     load_price_frames,
@@ -27,7 +26,7 @@ from utils.new_high_service import (
 )
 from utils.strategy_tuning import cumulative_to_returns, finalize, run_groups, seed_worker_caches, summarize_combo
 
-TUNING_AXES = ("top_n", "max_per_industry", "exit_ma_days", "min_value_mult", "stop_loss_pct")
+TUNING_AXES = ("exit_ma_days", "min_value_mult", "stop_loss_pct")
 
 
 def _checked(values: list[Any], options: tuple, label: str, *, cast) -> list[Any]:
@@ -79,58 +78,46 @@ def _worker_context(exit_ma: int) -> dict[str, Any]:
 
 
 def _run_group(task: tuple) -> list[dict[str, Any]]:
-    """(이탈 이평선, 종목수, 손절선) 하나의 조합 — 별도 프로세스에서 돈다."""
-    months, base, exit_ma, top_n, stops, mults, caps = task
+    """(이탈 이평선, 손절선) 하나의 조합 — 별도 프로세스에서 돈다."""
+    months, base, exit_ma, stops, mults = task
     from utils.new_high_backtest import run_backtest
 
     context = _worker_context(int(exit_ma))
     rows: list[dict[str, Any]] = []
     for stop in stops:
         for mult in mults:
-            for cap in caps:
-                combo = dict(
-                    base,
-                    top_n=top_n,
-                    stop_loss_pct=stop,
-                    exit_ma_days=exit_ma,
-                    min_value_mult=mult,
-                    max_per_industry=cap,
+            combo = dict(
+                base,
+                stop_loss_pct=stop,
+                exit_ma_days=exit_ma,
+                min_value_mult=mult,
+            )
+            result = run_backtest(months, combo, context)
+            daily = pd.DataFrame(result["daily"])
+            daily["date"] = pd.to_datetime(daily["date"])
+            returns = cumulative_to_returns(daily.set_index("date")["strategy_pct"])
+            rows.append(
+                summarize_combo(
+                    {
+                        "stop_loss_pct": stop,
+                        "exit_ma_days": exit_ma,
+                        "min_value_mult": mult,
+                    },
+                    returns,
+                    {"trade_count": result["trade_count"], "win_rate_pct": result["win_rate_pct"]},
                 )
-                result = run_backtest(months, combo, context)
-                daily = pd.DataFrame(result["daily"])
-                daily["date"] = pd.to_datetime(daily["date"])
-                returns = cumulative_to_returns(daily.set_index("date")["strategy_pct"])
-                rows.append(
-                    summarize_combo(
-                        {
-                            "top_n": top_n,
-                            "stop_loss_pct": stop,
-                            "exit_ma_days": exit_ma,
-                            "min_value_mult": mult,
-                            "max_per_industry": cap,
-                        },
-                        returns,
-                        {"trade_count": result["trade_count"], "win_rate_pct": result["win_rate_pct"]},
-                    )
-                )
+            )
     return rows
 
 
 def run_tuning(months: int, settings: dict[str, Any] | None, ranges: dict[str, list[Any]]) -> dict[str, Any]:
     base = validate_settings(settings or load_settings())
-    top_ns = _checked(ranges.get("top_n", []), TOP_N_OPTIONS, "보유 종목수", cast=int)
     stops = _checked(ranges.get("stop_loss_pct", []), STOP_LOSS_OPTIONS, "손절선", cast=float)
     exit_mas = _checked(ranges.get("exit_ma_days", []), EXIT_MA_OPTIONS, "이탈 이평선", cast=int)
     mults = _checked(ranges.get("min_value_mult", []), MIN_VALUE_MULT_OPTIONS, "급증 하한", cast=float)
-    caps = _checked(ranges.get("max_per_industry", []), MAX_PER_INDUSTRY_OPTIONS, "업종 상한", cast=int)
 
-    # 작업을 잘게 쪼개 코어가 놀지 않게 한다 — (이탈선, 종목수, 손절선)마다 하나.
-    tasks = [
-        (months, base, exit_ma, top_n, [stop], mults, caps)
-        for exit_ma in exit_mas
-        for top_n in top_ns
-        for stop in stops
-    ]
+    # 작업을 잘게 쪼개 코어가 놀지 않게 한다 — (이탈선, 손절선)마다 하나.
+    tasks = [(months, base, exit_ma, [stop], mults) for exit_ma in exit_mas for stop in stops]
     rows: list[dict[str, Any]] = []
     bundle = _preload(str(base["pool"]))
     for group_rows in run_groups(_run_group, tasks, initializer=_init_worker, initargs=(bundle,)):
