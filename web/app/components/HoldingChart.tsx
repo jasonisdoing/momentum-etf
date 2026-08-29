@@ -20,6 +20,8 @@ import type { IChartApi, Time } from "lightweight-charts";
 export type HoldingChartData = {
   ticker: string;
   name: string;
+  /** 전략명(모멘텀·신고가·포트폴리오) — 합성처럼 카드마다 다른 화면은 백엔드가 내려준다. */
+  strategy_label?: string;
   candles: { time: string; open: number; high: number; low: number; close: number }[];
   ma_lines: { ma_days: number; points: { time: string; value: number }[] }[];
 };
@@ -36,6 +38,8 @@ type Props = {
   daysUnit?: string;
   /** 완성된 보유 기간 문구("3주"·"12일") — 합성처럼 백엔드가 문자열로 주는 화면용. days 보다 우선. */
   daysLabel?: string | null;
+  /** 전략명 — 화면 전체가 한 전략이면 여기로 넘긴다. 없으면 데이터의 strategy_label. */
+  strategyLabel?: string;
   height?: number;
 };
 
@@ -50,7 +54,7 @@ function formatPrice(value: number): string {
   return value.toLocaleString("ko-KR", { maximumFractionDigits: value >= 1000 ? 0 : 2 });
 }
 
-export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, daysUnit = "일", daysLabel, height = 320 }: Props) {
+export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, daysUnit = "일", daysLabel, strategyLabel, height = 320 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
 
@@ -114,7 +118,13 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
   return (
     <div className="card appCard" style={{ padding: "12px 14px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        <strong style={{ fontSize: "var(--fs-base)" }}>{chart.name}</strong>
+        {/* [전략명] 티커 종목명 — 세 화면 공통 표기. */}
+        <strong style={{ fontSize: "var(--fs-base)" }}>
+          {(() => {
+            const label = strategyLabel ?? chart.strategy_label;
+            return `${label ? `[${label}] ` : ""}${chart.ticker} ${chart.name}`;
+          })()}
+        </strong>
         <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
           {returnPct != null ? (
             <span

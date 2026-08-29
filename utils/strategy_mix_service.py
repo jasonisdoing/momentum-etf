@@ -317,6 +317,8 @@ def holding_charts_for_account(account_id: str | None, tickers: list[str]) -> li
             ma_days = [int(pool_settings["SHORT_MA_DAYS"]), int(pool_settings["LONG_MA_DAYS"])]
         # 이 슬리브 풀에 없는 티커는 가격 프레임이 없어 자연히 건너뛴다(다음 슬리브가 잡는다).
         for chart in build_charts(spec.pool, remaining, ma_days):
+            # 카드 제목의 [이름] — 사용자가 슬리브에 붙인 이름, 없으면 전략 이름(spec.label).
+            chart["strategy_label"] = spec.label
             charts_by_ticker.setdefault(chart["ticker"], chart)
     return [charts_by_ticker[t] for t in wanted if t in charts_by_ticker]
 
