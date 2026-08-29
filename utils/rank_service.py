@@ -611,10 +611,12 @@ def _compute_rank_data_payload(
     previous_trading_day = _get_previous_trading_day(country_code, raw_latest_trading_day)
     weekly_rank_trading_day = _get_nth_previous_trading_day(country_code, raw_latest_trading_day, 5)
     if previous_trading_day is not None:
+        # 번호만 쓴다 — 표시용 지표는 계산하지 않는다(scores_only).
         previous_dataframe = build_ticker_type_rankings(
             selected_ticker_type,
             ma_rules=ma_rules,
             as_of_date=previous_trading_day,
+            scores_only=True,
         )
         previous_rows = _build_score_ranked_rows(previous_dataframe)
         previous_rank_map = _build_rank_map_from_rows(previous_rows)
@@ -623,6 +625,7 @@ def _compute_rank_data_payload(
             selected_ticker_type,
             ma_rules=ma_rules,
             as_of_date=weekly_rank_trading_day,
+            scores_only=True,
         )
         weekly_rows = _build_score_ranked_rows(weekly_dataframe)
         weekly_rank_map = _build_rank_map_from_rows(weekly_rows)
