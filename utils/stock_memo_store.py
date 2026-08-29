@@ -11,7 +11,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timezone
+from typing import Any
 
 from utils.logger import get_app_logger
 
@@ -40,6 +42,22 @@ def get_stock_memos(tickers: list[str] | set[str] | tuple[str, ...]) -> dict[str
         if ticker and memo:
             memos[ticker] = memo
     return memos
+
+
+def attach_stock_memos(*row_groups: Iterable[dict[str, Any]], ticker_key: str = "ticker") -> None:
+    """행 목록들에 `memo` 를 채운다. 여러 묶음을 받아 DB 는 **한 번만** 읽는다.
+
+    반드시 **TTL 캐시 바깥**에서 부른다. 메모는 전략 계산 결과가 아니라 종목에 붙는
+    수기 값이라 언제든 다른 화면에서 바뀐다. 캐시 안에서 붙이면 그 캐시가 살아 있는
+    동안 옛 메모가 남고, 저장 경로가 캐시를 지워 주기를 바라는 구조가 된다(실제로
+    신고가 화면이 그래서 빈칸으로 보였다).
+    """
+    rows = [row for group in row_groups for row in group if isinstance(row, dict)]
+    if not rows:
+        return
+    memo_by_ticker = get_stock_memos([str(row.get(ticker_key) or "") for row in rows])
+    for row in rows:
+        row["memo"] = memo_by_ticker.get(str(row.get(ticker_key) or "").strip(), "")
 
 
 def set_stock_memo(ticker: str, memo: str | None) -> bool:

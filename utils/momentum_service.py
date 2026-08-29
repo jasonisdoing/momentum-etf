@@ -55,6 +55,7 @@ warnings.filterwarnings("ignore")
 RESERVE_MULTIPLIER = 1
 # 월↔거래일 환산 — 공용 상수(config, =20)를 재사용한다 (자산헬퍼·시장추세와 동일 기준).
 from config import CACHE_TTL_COMPUTE, TRADING_DAYS_PER_MONTH  # noqa: E402
+from utils.stock_memo_store import attach_stock_memos  # noqa: E402
 from utils.ttl_cache import TtlCache  # noqa: E402
 
 # ── 룩백 4 · 종목 수 6 · 업종 상한 2 를 쓰는 근거 ──────────────────────────
@@ -811,7 +812,10 @@ def compute_picks(settings: dict[str, Any] | None = None, as_of: str | None = No
         settings = load_settings()
     settings = validate_settings(settings)
     cache_key = _PICKS_CACHE.make_key(settings, as_of or "")
-    return _PICKS_CACHE.get_or_compute(cache_key, lambda: _compute_picks(settings, as_of))
+    result = _PICKS_CACHE.get_or_compute(cache_key, lambda: _compute_picks(settings, as_of))
+    # 종목 메모는 **캐시 밖**에서 붙인다 — 다른 화면에서 고친 값이 즉시 보여야 한다.
+    attach_stock_memos(result["rows"])
+    return result
 
 
 def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any]:
@@ -1260,12 +1264,6 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
 
     name_by_ticker = {row["ticker"]: row.get("name") or row["ticker"] for row in universe}
 
-    # 종목 메모 — 계좌가 아니라 **종목**에 붙는다(utils/stock_memo_store). 순위·자산 관리
-    # 화면과 같은 값이고, 유니버스 전체를 한 번에 읽는다.
-    from utils.stock_memo_store import get_stock_memos
-
-    memo_by_ticker = get_stock_memos([row["ticker"] for row in universe])
-
     # 선정분(1~N) — 판정일 종가로 확정된 순서 그대로. 이 주에 실제로 들고 가는 목록이라
     # 지금 값으로 다시 세우면 확정된 편입 순서가 흔들린다.
     selected_rows = [
@@ -1281,7 +1279,6 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             "ticker": item["ticker"],
             "name": item["name"],
             "market": item.get("market", ""),
-            "memo": memo_by_ticker.get(item["ticker"], ""),
             "industry": industry_map_by_ticker.get(item["ticker"], ""),
             "currency": currency,
             **price_info(item["ticker"]),
@@ -1313,7 +1310,6 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             "ticker": item["ticker"],
             "name": item["name"],
             "market": item.get("market", ""),
-            "memo": memo_by_ticker.get(item["ticker"], ""),
             "industry": industry_map_by_ticker.get(item["ticker"], ""),
             "currency": currency,
             **price_info(item["ticker"]),
@@ -1339,7 +1335,6 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             "ticker": item["ticker"],
             "name": item["name"],
             "market": item.get("market", ""),
-            "memo": memo_by_ticker.get(item["ticker"], ""),
             "industry": industry_map_by_ticker.get(item["ticker"], ""),
             "currency": currency,
             **price_info(item["ticker"]),

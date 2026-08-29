@@ -134,6 +134,8 @@ type Holding = {
   /** hold = 계속 보유, sell = 내일 시가에 청산 */
   status: "hold" | "sell";
   exit_reason: string | null;
+  /** 종목에 붙는 메모 — 순위·모멘텀·자산 관리 화면과 같은 값. */
+  memo?: string;
 };
 
 /** 보유 표에 함께 그리는 행. 아직 안 산 종목은 매수가·수익률이 없다. */
@@ -195,6 +197,8 @@ type Trade = {
   change_pct?: number | null;
   /** 청산 후 현재 시세 — 운용 현황 표에서만 쓴다(백테스트 체결 목록에는 없다). */
   price?: number | null;
+  /** 종목 메모 — 운용 현황 표에서만 쓴다(백테스트 체결 목록에는 없다). */
+  memo?: string;
   entry_date: string;
   entry_price: number;
   exit_date: string;
@@ -798,6 +802,7 @@ export function NewHighClient() {
       exit_price: null,
       entry_date: h.entry_date, entry_price: h.entry_price, return_pct: h.return_pct,
       plan: h.status, days: h.days, is_new: h.is_new, exit_reason: h.exit_reason,
+      memo: h.memo,
     }));
     const buys: PlanRow[] = positions.planned_entries.map((row) => ({
       ticker: row.ticker, name: row.name, industry: row.industry, market_cap_rank: row.market_cap_rank ?? null,
@@ -805,6 +810,7 @@ export function NewHighClient() {
       exit_price: null,
       entry_date: null, entry_price: null, return_pct: null,
       plan: "buy", days: null, is_new: false, exit_reason: null,
+      memo: row.memo,
     }));
     // 오늘 이미 청산된 종목 — 현재가는 지금 시세, 청산가는 따로 담는다.
     const exited: PlanRow[] = positions.exited_today.map((t) => ({
@@ -813,6 +819,7 @@ export function NewHighClient() {
       price: t.price ?? null, exit_price: t.exit_price,
       entry_date: t.entry_date, entry_price: t.entry_price, return_pct: t.return_pct,
       plan: "exited", days: t.days, is_new: false, exit_reason: t.reason,
+      memo: t.memo,
     }));
     // 보유(매도 예정 포함)가 위, 아직 안 산 것, 이미 끝난 것 순.
     // 같은 묶음 안에서는 **오래 들고 있는 것이 위** — 편입일이 이른 순이다.
