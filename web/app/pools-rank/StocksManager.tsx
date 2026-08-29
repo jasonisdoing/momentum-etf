@@ -1776,7 +1776,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       </button>
                     </div>
                   </label>
-                  {pageMode === "rank" && maRule ? (
+                  {/* 이평선 — 순위 판정선이자 차트에 그리는 선이라 두 모드 모두에서 바꾼다.
+                      관리 모드에서만 감춘다(거기서는 종목을 담고 빼는 것만 한다). */}
+                  {pageMode !== "manage" && maRule ? (
                     <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">이평선</span>
                       <div className="appMaRuleRow">
@@ -1795,21 +1797,24 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       </div>
                     </label>
                   ) : null}
-                  <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">컬럼</span>
-                    <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="컬럼 표시 방식">
-                      {METRIC_MODE_OPTIONS.map(({ value, label }) => (
-                        <button
-                          key={value}
-                          type="button"
-                          className={metricMode === value ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                          onClick={() => setMetricMode(value)}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </label>
+                  {/* 컬럼 묶음 전환 — 그리드에만 쓰는 설정이라 차트 모드에서는 감춘다. */}
+                  {pageMode === "chart" ? null : (
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">컬럼</span>
+                      <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="컬럼 표시 방식">
+                        {METRIC_MODE_OPTIONS.map(({ value, label }) => (
+                          <button
+                            key={value}
+                            type="button"
+                            className={metricMode === value ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                            onClick={() => setMetricMode(value)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </label>
+                  )}
                 </div>
               </div>
             </ResponsiveFiltersSection>
