@@ -965,6 +965,15 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
         item["market_cap"] = market_cap_by.get(item["ticker"])
         item["market_cap_rank"] = rank_by_ticker.get(item["ticker"])
 
+    # 종목 메모 — 계좌가 아니라 **종목**에 붙는다(utils/stock_memo_store). 순위·모멘텀·합성·
+    # 자산 관리 화면과 같은 값이고, 세 표(후보·보유·오늘 이탈)에 한 번에 붙인다.
+    from utils.stock_memo_store import get_stock_memos
+
+    memo_rows = [*rows, *holdings, *simulated["exited_today"]]
+    memo_by_ticker = get_stock_memos([str(item.get("ticker") or "") for item in memo_rows])
+    for item in memo_rows:
+        item["memo"] = memo_by_ticker.get(item["ticker"], "")
+
     # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.
     fill_base = pd.Timestamp(str(quotes["traded_at"])[:10]) if quotes["live"] else last
     from utils.settings_loader import get_ticker_type_settings

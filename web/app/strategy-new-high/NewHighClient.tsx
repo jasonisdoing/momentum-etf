@@ -30,10 +30,12 @@ import {
   formatTradeValueMult,
   tradeValueMultStyle,
   marketCapRankColumn,
+  stockMemoColumn,
 } from "@/lib/grid-cells";
 import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
 import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
 import { renderStockNameCell } from "@/lib/name-highlight";
+import { updateStockMemo } from "@/lib/stocks-store";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
@@ -110,6 +112,8 @@ type PositionRow = {
   value_mult: number | null;
   /** 같은 배수를 토스 실시간(KRX+NXT 합산)으로 낸 값. 확정값과 다르면 괄호로 보여준다. */
   value_mult_live?: number | null;
+  /** 종목에 붙는 메모 — 순위·모멘텀·자산 관리 화면과 같은 값. */
+  memo?: string;
 };
 
 type Holding = {
@@ -150,6 +154,8 @@ type PlanRow = {
   days: number | null;
   is_new: boolean;
   exit_reason: string | null;
+  /** 종목에 붙는 메모 — 순위·모멘텀·자산 관리 화면과 같은 값. */
+  memo?: string;
 };
 
 type Positions = {
@@ -395,6 +401,18 @@ function formatPrice(value: number | null | undefined): string {
 
 export function NewHighClient() {
   const toast = useToast();
+  /** 종목 메모 저장 — 계좌가 아니라 종목에 붙는다(순위·모멘텀·자산 관리 화면과 같은 값·같은 API). */
+  const saveMemo = useCallback(
+    async (ticker: string, memo: string) => {
+      try {
+        await updateStockMemo(ticker, memo);
+        toast.success("메모 저장 완료");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "메모 저장에 실패했습니다.");
+      }
+    },
+    [toast],
+  );
   const [view, setView] = useState<View | null>(null);
   const [positions, setPositions] = useState<Positions | null>(null);
   const [backtest, setBacktest] = useState<Backtest | null>(null);
@@ -624,6 +642,11 @@ export function NewHighClient() {
         minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
         cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
       },
+      // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
+      stockMemoColumn<PositionRow>({
+        field: "memo",
+        onSave: (row, memo) => void saveMemo(row.ticker, memo),
+      }),
       // 업종 컬럼 노출 여부 — 종목풀 설정의 풀 성격(pool_kind)이 1순위(개별주=표시, ETF=숨김),
       // 미설정 풀은 행 값 유무로 추정 (pools-rank·strategy-momentum 과 같은 기준).
       {
@@ -881,6 +904,11 @@ export function NewHighClient() {
         minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
         cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
       },
+      // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
+      stockMemoColumn<PlanRow>({
+        field: "memo",
+        onSave: (row, memo) => void saveMemo(row.ticker, memo),
+      }),
       {
         field: "industry",
         headerName: "업종",
