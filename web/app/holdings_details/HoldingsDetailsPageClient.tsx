@@ -661,7 +661,7 @@ export function HoldingsDetailsPageClient() {
             <ResponsiveFiltersSection>
               <div className="appMainHeader">
                 <div className="appMainHeaderLeft rankMainHeaderLeft">
-                  <label className="appLabeledField">
+                  <label className="appLabeledField rankCountryField">
                     <span className="appLabeledFieldLabel">종목 국가</span>
                     <select
                       className="form-select"
