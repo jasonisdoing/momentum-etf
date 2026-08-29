@@ -704,6 +704,8 @@ export function StrategyMixClient() {
   const [charts, setCharts] = useState<HoldingChartData[] | null>(null);
   const [chartsLoading, setChartsLoading] = useState(false);
   const [chartsError, setChartsError] = useState<string | null>(null);
+  // 차트 기간(개월) — 백엔드 config.HOLDING_CHART_MONTHS 가 단일 소스. 응답에서 받아 문구에 쓴다.
+  const [chartMonths, setChartMonths] = useState<number | null>(null);
   // 차트 대상 — 현금·고정 자산 제외. 전량 매도 대상은 아직 보유 중이라 포함한다.
   const chartRows = useMemo(
     () => positionRows.filter((row) => !row.is_cash && !row.is_fixed_asset),
@@ -732,9 +734,10 @@ export function StrategyMixClient() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ account_id: accountId, tickers: chartRows.map((row) => row.ticker) }),
         });
-        const payload = (await response.json()) as { charts?: HoldingChartData[]; error?: string };
+        const payload = (await response.json()) as { charts?: HoldingChartData[]; months?: number; error?: string };
         if (!response.ok) throw new Error(payload.error ?? "차트를 불러오지 못했습니다.");
         setCharts(payload.charts ?? []);
+        setChartMonths(payload.months ?? null);
       } catch (chartError) {
         const message = chartError instanceof Error ? chartError.message : "차트를 불러오지 못했습니다.";
         setChartsError(message);
@@ -1653,7 +1656,8 @@ export function StrategyMixClient() {
                       loading={chartsLoading}
                       error={chartsError}
                       emptyMessage="보유 종목이 없습니다."
-                      hint="최근 6개월 일봉입니다. 이평선은 그 종목 슬리브의 기준선 — 모멘텀은 단기·장기, 신고가는 이탈선입니다."
+                      hint="이평선은 그 종목 슬리브의 기준선 — 모멘텀은 단기·장기, 신고가는 이탈선입니다."
+                      months={chartMonths}
                       chartProps={(item) => {
                         const row = chartRows.find((candidate) => candidate.ticker === item.ticker);
                         // 슬리브별 슬롯 값 중 이 종목이 걸린 첫 슬롯 — 전략 수익률·보유 기간 배지.

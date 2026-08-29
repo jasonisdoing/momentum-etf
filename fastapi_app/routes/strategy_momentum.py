@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Body, Depends, Query
 
+from config import HOLDING_CHART_MONTHS
 from fastapi_app.dependencies import require_internal_token
 from utils.momentum_service import (
     compute_picks,
@@ -196,6 +197,8 @@ def post_strategy_momentum_charts(
             [int(settings["short_ma_days"]), int(settings["long_ma_days"])],
             as_of=str(as_of) if as_of else None,
         ),
+        # 화면 안내 문구("최근 N개월 일봉입니다")가 쓰는 값 — 프론트에 복사본을 두지 않는다.
+        "months": HOLDING_CHART_MONTHS,
         "short_ma_days": int(settings["short_ma_days"]),
         "long_ma_days": int(settings["long_ma_days"]),
     }

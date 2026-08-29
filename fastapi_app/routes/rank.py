@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Body, Depends, Query
 
+from config import HOLDING_CHART_MONTHS
 from fastapi_app.dependencies import require_internal_token
 from utils.rank_service import load_rank_data, load_rank_toolbar_data
 
@@ -63,6 +64,8 @@ def post_rank_charts(
     long = payload.get("long_ma_days") or pool_settings["LONG_MA_DAYS"]
     return {
         "charts": holding_charts(ticker_type, [str(ticker) for ticker in tickers], [int(short), int(long)]),
+        # 화면 안내 문구("최근 N개월 일봉입니다")가 쓰는 값 — 프론트에 복사본을 두지 않는다.
+        "months": HOLDING_CHART_MONTHS,
         "short_ma_days": int(short),
         "long_ma_days": int(long),
     }

@@ -35,6 +35,7 @@ export function StrategyHoldingCharts({
   loading,
   error,
   hint,
+  months,
   emptyMessage,
   chartProps,
 }: {
@@ -42,8 +43,12 @@ export function StrategyHoldingCharts({
   charts: HoldingChartData[] | null;
   loading: boolean;
   error: string | null;
-  /** 이 전략에서 선이 뜻하는 바. 전략마다 판정이 달라 화면이 쓴다. */
+  /** 이 전략에서 선이 뜻하는 바. 전략마다 판정이 달라 화면이 쓴다.
+   *  앞의 "최근 N개월 일봉입니다." 는 여기서 붙이므로 화면이 적지 않는다. */
   hint: ReactNode;
+  /** 차트 기간(개월) — 백엔드 `config.HOLDING_CHART_MONTHS` 가 단일 소스다.
+   *  아직 응답을 못 받았으면 null: 숫자를 지어내지 않고 그 문장을 빼고 그린다. */
+  months?: number | null;
   emptyMessage: string;
   chartProps: (chart: HoldingChartData) => HoldingChartExtras;
 }) {
@@ -53,7 +58,10 @@ export function StrategyHoldingCharts({
 
   return (
     <>
-      <div style={{ ...hintStyle, margin: "4px 0 10px" }}>{hint}</div>
+      <div style={{ ...hintStyle, margin: "4px 0 10px" }}>
+        {months != null ? `최근 ${months}개월 일봉입니다. ` : null}
+        {hint}
+      </div>
       {/* 최대 2열, 좁으면 1열 — 규칙은 globals.css 의 `.appChartGrid` 한 곳에 있다. */}
       <div className="appChartGrid">
         {charts.map((item) => (

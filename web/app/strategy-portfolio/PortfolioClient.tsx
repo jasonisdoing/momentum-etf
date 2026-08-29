@@ -187,6 +187,8 @@ export function PortfolioClient() {
   const [charts, setCharts] = useState<HoldingChartData[] | null>(null);
   const [chartsLoading, setChartsLoading] = useState(false);
   const [chartsError, setChartsError] = useState<string | null>(null);
+  // 차트 기간(개월) — 백엔드 config.HOLDING_CHART_MONTHS 가 단일 소스. 응답에서 받아 문구에 쓴다.
+  const [chartMonths, setChartMonths] = useState<number | null>(null);
 
 
   // 백테스트 — 기본 12개월(모멘텀·신고가 화면과 같다).
@@ -433,9 +435,10 @@ export function PortfolioClient() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ pool: draft.pool, tickers: chartRows }),
         });
-        const payload = (await response.json()) as { charts?: HoldingChartData[]; error?: string };
+        const payload = (await response.json()) as { charts?: HoldingChartData[]; months?: number; error?: string };
         if (!response.ok) throw new Error(payload.error ?? "차트를 불러오지 못했습니다.");
         setCharts(payload.charts ?? []);
+        setChartMonths(payload.months ?? null);
       } catch (chartError) {
         const message = chartError instanceof Error ? chartError.message : "차트를 불러오지 못했습니다.";
         setChartsError(message);
@@ -761,7 +764,8 @@ export function PortfolioClient() {
                 loading={chartsLoading}
                 error={chartsError}
                 emptyMessage="담은 종목이 없습니다."
-                hint="최근 6개월 일봉입니다. 포트폴리오는 진입·청산 판정이 없어 종목풀 설정의 단기·장기 이평선을 참고로 그립니다."
+                hint="포트폴리오는 진입·청산 판정이 없어 종목풀 설정의 단기·장기 이평선을 참고로 그립니다."
+                months={chartMonths}
                 chartProps={() => ({ strategyLabel: "포트폴리오" })}
               />
             ) : (

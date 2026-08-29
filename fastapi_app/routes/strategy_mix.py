@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from config import HOLDING_CHART_MONTHS
 from fastapi_app.dependencies import require_internal_token
 
 router = APIRouter(prefix="/internal/strategy-mix", tags=["strategy-mix"])
@@ -64,7 +65,11 @@ def post_strategy_mix_charts(
     tickers = payload.get("tickers") if isinstance(payload, dict) else None
     if not isinstance(tickers, list):
         raise ValueError("'tickers' 는 목록이어야 합니다.")
-    return {"charts": holding_charts_for_account(account_id, [str(t) for t in tickers])}
+    return {
+        "charts": holding_charts_for_account(account_id, [str(t) for t in tickers]),
+        # 화면 안내 문구("최근 N개월 일봉입니다")가 쓰는 값 — 프론트에 복사본을 두지 않는다.
+        "months": HOLDING_CHART_MONTHS,
+    }
 
 
 @router.post("/slack-test")
