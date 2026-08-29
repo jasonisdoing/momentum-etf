@@ -76,6 +76,8 @@ export function MarketSessionBar({ sessions }: { sessions: MarketSession[] }) {
           <span
             key={row.country}
             className="marketSessionItem"
+            // 헤더 폭이 모자랄 때 숨는 순서(숫자 클수록 먼저) — AppShell 의 우선순위표와 한 세트다.
+            data-fit-priority={{ kor: 5, us: 6, au: 7 }[row.country] ?? 7}
             title={detail ? `${row.name} ${label} — ${detail}` : `${row.name} ${label}`}
           >
             <span aria-hidden>{FLAGS[row.country] ?? ""}</span>

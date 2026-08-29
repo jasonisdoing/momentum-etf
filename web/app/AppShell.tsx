@@ -18,7 +18,7 @@ import { HubMenu } from "./components/HubMenu";
 import { GlobalTickerSearch } from "./components/GlobalTickerSearch";
 import { MarketSessionBar, type MarketSession } from "./components/MarketSessionBar";
 import { RecentPages } from "./components/RecentPages";
-import { useFitOneLine } from "@/lib/use-fit-one-line";
+import { useFitByPriority } from "@/lib/use-fit-one-line";
 
 // 메뉴 정의는 nav-menu.ts 가 단일 소스 — 홈 허브 타일(HubMenu)과 공유한다.
 const homeItem = HOME_ITEM;
@@ -176,8 +176,11 @@ export function AppShell({ children }: AppShellProps) {
   const [isNqLoading, setIsNqLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // 상단 시세 스트립: 폭이 좁으면 들어가는 값만 표시(넘치면 오른쪽부터 숨김). 검색창은 항상 유지.
-  const topbarFxRef = useRef<HTMLDivElement>(null);
-  useFitOneLine(topbarFxRef, [fx, nqFuture, isFxLoading, isNqLoading]);
+  // 헤더 한 줄 맞춤 — 폭이 모자라면 우선순위 낮은 것부터 숨긴다(숫자 클수록 먼저).
+  // 순서: 검색창(8) → 호주 세션(7) → 미국 세션(6) → 한국 세션(5) → AUD환율(4)
+  //      → USD환율(3) → 나스닥선물(2) → 배포 배지(1).
+  const topHeaderRef = useRef<HTMLDivElement>(null);
+  useFitByPriority(topHeaderRef, [fx, nqFuture, isFxLoading, isNqLoading, marketSessions, dashboardSummary?.is_deploying]);
   // 데스크톱 좌측 사이드바는 제거됨. 메뉴는 홈의 우측 레일(HubMenu)로 통일하고,
   // 다른 화면은 사이드바 없이 전체폭 + 상단 홈 버튼으로 복귀한다. (모바일은 햄버거 메뉴 유지)
   const isHome = pathname === "/";
@@ -482,7 +485,7 @@ export function AppShell({ children }: AppShellProps) {
     <div className="appLayout appLayoutNoSidebar">
       <div className="appMain">
         <header className="navbar d-print-none appTopHeader">
-          <div className="container-fluid appTopHeaderInner">
+          <div className="container-fluid appTopHeaderInner" ref={topHeaderRef}>
             <div className="appHeaderLeft">
               {/* 사이드바 없는 화면에서 홈(허브)으로 복귀 */}
               <Link
@@ -495,6 +498,7 @@ export function AppShell({ children }: AppShellProps) {
               </Link>
               {dashboardSummary?.is_deploying ? (
                 <span
+                  data-fit-priority={1}
                   title="서버 배포 진행 중 — DB가 일시적으로 느려질 수 있습니다"
                   style={{
                     marginLeft: "0.5rem",
@@ -526,16 +530,16 @@ export function AppShell({ children }: AppShellProps) {
                 Jason 투자
               </Link>
             </div>
-            <div className="topbarFx" ref={topbarFxRef}>
+            <div className="topbarFx">
               {isDbError && (
                 <span className="topbarFxItem" style={{ color: "#e03131", fontWeight: 600, background: "#ffe3e3", padding: "2px 8px", borderRadius: "4px" }}>
                   ⚠️ 몽고디비 이슈
                 </span>
               )}
-              <span className="topbarFxItem topbarTickerSearchItem">
+              <span className="topbarFxItem topbarTickerSearchItem" data-fit-priority={8}>
                 <GlobalTickerSearch />
               </span>
-              <span className="topbarFxItem" data-fit-hideable>
+              <span className="topbarFxItem" data-fit-priority={2}>
                 나스닥선물:{" "}
                 {isNqLoading ? (
                   <span className="topbarFxLoading" aria-label="나스닥선물 로딩 중">
@@ -552,7 +556,7 @@ export function AppShell({ children }: AppShellProps) {
                   <strong>-</strong>
                 )}
               </span>
-              <span className="topbarFxItem" data-fit-hideable>
+              <span className="topbarFxItem" data-fit-priority={3}>
                 USD/KRW:{" "}
                 {isFxLoading ? (
                   <span className="topbarFxLoading" aria-label="환율 로딩 중">
@@ -567,7 +571,7 @@ export function AppShell({ children }: AppShellProps) {
                   </>
                 )}
               </span>
-              <span className="topbarFxItem" data-fit-hideable>
+              <span className="topbarFxItem" data-fit-priority={4}>
                 AUD/KRW:{" "}
                 {isFxLoading ? (
                   <span className="topbarFxLoading" aria-label="환율 로딩 중">
