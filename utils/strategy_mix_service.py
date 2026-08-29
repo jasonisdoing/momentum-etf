@@ -824,7 +824,7 @@ def _krw_rate(currency: str) -> float:
 
 # 슬리브별 값이 붙는 자리 — 내부 계산은 `a_weight` 처럼 평평하게 들고 다니고(키가 늘어도
 # 코드가 그대로다), 화면에 내보낼 때만 `slots` 아래로 모은다. 화면은 슬롯 키를 돌며 읽는다.
-_SLOT_ROW_FIELDS: tuple[str, ...] = ("weight", "status", "return_pct", "held_label")
+_SLOT_ROW_FIELDS: tuple[str, ...] = ("weight", "status", "return_pct", "held_label", "entry_date", "entry_price")
 
 
 def _holding_payload(row: dict[str, Any], slot_keys: Sequence[str]) -> dict[str, Any]:
@@ -1112,6 +1112,9 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
                 # 보유 기간 표기 — 전략마다 단위가 다르다("3주" vs "12일"). 슬롯에 어느
                 # 전략이 오든 맞게 읽히도록 숫자가 아니라 완성된 문자열로 내려준다.
                 row[f"{key}_held_label"] = None
+                # 차트의 진입 화살표 — 슬리브마다 편입 시점이 다르므로 슬롯별로 들고 간다.
+                row[f"{key}_entry_date"] = None
+                row[f"{key}_entry_price"] = None
             row["price"] = target.get("price")
             row["change_pct"] = target.get("change_pct")
             by_ticker[ticker] = row
@@ -1129,6 +1132,10 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
             row[f"{source}_return_pct"] = round(float(target["return_pct"]), 2)
         if target.get("held_label"):
             row[f"{source}_held_label"] = target["held_label"]
+        if target.get("entry_date"):
+            row[f"{source}_entry_date"] = str(target["entry_date"])[:10]
+        if target.get("entry_price") is not None:
+            row[f"{source}_entry_price"] = float(target["entry_price"])
 
     # 매도 예정(자격 상실·이탈)은 목표 비중 0 이다 — 다음 시가에 전량 팔고 그 슬롯은
     # 다음 교체까지 현금이다. 비중을 남겨두면 팔아야 할 종목의 매매수량이 0 으로 보인다.

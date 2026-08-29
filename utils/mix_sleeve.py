@@ -226,6 +226,9 @@ def _momentum_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> S
                 "status": status,
                 "return_pct": row.get("entry_return_pct"),
                 "held_label": _held_label(row.get("streak_weeks"), unit="주", zero="신규"),
+                # 차트의 진입 화살표용 — 연속 편입이 시작된 교체일. 모멘텀은 매수가를 따로 들지 않는다.
+                "entry_date": row.get("entry_date"),
+                "entry_price": None,
                 "is_exiting": exiting,
                 "drift_pct": drift_by_ticker.get(ticker),
             }
@@ -313,6 +316,9 @@ def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
                 "status": f"목표 {float(row['weight_pct']):.2f}%",
                 "return_pct": None,
                 "held_label": "",
+                # 포트폴리오는 진입 판정이 없다 — 매수 시점을 만들어 내지 않는다.
+                "entry_date": None,
+                "entry_price": None,
                 "is_exiting": False,
                 # 저장 비중을 그대로 싣는다 — 합성이 `슬리브 몫 × drift_pct / 100` 으로 목표를
                 # 잡으므로, 종목 30% + 현금 10% 는 슬리브 몫의 30%·10% 가 된다(비율 유지).
@@ -365,6 +371,9 @@ def _new_high_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> S
                 "status": status,
                 "return_pct": row.get("return_pct"),
                 "held_label": _held_label(row.get("days"), unit="일", zero="진입"),
+                # 차트의 진입 화살표용.
+                "entry_date": row.get("entry_date"),
+                "entry_price": row.get("entry_price"),
                 "is_exiting": exiting,
                 "drift_pct": float(weight) if weight is not None else None,
             }
@@ -379,6 +388,9 @@ def _new_high_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> S
                 "status": "진입 예정 (다음 시가 매수)",
                 "return_pct": None,
                 "held_label": "",
+                # 아직 안 샀다.
+                "entry_date": None,
+                "entry_price": None,
                 "is_exiting": False,
                 "drift_pct": None,
             }

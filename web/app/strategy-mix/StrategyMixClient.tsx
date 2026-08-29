@@ -180,6 +180,9 @@ type HoldingSlot = {
   return_pct?: number | null;
   /** 보유 기간 — 전략마다 단위가 달라 백엔드가 완성된 문자열로 내려준다("3주"·"12일"·"신규"). */
   held_label?: string | null;
+  /** 차트의 진입 화살표 — 슬리브마다 편입 시점이 다르다. 모멘텀은 매수가를 들지 않아 날짜만 온다. */
+  entry_date?: string | null;
+  entry_price?: number | null;
 };
 
 type Holding = {
@@ -1665,10 +1668,15 @@ export function StrategyMixClient() {
                             const row = chartRows.find((candidate) => candidate.ticker === item.ticker);
                             // 슬리브별 슬롯 값 중 이 종목이 걸린 첫 슬롯 — 전략 수익률·보유 기간 배지.
                             const slot = row ? Object.values(row.slots ?? {}).find((value) => value?.held_label || value?.return_pct != null) : undefined;
+                            // 진입 화살표는 편입일을 가진 슬롯에서 찾는다 — 위 슬롯은 수익률·보유기간 기준이라
+                            // 편입일이 없는 슬리브(포트폴리오)가 걸릴 수 있다.
+                            const entrySlot = row ? Object.values(row.slots ?? {}).find((value) => value?.entry_date) : undefined;
                             return (
                               <HoldingChart
                                 key={item.ticker}
                                 chart={item}
+                                entryDate={entrySlot?.entry_date}
+                                entryPrice={entrySlot?.entry_price}
                                 returnPct={slot?.return_pct ?? row?.return_pct ?? null}
                                 daysLabel={slot?.held_label ?? null}
                               />
