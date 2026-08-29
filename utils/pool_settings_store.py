@@ -43,6 +43,20 @@ from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
 logger = get_app_logger()
 
 COLLECTION = "pool_settings"
+
+# '제한 없음'은 파이썬에서 None 이지만 JSON 응답·쿼리스트링에는 숫자로 실어야 한다.
+INDUSTRY_CAP_NONE = -1
+
+
+def max_per_industry_options() -> list[int]:
+    """업종 상한 선택지를 API 로 내보낼 형태로. None(제한 없음) 은 -1 로 바꾼다.
+
+    화면이 목록을 베껴 두면 어긋난다 — `/pools-rank` 는 4 가 빠져 있었고
+    `/pools-settings` 는 ["1","2","3",""] 로 굳어 있었다. 두 화면 모두 이 함수를 탄다.
+    """
+    return [INDUSTRY_CAP_NONE if value is None else int(value) for value in MAX_PER_INDUSTRY_OPTIONS]
+
+
 INTERNAL_POOL_ID_PREFIX = "__"
 
 # DB 오버라이드 대상 키 — 전부 필수이며 비어 있으면 로딩 자체가 실패한다.
@@ -304,7 +318,7 @@ def get_overrides() -> dict[str, dict[str, Any]]:
 def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> dict[str, Any]:
     """입력값을 검증/정규화한다. 잘못된 값은 PoolSettingsError.
 
-    ``check_options`` — 선택지(이평선·슬리피지) 포함 여부 검사. **저장할 때만** 켠다.
+    ``check_options`` — 선택지(이평선·업종상한·손절·슬리피지) 포함 여부 검사. **저장할 때만** 켠다.
     DB 에서 읽을 때는 끈다: 선택지가 바뀐 뒤 옛 값이 남아 있거나(또는 서버가 옛 코드를 돌리거나)
     하면, 읽기에서 막는 순간 그 풀을 쓰지 않는 배치·화면까지 전부 죽는다. 선택지 밖 값은
     화면이 "(선택지 밖)"으로 보여주고 사용자가 고쳐 저장한다.
@@ -335,7 +349,7 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
     if "MAX_PER_INDUSTRY" in values:
         raw = values["MAX_PER_INDUSTRY"]
         cap = None if raw in (None, "", "none") else int(raw)
-        if cap not in MAX_PER_INDUSTRY_OPTIONS:
+        if check_options and cap not in MAX_PER_INDUSTRY_OPTIONS:
             allowed = ", ".join("없음" if v is None else str(v) for v in MAX_PER_INDUSTRY_OPTIONS)
             raise PoolSettingsError(f"MAX_PER_INDUSTRY 는 {allowed} 중 하나여야 합니다: {raw}")
         cleaned["MAX_PER_INDUSTRY"] = cap
@@ -345,7 +359,7 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
         raw = values["INTRAWEEK_STOP_PCT"]
         stop = None if raw in (None, "", "none") else round(float(raw), 2)
         allowed_stops = {None, *(round(v, 2) for v in STOP_LOSS_PCT_OPTIONS)}
-        if stop not in allowed_stops:
+        if check_options and stop not in allowed_stops:
             allowed = ", ".join("없음" if v is None else f"{v:g}" for v in (None, *STOP_LOSS_PCT_OPTIONS))
             raise PoolSettingsError(f"INTRAWEEK_STOP_PCT 는 {allowed} 중 하나여야 합니다: {raw}")
         cleaned["INTRAWEEK_STOP_PCT"] = stop
