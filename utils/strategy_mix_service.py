@@ -22,6 +22,7 @@ from config import CACHE_TTL_COMPUTE
 from utils.logger import get_app_logger
 from utils.mix_sleeve import MOMENTUM, NEW_HIGH, PORTFOLIO, STRATEGY_LABELS, SleeveSpec
 from utils.share_allocation import ShareTarget, allocate_integer_shares, backtest_initial_capital
+from utils.stock_memo_store import attach_stock_memos
 from utils.trade_stats import summarize_trades
 from utils.ttl_cache import TtlCache
 
@@ -1260,11 +1261,7 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
 
     # 종목 메모 — 계좌가 아니라 **종목**에 붙는다(utils/stock_memo_store). 순위·자산 관리·
     # 모멘텀 화면과 같은 값이다. 전량 매도 행까지 붙은 뒤에 한 번에 읽는다.
-    from utils.stock_memo_store import get_stock_memos
-
-    memo_by_ticker = get_stock_memos([str(row.get("ticker") or "") for row in holdings])
-    for row in holdings:
-        row["memo"] = memo_by_ticker.get(str(row.get("ticker") or ""), "")
+    attach_stock_memos(holdings)
 
     # 장중 반영·과거 날짜 목록은 그 정보를 주는 전략에서만 온다(신고가). 슬리브 어디에도
     # 없으면 빈 값 — 임의로 만들지 않는다.

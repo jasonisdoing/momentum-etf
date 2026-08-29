@@ -32,6 +32,7 @@ from utils.new_high_service import (
 )
 from utils.pool_settings_store import get_pool_slippage
 from utils.share_allocation import ShareTarget, allocate_integer_shares, backtest_initial_capital
+from utils.stock_memo_store import attach_stock_memos
 from utils.trade_stats import summarize_trades
 from utils.ttl_cache import TtlCache
 
@@ -667,7 +668,12 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
     """
     settings = validate_settings(settings or load_settings())
     cache_key = _POSITIONS_CACHE.make_key(settings, as_of or "")
-    return _POSITIONS_CACHE.get_or_compute(cache_key, lambda: _current_positions(settings, as_of))
+    result = _POSITIONS_CACHE.get_or_compute(cache_key, lambda: _current_positions(settings, as_of))
+    # 종목 메모는 **캐시 밖**에서 붙인다 — 다른 화면에서 고친 값이 즉시 보여야 한다.
+    attach_stock_memos(
+        result["breakouts"], result["candidates"], result["holdings"], result["planned_entries"], result["exited_today"]
+    )
+    return result
 
 
 def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str, Any]:
@@ -964,15 +970,6 @@ def _current_positions(settings: dict[str, Any], as_of: str | None) -> dict[str,
     for item in [*holdings, *simulated["exited_today"]]:
         item["market_cap"] = market_cap_by.get(item["ticker"])
         item["market_cap_rank"] = rank_by_ticker.get(item["ticker"])
-
-    # 종목 메모 — 계좌가 아니라 **종목**에 붙는다(utils/stock_memo_store). 순위·모멘텀·합성·
-    # 자산 관리 화면과 같은 값이고, 세 표(후보·보유·오늘 이탈)에 한 번에 붙인다.
-    from utils.stock_memo_store import get_stock_memos
-
-    memo_rows = [*rows, *holdings, *simulated["exited_today"]]
-    memo_by_ticker = get_stock_memos([str(item.get("ticker") or "") for item in memo_rows])
-    for item in memo_rows:
-        item["memo"] = memo_by_ticker.get(item["ticker"], "")
 
     # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.
     fill_base = pd.Timestamp(str(quotes["traded_at"])[:10]) if quotes["live"] else last
