@@ -4,7 +4,8 @@ import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconCheck } from "@tabler/icons-react";
 
-import { HoldingChart, type HoldingChartData } from "../components/HoldingChart";
+import { type HoldingChartData } from "../components/HoldingChart";
+import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { MonthsSelect } from "../components/MonthsSelect";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
@@ -796,7 +797,8 @@ export function NewHighClient() {
       change_pct: row.change_pct, price: row.price,
       exit_price: null,
       entry_date: null, entry_price: null, return_pct: null,
-      plan: "buy", days: null, is_new: false, exit_reason: null,
+      // 아직 안 샀다 — null 로 두면 보유일 칸과 차트 배지가 통째로 비어 진입 전인지 알 수 없다.
+      plan: "buy", days: 0, is_new: false, exit_reason: null,
       memo: row.memo,
     }));
     // 오늘 이미 청산된 종목 — 현재가는 지금 시세, 청산가는 따로 담는다.
@@ -1222,44 +1224,30 @@ export function NewHighClient() {
                       />
                     ) : null}
                   </>
-                ) : chartsLoading || (!charts && !chartsError) ? (
-                  <div style={{ ...hintStyle, padding: "24px 0", textAlign: "center" }}>차트를 불러오는 중…</div>
-                ) : chartsError ? (
-                  <div className="alert alert-danger">{chartsError}</div>
-                ) : charts && charts.length > 0 ? (
-                  <>
-                    <div style={{ ...hintStyle, margin: "4px 0 10px" }}>
-                      최근 6개월 일봉입니다. 종가가 직전 최고 종가를 넘으면 진입,{" "}
-                      <strong style={{ color: "#12b886" }}>MA{draft.exit_ma_days}</strong>를 하회하면 청산합니다.
-                      진입한 종목은 매수가와 함께 Buy 화살표가 표시됩니다.
-                    </div>
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                        gap: "18px 20px",
-                      }}
-                    >
-                      {charts.map((item) => {
-                        const row = chartRows.find((candidate) => candidate.ticker === item.ticker);
-                        return (
-                          <HoldingChart
-                            key={item.ticker}
-                            chart={item}
-                            strategyLabel="신고가"
-                            entryDate={row?.entry_date}
-                            entryPrice={row?.entry_price}
-                            returnPct={row?.return_pct}
-                            days={row?.days}
-                          />
-                        );
-                      })}
-                    </div>
-                  </>
                 ) : (
-                  <div style={{ ...hintStyle, padding: "24px 0", textAlign: "center" }}>
-                    보유 중이거나 진입 예정인 종목이 없습니다.
-                  </div>
+                  <StrategyHoldingCharts
+                    charts={charts}
+                    loading={chartsLoading}
+                    error={chartsError}
+                    emptyMessage="보유 중이거나 진입 예정인 종목이 없습니다."
+                    hint={
+                      <>
+                        최근 6개월 일봉입니다. 종가가 직전 최고 종가를 넘으면 진입,{" "}
+                        <strong style={{ color: "#12b886" }}>MA{draft.exit_ma_days}</strong>를 하회하면 청산합니다.
+                        진입한 종목은 매수가와 함께 Buy 화살표가 표시됩니다.
+                      </>
+                    }
+                    chartProps={(item) => {
+                      const row = chartRows.find((candidate) => candidate.ticker === item.ticker);
+                      return {
+                        strategyLabel: "신고가",
+                        entryDate: row?.entry_date,
+                        entryPrice: row?.entry_price,
+                        returnPct: row?.return_pct,
+                        days: row?.days,
+                      };
+                    }}
+                  />
                 )}
             </div>
           </div>

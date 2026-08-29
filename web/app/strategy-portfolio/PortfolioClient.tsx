@@ -14,6 +14,8 @@ import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { StableInlineInput } from "../components/StableInlineInput";
 import { StrategyNotes } from "../components/StrategyNotes";
+import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
+import { type HoldingChartData } from "../components/HoldingChart";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
@@ -25,6 +27,13 @@ import { formatPoolLabel } from "@/lib/pool-label";
 import { updateStockMemo } from "@/lib/stocks-store";
 
 const gridTheme = createAppGridTheme();
+
+// 종목 표 안쪽 탭 — 모멘텀·신고가·합성과 같은 구성. 차트는 담은 종목 수만큼 그리므로 열 때만 그린다.
+const HOLDINGS_TABS = [
+  { key: "list", label: "종목" },
+  { key: "chart", label: "차트" },
+] as const;
+type HoldingsTab = (typeof HOLDINGS_TABS)[number]["key"];
 
 /** 현금 행 — 종목 비중 합의 나머지다(`/asset-helper` 와 같은 규칙·같은 내부 티커). */
 const CASH_TICKER = "__CASH__";
@@ -173,6 +182,11 @@ export function PortfolioClient() {
   const [saving, setSaving] = useState(false);
 
   const [selected, setSelected] = useState<string[]>([]);
+  // ── 차트 탭 (모멘텀·신고가·합성과 같은 구성 — 공용 StrategyHoldingCharts) ──
+  const [holdingsTab, setHoldingsTab] = useState<HoldingsTab>("list");
+  const [charts, setCharts] = useState<HoldingChartData[] | null>(null);
+  const [chartsLoading, setChartsLoading] = useState(false);
+  const [chartsError, setChartsError] = useState<string | null>(null);
 
 
   // 백테스트 — 기본 12개월(모멘텀·신고가 화면과 같다).
@@ -389,6 +403,48 @@ export function PortfolioClient() {
       };
     }),
   ];
+
+  // 차트를 그릴 대상 — 담은 종목만. 현금 행과 추가 중인 행은 뺀다.
+  const chartRows = useMemo(
+    () => (draft?.weights ?? []).map((row) => row.ticker),
+    [draft?.weights],
+  );
+  // 풀·구성이 바뀌면 이전 차트는 버린다.
+  const chartKey = useMemo(
+    () => `${draft?.pool ?? ""}|${chartRows.join(",")}`,
+    [draft?.pool, chartRows],
+  );
+  useEffect(() => {
+    setCharts(null);
+    setChartsError(null);
+  }, [chartKey]);
+  // 차트 탭을 열 때만 받는다 — 담은 종목 수만큼 일봉을 실어 오므로 목록 탭에서는 낭비다.
+  useEffect(() => {
+    if (holdingsTab !== "chart" || !draft || charts || chartsLoading || chartsError) return;
+    if (chartRows.length === 0) {
+      setCharts([]);
+      return;
+    }
+    setChartsLoading(true);
+    void (async () => {
+      try {
+        const response = await fetch("/api/strategy-portfolio/charts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pool: draft.pool, tickers: chartRows }),
+        });
+        const payload = (await response.json()) as { charts?: HoldingChartData[]; error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "차트를 불러오지 못했습니다.");
+        setCharts(payload.charts ?? []);
+      } catch (chartError) {
+        const message = chartError instanceof Error ? chartError.message : "차트를 불러오지 못했습니다.";
+        setChartsError(message);
+        toast.error(message);
+      } finally {
+        setChartsLoading(false);
+      }
+    })();
+  }, [holdingsTab, draft, charts, chartsLoading, chartsError, chartRows, toast]);
 
   const columns = useMemo<ColDef<WeightRow>[]>(
     () => [
@@ -692,6 +748,23 @@ export function PortfolioClient() {
               </div>
             </div>
             <StrategyNotes items={STRATEGY_NOTES} />
+            <NavTabs
+              items={HOLDINGS_TABS}
+              value={holdingsTab}
+              onChange={setHoldingsTab}
+              label="종목 보기"
+              style={{ marginBottom: 12 }}
+            />
+            {holdingsTab === "chart" ? (
+              <StrategyHoldingCharts
+                charts={charts}
+                loading={chartsLoading}
+                error={chartsError}
+                emptyMessage="담은 종목이 없습니다."
+                hint="최근 6개월 일봉입니다. 포트폴리오는 진입·청산 판정이 없어 종목풀 설정의 단기·장기 이평선을 참고로 그립니다."
+                chartProps={() => ({ strategyLabel: "포트폴리오" })}
+              />
+            ) : (
             <AppAgGrid<WeightRow>
               rowData={gridRows}
               columnDefs={columns}
@@ -743,7 +816,8 @@ export function PortfolioClient() {
               }}
               getRowId={(p) => p.data.ticker}
             />
-            {draft.weights.length === 0 ? (
+            )}
+            {holdingsTab === "list" && draft.weights.length === 0 ? (
               <div style={{ ...hintStyle, padding: "16px 0", textAlign: "center" }}>
                 ＋ 를 눌러 이 종목풀의 종목을 담고 비중을 정하세요.
               </div>

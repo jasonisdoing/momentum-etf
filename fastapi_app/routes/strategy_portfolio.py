@@ -83,3 +83,30 @@ def post_strategy_portfolio_backtest(
         int(months) if months else None,
         settings if isinstance(settings, dict) else None,
     )
+
+
+@router.post("/charts")
+def post_strategy_portfolio_charts(
+    payload: dict = Body(default={}),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """보유 종목 일봉 + 이평선. body: ``{"pool": "...", "tickers": [...]}``.
+
+    포트폴리오에는 판정선이 없어 **풀 설정 이평선**(추세 배지 기준)을 참고로 그린다 —
+    합성 화면의 포트폴리오 슬리브와 같은 규칙이다(`strategy_mix_service.holding_charts_for_account`).
+    """
+    from utils.holding_chart_service import holding_charts
+    from utils.settings_loader import get_ticker_type_settings
+
+    pool = str(payload.get("pool") or "") if isinstance(payload, dict) else ""
+    settings = load_settings(pool or None)
+    tickers = payload.get("tickers") if isinstance(payload, dict) else None
+    if not isinstance(tickers, list):
+        raise ValueError("'tickers' 는 목록이어야 합니다.")
+    pool_settings = get_ticker_type_settings(settings["pool"]) or {}
+    ma_days = [int(pool_settings["SHORT_MA_DAYS"]), int(pool_settings["LONG_MA_DAYS"])]
+    return {
+        "charts": holding_charts(settings["pool"], [str(ticker) for ticker in tickers], ma_days),
+        "short_ma_days": ma_days[0],
+        "long_ma_days": ma_days[1],
+    }
