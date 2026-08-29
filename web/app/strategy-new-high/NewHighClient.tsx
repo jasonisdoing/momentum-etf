@@ -4,6 +4,7 @@ import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconCheck } from "@tabler/icons-react";
 
+import { formatMarketCapWon } from "@/lib/market-cap-format";
 import { type HoldingChartData } from "../components/HoldingChart";
 import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -364,14 +365,6 @@ function dailyChangeColumn<T extends { change_pct?: number | null }>(): ColDef<T
 }
 
 /** 시가총액 표기 — 조/억 단위. 자리수가 커 그대로 두면 표가 밀린다. */
-function formatMarketCap(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "-";
-  const jo = value / 1_0000_0000_0000;
-  if (jo >= 1) return `${jo.toFixed(1)}조`;
-  const eok = value / 1_0000_0000;
-  return `${eok.toLocaleString("ko-KR", { maximumFractionDigits: 0 })}억`;
-}
-
 function toDateKey(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -688,7 +681,7 @@ export function NewHighClient() {
         width: 116,
         type: "numericColumn",
         headerTooltip: "신호가 자리보다 많을 때 이 순서로 담는다(우선순위=시가총액일 때).",
-        valueFormatter: (p) => formatMarketCap(p.value as number | null),
+        valueFormatter: (p) => formatMarketCapWon(p.value as number | null),
       },
       {
         field: "value_mult",

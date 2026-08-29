@@ -2,8 +2,12 @@
 
 화면(순위·모멘텀·신고가)이 매번 시총 목록을 받아 순위를 매기면 한국은 네이버 전체
 페이지(약 2,600종목) 조회가 붙어 느려진다. 그래서 **배치 B 가 하루 한 번** 국가별 순위표를
-만들어 개별주 풀 종목의 ``stock_cache_meta.meta_cache.market_cap_rank`` 에 써 두고, 화면은
-이미 읽는 메타 캐시에서 꺼내기만 한다(런타임 비용 0). 순위 기준 시각은 배치 시각이다.
+만들어 개별주 풀 종목의 ``stock_cache_meta.meta_cache`` 에 써 두고, 화면은 이미 읽는
+메타 캐시에서 꺼내기만 한다(런타임 비용 0). 기준 시각은 배치 시각이다.
+
+순위(``market_cap_rank``)와 함께 **금액**(``total_net_assets``)도 적는다 — 순위표를 만들려고
+이미 받아 온 값이라 추가 조회가 없다. 이게 없으면 신고가 화면이 시총 금액을 쓰려고 네이버
+페이지 순회를 한 번 더 했다(kor_stock 424종목에 4초).
 
 순위의 분모(국가별 "시장"):
   - kor: 네이버 시총 목록 KOSPI + KOSDAQ 전체 (ETF·ETN 제외 — 개별주만)
@@ -20,6 +24,8 @@ from typing import Any
 from utils.logger import get_app_logger
 
 META_FIELD = "market_cap_rank"
+# 시총 금액이 들어가는 자리 — 미국·호주 ETF 메타가 쓰던 필드와 같다(화면이 한 곳만 읽는다).
+CAP_FIELD = "total_net_assets"
 
 
 def _rank_by_cap(caps: dict[str, float]) -> dict[str, int]:
@@ -70,16 +76,32 @@ def _index_caps(indexes: tuple[str, ...]) -> dict[str, float]:
     return caps
 
 
-def load_market_cap_rank_map(country_code: str) -> dict[str, int]:
-    """국가별 시장 전체의 티커 → 시총 순위."""
+def _cap_amount(country_code: str, cap: float | None) -> float | None:
+    """저장할 시총 금액 — 통화 단위를 소스에 맞춘다.
+
+    네이버는 **억 원** 단위로 준다. 미국·호주 지수 구성종목은 이미 통화 단위 금액이다.
+    화면이 국가별로 포맷하므로 여기서는 현지 통화 원시값으로 맞춰만 둔다.
+    """
+    if cap is None or cap <= 0:
+        return None
+    return float(cap) * 1_0000_0000 if str(country_code or "").strip().lower() == "kor" else float(cap)
+
+
+def load_market_caps(country_code: str) -> dict[str, float]:
+    """국가별 시장 전체의 티커 → 시가총액. 순위는 이 값으로 매긴다."""
     country = str(country_code or "").strip().lower()
     if country == "kor":
-        return _rank_by_cap(_kor_caps())
+        return _kor_caps()
     if country == "us":
-        return _rank_by_cap(_index_caps(("SP500", "NDX100")))
+        return _index_caps(("SP500", "NDX100"))
     if country == "au":
-        return _rank_by_cap(_index_caps(("ASX200",)))
+        return _index_caps(("ASX200",))
     raise ValueError(f"시총 순위를 지원하지 않는 국가입니다: {country_code}")
+
+
+def load_market_cap_rank_map(country_code: str) -> dict[str, int]:
+    """국가별 시장 전체의 티커 → 시총 순위."""
+    return _rank_by_cap(load_market_caps(country_code))
 
 
 def update_market_cap_ranks(ticker_types: list[str] | None = None) -> dict[str, int]:
@@ -93,7 +115,7 @@ def update_market_cap_ranks(ticker_types: list[str] | None = None) -> dict[str, 
 
     logger = get_app_logger()
     wanted = {str(t).strip().lower() for t in ticker_types} if ticker_types else None
-    rank_by_country: dict[str, dict[str, int]] = {}
+    caps_by_country: dict[str, dict[str, float]] = {}
     updated: dict[str, int] = {}
     for config in _load_pool_configs():
         pool = str(config.get("ticker_type") or "").strip().lower()
@@ -102,15 +124,16 @@ def update_market_cap_ranks(ticker_types: list[str] | None = None) -> dict[str, 
         if str(config.get("pool_kind") or "").strip().lower() != "stock":
             continue  # ETF 풀은 시총 순위 개념이 없다
         country = str(config.get("country_code") or "").strip().lower()
-        if country not in rank_by_country:
+        if country not in caps_by_country:
             try:
-                rank_by_country[country] = load_market_cap_rank_map(country)
+                caps_by_country[country] = load_market_caps(country)
             except Exception as exc:
-                logger.error("[배치 B] 시총 순위표 생성 실패 (%s): %s", country, exc)
-                rank_by_country[country] = {}
-        ranks = rank_by_country[country]
-        if not ranks:
+                logger.error("[배치 B] 시총 목록 조회 실패 (%s): %s", country, exc)
+                caps_by_country[country] = {}
+        caps = caps_by_country[country]
+        if not caps:
             continue
+        ranks = _rank_by_cap(caps)
         # 반복 횟수가 아니라 **실제로 기록된 건수**를 센다 — 예전에는 한 건도 안 써져도
         # "201종목 기록" 으로 찍혀서 화면의 시총 컬럼이 비어 있는 걸 로그로 못 잡았다.
         written = 0
@@ -124,9 +147,10 @@ def update_market_cap_ranks(ticker_types: list[str] | None = None) -> dict[str, 
                 missing += 1
             if set_stock_cache_meta_field(pool, ticker, META_FIELD, rank):
                 written += 1
+            set_stock_cache_meta_field(pool, ticker, CAP_FIELD, _cap_amount(country, caps.get(ticker)))
         updated[pool] = written
         logger.info(
-            "[배치 B] 시총 순위 기록: %s %d건 (국가 %s, 순위표 %d종목, 순위 없음 %d종목)",
+            "[배치 B] 시총 순위·금액 기록: %s %d건 (국가 %s, 순위표 %d종목, 순위 없음 %d종목)",
             pool,
             written,
             country,

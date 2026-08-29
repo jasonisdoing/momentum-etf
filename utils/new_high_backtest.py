@@ -315,24 +315,16 @@ def _meets_min_mult(mult: Any, minimum: float | None) -> bool:
     return bool(pd.notna(mult)) and float(mult) >= minimum
 
 
-def _market_caps(pool: str, tickers: list[str]) -> dict[str, float]:
-    """티커 → 시가총액(원). 소스는 국가마다 다르므로 여기서 갈라 쓴다.
+def _market_caps(pool: str) -> dict[str, float]:
+    """티커 → 시가총액. 배치 B 가 메타 캐시에 적어 둔 값을 읽기만 한다.
 
-    한국 개별주는 네이버 시세표(`/kor-market-stock` 과 같은 소스, 억 원 단위)를,
-    그 외에는 종목 캐시 메타의 순자산총액(`/pools-rank` 와 같은 값)을 쓴다.
+    한국 개별주는 예전에 여기서 네이버 시세표를 직접 순회했다(424종목에 4초). 그런데 그
+    목록은 시총 **순위**를 매기려고 배치가 이미 받아 오는 값이라, 배치가 금액까지 적게
+    하고(`utils/market_cap_rank`) 화면은 DB 만 읽는다. 국가별 분기도 함께 사라졌다.
+
     값이 없는 종목은 맵에서 빠진다 — 화면은 '-' 로 둔다(임의 보정 없음).
-
     현재 값만 있고 과거 이력이 없다. 그래서 백테스트 우선순위에는 쓰지 않는다.
     """
-    from utils.settings_loader import get_ticker_type_settings
-
-    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
-    if country == "kor":
-        from utils.kor_stock_market_service import load_kor_market_caps
-
-        # 네이버는 억 원 단위로 준다 — 다른 소스와 맞춰 원 단위로 되돌린다.
-        return {ticker: float(cap) * 1_0000_0000 for ticker, cap in load_kor_market_caps(tickers).items()}
-
     from utils.db_manager import get_db_connection
 
     db = get_db_connection()
@@ -606,7 +598,7 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     today_high = panel["high"].loc[last]
     value_mult = signals["value_mult"].loc[last]
     trade_value = panel["value"].loc[last]
-    market_cap_by = _market_caps(pool, [row["ticker"] for row in universe])
+    market_cap_by = _market_caps(pool)
     # 시총 순위 — 배치 B 가 메타 캐시에 적어 둔 시장 전체 순위(개별주 풀만 값 있음).
     from utils.market_cap_rank import market_cap_rank_of
     from utils.stock_cache_meta_io import get_stock_cache_meta_docs
