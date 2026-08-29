@@ -423,6 +423,8 @@ export function PortfolioClient() {
   // 차트 탭을 열 때만 받는다 — 담은 종목 수만큼 일봉을 실어 오므로 목록 탭에서는 낭비다.
   useEffect(() => {
     if (holdingsTab !== "chart" || !draft || charts || chartsLoading || chartsError) return;
+    // 저장 중에는 초안이 아직 이전 풀 것이다 — 응답이 와서 종목 목록까지 바뀐 뒤에 받는다.
+    if (saving) return;
     if (chartRows.length === 0) {
       setCharts([]);
       return;
@@ -447,7 +449,7 @@ export function PortfolioClient() {
         setChartsLoading(false);
       }
     })();
-  }, [holdingsTab, draft, charts, chartsLoading, chartsError, chartRows, toast]);
+  }, [holdingsTab, draft, charts, chartsLoading, chartsError, chartRows, saving, toast]);
 
   const columns = useMemo<ColDef<WeightRow>[]>(
     () => [
@@ -761,7 +763,7 @@ export function PortfolioClient() {
             {holdingsTab === "chart" ? (
               <StrategyHoldingCharts
                 charts={charts}
-                loading={chartsLoading}
+                loading={chartsLoading || saving}
                 error={chartsError}
                 emptyMessage="담은 종목이 없습니다."
                 hint="포트폴리오는 진입·청산 판정이 없어 종목풀 설정의 단기·장기 이평선을 참고로 그립니다."
