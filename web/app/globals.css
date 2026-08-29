@@ -4703,6 +4703,21 @@ a {
   padding: 1rem;
 }
 
+/* 전략·순위 화면의 보유 종목 차트 격자 — 최대 2열이고 좁아지면 1열이다.
+   auto-fit 로 두면 넓은 모니터에서 3열 이상으로 벌어져 캔들이 작아진다. */
+.appChartGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 20px;
+}
+
+/* 카드 하나가 420px 아래로 눌리면 캔들이 뭉개진다 — 그 전에 1열로 떨어뜨린다. */
+@media (max-width: 900px) {
+  .appChartGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .appCardBodyTight {
   padding: 0.875rem 1rem 1rem;
 }
