@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Body, Depends, Query
 
-from config import REBALANCE_BAND_PCT_OPTIONS, REBALANCE_LABELS, REBALANCE_OPTIONS
+from config import HOLDING_CHART_MONTHS, REBALANCE_BAND_PCT_OPTIONS, REBALANCE_LABELS, REBALANCE_OPTIONS
 from fastapi_app.dependencies import require_internal_token
 from utils.pool_signal_backtest_service import get_month_options
 from utils.portfolio_service import (
@@ -107,6 +107,8 @@ def post_strategy_portfolio_charts(
     ma_days = [int(pool_settings["SHORT_MA_DAYS"]), int(pool_settings["LONG_MA_DAYS"])]
     return {
         "charts": holding_charts(settings["pool"], [str(ticker) for ticker in tickers], ma_days),
+        # 화면 안내 문구("최근 N개월 일봉입니다")가 쓰는 값 — 프론트에 복사본을 두지 않는다.
+        "months": HOLDING_CHART_MONTHS,
         "short_ma_days": ma_days[0],
         "long_ma_days": ma_days[1],
     }

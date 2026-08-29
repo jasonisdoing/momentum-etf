@@ -432,6 +432,8 @@ export function NewHighClient() {
   const [charts, setCharts] = useState<HoldingChartData[] | null>(null);
   const [chartsLoading, setChartsLoading] = useState(false);
   const [chartsError, setChartsError] = useState<string | null>(null);
+  // 차트 기간(개월) — 백엔드 config.HOLDING_CHART_MONTHS 가 단일 소스. 응답에서 받아 문구에 쓴다.
+  const [chartMonths, setChartMonths] = useState<number | null>(null);
 
   const constraints = view?.constraints ?? null;
   // 창 길이가 바뀌면 문구도 따라 바뀐다 — "52주" 를 문자열로 박지 않는다.
@@ -850,9 +852,10 @@ export function NewHighClient() {
             as_of: asOf || null,
           }),
         });
-        const payload = (await response.json()) as { charts?: HoldingChartData[]; error?: string };
+        const payload = (await response.json()) as { charts?: HoldingChartData[]; months?: number; error?: string };
         if (!response.ok) throw new Error(payload.error ?? "차트를 불러오지 못했습니다.");
         setCharts(payload.charts ?? []);
+        setChartMonths(payload.months ?? null);
       } catch (chartError) {
         const message = chartError instanceof Error ? chartError.message : "차트를 불러오지 못했습니다.";
         setChartsError(message);
@@ -1230,9 +1233,10 @@ export function NewHighClient() {
                     loading={chartsLoading}
                     error={chartsError}
                     emptyMessage="보유 중이거나 진입 예정인 종목이 없습니다."
+                    months={chartMonths}
                     hint={
                       <>
-                        최근 6개월 일봉입니다. 종가가 직전 최고 종가를 넘으면 진입,{" "}
+                        종가가 직전 최고 종가를 넘으면 진입,{" "}
                         <strong style={{ color: "#12b886" }}>MA{draft.exit_ma_days}</strong>를 하회하면 청산합니다.
                         진입한 종목은 매수가와 함께 Buy 화살표가 표시됩니다.
                       </>

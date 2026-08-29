@@ -14,6 +14,7 @@ from typing import Any
 
 import pandas as pd
 
+from config import HOLDING_CHART_MONTHS
 from utils.price_series import positive_prices as _positive
 
 _CANDLE_KEYS = ("Open", "High", "Low", "Close")
@@ -24,14 +25,18 @@ def holding_charts(
     tickers: list[str],
     ma_days_list: list[int],
     as_of: str | None = None,
-    months: int = 6,
+    months: int | None = None,
 ) -> list[dict[str, Any]]:
-    """티커별 {ticker, name, candles, ma_lines} 목록. 순서는 넘긴 티커 순서."""
+    """티커별 {ticker, name, candles, ma_lines} 목록. 순서는 넘긴 티커 순서.
+
+    ``months`` 를 안 주면 `config.HOLDING_CHART_MONTHS` — 화면 문구도 같은 값을 받아 쓴다.
+    """
     from utils.cache_utils import load_cached_frames_bulk_from_ticker_types
     from utils.portfolio_io import average_buy_price_by_ticker
     from utils.settings_loader import get_ticker_type_settings
     from utils.stock_list_io import _load_ticker_type_stocks_raw
 
+    months = int(HOLDING_CHART_MONTHS if months is None else months)
     wanted = [ticker for ticker in dict.fromkeys(str(t).strip() for t in tickers) if ticker]
     ma_days_list = sorted({int(days) for days in ma_days_list if int(days) > 0})
     if not wanted or not ma_days_list:

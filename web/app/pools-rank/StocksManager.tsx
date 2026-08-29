@@ -355,6 +355,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [charts, setCharts] = useState<HoldingChartData[] | null>(null);
   const [chartsLoading, setChartsLoading] = useState(false);
   const [chartsError, setChartsError] = useState<string | null>(null);
+  // 차트 기간(개월) — 백엔드 config.HOLDING_CHART_MONTHS 가 단일 소스. 응답에서 받아 문구에 쓴다.
+  const [chartMonths, setChartMonths] = useState<number | null>(null);
   const [ticker_types, setAccounts] = useState<RankTickerType[]>(rankToolbarCache?.ticker_types ?? []);
   const [selectedTickerType, setSelectedAccountId] = useState(
     rankToolbarCache?.ticker_type ?? DEFAULT_TICKER_TYPE,
@@ -644,9 +646,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             long_ma_days: maRule?.long_ma_days,
           }),
         });
-        const payload = (await response.json()) as { charts?: HoldingChartData[]; error?: string };
+        const payload = (await response.json()) as { charts?: HoldingChartData[]; months?: number; error?: string };
         if (!response.ok) throw new Error(payload.error ?? "차트를 불러오지 못했습니다.");
         setCharts(payload.charts ?? []);
+        setChartMonths(payload.months ?? null);
       } catch (chartError) {
         const message = chartError instanceof Error ? chartError.message : "차트를 불러오지 못했습니다.";
         setChartsError(message);
@@ -1863,7 +1866,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 loading={chartsLoading || loading || isPending}
                 error={chartsError}
                 emptyMessage="이 종목풀에 종목이 없습니다."
-                hint={`최근 6개월 일봉입니다. 표에 보이는 순서대로 그립니다 — 지금 ${chartTickers.length}개 / 전체 ${orderedTickers.length}개.`}
+                hint={`표에 보이는 순서대로 그립니다 — 지금 ${chartTickers.length}개 / 전체 ${orderedTickers.length}개.`}
+                months={chartMonths}
                 chartProps={(item) => ({ badges: rankChartBadges(item.ticker) })}
               />
               {!chartsLoading && !chartsError && chartTickers.length < orderedTickers.length ? (

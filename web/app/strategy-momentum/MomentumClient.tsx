@@ -533,6 +533,8 @@ export function MomentumClient() {
   const [charts, setCharts] = useState<HoldingChartData[] | null>(null);
   const [chartsLoading, setChartsLoading] = useState(false);
   const [chartsError, setChartsError] = useState<string | null>(null);
+  // 차트 기간(개월) — 백엔드 config.HOLDING_CHART_MONTHS 가 단일 소스. 응답에서 받아 문구에 쓴다.
+  const [chartMonths, setChartMonths] = useState<number | null>(null);
   // 차트를 그릴 대상 — 선정분(1~N)만. 차순위·예상 전용·이미 매도된 종목은 뺀다.
   const chartRows = useMemo(
     () => pickRows.filter((row) => !row.is_reserve && !row.is_expected_only && !row.is_exited),
@@ -562,9 +564,10 @@ export function MomentumClient() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ pool: view.settings.pool, tickers: chartRows.map((row) => row.ticker) }),
         });
-        const payload = (await response.json()) as { charts?: HoldingChartData[]; error?: string };
+        const payload = (await response.json()) as { charts?: HoldingChartData[]; months?: number; error?: string };
         if (!response.ok) throw new Error(payload.error ?? "차트를 불러오지 못했습니다.");
         setCharts(payload.charts ?? []);
+        setChartMonths(payload.months ?? null);
       } catch (chartError) {
         const message = chartError instanceof Error ? chartError.message : "차트를 불러오지 못했습니다.";
         setChartsError(message);
@@ -1194,7 +1197,8 @@ export function MomentumClient() {
                 loading={chartsLoading}
                 error={chartsError}
                 emptyMessage="선정된 종목이 없습니다."
-                hint="최근 6개월 일봉입니다. 장기선 위 & 단기선 위(자격)를 잃으면 편출되고, 편입이 시작된 교체일에 Buy 화살표가 표시됩니다."
+                hint="장기선 위 & 단기선 위(자격)를 잃으면 편출되고, 편입이 시작된 교체일에 Buy 화살표가 표시됩니다."
+                months={chartMonths}
                 chartProps={(item) => {
                   const row = chartRows.find((candidate) => candidate.ticker === item.ticker);
                   return {
