@@ -720,7 +720,15 @@ def build_ticker_type_rankings(
     as_of_date: pd.Timestamp | None = None,
     realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
     status_callback: Any | None = None,
+    scores_only: bool = False,
 ) -> pd.DataFrame:
+    """종목풀 순위표. ``scores_only`` 면 **줄 세우기에 필요한 것만** 계산한다.
+
+    순위 점수(`rank_score`)는 장기 이격률 하나다. 그런데 기본 경로는 화면 표에 쓰는
+    기간수익률(1~36달)·RSI·고점·월별 수익률까지 종목마다 계산한다 — 424종목에 2초다.
+    「이전」·「1주」 순위처럼 **번호만 필요한** 호출은 그 값을 하나도 쓰지 않으므로 건너뛴다.
+    행 구성·정렬 기준은 그대로라 매겨지는 번호는 같다.
+    """
     if callable(status_callback):
         status_callback("최신 거래일 기준 캐시 상태 확인")
     started_at = perf_counter()
@@ -822,12 +830,16 @@ def build_ticker_type_rankings(
         preprocess_elapsed += perf_counter() - preprocess_started_at
 
         metric_started_at = perf_counter()
-        price_metrics = _extract_price_metrics_from_close_series(
-            effective_close_series,
-            reference_date=selected_as_of_date,
-            monthly_labels=monthly_labels,
-        )
-        price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
+        if scores_only:
+            # 표시용 지표는 만들지 않는다 — 컬럼 자리는 비워 둔다(임의 값으로 채우지 않는다).
+            price_metrics = {}
+        else:
+            price_metrics = _extract_price_metrics_from_close_series(
+                effective_close_series,
+                reference_date=selected_as_of_date,
+                monthly_labels=monthly_labels,
+            )
+            price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
         metric_elapsed += perf_counter() - metric_started_at
 
         # 추세(%)는 아래 공통 엔진에서 한 번에 주입된다.
