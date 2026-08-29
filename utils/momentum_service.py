@@ -1164,16 +1164,9 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
 
     row_tickers = [item["ticker"] for item in selected + reserve] + [item["ticker"] for item in extra_expected]
 
-    # 시가총액(억) — /kor-market-stock 과 같은 네이버 marketValue 소스(10분 캐시).
-    market_caps: dict[str, int] = {}
-    if country == "kor":
-        try:
-            from utils.kor_stock_market_service import load_kor_market_caps
-
-            market_caps = load_kor_market_caps(row_tickers)
-        except Exception:
-            market_caps = {}  # 보조 정보 — 실패해도 선정 표는 그대로 뜬다.
-    # 시총 순위 — 배치 B 가 메타 캐시에 적어 둔 시장 전체 순위(개별주 풀만 값 있음). 화면은 읽기만 한다.
+    # 시총 순위·금액 — 배치 B 가 메타 캐시에 적어 둔 값(개별주 풀만 값 있음). 화면은 읽기만 한다.
+    # 예전에는 한국만 네이버 시세표를 직접 순회해 금액을 받았다(424종목에 4초). 배치가 순위를
+    # 매기려고 이미 받아 오는 값이라, 배치가 금액까지 적고 여기서는 DB 만 읽는다.
     from utils.market_cap_rank import market_cap_rank_of
     from utils.stock_cache_meta_io import get_stock_cache_meta_docs
 
@@ -1182,6 +1175,11 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         meta_docs = {}
     rank_by_ticker = {t: market_cap_rank_of((doc or {}).get("meta_cache")) for t, doc in meta_docs.items()}
+    market_caps = {
+        t: float(value)
+        for t, doc in meta_docs.items()
+        if (value := ((doc or {}).get("meta_cache") or {}).get("total_net_assets"))
+    }
 
     def price_info(ticker: str) -> dict[str, Any]:
         frame = frames.get(ticker)
@@ -1190,7 +1188,7 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
                 "price": None,
                 "daily_change_pct": None,
                 "high_drawdown_pct": None,
-                "market_cap_eok": None,
+                "market_cap": None,
                 "market_cap_rank": rank_by_ticker.get(ticker),
                 "monthly_returns": {label: None for label in month_labels},
             }
@@ -1217,7 +1215,7 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
             "price": round(price, 4) if price is not None else None,
             "daily_change_pct": daily_change_pct,
             "high_drawdown_pct": high_drawdown_pct,
-            "market_cap_eok": market_caps.get(ticker),
+            "market_cap": market_caps.get(ticker),
             "market_cap_rank": rank_by_ticker.get(ticker),
             "monthly_returns": build_recent_monthly_return_metrics(close, labels=month_labels),
         }

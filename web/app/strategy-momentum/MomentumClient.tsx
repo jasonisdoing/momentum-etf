@@ -23,7 +23,7 @@ import { createAppGridTheme } from "../components/app-grid-theme";
 import { formatDateWithWeekday } from "@/lib/datetime";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
-import { formatKorMarketCap } from "@/lib/market-cap-format";
+import { formatMarketCapWon } from "@/lib/market-cap-format";
 import {
   type BacktestDayRow,
   type BacktestMonthRow,
@@ -128,7 +128,7 @@ type PickRow = {
   monthly_returns: Record<string, number | null>;
   daily_change_pct: number | null;
   high_drawdown_pct: number | null;
-  market_cap_eok: number | null;
+  market_cap: number | null;
   market_cap_rank: number | null;
   /** 종목 메모 — 계좌가 아니라 종목에 붙는다(자산 관리·순위 화면과 같은 값). */
   memo?: string;
@@ -747,16 +747,16 @@ export function MomentumClient() {
         type: "numericColumn",
         valueFormatter: (p) => formatPrice(p.value, p.data?.currency),
       },
-      // 시가총액 소스(네이버)가 한국 전용이라 한국 풀에서만 보여준다.
-      ...(picksCountry === "kor"
+      // 시가총액 — 배치 B 가 메타 캐시에 적어 둔 값(개별주 풀만). 신고가 화면과 같은 소스·같은 표기.
+      ...(hasMarketCap
         ? [
           {
             headerName: "시가총액",
-            field: "market_cap_eok",
-            headerTooltip: "네이버 시가총액 (/kor-market-stock 과 같은 소스, 10분 캐시)",
+            field: "market_cap",
+            headerTooltip: "배치가 하루 한 번 적어 둔 시가총액 (순위·신고가 화면과 같은 값)",
             width: 120,
             type: "numericColumn",
-            valueFormatter: (p) => formatKorMarketCap(p.value),
+            valueFormatter: (p) => formatMarketCapWon(p.value),
           } as ColDef<PickRow>,
         ]
         : []),
