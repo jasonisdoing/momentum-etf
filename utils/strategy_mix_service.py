@@ -290,6 +290,37 @@ def _resolve_mix_account(account_id: str | None) -> dict[str, Any]:
     }
 
 
+def holding_charts_for_account(account_id: str | None, tickers: list[str]) -> list[dict[str, Any]]:
+    """보유 종목 차트 — 슬리브별로 그 전략의 기준선을 그린다 (공용 `holding_chart_service`).
+
+    모멘텀 슬리브 종목은 단기·장기, 신고가는 이탈 이평선, 포트폴리오는 풀 판정 이평선.
+    같은 티커가 두 슬리브에 있으면 앞 슬롯(선정 우선) 기준 한 장만 그린다 — 행도 한 줄이다.
+    """
+    from utils.holding_chart_service import holding_charts as build_charts
+    from utils.mix_sleeve import MOMENTUM, NEW_HIGH
+    from utils.settings_loader import get_ticker_type_settings
+
+    ctx = _resolve_mix_account(account_id)
+    wanted = [str(t).strip() for t in tickers if str(t or "").strip()]
+    charts_by_ticker: dict[str, dict[str, Any]] = {}
+    for spec in ctx["slots"]:
+        remaining = [t for t in wanted if t not in charts_by_ticker]
+        if not remaining:
+            break
+        if spec.strategy == MOMENTUM:
+            ma_days = [int(spec.settings["short_ma_days"]), int(spec.settings["long_ma_days"])]
+        elif spec.strategy == NEW_HIGH:
+            ma_days = [int(spec.settings["exit_ma_days"])]
+        else:
+            # 포트폴리오(배당주) — 판정선이 없어 풀 설정 이평선(추세 배지 기준)을 참고로 그린다.
+            pool_settings = get_ticker_type_settings(spec.pool) or {}
+            ma_days = [int(pool_settings["SHORT_MA_DAYS"]), int(pool_settings["LONG_MA_DAYS"])]
+        # 이 슬리브 풀에 없는 티커는 가격 프레임이 없어 자연히 건너뛴다(다음 슬리브가 잡는다).
+        for chart in build_charts(spec.pool, remaining, ma_days):
+            charts_by_ticker.setdefault(chart["ticker"], chart)
+    return [charts_by_ticker[t] for t in wanted if t in charts_by_ticker]
+
+
 def _load_account_state(account_id: str) -> dict[str, Any]:
     """적용 계좌의 실제 보유 수량·평단·현금 — portfolio_master 가 단일 소스다."""
     from utils.portfolio_io import load_portfolio_master
