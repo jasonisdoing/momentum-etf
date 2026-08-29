@@ -34,6 +34,10 @@ export type HoldingChartData = {
   avg_buy_price?: number | null;
   /** 통화(KRW·USD·AUD) — 가격에 기호를 붙이는 데 쓴다. 풀마다 다르다. */
   currency?: string | null;
+  /** 이 요청의 차트들이 공유하는 날짜 축 — 전체 거래일 수와, 창 시작부터 첫 캔들까지의 빈 칸 수.
+   *  상장한 지 얼마 안 된 종목이 캔들 몇 개로 가로 폭을 다 채우지 않게 한다. */
+  window_bars?: number | null;
+  leading_bars?: number | null;
 };
 
 /** 카드 오른쪽 배지 하나. 색은 화면이 정한다(전략 배지와 같은 모양을 쓴다). */
@@ -151,7 +155,18 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
         title: "",
       });
     }
-    api.timeScale().fitContent();
+    /** 보이는 구간을 공용 창에 맞춘다 — 캔들이 적으면 왼쪽을 비우고 오른쪽 일부만 채운다.
+     *  창 정보가 없으면(옛 응답) 예전처럼 데이터에 꽉 맞춘다. */
+    function fitToWindow() {
+      const windowBars = chart.window_bars ?? 0;
+      const leadingBars = chart.leading_bars ?? 0;
+      if (windowBars > chart.candles.length) {
+        api.timeScale().setVisibleLogicalRange({ from: -leadingBars - 0.5, to: windowBars - leadingBars - 0.5 });
+        return;
+      }
+      api.timeScale().fitContent();
+    }
+    fitToWindow();
 
     /** 평단 선의 화면 높이와 그 대비 수익률 — 차트 크기가 바뀌면 다시 잰다. */
     function updateAverageBadge(el: HTMLDivElement) {
@@ -174,7 +189,7 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
 
     const observer = new ResizeObserver(() => {
       api.applyOptions({ width: container.clientWidth });
-      api.timeScale().fitContent();
+      fitToWindow();
       updateAverageBadge(container);
     });
     observer.observe(container);
