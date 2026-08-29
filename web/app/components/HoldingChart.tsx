@@ -192,7 +192,18 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
     <div className="card appCard" style={{ padding: "12px 14px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         {/* [전략명] 티커 종목명 — 세 화면 공통 표기. */}
-        <strong style={{ fontSize: "var(--fs-base)" }}>
+        {/* 이름이 길어도 카드 높이가 늘지 않게 한 줄로 자른다 — 카드가 2열이라 한 장만 높아지면
+            옆 카드까지 같이 늘어난다. minWidth:0 이 없으면 flex 자식이 줄지 않아 말줄임이 안 걸린다. */}
+        <strong
+          style={{
+            fontSize: "var(--fs-base)",
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+          title={`${chart.ticker} ${chart.name}`}
+        >
           {(() => {
             const label = strategyLabel ?? chart.strategy_label;
             return `${label ? `[${label}] ` : ""}${chart.ticker} ${chart.name}`;
@@ -200,7 +211,7 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
         </strong>
         {/* 오른쪽 배지 — 산 날 → 들고 있는 기간 → 수익률 순. 왼쪽부터 시간 순으로 읽힌다.
             `badges` 를 주면 화면이 정한 배지로 통째로 갈아 끼운다(순위 화면). */}
-        <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
           {badges ? (
             badges.map((badge) => (
               <span

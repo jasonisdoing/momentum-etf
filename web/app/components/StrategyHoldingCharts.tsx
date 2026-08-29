@@ -54,7 +54,8 @@ export function StrategyHoldingCharts({
   return (
     <>
       <div style={{ ...hintStyle, margin: "4px 0 10px" }}>{hint}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "18px 20px" }}>
+      {/* 최대 2열, 좁으면 1열 — 규칙은 globals.css 의 `.appChartGrid` 한 곳에 있다. */}
+      <div className="appChartGrid">
         {charts.map((item) => (
           <HoldingChart key={item.ticker} chart={item} {...chartProps(item)} />
         ))}
