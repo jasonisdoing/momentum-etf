@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { ColDef, ICellRendererParams } from "ag-grid-community";
 
 import { formatKstDateTime } from "@/lib/datetime";
+import { industryCapLabel, isIndustryCapNone } from "@/lib/industry-cap";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { LastSavedCell } from "../components/LastSavedCell";
@@ -76,6 +77,8 @@ type PoolSettingsResponse = {
   constraints: {
     /** 이평선 선택지 — 국가별(풀의 country_code 로 고른다). 백엔드 utils/ma_options 가 단일 소스. */
     ma_options_by_country: Record<string, MaOptionsPayload>;
+    /** 업종 상한 선택지 — 백엔드 config.MAX_PER_INDUSTRY_OPTIONS 가 단일 소스(-1 = 없음). */
+    max_per_industry_options?: number[];
     slippage_pct_options?: number[];
     stoploss_pct_options?: number[];
     market_indices?: MarketIndexOption[];
@@ -511,6 +514,10 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     ? data.constraints.stoploss_pct_options
     : DEFAULT_STOPLOSS_PCT_OPTIONS;
   const marketIndices = data.constraints.market_indices ?? [];
+  // 이 그리드의 드래프트는 문자열이고 빈 문자열이 '없음'이라, API 의 -1 을 ""로 옮긴다.
+  const industryCapOptions = (data.constraints.max_per_industry_options ?? []).map((value) =>
+    isIndustryCapNone(value) ? "" : String(value),
+  );
 
   /** 셀렉트 편집 컬럼 — 목록 밖 저장값도 후보에 남겨 빈 셀렉트가 되지 않게 한다. */
   const selectCol = (
@@ -588,8 +595,9 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       valueFormatter: (params) => (params.value == null ? "-" : Number(params.value).toLocaleString("ko-KR")),
     },
     // 업종 상한 — 순위 화면 추천(✅)과 모멘텀 선정이 함께 쓴다. 빈 값 = 제한 없음.
-    selectCol("MAX_PER_INDUSTRY", "업종상한", 88, () => ["1", "2", "3", ""], {
-      valueFormatter: (params) => (params.value === "" || params.value == null ? "없음" : `${params.value}종목`),
+    selectCol("MAX_PER_INDUSTRY", "업종상한", 88, () => industryCapOptions, {
+      valueFormatter: (params) =>
+        industryCapLabel(params.value === "" || params.value == null ? null : Number(params.value)),
       headerTooltip: "한 업종에서 최대 몇 종목까지 담을지. 순위 화면의 ✅ 와 모멘텀 선정이 같은 값을 씁니다.",
     }),
     selectCol(

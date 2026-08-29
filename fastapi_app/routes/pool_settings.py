@@ -19,6 +19,7 @@ from utils.pool_settings_store import (
     delete_pool,
     get_pool_delete_impact,
     load_pool_definitions,
+    max_per_industry_options,
     save_pool_settings,
     update_pool,
 )
@@ -80,6 +81,7 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
         "pools": pools,
         "constraints": {
             "ma_options_by_country": ma_options_by_country(),
+            "max_per_industry_options": max_per_industry_options(),
             "slippage_pct_options": list(SLIPPAGE_PCT_OPTIONS),
             "stoploss_pct_options": list(STOPLOSS_PCT_OPTIONS),
             "editable_keys": list(POOL_EDITABLE_KEYS),

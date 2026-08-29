@@ -5,6 +5,7 @@ import type { ColDef, RowClassParams } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { industryCapLabel, withCurrentIndustryCap } from "@/lib/industry-cap";
 import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
@@ -1761,12 +1762,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                         value={String(effectiveMaxPerIndustry)}
                         onChange={(event) => handleMaxPerIndustryChange(Number(event.target.value))}
                       >
-                        {(industryCapChoices.includes(effectiveMaxPerIndustry)
-                          ? industryCapChoices
-                          : [...industryCapChoices, effectiveMaxPerIndustry]
-                        ).map((option: number) => (
+                        {withCurrentIndustryCap(industryCapChoices, effectiveMaxPerIndustry).map((option: number) => (
                           <option key={option} value={String(option)}>
-                            {option < 0 ? "없음" : `${option}종목`}
+                            {industryCapLabel(option)}
                           </option>
                         ))}
                       </select>
