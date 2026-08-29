@@ -22,16 +22,14 @@ def get_strategy_mix_meta(_: None = Depends(require_internal_token)) -> dict:
 @router.get("/positions")
 def get_strategy_mix_positions(
     account_id: str | None = Query(default=None),
-    as_of: str | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict:
     """오늘 기준 합성 운영 상태 — 보유 목록(목표 비중)·현금 비중·오늘의 액션.
 
-    ``as_of`` 를 주면 그 날짜의 상태를 재현한다 (과거 날짜 조회).
     """
     from utils.strategy_mix_service import mix_positions
 
-    return mix_positions(account_id, as_of)
+    return mix_positions(account_id)
 
 
 @router.get("/backtest")

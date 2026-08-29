@@ -83,16 +83,12 @@ def post_strategy_new_high_positions(
 ) -> dict:
     """기준일의 보유·이탈·돌파·후보를 반환한다 (가격 캐시 기반 — 수 초).
 
-    body: ``{"settings": {...}, "as_of": "2026-08-11"}``. ``as_of`` 를 비우면 최신 거래일.
+    body: ``{"settings": {...}}``. 항상 최신 거래일 기준이다.
     """
     from utils.new_high_backtest import current_positions
 
     settings = payload.get("settings") if isinstance(payload, dict) else None
-    as_of = payload.get("as_of") if isinstance(payload, dict) else None
-    return current_positions(
-        settings if isinstance(settings, dict) else None,
-        as_of=str(as_of) if as_of else None,
-    )
+    return current_positions(settings if isinstance(settings, dict) else None)
 
 
 @router.post("/charts")
@@ -100,7 +96,7 @@ def post_strategy_new_high_charts(
     payload: dict = Body(default={}),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """보유 종목 일봉. body: ``{"settings": {...}, "tickers": [...], "as_of": "2026-08-11"}``.
+    """보유 종목 일봉. body: ``{"settings": {...}, "tickers": [...]}``.
 
     티커는 화면이 이미 받아둔 보유 목록에서 그대로 넘긴다 — 여기서 보유를 다시 계산하면
     같은 시뮬레이션을 두 번 돌리게 된다.
@@ -113,13 +109,11 @@ def post_strategy_new_high_charts(
     tickers = payload.get("tickers") if isinstance(payload, dict) else None
     if not isinstance(tickers, list):
         raise ValueError("'tickers' 는 목록이어야 합니다.")
-    as_of = payload.get("as_of") if isinstance(payload, dict) else None
     return {
         "charts": holding_charts(
             settings["pool"],
             [str(ticker) for ticker in tickers],
             [int(settings["exit_ma_days"])],
-            as_of=str(as_of) if as_of else None,
         ),
         # 화면 안내 문구("최근 N개월 일봉입니다")가 쓰는 값 — 프론트에 복사본을 두지 않는다.
         "months": HOLDING_CHART_MONTHS,

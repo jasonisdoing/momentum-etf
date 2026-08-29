@@ -103,18 +103,18 @@ def load_context(spec: SleeveSpec) -> dict[str, Any] | None:
     return None
 
 
-def current_state(spec: SleeveSpec, as_of: str | None = None) -> dict[str, Any]:
-    """오늘(또는 `as_of`) 기준 이 슬리브의 선정·보유 상태 — 엔진 원본 형태 그대로."""
+def current_state(spec: SleeveSpec) -> dict[str, Any]:
+    """오늘 기준 이 슬리브의 선정·보유 상태 — 엔진 원본 형태 그대로."""
     if spec.strategy == MOMENTUM:
         from utils.momentum_service import compute_picks
 
-        return compute_picks(spec.settings, as_of=as_of)
+        return compute_picks(spec.settings)
     if spec.strategy == PORTFOLIO:
         # 포트폴리오는 판정이 없다 — 저장된 목표 비중이 곧 현재 상태다.
         return dict(spec.settings)
     from utils.new_high_backtest import current_positions
 
-    return current_positions(spec.settings, as_of=as_of)
+    return current_positions(spec.settings)
 
 
 def _held_label(value: Any, *, unit: str, zero: str) -> str:
@@ -165,15 +165,14 @@ class SlotState:
     rebalance: dict[str, Any] | None = None
     # 다음 교체 예상 종목 {ticker: row} — 교체가 있는 전략만. 다음주 가정 미리보기가 쓴다.
     next_expected: dict[str, dict[str, Any]] = field(default_factory=dict)
-    # 과거 날짜 재현·장중 반영 — 이 정보를 주는 전략만 채운다.
+    # 데이터 기준일·장중 반영 — 이 정보를 주는 전략만 채운다.
     as_of: str | None = None
     live: bool = False
-    available_dates: list[str] = field(default_factory=list)
 
 
-def slot_state(spec: SleeveSpec, as_of: str | None = None) -> SlotState:
+def slot_state(spec: SleeveSpec) -> SlotState:
     """엔진 원본 상태를 `SlotState` 로 정규화한다 — 합성이 전략을 가리지 않게."""
-    raw = current_state(spec, as_of=as_of)
+    raw = current_state(spec)
     # 포트폴리오는 슬롯 개수 개념이 없다 — 담은 종목 수가 곧 슬롯 수다.
     top_n = len(spec.settings.get("weights") or []) if spec.strategy == PORTFOLIO else int(spec.settings["top_n"])
     if spec.strategy == MOMENTUM:
@@ -434,7 +433,6 @@ def _new_high_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> S
         rebalance=None,
         as_of=raw.get("as_of"),
         live=bool(raw.get("live")),
-        available_dates=[str(d.get("date")) for d in (raw.get("available_dates") or [])],
     )
 
 

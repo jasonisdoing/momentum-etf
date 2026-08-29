@@ -168,8 +168,6 @@ type Positions = {
   universe_count: number;
   window_weeks: number;
   min_value_mult: number | null;
-  /** 최근 거래일 목록 — 기준일 셀렉트가 쓴다. */
-  available_dates: { date: string; candidate_count: number; breakout_count: number }[];
   /** 가격 캐시가 마지막으로 갱신된 시각(ISO). 배치가 안 돌았으면 null. */
   refreshed_at: string | null;
   /** 진행 중인 세션의 실시간 시세를 얹었는지. 참이면 종가가 아직 확정 전이다. */
@@ -427,7 +425,6 @@ export function NewHighClient() {
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
   const [currentTab, setCurrentTab] = useState<CurrentTab>("list");
   // 기준일 — 빈 값이면 최신 거래일. 과거 날짜를 고르면 그 시점 상태를 재현한다.
-  const [asOf, setAsOf] = useState<string>("");
   const [candidatesOpen, setCandidatesOpen] = useState(false);
   const [charts, setCharts] = useState<HoldingChartData[] | null>(null);
   const [chartsLoading, setChartsLoading] = useState(false);
@@ -468,7 +465,7 @@ export function NewHighClient() {
     };
   }, []);
 
-  const runPositions = useCallback(async (settings: Settings, date = "") => {
+  const runPositions = useCallback(async (settings: Settings) => {
     setRunning(true);
     setPositionsProgress({ percent: 10, message: "돌파·보유 상태를 계산하는 중" });
     const stopRamp = startProgressRamp(setPositionsProgress);
@@ -476,7 +473,7 @@ export function NewHighClient() {
       const response = await fetch("/api/strategy-new-high/positions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ settings, as_of: date || null }),
+        body: JSON.stringify({ settings }),
       });
       const payload = (await response.json()) as Positions & { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "돌파 종목을 불러오지 못했습니다.");
@@ -513,8 +510,7 @@ export function NewHighClient() {
         setBacktest(null);
         setBacktestError(null);
         toast.success(message);
-        setAsOf("");
-        void runPositions(payload.settings, "");
+        void runPositions(payload.settings);
       } catch (saveError) {
         toast.error(saveError instanceof Error ? saveError.message : "설정을 저장하지 못했습니다.");
       } finally {
@@ -591,10 +587,10 @@ export function NewHighClient() {
   // 장중에는 실시간 시세가 움직이므로 주기적으로 다시 받는다.
   // 과거 날짜를 보는 중이거나 장이 닫혀 있으면 갱신할 것이 없어 타이머를 걸지 않는다.
   useEffect(() => {
-    if (!positions?.auto_refresh || asOf || !draft) return;
-    const id = window.setInterval(() => void runPositions(draft, ""), LIVE_REFRESH_MS);
+    if (!positions?.auto_refresh || !draft) return;
+    const id = window.setInterval(() => void runPositions(draft), LIVE_REFRESH_MS);
     return () => window.clearInterval(id);
-  }, [positions?.auto_refresh, asOf, draft, runPositions]);
+  }, [positions?.auto_refresh, draft, runPositions]);
 
   const positionColumns = useMemo<ColDef<PositionRow>[]>(
     () => [
@@ -853,7 +849,6 @@ export function NewHighClient() {
           body: JSON.stringify({
             settings: draft,
             tickers: chartRows.map((row) => row.ticker),
-            as_of: asOf || null,
           }),
         });
         const payload = (await response.json()) as { charts?: HoldingChartData[]; months?: number; error?: string };
@@ -868,7 +863,7 @@ export function NewHighClient() {
         setChartsLoading(false);
       }
     })();
-  }, [currentTab, draft, positions, charts, chartsLoading, chartsError, chartRows, asOf, toast]);
+  }, [currentTab, draft, positions, charts, chartsLoading, chartsError, chartRows, toast]);
 
   const holdingColumns = useMemo<ColDef<PlanRow>[]>(
     () => [
@@ -1128,28 +1123,13 @@ export function NewHighClient() {
                       : `${formatKstDateTime(positions.refreshed_at)} 갱신`}
                   </span>
                 ) : null}
+                {/* 기준일 셀렉트를 없앤 뒤에도 "언제 기준인지"는 남긴다 — 장중이면 자동 갱신 중이라는 표시. */}
                 {positions ? (
-                  <select
-                    className="form-select form-select-sm"
-                    style={{ width: "auto" }}
-                    value={asOf}
-                    onChange={(event) => {
-                      setAsOf(event.target.value);
-                      if (draft) void runPositions(draft, event.target.value);
-                    }}
-                  >
-                    <option value="">
-                      {positions.auto_refresh
-                        ? `오늘 (${positions.live ? "장중" : "장전"} 자동 갱신)`
-                        : `오늘 (${formatDateWithWeekday(positions.as_of)})`}
-                    </option>
-                    {positions.available_dates.map((d) => (
-                      <option key={d.date} value={d.date}>
-                        {formatDateWithWeekday(d.date)} ({d.candidate_count}종목
-                        {d.breakout_count ? ` · 돌파 ${d.breakout_count}` : ""})
-                      </option>
-                    ))}
-                  </select>
+                  <span style={hintStyle}>
+                    {positions.auto_refresh
+                      ? `오늘 (${positions.live ? "장중" : "장전"} 자동 갱신)`
+                      : `오늘 (${formatDateWithWeekday(positions.as_of)})`}
+                  </span>
                 ) : null}
                 <span style={hintStyle}>{running ? "계산 중…" : ""}</span>
               </span>

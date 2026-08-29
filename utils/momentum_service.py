@@ -778,40 +778,29 @@ def current_portfolio_dates(benchmark_close: pd.Series, country: str) -> tuple[p
 
 # ── 선정 (현재 포트폴리오) ─────────────────────────────────────────────────
 # 유니버스 전체의 가격 프레임을 읽고 판정까지 하는 계산이라 수십 초 걸린다.
-# 설정·기준일이 같으면 결과도 같으므로 짧게 재사용한다(설정을 바꾸면 키가 달라진다).
+# 설정이 같으면 결과도 같으므로 짧게 재사용한다(설정을 바꾸면 키가 달라진다).
 _PICKS_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="momentum_picks")
 
 
-def compute_picks(settings: dict[str, Any] | None = None, as_of: str | None = None) -> dict[str, Any]:
-    """현재 적용 중인 월 확정 포트폴리오 — 화면 ③ 카드와 스크립트가 함께 쓴다.
-
-    ``as_of`` 를 주면 그 날짜까지의 데이터만 사용해 그날의 상태를 재현한다
-    (신고가 화면의 과거 날짜 조회와 같은 규칙 — 실시간은 섞지 않는다).
-    """
+def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    """현재 적용 중인 월 확정 포트폴리오 — 화면 ③ 카드와 스크립트가 함께 쓴다."""
     if settings is None:
         settings = load_settings()
     settings = validate_settings(settings)
-    cache_key = _PICKS_CACHE.make_key(settings, as_of or "")
-    result = _PICKS_CACHE.get_or_compute(cache_key, lambda: _compute_picks(settings, as_of))
+    cache_key = _PICKS_CACHE.make_key(settings)
+    result = _PICKS_CACHE.get_or_compute(cache_key, lambda: _compute_picks(settings))
     # 종목 메모는 **캐시 밖**에서 붙인다 — 다른 화면에서 고친 값이 즉시 보여야 한다.
     attach_stock_memos(result["rows"])
     return result
 
 
-def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any]:
+def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
     pool = str(settings["pool"])
     info = pool_info(pool)
     universe = load_universe(pool)
     frames = load_price_frames(universe)
     country = info["country"]
     currency = info["currency"]
-
-    cutoff = pd.Timestamp(as_of) if as_of else None
-    if cutoff is not None:
-        frames = {
-            ticker: (frame[frame.index <= cutoff] if frame is not None and not frame.empty else frame)
-            for ticker, frame in frames.items()
-        }
 
     # 실시간을 얹기 전 원본 — 체결가(시가)가 필요한 계산은 이 프레임을 쓴다.
     # 아래 실시간 반영본은 Close 만 남기므로 시가가 사라진다.
@@ -821,16 +810,14 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
     # 유니버스 전체의 종가 시리즈 끝에 실시간 현재가를 붙인다(공용
     # build_effective_close_series). 이후의 '현재' 기준 계산 — 다음 주 예상·예상
     # 순위·현재 이격·이번달 수익률·고점 — 이 전부 장중 가격을 본다.
-    # 판정일 기준 계산은 as_of 필터가 오늘 행을 잘라내므로 영향이 없다.
-    # 과거 날짜 재현 중에는 실시간을 섞지 않는다 — 그날 상태를 보는 화면이다.
+    # 판정일 기준 계산은 그날 종가로 확정돼 있어 실시간을 얹어도 달라지지 않는다.
     realtime: dict[str, dict[str, Any]] = {}
-    if cutoff is None:
-        try:
-            from services.price_service import get_realtime_snapshot
+    try:
+        from services.price_service import get_realtime_snapshot
 
-            realtime = get_realtime_snapshot(country, [row["ticker"] for row in universe])
-        except Exception:
-            realtime = {}  # 실시간 실패는 캐시 폴백 — 화면이 값 없이 뜨는 것보단 어제 종가가 낫다.
+        realtime = get_realtime_snapshot(country, [row["ticker"] for row in universe])
+    except Exception:
+        realtime = {}  # 실시간 실패는 캐시 폴백 — 화면이 값 없이 뜨는 것보단 어제 종가가 낫다.
     if realtime:
         from utils.rankings import build_effective_close_series
 
@@ -854,10 +841,6 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
         frames = effective_frames
 
     benchmark_close = load_benchmark_close(pool)
-    if cutoff is not None:
-        benchmark_close = benchmark_close[benchmark_close.index <= cutoff]
-        if len(benchmark_close) == 0:
-            raise RuntimeError(f"{as_of} 이전의 벤치마크 데이터가 없습니다.")
     rebalance_date, signal_date = current_portfolio_dates(benchmark_close, info["country"])
     candidates = select_candidates(universe, frames, settings, as_of=signal_date)
     scored = rank_candidates(candidates)
@@ -1075,7 +1058,7 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
         낙폭이 손절선 이하. 오늘 종가로 확정되기 전의 예보라 화면 표시 전용이다.
         """
         none = {"is_exit_forecast": False, "exit_forecast_reason": None}
-        if not settings.get("intraweek_exit", True) or cutoff is not None:
+        if not settings.get("intraweek_exit", True):
             return none
         if ticker not in set(held_tickers) or ticker in exit_by_ticker:
             return none

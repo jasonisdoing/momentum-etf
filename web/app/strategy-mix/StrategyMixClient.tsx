@@ -250,7 +250,6 @@ type Positions = {
   /** 계산 기준 계좌의 원장 상태. 없으면 비중만 보여준다. */
   account: AccountState | null;
   /** 과거 날짜 셀렉트용 — 신고가 화면과 같은 날짜 목록. */
-  available_dates: string[];
   summary: {
     stock_pct: number;
     cash_pct: number;

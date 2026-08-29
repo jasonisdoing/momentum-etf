@@ -63,7 +63,6 @@ type RankData = {
   /** 이평선 일수 선택지 — 백엔드 상수(utils/ma_options)가 단일 소스. */
   short_ma_options: number[];
   long_ma_options: number[];
-  as_of_date: string | null;
   monthly_return_labels: string[];
   rows: RankRow[];
   cache_blocked: boolean;
@@ -107,14 +106,10 @@ type RankMaRuleOverride = {
 export async function loadRankData(params?: {
   ticker_type?: string;
   ma_rule_override?: RankMaRuleOverride;
-  as_of_date?: string;
 }, signal?: AbortSignal): Promise<RankData> {
   const search = new URLSearchParams();
   if (params?.ticker_type) {
     search.set("ticker_type", params.ticker_type);
-  }
-  if (params?.as_of_date) {
-    search.set("as_of_date", params.as_of_date);
   }
   const override = params?.ma_rule_override;
   if (override) {

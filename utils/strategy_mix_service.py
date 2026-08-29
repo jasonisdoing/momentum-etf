@@ -375,7 +375,7 @@ def _load_account_state(account_id: str) -> dict[str, Any]:
 _SHARES_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="mix_sleeve_shares")
 
 
-def _sleeve_shares(ctx: dict[str, Any], as_of: str | None) -> dict[str, float]:
+def _sleeve_shares(ctx: dict[str, Any]) -> dict[str, float]:
     """{슬롯키: 몫 %} + cash_pct — 직전 월초 배분 이후 흘러간 비율.
 
     각 슬리브의 일별 곡선에서 이번 달 첫 거래일 이후 성장률을 읽어, 월초 배분에 곱한 뒤
@@ -386,18 +386,17 @@ def _sleeve_shares(ctx: dict[str, Any], as_of: str | None) -> dict[str, float]:
     곡선을 못 구하면(데이터 부족 등) 저장된 월초 배분을 그대로 쓴다 — 임의 보정 대신
     '아직 안 흘러간 상태' 로 명시한다.
     """
-    # 캐시 키는 계좌·기준일 + **슬리브 구성**이다. 조합이나 배분을 바꾸면 몫이 달라지므로
+    # 캐시 키는 계좌 + **슬리브 구성**이다. 조합이나 배분을 바꾸면 몫이 달라지므로
     # 구성까지 키에 넣어야 저장 직후 옛 몫이 그대로 나오지 않는다.
     key = _SHARES_CACHE.make_key(
         ctx["account_id"],
-        as_of or "",
         [(spec.key, spec.strategy, spec.pool) for spec in ctx["slots"]],
         mix_weights_for_account(ctx["account_id"]),
     )
-    return _SHARES_CACHE.get_or_compute(key, lambda: _compute_sleeve_shares(ctx, as_of))
+    return _SHARES_CACHE.get_or_compute(key, lambda: _compute_sleeve_shares(ctx))
 
 
-def _compute_sleeve_shares(ctx: dict[str, Any], as_of: str | None) -> dict[str, float]:
+def _compute_sleeve_shares(ctx: dict[str, Any]) -> dict[str, float]:
     from utils.mix_sleeve import daily_curve, load_context, run_backtest
 
     base = mix_weights_for_account(ctx["account_id"])
@@ -410,10 +409,9 @@ def _compute_sleeve_shares(ctx: dict[str, Any], as_of: str | None) -> dict[str, 
         )
         return base
 
-    cutoff = as_of or "9999-12-31"
-    trimmed = {key: {d: v for d, v in curve.items() if d <= cutoff} for key, curve in curves.items()}
-    if not trimmed or not all(trimmed.values()):
+    if not curves or not all(curves.values()):
         return base
+    trimmed = curves
     # 기준 달 — 어느 슬리브든 마지막 날짜가 같은 달이다(같은 국가 달력).
     month = max(max(curve) for curve in trimmed.values())[:7]
 
@@ -1057,14 +1055,13 @@ def _build_next_week_preview(
     return {"fill_date": fill_date, "groups": groups}
 
 
-def mix_positions(account_id: str | None = None, as_of: str | None = None) -> dict[str, Any]:
+def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     """오늘 기준 합성 운영 상태 — 보유 목록(목표 비중)·현금 비중·오늘의 액션.
 
     각 슬리브의 전략 화면이 계산하는 것을 어댑터(`utils.mix_sleeve.slot_state`)로 같은
     형태로 받아 합칠 뿐, 새 판정 로직은 없다. 비중은 슬리브 몫 ÷ 슬롯 수(빈 슬롯 = 현금).
     겹치는 종목은 한 행으로 합친다 — 계좌에는 그 종목이 하나뿐이라, 슬리브별로 나누면
     보유 수량이 두 번 세어지고 매매 지시가 반대로 나온다.
-    ``as_of`` 를 주면 모든 슬리브가 그 날짜의 상태를 재현한다 (실시간 없음).
     """
     import pandas as pd
 
@@ -1074,13 +1071,13 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
     slots: list[SleeveSpec] = ctx["slots"]
     keys = [spec.key for spec in slots]
     labels = _slot_labels(slots)
-    states = {spec.key: slot_state(spec, as_of=as_of) for spec in slots}
+    states = {spec.key: slot_state(spec) for spec in slots}
 
     # ── 슬리브 몫 — 월초 배분에서 각 슬리브가 흘러간 비율을 역산한다 ──
     # 재조정은 매월 첫 거래일에만 하므로, 그 사이에는 잘 나간 슬리브의 몫이 커진 채로
     # 가는 것이 백테스트다. 항상 월초 배분으로 보면 승자 슬리브를 매주 깎는 지시가 나온다.
     base_weights = mix_weights_for_account(ctx["account_id"])
-    drifted = _sleeve_shares(ctx, as_of)
+    drifted = _sleeve_shares(ctx)
     reserved_cash_share = drifted["cash_pct"]
     shares = {key: drifted[f"{key}_pct"] for key in keys}
 
@@ -1158,8 +1155,7 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
     # 종목 가격의 통화 — 계좌 원장(원화)과 맞추려면 환율이 필요하다.
     pool_currency = ctx["currency"]
     tz_name = str((MARKET_SCHEDULES.get(country) or {}).get("timezone") or "Asia/Seoul")
-    # 과거 날짜 조회면 그 날짜 기준으로 첫 거래일 여부를 판정한다.
-    today_local = pd.Timestamp(as_of).date() if as_of else pd.Timestamp.now(tz=tz_name).date()
+    today_local = pd.Timestamp.now(tz=tz_name).date()
     month_start = today_local.replace(day=1)
     month_days = get_trading_days(month_start.strftime("%Y-%m-%d"), today_local.strftime("%Y-%m-%d"), country)
     sleeve_rebalance_today = bool(month_days) and month_days[0].date() == today_local
@@ -1303,12 +1299,10 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
     # 모멘텀 화면과 같은 값이다. 전량 매도 행까지 붙은 뒤에 한 번에 읽는다.
     attach_stock_memos(holdings)
 
-    # 장중 반영·과거 날짜 목록은 그 정보를 주는 전략에서만 온다(신고가). 슬리브 어디에도
-    # 없으면 빈 값 — 임의로 만들지 않는다.
+    # 장중 반영은 그 정보를 주는 전략에서만 온다(신고가). 슬리브 어디에도 없으면 거짓이다.
     live = any(states[key].live for key in keys)
-    # 데이터 기준일 — 그 값을 주는 전략(신고가)이 있으면 그걸 쓰고, 없으면 조회 기준일이다.
+    # 데이터 기준일 — 그 값을 주는 전략(신고가)이 있으면 그걸 쓰고, 없으면 오늘이다.
     as_of_value = next((states[key].as_of for key in keys if states[key].as_of), None) or str(today_local)
-    available_dates = next((states[key].available_dates for key in keys if states[key].available_dates), [])
 
     payload = {
         "computed_at": datetime.now().astimezone().isoformat(),
@@ -1319,8 +1313,6 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
         "as_of": as_of_value,
         "next_trading_day": next_trading_day,
         "live": live,
-        # 과거 날짜 셀렉트용.
-        "available_dates": available_dates,
         "summary": {
             "stock_pct": round(stock_pct, 2),
             "cash_pct": round(100 - stock_pct, 2),
@@ -1355,8 +1347,7 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
                     # 다음 거래일 시가 매도(확정) — 자격 상실·이탈·손절.
                     "sells": states[key].sells,
                     # 장중 판정 기준 이탈 **예상** — 오늘 종가로 확정된다. 화면 전용.
-                    # 과거 재현(as_of)에는 장중 개념이 없으므로 비운다.
-                    "exit_forecast": states[key].exit_forecast if not as_of else [],
+                    "exit_forecast": states[key].exit_forecast,
                     # 다음 거래일 시가에 새로 담는 것.
                     "entries": states[key].entries,
                     # 주기적 교체가 있는 전략만 — 판정은 끝났고 체결만 남았다.
@@ -1397,21 +1388,17 @@ def mix_positions(account_id: str | None = None, as_of: str | None = None) -> di
     payload["actions"]["groups"] = _build_action_groups(
         payload["holdings"], payload["actions"], next_trading_day, currency=currency
     )
-    # 다음주 교체 가정 미리보기 — 실시간 순위 기준 잠정치라 과거 재현(as_of)에는 없다.
-    payload["actions"]["next_week_preview"] = (
-        _build_next_week_preview(
-            states,
-            payload["holdings"],
-            payload["actions"],
-            slot_weight,
-            account,
-            ahead,
-            today_local,
-            currency,
-            _krw_rate(pool_currency),
-        )
-        if not as_of
-        else None
+    # 다음주 교체 가정 미리보기 — 실시간 순위 기준 잠정치.
+    payload["actions"]["next_week_preview"] = _build_next_week_preview(
+        states,
+        payload["holdings"],
+        payload["actions"],
+        slot_weight,
+        account,
+        ahead,
+        today_local,
+        currency,
+        _krw_rate(pool_currency),
     )
     # 슬리브별 값을 `slots[키]` 로 모아 내보낸다 — 화면은 슬롯 키를 돌며 읽는다.
     payload["holdings"] = [_holding_payload(row, keys) for row in payload["holdings"]]

@@ -11,9 +11,7 @@ export async function GET(request: NextRequest) {
   try {
     const params = new URLSearchParams();
     const accountId = request.nextUrl.searchParams.get("account_id");
-    const asOf = request.nextUrl.searchParams.get("as_of");
     if (accountId) params.set("account_id", accountId);
-    if (asOf) params.set("as_of", asOf);
     const query = params.size > 0 ? `?${params.toString()}` : "";
     return jsonNoStore(await fetchFastApiJson(`/internal/strategy-mix/positions${query}`, {}, 300_000));
   } catch (error) {

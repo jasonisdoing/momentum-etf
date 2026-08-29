@@ -29,16 +29,14 @@ from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
 from utils.ttl_cache import TtlCache
 
-_RankCacheKey = tuple[str, str, tuple[tuple[int, int], ...], int | None, int | None]
+_RankCacheKey = tuple[str, tuple[tuple[int, int], ...]]
 _RANK_DATA_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="rank_data")
 
 
 def _build_rank_cache_key(
     ticker_type: str,
-    as_of_date: pd.Timestamp | None,
     ma_rules: list[dict[str, Any]],
 ) -> _RankCacheKey:
-    as_of_date_key = as_of_date.date().isoformat() if as_of_date is not None else ""
     ma_rule_key = tuple(
         (
             int(rule.get("short_ma_days") or 0),
@@ -46,7 +44,7 @@ def _build_rank_cache_key(
         )
         for rule in ma_rules
     )
-    return (ticker_type, as_of_date_key, ma_rule_key)
+    return (ticker_type, ma_rule_key)
 
 
 def invalidate_rank_data_cache(ticker_type: str | None = None) -> None:
@@ -593,14 +591,10 @@ def _compute_rank_data_payload(
     selected_ticker_type: str,
     country_code: str,
     ma_rules: list[dict[str, Any]],
-    selected_as_of_date: pd.Timestamp | None,
 ) -> dict[str, Any]:
-    dataframe = build_ticker_type_rankings(
-        selected_ticker_type,
-        ma_rules=ma_rules,
-        as_of_date=selected_as_of_date,
-    )
-    effective_as_of_date = selected_as_of_date
+    # 기준일은 항상 오늘이다 — 아래에서 데이터가 실제로 어느 날짜인지(effective) 다시 읽는다.
+    dataframe = build_ticker_type_rankings(selected_ticker_type, ma_rules=ma_rules)
+    effective_as_of_date: pd.Timestamp | None = None
     raw_as_of_date = dataframe.attrs.get("as_of_date")
     if raw_as_of_date is not None:
         try:
@@ -679,7 +673,6 @@ def load_rank_data(
     *,
     ticker_type: str | None = None,
     ma_rule_override: dict[str, Any] | None = None,
-    as_of_date: str | None = None,
 ) -> dict[str, Any]:
     configs_payload, default_config = _build_configs_payload()
 
@@ -697,20 +690,10 @@ def load_rank_data(
     country_code = str(selected_config.get("country_code") or "") if selected_config else ""
 
     ma_rules = build_effective_ma_rules(selected_ticker_type, ma_rule_override)
-    selected_as_of_date: pd.Timestamp | None = None
-    if as_of_date:
-        try:
-            selected_as_of_date = pd.to_datetime(as_of_date).normalize()
-        except Exception as exc:
-            raise ValueError(f"기준일 형식이 올바르지 않습니다: {as_of_date}") from exc
-        today_korea = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
-        if selected_as_of_date > today_korea:
-            raise ValueError("기준일은 오늘 이후로 선택할 수 없습니다.")
-
     if selected_config is None:
         raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
 
-    cache_key = _build_rank_cache_key(selected_ticker_type, selected_as_of_date, ma_rules)
+    cache_key = _build_rank_cache_key(selected_ticker_type, ma_rules)
     return _RANK_DATA_CACHE.get_or_compute(
         cache_key,
         lambda: _compute_rank_data_payload(
@@ -718,6 +701,5 @@ def load_rank_data(
             selected_ticker_type=selected_ticker_type,
             country_code=country_code,
             ma_rules=ma_rules,
-            selected_as_of_date=selected_as_of_date,
         ),
     )
