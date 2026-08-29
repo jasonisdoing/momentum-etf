@@ -624,6 +624,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   // 차트 모드일 때만 받는다 — 종목 수만큼 일봉을 실어 오므로 순위·관리 모드에서는 낭비다.
   useEffect(() => {
     if (pageMode !== "chart" || charts || chartsLoading || chartsError) return;
+    // 순위 데이터가 아직 오는 중이면 목록이 비어 있는 게 당연하다 — 여기서 빈 결과로 확정하면
+    // "종목이 없습니다" 가 잠깐 떴다가 차트로 바뀐다.
+    if (loading || isPending) return;
     if (chartTickers.length === 0) {
       setCharts([]);
       return;
@@ -652,7 +655,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         setChartsLoading(false);
       }
     })();
-  }, [pageMode, charts, chartsLoading, chartsError, chartTickers, selectedTickerType, maRule, toast]);
+  }, [pageMode, charts, chartsLoading, chartsError, chartTickers, selectedTickerType, maRule, loading, isPending, toast]);
 
   /** 차트 카드 배지 — 순위·고점·일간·1주. 표의 같은 이름 컬럼과 같은 값이다.
    *  전략 화면의 배지(진입일·보유기간·수익률)는 보유 정보라 종목풀에는 쓸 값이 없다. */
@@ -1857,7 +1860,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             <div className="card-body appCardBodyTight">
               <StrategyHoldingCharts
                 charts={charts}
-                loading={chartsLoading}
+                loading={chartsLoading || loading || isPending}
                 error={chartsError}
                 emptyMessage="이 종목풀에 종목이 없습니다."
                 hint={`최근 6개월 일봉입니다. 표에 보이는 순서대로 그립니다 — 지금 ${chartTickers.length}개 / 전체 ${orderedTickers.length}개.`}
