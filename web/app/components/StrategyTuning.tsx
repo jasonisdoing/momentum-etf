@@ -208,10 +208,11 @@ export function StrategyTuning({
       { headerName: "MDD", field: "mdd_pct", width: 90, valueFormatter: num(1, false, "%"), ...right },
       { headerName: "소르티노", field: "sortino", width: 96, valueFormatter: num(2), ...right },
     ];
-    if (result?.rows[0]?.trade_count != null) columns.push({ headerName: "거래", field: "trade_count", width: 80, ...right });
-    if (result?.rows[0]?.win_rate_pct != null)
-      columns.push({ headerName: "승률", field: "win_rate_pct", width: 84, valueFormatter: num(0, false, "%"), ...right });
     columns.push(
+      // 거래·승률은 두 전략 모두 항상 내려준다. 예전에는 첫 행에 값이 있을 때만 컬럼을 만들었는데,
+      // 그러면 1등 조합이 거래 0건(승률 null)이면 나머지 행의 값까지 통째로 사라졌다.
+      { headerName: "거래", field: "trade_count", width: 80, ...right },
+      { headerName: "승률", field: "win_rate_pct", width: 84, valueFormatter: num(0, false, "%"), ...right },
       {
         headerName: "분기승수",
         field: "quarter_wins",

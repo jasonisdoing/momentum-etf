@@ -118,6 +118,7 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
                     "intraweek": value,
                 },
                 returns,
+                {"trade_count": result["trade_count"], "win_rate_pct": result["win_rate_pct"]},
             )
         )
     return rows, skipped
