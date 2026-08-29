@@ -66,7 +66,7 @@ type PoolOption = {
   name: string;
   order: number;
   icon: string;
-  settings?: Partial<Record<"TOP_N_HOLD" | "SHORT_MA_DAYS" | "LONG_MA_DAYS", PoolSettingField>>;
+  settings?: Partial<Record<"SHORT_MA_DAYS" | "LONG_MA_DAYS", PoolSettingField>>;
 };
 type PoolSettingsResponse = {
   pools?: PoolOption[];
@@ -206,7 +206,7 @@ export function PoolBacktestManager() {
   useEffect(() => {
     const pool = pools.find((p) => p.ticker_type === poolId);
     if (!pool?.settings) return;
-    setTopN(fieldToInt(pool.settings.TOP_N_HOLD));
+    setTopN(null); // 비우면 시스템 공통 보유 종목 수(config.TOP_N_HOLD) — 실험용 덮어쓰기만 입력
     setShortMa(fieldToInt(pool.settings.SHORT_MA_DAYS));
     setLongMa(fieldToInt(pool.settings.LONG_MA_DAYS));
   }, [poolId, pools]);

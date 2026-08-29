@@ -941,7 +941,10 @@ def build_ticker_type_rankings(
     from utils.industry_map import industry_map
 
     industry_by = {str(key).strip().upper(): value for key, value in industry_map(ticker_type).items()}
-    top_n = int(settings["TOP_N_HOLD"]) if top_n_override is None else int(top_n_override)
+    from config import TOP_N_HOLD
+
+    # 보유 종목 수는 풀별 설정이 아니라 시스템 공통(config) — 순위 추천 ✅ 개수의 기준.
+    top_n = TOP_N_HOLD if top_n_override is None else int(top_n_override)
     df = _mark_hold_targets(df, top_n, max_per_industry, industry_by)
     df = _normalize_ranking_values(df, country_code, monthly_labels=monthly_labels)
     df.attrs["realtime_active"] = realtime_active
