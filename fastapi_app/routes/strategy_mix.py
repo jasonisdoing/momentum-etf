@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
@@ -50,6 +50,21 @@ def get_strategy_mix_backtest(
 
 class SlackTestPayload(BaseModel):
     account_id: str
+
+
+@router.post("/charts")
+def post_strategy_mix_charts(
+    payload: dict = Body(default={}),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """보유 종목 일봉 + 슬리브별 기준 이평선. body: ``{"account_id": "...", "tickers": [...]}``."""
+    from utils.strategy_mix_service import holding_charts_for_account
+
+    account_id = payload.get("account_id") if isinstance(payload, dict) else None
+    tickers = payload.get("tickers") if isinstance(payload, dict) else None
+    if not isinstance(tickers, list):
+        raise ValueError("'tickers' 는 목록이어야 합니다.")
+    return {"charts": holding_charts_for_account(account_id, [str(t) for t in tickers])}
 
 
 @router.post("/slack-test")

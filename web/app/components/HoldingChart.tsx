@@ -34,6 +34,8 @@ type Props = {
   /** 보유 기간 — 신고가는 일, 모멘텀은 주. 단위 문구는 `daysUnit`. */
   days?: number | null;
   daysUnit?: string;
+  /** 완성된 보유 기간 문구("3주"·"12일") — 합성처럼 백엔드가 문자열로 주는 화면용. days 보다 우선. */
+  daysLabel?: string | null;
   height?: number;
 };
 
@@ -48,7 +50,7 @@ function formatPrice(value: number): string {
   return value.toLocaleString("ko-KR", { maximumFractionDigits: value >= 1000 ? 0 : 2 });
 }
 
-export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, daysUnit = "일", height = 320 }: Props) {
+export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, daysUnit = "일", daysLabel, height = 320 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
 
@@ -140,7 +142,7 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
               진입 예정
             </span>
           )}
-          {days != null ? (
+          {daysLabel != null || days != null ? (
             <span
               style={{
                 borderRadius: 8,
@@ -151,8 +153,7 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
                 color: "#0ca678",
               }}
             >
-              {days}
-              {daysUnit}
+              {daysLabel ?? `${days}${daysUnit}`}
             </span>
           ) : null}
         </span>

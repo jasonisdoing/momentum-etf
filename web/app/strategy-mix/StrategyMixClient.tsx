@@ -25,6 +25,7 @@ import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
 import { StrategyNotes } from "../components/StrategyNotes";
+import { HoldingChart, type HoldingChartData } from "../components/HoldingChart";
 import { NavTabs } from "../components/NavTabs";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
@@ -410,6 +411,13 @@ const SLOT_KEY_ORDER = ["a", "b", "c"] as const;
 
 
 /** 보유 표 행 — 현금 행도 같은 표에 넣는다 (비중 합이 100%임을 한눈에 보이게). */
+// 보유 목록 안쪽 탭 — 모멘텀·신고가 화면과 같은 구성. 차트는 열 때만 그린다.
+const HOLDINGS_TABS = [
+  { key: "list", label: "종목" },
+  { key: "chart", label: "차트" },
+] as const;
+type HoldingsTab = (typeof HOLDINGS_TABS)[number]["key"];
+
 type PositionRow = Holding & {
   is_cash?: boolean;
   /** 종목 메모 — 계좌가 아니라 종목에 붙는다(자산 관리·순위 화면과 같은 값). */
@@ -686,6 +694,51 @@ export function StrategyMixClient() {
         }),
     ];
   }, [positions, quotes, totalAsset]);
+
+  // ── 차트 탭 (공용 HoldingChart — 슬리브별 기준선은 백엔드가 내려준다) ──
+  const [holdingsTab, setHoldingsTab] = useState<HoldingsTab>("list");
+  const [charts, setCharts] = useState<HoldingChartData[] | null>(null);
+  const [chartsLoading, setChartsLoading] = useState(false);
+  const [chartsError, setChartsError] = useState<string | null>(null);
+  // 차트 대상 — 현금·고정 자산 제외. 전량 매도 대상은 아직 보유 중이라 포함한다.
+  const chartRows = useMemo(
+    () => positionRows.filter((row) => !row.is_cash && !row.is_fixed_asset),
+    [positionRows],
+  );
+  const chartKey = useMemo(
+    () => `${accountId}|${chartRows.map((row) => row.ticker).join(",")}`,
+    [accountId, chartRows],
+  );
+  useEffect(() => {
+    setCharts(null);
+    setChartsError(null);
+  }, [chartKey]);
+  // 차트 탭을 열 때만 받는다 — 보유 종목 수만큼 일봉을 실어 오므로 목록 탭에서는 낭비다.
+  useEffect(() => {
+    if (holdingsTab !== "chart" || !positions || charts || chartsLoading || chartsError) return;
+    if (chartRows.length === 0) {
+      setCharts([]);
+      return;
+    }
+    setChartsLoading(true);
+    void (async () => {
+      try {
+        const response = await fetch("/api/strategy-mix/charts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account_id: accountId, tickers: chartRows.map((row) => row.ticker) }),
+        });
+        const payload = (await response.json()) as { charts?: HoldingChartData[]; error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "차트를 불러오지 못했습니다.");
+        setCharts(payload.charts ?? []);
+      } catch (chartError) {
+        const message = chartError instanceof Error ? chartError.message : "차트를 불러오지 못했습니다.";
+        setChartsError(message);
+      } finally {
+        setChartsLoading(false);
+      }
+    })();
+  }, [holdingsTab, positions, charts, chartsLoading, chartsError, chartRows, accountId]);
 
   const positionColumns = useMemo<ColDef<PositionRow>[]>(() => {
     const columns: ColDef<PositionRow>[] = [
@@ -1583,6 +1636,50 @@ export function StrategyMixClient() {
                   </div>
 
                   {/* ② 보유 목록 — 현금까지 한 표로, 비중 합 100%. */}
+                  <NavTabs
+                    items={HOLDINGS_TABS}
+                    value={holdingsTab}
+                    onChange={setHoldingsTab}
+                    label="보유 목록 보기"
+                    style={{ marginBottom: 8 }}
+                  />
+                  {holdingsTab === "chart" ? (
+                    chartsLoading || (!charts && !chartsError) ? (
+                      <div style={{ ...hintStyle, padding: "24px 0", textAlign: "center" }}>차트를 불러오는 중…</div>
+                    ) : chartsError ? (
+                      <div className="alert alert-danger">{chartsError}</div>
+                    ) : charts && charts.length > 0 ? (
+                      <>
+                        <div style={{ ...hintStyle, margin: "4px 0 10px" }}>
+                          최근 6개월 일봉입니다. 이평선은 그 종목 슬리브의 기준선 —
+                          모멘텀은 단기·장기, 신고가는 이탈선입니다.
+                        </div>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                            gap: "18px 20px",
+                          }}
+                        >
+                          {charts.map((item) => {
+                            const row = chartRows.find((candidate) => candidate.ticker === item.ticker);
+                            // 슬리브별 슬롯 값 중 이 종목이 걸린 첫 슬롯 — 전략 수익률·보유 기간 배지.
+                            const slot = row ? Object.values(row.slots ?? {}).find((value) => value?.held_label || value?.return_pct != null) : undefined;
+                            return (
+                              <HoldingChart
+                                key={item.ticker}
+                                chart={item}
+                                returnPct={slot?.return_pct ?? row?.return_pct ?? null}
+                                daysLabel={slot?.held_label ?? null}
+                              />
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ ...hintStyle, padding: "24px 0", textAlign: "center" }}>보유 종목이 없습니다.</div>
+                    )
+                  ) : (
                   <AppAgGrid<PositionRow>
                     rowData={positionRows}
                     columnDefs={positionColumns}
@@ -1605,6 +1702,7 @@ export function StrategyMixClient() {
                       suppressMovableColumns: true,
                     }}
                   />
+                  )}
 
                   {/* ③ 배분 — 합계 · 모멘텀 · 신고가 세 줄. 각 줄에 배정 금액과 주식·현금. */}
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
