@@ -4626,12 +4626,19 @@ a {
   width: auto;
 }
 
-.rankMainHeaderLeft .appLabeledField:first-child {
-  flex: 0 0 10.5rem;
+/* 헤더 칸 폭 — 자리 순서가 아니라 **무엇인지**로 짚는다.
+   예전에는 `:first-child` / `:nth-child(2)` 로 잡았는데, 앞에 있던 기준일 칸을 없애자
+   폭이 통째로 한 칸씩 밀려 종목풀은 잘리고(`(us_div_etf)` 가 안 보였다) 그 옆 칸에는
+   빈자리가 생겼다. 칸을 넣고 빼도 폭이 따라 밀리지 않게 클래스로 지정한다. */
+
+/* 종목풀 셀렉트 — `11. 🇺🇸 미국 배당 ETF(us_div_etf)` 가 안 잘리는 폭. */
+.rankPoolField {
+  flex: 0 0 16rem;
 }
 
-.rankMainHeaderLeft .appLabeledField:nth-child(2) {
-  flex: 0 0 16rem;
+/* 국가 셀렉트(`/holdings_details`) — 값이 짧아 종목풀보다 좁다. */
+.rankCountryField {
+  flex: 0 0 10.5rem;
 }
 
 /* 이평선 단기·장기 셀렉트 한 쌍 (`/pools-rank`, `/strategy-momentum` 공용).
