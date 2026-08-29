@@ -28,6 +28,8 @@ def holding_charts(
 ) -> list[dict[str, Any]]:
     """티커별 {ticker, name, candles, ma_lines} 목록. 순서는 넘긴 티커 순서."""
     from utils.cache_utils import load_cached_frames_bulk_from_ticker_types
+    from utils.portfolio_io import average_buy_price_by_ticker
+    from utils.settings_loader import get_ticker_type_settings
     from utils.stock_list_io import _load_ticker_type_stocks_raw
 
     wanted = [ticker for ticker in dict.fromkeys(str(t).strip() for t in tickers) if ticker]
@@ -40,6 +42,9 @@ def holding_charts(
     }
     frames = load_cached_frames_bulk_from_ticker_types([pool], wanted)
     cutoff = pd.Timestamp(as_of) if as_of else None
+    # 내 평균 매입가 — 전 계좌 합산. 같은 티커가 다른 시장에도 있으면(IOO) 이 풀의 통화만 센다.
+    pool_currency = str((get_ticker_type_settings(pool) or {}).get("currency") or "").strip()
+    avg_buy_by = average_buy_price_by_ticker(wanted, currency=pool_currency or None)
 
     charts: list[dict[str, Any]] = []
     for ticker in wanted:
@@ -75,6 +80,10 @@ def holding_charts(
                 "name": name_by.get(ticker) or ticker,
                 "candles": candles,
                 "ma_lines": [{"ma_days": days, "points": points_by_days[days]} for days in ma_days_list],
+                # 내 평균 매입가 — 실제로 들고 있는 종목에만 붙는다(`/ticker` 상세와 같은 값).
+                "avg_buy_price": avg_buy_by.get(ticker),
+                # 통화 — 화면이 가격에 기호를 붙인다(원 · $ · A$). 풀마다 다르므로 함께 보낸다.
+                "currency": pool_currency,
             }
         )
     return charts

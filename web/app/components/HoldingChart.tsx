@@ -7,17 +7,21 @@
  *  신고가는 이탈 이평선 1줄, 모멘텀은 단기·장기 2줄. 색은 여기 팔레트 순서로 정한다.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   CandlestickSeries,
   ColorType,
   LineSeries,
+  LineStyle,
   createChart,
   createSeriesMarkers,
 } from "lightweight-charts";
 import type { IChartApi, Time } from "lightweight-charts";
 
 import { formatMonthDayWithWeekday } from "@/lib/datetime";
+import { getSignedNullableClass } from "../assets/assets-helpers";
+import { formatCurrencyPrice, priceDecimals } from "@/lib/price-format";
 
 export type HoldingChartData = {
   ticker: string;
@@ -26,6 +30,20 @@ export type HoldingChartData = {
   strategy_label?: string;
   candles: { time: string; open: number; high: number; low: number; close: number }[];
   ma_lines: { ma_days: number; points: { time: string; value: number }[] }[];
+  /** 내 평균 매입가 — 실제로 들고 있는 종목에만 온다(`/ticker` 상세와 같은 값). */
+  avg_buy_price?: number | null;
+  /** 통화(KRW·USD·AUD) — 가격에 기호를 붙이는 데 쓴다. 풀마다 다르다. */
+  currency?: string | null;
+};
+
+/** 카드 오른쪽 배지 하나. 색은 화면이 정한다(전략 배지와 같은 모양을 쓴다). */
+export type ChartBadge = {
+  key: string;
+  text: ReactNode;
+  background?: string;
+  color?: string;
+  /** 테두리만 있는 흰 배지 — 수익률처럼 값이 주인공인 배지에 쓴다. */
+  outlined?: boolean;
 };
 
 type Props = {
@@ -42,6 +60,9 @@ type Props = {
   daysLabel?: string | null;
   /** 전략명 — 화면 전체가 한 전략이면 여기로 넘긴다. 없으면 데이터의 strategy_label. */
   strategyLabel?: string;
+  /** 오른쪽 배지를 직접 정한다 — 주면 기본(진입일·보유기간·수익률) 대신 이걸 그린다.
+   *  순위 화면처럼 보유 개념이 없고 순위·고점 같은 다른 값을 보여줄 때 쓴다. */
+  badges?: ChartBadge[];
   height?: number;
 };
 
@@ -51,6 +72,8 @@ const DOWN = "#206bc4";
 // 이평선 팔레트 — 첫 선(단기/이탈선)은 청록, 둘째 선(장기)은 주황.
 const MA_COLORS = ["#12b886", "#f76707", "#7048e8"];
 const BUY_MARKER_COLOR = "#111827";
+// 내 평균 매입가 점선 — 이평선 팔레트와 겹치지 않는 회색.
+const AVG_BUY_LINE_COLOR = "#868e96";
 
 // 카드 오른쪽 배지 공통 모양 — 색만 배지마다 다르다.
 const badgeStyle: React.CSSProperties = {
@@ -60,13 +83,14 @@ const badgeStyle: React.CSSProperties = {
   fontWeight: 700,
 };
 
-function formatPrice(value: number): string {
-  return value.toLocaleString("ko-KR", { maximumFractionDigits: value >= 1000 ? 0 : 2 });
-}
-
-export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, daysUnit = "일", daysLabel, strategyLabel, height = 320 }: Props) {
+export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, daysUnit = "일", daysLabel, strategyLabel, badges, height = 320 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  // 내 평균 배지 — 평단 선 높이에 맞춰 왼쪽에 띄운다(`/ticker` 상세와 같은 표기).
+  // 선의 y 좌표는 차트가 그려진 뒤에야 알 수 있어 상태로 들고 있는다.
+  const [averageBadge, setAverageBadge] = useState<{ top: number; returnPct: number | null } | null>(null);
+
+  const currency = chart.currency ?? "";
 
   useEffect(() => {
     const container = containerRef.current;
@@ -89,7 +113,12 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
       upColor: UP, downColor: DOWN,
       borderUpColor: UP, borderDownColor: DOWN,
       wickUpColor: UP, wickDownColor: DOWN,
-      priceFormat: { type: "price", precision: 0, minMove: 1 },
+      // 축·툴팁 가격에 통화 기호를 붙인다 — `/ticker` 상세와 같은 표기(20,795원 · $23.45 · A$23.32).
+      priceFormat: {
+        type: "custom",
+        minMove: priceDecimals(currency) === 0 ? 1 : 0.01,
+        formatter: (price: number) => formatCurrencyPrice(price, currency),
+      },
     });
     candles.setData(chart.candles.map((row) => ({ ...row, time: row.time as Time })));
 
@@ -103,16 +132,50 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
     // 진입 마커 — 매수가를 함께 적는다 (별도 매수가 점선은 두지 않는다).
     // 차트 구간보다 진입일이 이르면 마커를 못 찍는다 — 없는 자리에 찍지 않는다.
     if (entryDate && chart.candles.some((row) => row.time === entryDate)) {
-      const label = entryPrice != null && Number.isFinite(entryPrice) ? `Buy ${formatPrice(entryPrice)}` : "Buy";
+      const label =
+        entryPrice != null && Number.isFinite(entryPrice) ? `Buy ${formatCurrencyPrice(entryPrice, currency)}` : "Buy";
       createSeriesMarkers(candles, [
         { time: entryDate as Time, position: "belowBar", color: BUY_MARKER_COLOR, shape: "arrowUp", text: label },
       ]);
     }
+    // 내 평균 매입가 — 실제로 들고 있으면 점선으로 긋는다(`/ticker` 상세와 같은 표기).
+    // 전략의 진입가(Buy 마커)와 다르다: 이건 여러 계좌를 합친 내 실제 평단이다.
+    const avgBuyPrice = chart.avg_buy_price;
+    if (avgBuyPrice != null && Number.isFinite(avgBuyPrice) && avgBuyPrice > 0) {
+      candles.createPriceLine({
+        price: avgBuyPrice,
+        color: AVG_BUY_LINE_COLOR,
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: "",
+      });
+    }
     api.timeScale().fitContent();
+
+    /** 평단 선의 화면 높이와 그 대비 수익률 — 차트 크기가 바뀌면 다시 잰다. */
+    function updateAverageBadge(el: HTMLDivElement) {
+      if (avgBuyPrice == null || !Number.isFinite(avgBuyPrice) || avgBuyPrice <= 0) {
+        setAverageBadge(null);
+        return;
+      }
+      const y = candles.priceToCoordinate(avgBuyPrice);
+      if (y === null) {
+        setAverageBadge(null);
+        return;
+      }
+      const lastClose = chart.candles[chart.candles.length - 1]?.close ?? null;
+      setAverageBadge({
+        top: Math.max(4, Math.min(y - 14, el.clientHeight - 30)),
+        returnPct: lastClose != null && lastClose > 0 ? (lastClose / avgBuyPrice - 1) * 100 : null,
+      });
+    }
+    updateAverageBadge(container);
 
     const observer = new ResizeObserver(() => {
       api.applyOptions({ width: container.clientWidth });
       api.timeScale().fitContent();
+      updateAverageBadge(container);
     });
     observer.observe(container);
 
@@ -135,8 +198,25 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
             return `${label ? `[${label}] ` : ""}${chart.ticker} ${chart.name}`;
           })()}
         </strong>
-        {/* 오른쪽 배지 — 산 날 → 들고 있는 기간 → 수익률 순. 왼쪽부터 시간 순으로 읽힌다. */}
+        {/* 오른쪽 배지 — 산 날 → 들고 있는 기간 → 수익률 순. 왼쪽부터 시간 순으로 읽힌다.
+            `badges` 를 주면 화면이 정한 배지로 통째로 갈아 끼운다(순위 화면). */}
         <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+          {badges ? (
+            badges.map((badge) => (
+              <span
+                key={badge.key}
+                style={{
+                  ...badgeStyle,
+                  ...(badge.outlined ? { border: "1px solid rgba(148,163,184,0.45)" } : {}),
+                  ...(badge.background ? { background: badge.background } : {}),
+                  ...(badge.color ? { color: badge.color } : {}),
+                }}
+              >
+                {badge.text}
+              </span>
+            ))
+          ) : (
+            <>
           {entryDate ? (
             <span style={{ ...badgeStyle, background: "#f1f3f5", color: "var(--text-muted)" }}>
               {formatMonthDayWithWeekday(entryDate)}
@@ -153,6 +233,8 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
             </span>
           ) : (
             <span style={{ ...badgeStyle, background: "#fff0f0", color: UP }}>진입 예정</span>
+          )}
+            </>
           )}
         </span>
       </div>
@@ -178,6 +260,16 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
           ))}
         </span>
         <div ref={containerRef} />
+        {averageBadge ? (
+          <div className="appChartAverageBadge" style={{ top: averageBadge.top }}>
+            <span>내 평균 </span>
+            <span className={getSignedNullableClass(averageBadge.returnPct)}>
+              {averageBadge.returnPct == null
+                ? "-"
+                : `${averageBadge.returnPct > 0 ? "+" : ""}${averageBadge.returnPct.toFixed(2)}%`}
+            </span>
+          </div>
+        ) : null}
       </div>
     </div>
   );

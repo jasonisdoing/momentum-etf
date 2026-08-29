@@ -3425,7 +3425,9 @@ a {
   transform: translateX(-50%);
 }
 
-.tickerDetailAverageBadge {
+/* 내 평균 매입가 배지 — 차트 왼쪽에 평단 선 높이로 띄운다.
+   티커 상세와 전략·순위 차트가 같은 모양을 쓴다(이름에 화면을 넣지 않는다). */
+.appChartAverageBadge {
   position: absolute;
   left: 1.5rem;
   z-index: 3;

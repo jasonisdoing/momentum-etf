@@ -44,7 +44,6 @@ MAX_BACKTEST_MONTHS = 60
 _HELD_HISTORY_DAYS = 40
 
 
-
 def _drawdown_pct(series: pd.Series) -> float:
     return float(((series / series.cummax()) - 1).min() * 100)
 

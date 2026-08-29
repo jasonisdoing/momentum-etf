@@ -22,6 +22,8 @@ import {
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import type { PoolAddProgress } from "@/lib/pool-add";
 import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
+import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
+import { type ChartBadge, type HoldingChartData } from "../components/HoldingChart";
 import { addStockCandidate, deleteStock, loadMovablePools, moveStockToPool, updateStockBucket, updateStockMemo, validateStockCandidate, updateStockExclude, type StocksAccountItem } from "@/lib/stocks-store";
 import {
   readRememberedTickerType,
@@ -163,6 +165,8 @@ type RankAddingRowState = {
 
 const rankGridTheme = createAppGridTheme();
 const DEFAULT_TICKER_TYPE = "";
+// 차트 모드에서 한 번에 더 그리는 개수. 풀에 수백 종목이 있어 전부 그리면 응답도 렌더도 버틴다.
+const RANK_CHART_PAGE_SIZE = 20;
 
 /** 그리드에 어떤 컬럼 묶음을 보여줄지. 화면 전환용 `pageMode` 와는 다른 축이다. */
 type MetricMode = "basic" | "ranking" | "monthly" | "info";
@@ -343,7 +347,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const toolbarFetchAbortRef = useRef<AbortController | null>(null);
   const rankFetchAbortRef = useRef<AbortController | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [pageMode, setPageMode] = useState<"rank" | "manage">("rank");
+  const [pageMode, setPageMode] = useState<"rank" | "manage" | "chart">("rank");
+  // ── 차트 모드 ── 표에 보이는 순서(정렬·필터 반영)를 그대로 따라간다.
+  // AG Grid 가 정렬·필터를 하므로 순서는 그리드에게 물어야 한다 — 원본 배열은 정렬 전이다.
+  const [displayedTickers, setDisplayedTickers] = useState<string[]>([]);
+  const [chartLimit, setChartLimit] = useState(RANK_CHART_PAGE_SIZE);
+  const [charts, setCharts] = useState<HoldingChartData[] | null>(null);
+  const [chartsLoading, setChartsLoading] = useState(false);
+  const [chartsError, setChartsError] = useState<string | null>(null);
   const [ticker_types, setAccounts] = useState<RankTickerType[]>(rankToolbarCache?.ticker_types ?? []);
   const [selectedTickerType, setSelectedAccountId] = useState(
     rankToolbarCache?.ticker_type ?? DEFAULT_TICKER_TYPE,
@@ -580,6 +591,93 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     const tickerType = String(selectedTickerTypeItem?.ticker_type || "").trim().toLowerCase();
     return tickerType === "kor_kr" || tickerType === "kor_us";
   }, [selectedTickerTypeItem?.ticker_type]);
+
+  // 차트 모드 — 표에 보이는 순서대로 앞에서 `chartLimit` 개만 그린다(「더 보기」로 20개씩 늘린다).
+  // 그리드가 알려준 표시 순서를 우선하되, 그리드가 아직 모르는 종목(풀을 막 바꾼 직후)은
+  // 원래 순서로 뒤에 붙인다 — 차트 모드에서 풀을 바꿔도 빈 화면이 되지 않는다.
+  const orderedTickers = useMemo(() => {
+    const available = new Set(gridRows.map((row) => row.티커));
+    const ordered = displayedTickers.filter((ticker) => available.has(ticker));
+    const seen = new Set(ordered);
+    for (const row of gridRows) {
+      if (row.티커 && !seen.has(row.티커)) ordered.push(row.티커);
+    }
+    return ordered;
+  }, [displayedTickers, gridRows]);
+  const chartTickers = useMemo(
+    () => orderedTickers.slice(0, chartLimit),
+    [orderedTickers, chartLimit],
+  );
+  // 풀·기준일·이평선·표시 순서가 바뀌면 이전 차트는 버린다.
+  const chartKey = useMemo(
+    () => `${selectedTickerType}|${selectedAsOfDate}|${maRule?.short_ma_days}|${maRule?.long_ma_days}|${chartTickers.join(",")}`,
+    [selectedTickerType, selectedAsOfDate, maRule?.short_ma_days, maRule?.long_ma_days, chartTickers],
+  );
+  useEffect(() => {
+    setCharts(null);
+    setChartsError(null);
+  }, [chartKey]);
+  // 종목풀·정렬을 바꾸면 다시 20개부터 본다 — 앞서 100개를 펼쳐 뒀다고 새 목록도 100개를 받을 이유가 없다.
+  useEffect(() => {
+    setChartLimit(RANK_CHART_PAGE_SIZE);
+  }, [selectedTickerType, selectedAsOfDate]);
+  // 차트 모드일 때만 받는다 — 종목 수만큼 일봉을 실어 오므로 순위·관리 모드에서는 낭비다.
+  useEffect(() => {
+    if (pageMode !== "chart" || charts || chartsLoading || chartsError) return;
+    if (chartTickers.length === 0) {
+      setCharts([]);
+      return;
+    }
+    setChartsLoading(true);
+    void (async () => {
+      try {
+        const response = await fetch("/api/rank/charts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ticker_type: selectedTickerType,
+            tickers: chartTickers,
+            short_ma_days: maRule?.short_ma_days,
+            long_ma_days: maRule?.long_ma_days,
+          }),
+        });
+        const payload = (await response.json()) as { charts?: HoldingChartData[]; error?: string };
+        if (!response.ok) throw new Error(payload.error ?? "차트를 불러오지 못했습니다.");
+        setCharts(payload.charts ?? []);
+      } catch (chartError) {
+        const message = chartError instanceof Error ? chartError.message : "차트를 불러오지 못했습니다.";
+        setChartsError(message);
+        toast.error(message);
+      } finally {
+        setChartsLoading(false);
+      }
+    })();
+  }, [pageMode, charts, chartsLoading, chartsError, chartTickers, selectedTickerType, maRule, toast]);
+
+  /** 차트 카드 배지 — 순위·고점·일간·1주. 표의 같은 이름 컬럼과 같은 값이다.
+   *  전략 화면의 배지(진입일·보유기간·수익률)는 보유 정보라 종목풀에는 쓸 값이 없다. */
+  const rankChartBadges = useCallback(
+    (ticker: string): ChartBadge[] => {
+      const row = gridRows.find((candidate) => candidate.티커 === ticker);
+      const pct = (value: number | null | undefined) =>
+        value == null ? "-" : `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+      const signColorOf = (value: number | null | undefined) =>
+        value == null || value === 0 ? undefined : value > 0 ? "#e03131" : "#206bc4";
+      return [
+        { key: "rank", text: row?.순위 == null ? "-" : `${row.순위}위`, background: "#f1f3f5", color: "var(--text-muted)" },
+        // 고점 대비 — 0 이면 신고점. 표의 ⭐ 표기와 같은 기준이다.
+        {
+          key: "high",
+          text: row?.고점 == null ? "고점 -" : row.고점 === 0 ? "⭐ 신고점" : `고점 ${row.고점.toFixed(1)}%`,
+          background: "#fff4e6",
+          color: "#e8590c",
+        },
+        { key: "daily", text: <>일간 <span style={{ color: signColorOf(row?.["일간(%)"]) }}>{pct(row?.["일간(%)"])}</span></>, outlined: true },
+        { key: "week", text: <>1주 <span style={{ color: signColorOf(row?.["1주(%)"]) }}>{pct(row?.["1주(%)"])}</span></>, outlined: true },
+      ];
+    },
+    [gridRows],
+  );
 
   const displayGridRows = useMemo<RankGridRow[]>(() => {
     const rows = gridRows;
@@ -1642,7 +1740,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                         className={pageMode === "rank" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
                         onClick={() => setPageMode("rank")}
                       >
-                        순위모드
+                        순위
                       </button>
                       <button
                         type="button"
@@ -1653,9 +1751,22 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                           }
                         }}
                         disabled={isAllTickerType}
-                        title={isAllTickerType ? "전체 종목풀에서는 관리모드를 사용할 수 없습니다." : undefined}
+                        title={isAllTickerType ? "전체 종목풀에서는 관리 모드를 사용할 수 없습니다." : undefined}
                       >
-                        관리모드
+                        관리
+                      </button>
+                      <button
+                        type="button"
+                        className={pageMode === "chart" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                        onClick={() => {
+                          if (!isAllTickerType) {
+                            setPageMode("chart");
+                          }
+                        }}
+                        disabled={isAllTickerType}
+                        title={isAllTickerType ? "전체 종목풀에서는 차트 모드를 사용할 수 없습니다." : "표에 보이는 순서대로 일봉을 그린다"}
+                      >
+                        차트
                       </button>
                     </div>
                   </label>
@@ -1742,6 +1853,29 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             </div>
           ) : null}
 
+          {pageMode === "chart" ? (
+            <div className="card-body appCardBodyTight">
+              <StrategyHoldingCharts
+                charts={charts}
+                loading={chartsLoading}
+                error={chartsError}
+                emptyMessage="이 종목풀에 종목이 없습니다."
+                hint={`최근 6개월 일봉입니다. 표에 보이는 순서대로 그립니다 — 지금 ${chartTickers.length}개 / 전체 ${orderedTickers.length}개.`}
+                chartProps={(item) => ({ badges: rankChartBadges(item.ticker) })}
+              />
+              {!chartsLoading && !chartsError && chartTickers.length < orderedTickers.length ? (
+                <div style={{ display: "flex", justifyContent: "center", padding: "16px 0" }}>
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary btn-sm px-4 fw-bold"
+                    onClick={() => setChartLimit((limit) => limit + RANK_CHART_PAGE_SIZE)}
+                  >
+                    더 보기 ({Math.min(RANK_CHART_PAGE_SIZE, orderedTickers.length - chartTickers.length)}개)
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : (
           <div className="card-body appCardBodyTight appTableCardBodyFill">
             <div className="appGridFillWrap">
               <AppAgGrid
@@ -1770,6 +1904,17 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 minHeight="100%"
                 gridOptions={{
                   suppressMovableColumns: true,
+                  // 정렬·필터가 반영된 표시 순서를 담아 둔다 — 차트 모드가 이 순서로 그린다.
+                  onModelUpdated: (event) => {
+                    const ordered: string[] = [];
+                    event.api.forEachNodeAfterFilterAndSort((node) => {
+                      const ticker = (node.data as RankGridRow | undefined)?.티커;
+                      if (ticker && !(node.data as RankGridRow).__isAddingRow) ordered.push(String(ticker));
+                    });
+                    setDisplayedTickers((prev) =>
+                      prev.length === ordered.length && prev.every((t, i) => t === ordered[i]) ? prev : ordered,
+                    );
+                  },
                   rowSelection: pageMode === "manage"
                     ? {
                       mode: "multiRow",
@@ -1818,6 +1963,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
               />
             </div>
           </div>
+          )}
         </div>
       </section>
 

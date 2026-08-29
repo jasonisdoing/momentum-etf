@@ -575,7 +575,6 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
 
     ma_rules = build_effective_ma_rules(selected_ticker_type, None)
 
-
     return {
         "ticker_types": configs_payload,
         "ticker_type": selected_ticker_type,

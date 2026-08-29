@@ -12,7 +12,7 @@
 
 import type { ReactNode } from "react";
 
-import { HoldingChart, type HoldingChartData } from "./HoldingChart";
+import { HoldingChart, type ChartBadge, type HoldingChartData } from "./HoldingChart";
 
 const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--fs-sm)" };
 const centeredHint: React.CSSProperties = { ...hintStyle, padding: "24px 0", textAlign: "center" };
@@ -26,6 +26,8 @@ export type HoldingChartExtras = {
   days?: number | null;
   daysUnit?: string;
   daysLabel?: string | null;
+  /** 배지를 직접 정할 때 — 주면 위 값들 대신 이 배지가 그려진다(순위 화면). */
+  badges?: ChartBadge[];
 };
 
 export function StrategyHoldingCharts({

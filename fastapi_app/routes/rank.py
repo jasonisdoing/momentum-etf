@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
 from utils.rank_service import load_rank_data, load_rank_toolbar_data
@@ -35,3 +35,34 @@ def get_rank_data(
         ma_rule_override=ma_rule_override,
         as_of_date=as_of_date,
     )
+
+
+@router.post("/charts")
+def post_rank_charts(
+    payload: dict = Body(default={}),
+    _: None = Depends(require_internal_token),
+) -> dict[str, object]:
+    """순위 화면 차트 — 일봉 + 그 풀의 판정 이평선. body: ``{"ticker_type": "...", "tickers": [...]}``.
+
+    티커는 화면이 보고 있는 순서 그대로 넘긴다(정렬·필터를 반영한 순서). 여기서 순위를
+    다시 매기면 표와 차트 순서가 갈린다. 이평선은 화면이 임시로 바꿀 수 있어(툴바) 값을
+    받으면 그걸 쓰고, 없으면 풀 저장값을 쓴다.
+    """
+    from utils.holding_chart_service import holding_charts
+    from utils.settings_loader import get_ticker_type_settings
+
+    ticker_type = str(payload.get("ticker_type") or "").strip()
+    if not ticker_type:
+        raise ValueError("'ticker_type' 이 필요합니다.")
+    tickers = payload.get("tickers")
+    if not isinstance(tickers, list):
+        raise ValueError("'tickers' 는 목록이어야 합니다.")
+
+    pool_settings = get_ticker_type_settings(ticker_type) or {}
+    short = payload.get("short_ma_days") or pool_settings["SHORT_MA_DAYS"]
+    long = payload.get("long_ma_days") or pool_settings["LONG_MA_DAYS"]
+    return {
+        "charts": holding_charts(ticker_type, [str(ticker) for ticker in tickers], [int(short), int(long)]),
+        "short_ma_days": int(short),
+        "long_ma_days": int(long),
+    }

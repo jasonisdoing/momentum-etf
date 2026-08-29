@@ -1,4 +1,5 @@
 import datetime
+from collections.abc import Iterable
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -97,6 +98,59 @@ def load_holding_accounts_by_ticker(country_code: str | None = None) -> dict[str
                     names.append(account_name)
 
     return accounts_by_ticker
+
+
+def average_buy_price_by_ticker(
+    tickers: Iterable[str] | None = None, currency: str | None = None
+) -> dict[str, float]:
+    """티커 → 전 계좌 통합 평균매입가. 보유가 없는 티커는 결과에서 빠진다.
+
+    같은 티커가 여러 계좌에 있으면 수량 가중으로 하나로 합친다. 차트의 '내 평균' 선과
+    `/ticker` 상세가 같은 값을 보도록 여기 한 곳에서만 계산한다.
+
+    같은 티커가 여러 시장에 상장된 경우가 있어(IOO — 미국 USD / 호주 AUD) ``currency``
+    를 주면 그 통화 보유분만 합산한다. 통화가 섞인 채로 평균을 내면 뜻 없는 숫자가 되므로,
+    통화를 안 준 상태에서 섞여 있으면 그 티커는 **빼고** 돌려준다(임의로 고르지 않는다).
+
+    계좌 문서를 티커마다 다시 읽지 않는다 — 차트는 한 번에 수십 종목을 묻는다.
+    """
+    from utils.settings_loader import list_available_accounts
+
+    wanted = {str(t).strip().upper() for t in (tickers or []) if str(t or "").strip()} or None
+    target_currency = str(currency or "").strip().upper()
+
+    quantity_by: dict[str, float] = {}
+    amount_by: dict[str, float] = {}
+    currencies_by: dict[str, set[str]] = {}
+
+    for account_id in list_available_accounts():
+        master = load_portfolio_master(account_id)
+        if not master:
+            continue
+        for holding in master.get("holdings") or []:
+            ticker = str(holding.get("ticker") or "").strip().upper()
+            if not ticker or (wanted is not None and ticker not in wanted):
+                continue
+            try:
+                quantity = float(holding.get("quantity") or 0.0)
+                average = float(holding.get("average_buy_price") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if quantity <= 0 or average <= 0:
+                continue
+            holding_currency = str(holding.get("currency") or "").strip().upper()
+            if target_currency and holding_currency and holding_currency != target_currency:
+                continue
+            if holding_currency:
+                currencies_by.setdefault(ticker, set()).add(holding_currency)
+            quantity_by[ticker] = quantity_by.get(ticker, 0.0) + quantity
+            amount_by[ticker] = amount_by.get(ticker, 0.0) + quantity * average
+
+    return {
+        ticker: amount_by[ticker] / quantity
+        for ticker, quantity in quantity_by.items()
+        if quantity > 0 and len(currencies_by.get(ticker) or {""}) <= 1
+    }
 
 
 def load_all_holding_tickers(country_code: str | None = None) -> set[str]:
