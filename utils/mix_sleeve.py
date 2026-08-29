@@ -122,6 +122,8 @@ def _held_label(value: Any, *, unit: str, zero: str) -> str:
 
     화면이 슬롯 A·B 만 알고 어느 전략인지 모르게 하려면, 숫자가 아니라 단위까지 붙은
     문자열로 내려줘야 한다. 값이 없으면 빈 문자열(표시 안 함).
+
+    ``zero`` 는 0 이하일 때 쓸 문구다 — 아직 안 산 종목("0주")에 쓴다.
     """
     if value is None:
         return ""
@@ -209,7 +211,8 @@ def _momentum_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> S
     targets: list[dict[str, Any]] = []
     for row in selected:
         ticker = str(row["ticker"]).strip()
-        if ticker in held_tickers:
+        holding = bool(row.get("is_held"))
+        if holding:
             streak = row.get("streak_weeks")
             status = f"유지 ({streak}주째)" if streak else "유지"
         else:
@@ -225,7 +228,9 @@ def _momentum_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> S
                 "change_pct": row.get("daily_change_pct"),
                 "status": status,
                 "return_pct": row.get("entry_return_pct"),
-                "held_label": _held_label(row.get("streak_weeks"), unit="주", zero="신규"),
+                # 아직 안 산 종목은 보유 기간이 0 이다 — `streak_weeks` 는 '이번 주 선정 1주차'라
+                # 1 이 들어와서, 그대로 쓰면 진입 전인데 1주 들고 있는 것처럼 보인다.
+                "held_label": _held_label(row.get("streak_weeks") if holding else 0, unit="주", zero="0주"),
                 # 차트의 진입 화살표용 — 연속 편입이 시작된 교체일. 모멘텀은 매수가를 따로 들지 않는다.
                 "entry_date": row.get("entry_date"),
                 "entry_price": None,
@@ -387,7 +392,8 @@ def _new_high_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> S
                 "change_pct": row.get("change_pct"),
                 "status": "진입 예정 (다음 시가 매수)",
                 "return_pct": None,
-                "held_label": "",
+                # 아직 안 샀다 — 빈칸으로 두면 보유일 컬럼·차트 배지가 통째로 사라진다.
+                "held_label": "0일",
                 # 아직 안 샀다.
                 "entry_date": None,
                 "entry_price": None,

@@ -25,7 +25,8 @@ import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
 import { StrategyNotes } from "../components/StrategyNotes";
-import { HoldingChart, type HoldingChartData } from "../components/HoldingChart";
+import { type HoldingChartData } from "../components/HoldingChart";
+import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
 import { NavTabs } from "../components/NavTabs";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
@@ -1647,46 +1648,27 @@ export function StrategyMixClient() {
                     style={{ marginBottom: 8 }}
                   />
                   {holdingsTab === "chart" ? (
-                    chartsLoading || (!charts && !chartsError) ? (
-                      <div style={{ ...hintStyle, padding: "24px 0", textAlign: "center" }}>차트를 불러오는 중…</div>
-                    ) : chartsError ? (
-                      <div className="alert alert-danger">{chartsError}</div>
-                    ) : charts && charts.length > 0 ? (
-                      <>
-                        <div style={{ ...hintStyle, margin: "4px 0 10px" }}>
-                          최근 6개월 일봉입니다. 이평선은 그 종목 슬리브의 기준선 —
-                          모멘텀은 단기·장기, 신고가는 이탈선입니다.
-                        </div>
-                        <div
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                            gap: "18px 20px",
-                          }}
-                        >
-                          {charts.map((item) => {
-                            const row = chartRows.find((candidate) => candidate.ticker === item.ticker);
-                            // 슬리브별 슬롯 값 중 이 종목이 걸린 첫 슬롯 — 전략 수익률·보유 기간 배지.
-                            const slot = row ? Object.values(row.slots ?? {}).find((value) => value?.held_label || value?.return_pct != null) : undefined;
-                            // 진입 화살표는 편입일을 가진 슬롯에서 찾는다 — 위 슬롯은 수익률·보유기간 기준이라
-                            // 편입일이 없는 슬리브(포트폴리오)가 걸릴 수 있다.
-                            const entrySlot = row ? Object.values(row.slots ?? {}).find((value) => value?.entry_date) : undefined;
-                            return (
-                              <HoldingChart
-                                key={item.ticker}
-                                chart={item}
-                                entryDate={entrySlot?.entry_date}
-                                entryPrice={entrySlot?.entry_price}
-                                returnPct={slot?.return_pct ?? row?.return_pct ?? null}
-                                daysLabel={slot?.held_label ?? null}
-                              />
-                            );
-                          })}
-                        </div>
-                      </>
-                    ) : (
-                      <div style={{ ...hintStyle, padding: "24px 0", textAlign: "center" }}>보유 종목이 없습니다.</div>
-                    )
+                    <StrategyHoldingCharts
+                      charts={charts}
+                      loading={chartsLoading}
+                      error={chartsError}
+                      emptyMessage="보유 종목이 없습니다."
+                      hint="최근 6개월 일봉입니다. 이평선은 그 종목 슬리브의 기준선 — 모멘텀은 단기·장기, 신고가는 이탈선입니다."
+                      chartProps={(item) => {
+                        const row = chartRows.find((candidate) => candidate.ticker === item.ticker);
+                        // 슬리브별 슬롯 값 중 이 종목이 걸린 첫 슬롯 — 전략 수익률·보유 기간 배지.
+                        const slot = row ? Object.values(row.slots ?? {}).find((value) => value?.held_label || value?.return_pct != null) : undefined;
+                        // 진입 화살표는 편입일을 가진 슬롯에서 찾는다 — 위 슬롯은 수익률·보유기간 기준이라
+                        // 편입일이 없는 슬리브(포트폴리오)가 걸릴 수 있다.
+                        const entrySlot = row ? Object.values(row.slots ?? {}).find((value) => value?.entry_date) : undefined;
+                        return {
+                          entryDate: entrySlot?.entry_date,
+                          entryPrice: entrySlot?.entry_price,
+                          returnPct: slot?.return_pct ?? row?.return_pct ?? null,
+                          daysLabel: slot?.held_label ?? null,
+                        };
+                      }}
+                    />
                   ) : (
                   <AppAgGrid<PositionRow>
                     rowData={positionRows}

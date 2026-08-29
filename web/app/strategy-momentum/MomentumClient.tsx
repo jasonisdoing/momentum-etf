@@ -13,7 +13,8 @@ import { StrategyNotes } from "../components/StrategyNotes";
 import { StrategyTuning, type TuningResult } from "../components/StrategyTuning";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
-import { HoldingChart, type HoldingChartData } from "../components/HoldingChart";
+import { type HoldingChartData } from "../components/HoldingChart";
+import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
@@ -100,6 +101,8 @@ type PickRow = {
   is_reserve: boolean;
   // 현재 표(선정+후보) 밖인데 다음 주 편입이 예상되는 종목 — 하단 별도 행.
   is_expected_only: boolean;
+  /** 지금 실제로 들고 있는가 — 교체가 확정됐어도 체결 전이면 거짓. */
+  is_held?: boolean;
   // 주중 매도 — 보유 자격(장기>0 & 단기≥0) 상실로 매도됨(체결 완료) / 다음 시가 매도 예정.
   is_exited?: boolean;
   is_exit_pending?: boolean;
@@ -1186,42 +1189,24 @@ export function MomentumClient() {
               />
             ) : null}
             {view.picks && !picking && currentTab === "chart" ? (
-              chartsLoading || (!charts && !chartsError) ? (
-                <div style={{ ...hintStyle, padding: "24px 0", textAlign: "center" }}>차트를 불러오는 중…</div>
-              ) : chartsError ? (
-                <div className="alert alert-danger">{chartsError}</div>
-              ) : charts && charts.length > 0 ? (
-                <>
-                  <div style={{ ...hintStyle, margin: "4px 0 10px" }}>
-                    최근 6개월 일봉입니다. 장기선 위 & 단기선 위(자격)를 잃으면 편출되고,
-                    편입이 시작된 교체일에 Buy 화살표가 표시됩니다.
-                  </div>
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                      gap: "18px 20px",
-                    }}
-                  >
-                    {charts.map((item) => {
-                      const row = chartRows.find((candidate) => candidate.ticker === item.ticker);
-                      return (
-                        <HoldingChart
-                          key={item.ticker}
-                          chart={item}
-                          strategyLabel="모멘텀"
-                          entryDate={row?.entry_date}
-                          returnPct={row?.entry_return_pct}
-                          days={row?.streak_weeks}
-                          daysUnit="주"
-                        />
-                      );
-                    })}
-                  </div>
-                </>
-              ) : (
-                <div style={{ ...hintStyle, padding: "24px 0", textAlign: "center" }}>선정된 종목이 없습니다.</div>
-              )
+              <StrategyHoldingCharts
+                charts={charts}
+                loading={chartsLoading}
+                error={chartsError}
+                emptyMessage="선정된 종목이 없습니다."
+                hint="최근 6개월 일봉입니다. 장기선 위 & 단기선 위(자격)를 잃으면 편출되고, 편입이 시작된 교체일에 Buy 화살표가 표시됩니다."
+                chartProps={(item) => {
+                  const row = chartRows.find((candidate) => candidate.ticker === item.ticker);
+                  return {
+                    strategyLabel: "모멘텀",
+                    entryDate: row?.entry_date,
+                    returnPct: row?.entry_return_pct,
+                    // 아직 안 산 종목은 0주 — streak_weeks 는 '이번 주 선정 1주차'라 1 이 들어온다.
+                    days: row?.is_held ? row.streak_weeks : 0,
+                    daysUnit: "주",
+                  };
+                }}
+              />
             ) : null}
           </div>
         </div>

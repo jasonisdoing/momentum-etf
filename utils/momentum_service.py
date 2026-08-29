@@ -1249,6 +1249,9 @@ def _compute_picks(settings: dict[str, Any], as_of: str | None) -> dict[str, Any
             "expected_rank": expected_rank_by_ticker.get(item["ticker"]),
             "is_reserve": False,
             "is_expected_only": False,
+            # 지금 실제로 들고 있는가 — 교체가 확정됐어도 체결 전이면 거짓이다.
+            # 화면·합성이 "1주째 보유" 와 "이번 교체에 살 예정" 을 가르는 기준이다.
+            "is_held": item["ticker"] in set(held_tickers),
             "streak_weeks": streaks.get(item["ticker"], 1),
             # 연속 편입이 시작된 교체일 — 차트 탭의 Buy 마커 위치.
             "entry_date": str(streak_entry[item["ticker"]].date()) if item["ticker"] in streak_entry else None,
