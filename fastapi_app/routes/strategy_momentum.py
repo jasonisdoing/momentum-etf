@@ -25,7 +25,38 @@ def _month_options(settings: dict) -> list[int]:
     from utils.pool_signal_backtest_service import get_month_options
 
     limit = available_backtest_months(load_benchmark_close(settings["pool"]), int(settings["long_ma_days"]))
-    return [month for month in get_month_options() if month <= limit]
+    months = [month for month in get_month_options() if month <= limit]
+
+    # ADR 하한이 켜진 풀은 게이트가 전 구간에 적용되는 기간만 고른다 — ADR 이력 이전이 섞인
+    # 창(24개월 등)은 게이트 유무가 섞인 결과가 나와 혼란만 준다. 대신 이력이 덮는 최대
+    # 개월수를 동적 선택지 하나로 붙인다(이력이 쌓일수록 매달 늘어난다).
+    if settings.get("adr_floor") is not None:
+        months = _clip_months_to_adr(months, settings["pool"], limit)
+    return months
+
+
+def _clip_months_to_adr(months: list[int], pool: str, limit: int) -> list[int]:
+    from utils.momentum_service import adr_max_backtest_months
+
+    adr_max = adr_max_backtest_months(pool)
+    if adr_max is None or adr_max <= 0:
+        return months
+    adr_max = min(adr_max, limit)
+    clipped = [month for month in months if month <= adr_max]
+    if adr_max not in clipped:
+        clipped.append(adr_max)
+    return clipped
+
+
+def _tuning_month_options(settings: dict) -> list[int]:
+    """튜닝 기간 선택지 — 축에 ADR 하한이 항상 포함되므로, 저장값과 무관하게 ADR 이력이
+    전 구간을 덮는 기간만 노출한다(레짐 미설정 풀은 제한 없음)."""
+    from utils.momentum_service import available_backtest_months, load_benchmark_close
+    from utils.pool_signal_backtest_service import get_month_options
+
+    limit = available_backtest_months(load_benchmark_close(settings["pool"]), int(settings["long_ma_days"]))
+    months = [month for month in get_month_options() if month <= limit]
+    return _clip_months_to_adr(months, settings["pool"], limit)
 
 
 def _ma_rule_payload(settings: dict) -> dict:
@@ -42,9 +73,12 @@ def _ma_rule_payload(settings: dict) -> dict:
 
 def _constraints_payload() -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트 복사본 제거)."""
+    from config import ADR_FLOOR_OPTIONS
     from utils.momentum_service import INTRAWEEK_STOP_OPTIONS
 
     return {
+        # ADR 하한 — 판정일의 시장 ADR 이 미만이면 그 주 전량 현금. None = 게이트 없음(기본).
+        "adr_floor_options": list(ADR_FLOOR_OPTIONS),
         # 주중 손절선(%) — 주중 이탈이 켜진 풀에서만 화면에 노출한다. None = 손절 없음.
         "intraweek_stop_options": list(INTRAWEEK_STOP_OPTIONS),
     }
@@ -80,6 +114,7 @@ def get_strategy_momentum(
         "settings_by_pool": load_settings_map()["settings_by_pool"],
         "pool_options": pool_options(),
         "month_options": _month_options(settings),
+        "tuning_month_options": _tuning_month_options(settings),
         "ma_rule": _ma_rule_payload(settings),
         "constraints": _constraints_payload(),
         "picks": None,
@@ -106,6 +141,7 @@ def put_strategy_momentum_settings(
         "settings_by_pool": load_settings_map()["settings_by_pool"],
         "pool_options": pool_options(),
         "month_options": _month_options(saved),
+        "tuning_month_options": _tuning_month_options(saved),
         "ma_rule": _ma_rule_payload(saved),
         "constraints": _constraints_payload(),
         "picks": None,

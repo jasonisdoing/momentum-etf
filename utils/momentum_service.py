@@ -30,7 +30,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import STOP_LOSS_PCT_OPTIONS, TOP_N_HOLD
+from config import ADR_FLOOR_OPTIONS, STOP_LOSS_PCT_OPTIONS, TOP_N_HOLD
 from core.strategy.scoring import (
     compute_ma_disparity,
     drawdown_from_high_pct,
@@ -128,6 +128,7 @@ def pool_info(pool: str) -> dict[str, str]:
 PER_POOL_SETTING_KEYS = (
     "short_ma_days",
     "long_ma_days",
+    "adr_floor",
     "intraweek_exit",
     "intraweek_stop_pct",
 )
@@ -170,6 +171,16 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     if short_ma_days >= long_ma_days:
         raise ValueError("'short_ma_days' 는 'long_ma_days' 보다 작아야 합니다.")
 
+    # ADR 하한 — 판정일의 시장 ADR 이 이 값 미만이면 그 주는 전량 현금. None = 게이트 없음(기본).
+    # 시장은 풀 설정의 시장 레짐 지수(ADR 이 있는 4개 시장으로 제한됨)를 따른다.
+    raw_adr = settings.get("adr_floor")
+    adr_floor = None if raw_adr in (None, "", "none") else int(raw_adr)
+    if adr_floor not in ADR_FLOOR_OPTIONS:
+        allowed = ", ".join("없음" if v is None else str(v) for v in ADR_FLOOR_OPTIONS)
+        raise ValueError(f"'adr_floor' 는 {allowed} 중 하나여야 합니다 (받은 값: {raw_adr}).")
+    if adr_floor is not None and adr_market_of_pool(pool) is None:
+        raise ValueError("ADR 하한을 쓰려면 /pools-settings 에서 이 풀의 시장 레짐 지수를 먼저 설정하세요.")
+
     # 주중 이탈 — 풀 성격에 따라 켜고 끈다. 개별주는 급락 방어가 필요하고,
     # ETF 는 20일선 부근을 오르내리며 하루짜리 이탈이 잦아 왕복 비용만 커진다.
     intraweek_exit = settings.get("intraweek_exit")
@@ -198,6 +209,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "top_n": TOP_N_HOLD,
         "short_ma_days": short_ma_days,
         "long_ma_days": long_ma_days,
+        "adr_floor": adr_floor,
         "intraweek_exit": intraweek_exit,
         "intraweek_stop_pct": intraweek_stop_pct,
     }
@@ -238,6 +250,7 @@ def pool_options() -> list[dict[str, Any]]:
 _POOL_KEY_BY_SETTING: dict[str, str] = {
     "short_ma_days": "SHORT_MA_DAYS",
     "long_ma_days": "LONG_MA_DAYS",
+    "adr_floor": "ADR_FLOOR",
     "intraweek_exit": "INTRAWEEK_EXIT",
     "intraweek_stop_pct": "INTRAWEEK_STOP_PCT",
 }
@@ -249,11 +262,12 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
     for setting_key, pool_key in _POOL_KEY_BY_SETTING.items():
         if pool_key not in config:
             # None 을 값으로 갖는 항목(주중 손절선 등)은 키 자체는 있어야 한다.
-            if setting_key in ("intraweek_stop_pct", "intraweek_exit"):
+            if setting_key in ("adr_floor", "intraweek_stop_pct", "intraweek_exit"):
                 continue
             return None
         result[setting_key] = config[pool_key]
     # 없는 선택 항목은 '미설정' 기본값으로 채운다 — 임의 보정이 아니라 스키마 기본이다.
+    result.setdefault("adr_floor", None)
     result.setdefault("intraweek_exit", False)
     result.setdefault("intraweek_stop_pct", None)
     return result
@@ -317,6 +331,7 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
 # 화면 로드 때 선택지 밖 저장값을 보정할 항목 — (키, 라벨, 선택지)
 _OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
     ("short_ma_days", "단기 이평", SHORT_MA_OPTIONS),
+    ("adr_floor", "ADR 하한", ADR_FLOOR_OPTIONS),
     ("long_ma_days", "장기 이평", LONG_MA_OPTIONS),
     ("intraweek_stop_pct", "주중 손절선", INTRAWEEK_STOP_OPTIONS),
 )
@@ -483,6 +498,91 @@ def momentum_metrics(
     }
 
 
+# ── ADR 게이트 ─────────────────────────────────────────────────────────────
+# 시장 폭(ADR)이 무너진 주는 개별주 모멘텀의 승률이 급락한다는 검증 결과(메모리
+# adr-gate-research)에 따른 주간 스위치. 판정은 주간 판정일의 ADR 로 하고, 여기(후보
+# 선정)에서 빈 목록을 돌려주면 엔진이 자연히 전량 매도·현금 대기로 흘러간다 —
+# 선정·백테스트·연속 추적·합성이 같은 경로라 한 곳으로 충분하다.
+
+# 시리즈 캐시 — 백테스트가 판정일마다 부르므로 DB 를 반복해서 읽지 않는다.
+# 튜닝 워커는 DB 를 건드리지 않는 규칙이라, 부모가 프리로드해 `seed_adr_series` 로 심는다.
+_ADR_SERIES_CACHE: dict[str, pd.Series] = {}
+
+
+def adr_market_of_pool(pool: str) -> str | None:
+    """풀의 시장 레짐 지수 → ADR 시장(KOSPI·KOSDAQ·SP500·NDX100). 미설정이면 None."""
+    from utils.market_breadth_service import MARKET_BY_INDEX_TICKER
+    from utils.pool_settings_store import get_pool_market_regime_index
+    from utils.settings_loader import get_ticker_type_settings
+
+    try:
+        pool_settings = get_ticker_type_settings(pool) or {}
+    except Exception:
+        return None
+    index = get_pool_market_regime_index(pool_settings)
+    if index is None:
+        return None
+    return MARKET_BY_INDEX_TICKER.get(index["ticker"])
+
+
+def load_adr_series(market: str) -> pd.Series:
+    """시장의 일별 ADR 시계열 (날짜 오름차순). 창이 차기 전 구간은 없다."""
+    cached = _ADR_SERIES_CACHE.get(market)
+    if cached is not None:
+        return cached
+    from utils.market_breadth_service import load_adr_series as load_points
+
+    series = pd.Series(
+        {pd.Timestamp(point["date"]): float(point["adr"]) for point in load_points(market) if point["adr"] is not None}
+    ).sort_index()
+    _ADR_SERIES_CACHE[market] = series
+    return series
+
+
+def seed_adr_series(market: str, series: pd.Series) -> None:
+    """튜닝 워커용 — 부모가 읽은 시계열을 심어 워커의 DB 접근을 없앤다."""
+    _ADR_SERIES_CACHE[market] = series
+
+
+def adr_gate_blocked(settings: dict[str, Any], as_of: pd.Timestamp | None) -> bool:
+    """판정일 기준 게이트 차단 여부. 이력이 없는 날짜는 게이트 미적용(False).
+
+    `as_of=None`(현재 판정)일 때 값이 없거나 14일 이상 낡았으면 **에러** — 게이트를 켜둔 채
+    폭 데이터가 죽었는데 조용히 통과시키면 안 된다. 과거 날짜는 이력 이전이면 미적용이다.
+    """
+    adr_floor = settings.get("adr_floor")
+    if adr_floor is None:
+        return False
+    market = adr_market_of_pool(str(settings["pool"]))
+    if market is None:
+        raise RuntimeError("ADR 하한이 설정됐지만 풀의 시장 레짐 지수가 없습니다 — /pools-settings 에서 설정하세요.")
+    series = load_adr_series(market)
+    if as_of is None:
+        if series.empty:
+            raise RuntimeError(f"{market} ADR 데이터가 없습니다 — market_breadth 배치를 확인하세요.")
+        last_date = series.index[-1]
+        if pd.Timestamp.now().normalize() - last_date > pd.Timedelta(days=14):
+            raise RuntimeError(f"{market} ADR 이 {last_date.date()} 이후 갱신되지 않았습니다 — market_breadth 배치를 확인하세요.")
+        value = float(series.iloc[-1])
+        return value < float(adr_floor)
+    value = series.asof(pd.Timestamp(as_of))
+    if pd.isna(value):
+        return False  # 이력 이전 — 게이트 미적용 (기간 선택지가 이 구간을 이미 걸러낸다)
+    return float(value) < float(adr_floor)
+
+
+def adr_max_backtest_months(pool: str) -> int | None:
+    """ADR 이력이 통째로 덮는 최대 백테스트 개월 수. 레짐 미설정이면 None."""
+    market = adr_market_of_pool(pool)
+    if market is None:
+        return None
+    series = load_adr_series(market)
+    if series.empty:
+        return 0
+    span_days = (pd.Timestamp.now().normalize() - series.index[0]).days
+    return max(0, span_days * 12 // 365)
+
+
 def select_candidates(
     universe: list[dict[str, str]],
     frames: dict[str, pd.DataFrame],
@@ -496,6 +596,10 @@ def select_candidates(
     """
     short_ma_days = int(settings["short_ma_days"])
     long_ma_days = int(settings["long_ma_days"])
+
+    # ADR 게이트 — 차단된 판정일은 후보 자체가 없다(그 주 전량 매도·신규 없음).
+    if adr_gate_blocked(settings, as_of):
+        return []
 
     candidates: list[dict[str, Any]] = []
     for row in universe:
@@ -842,6 +946,20 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
 
     benchmark_close = load_benchmark_close(pool)
     rebalance_date, signal_date = current_portfolio_dates(benchmark_close, info["country"])
+
+    # ADR 게이트 상태 — 화면이 "왜 선정이 비었는지"를 보여준다. 판정은 select_candidates 안.
+    adr_gate: dict[str, Any] | None = None
+    if settings.get("adr_floor") is not None:
+        market = adr_market_of_pool(pool)
+        series = load_adr_series(market) if market else pd.Series(dtype=float)
+        value = series.asof(signal_date) if not series.empty else None
+        adr_gate = {
+            "market": market,
+            "floor": settings["adr_floor"],
+            "value": round(float(value), 1) if value is not None and pd.notna(value) else None,
+            "blocked": adr_gate_blocked(settings, signal_date),
+        }
+
     candidates = select_candidates(universe, frames, settings, as_of=signal_date)
     scored = rank_candidates(candidates)
 
@@ -1348,6 +1466,8 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
         "rebalance_date": rebalance_date.strftime("%Y-%m-%d"),
         "signal_date": signal_date.strftime("%Y-%m-%d"),
         "universe_count": len(universe),
+        # ADR 게이트 — 하한 미설정이면 None. blocked=True 면 이번 주는 전량 현금이다.
+        "adr_gate": adr_gate,
         "candidate_count": len(candidates),
         # 풀의 국가·통화 — 화면이 마켓·시가총액 컬럼 표시와 티커 표기(ASX: 등)를 정한다.
         "country": country,

@@ -31,6 +31,7 @@ import pandas as pd
 
 from leverage.engine.backtest.ma_cross import max_drawdown_pct, sortino
 from utils.momentum_service import (
+    adr_gate_blocked,
     available_backtest_months,
     benchmark_info,
     load_benchmark_close,
@@ -196,12 +197,31 @@ def run_backtest(
     # 교체 시점별 후보 (모멘텀은 가격 캐시만 쓰므로 즉시 계산된다)
     candidates_by_date: list[list[dict[str, Any]]] = []
     all_signal_dates = signal_dates + ([pending_signal] if pending_signal is not None else [])
+    # 표시용 ADR — 일간·주간 행에 붙인다(게이트 유무와 무관, 레짐 시장이 없으면 빈 시리즈).
+    from utils.momentum_service import adr_market_of_pool, load_adr_series
+
+    adr_market = adr_market_of_pool(pool)
+    adr_series = load_adr_series(adr_market) if adr_market else pd.Series(dtype=float)
+
+    def adr_at(stamp: pd.Timestamp) -> float | None:
+        if adr_series.empty:
+            return None
+        value = adr_series.asof(pd.Timestamp(stamp))
+        return round(float(value), 1) if pd.notna(value) else None
+
     candidate_cache: dict = context.setdefault("candidate_cache", {})
     ma_key = (int(settings["short_ma_days"]), int(settings["long_ma_days"]))
+    # ADR 게이트는 **캐시 밖**에서 판정한다. 게이트는 후보 내용을 바꾸지 않고 "그 주를 통째로
+    # 쉬는지"만 정하므로, 캐시에는 게이트 무관 후보를 두고 차단된 판정일만 빈 목록을 쓴다.
+    # (거래대금 하한 때 겪은 튜닝 캐시 전염 — 첫 조합의 필터 결과가 다른 조합에 재사용 — 예방)
+    ungated_settings = {**settings, "adr_floor": None}
     for signal_date in all_signal_dates:
+        if adr_gate_blocked(settings, signal_date):
+            candidates_by_date.append([])
+            continue
         cache_key = (signal_date, *ma_key)
         if cache_key not in candidate_cache:
-            candidate_cache[cache_key] = select_candidates(universe, frames, settings, as_of=signal_date)
+            candidate_cache[cache_key] = select_candidates(universe, frames, ungated_settings, as_of=signal_date)
         # 아래 단계가 후보 dict 를 손대더라도 캐시는 그대로 남게 복사본을 준다.
         candidates_by_date.append([dict(item) for item in candidate_cache[cache_key]])
 
@@ -555,6 +575,8 @@ def run_backtest(
                     "date": key,
                     "strategy_pct": round((daily_growth[key] - 1.0) * 100.0, 6),
                     "benchmark_pct": round(bench_changes[key], 6) if key in bench_changes else None,
+                    # 그날의 시장 ADR — 게이트 이해용 표시값(레짐 시장 없는 풀은 None).
+                    "adr": adr_at(pd.Timestamp(key)),
                 }
             )
 
@@ -606,6 +628,8 @@ def run_backtest(
             weekly.append(
                 {
                     "week_end": bucket["end"].strftime("%Y-%m-%d"),
+                    # 판정일(주 마지막 거래일)의 시장 ADR — 다음 주 게이트를 결정한 값.
+                    "adr": adr_at(bucket["end"]),
                     "strategy_pct": _compound_daily(bucket["strategy"]),
                     "benchmark_pct": _compound_daily(bucket["benchmark"]),
                     # 교체 직후(주 시작) 종목 수 — 주중 이탈로 줄면 화면이 "5 → 0" 로 보여준다.

@@ -31,6 +31,7 @@ from datetime import datetime
 from typing import Any
 
 from config import (
+    ADR_FLOOR_OPTIONS,
     POOL_KIND_OPTIONS,
     SLIPPAGE_PCT_OPTIONS,
     STOP_LOSS_PCT_OPTIONS,
@@ -58,6 +59,7 @@ OVERRIDABLE_KEYS: tuple[str, ...] = (
 # 모멘텀 전략 전용 값 — 위 셋과 함께 한 풀의 전략 설정을 이룬다. 기존 문서에 없을 수 있어
 # 로딩 필수값은 아니다(미설정이면 전략 화면에서 저장해야 한다).
 MOMENTUM_KEYS: tuple[str, ...] = (
+    "ADR_FLOOR",  # None = 게이트 없음 (모멘텀 ADR 하한 — 시장은 MARKET_REGIME_INDEX 를 따름)
     "INTRAWEEK_EXIT",
     "INTRAWEEK_STOP_PCT",  # None = 손절 없음
 )
@@ -328,6 +330,13 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
         cleaned[key] = num
 
     # 모멘텀 전용 — 숫자/불리언이 섞여 있고 None 이 '없음' 을 뜻한다(임의 보정하지 않는다).
+    if "ADR_FLOOR" in values:
+        raw = values["ADR_FLOOR"]
+        floor = None if raw in (None, "", "none") else int(raw)
+        if check_options and floor not in ADR_FLOOR_OPTIONS:
+            allowed = ", ".join("없음" if v is None else str(v) for v in ADR_FLOOR_OPTIONS)
+            raise PoolSettingsError(f"ADR_FLOOR 는 {allowed} 중 하나여야 합니다: {raw}")
+        cleaned["ADR_FLOOR"] = floor
     if "INTRAWEEK_EXIT" in values:
         cleaned["INTRAWEEK_EXIT"] = bool(values["INTRAWEEK_EXIT"])
     if "INTRAWEEK_STOP_PCT" in values:
