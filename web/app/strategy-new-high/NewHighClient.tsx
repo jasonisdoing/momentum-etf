@@ -26,6 +26,7 @@ import {
   INDUSTRY_COLUMN_MIN_WIDTH,
   INDUSTRY_COLUMN_WIDTH,
   STOCK_NAME_COLUMN_MIN_WIDTH,
+  adrColumn,
   formatSignedPct,
   renderIndustryCell,
   signColor,
@@ -237,7 +238,7 @@ type Backtest = {
   reason_counts?: Record<string, number>;
   trades: Trade[];
   /** 일별 누적 수익률(%) — 월간·연간은 이 값에서 만든다. */
-  daily: { date: string; strategy_pct: number; benchmark_pct: number }[];
+  daily: { date: string; strategy_pct: number; benchmark_pct: number; adr?: number | null }[];
 };
 
 // 장중 자동 갱신 주기. 계산이 수 초 걸려 더 짧게 잡으면 요청이 겹친다.
@@ -259,7 +260,15 @@ const VIEW_MODES = [
 ] as const;
 type ViewMode = (typeof VIEW_MODES)[number]["key"];
 
-type PeriodRow = { period: string; strategy_pct: number; benchmark_pct: number };
+type PeriodRow = {
+  period: string;
+  strategy_pct: number;
+  benchmark_pct: number;
+  /** 구간 마지막 날의 시장 ADR — 일간·주간(판정일) 컬럼이 쓴다. */
+  adr: number | null;
+  /** 구간 최저 시장 ADR — 월간·연간 컬럼이 쓴다. */
+  adr_min: number | null;
+};
 
 /** 그 날짜가 속한 주의 월요일 — 주간 묶음 키. 로컬 기준으로 조립한다(UTC 파싱은 하루 밀린다). */
 function weekKeyOf(date: string): string {
@@ -273,12 +282,23 @@ function weekKeyOf(date: string): string {
  *  주간은 묶음 키(월요일)와 표시 라벨(그 주 마지막 거래일)이 달라 따로 담는다. */
 function toPeriodRows(daily: Backtest["daily"], keyOf: (date: string) => string, labelByLastDate = false): PeriodRow[] {
   if (daily.length === 0) return [];
-  const lastByPeriod = new Map<string, { strategy: number; benchmark: number; lastDate: string }>();
+  const lastByPeriod = new Map<
+    string,
+    { strategy: number; benchmark: number; lastDate: string; adr: number | null; adrMin: number | null }
+  >();
   const order: string[] = [];
   for (const point of daily) {
     const key = keyOf(point.date);
     if (!lastByPeriod.has(key)) order.push(key);
-    lastByPeriod.set(key, { strategy: point.strategy_pct, benchmark: point.benchmark_pct, lastDate: point.date });
+    const knownMin = lastByPeriod.get(key)?.adrMin ?? null;
+    const adr = point.adr ?? null;
+    lastByPeriod.set(key, {
+      strategy: point.strategy_pct,
+      benchmark: point.benchmark_pct,
+      lastDate: point.date,
+      adr,
+      adrMin: adr == null ? knownMin : knownMin == null ? adr : Math.min(knownMin, adr),
+    });
   }
   // 첫 구간의 기준은 시작 시점(누적 0%)이다.
   let prev = { strategy: 0, benchmark: 0 };
@@ -290,6 +310,8 @@ function toPeriodRows(daily: Backtest["daily"], keyOf: (date: string) => string,
       period: labelByLastDate ? current.lastDate : key,
       strategy_pct: step(current.strategy, prev.strategy),
       benchmark_pct: step(current.benchmark, prev.benchmark),
+      adr: current.adr,
+      adr_min: current.adrMin,
     });
     prev = current;
   }
@@ -710,6 +732,9 @@ export function NewHighClient() {
     [windowLabel, hasIndustryData, positions?.live],
   );
 
+  // ADR 값이 하나도 없으면(레짐 시장 없는 풀) 컬럼을 숨긴다 — 모멘텀 화면과 같은 규칙.
+  const hasAdr = useMemo(() => (backtest?.daily ?? []).some((row) => row.adr != null), [backtest]);
+
   const periodColumns = useMemo<ColDef<PeriodRow>[]>(
     () => [
       {
@@ -749,8 +774,14 @@ export function NewHighClient() {
         valueFormatter: (p) => (p.value == null ? "-" : `${formatSignedPct(p.value as number, 2)}p`),
         cellStyle: (p) => ({ color: signColor(p.value as number) }),
       },
+      // ADR — 일간=당일, 주간=판정일(주 마지막 거래일), 월간·연간=기간 최저. 모멘텀 표와 같은 구성.
+      viewMode === "daily"
+        ? adrColumn<PeriodRow>({ headerName: "ADR", headerTooltip: "그날의 시장 ADR(20일 등락비율)", hide: !hasAdr, getter: (row) => row.adr })
+        : viewMode === "weekly"
+          ? adrColumn<PeriodRow>({ headerName: "판정일 ADR", headerTooltip: "그 주 마지막 거래일의 시장 ADR — 다음 거래일 진입 게이트를 결정한 값", hide: !hasAdr, getter: (row) => row.adr })
+          : adrColumn<PeriodRow>({ headerName: "최저 ADR", headerTooltip: `${viewMode === "yearly" ? "그 해" : "그 달"}의 시장 ADR 최저값`, hide: !hasAdr, getter: (row) => row.adr_min }),
     ],
-    [viewMode, backtest?.benchmark_name],
+    [viewMode, backtest?.benchmark_name, hasAdr],
   );
 
   const periodRows = useMemo<PeriodRow[]>(() => {

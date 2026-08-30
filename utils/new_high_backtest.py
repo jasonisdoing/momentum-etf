@@ -103,16 +103,22 @@ def run_backtest(
     context = context or load_context(settings)
     name_by, industry_by = context["name_by"], context["industry_by"]
 
-    # ADR 진입 게이트 — 판정일 ADR 이 하한 미만이면 그날은 **신규 진입만** 건너뛴다.
-    # 보유 청산(손절·이탈)은 그대로 돈다. 이력 이전 날짜는 게이트 미적용.
+    # 시장 ADR — 진입 게이트와 표시(일간 행)가 함께 쓴다. 게이트 유무와 무관하게 싣고,
+    # 레짐 시장이 없는 풀이면 빈 시리즈다.
     from utils.momentum_service import adr_market_of_pool, load_adr_series
 
     adr_floor = settings.get("adr_floor")
-    adr_series = pd.Series(dtype=float)
-    if adr_floor is not None:
-        adr_market = adr_market_of_pool(pool)
-        adr_series = load_adr_series(adr_market) if adr_market else pd.Series(dtype=float)
+    adr_market = adr_market_of_pool(pool)
+    adr_series = load_adr_series(adr_market) if adr_market else pd.Series(dtype=float)
 
+    def adr_at(stamp: pd.Timestamp) -> float | None:
+        if adr_series.empty:
+            return None
+        value = adr_series.asof(pd.Timestamp(stamp))
+        return round(float(value), 1) if pd.notna(value) else None
+
+    # ADR 진입 게이트 — 판정일 ADR 이 하한 미만이면 그날은 **신규 진입만** 건너뛴다.
+    # 보유 청산(손절·이탈)은 그대로 돈다. 이력 이전 날짜는 게이트 미적용.
     def entry_blocked(stamp: pd.Timestamp) -> bool:
         if adr_floor is None or adr_series.empty:
             return False
@@ -315,6 +321,7 @@ def run_backtest(
                 "date": str(d.date()),
                 "strategy_pct": round((v - 1) * 100, 2),
                 "benchmark_pct": round((float(benchmark.loc[d]) - 1) * 100, 2),
+                "adr": adr_at(d),
             }
             for d, v in strategy.items()
         ],
