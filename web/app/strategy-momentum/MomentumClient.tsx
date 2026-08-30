@@ -87,6 +87,8 @@ type PoolSettings = {
   top_n: number;
   short_ma_days: number;
   long_ma_days: number;
+  /** ADR 하한 — 판정일의 시장 ADR(풀의 시장 레짐 지수 시장)이 미만이면 그 주 전량 현금. null = 없음. */
+  adr_floor?: number | null;
   /** 주중 이탈 — 보유 자격을 잃으면 다음 거래일 시가에 판다. 풀 성격에 따라 끄고 켠다. */
   intraweek_exit: boolean;
   /** 주중 손절선(%) — 교체일 시가 대비 낙폭. null 은 손절 없음. 주중 이탈이 켜진 풀만 의미 있다. */
@@ -153,6 +155,8 @@ type PicksResult = {
   country: string;
   currency: string;
   monthly_return_labels: string[];
+  /** ADR 게이트 상태 — 하한 미설정이면 null. blocked 면 이번 주는 전량 현금. */
+  adr_gate?: { market: string | null; floor: number; value: number | null; blocked: boolean } | null;
   rows: PickRow[];
 };
 
@@ -162,6 +166,8 @@ type PicksResult = {
 // 주간 행 — 달력 주 단위. 기준일은 그 주 마지막 거래일, 편입·편출은 그 주 체결분.
 type BacktestWeekRow = {
   week_end: string;
+  /** 판정일(기준일)의 시장 ADR — 다음 주 게이트를 결정한 값. */
+  adr?: number | null;
   strategy_pct: number | null;
   benchmark_pct: number | null;
   holdings_count: number;
@@ -236,8 +242,11 @@ type View = {
   };
   // 기간 선택지는 서버가 가격 캐시 범위로 계산해 내려준다 (종목풀 백테스트와 동일).
   month_options?: number[];
+  /** 튜닝 전용 기간 — ADR 축이 항상 있으므로 ADR 이력이 덮는 범위만 온다. */
+  tuning_month_options?: number[];
   // 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다).
   constraints?: {
+    adr_floor_options?: (number | null)[];
     intraweek_stop_options?: (number | null)[];
   };
   picks: PicksResult | null;
@@ -306,6 +315,8 @@ export function MomentumClient() {
   const [draftPool, setDraftPool] = useState<string>("");
   // 이평선 초안 — 종목풀 설정에 풀별로 저장된다(순위 화면·보유종목 알림과 같은 값).
   const [draftMaRule, setDraftMaRule] = useState<{ short: number; long: number } | null>(null);
+  // ADR 하한 — "" 은 없음(기본). 시장은 풀 설정의 시장 레짐 지수를 따른다.
+  const [draftAdrFloor, setDraftAdrFloor] = useState<string>("");
   const [draftIntraweekExit, setDraftIntraweekExit] = useState(true);
   // 주중 손절선 — "" 은 손절 없음. 주중 이탈이 켜졌을 때만 셀렉트를 노출한다.
   const [draftIntraweekStop, setDraftIntraweekStop] = useState<string>("");
@@ -314,6 +325,7 @@ export function MomentumClient() {
   const fillDrafts = useCallback((values: PoolSettings) => {
     setDraft({});
     setDraftMaRule({ short: values.short_ma_days, long: values.long_ma_days });
+    setDraftAdrFloor(values.adr_floor == null ? "" : String(values.adr_floor));
     setDraftIntraweekExit(values.intraweek_exit);
     setDraftIntraweekStop(values.intraweek_stop_pct == null ? "" : String(values.intraweek_stop_pct));
   }, []);
@@ -451,13 +463,14 @@ export function MomentumClient() {
         // 이평선은 전략 전용 값 — 설정의 일부로 풀별 저장한다(종목풀 설정과 무관).
         short_ma_days: draftMaRule.short,
         long_ma_days: draftMaRule.long,
+        adr_floor: draftAdrFloor === "" ? null : Number(draftAdrFloor),
         intraweek_exit: draftIntraweekExit,
         // 주중 이탈을 끄면 손절선도 함께 해제한다 — 이탈의 추가 조건이라 홀로는 의미가 없다.
         intraweek_stop_pct: draftIntraweekExit && draftIntraweekStop !== "" ? Number(draftIntraweekStop) : null,
       },
       "설정을 저장했습니다.",
     );
-  }, [draftIntraweekExit, draftIntraweekStop, draftMaRule, draftPool, persistSettings, toast, view?.settings.top_n]);
+  }, [draftAdrFloor, draftIntraweekExit, draftIntraweekStop, draftMaRule, draftPool, persistSettings, toast, view?.settings.top_n]);
 
   // 풀 셀렉트 변경 — 그 풀의 저장 설정이 있으면 **즉시 전환·저장·재선정**한다
   // (전환은 초안이 아니라 컨텍스트 스위치다). 저장분이 없는 풀(첫 설정)만 초안으로
@@ -580,6 +593,7 @@ export function MomentumClient() {
     if (view.coerced?.length) return true;
     return (
       draftPool !== saved.pool ||
+      (draftAdrFloor === "" ? null : Number(draftAdrFloor)) !== (saved.adr_floor ?? null) ||
       draftIntraweekExit !== saved.intraweek_exit ||
       (draftIntraweekStop === "" ? null : Number(draftIntraweekStop)) !== (saved.intraweek_stop_pct ?? null) ||
       (draftMaRule != null &&
@@ -587,7 +601,7 @@ export function MomentumClient() {
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
           draftMaRule.long !== view.ma_rule.long_ma_days))
     );
-  }, [draftIntraweekExit, draftIntraweekStop, draftMaRule, draftPool, view]);
+  }, [draftAdrFloor, draftIntraweekExit, draftIntraweekStop, draftMaRule, draftPool, view]);
 
   const monthlyLabels = view?.picks?.monthly_return_labels ?? [];
   // 선정 결과 풀의 국가 — 마켓·시가총액 컬럼 표시와 티커 표기(ASX:)를 정한다.
@@ -773,6 +787,33 @@ export function MomentumClient() {
   // 표 헤더의 지수 이름 — 신고가·합성 화면과 같은 표기(값에 % 가 붙으므로 헤더엔 붙이지 않는다).
   const benchmarkLabel = backtest?.benchmark_name ?? "벤치마크";
 
+  // ADR 컬럼 — 값이 하나도 없으면(레짐 시장 없는 풀) 컬럼을 숨긴다.
+  const hasAdr = useMemo(() => (backtest?.daily ?? []).some((row) => row.adr != null), [backtest]);
+  // 월간·연간의 최저 ADR — 일간 값에서 직접 구한다(집계 공용 함수는 수익률만 다룬다).
+  const adrMinByPrefix = useMemo(() => {
+    const min = new Map<string, number>();
+    for (const row of backtest?.daily ?? []) {
+      if (row.adr == null) continue;
+      for (const prefix of [row.date.slice(0, 7), row.date.slice(0, 4)]) {
+        const known = min.get(prefix);
+        if (known == null || row.adr < known) min.set(prefix, row.adr);
+      }
+    }
+    return min;
+  }, [backtest]);
+
+  /** ADR 컬럼 — 일간=당일 값, 주간=판정일 값, 월간·연간=기간 최저. 값 없으면 숨긴다. */
+  const adrColumn = useCallback(<T,>(headerName: string, getter: (row: T) => number | null | undefined, headerTooltip: string): ColDef<T> => ({
+    headerName,
+    colId: "adr",
+    headerTooltip,
+    width: 96,
+    hide: !hasAdr,
+    type: "numericColumn",
+    valueGetter: (p) => (p.data ? getter(p.data) ?? null : null),
+    valueFormatter: (p) => (p.value == null ? "-" : Number(p.value).toFixed(1)),
+  }), [hasAdr]);
+
   const backtestColumns = useMemo<ColDef<BacktestMonthRow>[]>(() => {
     if (!backtest) return [];
     const columns: ColDef<BacktestMonthRow>[] = [
@@ -803,8 +844,9 @@ export function MomentumClient() {
       },
     ];
     columns.push(excessColumn<BacktestMonthRow>());
+    columns.push(adrColumn<BacktestMonthRow>("최저 ADR", (row) => adrMinByPrefix.get(row.month) ?? null, "그 달의 시장 ADR 최저값"));
     return columns;
-  }, [backtest]);
+  }, [backtest, adrColumn, adrMinByPrefix]);
 
   const dailyColumns = useMemo<ColDef<BacktestDayRow>[]>(() => {
     if (!backtest) return [];
@@ -824,8 +866,9 @@ export function MomentumClient() {
       pctColumn(benchmarkLabel, "benchmark_pct", `${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
     ];
     columns.push(excessColumn<BacktestDayRow>());
+    columns.push(adrColumn<BacktestDayRow>("ADR", (row) => row.adr, "그날의 시장 ADR(20일 등락비율)"));
     return columns;
-  }, [backtest]);
+  }, [backtest, adrColumn]);
 
   const tradeColumns = useMemo<ColDef<BacktestTradeRow>[]>(
     () => [
@@ -880,6 +923,7 @@ export function MomentumClient() {
   );
   const yearRows = useMemo<BacktestYearRow[]>(() => toYearRows(monthRows), [monthRows]);
 
+
   // 주간 표 — 매매 일지. 주 수익률 + 그 주에 체결된 편입·편출과 주말 보유 수·교체율.
   const weeklyColumns = useMemo<ColDef<BacktestWeekRow>[]>(() => {
     if (!backtest) return [];
@@ -903,6 +947,7 @@ export function MomentumClient() {
       },
       pctColumn("전략", "strategy_pct", "그 주 보유 포트폴리오의 수익률 (교체 비용 반영)"),
       pctColumn(benchmarkLabel, "benchmark_pct", `${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
+      adrColumn<BacktestWeekRow>("판정일 ADR", (row) => row.adr, "기준일(판정일) 종가 기준 시장 ADR — 다음 주 게이트를 결정한 값"),
     ];
     columns.push(
       {
@@ -999,8 +1044,9 @@ export function MomentumClient() {
       ),
     ];
     columns.push(excessColumn<BacktestYearRow>());
+    columns.push(adrColumn<BacktestYearRow>("최저 ADR", (row) => adrMinByPrefix.get(row.year) ?? null, "그 해의 시장 ADR 최저값"));
     return columns;
-  }, [backtest]);
+  }, [backtest, adrColumn, adrMinByPrefix]);
 
   if (loading && !view) {
     return (
@@ -1073,6 +1119,22 @@ export function MomentumClient() {
                       </span>
                     </label>
                     <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">ADR 하한</span>
+                      <select
+                        className="form-select form-select-sm"
+                        style={{ width: 88 }}
+                        value={draftAdrFloor}
+                        onChange={(e) => setDraftAdrFloor(e.target.value)}
+                        title="판정일의 시장 ADR(20일 등락비율)이 이 값 미만이면 그 주는 전량 현금. 시장은 종목풀 설정의 시장 레짐 지수를 따른다."
+                      >
+                        {(view.constraints?.adr_floor_options ?? []).map((value) => (
+                          <option key={String(value)} value={value == null ? "" : String(value)}>
+                            {value == null ? "없음" : String(value)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">주중 이탈</span>
                       <select
                         className="form-select form-select-sm"
@@ -1143,6 +1205,18 @@ export function MomentumClient() {
                     체결 {view.picks.rebalance_date} (판정 {view.picks.signal_date}) · {view.picks.universe_count} →{" "}
                     {view.picks.candidate_count} → {selectedCount}
                     {reserveCount > 0 ? ` (+${reserveCount})` : ""}
+                    {view.picks.adr_gate ? (
+                      view.picks.adr_gate.blocked ? (
+                        <b style={{ color: "#d9480f" }}>
+                          {" "}· ADR 게이트 발동 — {view.picks.adr_gate.market} {view.picks.adr_gate.value ?? "-"} &lt;{" "}
+                          {view.picks.adr_gate.floor}, 이번 주 전량 현금
+                        </b>
+                      ) : (
+                        <span>
+                          {" "}· ADR {view.picks.adr_gate.market} {view.picks.adr_gate.value ?? "-"} (하한 {view.picks.adr_gate.floor})
+                        </span>
+                      )
+                    ) : null}
                   </span>
                 ) : (
                   <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>
@@ -1341,7 +1415,7 @@ export function MomentumClient() {
         <StrategyTuning
           // 풀이 바뀌면 재마운트 — 이전 풀의 튜닝 결과가 남지 않게 한다(백테스트와 같은 시점).
           key={draftPool}
-          monthOptions={view.month_options ?? [backtestMonths]}
+          monthOptions={view.tuning_month_options ?? view.month_options ?? [backtestMonths]}
           defaultMonths={backtestMonths}
           // 튜닝도 백테스트와 같이 **저장된 설정** 기준이라 실행 조건을 같게 둔다.
           disabled={backtesting || isDirty}
@@ -1352,6 +1426,7 @@ export function MomentumClient() {
           current={{
             short_ma_days: view.settings.short_ma_days,
             long_ma_days: view.settings.long_ma_days,
+            adr_floor: view.settings.adr_floor ?? null,
             intraweek: !view.settings.intraweek_exit
               ? "off"
               : view.settings.intraweek_stop_pct == null
@@ -1363,6 +1438,11 @@ export function MomentumClient() {
             // 종목 수(공통 고정)·업종 상한(폐기)은 축이 아니다 — 튜닝은 시장의 이평 반응과 손절 기준만 잰다.
             { key: "short_ma_days", label: "단기 이평", values: (view.ma_rule?.short_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },
             { key: "long_ma_days", label: "장기 이평", values: (view.ma_rule?.long_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },
+            {
+              key: "adr_floor",
+              label: "ADR 하한",
+              values: (view.constraints?.adr_floor_options ?? []).map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: String(n) })),
+            },
             {
               key: "intraweek",
               label: "주중 손절선",
@@ -1383,6 +1463,7 @@ export function MomentumClient() {
               pool: draftPool,
               short_ma_days: Number(params.short_ma_days),
               long_ma_days: Number(params.long_ma_days),
+              adr_floor: params.adr_floor == null ? null : Number(params.adr_floor),
               intraweek_exit: intraweekExit,
               intraweek_stop_pct: intraweekExit ? stop : null,
             };

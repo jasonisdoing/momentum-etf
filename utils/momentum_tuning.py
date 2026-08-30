@@ -1,6 +1,6 @@
 """모멘텀 전략 튜닝 — 설정 항목들의 범위 조합을 한 번에 백테스트해 비교한다.
 
-화면 '튜닝' 섹션용. 축(화면 순서): 선정 이평(단기·장기) · 주중 손절선.
+화면 '튜닝' 섹션용. 축(화면 순서): 선정 이평(단기·장기) · ADR 하한 · 주중 손절선.
 종목 수는 시스템 공통(config.TOP_N_HOLD) 고정, 업종 상한은 폐기 — 튜닝은 "그 시장이 어떤
 이동평균에 반응하는가"와 손절 기준을 재는 용도로만 쓴다(종목 수까지 돌리면 과적합 탐색이 된다).
 (단기, 장기) 쌍을 작업 단위로 별도 프로세스에서 병렬로 돌린다 — 각 프로세스는 가격·판정일별
@@ -15,10 +15,12 @@
 
 from __future__ import annotations
 
+from itertools import product
 from typing import Any
 
 import pandas as pd
 
+from config import ADR_FLOOR_OPTIONS
 from utils.momentum_service import (
     INTRAWEEK_STOP_OPTIONS,
     LONG_MA_OPTIONS,
@@ -28,7 +30,7 @@ from utils.momentum_service import (
 )
 from utils.strategy_tuning import finalize, run_groups, seed_worker_caches, summarize_combo
 
-TUNING_AXES = ("short_ma_days", "long_ma_days", "intraweek")
+TUNING_AXES = ("short_ma_days", "long_ma_days", "adr_floor", "intraweek")
 
 
 def _intraweek_settings(value: Any) -> dict[str, Any]:
@@ -40,6 +42,15 @@ def _intraweek_settings(value: Any) -> dict[str, Any]:
     if stop not in INTRAWEEK_STOP_OPTIONS:
         raise ValueError(f"주중 손절선 값이 올바르지 않습니다: {value}")
     return {"intraweek_exit": True, "intraweek_stop_pct": stop}
+
+
+def _checked_optional_ints(values: list[Any], options: tuple, label: str) -> list[Any]:
+    """None(없음)이 섞인 정수 선택지 축 검증."""
+    cleaned = list(dict.fromkeys(None if v in (None, "", "none") else int(v) for v in values))
+    bad = [v for v in cleaned if v not in options]
+    if not cleaned or bad:
+        raise ValueError(f"'{label}' 범위가 올바르지 않습니다: {bad or cleaned}")
+    return cleaned
 
 
 def _checked(values: list[Any], options: tuple, label: str) -> list[Any]:
@@ -60,27 +71,41 @@ _WORKER_CONTEXT: dict[str, Any] = {}
 def _init_worker(bundle: dict[str, Any]) -> None:
     seed_worker_caches(bundle["pool_configs"], bundle["stocks_by_pool"])
     _PRELOAD.update(bundle)
+    if bundle.get("adr_market") and bundle.get("adr_series") is not None:
+        from utils.momentum_service import seed_adr_series
+
+        seed_adr_series(bundle["adr_market"], bundle["adr_series"])
 
 
 def _preload(pool: str) -> dict[str, Any]:
     """부모가 한 번 읽는 공유 데이터 — 워커 초기화 때 통째로 넘긴다."""
-    from utils.momentum_service import load_benchmark_close, load_price_frames, load_universe
+    from utils.momentum_service import (
+        adr_market_of_pool,
+        load_adr_series,
+        load_benchmark_close,
+        load_price_frames,
+        load_universe,
+    )
     from utils.settings_loader import _load_pool_configs
     from utils.stock_list_io import _load_ticker_type_stocks_raw
 
     universe = load_universe(pool)
+    # ADR 시계열 — 워커는 DB 를 안 건드리므로 부모가 읽어서 심는다(레짐 미설정 풀은 None).
+    adr_market = adr_market_of_pool(pool)
     return {
         "pool_configs": _load_pool_configs(),
         "stocks_by_pool": {pool: _load_ticker_type_stocks_raw(pool)},
         "universe": universe,
         "frames": load_price_frames(universe),
         "benchmark_close": load_benchmark_close(pool),
+        "adr_market": adr_market,
+        "adr_series": load_adr_series(adr_market) if adr_market else None,
     }
 
 
 def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
     """(단기, 장기) 쌍 하나의 조합 — 별도 프로세스에서 돈다."""
-    months, base, short, long, intraweeks = task
+    months, base, short, long, adr_floors, intraweeks = task
     from utils.momentum_backtest import run_backtest
 
     context = _WORKER_CONTEXT
@@ -88,11 +113,12 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
         context.update({k: _PRELOAD[k] for k in ("universe", "frames", "benchmark_close")})
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
-    for value in intraweeks:
+    for adr_floor, value in product(adr_floors, intraweeks):
         combo = dict(
             base,
             short_ma_days=short,
             long_ma_days=long,
+            adr_floor=adr_floor,
             **_intraweek_settings(value),
         )
         try:
@@ -108,6 +134,7 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
                 {
                     "short_ma_days": short,
                     "long_ma_days": long,
+                    "adr_floor": adr_floor,
                     "intraweek": value,
                 },
                 returns,
@@ -120,6 +147,7 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
 def run_tuning(months: int, settings: dict[str, Any] | None, ranges: dict[str, list[Any]]) -> dict[str, Any]:
     base = validate_settings(settings or load_settings())
     shorts = _checked(ranges.get("short_ma_days", []), SHORT_MA_OPTIONS, "단기 이평")
+    adr_floors = _checked_optional_ints(ranges.get("adr_floor", []), ADR_FLOOR_OPTIONS, "ADR 하한")
     longs = _checked(ranges.get("long_ma_days", []), LONG_MA_OPTIONS, "장기 이평")
     intraweeks = list(dict.fromkeys(ranges.get("intraweek", [])))
     if not intraweeks:
@@ -130,7 +158,7 @@ def run_tuning(months: int, settings: dict[str, Any] | None, ranges: dict[str, l
     if not ma_pairs:
         raise ValueError("단기 이평이 장기 이평보다 작은 조합이 없습니다.")
 
-    tasks = [(months, base, short, long, intraweeks) for short, long in ma_pairs]
+    tasks = [(months, base, short, long, adr_floors, intraweeks) for short, long in ma_pairs]
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
     bundle = _preload(str(base["pool"]))

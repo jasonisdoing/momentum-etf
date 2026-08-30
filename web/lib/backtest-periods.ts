@@ -10,6 +10,8 @@ export type BacktestDayRow = {
   date: string;
   strategy_pct: number | null;
   benchmark_pct: number | null;
+  /** 그날의 시장 ADR — 모멘텀 ADR 게이트 이해용(넣는 화면만 채운다). */
+  adr?: number | null;
 };
 
 export type BacktestMonthRow = {
