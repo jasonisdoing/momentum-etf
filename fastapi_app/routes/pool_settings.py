@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
 from utils.ma_options import ma_options_by_country
+from utils.market_breadth_service import MARKET_BY_INDEX_TICKER
 from utils.market_trend_service import INDICES
 from utils.pool_settings_store import (
     POOL_EDITABLE_KEYS,
@@ -83,7 +84,12 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
             "slippage_pct_options": list(SLIPPAGE_PCT_OPTIONS),
             "stoploss_pct_options": list(STOPLOSS_PCT_OPTIONS),
             "editable_keys": list(POOL_EDITABLE_KEYS),
-            "market_indices": [{"ticker": item["yf_ticker"], "name": item["name"]} for item in INDICES],
+            # 시장 레짐 후보 — ADR(시장 폭)이 있는 4개 시장만(코스피·코스닥·S&P500·나스닥100).
+            "market_indices": [
+                {"ticker": item["yf_ticker"], "name": item["name"]}
+                for item in INDICES
+                if item["yf_ticker"] in MARKET_BY_INDEX_TICKER
+            ],
         },
     }
 
