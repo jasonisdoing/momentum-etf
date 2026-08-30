@@ -102,6 +102,22 @@ def run_backtest(
 
     context = context or load_context(settings)
     name_by, industry_by = context["name_by"], context["industry_by"]
+
+    # ADR 진입 게이트 — 판정일 ADR 이 하한 미만이면 그날은 **신규 진입만** 건너뛴다.
+    # 보유 청산(손절·이탈)은 그대로 돈다. 이력 이전 날짜는 게이트 미적용.
+    from utils.momentum_service import adr_market_of_pool, load_adr_series
+
+    adr_floor = settings.get("adr_floor")
+    adr_series = pd.Series(dtype=float)
+    if adr_floor is not None:
+        adr_market = adr_market_of_pool(pool)
+        adr_series = load_adr_series(adr_market) if adr_market else pd.Series(dtype=float)
+
+    def entry_blocked(stamp: pd.Timestamp) -> bool:
+        if adr_floor is None or adr_series.empty:
+            return False
+        value = adr_series.asof(pd.Timestamp(stamp))
+        return pd.notna(value) and float(value) < float(adr_floor)
     panel, signals = context["panel"], context["signals"]
 
     close_df, open_df = panel["close"], panel["open"]
@@ -178,9 +194,9 @@ def run_backtest(
             )
             del holdings[ticker]
 
-        # 2) 진입 — 빈 자리만큼, 거래대금 급증이 큰 순
+        # 2) 진입 — 빈 자리만큼, 거래대금 급증이 큰 순 (ADR 게이트에 걸린 날은 건너뜀)
         free = slots - len(holdings)
-        if free > 0:
+        if free > 0 and not entry_blocked(day):
             # 배정 기준은 **체결 시점(다음 거래일 시가)의 자산**이다. 청산 대금이 이미
             # 현금에 들어와 있으므로 파는 쪽과 사는 쪽이 같은 시점으로 맞는다.
             fill_value = cash
@@ -676,8 +692,25 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
             held["status"] = "sell" if (hit_stop or hit_ma) else "hold"
             held["exit_reason"] = "손절" if hit_stop else ("이탈" if hit_ma else None)
 
+    # ADR 진입 게이트 — 발동하면 오늘은 신규 진입이 없다(보유 관리는 그대로).
+    adr_gate: dict[str, Any] | None = None
+    if settings.get("adr_floor") is not None:
+        from utils.momentum_service import adr_gate_blocked, adr_market_of_pool, load_adr_series
+
+        gate_market = adr_market_of_pool(pool)
+        gate_series = load_adr_series(gate_market) if gate_market else pd.Series(dtype=float)
+        gate_value = gate_series.asof(last) if not gate_series.empty else None
+        adr_gate = {
+            "market": gate_market,
+            "floor": settings["adr_floor"],
+            "value": round(float(gate_value), 1) if gate_value is not None and pd.notna(gate_value) else None,
+            "blocked": adr_gate_blocked(settings, last),
+        }
+
     def pick_entries() -> list[dict[str, Any]]:
         """자리·자격·우선순위를 적용해 다음 시가에 살 종목을 고른다."""
+        if adr_gate is not None and adr_gate["blocked"]:
+            return []
         planned_exits = sum(1 for h in holdings if h.get("status") == "sell")
         free = int(settings["top_n"]) - (len(holdings) - planned_exits)
         if free <= 0:
@@ -871,6 +904,8 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
         "holdings": holdings,
         # 내일 시가에 살 종목 (자리·자격·우선순위를 모두 적용한 결과).
         "planned_entries": entries,
+        # ADR 게이트 — 하한 미설정이면 None. blocked=True 면 오늘은 신규 진입이 없다.
+        "adr_gate": adr_gate,
         "exited_today": simulated["exited_today"],
         "pool": pool,
         "universe_count": len(rows),

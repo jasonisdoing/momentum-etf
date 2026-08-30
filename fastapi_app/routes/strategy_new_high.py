@@ -20,19 +20,39 @@ from utils.pool_signal_backtest_service import get_month_options
 router = APIRouter(prefix="/internal/strategy-new-high", tags=["strategy-new-high"])
 
 
-def _constraints(pool: str) -> dict:
+def _adr_clipped_months(pool: str, months: list[int]) -> list[int]:
+    """ADR 이력이 통째로 덮는 기간만 남기고, 끝에 동적 최대(현재 이력 개월수) 1개를 붙인다."""
+    from utils.momentum_service import adr_max_backtest_months
+
+    adr_max = adr_max_backtest_months(pool)
+    if adr_max is None or adr_max <= 0:
+        return months
+    clipped = [month for month in months if month <= adr_max]
+    if adr_max not in clipped:
+        clipped.append(adr_max)
+    return clipped
+
+
+def _constraints(pool: str, adr_floor: int | None = None) -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다)."""
     from utils.ma_options import short_ma_options
     from utils.settings_loader import get_ticker_type_settings
 
     country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+    from config import ADR_FLOOR_OPTIONS
+
     return {
+        # ADR 하한 — 전일 시장 ADR 이 미만이면 그날 신규 진입 차단. None = 없음(기본).
+        "adr_floor_options": list(ADR_FLOOR_OPTIONS),
         "stop_loss_options": list(STOP_LOSS_OPTIONS),
         # 이탈 이평선 = 그 풀 국가의 단기 이평 선택지
         "exit_ma_options": list(short_ma_options(country)),
         "min_value_mult_options": list(MIN_VALUE_MULT_OPTIONS),
         # 기간 선택지 — 종목풀 백테스트와 같은 목록이 단일 소스(전략별로 따로 두지 않는다).
-        "month_options": get_month_options(),
+        # ADR 하한이 저장돼 있으면 게이트가 전 구간에 적용되는 기간만 남긴다(모멘텀과 같은 규칙).
+        "month_options": _adr_clipped_months(pool, get_month_options()) if adr_floor is not None else get_month_options(),
+        # 튜닝은 축에 ADR 하한이 항상 포함되므로 저장값과 무관하게 이력 범위로 제한한다.
+        "tuning_month_options": _adr_clipped_months(pool, get_month_options()),
         # 신고가 창 — 화면 문구("52주 신고가")를 이 값에서 만든다.
         "high_window_weeks": HIGH_WINDOW_WEEKS,
     }
@@ -46,7 +66,7 @@ def _view(settings: dict) -> dict:
         "default_settings": dict(DEFAULT_SETTINGS),
         "settings_by_pool": load_settings_map(),
         "pool_options": pool_options(),
-        "constraints": _constraints(settings["pool"]),
+        "constraints": _constraints(settings["pool"], settings.get("adr_floor")),
     }
 
 
