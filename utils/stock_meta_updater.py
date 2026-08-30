@@ -1172,8 +1172,10 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
         naver_us_stock_map=naver_us_stock_map,
     )
 
-    # 한국 종목풀은 ETF 상세 캐시 갱신을 시도한다. 개별주/비ETF는 서비스 오류를 경고로 건너뛴다.
-    if country_code == "kor":
+    # 한국 종목풀은 ETF 상세 캐시 갱신을 시도한다. 개별주 풀(pool_kind=stock)은 ETF 가
+    # 아니라 404 만 나므로 시도 자체를 건너뛴다 — 미설정 풀만 시도 후 경고로 넘어간다.
+    pool_kind = str(settings.get("pool_kind") or "").strip().lower()
+    if country_code == "kor" and pool_kind != "stock":
         try:
             _refresh_korean_etf_meta_cache(type_norm, ticker_norm, str(stock.get("name") or ticker_norm))
         except Exception as meta_cache_error:
