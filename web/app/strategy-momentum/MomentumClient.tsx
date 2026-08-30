@@ -35,6 +35,7 @@ import {
   INDUSTRY_COLUMN_MIN_WIDTH,
   INDUSTRY_COLUMN_WIDTH,
   STOCK_NAME_COLUMN_MIN_WIDTH,
+  adrColumn as sharedAdrColumn,
   formatSignedPct,
   renderHighDrawdownCell,
   renderIndustryCell,
@@ -810,17 +811,12 @@ export function MomentumClient() {
     return min;
   }, [backtest]);
 
-  /** ADR 컬럼 — 일간=당일 값, 주간=판정일 값, 월간·연간=기간 최저. 값 없으면 숨긴다. */
-  const adrColumn = useCallback(<T,>(headerName: string, getter: (row: T) => number | null | undefined, headerTooltip: string): ColDef<T> => ({
-    headerName,
-    colId: "adr",
-    headerTooltip,
-    width: 96,
-    hide: !hasAdr,
-    type: "numericColumn",
-    valueGetter: (p) => (p.data ? getter(p.data) ?? null : null),
-    valueFormatter: (p) => (p.value == null ? "-" : Number(p.value).toFixed(1)),
-  }), [hasAdr]);
+  /** ADR 컬럼 — 정의는 공용(@/lib/grid-cells), 여기서는 숨김 여부만 바인딩한다. */
+  const adrColumn = useCallback(
+    <T,>(headerName: string, getter: (row: T) => number | null | undefined, headerTooltip: string): ColDef<T> =>
+      sharedAdrColumn<T>({ headerName, headerTooltip, hide: !hasAdr, getter }),
+    [hasAdr],
+  );
 
   const backtestColumns = useMemo<ColDef<BacktestMonthRow>[]>(() => {
     if (!backtest) return [];

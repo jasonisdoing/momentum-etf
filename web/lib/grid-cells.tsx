@@ -132,6 +132,26 @@ export function tradeValueMultColumn<T>(options?: {
   };
 }
 
+/** 시장 ADR 컬럼 — 모멘텀·신고가 백테스트 표 공용. 일간=당일 값, 주간=판정일 값,
+ *  월간·연간=기간 최저. 값이 하나도 없으면(레짐 시장 없는 풀) `hide` 로 숨긴다. */
+export function adrColumn<T>(options: {
+  headerName: string;
+  headerTooltip: string;
+  hide: boolean;
+  getter: (row: T) => number | null | undefined;
+}): ColDef<T> {
+  return {
+    headerName: options.headerName,
+    colId: "adr",
+    headerTooltip: options.headerTooltip,
+    width: 96,
+    hide: options.hide,
+    type: "numericColumn",
+    valueGetter: (p) => (p.data ? options.getter(p.data) ?? null : null),
+    valueFormatter: (p) => (p.value == null ? "-" : Number(p.value).toFixed(1)),
+  };
+}
+
 /** 시총 순위 컬럼 — 순위·모멘텀·신고가 화면 공용. 배치 B 가 메타 캐시에 적어 둔 국가별 시장 전체
  *  시총 순위(한국=KOSPI+KOSDAQ, 미국=S&P500∪NDX100, 호주=ASX200)다. 개별주 풀에서만 보이고
  *  (`hide`), 값이 없으면 "-". 티커 컬럼 바로 앞에 둔다. */
