@@ -385,13 +385,19 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
             elif not ticker or not name:
                 raise PoolSettingsError("MARKET_REGIME_INDEX 에는 ticker/name 이 모두 필요합니다.")
             else:
+                # ADR(시장 폭)이 있는 4개 시장만 허용 — 단일 소스는 market_breadth 의 매핑이다.
+                from utils.market_breadth_service import MARKET_BY_INDEX_TICKER
                 from utils.market_trend_service import INDICES
 
-                allowed = {str(item["yf_ticker"]): str(item["name"]) for item in INDICES}
+                allowed = {
+                    str(item["yf_ticker"]): str(item["name"])
+                    for item in INDICES
+                    if str(item["yf_ticker"]) in MARKET_BY_INDEX_TICKER
+                }
                 if ticker not in allowed:
                     options = ", ".join(f"{label}({code})" for code, label in allowed.items())
                     raise PoolSettingsError(
-                        f"MARKET_REGIME_INDEX 는 시장추세 지수 중 하나여야 합니다: {options}. 입력값: {ticker}"
+                        f"MARKET_REGIME_INDEX 는 ADR 이 있는 시장 지수여야 합니다: {options}. 입력값: {ticker}"
                     )
                 cleaned["MARKET_REGIME_INDEX"] = {"ticker": ticker, "name": allowed[ticker]}
 
