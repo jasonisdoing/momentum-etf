@@ -1,6 +1,6 @@
 """신고가 전략 튜닝 — 설정 항목들의 범위 조합을 한 번에 백테스트해 비교한다.
 
-화면 '튜닝' 섹션용. 축(화면 순서): 이탈 이평선 · 급증 하한 · 손절선.
+화면 '튜닝' 섹션용. 축(화면 순서): 이탈 이평선 · 거래대금 하한 · 손절선.
 종목 수는 시스템 공통(config.TOP_N_HOLD) 고정, 업종 상한은 폐기 — 튜닝은 시장의 이평 반응과
 급증·손절 기준을 재는 용도로만 쓴다. 축 밖의 설정은 전달받은 설정으로 고정하고, (이탈 이평선, 손절선)을 작업
 단위로 별도 프로세스에서 병렬로 돌리며, 각 프로세스가 패널·신호를 한 번 만들어 그 안의 조합에
@@ -114,7 +114,7 @@ def run_tuning(months: int, settings: dict[str, Any] | None, ranges: dict[str, l
     base = validate_settings(settings or load_settings())
     stops = _checked(ranges.get("stop_loss_pct", []), STOP_LOSS_OPTIONS, "손절선", cast=float)
     exit_mas = _checked(ranges.get("exit_ma_days", []), EXIT_MA_OPTIONS, "이탈 이평선", cast=int)
-    mults = _checked(ranges.get("min_value_mult", []), MIN_VALUE_MULT_OPTIONS, "급증 하한", cast=float)
+    mults = _checked(ranges.get("min_value_mult", []), MIN_VALUE_MULT_OPTIONS, "거래대금 하한", cast=float)
 
     # 작업을 잘게 쪼개 코어가 놀지 않게 한다 — (이탈선, 손절선)마다 하나.
     tasks = [(months, base, exit_ma, [stop], mults) for exit_ma in exit_mas for stop in stops]

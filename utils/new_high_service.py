@@ -306,7 +306,7 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
 # 화면 로드 때 선택지 밖 저장값을 보정할 항목 — (키, 라벨, 선택지)
 _OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
     ("exit_ma_days", "이탈 이평선", EXIT_MA_OPTIONS),
-    ("min_value_mult", "급증 하한", MIN_VALUE_MULT_OPTIONS),
+    ("min_value_mult", "거래대금 하한", MIN_VALUE_MULT_OPTIONS),
     ("stop_loss_pct", "손절선", STOP_LOSS_OPTIONS),
 )
 

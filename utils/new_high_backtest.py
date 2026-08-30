@@ -851,9 +851,12 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     # 보유·이탈 행에도 시가총액·시총 순위(화면 공용 컬럼).
     # 시총은 원래 진입 우선순위 판정용이라 후보 행에만 채웠는데, 화면은 보유 표에도 같은
     # 컬럼을 두고 있어 통째로 비어 보였다.
+    # 거래대금 배수도 후보 행과 같은 값을 붙인다 — 화면 표준 배치(현재가 뒤 거래대금)용.
+    value_mult_by = {row["ticker"]: (row.get("value_mult"), row.get("value_mult_live")) for row in rows}
     for item in [*holdings, *simulated["exited_today"]]:
         item["market_cap"] = market_cap_by.get(item["ticker"])
         item["market_cap_rank"] = rank_by_ticker.get(item["ticker"])
+        item["value_mult"], item["value_mult_live"] = value_mult_by.get(item["ticker"], (None, None))
 
     # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.
     fill_base = pd.Timestamp(str(quotes["traded_at"])[:10]) if quotes["live"] else last

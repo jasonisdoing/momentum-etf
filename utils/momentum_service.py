@@ -1175,6 +1175,10 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         meta_docs = {}
     rank_by_ticker = {t: market_cap_rank_of((doc or {}).get("meta_cache")) for t, doc in meta_docs.items()}
+    # 거래대금 배수(20일 평균 대비) — 순위·신고가 화면과 **같은 소스**(배치 확정 + 토스 실시간).
+    from utils.rank_service import _load_trade_value_mult
+
+    value_mult_by, value_mult_live_by = _load_trade_value_mult(pool, row_tickers)
     market_caps = {
         t: float(value)
         for t, doc in meta_docs.items()
@@ -1190,6 +1194,8 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
                 "high_drawdown_pct": None,
                 "market_cap": None,
                 "market_cap_rank": rank_by_ticker.get(ticker),
+                "value_mult": value_mult_by.get(ticker),
+                "value_mult_live": value_mult_live_by.get(ticker),
                 "monthly_returns": {label: None for label in month_labels},
             }
         close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
@@ -1217,6 +1223,8 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
             "high_drawdown_pct": high_drawdown_pct,
             "market_cap": market_caps.get(ticker),
             "market_cap_rank": rank_by_ticker.get(ticker),
+            "value_mult": value_mult_by.get(ticker),
+            "value_mult_live": value_mult_live_by.get(ticker),
             "monthly_returns": build_recent_monthly_return_metrics(close, labels=month_labels),
         }
 

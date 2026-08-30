@@ -14,8 +14,7 @@ import {
   marketBadgeCellStyle,
   renderHighDrawdownCell,
   renderIndustryCell,
-  formatTradeValueMult,
-  tradeValueMultStyle,
+  tradeValueMultColumn,
   marketCapRankColumn,
   stockMemoColumn,
 } from "@/lib/grid-cells";
@@ -1104,20 +1103,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return formatPrice(params.value ?? null, rowCurrency);
         },
       },
-      {
+      // 공용 컬럼 — 전략 화면들과 같은 정의. 이 화면의 행 필드명만 한국어라 지정해 준다.
+      tradeValueMultColumn<RankGridRow>({
         field: "거래대금",
-        headerName: "거래대금",
+        liveField: "거래대금(실시간)",
         hide: metricMode !== "basic",
-        type: "rightAligned",
-        minWidth: 112,
-        width: 112,
-        headerTooltip:
-          "20일 평균 거래대금 대비 배수 — 신고가 돌파 화면과 같은 값(전략 판정 기준). " +
-          "괄호는 토스 실시간 배수로, 대체거래소(NXT) 거래분까지 합산한 값이라 확정값보다 큽니다.",
-        valueFormatter: (params) =>
-          formatTradeValueMult(params.value as number | null, params.data?.["거래대금(실시간)"] ?? null),
-        cellStyle: (params) => tradeValueMultStyle(params.value as number | null | undefined),
-      },
+      }),
     ];
 
     // 순위 산정에 직접 쓰이는 지표들. 종목을 고르는 눈으로 볼 때만 필요하다.
