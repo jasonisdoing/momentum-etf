@@ -243,17 +243,6 @@ type View = {
   picks: PicksResult | null;
 };
 
-// 선정 결과를 바꾸는 설정 — 이 값들이 바뀔 때만 저장 후 선정을 다시 계산한다.
-// 슬리피지와 백테스트 기간은 백테스트에만 쓰이므로 선정을 다시 돌릴 이유가 없다.
-const PICK_AFFECTING_KEYS = [
-  "pool",
-] as const;
-
-function needsRepick(before: Settings | null, after: Settings): boolean {
-  if (!before) return true;
-  return PICK_AFFECTING_KEYS.some((key) => before[key] !== after[key]);
-}
-
 // 운용 현황 안쪽 탭 — 신고가 화면과 같은 구성. 차트는 선정 종목 수만큼 그리므로 열 때만 그린다.
 const CURRENT_TABS = [
   { key: "list", label: "종목" },
@@ -415,10 +404,6 @@ export function MomentumClient() {
     async (settings: Settings, successMessage: string) => {
       setSaving(true);
       try {
-        const maRuleChanged =
-          view?.ma_rule != null &&
-          (settings.short_ma_days !== view.ma_rule.short_ma_days ||
-            settings.long_ma_days !== view.ma_rule.long_ma_days);
         const resp = await fetch("/api/strategy-momentum", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -427,14 +412,14 @@ export function MomentumClient() {
         const payload = await resp.json();
         if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
         const saved = payload as View;
-        // 이평선이 바뀌면 이격 점수가 달라지므로 무조건 재선정한다.
-        const repick = maRuleChanged || needsRepick(view?.settings ?? null, saved.settings);
-        // 선정에 영향이 없는 변경(슬리피지·백테스트 기간)이면 기존 선정 결과를 그대로 둔다.
-        applyView({ ...saved, picks: repick ? null : (view?.picks ?? null) });
+        // 이 폼의 설정(종목풀·이평선·거래대금 하한·주중 이탈·손절선)은 전부 선정·매도 예정에
+        // 영향을 준다 — 저장하면 무조건 다시 계산한다. (예전의 "선정 무관 설정" 예외 목록은
+        // 슬리피지가 이 폼에 있던 시절의 유물이라 제거했다.)
+        applyView({ ...saved, picks: null });
         // 백테스트는 어느 설정이 바뀌든 결과가 달라지므로 비운다.
         setBacktest(null);
-        toast.success(repick ? `${successMessage} 선정을 다시 계산합니다.` : successMessage);
-        if (repick) await runPicks(saved.settings.pool);
+        toast.success(`${successMessage} 선정을 다시 계산합니다.`);
+        await runPicks(saved.settings.pool);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "설정을 저장하지 못했습니다.");
       } finally {
