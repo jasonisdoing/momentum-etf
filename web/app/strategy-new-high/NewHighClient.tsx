@@ -1060,17 +1060,17 @@ export function NewHighClient() {
     [hasIndustryData],
   );
 
-  if (loading) return <PageFrame title="신고가 돌파 전략" fullWidth><div className="appPageStack">불러오는 중…</div></PageFrame>;
+  if (loading) return <PageFrame title="신고가 전략" fullWidth><div className="appPageStack">불러오는 중…</div></PageFrame>;
   if (error || !view || !draft || !constraints) {
     return (
-      <PageFrame title="신고가 돌파 전략" fullWidth>
+      <PageFrame title="신고가 전략" fullWidth>
         <div className="alert alert-danger">{error ?? "설정을 불러오지 못했습니다."}</div>
       </PageFrame>
     );
   }
 
   return (
-    <PageFrame title="신고가 돌파 전략" fullWidth>
+    <PageFrame title="신고가 전략" fullWidth>
       <div className="appPageStack">
         <section className="appSection">
           <div className="card appCard">
@@ -1078,76 +1078,76 @@ export function NewHighClient() {
               {/* 메인 헤더 — 주 제어(셀렉터·토글). CRUD 버튼은 아래 보조 액션 헤더로 뺀다. */}
               <div className="appMainHeader">
                 <div className="appMainHeaderLeft">
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">종목풀</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={draft.pool}
-                    onChange={(event) => handlePoolChange(event.target.value)}
-                  >
-                    {(view.pool_options ?? []).map((option) => (
-                      <option key={option.ticker_type} value={option.ticker_type}>
-                        {formatPoolLabel(option)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">이탈 이평선</span>
-                  <MaDaysSelect
-                    value={draft.exit_ma_days}
-                    options={constraints.exit_ma_options}
-                    onChange={(days) => setDraft({ ...draft, exit_ma_days: days })}
-                  />
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">거래대금 하한</span>
-                  <select
-                    className="form-select form-select-sm"
-                    // '없음'(null)은 빈 문자열로 실어 보낸다 — select 의 value 는 문자열만 받는다.
-                    value={draft.min_value_mult == null ? "" : String(draft.min_value_mult)}
-                    onChange={(event) => setDraft({
-                      ...draft,
-                      min_value_mult: event.target.value === "" ? null : Number(event.target.value),
-                    })}
-                  >
-                    {constraints.min_value_mult_options.map((value) => (
-                      <option key={String(value)} value={value == null ? "" : String(value)}>
-                        {value == null ? "없음" : `${value}배`}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">ADR 하한</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={draft.adr_floor == null ? "" : String(draft.adr_floor)}
-                    onChange={(event) => setDraft({
-                      ...draft,
-                      adr_floor: event.target.value === "" ? null : Number(event.target.value),
-                    })}
-                    title="전일 시장 ADR(20일 등락비율)이 이 값 미만이면 그날은 신규 진입을 하지 않는다. 보유 종목은 손절선·이탈 이평선이 그대로 관리한다. 시장은 종목풀 설정의 시장 레짐 지수를 따른다."
-                  >
-                    {(constraints.adr_floor_options ?? []).map((value) => (
-                      <option key={String(value)} value={value == null ? "" : String(value)}>
-                        {value == null ? "없음" : String(value)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">손절선</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={String(draft.stop_loss_pct)}
-                    onChange={(event) => setDraft({ ...draft, stop_loss_pct: Number(event.target.value) })}
-                  >
-                    {constraints.stop_loss_options.map((n) => (
-                      <option key={n} value={n}>{n}%</option>
-                    ))}
-                  </select>
-                </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">종목풀</span>
+                    <select
+                      className="form-select form-select-sm"
+                      value={draft.pool}
+                      onChange={(event) => handlePoolChange(event.target.value)}
+                    >
+                      {(view.pool_options ?? []).map((option) => (
+                        <option key={option.ticker_type} value={option.ticker_type}>
+                          {formatPoolLabel(option)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">이탈 이평선</span>
+                    <MaDaysSelect
+                      value={draft.exit_ma_days}
+                      options={constraints.exit_ma_options}
+                      onChange={(days) => setDraft({ ...draft, exit_ma_days: days })}
+                    />
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">거래대금 하한</span>
+                    <select
+                      className="form-select form-select-sm"
+                      // '없음'(null)은 빈 문자열로 실어 보낸다 — select 의 value 는 문자열만 받는다.
+                      value={draft.min_value_mult == null ? "" : String(draft.min_value_mult)}
+                      onChange={(event) => setDraft({
+                        ...draft,
+                        min_value_mult: event.target.value === "" ? null : Number(event.target.value),
+                      })}
+                    >
+                      {constraints.min_value_mult_options.map((value) => (
+                        <option key={String(value)} value={value == null ? "" : String(value)}>
+                          {value == null ? "없음" : `${value}배`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">ADR 하한</span>
+                    <select
+                      className="form-select form-select-sm"
+                      value={draft.adr_floor == null ? "" : String(draft.adr_floor)}
+                      onChange={(event) => setDraft({
+                        ...draft,
+                        adr_floor: event.target.value === "" ? null : Number(event.target.value),
+                      })}
+                      title="전일 시장 ADR(20일 등락비율)이 이 값 미만이면 그날은 신규 진입을 하지 않는다. 보유 종목은 손절선·이탈 이평선이 그대로 관리한다. 시장은 종목풀 설정의 시장 레짐 지수를 따른다."
+                    >
+                      {(constraints.adr_floor_options ?? []).map((value) => (
+                        <option key={String(value)} value={value == null ? "" : String(value)}>
+                          {value == null ? "없음" : String(value)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">손절선</span>
+                    <select
+                      className="form-select form-select-sm"
+                      value={String(draft.stop_loss_pct)}
+                      onChange={(event) => setDraft({ ...draft, stop_loss_pct: Number(event.target.value) })}
+                    >
+                      {constraints.stop_loss_options.map((n) => (
+                        <option key={n} value={n}>{n}%</option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
                 {/* CRUD 버튼이 하나뿐이라 별도 줄을 두지 않고 메인 헤더 오른쪽에 둔다. */}
                 <div className="appMainHeaderRight">
@@ -1191,120 +1191,120 @@ export function NewHighClient() {
               </span>
             </div>
             <div className="card-body appCardBodyTight">
-                <StrategyNotes items={CURRENT_NOTES} />
-                <NavTabs
-                  items={CURRENT_TABS}
-                  value={currentTab}
-                  onChange={setCurrentTab}
-                  label="운용 현황 보기"
-                  style={{ marginBottom: 12 }}
-                />
-                {running && !positions ? (
-                  <AppLoadingProgress title="운용 현황 계산 중..." progress={positionsProgress} />
-                ) : currentTab === "list" ? (
-                  <>
-                    <div style={{ ...hintStyle, fontWeight: 700, margin: "4px 0 6px" }}>
-                      보유 종목 ({positions?.holdings.length ?? 0}개)
-                      {positions?.holdings.some((h) => h.status === "sell")
-                        ? ` · ${fillDay} 매도 ${positions.holdings.filter((h) => h.status === "sell").length}`
-                        : ""}
-                      {positions?.planned_entries.length
-                        ? ` · ${fillDay} 매수 ${positions.planned_entries.length}`
-                        : ""}
-                      {positions?.exited_today.length ? ` · 오늘 이탈 ${positions.exited_today.length}` : ""}
-                      {positions?.adr_gate ? (
-                        positions.adr_gate.blocked ? (
-                          <b style={{ color: "#d9480f" }}>
-                            {" "}· ADR 게이트 발동 — {positions.adr_gate.market} {positions.adr_gate.value ?? "-"} &lt;{" "}
-                            {positions.adr_gate.floor}, 오늘 신규 진입 없음
-                          </b>
-                        ) : (
-                          <span>
-                            {" "}· ADR {positions.adr_gate.market} {positions.adr_gate.value ?? "-"} (하한 {positions.adr_gate.floor})
-                          </span>
-                        )
-                      ) : null}
+              <StrategyNotes items={CURRENT_NOTES} />
+              <NavTabs
+                items={CURRENT_TABS}
+                value={currentTab}
+                onChange={setCurrentTab}
+                label="운용 현황 보기"
+                style={{ marginBottom: 12 }}
+              />
+              {running && !positions ? (
+                <AppLoadingProgress title="운용 현황 계산 중..." progress={positionsProgress} />
+              ) : currentTab === "list" ? (
+                <>
+                  <div style={{ ...hintStyle, fontWeight: 700, margin: "4px 0 6px" }}>
+                    보유 종목 ({positions?.holdings.length ?? 0}개)
+                    {positions?.holdings.some((h) => h.status === "sell")
+                      ? ` · ${fillDay} 매도 ${positions.holdings.filter((h) => h.status === "sell").length}`
+                      : ""}
+                    {positions?.planned_entries.length
+                      ? ` · ${fillDay} 매수 ${positions.planned_entries.length}`
+                      : ""}
+                    {positions?.exited_today.length ? ` · 오늘 이탈 ${positions.exited_today.length}` : ""}
+                    {positions?.adr_gate ? (
+                      positions.adr_gate.blocked ? (
+                        <b style={{ color: "#d9480f" }}>
+                          {" "}· ADR 게이트 발동 — {positions.adr_gate.market} {positions.adr_gate.value ?? "-"} &lt;{" "}
+                          {positions.adr_gate.floor}, 오늘 신규 진입 없음
+                        </b>
+                      ) : (
+                        <span>
+                          {" "}· ADR {positions.adr_gate.market} {positions.adr_gate.value ?? "-"} (하한 {positions.adr_gate.floor})
+                        </span>
+                      )
+                    ) : null}
+                  </div>
+                  <AppAgGrid<PlanRow>
+                    rowData={planRows.map(withQuote)}
+                    columnDefs={holdingColumns}
+                    loading={running}
+                    theme={gridTheme}
+                    minHeight={0}
+                    height="auto"
+                    gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setCandidatesOpen((open) => !open)}
+                    style={{
+                      ...hintStyle, fontWeight: 700, margin: "16px 0 6px", padding: 0,
+                      background: "none", border: "none", cursor: "pointer",
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                    }}
+                  >
+                    <span>{candidatesOpen ? "▾" : "▸"}</span>
+                    진입 후보 ({(positions?.breakouts.length ?? 0) + (positions?.candidates.length ?? 0)}개)
+                  </button>
+                  {candidatesOpen ? (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                        gap: "10px 20px",
+                        padding: "12px 14px",
+                        marginBottom: 10,
+                        borderRadius: 8,
+                        background: "var(--bs-secondary-bg, #f1f5f9)",
+                      }}
+                    >
+                      {STAGE_GUIDE.map((stage) => (
+                        <div key={stage.label} style={{ fontSize: "var(--fs-sm)", lineHeight: 1.5 }}>
+                          <strong style={{ color: STAGE_STYLE[stage.key].color }}>{stage.label}</strong>
+                          <div style={{ color: "var(--text-muted)" }}>{STAGE_STYLE[stage.key].text}</div>
+                        </div>
+                      ))}
                     </div>
-                    <AppAgGrid<PlanRow>
-                      rowData={planRows.map(withQuote)}
-                      columnDefs={holdingColumns}
+                  ) : null}
+                  {/* 진입 후보 표 — 설명과 함께 접고 펼친다 (접힌 상태에서는 보유 표만 남는다). */}
+                  {candidatesOpen ? (
+                    <AppAgGrid<PositionRow>
+                      rowData={[...(positions?.breakouts ?? []), ...(positions?.candidates ?? [])].map(withQuote)}
+                      columnDefs={positionColumns}
                       loading={running}
                       theme={gridTheme}
                       minHeight={0}
                       height="auto"
                       gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
                     />
-                    <button
-                      type="button"
-                      onClick={() => setCandidatesOpen((open) => !open)}
-                      style={{
-                        ...hintStyle, fontWeight: 700, margin: "16px 0 6px", padding: 0,
-                        background: "none", border: "none", cursor: "pointer",
-                        display: "inline-flex", alignItems: "center", gap: 6,
-                      }}
-                    >
-                      <span>{candidatesOpen ? "▾" : "▸"}</span>
-                      진입 후보 ({(positions?.breakouts.length ?? 0) + (positions?.candidates.length ?? 0)}개)
-                    </button>
-                    {candidatesOpen ? (
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-                          gap: "10px 20px",
-                          padding: "12px 14px",
-                          marginBottom: 10,
-                          borderRadius: 8,
-                          background: "var(--bs-secondary-bg, #f1f5f9)",
-                        }}
-                      >
-                        {STAGE_GUIDE.map((stage) => (
-                          <div key={stage.label} style={{ fontSize: "var(--fs-sm)", lineHeight: 1.5 }}>
-                            <strong style={{ color: STAGE_STYLE[stage.key].color }}>{stage.label}</strong>
-                            <div style={{ color: "var(--text-muted)" }}>{STAGE_STYLE[stage.key].text}</div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                    {/* 진입 후보 표 — 설명과 함께 접고 펼친다 (접힌 상태에서는 보유 표만 남는다). */}
-                    {candidatesOpen ? (
-                      <AppAgGrid<PositionRow>
-                        rowData={[...(positions?.breakouts ?? []), ...(positions?.candidates ?? [])].map(withQuote)}
-                        columnDefs={positionColumns}
-                        loading={running}
-                        theme={gridTheme}
-                        minHeight={0}
-                        height="auto"
-                        gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
-                      />
-                    ) : null}
-                  </>
-                ) : (
-                  <StrategyHoldingCharts
-                    charts={charts}
-                    loading={chartsLoading || running || saving}
-                    error={chartsError}
-                    emptyMessage="보유 중이거나 진입 예정인 종목이 없습니다."
-                    months={chartMonths}
-                    hint={
-                      <>
-                        종가가 직전 최고 종가를 넘으면 진입,{" "}
-                        <strong style={{ color: "#12b886" }}>MA{draft.exit_ma_days}</strong>를 하회하면 청산합니다.
-                        진입한 종목은 매수가와 함께 Buy 화살표가 표시됩니다.
-                      </>
-                    }
-                    chartProps={(item) => {
-                      const row = chartRows.find((candidate) => candidate.ticker === item.ticker);
-                      return {
-                        strategyLabel: "신고가",
-                        entryDate: row?.entry_date,
-                        entryPrice: row?.entry_price,
-                        returnPct: row?.return_pct,
-                        days: row?.days,
-                      };
-                    }}
-                  />
-                )}
+                  ) : null}
+                </>
+              ) : (
+                <StrategyHoldingCharts
+                  charts={charts}
+                  loading={chartsLoading || running || saving}
+                  error={chartsError}
+                  emptyMessage="보유 중이거나 진입 예정인 종목이 없습니다."
+                  months={chartMonths}
+                  hint={
+                    <>
+                      종가가 직전 최고 종가를 넘으면 진입,{" "}
+                      <strong style={{ color: "#12b886" }}>MA{draft.exit_ma_days}</strong>를 하회하면 청산합니다.
+                      진입한 종목은 매수가와 함께 Buy 화살표가 표시됩니다.
+                    </>
+                  }
+                  chartProps={(item) => {
+                    const row = chartRows.find((candidate) => candidate.ticker === item.ticker);
+                    return {
+                      strategyLabel: "신고가",
+                      entryDate: row?.entry_date,
+                      entryPrice: row?.entry_price,
+                      returnPct: row?.return_pct,
+                      days: row?.days,
+                    };
+                  }}
+                />
+              )}
             </div>
           </div>
         </section>
@@ -1331,65 +1331,65 @@ export function NewHighClient() {
                 </button>
               </span>
             </div>
-              <div className="card-body appCardBodyTight">
-                {backtestError ? <div className="alert alert-danger">{backtestError}</div> : null}
-                {backtesting ? (
-                  <AppLoadingProgress title="백테스트 실행 중..." progress={backtestProgress} />
-                ) : !backtest ? (
-                  <div style={{ ...hintStyle, padding: "24px 0", textAlign: "center" }}>
-                    실행을 누르면 결과가 표시됩니다.
-                  </div>
-                ) : (
+            <div className="card-body appCardBodyTight">
+              {backtestError ? <div className="alert alert-danger">{backtestError}</div> : null}
+              {backtesting ? (
+                <AppLoadingProgress title="백테스트 실행 중..." progress={backtestProgress} />
+              ) : !backtest ? (
+                <div style={{ ...hintStyle, padding: "24px 0", textAlign: "center" }}>
+                  실행을 누르면 결과가 표시됩니다.
+                </div>
+              ) : (
                 <>
-                <BacktestSummary
-                  startDate={backtest.start_date}
-                  endDate={backtest.end_date}
-                  strategy={{
-                    label: "전략",
-                    totalPct: backtest.strategy_total_pct,
-                    cagrPct: backtest.strategy_cagr_pct,
-                    mddPct: backtest.strategy_mdd_pct,
-                    sortino: backtest.strategy_sortino,
-                  }}
-                  benchmark={{
-                    label: backtest.benchmark_name,
-                    totalPct: backtest.benchmark_total_pct,
-                    cagrPct: backtest.benchmark_cagr_pct,
-                    mddPct: backtest.benchmark_mdd_pct,
-                    sortino: backtest.benchmark_sortino,
-                  }}
-                />
-                <BacktestTradeStats stats={backtest} style={{ marginBottom: 12 }} />
-                <NavTabs
-                  items={VIEW_MODES}
-                  value={viewMode}
-                  onChange={setViewMode}
-                  label="백테스트 보기 단위"
-                  style={{ marginBottom: 10 }}
-                />
-                {viewMode === "trades" ? (
-                  // autoHeight — 카드 안에서 스크롤하지 않고 브라우저 스크롤로 본다.
-                  <AppAgGrid<Trade>
-                    rowData={backtest.trades}
-                    columnDefs={tradeColumns}
-                    theme={gridTheme}
-                    minHeight={0}
-                    height="auto"
-                    gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                  <BacktestSummary
+                    startDate={backtest.start_date}
+                    endDate={backtest.end_date}
+                    strategy={{
+                      label: "전략",
+                      totalPct: backtest.strategy_total_pct,
+                      cagrPct: backtest.strategy_cagr_pct,
+                      mddPct: backtest.strategy_mdd_pct,
+                      sortino: backtest.strategy_sortino,
+                    }}
+                    benchmark={{
+                      label: backtest.benchmark_name,
+                      totalPct: backtest.benchmark_total_pct,
+                      cagrPct: backtest.benchmark_cagr_pct,
+                      mddPct: backtest.benchmark_mdd_pct,
+                      sortino: backtest.benchmark_sortino,
+                    }}
                   />
-                ) : (
-                  <AppAgGrid<PeriodRow>
-                    rowData={periodRows}
-                    columnDefs={periodColumns}
-                    theme={gridTheme}
-                    minHeight={0}
-                    height="auto"
-                    gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                  <BacktestTradeStats stats={backtest} style={{ marginBottom: 12 }} />
+                  <NavTabs
+                    items={VIEW_MODES}
+                    value={viewMode}
+                    onChange={setViewMode}
+                    label="백테스트 보기 단위"
+                    style={{ marginBottom: 10 }}
                   />
-                )}
+                  {viewMode === "trades" ? (
+                    // autoHeight — 카드 안에서 스크롤하지 않고 브라우저 스크롤로 본다.
+                    <AppAgGrid<Trade>
+                      rowData={backtest.trades}
+                      columnDefs={tradeColumns}
+                      theme={gridTheme}
+                      minHeight={0}
+                      height="auto"
+                      gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                    />
+                  ) : (
+                    <AppAgGrid<PeriodRow>
+                      rowData={periodRows}
+                      columnDefs={periodColumns}
+                      theme={gridTheme}
+                      minHeight={0}
+                      height="auto"
+                      gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                    />
+                  )}
                 </>
-                )}
-              </div>
+              )}
+            </div>
           </div>
         </section>
 

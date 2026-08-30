@@ -34,7 +34,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | `/pools-settings` | 종목풀 설정 | `utils/pool_settings_store.py` |
 | `/pools-backtest` | 종목풀 백테스트 | `utils/pool_signal_backtest_service.py` |
 | `/strategy-momentum` | 모멘텀 전략(주간) 선정·백테스트·튜닝 | `utils/momentum_service.py`, `momentum_backtest.py`, `momentum_tuning.py` |
-| `/strategy-new-high` | 신고가 돌파 전략 선정·백테스트·튜닝 | `utils/new_high_service.py`, `new_high_backtest.py`, `new_high_tuning.py` |
+| `/strategy-new-high` | 신고가 전략 선정·백테스트·튜닝 | `utils/new_high_service.py`, `new_high_backtest.py`, `new_high_tuning.py` |
 | `/strategy-mix` | 두 전략 합성 — 목표 비중·오늘의 액션·백테스트(열람 전용) | `utils/strategy_mix_service.py` |
 | `/leverage-settings` | 레버리지 이동평균 크로스 설정·튜닝 | `leverage/` |
 | `/account-settings` | 계좌 메타·증권사 연동·합성 슬리브별 종목풀·보유종목 알림 On/Off | `utils/account_settings_store.py`, `utils/holdings_alarm_service.py` |

@@ -1,4 +1,4 @@
-"""신고가 돌파 전략 설정·선정 API."""
+"""신고가 전략 설정·선정 API."""
 
 from fastapi import APIRouter, Body, Depends, Query
 

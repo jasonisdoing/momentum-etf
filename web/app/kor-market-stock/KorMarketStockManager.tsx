@@ -330,7 +330,7 @@ export function KorMarketStockManager({
         field: "industry",
         width: INDUSTRY_COLUMN_WIDTH,
         minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
-        headerTooltip: "네이버 업종 분류 — 신고가 돌파·종목풀 순위 화면과 같은 값.",
+        headerTooltip: "네이버 업종 분류 — 신고가·종목풀 순위 화면과 같은 값.",
         cellRenderer: (params: { value?: string }) => renderIndustryCell(params.value),
       },
       {

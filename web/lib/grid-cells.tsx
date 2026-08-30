@@ -56,7 +56,7 @@ export function renderHighDrawdownCell(value: number | null | undefined, digits 
   return <span>{`${value.toFixed(digits)}%`}</span>;
 }
 
-/** 거래대금 배수(20일 평균 대비) 셀 색 — 클수록 진해진다. 종목풀 순위·신고가 돌파 공용.
+/** 거래대금 배수(20일 평균 대비) 셀 색 — 클수록 진해진다. 종목풀 순위·신고가 공용.
  *
  *  대부분 1배 근처에 몰려 있어(중앙값 0.94배) 평상시 값까지 물들이면 표가 시끄러워지고
  *  정작 봐야 할 종목이 묻힌다. 1.5배까지는 흐린 회색으로 눌러두고 그 위부터 같은 빨강의
@@ -121,7 +121,7 @@ export function tradeValueMultColumn<T>(options?: {
     headerTooltip:
       options?.headerTooltip ??
       "20일 평균 거래대금 대비 배수 (순위·신고가 화면과 같은 값). " +
-        "괄호는 토스 실시간 배수로, 대체거래소(NXT) 거래분까지 합산한 값이라 확정값보다 큽니다.",
+      "괄호는 토스 실시간 배수로, 대체거래소(NXT) 거래분까지 합산한 값이라 확정값보다 큽니다.",
     valueFormatter: (p: { value?: unknown; data?: T }) =>
       formatTradeValueMult(
         p.value as number | null,

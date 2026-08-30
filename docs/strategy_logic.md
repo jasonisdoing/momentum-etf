@@ -28,7 +28,7 @@
 - 슬롯 고정 비중(1/N), 빈 슬롯은 현금. 비용은 완전 리밸런싱 모델(유지 종목 재조정까지 슬리피지).
 - 버린 것: 월간 리밸런싱·수익인출전략 비교(주간으로 전환하며 제거), 미국 풀 참고 지수 FMTM 하드코딩(벤치마크 하나로 통일).
 
-## 신고가 돌파 전략 (`/strategy-new-high`)
+## 신고가 전략 (`/strategy-new-high`)
 
 `utils/new_high_service.py` · `new_high_backtest.py`
 
