@@ -41,6 +41,7 @@ import {
   signColor,
   marketCapRankColumn,
   stockMemoColumn,
+  tradeValueMultColumn,
 } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { updateStockMemo } from "@/lib/stocks-store";
@@ -130,6 +131,9 @@ type PickRow = {
   high_drawdown_pct: number | null;
   market_cap: number | null;
   market_cap_rank: number | null;
+  /** 20일 평균 대비 거래대금 배수 — 순위·신고가 화면과 같은 소스(배치 확정 + 실시간). */
+  value_mult?: number | null;
+  value_mult_live?: number | null;
   /** 종목 메모 — 계좌가 아니라 종목에 붙는다(자산 관리·순위 화면과 같은 값). */
   memo?: string;
   signal_short_pct: number | null;
@@ -747,6 +751,8 @@ export function MomentumClient() {
         type: "numericColumn",
         valueFormatter: (p) => formatPrice(p.value, p.data?.currency),
       },
+      // 표준 배치(일간(%) → 현재가 → 거래대금) — 순위·신고가 화면과 같은 공용 컬럼.
+      tradeValueMultColumn<PickRow>(),
       // 시가총액 — 배치 B 가 메타 캐시에 적어 둔 값(개별주 풀만). 신고가 화면과 같은 소스·같은 표기.
       ...(hasMarketCap
         ? [

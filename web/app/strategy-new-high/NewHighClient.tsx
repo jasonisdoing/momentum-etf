@@ -29,8 +29,7 @@ import {
   formatSignedPct,
   renderIndustryCell,
   signColor,
-  formatTradeValueMult,
-  tradeValueMultStyle,
+  tradeValueMultColumn,
   marketCapRankColumn,
   stockMemoColumn,
 } from "@/lib/grid-cells";
@@ -50,7 +49,7 @@ type Settings = {
   top_n: number;
   stop_loss_pct: number;
   exit_ma_days: number;
-  /** 진입 자격 — 거래대금 급증 배수 하한. null 이면 조건 없음. */
+  /** 진입 자격 — 거래대금 배수 하한(20일 평균 대비). null 이면 조건 없음. */
   min_value_mult: number | null;
 };
 
@@ -125,6 +124,9 @@ type Holding = {
   price: number;
   return_pct: number;
   days: number;
+  /** 20일 평균 대비 거래대금 배수 — 진입 후보 표와 같은 값. */
+  value_mult?: number | null;
+  value_mult_live?: number | null;
   /** 오늘 편입된 종목 */
   is_new: boolean;
   /** hold = 계속 보유, sell = 내일 시가에 청산 */
@@ -149,6 +151,8 @@ type PlanRow = {
   entry_price: number | null;
   return_pct: number | null;
   plan: "hold" | "sell" | "buy" | "exited";
+  value_mult?: number | null;
+  value_mult_live?: number | null;
   days: number | null;
   is_new: boolean;
   exit_reason: string | null;
@@ -191,6 +195,9 @@ type Trade = {
   change_pct?: number | null;
   /** 청산 후 현재 시세 — 운용 현황 표에서만 쓴다(백테스트 체결 목록에는 없다). */
   price?: number | null;
+  /** 거래대금 배수 — 운용 현황 표에서만 쓴다(백테스트 체결 목록에는 없다). */
+  value_mult?: number | null;
+  value_mult_live?: number | null;
   /** 종목 메모 — 운용 현황 표에서만 쓴다(백테스트 체결 목록에는 없다). */
   memo?: string;
   entry_date: string;
@@ -290,7 +297,7 @@ function toPeriodRows(daily: Backtest["daily"], keyOf: (date: string) => string,
  */
 const STAGE_STYLE = {
   breakout: { color: "#d62828", text: "장중 현재가가 직전 최고 종가 이상이면 돌파중, 장 마감 후 종가가 그 이상이면 돌파성공입니다. 다음 거래일 시가에 매수합니다." },
-  blocked: { color: "#0c8599", text: "최고 종가는 넘었지만 사지 않는 종목입니다. (미달)은 거래대금 급증 하한에 못 미친 것입니다. 날짜 목록의 돌파 수에서도 빠집니다." },
+  blocked: { color: "#0c8599", text: "최고 종가는 넘었지만 사지 않는 종목입니다. (미달)은 거래대금 하한에 못 미친 것입니다. 날짜 목록의 돌파 수에서도 빠집니다." },
   pullback: { color: "#7048e8", text: "장중 고가는 최고 종가선에 닿았지만 종가가 다시 아래로 내려온 상태입니다." },
   imminent: { color: "#e8590c", text: "최고 종가까지 3% 이내로 남은 종목입니다." },
   near: { color: "#2f9e44", text: "최고 종가까지 3% 초과 7% 이내로 남은 종목입니다." },
@@ -328,8 +335,8 @@ const CURRENT_NOTES = [
   {
     title: "진입",
     body:
-      "종가가 직전 52주 최고 종가를 넘고 거래대금 급증 배수가 하한 이상이면 다음 거래일 시가에 매수합니다. " +
-      "빈 슬롯만큼, 거래대금 급증 배수 순으로 담습니다.",
+      "종가가 직전 52주 최고 종가를 넘고 거래대금 배수(20일 평균 대비)가 하한 이상이면 다음 거래일 시가에 매수합니다. " +
+      "빈 슬롯만큼, 거래대금 배수 순으로 담습니다.",
   },
   {
     title: "청산",
@@ -649,6 +656,12 @@ export function NewHighClient() {
         type: "numericColumn",
         valueFormatter: (p) => formatPrice(p.value as number),
       },
+      tradeValueMultColumn<PositionRow>({
+        qualifies: (row) => row?.qualifies,
+        headerTooltip:
+          "20일 평균 거래대금 대비 배수 — 하한 이상이어야 진입한다. 굵은 글씨가 자격 통과다. " +
+          "괄호는 토스 실시간 배수로, 대체거래소(NXT) 거래분까지 합산한 값이라 확정값보다 큽니다.",
+      }),
       {
         field: "gap_high_pct",
         headerName: "고가 대비",
@@ -682,19 +695,6 @@ export function NewHighClient() {
         type: "numericColumn",
         headerTooltip: "신호가 자리보다 많을 때 이 순서로 담는다(우선순위=시가총액일 때).",
         valueFormatter: (p) => formatMarketCapWon(p.value as number | null),
-      },
-      {
-        field: "value_mult",
-        headerName: "거래대금",
-        width: 124,
-        type: "numericColumn",
-        headerTooltip:
-          "20일 평균 거래대금 대비 배수 — 하한 이상이어야 진입한다. 굵은 글씨가 자격 통과다. " +
-          "괄호는 토스 실시간 배수로, 대체거래소(NXT) 거래분까지 합산한 값이라 확정값보다 큽니다.",
-        valueFormatter: (p) =>
-          formatTradeValueMult(p.value as number | null, (p.data as PositionRow | undefined)?.value_mult_live ?? null),
-        // 농도는 배수 크기, 굵기는 진입 자격. 자격 하한은 설정값이라 농도 단계와 다를 수 있다.
-        cellStyle: (p) => tradeValueMultStyle(p.value as number | null, (p.data as PositionRow | undefined)?.qualifies),
       },
     ],
     // live 가 빠지면 장전에 만든 컬럼이 그대로 남아 장중에도 '돌파성공' 으로 보인다.
@@ -778,6 +778,7 @@ export function NewHighClient() {
     const held: PlanRow[] = positions.holdings.map((h) => ({
       ticker: h.ticker, name: h.name, industry: h.industry, market_cap_rank: h.market_cap_rank ?? null,
       change_pct: h.change_pct, price: h.price,
+      value_mult: h.value_mult ?? null, value_mult_live: h.value_mult_live ?? null,
       exit_price: null,
       entry_date: h.entry_date, entry_price: h.entry_price, return_pct: h.return_pct,
       plan: h.status, days: h.days, is_new: h.is_new, exit_reason: h.exit_reason,
@@ -786,6 +787,7 @@ export function NewHighClient() {
     const buys: PlanRow[] = positions.planned_entries.map((row) => ({
       ticker: row.ticker, name: row.name, industry: row.industry, market_cap_rank: row.market_cap_rank ?? null,
       change_pct: row.change_pct, price: row.price,
+      value_mult: row.value_mult ?? null, value_mult_live: row.value_mult_live ?? null,
       exit_price: null,
       entry_date: null, entry_price: null, return_pct: null,
       // 아직 안 샀다 — null 로 두면 보유일 칸과 차트 배지가 통째로 비어 진입 전인지 알 수 없다.
@@ -797,6 +799,7 @@ export function NewHighClient() {
       ticker: t.ticker, name: t.name, industry: t.industry, market_cap_rank: t.market_cap_rank ?? null,
       change_pct: t.change_pct ?? null,
       price: t.price ?? null, exit_price: t.exit_price,
+      value_mult: t.value_mult ?? null, value_mult_live: t.value_mult_live ?? null,
       entry_date: t.entry_date, entry_price: t.entry_price, return_pct: t.return_pct,
       plan: "exited", days: t.days, is_new: false, exit_reason: t.reason,
       memo: t.memo,
@@ -918,6 +921,8 @@ export function NewHighClient() {
         headerTooltip: "이탈한 종목도 지금 시세다 — 판 뒤의 흐름을 청산가와 견줘 볼 수 있다.",
         valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number)),
       },
+      // 표준 배치(일간(%) → 현재가 → 거래대금) — 순위·진입 후보 표와 같은 공용 컬럼.
+      tradeValueMultColumn<PlanRow>(),
       {
         field: "entry_date",
         headerName: "편입일",
@@ -1056,7 +1061,7 @@ export function NewHighClient() {
                   />
                 </label>
                 <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">급증 하한</span>
+                  <span className="appLabeledFieldLabel">거래대금 하한</span>
                   <select
                     className="form-select form-select-sm"
                     // '없음'(null)은 빈 문자열로 실어 보낸다 — select 의 value 는 문자열만 받는다.
@@ -1340,7 +1345,7 @@ export function NewHighClient() {
             { key: "exit_ma_days", label: "이탈 이평선", values: constraints.exit_ma_options.map((n) => ({ value: n, label: `${n}일` })) },
             {
               key: "min_value_mult",
-              label: "급증 하한",
+              label: "거래대금 하한",
               values: constraints.min_value_mult_options.map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: `${n}배` })),
             },
             { key: "stop_loss_pct", label: "손절선", values: constraints.stop_loss_options.map((n) => ({ value: n, label: `${n}%` })) },

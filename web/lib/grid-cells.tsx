@@ -98,6 +98,40 @@ export function tradeValueMultStyle(
   return { color: "var(--text-muted)", ...weight };
 }
 
+/** 거래대금(20일 평균 대비 배수) 컬럼 — 순위·신고가·모멘텀·합성이 같은 정의를 쓴다.
+ *  표준 배치는 「일간(%) → 현재가 → 거래대금」 — 이 컬럼을 현재가 바로 뒤에 둔다.
+ *  필드명이 화면마다 다르면(fied·liveField) 지정하고, 진입 자격 굵기가 필요한 화면만 qualifies 를 준다. */
+export function tradeValueMultColumn<T>(options?: {
+  field?: string;
+  liveField?: string;
+  qualifies?: (row: T | undefined) => boolean | undefined;
+  hide?: boolean;
+  headerTooltip?: string;
+}): ColDef<T> {
+  const field = options?.field ?? "value_mult";
+  const liveField = options?.liveField ?? "value_mult_live";
+  return {
+    colId: field,
+    valueGetter: (p) => ((p.data as Record<string, unknown> | undefined)?.[field] as number | null | undefined) ?? null,
+    headerName: "거래대금",
+    width: 124,
+    minWidth: 112,
+    hide: options?.hide,
+    type: "numericColumn",
+    headerTooltip:
+      options?.headerTooltip ??
+      "20일 평균 거래대금 대비 배수 (순위·신고가 화면과 같은 값). " +
+        "괄호는 토스 실시간 배수로, 대체거래소(NXT) 거래분까지 합산한 값이라 확정값보다 큽니다.",
+    valueFormatter: (p: { value?: unknown; data?: T }) =>
+      formatTradeValueMult(
+        p.value as number | null,
+        ((p.data as Record<string, unknown> | undefined)?.[liveField] as number | null | undefined) ?? null,
+      ),
+    cellStyle: (p: { value?: unknown; data?: T }) =>
+      tradeValueMultStyle(p.value as number | null, options?.qualifies?.(p.data)),
+  };
+}
+
 /** 시총 순위 컬럼 — 순위·모멘텀·신고가 화면 공용. 배치 B 가 메타 캐시에 적어 둔 국가별 시장 전체
  *  시총 순위(한국=KOSPI+KOSDAQ, 미국=S&P500∪NDX100, 호주=ASX200)다. 개별주 풀에서만 보이고
  *  (`hide`), 값이 없으면 "-". 티커 컬럼 바로 앞에 둔다. */
