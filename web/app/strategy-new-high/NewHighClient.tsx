@@ -51,16 +51,21 @@ type Settings = {
   exit_ma_days: number;
   /** 진입 자격 — 거래대금 배수 하한(20일 평균 대비). null 이면 조건 없음. */
   min_value_mult: number | null;
+  /** ADR 하한 — 전일 시장 ADR 이 미만이면 그날 신규 진입 차단. null = 없음. */
+  adr_floor?: number | null;
 };
 
 type PoolOption = PoolLabelSource & { country_code?: string; currency?: string; pool_kind?: string | null };
 // PoolLabelSource 가 ticker_type·name·icon·order 를 갖는다 — 번호는 order 에서 나온다.
 
 type Constraints = {
+  adr_floor_options?: (number | null)[];
   stop_loss_options: number[];
   exit_ma_options: number[];
   min_value_mult_options: (number | null)[];
   month_options: number[];
+  /** 튜닝 전용 기간 — ADR 축이 항상 있으므로 ADR 이력이 덮는 범위만 온다. */
+  tuning_month_options?: number[];
   /** 신고가 창 — "52주" 같은 문구를 이 값에서 만든다(화면에 숫자를 박지 않는다). */
   high_window_weeks: number;
 };
@@ -168,6 +173,8 @@ type Positions = {
   next_session: string | null;
   holdings: Holding[];
   planned_entries: PositionRow[];
+  /** ADR 게이트 — 하한 미설정이면 null. blocked=True 면 오늘 신규 진입 없음. */
+  adr_gate?: { market: string | null; floor: number; value: number | null; blocked: boolean } | null;
   exited_today: Trade[];
   pool: string;
   universe_count: number;
@@ -336,7 +343,9 @@ const CURRENT_NOTES = [
     title: "진입",
     body:
       "종가가 직전 52주 최고 종가를 넘고 거래대금 배수(20일 평균 대비)가 하한 이상이면 다음 거래일 시가에 매수합니다. " +
-      "빈 슬롯만큼, 거래대금 배수 순으로 담습니다.",
+      "빈 슬롯만큼, 거래대금 배수 순으로 담습니다. " +
+      "ADR 하한을 설정하면 전일 시장 ADR(20일 상승/하락 종목수 비율 — 시장은 종목풀 설정의 시장 레짐 지수)이 " +
+      "하한 미만인 날은 신규 진입을 하지 않습니다(보유 종목은 아래 청산 규칙이 그대로 관리).",
   },
   {
     title: "청산",
@@ -1079,6 +1088,24 @@ export function NewHighClient() {
                   </select>
                 </label>
                 <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">ADR 하한</span>
+                  <select
+                    className="form-select form-select-sm"
+                    value={draft.adr_floor == null ? "" : String(draft.adr_floor)}
+                    onChange={(event) => setDraft({
+                      ...draft,
+                      adr_floor: event.target.value === "" ? null : Number(event.target.value),
+                    })}
+                    title="전일 시장 ADR(20일 등락비율)이 이 값 미만이면 그날은 신규 진입을 하지 않는다. 보유 종목은 손절선·이탈 이평선이 그대로 관리한다. 시장은 종목풀 설정의 시장 레짐 지수를 따른다."
+                  >
+                    {(constraints.adr_floor_options ?? []).map((value) => (
+                      <option key={String(value)} value={value == null ? "" : String(value)}>
+                        {value == null ? "없음" : String(value)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">손절선</span>
                   <select
                     className="form-select form-select-sm"
@@ -1154,6 +1181,18 @@ export function NewHighClient() {
                         ? ` · ${fillDay} 매수 ${positions.planned_entries.length}`
                         : ""}
                       {positions?.exited_today.length ? ` · 오늘 이탈 ${positions.exited_today.length}` : ""}
+                      {positions?.adr_gate ? (
+                        positions.adr_gate.blocked ? (
+                          <b style={{ color: "#d9480f" }}>
+                            {" "}· ADR 게이트 발동 — {positions.adr_gate.market} {positions.adr_gate.value ?? "-"} &lt;{" "}
+                            {positions.adr_gate.floor}, 오늘 신규 진입 없음
+                          </b>
+                        ) : (
+                          <span>
+                            {" "}· ADR {positions.adr_gate.market} {positions.adr_gate.value ?? "-"} (하한 {positions.adr_gate.floor})
+                          </span>
+                        )
+                      ) : null}
                     </div>
                     <AppAgGrid<PlanRow>
                       rowData={planRows.map(withQuote)}
@@ -1327,7 +1366,7 @@ export function NewHighClient() {
         <StrategyTuning
           // 풀이 바뀌면 재마운트 — 이전 풀의 튜닝 결과가 남지 않게 한다(백테스트와 같은 시점).
           key={draft.pool}
-          monthOptions={constraints.month_options}
+          monthOptions={constraints.tuning_month_options ?? constraints.month_options}
           defaultMonths={backtestMonths}
           // 튜닝도 백테스트와 같이 **화면 초안** 기준이라(fixedLabel 참고) 실행 조건을 같게 둔다.
           disabled={backtesting}
@@ -1338,6 +1377,7 @@ export function NewHighClient() {
             stop_loss_pct: draft.stop_loss_pct,
             exit_ma_days: draft.exit_ma_days,
             min_value_mult: draft.min_value_mult ?? null,
+            adr_floor: draft.adr_floor ?? null,
           }}
           axes={[
             // 축 값 = 상단 셀렉트 선택지(서버 상수) — 순서·이름도 상단 설정과 같다.
@@ -1347,6 +1387,11 @@ export function NewHighClient() {
               key: "min_value_mult",
               label: "거래대금 하한",
               values: constraints.min_value_mult_options.map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: `${n}배` })),
+            },
+            {
+              key: "adr_floor",
+              label: "ADR 하한",
+              values: (constraints.adr_floor_options ?? []).map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: String(n) })),
             },
             { key: "stop_loss_pct", label: "손절선", values: constraints.stop_loss_options.map((n) => ({ value: n, label: `${n}%` })) },
           ]}
@@ -1358,6 +1403,7 @@ export function NewHighClient() {
                 stop_loss_pct: Number(params.stop_loss_pct),
                 exit_ma_days: Number(params.exit_ma_days),
                 min_value_mult: params.min_value_mult == null ? null : Number(params.min_value_mult),
+                adr_floor: params.adr_floor == null ? null : Number(params.adr_floor),
               },
               "튜닝 조합을 적용해 저장했습니다.",
             );

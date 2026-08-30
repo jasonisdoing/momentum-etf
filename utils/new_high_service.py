@@ -28,7 +28,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import MIN_VALUE_MULT_OPTIONS, TOP_N_HOLD
+from config import ADR_FLOOR_OPTIONS, MIN_VALUE_MULT_OPTIONS, TOP_N_HOLD
 from config import STOP_LOSS_PCT_OPTIONS as STOP_LOSS_OPTIONS
 from utils.ma_options import SHORT_MA_OPTIONS
 from utils.price_series import positive_prices as _positive
@@ -67,6 +67,7 @@ PER_POOL_SETTING_KEYS = (
     "stop_loss_pct",
     "exit_ma_days",
     "min_value_mult",
+    "adr_floor",
 )
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -74,6 +75,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "exit_ma_days": 20,
     # 기본은 조건 없음 — 풀마다 적정값이 달라 사용자가 시험해 보고 저장한다.
     "min_value_mult": None,
+    # ADR 하한 — 전일 시장 ADR 이 미만이면 그날 **신규 진입만** 차단(보유는 손절·이탈이 관리).
+    # 기본 없음. 시장은 풀 설정의 시장 레짐 지수를 따른다(모멘텀과 같은 공용 판정).
+    "adr_floor": None,
 }
 
 
@@ -259,9 +263,21 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     if min_value_mult not in MIN_VALUE_MULT_OPTIONS:
         raise ValueError(f"min_value_mult 는 {list(MIN_VALUE_MULT_OPTIONS)} 중 하나여야 합니다 (받은 값: {raw_min})")
 
+    raw_adr = settings.get("adr_floor", DEFAULT_SETTINGS["adr_floor"])
+    adr_floor = None if raw_adr in (None, "", "none") else int(raw_adr)
+    if adr_floor not in ADR_FLOOR_OPTIONS:
+        allowed = ", ".join("없음" if v is None else str(v) for v in ADR_FLOOR_OPTIONS)
+        raise ValueError(f"adr_floor 는 {allowed} 중 하나여야 합니다 (받은 값: {raw_adr})")
+    if adr_floor is not None:
+        from utils.momentum_service import adr_market_of_pool
+
+        if adr_market_of_pool(pool) is None:
+            raise ValueError("ADR 하한을 쓰려면 /pools-settings 에서 이 풀의 시장 레짐 지수를 먼저 설정하세요.")
+
     return {
         "pool": pool,
         "min_value_mult": min_value_mult,
+        "adr_floor": adr_floor,
         # 종목 수(슬롯)는 풀별 설정이 아니라 시스템 공통(config.TOP_N_HOLD) — 업종 상한은
         # 개념째 폐기했다(집중 완화는 합성 배분 몫).
         "top_n": TOP_N_HOLD,
@@ -305,6 +321,7 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
 
 # 화면 로드 때 선택지 밖 저장값을 보정할 항목 — (키, 라벨, 선택지)
 _OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
+    ("adr_floor", "ADR 하한", ADR_FLOOR_OPTIONS),
     ("exit_ma_days", "이탈 이평선", EXIT_MA_OPTIONS),
     ("min_value_mult", "거래대금 하한", MIN_VALUE_MULT_OPTIONS),
     ("stop_loss_pct", "손절선", STOP_LOSS_OPTIONS),
