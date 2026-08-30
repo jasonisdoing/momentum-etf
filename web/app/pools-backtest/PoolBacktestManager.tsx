@@ -30,9 +30,6 @@ type Performance = {
   turnover_pct: number;
   round_trip_pct: number;
   cost_per_round_pct: number;
-  down_market_invest_pct?: number;
-  market_regime_index?: { ticker: string; name: string } | null;
-  down_market_rounds?: number;
   rule: StrategyStats;
   benchmark: (StrategyStats & { ticker: string; name: string }) | null;
   // 벤치마크를 못 쓸 때 원인 구분 (미설정 / 가격 캐시 없음 / 기간 불일치).
@@ -76,7 +73,6 @@ type PoolSettingsResponse = {
 type BacktestOptions = { forward_day_options?: number[]; month_options?: number[]; max_months?: number; error?: string };
 
 const FORWARD_DAY_OPTIONS = [5, 10, 20, 40, 60];
-const DOWN_MARKET_INVEST_OPTIONS = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
 
 /** 종목풀 설정 필드에서 정수를 꺼낸다. 값이 없으면 null. */
 function fieldToInt(field: PoolSettingField | undefined): number | null {
@@ -119,7 +115,6 @@ export function PoolBacktestManager() {
   const [shortMa, setShortMa] = useState<number | null>(null);
   const [longMa, setLongMa] = useState<number | null>(null);
   const [holdK, setHoldK] = useState<number | null>(null); // 상대 임계(보유 유지). null=끔(매 회차 재선택)
-  const [downMarketInvestPct, setDownMarketInvestPct] = useState(100);
   const [maOptions, setMaOptions] = useState<Partial<MaOptionsPayload>>({});
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -224,7 +219,6 @@ export function PoolBacktestManager() {
       if (shortMa != null) params.set("short_ma_days", String(shortMa));
       if (longMa != null) params.set("long_ma_days", String(longMa));
       if (holdK != null) params.set("hold_threshold_k", String(holdK));
-      params.set("down_market_invest_pct", String(downMarketInvestPct));
       const resp = await fetch(`/api/pool-backtest?${params.toString()}`, { cache: "no-store" });
       const payload = (await resp.json()) as BacktestResult & { detail?: string };
       if (!resp.ok || payload.error) throw new Error(payload.error ?? payload.detail ?? "백테스트에 실패했습니다.");
@@ -235,7 +229,7 @@ export function PoolBacktestManager() {
     } finally {
       setLoading(false);
     }
-  }, [forwardDays, months, poolId, topN, shortMa, longMa, holdK, downMarketInvestPct, toast]);
+  }, [forwardDays, months, poolId, topN, shortMa, longMa, holdK, toast]);
 
   return (
     <div className="appPageStack appPageStackFill">
@@ -320,20 +314,6 @@ export function PoolBacktestManager() {
                     ))}
                   </select>
                 </label>
-                <label className="appLabeledField" style={{ minWidth: 140, flex: "0 0 auto" }}>
-                  <span className="appLabeledFieldLabel">하락시 투자비중</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={downMarketInvestPct}
-                    onChange={(e) => setDownMarketInvestPct(Number(e.target.value))}
-                  >
-                    {DOWN_MARKET_INVEST_OPTIONS.map((pct) => (
-                      <option key={pct} value={pct}>
-                        {pct}%
-                      </option>
-                    ))}
-                  </select>
-                </label>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexShrink: 0 }}>
                 <button type="button" className="btn btn-sm btn-primary" disabled={loading || !poolId} onClick={() => void runBacktest()}>
@@ -379,9 +359,6 @@ export function PoolBacktestManager() {
                   {result.performance.cash_rounds > 0 ? `, 전부 현금 ${result.performance.cash_rounds}회` : ""}
                   {result.performance.partial_rounds > 0 ? `, 일부 현금 ${result.performance.partial_rounds}회` : ""}).
                   조건 맞는 종목이 {result.performance.top_n_hold}개 미만이면 부족분은 현금으로 둡니다.
-                  {result.performance.down_market_invest_pct !== undefined && result.performance.down_market_invest_pct < 100
-                    ? ` 시장 레짐(${result.performance.market_regime_index?.name ?? "-"}) 하락 회차는 투자비중 ${result.performance.down_market_invest_pct}%로 제한합니다.`
-                    : ""}
                   {result.performance.hold_threshold_k != null
                     ? ` 보유 유지 k=${result.performance.hold_threshold_k.toFixed(1)}: 이미 보유한 종목은 이격이 'N등 이격×k' 이상이면 유지(회전율↓).`
                     : ""}
