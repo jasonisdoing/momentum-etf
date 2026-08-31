@@ -36,12 +36,14 @@ def _adr_clipped_months(pool: str, months: list[int]) -> list[int]:
 def _constraints(pool: str, adr_floor: int | None = None) -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다)."""
     from utils.ma_options import short_ma_options
-    from utils.settings_loader import get_ticker_type_settings
+    from utils.new_high_service import pool_country
 
-    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+    country = pool_country(pool)
     from config import ADR_FLOOR_OPTIONS
 
     return {
+        # 풀 국가 — 슬랙 알람 토글(한국 전용)의 표시 여부를 화면이 이 값으로 가른다.
+        "country": country,
         # ADR 하한 — 전일 시장 ADR 이 미만이면 그날 신규 진입 차단. None = 없음(기본).
         "adr_floor_options": list(ADR_FLOOR_OPTIONS),
         "stop_loss_options": list(STOP_LOSS_OPTIONS),
@@ -94,6 +96,20 @@ def put_strategy_new_high_settings(
     if not isinstance(settings, dict):
         raise ValueError("저장할 'settings' 가 필요합니다.")
     return _view(save_settings(settings))
+
+
+@router.post("/slack-test")
+def post_strategy_new_high_slack_test(
+    payload: dict = Body(...),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """신고가 알람 테스트 발송 — 슬랙 연결·풀 설정 경로 확인용. body: ``{"pool": "..."}``."""
+    from utils.new_high_notify import send_test
+
+    pool = payload.get("pool") if isinstance(payload, dict) else None
+    if not isinstance(pool, str) or not pool.strip():
+        raise ValueError("발송할 'pool' 이 필요합니다.")
+    return send_test(pool.strip())
 
 
 @router.post("/positions")

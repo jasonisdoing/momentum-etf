@@ -54,12 +54,16 @@ type Settings = {
   min_value_mult: number | null;
   /** ADR 하한 — 전일 시장 ADR 이 미만이면 그날 신규 진입 차단. null = 없음. */
   adr_floor?: number | null;
+  /** 신고가 전용 슬랙 알람 — 한국 풀에서만 켤 수 있다(배치 new_high_notify_kor 가 감시). */
+  slack_enabled?: boolean;
 };
 
 type PoolOption = PoolLabelSource & { country_code?: string; currency?: string; pool_kind?: string | null };
 // PoolLabelSource 가 ticker_type·name·icon·order 를 갖는다 — 번호는 order 에서 나온다.
 
 type Constraints = {
+  /** 풀 국가 코드 — 슬랙 알람 토글(한국 전용)의 표시 여부. */
+  country?: string;
   adr_floor_options?: (number | null)[];
   stop_loss_options: (number | null)[];
   exit_ma_options: number[];
@@ -331,23 +335,23 @@ function toPeriodRows(daily: Backtest["daily"], keyOf: (date: string) => string,
  * 파랑 계열은 쓰지 않는다 — 이 앱에서 파랑은 하락을 뜻해 헷갈린다.
  */
 const STAGE_STYLE = {
-  breakout: { color: "#d62828", text: "장중 현재가가 직전 최고 종가 이상이면 돌파중, 장 마감 후 종가가 그 이상이면 돌파성공입니다. 다음 거래일 시가에 매수합니다." },
-  blocked: { color: "#0c8599", text: "최고 종가는 넘었지만 사지 않는 종목입니다. (미달)은 거래대금 하한에 못 미친 것입니다. 날짜 목록의 돌파 수에서도 빠집니다." },
+  breakout: { color: "#d62828", text: "현재가(마감 후에는 종가)가 직전 최고 종가 이상이고 거래대금 하한 기준까지 달성한 종목입니다. 한국 종목은 장중에 실시간 거래대금을 장 경과 시간 비례 목표와 비교해 판정합니다." },
+  blocked: { color: "#0c8599", text: "최고 종가에 도달은 했지만 거래대금 하한을 넘지 못한 종목입니다. 한국 풀은 장중에 하한을 장 경과 시간에 비례해 낮춰 판정합니다 — 그 시점 목표 페이스를 넘으면 돌파성공으로 바뀝니다. 날짜 목록의 돌파 수에서도 빠집니다." },
   pullback: { color: "#7048e8", text: "장중 고가는 최고 종가선에 닿았지만 종가가 다시 아래로 내려온 상태입니다." },
   imminent: { color: "#e8590c", text: "최고 종가까지 3% 이내로 남은 종목입니다." },
   near: { color: "#2f9e44", text: "최고 종가까지 3% 초과 7% 이내로 남은 종목입니다." },
   held: { color: "#495057", text: "전략이 이미 들고 있는 종목이 신고가를 다시 넘은 상태입니다. 돌파 신호는 매일 나오지만 재매수하지 않아 목록에만 남습니다." },
 } as const;
 
-function describeStage(row: PositionRow, live: boolean): { label: string; color: string } {
+function describeStage(row: PositionRow): { label: string; color: string } {
   // 전략이 이미 들고 있으면 상태보다 '못 산다'는 사실이 먼저다.
   // (실계좌 보유 여부는 별도 '보유' 컬럼이 담당한다 — 뜻이 달라 섞지 않는다.)
   if (row.is_held) return { label: "신고가 갱신", color: STAGE_STYLE.held.color };
   if (row.gap_pct >= 0) {
-    // 장중에는 종가가 아직 안 나왔으니 '돌파중' — 마감 뒤 확정되면 '돌파성공'.
-    const label = live ? "돌파중" : "돌파성공";
-    if (!row.qualifies) return { label: `${label}(미달)`, color: STAGE_STYLE.blocked.color };
-    return { label, color: STAGE_STYLE.breakout.color };
+    // (미달)은 어차피 매수 대상이 아니라 장중/마감 구분 없이 한 라벨로 합친다.
+    if (!row.qualifies) return { label: "돌파(미달)", color: STAGE_STYLE.blocked.color };
+    // 장중/마감 구분 없이 '돌파성공' 하나 — 거래대금 기준(한국은 시간 비례)까지 통과한 상태다.
+    return { label: "돌파성공", color: STAGE_STYLE.breakout.color };
   }
   // 장중에 선을 건드렸다가 밀린 것은 그냥 '임박'과 성격이 달라 따로 표시한다.
   if (row.touched) return { label: "터치 후 밀림", color: STAGE_STYLE.pullback.color };
@@ -357,7 +361,7 @@ function describeStage(row: PositionRow, live: boolean): { label: string; color:
 
 /** 상태 단계 설명 — 진입 후보를 펼치면 보여준다. 색·문구는 STAGE_STYLE 이 단일 소스다. */
 const STAGE_GUIDE: { label: string; key: keyof typeof STAGE_STYLE }[] = [
-  { label: "돌파중 / 돌파성공", key: "breakout" },
+  { label: "돌파성공", key: "breakout" },
   { label: "돌파(미달)", key: "blocked" },
   { label: "터치 후 밀림", key: "pullback" },
   { label: "임박", key: "imminent" },
@@ -463,6 +467,7 @@ export function NewHighClient() {
   const [currentTab, setCurrentTab] = useState<CurrentTab>("list");
   // 기준일 — 빈 값이면 최신 거래일. 과거 날짜를 고르면 그 시점 상태를 재현한다.
   const [candidatesOpen, setCandidatesOpen] = useState(false);
+  const [slackTesting, setSlackTesting] = useState(false);
   const [charts, setCharts] = useState<HoldingChartData[] | null>(null);
   const [chartsLoading, setChartsLoading] = useState(false);
   const [chartsError, setChartsError] = useState<string | null>(null);
@@ -621,6 +626,26 @@ export function NewHighClient() {
     }
   }, [draft, toast, backtestMonths]);
 
+  /** 슬랙 알람 테스트 발송 — 저장 여부와 무관하게 현재 풀로 즉시 보낸다. */
+  const sendSlackTest = useCallback(async () => {
+    if (!draft) return;
+    setSlackTesting(true);
+    try {
+      const response = await fetch("/api/strategy-new-high/slack-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pool: draft.pool }),
+      });
+      const payload = (await response.json()) as { sent?: boolean; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "슬랙 발송에 실패했습니다.");
+      toast.success("슬랙으로 테스트 메시지를 보냈습니다.");
+    } catch (sendError) {
+      toast.error(sendError instanceof Error ? sendError.message : "슬랙 발송에 실패했습니다.");
+    } finally {
+      setSlackTesting(false);
+    }
+  }, [draft, toast]);
+
   // 장중에는 실시간 시세가 움직이므로 주기적으로 다시 받는다.
   // 과거 날짜를 보는 중이거나 장이 닫혀 있으면 갱신할 것이 없어 타이머를 걸지 않는다.
   useEffect(() => {
@@ -639,7 +664,7 @@ export function NewHighClient() {
         valueGetter: (p) => p.data?.gap_pct ?? null,
         cellRenderer: (p: { data?: PositionRow }) => {
           if (!p.data) return null;
-          const stage = describeStage(p.data, positions?.live ?? false);
+          const stage = describeStage(p.data);
           return <strong style={{ color: stage.color }}>{stage.label}</strong>;
         },
       },
@@ -734,8 +759,7 @@ export function NewHighClient() {
         valueFormatter: (p) => formatMarketCapWon(p.value as number | null),
       },
     ],
-    // live 가 빠지면 장전에 만든 컬럼이 그대로 남아 장중에도 '돌파성공' 으로 보인다.
-    [windowLabel, hasIndustryData, positions?.live],
+    [windowLabel, hasIndustryData],
   );
 
   // ADR 값이 하나도 없으면(레짐 시장 없는 풀) 컬럼을 숨긴다 — 모멘텀 화면과 같은 규칙.
@@ -1180,6 +1204,34 @@ export function NewHighClient() {
                       ))}
                     </select>
                   </label>
+                  {/* 신고가 전용 슬랙 알람 — 배치가 한국 장 시간에만 돌아 한국 풀에서만 보인다(합성 화면과 같은 UI). */}
+                  {constraints.country === "kor" ? (
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">슬랙 알람</span>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <div className="form-check form-switch" style={{ marginBottom: 0 }}>
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                            checked={Boolean(draft.slack_enabled)}
+                            disabled={saving}
+                            onChange={(event) => setDraft({ ...draft, slack_enabled: event.target.checked })}
+                            title="신고가 전용 슬랙 알람 (배치 '한국 신고가 알람'이 장중 감시). 저장 버튼을 눌러야 반영된다."
+                          />
+                        </div>
+                        <span style={hintStyle}>{draft.slack_enabled ? "켜짐" : "꺼짐"}</span>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary"
+                          disabled={slackTesting}
+                          onClick={() => void sendSlackTest()}
+                        >
+                          {slackTesting ? "발송 중…" : "지금 발송(테스트)"}
+                        </button>
+                      </span>
+                    </label>
+                  ) : null}
                 </div>
                 {/* CRUD 버튼이 하나뿐이라 별도 줄을 두지 않고 메인 헤더 오른쪽에 둔다. */}
                 <div className="appMainHeaderRight">
@@ -1266,17 +1318,30 @@ export function NewHighClient() {
                     height="auto"
                     gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
                   />
+                  {/* 진입 후보 표 — 항상 펼쳐 둔다. 상태 설명만 표 아래에서 접고 펼친다. */}
+                  <div style={{ ...hintStyle, fontWeight: 700, margin: "16px 0 6px" }}>
+                    진입 후보 ({(positions?.breakouts.length ?? 0) + (positions?.candidates.length ?? 0)}개)
+                  </div>
+                  <AppAgGrid<PositionRow>
+                    rowData={[...(positions?.breakouts ?? []), ...(positions?.candidates ?? [])].map(withQuote)}
+                    columnDefs={positionColumns}
+                    loading={running}
+                    theme={gridTheme}
+                    minHeight={0}
+                    height="auto"
+                    gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                  />
                   <button
                     type="button"
                     onClick={() => setCandidatesOpen((open) => !open)}
                     style={{
-                      ...hintStyle, fontWeight: 700, margin: "16px 0 6px", padding: 0,
+                      ...hintStyle, fontWeight: 700, margin: "12px 0 6px", padding: 0,
                       background: "none", border: "none", cursor: "pointer",
                       display: "inline-flex", alignItems: "center", gap: 6,
                     }}
                   >
                     <span>{candidatesOpen ? "▾" : "▸"}</span>
-                    진입 후보 ({(positions?.breakouts.length ?? 0) + (positions?.candidates.length ?? 0)}개)
+                    진입 후보 설명
                   </button>
                   {candidatesOpen ? (
                     <div
@@ -1297,18 +1362,6 @@ export function NewHighClient() {
                         </div>
                       ))}
                     </div>
-                  ) : null}
-                  {/* 진입 후보 표 — 설명과 함께 접고 펼친다 (접힌 상태에서는 보유 표만 남는다). */}
-                  {candidatesOpen ? (
-                    <AppAgGrid<PositionRow>
-                      rowData={[...(positions?.breakouts ?? []), ...(positions?.candidates ?? [])].map(withQuote)}
-                      columnDefs={positionColumns}
-                      loading={running}
-                      theme={gridTheme}
-                      minHeight={0}
-                      height="auto"
-                      gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
-                    />
                   ) : null}
                 </>
               ) : (
