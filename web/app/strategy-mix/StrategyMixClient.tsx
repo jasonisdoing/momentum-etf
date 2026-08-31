@@ -848,63 +848,27 @@ export function StrategyMixClient() {
         },
       },
       // 슬리브별 몫 — 슬롯 값의 합이 목표비중이다. 그 슬리브에 없는 종목은 '-'.
-      ...slotKeys.map<ColDef<PositionRow>>((slot) => ({
-        colId: `slot_weight_${slot}`,
-        headerName: slotLabel(slot),
-        width: 104,
-        type: "numericColumn",
-        valueGetter: (p) => p.data?.slots?.[slot]?.weight ?? null,
-        valueFormatter: (p) =>
-          p.value == null || (p.value as number) === 0 ? "-" : `${(p.value as number).toFixed(2)}%`,
-        cellStyle: { color: "var(--text-muted)" },
-      })),
-      {
-        colId: "held_for",
-        headerName: "보유일",
-        width: 96,
-        headerTooltip: `${slotKeys.map(slotLabel).join(" · ")} 슬리브의 보유 기간 (진입 예정은 -)`,
-        cellStyle: { color: "var(--text-muted)", textAlign: "center" },
-        valueGetter: (p) => {
-          if (!p.data) return "";
-          const bits = slotKeys
-            .map((slot) => p.data?.slots?.[slot]?.held_label)
-            .filter((label): label is string => Boolean(label));
-          return bits.join(" · ") || "-";
-        },
-      },
-      {
-        colId: "strategy_return",
-        headerName: "전략수익률",
-        width: 104,
-        type: "numericColumn",
-        headerTooltip:
-          "전략 이론값(계좌 실손익 아님) — 각 전략이 잡은 편입가 대비. 여러 슬리브에 걸치면 몫 가중 평균.",
-        valueGetter: (p) => {
-          if (!p.data) return null;
-          const slots = slotKeys.map((slot) => p.data?.slots?.[slot]).filter(Boolean);
-          const parts = slots
-            .filter((slot) => slot?.return_pct != null && (slot?.weight ?? 0) > 0)
-            .map((slot) => ({ w: slot?.weight ?? 0, r: slot?.return_pct ?? 0 }));
-          if (!parts.length) {
-            // 몫이 0(매도 예정 등)이어도 수익률 자체는 보여준다.
-            return slots.find((slot) => slot?.return_pct != null)?.return_pct ?? null;
-          }
-          const total = parts.reduce((a, x) => a + x.w, 0);
-          return parts.reduce((a, x) => a + (x.r * x.w) / total, 0);
-        },
-        valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
-        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
-        tooltipValueGetter: (p) => {
-          if (!p.data) return "";
-          const bits = slotKeys
-            .map((slot) => {
-              const value = p.data?.slots?.[slot]?.return_pct;
-              return value == null ? null : `${slotLabel(slot)} ${formatSignedPct(value, 2)}`;
-            })
-            .filter((text): text is string => Boolean(text));
-          return bits.join(" · ");
-        },
-      },
+      // 실제 보유 성과 — 계좌 총자산을 알 때만 값이 있다. 비중 바로 뒤에 둔다.
+      ...(totalAsset != null
+        ? ([
+          {
+            field: "return_pct",
+            headerName: "수익률",
+            headerTooltip: "계좌 매입 평단 대비 실제 수익률. 아직 사지 않은 종목은 평단이 없어 비어 있다.",
+            width: 88,
+            type: "numericColumn",
+            valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
+            cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
+          },
+          {
+            field: "held_value",
+            headerName: "평가 금액",
+            width: 120,
+            type: "numericColumn",
+            valueFormatter: (p) => formatAmount(p.value as number),
+          },
+        ] as ColDef<PositionRow>[])
+        : []),
       {
         field: "weight_pct",
         headerName: "목표비중",
@@ -920,11 +884,19 @@ export function StrategyMixClient() {
     if (totalAsset != null) {
       columns.push(
         {
+          field: "held_quantity",
+          headerName: "수량",
+          width: 80,
+          type: "numericColumn",
+          valueFormatter: (p) =>
+            p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR"),
+        },
+        {
           field: "shares",
           headerName: "목표수량",
           headerTooltip:
             "목표비중 × 총자산 ÷ 현재가. 주중 이탈·손절이 예상되는 종목은 이탈 후 남을 목표를 (예상)으로 보여준다.",
-          width: 104,
+          width: 88,
           type: "numericColumn",
           valueFormatter: (p) => {
             // 예상 이벤트(주중 이탈·손절)가 있는 행만 예상 목표로 겹쳐 쓴다.
@@ -944,7 +916,7 @@ export function StrategyMixClient() {
           field: "trade_quantity",
           headerName: "매매수량",
           headerTooltip: "목표수량 − 수량. +는 매수, −는 매도",
-          width: 92,
+          width: 84,
           type: "numericColumn",
           valueFormatter: (p) => {
             const forecast = p.data?.forecast_trade_quantity;
@@ -965,29 +937,62 @@ export function StrategyMixClient() {
             return { color: signColor(p.value as number), fontWeight: 700, opacity: 1 };
           },
         },
-        {
-          field: "held_quantity",
-          headerName: "수량",
-          width: 80,
+        ...slotKeys.map<ColDef<PositionRow>>((slot) => ({
+          colId: `slot_weight_${slot}`,
+          headerName: slotLabel(slot),
+          width: 104,
           type: "numericColumn",
+          valueGetter: (p) => p.data?.slots?.[slot]?.weight ?? null,
           valueFormatter: (p) =>
-            p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR"),
+            p.value == null || (p.value as number) === 0 ? "-" : `${(p.value as number).toFixed(2)}%`,
+          cellStyle: { color: "var(--text-muted)" },
+        })),
+        {
+          colId: "held_for",
+          headerName: "보유일",
+          width: 96,
+          headerTooltip: `${slotKeys.map(slotLabel).join(" · ")} 슬리브의 보유 기간 (진입 예정은 -)`,
+          cellStyle: { color: "var(--text-muted)", textAlign: "center" },
+          valueGetter: (p) => {
+            if (!p.data) return "";
+            const bits = slotKeys
+              .map((slot) => p.data?.slots?.[slot]?.held_label)
+              .filter((label): label is string => Boolean(label));
+            return bits.join(" · ") || "-";
+          },
         },
         {
-          field: "return_pct",
-          headerName: "수익률",
-          headerTooltip: "계좌 매입 평단 대비 실제 수익률. 아직 사지 않은 종목은 평단이 없어 비어 있다.",
+          colId: "strategy_return",
+          headerName: "전략수익률",
           width: 88,
           type: "numericColumn",
+          headerTooltip:
+            "전략 이론값(계좌 실손익 아님) — 각 전략이 잡은 편입가 대비. 여러 슬리브에 걸치면 몫 가중 평균.",
+          valueGetter: (p) => {
+            if (!p.data) return null;
+            const slots = slotKeys.map((slot) => p.data?.slots?.[slot]).filter(Boolean);
+            const parts = slots
+              .filter((slot) => slot?.return_pct != null && (slot?.weight ?? 0) > 0)
+              .map((slot) => ({ w: slot?.weight ?? 0, r: slot?.return_pct ?? 0 }));
+            if (!parts.length) {
+              // 몫이 0(매도 예정 등)이어도 수익률 자체는 보여준다.
+              return slots.find((slot) => slot?.return_pct != null)?.return_pct ?? null;
+            }
+            const total = parts.reduce((a, x) => a + x.w, 0);
+            return parts.reduce((a, x) => a + (x.r * x.w) / total, 0);
+          },
           valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
           cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
-        },
-        {
-          field: "held_value",
-          headerName: "평가 금액",
-          width: 120,
-          type: "numericColumn",
-          valueFormatter: (p) => formatAmount(p.value as number),
+          tooltipValueGetter: (p) => {
+            if (!p.data) return "";
+            const bits = slotKeys
+              .map((slot) => {
+                const value = p.data?.slots?.[slot]?.return_pct;
+                return value == null ? null : `${slotLabel(slot)} ${formatSignedPct(value, 2)}`;
+              })
+              .filter((text): text is string => Boolean(text));
+            return bits.join(" · ");
+          },
         },
         {
           field: "amount",
