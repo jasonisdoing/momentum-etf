@@ -22,8 +22,11 @@ def main() -> int:
     load_env_if_present()
     summary = refresh_market_breadth()
 
+    # 스킵된 시장(기준일 불일치 등)은 요약 형태가 다르다 — 정상 형태만 가정하면 KeyError 로 죽는다.
     parts = [
-        f"{market}=대상{info['universe']}·신규{info['inserted']}일·갱신{info['updated']}일({info['latest_date']})"
+        f"{market}=스킵({info['reason']})"
+        if info.get("skipped")
+        else f"{market}=대상{info['universe']}·신규{info['inserted']}일·갱신{info['updated']}일({info['latest_date']})"
         for market, info in summary["markets"].items()
     ]
     print(f"[market_breadth] 시장 폭 집계 완료: {' '.join(parts)}")
