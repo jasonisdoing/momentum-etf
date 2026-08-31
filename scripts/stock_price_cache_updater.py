@@ -50,6 +50,50 @@ PER_TICKER_TIMEOUT_SECONDS = 90
 KOR_FETCH_TARGET_SECONDS = 1
 
 
+def _backfill_missing_closes_from_naver(ticker_type: str, tickers: list[str]) -> int:
+    """yfinance 가 종가를 비운 봉을 네이버 해외증시로 메운다. 반환: 메운 종목 수.
+
+    야후가 봉을 만들어 두고 **Close 만 NaN 으로** 주는 날이 있다(2026-08-28: 시가·고가·
+    저가·거래량은 있는데 종가만 없음). 그 행이 캐시에 남으면 그날이 거래일로 잡힌 채
+    종가가 없어, 읽는 쪽마다 다르게 어긋난다 — 백테스트는 보유 평가액을 0 으로 매겼다.
+
+    같은 봉을 네이버는 온전히 들고 있고 시가·고가·저가가 yfinance 와 소수점까지 같다.
+    **빈 값만** 채운다 — 이미 있는 값은 건드리지 않는다(주 소스는 어디까지나 yfinance).
+    거래량은 네이버가 주지 않으므로 그대로 둔다.
+    """
+    from utils.cache_utils import load_cached_frame, save_cached_frame
+    from utils.naver_overseas import fetch_daily_ohlc
+
+    filled = 0
+    for ticker in tickers:
+        cached = load_cached_frame(ticker_type, ticker)
+        if cached is None or cached.empty or "Close" not in cached.columns:
+            continue
+        gaps = cached.index[cached["Close"].isna()]
+        if len(gaps) == 0:
+            continue
+
+        # 네이버는 최근분부터 준다 — 가장 오래된 결측까지 덮을 만큼만 요청한다.
+        span_days = int((cached.index[-1] - gaps.min()).days) + 5
+        naver = fetch_daily_ohlc(ticker, days=max(10, min(span_days, 200)))
+        if naver is None or naver.empty:
+            continue
+
+        merged = cached.copy()
+        touched = 0
+        for day in gaps:
+            if day not in naver.index:
+                continue
+            for column in ("Open", "High", "Low", "Close"):
+                if column in merged.columns and pd.isna(merged.at[day, column]):
+                    merged.at[day, column] = float(naver.at[day, column])
+            touched += 1
+        if touched:
+            save_cached_frame(ticker_type, ticker, merged)
+            filled += 1
+    return filled
+
+
 def _resolve_fetch_workers() -> int:
     """종목 fetch 병렬 워커 수.
 
@@ -831,6 +875,20 @@ def refresh_cache_for_target(
             )
         else:
             logger.info("-> [%s] 캐시 갱신 완료 (%d개 종목).", target_norm.upper(), succeeded_count)
+
+        # 미국 풀: yfinance 가 종가를 비운 봉을 네이버로 메운다(빈 값만 채운다).
+        if country_code == "us":
+            try:
+                pool_tickers = [
+                    str(item.get("ticker") or "").strip().upper()
+                    for item in target_items
+                    if str(item.get("ticker") or "").strip()
+                ]
+                filled = _backfill_missing_closes_from_naver(target_norm, pool_tickers)
+                if filled:
+                    logger.info("[%s] 네이버 해외증시로 빈 종가 보강: %d종목", target_norm.upper(), filled)
+            except Exception as exc:
+                logger.warning("[%s] 네이버 종가 보강 건너뜀: %s", target_norm.upper(), exc)
 
         success_tickers = [
             str(etf.get("ticker") or "").strip().upper()
