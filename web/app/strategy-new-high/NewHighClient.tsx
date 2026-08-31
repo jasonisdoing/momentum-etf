@@ -359,6 +359,10 @@ function describeStage(row: PositionRow): { label: string; color: string } {
   return { label: "근접", color: STAGE_STYLE.near.color };
 }
 
+/** 상태 컬럼 폭 — 보유 종목·진입 후보 표가 같은 값을 쓴다(폭이 다르면 어긋나 보인다). */
+const STATUS_COLUMN_WIDTH = 124;
+const STATUS_COLUMN_MIN_WIDTH = 110;
+
 /** 상태 단계 설명 — 진입 후보를 펼치면 보여준다. 색·문구는 STAGE_STYLE 이 단일 소스다. */
 const STAGE_GUIDE: { label: string; key: keyof typeof STAGE_STYLE }[] = [
   { label: "돌파성공", key: "breakout" },
@@ -658,8 +662,8 @@ export function NewHighClient() {
     () => [
       {
         headerName: "상태",
-        width: 124,
-        minWidth: 110,
+        width: STATUS_COLUMN_WIDTH,
+        minWidth: STATUS_COLUMN_MIN_WIDTH,
         cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
         valueGetter: (p) => p.data?.gap_pct ?? null,
         cellRenderer: (p: { data?: PositionRow }) => {
@@ -668,17 +672,7 @@ export function NewHighClient() {
           return <strong style={{ color: stage.color }}>{stage.label}</strong>;
         },
       },
-      {
-        field: "account_held",
-        headerName: "보유중",
-        headerTooltip: "지금 계좌에 실제로 들고 있는 종목 — 시장 화면의 '보유' 와 같은 기준(그 국가의 모든 계좌).",
-        width: 74,
-        minWidth: 66,
-        cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
-        // 보유가 아니면 공백 — '-' 를 채우면 보유 표시가 눈에 안 들어온다.
-        cellRenderer: (p: { value?: boolean }) =>
-          p.value ? <strong style={{ color: "#2f9e44" }}>보유</strong> : null,
-      },
+      // 실계좌 보유는 컬럼 대신 행 배경(appHeldRow, 녹색)으로 표시한다 — 시장 화면과 같은 표준.
       // 시총은 개별주에만 있는 값이라 업종과 판정이 다르다(`@/lib/pool-industry`).
       marketCapRankColumn<PositionRow>("market_cap_rank", !hasMarketCap),
       {
@@ -936,21 +930,25 @@ export function NewHighClient() {
     () => [
       {
         headerName: "상태",
-        // 가장 긴 문구가 "매도 예정(예상) (손절)" 이라 잘리지 않을 만큼 준다.
-        width: 172,
-        minWidth: 156,
+        // 진입 후보 표의 상태와 같은 폭 — 두 표가 나란히 있어 폭이 다르면 어긋나 보인다.
+        // "매도 예정(예상) (손절)" 같은 긴 문구는 잘릴 수 있어 전체를 툴팁으로 둔다.
+        width: STATUS_COLUMN_WIDTH,
+        minWidth: STATUS_COLUMN_MIN_WIDTH,
         cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
         valueGetter: (p) => p.data?.plan ?? "",
         cellRenderer: (p: { data?: PlanRow }) => {
           if (!p.data) return null;
           // 장중 판정은 오늘 종가로 확정되기 전이라 (예상) — 종가 확정 후에는 꼬리표가 빠진다.
           const tag = positions?.live ? "(예상)" : "";
+          const reason = p.data.exit_reason ? ` (${p.data.exit_reason})` : "";
           if (p.data.plan === "buy") return <strong style={{ color: "#d62828" }}>진입 예정{tag}</strong>;
           if (p.data.plan === "sell") {
-            return <strong style={{ color: "#1971c2" }}>매도 예정{tag}{p.data.exit_reason ? ` (${p.data.exit_reason})` : ""}</strong>;
+            const label = `매도 예정${tag}${reason}`;
+            return <strong style={{ color: "#1971c2", whiteSpace: "nowrap" }} title={label}>{label}</strong>;
           }
           if (p.data.plan === "exited") {
-            return <span style={{ color: "var(--text-muted)" }}>이탈{p.data.exit_reason ? ` (${p.data.exit_reason})` : ""}</span>;
+            const label = `이탈${reason}`;
+            return <span style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }} title={label}>{label}</span>;
           }
           return <span>{p.data.is_new ? "진입" : `${p.data.days}일`}</span>;
         },
@@ -1329,6 +1327,8 @@ export function NewHighClient() {
                     theme={gridTheme}
                     minHeight={0}
                     height="auto"
+                    // 실계좌 보유 종목은 행 배경 녹색 — 시장 화면과 같은 표준(보유 컬럼 대체).
+                    getRowClass={(params) => (params.data?.account_held ? "appHeldRow" : "")}
                     gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
                   />
                   <button
