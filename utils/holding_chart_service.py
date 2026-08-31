@@ -14,7 +14,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import HOLDING_CHART_MONTHS
+from config import HOLDING_CHART_MONTHS, HOLDING_CHART_SHOW_AVG_BUY_PRICE
 from utils.price_series import positive_prices as _positive
 
 _CANDLE_KEYS = ("Open", "High", "Low", "Close")
@@ -46,8 +46,13 @@ def holding_charts(
     }
     frames = load_cached_frames_bulk_from_ticker_types([pool], wanted)
     # 내 평균 매입가 — 전 계좌 합산. 같은 티커가 다른 시장에도 있으면(IOO) 이 풀의 통화만 센다.
+    # 끄면(config.HOLDING_CHART_SHOW_AVG_BUY_PRICE) 계좌를 아예 읽지 않는다.
     pool_currency = str((get_ticker_type_settings(pool) or {}).get("currency") or "").strip()
-    avg_buy_by = average_buy_price_by_ticker(wanted, currency=pool_currency or None)
+    avg_buy_by = (
+        average_buy_price_by_ticker(wanted, currency=pool_currency or None)
+        if HOLDING_CHART_SHOW_AVG_BUY_PRICE
+        else {}
+    )
 
     # 한 요청의 차트들이 **같은 날짜 축**을 쓰도록, 이 풀의 거래일을 먼저 모은다.
     # 이게 없으면 상장한 지 얼마 안 된 종목이 캔들 열몇 개로 가로 폭을 다 채워, 다른 종목과
