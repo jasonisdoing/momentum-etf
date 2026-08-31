@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
-from config import CACHE_TTL_COMPUTE
+from config import CACHE_TTL_COMPUTE, MIX_REBALANCE_BAND_MIN_PCT, MIX_REBALANCE_BAND_RATIO
 from utils.logger import get_app_logger
 from utils.mix_sleeve import MOMENTUM, NEW_HIGH, PORTFOLIO, STRATEGY_LABELS, SleeveSpec
 from utils.share_allocation import ShareTarget, allocate_integer_shares, backtest_initial_capital
@@ -431,13 +431,6 @@ def _compute_sleeve_shares(ctx: dict[str, Any]) -> dict[str, float]:
     return shares
 
 
-# 비중 조정 지시 밴드 — **슬롯 크기에 비례**한다(슬롯 목표비중 × 비율, 최소 0.5%p).
-# 고정 0.5%p 로 두면 슬롯이 큰 종목은 하루 가격 변동(드리프트)만으로 지시가 떠서, 백테스트에
-# 없는 주중 재조정 매매를 시키게 된다. 드리프트는 지시로 만들지 않는 게 전략 규칙이고,
-# 입출금은 큰 단위로 들어오므로(총자산 15%+) 이 밴드를 넘어 지시가 생성된다.
-_REBALANCE_BAND_RATIO = 0.15
-_REBALANCE_BAND_MIN_PCT = 0.5
-
 _WEEKDAYS_KO = ("월", "화", "수", "목", "금", "토", "일")
 
 
@@ -467,7 +460,8 @@ def _build_action_groups(
 
     화면과 슬랙 알람이 **이 결과를 그대로** 쓴다 — 조립을 한 곳에 두어 둘이 어긋나지
     않게 한다. 규칙은 화면에 있던 것 그대로:
-      · 목표는 흘러간 비중을 따라가므로, 밴드(슬롯 비중의 15%, 최소 0.5%p) 이상 차이만 지시로 만든다
+      · 목표는 흘러간 비중을 따라가므로, 밴드(슬롯 비중 × config.MIX_REBALANCE_BAND_RATIO,
+        최소 MIX_REBALANCE_BAND_MIN_PCT %p) 이상 차이만 지시로 만든다
         — 가격 드리프트는 지시가 안 되고, 큰 단위 입출금·교체·진입·이탈만 지시가 된다.
       · 교체가 확정됐지만 미체결이면 그 슬리브 몫은 교체일 시가 그룹, 나머지는 다음 거래일 그룹.
       · 전량 매도·손절·이탈은 금액과 무관하게 항상 남긴다.
@@ -545,7 +539,7 @@ def _build_action_groups(
         weight = float(row.get("weight_pct") or 0)
         if not row.get("is_sell_all") and not (reason and trade < 0 and weight <= 0):
             gap = abs(weight - float(row.get("current_weight_pct") or 0))
-            band = max(_REBALANCE_BAND_MIN_PCT, weight * _REBALANCE_BAND_RATIO)
+            band = max(MIX_REBALANCE_BAND_MIN_PCT, weight * MIX_REBALANCE_BAND_RATIO)
             if gap < band:
                 continue
         held = float(row.get("held_quantity") or 0) > 0
@@ -1388,6 +1382,11 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     payload["actions"]["groups"] = _build_action_groups(
         payload["holdings"], payload["actions"], next_trading_day, currency=currency
     )
+    # 지시 밴드 — 화면 설명 문구가 이 값으로 만들어진다(config 이 단일 소스).
+    payload["actions"]["band"] = {
+        "ratio_pct": round(MIX_REBALANCE_BAND_RATIO * 100, 1),
+        "min_pct": MIX_REBALANCE_BAND_MIN_PCT,
+    }
     # 다음주 교체 가정 미리보기 — 실시간 순위 기준 잠정치.
     payload["actions"]["next_week_preview"] = _build_next_week_preview(
         states,
