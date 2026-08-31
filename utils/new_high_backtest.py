@@ -559,6 +559,11 @@ def _apply_live_trade_values(
 
     # 오늘을 뺀 직전 19거래일 — 확정된 값만 쓴다.
     recent = value_df.loc[:last].tail(19)
+    # 장중 판정용 하한 — 하루 기준 하한을 장 경과 비율로 낮춘 값(한국 전용, 알람과 같은 식).
+    # 오전의 누적 거래대금을 하루 기준에 그대로 대면 돌파 종목이 전부 (미달)로 뜬다.
+    from utils.new_high_service import live_min_value_mult
+
+    live_required = live_min_value_mult(min_value_mult)
     for row in rows:
         today = (snapshot.get(row["ticker"]) or {}).get("tradeValue")
         if today is None or float(today) <= 0 or row["ticker"] not in recent.columns:
@@ -575,7 +580,7 @@ def _apply_live_trade_values(
             # 오늘 확정값이 아직 없다 — 실시간이 유일한 오늘 값이라 판정에도 쓴다.
             row["trade_value"] = float(today)
             row["value_mult"] = live_mult
-            row["qualifies"] = _meets_min_mult(live_mult, min_value_mult)
+            row["qualifies"] = _meets_min_mult(live_mult, live_required)
 
 
 def _market_today(pool: str) -> str:

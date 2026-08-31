@@ -73,6 +73,7 @@ PER_POOL_SETTING_KEYS = (
     "exit_ma_days",
     "min_value_mult",
     "adr_floor",
+    "slack_enabled",
 )
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -83,6 +84,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # ADR 하한 — 전일 시장 ADR 이 미만이면 그날 **신규 진입만** 차단(보유는 손절·이탈이 관리).
     # 기본 없음. 시장은 풀 설정의 시장 레짐 지수를 따른다(모멘텀과 같은 공용 판정).
     "adr_floor": None,
+    # 신고가 전용 슬랙 알람 — 배치(new_high_notify_kor)가 켜진 풀만 감시한다. 한국 풀 전용.
+    "slack_enabled": False,
 }
 
 
@@ -100,6 +103,43 @@ def available_pools() -> list[str]:
     from utils.settings_loader import list_available_ticker_types
 
     return list(list_available_ticker_types())
+
+
+def pool_country(pool: str) -> str:
+    """풀의 국가 코드(kor/us/aus…) — 슬랙 알람 가능 여부·이평 선택지가 이 값으로 갈린다."""
+    from utils.settings_loader import get_ticker_type_settings
+
+    return str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+
+
+def kor_session_elapsed_fraction() -> float:
+    """한국 정규장(09:00~15:30) 경과 비율 — 장중 거래대금 하한의 시간 비례 환산에 쓴다.
+
+    개장 전이면 0, 마감 후면 1. **한국 전용** — 미국 풀은 장중에 볼 일이 거의 없고
+    서머타임 처리만 얹게 되어 하루 기준 하한을 그대로 쓴다.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from config import MARKET_SCHEDULES
+
+    schedule = MARKET_SCHEDULES["kor"]
+    now = datetime.now(ZoneInfo(schedule["timezone"]))
+    open_at = now.replace(hour=schedule["open"].hour, minute=schedule["open"].minute, second=0, microsecond=0)
+    close_at = now.replace(hour=schedule["close"].hour, minute=schedule["close"].minute, second=0, microsecond=0)
+    elapsed = (now - open_at).total_seconds()
+    return min(max(elapsed / (close_at - open_at).total_seconds(), 0.0), 1.0)
+
+
+def live_min_value_mult(min_value_mult: float | None) -> float | None:
+    """장중 판정용 거래대금 하한 — 하루 기준 하한을 장 경과 비율만큼 낮춘 값 (한국 전용).
+
+    거래대금은 장이 끝나야 다 쌓이므로, 하루 기준 그대로 비교하면 오전에는 돌파해도
+    거의 전부 (미달)이 된다. 화면(장중 qualifies)과 신고가 알람이 같은 식을 쓴다.
+    """
+    if min_value_mult is None:
+        return None
+    return float(min_value_mult) * kor_session_elapsed_fraction()
 
 
 def pool_options() -> list[dict[str, Any]]:
@@ -293,10 +333,16 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         if adr_market_of_pool(pool) is None:
             raise ValueError("ADR 하한을 쓰려면 /pools-settings 에서 이 풀의 시장 레짐 지수를 먼저 설정하세요.")
 
+    # 슬랙 알람 — 배치가 한국 장 시간에만 돌아 한국 풀에서만 켤 수 있다.
+    slack_enabled = bool(settings.get("slack_enabled", DEFAULT_SETTINGS["slack_enabled"]))
+    if slack_enabled and pool_country(pool) != "kor":
+        raise ValueError("신고가 슬랙 알람은 한국 풀에서만 켤 수 있습니다.")
+
     return {
         "pool": pool,
         "min_value_mult": min_value_mult,
         "adr_floor": adr_floor,
+        "slack_enabled": slack_enabled,
         # 종목 수(슬롯)는 풀별 설정이 아니라 시스템 공통(config.TOP_N_HOLD) — 업종 상한은
         # 개념째 폐기했다(집중 완화는 합성 배분 몫).
         "top_n": TOP_N_HOLD,
