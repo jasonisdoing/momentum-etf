@@ -96,7 +96,9 @@ def run_backtest(
 
     pool = settings["pool"]
     slots = int(settings["top_n"])
-    stop_pct = float(settings["stop_loss_pct"])
+    # 손절선 — None 이면 손절 없이 이탈 이평선만으로 청산한다.
+    raw_stop = settings["stop_loss_pct"]
+    stop_pct = None if raw_stop is None else float(raw_stop)
     # 슬리피지는 종목풀 설정을 단일 소스로 쓴다 — 매수·매도 편도값을 각각 적용한다.
     buy_slippage, sell_slippage = get_pool_slippage(pool)
 
@@ -178,7 +180,7 @@ def run_backtest(
             price = close_df.at[day, ticker]
             if pd.isna(price):
                 continue
-            hit_stop = (price / position["entry"] - 1) * 100 <= stop_pct
+            hit_stop = stop_pct is not None and (price / position["entry"] - 1) * 100 <= stop_pct
             hit_ma = bool(below_ma.at[day, ticker])
             if not (hit_stop or hit_ma):
                 continue
@@ -689,7 +691,8 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     # 마지막 거래일 종가로 '다음 시가에 할 일' 을 판정한다. 백테스트 루프는 마지막 날을
     # 판정하지 않는다(체결할 다음 날이 없어서). 그래서 여기서 한 번 더 본다 — 이게 없으면
     # 화면에 살 종목만 보이고 팔 종목이 안 보인다.
-    stop_pct = float(settings["stop_loss_pct"])
+    raw_stop = settings["stop_loss_pct"]
+    stop_pct = None if raw_stop is None else float(raw_stop)
     exit_ma_days = int(settings["exit_ma_days"])
     below_ma_last = signals["below_ma"].loc[last]
     # 이탈 이평선 값 — 화면이 "이탈까지 얼마 남았는지"를 보여준다. **판정에 쓰는 그 선**이라
@@ -714,7 +717,7 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
             price = price_of(held["ticker"])
             if price is None:
                 continue
-            hit_stop = (price / held["entry_price"] - 1) * 100 <= stop_pct
+            hit_stop = stop_pct is not None and (price / held["entry_price"] - 1) * 100 <= stop_pct
             hit_ma = bool(below_ma_last.get(held["ticker"]))
             held["status"] = "sell" if (hit_stop or hit_ma) else "hold"
             held["exit_reason"] = "손절" if hit_stop else ("이탈" if hit_ma else None)

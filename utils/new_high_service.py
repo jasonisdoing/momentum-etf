@@ -29,7 +29,12 @@ from typing import Any
 import pandas as pd
 
 from config import ADR_FLOOR_OPTIONS, MIN_VALUE_MULT_OPTIONS, TOP_N_HOLD
-from config import STOP_LOSS_PCT_OPTIONS as STOP_LOSS_OPTIONS
+
+# 손절선 — 시스템 공용 목록 앞에 '없음'(None)을 붙인다. 이탈 이평선이 있어 손절이
+# 없어도 청산 경로가 있다(모멘텀의 주중 손절과 같은 규칙 — `config` 주석 참고).
+from config import STOP_LOSS_PCT_OPTIONS as _STOP_LOSS_PCT_OPTIONS
+
+STOP_LOSS_OPTIONS: tuple[float | None, ...] = (None, *_STOP_LOSS_PCT_OPTIONS)
 from utils.ma_options import SHORT_MA_OPTIONS
 from utils.price_series import positive_prices as _positive
 from utils.strategy_settings import coerce_to_options
@@ -271,6 +276,12 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     if min_value_mult not in MIN_VALUE_MULT_OPTIONS:
         raise ValueError(f"min_value_mult 는 {list(MIN_VALUE_MULT_OPTIONS)} 중 하나여야 합니다 (받은 값: {raw_min})")
 
+    raw_stop = settings.get("stop_loss_pct", DEFAULT_SETTINGS["stop_loss_pct"])
+    stop_loss_pct = None if raw_stop in (None, "", "none") else float(raw_stop)
+    if stop_loss_pct not in STOP_LOSS_OPTIONS:
+        allowed = ", ".join("없음" if v is None else f"{v:g}" for v in STOP_LOSS_OPTIONS)
+        raise ValueError(f"stop_loss_pct 는 {allowed} 중 하나여야 합니다 (받은 값: {raw_stop})")
+
     raw_adr = settings.get("adr_floor", DEFAULT_SETTINGS["adr_floor"])
     adr_floor = None if raw_adr in (None, "", "none") else int(raw_adr)
     if adr_floor not in ADR_FLOOR_OPTIONS:
@@ -289,7 +300,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         # 종목 수(슬롯)는 풀별 설정이 아니라 시스템 공통(config.TOP_N_HOLD) — 업종 상한은
         # 개념째 폐기했다(집중 완화는 합성 배분 몫).
         "top_n": TOP_N_HOLD,
-        "stop_loss_pct": pick("stop_loss_pct", STOP_LOSS_OPTIONS, float),
+        "stop_loss_pct": stop_loss_pct,
         "exit_ma_days": pick("exit_ma_days", EXIT_MA_OPTIONS, int),
     }
 
