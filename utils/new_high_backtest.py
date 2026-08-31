@@ -692,6 +692,21 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     stop_pct = float(settings["stop_loss_pct"])
     exit_ma_days = int(settings["exit_ma_days"])
     below_ma_last = signals["below_ma"].loc[last]
+    # 이탈 이평선 값 — 화면이 "이탈까지 얼마 남았는지"를 보여준다. **판정에 쓰는 그 선**이라
+    # 화면 숫자와 매도 판정이 갈리지 않는다. 장중이면 아래에서 잠정 종가로 다시 계산한다.
+    exit_ma_last = signals["exit_ma"].loc[last]
+
+    def attach_exit_ma_gap() -> None:
+        """보유 행에 이탈선 값과 현재가 대비 여유(%)를 붙인다. 값이 없으면 채우지 않는다."""
+        for held in holdings:
+            line = exit_ma_last.get(held["ticker"])
+            price = held.get("price")
+            if line is None or pd.isna(line) or float(line) <= 0 or price is None:
+                held["exit_ma"] = None
+                held["exit_ma_gap_pct"] = None
+                continue
+            held["exit_ma"] = round(float(line), 2)
+            held["exit_ma_gap_pct"] = round((float(price) / float(line) - 1) * 100, 2)
 
     def mark_exits(price_of) -> None:
         """청산 여부를 표시한다. price_of 가 None 을 돌려주면 판정하지 않는다."""
@@ -752,6 +767,7 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     )
 
     mark_exits(confirmed_close)
+    attach_exit_ma_gap()
     # 확정 종가 기준 판정 — 장중이면 아래에서 잠정 종가로 다시 판정하며 예상으로 바꾼다.
     for held in holdings:
         held["is_exit_forecast"] = False
@@ -846,8 +862,11 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
                 continue
             window = recent[held["ticker"]].tolist() + [live["price"]]
             if len(window) == exit_ma_days and not any(pd.isna(v) for v in window):
-                below_ma_last[held["ticker"]] = live["price"] < sum(window) / exit_ma_days
+                live_line = sum(window) / exit_ma_days
+                below_ma_last[held["ticker"]] = live["price"] < live_line
+                exit_ma_last[held["ticker"]] = live_line
         mark_exits(lambda ticker: (quotes["by_ticker"].get(ticker) or {}).get("price"))
+        attach_exit_ma_gap()
         # 장중 판정은 **오늘 잠정 종가** 기준이라 확정이 아니다. 종가가 바뀌면 결과도 바뀌므로
         # 화면·합성이 '(예상)' 으로 구분할 수 있게 표시한다(모멘텀의 `is_exit_forecast` 와 같은 뜻).
         for held in holdings:
