@@ -221,7 +221,7 @@ STOP_LOSS_PCT_OPTIONS: tuple[float, ...] = (-7.0, -10.0)
 # 모멘텀 ADR 하한 — 판정일의 시장 ADR(20일 등락비율)이 이 값 미만이면 그 주는 전량 현금.
 # None = 게이트 없음(기본). 시장은 풀 설정의 시장 레짐 지수를 따른다.
 # 85~95 는 코스닥 검증에서 확인된 유효 구간 — 100 은 중앙값 부근이라 상시 껌뻑여 제외.
-ADR_FLOOR_OPTIONS: tuple[int | None, ...] = (None, 90, 95, 100)
+ADR_FLOOR_OPTIONS: tuple[int | None, ...] = (None, 90, 100)
 
 # 거래대금 하한 — 평소 대비 몇 배 이상이어야 신호로 인정할지. None = 제한 없음.
 MIN_VALUE_MULT_OPTIONS: tuple[float | None, ...] = (5.0, 2.0, 1.0, None)
