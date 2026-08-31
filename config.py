@@ -359,3 +359,10 @@ TUNING_WORKERS: int | None = 10
 # 그려진다. 다만 창이 짧으면 장기선이 거의 직선으로 보여 판정선 구실을 못 한다 —
 # 장기 이평선이 240일인 풀(kor_div_etf)은 12개월 이상이 읽을 만하다.
 HOLDING_CHART_MONTHS = 13
+
+# 차트에 **내 평균 매입가**를 그릴지. 끄면 점선과 왼쪽 배지가 함께 사라진다.
+#
+# 실제로 들고 있는 종목에만 나오므로(`utils/portfolio_io.average_buy_price_by_ticker`)
+# 전략 판단에 내 단가가 끼어드는 게 싫을 때 끈다 — 물타기 유혹을 줄이려는 목적이다.
+# 계산은 계좌 원장을 한 번 읽는 정도라 켜 두어도 비용이 거의 없다.
+HOLDING_CHART_SHOW_AVG_BUY_PRICE = True
