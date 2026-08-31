@@ -288,7 +288,10 @@ def run_backtest(
                 "sleeve_weight_pct": round(value / sleeve_value * 100, 4) if sleeve_value > 0 else 0.0,
             }
         )
-    open_positions.sort(key=lambda row: row["entry_date"], reverse=True)
+    # 오래 들고 있는 것이 위 — 화면(`/strategy-new-high`)이 보여주는 순서다.
+    # 여기서 맞춰 두면 이 목록을 그대로 쓰는 합성 슬리브도 같은 순서가 된다
+    # (예전에는 화면만 다시 뒤집어서 두 화면의 순서가 정반대로 보였다).
+    open_positions.sort(key=lambda row: row["entry_date"])
     # 빈 슬롯·잔여 현금 비중 — 종목 비중과 합쳐 100 이 된다.
     sleeve_cash_weight_pct = round(cash / sleeve_value * 100, 4) if sleeve_value > 0 else 100.0
     exited_today = [t for t in trades if t["exit_date"] == str(last_day.date())]
