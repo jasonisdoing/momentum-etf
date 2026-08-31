@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 from io import BytesIO
 from typing import Any
 from zipfile import ZipFile
@@ -31,13 +32,41 @@ _COLLECTION_NAME = "etf_market_master"
 # 탭 구분 .cod 파일의 필드 위치 (cp949).
 _F_TICKER = 4
 _F_NAME_KR = 6
-_F_NAME_EN = 7
+_F_NAME_EN = 7  # 운용사·법적 구조까지 담긴 긴 이름 — PTP 판정에 쓴다
 _F_SECURITY_TYPE = 8  # 2=주식, 3=ETF
 _F_CURRENCY = 9
 
 _ETF_TYPE = "3"
 _DOLLAR_VOLUME_DAYS = 20  # 거래대금 순위의 평균 일수
 _YF_CHUNK = 300
+
+# PTP(Publicly Traded Partnership) 판정 — 국내 투자자는 **매도 대금 총액의 10%** 가
+# 원천징수돼 사실상 거래 대상이 아니다. 그래서 화면에서 기본으로 뺀다.
+#
+# 판정은 마스터의 **긴 이름**(`_F_NAME_EN`)으로 한다 — 거기에 법적 구조가 드러난다:
+#   BWET → "AMPLIFY COMMODITY TRUST BREAKWAVE TANKER SHIPPING ETF"
+#   USO  → "UNITED STATES OIL FUND LP UNITS"
+#   UCO  → "PROSHARES TRUST II ULTA BLOMBERG CRUD OIL"
+# 화면에 쓰는 짧은 이름에는 이 정보가 없어서 이름 키워드 필터로는 못 걸렀다.
+#
+# `LP` 는 **펀드 이름의 LP** 만 본다 — 그냥 걸면 운용사명("SPROTT ASSET MANAGEMENT LP")이
+# 걸려 PTP 가 아닌 PHYS·PSLV·CEF 까지 빠진다.
+#
+# 마스터의 긴 이름이 종목마다 들쭉날쭉해 못 잡는 것이 있다(BOIL·ZSL·GLL·UVXY·VIXY —
+# 형제 종목엔 있는 "TRUST II" 가 빠져 있다). 그건 아래 목록에 티커로 적어 보완한다.
+_PTP_NAME_PATTERN = re.compile(
+    r"(?:FUND|FD|FDS)\s+LP|LP\s+UNIT|PARTNERSHIP|"
+    r"COMMODITY TRUST|COMM TR|COMMODTY|COMMODITY POOL|PROSHARES TRUST II",
+    re.I,
+)
+
+# 긴 이름으로 못 잡는 PTP — 확인되는 대로 티커를 적는다.
+_PTP_EXTRA_TICKERS: frozenset[str] = frozenset()
+
+
+def _is_ptp(ticker: str, legal_name: str) -> bool:
+    """이 ETF 가 PTP 인지. 긴 이름의 법적 구조 + 보완 티커 목록으로 본다."""
+    return ticker in _PTP_EXTRA_TICKERS or bool(_PTP_NAME_PATTERN.search(legal_name or ""))
 
 
 def _load_us_etf_master() -> list[dict[str, str]]:
@@ -71,6 +100,8 @@ def _load_us_etf_master() -> list[dict[str, str]]:
                     # 화면 표기는 한글명 우선 — KIS 가 번역해 둔 종목만 있고, 없으면 영문명.
                     "name": name_kr or name_en,
                     "exchange": exchange,
+                    # 법적 구조가 드러나는 긴 이름 — PTP 판정용(화면에는 안 쓴다).
+                    "legal_name": name_en,
                 }
             )
             count += 1
@@ -186,6 +217,8 @@ def refresh_us_etf_market_cache() -> int:
                 "prev_volume": int(volumes.iloc[-1]) if not volumes.empty else 0,
                 # 20일 평균 거래대금(백만$) — 시가총액 대신 규모 지표로 쓴다.
                 "dollar_volume_musd": round(dollar_volume_by[ticker] / 1e6, 1),
+                # PTP 여부 — 화면이 기본으로 제외한다(국내 매도 시 총액 10% 원천징수).
+                "is_ptp": _is_ptp(ticker, by_ticker[ticker].get("legal_name", "")),
             }
         )
 

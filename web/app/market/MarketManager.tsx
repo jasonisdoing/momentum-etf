@@ -37,6 +37,9 @@ type MarketRowItem = {
   prev_volume: number;
   market_cap: number;
   is_held: boolean;
+  /** PTP(Publicly Traded Partnership) — 국내 매도 시 총액 10% 원천징수라 사실상 거래 대상이 아니다.
+   *  이름으로는 못 가르는 값이라 배치가 판정해 내려준다(`utils/us_etf_market_service`). */
+  is_ptp?: boolean;
 };
 
 type MarketResponse = {
@@ -65,6 +68,9 @@ type MarketVariantConfig = {
   errorLabel: string;
   // 이름 키워드 제외 필터 — 대소문자 무시 비교이므로 키워드는 대문자로 적는다.
   exclusionGroups: Record<string, string[]>;
+  /** 이름으로 못 가르는 제외 그룹 — 배치가 판정해 둔 불리언 필드를 본다.
+   *  키워드 그룹과 같은 칩으로 보이고 같은 방식으로 켜고 끈다. */
+  flagExclusions?: Record<string, keyof MarketRowItem>;
   defaultExcluded: string[];
   showNavColumns: boolean; // Nav·괴리율 — 한국 실시간 스냅샷에만 있다
   showListing: boolean; // 상장일 컬럼 + 신규 필터 — 미국 마스터에는 상장일이 없다
@@ -122,7 +128,10 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
         "비트코인", "이더리움",
       ],
     },
-    defaultExcluded: ["채권", "인버스/숏", "레버리지", "커버드콜/인컴", "리츠", "가상자산"],
+    // PTP — 원자재·선물형 상품(BWET·DBA·USO 등)이 여기 속한다. 짧은 이름에는 법적 구조가
+    // 안 드러나 키워드로는 못 거른다(배치가 긴 이름으로 판정해 `is_ptp` 로 내려준다).
+    flagExclusions: { PTP: "is_ptp" },
+    defaultExcluded: ["채권", "인버스/숏", "레버리지", "커버드콜/인컴", "리츠", "가상자산", "PTP"],
     showNavColumns: false,
     showListing: false,
     capHeader: "거래대금($M)",
@@ -249,6 +258,10 @@ export function MarketManager({
   const filteredRows = useMemo(() => {
     const normalizedQuery = query.trim().toUpperCase();
     const expandedKeywords = excludedGroups.flatMap((group) => variant.exclusionGroups[group] ?? []);
+    // 이름으로 못 가르는 그룹(PTP) — 배치가 판정해 둔 불리언 필드를 본다.
+    const excludedFlagFields = excludedGroups
+      .map((group) => variant.flagExclusions?.[group])
+      .filter((field): field is keyof MarketRowItem => Boolean(field));
     const marketCapFilter = Number(minMarketCap || 0);
     const volumeFilter = Number(minPrevVolume || 0);
     const today = new Date();
@@ -265,6 +278,10 @@ export function MarketManager({
           !row.ticker.toUpperCase().includes(normalizedQuery) &&
           !row.name.toUpperCase().includes(normalizedQuery)
         ) {
+          return false;
+        }
+
+        if (!newOnly && excludedFlagFields.some((field) => row[field] === true)) {
           return false;
         }
 
@@ -704,7 +721,7 @@ export function MarketManager({
           </div>
           <div className="card-body appCardBodyTight appTableCardBodyFill">
             <div className="pillRow">
-              {Object.keys(variant.exclusionGroups).map((group) => {
+              {[...Object.keys(variant.exclusionGroups), ...Object.keys(variant.flagExclusions ?? {})].map((group) => {
                 const isActive = excludedGroups.includes(group);
                 return (
                   <button
