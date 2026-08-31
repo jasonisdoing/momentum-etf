@@ -48,7 +48,7 @@ type Settings = {
   pool: string;
   /** 서버가 config.TOP_N_HOLD 로 채워 주는 공통값 — 화면에 입력은 없고 표시·계산에만 쓴다. */
   top_n: number;
-  stop_loss_pct: number;
+  stop_loss_pct: number | null;
   exit_ma_days: number;
   /** 진입 자격 — 거래대금 배수 하한(20일 평균 대비). null 이면 조건 없음. */
   min_value_mult: number | null;
@@ -61,7 +61,7 @@ type PoolOption = PoolLabelSource & { country_code?: string; currency?: string; 
 
 type Constraints = {
   adr_floor_options?: (number | null)[];
-  stop_loss_options: number[];
+  stop_loss_options: (number | null)[];
   exit_ma_options: number[];
   min_value_mult_options: (number | null)[];
   month_options: number[];
@@ -1166,11 +1166,17 @@ export function NewHighClient() {
                     <span className="appLabeledFieldLabel">손절선</span>
                     <select
                       className="form-select form-select-sm"
-                      value={String(draft.stop_loss_pct)}
-                      onChange={(event) => setDraft({ ...draft, stop_loss_pct: Number(event.target.value) })}
+                      value={draft.stop_loss_pct == null ? "" : String(draft.stop_loss_pct)}
+                      onChange={(event) => setDraft({
+                        ...draft,
+                        stop_loss_pct: event.target.value === "" ? null : Number(event.target.value),
+                      })}
+                      title="진입가 대비 이 낙폭에 닿으면 다음 시가에 판다. '없음'이면 손절 없이 이탈 이평선만으로 청산한다."
                     >
-                      {constraints.stop_loss_options.map((n) => (
-                        <option key={n} value={n}>{n}%</option>
+                      {constraints.stop_loss_options.map((value) => (
+                        <option key={String(value)} value={value == null ? "" : String(value)}>
+                          {value == null ? "없음" : `${value}%`}
+                        </option>
                       ))}
                     </select>
                   </label>
@@ -1450,14 +1456,18 @@ export function NewHighClient() {
               label: "ADR 하한",
               values: (constraints.adr_floor_options ?? []).map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: String(n) })),
             },
-            { key: "stop_loss_pct", label: "손절선", values: constraints.stop_loss_options.map((n) => ({ value: n, label: `${n}%` })) },
+            {
+              key: "stop_loss_pct",
+              label: "손절선",
+              values: constraints.stop_loss_options.map((n) => ({ value: n, label: n == null ? "없음" : `${n}%` })),
+            },
           ]}
           onApply={async (params) => {
             // 조합을 상단 폼에 넣고 그대로 저장한다 (저장 응답이 폼·운용 현황을 갱신한다).
             await persistSettings(
               {
                 ...draft,
-                stop_loss_pct: Number(params.stop_loss_pct),
+                stop_loss_pct: params.stop_loss_pct == null ? null : Number(params.stop_loss_pct),
                 exit_ma_days: Number(params.exit_ma_days),
                 min_value_mult: params.min_value_mult == null ? null : Number(params.min_value_mult),
                 adr_floor: params.adr_floor == null ? null : Number(params.adr_floor),
