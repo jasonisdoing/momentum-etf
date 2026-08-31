@@ -140,6 +140,8 @@ type Holding = {
   exit_reason: string | null;
   /** 종목에 붙는 메모 — 순위·모멘텀·자산 관리 화면과 같은 값. */
   memo?: string;
+  exit_ma_gap_pct?: number | null;
+  exit_ma?: number | null;
 };
 
 /** 보유 표에 함께 그리는 행. 아직 안 산 종목은 매수가·수익률이 없다. */
@@ -164,6 +166,10 @@ type PlanRow = {
   exit_reason: string | null;
   /** 종목에 붙는 메모 — 순위·모멘텀·자산 관리 화면과 같은 값. */
   memo?: string;
+  /** 이탈 이평선까지 남은 여유(%) — (현재가 ÷ 이탈선 − 1) × 100. 0 에 가까울수록 매도 임박. */
+  exit_ma_gap_pct?: number | null;
+  /** 이탈 이평선 값 — 여유율 툴팁에 함께 보여준다. */
+  exit_ma?: number | null;
 };
 
 type Positions = {
@@ -823,6 +829,7 @@ export function NewHighClient() {
       entry_date: h.entry_date, entry_price: h.entry_price, return_pct: h.return_pct,
       plan: h.status, days: h.days, is_new: h.is_new, exit_reason: h.exit_reason,
       memo: h.memo,
+      exit_ma_gap_pct: h.exit_ma_gap_pct, exit_ma: h.exit_ma,
     }));
     const buys: PlanRow[] = positions.planned_entries.map((row) => ({
       ticker: row.ticker, name: row.name, industry: row.industry, market_cap_rank: row.market_cap_rank ?? null,
@@ -995,8 +1002,27 @@ export function NewHighClient() {
         valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
         cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
       },
+      {
+        // 이탈까지 얼마나 남았나 — 현재가가 이탈 이평선보다 몇 % 위인지.
+        // 판정에 쓰는 바로 그 선이라 이 숫자가 0 이하가 되면 매도 판정이 선다.
+        field: "exit_ma_gap_pct",
+        // 이름에 이평선 일수를 넣는다 — 설정을 바꾸면 헤더도 따라 바뀐다.
+        headerName: `MA${draft?.exit_ma_days ?? ""} 이탈`,
+        width: 96,
+        type: "numericColumn",
+        headerTooltip: `현재가가 이탈 이평선(MA${draft?.exit_ma_days ?? ""})보다 몇 % 위인지. 0 에 가까울수록 매도가 가깝다.`,
+        tooltipValueGetter: (p) =>
+          p.data?.exit_ma != null ? `이탈선 ${formatPrice(p.data.exit_ma)}` : "",
+        valueFormatter: (p) => (p.value == null ? "-" : `${(p.value as number).toFixed(1)}%`),
+        // 5% 안으로 들어오면 붉게 — 그 밖은 평범한 숫자다(눈이 임박한 것만 잡게).
+        cellStyle: (p): { color: string; fontWeight: number } | null => {
+          const value = p.value as number | null;
+          if (value != null && value <= 5) return { color: "var(--up-color, #d64545)", fontWeight: 700 };
+          return null;
+        },
+      },
     ],
-    [hasIndustryData, fillDay, positions?.live],
+    [hasIndustryData, fillDay, positions?.live, draft?.exit_ma_days],
   );
 
   const tradeColumns = useMemo<ColDef<Trade>[]>(

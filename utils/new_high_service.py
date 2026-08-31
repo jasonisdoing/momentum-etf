@@ -239,6 +239,8 @@ def compute_signals(panel: dict[str, pd.DataFrame], exit_ma_days: int) -> dict[s
         # 돌파 판정은 **종가** 기준이다 — 장중에 잠깐 찍고 밀린 것은 돌파로 보지 않는다.
         "breakout": close_df > prior_high,
         "below_ma": close_df < exit_ma,
+        # 이탈선 값 자체 — 화면이 "이탈까지 얼마 남았는지"를 보여주는 데 쓴다(판정과 같은 선).
+        "exit_ma": exit_ma,
         "prior_high": prior_high,
         "prior_high_intraday": prior_high_intraday,
         # 20일 평균 거래대금 대비 배수 — 돌파에 자금이 실렸는지 본다.
