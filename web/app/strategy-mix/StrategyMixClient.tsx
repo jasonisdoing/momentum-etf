@@ -278,6 +278,8 @@ type Positions = {
     sleeve_rebalance_today: boolean;
     /** 오늘의 액션 — 서버가 조립한 체결일 묶음(화면·슬랙 알람 공용 단일 소스). */
     groups: ActionGroup[];
+    /** 지시 밴드 — 설명 문구용(config 단일 소스). */
+    band?: { ratio_pct: number; min_pct: number };
     /** 다음주 교체 가정 미리보기 — 오늘의 액션과 같은 조립을 다음주 가정 목표로 돌린 결과.
      *  종목 교체가 없으면 오늘의 액션과 똑같다. 과거 조회면 null. */
     next_week_preview: {
@@ -1740,7 +1742,8 @@ export function StrategyMixClient() {
                     <div style={{ fontWeight: 700, marginBottom: 6 }}>
                       오늘의 액션
                       <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
-                        목표 비중과 슬롯 크기의 15%p(최소 0.5%p) 이상 차이만 지시로 표시 — 가격
+                        목표 비중과 슬롯 크기의 {actions?.band?.ratio_pct ?? "-"}%(최소{" "}
+                        {actions?.band?.min_pct ?? "-"}%p) 이상 차이만 지시로 표시 — 가격
                         변동(드리프트)으로는 지시가 없고, 큰 단위 입출금·교체·진입·이탈·월초 이관 때
                         나옵니다 · 모멘텀 교체 확정분은 교체일 그룹
                       </span>
