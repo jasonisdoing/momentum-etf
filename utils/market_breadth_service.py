@@ -330,7 +330,14 @@ def refresh_market_breadth() -> dict[str, Any]:
         else:
             light = _daily_counts_light(market, spec, target_date)
             if light is None:
-                summary["markets"][market] = {"skipped": True, "reason": "기준일 불일치", "latest_date": target_date}
+                # 키 이름을 `skipped` 로 쓰지 않는다 — 아래 정상 형태의 `skipped` 는
+                # '표본 부족으로 건너뛴 **날짜 수**'라 뜻이 다르다. 같은 이름을 쓰면
+                # 요약을 찍는 쪽이 둘을 구분하지 못해 죽는다(KeyError: 'universe').
+                summary["markets"][market] = {
+                    "market_skipped": True,
+                    "reason": "기준일 불일치",
+                    "latest_date": target_date,
+                }
                 continue
             tickers, counts = light
             counts_by_date = {target_date: counts}
@@ -352,10 +359,12 @@ def refresh_market_breadth() -> dict[str, Any]:
                 inserted += 1
 
         summary["markets"][market] = {
+            "market_skipped": False,
             "universe": len(tickers),
             "inserted": inserted,
             "updated": updated,
-            "skipped": skipped,
+            # 표본 부족으로 건너뛴 **날짜 수** — 시장을 건너뛴 것과 다르다.
+            "skipped_days": skipped,
             "latest_date": target_date,
         }
         logger.info(
