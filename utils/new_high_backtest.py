@@ -155,11 +155,16 @@ def run_backtest(
     curve: list[float] = []
     last_day = span[-1]
 
+    # 평가 전용 종가 — 그날 값이 없으면 **직전 유효 종가**로 본다.
+    # 판정(돌파·이탈)에는 쓰지 않는다. 없는 날을 0 으로 치면 그 종목이 사라진 것처럼
+    # 계산돼 곡선이 한 번에 무너진다(us_etf 가 마지막 하루로 -100% 가 됐다).
+    valuation_close = close_df.ffill()
+
     def _value_at(day: pd.Timestamp) -> float:
         """그날 종가로 평가한 총자산 — 현금 + 보유 평가액."""
         total = cash
         for ticker, position in holdings.items():
-            price = close_df.at[day, ticker]
+            price = valuation_close.at[day, ticker]
             if pd.notna(price):
                 total += position["shares"] * float(price)
         return total

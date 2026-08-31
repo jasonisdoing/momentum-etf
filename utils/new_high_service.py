@@ -209,6 +209,12 @@ def build_price_panel(universe: list[dict[str, str]], frames: dict[str, pd.DataF
         raise RuntimeError("가격 캐시를 불러오지 못해 신고가를 판정할 수 없습니다.")
 
     close_df = pd.DataFrame(closes).sort_index()
+    # 종가가 **한 종목도 없는 날**은 거래일로 치지 않는다. 가격 캐시가 거래량만 채우고
+    # OHLC 는 비운 행을 만들 때가 있는데(us_etf 2026-08-28), 그걸 마지막 거래일로 삼으면
+    # 백테스트가 그날 보유 평가액을 0 으로 매겨 하루 만에 -100% 로 무너진다.
+    close_df = close_df.dropna(axis=0, how="all")
+    if close_df.empty:
+        raise RuntimeError("가격 캐시에 종가가 있는 거래일이 없습니다.")
     return {
         "close": close_df,
         "open": pd.DataFrame(opens).reindex(close_df.index),
