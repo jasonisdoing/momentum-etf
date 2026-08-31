@@ -1664,7 +1664,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             <ResponsiveFiltersSection>
               <div className="appMainHeader">
                 <div className="appMainHeaderLeft rankMainHeaderLeft">
-                  <label className="appLabeledField rankPoolField">
+                  <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">종목풀</span>
                     <select
                       className="form-select"
