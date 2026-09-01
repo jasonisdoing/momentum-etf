@@ -168,8 +168,19 @@ type PicksResult = {
   country: string;
   currency: string;
   monthly_return_labels: string[];
-  /** ADR 게이트 상태 — 하한 미설정이면 null. blocked 면 이번 주는 전량 현금. */
-  adr_gate?: { market: string | null; floor: number; value: number | null; blocked: boolean } | null;
+  /**
+   * ADR 게이트 상태 — 하한 미설정이면 null. blocked 면 이번 주는 전량 현금.
+   * `intraweek` 는 마지막 확정 종가 기준의 주중 게이트 — 주간 판정을 통과한 뒤 ADR 이
+   * 무너지면 여기가 blocked 가 되고 다음 거래일 시가에 전량 매도한다.
+   * 주중 이탈이 꺼진 풀은 null.
+   */
+  adr_gate?: {
+    market: string | null;
+    floor: number;
+    value: number | null;
+    blocked: boolean;
+    intraweek?: { date: string; value: number | null; blocked: boolean } | null;
+  } | null;
   rows: PickRow[];
 };
 
@@ -1244,9 +1255,20 @@ export function MomentumClient() {
                           {" "}· ADR 게이트 발동 — {view.picks.adr_gate.market} {view.picks.adr_gate.value ?? "-"} &lt;{" "}
                           {view.picks.adr_gate.floor}, 이번 주 전량 현금
                         </b>
+                      ) : view.picks.adr_gate.intraweek?.blocked ? (
+                        // 주간 판정은 통과했는데 그 뒤 ADR 이 무너진 상태 — 판정일 값만 보여 주면
+                        // 왜 전량 매도 예정인지 화면에서 알 수가 없다. 최신 값을 함께 세운다.
+                        <b style={{ color: "#d9480f" }}>
+                          {" "}· ADR {view.picks.adr_gate.market} {view.picks.adr_gate.value ?? "-"} → 주중 게이트 발동{" "}
+                          {view.picks.adr_gate.intraweek.value ?? "-"} &lt; {view.picks.adr_gate.floor}, 다음 거래일 시가 전량 매도
+                        </b>
                       ) : (
                         <span>
                           {" "}· ADR {view.picks.adr_gate.market} {view.picks.adr_gate.value ?? "-"} (하한 {view.picks.adr_gate.floor})
+                          {view.picks.adr_gate.intraweek?.value != null &&
+                          view.picks.adr_gate.intraweek.value !== view.picks.adr_gate.value
+                            ? ` · 최신 ${view.picks.adr_gate.intraweek.value}`
+                            : ""}
                         </span>
                       )
                     ) : null}
