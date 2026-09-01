@@ -995,11 +995,28 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
         market = adr_market_of_pool(pool)
         series = load_adr_series(market) if market else pd.Series(dtype=float)
         value = series.asof(signal_date) if not series.empty else None
+        # 주중 게이트 — 마지막 확정 종가 기준. 주간 판정(위 value)은 통과했어도 그 뒤 ADR 이
+        # 무너지면 다음 거래일 시가에 전량 매도한다. 화면이 그 상태를 따로 알려야 해서
+        # 판정일 값과 **함께** 싣는다(같은 자리에 최신값을 덮으면 게이트 근거가 사라진다).
+        # 주중 이탈이 꺼진 풀은 주중에 팔지 않으므로 None.
+        latest_date = benchmark_close.index[-1]
+        latest_value = series.asof(latest_date) if not series.empty else None
         adr_gate = {
             "market": market,
             "floor": settings["adr_floor"],
             "value": round(float(value), 1) if value is not None and pd.notna(value) else None,
             "blocked": adr_gate_blocked(settings, signal_date),
+            "intraweek": (
+                {
+                    "date": str(latest_date.date()),
+                    "value": (
+                        round(float(latest_value), 1) if latest_value is not None and pd.notna(latest_value) else None
+                    ),
+                    "blocked": adr_gate_blocked(settings, latest_date),
+                }
+                if settings.get("intraweek_exit", True)
+                else None
+            ),
         }
 
     candidates = select_candidates(universe, frames, settings, as_of=signal_date)
