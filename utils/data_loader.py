@@ -374,6 +374,40 @@ def canonical_cache_ticker(ticker: str, country: str) -> str:
     return ticker_norm
 
 
+def _preserve_recent_completed_rows(
+    new_df: pd.DataFrame, old_df: pd.DataFrame, country_code: str
+) -> pd.DataFrame:
+    """전체 재수집 결과에 빠진 **최근 완결 거래일** 행을 기존 캐시에서 되살린다.
+
+    야후가 특정 날을 통째로 빼고 주면(2026-08-28 실사례) 전체 재수집이 그 행을 지워,
+    풀 끝의 네이버 보완이 돌기 전까지 화면 판정이 잠깐 다른 결과를 내는 창이 생겼다.
+    저장 시점에 병합해 그 창 자체를 없앤다. 검사 범위는 최근 30일의 완결 거래일 —
+    더 오래된 구멍은 네이버 보완·의심 날짜 정리가 다룬다.
+    """
+    from utils.trading_calendar import get_trading_days, is_market_day_completed
+
+    try:
+        recent = [
+            pd.Timestamp(day).normalize()
+            for day in get_trading_days(
+                (pd.Timestamp.now() - pd.Timedelta(days=30)).strftime("%Y-%m-%d"),
+                pd.Timestamp.now().strftime("%Y-%m-%d"),
+                country_code,
+            )
+        ]
+        keep_days = [
+            day
+            for day in recent
+            if day in old_df.index and day not in new_df.index and is_market_day_completed(country_code, day)
+        ]
+    except Exception:
+        return new_df
+    if not keep_days:
+        return new_df
+    merged = pd.concat([new_df, old_df.loc[keep_days]]).sort_index()
+    return merged[~merged.index.duplicated(keep="first")]
+
+
 def fetch_ohlcv(
     ticker: str,
     country: str,
@@ -488,8 +522,12 @@ def _fetch_ohlcv_with_cache(
 
     if force_refresh:
         cached_df = None
+        # 전체 재수집이 소스의 일시 누락으로 **최근 완결 거래일 행을 지워버리지 않도록**
+        # 기존 캐시를 보존용으로 따로 들고 간다 — 저장 직전에 빠진 날만 되살린다.
+        previous_df = load_cached_frame_with_fallback(cache_key, ticker)
         missing_ranges.append((request_start_dt, end_dt))
     else:
+        previous_df = None
         cached_df = load_cached_frame_with_fallback(cache_key, ticker)
         # cache_seed_dt는 이미 위에서 가져왔으므로 중복 제거
         if (cached_df is None or cached_df.empty) and cache_seed_dt is not None:
@@ -610,6 +648,8 @@ def _fetch_ohlcv_with_cache(
         combined_df = pd.concat(frames)
         combined_df.sort_index(inplace=True)
         combined_df = combined_df[~combined_df.index.duplicated(keep="last")]
+        if force_refresh and previous_df is not None and not previous_df.empty:
+            combined_df = _preserve_recent_completed_rows(combined_df, previous_df, country_code)
         save_cached_frame(cache_key, ticker, combined_df)
 
         # new_total = combined_df.shape[0]
