@@ -817,6 +817,23 @@ export function MomentumClient() {
     }
     return min;
   }, [backtest]);
+  // 주간의 최저 ADR — 월간·연간은 날짜 접두사로 묶이지만 주는 접두사가 없어 **구간**으로 나눈다
+  // (직전 기준일 다음날 ~ 이번 기준일). 표는 최신순이라 여기서 오름차순으로 세워 훑는다.
+  const adrMinByWeekEnd = useMemo(() => {
+    const min = new Map<string, number>();
+    const weekEnds = (backtest?.weekly ?? []).map((row) => row.week_end).sort();
+    if (weekEnds.length === 0) return min;
+    const days = [...(backtest?.daily ?? [])].sort((a, b) => a.date.localeCompare(b.date));
+    let index = 0;
+    for (const row of days) {
+      if (row.adr == null) continue;
+      while (index < weekEnds.length && row.date > weekEnds[index]) index += 1;
+      if (index >= weekEnds.length) break;
+      const known = min.get(weekEnds[index]);
+      if (known == null || row.adr < known) min.set(weekEnds[index], row.adr);
+    }
+    return min;
+  }, [backtest]);
 
   /** ADR 컬럼 — 정의는 공용(@/lib/grid-cells), 여기서는 숨김 여부만 바인딩한다. */
   const adrColumn = useCallback(
@@ -959,6 +976,11 @@ export function MomentumClient() {
       pctColumn("전략", "strategy_pct", "그 주 보유 포트폴리오의 수익률 (교체 비용 반영)"),
       pctColumn(benchmarkLabel, "benchmark_pct", `${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
       adrColumn<BacktestWeekRow>("판정일 ADR", (row) => row.adr, "기준일(판정일) 종가 기준 시장 ADR — 다음 주 게이트를 결정한 값"),
+      adrColumn<BacktestWeekRow>(
+        "최저 ADR",
+        (row) => adrMinByWeekEnd.get(row.week_end) ?? null,
+        "그 주의 시장 ADR 최저값 — 주중 게이트가 걸렸는지 본다",
+      ),
     ];
     columns.push(
       {
@@ -1020,7 +1042,7 @@ export function MomentumClient() {
     );
     columns.push(excessColumn<BacktestWeekRow>());
     return columns;
-  }, [backtest]);
+  }, [backtest, adrColumn, adrMinByWeekEnd]);
 
   const yearColumns = useMemo<ColDef<BacktestYearRow>[]>(() => {
     if (!backtest) return [];
