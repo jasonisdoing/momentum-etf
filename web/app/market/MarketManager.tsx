@@ -694,7 +694,33 @@ export function MarketManager({
                         value={minPrevVolume}
                         onChange={(event) => setMinPrevVolume(event.target.value)}
                       />
-                      {variant.showListing ? (
+                    </div>
+                  </label>
+                  {/* 과세 구분 — 국내 주식형만 매매차익 비과세다. 이름으로는 못 가르므로
+                      (KODEX 레버리지는 국내 주식이지만 파생이라 과세) 배치가 받아 둔 분류를 쓴다. */}
+                  {variant.showTaxFilter ? (
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">과세</span>
+                      <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="과세 구분">
+                        {TAX_FILTER_OPTIONS.map(({ key, label, title }) => (
+                          <button
+                            key={key}
+                            type="button"
+                            className={taxFilter === key ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                            onClick={() => setTaxFilter(key)}
+                            title={title}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </label>
+                  ) : null}
+                  {/* 신규 — 누르면 일수 입력과 안내가 옆으로 늘어난다. 그래서 왼쪽 묶음의
+                      **맨 끝**에 둔다(가운데 있으면 펼칠 때마다 뒤 칸이 밀린다). */}
+                  {variant.showListing ? (
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">신규 상장</span>
                       <div className="marketNewOnlyRow">
                         <button
                           type="button"
@@ -715,31 +741,11 @@ export function MarketManager({
                               aria-label="신규 ETF 최근 일수"
                             />
                             <span className="marketNewOnlyDaysLabel">일</span>
-                          </div>) : null}
+                          </div>
+                        ) : null}
                         {newOnly ? (
                           <span className="marketNewOnlyHint">최근 {Math.max(1, Number.parseInt(newListingDays || "14", 10) || 14)}일 상장 ETF</span>
                         ) : null}
-                      </div>
-                      ) : null}
-                    </div>
-                  </label>
-                  {/* 과세 구분 — 국내 주식형만 매매차익 비과세다. 이름으로는 못 가르므로
-                      (KODEX 레버리지는 국내 주식이지만 파생이라 과세) 배치가 받아 둔 분류를 쓴다. */}
-                  {variant.showTaxFilter ? (
-                    <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">과세</span>
-                      <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="과세 구분">
-                        {TAX_FILTER_OPTIONS.map(({ key, label, title }) => (
-                          <button
-                            key={key}
-                            type="button"
-                            className={taxFilter === key ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                            onClick={() => setTaxFilter(key)}
-                            title={title}
-                          >
-                            {label}
-                          </button>
-                        ))}
                       </div>
                     </label>
                   ) : null}
