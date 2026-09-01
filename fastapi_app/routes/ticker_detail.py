@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from fastapi import APIRouter, Body, Depends, Query
 
-from config import CACHE_TTL_LIVE, MARKET_SCHEDULES
+from config import CACHE_TTL_LIVE, HOLDING_CHART_SHOW_AVG_BUY_PRICE, MARKET_SCHEDULES
 from fastapi_app.dependencies import require_internal_token
 from services.component_price_service import build_component_price_snapshot, enrich_component_prices
 from services.portfolio_change_service import (
@@ -180,7 +180,12 @@ def _calculate_consolidated_average_buy_price(ticker: str, currency: str | None 
 
     같은 티커가 여러 시장에 상장된 경우(예: IOO — 미국 USD / 호주 AUD)가 있어,
     ``currency`` 가 주어지면 그 통화 보유분만 합산한다(통화가 섞여 계산 불가한 상황 자체를 없앤다).
+
+    `config.HOLDING_CHART_SHOW_AVG_BUY_PRICE` 가 꺼져 있으면 계산하지 않는다 —
+    전략·순위 차트와 같은 스위치다(내 단가를 화면에서 빼는 목적이라 화면마다 다르면 뜻이 없다).
     """
+    if not HOLDING_CHART_SHOW_AVG_BUY_PRICE:
+        return None
     ticker_key = str(ticker or "").strip().upper()
     if not ticker_key:
         raise ValueError("ticker 값이 필요합니다.")
