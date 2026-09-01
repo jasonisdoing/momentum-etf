@@ -1818,20 +1818,8 @@ export function StrategyMixClient() {
                             </ul>
                           </div>
                         ))}
-                        {actions?.sleeve_rebalance_today ? (
-                          <div>
-                            <strong>슬리브 리밸런싱</strong> — 매월 첫 거래일입니다.
-                            {positions?.summary?.base_weights
-                              ? ` ${[
-                                  ...slotKeys.map(
-                                    (slot) =>
-                                      `${slotLabel(slot)} ${positions.summary.base_weights[`${slot}_pct`] ?? 0}%`,
-                                  ),
-                                  `현금 ${positions.summary.base_weights.cash_pct ?? 0}%`,
-                                ].join(" · ")} 로 다시 맞추세요.`
-                              : " 저장된 배분으로 다시 맞추세요."}
-                          </div>
-                        ) : null}
+                        {/* 월초 슬리브 리밸런싱 안내문은 제거했다 — 실제 할 일은 위 지시 목록에
+                            이미 나오는데 "다시 맞추세요" 명령문이 별도 수동 작업처럼 읽혔다. */}
                       </div>
                     )}
                   </div>
