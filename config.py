@@ -207,7 +207,7 @@ MIN_TRADING_DAYS = 20
 # 화면 셀렉트는 API 응답으로 받은 목록만 렌더한다(프론트에 복사본을 두지 않는다).
 
 # 풀별 보유 종목 수 선택지 — 실제 값은 DB(pool_settings)의 각 풀 문서에 저장한다.
-TOP_N_HOLD_OPTIONS: tuple[int, ...] = (5, 8, 10)
+TOP_N_HOLD_OPTIONS: tuple[int, ...] = (5, 6, 8, 10)
 
 # 손절 기준(%) — 진입가·평단 대비 하락률. 세 군데가 같은 목록을 쓴다:
 #   · 신고가 전략의 손절선          (new_high_service.STOP_LOSS_OPTIONS)

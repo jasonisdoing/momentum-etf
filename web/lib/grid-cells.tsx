@@ -56,6 +56,35 @@ export function renderHighDrawdownCell(value: number | null | undefined, digits 
   return <span>{`${value.toFixed(digits)}%`}</span>;
 }
 
+/** 이탈 이평선까지 남은 이격 컬럼 — 신고가·모멘텀 운용 현황 공용.
+ *  0 이하면 이탈이고, 5% 안으로 가까워지면 빨강·굵게 표시한다. */
+export function maExitGapColumn<T>(options: {
+  field: ColDefField<T>;
+  maDays: number | null | undefined;
+  getMaValue?: (row: T | undefined) => number | null | undefined;
+  formatMaValue?: (value: number, row: T | undefined) => string;
+}): ColDef<T> {
+  const label = `MA${options.maDays ?? ""}`;
+  return {
+    field: options.field,
+    headerName: `${label} 이탈`,
+    width: 96,
+    type: "numericColumn",
+    headerTooltip: `현재가가 이탈 이평선(${label})보다 몇 % 위인지. 0에 가까울수록 매도가 가깝다.`,
+    tooltipValueGetter: (p) => {
+      const value = options.getMaValue?.(p.data);
+      if (value == null) return "";
+      return `이탈선 ${options.formatMaValue?.(value, p.data) ?? String(value)}`;
+    },
+    valueFormatter: (p) => (p.value == null ? "-" : `${Number(p.value).toFixed(1)}%`),
+    cellStyle: (p): { color: string; fontWeight: number } | null => {
+      const value = p.value as number | null;
+      if (value != null && value <= 5) return { color: "var(--up-color, #d64545)", fontWeight: 700 };
+      return null;
+    },
+  };
+}
+
 /** 거래대금 배수(20일 평균 대비) 셀 색 — 클수록 진해진다. 종목풀 순위·신고가 공용.
  *
  *  대부분 1배 근처에 몰려 있어(중앙값 0.94배) 평상시 값까지 물들이면 표가 시끄러워지고
