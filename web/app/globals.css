@@ -4616,13 +4616,18 @@ a {
   flex-wrap: nowrap;
 }
 
+/* 시장 화면 헤더 — 다른 화면과 같은 규칙을 쓴다(내용 폭 + 자리 모자라면 줄바꿈).
+   예전에는 `:first-child` 18rem · `:not(:first-child)` 11rem 으로 **자리 순서**에 폭을
+   박고 `nowrap` 이었다. 그래서 칸을 하나 더하면 밀려나는 게 아니라 겹쳤다 — 거래량 칸은
+   안에 입력(140px)과 「신규」 버튼이 들어 11rem 을 이미 넘겼고, 넘친 만큼 옆 칸을 밟았다.
+   검색 칸만 넓게 두되 줄어들 수는 있게 한다. */
 .marketMainHeaderLeft {
   flex: 1 1 auto;
-  flex-wrap: nowrap;
 }
 
 .marketMainHeaderLeft .appLabeledField {
   width: auto;
+  flex: 0 0 auto;
 }
 
 .marketMainHeaderLeft .field {
@@ -4631,17 +4636,6 @@ a {
 
 .marketMainHeaderLeft .appLabeledField:first-child {
   flex: 0 1 18rem;
-}
-
-.marketMainHeaderLeft .appLabeledField:not(:first-child) {
-  flex: 0 0 11rem;
-}
-
-/* 과세 토글 칸 — 버튼 세 개라 위 자리 규칙(11rem)에 안 들어간다. 내용만큼 쓴다.
-   자리 순서로 폭을 정하는 규칙 아래에 새 칸을 넣을 때는 이렇게 예외를 명시해야 한다
-   (그냥 두면 좁은 폭에 눌려 옆 요소와 겹친다). */
-.marketMainHeaderLeft .appLabeledField.marketTaxField {
-  flex: 0 0 auto;
 }
 
 .marketMainHeaderRight {
@@ -5169,13 +5163,7 @@ a {
     flex-wrap: wrap;
   }
 
-  .marketMainHeaderLeft .appLabeledField:first-child,
-  .marketMainHeaderLeft .appLabeledField:not(:first-child) {
-    flex: 1 1 100%;
-  }
-
-  .rankMainHeaderLeft .appLabeledField:first-child,
-  .rankMainHeaderLeft .appLabeledField:nth-child(2),
+  .marketMainHeaderLeft .appLabeledField,
   .rankMainHeaderLeft .appLabeledField {
     flex: 1 1 100%;
   }

@@ -726,7 +726,7 @@ export function MarketManager({
                   {/* 과세 구분 — 국내 주식형만 매매차익 비과세다. 이름으로는 못 가르므로
                       (KODEX 레버리지는 국내 주식이지만 파생이라 과세) 배치가 받아 둔 분류를 쓴다. */}
                   {variant.showTaxFilter ? (
-                    <label className="appLabeledField marketTaxField">
+                    <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">과세</span>
                       <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="과세 구분">
                         {TAX_FILTER_OPTIONS.map(({ key, label, title }) => (
