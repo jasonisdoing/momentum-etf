@@ -12,6 +12,22 @@ export type LoadingProgress = {
   message: string;
 };
 
+/**
+ * 진행률을 일정 간격으로 90%까지 올린다. 서버가 단일 요청으로 응답해 실제 단계를
+ * 알 수 없으므로, 실제 소요 시간(수 초~수 분)에 맞춘 완만한 램프만 보여준다.
+ * 반환값을 호출하면 타이머가 멈춘다 — 응답이 오면 반드시 호출한다.
+ */
+export function startProgressRamp(
+  setProgress: (updater: (prev: LoadingProgress | null) => LoadingProgress | null) => void,
+  stepPercent = 6,
+  intervalMs = 400,
+): () => void {
+  const timer = window.setInterval(() => {
+    setProgress((prev) => (prev ? { ...prev, percent: Math.min(90, prev.percent + stepPercent) } : prev));
+  }, intervalMs);
+  return () => window.clearInterval(timer);
+}
+
 type AppLoadingProgressProps = {
   title: string;
   progress: LoadingProgress | null;
@@ -44,7 +60,8 @@ const barStyle: React.CSSProperties = {
 };
 
 export function AppLoadingProgress({ title, progress, fallbackMessage }: AppLoadingProgressProps) {
-  const percent = progress?.percent ?? 0;
+  // 표시는 항상 정수 % — 램프가 소수로 올라와도(튜닝처럼 느린 램프) 화면은 같은 형식을 쓴다.
+  const percent = Math.round(progress?.percent ?? 0);
   return (
     <div style={boxStyle}>
       <div style={textRowStyle}>

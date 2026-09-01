@@ -9,13 +9,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-from config import MIN_TRADING_DAYS
+from config import METRIC_WINDOW_MONTHS, MIN_TRADING_DAYS
 from utils.moving_averages import calculate_moving_average
 
 
@@ -112,13 +112,136 @@ def compute_trend_frame(
         ma_cols[ticker] = ma_series.reindex(close_frame.index)
     ma_frame = pd.DataFrame(ma_cols, index=close_frame.index)
     trend = pd.DataFrame(
-        {
-            ticker: calculate_maps_score(close_frame[ticker], ma_frame[ticker])
-            for ticker in close_frame.columns
-        },
+        {ticker: calculate_maps_score(close_frame[ticker], ma_frame[ticker]) for ticker in close_frame.columns},
         index=close_frame.index,
     )
     return trend
+
+
+def compute_ma_disparity(close_series: pd.Series, ma_days: int) -> float | None:
+    """종목 하나의 **최신 이격률(%)** — 종가가 이동평균보다 몇 % 위/아래인가.
+
+    `compute_trend_frame` 의 1종목 버전이다. 순위 화면(프레임 단위)과 보유종목 알림(종목
+    단위)이 같은 정의를 쓰도록 계산을 여기 한 곳에 둔다 — 예전에는 알림이 따로 계산하면서
+    가격 구간을 잘라(EMA 워밍업 부족) 순위 화면과 다른 값을 냈다.
+
+    ``min_periods`` 를 두지 않는 것도 프레임 버전과 같다 — 상장 직후라도 있는 종가로
+    부분 계산한다. 랭킹 포함 여부는 ``compute_eligibility_mask`` 가 따로 판정한다.
+    """
+    series = close_series.dropna()
+    if series.empty:
+        return None
+    ma_series = calculate_moving_average(series, int(ma_days))
+    score = calculate_maps_score(series, ma_series)
+    if score.empty or pd.isna(score.iloc[-1]):
+        return None
+    return float(score.iloc[-1])
+
+
+def rank_score(long_disparity_pct: Any, short_disparity_pct: Any = None) -> Any:
+    """**순위 점수** — 종목을 줄 세우는 단일 기준. 정의는 **장기 이격률**이다.
+
+    순위 화면(`/pools-rank`)의 정렬·추천(✅)과 모멘텀 전략(`/strategy-momentum`)의 선정이
+    이 함수 하나만 쓴다. 예전에는 두 곳이 각자 계산해서, 정의를 바꾸려면 양쪽을 따로
+    고쳐야 했고 한쪽만 고치면 두 화면의 순서가 조용히 갈렸다.
+
+    **단기는 순위에 넣지 않는다.** 두 이평선의 역할이 다르기 때문이다 — 장기는 종목을
+    고르고(순위), 단기는 들고 있을지만 본다(이탈). 한때 둘의 평균을 점수로 썼는데,
+    단기 반등만으로 순위가 오르내려 장기 추세로 줄 세운다는 뜻이 흐려졌다.
+    단기 이격률은 `hold_eligible` 이 계속 본다 — 둘 중 하나라도 깨지면 이탈이다.
+
+    `short_disparity_pct` 는 호출부 시그니처를 유지하려고 남긴 자리다(점수에 쓰지 않는다).
+
+    스칼라(종목 하나)와 Series(프레임 전체) 둘 다 받는다 — 호출부가 형태를 맞출 필요가 없다.
+    값이 없으면 None/NaN 을 그대로 돌려준다(임의 값으로 채우지 않는다).
+    """
+    del short_disparity_pct  # 순위는 장기만 본다 (이탈 판정은 hold_eligible 이 따로 한다)
+    if isinstance(long_disparity_pct, pd.Series):
+        return pd.to_numeric(long_disparity_pct, errors="coerce")
+    if long_disparity_pct is None or pd.isna(long_disparity_pct):
+        return None
+    return float(long_disparity_pct)
+
+
+def drawdown_from_high_pct(
+    close_series: pd.Series,
+    current_price: float | None = None,
+    *,
+    window_months: int = METRIC_WINDOW_MONTHS,
+) -> float | None:
+    """고점 대비(%) — 최근 ``window_months`` 최고가 대비 현재가. 0 이면 신고점.
+
+    순위 화면(`/pools-rank`)과 모멘텀 전략이 같은 값을 쓰도록 여기서만 정의한다.
+    창을 캐시 전 기간이 아니라 12개월로 자르는 것이 규칙의 핵심이라, 각자 계산하면
+    창 길이가 갈려 같은 종목에 화면마다 다른 값이 붙는다.
+
+    ``current_price`` 를 주면 그 값으로 비교한다(실시간 반영가). 없으면 마지막 종가.
+    """
+    series = pd.to_numeric(close_series, errors="coerce").dropna()
+    if series.empty:
+        return None
+    price = float(series.iloc[-1]) if current_price is None else float(current_price)
+    window = series.loc[series.index[-1] - pd.DateOffset(months=int(window_months)) :]
+    if window.empty:
+        return None
+    max_price = float(window.max())
+    if max_price <= 0:
+        return None
+    return (price / max_price - 1.0) * 100.0
+
+
+def hold_eligible(long_disparity_pct: Any, short_disparity_pct: Any) -> Any:
+    """보유 가능 조건 — **장기 이격 > 0 이고 단기 이격 >= 0**.
+
+    장기 이평선은 종목 선택, 단기 이평선은 손절/익절을 담당한다. **둘 중 하나라도
+    이탈하면 이탈**이다 — 장기 추세가 죽었거나 단기 추세가 꺾이면 보유하지 않는다.
+    순위 화면의 추천(✅)·모멘텀 선정·백테스트가 같은 규칙을 쓰도록 여기서만 정의한다.
+
+    순위(`rank_score`)는 장기만 본다 — 이 함수와 역할이 다르다.
+
+    스칼라와 Series 둘 다 받는다 — `rank_score` 와 같다. 종목풀 조건(제외 종목)은
+    호출부에서 따로 건다.
+    """
+    if isinstance(long_disparity_pct, pd.Series) or isinstance(short_disparity_pct, pd.Series):
+        long_series = pd.to_numeric(long_disparity_pct, errors="coerce")
+        short_series = pd.to_numeric(short_disparity_pct, errors="coerce")
+        return long_series.notna() & (long_series > 0) & short_series.notna() & (short_series >= 0)
+    if long_disparity_pct is None or short_disparity_pct is None:
+        return False
+    if pd.isna(long_disparity_pct) or pd.isna(short_disparity_pct):
+        return False
+    return float(long_disparity_pct) > 0 and float(short_disparity_pct) >= 0
+
+
+def select_holdings(
+    candidates: Sequence[Mapping[str, Any]],
+    *,
+    top_n: int,
+) -> list[str]:
+    """**보유 대상 선정 — 순위 화면과 모멘텀 전략이 함께 쓰는 단 하나의 규칙.**
+
+    ① 자격(`hold_eligible`) → ② 순위 점수(`rank_score`) 내림차순으로 최대 `top_n` 개의
+    티커를 돌려준다. (업종 상한은 폐기 — 집중 완화는 합성 배분이 맡는다.)
+
+    `candidates` 의 각 항목에 필요한 키:
+        ticker · long_disparity_pct · short_disparity_pct
+    이미 자격을 거른 목록을 넘겨도 된다(조건을 다시 통과할 뿐이다).
+    """
+    scored: list[tuple[float, str]] = []
+    for row in candidates:
+        ticker = str(row.get("ticker") or "").strip()
+        if not ticker:
+            continue
+        long_pct, short_pct = row.get("long_disparity_pct"), row.get("short_disparity_pct")
+        if not hold_eligible(long_pct, short_pct):
+            continue
+        score = rank_score(long_pct, short_pct)
+        if score is None:
+            continue
+        scored.append((float(score), ticker))
+    # 점수 내림차순. 동점은 티커 순으로 못 박아 실행할 때마다 순서가 흔들리지 않게 한다.
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [ticker for _, ticker in scored[: int(top_n)]]
 
 
 def compute_rule_percentile_frame(
@@ -194,6 +317,10 @@ __all__ = [
     "calculate_maps_score",
     "calculate_signed_percentile_score",
     "compute_trend_frame",
+    "rank_score",
+    "hold_eligible",
+    "select_holdings",
+    "drawdown_from_high_pct",
     "compute_rule_percentile_frame",
     "compute_eligibility_mask",
     "combine_rule_percentiles",

@@ -27,6 +27,8 @@ services:
       - ./data:/app/data:ro
       # cron 래퍼 hotfix 용 bind mount (이미지 재빌드 없이 반영)
       - ./infra/cron:/app/infra/cron:ro
+      # 증권사 API 토큰 캐시 — scheduler 와 공유(같은 앱키 = 같은 캐시 파일 = 토큰 1개 재사용)
+      - nhplug_token_cache:/root/.nhplug
       # cron 배치 로그 (호스트에서 tail 가능)
       - ./logs:/app/logs
     expose:
@@ -55,8 +57,8 @@ services:
     expose:
       - "80"
     environment:
-      - VIRTUAL_HOST=etf.dojason.com
-      - LETSENCRYPT_HOST=etf.dojason.com
+      - VIRTUAL_HOST=invest.jason.ai.kr
+      - LETSENCRYPT_HOST=invest.jason.ai.kr
       - LETSENCRYPT_EMAIL=kimwootak@catholic.ac.kr
       - TZ=Asia/Seoul
     volumes:
@@ -79,8 +81,14 @@ services:
       - ./data:/app/data
       - ./infra/cron:/app/infra/cron:ro
       - ./logs:/app/logs
+      # 증권사 API 토큰 캐시(24시간 유효) — 컨테이너를 재생성해도 재발급(보안 알림톡)이
+      # 나지 않도록 호스트에 보존한다.
+      - nhplug_token_cache:/root/.nhplug
     command: ["python", "-u", "infra/server_scheduler.py"]
     # 배포 시 진행 중인 배치(가격 캐시 등)가 끝날 때까지 SIGKILL 을 미룬다.
     # subprocess timeout(20분) 과 같은 기준 — 20분 안에 자연 종료 또는 timeout 으로 정리.
     stop_grace_period: 20m
     restart: unless-stopped
+
+volumes:
+  nhplug_token_cache:

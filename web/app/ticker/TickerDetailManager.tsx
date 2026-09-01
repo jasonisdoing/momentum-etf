@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { IconCheck, IconPlus } from "@tabler/icons-react";
 import { useSearchParams } from "next/navigation";
+
+import { formatCurrencyPrice } from "@/lib/price-format";
 import {
   createChart,
   ColorType,
@@ -256,7 +258,7 @@ function formatSignedPriceDelta(value: number | null, countryCode: string): stri
   if (absValue === 0) {
     return "0";
   }
-  return `${value > 0 ? "▲ " : "▼ "}${formatTickerPrice(absValue, countryCode)}`;
+  return `${value > 0 ? "▲ " : "▼ "}${formatCurrencyPrice(absValue, countryCode)}`;
 }
 
 function formatDateWithWeekday(value: string): string {
@@ -388,74 +390,6 @@ function aggregateYearlyRows(data: PriceRow[]): YearlyPriceRow[] {
   }));
 }
 
-function formatTickerPrice(value: number | null, countryCode: string): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "N/A";
-  }
-
-  const normalized = String(countryCode || "").trim().toLowerCase();
-  if (normalized === "au" || normalized === "aud") {
-    return `A$${new Intl.NumberFormat("en-AU", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value)}`;
-  }
-
-  if (normalized === "us" || normalized === "usd") {
-    return `$${new Intl.NumberFormat("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value)}`;
-  }
-
-  if (normalized === "eur") {
-    return `€${new Intl.NumberFormat("de-DE", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value)}`;
-  }
-
-  if (normalized === "twd") {
-    return `${new Intl.NumberFormat("zh-TW", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value)} TWD`;
-  }
-
-  if (normalized === "hkd") {
-    return `HK$${new Intl.NumberFormat("en-HK", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value)}`;
-  }
-
-  if (normalized === "jpy") {
-    return `¥${new Intl.NumberFormat("ja-JP", {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value)}`;
-  }
-
-  if (normalized === "gbp") {
-    return `£${new Intl.NumberFormat("en-GB", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value)}`;
-  }
-
-  if (normalized === "cny") {
-    return `${new Intl.NumberFormat("zh-CN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value)} CNY`;
-  }
-
-  return `${new Intl.NumberFormat("ko-KR", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value)}원`;
-}
-
 function buildRangeBadgeText(
   anchorPrice: number,
   currentPrice: number,
@@ -463,7 +397,7 @@ function buildRangeBadgeText(
   countryCode: string,
 ): string {
   const pct = anchorPrice === 0 ? null : ((currentPrice / anchorPrice) - 1) * 100;
-  return `${formatTickerPrice(anchorPrice, countryCode)} (${formatPercent(pct)}, ${date})`;
+  return `${formatCurrencyPrice(anchorPrice, countryCode)} (${formatPercent(pct)}, ${date})`;
 }
 
 function getInitialVisibleLogicalRange(
@@ -775,11 +709,14 @@ export function TickerDetailManager({
     return map;
   }, [chartRows]);
 
+  // 제목 옆 현재가·등락률 — **항상 전일 대비**(일봉 마지막)다.
+  // 차트 기간(일/주/월)을 따라가면 월봉을 볼 때 한 달 등락률이 제목에 떠서, 옆 ETF정보의
+  // 전일 대비와 값이 어긋난다. 제목은 종목의 지금 상태를 알리는 자리라 기간과 무관해야 한다.
   const lastInfo = useMemo<CrosshairInfo | null>(() => {
-    if (chartRows.length === 0) return null;
-    const last = chartRows[chartRows.length - 1];
+    if (rows.length === 0) return null;
+    const last = rows[rows.length - 1];
     return { open: last.open, high: last.high, low: last.low, close: last.close, change_pct: last.change_pct };
-  }, [chartRows]);
+  }, [rows]);
 
   useEffect(() => {
     if (!chartContainerRef.current || chartRows.length === 0) {
@@ -816,7 +753,7 @@ export function TickerDetailManager({
       priceFormat: {
         type: "custom",
         minMove: priceMinMove,
-        formatter: (price: number) => formatTickerPrice(price, selectedCountryCode),
+        formatter: (price: number) => formatCurrencyPrice(price, selectedCountryCode),
       },
     });
     candleSeries.setData(
@@ -944,7 +881,7 @@ export function TickerDetailManager({
         priceFormat: {
           type: "custom",
           minMove: priceMinMove,
-          formatter: (price: number) => formatTickerPrice(price, selectedCountryCode),
+          formatter: (price: number) => formatCurrencyPrice(price, selectedCountryCode),
         },
       }).setData(maData);
     }
@@ -1095,10 +1032,10 @@ export function TickerDetailManager({
       },
       {
         field: "close", headerName: "종가", minWidth: 84, flex: 0.95, type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode)
+        cellRenderer: (params: { value: number | null }) => formatCurrencyPrice(params.value, selectedCountryCode)
       },
       {
-        field: "change_pct", headerName: "등락률", minWidth: 92, flex: 0.95, type: "rightAligned",
+        field: "change_pct", headerName: "일간(%)", minWidth: 92, flex: 0.95, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => (
           <span className={getSignedClass(params.value)}>{formatPercent(params.value)}</span>
         )
@@ -1126,7 +1063,7 @@ export function TickerDetailManager({
       },
       {
         field: "amount", headerName: "주당 배당금", minWidth: 100, flex: 1, type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode),
+        cellRenderer: (params: { value: number | null }) => formatCurrencyPrice(params.value, selectedCountryCode),
       },
       {
         field: "yield_pct", headerName: "배당수익률", minWidth: 96, flex: 1, type: "rightAligned",
@@ -1147,7 +1084,7 @@ export function TickerDetailManager({
       },
       {
         field: "close", headerName: "월말 종가", minWidth: 88, flex: 0.95, type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode)
+        cellRenderer: (params: { value: number | null }) => formatCurrencyPrice(params.value, selectedCountryCode)
       },
       {
         field: "change_pct", headerName: "월간 등락률", minWidth: 96, flex: 0.95, type: "rightAligned",
@@ -1174,7 +1111,7 @@ export function TickerDetailManager({
       },
       {
         field: "close", headerName: "연말 종가", minWidth: 88, flex: 0.95, type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode)
+        cellRenderer: (params: { value: number | null }) => formatCurrencyPrice(params.value, selectedCountryCode)
       },
       {
         field: "change_pct", headerName: "연간 등락률", minWidth: 96, flex: 0.95, type: "rightAligned",
@@ -1274,7 +1211,7 @@ export function TickerDetailManager({
           width: 108,
           type: "rightAligned",
           cellRenderer: (params: { value: number | null; data?: TickerHoldingRow }) =>
-            formatTickerPrice(params.value, String(params.data?.price_currency || "kor")),
+            formatCurrencyPrice(params.value, String(params.data?.price_currency || "kor")),
         },
         {
           field: "change_pct",
@@ -1319,7 +1256,7 @@ export function TickerDetailManager({
                     <div className="tickerDetailHeroLeft">
                       <div className="tickerDetailHeroTitle">{displayTitle}</div>
                       {lastInfo?.close != null ? (
-                        <span className="tickerDetailHeroPrice">{formatTickerPrice(lastInfo.close, selectedCountryCode)}</span>
+                        <span className="tickerDetailHeroPrice">{formatCurrencyPrice(lastInfo.close, selectedCountryCode)}</span>
                       ) : null}
                       {lastInfo?.change_pct != null ? (
                         <span className={`tickerDetailHeroChange ${getSignedClass(lastInfo.change_pct)}`}>
@@ -1347,7 +1284,7 @@ export function TickerDetailManager({
                             <div className="tickerDetailInfoSummaryRow">
                               <span className="tickerDetailInfoLabel">현재가</span>
                               <div className="tickerDetailInfoMain">
-                                <strong>{formatTickerPrice(latestClose, selectedCountryCode)}</strong>
+                                <strong>{formatCurrencyPrice(latestClose, selectedCountryCode)}</strong>
                                 <span className={getSignedClass(latestChangeAmount ?? latestChangePct)}>
                                   {formatSignedPriceDelta(latestChangeAmount, selectedCountryCode)}
                                 </span>
@@ -1357,7 +1294,7 @@ export function TickerDetailManager({
                             <div className="tickerDetailInfoSummaryRow">
                               <span className="tickerDetailInfoLabel">iNAV</span>
                               <div className="tickerDetailInfoMain">
-                                <strong>{formatTickerPrice(etfInfo?.nav ?? null, "kor")}</strong>
+                                <strong>{formatCurrencyPrice(etfInfo?.nav ?? null, "kor")}</strong>
                                 <span className={getSignedClass(navDelta)}>{formatSignedPriceDelta(navDelta, "kor")}</span>
                                 <span className={getSignedClass(navChangePct)}>{formatPercent(navChangePct)}</span>
                               </div>
@@ -1486,7 +1423,7 @@ export function TickerDetailManager({
                       </div>
                       <div ref={chartContainerRef} style={{ width: "100%", position: "relative" }} />
                       {chartAverageBadge ? (
-                        <div className="tickerDetailAverageBadge" style={{ top: chartAverageBadge.top }}>
+                        <div className="appChartAverageBadge" style={{ top: chartAverageBadge.top }}>
                           <span>내 평균 </span>
                           <span className={getSignedClass(chartAverageBadge.returnPct)}>
                             {formatSignedPercent(chartAverageBadge.returnPct)}

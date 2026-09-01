@@ -76,9 +76,7 @@ def _fetch_field(settings: dict, start, field: str) -> pd.DataFrame:
 
     series: dict[str, pd.Series] = {}
     for ticker in _market_tickers(settings):
-        df = fetch_ohlcv(
-            ticker, country, months_back=None, date_range=[start_str, None], ticker_type=_TICKER_TYPE
-        )
+        df = fetch_ohlcv(ticker, country, months_back=None, date_range=[start_str, None], ticker_type=_TICKER_TYPE)
         if df is None or df.empty:
             raise ValueError(f"가격 데이터를 받아오지 못했습니다: {ticker} ({country})")
 
@@ -95,7 +93,7 @@ def _fetch_field(settings: dict, start, field: str) -> pd.DataFrame:
             if rt_val is not None and rt_val > 0:
                 today_row = pd.DataFrame(
                     {"Open": [rt_val], "High": [rt_val], "Low": [rt_val], "Close": [rt_val], "Volume": [0.0]},
-                    index=[latest_day]
+                    index=[latest_day],
                 )
                 df = pd.concat([df, today_row])
                 df = df[~df.index.duplicated(keep="last")].sort_index()

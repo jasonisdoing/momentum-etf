@@ -14,6 +14,7 @@ from utils.asx_ticker import ensure_asx_prefix, strip_asx_prefix
 from utils.cash_model import cash_total_krw
 from utils.logger import get_app_logger
 from utils.portfolio_io import load_portfolio_master, load_real_holdings_table, save_portfolio_master
+from utils.share_allocation import ShareTarget, allocate_integer_shares
 
 logger = get_app_logger()
 
@@ -61,18 +62,6 @@ def _compute_account_total_assets_native(
     return total_valuation_krw
 
 
-def _compute_target_quantity(target_amount: float, current_price: float, currency: str) -> float | int | None:
-    # NaN 은 `<= 0` 비교를 통과하므로(NaN 비교는 항상 False) 유한성 검사를 먼저 한다.
-    # 가격·목표금액을 알 수 없으면 목표수량도 계산 불가(None → 화면 '-') 로 명시한다.
-    if not math.isfinite(current_price) or current_price <= 0 or not math.isfinite(target_amount):
-        return None
-    quantity = target_amount / current_price
-    currency_code = str(currency or "KRW").strip().upper()
-    if currency_code == "AUD":
-        return round(quantity, 4)
-    return max(math.floor(quantity), 0)
-
-
 def _apply_target_metrics(
     rows: list[dict[str, Any]],
     account_id: str,
@@ -107,6 +96,7 @@ def _apply_target_metrics(
         return rate if rate > 0 else None
 
     enriched_rows: list[dict[str, Any]] = []
+    allocation_targets: list[ShareTarget] = []
     for row in rows:
         target_ratio = target_map.get(_normalize_target_ticker(str(row.get("ticker") or "")))
         next_row = dict(row)
@@ -115,17 +105,31 @@ def _apply_target_metrics(
             next_row["target_amount"] = None
             next_row["target_quantity"] = None
         else:
-            target_amount = round(account_total_assets * (target_ratio / 100.0), 2)
-            next_row["target_amount"] = target_amount
-            # 목표수량 = KRW 목표금액 ÷ (현재가 × 종목 통화 환율). 환율이 없으면 계산 불가(None).
+            next_row["target_amount"] = round(account_total_assets * (target_ratio / 100.0), 2)
+            # 목표수량은 아래에서 전 종목을 **한 번에** 배분한다 — 여기서 개별로 나누지 않는다.
+            # 목표금액·1주값은 통화 혼합 계좌(KRW 계좌의 USD 종목 등)를 위해 KRW 로 맞춘다.
             fx_rate = _row_fx_rate_krw(str(next_row.get("currency") or ""))
             price_krw = float(next_row.get("current_price_num") or 0.0) * fx_rate if fx_rate else 0.0
-            next_row["target_quantity"] = _compute_target_quantity(
-                account_total_krw * (target_ratio / 100.0),
-                price_krw,
-                str(next_row.get("currency") or account_currency),
-            )
+            # NaN 은 `<= 0` 비교를 통과하므로(NaN 비교는 항상 False) 유한성 검사를 먼저 한다.
+            if math.isfinite(price_krw) and price_krw > 0:
+                allocation_targets.append(
+                    ShareTarget(
+                        key=str(next_row.get("ticker") or ""),
+                        target_amount=account_total_krw * (target_ratio / 100.0),
+                        price=price_krw,
+                    )
+                )
+            next_row["target_quantity"] = None  # 배분 후 채운다
         enriched_rows.append(next_row)
+
+    # 종목마다 따로 내림하면 1주 값에 걸려 남은 몫이 현금으로 놀고 아무도 다시 쓰지 않는다.
+    # 합성 전략·백테스트와 **같은 함수**로 한 번에 배분한다.
+    quantities = allocate_integer_shares(
+        allocation_targets, budget=sum(item.target_amount for item in allocation_targets)
+    )
+    for row in enriched_rows:
+        if row.get("target_ratio") is not None and str(row.get("ticker") or "") in quantities:
+            row["target_quantity"] = quantities[str(row["ticker"])]
     return enriched_rows
 
 
@@ -143,11 +147,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
     rates = get_exchange_rates()
     cash_data = load_cash_accounts()
     cash_accounts = cash_data.get("accounts", [])
-    cash_map = {
-        str(account.get("account_id") or ""): account
-        for account in cash_accounts
-        if isinstance(account, dict)
-    }
+    cash_map = {str(account.get("account_id") or ""): account for account in cash_accounts if isinstance(account, dict)}
 
     target_id = str(account_id or "").strip()
     if target_id.upper() == "TOTAL":
@@ -156,7 +156,6 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
     # target_id가 비어있으면 모든 계좌를 순회하며 데이터를 수집함
     all_rows: list[dict[str, Any]] = []
     account_summaries: list[dict[str, Any]] = []
-    selected_account_currency = "KRW"
     selected_cash_info: dict[str, Any] | None = None
 
     for account in all_accounts:
@@ -181,6 +180,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
         # df 가 None 이거나 비어있으면 빈 DataFrame 으로 처리해서 이어 진행한다.
         if df is None or df.empty:
             import pandas as pd  # 지연 import (위 모듈 import 와 일관성)
+
             df = pd.DataFrame()
 
         settings = account.get("settings") or {}
@@ -188,10 +188,13 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
         currency = str(settings.get("currency") or "KRW").strip().upper()
         cash_info = cash_map.get(curr_account_id)
         if curr_account_id == target_id:
-            selected_account_currency = currency
             selected_cash_info = cash_info
 
         account_rows: list[dict[str, Any]] = []
+        # 종목 메모 — 계좌가 아니라 종목에 붙는다(utils/stock_memo_store). 계좌 안 종목을 한 번에 읽는다.
+        from utils.stock_memo_store import get_stock_memos
+
+        memo_by_ticker = get_stock_memos([str(t or "").strip() for t in df.get("티커", [])])
 
         for _, row in df.iterrows():
             ticker_raw = str(row.get("티커") or "").strip()
@@ -209,8 +212,10 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
             avg_price = float(row.get("평균 매입가") or 0)
             current_price = float(row.get("현재가") or 0)
             # NaN/None 방어 로직 추가
+
             def safe_int(val):
                 import pandas as pd
+
                 if pd.isna(val) or val is None:
                     return 0
                 try:
@@ -269,7 +274,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                     "daily_change_pct": float(row.get("일간(%)") or 0) if row.get("일간(%)") is not None else None,
                     "buy_amount_krw": buy_amount,
                     "valuation_krw": val_amount,
-                    "memo": str(row.get("memo") or "").strip(),
+                    "memo": memo_by_ticker.get(ticker_raw, ""),
                     "sort_order": safe_int(row.get("sort_order")),
                     "ticker_type": str(row.get("ticker_type") or "").strip(),
                     "country_code": str(row.get("country_code") or "").strip(),
@@ -333,6 +338,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                 "intl_shares_value": (cash_info or {}).get("intl_shares_value"),
                 "intl_shares_change": (cash_info or {}).get("intl_shares_change"),
                 "updated_at": (cash_info or {}).get("updated_at"),
+                "updated_by": (cash_info or {}).get("updated_by"),
                 "valuation_krw": valuation_krw,
                 "total_assets_krw": valuation_krw + cash_balance_krw,
                 "holdings_count": len([r for r in account_rows if str(r.get("ticker") or "") != "IS"]),
@@ -383,13 +389,15 @@ def delete_holding(account_id: str, ticker: str) -> dict[str, str]:
         raise RuntimeError(f"종목 {ticker}을 찾을 수 없습니다.")
 
     save_portfolio_master(account_id, _assign_sort_order(new_holdings))
-    
-    # 변경 사항을 스냅샷에 즉시 동기화
+
+    # 변경 사항을 통합 스냅샷에 반영 — 전 계좌 재계산이라 무거워서 백그라운드로 돌린다.
     try:
-        from utils.snapshot_service import update_today_snapshot_all_accounts
-        update_today_snapshot_all_accounts()
+        from utils.snapshot_service import refresh_today_snapshot_async
+
+        refresh_today_snapshot_async()
     except Exception as e:
         from utils.logger import get_app_logger
+
         get_app_logger().warning(f"Failed to update snapshot after deletion: {e}")
 
     return {"deleted": ticker}
@@ -425,7 +433,10 @@ def update_holding(
             if average_buy_price is not None:
                 h["average_buy_price"] = float(average_buy_price)
             if memo is not None:
-                h["memo"] = str(memo).strip()
+                # 메모는 계좌 보유가 아니라 **종목**에 붙는다(utils/stock_memo_store).
+                from utils.stock_memo_store import set_stock_memo
+
+                set_stock_memo(h.get("ticker") or ticker, memo)
             if target_ratio is not None:
                 _set_holding_target_ratio(h, float(target_ratio))
             found = True
@@ -436,12 +447,14 @@ def update_holding(
 
     save_portfolio_master(account_id, _assign_sort_order(holdings))
 
-    # 변경 사항을 스냅샷에 즉시 동기화
+    # 변경 사항을 통합 스냅샷에 반영 — 전 계좌 재계산이라 무거워서 백그라운드로 돌린다.
     try:
-        from utils.snapshot_service import update_today_snapshot_all_accounts
-        update_today_snapshot_all_accounts()
+        from utils.snapshot_service import refresh_today_snapshot_async
+
+        refresh_today_snapshot_async()
     except Exception as e:
         from utils.logger import get_app_logger
+
         get_app_logger().warning(f"Failed to update snapshot after update: {e}")
 
     return {"updated": ticker}
@@ -492,21 +505,27 @@ def add_holding(
         "currency": currency,
         "first_buy_date": datetime.now().strftime("%Y-%m-%d"),
         "last_buy_date": datetime.now().strftime("%Y-%m-%d"),
-        "memo": str(memo or "").strip(),
         "sort_order": next_sort_order,
     }
 
     if target_ratio is not None:
         _set_holding_target_ratio(new_holding, float(target_ratio))
+    if memo is not None:
+        # 메모는 계좌 보유가 아니라 **종목**에 붙는다(utils/stock_memo_store).
+        from utils.stock_memo_store import set_stock_memo
+
+        set_stock_memo(raw_ticker, memo)
     holdings.append(new_holding)
     save_portfolio_master(account_id, _assign_sort_order(holdings))
 
-    # 변경 사항을 스냅샷에 즉시 동기화
+    # 변경 사항을 통합 스냅샷에 반영 — 전 계좌 재계산이라 무거워서 백그라운드로 돌린다.
     try:
-        from utils.snapshot_service import update_today_snapshot_all_accounts
-        update_today_snapshot_all_accounts()
+        from utils.snapshot_service import refresh_today_snapshot_async
+
+        refresh_today_snapshot_async()
     except Exception as e:
         from utils.logger import get_app_logger
+
         get_app_logger().warning(f"Failed to update snapshot after addition: {e}")
 
     return {"added": ticker, "name": res["name"]}
@@ -539,10 +558,7 @@ def reorder_holdings(account_id: str, ordered_tickers: list[str]) -> dict[str, A
     if not holdings:
         raise RuntimeError("정렬할 종목이 없습니다.")
 
-    holding_map = {
-        _normalize_target_ticker(str(holding.get("ticker") or "")): holding
-        for holding in holdings
-    }
+    holding_map = {_normalize_target_ticker(str(holding.get("ticker") or "")): holding for holding in holdings}
     missing_tickers = [ticker for ticker in normalized_tickers if ticker not in holding_map]
     if missing_tickers:
         joined = ", ".join(missing_tickers)
@@ -568,9 +584,9 @@ def reorder_holdings(account_id: str, ordered_tickers: list[str]) -> dict[str, A
     )
 
     try:
-        from utils.snapshot_service import update_today_snapshot_all_accounts
+        from utils.snapshot_service import refresh_today_snapshot_async
 
-        update_today_snapshot_all_accounts()
+        refresh_today_snapshot_async()
     except Exception as e:
         from utils.logger import get_app_logger
 
@@ -580,103 +596,33 @@ def reorder_holdings(account_id: str, ordered_tickers: list[str]) -> dict[str, A
 
 
 def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
-    """계좌에 추가할 수 있는 유효한 티커인지 검증한다."""
+    """계좌에 추가할 수 있는 유효한 티커인지 검증한다.
+
+    해석은 `/asset-helper`·`/strategy-portfolio` 와 **같은 공용 함수**(`utils.ticker_resolver`)다.
+    예전에는 여기서 종목풀 10개를 하나씩 돌며 원천 조회를 해서 티커 하나에 19초가 걸렸다 —
+    한국 종목인데 미국·호주 풀 차례에 yfinance 로 찾다가 404 를 반복했다.
+
+    계좌가 여러 통화를 들면 같은 티커가 여러 시장에 있을 수 있다. 그 좁히기(현금 통화 기준)도
+    공용 함수가 한다 — `account_id` 를 넘기면 계좌 통화로 후보를 고른다.
+    """
     account_id = str(account_id or "").strip()
     ticker = str(ticker or "").strip().upper()
 
     if not account_id or not ticker:
         raise RuntimeError("계좌 ID와 종목코드가 필요합니다.")
 
-    # 시장 접두어(ASX:/US:/KOR:)로 시장을 명시할 수 있다(같은 티커가 여러 시장에 있을 때 구분용).
-    forced_country: str | None = None
-    if ticker.startswith("ASX:"):
-        forced_country, raw_ticker = "au", ticker[len("ASX:") :].strip().upper()
-    elif ticker.startswith("US:"):
-        forced_country, raw_ticker = "us", ticker[len("US:") :].strip().upper()
-    elif ticker.startswith("KOR:"):
-        forced_country, raw_ticker = "kor", ticker[len("KOR:") :].strip().upper()
-    else:
-        raw_ticker = ticker.strip().upper()
-    if not raw_ticker:
-        raise RuntimeError("유효한 티커를 입력하세요.")
+    from utils.ticker_resolver import resolve_ticker_meta
 
-    from utils.settings_loader import get_account_settings
-    from utils.stocks_service import validate_stock_candidate
-
-    # 1. 계좌 설정 로드 (DB account_settings 읽기)
     try:
-        settings = get_account_settings(account_id)
-        # account_settings["settings"]가 아닌 top-level에 있는 경우가 많음
-        inner_settings = settings.get("settings") or settings
-    except Exception as e:
-        raise RuntimeError(f"계좌 설정을 찾을 수 없습니다: {account_id} ({e})")
-
-    # 2. 전체 종목풀을 대상으로 종목 추가 가능 여부를 검사한다.
-    from utils.settings_loader import list_available_ticker_types
-
-    ticker_types = list_available_ticker_types()
-    if not ticker_types:
-        raise RuntimeError("사용 가능한 종목풀이 없습니다.")
-
-    # 3. 종목풀(stock_meta)에 이미 등록된 종목만 계좌에 담을 수 있다.
-    #    미등록 종목(status="new": fetch 는 되지만 stock_meta 부재)은 여기서 막고,
-    #    최초 등록 창구인 '종목 순위(pools-rank)' 로 안내한다. (pools-rank 는 이 함수를 거치지 않는다.)
-    last_error = None
-    saw_unregistered = False
-    # 시장(country_code)별 최초 active 후보. 같은 시장의 여러 종목풀 중복은 하나로 취급.
-    candidates_by_country: dict[str, dict[str, Any]] = {}
-
-    for tt in ticker_types:
-        try:
-            # StocksManager가 사용하는 동일한 함수 호출
-            candidate = validate_stock_candidate(tt, raw_ticker)
-        except Exception as e:
-            last_error = str(e)
-            continue
-        if candidate.get("status") == "active":
-            cc = str(candidate.get("country_code") or "").strip().lower()
-            candidates_by_country.setdefault(cc, candidate)
-        else:
-            saw_unregistered = True
-
-    if not candidates_by_country:
-        if saw_unregistered:
-            raise RuntimeError(
-                f"종목풀에 등록되지 않은 종목입니다: {raw_ticker}. "
-                "'종목 순위' 화면에서 먼저 종목을 추가한 뒤 계좌에 담아주세요."
-            )
-        raise RuntimeError(last_error or f"등록되지 않은 종목입니다: {raw_ticker}")
-
-    # 시장 결정: 접두어 지정 > 단일 시장 > 계좌 현금 통화로 후보 필터(A).
-    if forced_country is not None:
-        if forced_country not in candidates_by_country:
-            raise RuntimeError(f"'{raw_ticker}' 는 지정한 시장({forced_country})에 등록돼 있지 않습니다.")
-        validated_res = candidates_by_country[forced_country]
-    elif len(candidates_by_country) == 1:
-        validated_res = next(iter(candidates_by_country.values()))
-    else:
-        # 같은 티커가 여러 시장에 존재 — 계좌가 보유하는 현금 통화로 후보를 좁힌다.
-        from utils.cash_model import currency_for_country, resolve_cash_currencies
-
-        account_currencies = set(resolve_cash_currencies(inner_settings))
-        matched = {
-            cc: cand
-            for cc, cand in candidates_by_country.items()
-            if currency_for_country(cc) in account_currencies
-        }
-        if len(matched) == 1:
-            validated_res = next(iter(matched.values()))
-        else:
-            markets = " / ".join(sorted(f"{currency_for_country(cc)}({cc})" for cc in candidates_by_country))
-            raise RuntimeError(
-                f"'{raw_ticker}' 는 여러 시장에 등록돼 있습니다: {markets}. "
-                f"'US:{raw_ticker}' 또는 'ASX:{raw_ticker}' 처럼 시장을 지정해 주세요."
-            )
+        resolved = resolve_ticker_meta(ticker, account_id=account_id)
+    except RuntimeError as exc:
+        # 종목풀에 없는 티커 — 최초 등록 창구(`/pools-rank`)로 안내한다.
+        raise RuntimeError(f"{exc} '종목 순위' 화면에서 먼저 종목을 추가한 뒤 계좌에 담아주세요.") from exc
 
     return {
-        "ticker": validated_res["ticker"],
-        "name": validated_res["name"],
-        "bucket_id": validated_res.get("bucket_id") or 1,
-        "country_code": str(validated_res.get("country_code") or "").strip().lower(),
-        "status": "success"
+        "ticker": str(resolved["ticker"]),
+        "name": str(resolved["name"]),
+        "bucket_id": int(resolved.get("bucket") or 1),
+        "country_code": str(resolved.get("country_code") or "").strip().lower(),
+        "status": "success",
     }

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from utils.account_registry import load_account_configs
 from utils.cash_model import resolve_cash_currencies, resolve_cash_native_map
 from utils.db_manager import get_db_connection
 from utils.normalization import normalize_nullable_number, normalize_number, to_iso_string
+
+KST = ZoneInfo("Asia/Seoul")
 
 
 def _require_db():
@@ -66,13 +69,20 @@ def load_cash_accounts() -> dict[str, list[dict[str, Any]]]:
                     else None
                 ),
                 "updated_at": to_iso_string(account_doc.get("updated_at")),
+                "updated_by": str(account_doc.get("updated_by") or ""),
             }
         )
 
     return {"accounts": rows}
 
 
-def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, str]:
+def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, Any]:
+    """현금·원금을 저장하고, 저장된 계좌의 현금 상태를 함께 돌려준다.
+
+    반환의 ``accounts`` 는 화면이 **전체 리로드 없이** 현금 칸과 파생값(총자산·현금비중)을
+    바로 갱신하는 데 쓴다. 통화별 native 맵을 원화로 합치려면 환율이 필요해 화면이
+    스스로 계산할 수 없다 — 그래서 서버가 계산한 값을 그대로 내려준다.
+    """
     if not updates:
         raise ValueError("저장할 계좌 데이터가 없습니다.")
 
@@ -80,8 +90,11 @@ def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, str]:
     collection = db.portfolio_master
     doc = collection.find_one({"master_id": "GLOBAL"}) or {"master_id": "GLOBAL", "accounts": []}
     accounts = list(doc.get("accounts") or [])
-    now = datetime.datetime.now()
+    # tz 를 붙여 저장한다 — naive 로 넣으면 Mongo 가 그 값을 UTC 로 보관하고, 읽는 쪽
+    # (to_iso_string)도 UTC 로 해석해 화면에 9시간 뒤(미래)로 찍힌다.
+    now = datetime.datetime.now(KST)
 
+    saved: list[dict[str, Any]] = []
     for update in updates:
         account_id = str(update.get("account_id") or "").strip()
         if not account_id:
@@ -97,6 +110,7 @@ def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, str]:
             "intl_shares_value": normalize_nullable_number(update.get("intl_shares_value")),
             "intl_shares_change": normalize_nullable_number(update.get("intl_shares_change")),
             "updated_at": now,
+            "updated_by": "user",
         }
 
         # 통화별 native 현금 맵 동기화 (신 형식 우선, 없으면 레거시 필드에서 합성).
@@ -139,8 +153,22 @@ def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, str]:
             row["holdings"] = []
             accounts.append(row)
 
-    collection.update_one({"master_id": "GLOBAL"}, {"$set": {"accounts": accounts}}, upsert=True)
-    from utils.snapshot_service import update_today_snapshot_all_accounts
+        merged = accounts[index] if index >= 0 else row
+        saved.append(
+            {
+                "account_id": account_id,
+                "cash": merged.get("cash") or {},
+                "cash_balance_krw": normalize_number(merged.get("cash_balance")),
+                "cash_balance_native": normalize_nullable_number(merged.get("cash_balance_native")),
+                "cash_target_ratio": normalize_number(merged.get("cash_target_ratio")),
+                "total_principal": normalize_number(merged.get("total_principal")),
+                "updated_at": to_iso_string(now),
+                "updated_by": "user",
+            }
+        )
 
-    update_today_snapshot_all_accounts()
-    return {"message": "자산 관리 저장 완료"}
+    collection.update_one({"master_id": "GLOBAL"}, {"$set": {"accounts": accounts}}, upsert=True)
+    from utils.snapshot_service import refresh_today_snapshot_async
+
+    refresh_today_snapshot_async()
+    return {"message": "자산 관리 저장 완료", "accounts": saved}

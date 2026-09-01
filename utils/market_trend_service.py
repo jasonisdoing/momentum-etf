@@ -12,8 +12,6 @@ MA 계산은 utils.moving_averages 사용.
 from __future__ import annotations
 
 import logging
-import math
-import threading
 import time
 from datetime import datetime
 from typing import Any
@@ -23,13 +21,17 @@ import pandas as pd
 import yfinance as yf
 
 from config import (
+    CACHE_TTL_LIVE,
     MARKET_TREND_SCORE_ANCHOR_PERCENTILE,
     MARKET_TREND_SCORE_MA_DAYS,
     MARKET_TREND_SUPERTREND_MULTIPLIER,
     MARKET_TREND_SUPERTREND_PERIOD,
+    METRIC_WINDOW_MONTHS,
     TRADING_DAYS_PER_MONTH,
 )
+from utils.market_breadth_service import load_adr_for_index
 from utils.moving_averages import calculate_moving_average
+from utils.yfinance_guard import yfinance_lock
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,10 @@ INDICES: list[dict[str, str]] = [
     {"name": "S&P 500", "yf_ticker": "^GSPC"},
     {"name": "나스닥 100", "yf_ticker": "^NDX"},
     {"name": "나스닥 100 선물", "yf_ticker": "NQ=F"},  # 이력=yfinance, 최신 봉=토스(RFU.NQc1) 보강
+    # 원/달러 환율. 지수는 아니지만 같은 추세 판정을 쓴다 — 달러 투자 계좌에서는
+    # 환율 상승이 곧 유리한 방향이라 '강세'가 그 계좌 기준으로 맞는 해석이 된다.
+    # (원화 자산 기준으로 읽으면 강세 = 원화 약세다.)
+    {"name": "미국달러", "yf_ticker": "KRW=X"},
 ]
 
 # 네이버 차트 (legacy XML) — 일봉 OHLCV 조회는 공통 헬퍼(utils/naver_chart.py)를 쓴다.
@@ -75,19 +81,11 @@ def _fetch_naver_kor_index_close(symbol: str, count: int) -> pd.Series | None:
     return df["Close"]
 
 
-# yfinance 호출 직렬화 락.
-#
-# yfinance 는 프로세스 전역 상태를 공유해서 여러 스레드가 동시에 받으면 서로 결과를
-# 덮어쓴다. FastAPI 는 동기 엔드포인트를 스레드풀에서 돌리는데, 홈 화면이 지수 4개
-# 차트를 한꺼번에 요청하면 이 조건에 정확히 걸린다.
-# 실제로 '필라델피아 반도체' 카드에 나스닥 100 가격이 그려졌다(2026-08-04 확인).
-# 티커별 SuperTrend 설정은 제 것이 적용돼 가격만 남의 것이 되는 형태라 알아채기 어렵다.
-#
-# 락으로 한 번에 하나씩만 받게 한다. 그러면 4개가 순차 다운로드가 되어 느려지므로
+# yfinance 동시 호출 오염 방지는 공용 락(utils/yfinance_guard)을 쓴다.
+# 락으로 직렬화하면 홈의 지수 4개가 순차 다운로드가 되어 느려지므로,
 # 짧은 TTL 캐시를 함께 둔다 — 같은 화면의 뒤이은 요청은 캐시로 즉시 응답한다.
-_YF_LOCK = threading.Lock()
 _OHLC_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}
-_OHLC_CACHE_TTL_SEC = 60.0
+_OHLC_CACHE_TTL_SEC = CACHE_TTL_LIVE
 
 
 def _fetch_yf_intraday_last_close(yf_ticker: str) -> tuple[pd.Timestamp, float] | None:
@@ -100,7 +98,7 @@ def _fetch_yf_intraday_last_close(yf_ticker: str) -> tuple[pd.Timestamp, float] 
     실패 시 None — 호출자는 보강 없이 기존 daily 시리즈를 그대로 사용한다.
     """
     try:
-        with _YF_LOCK:
+        with yfinance_lock():
             df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
     except Exception as exc:
         logger.warning("intraday 보강 호출 실패 (%s): %s", yf_ticker, exc)
@@ -205,7 +203,7 @@ def compute_market_trend() -> dict[str, Any]:
     Returns:
         ``{"ma_days", "items": [{
             name, ticker, price, change_pct, trend_pct, trend_score,
-            pct_from_high, current_regime, current_regime_days, prev_regime,
+            pct_from_high, pct_from_low, current_regime, current_regime_days, prev_regime,
         }, ...]}``
     """
     ma_days = MARKET_TREND_SCORE_MA_DAYS
@@ -240,6 +238,11 @@ def compute_market_trend() -> dict[str, Any]:
     for idx in INDICES:
         kor_ohlc = kor_ohlc_by_ticker.get(idx["yf_ticker"])
         item = _build_item(df, idx["yf_ticker"], idx["name"], ma_days, kor_ohlc)
+        # ADR 단계·지속일수 — 구성종목 데이터가 있는 한국 지수만 값이 붙는다.
+        adr = load_adr_for_index(idx["yf_ticker"])
+        item["adr"] = adr["latest_adr"] if adr else None
+        item["adr_level"] = adr["level"] if adr else None
+        item["adr_level_days"] = adr["level_days"] if adr else None
         items.append(item)
 
     return {
@@ -267,8 +270,10 @@ def _build_item(
         # 점수 환산 기준 (참조용)
         "score_range_high": None,
         "score_range_low": None,
-        # 52주 전고점 대비 등락률 (현재가 ÷ 52주 최고 − 1) × 100 — 0 이하(고점=0)
+        # 전고점 대비 등락률 (현재가 ÷ 최근 METRIC_WINDOW_MONTHS 최고 − 1) × 100 — 0 이하(고점=0)
         "pct_from_high": None,
+        # 전저점 대비 등락률 (현재가 ÷ 최근 METRIC_WINDOW_MONTHS 최저 − 1) × 100 — 0 이상(저점=0)
+        "pct_from_low": None,
         # 현재 레짐 + 지속 일수 (테이블 표시용)
         "current_regime": None,
         "current_regime_days": None,
@@ -279,6 +284,9 @@ def _build_item(
         "days_since_last_up": None,
         # 현재 레짐이 하락일 때: 마지막 중립 구간 종료 후 경과 거래일 (12개월 내 중립 없으면 None)
         "days_since_last_neutral": None,
+        # 현재 레짐 2일차 시가 대비 등락률 — 표의 "상승 9일째(+16.3%)".
+        # 1일차는 신호 확정 전이라 뺀다. 구간이 하루뿐이면 아직 잡을 구간이 없어 None.
+        "regime_change_pct": None,
     }
     # 한국 인덱스는 네이버에서 받은 OHLC 의 종가를 우선 사용한다.
     full_df = None
@@ -330,11 +338,15 @@ def _build_item(
 
     base["trend_pct"] = _trend_pct_at(close_series, ma_series, offset=0)
 
-    # 52주(252거래일) 전고점 대비 등락률. 현재가가 고점이면 0, 아래면 음수.
-    high_window = close_series.tail(TRADING_DAYS_PER_MONTH * 12 + 12)
-    high_52w = _to_float(high_window.max()) if not high_window.empty else None
-    if high_52w is not None and high_52w > 0 and latest_price is not None:
-        base["pct_from_high"] = (latest_price / high_52w - 1.0) * 100.0
+    # 전고점·전저점 대비 등락률 — 다른 화면의 고점과 같은 공용 창(METRIC_WINDOW_MONTHS, 12개월).
+    # 고점 대비는 0 이하(고점=0), 저점 대비는 0 이상(저점=0).
+    hl_window = close_series.loc[close_series.index[-1] - pd.DateOffset(months=METRIC_WINDOW_MONTHS) :]
+    high_price = _to_float(hl_window.max()) if not hl_window.empty else None
+    if high_price is not None and high_price > 0 and latest_price is not None:
+        base["pct_from_high"] = (latest_price / high_price - 1.0) * 100.0
+    low_price = _to_float(hl_window.min()) if not hl_window.empty else None
+    if low_price is not None and low_price > 0 and latest_price is not None:
+        base["pct_from_low"] = (latest_price / low_price - 1.0) * 100.0
 
     # 최근 12개월 일별 레짐을 ST(SuperTrend)로 계산한다.
     try:
@@ -372,6 +384,18 @@ def _build_item(
             base["days_since_last_up"] = _days_since_last("accel_up")
         else:
             base["days_since_last_neutral"] = _days_since_last("accel_down")
+
+        # 현재 구간 **2일차 시가** 대비 등락률 — 사람이 실제로 잡을 수 있었던 구간이다.
+        # 추세 전환은 1일차 종가로 확정되므로 그날 장중 등락은 신호가 나오기 전이고,
+        # 빨라야 다음 날 시가에 들어간다 (전략 백테스트의 '판정 L−1 종가 / 체결 L 시가'와 같은 기준).
+        # "N일째"의 N 번째 뒤가 1일차이므로 2일차는 N−1 번째 뒤다.
+        # 상승·하락 모두 같은 기준이다 — 레짐이 2상태뿐이라 하락 구간에서는
+        # days_since_last_up 도 현재 구간 일수와 같은 값이다.
+        regime_days = int(ranges[-1]["days"])
+        if regime_days >= 2 and "Open" in full_df.columns and regime_days - 1 <= len(full_df):
+            entry_open = _to_float(full_df["Open"].iloc[-(regime_days - 1)])
+            if entry_open is not None and entry_open > 0 and latest_price is not None:
+                base["regime_change_pct"] = (latest_price / entry_open - 1.0) * 100.0
 
     # MA 괴리율 0%를 0점으로 두고, 12개월 상위 5%(95퍼센타일)/하위 5%(5퍼센타일) 괴리율로
     # 점수 정규화한다. 단발 극단치(최대/최소)는 천장을 한 순간만 만들어 +100 이 거의 안 찍히므로,
@@ -412,30 +436,6 @@ def _trend_pct_series(
     return out
 
 
-def _offense_defense(trend_pct: float | None, trend_min: float | None) -> dict[str, int] | None:
-    """기준 이동평균선 대비 위치로 공격/방어 비율(각 0~100, 20% 단위)을 산출한다.
-
-    상세 차트(`compute_index_history`)의 공격/방어 바 전용이다. 목록 그리드에서는 '이전 추세'
-    컬럼으로 대체되어 더 이상 쓰지 않는다.
-
-    - 종가가 MA 위(괴리 ≥ 0): 공격 100 / 방어 0.
-    - MA 아래: 12개월 최저 괴리(``trend_min``, 화면의 '최저')까지의 진행률 f 를 20% 단위로
-      **올림**해 방어 비율을 매긴다 — MA 아래로 조금이라도 내려가면 방어 20(공격 80)부터
-      시작하고, 최저 근처(f≥80%)면 방어 100(공격 0).
-    데이터가 없으면 None.
-    """
-    if trend_pct is None:
-        return None
-    if trend_pct >= 0:
-        return {"offense_pct": 100, "defense_pct": 0}  # MA 위 — 최저 앵커 불필요
-    if trend_min is None or trend_min >= 0:
-        return None  # MA 아래인데 방어 척도(12개월 최저)가 없음 → 판정 불가(미표시)
-    f = min(trend_pct / trend_min, 1.0)  # 0(=MA선) ~ 1(=최저), 둘 다 음수라 0~1
-    steps = max(1, min(5, math.ceil(f * 5)))  # 1~5 단계
-    defense = steps * 20
-    return {"offense_pct": 100 - defense, "defense_pct": defense}
-
-
 def _normalize_score(value: float | None, lo: float, hi: float) -> float | None:
     """MA 괴리율 0%를 0점으로 고정하고 위/아래 영역을 따로 정규화한다."""
     if value is None:
@@ -469,7 +469,6 @@ def _trend_pct_at(
     if price is None or ma_value is None or ma_value == 0:
         return None
     return (price / ma_value - 1.0) * 100.0
-
 
 
 def _resolve_supertrend_params(yf_ticker: str) -> tuple[int, float]:
@@ -508,8 +507,12 @@ def _calculate_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float 
         prev_lower = final_lower.iloc[i - 1]
         prev_close = close.iloc[i - 1]
 
-        final_upper.iloc[i] = basic_upper.iloc[i] if basic_upper.iloc[i] < prev_upper or prev_close > prev_upper else prev_upper
-        final_lower.iloc[i] = basic_lower.iloc[i] if basic_lower.iloc[i] > prev_lower or prev_close < prev_lower else prev_lower
+        final_upper.iloc[i] = (
+            basic_upper.iloc[i] if basic_upper.iloc[i] < prev_upper or prev_close > prev_upper else prev_upper
+        )
+        final_lower.iloc[i] = (
+            basic_lower.iloc[i] if basic_lower.iloc[i] > prev_lower or prev_close < prev_lower else prev_lower
+        )
 
         prev_dir = direction.iloc[i - 1]
         if prev_dir == 1:
@@ -539,8 +542,6 @@ def is_market_trend_index(ticker: str) -> bool:
     return any(idx["yf_ticker"] == ticker for idx in INDICES)
 
 
-
-
 def _build_regime_ranges_from_series(regime: pd.Series, window_days: int) -> list[dict[str, Any]]:
     """레짐 시리즈를 최근 window_days 기준 연속 구간 목록으로 변환한다."""
     if regime is None or regime.empty:
@@ -567,12 +568,10 @@ def _build_regime_ranges_from_series(regime: pd.Series, window_days: int) -> lis
     return ranges
 
 
-
 def _index_uses_naver(yf_ticker: str) -> bool:
     """해당 지수가 한국(네이버) 소스인지 여부."""
     meta = next((idx for idx in INDICES if idx["yf_ticker"] == yf_ticker), None)
     return bool(meta and meta.get("kor_naver_symbol"))
-
 
 
 def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
@@ -590,7 +589,7 @@ def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
     # 다운로드와 캐시 조회를 같은 락 안에서 처리한다 — 동시에 들어온 다른 티커 요청이
     # yfinance 전역 상태를 건드려 남의 데이터를 받아오는 것을 막는다(_YF_LOCK 주석 참고).
     try:
-        with _YF_LOCK:
+        with yfinance_lock():
             cached = _OHLC_CACHE.get(yf_ticker)
             if cached is not None and time.monotonic() - cached[0] < _OHLC_CACHE_TTL_SEC:
                 return cached[1].copy()
@@ -623,11 +622,9 @@ def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
                 col_raw = col_raw.iloc[:, 0]
             cleaned_cols[col] = col_raw
     frame = pd.DataFrame(cleaned_cols).dropna()
-    with _YF_LOCK:
+    with yfinance_lock():
         _OHLC_CACHE[yf_ticker] = (time.monotonic(), frame)
     return frame.copy()
-
-
 
 
 def compute_index_history(yf_ticker: str) -> dict[str, Any]:
@@ -648,6 +645,7 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
         "history": [],
         "trend_min_12m": None,
         "trend_max_12m": None,
+        "adr": None,
     }
 
     df = load_index_ohlc(yf_ticker)
@@ -751,10 +749,6 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
             }
         )
 
-    # 공격/방어 비율 — 최신 괴리율과 12개월 '최저'(score_min) 기준. 화면 바와 같은 앵커를 쓴다.
-    latest_trend = full_trend[length - 1] if full_trend else None
-    offense_defense = _offense_defense(latest_trend, score_min)
-
     return {
         "ticker": yf_ticker,
         "name": name,
@@ -762,8 +756,8 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
         "history": history,
         "trend_min_12m": score_min,
         "trend_max_12m": score_max,
-        "offense_pct": offense_defense["offense_pct"] if offense_defense else None,
-        "defense_pct": offense_defense["defense_pct"] if offense_defense else None,
+        # 한국 지수(코스피·코스닥)만 구성종목 데이터가 있어 ADR 이 붙는다. 나머지는 None.
+        "adr": load_adr_for_index(yf_ticker),
     }
 
 

@@ -398,7 +398,7 @@ def main():
         if target_df is not None:
             for _, row in target_df.iterrows():
                 ticker = str(row.get("티커", "")).strip().upper()
-                if ticker and ticker != "IS": # International Shares 등 가상 종목 제외
+                if ticker and ticker != "IS":  # International Shares 등 가상 종목 제외
                     holding_list.append({"ticker": ticker})
 
         save_daily_snapshot(
@@ -408,7 +408,7 @@ def main():
             acc["cash"],
             acc["valuation"],
             acc.get("valuation", 0.0) - acc.get("stock_profit", 0.0),
-            holding_details=holding_list
+            holding_details=holding_list,
         )
 
     save_daily_snapshot(

@@ -181,9 +181,14 @@ def tune_ma_cross(
     for ma_days in candidates:
         for peak_drawdown_pct in peak_drawdown_candidates:
             result = run_ma_cross(
-                index_close, leverage_close, defense_close, ma_days,
+                index_close,
+                leverage_close,
+                defense_close,
+                ma_days,
                 peak_drawdown_pct=peak_drawdown_pct,
-                buy_pct=buy_pct, sell_pct=sell_pct, eval_start=eval_start,
+                buy_pct=buy_pct,
+                sell_pct=sell_pct,
+                eval_start=eval_start,
             )
             if result is not None:
                 rows.append(result)
@@ -197,7 +202,9 @@ def tune_ma_cross(
     return rows
 
 
-def current_index_judgment(index_close: pd.Series, ma_days: int, *, peak_drawdown_pct: float) -> dict[str, object] | None:
+def current_index_judgment(
+    index_close: pd.Series, ma_days: int, *, peak_drawdown_pct: float
+) -> dict[str, object] | None:
     """가장 최근 종가와 이동평균(N일), 고점대비 조건으로 지금 보유해야 할 쪽을 판정한다.
 
     반환: ``{as_of, index_close, ma, gap_pct, peak_drawdown_pct, want_leverage, required_index_close}``.

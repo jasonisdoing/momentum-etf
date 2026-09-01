@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from config import MARKET_SCHEDULES
+from config import CACHE_TTL_COMPUTE, CACHE_TTL_LIVE, MARKET_SCHEDULES
 from utils.data_loader import (
     fetch_au_quoteapi_snapshot,
     fetch_naver_etf_inav_snapshot,
@@ -18,6 +19,7 @@ from utils.data_loader import (
     get_exchange_rate_series as load_exchange_rate_series,
 )
 from utils.logger import get_app_logger
+from utils.yfinance_guard import yfinance_lock
 
 logger = get_app_logger()
 
@@ -27,13 +29,17 @@ logger = get_app_logger()
 # key: "{country}:{ticker}" → {"data": {...}, "fetched_at": dt, "expires_at": dt, "source": str}
 _TICKER_PRICE_CACHE: dict[str, dict[str, Any]] = {}
 
-_KOR_ACTIVE_TTL_SECONDS = 60
-_AU_ACTIVE_TTL_SECONDS = 60
-_US_ACTIVE_TTL_SECONDS = 60
-_WORLDSTOCK_TTL_SECONDS = 900
-_YAHOO_SYMBOL_TTL_SECONDS = 900
-_IDLE_TTL_SECONDS = 60
-_FX_TTL_SECONDS = 3600
+_KOR_ACTIVE_TTL_SECONDS = CACHE_TTL_LIVE
+_AU_ACTIVE_TTL_SECONDS = CACHE_TTL_LIVE
+_US_ACTIVE_TTL_SECONDS = CACHE_TTL_LIVE
+_WORLDSTOCK_TTL_SECONDS = CACHE_TTL_COMPUTE
+_YAHOO_SYMBOL_TTL_SECONDS = CACHE_TTL_COMPUTE
+_IDLE_TTL_SECONDS = CACHE_TTL_LIVE
+_FX_TTL_SECONDS = CACHE_TTL_COMPUTE
+# 환율 조회 재시도 횟수. `_FX_CACHE` 는 프로세스 메모리라 매번 새로 뜨는 배치에서는
+# stale 폴백이 없다 — 배치가 기댈 수 있는 건 이 재시도뿐이다.
+_FX_FETCH_MAX_ATTEMPTS = 3
+_FX_RETRY_BASE_SECONDS = 3.0
 
 # 하위 호환: 기존 쿼리 단위 캐시 (환율 전용으로 유지)
 _FX_CACHE: dict[str, dict[str, Any]] = {}
@@ -61,9 +67,7 @@ def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str
         # 장 전에 idle TTL(3600s)로 캐시된 항목도 개장 후 active TTL(30s) 경과 즉시 만료된다.
         fetched_at = entry.get("fetched_at") if entry else None
         is_alive = (
-            entry is not None
-            and isinstance(fetched_at, datetime)
-            and (now - fetched_at).total_seconds() < ttl_seconds
+            entry is not None and isinstance(fetched_at, datetime) and (now - fetched_at).total_seconds() < ttl_seconds
         )
         if is_alive:
             cached_result[ticker] = entry["data"]  # type: ignore[index]
@@ -165,6 +169,7 @@ def get_worldstock_snapshot(reuters_codes: Sequence[str]) -> dict[str, dict[str,
 
     # 일괄 조회 후 응답에 빠진 코드는 영구 누락 가능성 → 블랙리스트에 마킹
     from utils.symbol_resolution_blacklist import mark_failed
+
     for code in expired_codes:
         if code not in fetched_data:
             mark_failed(code, source="네이버", reason="Worldstock: 응답에 누락된 코드")
@@ -217,51 +222,11 @@ def get_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, flo
     return {**cached_result, **fetched_filtered}
 
 
-def _overlay_toss_usd_rate(rates: dict[str, Any]) -> dict[str, Any]:
-    """USD/KRW **현재가**만 토스 실시간(REAL_TIME, 5초 TTL)으로 덮어쓴다.
-
-    변동률은 토스의 ``base`` 를 쓰지 않고 야후 전일 종가 기준으로 다시 계산한다.
-    환율은 24시간 시장이라 소스마다 '전일'의 기준 시각이 달라, 토스 ``base`` 를
-    그대로 쓰면 USD 만 다른 기준이 되어 AUD 등 나머지 통화와 부호까지 어긋난다.
-    (실측: 토스 base 1441.10 → −0.30%, 야후 전일 1421.16 → +1.11%)
-
-    토스 조회 실패 시 야후(KRW=X) 값이 백업으로 그대로 유지된다.
-    """
-    result = dict(rates)
-    try:
-        from services.toss_market_service import fetch_toss_indicator_prices
-
-        fx = fetch_toss_indicator_prices().get("EXCHANGE_RATE") or {}
-        latest = fx.get("latest")
-        if not latest:
-            return result
-
-        # 야후 USD 값에서 전일 종가를 역산한다 — 나머지 통화와 같은 기준을 쓰기 위함.
-        yahoo_usd = rates.get("USD") or {}
-        yahoo_rate = yahoo_usd.get("rate")
-        yahoo_change_pct = yahoo_usd.get("change_pct")
-        previous_close = None
-        if yahoo_rate and yahoo_change_pct is not None:
-            divisor = 1.0 + float(yahoo_change_pct) / 100.0
-            if divisor != 0:
-                previous_close = float(yahoo_rate) / divisor
-
-        if previous_close and previous_close > 0:
-            change_pct = (float(latest) / previous_close - 1.0) * 100.0
-        else:
-            # 전일 종가를 구하지 못하면 야후 변동률을 그대로 유지한다(임의 값 만들지 않음).
-            change_pct = yahoo_change_pct
-
-        result["USD"] = {"rate": float(latest), "change_pct": change_pct}
-    except Exception as exc:
-        logger.warning("토스 달러 환율 조회 실패 — 야후 백업 사용: %s", exc)
-    return result
-
-
 def get_exchange_rates() -> dict[str, Any]:
     """주요 통화의 원화 환율을 반환한다.
 
-    USD 는 토스 실시간 환율 우선(+야후 백업), 나머지 통화는 야후(1시간 TTL 캐시).
+    소스는 야후 하나다(`KRW=X` 등 일괄 조회). 현재가와 전일 종가가 같은 소스라
+    변동률 기준이 어긋나지 않는다.
     """
 
     cache_key = "fx:major"
@@ -269,14 +234,14 @@ def get_exchange_rates() -> dict[str, Any]:
     now = datetime.now()
 
     if _is_cache_alive(cached_entry, now):
-        return _overlay_toss_usd_rate(cached_entry["data"])
+        return dict(cached_entry["data"])
 
     try:
         rates = _fetch_exchange_rates()
     except Exception as exc:
         stale_rates = _reuse_stale_fx_cache(cache_key, exc)
         if stale_rates is not None:
-            return _overlay_toss_usd_rate(stale_rates)
+            return dict(stale_rates)
         raise
 
     _FX_CACHE[cache_key] = {
@@ -285,7 +250,7 @@ def get_exchange_rates() -> dict[str, Any]:
         "expires_at": now + timedelta(seconds=_FX_TTL_SECONDS),
         "is_stale": False,
     }
-    return _overlay_toss_usd_rate(rates)
+    return rates
 
 
 def get_exchange_rate_series(
@@ -375,6 +340,7 @@ def get_realtime_snapshot_meta(country_code: str, tickers: Sequence[str]) -> dic
 # ────────────────────────────────────────────
 # 내부 함수
 # ────────────────────────────────────────────
+
 
 def _normalize_country_code(country_code: str) -> str:
     country = str(country_code or "").strip().lower()
@@ -482,6 +448,45 @@ def _is_market_active(country: str) -> bool:
     return market_open_dt <= now_local <= market_close_dt
 
 
+def _fetch_bulk_fx_closes(symbols: list[str]) -> dict[str, tuple[float, float]]:
+    """여러 통화의 (최신 종가, 직전 종가)를 **한 번의 요청**으로 받는다.
+
+    통화마다 따로 부르면 8회 요청이라 야후 레이트리밋에 쉽게 걸린다(전 통화 동시 실패의
+    원인). 일봉 마지막 종가는 `fast_info.last_price` 와 같은 값이라 결과는 동일하다.
+    데이터가 모자란 통화는 결과에서 빠지며, 호출자가 개별 조회로 보완한다.
+    """
+    import yfinance as yf
+
+    out: dict[str, tuple[float, float]] = {}
+    try:
+        with yfinance_lock():
+            frame = yf.download(
+                tickers=symbols,
+                period="10d",
+                interval="1d",
+                progress=False,
+                auto_adjust=False,
+                threads=False,
+                group_by="ticker",
+            )
+    except Exception as exc:
+        logger.warning("환율 일괄 조회 실패(개별 조회로 진행): %s", exc)
+        return out
+    if frame is None or frame.empty:
+        return out
+
+    import pandas as pd
+
+    for symbol in symbols:
+        try:
+            closes = pd.to_numeric(frame[symbol]["Close"], errors="coerce").dropna()
+            if len(closes) >= 2:
+                out[symbol] = (float(closes.iloc[-1]), float(closes.iloc[-2]))
+        except Exception:
+            continue
+    return out
+
+
 def _fetch_exchange_rates() -> dict[str, Any]:
     import yfinance as yf
 
@@ -495,30 +500,51 @@ def _fetch_exchange_rates() -> dict[str, Any]:
         "GBP": "GBPKRW=X",
         "EUR": "EURKRW=X",
     }
+
+    def _put(currency: str, current_rate: float, previous_close: float) -> None:
+        change_pct = ((current_rate - previous_close) / previous_close * 100.0) if previous_close > 0 else 0.0
+        rates[currency] = {"rate": current_rate, "change_pct": change_pct}
+
     rates: dict[str, Any] = {}
-    missing_currencies: list[str] = []
+    # 야후가 간헐적으로 전 통화를 한꺼번에 거절한다(일시 장애·레이트리밋). 그때마다 배치가
+    # 통째로 죽으므로, 요청 수를 줄이고(일괄 조회) 남은 것만 짧게 재시도한다.
+    # `_FX_CACHE` 는 프로세스 메모리라 매번 새로 뜨는 배치에는 stale 폴백이 없다 —
+    # 배치가 기댈 수 있는 건 이 재시도뿐이다.
+    pending = dict(mapping)
+    for attempt in range(1, _FX_FETCH_MAX_ATTEMPTS + 1):
+        bulk = _fetch_bulk_fx_closes(list(pending.values()))
+        failed: dict[str, str] = {}
+        for currency, symbol in pending.items():
+            if symbol in bulk:
+                _put(currency, *bulk[symbol])
+                continue
+            # 일괄 조회에서 빠진 통화만 개별로 보완한다(데이터가 짧은 통화 등).
+            try:
+                with yfinance_lock():
+                    ticker = yf.Ticker(symbol)
+                    _put(currency, float(ticker.fast_info.last_price), float(ticker.fast_info.previous_close))
+            except Exception as exc:
+                if attempt >= _FX_FETCH_MAX_ATTEMPTS:
+                    logger.warning("%s 환율 조회 실패: %s", currency, exc)
+                failed[currency] = symbol
 
-    for currency, symbol in mapping.items():
-        try:
-            ticker = yf.Ticker(symbol)
-            current_rate = float(ticker.fast_info.last_price)
-            previous_close = float(ticker.fast_info.previous_close)
-        except Exception as exc:
-            logger.warning("%s 환율 조회 실패: %s", currency, exc)
-            missing_currencies.append(currency)
-            continue
+        # 남은 목록을 먼저 갱신한다 — 성공해서 break 할 때도 pending 이 비어야
+        # 아래 최종 검사에 걸리지 않는다.
+        pending = failed
+        if not pending:
+            break
+        if attempt < _FX_FETCH_MAX_ATTEMPTS:
+            logger.warning(
+                "환율 일시 오류 재시도 (%d/%d): %s",
+                attempt,
+                _FX_FETCH_MAX_ATTEMPTS,
+                ", ".join(sorted(pending)),
+            )
+            # 레이트리밋은 초 단위로 풀린다 — 짧게 끊지 말고 넉넉히 기다린다.
+            time.sleep(_FX_RETRY_BASE_SECONDS * attempt)
 
-        change_pct = 0.0
-        if previous_close > 0:
-            change_pct = ((current_rate - previous_close) / previous_close) * 100.0
-
-        rates[currency] = {
-            "rate": current_rate,
-            "change_pct": change_pct,
-        }
-
-    if missing_currencies:
-        joined = ", ".join(missing_currencies)
+    if pending:
+        joined = ", ".join(sorted(pending))
         raise RuntimeError(f"환율 데이터를 조회하지 못했습니다: {joined}")
 
     rates["updated_at"] = datetime.now()

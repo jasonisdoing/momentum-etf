@@ -6,10 +6,14 @@ import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { formatPoolLabel } from "@/lib/pool-label";
-import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
+import { useLatestRequest } from "@/lib/use-latest-request";
+import { loadStocksTable } from "@/lib/stocks-store";
+import { addTickersToPool, buildPoolAddSkipNotice, splitByPoolMembership } from "@/lib/pool-add";
+import type { PoolAddProgress } from "@/lib/pool-add";
 import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
+import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
@@ -22,6 +26,8 @@ import {
 type AusMarketStockRow = {
   rank: number;
   ticker: string;
+  /** 이 종목이 이미 들어 있는 종목풀 id 목록 — 추가 시 중복을 미리 거른다. */
+  ticker_pool_types?: string[];
   name: string;
   english_name: string;
   industry: string;
@@ -122,12 +128,17 @@ export function AusMarketStockManager({
   const [selectedTickerPool, setSelectedTickerPool] = useState("");
   const [selectedBucketId, setSelectedBucketId] = useState<number | "">("");
   const [adding, setAdding] = useState(false);
+  // 종목당 수 초씩 걸려서 진행도를 보여주지 않으면 멈춘 것처럼 보인다.
+  const [addProgress, setAddProgress] = useState<PoolAddProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const toast = useToast();
+  const { begin, isLatest } = useLatestRequest();
 
   const load = useCallback(async (minCapUkmText: string) => {
+    // 늦게 도착한 옛 응답이 새 결과를 덮지 않게 한다(공용 훅).
+    const token = begin();
     setLoading(true);
     setError(null);
     try {
@@ -141,6 +152,7 @@ export function AusMarketStockManager({
       if (!resp.ok) {
         throw new Error(data.error ?? "데이터를 불러오지 못했습니다.");
       }
+      if (!isLatest(token)) return;
       setRows(data.rows ?? []);
       setTotalCount(data.total_count ?? 0);
       setTickerPools(allStocksPayload.ticker_types ?? []);
@@ -153,11 +165,12 @@ export function AusMarketStockManager({
       });
       setRegisteredTickers(registered);
     } catch (e) {
+      if (!isLatest(token)) return;
       setError(e instanceof Error ? e.message : "데이터를 불러오지 못했습니다.");
     } finally {
-      setLoading(false);
+      if (isLatest(token)) setLoading(false);
     }
-  }, []);
+  }, [begin, isLatest]);
 
   useEffect(() => {
     void load(minMarketCapUkm);
@@ -224,37 +237,43 @@ export function AusMarketStockManager({
       return;
     }
 
-    setAdding(true);
-    let addedCount = 0;
-    let duplicateCount = 0;
-    const failedTickers: string[] = [];
-
-    for (const ticker of selectedTickers) {
-      try {
-        await addStockCandidate(tickerPool, ticker, bucketId);
-        addedCount += 1;
-      } catch (addError) {
-        const message = addError instanceof Error ? addError.message : "종목 추가 처리에 실패했습니다.";
-        if (message.includes("이미 등록된 종목입니다.")) {
-          duplicateCount += 1;
-          continue;
-        }
-        failedTickers.push(ticker);
-      }
+    // 이미 어딘가의 풀에 있는 종목은 보내지 않는다 — 표가 풀 목록을 들고 있어 조회가 필요 없다.
+    // 건너뛰는 건 정상 동작이라 시작 전에 노란색으로 알린다.
+    const split = splitByPoolMembership(selectedTickers, rows, tickerPool);
+    const skipNotice = buildPoolAddSkipNotice(selectedTickers.length, split);
+    if (skipNotice) {
+      toast.warning(skipNotice);
+    }
+    if (split.fresh.length === 0) {
+      setAddModalOpen(false);
+      return;
     }
 
+    setAdding(true);
+    setAddProgress(null);
+    const { added, skipped, blocked, failed } = await addTickersToPool(
+      split.fresh,
+      tickerPool,
+      bucketId,
+      setAddProgress,
+      // 진행도에 종목명을 보여주기 위한 표의 이름 — 추가 조회 없이 넘긴다.
+      new Map(rows.map((row) => [String(row.ticker).trim().toUpperCase(), row.name])),
+    );
+
     setAdding(false);
+    setAddProgress(null);
     setAddModalOpen(false);
 
-    if (addedCount > 0) toast.success(`종목 ${addedCount}개를 추가했습니다.`);
-    if (duplicateCount > 0) toast.error(`이미 등록된 종목 ${duplicateCount}개는 건너뛰었습니다.`);
-    if (failedTickers.length > 0) toast.error(`추가 실패: ${failedTickers.join(", ")}`);
+    if (added > 0) toast.success(`종목 ${added}개를 추가했습니다.`);
+    if (skipped > 0) toast.error(`이미 등록된 종목 ${skipped}개는 건너뛰었습니다.`);
+    if (blocked > 0) toast.error(`다른 종목풀에 있는 ${blocked}개는 건너뛰었습니다.`);
+    if (failed.length > 0) toast.error(`추가 실패: ${failed.join(", ")}`);
 
-    if (addedCount > 0) {
+    if (added > 0) {
       setSelectedTickers([]);
       await load(minMarketCapUkm);
     }
-  }, [load, minMarketCapUkm, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
+  }, [load, minMarketCapUkm, rows, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
 
   const columnDefs = useMemo<ColDef<AusMarketStockGridRow>[]>(
     () => [
@@ -307,7 +326,7 @@ export function AusMarketStockManager({
         cellRenderer: (params: { value?: string }) => renderTruncatedText(params.value),
       },
       {
-        headerName: "등락률",
+        headerName: "일간(%)",
         field: "change_pct",
         width: 110,
         minWidth: 96,
@@ -548,6 +567,7 @@ export function AusMarketStockManager({
               ))}
             </select>
           </label>
+          <PoolAddProgressBar progress={addProgress} />
         </div>
       </AppModal>
     </section>

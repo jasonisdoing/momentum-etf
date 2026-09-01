@@ -28,4 +28,3 @@ def format_kr_money(value: float) -> str:
         return f"{sign}{val_abs:,}원"
 
     return sign + " ".join(parts) + "원"
-

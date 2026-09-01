@@ -7,9 +7,10 @@
 import type { ComponentType } from "react";
 import {
   IconActivity,
-  IconBell,
   IconCash,
   IconChartHistogram,
+  IconChartInfographic,
+  IconChartPie,
   IconChartLine,
   IconDatabase,
   IconHome,
@@ -20,6 +21,7 @@ import {
   IconNotes,
   IconReceipt2,
   IconSettings,
+  IconTable,
   IconTrendingUp,
 } from "@tabler/icons-react";
 
@@ -79,7 +81,9 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { href: "/us-market-stock", label: "미국 개별주", icon: "🇺🇸" },
       { href: "/aus-market-stock", label: "호주 개별주", icon: "🇦🇺" },
       { href: "/kor-market-etf", label: "한국 ETF", icon: "🇰🇷" },
+      { href: "/us-market-etf", label: "미국 ETF", icon: "🇺🇸" },
       { href: "/live-24h", label: "24H 시세", icon: "⏰" },
+      { href: "/kor-dividend", label: "한국 배당주", icon: "🇰🇷" },
     ],
   },
   {
@@ -98,8 +102,10 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     icon: IconChartLine,
     items: [
       { href: "/leverage-settings", label: "레버리지", icon: IconSettings },
-      { href: "/strategy-sm", label: "Steady Momentum", icon: IconTrendingUp },
-      { href: "/strategy-trade", label: "사고팔기", icon: IconChartLine },
+      { href: "/strategy-mix", label: "합성 전략", icon: IconChartInfographic },
+      { href: "/strategy-momentum", label: "모멘텀 전략", icon: IconTrendingUp },
+      { href: "/strategy-new-high", label: "신고가 전략", icon: IconTrendingUp },
+      { href: "/strategy-portfolio", label: "포트폴리오 전략", icon: IconChartPie },
     ],
   },
   {
@@ -107,9 +113,9 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     title: "시스템",
     icon: IconSettings,
     items: [
-      { href: "/alarms", label: "알람", icon: IconBell },
       { href: "/memos", label: "메모", icon: IconNotes },
       { href: "/data_source", label: "데이터 소스", icon: IconDatabase },
+      { href: "/data-tables", label: "테이블", icon: IconTable },
       { href: "/batch", label: "배치", icon: IconListDetails },
     ],
   },
@@ -135,6 +141,8 @@ export const FULL_WIDTH_ROUTES: readonly string[] = [
   "/us-market-stock",
   "/aus-market-stock",
   "/kor-market-etf",
+  "/us-market-etf",
+  "/kor-dividend",
   "/holdings_details",
 ];
 

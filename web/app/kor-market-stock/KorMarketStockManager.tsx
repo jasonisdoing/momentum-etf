@@ -5,11 +5,21 @@ import { IconPlus } from "@tabler/icons-react";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import {
+  INDUSTRY_COLUMN_MIN_WIDTH,
+  INDUSTRY_COLUMN_WIDTH,
+  renderIndustryCell,
+} from "@/lib/grid-cells";
+import { formatKorMarketCap } from "@/lib/market-cap-format";
+import { useLatestRequest } from "@/lib/use-latest-request";
 import { formatPoolLabel } from "@/lib/pool-label";
-import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
+import { loadStocksTable } from "@/lib/stocks-store";
+import { addTickersToPool, buildPoolAddSkipNotice, splitByPoolMembership } from "@/lib/pool-add";
+import type { PoolAddProgress } from "@/lib/pool-add";
 import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
+import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
@@ -22,7 +32,10 @@ import {
 type KorMarketStockRow = {
   rank: number;
   ticker: string;
+  /** 이 종목이 이미 들어 있는 종목풀 id 목록 — 추가 시 중복을 미리 거른다. */
+  ticker_pool_types?: string[];
   name: string;
+  industry: string;
   ticker_pools: string;
   is_held: boolean;
   current_price: number | null;
@@ -64,19 +77,20 @@ function formatVolume(value: number | null): string {
   return new Intl.NumberFormat("ko-KR").format(value);
 }
 
-function formatMarketCap(value: number | null): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  if (value >= 10000) {
-    const jo = Math.floor(value / 10000);
-    const eok = value % 10000;
-    return eok > 0
-      ? `${new Intl.NumberFormat("ko-KR").format(jo)}조 ${new Intl.NumberFormat("ko-KR").format(eok)}억`
-      : `${new Intl.NumberFormat("ko-KR").format(jo)}조`;
-  }
-  return `${new Intl.NumberFormat("ko-KR").format(value)}억`;
-}
 
-const MARKET_OPTIONS = ["KOSPI", "KOSDAQ"] as const;
+// 지수 구성종목(KOSPI200·KOSDAQ150)은 시총 순위가 아니라 **명단 전체**라 상위 N 을 고르지 않는다.
+// 명단 소스(추종 ETF)는 백엔드 `index_constituents_loader.KOR_INDEX_SOURCES` 가 단일 소스다.
+const MARKET_OPTIONS = ["KOSPI", "KOSDAQ", "KOSPI200", "KOSDAQ150"] as const;
+type MarketOption = (typeof MARKET_OPTIONS)[number];
+const MARKET_LABELS: Record<MarketOption, string> = {
+  KOSPI: "코스피",
+  KOSDAQ: "코스닥",
+  KOSPI200: "KODEX 200(069500)",
+  KOSDAQ150: "KODEX 코스닥150(229200)",
+};
+/** 지수 구성종목 마켓 — 명단이 정해져 있어 상위 N 을 자를 이유가 없다. */
+const INDEX_MARKETS: readonly MarketOption[] = ["KOSPI200", "KOSDAQ150"];
+const usesTopLimit = (market: MarketOption): boolean => !INDEX_MARKETS.includes(market);
 const KOSPI_LIMIT_OPTIONS = [200, 150, 100, 50] as const;
 const KOSDAQ_LIMIT_OPTIONS = [150, 100, 50] as const;
 
@@ -85,7 +99,7 @@ export function KorMarketStockManager({
 }: {
   onSummaryChange?: (summary: { market: string; count: number; totalCount: number }) => void;
 }) {
-  const [market, setMarket] = useState<(typeof MARKET_OPTIONS)[number]>("KOSPI");
+  const [market, setMarket] = useState<MarketOption>("KOSPI");
   const [limit, setLimit] = useState<number>(200);
   const [minMarketCapJo, setMinMarketCapJo] = useState("");
   const [rows, setRows] = useState<KorMarketStockRow[]>([]);
@@ -97,12 +111,18 @@ export function KorMarketStockManager({
   const [selectedTickerPool, setSelectedTickerPool] = useState("");
   const [selectedBucketId, setSelectedBucketId] = useState<number | "">("");
   const [adding, setAdding] = useState(false);
+  // 종목당 수 초씩 걸려서 진행도를 보여주지 않으면 멈춘 것처럼 보인다.
+  const [addProgress, setAddProgress] = useState<PoolAddProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const toast = useToast();
+  const { begin, isLatest } = useLatestRequest();
 
   const load = useCallback(async (m: string, l: number, minCapJoText: string) => {
+    // 코스피(200종목)가 코스닥(150종목)보다 느려서, 시장을 바꾸면 늦게 온 코스피 응답이
+    // 먼저 그려진 코스닥 화면을 덮었다. 마지막 요청의 응답만 반영한다.
+    const token = begin();
     setLoading(true);
     setError(null);
     try {
@@ -113,6 +133,7 @@ export function KorMarketStockManager({
         loadStocksTable("kor").catch(() => ({ ticker_types: [], rows: [], ticker_type: "" })),
       ]);
       const data = (await resp.json()) as KorMarketStocksResponse;
+      if (!isLatest(token)) return;
       if (!resp.ok) {
         throw new Error(data.error ?? "데이터를 불러오지 못했습니다.");
       }
@@ -128,26 +149,27 @@ export function KorMarketStockManager({
       });
       setRegisteredTickers(registered);
     } catch (e) {
+      if (!isLatest(token)) return;
       setError(e instanceof Error ? e.message : "데이터를 불러오지 못했습니다.");
     } finally {
-      setLoading(false);
+      if (isLatest(token)) setLoading(false);
     }
-  }, []);
+  }, [begin, isLatest]);
 
   useEffect(() => {
     load(market, limit, minMarketCapJo);
   }, [market, limit, minMarketCapJo, load]);
 
   const limitOptions = useMemo<number[]>(
-    () => (market === "KOSPI" ? [...KOSPI_LIMIT_OPTIONS] : [...KOSDAQ_LIMIT_OPTIONS]),
+    () => (market === "KOSDAQ" ? [...KOSDAQ_LIMIT_OPTIONS] : [...KOSPI_LIMIT_OPTIONS]),
     [market],
   );
 
   useEffect(() => {
-    if (!limitOptions.includes(limit)) {
+    if (usesTopLimit(market) && !limitOptions.includes(limit)) {
       setLimit(limitOptions[0]);
     }
-  }, [limit, limitOptions]);
+  }, [limit, limitOptions, market]);
 
   useEffect(() => {
     onSummaryChange?.({ market, count: rows.length, totalCount });
@@ -220,43 +242,51 @@ export function KorMarketStockManager({
       return;
     }
 
-    setAdding(true);
-    let addedCount = 0;
-    let duplicateCount = 0;
-    const failedTickers: string[] = [];
-
-    for (const ticker of selectedTickers) {
-      try {
-        await addStockCandidate(tickerPool, ticker, bucketId);
-        addedCount += 1;
-      } catch (addError) {
-        const message = addError instanceof Error ? addError.message : "종목 추가 처리에 실패했습니다.";
-        if (message.includes("이미 등록된 종목입니다.")) {
-          duplicateCount += 1;
-          continue;
-        }
-        failedTickers.push(ticker);
-      }
+    // 이미 어딘가의 풀에 있는 종목은 보내지 않는다 — 표가 풀 목록을 들고 있어 조회가 필요 없다.
+    // 건너뛰는 건 정상 동작이라 시작 전에 노란색으로 알린다.
+    const split = splitByPoolMembership(selectedTickers, rows, tickerPool);
+    const skipNotice = buildPoolAddSkipNotice(selectedTickers.length, split);
+    if (skipNotice) {
+      toast.warning(skipNotice);
     }
+    if (split.fresh.length === 0) {
+      setAddModalOpen(false);
+      return;
+    }
+
+    setAdding(true);
+    setAddProgress(null);
+    const { added, skipped, blocked, failed } = await addTickersToPool(
+      split.fresh,
+      tickerPool,
+      bucketId,
+      setAddProgress,
+      // 진행도에 종목명을 보여주기 위한 표의 이름 — 추가 조회 없이 넘긴다.
+      new Map(rows.map((row) => [String(row.ticker).trim().toUpperCase(), row.name])),
+    );
 
     setAdding(false);
+    setAddProgress(null);
     setAddModalOpen(false);
 
-    if (addedCount > 0) {
-      toast.success(`종목 ${addedCount}개를 추가했습니다.`);
+    if (added > 0) {
+      toast.success(`종목 ${added}개를 추가했습니다.`);
     }
-    if (duplicateCount > 0) {
-      toast.error(`이미 등록된 종목 ${duplicateCount}개는 건너뛰었습니다.`);
+    if (skipped > 0) {
+      toast.error(`이미 등록된 종목 ${skipped}개는 건너뛰었습니다.`);
     }
-    if (failedTickers.length > 0) {
-      toast.error(`추가 실패: ${failedTickers.join(", ")}`);
+    if (blocked > 0) {
+      toast.error(`다른 종목풀에 있는 ${blocked}개는 건너뛰었습니다.`);
+    }
+    if (failed.length > 0) {
+      toast.error(`추가 실패: ${failed.join(", ")}`);
     }
 
-    if (addedCount > 0) {
+    if (added > 0) {
       setSelectedTickers([]);
       await load(market, limit, minMarketCapJo);
     }
-  }, [load, market, limit, minMarketCapJo, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
+  }, [load, market, limit, minMarketCapJo, rows, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
 
   const columnDefs = useMemo<ColDef<KorMarketStockGridRow>[]>(
     () => [
@@ -296,7 +326,15 @@ export function KorMarketStockManager({
         minWidth: 180,
       },
       {
-        headerName: "등락률",
+        headerName: "업종",
+        field: "industry",
+        width: INDUSTRY_COLUMN_WIDTH,
+        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
+        headerTooltip: "네이버 업종 분류 — 신고가·종목풀 순위 화면과 같은 값.",
+        cellRenderer: (params: { value?: string }) => renderIndustryCell(params.value),
+      },
+      {
+        headerName: "일간(%)",
         field: "change_pct",
         width: 110,
         minWidth: 96,
@@ -378,7 +416,7 @@ export function KorMarketStockManager({
         minWidth: 140,
         type: "rightAligned",
         sort: "desc",
-        valueFormatter: (p) => formatMarketCap(p.value),
+        valueFormatter: (p) => formatKorMarketCap(p.value),
       },
       {
         field: "__selected__",
@@ -433,29 +471,32 @@ export function KorMarketStockManager({
                         className={market === opt ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
                         onClick={() => {
                           setMarket(opt);
-                          setLimit(opt === "KOSPI" ? 200 : 150);
+                          setLimit(opt === "KOSDAQ" ? 150 : 200);
                         }}
                       >
-                        {opt === "KOSPI" ? "코스피" : "코스닥"}
+                        {MARKET_LABELS[opt]}
                       </button>
                     ))}
                   </div>
                 </label>
 
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">시가총액 상위</span>
-                  <select
-                    className="form-select"
-                    value={limit}
-                    onChange={(e) => setLimit(Number(e.target.value))}
-                  >
-                    {limitOptions.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {market} {opt}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {/* 지수 구성종목 마켓은 명단 전체를 보여주므로 상위 N 셀렉트를 두지 않는다. */}
+                {usesTopLimit(market) ? (
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">시가총액 상위</span>
+                    <select
+                      className="form-select"
+                      value={limit}
+                      onChange={(e) => setLimit(Number(e.target.value))}
+                    >
+                      {limitOptions.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {market} {opt}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
 
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">최소 시가총액(조)</span>
@@ -565,6 +606,7 @@ export function KorMarketStockManager({
               ))}
             </select>
           </label>
+          <PoolAddProgressBar progress={addProgress} />
         </div>
       </AppModal>
     </section>

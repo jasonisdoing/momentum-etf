@@ -442,21 +442,20 @@ export function MonthlyManager({
                     </span>
                   </label>
                 </div>
+                {/* CRUD 버튼이 하나뿐이라 별도 줄을 두지 않고 메인 헤더 오른쪽에 둔다. */}
+                <div className="appMainHeaderRight">
+                  <button
+                    type="button"
+                    className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                    onClick={handleSave}
+                    disabled={isPending || dirtyRowIds.length === 0}
+                  >
+                    <IconCheck size={16} />
+                    <span>저장</span>
+                  </button>
+                </div>
               </div>
             </ResponsiveFiltersSection>
-          </div>
-          <div className="card-header appActionHeader bg-light-subtle border-top">
-            <div className="appActionHeaderInner">
-              <button
-                type="button"
-                className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
-                onClick={handleSave}
-                disabled={isPending || dirtyRowIds.length === 0}
-              >
-                <IconCheck size={16} />
-                <span>저장</span>
-              </button>
-            </div>
           </div>
           <div className="card-body appCardBodyTight appTableCardBodyFill">
             <AppAgGrid<MonthlyGridRow>

@@ -49,10 +49,14 @@ def get_account_settings_list(_: None = Depends(require_internal_token)) -> dict
         accounts = load_account_docs()
     except AccountSettingsStoreError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    from utils.momentum_service import pool_options
+
     return {
         "accounts": accounts,
         "editable_keys": list(EDITABLE_KEYS),
         "market_indices": [{"ticker": item["yf_ticker"], "name": item["name"]} for item in INDICES],
+        # 합성 전략 종목풀 선택지 — 다른 화면의 풀 셀렉터와 같은 표기 필드를 쓴다.
+        "pool_options": pool_options(),
     }
 
 
@@ -73,9 +77,7 @@ def put_account_settings(
 
 
 @router.post("")
-def post_account(
-    payload: AccountCreatePayload, _: None = Depends(require_internal_token)
-) -> dict[str, object]:
+def post_account(payload: AccountCreatePayload, _: None = Depends(require_internal_token)) -> dict[str, object]:
     try:
         created = create_account(
             payload.account_id,
@@ -91,9 +93,7 @@ def post_account(
 
 
 @router.delete("")
-def delete_account_route(
-    payload: AccountDeletePayload, _: None = Depends(require_internal_token)
-) -> dict[str, object]:
+def delete_account_route(payload: AccountDeletePayload, _: None = Depends(require_internal_token)) -> dict[str, object]:
     try:
         result = delete_account(payload.account_id)
     except AccountSettingsStoreError as exc:

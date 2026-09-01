@@ -10,6 +10,8 @@ import { createAppGridTheme } from "../components/app-grid-theme";
 type SystemScheduleRow = {
   key: string;
   job: string;
+  // 성격이 비슷한 배치 묶음 이름. 표에서 구분줄로 쓴다 (백엔드 SCHEDULE_ROWS 가 정한다).
+  group?: string;
   target: string;
   run_location?: string;
   cadence: string;
@@ -41,19 +43,10 @@ type SystemNextRunInfo = {
   display?: string | null;
 };
 
-type SystemJobKey =
-  | "data_aggregate"
-  | "cache_refresh"
-  | "market_hours_analysis"
-  | "reference_meta_updater"
-  | "price_metrics_updater"
-  | "asset_summary"
-  | "us_market_stocks"
-  | "aus_market_stocks"
-  | "live_24h_slack"
-  | "leverage_ma_cross"
-  | "holdings_alarm"
-    | "strategy_trade_notify";
+/** 배치 action 키. 목록은 백엔드 `SystemAction` 이 단일 소스다 — 여기에 복사본을 두면
+ *  배치를 추가할 때마다 어긋난다(실제로 `market_breadth` 가 빠진 채 방치돼 있었다).
+ *  화면은 `SCHEDULE_ROWS` 가 내려준 `key` 를 그대로 넘기고, 검증은 서버가 한다. */
+type SystemJobKey = string;
 
 type BatchQueueItem = {
   id: string;
@@ -82,6 +75,9 @@ type SystemResponse = {
 
 type SystemScheduleGridRow = SystemScheduleRow & {
   id: string;
+  // 표시 번호 — 백엔드 배치 정의(`utils/system_service.SCHEDULE_ROWS`)의 `no` 가 단일 소스다.
+  // 목록 순서로 매기면 중간에 배치를 추가할 때 뒤 번호가 전부 밀린다.
+  no?: number | null;
   running: boolean;
   anyRunning: boolean;
   isDeploying: boolean;
@@ -142,6 +138,10 @@ function formatRunningCommandPrefix(detail: SystemRunningJobDetail | undefined, 
   const estimatedSeconds = detail?.estimated_seconds;
   const estimatedDisplay = detail?.estimated_display;
   if (typeof estimatedSeconds !== "number" || estimatedSeconds <= 0 || !detail?.started_at) {
+    // 성공 이력이 없어 예상시간을 모르는 잡 — 최초 실행임을 표시한다 (중단 중이면 그대로).
+    if (!detail?.cancel_requested && (typeof estimatedSeconds !== "number" || estimatedSeconds <= 0)) {
+      return `▶ ${ownerLabel}실행 중 (최초 실행이라 예상시간 없음)... `;
+    }
     return `▶ ${ownerLabel}${stateLabel}... `;
   }
   const startedMs = new Date(detail.started_at).getTime();
@@ -163,7 +163,15 @@ function formatRunningCommandPrefix(detail: SystemRunningJobDetail | undefined, 
 
 const appGridTheme = createAppGridTheme();
 
-const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
+/** 그룹 구분줄 — 실제 배치가 아니라 표시용 행이다. */
+type ScheduleGroupRow = { key: string; isGroup: true; group: string };
+type ScheduleGridRow = SystemScheduleGridRow | ScheduleGroupRow;
+
+function isGroupRow(row: ScheduleGridRow | undefined): row is ScheduleGroupRow {
+  return Boolean(row && (row as ScheduleGroupRow).isGroup);
+}
+
+const scheduleColumns: ColDef<ScheduleGridRow>[] = [
   {
     headerName: "#",
     minWidth: 48,
@@ -172,9 +180,24 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
     sortable: false,
     suppressMovable: true,
     type: "rightAligned",
-    valueGetter: (params) => (params.node ? (params.node.rowIndex ?? -1) + 1 : ""),
+    // 구분줄에는 번호가 없다. 배치 번호는 백엔드 정의의 `no` 를 그대로 쓴다.
+    valueGetter: (params) => (isGroupRow(params.data) ? "" : (params.data?.no ?? "")),
   },
-  { field: "job", headerName: "작업", minWidth: 220, flex: 1 },
+  // 가장 긴 작업명이 "종목 가격지표 업데이트"(11자)라 고정 폭으로 두고, 남는 폭은 실행 명령이 가져간다.
+  { field: "job", headerName: "작업", minWidth: 150, width: 170, maxWidth: 190 },
+  {
+    field: "run_location",
+    headerName: "실행 위치",
+    width: 104,
+    headerTooltip: "이 잡을 잡을 수 있는 워커 — LOCAL 전용은 큐의 LOCAL_ONLY_JOBS(백엔드)가 단일 소스",
+    cellStyle: { textAlign: "center" },
+    cellRenderer: (p: { value?: string }) =>
+      p.value === "LOCAL" ? (
+        <span style={{ fontWeight: 700, color: "#b45309" }}>로컬 전용</span>
+      ) : (
+        <span style={{ color: "var(--text-muted)" }}>서버·로컬</span>
+      ),
+  },
   {
     field: "cadence",
     headerName: "자동 주기",
@@ -257,7 +280,7 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
     field: "command",
     headerName: "실행 명령 (클릭하여 백그라운드 실행)",
     minWidth: 320,
-    flex: 1.6,
+    flex: 2.6,
     // 실행 중인 행은 prefix(▶ [SERVER] 실행 중...) + ✕ 버튼이 길어서 명령어가 잘림.
     // autoHeight + wrapText 로 실행 중인 행만 2줄이 되도록 한다 (다른 행은 콘텐츠가 짧아 1줄 유지).
     autoHeight: true,
@@ -267,7 +290,8 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
       if (!row) return { cursor: "default" };
       if (row.running) return { cursor: "default", backgroundColor: "#fff8e1" };
       // 큐 기반: 다른 배치가 실행 중이어도 클릭 가능 (대기 큐에 추가됨)
-      return { cursor: "pointer" };
+      // 실행 중이 아닌 행은 명령어만 있어 한 줄로 둔다 — 2줄은 실행 중 prefix 가 붙을 때만.
+      return { cursor: "pointer", whiteSpace: "nowrap" };
     },
     tooltipValueGetter: (params) => {
       const row = params.data as SystemScheduleGridRow | undefined;
@@ -455,6 +479,17 @@ export function SystemManager({
     };
   });
 
+  // 그룹이 바뀌는 자리에 구분줄을 끼운다. 순서·묶음은 백엔드 SCHEDULE_ROWS 가 정한다.
+  const scheduleRowsWithGroups: ScheduleGridRow[] = [];
+  let lastGroup: string | undefined;
+  for (const row of scheduleGridRows) {
+    if (row.group && row.group !== lastGroup) {
+      lastGroup = row.group;
+      scheduleRowsWithGroups.push({ key: `__group__${row.group}`, isGroup: true, group: row.group });
+    }
+    scheduleRowsWithGroups.push(row);
+  }
+
   useEffect(() => {
     const id = window.setInterval(() => setNowTick(Date.now()), anyRunning ? 1000 : 30_000);
     return () => window.clearInterval(id);
@@ -522,7 +557,6 @@ export function SystemManager({
     }
     // 큐 기반: 다른 배치 실행 중이어도 거부하지 않고 enqueue (백엔드가 중복 enqueue 만 차단)
     startTransition(async () => {
-      setError(null);
       try {
         const response = await fetch("/api/system", {
           method: "POST",
@@ -535,9 +569,9 @@ export function SystemManager({
         }
         toast.success(String(payload.message ?? `[배치] ${label} 큐에 추가됨`));
       } catch (actionError) {
-        const msg = actionError instanceof Error ? actionError.message : "배치 큐 추가에 실패했습니다.";
-        setError(msg);
-        toast.error(msg);
+        // 실행 요청 실패는 토스트로만 알린다. 상단 배너는 목록 조회 실패 전용이라
+        // 여기서도 쓰면 같은 문장이 두 곳에 겹쳐 뜬다.
+        toast.error(actionError instanceof Error ? actionError.message : "배치 큐 추가에 실패했습니다.");
       }
     });
   }
@@ -562,7 +596,7 @@ export function SystemManager({
           </div>
           <div className="card-body appCardBodyTight">
             <AppAgGrid
-              rowData={scheduleGridRows}
+              rowData={scheduleRowsWithGroups}
               columnDefs={scheduleColumns}
               loading={loading}
               minHeight="18rem"
@@ -572,10 +606,16 @@ export function SystemManager({
               gridOptions={{
                 suppressMovableColumns: true,
                 domLayout: "autoHeight",
+                isFullWidthRow: (params) => isGroupRow(params.rowNode.data ?? undefined),
+                fullWidthCellRenderer: (params: { data?: ScheduleGridRow }) =>
+                  isGroupRow(params.data) ? (
+                    <div className="batchGroupRow">{params.data.group}</div>
+                  ) : null,
+                getRowHeight: (params) => (isGroupRow(params.data ?? undefined) ? 32 : undefined),
                 onCellClicked: (event) => {
                   if (event.colDef.field !== "command") return;
-                  const row = event.data as SystemScheduleGridRow | undefined;
-                  if (!row?.key) return;
+                  const row = event.data as ScheduleGridRow | undefined;
+                  if (!row || isGroupRow(row) || !row.key) return;
                   // 큐 기반: 모든 작업 클릭 허용. running/pending 중복은 handleTriggerJob 내부에서 토스트 안내.
                   handleTriggerJob(row.key as SystemJobKey, row.job);
                 },

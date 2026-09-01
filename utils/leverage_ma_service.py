@@ -18,11 +18,14 @@ from leverage.config_store import load_config, load_leverage_state, save_leverag
 from leverage.engine.backtest.ma_cross import current_index_judgment, run_buy_hold, tune_ma_cross
 from leverage.holding import count_trading_days_market, resolve_holding_start_date
 from utils.data_loader import fetch_ohlcv
+from utils.logger import get_app_logger
 from utils.moving_averages import get_moving_average_type
 
 # 이동평균 최장 후보(240)를 창 시작부터 계산하려면 그만큼의 사전 데이터가 필요하다.
 _WARMUP_EXTRA_BDAYS = 30
 _TICKER_TYPE = "etf"
+
+logger = get_app_logger()
 
 
 def _fetch_close(ticker: str, country: str, start_str: str) -> pd.Series:
@@ -36,7 +39,9 @@ def _fetch_close(ticker: str, country: str, start_str: str) -> pd.Series:
 
 
 def _load_series(
-    config: dict[str, Any], months: int, max_ma: int,
+    config: dict[str, Any],
+    months: int,
+    max_ma: int,
 ) -> tuple[pd.Series, pd.Series, pd.Series | None, pd.Timestamp]:
     """지수/레버리지/방어 종가 + 평가 시작일. 방어가 현금이면 None(수익 0).
 
@@ -96,6 +101,38 @@ def _asset_meta(config: dict[str, Any]) -> dict[str, dict[str, str]]:
     }
 
 
+def _holding_return(state: dict[str, Any], country: str) -> dict[str, Any]:
+    """보유 중인 자산의 보유 시작일 대비 수익률.
+
+    현금(CASH)을 들고 있으면 수익률이라는 개념이 없어 값을 채우지 않는다.
+    시작일 종가가 없으면(그날 거래정지 등) 그 이후 첫 거래일 종가를 진입가로 본다.
+    조회 실패는 화면 전체를 막을 이유가 아니라 값 없음으로 둔다.
+    """
+    ticker = str(state.get("target") or "").strip()
+    start = str(state.get("holding_start_date") or "").strip()
+    if not ticker or ticker.upper() == "CASH" or not start:
+        return {}
+
+    try:
+        series = _fetch_close(ticker, country, start).dropna()
+    except Exception as exc:
+        logger.warning("[LEVERAGE] 보유 수익률 계산용 시세 조회 실패 (%s): %s", ticker, exc)
+        return {}
+
+    series = series[series > 0]
+    if len(series) < 1:
+        return {}
+    entry_price = float(series.iloc[0])
+    current_price = float(series.iloc[-1])
+    if entry_price <= 0:
+        return {}
+    return {
+        "holding_entry_price": round(entry_price, 2),
+        "holding_current_price": round(current_price, 2),
+        "holding_return_pct": round((current_price / entry_price - 1.0) * 100.0, 2),
+    }
+
+
 def compute_ma_cross_view(profile: str) -> dict[str, Any]:
     """현재 판정 + 추천 + 직전 상태를 반환한다(읽기 전용, 저장 안 함).
 
@@ -116,7 +153,11 @@ def compute_ma_cross_view(profile: str) -> dict[str, Any]:
     # 시장 거래일 달력으로 매번 계산한다(지수 티커를 달력 기준으로 사용).
     state = load_leverage_state(profile)
     if state.get("holding_start_date"):
-        state = {**state, "holding_days": count_trading_days_market(country, config["index_ticker"], state["holding_start_date"])}
+        state = {
+            **state,
+            "holding_days": count_trading_days_market(country, config["index_ticker"], state["holding_start_date"]),
+        }
+        state = {**state, **_holding_return(state, country)}
 
     meta = _asset_meta(config)
     if judgment is None:
@@ -142,7 +183,9 @@ def compute_ma_cross_view(profile: str) -> dict[str, Any]:
         "peak_drawdown_pct": peak_drawdown_pct,
         "slippage": float(config["slippage"]),
         "assets": meta,
-        "judgment": None if judgment is None else {
+        "judgment": None
+        if judgment is None
+        else {
             "as_of": judgment["as_of"].date().isoformat(),
             "index_close": judgment["index_close"],
             "ma": judgment["ma"],
@@ -193,7 +236,9 @@ def compute_ma_cross_tune(
         raise ValueError(f"레버리지 종목 단순 보유 성과 계산 데이터가 부족합니다: {config['leverage_ticker']}")
 
     rows = tune_ma_cross(
-        index, leverage, defense,
+        index,
+        leverage,
+        defense,
         buy_pct=slip,
         sell_pct=slip,
         candidates=candidates,
@@ -246,8 +291,10 @@ def persist_ma_cross_state(profile: str) -> dict[str, Any]:
         as_of = recommendation["as_of"]
         # 포지션이 실제로 바뀐 날에만 보유 시작일을 새로 기록, 유지되면 기존값 보존(리셋 없음).
         holding_start_date = resolve_holding_start_date(
-            prev.get("target"), prev.get("holding_start_date"),
-            recommendation["target_ticker"], as_of,
+            prev.get("target"),
+            prev.get("holding_start_date"),
+            recommendation["target_ticker"],
+            as_of,
         )
 
         # 슬랙: 설정에서 켜져 있고, '장 마감 직후'이며, 오늘 아직 안 보냈을 때만 1회 발송.

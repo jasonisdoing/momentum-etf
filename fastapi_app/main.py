@@ -10,11 +10,14 @@ from .routes.alarms import router as alarms_router
 from .routes.asset_helper import router as asset_helper_router
 from .routes.assets import router as assets_router
 from .routes.aus_market_stocks import router as aus_market_stocks_router
+from .routes.broker_api import router as broker_api_router
 from .routes.daily import router as daily_router
 from .routes.dashboard import router as dashboard_router
 from .routes.data_sources import router as data_sources_router
+from .routes.data_tables import router as data_tables_router
 from .routes.holdings import router as holdings_router
 from .routes.holdings_components import router as holdings_components_router
+from .routes.kor_dividend import router as kor_dividend_router
 from .routes.kor_market_stocks import router as kor_market_stocks_router
 from .routes.leverage import router as leverage_router
 from .routes.live_24h import router as live_24h_router
@@ -25,11 +28,14 @@ from .routes.monthly import router as monthly_router
 from .routes.note import router as note_router
 from .routes.pool_backtest import router as pool_backtest_router
 from .routes.pool_settings import router as pool_settings_router
+from .routes.quotes import router as quotes_router
 from .routes.rank import router as rank_router
 from .routes.snapshots import router as snapshots_router
 from .routes.stocks import router as stocks_router
-from .routes.strategy_sm import router as strategy_sm_router
-from .routes.strategy_trade import router as strategy_trade_router
+from .routes.strategy_mix import router as strategy_mix_router
+from .routes.strategy_momentum import router as strategy_momentum_router
+from .routes.strategy_new_high import router as strategy_new_high_router
+from .routes.strategy_portfolio import router as strategy_portfolio_router
 from .routes.system import router as system_router
 from .routes.ticker_detail import router as ticker_detail_router
 from .routes.us_market_stocks import router as us_market_stocks_router
@@ -80,6 +86,8 @@ app.include_router(holdings_components_router)
 app.include_router(dashboard_router)
 app.include_router(daily_router)
 app.include_router(data_sources_router)
+app.include_router(data_tables_router)
+app.include_router(kor_dividend_router)
 app.include_router(kor_market_stocks_router)
 app.include_router(market_router)
 app.include_router(memos_router)
@@ -88,12 +96,16 @@ app.include_router(note_router)
 app.include_router(pool_settings_router)
 app.include_router(pool_backtest_router)
 app.include_router(account_settings_router)
+app.include_router(broker_api_router)
+app.include_router(quotes_router)
 app.include_router(rank_router)
 app.include_router(snapshots_router)
 app.include_router(stocks_router)
 app.include_router(asset_helper_router)
-app.include_router(strategy_sm_router)
-app.include_router(strategy_trade_router)
+app.include_router(strategy_mix_router)
+app.include_router(strategy_new_high_router)
+app.include_router(strategy_portfolio_router)
+app.include_router(strategy_momentum_router)
 from fastapi import Request
 from pymongo.errors import NetworkTimeout, PyMongoError
 from starlette.responses import JSONResponse

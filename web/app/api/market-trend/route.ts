@@ -1,24 +1,9 @@
-import { NextResponse } from "next/server";
-
-import { fetchFastApiJson } from "@/lib/internal-api";
-import { jsonNoStore } from "@/lib/no-store-response";
+import { createFastApiProxy } from "@/lib/fastapi-proxy";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+const proxy = createFastApiProxy({
+  GET: { path: "/internal/market-trend", error: "시장지수 추세 데이터를 불러오지 못했습니다." },
+});
 
-  try {
-    const data = await fetchFastApiJson<unknown>(
-      "/internal/market-trend",
-    );
-    return jsonNoStore(data as Record<string, unknown>);
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "시장지수 추세 데이터를 불러오지 못했습니다.",
-      },
-      { status: 500 },
-    );
-  }
-}
+export const GET = proxy.GET!;

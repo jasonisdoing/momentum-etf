@@ -5,10 +5,10 @@ from typing import Any
 
 from services.price_service import get_realtime_snapshot
 from services.stock_cache_service import delete_stock_cache
+from utils.cache_invalidation import invalidate_pool_caches
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.normalization import normalize_nullable_number, normalize_text
-from utils.rank_service import invalidate_rank_data_cache
 from utils.stock_list_io import add_stock, hard_remove_stock, invalidate_ticker_type_cache
 from utils.stock_meta_updater import fetch_stock_info
 from utils.ticker_registry import load_ticker_type_configs as load_account_configs
@@ -48,10 +48,10 @@ def _load_ticker_types_payload() -> list[dict[str, Any]]:
 def _pick_ticker_type(ticker_types: list[dict[str, Any]], ticker_type: str | None) -> str:
     target = str(ticker_type or "").strip().lower()
     available_ids = [str(t["ticker_type"]).lower() for t in ticker_types]
-    
+
     if target and target in available_ids:
         return target
-        
+
     return available_ids[0] if available_ids else ""
 
 
@@ -99,6 +99,46 @@ def _load_stock_meta_doc(ticker_type: str, ticker: str) -> dict[str, Any] | None
             "is_deleted": 1,
         },
     )
+
+
+def _find_other_pool_with_ticker(ticker_type: str, ticker: str) -> str | None:
+    """같은 티커를 이미 담고 있는 **다른** 종목풀의 ticker_type. 없으면 None.
+
+    한 티커가 여러 풀에 있으면 계좌 보유 종목의 소속 풀을 특정할 수 없고
+    (``portfolio_io._pick_meta_doc`` 이 통화로만 골라 같은 통화의 풀끼리는 구분이 안 된다),
+    그러면 그 풀의 이평선으로 이탈을 판정할 수 없다. 그래서 추가 단계에서 막는다.
+
+    호주는 ``ASX:`` 접두사를 붙여 저장하므로(예: ``ASX:IOO`` vs ``IOO``) 미국에 같은 티커가
+    있어도 문자열이 달라 자연히 구분된다 — 국가를 따로 볼 필요가 없다.
+    """
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결에 실패했습니다.")
+
+    doc = db.stock_meta.find_one(
+        {
+            "ticker": str(ticker or "").strip().upper(),
+            "ticker_type": {"$ne": str(ticker_type or "").strip().lower()},
+            "is_deleted": {"$ne": True},
+        },
+        {"ticker_type": 1},
+    )
+    return str(doc["ticker_type"]) if doc else None
+
+
+def _pool_label(ticker_type: str) -> str:
+    """오류 문구용 종목풀 표기 — '🇰🇷 국내상장 국내 ETF (kor_kr)'."""
+    from utils.settings_loader import get_ticker_type_settings
+
+    try:
+        config = get_ticker_type_settings(ticker_type) or {}
+    except Exception:
+        return ticker_type
+    icon = str(config.get("icon") or "").strip()
+    name = str(config.get("name") or "").strip()
+    if not name:
+        return ticker_type
+    return f"{icon} {name} ({ticker_type})".strip()
 
 
 def load_active_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
@@ -155,11 +195,9 @@ def load_active_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
                 "listing_date": normalize_text(doc.get("listing_date"), "-"),
                 "week_volume": normalize_nullable_number(doc.get("1_week_avg_volume")),
                 "return_1d": normalize_nullable_number(
-                    realtime_snapshot.get(doc.get("ticker", ""), {}).get("changeRate") 
+                    realtime_snapshot.get(doc.get("ticker", ""), {}).get("changeRate")
                 ),
-                "괴리율": normalize_nullable_number(
-                    realtime_snapshot.get(doc.get("ticker", ""), {}).get("deviation")
-                ),
+                "괴리율": normalize_nullable_number(realtime_snapshot.get(doc.get("ticker", ""), {}).get("deviation")),
                 "return_1w": normalize_nullable_number(doc.get("1_week_earn_rate")),
                 "return_2w": normalize_nullable_number(doc.get("2_week_earn_rate")),
                 "return_1m": normalize_nullable_number(doc.get("1_month_earn_rate")),
@@ -213,12 +251,31 @@ def validate_stock_candidate(ticker_type: str, ticker: str) -> dict[str, Any]:
         },
     )
 
-    stock_info = fetch_stock_info(ticker_norm, country_code)
-    if not stock_info or not str(stock_info.get("name") or "").strip():
-        raise RuntimeError("유효한 티커를 찾지 못했습니다.")
-
     is_deleted = bool(existing and existing.get("is_deleted") is True)
     is_active = bool(existing and existing.get("is_deleted") is not True)
+
+    # 이미 등록돼 있는 종목은 외부 조회를 건너뛴다 — 어차피 "이미 등록된 종목입니다" 로
+    # 끝나서 받아온 값을 쓰지도 않는다. 여러 종목을 한꺼번에 추가할 때 대부분이 중복인데,
+    # 이 호출 때문에 종목당 수백 ms~수 초씩 걸렸다.
+    # 저장된 이름이 비어 있으면(옛 문서) 건너뛸 근거가 없으므로 그대로 조회한다.
+    existing_name = normalize_text((existing or {}).get("name"), "") if is_active else ""
+    if is_active and existing_name:
+        stock_info = {"name": existing_name, "listing_date": (existing or {}).get("listing_date")}
+    else:
+        stock_info = None
+        # 미국은 ETF 마켓 캐시(KIS 마스터 이름)를 먼저 본다 — yfinance info 는 레이트리밋에
+        # 자주 걸려서(배치 직후 등) 캐시에 있는 종목까지 추가 실패로 끝났다.
+        if country_code == "us":
+            from utils.us_etf_market_service import us_etf_name_of
+
+            cached_name = us_etf_name_of(ticker_norm)
+            if cached_name:
+                stock_info = {"name": cached_name, "listing_date": None}
+        if stock_info is None:
+            stock_info = fetch_stock_info(ticker_norm, country_code)
+        if not stock_info or not str(stock_info.get("name") or "").strip():
+            raise RuntimeError("유효한 티커를 찾지 못했습니다.")
+
     deleted_reason = normalize_text(existing.get("deleted_reason"), "") if existing else ""
     listing_date = normalize_text(stock_info.get("listing_date") or (existing or {}).get("listing_date"), "-")
     bucket_id = int((existing or {}).get("bucket") or 1)
@@ -274,7 +331,8 @@ def refresh_single_stock(ticker_type: str, ticker: str) -> dict[str, str]:
     except Exception as e:
         logger.error(f"[{type_norm.upper()}/{ticker_norm}] 가격 캐시 갱신 실패: {e}")
 
-    # 2) 메타데이터 업데이트 — 위에서 채운 가격 캐시로 backtest_stats(3달 MDD/수익/소르티노)를 계산·저장.
+    # 2) 메타데이터 업데이트 — 이름/상장일 등 식별 메타를 채운다.
+    #    (MDD·소르티노는 순위 조회 시 실시간 계산이라 여기서 만들지 않는다.)
     from utils.stock_meta_updater import update_single_ticker_metadata
 
     try:
@@ -282,7 +340,7 @@ def refresh_single_stock(ticker_type: str, ticker: str) -> dict[str, str]:
     except Exception as e:
         logger.error(f"[{type_norm.upper()}/{ticker_norm}] 메타데이터 갱신 실패: {e}")
 
-    invalidate_rank_data_cache(type_norm)
+    invalidate_pool_caches(type_norm)
     return {"ticker": ticker_norm, "ticker_type": type_norm}
 
 
@@ -293,6 +351,11 @@ def add_active_stock(ticker_type: str, ticker: str, bucket_id: int) -> dict[str,
     bucket_value = int(bucket_id or 0)
     if bucket_value not in BUCKETS:
         raise RuntimeError("버킷을 선택하세요.")
+
+    # 한 티커는 한 종목풀에만 — 계좌 보유 종목의 소속 풀이 유일해야 그 풀의 이평선으로 판정할 수 있다.
+    other_pool = _find_other_pool_with_ticker(ticker_type_norm, ticker_norm)
+    if other_pool:
+        raise RuntimeError(f"이미 다른 종목풀에 있습니다: {_pool_label(other_pool)}")
 
     created = add_stock(
         ticker_type_norm,
@@ -339,7 +402,7 @@ def add_active_stock(ticker_type: str, ticker: str, bucket_id: int) -> dict[str,
             invalidate_ticker_type_cache(ticker_type_norm)
         raise RuntimeError(f"종목 캐시 갱신에 실패해 추가를 취소했습니다: {refresh_error}") from refresh_error
 
-    invalidate_rank_data_cache(ticker_type_norm)
+    invalidate_pool_caches(ticker_type_norm)
     return {
         "ticker": ticker_norm,
         "name": str(validated["name"]),
@@ -375,7 +438,7 @@ def update_stock_bucket(ticker_type: str, ticker: str, bucket_id: int) -> None:
 
     # stock_list_io 의 TTL 캐시가 60초간 이전 값을 반환해 버려서 UI 에 반영되지 않는 것을 방지한다.
     invalidate_ticker_type_cache(type_norm)
-    invalidate_rank_data_cache(type_norm)
+    invalidate_pool_caches(type_norm)
 
 
 def delete_active_stock(ticker_type: str, ticker: str) -> None:
@@ -393,7 +456,7 @@ def delete_active_stock(ticker_type: str, ticker: str) -> None:
     from utils.stock_list_io import get_active_holding_tickers
 
     try:
-        is_currently_held = ticker_norm in get_active_holding_tickers().get(type_norm, set())
+        is_currently_held = ticker_norm in get_active_holding_tickers()
     except Exception:
         is_currently_held = False
 
@@ -408,7 +471,135 @@ def delete_active_stock(ticker_type: str, ticker: str) -> None:
         except Exception:
             pass
 
-    invalidate_rank_data_cache(type_norm)
+    invalidate_pool_caches(type_norm)
+
+
+def movable_pools(ticker_type: str) -> list[dict[str, Any]]:
+    """그 종목풀에서 종목을 옮길 수 있는 대상 풀 목록.
+
+    **같은 국가 + 같은 구분(`pool_kind`)** 만 허용한다. 국가가 다르면 거래 달력·통화가 갈리고,
+    구분이 다르면(개별주 ↔ ETF) 업종 상한 같은 설정의 의미가 달라진다. 자기 자신은 뺀다.
+    구분이 미설정인 풀은 무엇과도 같다고 볼 수 없어 대상에서 제외한다(추정하지 않는다).
+    """
+    from utils.momentum_service import pool_options
+    from utils.settings_loader import get_ticker_type_settings
+
+    source = get_ticker_type_settings(str(ticker_type or "").strip().lower()) or {}
+    country = str(source.get("country_code") or "").strip().lower()
+    kind = str(source.get("pool_kind") or "").strip().lower()
+    if not country or not kind:
+        return []
+    return [
+        option
+        for option in pool_options()
+        if option["ticker_type"] != str(ticker_type or "").strip().lower()
+        and option.get("country_code") == country
+        and option.get("pool_kind") == kind
+    ]
+
+
+def move_active_stock(from_pool: str, to_pool: str, ticker: str) -> dict[str, Any]:
+    """종목 하나를 다른 종목풀로 옮긴다 — 옛 풀에서 빼고 새 풀에 담는다.
+
+    한 티커는 한 종목풀에만 있어야 하므로(계좌 보유 종목의 소속 풀이 유일해야 그 풀의
+    이평선·손절 기준으로 판정할 수 있다) '양쪽에 두기' 가 아니라 이동이다.
+
+    **다시 받는 것 없이 옮기기만 한다.** 종목 메타(이름·상장일·업종·메모)·가격 캐시·배치
+    계산값이 전부 같은 값이라 원천 조회가 필요 없다. 예전에는 삭제 후 신규 추가로 처리해
+    종목당 10초(메타 9초 + 시세 1.6초)가 들었다.
+    """
+    source = str(from_pool or "").strip().lower()
+    target = str(to_pool or "").strip().lower()
+    ticker_norm = str(ticker or "").strip().upper()
+    if not source or not target or not ticker_norm:
+        raise RuntimeError("출발 종목풀·대상 종목풀·티커가 모두 필요합니다.")
+    if source == target:
+        raise RuntimeError("출발 종목풀과 대상 종목풀이 같습니다.")
+    if target not in {option["ticker_type"] for option in movable_pools(source)}:
+        raise RuntimeError(
+            f"'{_pool_label(source)}' 에서 '{_pool_label(target)}' 로는 옮길 수 없습니다 — "
+            "국가와 구분(개별주/ETF)이 같은 종목풀로만 옮길 수 있습니다."
+        )
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결에 실패했습니다.")
+
+    current = db.stock_meta.find_one({"ticker_type": source, "ticker": ticker_norm, "is_deleted": {"$ne": True}})
+    if not current:
+        raise RuntimeError(f"'{_pool_label(source)}' 에 없는 종목입니다: {ticker_norm}")
+    bucket_value = int(current.get("bucket") or 1)
+
+    # 대상 풀에 이미 활성으로 있으면 여기서 막는다. 아래 이동은 '먼저 빼고 담는' 순서라
+    # 담기에서 걸리면 되돌리기까지 돌아야 하고, 화면에는 원인 없이 '이동 실패'만 남는다.
+    if db.stock_meta.find_one({"ticker_type": target, "ticker": ticker_norm, "is_deleted": {"$ne": True}}):
+        raise RuntimeError(
+            f"'{_pool_label(target)}' 에 {ticker_norm} 가 이미 있습니다 — 한 티커는 한 종목풀에만 둡니다. "
+            "대상 종목풀에서 먼저 지운 뒤 옮겨주세요."
+        )
+    # 대상 풀에 **삭제 상태로** 남아 있던 문서 — add_stock 이 이걸 되살린다. 이동이 실패하면
+    # 되살아난 문서를 원래대로 돌려놔야 한다(안 그러면 출발·대상 양쪽에 종목이 남는다).
+    target_before = db.stock_meta.find_one({"ticker_type": target, "ticker": ticker_norm})
+
+    # 이름·상장일·마켓·업종·메모는 종목풀이 바뀐다고 달라지지 않는다 — 옛 문서 값을 그대로
+    # 가져간다. 원천에서 다시 받으면 종목당 9초가 더 든다.
+    carried = {
+        key: value
+        for key, value in current.items()
+        # name 은 add_stock 이 별도 인자로 받으므로 여기서 뺀다(중복 전달 방지).
+        if key
+        not in ("_id", "ticker", "ticker_type", "name", "is_deleted", "deleted_at", "deleted_reason", "created_at")
+    }
+    carried_name = str(current.get("name") or ticker_norm)
+
+    from utils.cache_utils import move_cached_frame
+    from utils.stock_list_io import add_stock
+
+    # 옛 풀에서 먼저 뺀다 — 남겨 두면 '이미 다른 종목풀에 있습니다' 로 막힌다.
+    # 가격 캐시·배치 계산값은 지우지 않고 새 풀로 옮긴다(같은 시세라 다시 받을 이유가 없다).
+    if not hard_remove_stock(source, ticker_norm):
+        raise RuntimeError(f"'{_pool_label(source)}' 에서 빼지 못했습니다: {ticker_norm}")
+    try:
+        if not add_stock(target, ticker_norm, name=carried_name, **carried):
+            raise RuntimeError("대상 종목풀에 담지 못했습니다.")
+        move_cached_frame(source, target, ticker_norm)
+        for meta_coll in ("stock_cache_meta", "previous_stock_cache_meta"):
+            # 대상 풀에 남아 있던 옛 계산값은 먼저 지운다 — (ticker_type, ticker) 유일 인덱스가
+            # 걸려 있어 그대로 두면 이동이 중복 키로 실패한다. 옮겨오는 쪽이 실제 종목의 값이다.
+            db[meta_coll].delete_many({"ticker_type": target, "ticker": ticker_norm})
+            db[meta_coll].update_many({"ticker_type": source, "ticker": ticker_norm}, {"$set": {"ticker_type": target}})
+    except Exception as exc:
+        # 새 풀에 담지 못했으면 옛 풀로 되돌린다 — 이미 뺀 뒤라 되돌리지 않으면 종목이 사라진다.
+        # 대상 풀 문서도 이동 전 상태로 돌린다. add_stock 이 성공한 뒤 그 다음 단계에서
+        # 실패하면 종목이 출발·대상 양쪽에 활성으로 남는다(실제로 그렇게 됐다).
+        try:
+            if target_before is None:
+                hard_remove_stock(target, ticker_norm)
+            else:
+                db.stock_meta.replace_one({"_id": target_before["_id"]}, target_before, upsert=True)
+        except Exception as revert_error:
+            get_app_logger().error("[이동] %s 대상 풀 되돌리기 실패: %s", ticker_norm, revert_error)
+        try:
+            restored = add_stock(source, ticker_norm, name=carried_name, **carried)
+        except Exception as restore_error:
+            restored = False
+            get_app_logger().error("[이동] %s 복구 중 오류: %s", ticker_norm, restore_error)
+        if not restored:
+            # 조용히 넘기면 안 된다 — 종목이 어느 풀에도 없는 상태로 남는다.
+            get_app_logger().error(
+                "[이동] %s 복구 실패 — '%s' 에서 빠진 채로 남았습니다. 수동 재등록이 필요합니다.",
+                ticker_norm,
+                source,
+            )
+            raise RuntimeError(
+                f"{ticker_norm} 이동에 실패했고 '{_pool_label(source)}' 로 되돌리지도 못했습니다. "
+                f"이 종목은 지금 어느 종목풀에도 없습니다 — 다시 추가해 주세요. (원인: {exc})"
+            ) from exc
+        raise RuntimeError(f"{ticker_norm} 이동 실패: {exc}") from exc
+
+    invalidate_pool_caches(source)
+    invalidate_pool_caches(target)
+    return {"ticker": ticker_norm, "from": source, "to": target, "bucket_id": bucket_value}
 
 
 def load_deleted_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
@@ -466,11 +657,9 @@ def load_deleted_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
                 "listing_date": normalize_text(doc.get("listing_date"), "-"),
                 "week_volume": normalize_nullable_number(doc.get("1_week_avg_volume")),
                 "return_1d": normalize_nullable_number(
-                    realtime_snapshot.get(doc.get("ticker", ""), {}).get("changeRate") 
+                    realtime_snapshot.get(doc.get("ticker", ""), {}).get("changeRate")
                 ),
-                "괴리율": normalize_nullable_number(
-                    realtime_snapshot.get(doc.get("ticker", ""), {}).get("deviation")
-                ),
+                "괴리율": normalize_nullable_number(realtime_snapshot.get(doc.get("ticker", ""), {}).get("deviation")),
                 "return_1w": normalize_nullable_number(doc.get("1_week_earn_rate")),
                 "return_2w": normalize_nullable_number(doc.get("2_week_earn_rate")),
                 "return_1m": normalize_nullable_number(doc.get("1_month_earn_rate")),
@@ -522,7 +711,7 @@ def restore_deleted_stocks(ticker_type: str, tickers: list[str]) -> int:
     )
     if result.modified_count > 0:
         invalidate_ticker_type_cache(type_norm)
-        invalidate_rank_data_cache(type_norm)
+        invalidate_pool_caches(type_norm)
     return int(result.modified_count)
 
 
@@ -555,7 +744,7 @@ def hard_delete_stocks(ticker_type: str, tickers: list[str]) -> int:
 
     if result.deleted_count > 0:
         invalidate_ticker_type_cache(type_norm)
-        invalidate_rank_data_cache(type_norm)
+        invalidate_pool_caches(type_norm)
     return int(result.deleted_count)
 
 
@@ -586,4 +775,4 @@ def toggle_exclude_from_ranking(ticker_type: str, ticker: str, exclude: bool) ->
 
     # 캐시 무효화 (종목풀 리스트 캐시 재생성 및 랭킹 캐시 무효화)
     invalidate_ticker_type_cache(type_norm)
-    invalidate_rank_data_cache(type_norm)
+    invalidate_pool_caches(type_norm)

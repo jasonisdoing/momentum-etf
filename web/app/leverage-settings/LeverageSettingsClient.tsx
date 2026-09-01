@@ -4,7 +4,9 @@ import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { formatKstDateTime } from "@/lib/datetime";
+import { formatSignedPct, signColor } from "@/lib/grid-cells";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { MONTH_OPTIONS, MonthsSelect } from "../components/MonthsSelect";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
@@ -33,7 +35,6 @@ const compactLabelStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-const TUNE_MONTH_OPTIONS = [1, 2, 3, 4, 5, 6, 12, 24, 36, 48, 60] as const;
 // 슬리피지 편도(%). 종목풀 설정과 동일한 0.05~0.5 (0.05 단위).
 const SLIPPAGE_OPTIONS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5] as const;
 const leverageTuneGridTheme = createAppGridTheme();
@@ -128,7 +129,19 @@ type MaView = {
     prev_target: string | null;
     is_changed: boolean;
   } | null;
-  state: { date?: string; target?: string; target_name?: string; side?: string; updated_at?: string; holding_days?: number; holding_start_date?: string } | null;
+  state: {
+    date?: string;
+    target?: string;
+    target_name?: string;
+    side?: string;
+    updated_at?: string;
+    holding_days?: number;
+    holding_start_date?: string;
+    /** 보유 시작일 대비 수익률 — 현금 보유 중이면 없다. */
+    holding_return_pct?: number | null;
+    holding_entry_price?: number | null;
+    holding_current_price?: number | null;
+  } | null;
   error?: string;
 };
 
@@ -654,13 +667,7 @@ export function LeverageSettingsClient() {
                 <div style={{ display: "flex", gap: "10px 12px", alignItems: "flex-end", flexWrap: "wrap" }}>
                   <label className="appLabeledField" style={{ minWidth: 130, flex: "0 0 auto" }}>
                     <span className="appLabeledFieldLabel">기간(개월)</span>
-                    <select className="form-select form-select-sm" value={tuneMonths} onChange={(e) => setTuneMonths(Number(e.target.value))}>
-                      {TUNE_MONTH_OPTIONS.map((m) => (
-                        <option key={m} value={m}>
-                          최근 {m}개월
-                        </option>
-                      ))}
-                    </select>
+                    <MonthsSelect value={tuneMonths} options={MONTH_OPTIONS} onChange={setTuneMonths} />
                   </label>
                   <div style={{ display: "flex", gap: 7, alignItems: "flex-end", flexWrap: "wrap" }}>
                     <span style={{ color: "var(--text-muted)", fontWeight: 700, paddingBottom: 7, fontSize: "var(--fs-sm)" }}>이동선</span>
@@ -824,6 +831,18 @@ export function LeverageSettingsClient() {
                       <span style={{ fontWeight: 600, fontSize: "var(--fs-sm)" }}>{value}</span>
                     </div>
                   ))}
+                  {/* 수익률은 현금이 아니라 실제 종목을 들고 있을 때만 뜻이 있다. */}
+                  {state?.holding_return_pct != null ? (
+                    <div style={{ display: "flex", gap: 12, padding: "4px 0" }}>
+                      <span style={{ width: 84, flexShrink: 0, color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>수익률</span>
+                      <span style={{ fontWeight: 700, fontSize: "var(--fs-sm)", color: signColor(state.holding_return_pct) }}>
+                        {formatSignedPct(state.holding_return_pct, 2)}
+                        <span style={{ marginLeft: 6, fontWeight: 500, color: "var(--text-muted)" }}>
+                          ({state.holding_entry_price} → {state.holding_current_price})
+                        </span>
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>

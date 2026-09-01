@@ -6,7 +6,7 @@ from typing import Any
 
 from utils.asx_ticker import ensure_asx_prefix, strip_asx_prefix
 from utils.index_constituents_loader import load_index_constituents, load_index_meta
-from utils.market_service import load_ticker_pool_map
+from utils.market_service import load_ticker_pool_map, load_ticker_pool_type_map
 from utils.portfolio_io import load_all_holding_tickers
 
 
@@ -24,6 +24,8 @@ def load_aus_index_stock_market(index: str = "ASX200", min_market_cap_ukm: int =
     meta = load_index_meta("ASX200")
 
     ticker_pool_map = load_ticker_pool_map(country_code="au")
+    # 화면이 "이미 이 풀에 있는 종목"을 걸러내려면 이름이 아니라 풀 id 가 필요하다.
+    ticker_pool_type_map = load_ticker_pool_type_map(country_code="au")
     held_tickers = load_all_holding_tickers(country_code="au")
     held_keys = {_normalize_asx_ticker(ticker) for ticker in held_tickers}
     min_market_cap_aud = min_market_cap_ukm * 100_000_000
@@ -47,6 +49,9 @@ def load_aus_index_stock_market(index: str = "ASX200", min_market_cap_ukm: int =
                 "market": "ASX",
                 "ticker_pools": ", ".join(
                     ticker_pool_map.get(strip_asx_prefix(ticker), []) or ticker_pool_map.get(ticker, [])
+                ),
+                "ticker_pool_types": (
+                    ticker_pool_type_map.get(strip_asx_prefix(ticker), []) or ticker_pool_type_map.get(ticker, [])
                 ),
                 "is_held": ticker in held_keys,
                 "current_price": item.get("current_price") or item.get("return_3m_latest_price"),

@@ -21,5 +21,5 @@ def get_cash_accounts(_: None = Depends(require_internal_token)) -> dict[str, An
 
 
 @router.post("")
-def post_cash_accounts(payload: CashSavePayload, _: None = Depends(require_internal_token)) -> dict[str, str]:
+def post_cash_accounts(payload: CashSavePayload, _: None = Depends(require_internal_token)) -> dict[str, Any]:
     return save_cash_accounts(payload.accounts)

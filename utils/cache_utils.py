@@ -12,17 +12,15 @@ import pandas as pd
 from bson.binary import Binary
 from pymongo.errors import PyMongoError
 
+from config import CACHE_TTL_LIVE
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
+from utils.ttl_cache import TtlCache
 
 logger = get_app_logger()
 
 _CLOSE_SERIES_MEMORY_CACHE: dict[tuple[str, str], tuple[datetime | None, pd.Series]] = {}
 
-_COLLECTION_NAME_MAP = {
-    "kor": "cache_kor_stocks",
-    "us": "cache_us_stocks",
-}
 _REFRESH_STATUS_COLLECTION = "cache_refresh_status"
 
 _TEMP_SUFFIX_SANITIZE = re.compile(r"[^a-z0-9_-]", re.IGNORECASE)
@@ -124,12 +122,23 @@ def _get_cache_start_date() -> pd.Timestamp | None:
     return None
 
 
+# 종목풀·계좌가 아닌 **참조 시세**의 저장 위치.
+# 이들은 OHLCV 저장 코드를 재사용하려고 같은 함수에 토큰만 다르게 넘겨 쓴다. 그런데 수명이
+# 정반대다 — 소유자 캐시(`cache_<소유자>_stocks`)는 종목풀·계좌가 사라지면 함께 지워야 하고,
+# 참조 시세는 소유자가 없어 절대 지우면 안 된다. 이름 형식이 같으면 구분이 불가능해서
+# 고아 점검이 환율을 '주인 없는 데이터' 로 잡았다(예외 목록으로 막다가 형식을 분리했다).
+_REFERENCE_COLLECTIONS = {
+    "fx": "reference_fx_prices",
+    "etf": "reference_index_prices",
+}
+
+
 def _resolve_collection_name(account_id: str) -> str:
     token = (account_id or "global").strip().lower() or "global"
 
-    # Static map check (legacy support or specific overrides)
-    if token in _COLLECTION_NAME_MAP:
-        return _COLLECTION_NAME_MAP[token]
+    # 참조 시세는 소유자 캐시와 다른 이름 형식을 쓴다(위 주석 참고).
+    if token in _REFERENCE_COLLECTIONS:
+        return _REFERENCE_COLLECTIONS[token]
 
     # Temporary collection handling
     if "_tmp_" in token:
@@ -186,7 +195,9 @@ def get_all_ticker_type_lookup_keys() -> list[str]:
     """모든 종목풀 캐시 키를 명시적으로 반환한다."""
     from utils.settings_loader import list_available_ticker_types
 
-    return [str(ticker_type).strip().lower() for ticker_type in list_available_ticker_types() if str(ticker_type).strip()]
+    return [
+        str(ticker_type).strip().lower() for ticker_type in list_available_ticker_types() if str(ticker_type).strip()
+    ]
 
 
 def _load_cached_frames_bulk_from_keys(cache_keys: Iterable[str], tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
@@ -351,8 +362,30 @@ def load_cached_frame_with_fallback(account_id: str, ticker: str) -> pd.DataFram
     return None
 
 
+# 가격 프레임 캐시 — **한 요청 안의 중복 조회**를 없애려고 둔다.
+# 합성 화면은 슬리브마다 판정과 백테스트를 돌리는데, 같은 종목풀을 보는 슬리브가 여럿이면
+# 같은 프레임을 그 수만큼 다시 읽었다(kor_stock 424종목을 4번, 24초). 역직렬화까지 매번
+# 다시 하므로 DB 왕복만의 문제가 아니다.
+# 종목 추가·삭제·이동은 `invalidate_pool_caches` 가 이 캐시도 지우므로 만료를 기다리지 않는다.
+# 항목 하나가 종목풀 전체 프레임(한국 개별주 424종목 = 38MB)일 수 있어 개수를 제한한다.
+# 실제로 붐비는 것은 풀별 전체 조회 몇 건과 소수 티커 조회들이라 이 정도면 충분히 덮는다.
+_FRAMES_CACHE = TtlCache(CACHE_TTL_LIVE, name="cached_frames", max_entries=24)
+
+
+def invalidate_frames_cache() -> None:
+    """가격 프레임 캐시를 비운다 (종목풀 내용·가격 캐시가 바뀌었을 때)."""
+    _FRAMES_CACHE.invalidate()
+
+
 def load_cached_frames_bulk(account_id: str, tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
-    """다수의 티커를 한 번의 질의로 가져와 역직렬화합니다."""
+    """다수의 티커를 한 번의 질의로 가져와 역직렬화합니다 (짧은 TTL 캐시)."""
+    key = _FRAMES_CACHE.make_key(
+        str(account_id or "").strip().lower(), sorted({(t or "").strip().upper() for t in tickers if (t or "").strip()})
+    )
+    return _FRAMES_CACHE.get_or_compute(key, lambda: _load_cached_frames_bulk_uncached(account_id, tickers))
+
+
+def _load_cached_frames_bulk_uncached(account_id: str, tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
     normalized = []
     for t in tickers:
         norm = (t or "").strip().upper()
@@ -826,6 +859,102 @@ def set_cache_refresh_completed_at(target_id: str, completed_at: datetime) -> No
     )
 
 
+# 이상치 경고 — 최근 이 일수 안에서 하루 등락이 한도를 넘으면 저장은 하되 슬랙으로 알린다.
+# 차단하지 않는 이유: 유닛 병합·액면분할 직후처럼 정상적으로 큰 변동도 있다(호주 IOO 6.35:1).
+# 한도 60% 초과: 개별주 상하한가(±30%)의 2배 = 단일종목 2배 레버리지 ETF 의 이론상 최대가
+# 정확히 ±60%다 (2026-07-31 SK하이닉스 상한가 날 +58% 실측). 그 위는 정상 시장에서
+# 나올 수 없어 데이터 사고(+542%, +1998% 등)만 걸린다.
+_ANOMALY_ALERT_WINDOW_DAYS = 40
+_ANOMALY_ALERT_PCT = 60.0
+# 이상치 기록도 시세 캐시와 같은 기준으로 나눈다 — 소유자(종목풀·계좌) 것은 소유자가
+# 사라질 때 함께 지워야 하고, 참조 시세 것은 지울 주인이 없다. 한 표에 섞으면 삭제·고아
+# 점검이 값을 보고 예외를 판정해야 한다(그 예외가 환율 기록을 지울 뻔했다).
+_ANOMALY_ALERT_COLLECTION = "price_anomaly_alerts"
+_REFERENCE_ANOMALY_COLLECTION = "reference_price_anomalies"
+
+
+def _lookup_ticker_name(cache_owner: str, ticker: str) -> str:
+    """알림 표시용 종목명 — 풀 문서에서 찾고 없으면 다른 풀, 그래도 없으면 빈 값.
+
+    `cache_owner` 가 종목풀이 아니면(환율 `fx` 등) stock_meta 에 없으므로 빈 값이 된다.
+    """
+    try:
+        db = get_db_connection()
+        if db is None:
+            return ""
+        doc = db.stock_meta.find_one(
+            {"ticker_type": str(cache_owner).strip().lower(), "ticker": ticker}, {"name": 1}
+        ) or db.stock_meta.find_one({"ticker": ticker, "name": {"$nin": [None, ""]}}, {"name": 1})
+        return str((doc or {}).get("name") or "").strip()
+    except Exception:
+        return ""
+
+
+def _alert_price_anomalies(cache_owner: str, ticker: str, df: pd.DataFrame) -> None:
+    """저장 직전 종가의 하루 등락을 검사해 한도 초과를 슬랙으로 경고한다.
+
+    같은 (캐시 소유자, 티커, 날짜) 조합은 한 번만 보낸다 — 오염된 프레임이 매시 재저장돼도
+    슬랙이 도배되지 않게 DB 에 알림 이력을 남긴다. 검사·발송 실패는 저장을 막지 않는다.
+
+    기록 위치는 시세 캐시와 같은 기준으로 나뉜다 — 종목풀·계좌 것은 `price_anomaly_alerts`,
+    참조 시세(환율·레버리지 지수) 것은 `reference_price_anomalies`. 소유자가 사라질 때
+    함께 지워야 하는지가 정반대라서다.
+    """
+    try:
+        close_column = _resolve_close_column(df.columns.astype(str).tolist())
+        if close_column is None:
+            return
+        close = pd.to_numeric(df[close_column], errors="coerce").dropna().astype(float)
+        if len(close) < 2:
+            return
+        recent = close.iloc[-_ANOMALY_ALERT_WINDOW_DAYS:]
+        # 부호를 살려 둔다 — 하락 사고를 (+60%) 로 보여주면 오독한다.
+        change = recent.pct_change() * 100
+        jumps = change[change.abs() > _ANOMALY_ALERT_PCT]
+        if jumps.empty:
+            return
+
+        db = get_db_connection()
+        if db is None:
+            return
+        alerts = db[
+            _REFERENCE_ANOMALY_COLLECTION if cache_owner in _REFERENCE_COLLECTIONS else _ANOMALY_ALERT_COLLECTION
+        ]
+        lines = []
+        for stamp, pct in jumps.items():
+            key = {
+                "cache_owner": str(cache_owner).strip().lower(),
+                "ticker": (ticker or "").strip().upper(),
+                "date": pd.Timestamp(stamp).strftime("%Y-%m-%d"),
+            }
+            marked = alerts.update_one(
+                key,
+                {"$setOnInsert": {**key, "pct": round(float(pct), 1), "created_at": datetime.utcnow()}},
+                upsert=True,
+            )
+            if marked.upserted_id is not None:  # 처음 보는 (캐시 소유자, 티커, 날짜)만 알린다
+                position = close.index.get_loc(stamp)
+                before = float(close.iloc[position - 1])
+                lines.append(f"· {key['date']} {before:,.2f} → {float(close.loc[stamp]):,.2f} ({pct:+.0f}%)")
+        if not lines:
+            return
+
+        from utils.notification import send_slack_message_v2
+
+        name = _lookup_ticker_name(cache_owner, key["ticker"])
+        title = f"{key['cache_owner'].upper()}/{key['ticker']}" + (f" {name}" if name else "")
+        send_slack_message_v2(
+            f":rotating_light: 가격 캐시 이상치 감지 — {title}\n"
+            + "\n".join(lines)
+            + f"\n하루 등락 {_ANOMALY_ALERT_PCT:.0f}% 초과 (단일종목 2배 레버리지의 이론상 최대). "
+            "분할·병합이면 정상이지만, yfinance 동시 호출 오염이나 원천 데이터 사고일 수 있어 "
+            "확인이 필요합니다. 저장은 그대로 진행됐습니다."
+        )
+        logger.warning("[CACHE] 가격 이상치 감지 %s/%s: %s", cache_owner, ticker, "; ".join(lines))
+    except Exception as exc:  # 경고 실패가 저장을 막으면 안 된다
+        logger.warning("[CACHE] 가격 이상치 검사 실패 (%s/%s): %s", cache_owner, ticker, exc)
+
+
 def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
     """캐시 DataFrame을 저장합니다. CACHE_START_DATE 이전 데이터는 제외합니다."""
     if df is None or df.empty:
@@ -848,6 +977,9 @@ def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
         raise ValueError("CACHE_START_DATE 적용 후 저장할 캐시 데이터가 비어 있습니다.")
 
     ticker_norm = (ticker or "").strip().upper()
+
+    # 이상치 경고(차단 아님) — 뒤섞인 가격이 조용히 저장되는 것을 그날 알아채기 위한 그물.
+    _alert_price_anomalies(account_id, ticker_norm, df_to_save)
 
     # [HOTFIX] 직렬화 오류 방지를 위한 정규화 및 중복 컬럼 제거
     df_to_save.columns = [str(c) for c in df_to_save.columns]
@@ -901,6 +1033,30 @@ def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
             f"저장된 캐시 행 수가 다릅니다 ({ticker_norm}): expected={expected_count}, actual={saved_count}"
         )
 
+    # 방금 저장한 가격이 곧바로 보이게 한다 — 읽기 캐시에 옛 프레임이 남으면 안 된다.
+    invalidate_frames_cache()
+
+
+def move_cached_frame(from_owner: str, to_owner: str, ticker: str) -> bool:
+    """가격 캐시 문서를 다른 소유자 컬렉션으로 **그대로 옮긴다**.
+
+    종목풀 이동에 쓴다 — 원천에서 다시 받으면 종목당 1~2초가 드는데, 같은 시세를 옮기는
+    것뿐이라 받을 이유가 없다. 대상에 이미 있으면 덮어쓴다.
+    """
+    db = get_db_connection()
+    if db is None:
+        return False
+    ticker_norm = str(ticker or "").strip().upper()
+    source = db[_resolve_collection_name(from_owner)]
+    doc = source.find_one({"ticker": ticker_norm})
+    if not doc:
+        return False
+    doc.pop("_id", None)
+    db[_resolve_collection_name(to_owner)].replace_one({"ticker": ticker_norm}, doc, upsert=True)
+    source.delete_one({"ticker": ticker_norm})
+    invalidate_frames_cache()
+    return True
+
 
 def delete_cached_frame(account_id: str, ticker: str) -> None:
     collection = _get_collection(account_id)
@@ -910,12 +1066,49 @@ def delete_cached_frame(account_id: str, ticker: str) -> None:
         collection.delete_one({"ticker": (ticker or "").strip().upper()})
     except Exception:
         return
+    invalidate_frames_cache()
+
+
+def prune_cache_to_tickers(account_id: str, keep_tickers: Iterable[str]) -> list[str]:
+    """``keep_tickers`` 에 없는 캐시 문서를 지우고 지운 티커 목록을 돌려준다.
+
+    종목풀에서 빠진 종목의 캐시는 아무도 갱신하지 않아 그 시점에 얼어붙는다. 그대로 두면
+    한 컬렉션 안에 최신 종목과 멈춘 종목이 섞이고, 나중에 컬렉션을 통째로 읽는 쪽이
+    서로 다른 날짜의 값을 한 표본으로 쓰게 된다.
+
+    보유 중인 종목은 호출자가 ``keep_tickers`` 에 포함시켜야 한다 — 풀에서 빠져도
+    자산 화면이 그 가격을 계속 쓴다 (`utils/stocks_service` 의 종목 삭제 규칙과 같다).
+    """
+    collection = _get_collection(account_id)
+    if collection is None:
+        return []
+
+    keep = {str(ticker or "").strip().upper() for ticker in keep_tickers}
+    keep.discard("")
+    if not keep:
+        # 지킬 목록을 못 만든 상태에서 지우면 캐시를 통째로 날린다.
+        logger.warning("[%s] 캐시 정리 대상 목록이 비어 있어 정리를 건너뜁니다.", account_id)
+        return []
+
+    try:
+        orphans = [
+            str(doc.get("ticker") or "").strip().upper()
+            for doc in collection.find({"ticker": {"$nin": list(keep)}}, {"ticker": 1})
+        ]
+        if orphans:
+            collection.delete_many({"ticker": {"$in": orphans}})
+            invalidate_frames_cache()
+    except Exception as exc:
+        logger.warning("[%s] 고아 캐시 정리 실패: %s", account_id, exc)
+        return []
+    return orphans
 
 
 def drop_cache_collection(account_id: str) -> None:
     db = get_db_connection()
     if db is None:
         return
+    invalidate_frames_cache()
     collection_name = _resolve_collection_name(account_id)
     try:
         db[collection_name].drop()
@@ -928,7 +1121,7 @@ def clean_temp_cache_collections(account_id: str, *, max_age_seconds: int | None
     db = get_db_connection()
     if db is None:
         return 0
-    base_name = _COLLECTION_NAME_MAP.get(account_id.strip().lower(), f"cache_{account_id}_stocks")
+    base_name = _resolve_collection_name(account_id)
     removed = 0
     try:
         threshold = None
@@ -991,47 +1184,6 @@ def get_cached_date_range(account_id: str, ticker: str) -> tuple[pd.Timestamp, p
     if df is None or df.empty:
         return None
     return df.index.min(), df.index.max()
-
-
-def list_available_cache_keys() -> list[str]:
-    """캐시된 계정(또는 국가) 키 목록을 반환합니다."""
-    db = get_db_connection()
-    if db is None:
-        return []
-
-    available: list[str] = []
-    try:
-        existing = set(db.list_collection_names())
-    except Exception:
-        existing = set()
-
-    # 정적 맵 먼저 체크
-    for key, coll in _COLLECTION_NAME_MAP.items():
-        if coll in existing:
-            available.append(key)
-
-    # 동적 컬렉션 패턴 체크 (cache_{account}_stocks)
-    # cache_ 로 시작하고 _stocks 로 끝나는 컬렉션 탐색
-    # 단, _tmp_ 가 포함된 건 임시 컬렉션이므로 제외
-    for coll_name in existing:
-        if coll_name.startswith("cache_") and coll_name.endswith("_stocks"):
-            # cache_{account}_stocks
-            # account 부분을 추출
-            # prefix "cache_" (len 6), suffix "_stocks" (len 7)
-            if len(coll_name) > 13:
-                inner = coll_name[6:-7]  # extract "account"
-                if "_tmp_" in inner:
-                    continue
-                available.append(inner)
-
-    # 중복 제거 및 정렬
-    available = sorted(list(set(available)))
-
-    if not available:
-        # DB 연결 실패 또는 없으면 정적 맵 키라도 반환
-        available = sorted(_COLLECTION_NAME_MAP.keys())
-
-    return available
 
 
 def list_cached_tickers(account_id: str) -> list[str]:

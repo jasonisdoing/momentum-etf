@@ -14,6 +14,7 @@ from utils.cache_utils import (
 )
 from utils.formatters import clean_holding_display_name
 from utils.logger import get_app_logger
+from utils.yfinance_guard import yfinance_lock
 
 logger = get_app_logger()
 
@@ -657,6 +658,7 @@ def _fetch_yahoo_baseline_prices(
         previous_day_symbols = {str(symbol or "").strip().upper() for symbol in previous_trading_day_symbols}
 
         from utils.symbol_resolution_blacklist import get_active_blacklist, mark_failed
+
         blacklist = get_active_blacklist()
 
         for symbol in normalized_symbols:
@@ -694,16 +696,18 @@ def _fetch_yahoo_baseline_prices(
         base_ts = pd.Timestamp(base_date).normalize()
         start_ts = base_ts - pd.Timedelta(days=10)
         end_ts = base_ts + pd.Timedelta(days=1)
-        downloaded = yf.download(
-            symbols_to_fetch,
-            start=start_ts.strftime("%Y-%m-%d"),
-            end=end_ts.strftime("%Y-%m-%d"),
-            interval="1d",
-            auto_adjust=False,
-            progress=False,
-            group_by="ticker",
-            threads=True,
-        )
+        # yfinance 는 프로세스 전역 상태를 공유해 동시 호출 시 서로 결과를 덮어쓴다(utils/yfinance_guard).
+        with yfinance_lock():
+            downloaded = yf.download(
+                symbols_to_fetch,
+                start=start_ts.strftime("%Y-%m-%d"),
+                end=end_ts.strftime("%Y-%m-%d"),
+                interval="1d",
+                auto_adjust=False,
+                progress=False,
+                group_by="ticker",
+                threads=True,
+            )
         if downloaded is None or downloaded.empty:
             return result
 

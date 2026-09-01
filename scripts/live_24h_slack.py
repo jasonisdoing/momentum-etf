@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import LIVE_24H_ALERT_PCT
 from utils.env import load_env_if_present
 from utils.live_24h_service import load_live_24h_quotes
-from utils.notification import send_slack_message_v2
+from utils.notification import app_link, send_slack_message_v2
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -148,17 +148,13 @@ def main():
 
     # 급변 종목이 없으면 보내지 않는다 — 알릴 것이 있을 때만(@channel) 발송한다.
     if not alerts:
-        logger.info(
-            "24H 시세 급변 없음 — 슬랙 발송 생략 (%d종목, 임계 %.1f%%)", len(rows), LIVE_24H_ALERT_PCT
-        )
+        logger.info("24H 시세 급변 없음 — 슬랙 발송 생략 (%d종목, 임계 %.1f%%)", len(rows), LIVE_24H_ALERT_PCT)
         return
 
     # 최근 1시간 급변 종목을 맨 위에 @channel 핑으로 알린다.
     tags = ", ".join(f"{name} {mv:+.1f}%" for name, mv in alerts)
     lines = [f"<!channel> 🚨 *최근 1시간 급변* — {tags}"]
     lines.extend(body)
-    # 타이틀(링크)은 목록 아래에 — 클릭 시 live-24h 페이지로 이동
-    lines.append("*<https://etf.dojason.com/live-24h|🌐 24H 시세>*")
 
     send_slack_message_v2("\n".join(lines))
     logger.info("24H 시세 슬랙 전송 완료 (%d종목, 1시간 급변 %d건)", len(rows), len(alerts))

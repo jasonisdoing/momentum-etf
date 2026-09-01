@@ -3,22 +3,21 @@ from __future__ import annotations
 import json
 import threading
 import time as _time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 from fastapi import APIRouter, Body, Depends, Query
 
-from config import MARKET_SCHEDULES
+from config import CACHE_TTL_LIVE, HOLDING_CHART_SHOW_AVG_BUY_PRICE, MARKET_SCHEDULES
 from fastapi_app.dependencies import require_internal_token
 from services.component_price_service import build_component_price_snapshot, enrich_component_prices
 from services.portfolio_change_service import (
-    _resolve_base_date_to_trading_day,
-    compute_portfolio_change_bundle,
+    build_daily_fx_rates as _build_daily_fx_rates_for_holdings,
 )
 from services.portfolio_change_service import (
-    build_daily_fx_rates as _build_daily_fx_rates_for_holdings,
+    compute_portfolio_change_bundle,
 )
 from services.price_service import (
     get_exchange_rates,
@@ -33,6 +32,7 @@ from utils.cache_utils import (
     load_cached_updated_at_bulk_before_or_at_with_fallback,
     load_cached_updated_at_bulk_with_fallback,
 )
+from utils.cash_model import currency_for_country
 from utils.data_loader import (
     fetch_naver_etf_inav_snapshot,
     fetch_ohlcv,
@@ -41,12 +41,12 @@ from utils.data_loader import (
     get_trading_days,
 )
 from utils.kis_market import load_cached_kis_domestic_etf_master
-from utils.cash_model import currency_for_country
 from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import list_available_accounts, load_common_settings
-from utils.stock_cache_meta_io import get_previous_stock_cache_meta_history
-from utils.stock_list_io import get_active_holding_tickers, get_etfs
+from utils.stock_cache_meta_io import get_previous_stock_cache_meta
+from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs
+from utils.ticker_resolver import resolve_ticker_meta
 
 router = APIRouter(prefix="/internal/ticker-detail", tags=["ticker-detail"])
 
@@ -54,7 +54,7 @@ router = APIRouter(prefix="/internal/ticker-detail", tags=["ticker-detail"])
 # 하지 않도록 짧은 TTL 로 캐시한다(타임아웃 후 재시도도 즉시 응답).
 _COMPARE_CACHE: dict[str, tuple[dict[str, object], float]] = {}
 _COMPARE_CACHE_LOCK = threading.Lock()
-_COMPARE_CACHE_TTL = 20.0
+_COMPARE_CACHE_TTL = CACHE_TTL_LIVE
 
 
 def _load_us_pool_ticker_set() -> set[str]:
@@ -78,197 +78,6 @@ def _load_domestic_etf_ticker_set() -> set[str]:
     if "티커" not in df.columns:
         raise RuntimeError("KIS ETF 마스터 캐시에 티커 컬럼이 없습니다.")
     return {str(value or "").strip().upper() for value in df["티커"].tolist() if str(value or "").strip()}
-
-
-def _lookup_domestic_etf_name(ticker: str) -> str | None:
-    df, _ = load_cached_kis_domestic_etf_master()
-    if "티커" not in df.columns:
-        raise RuntimeError("KIS ETF 마스터 캐시에 티커 컬럼이 없습니다.")
-    name_column = "종목명" if "종목명" in df.columns else "한글종목명" if "한글종목명" in df.columns else None
-    if name_column is None:
-        raise RuntimeError("KIS ETF 마스터 캐시에 종목명 컬럼이 없습니다.")
-
-    ticker_norm = str(ticker or "").strip().upper()
-    matched = df[df["티커"].astype(str).str.strip().str.upper() == ticker_norm]
-    if matched.empty:
-        return None
-
-    name = str(matched.iloc[0].get(name_column) or "").strip()
-    return name or None
-
-
-def _resolve_ticker_meta_item(
-    ticker: str,
-    allowed_ticker_types: set[str] | None = None,
-    account_id: str | None = None,
-) -> dict[str, object]:
-    ticker_key = str(ticker or "").strip().upper()
-    if not ticker_key:
-        raise ValueError("ticker 파라미터가 필요합니다.")
-
-    # 계좌에 연결된 종목풀로 검색 범위를 제한할 때 사용 (None 이면 전체 검색).
-    def _allowed(ticker_type: str) -> bool:
-        return allowed_ticker_types is None or ticker_type in allowed_ticker_types
-
-    # 시장 명시 접두사가 있으면 해당 시장으로 강제 지정. 동일 심볼이 여러 풀에 있을 때 구분.
-    forced_ticker_type: str | None = None
-    if ticker_key.startswith("ASX:"):
-        ticker_key = ticker_key[len("ASX:") :]
-        forced_ticker_type = "aus"
-        if not ticker_key:
-            raise ValueError("ASX: 뒤에 티커가 필요합니다.")
-    elif ticker_key.startswith("US:"):
-        ticker_key = ticker_key[len("US:") :]
-        forced_ticker_type = "us"
-        if not ticker_key:
-            raise ValueError("US: 뒤에 티커가 필요합니다.")
-    elif ticker_key.startswith("KOR:"):
-        ticker_key = ticker_key[len("KOR:") :]
-        forced_ticker_type = "kor"
-        if not ticker_key:
-            raise ValueError("KOR: 뒤에 티커가 필요합니다.")
-    elif ticker_key.startswith("ETF:"):
-        ticker_key = ticker_key[len("ETF:") :]
-        forced_ticker_type = "etf"
-        if not ticker_key:
-            raise ValueError("ETF: 뒤에 티커가 필요합니다.")
-
-    configs = load_ticker_type_configs()
-    matches: list[dict[str, object]] = []
-    for config in configs:
-        ticker_type = config["ticker_type"]
-        try:
-            pool_order = int(config["order"])
-        except (KeyError, TypeError, ValueError) as exc:
-            raise RuntimeError(f"종목풀 {ticker_type}의 우선순위(order)가 없습니다.") from exc
-        if forced_ticker_type is not None and ticker_type != forced_ticker_type:
-            continue
-        if not _allowed(str(ticker_type)):
-            continue
-        country_code = config.get("country_code", "")
-        for item in get_etfs(ticker_type):
-            item_ticker = str(item.get("ticker") or "").strip().upper()
-            if item_ticker != ticker_key:
-                continue
-            matches.append(
-                {
-                    "ticker": ticker_key,
-                    "name": str(item.get("name") or "").strip() or ticker_key,
-                    "ticker_type": ticker_type,
-                    "country_code": country_code,
-                    "is_etf": bool(item.get("is_etf", False)),
-                    "bucket": int(item.get("bucket") or 1),
-                    "_pool_order": pool_order,
-                }
-            )
-
-    def _public_match(match: dict[str, object]) -> dict[str, object]:
-        return {key: value for key, value in match.items() if not str(key).startswith("_")}
-
-    # 같은 티커가 여러 시장에 있으면(예: 미국·호주 IOO) 계좌가 보유하는 현금 통화로 후보를 좁힌다.
-    # (계좌 담기 검증 validate_ticker_for_account 와 동일한 규칙 — 낙관적 표시와 실제 저장의 시장 일치)
-    if len(matches) > 1 and account_id:
-        try:
-            from utils.cash_model import resolve_cash_currencies
-            from utils.settings_loader import get_account_settings
-
-            acct = get_account_settings(account_id)
-            acct_currencies = set(resolve_cash_currencies(acct.get("settings") or acct))
-            filtered = [
-                match
-                for match in matches
-                if currency_for_country(str(match.get("country_code") or "")) in acct_currencies
-            ]
-            if filtered:
-                matches = filtered
-        except Exception:
-            pass
-
-    if len(matches) == 1:
-        return _public_match(matches[0])
-    if len(matches) > 1:
-        sorted_matches = sorted(matches, key=lambda match: (int(match["_pool_order"]), str(match["ticker_type"])))
-        return _public_match(sorted_matches[0])
-
-    # ASX: 접두사로 호주를 명시했는데 풀에 없으면 즉시 호주로 결정 (미국 폴백 차단)
-    if forced_ticker_type == "aus" and _allowed("aus"):
-        return {
-            "ticker": ticker_key,
-            "name": ticker_key,
-            "ticker_type": "aus",
-            "country_code": "au",
-            "is_etf": True,
-        }
-
-    holding_matches = [
-        ticker_type
-        for ticker_type, tickers in get_active_holding_tickers().items()
-        if ticker_key in tickers and _allowed(str(ticker_type))
-    ]
-    if len(holding_matches) == 1:
-        holding_type = holding_matches[0]
-        holding_config = next(
-            (config for config in configs if str(config.get("ticker_type") or "").strip().lower() == holding_type),
-            {},
-        )
-        cache_doc = get_stock_cache_meta(holding_type, ticker_key)
-        cache_name = cache_doc.get("name") if isinstance(cache_doc, dict) else None
-        if not cache_name and ticker_key.isdigit() and len(ticker_key) == 6:
-            cache_name = _lookup_domestic_etf_name(ticker_key)
-
-        return {
-            "ticker": ticker_key,
-            "name": cache_name or ticker_key,
-            "ticker_type": holding_type,
-            "country_code": str(holding_config.get("country_code") or "").strip().lower(),
-            "is_etf": holding_type != "kor",
-            "bucket": int(cache_doc.get("bucket") or 1) if isinstance(cache_doc, dict) else 1,
-        }
-    if len(holding_matches) > 1:
-        joined = ", ".join(sorted(holding_matches))
-        raise RuntimeError(f"보유 중인 동일 티커 {ticker_key}가 여러 종목풀에 있습니다: {joined}")
-
-    if ticker_key.isdigit() and len(ticker_key) == 6:
-        domestic_etf_tickers = _load_domestic_etf_ticker_set()
-        if ticker_key in domestic_etf_tickers and _allowed("kor_kr"):
-            return {
-                "ticker": ticker_key,
-                "name": _lookup_domestic_etf_name(ticker_key) or ticker_key,
-                "ticker_type": "kor_kr",
-                "country_code": "kor",
-                "is_etf": True,
-            }
-        if ticker_key not in domestic_etf_tickers and _allowed("kor"):
-            return {
-                "ticker": ticker_key,
-                "name": ticker_key,
-                "ticker_type": "kor",
-                "country_code": "kor",
-                "is_etf": False,
-            }
-
-    if ticker_key.endswith(".AX") and _allowed("aus"):
-        return {
-            "ticker": ticker_key,
-            "name": ticker_key,
-            "ticker_type": "aus",
-            "country_code": "au",
-            "is_etf": True,
-        }
-
-    if (ticker_key.isalpha() or "." in ticker_key) and _allowed("us"):
-        return {
-            "ticker": ticker_key,
-            "name": ticker_key,
-            "ticker_type": "us",
-            "country_code": "us",
-            "is_etf": False,
-        }
-
-    if allowed_ticker_types is not None:
-        joined = ", ".join(sorted(allowed_ticker_types)) or "없음"
-        raise RuntimeError(f"{ticker_key} 티커를 연결된 종목풀({joined})에서 찾지 못했습니다.")
-    raise RuntimeError(f"{ticker_key} 티커를 찾지 못했습니다.")
 
 
 def _is_us_pool_candidate(item: dict[str, object]) -> bool:
@@ -371,7 +180,12 @@ def _calculate_consolidated_average_buy_price(ticker: str, currency: str | None 
 
     같은 티커가 여러 시장에 상장된 경우(예: IOO — 미국 USD / 호주 AUD)가 있어,
     ``currency`` 가 주어지면 그 통화 보유분만 합산한다(통화가 섞여 계산 불가한 상황 자체를 없앤다).
+
+    `config.HOLDING_CHART_SHOW_AVG_BUY_PRICE` 가 꺼져 있으면 계산하지 않는다 —
+    전략·순위 차트와 같은 스위치다(내 단가를 화면에서 빼는 목적이라 화면마다 다르면 뜻이 없다).
     """
+    if not HOLDING_CHART_SHOW_AVG_BUY_PRICE:
+        return None
     ticker_key = str(ticker or "").strip().upper()
     if not ticker_key:
         raise ValueError("ticker 값이 필요합니다.")
@@ -488,32 +302,14 @@ def _build_korean_etf_info_payload(
         except (TypeError, ValueError):
             market_cap_krw = None
 
-    # 최근 공식 iNAV 기준일과 비교 기준 iNAV 히스토리 조회
-    # 오늘 날짜의 히스토리도 포함하기 위해 내일 날짜를 전달한다 (함수는 $lt 비교).
-    today_dt = datetime.now(ZoneInfo("Asia/Seoul"))
-    tomorrow_str = (today_dt + timedelta(days=1)).strftime("%Y-%m-%d")
-    latest_history = get_previous_stock_cache_meta_history(ticker_type, ticker, tomorrow_str)
+    # 비교는 (현재 값 vs 직전 영업일 값) 한 쌍 — 조회 1회.
+    # 직전값의 date 는 저장 시점에 이미 거래일이라 휴장일 보정이 필요 없다.
+    previous_meta = get_previous_stock_cache_meta(ticker_type, ticker)
     prev_nav = None
     portfolio_change_base_date = None
-    if latest_history and "meta_cache" in latest_history:
-        latest_history_nav = latest_history["meta_cache"].get("nav")
-        raw_base_date = str(latest_history.get("date") or "").strip() or None
-        # 한국 종목 풀: base_date 가 휴장일이면 직전 거래일로 보정
-        if raw_base_date and str(ticker_type or "").strip().lower().startswith("kor"):
-            portfolio_change_base_date = _resolve_base_date_to_trading_day(ticker_type, ticker, raw_base_date)
-        else:
-            portfolio_change_base_date = raw_base_date
-        if (
-            nav_value is not None
-            and latest_history_nav is not None
-            and float(nav_value) == float(latest_history_nav)
-            and portfolio_change_base_date
-        ):
-            prev_history = get_previous_stock_cache_meta_history(ticker_type, ticker, portfolio_change_base_date)
-            if prev_history and "meta_cache" in prev_history:
-                prev_nav = prev_history["meta_cache"].get("nav")
-        else:
-            prev_nav = latest_history_nav
+    if previous_meta and "meta_cache" in previous_meta:
+        prev_nav = previous_meta["meta_cache"].get("nav")
+        portfolio_change_base_date = str(previous_meta.get("date") or "").strip() or None
 
     nav_change = None
     nav_change_pct = None
@@ -767,7 +563,7 @@ def resolve_ticker(
     allowed: set[str] | None = None
     if ticker_types is not None:
         allowed = {part.strip() for part in ticker_types.split(",") if part.strip()}
-    return _resolve_ticker_meta_item(ticker, allowed_ticker_types=allowed, account_id=account_id)
+    return resolve_ticker_meta(ticker, allowed_ticker_types=allowed, account_id=account_id)
 
 
 @router.get("/search-data")
@@ -1014,7 +810,9 @@ def build_ticker_detail_payload(
             # 가격 시계열만 필요한 호출(성과분석 탭) — 구성종목 시세 평가·포트폴리오 변동 계산을 건너뛴다.
             holdings = []
         elif not holdings:
-            holdings_error = "구성종목 캐시가 없습니다. python scripts/stock_reference_meta_updater.py 실행이 필요합니다."
+            holdings_error = (
+                "구성종목 캐시가 없습니다. python scripts/stock_reference_meta_updater.py 실행이 필요합니다."
+            )
         elif not holdings_as_of_date:
             holdings_error = "구성종목 캐시 기준일(reference_date)이 없습니다."
         else:
@@ -1132,7 +930,10 @@ def get_ticker_detail_compare(
     with _COMPARE_CACHE_LOCK:
         cached = _COMPARE_CACHE.get(cache_key)
         if cached and now_ts - cached[1] < _COMPARE_CACHE_TTL:
-            return cached[0]
+            # 캐시 키는 종목 집합(정렬)이라 **순서가 달라도 같은 키**다. 화면이 카드 순서를
+            # 바꿔 다시 요청하면 옛 순서 결과가 그대로 나가므로, 여기서 요청 순서로 맞춘다.
+            # (맞추지 않으면 화면이 이름과 시세를 다른 종목끼리 짝지어 보여준다.)
+            return {"results": _order_compare_results(cached[0].get("results") or [], items)}
 
     # 1) 한국 ETF 구성종목 합집합 → 공유 가격 스냅샷 1회 구성 (build_component_price_snapshot 가 중복 제거)
     #    구성종목이 필요 없는 호출이면 이 조회 자체를 건너뛴다(성과분석 탭 초기 로딩 단축).
@@ -1153,17 +954,49 @@ def get_ticker_detail_compare(
     # 2) ETF 별 detail 을 공유 스냅샷으로 계산 (캐시 우회 → 종목당 동일 값 보장)
     results: list[dict[str, object]] = []
     for item in items:
-        results.append(
-            build_ticker_detail_payload(
-                str(item.get("ticker") or ""),
-                str(item.get("ticker_type") or ""),
-                str(item.get("country_code") or "kor"),
-                component_price_snapshot=shared_snapshot,
-                use_bundle_cache=False,
-                include_holdings=include_holdings,
-            )
+        detail = build_ticker_detail_payload(
+            str(item.get("ticker") or ""),
+            str(item.get("ticker_type") or ""),
+            str(item.get("country_code") or "kor"),
+            component_price_snapshot=shared_snapshot,
+            use_bundle_cache=False,
+            include_holdings=include_holdings,
         )
+        # 어느 요청 항목의 결과인지 응답에 실어 둔다 — 화면이 순서(인덱스)가 아니라
+        # 이 값으로 짝을 지어야 순서가 바뀌어도 이름과 시세가 어긋나지 않는다.
+        detail["ticker_type"] = str(item.get("ticker_type") or "")
+        detail["country_code"] = str(item.get("country_code") or "kor")
+        results.append(detail)
     result = {"results": results}
     with _COMPARE_CACHE_LOCK:
         _COMPARE_CACHE[cache_key] = (result, now_ts)
     return result
+
+
+def _compare_result_key(ticker: object, ticker_type: object, country_code: object) -> tuple[str, str, str]:
+    """비교 결과를 요청 항목과 이어 붙일 때 쓰는 키."""
+    return (
+        str(ticker or "").strip().upper(),
+        str(ticker_type or "").strip().lower(),
+        str(country_code or "kor").strip().lower(),
+    )
+
+
+def _order_compare_results(results: list[dict[str, object]], items: list[dict[str, object]]) -> list[dict[str, object]]:
+    """캐시된 결과를 이번 요청의 종목 순서로 다시 세운다.
+
+    짝을 못 찾은 항목이 하나라도 있으면 순서를 못 맞춘다는 뜻이므로 원본을 그대로 둔다 —
+    임의로 채워 넣으면 다른 종목의 값이 붙는다.
+    """
+    by_key = {
+        _compare_result_key(row.get("ticker"), row.get("ticker_type"), row.get("country_code")): row
+        for row in results
+        if isinstance(row, dict)
+    }
+    ordered: list[dict[str, object]] = []
+    for item in items:
+        row = by_key.get(_compare_result_key(item.get("ticker"), item.get("ticker_type"), item.get("country_code")))
+        if row is None:
+            return results
+        ordered.append(row)
+    return ordered

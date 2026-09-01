@@ -19,7 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from config import CACHE_START_DATE
 
 COUNTRY_DIR = PROJECT_ROOT / "data" / "country"
-HOLIDAY_OVERRIDE_PATH = PROJECT_ROOT / "config" / "market_holiday_overrides.json"
+HOLIDAY_OVERRIDE_PATH = PROJECT_ROOT / "data" / "market_holiday_overrides.json"
 KST = ZoneInfo("Asia/Seoul")
 
 MARKET_CALENDARS: dict[str, str] = {

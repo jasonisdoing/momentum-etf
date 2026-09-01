@@ -37,3 +37,34 @@ export function useFitOneLine(ref: RefObject<HTMLElement | null>, deps: readonly
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref, ...deps]);
 }
+
+// 우선순위 기반 한 줄 맞춤 — 숫자가 큰 `data-fit-priority` 부터 숨긴다(1=끝까지 유지).
+// useFitOneLine 과 달리 컨테이너 어디에 있든(중첩 포함) 전체 폭 기준으로 접는다.
+// 전제: 컨테이너는 `flex-wrap: nowrap; overflow: hidden`, 중간 래퍼는 줄어들지 않아야
+// (flex-shrink: 0) 넘침이 scrollWidth 로 드러난다. 줄바꿈 레이아웃(모바일)에선 아무것도 안 한다.
+export function useFitByPriority(ref: RefObject<HTMLElement | null>, deps: readonly unknown[] = []): void {
+  useLayoutEffect(() => {
+    const container = ref.current;
+    if (!container) return;
+
+    const compute = () => {
+      const items = Array.from(container.querySelectorAll<HTMLElement>("[data-fit-priority]")).sort(
+        (a, b) => Number(b.dataset.fitPriority ?? 0) - Number(a.dataset.fitPriority ?? 0),
+      );
+      items.forEach((el) => {
+        el.style.display = "";
+      });
+      if (getComputedStyle(container).flexWrap === "wrap") return;
+      for (const el of items) {
+        if (container.scrollWidth <= container.clientWidth + 1) break;
+        el.style.display = "none";
+      }
+    };
+
+    compute();
+    const observer = new ResizeObserver(compute);
+    observer.observe(container);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ref, ...deps]);
+}

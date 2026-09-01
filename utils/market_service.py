@@ -52,6 +52,34 @@ def load_ticker_pool_map(country_code: str | None = None) -> dict[str, list[str]
     return ticker_pool_map
 
 
+def load_ticker_pool_type_map(country_code: str | None = None) -> dict[str, list[str]]:
+    """종목 티커 → 종목풀 **id**(ticker_type) 매핑.
+
+    `load_ticker_pool_map` 은 화면에 보여줄 풀 이름을 주는데, 이름은 표시용으로 번호
+    접두어가 떨어져 있어 화면이 풀 id 와 짝지을 수 없다. "이미 이 풀에 있는 종목"을
+    골라내려면 id 가 필요해서 따로 둔다.
+    """
+    from utils.stock_list_io import get_etfs
+    from utils.ticker_registry import load_ticker_type_configs
+
+    result: dict[str, list[str]] = {}
+    for config in load_ticker_type_configs():
+        ticker_type = str(config.get("ticker_type") or "").strip().lower()
+        pool_country = str(config.get("country_code") or "").strip().lower()
+        if not ticker_type:
+            continue
+        if country_code is not None and pool_country != country_code.strip().lower():
+            continue
+        for item in get_etfs(ticker_type):
+            ticker = normalize_text(item.get("ticker")).upper()
+            if not ticker:
+                continue
+            result.setdefault(ticker, [])
+            if ticker_type not in result[ticker]:
+                result[ticker].append(ticker_type)
+    return result
+
+
 def _load_kor_etf_realtime_snapshot(tickers: list[str]) -> dict[str, dict[str, float | None]]:
     if not tickers:
         return {}
@@ -121,14 +149,18 @@ def load_market_data() -> dict[str, Any]:
             "market_cap": int(normalize_number(row.get("시가총액"))),
             "base_close_1m": normalize_nullable_number(row.get("기준종가_1m")),
             "base_close_2m": normalize_nullable_number(row.get("기준종가_2m")),
+            # 매매차익 비과세 여부(국내 주식형만). 분류를 못 받은 종목은 None = 모름.
+            "is_tax_free": row.get("is_tax_free"),
         }
         for row in rows
     ]
 
     ticker_pool_map = load_ticker_pool_map()
+    ticker_pool_type_map = load_ticker_pool_type_map()
     snapshot = _load_kor_etf_realtime_snapshot([row["ticker"] for row in normalized_rows if row["ticker"]])
 
     from utils.portfolio_io import load_all_holding_tickers
+
     held_tickers = load_all_holding_tickers()
 
     def _return_pct(now_val: float | None, base_close: float | None) -> float | None:
@@ -147,6 +179,8 @@ def load_market_data() -> dict[str, Any]:
             {
                 **row,
                 "ticker_pools": ", ".join(ticker_pool_map.get(row["ticker"], [])),
+                # 종목풀 추가 사전 필터(공용 pool-add)가 풀 id 로 판별한다 — 이름은 표시용.
+                "ticker_pool_types": ticker_pool_type_map.get(row["ticker"], []),
                 "is_held": row["ticker"] in held_tickers,
                 "daily_change_pct": snap.get("changeRate"),
                 "current_price": now_val,

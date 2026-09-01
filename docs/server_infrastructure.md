@@ -1,160 +1,87 @@
-# 서버 인프라 정보
+# 서버 인프라 · 배치 · 도메인
 
-## 접속 정보
+## 서버
 
 | 항목 | 값 |
-|------|-----|
-| IP | ***.***.***.** |
-| OS 사용자 | ubuntu |
-| SSH 키 경로 | {SSH 키 파일 경로} |
-| 도메인 | etf.dojason.com |
+| --- | --- |
+| 호스트 | OCI 춘천, 1 OCPU ARM, Ubuntu, 사용자 `ubuntu` |
+| 접속 | `ssh -i {SSH 키} ubuntu@{IP}` |
+| 앱 경로 | `/home/ubuntu/apps/momentum-etf` |
+| 컨테이너 | `momentum-etf-app-1`(Node, 80) · `momentum-etf-fastapi_app-1`(FastAPI, 8000, 내부) · MongoDB · `nginx-proxy` · `nginx-proxy-acme` |
+| 서버 `data/` | 읽기 전용 마운트 — 서버에서 갱신돼야 하는 데이터는 파일이 아니라 DB(`index_constituents` 등) |
 
-```bash
-ssh -i {SSH 키 파일 경로} ubuntu@***.***.***.**
-```
+VM 의 역할은 컨테이너 가동뿐이다. 자동 배치는 돌지 않는다.
 
----
+## 배치
 
-## Docker 컨테이너 구성
+- **모든 자동 배치는 로컬(Mac)** 의 `infra/server_scheduler.py` 가 `infra/cron/crontab` 을 파싱해 APScheduler 로 실행한다. VM cron 은 CPU 100% 다운이 반복돼 제거했다(`infra/cron/install.sh --uninstall`).
+- `crontab` 이 배치 정의의 단일 소스. 잡 이름 = action 키. 비활성화는 주석이 아니라 **라인 삭제**(과거 파서가 주석 라인을 등록한 적 있음). 스크립트 뒤 인자는 전달되지만 `-m` 은 안 된다.
+- 락: Mongo `batch_locks`(`_id=<job>`). 로컬 자동 실행과 `/batch` 수동 실행이 같은 락을 쓴다. 소유자는 `APP_TYPE`(`Local` / 미설정=PROD). 꺼져 있던 시간의 누락분은 따라잡지 않는다.
+- 큐는 서버·로컬이 공유. 로컬에만 결과가 남는 잡은 `utils/batch_queue.LOCAL_ONLY_JOBS` 에 등록하면 서버 워커가 claim 하지 않는다.
+- 배치 코드는 Docker 이미지에 포함 → 변경 시 재배포. `crontab`/`run_batch` 는 마운트라 즉시 반영.
+- 로그: `logs/cron/<job>.log`. 실패 시에만 래퍼 슬랙 알림.
+- 배치 추가·삭제 시 함께 고칠 7곳은 [developer_guide.md](developer_guide.md) §4.
 
-| 컨테이너명 | 이미지 | 역할 |
-|------------|--------|------|
-| momentum-etf-app-1 | momentum-etf-app | Node 웹 앱 (포트 80) |
-| momentum-etf-fastapi_app-1 | momentum-etf-fastapi_app | 내부 FastAPI 백엔드 (포트 8000, 외부 미공개) |
-| nginx-proxy | nginxproxy/nginx-proxy | 리버스 프록시 (80, 443) |
-| nginx-proxy-acme | nginxproxy/acme-companion | SSL 인증서 자동 갱신 |
+### 배치 목록 (crontab 기준)
 
----
+| 잡 | 스크립트 | 비고 |
+| --- | --- | --- |
+| `cache_refresh` / `cache_refresh_full` | `stock_price_cache_updater.py` | 매시 증분, 하루 1회 `--full`(수정주가 재정렬) |
+| `reference_meta_updater` | `stock_reference_meta_updater.py` | 배치 B: 식별·상세 메타, ETF 구성종목·배당 |
+| `price_metrics_updater` | `stock_price_metrics_updater.py` | 배치 A: 거래량·기간수익률 등 가격 파생 |
+| `data_aggregate` | `collect_data.py` | 일별 원장 → 주/월 재집계 |
+| `asset_summary` | `slack_asset_summary.py` | 자산 요약 슬랙 |
+| `market_hours_analysis` | `analyze_market_hours.py` | |
+| `us_market_stocks` / `aus_market_stocks` | `update_us_market_stocks.py` / `update_aus_market_stocks.py` | `index_constituents` 갱신. 구성종목 수가 범위 밖이면 저장 안 하고 실패 |
+| `us_market_etfs` | `update_us_market_etfs.py` | 미국 ETF 마켓 목록(`etf_market_master`) — KIS 미국 마스터 + yfinance |
+| `market_breadth` | `collect_market_breadth.py` | 한국 마감 후·미국 마감 후 |
+| `db_backup` | `backup_mongo_full.py` | 로컬 폴더라 LOCAL 전용 |
+| `holdings_alarm`, `strategy_mix_notify`, `live_24h_slack`, `leverage_ma_cross`, `broker_balance_sync` 등 | 동명 스크립트 | 알림·동기화 |
 
-## nginx-proxy 구성
+## 배포
 
-### vhost.d 경로
+- Node 앱이 내부 네트워크로 FastAPI 호출. nginx-proxy 가 도메인 요청을 Node 컨테이너로 프록시, acme-companion 이 Let's Encrypt 인증서 자동 갱신.
+- GitHub Actions(`.github/workflows/`)로 배포. 배포 실패 시 앱이 죽어야 한다 — rollback·build-first 로 가리지 않는다.
+- 폐기된 기능은 배포 때 서버 DB 문서·crontab 라인도 같이 지운다.
 
-nginx-proxy는 도메인별 커스텀 nginx 설정을 `/etc/nginx/vhost.d/` 에서 읽는다.
-호스트 경로(bind mount)는 다음과 같다:
+### nginx-proxy 커스텀 설정
 
-```
-/home/ubuntu/apps/nginx-proxy/vhost.d/
-```
+호스트 `/home/ubuntu/apps/nginx-proxy/vhost.d/` — `{domain}`(server 블록), `{domain}_location`, `{domain}_location_override`. **파일명이 곧 호스트명**. 수정 후 `docker restart nginx-proxy`(reload 로는 템플릿이 재렌더링되지 않음).
 
-### 파일 종류
+## 도메인 · DNS · 인증서
 
-| 파일명 | 적용 위치 | 용도 |
-|--------|-----------|------|
-| `{domain}` | server 블록 내부 (location 블록 밖) | 새 location 블록 추가 등 서버 레벨 설정 |
-| `{domain}_location` | `location /` 블록 내부 | 기본 proxy location 내 추가 설정 |
-| `{domain}_location_override` | `location /` 블록 전체 대체 | proxy location 완전 교체 |
+| 항목 | 값 |
+| --- | --- |
+| 서비스 주소 | https://invest.jason.ai.kr |
+| 등록기관 | 가비아 (`jason.ai.kr`) |
+| DNS 관리 | Cloudflare — **레코드는 여기서만**(가비아 DNS 화면은 반영 안 됨) |
+| 레코드 | A `invest` → 서버 IP, **DNS 전용(회색 구름)** |
+| 인증서 | Let's Encrypt, acme-companion |
 
-### 설정 변경 절차
+Cloudflare 프록시(주황 구름)는 쓰지 않는다 — HTTP-01 검증이 리다이렉트로 실패하고 Flexible SSL 이면 무한 리다이렉트.
 
-1. `/home/ubuntu/apps/nginx-proxy/vhost.d/{파일}` 생성 또는 수정
-2. nginx-proxy 재시작으로 템플릿 재렌더링 (단순 reload로는 적용 안 됨)
+코드에 도메인을 적지 않는다. 서버 `.env` 의 **`APP_BASE_URL` 하나**가 단일 소스(슬랙 링크 `utils/notification.app_link`, 구글 OAuth 콜백 `web/lib/auth.ts`). 예외는 `docker-compose.yml` 의 `VIRTUAL_HOST`·`LETSENCRYPT_HOST` 와 `vhost.d/` 파일명. 구글 OAuth 콘솔의 리디렉션 URI 도 같은 주소.
 
-```bash
-docker restart nginx-proxy
-```
+## 환경변수 (`.env`)
 
-### 예시: robots.txt 응답 추가
+| 키 | 용도 |
+| --- | --- |
+| `APP_BASE_URL` | 서비스 주소 단일 소스 |
+| `APP_TYPE` | `Local` 이면 로컬 워커·락 소유자 |
+| `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` | 알림 |
+| `DART_API_KEY` | OpenDART 재무 조회 |
+| `KRX_DATA_ID`, `KRX_DATA_PW` | KRX 로그인 헬퍼(보관용, 자동 수집은 약관 금지) |
+| MongoDB 접속 | `utils/db_manager.py` 참조 |
 
-파일: `/home/ubuntu/apps/nginx-proxy/vhost.d/etf.dojason.com`
+## 겪은 문제
 
-```nginx
-location = /robots.txt {
-    return 200 'User-agent: *\nAllow: /\n';
-    add_header Content-Type text/plain;
-}
-```
-
----
-
-## 앱 배포 구조
-
-- Node 웹 앱이 컨테이너 내부 포트 80으로 실행
-- FastAPI 내부 API가 컨테이너 내부 포트 8000으로 실행
-- Node 앱이 내부 네트워크에서 FastAPI를 호출
-- nginx-proxy가 `etf.dojason.com` 요청을 momentum-etf-app-1 컨테이너로 프록시
-- SSL은 acme-companion이 Let's Encrypt 인증서로 자동 처리
-
----
-
-## 배치 운영
-
-### VM cron 제거
-
-1 OCPU ARM VM 에서 배치 실행 시 CPU 100% 폭주로 시스템 다운이 반복돼,
-momentum-etf 의 VM cron 항목은 모두 제거되었다 (`infra/cron/install.sh --uninstall`).
-
-> **leverage-switching 앱 통합(2026-06)**: 같은 VM 에서 별도 호스트 cron 으로 돌던
-> `leverage-switching`(레버리지 스위칭) 앱은 폐기되었고, 전략이 momentum-etf 의
-> `leverage/` 패키지로 이전되었다. 추천 배치는 momentum-etf 배치 체계의 `leverage_ma_cross`
-> 잡(`scripts/leverage_recommend_ma_cross.py`, 한국+미국 이동평균선 크로스+고점대비)으로 편입되어 동일한
-> crontab·스케줄러·큐로 실행된다. (드로다운 컷 기반 구 스위칭 배치는 폐기됨)
-> leverage-switching VM cron 제거는
-> `bash ~/apps/leverage-switching/infra/cron/install.sh --uninstall`.
-
-### 로컬 스케줄러로 전환
-
-모든 momentum-etf 자동 배치는 로컬(Mac) 의 `infra/server_scheduler.py` 가 실행한다.
-이 프로세스는 `infra/cron/crontab` 파일을 단일 진실 소스로 파싱하여
-APScheduler 에 등록한다.
-
-- 락 메커니즘: MongoDB `batch_locks` 컬렉션 (`_id=<job_name>` unique)
-  → 로컬 자동 실행과 `/system` 화면 수동 실행이 동일한 락을 거치므로 중복 방지됨
-- 락 소유자 식별: `APP_TYPE` 환경변수 (`Local` vs 미설정 시 `PROD`)
-- 노트북이 꺼져 있던 시간의 미실행 분은 따라잡지 않는다 (misfire_grace_time=None)
-
-### 로컬 전용 잡 (워커 친화도)
-
-큐는 서버·로컬 워커가 공유한다. **무거운 계산 + 결과가 로컬 파일에 남는** 잡을 로컬 워커만
-픽하게 하려면 `utils/batch_queue.py` 의 `LOCAL_ONLY_JOBS` 에 잡 이름을 등록한다(현재는 비어 있음).
-
-- `enqueue` 가 잡 doc 에 `local_only` 플래그를 자동 기록(잡 이름 기준) → 모든 트리거 경로에 일관 적용.
-- `claim_next_pending` 은 워커가 `APP_TYPE != "Local"` 이면 `local_only: {$ne: True}` 로 필터 →
-  **서버 워커는 로컬 전용 잡을 claim 하지 않는다.** 로컬 워커는 전부 claim.
-- 로컬 전용 잡을 다시 둘 경우: **로컬 워커가 꺼져 있으면 pending 으로 대기**(서버가 안 가져감).
-
-### 스케줄러·배치 작성 시 주의
-
-`infra/server_scheduler.py` 가 `infra/cron/crontab` 을 파싱할 때의 비자명한 동작:
-
-- **무인자 스크립트만 실행**: `python <script.py>` 형태만 파싱하며 `-m`/추가 인자는 인식하지 못한다. 인자가 필요한 진입점은 무인자 **래퍼 스크립트**로 감싼다(예: `scripts/leverage_recommend_ma_cross.py`).
-- **주석 cron 라인도 활성으로 파싱**: 주석(`#`) 처리된 잡 라인도 등록될 수 있으므로, 잡 비활성화는 주석이 아니라 **라인 삭제**로 한다.
-- 배치 코드/스크립트는 Docker 이미지에 포함되므로 변경 시 **재배포** 필요. `crontab`/`run_batch` 는 `./infra/cron` 마운트로 즉시 반영.
-
-### 개별주 인덱스 캐시
-
-- **저장 위치는 MongoDB `index_constituents` 컬렉션입니다** (`_id` 가 `SP500`/`NDX100`/`ASX200`). 예전에는 `data/*_tickers.json` 파일이었는데, 배치는 로컬에서만 자동 실행되는 반면 서버 컨테이너의 `data/` 는 읽기 전용 마운트(`./data:/app/data:ro`)라 서버 데이터가 갱신되지 않고 사람이 직접 올려야 했습니다. DB 는 서버·로컬이 함께 보므로 어디서 돌든 결과가 공유됩니다. 읽기·쓰기는 `utils/index_constituents_loader.py` 만 거칩니다.
-- 미국 개별주 캐시는 `us_market_stocks` 배치가 평일 08:00 KST에 `scripts/update_us_market_stocks.py`를 실행해 갱신합니다.
-  - 출처: S&P500은 위키피디아 구성종목 표, NASDAQ100은 나스닥 공식 API(`api.nasdaq.com/api/quote/list-type/nasdaq100`), 섹터·업종은 yfinance입니다.
-  - 구성종목 수가 기대 범위(S&P500 490~510, NASDAQ100 95~110)를 벗어나면 저장하지 않고 종료 코드 1로 끝납니다. cron 래퍼가 이를 실패로 보고 슬랙 알림을 보냅니다. 위키 문서가 옮겨져 NASDAQ100 갱신이 한 달간 조용히 실패했던 일을 막기 위한 장치입니다.
-  - 섹터·업종은 이미 저장된 값을 재사용하고 새로 편입된 종목만 조회합니다. 전부 다시 받으려면 `--refresh-classification` 을 줍니다.
-- 호주 개별주 캐시는 `aus_market_stocks` 배치가 평일 08:10 KST에 `scripts/update_aus_market_stocks.py`를 실행해 `index_constituents` 의 `ASX200` 문서를 갱신합니다.
-- 미국·호주 개별주 캐시는 yfinance 일봉으로 1개월·3개월·12개월 수익률과 12개월 MDD를 보강합니다.
-- 호주 캐시는 Wikipedia `S&P/ASX 200` 구성종목을 기준으로 하고, yfinance의 `.AX` 심볼로 시가총액·거래량·기간 지표를 보강합니다. 화면과 종목풀 저장 티커는 시스템 원칙대로 `ASX:` 접두사를 사용합니다.
-- leverage 전략 데이터는 `ticker_type="etf"`(MongoDB 캐시 키)로 조회하며 대상은 모두 한국 ETF.
-
-### VM 의 역할 (현재)
-
-- Docker 컨테이너 (웹 + FastAPI + MongoDB + nginx-proxy) 만 가동
-- 자동 배치 없음. 수동 실행이 필요하면 `/system` 화면의 버튼으로 트리거
-
-### 가격 캐시 — KOR 풀 동적 sleep (KRX rate-limit 회피)
-
-**증상**: 서버(OCI 춘천) 에서 가격 캐시 KOR 풀 처리 중 30~33 종목 즈음 KRX 응답이
-멈추면서 작업이 hang 으로 빠진다. 로컬(한국 ISP)에서는 발생하지 않는다.
-
-**원인**: KRX 가 단위 시간당 호출 빈도로 IP 차단을 거는 것으로 보인다. 서버는
-응답이 너무 빨라 (종목당 ~0.1s) 분당 600회 호출이 발생하면서 차단된다.
-
-**대응 (구현)**: `scripts/stock_price_cache_updater.py` 의 KOR 풀 직렬 루프에
-**종목당 동적 sleep** 을 적용한다. 종목 처리 elapsed 가 목표 간격 미만이면
-부족분만큼 채워서 호출 빈도를 일정 수준 이하로 유지한다.
-
-- 목표 간격: `scripts/stock_price_cache_updater.py` 상단의 `KOR_FETCH_TARGET_SECONDS` 상수 (기본 **0.3초**)
-- 적용 대상: `country_code == "kor"` 풀만 (US/AUS 는 yfinance 일괄 prefetch 라 무영향)
-- 로그 표시 예: `소요 0.1s + 0.2s 대기(속도조절)`
-- 로컬은 종목당 자연 소요(0.2~0.4s) 가 이미 충분히 느려 sleep 0 → 영향 없음
-- 서버는 0.1s × ~60종목 부족분 = 약 +12s 보충 → 풀 전체 +1~2분, 20분 timeout 한참 여유
-
-**튜닝**: 위 기본값으로도 차단되면 `KOR_FETCH_TARGET_SECONDS` 값을 늘린다.
-예를 들어 `0.6` 으로 바꾸면 종목당 최소 0.6초 간격으로 pykrx 호출을 늦춘다.
+| 증상 | 원인 | 조치 |
+| --- | --- | --- |
+| 서버에서 KOR 가격 캐시가 30종목쯤에서 hang | KRX 호출 빈도 IP 차단(서버는 응답이 빨라 분당 600회) | `stock_price_cache_updater.py` 의 `KOR_FETCH_TARGET_SECONDS` 로 종목당 최소 간격. 차단되면 값을 늘린다 |
+| VM 에서 배치 돌리면 시스템 다운 | 1 OCPU ARM CPU 100% | VM cron 제거, 로컬 스케줄러 |
+| 호스트 변경 후 인증서 미발급 | acme-companion 이 옛 컨테이너 데이터 보유 | `/app/letsencrypt_service_data` 정리 후 재시작 |
+| 로그인만 `redirect_uri_mismatch` | `node_app` 이 옛 `APP_BASE_URL` | 컨테이너 재생성 |
+| robots.txt 가 404 HTML | `vhost.d/` 파일명이 옛 도메인 | 파일명을 새 호스트로 |
+| DNS 레코드가 반영 안 됨 | 가비아에 등록함 | Cloudflare 에 등록 |
+| 배포 실패 `DISK_USE: 100%` | compose 가 `:latest` 를 참조해 배포마다 직전 이미지가 dangling 으로 남는데 정리하는 곳이 없었다(2026-04 에 넣은 `prune -af` 를 2026-05 에 부하 때문에 제거). 3개월간 1,140개 32.6GB 누적 | 배포 끝에 `docker image prune -f` 복원(`-a` 없이 — 태그 이미지까지 지우면 다음 배포에 다시 받아 1 OCPU 에 부하). 배포 **전** 디스크 5GB 미만이면 서버를 건드리기 전에 실패 |
+| 디스크를 비웠는데도 배포가 계속 실패 (fastapi 헬스체크 30초 초과) | 디스크 100% 때 mongodb 컨테이너가 재시작하며 네트워크 엔드포인트를 못 붙였다. `inspect` 에 네트워크 이름은 있는데 **IP 가 빈 값**이라 `mongodb` DNS 해석 실패 | `docker compose up -d --force-recreate mongodb` 로 컨테이너 재생성(데이터는 볼륨이라 보존). `docker network inspect momentum-etf_default` 의 Containers 목록에 mongodb 가 있는지로 판별 |

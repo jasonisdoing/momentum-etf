@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 
 from utils.account_registry import load_account_configs
-from utils.daily_fund_service import calculate_period_return_pct, load_daily_docs_for_aggregation
+from utils.daily_fund_service import calculate_period_return_pct
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.monthly_service import _load_monthly_docs as _load_monthly_docs_with_running
@@ -33,10 +33,12 @@ def _load_account_benchmarks(configs: list[dict[str, Any]]) -> dict[str, dict[st
     환율을 못 구하면 환산 못 한 값을 그대로 쓰지 않고 pct=None 으로 둔다 — 기준이 다른 값을
     비교하면 승부가 조용히 틀리기 때문이다.
 
-    반환: {account_id: {"name": 표시명, "pct": 원화기준 일간%|None}}
+    반환: {account_id: {"name": 표시명, "label": 화면 표기, "pct": 원화기준 일간%|None}}
+
+    ``label`` 은 지수(%) 옆에 괄호로 붙는 짧은 표기다. **국내는 종목명, 해외는 티커** —
+    국내 ETF 이름은 티커(숫자 6자리)만으로 뭔지 알 수 없고, 해외는 티커가 곧 통용 이름이다.
     """
     from services.price_service import get_exchange_rates, get_realtime_snapshot
-
     from utils.cash_model import currency_for_country
 
     # country -> 조회할 ticker 집합, account -> (country, fetch_ticker, name)
@@ -51,10 +53,13 @@ def _load_account_benchmarks(configs: list[dict[str, Any]]) -> dict[str, dict[st
         # au 소스는 bare 코드를 받으므로 .AX 접미사는 제거.
         fetch_ticker = ticker[:-3] if country == "au" and ticker.endswith(".AX") else ticker
         tickers_by_country.setdefault(country, set()).add(fetch_ticker)
+        name = str(bench.get("name") or ticker)
         acc_meta[config["account_id"]] = {
             "country": country,
             "fetch_ticker": fetch_ticker,
-            "name": str(bench.get("name") or ticker),
+            "name": name,
+            # 국내는 종목명(티커가 숫자라 알아볼 수 없다), 해외는 티커(그 자체가 통용 이름).
+            "label": name if country == "kor" else ticker,
         }
 
     snap_by_country: dict[str, dict[str, Any]] = {}
@@ -90,7 +95,7 @@ def _load_account_benchmarks(configs: list[dict[str, Any]]) -> dict[str, dict[st
             else:
                 pct = ((1.0 + pct / 100.0) * (1.0 + float(fx_change_pct) / 100.0) - 1.0) * 100.0
 
-        result[account_id] = {"name": meta["name"], "pct": pct}
+        result[account_id] = {"name": meta["name"], "label": meta["label"], "pct": pct}
     return result
 
 
@@ -228,6 +233,13 @@ def load_dashboard_data() -> dict[str, Any]:
     account_benchmarks = _load_account_benchmarks(configs)
 
     accounts: list[dict[str, Any]] = []
+    # 금일·금주 손익 합계 — 계좌별을 더해 만든다. 예전에는 일별 집계 배치가 적어 둔 값을
+    # 그대로 썼는데, 계좌 행은 지금 시세로 다시 계산해서 `/assets` 의 합계와 계좌 합이
+    # 어긋났다(배치 이후 움직인 만큼). 같은 소스에서 나오게 한다.
+    totals_daily_profit = 0.0
+    totals_daily_base = 0.0
+    totals_weekly_profit = 0.0
+    totals_weekly_base = 0.0
     for config in configs:
         portfolio_account = portfolio_accounts.get(config["account_id"], {})
         snapshot_account = snapshot_accounts.get(config["account_id"], {})
@@ -261,15 +273,28 @@ def load_dashboard_data() -> dict[str, Any]:
         # daily_profit / weekly_profit 은 입출금 영향을 제거한 시장 변동분만 계산한다.
         previous_account_principal = normalize_number(previous_snapshot_account.get("total_principal"))
         weekly_base_account_principal = normalize_number(weekly_base_snapshot_account.get("total_principal"))
-        daily_deposit = (total_principal - previous_account_principal) if previous_snapshot_account else 0.0
-        weekly_deposit = (total_principal - weekly_base_account_principal) if weekly_base_snapshot_account else 0.0
-        daily_profit = (total_assets - previous_total_assets - daily_deposit) if previous_snapshot_account else 0.0
-        weekly_profit = (
-            (total_assets - weekly_base_total_assets - weekly_deposit) if weekly_base_snapshot_account else 0.0
-        )
+        # 전일 스냅샷에 계좌가 없으면(생성 첫날) 전일 자산·원금을 0으로 보고 계산한다 —
+        # 첫날 손익 = 총자산 − 원금, 수익률 분모 = 당일 입금(원금). 0 처리하면 첫날이 공백이 된다.
+        daily_deposit = total_principal - previous_account_principal
+        weekly_deposit = total_principal - weekly_base_account_principal
+        daily_profit = total_assets - previous_total_assets - daily_deposit
+        weekly_profit = total_assets - weekly_base_total_assets - weekly_deposit
 
-        daily_return_pct_acc = calculate_period_return_pct(daily_profit, previous_total_assets)
-        weekly_return_pct_acc = calculate_period_return_pct(weekly_profit, weekly_base_total_assets)
+        # 수익률 분모 = 직전 자산 + 당일(주간) 입금 — 신규 계좌(전일 0)나 큰 입금이 있는
+        # 날에도 유입 자금 기준의 수익률이 나온다. 인출(음수)은 분모에서 빼지 않는다
+        # (인출한 돈도 그 시점까지는 운용됐으므로). Modified Dietz 의 단순형.
+        daily_return_pct_acc = calculate_period_return_pct(
+            daily_profit, previous_total_assets + max(daily_deposit, 0.0)
+        )
+        weekly_return_pct_acc = calculate_period_return_pct(
+            weekly_profit, weekly_base_total_assets + max(weekly_deposit, 0.0)
+        )
+        # 합계용 누적 — 분자(손익)만 더하면 수익률 분모가 없다. 계좌별과 같은 분모
+        # (직전 자산 + 당일 입금)를 함께 모아 합계 수익률도 같은 정의로 낸다.
+        totals_daily_profit += daily_profit
+        totals_daily_base += previous_total_assets + max(daily_deposit, 0.0)
+        totals_weekly_profit += weekly_profit
+        totals_weekly_base += weekly_base_total_assets + max(weekly_deposit, 0.0)
         accounts.append(
             {
                 "account_id": config["account_id"],
@@ -286,6 +311,7 @@ def load_dashboard_data() -> dict[str, Any]:
                 "daily_profit": daily_profit,
                 "daily_return_pct": daily_return_pct_acc,
                 "benchmark_name": (account_benchmarks.get(config["account_id"]) or {}).get("name"),
+                "benchmark_label": (account_benchmarks.get(config["account_id"]) or {}).get("label"),
                 "benchmark_pct": (account_benchmarks.get(config["account_id"]) or {}).get("pct"),
                 "index_result": _index_result(
                     daily_return_pct_acc, (account_benchmarks.get(config["account_id"]) or {}).get("pct")
@@ -299,18 +325,12 @@ def load_dashboard_data() -> dict[str, Any]:
     total_assets = sum(account["total_assets"] for account in accounts)
     total_principal = sum(account["total_principal"] for account in accounts)
     total_cash = sum(account["cash_balance"] for account in accounts)
-    # /assets 와 /daily, /weekly 의 일/주 수익률을 일치시키기 위해
-    # daily_fund_data 와 weekly_fund_data 에서 마지막 row 를 직접 사용한다.
-    # (자산 수익률 계산 정책: docs/developer_guide.md 참고)
-    try:
-        latest_daily_doc = next(iter(load_daily_docs_for_aggregation()), None)
-    except Exception as exc:
-        logger.warning("daily_fund_data 조회 실패: %s", exc)
-        latest_daily_doc = None
-    daily_profit = normalize_number((latest_daily_doc or {}).get("daily_profit"))
-    daily_return_pct = normalize_number((latest_daily_doc or {}).get("daily_return_pct"))
-    weekly_profit = normalize_number((latest_weekly or {}).get("weekly_profit"))
-    weekly_return_pct = normalize_number((latest_weekly or {}).get("weekly_return_pct"))
+    # 금일·금주는 계좌별 합이다 — 화면의 합계 행과 계좌 행이 같은 값에서 나와야 한다.
+    # 월별·연별은 그런 계좌별 계산이 없어 집계 배치 값을 그대로 쓴다.
+    daily_profit = totals_daily_profit
+    daily_return_pct = calculate_period_return_pct(totals_daily_profit, totals_daily_base)
+    weekly_profit = totals_weekly_profit
+    weekly_return_pct = calculate_period_return_pct(totals_weekly_profit, totals_weekly_base)
 
     # 월별/년별 최신 doc 의 금월/금년 손익 (캐시 누락 시 0 으로 폴백)
     try:

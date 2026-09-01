@@ -18,7 +18,6 @@ export async function GET(request: NextRequest) {
       "short_ma_days",
       "long_ma_days",
       "hold_threshold_k",
-      "down_market_invest_pct",
     ]) {
       const value = src.get(key);
       if (value !== null && value !== "") params.set(key, value);
