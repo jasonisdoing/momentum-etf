@@ -28,6 +28,7 @@ import {
   STOCK_NAME_COLUMN_MIN_WIDTH,
   adrColumn,
   formatSignedPct,
+  maExitGapColumn,
   renderIndustryCell,
   signColor,
   tradeValueMultColumn,
@@ -999,25 +1000,12 @@ export function NewHighClient() {
         valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
         cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
       },
-      {
-        // 이탈까지 얼마나 남았나 — 현재가가 이탈 이평선보다 몇 % 위인지.
-        // 판정에 쓰는 바로 그 선이라 이 숫자가 0 이하가 되면 매도 판정이 선다.
+      maExitGapColumn<PlanRow>({
         field: "exit_ma_gap_pct",
-        // 이름에 이평선 일수를 넣는다 — 설정을 바꾸면 헤더도 따라 바뀐다.
-        headerName: `MA${draft?.exit_ma_days ?? ""} 이탈`,
-        width: 96,
-        type: "numericColumn",
-        headerTooltip: `현재가가 이탈 이평선(MA${draft?.exit_ma_days ?? ""})보다 몇 % 위인지. 0 에 가까울수록 매도가 가깝다.`,
-        tooltipValueGetter: (p) =>
-          p.data?.exit_ma != null ? `이탈선 ${formatPrice(p.data.exit_ma)}` : "",
-        valueFormatter: (p) => (p.value == null ? "-" : `${(p.value as number).toFixed(1)}%`),
-        // 5% 안으로 들어오면 붉게 — 그 밖은 평범한 숫자다(눈이 임박한 것만 잡게).
-        cellStyle: (p): { color: string; fontWeight: number } | null => {
-          const value = p.value as number | null;
-          if (value != null && value <= 5) return { color: "var(--up-color, #d64545)", fontWeight: 700 };
-          return null;
-        },
-      },
+        maDays: draft?.exit_ma_days,
+        getMaValue: (row) => row?.exit_ma,
+        formatMaValue: (value) => formatPrice(value),
+      }),
     ],
     [hasIndustryData, fillDay, positions?.live, draft?.exit_ma_days],
   );

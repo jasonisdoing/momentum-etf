@@ -37,6 +37,7 @@ import {
   STOCK_NAME_COLUMN_MIN_WIDTH,
   adrColumn as sharedAdrColumn,
   formatSignedPct,
+  maExitGapColumn,
   renderHighDrawdownCell,
   renderIndustryCell,
   signColor,
@@ -687,6 +688,10 @@ export function MomentumClient() {
         valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number)),
         cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
       },
+      maExitGapColumn<PickRow>({
+        field: "current_short_pct",
+        maDays: view?.settings.short_ma_days,
+      }),
       {
         headerName: "고점",
         field: "high_drawdown_pct",
@@ -790,7 +795,7 @@ export function MomentumClient() {
       ),
     ];
     // 월별 라벨·국가·업종 유무가 선정 응답에 실려 온다 — 바뀌면(월 전환·풀 전환) 컬럼도 다시 만든다.
-  }, [hasIndustryData, monthlyLabels, picksCountry, saveMemo]);
+  }, [hasIndustryData, monthlyLabels, picksCountry, saveMemo, view?.settings.short_ma_days]);
 
   // 월간 표 — 연간과 같은 집계형(월/전략/벤치). 매매 내역은 주간 표가 담당한다.
   // 표 헤더의 지수 이름 — 신고가·합성 화면과 같은 표기(값에 % 가 붙으므로 헤더엔 붙이지 않는다).
