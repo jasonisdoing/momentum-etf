@@ -175,6 +175,9 @@ export function marketCapRankColumn<T>(field: ColDefField<T>, hide: boolean): Co
  *   · `onSave` 를 주면 셀을 벗어날 때 바로 저장한다(순위·모멘텀·합성).
  *   · 안 주면 그리드 값만 바뀐다 — 화면이 자기 저장 흐름을 태운다(자산 관리의 일괄 저장).
  *  `editable` 이 false 인 행은 편집도 안 되고 빈 값도 흐리게 표시하지 않는다(현금 행 등). */
+/** 메모 칸 배경(노랑) — 규칙은 globals.css 의 `.appMemoCell` 한 곳에 있다. */
+const MEMO_CELL_CLASS = "appMemoCell";
+
 export function stockMemoColumn<T>(options: {
   field: ColDefField<T>;
   width?: number;
@@ -193,8 +196,12 @@ export function stockMemoColumn<T>(options: {
     // 빈 문자열이 많아 자동 추론이 흔들린다 — 문자열 에디터를 명시한다.
     cellDataType: "text",
     editable: (params) => canEdit(params.data),
-    cellClass: (params) =>
-      cellClass ? cellClass(params.data) : canEdit(params.data) ? "appEditableCell" : undefined,
+    // 메모 칸 표시(노란 배경)는 화면이 `cellClass` 를 덮어써도 유지한다 — 같은 값을 여러
+    // 화면이 함께 보는 칸이라 색이 화면마다 달라지면 같은 칸인지 알아보기 어렵다.
+    cellClass: (params) => {
+      const base = cellClass ? cellClass(params.data) : canEdit(params.data) ? "appEditableCell" : undefined;
+      return [base, MEMO_CELL_CLASS].filter(Boolean).join(" ");
+    },
     valueParser: (params) => String(params.newValue ?? "").trim(),
     cellRenderer: (params: { data?: T; value?: string | null }) => {
       const text = String(params.value ?? "").trim();

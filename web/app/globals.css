@@ -3757,6 +3757,29 @@ a {
   background: rgba(46, 160, 67, 0.18);
 }
 
+/* 종목 메모 칸 — 편집 가능 칸(연녹색)과 구분되게 노랑으로 둔다.
+   같은 값을 여러 화면이 함께 보는 수기 칸이라(`utils/stock_memo_store`) 눈에 띄어야 한다.
+   `.appEditableCell` 뒤에 와야 배경이 덮인다. */
+.ag-cell.appEditableCell.appMemoCell {
+  background: rgba(240, 180, 41, 0.14);
+}
+
+.ag-cell.appEditableCell.appMemoCell:hover {
+  background: rgba(240, 180, 41, 0.24);
+}
+
+.ag-cell.appEditableCell.appMemoCell.appDirtyCell {
+  background: rgba(240, 180, 41, 0.34);
+}
+
+.ag-cell.appEditableCell.appMemoCell.appDirtyCell:hover {
+  background: rgba(240, 180, 41, 0.42);
+}
+
+.ag-cell.appEditableCell.appMemoCell.ag-cell-inline-editing {
+  background: rgba(240, 180, 41, 0.28);
+}
+
 .assetsAgGrid .ag-cell.assetsEditableCell {
   background: rgba(46, 160, 67, 0.08);
 }
