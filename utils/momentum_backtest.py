@@ -228,7 +228,7 @@ def run_backtest(
     # 슬리피지는 종목풀 설정을 단일 소스로 쓴다 — 매수·매도 편도값을 각각 적용한다.
     buy_slippage_pct, sell_slippage_pct = get_pool_slippage(pool)
     buy_slippage, sell_slippage = buy_slippage_pct / 100.0, sell_slippage_pct / 100.0
-    top_n = int(settings["top_n"])  # validate_settings 가 config.TOP_N_HOLD 로 채운다
+    top_n = int(settings["top_n"])  # validate_settings 가 선택한 풀의 TOP_N_HOLD 로 채운다
 
     # 일간 표용 — 보유 구간 안에서 매일의 동일가중 포트폴리오 수익률.
     # 가격은 한 번만 정제해 재사용한다(구간마다 다시 정제하면 느리다).
@@ -645,10 +645,7 @@ def run_backtest(
     # ── 예정 행 — 다음 주. 매매가 없어도 '보유 N 유지'가 보이도록 항상 붙인다.
     if pending_signal is not None:
         # 다음 교체 판정일 종가가 이미 확정됐다 — 그 선정을 그대로 보여준다.
-        pending_holdings = {
-            item["ticker"]
-            for item in select_top(rank_candidates(candidates_by_date[-1]), top_n)
-        }
+        pending_holdings = {item["ticker"] for item in select_top(rank_candidates(candidates_by_date[-1]), top_n)}
         pending_added = sorted(pending_holdings - current_holdings)
         pending_removed = sorted(current_holdings - pending_holdings)
         pending_count = len(pending_holdings)

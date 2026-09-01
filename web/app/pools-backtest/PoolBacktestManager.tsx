@@ -201,7 +201,7 @@ export function PoolBacktestManager() {
   useEffect(() => {
     const pool = pools.find((p) => p.ticker_type === poolId);
     if (!pool?.settings) return;
-    setTopN(null); // 비우면 시스템 공통 보유 종목 수(config.TOP_N_HOLD) — 실험용 덮어쓰기만 입력
+    setTopN(null); // 비우면 선택한 풀의 보유종목 수 — 값이 있으면 이번 실험에서만 덮어쓴다.
     setShortMa(fieldToInt(pool.settings.SHORT_MA_DAYS));
     setLongMa(fieldToInt(pool.settings.LONG_MA_DAYS));
   }, [poolId, pools]);

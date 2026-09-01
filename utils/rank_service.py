@@ -5,7 +5,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import CACHE_TTL_COMPUTE, TOP_N_HOLD
+from config import CACHE_TTL_COMPUTE
 from services.stock_cache_service import get_stock_cache_meta_map
 from utils.data_loader import get_trading_days
 from utils.ma_options import ma_options_payload
@@ -301,6 +301,8 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
 
 
 def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    from utils.pool_settings_store import get_pool_top_n_hold
+
     configs = load_ticker_type_configs()
     if not configs:
         raise ValueError("사용 가능한 종목풀이 없습니다.")
@@ -315,8 +317,7 @@ def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "country_code": str(cfg.get("country_code") or ""),
             # 풀 성격(stock/etf) — 미설정이면 빈 값(화면이 행 값으로 추정).
             "pool_kind": str(cfg.get("pool_kind") or ""),
-            # 시스템 공통 보유 종목 수(config) — 풀별 설정은 폐기했다.
-            "top_n_hold": TOP_N_HOLD,
+            "top_n_hold": get_pool_top_n_hold(str(cfg["ticker_type"])),
             "currency": str(cfg["settings"].get("currency") or ""),
         }
         for cfg in configs

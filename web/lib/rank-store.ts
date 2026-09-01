@@ -7,7 +7,7 @@ type RankTickerType = {
   icon: string;
   country_code: string;
   top_n_hold?: number;
-  /** 업종 상한 — 종목풀 저장값. null/미설정 = 제한 없음. */
+  /** 종목풀 통화. */
   currency?: string;
   include?: string[];
 };
