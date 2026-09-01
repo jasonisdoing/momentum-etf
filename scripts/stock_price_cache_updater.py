@@ -63,11 +63,15 @@ def _backfill_missing_closes_from_naver(ticker_type: str, tickers: list[str]) ->
     ①은 빈 값만 채우고, ②는 그 날짜 행을 새로 만들어 시가·고가·저가·종가를 채운다.
     이미 있는 값은 건드리지 않는다(주 소스는 어디까지나 yfinance).
     거래량은 네이버가 주지 않으므로 빈 값으로 둔다 — 지어내지 않는다.
-    ②의 탐지는 미국 거래일 캘린더 기준 최근 구간(캐시 마지막 날 이전 14일)만 본다.
+
+    ②의 탐지: 최근 30일의 미국 거래일 중 **장 마감이 끝난 날**인데 캐시에 없는 날 —
+    캐시 마지막 봉의 앞이든 뒤든 가리지 않는다(야후가 어느 날부터 통째로 안 주는 경우도
+    마감된 날이면 채운다). "아직 안 온 오늘 데이터"와의 구분은 마감 완료 여부가 한다.
+    네이버로 채운 날의 거래량은 다음 전체 재수집(--full)이 야후 값으로 되채운다.
     """
     from utils.cache_utils import load_cached_frame, save_cached_frame
     from utils.naver_overseas import fetch_daily_ohlc
-    from utils.trading_calendar import get_trading_days
+    from utils.trading_calendar import get_trading_days, is_market_day_completed
 
     filled = 0
     calendar_days: list[pd.Timestamp] | None = None  # 종목 공통 — 한 번만 받는다
@@ -77,27 +81,30 @@ def _backfill_missing_closes_from_naver(ticker_type: str, tickers: list[str]) ->
             continue
         gaps = list(cached.index[cached["Close"].isna()])
 
-        # ② 통째로 빠진 최근 거래일 — 캘린더에는 있는데 캐시 인덱스에 없는 날.
-        last = cached.index[-1]
+        # ② 통째로 빠진 거래일 — 캘린더에는 있고 마감도 끝났는데 캐시 인덱스에 없는 날.
         if calendar_days is None:
             try:
                 calendar_days = [
-                    pd.Timestamp(day).normalize()
-                    for day in get_trading_days(
-                        (pd.Timestamp.now() - pd.Timedelta(days=14)).strftime("%Y-%m-%d"),
-                        pd.Timestamp.now().strftime("%Y-%m-%d"),
-                        "us",
+                    day
+                    for day in (
+                        pd.Timestamp(raw).normalize()
+                        for raw in get_trading_days(
+                            (pd.Timestamp.now() - pd.Timedelta(days=30)).strftime("%Y-%m-%d"),
+                            pd.Timestamp.now().strftime("%Y-%m-%d"),
+                            "us",
+                        )
                     )
+                    if is_market_day_completed("us", day)
                 ]
             except Exception:
                 calendar_days = []
-        absent = [day for day in calendar_days if day <= last and day not in cached.index]
+        absent = [day for day in calendar_days if day not in cached.index]
         if not gaps and not absent:
             continue
 
         # 네이버는 최근분부터 준다 — 가장 오래된 결측까지 덮을 만큼만 요청한다.
         oldest = min([*gaps, *absent])
-        span_days = int((cached.index[-1] - oldest).days) + 5
+        span_days = int((pd.Timestamp.now().normalize() - oldest).days) + 5
         naver = fetch_daily_ohlc(ticker, days=max(10, min(span_days, 200)))
         if naver is None or naver.empty:
             continue
