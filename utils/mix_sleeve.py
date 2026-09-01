@@ -250,10 +250,12 @@ def _momentum_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> S
             {
                 "ticker": str(row["ticker"]).strip(),
                 "name": row.get("name") or row["ticker"],
-                # 발동 사유 — 손절선과 이평선 이탈을 구분한다(판정 함수가 정한 값).
-                "reason": {"주중 손절": "주중 손절선 하회", "주중 이탈": "자격 상실(이평선 하회)"}.get(
-                    str(row.get("exit_reason") or ""), "자격 상실(이평선 하회)"
-                ),
+                # 발동 사유 — 손절선·이평선 이탈·시장 게이트를 구분한다(판정 함수가 정한 값).
+                "reason": {
+                    "주중 손절": "주중 손절선 하회",
+                    "주중 이탈": "자격 상실(이평선 하회)",
+                    "ADR 게이트": "시장 ADR 하한 미달",
+                }.get(str(row.get("exit_reason") or ""), "자격 상실(이평선 하회)"),
                 "return_pct": None,
             }
             for row in selected
