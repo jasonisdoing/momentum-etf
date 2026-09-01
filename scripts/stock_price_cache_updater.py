@@ -103,7 +103,9 @@ def _backfill_missing_closes_from_naver(ticker_type: str, tickers: list[str]) ->
                 ]
             except Exception:
                 calendar_days = []
-        absent = [day for day in calendar_days if day not in cached.index]
+        # 그 종목의 첫 봉 이전은 상장 전이라 데이터가 없는 게 정상 — 탐지 대상이 아니다
+        # (신규 상장 ETF 가 "네이버에도 없어 못 채움" 오탐으로 찍혔다).
+        absent = [day for day in calendar_days if day >= cached.index[0] and day not in cached.index]
         if not gaps and not absent:
             continue
 
@@ -1092,8 +1094,8 @@ def main():
 def _notify_cache_issues(reports: list[dict], *, full_refresh: bool) -> None:
     """캐시 갱신 중 발견된 문제를 슬랙 1건으로 통보한다. 문제가 없으면 보내지 않는다.
 
-    항목: 수집 실패 / 야후 누락을 네이버로 보강(자동 복구됨) / 네이버에도 없어 못 채운 누락 /
-    의심 날짜 자동 제거. 소음이 되는 항목은 여기서 빼면 된다.
+    항목: 수집 실패 / 네이버에도 없어 못 채운 누락 / 의심 날짜 자동 제거.
+    자동 복구에 성공한 보강은 알리지 않는다(로그에만 남긴다) — 소음이 되는 항목은 여기서 뺀다.
     """
     logger = get_app_logger()
     lines: list[str] = []
@@ -1105,9 +1107,6 @@ def _notify_cache_issues(reports: list[dict], *, full_refresh: bool) -> None:
             preview = ", ".join(failed[:10]) + (" …" if len(failed) > 10 else "")
             pool_lines.append(f"· 수집 실패 {len(failed)}종목: {preview}")
         backfill = report.get("backfill") or {}
-        if backfill.get("filled_tickers"):
-            days = " · ".join(f"{day} {count}종목" for day, count in sorted(backfill["filled_days"].items()))
-            pool_lines.append(f"· 야후 누락 → 네이버 보강 {backfill['filled_tickers']}종목 ({days})")
         unfilled = backfill.get("unfilled") or {}
         if unfilled:
             preview = ", ".join(f"{t}({', '.join(d)})" for t, d in list(unfilled.items())[:10])
