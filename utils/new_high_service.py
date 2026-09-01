@@ -113,9 +113,11 @@ def pool_country(pool: str) -> str:
 
 
 def kor_session_elapsed_fraction() -> float:
-    """한국 정규장(09:00~15:30) 경과 비율 — 장중 거래대금 하한의 시간 비례 환산에 쓴다.
+    """한국 거래 시간 경과 비율 — 장중 거래대금 하한·환산 배수의 분모.
 
-    개장 전이면 0, 마감 후면 1. **한국 전용** — 미국 풀은 장중에 볼 일이 거의 없고
+    창은 정규장이 아니라 **프리마켓 08:00 ~ 애프터 20:00** 이다. 분자(토스 실시간 누적
+    거래대금)가 NXT 프리·애프터 거래분까지 합산된 값이라, 같은 창으로 재야 환산이 맞는다.
+    시작 전이면 0, 끝난 뒤면 1. **한국 전용** — 미국 풀은 장중에 볼 일이 거의 없고
     서머타임 처리만 얹게 되어 하루 기준 하한을 그대로 쓴다.
     """
     from datetime import datetime
@@ -125,10 +127,41 @@ def kor_session_elapsed_fraction() -> float:
 
     schedule = MARKET_SCHEDULES["kor"]
     now = datetime.now(ZoneInfo(schedule["timezone"]))
-    open_at = now.replace(hour=schedule["open"].hour, minute=schedule["open"].minute, second=0, microsecond=0)
-    close_at = now.replace(hour=schedule["close"].hour, minute=schedule["close"].minute, second=0, microsecond=0)
+    start = schedule["premarket_open"]
+    end = schedule["aftermarket_close"]
+    open_at = now.replace(hour=start.hour, minute=start.minute, second=0, microsecond=0)
+    close_at = now.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
     elapsed = (now - open_at).total_seconds()
     return min(max(elapsed / (close_at - open_at).total_seconds(), 0.0), 1.0)
+
+
+def kor_session_live_fraction() -> float | None:
+    """한국 거래 시간(프리마켓 08:00~애프터 20:00)이 **진행 중일 때만** 경과 비율(0<f<1)을,
+    아니면 None 을 돌려준다.
+
+    휴장일·시작 전·20시 이후에는 None — 시간 비례 계산(본값 실시간 전환·환산 배수·판정
+    하한)을 하지 않는다.
+    """
+    fraction = kor_session_elapsed_fraction()
+    if not 0.0 < fraction < 1.0:
+        return None
+    from utils.trading_calendar import is_trading_day
+
+    return fraction if is_trading_day("kor") else None
+
+
+def pace_value_mult(mult: float | None) -> float | None:
+    """장중 누적 거래대금 배수를 하루 기준으로 환산한 값(누적 ÷ 장 경과율).
+
+    10시에 누적 3배면 환산 약 19배 — 지금 페이스대로면 하루 기준 몇 배인지다.
+    화면 거래대금 컬럼이 괄호로 보여준다. 장중이 아니면 None(괄호 없음).
+    """
+    if mult is None:
+        return None
+    fraction = kor_session_live_fraction()
+    if fraction is None:
+        return None
+    return round(float(mult) / fraction, 1)
 
 
 def live_min_value_mult(min_value_mult: float | None) -> float | None:

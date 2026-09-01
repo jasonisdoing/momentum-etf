@@ -68,10 +68,9 @@ export function renderHighDrawdownCell(value: number | null | undefined, digits 
  */
 /** 거래대금 배수 표기 — 순위·신고가 화면 공용.
  *
- *  `value` 는 전략이 판정에 쓰는 배수(KRX 정규시장 확정)이고, `live` 는 토스 실시간
- *  배수다. 토스는 대체거래소(NXT) 거래분까지 합산해서 주므로 같은 날이라도 KRX 확정값보다
- *  크다 — 어느 쪽도 틀린 값이 아니라 **재는 범위가 다르다**. 그래서 둘이 다를 때만
- *  `3.2배 (4.6)` 처럼 나란히 보여준다(장중에는 둘이 같아 괄호가 안 붙는다).
+ *  `value` 는 본값(장중=토스 실시간 누적, 마감 후=KRX 확정)이고, `live` 는 장중에만 오는
+ *  **시간 환산 배수**(누적 ÷ 장 경과율 — 지금 페이스대로면 하루 기준 몇 배인지)다.
+ *  둘이 다를 때 `3.0배 (19.5)` 처럼 나란히 보여준다(장중이 아니면 괄호가 안 붙는다).
  */
 export function formatTradeValueMult(
   value: number | null | undefined,
@@ -121,7 +120,7 @@ export function tradeValueMultColumn<T>(options?: {
     headerTooltip:
       options?.headerTooltip ??
       "20일 평균 거래대금 대비 배수 (순위·신고가 화면과 같은 값). " +
-      "괄호는 토스 실시간 배수로, 대체거래소(NXT) 거래분까지 합산한 값이라 확정값보다 큽니다.",
+      "괄호는 장중 시간 비율로 환산한 배수 — 지금 페이스대로면 하루 기준 몇 배인지입니다.",
     valueFormatter: (p: { value?: unknown; data?: T }) =>
       formatTradeValueMult(
         p.value as number | null,
