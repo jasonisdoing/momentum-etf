@@ -50,8 +50,11 @@ PER_TICKER_TIMEOUT_SECONDS = 90
 KOR_FETCH_TARGET_SECONDS = 1
 
 
-def _backfill_missing_closes_from_naver(ticker_type: str, tickers: list[str]) -> int:
-    """yfinance 이력의 구멍을 네이버 해외증시로 메운다. 반환: 메운 종목 수.
+def _backfill_missing_closes_from_naver(ticker_type: str, tickers: list[str]) -> dict:
+    """yfinance 이력의 구멍을 네이버 해외증시로 메운다.
+
+    반환(슬랙 점검 보고용): ``{"filled_tickers": 메운 종목 수,
+    "filled_days": {날짜: 종목 수}, "unfilled": {티커: [네이버에도 없어 못 채운 날짜]}}``.
 
     구멍은 두 형태다 — 둘 다 실제로 관측됐다:
       ① 봉은 있는데 **Close 만 NaN** (2026-08-28: 시가·고가·저가·거래량은 있고 종가만 없음).
@@ -74,6 +77,8 @@ def _backfill_missing_closes_from_naver(ticker_type: str, tickers: list[str]) ->
     from utils.trading_calendar import get_trading_days, is_market_day_completed
 
     filled = 0
+    filled_days: dict[str, int] = {}
+    unfilled: dict[str, list[str]] = {}
     calendar_days: list[pd.Timestamp] | None = None  # 종목 공통 — 한 번만 받는다
     for ticker in tickers:
         cached = load_cached_frame(ticker_type, ticker)
@@ -113,23 +118,27 @@ def _backfill_missing_closes_from_naver(ticker_type: str, tickers: list[str]) ->
         touched = 0
         for day in gaps:
             if day not in naver.index:
+                unfilled.setdefault(ticker, []).append(str(day.date()))
                 continue
             for column in ("Open", "High", "Low", "Close"):
                 if column in merged.columns and pd.isna(merged.at[day, column]):
                     merged.at[day, column] = float(naver.at[day, column])
             touched += 1
+            filled_days[str(day.date())] = filled_days.get(str(day.date()), 0) + 1
         for day in absent:
             if day not in naver.index:
+                unfilled.setdefault(ticker, []).append(str(day.date()))
                 continue
             for column in ("Open", "High", "Low", "Close"):
                 if column in merged.columns:
                     merged.at[day, column] = float(naver.at[day, column])
             touched += 1
+            filled_days[str(day.date())] = filled_days.get(str(day.date()), 0) + 1
         if touched:
             merged = merged.sort_index()
             save_cached_frame(ticker_type, ticker, merged)
             filled += 1
-    return filled
+    return {"filled_tickers": filled, "filled_days": filled_days, "unfilled": unfilled}
 
 
 def _resolve_fetch_workers() -> int:
@@ -914,7 +923,8 @@ def refresh_cache_for_target(
         else:
             logger.info("-> [%s] 캐시 갱신 완료 (%d개 종목).", target_norm.upper(), succeeded_count)
 
-        # 미국 풀: yfinance 가 종가를 비운 봉을 네이버로 메운다(빈 값만 채운다).
+        # 미국 풀: yfinance 이력의 구멍(종가 빈칸·통누락)을 네이버로 메운다.
+        backfill_report: dict | None = None
         if country_code == "us":
             try:
                 pool_tickers = [
@@ -922,9 +932,14 @@ def refresh_cache_for_target(
                     for item in target_items
                     if str(item.get("ticker") or "").strip()
                 ]
-                filled = _backfill_missing_closes_from_naver(target_norm, pool_tickers)
-                if filled:
-                    logger.info("[%s] 네이버 해외증시로 빈 종가 보강: %d종목", target_norm.upper(), filled)
+                backfill_report = _backfill_missing_closes_from_naver(target_norm, pool_tickers)
+                if backfill_report["filled_tickers"]:
+                    logger.info(
+                        "[%s] 네이버 해외증시로 야후 누락 보강: %d종목 %s",
+                        target_norm.upper(),
+                        backfill_report["filled_tickers"],
+                        backfill_report["filled_days"],
+                    )
             except Exception as exc:
                 logger.warning("[%s] 네이버 종가 보강 건너뜀: %s", target_norm.upper(), exc)
 
@@ -949,8 +964,9 @@ def refresh_cache_for_target(
             logger.warning("[%s] 고아 캐시 정리 중 오류: %s", target_norm.upper(), exc)
 
         # 풀 전체 검증: 데이터 소스 오류로 다수 종목의 close 가 NaN인 날짜 자동 제거
+        purged_dates: list = []
         try:
-            _purge_suspicious_dates(target_norm, success_tickers)
+            purged_dates = _purge_suspicious_dates(target_norm, success_tickers)
         except Exception as exc:
             logger.warning("[%s] 의심 날짜 자동 정리 중 오류: %s", target_norm.upper(), exc)
 
@@ -962,6 +978,14 @@ def refresh_cache_for_target(
 
         # 포트폴리오 변동 캐시는 조회 시 TTL 기준으로 갱신한다.
         set_cache_refresh_completed_at(target_norm, pd.Timestamp.utcnow().to_pydatetime())
+
+        # 슬랙 점검 보고용 — main 이 풀별로 모아 문제가 있을 때만 1건 발송한다.
+        return {
+            "pool": target_norm,
+            "failed": list(failed_tickers),
+            "backfill": backfill_report,
+            "purged_dates": [str(pd.Timestamp(day).date()) for day in purged_dates],
+        }
 
 
 def _collect_benchmark_tickers(target_id: str) -> list[str]:
@@ -1055,9 +1079,56 @@ def main():
         "full(전체 재수집)" if args.full else "incremental(증분)",
     )
 
+    reports: list[dict] = []
     with _global_refresh_lock():
         for t_id in targets_to_update:
-            refresh_cache_for_target(t_id, start_date, full_refresh=args.full)
+            report = refresh_cache_for_target(t_id, start_date, full_refresh=args.full)
+            if isinstance(report, dict):
+                reports.append(report)
+
+    _notify_cache_issues(reports, full_refresh=args.full)
+
+
+def _notify_cache_issues(reports: list[dict], *, full_refresh: bool) -> None:
+    """캐시 갱신 중 발견된 문제를 슬랙 1건으로 통보한다. 문제가 없으면 보내지 않는다.
+
+    항목: 수집 실패 / 야후 누락을 네이버로 보강(자동 복구됨) / 네이버에도 없어 못 채운 누락 /
+    의심 날짜 자동 제거. 소음이 되는 항목은 여기서 빼면 된다.
+    """
+    logger = get_app_logger()
+    lines: list[str] = []
+    for report in reports:
+        pool = str(report["pool"]).upper()
+        pool_lines: list[str] = []
+        failed = report.get("failed") or []
+        if failed:
+            preview = ", ".join(failed[:10]) + (" …" if len(failed) > 10 else "")
+            pool_lines.append(f"· 수집 실패 {len(failed)}종목: {preview}")
+        backfill = report.get("backfill") or {}
+        if backfill.get("filled_tickers"):
+            days = " · ".join(f"{day} {count}종목" for day, count in sorted(backfill["filled_days"].items()))
+            pool_lines.append(f"· 야후 누락 → 네이버 보강 {backfill['filled_tickers']}종목 ({days})")
+        unfilled = backfill.get("unfilled") or {}
+        if unfilled:
+            preview = ", ".join(f"{t}({', '.join(d)})" for t, d in list(unfilled.items())[:10])
+            suffix = " …" if len(unfilled) > 10 else ""
+            pool_lines.append(f"· 네이버에도 없어 못 채움 {len(unfilled)}종목: {preview}{suffix}")
+        purged = report.get("purged_dates") or []
+        if purged:
+            pool_lines.append(f"· 의심 날짜(다수 종목 종가 NaN) 제거: {', '.join(purged)}")
+        if pool_lines:
+            lines.append(f"*{pool}*")
+            lines.extend(pool_lines)
+    if not lines:
+        return
+    mode = "전체 재수집" if full_refresh else "증분"
+    message = "\n".join([f"⚠️ 가격 캐시 점검 ({mode}) — 문제 발견", *lines])
+    try:
+        from utils.notification import send_slack_message_v2
+
+        send_slack_message_v2(message)
+    except Exception:
+        logger.exception("[cache] 점검 슬랙 발송 실패")
 
 
 if __name__ == "__main__":
