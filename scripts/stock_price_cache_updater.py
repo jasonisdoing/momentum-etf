@@ -51,30 +51,53 @@ KOR_FETCH_TARGET_SECONDS = 1
 
 
 def _backfill_missing_closes_from_naver(ticker_type: str, tickers: list[str]) -> int:
-    """yfinance 가 종가를 비운 봉을 네이버 해외증시로 메운다. 반환: 메운 종목 수.
+    """yfinance 이력의 구멍을 네이버 해외증시로 메운다. 반환: 메운 종목 수.
 
-    야후가 봉을 만들어 두고 **Close 만 NaN 으로** 주는 날이 있다(2026-08-28: 시가·고가·
-    저가·거래량은 있는데 종가만 없음). 그 행이 캐시에 남으면 그날이 거래일로 잡힌 채
-    종가가 없어, 읽는 쪽마다 다르게 어긋난다 — 백테스트는 보유 평가액을 0 으로 매겼다.
+    구멍은 두 형태다 — 둘 다 실제로 관측됐다:
+      ① 봉은 있는데 **Close 만 NaN** (2026-08-28: 시가·고가·저가·거래량은 있고 종가만 없음).
+      ② 최근 거래일 봉이 이력에서 **통째로 빠짐** (2026-09-01: 재수집이 8/28 행이 아예 없는
+        이력을 받아 와, 전날 네이버로 채워둔 금요일 봉까지 사라졌다 — 판정일 데이터가 하루
+        뒤로 밀려 모멘텀 선정이 밤 사이 바뀌었다).
 
     같은 봉을 네이버는 온전히 들고 있고 시가·고가·저가가 yfinance 와 소수점까지 같다.
-    **빈 값만** 채운다 — 이미 있는 값은 건드리지 않는다(주 소스는 어디까지나 yfinance).
-    거래량은 네이버가 주지 않으므로 그대로 둔다.
+    ①은 빈 값만 채우고, ②는 그 날짜 행을 새로 만들어 시가·고가·저가·종가를 채운다.
+    이미 있는 값은 건드리지 않는다(주 소스는 어디까지나 yfinance).
+    거래량은 네이버가 주지 않으므로 빈 값으로 둔다 — 지어내지 않는다.
+    ②의 탐지는 미국 거래일 캘린더 기준 최근 구간(캐시 마지막 날 이전 14일)만 본다.
     """
     from utils.cache_utils import load_cached_frame, save_cached_frame
     from utils.naver_overseas import fetch_daily_ohlc
+    from utils.trading_calendar import get_trading_days
 
     filled = 0
+    calendar_days: list[pd.Timestamp] | None = None  # 종목 공통 — 한 번만 받는다
     for ticker in tickers:
         cached = load_cached_frame(ticker_type, ticker)
         if cached is None or cached.empty or "Close" not in cached.columns:
             continue
-        gaps = cached.index[cached["Close"].isna()]
-        if len(gaps) == 0:
+        gaps = list(cached.index[cached["Close"].isna()])
+
+        # ② 통째로 빠진 최근 거래일 — 캘린더에는 있는데 캐시 인덱스에 없는 날.
+        last = cached.index[-1]
+        if calendar_days is None:
+            try:
+                calendar_days = [
+                    pd.Timestamp(day).normalize()
+                    for day in get_trading_days(
+                        (pd.Timestamp.now() - pd.Timedelta(days=14)).strftime("%Y-%m-%d"),
+                        pd.Timestamp.now().strftime("%Y-%m-%d"),
+                        "us",
+                    )
+                ]
+            except Exception:
+                calendar_days = []
+        absent = [day for day in calendar_days if day <= last and day not in cached.index]
+        if not gaps and not absent:
             continue
 
         # 네이버는 최근분부터 준다 — 가장 오래된 결측까지 덮을 만큼만 요청한다.
-        span_days = int((cached.index[-1] - gaps.min()).days) + 5
+        oldest = min([*gaps, *absent])
+        span_days = int((cached.index[-1] - oldest).days) + 5
         naver = fetch_daily_ohlc(ticker, days=max(10, min(span_days, 200)))
         if naver is None or naver.empty:
             continue
@@ -88,7 +111,15 @@ def _backfill_missing_closes_from_naver(ticker_type: str, tickers: list[str]) ->
                 if column in merged.columns and pd.isna(merged.at[day, column]):
                     merged.at[day, column] = float(naver.at[day, column])
             touched += 1
+        for day in absent:
+            if day not in naver.index:
+                continue
+            for column in ("Open", "High", "Low", "Close"):
+                if column in merged.columns:
+                    merged.at[day, column] = float(naver.at[day, column])
+            touched += 1
         if touched:
+            merged = merged.sort_index()
             save_cached_frame(ticker_type, ticker, merged)
             filled += 1
     return filled
