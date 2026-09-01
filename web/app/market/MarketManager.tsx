@@ -86,8 +86,8 @@ type MarketVariantConfig = {
 // 과세 구분 선택지 — 분류를 못 받은 종목은 '모두'에서만 보인다(어느 쪽으로도 넘겨짚지 않는다).
 const TAX_FILTER_OPTIONS = [
   { key: "all", label: "모두", title: "과세 구분과 무관하게 전부" },
-  { key: "taxed", label: "과세", title: "해외·파생·원자재·채권 — 매매차익에 배당소득세" },
   { key: "free", label: "비과세", title: "국내 주식형 — 매매차익 비과세" },
+  { key: "taxed", label: "과세", title: "해외·파생·원자재·채권 — 매매차익에 배당소득세" },
 ] as const;
 
 const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
