@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from collections.abc import Callable
 from typing import Any
 
 import pandas as pd
@@ -548,33 +549,47 @@ def seed_adr_series(market: str, series: pd.Series) -> None:
     _ADR_SERIES_CACHE[market] = series
 
 
+def adr_gate_checker(settings: dict[str, Any]) -> Callable[[pd.Timestamp | None], bool]:
+    """게이트 판정을 **한 번만 준비해** 날짜마다 반복 호출하는 형태로 돌려준다.
+
+    주간 판정은 한 번뿐이지만 주중 판정은 거래일마다 돈다 — 그때마다 풀 설정과 ADR
+    시계열을 다시 찾으면 백테스트가 느려진다. 시장·시계열 조회를 여기서 끝내고,
+    돌려주는 함수는 날짜 비교만 한다. 판정 규칙은 이 한 곳에만 있다.
+    """
+    adr_floor = settings.get("adr_floor")
+    if adr_floor is None:
+        return lambda _as_of: False
+    market = adr_market_of_pool(str(settings["pool"]))
+    if market is None:
+        raise RuntimeError("ADR 하한이 설정됐지만 풀의 시장 레짐 지수가 없습니다 — /pools-settings 에서 설정하세요.")
+    series = load_adr_series(market)
+    floor = float(adr_floor)
+
+    def blocked(as_of: pd.Timestamp | None) -> bool:
+        if as_of is None:
+            if series.empty:
+                raise RuntimeError(f"{market} ADR 데이터가 없습니다 — market_breadth 배치를 확인하세요.")
+            last_date = series.index[-1]
+            if pd.Timestamp.now().normalize() - last_date > pd.Timedelta(days=14):
+                raise RuntimeError(
+                    f"{market} ADR 이 {last_date.date()} 이후 갱신되지 않았습니다 — market_breadth 배치를 확인하세요."
+                )
+            return float(series.iloc[-1]) < floor
+        value = series.asof(pd.Timestamp(as_of))
+        if pd.isna(value):
+            return False  # 이력 이전 — 게이트 미적용 (기간 선택지가 이 구간을 이미 걸러낸다)
+        return float(value) < floor
+
+    return blocked
+
+
 def adr_gate_blocked(settings: dict[str, Any], as_of: pd.Timestamp | None) -> bool:
     """판정일 기준 게이트 차단 여부. 이력이 없는 날짜는 게이트 미적용(False).
 
     `as_of=None`(현재 판정)일 때 값이 없거나 14일 이상 낡았으면 **에러** — 게이트를 켜둔 채
     폭 데이터가 죽었는데 조용히 통과시키면 안 된다. 과거 날짜는 이력 이전이면 미적용이다.
     """
-    adr_floor = settings.get("adr_floor")
-    if adr_floor is None:
-        return False
-    market = adr_market_of_pool(str(settings["pool"]))
-    if market is None:
-        raise RuntimeError("ADR 하한이 설정됐지만 풀의 시장 레짐 지수가 없습니다 — /pools-settings 에서 설정하세요.")
-    series = load_adr_series(market)
-    if as_of is None:
-        if series.empty:
-            raise RuntimeError(f"{market} ADR 데이터가 없습니다 — market_breadth 배치를 확인하세요.")
-        last_date = series.index[-1]
-        if pd.Timestamp.now().normalize() - last_date > pd.Timedelta(days=14):
-            raise RuntimeError(
-                f"{market} ADR 이 {last_date.date()} 이후 갱신되지 않았습니다 — market_breadth 배치를 확인하세요."
-            )
-        value = float(series.iloc[-1])
-        return value < float(adr_floor)
-    value = series.asof(pd.Timestamp(as_of))
-    if pd.isna(value):
-        return False  # 이력 이전 — 게이트 미적용 (기간 선택지가 이 구간을 이미 걸러낸다)
-    return float(value) < float(adr_floor)
+    return adr_gate_checker(settings)(as_of)
 
 
 def adr_max_backtest_months(pool: str) -> int | None:
@@ -676,6 +691,11 @@ def simulate_intraweek_exits(
     반환 항목의 ``sell_date`` 가 None 이면 아직 체결 전(다음 거래일 시가 매도 예정)이다.
     선정 화면과 백테스트가 모두 이 함수를 써야 결과가 어긋나지 않는다.
 
+    ADR 하한이 설정돼 있으면 **날짜 단위 시장 게이트**도 함께 본다. 그날 시장 ADR 이
+    하한 미만이면 남은 보유를 통째로 판다 — ADR 은 시장 지표라 종목별로 가를 근거가 없고,
+    주간 게이트가 하는 일(그 주 전량 현금)과 같은 판단을 주중에 앞당기는 것이다.
+    같은 날 손절·이탈에 먼저 걸린 종목은 그 사유를 유지한다(더 구체적인 이유가 남는다).
+
     설정의 ``intraweek_exit`` 이 꺼져 있으면 주중에는 팔지 않는다(주 교체일에만 정리).
     ETF 풀처럼 20일선 부근을 오르내리는 종목이 많으면 하루짜리 이탈이 잦아 왕복
     비용만 커지기 때문이다 — 풀 성격에 맞춰 화면에서 켜고 끈다.
@@ -725,6 +745,8 @@ def simulate_intraweek_exits(
 
     remaining = set(holdings)
     exits: list[dict[str, Any]] = []
+    # 시장 게이트 — 시계열 조회를 루프 밖에서 끝낸다(주간 판정과 같은 공용 함수).
+    adr_blocked = adr_gate_checker(settings)
     for day in index[(index >= scan_start) & (index <= scan_end)]:
         later = index[index > day]
         sell_date = later[0] if len(later) > 0 else None
@@ -760,6 +782,20 @@ def simulate_intraweek_exits(
                     "reason": "주중 손절" if hit_stop else "주중 이탈",
                 }
             )
+        # 종목별 판정 뒤에 본다 — 손절·이탈에 걸린 종목은 그 사유를 남기고, 남은 보유만
+        # 시장 게이트로 정리한다. 어차피 같은 다음 거래일 시가 체결이라 성과는 같고
+        # 사유 표시만 정확해진다.
+        if remaining and adr_blocked(day):
+            for ticker in sorted(remaining):
+                exits.append(
+                    {
+                        "ticker": ticker,
+                        "signal_date": day,
+                        "sell_date": sell_date,
+                        "reason": "ADR 게이트",
+                    }
+                )
+            remaining.clear()
     return exits
 
 
