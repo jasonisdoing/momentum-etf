@@ -4,10 +4,10 @@
 네 그룹으로 나눠 보낸다. 분류는 화면과 같은 기준 — 거래대금 하한은 장중에 시간 비례로
 환산한 목표(하루 목표 × 장 경과 비율)와 비교한다.
 
-발송 규칙(트리거): 어떤 종목의 **거래대금 배수가 새 정수 단(1배·2배·3배…)에 처음
-도달했을 때만** 전체 내용을 1회 발송한다. 단은 하루 안에서 올라가기만 한다 —
+발송 규칙(트리거): 어떤 종목의 **실시간 비율(시간 환산 배수)이 새 정수 단(1배·2배·3배…)에
+처음 도달했을 때만** 전체 내용을 1회 발송한다. 단은 하루 안에서 올라가기만 한다 —
 2배를 찍고 1배로 줄었다가 다시 2배가 되어도 재발송하지 않고, 3배가 되면 그 종목이
-트리거가 되어 다시 나간다. 트리거된 종목의 값(종가 대비·거래대금)은 볼드로 표시한다.
+트리거가 되어 다시 나간다. 트리거된 종목의 실시간 비율은 볼드로 표시한다.
 구성(종목 출입)만 바뀌는 것은 발송 사유가 아니다 — 10분마다 반복되는 소음을 막는다.
 단 기록은 DB(system_config)에 날짜와 함께 남기고, 날이 바뀌면 비운다.
 
@@ -66,36 +66,39 @@ def _pool_display_name(pool: str) -> str:
 
 
 def _row_mult(row: dict[str, Any]) -> float | None:
-    """표시·트리거에 쓰는 거래대금 배수 — 본값(장중=실시간 누적, 확정 후=KRX).
-
-    `value_mult_live` 는 이제 시간 환산 배수라 트리거(정수 단)에는 쓰지 않는다.
-    """
+    """표시에 쓰는 거래대금 배수 — 본값(장중=실시간 누적, 확정 후=KRX)."""
     value = row.get("value_mult")
     return float(value) if value is not None else None
 
 
+def _row_pace_level(row: dict[str, Any]) -> int:
+    """실시간 비율(시간 환산 배수)의 정수 단(내림) — 트리거·괄호 표시의 기준. 없으면 0."""
+    pace = row.get("value_mult_live")
+    if pace is None:
+        return 0
+    return int(math.floor(float(pace)))
+
+
 def _row_line(row: dict[str, Any], bold: bool) -> str:
-    """한 종목 줄 — 「티커 이름 · 일간% · 종가 대비 % · 거래대금 배수」. 네 그룹이 같은 형식을 쓴다.
+    """한 종목 줄 — 「티커 이름 · 일간% · 종가 대비 % · 거래대금 배수(실시간 비율 N배)」.
 
-    ``bold`` (이번 발송의 트리거 종목)면 종가 대비·거래대금 값을 볼드로 감싼다.
+    종가 대비는 항상 볼드(화면 컬럼과 같은 강조). 실시간 비율은 정수 단(내림)으로
+    보여주고, ``bold`` (이번 발송의 트리거 종목)면 그 부분만 볼드로 감싼다.
     """
-
-    def emph(text: str) -> str:
-        return f"*{text}*" if bold else text
-
     change = row.get("change_pct")
     gap = row.get("gap_pct")
     mult = _row_mult(row)
-    # 괄호는 화면과 같은 시간 환산 배수(누적 ÷ 08~20시 경과율) — 장중에만 값이 있다.
-    pace = row.get("value_mult_live")
     mult_text = None
     if mult is not None:
-        mult_text = f"거래대금 {mult:.1f}배" + (f"(실시간 비율 {float(pace):.1f}배)" if pace is not None else "")
+        mult_text = f"거래대금 {mult:.1f}배"
+        if row.get("value_mult_live") is not None:
+            pace_text = f"실시간 비율 {_row_pace_level(row)}배"
+            mult_text += f"({f'*{pace_text}*' if bold else pace_text})"
     parts = [
         f"*{row['ticker']} {row.get('name') or ''}*".strip(),
         f"{'+' if (change or 0) >= 0 else ''}{change:.2f}%" if change is not None else None,
-        emph(f"종가 대비 {'+' if gap >= 0 else ''}{gap:.2f}%") if gap is not None else None,
-        emph(mult_text) if mult_text else None,
+        f"*종가 대비 {'+' if gap >= 0 else ''}{gap:.2f}%*" if gap is not None else None,
+        mult_text,
     ]
     return "🔺 " + " · ".join(part for part in parts if part)
 
@@ -182,15 +185,14 @@ def notify_pool(pool: str) -> dict[str, Any]:
     today = str(positions.get("quote_at") or "")[:10] or str(positions.get("as_of") or "")
     stored = _load_levels(pool, today)
 
-    # 오늘의 단 — 목록에 있는 종목의 거래대금 배수를 정수로 내림(1 미만은 0). 단은 올라가기만 한다.
+    # 오늘의 단 — 목록에 있는 종목의 **실시간 비율**(시간 환산 배수)을 정수로 내림(1 미만은 0).
+    # 단은 올라가기만 한다(래칫). 비율은 장 초반에 높다가 내려오는 성질이라, 아침 첫 발송에서
+    # 래칫이 높게 잡히고 이후에는 페이스가 더 가속한 종목만 다시 트리거된다.
     triggered: set[str] = set()
     levels = dict(stored)
     for group in groups:
         for row in group["rows"]:
-            mult = _row_mult(row)
-            if mult is None:
-                continue
-            level = int(math.floor(mult))
+            level = _row_pace_level(row)
             ticker = str(row["ticker"])
             if level >= 1 and level > stored.get(ticker, 0):
                 triggered.add(ticker)
