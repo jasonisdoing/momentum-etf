@@ -4637,6 +4637,13 @@ a {
   flex: 0 0 11rem;
 }
 
+/* 과세 토글 칸 — 버튼 세 개라 위 자리 규칙(11rem)에 안 들어간다. 내용만큼 쓴다.
+   자리 순서로 폭을 정하는 규칙 아래에 새 칸을 넣을 때는 이렇게 예외를 명시해야 한다
+   (그냥 두면 좁은 폭에 눌려 옆 요소와 겹친다). */
+.marketMainHeaderLeft .appLabeledField.marketTaxField {
+  flex: 0 0 auto;
+}
+
 .marketMainHeaderRight {
   flex-wrap: nowrap;
 }

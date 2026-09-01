@@ -149,6 +149,8 @@ def load_market_data() -> dict[str, Any]:
             "market_cap": int(normalize_number(row.get("시가총액"))),
             "base_close_1m": normalize_nullable_number(row.get("기준종가_1m")),
             "base_close_2m": normalize_nullable_number(row.get("기준종가_2m")),
+            # 매매차익 비과세 여부(국내 주식형만). 분류를 못 받은 종목은 None = 모름.
+            "is_tax_free": row.get("is_tax_free"),
         }
         for row in rows
     ]
