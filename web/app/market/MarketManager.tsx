@@ -40,6 +40,8 @@ type MarketRowItem = {
   /** PTP(Publicly Traded Partnership) — 국내 매도 시 총액 10% 원천징수라 사실상 거래 대상이 아니다.
    *  이름으로는 못 가르는 값이라 배치가 판정해 내려준다(`utils/us_etf_market_service`). */
   is_ptp?: boolean;
+  /** 매매차익 비과세 여부(국내 주식형 ETF만). 분류를 못 받은 종목은 없음 = 모름. */
+  is_tax_free?: boolean | null;
 };
 
 type MarketResponse = {
@@ -71,6 +73,8 @@ type MarketVariantConfig = {
   /** 이름으로 못 가르는 제외 그룹 — 배치가 판정해 둔 불리언 필드를 본다.
    *  키워드 그룹과 같은 칩으로 보이고 같은 방식으로 켜고 끈다. */
   flagExclusions?: Record<string, keyof MarketRowItem>;
+  /** 과세 구분 토글(모두/과세/비과세)을 보일지 — 국내 ETF 만 이 구분이 있다. */
+  showTaxFilter?: boolean;
   defaultExcluded: string[];
   showNavColumns: boolean; // Nav·괴리율 — 한국 실시간 스냅샷에만 있다
   showListing: boolean; // 상장일 컬럼 + 신규 필터 — 미국 마스터에는 상장일이 없다
@@ -78,6 +82,13 @@ type MarketVariantConfig = {
   capFilterDefault: string; // 규모 최소값 필터 초기값 ("" = 없음)
   volumeFilterDefault: string; // 거래량 최소값 필터 초기값 ("" = 없음)
 };
+
+// 과세 구분 선택지 — 분류를 못 받은 종목은 '모두'에서만 보인다(어느 쪽으로도 넘겨짚지 않는다).
+const TAX_FILTER_OPTIONS = [
+  { key: "all", label: "모두", title: "과세 구분과 무관하게 전부" },
+  { key: "taxed", label: "과세", title: "해외·파생·원자재·채권 — 매매차익에 배당소득세" },
+  { key: "free", label: "비과세", title: "국내 주식형 — 매매차익 비과세" },
+] as const;
 
 const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
   kor: {
@@ -100,6 +111,8 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
     capHeader: "시가총액(억)",
     capFilterDefault: "",
     volumeFilterDefault: "",
+    // 국내 주식형 ETF 는 매매차익이 비과세고 그 밖(해외·파생·원자재·채권)은 과세다.
+    showTaxFilter: true,
   },
   us: {
     apiPath: "/api/market/us-etf",
@@ -206,6 +219,8 @@ export function MarketManager({
   const [minMarketCap, setMinMarketCap] = useState(variant.capFilterDefault); // 규모(시총/거래대금) 최소값
   const [minPrevVolume, setMinPrevVolume] = useState(variant.volumeFilterDefault); // 거래량(주)
   const [excludedGroups, setExcludedGroups] = useState<string[]>(variant.defaultExcluded);
+  // 과세 구분 — all(모두) · taxed(과세) · free(비과세). 분류를 못 받은 종목은 '모두'에서만 보인다.
+  const [taxFilter, setTaxFilter] = useState<"all" | "taxed" | "free">("all");
   const [newOnly, setNewOnly] = useState(false);
   const [newListingDays, setNewListingDays] = useState("14");
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
@@ -285,6 +300,10 @@ export function MarketManager({
           return false;
         }
 
+        // 과세 구분 — 분류가 없는 종목(null)은 어느 쪽으로도 넘겨짚지 않고 '모두'에서만 보인다.
+        if (taxFilter === "free" && row.is_tax_free !== true) return false;
+        if (taxFilter === "taxed" && row.is_tax_free !== false) return false;
+
         // 양끝 공백 패딩 — 공백 포함 키워드(" CLO " 등)가 이름 첫/끝 단어에도 걸리게 한다.
         const nameUpper = ` ${row.name.toUpperCase()} `;
         if (!newOnly && expandedKeywords.some((keyword) => nameUpper.includes(keyword.toUpperCase()))) {
@@ -323,7 +342,7 @@ export function MarketManager({
         }
         return left.ticker.localeCompare(right.ticker);
       });
-  }, [excludedGroups, minMarketCap, minPrevVolume, newListingDays, newOnly, query, rows]);
+  }, [excludedGroups, minMarketCap, minPrevVolume, newListingDays, newOnly, query, rows, taxFilter]);
 
   const gridRows = useMemo<MarketGridRow[]>(
     () => filteredRows.map((row, index) => ({ ...row, row_number: index + 1 })),
@@ -704,6 +723,26 @@ export function MarketManager({
                       ) : null}
                     </div>
                   </label>
+                  {/* 과세 구분 — 국내 주식형만 매매차익 비과세다. 이름으로는 못 가르므로
+                      (KODEX 레버리지는 국내 주식이지만 파생이라 과세) 배치가 받아 둔 분류를 쓴다. */}
+                  {variant.showTaxFilter ? (
+                    <label className="appLabeledField marketTaxField">
+                      <span className="appLabeledFieldLabel">과세</span>
+                      <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="과세 구분">
+                        {TAX_FILTER_OPTIONS.map(({ key, label, title }) => (
+                          <button
+                            key={key}
+                            type="button"
+                            className={taxFilter === key ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                            onClick={() => setTaxFilter(key)}
+                            title={title}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </label>
+                  ) : null}
                 </div>
                 <div className="appMainHeaderRight">
                   <button
