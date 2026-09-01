@@ -1,15 +1,24 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from datetime import datetime
-from threading import Lock
-from time import monotonic
 from typing import Any
 
 import pandas as pd
 
+from config import CACHE_TTL_COMPUTE, TOP_N_HOLD
 from services.stock_cache_service import get_stock_cache_meta_map
 from utils.data_loader import get_trading_days
+from utils.ma_options import ma_options_payload
+
+
+def _pool_country(ticker_type: str) -> str:
+    """풀 설정의 국가 — 이평선 선택지가 국가별이라 응답마다 실어 보낸다."""
+    from utils.settings_loader import get_ticker_type_settings
+
+    return str((get_ticker_type_settings(ticker_type) or {}).get("country_code") or "").strip().lower()
+
+
+from utils.market_cap_rank import market_cap_rank_of
 from utils.rankings import (
     MONTHLY_RETURN_LABEL_COUNT,
     build_effective_ma_rules,
@@ -18,74 +27,38 @@ from utils.rankings import (
 )
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
+from utils.ttl_cache import TtlCache
 
-_RANK_DATA_CACHE_TTL_SECONDS = 300.0
-_RankCacheKey = tuple[str, str, tuple[tuple[int, int], ...]]
-_RANK_DATA_CACHE: dict[_RankCacheKey, tuple[float, dict[str, Any]]] = {}
-_RANK_DATA_CACHE_LOCK = Lock()
-_RANK_DATA_INFLIGHT_LOCKS: dict[_RankCacheKey, Lock] = {}
+_RankCacheKey = tuple[str, tuple[tuple[int, int], ...]]
+_RANK_DATA_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="rank_data")
 
 
 def _build_rank_cache_key(
     ticker_type: str,
-    as_of_date: pd.Timestamp | None,
     ma_rules: list[dict[str, Any]],
 ) -> _RankCacheKey:
-    as_of_date_key = as_of_date.date().isoformat() if as_of_date is not None else ""
     ma_rule_key = tuple(
         (
             int(rule.get("short_ma_days") or 0),
             int(rule.get("long_ma_days") or 0),
-            int(rule.get("slope_days") or 0),
         )
         for rule in ma_rules
     )
-    return (ticker_type, as_of_date_key, ma_rule_key)
+    return (ticker_type, ma_rule_key)
 
 
 def invalidate_rank_data_cache(ticker_type: str | None = None) -> None:
     """랭킹 응답 메모리 캐시를 무효화한다."""
 
-    with _RANK_DATA_CACHE_LOCK:
-        if ticker_type is None:
-            _RANK_DATA_CACHE.clear()
-            return
+    if ticker_type is None:
+        _RANK_DATA_CACHE.invalidate()
+        return
 
-        target = str(ticker_type or "").strip().lower()
-        if not target:
-            return
+    target = str(ticker_type or "").strip().lower()
+    if not target:
+        return
 
-        for cache_key in list(_RANK_DATA_CACHE):
-            if cache_key[0] == target:
-                _RANK_DATA_CACHE.pop(cache_key, None)
-
-
-def _get_rank_data_cache(cache_key: _RankCacheKey) -> dict[str, Any] | None:
-    with _RANK_DATA_CACHE_LOCK:
-        cached = _RANK_DATA_CACHE.get(cache_key)
-        if cached is None:
-            return None
-
-        cached_at, payload = cached
-        if monotonic() - cached_at > _RANK_DATA_CACHE_TTL_SECONDS:
-            _RANK_DATA_CACHE.pop(cache_key, None)
-            return None
-
-        return deepcopy(payload)
-
-
-def _set_rank_data_cache(cache_key: _RankCacheKey, payload: dict[str, Any]) -> None:
-    with _RANK_DATA_CACHE_LOCK:
-        _RANK_DATA_CACHE[cache_key] = (monotonic(), deepcopy(payload))
-
-
-def _get_rank_data_inflight_lock(cache_key: _RankCacheKey) -> Lock:
-    with _RANK_DATA_CACHE_LOCK:
-        lock = _RANK_DATA_INFLIGHT_LOCKS.get(cache_key)
-        if lock is None:
-            lock = Lock()
-            _RANK_DATA_INFLIGHT_LOCKS[cache_key] = lock
-        return lock
+    _RANK_DATA_CACHE.invalidate(lambda cache_key: cache_key[0] == target)
 
 
 def _serialize_datetime(value: Any) -> str | None:
@@ -165,23 +138,128 @@ def _format_listed_date(value: Any) -> str | None:
     return normalized
 
 
-def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.DataFrame:
-    if dataframe.empty:
+def _apply_industry_labels(dataframe: pd.DataFrame, ticker_type: str) -> pd.DataFrame:
+    """업종을 붙인다 — 공용 맵(utils/industry_map)이 단일 소스.
+
+    한국 종목은 네이버 분류(한국어 원본), 미국은 지수 구성종목의 yfinance 분류다.
+    번역하지 않는다 — 각 시장에서 쓰는 용어 그대로 보여주는 게 정확하다.
+    분류가 없는 종목(ETF 등)은 빈 값이며, 화면은 값이 있는 풀에서만 컬럼을 노출한다.
+    """
+    if dataframe.empty or "티커" not in dataframe.columns:
         return dataframe
 
-    from utils.stock_list_io import get_all_etfs_including_deleted
-    meta_docs = get_all_etfs_including_deleted(ticker_type)
-    meta_stats_map = {}
-    for d in meta_docs:
-        t = str(d.get("ticker") or "").strip().upper()
-        if t and "backtest_stats" in d:
-            meta_stats_map[t] = d["backtest_stats"]
+    from utils.industry_map import industry_map
+
+    industry_by = {str(k).strip().upper(): v for k, v in industry_map(ticker_type).items()}
+
+    upper = dataframe["티커"].astype(str).str.strip().str.upper()
+    dataframe["업종"] = upper.map(lambda t: industry_by.get(t, ""))
+    return dataframe
+
+
+def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> tuple[dict[str, float], dict[str, float]]:
+    """티커별 거래대금 배수(20일 평균 대비) — `(본값, 시간 환산)` 두 벌.
+
+    **본값**: 장중에는 토스 실시간 누적 배수, 마감 후에는 가격 캐시 배치가 저장해 둔
+    KRX 정규시장 확정값이다(다음날 KRX 로 전환).
+
+    **시간 환산**: 장중에만 있다 — 누적 배수를 장 경과 비율로 나눈 값(지금 페이스대로면
+    하루 기준 몇 배인지). 화면이 괄호로 보여준다: "3.0배 (19.5)". 예전에는 여기에 토스의
+    KRX+NXT 합산 배수를 담아 확정값과 비교했는데, 재는 범위가 달라 혼란만 줘서 제거했다.
+
+    배치가 안 돌았거나 20일치가 없는 종목은 키가 없다 — 화면은 '-' 로 둔다.
+    """
+    if not tickers:
+        return {}, {}
+    try:
+        from utils.db_manager import get_db_connection
+
+        db = get_db_connection()
+        if db is None:
+            return {}
+        docs = list(
+            db.stock_meta.find(
+                {"ticker_type": ticker_type, "ticker": {"$in": tickers}},
+                {"_id": 0, "ticker": 1, "trade_value_mult": 1, "trade_value_sum19": 1},
+            )
+        )
+    except Exception:
+        return {}, {}
+
+    result = {
+        str(doc["ticker"]).strip().upper(): float(doc["trade_value_mult"])
+        for doc in docs
+        if doc.get("trade_value_mult") is not None
+    }
+    sum19 = {
+        str(doc["ticker"]).strip().upper(): float(doc["trade_value_sum19"])
+        for doc in docs
+        if doc.get("trade_value_sum19") is not None
+    }
+    live = _live_trade_value_mult(ticker_type, sum19)
+    from utils.new_high_service import kor_session_live_fraction
+
+    fraction = kor_session_live_fraction()
+    if fraction is not None:
+        # 장중 — 실시간 누적이 본값, 괄호에는 시간 환산 배수.
+        pace = {}
+        for ticker, value in live.items():
+            result[ticker] = round(value, 2)
+            pace[ticker] = round(value / fraction, 1)
+        return result, pace
+    # 장중이 아니면 확정값이 본값 — 배치 값이 없는 종목(오늘 상장 등)만 실시간으로 채운다.
+    for ticker, value in live.items():
+        result.setdefault(ticker, round(value, 2))
+    return result, {}
+
+
+def _live_trade_value_mult(ticker_type: str, sum19: dict[str, float]) -> dict[str, float]:
+    """오늘 누적 거래대금으로 다시 계산한 배수. 국내 상장 종목만 해당한다.
+
+    분모는 배치가 넘겨준 직전 19거래일 합에 오늘을 더한 20일 평균이다 — 확정된 날의
+    계산식과 같다. 조회에 실패하거나 오늘 값이 없는 종목은 비워 두고 배치 값을 쓴다.
+    """
+    from utils.settings_loader import get_ticker_type_settings
+
+    settings = get_ticker_type_settings(ticker_type) or {}
+    if str(settings.get("country_code") or "").strip().lower() != "kor" or not sum19:
+        return {}
+    try:
+        from utils.data_loader import fetch_toss_kr_stock_snapshot
+
+        snapshot = fetch_toss_kr_stock_snapshot(list(sum19))
+    except Exception:
+        return {}
+
+    out: dict[str, float] = {}
+    for ticker, base_sum in sum19.items():
+        today = (snapshot.get(ticker) or {}).get("tradeValue")
+        if today is None or float(today) <= 0:
+            continue
+        base = (base_sum + float(today)) / 20
+        if base > 0:
+            out[ticker] = float(today) / base
+    return out
+
+
+def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.DataFrame:
+    """정보 컬럼(배당률·보수·순자산·상장일)을 메타 캐시에서 붙인다.
+
+    backtest_stats(MDD·소르티노·is_partial)는 순위 계산(rankings)이 장기 이평선 파생
+    기간으로 실시간 계산해 행에 이미 담겨 있으므로 여기서 건드리지 않는다.
+    """
+    if dataframe.empty:
+        return dataframe
 
     tickers = [
         str(record.get("티커") or "").strip().upper()
         for record in dataframe.to_dict(orient="records")
         if str(record.get("티커") or "").strip()
     ]
+    # 거래대금 배수는 가격 캐시 배치가 stock_meta 에 미리 넣어둔 값을 읽는다.
+    # 여기서 직접 계산하려면 거래량이 든 큰 blob 을 받아야 해서 순위 계산이 3초 더 걸린다.
+    mult_map, live_mult_map = _load_trade_value_mult(ticker_type, tickers)
+
     cache_map = get_stock_cache_meta_map(ticker_type, tickers)
     if not cache_map:
         enriched = dataframe.copy()
@@ -189,7 +267,14 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         enriched["보수"] = None
         enriched["순자산총액"] = None
         enriched["상장일"] = None
-        enriched["backtest_stats"] = enriched["티커"].map(lambda t: meta_stats_map.get(str(t).strip().upper()))
+        enriched["시총순위"] = None
+        if "티커" in enriched.columns:
+            keys = enriched["티커"].map(lambda t: str(t or "").strip().upper())
+            enriched["거래대금"] = keys.map(mult_map.get)
+            enriched["거래대금(실시간)"] = keys.map(live_mult_map.get)
+        else:
+            enriched["거래대금"] = None
+            enriched["거래대금(실시간)"] = None
         enriched.attrs.update(dict(dataframe.attrs))
         return enriched
 
@@ -202,8 +287,11 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         row["배당률"] = meta_cache.get("dividend_yield_ttm")
         row["보수"] = meta_cache.get("expense_ratio")
         row["순자산총액"] = meta_cache.get("total_net_assets")
+        row["시총순위"] = market_cap_rank_of(meta_cache)  # 배치 B 가 적어 둔 시장 전체 시총 순위(개별주 풀만 값 있음)
         row["상장일"] = _format_listed_date(meta_cache.get("listed_date") or row.get("상장일"))
-        row["backtest_stats"] = meta_stats_map.get(ticker)
+        row["거래대금"] = mult_map.get(ticker)
+        # 대체거래소(NXT) 합산 실시간 배수 — 화면이 확정값 옆에 괄호로 보여준다.
+        row["거래대금(실시간)"] = live_mult_map.get(ticker)
 
         rows.append(row)
 
@@ -225,7 +313,10 @@ def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "name": str(cfg["name"]),
             "icon": str(cfg.get("icon") or ""),
             "country_code": str(cfg.get("country_code") or ""),
-            "top_n_hold": int(cfg["settings"].get("TOP_N_HOLD", 0)),
+            # 풀 성격(stock/etf) — 미설정이면 빈 값(화면이 행 값으로 추정).
+            "pool_kind": str(cfg.get("pool_kind") or ""),
+            # 시스템 공통 보유 종목 수(config) — 풀별 설정은 폐기했다.
+            "top_n_hold": TOP_N_HOLD,
             "currency": str(cfg["settings"].get("currency") or ""),
         }
         for cfg in configs
@@ -297,6 +388,7 @@ def _build_missing_ticker_rows(
             {
                 "티커": ticker,
                 "종목명": _name_of(source, ticker),
+                "메모": "",
                 "source_ticker_type": source,
                 "순번": "-",
                 "순위": None,
@@ -306,6 +398,7 @@ def _build_missing_ticker_rows(
                 "bucket": None,
                 "상장일": "-",
                 "추세": None,
+                "점수": None,
                 "보유": "",
                 "보유대상": False,
                 "현재가": None,
@@ -395,29 +488,34 @@ def _normalize_trend_value(value: Any) -> float | None:
 
 
 def _build_score_ranked_rows(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
+    """순위 번호(「순위」 컬럼)를 매긴다 — 기준은 순위 점수(`core.strategy.scoring.rank_score`).
+
+    표시용 「장기」(이격)·「단기」(단기이격)는 원천 값 그대로 두고, 줄 세우기만 점수로 한다.
+    벤치마크 대비 표시(`is_below_benchmark`)도 같은 점수로 비교해야 순위와 어긋나지 않는다.
+    """
     rows_with_index: list[dict[str, Any]] = []
     for index, row in enumerate(dataframe.to_dict(orient="records")):
-        trend = _normalize_trend_value(row.get("추세"))
         rows_with_index.append(
             {
                 **row,
-                "추세": trend,
+                "추세": _normalize_trend_value(row.get("추세")),
+                "점수": _normalize_trend_value(row.get("점수")),
                 "__base_index": index,
             }
         )
 
     rows_with_index.sort(
         key=lambda row: (
-            1 if row.get("추세") is None else 0,
-            -(float(row["추세"]) if row.get("추세") is not None else 0.0),
+            1 if row.get("점수") is None else 0,
+            -(float(row["점수"]) if row.get("점수") is not None else 0.0),
             int(row["__base_index"]),
         )
     )
 
     bm_score = None
     for row in rows_with_index:
-        if row.get("is_benchmark") and row.get("추세") is not None:
-            bm_score = float(row["추세"])
+        if row.get("is_benchmark") and row.get("점수") is not None:
+            bm_score = float(row["점수"])
             break
 
     ranked_rows: list[dict[str, Any]] = []
@@ -425,10 +523,7 @@ def _build_score_ranked_rows(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
     for row in rows_with_index:
         normalized = dict(row)
         normalized.pop("__base_index", None)
-        is_excl = bool(normalized.get("exclude_from_ranking"))
-        is_bm = bool(normalized.get("is_benchmark"))
-        score = normalized.get("추세")
-        is_non_pos = score is not None and float(score) <= 0.0
+        score = normalized.get("점수")
 
         is_below_bm = False
         if bm_score is not None and score is not None:
@@ -479,7 +574,9 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
     else:
         selected_ticker_type = str(default_config["ticker_type"]).strip().lower()
 
-    selected_config = next((cfg for cfg in configs_payload if str(cfg["ticker_type"]).lower() == selected_ticker_type), None)
+    selected_config = next(
+        (cfg for cfg in configs_payload if str(cfg["ticker_type"]).lower() == selected_ticker_type), None
+    )
     if selected_config is None:
         raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
 
@@ -489,6 +586,11 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
         "ticker_types": configs_payload,
         "ticker_type": selected_ticker_type,
         "ma_rules": ma_rules,
+        # 이평선 일수 선택지 — 백엔드 상수가 단일 소스(풀 국가별).
+        **ma_options_payload(_pool_country(selected_ticker_type)),
+        # 종목 수·업종 상한 선택지도 같은 단일 소스(`config`)다. 화면에 복사본을 두면
+        # config 를 고쳐도 이 화면만 옛 목록이 남는다(실제로 업종 상한 4 가 빠져 있었다).
+        # 업종 상한의 None(제한 없음)은 쿼리로 넘길 수 있게 -1 로 바꿔 보낸다.
     }
 
 
@@ -498,14 +600,10 @@ def _compute_rank_data_payload(
     selected_ticker_type: str,
     country_code: str,
     ma_rules: list[dict[str, Any]],
-    selected_as_of_date: pd.Timestamp | None,
 ) -> dict[str, Any]:
-    dataframe = build_ticker_type_rankings(
-        selected_ticker_type,
-        ma_rules=ma_rules,
-        as_of_date=selected_as_of_date,
-    )
-    effective_as_of_date = selected_as_of_date
+    # 기준일은 항상 오늘이다 — 아래에서 데이터가 실제로 어느 날짜인지(effective) 다시 읽는다.
+    dataframe = build_ticker_type_rankings(selected_ticker_type, ma_rules=ma_rules)
+    effective_as_of_date: pd.Timestamp | None = None
     raw_as_of_date = dataframe.attrs.get("as_of_date")
     if raw_as_of_date is not None:
         try:
@@ -522,10 +620,12 @@ def _compute_rank_data_payload(
     previous_trading_day = _get_previous_trading_day(country_code, raw_latest_trading_day)
     weekly_rank_trading_day = _get_nth_previous_trading_day(country_code, raw_latest_trading_day, 5)
     if previous_trading_day is not None:
+        # 번호만 쓴다 — 표시용 지표는 계산하지 않는다(scores_only).
         previous_dataframe = build_ticker_type_rankings(
             selected_ticker_type,
             ma_rules=ma_rules,
             as_of_date=previous_trading_day,
+            scores_only=True,
         )
         previous_rows = _build_score_ranked_rows(previous_dataframe)
         previous_rank_map = _build_rank_map_from_rows(previous_rows)
@@ -534,6 +634,7 @@ def _compute_rank_data_payload(
             selected_ticker_type,
             ma_rules=ma_rules,
             as_of_date=weekly_rank_trading_day,
+            scores_only=True,
         )
         weekly_rows = _build_score_ranked_rows(weekly_dataframe)
         weekly_rank_map = _build_rank_map_from_rows(weekly_rows)
@@ -551,11 +652,13 @@ def _compute_rank_data_payload(
         dataframe.attrs.update(dataframe_attrs)
 
     dataframe = _apply_rank_info_cache(dataframe, selected_ticker_type)
+    dataframe = _apply_industry_labels(dataframe, selected_ticker_type)
 
     return {
         "ticker_types": configs_payload,
         "ticker_type": selected_ticker_type,
         "ma_rules": ma_rules,
+        **ma_options_payload(_pool_country(selected_ticker_type)),
         "as_of_date": _serialize_datetime(effective_as_of_date),
         "monthly_return_labels": get_recent_monthly_return_labels(
             MONTHLY_RETURN_LABEL_COUNT,
@@ -582,7 +685,6 @@ def load_rank_data(
     *,
     ticker_type: str | None = None,
     ma_rule_override: dict[str, Any] | None = None,
-    as_of_date: str | None = None,
 ) -> dict[str, Any]:
     configs_payload, default_config = _build_configs_payload()
 
@@ -594,42 +696,22 @@ def load_rank_data(
         selected_ticker_type = target
     else:
         selected_ticker_type = str(default_config["ticker_type"]).strip().lower()
-    selected_config = next((cfg for cfg in configs_payload if str(cfg["ticker_type"]).lower() == selected_ticker_type), None)
+    selected_config = next(
+        (cfg for cfg in configs_payload if str(cfg["ticker_type"]).lower() == selected_ticker_type), None
+    )
     country_code = str(selected_config.get("country_code") or "") if selected_config else ""
 
     ma_rules = build_effective_ma_rules(selected_ticker_type, ma_rule_override)
-    selected_as_of_date: pd.Timestamp | None = None
-    if as_of_date:
-        try:
-            selected_as_of_date = pd.to_datetime(as_of_date).normalize()
-        except Exception as exc:
-            raise ValueError(f"기준일 형식이 올바르지 않습니다: {as_of_date}") from exc
-        today_korea = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
-        if selected_as_of_date > today_korea:
-            raise ValueError("기준일은 오늘 이후로 선택할 수 없습니다.")
-
     if selected_config is None:
         raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
 
-    cache_key = _build_rank_cache_key(
-        selected_ticker_type, selected_as_of_date, ma_rules
-    )
-    cached_payload = _get_rank_data_cache(cache_key)
-    if cached_payload is not None:
-        return cached_payload
-
-    inflight_lock = _get_rank_data_inflight_lock(cache_key)
-    with inflight_lock:
-        cached_payload = _get_rank_data_cache(cache_key)
-        if cached_payload is not None:
-            return cached_payload
-
-        payload = _compute_rank_data_payload(
+    cache_key = _build_rank_cache_key(selected_ticker_type, ma_rules)
+    return _RANK_DATA_CACHE.get_or_compute(
+        cache_key,
+        lambda: _compute_rank_data_payload(
             configs_payload=configs_payload,
             selected_ticker_type=selected_ticker_type,
             country_code=country_code,
             ma_rules=ma_rules,
-            selected_as_of_date=selected_as_of_date,
-        )
-        _set_rank_data_cache(cache_key, payload)
-        return payload
+        ),
+    )

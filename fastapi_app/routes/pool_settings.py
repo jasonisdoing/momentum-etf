@@ -8,11 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
+from utils.ma_options import ma_options_by_country
+from utils.market_breadth_service import MARKET_BY_INDEX_TICKER
+from utils.market_trend_service import INDICES
 from utils.pool_settings_store import (
-    MA_DAY_OPTIONS,
     POOL_EDITABLE_KEYS,
     SLIPPAGE_PCT_OPTIONS,
-    SLOPE_DAY_OPTIONS,
+    STOPLOSS_PCT_OPTIONS,
     PoolSettingsError,
     create_pool,
     delete_pool,
@@ -21,7 +23,6 @@ from utils.pool_settings_store import (
     save_pool_settings,
     update_pool,
 )
-from utils.market_trend_service import INDICES
 
 router = APIRouter(prefix="/internal/pool-settings", tags=["pool-settings"])
 
@@ -29,10 +30,14 @@ router = APIRouter(prefix="/internal/pool-settings", tags=["pool-settings"])
 class PoolSettingsUpdatePayload(BaseModel):
     pool_id: str
     values: dict[str, Any]
-    save_method: str = "수동"
+    # 저장 경로 — 화면의 「마지막 저장」 배지에 그대로 뜬다.
+    # 사용자(사람이 화면에서 저장) / 모멘텀 전략(전략 화면·튜닝 적용)
+    save_method: str = "사용자"
 
 
 class PoolDefinitionPayload(BaseModel):
+    """풀 생성·수정 — 둘 다 사람이 화면에서 한 일이라 저장 경로는 「사용자」다."""
+
     values: dict[str, Any]
     save_method: str = "사용자"
 
@@ -42,14 +47,18 @@ def _editable(settings: dict[str, Any]) -> dict[str, Any]:
     return {key: {"value": settings.get(key)} for key in POOL_EDITABLE_KEYS}
 
 
-def _pool_payload(settings: dict[str, Any]) -> dict[str, Any]:
+def _pool_payload(settings: dict[str, Any], stock_counts: dict[str, int]) -> dict[str, Any]:
     return {
+        # 그 풀에 담긴 종목 수 — 설정이 아니라 현황이라 편집할 수 없다.
+        "stock_count": stock_counts.get(str(settings["ticker_type"]).strip().lower(), 0),
         "ticker_type": settings["ticker_type"],
         "name": settings["name"],
         "icon": settings["icon"],
         "order": settings["order"],
         "country_code": settings["country_code"],
         "currency": settings["currency"],
+        # 풀 성격(stock/etf) — 미설정이면 None (화면이 '미설정' 으로 보여준다).
+        "pool_kind": settings.get("pool_kind"),
         "type_source": settings.get("type_source"),
         "settings": _editable(settings),
         "updated_at": settings.get("updated_at"),
@@ -60,19 +69,27 @@ def _pool_payload(settings: dict[str, Any]) -> dict[str, Any]:
 @router.get("")
 def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, object]:
     """풀별 편집 가능 설정과 입력 제약을 반환한다."""
+    from utils.stock_list_io import count_stocks_by_pool
+
     try:
-        pools = [_pool_payload(settings) for settings in load_pool_definitions()]
+        stock_counts = count_stocks_by_pool()
+        pools = [_pool_payload(settings, stock_counts) for settings in load_pool_definitions()]
     except PoolSettingsError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return {
         "pools": pools,
         "constraints": {
-            "ma_day_options": list(MA_DAY_OPTIONS),
-            "slope_day_options": list(SLOPE_DAY_OPTIONS),
+            "ma_options_by_country": ma_options_by_country(),
             "slippage_pct_options": list(SLIPPAGE_PCT_OPTIONS),
+            "stoploss_pct_options": list(STOPLOSS_PCT_OPTIONS),
             "editable_keys": list(POOL_EDITABLE_KEYS),
-            "market_indices": [{"ticker": item["yf_ticker"], "name": item["name"]} for item in INDICES],
+            # 시장 레짐 후보 — ADR(시장 폭)이 있는 4개 시장만(코스피·코스닥·S&P500·나스닥100).
+            "market_indices": [
+                {"ticker": item["yf_ticker"], "name": item["name"]}
+                for item in INDICES
+                if item["yf_ticker"] in MARKET_BY_INDEX_TICKER
+            ],
         },
     }
 

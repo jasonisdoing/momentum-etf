@@ -36,6 +36,17 @@ KST = ZoneInfo("Asia/Seoul")
 # 변경하려면 환경변수 BATCH_TIMEOUT_SECONDS 로 override.
 BATCH_TIMEOUT_SECONDS = int(os.environ.get("BATCH_TIMEOUT_SECONDS") or 1200)
 
+# 작업별 타임아웃 override — **정상 소요가 전역 기본(20분)에 근접·초과하는 배치**만 등록한다.
+# 전역을 늘리면 1~2분짜리 배치의 hang 감지가 함께 무뎌지므로 작업 단위로만 푼다.
+JOB_TIMEOUT_OVERRIDES: dict[str, int] = {
+    # 전체 히스토리 재수집(--full)은 정상 소요가 ~20분이라 기본 한도에 걸린다. 60분 허용.
+    "cache_refresh_full": 3600,
+}
+
+
+def _timeout_for(job_name: str) -> int:
+    return JOB_TIMEOUT_OVERRIDES.get(job_name, BATCH_TIMEOUT_SECONDS)
+
 
 def _format_duration(seconds: float) -> str:
     """초 → 사람이 읽기 쉬운 표시. 예: 1200 → '20분', 75 → '1분 15초', 45 → '45초'."""
@@ -149,9 +160,10 @@ def _get_job_display(job_name: str) -> tuple[int | None, str]:
     try:
         from utils.system_service import SCHEDULE_ROWS  # 지연 임포트
 
-        for idx, row in enumerate(SCHEDULE_ROWS, start=1):
+        for row in SCHEDULE_ROWS:
             if row.get("key") == job_name:
-                return idx, str(row.get("job") or job_name)
+                # 번호는 정의에 박힌 `no` 다 — 목록 순서로 세면 화면 번호와 어긋난다.
+                return row.get("no"), str(row.get("job") or job_name)
     except Exception:
         pass
     return None, job_name
@@ -176,6 +188,18 @@ def _format_tail(stdout: str, stderr: str) -> str:
     return tail
 
 
+# 잠자기 판정 여유 — 벽시계 경과가 측정 경과보다 이만큼 더 길면 그 사이 시스템이 잤다고 본다.
+# `time.monotonic()` 은 macOS 잠자기 동안 멈추므로 두 값이 벌어진다.
+# 노트북에서 밤새 배치를 돌릴 때 잠자기로 끊긴 실패까지 알리면 소음만 된다.
+_SLEEP_GAP_SECONDS = 120
+
+
+def _slept_during_run(started_wall: datetime, elapsed: float) -> bool:
+    """실행 도중 시스템이 잠들었는지. 벽시계와 측정 경과의 차이로 본다."""
+    wall = (datetime.now(KST) - started_wall).total_seconds()
+    return wall - elapsed >= _SLEEP_GAP_SECONDS
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 3:
         print(
@@ -187,7 +211,8 @@ def main(argv: list[str]) -> int:
     job_name = argv[1]
     command = argv[2:]
 
-    started_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
+    started_wall = datetime.now(KST)
+    started_at = started_wall.strftime("%Y-%m-%d %H:%M:%S KST")
     started_monotonic = time.monotonic()
 
     # 배포 진행 중에도 cron 시도. fastapi_app 재시작 시점엔 실패하지만 다음 슬롯에 자동 재시도.
@@ -196,7 +221,7 @@ def main(argv: list[str]) -> int:
     # MongoDB 분산 락: 로컬/서버 어디서든 동일 작업 중복 실행 차단
     db_lock = None
     try:
-        db_lock = _acquire_db_lock(job_name)
+        db_lock = _acquire_db_lock(job_name, ttl_seconds=_timeout_for(job_name))
     except RuntimeError as exc:
         skip_line = f"[run_batch] SKIP job={job_name} reason={exc} at={started_at}"
         print(skip_line, file=sys.stderr)
@@ -220,14 +245,14 @@ def main(argv: list[str]) -> int:
             check=False,
             # 외부 API hang 등 무한 대기 방지. timeout 초과 시 자식 프로세스에
             # 자동으로 SIGKILL 이 전달되고 TimeoutExpired 가 raise 된다.
-            timeout=BATCH_TIMEOUT_SECONDS,
+            timeout=_timeout_for(job_name),
         )
     except subprocess.TimeoutExpired as exc:
         elapsed = time.monotonic() - started_monotonic
         job_display = _format_job_display(job_name)
         timeout_line = (
             f"[run_batch] TIMEOUT job={job_name} elapsed={elapsed:.1f}s "
-            f"limit={BATCH_TIMEOUT_SECONDS}s — 자식 프로세스 SIGKILL 처리됨"
+            f"limit={_timeout_for(job_name)}s — 자식 프로세스 SIGKILL 처리됨"
         )
         _append_log_line(job_name, timeout_line)
         # 자식 stdout 일부 (디버깅용)
@@ -242,7 +267,7 @@ def main(argv: list[str]) -> int:
             f"<!channel>\n"
             f"⏰ *[{app_label}] 배치 타임아웃*: {job_display}\n"
             f"• 시작: {started_at}\n"
-            f"• 소요: {_format_duration(elapsed)} (제한 {_format_duration(BATCH_TIMEOUT_SECONDS)})\n"
+            f"• 소요: {_format_duration(elapsed)} (제한 {_format_duration(_timeout_for(job_name))})\n"
             f"• 자식 프로세스는 SIGKILL 로 강제 종료됨"
         )
         print(timeout_line, file=sys.stderr)
@@ -301,7 +326,12 @@ def main(argv: list[str]) -> int:
     app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
 
     already_notified_failure = exit_code == EXIT_ALREADY_NOTIFIED
-    should_notify = (not success) and (not already_notified_failure)
+    # 잠자기로 끊긴 실패는 알리지 않는다 — 사용자가 맥을 재운 결과라 조치할 것이 없고,
+    # 다음 예약 시각에 정상적으로 다시 돈다. 로그에는 사유를 남긴다.
+    slept = (not success) and _slept_during_run(started_wall, elapsed)
+    if slept:
+        _append_log_line(job_name, "[run_batch] SKIP-NOTIFY 시스템 잠자기로 중단된 실패 — 알림 생략")
+    should_notify = (not success) and (not already_notified_failure) and (not slept)
     if should_notify:
         job_display = _format_job_display(job_name)
         _notify(

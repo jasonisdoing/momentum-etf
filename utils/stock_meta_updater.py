@@ -1,6 +1,5 @@
 """계좌 종목 메타데이터를 업데이트합니다."""
 
-import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -9,18 +8,11 @@ import pandas as pd
 import requests  # noqa: F401  # 타입 힌트/하위 호환을 위해 유지
 import yfinance as yf
 
-import numpy as np
+from config import CACHE_TTL_META
 from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
 from services.etf_meta_service import fetch_korean_etf_info_from_naver
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
 from services.vanguard_au_service import fetch_vanguard_au_expense_ratio_pct, fetch_vanguard_au_holdings
-from utils.data_loader import (
-    _YF_SESSION,
-    fetch_naver_kor_market,
-    fetch_naver_kor_stock_map,
-    fetch_pykrx_name,
-    fetch_ohlcv,
-)
 from utils.asx_ticker import (
     ensure_asx_prefix,
     from_yahoo_symbol,
@@ -28,52 +20,20 @@ from utils.asx_ticker import (
     strip_asx_prefix,
     to_yahoo_symbol,
 )
+from utils.data_loader import (
+    _YF_SESSION,
+    fetch_naver_kor_market,
+    fetch_naver_kor_stock_map,
+    fetch_ohlcv,
+    fetch_pykrx_name,
+)
 from utils.http_session import shared_session
 from utils.kis_market import refresh_kis_domestic_etf_master_cache
 from utils.logger import get_app_logger
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
-from utils.indicators import calculate_moving_average_signals
-from utils.perf_metrics import curve_metrics
 
-
-def _simulate_single_stock_ma_strategy(close_prices: pd.Series, lookback_months: int) -> dict[str, Any]:
-    """단일 종목에 대해 지정 개월수(lookback_months) 동안의 단순 보유(Buy & Hold) 성과 지표(수익률, MDD, Sortino)를 구합니다.
-    상장일이 시작일보다 뒤에 있는 경우, 가용한 전체 기간으로 계산하고 is_partial=True 플래그를 반환합니다.
-    """
-    if close_prices.empty:
-        return {"cagr": 0.0, "mdd": 0.0, "sortino": 0.0, "is_partial": False}
-
-    try:
-        last_date = close_prices.index[-1]
-        start_date = last_date - pd.DateOffset(months=lookback_months)
-        
-        # 상장일이 시작일보다 나중인지 여부 판정
-        first_price_date = close_prices.index[0]
-        is_partial = first_price_date > start_date
-
-        target_series = close_prices.loc[start_date:]
-        if len(target_series) < 2:
-            return {"cagr": 0.0, "mdd": 0.0, "sortino": 0.0, "is_partial": is_partial}
-
-        start_val = float(target_series.iloc[0])
-        values = target_series.iloc[1:].to_numpy()
-
-        metrics = curve_metrics(start_val, values)
-        return {
-            "cagr": round(float(metrics.get("total_return_pct", 0.0)), 2),  # CAGR 대신 단순 누적 수익률(%) 저장
-            "mdd": round(float(metrics.get("mdd_pct", 0.0)), 2),
-            "sortino": round(float(metrics.get("sortino", 0.0)), 2),
-            "is_partial": is_partial,
-        }
-    except Exception:
-        return {"cagr": 0.0, "mdd": 0.0, "sortino": 0.0, "is_partial": False}
-
-
-# 랭킹 표시용 백테스트 기준 기간(개월). MDD·소르티노 모두 이 기간으로 계산한다.
-# 상장 기간이 이보다 짧으면 is_partial=True 로 표시(프론트에서 다른 색으로 강조).
-RANK_BACKTEST_MONTHS = 12
-
-# 가격 파생 지표(거래량·기간수익률·backtest_stats) 필드 목록 — 가격지표 배치가 담당하는 필드.
+# 가격 파생 지표(거래량·기간수익률) 필드 목록 — 가격지표 배치가 담당하는 필드.
+# MDD·소르티노(backtest_stats)는 순위 조회 시 장기 이평선 파생 기간으로 실시간 계산한다(utils/rankings.py).
 PRICE_METRIC_FIELDS = (
     "1_week_avg_volume",
     "volume",
@@ -83,12 +43,11 @@ PRICE_METRIC_FIELDS = (
     "3_month_earn_rate",
     "6_month_earn_rate",
     "12_month_earn_rate",
-    "backtest_stats",
 )
 
 
 def compute_price_metrics(frame: "pd.DataFrame | None") -> dict[str, Any]:
-    """OHLCV 프레임에서 거래량·기간수익률(1주~12개월)·backtest_stats 를 계산한다.
+    """OHLCV 프레임에서 거래량·기간수익률(1주~12개월)을 계산한다.
 
     가격지표 배치와 단일 종목 추가가 **같은 로직**을 쓰도록 공용화한 함수다.
     프레임이 없거나 Close 가 없으면 빈 dict 를 반환한다(호출부가 부분 갱신).
@@ -123,16 +82,20 @@ def compute_price_metrics(frame: "pd.DataFrame | None") -> dict[str, Any]:
     result["3_month_earn_rate"] = calc_rate_safe(frame, 63)
     result["6_month_earn_rate"] = calc_rate_safe(frame, 126)
     result["12_month_earn_rate"] = calc_rate_safe(frame, 252)
-
-    bt_close = frame["Close"].dropna()
-    if not bt_close.empty:
-        result["backtest_stats"] = _simulate_single_stock_ma_strategy(bt_close, RANK_BACKTEST_MONTHS)
     return result
 
+
 # -------------------------------------------------------------------------
+# 배치 B 종목 병렬 워커 수 — 종목당 작업이 네이버/야후 HTTP 대기 위주라 병렬 이득이 크다.
+# 사전 벤치마크: 네이버 x16·yfinance x12 까지 실패 0. 보수적으로 8을 쓴다.
+# 문제가 생기면 1 로 되돌리면 기존 직렬 동작이다. (pykrx 폴백은 데이터로더에서 락 직렬화)
+META_FETCH_WORKERS = 8
+
 # 배치 단위 공유 캐시 (메타 업데이트 1회 진입 시 1회만 빌드, 풀들 간 공유)
 # `update_stock_reference_metadata` 진입 시 `_reset_batch_caches()` 로 초기화한다.
 # -------------------------------------------------------------------------
+
+
 _BATCH_NAVER_ETF_NAMES_MAP: dict[str, str] | None = None
 
 
@@ -244,7 +207,7 @@ from utils.stock_list_io import bulk_update_stocks, get_all_etfs_including_delet
 
 # ETF 메타(info) 캐시 TTL — 이 시간 안에 갱신된 메타가 있으면 네이버 info 호출을 스킵.
 # 사용자 정책: info 는 변경 빈도가 낮으므로 1일 TTL, holdings 는 항상 갱신.
-_ETF_INFO_CACHE_TTL = timedelta(days=1)
+_ETF_INFO_CACHE_TTL = timedelta(seconds=CACHE_TTL_META)
 
 
 def _is_meta_cache_fresh(existing_doc: dict[str, Any] | None) -> bool:
@@ -270,7 +233,6 @@ def _refresh_korean_etf_meta_cache(
     name: str,
     *,
     existing_cache_doc: dict[str, Any] | None = None,
-    backtest_stats: dict[str, Any] | None = None,
 ) -> None:
     """한국 ETF 메타/구성종목 캐시를 네이버 기준으로 갱신한다.
 
@@ -291,6 +253,7 @@ def _refresh_korean_etf_meta_cache(
 
         # 실시간 iNAV/괴리율 추가 획득 (글로벌 캐시라 비용 거의 없음)
         from utils.data_loader import fetch_naver_etf_inav_snapshot
+
         inav_snapshot = fetch_naver_etf_inav_snapshot([ticker_norm]).get(ticker_norm, {})
 
         meta_cache = {
@@ -309,9 +272,6 @@ def _refresh_korean_etf_meta_cache(
             "issue_name": etf_info.get("issue_name"),
             "base_index": etf_info.get("base_index"),
         }
-
-    if meta_cache is not None:
-        meta_cache["backtest_stats"] = backtest_stats
 
     # 2) holdings 는 항상 갱신 (TTL 미적용)
     holdings_info = fetch_korean_etf_holdings_from_naver(ticker_norm)
@@ -387,7 +347,6 @@ def _refresh_us_stock_meta_cache(
     ticker: str,
     name: str,
     naver_entry: dict[str, Any],
-    backtest_stats: dict[str, Any] | None = None,
     *,
     is_etf: bool = False,
 ) -> None:
@@ -413,7 +372,6 @@ def _refresh_us_stock_meta_cache(
         "issue_name": name_norm,
         "market": naver_entry.get("market"),
         "industry": naver_entry.get("industry"),
-        "backtest_stats": backtest_stats,
     }
 
     # yfinance .info 보완 — ETF 는 네이버 배당값이 부정확해(개별주 기준) yfinance 를 우선한다.
@@ -440,7 +398,9 @@ def _refresh_us_stock_meta_cache(
             if meta_cache["listed_date"] is None:
                 epoch = info.get("firstTradeDateEpochUtc") or info.get("fundInceptionDate")
                 if isinstance(epoch, (int, float)) and not isinstance(epoch, bool) and epoch > 0:
-                    meta_cache["listed_date"] = datetime.fromtimestamp(float(epoch), tz=timezone.utc).strftime("%Y-%m-%d")
+                    meta_cache["listed_date"] = datetime.fromtimestamp(float(epoch), tz=timezone.utc).strftime(
+                        "%Y-%m-%d"
+                    )
             if not meta_cache.get("market"):
                 meta_cache["market"] = str(info.get("exchange") or "").strip().upper() or None
             if not meta_cache.get("industry"):
@@ -478,8 +438,8 @@ def _refresh_us_stock_meta_cache(
 
 def fetch_betashares_holdings(ticker: str) -> dict[str, Any] | None:
     """BetaShares 공식 홈페이지에서 portfolio holdings CSV를 긁어서 구성종목 딕셔너리를 반환합니다."""
-    import urllib.request
     import csv
+    import urllib.request
     from datetime import datetime
 
     logger = get_app_logger()
@@ -489,11 +449,10 @@ def fetch_betashares_holdings(ticker: str) -> dict[str, Any] | None:
 
     try:
         req = urllib.request.Request(
-            url,
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         )
         with urllib.request.urlopen(req, timeout=12) as response:
-            content = response.read().decode('utf-8', errors='ignore')
+            content = response.read().decode("utf-8", errors="ignore")
 
         lines = content.splitlines()
 
@@ -603,8 +562,9 @@ def fetch_betashares_holdings(ticker: str) -> dict[str, Any] | None:
 
 def fetch_yfinance_holdings(ticker: str, is_australian: bool = False) -> dict[str, Any] | None:
     """yfinance를 활용해 Top 10 구성종목 정보를 가져옵니다."""
-    import yfinance as yf
     from datetime import datetime
+
+    import yfinance as yf
 
     logger = get_app_logger()
     # 시스템 표준 티커는 ASX: 접두사를 달고 다니므로 외부 조회 직전에 벗긴다.
@@ -632,12 +592,14 @@ def fetch_yfinance_holdings(ticker: str, is_australian: bool = False) -> dict[st
             # 거래소 접미사가 붙은 원본 심볼(NAB.AX)이 상장 시장을 알려준다.
             # 호주 상장이면 시스템 표준 표기(ASX:NAB)로 저장한다.
             asx_ticker = from_yahoo_symbol(t_code)
-            items.append({
-                "ticker": asx_ticker or t_clean,
-                "name": name_val,
-                "weight": weight_val,
-                "yahoo_symbol": t_code,
-            })
+            items.append(
+                {
+                    "ticker": asx_ticker or t_clean,
+                    "name": name_val,
+                    "weight": weight_val,
+                    "yahoo_symbol": t_code,
+                }
+            )
 
         if not items:
             return None
@@ -662,10 +624,10 @@ def _refresh_overseas_etf_meta_cache(
     ticker: str,
     name: str,
     country_code: str,
-    backtest_stats: dict[str, Any] | None = None,
 ) -> None:
     """호주/미국 등 해외 ETF 메타와 holdings 캐시를 수집 및 저장한다."""
     from datetime import datetime
+
     logger = get_app_logger()
     ticker_type_norm = str(ticker_type or "").strip().lower()
     ticker_norm = str(ticker or "").strip().upper()
@@ -707,12 +669,12 @@ def _refresh_overseas_etf_meta_cache(
         "expense_ratio": None,
         "total_net_assets": None,
         "issue_name": name_norm,
-        "backtest_stats": backtest_stats,
     }
 
     # yfinance를 통해 추가적인 ETF 메타 정보 보완
     try:
         import yfinance as yf
+
         symbol = to_yahoo_symbol(ticker_norm) if country_norm == "au" else ticker_norm
         t_data = yf.Ticker(symbol)
         t_info = getattr(t_data, "info", {})
@@ -774,12 +736,15 @@ def _load_ticker_entries(type_norm: str) -> tuple[str, list[dict[str, Any]]] | N
 
 def _update_reference_meta_for_type(
     type_norm: str, progress_callback: Callable[[int, int, str], None] | None = None
-):
-    """배치 B(식별·상세 메타) — 이름/상장일/마켓/업종 + ETF 상세 캐시(holdings/배당/ETFBase)."""
+) -> list[tuple[str, str]]:
+    """배치 B(식별·상세 메타) — 이름/상장일/마켓/업종 + ETF 상세 캐시(holdings/배당/ETFBase).
+
+    반환: 이 풀의 실패 목록 [(ticker, "단계: 사유")] — 상위에서 모아 슬랙으로 보고한다.
+    """
     logger = get_app_logger()
     loaded = _load_ticker_entries(type_norm)
     if loaded is None:
-        return
+        return []
     country_code, ticker_entries = loaded
     total_count = len(ticker_entries)
     logger.info(f"[{type_norm.upper()}] 식별·상세 메타 업데이트 시작 (총 {total_count}개 종목)")
@@ -788,10 +753,21 @@ def _update_reference_meta_for_type(
 
     # [KOR] 전체 종목(일반주/ETF) 맵 구성하여 루프 내 호출 최소화
     naver_etf_map: dict[str, str] = {}
+    # 국내 ETF 업종 — 네이버 「(주식)섹터」 중분류 11종을 한 번에 받아 티커 → 업종명 맵을 만든다.
+    # 개별주는 종목마다 조회하지만(fetch_industry) ETF 는 분류별 목록이라 배치 앞에서 한 번이면 된다.
+    # 섹터형이 아닌 ETF(대표지수·레버리지·인버스 등)는 맵에 없다 — 업종이 없는 게 맞다.
+    kor_etf_industry_map: dict[str, str] = {}
     if country_code == "kor":
         logger.info("네이버 API에서 한국 ETF/종목 정보를 수집합니다 (배치 캐시)...")
         naver_etf_map = dict(_get_cached_naver_etf_names_map())
         fetch_naver_kor_stock_map()  # 캐시 워밍 (일반주/ETN 이름·시장 조회 대비)
+        try:
+            from services.naver_etf_category_service import fetch_etf_industry_map
+
+            kor_etf_industry_map = fetch_etf_industry_map()
+        except Exception as exc:
+            # 업종은 표시·업종 상한용이라 없으면 그만큼 상한이 안 걸릴 뿐, 배치는 계속한다.
+            logger.warning(f"[{type_norm.upper()}] 국내 ETF 업종 맵 수집 실패 — 업종 없이 진행: {exc}")
 
     # 한국 종목풀: 기존 메타 캐시 문서를 1회 일괄 로드해 ETF 상세 TTL 판정에 사용한다.
     existing_meta_cache_map: dict[str, dict[str, Any]] = {}
@@ -803,9 +779,7 @@ def _update_reference_meta_for_type(
         ]
         try:
             existing_meta_cache_map = get_stock_cache_meta_map(type_norm, all_tickers_for_pool)
-            logger.info(
-                f"[{type_norm.upper()}] 기존 메타 캐시 문서 {len(existing_meta_cache_map)}건 로드 (TTL 판정용)"
-            )
+            logger.info(f"[{type_norm.upper()}] 기존 메타 캐시 문서 {len(existing_meta_cache_map)}건 로드 (TTL 판정용)")
         except Exception as exc:
             logger.warning(f"[{type_norm.upper()}] 기존 메타 캐시 로드 실패 — 전체 갱신으로 진행: {exc}")
             existing_meta_cache_map = {}
@@ -823,11 +797,14 @@ def _update_reference_meta_for_type(
         naver_us_stock_map = fetch_naver_us_stock_info_map(us_tickers)
         logger.info(f"[{type_norm.upper()}] 네이버 미국 종목 업종 {len(naver_us_stock_map)}건 수집")
 
-    updates_for_db: list[dict[str, Any]] = []
-    for idx, stock in enumerate(ticker_entries, start=1):
-        ticker = stock.get("ticker")
-        if not ticker:
-            continue
+    def _process_one_stock(stock: dict[str, Any]) -> tuple[str, str, dict[str, Any] | None, list[str]]:
+        """단일 종목 처리 (워커 스레드). 반환: (ticker, name, update_doc|None, 실패목록).
+
+        실패 목록 항목은 "단계: 사유" 형식 — 배치 끝에 모아 슬랙으로 보고한다.
+        공유 맵(naver_*_map, existing_meta_cache_map)은 루프 전에 빌드 완료된 읽기 전용이다.
+        """
+        ticker = str(stock.get("ticker") or "")
+        failures: list[str] = []
         try:
             update_single_stock_metadata(
                 stock,
@@ -835,53 +812,96 @@ def _update_reference_meta_for_type(
                 naver_etf_map,
                 type_norm,
                 naver_us_stock_map=naver_us_stock_map,
+                kor_etf_industry_map=kor_etf_industry_map,
             )
-            name = stock.get("name") or "-"
-            logger.info(f"  -> 식별 메타 획득: {idx}/{total_count} - {name}({ticker})")
-
-            # 저장 필드 = 식별 필드만(가격지표는 배치 A 담당)
-            update_doc: dict[str, Any] = {"ticker": ticker}
-            for f in ("name", "listing_date", "market", "is_etf", "etf_category", "dividend_yield_ttm", "market_cap"):
-                if f in stock:
-                    update_doc[f] = stock[f]
-
-            # ETF 상세 캐시 갱신(holdings/배당 등). backtest_stats 는 배치 A(문서 필드)가 소유하므로 넘기지 않는다.
-            # ETF 가 아닌 국내 개별주(예: KOSDAQ 다우데이타)는 ETF 상세 API 가 404 이므로 호출 자체를 건너뛴다.
-            if country_code == "kor" and stock.get("is_etf"):
-                try:
-                    existing_doc = existing_meta_cache_map.get(str(ticker).strip().upper())
-                    _refresh_korean_etf_meta_cache(type_norm, str(ticker), str(name), existing_cache_doc=existing_doc)
-                except Exception as e:
-                    logger.warning(f"[{type_norm.upper()}/{ticker}] ETF 상세 캐시 갱신 건너뜀: {e}")
-            elif country_code == "au":
-                try:
-                    _refresh_overseas_etf_meta_cache(type_norm, str(ticker), str(name), country_code)
-                except Exception as e:
-                    logger.warning(f"[{type_norm.upper()}/{ticker}] 호주 ETF 상세 캐시 갱신 실패: {e}")
-            elif country_code == "us":
-                # 네이버에 없어도(미국 ETF 등) yfinance 로 배당·순자산을 보완하도록 항상 호출.
-                naver_entry = naver_us_stock_map.get(str(ticker).strip().upper(), {})
-                try:
-                    _refresh_us_stock_meta_cache(
-                        type_norm, str(ticker), str(name), naver_entry, is_etf=bool(stock.get("is_etf"))
-                    )
-                except Exception as e:
-                    logger.warning(f"[{type_norm.upper()}/{ticker}] 미국 메타 캐시 갱신 건너뜀: {e}")
-
-            updates_for_db.append(update_doc)
-            if len(updates_for_db) >= 100:
-                try:
-                    modified = bulk_update_stocks(type_norm, updates_for_db)
-                    logger.info(f"[{type_norm.upper()}] 식별 메타 중간 저장 ({idx}/{total_count}, {modified}건)")
-                    updates_for_db.clear()
-                except Exception as e:
-                    logger.error(f"[{type_norm.upper()}] 중간 저장 실패: {e}")
-
-            if progress_callback:
-                progress_callback(idx, total_count, f"{name}({ticker})")
-            time.sleep(0.02)  # 외부 API 보호용 미소 슬립
         except Exception as e:
-            logger.error(f"[{type_norm.upper()}/{ticker}] 식별 메타 업데이트 실패: {e}")
+            failures.append(f"식별 메타: {str(e)[:80]}")
+            return ticker, str(stock.get("name") or "-"), None, failures
+
+        name = str(stock.get("name") or "-")
+        # 저장 필드 = 식별 필드만(가격지표는 배치 A 담당)
+        update_doc: dict[str, Any] = {"ticker": ticker}
+        for f in (
+            "name",
+            "listing_date",
+            "market",
+            "is_etf",
+            "dividend_yield_ttm",
+            "market_cap",
+            "sector",
+            "industry",
+        ):
+            if f in stock:
+                update_doc[f] = stock[f]
+
+        # ETF 상세 캐시 갱신(holdings/배당 등).
+        # ETF 가 아닌 국내 개별주(예: KOSDAQ 다우데이타)는 ETF 상세 API 가 404 이므로 호출 자체를 건너뛴다.
+        if country_code == "kor" and stock.get("is_etf"):
+            try:
+                existing_doc = existing_meta_cache_map.get(ticker.strip().upper())
+                _refresh_korean_etf_meta_cache(type_norm, ticker, name, existing_cache_doc=existing_doc)
+            except Exception as e:
+                logger.warning(f"[{type_norm.upper()}/{ticker}] ETF 상세 캐시 갱신 건너뜀: {e}")
+                failures.append(f"ETF 상세: {str(e)[:80]}")
+        elif country_code == "au":
+            try:
+                _refresh_overseas_etf_meta_cache(type_norm, ticker, name, country_code)
+            except Exception as e:
+                logger.warning(f"[{type_norm.upper()}/{ticker}] 호주 ETF 상세 캐시 갱신 실패: {e}")
+                failures.append(f"호주 상세: {str(e)[:80]}")
+        elif country_code == "us":
+            # 네이버에 없어도(미국 ETF 등) yfinance 로 배당·순자산을 보완하도록 항상 호출.
+            naver_entry = naver_us_stock_map.get(ticker.strip().upper(), {})
+            try:
+                _refresh_us_stock_meta_cache(type_norm, ticker, name, naver_entry, is_etf=bool(stock.get("is_etf")))
+            except Exception as e:
+                logger.warning(f"[{type_norm.upper()}/{ticker}] 미국 메타 캐시 갱신 건너뜀: {e}")
+                failures.append(f"미국 메타: {str(e)[:80]}")
+
+        return ticker, name, update_doc, failures
+
+    # 종목 처리 병렬 실행 — 종목당 작업이 HTTP 대기 위주라 워커 수만큼 단축된다.
+    # DB 저장·진행 로그·progress_callback 은 메인 스레드에서만 수행한다.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    valid_entries = [s for s in ticker_entries if s.get("ticker")]
+    updates_for_db: list[dict[str, Any]] = []
+    pool_failures: list[tuple[str, str]] = []  # (ticker, "단계: 사유")
+    done_count = 0
+
+    def _handle_result(ticker: str, name: str, update_doc: dict[str, Any] | None, failures: list[str]) -> None:
+        nonlocal done_count
+        done_count += 1
+        for failure in failures:
+            pool_failures.append((ticker, failure))
+        if update_doc is None:
+            logger.error(f"[{type_norm.upper()}/{ticker}] 식별 메타 업데이트 실패: {failures}")
+        else:
+            # 「(병렬)」 표기 — 워커 여러 개가 동시에 도는 구조라 로그 순서가 종목 순서와 다르고,
+            # 끝물에 남은 한두 건은 병렬 이득이 사라져 오래 멈춘 것처럼 보인다. 보는 사람이 알아야 한다.
+            logger.info(
+                f"  -> 식별 메타 획득(병렬 워커 {META_FETCH_WORKERS}개): {done_count}/{total_count} - {name}({ticker})"
+            )
+            updates_for_db.append(update_doc)
+        if len(updates_for_db) >= 100:
+            try:
+                modified = bulk_update_stocks(type_norm, updates_for_db)
+                logger.info(f"[{type_norm.upper()}] 식별 메타 중간 저장 ({done_count}/{total_count}, {modified}건)")
+                updates_for_db.clear()
+            except Exception as e:
+                logger.error(f"[{type_norm.upper()}] 중간 저장 실패: {e}")
+                pool_failures.append(("(일괄)", f"중간 저장: {str(e)[:80]}"))
+        if progress_callback:
+            progress_callback(done_count, total_count, f"{name}({ticker})")
+
+    if META_FETCH_WORKERS <= 1:
+        for stock in valid_entries:
+            _handle_result(*_process_one_stock(stock))
+    else:
+        with ThreadPoolExecutor(max_workers=META_FETCH_WORKERS) as executor:
+            futures = [executor.submit(_process_one_stock, stock) for stock in valid_entries]
+            for future in as_completed(futures):
+                _handle_result(*future.result())
 
     try:
         if updates_for_db:
@@ -889,12 +909,13 @@ def _update_reference_meta_for_type(
             logger.info(f"[{type_norm.upper()}] 식별 메타 최종 저장 완료 ({modified}건)")
     except Exception as e:
         logger.error(f"'{type_norm}' 식별 메타 최종 저장 실패: {e}")
+        pool_failures.append(("(일괄)", f"최종 저장: {str(e)[:80]}"))
+
+    return pool_failures
 
 
-def _update_price_metrics_for_type(
-    type_norm: str, progress_callback: Callable[[int, int, str], None] | None = None
-):
-    """배치 A(가격 지표) — OHLCV 1회 로드로 거래량·기간수익률·backtest_stats 만 갱신."""
+def _update_price_metrics_for_type(type_norm: str, progress_callback: Callable[[int, int, str], None] | None = None):
+    """배치 A(가격 지표) — OHLCV 1회 로드로 거래량·기간수익률만 갱신."""
     logger = get_app_logger()
     loaded = _load_ticker_entries(type_norm)
     if loaded is None:
@@ -969,13 +990,47 @@ def update_stock_reference_metadata(ticker_type: str | None = None):
             logger.error("KIS 국내 ETF 마스터 캐시 갱신 실패: %s", exc)
 
     logger.info(f"[배치 B] 식별·상세 메타 대상 종목타입: {targets}")
+    failures_by_pool: dict[str, list[tuple[str, str]]] = {}
     for type_norm in targets:
-        _update_reference_meta_for_type(type_norm)
+        pool_failures = _update_reference_meta_for_type(type_norm)
+        if pool_failures:
+            failures_by_pool[type_norm] = pool_failures
     logger.info("[배치 B] 식별·상세 메타 업데이트 완료.")
+
+    # 시총 순위 — 종목별 갱신이 meta_cache 를 통째로 덮으므로 반드시 그 뒤에 적는다.
+    try:
+        from utils.market_cap_rank import update_market_cap_ranks
+
+        update_market_cap_ranks(targets)
+    except Exception as exc:
+        logger.error("[배치 B] 시총 순위 기록 실패: %s", exc)
+
+    # 부분 실패 슬랙 보고 — 어떤 풀/종목/단계에서 실패했는지 명시한다.
+    # (배치 자체는 계속 진행되므로 run_batch 의 exit!=0 실패 알림으로는 잡히지 않는 케이스)
+    if failures_by_pool:
+        total_failures = sum(len(v) for v in failures_by_pool.values())
+        lines = [f"⚠️ [배치 B] 종목 메타 업데이트 부분 실패: {total_failures}건"]
+        shown = 0
+        for pool, pool_failures in failures_by_pool.items():
+            for ticker, reason in pool_failures:
+                if shown >= 15:
+                    break
+                lines.append(f"• [{pool.upper()}/{ticker}] {reason}")
+                shown += 1
+            if shown >= 15:
+                break
+        if total_failures > shown:
+            lines.append(f"… 외 {total_failures - shown}건 — 상세는 logs/cron/reference_meta_updater.log")
+        try:
+            from utils.notification import send_slack_message_v2
+
+            send_slack_message_v2("\n".join(lines))
+        except Exception as exc:
+            logger.error(f"[배치 B] 부분 실패 슬랙 보고 실패: {exc}")
 
 
 def update_stock_price_metrics(ticker_type: str | None = None):
-    """배치 A — 가격 지표(거래량·기간수익률·backtest_stats)만 갱신. OHLCV 캐시만 사용."""
+    """배치 A — 가격 지표(거래량·기간수익률)만 갱신. OHLCV 캐시만 사용."""
     logger = get_app_logger()
     targets = _resolve_ticker_types_to_update(ticker_type)
     if targets is None:
@@ -1002,20 +1057,22 @@ def fetch_stock_info(ticker: str, country_code: str) -> dict[str, Any] | None:
 
     try:
         if country_norm == "kor":
-            # 1. Pykrx로 이름 조회 시도 (가장 빠름)
+            # 1. 네이버 ETF 이름 맵 — 1,164건을 한 번에 받아 캐시한다(0.18초, 이후 0.1초).
+            #    예전에는 pykrx 를 먼저 불렀는데 **종목당 5.28초** 라 여러 종목을 담을 때
+            #    이 한 줄이 시간의 대부분이었다(100종목 11분 중 9분). 둘 다 같은 이름을 준다.
             try:
-                name = fetch_pykrx_name(ticker)
-                if name:
-                    result["name"] = name
+                naver_map = fetch_naver_etf_names_map()
+                if ticker in naver_map:
+                    result["name"] = naver_map[ticker]
             except Exception:
                 pass
 
-            # 2. 이름 못 찾으면 Naver ETF 이름 맵 시도 (신규 상장 ETF 대응)
+            # 2. 맵에 없으면(개별주 등) pykrx 로 넘어간다 — 느리지만 ETF 가 아닌 종목을 덮는다.
             if not result["name"]:
                 try:
-                    naver_map = fetch_naver_etf_names_map()
-                    if ticker in naver_map:
-                        result["name"] = naver_map[ticker]
+                    name = fetch_pykrx_name(ticker)
+                    if name:
+                        result["name"] = name
                 except Exception:
                     pass
 
@@ -1035,23 +1092,27 @@ def fetch_stock_info(ticker: str, country_code: str) -> dict[str, Any] | None:
             if country_norm == "au" and not yf_ticker.endswith(".AX"):
                 yf_ticker = f"{yf_ticker}.AX"
 
-            t = yf.Ticker(yf_ticker)
-            try:
-                info = t.info
-                # 이름
-                name = info.get("longName") or info.get("shortName")
-                if name:
-                    result["name"] = name
-            except Exception:
-                pass
+            # 웹(종목 추가 검증) 경로라 락으로 직렬화한다 — 배치 워커는 이 함수를 쓰지 않는다.
+            from utils.yfinance_guard import yfinance_lock
 
-            # 상장일
-            try:
-                hist = t.history(period="max")
-                if not hist.empty:
-                    result["listing_date"] = hist.index.min().strftime("%Y-%m-%d")
-            except Exception:
-                pass
+            with yfinance_lock():
+                t = yf.Ticker(yf_ticker)
+                try:
+                    info = t.info
+                    # 이름
+                    name = info.get("longName") or info.get("shortName")
+                    if name:
+                        result["name"] = name
+                except Exception:
+                    pass
+
+                # 상장일
+                try:
+                    hist = t.history(period="max")
+                    if not hist.empty:
+                        result["listing_date"] = hist.index.min().strftime("%Y-%m-%d")
+                except Exception:
+                    pass
 
         # 이름이라도 찾았으면 성공
         if result["name"]:
@@ -1111,15 +1172,19 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
         naver_us_stock_map=naver_us_stock_map,
     )
 
-    # 한국 종목풀은 ETF 상세 캐시 갱신을 시도한다. 개별주/비ETF는 서비스 오류를 경고로 건너뛴다.
-    if country_code == "kor":
+    # 한국 종목풀은 ETF 상세 캐시 갱신을 시도한다. 개별주 풀(pool_kind=stock)은 ETF 가
+    # 아니라 404 만 나므로 시도 자체를 건너뛴다 — 미설정 풀만 시도 후 경고로 넘어간다.
+    pool_kind = str(settings.get("pool_kind") or "").strip().lower()
+    if country_code == "kor" and pool_kind != "stock":
         try:
             _refresh_korean_etf_meta_cache(type_norm, ticker_norm, str(stock.get("name") or ticker_norm))
         except Exception as meta_cache_error:
             logger.warning(f"[{type_norm.upper()}/{ticker_norm}] ETF 메타 캐시 갱신 건너뜀: {meta_cache_error}")
     elif country_code == "au":
         try:
-            _refresh_overseas_etf_meta_cache(type_norm, ticker_norm, str(stock.get("name") or ticker_norm), country_code)
+            _refresh_overseas_etf_meta_cache(
+                type_norm, ticker_norm, str(stock.get("name") or ticker_norm), country_code
+            )
         except Exception as meta_cache_error:
             logger.error(f"[{type_norm.upper()}/{ticker_norm}] 호주 ETF 상세 캐시 갱신 실패: {meta_cache_error}")
     elif country_code == "us":
@@ -1150,9 +1215,10 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
         "listing_date",
         "market",
         "is_etf",
-        "etf_category",
         "dividend_yield_ttm",
         "market_cap",
+        "sector",
+        "industry",
     ]
     for f in identity_fields:
         if f in stock:
@@ -1172,6 +1238,7 @@ def update_single_stock_metadata(
     account_norm: str = "",
     *,
     naver_us_stock_map: dict[str, Any] | None = None,
+    kor_etf_industry_map: dict[str, str] | None = None,
 ):
     """단일 종목의 메타데이터를 업데이트합니다."""
     logger = get_app_logger()
@@ -1228,17 +1295,33 @@ def update_single_stock_metadata(
             except Exception as e:
                 logger.warning(f"[{account_norm.upper()}/{ticker}] 마켓 정보 조회 실패: {e}")
 
+        # 4. 업종 — 국내 개별주는 네이버에서 받는다(한국어 원본, 번역 불필요).
+        # yfinance 는 국내 종목 셋 중 하나에 분류가 없어서 그만큼 업종 상한에서 빠졌다.
+        # 값이 이미 있으면 건너뛴다 — 최초 1회만 무겁고 이후엔 신규 종목만 조회한다.
+        # 빈 문자열은 '미설정'이라 그대로 둔다(임의 값으로 메우면 업종 상한이 엉뚱하게 묶인다).
+        if not stock.get("is_etf") and not stock.get("industry"):
+            from services.naver_industry_service import fetch_industry
+
+            industry = fetch_industry(ticker)
+            if industry:
+                stock["industry"] = industry
+                if account_norm:
+                    logger.debug(f"[{account_norm.upper()}/{ticker}] 업종 획득: {industry}")
+
+        # 5. ETF 업종 — 네이버 「(주식)섹터」 중분류(소재·IT·헬스케어 …). 배치 앞에서 만든
+        # 맵에서 꺼낸다. 개별주 업종과 달리 **매번 덮어쓴다** — 분류가 바뀌면 따라가야 하고,
+        # 맵에 없으면(섹터형이 아닌 ETF) 비운다. 임의 값으로 채우면 업종 상한이 엉뚱하게 묶인다.
+        if stock.get("is_etf"):
+            stock["industry"] = (kor_etf_industry_map or {}).get(str(ticker).strip(), "")
+
     elif country_code in ("us", "au"):
-        # 호주 풀은 ETF 전용. 미국은 종목 자체 속성(yfinance quoteType)으로 판정한다 — 아래 .info 블록에서 설정.
-        # (어느 풀에 넣었는지로 추정하면 같은 종목이 풀마다 다른 값을 갖게 되므로 쓰지 않는다.)
-        if country_code == "au":
-            stock["is_etf"] = True
+        # 미국·호주 모두 종목 자체 속성(yfinance quoteType)으로 ETF 를 판정한다 — 아래 .info 블록에서 설정.
+        # (어느 풀에 넣었는지로 추정하면 같은 종목이 풀마다 다른 값을 갖게 되므로 쓰지 않는다.
+        #  호주를 ETF 전용으로 가정하던 코드가 있었는데, 개별주 풀(aus_stock)이 생기면서
+        #  그 종목들이 ETF 경로를 타 시총·업종이 통째로 비었다.)
 
         if country_code == "us" and naver_us_stock_map:
             naver_entry = naver_us_stock_map.get(str(ticker).strip().upper(), {})
-            industry = str(naver_entry.get("industry") or "").strip()
-            if industry:
-                stock["etf_category"] = industry
             market = str(naver_entry.get("market") or "").strip().upper()
             if market:
                 stock["market"] = market
@@ -1259,12 +1342,13 @@ def update_single_stock_metadata(
                 else yf.Ticker(yfinance_ticker)
             )
 
-            # 미국: 종목 자체 속성으로 ETF 판정(quoteType == "ETF"). 이름 보완도 같은 .info 로 처리.
+            # 종목 자체 속성으로 ETF 판정(quoteType == "ETF"). 이름 보완·시총·업종도 같은 .info 로
+            # 처리한다 — 한 종목당 .info 는 한 번만 부른다.
             need_name = not stock.get("name") or stock.get("name") == ticker
-            if country_code == "us" or need_name:
+            if country_code in ("us", "au") or need_name:
                 try:
                     info = t.info
-                    if country_code == "us":
+                    if country_code in ("us", "au"):
                         is_etf = str(info.get("quoteType") or "").strip().upper() == "ETF"
                         if not is_etf:
                             # Yahoo 가 신생 ETF 를 EQUITY 로 잘못 분류하는 경우가 있다
@@ -1280,6 +1364,18 @@ def update_single_stock_metadata(
                                     f"종목명({yahoo_name})이 ETF 로 끝나 ETF 로 판정합니다."
                                 )
                         stock["is_etf"] = is_etf
+                    # 호주 개별주의 시총·업종 — 미국은 네이버 맵에서 받으므로 여기서 채우지 않는다.
+                    # 통화는 그 시장 통화 그대로다(호주=AUD). 국가를 섞어 비교하면 안 된다.
+                    if country_code == "au":
+                        cap = info.get("marketCap")
+                        if isinstance(cap, (int, float)) and not isinstance(cap, bool) and cap > 0:
+                            stock["market_cap"] = int(cap)
+                        sector = str(info.get("sector") or "").strip()
+                        if sector:
+                            stock["sector"] = sector
+                        industry = str(info.get("industry") or "").strip()
+                        if industry:
+                            stock["industry"] = industry
                     if need_name:
                         fetched_name = info.get("longName") or info.get("shortName")
                         if fetched_name:
@@ -1297,9 +1393,7 @@ def update_single_stock_metadata(
                         first_date = hist.index.min()
                         listing_date_str = first_date.strftime("%Y-%m-%d")
                         if account_norm:
-                            logger.debug(
-                                f"[{account_norm.upper()}/{ticker}] yfinance 상장일 획득: {listing_date_str}"
-                            )
+                            logger.debug(f"[{account_norm.upper()}/{ticker}] yfinance 상장일 획득: {listing_date_str}")
                 except Exception as e:
                     logger.warning(f"[{account_norm.upper()}/{ticker}] yfinance history 조회 실패: {e}")
         except Exception as e:
@@ -1311,7 +1405,7 @@ def update_single_stock_metadata(
     if listing_date_str:
         stock["listing_date"] = listing_date_str
 
-    # 가격 파생 지표(거래량·기간수익률·backtest_stats)는 이 함수에서 계산하지 않는다.
+    # 가격 파생 지표(거래량·기간수익률)는 이 함수에서 계산하지 않는다.
     # 호출부가 OHLCV 를 1회 로드해 compute_price_metrics() 로 계산·병합한다(가격지표 배치와 공유).
     stock.pop("1_month_avg_volume", None)
     stock.pop("1_week_avg_turnover", None)

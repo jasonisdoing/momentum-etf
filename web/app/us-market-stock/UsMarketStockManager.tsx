@@ -5,11 +5,16 @@ import { IconPlus } from "@tabler/icons-react";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { INDUSTRY_COLUMN_MIN_WIDTH, INDUSTRY_COLUMN_WIDTH, renderIndustryCell } from "@/lib/grid-cells";
 import { formatPoolLabel } from "@/lib/pool-label";
-import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
+import { useLatestRequest } from "@/lib/use-latest-request";
+import { loadStocksTable } from "@/lib/stocks-store";
+import { addTickersToPool, buildPoolAddSkipNotice, splitByPoolMembership } from "@/lib/pool-add";
+import type { PoolAddProgress } from "@/lib/pool-add";
 import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
+import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
@@ -22,6 +27,8 @@ import {
 type UsMarketStockRow = {
   rank: number;
   ticker: string;
+  /** 이 종목이 이미 들어 있는 종목풀 id 목록 — 추가 시 중복을 미리 거른다. */
+  ticker_pool_types?: string[];
   name: string;
   english_name: string;
   industry: string;
@@ -75,6 +82,31 @@ function viewIndices(view: ViewOption): readonly string[] {
 // null 이면 전체(절단 없음).
 // 통합은 두 지수를 합쳐 600 종목에 가까워 100 단위로는 구간이 너무 성기다 → 50 단위.
 // 단일 지수는 종목 수가 적어 100 단위 그대로 둔다.
+// 마지막으로 고른 상위 N — 다음 방문에도 같은 범위로 열리게 기억한다.
+// 키 형식은 시스템 공통(`momentum-etf:<화면>:<항목>`)을 따른다.
+const US_MARKET_TOP_COUNT_KEY = "momentum-etf:us-market-stock:top-count";
+
+/** 저장된 상위 N. `"all"`(전체)이거나 값이 없으면 null. */
+function readRememberedTopCount(): number | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const raw = window.localStorage.getItem(US_MARKET_TOP_COUNT_KEY);
+  if (!raw || raw === "all") {
+    return null;
+  }
+  const parsed = Number(raw);
+  // 못 읽는 값은 전체로 둔다 — 임의의 숫자로 잘라 보여주면 무엇이 적용됐는지 알 수 없다.
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function writeRememberedTopCount(value: number | null): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(US_MARKET_TOP_COUNT_KEY, value === null ? "all" : String(value));
+}
+
 const COMBINED_TOP_STEP = 50;
 const SINGLE_TOP_OPTIONS: readonly (number | null)[] = [null, 100, 200, 300, 400, 500];
 
@@ -156,12 +188,23 @@ export function UsMarketStockManager({
   const [selectedTickerPool, setSelectedTickerPool] = useState("");
   const [selectedBucketId, setSelectedBucketId] = useState<number | "">("");
   const [adding, setAdding] = useState(false);
+  // 종목당 수 초씩 걸려서 진행도를 보여주지 않으면 멈춘 것처럼 보인다.
+  const [addProgress, setAddProgress] = useState<PoolAddProgress | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // 마지막으로 고른 상위 N 복원 — 서버 렌더에는 localStorage 가 없어 초기값으로 못 쓴다.
+  // 상위 N 은 이미 받아둔 행을 자르기만 해서(재조회 없음) 늦게 반영돼도 값싸다.
+  useEffect(() => {
+    setTopCount(readRememberedTopCount());
+  }, []);
+
   const toast = useToast();
+  const { begin, isLatest } = useLatestRequest();
 
   const load = useCallback(async (currentView: ViewOption, minCapUkmText: string) => {
+    // 늦게 도착한 옛 응답이 새 결과를 덮지 않게 한다(공용 훅).
+    const token = begin();
     setLoading(true);
     setError(null);
     try {
@@ -192,9 +235,13 @@ export function UsMarketStockManager({
           if (!merged.has(row.ticker)) merged.set(row.ticker, row);
         }
       }
-      const mergedRows = [...merged.values()].sort(
-        (a, b) => (b.market_cap ?? 0) - (a.market_cap ?? 0),
-      );
+      // 시총 내림차순으로 세운 뒤 1번부터 다시 번호를 붙인다. 서버는 지수별로 번호를
+      // 매기므로(SP500 7위 · NDX100 7위), 합쳐 놓고 그대로 두면 같은 번호가 두 번 나오고
+      // 아래로 갈수록 순서와 어긋난다.
+      const mergedRows = [...merged.values()]
+        .sort((a, b) => (b.market_cap ?? 0) - (a.market_cap ?? 0))
+        .map((row, index) => ({ ...row, rank: index + 1 }));
+      if (!isLatest(token)) return;
       setRows(mergedRows);
       setTotalCount(mergedRows.length);
       setTickerPools(allStocksPayload.ticker_types ?? []);
@@ -207,11 +254,12 @@ export function UsMarketStockManager({
       });
       setRegisteredTickers(registered);
     } catch (e) {
+      if (!isLatest(token)) return;
       setError(e instanceof Error ? e.message : "데이터를 불러오지 못했습니다.");
     } finally {
-      setLoading(false);
+      if (isLatest(token)) setLoading(false);
     }
-  }, []);
+  }, [begin, isLatest]);
 
   useEffect(() => {
     void load(view, minMarketCapUkm);
@@ -291,43 +339,51 @@ export function UsMarketStockManager({
       return;
     }
 
-    setAdding(true);
-    let addedCount = 0;
-    let duplicateCount = 0;
-    const failedTickers: string[] = [];
-
-    for (const ticker of selectedTickers) {
-      try {
-        await addStockCandidate(tickerPool, ticker, bucketId);
-        addedCount += 1;
-      } catch (addError) {
-        const message = addError instanceof Error ? addError.message : "종목 추가 처리에 실패했습니다.";
-        if (message.includes("이미 등록된 종목입니다.")) {
-          duplicateCount += 1;
-          continue;
-        }
-        failedTickers.push(ticker);
-      }
+    // 이미 어딘가의 풀에 있는 종목은 보내지 않는다 — 표가 풀 목록을 들고 있어 조회가 필요 없다.
+    // 건너뛰는 건 정상 동작이라 시작 전에 노란색으로 알린다.
+    const split = splitByPoolMembership(selectedTickers, rows, tickerPool);
+    const skipNotice = buildPoolAddSkipNotice(selectedTickers.length, split);
+    if (skipNotice) {
+      toast.warning(skipNotice);
     }
+    if (split.fresh.length === 0) {
+      setAddModalOpen(false);
+      return;
+    }
+
+    setAdding(true);
+    setAddProgress(null);
+    const { added, skipped, blocked, failed } = await addTickersToPool(
+      split.fresh,
+      tickerPool,
+      bucketId,
+      setAddProgress,
+      // 진행도에 종목명을 보여주기 위한 표의 이름 — 추가 조회 없이 넘긴다.
+      new Map(rows.map((row) => [String(row.ticker).trim().toUpperCase(), row.name])),
+    );
 
     setAdding(false);
+    setAddProgress(null);
     setAddModalOpen(false);
 
-    if (addedCount > 0) {
-      toast.success(`종목 ${addedCount}개를 추가했습니다.`);
+    if (added > 0) {
+      toast.success(`종목 ${added}개를 추가했습니다.`);
     }
-    if (duplicateCount > 0) {
-      toast.error(`이미 등록된 종목 ${duplicateCount}개는 건너뛰었습니다.`);
+    if (skipped > 0) {
+      toast.error(`이미 등록된 종목 ${skipped}개는 건너뛰었습니다.`);
     }
-    if (failedTickers.length > 0) {
-      toast.error(`추가 실패: ${failedTickers.join(", ")}`);
+    if (blocked > 0) {
+      toast.error(`다른 종목풀에 있는 ${blocked}개는 건너뛰었습니다.`);
+    }
+    if (failed.length > 0) {
+      toast.error(`추가 실패: ${failed.join(", ")}`);
     }
 
-    if (addedCount > 0) {
+    if (added > 0) {
       setSelectedTickers([]);
       await load(view, minMarketCapUkm);
     }
-  }, [load, view, minMarketCapUkm, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
+  }, [load, view, minMarketCapUkm, rows, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
 
   const columnDefs = useMemo<ColDef<UsMarketStockGridRow>[]>(
     () => [
@@ -382,13 +438,13 @@ export function UsMarketStockManager({
       {
         headerName: "업종",
         field: "industry",
-        width: 180,
-        minWidth: 120,
+        width: INDUSTRY_COLUMN_WIDTH,
+        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
         cellClass: "usMarketStockTextCell",
-        cellRenderer: (params: { value?: string }) => renderTruncatedText(params.value),
+        cellRenderer: (params: { value?: string }) => renderIndustryCell(params.value),
       },
       {
-        headerName: "등락률",
+        headerName: "일간(%)",
         field: "change_pct",
         width: 110,
         minWidth: 96,
@@ -534,9 +590,11 @@ export function UsMarketStockManager({
                     ))}
                     <select
                       value={topCount === null ? "all" : String(topCount)}
-                      onChange={(event) =>
-                        setTopCount(event.target.value === "all" ? null : Number(event.target.value))
-                      }
+                      onChange={(event) => {
+                        const next = event.target.value === "all" ? null : Number(event.target.value);
+                        setTopCount(next);
+                        writeRememberedTopCount(next);
+                      }}
                       style={{
                         border: "1px solid rgba(148,163,184,0.4)",
                         borderRadius: 6,
@@ -663,6 +721,7 @@ export function UsMarketStockManager({
               ))}
             </select>
           </label>
+          <PoolAddProgressBar progress={addProgress} />
         </div>
       </AppModal>
     </section>

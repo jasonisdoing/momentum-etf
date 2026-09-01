@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import datetime as _dt
+import math
 from typing import Any
 
-
-import math
 
 def normalize_number(value: Any) -> float:
     """숫자로 변환한다. 실패 시 0.0을 반환한다."""

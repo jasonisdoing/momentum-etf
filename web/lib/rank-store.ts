@@ -7,6 +7,7 @@ type RankTickerType = {
   icon: string;
   country_code: string;
   top_n_hold?: number;
+  /** 업종 상한 — 종목풀 저장값. null/미설정 = 제한 없음. */
   currency?: string;
   include?: string[];
 };
@@ -27,6 +28,8 @@ type RankRow = {
   bucket: number;
   티커: string;
   종목명: string;
+  /** 종목 메모 — 자산 관리 화면과 같은 값(종목에 붙는다). */
+  메모?: string;
   상장일: string;
   현재가: number | null;
   "괴리율": number | null;
@@ -57,7 +60,9 @@ type RankData = {
   ticker_types: RankTickerType[];
   ticker_type: string;
   ma_rules: RankMaRule[];
-  as_of_date: string | null;
+  /** 이평선 일수 선택지 — 백엔드 상수(utils/ma_options)가 단일 소스. */
+  short_ma_options: number[];
+  long_ma_options: number[];
   monthly_return_labels: string[];
   rows: RankRow[];
   cache_blocked: boolean;
@@ -75,6 +80,9 @@ type RankToolbarData = {
   ticker_types: RankTickerType[];
   ticker_type: string;
   ma_rules: RankMaRule[];
+  short_ma_options: number[];
+  long_ma_options: number[];
+  /** 종목 수·업종 상한 선택지 — 백엔드 `config` 가 단일 소스(-1 = 제한 없음). */
 };
 
 export async function loadRankToolbarData(params?: {
@@ -89,25 +97,32 @@ export async function loadRankToolbarData(params?: {
   return fetchFastApiJson<RankToolbarData>(`/internal/rank/toolbar${query}`, { signal });
 }
 
+// 화면에서 임시로 바꿔 보는 이평선 값. 넘긴 항목만 저장 규칙을 대신하고, 빠진 항목은 저장값을 쓴다.
+type RankMaRuleOverride = {
+  short_ma_days?: number;
+  long_ma_days?: number;
+};
+
 export async function loadRankData(params?: {
   ticker_type?: string;
-  ma_rule_override?: RankMaRule;
-  as_of_date?: string;
+  ma_rule_override?: RankMaRuleOverride;
 }, signal?: AbortSignal): Promise<RankData> {
   const search = new URLSearchParams();
   if (params?.ticker_type) {
     search.set("ticker_type", params.ticker_type);
   }
-  if (params?.as_of_date) {
-    search.set("as_of_date", params.as_of_date);
-  }
-  if (params?.ma_rule_override) {
-    search.set("short_ma_days", String(params.ma_rule_override.short_ma_days));
-    search.set("long_ma_days", String(params.ma_rule_override.long_ma_days));
+  const override = params?.ma_rule_override;
+  if (override) {
+    for (const key of ["short_ma_days", "long_ma_days"] as const) {
+      const value = override[key];
+      if (value != null) {
+        search.set(key, String(value));
+      }
+    }
   }
 
   const query = search.size > 0 ? `?${search.toString()}` : "";
   return fetchFastApiJson<RankData>(`/internal/rank${query}`, { signal });
 }
 
-export type { RankTickerType, RankMaRule, RankData, RankRow };
+export type { RankTickerType, RankMaRule, RankMaRuleOverride, RankData, RankRow };

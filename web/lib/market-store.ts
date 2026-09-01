@@ -24,4 +24,8 @@ export async function loadEtfMarketTable(): Promise<MarketTableData> {
   return fetchFastApiJson<MarketTableData>("/internal/market");
 }
 
+export async function loadUsEtfMarketTable(): Promise<MarketTableData> {
+  return fetchFastApiJson<MarketTableData>("/internal/market/us-etf");
+}
+
 export type { MarketRowItem, MarketTableData };

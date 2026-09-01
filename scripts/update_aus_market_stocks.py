@@ -183,7 +183,7 @@ def _calculate_return_metrics(series: pd.Series) -> dict[str, Any]:
 
 def _fetch_stock_meta(tickers: list[str]) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
-    batches = [tickers[i:i + _YFINANCE_BATCH_SIZE] for i in range(0, len(tickers), _YFINANCE_BATCH_SIZE)]
+    batches = [tickers[i : i + _YFINANCE_BATCH_SIZE] for i in range(0, len(tickers), _YFINANCE_BATCH_SIZE)]
 
     for batch_idx, batch in enumerate(batches):
         print(f"  데이터 조회 중... {batch_idx * _YFINANCE_BATCH_SIZE + len(batch)}/{len(tickers)}", end="\r")
@@ -238,9 +238,7 @@ def _fetch_stock_meta(tickers: list[str]) -> dict[str, dict[str, Any]]:
 
 
 def _save(items: list[dict[str, Any]]) -> None:
-    save_index_constituents(
-        "ASX200", items, {"updated_at": date.today().isoformat(), "source": _SOURCE_URL}
-    )
+    save_index_constituents("ASX200", items, {"updated_at": date.today().isoformat(), "source": _SOURCE_URL})
     print(f"저장 완료: ASX200 ({len(items)}개)")
 
 

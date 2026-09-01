@@ -18,10 +18,14 @@ from scripts.slack_asset_summary import (
     format_korean_currency,
     get_trend_emoji,
 )
-from utils.daily_fund_service import aggregate_today_daily_data, remove_future_daily_rows
+from utils.daily_fund_service import (
+    TotalJumpGuardError,
+    aggregate_today_daily_data,
+    remove_future_daily_rows,
+)
 from utils.env import load_env_if_present
 from utils.monthly_service import aggregate_active_month_data
-from utils.notification import send_slack_message_v2
+from utils.notification import EXIT_ALREADY_NOTIFIED, send_slack_message_v2
 from utils.snapshot_service import update_today_snapshot_all_accounts
 from utils.weekly_service import aggregate_active_week_data
 from utils.yearly_service import aggregate_active_year_data
@@ -55,6 +59,22 @@ def _send_data_aggregate_summary() -> None:
         raise RuntimeError("데이터 집계 결과 슬랙 메시지 전송에 실패했습니다.")
 
 
+def _notify_total_jump_blocked(exc: TotalJumpGuardError) -> None:
+    """총자산 급변으로 집계를 건너뛴 사실만 알린다.
+
+    원인은 로그를 봐야 알 수 있고 대부분 다음 회차에 스스로 풀리므로,
+    여기서는 '얼마가 차이 났는지'만 전한다 (배치 로그 꼬리는 붙이지 않는다).
+    """
+    baseline_label = f" ({exc.baseline_date})" if exc.baseline_date else ""
+    send_slack_message_v2(
+        "<!channel>\n"
+        "⚠️ *일별 집계 건너뜀*: 총자산 급변\n"
+        f"• 직전{baseline_label}: {format_korean_currency(exc.baseline_total)}\n"
+        f"• 신규: {format_korean_currency(exc.new_total)}\n"
+        f"• 차이: {format_korean_currency(exc.diff)} ({exc.jump_pct:.1f}%)"
+    )
+
+
 def main() -> int:
     load_env_if_present()
     cleanup = remove_future_daily_rows()
@@ -62,7 +82,14 @@ def main() -> int:
     # 두 소스를 같은 실행·같은 시세로 맞추기 위해 집계 직전에 스냅샷을 먼저 갱신한다.
     # (스냅샷은 원래 보유 종목 변경 시에만 갱신돼, 매매 없는 날에는 기준이 낡을 수 있었다.)
     snapshot_result = update_today_snapshot_all_accounts()
-    daily_result = aggregate_today_daily_data()
+    try:
+        daily_result = aggregate_today_daily_data()
+    except TotalJumpGuardError as exc:
+        # 기록을 거부한 것이지 배치가 깨진 것이 아니다 — 뒤따르는 주/월/년 집계도 같은
+        # 일별 값을 쓰므로 여기서 멈춘다. 다음 회차(매시)에 정상값이면 그대로 채워진다.
+        print(f"[data_aggregate] {exc}", file=sys.stderr)
+        _notify_total_jump_blocked(exc)
+        return EXIT_ALREADY_NOTIFIED
     weekly_result = aggregate_active_week_data()
     monthly_result = aggregate_active_month_data()
     yearly_result = aggregate_active_year_data()

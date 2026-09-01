@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from functools import lru_cache
-from time import monotonic
 from typing import Any
 
 from utils.db_manager import get_db_connection
@@ -60,30 +59,42 @@ def ensure_stock_meta_readable() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 인메모리 캐시 (기존 호환)
+# 인메모리 캐시
 # ---------------------------------------------------------------------------
-_TICKER_TYPE_STOCKS_CACHE: dict[str, tuple[float, list[dict]]] = {}
+# **종목 목록에는 TTL 캐시를 두지 않는다.** 종목을 추가·삭제·이동하면 그 즉시 화면에
+# 보여야 하는데, TTL 이 있으면 만료 전까지 옛 목록이 남아 "고쳤는데 반영이 안 된다"가
+# 된다(이동 직후 출발 풀에 그대로 남고 도착 풀에 안 보이는 증상이 여기서 나왔다).
+# stock_meta 조회는 풀당 문서 수백 건이라 매번 읽어도 부담이 없다.
 _LISTING_CACHE: dict[tuple[str, str], str | None] = {}
-_CACHE_TTL_SECONDS = 60.0
+
+# 튜닝 워커 전용 읽기 전용 사본 — 부모 프로세스가 미리 읽어 넘긴 종목 목록이다.
+# **캐시가 아니다**: 만료도 무효화도 없고, 워커가 DB 를 건드리지 않게 하려고 채운다
+# (utils/strategy_tuning.seed_worker_caches). 웹·배치 프로세스에서는 항상 비어 있다.
+_SEEDED_POOL_STOCKS: dict[str, list[dict]] = {}
+
+
+def seed_pool_stocks(stocks_by_pool: dict[str, list[dict]]) -> None:
+    """워커 프로세스에 종목 목록 사본을 심는다 (튜닝 전용, 부모에서는 부르지 않는다)."""
+    _SEEDED_POOL_STOCKS.clear()
+    for pool, docs in stocks_by_pool.items():
+        _SEEDED_POOL_STOCKS[str(pool).strip().lower()] = list(docs)
 
 
 def _invalidate_cache(ticker_type: str | None = None) -> None:
-    """캐시를 무효화한다. ticker_type가 None이면 전체 캐시를 초기화한다."""
-    if ticker_type is None:
-        _TICKER_TYPE_STOCKS_CACHE.clear()
-        _LISTING_CACHE.clear()
-    else:
-        norm = (ticker_type or "").strip().lower()
-        _TICKER_TYPE_STOCKS_CACHE.pop(norm, None)
-        # listing 캐시에서 해당 계좌 관련 항목 제거는 비용이 크므로 전체 초기화
-        _LISTING_CACHE.clear()
+    """종목 목록 변경에 딸린 캐시를 모두 무효화한다.
+
+    ``_build_active_pool_ticker_map`` 은 만료가 없는 ``lru_cache`` 라 여기서 지우지 않으면
+    영영 옛 상태로 남는다 — 이 모듈의 쓰기 함수들이 모두 이 하나만 부르므로 여기에 둔다.
+    """
+    del ticker_type  # 두 캐시 모두 풀 구분이 없어 항상 전체를 지운다
+    _LISTING_CACHE.clear()
+    _build_active_pool_ticker_map.cache_clear()
 
 
 # 외부 모듈(예: stocks_service)에서 stock_meta 를 직접 갱신한 뒤 호출할 수 있도록
 # 공개 alias 를 제공한다.
 def invalidate_ticker_type_cache(ticker_type: str | None = None) -> None:
     _invalidate_cache(ticker_type)
-    _build_active_pool_ticker_map.cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -92,18 +103,18 @@ def invalidate_ticker_type_cache(ticker_type: str | None = None) -> None:
 
 
 def _load_ticker_type_stocks_raw(ticker_type: str) -> list[dict]:
-    """DB에서 해당 종목풀의 활성(is_deleted!=True) 종목 메타데이터를 로드한다 (TTL 캐시 적용)."""
+    """DB에서 해당 종목풀의 활성(is_deleted!=True) 종목 메타데이터를 로드한다.
+
+    **캐시하지 않는다** — 추가·삭제·이동이 즉시 보여야 한다(위 주석 참고).
+    """
     type_norm = (ticker_type or "").strip().lower()
-    cached = _TICKER_TYPE_STOCKS_CACHE.get(type_norm)
-    if cached is not None:
-        cached_at, cached_docs = cached
-        if monotonic() - cached_at < _CACHE_TTL_SECONDS:
-            return cached_docs
+    seeded = _SEEDED_POOL_STOCKS.get(type_norm)
+    if seeded is not None:
+        return seeded
 
     coll = _get_collection()
     if coll is None:
         logger.error("MongoDB 연결 실패 — stock_meta 컬렉션을 읽을 수 없습니다.")
-        _TICKER_TYPE_STOCKS_CACHE[type_norm] = (monotonic(), [])
         return []
 
     try:
@@ -120,11 +131,9 @@ def _load_ticker_type_stocks_raw(ticker_type: str) -> list[dict]:
             doc.pop("updated_at", None)
             doc.pop("is_deleted", None)
             doc.pop("deleted_at", None)
-        _TICKER_TYPE_STOCKS_CACHE[type_norm] = (monotonic(), docs)
         return docs
     except Exception as exc:
         logger.error("stock_meta 컬렉션 조회 실패 (type=%s): %s", type_norm, exc)
-        _TICKER_TYPE_STOCKS_CACHE[type_norm] = (monotonic(), [])
         return []
 
 
@@ -132,7 +141,10 @@ def _load_ticker_type_stocks_raw(ticker_type: str) -> list[dict]:
 # 공개 API — 읽기
 # ---------------------------------------------------------------------------
 
-from utils.settings_loader import get_account_settings, get_ticker_type_settings, list_available_ticker_types  # noqa: E402
+from utils.settings_loader import (  # noqa: E402
+    get_ticker_type_settings,
+    list_available_ticker_types,
+)
 
 
 @lru_cache(maxsize=1)
@@ -156,11 +168,7 @@ def _load_domestic_etf_ticker_set() -> set[str]:
     df, _ = load_cached_kis_domestic_etf_master()
     if "티커" not in df.columns:
         raise RuntimeError("KIS ETF 마스터 캐시에 티커 컬럼이 없습니다.")
-    return {
-        str(value or "").strip().upper()
-        for value in df["티커"].tolist()
-        if str(value or "").strip()
-    }
+    return {str(value or "").strip().upper() for value in df["티커"].tolist() if str(value or "").strip()}
 
 
 def infer_ticker_type_for_ticker(ticker: str) -> str:
@@ -184,86 +192,6 @@ def infer_ticker_type_for_ticker(ticker: str) -> str:
         return "us"
 
     raise RuntimeError(f"{ticker_norm}의 ticker_type을 추론할 수 없습니다.")
-
-
-def _get_account_allowed_ticker_types(account_id: str) -> list[str]:
-    """계좌 설정에 명시된 보유 가능 종목풀 목록을 반환한다."""
-    account_norm = str(account_id or "").strip().lower()
-    if not account_norm:
-        raise ValueError("account_id가 필요합니다.")
-
-    settings = get_account_settings(account_norm)
-    raw_types = settings.get("ticker_types")
-    if raw_types is None:
-        return []
-    if not isinstance(raw_types, list):
-        raise RuntimeError(f"계좌 '{account_norm}'의 ticker_types는 배열이어야 합니다.")
-
-    allowed: list[str] = []
-    valid_types = set(list_available_ticker_types())
-    for raw_type in raw_types:
-        ticker_type = str(raw_type or "").strip().lower()
-        if not ticker_type:
-            continue
-        if ticker_type not in valid_types:
-            raise RuntimeError(f"계좌 '{account_norm}'의 ticker_types에 알 수 없는 종목풀이 있습니다: {ticker_type}")
-        if ticker_type not in allowed:
-            allowed.append(ticker_type)
-    return allowed
-
-
-def _is_korean_etf_ticker_type(ticker_type: str) -> bool:
-    """국내 상장 ETF 종목풀인지 확인한다."""
-    try:
-        settings = get_ticker_type_settings(ticker_type)
-    except Exception:
-        return False
-    return str(settings.get("country_code") or "").strip().lower() == "kor"
-
-
-def infer_ticker_type_for_account_ticker(account_id: str, ticker: str) -> str:
-    """계좌별 허용 종목풀을 우선 사용해 보유 종목의 ticker_type을 추론한다."""
-    ticker_norm = str(ticker or "").strip().upper()
-    if not ticker_norm:
-        raise ValueError("ticker가 필요합니다.")
-
-    allowed_types = _get_account_allowed_ticker_types(account_id)
-    if not allowed_types:
-        return infer_ticker_type_for_ticker(ticker_norm)
-
-    active_matches = [
-        ticker_type
-        for ticker_type in _build_active_pool_ticker_map().get(ticker_norm, [])
-        if ticker_type in allowed_types
-    ]
-    if len(active_matches) == 1:
-        return active_matches[0]
-    if len(active_matches) > 1:
-        joined = ", ".join(sorted(active_matches))
-        raise RuntimeError(f"계좌 '{account_id}'에서 동일한 티커 {ticker_norm}가 여러 종목풀에 있습니다: {joined}")
-
-    if len(allowed_types) == 1:
-        return allowed_types[0]
-
-    if ticker_norm.isdigit() and len(ticker_norm) == 6:
-        is_domestic_etf = ticker_norm in _load_domestic_etf_ticker_set()
-        if is_domestic_etf:
-            etf_candidates = [ticker_type for ticker_type in allowed_types if _is_korean_etf_ticker_type(ticker_type)]
-            if len(etf_candidates) == 1:
-                return etf_candidates[0]
-            if len(etf_candidates) > 1:
-                joined = ", ".join(sorted(etf_candidates))
-                raise RuntimeError(f"계좌 '{account_id}'에서 ETF 티커 {ticker_norm}의 종목풀이 모호합니다: {joined}")
-        elif "kor" in allowed_types:
-            return "kor"
-
-    if ticker_norm.endswith(".AX") and "aus" in allowed_types:
-        return "aus"
-    if (ticker_norm.isalpha() or "." in ticker_norm) and "us" in allowed_types:
-        return "us"
-
-    joined = ", ".join(allowed_types)
-    raise RuntimeError(f"계좌 '{account_id}'의 허용 종목풀({joined})에서 {ticker_norm}의 ticker_type을 추론할 수 없습니다.")
 
 
 def get_etfs(ticker_type: str, include_extra_tickers: Iterable[str] | None = None) -> list[dict[str, str]]:
@@ -298,6 +226,24 @@ def get_etfs(ticker_type: str, include_extra_tickers: Iterable[str] | None = Non
         all_etfs.append(new_item)
 
     return all_etfs
+
+
+def count_stocks_by_pool() -> dict[str, int]:
+    """종목풀별 담긴 종목 수 — {ticker_type: 개수}. 삭제된 종목은 세지 않는다.
+
+    풀마다 목록을 읽어 세면 풀 수만큼 쿼리가 나가므로 집계 한 번으로 끝낸다.
+    한 건도 없는 풀은 키가 없다 — 호출부가 0 으로 읽는다.
+    """
+    coll = _get_collection()
+    if coll is None:
+        raise RuntimeError("MongoDB 연결 실패 — stock_meta 컬렉션을 읽을 수 없습니다.")
+    rows = coll.aggregate(
+        [
+            {"$match": {"is_deleted": {"$ne": True}}},
+            {"$group": {"_id": "$ticker_type", "count": {"$sum": 1}}},
+        ]
+    )
+    return {str(row["_id"]).strip().lower(): int(row["count"]) for row in rows if row.get("_id")}
 
 
 def get_etfs_by_country(country: str) -> list[dict[str, Any]]:
@@ -373,43 +319,31 @@ def get_all_etfs(ticker_type: str) -> list[dict[str, Any]]:
     return results
 
 
-def get_active_holding_tickers() -> dict[str, set[str]]:
-    """
-    현재 사용자가 포트폴리오 마스터에 보유 중인 종목을 ticker_type 기준으로 분류하여 조회한다.
+def get_active_holding_tickers() -> set[str]:
+    """현재 계좌들이 실제로 보유 중인 티커 집합.
 
-    반환 형태:
-    {
-        "kor_kr": {"122630", ...},
-        "kor": {"005930", ...},
-        "us": {"AAPL", ...},
-    }
+    종목풀 구분은 하지 않는다 — 쓰는 쪽이 필요한 답은 "이 티커를 보유 중인가" 하나뿐이고,
+    같은 티커가 여러 풀에 등록돼 있으면 풀 추론이 실패해 보유 종목이 누락됐다.
     """
     from utils.portfolio_io import load_portfolio_master
     from utils.settings_loader import list_available_accounts
 
-    holdings_by_type: dict[str, set[str]] = {}
+    held: set[str] = set()
     for account_id in list_available_accounts():
         snapshot = load_portfolio_master(account_id)
         if not snapshot:
             continue
         for h in snapshot.get("holdings", []):
-            t = str(h.get("ticker") or "").strip().upper()
-            if not t or t in {"IS", "__CASH__"}:
+            ticker = str(h.get("ticker") or "").strip().upper()
+            if not ticker or ticker in {"IS", "__CASH__"}:
                 continue
             try:
-                qty = float(h.get("quantity") or 0)
+                quantity = float(h.get("quantity") or 0)
             except (TypeError, ValueError):
-                qty = 0.0
-            if qty <= 0:
-                continue
-            try:
-                inferred_type = infer_ticker_type_for_account_ticker(account_id, t)
-            except Exception as exc:
-                logger.warning("보유 종목 ticker_type 추론 실패, 건너뜀 (%s/%s): %s", account_id, t, exc)
-                continue
-            holdings_by_type.setdefault(inferred_type, set()).add(t)
-
-    return holdings_by_type
+                quantity = 0.0
+            if quantity > 0:
+                held.add(ticker)
+    return held
 
 
 # ---------------------------------------------------------------------------
@@ -485,6 +419,34 @@ def save_etfs(ticker_type: str, data: list[dict]) -> None:
 
     logger.info("%d개 종목 정보가 stock_meta 컬렉션에 저장되었습니다. (type=%s)", len(new_tickers), type_norm)
     _invalidate_cache(type_norm)
+
+
+def pools_by_ticker(tickers: Iterable[str]) -> dict[str, str]:
+    """티커 → 소속 종목풀(ticker_type). 어느 풀에도 없는 티커는 키가 없다.
+
+    한 티커는 한 종목풀에만 들어간다(``add_active_stock`` 이 중복 등록을 막는다). 그래서
+    계좌 보유 종목의 소속 풀이 유일하게 정해지고, 그 풀의 이평선으로 이탈을 판정할 수 있다.
+
+    티커는 저장된 형태 그대로 본다 — 호주는 ``ASX:`` 접두사가 붙어 미국의 같은 티커와 구분된다.
+    """
+    normalized = sorted({str(t or "").strip().upper() for t in tickers if str(t or "").strip()})
+    if not normalized:
+        return {}
+
+    coll = _get_collection()
+    if coll is None:
+        raise RuntimeError("MongoDB 연결 실패 — stock_meta 컬렉션을 읽을 수 없습니다.")
+
+    result: dict[str, str] = {}
+    for doc in coll.find(
+        {"ticker": {"$in": normalized}, "is_deleted": {"$ne": True}},
+        {"_id": 0, "ticker": 1, "ticker_type": 1},
+    ):
+        ticker = str(doc.get("ticker") or "").strip().upper()
+        pool = str(doc.get("ticker_type") or "").strip().lower()
+        if ticker and pool:
+            result[ticker] = pool
+    return result
 
 
 def add_stock(ticker_type: str, ticker: str, name: str = "", **extra_fields: Any) -> bool:

@@ -297,9 +297,7 @@ def _collect_live_daily_summary() -> dict[str, Any]:
                 all_missing_tickers.extend(missing)
             # 수량이 있는데 평가금액이 0 이하인 종목 = 가격을 못 얻은 종목.
             # (캐시 문서는 있으나 값이 비정상인 경우 — missing_price_tickers 가드가 못 잡는 구멍)
-            zero_rows = holdings_df[
-                (holdings_df["수량"].fillna(0) > 0) & (holdings_df["평가금액(KRW)"].fillna(0) <= 0)
-            ]
+            zero_rows = holdings_df[(holdings_df["수량"].fillna(0) > 0) & (holdings_df["평가금액(KRW)"].fillna(0) <= 0)]
             if not zero_rows.empty:
                 all_zero_valuation_tickers.extend(str(t) for t in zero_rows["티커"].tolist())
 
@@ -496,8 +494,36 @@ def remove_future_daily_rows() -> dict[str, int]:
     return {"deleted": int(deleted)}
 
 
+class TotalJumpGuardError(RuntimeError):
+    """총자산 급변으로 일별 집계를 거부했을 때. 금액을 그대로 들고 있어 알림에서 재계산이 필요 없다."""
+
+    def __init__(
+        self,
+        new_total: float,
+        baseline_total: float,
+        baseline_date: str | None,
+        deposit_withdrawal: float,
+        jump_pct: float,
+    ) -> None:
+        self.new_total = new_total
+        self.baseline_total = baseline_total
+        self.baseline_date = baseline_date
+        self.deposit_withdrawal = deposit_withdrawal
+        self.jump_pct = jump_pct
+        # 입출금은 정상 변동이라 차이에서 뺀다 — 알림에 쓰는 '설명되지 않는 변동'.
+        self.diff = new_total - baseline_total - deposit_withdrawal
+        super().__init__(
+            f"총자산이 직전 기록 대비 {jump_pct:.1f}% 변동해 일별 집계 기록을 거부합니다 "
+            f"(허용 {DAILY_TOTAL_JUMP_GUARD_PCT:.0f}%, 직전 {baseline_total:,.0f} → 신규 {new_total:,.0f}). "
+            "가격 캐시 상태를 확인하세요. 실제 급변이면 수동으로 기록하세요."
+        )
+
+
 def _check_total_jump_guard(
-    new_total: float, baseline_total: float | None, deposit_withdrawal: float
+    new_total: float,
+    baseline_total: float | None,
+    deposit_withdrawal: float,
+    baseline_date: str | None = None,
 ) -> None:
     """총자산 급변 서킷브레이커 — 직전 기록 대비 허용 범위를 벗어나면 기록을 거부한다.
 
@@ -509,11 +535,7 @@ def _check_total_jump_guard(
         return
     jump_pct = abs(new_total - baseline_total - deposit_withdrawal) / baseline_total * 100.0
     if jump_pct > DAILY_TOTAL_JUMP_GUARD_PCT:
-        raise RuntimeError(
-            f"총자산이 직전 기록 대비 {jump_pct:.1f}% 변동해 일별 집계 기록을 거부합니다 "
-            f"(허용 {DAILY_TOTAL_JUMP_GUARD_PCT:.0f}%, 직전 {baseline_total:,.0f} → 신규 {new_total:,.0f}). "
-            "가격 캐시 상태를 확인하세요. 실제 급변이면 수동으로 기록하세요."
-        )
+        raise TotalJumpGuardError(new_total, baseline_total, baseline_date, deposit_withdrawal, jump_pct)
 
 
 def aggregate_today_daily_data() -> dict[str, str]:
@@ -523,14 +545,13 @@ def aggregate_today_daily_data() -> dict[str, str]:
     update_doc["updated_at"] = _get_now_kst()
 
     # 서킷브레이커 기준: 대상일 직전의 마지막 기록(과거 문서). 첫 기록이면 통과.
-    previous_doc = db[DAILY_COLLECTION].find_one(
-        {"date": {"$lt": target_date}}, sort=[("date", -1)]
-    )
+    previous_doc = db[DAILY_COLLECTION].find_one({"date": {"$lt": target_date}}, sort=[("date", -1)])
     existing_doc = db[DAILY_COLLECTION].find_one({"date": target_date}) or {}
     _check_total_jump_guard(
         float(update_doc.get("total_assets") or 0),
         float(previous_doc["total_assets"]) if previous_doc and previous_doc.get("total_assets") else None,
         float(existing_doc.get("deposit_withdrawal") or 0),
+        str(previous_doc.get("date")) if previous_doc else None,
     )
 
     db[DAILY_COLLECTION].update_one(

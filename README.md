@@ -26,13 +26,11 @@
 
 ## 📚 문서 (Documentation)
 
-더 자세한 내용은 `docs/` 폴더의 문서를 참고하세요.
+유지보수용 문서 3개(`docs/`). 사용법·설정값은 적지 않는다 — 코드가 단일 소스다.
 
-*   **[프로젝트 개요 (Project Overview)](docs/project_overview.md)**: 프로젝트의 철학, 상세 기능, 시스템 구조
-*   **[사용자 가이드 (User Guide)](docs/user_guide.md)**: 설치, 설정, 실행 방법, 결과 해석
-*   **[전략 로직 (Strategy Logic)](docs/strategy_logic.md)**: 이동평균 점수 계산 규칙과 정렬 기준
-*   **[개발자 가이드 (Developer Guide)](docs/developer_guide.md)**: 시스템 아키텍처, 데이터 파이프라인, 화면 구성
-*   **[백테스트 가이드](backtest/README.md)**: 백테스트 실행 방법, 설정, 출력 파일 설명
+*   **[개발자 가이드](docs/developer_guide.md)**: 구조, 화면·모듈, DB 단일 소스, 지켜야 할 규칙
+*   **[전략 로직](docs/strategy_logic.md)**: 전략별 규칙과 시도 후 폐기한 것
+*   **[서버 인프라](docs/server_infrastructure.md)**: 배포, 배치, 도메인, 환경변수
 
 ## ⚡️ 빠른 시작 (Quick Start)
 
@@ -53,14 +51,13 @@ pip install -r requirements.txt
 ```
 
 ### 2. 설정
-`config.py`를 환경에 맞게 수정하고, 계좌 메타데이터는 DB `account_settings`(웹 `계좌 → 설정`)에서 관리합니다. (상세 내용은 [사용자 가이드](docs/user_guide.md) 참고)
+`.env` 와 `config.py` 를 환경에 맞게 채우고, 계좌·종목풀은 DB(`account_settings`, `pool_settings`)에서 관리합니다. (환경변수는 [서버 인프라](docs/server_infrastructure.md) 참고)
 
 ### 3. 실행
 
-**1. 웹 실행**
 ```bash
-cd web
-npm run dev
+python run_local_dev.py            # FastAPI + Next dev
+python infra/server_scheduler.py   # 배치 스케줄러
 ```
 
 웹에서 다음 기능을 사용합니다.

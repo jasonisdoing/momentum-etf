@@ -69,8 +69,12 @@ def send_slack_ma_cross(
     want_leverage = bool(judgment.get("want_leverage"))
 
     index_display = _format_display_name(assets.get("index", {}).get("ticker", ""), assets.get("index", {}).get("name"))
-    leverage_display = _format_display_name(assets.get("leverage", {}).get("ticker", ""), assets.get("leverage", {}).get("name"))
-    defense_display = _format_display_name(assets.get("defense", {}).get("ticker", ""), assets.get("defense", {}).get("name"))
+    leverage_display = _format_display_name(
+        assets.get("leverage", {}).get("ticker", ""), assets.get("leverage", {}).get("name")
+    )
+    defense_display = _format_display_name(
+        assets.get("defense", {}).get("ticker", ""), assets.get("defense", {}).get("name")
+    )
     target_display = _format_display_name(rec.get("target_ticker", ""), rec.get("target_name")) if rec else "-"
 
     if is_changed:
@@ -175,7 +179,9 @@ def send_slack_ma_cross(
     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": summary_text}})
 
     if is_changed:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "<!channel> 포지션이 변경되었습니다! 확인해주세요."}})
+        blocks.append(
+            {"type": "section", "text": {"type": "mrkdwn", "text": "<!channel> 포지션이 변경되었습니다! 확인해주세요."}}
+        )
 
     return _post(f"[{market_name}] {header_text} ({as_of})", blocks, "이동평균선 크로스 추천")
 

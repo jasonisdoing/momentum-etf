@@ -95,6 +95,9 @@ type TickerHoldingRow = {
 
 type TickerDetailResponse = {
   ticker: string;
+  /** 어느 요청 항목의 결과인지 — 순서가 아니라 이 값으로 짝을 짓는다. */
+  ticker_type?: string;
+  country_code?: string;
   rows: PriceRow[];
   etf_info?: TickerEtfInfo | null;
   holdings: TickerHoldingRow[];
@@ -194,6 +197,11 @@ const BASIC_INFO_METRICS = [
 
 function tickerKey(item: TickerItem): string {
   return `${item.ticker_type}::${item.country_code}::${item.ticker}`;
+}
+
+/** 비교 응답 한 건의 짝짓기 키 — `tickerKey` 와 같은 형식이어야 한다. */
+function detailKey(detail: TickerDetailResponse): string {
+  return `${detail.ticker_type ?? ""}::${detail.country_code ?? ""}::${detail.ticker}`;
 }
 
 function readCompareGroups(): CompareGroupMap {
@@ -630,6 +638,22 @@ function getSortinoRatio(rows: PriceRow[], dateRange: ChartDateRange | null): nu
   return (mean / downsideStd) * Math.sqrt(252);
 }
 
+/**
+ * 유효 값이 2개 이상일 때 최댓값(1위) 인덱스를 돌려준다. 동률이면 앞 종목.
+ * MDD 는 음수라 최댓값 = 낙폭이 가장 작은 종목(최하 낙폭)이 된다.
+ */
+function getBestValueIndex(values: (number | null)[]): number | null {
+  let best: number | null = null;
+  let validCount = 0;
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (v === null || Number.isNaN(v)) continue;
+    validCount++;
+    if (best === null || v > (values[best] as number)) best = i;
+  }
+  return validCount >= 2 ? best : null;
+}
+
 function buildReturnSeries(rows: PriceRow[], dateRange: ChartDateRange | null): LineData[] {
   if (!dateRange) return [];
   const seriesRows = getPricedRows(rows).filter((row) => row.date >= dateRange.startDate && row.date <= dateRange.endDate);
@@ -871,7 +895,8 @@ function CompareChart({ products, dateRange }: { products: SelectedProduct[]; da
     const container = containerRef.current;
     const chart = createChart(container, {
       width: container.clientWidth,
-      height: 360,
+      // 높이는 CSS(flex)가 정한 컨테이너 높이를 따른다 — 뷰포트에 맞춰 늘고 줄어든다.
+      height: container.clientHeight || 360,
       layout: { background: { type: ColorType.Solid, color: "#ffffff" }, textColor: "#475569", fontSize: 12 },
       grid: { vertLines: { color: "#eef2f7" }, horzLines: { color: "#d8e0ec", style: 2 } },
       crosshair: { mode: CrosshairMode.Normal },
@@ -891,7 +916,9 @@ function CompareChart({ products, dateRange }: { products: SelectedProduct[]; da
     chart.timeScale().fitContent();
 
     const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) chart.applyOptions({ width: entry.contentRect.width });
+      for (const entry of entries) {
+        chart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
+      }
     });
     observer.observe(container);
 
@@ -928,11 +955,25 @@ export function ComparePageClient() {
     return map;
   }, [tickerItems]);
 
-  /** is_etf === true 인 ETF 만 검색 대상. (국내상장 국내/해외 ETF) */
-  const searchableItems = useMemo(
-    () => tickerItems.filter((item) => item.is_etf === true),
-    [tickerItems],
+  // ETF 와 개별주 모두 검색 대상 — 개별주는 기본 정보·구성 종목 탭이 숨겨진다.
+  const searchableItems = tickerItems;
+
+  // 첫 번째 선택 종목이 개별주면 ETF 전용 탭(기본 정보·구성 종목)을 숨긴다 —
+  // 개별주에는 보수·구성종목 개념이 없어 빈 탭만 남기 때문이다.
+  const firstItemIsStock = useMemo(() => {
+    const firstKey = selectedKeys[0];
+    if (!firstKey) return false;
+    const item = itemByKey.get(firstKey);
+    return item != null && item.is_etf !== true;
+  }, [selectedKeys, itemByKey]);
+  const visibleTabs = useMemo(
+    () => (firstItemIsStock ? COMPARE_TABS.filter((tab) => tab.key !== "basic" && tab.key !== "holdings") : COMPARE_TABS),
+    [firstItemIsStock],
   );
+  // 숨겨진 탭을 보고 있던 상태라면 성과 분석으로 되돌린다.
+  useEffect(() => {
+    if (!visibleTabs.some((tab) => tab.key === activeTab)) setActiveTab("performance");
+  }, [visibleTabs, activeTab]);
 
   // 마지막으로 로드한 조합 + 범위("종목키::full|price"). 탭 전환 시 중복 요청을 막는다.
   const loadedSignatureRef = useRef<string | null>(null);
@@ -975,7 +1016,18 @@ export function ComparePageClient() {
       // 같은 종목은 ETF 간 동일 값이 되고, 중복 조회/전역 lock 직렬화 문제도 사라진다.
       const details = await loadTickerDetailsBatch(items, includeHoldings);
       setLoadingProgress({ percent: 100, message: "비교 데이터 반영 중" });
-      setProducts(items.map((item, index) => ({ item, detail: details[index] })));
+      // 인덱스가 아니라 티커로 짝을 짓는다 — 서버 캐시가 순서를 다르게 돌려줘도
+      // 이름과 시세가 다른 종목끼리 붙지 않는다(카드 순서를 바꿀 때 실제로 겪은 문제).
+      const detailByKey = new Map(details.map((detail) => [detailKey(detail), detail] as const));
+      setProducts(
+        items
+          .map((item) => {
+            const detail = detailByKey.get(tickerKey(item));
+            // 짝이 없으면 그 종목은 빼고 보여준다 — 다른 종목의 값을 붙이는 것보다 낫다.
+            return detail ? { item, detail } : null;
+          })
+          .filter((product): product is SelectedProduct => product !== null),
+      );
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "비교 데이터를 불러오지 못했습니다.");
       loadedSignatureRef.current = null; // 실패한 요청은 '로드됨'으로 두지 않는다(재시도 가능하게).
@@ -1439,7 +1491,7 @@ export function ComparePageClient() {
   );
 
   return (
-    <PageFrame title="ETF 비교" fullHeight fullWidth titleRight={titleRight}>
+    <PageFrame title="종목 비교" fullHeight fullWidth titleRight={titleRight}>
       <div className="appPageStack appPageStackFill comparePage">
         {error ? <div className="alert alert-danger mb-0">{error}</div> : null}
 
@@ -1505,7 +1557,7 @@ export function ComparePageClient() {
                     <label className="appLabeledField" style={{ minWidth: 0, width: "auto" }}>
                       <span className="appLabeledFieldLabel">탭</span>
                       <div className="compareHeaderTabs appSegmentedToggle" role="group" aria-label="비교 보기 선택">
-                        {COMPARE_TABS.map((tab) => (
+                        {visibleTabs.map((tab) => (
                           <button
                             key={tab.key}
                             type="button"
@@ -1627,7 +1679,7 @@ export function ComparePageClient() {
         </section>
 
         {activeTab === "performance" ? (
-          <section className="compareMatrix compareMatrixBody">
+          <section className="compareMatrix compareMatrixBody compareMatrixPerformance">
             <div className="compareMatrixLabel compareMatrixLabelWide">수익률 추이</div>
             <div className="compareMatrixWide">
               <div className="comparePerformanceToolbar">
@@ -1700,21 +1752,29 @@ export function ComparePageClient() {
                   : `${selectedPerformanceRange.label} 기준`}
               </div>
             </div>
-            {sortedProducts.map((product) => {
-              const mdd = getMaxDrawdown(product.detail.rows, chartDateRange);
-              const value = mdd?.pct ?? null;
-              // MDD 값 아래에 낙폭 구간(고점일~저점일)을 작게 표기한다.
-              const period =
-                mdd?.peakDate && mdd?.troughDate
-                  ? `${formatDateKey(mdd.peakDate)}~${formatDateKey(mdd.troughDate)}`
-                  : null;
-              return (
-                <div key={`mdd-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
-                  {formatPercent(value)}
-                  {period ? <div className="compareMetricCellHint">({period})</div> : null}
-                </div>
-              );
-            })}
+            {(() => {
+              const mdds = sortedProducts.map((product) => getMaxDrawdown(product.detail.rows, chartDateRange));
+              // MDD 는 음수라 최댓값 = 낙폭이 가장 작은 종목에 ⭐ 표시.
+              const bestIndex = getBestValueIndex(mdds.map((mdd) => mdd?.pct ?? null));
+              return sortedProducts.map((product, index) => {
+                const mdd = mdds[index];
+                const value = mdd?.pct ?? null;
+                return (
+                  <div key={`mdd-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
+                    {bestIndex === index ? "⭐ " : ""}
+                    {formatPercent(value)}
+                    {/* MDD 값 아래에 낙폭 구간(고점일~저점일)을 두 줄로 작게 표기한다. */}
+                    {mdd?.peakDate && mdd?.troughDate ? (
+                      <div className="compareMetricCellHint">
+                        ({formatDateKey(mdd.peakDate)}~
+                        <br />
+                        {formatDateKey(mdd.troughDate)})
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              });
+            })()}
             {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
               <div key={`empty-mdd-${index}`} className="compareMetricCell">-</div>
             ))}
@@ -1727,20 +1787,47 @@ export function ComparePageClient() {
                   : `${selectedPerformanceRange.label} 기준`}
               </div>
             </div>
-            {sortedProducts.map((product) => {
-              const value = getSortinoRatio(product.detail.rows, chartDateRange);
-              return (
-                <div key={`sortino-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
-                  {value === null || Number.isNaN(value) ? "-" : value.toFixed(2)}
-                </div>
-              );
-            })}
+            {(() => {
+              const values = sortedProducts.map((product) => getSortinoRatio(product.detail.rows, chartDateRange));
+              const bestIndex = getBestValueIndex(values);
+              return sortedProducts.map((product, index) => {
+                const value = values[index];
+                return (
+                  <div key={`sortino-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
+                    {bestIndex === index ? "⭐ " : ""}
+                    {value === null || Number.isNaN(value) ? "-" : value.toFixed(2)}
+                  </div>
+                );
+              });
+            })()}
             {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
               <div key={`empty-sortino-${index}`} className="compareMetricCell">-</div>
             ))}
-            <div className="compareSharpeLegend">
-              소르티노 지수 해석: <strong>0 미만</strong> 손실 · <strong>0~1</strong> 평범 · <strong>1~2</strong> 양호 · <strong>2~3</strong> 우수 · <strong>3 이상</strong> 매우 우수 (하방 변동성(Downside Deviation)만을 기준으로 손실 위험 대비 초과수익을 측정, 연율화)
+
+            <div className="compareMatrixLabel compareMetricsGroupLabel compareMetricsGroupLabelSingle">
+              샤프 지수
+              <div className="compareMatrixLabelHint">
+                {chartDateRange?.shortened
+                  ? `${formatDateKey(chartDateRange.startDate)} ~ ${formatDateKey(chartDateRange.endDate)}`
+                  : `${selectedPerformanceRange.label} 기준`}
+              </div>
             </div>
+            {(() => {
+              const values = sortedProducts.map((product) => getSharpeRatio(product.detail.rows, chartDateRange));
+              const bestIndex = getBestValueIndex(values);
+              return sortedProducts.map((product, index) => {
+                const value = values[index];
+                return (
+                  <div key={`sharpe-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
+                    {bestIndex === index ? "⭐ " : ""}
+                    {value === null || Number.isNaN(value) ? "-" : value.toFixed(2)}
+                  </div>
+                );
+              });
+            })()}
+            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+              <div key={`empty-sharpe-${index}`} className="compareMetricCell">-</div>
+            ))}
           </section>
         ) : PERIOD_TABS.includes(activeTab) ? (
           (() => {

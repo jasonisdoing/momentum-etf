@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from config import HYPERLIQUID_DEX, HYPERLIQUID_INFO_URL, HYPERLIQUID_SYMBOLS, MARKET_SCHEDULES
+from config import CACHE_TTL_LIVE, HYPERLIQUID_DEX, HYPERLIQUID_INFO_URL, HYPERLIQUID_SYMBOLS, MARKET_SCHEDULES
 from services.price_service import get_exchange_rates, get_realtime_snapshot
 from utils.data_loader import fetch_toss_kr_stock_snapshot, resolve_toss_us_product_codes
 from utils.market_trend_service import _fetch_naver_kor_index_close
@@ -213,7 +213,11 @@ def _update_candle_caches_sync(usd_krw: float | None) -> None:
     try:
         import yfinance as yf
 
-        fx = yf.Ticker("KRW=X").history(period="2d", interval="15m")
+        from utils.yfinance_guard import yfinance_lock
+
+        # 동시 호출 시 남의 티커 데이터를 받는 것을 막는다(utils/yfinance_guard).
+        with yfinance_lock():
+            fx = yf.Ticker("KRW=X").history(period="2d", interval="15m")
         fx_candles = []
         for timestamp, row in fx.iterrows():
             o, h, low, c = (_to_float(row.get(k)) for k in ("Open", "High", "Low", "Close"))
@@ -472,7 +476,7 @@ def load_live_24h_quotes() -> dict[str, Any]:
 
 
 _REGULAR_CLOSE_CACHE: dict[tuple[str, bool], tuple[tuple[float | None, float | None, float | None], float]] = {}
-_REGULAR_CLOSE_TTL = 60.0  # 정규장 종가는 하루 1회만 바뀌므로 짧은 TTL 로 yfinance 호출을 줄인다.
+_REGULAR_CLOSE_TTL = CACHE_TTL_LIVE  # 정규장 종가는 하루 1회만 바뀌므로 짧은 TTL 로 yfinance 호출을 줄인다.
 
 
 def _regular_close_from_series(
@@ -521,7 +525,10 @@ def _fetch_regular_close(yahoo_symbol: str, session_open: bool) -> tuple[float |
     try:
         import yfinance as yf
 
-        hist = yf.Ticker(yahoo_symbol).history(period="7d", interval="1d")
+        from utils.yfinance_guard import yfinance_lock
+
+        with yfinance_lock():
+            hist = yf.Ticker(yahoo_symbol).history(period="7d", interval="1d")
         closes = hist["Close"].dropna() if hist is not None and "Close" in hist else None
         result = _regular_close_from_series(closes, session_open, "America/New_York")
     except Exception as exc:

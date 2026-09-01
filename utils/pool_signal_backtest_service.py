@@ -19,14 +19,14 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from config import CACHE_START_DATE
+from config import BACKTEST_MONTH_OPTIONS as MONTH_OPTIONS
+from config import CACHE_START_DATE, FORWARD_DAY_OPTIONS
 from utils.cache_utils import load_cached_close_series_bulk
 from utils.logger import get_app_logger
+from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
 from utils.moving_averages import calculate_moving_average
 from utils.pool_settings_store import (
-    MA_DAY_OPTIONS,
     get_pool_benchmark_ticker,
-    get_pool_market_regime_index,
 )
 from utils.rankings import get_ticker_type_ma_rules, hold_eligible_mask
 from utils.settings_loader import get_ticker_type_settings
@@ -34,7 +34,6 @@ from utils.stock_list_io import get_etfs
 
 logger = get_app_logger()
 
-FORWARD_DAY_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60)
 _TRADING_DAYS_PER_MONTH = 21
 
 
@@ -49,12 +48,13 @@ def get_max_backtest_months(today: date | None = None) -> int:
 
 
 def get_month_options() -> list[int]:
-    """기간 셀렉트 옵션. 60개월보다 긴 구간은 현재 캐시 기준 최대값만 노출한다."""
+    """기간 셀렉트 옵션. 가격 캐시가 못 채우는 구간은 뺀다.
+
+    예전에는 캐시가 60개월보다 길면 그 최대값(예 91개월)을 끝에 덧붙였는데, 캐시가
+    자랄수록 값이 매달 달라져 화면마다 선택지가 어긋났다. 고정 목록만 노출한다.
+    """
     max_months = get_max_backtest_months()
-    options = [1, 2, 3, 4, 5, 6, 12, 24, 36, 48, 60]
-    if max_months > 60:
-        options.append(max_months)
-    return [month for month in options if month <= max_months]
+    return [month for month in MONTH_OPTIONS if month <= max_months]
 
 
 def _format_date(value: Any) -> str:
@@ -127,7 +127,6 @@ def _rule_performance(
     forward_days: int,
     benchmark: dict[str, Any],
     hold_threshold_k: float | None = None,
-    down_market_invest_pct: float = 100.0,
 ) -> dict[str, Any] | None:
     """현재 설정 그대로 규칙을 돌렸을 때의 기간 실적.
 
@@ -158,9 +157,7 @@ def _rule_performance(
 
     pool_settings = get_ticker_type_settings(pool_id)
     missing_slippage = [
-        key
-        for key in ("BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT")
-        if pool_settings.get(key) in (None, "")
+        key for key in ("BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT") if pool_settings.get(key) in (None, "")
     ]
     if missing_slippage:
         raise ValueError(
@@ -170,10 +167,6 @@ def _rule_performance(
     buy_pct = float(pool_settings["BUY_SLIPPAGE_PCT"]) / 100.0
     sell_pct = float(pool_settings["SELL_SLIPPAGE_PCT"]) / 100.0
     round_trip_pct = float(pool_settings["BUY_SLIPPAGE_PCT"]) + float(pool_settings["SELL_SLIPPAGE_PCT"])
-    market_regime = (
-        _load_market_regime_map(pool_settings, require=True) if float(down_market_invest_pct) < 100.0 else None
-    )
-
     # 종목마다 상장일·거래정지가 달라 pivot 에 구멍이 생긴다. 포트폴리오는 금액을 이어 추적하므로
     # NaN 이 전파되면 곡선이 망가진다 → ffill(거래정지는 직전 종가 유지 = 그날 수익 0)로 메운다.
     # 상장 전(앞쪽) 결측은 그 종목이 아직 신호도 없어 선택되지 않으므로 그대로 둔다.
@@ -195,16 +188,9 @@ def _rule_performance(
     baskets: list[set[str]] = []
     cash_rounds = 0
     partial_rounds = 0
-    down_market_rounds = 0
 
     for i, as_of in enumerate(rebalance_dates):
         total_before = cash + sum(holdings.values())
-        invest_ratio = 1.0
-        if market_regime is not None:
-            regime = _resolve_market_regime_for_date(market_regime["series"], as_of)
-            if regime == "down":
-                invest_ratio = float(down_market_invest_pct) / 100.0
-                down_market_rounds += 1
         day = eligible[eligible["date"] == as_of]
         if day.empty:
             selected: list[str] = []
@@ -229,7 +215,7 @@ def _rule_performance(
                 sell_amount += holdings[ticker]
                 cash += holdings.pop(ticker)
 
-        # 매수는 레짐 켬/끔과 무관하게 항상 '승자 키우기': 신규만 목표 1/N(100% 기준)까지 사고,
+        # 매수는 항상 '승자 키우기': 신규만 목표 1/N(100% 기준)까지 사고,
         # 유지 종목은 비중 드리프트를 둔다(팔지 않음). 종목 간 상대 비중(승자 구조)은 여기서 결정된다.
         buy_amount = 0.0
         target_amount = target_w * total_before
@@ -240,29 +226,6 @@ def _rule_performance(
                 holdings[ticker] = each
                 cash -= each
                 buy_amount += each
-
-        # 레짐 볼륨 다이얼: 총 투자금액만 목표 투자비중으로 맞춘다. 상대 비중은 안 건드린다(리셋 없음).
-        #  - 하락(현재>목표): 모든 종목을 같은 배율로 축소, 차액은 현금.
-        #  - 상승 복귀(현재<목표, 현금 있음): 남은 현금을 현재 비중에 비례해 재투입(같은 배율로 증가).
-        if market_regime is not None:
-            target_invested = total_before * invest_ratio
-            current_invested = sum(holdings.values())
-            if current_invested > target_invested and current_invested > 0:
-                scale = target_invested / current_invested
-                for ticker in list(holdings):
-                    reduced = holdings[ticker] * (1.0 - scale)
-                    holdings[ticker] *= scale
-                    sell_amount += reduced
-                    cash += reduced
-                    if holdings[ticker] <= 1e-12:
-                        holdings.pop(ticker)
-            elif current_invested < target_invested and current_invested > 0 and cash > 0:
-                add_total = min(target_invested - current_invested, cash)
-                for ticker in list(holdings):
-                    add = add_total * (holdings[ticker] / current_invested)
-                    holdings[ticker] += add
-                    buy_amount += add
-                cash -= add_total
 
         # 정기 리밸런싱 비용. 긴급 매도 비용은 보유 기간 일별 루프에서 추가한다.
         cost = sell_amount * sell_pct + buy_amount * buy_pct
@@ -299,7 +262,9 @@ def _rule_performance(
                     # 매도 후 생긴 현금은 다음 리밸런싱일까지 대기한다.
                     for ticker in list(holdings):
                         short_disparity = (
-                            short_disparity_wide.at[current_date, ticker] if ticker in short_disparity_wide.columns else np.nan
+                            short_disparity_wide.at[current_date, ticker]
+                            if ticker in short_disparity_wide.columns
+                            else np.nan
                         )
                         if pd.notna(short_disparity) and float(short_disparity) < 0:
                             emergency_sell_amount = holdings.pop(ticker)
@@ -409,9 +374,6 @@ def _rule_performance(
         "turnover_pct": round(turnover * 100.0, 1),
         "round_trip_pct": round(round_trip_pct, 2),
         "cost_per_round_pct": round(cost_per_round, 2),
-        "down_market_invest_pct": round(float(down_market_invest_pct), 1),
-        "market_regime_index": market_regime["index"] if market_regime is not None else None,
-        "down_market_rounds": down_market_rounds,
         "rule": rule_stats,
         "benchmark": benchmark_payload,
         # 벤치마크를 못 쓸 때 화면이 원인을 구분해 보여주기 위한 값.
@@ -420,42 +382,6 @@ def _rule_performance(
         "benchmark_name": benchmark["name"] or None,
         "monthly": monthly_rows,
     }
-
-
-def _load_market_regime_map(pool_settings: dict[str, Any], *, require: bool) -> dict[str, Any] | None:
-    """종목풀의 시장 레짐 지수로 일별 상승/하락 맵을 만든다."""
-    index = get_pool_market_regime_index(pool_settings)
-    if index is None:
-        if require:
-            raise ValueError("하락시 투자비중을 100% 미만으로 쓰려면 /pools-settings 에서 시장 레짐 지수를 설정하세요.")
-        return None
-
-    from utils.market_trend_service import _calculate_supertrend, _resolve_supertrend_params, load_index_ohlc
-
-    ticker = index["ticker"]
-    ohlc = load_index_ohlc(ticker)
-    if ohlc is None or ohlc.empty:
-        raise ValueError(f"시장 레짐 지수 '{index['name']}'({ticker}) 의 가격 데이터를 불러오지 못했습니다.")
-
-    period, multiplier = _resolve_supertrend_params(ticker)
-    st = _calculate_supertrend(ohlc, period=period, multiplier=multiplier)
-    if st.empty or "direction" not in st:
-        raise ValueError(f"시장 레짐 지수 '{index['name']}'({ticker}) 의 레짐 계산 결과가 없습니다.")
-
-    series = pd.Series(np.where(st["direction"] == 1, "up", "down"), index=pd.to_datetime(st.index).normalize()).sort_index()
-    return {"index": index, "series": series}
-
-
-def _resolve_market_regime_for_date(regime: pd.Series, as_of: Any) -> str:
-    """리밸런싱일 기준 가장 최근 시장 레짐을 반환한다. 이전 레짐이 없으면 실패한다."""
-    target = pd.Timestamp(as_of).normalize()
-    pos = regime.index.searchsorted(target, side="right") - 1
-    if pos < 0:
-        raise ValueError(f"{target.strftime('%Y-%m-%d')} 이전의 시장 레짐 데이터가 없습니다.")
-    value = str(regime.iloc[pos])
-    if value not in {"up", "down"}:
-        raise ValueError(f"{target.strftime('%Y-%m-%d')} 시장 레짐 값이 올바르지 않습니다: {value}")
-    return value
 
 
 def _load_benchmark_close(pool_id: str, pool_settings: dict[str, Any]) -> dict[str, Any]:
@@ -509,7 +435,6 @@ def compute_pool_signal_backtest(
     short_ma_days: int | None = None,
     long_ma_days: int | None = None,
     hold_threshold_k: float | None = None,
-    down_market_invest_pct: float,
 ) -> dict[str, Any]:
     """종목풀의 이격/단기이격 규칙 → 최근 기간 실적(규칙/벤치마크)을 반환한다.
 
@@ -517,7 +442,7 @@ def compute_pool_signal_backtest(
     단기 이평선 기준이며, 두 이평선의 역할(선택/손절)로 포트폴리오를 시뮬레이션한다.
 
     MA 파라미터(단기/장기 이평선)는 해당 종목풀 설정을 기본으로 쓰되 화면 오버라이드가 있으면
-    그 값으로 실험한다. 고정 보유 종목(exclude_from_ranking)은 투자 후보가 아니므로 제외한다.
+    그 값으로 실험한다. 제외 종목(exclude_from_ranking)은 투자 후보가 아니므로 제외한다.
     """
     if forward_days not in FORWARD_DAY_OPTIONS:
         options = ", ".join(str(day) for day in FORWARD_DAY_OPTIONS)
@@ -527,18 +452,19 @@ def compute_pool_signal_backtest(
         raise ValueError(f"기간은 1~{max_months}개월이어야 합니다: {months}")
     if hold_threshold_k is not None and not (0.0 < float(hold_threshold_k) <= 1.0):
         raise ValueError(f"보유 유지 기준(k)은 0 초과 1 이하여야 합니다: {hold_threshold_k}")
-    if not (0.0 <= float(down_market_invest_pct) <= 100.0):
-        raise ValueError(f"하락시 투자비중은 0~100 범위여야 합니다: {down_market_invest_pct}")
 
     # MA/보유수 파라미터는 종목풀 설정이 기본. 화면에서 넘긴 오버라이드가 있으면 그 값으로
     # 실험한다(저장은 하지 않음). 오버라이드도 허용값인지 반드시 검증한다.
     rule = get_ticker_type_ma_rules(pool_id)[0]
-    short_days = _resolve_int_override(short_ma_days, rule["short_ma_days"], MA_DAY_OPTIONS, "단기 이평선")
-    long_days = _resolve_int_override(long_ma_days, rule["long_ma_days"], MA_DAY_OPTIONS, "장기 이평선")
+    short_days = _resolve_int_override(short_ma_days, rule["short_ma_days"], SHORT_MA_OPTIONS, "단기 이평선")
+    long_days = _resolve_int_override(long_ma_days, rule["long_ma_days"], LONG_MA_OPTIONS, "장기 이평선")
     window = int(months) * _TRADING_DAYS_PER_MONTH
 
+    from config import TOP_N_HOLD
+
     pool_settings = get_ticker_type_settings(pool_id)
-    top_n_hold = int(pool_settings["TOP_N_HOLD"]) if top_n is None else int(top_n)
+    # 미지정이면 시스템 공통 보유 종목 수(config) — 풀별 설정은 폐기했다.
+    top_n_hold = TOP_N_HOLD if top_n is None else int(top_n)
     if not (1 <= top_n_hold <= 100):
         raise ValueError(f"보유 종목수는 1~100 범위여야 합니다: {top_n_hold}")
     # 벤치마크는 비교 기준일 뿐 매수 대상이 아니다 — 순위 화면의 추천 규칙과 동일하게 뺀다.
@@ -553,7 +479,7 @@ def compute_pool_signal_backtest(
     ]
     excluded_count = len(all_etfs) - len(etfs)
     if not etfs:
-        raise ValueError(f"'{pool_id}' 종목풀에 분석 가능한 종목이 없습니다(고정 보유·벤치마크 제외 후 0개).")
+        raise ValueError(f"'{pool_id}' 종목풀에 분석 가능한 종목이 없습니다(제외 종목·벤치마크를 뺀 후 0개).")
 
     series_map = load_cached_close_series_bulk(pool_id, [item["ticker"] for item in etfs])
     frames: list[pd.DataFrame] = []
@@ -612,6 +538,5 @@ def compute_pool_signal_backtest(
             forward_days,
             _load_benchmark_close(pool_id, pool_settings),
             hold_threshold_k=hold_threshold_k,
-            down_market_invest_pct=float(down_market_invest_pct),
         ),
     }

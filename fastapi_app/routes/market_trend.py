@@ -41,8 +41,6 @@ def get_market_trend(
     return compute_market_trend()
 
 
-
-
 @router.get("/history")
 def get_market_trend_history(
     ticker: str = Query(..., description="Yahoo Finance 지수 심볼 (예: ^GSPC)"),

@@ -26,14 +26,29 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 # cron 의 요일 필드: 1=월, 2=화, ..., 6=토
 
 20 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
+# 하루 1회 전체 재수집(--full) — 수정주가(배당·분할) 재정렬용. 매시 라인은 증분만 수행한다.
+10 17 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh_full python scripts/stock_price_cache_updater.py --full >> logs/cron/cache_refresh_full.log 2>&1
 45 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py reference_meta_updater python scripts/stock_reference_meta_updater.py >> logs/cron/reference_meta_updater.log 2>&1
 50 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py price_metrics_updater python scripts/stock_price_metrics_updater.py >> logs/cron/price_metrics_updater.log 2>&1
 */10 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py data_aggregate python scripts/collect_data.py >> logs/cron/data_aggregate.log 2>&1
 40 9 * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
 10 16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
-0 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_hours_analysis python scripts/analyze_market_hours.py >> logs/cron/market_hours_analysis.log 2>&1
+30 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_hours_analysis python scripts/analyze_market_hours.py >> logs/cron/market_hours_analysis.log 2>&1
 0 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py us_market_stocks python scripts/update_us_market_stocks.py >> logs/cron/us_market_stocks.log 2>&1
 10 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py aus_market_stocks python scripts/update_aus_market_stocks.py >> logs/cron/aus_market_stocks.log 2>&1
+# 한국 지수 구성종목 — 공식 API 가 없어 추종 ETF(KODEX 200 / KODEX 코스닥150) 보유종목을 명단으로 쓴다.
+20 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py kor_market_stocks python scripts/update_kor_market_stocks.py >> logs/cron/kor_market_stocks.log 2>&1
+# 한국 배당주 지표 — 위 배치가 적재한 KOSPI200 명단을 유니버스로 읽으므로 반드시 그 뒤에 돈다.
+30 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py kor_dividend_stocks python scripts/update_kor_dividend_stocks.py >> logs/cron/kor_dividend_stocks.log 2>&1
+40 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py us_market_etfs python scripts/update_us_market_etfs.py >> logs/cron/us_market_etfs.log 2>&1
+# 시장 폭(ADR) — 한국 마감(15:30) 뒤 종가 확정 시각. 코스피 200 / 코스닥 150 의 일별 상승·하락 종목수를 적립한다.
+30 16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_breadth python scripts/collect_market_breadth.py >> logs/cron/market_breadth.log 2>&1
+# 07:00 은 미국 마감(KST 새벽 05~06시) 뒤. 금요일 미국 장은 토요일 새벽에 끝나므로 화~토(2-6)에 돈다.
+0 7 * * 2-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_breadth python scripts/collect_market_breadth.py >> logs/cron/market_breadth.log 2>&1
+# DB 백업 — 하루 1회 fresh 백업(임시 폴더 → 성공 시 교체), 최근 30개(=30일) 보존. 백업 폴더가 로컬(맥)이라 LOCAL 전용.
+# 전체 덤프라 DB 부하가 커서 매시 → 매일 07:00 으로 줄였다. 장 시간 분석(07:30)과 겹치지 않는다.
+0 7 * * * cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py db_backup python scripts/backup_mongo_full.py --gzip >> logs/cron/db_backup.log 2>&1
+
 # 최근 1시간 |변동| >= LIVE_24H_ALERT_PCT 인 종목이 있을 때만 <!channel> 로 발송(없으면 스킵).
 0 * * * * cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py live_24h_slack python scripts/live_24h_slack.py >> logs/cron/live_24h_slack.log 2>&1
 
@@ -42,7 +57,7 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 # 각 시장은 자기 거래 달력 기준 '장 마감 직후'일 때만 슬랙을 1회 보낸다(당일 중복 방지).
 # 한국 마감(15:30 KST)만 커버: 09:10·15:00·16:00 중 16:00 이 마감 직후라 한국 알림이 나간다.
 # (미국 알림이 필요하면 미국 마감 05:05/06:05 KST 라인을 추가해야 한다 — 현재는 미제공.)
-# 스케줄러는 무인자 스크립트만 실행하므로 scripts/ 래퍼를 통해 호출한다.
+# (스케줄러는 스크립트 뒤 인자도 그대로 전달한다 — 예: cache_refresh_full 의 --full)
 10 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py leverage_ma_cross python scripts/leverage_recommend_ma_cross.py >> logs/cron/leverage_ma_cross.log 2>&1
 0 15,16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py leverage_ma_cross python scripts/leverage_recommend_ma_cross.py >> logs/cron/leverage_ma_cross.log 2>&1
 
@@ -51,9 +66,21 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 # 개시 직후라 판정은 직전(어제) 확정 종가/수익률 기준 — 오늘 매매 전 아침 알림.
 10 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py holdings_alarm python scripts/holdings_alarm.py >> logs/cron/holdings_alarm.log 2>&1
 
-# ── 전략 사고팔기 알림 (평일 09:10~15:20, 10분 간격) ──────────────────────
-# kor_account 의 코스피200 ETF 6종을 회차로 보고, 매수/매도 지정가에 현재가가
-# 닿은 회차가 있을 때만 슬랙 1건 발송(없으면 미발송). 같은 회차-동작은 하루 1회.
-10,20,30,40,50 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
-0,10,20,30,40,50 10-14 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
-0,10,20 15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
+# ── 합성 액션 알림 (평일 09:10~15:20, 10분 간격) ──────────────────────────
+# 합성 알람(mix_slack_enabled) 켠 계좌의 오늘의 액션을 감시해, 새 지시·수량 증가가
+# 있을 때만 슬랙 발송. 지시가 줄어드는 변화(체결 반영)는 조용히 넘긴다.
+10,20,30,40,50 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_mix_notify_kor python scripts/strategy_mix_notify.py kor >> logs/cron/strategy_mix_notify_kor.log 2>&1
+0,10,20,30,40,50 10-14 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_mix_notify_kor python scripts/strategy_mix_notify.py kor >> logs/cron/strategy_mix_notify_kor.log 2>&1
+0,10,20 15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_mix_notify_kor python scripts/strategy_mix_notify.py kor >> logs/cron/strategy_mix_notify_kor.log 2>&1
+# 미국 합성 액션 알림 — 서머타임 정규장(22:30~05:00 KST)의 개장 10분 후~마감 10분 전.
+# 겨울 시간엔 1시간 밀리지만 crontab 이 KST 고정이라 장전 구간은 공회전(발송 없음)한다.
+40,50 22 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_mix_notify_us python scripts/strategy_mix_notify.py us >> logs/cron/strategy_mix_notify_us.log 2>&1
+0,10,20,30,40,50 23 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_mix_notify_us python scripts/strategy_mix_notify.py us >> logs/cron/strategy_mix_notify_us.log 2>&1
+0,10,20,30,40,50 0-3 * * 2-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_mix_notify_us python scripts/strategy_mix_notify.py us >> logs/cron/strategy_mix_notify_us.log 2>&1
+0,10,20,30,40,50 4 * * 2-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_mix_notify_us python scripts/strategy_mix_notify.py us >> logs/cron/strategy_mix_notify_us.log 2>&1
+
+# ── 증권사 잔고 동기화 (평일 09:00~15:40, 20분 간격) ──────────────────────
+# API 연동(broker_api) 저장된 계좌의 잔고·보유를 증권사 값으로 덮어쓴다. 계좌당 2콜
+# (잔고 + 연속조회), 호출은 1초 간격 직렬화. 15:40 마지막 회가 장 마감(15:30) 후
+# 확정 상태를 담는다. 변화 없으면 저장·슬랙 생략.
+0,20,40 9-15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py broker_balance_sync python scripts/broker_balance_sync.py >> logs/cron/broker_balance_sync.log 2>&1

@@ -96,25 +96,14 @@ def resolve_pool_ticker(ticker: str) -> dict[str, Any]:
 
     # active stocks 중 일치하는 종목 조회 (is_deleted가 참이 아닌 것)
     doc = db.stock_meta.find_one(
-        {
-            "ticker": ticker_norm,
-            "is_deleted": {"$ne": True}
-        },
-        {"ticker": 1, "name": 1, "ticker_type": 1}
+        {"ticker": ticker_norm, "is_deleted": {"$ne": True}}, {"ticker": 1, "name": 1, "ticker_type": 1}
     )
 
     if doc is None:
         # fallback: 삭제 상태이더라도 종목풀에 등록된 적이 있는 종목 검색
-        doc = db.stock_meta.find_one(
-            {"ticker": ticker_norm},
-            {"ticker": 1, "name": 1, "ticker_type": 1}
-        )
+        doc = db.stock_meta.find_one({"ticker": ticker_norm}, {"ticker": 1, "name": 1, "ticker_type": 1})
 
     if doc is None:
         raise ValueError(f"종목풀에서 티커 '{ticker_norm}'를 찾을 수 없습니다.")
 
-    return {
-        "ticker": doc["ticker"],
-        "name": doc["name"],
-        "ticker_type": doc["ticker_type"]
-    }
+    return {"ticker": doc["ticker"], "name": doc["name"], "ticker_type": doc["ticker_type"]}

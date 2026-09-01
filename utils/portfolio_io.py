@@ -1,10 +1,12 @@
 import datetime
+from collections.abc import Iterable
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 from bson import ObjectId
 
+from config import METRIC_WINDOW_MONTHS
 from services.price_service import get_exchange_rates, get_realtime_snapshot
 from utils.asx_ticker import ensure_asx_prefix
 from utils.db_manager import get_db_connection
@@ -18,6 +20,22 @@ KST = ZoneInfo("Asia/Seoul")
 def _now_kst() -> datetime.datetime:
     """KST 기준 현재 시각을 반환한다."""
     return datetime.datetime.now(KST)
+
+
+def return_pct_from_avg_price(price: Any, average_buy_price: Any) -> float | None:
+    """매입 평단 대비 현재가 수익률(%). 계좌 보유 표·합성 화면이 함께 쓴다.
+
+    평단이나 현재가가 없으면 **None** — 0% 로 채우면 '본전' 과 '모른다' 가 구분되지 않는다.
+    반올림은 하지 않는다: 화면마다 자릿수가 달라서 호출부가 정한다.
+    """
+    try:
+        buy = float(average_buy_price or 0)
+        current = float(price or 0)
+    except (TypeError, ValueError):
+        return None
+    if buy <= 0 or current <= 0:
+        return None
+    return (current / buy - 1.0) * 100.0
 
 
 def _round_snapshot_money(value: Any) -> int:
@@ -80,6 +98,59 @@ def load_holding_accounts_by_ticker(country_code: str | None = None) -> dict[str
                     names.append(account_name)
 
     return accounts_by_ticker
+
+
+def average_buy_price_by_ticker(
+    tickers: Iterable[str] | None = None, currency: str | None = None
+) -> dict[str, float]:
+    """티커 → 전 계좌 통합 평균매입가. 보유가 없는 티커는 결과에서 빠진다.
+
+    같은 티커가 여러 계좌에 있으면 수량 가중으로 하나로 합친다. 차트의 '내 평균' 선과
+    `/ticker` 상세가 같은 값을 보도록 여기 한 곳에서만 계산한다.
+
+    같은 티커가 여러 시장에 상장된 경우가 있어(IOO — 미국 USD / 호주 AUD) ``currency``
+    를 주면 그 통화 보유분만 합산한다. 통화가 섞인 채로 평균을 내면 뜻 없는 숫자가 되므로,
+    통화를 안 준 상태에서 섞여 있으면 그 티커는 **빼고** 돌려준다(임의로 고르지 않는다).
+
+    계좌 문서를 티커마다 다시 읽지 않는다 — 차트는 한 번에 수십 종목을 묻는다.
+    """
+    from utils.settings_loader import list_available_accounts
+
+    wanted = {str(t).strip().upper() for t in (tickers or []) if str(t or "").strip()} or None
+    target_currency = str(currency or "").strip().upper()
+
+    quantity_by: dict[str, float] = {}
+    amount_by: dict[str, float] = {}
+    currencies_by: dict[str, set[str]] = {}
+
+    for account_id in list_available_accounts():
+        master = load_portfolio_master(account_id)
+        if not master:
+            continue
+        for holding in master.get("holdings") or []:
+            ticker = str(holding.get("ticker") or "").strip().upper()
+            if not ticker or (wanted is not None and ticker not in wanted):
+                continue
+            try:
+                quantity = float(holding.get("quantity") or 0.0)
+                average = float(holding.get("average_buy_price") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if quantity <= 0 or average <= 0:
+                continue
+            holding_currency = str(holding.get("currency") or "").strip().upper()
+            if target_currency and holding_currency and holding_currency != target_currency:
+                continue
+            if holding_currency:
+                currencies_by.setdefault(ticker, set()).add(holding_currency)
+            quantity_by[ticker] = quantity_by.get(ticker, 0.0) + quantity
+            amount_by[ticker] = amount_by.get(ticker, 0.0) + quantity * average
+
+    return {
+        ticker: amount_by[ticker] / quantity
+        for ticker, quantity in quantity_by.items()
+        if quantity > 0 and len(currencies_by.get(ticker) or {""}) <= 1
+    }
 
 
 def load_all_holding_tickers(country_code: str | None = None) -> set[str]:
@@ -178,7 +249,7 @@ def load_real_holdings_table(
         docs_by_ticker: dict[str, list[dict[str, Any]]] = {}
         cursor = db.stock_meta.find(
             {"ticker": {"$in": all_tickers}, "is_deleted": {"$ne": True}},
-            {"ticker": 1, "bucket": 1, "name": 1, "ticker_type": 1, "is_etf": 1}
+            {"ticker": 1, "bucket": 1, "name": 1, "ticker_type": 1, "is_etf": 1},
         )
         for doc in cursor:
             docs_by_ticker.setdefault(doc["ticker"], []).append(doc)
@@ -213,8 +284,7 @@ def load_real_holdings_table(
             return docs[0]
 
         picked_docs = [
-            _pick_meta_doc(str(row.get("ticker") or ""), row.get("currency"))
-            for _, row in df_holdings.iterrows()
+            _pick_meta_doc(str(row.get("ticker") or ""), row.get("currency")) for _, row in df_holdings.iterrows()
         ]
 
         # 데이터 업데이트 (종목풀 정보 우선 적용, 다시장은 보유 통화 기준 문서 사용)
@@ -239,7 +309,8 @@ def load_real_holdings_table(
 
         # ticker_type이 없는 미등록 종목인 경우, 국가 코드를 기반으로 기본값 할당
         def _fallback_ticker_type(row):
-            if row.get("ticker_type"): return row["ticker_type"]
+            if row.get("ticker_type"):
+                return row["ticker_type"]
             c_code = row.get("country_code", "kor")
             return "us" if c_code == "us" else "aus" if c_code == "au" else "kor"
 
@@ -257,12 +328,9 @@ def load_real_holdings_table(
         "bucket",
         "first_buy_date",
         "last_buy_date",
-        "memo",
     ]:
         if col not in df_holdings.columns:
-            df_holdings[col] = "" if col in ("ticker", "name", "currency", "first_buy_date", "last_buy_date", "memo") else 0
-
-    df_holdings["memo"] = df_holdings["memo"].fillna("").astype(str)
+            df_holdings[col] = "" if col in ("ticker", "name", "currency", "first_buy_date", "last_buy_date") else 0
 
     df_holdings["quantity"] = (
         pd.to_numeric(df_holdings["quantity"], errors="coerce").fillna(0.0).apply(np.floor).astype(int)
@@ -400,7 +468,9 @@ def load_real_holdings_table(
             if prev_close > 0:
                 daily_pct = ((current_price / prev_close) - 1.0) * 100.0
 
-        max_price = float(close_series.max()) if not close_series.empty else 0.0
+        # 고점 대비(%) — 순위 화면과 같은 규칙: 최근 METRIC_WINDOW_MONTHS(12개월) 최고가 대비.
+        high_window = close_series.loc[close_series.index[-1] - pd.DateOffset(months=METRIC_WINDOW_MONTHS) :]
+        max_price = float(high_window.max()) if not high_window.empty else 0.0
         drawdown = None
         if max_price > 0:
             drawdown = (current_price / max_price - 1.0) * 100.0
@@ -419,13 +489,11 @@ def load_real_holdings_table(
 
     df_holdings["현재가"] = df_holdings.apply(_get_current_price, axis=1)
 
-    # 수익률 계산 (매입 단가 대비 현재가, 소수점 1자리)
+    # 수익률 계산 (매입 단가 대비 현재가, 소수점 1자리) — 공용 함수를 쓴다.
     def _calc_return_pct(row):
-        buy = float(row.get("average_buy_price") or 0)
-        curr = float(row.get("현재가") or 0)
-        if buy > 0:
-            return round(((curr / buy) - 1.0) * 100.0, 1)
-        return 0.0
+        value = return_pct_from_avg_price(row.get("현재가"), row.get("average_buy_price"))
+        # 이 표는 숫자 컬럼이라 빈 값을 못 받는다 — 평단이 없으면 0.0 (기존 동작 유지).
+        return 0.0 if value is None else round(value, 1)
 
     df_holdings["return_pct"] = df_holdings.apply(_calc_return_pct, axis=1)
 
@@ -512,8 +580,9 @@ def load_real_holdings_table(
         # We append a row to df_holdings
         pseudo_row = {
             "ticker": "IS",
-            # 표시명은 가격 프록시(VGS)의 정식 명칭으로 통일한다 — 내부 티커·고정자산 역할은 IS 유지.
-            "name": "Vanguard MSCI Index International Shares ETF",
+            # 표시명은 이 항목의 이름 그대로다. 예전에는 가격 프록시(VGS)의 정식 명칭을 썼는데,
+            # 실제 VGS 를 따로 사서 등록하면 같은 이름이 두 줄이 되어 구분이 안 됐다.
+            "name": "International Shares",
             "quantity": is_quantity,
             "average_buy_price": is_avg_price,
             "currency": "AUD",
@@ -541,7 +610,6 @@ def load_real_holdings_table(
         for col in ["수량", "평균 매입가", "매입금액(KRW)", "평가금액(KRW)"]:
             if col in df_holdings.columns:
                 df_holdings[col] = pd.to_numeric(df_holdings[col], errors="coerce").fillna(0)
-
 
     # Rename columns to match UI
     df_holdings = df_holdings.rename(
@@ -663,6 +731,9 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
                 "asset_helper": acc.get("asset_helper"),
                 "intl_shares_sort_order": acc.get("intl_shares_sort_order"),
                 "updated_at": acc.get("updated_at"),
+                "updated_by": acc.get("updated_by"),
+                # 통화별 현금 맵 — 자산 화면이 우선하는 값. 증권사 동기화의 차이 비교도 이걸 쓴다.
+                "cash": acc.get("cash") or {},
             }
     return None
 
@@ -677,8 +748,18 @@ def save_portfolio_master(
     intl_shares_value: float | None = None,
     intl_shares_change: float | None = None,
     intl_shares_sort_order: int | None = None,
+    updated_by: str = "user",
+    cash_map: dict[str, float] | None = None,
 ) -> bool:
-    """Save/Update one account's balance within the consolidated portfolio_master document."""
+    """Save/Update one account's balance within the consolidated portfolio_master document.
+
+    ``updated_by`` — 마지막 변경 주체. 수기 경로는 기본값 "user", 증권사 동기화·배치는
+    커넥터 id(예: "NAMU_PLUG")를 넘긴다. 화면이 '누가 언제 바꿨는지' 를 이 값으로 보여준다.
+
+    ``cash_map`` — 통화별 현금({"KRW": 4409108}). 자산 화면은 다통화 `cash` 맵을 레거시
+    `cash_balance` 보다 우선해서 읽으므로, 현금을 바꿀 때 맵도 함께 갱신해야 화면에
+    반영된다. **병합**한다 — 다른 통화(USD 등)의 잔액은 건드리지 않는다.
+    """
     db = get_db_connection()
     if db is None:
         return False
@@ -714,8 +795,11 @@ def save_portfolio_master(
                 for h in holdings:
                     h["quantity"] = int(math.floor(float(h.get("quantity", 0.0))))
 
+                if cash_map:
+                    acc["cash"] = {**(acc.get("cash") or {}), **{k.upper(): float(v) for k, v in cash_map.items()}}
                 acc["holdings"] = holdings
                 acc["updated_at"] = _now_kst()
+                acc["updated_by"] = str(updated_by or "user")
                 found = True
                 break
 
@@ -732,7 +816,10 @@ def save_portfolio_master(
                 "cash_balance": float(cash_balance or 0.0),
                 "holdings": holdings,
                 "updated_at": _now_kst(),
+                "updated_by": str(updated_by or "user"),
             }
+            if cash_map:
+                new_acc["cash"] = {k.upper(): float(v) for k, v in cash_map.items()}
             if cash_balance_native is not None:
                 new_acc["cash_balance_native"] = float(cash_balance_native)
             if cash_currency is not None:
@@ -762,7 +849,7 @@ def update_account_asset_helper(
 
     - 종목별 목표비중: 해당 계좌 보유 항목의 ``target_ratio`` 필드로 저장.
       맵에 없는 보유 항목은 필드를 제거한다(미설정 명시 — 임의 0 보정 금지).
-    - 계좌 단위 설정(weight_mode·백테스트 등): 계좌 객체의 ``asset_helper`` 필드로 저장.
+    - 계좌 단위 설정(백테스트 등): 계좌 객체의 ``asset_helper`` 필드로 저장.
 
     맵의 티커가 보유 목록에 없으면 에러를 낸다(fail loud — 종목 목록의 소스는 보유 목록이다).
     """
@@ -823,6 +910,11 @@ def save_daily_snapshot(
         return False
 
     snapshot_date = _resolve_snapshot_date()
+    # 소급 갱신 여부 — 주말·휴일 실행은 직전 거래일 행을 갱신한다(자산은 미국·호주 장
+    # 새벽 반영을 위해 소급이 맞다). 그러나 **원금은 달력일 귀속**이라 소급하면 안 된다:
+    # 주말에 옮긴 원금이 금요일 행에 스며들면 다음 거래일의 입출금 차감(Δ원금)이 0이 되어
+    # 이동액이 금일 손익으로 잡힌다. 소급 갱신에서는 기존 원금 값을 보존한다.
+    is_backfill = snapshot_date < _now_kst().strftime("%Y-%m-%d")
 
     try:
         # Find existing snapshot for today
@@ -841,7 +933,8 @@ def save_daily_snapshot(
 
         if account_id == "TOTAL":
             doc["total_assets"] = _round_snapshot_money(total_assets)
-            doc["total_principal"] = _round_snapshot_money(total_principal)
+            if not (is_backfill and doc.get("total_principal")):
+                doc["total_principal"] = _round_snapshot_money(total_principal)
             doc["cash_balance"] = _round_snapshot_money(cash_balance)
             doc["valuation_krw"] = _round_snapshot_money(valuation_krw)
             if purchase_amount is not None:
@@ -853,7 +946,8 @@ def save_daily_snapshot(
             for acc in accounts:
                 if acc["account_id"] == account_id:
                     acc["total_assets"] = _round_snapshot_money(total_assets)
-                    acc["total_principal"] = _round_snapshot_money(total_principal)
+                    if not (is_backfill and acc.get("total_principal")):
+                        acc["total_principal"] = _round_snapshot_money(total_principal)
                     acc["cash_balance"] = _round_snapshot_money(cash_balance)
                     acc["valuation_krw"] = _round_snapshot_money(valuation_krw)
                     if purchase_amount is not None:

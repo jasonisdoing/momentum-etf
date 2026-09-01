@@ -1,0 +1,332 @@
+/* 모바일 전용(`/m`) 스타일 — 폰 폭 기준. 데스크톱 화면 CSS 와 섞이지 않게 모듈로 둔다. */
+
+/* 화면 전체 틀 — 헤더·본문·푸터. 푸터는 항상 화면 아래에 붙는다. */
+.frame {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  width: 100%;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 8px;
+  padding: 8px calc(6px + env(safe-area-inset-left)) 16px calc(6px + env(safe-area-inset-right));
+  width: 100%;
+}
+
+/* 헤더 — 홈 화면에 추가한 앱(standalone)에서는 화면이 상태바 아래까지 올라온다.
+   safe-area 만큼 위를 띄우지 않으면 제목이 시계·배터리와 겹친다. */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 40px;
+  padding: calc(6px + env(safe-area-inset-top)) 6px 6px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-color, #e9ecef);
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 푸터 — 기준 시각과 새로고침. iOS 홈 인디케이터 영역만큼 아래를 띄운다. */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border-color, #e9ecef);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* 헤더·푸터의 아이콘 버튼 — 손가락으로 누르는 자리라 최소 44px 를 확보한다(애플 권장 최소 터치 영역). */
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-2xl);
+  line-height: 1;
+  padding: 4px 8px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.headerTitle {
+  font-size: var(--fs-lg);
+  font-weight: 800;
+}
+
+.backLink {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: var(--fs-base);
+}
+
+.summaryCard {
+  background: var(--bg-muted, rgba(0, 0, 0, 0.03));
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.summaryLabel {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.summaryValue {
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.summaryMetrics {
+  display: flex;
+  gap: 20px;
+}
+
+.metricLabel {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  margin-right: 6px;
+}
+
+.metricValue {
+  font-weight: 700;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border-color, #e9ecef);
+  border-radius: 0;
+  padding: 10px 6px;
+  text-decoration: none;
+  color: inherit;
+  background: none;
+  text-align: left;
+  font: inherit;
+}
+
+/* 계좌 한 묶음 — 헤더(버튼)와 펼친 종목 목록. */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.children {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 8px;
+}
+
+.childRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 6px 6px 10px;
+  border-left: 2px solid var(--border-color, #e9ecef);
+}
+
+.rowMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rowName {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowSub {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.rowSide {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.rowAmount {
+  font-weight: 700;
+}
+
+.rowPct {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+
+/* 홈(런처) — 위는 비우고 버튼은 아래에 둔다(엄지가 닿는 자리). */
+.homePage {
+  justify-content: flex-start;
+  gap: 14px;
+}
+
+.homeTop {
+  flex: 1;
+}
+
+.homeMenu {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.homeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 64px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+}
+
+.homeButton:active {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+.state {
+  color: var(--text-muted);
+  padding: 24px 4px;
+  text-align: center;
+}
+
+/* 홈 — 계좌 비중 파이 + 범례. */
+.pieBlock {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pieLegend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.legendRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+}
+
+.legendDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.legendName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legendAmount {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.legendValue {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* 홈 — 기간 수익률(금일·금주·금월·금년). */
+.periodCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-muted, rgba(0, 0, 0, 0.03));
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.periodRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.periodValue {
+  font-weight: 800;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.periodProfit {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+/* 화면 안의 묶음 — 제목 + 내용. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sectionTitle {
+  margin: 0;
+  padding-left: 2px;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text-muted);
+}

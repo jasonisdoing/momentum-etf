@@ -497,6 +497,13 @@ def refresh_kis_domestic_etf_master_cache() -> int:
     df = load_kis_domestic_etf_master()
     rows = df.to_dict(orient="records")
     _enrich_rows_with_base_closes(rows)
+    # 과세 구분 — KIS 마스터에 없어 네이버 ETF 분류로 채운다. 조회에 실패하면 맵이 비고
+    # 종목은 `is_tax_free=None`(모름)이 된다 — 비과세로 넘겨짚지 않는다.
+    from utils.kor_etf_tax_type import load_etf_tax_free_map
+
+    tax_free_by = load_etf_tax_free_map()
+    for row in rows:
+        row["is_tax_free"] = tax_free_by.get(str(row.get("티커") or "").strip())
     now = datetime.now(timezone.utc)
 
     coll = db[_COLLECTION_NAME]

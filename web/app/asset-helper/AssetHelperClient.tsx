@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef, GridOptions } from "ag-grid-community";
 
+import AccountSelect from "../components/AccountSelect";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { MONTH_OPTIONS, MonthsSelect } from "../components/MonthsSelect";
 import { GridToolbarButton } from "../components/GridToolbarButton";
 import { PageFrame } from "../components/PageFrame";
 import { StableInlineInput } from "../components/StableInlineInput";
@@ -11,7 +13,8 @@ import { useAddingTickerRow } from "../components/useAddingTickerRow";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { AssetHelperBacktestResult, type LabResult } from "../components/AssetHelperBacktestResult";
 import { BUCKET_THEME } from "@/lib/bucket-theme";
-import { renderNameWithLeverageHighlight } from "@/lib/name-highlight";
+import { FIXED_ASSET_NAME, FIXED_ASSET_PRICE_PROXY, FIXED_ASSET_ROW_CLASS, FIXED_ASSET_TICKER } from "@/lib/fixed-asset";
+import { renderStockNameCell } from "@/lib/name-highlight";
 import { reorderHoldings } from "@/lib/holdings-store";
 import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
 
@@ -35,11 +38,10 @@ import {
 // 현금 행은 편집 가능하며, 종목합 + 현금 = 100% 여야 유효하다(백엔드는 종목만 저장, 현금=100-종목합 파생).
 const CASH_TICKER = "__CASH__";
 // IS(International Shares) — /assets 에서 수동 입력하는 호주 고정자산.
-// 내부 티커는 IS 를 유지하되, 화면·백테스트에서는 VGS(가격 프록시)의 정식 명칭으로 보여준다.
-// 비중은 편집 불가(실제 평가액 기반 자동 계산)이고, 백테스트는 VGS 가격 시계열을 쓴다.
-const IS_TICKER = "IS";
-const IS_DISPLAY_NAME = "Vanguard MSCI Index International Shares ETF";
-const IS_PROXY_DISPLAY_TICKER = "ASX:VGS"; // 표시·지표 조회용 프록시 티커 (내부 키는 IS 유지)
+// 티커·이름 표기는 전 화면 공용(`@/lib/fixed-asset`)이다. 비중은 편집 불가(실제 평가액
+// 기반 자동 계산)이고, 백테스트는 VGS 가격 시계열을 프록시로 쓴다.
+const IS_TICKER = FIXED_ASSET_TICKER;
+const IS_DISPLAY_NAME = FIXED_ASSET_NAME;
 
 // 저장된 종목들의 고정비중 합의 나머지를 현금(%)으로 계산한다(로드 시 현금 초기화용).
 function cashFromTickers(rows: Array<{ ticker: string; name?: string; fixed_weight_pct?: number | null }>): number {
@@ -99,20 +101,6 @@ function formatMarketRegimeBullet(item: MarketTrendItem): { text: string; color:
   };
 }
 
-// 계좌 셀렉터 표기 — /pools-backtest 종목풀 셀렉터(formatPoolLabel)와 같은 조합 형식.
-// `1. 💰 연금저축 계좌(pension_account)`. order/icon 이 없으면 그 부분만 빠진다.
-function formatAccountLabel(acc: AccountOption): string {
-  const name = String(acc.name ?? "").trim() || acc.account_id;
-  const prefix = [
-    acc.order === null || acc.order === undefined ? null : `${acc.order}.`,
-    String(acc.icon ?? "").trim() || null,
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const body = `${name}(${acc.account_id})`;
-  return prefix ? `${prefix} ${body}` : body;
-}
-
 type HelperTicker = {
   ticker: string;
   name?: string;
@@ -139,6 +127,25 @@ type HoldingRow = {
   currency?: string;
   weight_pct?: number | null;
 };
+
+type AccountSummary = {
+  account_id?: string;
+  cash_balance_krw?: number | null;
+  total_assets_krw?: number | null;
+};
+
+// 현금의 '현재 비중'(%) = 현금 잔고 / 총자산. 종목 행의 weight_pct 와 같은 분모(현금 포함 총자산)를 쓴다.
+// 총자산이 없거나 0이면 null 로 두어 화면이 '-' 를 보여준다 — `100 - 종목합` 으로 대신하지 않는다
+// (행별 반올림 오차가 쌓이고, 종목이 일부만 잡힌 상태에서는 틀린 값이 된다).
+function currentCashWeightPct(summaries: AccountSummary[] | undefined, accountId: string): number | null {
+  const summary = (summaries ?? []).find((item) => String(item.account_id ?? "") === accountId);
+  const total = Number(summary?.total_assets_krw);
+  const cash = Number(summary?.cash_balance_krw);
+  if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(cash)) {
+    return null;
+  }
+  return Math.round((cash / total) * 10_000) / 100;
+}
 
 // 보유 티커의 시장 접두어(ASX:/KR: 등)를 제거한다. 가격 캐시·비중 계산은 접두어 없는 티커를 쓴다.
 function stripMarketPrefix(ticker: string): string {
@@ -207,7 +214,6 @@ type HelperSettings = Record<string, unknown> & { ACCOUNT_ID?: string; STOCK_MAX
 type GridRow = HelperTicker & { row_index: number; is_adding: boolean } & Partial<WeightRow>;
 
 // 백테스트 기간(개월) 선택 옵션 — 백엔드 ALLOWED_BACKTEST_MONTHS 와 동일해야 한다(자유 입력 시 허용값 밖 에러 방지).
-const BACKTEST_MONTH_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 24, 36];
 
 const REBALANCE_OPTIONS = [
   { value: "none", label: "리밸런싱 없음 (보유)" },
@@ -238,21 +244,23 @@ function buildRows(items: HelperTicker[] | undefined): HelperTicker[] {
     .map((item) => ({ ...item, ticker: item.ticker ?? "" }));
 }
 
-// 지표(금일/수익률/MDD/소르티노/현재가)를 계산해 티커→지표 맵으로 반환한다. 실패해도 빈 맵(그리드는 표시).
+/** 지표(금일/수익률/MDD/소르티노/현재가)를 티커→지표 맵으로. **실패하면 던진다.**
+ *  예전에는 빈 맵을 돌려줘서, 한 종목이 걸려도 표 전체가 조용히 `-` 가 되고 원인을 알 수 없었다. */
 async function fetchMetrics(validList: HelperTicker[], settingsArg: HelperSettings): Promise<Record<string, WeightRow>> {
-  try {
+  {
     const resp = await fetch("/api/asset-helper-settings/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         tickers: validList,
         settings: settingsArg,
-        weight_mode: "fixed",
         backtest_settings: { months: 12, rebalance: "none", initial_amount_manwon: 10000 },
       }),
     });
     const data = (await resp.json()) as { rows?: (WeightRow & { bucket?: unknown })[]; error?: string };
-    if (!resp.ok || data.error) return {};
+    if (!resp.ok || data.error) {
+      throw new Error(data.error ?? "지표를 계산하지 못했습니다.");
+    }
     const map: Record<string, WeightRow> = {};
     for (const row of data.rows ?? []) {
       map[row.ticker] = {
@@ -268,8 +276,6 @@ async function fetchMetrics(validList: HelperTicker[], settingsArg: HelperSettin
       };
     }
     return map;
-  } catch {
-    return {};
   }
 }
 
@@ -315,8 +321,10 @@ export function AssetHelperClient() {
     selectedAccountRef.current = selectedAccount;
   }, [selectedAccount]);
   const [marketTrendItems, setMarketTrendItems] = useState<MarketTrendItem[]>([]);
-  // 알람 배지(이동선 이탈·손절 아이콘) — /alarms 설정·판정 그대로. 보조 정보라 실패 시 빈 맵.
+  // 알람 배지(이동선 이탈·손절 아이콘) — 계좌 설정의 알람 On/Off·판정 그대로. 보조 정보라 실패 시 빈 맵.
   const [alertBadges, setAlertBadges] = useState<AlertBadges>({});
+  // 이동선 이탈 종목 — 배지와 같은 조건으로 행을 회색 처리한다.
+  const [maBrokenTickers, setMaBrokenTickers] = useState<Set<string>>(new Set());
   const [accountReturns, setAccountReturns] = useState<Record<string, AccountReturns>>({});
   const [memo, setMemo] = useState("");
   const [savedMemo, setSavedMemo] = useState("");
@@ -324,6 +332,8 @@ export function AssetHelperClient() {
   const [noteUpdatedAt, setNoteUpdatedAt] = useState<string | null>(null);
   const [tickers, setTickers] = useState<HelperTicker[]>(() => buildRows(undefined));
   const [cashWeight, setCashWeight] = useState(100); // 현금 비중(%) — 편집 가능. 로드 시 100-종목합으로 초기화.
+  // 현금의 '현재 비중'(%) — 계좌 요약의 현금/총자산. 총자산을 못 받으면 null(=화면에 '-').
+  const [cashCurrentWeight, setCashCurrentWeight] = useState<number | null>(null);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]); // 삭제 선택(내부 티커=접두어 없음)
   const [settings, setSettings] = useState<HelperSettings | null>(null);
   const [metricByTicker, setMetricByTicker] = useState<Record<string, WeightRow>>({});
@@ -334,7 +344,7 @@ export function AssetHelperClient() {
   const [btMonths, setBtMonths] = useState("12");
   const [btRebalance, setBtRebalance] = useState("monthly");
   // 기간(개월) 옵션 — pools-backtest 와 동일하게 가격 캐시 데이터 길이 기준으로 서버에서 받는다.
-  const [monthOptions, setMonthOptions] = useState<number[]>(BACKTEST_MONTH_OPTIONS);
+  const [monthOptions, setMonthOptions] = useState<number[]>(MONTH_OPTIONS);
   const [btResult, setBtResult] = useState<LabResult | null>(null);
   const [btRunning, setBtRunning] = useState(false);
 
@@ -406,7 +416,11 @@ export function AssetHelperClient() {
           error?: string;
         };
         if (!settingsResp.ok || data.error) throw new Error(data.error ?? "포트폴리오를 불러오지 못했습니다.");
-        const holdingsData = (await holdingsResp.json()) as { rows?: HoldingRow[]; error?: string };
+        const holdingsData = (await holdingsResp.json()) as {
+          rows?: HoldingRow[];
+          account_summaries?: AccountSummary[];
+          error?: string;
+        };
         if (!holdingsResp.ok || holdingsData.error) throw new Error(holdingsData.error ?? "보유 종목을 불러오지 못했습니다.");
         const noteData = (await noteResp.json()) as { content?: string; updated_at?: string };
         const noteContent = noteResp.ok ? String(noteData.content ?? "") : "";
@@ -416,6 +430,7 @@ export function AssetHelperClient() {
         setNoteUpdatedAt(noteResp.ok ? noteData.updated_at ?? null : null);
         const loadedTickers = mergeHoldingsWithWeights(holdingsData.rows ?? [], data.tickers);
         setTickers(loadedTickers);
+        setCashCurrentWeight(currentCashWeightPct(holdingsData.account_summaries, target));
         // 현금 비중은 저장값이 원본 — IS(자동)가 변해 합이 100에서 어긋나면 저장이 차단되고
         // 사용자가 직접 조정한다(현금 자동 흡수 금지). 저장값이 없는 계좌만 나머지로 초기화.
         setCashWeight(
@@ -431,10 +446,14 @@ export function AssetHelperClient() {
           const hasIsRow = validLoaded.some((t) => t.is_fixed_asset);
           const metricsRequest = validLoaded
             .filter((t) => !t.is_fixed_asset)
-            .concat(hasIsRow ? [{ ticker: "VGS", name: IS_DISPLAY_NAME, ticker_type: "aus" }] : []);
+            .concat(
+              hasIsRow
+                ? [{ ticker: FIXED_ASSET_PRICE_PROXY, name: IS_DISPLAY_NAME, ticker_type: "aus" }]
+                : [],
+            );
           const fetched = await fetchMetrics(metricsRequest, data.settings);
-          if (hasIsRow && fetched["VGS"]) {
-            fetched[IS_TICKER] = { ...fetched["VGS"], ticker: IS_TICKER };
+          if (hasIsRow && fetched[FIXED_ASSET_PRICE_PROXY]) {
+            fetched[IS_TICKER] = { ...fetched[FIXED_ASSET_PRICE_PROXY], ticker: IS_TICKER };
           }
           setMetricByTicker(fetched);
         } else {
@@ -475,11 +494,14 @@ export function AssetHelperClient() {
   useEffect(() => {
     if (!selectedAccount) {
       setAlertBadges({});
+      setMaBrokenTickers(new Set());
       return;
     }
     let alive = true;
-    void fetchAlertBadges(selectedAccount).then((badges) => {
-      if (alive) setAlertBadges(badges);
+    void fetchAlertBadges(selectedAccount).then((info) => {
+      if (!alive) return;
+      setAlertBadges(info.badgeByTicker);
+      setMaBrokenTickers(new Set(info.maTickers));
     });
     return () => {
       alive = false;
@@ -556,10 +578,11 @@ export function AssetHelperClient() {
   // /assets 와 동일: 확인 시 즉시 저장하지 않고 상단에 '미저장(pending)' 행으로 둔다.
   // 실제 보유목록 등록·비중 저장은 '저장' 버튼에서 한 번에 처리하고, 저장 전 새로고침하면 사라진다.
   const addOnValidated = useCallback(
-    (resolved: HelperTicker) => {
+    (resolved: HelperTicker & { name: string }) => {
       const key = resolved.ticker.trim().toUpperCase();
-      // 종목풀에 없는 티커는 resolve 가 이름 대신 티커를 돌려준다 — 그 경우 티커를 이름으로 쓴다(저장 후 실제 이름 확정).
-      const nm = resolved.name && resolved.name.trim() ? resolved.name.trim() : resolved.ticker;
+      // 이름은 항상 있다 — 종목풀에 있는 티커만 통과하고(addResolve 가 이름 없으면 에러),
+      // 종목풀에 없는 티커는 조회 단계에서 막힌다. 티커로 이름을 대신하지 않는다.
+      const nm = resolved.name.trim();
       setTickers((cur) =>
         cur.some((t) => t.ticker.trim().toUpperCase() === key)
           ? cur
@@ -679,7 +702,6 @@ export function AssetHelperClient() {
         body: JSON.stringify({
           account_id: selectedAccount,
           tickers: validTickers.filter((t) => !t.is_fixed_asset),
-          weight_mode: "fixed",
           settings,
           cash_weight_pct: cashWeight,
         }),
@@ -719,7 +741,6 @@ export function AssetHelperClient() {
         body: JSON.stringify({
           tickers: validTickers,
           settings,
-          weight_mode: "fixed",
           backtest_settings: { months: Number(btMonths), rebalance: btRebalance, initial_amount_manwon: Number(btAmount) },
         }),
       });
@@ -740,7 +761,14 @@ export function AssetHelperClient() {
 
   const gridRows = useMemo<GridRow[]>(() => {
     // 맨 위 고정 현금 행(읽기전용, row_index=-1 로 종목·추가행과 구분).
-    const cashRow: GridRow = { ticker: CASH_TICKER, name: "현금", row_index: -1, is_adding: false, fixed_weight_pct: cashWeight };
+    const cashRow: GridRow = {
+      ticker: CASH_TICKER,
+      name: "현금",
+      row_index: -1,
+      is_adding: false,
+      fixed_weight_pct: cashWeight,
+      current_weight_pct: cashCurrentWeight,
+    };
     const committed = tickers.map((item, idx) => ({
       ...item,
       ...(metricByTicker[item.ticker.trim().toUpperCase()] ?? {}),
@@ -751,7 +779,7 @@ export function AssetHelperClient() {
       ? [{ ticker: add.addingRow.ticker, name: add.addingRow.name, row_index: 0, is_adding: true }]
       : [];
     return [cashRow, ...addingRows, ...committed];
-  }, [tickers, metricByTicker, add.addingRow, cashWeight]);
+  }, [tickers, metricByTicker, add.addingRow, cashWeight, cashCurrentWeight]);
 
   const columnDefs = useMemo<ColDef<GridRow>[]>(
     () => [
@@ -803,8 +831,11 @@ export function AssetHelperClient() {
             );
           }
           {
-            // IS 고정자산은 가격 프록시(VGS) 티커로 표시하고 상세도 VGS 로 연결한다.
-            const dt = row.is_fixed_asset ? IS_PROXY_DISPLAY_TICKER : displayTickerFor(row.ticker, row.country_code);
+            // 고정 자산(IS)은 상장 종목이 아니라 상세 화면이 없다 — 링크 없이 표기만 한다.
+            if (row.is_fixed_asset) {
+              return <span>{FIXED_ASSET_TICKER}</span>;
+            }
+            const dt = displayTickerFor(row.ticker, row.country_code);
             return <TickerDetailLink ticker={dt} displayTicker={dt} />;
           }
         },
@@ -834,13 +865,12 @@ export function AssetHelperClient() {
               </div>
             );
           }
-          const badge = alertBadges[normalizeBadgeTicker(row.ticker)] ?? "";
-          return (
-            <span className="appNameCellText" title={params.value ?? ""}>
-              {renderNameWithLeverageHighlight(String(params.value ?? ""))}
-              {badge ? <span> {badge}</span> : null}
-            </span>
-          );
+          if (row.is_fixed_asset) {
+            return <span>{FIXED_ASSET_NAME}</span>;
+          }
+          return renderStockNameCell(params.value, {
+            badge: alertBadges[normalizeBadgeTicker(row.ticker)] ?? "",
+          });
         },
       },
       { field: "daily_change_pct", headerName: "일간", minWidth: 88, width: 88, type: "rightAligned", cellRenderer: renderPctCell },
@@ -875,7 +905,8 @@ export function AssetHelperClient() {
         // IS 고정자산은 실제 평가액 기반 자동값이라 편집 불가.
         editable: (params) => Boolean(params.data && !params.data.is_adding && !params.data.is_fixed_asset),
         valueFormatter: (p) => (p.value == null || p.value === "" ? "-" : `${Number(p.value).toFixed(2)}`),
-        cellClass: "assetsEditableCell",
+        // 편집 가능한 셀에만 녹색 배경을 준다 — IS 행은 색을 빼서 "여기는 못 고친다"가 보이게 한다.
+        cellClass: (params) => (params.data?.is_fixed_asset ? undefined : "assetsEditableCell"),
       },
     ],
     // add(useAddingTickerRow) 는 매 렌더 새로 생성되므로 의존성에 포함해
@@ -969,25 +1000,12 @@ export function AssetHelperClient() {
           <div className="card-body">
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">계좌</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={selectedAccount ?? ""}
-                    disabled={loading || accounts.length === 0}
-                    onChange={(event) => void load(event.target.value)}
-                  >
-                    {accounts.length === 0 ? (
-                      <option value="">계좌 불러오는 중...</option>
-                    ) : (
-                      accounts.map((a) => (
-                        <option key={a.account_id} value={a.account_id}>
-                          {formatAccountLabel(a)}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </label>
+                <AccountSelect
+                  accounts={accounts}
+                  value={selectedAccount ?? ""}
+                  onChange={(accountId) => void load(accountId)}
+                  disabled={loading}
+                />
               </div>
             </div>
           </div>
@@ -1056,10 +1074,12 @@ export function AssetHelperClient() {
                   {noteSaving ? "저장 중..." : "메모 저장"}
                 </GridToolbarButton>
               </div>
+              {/* 계좌 운영 규칙을 스크롤 없이 한눈에 보는 자리라 기본 높이를 넉넉히 준다
+                  (20줄 남짓 = 32rem). 오른쪽 아래 손잡이로 더 늘릴 수 있다. */}
               <textarea
                 className="form-control"
-                style={{ fontSize: "var(--fs-base)", minHeight: "16rem" }}
-                rows={12}
+                style={{ fontSize: "var(--fs-base)", minHeight: "32rem" }}
+                rows={22}
                 placeholder="이 계좌에 대한 투자 전략이나 주의사항을 메모하세요. AI가 요약할 때 함께 참고합니다."
                 value={memo}
                 onChange={(e) => setMemo(e.target.value)}
@@ -1111,6 +1131,12 @@ export function AssetHelperClient() {
               getRowId={(params) =>
                 params.data.is_adding ? "__adding__" : String(params.data.ticker || `row_${params.data.row_index}`)
               }
+              getRowClass={(params) => {
+                // 고정 자산은 사고팔 수 없는 줄이라 전체를 노랗게 구분한다.
+                if (params.data?.is_fixed_asset) return FIXED_ASSET_ROW_CLASS;
+                // 이동선 이탈은 종목명 뒤 배지와 같은 조건으로 행을 연한 회색으로 눌러 둔다.
+                return maBrokenTickers.has(normalizeBadgeTicker(params.data?.ticker ?? "")) ? "appTrendBrokenRow" : "";
+              }}
             />
           </div>
         </div>
@@ -1124,13 +1150,7 @@ export function AssetHelperClient() {
               </label>
               <label className="appLabeledField">
                 <span className="appLabeledFieldLabel">기간(개월)</span>
-                <select className="form-select form-select-sm" value={btMonths} onChange={(e) => setBtMonths(e.target.value)}>
-                  {monthOptions.map((m) => (
-                    <option key={m} value={m}>
-                      최근 {m}개월
-                    </option>
-                  ))}
-                </select>
+                <MonthsSelect value={Number(btMonths)} options={monthOptions} onChange={(m) => setBtMonths(String(m))} />
               </label>
               <label className="appLabeledField">
                 <span className="appLabeledFieldLabel">리밸런싱</span>

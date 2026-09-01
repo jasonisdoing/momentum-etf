@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+from utils.batch_queue import LOCAL_ONLY_JOBS
 from utils.db_manager import get_db_connection
 from utils.env import load_env_if_present
 from utils.ticker_registry import load_ticker_type_configs
@@ -16,27 +17,49 @@ load_env_if_present()
 
 SystemAction = Literal[
     "data_aggregate",
+    "broker_balance_sync",
+    "strategy_mix_notify_kor",
+    "strategy_mix_notify_us",
     "cache_refresh",
+    "cache_refresh_full",
     "market_hours_analysis",
     "reference_meta_updater",
     "price_metrics_updater",
     "asset_summary",
     "us_market_stocks",
+    "us_market_etfs",
     "aus_market_stocks",
+    "kor_market_stocks",
+    "kor_dividend_stocks",
+    "market_breadth",
     "live_24h_slack",
     "leverage_ma_cross",
     "holdings_alarm",
-    "strategy_trade_notify",
+    "db_backup",
 ]
 
 # 평일(월~금) / 월~토 / 매일 weekday 셋. (Python: 0=월 ... 6=일)
 _WEEKDAYS_MON_FRI = [0, 1, 2, 3, 4]
 _WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
+# 미국 장 마감이 KST 새벽이라, 미국 종가를 받는 아침 배치는 화~토에 돈다.
+_WEEKDAYS_TUE_SAT = [1, 2, 3, 4, 5]
 _WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6]
 
-# 전략 사고팔기 알림 슬롯 — 평일 09:10~15:20 을 10분 간격으로.
-# 한국 장중(09:00~15:30)에서 개시 직후·마감 직전을 뺀 구간이다.
-_STRATEGY_TRADE_SLOTS = [
+# 증권사 잔고 동기화 슬롯 — 20분 간격(09:00~15:40). 계좌당 2콜·1초 직렬화라 하루 42콜 수준.
+# 15:40 이 마감 후 1회.
+_BROKER_SYNC_SLOTS = [{"hour": hour, "minute": minute} for hour in range(9, 16) for minute in (0, 20, 40)]
+
+# 미국 장중 10분 슬롯 — 22:40~23:50 + 00:00~04:50 KST (서머타임 정규장 22:30~05:00 에서
+# 개장 직후·마감 직전 10분을 뺀 구간). 자정을 넘는 구간이라 요일은 월~토로 잡는다.
+_US_INTRADAY_10MIN_SLOTS = [
+    {"hour": hour, "minute": minute}
+    for hour in (22, 23, 0, 1, 2, 3, 4)
+    for minute in range(0, 60, 10)
+    if (hour, minute) >= (22, 40) or hour < 5
+]
+
+# 장중 10분 슬롯 — 평일 09:10~15:20. 한국 장중(09:00~15:30)에서 개시 직후·마감 직전을 뺀 구간.
+_INTRADAY_10MIN_SLOTS = [
     {"hour": hour, "minute": minute}
     for hour in range(9, 16)
     for minute in range(0, 60, 10)
@@ -44,26 +67,104 @@ _STRATEGY_TRADE_SLOTS = [
 ]
 
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
+# `no` 는 화면(`/batch`)에 보이는 번호다 — 목록 순서로 자동 매기면 중간에 배치를 추가할 때
+# 뒤 번호가 전부 밀려서 "12번 돌려줘" 같은 대화가 어긋난다. 여기서 명시적으로 매기고,
+# 배치를 추가하면 그 자리부터 번호를 다시 적는다(10·20·100 식으로 띄우지 않는다 — 연속 번호).
 # schedule 필드는 infra/cron/crontab 과 동기화해야 합니다.
 # 운영 방식: VM cron 은 제거됐고, 서버 docker scheduler 컨테이너의 infra/server_scheduler.py
 # 가 infra/cron/crontab 을 읽어 APScheduler 로 큐에 enqueue 합니다. worker 는
 # 서버와 로컬(`python infra/server_scheduler.py`) 양쪽에서 큐를 atomic 하게 claim 합니다.
 SCHEDULE_ROWS = [
+    # ① 상시 집계 — 가장 자주 돌고 짧다. 실패하면 화면 전체가 틀어진다.
     {
+        "no": 1,
         "key": "data_aggregate",
+        "group": "상시 집계",
         "job": "데이터 집계",
         "target": "일별/주별/월별/년별 데이터",
-        "run_location": "SERVER/LOCAL",
         "cadence": "월~토 24시간 10분 간격 KST",
         "command": "python scripts/collect_data.py",
         # 1분이면 끝나는 가벼운 집계라 촘촘히 돌린다(00·10·20·30·40·50분).
         "schedule": {"minutes": list(range(0, 60, 10)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
+        "no": 2,
+        "key": "cache_refresh",
+        "group": "상시 집계",
+        "job": "가격 캐시 업데이트",
+        "target": "모든 종목 가격",
+        "cadence": "월~토 24시간 매시 20분 KST",
+        "command": "python scripts/stock_price_cache_updater.py",
+        "schedule": {"minutes": [20], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
+    },
+    # ② 장중 실행 — 장중에 도는 것들. 알림과 데이터 동기화가 섞여 있다.
+    {
+        "no": 3,
+        "key": "broker_balance_sync",
+        "group": "장중 실행",
+        "job": "증권사 잔고 동기화",
+        "target": "API 연동(broker_api) 저장된 계좌",
+        "cadence": "평일 09:00~15:40 KST 20분 간격",
+        "command": "python scripts/broker_balance_sync.py",
+        # 15:40 마지막 회가 마감(15:30) 후 확정 상태를 담는다. 실패 슬랙은 시작·복구 1회씩.
+        "schedule": {"slots": _BROKER_SYNC_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
+        "no": 4,
+        "key": "strategy_mix_notify_kor",
+        "group": "장중 실행",
+        "job": "한국 합성 액션 알림",
+        "target": "합성 알람 켠 한국 풀 계좌 (오늘의 액션 신규·증가)",
+        "cadence": "평일 09:10~15:20 KST 10분 간격",
+        "command": "python scripts/strategy_mix_notify.py kor",
+        # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
+        # 지시가 줄어드는 변화(체결 반영)는 보내지 않는다.
+        "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
+        "no": 5,
+        "key": "strategy_mix_notify_us",
+        "group": "장중 실행",
+        "job": "미국 합성 액션 알림",
+        "target": "합성 알람 켠 미국 풀 계좌 (오늘의 액션 신규·증가)",
+        # 미국 정규장(서머타임 22:30~05:00 KST)의 개장 10분 후 ~ 마감 10분 전.
+        # 겨울 시간에는 1시간 밀린다 — crontab 이 KST 고정이라 그 구간은 장전 공회전(발송 없음).
+        "cadence": "평일 22:40~04:50 KST 10분 간격",
+        "command": "python scripts/strategy_mix_notify.py us",
+        "schedule": {"slots": _US_INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_SAT},
+    },
+    {
+        "no": 6,
+        "key": "holdings_alarm",
+        "group": "장중 실행",
+        "job": "보유종목 알람",
+        "target": "알람 On 계좌의 보유 종목",
+        "cadence": "평일 09:10 KST (한국 개시 직후)",
+        "command": "python scripts/holdings_alarm.py",
+        "schedule": {"minutes": [10], "hours": [9], "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
+        "no": 7,
+        "key": "leverage_ma_cross",
+        "group": "장중 실행",
+        "job": "레버리지 스위칭",
+        "target": "한국/미국 지수(코스피·나스닥100)",
+        "cadence": "평일 09:10 · 15:00 · 16:00 KST",
+        "command": "python scripts/leverage_recommend_ma_cross.py",
+        # 한국·미국 두 시장의 마감을 각각 커버해야 해서 여러 번 돈다. 09:10 은 미국 마감
+        # (한국시간 새벽 5~6시), 15:00·16:00 은 한국 마감용이다. 시장별로 '장 마감 직후'
+        # 이고 오늘 아직 안 보낸 경우에만 1회 발송하므로 여러 번 돌아도 중복되지 않는다.
+        "schedule": {
+            "slots": [{"hour": 9, "minute": 10}, {"hour": 15, "minute": 0}, {"hour": 16, "minute": 0}],
+            "weekdays": _WEEKDAYS_MON_FRI,
+        },
+    },
+    {
+        "no": 8,
         "key": "asset_summary",
+        "group": "장중 실행",
         "job": "전체 자산 요약 알림",
         "target": "전체 계좌",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 09:40 · 16:10 / 토 09:40 KST",
         "command": "python scripts/slack_asset_summary.py",
         # 토요일 09:40 은 금요일 미국 장 마감(한국시간 토 05~06시)을 반영하기 위한 것이다.
@@ -77,118 +178,176 @@ SCHEDULE_ROWS = [
             "weekdays": _WEEKDAYS_MON_SAT,
         },
     },
+    # ③ 마감 후 지표 — 하루 1~2회.
     {
-        "key": "cache_refresh",
-        "job": "가격 캐시 업데이트",
-        "target": "모든 종목 가격",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "월~토 24시간 매시 20분 KST",
-        "command": "python scripts/stock_price_cache_updater.py",
-        "schedule": {"minutes": [20], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
+        "no": 9,
+        "key": "market_breadth",
+        "group": "마감 후 지표",
+        "job": "시장 폭(ADR) 집계",
+        "target": "코스피 200 · 코스닥 150",
+        "cadence": "월~금 16:30 · 화~토 07:00 KST",
+        "command": "python scripts/collect_market_breadth.py",
+        # 16:30 = 한국 마감(15:30) 뒤 종가 확정. 07:00 = 미국 마감(KST 새벽 05~06시) 뒤.
+        # 한 번 실행에 네 시장을 모두 훑지만, 이미 최신인 시장은 새로 받을 것이 없어 곧 끝난다.
+        # 07:00 을 화~토로 두는 이유: 미국 금요일 장은 토요일 새벽에 끝나고,
+        # 월요일 아침에는 새로 마감된 미국 장이 없다.
+        "schedule": {
+            "slots": [
+                {"hour": 16, "minute": 30, "weekdays": _WEEKDAYS_MON_FRI},
+                {"hour": 7, "minute": 0, "weekdays": _WEEKDAYS_TUE_SAT},
+            ],
+            "weekdays": _WEEKDAYS_MON_SAT,
+        },
     },
     {
+        "no": 10,
+        "key": "cache_refresh_full",
+        "group": "마감 후 지표",
+        "job": "가격 캐시 전체 재수집",
+        "target": "모든 종목 가격 (전체 히스토리)",
+        "cadence": "평일 17:10 KST",
+        # 매시 증분(가격 캐시 업데이트)이 다루지 않는 과거 행 변경(수정주가 — 배당·분할)을
+        # 하루 1회 전체 재수집으로 되돌린다.
+        "command": "python scripts/stock_price_cache_updater.py --full",
+        "schedule": {"minutes": [10], "hours": [17], "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    # ④ 개장 전 준비 — 아침에 한 번, 오래 걸린다(실행 시각 순).
+    {
+        "no": 11,
+        "key": "market_hours_analysis",
+        "group": "개장 전 준비",
+        "job": "장 시간 분석",
+        "target": "시장 스케줄",
+        # DB 백업(20번)이 07:00 에 도니 겹치지 않게 30분 뒤로 뺀다.
+        "cadence": "평일 07:30 KST",
+        "command": "python scripts/analyze_market_hours.py",
+        "schedule": {"minutes": [30], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
+        "no": 12,
         "key": "reference_meta_updater",
+        "group": "개장 전 준비",
         "job": "종목 메타 업데이트",
         "target": "이름·상장일·마켓·업종 + ETF holdings·배당",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 07:45 KST",
         "command": "python scripts/stock_reference_meta_updater.py",
         "schedule": {"minutes": [45], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "no": 13,
         "key": "price_metrics_updater",
+        "group": "개장 전 준비",
         "job": "종목 가격지표 업데이트",
         "target": "거래량·기간수익률·backtest",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 07:50 KST",
         "command": "python scripts/stock_price_metrics_updater.py",
         "schedule": {"minutes": [50], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "no": 14,
         "key": "us_market_stocks",
+        "group": "개장 전 준비",
         "job": "미국 개별주 업데이트",
         "target": "S&P500, NASDAQ100",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 08:00 KST",
         "command": "python scripts/update_us_market_stocks.py",
         "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "no": 15,
         "key": "aus_market_stocks",
+        "group": "개장 전 준비",
         "job": "호주 개별주 업데이트",
         "target": "S&P/ASX 200",
-        "run_location": "SERVER/LOCAL",
         "cadence": "평일 08:10 KST",
         "command": "python scripts/update_aus_market_stocks.py",
         "schedule": {"minutes": [10], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "key": "market_hours_analysis",
-        "job": "장 시간 분석",
-        "target": "시장 스케줄",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "평일 07:00 KST",
-        "command": "python scripts/analyze_market_hours.py",
-        "schedule": {"minutes": [0], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
+        "no": 16,
+        "key": "kor_market_stocks",
+        "group": "개장 전 준비",
+        "job": "한국 지수 구성종목",
+        "target": "KOSPI200 (KODEX 200) · KOSDAQ150 (KODEX 코스닥150)",
+        "cadence": "평일 08:20 KST",
+        "command": "python scripts/update_kor_market_stocks.py",
+        "schedule": {"minutes": [20], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "no": 17,
+        "key": "kor_dividend_stocks",
+        "group": "개장 전 준비",
+        "job": "한국 배당주 지표",
+        "target": "저장된 KOSPI200 구성종목의 배당·재무 (DART + 네이버)",
+        # 구성종목 배치(08:20) 뒤에 돈다 — 그 명단을 유니버스로 읽는다.
+        "cadence": "평일 08:30 KST",
+        "command": "python scripts/update_kor_dividend_stocks.py",
+        "schedule": {"minutes": [30], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
+        "no": 18,
+        "key": "us_market_etfs",
+        "group": "개장 전 준비",
+        "job": "미국 ETF 업데이트",
+        "target": "KIS 미국 마스터 → 거래대금 상위 1,000개 수익률",
+        "cadence": "평일 08:40 KST",
+        "command": "python scripts/update_us_market_etfs.py",
+        "schedule": {"minutes": [40], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    # ⑤ 상시 운영 — 자동으로 돌고 손댈 일이 거의 없다.
+    {
+        "no": 19,
         "key": "live_24h_slack",
+        "group": "상시 운영",
         "job": "24H 시세 알림",
         "target": "하이퍼리퀴드/바이낸스",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "매일 24시간 매시 0분 KST (급변 시에만 발송)",
+        "cadence": "매일 24시간 매시 0분 KST",
         "command": "python scripts/live_24h_slack.py",
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
     },
     {
-        "key": "leverage_ma_cross",
-        "job": "레버리지 스위칭",
-        "target": "한국/미국 지수(코스피·나스닥100)",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:10 · 15:00 · 16:00 KST",
-        "command": "python scripts/leverage_recommend_ma_cross.py",
-        # 한국·미국 두 시장의 마감을 각각 커버해야 해서 여러 번 돈다. 09:10 은 미국 마감
-        # (한국시간 새벽 5~6시), 15:00·16:00 은 한국 마감용이다. 시장별로 '장 마감 직후'
-        # 이고 오늘 아직 안 보낸 경우에만 1회 발송하므로 여러 번 돌아도 중복되지 않는다.
-        "schedule": {
-            "slots": [{"hour": 9, "minute": 10}, {"hour": 15, "minute": 0}, {"hour": 16, "minute": 0}],
-            "weekdays": _WEEKDAYS_MON_FRI,
-        },
-    },
-    {
-        "key": "holdings_alarm",
-        "job": "보유종목 알람",
-        "target": "알람 On 계좌의 보유 종목",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:10 KST (한국 개시 직후)",
-        "command": "python scripts/holdings_alarm.py",
-        "schedule": {"minutes": [10], "hours": [9], "weekdays": _WEEKDAYS_MON_FRI},
-    },
-    {
-        "key": "strategy_trade_notify",
-        "job": "전략 사고팔기 알림",
-        "target": "kor_account 코스피200·코스닥150 ETF 각 6종",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:10~15:20 KST 10분 간격",
-        "command": "python scripts/strategy_trade_notify.py",
-        # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
-        "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+        "no": 20,
+        "key": "db_backup",
+        "group": "상시 운영",
+        "job": "DB 백업",
+        "target": "MongoDB 전체 → backups/ (최근 30개 보존)",
+        "cadence": "매일 07:00 KST",
+        # 하루 1회 fresh 백업 — 임시 폴더에 받고 성공 시에만 오늘 폴더로 교체. 백업 폴더가 로컬이라 LOCAL 전용.
+        # 예전에는 매시 돌았는데 전체 덤프라 DB 부하가 커서 하루 한 번으로 줄였다(보존 30개 = 30일).
+        "command": "python scripts/backup_mongo_full.py --gzip",
+        "schedule": {"minutes": [0], "hours": [7], "weekdays": _WEEKDAYS_ALL},
     },
 ]
 # action 키 → 실행할 스크립트 경로
 _SCRIPT_BY_ACTION: dict[str, str] = {
     "data_aggregate": "scripts/collect_data.py",
+    "broker_balance_sync": "scripts/broker_balance_sync.py",
+    "strategy_mix_notify_kor": "scripts/strategy_mix_notify.py",
+    "strategy_mix_notify_us": "scripts/strategy_mix_notify.py",
     "cache_refresh": "scripts/stock_price_cache_updater.py",
+    "cache_refresh_full": "scripts/stock_price_cache_updater.py",
     "market_hours_analysis": "scripts/analyze_market_hours.py",
     "reference_meta_updater": "scripts/stock_reference_meta_updater.py",
     "price_metrics_updater": "scripts/stock_price_metrics_updater.py",
     "asset_summary": "scripts/slack_asset_summary.py",
     "us_market_stocks": "scripts/update_us_market_stocks.py",
+    "us_market_etfs": "scripts/update_us_market_etfs.py",
     "aus_market_stocks": "scripts/update_aus_market_stocks.py",
+    "kor_market_stocks": "scripts/update_kor_market_stocks.py",
+    "kor_dividend_stocks": "scripts/update_kor_dividend_stocks.py",
+    "market_breadth": "scripts/collect_market_breadth.py",
     "live_24h_slack": "scripts/live_24h_slack.py",
     "leverage_ma_cross": "scripts/leverage_recommend_ma_cross.py",
     "holdings_alarm": "scripts/holdings_alarm.py",
-    "strategy_trade_notify": "scripts/strategy_trade_notify.py",
+    "db_backup": "scripts/backup_mongo_full.py",
+}
+
+# 액션별 추가 인자 — 워커가 스크립트 실행 시 그대로 붙인다.
+_ARGS_BY_ACTION: dict[str, list[str]] = {
+    "cache_refresh_full": ["--full"],
+    "db_backup": ["--gzip"],
+    "strategy_mix_notify_kor": ["kor"],
+    "strategy_mix_notify_us": ["us"],
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}
@@ -314,10 +473,7 @@ def _compute_next_run(schedule: dict | None) -> datetime | None:
     slots = schedule.get("slots")
     if slots:
         slot_rules = {
-            (int(s["hour"]), int(s["minute"])): frozenset(
-                int(w) for w in s.get("weekdays", weekdays)
-            )
-            for s in slots
+            (int(s["hour"]), int(s["minute"])): frozenset(int(w) for w in s.get("weekdays", weekdays)) for s in slots
         }
         candidate = (now + timedelta(minutes=1)).replace(second=0, microsecond=0)
         end = candidate + timedelta(days=8)
@@ -569,6 +725,7 @@ def _read_last_job_run_from_queue(
         if db is None:
             return None
         import re
+
         doc = db.batch_queue.find_one(
             {
                 "job_name": {"$regex": f"^{re.escape(job_key)}(:|$)"},
@@ -982,7 +1139,11 @@ def load_system_data() -> dict[str, object]:
 
     return {
         "pool_rows": _build_pool_summary_rows(),
-        "schedule_rows": SCHEDULE_ROWS,
+        # 실행 위치는 큐의 LOCAL_ONLY_JOBS 가 단일 소스 — 로컬 전용이 아니면 서버·로컬 둘 다 잡는다.
+        "schedule_rows": [
+            {**row, "run_location": "LOCAL" if row["key"] in LOCAL_ONLY_JOBS else "SERVER/LOCAL"}
+            for row in SCHEDULE_ROWS
+        ],
         "schedule_note": (
             "cron 스케줄 트리거는 서버 scheduler 컨테이너의 APScheduler 가 담당하며, "
             "`infra/cron/crontab` 파일이 단일 진실 소스입니다. "
@@ -1078,7 +1239,7 @@ def trigger_system_action(action: SystemAction) -> str:
 
     script_rel = _SCRIPT_BY_ACTION[action]
     label = _LABEL_BY_ACTION.get(action, action)
-    result = enqueue(action, script_rel, triggered_by="manual")
+    result = enqueue(action, script_rel, triggered_by="manual", arguments=_ARGS_BY_ACTION.get(action))
     if not result.get("enqueued"):
         return f"[시스템-배치] {label} 이미 큐에 있습니다 ({result.get('reason')})."
     return f"[시스템-배치] {label} 큐에 추가됨. 워커가 순서대로 실행합니다."

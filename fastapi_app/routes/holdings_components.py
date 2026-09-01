@@ -28,9 +28,7 @@ def get_accounts(
         {
             "account_id": str(c["account_id"]),
             "name": str(c.get("name", c["account_id"])),
-            "currency": _ACCOUNT_CURRENCY_BY_COUNTRY.get(
-                str(c.get("country_code") or "").strip().lower(), ""
-            ),
+            "currency": _ACCOUNT_CURRENCY_BY_COUNTRY.get(str(c.get("country_code") or "").strip().lower(), ""),
         }
         for c in configs
     ]

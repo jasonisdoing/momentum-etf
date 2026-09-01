@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ColDef, GridOptions } from "ag-grid-community";
 
 import { formatPoolLabel } from "@/lib/pool-label";
+import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
+import { MONTH_OPTIONS, MonthsSelect } from "../components/MonthsSelect";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
@@ -28,9 +30,6 @@ type Performance = {
   turnover_pct: number;
   round_trip_pct: number;
   cost_per_round_pct: number;
-  down_market_invest_pct?: number;
-  market_regime_index?: { ticker: string; name: string } | null;
-  down_market_rounds?: number;
   rule: StrategyStats;
   benchmark: (StrategyStats & { ticker: string; name: string }) | null;
   // 벤치마크를 못 쓸 때 원인 구분 (미설정 / 가격 캐시 없음 / 기간 불일치).
@@ -64,19 +63,16 @@ type PoolOption = {
   name: string;
   order: number;
   icon: string;
-  settings?: Partial<Record<"TOP_N_HOLD" | "SHORT_MA_DAYS" | "LONG_MA_DAYS" | "SLOPE_DAYS", PoolSettingField>>;
+  settings?: Partial<Record<"SHORT_MA_DAYS" | "LONG_MA_DAYS", PoolSettingField>>;
 };
 type PoolSettingsResponse = {
   pools?: PoolOption[];
-  constraints?: { ma_day_options?: number[] };
+  constraints?: Partial<MaOptionsPayload>;
   error?: string;
 };
 type BacktestOptions = { forward_day_options?: number[]; month_options?: number[]; max_months?: number; error?: string };
 
 const FORWARD_DAY_OPTIONS = [5, 10, 20, 40, 60];
-const DEFAULT_MONTH_OPTIONS = [1, 2, 3, 4, 5, 6, 12, 24, 36, 48, 60];
-const DEFAULT_MA_DAY_OPTIONS = [5, 10, 20, 40, 60, 120, 240];
-const DOWN_MARKET_INVEST_OPTIONS = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
 
 /** 종목풀 설정 필드에서 정수를 꺼낸다. 값이 없으면 null. */
 function fieldToInt(field: PoolSettingField | undefined): number | null {
@@ -113,14 +109,13 @@ export function PoolBacktestManager() {
   const [poolId, setPoolId] = useState("");
   const [forwardDays, setForwardDays] = useState(5);
   const [months, setMonths] = useState(12);
-  const [monthOptions, setMonthOptions] = useState(DEFAULT_MONTH_OPTIONS);
+  const [monthOptions, setMonthOptions] = useState(MONTH_OPTIONS);
   // 파라미터 오버라이드(실험용). 종목풀 선택 시 그 설정값으로 채워지고, 사용자가 바꿀 수 있다.
   const [topN, setTopN] = useState<number | null>(null);
   const [shortMa, setShortMa] = useState<number | null>(null);
   const [longMa, setLongMa] = useState<number | null>(null);
   const [holdK, setHoldK] = useState<number | null>(null); // 상대 임계(보유 유지). null=끔(매 회차 재선택)
-  const [downMarketInvestPct, setDownMarketInvestPct] = useState(100);
-  const [maDayOptions, setMaDayOptions] = useState(DEFAULT_MA_DAY_OPTIONS);
+  const [maOptions, setMaOptions] = useState<Partial<MaOptionsPayload>>({});
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -178,7 +173,7 @@ export function PoolBacktestManager() {
           const list = payload.pools ?? [];
           const loadedMonthOptions = (options.month_options ?? []).filter((month) => Number.isFinite(month) && month > 0);
           setPools(list);
-          if (payload.constraints?.ma_day_options?.length) setMaDayOptions(payload.constraints.ma_day_options);
+          if (payload.constraints) setMaOptions(payload.constraints);
           if (loadedMonthOptions.length > 0) {
             setMonthOptions(loadedMonthOptions);
             setMonths((current) =>
@@ -206,7 +201,7 @@ export function PoolBacktestManager() {
   useEffect(() => {
     const pool = pools.find((p) => p.ticker_type === poolId);
     if (!pool?.settings) return;
-    setTopN(fieldToInt(pool.settings.TOP_N_HOLD));
+    setTopN(null); // 비우면 시스템 공통 보유 종목 수(config.TOP_N_HOLD) — 실험용 덮어쓰기만 입력
     setShortMa(fieldToInt(pool.settings.SHORT_MA_DAYS));
     setLongMa(fieldToInt(pool.settings.LONG_MA_DAYS));
   }, [poolId, pools]);
@@ -224,7 +219,6 @@ export function PoolBacktestManager() {
       if (shortMa != null) params.set("short_ma_days", String(shortMa));
       if (longMa != null) params.set("long_ma_days", String(longMa));
       if (holdK != null) params.set("hold_threshold_k", String(holdK));
-      params.set("down_market_invest_pct", String(downMarketInvestPct));
       const resp = await fetch(`/api/pool-backtest?${params.toString()}`, { cache: "no-store" });
       const payload = (await resp.json()) as BacktestResult & { detail?: string };
       if (!resp.ok || payload.error) throw new Error(payload.error ?? payload.detail ?? "백테스트에 실패했습니다.");
@@ -235,7 +229,7 @@ export function PoolBacktestManager() {
     } finally {
       setLoading(false);
     }
-  }, [forwardDays, months, poolId, topN, shortMa, longMa, holdK, downMarketInvestPct, toast]);
+  }, [forwardDays, months, poolId, topN, shortMa, longMa, holdK, toast]);
 
   return (
     <div className="appPageStack appPageStackFill">
@@ -265,13 +259,7 @@ export function PoolBacktestManager() {
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 130, flex: "0 0 auto" }}>
                   <span className="appLabeledFieldLabel">기간(개월)</span>
-                  <select className="form-select form-select-sm" value={months} onChange={(e) => setMonths(Number(e.target.value))}>
-                    {monthOptions.map((m) => (
-                      <option key={m} value={m}>
-                        최근 {m}개월
-                      </option>
-                    ))}
-                  </select>
+                  <MonthsSelect value={months} options={monthOptions} onChange={setMonths} />
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 84, flex: "0 0 auto" }}>
                   <span className="appLabeledFieldLabel">리밸런싱 주기</span>
@@ -300,31 +288,11 @@ export function PoolBacktestManager() {
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 104, flex: "0 0 auto" }}>
                   <span className="appLabeledFieldLabel">단기 이평선</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={shortMa ?? ""}
-                    onChange={(e) => setShortMa(e.target.value === "" ? null : Number(e.target.value))}
-                  >
-                    {maDayOptions.map((d) => (
-                      <option key={d} value={d}>
-                        {d}일
-                      </option>
-                    ))}
-                  </select>
+                  <MaDaysSelect value={shortMa} options={maOptions.short_ma_options} onChange={setShortMa} />
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 104, flex: "0 0 auto" }}>
                   <span className="appLabeledFieldLabel">장기 이평선</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={longMa ?? ""}
-                    onChange={(e) => setLongMa(e.target.value === "" ? null : Number(e.target.value))}
-                  >
-                    {maDayOptions.map((d) => (
-                      <option key={d} value={d}>
-                        {d}일
-                      </option>
-                    ))}
-                  </select>
+                  <MaDaysSelect value={longMa} options={maOptions.long_ma_options} onChange={setLongMa} />
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 120, flex: "0 0 auto" }}>
                   <span
@@ -346,20 +314,6 @@ export function PoolBacktestManager() {
                     ))}
                   </select>
                 </label>
-                <label className="appLabeledField" style={{ minWidth: 140, flex: "0 0 auto" }}>
-                  <span className="appLabeledFieldLabel">하락시 투자비중</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={downMarketInvestPct}
-                    onChange={(e) => setDownMarketInvestPct(Number(e.target.value))}
-                  >
-                    {DOWN_MARKET_INVEST_OPTIONS.map((pct) => (
-                      <option key={pct} value={pct}>
-                        {pct}%
-                      </option>
-                    ))}
-                  </select>
-                </label>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexShrink: 0 }}>
                 <button type="button" className="btn btn-sm btn-primary" disabled={loading || !poolId} onClick={() => void runBacktest()}>
@@ -371,7 +325,7 @@ export function PoolBacktestManager() {
 
           <div className="card-body appCardBodyTight appTableCardBodyFill" style={{ overflowY: "auto", padding: "16px 20px" }}>
             <p style={{ fontSize: "var(--fs-base)", color: "var(--text-muted)", lineHeight: 1.6, margin: "0 0 16px" }}>
-              등급은 <strong>같은 날짜 안에서 종목끼리 상대비교</strong>해 나눕니다(시장 타이밍 효과 제거 — 순위 화면과 같은 관점). <strong>1등급 = 신호 상위</strong>. 고정 보유 종목 제외.
+              등급은 <strong>같은 날짜 안에서 종목끼리 상대비교</strong>해 나눕니다(시장 타이밍 효과 제거 — 순위 화면과 같은 관점). <strong>1등급 = 신호 상위</strong>. 제외 종목 제외.
               <br />
               주 지표는 <strong>평균수익</strong>입니다 — 모멘텀은 승률이 아니라 손익비로 벌기 때문에 상승확률로는 안 잡힙니다.{" "}
               <strong>기저 대비 차이가 오차(±)를 넘어야만 의미</strong>가 있습니다.
@@ -405,9 +359,6 @@ export function PoolBacktestManager() {
                   {result.performance.cash_rounds > 0 ? `, 전부 현금 ${result.performance.cash_rounds}회` : ""}
                   {result.performance.partial_rounds > 0 ? `, 일부 현금 ${result.performance.partial_rounds}회` : ""}).
                   조건 맞는 종목이 {result.performance.top_n_hold}개 미만이면 부족분은 현금으로 둡니다.
-                  {result.performance.down_market_invest_pct !== undefined && result.performance.down_market_invest_pct < 100
-                    ? ` 시장 레짐(${result.performance.market_regime_index?.name ?? "-"}) 하락 회차는 투자비중 ${result.performance.down_market_invest_pct}%로 제한합니다.`
-                    : ""}
                   {result.performance.hold_threshold_k != null
                     ? ` 보유 유지 k=${result.performance.hold_threshold_k.toFixed(1)}: 이미 보유한 종목은 이격이 'N등 이격×k' 이상이면 유지(회전율↓).`
                     : ""}

@@ -35,6 +35,7 @@ const NUMERIC_ALLOWED = [
   { file: "app/market-trend/MarketTrendChart.tsx", reason: "차트 라이브러리 설정" },
   { file: "app/ticker/TickerDetailManager.tsx", reason: "lightweight-charts layout" },
   { file: "app/compare/ComparePageClient.tsx", reason: "lightweight-charts layout" },
+  { file: "app/components/HoldingChart.tsx", reason: "lightweight-charts layout" },
 ];
 
 /**

@@ -18,12 +18,12 @@ from typing import Any
 
 import requests
 
-from config import TOSS_INVEST_API_BASE_URL, TOSS_INVEST_CERT_API_BASE_URL, TOSS_INVEST_HEADERS
+from config import CACHE_TTL_LIVE, TOSS_INVEST_API_BASE_URL, TOSS_INVEST_CERT_API_BASE_URL, TOSS_INVEST_HEADERS
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
 
-_INDICATOR_TTL_SECONDS = 5.0
+_INDICATOR_TTL_SECONDS = CACHE_TTL_LIVE
 _indicator_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
 _indicator_lock = threading.Lock()
 

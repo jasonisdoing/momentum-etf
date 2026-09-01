@@ -60,7 +60,11 @@ def run_backtest(
 
     def select_offense(date) -> str:
         """해당 일자 기준 이동평균 20일 이격도가 가장 큰 공격 후보를 반환한다."""
-        gaps = offense_gap_frame.loc[offense_gap_frame.index.asof(date)] if date not in offense_gap_frame.index else offense_gap_frame.loc[date]
+        gaps = (
+            offense_gap_frame.loc[offense_gap_frame.index.asof(date)]
+            if date not in offense_gap_frame.index
+            else offense_gap_frame.loc[date]
+        )
         gaps = gaps.dropna()
         if gaps.empty:
             raise ValueError(f"{pd.Timestamp(date).date()} 기준 공격 후보의 이동평균 20일 이격도를 계산할 수 없습니다.")
@@ -77,6 +81,7 @@ def run_backtest(
     # drop_today=True 이면 오늘(현지 기준) 세션을 신호 계산에서 제외한다.
     if drop_today and len(common_index) > 0:
         from zoneinfo import ZoneInfo
+
         market = settings.get("market", "kor")
         tz_name = "Asia/Seoul" if market == "kor" else "America/New_York"
         cutoff = pd.Timestamp.now(ZoneInfo(tz_name)).normalize().tz_localize(None)
@@ -94,7 +99,9 @@ def run_backtest(
     except ValueError:
         prev_signal_target = defense
     for _, row in signal_df_full.iterrows():
-        signal_target = pick_target(row, prev_signal_target, settings, offense_set=offense_set, select_offense=select_offense)
+        signal_target = pick_target(
+            row, prev_signal_target, settings, offense_set=offense_set, select_offense=select_offense
+        )
         signal_targets.append(signal_target)
         prev_signal_target = signal_target
     signal_target_series = pd.Series(signal_targets, index=signal_df_full.index, name="signal_target")
@@ -304,9 +311,7 @@ def run_backtest(
             total_value = cash_usd
         else:
             # 상장 전(가격 NaN) 후보는 0 으로 평가 (미보유 자산이라 수량도 0)
-            position_value = {
-                s: (qty[s] * prices_today[s] if not pd.isna(prices_today[s]) else 0.0) for s in assets
-            }
+            position_value = {s: (qty[s] * prices_today[s] if not pd.isna(prices_today[s]) else 0.0) for s in assets}
             total_pos = sum(position_value.values())
             total_value = cash_usd + total_pos
             weights = {s: (position_value[s] / total_value if total_value > 0 else 0.0) for s in assets}
@@ -392,7 +397,12 @@ def run_backtest(
             note = ""
             if sym == target:
                 note = "타깃"
-            elif sym in offense_set and target not in offense_set and sym == select_offense(date) and state in ["WAIT", "SELL"]:
+            elif (
+                sym in offense_set
+                and target not in offense_set
+                and sym == select_offense(date)
+                and state in ["WAIT", "SELL"]
+            ):
                 # Trade Ticker가 선택되지 않은 경우 드로다운 정보 표시
                 current_dd = signal_df.at[date, "drawdown"]
 
@@ -811,7 +821,9 @@ def run_backtest(
     live_drawdown = float(signal_df_full["drawdown"].iloc[-1])
 
     # 공격 후보별 최근(확정 신호일) 이동평균 20일 이격도 + 다음 진입 시 선택될 후보
-    last_gaps = offense_gap_frame.loc[last_date].dropna() if last_date in offense_gap_frame.index else pd.Series(dtype=float)
+    last_gaps = (
+        offense_gap_frame.loc[last_date].dropna() if last_date in offense_gap_frame.index else pd.Series(dtype=float)
+    )
     offense_gaps = {str(t): float(v) for t, v in last_gaps.items()}
     next_offense = select_offense(last_date)
 

@@ -169,7 +169,7 @@ export function HoldingsManager({
     },
     {
       field: "change_pct",
-      headerName: "등락률",
+      headerName: "일간(%)",
       minWidth: 92,
       flex: 0.95,
       type: "rightAligned",

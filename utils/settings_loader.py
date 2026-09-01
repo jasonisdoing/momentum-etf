@@ -57,9 +57,15 @@ def get_account_order(account_id: str) -> int:
     return int(get_account_settings(account_id)["order"])
 
 
-@cache
 def get_account_settings(account_id: str) -> dict[str, Any]:
-    """DB(account_settings)에 정의된 개별 계정 설정을 로드합니다."""
+    """DB(account_settings)에 정의된 개별 계정 설정을 로드합니다.
+
+    캐시는 두지 않는다 — 아래 `_load_account_configs` 가 store 의 TTL 캐시(30초)를 타므로
+    DB 를 매번 때리지 않으면서 다른 프로세스의 변경도 자동으로 반영된다.
+    예전에는 여기에 만료 없는 `@cache` 가 있어서, 저장한 프로세스만 최신이 되고 나머지는
+    재시작 전까지 옛 값을 봤다. 같은 프로세스 안에서도 이 함수를 타는 화면(`/assets` 현금
+    통화 목록)과 TTL 을 직접 읽는 화면(`/account-settings`)의 답이 갈렸다.
+    """
 
     account = (account_id or "").strip().lower()
     if not account:

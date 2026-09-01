@@ -1,20 +1,24 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
 from utils.stocks_service import (
     add_active_stock,
-    delete_active_stock as delete_active_stock_entry,
     hard_delete_stocks,
     load_active_stocks_table,
     load_deleted_stocks_table,
+    movable_pools,
+    move_active_stock,
     refresh_single_stock,
     restore_deleted_stocks,
+    toggle_exclude_from_ranking,
     update_stock_bucket,
     validate_stock_candidate,
-    toggle_exclude_from_ranking,
+)
+from utils.stocks_service import (
+    delete_active_stock as delete_active_stock_entry,
 )
 
 router = APIRouter(prefix="/internal/stocks", tags=["stocks"])
@@ -52,10 +56,21 @@ class StockValidationPayload(BaseModel):
     ticker: str
 
 
+class StockMemoPayload(BaseModel):
+    ticker: str
+    memo: str = ""
+
+
 class StockCreatePayload(BaseModel):
     ticker_type: str
     ticker: str
     bucket_id: int
+
+
+class StockMovePayload(BaseModel):
+    from_pool: str
+    to_pool: str
+    ticker: str
 
 
 @router.get("")
@@ -69,6 +84,16 @@ def get_active_stocks(
 @router.patch("")
 def patch_active_stock(payload: BucketUpdatePayload, _: None = Depends(require_internal_token)) -> dict[str, bool]:
     update_stock_bucket(payload.ticker_type, payload.ticker, payload.bucket_id)
+    return {"ok": True}
+
+
+@router.patch("/memo")
+def patch_stock_memo(payload: StockMemoPayload, _: None = Depends(require_internal_token)) -> dict[str, bool]:
+    """종목 메모 — 계좌가 아니라 종목에 붙는다(자산 관리·순위 화면 공용)."""
+    from utils.stock_memo_store import set_stock_memo
+
+    if not set_stock_memo(payload.ticker, payload.memo):
+        raise HTTPException(status_code=404, detail=f"종목을 찾을 수 없습니다: {payload.ticker}")
     return {"ok": True}
 
 
@@ -99,6 +124,18 @@ def post_validate_stock(
 @router.post("")
 def post_active_stock(payload: StockCreatePayload, _: None = Depends(require_internal_token)) -> dict[str, object]:
     return add_active_stock(payload.ticker_type, payload.ticker, payload.bucket_id)
+
+
+@router.get("/movable-pools")
+def get_movable_pools(ticker_type: str = Query(...), _: None = Depends(require_internal_token)) -> dict[str, object]:
+    """그 종목풀에서 옮길 수 있는 대상 풀 목록 (같은 국가·구분만)."""
+    return {"pools": movable_pools(ticker_type)}
+
+
+@router.post("/move")
+def post_move_stock(payload: StockMovePayload, _: None = Depends(require_internal_token)) -> dict[str, object]:
+    """종목 하나를 다른 종목풀로 옮긴다. 종목마다 한 번씩 호출한다(화면이 진행도를 보여준다)."""
+    return move_active_stock(payload.from_pool, payload.to_pool, payload.ticker)
 
 
 @router.get("/deleted")

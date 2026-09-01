@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/run-next.mjs dev",
-    "prebuild": "node scripts/check-font-tokens.mjs && (cp ../shared/bucket_theme.json lib/bucket_theme.json 2>/dev/null || cp /shared/bucket_theme.json lib/bucket_theme.json)",
+    "prebuild": "node scripts/check-font-tokens.mjs",
     "build": "next build",
     "start": "node scripts/run-next.mjs start"
   },

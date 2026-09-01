@@ -92,6 +92,7 @@ def _load_saved_classification(index: str) -> dict[str, dict[str, str]]:
 
 def _fetch_classification(tickers: list[str]) -> dict[str, dict[str, str]]:
     """yfinance 에서 섹터·업종을 받는다 (종목별 호출이라 병렬로 돈다)."""
+
     def one(ticker: str) -> tuple[str, dict[str, str]]:
         try:
             info = yf.Ticker(_normalize_yfinance_symbol(ticker)).get_info() or {}
@@ -239,7 +240,7 @@ def _calculate_return_metrics(series: pd.Series) -> dict[str, Any]:
 def _fetch_stock_meta(tickers: list[str]) -> dict[str, dict[str, Any]]:
     """yfinance fast_info 와 시계열로 시가총액·거래량·기간 수익률을 배치 조회한다."""
     result: dict[str, dict[str, Any]] = {}
-    batches = [tickers[i:i + _YFINANCE_BATCH_SIZE] for i in range(0, len(tickers), _YFINANCE_BATCH_SIZE)]
+    batches = [tickers[i : i + _YFINANCE_BATCH_SIZE] for i in range(0, len(tickers), _YFINANCE_BATCH_SIZE)]
 
     for batch_idx, batch in enumerate(batches):
         print(f"  데이터 조회 중... {batch_idx * _YFINANCE_BATCH_SIZE + len(batch)}/{len(tickers)}", end="\r")
@@ -306,9 +307,7 @@ def _save(index: str, tickers: list[dict[str, Any]], source_url: str) -> None:
     print(f"저장 완료: {index} ({len(tickers)}개)")
 
 
-def _enrich_constituents(
-    items: list[dict[str, Any]], index: str, refresh_classification: bool
-) -> list[dict[str, Any]]:
+def _enrich_constituents(items: list[dict[str, Any]], index: str, refresh_classification: bool) -> list[dict[str, Any]]:
     ticker_list = [str(item["ticker"]) for item in items]
 
     # 섹터·업종 — 저장된 값이 있으면 재사용한다. 종목별 호출이라 전체를 매번 받으면
@@ -338,8 +337,7 @@ def _enrich_constituents(
 
     missing = [item["ticker"] for item in items if not item["industry"]]
     if missing:
-        print(f"  업종 조회 실패 {len(missing)}종목: {', '.join(missing[:10])}"
-              f"{' 외' if len(missing) > 10 else ''}")
+        print(f"  업종 조회 실패 {len(missing)}종목: {', '.join(missing[:10])}{' 외' if len(missing) > 10 else ''}")
     return items
 
 

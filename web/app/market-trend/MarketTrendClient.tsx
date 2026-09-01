@@ -20,12 +20,14 @@ type MarketTrendItem = {
   trend_score: number | null;
   score_range_high: number | null;
   score_range_low: number | null;
-  // 52주 전고점 대비 등락률 (현재가 ÷ 52주 최고 − 1) × 100, 0 이하
+  // 전고점 대비 등락률 (현재가 ÷ 최근 12개월 최고 − 1) × 100, 0 이하
   pct_from_high: number | null;
+  // 전저점 대비 등락률 (현재가 ÷ 최근 12개월 최저 − 1) × 100, 0 이상
+  pct_from_low: number | null;
   // 현재 레짐(SuperTrend 방향) + 지속일수
   current_regime: RegimeKey | null;
   current_regime_days: number | null;
-  // 직전 레짐 구간. start_truncated = 12개월 창에 잘려 실제 시작이 더 앞일 수 있음.
+  // 직전 레짐 구간 — 응답에는 계속 실려 오지만 ADR 컬럼으로 대체되어 지금은 표시하지 않는다.
   prev_regime: {
     regime: RegimeKey;
     start_date: string;
@@ -35,6 +37,12 @@ type MarketTrendItem = {
   } | null;
   days_since_last_up: number | null;
   days_since_last_neutral: number | null;
+  // 현재 추세 구간 1일차 종가 대비 등락률. 상승 구간이어도 눌려 있으면 음수다.
+  regime_change_pct: number | null;
+  // ADR(등락비율) — 구성종목 데이터가 있는 한국 지수만 값이 있다.
+  adr: number | null;
+  adr_level: AdrLevel | null;
+  adr_level_days: number | null;
 };
 
 type MainRow = MarketTrendItem & { rowType: "main"; id: string };
@@ -85,25 +93,23 @@ const REGIME_COLORS: Record<RegimeKey, string> = {
   accel_down: "#1971c2", // 파랑
 };
 
+/** ADR 4단계 — 백엔드 `classify_adr()` 과 같은 구분이다. */
+type AdrLevel = "overbought" | "bullish" | "bearish" | "oversold";
+
+/** 표기는 **강세/약세 두 덩어리**로 하고, 과매수·과매도는 괄호로 덧붙인다.
+ *  과매수는 강세의 연장이라 따로 세면 국면이 끊긴 것처럼 보인다(연속일도 묶어서 센다).
+ *  색은 네 단계를 그대로 유지해 과매수·과매도가 눈에 띄게 남긴다. */
+const ADR_LEVEL_STYLE: Record<AdrLevel, { label: string; note: string | null; color: string; emoji: string }> = {
+  overbought: { label: "강세", note: "과매수", color: "#d62828", emoji: "🔥" },
+  bullish: { label: "강세", note: null, color: "#e8590c", emoji: "⬆️" },
+  bearish: { label: "약세", note: null, color: "#1971c2", emoji: "⬇️" },
+  oversold: { label: "약세", note: "과매도", color: "#0b7285", emoji: "🧊" },
+};
+
 const REGIME_DESCRIPTIONS: Array<{ key: RegimeKey; text: string }> = [
   { key: "accel_up", text: "⬆️ 상승: 가격이 SuperTrend 위에 위치한 강세 국면입니다." },
   { key: "accel_down", text: "⬇️ 하락: 가격이 SuperTrend 아래로 내려간 위험 국면입니다." },
 ];
-
-function renderRegimeCell(params: { data?: GridRow }) {
-  const data = params.data;
-  if (!data || isDetailRow(data)) return null;
-  const key = data.current_regime;
-  if (!key) return <span style={{ color: "var(--text-muted)" }}>-</span>;
-  const fontWeight = key === "accel_up" || key === "accel_down" ? 700 : 500;
-  return (
-    <span style={{ color: REGIME_COLORS[key], fontWeight }}>
-      {REGIME_LABEL[key]}
-    </span>
-  );
-}
-
-
 
 type MarketTrendClientProps = {
   // config.py 화면 고정값 (page.tsx 가 /defaults 응답으로 전달 — 표시 전용)
@@ -114,7 +120,7 @@ type MarketTrendClientProps = {
 
 // 시장지수 추세 패널 — 페이지(/market-trend)와 홈 허브가 공유하는 본문(그리드 카드).
 // compact(홈 허브): 핵심 컬럼(지수/일간/추세/기간)만 남긴 요약 그리드.
-const COMPACT_TREND_HEADERS = ["지수", "현재가", "일간(%)", "추세", "기간(거래일)"];
+const COMPACT_TREND_HEADERS = ["지수", "현재가", "일간(%)", "추세", "ADR"];
 
 export function MarketTrendPanel({
   maDays,
@@ -217,82 +223,80 @@ export function MarketTrendPanel({
         cellRenderer: renderSignedPercentCell,
       },
       {
-        headerName: "추세",
-        flex: 0.6,
-        minWidth: 80,
-        sortable: true,
-        headerClass: "marketTrendRegimeHeader",
-        cellStyle: {
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          textAlign: "center",
-        },
-        valueGetter: (params) => {
-          const data = params.data as GridRow | undefined;
-          if (!data || isDetailRow(data)) return null;
-          const key = data.current_regime;
-          return key ? REGIME_LABEL[key] : null;
-        },
-        cellRenderer: renderRegimeCell,
-      },
-      {
         field: "current_regime_days",
-        headerName: "기간(거래일)",
-        flex: 1.4,
-        minWidth: 240,
+        headerName: "추세",
+        flex: 1.1,
+        minWidth: 170,
         sortable: true,
+        headerClass: "marketTrendRegimeHeader",
         cellStyle: {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           textAlign: "center",
         },
-        headerClass: "marketTrendRegimeHeader",
-        cellRenderer: (params: { value?: number | null; data?: MarketTrendItem }) => {
-          const d = params.value;
-          if (d === null || d === undefined) return <span style={{ color: "var(--text-muted)" }}>-</span>;
-          const regime = params.data?.current_regime;
-          if (regime === "accel_up") {
-            return <span style={{ color: "var(--text-strong)" }}>상승 {d}일째</span>;
-          }
-          const sinceUp = params.data?.days_since_last_up;
-          const upText = sinceUp !== null && sinceUp !== undefined ? `하락 ${sinceUp}일째` : "1년 내 상승 없음";
-          return <span style={{ color: "var(--text-strong)" }}>{upText}</span>;
-        },
-      },
-      {
-        field: "prev_regime",
-        headerName: "이전 추세",
-        flex: 1.5,
-        minWidth: 260,
-        sortable: false,
-        cellStyle: {
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          textAlign: "center",
-        },
-        headerClass: "marketTrendRegimeHeader",
-        headerTooltip: "현재 추세 직전 구간 — 어떤 추세가 언제부터 언제까지 며칠간 이어졌는지",
+        headerTooltip:
+          "SuperTrend 방향과 그 방향이 이어진 거래일 수. 괄호는 그 구간 1일차 종가 대비 등락률이다. " +
+          "상승 구간이어도 1일차보다 눌려 있으면 음수가 나온다.",
+        // ADR 컬럼과 같은 표기 — 색을 입힌 상태 + 지속일수.
         cellRenderer: (params: { data?: GridRow }) => {
           const data = params.data;
           if (!data || isDetailRow(data)) return null;
-          const prev = data.prev_regime;
-          if (!prev) return <span style={{ color: "var(--text-muted)" }}>-</span>;
-          // 12개월 창에 잘린 구간은 실제로는 더 길다 — '+' 로 최소값임을 표시한다.
-          const daysText = prev.start_truncated ? `${prev.days}일+` : `${prev.days}일`;
+          const regime = data.current_regime;
+          if (!regime) return <span style={{ color: "var(--text-muted)" }}>-</span>;
+
+          // 상승은 현재 구간 일수, 하락은 마지막 상승 이후 경과일을 센다(원래 기간 컬럼과 같은 규칙).
+          const days = regime === "accel_up" ? data.current_regime_days : data.days_since_last_up;
+          const daysText = days != null ? `${days}일째` : regime === "accel_up" ? "" : "1년 내 상승 없음";
+          const movePct = data.regime_change_pct;
+          return (
+            <span style={{ color: "var(--text-strong)" }} title={`${REGIME_LABEL[regime]} — 구간 1일차 종가 대비`}>
+              <strong style={{ color: REGIME_COLORS[regime] }}>{REGIME_LABEL[regime]}</strong>
+              {daysText ? ` ${daysText}` : ""}
+              {movePct != null ? (
+                // 추세 방향과 실제 등락이 어긋날 수 있어(상승 구간인데 눌림) 부호 색을 따로 준다.
+                <span className={getSignedClass(movePct)}>{`(${formatPct(movePct)})`}</span>
+              ) : null}
+            </span>
+          );
+        },
+      },
+      {
+        field: "adr",
+        headerName: "ADR",
+        flex: 1.1,
+        minWidth: 170,
+        sortable: true,
+        cellStyle: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          textAlign: "center",
+        },
+        headerClass: "marketTrendRegimeHeader",
+        headerTooltip:
+          "등락비율(Advance-Decline Ratio) — 20일 누적 상승종목수 ÷ 하락종목수 × 100. " +
+          "지수는 대형주에 끌려가지만 ADR 은 얼마나 많은 종목이 함께 오르는지를 본다. " +
+          "구성종목 데이터가 있는 코스피·코스닥만 표시된다.",
+        cellRenderer: (params: { data?: GridRow }) => {
+          const data = params.data;
+          if (!data || isDetailRow(data)) return null;
+          const level = data.adr_level;
+          if (data.adr == null || !level) {
+            return <span style={{ color: "var(--text-muted)" }}>-</span>;
+          }
+          const style = ADR_LEVEL_STYLE[level];
           return (
             <span
               style={{ color: "var(--text-strong)" }}
-              title={
-                prev.start_truncated
-                  ? `${REGIME_LABEL[prev.regime]} — 12개월 표시 구간 이전부터 이어져 실제 시작일은 더 앞입니다.`
-                  : REGIME_LABEL[prev.regime]
-              }
+              title={`${style.label}${style.note ? `(${style.note})` : ""} — 20일 누적 ADR ${data.adr.toFixed(1)}`}
             >
-              <strong style={{ color: REGIME_COLORS[prev.regime] }}>{REGIME_LABEL[prev.regime]}</strong>
-              {` ${daysText} · ${prev.start_date} ~ ${prev.end_date}`}
+              <strong style={{ color: style.color }}>
+                {style.emoji} {style.label}
+              </strong>
+              {` ${data.adr.toFixed(1)}`}
+              {data.adr_level_days ? ` · ${data.adr_level_days}일째` : ""}
+              {style.note ? ` (${style.note})` : ""}
             </span>
           );
         },
@@ -306,11 +310,25 @@ export function MarketTrendPanel({
         type: "rightAligned",
         cellRenderer: renderSignedPercentCell,
       },
+      {
+        field: "pct_from_low",
+        headerName: "전저점 대비",
+        flex: 0.8,
+        minWidth: 110,
+        sortable: true,
+        type: "rightAligned",
+        cellRenderer: renderSignedPercentCell,
+      },
     ],
     [expandedTicker],
   );
 
   const detailHeight = 768;
+  // ADR 판이 붙는 지수(코스피·코스닥)는 그 판 높이만큼 행을 늘린다.
+  const adrPaneHeight = 200;
+  // 어느 지수에 ADR 이 붙는지는 백엔드가 정한다(구성종목 데이터가 있는 시장만).
+  // 행 높이는 응답을 기다리지 않고 정해야 해서 화면에도 같은 목록을 둔다.
+  const ADR_INDEX_TICKERS = new Set(["^KS11", "^KQ11"]);
   const gridOptions = useMemo<GridOptions<GridRow>>(
     () => ({
       isFullWidthRow: (params) => isDetailRow(params.rowNode.data ?? undefined),
@@ -327,7 +345,10 @@ export function MarketTrendPanel({
         );
       },
       getRowHeight: (params) => {
-        if (isDetailRow(params.data ?? undefined)) return detailHeight;
+        const data = params.data ?? undefined;
+        if (isDetailRow(data)) {
+          return ADR_INDEX_TICKERS.has(data.parentTicker) ? detailHeight + adrPaneHeight : detailHeight;
+        }
         return undefined;
       },
       onCellClicked: (params) => {
@@ -434,12 +455,11 @@ export function MarketTrendClient({
                 <li>현재가: 최신 거래일 종가 (Yahoo Finance · 배당/분할 자동 조정).</li>
                 <li>일간(%): 전일 종가 대비 등락률.</li>
                 <li>
-                  이전 추세: 현재 추세 <strong>직전 구간</strong>의 방향·지속일수·기간입니다. 최근 12개월만 보므로,
-                  그보다 앞에서 시작된 구간은 일수 뒤에 <strong>+</strong>가 붙습니다(실제로는 더 깁니다).
-                </li>
-                <li>
-                  공격/수비 비중(지수를 펼치면 나오는 상세 차트): 종가가 {maType}{maDays}선 <strong>위면 공격 100%</strong>,
-                  아래면 12개월 최저 괴리율까지의 거리로 <strong>수비 비중</strong>을 20% 단위로 매깁니다.
+                  ADR(등락비율): 최근 20거래일 <strong>상승종목수 ÷ 하락종목수 × 100</strong> 입니다.
+                  지수는 시가총액 큰 몇 종목에 끌려가지만 ADR 은 <strong>얼마나 많은 종목이 함께 오르는지</strong>를 봅니다.
+                  120 이상 <strong>과매수</strong> · 100 이상 <strong>강세</strong> · 75 초과 <strong>약세</strong> · 75 이하 <strong>과매도</strong>
+                  로 나누고, 그 단계가 이어진 거래일 수를 함께 표시합니다.
+                  구성종목을 집계하는 <strong>코스피·코스닥</strong>만 값이 있습니다(대상: 시가총액 상위 200 · 150종목).
                 </li>
                 <li>
                   레짐: <strong>SuperTrend</strong> 기반으로 계산되며 상승과 하락 두 가지 상태만 존재합니다.

@@ -1,5 +1,15 @@
 #!/usr/bin/env python
-"""계좌별 OHLCV 캐시를 종목 단위로 incremental 갱신합니다."""
+"""계좌별 OHLCV 캐시 갱신.
+
+실행 모드
+--------
+- 기본(증분): 캐시에 없는 구간만 조회한다. 한국 풀은 **최신 거래일 하루만 비는
+  종목을 네이버 일봉 스냅샷(50종목 배치 폴링)으로 일괄 적재**해 pykrx 종목별
+  호출(+1초 스로틀)을 없앤다. 매시 크론이 이 모드로 돈다.
+- ``--full``: 전체 히스토리 강제 재수집 — 수정주가(배당·분할) 재정렬용.
+  하루 1회 크론(17:10)이 담당하며, 네이버 스냅샷으로 들어온 당일 행도
+  이때 KRX 공식 값으로 덮어써진다.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +33,7 @@ from services.stock_cache_service import get_stock_cache_meta
 from utils.cache_utils import (
     get_cached_date_range,
     load_cached_frame_with_fallback,
+    prune_cache_to_tickers,
     save_cached_frame,
     set_cache_refresh_completed_at,
 )
@@ -38,6 +49,100 @@ PER_TICKER_TIMEOUT_SECONDS = 90
 # KOR_FETCH_TARGET_SECONDS = 0.5 서버에서 freeze 1초로 늘려서 테스트중
 KOR_FETCH_TARGET_SECONDS = 1
 
+
+def _backfill_missing_closes_from_naver(ticker_type: str, tickers: list[str]) -> dict:
+    """yfinance 이력의 구멍을 네이버 해외증시로 메운다.
+
+    반환(슬랙 점검 보고용): ``{"filled_tickers": 메운 종목 수,
+    "filled_days": {날짜: 종목 수}, "unfilled": {티커: [네이버에도 없어 못 채운 날짜]}}``.
+
+    구멍은 두 형태다 — 둘 다 실제로 관측됐다:
+      ① 봉은 있는데 **Close 만 NaN** (2026-08-28: 시가·고가·저가·거래량은 있고 종가만 없음).
+      ② 최근 거래일 봉이 이력에서 **통째로 빠짐** (2026-09-01: 재수집이 8/28 행이 아예 없는
+        이력을 받아 와, 전날 네이버로 채워둔 금요일 봉까지 사라졌다 — 판정일 데이터가 하루
+        뒤로 밀려 모멘텀 선정이 밤 사이 바뀌었다).
+
+    같은 봉을 네이버는 온전히 들고 있고 시가·고가·저가가 yfinance 와 소수점까지 같다.
+    ①은 빈 값만 채우고, ②는 그 날짜 행을 새로 만들어 시가·고가·저가·종가를 채운다.
+    이미 있는 값은 건드리지 않는다(주 소스는 어디까지나 yfinance).
+    거래량은 네이버가 주지 않으므로 빈 값으로 둔다 — 지어내지 않는다.
+
+    ②의 탐지: 최근 30일의 미국 거래일 중 **장 마감이 끝난 날**인데 캐시에 없는 날 —
+    캐시 마지막 봉의 앞이든 뒤든 가리지 않는다(야후가 어느 날부터 통째로 안 주는 경우도
+    마감된 날이면 채운다). "아직 안 온 오늘 데이터"와의 구분은 마감 완료 여부가 한다.
+    네이버로 채운 날의 거래량은 다음 전체 재수집(--full)이 야후 값으로 되채운다.
+    """
+    from utils.cache_utils import load_cached_frame, save_cached_frame
+    from utils.naver_overseas import fetch_daily_ohlc
+    from utils.trading_calendar import get_trading_days, is_market_day_completed
+
+    filled = 0
+    filled_days: dict[str, int] = {}
+    unfilled: dict[str, list[str]] = {}
+    calendar_days: list[pd.Timestamp] | None = None  # 종목 공통 — 한 번만 받는다
+    for ticker in tickers:
+        cached = load_cached_frame(ticker_type, ticker)
+        if cached is None or cached.empty or "Close" not in cached.columns:
+            continue
+        gaps = list(cached.index[cached["Close"].isna()])
+
+        # ② 통째로 빠진 거래일 — 캘린더에는 있고 마감도 끝났는데 캐시 인덱스에 없는 날.
+        if calendar_days is None:
+            try:
+                calendar_days = [
+                    day
+                    for day in (
+                        pd.Timestamp(raw).normalize()
+                        for raw in get_trading_days(
+                            (pd.Timestamp.now() - pd.Timedelta(days=30)).strftime("%Y-%m-%d"),
+                            pd.Timestamp.now().strftime("%Y-%m-%d"),
+                            "us",
+                        )
+                    )
+                    if is_market_day_completed("us", day)
+                ]
+            except Exception:
+                calendar_days = []
+        # 그 종목의 첫 봉 이전은 상장 전이라 데이터가 없는 게 정상 — 탐지 대상이 아니다
+        # (신규 상장 ETF 가 "네이버에도 없어 못 채움" 오탐으로 찍혔다).
+        absent = [day for day in calendar_days if day >= cached.index[0] and day not in cached.index]
+        if not gaps and not absent:
+            continue
+
+        # 네이버는 최근분부터 준다 — 가장 오래된 결측까지 덮을 만큼만 요청한다.
+        oldest = min([*gaps, *absent])
+        span_days = int((pd.Timestamp.now().normalize() - oldest).days) + 5
+        naver = fetch_daily_ohlc(ticker, days=max(10, min(span_days, 200)))
+        if naver is None or naver.empty:
+            continue
+
+        merged = cached.copy()
+        touched = 0
+        for day in gaps:
+            if day not in naver.index:
+                unfilled.setdefault(ticker, []).append(str(day.date()))
+                continue
+            for column in ("Open", "High", "Low", "Close"):
+                if column in merged.columns and pd.isna(merged.at[day, column]):
+                    merged.at[day, column] = float(naver.at[day, column])
+            touched += 1
+            filled_days[str(day.date())] = filled_days.get(str(day.date()), 0) + 1
+        for day in absent:
+            if day not in naver.index:
+                unfilled.setdefault(ticker, []).append(str(day.date()))
+                continue
+            for column in ("Open", "High", "Low", "Close"):
+                if column in merged.columns:
+                    merged.at[day, column] = float(naver.at[day, column])
+            touched += 1
+            filled_days[str(day.date())] = filled_days.get(str(day.date()), 0) + 1
+        if touched:
+            merged = merged.sort_index()
+            save_cached_frame(ticker_type, ticker, merged)
+            filled += 1
+    return {"filled_tickers": filled, "filled_days": filled_days, "unfilled": unfilled}
+
+
 def _resolve_fetch_workers() -> int:
     """종목 fetch 병렬 워커 수.
 
@@ -45,6 +150,7 @@ def _resolve_fetch_workers() -> int:
     안전하게 직렬(1) 로 고정한다. 추후 ProcessPoolExecutor 또는 asyncio 기반 재설계 필요.
     """
     return 1
+
 
 # 풀 전체 NaN 비율이 이 임계값을 초과하는 날짜는 데이터 소스 오류로 간주하고
 # 모든 종목 캐시에서 그 날짜 행을 제거한다. 다음 cron 시 자동 재fetch.
@@ -56,9 +162,7 @@ def _determine_start_date() -> str:
     settings = load_common_settings() or {}
     start = settings.get("CACHE_START_DATE")
     if not start:
-        raise RuntimeError(
-            "CACHE_START_DATE 가 설정되지 않았습니다. config.py 또는 공용 설정을 확인하세요."
-        )
+        raise RuntimeError("CACHE_START_DATE 가 설정되지 않았습니다. config.py 또는 공용 설정을 확인하세요.")
     return str(start)
 
 
@@ -117,6 +221,10 @@ def _purge_suspicious_dates(
 
     데이터 소스(yfinance 등)가 특정 날짜에 다수 종목의 데이터를 일시적으로 빠뜨리거나
     합성값을 반환할 때, 그 날짜 행을 모든 종목 캐시에서 제거해 다음 cron 시 재fetch 대상으로 만든다.
+
+    비율의 분모는 **그 날짜에 이미 상장돼 있던 종목**(창 안 첫 봉 이후)만이다. 풀 전체로
+    잡으면 신규 상장이 많은 풀에서 상장 전 부재가 NaN 으로 집계돼, 멀쩡히 거래되던 옛
+    종목의 진짜 데이터까지 지웠다(kor_us_div_etf 2025-07-28~09-22, 40거래일 실손실).
     """
     logger = get_app_logger()
     if not tickers:
@@ -154,7 +262,13 @@ def _purge_suspicious_dates(
     if matrix.empty:
         return []
 
-    nan_ratio = matrix.isna().sum(axis=1) / float(matrix.shape[1])
+    # 각 종목은 자기 첫 봉(창 안 기준)부터만 분모에 들어간다 — 상장 전 부재는 NaN 이 아니다.
+    listed = pd.DataFrame(
+        {ticker: matrix.index >= series.index.min() for ticker, series in close_map.items()},
+        index=matrix.index,
+    )
+    denominator = listed.sum(axis=1)
+    nan_ratio = (matrix.isna() & listed).sum(axis=1) / denominator.where(denominator > 0)
     suspicious = sorted(nan_ratio[nan_ratio > nan_threshold].index.tolist())
     if not suspicious:
         return []
@@ -202,11 +316,40 @@ def _purge_suspicious_dates(
     return suspicious
 
 
-def _update_daily_change_pct(target_id: str, tickers: list[str]) -> None:
-    """캐시된 종가 시계열의 마지막 2개로 일간 등락률을 계산해 stock_meta 에 저장한다.
+def _trade_value_fields(df: pd.DataFrame) -> dict[str, float] | None:
+    """거래대금 배수와, 장중 배수를 다시 계산할 때 쓸 재료.
 
-    /system 종목풀 표의 상승수(일간)/상승비율(일간) 이 이 필드를 읽는다.
-    가격 캐시가 이미 메모리에 적재된 직후라 추가 외부 호출 없이 공짜로 계산된다.
+    거래대금은 `종가 × 거래량` 이고 분모는 **당일을 포함한** 20일 평균이다
+    (`utils.new_high_service` 와 같은 정의 — 두 화면이 다른 숫자를 보이면 안 된다).
+
+    `trade_value_sum19` 는 직전 19거래일 합이다. 장중에는 오늘 거래대금을 실시간으로
+    받아 `(sum19 + 오늘) / 20` 을 분모로 쓰는데, 순위 화면은 거래량 이력이 없어서
+    그 합을 여기서 미리 넘겨준다. 20일이 안 되면 None(미산출 — 값을 지어내지 않는다).
+    """
+    if "Close" not in df or "Volume" not in df:
+        return None
+    close = pd.to_numeric(df["Close"], errors="coerce").where(lambda x: x > 0)
+    volume = pd.to_numeric(df["Volume"], errors="coerce")
+    value = (close * volume).dropna()
+    if len(value) < 20:
+        return None
+    window = value.iloc[-20:]
+    base = float(window.mean())
+    if base <= 0:
+        return None
+    return {
+        "trade_value": round(float(value.iloc[-1]), 2),
+        "trade_value_mult": round(float(value.iloc[-1]) / base, 4),
+        "trade_value_sum19": round(float(window.iloc[1:].sum()), 2),
+    }
+
+
+def _update_daily_change_pct(target_id: str, tickers: list[str]) -> None:
+    """캐시된 종가 시계열로 일간 등락률과 거래대금 배수를 계산해 stock_meta 에 저장한다.
+
+    /system 종목풀 표의 상승수(일간)/상승비율(일간) 과 /pools-rank 의 거래대금 컬럼이
+    이 필드를 읽는다. 가격 캐시가 이미 메모리에 적재된 직후라 추가 외부 호출 없이
+    공짜로 계산된다 — 순위 화면이 직접 계산하면 거래량 blob 을 받느라 3초가 더 든다.
     """
     logger = get_app_logger()
     if not tickers:
@@ -244,21 +387,18 @@ def _update_daily_change_pct(target_id: str, tickers: list[str]) -> None:
             if prev <= 0:
                 continue
             change_pct = (latest / prev - 1.0) * 100.0
-            ops.append(
-                UpdateOne(
-                    {"ticker_type": target_id, "ticker": ticker},
-                    {
-                        "$set": {
-                            "1_day_change_pct": round(change_pct, 4),
-                            "1_day_change_date": pd.Timestamp(close_series.index[-1]).strftime("%Y-%m-%d"),
-                        }
-                    },
-                )
-            )
+            fields = {
+                "1_day_change_pct": round(change_pct, 4),
+                "1_day_change_date": pd.Timestamp(close_series.index[-1]).strftime("%Y-%m-%d"),
+            }
+            trade_fields = _trade_value_fields(df)
+            if trade_fields:
+                fields.update(trade_fields)
+            ops.append(UpdateOne({"ticker_type": target_id, "ticker": ticker}, {"$set": fields}))
         if ops:
             result = db.stock_meta.bulk_write(ops, ordered=False)
             logger.info(
-                "[%s] 일간 등락률 저장 완료: %d개 종목 (matched %d)",
+                "[%s] 일간 등락률·거래대금 배수 저장 완료: %d개 종목 (matched %d)",
                 target_id.upper(),
                 len(ops),
                 result.matched_count,
@@ -385,19 +525,29 @@ def _refresh_portfolio_change_cache_for_target(
             if result:
                 logger.info(
                     " -> 포트폴리오 변동 캐시 갱신 완료: %d/%d - %s | 소요 %.1fs",
-                    idx, len(candidates), ticker, elapsed,
+                    idx,
+                    len(candidates),
+                    ticker,
+                    elapsed,
                 )
                 return True, ticker
             logger.warning(
                 " -> 포트폴리오 변동 캐시 계산 불가: %d/%d - %s | 소요 %.1fs",
-                idx, len(candidates), ticker, elapsed,
+                idx,
+                len(candidates),
+                ticker,
+                elapsed,
             )
             return False, ticker
         except Exception as exc:
             elapsed = time.perf_counter() - started_at
             logger.warning(
                 " -> 포트폴리오 변동 캐시 갱신 실패: %d/%d - %s: %s | 소요 %.1fs",
-                idx, len(candidates), ticker, exc, elapsed,
+                idx,
+                len(candidates),
+                ticker,
+                exc,
+                elapsed,
             )
             return False, ticker
 
@@ -412,10 +562,7 @@ def _refresh_portfolio_change_cache_for_target(
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(_process_one_bundle, i + 1, t)
-                for i, (t, _) in enumerate(candidates)
-            ]
+            futures = [executor.submit(_process_one_bundle, i + 1, t) for i, (t, _) in enumerate(candidates)]
             for future in as_completed(futures):
                 try:
                     ok, t = future.result()
@@ -446,8 +593,15 @@ def refresh_cache_for_target(
     target_id: str,
     start_date: str | None,
     progress_callback: Callable[[int, int, str], None] | None = None,
+    *,
+    full_refresh: bool = False,
 ):
-    """지정된 계정(target_id)에 대한 가격 데이터 캐시를 새로 고칩니다."""
+    """지정된 계정(target_id)에 대한 가격 데이터 캐시를 새로 고칩니다.
+
+    ``full_refresh=True`` 는 기존 동작(전체 히스토리 강제 재수집 — 수정주가 재정렬)이고,
+    기본(False)은 **증분**이다: 캐시에 없는 구간만 조회하며, 한국 풀은 최신 거래일
+    하루만 비는 종목을 네이버 일봉 스냅샷으로 일괄 적재해 pykrx 종목별 호출을 없앤다.
+    """
     logger = get_app_logger()
     target_norm = (target_id or "").strip().lower()
 
@@ -489,7 +643,9 @@ def refresh_cache_for_target(
                     months_back=None,
                     date_range=[range_start, None],
                     update_listing_meta=False,
-                    force_refresh=True,
+                    # 증분 모드는 캐시에 없는 구간만 조회한다. 전체 재수집(수정주가
+                    # 재정렬)은 하루 1회 --full 실행이 담당한다.
+                    force_refresh=full_refresh,
                     ticker_type=account_id,
                 )
                 if fetched_df is None or fetched_df.empty:
@@ -610,6 +766,62 @@ def refresh_cache_for_target(
                     exc,
                 )
 
+        # ── KOR 증분: 최신 거래일 하루만 비는 종목은 네이버 일봉 스냅샷으로 일괄 적재 ──
+        # (종목당 pykrx 호출 + 1초 스로틀 → 50종목 배치 폴링 몇 번으로 대체)
+        # 스냅샷으로 채워졌거나 이미 최신인 종목은 아래 루프에서 스로틀 없이 캐시 확인만 한다.
+        kor_snapshot_done: set[str] = set()
+        if country_code == "kor" and not full_refresh:
+            try:
+                from utils.cache_utils import load_cached_frame
+                from utils.data_loader import get_latest_trading_day, get_trading_days
+                from utils.realtime_quotes import fetch_naver_daily_ohlcv_snapshot
+
+                latest_day = get_latest_trading_day("kor").normalize()
+                recent_days = get_trading_days(
+                    (latest_day - pd.Timedelta(days=15)).strftime("%Y-%m-%d"),
+                    latest_day.strftime("%Y-%m-%d"),
+                    "kor",
+                )
+                prev_day = recent_days[-2].normalize() if len(recent_days) >= 2 else None
+                need_latest: list[str] = []
+                for item in target_items:
+                    t = str(item.get("ticker") or "").strip().upper()
+                    if not t:
+                        continue
+                    cached_range = get_cached_date_range(target_norm, t)
+                    if cached_range is None:
+                        continue  # 캐시 없음(신규) → 종목별 전체 수집 경로
+                    cache_end = pd.Timestamp(cached_range[1]).normalize()
+                    if cache_end >= latest_day:
+                        kor_snapshot_done.add(t)  # 이미 최신 — 네트워크·스로틀 불필요
+                    elif prev_day is not None and cache_end == prev_day:
+                        need_latest.append(t)  # 최신 거래일 하루만 부족 → 스냅샷 대상
+                if need_latest:
+                    snapshot = fetch_naver_daily_ohlcv_snapshot(need_latest, latest_day)
+                    for t, row in snapshot.items():
+                        cached_df = load_cached_frame(target_norm, t)
+                        if cached_df is None or cached_df.empty:
+                            continue
+                        addition = pd.DataFrame([row], index=pd.DatetimeIndex([latest_day]))
+                        merged = pd.concat(
+                            [cached_df[cached_df.index.normalize() != latest_day], addition]
+                        ).sort_index()
+                        save_cached_frame(target_norm, t, merged)
+                        kor_snapshot_done.add(t)
+                    logger.info(
+                        "[%s] 네이버 일봉 스냅샷 일괄 적재: %d/%d 종목 (기준일 %s, 미적재는 pykrx fallback)",
+                        target_norm.upper(),
+                        len(snapshot),
+                        len(need_latest),
+                        latest_day.date(),
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "[%s] 네이버 일봉 스냅샷 건너뜀(종목별 pykrx fallback): %s",
+                    target_norm.upper(),
+                    exc,
+                )
+
         def _process_one(idx: int, etf_item: dict) -> tuple[bool, str, str]:
             """단일 종목 처리. 반환: (성공여부, ticker, log_message).
 
@@ -617,7 +829,8 @@ def refresh_cache_for_target(
             서버처럼 응답이 너무 빠른 환경(종목당 ~0.1s)에서는 30종목 즈음 차단되어 hang
             상태로 빠진다. 종목당 목표 간격(KOR_FETCH_TARGET_SECONDS) 미만으로
             끝났을 때 부족분만큼 동적으로 sleep 한다. 로컬처럼 자연 소요가 충분히 느린
-            환경(0.3s 이상)은 영향이 없다.
+            환경(0.3s 이상)은 영향이 없다. 스냅샷/캐시로 이미 최신인 종목은 pykrx 를
+            부르지 않으므로 스로틀도 건너뛴다.
             """
             t = str(etf_item.get("ticker") or "").strip().upper()
             n = etf_item.get("name") or "-"
@@ -632,8 +845,9 @@ def refresh_cache_for_target(
                 elapsed = time.perf_counter() - started
 
                 # KOR 풀에만 동적 sleep — 부족분만큼 채워 호출 빈도를 늦춘다.
+                # (스냅샷으로 이미 채워진 종목은 pykrx 호출이 없어 스로틀 제외)
                 sleep_secs = 0.0
-                if country_code == "kor":
+                if country_code == "kor" and (full_refresh or t not in kor_snapshot_done):
                     sleep_secs = max(0.0, KOR_FETCH_TARGET_SECONDS - elapsed)
                     if sleep_secs > 0:
                         time.sleep(sleep_secs)
@@ -649,8 +863,7 @@ def refresh_cache_for_target(
                     logger.warning(msg)
                 else:
                     msg = (
-                        f" -> 가격 캐시 갱신 완료: {idx}/{total_tickers} - {n}({t})"
-                        f" | 소요 {elapsed:.1f}s{sleep_suffix}"
+                        f" -> 가격 캐시 갱신 완료: {idx}/{total_tickers} - {n}({t}) | 소요 {elapsed:.1f}s{sleep_suffix}"
                     )
                     logger.info(msg)
                 return True, t, msg
@@ -685,8 +898,7 @@ def refresh_cache_for_target(
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_idx = {
-                    executor.submit(_process_one, i + 1, etf): (i + 1, etf)
-                    for i, etf in enumerate(target_items)
+                    executor.submit(_process_one, i + 1, etf): (i + 1, etf) for i, etf in enumerate(target_items)
                 }
                 completed = 0
                 for future in as_completed(future_to_idx):
@@ -723,15 +935,50 @@ def refresh_cache_for_target(
         else:
             logger.info("-> [%s] 캐시 갱신 완료 (%d개 종목).", target_norm.upper(), succeeded_count)
 
+        # 미국 풀: yfinance 이력의 구멍(종가 빈칸·통누락)을 네이버로 메운다.
+        backfill_report: dict | None = None
+        if country_code == "us":
+            try:
+                pool_tickers = [
+                    str(item.get("ticker") or "").strip().upper()
+                    for item in target_items
+                    if str(item.get("ticker") or "").strip()
+                ]
+                backfill_report = _backfill_missing_closes_from_naver(target_norm, pool_tickers)
+                if backfill_report["filled_tickers"]:
+                    logger.info(
+                        "[%s] 네이버 해외증시로 야후 누락 보강: %d종목 %s",
+                        target_norm.upper(),
+                        backfill_report["filled_tickers"],
+                        backfill_report["filled_days"],
+                    )
+            except Exception as exc:
+                logger.warning("[%s] 네이버 종가 보강 건너뜀: %s", target_norm.upper(), exc)
+
         success_tickers = [
             str(etf.get("ticker") or "").strip().upper()
             for etf in target_items
             if str(etf.get("ticker") or "").strip().upper() not in failed_tickers
         ]
 
-        # 풀 전체 검증: 데이터 소스 오류로 다수 종목의 close 가 NaN인 날짜 자동 제거
+        # 이 배치가 다루지 않는 캐시 문서 제거. 남겨두면 그 시점에 얼어붙은 채로 남아,
+        # 나중에 컬렉션을 통째로 읽는 쪽이 최신 종목과 멈춘 종목을 한 표본으로 쓰게 된다.
+        # `all_map` 은 풀 종목 + 삭제된 종목 + 벤치마크 + 보유 종목을 모두 담고 있다.
         try:
-            _purge_suspicious_dates(target_norm, success_tickers)
+            orphans = prune_cache_to_tickers(target_norm, all_map.keys())
+            if orphans:
+                preview = ", ".join(orphans[:10])
+                suffix = " ..." if len(orphans) > 10 else ""
+                logger.info(
+                    "[%s] 갱신 대상 밖 캐시 %d건 제거: %s%s", target_norm.upper(), len(orphans), preview, suffix
+                )
+        except Exception as exc:
+            logger.warning("[%s] 고아 캐시 정리 중 오류: %s", target_norm.upper(), exc)
+
+        # 풀 전체 검증: 데이터 소스 오류로 다수 종목의 close 가 NaN인 날짜 자동 제거
+        purged_dates: list = []
+        try:
+            purged_dates = _purge_suspicious_dates(target_norm, success_tickers)
         except Exception as exc:
             logger.warning("[%s] 의심 날짜 자동 정리 중 오류: %s", target_norm.upper(), exc)
 
@@ -743,6 +990,14 @@ def refresh_cache_for_target(
 
         # 포트폴리오 변동 캐시는 조회 시 TTL 기준으로 갱신한다.
         set_cache_refresh_completed_at(target_norm, pd.Timestamp.utcnow().to_pydatetime())
+
+        # 슬랙 점검 보고용 — main 이 풀별로 모아 문제가 있을 때만 1건 발송한다.
+        return {
+            "pool": target_norm,
+            "failed": list(failed_tickers),
+            "backfill": backfill_report,
+            "purged_dates": [str(pd.Timestamp(day).date()) for day in purged_dates],
+        }
 
 
 def _collect_benchmark_tickers(target_id: str) -> list[str]:
@@ -774,6 +1029,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--start",
         help="데이터 조회 시작일 (YYYY-MM-DD). 지정하지 않으면 공통 설정",
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="전체 히스토리를 강제 재수집한다(수정주가 재정렬 — 하루 1회 크론용). 기본은 증분 갱신.",
     )
     return parser
 
@@ -824,11 +1084,60 @@ def main():
         logger.warning("갱신할 대상이 없습니다.")
         return
 
-    logger.info("전체 종목풀 가격 캐시 갱신 시작: targets=%s, start=%s", targets_to_update, start_date)
+    logger.info(
+        "전체 종목풀 가격 캐시 갱신 시작: targets=%s, start=%s, mode=%s",
+        targets_to_update,
+        start_date,
+        "full(전체 재수집)" if args.full else "incremental(증분)",
+    )
 
+    reports: list[dict] = []
     with _global_refresh_lock():
         for t_id in targets_to_update:
-            refresh_cache_for_target(t_id, start_date)
+            report = refresh_cache_for_target(t_id, start_date, full_refresh=args.full)
+            if isinstance(report, dict):
+                reports.append(report)
+
+    _notify_cache_issues(reports, full_refresh=args.full)
+
+
+def _notify_cache_issues(reports: list[dict], *, full_refresh: bool) -> None:
+    """캐시 갱신 중 발견된 문제를 슬랙 1건으로 통보한다. 문제가 없으면 보내지 않는다.
+
+    항목: 수집 실패 / 네이버에도 없어 못 채운 누락 / 의심 날짜 자동 제거.
+    자동 복구에 성공한 보강은 알리지 않는다(로그에만 남긴다) — 소음이 되는 항목은 여기서 뺀다.
+    """
+    logger = get_app_logger()
+    lines: list[str] = []
+    for report in reports:
+        pool = str(report["pool"]).upper()
+        pool_lines: list[str] = []
+        failed = report.get("failed") or []
+        if failed:
+            preview = ", ".join(failed[:10]) + (" …" if len(failed) > 10 else "")
+            pool_lines.append(f"· 수집 실패 {len(failed)}종목: {preview}")
+        backfill = report.get("backfill") or {}
+        unfilled = backfill.get("unfilled") or {}
+        if unfilled:
+            preview = ", ".join(f"{t}({', '.join(d)})" for t, d in list(unfilled.items())[:10])
+            suffix = " …" if len(unfilled) > 10 else ""
+            pool_lines.append(f"· 네이버에도 없어 못 채움 {len(unfilled)}종목: {preview}{suffix}")
+        purged = report.get("purged_dates") or []
+        if purged:
+            pool_lines.append(f"· 의심 날짜(다수 종목 종가 NaN) 제거: {', '.join(purged)}")
+        if pool_lines:
+            lines.append(f"*{pool}*")
+            lines.extend(pool_lines)
+    if not lines:
+        return
+    mode = "전체 재수집" if full_refresh else "증분"
+    message = "\n".join([f"⚠️ 가격 캐시 점검 ({mode}) — 문제 발견", *lines])
+    try:
+        from utils.notification import send_slack_message_v2
+
+        send_slack_message_v2(message)
+    except Exception:
+        logger.exception("[cache] 점검 슬랙 발송 실패")
 
 
 if __name__ == "__main__":

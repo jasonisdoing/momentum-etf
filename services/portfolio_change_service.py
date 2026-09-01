@@ -14,16 +14,17 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from config import CACHE_TTL_COMPUTE
 from services.component_price_service import enrich_component_prices
 from services.price_service import get_exchange_rate_series, get_exchange_rates
 from services.stock_cache_service import get_stock_cache_meta, refresh_stock_portfolio_change_cache
 from utils.data_loader import fetch_naver_etf_inav_snapshot
-from utils.stock_cache_meta_io import get_previous_stock_cache_meta_history
+from utils.stock_cache_meta_io import get_previous_stock_cache_meta
 
 logger = logging.getLogger(__name__)
 
 _HOLDINGS_PRICE_FETCH_LIMIT = 100
-_TTL_SECONDS = 300
+_TTL_SECONDS = CACHE_TTL_COMPUTE
 _PORTFOLIO_CHANGE_CALC_VERSION = 4  # 합계 계산을 base_date 누적(cumulative_change_pct)로 전환
 
 _PORTFOLIO_CHANGE_CACHE: dict[str, dict[str, Any]] = {}
@@ -189,42 +190,16 @@ def _is_trading_day_kor(date_str: str) -> bool:
         return True
 
 
-def _resolve_base_date_to_trading_day(ticker_type: str, ticker: str, raw_date: str) -> str | None:
-    """히스토리에 기록된 raw_date 가 휴장일이면 그 이전 거래일로 보정한다.
-
-    캘린더가 갱신되어 과거에 거래일로 잘못 기록된 스냅샷이 남아 있는 경우,
-    화면 표시·계산이 잘못된 날짜로 진행되는 것을 방지한다.
-    """
-    candidate = raw_date
-    for _ in range(7):  # 최대 7번까지 거슬러 올라가며 거래일 탐색
-        if not candidate:
-            return None
-        if _is_trading_day_kor(candidate):
-            return candidate
-        prev = get_previous_stock_cache_meta_history(ticker_type, ticker, candidate)
-        if not prev:
-            return None
-        candidate = str(prev.get("date") or "").strip()
-    return candidate or None
-
-
 def determine_portfolio_change_base_date(ticker_type: str, ticker: str) -> str | None:
-    """오늘 자정+1일을 넘겨 오늘 히스토리도 포함한 가장 최근 기준일을 반환한다.
+    """비교 기준일 — 직전 스냅샷의 날짜. 직전값이 없으면 None.
 
-    한국 종목인 경우 반환 날짜가 휴장일이면 그 이전 거래일로 보정한다.
+    저장 시점에 이미 거래일로 정해 넣으므로 휴장일 보정이 필요 없다
+    (예전에는 날짜별 히스토리를 최대 7번 거슬러 올라가며 보정했다).
     """
-    today_dt = datetime.now(ZoneInfo("Asia/Seoul"))
-    tomorrow_str = (today_dt + timedelta(days=1)).strftime("%Y-%m-%d")
-    hist = get_previous_stock_cache_meta_history(ticker_type, ticker, tomorrow_str)
-    if not hist:
+    previous = get_previous_stock_cache_meta(ticker_type, ticker)
+    if not previous:
         return None
-    raw_date = str(hist.get("date") or "").strip()
-    if not raw_date:
-        return None
-    # 한국 종목 풀만 캘린더 보정 (다른 국가는 별도 캘린더라 영향 없음)
-    if str(ticker_type or "").strip().lower().startswith("kor"):
-        return _resolve_base_date_to_trading_day(ticker_type, ticker, raw_date)
-    return raw_date
+    return str(previous.get("date") or "").strip() or None
 
 
 def _build_fx_rates_for_currencies(currencies: set[str], rates: dict[str, Any]) -> list[dict[str, Any]]:
@@ -468,36 +443,13 @@ def _resolve_nav_change_pct(ticker_type: str, ticker: str, current_nav: Any) -> 
     if nav_value <= 0:
         return None
 
-    today_dt = datetime.now(ZoneInfo("Asia/Seoul"))
-    tomorrow_str = (today_dt + timedelta(days=1)).strftime("%Y-%m-%d")
-    latest_history = get_previous_stock_cache_meta_history(ticker_type, ticker, tomorrow_str)
-    if not latest_history or "meta_cache" not in latest_history:
-        return None
-
-    latest_history_nav = latest_history["meta_cache"].get("nav")
-    raw_base_date = str(latest_history.get("date") or "").strip() or None
-    # 한국 종목 풀: base_date 가 휴장일이면 직전 거래일로 보정
-    if raw_base_date and str(ticker_type or "").strip().lower().startswith("kor"):
-        portfolio_change_base_date = _resolve_base_date_to_trading_day(ticker_type, ticker, raw_base_date)
-    else:
-        portfolio_change_base_date = raw_base_date
-    prev_nav = None
-    try:
-        if (
-            latest_history_nav is not None
-            and float(nav_value) == float(latest_history_nav)
-            and portfolio_change_base_date
-        ):
-            prev_history = get_previous_stock_cache_meta_history(ticker_type, ticker, portfolio_change_base_date)
-            if prev_history and "meta_cache" in prev_history:
-                prev_nav = prev_history["meta_cache"].get("nav")
-        else:
-            prev_nav = latest_history_nav
-    except (TypeError, ValueError):
+    # 비교는 늘 (현재 값 vs 직전 영업일 값) 한 쌍이다 — 조회 1회로 끝난다.
+    previous = get_previous_stock_cache_meta(ticker_type, ticker)
+    if not previous or "meta_cache" not in previous:
         return None
 
     try:
-        prev_nav_value = float(prev_nav)
+        prev_nav_value = float(previous["meta_cache"].get("nav"))
     except (TypeError, ValueError):
         return None
     if prev_nav_value <= 0:

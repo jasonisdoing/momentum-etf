@@ -211,7 +211,9 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
         current_state = {
             "date": end_date,
             "target": last_target,
-            "target_name": candidate_names.get(last_target, defense_name if last_target == defense_ticker else last_target),
+            "target_name": candidate_names.get(
+                last_target, defense_name if last_target == defense_ticker else last_target
+            ),
             "holding_start_date": holding_start_date,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -303,7 +305,11 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
             else:
                 # 방어 자산 보유 중 → 매수 기준까지 남은 회복폭 (실시간). 진입 후보 1위임을 표기.
                 gap = offense_gaps.get(sym)
-                gap_text = f" (진입 후보 1위, {get_moving_average_type()} 20일 이격 {gap * 100:+.2f}%)" if gap is not None else " (진입 후보 1위)"
+                gap_text = (
+                    f" (진입 후보 1위, {get_moving_average_type()} 20일 이격 {gap * 100:+.2f}%)"
+                    if gap is not None
+                    else " (진입 후보 1위)"
+                )
                 if needed_recovery > 0:
                     note = f"{signal_name}가 {needed_recovery:+.2f}% 더 회복 시 매수{gap_text}"
                 else:

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
@@ -12,6 +12,16 @@ from utils.logger import get_app_logger
 logger = get_app_logger()
 
 _COLLECTION_NAME = "stock_cache_meta"
+# 종목별 **직전 영업일 스냅샷 1건**만 보관한다(티커당 문서 1개).
+#
+# 예전에는 `stock_cache_meta_history` 에 날짜별 스냅샷을 전부 쌓았다. 오늘 것까지
+# 들어가다 보니 "가장 최근 1건"이 오늘인지 어제인지 알 수 없어 조회를 2번 했고,
+# 휴장일이면 최대 7번까지 거슬러 올라갔다. 데이터는 무한히 늘어 193MB(DB의 55%)가
+# 되어 mongodump 가 끊겼다.
+#
+# 지금은 **현재 값은 stock_cache_meta, 직전 값은 여기** 로 역할을 나눈다.
+# 비교가 늘 (현재 vs 직전) 한 쌍이라 조회 1회면 되고, 크기도 티커 수로 고정된다.
+_PREVIOUS_COLLECTION_NAME = "previous_stock_cache_meta"
 _INDEX_ENSURED = False
 
 
@@ -93,31 +103,38 @@ def get_stock_cache_meta_docs(ticker_type: str, tickers: list[str]) -> dict[str,
     return result
 
 
-def get_previous_stock_cache_meta_history(
-    ticker_type: str, 
-    ticker: str, 
-    before_date: str
-) -> dict[str, Any] | None:
-    """특정 날짜(YYYY-MM-DD) 이전의 가장 최근 히스토리 스냅샷을 반환한다."""
+def get_previous_stock_cache_meta(ticker_type: str, ticker: str) -> dict[str, Any] | None:
+    """직전 영업일 스냅샷 1건. 없으면 None(비교 기준이 없다는 뜻).
+
+    ``date`` 는 저장 시점에 이미 거래일로 정해져 있어 호출자가 휴장일 보정을 할 필요가 없다.
+    """
     type_norm = (ticker_type or "").strip().lower()
     ticker_norm = str(ticker or "").strip().upper()
-    
+
     db = get_db_connection()
     if db is None:
         return None
-        
-    coll = db["stock_cache_meta_history"]
-    # before_date보다 작은 날짜 중 가장 최근 것 하나 조회
-    doc = coll.find_one(
-        {
-            "ticker_type": type_norm, 
-            "ticker": ticker_norm, 
-            "date": {"$lt": before_date}
-        },
-        sort=[("date", -1)],
-        projection={"_id": 0}
+
+    doc = db[_PREVIOUS_COLLECTION_NAME].find_one(
+        {"ticker_type": type_norm, "ticker": ticker_norm},
+        projection={"_id": 0},
     )
     return dict(doc) if isinstance(doc, dict) else None
+
+
+def _resolve_snapshot_date() -> str:
+    """스냅샷 귀속 거래일 — 9시 이후이고 오늘이 거래일이면 오늘, 아니면 직전 거래일."""
+    from utils.data_loader import get_trading_days
+
+    now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+    today_str = now_kst.strftime("%Y-%m-%d")
+    trading_days = get_trading_days((now_kst - timedelta(days=14)).strftime("%Y-%m-%d"), today_str, "kor")
+    trading_days_str = [d.strftime("%Y-%m-%d") for d in trading_days]
+
+    if now_kst.hour >= 9 and today_str in trading_days_str:
+        return today_str
+    past_days = [d for d in trading_days_str if d < today_str]
+    return past_days[-1] if past_days else today_str
 
 
 def upsert_stock_cache_meta_doc(
@@ -160,7 +177,24 @@ def upsert_stock_cache_meta_doc(
     if holdings_cache is not None:
         payload["holdings_cache"] = holdings_cache
 
-    # 1. 최신 정보 업데이트 (기존 로직)
+    snapshot_date = _resolve_snapshot_date()
+    payload["snapshot_date"] = snapshot_date
+
+    db = get_db_connection()
+    # 오늘 값을 덮기 전에, 저장돼 있던 값이 **다른 날짜의 것**이면 직전값으로 옮긴다.
+    # 같은 날 여러 번 돌아도 직전값은 그대로다(귀속 날짜가 같으므로).
+    if db is not None:
+        current = coll.find_one(
+            {"ticker_type": type_norm, "ticker": ticker_norm},
+            projection={"_id": 0, "created_at": 0},
+        )
+        if current and str(current.get("snapshot_date") or "") not in ("", snapshot_date):
+            db[_PREVIOUS_COLLECTION_NAME].update_one(
+                {"ticker_type": type_norm, "ticker": ticker_norm},
+                {"$set": {**current, "date": current["snapshot_date"]}},
+                upsert=True,
+            )
+
     coll.update_one(
         {"ticker_type": type_norm, "ticker": ticker_norm},
         {
@@ -169,48 +203,6 @@ def upsert_stock_cache_meta_doc(
         },
         upsert=True,
     )
-
-    # 2. 일자별 히스토리 스냅샷 저장
-    db = get_db_connection()
-    if db is not None:
-        history_coll = db["stock_cache_meta_history"]
-        
-        # 한국 시간 기준으로 귀속 날짜 결정
-        now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
-        from utils.data_loader import get_trading_days
-        
-        # 최근 7일간 거래일 조회
-        start_search = (now_kst - timedelta(days=7)).strftime("%Y-%m-%d")
-        end_search = now_kst.strftime("%Y-%m-%d")
-        trading_days = get_trading_days(start_search, end_search, "kor")
-        trading_days_str = [d.strftime("%Y-%m-%d") for d in trading_days]
-        
-        today_str = now_kst.strftime("%Y-%m-%d")
-        
-        # 9시 이후이고 오늘이 거래일이면 오늘 날짜 사용, 아니면 직전 거래일 사용
-        if now_kst.hour >= 9 and today_str in trading_days_str:
-            snapshot_date = today_str
-        else:
-            # 오늘이 거래일이어도 9시 전이면 직전 거래일, 오늘이 휴장일이면 가장 최근 거래일
-            past_days = [d for d in trading_days_str if d < today_str]
-            snapshot_date = past_days[-1] if past_days else today_str
-
-        history_payload = payload.copy()
-        history_payload["date"] = snapshot_date
-        
-        # 히스토리 컬렉션 인덱스 (최초 1회)
-        history_coll.create_index(
-            [("ticker_type", 1), ("ticker", 1), ("date", -1)],
-            unique=True,
-            name="ticker_date_history_unique",
-            background=True
-        )
-        
-        history_coll.update_one(
-            {"ticker_type": type_norm, "ticker": ticker_norm, "date": snapshot_date},
-            {"$set": history_payload},
-            upsert=True
-        )
 
 
 def update_stock_portfolio_change_cache_doc(
@@ -261,3 +253,36 @@ def delete_stock_cache_meta_doc(ticker_type: str, ticker: str) -> None:
         raise RuntimeError("MongoDB 연결 실패 — stock_cache_meta 컬렉션에 쓸 수 없습니다.")
 
     coll.delete_one({"ticker_type": type_norm, "ticker": ticker_norm})
+
+
+def set_stock_cache_meta_field(ticker_type: str, ticker: str, key: str, value: Any) -> bool:
+    """``meta_cache`` 의 한 필드만 바꾼다(문서 전체를 덮지 않는다). ``value`` 가 None 이면 필드를 지운다.
+
+    배치 B 의 종목별 갱신 뒤에 붙는 파생값(시총 순위 등)용.
+
+    값이 있으면 문서가 없어도 만든다. 예전에는 "배치 B 가 먼저 문서를 만든다"고 보고
+    만들지 않았는데, 한국 **개별주** 풀은 ETF 상세가 없어 `stock_cache_meta` 문서 자체가
+    생기지 않는다. 그래서 시총 순위가 한 건도 안 써졌고 화면의 시총 컬럼이 통째로 비었다.
+
+    Returns:
+        실제로 문서가 바뀌었는지. 호출부가 "몇 건 기록"을 정확히 셀 수 있게 돌려준다
+        (반복 횟수로 세면 한 건도 안 써져도 성공처럼 보인다).
+    """
+    type_norm = (ticker_type or "").strip().lower()
+    ticker_norm = str(ticker or "").strip().upper()
+    if not type_norm or not ticker_norm or not key:
+        raise ValueError("ticker_type, ticker, key must be provided")
+    coll = _get_collection()
+    if coll is None:
+        raise RuntimeError("MongoDB 연결 실패 — stock_cache_meta 컬렉션에 쓸 수 없습니다.")
+    field = f"meta_cache.{key}"
+    if value is None:
+        # 지우는 쪽은 문서를 만들지 않는다 — 빈 문서만 남는다.
+        result = coll.update_one({"ticker_type": type_norm, "ticker": ticker_norm}, {"$unset": {field: ""}})
+    else:
+        result = coll.update_one(
+            {"ticker_type": type_norm, "ticker": ticker_norm},
+            {"$set": {field: value}, "$setOnInsert": {"ticker_type": type_norm, "ticker": ticker_norm}},
+            upsert=True,
+        )
+    return bool(result.modified_count or getattr(result, "upserted_id", None))

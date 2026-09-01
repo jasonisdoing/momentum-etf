@@ -17,10 +17,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from config import CACHE_TTL_SLOW
+
 logger = logging.getLogger(__name__)
 
 _BLACKLIST_PATH = Path(__file__).resolve().parents[1] / "data" / "yahoo_resolve_blacklist.json"
-_TTL = timedelta(hours=1)
+_TTL = timedelta(seconds=CACHE_TTL_SLOW)
 _LOCK = threading.Lock()
 
 

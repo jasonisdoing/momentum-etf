@@ -29,6 +29,11 @@ from utils.settings_loader import get_slack_channel
 _LAST_ERROR: str | None = None
 logger = get_app_logger()
 
+# 배치가 스스로 슬랙 알림을 보냈을 때 쓰는 종료 코드.
+# `infra/cron/run_batch.py` 래퍼가 이 코드를 보면 로그 꼬리를 붙인 일반 실패 알림을 보내지 않는다.
+# (래퍼는 프로젝트 임포트 없이 도는 독립 스크립트라 같은 값을 자체 상수로 들고 있다.)
+EXIT_ALREADY_NOTIFIED = 66
+
 
 # ---------------------------------------------------------------------------
 # 슬랙 웹훅 관련 헬퍼
@@ -86,6 +91,18 @@ def strip_html_tags(value: str) -> str:
         return re.sub(r"<[^>]+>", "", value)
     except Exception:  # pragma: no cover - 방어적 처리
         return value
+
+
+def app_link(path: str, label: str) -> str:
+    """슬랙 메시지의 화면 링크 — 주소는 APP_BASE_URL 하나로만 정한다.
+
+    도메인을 코드에 적으면 옮길 때마다 스크립트를 고쳐야 한다. 값이 없으면 링크
+    없이 라벨만 남긴다(임의 주소를 만들지 않는다).
+    """
+    base = str(os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
+    if not base:
+        return label
+    return f"<{base}/{path.lstrip('/')}|{label}>"
 
 
 def _send_slack_message_via_bot(
@@ -269,6 +286,7 @@ def _format_return_with_amount(
 
 
 __all__ = [
+    "app_link",
     "build_summary_line_from_summary_data",
     "build_summary_line_from_header",
     "get_last_error",

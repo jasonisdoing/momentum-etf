@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from services.price_service import get_exchange_rates
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
+from utils.logger import get_app_logger
 from utils.normalization import normalize_number
 
 
@@ -59,6 +61,52 @@ def load_snapshot_list() -> list[dict[str, Any]]:
     return snapshots
 
 
+# 스냅샷 갱신은 **전 계좌 통합 집계**라 계좌 하나만 다시 계산할 수 없다(문서가 하나다).
+# 종목을 담고 빼는 화면에서는 이 계산이 응답을 8초 넘게 붙잡는데, 스냅샷은 대시보드·기간손익
+# 표시용이라 몇 초 늦어도 된다. 그래서 저장은 바로 끝내고 갱신은 뒤에서 돌린다.
+_snapshot_lock = threading.Lock()
+_snapshot_running = False
+_snapshot_pending = False
+
+
+def _run_snapshot_refresh() -> None:
+    """백그라운드 스레드 본체 — 도는 중에 또 요청이 오면 끝나고 한 번 더 돈다."""
+    global _snapshot_pending
+    while True:
+        try:
+            update_today_snapshot_all_accounts()
+        except Exception as exc:
+            get_app_logger().warning("[스냅샷] 백그라운드 갱신 실패: %s", exc)
+        with _snapshot_lock:
+            if not _snapshot_pending:
+                return
+            _snapshot_pending = False
+
+
+def refresh_today_snapshot_async() -> None:
+    """오늘 자 통합 스냅샷 갱신을 백그라운드로 예약한다.
+
+    이미 돌고 있으면 '한 번 더' 표시만 남긴다 — 여러 종목을 잇달아 담아도 계산이 겹치지 않고,
+    마지막 변경까지 반영된 결과가 남는다.
+    """
+    global _snapshot_running, _snapshot_pending
+    with _snapshot_lock:
+        if _snapshot_running:
+            _snapshot_pending = True
+            return
+        _snapshot_running = True
+
+    def _worker() -> None:
+        global _snapshot_running
+        try:
+            _run_snapshot_refresh()
+        finally:
+            with _snapshot_lock:
+                _snapshot_running = False
+
+    threading.Thread(target=_worker, name="snapshot-refresh", daemon=True).start()
+
+
 def update_today_snapshot_all_accounts() -> dict[str, Any]:
     """
     모든 계좌 정보를 실시간으로 계산하여 오늘 자 통합 스냅샷을 갱신한다.
@@ -102,7 +150,7 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
             if df is not None and not df.empty:
                 acc_valuation = float(df["평가금액(KRW)"].sum())
                 acc_purchase = float(df["매입금액(KRW)"].sum())
-                
+
                 # 보유 종목 상세 (티커만; 보유일 컬럼은 더 이상 사용하지 않음)
                 holding_details = []
                 for _, row in df.iterrows():
@@ -115,6 +163,7 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
                 holding_details = []
         except Exception as e:
             from utils.logger import get_app_logger
+
             get_app_logger().error(f"Failed to calculate valuation for account {aid}: {e}")
             acc_valuation = 0.0
             acc_purchase = 0.0
@@ -130,18 +179,20 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
             intl_shares_value = normalize_number(m_data.get("intl_shares_value"))
 
         # 계좌별 개별 스냅샷 저장 데이터 구성
-        account_summaries.append({
-            "account_id": aid,
-            "total_assets": acc_total_assets,
-            "total_principal": acc_principal,
-            "cash_balance": acc_cash,
-            "cash_balance_native": cash_balance_native,
-            "cash_currency": cash_currency,
-            "valuation_krw": acc_valuation,
-            "purchase_amount": acc_purchase,
-            "holding_details": holding_details,
-            "intl_shares_value": intl_shares_value,
-        })
+        account_summaries.append(
+            {
+                "account_id": aid,
+                "total_assets": acc_total_assets,
+                "total_principal": acc_principal,
+                "cash_balance": acc_cash,
+                "cash_balance_native": cash_balance_native,
+                "cash_currency": cash_currency,
+                "valuation_krw": acc_valuation,
+                "purchase_amount": acc_purchase,
+                "holding_details": holding_details,
+                "intl_shares_value": intl_shares_value,
+            }
+        )
 
         # DB에 개별 계좌 데이터로 먼저 저장 (save_daily_snapshot 호출)
         save_daily_snapshot(
@@ -160,18 +211,10 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
     # 전체 통합 데이터 저장
     total_assets = global_valuation + global_cash
     save_daily_snapshot(
-        "TOTAL",
-        total_assets,
-        global_principal,
-        global_cash,
-        global_valuation,
-        purchase_amount=global_purchase
+        "TOTAL", total_assets, global_principal, global_cash, global_valuation, purchase_amount=global_purchase
     )
 
-    return {
-        "total_assets": total_assets,
-        "account_count": len(account_summaries)
-    }
+    return {"total_assets": total_assets, "account_count": len(account_summaries)}
 
 
 # 계좌별 최근 거래일 기간 수익률 창.

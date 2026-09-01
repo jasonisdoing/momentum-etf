@@ -1,20 +1,24 @@
 "use client";
 
 import { AgGridReact } from "ag-grid-react";
+import { useEffect, useRef } from "react";
 import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
 import type {
   CellClassParams,
   ColDef,
+  ColGroupDef,
   GridOptions,
   RowClassParams,
   Theme,
+  GridApi,
 } from "ag-grid-community";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 type AppAgGridProps<TData> = {
   rowData: TData[];
-  columnDefs: ColDef<TData>[];
+  /** AG Grid 는 평범한 컬럼과 컬럼 그룹을 섞어 받는다(2단 헤더). */
+  columnDefs: (ColDef<TData> | ColGroupDef<TData>)[];
   loading?: boolean;
   minHeight?: string | number;
   height?: string | number;
@@ -39,6 +43,13 @@ export function AppAgGrid<TData>({
   theme = "legacy",
 }: AppAgGridProps<TData>) {
   const themeClassName = theme === "legacy" ? "ag-theme-quartz appAgGridThemeLegacy" : "appAgGridTheme";
+  // 행 클래스(getRowClass)는 AG Grid 가 행 생성 시점에만 평가한다 — getRowId 가 같은 행을
+  // 데이터만 바꿔 갱신하면(이평선 변경 재계산 등) 셀 값은 새 값인데 행 배경은 옛 판정으로
+  // 남는다. 데이터가 바뀌면 행을 다시 그려 클래스도 같은 데이터 기준으로 재평가한다.
+  const apiRef = useRef<GridApi<TData> | null>(null);
+  useEffect(() => {
+    apiRef.current?.redrawRows();
+  }, [rowData]);
   return (
     <div className={className ? `appAgGridWrap ${className}` : "appAgGridWrap"} style={{ minHeight, height }}>
       <div className={themeClassName}>
@@ -58,6 +69,9 @@ export function AppAgGrid<TData>({
           }}
           getRowClass={getRowClass}
           getRowId={getRowId}
+          onGridReady={(event) => {
+            apiRef.current = event.api;
+          }}
           {...gridOptions}
         />
       </div>
