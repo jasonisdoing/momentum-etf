@@ -160,8 +160,8 @@ def _apply_industry_labels(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
 def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> tuple[dict[str, float], dict[str, float]]:
     """티커별 거래대금 배수(20일 평균 대비) — `(본값, 시간 환산)` 두 벌.
 
-    **본값**: 장중에는 토스 실시간 누적 배수, 마감 후에는 가격 캐시 배치가 저장해 둔
-    KRX 정규시장 확정값이다(다음날 KRX 로 전환).
+    **본값**: 한국 장중에는 토스 실시간 누적 배수, 그 외에는 가격 캐시 배치가
+    ``stock_meta``에 저장해 둔 완료 거래일 값이다.
 
     **시간 환산**: 장중에만 있다 — 누적 배수를 장 경과 비율로 나눈 값(지금 페이스대로면
     하루 기준 몇 배인지). 화면이 괄호로 보여준다: "3.0배 (19.5)". 예전에는 여기에 토스의
@@ -176,7 +176,7 @@ def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> tuple[dict[s
 
         db = get_db_connection()
         if db is None:
-            return {}
+            return {}, {}
         docs = list(
             db.stock_meta.find(
                 {"ticker_type": ticker_type, "ticker": {"$in": tickers}},
@@ -197,7 +197,7 @@ def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> tuple[dict[s
         if doc.get("trade_value_sum19") is not None
     }
     live = _live_trade_value_mult(ticker_type, sum19)
-    from utils.new_high_service import kor_session_live_fraction
+    from utils.trade_value import kor_session_live_fraction
 
     fraction = kor_session_live_fraction()
     if fraction is not None:

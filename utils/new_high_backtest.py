@@ -86,9 +86,7 @@ def run_backtest(
     settings: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """돌파 전략 백테스트. 일별 자산곡선과 체결 내역을 함께 돌려준다.
-
-    """
+    """돌파 전략 백테스트. 일별 자산곡선과 체결 내역을 함께 돌려준다."""
     settings = validate_settings(settings or load_settings())
     months = int(months or DEFAULT_BACKTEST_MONTHS)
     if not 1 <= months <= MAX_BACKTEST_MONTHS:
@@ -126,6 +124,7 @@ def run_backtest(
             return False
         value = adr_series.asof(pd.Timestamp(stamp))
         return pd.notna(value) and float(value) < float(adr_floor)
+
     panel, signals = context["panel"], context["signals"]
 
     close_df, open_df = panel["close"], panel["open"]
@@ -523,77 +522,6 @@ def _apply_display_quotes(
         held["return_pct"] = round((quote["price"] / held["entry_price"] - 1) * 100, 2)
 
 
-def _apply_live_trade_values(
-    rows: list[dict[str, Any]],
-    pool: str,
-    value_df: pd.DataFrame,
-    last: pd.Timestamp,
-    min_value_mult: float | None,
-    *,
-    confirmed_today: bool,
-) -> None:
-    """진행 중인 세션의 누적 거래대금으로 `trade_value`·`value_mult`·`qualifies` 를 다시 쓴다.
-
-    분모는 확정된 직전 19거래일 합에 오늘을 더한 20일 평균이다 — 백테스트가 쓰는 식과 같다.
-    백테스트는 확정된 과거만 보므로 여기서 바꾼 값이 성과 계산에 섞이지 않는다.
-    국내 상장이 아니거나 조회에 실패하면 아무것도 바꾸지 않는다(캐시 값 유지).
-
-    `value_mult_live` 에는 **시간 비율 환산 배수**(누적 ÷ 장 경과율)를 담는다 — 화면이
-    괄호로 보여준다("3.0배 (19.5)" = 지금 페이스대로면 하루 기준 19.5배). 장중이 아니면
-    None 이라 괄호가 붙지 않는다(예전의 NXT 합산 비교 표시는 제거했다).
-    """
-    from utils.settings_loader import get_ticker_type_settings
-
-    settings = get_ticker_type_settings(pool) or {}
-    if str(settings.get("country_code") or "").strip().lower() != "kor":
-        return
-    tickers = [row["ticker"] for row in rows]
-    try:
-        from utils.data_loader import fetch_toss_kr_stock_snapshot
-
-        snapshot = fetch_toss_kr_stock_snapshot(tickers)
-    except Exception:
-        logger.exception("[new_high] 실시간 거래대금 조회 실패 (%s)", pool)
-        return
-    if not snapshot:
-        return
-
-    # 오늘을 뺀 직전 19거래일 — 확정된 값만 쓴다.
-    recent = value_df.loc[:last].tail(19)
-    # 장중 판정용 하한 — 하루 기준 하한을 장 경과 비율로 낮춘 값(한국 전용, 알람과 같은 식).
-    # 오전의 누적 거래대금을 하루 기준에 그대로 대면 돌파 종목이 전부 (미달)로 뜬다.
-    from utils.new_high_service import live_min_value_mult, pace_value_mult
-
-    live_required = live_min_value_mult(min_value_mult)
-    for row in rows:
-        today = (snapshot.get(row["ticker"]) or {}).get("tradeValue")
-        if today is None or float(today) <= 0 or row["ticker"] not in recent.columns:
-            continue
-        history = recent[row["ticker"]].dropna()
-        if len(history) < 19:
-            continue
-        base = (float(history.sum()) + float(today)) / 20
-        if base <= 0:
-            continue
-        live_mult = round(float(today) / base, 2)
-        row["value_mult_live"] = pace_value_mult(live_mult)
-        if not confirmed_today:
-            # 오늘 확정값이 아직 없다 — 실시간이 유일한 오늘 값이라 판정에도 쓴다.
-            row["trade_value"] = float(today)
-            row["value_mult"] = live_mult
-            row["qualifies"] = _meets_min_mult(live_mult, live_required)
-
-
-def _market_today(pool: str) -> str:
-    """그 시장의 오늘 날짜(YYYY-MM-DD). 캐시가 오늘까지 확정됐는지 판단하는 기준이다."""
-    from config import MARKET_SCHEDULES
-    from utils.settings_loader import get_ticker_type_settings
-
-    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
-    tz_name = str((MARKET_SCHEDULES.get(country) or {}).get("timezone") or "Asia/Seoul")
-    return str(pd.Timestamp.now(tz=tz_name).date())
-
-
 def _cache_refreshed_at(pool: str) -> str | None:
     """이 종목풀 가격 캐시의 마지막 갱신 시각(ISO). 배치가 안 돌았으면 None."""
     from utils.cache_utils import get_cache_refresh_completed_at
@@ -635,8 +563,6 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     prior_high = signals["prior_high"].loc[last]
     prior_high_intraday = signals["prior_high_intraday"].loc[last]
     today_high = panel["high"].loc[last]
-    value_mult = signals["value_mult"].loc[last]
-    trade_value = panel["value"].loc[last]
     market_cap_by = _market_caps(pool)
     # 시총 순위 — 배치 B 가 메타 캐시에 적어 둔 시장 전체 순위(개별주 풀만 값 있음).
     from utils.market_cap_rank import market_cap_rank_of
@@ -647,6 +573,14 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         meta_docs = {}
     rank_by_ticker = {t: market_cap_rank_of((doc or {}).get("meta_cache")) for t, doc in meta_docs.items()}
+    # 현재 화면과 진입 자격은 모멘텀 화면과 동일하게 배치 메타·공용 실시간 경로를 쓴다.
+    # 과거 백테스트는 아래의 공용 순수 계산으로 만든 signals 값을 계속 사용한다.
+    from utils.rank_service import _load_trade_value_mult
+    from utils.trade_value import live_min_value_mult
+
+    value_mult_by, value_mult_live_by = _load_trade_value_mult(pool, list(close_df.columns))
+    min_value_mult = settings["min_value_mult"]
+    live_required = live_min_value_mult(min_value_mult)
     # 일간 등락률 — 다른 화면(순위·시장추세)과 같은 기준으로 직전 거래일 종가 대비.
     prev_close = close_df.loc[close_df.index[-2]] if len(close_df.index) >= 2 else None
 
@@ -677,7 +611,6 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
                 "change_pct": change_pct,
                 "market_cap": market_cap_by.get(ticker),
                 "market_cap_rank": rank_by_ticker.get(ticker),
-                "trade_value": float(trade_value.get(ticker)) if pd.notna(trade_value.get(ticker)) else None,
                 "price": float(price),
                 "prior_high": float(high),
                 # 관례상의 52주 신고가(장중 고가) — 참고 표시용. 판정에는 쓰지 않는다.
@@ -686,9 +619,12 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
                 # 0 이상이면 돌파, 음수면 최고 종가까지 남은 거리.
                 "gap_pct": round(gap_pct, 2),
                 "touched": touched,
-                "value_mult": round(float(value_mult.get(ticker)), 2) if pd.notna(value_mult.get(ticker)) else None,
+                "value_mult": round(float(value_mult_by[ticker]), 2) if ticker in value_mult_by else None,
+                "value_mult_live": value_mult_live_by.get(ticker),
                 # 돌파했더라도 이 값이 거짓이면 사지 않는다 (백테스트와 같은 판정).
-                "qualifies": _meets_min_mult(value_mult.get(ticker), settings["min_value_mult"]),
+                "qualifies": _meets_min_mult(
+                    value_mult_by.get(ticker), live_required if ticker in value_mult_live_by else min_value_mult
+                ),
             }
         )
 
@@ -765,18 +701,6 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     def confirmed_close(ticker: str) -> float | None:
         price = close_df.at[last, ticker]
         return None if pd.isna(price) else float(price)
-
-    # 거래대금 배수 — 장중에는 실시간(토스) 누적이 본값·판정 기준이 되고, 괄호에는 시간
-    # 비율 환산 배수가 담긴다. 오늘 확정값이 아직 없으면(장중) 실시간이 판정 기준이 된다 —
-    # 오늘 돌파한 종목을 어제 자금 유입으로 판정할 수는 없기 때문이다.
-    _apply_live_trade_values(
-        rows,
-        pool,
-        panel["value"],
-        last,
-        settings["min_value_mult"],
-        confirmed_today=str(last.date()) >= str(_market_today(pool)),
-    )
 
     mark_exits(confirmed_close)
     attach_exit_ma_gap()

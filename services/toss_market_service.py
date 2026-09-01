@@ -129,6 +129,36 @@ def fetch_toss_stock_candles(
     return candles
 
 
+def fetch_toss_us_daily_ohlcv(code: str, count: int = 60) -> list[dict[str, float | str]]:
+    """미국 주식 일봉을 과거→최신 순으로 반환한다.
+
+    네이버 해외 일봉에는 없는 거래량을 미국 가격 캐시가 보강할 때 쓴다.
+    """
+    url = f"{TOSS_INVEST_API_BASE_URL}/api/v2/c-chart/us-s/{code}/day:1"
+    resp = requests.get(url, headers=TOSS_INVEST_HEADERS, params={"count": int(count)}, timeout=8)
+    resp.raise_for_status()
+    candles_raw = ((resp.json().get("result") or {}).get("candles")) or []
+    if not candles_raw:
+        raise RuntimeError(f"토스 미국주식 일봉 응답이 비어 있습니다: {code}")
+
+    candles: list[dict[str, float | str]] = []
+    for candle in reversed(candles_raw):
+        try:
+            candles.append(
+                {
+                    "date": str(candle["dt"])[:10],
+                    "open": float(candle["open"]),
+                    "high": float(candle["high"]),
+                    "low": float(candle["low"]),
+                    "close": float(candle["close"]),
+                    "volume": float(candle["volume"]),
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return candles
+
+
 def fetch_toss_latest_daily_close(code: str) -> tuple[str, float]:
     """가장 최근 일봉(형성 중 포함)의 (날짜 YYYY-MM-DD, 종가)를 반환한다."""
     url = f"{TOSS_INVEST_API_BASE_URL}/api/v2/c-chart/us-s/{code}/day:1"

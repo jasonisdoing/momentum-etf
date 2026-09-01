@@ -94,7 +94,6 @@ type PositionRow = {
   /** 오늘 기준 시가총액(순위 화면과 같은 소스). 과거 이력이 없어 백테스트에는 쓰지 않는다. */
   market_cap: number | null;
   market_cap_rank: number | null;
-  trade_value: number | null;
   /** 돌파했더라도 거짓이면 사지 않는다(배수 하한 미달). */
   qualifies: boolean;
   price: number;

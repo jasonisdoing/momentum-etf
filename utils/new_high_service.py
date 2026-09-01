@@ -109,69 +109,6 @@ def pool_country(pool: str) -> str:
     return str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
 
 
-def kor_session_elapsed_fraction() -> float:
-    """한국 거래 시간 경과 비율 — 장중 거래대금 하한·환산 배수의 분모.
-
-    창은 정규장이 아니라 **프리마켓 08:00 ~ 애프터 20:00** 이다. 분자(토스 실시간 누적
-    거래대금)가 NXT 프리·애프터 거래분까지 합산된 값이라, 같은 창으로 재야 환산이 맞는다.
-    시작 전이면 0, 끝난 뒤면 1. **한국 전용** — 미국 풀은 장중에 볼 일이 거의 없고
-    서머타임 처리만 얹게 되어 하루 기준 하한을 그대로 쓴다.
-    """
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    from config import MARKET_SCHEDULES
-
-    schedule = MARKET_SCHEDULES["kor"]
-    now = datetime.now(ZoneInfo(schedule["timezone"]))
-    start = schedule["premarket_open"]
-    end = schedule["aftermarket_close"]
-    open_at = now.replace(hour=start.hour, minute=start.minute, second=0, microsecond=0)
-    close_at = now.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
-    elapsed = (now - open_at).total_seconds()
-    return min(max(elapsed / (close_at - open_at).total_seconds(), 0.0), 1.0)
-
-
-def kor_session_live_fraction() -> float | None:
-    """한국 거래 시간(프리마켓 08:00~애프터 20:00)이 **진행 중일 때만** 경과 비율(0<f<1)을,
-    아니면 None 을 돌려준다.
-
-    휴장일·시작 전·20시 이후에는 None — 시간 비례 계산(본값 실시간 전환·환산 배수·판정
-    하한)을 하지 않는다.
-    """
-    fraction = kor_session_elapsed_fraction()
-    if not 0.0 < fraction < 1.0:
-        return None
-    from utils.trading_calendar import is_trading_day
-
-    return fraction if is_trading_day("kor") else None
-
-
-def pace_value_mult(mult: float | None) -> float | None:
-    """장중 누적 거래대금 배수를 하루 기준으로 환산한 값(누적 ÷ 장 경과율).
-
-    10시에 누적 3배면 환산 약 19배 — 지금 페이스대로면 하루 기준 몇 배인지다.
-    화면 거래대금 컬럼이 괄호로 보여준다. 장중이 아니면 None(괄호 없음).
-    """
-    if mult is None:
-        return None
-    fraction = kor_session_live_fraction()
-    if fraction is None:
-        return None
-    return round(float(mult) / fraction, 1)
-
-
-def live_min_value_mult(min_value_mult: float | None) -> float | None:
-    """장중 판정용 거래대금 하한 — 하루 기준 하한을 장 경과 비율만큼 낮춘 값 (한국 전용).
-
-    거래대금은 장이 끝나야 다 쌓이므로, 하루 기준 그대로 비교하면 오전에는 돌파해도
-    거의 전부 (미달)이 된다. 화면(장중 qualifies)과 신고가 알람이 같은 식을 쓴다.
-    """
-    if min_value_mult is None:
-        return None
-    return float(min_value_mult) * kor_session_elapsed_fraction()
-
-
 def pool_options() -> list[dict[str, Any]]:
     """풀 셀렉트 옵션 — 종목풀 설정(DB)의 이름·아이콘·순서를 단일 소스로 쓴다.
 
@@ -267,6 +204,8 @@ def load_benchmark_close(pool: str) -> pd.Series:
 # ── 가격 ───────────────────────────────────────────────────────────────────
 def build_price_panel(universe: list[dict[str, str]], frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
     """(날짜 × 티커) 종가·시가·고가·거래대금 표. 백테스트와 선정이 같은 값을 쓴다."""
+    from utils.trade_value import trade_value_series
+
     closes, opens, highs, values = {}, {}, {}, {}
     for row in universe:
         ticker = row["ticker"]
@@ -275,10 +214,17 @@ def build_price_panel(universe: list[dict[str, str]], frames: dict[str, pd.DataF
             continue
         close = _positive(frame["Close"])
         volume = pd.to_numeric(frame["Volume"], errors="coerce") if "Volume" in frame else None
+        value_close_column = next(
+            (column for column in ("unadjusted_close", "Close", "close") if column in frame.columns), None
+        )
         closes[ticker] = close
         opens[ticker] = _positive(frame["Open"])
         highs[ticker] = _positive(frame["High"])
-        values[ticker] = close * volume if volume is not None else pd.Series(index=frame.index, dtype=float)
+        values[ticker] = (
+            trade_value_series(frame[value_close_column], volume)
+            if volume is not None and value_close_column is not None
+            else pd.Series(index=frame.index, dtype=float)
+        )
 
     if not closes:
         raise RuntimeError("가격 캐시를 불러오지 못해 신고가를 판정할 수 없습니다.")
@@ -310,6 +256,8 @@ def compute_signals(panel: dict[str, pd.DataFrame], exit_ma_days: int) -> dict[s
     prior_high_intraday = panel["high"].rolling(HIGH_WINDOW, min_periods=HIGH_WINDOW_MIN_DAYS).max().shift(1)
     exit_ma = close_df.rolling(exit_ma_days, min_periods=exit_ma_days).mean()
     value_df = panel["value"]
+    from utils.trade_value import trade_value_multiplier_frame
+
     return {
         # 돌파 판정은 **종가** 기준이다 — 장중에 잠깐 찍고 밀린 것은 돌파로 보지 않는다.
         "breakout": close_df > prior_high,
@@ -323,7 +271,7 @@ def compute_signals(panel: dict[str, pd.DataFrame], exit_ma_days: int) -> dict[s
         # (실제 20배가 10.3배로 표기) 표기값 상한이 20배가 되지만, 참고하는 외부 시스템이
         # 같은 정의를 쓴다(NHN 777억→5.3배, 855억→5.7배 — 분모가 당일 값을 따라 움직인다).
         # 하한 최적값(kor 5배 등)도 이 정의 위에서 찾은 것이라 바꾸면 다시 잡아야 한다.
-        "value_mult": value_df / value_df.rolling(20, min_periods=20).mean(),
+        "value_mult": trade_value_multiplier_frame(value_df),
     }
 
 

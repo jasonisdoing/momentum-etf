@@ -143,6 +143,105 @@ def _backfill_missing_closes_from_naver(ticker_type: str, tickers: list[str]) ->
     return {"filled_tickers": filled, "filled_days": filled_days, "unfilled": unfilled}
 
 
+def _backfill_missing_volumes_from_toss(
+    ticker_type: str,
+    tickers: list[str],
+    *,
+    lookback_days: int = 45,
+) -> dict:
+    """최근 미국 일봉의 빈 거래량을 토스 일봉으로 채운다.
+
+    네이버가 복구한 OHLC 행은 종가가 이미 있어 다음 배치에서 가격 누락으로 다시 잡히지
+    않는다. 그래서 완료된 미국 거래일 중 ``Close``는 있고 ``Volume``만 비어 있는 행을
+    별도로 찾는다. 기존 OHLC는 건드리지 않고 거래량만 채운다.
+    """
+    from services.toss_market_service import fetch_toss_us_daily_ohlcv
+    from utils.cache_utils import load_cached_frame, save_cached_frame
+    from utils.realtime_quotes import resolve_toss_us_product_codes
+    from utils.trading_calendar import get_trading_days, is_market_day_completed
+
+    logger = get_app_logger()
+    now = pd.Timestamp.now().normalize()
+    start = now - pd.Timedelta(days=max(1, int(lookback_days)))
+    completed_days = {
+        pd.Timestamp(day).normalize()
+        for day in get_trading_days(start.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d"), "us")
+        if is_market_day_completed("us", pd.Timestamp(day).normalize())
+    }
+    if not completed_days:
+        return {"filled_tickers": 0, "filled_days": {}, "unfilled": {}}
+
+    cached_by_ticker: dict[str, pd.DataFrame] = {}
+    missing_by_ticker: dict[str, list[pd.Timestamp]] = {}
+    for ticker in tickers:
+        cached = load_cached_frame(ticker_type, ticker)
+        if cached is None or cached.empty or "Close" not in cached.columns:
+            continue
+        volume = (
+            pd.to_numeric(cached["Volume"], errors="coerce")
+            if "Volume" in cached.columns
+            else pd.Series(float("nan"), index=cached.index, dtype="float64")
+        )
+        close = pd.to_numeric(cached["Close"], errors="coerce")
+        normalized_index = pd.to_datetime(cached.index).normalize()
+        gaps = sorted(
+            {
+                pd.Timestamp(day).normalize()
+                for day, close_value, volume_value in zip(normalized_index, close, volume, strict=True)
+                if day in completed_days and pd.notna(close_value) and pd.isna(volume_value)
+            }
+        )
+        if gaps:
+            cached_by_ticker[ticker] = cached.copy()
+            missing_by_ticker[ticker] = gaps
+
+    if not missing_by_ticker:
+        return {"filled_tickers": 0, "filled_days": {}, "unfilled": {}}
+
+    product_codes = resolve_toss_us_product_codes(list(missing_by_ticker))
+    filled_tickers = 0
+    filled_days: dict[str, int] = {}
+    unfilled: dict[str, list[str]] = {}
+    for ticker, gaps in missing_by_ticker.items():
+        product_code = product_codes.get(ticker)
+        if not product_code:
+            unfilled[ticker] = [str(day.date()) for day in gaps]
+            continue
+        oldest = min(gaps)
+        count = max(30, min(200, int((now - oldest).days * 2 + 10)))
+        try:
+            candles = fetch_toss_us_daily_ohlcv(product_code, count=count)
+        except Exception:
+            logger.exception("[%s] %s 토스 거래량 조회 실패", ticker_type.upper(), ticker)
+            unfilled[ticker] = [str(day.date()) for day in gaps]
+            continue
+        by_date = {pd.Timestamp(str(candle["date"])).normalize(): candle for candle in candles}
+        cached = cached_by_ticker[ticker]
+        if "Volume" not in cached.columns:
+            cached["Volume"] = pd.Series(float("nan"), index=cached.index, dtype="float64")
+        normalized_index = pd.to_datetime(cached.index).normalize()
+        touched = 0
+        for day in gaps:
+            candle = by_date.get(day)
+            raw_volume = candle.get("volume") if candle else None
+            if raw_volume is None or float(raw_volume) <= 0:
+                unfilled.setdefault(ticker, []).append(str(day.date()))
+                continue
+            matching_rows = cached.index[normalized_index == day]
+            if len(matching_rows) == 0:
+                unfilled.setdefault(ticker, []).append(str(day.date()))
+                continue
+            cached.at[matching_rows[-1], "Volume"] = float(raw_volume)
+            touched += 1
+            day_key = str(day.date())
+            filled_days[day_key] = filled_days.get(day_key, 0) + 1
+        if touched:
+            save_cached_frame(ticker_type, ticker, cached.sort_index())
+            filled_tickers += 1
+
+    return {"filled_tickers": filled_tickers, "filled_days": filled_days, "unfilled": unfilled}
+
+
 def _resolve_fetch_workers() -> int:
     """종목 fetch 병렬 워커 수.
 
@@ -320,28 +419,20 @@ def _trade_value_fields(df: pd.DataFrame) -> dict[str, float] | None:
     """거래대금 배수와, 장중 배수를 다시 계산할 때 쓸 재료.
 
     거래대금은 `종가 × 거래량` 이고 분모는 **당일을 포함한** 20일 평균이다
-    (`utils.new_high_service` 와 같은 정의 — 두 화면이 다른 숫자를 보이면 안 된다).
+    (`utils.trade_value` 가 단일 소스 — 두 전략 화면이 다른 숫자를 보이면 안 된다).
 
     `trade_value_sum19` 는 직전 19거래일 합이다. 장중에는 오늘 거래대금을 실시간으로
     받아 `(sum19 + 오늘) / 20` 을 분모로 쓰는데, 순위 화면은 거래량 이력이 없어서
     그 합을 여기서 미리 넘겨준다. 20일이 안 되면 None(미산출 — 값을 지어내지 않는다).
     """
-    if "Close" not in df or "Volume" not in df:
+    if "Volume" not in df:
         return None
-    close = pd.to_numeric(df["Close"], errors="coerce").where(lambda x: x > 0)
-    volume = pd.to_numeric(df["Volume"], errors="coerce")
-    value = (close * volume).dropna()
-    if len(value) < 20:
+    close_col = next((column for column in ("unadjusted_close", "Close", "close") if column in df.columns), None)
+    if close_col is None:
         return None
-    window = value.iloc[-20:]
-    base = float(window.mean())
-    if base <= 0:
-        return None
-    return {
-        "trade_value": round(float(value.iloc[-1]), 2),
-        "trade_value_mult": round(float(value.iloc[-1]) / base, 4),
-        "trade_value_sum19": round(float(window.iloc[1:].sum()), 2),
-    }
+    from utils.trade_value import latest_trade_value_fields
+
+    return latest_trade_value_fields(df[close_col], df["Volume"])
 
 
 def _update_daily_change_pct(target_id: str, tickers: list[str]) -> None:
@@ -937,13 +1028,14 @@ def refresh_cache_for_target(
 
         # 미국 풀: yfinance 이력의 구멍(종가 빈칸·통누락)을 네이버로 메운다.
         backfill_report: dict | None = None
+        volume_backfill_report: dict | None = None
         if country_code == "us":
+            pool_tickers = [
+                str(item.get("ticker") or "").strip().upper()
+                for item in target_items
+                if str(item.get("ticker") or "").strip()
+            ]
             try:
-                pool_tickers = [
-                    str(item.get("ticker") or "").strip().upper()
-                    for item in target_items
-                    if str(item.get("ticker") or "").strip()
-                ]
                 backfill_report = _backfill_missing_closes_from_naver(target_norm, pool_tickers)
                 if backfill_report["filled_tickers"]:
                     logger.info(
@@ -954,6 +1046,17 @@ def refresh_cache_for_target(
                     )
             except Exception as exc:
                 logger.warning("[%s] 네이버 종가 보강 건너뜀: %s", target_norm.upper(), exc)
+            try:
+                volume_backfill_report = _backfill_missing_volumes_from_toss(target_norm, pool_tickers)
+                if volume_backfill_report["filled_tickers"]:
+                    logger.info(
+                        "[%s] 토스 일봉으로 거래량 누락 보강: %d종목 %s",
+                        target_norm.upper(),
+                        volume_backfill_report["filled_tickers"],
+                        volume_backfill_report["filled_days"],
+                    )
+            except Exception as exc:
+                logger.warning("[%s] 토스 거래량 보강 건너뜀: %s", target_norm.upper(), exc)
 
         success_tickers = [
             str(etf.get("ticker") or "").strip().upper()
@@ -996,6 +1099,7 @@ def refresh_cache_for_target(
             "pool": target_norm,
             "failed": list(failed_tickers),
             "backfill": backfill_report,
+            "volume_backfill": volume_backfill_report,
             "purged_dates": [str(pd.Timestamp(day).date()) for day in purged_dates],
         }
 
@@ -1122,6 +1226,12 @@ def _notify_cache_issues(reports: list[dict], *, full_refresh: bool) -> None:
             preview = ", ".join(f"{t}({', '.join(d)})" for t, d in list(unfilled.items())[:10])
             suffix = " …" if len(unfilled) > 10 else ""
             pool_lines.append(f"· 네이버에도 없어 못 채움 {len(unfilled)}종목: {preview}{suffix}")
+        volume_backfill = report.get("volume_backfill") or {}
+        volume_unfilled = volume_backfill.get("unfilled") or {}
+        if volume_unfilled:
+            preview = ", ".join(f"{t}({', '.join(d)})" for t, d in list(volume_unfilled.items())[:10])
+            suffix = " …" if len(volume_unfilled) > 10 else ""
+            pool_lines.append(f"· 토스에도 없어 못 채운 거래량 {len(volume_unfilled)}종목: {preview}{suffix}")
         purged = report.get("purged_dates") or []
         if purged:
             pool_lines.append(f"· 의심 날짜(다수 종목 종가 NaN) 제거: {', '.join(purged)}")
