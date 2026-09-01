@@ -54,16 +54,12 @@ type Settings = {
   min_value_mult: number | null;
   /** ADR 하한 — 전일 시장 ADR 이 미만이면 그날 신규 진입 차단. null = 없음. */
   adr_floor?: number | null;
-  /** 신고가 전용 슬랙 알람 — 한국 풀에서만 켤 수 있다(배치 new_high_notify_kor 가 감시). */
-  slack_enabled?: boolean;
 };
 
 type PoolOption = PoolLabelSource & { country_code?: string; currency?: string; pool_kind?: string | null };
 // PoolLabelSource 가 ticker_type·name·icon·order 를 갖는다 — 번호는 order 에서 나온다.
 
 type Constraints = {
-  /** 풀 국가 코드 — 슬랙 알람 토글(한국 전용)의 표시 여부. */
-  country?: string;
   adr_floor_options?: (number | null)[];
   stop_loss_options: (number | null)[];
   exit_ma_options: number[];
@@ -471,7 +467,6 @@ export function NewHighClient() {
   const [currentTab, setCurrentTab] = useState<CurrentTab>("list");
   // 기준일 — 빈 값이면 최신 거래일. 과거 날짜를 고르면 그 시점 상태를 재현한다.
   const [candidatesOpen, setCandidatesOpen] = useState(false);
-  const [slackTesting, setSlackTesting] = useState(false);
   const [charts, setCharts] = useState<HoldingChartData[] | null>(null);
   const [chartsLoading, setChartsLoading] = useState(false);
   const [chartsError, setChartsError] = useState<string | null>(null);
@@ -629,26 +624,6 @@ export function NewHighClient() {
       setBacktestProgress(null);
     }
   }, [draft, toast, backtestMonths]);
-
-  /** 슬랙 알람 테스트 발송 — 저장 여부와 무관하게 현재 풀로 즉시 보낸다. */
-  const sendSlackTest = useCallback(async () => {
-    if (!draft) return;
-    setSlackTesting(true);
-    try {
-      const response = await fetch("/api/strategy-new-high/slack-test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pool: draft.pool }),
-      });
-      const payload = (await response.json()) as { sent?: boolean; error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "슬랙 발송에 실패했습니다.");
-      toast.success("슬랙으로 테스트 메시지를 보냈습니다.");
-    } catch (sendError) {
-      toast.error(sendError instanceof Error ? sendError.message : "슬랙 발송에 실패했습니다.");
-    } finally {
-      setSlackTesting(false);
-    }
-  }, [draft, toast]);
 
   // 장중에는 실시간 시세가 움직이므로 주기적으로 다시 받는다.
   // 과거 날짜를 보는 중이거나 장이 닫혀 있으면 갱신할 것이 없어 타이머를 걸지 않는다.
@@ -1202,34 +1177,6 @@ export function NewHighClient() {
                       ))}
                     </select>
                   </label>
-                  {/* 신고가 전용 슬랙 알람 — 배치가 한국 장 시간에만 돌아 한국 풀에서만 보인다(합성 화면과 같은 UI). */}
-                  {constraints.country === "kor" ? (
-                    <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">슬랙 알람</span>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                        <div className="form-check form-switch" style={{ marginBottom: 0 }}>
-                          <input
-                            className="form-check-input"
-                            type="checkbox"
-                            role="switch"
-                            checked={Boolean(draft.slack_enabled)}
-                            disabled={saving}
-                            onChange={(event) => setDraft({ ...draft, slack_enabled: event.target.checked })}
-                            title="신고가 전용 슬랙 알람 (배치 '한국 신고가 알람'이 장중 감시). 저장 버튼을 눌러야 반영된다."
-                          />
-                        </div>
-                        <span style={hintStyle}>{draft.slack_enabled ? "켜짐" : "꺼짐"}</span>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline-secondary"
-                          disabled={slackTesting}
-                          onClick={() => void sendSlackTest()}
-                        >
-                          {slackTesting ? "발송 중…" : "지금 발송(테스트)"}
-                        </button>
-                      </span>
-                    </label>
-                  ) : null}
                 </div>
                 {/* CRUD 버튼이 하나뿐이라 별도 줄을 두지 않고 메인 헤더 오른쪽에 둔다. */}
                 <div className="appMainHeaderRight">

@@ -20,7 +20,6 @@ SystemAction = Literal[
     "broker_balance_sync",
     "strategy_mix_notify_kor",
     "strategy_mix_notify_us",
-    "new_high_notify_kor",
     "cache_refresh",
     "cache_refresh_full",
     "market_hours_analysis",
@@ -136,17 +135,6 @@ SCHEDULE_ROWS = [
     },
     {
         "no": 6,
-        "key": "new_high_notify_kor",
-        "group": "장중 실행",
-        "job": "한국 신고가 알람",
-        "target": "신고가 알람 켠 한국 풀 (미보유 돌파 + 거래대금 시간비례 달성, 구성 변경 시 발송)",
-        "cadence": "평일 09:10~15:20 KST 10분 간격",
-        "command": "python scripts/new_high_notify.py kor",
-        # 한국 합성 액션 알림과 같은 장중 슬롯.
-        "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
-    },
-    {
-        "no": 7,
         "key": "holdings_alarm",
         "group": "장중 실행",
         "job": "보유종목 알람",
@@ -156,7 +144,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [10], "hours": [9], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 8,
+        "no": 7,
         "key": "leverage_ma_cross",
         "group": "장중 실행",
         "job": "레버리지 스위칭",
@@ -172,7 +160,7 @@ SCHEDULE_ROWS = [
         },
     },
     {
-        "no": 9,
+        "no": 8,
         "key": "asset_summary",
         "group": "장중 실행",
         "job": "전체 자산 요약 알림",
@@ -192,7 +180,7 @@ SCHEDULE_ROWS = [
     },
     # ③ 마감 후 지표 — 하루 1~2회.
     {
-        "no": 10,
+        "no": 9,
         "key": "market_breadth",
         "group": "마감 후 지표",
         "job": "시장 폭(ADR) 집계",
@@ -212,7 +200,7 @@ SCHEDULE_ROWS = [
         },
     },
     {
-        "no": 11,
+        "no": 10,
         "key": "cache_refresh_full",
         "group": "마감 후 지표",
         "job": "가격 캐시 전체 재수집",
@@ -225,18 +213,18 @@ SCHEDULE_ROWS = [
     },
     # ④ 개장 전 준비 — 아침에 한 번, 오래 걸린다(실행 시각 순).
     {
-        "no": 12,
+        "no": 11,
         "key": "market_hours_analysis",
         "group": "개장 전 준비",
         "job": "장 시간 분석",
         "target": "시장 스케줄",
-        # DB 백업(21번)이 07:00 에 도니 겹치지 않게 30분 뒤로 뺀다.
+        # DB 백업(20번)이 07:00 에 도니 겹치지 않게 30분 뒤로 뺀다.
         "cadence": "평일 07:30 KST",
         "command": "python scripts/analyze_market_hours.py",
         "schedule": {"minutes": [30], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 13,
+        "no": 12,
         "key": "reference_meta_updater",
         "group": "개장 전 준비",
         "job": "종목 메타 업데이트",
@@ -246,7 +234,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [45], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 14,
+        "no": 13,
         "key": "price_metrics_updater",
         "group": "개장 전 준비",
         "job": "종목 가격지표 업데이트",
@@ -256,7 +244,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [50], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 15,
+        "no": 14,
         "key": "us_market_stocks",
         "group": "개장 전 준비",
         "job": "미국 개별주 업데이트",
@@ -266,7 +254,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 16,
+        "no": 15,
         "key": "aus_market_stocks",
         "group": "개장 전 준비",
         "job": "호주 개별주 업데이트",
@@ -276,7 +264,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [10], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 17,
+        "no": 16,
         "key": "kor_market_stocks",
         "group": "개장 전 준비",
         "job": "한국 지수 구성종목",
@@ -286,7 +274,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [20], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 18,
+        "no": 17,
         "key": "kor_dividend_stocks",
         "group": "개장 전 준비",
         "job": "한국 배당주 지표",
@@ -297,7 +285,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [30], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 19,
+        "no": 18,
         "key": "us_market_etfs",
         "group": "개장 전 준비",
         "job": "미국 ETF 업데이트",
@@ -308,7 +296,7 @@ SCHEDULE_ROWS = [
     },
     # ⑤ 상시 운영 — 자동으로 돌고 손댈 일이 거의 없다.
     {
-        "no": 20,
+        "no": 19,
         "key": "live_24h_slack",
         "group": "상시 운영",
         "job": "24H 시세 알림",
@@ -318,7 +306,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
     },
     {
-        "no": 21,
+        "no": 20,
         "key": "db_backup",
         "group": "상시 운영",
         "job": "DB 백업",
@@ -336,7 +324,6 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "broker_balance_sync": "scripts/broker_balance_sync.py",
     "strategy_mix_notify_kor": "scripts/strategy_mix_notify.py",
     "strategy_mix_notify_us": "scripts/strategy_mix_notify.py",
-    "new_high_notify_kor": "scripts/new_high_notify.py",
     "cache_refresh": "scripts/stock_price_cache_updater.py",
     "cache_refresh_full": "scripts/stock_price_cache_updater.py",
     "market_hours_analysis": "scripts/analyze_market_hours.py",
@@ -361,7 +348,6 @@ _ARGS_BY_ACTION: dict[str, list[str]] = {
     "db_backup": ["--gzip"],
     "strategy_mix_notify_kor": ["kor"],
     "strategy_mix_notify_us": ["us"],
-    "new_high_notify_kor": ["kor"],
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}

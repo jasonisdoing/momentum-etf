@@ -172,7 +172,7 @@ class OwnedKeySpec:
     """설정 문서 **안쪽**에 소유자 id 가 키로 들어가는 자리.
 
     컬렉션 단위가 아니라 문서 하나의 하위 키라 컬렉션 목록만 봐서는 보이지 않는다.
-    실제로 `new_high_notify_state.pools` 에 삭제된 풀이 남아 있었다.
+    실제로 이런 자리(알림 상태 문서)에 삭제된 풀이 남아 있던 적이 있다.
     """
 
     doc_id: str
@@ -185,7 +185,6 @@ class OwnedKeySpec:
 OWNED_KEY_SPECS: tuple[OwnedKeySpec, ...] = (
     OwnedKeySpec("new_high_settings", "settings_by_pool", "pool", "신고가 전략의 풀별 저장 설정"),
     OwnedKeySpec("portfolio_settings", "settings_by_pool", "pool", "포트폴리오 전략의 풀별 목표 비중"),
-    OwnedKeySpec("new_high_notify_state", "pools", "pool", "신고가 알림 발송 상태(풀별)"),
     OwnedKeySpec("strategy_mix_notify_state", "accounts", "account", "합성 액션 알림 발송 상태(계좌별)"),
     OwnedKeySpec("broker_balance_sync_state", "accounts", "account", "증권사 잔고 동기화 실패/복구 상태(계좌별)"),
 )
