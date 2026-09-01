@@ -115,7 +115,7 @@ type PositionRow = {
   is_held: boolean;
   /** 전략이 판정에 쓰는 배수(KRX 정규시장 확정). */
   value_mult: number | null;
-  /** 같은 배수를 토스 실시간(KRX+NXT 합산)으로 낸 값. 확정값과 다르면 괄호로 보여준다. */
+  /** 장중 시간 환산 배수(누적 ÷ 장 경과율). 장중에만 값이 있고 괄호로 보여준다. */
   value_mult_live?: number | null;
   /** 종목에 붙는 메모 — 순위·모멘텀·자산 관리 화면과 같은 값. */
   memo?: string;
@@ -715,8 +715,8 @@ export function NewHighClient() {
       tradeValueMultColumn<PositionRow>({
         qualifies: (row) => row?.qualifies,
         headerTooltip:
-          "20일 평균 거래대금 대비 배수 — 하한 이상이어야 진입한다. 굵은 글씨가 자격 통과다. " +
-          "괄호는 토스 실시간 배수로, 대체거래소(NXT) 거래분까지 합산한 값이라 확정값보다 큽니다.",
+          "20일 평균 거래대금 대비 배수 — 하한 이상이어야 진입한다(장중 한국은 시간 비례 하한). 굵은 글씨가 자격 통과다. " +
+          "괄호는 장중 시간 비율로 환산한 배수 — 지금 페이스대로면 하루 기준 몇 배인지입니다.",
       }),
       {
         field: "gap_high_pct",

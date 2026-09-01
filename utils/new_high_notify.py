@@ -66,10 +66,11 @@ def _pool_display_name(pool: str) -> str:
 
 
 def _row_mult(row: dict[str, Any]) -> float | None:
-    """표시·트리거에 쓰는 거래대금 배수 — 실시간(토스)이 있으면 그 값, 없으면 확정값."""
-    value = row.get("value_mult_live")
-    if value is None:
-        value = row.get("value_mult")
+    """표시·트리거에 쓰는 거래대금 배수 — 본값(장중=실시간 누적, 확정 후=KRX).
+
+    `value_mult_live` 는 이제 시간 환산 배수라 트리거(정수 단)에는 쓰지 않는다.
+    """
+    value = row.get("value_mult")
     return float(value) if value is not None else None
 
 
@@ -85,11 +86,16 @@ def _row_line(row: dict[str, Any], bold: bool) -> str:
     change = row.get("change_pct")
     gap = row.get("gap_pct")
     mult = _row_mult(row)
+    # 괄호는 화면과 같은 시간 환산 배수(누적 ÷ 08~20시 경과율) — 장중에만 값이 있다.
+    pace = row.get("value_mult_live")
+    mult_text = None
+    if mult is not None:
+        mult_text = f"거래대금 {mult:.1f}배" + (f"(실시간 비율 {float(pace):.1f}배)" if pace is not None else "")
     parts = [
         f"*{row['ticker']} {row.get('name') or ''}*".strip(),
         f"{'+' if (change or 0) >= 0 else ''}{change:.2f}%" if change is not None else None,
         emph(f"종가 대비 {'+' if gap >= 0 else ''}{gap:.2f}%") if gap is not None else None,
-        emph(f"거래대금 {mult:.1f}배") if mult is not None else None,
+        emph(mult_text) if mult_text else None,
     ]
     return "🔺 " + " · ".join(part for part in parts if part)
 

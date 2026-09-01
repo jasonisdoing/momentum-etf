@@ -538,8 +538,9 @@ def _apply_live_trade_values(
     백테스트는 확정된 과거만 보므로 여기서 바꾼 값이 성과 계산에 섞이지 않는다.
     국내 상장이 아니거나 조회에 실패하면 아무것도 바꾸지 않는다(캐시 값 유지).
 
-    실시간 배수는 `value_mult_live` 에 **항상** 따로 남긴다 — 토스는 대체거래소(NXT)
-    거래분까지 합산해 주므로 KRX 확정값보다 크고, 화면이 둘을 나란히 보여준다.
+    `value_mult_live` 에는 **시간 비율 환산 배수**(누적 ÷ 장 경과율)를 담는다 — 화면이
+    괄호로 보여준다("3.0배 (19.5)" = 지금 페이스대로면 하루 기준 19.5배). 장중이 아니면
+    None 이라 괄호가 붙지 않는다(예전의 NXT 합산 비교 표시는 제거했다).
     """
     from utils.settings_loader import get_ticker_type_settings
 
@@ -561,7 +562,7 @@ def _apply_live_trade_values(
     recent = value_df.loc[:last].tail(19)
     # 장중 판정용 하한 — 하루 기준 하한을 장 경과 비율로 낮춘 값(한국 전용, 알람과 같은 식).
     # 오전의 누적 거래대금을 하루 기준에 그대로 대면 돌파 종목이 전부 (미달)로 뜬다.
-    from utils.new_high_service import live_min_value_mult
+    from utils.new_high_service import live_min_value_mult, pace_value_mult
 
     live_required = live_min_value_mult(min_value_mult)
     for row in rows:
@@ -575,7 +576,7 @@ def _apply_live_trade_values(
         if base <= 0:
             continue
         live_mult = round(float(today) / base, 2)
-        row["value_mult_live"] = live_mult
+        row["value_mult_live"] = pace_value_mult(live_mult)
         if not confirmed_today:
             # 오늘 확정값이 아직 없다 — 실시간이 유일한 오늘 값이라 판정에도 쓴다.
             row["trade_value"] = float(today)
@@ -765,8 +766,8 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
         price = close_df.at[last, ticker]
         return None if pd.isna(price) else float(price)
 
-    # 거래대금 배수 — 실시간(토스, KRX+NXT 합산) 값을 **항상** 함께 담는다. 화면이 확정값
-    # 옆에 괄호로 보여준다. 오늘 확정값이 아직 없으면(장중) 실시간이 판정 기준이 된다 —
+    # 거래대금 배수 — 장중에는 실시간(토스) 누적이 본값·판정 기준이 되고, 괄호에는 시간
+    # 비율 환산 배수가 담긴다. 오늘 확정값이 아직 없으면(장중) 실시간이 판정 기준이 된다 —
     # 오늘 돌파한 종목을 어제 자금 유입으로 판정할 수는 없기 때문이다.
     _apply_live_trade_values(
         rows,

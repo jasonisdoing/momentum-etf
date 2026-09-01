@@ -158,15 +158,14 @@ def _apply_industry_labels(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
 
 
 def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> tuple[dict[str, float], dict[str, float]]:
-    """티커별 거래대금 배수(20일 평균 대비) — `(판정 기준, 실시간 합산)` 두 벌.
+    """티커별 거래대금 배수(20일 평균 대비) — `(본값, 시간 환산)` 두 벌.
 
-    **판정 기준**은 가격 캐시 배치가 저장해 둔 값이다(KRX 정규시장 확정). 장중에는 오늘
-    확정값이 아직 없으므로 실시간 값으로 채운다 — 마감 후 배치가 돌면 확정값으로 바뀐다.
+    **본값**: 장중에는 토스 실시간 누적 배수, 마감 후에는 가격 캐시 배치가 저장해 둔
+    KRX 정규시장 확정값이다(다음날 KRX 로 전환).
 
-    **실시간 합산**은 토스 스냅샷 기준이다. 토스는 KRX 에 더해 대체거래소(NXT) 거래분까지
-    합산해서 준다(응답의 `nxtSinglePrice`). 그래서 같은 날이라도 KRX 확정값보다 크다
-    (씨젠 2026-08-28: KRX 393억 → 3.20배, 합산 711억 → 4.57배). 어느 쪽도 틀린 값이
-    아니라 **재는 범위가 다르다** — 화면이 둘을 나란히 보여주고 판정은 확정값으로 한다.
+    **시간 환산**: 장중에만 있다 — 누적 배수를 장 경과 비율로 나눈 값(지금 페이스대로면
+    하루 기준 몇 배인지). 화면이 괄호로 보여준다: "3.0배 (19.5)". 예전에는 여기에 토스의
+    KRX+NXT 합산 배수를 담아 확정값과 비교했는데, 재는 범위가 달라 혼란만 줘서 제거했다.
 
     배치가 안 돌았거나 20일치가 없는 종목은 키가 없다 — 화면은 '-' 로 둔다.
     """
@@ -198,10 +197,20 @@ def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> tuple[dict[s
         if doc.get("trade_value_sum19") is not None
     }
     live = _live_trade_value_mult(ticker_type, sum19)
-    # 배치 값이 없는 종목(오늘 상장 등)은 실시간이라도 보여준다.
+    from utils.new_high_service import kor_session_live_fraction
+
+    fraction = kor_session_live_fraction()
+    if fraction is not None:
+        # 장중 — 실시간 누적이 본값, 괄호에는 시간 환산 배수.
+        pace = {}
+        for ticker, value in live.items():
+            result[ticker] = round(value, 2)
+            pace[ticker] = round(value / fraction, 1)
+        return result, pace
+    # 장중이 아니면 확정값이 본값 — 배치 값이 없는 종목(오늘 상장 등)만 실시간으로 채운다.
     for ticker, value in live.items():
-        result.setdefault(ticker, value)
-    return result, live
+        result.setdefault(ticker, round(value, 2))
+    return result, {}
 
 
 def _live_trade_value_mult(ticker_type: str, sum19: dict[str, float]) -> dict[str, float]:
