@@ -72,10 +72,6 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 10,20,30,40,50 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_mix_notify_kor python scripts/strategy_mix_notify.py kor >> logs/cron/strategy_mix_notify_kor.log 2>&1
 0,10,20,30,40,50 10-14 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_mix_notify_kor python scripts/strategy_mix_notify.py kor >> logs/cron/strategy_mix_notify_kor.log 2>&1
 0,10,20 15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_mix_notify_kor python scripts/strategy_mix_notify.py kor >> logs/cron/strategy_mix_notify_kor.log 2>&1
-# 한국 신고가 알람 — 신고가 설정(slack_enabled) 켠 한국 풀 감시. 미보유 돌파+거래대금 시간비례 달성 구성이 달라지면 발송.
-10,20,30,40,50 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py new_high_notify_kor python scripts/new_high_notify.py kor >> logs/cron/new_high_notify_kor.log 2>&1
-0,10,20,30,40,50 10-14 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py new_high_notify_kor python scripts/new_high_notify.py kor >> logs/cron/new_high_notify_kor.log 2>&1
-0,10,20 15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py new_high_notify_kor python scripts/new_high_notify.py kor >> logs/cron/new_high_notify_kor.log 2>&1
 # 미국 합성 액션 알림 — 서머타임 정규장(22:30~05:00 KST)의 개장 10분 후~마감 10분 전.
 # 겨울 시간엔 1시간 밀리지만 crontab 이 KST 고정이라 장전 구간은 공회전(발송 없음)한다.
 40,50 22 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_mix_notify_us python scripts/strategy_mix_notify.py us >> logs/cron/strategy_mix_notify_us.log 2>&1
