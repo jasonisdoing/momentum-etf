@@ -1450,7 +1450,8 @@ class _SlotRuntime:
     below_ma: Any = None
     value_mult: Any = None
     entry: dict[str, float] = field(default_factory=dict)
-    stop_pct: float = 0.0
+    # None 이면 손절 미사용 — 신고가 엔진과 같은 규칙
+    stop_pct: float | None = None
     min_mult: Any = None
 
 
@@ -1519,7 +1520,8 @@ def _build_slot_runtime(
     runtime.breakout = signals["breakout"]
     runtime.below_ma = signals["below_ma"]
     runtime.value_mult = signals["value_mult"]
-    runtime.stop_pct = float(spec.settings["stop_loss_pct"])
+    raw_stop = spec.settings["stop_loss_pct"]
+    runtime.stop_pct = None if raw_stop is None else float(raw_stop)
     runtime.min_mult = spec.settings["min_value_mult"]
     return runtime
 
@@ -1619,7 +1621,7 @@ def _simulate_mix_daily(
                 price = px(rt.close_df, prev, ticker)
                 if price is None:
                     continue
-                hit_stop = (price / rt.entry[ticker] - 1) * 100 <= rt.stop_pct
+                hit_stop = rt.stop_pct is not None and (price / rt.entry[ticker] - 1) * 100 <= rt.stop_pct
                 if not (hit_stop or bool(rt.below_ma.at[prev, ticker])):
                     continue
                 fill = px(rt.open_df, day, ticker) or price
