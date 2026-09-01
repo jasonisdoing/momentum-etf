@@ -221,6 +221,10 @@ def _purge_suspicious_dates(
 
     데이터 소스(yfinance 등)가 특정 날짜에 다수 종목의 데이터를 일시적으로 빠뜨리거나
     합성값을 반환할 때, 그 날짜 행을 모든 종목 캐시에서 제거해 다음 cron 시 재fetch 대상으로 만든다.
+
+    비율의 분모는 **그 날짜에 이미 상장돼 있던 종목**(창 안 첫 봉 이후)만이다. 풀 전체로
+    잡으면 신규 상장이 많은 풀에서 상장 전 부재가 NaN 으로 집계돼, 멀쩡히 거래되던 옛
+    종목의 진짜 데이터까지 지웠다(kor_us_div_etf 2025-07-28~09-22, 40거래일 실손실).
     """
     logger = get_app_logger()
     if not tickers:
@@ -258,7 +262,13 @@ def _purge_suspicious_dates(
     if matrix.empty:
         return []
 
-    nan_ratio = matrix.isna().sum(axis=1) / float(matrix.shape[1])
+    # 각 종목은 자기 첫 봉(창 안 기준)부터만 분모에 들어간다 — 상장 전 부재는 NaN 이 아니다.
+    listed = pd.DataFrame(
+        {ticker: matrix.index >= series.index.min() for ticker, series in close_map.items()},
+        index=matrix.index,
+    )
+    denominator = listed.sum(axis=1)
+    nan_ratio = (matrix.isna() & listed).sum(axis=1) / denominator.where(denominator > 0)
     suspicious = sorted(nan_ratio[nan_ratio > nan_threshold].index.tolist())
     if not suspicious:
         return []
