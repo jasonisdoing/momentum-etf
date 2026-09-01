@@ -639,7 +639,7 @@ export function MomentumClient() {
         headerTooltip:
           "이번 포트폴리오까지 몇 주 연속 편입됐는지 (신규 = 이번 주 첫 편입, 최대 12주 추적). " +
           "화살표 — →유지/→신규(초록)는 다음 주 예상, 확정은 교체일 직전 판정일 종가. " +
-          "빨강은 빠지는 종목이며 굵기가 '이미 팔렸는지'를 뜻한다: →매도예정(가늘게)은 아직 보유 중, " +
+          "빨강은 빠지는 종목이다: →교체예정은 다음 주 순위 교체, →매도예정은 주중 이탈 확정 후 다음 시가 매도, " +
           "→손절·→이탈(굵게)은 주중에 이미 매도된 것. →손절(예상)/→이탈(예상)은 장중 가격 기준 예보로 " +
           "오늘 종가로 확정되면 다음 거래일 시가에 판다.",
         width: 108,
@@ -649,9 +649,8 @@ export function MomentumClient() {
             p.value == null ? "-" : p.value <= 1 ? "신규" : p.value >= 12 ? "12+" : `${p.value}주`;
           const isNewPick = p.value != null && p.value <= 1 && !p.data?.is_reserve;
           const held = Boolean(p.data && !p.data.is_reserve && !p.data.is_expected_only);
-          // 빠지는 종목은 빨강으로 쓰되 **굵기로 '이미 팔렸는지'를 가른다** — 굵게는 주중에
-          // 이미 매도된 것(사유까지 표시), 가늘게는 아직 들고 있는 것. 초록 화살표만
-          // '다음 주 예상' 이고, 빨강은 지금 상태다.
+          // 빠지는 종목은 빨강으로 쓰고 원인을 문구로 가른다 — 순위 경쟁이면 교체예정,
+          // 주중 이탈이 확정됐지만 미체결이면 매도예정, 이미 매도됐으면 사유를 굵게 표시한다.
           let next: React.ReactNode = null;
           if (p.data?.is_exited) {
             const reason = String(p.data.exit_reason ?? "").includes("손절") ? "손절" : "이탈";
@@ -669,7 +668,7 @@ export function MomentumClient() {
           } else if (p.data?.next_week_expected) {
             next = <span style={{ color: "#2f9e44", fontWeight: 700 }}> →{held ? "유지" : "신규"}</span>;
           } else if (held) {
-            next = <span style={{ color: "var(--up-color, #d64545)" }}> →매도예정</span>;
+            next = <span style={{ color: "var(--up-color, #d64545)" }}> →교체예정</span>;
           }
           return (
             <span>
