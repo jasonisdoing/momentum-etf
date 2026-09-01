@@ -28,7 +28,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import ADR_FLOOR_OPTIONS, MIN_VALUE_MULT_OPTIONS, TOP_N_HOLD
+from config import ADR_FLOOR_OPTIONS, MIN_VALUE_MULT_OPTIONS
 
 # 손절선 — 시스템 공용 목록 앞에 '없음'(None)을 붙인다. 이탈 이평선이 있어 손절이
 # 없어도 청산 경로가 있다(모멘텀의 주중 손절과 같은 규칙 — `config` 주석 참고).
@@ -367,12 +367,17 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "pool": pool,
         "min_value_mult": min_value_mult,
         "adr_floor": adr_floor,
-        # 종목 수(슬롯)는 풀별 설정이 아니라 시스템 공통(config.TOP_N_HOLD) — 업종 상한은
-        # 개념째 폐기했다(집중 완화는 합성 배분 몫).
-        "top_n": TOP_N_HOLD,
+        # 종목 수(슬롯)는 순위·모멘텀·종목풀 백테스트와 같은 풀 설정을 쓴다.
+        "top_n": _pool_top_n_hold(pool),
         "stop_loss_pct": stop_loss_pct,
         "exit_ma_days": pick("exit_ma_days", EXIT_MA_OPTIONS, int),
     }
+
+
+def _pool_top_n_hold(pool: str) -> int:
+    from utils.pool_settings_store import get_pool_top_n_hold
+
+    return get_pool_top_n_hold(pool)
 
 
 def _load_doc() -> dict[str, Any]:

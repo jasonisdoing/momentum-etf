@@ -928,11 +928,10 @@ def build_ticker_type_rankings(
             "_ticker_sort",
         ]
     )
-    # 업종 상한 — 화면에서 바꿔 보는 값이 있으면 그것, 없으면 종목풀 저장값(모멘텀과 같은 값).
-    from config import TOP_N_HOLD
+    # 추천 ✅ 개수는 모멘텀·신고가·종목풀 백테스트와 같은 풀 설정을 쓴다.
+    from utils.pool_settings_store import get_pool_top_n_hold
 
-    # 보유 종목 수는 풀별 설정이 아니라 시스템 공통(config) — 순위 추천 ✅ 개수의 기준.
-    df = _mark_hold_targets(df, TOP_N_HOLD)
+    df = _mark_hold_targets(df, get_pool_top_n_hold(ticker_type))
     df = _normalize_ranking_values(df, country_code, monthly_labels=monthly_labels)
     df.attrs["realtime_active"] = realtime_active
     df.attrs["ranking_computed_at"] = ranking_computed_at

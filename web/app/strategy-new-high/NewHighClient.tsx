@@ -46,7 +46,7 @@ const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "
 
 type Settings = {
   pool: string;
-  /** 서버가 config.TOP_N_HOLD 로 채워 주는 공통값 — 화면에 입력은 없고 표시·계산에만 쓴다. */
+  /** 종목풀 설정의 보유종목 수 — 이 화면에서는 표시·계산에만 쓴다. */
   top_n: number;
   stop_loss_pct: number | null;
   exit_ma_days: number;

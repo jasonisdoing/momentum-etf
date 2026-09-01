@@ -460,11 +460,13 @@ def compute_pool_signal_backtest(
     long_days = _resolve_int_override(long_ma_days, rule["long_ma_days"], LONG_MA_OPTIONS, "장기 이평선")
     window = int(months) * _TRADING_DAYS_PER_MONTH
 
-    from config import TOP_N_HOLD
-
     pool_settings = get_ticker_type_settings(pool_id)
-    # 미지정이면 시스템 공통 보유 종목 수(config) — 풀별 설정은 폐기했다.
-    top_n_hold = TOP_N_HOLD if top_n is None else int(top_n)
+    if top_n is None:
+        from utils.pool_settings_store import get_pool_top_n_hold
+
+        top_n_hold = get_pool_top_n_hold(pool_id)
+    else:
+        top_n_hold = int(top_n)
     if not (1 <= top_n_hold <= 100):
         raise ValueError(f"보유 종목수는 1~100 범위여야 합니다: {top_n_hold}")
     # 벤치마크는 비교 기준일 뿐 매수 대상이 아니다 — 순위 화면의 추천 규칙과 동일하게 뺀다.

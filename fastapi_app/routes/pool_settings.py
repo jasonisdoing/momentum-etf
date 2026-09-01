@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from config import TOP_N_HOLD_OPTIONS
 from fastapi_app.dependencies import require_internal_token
 from utils.ma_options import ma_options_by_country
 from utils.market_breadth_service import MARKET_BY_INDEX_TICKER
@@ -81,6 +82,7 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
         "pools": pools,
         "constraints": {
             "ma_options_by_country": ma_options_by_country(),
+            "top_n_hold_options": list(TOP_N_HOLD_OPTIONS),
             "slippage_pct_options": list(SLIPPAGE_PCT_OPTIONS),
             "stoploss_pct_options": list(STOPLOSS_PCT_OPTIONS),
             "editable_keys": list(POOL_EDITABLE_KEYS),

@@ -30,7 +30,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import ADR_FLOOR_OPTIONS, STOP_LOSS_PCT_OPTIONS, TOP_N_HOLD
+from config import ADR_FLOOR_OPTIONS, STOP_LOSS_PCT_OPTIONS
 from core.strategy.scoring import (
     compute_ma_disparity,
     drawdown_from_high_pct,
@@ -203,16 +203,20 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "pool": pool,
-        # 종목 수는 풀별 설정이 아니라 시스템 공통(config.TOP_N_HOLD) — 과적합을 피하려고
-        # 튜닝·저장 대상에서 뺐다. 업종 상한도 같은 이유로 개념째 제거(집중 완화는
-        # 합성 배분 — 모멘텀·신고가 50% + 배당주 50% — 가 맡는다).
-        "top_n": TOP_N_HOLD,
+        # 종목 수는 순위·신고가·종목풀 백테스트와 같은 풀 설정을 쓴다.
+        "top_n": _pool_top_n_hold(pool),
         "short_ma_days": short_ma_days,
         "long_ma_days": long_ma_days,
         "adr_floor": adr_floor,
         "intraweek_exit": intraweek_exit,
         "intraweek_stop_pct": intraweek_stop_pct,
     }
+
+
+def _pool_top_n_hold(pool: str) -> int:
+    from utils.pool_settings_store import get_pool_top_n_hold
+
+    return get_pool_top_n_hold(pool)
 
 
 def pool_options() -> list[dict[str, Any]]:
@@ -562,7 +566,9 @@ def adr_gate_blocked(settings: dict[str, Any], as_of: pd.Timestamp | None) -> bo
             raise RuntimeError(f"{market} ADR 데이터가 없습니다 — market_breadth 배치를 확인하세요.")
         last_date = series.index[-1]
         if pd.Timestamp.now().normalize() - last_date > pd.Timedelta(days=14):
-            raise RuntimeError(f"{market} ADR 이 {last_date.date()} 이후 갱신되지 않았습니다 — market_breadth 배치를 확인하세요.")
+            raise RuntimeError(
+                f"{market} ADR 이 {last_date.date()} 이후 갱신되지 않았습니다 — market_breadth 배치를 확인하세요."
+            )
         value = float(series.iloc[-1])
         return value < float(adr_floor)
     value = series.asof(pd.Timestamp(as_of))
@@ -991,10 +997,7 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
             break
         prior_signal = _signal_date_for(benchmark_close, prior_rebalance)
         prior_candidates = select_candidates(universe, frames, settings, as_of=prior_signal)
-        prior_top = {
-            item["ticker"]
-            for item in select_top(rank_candidates(prior_candidates), top_n)
-        }
+        prior_top = {item["ticker"] for item in select_top(rank_candidates(prior_candidates), top_n)}
         for ticker in list(alive):
             if ticker in prior_top:
                 streaks[ticker] += 1

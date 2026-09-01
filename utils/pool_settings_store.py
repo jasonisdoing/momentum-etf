@@ -3,7 +3,7 @@
 MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 보관한다.
 
     구조: ticker_type, name, icon, order, country_code, currency, pool_kind
-    편집: SHORT_MA_DAYS, LONG_MA_DAYS,                         ← 모멘텀 전략 설정이기도 하다
+    편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS,             ← 전략 공용 설정
           INTRAWEEK_EXIT, INTRAWEEK_STOP_PCT,                   ← 모멘텀 전용
           BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, STOPLOSS_THRESHOLD_PCT,
           BENCHMARK, MARKET_REGIME_INDEX (선택 — 비우면 미설정)
@@ -35,6 +35,7 @@ from config import (
     POOL_KIND_OPTIONS,
     SLIPPAGE_PCT_OPTIONS,
     STOP_LOSS_PCT_OPTIONS,
+    TOP_N_HOLD_OPTIONS,
 )
 from config import STOP_LOSS_PCT_OPTIONS as STOPLOSS_PCT_OPTIONS
 from utils.logger import get_app_logger
@@ -52,6 +53,7 @@ INTERNAL_POOL_ID_PREFIX = "__"
 # 기준이라, 전략 설정을 따로 두지 않고 풀 문서 하나에 모은다(순위 화면·보유종목 알림·
 # 종목풀 백테스트가 같은 값을 본다). 신고가는 자기 설정 문서를 따로 쓴다.
 OVERRIDABLE_KEYS: tuple[str, ...] = (
+    "TOP_N_HOLD",
     "SHORT_MA_DAYS",
     "LONG_MA_DAYS",
 )
@@ -100,7 +102,7 @@ STRUCTURAL_KEYS: tuple[str, ...] = (
 )
 
 
-_INT_KEYS = ("SHORT_MA_DAYS", "LONG_MA_DAYS")
+_INT_KEYS = ("TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS")
 _FLOAT_KEYS = ("BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT", "STOPLOSS_THRESHOLD_PCT")
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 _ALLOWED_CURRENCIES = {"KRW", "AUD", "USD"}
@@ -327,6 +329,9 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
             if num not in allowed:
                 options = ", ".join(str(day) for day in allowed)
                 raise PoolSettingsError(f"{key} 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
+        if key == "TOP_N_HOLD" and check_options and num not in TOP_N_HOLD_OPTIONS:
+            options = ", ".join(str(value) for value in TOP_N_HOLD_OPTIONS)
+            raise PoolSettingsError(f"{key} 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
         cleaned[key] = num
 
     # 모멘텀 전용 — 숫자/불리언이 섞여 있고 None 이 '없음' 을 뜻한다(임의 보정하지 않는다).
@@ -537,6 +542,24 @@ def get_pool_slippage(pool: str) -> tuple[float, float]:
             f"종목풀({pool}) 설정에 {', '.join(missing)} 가 없습니다 — `/pools-settings` 에서 먼저 저장하세요."
         )
     return float(settings["BUY_SLIPPAGE_PCT"]), float(settings["SELL_SLIPPAGE_PCT"])
+
+
+def get_pool_top_n_hold(pool: str) -> int:
+    """종목풀의 보유 종목 수를 반환한다. 누락·선택지 밖 값은 명시적으로 실패한다."""
+    from utils.settings_loader import get_ticker_type_settings
+
+    settings = get_ticker_type_settings(pool) or {}
+    raw = settings.get("TOP_N_HOLD")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise PoolSettingsError(
+            f"종목풀({pool}) 설정에 TOP_N_HOLD 가 없습니다 — `/pools-settings` 에서 먼저 저장하세요."
+        ) from exc
+    if value not in TOP_N_HOLD_OPTIONS:
+        options = ", ".join(str(item) for item in TOP_N_HOLD_OPTIONS)
+        raise PoolSettingsError(f"종목풀({pool}) TOP_N_HOLD 는 {options} 중 하나여야 합니다: {value}")
+    return value
 
 
 def get_pool_delete_impact(pool_id: str) -> dict[str, Any]:

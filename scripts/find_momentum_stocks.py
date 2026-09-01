@@ -8,12 +8,10 @@
 사용법
 ------
     python scripts/find_momentum_stocks.py            # 저장 설정으로 선정
-    python scripts/find_momentum_stocks.py --top 20   # 종목 수만 재정의
 """
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -26,15 +24,9 @@ from utils.report import render_table_eaw
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="모멘텀 전략 선정 출력")
-    parser.add_argument("--top", type=int, default=None, help="종목 수 (기본: 저장 설정)")
-    args = parser.parse_args()
-
     load_env_if_present()
 
     settings = load_settings()
-    if args.top is not None:
-        settings = {**settings, "top_n": args.top}
     print(f"설정: {settings}")
 
     result = compute_picks(settings)
