@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 
 from utils.account_registry import load_account_configs
-from utils.daily_fund_service import calculate_period_return_pct, load_daily_docs_for_aggregation
+from utils.daily_fund_service import calculate_period_return_pct
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.monthly_service import _load_monthly_docs as _load_monthly_docs_with_running
@@ -233,6 +233,13 @@ def load_dashboard_data() -> dict[str, Any]:
     account_benchmarks = _load_account_benchmarks(configs)
 
     accounts: list[dict[str, Any]] = []
+    # 금일·금주 손익 합계 — 계좌별을 더해 만든다. 예전에는 일별 집계 배치가 적어 둔 값을
+    # 그대로 썼는데, 계좌 행은 지금 시세로 다시 계산해서 `/assets` 의 합계와 계좌 합이
+    # 어긋났다(배치 이후 움직인 만큼). 같은 소스에서 나오게 한다.
+    totals_daily_profit = 0.0
+    totals_daily_base = 0.0
+    totals_weekly_profit = 0.0
+    totals_weekly_base = 0.0
     for config in configs:
         portfolio_account = portfolio_accounts.get(config["account_id"], {})
         snapshot_account = snapshot_accounts.get(config["account_id"], {})
@@ -282,6 +289,12 @@ def load_dashboard_data() -> dict[str, Any]:
         weekly_return_pct_acc = calculate_period_return_pct(
             weekly_profit, weekly_base_total_assets + max(weekly_deposit, 0.0)
         )
+        # 합계용 누적 — 분자(손익)만 더하면 수익률 분모가 없다. 계좌별과 같은 분모
+        # (직전 자산 + 당일 입금)를 함께 모아 합계 수익률도 같은 정의로 낸다.
+        totals_daily_profit += daily_profit
+        totals_daily_base += previous_total_assets + max(daily_deposit, 0.0)
+        totals_weekly_profit += weekly_profit
+        totals_weekly_base += weekly_base_total_assets + max(weekly_deposit, 0.0)
         accounts.append(
             {
                 "account_id": config["account_id"],
@@ -312,18 +325,12 @@ def load_dashboard_data() -> dict[str, Any]:
     total_assets = sum(account["total_assets"] for account in accounts)
     total_principal = sum(account["total_principal"] for account in accounts)
     total_cash = sum(account["cash_balance"] for account in accounts)
-    # /assets 와 /daily, /weekly 의 일/주 수익률을 일치시키기 위해
-    # daily_fund_data 와 weekly_fund_data 에서 마지막 row 를 직접 사용한다.
-    # (자산 수익률 계산 정책: docs/developer_guide.md 참고)
-    try:
-        latest_daily_doc = next(iter(load_daily_docs_for_aggregation()), None)
-    except Exception as exc:
-        logger.warning("daily_fund_data 조회 실패: %s", exc)
-        latest_daily_doc = None
-    daily_profit = normalize_number((latest_daily_doc or {}).get("daily_profit"))
-    daily_return_pct = normalize_number((latest_daily_doc or {}).get("daily_return_pct"))
-    weekly_profit = normalize_number((latest_weekly or {}).get("weekly_profit"))
-    weekly_return_pct = normalize_number((latest_weekly or {}).get("weekly_return_pct"))
+    # 금일·금주는 계좌별 합이다 — 화면의 합계 행과 계좌 행이 같은 값에서 나와야 한다.
+    # 월별·연별은 그런 계좌별 계산이 없어 집계 배치 값을 그대로 쓴다.
+    daily_profit = totals_daily_profit
+    daily_return_pct = calculate_period_return_pct(totals_daily_profit, totals_daily_base)
+    weekly_profit = totals_weekly_profit
+    weekly_return_pct = calculate_period_return_pct(totals_weekly_profit, totals_weekly_base)
 
     # 월별/년별 최신 doc 의 금월/금년 손익 (캐시 누락 시 0 으로 폴백)
     try:
