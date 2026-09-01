@@ -15,6 +15,11 @@ export const FIXED_ASSET_NAME = "International Shares";
  *  (추세 이탈 행이 회색 줄로 구분되는 것과 같은 방식). */
 export const FIXED_ASSET_ROW_CLASS = "appFixedAssetRow";
 
+/** IS 의 가격 프록시 — 실제 상장 종목이 아니라 시세가 없어, 호주 ETF 풀의 이 종목으로 대신 잰다.
+ *  **접두사까지 정확히** 써야 한다: 종목풀에 없는 티커는 가격 캐시가 없어 조회 전체가 실패한다
+ *  (예전에 `VGS` 로 적어 `/asset-helper` 의 지표 컬럼이 통째로 비었다). */
+export const FIXED_ASSET_PRICE_PROXY = "ASX:VGS";
+
 export function isFixedAssetTicker(ticker: unknown): boolean {
   return String(ticker ?? "").trim().toUpperCase() === FIXED_ASSET_TICKER;
 }

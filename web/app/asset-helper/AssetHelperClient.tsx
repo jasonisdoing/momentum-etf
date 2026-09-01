@@ -13,7 +13,7 @@ import { useAddingTickerRow } from "../components/useAddingTickerRow";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { AssetHelperBacktestResult, type LabResult } from "../components/AssetHelperBacktestResult";
 import { BUCKET_THEME } from "@/lib/bucket-theme";
-import { FIXED_ASSET_NAME, FIXED_ASSET_ROW_CLASS, FIXED_ASSET_TICKER } from "@/lib/fixed-asset";
+import { FIXED_ASSET_NAME, FIXED_ASSET_PRICE_PROXY, FIXED_ASSET_ROW_CLASS, FIXED_ASSET_TICKER } from "@/lib/fixed-asset";
 import { renderStockNameCell } from "@/lib/name-highlight";
 import { reorderHoldings } from "@/lib/holdings-store";
 import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
@@ -244,9 +244,10 @@ function buildRows(items: HelperTicker[] | undefined): HelperTicker[] {
     .map((item) => ({ ...item, ticker: item.ticker ?? "" }));
 }
 
-// 지표(금일/수익률/MDD/소르티노/현재가)를 계산해 티커→지표 맵으로 반환한다. 실패해도 빈 맵(그리드는 표시).
+/** 지표(금일/수익률/MDD/소르티노/현재가)를 티커→지표 맵으로. **실패하면 던진다.**
+ *  예전에는 빈 맵을 돌려줘서, 한 종목이 걸려도 표 전체가 조용히 `-` 가 되고 원인을 알 수 없었다. */
 async function fetchMetrics(validList: HelperTicker[], settingsArg: HelperSettings): Promise<Record<string, WeightRow>> {
-  try {
+  {
     const resp = await fetch("/api/asset-helper-settings/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -257,7 +258,9 @@ async function fetchMetrics(validList: HelperTicker[], settingsArg: HelperSettin
       }),
     });
     const data = (await resp.json()) as { rows?: (WeightRow & { bucket?: unknown })[]; error?: string };
-    if (!resp.ok || data.error) return {};
+    if (!resp.ok || data.error) {
+      throw new Error(data.error ?? "지표를 계산하지 못했습니다.");
+    }
     const map: Record<string, WeightRow> = {};
     for (const row of data.rows ?? []) {
       map[row.ticker] = {
@@ -273,8 +276,6 @@ async function fetchMetrics(validList: HelperTicker[], settingsArg: HelperSettin
       };
     }
     return map;
-  } catch {
-    return {};
   }
 }
 
@@ -445,10 +446,14 @@ export function AssetHelperClient() {
           const hasIsRow = validLoaded.some((t) => t.is_fixed_asset);
           const metricsRequest = validLoaded
             .filter((t) => !t.is_fixed_asset)
-            .concat(hasIsRow ? [{ ticker: "VGS", name: IS_DISPLAY_NAME, ticker_type: "aus" }] : []);
+            .concat(
+              hasIsRow
+                ? [{ ticker: FIXED_ASSET_PRICE_PROXY, name: IS_DISPLAY_NAME, ticker_type: "aus" }]
+                : [],
+            );
           const fetched = await fetchMetrics(metricsRequest, data.settings);
-          if (hasIsRow && fetched["VGS"]) {
-            fetched[IS_TICKER] = { ...fetched["VGS"], ticker: IS_TICKER };
+          if (hasIsRow && fetched[FIXED_ASSET_PRICE_PROXY]) {
+            fetched[IS_TICKER] = { ...fetched[FIXED_ASSET_PRICE_PROXY], ticker: IS_TICKER };
           }
           setMetricByTicker(fetched);
         } else {
