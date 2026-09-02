@@ -31,7 +31,7 @@ import {
   getSignedClass,
   isDetailRow,
   isTotalRow,
-  parseRawPrice,
+  parseNumericCell,
 } from "./assets-helpers";
 
 export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: AssetsHeaderSummary) => void }) {
@@ -545,13 +545,11 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ? "assetsEditableCell assetsDirtyCell"
           : "assetsEditableCell";
       },
-      valueParser: (params) => {
-        const parsed = parseFloat(parseRawPrice(params.newValue));
-        if (Number.isNaN(parsed) || parsed < 0) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
+      valueParser: (params) =>
+        parseNumericCell(params.newValue, params.oldValue, {
+          label: "총 원금",
+          onReject: (message) => toast.error(message),
+        }),
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
         params.data && !isDetailRow(params.data) ? formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0)) : "",
     },

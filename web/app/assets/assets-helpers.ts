@@ -219,6 +219,54 @@ export function parseRawPrice(formatted: unknown): string {
   return String(formatted).replace(/A\$|\$|₩|원|,|\s/g, "");
 }
 
+/**
+ * 같은 거절 메시지가 잇달아 뜨는 것을 막는다.
+ *
+ * AG Grid 는 편집 확정 한 번에 `valueParser` 를 여러 번 부른다. 그대로 두면 토스트가
+ * 같은 문구로 두세 개씩 쌓인다.
+ */
+const REJECT_DEDUPE_MS = 800;
+let lastRejection: { message: string; at: number } | null = null;
+
+/**
+ * 숫자 입력 칸의 공용 파서.
+ *
+ * **빈 값은 0 으로 본다.** 값을 다 지우고 확정하는 건 "0 으로 만들겠다"는 뜻이고,
+ * 세 칸(수량·매입 단가·총 원금) 모두 0 이 유효한 값이다.
+ *
+ * 숫자가 아니거나 음수면 원래 값으로 되돌리고 **그 이유를 알린다**. 예전에는 조용히
+ * 되돌렸는데, 그러면 그리드가 `newValue === oldValue` 로 보고 저장 요청조차 하지 않아
+ * 화면에는 "수정이 안 된다"로만 보였다.
+ */
+export function parseNumericCell(
+  newValue: unknown,
+  oldValue: unknown,
+  options: { label: string; integer?: boolean; onReject: (message: string) => void },
+): unknown {
+  const reject = (message: string) => {
+    const now = Date.now();
+    if (lastRejection && lastRejection.message === message && now - lastRejection.at < REJECT_DEDUPE_MS) {
+      return oldValue;
+    }
+    lastRejection = { message, at: now };
+    options.onReject(message);
+    return oldValue;
+  };
+
+  const raw = parseRawPrice(newValue).trim();
+  if (raw === "") {
+    return 0;
+  }
+  const parsed = options.integer ? parseInt(raw, 10) : parseFloat(raw);
+  if (Number.isNaN(parsed)) {
+    return reject(`${options.label}에 숫자를 입력하세요 (받은 값: ${String(newValue)}).`);
+  }
+  if (parsed < 0) {
+    return reject(`${options.label}은(는) 0 보다 작을 수 없습니다 (받은 값: ${parsed}).`);
+  }
+  return parsed;
+}
+
 export function safeParseFloat(value: unknown): number {
   const parsed = parseFloat(parseRawPrice(value));
   return Number.isNaN(parsed) ? 0 : parsed;
