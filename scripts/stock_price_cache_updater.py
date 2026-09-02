@@ -1097,6 +1097,8 @@ def refresh_cache_for_target(
         # 슬랙 점검 보고용 — main 이 풀별로 모아 문제가 있을 때만 1건 발송한다.
         return {
             "pool": target_norm,
+            # 통보 필터가 그 나라 거래일 달력을 골라야 해서 함께 싣는다.
+            "country_code": country_code,
             "failed": list(failed_tickers),
             "backfill": backfill_report,
             "volume_backfill": volume_backfill_report,
@@ -1205,12 +1207,46 @@ def main():
     _notify_cache_issues(reports, full_refresh=args.full)
 
 
+def _recent_trading_days(country_code: str, days: int) -> set[str] | None:
+    """그 나라의 최근 `days` 거래일(오늘 포함) 날짜 문자열. 달력을 못 읽으면 None."""
+    if days <= 0:
+        return set()
+    from utils.trading_calendar import get_trading_days
+
+    end = pd.Timestamp.now().normalize()
+    # 연휴가 길어도 days 개를 채우도록 넉넉히 뒤로 잡는다.
+    start = end - pd.Timedelta(days=days * 3 + 14)
+    try:
+        calendar = get_trading_days(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), country_code)
+    except Exception:
+        return None  # 달력이 없으면 걸러내지 않는다 — 조용히 통보를 삼키지 않기 위해서다.
+    return {str(pd.Timestamp(day).date()) for day in calendar[-days:]}
+
+
+def _recent_unfilled(unfilled: dict, recent_days: set[str] | None) -> dict:
+    """못 채운 결측 중 최근 거래일 것만 남긴다. 기준을 못 구했으면(None) 그대로 둔다."""
+    if recent_days is None:
+        return dict(unfilled)
+    kept: dict[str, list[str]] = {}
+    for ticker, dates in unfilled.items():
+        recent = [day for day in dates if day in recent_days]
+        if recent:
+            kept[ticker] = recent
+    return kept
+
+
 def _notify_cache_issues(reports: list[dict], *, full_refresh: bool) -> None:
     """캐시 갱신 중 발견된 문제를 슬랙 1건으로 통보한다. 문제가 없으면 보내지 않는다.
 
-    항목: 수집 실패 / 네이버에도 없어 못 채운 누락 / 의심 날짜 자동 제거.
+    항목: 수집 실패 / 외부 소스에도 없어 못 채운 결측 / 의심 날짜 자동 제거.
     자동 복구에 성공한 보강은 알리지 않는다(로그에만 남긴다) — 소음이 되는 항목은 여기서 뺀다.
+
+    **못 채운 결측은 최근 것만 알린다**(`CACHE_ISSUE_NOTIFY_RECENT_TRADING_DAYS`).
+    다음 실행에도 그대로 남아 있어, 조건 없이 알리면 같은 내용이 매일 오기 때문이다.
+    걸러진 건은 아래 로그에 남는다.
     """
+    from config import CACHE_ISSUE_NOTIFY_RECENT_TRADING_DAYS
+
     logger = get_app_logger()
     lines: list[str] = []
     for report in reports:
@@ -1220,14 +1256,30 @@ def _notify_cache_issues(reports: list[dict], *, full_refresh: bool) -> None:
         if failed:
             preview = ", ".join(failed[:10]) + (" …" if len(failed) > 10 else "")
             pool_lines.append(f"· 수집 실패 {len(failed)}종목: {preview}")
+        recent_days = _recent_trading_days(
+            str(report.get("country_code") or ""), int(CACHE_ISSUE_NOTIFY_RECENT_TRADING_DAYS)
+        )
         backfill = report.get("backfill") or {}
-        unfilled = backfill.get("unfilled") or {}
+        all_unfilled = backfill.get("unfilled") or {}
+        unfilled = _recent_unfilled(all_unfilled, recent_days)
+        if len(all_unfilled) != len(unfilled):
+            logger.info(
+                "[cache] %s 종가 결측 %d종목 중 %d종목만 통보 (최근 %d거래일 기준, 나머지는 로그만): %s",
+                pool, len(all_unfilled), len(unfilled), CACHE_ISSUE_NOTIFY_RECENT_TRADING_DAYS, all_unfilled,
+            )
         if unfilled:
             preview = ", ".join(f"{t}({', '.join(d)})" for t, d in list(unfilled.items())[:10])
             suffix = " …" if len(unfilled) > 10 else ""
             pool_lines.append(f"· 네이버에도 없어 못 채움 {len(unfilled)}종목: {preview}{suffix}")
         volume_backfill = report.get("volume_backfill") or {}
-        volume_unfilled = volume_backfill.get("unfilled") or {}
+        all_volume_unfilled = volume_backfill.get("unfilled") or {}
+        volume_unfilled = _recent_unfilled(all_volume_unfilled, recent_days)
+        if len(all_volume_unfilled) != len(volume_unfilled):
+            logger.info(
+                "[cache] %s 거래량 결측 %d종목 중 %d종목만 통보 (최근 %d거래일 기준, 나머지는 로그만): %s",
+                pool, len(all_volume_unfilled), len(volume_unfilled),
+                CACHE_ISSUE_NOTIFY_RECENT_TRADING_DAYS, all_volume_unfilled,
+            )
         if volume_unfilled:
             preview = ", ".join(f"{t}({', '.join(d)})" for t, d in list(volume_unfilled.items())[:10])
             suffix = " …" if len(volume_unfilled) > 10 else ""
