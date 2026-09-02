@@ -117,12 +117,16 @@ export function tradeValueMultStyle(
   value: number | null | undefined,
   bold?: boolean,
 ): { color: string; fontWeight?: number } {
+  // 단계는 **불투명 색**으로 만든다. 예전에는 알파(0.5~0.85)로 강도를 표현했는데,
+  // 편집 칸처럼 배경색이 깔린 셀에서 옅은 단계가 배경에 묻혀 회색(--text-muted, #5b6675)
+  // 보다 흐려졌다 — 신호가 있는 1.9배가 신호가 없는 0.6배보다 약해 보였다.
+  // 아래로 갈수록 채도만 낮아지고 명도는 회색 이상을 유지한다.
   const weight = bold ? { fontWeight: 700 } : {};
   if (value == null || Number.isNaN(value)) return { color: "var(--text-muted)", ...weight };
-  if (value >= 5) return { color: "rgb(214, 40, 40)", fontWeight: 700 };
-  if (value >= 3) return { color: "rgba(214, 40, 40, 0.85)", fontWeight: 700 };
-  if (value >= 2) return { color: "rgba(214, 40, 40, 0.7)", ...weight };
-  if (value >= 1.5) return { color: "rgba(214, 40, 40, 0.5)", ...weight };
+  if (value >= 5) return { color: "#a11010", fontWeight: 700 };
+  if (value >= 3) return { color: "#c62828", fontWeight: 700 };
+  if (value >= 2) return { color: "#d13a3a", ...weight };
+  if (value >= 1.5) return { color: "#b8514a", ...weight };
   return { color: "var(--text-muted)", ...weight };
 }
 
