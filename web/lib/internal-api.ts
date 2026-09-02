@@ -1,5 +1,3 @@
-import { Agent } from "undici";
-
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 function getFastApiBaseUrl(): string {
@@ -31,12 +29,16 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * 기본 타임아웃(30초) 이하면 undici 기본값이 이미 넉넉하므로 만들지 않는다.
  * 같은 값의 Agent 는 재사용한다 — 요청마다 새로 만들면 연결 풀이 쌓인다.
  */
-const AGENTS_BY_TIMEOUT = new Map<number, Agent>();
+const AGENTS_BY_TIMEOUT = new Map<number, unknown>();
 
-function dispatcherFor(timeoutMs: number): Agent | undefined {
+async function dispatcherFor(timeoutMs: number): Promise<unknown> {
   if (timeoutMs <= DEFAULT_TIMEOUT_MS) return undefined;
   const known = AGENTS_BY_TIMEOUT.get(timeoutMs);
   if (known) return known;
+  // undici 를 파일 맨 위에서 import 하면 안 된다 — 이 모듈은 여러 store 가 거쳐 가고,
+  // 그 store 에서 타입·상수만 가져다 쓰는 **클라이언트 컴포넌트**의 번들에도 딸려 들어가
+  // `node:net` 을 못 풀고 터진다. 서버에서 실제로 긴 호출을 할 때만 읽는다.
+  const { Agent } = await import("undici");
   // bodyTimeout 은 청크 사이 간격 기준이라 헤더와 같은 값이면 충분하다.
   const agent = new Agent({ headersTimeout: timeoutMs, bodyTimeout: timeoutMs });
   AGENTS_BY_TIMEOUT.set(timeoutMs, agent);
@@ -79,13 +81,14 @@ export async function fetchFastApiJson<T>(
 
   let response: Response;
   try {
+    const dispatcher = await dispatcherFor(timeoutMs);
     response = await fetch(`${getFastApiBaseUrl()}${path}`, {
       ...init,
       headers,
       signal: controller.signal,
       cache: "no-store",
-      dispatcher: dispatcherFor(timeoutMs),
-    } as RequestInit & { dispatcher?: Agent });
+      dispatcher,
+    } as RequestInit & { dispatcher?: unknown });
   } catch (error) {
     clearTimeout(timeoutId);
     const isAbort =
