@@ -32,11 +32,16 @@ export function marketBadgeCellStyle(value: unknown): React.CSSProperties | null
  *  긴 이름은 2줄까지 보이고 넘치면 말줄임 (renderStockNameCell). */
 export const STOCK_NAME_COLUMN_MIN_WIDTH = 220;
 
-/** 업종 컬럼 폭 — 종목풀 순위 화면 기준. 업종 컬럼이 있는 모든 화면이 같은 값을 쓴다.
- *  한글 최장은 `섬유,의류,신발,호화품`(12자). 영문은 25자 안팎이 흔하고
- *  40자짜리(`Drug Manufacturers - Specialty & Generic`)는 2줄까지 보이고 넘치면 말줄임. */
-export const INDUSTRY_COLUMN_WIDTH = 200;
-export const INDUSTRY_COLUMN_MIN_WIDTH = 150;
+/** 업종 컬럼 폭 — 업종 컬럼이 있는 모든 화면이 같은 값을 쓴다.
+ *
+ *  셀은 2줄까지 보이고 넘치면 말줄임(`renderIndustryCell`)이라, **2줄이 꽉 차는 폭**이
+ *  기준이다. 실측: 미국·호주는 90%가 30자 안쪽(최장 35자)이고 한국은 최장 12자
+ *  (`섬유,의류,신발,호화품`)다. 30자를 2줄에 담으려면 15자/줄, 13px 영문 평균 자폭
+ *  6.8px 에 셀 좌우 패딩을 더해 약 124px 이다.
+ *
+ *  예전 200px 은 영문 기준으로도 남았고, 한국 화면에서는 절반이 빈 채로 있었다. */
+export const INDUSTRY_COLUMN_WIDTH = 124;
+export const INDUSTRY_COLUMN_MIN_WIDTH = 104;
 
 /** 업종 셀 — 종목풀 화면의 종목명과 같이 2줄까지 보이고 넘치면 말줄임(전체 값은 툴팁). */
 export function renderIndustryCell(value: string | null | undefined) {
@@ -47,6 +52,31 @@ export function renderIndustryCell(value: string | null | undefined) {
       {text}
     </span>
   );
+}
+
+/** 업종 컬럼 — 순위·전략·마켓 화면 공용.
+ *
+ *  폭·셀 표기만 공용이고 정의는 화면마다 복사돼 있어서, 툴팁이 제각각이거나 아예 없고
+ *  빈 컬럼을 숨기는 기준도 갈라져 있었다. 여기 하나로 모은다.
+ *
+ *  `field` 는 화면의 데이터 키(순위 화면만 한글 `"업종"`), `hide` 는 업종이 아예 없는
+ *  풀(ETF 모음 등)에서 빈 컬럼을 숨길 때 쓴다. */
+export function industryColumn<T>(options?: {
+  field?: string;
+  hide?: boolean;
+  cellClass?: string;
+}): ColDef<T> {
+  return {
+    colId: "industry",
+    field: (options?.field ?? "industry") as ColDefField<T>,
+    headerName: "업종",
+    hide: options?.hide,
+    width: INDUSTRY_COLUMN_WIDTH,
+    minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
+    headerTooltip: "한국은 네이버 분류, 미국·호주는 지수 구성종목의 yfinance 분류",
+    cellClass: options?.cellClass,
+    cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
+  };
 }
 
 /** 고점 대비(%) 셀 — 정확히 0 이면 ⭐신고점(빨강 볼드), 그 외 퍼센트 표기. */

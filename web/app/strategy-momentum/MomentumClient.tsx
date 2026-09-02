@@ -32,14 +32,12 @@ import {
   toYearRows,
 } from "@/lib/backtest-periods";
 import {
-  INDUSTRY_COLUMN_MIN_WIDTH,
-  INDUSTRY_COLUMN_WIDTH,
+  industryColumn,
   STOCK_NAME_COLUMN_MIN_WIDTH,
   adrColumn as sharedAdrColumn,
   formatSignedPct,
   maExitGapColumn,
   renderHighDrawdownCell,
-  renderIndustryCell,
   signColor,
   marketCapRankColumn,
   stockMemoColumn,
@@ -748,18 +746,7 @@ export function MomentumClient() {
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
       }),
       // 업종 데이터가 아예 없는 풀(ETF 모음 등)에서는 빈 컬럼을 숨긴다.
-      ...(hasIndustryData
-        ? [
-          {
-            headerName: "업종",
-            field: "industry",
-            headerTooltip: "한국은 네이버 분류, 미국은 지수 구성종목의 yfinance 분류",
-            width: INDUSTRY_COLUMN_WIDTH,
-            minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
-            cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
-          } as ColDef<PickRow>,
-        ]
-        : []),
+      industryColumn<PickRow>({ hide: !hasIndustryData }),
       {
         headerName: "일간(%)",
         field: "daily_change_pct",

@@ -5,7 +5,7 @@ import { IconPlus } from "@tabler/icons-react";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
-import { INDUSTRY_COLUMN_MIN_WIDTH, INDUSTRY_COLUMN_WIDTH, renderIndustryCell } from "@/lib/grid-cells";
+import { industryColumn } from "@/lib/grid-cells";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { useLatestRequest } from "@/lib/use-latest-request";
 import { loadStocksTable } from "@/lib/stocks-store";
@@ -435,14 +435,7 @@ export function UsMarketStockManager({
         cellClass: "usMarketStockTextCell",
         cellRenderer: (params: { value?: string }) => renderTruncatedText(params.value),
       },
-      {
-        headerName: "업종",
-        field: "industry",
-        width: INDUSTRY_COLUMN_WIDTH,
-        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
-        cellClass: "usMarketStockTextCell",
-        cellRenderer: (params: { value?: string }) => renderIndustryCell(params.value),
-      },
+      industryColumn<UsMarketStockGridRow>({ cellClass: "usMarketStockTextCell" }),
       {
         headerName: "일간(%)",
         field: "change_pct",
