@@ -49,7 +49,33 @@ export type StockNameOptions = {
   isNew?: boolean;
   /** 단기·장기 이평선 중 하나 이상 이탈 — `isTrendBroken()` 의 결과를 넘긴다 */
   trendBroken?: boolean;
+  /** 티커·종목명 검색어 — 일치하는 글자만 굵게 표시한다. */
+  searchQuery?: string;
 };
+
+export function renderTextWithSearchHighlight(text: string, query: string | null | undefined): ReactNode {
+  const needle = String(query ?? "").trim().toLocaleLowerCase();
+  if (!needle) return text;
+
+  const normalizedText = text.toLocaleLowerCase();
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  let matchIndex = normalizedText.indexOf(needle, cursor);
+  while (matchIndex >= 0) {
+    if (matchIndex > cursor) parts.push(text.slice(cursor, matchIndex));
+    const matchEnd = matchIndex + needle.length;
+    parts.push(
+      <strong key={`${matchIndex}:${matchEnd}`} style={{ fontWeight: 800 }}>
+        {text.slice(matchIndex, matchEnd)}
+      </strong>,
+    );
+    cursor = matchEnd;
+    matchIndex = normalizedText.indexOf(needle, cursor);
+  }
+  if (cursor === 0) return text;
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return <>{parts}</>;
+}
 
 export function renderNameWithLeverageHighlight(
   name: string,
@@ -64,28 +90,29 @@ export function renderNameWithLeverageHighlight(
 
   const parts = name.split(NAME_HIGHLIGHT_RE);
   if (parts.length === 1) {
+    const highlightedName = renderTextWithSearchHighlight(name, options?.searchQuery);
     return newBadge || brokenBadge ? (
       <>
-        {name}
+        {highlightedName}
         {newBadge}
         {brokenBadge}
       </>
     ) : (
-      name
+      highlightedName
     );
   }
   const emojis: string[] = [];
   const rendered = parts.map((part, index) => {
     const style = index % 2 === 1 ? getNameHighlight(part) : undefined;
     if (!style) {
-      return <span key={index}>{part}</span>;
+      return <span key={index}>{renderTextWithSearchHighlight(part, options?.searchQuery)}</span>;
     }
     if (!emojis.includes(style.emoji)) {
       emojis.push(style.emoji);
     }
     return (
       <span key={index} style={{ color: style.color, fontWeight: 700 }}>
-        {part}
+        {renderTextWithSearchHighlight(part, options?.searchQuery)}
       </span>
     );
   });

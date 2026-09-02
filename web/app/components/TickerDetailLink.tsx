@@ -1,10 +1,12 @@
 "use client";
 
 import { IconExternalLink } from "@tabler/icons-react";
+import type { ReactNode } from "react";
 
 type TickerDetailLinkProps = {
   ticker: string | null | undefined;
   displayTicker?: string | null;
+  displayContent?: ReactNode;
   className?: string;
 };
 
@@ -43,7 +45,7 @@ export function stripAsxPrefix(ticker: string | null | undefined): string {
   return text.startsWith("ASX:") ? text.slice(4) : text;
 }
 
-export function TickerDetailLink({ ticker, displayTicker, className }: TickerDetailLinkProps) {
+export function TickerDetailLink({ ticker, displayTicker, displayContent, className }: TickerDetailLinkProps) {
   const routeTicker = normalizeTickerForDetailRoute(ticker);
   // 호주 종목은 `ASX:` 를 붙인 채로 보여준다 — 미국에 같은 티커가 있어 구분이 필요하다.
   // (docs/developer_guide.md "호주 티커(ASX) 식별 규칙")
@@ -61,14 +63,14 @@ export function TickerDetailLink({ ticker, displayTicker, className }: TickerDet
   if (disabled) {
     return (
       <span className={className ? `appCodeText ${className}` : "appCodeText"}>
-        {text === "__CASH__" ? "-" : text}
+        {text === "__CASH__" ? "-" : (displayContent ?? text)}
       </span>
     );
   }
 
   return (
     <span className={className ? `tickerDetailLink ${className}` : "tickerDetailLink"}>
-      <span className="appCodeText tickerDetailLinkText">{text}</span>
+      <span className="appCodeText tickerDetailLinkText">{displayContent ?? text}</span>
       <a
         href={href}
         target="_blank"

@@ -18,7 +18,7 @@ import {
   marketCapRankColumn,
   stockMemoColumn,
 } from "@/lib/grid-cells";
-import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
+import { isTrendBroken, renderStockNameCell, renderTextWithSearchHighlight } from "@/lib/name-highlight";
 import type { PoolAddProgress } from "@/lib/pool-add";
 import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
@@ -571,9 +571,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const searchedGridRows = useMemo(() => {
     const query = tickerSearch.trim().toLocaleLowerCase();
     if (!query) return gridRows;
-    return gridRows.filter((row) =>
-      `${String(row.티커 ?? "")} ${String(row.종목명 ?? "")}`.toLocaleLowerCase().includes(query),
-    );
+    return gridRows.filter((row) => {
+      const ticker = String(row.티커 ?? "").toLocaleLowerCase();
+      const name = String(row.종목명 ?? "").toLocaleLowerCase();
+      return ticker.includes(query) || name.includes(query);
+    });
   }, [gridRows, tickerSearch]);
 
   const showDeviationColumn = useMemo(() => {
@@ -1028,7 +1030,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           const displayValue = isAusPool && value !== "-" && !value.startsWith("ASX:")
             ? `ASX:${value}`
             : value;
-          return <TickerDetailLink ticker={displayValue} displayTicker={displayValue} />;
+          return (
+            <TickerDetailLink
+              ticker={displayValue}
+              displayTicker={displayValue}
+              displayContent={renderTextWithSearchHighlight(displayValue, tickerSearch)}
+            />
+          );
         },
       },
       {
@@ -1072,6 +1080,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             // MDD·소르티노 노란색과 같은 기준 — 상장 기간이 백테스트 기준 창(METRIC_WINDOW_MONTHS)보다 짧은 종목.
             isNew: params.data?.backtest_stats?.is_partial === true,
             trendBroken: isTrendBroken(params.data?.단기이격, params.data?.이격),
+            searchQuery: tickerSearch,
           });
         },
       },
@@ -1342,6 +1351,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     selectedTickerTypeItem?.country_code,
     selectedTickerTypeItem?.top_n_hold,
     selectedTickerTypeItem?.currency,
+    tickerSearch,
     ticker_types,
   ]);
 
