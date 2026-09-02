@@ -131,6 +131,14 @@ export function maExitGapColumn<T>(options: {
  *  **시간 환산 배수**(누적 ÷ 장 경과율 — 지금 페이스대로면 하루 기준 몇 배인지)다.
  *  둘이 다를 때 `3.0배 (19.5)` 처럼 나란히 보여준다(장중이 아니면 괄호가 안 붙는다).
  */
+/** 거래대금(배수) 컬럼 폭 — 이 컬럼을 쓰는 모든 화면이 같은 값을 쓴다.
+ *
+ *  값은 대개 `3.9배`(실측 99%가 3.9 이하, 최대 14.7)라 짧고, 한국 장중에만 환산 배수가
+ *  괄호로 붙어 `3.9배 (19.5)` 로 가장 길어진다. 13px 기준 약 90px 이고, 우측 정렬 헤더
+ *  `거래대금`(4자 + 정렬 화살표)도 비슷해서 둘 다 100px 안에 들어간다. */
+export const TRADE_VALUE_COLUMN_WIDTH = 100;
+export const TRADE_VALUE_COLUMN_MIN_WIDTH = 88;
+
 export function formatTradeValueMult(
   value: number | null | undefined,
   live?: number | null,
@@ -176,8 +184,8 @@ export function tradeValueMultColumn<T>(options?: {
     colId: field,
     valueGetter: (p) => ((p.data as Record<string, unknown> | undefined)?.[field] as number | null | undefined) ?? null,
     headerName: "거래대금",
-    width: 124,
-    minWidth: 112,
+    width: TRADE_VALUE_COLUMN_WIDTH,
+    minWidth: TRADE_VALUE_COLUMN_MIN_WIDTH,
     hide: options?.hide,
     type: "numericColumn",
     headerTooltip:
