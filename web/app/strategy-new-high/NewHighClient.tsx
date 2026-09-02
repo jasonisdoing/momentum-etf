@@ -23,13 +23,11 @@ import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import {
-  INDUSTRY_COLUMN_MIN_WIDTH,
-  INDUSTRY_COLUMN_WIDTH,
+  industryColumn,
   STOCK_NAME_COLUMN_MIN_WIDTH,
   adrColumn,
   formatSignedPct,
   maExitGapColumn,
-  renderIndustryCell,
   signColor,
   tradeValueMultColumn,
   marketCapRankColumn,
@@ -670,15 +668,7 @@ export function NewHighClient() {
       }),
       // 업종 컬럼 노출 여부 — 종목풀 설정의 풀 성격(pool_kind)이 1순위(개별주=표시, ETF=숨김),
       // 미설정 풀은 행 값 유무로 추정 (pools-rank·strategy-momentum 과 같은 기준).
-      {
-        field: "industry",
-        headerName: "업종",
-        hide: !hasIndustryData,
-        width: INDUSTRY_COLUMN_WIDTH,
-        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
-        headerTooltip: "한국은 네이버 분류, 미국은 지수 구성종목의 yfinance 분류",
-        cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
-      },
+      industryColumn<PositionRow>({ hide: !hasIndustryData }),
       dailyChangeColumn<PositionRow>(),
       {
         field: "price",
@@ -947,15 +937,7 @@ export function NewHighClient() {
         field: "memo",
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
       }),
-      {
-        field: "industry",
-        headerName: "업종",
-        hide: !hasIndustryData,
-        width: INDUSTRY_COLUMN_WIDTH,
-        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
-        headerTooltip: "한국은 네이버 분류, 미국은 지수 구성종목의 yfinance 분류",
-        cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
-      },
+      industryColumn<PlanRow>({ hide: !hasIndustryData }),
       dailyChangeColumn<PlanRow>(),
       {
         field: "price",
@@ -1025,15 +1007,7 @@ export function NewHighClient() {
         minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
         cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
       },
-      {
-        field: "industry",
-        headerName: "업종",
-        hide: !hasIndustryData,
-        width: INDUSTRY_COLUMN_WIDTH,
-        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
-        headerTooltip: "한국은 네이버 분류, 미국은 지수 구성종목의 yfinance 분류",
-        cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
-      },
+      industryColumn<Trade>({ hide: !hasIndustryData }),
       { field: "entry_date", headerName: "진입일", width: 116 },
       {
         field: "entry_price",

@@ -6,9 +6,7 @@ import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import {
-  INDUSTRY_COLUMN_MIN_WIDTH,
-  INDUSTRY_COLUMN_WIDTH,
-  renderIndustryCell,
+  industryColumn,
 } from "@/lib/grid-cells";
 import { formatKorMarketCap } from "@/lib/market-cap-format";
 import { useLatestRequest } from "@/lib/use-latest-request";
@@ -325,14 +323,7 @@ export function KorMarketStockManager({
         flex: 1,
         minWidth: 180,
       },
-      {
-        headerName: "업종",
-        field: "industry",
-        width: INDUSTRY_COLUMN_WIDTH,
-        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
-        headerTooltip: "네이버 업종 분류 — 신고가·종목풀 순위 화면과 같은 값.",
-        cellRenderer: (params: { value?: string }) => renderIndustryCell(params.value),
-      },
+      industryColumn<KorMarketStockGridRow>(),
       {
         headerName: "일간(%)",
         field: "change_pct",

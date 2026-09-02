@@ -9,11 +9,9 @@ import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect"
 import { formatPoolLabel } from "@/lib/pool-label";
 import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
 import {
-  INDUSTRY_COLUMN_MIN_WIDTH,
-  INDUSTRY_COLUMN_WIDTH,
+  industryColumn,
   marketBadgeCellStyle,
   renderHighDrawdownCell,
-  renderIndustryCell,
   tradeValueMultColumn,
   marketCapRankColumn,
   stockMemoColumn,
@@ -1091,15 +1089,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         onSave: (row, memo) => void handleMemoChange(String(row.티커 ?? ""), memo),
         editable: (row) => !row?.__isAddingRow,
       }),
-      {
-        field: "업종",
-        headerName: "업종",
-        hide: !hasIndustryData,
-        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
-        width: INDUSTRY_COLUMN_WIDTH,
-        headerTooltip: "한국은 네이버 분류, 미국은 지수 구성종목의 yfinance 분류",
-        cellRenderer: (params: { value?: string }) => renderIndustryCell(params.value),
-      },
+      industryColumn<RankGridRow>({ field: "업종", hide: !hasIndustryData }),
       {
         field: "일간(%)",
         headerName: "일간(%)",
