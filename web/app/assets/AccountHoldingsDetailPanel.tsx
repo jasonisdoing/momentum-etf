@@ -48,6 +48,7 @@ import {
   getPreviewWeightPct,
   getSignedClass,
   parseEditableQuantity,
+  parseNumericCell,
   parseRawPrice,
   reorderRowsByTickers,
   safeParseFloat,
@@ -1037,13 +1038,12 @@ export function AccountHoldingsDetailPanel({
           ? "assetsEditableCell assetsDirtyCell"
           : "assetsEditableCell";
       },
-      valueParser: (params) => {
-        const parsed = parseInt(parseRawPrice(params.newValue), 10);
-        if (Number.isNaN(parsed) || parsed < 0) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
+      valueParser: (params) =>
+        parseNumericCell(params.newValue, params.oldValue, {
+          label: "수량",
+          integer: true,
+          onReject: (message) => toast.error(message),
+        }),
       cellRenderer: (params: { data?: GridRow; value?: number }) => {
         const row = params.data;
         if (!row) {
@@ -1081,13 +1081,11 @@ export function AccountHoldingsDetailPanel({
           ? "assetsEditableCell assetsDirtyCell"
           : "assetsEditableCell";
       },
-      valueParser: (params) => {
-        const parsed = parseFloat(parseRawPrice(params.newValue));
-        if (Number.isNaN(parsed) || parsed < 0) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
+      valueParser: (params) =>
+        parseNumericCell(params.newValue, params.oldValue, {
+          label: "매입 단가",
+          onReject: (message) => toast.error(message),
+        }),
       cellRenderer: (params: { data?: GridRow; value?: string | number }) => {
         const row = params.data;
         if (!row) {
@@ -1142,13 +1140,6 @@ export function AccountHoldingsDetailPanel({
       valueGetter: (params) => (params.data ? getPreviewValuationKrw(params.data) : null),
       // 현금 입력은 상단 통화별 박스로 이전됨 — 그리드 현금 셀 편집은 막고 편집 스타일도 제거한다.
       editable: false,
-      valueParser: (params) => {
-        const parsed = parseFloat(parseRawPrice(params.newValue));
-        if (Number.isNaN(parsed) || parsed < 0) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
       cellRenderer: (params: { data?: GridRow }) => (
         <span className="appGridNumericValue">{params.data ? formatHiddenAmount(showAmounts, formatKrw(getPreviewValuationKrw(params.data))) : "-"}</span>
       ),
