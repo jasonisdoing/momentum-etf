@@ -354,6 +354,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [metricMode, setMetricMode] = useState<MetricMode>("basic");
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [rows, setRows] = useState<RankRow[]>([]);
+  const [tickerSearch, setTickerSearch] = useState("");
   const [cacheBlocked, setCacheBlocked] = useState(false);
   const [rankingComputedAt, setRankingComputedAt] = useState<string | null>(null);
   const [realtimeFetchedAt, setRealtimeFetchedAt] = useState<string | null>(null);
@@ -567,6 +568,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     [rows, selectedTickerType],
   );
 
+  const searchedGridRows = useMemo(() => {
+    const query = tickerSearch.trim().toLocaleLowerCase();
+    if (!query) return gridRows;
+    return gridRows.filter((row) =>
+      `${String(row.티커 ?? "")} ${String(row.종목명 ?? "")}`.toLocaleLowerCase().includes(query),
+    );
+  }, [gridRows, tickerSearch]);
+
   const showDeviationColumn = useMemo(() => {
     const tickerType = String(selectedTickerTypeItem?.ticker_type || "").trim().toLowerCase();
     return tickerType === "kor_kr" || tickerType === "kor_us";
@@ -576,14 +585,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   // 그리드가 알려준 표시 순서를 우선하되, 그리드가 아직 모르는 종목(풀을 막 바꾼 직후)은
   // 원래 순서로 뒤에 붙인다 — 차트 모드에서 풀을 바꿔도 빈 화면이 되지 않는다.
   const orderedTickers = useMemo(() => {
-    const available = new Set(gridRows.map((row) => row.티커));
+    const available = new Set(searchedGridRows.map((row) => row.티커));
     const ordered = displayedTickers.filter((ticker) => available.has(ticker));
     const seen = new Set(ordered);
-    for (const row of gridRows) {
+    for (const row of searchedGridRows) {
       if (row.티커 && !seen.has(row.티커)) ordered.push(row.티커);
     }
     return ordered;
-  }, [displayedTickers, gridRows]);
+  }, [displayedTickers, searchedGridRows]);
   const chartTickers = useMemo(
     () => orderedTickers.slice(0, chartLimit),
     [orderedTickers, chartLimit],
@@ -600,7 +609,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   // 종목풀·정렬을 바꾸면 다시 20개부터 본다 — 앞서 100개를 펼쳐 뒀다고 새 목록도 100개를 받을 이유가 없다.
   useEffect(() => {
     setChartLimit(RANK_CHART_PAGE_SIZE);
-  }, [selectedTickerType]);
+  }, [selectedTickerType, tickerSearch]);
   // 차트 모드일 때만 받는다 — 종목 수만큼 일봉을 실어 오므로 순위·관리 모드에서는 낭비다.
   useEffect(() => {
     if (pageMode !== "chart" || charts || chartsLoading || chartsError) return;
@@ -664,7 +673,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   );
 
   const displayGridRows = useMemo<RankGridRow[]>(() => {
-    const rows = gridRows;
+    const rows = searchedGridRows;
     if (pageMode !== "manage" || !addingRow) {
       return rows;
     }
@@ -718,7 +727,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       },
       ...rows,
     ];
-  }, [addingRow, gridRows, pageMode]);
+  }, [addingRow, pageMode, searchedGridRows]);
 
   const maRuleSummary = useMemo(
     () => (maRule ? [`${maRule.ma_type} 단기 ${maRule.short_ma_days}일 · 장기 ${maRule.long_ma_days}일`] : []),
@@ -1760,6 +1769,19 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       </div>
                     </label>
                   )}
+                </div>
+                <div className="appMainHeaderRight rankMainHeaderRight">
+                  <label className="appLabeledField rankTickerSearchField">
+                    <span className="appLabeledFieldLabel">검색</span>
+                    <input
+                      className="form-control"
+                      type="search"
+                      value={tickerSearch}
+                      placeholder="티커 또는 종목명"
+                      aria-label="티커 또는 종목명 검색"
+                      onChange={(event) => setTickerSearch(event.target.value)}
+                    />
+                  </label>
                 </div>
               </div>
             </ResponsiveFiltersSection>
