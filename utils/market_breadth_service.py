@@ -298,6 +298,149 @@ def _daily_counts_backfill(
     return tickers, by_date
 
 
+# 종목풀 ADR — 시장 지수 대신 **그 풀의 종목들** 로 폭을 잰다.
+#
+# 지수 ADR 은 매매하는 종목과 구성이 다르다(us_stock 은 S&P100+나스닥100 조합이라
+# SP500 과도 NDX100 과도 다르다). 풀 자신의 폭을 보는 편이 그 전략에 더 맞다.
+#
+# 시장 4개와 달리 **외부 조회가 없다** — 가격 캐시가 이미 매일 갱신되므로 그것만 센다.
+# 그래서 활성 풀 전부를 매일 돌려도 비용이 거의 없고, 골라 둔 풀만 계산하지 않는다
+# (레짐을 바꾼 순간 과거가 비어 백테스트가 그 구간을 못 쓰기 때문).
+POOL_MARKET_PREFIX = "pool:"
+
+# 종목풀 레짐을 고른 상태를 나타내는 예약 티커. 지수와 같은 `{ticker, name}` 자리에
+# 들어가 저장 스키마를 바꾸지 않는다 — 어느 풀인지는 설정을 읽는 그 풀 자신이다.
+SELF_POOL_REGIME_TICKER = "pool:self"
+
+
+def pool_market_key(pool: str) -> str:
+    """종목풀 ADR 의 시장 키 — 시장 4개와 같은 컬렉션에 섞여 들어간다."""
+    return f"{POOL_MARKET_PREFIX}{str(pool or '').strip().lower()}"
+
+
+def pool_of_market_key(market: str) -> str | None:
+    """시장 키가 종목풀이면 그 풀 id, 지수면 None."""
+    text = str(market or "")
+    return text[len(POOL_MARKET_PREFIX) :] if text.startswith(POOL_MARKET_PREFIX) else None
+
+
+def _pool_daily_counts(pool: str, since: str | None = None) -> tuple[int, dict[str, dict[str, int]]]:
+    """가격 캐시에서 그 풀의 일별 상승/하락 종목수를 센다.
+
+    전일 종가 대비로 판정한다 — 시장 4개(등락률·일봉)와 같은 기준이다.
+    보합(0%)은 어느 쪽에도 넣지 않는다. `counted` 는 그날 판정에 쓰인 종목 수다.
+
+    ``since`` 를 주면 **그날 이후만** 센다(그날 자신은 최신일 갱신 대상이라 포함).
+    전일 대비를 내야 하므로 계산에는 그 하루 앞까지 넣는다.
+    """
+    from utils.cache_utils import load_cached_frames_bulk_from_ticker_types
+    from utils.stock_list_io import get_etfs
+
+    tickers = [str(row["ticker"]).strip() for row in get_etfs(pool) if row.get("ticker")]
+    if not tickers:
+        return 0, {}
+    frames = load_cached_frames_bulk_from_ticker_types([pool], tickers)
+
+    closes: dict[str, pd.Series] = {}
+    for ticker, frame in frames.items():
+        if frame is None or frame.empty or "Close" not in frame:
+            continue
+        series = pd.to_numeric(frame["Close"], errors="coerce")
+        series = series[series > 0].dropna()
+        if len(series) >= 2:
+            closes[ticker] = series
+    if not closes:
+        return len(tickers), {}
+
+    close_df = pd.DataFrame(closes).sort_index()
+    if since:
+        # 이미 저장된 구간은 다시 세지 않는다. 전일 대비를 내야 해서 한 칸 앞부터 자른다.
+        stamps = list(close_df.index)
+        keep_from = next((i for i, day in enumerate(stamps) if str(pd.Timestamp(day).date()) >= since), None)
+        if keep_from is None:
+            return len(tickers), {}
+        close_df = close_df.iloc[max(keep_from - 1, 0) :]
+    change = close_df.pct_change()
+    counts: dict[str, dict[str, int]] = {}
+    for day, row in change.iterrows():
+        valid = row.dropna()
+        if valid.empty:
+            continue
+        counts[str(pd.Timestamp(day).date())] = {
+            "advance": int((valid > 0).sum()),
+            "decline": int((valid < 0).sum()),
+            "counted": int(len(valid)),
+        }
+    return len(tickers), counts
+
+
+def refresh_pool_breadth(pools: list[str] | None = None, *, full: bool = False) -> dict[str, Any]:
+    """활성 종목풀의 상승/하락 종목수를 채운다 — 가격 캐시만 읽는다(외부 조회 없음).
+
+    시장 4개(`refresh_market_breadth`)와 같은 컬렉션·스키마를 쓰고, 시장 키만
+    `pool:<풀id>` 다. 그래서 읽기(`load_adr_series`)·판정·화면은 손댈 것이 없다.
+
+    **과거는 소급 계산한다.** 가격 캐시에 이력이 있으니 처음부터 백테스트에 쓸 수 있다.
+    다만 지금 풀 구성으로 과거를 재구성하는 것이라 생존 편향이 들어간다 — 중간에 빠진
+    종목은 없는 셈이 되고, 새로 들어온 종목은 편입 전 구간까지 계산에 들어간다.
+    (표본 가드가 이를 일부 걸러낸다 — 대상의 90% 가 안 차는 날은 기록하지 않는다.)
+
+    평상시에는 **마지막 저장일 이후만** 센다. ``full=True`` 면 전 이력을 다시 훑는다
+    (풀 종목이 크게 바뀌어 과거까지 다시 세고 싶을 때만 쓴다 — 이미 있는 날짜는
+    그래도 덮지 않으므로, 정말 다시 만들려면 그 풀의 문서를 먼저 지워야 한다).
+    """
+    from utils.settings_loader import list_available_ticker_types
+
+    db = _require_db()
+    collection = db[COLLECTION_NAME]
+    collection.create_index([("market", 1), ("date", 1)], unique=True, name="market_date_unique")
+
+    targets = pools if pools is not None else list_available_ticker_types()
+    summary: dict[str, Any] = {"pools": {}}
+    for pool in targets:
+        market = pool_market_key(pool)
+        # 이미 채운 구간은 건너뛴다 — 첫 실행만 전 이력을 훑고 그 뒤로는 하루치씩이다.
+        # 마지막 저장일 자신은 장중 재실행으로 값이 바뀔 수 있어 다시 센다.
+        last_doc = None if full else collection.find_one({"market": market}, {"_id": 0, "date": 1}, sort=[("date", -1)])
+        since = str(last_doc["date"]) if last_doc else None
+        try:
+            universe_size, counts_by_date = _pool_daily_counts(pool, since)
+        except Exception as exc:
+            logger.warning("[pool_breadth] %s 집계 실패: %s", pool, exc)
+            summary["pools"][pool] = {"error": str(exc)}
+            continue
+        if not counts_by_date:
+            summary["pools"][pool] = {"skipped": True, "reason": "가격 캐시에 종가가 없습니다."}
+            continue
+
+        # 표본이 적은 날은 등락비가 크게 흔들려 ADR 을 왜곡한다 — 시장 4개와 같은 가드.
+        min_counted = universe_size * _MIN_COUNTED_RATIO
+        target_date = max(counts_by_date)
+        inserted = updated = skipped = 0
+        for date, counts in sorted(counts_by_date.items()):
+            if counts["counted"] < min_counted:
+                skipped += 1
+                continue
+            doc = {"market": market, "date": date, **counts, "universe_size": universe_size}
+            if date == target_date:
+                # 최신일은 장중 재실행으로 값이 바뀔 수 있어 갱신한다.
+                collection.update_one({"market": market, "date": date}, {"$set": doc}, upsert=True)
+                updated += 1
+                continue
+            result = collection.update_one({"market": market, "date": date}, {"$setOnInsert": doc}, upsert=True)
+            if result.upserted_id is not None:
+                inserted += 1
+        summary["pools"][pool] = {
+            "market": market,
+            "universe_size": universe_size,
+            "inserted": inserted,
+            "updated": updated,
+            "skipped": skipped,
+            "latest_date": target_date,
+        }
+    return summary
+
+
 def refresh_market_breadth() -> dict[str, Any]:
     """시장별로 빠진 날의 상승/하락 종목수를 채운다.
 

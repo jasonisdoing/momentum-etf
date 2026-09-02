@@ -1,15 +1,28 @@
-import { createFastApiProxy } from "@/lib/fastapi-proxy";
+import type { NextRequest } from "next/server";
+
+import { fetchFastApiJson } from "@/lib/internal-api";
+import { jsonNoStore } from "@/lib/no-store-response";
+import { proxyStream } from "@/lib/stream-proxy";
 
 export const dynamic = "force-dynamic";
+// 스트림이 중간에 잘리지 않게 실행 시간을 넉넉히 준다(초).
+export const maxDuration = 3600;
 
-const proxy = createFastApiProxy({
-  POST: {
-    path: "/internal/strategy-new-high/tuning",
-    // 조합 수십 개를 한 번에 백테스트한다.
-    error: "튜닝에 실패했습니다.",
-    forwardBody: true,
-    timeoutMs: 3_600_000,
-  },
-});
+/**
+ * 튜닝 — 조합 수십 개를 백테스트한다. 응답은 SSE 스트림이라
+ * (진행 이벤트 여러 개 + 결과 이벤트 하나) 그대로 통과시킨다.
+ */
+export async function POST(request: NextRequest) {
+  return proxyStream("/internal/strategy-new-high/tuning", await request.json());
+}
 
-export const POST = proxy.POST!;
+export async function DELETE() {
+  try {
+    return jsonNoStore(await fetchFastApiJson("/internal/strategy-new-high/tuning", { method: "DELETE" }));
+  } catch (error) {
+    return jsonNoStore(
+      { error: error instanceof Error ? error.message : "튜닝을 중단하지 못했습니다." },
+      { status: 500 },
+    );
+  }
+}

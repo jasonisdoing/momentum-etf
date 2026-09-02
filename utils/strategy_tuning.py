@@ -9,14 +9,168 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterable
-from concurrent.futures import ProcessPoolExecutor
+from collections.abc import Callable, Iterable, Iterator
 from multiprocessing import get_context
+from multiprocessing.pool import Pool
+from threading import Event, Lock
 from typing import Any
 
 import pandas as pd
 
 from config import TUNING_WORKERS
+from utils.perf_metrics import daily_return_metrics
+
+# 튜닝 스트림이 끊기면 워커가 현재 조합을 마친 뒤 다음 조합으로 넘어가지 않게 하는 신호.
+# 프로세스 시작 때 initializer 로 전달하므로 spawn 환경에서도 같은 이벤트를 본다.
+_CANCEL_EVENT: Any = None
+
+
+class TuningCancelledError(RuntimeError):
+    """사용자 중단 또는 새 튜닝 시작으로 현재 실행이 교체됐다."""
+
+
+class TuningRun:
+    """서버 전체에서 실행 중인 튜닝 하나와 그 프로세스 풀의 종료 핸들."""
+
+    def __init__(self, label: str, replaced_label: str | None) -> None:
+        self.label = label
+        self.replaced_label = replaced_label
+        self._cancelled = Event()
+        self._lock = Lock()
+        self._pool: Pool | None = None
+        self._worker_cancel_event: Any = None
+        self._pool_stopped = False
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled.is_set()
+
+    def wait(self, seconds: float) -> None:
+        self._cancelled.wait(seconds)
+
+    def raise_if_cancelled(self) -> None:
+        if self.cancelled:
+            raise TuningCancelledError("튜닝이 중단되었습니다.")
+
+    def attach_pool(self, pool: Pool, worker_cancel_event: Any) -> None:
+        """새 풀을 연결한다. 연결 전에 취소됐다면 풀을 즉시 끝낸다."""
+        with self._lock:
+            self._pool = pool
+            self._worker_cancel_event = worker_cancel_event
+            self._pool_stopped = False
+            cancelled = self.cancelled
+        if cancelled:
+            self.cancel()
+            raise TuningCancelledError("튜닝이 중단되었습니다.")
+
+    def close_pool(self, pool: Pool) -> None:
+        """정상 완료된 풀을 정리한다."""
+        with self._lock:
+            if self._pool is not pool or self._pool_stopped:
+                return
+            self._pool_stopped = True
+        pool.close()
+        pool.join()
+
+    def detach_pool(self, pool: Pool) -> None:
+        with self._lock:
+            if self._pool is pool:
+                self._pool = None
+                self._worker_cancel_event = None
+
+    def cancel(self) -> None:
+        """실행 중인 워커를 기다리지 않고 실제 프로세스 풀까지 종료한다."""
+        self._cancelled.set()
+        with self._lock:
+            worker_cancel_event = self._worker_cancel_event
+            pool = self._pool
+            should_stop = pool is not None and not self._pool_stopped
+            if should_stop:
+                self._pool_stopped = True
+        if worker_cancel_event is not None:
+            worker_cancel_event.set()
+        if should_stop and pool is not None:
+            pool.terminate()
+            pool.join()
+
+
+_ACTIVE_TUNING_LOCK = Lock()
+_ACTIVE_TUNING: TuningRun | None = None
+
+
+def begin_tuning(label: str) -> TuningRun:
+    """기존 튜닝을 종료하고 서버 전체의 새 활성 튜닝을 등록한다."""
+    global _ACTIVE_TUNING
+    with _ACTIVE_TUNING_LOCK:
+        previous = _ACTIVE_TUNING
+        if previous is not None:
+            previous.cancel()
+        run = TuningRun(label, previous.label if previous is not None else None)
+        _ACTIVE_TUNING = run
+        return run
+
+
+def finish_tuning(run: TuningRun) -> None:
+    """자신이 아직 활성 실행일 때만 전역 슬롯을 비운다."""
+    global _ACTIVE_TUNING
+    with _ACTIVE_TUNING_LOCK:
+        if _ACTIVE_TUNING is run:
+            _ACTIVE_TUNING = None
+
+
+def cancel_active_tuning() -> dict[str, Any]:
+    """브라우저의 중단 버튼용 — 현재 튜닝과 워커를 즉시 종료한다."""
+    global _ACTIVE_TUNING
+    with _ACTIVE_TUNING_LOCK:
+        run = _ACTIVE_TUNING
+        if run is None:
+            return {"cancelled": False, "message": "실행 중인 튜닝이 없습니다."}
+        run.cancel()
+        if _ACTIVE_TUNING is run:
+            _ACTIVE_TUNING = None
+        return {"cancelled": True, "label": run.label, "message": f"{run.label} 튜닝을 중단했습니다."}
+
+
+def managed_tuning_events(run: TuningRun, source: Iterable[dict[str, Any]]) -> Iterator[dict[str, Any]]:
+    """교체·중단 알림과 활성 슬롯 정리를 전략별 이벤트 흐름에 공통 적용한다."""
+    iterator = iter(source)
+    completed = False
+    try:
+        if run.replaced_label is not None:
+            yield {
+                "type": "notice",
+                "message": f"기존 튜닝({run.replaced_label})을 중단하고 새 튜닝을 시작했습니다.",
+            }
+        for event in iterator:
+            run.raise_if_cancelled()
+            if event.get("type") == "result":
+                completed = True
+            yield event
+    except TuningCancelledError:
+        yield {"type": "cancelled", "message": "튜닝이 중단되었습니다."}
+    finally:
+        close = getattr(iterator, "close", None)
+        if callable(close):
+            close()
+        if not completed:
+            run.cancel()
+        finish_tuning(run)
+
+
+def _init_cancelable_worker(
+    initializer: Callable[..., None] | None,
+    initargs: tuple,
+    cancel_event: Any,
+) -> None:
+    global _CANCEL_EVENT
+    _CANCEL_EVENT = cancel_event
+    if initializer is not None:
+        initializer(*initargs)
+
+
+def tuning_cancelled() -> bool:
+    """현재 튜닝 요청이 취소됐는지 워커 안에서 확인한다."""
+    return bool(_CANCEL_EVENT is not None and _CANCEL_EVENT.is_set())
 
 
 def tuning_workers(task_count: int) -> int:
@@ -33,8 +187,22 @@ def seed_worker_caches(pool_configs: list[dict[str, Any]], stocks_by_pool: dict[
 
     워커 여러 개가 동시에 MongoDB 를 읽으면(가격·종목·설정) 로컬 mongod 가 CPU 를 뺏겨
     타임아웃이 나고 화면의 다른 요청까지 실패한다 — 그래서 워커는 읽기 전용 사본만 쓴다.
+
+    **메인 프로세스에서는 아무것도 하지 않는다.** 작업이 하나뿐이면 `iter_groups` 가
+    별도 프로세스를 만들지 않고 여기서 초기화하는데, 그때 아래 것들을 그대로 실행하면
+    서버 프로세스가 오염된다:
+
+      · `_load_pool_configs` 를 스냅샷으로 갈아끼우므로, 그 뒤 종목풀 설정을 저장해도
+        서버가 계속 옛 값을 본다(종목 수를 6→5 로 바꿔도 6 으로 굳었다).
+      · `os.nice(5)` 는 되돌릴 수 없어 서버 우선순위가 영구히 내려간다.
+
+    메인은 DB 를 읽을 수 있으니 시딩 자체가 필요 없다 — 건너뛰는 것이 곧 정답이다.
     """
     import os
+    from multiprocessing import current_process
+
+    if current_process().name == "MainProcess":
+        return
 
     from utils import settings_loader, stock_list_io
 
@@ -46,44 +214,52 @@ def seed_worker_caches(pool_configs: list[dict[str, Any]], stocks_by_pool: dict[
         pass
 
 
-def run_groups(
+def iter_groups(
     worker: Callable[[Any], Any],
     tasks: Iterable[Any],
     *,
+    run: TuningRun,
     initializer: Callable[..., None] | None = None,
     initargs: tuple = (),
-) -> list[Any]:
-    """작업 그룹을 별도 프로세스(spawn)에서 병렬로 돌린다.
+) -> Iterator[tuple[int, int, Any]]:
+    """작업 그룹을 병렬 실행하고 결과를 **끝나는 대로 하나씩** 흘린다.
 
-    ``initializer`` 는 워커마다 한 번 실행돼 부모가 읽어 둔 데이터(가격·종목·설정)를
-    넘긴다 — 워커는 DB 를 건드리지 않는다. fork 대신 spawn 을 써서 macOS 에서도 안전하다.
-    작업이 하나뿐이거나 워커가 1개면 현재 프로세스에서 그대로 돈다(초기화도 여기서).
+    `(완료 수, 전체 수, 결과)` 를 내보낸다 — 호출자가 진행을 그대로 스트리밍할 수 있다.
+    튜닝은 10분 넘게 걸려서, 다 끝난 뒤 한 번에 응답하면 화면이 죽은 것처럼 보인다.
     """
     tasks = list(tasks)
-    workers = tuning_workers(len(tasks))
-    if workers <= 1:
-        if initializer is not None:
-            initializer(*initargs)
-        return [worker(task) for task in tasks]
-    with ProcessPoolExecutor(
-        max_workers=workers, mp_context=get_context("spawn"), initializer=initializer, initargs=initargs
-    ) as executor:
-        return list(executor.map(worker, tasks))
-
-
-def metrics_from_returns(returns_pct: pd.Series) -> dict[str, float | None]:
-    """일별 수익률(%) 시계열 → 총수익·MDD·소르티노(연환산)."""
-    if returns_pct.empty:
-        return {"total_pct": 0.0, "mdd_pct": 0.0, "sortino": None}
-    growth = (1 + returns_pct / 100).cumprod()
-    returns = returns_pct / 100
-    downside = returns[returns < 0]
-    dev = float((downside**2).mean() ** 0.5) if not downside.empty else 0.0
-    return {
-        "total_pct": round(float((growth.iloc[-1] - 1) * 100), 1),
-        "mdd_pct": round(float((((growth / growth.cummax()) - 1) * 100).min()), 1),
-        "sortino": round(float(returns.mean()) / dev * (252**0.5), 2) if dev > 0 else None,
-    }
+    total = len(tasks)
+    workers = tuning_workers(total)
+    context = get_context("spawn")
+    cancel_event = context.Event()
+    pool = context.Pool(
+        processes=workers,
+        initializer=_init_cancelable_worker,
+        initargs=(initializer, initargs, cancel_event),
+    )
+    run.attach_pool(pool, cancel_event)
+    pending = [pool.apply_async(worker, (task,)) for task in tasks]
+    completed = False
+    try:
+        done = 0
+        while pending:
+            run.raise_if_cancelled()
+            ready = [result for result in pending if result.ready()]
+            if not ready:
+                # 취소 API가 0.1초 안에 이 루프를 깨울 수 있게 결과를 무한 대기하지 않는다.
+                run.wait(0.1)
+                continue
+            for result in ready:
+                pending.remove(result)
+                done += 1
+                yield done, total, result.get()
+        completed = True
+    finally:
+        if completed:
+            run.close_pool(pool)
+        else:
+            run.cancel()
+        run.detach_pool(pool)
 
 
 def cumulative_to_returns(cumulative_pct: pd.Series) -> pd.Series:
@@ -99,25 +275,17 @@ def quarterly_returns(returns_pct: pd.Series) -> dict[str, float]:
     }
 
 
-def cagr_pct(returns_pct: pd.Series) -> float | None:
-    """연환산 수익률(%) — 총수익을 실제 달력 기간(일수)으로 연환산한다."""
-    if len(returns_pct) < 2:
-        return None
-    growth = float((1 + returns_pct / 100).prod())
-    days = (returns_pct.index[-1] - returns_pct.index[0]).days
-    if growth <= 0 or days <= 0:
-        return None
-    return round((growth ** (365.0 / days) - 1) * 100, 1)
-
-
 def summarize_combo(
     params: dict[str, Any], returns_pct: pd.Series, extra: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     """조합 하나의 요약 행. ``extra`` 는 전략별 부가 지표(거래 수·승률 등)."""
+    metrics = daily_return_metrics(returns_pct)
     return {
         "params": params,
-        **metrics_from_returns(returns_pct),
-        "cagr_pct": cagr_pct(returns_pct),
+        "total_pct": round(float(metrics["total_pct"]), 1),
+        "cagr_pct": round(float(metrics["cagr_pct"]), 1) if metrics["cagr_pct"] is not None else None,
+        "mdd_pct": round(float(metrics["mdd_pct"]), 1),
+        "sortino": round(float(metrics["sortino"]), 2) if metrics["sortino"] is not None else None,
         "quarters": quarterly_returns(returns_pct),
         **(extra or {}),
     }

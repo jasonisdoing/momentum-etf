@@ -33,6 +33,7 @@ import pandas as pd
 
 from config import ADR_FLOOR_OPTIONS, STOP_LOSS_PCT_OPTIONS
 from core.strategy.scoring import (
+    calculate_maps_score,
     compute_ma_disparity,
     drawdown_from_high_pct,
     hold_eligible,
@@ -132,7 +133,22 @@ PER_POOL_SETTING_KEYS = (
     "adr_floor",
     "intraweek_exit",
     "intraweek_stop_pct",
+    "rebalance_mode",
 )
+
+# 교체 규칙 — 주 교체일에 보유를 어떻게 정할지.
+#   weekly : 매주 상위 N 을 새로 뽑는다(기존 방식). 순위가 밀리면 자격이 남아도 편출한다.
+#   hold   : 후보 자격이 남아 있으면 순위와 무관하게 계속 들고 가고, 자격을 잃어 빈 자리만
+#            그 시점 상위 후보로 채운다(신고가 전략의 편입 방식과 같은 결).
+# 어느 쪽이 유리한지는 시장이 정한다 — 12·36개월 비교에서 us_stock 은 hold 가 수익·MDD·
+# 소르티노를 함께 개선했지만, kor_stock 은 수익이 1/3 로 무너졌다. 풀별로 튜닝해서 고른다.
+REBALANCE_MODE_WEEKLY = "weekly"
+REBALANCE_MODE_HOLD = "hold"
+REBALANCE_MODE_OPTIONS: tuple[str, ...] = (REBALANCE_MODE_WEEKLY, REBALANCE_MODE_HOLD)
+REBALANCE_MODE_LABELS: dict[str, str] = {
+    REBALANCE_MODE_WEEKLY: "매주 재선정",
+    REBALANCE_MODE_HOLD: "자격 유지",
+}
 
 # 주중 손절선 선택지(%) — 교체일 시가 대비 낙폭. None 은 '손절 없음'.
 # kor·kospi200 24개월 백테스트에서 -10 이 공통 피크였다(-5 는 휩쏘 손실, -15 는 효과 소멸).
@@ -202,6 +218,14 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
             allowed = ", ".join(str(v) for v in INTRAWEEK_STOP_OPTIONS if v is not None)
             raise ValueError(f"'intraweek_stop_pct' 는 {allowed} 중 하나여야 합니다.")
 
+    # 교체 규칙 — 미설정이면 기존 동작(매주 재선정)으로 본다. 스키마 기본이지 임의 보정이 아니다.
+    rebalance_mode = str(settings.get("rebalance_mode") or REBALANCE_MODE_WEEKLY).strip().lower()
+    if rebalance_mode not in REBALANCE_MODE_OPTIONS:
+        allowed = ", ".join(f"{key}({REBALANCE_MODE_LABELS[key]})" for key in REBALANCE_MODE_OPTIONS)
+        raise ValueError(
+            f"'rebalance_mode' 는 {allowed} 중 하나여야 합니다 (받은 값: {settings.get('rebalance_mode')})."
+        )
+
     return {
         "pool": pool,
         # 종목 수는 순위·신고가·종목풀 백테스트와 같은 풀 설정을 쓴다.
@@ -211,6 +235,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "adr_floor": adr_floor,
         "intraweek_exit": intraweek_exit,
         "intraweek_stop_pct": intraweek_stop_pct,
+        "rebalance_mode": rebalance_mode,
     }
 
 
@@ -258,6 +283,7 @@ _POOL_KEY_BY_SETTING: dict[str, str] = {
     "adr_floor": "ADR_FLOOR",
     "intraweek_exit": "INTRAWEEK_EXIT",
     "intraweek_stop_pct": "INTRAWEEK_STOP_PCT",
+    "rebalance_mode": "REBALANCE_MODE",
 }
 
 
@@ -267,7 +293,7 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
     for setting_key, pool_key in _POOL_KEY_BY_SETTING.items():
         if pool_key not in config:
             # None 을 값으로 갖는 항목(주중 손절선 등)은 키 자체는 있어야 한다.
-            if setting_key in ("adr_floor", "intraweek_stop_pct", "intraweek_exit"):
+            if setting_key in ("adr_floor", "intraweek_stop_pct", "intraweek_exit", "rebalance_mode"):
                 continue
             return None
         result[setting_key] = config[pool_key]
@@ -275,6 +301,7 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
     result.setdefault("adr_floor", None)
     result.setdefault("intraweek_exit", False)
     result.setdefault("intraweek_stop_pct", None)
+    result.setdefault("rebalance_mode", REBALANCE_MODE_WEEKLY)
     return result
 
 
@@ -515,8 +542,16 @@ _ADR_SERIES_CACHE: dict[str, pd.Series] = {}
 
 
 def adr_market_of_pool(pool: str) -> str | None:
-    """풀의 시장 레짐 지수 → ADR 시장(KOSPI·KOSDAQ·SP500·NDX100). 미설정이면 None."""
-    from utils.market_breadth_service import MARKET_BY_INDEX_TICKER
+    """풀의 ADR 기준 → 시장 키. 미설정이면 None.
+
+    지수 4개(KOSPI·KOSDAQ·SP500·NDX100) 또는 **그 풀 자신**(`pool:<풀id>`) 이다.
+    어느 쪽이든 `market_breadth_daily` 의 같은 스키마라 읽기·판정은 구분하지 않는다.
+    """
+    from utils.market_breadth_service import (
+        MARKET_BY_INDEX_TICKER,
+        SELF_POOL_REGIME_TICKER,
+        pool_market_key,
+    )
     from utils.pool_settings_store import get_pool_market_regime_index
     from utils.settings_loader import get_ticker_type_settings
 
@@ -527,6 +562,8 @@ def adr_market_of_pool(pool: str) -> str | None:
     index = get_pool_market_regime_index(pool_settings)
     if index is None:
         return None
+    if index["ticker"] == SELF_POOL_REGIME_TICKER:
+        return pool_market_key(pool)
     return MARKET_BY_INDEX_TICKER.get(index["ticker"])
 
 
@@ -610,6 +647,7 @@ def select_candidates(
     settings: dict[str, Any],
     *,
     as_of: pd.Timestamp | None = None,
+    series_cache: IntraweekSeriesCache,
 ) -> list[dict[str, Any]]:
     """이격 후보 목록 — 보유 가능 조건은 순위 화면과 **같은 공용 함수**(`hold_eligible`)다.
 
@@ -624,18 +662,25 @@ def select_candidates(
 
     candidates: list[dict[str, Any]] = []
     for row in universe:
-        frame = frames.get(row["ticker"])
-        if frame is None:
+        series = _intraweek_series(frames, row["ticker"], short_ma_days, long_ma_days, series_cache)
+        if series is None:
             continue
-        metrics = momentum_metrics(
-            frame["Close"],
-            short_ma_days=short_ma_days,
-            long_ma_days=long_ma_days,
-            as_of=as_of,
+        close = series[2] if as_of is None else series[2][series[2].index <= as_of]
+        if len(close) < long_ma_days + 4:
+            continue
+        stamp = close.index[-1]
+        short_disparity_pct = series[0].asof(stamp)
+        disparity_pct = series[1].asof(stamp)
+        if pd.isna(short_disparity_pct) or pd.isna(disparity_pct):
+            continue
+        candidates.append(
+            {
+                **row,
+                "disparity_pct": float(disparity_pct),
+                "short_disparity_pct": float(short_disparity_pct),
+                "momentum_score": rank_score(float(disparity_pct), float(short_disparity_pct)),
+            }
         )
-        if metrics is None:
-            continue
-        candidates.append({**row, **metrics})
 
     # 장기 이격 > 0 & 단기 이격 >= 0 — 순위/종목풀 백테스트와 같은 단일 규칙.
     return [c for c in candidates if hold_eligible(c["disparity_pct"], c["short_disparity_pct"])]
@@ -673,6 +718,53 @@ def select_top(
 
 
 # ── 주간 리밸런싱 시점 ─────────────────────────────────────────────────────
+IntraweekSeriesCache = dict[
+    tuple[str, int, int],
+    tuple[pd.Series, pd.Series, pd.Series, pd.Series] | None,
+]
+
+
+def _intraweek_series(
+    frames: dict[str, pd.DataFrame],
+    ticker: str,
+    short_ma_days: int,
+    long_ma_days: int,
+    series_cache: IntraweekSeriesCache,
+) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series] | None:
+    """종목·이평 조합의 주중 판정 시계열을 만들고 호출자 캐시에 보관한다."""
+    key = (ticker, short_ma_days, long_ma_days)
+    if key in series_cache:
+        return series_cache[key]
+
+    frame = frames.get(ticker)
+    close = (
+        pd.to_numeric(frame["Close"], errors="coerce").dropna()
+        if frame is not None and not frame.empty and "Close" in frame.columns
+        else None
+    )
+    if close is None or len(close) < long_ma_days + 4:
+        series_cache[key] = None
+        return None
+
+    from utils.moving_averages import calculate_moving_average
+
+    short_ma = calculate_moving_average(close, short_ma_days, min_periods=short_ma_days)
+    long_ma = calculate_moving_average(close, long_ma_days, min_periods=long_ma_days)
+    opens = (
+        positive_prices(frame["Open"]).dropna()
+        if frame is not None and not frame.empty and "Open" in frame.columns
+        else pd.Series(dtype=float)
+    )
+    prepared = (
+        calculate_maps_score(close, short_ma),
+        calculate_maps_score(close, long_ma),
+        close,
+        opens,
+    )
+    series_cache[key] = prepared
+    return prepared
+
+
 def simulate_intraweek_exits(
     frames: dict[str, pd.DataFrame],
     settings: dict[str, Any],
@@ -680,6 +772,8 @@ def simulate_intraweek_exits(
     index: pd.DatetimeIndex,
     scan_start: pd.Timestamp,
     scan_end: pd.Timestamp,
+    *,
+    series_cache: IntraweekSeriesCache,
 ) -> list[dict[str, Any]]:
     """주중 매도 — 보유 종목이 자격을 잃으면 다음 거래일 시가에 판다.
 
@@ -703,45 +797,22 @@ def simulate_intraweek_exits(
     if not settings.get("intraweek_exit", True):
         return []
 
-    from utils.moving_averages import calculate_moving_average
-
     short_ma_days = int(settings["short_ma_days"])
     long_ma_days = int(settings["long_ma_days"])
     stop_raw = settings.get("intraweek_stop_pct")
     stop_pct = float(stop_raw) if stop_raw is not None else None
 
-    # 종목별 이격 시계열 — momentum_metrics 와 같은 이평선을 한 번만 계산해 재사용한다
-    # (SMA/EMA 모두 날짜 d 의 값은 d 이후 데이터와 무관해 as_of 절단과 결과가 같다).
-    disparity_cache: dict[str, tuple[pd.Series, pd.Series] | None] = {}
+    # 이 캐시는 백테스트 컨텍스트에 있어 같은 종목·이평 조합을 주차와 튜닝 조합 사이에서
+    # 재사용한다. 손절 기준가만 주 시작일마다 달라 아래 지역 캐시에 따로 둔다.
+    entry_price_cache: dict[str, float | None] = {}
 
-    def disparity(ticker: str) -> tuple[pd.Series, pd.Series] | None:
-        if ticker not in disparity_cache:
-            frame = frames.get(ticker)
-            close = (
-                pd.to_numeric(frame["Close"], errors="coerce").dropna()
-                if frame is not None and not frame.empty and "Close" in frame.columns
-                else None
+    def entry_price(ticker: str, opens: pd.Series) -> float | None:
+        if ticker not in entry_price_cache:
+            value = opens.asof(scan_start) if not opens.empty else None
+            entry_price_cache[ticker] = (
+                float(value) if value is not None and pd.notna(value) and float(value) > 0 else None
             )
-            if close is None or len(close) < long_ma_days + 4:
-                disparity_cache[ticker] = None
-            else:
-                short_ma = calculate_moving_average(close, short_ma_days, min_periods=short_ma_days)
-                long_ma = calculate_moving_average(close, long_ma_days, min_periods=long_ma_days)
-                # 손절선 기준가 — 이번 구간(주) 시작 체결가(교체일 시가). 0 가격은 거래정지 칸.
-                entry_price = None
-                if stop_pct is not None and frame is not None and not frame.empty and "Open" in frame.columns:
-                    opens = positive_prices(frame["Open"]).dropna()
-                    if len(opens):
-                        entry_raw = opens.asof(scan_start)
-                        if pd.notna(entry_raw) and float(entry_raw) > 0:
-                            entry_price = float(entry_raw)
-                disparity_cache[ticker] = (
-                    (close / short_ma - 1.0) * 100.0,
-                    (close / long_ma - 1.0) * 100.0,
-                    close,
-                    entry_price,
-                )
-        return disparity_cache[ticker]
+        return entry_price_cache[ticker]
 
     remaining = set(holdings)
     exits: list[dict[str, Any]] = []
@@ -751,7 +822,7 @@ def simulate_intraweek_exits(
         later = index[index > day]
         sell_date = later[0] if len(later) > 0 else None
         for ticker in sorted(remaining):
-            series = disparity(ticker)
+            series = _intraweek_series(frames, ticker, short_ma_days, long_ma_days, series_cache)
             if series is None:
                 continue  # 이격을 계산할 데이터가 없으면 신호 없음 — 유지
             try:
@@ -765,10 +836,11 @@ def simulate_intraweek_exits(
             # 주중 손절 — 교체일 시가 대비 종가 낙폭이 손절선 이하면 자격과 무관하게 판다.
             # kor·kospi200 백테스트에서 -10% 부근이 수익·MDD·소르티노를 함께 개선했다.
             hit_stop = False
-            if stop_pct is not None and series[3] is not None:
+            base = entry_price(ticker, series[3]) if stop_pct is not None else None
+            if stop_pct is not None and base is not None:
                 price = series[2].asof(day)
                 if pd.notna(price):
-                    hit_stop = (float(price) / series[3] - 1.0) * 100.0 <= stop_pct
+                    hit_stop = (float(price) / base - 1.0) * 100.0 <= stop_pct
             if eligible and not hit_stop:
                 continue
             remaining.discard(ticker)
@@ -1019,7 +1091,14 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
             ),
         }
 
-    candidates = select_candidates(universe, frames, settings, as_of=signal_date)
+    momentum_series_cache: IntraweekSeriesCache = {}
+    candidates = select_candidates(
+        universe,
+        frames,
+        settings,
+        as_of=signal_date,
+        series_cache=momentum_series_cache,
+    )
     scored = rank_candidates(candidates)
 
     top_n = int(settings["top_n"])
@@ -1049,7 +1128,13 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
         if not alive:
             break
         prior_signal = _signal_date_for(benchmark_close, prior_rebalance)
-        prior_candidates = select_candidates(universe, frames, settings, as_of=prior_signal)
+        prior_candidates = select_candidates(
+            universe,
+            frames,
+            settings,
+            as_of=prior_signal,
+            series_cache=momentum_series_cache,
+        )
         prior_top = {item["ticker"] for item in select_top(rank_candidates(prior_candidates), top_n)}
         for ticker in list(alive):
             if ticker in prior_top:
@@ -1072,6 +1157,7 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
         benchmark_close.index,
         rebalance_date,
         benchmark_close.index[-1],
+        series_cache=momentum_series_cache,
     )
     exit_by_ticker = {exit_info["ticker"]: exit_info for exit_info in intraweek_exits}
 
@@ -1100,7 +1186,15 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
                 prev_selected = {
                     item["ticker"]
                     for item in select_top(
-                        rank_candidates(select_candidates(universe, frames, settings, as_of=prior_index[-1])),
+                        rank_candidates(
+                            select_candidates(
+                                universe,
+                                frames,
+                                settings,
+                                as_of=prior_index[-1],
+                                series_cache=momentum_series_cache,
+                            )
+                        ),
                         top_n,
                     )
                 }
@@ -1111,6 +1205,7 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
                     benchmark_close.index,
                     prev_rebalance,
                     benchmark_close.index[-1],
+                    series_cache=momentum_series_cache,
                 )
                 prev_exited = {info["ticker"] for info in prev_exit_list}
                 held_tickers = sorted(prev_selected - prev_exited)
@@ -1309,7 +1404,21 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
             "signal_long_pct": round(metrics["disparity_pct"], 1),
         }
 
-    current_scored = rank_candidates(select_candidates(universe, frames, settings, as_of=None))
+    # 현재 기준 후보 — **게이트를 빼고** 뽑는다. ADR 게이트가 걸린 주에는 신규 진입이
+    # 없지만, 차순위·예상 순위는 "게이트가 풀리면 무엇이 올라오는가" 를 보는 참고 자료라
+    # 함께 지우면 회복 국면에서 볼 것이 사라진다. 실제 매매 판정은 아래 `selected`
+    # (판정일 기준, 게이트 반영)가 정하므로 표시만 달라진다.
+    # 백테스트도 같은 방식으로 게이트를 후보 계산 밖에서 다룬다(`ungated_settings`).
+    ungated_settings = {**settings, "adr_floor": None}
+    current_scored = rank_candidates(
+        select_candidates(
+            universe,
+            frames,
+            ungated_settings,
+            as_of=None,
+            series_cache=momentum_series_cache,
+        )
+    )
     current_top = select_top(current_scored, top_n)
     next_expected: set[str] = {item["ticker"] for item in current_top}
     # 예상 순위 — 판정일 순위와 같은 규칙의 '현재 기준' 버전: 선정분 1~top_n,

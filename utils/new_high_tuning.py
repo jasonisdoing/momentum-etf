@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from itertools import product
 from typing import Any
 
@@ -26,7 +27,17 @@ from utils.new_high_service import (
     load_universe,
     validate_settings,
 )
-from utils.strategy_tuning import cumulative_to_returns, finalize, run_groups, seed_worker_caches, summarize_combo
+from utils.strategy_tuning import (
+    TuningRun,
+    begin_tuning,
+    cumulative_to_returns,
+    finalize,
+    iter_groups,
+    managed_tuning_events,
+    seed_worker_caches,
+    summarize_combo,
+    tuning_cancelled,
+)
 
 TUNING_AXES = ("exit_ma_days", "min_value_mult", "adr_floor", "stop_loss_pct")
 
@@ -97,6 +108,8 @@ def _run_group(task: tuple) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for stop in stops:
         for mult, adr_floor in product(mults, adr_floors):
+            if tuning_cancelled():
+                return rows
             combo = dict(
                 base,
                 stop_loss_pct=stop,
@@ -124,6 +137,30 @@ def _run_group(task: tuple) -> list[dict[str, Any]]:
 
 
 def run_tuning(months: int, settings: dict[str, Any] | None, ranges: dict[str, list[Any]]) -> dict[str, Any]:
+    """전 조합을 돌려 결과 페이로드를 만든다(진행 없이 한 번에)."""
+    run = begin_tuning(f"신고가 직접 실행 {months}개월")
+    for event in stream_tuning(months, settings, ranges, run):
+        if event["type"] == "result":
+            return event["payload"]
+    raise RuntimeError("튜닝이 결과를 내지 못했습니다.")
+
+
+def stream_tuning(
+    months: int,
+    settings: dict[str, Any] | None,
+    ranges: dict[str, list[Any]],
+    run: TuningRun,
+) -> Iterator[dict[str, Any]]:
+    yield from managed_tuning_events(run, _stream_tuning(months, settings, ranges, run))
+
+
+def _stream_tuning(
+    months: int,
+    settings: dict[str, Any] | None,
+    ranges: dict[str, list[Any]],
+    run: TuningRun,
+) -> Iterator[dict[str, Any]]:
+    """묶음이 끝날 때마다 진행을, 마지막에 결과를 내보낸다(모멘텀 튜닝과 같은 형태)."""
     base = validate_settings(settings or load_settings())
     stops = _checked(ranges.get("stop_loss_pct", []), STOP_LOSS_OPTIONS, "손절선", cast=float)
     exit_mas = _checked(ranges.get("exit_ma_days", []), EXIT_MA_OPTIONS, "이탈 이평선", cast=int)
@@ -132,11 +169,28 @@ def run_tuning(months: int, settings: dict[str, Any] | None, ranges: dict[str, l
 
     # 작업을 잘게 쪼개 코어가 놀지 않게 한다 — (이탈선, 손절선)마다 하나.
     tasks = [(months, base, exit_ma, [stop], mults, adr_floors) for exit_ma in exit_mas for stop in stops]
+    combos_per_group = len(mults) * len(adr_floors)
+    total_combos = len(tasks) * combos_per_group
     rows: list[dict[str, Any]] = []
+    yield {"type": "progress", "phase": "prepare", "done": 0, "total": total_combos}
     bundle = _preload(str(base["pool"]))
-    for group_rows in run_groups(_run_group, tasks, initializer=_init_worker, initargs=(bundle,)):
+    yield {"type": "progress", "phase": "backtest", "done": 0, "total": total_combos}
+    for done, total, group_rows in iter_groups(
+        _run_group,
+        tasks,
+        run=run,
+        initializer=_init_worker,
+        initargs=(bundle,),
+    ):
         rows.extend(group_rows)
+        yield {
+            "type": "progress",
+            "phase": "backtest",
+            "done": min(total_combos, done * combos_per_group),
+            "total": total * combos_per_group,
+        }
 
+    yield {"type": "progress", "phase": "finalize", "done": total_combos, "total": total_combos}
     payload = finalize(rows, list(TUNING_AXES))
     payload["months"] = int(months)
-    return payload
+    yield {"type": "result", "payload": payload}

@@ -64,6 +64,7 @@ MOMENTUM_KEYS: tuple[str, ...] = (
     "ADR_FLOOR",  # None = 게이트 없음 (모멘텀 ADR 하한 — 시장은 MARKET_REGIME_INDEX 를 따름)
     "INTRAWEEK_EXIT",
     "INTRAWEEK_STOP_PCT",  # None = 손절 없음
+    "REBALANCE_MODE",  # weekly = 매주 재선정(기존) · hold = 자격 유지
 )
 
 # 보유종목 손절 알림 기준(%). 이평선과 같은 성격의 **종목 판정 기준**이라 계좌가 아니라
@@ -344,6 +345,16 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
         cleaned["ADR_FLOOR"] = floor
     if "INTRAWEEK_EXIT" in values:
         cleaned["INTRAWEEK_EXIT"] = bool(values["INTRAWEEK_EXIT"])
+    if "REBALANCE_MODE" in values:
+        # 교체 규칙 — 값 목록은 모멘텀 서비스가 단일 소스다(여기 복사본을 두지 않는다).
+        from utils.momentum_service import REBALANCE_MODE_OPTIONS, REBALANCE_MODE_WEEKLY
+
+        raw = values["REBALANCE_MODE"]
+        mode = REBALANCE_MODE_WEEKLY if raw in (None, "") else str(raw).strip().lower()
+        if check_options and mode not in REBALANCE_MODE_OPTIONS:
+            allowed = ", ".join(REBALANCE_MODE_OPTIONS)
+            raise PoolSettingsError(f"REBALANCE_MODE 는 {allowed} 중 하나여야 합니다: {raw}")
+        cleaned["REBALANCE_MODE"] = mode
     if "INTRAWEEK_STOP_PCT" in values:
         raw = values["INTRAWEEK_STOP_PCT"]
         stop = None if raw in (None, "", "none") else round(float(raw), 2)
@@ -399,8 +410,9 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
             elif not ticker or not name:
                 raise PoolSettingsError("MARKET_REGIME_INDEX 에는 ticker/name 이 모두 필요합니다.")
             else:
-                # ADR(시장 폭)이 있는 4개 시장만 허용 — 단일 소스는 market_breadth 의 매핑이다.
-                from utils.market_breadth_service import MARKET_BY_INDEX_TICKER
+                # ADR(시장 폭)이 있는 4개 시장 + **그 풀 자신**만 허용.
+                # 단일 소스는 market_breadth 의 매핑과 예약 티커다.
+                from utils.market_breadth_service import MARKET_BY_INDEX_TICKER, SELF_POOL_REGIME_TICKER
                 from utils.market_trend_service import INDICES
 
                 allowed = {
@@ -408,10 +420,11 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
                     for item in INDICES
                     if str(item["yf_ticker"]) in MARKET_BY_INDEX_TICKER
                 }
+                allowed[SELF_POOL_REGIME_TICKER] = "종목풀"
                 if ticker not in allowed:
                     options = ", ".join(f"{label}({code})" for code, label in allowed.items())
                     raise PoolSettingsError(
-                        f"MARKET_REGIME_INDEX 는 ADR 이 있는 시장 지수여야 합니다: {options}. 입력값: {ticker}"
+                        f"MARKET_REGIME_INDEX 는 ADR 기준 중 하나여야 합니다: {options}. 입력값: {ticker}"
                     )
                 cleaned["MARKET_REGIME_INDEX"] = {"ticker": ticker, "name": allowed[ticker]}
 

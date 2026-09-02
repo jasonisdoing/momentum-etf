@@ -29,8 +29,10 @@ from typing import Any
 
 import pandas as pd
 
-from leverage.engine.backtest.ma_cross import max_drawdown_pct, sortino
 from utils.momentum_service import (
+    REBALANCE_MODE_HOLD,
+    REBALANCE_MODE_WEEKLY,
+    IntraweekSeriesCache,
     adr_gate_blocked,
     available_backtest_months,
     benchmark_info,
@@ -47,6 +49,7 @@ from utils.momentum_service import (
     week_last_trading_day,
     week_rebalance_pair,
 )
+from utils.perf_metrics import daily_return_metrics
 from utils.pool_settings_store import get_pool_slippage
 from utils.pool_signal_backtest_service import get_max_backtest_months
 from utils.price_series import positive_prices
@@ -95,36 +98,20 @@ def _open_return(opens: pd.Series, start: pd.Timestamp, end: pd.Timestamp) -> fl
     return float(end_price) / float(start_price) - 1.0
 
 
-def _period_return(
-    close: pd.Series,
-    start: pd.Timestamp,
-    end: pd.Timestamp,
-    start_open: float | None = None,
-) -> float | None:
-    """구간 수익률. ``start_open`` 을 주면 그 값을 시작가로 쓴다(전략처럼 시가에 산 경우)."""
-    series = positive_prices(close).dropna()
-    try:
-        start_price = float(start_open) if start_open is not None and float(start_open) > 0 else series.asof(start)
-        end_price = series.asof(end)
-    except Exception:
-        return None
-    if pd.isna(start_price) or pd.isna(end_price) or float(start_price) <= 0:
-        return None
-    return float(end_price) / float(start_price) - 1.0
-
-
 def run_backtest(
     months: int,
     settings: dict[str, Any] | None = None,
     *,
     include_daily: bool,
+    tuning_only: bool,
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """월간 리밸런싱 백테스트. 월별 전략 vs 벤치마크 수익률을 반환한다.
 
-    ``include_daily`` 가 참일 때만 일별 행까지 만든다. 일별은 구간마다 종목별
-    시계열을 재색인해야 하고 응답도 수천 행이 되므로, 화면에서 일간 탭을 볼 때만
-    요청한다. 동작이 달라지는 값이라 기본값을 두지 않는다.
+    성과 지표와 주간 표는 항상 같은 일별 곡선에서 계산한다. ``include_daily`` 는 계산 여부가
+    아니라 응답에 수천 개의 일별 행을 포함할지만 정한다. ``tuning_only`` 는 튜닝 지표에
+    필요한 일별 전략 수익률·거래 통계만 만들고 화면용 주간 표·예정 행·벤치마크를 생략한다.
+    동작이 달라지는 값이라 기본값을 두지 않는다.
 
     ``context`` 는 튜닝처럼 같은 풀로 여러 설정을 연달아 돌릴 때 쓰는 공유 캐시다
     (universe·frames·benchmark_close·정제 시계열·판정일별 후보). 비어 있는
@@ -132,6 +119,7 @@ def run_backtest(
     이평에만 의존하므로 (판정일, 단기, 장기) 키로 캐시한다.
     """
     context = context if context is not None else {}
+    intraweek_series_cache: IntraweekSeriesCache = context.setdefault("intraweek_series_cache", {})
     max_months = get_max_backtest_months()
     if not isinstance(months, int) or not 1 <= months <= max_months:
         raise ValueError(f"'months' 는 1~{max_months} 사이의 정수여야 합니다.")
@@ -221,7 +209,13 @@ def run_backtest(
             continue
         cache_key = (signal_date, *ma_key)
         if cache_key not in candidate_cache:
-            candidate_cache[cache_key] = select_candidates(universe, frames, ungated_settings, as_of=signal_date)
+            candidate_cache[cache_key] = select_candidates(
+                universe,
+                frames,
+                ungated_settings,
+                as_of=signal_date,
+                series_cache=intraweek_series_cache,
+            )
         # 아래 단계가 후보 dict 를 손대더라도 캐시는 그대로 남게 복사본을 준다.
         candidates_by_date.append([dict(item) for item in candidate_cache[cache_key]])
 
@@ -235,7 +229,7 @@ def run_backtest(
     clean_closes: dict[str, pd.Series] = {}
     clean_opens: dict[str, pd.Series] = {}
     clean_benchmark: pd.Series | None = None
-    if include_daily:
+    if include_daily or not tuning_only:
         if "clean_closes" not in context:
             context["clean_closes"] = {
                 ticker: positive_prices(frame["Close"]).dropna() for ticker, frame in frames.items()
@@ -250,6 +244,15 @@ def run_backtest(
         clean_closes = context["clean_closes"]
         clean_opens = context["clean_opens"]
         clean_benchmark = context["clean_benchmark"]
+
+    def opens_for(ticker: str) -> pd.Series | None:
+        """정제 시가 — 일별 계산 컨텍스트가 있으면 전 구간에서 같은 시리즈를 재사용한다."""
+        cached = clean_opens.get(ticker)
+        if cached is not None:
+            return cached
+        frame = frames.get(ticker)
+        return _open_series(frame) if frame is not None else None
+
     daily: list[dict[str, Any]] = []
     # 날짜 -> 그날의 성장배수. 구간 경계일(교체일)은 두 구간이 함께 쓰므로 곱해서 합친다.
     daily_growth: dict[str, float] = {}
@@ -262,8 +265,7 @@ def run_backtest(
     trades: list[dict[str, Any]] = []
 
     def _open_price(ticker: str, day: pd.Timestamp) -> float | None:
-        frame = frames.get(ticker)
-        opens = _open_series(frame) if frame is not None else None
+        opens = opens_for(ticker)
         if opens is None:
             return None
         value = opens.asof(day)
@@ -314,15 +316,17 @@ def run_backtest(
             }
         )
 
-    strategy_returns: list[float] = []
-    benchmark_returns: list[float] = []
     # 벤치마크 시가 — 첫 구간의 시작가로 쓴다(전략이 그날 시가에 체결하므로 조건을 맞춘다).
-    from utils.benchmark_curve import load_benchmark_frame
+    bench_open = pd.Series(dtype=float)
+    if not tuning_only:
+        from utils.benchmark_curve import load_benchmark_frame
 
-    _bench_frame = load_benchmark_frame(pool)
-    bench_open = (
-        positive_prices(_bench_frame["Open"]).dropna() if "Open" in _bench_frame.columns else pd.Series(dtype=float)
-    )
+        _bench_frame = load_benchmark_frame(pool)
+        bench_open = (
+            positive_prices(_bench_frame["Open"]).dropna() if "Open" in _bench_frame.columns else pd.Series(dtype=float)
+        )
+    # 교체 규칙 — 'hold' 면 순위가 밀려도 후보 자격이 남은 종목을 계속 들고 간다.
+    hold_while_eligible = str(settings.get("rebalance_mode") or REBALANCE_MODE_WEEKLY) == REBALANCE_MODE_HOLD
     previous_holdings: set[str] = set()
     # 직전 보유 구간의 종목별 성장배수(1+수익률) — 교체 시점의 드리프트 비중 계산용.
     previous_growth: dict[str, float] = {}
@@ -335,7 +339,17 @@ def run_backtest(
         end = dates[position + 1]
         # 판정은 교체일 직전 거래일(signal_dates), 체결·보유 구간은 교체일 시가(start→end).
         scored = rank_candidates(candidates_by_date[position])
-        holdings = [item["ticker"] for item in select_top(scored, top_n)]
+        if hold_while_eligible:
+            # 자격 유지형 — 후보에 남아 있으면 순위와 무관하게 계속 들고 가고, 자격을 잃어
+            # 빈 자리만 그 시점 상위 후보로 채운다. '자격' 판정은 따로 두지 않는다 —
+            # `candidates_by_date` 가 이미 후보 필터를 통과한 목록이라 거기 남아 있는지가
+            # 곧 자격이다(ADR 게이트에 걸린 주는 목록이 비어 전량 현금으로 간다).
+            ranked = [item["ticker"] for item in scored]
+            kept = [ticker for ticker in ranked if ticker in previous_holdings]
+            free = max(top_n - len(kept), 0)
+            holdings = kept + [ticker for ticker in ranked if ticker not in previous_holdings][:free]
+        else:
+            holdings = [item["ticker"] for item in select_top(scored, top_n)]
         holdings_set = set(holdings)
         added_tickers = sorted(holdings_set - previous_holdings)
         removed_tickers = sorted(previous_holdings - holdings_set)
@@ -349,7 +363,15 @@ def run_backtest(
         scan_days = bench_index[(bench_index >= start) & (bench_index < end)]
         exits: list[dict[str, Any]] = []
         if len(scan_days) >= 2:
-            exits = simulate_intraweek_exits(frames, settings, holdings_set, bench_index, start, scan_days[-2])
+            exits = simulate_intraweek_exits(
+                frames,
+                settings,
+                holdings_set,
+                bench_index,
+                start,
+                scan_days[-2],
+                series_cache=intraweek_series_cache,
+            )
         exited_tickers = {x["ticker"] for x in exits}
         sell_date_by_ticker = {x["ticker"]: x["sell_date"] for x in exits}
         # 이 구간을 끝까지 들고 가는 종목 — 다음 교체·표시가 이 기준을 쓴다.
@@ -393,8 +415,7 @@ def run_backtest(
         # 보유 구간 — 주중 매도된 종목은 매도 체결일 시가까지만 수익이 발생한다.
         period_returns: dict[str, float] = {}
         for ticker in holdings:
-            frame = frames.get(ticker)
-            opens = _open_series(frame) if frame is not None else None
+            opens = opens_for(ticker)
             if opens is None:
                 continue
             value = _open_return(opens, start, sell_date_by_ticker.get(ticker, end))
@@ -411,8 +432,7 @@ def run_backtest(
         # include_daily 일 때만 채워져서, 그걸 쓰면 일간 탭을 안 볼 때 비중이 통째로 비었다.
         entry_price_by_ticker: dict[str, float] = {}
         for ticker in holdings:
-            frame = frames.get(ticker)
-            opens = _open_series(frame) if frame is not None else None
+            opens = opens_for(ticker)
             if opens is None:
                 continue
             entry = opens.asof(start)
@@ -437,18 +457,6 @@ def run_backtest(
             gross = None  # 보유 종목의 가격 데이터가 전혀 없음 — 데이터 문제를 그대로 드러낸다
 
         strategy_pct = (gross - cost) * 100.0 if gross is not None else None
-        # 벤치마크도 전략과 **같은 시점**에 산 것으로 잰다 — 첫 구간만 시작일 시가가 기준이다
-        # (전략은 그날 시가에 체결한다). 종가로 재면 시작일 갭만큼 벤치마크가 유·불리해진다.
-        benchmark_return = _period_return(
-            benchmark_close, start, end, start_open=bench_open.get(start) if not strategy_returns else None
-        )
-        benchmark_pct = benchmark_return * 100.0 if benchmark_return is not None else None
-
-        if strategy_pct is not None:
-            strategy_returns.append(strategy_pct / 100.0)
-        if benchmark_pct is not None:
-            benchmark_returns.append(benchmark_pct / 100.0)
-
         # ── 일간 행 ──
         # 이 구간(start→end)의 보유 종목은 고정이다. 체결이 시가이므로 **start 시가**를 1 로
         # 두고, 마지막 날(또는 주중 매도일)은 그날 **시가**로 끊는다 — 종가로 재면 교체일
@@ -456,7 +464,7 @@ def run_backtest(
         # start 는 직전 구간의 end 와 같은 날이라 날짜가 겹친다. 겹치는 날은 곱해서 하나로
         # 합친다(직전 구간의 '전일 종가 → 시가' 와 이번 구간의 '시가 → 종가').
         # 교체 비용은 구간 첫날에 한 번 반영한다(주간 계산과 같은 방식).
-        window = bench_index[(bench_index >= start) & (bench_index <= end)] if include_daily else []
+        window = bench_index[(bench_index >= start) & (bench_index <= end)]
         if len(window) > 0:
 
             def position_curve(ticker: str) -> pd.Series | None:
@@ -478,12 +486,11 @@ def run_backtest(
 
             # 일별 곡선도 같은 정수 주수 비중으로 합친다 — 주간 수익률과 기준이 갈리면
             # 두 탭의 값이 어긋난다.
+            curves = {ticker: position_curve(ticker) for ticker in holdings}
             weighted = [
-                curve * weight_by_ticker.get(ticker, 0.0)
-                for ticker, curve in ((t, position_curve(t)) for t in holdings)
-                if curve is not None
+                curve * weight_by_ticker.get(ticker, 0.0) for ticker, curve in curves.items() if curve is not None
             ]
-            invested = sum(weight_by_ticker.get(t, 0.0) for t in holdings if position_curve(t) is not None)
+            invested = sum(weight_by_ticker.get(ticker, 0.0) for ticker, curve in curves.items() if curve is not None)
             if weighted:
                 # 투자되지 않은 몫은 현금(가치 1 고정).
                 portfolio = pd.concat(weighted, axis=1).sum(axis=1) + float(1.0 - invested)
@@ -522,29 +529,36 @@ def run_backtest(
     # ── 이미 체결된 최신 교체 — 마지막 캐시 거래일이 그 주의 교체일이면 그날 시가에
     # 체결이 끝났다. 구간 루프는 이 날을 구간 끝으로만 보므로 여기서 반영한다.
     current_holdings = previous_holdings
-    last_pair = week_rebalance_pair(country, last_cached - pd.Timedelta(days=int(last_cached.weekday())))
-    if last_pair is not None and last_pair[0] == last_cached:
-        selection = {
-            item["ticker"]
-            for item in select_top(
-                rank_candidates(
-                    select_candidates(universe, frames, settings, as_of=bench_index[bench_index < last_cached][-1])
-                ),
-                top_n,
-            )
-        }
-        for ticker in sorted(selection - previous_holdings):
-            trade_events.append({"date": last_cached, "action": "add", "ticker": ticker})
-            _open_trade(ticker, last_cached)
-        for ticker in sorted(previous_holdings - selection):
-            trade_events.append({"date": last_cached, "action": "remove", "ticker": ticker})
-            _close_trade(ticker, last_cached, "주간 교체")
-        current_holdings = selection
+    if not tuning_only:
+        last_pair = week_rebalance_pair(country, last_cached - pd.Timedelta(days=int(last_cached.weekday())))
+        if last_pair is not None and last_pair[0] == last_cached:
+            selection = {
+                item["ticker"]
+                for item in select_top(
+                    rank_candidates(
+                        select_candidates(
+                            universe,
+                            frames,
+                            settings,
+                            as_of=bench_index[bench_index < last_cached][-1],
+                            series_cache=intraweek_series_cache,
+                        )
+                    ),
+                    top_n,
+                )
+            }
+            for ticker in sorted(selection - previous_holdings):
+                trade_events.append({"date": last_cached, "action": "add", "ticker": ticker})
+                _open_trade(ticker, last_cached)
+            for ticker in sorted(previous_holdings - selection):
+                trade_events.append({"date": last_cached, "action": "remove", "ticker": ticker})
+                _close_trade(ticker, last_cached, "주간 교체")
+            current_holdings = selection
 
     # ── 일간 행 조립 — 구간별로 모은 성장배수를 날짜순 행으로 편다.
     # 벤치마크·참조는 구간과 무관하므로 전체 시계열에서 한 번에 일별 변동률을 만든다
     # (구간마다 정규화하면 경계일이 두 번 세어진다).
-    if include_daily and daily_growth:
+    if daily_growth:
         span_index = bench_index[(bench_index >= dates[0]) & (bench_index <= dates[-1])]
 
         def _daily_changes(source: pd.Series | None) -> dict[str, float]:
@@ -565,24 +579,31 @@ def run_backtest(
                 changes.iloc[0] = float(series.iloc[0]) / float(base) - 1.0
             return {day.strftime("%Y-%m-%d"): float(v) * 100.0 for day, v in changes.items() if pd.notna(v)}
 
-        bench_changes = _daily_changes(clean_benchmark)
+        bench_changes = {} if tuning_only else _daily_changes(clean_benchmark)
         # 소수 6자리 — 화면은 2자리로 보여주지만, 연간·월간·주간 표는 이 값을 **복리로 합성**한다.
         # 2자리로 잘라 보내면 하루치 오차(최대 0.005%p)가 250일 쌓여 합계가 총수익과 어긋난다
         # (12개월 기준 전략 0.5%p·벤치마크 0.9%p 차이가 났다).
         for key in sorted(daily_growth):
-            daily.append(
-                {
-                    "date": key,
-                    "strategy_pct": round((daily_growth[key] - 1.0) * 100.0, 6),
-                    "benchmark_pct": round(bench_changes[key], 6) if key in bench_changes else None,
-                    # 그날의 시장 ADR — 게이트 이해용 표시값(레짐 시장 없는 풀은 None).
-                    "adr": adr_at(pd.Timestamp(key)),
-                }
-            )
+            row = {
+                "date": key,
+                "strategy_pct": round((daily_growth[key] - 1.0) * 100.0, 6),
+            }
+            if not tuning_only:
+                row.update(
+                    {
+                        "benchmark_pct": round(bench_changes[key], 6) if key in bench_changes else None,
+                        # 그날의 시장 ADR — 게이트 이해용 표시값(레짐 시장 없는 풀은 None).
+                        "adr": adr_at(pd.Timestamp(key)),
+                    }
+                )
+            daily.append(row)
+
+    if tuning_only:
+        return {"daily": list(reversed(daily)), **summarize_trades(trades)}
 
     # ── 주간 행 — 달력 주(월~일) 단위. 기준일은 그 주 마지막 거래일, 수익률은 그 주의
     # 성과, 편입·편출은 그 주에 체결된 매매다.
-    if include_daily and daily:
+    if daily:
 
         def _week_monday(stamp: pd.Timestamp) -> pd.Timestamp:
             return (stamp - pd.Timedelta(days=int(stamp.weekday()))).normalize()
@@ -655,7 +676,13 @@ def run_backtest(
     else:
         # 판정일이 아직 오지 않았다 — 마지막 종가로 판정한 주중 매도 예정만 반영한다.
         pending_exits = simulate_intraweek_exits(
-            frames, settings, current_holdings, bench_index, last_cached, last_cached
+            frames,
+            settings,
+            current_holdings,
+            bench_index,
+            last_cached,
+            last_cached,
+            series_cache=intraweek_series_cache,
         )
         pending_added = []
         pending_removed = sorted(x["ticker"] for x in pending_exits)
@@ -693,27 +720,22 @@ def run_backtest(
             }
         )
 
-    def _summarize(returns: list[float]) -> tuple[float, float | None, float | None, float | None]:
-        curve = pd.Series([1.0] + list(pd.Series(returns).add(1.0).cumprod()))
-        total = (float(curve.iloc[-1]) - 1.0) * 100.0
-        # CAGR — 주별 표본 수 기준 연율화 (1년 미만이면 연 환산이라 과장될 수 있음)
-        sample_periods = len(returns)
-        cagr = (
-            ((1.0 + total / 100.0) ** (52.0 / sample_periods) - 1.0) * 100.0
-            if sample_periods > 0 and total > -100.0
-            else None
+    def _summarize_daily(key: str) -> tuple[float, float | None, float | None, float | None]:
+        returns = pd.Series(
+            [row[key] for row in daily if row.get(key) is not None],
+            index=pd.to_datetime([row["date"] for row in daily if row.get(key) is not None]),
+            dtype=float,
         )
-        # 소르티노는 주별 수익률 기준 연율화 (레버리지 엔진 공용 함수 재사용).
-        # 표본 3개 미만이거나 하락 주가 없으면 None → 화면에서 '-'.
+        metrics = daily_return_metrics(returns)
         return (
-            round(total, 2),
-            max_drawdown_pct(curve),
-            sortino(pd.Series(returns), periods_per_year=52),
-            round(cagr, 1) if cagr is not None else None,
+            round(float(metrics["total_pct"]), 2),
+            round(float(metrics["mdd_pct"]), 2),
+            round(float(metrics["sortino"]), 2) if metrics["sortino"] is not None else None,
+            round(float(metrics["cagr_pct"]), 1) if metrics["cagr_pct"] is not None else None,
         )
 
-    strategy_total, strategy_mdd, strategy_sortino, strategy_cagr = _summarize(strategy_returns)
-    benchmark_total, benchmark_mdd, benchmark_sortino, benchmark_cagr = _summarize(benchmark_returns)
+    strategy_total, strategy_mdd, strategy_sortino, strategy_cagr = _summarize_daily("strategy_pct")
+    benchmark_total, benchmark_mdd, benchmark_sortino, benchmark_cagr = _summarize_daily("benchmark_pct")
 
     return {
         "start_date": dates[0].strftime("%Y-%m-%d"),
@@ -732,7 +754,7 @@ def run_backtest(
         # 주간 표 — 매매 내역(편입·편출·교체율·보유 수)을 담는다. 최신 주가 위.
         "weekly": list(reversed(weekly)),
         # 일간 표 — 최신 날짜가 위로 오게 뒤집는다
-        "daily": list(reversed(daily)),
+        "daily": list(reversed(daily)) if include_daily else [],
         # 체결 목록 — 보유중(청산 전) 행이 위, 그 아래는 청산일 최신순.
         "trades": [
             _open_position_row(ticker, position)

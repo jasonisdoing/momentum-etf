@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from itertools import product
 from typing import Any
 
@@ -24,13 +25,24 @@ from config import ADR_FLOOR_OPTIONS
 from utils.momentum_service import (
     INTRAWEEK_STOP_OPTIONS,
     LONG_MA_OPTIONS,
+    REBALANCE_MODE_OPTIONS,
+    REBALANCE_MODE_WEEKLY,
     SHORT_MA_OPTIONS,
     load_settings,
     validate_settings,
 )
-from utils.strategy_tuning import finalize, run_groups, seed_worker_caches, summarize_combo
+from utils.strategy_tuning import (
+    TuningRun,
+    begin_tuning,
+    finalize,
+    iter_groups,
+    managed_tuning_events,
+    seed_worker_caches,
+    summarize_combo,
+    tuning_cancelled,
+)
 
-TUNING_AXES = ("short_ma_days", "long_ma_days", "adr_floor", "intraweek")
+TUNING_AXES = ("short_ma_days", "long_ma_days", "adr_floor", "intraweek", "rebalance_mode")
 
 
 def _intraweek_settings(value: Any) -> dict[str, Any]:
@@ -105,7 +117,7 @@ def _preload(pool: str) -> dict[str, Any]:
 
 def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
     """(단기, 장기) 쌍 하나의 조합 — 별도 프로세스에서 돈다."""
-    months, base, short, long, adr_floors, intraweeks = task
+    months, base, short, long, adr_floors, intraweeks, rebalance_modes = task
     from utils.momentum_backtest import run_backtest
 
     context = _WORKER_CONTEXT
@@ -113,16 +125,19 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
         context.update({k: _PRELOAD[k] for k in ("universe", "frames", "benchmark_close")})
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
-    for adr_floor, value in product(adr_floors, intraweeks):
+    for adr_floor, value, rebalance_mode in product(adr_floors, intraweeks, rebalance_modes):
+        if tuning_cancelled():
+            break
         combo = dict(
             base,
             short_ma_days=short,
             long_ma_days=long,
             adr_floor=adr_floor,
+            rebalance_mode=rebalance_mode,
             **_intraweek_settings(value),
         )
         try:
-            result = run_backtest(months, combo, include_daily=True, context=context)
+            result = run_backtest(months, combo, include_daily=True, tuning_only=True, context=context)
         except ValueError as error:  # 장기 이평이 길어 기간이 모자라는 조합 — 그 이평 쌍은 통째로 건너뛴다
             skipped.append(f"단기 {short}/장기 {long}: {error}")
             break
@@ -136,6 +151,7 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
                     "long_ma_days": long,
                     "adr_floor": adr_floor,
                     "intraweek": value,
+                    "rebalance_mode": rebalance_mode,
                 },
                 returns,
                 {"trade_count": result["trade_count"], "win_rate_pct": result["win_rate_pct"]},
@@ -145,6 +161,34 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
 
 
 def run_tuning(months: int, settings: dict[str, Any] | None, ranges: dict[str, list[Any]]) -> dict[str, Any]:
+    """전 조합을 돌려 결과 페이로드를 만든다(진행 없이 한 번에)."""
+    run = begin_tuning(f"모멘텀 직접 실행 {months}개월")
+    for event in stream_tuning(months, settings, ranges, run):
+        if event["type"] == "result":
+            return event["payload"]
+    raise RuntimeError("튜닝이 결과를 내지 못했습니다.")
+
+
+def stream_tuning(
+    months: int,
+    settings: dict[str, Any] | None,
+    ranges: dict[str, list[Any]],
+    run: TuningRun,
+) -> Iterator[dict[str, Any]]:
+    yield from managed_tuning_events(run, _stream_tuning(months, settings, ranges, run))
+
+
+def _stream_tuning(
+    months: int,
+    settings: dict[str, Any] | None,
+    ranges: dict[str, list[Any]],
+    run: TuningRun,
+) -> Iterator[dict[str, Any]]:
+    """묶음이 끝날 때마다 진행을, 마지막에 결과를 내보낸다.
+
+    화면이 이 흐름을 그대로 진행 바에 쓴다 — 다 끝난 뒤 한 번에 응답하면 10분 넘게
+    아무 소식이 없어 화면이 죽은 것처럼 보인다.
+    """
     base = validate_settings(settings or load_settings())
     shorts = _checked(ranges.get("short_ma_days", []), SHORT_MA_OPTIONS, "단기 이평")
     adr_floors = _checked_optional_ints(ranges.get("adr_floor", []), ADR_FLOOR_OPTIONS, "ADR 하한")
@@ -154,22 +198,47 @@ def run_tuning(months: int, settings: dict[str, Any] | None, ranges: dict[str, l
         raise ValueError("'주중 손절선' 범위가 비어 있습니다.")
     for value in intraweeks:
         _intraweek_settings(value)  # 검증
+    rebalance_modes = list(dict.fromkeys(str(v).strip().lower() for v in ranges.get("rebalance_mode", [])))
+    if not rebalance_modes:
+        # 축을 안 보낸 예전 요청은 저장된 규칙 하나로 돈다 — 조합 수가 조용히 두 배가 되지 않는다.
+        rebalance_modes = [str(base.get("rebalance_mode") or REBALANCE_MODE_WEEKLY)]
+    bad = [v for v in rebalance_modes if v not in REBALANCE_MODE_OPTIONS]
+    if bad:
+        allowed = ", ".join(REBALANCE_MODE_OPTIONS)
+        raise ValueError(f"'교체 규칙' 값이 올바르지 않습니다: {', '.join(bad)} (가능: {allowed})")
     ma_pairs = [(short, long) for short in shorts for long in longs if short < long]
     if not ma_pairs:
         raise ValueError("단기 이평이 장기 이평보다 작은 조합이 없습니다.")
 
-    tasks = [(months, base, short, long, adr_floors, intraweeks) for short, long in ma_pairs]
+    tasks = [(months, base, short, long, adr_floors, intraweeks, rebalance_modes) for short, long in ma_pairs]
+    combos_per_group = len(adr_floors) * len(intraweeks) * len(rebalance_modes)
+    total_combos = len(tasks) * combos_per_group
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
+    yield {"type": "progress", "phase": "prepare", "done": 0, "total": total_combos}
     bundle = _preload(str(base["pool"]))
-    for group_rows, group_skipped in run_groups(_run_ma_group, tasks, initializer=_init_worker, initargs=(bundle,)):
+    yield {"type": "progress", "phase": "backtest", "done": 0, "total": total_combos}
+    for done, total, (group_rows, group_skipped) in iter_groups(
+        _run_ma_group,
+        tasks,
+        run=run,
+        initializer=_init_worker,
+        initargs=(bundle,),
+    ):
         rows.extend(group_rows)
         skipped.extend(group_skipped)
+        yield {
+            "type": "progress",
+            "phase": "backtest",
+            "done": min(total_combos, done * combos_per_group),
+            "total": total * combos_per_group,
+        }
 
     if not rows:
         raise ValueError("돌릴 수 있는 조합이 없습니다. " + (skipped[0] if skipped else ""))
+    yield {"type": "progress", "phase": "finalize", "done": total_combos, "total": total_combos}
     payload = finalize(rows, list(TUNING_AXES))
     payload["months"] = int(months)
     payload["fixed"] = {}
     payload["skipped"] = list(dict.fromkeys(skipped))
-    return payload
+    yield {"type": "result", "payload": payload}

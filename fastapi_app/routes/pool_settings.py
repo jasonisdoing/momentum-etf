@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from config import TOP_N_HOLD_OPTIONS
 from fastapi_app.dependencies import require_internal_token
 from utils.ma_options import ma_options_by_country
-from utils.market_breadth_service import MARKET_BY_INDEX_TICKER
+from utils.market_breadth_service import MARKET_BY_INDEX_TICKER, SELF_POOL_REGIME_TICKER
 from utils.market_trend_service import INDICES
 from utils.pool_settings_store import (
     POOL_EDITABLE_KEYS,
@@ -86,11 +86,16 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
             "slippage_pct_options": list(SLIPPAGE_PCT_OPTIONS),
             "stoploss_pct_options": list(STOPLOSS_PCT_OPTIONS),
             "editable_keys": list(POOL_EDITABLE_KEYS),
-            # 시장 레짐 후보 — ADR(시장 폭)이 있는 4개 시장만(코스피·코스닥·S&P500·나스닥100).
+            # ADR 기준 후보 — 지수 4개(코스피·코스닥·S&P500·나스닥100) + 그 종목풀 자신.
+            # 종목풀은 지수와 구성이 달라(us_stock 은 S&P100+나스닥100 조합) 매매하는
+            # 종목의 폭을 그대로 본다. 값은 예약 티커라 저장 스키마는 그대로다.
             "market_indices": [
-                {"ticker": item["yf_ticker"], "name": item["name"]}
-                for item in INDICES
-                if item["yf_ticker"] in MARKET_BY_INDEX_TICKER
+                *(
+                    {"ticker": item["yf_ticker"], "name": item["name"]}
+                    for item in INDICES
+                    if item["yf_ticker"] in MARKET_BY_INDEX_TICKER
+                ),
+                {"ticker": SELF_POOL_REGIME_TICKER, "name": "종목풀"},
             ],
         },
     }
