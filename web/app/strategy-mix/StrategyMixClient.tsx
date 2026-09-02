@@ -120,6 +120,11 @@ type Meta = {
   max_sleeves: number;
   /** 조합이 아직 없는 계좌에서 채울 입력 초안(전략·종목풀은 비어 있다). */
   default_sleeves: MixSleeve[];
+  /**
+   * `"전략:풀"` → 그 전략 화면에 저장된 설정 요약(읽기 전용 표시용).
+   * 계좌가 아니라 조합에 매달려 있어 셀렉트를 바꾸면 즉시 그 조합의 설정이 보인다.
+   */
+  settings_summaries?: Record<string, { label: string; value: string }[]>;
   /** 기본 선택 계좌 — 목록의 첫 계좌. */
   account_id: string;
 };
@@ -1220,6 +1225,27 @@ export function StrategyMixClient() {
   const strategyLabelOf = (value: string) =>
     meta?.strategy_options.find((option) => option.value === value)?.label ?? value;
 
+  /** 슬리브 오른쪽의 읽기 전용 설정 — 그 전략 화면에 저장된 값을 그대로 보여준다. */
+  const settingsOf = (strategy: string, pool: string) => {
+    if (!strategy || !pool) return null;
+    const summaries = meta?.settings_summaries ?? {};
+    // 전략 전체를 못 읽은 경우는 `전략:*` 로 들어온다.
+    const items = summaries[`${strategy}:${pool}`] ?? summaries[`${strategy}:*`];
+    if (!items?.length) {
+      return <span className="mixSleeveSettings mixSleeveSettingsError">저장된 설정 없음</span>;
+    }
+    const failed = items.some((item) => item.label.includes("오류"));
+    return (
+      <span className={`mixSleeveSettings${failed ? " mixSleeveSettingsError" : ""}`}>
+        {items.map((item) => (
+          <span key={item.label} className="mixSleeveSettingItem">
+            {item.label} <b>{item.value}</b>
+          </span>
+        ))}
+      </span>
+    );
+  };
+
   // 합계 — 100 이 아니면 저장을 막는다. 모자란 만큼을 현금으로 채우면 사용자가 의도한
   // 배분이 조용히 바뀌므로 보정하지 않고 그대로 알린다.
   const weightSum = useMemo(() => {
@@ -1516,6 +1542,10 @@ export function StrategyMixClient() {
                         >
                           −
                         </button>
+                        {/* 그 전략 화면에 저장된 설정 — 읽기 전용. 여기서 고치지 않는다.
+                            합성은 각 전략의 저장 설정을 그대로 돌리므로, 무엇으로 도는지
+                            이 화면에서 바로 보여야 한다. */}
+                        {settingsOf(strategy, pool)}
                       </div>
                     );
                   })}
