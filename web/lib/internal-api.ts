@@ -31,18 +31,29 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  */
 const AGENTS_BY_TIMEOUT = new Map<number, unknown>();
 
-async function dispatcherFor(timeoutMs: number): Promise<unknown> {
-  if (timeoutMs <= DEFAULT_TIMEOUT_MS) return undefined;
+type FetchLike = (input: string, init: RequestInit & { dispatcher?: unknown }) => Promise<Response>;
+
+/**
+ * 이 호출에 쓸 fetch 와 디스패처.
+ *
+ * 짧은 호출은 Node 내장 fetch 를 그대로 쓴다. 긴 호출만 설치본 undici 의 `Agent` 를
+ * 붙이는데, 그때는 **fetch 도 같은 설치본** 것을 써야 한다 — Node 내장 undici 와
+ * 설치본은 버전이 달라, 내장 fetch 에 설치본 Agent 를 넘기면 핸들러 규약이 어긋나
+ * `UND_ERR_INVALID_ARG (invalid onRequestStart method)` 로 터진다.
+ *
+ * undici 를 파일 맨 위에서 import 하면 안 된다 — 이 모듈은 여러 store 가 거쳐 가고,
+ * 그 store 에서 타입·상수만 가져다 쓰는 **클라이언트 컴포넌트**의 번들에도 딸려 들어가
+ * `node:net` 을 못 풀고 터진다. 서버에서 실제로 긴 호출을 할 때만 읽는다.
+ */
+async function requesterFor(timeoutMs: number): Promise<{ fetchFn: FetchLike; dispatcher?: unknown }> {
+  if (timeoutMs <= DEFAULT_TIMEOUT_MS) return { fetchFn: fetch as FetchLike };
+  const undici = await import("undici");
   const known = AGENTS_BY_TIMEOUT.get(timeoutMs);
-  if (known) return known;
-  // undici 를 파일 맨 위에서 import 하면 안 된다 — 이 모듈은 여러 store 가 거쳐 가고,
-  // 그 store 에서 타입·상수만 가져다 쓰는 **클라이언트 컴포넌트**의 번들에도 딸려 들어가
-  // `node:net` 을 못 풀고 터진다. 서버에서 실제로 긴 호출을 할 때만 읽는다.
-  const { Agent } = await import("undici");
+  if (known) return { fetchFn: undici.fetch as unknown as FetchLike, dispatcher: known };
   // bodyTimeout 은 청크 사이 간격 기준이라 헤더와 같은 값이면 충분하다.
-  const agent = new Agent({ headersTimeout: timeoutMs, bodyTimeout: timeoutMs });
+  const agent = new undici.Agent({ headersTimeout: timeoutMs, bodyTimeout: timeoutMs });
   AGENTS_BY_TIMEOUT.set(timeoutMs, agent);
-  return agent;
+  return { fetchFn: undici.fetch as unknown as FetchLike, dispatcher: agent };
 }
 
 /**
@@ -81,14 +92,14 @@ export async function fetchFastApiJson<T>(
 
   let response: Response;
   try {
-    const dispatcher = await dispatcherFor(timeoutMs);
-    response = await fetch(`${getFastApiBaseUrl()}${path}`, {
+    const { fetchFn, dispatcher } = await requesterFor(timeoutMs);
+    response = await fetchFn(`${getFastApiBaseUrl()}${path}`, {
       ...init,
       headers,
       signal: controller.signal,
       cache: "no-store",
       dispatcher,
-    } as RequestInit & { dispatcher?: unknown });
+    });
   } catch (error) {
     clearTimeout(timeoutId);
     const isAbort =
