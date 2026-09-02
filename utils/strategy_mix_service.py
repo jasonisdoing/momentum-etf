@@ -121,6 +121,7 @@ def mix_accounts() -> list[dict[str, Any]]:
     from utils.settings_loader import get_account_settings, list_available_accounts
 
     pool_names = {option["ticker_type"]: option for option in _pool_options(_all_active_pools())}
+
     accounts: list[dict[str, Any]] = []
     for account_id in list_available_accounts():
         try:
@@ -175,6 +176,33 @@ def default_sleeves() -> list[dict[str, Any]]:
     ]
 
 
+def _settings_summaries() -> dict[str, list[dict[str, str]]]:
+    """`"전략:풀"` → 그 전략 화면에 저장된 설정 요약.
+
+    계좌가 아니라 **조합**에 매단다 — 합성 화면에서 셀렉트를 바꾸는 즉시 그 조합의
+    설정이 보여야 하는데, 계좌 슬리브에 붙이면 저장 전 초안에서는 값이 어긋난다.
+    항목·라벨은 슬리브 어댑터(`utils.mix_sleeve.settings_summary`)가 단일 소스다.
+    """
+    from utils.mix_sleeve import STRATEGY_OPTIONS, settings_map, settings_summary, validate_settings
+
+    summaries: dict[str, list[dict[str, str]]] = {}
+    for strategy in STRATEGY_OPTIONS:
+        try:
+            stored_by_pool = settings_map(strategy)
+        except Exception as error:
+            # 조용히 빈칸으로 두지 않는다 — 설정이 깨졌으면 화면에서 보여야 고칠 수 있다.
+            summaries[f"{strategy}:*"] = [{"label": "설정 오류", "value": str(error)}]
+            continue
+        for pool, stored in stored_by_pool.items():
+            try:
+                # 종목 수처럼 풀 설정에서 오는 값은 검증을 거쳐야 채워진다.
+                checked = validate_settings(strategy, {"pool": pool, **stored})
+                summaries[f"{strategy}:{pool}"] = settings_summary(strategy, checked)
+            except Exception as error:
+                summaries[f"{strategy}:{pool}"] = [{"label": "설정 오류", "value": str(error)}]
+    return summaries
+
+
 def mix_meta() -> dict[str, Any]:
     """화면 초기용 — 운용 계좌 목록과 기간 선택지 (백테스트 계산 없음)."""
     from utils.account_settings_store import MAX_MIX_SLEEVES, MIN_MIX_SLEEVES
@@ -192,6 +220,8 @@ def mix_meta() -> dict[str, Any]:
         "strategy_options": [{"value": key, "label": STRATEGY_LABELS[key]} for key in STRATEGY_OPTIONS],
         # 풀은 계좌 국가에 맞는 것만 고를 수 있어야 해서 국가 코드를 함께 준다.
         "pool_options": _pool_options(_all_active_pools()),
+        # 조합별 저장 설정 요약 — 화면이 슬리브 오른쪽에 읽기 전용으로 보여준다.
+        "settings_summaries": _settings_summaries(),
         # 기본 선택 — 목록의 첫 계좌. 화면이 마지막 선택을 로컬스토리지에 기억한다.
         "account_id": accounts[0]["account_id"] if accounts else "",
     }

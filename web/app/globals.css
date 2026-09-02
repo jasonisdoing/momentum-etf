@@ -4413,6 +4413,37 @@ a {
   font-weight: 800;
 }
 
+/* 슬리브 오른쪽의 저장 설정(읽기 전용) — 삭제 버튼 뒤에서 남는 폭을 채운다.
+   좁아지면 줄바꿈으로 흘러가고, 입력 칸들을 밀어내지 않는다. */
+.mixSleeveSettings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  flex: 1 1 16rem;
+  min-width: 0;
+  padding-left: 0.25rem;
+  color: #5b6778;
+  font-size: var(--fs-sm);
+}
+
+.mixSleeveSettingItem {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
+.mixSleeveSettingItem > b {
+  color: #1f2d3d;
+  font-weight: 600;
+}
+
+/* 설정을 읽지 못한 조합 — 빈칸으로 두면 설정이 없는 것과 구분이 안 된다. */
+.mixSleeveSettings.mixSleeveSettingsError {
+  color: #d9480f;
+}
+
 .mixSleeveWeight {
   display: inline-flex;
   align-items: center;

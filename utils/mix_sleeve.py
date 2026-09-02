@@ -76,6 +76,46 @@ def settings_map(strategy: str) -> dict[str, Any]:
     return dict(load_settings_map())
 
 
+def settings_summary(strategy: str, settings: dict[str, Any]) -> list[dict[str, str]]:
+    """그 슬리브의 저장 설정을 화면에 읽기 전용으로 보여줄 `[{label, value}]`.
+
+    전략마다 항목이 다르다 — 어떤 항목을 어떤 말로 부르는지는 여기 한 곳에만 둔다.
+    각 전략 화면의 셀렉트 라벨과 같은 말을 쓴다(같은 값을 다른 이름으로 부르지 않는다).
+    값이 없는 설정은 임의로 채우지 않고 '없음'·'안 씀'으로 그대로 드러낸다.
+    """
+    strategy = normalize_strategy(strategy)
+
+    def optional(value: Any, suffix: str = "", *, empty: str = "없음") -> str:
+        return empty if value is None else f"{value:g}{suffix}" if isinstance(value, (int, float)) else str(value)
+
+    if strategy == MOMENTUM:
+        return [
+            {"label": "종목 수", "value": optional(settings.get("top_n"), "개")},
+            {"label": "이평선", "value": f"{settings.get('short_ma_days')}/{settings.get('long_ma_days')}일"},
+            {"label": "ADR 하한", "value": optional(settings.get("adr_floor"))},
+            {"label": "주중 이탈", "value": "사용" if settings.get("intraweek_exit") else "안 씀"},
+            {"label": "주중 손절선", "value": optional(settings.get("intraweek_stop_pct"), "%", empty="안 씀")},
+        ]
+    if strategy == NEW_HIGH:
+        return [
+            {"label": "종목 수", "value": optional(settings.get("top_n"), "개")},
+            {"label": "손절선", "value": optional(settings.get("stop_loss_pct"), "%", empty="안 씀")},
+            {"label": "이탈 이평", "value": optional(settings.get("exit_ma_days"), "일")},
+            {"label": "거래대금 하한", "value": optional(settings.get("min_value_mult"), "배")},
+            {"label": "ADR 하한", "value": optional(settings.get("adr_floor"))},
+        ]
+    from config import REBALANCE_LABELS
+
+    weights = list(settings.get("weights") or [])
+    rebalance = str(settings.get("rebalance") or "none")
+    return [
+        {"label": "종목 수", "value": f"{len(weights)}개"},
+        {"label": "리밸런싱", "value": REBALANCE_LABELS.get(rebalance, rebalance)},
+        {"label": "허용 밴드", "value": optional(settings.get("band_pct"), "%p")},
+        {"label": "현금", "value": optional(settings.get("cash_weight_pct"), "%")},
+    ]
+
+
 def validate_settings(strategy: str, settings: dict[str, Any]) -> dict[str, Any]:
     strategy = normalize_strategy(strategy)
     if strategy == MOMENTUM:
