@@ -1769,9 +1769,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       </div>
                     </label>
                   )}
-                </div>
-                <div className="appMainHeaderRight rankMainHeaderRight">
-                  <label className="appLabeledField rankTickerSearchField">
+                  <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">검색</span>
                     <input
                       className="form-control"
