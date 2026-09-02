@@ -1,3 +1,5 @@
+import { Agent } from "undici";
+
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 function getFastApiBaseUrl(): string {
@@ -17,6 +19,29 @@ function getFastApiToken(): string {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * 오래 걸리는 호출용 디스패처.
+ *
+ * undici 는 `AbortSignal` 과 **별개로** 자체 타임아웃을 건다 — 응답 헤더가 5분(기본
+ * `headersTimeout`) 안에 안 오면 `UND_ERR_HEADERS_TIMEOUT` 으로 연결을 끊는다. 튜닝처럼
+ * 계산이 다 끝나야 응답이 시작되는 호출은 우리가 1시간을 줘도 5분에 잘렸다.
+ * 그래서 호출자가 정한 `timeoutMs` 를 undici 쪽에도 그대로 맞춘다.
+ *
+ * 기본 타임아웃(30초) 이하면 undici 기본값이 이미 넉넉하므로 만들지 않는다.
+ * 같은 값의 Agent 는 재사용한다 — 요청마다 새로 만들면 연결 풀이 쌓인다.
+ */
+const AGENTS_BY_TIMEOUT = new Map<number, Agent>();
+
+function dispatcherFor(timeoutMs: number): Agent | undefined {
+  if (timeoutMs <= DEFAULT_TIMEOUT_MS) return undefined;
+  const known = AGENTS_BY_TIMEOUT.get(timeoutMs);
+  if (known) return known;
+  // bodyTimeout 은 청크 사이 간격 기준이라 헤더와 같은 값이면 충분하다.
+  const agent = new Agent({ headersTimeout: timeoutMs, bodyTimeout: timeoutMs });
+  AGENTS_BY_TIMEOUT.set(timeoutMs, agent);
+  return agent;
+}
 
 /**
  * fetch 실패의 진짜 원인을 한 줄로 푼다.
@@ -59,7 +84,8 @@ export async function fetchFastApiJson<T>(
       headers,
       signal: controller.signal,
       cache: "no-store",
-    });
+      dispatcher: dispatcherFor(timeoutMs),
+    } as RequestInit & { dispatcher?: Agent });
   } catch (error) {
     clearTimeout(timeoutId);
     const isAbort =
