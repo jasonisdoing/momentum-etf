@@ -10,7 +10,7 @@ import { MonthsSelect } from "../components/MonthsSelect";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
 import { StrategyNotes } from "../components/StrategyNotes";
-import { StrategyTuning, type TuningResult } from "../components/StrategyTuning";
+import { StrategyTuning } from "../components/StrategyTuning";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { type HoldingChartData } from "../components/HoldingChart";
@@ -102,6 +102,8 @@ type PoolSettings = {
   adr_floor?: number | null;
   /** 주중 이탈 — 보유 자격을 잃으면 다음 거래일 시가에 판다. 풀 성격에 따라 끄고 켠다. */
   intraweek_exit: boolean;
+  /** 교체 규칙 — "weekly"(매주 재선정) / "hold"(자격 유지). */
+  rebalance_mode: string;
   /** 주중 손절선(%) — 교체일 시가 대비 낙폭. null 은 손절 없음. 주중 이탈이 켜진 풀만 의미 있다. */
   intraweek_stop_pct?: number | null;
 };
@@ -270,6 +272,8 @@ type View = {
   constraints?: {
     adr_floor_options?: (number | null)[];
     intraweek_stop_options?: (number | null)[];
+    /** 교체 규칙 선택지 — 백엔드 상수가 단일 소스. 화면 셀렉트와 튜닝 축이 같이 쓴다. */
+    rebalance_mode_options?: { value: string; label: string }[];
   };
   picks: PicksResult | null;
 };
@@ -342,6 +346,8 @@ export function MomentumClient() {
   const [draftIntraweekExit, setDraftIntraweekExit] = useState(true);
   // 주중 손절선 — "" 은 손절 없음. 주중 이탈이 켜졌을 때만 셀렉트를 노출한다.
   const [draftIntraweekStop, setDraftIntraweekStop] = useState<string>("");
+  // 교체 규칙 — 주 교체일에 보유를 어떻게 정할지. 저장값이 없던 풀은 기존 동작(weekly).
+  const [draftRebalanceMode, setDraftRebalanceMode] = useState<string>("weekly");
 
   // 풀별 설정을 폼 초안에 채운다 — 풀 셀렉트 전환과 응답 반영이 같은 경로를 쓴다.
   const fillDrafts = useCallback((values: PoolSettings) => {
@@ -350,6 +356,7 @@ export function MomentumClient() {
     setDraftAdrFloor(values.adr_floor == null ? "" : String(values.adr_floor));
     setDraftIntraweekExit(values.intraweek_exit);
     setDraftIntraweekStop(values.intraweek_stop_pct == null ? "" : String(values.intraweek_stop_pct));
+    setDraftRebalanceMode(values.rebalance_mode || "weekly");
   }, []);
 
   const applyView = useCallback(
@@ -489,10 +496,11 @@ export function MomentumClient() {
         intraweek_exit: draftIntraweekExit,
         // 주중 이탈을 끄면 손절선도 함께 해제한다 — 이탈의 추가 조건이라 홀로는 의미가 없다.
         intraweek_stop_pct: draftIntraweekExit && draftIntraweekStop !== "" ? Number(draftIntraweekStop) : null,
+        rebalance_mode: draftRebalanceMode,
       },
       "설정을 저장했습니다.",
     );
-  }, [draftAdrFloor, draftIntraweekExit, draftIntraweekStop, draftMaRule, draftPool, persistSettings, toast, view?.settings.top_n]);
+  }, [draftAdrFloor, draftIntraweekExit, draftIntraweekStop, draftMaRule, draftPool, draftRebalanceMode, persistSettings, toast, view?.settings.top_n]);
 
   // 풀 셀렉트 변경 — 그 풀의 저장 설정이 있으면 **즉시 전환·저장·재선정**한다
   // (전환은 초안이 아니라 컨텍스트 스위치다). 저장분이 없는 풀(첫 설정)만 초안으로
@@ -618,12 +626,13 @@ export function MomentumClient() {
       (draftAdrFloor === "" ? null : Number(draftAdrFloor)) !== (saved.adr_floor ?? null) ||
       draftIntraweekExit !== saved.intraweek_exit ||
       (draftIntraweekStop === "" ? null : Number(draftIntraweekStop)) !== (saved.intraweek_stop_pct ?? null) ||
+      draftRebalanceMode !== (saved.rebalance_mode || "weekly") ||
       (draftMaRule != null &&
         view.ma_rule != null &&
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
           draftMaRule.long !== view.ma_rule.long_ma_days))
     );
-  }, [draftAdrFloor, draftIntraweekExit, draftIntraweekStop, draftMaRule, draftPool, view]);
+  }, [draftAdrFloor, draftIntraweekExit, draftIntraweekStop, draftMaRule, draftPool, draftRebalanceMode, view]);
 
   const monthlyLabels = view?.picks?.monthly_return_labels ?? [];
   // 선정 결과 풀의 국가 — 마켓·시가총액 컬럼 표시와 티커 표기(ASX:)를 정한다.
@@ -1166,6 +1175,22 @@ export function MomentumClient() {
                       </select>
                     </label>
                     <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">교체 규칙</span>
+                      <select
+                        className="form-select form-select-sm"
+                        style={{ width: 128 }}
+                        value={draftRebalanceMode}
+                        onChange={(e) => setDraftRebalanceMode(e.target.value)}
+                        title="매주 재선정 — 교체일마다 상위 N 을 새로 뽑는다(순위가 밀리면 편출). 자격 유지 — 후보 자격이 남아 있으면 순위와 무관하게 계속 들고 가고, 자격을 잃어 빈 자리만 채운다."
+                      >
+                        {(view.constraints?.rebalance_mode_options ?? []).map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">주중 이탈</span>
                       <select
                         className="form-select form-select-sm"
@@ -1245,17 +1270,24 @@ export function MomentumClient() {
                       ) : view.picks.adr_gate.intraweek?.blocked ? (
                         // 주간 판정은 통과했는데 그 뒤 ADR 이 무너진 상태 — 판정일 값만 보여 주면
                         // 왜 전량 매도 예정인지 화면에서 알 수가 없다. 최신 값을 함께 세운다.
-                        <b style={{ color: "#d9480f" }}>
-                          {" "}· ADR {view.picks.adr_gate.market} {view.picks.adr_gate.value ?? "-"} → 주중 게이트 발동{" "}
+                        <b
+                          style={{ color: "#d9480f" }}
+                          title={`판정일 ${view.picks.signal_date} 에는 하한을 넘어 선정이 실행됐지만, 그 뒤 ${view.picks.adr_gate.intraweek.date} 에 하한 아래로 내려갔습니다.`}
+                        >
+                          {" "}· ADR {view.picks.adr_gate.market} 판정일 {view.picks.adr_gate.value ?? "-"} → 주중 게이트 발동{" "}
                           {view.picks.adr_gate.intraweek.value ?? "-"} &lt; {view.picks.adr_gate.floor}, 다음 거래일 시가 전량 매도
                         </b>
                       ) : (
-                        <span>
-                          {" "}· ADR {view.picks.adr_gate.market} {view.picks.adr_gate.value ?? "-"} (하한 {view.picks.adr_gate.floor})
-                          {view.picks.adr_gate.intraweek?.value != null &&
-                          view.picks.adr_gate.intraweek.value !== view.picks.adr_gate.value
+                        // 두 값의 시점이 다르다 — 앞은 이번 주를 정한 판정일, 뒤는 마지막 거래일.
+                        // 라벨 없이 숫자만 두면 무엇을 보는 값인지 알 수가 없다.
+                        <span
+                          title={`판정일 ${view.picks.signal_date} 의 ADR 이 하한 이상이라 이번 주 선정이 실행됐습니다. 최신은 마지막 거래일 ${view.picks.adr_gate.intraweek?.date ?? "-"} 값으로, 주중 게이트가 이 값을 봅니다.`}
+                        >
+                          {" "}· ADR {view.picks.adr_gate.market} 판정일 {view.picks.adr_gate.value ?? "-"}
+                          {view.picks.adr_gate.intraweek?.value != null
                             ? ` · 최신 ${view.picks.adr_gate.intraweek.value}`
                             : ""}
+                          {" "}(하한 {view.picks.adr_gate.floor})
                         </span>
                       )
                     ) : null}
@@ -1462,8 +1494,6 @@ export function MomentumClient() {
           // 튜닝도 백테스트와 같이 **저장된 설정** 기준이라 실행 조건을 같게 둔다.
           disabled={backtesting || isDirty}
           disabledHint={isDirty ? "설정을 저장해야 실행할 수 있습니다" : undefined}
-          secondsPerCombo={0.06}
-          extraSeconds={90}
           fixedLabel={`저장된 설정 기준 (종목풀 ${draftPool} · 종목 수 ${view.settings.top_n} 공통 고정)`}
           current={{
             short_ma_days: view.settings.short_ma_days,
@@ -1474,6 +1504,7 @@ export function MomentumClient() {
               : view.settings.intraweek_stop_pct == null
                 ? "none"
                 : view.settings.intraweek_stop_pct,
+            rebalance_mode: view.settings.rebalance_mode || "weekly",
           }}
           axes={[
             // 축 값 = 상단 셀렉트 선택지(서버 상수) — 여기서 따로 정하지 않는다.
@@ -1495,6 +1526,14 @@ export function MomentumClient() {
                 ),
               ],
             },
+            {
+              key: "rebalance_mode",
+              label: "교체 규칙",
+              values: (view.constraints?.rebalance_mode_options ?? []).map((option) => ({
+                value: option.value,
+                label: option.label,
+              })),
+            },
           ]}
           onApply={async (params) => {
             // 조합을 상단 폼에 넣고 그대로 저장한다 (저장 응답이 폼·선정을 갱신한다).
@@ -1508,21 +1547,21 @@ export function MomentumClient() {
               adr_floor: params.adr_floor == null ? null : Number(params.adr_floor),
               intraweek_exit: intraweekExit,
               intraweek_stop_pct: intraweekExit ? stop : null,
+              rebalance_mode: String(params.rebalance_mode ?? view.settings.rebalance_mode ?? "weekly"),
             };
             fillDrafts(next);
             await persistSettings(next, "튜닝 조합을 적용해 저장했습니다.");
           }}
-          run={async (months, ranges) => {
-            const resp = await fetch(`/api/strategy-momentum/tuning?pool=${encodeURIComponent(draftPool)}`, {
+          // 응답은 SSE 스트림(진행 이벤트 + 결과 이벤트) — 파싱은 StrategyTuning 이 한다.
+          run={async (months, ranges, signal) =>
+            fetch(`/api/strategy-momentum/tuning?pool=${encodeURIComponent(draftPool)}`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              // 업종 데이터가 없는 풀은 상한 축을 '없음' 하나로 고정해 보낸다.
               body: JSON.stringify({ months, ranges }),
-            });
-            const payload = await resp.json();
-            if (!resp.ok) throw new Error(payload?.error ?? "튜닝에 실패했습니다.");
-            return payload as TuningResult;
-          }}
+              signal,
+            })
+          }
+          cancelRun={() => fetch("/api/strategy-momentum/tuning", { method: "DELETE" })}
         />
       </div>
     </PageFrame>

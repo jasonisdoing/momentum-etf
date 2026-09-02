@@ -487,7 +487,7 @@ def run_backtest(spec: SleeveSpec, months: int, context: dict[str, Any] | None =
     if spec.strategy == MOMENTUM:
         from utils.momentum_backtest import run_backtest as sm_backtest
 
-        return sm_backtest(months, spec.settings, include_daily=True)
+        return sm_backtest(months, spec.settings, include_daily=True, tuning_only=False)
     from utils.new_high_backtest import run_backtest as nh_backtest
 
     return nh_backtest(months, spec.settings, context)

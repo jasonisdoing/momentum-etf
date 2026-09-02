@@ -1,7 +1,7 @@
 "use client";
 
 import type { ColDef } from "ag-grid-community";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppAgGrid } from "./AppAgGrid";
 import { MonthsSelect } from "./MonthsSelect";
@@ -83,9 +83,8 @@ export function StrategyTuning({
   defaultMonths,
   fixedLabel,
   current,
-  secondsPerCombo,
-  extraSeconds = 0,
   run,
+  cancelRun,
   onApply,
   disabled,
   disabledHint,
@@ -97,11 +96,13 @@ export function StrategyTuning({
   /** 고정되는 나머지 설정 요약 — 예: "저장된 설정 기준 (종목풀 us)". */
   fixedLabel: string;
   current: Record<string, TuningValue>;
-  /** 조합 하나당 예상 소요 초 — 진행도 램프 속도에 쓴다. */
-  secondsPerCombo: number;
-  /** 조합과 무관한 준비 시간(초) — 가격 로드·후보 계산 등. */
-  extraSeconds?: number;
-  run: (months: number, ranges: Record<string, TuningValue[]>) => Promise<TuningResult>;
+  /**
+   * 튜닝 실행 — 부모가 자기 경로로 POST 하고 **Response 를 그대로** 돌려준다.
+   * 응답은 SSE 스트림이라(진행 이벤트 + 결과 이벤트) 여기서 줄 단위로 읽는다.
+   */
+  run: (months: number, ranges: Record<string, TuningValue[]>, signal: AbortSignal) => Promise<Response>;
+  /** 서버에서 현재 튜닝의 프로세스 풀까지 종료한다. */
+  cancelRun: () => Promise<Response>;
   /** 행의 조합을 상단 설정에 넣고 저장까지 한다 — 부모가 자기 저장 흐름으로 처리한다. */
   onApply: (params: Record<string, TuningValue>) => Promise<void> | void;
   /** 실행 차단 — 부모가 **백테스트 버튼과 같은 조건**을 넘긴다(두 실행의 기준이 갈리면 안 된다). */
@@ -115,6 +116,17 @@ export function StrategyTuning({
   const [progress, setProgress] = useState<LoadingProgress | null>(null);
   const [result, setResult] = useState<TuningResult | null>(null);
   const [applying, setApplying] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const cancelRequestedRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+      abortRef.current?.abort();
+    },
+    [],
+  );
 
   const apply = useCallback(
     async (params: Record<string, TuningValue>) => {
@@ -131,34 +143,137 @@ export function StrategyTuning({
   );
 
   const comboCount = useMemo(() => axes.reduce((n, axis) => n * axis.values.length, 1), [axes]);
-  // 램프 속도 기준 — 조합 수 × 조합당 초 + 준비 시간. 화면에는 예상 시간을 보여주지 않는다(잘 안 맞는다).
-  const expectedSeconds = Math.max(10, Math.round(comboCount * secondsPerCombo + extraSeconds));
+  // 결과가 도착하면 계산은 끝난 것이다. 비동기 정리 상태가 남더라도 화면을 잠그지 않는다.
+  const busy = running && result == null;
+
+  const cancel = useCallback(async () => {
+    const controller = abortRef.current;
+    if (!controller) return;
+    cancelRequestedRef.current = true;
+    setProgress((prev) => (prev ? { ...prev, message: "튜닝 중단 중…" } : prev));
+    try {
+      const response = await cancelRun();
+      const payload = (await response.json().catch(() => ({}))) as { message?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error || `튜닝 중단에 실패했습니다. (${response.status})`);
+      controller.abort();
+      if (abortRef.current === controller) abortRef.current = null;
+      if (mountedRef.current) {
+        setRunning(false);
+        setProgress(null);
+      }
+      toast.success(payload.message || "튜닝을 중단했습니다.");
+    } catch (error) {
+      cancelRequestedRef.current = false;
+      setProgress((prev) => (prev ? { ...prev, message: "튜닝 중단 실패 — 백테스트 계속 실행 중" } : prev));
+      toast.error(error instanceof Error ? error.message : "튜닝을 중단하지 못했습니다.");
+    }
+  }, [cancelRun, toast]);
 
   const execute = useCallback(async () => {
+    const controller = new AbortController();
+    abortRef.current = controller;
     setRunning(true);
     setResult(null);
-    setProgress({ percent: 0, message: `${comboCount}조합 백테스트 중` });
-    // 서버가 단일 응답이라 실제 단계를 모른다 — 예상 시간에 맞춰 90%까지 올리는 램프
-    // (내부는 소수로 누적, 표시는 AppLoadingProgress 가 정수로 반올림).
-    const stepPercent = Math.max(0.1, 88 / expectedSeconds);
-    const timer = window.setInterval(() => {
-      setProgress((prev) => (prev ? { ...prev, percent: Math.min(90, prev.percent + stepPercent) } : prev));
-    }, 1000);
-    const stopRamp = () => window.clearInterval(timer);
+    // 첫 묶음이 끝날 때까지는 진행을 **올리지 않는다**. 예전에는 예상 시간에 맞춘 램프를
+    // 돌렸는데, 예상이 빗나가면 90% 에 멈춰 있다가 실제 진행(1/12 = 8%)이 도착하는 순간
+    // 바가 뒤로 갔다. 모르는 구간은 모른다고 두고, 무엇을 기다리는지만 정확히 적는다.
+    setProgress({ percent: 0, message: `1/2 준비 중 — ${comboCount}조합의 가격·후보를 읽는 중` });
+
     try {
       const ranges = Object.fromEntries(axes.map((axis) => [axis.key, axis.values.map((v) => v.value)]));
-      const payload = await run(months, ranges);
-      setProgress({ percent: 100, message: "결과 반영 중" });
-      setResult(payload);
-      if (payload.skipped?.length) toast.warning(`일부 조합을 건너뛰었습니다: ${payload.skipped[0]}`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "튜닝에 실패했습니다.");
-    } finally {
-      stopRamp();
+      const response = await run(months, ranges, controller.signal);
+      if (!response.ok) {
+        const message = await response.text().catch(() => "");
+        throw new Error(message.trim() || `튜닝 요청에 실패했습니다. (${response.status})`);
+      }
+      if (!response.body) throw new Error("튜닝 응답을 받지 못했습니다.");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let payload: TuningResult | null = null;
+      let cancelledMessage: string | null = null;
+
+      // SSE — 이벤트 하나가 `data: {...}` 한 줄이다. 주석(`:` 시작)은 연결 확인용이라 버린다.
+      const handleLine = (line: string) => {
+        const text = line.trim();
+        if (!text || text.startsWith(":")) return;
+        if (!text.startsWith("data:")) return;
+        const event = JSON.parse(text.slice("data:".length).trim()) as
+          | { type: "progress"; phase?: "prepare" | "backtest" | "finalize"; done: number; total: number }
+          | { type: "result"; payload: TuningResult }
+          | { type: "notice" | "cancelled"; message: string }
+          | { type: "error"; message: string };
+        if (event.type === "progress") {
+          const total = Math.max(1, event.total);
+          const done = Math.max(0, Math.min(total, event.done));
+          if (event.phase === "prepare") {
+            setProgress({ percent: 0, message: `1/2 준비 중 — ${event.total}조합의 가격·후보를 읽는 중` });
+          } else if (event.phase === "finalize") {
+            setProgress({ percent: 98, message: `2/2 백테스트 완료 — ${event.total}조합 결과 집계 중` });
+          } else {
+            // 마지막 집계·전송이 남아 있어 백테스트 단계는 95% 를 넘기지 않는다.
+            setProgress({
+              percent: Math.min(95, (done / total) * 95),
+              message:
+                done === 0
+                  ? `2/2 백테스트 중 — 첫 결과를 기다리는 중 (0/${event.total}조합)`
+                  : `2/2 백테스트 중 — ${done}/${event.total}조합 완료`,
+            });
+          }
+        } else if (event.type === "result") {
+          payload = event.payload;
+        } else if (event.type === "notice") {
+          toast.warning(event.message);
+        } else if (event.type === "cancelled") {
+          cancelledMessage = event.message;
+        } else {
+          throw new Error(event.message);
+        }
+      };
+
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let cut = buffer.indexOf("\n");
+        while (cut >= 0) {
+          handleLine(buffer.slice(0, cut));
+          buffer = buffer.slice(cut + 1);
+          cut = buffer.indexOf("\n");
+        }
+      }
+      handleLine(buffer);
+
+      if (cancelledMessage) {
+        if (!cancelRequestedRef.current) toast.warning(cancelledMessage);
+        return;
+      }
+      if (!payload) throw new Error("튜닝 결과를 받지 못했습니다.");
+      const resultPayload = payload as TuningResult;
+      // 결과가 도착한 시점에 서버 작업은 끝났다. 그리드 렌더링을 기다리며 실행 상태를
+      // 붙잡아 두면 완료 후에도 진행 바·중단 버튼·기간 잠금이 남는다.
+      setResult(resultPayload);
+      if (abortRef.current === controller) abortRef.current = null;
       setRunning(false);
       setProgress(null);
+      const skipped = resultPayload.skipped;
+      if (skipped?.length) toast.warning(`일부 조합을 건너뛰었습니다: ${skipped[0]}`);
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        toast.error(error instanceof Error ? error.message : "튜닝에 실패했습니다.");
+      }
+    } finally {
+      cancelRequestedRef.current = false;
+      const isCurrentRequest = abortRef.current === controller;
+      if (isCurrentRequest) abortRef.current = null;
+      // 중단 직후 새 튜닝이 시작됐다면 이전 요청의 정리가 새 진행 상태를 지우면 안 된다.
+      if (mountedRef.current && isCurrentRequest) {
+        setRunning(false);
+        setProgress(null);
+      }
     }
-  }, [axes, comboCount, expectedSeconds, months, run, toast]);
+  }, [axes, comboCount, months, run, toast]);
 
   const labelOf = (axis: TuningAxis, value: TuningValue) =>
     axis.values.find((o) => o.value === value)?.label ?? String(value ?? "없음");
@@ -231,7 +346,7 @@ export function StrategyTuning({
               type="button"
               className="btn btn-sm btn-outline-dark"
               style={{ padding: "0 8px", lineHeight: 1.6 }}
-              disabled={disabled || running || applying || p.data.is_current}
+              disabled={disabled || busy || applying || p.data.is_current}
               onClick={() => void apply(p.data!.params)}
             >
               {p.data.is_current ? "현재" : "적용"}
@@ -241,7 +356,7 @@ export function StrategyTuning({
     );
     return columns;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [axes, result, disabled, running, applying]);
+  }, [axes, result, disabled, busy, applying]);
 
   return (
     <section className="appSection">
@@ -257,10 +372,16 @@ export function StrategyTuning({
             </div>
             <div className="appMainHeaderRight">
               {disabledHint && !running ? <span style={hint}>{disabledHint}</span> : null}
-              <MonthsSelect value={months} options={monthOptions} disabled={running} onChange={setMonths} />
-              <button type="button" className="btn btn-sm btn-dark" disabled={disabled || running} onClick={() => void execute()}>
-                {running ? "실행 중…" : "실행"}
-              </button>
+              <MonthsSelect value={months} options={monthOptions} disabled={busy} onChange={setMonths} />
+              {busy ? (
+                <button type="button" className="btn btn-sm btn-outline-danger" onClick={cancel}>
+                  중단
+                </button>
+              ) : (
+                <button type="button" className="btn btn-sm btn-dark" disabled={disabled} onClick={() => void execute()}>
+                  실행
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -275,7 +396,7 @@ export function StrategyTuning({
             </div>
             <div style={hint}>나머지 설정은 고정 — {fixedLabel}</div>
 
-            {running ? (
+            {busy ? (
               <AppLoadingProgress title="튜닝 실행 중…" progress={progress} />
             ) : !result ? (
               <div style={{ ...hint, textAlign: "center", padding: "14px 0" }}>실행을 누르면 결과가 표시됩니다.</div>
@@ -306,11 +427,15 @@ export function StrategyTuning({
                   rowData={gridRows}
                   columnDefs={gridColumns}
                   theme={gridTheme}
-                  minHeight={0}
-                  height="auto"
+                  minHeight={320}
+                  height="34rem"
                   getRowClass={(p) => (p.data?.is_current ? "appHeldRow" : "")}
-                  // 백테스트 표와 같이 행 수만큼 늘어난다 — 표 안 스크롤 없이 페이지 스크롤로 본다.
-                  gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true, rowHeight: 34 }}
+                  // 결과 행은 수백 개라 고정 높이에서 가상화한다. autoHeight 는 모든 셀을 한꺼번에
+                  // 만들어 완료 화면과 중단 버튼을 수 초 동안 멈추게 했다.
+                  gridOptions={{
+                    suppressMovableColumns: true,
+                    rowHeight: 34,
+                  }}
                 />
                 <div style={hint}>
                   기본 소르티노 내림차순(헤더를 눌러 정렬) · CAGR = 기간 수익의 연환산 · 분기승수 = 그 분기에 조합들 중 상위

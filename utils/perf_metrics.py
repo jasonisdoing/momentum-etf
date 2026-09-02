@@ -3,6 +3,39 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
+
+
+def daily_return_metrics(returns_pct: pd.Series) -> dict[str, float | None]:
+    """날짜 인덱스의 일별 수익률(%)에서 총수익·CAGR·MDD·소르티노를 계산한다."""
+    if returns_pct.empty:
+        return {"total_pct": 0.0, "cagr_pct": None, "mdd_pct": 0.0, "sortino": None}
+    if not isinstance(returns_pct.index, pd.DatetimeIndex):
+        raise ValueError("일별 성과 계산에는 DatetimeIndex가 필요합니다.")
+    if returns_pct.isna().any():
+        raise ValueError("일별 성과 계산에는 빈 수익률이 없어야 합니다.")
+
+    ordered = returns_pct.sort_index().astype(float)
+    returns = ordered / 100.0
+    growth = (1.0 + returns).cumprod()
+    total_pct = float((growth.iloc[-1] - 1.0) * 100.0)
+    # 첫 거래일 손실도 시작 자산 1.0 대비 낙폭으로 잡혀야 한다.
+    curve = pd.concat([pd.Series([1.0]), growth.reset_index(drop=True)], ignore_index=True)
+    mdd_pct = float((((curve / curve.cummax()) - 1.0) * 100.0).min())
+
+    downside = returns[returns < 0]
+    downside_deviation = float((downside**2).mean() ** 0.5) if not downside.empty else 0.0
+    sortino_value = float(returns.mean()) / downside_deviation * float(252**0.5) if downside_deviation > 0 else None
+
+    days = int((ordered.index[-1] - ordered.index[0]).days)
+    final_growth = float(growth.iloc[-1])
+    cagr_value = (final_growth ** (365.0 / days) - 1.0) * 100.0 if final_growth > 0 and days > 0 else None
+    return {
+        "total_pct": total_pct,
+        "cagr_pct": cagr_value,
+        "mdd_pct": mdd_pct,
+        "sortino": sortino_value,
+    }
 
 
 def sharpe_from_curve(start_val: float, values: np.ndarray, cagr_pct: float = 0.0) -> float:

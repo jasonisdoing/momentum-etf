@@ -14,7 +14,7 @@ import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
 import { StrategyNotes } from "../components/StrategyNotes";
-import { StrategyTuning, type TuningResult } from "../components/StrategyTuning";
+import { StrategyTuning } from "../components/StrategyTuning";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
@@ -1394,8 +1394,6 @@ export function NewHighClient() {
           defaultMonths={backtestMonths}
           // 튜닝도 백테스트와 같이 **화면 초안** 기준이라(fixedLabel 참고) 실행 조건을 같게 둔다.
           disabled={backtesting}
-          secondsPerCombo={0.04}
-          extraSeconds={50}
           fixedLabel={`현재 화면 값 기준 (종목 수 ${draft.top_n} 공통 고정)`}
           current={{
             stop_loss_pct: draft.stop_loss_pct,
@@ -1436,16 +1434,16 @@ export function NewHighClient() {
               "튜닝 조합을 적용해 저장했습니다.",
             );
           }}
-          run={async (months, ranges) => {
-            const response = await fetch("/api/strategy-new-high/tuning", {
+          // 응답은 SSE 스트림(진행 이벤트 + 결과 이벤트) — 파싱은 StrategyTuning 이 한다.
+          run={async (months, ranges, signal) =>
+            fetch("/api/strategy-new-high/tuning", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ months, settings: effectiveDraft ?? draft, ranges }),
-            });
-            const payload = await response.json();
-            if (!response.ok) throw new Error(payload.error ?? "튜닝에 실패했습니다.");
-            return payload as TuningResult;
-          }}
+              signal,
+            })
+          }
+          cancelRun={() => fetch("/api/strategy-new-high/tuning", { method: "DELETE" })}
         />
       </div>
     </PageFrame>

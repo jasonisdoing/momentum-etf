@@ -1,9 +1,11 @@
 """모멘텀 전략(전략-ST) 설정·선정 API."""
 
 from fastapi import APIRouter, Body, Depends, Query
+from fastapi.responses import StreamingResponse
 
 from config import HOLDING_CHART_MONTHS
 from fastapi_app.dependencies import require_internal_token
+from fastapi_app.streaming import sse_stream
 from utils.momentum_service import (
     compute_picks,
     load_settings,
@@ -74,13 +76,17 @@ def _ma_rule_payload(settings: dict) -> dict:
 def _constraints_payload() -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트 복사본 제거)."""
     from config import ADR_FLOOR_OPTIONS
-    from utils.momentum_service import INTRAWEEK_STOP_OPTIONS
+    from utils.momentum_service import INTRAWEEK_STOP_OPTIONS, REBALANCE_MODE_LABELS, REBALANCE_MODE_OPTIONS
 
     return {
         # ADR 하한 — 판정일의 시장 ADR 이 미만이면 그 주 전량 현금. None = 게이트 없음(기본).
         "adr_floor_options": list(ADR_FLOOR_OPTIONS),
         # 주중 손절선(%) — 주중 이탈이 켜진 풀에서만 화면에 노출한다. None = 손절 없음.
         "intraweek_stop_options": list(INTRAWEEK_STOP_OPTIONS),
+        # 교체 규칙 — 주 교체일에 보유를 어떻게 정할지. 화면 셀렉트와 튜닝 축이 같은 목록을 쓴다.
+        "rebalance_mode_options": [
+            {"value": key, "label": REBALANCE_MODE_LABELS[key]} for key in REBALANCE_MODE_OPTIONS
+        ],
     }
 
 
@@ -169,8 +175,8 @@ def post_strategy_momentum_backtest(
     """주간 리밸런싱 백테스트.
 
     body: ``{"months": 12, "include_daily": false}``.
-    ``include_daily`` 는 일간 탭을 볼 때만 참으로 보낸다 — 일별 계산은 응답이
-    수천 행으로 커지므로 필요할 때만 만든다.
+    ``include_daily`` 는 일간 탭을 볼 때만 참으로 보낸다. 성과는 항상 일별로 계산하며,
+    이 값은 응답에 수천 개의 일별 행을 포함할지만 정한다.
     """
     from utils.momentum_backtest import run_backtest
 
@@ -180,7 +186,7 @@ def post_strategy_momentum_backtest(
     include_daily = payload.get("include_daily") if isinstance(payload, dict) else None
     if not isinstance(include_daily, bool):
         raise ValueError("'include_daily' 는 참/거짓이어야 합니다.")
-    return run_backtest(months, settings=load_settings(pool), include_daily=include_daily)
+    return run_backtest(months, settings=load_settings(pool), include_daily=include_daily, tuning_only=False)
 
 
 @router.post("/tuning")
@@ -188,13 +194,23 @@ def post_strategy_momentum_tuning(
     payload: dict = Body(...),
     pool: str | None = Query(default=None),
     _: None = Depends(require_internal_token),
-) -> dict:
+) -> StreamingResponse:
     """튜닝 — 설정 항목 범위의 모든 조합을 백테스트한다 (저장된 설정 기준).
 
     body: ``{"months": 12, "ranges": {
-    "short_ma_days": [...], "long_ma_days": [...], "intraweek": ["off", "none", -5, ...]}}``
+    "short_ma_days": [...], "long_ma_days": [...], "adr_floor": [...],
+    "intraweek": ["off", "none", -7, ...], "rebalance_mode": [...]}}``
+
+    응답은 **SSE 스트림**이다 — 준비·조합 완료·집계 진행 이벤트와 마지막 결과 이벤트.
+    다 끝난 뒤 한 번에 응답하면 10분 넘게 소식이 없어 화면이 죽은 것처럼 보이고,
+    응답 헤더가 늦어 프록시(undici)의 헤더 대기 한도에도 걸린다.
+
+        data: {"type": "progress", "phase": "backtest", "done": 72, "total": 216}
+        data: {"type": "result", "payload": {...}}
+        data: {"type": "error", "message": "..."}     계산 도중 실패
     """
-    from utils.momentum_tuning import run_tuning
+    from utils.momentum_tuning import stream_tuning
+    from utils.strategy_tuning import begin_tuning
 
     if not isinstance(payload, dict):
         raise ValueError("요청 형식이 올바르지 않습니다.")
@@ -204,7 +220,17 @@ def post_strategy_momentum_tuning(
     ranges = payload.get("ranges")
     if not isinstance(ranges, dict) or not all(isinstance(v, list) for v in ranges.values()):
         raise ValueError("'ranges' 는 축별 값 목록이어야 합니다.")
-    return run_tuning(months, load_settings(pool), ranges)
+    settings = load_settings(pool)
+    run = begin_tuning(f"모멘텀 {settings['pool']} {months}개월")
+    return sse_stream(lambda: stream_tuning(months, settings, ranges, run))
+
+
+@router.delete("/tuning")
+def delete_strategy_momentum_tuning(_: None = Depends(require_internal_token)) -> dict:
+    """현재 실행 중인 전략 튜닝과 워커 프로세스를 즉시 종료한다."""
+    from utils.strategy_tuning import cancel_active_tuning
+
+    return cancel_active_tuning()
 
 
 @router.post("/charts")

@@ -36,7 +36,7 @@ const KEY_LABELS: Record<EditableKey, string> = {
   SELL_SLIPPAGE_PCT: "매도 슬리피지(%)",
   STOPLOSS_THRESHOLD_PCT: "손절 기준(%)",
   BENCHMARK: "벤치마크",
-  MARKET_REGIME_INDEX: "시장 레짐",
+  MARKET_REGIME_INDEX: "ADR 기준",
 };
 
 const DEFAULT_SLIPPAGE_PCT_OPTIONS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5];
@@ -644,7 +644,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         );
       },
     },
-    selectCol("marketRegimeTicker", "시장 레짐", 104, () => marketIndices.map((item) => item.ticker), {
+    selectCol("marketRegimeTicker", "ADR 기준", 104, () => marketIndices.map((item) => item.ticker), {
       valueFormatter: (params) =>
         marketIndices.find((item) => item.ticker === params.value)?.name ?? (params.value ? String(params.value) : "미설정"),
     }),
@@ -796,7 +796,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         <span style={{ ...labelStyle, width: 72 }}>벤치마크</span>
         <BenchmarkField ticker={draft.benchmarkTicker} name={draft.benchmarkName} onChange={onChange} />
         {renderField(
-          "시장 레짐",
+          "ADR 기준",
           <select
             className="form-select form-select-sm"
             style={{ width: 170 }}
