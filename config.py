@@ -377,4 +377,4 @@ HOLDING_CHART_SHOW_AVG_BUY_PRICE = True
 # 남긴다. 0 으로 두면 결측 통보를 아예 하지 않는다.
 #
 # 수집 실패(이번 실행의 결과)와 의심 날짜 제거(1회성)는 이 값과 무관하게 항상 알린다.
-CACHE_ISSUE_NOTIFY_RECENT_TRADING_DAYS = 5
+CACHE_ISSUE_NOTIFY_RECENT_TRADING_DAYS = 2
