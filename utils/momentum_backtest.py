@@ -627,7 +627,10 @@ def run_backtest(
                 event_index += 1
             weekly.append(
                 {
-                    "week_end": bucket["end"].strftime("%Y-%m-%d"),
+                    # 기준일은 **그 주 마지막 거래일**이다. 진행 중인 주는 캐시가 거기까지밖에
+                    # 없어 예전에는 화요일 같은 날짜가 찍혔다 — 완결된 주와 규칙이 달라
+                    # 표에서 주가 하나 더 있는 것처럼 보였다.
+                    "week_end": week_last_trading_day(country, bucket["end"]),
                     # 판정일(주 마지막 거래일)의 시장 ADR — 다음 주 게이트를 결정한 값.
                     "adr": adr_at(bucket["end"]),
                     "strategy_pct": _compound_daily(bucket["strategy"]),
@@ -659,22 +662,36 @@ def run_backtest(
         pending_count = len(current_holdings) - len(pending_removed)
         pending_exit_reason = {x["ticker"]: x.get("reason") or "주중 이탈" for x in pending_exits}
 
-    weekly.append(
-        {
-            "week_end": week_last_trading_day(country, next_rebalance or (last_cached + pd.Timedelta(days=7))),
-            "strategy_pct": None,
-            "benchmark_pct": None,
-            "holdings_start": pending_count + len(pending_removed) if pending_signal is None else pending_count,
-            "holdings_count": pending_count,
-            "turnover_pct": round(len(pending_added) / top_n * 100.0, 1),
-            "added": [holding_label(t) for t in pending_added],
-            "removed": [holding_label(t) for t in pending_removed] if pending_signal is not None else [],
-            "exited": []
-            if pending_signal is not None
-            else [f"{holding_label(t)} · {pending_exit_reason[t]} 예정" for t in pending_removed],
-            "is_pending": True,
-        }
+    # 예정이 속한 주 — 판정일 종가가 확정됐으면 **다음 교체 뒤의 주**, 아직이면 지금
+    # 진행 중인 주다. 후자를 다음 주로 찍으면 내일 시가에 팔 종목이 한 주 뒤 행에 실려
+    # 실제 체결 주와 어긋난다.
+    pending_week_end = week_last_trading_day(country, next_rebalance if pending_signal is not None else last_cached)
+    pending_exited = (
+        []
+        if pending_signal is not None
+        else [f"{holding_label(t)} · {pending_exit_reason[t]} 예정" for t in pending_removed]
     )
+    # 진행 중인 주는 그 주 행이 이미 있다 — 새 행을 만들지 않고 예정을 얹는다.
+    current_week_row = weekly[-1] if weekly and weekly[-1]["week_end"] == pending_week_end else None
+    if current_week_row is not None:
+        current_week_row["holdings_count"] = pending_count
+        current_week_row["exited"] = [*current_week_row["exited"], *pending_exited]
+        current_week_row["is_pending"] = True
+    else:
+        weekly.append(
+            {
+                "week_end": pending_week_end,
+                "strategy_pct": None,
+                "benchmark_pct": None,
+                "holdings_start": pending_count + len(pending_removed) if pending_signal is None else pending_count,
+                "holdings_count": pending_count,
+                "turnover_pct": round(len(pending_added) / top_n * 100.0, 1),
+                "added": [holding_label(t) for t in pending_added],
+                "removed": [holding_label(t) for t in pending_removed] if pending_signal is not None else [],
+                "exited": pending_exited,
+                "is_pending": True,
+            }
+        )
 
     def _summarize(returns: list[float]) -> tuple[float, float | None, float | None, float | None]:
         curve = pd.Series([1.0] + list(pd.Series(returns).add(1.0).cumprod()))
