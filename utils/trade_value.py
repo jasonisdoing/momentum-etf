@@ -57,38 +57,54 @@ def latest_trade_value_fields(close: pd.Series, volume: pd.Series) -> dict[str, 
     }
 
 
-def kor_session_elapsed_fraction() -> float:
-    """한국 프리마켓 08:00~애프터 20:00의 경과 비율(시작 전 0, 종료 후 1)."""
-    schedule = MARKET_SCHEDULES["kor"]
-    now = datetime.now(ZoneInfo(schedule["timezone"]))
-    start = schedule["premarket_open"]
-    end = schedule["aftermarket_close"]
+def session_elapsed_fraction(country: str) -> float | None:
+    """그 시장의 프리마켓 시작~애프터 종료 경과 비율(시작 전 0, 종료 후 1).
+
+    시간표를 모르는 시장은 None — 비율을 지어내지 않는다. 누적 거래대금을 하루 기준으로
+    환산할 때 쓰므로, 정규장만이 아니라 체결이 일어나는 구간 전체를 분모로 본다.
+    """
+    schedule = (MARKET_SCHEDULES or {}).get(str(country).strip().lower())
+    if not isinstance(schedule, dict):
+        return None
+    start, end = schedule.get("premarket_open"), schedule.get("aftermarket_close")
+    tz_name = str(schedule.get("timezone") or "").strip()
+    if start is None or end is None or not tz_name:
+        return None
+    now = datetime.now(ZoneInfo(tz_name))
     open_at = now.replace(hour=start.hour, minute=start.minute, second=0, microsecond=0)
     close_at = now.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
-    elapsed = (now - open_at).total_seconds()
-    return min(max(elapsed / (close_at - open_at).total_seconds(), 0.0), 1.0)
+    span = (close_at - open_at).total_seconds()
+    if span <= 0:
+        return None
+    return min(max((now - open_at).total_seconds() / span, 0.0), 1.0)
 
 
-def kor_session_live_fraction() -> float | None:
-    """한국 거래 세션 진행 중인 거래일에만 경과 비율을 반환한다."""
-    fraction = kor_session_elapsed_fraction()
-    if not 0.0 < fraction < 1.0:
+def session_live_fraction(country: str) -> float | None:
+    """거래 세션이 진행 중인 거래일에만 경과 비율을 반환한다."""
+    fraction = session_elapsed_fraction(country)
+    if fraction is None or not 0.0 < fraction < 1.0:
         return None
     from utils.trading_calendar import is_trading_day
 
-    return fraction if is_trading_day("kor") else None
+    return fraction if is_trading_day(country) else None
 
 
-def live_min_value_mult(min_value_mult: float | None) -> float | None:
-    """장중 누적 거래대금에 적용할 시간 비례 하한."""
+def live_min_value_mult(min_value_mult: float | None, country: str) -> float | None:
+    """장중 누적 거래대금에 적용할 시간 비례 하한.
+
+    누적 배수는 장이 진행될수록 커지므로 하한도 같은 비율로 낮춰야 공평하다(개장 직후
+    2배를 요구하면 아무것도 통과하지 못한다). 장중이 아니면 하한을 그대로 돌려준다.
+    """
     if min_value_mult is None:
         return None
-    return float(min_value_mult) * kor_session_elapsed_fraction()
+    fraction = session_live_fraction(country)
+    return float(min_value_mult) * fraction if fraction is not None else float(min_value_mult)
 
 
 __all__ = [
     "TRADE_VALUE_WINDOW",
-    "kor_session_live_fraction",
+    "session_elapsed_fraction",
+    "session_live_fraction",
     "latest_trade_value_fields",
     "live_min_value_mult",
     "trade_value_multiplier_frame",

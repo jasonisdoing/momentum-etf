@@ -160,7 +160,7 @@ def _apply_industry_labels(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
 def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> tuple[dict[str, float], dict[str, float]]:
     """티커별 거래대금 배수(20일 평균 대비) — `(본값, 시간 환산)` 두 벌.
 
-    **본값**: 한국 장중에는 토스 실시간 누적 배수, 그 외에는 가격 캐시 배치가
+    **본값**: 한국·미국 장중에는 토스 실시간 누적 배수, 그 외에는 가격 캐시 배치가
     ``stock_meta``에 저장해 둔 완료 거래일 값이다.
 
     **시간 환산**: 장중에만 있다 — 누적 배수를 장 경과 비율로 나눈 값(지금 페이스대로면
@@ -197,9 +197,11 @@ def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> tuple[dict[s
         if doc.get("trade_value_sum19") is not None
     }
     live = _live_trade_value_mult(ticker_type, sum19)
-    from utils.trade_value import kor_session_live_fraction
+    from utils.settings_loader import get_ticker_type_settings
+    from utils.trade_value import session_live_fraction
 
-    fraction = kor_session_live_fraction()
+    country = str((get_ticker_type_settings(ticker_type) or {}).get("country_code") or "").strip().lower()
+    fraction = session_live_fraction(country)
     if fraction is not None:
         # 장중 — 실시간 누적이 본값, 괄호에는 시간 환산 배수.
         pace = {}
@@ -214,20 +216,27 @@ def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> tuple[dict[s
 
 
 def _live_trade_value_mult(ticker_type: str, sum19: dict[str, float]) -> dict[str, float]:
-    """오늘 누적 거래대금으로 다시 계산한 배수. 국내 상장 종목만 해당한다.
+    """오늘 누적 거래대금으로 다시 계산한 배수. 한국·미국 상장 종목이 해당한다.
 
     분모는 배치가 넘겨준 직전 19거래일 합에 오늘을 더한 20일 평균이다 — 확정된 날의
     계산식과 같다. 조회에 실패하거나 오늘 값이 없는 종목은 비워 두고 배치 값을 쓴다.
+
+    누적 거래대금을 주는 소스가 있는 시장만 계산한다 — 호주는 시세 소스가 거래대금을
+    주지 않아 배치 확정값만 쓴다(추정하지 않는다).
     """
     from utils.settings_loader import get_ticker_type_settings
 
     settings = get_ticker_type_settings(ticker_type) or {}
-    if str(settings.get("country_code") or "").strip().lower() != "kor" or not sum19:
+    country = str(settings.get("country_code") or "").strip().lower()
+    if not sum19:
+        return {}
+    from utils.data_loader import fetch_toss_kr_stock_snapshot, fetch_toss_us_stock_snapshot
+
+    fetch = {"kor": fetch_toss_kr_stock_snapshot, "us": fetch_toss_us_stock_snapshot}.get(country)
+    if fetch is None:
         return {}
     try:
-        from utils.data_loader import fetch_toss_kr_stock_snapshot
-
-        snapshot = fetch_toss_kr_stock_snapshot(list(sum19))
+        snapshot = fetch(list(sum19))
     except Exception:
         return {}
 

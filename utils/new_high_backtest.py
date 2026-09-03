@@ -467,6 +467,13 @@ def _should_auto_refresh(pool: str, quotes: dict[str, Any]) -> bool:
     return opens_at - pd.Timedelta(minutes=_PRE_MARKET_REFRESH_LEAD_MINUTES) <= now_local <= opens_at
 
 
+def _pool_country(pool: str) -> str:
+    """종목풀의 국가 코드(kor·us·au). 시장별 규칙을 고르는 단일 소스."""
+    from utils.settings_loader import get_ticker_type_settings
+
+    return str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+
+
 def _market_today(pool: str) -> str | None:
     """그 시장의 **현지 오늘** 날짜(YYYY-MM-DD). 시간대를 모르면 None — 날짜를 지어내지 않는다.
 
@@ -474,10 +481,8 @@ def _market_today(pool: str) -> str | None:
     지났는지' 는 시장 현지 날짜로 따져야 한다.
     """
     from config import MARKET_SCHEDULES
-    from utils.settings_loader import get_ticker_type_settings
 
-    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
-    tz_name = str(((MARKET_SCHEDULES or {}).get(country) or {}).get("timezone") or "").strip()
+    tz_name = str(((MARKET_SCHEDULES or {}).get(_pool_country(pool)) or {}).get("timezone") or "").strip()
     if not tz_name:
         return None
     try:
@@ -595,7 +600,8 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
 
     value_mult_by, value_mult_live_by = _load_trade_value_mult(pool, list(close_df.columns))
     min_value_mult = settings["min_value_mult"]
-    live_required = live_min_value_mult(min_value_mult)
+    # 장중 누적 배수에 맞춘 하한 — 그 시장의 세션 경과 비율만큼 낮춘다.
+    live_required = live_min_value_mult(min_value_mult, _pool_country(pool))
     # 일간 등락률 — 다른 화면(순위·시장추세)과 같은 기준으로 직전 거래일 종가 대비.
     prev_close = close_df.loc[close_df.index[-2]] if len(close_df.index) >= 2 else None
 
