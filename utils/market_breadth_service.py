@@ -75,7 +75,16 @@ MARKETS: dict[str, dict[str, Any]] = {
 
 # 그날 판정에 쓰인 종목이 대상의 이 비율에 못 미치면 기록하지 않는다.
 # 표본이 적은 날은 상승/하락 비가 크게 흔들려 ADR 을 통째로 왜곡한다.
+#
+# 시장 4개는 지수 구성종목이라 그날 전부 존재한다 — 표본이 모자라면 상장 문제가 아니라
+# **조회가 실패한 것**이므로 그날은 버린다.
 _MIN_COUNTED_RATIO = 0.9
+
+# 종목풀은 기준이 다르다. 과거로 갈수록 아직 상장 전인 종목이 많아 미달이 정상이고,
+# 그날 존재하던 종목들의 폭이 그 시점의 진짜 ADR 이다. 지금 구성의 90% 를 요구하면
+# 멀쩡한 과거를 통째로 버린다(kor_kr 은 1882일 중 115일만 남았다).
+# 50% 로 두면 실제로 세는 종목이 가장 적은 풀도 41종목이라 비율이 흔들리지 않는다.
+_POOL_MIN_COUNTED_RATIO = 0.5
 
 # 지수 티커 → 시장. 화면(`/market-trend`)의 지수 행과 ADR 을 잇는다.
 MARKET_BY_INDEX_TICKER = {"^KS11": "KOSPI", "^KQ11": "KOSDAQ", "^GSPC": "SP500", "^NDX": "NDX100"}
@@ -413,8 +422,8 @@ def refresh_pool_breadth(pools: list[str] | None = None, *, full: bool = False) 
             summary["pools"][pool] = {"skipped": True, "reason": "가격 캐시에 종가가 없습니다."}
             continue
 
-        # 표본이 적은 날은 등락비가 크게 흔들려 ADR 을 왜곡한다 — 시장 4개와 같은 가드.
-        min_counted = universe_size * _MIN_COUNTED_RATIO
+        # 표본 가드 — 종목풀은 시장 4개보다 느슨하다(위 상수 주석 참고).
+        min_counted = universe_size * _POOL_MIN_COUNTED_RATIO
         target_date = max(counts_by_date)
         inserted = updated = skipped = 0
         for date, counts in sorted(counts_by_date.items()):
