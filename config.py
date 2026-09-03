@@ -216,10 +216,16 @@ STOP_LOSS_PCT_OPTIONS: tuple[float, ...] = (-7.0, -10.0)
 # 모멘텀 ADR 하한 — 판정일의 시장 ADR(20일 등락비율)이 이 값 미만이면 그 주는 전량 현금.
 # None = 게이트 없음(기본). 시장은 풀 설정의 시장 레짐 지수를 따른다.
 # 85~95 는 코스닥 검증에서 확인된 유효 구간 — 100 은 중앙값 부근이라 상시 껌뻑여 제외.
-ADR_FLOOR_OPTIONS: tuple[int | None, ...] = (90, 95, 100)
+ADR_FLOOR_OPTIONS: tuple[int | None, ...] = (85, 90, 95, 100)
 
-# 거래대금 하한 — 평소 대비 몇 배 이상이어야 신호로 인정할지. None = 제한 없음.
-MIN_VALUE_MULT_OPTIONS: tuple[float | None, ...] = (5.0, 4.0, 3.0, 2.0, 1.0, None)
+# 거래대금 하한 — 평소(20일 평균) 대비 몇 배 이상이어야 신호로 인정할지. None = 제한 없음.
+# **국가별**이다 — 이평선 선택지(SHORT_MA_DAYS_BY_COUNTRY)와 같은 방식으로, 신고가의
+# 화면 셀렉트·튜닝 축·저장 검증이 풀 국가의 목록을 쓴다(`utils/new_high_service` 가 골라 준다).
+MIN_VALUE_MULT_OPTIONS_BY_COUNTRY: dict[str, tuple[float | None, ...]] = {
+    "kor": (5.0, 3.0, 1.0, None),
+    "us": (3.0, 2.0, 1.0, None),
+    "au": (3.0, 2.0, 1.0, None),
+}
 
 # 합성 전략의 비중 조정 지시 밴드 — 목표와의 차이가 「슬롯 목표비중 × RATIO」(최소 MIN_PCT %p)
 # 이상일 때만 매매 지시로 만든다. 고정 %p 만 쓰면 슬롯이 큰 종목은 하루 가격 변동(드리프트)만으로

@@ -18,12 +18,13 @@ import pandas as pd
 from config import ADR_FLOOR_OPTIONS
 from utils.new_high_service import (
     EXIT_MA_OPTIONS,
-    MIN_VALUE_MULT_OPTIONS,
     build_price_panel,
     compute_signals,
     load_price_frames,
     load_settings,
     load_universe,
+    min_value_mult_options,
+    pool_country,
     validate_settings,
 )
 from utils.strategy_tuning import (
@@ -159,7 +160,13 @@ def _stream_tuning(
     """묶음이 끝날 때마다 진행을, 마지막에 결과를 내보낸다(모멘텀 튜닝과 같은 형태)."""
     base = validate_settings(settings or load_settings())
     exit_mas = _checked(ranges.get("exit_ma_days", []), EXIT_MA_OPTIONS, "이탈 이평선", cast=int)
-    mults = _checked(ranges.get("min_value_mult", []), MIN_VALUE_MULT_OPTIONS, "거래대금 하한", cast=float)
+    # 거래대금 하한 축 — 선택지가 국가별이라 풀의 국가 목록으로 검증한다(화면 셀렉트와 같은 소스).
+    mults = _checked(
+        ranges.get("min_value_mult", []),
+        min_value_mult_options(pool_country(str(base["pool"]))),
+        "거래대금 하한",
+        cast=float,
+    )
     adr_floors = _checked(ranges.get("adr_floor", []), ADR_FLOOR_OPTIONS, "ADR 하한", cast=int)
 
     # 작업을 잘게 쪼개 코어가 놀지 않게 한다 — 이탈선마다 하나.
