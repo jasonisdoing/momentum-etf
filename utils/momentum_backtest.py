@@ -2,12 +2,15 @@
 
 방식
 ----
-- **매주 재선정한다.** 판정과 체결을 분리한다: **주 마지막 거래일 종가**까지의
+- **매주 판정한다.** 판정과 체결을 분리한다: **주 마지막 거래일 종가**까지의
   데이터로 선정을 계산하고, **다음 주 첫 거래일 시가**에 체결한다. 한 주 종가를
   모두 보고 판정한 뒤 주말 동안 검토할 시간을 두는 리듬이며, 종가로 판정한 것을
   같은 종가에 체결하는 동시성 편향(look-ahead)도 없다.
 - 선정은 꾸준한 모멘텀 점수(연율화 상대기울기 × R²) 순 — 화면 선정과 같은
   ``rank_candidates`` 를 써서 두 화면이 항상 일치한다.
+- **교체 규칙은 자격 유지 하나다**(``select_top_keeping``): 후보 자격이 남은 보유는
+  순위가 밀려도 계속 들고 가고, 자격을 잃어 빈 자리만 그 시점 상위 후보로 채운다.
+  매주 상위 N 을 새로 뽑는 방식은 순위 몇 계단 차이로 왕복 비용만 쌓아 폐기했다.
 - 슬롯 고정 비중: 종목당 1/top_n 로 배분하고, 자격 종목이 top_n 보다 적으면
   빈 슬롯은 현금으로 남긴다.
 - **주중 매도**(simulate_intraweek_exits): 보유 종목이 보유 자격(장기 이격 > 0 &
@@ -30,8 +33,6 @@ from typing import Any
 import pandas as pd
 
 from utils.momentum_service import (
-    REBALANCE_MODE_HOLD,
-    REBALANCE_MODE_WEEKLY,
     IntraweekSeriesCache,
     adr_gate_blocked,
     available_backtest_months,
@@ -43,7 +44,7 @@ from utils.momentum_service import (
     pool_info,
     rank_candidates,
     select_candidates,
-    select_top,
+    select_top_keeping,
     simulate_intraweek_exits,
     validate_settings,
     week_last_trading_day,
@@ -325,8 +326,6 @@ def run_backtest(
         bench_open = (
             positive_prices(_bench_frame["Open"]).dropna() if "Open" in _bench_frame.columns else pd.Series(dtype=float)
         )
-    # 교체 규칙 — 'hold' 면 순위가 밀려도 후보 자격이 남은 종목을 계속 들고 간다.
-    hold_while_eligible = str(settings.get("rebalance_mode") or REBALANCE_MODE_WEEKLY) == REBALANCE_MODE_HOLD
     previous_holdings: set[str] = set()
     # 직전 보유 구간의 종목별 성장배수(1+수익률) — 교체 시점의 드리프트 비중 계산용.
     previous_growth: dict[str, float] = {}
@@ -339,17 +338,8 @@ def run_backtest(
         end = dates[position + 1]
         # 판정은 교체일 직전 거래일(signal_dates), 체결·보유 구간은 교체일 시가(start→end).
         scored = rank_candidates(candidates_by_date[position])
-        if hold_while_eligible:
-            # 자격 유지형 — 후보에 남아 있으면 순위와 무관하게 계속 들고 가고, 자격을 잃어
-            # 빈 자리만 그 시점 상위 후보로 채운다. '자격' 판정은 따로 두지 않는다 —
-            # `candidates_by_date` 가 이미 후보 필터를 통과한 목록이라 거기 남아 있는지가
-            # 곧 자격이다(ADR 게이트에 걸린 주는 목록이 비어 전량 현금으로 간다).
-            ranked = [item["ticker"] for item in scored]
-            kept = [ticker for ticker in ranked if ticker in previous_holdings]
-            free = max(top_n - len(kept), 0)
-            holdings = kept + [ticker for ticker in ranked if ticker not in previous_holdings][:free]
-        else:
-            holdings = [item["ticker"] for item in select_top(scored, top_n)]
+        # 교체 규칙(자격 유지) — 공용 함수 하나만 쓴다.
+        holdings = [item["ticker"] for item in select_top_keeping(scored, top_n, previous_holdings)]
         holdings_set = set(holdings)
         added_tickers = sorted(holdings_set - previous_holdings)
         removed_tickers = sorted(previous_holdings - holdings_set)
@@ -534,7 +524,7 @@ def run_backtest(
         if last_pair is not None and last_pair[0] == last_cached:
             selection = {
                 item["ticker"]
-                for item in select_top(
+                for item in select_top_keeping(
                     rank_candidates(
                         select_candidates(
                             universe,
@@ -545,6 +535,7 @@ def run_backtest(
                         )
                     ),
                     top_n,
+                    previous_holdings,
                 )
             }
             for ticker in sorted(selection - previous_holdings):
@@ -669,7 +660,10 @@ def run_backtest(
     # ── 예정 행 — 다음 주. 매매가 없어도 '보유 N 유지'가 보이도록 항상 붙인다.
     if pending_signal is not None:
         # 다음 교체 판정일 종가가 이미 확정됐다 — 그 선정을 그대로 보여준다.
-        pending_holdings = {item["ticker"] for item in select_top(rank_candidates(candidates_by_date[-1]), top_n)}
+        pending_holdings = {
+            item["ticker"]
+            for item in select_top_keeping(rank_candidates(candidates_by_date[-1]), top_n, current_holdings)
+        }
         pending_added = sorted(pending_holdings - current_holdings)
         pending_removed = sorted(current_holdings - pending_holdings)
         pending_count = len(pending_holdings)

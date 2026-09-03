@@ -131,23 +131,14 @@ PER_POOL_SETTING_KEYS = (
     "short_ma_days",
     "long_ma_days",
     "adr_floor",
-    "intraweek_exit",
-    "rebalance_mode",
 )
 
-# 교체 규칙 — 주 교체일에 보유를 어떻게 정할지.
-#   weekly : 매주 상위 N 을 새로 뽑는다(기존 방식). 순위가 밀리면 자격이 남아도 편출한다.
-#   hold   : 후보 자격이 남아 있으면 순위와 무관하게 계속 들고 가고, 자격을 잃어 빈 자리만
-#            그 시점 상위 후보로 채운다(신고가 전략의 편입 방식과 같은 결).
-# 어느 쪽이 유리한지는 시장이 정한다 — 12·36개월 비교에서 us_stock 은 hold 가 수익·MDD·
-# 소르티노를 함께 개선했지만, kor_stock 은 수익이 1/3 로 무너졌다. 풀별로 튜닝해서 고른다.
-REBALANCE_MODE_WEEKLY = "weekly"
-REBALANCE_MODE_HOLD = "hold"
-REBALANCE_MODE_OPTIONS: tuple[str, ...] = (REBALANCE_MODE_WEEKLY, REBALANCE_MODE_HOLD)
-REBALANCE_MODE_LABELS: dict[str, str] = {
-    REBALANCE_MODE_WEEKLY: "매주 재선정",
-    REBALANCE_MODE_HOLD: "자격 유지",
-}
+# 교체 규칙·주중 이탈은 **전략의 일부**라 설정이 아니다.
+#   교체 규칙 = 자격 유지 : 후보 자격이 남아 있으면 순위와 무관하게 계속 들고 가고, 자격을
+#               잃어 빈 자리만 그 시점 상위 후보로 채운다(신고가 전략의 편입 방식과 같은 결).
+#               매주 상위 N 을 새로 뽑는 방식은 순위 몇 계단 차이로 왕복 비용만 쌓아 폐기했다.
+#   주중 이탈 = 사용 : 보유 자격(장기 이격 > 0 · 단기 이격 >= 0)을 잃으면 다음 거래일 시가에
+#               판다. 주 교체일까지 기다리면 급락 구간을 그대로 맞는다.
 
 # 전략 전용 이평선 선택지 — 화면 셀렉트와 튜닝 축이 같은 값을 쓴다.
 # 그리드 결과(kor_kr·kospi200·us)에서 장기 60~120 이 고원, 140 부터 열위라 140 까지만 둔다.
@@ -192,20 +183,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     if adr_floor is not None and adr_market_of_pool(pool) is None:
         raise ValueError("ADR 하한을 쓰려면 /pools-settings 에서 이 풀의 시장 레짐 지수를 먼저 설정하세요.")
 
-    # 주중 이탈 — 풀 성격에 따라 켜고 끈다. 개별주는 급락 방어가 필요하고,
-    # ETF 는 20일선 부근을 오르내리며 하루짜리 이탈이 잦아 왕복 비용만 커진다.
-    intraweek_exit = settings.get("intraweek_exit")
-    if not isinstance(intraweek_exit, bool):
-        raise ValueError("'intraweek_exit' 는 true/false 여야 합니다.")
-
-    # 교체 규칙 — 미설정이면 기존 동작(매주 재선정)으로 본다. 스키마 기본이지 임의 보정이 아니다.
-    rebalance_mode = str(settings.get("rebalance_mode") or REBALANCE_MODE_WEEKLY).strip().lower()
-    if rebalance_mode not in REBALANCE_MODE_OPTIONS:
-        allowed = ", ".join(f"{key}({REBALANCE_MODE_LABELS[key]})" for key in REBALANCE_MODE_OPTIONS)
-        raise ValueError(
-            f"'rebalance_mode' 는 {allowed} 중 하나여야 합니다 (받은 값: {settings.get('rebalance_mode')})."
-        )
-
     return {
         "pool": pool,
         # 종목 수는 순위·신고가·종목풀 백테스트와 같은 풀 설정을 쓴다.
@@ -213,8 +190,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "short_ma_days": short_ma_days,
         "long_ma_days": long_ma_days,
         "adr_floor": adr_floor,
-        "intraweek_exit": intraweek_exit,
-        "rebalance_mode": rebalance_mode,
     }
 
 
@@ -260,8 +235,6 @@ _POOL_KEY_BY_SETTING: dict[str, str] = {
     "short_ma_days": "SHORT_MA_DAYS",
     "long_ma_days": "LONG_MA_DAYS",
     "adr_floor": "ADR_FLOOR",
-    "intraweek_exit": "INTRAWEEK_EXIT",
-    "rebalance_mode": "REBALANCE_MODE",
 }
 
 
@@ -271,14 +244,12 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
     for setting_key, pool_key in _POOL_KEY_BY_SETTING.items():
         if pool_key not in config:
             # None 을 값으로 갖는 항목(ADR 하한 등)은 키 자체는 있어야 한다.
-            if setting_key in ("adr_floor", "intraweek_exit", "rebalance_mode"):
+            if setting_key == "adr_floor":
                 continue
             return None
         result[setting_key] = config[pool_key]
     # 없는 선택 항목은 '미설정' 기본값으로 채운다 — 임의 보정이 아니라 스키마 기본이다.
     result.setdefault("adr_floor", None)
-    result.setdefault("intraweek_exit", False)
-    result.setdefault("rebalance_mode", REBALANCE_MODE_WEEKLY)
     return result
 
 
@@ -698,6 +669,28 @@ def select_top(
     return [by_ticker[ticker] for ticker in picked]
 
 
+def select_top_keeping(
+    scored: list[dict[str, Any]],
+    top_n: int,
+    holdings: set[str],
+) -> list[dict[str, Any]]:
+    """교체 규칙(자격 유지)으로 상위 top_n 을 고른다 — 백테스트·화면 공용.
+
+    후보에 남아 있는 보유 종목은 순위와 무관하게 계속 들고 가고, 자격을 잃어 빈 자리만
+    그 시점 상위 후보로 채운다. '자격' 판정을 따로 두지 않는다 — ``scored`` 는 이미 후보
+    필터(`select_candidates`)를 통과한 목록이라 거기 남아 있는지가 곧 자격이다
+    (ADR 게이트에 걸린 주는 목록이 비어 전량 현금으로 간다).
+
+    ``holdings`` 가 비면 `select_top` 과 같다(첫 구간·전량 현금 뒤 재진입).
+    """
+    by_ticker = {item["ticker"]: item for item in scored}
+    ranked = [item["ticker"] for item in scored]
+    kept = [ticker for ticker in ranked if ticker in holdings]
+    free = max(top_n - len(kept), 0)
+    picked = kept + [ticker for ticker in ranked if ticker not in holdings][:free]
+    return [by_ticker[ticker] for ticker in picked]
+
+
 # ── 주간 리밸런싱 시점 ─────────────────────────────────────────────────────
 IntraweekSeriesCache = dict[
     tuple[str, int, int],
@@ -764,14 +757,7 @@ def simulate_intraweek_exits(
     하한 미만이면 남은 보유를 통째로 판다 — ADR 은 시장 지표라 종목별로 가를 근거가 없고,
     주간 게이트가 하는 일(그 주 전량 현금)과 같은 판단을 주중에 앞당기는 것이다.
     같은 날 이탈에 먼저 걸린 종목은 그 사유를 유지한다(더 구체적인 이유가 남는다).
-
-    설정의 ``intraweek_exit`` 이 꺼져 있으면 주중에는 팔지 않는다(주 교체일에만 정리).
-    ETF 풀처럼 20일선 부근을 오르내리는 종목이 많으면 하루짜리 이탈이 잦아 왕복
-    비용만 커지기 때문이다 — 풀 성격에 맞춰 화면에서 켜고 끈다.
     """
-    if not settings.get("intraweek_exit", True):
-        return []
-
     short_ma_days = int(settings["short_ma_days"])
     long_ma_days = int(settings["long_ma_days"])
 
@@ -1019,7 +1005,6 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
         # 주중 게이트 — 마지막 확정 종가 기준. 주간 판정(위 value)은 통과했어도 그 뒤 ADR 이
         # 무너지면 다음 거래일 시가에 전량 매도한다. 화면이 그 상태를 따로 알려야 해서
         # 판정일 값과 **함께** 싣는다(같은 자리에 최신값을 덮으면 게이트 근거가 사라진다).
-        # 주중 이탈이 꺼진 풀은 주중에 팔지 않으므로 None.
         latest_date = benchmark_close.index[-1]
         latest_value = series.asof(latest_date) if not series.empty else None
         adr_gate = {
@@ -1027,17 +1012,13 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
             "floor": settings["adr_floor"],
             "value": round(float(value), 1) if value is not None and pd.notna(value) else None,
             "blocked": adr_gate_blocked(settings, signal_date),
-            "intraweek": (
-                {
-                    "date": str(latest_date.date()),
-                    "value": (
-                        round(float(latest_value), 1) if latest_value is not None and pd.notna(latest_value) else None
-                    ),
-                    "blocked": adr_gate_blocked(settings, latest_date),
-                }
-                if settings.get("intraweek_exit", True)
-                else None
-            ),
+            "intraweek": {
+                "date": str(latest_date.date()),
+                "value": (
+                    round(float(latest_value), 1) if latest_value is not None and pd.notna(latest_value) else None
+                ),
+                "blocked": adr_gate_blocked(settings, latest_date),
+            },
         }
 
     momentum_series_cache: IntraweekSeriesCache = {}
@@ -1276,8 +1257,6 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
         전의 예보라 화면 표시 전용이다.
         """
         none = {"is_exit_forecast": False, "exit_forecast_reason": None}
-        if not settings.get("intraweek_exit", True):
-            return none
         if ticker not in set(held_tickers) or ticker in exit_by_ticker:
             return none
         # 자격 상실 — 현재 이격(전략 이평선 기준).
@@ -1348,9 +1327,7 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
         )
     )
     # 예상 순위·다음 주 편입은 **자격을 갖춘 종목만** 본다 — 선정 규칙과 같아야 한다.
-    current_scored = [
-        item for item in current_all if hold_eligible(item["disparity_pct"], item["short_disparity_pct"])
-    ]
+    current_scored = [item for item in current_all if hold_eligible(item["disparity_pct"], item["short_disparity_pct"])]
     current_top = select_top(current_scored, top_n)
     next_expected: set[str] = {item["ticker"] for item in current_top}
     # 예상 순위 — 판정일 순위와 같은 규칙의 '현재 기준' 버전: 선정분 1~top_n,
@@ -1367,7 +1344,9 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
     # "다음에 올라올 만한 종목" 을 보여준다. 자격 미달 행은 화면이 추세 이탈로 눌러 준다.
     eligible_tickers = {item["ticker"] for item in current_scored}
     reserve_pool = [item for item in current_scored if item["ticker"] not in selected_tickers] + [
-        item for item in current_all if item["ticker"] not in selected_tickers and item["ticker"] not in eligible_tickers
+        item
+        for item in current_all
+        if item["ticker"] not in selected_tickers and item["ticker"] not in eligible_tickers
     ]
     reserve = reserve_pool[: top_n * RESERVE_MULTIPLIER]
     # 현재 표(선정+차순위)에 없는 예상 종목 — 하단에 별도 행으로 붙인다.

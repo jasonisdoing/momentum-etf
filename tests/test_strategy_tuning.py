@@ -116,9 +116,7 @@ class StrategyTuningProgressTest(unittest.TestCase):
                 {
                     "short_ma_days": [20],
                     "long_ma_days": [50],
-                    "adr_floor": [None, 90],
-                    "intraweek": ["off", "none"],
-                    "rebalance_mode": ["weekly", "hold"],
+                    "adr_floor": [90, 100],
                 },
                 run,
             )
@@ -126,8 +124,8 @@ class StrategyTuningProgressTest(unittest.TestCase):
 
         progress = [event for event in events if event["type"] == "progress"]
         self.assertEqual([event["phase"] for event in progress], ["prepare", "backtest", "backtest", "finalize"])
-        self.assertEqual(progress[0]["total"], 8)
-        self.assertEqual(progress[2]["done"], 8)
+        self.assertEqual(progress[0]["total"], 2)
+        self.assertEqual(progress[2]["done"], 2)
 
 
 class DailyPerformanceMetricsTest(unittest.TestCase):
@@ -214,7 +212,6 @@ class MomentumIntraweekCacheTest(unittest.TestCase):
             )
         }
         settings = {
-            "intraweek_exit": True,
             "short_ma_days": 2,
             "long_ma_days": 3,
             "adr_floor": None,
@@ -246,7 +243,7 @@ class MomentumIntraweekCacheTest(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertEqual(moving_average.call_count, 2)
-        self.assertEqual(first[0]["reason"], "주중 손절")
+        self.assertEqual(first[0]["reason"], "주중 이탈")
 
 
 if __name__ == "__main__":
