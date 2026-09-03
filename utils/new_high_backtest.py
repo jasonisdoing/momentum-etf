@@ -467,6 +467,26 @@ def _should_auto_refresh(pool: str, quotes: dict[str, Any]) -> bool:
     return opens_at - pd.Timedelta(minutes=_PRE_MARKET_REFRESH_LEAD_MINUTES) <= now_local <= opens_at
 
 
+def _market_today(pool: str) -> str | None:
+    """그 시장의 **현지 오늘** 날짜(YYYY-MM-DD). 시간대를 모르면 None — 날짜를 지어내지 않는다.
+
+    미국 풀을 한국에서 보면 브라우저·서버의 날짜가 시장의 날짜와 하루 어긋난다. '그 세션이
+    지났는지' 는 시장 현지 날짜로 따져야 한다.
+    """
+    from config import MARKET_SCHEDULES
+    from utils.settings_loader import get_ticker_type_settings
+
+    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+    tz_name = str(((MARKET_SCHEDULES or {}).get(country) or {}).get("timezone") or "").strip()
+    if not tz_name:
+        return None
+    try:
+        return str(pd.Timestamp.now(tz=tz_name).date())
+    except Exception:
+        logger.exception("[new_high] 시장 현지 날짜 계산 실패 (%s)", pool)
+        return None
+
+
 def _next_session(pool: str, last: pd.Timestamp) -> str | None:
     """캐시 마지막 거래일 **다음**의 거래일 — 진입·청산이 체결되는 날.
 
@@ -807,6 +827,17 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
         # '일간(%)' 이 어긋나지 않는다. 고가·시가가 없거나 직전 세션 값이라 돌파 거리·터치·
         # 진입 예정은 확정 종가 기준 그대로 둔다.
         _apply_display_quotes(rows, holdings, quotes["by_ticker"])
+
+    # ── 지난 세션의 청산분은 버린다 ─────────────────────────────────────────
+    # `exited_today` 는 가격 캐시의 마지막 **확정** 거래일 체결분이다. 그 다음 거래일이
+    # 이미 시작됐다면(장중이든 마감 뒤든) 그건 어제 일이라 보유 표에 있을 이유가 없다 —
+    # 그 내역은 「체결」 탭에 그대로 남는다. 캐시가 하루 늦게 채워지는 동안(미국 종가는
+    # 한국 시간 새벽) 어제 팔린 종목이 계속 '이탈' 로 보이던 것을 여기서 끊는다.
+    # 실시간 시세 유무와 무관하게 **시장 현지 날짜**로만 판단한다. 장중에 위에서 담은
+    # 오늘 시가 체결분은 체결일이 오늘이라 그대로 남는다.
+    market_today = _market_today(pool)
+    if market_today:
+        simulated["exited_today"] = [t for t in simulated["exited_today"] if t["exit_date"] >= market_today]
 
     # 이미 보유 중인 종목은 다시 사지 않는다(백테스트도 같다). 목록에는 남기되 표시를 구분한다 —
     # 보유 종목이 아직 신고가를 갱신 중인지가 추세 판단에 쓸모 있다.
