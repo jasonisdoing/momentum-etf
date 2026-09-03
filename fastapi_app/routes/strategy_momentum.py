@@ -76,13 +76,11 @@ def _ma_rule_payload(settings: dict) -> dict:
 def _constraints_payload() -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트 복사본 제거)."""
     from config import ADR_FLOOR_OPTIONS
-    from utils.momentum_service import INTRAWEEK_STOP_OPTIONS, REBALANCE_MODE_LABELS, REBALANCE_MODE_OPTIONS
+    from utils.momentum_service import REBALANCE_MODE_LABELS, REBALANCE_MODE_OPTIONS
 
     return {
         # ADR 하한 — 판정일의 시장 ADR 이 미만이면 그 주 전량 현금. None = 게이트 없음(기본).
         "adr_floor_options": list(ADR_FLOOR_OPTIONS),
-        # 주중 손절선(%) — 주중 이탈이 켜진 풀에서만 화면에 노출한다. None = 손절 없음.
-        "intraweek_stop_options": list(INTRAWEEK_STOP_OPTIONS),
         # 교체 규칙 — 주 교체일에 보유를 어떻게 정할지. 화면 셀렉트와 튜닝 축이 같은 목록을 쓴다.
         "rebalance_mode_options": [
             {"value": key, "label": REBALANCE_MODE_LABELS[key]} for key in REBALANCE_MODE_OPTIONS

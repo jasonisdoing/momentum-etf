@@ -31,7 +31,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import ADR_FLOOR_OPTIONS, STOP_LOSS_PCT_OPTIONS
+from config import ADR_FLOOR_OPTIONS
 from core.strategy.scoring import (
     calculate_maps_score,
     compute_ma_disparity,
@@ -132,7 +132,6 @@ PER_POOL_SETTING_KEYS = (
     "long_ma_days",
     "adr_floor",
     "intraweek_exit",
-    "intraweek_stop_pct",
     "rebalance_mode",
 )
 
@@ -149,11 +148,6 @@ REBALANCE_MODE_LABELS: dict[str, str] = {
     REBALANCE_MODE_WEEKLY: "매주 재선정",
     REBALANCE_MODE_HOLD: "자격 유지",
 }
-
-# 주중 손절선 선택지(%) — 교체일 시가 대비 낙폭. None 은 '손절 없음'.
-# kor·kospi200 24개월 백테스트에서 -10 이 공통 피크였다(-5 는 휩쏘 손실, -15 는 효과 소멸).
-# 주중 손절 — 공용 손절 목록에 '안 씀(None)' 을 더한 것이다. 퍼센트 자체는 한 곳에서만 정한다.
-INTRAWEEK_STOP_OPTIONS: tuple[float | None, ...] = (None, *STOP_LOSS_PCT_OPTIONS)
 
 # 전략 전용 이평선 선택지 — 화면 셀렉트와 튜닝 축이 같은 값을 쓴다.
 # 그리드 결과(kor_kr·kospi200·us)에서 장기 60~120 이 고원, 140 부터 열위라 140 까지만 둔다.
@@ -204,20 +198,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(intraweek_exit, bool):
         raise ValueError("'intraweek_exit' 는 true/false 여야 합니다.")
 
-    # 주중 손절선 — 주중 이탈의 추가 조건이라 이탈이 켜져 있을 때만 의미가 있다.
-    # 미설정(None)은 '손절 없음'. 저장돼 있던 값이 선택지 밖이면 명시적으로 에러.
-    stop_raw = settings.get("intraweek_stop_pct")
-    if stop_raw in (None, ""):
-        intraweek_stop_pct = None
-    else:
-        try:
-            intraweek_stop_pct = float(stop_raw)
-        except (TypeError, ValueError) as error:
-            raise ValueError(f"'intraweek_stop_pct' 는 숫자여야 합니다: {stop_raw}") from error
-        if intraweek_stop_pct not in INTRAWEEK_STOP_OPTIONS:
-            allowed = ", ".join(str(v) for v in INTRAWEEK_STOP_OPTIONS if v is not None)
-            raise ValueError(f"'intraweek_stop_pct' 는 {allowed} 중 하나여야 합니다.")
-
     # 교체 규칙 — 미설정이면 기존 동작(매주 재선정)으로 본다. 스키마 기본이지 임의 보정이 아니다.
     rebalance_mode = str(settings.get("rebalance_mode") or REBALANCE_MODE_WEEKLY).strip().lower()
     if rebalance_mode not in REBALANCE_MODE_OPTIONS:
@@ -234,7 +214,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "long_ma_days": long_ma_days,
         "adr_floor": adr_floor,
         "intraweek_exit": intraweek_exit,
-        "intraweek_stop_pct": intraweek_stop_pct,
         "rebalance_mode": rebalance_mode,
     }
 
@@ -282,7 +261,6 @@ _POOL_KEY_BY_SETTING: dict[str, str] = {
     "long_ma_days": "LONG_MA_DAYS",
     "adr_floor": "ADR_FLOOR",
     "intraweek_exit": "INTRAWEEK_EXIT",
-    "intraweek_stop_pct": "INTRAWEEK_STOP_PCT",
     "rebalance_mode": "REBALANCE_MODE",
 }
 
@@ -292,15 +270,14 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
     result: dict[str, Any] = {}
     for setting_key, pool_key in _POOL_KEY_BY_SETTING.items():
         if pool_key not in config:
-            # None 을 값으로 갖는 항목(주중 손절선 등)은 키 자체는 있어야 한다.
-            if setting_key in ("adr_floor", "intraweek_stop_pct", "intraweek_exit", "rebalance_mode"):
+            # None 을 값으로 갖는 항목(ADR 하한 등)은 키 자체는 있어야 한다.
+            if setting_key in ("adr_floor", "intraweek_exit", "rebalance_mode"):
                 continue
             return None
         result[setting_key] = config[pool_key]
     # 없는 선택 항목은 '미설정' 기본값으로 채운다 — 임의 보정이 아니라 스키마 기본이다.
     result.setdefault("adr_floor", None)
     result.setdefault("intraweek_exit", False)
-    result.setdefault("intraweek_stop_pct", None)
     result.setdefault("rebalance_mode", REBALANCE_MODE_WEEKLY)
     return result
 
@@ -365,7 +342,6 @@ _OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
     ("short_ma_days", "단기 이평", SHORT_MA_OPTIONS),
     ("adr_floor", "ADR 하한", ADR_FLOOR_OPTIONS),
     ("long_ma_days", "장기 이평", LONG_MA_OPTIONS),
-    ("intraweek_stop_pct", "주중 손절선", INTRAWEEK_STOP_OPTIONS),
 )
 
 
@@ -725,7 +701,7 @@ def select_top(
 # ── 주간 리밸런싱 시점 ─────────────────────────────────────────────────────
 IntraweekSeriesCache = dict[
     tuple[str, int, int],
-    tuple[pd.Series, pd.Series, pd.Series, pd.Series] | None,
+    tuple[pd.Series, pd.Series, pd.Series] | None,
 ]
 
 
@@ -735,7 +711,7 @@ def _intraweek_series(
     short_ma_days: int,
     long_ma_days: int,
     series_cache: IntraweekSeriesCache,
-) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series] | None:
+) -> tuple[pd.Series, pd.Series, pd.Series] | None:
     """종목·이평 조합의 주중 판정 시계열을 만들고 호출자 캐시에 보관한다."""
     key = (ticker, short_ma_days, long_ma_days)
     if key in series_cache:
@@ -755,16 +731,10 @@ def _intraweek_series(
 
     short_ma = calculate_moving_average(close, short_ma_days, min_periods=short_ma_days)
     long_ma = calculate_moving_average(close, long_ma_days, min_periods=long_ma_days)
-    opens = (
-        positive_prices(frame["Open"]).dropna()
-        if frame is not None and not frame.empty and "Open" in frame.columns
-        else pd.Series(dtype=float)
-    )
     prepared = (
         calculate_maps_score(close, short_ma),
         calculate_maps_score(close, long_ma),
         close,
-        opens,
     )
     series_cache[key] = prepared
     return prepared
@@ -793,7 +763,7 @@ def simulate_intraweek_exits(
     ADR 하한이 설정돼 있으면 **날짜 단위 시장 게이트**도 함께 본다. 그날 시장 ADR 이
     하한 미만이면 남은 보유를 통째로 판다 — ADR 은 시장 지표라 종목별로 가를 근거가 없고,
     주간 게이트가 하는 일(그 주 전량 현금)과 같은 판단을 주중에 앞당기는 것이다.
-    같은 날 손절·이탈에 먼저 걸린 종목은 그 사유를 유지한다(더 구체적인 이유가 남는다).
+    같은 날 이탈에 먼저 걸린 종목은 그 사유를 유지한다(더 구체적인 이유가 남는다).
 
     설정의 ``intraweek_exit`` 이 꺼져 있으면 주중에는 팔지 않는다(주 교체일에만 정리).
     ETF 풀처럼 20일선 부근을 오르내리는 종목이 많으면 하루짜리 이탈이 잦아 왕복
@@ -804,20 +774,6 @@ def simulate_intraweek_exits(
 
     short_ma_days = int(settings["short_ma_days"])
     long_ma_days = int(settings["long_ma_days"])
-    stop_raw = settings.get("intraweek_stop_pct")
-    stop_pct = float(stop_raw) if stop_raw is not None else None
-
-    # 이 캐시는 백테스트 컨텍스트에 있어 같은 종목·이평 조합을 주차와 튜닝 조합 사이에서
-    # 재사용한다. 손절 기준가만 주 시작일마다 달라 아래 지역 캐시에 따로 둔다.
-    entry_price_cache: dict[str, float | None] = {}
-
-    def entry_price(ticker: str, opens: pd.Series) -> float | None:
-        if ticker not in entry_price_cache:
-            value = opens.asof(scan_start) if not opens.empty else None
-            entry_price_cache[ticker] = (
-                float(value) if value is not None and pd.notna(value) and float(value) > 0 else None
-            )
-        return entry_price_cache[ticker]
 
     remaining = set(holdings)
     exits: list[dict[str, Any]] = []
@@ -838,15 +794,7 @@ def simulate_intraweek_exits(
             if pd.isna(short_value) or pd.isna(long_value):
                 continue
             eligible = float(long_value) > 0 and float(short_value) >= 0
-            # 주중 손절 — 교체일 시가 대비 종가 낙폭이 손절선 이하면 자격과 무관하게 판다.
-            # kor·kospi200 백테스트에서 -10% 부근이 수익·MDD·소르티노를 함께 개선했다.
-            hit_stop = False
-            base = entry_price(ticker, series[3]) if stop_pct is not None else None
-            if stop_pct is not None and base is not None:
-                price = series[2].asof(day)
-                if pd.notna(price):
-                    hit_stop = (float(price) / base - 1.0) * 100.0 <= stop_pct
-            if eligible and not hit_stop:
+            if eligible:
                 continue
             remaining.discard(ticker)
             exits.append(
@@ -854,12 +802,11 @@ def simulate_intraweek_exits(
                     "ticker": ticker,
                     "signal_date": day,
                     "sell_date": sell_date,
-                    # 발동 사유 — 화면·체결 목록이 그대로 쓴다. 둘 다 걸리면 손절을 앞세운다
-                    # (손절이 더 급한 신호이고, 이평선 문구로 표시하면 원인을 오해한다).
-                    "reason": "주중 손절" if hit_stop else "주중 이탈",
+                    # 발동 사유 — 화면·체결 목록이 그대로 쓴다.
+                    "reason": "주중 이탈",
                 }
             )
-        # 종목별 판정 뒤에 본다 — 손절·이탈에 걸린 종목은 그 사유를 남기고, 남은 보유만
+        # 종목별 판정 뒤에 본다 — 이탈에 걸린 종목은 그 사유를 남기고, 남은 보유만
         # 시장 게이트로 정리한다. 어차피 같은 다음 거래일 시가 체결이라 성과는 같고
         # 사유 표시만 정확해진다.
         if remaining and adr_blocked(day):
@@ -1055,12 +1002,9 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
             if eff_close is None:
                 effective_frames[frame_ticker] = frame
             else:
-                # 시가는 원본을 보존한다 — 주중 손절선 기준가(교체일 시가)가 여기서 나온다.
-                # 종가만 남기면 손절 판정이 조용히 무력화된다(오늘 행의 시가는 없음으로 둔다).
-                columns = {"Close": eff_close}
-                if "Open" in frame.columns:
-                    columns["Open"] = pd.to_numeric(frame["Open"], errors="coerce")
-                effective_frames[frame_ticker] = pd.DataFrame(columns)
+                # 판정은 종가만 쓴다 — 시가가 필요한 계산(진입가 수익률 등)은 원본 캐시
+                # (cached_frames)에서 읽는다.
+                effective_frames[frame_ticker] = pd.DataFrame({"Close": eff_close})
         frames = effective_frames
 
     benchmark_close = load_benchmark_close(pool)
@@ -1327,41 +1271,18 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
         }
 
     def exit_forecast(ticker: str, current: dict[str, Any]) -> dict[str, Any]:
-        """주중 이탈·손절 **예상** — 현재(장중) 가격으로 확정 판정(simulate_intraweek_exits)과
-        같은 두 조건을 미리 본다: ① 자격 상실(장기 ≤ 0 또는 단기 < 0) ② 교체일 시가 대비
-        낙폭이 손절선 이하. 오늘 종가로 확정되기 전의 예보라 화면 표시 전용이다.
+        """주중 이탈 **예상** — 현재(장중) 가격으로 확정 판정(simulate_intraweek_exits)과
+        같은 조건(자격 상실: 장기 ≤ 0 또는 단기 < 0)을 미리 본다. 오늘 종가로 확정되기
+        전의 예보라 화면 표시 전용이다.
         """
         none = {"is_exit_forecast": False, "exit_forecast_reason": None}
         if not settings.get("intraweek_exit", True):
             return none
         if ticker not in set(held_tickers) or ticker in exit_by_ticker:
             return none
-        # ② 손절 — 기준가는 이번 구간 시작 체결가(교체일 시가). 확정 판정과 같은 소스(캐시 시가)를
-        #    쓰되, 체결 당일이라 캐시에 없으면 실시간 스냅샷의 오늘 시가로 대신한다.
-        stop_raw = settings.get("intraweek_stop_pct")
-        hit_stop = False
-        if stop_raw is not None and held_since is not None:
-            entry_price = None
-            frame = cached_frames.get(ticker)
-            if frame is not None and not frame.empty and "Open" in frame.columns:
-                opens = positive_prices(frame["Open"]).dropna()
-                if len(opens):
-                    entry_raw = opens.asof(held_since)
-                    if pd.notna(entry_raw) and float(entry_raw) > 0 and opens.index.asof(held_since) == held_since:
-                        entry_price = float(entry_raw)
-            if entry_price is None and held_since == pd.Timestamp.now().normalize():
-                snap_open = (realtime.get(ticker) or {}).get("open")
-                if snap_open and float(snap_open) > 0:
-                    entry_price = float(snap_open)
-            frame_now = frames.get(ticker)
-            close_now = pd.to_numeric(frame_now["Close"], errors="coerce").dropna() if frame_now is not None else None
-            if entry_price and close_now is not None and not close_now.empty:
-                hit_stop = (float(close_now.iloc[-1]) / entry_price - 1.0) * 100.0 <= float(stop_raw)
-        # ① 자격 상실 — 현재 이격(전략 이평선 기준).
+        # 자격 상실 — 현재 이격(전략 이평선 기준).
         short_now, long_now = current.get("current_short_pct"), current.get("current_long_pct")
         lost = short_now is not None and long_now is not None and (float(long_now) <= 0 or float(short_now) < 0)
-        if hit_stop:
-            return {"is_exit_forecast": True, "exit_forecast_reason": "주중 손절 예상"}
         if lost:
             return {"is_exit_forecast": True, "exit_forecast_reason": "주중 이탈 예상(이평선 하회)"}
         return none

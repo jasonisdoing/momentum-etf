@@ -47,7 +47,6 @@ type Settings = {
   pool: string;
   /** 종목풀 설정의 보유종목 수 — 이 화면에서는 표시·계산에만 쓴다. */
   top_n: number;
-  stop_loss_pct: number | null;
   exit_ma_days: number;
   /** 진입 자격 — 거래대금 배수 하한(20일 평균 대비). null 이면 조건 없음. */
   min_value_mult: number | null;
@@ -60,7 +59,6 @@ type PoolOption = PoolLabelSource & { country_code?: string; currency?: string; 
 
 type Constraints = {
   adr_floor_options?: (number | null)[];
-  stop_loss_options: (number | null)[];
   exit_ma_options: number[];
   min_value_mult_options: (number | null)[];
   month_options: number[];
@@ -380,7 +378,7 @@ const CURRENT_NOTES = [
   {
     title: "청산",
     body:
-      "종가가 손절선(진입가 대비) 아래거나 이탈 이동평균을 하회하면 다음 거래일 시가에 전량 매도합니다. " +
+      "종가가 이탈 이동평균을 하회하면 다음 거래일 시가에 전량 매도합니다. " +
       "부분 매도와 목표가(익절)는 없습니다.",
   },
   {
@@ -896,7 +894,7 @@ export function NewHighClient() {
       {
         headerName: "상태",
         // 진입 후보 표의 상태와 같은 폭 — 두 표가 나란히 있어 폭이 다르면 어긋나 보인다.
-        // "매도 예정(예상) (손절)" 같은 긴 문구는 잘릴 수 있어 전체를 툴팁으로 둔다.
+        // "매도 예정(예상) (이탈)" 같은 긴 문구는 잘릴 수 있어 전체를 툴팁으로 둔다.
         width: STATUS_COLUMN_WIDTH,
         minWidth: STATUS_COLUMN_MIN_WIDTH,
         cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
@@ -1111,29 +1109,11 @@ export function NewHighClient() {
                         ...draft,
                         adr_floor: event.target.value === "" ? null : Number(event.target.value),
                       })}
-                      title="전일 시장 ADR(20일 등락비율)이 이 값 미만이면 그날은 신규 진입을 하지 않는다. 보유 종목은 손절선·이탈 이평선이 그대로 관리한다. 시장은 종목풀 설정의 시장 레짐 지수를 따른다."
+                      title="전일 시장 ADR(20일 등락비율)이 이 값 미만이면 그날은 신규 진입을 하지 않는다. 보유 종목은 이탈 이평선이 그대로 관리한다. 시장은 종목풀 설정의 시장 레짐 지수를 따른다."
                     >
                       {(constraints.adr_floor_options ?? []).map((value) => (
                         <option key={String(value)} value={value == null ? "" : String(value)}>
                           {value == null ? "없음" : String(value)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">손절선</span>
-                    <select
-                      className="form-select form-select-sm"
-                      value={draft.stop_loss_pct == null ? "" : String(draft.stop_loss_pct)}
-                      onChange={(event) => setDraft({
-                        ...draft,
-                        stop_loss_pct: event.target.value === "" ? null : Number(event.target.value),
-                      })}
-                      title="진입가 대비 이 낙폭에 닿으면 다음 시가에 판다. '없음'이면 손절 없이 이탈 이평선만으로 청산한다."
-                    >
-                      {constraints.stop_loss_options.map((value) => (
-                        <option key={String(value)} value={value == null ? "" : String(value)}>
-                          {value == null ? "없음" : `${value}%`}
                         </option>
                       ))}
                     </select>
@@ -1396,14 +1376,13 @@ export function NewHighClient() {
           disabled={backtesting}
           fixedLabel={`현재 화면 값 기준 (종목 수 ${draft.top_n} 공통 고정)`}
           current={{
-            stop_loss_pct: draft.stop_loss_pct,
             exit_ma_days: draft.exit_ma_days,
             min_value_mult: draft.min_value_mult ?? null,
             adr_floor: draft.adr_floor ?? null,
           }}
           axes={[
             // 축 값 = 상단 셀렉트 선택지(서버 상수) — 순서·이름도 상단 설정과 같다.
-            // 종목 수(공통 고정)·업종 상한(폐기)은 축이 아니다 — 튜닝은 시장의 반응 속도와 급증·손절 기준만 잰다.
+            // 종목 수(공통 고정)·업종 상한(폐기)은 축이 아니다 — 튜닝은 시장의 반응 속도와 급증 기준만 잰다.
             { key: "exit_ma_days", label: "이탈 이평선", values: constraints.exit_ma_options.map((n) => ({ value: n, label: `${n}일` })) },
             {
               key: "min_value_mult",
@@ -1415,18 +1394,12 @@ export function NewHighClient() {
               label: "ADR 하한",
               values: (constraints.adr_floor_options ?? []).map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: String(n) })),
             },
-            {
-              key: "stop_loss_pct",
-              label: "손절선",
-              values: constraints.stop_loss_options.map((n) => ({ value: n, label: n == null ? "없음" : `${n}%` })),
-            },
           ]}
           onApply={async (params) => {
             // 조합을 상단 폼에 넣고 그대로 저장한다 (저장 응답이 폼·운용 현황을 갱신한다).
             await persistSettings(
               {
                 ...draft,
-                stop_loss_pct: params.stop_loss_pct == null ? null : Number(params.stop_loss_pct),
                 exit_ma_days: Number(params.exit_ma_days),
                 min_value_mult: params.min_value_mult == null ? null : Number(params.min_value_mult),
                 adr_floor: params.adr_floor == null ? null : Number(params.adr_floor),

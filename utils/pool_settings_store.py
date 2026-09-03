@@ -4,7 +4,7 @@ MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 
 
     구조: ticker_type, name, icon, order, country_code, currency, pool_kind
     편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS,             ← 전략 공용 설정
-          INTRAWEEK_EXIT, INTRAWEEK_STOP_PCT,                   ← 모멘텀 전용
+          INTRAWEEK_EXIT,                                       ← 모멘텀 전용
           BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, STOPLOSS_THRESHOLD_PCT,
           BENCHMARK, MARKET_REGIME_INDEX (선택 — 비우면 미설정)
 
@@ -34,7 +34,6 @@ from config import (
     ADR_FLOOR_OPTIONS,
     POOL_KIND_OPTIONS,
     SLIPPAGE_PCT_OPTIONS,
-    STOP_LOSS_PCT_OPTIONS,
     TOP_N_HOLD_OPTIONS,
 )
 from config import STOP_LOSS_PCT_OPTIONS as STOPLOSS_PCT_OPTIONS
@@ -63,7 +62,6 @@ OVERRIDABLE_KEYS: tuple[str, ...] = (
 MOMENTUM_KEYS: tuple[str, ...] = (
     "ADR_FLOOR",  # None = 게이트 없음 (모멘텀 ADR 하한 — 시장은 MARKET_REGIME_INDEX 를 따름)
     "INTRAWEEK_EXIT",
-    "INTRAWEEK_STOP_PCT",  # None = 손절 없음
     "REBALANCE_MODE",  # weekly = 매주 재선정(기존) · hold = 자격 유지
 )
 
@@ -355,14 +353,6 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
             allowed = ", ".join(REBALANCE_MODE_OPTIONS)
             raise PoolSettingsError(f"REBALANCE_MODE 는 {allowed} 중 하나여야 합니다: {raw}")
         cleaned["REBALANCE_MODE"] = mode
-    if "INTRAWEEK_STOP_PCT" in values:
-        raw = values["INTRAWEEK_STOP_PCT"]
-        stop = None if raw in (None, "", "none") else round(float(raw), 2)
-        allowed_stops = {None, *(round(v, 2) for v in STOP_LOSS_PCT_OPTIONS)}
-        if check_options and stop not in allowed_stops:
-            allowed = ", ".join("없음" if v is None else f"{v:g}" for v in (None, *STOP_LOSS_PCT_OPTIONS))
-            raise PoolSettingsError(f"INTRAWEEK_STOP_PCT 는 {allowed} 중 하나여야 합니다: {raw}")
-        cleaned["INTRAWEEK_STOP_PCT"] = stop
 
     for key in _FLOAT_KEYS:
         if key not in values:

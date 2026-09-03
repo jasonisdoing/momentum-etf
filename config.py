@@ -203,26 +203,23 @@ MIN_TRADING_DAYS = 10
 # 한쪽만 고쳐져 화면 셀렉트·튜닝 축·저장 검증이 전략별로 갈린다 — 실제로 종목 수에
 # 2 를 넣을 때 모멘텀만 바뀌어 두 화면이 달라졌다.
 # 여기에 두는 기준은 **의미가 같은가** 다. 값이 우연히 같아도 뜻이 다르면
-# (모멘텀의 주중 손절 vs 신고가의 손절선) 각 전략에 남긴다.
+# 각 전략에 남긴다.
 # 화면 셀렉트는 API 응답으로 받은 목록만 렌더한다(프론트에 복사본을 두지 않는다).
 
 # 풀별 보유 종목 수 선택지 — 실제 값은 DB(pool_settings)의 각 풀 문서에 저장한다.
 TOP_N_HOLD_OPTIONS: tuple[int, ...] = (5, 6, 8, 10)
 
-# 손절 기준(%) — 진입가·평단 대비 하락률. 세 군데가 같은 목록을 쓴다:
-#   · 신고가 전략의 손절선          (new_high_service.STOP_LOSS_OPTIONS)
-#   · 모멘텀 전략의 주중 손절        (momentum_service.INTRAWEEK_STOP_OPTIONS — 여기에 '없음' 추가)
-#   · 종목풀의 보유종목 손절 알림 기준 (pool_settings_store.STOPLOSS_PCT_OPTIONS)
-# '없음'을 허용할지는 쓰는 쪽이 정한다 — 목록 자체는 하나다.
+# 손절 기준(%) — 평단 대비 하락률. **보유종목 손절 알림**(pool_settings_store.
+# STOPLOSS_PCT_OPTIONS)만 쓴다.
 STOP_LOSS_PCT_OPTIONS: tuple[float, ...] = (-7.0, -10.0)
 
 # 모멘텀 ADR 하한 — 판정일의 시장 ADR(20일 등락비율)이 이 값 미만이면 그 주는 전량 현금.
 # None = 게이트 없음(기본). 시장은 풀 설정의 시장 레짐 지수를 따른다.
 # 85~95 는 코스닥 검증에서 확인된 유효 구간 — 100 은 중앙값 부근이라 상시 껌뻑여 제외.
-ADR_FLOOR_OPTIONS: tuple[int | None, ...] = (None, 90, 100)
+ADR_FLOOR_OPTIONS: tuple[int | None, ...] = (90, 95, 100)
 
 # 거래대금 하한 — 평소 대비 몇 배 이상이어야 신호로 인정할지. None = 제한 없음.
-MIN_VALUE_MULT_OPTIONS: tuple[float | None, ...] = (3.0, 2.0, 1.0, None)
+MIN_VALUE_MULT_OPTIONS: tuple[float | None, ...] = (5.0, 4.0, 3.0, 2.0, 1.0, None)
 
 # 합성 전략의 비중 조정 지시 밴드 — 목표와의 차이가 「슬롯 목표비중 × RATIO」(최소 MIN_PCT %p)
 # 이상일 때만 매매 지시로 만든다. 고정 %p 만 쓰면 슬롯이 큰 종목은 하루 가격 변동(드리프트)만으로

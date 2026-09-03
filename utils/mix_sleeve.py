@@ -94,12 +94,10 @@ def settings_summary(strategy: str, settings: dict[str, Any]) -> list[dict[str, 
             {"label": "이평선", "value": f"{settings.get('short_ma_days')}/{settings.get('long_ma_days')}일"},
             {"label": "ADR 하한", "value": optional(settings.get("adr_floor"))},
             {"label": "주중 이탈", "value": "사용" if settings.get("intraweek_exit") else "안 씀"},
-            {"label": "주중 손절선", "value": optional(settings.get("intraweek_stop_pct"), "%", empty="안 씀")},
         ]
     if strategy == NEW_HIGH:
         return [
             {"label": "종목 수", "value": optional(settings.get("top_n"), "개")},
-            {"label": "손절선", "value": optional(settings.get("stop_loss_pct"), "%", empty="안 씀")},
             {"label": "이탈 이평", "value": optional(settings.get("exit_ma_days"), "일")},
             {"label": "거래대금 하한", "value": optional(settings.get("min_value_mult"), "배")},
             {"label": "ADR 하한", "value": optional(settings.get("adr_floor"))},
@@ -290,9 +288,8 @@ def _momentum_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> S
             {
                 "ticker": str(row["ticker"]).strip(),
                 "name": row.get("name") or row["ticker"],
-                # 발동 사유 — 손절선·이평선 이탈·시장 게이트를 구분한다(판정 함수가 정한 값).
+                # 발동 사유 — 이평선 이탈·시장 게이트를 구분한다(판정 함수가 정한 값).
                 "reason": {
-                    "주중 손절": "주중 손절선 하회",
                     "주중 이탈": "자격 상실(이평선 하회)",
                     "ADR 게이트": "시장 ADR 하한 미달",
                 }.get(str(row.get("exit_reason") or ""), "자격 상실(이평선 하회)"),

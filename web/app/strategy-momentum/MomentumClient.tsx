@@ -79,7 +79,6 @@ const CURRENT_NOTES = [
     title: "주중 이탈",
     body:
       "보유 자격(장기 이격 > 0, 단기 이격 ≥ 0)을 잃으면 다음 거래일 시가에 전량 매도합니다. " +
-      "주중 손절선을 설정하면 교체일 시가 대비 낙폭이 그 이하일 때도 팝니다. " +
       "ADR 하한을 함께 쓰면 주중에 시장 ADR이 하한 아래로 내려간 날에도 남은 보유를 전부 팝니다 " +
       "— 주간 게이트가 다음 교체일에 할 일을 그날로 앞당깁니다. " +
       "판 슬롯은 다음 교체까지 현금입니다(풀별 설정으로 켜고 끕니다).",
@@ -104,8 +103,6 @@ type PoolSettings = {
   intraweek_exit: boolean;
   /** 교체 규칙 — "weekly"(매주 재선정) / "hold"(자격 유지). */
   rebalance_mode: string;
-  /** 주중 손절선(%) — 교체일 시가 대비 낙폭. null 은 손절 없음. 주중 이탈이 켜진 풀만 의미 있다. */
-  intraweek_stop_pct?: number | null;
 };
 
 type Settings = PoolSettings & { pool: string };
@@ -123,7 +120,7 @@ type PickRow = {
   is_exited?: boolean;
   is_exit_pending?: boolean;
   exit_date?: string | null;
-  /** 주중 매도 사유 — "주중 손절"(손절선 도달) · "주중 이탈"(자격 상실) · "ADR 게이트"(시장 하한 미달). */
+  /** 주중 매도 사유 — "주중 이탈"(자격 상실) · "ADR 게이트"(시장 하한 미달). */
   exit_reason?: string | null;
   streak_weeks: number | null;
   /** 연속 편입이 시작된 교체일 — 차트 탭의 Buy 마커 위치. 선정분만 값이 있다. */
@@ -131,7 +128,7 @@ type PickRow = {
   /** 편입 후 수익률(%) — 연속 편입 시작 교체일 시가 대비. 보유 중인 종목만 값이 있다. */
   entry_return_pct?: number | null;
   next_week_expected: boolean;
-  /** 주중 이탈·손절 **예상** — 현재(장중) 가격 기준, 오늘 종가로 확정 전. */
+  /** 주중 이탈 **예상** — 현재(장중) 가격 기준, 오늘 종가로 확정 전. */
   is_exit_forecast?: boolean;
   exit_forecast_reason?: string | null;
   ticker: string;
@@ -196,7 +193,7 @@ type BacktestWeekRow = {
   benchmark_pct: number | null;
   holdings_count: number;
   holdings_start?: number;
-  /** 주중 이탈·손절 매도 — "종목명(코드) · 사유" 형식. */
+  /** 주중 이탈 매도 — "종목명(코드) · 사유" 형식. */
   exited?: string[];
   turnover_pct: number | null;
   added: string[];
@@ -271,7 +268,6 @@ type View = {
   // 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다).
   constraints?: {
     adr_floor_options?: (number | null)[];
-    intraweek_stop_options?: (number | null)[];
     /** 교체 규칙 선택지 — 백엔드 상수가 단일 소스. 화면 셀렉트와 튜닝 축이 같이 쓴다. */
     rebalance_mode_options?: { value: string; label: string }[];
   };
@@ -344,8 +340,6 @@ export function MomentumClient() {
   // ADR 하한 — "" 은 없음(기본). 시장은 풀 설정의 시장 레짐 지수를 따른다.
   const [draftAdrFloor, setDraftAdrFloor] = useState<string>("");
   const [draftIntraweekExit, setDraftIntraweekExit] = useState(true);
-  // 주중 손절선 — "" 은 손절 없음. 주중 이탈이 켜졌을 때만 셀렉트를 노출한다.
-  const [draftIntraweekStop, setDraftIntraweekStop] = useState<string>("");
   // 교체 규칙 — 주 교체일에 보유를 어떻게 정할지. 저장값이 없던 풀은 기존 동작(weekly).
   const [draftRebalanceMode, setDraftRebalanceMode] = useState<string>("weekly");
 
@@ -355,7 +349,6 @@ export function MomentumClient() {
     setDraftMaRule({ short: values.short_ma_days, long: values.long_ma_days });
     setDraftAdrFloor(values.adr_floor == null ? "" : String(values.adr_floor));
     setDraftIntraweekExit(values.intraweek_exit);
-    setDraftIntraweekStop(values.intraweek_stop_pct == null ? "" : String(values.intraweek_stop_pct));
     setDraftRebalanceMode(values.rebalance_mode || "weekly");
   }, []);
 
@@ -453,7 +446,7 @@ export function MomentumClient() {
         const payload = await resp.json();
         if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
         const saved = payload as View;
-        // 이 폼의 설정(종목풀·이평선·거래대금 하한·주중 이탈·손절선)은 전부 선정·매도 예정에
+        // 이 폼의 설정(종목풀·이평선·주중 이탈·교체 규칙)은 전부 선정·매도 예정에
         // 영향을 준다 — 저장하면 무조건 다시 계산한다. (예전의 "선정 무관 설정" 예외 목록은
         // 슬리피지가 이 폼에 있던 시절의 유물이라 제거했다.)
         applyView({ ...saved, picks: null });
@@ -494,13 +487,11 @@ export function MomentumClient() {
         long_ma_days: draftMaRule.long,
         adr_floor: draftAdrFloor === "" ? null : Number(draftAdrFloor),
         intraweek_exit: draftIntraweekExit,
-        // 주중 이탈을 끄면 손절선도 함께 해제한다 — 이탈의 추가 조건이라 홀로는 의미가 없다.
-        intraweek_stop_pct: draftIntraweekExit && draftIntraweekStop !== "" ? Number(draftIntraweekStop) : null,
         rebalance_mode: draftRebalanceMode,
       },
       "설정을 저장했습니다.",
     );
-  }, [draftAdrFloor, draftIntraweekExit, draftIntraweekStop, draftMaRule, draftPool, draftRebalanceMode, persistSettings, toast, view?.settings.top_n]);
+  }, [draftAdrFloor, draftIntraweekExit, draftMaRule, draftPool, draftRebalanceMode, persistSettings, toast, view?.settings.top_n]);
 
   // 풀 셀렉트 변경 — 그 풀의 저장 설정이 있으면 **즉시 전환·저장·재선정**한다
   // (전환은 초안이 아니라 컨텍스트 스위치다). 저장분이 없는 풀(첫 설정)만 초안으로
@@ -625,14 +616,13 @@ export function MomentumClient() {
       draftPool !== saved.pool ||
       (draftAdrFloor === "" ? null : Number(draftAdrFloor)) !== (saved.adr_floor ?? null) ||
       draftIntraweekExit !== saved.intraweek_exit ||
-      (draftIntraweekStop === "" ? null : Number(draftIntraweekStop)) !== (saved.intraweek_stop_pct ?? null) ||
       draftRebalanceMode !== (saved.rebalance_mode || "weekly") ||
       (draftMaRule != null &&
         view.ma_rule != null &&
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
           draftMaRule.long !== view.ma_rule.long_ma_days))
     );
-  }, [draftAdrFloor, draftIntraweekExit, draftIntraweekStop, draftMaRule, draftPool, draftRebalanceMode, view]);
+  }, [draftAdrFloor, draftIntraweekExit, draftMaRule, draftPool, draftRebalanceMode, view]);
 
   const monthlyLabels = view?.picks?.monthly_return_labels ?? [];
   // 선정 결과 풀의 국가 — 마켓·시가총액 컬럼 표시와 티커 표기(ASX:)를 정한다.
@@ -661,7 +651,7 @@ export function MomentumClient() {
           "이번 포트폴리오까지 몇 주 연속 편입됐는지 (신규 = 이번 주 첫 편입, 최대 12주 추적). " +
           "화살표 — →유지/→신규(초록)는 다음 주 예상, 확정은 교체일 직전 판정일 종가. " +
           "빨강은 빠지는 종목이다: →교체예정은 다음 주 순위 교체, →매도예정은 주중 이탈 확정 후 다음 시가 매도, " +
-          "→손절·→이탈(굵게)은 주중에 이미 매도된 것. →손절(예상)/→이탈(예상)은 장중 가격 기준 예보로 " +
+          "→이탈(굵게)은 주중에 이미 매도된 것. →이탈(예상)은 장중 가격 기준 예보로 " +
           "오늘 종가로 확정되면 다음 거래일 시가에 판다.",
         width: 108,
         cellDataType: "text",
@@ -674,16 +664,14 @@ export function MomentumClient() {
           // 주중 이탈이 확정됐지만 미체결이면 매도예정, 이미 매도됐으면 사유를 굵게 표시한다.
           let next: React.ReactNode = null;
           if (p.data?.is_exited) {
-            const reason = String(p.data.exit_reason ?? "").includes("손절") ? "손절" : "이탈";
-            next = <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}> →{reason}</span>;
+            next = <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}> →이탈</span>;
           } else if (p.data?.is_exit_pending) {
             next = <span style={{ color: "var(--up-color, #d64545)" }}> →매도예정</span>;
           } else if (p.data?.is_exit_forecast) {
-            // 주중 이탈·손절 **예보** — 다음주 순위 예상보다 우선한다(오늘 종가 확정 시 내일 시가 매도).
-            const reason = String(p.data.exit_forecast_reason ?? "").includes("손절") ? "손절" : "이탈";
+            // 주중 이탈 **예보** — 다음주 순위 예상보다 우선한다(오늘 종가 확정 시 내일 시가 매도).
             next = (
               <span style={{ color: "var(--up-color, #d64545)", opacity: 0.75 }} title="오늘 종가로 확정 시 다음 거래일 시가 매도">
-                {" "}→{reason}(예상)
+                {" "}→이탈(예상)
               </span>
             );
           } else if (p.data?.next_week_expected) {
@@ -993,7 +981,7 @@ export function MomentumClient() {
       {
         headerName: "종목 수",
         field: "holdings_count",
-        headerTooltip: "교체 직후 → 주말 종목 수. 화살표가 있으면 주중 이탈·손절로 줄어든 것(이탈 컬럼 참고).",
+        headerTooltip: "교체 직후 → 주말 종목 수. 화살표가 있으면 주중 이탈로 줄어든 것(이탈 컬럼 참고).",
         width: 84,
         type: "numericColumn",
         cellDataType: "text",
@@ -1035,9 +1023,9 @@ export function MomentumClient() {
         cellStyle: () => ({ color: "var(--down-color, #2f6fd0)" }),
       },
       {
-        headerName: "이탈·손절",
+        headerName: "이탈",
         field: "exited",
-        headerTooltip: "주중에 자격 상실·손절선으로 매도된 종목 (교체 편출과 별개, 판 슬롯은 다음 교체까지 현금)",
+        headerTooltip: "주중에 자격 상실로 매도된 종목 (교체 편출과 별개, 판 슬롯은 다음 교체까지 현금)",
         flex: 1,
         minWidth: 200,
         wrapText: true,
@@ -1203,27 +1191,6 @@ export function MomentumClient() {
                         <option value="off">미사용</option>
                       </select>
                     </label>
-                    {draftIntraweekExit ? (
-                      <label className="appLabeledField">
-                        <span className="appLabeledFieldLabel">주중 손절선</span>
-                        <select
-                          className="form-select form-select-sm"
-                          style={{ width: 96 }}
-                          value={draftIntraweekStop}
-                          onChange={(e) => setDraftIntraweekStop(e.target.value)}
-                          title="교체일 시가 대비 종가 낙폭이 이 값 이하면 자격과 무관하게 다음 거래일 시가에 매도한다."
-                        >
-                          <option value="">없음</option>
-                          {(view.constraints?.intraweek_stop_options ?? [])
-                            .filter((v): v is number => v != null)
-                            .map((v) => (
-                              <option key={v} value={String(v)}>
-                                {v}%
-                              </option>
-                            ))}
-                        </select>
-                      </label>
-                    ) : null}
                   </>
                 ) : null}
               </div>
@@ -1499,16 +1466,12 @@ export function MomentumClient() {
             short_ma_days: view.settings.short_ma_days,
             long_ma_days: view.settings.long_ma_days,
             adr_floor: view.settings.adr_floor ?? null,
-            intraweek: !view.settings.intraweek_exit
-              ? "off"
-              : view.settings.intraweek_stop_pct == null
-                ? "none"
-                : view.settings.intraweek_stop_pct,
+            intraweek: view.settings.intraweek_exit ? "on" : "off",
             rebalance_mode: view.settings.rebalance_mode || "weekly",
           }}
           axes={[
             // 축 값 = 상단 셀렉트 선택지(서버 상수) — 여기서 따로 정하지 않는다.
-            // 종목 수(공통 고정)·업종 상한(폐기)은 축이 아니다 — 튜닝은 시장의 이평 반응과 손절 기준만 잰다.
+            // 종목 수(공통 고정)·업종 상한(폐기)은 축이 아니다 — 튜닝은 시장의 이평 반응만 잰다.
             { key: "short_ma_days", label: "단기 이평", values: (view.ma_rule?.short_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },
             { key: "long_ma_days", label: "장기 이평", values: (view.ma_rule?.long_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },
             {
@@ -1518,12 +1481,10 @@ export function MomentumClient() {
             },
             {
               key: "intraweek",
-              label: "주중 손절선",
+              label: "주중 이탈",
               values: [
-                { value: "off", label: "이탈 미사용" },
-                ...(view.constraints?.intraweek_stop_options ?? []).map((n) =>
-                  n == null ? { value: "none", label: "이탈만(손절 없음)" } : { value: n, label: `${n}%` },
-                ),
+                { value: "off", label: "미사용" },
+                { value: "on", label: "사용" },
               ],
             },
             {
@@ -1537,16 +1498,13 @@ export function MomentumClient() {
           ]}
           onApply={async (params) => {
             // 조합을 상단 폼에 넣고 그대로 저장한다 (저장 응답이 폼·선정을 갱신한다).
-            const intraweekExit = params.intraweek !== "off";
-            const stop = typeof params.intraweek === "number" ? params.intraweek : null;
             const next = {
               ...view.settings,
               pool: draftPool,
               short_ma_days: Number(params.short_ma_days),
               long_ma_days: Number(params.long_ma_days),
               adr_floor: params.adr_floor == null ? null : Number(params.adr_floor),
-              intraweek_exit: intraweekExit,
-              intraweek_stop_pct: intraweekExit ? stop : null,
+              intraweek_exit: params.intraweek !== "off",
               rebalance_mode: String(params.rebalance_mode ?? view.settings.rebalance_mode ?? "weekly"),
             };
             fillDrafts(next);
