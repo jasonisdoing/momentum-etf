@@ -891,6 +891,9 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
         "country": str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower(),
         # 진입 예정·매도 예정이 실제로 체결되는 날. 화면이 '오늘/내일' 을 이 값으로 가른다.
         "next_session": _next_session(pool, fill_base),
+        # 동시 보유 상한 — 화면이 '빈 슬롯' 행 수를 이 값으로 센다. 설정 초안이 아니라
+        # **이 결과를 만든 값**을 그대로 내려, 저장 전 화면 값과 어긋나지 않게 한다.
+        "top_n": int(settings["top_n"]),
         "holdings": holdings,
         # 내일 시가에 살 종목 (자리·자격·우선순위를 모두 적용한 결과).
         "planned_entries": entries,
