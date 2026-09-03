@@ -76,15 +76,10 @@ def _ma_rule_payload(settings: dict) -> dict:
 def _constraints_payload() -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트 복사본 제거)."""
     from config import ADR_FLOOR_OPTIONS
-    from utils.momentum_service import REBALANCE_MODE_LABELS, REBALANCE_MODE_OPTIONS
 
     return {
         # ADR 하한 — 판정일의 시장 ADR 이 미만이면 그 주 전량 현금. None = 게이트 없음(기본).
         "adr_floor_options": list(ADR_FLOOR_OPTIONS),
-        # 교체 규칙 — 주 교체일에 보유를 어떻게 정할지. 화면 셀렉트와 튜닝 축이 같은 목록을 쓴다.
-        "rebalance_mode_options": [
-            {"value": key, "label": REBALANCE_MODE_LABELS[key]} for key in REBALANCE_MODE_OPTIONS
-        ],
     }
 
 
@@ -196,8 +191,7 @@ def post_strategy_momentum_tuning(
     """튜닝 — 설정 항목 범위의 모든 조합을 백테스트한다 (저장된 설정 기준).
 
     body: ``{"months": 12, "ranges": {
-    "short_ma_days": [...], "long_ma_days": [...], "adr_floor": [...],
-    "intraweek": ["off", "none", -7, ...], "rebalance_mode": [...]}}``
+    "short_ma_days": [...], "long_ma_days": [...], "adr_floor": [...]}}``
 
     응답은 **SSE 스트림**이다 — 준비·조합 완료·집계 진행 이벤트와 마지막 결과 이벤트.
     다 끝난 뒤 한 번에 응답하면 10분 넘게 소식이 없어 화면이 죽은 것처럼 보이고,

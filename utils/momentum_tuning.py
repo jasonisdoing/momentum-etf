@@ -1,21 +1,17 @@
 """모멘텀 전략 튜닝 — 설정 항목들의 범위 조합을 한 번에 백테스트해 비교한다.
 
-화면 '튜닝' 섹션용. 축(화면 순서): 선정 이평(단기·장기) · ADR 하한 · 주중 이탈.
-종목 수는 풀 설정(`pool_settings.TOP_N_HOLD`) 고정, 업종 상한은 폐기 — 튜닝은 "그 시장이 어떤
-이동평균에 반응하는가"를 재는 용도로만 쓴다(종목 수까지 돌리면 과적합 탐색이 된다).
+화면 '튜닝' 섹션용. 축(화면 순서): 선정 이평(단기·장기) · ADR 하한.
+종목 수는 풀 설정(`pool_settings.TOP_N_HOLD`) 고정, 업종 상한은 폐기, 교체 규칙(자격 유지)과
+주중 이탈(사용)은 전략에 고정 — 튜닝은 "그 시장이 어떤 이동평균에 반응하는가"를 재는 용도로만
+쓴다(종목 수까지 돌리면 과적합 탐색이 된다).
 (단기, 장기) 쌍을 작업 단위로 별도 프로세스에서 병렬로 돌린다 — 각 프로세스는 가격·판정일별
 후보를 한 번 읽어 그 쌍의 전 조합에 공유(run_backtest 의 context)하므로 조합당 0.5초 수준이고,
 병렬 수(코어 수 − 1)만큼 전체 시간이 줄어든다.
-
-주중 이탈 축의 값
-  "off" → 주중 이탈 미사용
-  "on"  → 주중 이탈 사용(이평선 이탈)
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
-from itertools import product
 from typing import Any
 
 import pandas as pd
@@ -23,8 +19,6 @@ import pandas as pd
 from config import ADR_FLOOR_OPTIONS
 from utils.momentum_service import (
     LONG_MA_OPTIONS,
-    REBALANCE_MODE_OPTIONS,
-    REBALANCE_MODE_WEEKLY,
     SHORT_MA_OPTIONS,
     load_settings,
     validate_settings,
@@ -40,15 +34,7 @@ from utils.strategy_tuning import (
     tuning_cancelled,
 )
 
-TUNING_AXES = ("short_ma_days", "long_ma_days", "adr_floor", "intraweek", "rebalance_mode")
-
-
-def _intraweek_settings(value: Any) -> dict[str, Any]:
-    if value == "off":
-        return {"intraweek_exit": False}
-    if value == "on":
-        return {"intraweek_exit": True}
-    raise ValueError(f"주중 이탈 값이 올바르지 않습니다: {value}")
+TUNING_AXES = ("short_ma_days", "long_ma_days", "adr_floor")
 
 
 def _checked_optional_ints(values: list[Any], options: tuple, label: str) -> list[Any]:
@@ -112,7 +98,7 @@ def _preload(pool: str) -> dict[str, Any]:
 
 def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
     """(단기, 장기) 쌍 하나의 조합 — 별도 프로세스에서 돈다."""
-    months, base, short, long, adr_floors, intraweeks, rebalance_modes = task
+    months, base, short, long, adr_floors = task
     from utils.momentum_backtest import run_backtest
 
     context = _WORKER_CONTEXT
@@ -120,17 +106,10 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
         context.update({k: _PRELOAD[k] for k in ("universe", "frames", "benchmark_close")})
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
-    for adr_floor, value, rebalance_mode in product(adr_floors, intraweeks, rebalance_modes):
+    for adr_floor in adr_floors:
         if tuning_cancelled():
             break
-        combo = dict(
-            base,
-            short_ma_days=short,
-            long_ma_days=long,
-            adr_floor=adr_floor,
-            rebalance_mode=rebalance_mode,
-            **_intraweek_settings(value),
-        )
+        combo = dict(base, short_ma_days=short, long_ma_days=long, adr_floor=adr_floor)
         try:
             result = run_backtest(months, combo, include_daily=True, tuning_only=True, context=context)
         except ValueError as error:  # 장기 이평이 길어 기간이 모자라는 조합 — 그 이평 쌍은 통째로 건너뛴다
@@ -141,13 +120,7 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
         returns = daily.set_index("date")["strategy_pct"].dropna()
         rows.append(
             summarize_combo(
-                {
-                    "short_ma_days": short,
-                    "long_ma_days": long,
-                    "adr_floor": adr_floor,
-                    "intraweek": value,
-                    "rebalance_mode": rebalance_mode,
-                },
+                {"short_ma_days": short, "long_ma_days": long, "adr_floor": adr_floor},
                 returns,
                 {"trade_count": result["trade_count"], "win_rate_pct": result["win_rate_pct"]},
             )
@@ -188,25 +161,12 @@ def _stream_tuning(
     shorts = _checked(ranges.get("short_ma_days", []), SHORT_MA_OPTIONS, "단기 이평")
     adr_floors = _checked_optional_ints(ranges.get("adr_floor", []), ADR_FLOOR_OPTIONS, "ADR 하한")
     longs = _checked(ranges.get("long_ma_days", []), LONG_MA_OPTIONS, "장기 이평")
-    intraweeks = list(dict.fromkeys(ranges.get("intraweek", [])))
-    if not intraweeks:
-        raise ValueError("'주중 이탈' 범위가 비어 있습니다.")
-    for value in intraweeks:
-        _intraweek_settings(value)  # 검증
-    rebalance_modes = list(dict.fromkeys(str(v).strip().lower() for v in ranges.get("rebalance_mode", [])))
-    if not rebalance_modes:
-        # 축을 안 보낸 예전 요청은 저장된 규칙 하나로 돈다 — 조합 수가 조용히 두 배가 되지 않는다.
-        rebalance_modes = [str(base.get("rebalance_mode") or REBALANCE_MODE_WEEKLY)]
-    bad = [v for v in rebalance_modes if v not in REBALANCE_MODE_OPTIONS]
-    if bad:
-        allowed = ", ".join(REBALANCE_MODE_OPTIONS)
-        raise ValueError(f"'교체 규칙' 값이 올바르지 않습니다: {', '.join(bad)} (가능: {allowed})")
     ma_pairs = [(short, long) for short in shorts for long in longs if short < long]
     if not ma_pairs:
         raise ValueError("단기 이평이 장기 이평보다 작은 조합이 없습니다.")
 
-    tasks = [(months, base, short, long, adr_floors, intraweeks, rebalance_modes) for short, long in ma_pairs]
-    combos_per_group = len(adr_floors) * len(intraweeks) * len(rebalance_modes)
+    tasks = [(months, base, short, long, adr_floors) for short, long in ma_pairs]
+    combos_per_group = len(adr_floors)
     total_combos = len(tasks) * combos_per_group
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []

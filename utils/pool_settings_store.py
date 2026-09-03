@@ -4,7 +4,7 @@ MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 
 
     구조: ticker_type, name, icon, order, country_code, currency, pool_kind
     편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS,             ← 전략 공용 설정
-          INTRAWEEK_EXIT,                                       ← 모멘텀 전용
+          ADR_FLOOR,                                            ← 모멘텀 전용
           BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, STOPLOSS_THRESHOLD_PCT,
           BENCHMARK, MARKET_REGIME_INDEX (선택 — 비우면 미설정)
 
@@ -61,8 +61,6 @@ OVERRIDABLE_KEYS: tuple[str, ...] = (
 # 로딩 필수값은 아니다(미설정이면 전략 화면에서 저장해야 한다).
 MOMENTUM_KEYS: tuple[str, ...] = (
     "ADR_FLOOR",  # None = 게이트 없음 (모멘텀 ADR 하한 — 시장은 MARKET_REGIME_INDEX 를 따름)
-    "INTRAWEEK_EXIT",
-    "REBALANCE_MODE",  # weekly = 매주 재선정(기존) · hold = 자격 유지
 )
 
 # 보유종목 손절 알림 기준(%). 이평선과 같은 성격의 **종목 판정 기준**이라 계좌가 아니라
@@ -341,18 +339,6 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
             allowed = ", ".join("없음" if v is None else str(v) for v in ADR_FLOOR_OPTIONS)
             raise PoolSettingsError(f"ADR_FLOOR 는 {allowed} 중 하나여야 합니다: {raw}")
         cleaned["ADR_FLOOR"] = floor
-    if "INTRAWEEK_EXIT" in values:
-        cleaned["INTRAWEEK_EXIT"] = bool(values["INTRAWEEK_EXIT"])
-    if "REBALANCE_MODE" in values:
-        # 교체 규칙 — 값 목록은 모멘텀 서비스가 단일 소스다(여기 복사본을 두지 않는다).
-        from utils.momentum_service import REBALANCE_MODE_OPTIONS, REBALANCE_MODE_WEEKLY
-
-        raw = values["REBALANCE_MODE"]
-        mode = REBALANCE_MODE_WEEKLY if raw in (None, "") else str(raw).strip().lower()
-        if check_options and mode not in REBALANCE_MODE_OPTIONS:
-            allowed = ", ".join(REBALANCE_MODE_OPTIONS)
-            raise PoolSettingsError(f"REBALANCE_MODE 는 {allowed} 중 하나여야 합니다: {raw}")
-        cleaned["REBALANCE_MODE"] = mode
 
     for key in _FLOAT_KEYS:
         if key not in values:
