@@ -1390,29 +1390,7 @@ export function StrategyMixClient() {
                   </label>
                   {selectedAccount ? (
                     <>
-                      {/* 슬리브 배분(%)은 아래 슬리브 영역의 각 줄에 있다 — 여기는 현금만. */}
-                      <label className="appLabeledField" style={{ marginBottom: 0 }}>
-                        <span className="appLabeledFieldLabel">현금</span>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                          <input
-                            className="form-control form-control-sm"
-                            style={{ width: 72, textAlign: "right" }}
-                            type="number"
-                            min={0}
-                            max={100}
-                            step={1}
-                            value={cashPct}
-                            disabled={settingsSaving}
-                            onChange={(event) => setCashPct(event.target.value)}
-                            title="어느 슬리브에도 주지 않고 늘 비워 두는 몫(%). 빈 슬롯에서 생기는 현금은 여기에 더해진다."
-                          />
-                          <span style={hintStyle}>%</span>
-                        </span>
-                      </label>
-                      <span style={{ ...hintStyle, color: weightOk ? "var(--text-muted)" : "#d62828", fontWeight: weightOk ? 400 : 700 }}>
-                        합계 {weightSum === null ? "-" : `${weightSum}%`}
-                        {weightOk ? " ✓" : " (100% 필요)"}
-                      </span>
+                      {/* 배분(%)은 전부 아래 슬리브 표에 있다 — 현금도 같은 줄 형태로 둔다. */}
                       <label className="appLabeledField" style={{ marginBottom: 0 }}>
                         <span className="appLabeledFieldLabel">슬랙 알람</span>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -1462,6 +1440,37 @@ export function StrategyMixClient() {
                   "이 조합에 몇 %" 가 한눈에 읽힌다(헤더에 늘어놓으면 짝이 안 보인다). */}
               {selectedAccount ? (
                 <div className="mixSleeveRows">
+                  {/* 현금 — 슬리브가 아니라 '비워 두는 몫' 이지만, 배분을 한눈에 맞추려면
+                      같은 열에 있어야 한다. 앞쪽 세 칸(전략·종목풀·이름)은 비운다. */}
+                  <div className="mixSleeveRow">
+                    <span className="mixSleeveMark">현금</span>
+                    <span />
+                    <span />
+                    <span />
+                    <span className="mixSleeveWeight">
+                      <input
+                        className="form-control form-control-sm"
+                        style={{ width: 72, textAlign: "right" }}
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.1}
+                        value={cashPct}
+                        disabled={settingsSaving}
+                        title="어느 슬리브에도 주지 않고 늘 비워 두는 몫(%). 빈 슬롯에서 생기는 현금은 여기에 더해진다."
+                        onChange={(event) => setCashPct(event.target.value)}
+                      />
+                      <span style={hintStyle}>%</span>
+                    </span>
+                    <span />
+                    <span
+                      className="mixSleeveSettings"
+                      style={{ color: weightOk ? undefined : "#d62828", fontWeight: weightOk ? 400 : 700 }}
+                    >
+                      합계 {weightSum === null ? "-" : `${weightSum}%`}
+                      {weightOk ? " ✓" : " (100% 필요)"}
+                    </span>
+                  </div>
                   {draftSleeves.map((sleeve, index) => {
                     const { strategy, pool, name } = sleeve;
                     // 계좌와 국가가 같은 풀만 — 거래 달력·통화가 갈리면 합성이 성립하지 않는다.
@@ -1519,7 +1528,7 @@ export function StrategyMixClient() {
                             type="number"
                             min={0}
                             max={100}
-                            step={1}
+                            step={0.1}
                             value={String(sleeve.weight_pct)}
                             disabled={settingsSaving}
                             title={`${sleeve.key.toUpperCase()} 슬리브에 배분할 몫(%).`}
@@ -1550,7 +1559,7 @@ export function StrategyMixClient() {
                     );
                   })}
                   {draftSleeves.length < maxSleeves ? (
-                    <div className="mixSleeveRow">
+                    <div className="mixSleeveRow mixSleeveAddRow">
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-dark"

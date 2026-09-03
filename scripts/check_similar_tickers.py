@@ -24,7 +24,6 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.data_loader import get_latest_trading_day, prepare_price_data
-from utils.rankings import get_ticker_type_ma_rules
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
 from utils.stock_list_io import get_etfs
 
@@ -32,9 +31,13 @@ from utils.stock_list_io import get_etfs
 # 상관계수 기준 — 이 값 이상인 쌍을 같은 그룹으로 묶는다. 낮출수록 그룹이 커진다.
 SIMILAR_THRESHOLD = 0.95
 # 「매우 유사」로 붉게 표시하는 기준. 이 사이(기준~강조)는 노랑으로 '검토 필요'다.
-STRONG_THRESHOLD = 0.97
+STRONG_THRESHOLD = 0.98
 # 이 일수보다 짧은 종목은 분석에서 뺀다 — 신규 상장은 표본이 적어 상관계수가 튄다.
 MIN_TRADING_DAYS = 20
+# 상관관계를 볼 기간(개월). 전략 이평선과는 목적이 달라 따로 정한다 —
+# 짧게 잡으면 같은 섹터가 잠깐 함께 움직인 것만으로도 0.95 를 넘어, 구조적으로
+# 겹치는 종목과 구분되지 않는다.
+LOOKBACK_MONTHS = 3
 # ─────────────────────────────────────────────────────────────────────────
 
 
@@ -54,9 +57,6 @@ def load_market_data(
     if not country_code:
         raise ValueError(f"종목풀 '{ticker_type}'의 country_code가 비어 있습니다.")
 
-    ma_rules = get_ticker_type_ma_rules(ticker_type)
-    lookback_days = max(int(rule["long_ma_days"]) for rule in ma_rules)
-
     etfs = get_etfs(ticker_type)
     tickers = sorted({str(etf["ticker"]).strip().upper() for etf in etfs if etf.get("ticker")})
     ticker_names = {
@@ -66,13 +66,15 @@ def load_market_data(
     end_date = get_latest_trading_day(country_code)
     if not isinstance(end_date, pd.Timestamp):
         end_date = pd.Timestamp.now().normalize()
-    # 웜업 데이터 포함하여 넉넉히 로드
-    start_date = end_date - pd.DateOffset(days=int(lookback_days * 1.5))
+    start_date = end_date - pd.DateOffset(months=LOOKBACK_MONTHS)
+    # 거래일로 몇 개인지는 나라·기간마다 달라 실제 로드 결과에서 센다.
+    # 넉넉히(휴장 감안 1.1배) 받아 두고 아래에서 기간으로 자른다.
+    load_start = end_date - pd.DateOffset(days=int(LOOKBACK_MONTHS * 31 * 1.1))
 
     prefetched_map, missing = prepare_price_data(
         tickers=tickers,
         country=country_code,
-        start_date=start_date.strftime("%Y-%m-%d"),
+        start_date=load_start.strftime("%Y-%m-%d"),
         end_date=end_date.strftime("%Y-%m-%d"),
         warmup_days=30,
         ticker_type=ticker_type,
@@ -98,7 +100,8 @@ def load_market_data(
             missing_tickers.append(f"{ticker} (종가 컬럼 없음)")
             continue
 
-        df_cut = df.tail(lookback_days)
+        # 기간으로 자른다 — 거래일 수가 아니라 달력 기준이라 나라가 달라도 같은 구간이다.
+        df_cut = df[df.index >= start_date]
         if len(df_cut) < MIN_TRADING_DAYS:
             short_tickers.append(f"{ticker} (데이터 부족: {len(df_cut)}일 < {MIN_TRADING_DAYS}일)")
             continue
@@ -127,7 +130,7 @@ def load_market_data(
 
     prices_df = pd.DataFrame(close_dict)
     prices_df = prices_df.dropna(how="all")
-    return prices_df, stats_dict, lookback_days, missing_tickers, short_tickers
+    return prices_df, stats_dict, len(prices_df), missing_tickers, short_tickers
 
 
 def build_similarity_groups(
@@ -209,13 +212,13 @@ def print_report(
     stats: dict[str, StockStats],
     threshold: float,
     total_tickers: int,
-    lookback_days: int,
+    trading_days: int,
 ) -> None:
     """상관관계 및 수익률 비교 리포트를 출력합니다."""
     print()
     print(f"{'=' * 70}")
     print(f"  📊 상관관계 유사 그룹 분석: {ticker_type.upper()}")
-    print(f"  분석 기간: 최근 {lookback_days} 거래일 | 대상 종목: {total_tickers}개")
+    print(f"  분석 기간: 최근 {LOOKBACK_MONTHS}개월 ({trading_days} 거래일) | 대상 종목: {total_tickers}개")
     print(f"  기준: 상관계수 ≥ {threshold}")
     print(f"{'=' * 70}")
 
@@ -278,7 +281,7 @@ def main() -> None:
     ticker_type = args.ticker_type.lower()
 
     print(f"\n[{ticker_type.upper()}] 가격 데이터 로딩 중...")
-    prices_df, stats, lookback_days, missing, short = load_market_data(ticker_type)
+    prices_df, stats, trading_days, missing, short = load_market_data(ticker_type)
 
     if missing:
         print(f"\n[오류] 데이터가 없는 {len(missing)}개 종목이 발견되었습니다:")
@@ -303,7 +306,7 @@ def main() -> None:
         stats=stats,
         threshold=SIMILAR_THRESHOLD,
         total_tickers=len(prices_df.columns),
-        lookback_days=lookback_days,
+        trading_days=trading_days,
     )
 
 
