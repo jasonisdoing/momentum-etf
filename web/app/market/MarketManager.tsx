@@ -31,6 +31,8 @@ type MarketRowItem = {
   current_price: number | null;
   nav: number | null;
   deviation: number | null;
+  return_1w_pct: number | null;
+  return_2w_pct: number | null;
   return_1m_pct: number | null;
   return_2m_pct: number | null;
   return_3m_pct: number | null;
@@ -84,6 +86,16 @@ type MarketVariantConfig = {
 };
 
 // 과세 구분 선택지 — 분류를 못 받은 종목은 '모두'에서만 보인다(어느 쪽으로도 넘겨짚지 않는다).
+/** 기간 수익률 컬럼 — 짧은 기간부터. 기준종가는 배치가 넣고(`utils/kis_market`),
+ *  3달만 실시간 스냅샷이 직접 준다. 기간을 늘리려면 배치의 기준일 목록도 함께 늘린다. */
+const RETURN_PERIODS = [
+  { field: "return_1w_pct", header: "1주(%)" },
+  { field: "return_2w_pct", header: "2주(%)" },
+  { field: "return_1m_pct", header: "1달(%)" },
+  { field: "return_2m_pct", header: "2달(%)" },
+  { field: "return_3m_pct", header: "3달(%)" },
+] as const;
+
 const TAX_FILTER_OPTIONS = [
   { key: "all", label: "모두", title: "과세 구분과 무관하게 전부" },
   { key: "free", label: "비과세", title: "국내 주식형 — 매매차익 비과세" },
@@ -529,35 +541,18 @@ export function MarketManager({
             },
           ] as ColDef<MarketGridRow>[])
         : []),
-      {
-        field: "return_1m_pct",
-        headerName: "1달(%)",
+      // 기간 수익률 — 짧은 기간부터. 값 없음이 맨 아래로 가도록 정렬 비교자를 같이 준다.
+      ...RETURN_PERIODS.map(({ field, header }) => ({
+        field,
+        headerName: header,
         width: 96,
         type: "rightAligned",
-        comparator: (a, b) => (a ?? Number.NEGATIVE_INFINITY) - (b ?? Number.NEGATIVE_INFINITY),
+        comparator: (a: number | null, b: number | null) =>
+          (a ?? Number.NEGATIVE_INFINITY) - (b ?? Number.NEGATIVE_INFINITY),
         cellRenderer: (params: { value: number | null }) => (
           <span className={getSignedMetricClass(params.value)}>{formatPercent(params.value)}</span>
         ),
-      },
-      {
-        field: "return_2m_pct",
-        headerName: "2달(%)",
-        width: 96,
-        type: "rightAligned",
-        comparator: (a, b) => (a ?? Number.NEGATIVE_INFINITY) - (b ?? Number.NEGATIVE_INFINITY),
-        cellRenderer: (params: { value: number | null }) => (
-          <span className={getSignedMetricClass(params.value)}>{formatPercent(params.value)}</span>
-        ),
-      },
-      {
-        field: "return_3m_pct",
-        headerName: "3달(%)",
-        width: 96,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => (
-          <span className={getSignedMetricClass(params.value)}>{formatPercent(params.value)}</span>
-        ),
-      },
+      })),
       ...(variant.showListing ? ([{ field: "listed_at", headerName: "상장일", width: 112 }] as ColDef<MarketGridRow>[]) : []),
       {
         field: "prev_volume",
