@@ -1241,9 +1241,9 @@ def _notify_cache_issues(reports: list[dict], *, full_refresh: bool) -> None:
     항목: 수집 실패 / 외부 소스에도 없어 못 채운 결측 / 의심 날짜 자동 제거.
     자동 복구에 성공한 보강은 알리지 않는다(로그에만 남긴다) — 소음이 되는 항목은 여기서 뺀다.
 
-    **못 채운 결측은 최근 것만 알린다**(`CACHE_ISSUE_NOTIFY_RECENT_TRADING_DAYS`).
-    다음 실행에도 그대로 남아 있어, 조건 없이 알리면 같은 내용이 매일 오기 때문이다.
-    걸러진 건은 아래 로그에 남는다.
+    **날짜 기반 문제는 최근 것만 알린다**(`CACHE_ISSUE_NOTIFY_RECENT_TRADING_DAYS`).
+    다음 실행에도 그대로 남거나 전체 재수집 때 다시 생겨, 조건 없이 알리면 같은 내용이
+    매일 오기 때문이다. 걸러진 건은 아래 로그에 남는다.
     """
     from config import CACHE_ISSUE_NOTIFY_RECENT_TRADING_DAYS
 
@@ -1265,7 +1265,11 @@ def _notify_cache_issues(reports: list[dict], *, full_refresh: bool) -> None:
         if len(all_unfilled) != len(unfilled):
             logger.info(
                 "[cache] %s 종가 결측 %d종목 중 %d종목만 통보 (최근 %d거래일 기준, 나머지는 로그만): %s",
-                pool, len(all_unfilled), len(unfilled), CACHE_ISSUE_NOTIFY_RECENT_TRADING_DAYS, all_unfilled,
+                pool,
+                len(all_unfilled),
+                len(unfilled),
+                CACHE_ISSUE_NOTIFY_RECENT_TRADING_DAYS,
+                all_unfilled,
             )
         if unfilled:
             preview = ", ".join(f"{t}({', '.join(d)})" for t, d in list(unfilled.items())[:10])
@@ -1277,14 +1281,27 @@ def _notify_cache_issues(reports: list[dict], *, full_refresh: bool) -> None:
         if len(all_volume_unfilled) != len(volume_unfilled):
             logger.info(
                 "[cache] %s 거래량 결측 %d종목 중 %d종목만 통보 (최근 %d거래일 기준, 나머지는 로그만): %s",
-                pool, len(all_volume_unfilled), len(volume_unfilled),
-                CACHE_ISSUE_NOTIFY_RECENT_TRADING_DAYS, all_volume_unfilled,
+                pool,
+                len(all_volume_unfilled),
+                len(volume_unfilled),
+                CACHE_ISSUE_NOTIFY_RECENT_TRADING_DAYS,
+                all_volume_unfilled,
             )
         if volume_unfilled:
             preview = ", ".join(f"{t}({', '.join(d)})" for t, d in list(volume_unfilled.items())[:10])
             suffix = " …" if len(volume_unfilled) > 10 else ""
             pool_lines.append(f"· 토스에도 없어 못 채운 거래량 {len(volume_unfilled)}종목: {preview}{suffix}")
-        purged = report.get("purged_dates") or []
+        all_purged = report.get("purged_dates") or []
+        purged = list(all_purged) if recent_days is None else [day for day in all_purged if day in recent_days]
+        if len(all_purged) != len(purged):
+            logger.info(
+                "[cache] %s 의심 날짜 제거 %d일 중 %d일만 통보 (최근 %d거래일 기준, 나머지는 로그만): %s",
+                pool,
+                len(all_purged),
+                len(purged),
+                CACHE_ISSUE_NOTIFY_RECENT_TRADING_DAYS,
+                all_purged,
+            )
         if purged:
             pool_lines.append(f"· 의심 날짜(다수 종목 종가 NaN) 제거: {', '.join(purged)}")
         if pool_lines:

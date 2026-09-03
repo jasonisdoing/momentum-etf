@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from scripts.stock_price_cache_updater import _backfill_missing_volumes_from_toss
+from scripts.stock_price_cache_updater import _backfill_missing_volumes_from_toss, _notify_cache_issues
 from utils.new_high_service import build_price_panel
 from utils.trade_value import latest_trade_value_fields, trade_value_multiplier_series
 
@@ -96,6 +96,24 @@ class TossVolumeBackfillTest(unittest.TestCase):
             saved.loc[missing_day, ["Open", "High", "Low", "Close"]],
             cached.loc[missing_day, ["Open", "High", "Low", "Close"]],
         )
+
+
+class CacheIssueNotificationTest(unittest.TestCase):
+    @patch("utils.notification.send_slack_message_v2")
+    @patch("scripts.stock_price_cache_updater._recent_trading_days", return_value={"2026-09-03"})
+    def test_old_suspicious_date_is_logged_without_slack(self, _recent_days, send_slack) -> None:
+        _notify_cache_issues(
+            [
+                {
+                    "pool": "aus_etf",
+                    "country_code": "au",
+                    "purged_dates": ["2025-10-24"],
+                }
+            ],
+            full_refresh=True,
+        )
+
+        send_slack.assert_not_called()
 
 
 if __name__ == "__main__":
