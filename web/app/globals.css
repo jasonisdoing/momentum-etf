@@ -4385,28 +4385,35 @@ a {
 
 /* 합성 슬리브 줄 — 메인 헤더 아래 전용 영역. 슬롯 하나가 한 줄이라
    전략·종목풀·이름·배분이 짝지어 읽힌다(헤더에 늘어놓으면 짝이 안 보인다). */
+/* 슬리브 표 — 현금 행과 A·B·C 가 **같은 열**에 맞아야 비중 칸이 세로로 정렬된다.
+   flex 로 두면 종목풀 이름 길이에 따라 행마다 칸이 밀렸다(긴 이름 행만 어긋났다).
+   열: 슬롯기호 · 전략 · 종목풀 · 이름 · 비중 · 삭제 · 저장 설정 */
 .mixSleeveRows {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: auto auto auto auto auto auto minmax(0, 1fr);
+  align-items: center;
   gap: 0.375rem;
   margin-top: 0.5rem;
   padding-top: 0.5rem;
   border-top: 1px solid var(--app-border, rgba(148, 163, 184, 0.35));
 }
 
+/* 행 자체는 상자를 만들지 않는다 — 자식이 바로 위 격자의 칸이 되게 한다. */
 .mixSleeveRow {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  flex-wrap: wrap;
+  display: contents;
 }
 
-/* 슬롯 기호(A·B·C) — 줄 맨 앞에서 폭을 고정해 아래 줄과 세로가 맞는다. */
+/* 슬리브 추가 버튼 — 열에 끼우지 않고 한 줄을 다 쓴다. */
+.mixSleeveAddRow {
+  grid-column: 1 / -1;
+}
+
+/* 슬롯 기호(A·B·C·현금) — 넓은 쪽에 맞추고 가운데 정렬한다. */
 .mixSleeveMark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
+  min-width: 22px;
   flex-shrink: 0;
   color: #5b6778;
   font-size: var(--fs-sm);
@@ -4420,7 +4427,6 @@ a {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.25rem 0.5rem;
-  flex: 1 1 16rem;
   min-width: 0;
   padding-left: 0.25rem;
   color: #5b6778;
