@@ -80,10 +80,28 @@ def session_elapsed_fraction(country: str) -> float | None:
 
 
 def session_live_fraction(country: str) -> float | None:
-    """거래 세션이 진행 중인 거래일에만 경과 비율을 반환한다."""
+    """실시간 누적 거래대금으로 배수를 덮어써도 되는 구간의 경과 비율.
+
+    **정규장이 열린 뒤부터**다. 장전(한국 동시호가 08:00~09:00, 미국 프리마켓)에는 체결이
+    거의 없어 누적 거래대금이 0에 가깝다. 그 값으로 확정 배수를 덮어쓰면 어제 종가로
+    돌파·자격이 확정된 종목이 아침에 갑자기 자격 미달로 목록에서 사라진다(KODEX 보험
+    2026-09-04: 배치 4.80배 → 장전 0.00배). 돌파·이탈 판정도 장전을 장중으로 보지 않으므로
+    (`_live_quotes` 의 pre_market 가드) 기준을 그쪽에 맞춘다.
+
+    환산 분모는 체결이 일어나는 구간 전체(`session_elapsed_fraction`)를 그대로 쓴다 —
+    개장 여부만 여기서 가른다.
+    """
     fraction = session_elapsed_fraction(country)
     if fraction is None or not 0.0 < fraction < 1.0:
         return None
+    schedule = (MARKET_SCHEDULES or {}).get(str(country).strip().lower())
+    open_time = (schedule or {}).get("open")
+    tz_name = str((schedule or {}).get("timezone") or "").strip()
+    if open_time is None or not tz_name:
+        return None
+    now = datetime.now(ZoneInfo(tz_name))
+    if now < now.replace(hour=open_time.hour, minute=open_time.minute, second=0, microsecond=0):
+        return None  # 정규장 개장 전 — 확정값을 그대로 둔다
     from utils.trading_calendar import is_trading_day
 
     return fraction if is_trading_day(country) else None
