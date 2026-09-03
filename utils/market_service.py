@@ -6,6 +6,7 @@ from typing import Any
 import requests
 
 from utils.db_manager import get_db_connection
+from utils.kis_market import BASE_CLOSE_SUFFIXES
 from utils.normalization import (
     normalize_nullable_number,
     normalize_number,
@@ -147,8 +148,10 @@ def load_market_data() -> dict[str, Any]:
             "listed_at": normalize_text(row.get("상장일")),
             "prev_volume": int(normalize_number(row.get("전일거래량"))),
             "market_cap": int(normalize_number(row.get("시가총액"))),
-            "base_close_1m": normalize_nullable_number(row.get("기준종가_1m")),
-            "base_close_2m": normalize_nullable_number(row.get("기준종가_2m")),
+            **{
+                f"base_close_{suffix}": normalize_nullable_number(row.get(f"기준종가_{suffix}"))
+                for suffix in BASE_CLOSE_SUFFIXES
+            },
             # 매매차익 비과세 여부(국내 주식형만). 분류를 못 받은 종목은 None = 모름.
             "is_tax_free": row.get("is_tax_free"),
         }
@@ -173,8 +176,8 @@ def load_market_data() -> dict[str, Any]:
     for row in normalized_rows:
         snap = snapshot.get(row["ticker"], {})
         now_val = snap.get("nowVal")
-        base_1m = row.pop("base_close_1m", None)
-        base_2m = row.pop("base_close_2m", None)
+        # 기준종가는 화면에 내보내지 않는다 — 수익률로만 쓴다.
+        bases = {suffix: row.pop(f"base_close_{suffix}", None) for suffix in BASE_CLOSE_SUFFIXES}
         result_rows.append(
             {
                 **row,
@@ -186,8 +189,8 @@ def load_market_data() -> dict[str, Any]:
                 "current_price": now_val,
                 "nav": snap.get("nav"),
                 "deviation": snap.get("deviation"),
-                "return_1m_pct": _return_pct(now_val, base_1m),
-                "return_2m_pct": _return_pct(now_val, base_2m),
+                **{f"return_{suffix}_pct": _return_pct(now_val, bases[suffix]) for suffix in BASE_CLOSE_SUFFIXES},
+                # 3달은 실시간 스냅샷이 직접 준다(기준종가를 따로 받지 않는다).
                 "return_3m_pct": snap.get("threeMonthEarnRate"),
             }
         )
