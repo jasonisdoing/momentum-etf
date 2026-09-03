@@ -76,11 +76,11 @@ const CURRENT_NOTES = [
       "ADR이 하한 위로 회복하면 다음 교체부터 정상 선정을 재개합니다. 없음이면 게이트를 쓰지 않습니다.",
   },
   {
-    title: "주중 이탈 (상시)",
+    title: "주중 매도 (ADR 게이트만)",
     body:
-      "보유 자격(장기 이격 > 0, 단기 이격 ≥ 0)을 잃으면 다음 거래일 시가에 전량 매도합니다. " +
-      "ADR 하한을 함께 쓰면 주중에 시장 ADR이 하한 아래로 내려간 날에도 남은 보유를 전부 팝니다 " +
-      "— 주간 게이트가 다음 교체일에 할 일을 그날로 앞당깁니다. " +
+      "주중 매도는 시장 ADR이 하한 아래로 내려간 날의 전량 매도(다음 거래일 시가) 하나뿐입니다. " +
+      "보유 종목이 주중에 이평선을 이탈해도 ADR이 하한 이상이면 주말 판정까지 계속 보유합니다 " +
+      "— 개별 이탈은 주말 교체(자격 유지 재선정)가 처리합니다. " +
       "판 슬롯은 다음 교체까지 현금입니다(전략 고정 — 끄는 설정은 없습니다).",
   },
   {
@@ -116,17 +116,16 @@ type PickRow = {
   is_exited?: boolean;
   is_exit_pending?: boolean;
   exit_date?: string | null;
-  /** 주중 매도 사유 — "주중 이탈"(자격 상실) · "ADR 게이트"(시장 하한 미달). */
+  /** 주중 매도 사유 — "ADR 게이트"(시장 하한 미달) 하나뿐이다. */
   exit_reason?: string | null;
+  /** 주중에 이평선을 이탈했지만 ADR이 하한 이상이라 보유 중 — 유지 표시에 (이탈·ADR)을 붙인다. */
+  held_ma_dip?: boolean;
   streak_weeks: number | null;
   /** 연속 편입이 시작된 교체일 — 차트 탭의 Buy 마커 위치. 선정분만 값이 있다. */
   entry_date?: string | null;
   /** 편입 후 수익률(%) — 연속 편입 시작 교체일 시가 대비. 보유 중인 종목만 값이 있다. */
   entry_return_pct?: number | null;
   next_week_expected: boolean;
-  /** 주중 이탈 **예상** — 현재(장중) 가격 기준, 오늘 종가로 확정 전. */
-  is_exit_forecast?: boolean;
-  exit_forecast_reason?: string | null;
   ticker: string;
   name: string;
   // 종목의 소속 마켓(KOSPI/KOSDAQ) — 한국 통합 풀 구분 표시용, 없으면 빈 값.
@@ -188,7 +187,7 @@ type BacktestWeekRow = {
   benchmark_pct: number | null;
   holdings_count: number;
   holdings_start?: number;
-  /** 주중 이탈 매도 — "종목명(코드) · 사유" 형식. */
+  /** 주중 매도(ADR 게이트) — "종목명(코드) · 사유" 형식. */
   exited?: string[];
   turnover_pct: number | null;
   added: string[];
@@ -634,34 +633,44 @@ export function MomentumClient() {
         headerTooltip:
           "이번 포트폴리오까지 몇 주 연속 편입됐는지 (신규 = 이번 주 첫 편입, 최대 12주 추적). " +
           "화살표 — →유지/→신규(초록)는 다음 주 예상, 확정은 교체일 직전 판정일 종가. " +
-          "빨강은 빠지는 종목이다: →교체예정은 다음 주 순위 교체, →매도예정은 주중 이탈 확정 후 다음 시가 매도, " +
-          "→이탈(굵게)은 주중에 이미 매도된 것. →이탈(예상)은 장중 가격 기준 예보로 " +
-          "오늘 종가로 확정되면 다음 거래일 시가에 판다.",
-        width: 108,
+          "빨강은 빠지는 종목이다: →교체예정은 다음 주 교체에서 빠질 예상, " +
+          "→매도예정은 ADR 게이트 확정 후 다음 시가 매도, →매도(굵게)는 주중에 이미 매도된 것. " +
+          "(이탈·ADR)은 주중에 이평선을 이탈했지만 시장 ADR이 하한 이상이라 주말 판정까지 보유 중이라는 표시다.",
+        width: 148,
         cellDataType: "text",
         cellRenderer: (p: { value?: number | null; data?: PickRow }) => {
           const streak =
             p.value == null ? "-" : p.value <= 1 ? "신규" : p.value >= 12 ? "12+" : `${p.value}주`;
           const isNewPick = p.value != null && p.value <= 1 && !p.data?.is_reserve;
           const held = Boolean(p.data && !p.data.is_reserve && !p.data.is_expected_only);
-          // 빠지는 종목은 빨강으로 쓰고 원인을 문구로 가른다 — 순위 경쟁이면 교체예정,
-          // 주중 이탈이 확정됐지만 미체결이면 매도예정, 이미 매도됐으면 사유를 굵게 표시한다.
+          // 빠지는 종목은 빨강으로 쓰고 원인을 문구로 가른다 — 다음 주 교체에서 빠지면
+          // 교체예정, ADR 게이트가 확정됐지만 미체결이면 매도예정, 이미 매도됐으면 굵게.
           let next: React.ReactNode = null;
           if (p.data?.is_exited) {
-            next = <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}> →이탈</span>;
+            next = <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}> →매도</span>;
           } else if (p.data?.is_exit_pending) {
             next = <span style={{ color: "var(--up-color, #d64545)" }}> →매도예정</span>;
-          } else if (p.data?.is_exit_forecast) {
-            // 주중 이탈 **예보** — 다음주 순위 예상보다 우선한다(오늘 종가 확정 시 내일 시가 매도).
+          } else if (p.data?.next_week_expected) {
+            // (이탈·ADR) — 주중에 이평선을 이탈했지만 ADR이 하한 이상이라 판 대신 보유 중.
+            const dip = held && p.data?.held_ma_dip;
             next = (
-              <span style={{ color: "var(--up-color, #d64545)", opacity: 0.75 }} title="오늘 종가로 확정 시 다음 거래일 시가 매도">
-                {" "}→이탈(예상)
+              <span
+                style={{ color: "#2f9e44", fontWeight: 700 }}
+                title={dip ? "주중에 이평선을 이탈했지만 시장 ADR이 하한 이상이라 주말 판정까지 보유합니다." : undefined}
+              >
+                {" "}→{held ? (dip ? "유지(이탈·ADR)" : "유지") : "신규"}
               </span>
             );
-          } else if (p.data?.next_week_expected) {
-            next = <span style={{ color: "#2f9e44", fontWeight: 700 }}> →{held ? "유지" : "신규"}</span>;
           } else if (held) {
-            next = <span style={{ color: "var(--up-color, #d64545)" }}> →교체예정</span>;
+            const dip = p.data?.held_ma_dip;
+            next = (
+              <span
+                style={{ color: "var(--up-color, #d64545)" }}
+                title={dip ? "주중에 이평선을 이탈했지만 시장 ADR이 하한 이상이라 주말 판정까지 보유합니다. 지금 기준으로는 다음 교체에서 빠집니다." : undefined}
+              >
+                {" "}→교체예정{dip ? "(이탈·ADR)" : ""}
+              </span>
+            );
           }
           return (
             <span>
@@ -965,7 +974,7 @@ export function MomentumClient() {
       {
         headerName: "종목 수",
         field: "holdings_count",
-        headerTooltip: "교체 직후 → 주말 종목 수. 화살표가 있으면 주중 이탈로 줄어든 것(이탈 컬럼 참고).",
+        headerTooltip: "교체 직후 → 주말 종목 수. 화살표가 있으면 주중 ADR 게이트 매도로 줄어든 것(주중 매도 컬럼 참고).",
         width: 84,
         type: "numericColumn",
         cellDataType: "text",
@@ -1007,9 +1016,9 @@ export function MomentumClient() {
         cellStyle: () => ({ color: "var(--down-color, #2f6fd0)" }),
       },
       {
-        headerName: "이탈",
+        headerName: "주중 매도",
         field: "exited",
-        headerTooltip: "주중에 자격 상실로 매도된 종목 (교체 편출과 별개, 판 슬롯은 다음 교체까지 현금)",
+        headerTooltip: "주중에 ADR 게이트로 전량 매도된 종목 (교체 편출과 별개, 판 슬롯은 다음 교체까지 현금)",
         flex: 1,
         minWidth: 200,
         wrapText: true,
@@ -1416,7 +1425,7 @@ export function MomentumClient() {
           // 튜닝도 백테스트와 같이 **저장된 설정** 기준이라 실행 조건을 같게 둔다.
           disabled={backtesting || isDirty}
           disabledHint={isDirty ? "설정을 저장해야 실행할 수 있습니다" : undefined}
-          fixedLabel={`저장된 설정 기준 (종목풀 ${draftPool} · 종목 수 ${view.settings.top_n} 공통 고정 · 교체 규칙 자격 유지 · 주중 이탈 사용)`}
+          fixedLabel={`저장된 설정 기준 (종목풀 ${draftPool} · 종목 수 ${view.settings.top_n} 공통 고정 · 교체 규칙 자격 유지 · 주중 매도는 ADR 게이트만)`}
           current={{
             short_ma_days: view.settings.short_ma_days,
             long_ma_days: view.settings.long_ma_days,
@@ -1424,7 +1433,7 @@ export function MomentumClient() {
           }}
           axes={[
             // 축 값 = 상단 셀렉트 선택지(서버 상수) — 여기서 따로 정하지 않는다.
-            // 종목 수(공통 고정)·업종 상한(폐기)·교체 규칙·주중 이탈(전략 고정)은 축이 아니다
+            // 종목 수(공통 고정)·업종 상한(폐기)·교체 규칙·주중 매도(전략 고정)는 축이 아니다
             // — 튜닝은 시장의 이평 반응만 잰다.
             { key: "short_ma_days", label: "단기 이평", values: (view.ma_rule?.short_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },
             { key: "long_ma_days", label: "장기 이평", values: (view.ma_rule?.long_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },

@@ -200,50 +200,14 @@ class MomentumIntraweekCacheTest(unittest.TestCase):
         self.assertAlmostEqual(first[0]["disparity_pct"], expected_first["disparity_pct"])
         self.assertAlmostEqual(second[0]["disparity_pct"], expected_second["disparity_pct"])
 
-    def test_reuses_moving_average_series_across_weekly_scans(self) -> None:
+    def test_intraweek_exits_only_fire_on_adr_gate(self) -> None:
+        """주중 매도는 ADR 게이트만 — 게이트가 없으면(하한 미설정) 주중 매도가 없다."""
         dates = pd.date_range("2026-01-02", periods=10, freq="B")
-        frames = {
-            "AAA": pd.DataFrame(
-                {
-                    "Open": [100, 101, 102, 103, 104, 105, 106, 90, 89, 88],
-                    "Close": [100, 101, 102, 103, 104, 105, 106, 90, 89, 88],
-                },
-                index=dates,
-            )
-        }
-        settings = {
-            "short_ma_days": 2,
-            "long_ma_days": 3,
-            "adr_floor": None,
-        }
-        series_cache: momentum_service.IntraweekSeriesCache = {}
+        settings = {"adr_floor": None, "pool": "us_stock"}
 
-        with patch(
-            "utils.moving_averages.calculate_moving_average",
-            wraps=calculate_moving_average,
-        ) as moving_average:
-            first = momentum_service.simulate_intraweek_exits(
-                frames,
-                settings,
-                {"AAA"},
-                dates,
-                dates[5],
-                dates[8],
-                series_cache=series_cache,
-            )
-            second = momentum_service.simulate_intraweek_exits(
-                frames,
-                settings,
-                {"AAA"},
-                dates,
-                dates[5],
-                dates[8],
-                series_cache=series_cache,
-            )
+        exits = momentum_service.simulate_intraweek_exits(settings, {"AAA"}, dates, dates[5], dates[8])
 
-        self.assertEqual(first, second)
-        self.assertEqual(moving_average.call_count, 2)
-        self.assertEqual(first[0]["reason"], "주중 이탈")
+        self.assertEqual(exits, [])
 
 
 if __name__ == "__main__":

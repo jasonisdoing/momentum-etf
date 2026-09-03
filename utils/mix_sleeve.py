@@ -255,7 +255,7 @@ def _momentum_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> S
             status = f"매수 예정 ({raw.get('rebalance_date')} 시가)"
         exiting = bool(row.get("is_exit_pending"))
         if exiting:
-            status += f" · 매도 예정({row.get('exit_reason') or '주중 이탈'})"
+            status += f" · 매도 예정({row.get('exit_reason') or 'ADR 게이트'})"
         targets.append(
             {
                 "ticker": ticker,
@@ -287,25 +287,15 @@ def _momentum_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> S
             {
                 "ticker": str(row["ticker"]).strip(),
                 "name": row.get("name") or row["ticker"],
-                # 발동 사유 — 이평선 이탈·시장 게이트를 구분한다(판정 함수가 정한 값).
-                "reason": {
-                    "주중 이탈": "자격 상실(이평선 하회)",
-                    "ADR 게이트": "시장 ADR 하한 미달",
-                }.get(str(row.get("exit_reason") or ""), "자격 상실(이평선 하회)"),
+                # 발동 사유 — 주중 매도는 ADR 게이트(전량)뿐이다(판정 함수가 정한 값).
+                "reason": "시장 ADR 하한 미달",
                 "return_pct": None,
             }
             for row in selected
             if row.get("is_exit_pending")
         ],
-        exit_forecast=[
-            {
-                "ticker": str(row["ticker"]).strip(),
-                "name": row.get("name") or row["ticker"],
-                "reason": row.get("exit_forecast_reason") or "주중 이탈 예상",
-            }
-            for row in selected
-            if row.get("is_exit_forecast")
-        ],
+        # 모멘텀은 주중 개별 이탈 예보가 없다 — 주중 매도는 ADR 게이트(확정 종가 판정)뿐.
+        exit_forecast=[],
         entries=[],
         rebalance={
             "is_filled": bool(raw.get("is_filled")),

@@ -1651,7 +1651,7 @@ def _simulate_mix_daily(
                 fill = px(rt.open_df, day, ticker) or price
                 rt.cash += rt.shares.pop(ticker) * fill * (1 - rt.sell_slip)
 
-        # 2) 모멘텀 매도 체결(교체 편출·주중 이탈 — 체결 내역의 청산일)
+        # 2) 모멘텀 매도 체결(교체 편출·주중 ADR 게이트 — 체결 내역의 청산일)
         for rt in runtimes:
             if rt.spec.strategy != MOMENTUM:
                 continue
