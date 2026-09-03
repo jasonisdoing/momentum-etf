@@ -9,7 +9,6 @@ from fastapi_app.streaming import sse_stream
 from utils.new_high_service import (
     DEFAULT_SETTINGS,
     HIGH_WINDOW_WEEKS,
-    MIN_VALUE_MULT_OPTIONS,
     load_settings,
     load_settings_for_view,
     load_settings_map,
@@ -37,7 +36,7 @@ def _adr_clipped_months(pool: str, months: list[int]) -> list[int]:
 def _constraints(pool: str, adr_floor: int | None = None) -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다)."""
     from utils.ma_options import short_ma_options
-    from utils.new_high_service import pool_country
+    from utils.new_high_service import min_value_mult_options, pool_country
 
     country = pool_country(pool)
     from config import ADR_FLOOR_OPTIONS
@@ -47,7 +46,8 @@ def _constraints(pool: str, adr_floor: int | None = None) -> dict:
         "adr_floor_options": list(ADR_FLOOR_OPTIONS),
         # 이탈 이평선 = 그 풀 국가의 단기 이평 선택지
         "exit_ma_options": list(short_ma_options(country)),
-        "min_value_mult_options": list(MIN_VALUE_MULT_OPTIONS),
+        # 거래대금 하한 — 이탈 이평선과 같이 그 풀 국가의 목록.
+        "min_value_mult_options": list(min_value_mult_options(country)),
         # 기간 선택지 — 종목풀 백테스트와 같은 목록이 단일 소스(전략별로 따로 두지 않는다).
         # ADR 하한이 저장돼 있으면 게이트가 전 구간에 적용되는 기간만 남긴다(모멘텀과 같은 규칙).
         "month_options": _adr_clipped_months(pool, get_month_options())

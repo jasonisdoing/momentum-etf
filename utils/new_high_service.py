@@ -26,7 +26,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import ADR_FLOOR_OPTIONS, MIN_VALUE_MULT_OPTIONS
+from config import ADR_FLOOR_OPTIONS, MIN_VALUE_MULT_OPTIONS_BY_COUNTRY
 from utils.ma_options import SHORT_MA_OPTIONS
 from utils.price_series import positive_prices as _positive
 from utils.strategy_settings import coerce_to_options
@@ -97,6 +97,15 @@ def pool_country(pool: str) -> str:
     from utils.settings_loader import get_ticker_type_settings
 
     return str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+
+
+def min_value_mult_options(country_code: str | None) -> tuple[float | None, ...]:
+    """그 국가의 거래대금 하한 선택지 — 목록은 `config.MIN_VALUE_MULT_OPTIONS_BY_COUNTRY`
+    가 단일 소스다(이평 선택지의 `utils/ma_options` 와 같은 방식). 모르는 국가면 에러."""
+    country = str(country_code or "").strip().lower()
+    if country not in MIN_VALUE_MULT_OPTIONS_BY_COUNTRY:
+        raise ValueError(f"거래대금 하한 선택지를 지원하지 않는 국가입니다: {country_code!r}")
+    return MIN_VALUE_MULT_OPTIONS_BY_COUNTRY[country]
 
 
 def pool_options() -> list[dict[str, Any]]:
@@ -279,10 +288,12 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"{key} 는 {list(options)} 중 하나여야 합니다 (받은 값: {value})")
         return value
 
+    # 거래대금 하한 — 선택지가 국가별이라 풀의 국가로 목록을 고른다.
+    mult_options = min_value_mult_options(pool_country(pool))
     raw_min = settings.get("min_value_mult", DEFAULT_SETTINGS["min_value_mult"])
     min_value_mult = None if raw_min in (None, "", "none") else float(raw_min)
-    if min_value_mult not in MIN_VALUE_MULT_OPTIONS:
-        raise ValueError(f"min_value_mult 는 {list(MIN_VALUE_MULT_OPTIONS)} 중 하나여야 합니다 (받은 값: {raw_min})")
+    if min_value_mult not in mult_options:
+        raise ValueError(f"min_value_mult 는 {list(mult_options)} 중 하나여야 합니다 (받은 값: {raw_min})")
 
     raw_adr = settings.get("adr_floor", DEFAULT_SETTINGS["adr_floor"])
     adr_floor = None if raw_adr in (None, "", "none") else int(raw_adr)
@@ -344,12 +355,14 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
     return validate_settings({"pool": selected, **DEFAULT_SETTINGS, **stored})
 
 
-# 화면 로드 때 선택지 밖 저장값을 보정할 항목 — (키, 라벨, 선택지)
-_OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
-    ("adr_floor", "ADR 하한", ADR_FLOOR_OPTIONS),
-    ("exit_ma_days", "이탈 이평선", EXIT_MA_OPTIONS),
-    ("min_value_mult", "거래대금 하한", MIN_VALUE_MULT_OPTIONS),
-)
+# 화면 로드 때 선택지 밖 저장값을 보정할 항목 — (키, 라벨, 선택지).
+# 거래대금 하한 선택지가 국가별이라 풀을 알아야 목록이 정해진다.
+def _option_fields(pool: str) -> tuple[tuple[str, str, tuple], ...]:
+    return (
+        ("adr_floor", "ADR 하한", ADR_FLOOR_OPTIONS),
+        ("exit_ma_days", "이탈 이평선", EXIT_MA_OPTIONS),
+        ("min_value_mult", "거래대금 하한", min_value_mult_options(pool_country(pool))),
+    )
 
 
 def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], list[str]]:
@@ -361,7 +374,7 @@ def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], lis
     if selected not in pools:
         raise ValueError(f"지원하지 않는 종목풀입니다: {pool}")
     merged = {"pool": selected, **DEFAULT_SETTINGS, **dict((doc.get("settings_by_pool") or {}).get(selected) or {})}
-    return coerce_to_options(merged, _OPTION_FIELDS, validate_settings)
+    return coerce_to_options(merged, _option_fields(selected), validate_settings)
 
 
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
@@ -384,7 +397,7 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
 __all__ = [
     "DEFAULT_SETTINGS",
     "DEFAULT_BACKTEST_MONTHS",
-    "MIN_VALUE_MULT_OPTIONS",
+    "min_value_mult_options",
     "EXIT_MA_OPTIONS",
     "HIGH_WINDOW_WEEKS",
     "benchmark_info",
