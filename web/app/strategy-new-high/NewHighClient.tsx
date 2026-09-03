@@ -154,7 +154,7 @@ type PlanRow = {
   entry_date: string | null;
   entry_price: number | null;
   return_pct: number | null;
-  plan: "hold" | "sell" | "buy" | "exited";
+  plan: "hold" | "sell" | "buy" | "exited" | "empty";
   value_mult?: number | null;
   value_mult_live?: number | null;
   days: number | null;
@@ -170,6 +170,8 @@ type PlanRow = {
 
 type Positions = {
   as_of: string;
+  /** 동시 보유 상한 — 빈 슬롯 행 수를 세는 데 쓴다. */
+  top_n: number;
   /** 표시용 시세 갱신에 쓰는 국가 코드(시세 소스가 국가별로 다르다). */
   country: string;
   /** 진입·청산이 체결되는 거래일. 캘린더가 답하지 못하면 null. */
@@ -832,16 +834,30 @@ export function NewHighClient() {
       plan: "exited", days: t.days, is_new: false, exit_reason: t.reason,
       memo: t.memo,
     }));
-    // 보유(매도 예정 포함)가 위, 아직 안 산 것, 이미 끝난 것 순.
+    // 빈 슬롯 — 상한에서 '다음 시가 이후에 실제로 차 있을 자리' 를 뺀 만큼. 매도 예정은
+    // 곧 비고, 진입 예정은 곧 찬다. 자리가 남았다는 것은 자격을 갖춘 돌파가 없었다는 뜻이라,
+    // 표에 자리를 그려 두면 "왜 안 샀지" 를 표만 보고 알 수 있다.
+    const filled = held.filter((row) => row.plan !== "sell").length + buys.length;
+    const empty: PlanRow[] = Array.from({ length: Math.max(positions.top_n - filled, 0) }, (_, index) => ({
+      ticker: `__EMPTY_${index}__`, name: "(빈 슬롯)", industry: "", market_cap_rank: null,
+      change_pct: null, price: null, exit_price: null,
+      value_mult: null, value_mult_live: null,
+      entry_date: null, entry_price: null, return_pct: null,
+      plan: "empty", days: null, is_new: false, exit_reason: null,
+    }));
+    // 보유(매도 예정 포함)가 위, 아직 안 산 것, 빈 자리, 이미 끝난 것 순.
     // 같은 묶음 안에서는 **오래 들고 있는 것이 위** — 편입일이 이른 순이다.
-    const rank = { hold: 0, sell: 0, buy: 1, exited: 2 } as const;
-    return [...held, ...buys, ...exited].sort(
+    const rank = { hold: 0, sell: 0, buy: 1, empty: 2, exited: 3 } as const;
+    return [...held, ...buys, ...empty, ...exited].sort(
       (a, b) => rank[a.plan] - rank[b.plan] || (a.entry_date ?? "").localeCompare(b.entry_date ?? ""),
     );
   }, [positions]);
 
   // 차트를 그릴 대상 — 이미 나간 종목은 뺀다. 표와 같은 순서로 그린다.
-  const chartRows = useMemo(() => planRows.filter((row) => row.plan !== "exited"), [planRows]);
+  const chartRows = useMemo(
+    () => planRows.filter((row) => row.plan !== "exited" && row.plan !== "empty"),
+    [planRows],
+  );
   // 풀·기준일·구성이 바뀌면 이전 차트는 버린다.
   // 사용자가 고른 풀(draft.pool)을 앞에 둔다 — `positions` 는 새 결과가 와야 바뀌므로,
   // 그것만 보면 풀을 바꾼 뒤 결과가 오기까지 **이전 풀의 차트가 그대로 남는다**.
@@ -900,7 +916,7 @@ export function NewHighClient() {
         cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
         valueGetter: (p) => p.data?.plan ?? "",
         cellRenderer: (p: { data?: PlanRow }) => {
-          if (!p.data) return null;
+          if (!p.data || p.data.plan === "empty") return null;
           // 장중 판정은 오늘 종가로 확정되기 전이라 (예상) — 종가 확정 후에는 꼬리표가 빠진다.
           const tag = positions?.live ? "(예상)" : "";
           const reason = p.data.exit_reason ? ` (${p.data.exit_reason})` : "";
@@ -933,6 +949,7 @@ export function NewHighClient() {
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
       stockMemoColumn<PlanRow>({
         field: "memo",
+        editable: (row) => row?.plan !== "empty",
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
       }),
       industryColumn<PlanRow>({ hide: !hasIndustryData }),
@@ -1202,6 +1219,7 @@ export function NewHighClient() {
                     theme={gridTheme}
                     minHeight={0}
                     height="auto"
+                    getRowClass={(params) => (params.data?.plan === "empty" ? "appEmptySlotRow" : "")}
                     gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
                   />
                   {/* 진입 후보 표 — 항상 펼쳐 둔다. 상태 설명만 표 아래에서 접고 펼친다. */}

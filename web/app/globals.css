@@ -3606,6 +3606,20 @@ a {
   font-feature-settings: "tnum" 1;
 }
 
+/* 빈 슬롯 행 — 아직 채우지 못한 자리를 표에 그려 둔다(신고가 운용 현황).
+   칸 자체는 남겨 격자가 어긋나지 않게 하고, 종목명의 "(빈 슬롯)" 만 남기고 값을 비운다.
+   행마다 조건부로 컬럼을 갈아 끼우는 것보다 이쪽이 컬럼 정의를 건드리지 않는다. */
+.appAgGridTheme .ag-row.appEmptySlotRow .ag-cell,
+.appAgGridThemeLegacy .ag-row.appEmptySlotRow .ag-cell {
+  visibility: hidden;
+}
+
+.appAgGridTheme .ag-row.appEmptySlotRow .ag-cell[col-id="name"],
+.appAgGridThemeLegacy .ag-row.appEmptySlotRow .ag-cell[col-id="name"] {
+  visibility: visible;
+  color: var(--text-muted);
+}
+
 .appAgGridTheme .ag-row.appHeldRow {
   background: rgba(102, 204, 102, 0.35);
 }
