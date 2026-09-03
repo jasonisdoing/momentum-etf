@@ -648,6 +648,7 @@ def select_candidates(
     *,
     as_of: pd.Timestamp | None = None,
     series_cache: IntraweekSeriesCache,
+    include_ineligible: bool = False,
 ) -> list[dict[str, Any]]:
     """이격 후보 목록 — 보유 가능 조건은 순위 화면과 **같은 공용 함수**(`hold_eligible`)다.
 
@@ -683,6 +684,10 @@ def select_candidates(
         )
 
     # 장기 이격 > 0 & 단기 이격 >= 0 — 순위/종목풀 백테스트와 같은 단일 규칙.
+    # `include_ineligible` 이면 걸러내지 않고 전부 돌려준다 — 화면의 차순위 목록이
+    # 자격 미달 종목까지 채울 때만 쓴다(선정·백테스트는 늘 걸러진 목록을 본다).
+    if include_ineligible:
+        return candidates
     return [c for c in candidates if hold_eligible(c["disparity_pct"], c["short_disparity_pct"])]
 
 
@@ -1410,15 +1415,21 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
     # (판정일 기준, 게이트 반영)가 정하므로 표시만 달라진다.
     # 백테스트도 같은 방식으로 게이트를 후보 계산 밖에서 다룬다(`ungated_settings`).
     ungated_settings = {**settings, "adr_floor": None}
-    current_scored = rank_candidates(
+    # 자격 미달까지 한 번에 뽑아 둔다 — 차순위 목록을 채울 때 쓴다(아래 `reserve`).
+    current_all = rank_candidates(
         select_candidates(
             universe,
             frames,
             ungated_settings,
             as_of=None,
             series_cache=momentum_series_cache,
+            include_ineligible=True,
         )
     )
+    # 예상 순위·다음 주 편입은 **자격을 갖춘 종목만** 본다 — 선정 규칙과 같아야 한다.
+    current_scored = [
+        item for item in current_all if hold_eligible(item["disparity_pct"], item["short_disparity_pct"])
+    ]
     current_top = select_top(current_scored, top_n)
     next_expected: set[str] = {item["ticker"] for item in current_top}
     # 예상 순위 — 판정일 순위와 같은 규칙의 '현재 기준' 버전: 선정분 1~top_n,
@@ -1430,7 +1441,14 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
         expected_rank_by_ticker[item["ticker"]] = expected_rank
     # 차순위 후보 — **현재 이격 기준** 선정 제외 상위 N. 주중에 새로 올라온 종목이
     # 보이도록 판정일이 아니라 지금 순위로 뽑는다(판정일 값은 컬럼에 재계산으로 표시).
-    reserve = [item for item in current_scored if item["ticker"] not in selected_tickers][: top_n * RESERVE_MULTIPLIER]
+    # 자격을 갖춘 종목을 먼저 채우고, 모자라면 자격 미달까지 점수 순으로 채운다.
+    # 풀이 작으면(호주 코어 ETF 8종목) 후보가 전부 선정돼 차순위가 비었다 — 그때도
+    # "다음에 올라올 만한 종목" 을 보여준다. 자격 미달 행은 화면이 추세 이탈로 눌러 준다.
+    eligible_tickers = {item["ticker"] for item in current_scored}
+    reserve_pool = [item for item in current_scored if item["ticker"] not in selected_tickers] + [
+        item for item in current_all if item["ticker"] not in selected_tickers and item["ticker"] not in eligible_tickers
+    ]
+    reserve = reserve_pool[: top_n * RESERVE_MULTIPLIER]
     # 현재 표(선정+차순위)에 없는 예상 종목 — 하단에 별도 행으로 붙인다.
     table_tickers = {item["ticker"] for item in selected + reserve}
     extra_expected = [item for item in current_top if item["ticker"] not in table_tickers]
