@@ -810,9 +810,12 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
                 entry["prevClose"] = prev_val
                 entry["changeRate"] = ((now_val - prev_val) / prev_val) * 100.0
 
-            volume = _safe_float(item.get("volume"))
-            if volume is not None:
-                entry["volume"] = volume
+            # 오늘 누적 거래량·거래대금 — 국내 스냅샷과 같은 키로 담는다(장중 거래대금
+            # 배수를 두 시장이 같은 계산으로 쓴다). 토스의 `value` 는 이미 통화 금액이다.
+            for key, field in (("tradeValue", "value"), ("tradeVolume", "volume"), ("volume", "volume")):
+                parsed = _safe_float(item.get(field))
+                if parsed is not None and parsed > 0:
+                    entry[key] = parsed
 
             snapshot[sym] = entry
 
