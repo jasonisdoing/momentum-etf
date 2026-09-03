@@ -13,9 +13,12 @@
   매주 상위 N 을 새로 뽑는 방식은 순위 몇 계단 차이로 왕복 비용만 쌓아 폐기했다.
 - 슬롯 고정 비중: 종목당 1/top_n 로 배분하고, 자격 종목이 top_n 보다 적으면
   빈 슬롯은 현금으로 남긴다.
-- **주중 매도**(simulate_intraweek_exits): 보유 종목이 보유 자격(장기 이격 > 0 &
-  단기 이격 >= 0, hold_eligible_mask 와 동일)을 잃으면 다음 거래일 시가에 판다.
+- **주중 매도는 ADR 게이트만**(simulate_intraweek_exits): 시장 ADR 이 하한 미만으로
+  내려간 날 전량을 다음 거래일 시가에 판다. 개별 종목이 주중에 이평선을 이탈해도
+  ADR 이 하한 이상이면 주말 판정까지 보유한다 — 개별 이탈은 주 교체가 처리한다.
   판 슬롯은 다음 주 교체까지 현금이다 — 주중 재매수는 하지 않는다.
+- **창 시작 보유는 경로 재생으로 시드한다**(replay_hold_path): 자격 유지는 직전 보유가
+  선정을 정하는 경로 의존 규칙이라, 빈 보유로 시작하면 창 길이마다 현재 보유가 갈라진다.
 - 슬리피지는 편도(%)로, 리밸런싱에서 실제 매매되는 금액 전체에 부과한다:
   편출 전량 매도 + 편입 1/N 매수 + **유지 종목의 1/N 재조정 매매**(한 달간
   흘러간 비중과 목표 1/N 의 차이)까지 포함 — 완전 리밸런싱 모델과 비용이 일치한다.
@@ -43,6 +46,7 @@ from utils.momentum_service import (
     load_universe,
     pool_info,
     rank_candidates,
+    replay_hold_path,
     select_candidates,
     select_top_keeping,
     simulate_intraweek_exits,
@@ -204,10 +208,8 @@ def run_backtest(
     # 쉬는지"만 정하므로, 캐시에는 게이트 무관 후보를 두고 차단된 판정일만 빈 목록을 쓴다.
     # (거래대금 하한 때 겪은 튜닝 캐시 전염 — 첫 조합의 필터 결과가 다른 조합에 재사용 — 예방)
     ungated_settings = {**settings, "adr_floor": None}
-    for signal_date in all_signal_dates:
-        if adr_gate_blocked(settings, signal_date):
-            candidates_by_date.append([])
-            continue
+
+    def cached_candidates(signal_date: pd.Timestamp) -> list[dict[str, Any]]:
         cache_key = (signal_date, *ma_key)
         if cache_key not in candidate_cache:
             candidate_cache[cache_key] = select_candidates(
@@ -217,8 +219,14 @@ def run_backtest(
                 as_of=signal_date,
                 series_cache=intraweek_series_cache,
             )
+        return candidate_cache[cache_key]
+
+    for signal_date in all_signal_dates:
+        if adr_gate_blocked(settings, signal_date):
+            candidates_by_date.append([])
+            continue
         # 아래 단계가 후보 dict 를 손대더라도 캐시는 그대로 남게 복사본을 준다.
-        candidates_by_date.append([dict(item) for item in candidate_cache[cache_key]])
+        candidates_by_date.append([dict(item) for item in cached_candidates(signal_date)])
 
     # 슬리피지는 종목풀 설정을 단일 소스로 쓴다 — 매수·매도 편도값을 각각 적용한다.
     buy_slippage_pct, sell_slippage_pct = get_pool_slippage(pool)
@@ -326,7 +334,19 @@ def run_backtest(
         bench_open = (
             positive_prices(_bench_frame["Open"]).dropna() if "Open" in _bench_frame.columns else pd.Series(dtype=float)
         )
-    previous_holdings: set[str] = set()
+    # 자격 유지 시드 — 창 시작 전의 경로를 재생해 시작 보유를 잇는다. 빈 보유로 시작하면
+    # 창 길이(12·60개월)마다 현재 보유가 갈라져, 화면(운용 현황)과 백테스트가 서로 다른
+    # 보유·예정을 보여준다(자격 유지는 경로 의존 규칙이다). 후보는 위 캐시를 재사용한다.
+    seed_path = replay_hold_path(
+        universe,
+        frames,
+        settings,
+        benchmark_close,
+        until_rebalance=dates[0],
+        series_cache=intraweek_series_cache,
+        candidates_at=cached_candidates,
+    )
+    previous_holdings: set[str] = set(seed_path[-1]["survivors"]) if seed_path else set()
     # 직전 보유 구간의 종목별 성장배수(1+수익률) — 교체 시점의 드리프트 비중 계산용.
     previous_growth: dict[str, float] = {}
     # 굴리는 자산 — 정수 주수 배분의 예산이다. 시작 자본은 통화별 상수(config).
@@ -341,27 +361,22 @@ def run_backtest(
         # 교체 규칙(자격 유지) — 공용 함수 하나만 쓴다.
         holdings = [item["ticker"] for item in select_top_keeping(scored, top_n, previous_holdings)]
         holdings_set = set(holdings)
-        added_tickers = sorted(holdings_set - previous_holdings)
-        removed_tickers = sorted(previous_holdings - holdings_set)
+        # 첫 구간은 시드 보유도 전부 편입으로 잡는다 — 창 안에서는 시작 시가에 산 것이고,
+        # 그래야 체결 내역·주간 종목 수 집계가 어긋나지 않는다. 시드에서 탈락한 종목은
+        # 창 안에서 산 적이 없으므로 편출로 잡지 않는다.
+        added_tickers = sorted(holdings_set - (previous_holdings if position > 0 else set()))
+        removed_tickers = sorted(previous_holdings - holdings_set) if position > 0 else []
         # 슬롯 고정 비중 — 선정이 top_n 보다 적으면 빈 슬롯은 현금으로 남긴다.
         target_weight = 1.0 / top_n
 
-        # ── 주중 매도 — 자격 상실 종목은 다음 거래일 시가 매도 (선정 화면과 같은 함수).
+        # ── 주중 매도 — ADR 게이트 전량 매도만 (선정 화면과 같은 함수).
         # 완결된 주는 마지막 판정일(교체일 직전)을 스캔에서 제외한다 — 그 판정의 체결은
         # 주 교체가 대신하기 때문이다(이중 계산 방지). 마지막 구간은 끝까지 스캔해
         # 마지막 종가 판정분을 '다음 거래일 매도 예정'으로 남긴다.
         scan_days = bench_index[(bench_index >= start) & (bench_index < end)]
         exits: list[dict[str, Any]] = []
         if len(scan_days) >= 2:
-            exits = simulate_intraweek_exits(
-                frames,
-                settings,
-                holdings_set,
-                bench_index,
-                start,
-                scan_days[-2],
-                series_cache=intraweek_series_cache,
-            )
+            exits = simulate_intraweek_exits(settings, holdings_set, bench_index, start, scan_days[-2])
         exited_tickers = {x["ticker"] for x in exits}
         sell_date_by_ticker = {x["ticker"]: x["sell_date"] for x in exits}
         # 이 구간을 끝까지 들고 가는 종목 — 다음 교체·표시가 이 기준을 쓴다.
@@ -374,7 +389,7 @@ def run_backtest(
             trade_events.append({"date": start, "action": "remove", "ticker": ticker, "reason": "주간 교체"})
             _close_trade(ticker, start, "주간 교체")
         for exit_info in exits:
-            reason = exit_info.get("reason") or "주중 이탈"
+            reason = exit_info.get("reason") or "ADR 게이트"
             trade_events.append(
                 {"date": exit_info["sell_date"], "action": "remove", "ticker": exit_info["ticker"], "reason": reason}
             )
@@ -623,7 +638,7 @@ def run_backtest(
             bucket = buckets[key]
             added_labels: list[str] = []
             removed_labels: list[str] = []
-            exited_labels: list[str] = []  # 주중 이탈 — 교체 편출과 구분해 보여준다
+            exited_labels: list[str] = []  # 주중 매도(ADR 게이트) — 교체 편출과 구분해 보여준다
             while event_index < len(events_sorted) and events_sorted[event_index]["date"] <= bucket["end"]:
                 event = events_sorted[event_index]
                 if event["action"] == "add":
@@ -647,7 +662,7 @@ def run_backtest(
                     "adr": adr_at(bucket["end"]),
                     "strategy_pct": _compound_daily(bucket["strategy"]),
                     "benchmark_pct": _compound_daily(bucket["benchmark"]),
-                    # 교체 직후(주 시작) 종목 수 — 주중 이탈로 줄면 화면이 "5 → 0" 로 보여준다.
+                    # 교체 직후(주 시작) 종목 수 — 주중 ADR 게이트로 줄면 화면이 "5 → 0" 로 보여준다.
                     "holdings_start": holdings_running + len(exited_labels),
                     "holdings_count": holdings_running,
                     "turnover_pct": round(len(added_labels) / top_n * 100.0, 1),
@@ -669,19 +684,11 @@ def run_backtest(
         pending_count = len(pending_holdings)
     else:
         # 판정일이 아직 오지 않았다 — 마지막 종가로 판정한 주중 매도 예정만 반영한다.
-        pending_exits = simulate_intraweek_exits(
-            frames,
-            settings,
-            current_holdings,
-            bench_index,
-            last_cached,
-            last_cached,
-            series_cache=intraweek_series_cache,
-        )
+        pending_exits = simulate_intraweek_exits(settings, current_holdings, bench_index, last_cached, last_cached)
         pending_added = []
         pending_removed = sorted(x["ticker"] for x in pending_exits)
         pending_count = len(current_holdings) - len(pending_removed)
-        pending_exit_reason = {x["ticker"]: x.get("reason") or "주중 이탈" for x in pending_exits}
+        pending_exit_reason = {x["ticker"]: x.get("reason") or "ADR 게이트" for x in pending_exits}
 
     # 예정이 속한 주 — 판정일 종가가 확정됐으면 **다음 교체 뒤의 주**, 아직이면 지금
     # 진행 중인 주다. 후자를 다음 주로 찍으면 내일 시가에 팔 종목이 한 주 뒤 행에 실려
