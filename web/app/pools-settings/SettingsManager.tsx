@@ -11,6 +11,7 @@ import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect"
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { AppModal } from "../components/AppModal";
+import { ensureAsxPrefix } from "../components/TickerDetailLink";
 
 /** 숫자 셀렉트/입력으로 편집하는 키. */
 const NUMERIC_KEYS = [
@@ -175,6 +176,10 @@ function toDraft(pool: PoolEntry): PoolDraft {
 }
 
 function draftToValues(draft: PoolDraft) {
+  const benchmarkTicker =
+    draft.country_code === "au"
+      ? ensureAsxPrefix(draft.benchmarkTicker)
+      : draft.benchmarkTicker.trim().toUpperCase();
   return {
     ticker_type: draft.ticker_type.trim().toLowerCase(),
     name: draft.name.trim(),
@@ -191,8 +196,8 @@ function draftToValues(draft: PoolDraft) {
     SELL_SLIPPAGE_PCT: Number(draft.SELL_SLIPPAGE_PCT),
     STOPLOSS_THRESHOLD_PCT: Number(draft.STOPLOSS_THRESHOLD_PCT),
     // 티커/이름이 모두 비면 미설정(null). 하나만 있으면 백엔드가 거부한다.
-    BENCHMARK: draft.benchmarkTicker.trim()
-      ? { ticker: draft.benchmarkTicker.trim().toUpperCase(), name: draft.benchmarkName.trim() }
+    BENCHMARK: benchmarkTicker
+      ? { ticker: benchmarkTicker, name: draft.benchmarkName.trim() }
       : null,
     MARKET_REGIME_INDEX: draft.marketRegimeTicker.trim()
       ? { ticker: draft.marketRegimeTicker.trim(), name: draft.marketRegimeName.trim() }
@@ -235,10 +240,14 @@ function SelectField({
 function BenchmarkField({
   ticker,
   name,
+  countryCode,
+  tickerTypes,
   onChange,
 }: {
   ticker: string;
   name: string;
+  countryCode: string;
+  tickerTypes: string[];
   onChange: (key: keyof PoolDraft, value: string) => void;
 }) {
   const toast = useToast();
@@ -246,22 +255,39 @@ function BenchmarkField({
   const [resolving, setResolving] = useState(false);
 
   const resolve = async () => {
-    const target = ticker.trim();
+    const country = countryCode.trim().toLowerCase();
+    const target = country === "au" ? ensureAsxPrefix(ticker) : ticker.trim().toUpperCase();
     if (!target) {
       toast.error("티커를 입력해주세요.");
       return;
     }
+    if (tickerTypes.length === 0) {
+      toast.error(`국가(${country})에 등록된 종목풀이 없습니다.`);
+      return;
+    }
     try {
       setResolving(true);
-      const resp = await fetch(`/api/leverage-config/resolve?ticker=${encodeURIComponent(target)}`);
-      const payload = (await resp.json()) as { name?: string; error?: string };
-      if (!resp.ok || payload.error || !payload.name) {
+      const resp = await fetch(
+        `/api/ticker-resolve?ticker=${encodeURIComponent(target)}&ticker_types=${encodeURIComponent(tickerTypes.join(","))}`,
+      );
+      const payload = (await resp.json()) as {
+        ticker?: string;
+        name?: string;
+        country_code?: string;
+        error?: string;
+      };
+      if (!resp.ok || payload.error || !payload.ticker || !payload.name) {
         toast.error(payload.error ?? "종목명을 찾을 수 없습니다.");
         return;
       }
+      if (String(payload.country_code ?? "").toLowerCase() !== country) {
+        toast.error(`국가(${country}) 종목만 벤치마크로 등록할 수 있습니다.`);
+        return;
+      }
+      onChange("benchmarkTicker", payload.ticker);
       onChange("benchmarkName", payload.name);
       setEditing(false);
-      toast.success(`${payload.name}(${target}) 확인 완료`);
+      toast.success(`${payload.name}(${payload.ticker}) 확인 완료`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "티커 조회 중 오류가 발생했습니다.");
     } finally {
@@ -346,6 +372,13 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     [drafts, rows],
   );
   const dirtyCount = gridRows.filter((row) => row.__dirty).length;
+  const tickerTypesForCountry = useCallback(
+    (countryCode: string) =>
+      rows
+        .filter((pool) => String(pool.country_code ?? "").toLowerCase() === countryCode.trim().toLowerCase())
+        .map((pool) => pool.ticker_type),
+    [rows],
+  );
 
   useEffect(() => {
     onSummaryChange?.(rows.length);
@@ -728,7 +761,16 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       <div style={rowStyle}>
         {renderField(
           "국가",
-          <SelectField value={draft.country_code} options={COUNTRY_OPTIONS} width={82} onChange={(value) => onChange("country_code", value)} />,
+          <SelectField
+            value={draft.country_code}
+            options={COUNTRY_OPTIONS}
+            width={82}
+            onChange={(value) => {
+              onChange("country_code", value);
+              onChange("benchmarkTicker", "");
+              onChange("benchmarkName", "");
+            }}
+          />,
           { minWidth: 144, labelWidth: 44 },
         )}
         {renderField(
@@ -794,7 +836,13 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
 
       <div style={{ ...rowStyle, marginBottom: 0 }}>
         <span style={{ ...labelStyle, width: 72 }}>벤치마크</span>
-        <BenchmarkField ticker={draft.benchmarkTicker} name={draft.benchmarkName} onChange={onChange} />
+        <BenchmarkField
+          ticker={draft.benchmarkTicker}
+          name={draft.benchmarkName}
+          countryCode={draft.country_code}
+          tickerTypes={tickerTypesForCountry(draft.country_code)}
+          onChange={onChange}
+        />
         {renderField(
           "ADR 기준",
           <select
@@ -916,6 +964,9 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
                     }
                     // 국가를 바꾸면 이평선 선택지가 통째로 바뀐다 — 목록 밖 값이 남지 않게 비운다.
                     if (key === "country_code") {
+                      // 기존 국가의 벤치마크가 새 국가 설정에 남지 않게 다시 선택하도록 비운다.
+                      updateDraft(params.data.ticker_type, "benchmarkTicker", "");
+                      updateDraft(params.data.ticker_type, "benchmarkName", "");
                       const options = data.constraints.ma_options_by_country[String(params.newValue ?? "")];
                       const short = Number(params.data.SHORT_MA_DAYS);
                       const long = Number(params.data.LONG_MA_DAYS);
@@ -952,6 +1003,8 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
           <BenchmarkField
             ticker={drafts[benchmarkTargetId].benchmarkTicker}
             name={drafts[benchmarkTargetId].benchmarkName}
+            countryCode={drafts[benchmarkTargetId].country_code}
+            tickerTypes={tickerTypesForCountry(drafts[benchmarkTargetId].country_code)}
             onChange={(key, value) => updateDraft(benchmarkTargetId, key, value)}
           />
         ) : null}

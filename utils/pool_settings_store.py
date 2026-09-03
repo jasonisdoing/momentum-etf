@@ -433,43 +433,61 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
     return cleaned
 
 
+def _canonical_benchmark_for_country(
+    benchmark: dict[str, Any], country_code: str, candidates: list[dict[str, Any]]
+) -> dict[str, str]:
+    """벤치마크를 해당 국가 종목의 표준 티커·이름으로 확정한다."""
+    country = str(country_code or "").strip().lower()
+    ticker = str(benchmark.get("ticker") or "").strip().upper()
+    if country == "au":
+        from utils.asx_ticker import ensure_asx_prefix
+
+        ticker = ensure_asx_prefix(ticker)
+
+    candidate_by_ticker = {
+        str(item.get("ticker") or "").strip().upper(): str(item.get("name") or "").strip()
+        for item in candidates
+        if item.get("ticker")
+    }
+    name = candidate_by_ticker.get(ticker)
+    if name is None:
+        raise PoolSettingsError(f"벤치마크 '{ticker}' 는 국가({country})에 등록된 종목이 아닙니다.")
+    return {"ticker": ticker, "name": name or ticker}
+
+
+def _normalize_benchmark_for_country(cleaned: dict[str, Any], country_code: str) -> None:
+    """정리된 설정의 벤치마크를 같은 국가 종목 목록으로 검증하고 제자리에서 표준화한다."""
+    benchmark = cleaned.get("BENCHMARK")
+    if not isinstance(benchmark, dict) or not benchmark.get("ticker"):
+        return
+
+    from utils.stock_list_io import get_etfs
+
+    country = str(country_code or "").strip().lower()
+    pool_ids = [
+        str(definition["ticker_type"])
+        for definition in load_pool_definitions()
+        if str(definition.get("country_code") or "").strip().lower() == country
+    ]
+    candidates = [item for pool_id in pool_ids for item in get_etfs(pool_id)]
+    cleaned["BENCHMARK"] = _canonical_benchmark_for_country(benchmark, country, candidates)
+
+
 def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = "사용자") -> dict[str, Any]:
     """편집한 값을 pool_settings 에 upsert 하고 캐시를 무효화한다.
 
     pool_id 는 유효한 ticker_type.
     반환: 저장된(정규화된) 값.
     """
-    from utils.settings_loader import list_available_ticker_types
+    from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
 
     norm_id = str(pool_id or "").strip().lower()
     if norm_id not in list_available_ticker_types():
         raise PoolSettingsError(f"알 수 없는 종목풀입니다: {pool_id}")
 
     cleaned = _validate_values(values)
-
-    # 벤치마크는 이 종목풀에 실제로 등록된 종목이어야 한다(순위/백테스트에서 매수 후보에서
-    # 제외하고 종가를 이 풀 캐시에서 읽기 때문). 없는 종목이면 저장을 거부한다.
-    benchmark = cleaned.get("BENCHMARK")
-    if isinstance(benchmark, dict) and benchmark.get("ticker"):
-        from utils.stock_list_io import get_etfs
-
-        def _norm_ticker(value: Any) -> str:
-            return str(value or "").strip().upper().removeprefix("ASX:")
-
-        # 접두사를 뗀 형태로 대조하되, **저장은 풀에 등록된 표기 그대로** 한다.
-        # 호주는 시스템 내부에서 `ASX:` 접두사를 쓰는데(utils/asx_ticker), 사용자가
-        # `IVV` 로 입력하면 대조는 통과하고 저장만 접두사 없이 남아 캐시 조회가 빗나갔다.
-        canonical_by_norm = {
-            _norm_ticker(item.get("ticker")): str(item.get("ticker") or "").strip().upper()
-            for item in get_etfs(norm_id)
-        }
-        canonical = canonical_by_norm.get(_norm_ticker(benchmark["ticker"]))
-        if canonical is None:
-            raise PoolSettingsError(
-                f"벤치마크 '{benchmark['ticker']}' 는 이 종목풀에 등록된 종목이 아닙니다. "
-                "종목풀에 있는 종목만 벤치마크로 지정할 수 있습니다."
-            )
-        benchmark["ticker"] = canonical
+    country_code = str(get_ticker_type_settings(norm_id).get("country_code") or "").strip().lower()
+    _normalize_benchmark_for_country(cleaned, country_code)
 
     db = _db()
     db[COLLECTION].update_one(
@@ -501,6 +519,7 @@ def create_pool(values: dict[str, Any], save_method: str = "사용자") -> dict[
         raise PoolSettingsError(f"신규 종목풀에 필수 값이 없습니다: {', '.join(missing)}")
     cleaned = _normalize_pool_values(values, require_ticker_type=True)
     pool_id = cleaned.pop("ticker_type")
+    _normalize_benchmark_for_country(cleaned, str(cleaned.get("country_code") or ""))
 
     db = _db()
     if db[COLLECTION].find_one({"_id": pool_id}, {"_id": 1}) is not None:
@@ -523,12 +542,15 @@ def update_pool(pool_id: str, values: dict[str, Any], save_method: str = "사용
     norm_id = _normalize_ticker_type(pool_id)
     if "ticker_type" in values and _normalize_ticker_type(values["ticker_type"]) != norm_id:
         raise PoolSettingsError("ticker_type 은 변경할 수 없습니다.")
+    db = _db()
+    existing = db[COLLECTION].find_one({"_id": norm_id})
+    if existing is None:
+        raise PoolSettingsError(f"알 수 없는 종목풀입니다: {pool_id}")
     cleaned = _normalize_pool_values({k: v for k, v in values.items() if k != "ticker_type"}, require_ticker_type=False)
     if not cleaned:
         raise PoolSettingsError("저장할 값이 없습니다.")
-    db = _db()
-    if db[COLLECTION].find_one({"_id": norm_id}, {"_id": 1}) is None:
-        raise PoolSettingsError(f"알 수 없는 종목풀입니다: {pool_id}")
+    country_code = str(cleaned.get("country_code") or existing.get("country_code") or "").strip().lower()
+    _normalize_benchmark_for_country(cleaned, country_code)
     db[COLLECTION].update_one(
         {"_id": norm_id},
         {
