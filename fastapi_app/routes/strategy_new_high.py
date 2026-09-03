@@ -10,7 +10,6 @@ from utils.new_high_service import (
     DEFAULT_SETTINGS,
     HIGH_WINDOW_WEEKS,
     MIN_VALUE_MULT_OPTIONS,
-    STOP_LOSS_OPTIONS,
     load_settings,
     load_settings_for_view,
     load_settings_map,
@@ -46,7 +45,6 @@ def _constraints(pool: str, adr_floor: int | None = None) -> dict:
     return {
         # ADR 하한 — 전일 시장 ADR 이 미만이면 그날 신규 진입 차단. None = 없음(기본).
         "adr_floor_options": list(ADR_FLOOR_OPTIONS),
-        "stop_loss_options": list(STOP_LOSS_OPTIONS),
         # 이탈 이평선 = 그 풀 국가의 단기 이평 선택지
         "exit_ma_options": list(short_ma_options(country)),
         "min_value_mult_options": list(MIN_VALUE_MULT_OPTIONS),
@@ -168,7 +166,7 @@ def post_strategy_new_high_tuning(
     """튜닝 — 설정 항목 범위의 모든 조합을 백테스트한다.
 
     body: ``{"months": 12, "settings": {...현재 화면 값}, "ranges": {
-    "stop_loss_pct": [...], "exit_ma_days": [...], "min_value_mult": [...], "adr_floor": [...]}}``
+    "exit_ma_days": [...], "min_value_mult": [...], "adr_floor": [...]}}``
     축 밖의 설정은 ``settings`` 값으로 고정한다.
     """
     from utils.new_high_tuning import stream_tuning

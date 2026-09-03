@@ -215,7 +215,6 @@ class MomentumIntraweekCacheTest(unittest.TestCase):
         }
         settings = {
             "intraweek_exit": True,
-            "intraweek_stop_pct": -7.0,
             "short_ma_days": 2,
             "long_ma_days": 3,
             "adr_floor": None,

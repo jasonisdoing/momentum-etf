@@ -9,7 +9,7 @@ import { AppLoadingProgress, type LoadingProgress } from "./AppLoadingProgress";
 import { useToast } from "./ToastProvider";
 import { createAppGridTheme } from "./app-grid-theme";
 
-/** 축 값 — 숫자 외에 "off"/"none" 같은 상태값도 쓴다(모멘텀 주중 손절선). */
+/** 축 값 — 숫자 외에 "off"/"on" 같은 상태값도 쓴다(모멘텀 주중 이탈). */
 export type TuningValue = number | string | null;
 
 /** 튜닝 축 하나 — 화면 설정 항목과 1:1. 값 목록은 저장 가능한 옵션과 같아야 한다.

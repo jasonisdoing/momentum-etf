@@ -315,7 +315,7 @@ def finalize(rows: list[dict[str, Any]], axes: list[str]) -> dict[str, Any]:
             if value not in seen:
                 seen.append(value)
         # 축 값 표시 순서 — 문자열(미사용·없음 등)은 주어진 순서대로 앞에, 숫자는 절댓값 오름차순
-        # (손절선 -5, -6, … -10 / 종목수 5, 6, …), None 은 맨 뒤.
+        # (종목수 5, 6, … / ADR 90, 100), None 은 맨 뒤.
         order = {v: i for i, v in enumerate(seen)}
         seen.sort(key=lambda v: (2, 0) if v is None else ((0, order[v]) if isinstance(v, str) else (1, abs(v))))
         for value in seen:

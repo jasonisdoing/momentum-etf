@@ -494,7 +494,7 @@ def _build_action_groups(
         최소 MIX_REBALANCE_BAND_MIN_PCT %p) 이상 차이만 지시로 만든다
         — 가격 드리프트는 지시가 안 되고, 큰 단위 입출금·교체·진입·이탈만 지시가 된다.
       · 교체가 확정됐지만 미체결이면 그 슬리브 몫은 교체일 시가 그룹, 나머지는 다음 거래일 그룹.
-      · 전량 매도·손절·이탈은 금액과 무관하게 항상 남긴다.
+      · 전량 매도·이탈은 금액과 무관하게 항상 남긴다.
     슬리브가 어떤 전략인지는 보지 않는다 — 있는 액션만 읽는다(교체가 없는 전략은 rebalance=None).
     """
     slots: dict[str, dict[str, Any]] = actions["slots"]
@@ -1368,7 +1368,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
                     "label": labels[key],
                     # 장중 판정을 쓰는 전략인지 — 그 슬리브의 매도는 아직 '예상'이다.
                     "live": states[key].live,
-                    # 다음 거래일 시가 매도(확정) — 자격 상실·이탈·손절.
+                    # 다음 거래일 시가 매도(확정) — 자격 상실·이탈.
                     "sells": states[key].sells,
                     # 장중 판정 기준 이탈 **예상** — 오늘 종가로 확정된다. 화면 전용.
                     "exit_forecast": states[key].exit_forecast,
@@ -1479,9 +1479,6 @@ class _SlotRuntime:
     breakout: Any = None
     below_ma: Any = None
     value_mult: Any = None
-    entry: dict[str, float] = field(default_factory=dict)
-    # None 이면 손절 미사용 — 신고가 엔진과 같은 규칙
-    stop_pct: float | None = None
     min_mult: Any = None
 
 
@@ -1508,7 +1505,7 @@ def _build_slot_runtime(
     두 전략의 재현 방식이 다르다:
       - 모멘텀: **체결 내역으로 보유를 복원**한다. 선정이 순위 기반이라 포지션 크기와 무관해
         후보 재계산 없이 정확히 재현된다.
-      - 신고가: **신호(돌파·손절·이탈)에서 다시 판정**한다. 진입 여부가 슬리브 현금에 달려
+      - 신고가: **신호(돌파·이탈)에서 다시 판정**한다. 진입 여부가 슬리브 현금에 달려
         있어, 이관으로 현금이 달라지면 엔진 체결 내역과 어긋난다.
     """
     from utils.pool_settings_store import get_pool_slippage
@@ -1550,8 +1547,6 @@ def _build_slot_runtime(
     runtime.breakout = signals["breakout"]
     runtime.below_ma = signals["below_ma"]
     runtime.value_mult = signals["value_mult"]
-    raw_stop = spec.settings["stop_loss_pct"]
-    runtime.stop_pct = None if raw_stop is None else float(raw_stop)
     runtime.min_mult = spec.settings["min_value_mult"]
     return runtime
 
@@ -1651,12 +1646,10 @@ def _simulate_mix_daily(
                 price = px(rt.close_df, prev, ticker)
                 if price is None:
                     continue
-                hit_stop = rt.stop_pct is not None and (price / rt.entry[ticker] - 1) * 100 <= rt.stop_pct
-                if not (hit_stop or bool(rt.below_ma.at[prev, ticker])):
+                if not bool(rt.below_ma.at[prev, ticker]):
                     continue
                 fill = px(rt.open_df, day, ticker) or price
                 rt.cash += rt.shares.pop(ticker) * fill * (1 - rt.sell_slip)
-                rt.entry.pop(ticker, None)
 
         # 2) 모멘텀 매도 체결(교체 편출·주중 이탈 — 체결 내역의 청산일)
         for rt in runtimes:
@@ -1839,7 +1832,6 @@ def _simulate_mix_daily(
                 if bought <= 0:
                     continue
                 rt.shares[ticker] = bought
-                rt.entry[ticker] = fills[ticker]
                 rt.cash -= bought * fills[ticker]
 
         # 비워 둔 현금도 계좌 자산이다 — 곡선에서 빼면 배분을 늘릴수록 총자산이 줄어 보인다.

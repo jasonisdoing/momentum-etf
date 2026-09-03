@@ -1,16 +1,15 @@
 """모멘텀 전략 튜닝 — 설정 항목들의 범위 조합을 한 번에 백테스트해 비교한다.
 
-화면 '튜닝' 섹션용. 축(화면 순서): 선정 이평(단기·장기) · ADR 하한 · 주중 손절선.
+화면 '튜닝' 섹션용. 축(화면 순서): 선정 이평(단기·장기) · ADR 하한 · 주중 이탈.
 종목 수는 풀 설정(`pool_settings.TOP_N_HOLD`) 고정, 업종 상한은 폐기 — 튜닝은 "그 시장이 어떤
-이동평균에 반응하는가"와 손절 기준을 재는 용도로만 쓴다(종목 수까지 돌리면 과적합 탐색이 된다).
+이동평균에 반응하는가"를 재는 용도로만 쓴다(종목 수까지 돌리면 과적합 탐색이 된다).
 (단기, 장기) 쌍을 작업 단위로 별도 프로세스에서 병렬로 돌린다 — 각 프로세스는 가격·판정일별
 후보를 한 번 읽어 그 쌍의 전 조합에 공유(run_backtest 의 context)하므로 조합당 0.5초 수준이고,
 병렬 수(코어 수 − 1)만큼 전체 시간이 줄어든다.
 
-주중 손절선 축의 값
-  "off"  → 주중 이탈 미사용
-  "none" → 주중 이탈 사용, 손절선 없음(이평선 이탈만)
-  숫자   → 주중 이탈 사용 + 그 손절선(%)
+주중 이탈 축의 값
+  "off" → 주중 이탈 미사용
+  "on"  → 주중 이탈 사용(이평선 이탈)
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ import pandas as pd
 
 from config import ADR_FLOOR_OPTIONS
 from utils.momentum_service import (
-    INTRAWEEK_STOP_OPTIONS,
     LONG_MA_OPTIONS,
     REBALANCE_MODE_OPTIONS,
     REBALANCE_MODE_WEEKLY,
@@ -47,13 +45,10 @@ TUNING_AXES = ("short_ma_days", "long_ma_days", "adr_floor", "intraweek", "rebal
 
 def _intraweek_settings(value: Any) -> dict[str, Any]:
     if value == "off":
-        return {"intraweek_exit": False, "intraweek_stop_pct": None}
-    if value == "none" or value is None:
-        return {"intraweek_exit": True, "intraweek_stop_pct": None}
-    stop = float(value)
-    if stop not in INTRAWEEK_STOP_OPTIONS:
-        raise ValueError(f"주중 손절선 값이 올바르지 않습니다: {value}")
-    return {"intraweek_exit": True, "intraweek_stop_pct": stop}
+        return {"intraweek_exit": False}
+    if value == "on":
+        return {"intraweek_exit": True}
+    raise ValueError(f"주중 이탈 값이 올바르지 않습니다: {value}")
 
 
 def _checked_optional_ints(values: list[Any], options: tuple, label: str) -> list[Any]:
@@ -195,7 +190,7 @@ def _stream_tuning(
     longs = _checked(ranges.get("long_ma_days", []), LONG_MA_OPTIONS, "장기 이평")
     intraweeks = list(dict.fromkeys(ranges.get("intraweek", [])))
     if not intraweeks:
-        raise ValueError("'주중 손절선' 범위가 비어 있습니다.")
+        raise ValueError("'주중 이탈' 범위가 비어 있습니다.")
     for value in intraweeks:
         _intraweek_settings(value)  # 검증
     rebalance_modes = list(dict.fromkeys(str(v).strip().lower() for v in ranges.get("rebalance_mode", [])))

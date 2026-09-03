@@ -6,16 +6,14 @@
 2. 진입: 종가가 **직전 52주 최고가**를 넘어선 날(돌파). 다음 거래일 **시가** 체결.
    창은 거래일 수가 아니라 **달력 52주**다(`HIGH_WINDOW_WEEKS`). 화면 문구도 이
    값에서 만들어, 창을 바꾸면 문구가 따라온다.
-3. 청산: 아래 둘 중 **먼저 걸리는 쪽**. 판정은 종가, 체결은 다음 거래일 시가.
-     ① 진입가 대비 손절선(−7% 또는 −10%)
-     ② 이탈 이동평균(기본 20일) 종가 하회
+3. 청산: **이탈 이동평균(기본 20일) 종가 하회**. 판정은 종가, 체결은 다음 거래일 시가.
    목표가(익절)는 두지 않는다 — 오르는 종목은 계속 들고 간다.
 4. 자리 배분: 동시 보유 상한 top_n, 균등 배분. 신호가 자리보다 많으면
    **거래대금 급증 배수**가 큰 순으로 담는다(돌파에 자금이 실린 쪽 우선).
    자리가 꽉 차 있으면 새 돌파가 와도 **교체하지 않는다** — 2026-08-14 kor(24개월)·
    us(60개월) 백테스트에서 최저수익/손실만/최장보유 교체 전부가 현행보다 나빴다
    (kor +1912% vs 교체 시 +142~779%, us +240% vs -76~+95%). 보유 중이라는 것 자체가
-   손절·이탈에 안 걸린 살아있는 추세라는 뜻이라, 교체는 청산 규칙을 앞질러 이익
+   이탈에 안 걸린 살아있는 추세라는 뜻이라, 교체는 청산 규칙을 앞질러 이익
    종목을 자르고 슬리피지 왕복 비용만 쌓는다.
 
 설정은 MongoDB `system_config.new_high_settings` 에 풀별로 저장한다(`settings_by_pool`).
@@ -29,12 +27,6 @@ from typing import Any
 import pandas as pd
 
 from config import ADR_FLOOR_OPTIONS, MIN_VALUE_MULT_OPTIONS
-
-# 손절선 — 시스템 공용 목록 앞에 '없음'(None)을 붙인다. 이탈 이평선이 있어 손절이
-# 없어도 청산 경로가 있다(모멘텀의 주중 손절과 같은 규칙 — `config` 주석 참고).
-from config import STOP_LOSS_PCT_OPTIONS as _STOP_LOSS_PCT_OPTIONS
-
-STOP_LOSS_OPTIONS: tuple[float | None, ...] = (None, *_STOP_LOSS_PCT_OPTIONS)
 from utils.ma_options import SHORT_MA_OPTIONS
 from utils.price_series import positive_prices as _positive
 from utils.strategy_settings import coerce_to_options
@@ -69,18 +61,16 @@ _SETTINGS_KEY = "new_high_settings"
 # 슬리피지는 종목풀 설정(BUY/SELL_SLIPPAGE_PCT)을 쓰고, 백테스트 기간은 실행할 때
 # 화면에서 고른다 — 둘 다 여기 저장하지 않는다.
 PER_POOL_SETTING_KEYS = (
-    "stop_loss_pct",
     "exit_ma_days",
     "min_value_mult",
     "adr_floor",
 )
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "stop_loss_pct": -7.0,
     "exit_ma_days": 20,
     # 기본은 조건 없음 — 풀마다 적정값이 달라 사용자가 시험해 보고 저장한다.
     "min_value_mult": None,
-    # ADR 하한 — 전일 시장 ADR 이 미만이면 그날 **신규 진입만** 차단(보유는 손절·이탈이 관리).
+    # ADR 하한 — 전일 시장 ADR 이 미만이면 그날 **신규 진입만** 차단(보유는 이탈이 관리).
     # 기본 없음. 시장은 풀 설정의 시장 레짐 지수를 따른다(모멘텀과 같은 공용 판정).
     "adr_floor": None,
 }
@@ -294,12 +284,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     if min_value_mult not in MIN_VALUE_MULT_OPTIONS:
         raise ValueError(f"min_value_mult 는 {list(MIN_VALUE_MULT_OPTIONS)} 중 하나여야 합니다 (받은 값: {raw_min})")
 
-    raw_stop = settings.get("stop_loss_pct", DEFAULT_SETTINGS["stop_loss_pct"])
-    stop_loss_pct = None if raw_stop in (None, "", "none") else float(raw_stop)
-    if stop_loss_pct not in STOP_LOSS_OPTIONS:
-        allowed = ", ".join("없음" if v is None else f"{v:g}" for v in STOP_LOSS_OPTIONS)
-        raise ValueError(f"stop_loss_pct 는 {allowed} 중 하나여야 합니다 (받은 값: {raw_stop})")
-
     raw_adr = settings.get("adr_floor", DEFAULT_SETTINGS["adr_floor"])
     adr_floor = None if raw_adr in (None, "", "none") else int(raw_adr)
     if adr_floor not in ADR_FLOOR_OPTIONS:
@@ -317,7 +301,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "adr_floor": adr_floor,
         # 종목 수(슬롯)는 순위·모멘텀·종목풀 백테스트와 같은 풀 설정을 쓴다.
         "top_n": _pool_top_n_hold(pool),
-        "stop_loss_pct": stop_loss_pct,
         "exit_ma_days": pick("exit_ma_days", EXIT_MA_OPTIONS, int),
     }
 
@@ -366,7 +349,6 @@ _OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
     ("adr_floor", "ADR 하한", ADR_FLOOR_OPTIONS),
     ("exit_ma_days", "이탈 이평선", EXIT_MA_OPTIONS),
     ("min_value_mult", "거래대금 하한", MIN_VALUE_MULT_OPTIONS),
-    ("stop_loss_pct", "손절선", STOP_LOSS_OPTIONS),
 )
 
 
@@ -405,7 +387,6 @@ __all__ = [
     "MIN_VALUE_MULT_OPTIONS",
     "EXIT_MA_OPTIONS",
     "HIGH_WINDOW_WEEKS",
-    "STOP_LOSS_OPTIONS",
     "benchmark_info",
     "build_price_panel",
     "compute_signals",

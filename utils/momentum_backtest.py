@@ -632,7 +632,7 @@ def run_backtest(
             bucket = buckets[key]
             added_labels: list[str] = []
             removed_labels: list[str] = []
-            exited_labels: list[str] = []  # 주중 이탈·손절 — 교체 편출과 구분해 보여준다
+            exited_labels: list[str] = []  # 주중 이탈 — 교체 편출과 구분해 보여준다
             while event_index < len(events_sorted) and events_sorted[event_index]["date"] <= bucket["end"]:
                 event = events_sorted[event_index]
                 if event["action"] == "add":

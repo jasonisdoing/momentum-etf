@@ -1,7 +1,7 @@
 """신고가 전략 백테스트.
 
-이벤트 기반이라 월간 리밸런싱과 리듬이 다르다 — 돌파한 날 사고, 손절선이나 이탈
-이동평균에 걸린 날 판다. 판정은 종가, 체결은 다음 거래일 **시가**다. 종가 체결은
+이벤트 기반이라 월간 리밸런싱과 리듬이 다르다 — 돌파한 날 사고, 이탈 이동평균에
+걸린 날 판다. 판정은 종가, 체결은 다음 거래일 **시가**다. 종가 체결은
 쓰지 않는다: 마감 동시호가에 대량을 던지면 체결가를 모른 채 거래하게 된다.
 
 자산은 **현금과 주수로** 들고 간다. 진입할 때 그 시점 자산의 1/slots 를 배정하고,
@@ -94,9 +94,6 @@ def run_backtest(
 
     pool = settings["pool"]
     slots = int(settings["top_n"])
-    # 손절선 — None 이면 손절 없이 이탈 이평선만으로 청산한다.
-    raw_stop = settings["stop_loss_pct"]
-    stop_pct = None if raw_stop is None else float(raw_stop)
     # 슬리피지는 종목풀 설정을 단일 소스로 쓴다 — 매수·매도 편도값을 각각 적용한다.
     buy_slippage, sell_slippage = get_pool_slippage(pool)
 
@@ -118,7 +115,7 @@ def run_backtest(
         return round(float(value), 1) if pd.notna(value) else None
 
     # ADR 진입 게이트 — 판정일 ADR 이 하한 미만이면 그날은 **신규 진입만** 건너뛴다.
-    # 보유 청산(손절·이탈)은 그대로 돈다. 이력 이전 날짜는 게이트 미적용.
+    # 보유 청산(이탈)은 그대로 돈다. 이력 이전 날짜는 게이트 미적용.
     def entry_blocked(stamp: pd.Timestamp) -> bool:
         if adr_floor is None or adr_series.empty:
             return False
@@ -179,9 +176,7 @@ def run_backtest(
             price = close_df.at[day, ticker]
             if pd.isna(price):
                 continue
-            hit_stop = stop_pct is not None and (price / position["entry"] - 1) * 100 <= stop_pct
-            hit_ma = bool(below_ma.at[day, ticker])
-            if not (hit_stop or hit_ma):
+            if not bool(below_ma.at[day, ticker]):
                 continue
             exit_price = open_df.at[nxt, ticker]
             if pd.isna(exit_price):
@@ -201,7 +196,7 @@ def run_backtest(
                     "exit_price": round(float(exit_price), 2),
                     "return_pct": round(ret * 100, 2),
                     "days": len(close_df.loc[position["date"] : day]) - 1,
-                    "reason": "손절" if hit_stop else "이탈",
+                    "reason": "이탈",
                 }
             )
             del holdings[ticker]
@@ -636,8 +631,6 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     # 마지막 거래일 종가로 '다음 시가에 할 일' 을 판정한다. 백테스트 루프는 마지막 날을
     # 판정하지 않는다(체결할 다음 날이 없어서). 그래서 여기서 한 번 더 본다 — 이게 없으면
     # 화면에 살 종목만 보이고 팔 종목이 안 보인다.
-    raw_stop = settings["stop_loss_pct"]
-    stop_pct = None if raw_stop is None else float(raw_stop)
     exit_ma_days = int(settings["exit_ma_days"])
     below_ma_last = signals["below_ma"].loc[last]
     # 이탈 이평선 값 — 화면이 "이탈까지 얼마 남았는지"를 보여준다. **판정에 쓰는 그 선**이라
@@ -662,10 +655,9 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
             price = price_of(held["ticker"])
             if price is None:
                 continue
-            hit_stop = stop_pct is not None and (price / held["entry_price"] - 1) * 100 <= stop_pct
             hit_ma = bool(below_ma_last.get(held["ticker"]))
-            held["status"] = "sell" if (hit_stop or hit_ma) else "hold"
-            held["exit_reason"] = "손절" if hit_stop else ("이탈" if hit_ma else None)
+            held["status"] = "sell" if hit_ma else "hold"
+            held["exit_reason"] = "이탈" if hit_ma else None
 
     # ADR 진입 게이트 — 발동하면 오늘은 신규 진입이 없다(보유 관리는 그대로).
     adr_gate: dict[str, Any] | None = None

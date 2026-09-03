@@ -298,7 +298,7 @@ type Positions = {
 type SlotActions = {
   label: string;
   live: boolean;
-  /** 다음 거래일 시가 매도(확정) — 자격 상실·이탈·손절. */
+  /** 다음 거래일 시가 매도(확정) — 자격 상실·이탈. */
   sells: { ticker: string; name: string; reason: string; return_pct: number | null }[];
   /** 장중 판정 기준 이탈 예상 — 오늘 종가로 확정된다. 화면 전용(알람 제외). */
   exit_forecast: { ticker: string; name: string; reason: string }[];
@@ -900,11 +900,11 @@ export function StrategyMixClient() {
           field: "shares",
           headerName: "목표수량",
           headerTooltip:
-            "목표비중 × 총자산 ÷ 현재가. 주중 이탈·손절이 예상되는 종목은 이탈 후 남을 목표를 (예상)으로 보여준다.",
+            "목표비중 × 총자산 ÷ 현재가. 주중 이탈이 예상되는 종목은 이탈 후 남을 목표를 (예상)으로 보여준다.",
           width: 88,
           type: "numericColumn",
           valueFormatter: (p) => {
-            // 예상 이벤트(주중 이탈·손절)가 있는 행만 예상 목표로 겹쳐 쓴다.
+            // 예상 이벤트(주중 이탈)가 있는 행만 예상 목표로 겹쳐 쓴다.
             // 가격 변동으로 목표와 조금 어긋나는 것은 예상이 아니라 그대로 둔다.
             const forecast = p.data?.forecast_target_quantity;
             if (p.data?.is_exit_forecast && forecast != null) {
