@@ -156,8 +156,6 @@ type CandidateRow = {
   long_gap_pct: number | null;
   high_drawdown_pct: number | null;
   market_cap: number | null;
-  /** 전략이 이미 들고 있는 종목 — 다시 사지 않지만 순위에는 남는다. */
-  is_held: boolean;
   account_held?: boolean;
 };
 
@@ -181,6 +179,9 @@ type Trade = {
   memo?: string;
 };
 
+/** 엔진이 주는 보유 한 행 — 표는 여기에 `plan` 을 붙여 한 축으로 다룬다. */
+type Holding = Omit<PlanRow, "plan"> & { status: "hold" | "sell" };
+
 type Positions = {
   as_of: string;
   /** 동시 보유 상한 — 빈 슬롯 행 수를 세는 데 쓴다. */
@@ -195,7 +196,7 @@ type Positions = {
   live: boolean;
   /** 가격 캐시가 마지막으로 갱신된 시각(KST). */
   cache_refreshed_at?: string | null;
-  holdings: PlanRow[];
+  holdings: Holding[];
   /** 다음 시가에 살 종목 — 자리·자격·우선순위를 모두 적용한 결과. */
   planned_entries: CandidateRow[];
   /** 마지막 세션에 청산된 종목. */
@@ -555,7 +556,8 @@ export function MomentumClient() {
   // 보유 + 다음 시가 매수 + 빈 슬롯 + 이탈을 한 표로 — 이 표만 보고 주문을 낼 수 있게.
   const planRows = useMemo<PlanRow[]>(() => {
     if (!positions) return [];
-    const held = positions.holdings;
+    // 엔진은 `status`(hold/sell) 로 준다 — 표는 진입 예정·빈 슬롯까지 한 축(`plan`)으로 본다.
+    const held: PlanRow[] = positions.holdings.map((row) => ({ ...row, plan: row.status }));
     const buys: PlanRow[] = positions.planned_entries.map((row) => ({
       ticker: row.ticker,
       name: row.name,
@@ -621,9 +623,11 @@ export function MomentumClient() {
       is_new: false,
       exit_reason: null,
     }));
-    // 보유(매도 예정 포함)가 위, 아직 안 산 것, 빈 자리, 이미 끝난 것 순.
+    // 보유(매도 예정 포함)가 위, 그 아래로 빈 자리 → 이미 끝난 것 → 아직 안 산 것 순.
+    // 진입 예정을 맨 아래에 두는 이유: 지금 계좌에 있는 것과 없는 것을 먼저 가르고, 없는 것
+    // 중에서도 **앞으로 살 것**을 마지막에 봐야 주문 순서와 읽는 순서가 맞는다.
     // 같은 묶음 안에서는 **오래 들고 있는 것이 위** — 편입일이 이른 순이다.
-    const order = { hold: 0, sell: 0, buy: 1, empty: 2, exited: 3 } as const;
+    const order = { hold: 0, sell: 0, empty: 1, exited: 2, buy: 3 } as const;
     return [...held, ...buys, ...empty, ...exited].sort(
       (a, b) => order[a.plan] - order[b.plan] || (a.entry_date ?? "").localeCompare(b.entry_date ?? ""),
     );
@@ -778,25 +782,19 @@ export function MomentumClient() {
   // 진입 후보 표 — 자리가 나면 담을 순서. 상태는 「보유 중」과 「후보」 둘뿐이다.
   const candidateColumns = useMemo<ColDef<CandidateRow>[]>(
     () => [
-      {
-        headerName: "상태",
-        width: STATUS_COLUMN_WIDTH,
-        minWidth: STATUS_COLUMN_MIN_WIDTH,
-        cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
-        valueGetter: (p) => (p.data?.is_held ? "보유 중" : "후보"),
-        cellRenderer: (p: { data?: CandidateRow }) =>
-          p.data?.is_held ? (
-            <span style={{ color: "var(--text-muted)" }}>보유 중</span>
-          ) : (
-            <strong style={{ color: "#2f9e44" }}>후보</strong>
-          ),
-      },
+      // 첫 컬럼은 보유 표의 '상태' 와 **같은 폭**이다 — 두 표가 위아래로 붙어 있어
+      // 거래대금까지 칸이 어긋나면 읽기 어렵다. 이 표에 담긴 것은 전부 후보라 상태를
+      // 따로 쓸 것이 없으므로 그 자리에 순위를 넣는다.
       {
         field: "rank",
         headerName: "순위",
-        width: 68,
-        type: "numericColumn",
+        width: STATUS_COLUMN_WIDTH,
+        minWidth: STATUS_COLUMN_MIN_WIDTH,
         headerTooltip: "장기 이격률이 큰 순 — 자리가 나면 이 순서로 담는다.",
+        cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+        cellRenderer: (p: { value?: number | null }) => (
+          <strong style={{ color: "#2f9e44" }}>{p.value ?? "-"}</strong>
+        ),
       },
       marketCapRankColumn<CandidateRow>("market_cap_rank", !hasMarketCap),
       {
