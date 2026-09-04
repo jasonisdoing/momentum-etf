@@ -870,94 +870,50 @@ def _holding_payload(row: dict[str, Any], slot_keys: Sequence[str]) -> dict[str,
 
 
 def _sleeve_target_shares(
-    ctx: dict[str, Any],
     states: dict[str, Any],
     sleeve_amount_krw: dict[str, float],
     krw_rate: float,
 ) -> dict[str, int]:
-    """계좌 금액을 **역산해** 슬리브를 다시 돌린 뒤, 그 마지막 날 보유 주수를 목표로 낸다.
+    """슬리브마다 **자기 몫 예산 안에서** 목표 주수를 정한다.
 
-    각 전략 화면은 config 의 명목 자본(예: USD 15,000)으로 백테스트를 돌린다. 그 정수 주수를
-    계좌 규모로 환산하면 `1.61주` 같은 값이 나오고, 반올림하면 예산을 넘겨 **살 돈이 없는
-    매수 지시**가 된다(us_test 에서 목표 합계가 총자산을 55만원 넘겼다).
+    종목과 비중은 백테스트가 정한 것을 그대로 쓴다 — 계좌 금액으로 백테스트를 다시 돌리지
+    않는다. 자본을 줄이면 비싼 종목을 1주도 못 사서 그 진입을 건너뛰고, 빈 슬롯에 다른 종목이
+    들어와 **보유 종목 자체가 달라진다**(실측: $15,000 은 2026-01-05 ASML 진입, $1,976 은 그걸
+    못 사고 다음 날 SLB 진입 → 7월에 APD 까지 이어졌다). 그러면 전략 화면과 합성 화면이 다른
+    종목을 보게 된다 — AGENTS.md 10 위반이다.
 
-    그래서 시작 자본을 바꿔 **같은 엔진을 한 번 더** 돌린다.
+    계좌가 작아서 못 사는 것은 목록에서 지우지 않고 **「1주 못 삼」 경고로 드러낸다**.
 
-        배율 = 계좌 슬리브 몫 ÷ 백테스트 슬리브 평가액
-        시작 자본 = 명목 자본 × 배율   →  마지막 날 평가액 ≈ 계좌 슬리브 몫
-
-    그러면 엔진이 애초에 살 수 있는 것만 샀으므로, 나온 주수는 계좌 돈으로 그대로 살 수
-    있다 — 환산도 반올림도 예산 초과도 없다. 판정 규칙은 하나도 건드리지 않는다(자본만 다르다).
-
-    아직 안 산 진입 예정 종목은 엔진이 다음 시가에 슬롯 몫만큼 사므로 `슬롯 몫 ÷ 1주 값`
-    으로 잡는다 — 엔진이 쓸 예산과 같은 기준이다.
-    포트폴리오만 다르다 — 그 백테스트는 **소수 주수**로 비중을 정확히 맞추는 전략이라 역산할
-    정수 주수가 없다. 그래서 저장 비중 × 그 슬리브 몫을 목표 금액으로 잡고, 백테스트가 진입할
-    때 쓰는 배분 함수를 **그 슬리브 예산 안에서만** 돌린다(다른 슬리브 돈을 끌어오지 않는다).
+    예산을 슬리브별로 끊는 이유: 한 슬리브의 남는 돈으로 다른 슬리브 종목을 사면 배분이
+    무너진다. 배분 함수는 백테스트가 진입할 때 쓰는 것과 같은 함수다.
     """
-    from utils.mix_sleeve import PORTFOLIO
-    from utils.mix_sleeve import load_context as sleeve_context
-    from utils.mix_sleeve import run_backtest as sleeve_backtest
-    from utils.share_allocation import ShareTarget, allocate_integer_shares, backtest_initial_capital
+    from utils.share_allocation import ShareTarget, allocate_integer_shares
 
     targets: dict[str, int] = {}
-    for spec in ctx["slots"]:
-        state = states[spec.key]
-        if spec.strategy == PORTFOLIO:
-            budget = sleeve_amount_krw[spec.key]
-            items = []
-            for row in state.targets:
-                price = row.get("price")
-                weight = row.get("drift_pct")
-                if not price or weight is None:
-                    continue
-                items.append(
-                    ShareTarget(
-                        key=str(row["ticker"]).strip(),
-                        target_amount=budget * float(weight) / 100.0,
-                        price=float(price) * krw_rate,
-                    )
+    for key, state in states.items():
+        budget = sleeve_amount_krw.get(key, 0.0)
+        if budget <= 0 or krw_rate <= 0:
+            continue
+        # 슬리브 안 비중 — 이미 산 종목은 흘러간 실제 비중(drift_pct), 진입 예정은 슬롯 1칸.
+        slot_pct = 100.0 / state.top_n if state.top_n else 0.0
+        items: list[ShareTarget] = []
+        for row in state.targets:
+            price = row.get("price")
+            if not price or row.get("is_exiting"):
+                continue
+            weight = row.get("drift_pct")
+            weight = slot_pct if weight is None else float(weight)
+            if weight <= 0:
+                continue
+            items.append(
+                ShareTarget(
+                    key=str(row["ticker"]).strip(),
+                    target_amount=budget * weight / 100.0,
+                    price=float(price) * krw_rate,
                 )
-            targets.update(allocate_integer_shares(items, budget=sum(item.target_amount for item in items)))
-            continue
-        # 계좌 슬리브 몫을 그 풀 통화로 — 계좌 원장은 원화, 백테스트는 그 시장 통화다.
-        amount = sleeve_amount_krw[spec.key] / krw_rate if krw_rate > 0 else 0.0
-        if amount <= 0 or state.sleeve_value <= 0:
-            continue
-        scale = amount / state.sleeve_value
-        months = _sleeve_lookback_months(spec)
-        result = sleeve_backtest(
-            spec,
-            months,
-            sleeve_context(spec),
-            initial_capital=backtest_initial_capital(spec.pool) * scale,
-        )
-        for row in result["open_positions"]:
-            targets[str(row["ticker"]).strip()] = int(row["shares"])
-        # 진입 예정 — 아직 안 샀으니 다음 시가에 쓸 슬롯 몫으로 센다.
-        slot_amount = float(result["slot_amount"])
-        price_by = {str(row["ticker"]).strip(): row.get("price") for row in state.targets}
-        for ticker in result["planned_entries"]:
-            price = price_by.get(str(ticker).strip())
-            if price and slot_amount > 0:
-                targets[str(ticker).strip()] = int(slot_amount // float(price))
+            )
+        targets.update(allocate_integer_shares(items, budget=sum(item.target_amount for item in items)))
     return targets
-
-
-def _sleeve_lookback_months(spec: SleeveSpec) -> int:
-    """슬리브 상태를 만들 때 쓰는 조회 기간 — 각 전략 화면과 **같은 값**이어야 한다.
-
-    다른 기간으로 돌리면 진입 시점이 달라져 보유 종목 자체가 달라진다.
-    """
-    from utils.mix_sleeve import MOMENTUM
-
-    if spec.strategy == MOMENTUM:
-        from utils.momentum_backtest import _HOLDINGS_LOOKBACK_MONTHS
-
-        return int(_HOLDINGS_LOOKBACK_MONTHS)
-    from utils.new_high_backtest import _HOLDINGS_LOOKBACK_MONTHS
-
-    return int(_HOLDINGS_LOOKBACK_MONTHS)
 
 
 def _attach_account_targets(
@@ -1019,19 +975,16 @@ def _attach_account_targets(
             target_qty = None
         row["target_quantity"] = target_qty
         row["trade_quantity"] = None if target_qty is None else target_qty - int(row["held_quantity"])
-        # 목표 비중을 **목표 주수에서 다시 낸다.** 비중은 원래 명목 자본으로 돌린 백테스트의
-        # 값이라, 계좌 금액으로 돌려 나온 주수와 어긋난다(DELL 이 비중 5.97% 인데 목표는
-        # 1주 = 3.70% 였다). 실제로 들고 있을 금액이 곧 그 종목의 비중이다.
-        # 슬리브별 몫도 같은 비율로 줄여 합이 비중과 맞게 한다 — 남는 몫은 그 슬리브의 현금이다.
-        if target_qty is None or not price_krw or total_assets <= 0:
-            continue
-        before = float(row["weight_pct"])
-        row["weight_pct"] = round(target_qty * price_krw / total_assets * 100.0, 4)
-        row["target_amount"] = round(target_qty * price_krw, 2)
-        if before > 0:
-            ratio = row["weight_pct"] / before
-            for key in slot_keys:
-                row[f"{key}_weight"] = float(row.get(f"{key}_weight") or 0) * ratio
+        # 1주도 못 사는 종목 — 목록에서 지우지 않고 경고로 드러낸다. 계좌가 백테스트 자본보다
+        # 작으면 도달할 수 없는 목표가 생기는데, 이걸 숨기면 백테스트 수익률을 낼 수 있다고
+        # 착각하게 된다. 비중은 백테스트 것 그대로 둔다(종목·비중은 절대 바꾸지 않는다).
+        row["unaffordable"] = bool(
+            target_qty == 0
+            and float(row.get("weight_pct") or 0) > 0
+            and not row.get("is_sell_all")
+            and price_krw
+            and float(row["target_amount"]) < price_krw
+        )
     target_tickers = {row["ticker"] for row in holdings}
     sell_all: list[dict[str, Any]] = []
     for ticker, item in sorted(account["holdings"].items()):
@@ -1374,10 +1327,10 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
                 }
             )
 
-        # 목표 주수 — 계좌 금액을 역산해 슬리브를 다시 돌린 결과. 판정은 그대로고 자본만 다르다.
+        # 목표 주수 — 슬리브마다 자기 몫 예산 안에서 배분. 종목·비중은 백테스트 것 그대로다.
         total_assets = float(account.get("total_assets") or 0)
         sleeve_amount_krw = {key: total_assets * shares[key] / 100.0 for key in keys}
-        target_shares = _sleeve_target_shares(ctx, states, sleeve_amount_krw, krw_rate)
+        target_shares = _sleeve_target_shares(states, sleeve_amount_krw, krw_rate)
         account["sell_all"] = _attach_account_targets(
             holdings, account, krw_rate, slot_keys=keys, target_shares=target_shares
         )
@@ -1655,50 +1608,6 @@ def _value_account(account: dict[str, Any], krw_rate: float, price_hint: dict[st
     account["fixed_asset_pct"] = round(fixed_value / total_assets * 100.0, 4) if total_assets > 0 else 0.0
 
 
-def _account_sleeve_capitals(
-    ctx: dict[str, Any],
-    months: int,
-    contexts: dict[str, dict[str, Any] | None],
-) -> dict[str, float]:
-    """슬리브별 **시작 자본** — 그 계좌 돈으로 이 기간을 굴렸다면 얼마로 시작했어야 하는가.
-
-        배율 = 계좌 슬리브 몫 ÷ 명목 자본으로 돌린 슬리브 최종 평가액
-        시작 자본 = 명목 자본 × 배율
-
-    계좌를 못 읽거나 총자산이 없으면 빈 dict — 그러면 호출부가 명목 자본으로 돌린다.
-    (계좌 없이 열어 보는 경우가 있어서다. 임의 보정이 아니라 '계좌 기준이 없음'이다.)
-    """
-    from utils.mix_sleeve import PORTFOLIO
-    from utils.mix_sleeve import run_backtest as sleeve_backtest
-    from utils.share_allocation import backtest_initial_capital
-
-    try:
-        account = _load_account_state(ctx["account_id"])
-    except Exception:
-        logger.warning("[STRATEGY-MIX] %s 계좌를 읽지 못해 명목 자본으로 돌린다", ctx["account_id"], exc_info=True)
-        return {}
-    krw_rate = _krw_rate(ctx["currency"])
-    if krw_rate <= 0:
-        return {}
-    _value_account(account, krw_rate)
-    total_assets = float(account.get("total_assets") or 0)
-    if total_assets <= 0:
-        return {}
-
-    shares = _sleeve_shares(ctx)
-    capitals: dict[str, float] = {}
-    for spec in ctx["slots"]:
-        if spec.strategy == PORTFOLIO:
-            continue  # 소수 주수로 비중만 맞추는 전략 — 자본이 결과를 바꾸지 않는다
-        amount = total_assets * float(shares[f"{spec.key}_pct"]) / 100.0 / krw_rate
-        nominal = backtest_initial_capital(spec.pool)
-        probe = sleeve_backtest(spec, months, contexts.get(spec.key))
-        sleeve_value = float(probe.get("sleeve_value") or 0)
-        if amount > 0 and sleeve_value > 0:
-            capitals[spec.key] = nominal * amount / sleeve_value
-    return capitals
-
-
 def run_mix_backtest(account_id: str | None = None, months: int | None = None) -> dict[str, Any]:
     """선택한 계좌의 슬리브별 저장 설정으로 A·B 백테스트를 각각 돌려 합성 결과를 만든다.
 
@@ -1726,14 +1635,7 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
     from utils.mix_sleeve import run_backtest as sleeve_backtest
 
     contexts = {spec.key: sleeve_context(spec) for spec in ctx["slots"]}
-    # 슬리브 백테스트를 **계좌 금액**으로 돌린다 — 운용 현황의 목표 주수와 같은 실행이라야
-    # 화면 수익률이 그 목표로 실제 낼 수 있는 숫자가 된다. 명목 자본(config 상수)으로 돌리면
-    # 정수 주수의 낟알이 계좌보다 훨씬 잘아, 계좌에서는 낼 수 없는 성과가 찍힌다.
-    # 자본은 역산한다 — 명목으로 한 번 돌려 배수를 얻고, 계좌 슬리브 몫을 그 배수로 나눈다.
-    capitals = _account_sleeve_capitals(ctx, months, contexts)
-    results = {
-        spec.key: sleeve_backtest(spec, months, contexts[spec.key], capitals.get(spec.key)) for spec in ctx["slots"]
-    }
+    results = {spec.key: sleeve_backtest(spec, months, contexts[spec.key]) for spec in ctx["slots"]}
     # 벤치마크 곡선 — **계좌 벤치마크**의 종가에서 직접 만든다. 합성은 한 계좌를 통째로 굴린
     # 결과라 대조군도 계좌 단위여야 한다(슬리브 풀 것을 쓰면 모멘텀 풀을 바꾸는 것만으로
     # 비교 기준이 따라 바뀐다). 값은 시작일 대비 누적 배수로 담고 아래에서 0% 로 재기준한다.

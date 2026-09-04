@@ -113,7 +113,6 @@ def run_backtest(
     months: int | None = None,
     settings: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
-    initial_capital: float | None = None,
 ) -> dict[str, Any]:
     """모멘텀 백테스트. 일별 자산곡선과 체결 내역을 함께 돌려준다(신고가와 같은 형태)."""
     settings = validate_settings(settings or load_settings())
@@ -124,7 +123,6 @@ def run_backtest(
     context = context or load_context(settings)
     signals = context["signals"]
     return run_slot_backtest(
-        initial_capital=initial_capital,
         pool=settings["pool"],
         months=months,
         panel=context["panel"],
@@ -301,10 +299,6 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     return {
         "as_of": str(last.date()),
         "pool": pool,
-        # 백테스트가 지금 굴리고 있는 슬리브 평가액과 슬롯 하나의 몫 — 합성이 계좌 금액을
-        # 역산할 때 쓴다(계좌 몫 ÷ 이 값 = 배율).
-        "sleeve_value": simulated["sleeve_value"],
-        "slot_amount": simulated["slot_amount"],
         "country": info["country"],
         "currency": info["currency"],
         "top_n": slots,

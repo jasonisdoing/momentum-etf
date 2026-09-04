@@ -100,7 +100,6 @@ def run_slot_backtest(
     name_by: dict[str, str],
     industry_by: dict[str, str],
     exit_reason: str,
-    initial_capital: float | None = None,
 ) -> dict[str, Any]:
     """일간 슬롯 시뮬레이션. 자산곡선·지표·체결 내역·현재 보유를 한 형태로 돌려준다.
 
@@ -121,15 +120,14 @@ def run_slot_backtest(
     #
     # 시작 자본은 통화별 상수(config.BACKTEST_INITIAL_CAPITAL)다. 상대곡선(1.0)으로 두면
     # 주수가 소수로 나오는데, 실제로는 정수 주수만 살 수 있어 운용 현황과 결과가 어긋난다.
-    # 곡선은 마지막에 시작 자본으로 나눠 배수로 돌려주므로 성과 지표는 자본에 무관하다.
+    # 곡선은 마지막에 시작 자본으로 나눠 배수로 돌려준다.
     #
-    # ``initial_capital`` 을 주면 그 돈으로 돌린다 — 합성 운용 현황이 **계좌 금액을 역산해**
-    # 넘긴다(오늘 총자산 ÷ 누적 배수). 그래야 마지막 날 보유 주수가 계좌 돈으로 실제로 살 수
-    # 있는 정수 주수가 되고, 화면이 그걸 그대로 목표로 쓸 수 있다. 명목 자본으로 돌린 주수를
-    # 계좌 규모로 환산하면 1.61주 같은 값이 나와, 반올림이 예산을 넘겨 못 사는 지시가 된다.
-    if initial_capital is not None and initial_capital <= 0:
-        raise ValueError(f"시작 자본은 0보다 커야 합니다 (받은 값: {initial_capital})")
-    initial_capital = float(initial_capital if initial_capital is not None else backtest_initial_capital(pool))
+    # 자본을 계좌 금액으로 바꿔 돌리는 건 **하지 않는다.** 자본이 작아지면 비싼 종목을 1주도
+    # 못 사서 그 진입을 건너뛰고, 빈 슬롯에 다른 종목이 들어와 경로가 통째로 갈라진다
+    # (실측: $15,000 은 2026-01-05 ASML 진입, $1,976 은 그걸 못 사고 다음 날 SLB 진입 →
+    # 7월에 APD 까지 이어져 보유 종목이 달라졌다). 그러면 전략 화면과 합성 화면이 서로 다른
+    # 종목을 보게 된다. 계좌가 작아서 못 사는 것은 **화면이 「1주 못 삼」으로 드러낸다**.
+    initial_capital = backtest_initial_capital(pool)
     cash = float(initial_capital)
     holdings: dict[str, dict[str, Any]] = {}
     trades: list[dict[str, Any]] = []
@@ -259,8 +257,6 @@ def run_slot_backtest(
                 "industry": industry_by.get(ticker, ""),
                 "entry_date": str(position["date"].date()),
                 "entry_price": round(position["open"], 2),
-                # 지금 들고 있는 주수 — 합성 운용 현황이 계좌의 목표 주수로 그대로 쓴다.
-                "shares": int(position["shares"]),
                 "price": float(price),
                 # 표시용 평가손익 — 아직 안 팔았으니 매도 슬리피지는 빼지 않는다.
                 "return_pct": round((float(price) / position["open"] - 1) * 100, 2),
@@ -325,10 +321,6 @@ def run_slot_backtest(
         "planned_entries": planned_entries,
         # 빈 슬롯·잔여 현금 비중 — 종목 비중과 합쳐 100 이 된다.
         "sleeve_cash_weight_pct": round(cash / sleeve_value * 100, 4) if sleeve_value > 0 else 100.0,
-        # 슬리브 평가액과 슬롯 하나의 몫 — 아직 안 산 진입 예정 종목의 목표 주수를 화면이
-        # 이 값으로 잡는다(엔진이 다음 시가에 쓸 예산과 같은 기준).
-        "sleeve_value": round(sleeve_value, 2),
-        "slot_amount": round(sleeve_value / slots, 2) if slots else 0.0,
         "exited_today": [t for t in trades if t["exit_date"] == str(last_day.date())],
         # 소수 6자리 — 화면은 2자리로 보여주지만, 연간·월간·주간 표와 튜닝 지표는 이 값을
         # **복리로 합성**한다. 2자리로 잘라 보내면 하루치 오차가 250일 쌓여 합계가 총수익과
