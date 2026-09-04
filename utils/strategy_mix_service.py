@@ -20,7 +20,7 @@ from typing import Any
 
 from config import CACHE_TTL_COMPUTE, MIX_REBALANCE_BAND_MIN_PCT, MIX_REBALANCE_BAND_RATIO
 from utils.logger import get_app_logger
-from utils.mix_sleeve import MOMENTUM, NEW_HIGH, PORTFOLIO, STRATEGY_LABELS, SleeveSpec
+from utils.mix_sleeve import MOMENTUM, PORTFOLIO, STRATEGY_LABELS, SleeveSpec
 from utils.share_allocation import ShareTarget, allocate_integer_shares, backtest_initial_capital
 from utils.stock_memo_store import attach_stock_memos
 from utils.trade_stats import summarize_trades
@@ -854,9 +854,7 @@ def _holding_payload(row: dict[str, Any], slot_keys: Sequence[str]) -> dict[str,
     flat_keys = {f"{key}_{field}" for key in slot_keys for field in _SLOT_ROW_FIELDS}
     payload = {name: value for name, value in row.items() if name not in flat_keys}
     payload["weight_pct"] = round(float(row["weight_pct"]), 2)
-    payload["slots"] = {
-        key: {field: row.get(f"{key}_{field}") for field in _SLOT_ROW_FIELDS} for key in slot_keys
-    }
+    payload["slots"] = {key: {field: row.get(f"{key}_{field}") for field in _SLOT_ROW_FIELDS} for key in slot_keys}
     return payload
 
 
@@ -1466,16 +1464,12 @@ class _SlotRuntime:
     top_n: int
     cash: float
     shares: dict[str, float] = field(default_factory=dict)
-    # 모멘텀 — 체결 내역에서 복원한 매매 일정
-    buys: dict[str, list[str]] = field(default_factory=dict)
-    sells: dict[str, list[str]] = field(default_factory=dict)
-    rebalance_days: set[str] = field(default_factory=set)
     # 포트폴리오 — 목표 비중(계좌 전체 대비 %)과 되돌리기 규칙
     target_weights: dict[str, float] = field(default_factory=dict)
     band_pct: float = 0.0
     rebalance_period: str = ""
     last_period: str | None = None
-    # 신고가 — 신호에서 다시 판정하는 데 필요한 것
+    # 모멘텀·신고가 — 신호에서 다시 판정하는 데 필요한 것(같은 슬롯 엔진이라 형태가 같다)
     breakout: Any = None
     below_ma: Any = None
     value_mult: Any = None
@@ -1502,11 +1496,9 @@ def _build_slot_runtime(
 ) -> _SlotRuntime:
     """슬리브 하나를 시뮬레이션에 쓸 형태로 준비한다.
 
-    두 전략의 재현 방식이 다르다:
-      - 모멘텀: **체결 내역으로 보유를 복원**한다. 선정이 순위 기반이라 포지션 크기와 무관해
-        후보 재계산 없이 정확히 재현된다.
-      - 신고가: **신호(돌파·이탈)에서 다시 판정**한다. 진입 여부가 슬리브 현금에 달려
-        있어, 이관으로 현금이 달라지면 엔진 체결 내역과 어긋난다.
+    모멘텀·신고가는 **신호(진입·청산)에서 다시 판정**한다. 진입 여부가 슬리브 현금에 달려
+    있어, 월초 이관으로 현금이 달라지면 엔진의 체결 내역을 그대로 재생할 수 없기 때문이다.
+    두 전략이 같은 슬롯 엔진이라 신호 표 세 장만 다르다.
     """
     from utils.pool_settings_store import get_pool_slippage
 
@@ -1601,14 +1593,10 @@ def _simulate_mix_daily(
     # 시뮬레이션 날짜 — 슬리브 패널의 합집합. 같은 국가 풀이면 거래일이 같아 결과가 같고,
     # 어긋나는 날은 아래 `px` 가 값 없음으로 넘긴다.
     all_days = sorted({day for panel in panels.values() for day in panel["close"].index})
-    # 시작일 — 요청 기간(`months`)만큼 자른다. 체결 복원형(모멘텀) 슬리브가 있으면 그 첫
-    # 매수일부터 — 그 전에는 보유가 없어 곡선이 평평하다.
-    # 체결 복원형이 하나도 없으면(신고가만인 조합) 기간 컷이 유일한 기준이다. 예전에는 이때
-    # 패널 전체를 돌아 12개월을 요청해도 7년치가 계산됐다.
+    # 시작일 — 요청 기간(`months`)만큼 자른다. 세 전략 모두 신호에서 다시 판정하므로
+    # 시작일이 곧 첫 판정일이다(예전에는 모멘텀만 체결 내역을 재생해 첫 매수일을 찾았다).
     period_start = all_days[-1] - pd.DateOffset(months=months)
-    first_buys = [min(rt.buys) for rt in runtimes if rt.buys]
-    first = pd.Timestamp(min(first_buys)) if first_buys else period_start
-    span = [day for day in all_days if day >= first]
+    span = [day for day in all_days if day >= period_start]
 
     # 두 전략에 주지 않고 비워 두는 몫 — 자라지 않고, 월초에만 다시 맞춘다.
     cash_reserved = weights["cash_pct"] / 100.0 * capital
@@ -1634,9 +1622,9 @@ def _simulate_mix_daily(
         prev, day = span[i - 1], span[i]
         day_key = str(day.date())
 
-        # 1) 신고가 청산 — prev 종가 판정 → 오늘 시가 체결
+        # 1) 청산 — prev 종가 판정 → 오늘 시가 체결 (모멘텀·신고가 공통)
         for rt in runtimes:
-            if rt.spec.strategy != NEW_HIGH:
+            if rt.spec.strategy == PORTFOLIO:
                 continue
             for ticker in list(rt.shares):
                 price = px(rt.close_df, prev, ticker)
@@ -1647,20 +1635,7 @@ def _simulate_mix_daily(
                 fill = px(rt.open_df, day, ticker) or price
                 rt.cash += rt.shares.pop(ticker) * fill * (1 - rt.sell_slip)
 
-        # 2) 모멘텀 매도 체결(교체 편출·주중 ADR 게이트 — 체결 내역의 청산일)
-        for rt in runtimes:
-            if rt.spec.strategy != MOMENTUM:
-                continue
-            for ticker in rt.sells.get(day_key, []):
-                if ticker not in rt.shares:
-                    continue
-                fill = px(rt.open_df, day, ticker) or px(rt.close_df, prev, ticker)
-                if fill:
-                    rt.cash += rt.shares.pop(ticker) * fill * (1 - rt.sell_slip)
-                else:
-                    rt.shares.pop(ticker)
-
-        # 3) 월초 배분 되돌리기 — 현금 우선 이관(시가). 교체·진입보다 먼저.
+        # 2) 월초 배분 되돌리기 — 현금 우선 이관(시가). 교체·진입보다 먼저.
         #    넘치는 슬리브에서 뽑아 한 곳에 모은 뒤 모자란 슬리브에 현금으로만 넘긴다.
         #    남는 것이 비워 두는 현금 몫이 된다(대수적으로 목표와 정확히 일치한다).
         if prev_month is not None and day_key[:7] != prev_month:
@@ -1701,95 +1676,9 @@ def _simulate_mix_daily(
             cash_reserved = pool_cash
         prev_month = day_key[:7]
 
-        # 4) 모멘텀 편입 + 교체일 동일가중(슬리브 자산/N, 시가)
+        # 3) 진입 — prev 종가 판정 → 오늘 시가, 배정은 min(슬리브/N, 현금) (모멘텀·신고가 공통)
         for rt in runtimes:
-            if rt.spec.strategy != MOMENTUM:
-                continue
-            for ticker in rt.buys.get(day_key, []):
-                rt.shares.setdefault(ticker, 0.0)
-            if day_key not in rt.rebalance_days:
-                continue
-            sleeve_total = value_at(rt, day, rt.open_df)
-            unit = sleeve_total / rt.top_n if rt.top_n else 0.0
-            # 목표 주수는 운용 현황과 **같은 함수**로 낸다. 매도가 먼저 현금을 만들고
-            # 그 현금으로 매수하므로, 예산은 슬리브 전체 자산이다.
-            buy_prices = {ticker: px(rt.open_df, day, ticker) for ticker in list(rt.shares)}
-            wanted = allocate_integer_shares(
-                [
-                    ShareTarget(key=ticker, target_amount=unit, price=fill * (1 + rt.buy_slip))
-                    for ticker, fill in buy_prices.items()
-                    if fill
-                ],
-                budget=sleeve_total,
-            )
-            # 매도 먼저 — 대금이 있어야 매수가 체결된다.
-            for ticker, fill in buy_prices.items():
-                if not fill:
-                    continue
-                delta = wanted.get(ticker, 0) - rt.shares[ticker]
-                if delta < 0:
-                    rt.cash += -delta * fill * (1 - rt.sell_slip)
-                    rt.shares[ticker] += delta
-            for ticker, fill in buy_prices.items():
-                if not fill:
-                    continue
-                delta = wanted.get(ticker, 0) - rt.shares[ticker]
-                if delta <= 0:
-                    continue
-                cost = delta * fill * (1 + rt.buy_slip)
-                if cost > rt.cash:  # 슬리피지 때문에 예산을 살짝 넘을 수 있다
-                    delta = int(rt.cash // (fill * (1 + rt.buy_slip)))
-                    cost = delta * fill * (1 + rt.buy_slip)
-                if delta <= 0:
-                    continue
-                rt.cash -= cost
-                rt.shares[ticker] += delta
-
-        # 4-b) 포트폴리오 되돌리기 — 최초 매수 + 주기가 바뀐 날. 기준을 넘긴 종목만 시가 체결.
-        for rt in runtimes:
-            if rt.spec.strategy != PORTFOLIO or not rt.target_weights:
-                continue
-            period = _portfolio_period_key(day, rt.rebalance_period)
-            first_fill = rt.last_period is None
-            if not first_fill and (period is None or period == rt.last_period):
-                continue
-            rt.last_period = period if period is not None else rt.last_period or ""
-            sleeve_total = value_at(rt, day, rt.open_df)
-            if sleeve_total <= 0:
-                continue
-            prices = {ticker: px(rt.open_df, day, ticker) for ticker in rt.target_weights}
-            # 매도 먼저 — 대금이 있어야 매수가 체결된다(모멘텀 교체와 같은 순서).
-            for sell_first in (True, False):
-                for ticker, target_ratio in rt.target_weights.items():
-                    fill = prices.get(ticker)
-                    if not fill:
-                        continue
-                    held_value = rt.shares.get(ticker, 0.0) * fill
-                    gap_pct = (sleeve_total * target_ratio - held_value) / sleeve_total * 100.0
-                    # 기준 안이면 두고 본다 — 가격 드리프트로 매매하지 않는 것이 이 전략의 규칙.
-                    if not first_fill and abs(gap_pct) < rt.band_pct:
-                        continue
-                    if (gap_pct < 0) != sell_first:
-                        continue
-                    diff_value = sleeve_total * target_ratio - held_value
-                    slip = rt.buy_slip if diff_value > 0 else -rt.sell_slip
-                    price = fill * (1 + slip)
-                    delta = diff_value / price
-                    if delta > 0:
-                        cost = delta * price
-                        if cost > rt.cash:
-                            delta = rt.cash / price
-                            cost = delta * price
-                        if delta <= 0:
-                            continue
-                        rt.cash -= cost
-                    else:
-                        rt.cash += -delta * price
-                    rt.shares[ticker] = rt.shares.get(ticker, 0.0) + delta
-
-        # 5) 신고가 진입 — prev 돌파 → 오늘 시가, 배정은 min(슬리브/N, 현금)
-        for rt in runtimes:
-            if rt.spec.strategy != NEW_HIGH:
+            if rt.spec.strategy == PORTFOLIO:
                 continue
             free = rt.top_n - len(rt.shares)
             if free <= 0:
@@ -1811,7 +1700,7 @@ def _simulate_mix_daily(
             picks.sort(key=priority, reverse=True)
             picks = picks[:free]
             open_value = value_at(rt, day, rt.open_df)
-            # 신고가 슬리브도 같은 배분 함수. 예산은 살 수 있는 현금까지만이다
+            # 슬리브도 백테스트와 같은 배분 함수. 예산은 살 수 있는 현금까지만이다
             # (팔지 않은 평가익으로는 못 산다).
             slot_amount = open_value / rt.top_n if rt.top_n else 0.0
             fills = {ticker: px(rt.open_df, day, ticker) * (1 + rt.buy_slip) for ticker in picks}
