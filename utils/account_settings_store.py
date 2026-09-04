@@ -134,7 +134,9 @@ def _validate_pct(account_id: str, label: str, raw: Any) -> float:
     return round(pct, 2)
 
 
-def _validate_mix_pool(account_id: str, label: str, raw: Any, values: dict[str, Any], existing_doc: dict[str, Any]) -> str:
+def _validate_mix_pool(
+    account_id: str, label: str, raw: Any, values: dict[str, Any], existing_doc: dict[str, Any]
+) -> str:
     """슬리브가 볼 종목풀 — 등록된 풀이고 계좌와 국가·통화가 같아야 한다.
 
     국가가 다르면 거래 달력이 갈려 월초 리밸런싱 판정일이 슬리브마다 달라지고, 통화가
@@ -148,7 +150,9 @@ def _validate_mix_pool(account_id: str, label: str, raw: Any, values: dict[str, 
         raise AccountSettingsStoreError(f"'{account_id}' 의 {label} 종목풀을 고르세요.")
     allowed = list_available_ticker_types()
     if pool not in allowed:
-        raise AccountSettingsStoreError(f"'{account_id}' 의 {label} 종목풀은 {', '.join(allowed)} 중 하나여야 합니다: {raw}")
+        raise AccountSettingsStoreError(
+            f"'{account_id}' 의 {label} 종목풀은 {', '.join(allowed)} 중 하나여야 합니다: {raw}"
+        )
 
     pool_config = get_ticker_type_settings(pool) or {}
     for name, account_value, pool_value in (

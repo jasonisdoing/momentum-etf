@@ -145,7 +145,9 @@ def _download_daily(tickers: list[str], period: str) -> dict[str, pd.DataFrame]:
             if closes is None or closes.dropna().empty:
                 continue
             result[ticker] = frame
-        logger.info("[미국 ETF] 일봉 조회 %d/%d (수신 %d)", min(start + _YF_CHUNK, len(tickers)), len(tickers), len(result))
+        logger.info(
+            "[미국 ETF] 일봉 조회 %d/%d (수신 %d)", min(start + _YF_CHUNK, len(tickers)), len(tickers), len(result)
+        )
     return result
 
 

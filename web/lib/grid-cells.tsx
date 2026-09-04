@@ -334,7 +334,14 @@ export const STATUS_COLUMN_MIN_WIDTH = 140;
 export type SlotPlan = "hold" | "sell" | "buy" | "exited" | "empty";
 
 export function slotStatusColumn<
-  T extends { plan: SlotPlan; days: number | null; is_new: boolean; exit_reason: string | null; exit_date?: string | null },
+  T extends {
+    plan: SlotPlan;
+    days: number | null;
+    is_new: boolean;
+    exit_reason: string | null;
+    entry_date?: string | null;
+    exit_date?: string | null;
+  },
 >(options: {
   live: boolean;
   /** 매수·매도 예정이 체결되는 날 — 상태 문구 앞에 붙인다. */
@@ -378,7 +385,9 @@ export function slotStatusColumn<
           </span>
         );
       }
-      return <span>{p.data.is_new ? "진입" : `${p.data.days}일`}</span>;
+      // 보유는 들고 있던 거래일 수로만 쓴다. 「진입」 같은 말을 따로 두면 언제 산 것인지가
+      // 되레 흐려진다 — 산 날짜는 편입일 컬럼이 보여준다.
+      return <span>{`${p.data.days}일`}</span>;
     },
   };
 }

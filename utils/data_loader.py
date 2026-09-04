@@ -374,9 +374,7 @@ def canonical_cache_ticker(ticker: str, country: str) -> str:
     return ticker_norm
 
 
-def _preserve_recent_completed_rows(
-    new_df: pd.DataFrame, old_df: pd.DataFrame, country_code: str
-) -> pd.DataFrame:
+def _preserve_recent_completed_rows(new_df: pd.DataFrame, old_df: pd.DataFrame, country_code: str) -> pd.DataFrame:
     """전체 재수집 결과에 빠진 **최근 완결 거래일** 행을 기존 캐시에서 되살린다.
 
     야후가 특정 날을 통째로 빼고 주면(2026-08-28 실사례) 전체 재수집이 그 행을 지워,

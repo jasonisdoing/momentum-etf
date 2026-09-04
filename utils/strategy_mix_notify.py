@@ -96,9 +96,7 @@ def notify_all(country: str | None = None) -> dict[str, Any]:
         # 다시 커졌을 때(재발) 알림이 나간다.
         _save_state(account_id, current)
         if not grown:
-            results.append(
-                {"account_id": account_id, "name": target["name"], "changed": False, "items": len(current)}
-            )
+            results.append({"account_id": account_id, "name": target["name"], "changed": False, "items": len(current)})
             continue
         send_slack_message_v2(_format_message(target["name"], groups))
         sent += 1

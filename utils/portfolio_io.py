@@ -100,9 +100,7 @@ def load_holding_accounts_by_ticker(country_code: str | None = None) -> dict[str
     return accounts_by_ticker
 
 
-def average_buy_price_by_ticker(
-    tickers: Iterable[str] | None = None, currency: str | None = None
-) -> dict[str, float]:
+def average_buy_price_by_ticker(tickers: Iterable[str] | None = None, currency: str | None = None) -> dict[str, float]:
     """티커 → 전 계좌 통합 평균매입가. 보유가 없는 티커는 결과에서 빠진다.
 
     같은 티커가 여러 계좌에 있으면 수량 가중으로 하나로 합친다. 차트의 '내 평균' 선과
