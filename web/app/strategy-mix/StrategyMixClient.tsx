@@ -813,12 +813,16 @@ export function StrategyMixClient() {
         headerName: "전략",
         width: 110,
         cellClass: "appWrapCell",
+        // 배열 필드는 AG Grid가 object 타입으로 추론하므로 문자열 포매터를 명시한다.
+        valueFormatter: (p) => {
+          const sources = Array.isArray(p.value) ? p.value : [];
+          return sources.length === 0 ? "-" : sources.map((source) => slotLabel(String(source))).join("·");
+        },
         // 슬리브 이름은 사용자가 붙이는 값이라 길어질 수 있다. 종목명과 같은 공용 클래스로
         // 최대 2줄까지 보여주고 넘치면 말줄임한다(칸 폭을 늘리면 표가 옆으로 밀린다).
-        cellRenderer: (p: { value?: string[] | null; data?: PositionRow }) => {
-          const sources = p.value ?? [];
+        cellRenderer: (p: { valueFormatted?: string | null }) => {
           // 여러 슬리브가 같은 종목을 담으면 한 행에 모두 표시된다 (비중은 합산).
-          const text = sources.length === 0 ? "-" : sources.map((source) => slotLabel(source)).join("·");
+          const text = p.valueFormatted ?? "-";
           return (
             <span className="appNameCellText" title={text}>
               {text}
