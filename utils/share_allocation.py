@@ -50,17 +50,46 @@ class ShareTarget:
     """목표 금액. 예산과 같은 통화여야 한다."""
     price: float
     """1주 값. 목표 금액과 같은 통화여야 한다(환율은 호출부에서 맞춘다)."""
+    held: float = 0.0
+    """지금 들고 있는 주수 — `account_target_shares` 가 목표를 바꿀지 판정할 때만 쓴다."""
 
 
-def allocate_integer_shares(targets: list[ShareTarget], budget: float) -> dict[str, int]:
+def account_target_shares(targets: list[ShareTarget], deadband: float) -> dict[str, int]:
+    """실계좌 **목표수량** — 목표금액에 가장 가까운 정수 주수. 단 지금 보유에서 ``deadband``
+    (주 단위) 안이면 **보유를 그대로 목표로 둔다**.
+
+    배분(`allocate_integer_shares`)을 쓰지 않는 이유: 그 방식은 예산이 바닥날 때까지 한 주씩
+    주므로 **마지막 한 주를 누가 가져가느냐**가 가격에 민감하다. 경계에 앉은 종목이 한 틱에
+    뒤집혀, 살 수 없는 지시가 생겼다 사라지기를 반복했다(DELL 목표가 2주↔1주로 왕복).
+
+    여기서는 종목마다 독립적으로 반올림하므로 그 흔들림이 없다. 반올림이 위로 튀어 총 매수액이
+    가용 현금을 넘는 문제는 **지시 단계에서 초과 보유를 팔아** 맞춘다(`_fund_buys_with_sells`).
+
+    ``deadband`` 는 목표를 바꾸는 문턱이다. 0.5(반올림 경계)보다 넓어야 경계에 앉은 종목이
+    반올림 방향을 왕복하지 않는다.
+    """
+    result: dict[str, int] = {}
+    for item in targets:
+        if item.price <= 0:
+            result[item.key] = 0
+            continue
+        ideal = item.target_amount / item.price
+        held = int(item.held)
+        result[item.key] = held if abs(ideal - item.held) < deadband else int(round(ideal))
+    return result
+
+
+def allocate_integer_shares(
+    targets: list[ShareTarget],
+    budget: float,
+) -> dict[str, int]:
     """목표 금액을 정수 주수로 배분한다. 총 배정액은 ``budget`` 을 넘지 않는다.
 
     Args:
-        targets: 종목별 목표 금액과 1주 값.
+        targets: 종목별 목표 금액과 1주 값(이미 들고 있으면 ``held``).
         budget: 주식에 쓸 총액(= 총자산 × 주식 목표비중). **보유 현금이 아니다** —
             초과 보유분을 팔면 그 대금이 부족분 매수에 쓰이므로, 지금 현금이 얼마인지는
             목표 수량을 정하는 데 쓰지 않는다.
-
     Returns:
         {식별자: 주수}. 배정이 0 인 종목도 키는 있다.
     """

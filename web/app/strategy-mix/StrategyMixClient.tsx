@@ -37,6 +37,7 @@ import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
 import { FIXED_ASSET_NAME, FIXED_ASSET_ROW_CLASS, FIXED_ASSET_TICKER } from "@/lib/fixed-asset";
 import {
   STOCK_NAME_COLUMN_MIN_WIDTH,
+  industryColumn,
   stockMemoColumn,
   formatSignedPct,
   signColor,
@@ -61,11 +62,25 @@ const CURRENT_NOTES = [
       "고정 비율이 아니며, 두 전략이 같은 종목을 담으면 합산합니다. 입출금이 없으면 지시가 거의 나오지 않습니다.",
   },
   {
+    title: "목표 주수",
+    body:
+      "목표 금액을 주가로 나눈 값에 가장 가까운 정수입니다. 다만 지금 보유 주수에서 0.6주 넘게 " +
+      "벌어져야 목표를 옮깁니다 — 반올림 경계에 앉은 종목이 가격 한 틱에 뒤집혀 지시가 생겼다 " +
+      "사라지기를 반복하기 때문입니다.",
+  },
+  {
     title: "액션",
     body:
       "목표와 보유의 차이가 0.5%p 이상이면 매일 지시로 나옵니다. 목표가 흘러간 비중을 따라가므로 " +
       "평소에는 차이가 없고, 지시가 나오는 건 입출금·교체·진입·이탈·월초 이관 같은 실변화뿐입니다. " +
       "교체 확정분은 그 슬리브의 교체일 시가 그룹으로 묶입니다.",
+  },
+  {
+    title: "매수 자금 매도",
+    body:
+      "매수 대금이 현금보다 크면 초과 보유 종목을 팔아 채웁니다. 한 주 팔아도 목표 주수가 따라 " +
+      "내려오는 종목만 쓰고(안 그러면 다음 날 되사라가 나옵니다), 그중 목표 비중에서 멀어지는 폭이 " +
+      "작은 순으로 한 주씩 팝니다. 그래도 모자라면 그 매수는 지시하지 않습니다.",
   },
   {
     title: "월초 배분 복구",
@@ -216,6 +231,8 @@ type Holding = {
   forecast_trade_quantity?: number | null;
   /** 이탈 후 남을 목표수량 — 목표수량 칸에 (예상)으로 겹쳐 쓴다. */
   forecast_target_quantity?: number | null;
+  /** 업종 — 순위·모멘텀·신고가 화면과 같은 공용 맵(계좌 국가 전체). 없으면 빈 값. */
+  industry?: string;
   /** 종목풀 설정 이평선 기준 이격(%) — 종목명 옆 추세 이탈 배지(❗)에 쓴다. */
   current_short_pct?: number | null;
   current_long_pct?: number | null;
@@ -756,6 +773,13 @@ export function StrategyMixClient() {
     })();
   }, [holdingsTab, positions, charts, chartsLoading, chartsError, chartRows, accountId, positionsLoading]);
 
+  // 업종 컬럼 노출 — 값이 하나도 없으면(ETF 만 담은 계좌) 빈 컬럼을 숨긴다.
+  // 전략 화면은 풀 성격으로 가르는데, 합성은 여러 풀이 섞여 행 값으로 본다.
+  const hasIndustryData = useMemo(
+    () => positionRows.some((row) => String(row.industry ?? "").trim() !== ""),
+    [positionRows],
+  );
+
   const positionColumns = useMemo<ColDef<PositionRow>[]>(() => {
     const columns: ColDef<PositionRow>[] = [
       {
@@ -796,6 +820,8 @@ export function StrategyMixClient() {
         editable: (row) => !row?.is_cash && !row?.is_fixed_asset,
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
       }),
+      // 업종 — 전략 화면과 같은 공용 컬럼. ETF 만 담은 계좌는 값이 없어 통째로 숨긴다.
+      industryColumn<PositionRow>({ hide: !hasIndustryData }),
       {
         field: "sources",
         headerName: "전략",
@@ -1038,7 +1064,7 @@ export function StrategyMixClient() {
     });
     return columns;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
-  }, [totalAsset, slotKeys, sleeves, saveMemo]);
+  }, [totalAsset, slotKeys, sleeves, saveMemo, hasIndustryData]);
 
   const periodRows = useMemo<PeriodRow[]>(() => {
     if (!view || viewMode === "trades") return [];
@@ -1789,7 +1815,8 @@ export function StrategyMixClient() {
                         목표 비중과 슬롯 크기의 {actions?.band?.ratio_pct ?? "-"}%(최소{" "}
                         {actions?.band?.min_pct ?? "-"}%p) 이상 차이만 지시로 표시 — 가격
                         변동(드리프트)으로는 지시가 없고, 큰 단위 입출금·교체·진입·이탈·월초 이관 때
-                        나옵니다 · 모멘텀 교체 확정분은 교체일 그룹
+                        나옵니다 · 모멘텀 교체 확정분은 교체일 그룹 · 현금이 모자란 매수는 초과 보유
+                        종목을 팔아 채웁니다(매수 자금 매도)
                       </span>
                     </div>
                     {!hasActions ? (
