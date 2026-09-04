@@ -26,6 +26,7 @@ from utils.momentum_service import (
 from utils.strategy_tuning import (
     TuningRun,
     begin_tuning,
+    cumulative_to_returns,
     finalize,
     iter_groups,
     managed_tuning_events,
@@ -58,7 +59,6 @@ def _checked(values: list[Any], options: tuple, label: str) -> list[Any]:
 # 워커 프로세스 안에서만 쓰는 상태 — 부모가 넘긴 가격·종목·설정(프리로드)과, 작업 사이에
 # 재사용하는 백테스트 컨텍스트(후보 캐시 포함). 워커는 DB 를 건드리지 않는다.
 _PRELOAD: dict[str, Any] = {}
-_WORKER_CONTEXT: dict[str, Any] = {}
 
 
 def _init_worker(bundle: dict[str, Any]) -> None:
@@ -79,6 +79,7 @@ def _preload(pool: str) -> dict[str, Any]:
         load_price_frames,
         load_universe,
     )
+    from utils.new_high_service import build_price_panel
     from utils.settings_loader import _load_pool_configs
     from utils.stock_list_io import _load_ticker_type_stocks_raw
 
@@ -89,7 +90,10 @@ def _preload(pool: str) -> dict[str, Any]:
         "pool_configs": _load_pool_configs(),
         "stocks_by_pool": {pool: _load_ticker_type_stocks_raw(pool)},
         "universe": universe,
-        "frames": load_price_frames(universe),
+        # 가격 패널 — 이평선 조합이 달라도 같은 값이라 부모가 한 번만 만든다.
+        "panel": build_price_panel(universe, load_price_frames(universe)),
+        "name_by": {row["ticker"]: row["name"] for row in universe},
+        "industry_by": {row["ticker"]: row.get("industry", "") for row in universe},
         "benchmark_close": load_benchmark_close(pool),
         "adr_market": adr_market,
         "adr_series": load_adr_series(adr_market) if adr_market else None,
@@ -99,11 +103,17 @@ def _preload(pool: str) -> dict[str, Any]:
 def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
     """(단기, 장기) 쌍 하나의 조합 — 별도 프로세스에서 돈다."""
     months, base, short, long, adr_floors = task
-    from utils.momentum_backtest import run_backtest
+    from utils.momentum_backtest import compute_signals, run_backtest
 
-    context = _WORKER_CONTEXT
-    if not context:
-        context.update({k: _PRELOAD[k] for k in ("universe", "frames", "benchmark_close")})
+    # 신호는 이평선 쌍에만 의존한다 — 이 쌍의 전 조합(ADR 하한)이 하나를 나눠 쓴다.
+    context = {
+        "pool": base["pool"],
+        "universe": _PRELOAD["universe"],
+        "name_by": _PRELOAD["name_by"],
+        "industry_by": _PRELOAD["industry_by"],
+        "panel": _PRELOAD["panel"],
+        "signals": compute_signals(_PRELOAD["panel"], short, long),
+    }
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
     for adr_floor in adr_floors:
@@ -111,13 +121,14 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
             break
         combo = dict(base, short_ma_days=short, long_ma_days=long, adr_floor=adr_floor)
         try:
-            result = run_backtest(months, combo, include_daily=True, tuning_only=True, context=context)
+            result = run_backtest(months, combo, context)
         except ValueError as error:  # 장기 이평이 길어 기간이 모자라는 조합 — 그 이평 쌍은 통째로 건너뛴다
             skipped.append(f"단기 {short}/장기 {long}: {error}")
             break
-        daily = pd.DataFrame(sorted(result["daily"], key=lambda r: r["date"]))
+        daily = pd.DataFrame(result["daily"])
         daily["date"] = pd.to_datetime(daily["date"])
-        returns = daily.set_index("date")["strategy_pct"].dropna()
+        # 엔진은 누적(%)을 준다 — 지표는 일별 수익률로 재므로 신고가와 같은 공용 변환을 쓴다.
+        returns = cumulative_to_returns(daily.set_index("date")["strategy_pct"])
         rows.append(
             summarize_combo(
                 {"short_ma_days": short, "long_ma_days": long, "adr_floor": adr_floor},

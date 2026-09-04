@@ -141,3 +141,76 @@ export function toYearRows(monthly: BacktestMonthRow[]): BacktestYearRow[] {
       benchmark_partial: countOf(rows, "benchmark_pct") < 12,
     }));
 }
+
+
+/** 백테스트 기간 탭 — 신고가·모멘텀이 같은 구성을 쓴다. */
+export const VIEW_MODES = [
+  { key: "yearly", label: "연간" },
+  { key: "monthly", label: "월간" },
+  { key: "weekly", label: "주간" },
+  { key: "daily", label: "일간" },
+  { key: "trades", label: "체결" },
+] as const;
+export type ViewMode = (typeof VIEW_MODES)[number]["key"];
+
+export type PeriodRow = {
+  period: string;
+  strategy_pct: number;
+  benchmark_pct: number;
+  /** 구간 마지막 날의 시장 ADR — 일간·주간(판정일) 컬럼이 쓴다. */
+  adr: number | null;
+  /** 구간 최저 시장 ADR — 월간·연간 컬럼이 쓴다. */
+  adr_min: number | null;
+};
+
+/** 그 날짜가 속한 주의 월요일 — 주간 묶음 키. 로컬 기준으로 조립한다(UTC 파싱은 하루 밀린다). */
+export function weekKeyOf(date: string): string {
+  const parsed = new Date(`${date}T00:00:00`);
+  parsed.setDate(parsed.getDate() - ((parsed.getDay() + 6) % 7));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
+}
+
+/** 누적(%) 시계열을 기간별 수익률로 자른다. 구간 양끝의 누적값 비로 계산한다.
+ *  주간은 묶음 키(월요일)와 표시 라벨(그 주 마지막 거래일)이 달라 따로 담는다. */
+export function toPeriodRows(
+  daily: { date: string; strategy_pct: number; benchmark_pct: number; adr?: number | null }[],
+  keyOf: (date: string) => string,
+  labelByLastDate = false,
+): PeriodRow[] {
+  if (daily.length === 0) return [];
+  const lastByPeriod = new Map<
+    string,
+    { strategy: number; benchmark: number; lastDate: string; adr: number | null; adrMin: number | null }
+  >();
+  const order: string[] = [];
+  for (const point of daily) {
+    const key = keyOf(point.date);
+    if (!lastByPeriod.has(key)) order.push(key);
+    const knownMin = lastByPeriod.get(key)?.adrMin ?? null;
+    const adr = point.adr ?? null;
+    lastByPeriod.set(key, {
+      strategy: point.strategy_pct,
+      benchmark: point.benchmark_pct,
+      lastDate: point.date,
+      adr,
+      adrMin: adr == null ? knownMin : knownMin == null ? adr : Math.min(knownMin, adr),
+    });
+  }
+  // 첫 구간의 기준은 시작 시점(누적 0%)이다.
+  let prev = { strategy: 0, benchmark: 0 };
+  const rows: PeriodRow[] = [];
+  for (const key of order) {
+    const current = lastByPeriod.get(key)!;
+    const step = (now: number, before: number) => ((1 + now / 100) / (1 + before / 100) - 1) * 100;
+    rows.push({
+      period: labelByLastDate ? current.lastDate : key,
+      strategy_pct: step(current.strategy, prev.strategy),
+      benchmark_pct: step(current.benchmark, prev.benchmark),
+      adr: current.adr,
+      adr_min: current.adrMin,
+    });
+    prev = current;
+  }
+  return rows.reverse();
+}

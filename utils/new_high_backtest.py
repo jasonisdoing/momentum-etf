@@ -21,7 +21,6 @@ from utils.new_high_service import (
     DEFAULT_BACKTEST_MONTHS,
     HIGH_WINDOW,
     HIGH_WINDOW_WEEKS,
-    benchmark_info,
     build_price_panel,
     compute_signals,
     load_price_frames,
@@ -29,37 +28,24 @@ from utils.new_high_service import (
     load_universe,
     validate_settings,
 )
-from utils.pool_settings_store import get_pool_slippage
-from utils.share_allocation import ShareTarget, allocate_integer_shares, backtest_initial_capital
+from utils.slot_backtest import run_slot_backtest
+from utils.slot_positions import (
+    _apply_display_quotes,
+    _cache_refreshed_at,
+    _live_quotes,
+    _market_caps,
+    _market_today,
+    _next_session,
+    _pool_country,
+    _should_auto_refresh,
+)
 from utils.stock_memo_store import attach_stock_memos
-from utils.trade_stats import summarize_trades
 from utils.ttl_cache import TtlCache
 
 logger = logging.getLogger(__name__)
 
 # 백테스트 기간 상한 — 신고가 창(52주)만큼 앞선 데이터가 있어야 판정이 된다.
 MAX_BACKTEST_MONTHS = 60
-
-
-def _drawdown_pct(series: pd.Series) -> float:
-    return float(((series / series.cummax()) - 1).min() * 100)
-
-
-def _cagr_pct(total_pct: float, months: int) -> float | None:
-    if months <= 0:
-        return None
-    return ((1 + total_pct / 100) ** (12 / months) - 1) * 100
-
-
-def _sortino(returns: pd.Series) -> float | None:
-    """하방 변동성 대비 수익. 하락일이 없으면 나눌 수 없어 None."""
-    downside = returns[returns < 0]
-    if downside.empty or len(returns) < 2:
-        return None
-    dd = float((downside**2).mean() ** 0.5)
-    if dd <= 0:
-        return None
-    return float(returns.mean() / dd * (252**0.5))
 
 
 def load_context(settings: dict[str, Any]) -> dict[str, Any]:
@@ -94,242 +80,29 @@ def run_backtest(
 
     pool = settings["pool"]
     slots = int(settings["top_n"])
-    # 슬리피지는 종목풀 설정을 단일 소스로 쓴다 — 매수·매도 편도값을 각각 적용한다.
-    buy_slippage, sell_slippage = get_pool_slippage(pool)
 
     context = context or load_context(settings)
-    name_by, industry_by = context["name_by"], context["industry_by"]
+    signals = context["signals"]
+    breakout, below_ma, value_mult = signals["breakout"], signals["below_ma"], signals["value_mult"]
 
-    # 시장 ADR — 진입 게이트와 표시(일간 행)가 함께 쓴다. 게이트 유무와 무관하게 싣고,
-    # 레짐 시장이 없는 풀이면 빈 시리즈다.
-    from utils.momentum_service import adr_market_of_pool, load_adr_series
-
-    adr_floor = settings.get("adr_floor")
-    adr_market = adr_market_of_pool(pool)
-    adr_series = load_adr_series(adr_market) if adr_market else pd.Series(dtype=float)
-
-    def adr_at(stamp: pd.Timestamp) -> float | None:
-        if adr_series.empty:
-            return None
-        value = adr_series.asof(pd.Timestamp(stamp))
-        return round(float(value), 1) if pd.notna(value) else None
-
-    # ADR 진입 게이트 — 판정일 ADR 이 하한 미만이면 그날은 **신규 진입만** 건너뛴다.
-    # 보유 청산(이탈)은 그대로 돈다. 이력 이전 날짜는 게이트 미적용.
-    def entry_blocked(stamp: pd.Timestamp) -> bool:
-        if adr_floor is None or adr_series.empty:
-            return False
-        value = adr_series.asof(pd.Timestamp(stamp))
-        return pd.notna(value) and float(value) < float(adr_floor)
-
-    panel, signals = context["panel"], context["signals"]
-
-    close_df, open_df = panel["close"], panel["open"]
-    breakout, below_ma = signals["breakout"], signals["below_ma"]
-
-    # 진입 우선순위 — 거래대금 급증 배수가 큰 쪽부터 (자리가 모자랄 때의 정렬 기준).
+    # 진입 자격 — 돌파한 날 중 거래대금 급증 배수가 하한 이상인 종목만. 자리가 모자라면
+    # 배수가 큰 쪽(돌파에 자금이 실린 종목)부터 담는다.
     min_mult = settings["min_value_mult"]
-    value_mult = signals["value_mult"]
+    qualifies = value_mult.notna() & (value_mult >= min_mult) if min_mult is not None else breakout.notna()
 
-    def priority_of(day: pd.Timestamp, ticker: str) -> float:
-        score = value_mult.at[day, ticker]
-        return float(score) if pd.notna(score) else 0.0
-
-    dates = close_df.index
-    span = [d for d in dates if d >= dates[-1] - pd.DateOffset(months=months)]
-    if len(span) < 2:
-        raise RuntimeError("백테스트할 구간의 가격 데이터가 부족합니다.")
-
-    # 자산은 현금 + 보유 주수로 들고 간다. 포지션 손익을 자산에 곱하면 동시에 들고 있던
-    # 종목의 손익이 합산이 아니라 곱으로 쌓여 수익이 부풀려진다.
-    #
-    # 시작 자본은 통화별 상수(config.BACKTEST_INITIAL_CAPITAL)다. 예전에는 1.0 상대곡선이라
-    # 주수가 소수(4.503주)로 나왔는데, 실제로는 정수 주수만 살 수 있어 운용 현황과 결과가
-    # 어긋났다. 곡선은 마지막에 시작 자본으로 나눠 예전과 같은 배수로 돌려준다.
-    initial_capital = backtest_initial_capital(pool)
-    cash = float(initial_capital)
-    holdings: dict[str, dict[str, Any]] = {}
-    trades: list[dict[str, Any]] = []
-    curve: list[float] = []
-    last_day = span[-1]
-
-    # 평가 전용 종가 — 그날 값이 없으면 **직전 유효 종가**로 본다.
-    # 판정(돌파·이탈)에는 쓰지 않는다. 없는 날을 0 으로 치면 그 종목이 사라진 것처럼
-    # 계산돼 곡선이 한 번에 무너진다(us_etf 가 마지막 하루로 -100% 가 됐다).
-    valuation_close = close_df.ffill()
-
-    def _value_at(day: pd.Timestamp) -> float:
-        """그날 종가로 평가한 총자산 — 현금 + 보유 평가액."""
-        total = cash
-        for ticker, position in holdings.items():
-            price = valuation_close.at[day, ticker]
-            if pd.notna(price):
-                total += position["shares"] * float(price)
-        return total
-
-    for index, day in enumerate(span[:-1]):
-        nxt = span[index + 1]
-
-        # 1) 청산 판정 (오늘 종가) → 내일 시가 체결
-        for ticker in list(holdings):
-            position = holdings[ticker]
-            price = close_df.at[day, ticker]
-            if pd.isna(price):
-                continue
-            if not bool(below_ma.at[day, ticker]):
-                continue
-            exit_price = open_df.at[nxt, ticker]
-            if pd.isna(exit_price):
-                exit_price = price  # 다음 날 시가가 없으면(거래정지) 오늘 종가로 본다
-            ret = (float(exit_price) * (1 - sell_slippage / 100)) / position["entry"] - 1
-            cash += position["shares"] * float(exit_price) * (1 - sell_slippage / 100)
-            trades.append(
-                {
-                    "ticker": ticker,
-                    "name": name_by.get(ticker, ticker),
-                    "industry": industry_by.get(ticker, ""),
-                    "entry_date": str(position["date"].date()),
-                    # 표시는 **실제 체결 시가**다. 슬리피지는 가격이 아니라 비용이라
-                    # 손익률에만 반영한다 — 가격에 섞으면 시장에 없는 호가가 찍힌다.
-                    "entry_price": round(position["open"], 2),
-                    "exit_date": str(nxt.date()),
-                    "exit_price": round(float(exit_price), 2),
-                    "return_pct": round(ret * 100, 2),
-                    "days": len(close_df.loc[position["date"] : day]) - 1,
-                    "reason": "이탈",
-                }
-            )
-            del holdings[ticker]
-
-        # 2) 진입 — 빈 자리만큼, 거래대금 급증이 큰 순 (ADR 게이트에 걸린 날은 건너뜀)
-        free = slots - len(holdings)
-        if free > 0 and not entry_blocked(day):
-            # 배정 기준은 **체결 시점(다음 거래일 시가)의 자산**이다. 청산 대금이 이미
-            # 현금에 들어와 있으므로 파는 쪽과 사는 쪽이 같은 시점으로 맞는다.
-            fill_value = cash
-            for held_ticker, held_position in holdings.items():
-                held_price = open_df.at[nxt, held_ticker]
-                if pd.isna(held_price):
-                    held_price = close_df.at[day, held_ticker]
-                if pd.notna(held_price):
-                    fill_value += held_position["shares"] * float(held_price)
-            row = breakout.loc[day]
-            picks = [
-                t
-                for t in row[row].index
-                if t not in holdings
-                and not pd.isna(open_df.at[nxt, t])
-                and _meets_min_mult(value_mult.at[day, t], min_mult)
-            ]
-            picks.sort(key=lambda t: priority_of(day, t), reverse=True)
-            picks = picks[:free]
-            # 주수 배분은 운용 현황과 **같은 함수**를 쓴다 — 규칙이 갈라지면 백테스트가
-            # 실제로 못 내는 성과를 내게 된다. 예산은 살 수 있는 현금까지만(팔지 않은
-            # 평가익으로는 못 산다). 손익 계산에는 슬리피지를 얹은 값을 쓴다.
-            fill_price_by_ticker = {t: float(open_df.at[nxt, t]) * (1 + buy_slippage / 100) for t in picks}
-            slot_amount = fill_value / slots if slots else 0.0
-            quantities = allocate_integer_shares(
-                [
-                    ShareTarget(key=ticker, target_amount=slot_amount, price=price)
-                    for ticker, price in fill_price_by_ticker.items()
-                    if price > 0
-                ],
-                budget=min(slot_amount * len(picks), cash),
-            )
-            for ticker in picks:
-                shares = quantities.get(ticker, 0)
-                if shares <= 0:
-                    continue
-                fill_price = fill_price_by_ticker[ticker]
-                holdings[ticker] = {
-                    "open": float(open_df.at[nxt, ticker]),
-                    "entry": fill_price,
-                    "date": nxt,
-                    "shares": shares,
-                }
-                cash -= shares * fill_price
-
-        curve.append(_value_at(day))
-
-    # 마지막 날은 판정·체결이 없다(체결할 다음 거래일이 없어서). 다만 그날 종가로
-    # **평가**는 해야 곡선이 하루 짧아지지 않는다 — 모멘텀 엔진과 같은 기준.
-    curve.append(_value_at(last_day))
-
-    # 아직 청산하지 않은 종목 — 성과에는 평가손익으로 이미 반영돼 있지만 체결 내역에는 없다.
-    # 슬리브 안에서의 현재 비중도 함께 담는다. 진입할 때 1/slots 였다가 시세대로 흘러간
-    # 값이라, 합성 화면이 '지금 이 종목이 몇 % 여야 하는지' 를 이 값으로 잡는다.
-    sleeve_value = _value_at(last_day)
-    open_positions = []
-    for ticker, position in holdings.items():
-        price = close_df.at[last_day, ticker]
-        if pd.isna(price):
-            continue
-        value = position["shares"] * float(price)
-        open_positions.append(
-            {
-                "ticker": ticker,
-                "name": name_by.get(ticker, ticker),
-                "industry": industry_by.get(ticker, ""),
-                "entry_date": str(position["date"].date()),
-                "entry_price": round(position["open"], 2),
-                "price": float(price),
-                # 표시용 평가손익 — 아직 안 팔았으니 매도 슬리피지는 빼지 않는다.
-                "return_pct": round((float(price) / position["open"] - 1) * 100, 2),
-                "days": len(close_df.loc[position["date"] : last_day]) - 1,
-                # 오늘 편입된 종목은 목록에서 따로 표시한다.
-                "is_new": position["date"] == last_day,
-                # 이 슬리브 안에서의 비중(%) — 슬리브 전체를 100 으로 본다.
-                "sleeve_weight_pct": round(value / sleeve_value * 100, 4) if sleeve_value > 0 else 0.0,
-            }
-        )
-    # 오래 들고 있는 것이 위 — 화면(`/strategy-new-high`)이 보여주는 순서다.
-    # 여기서 맞춰 두면 이 목록을 그대로 쓰는 합성 슬리브도 같은 순서가 된다
-    # (예전에는 화면만 다시 뒤집어서 두 화면의 순서가 정반대로 보였다).
-    open_positions.sort(key=lambda row: row["entry_date"])
-    # 빈 슬롯·잔여 현금 비중 — 종목 비중과 합쳐 100 이 된다.
-    sleeve_cash_weight_pct = round(cash / sleeve_value * 100, 4) if sleeve_value > 0 else 100.0
-    exited_today = [t for t in trades if t["exit_date"] == str(last_day.date())]
-
-    # 곡선은 시작 1.0 배수로 되돌린다 — 시작 자본은 정수 주수를 세기 위한 것이고,
-    # 성과 지표(수익률·MDD·벤치마크 대비)는 예전과 같은 배수 기준으로 읽어야 한다.
-    strategy = pd.Series(curve, index=span) / initial_capital  # 마지막 날은 평가만 한 값이 들어간다
-    # 벤치마크는 **시작일 시가**를 1 로 둔다 — 전략도 그날 시가에 사기 때문이다(공용 함수).
-    from utils.benchmark_curve import benchmark_growth
-
-    benchmark = benchmark_growth(pool, strategy.index)
-
-    strategy_total = float((strategy.iloc[-1] - 1) * 100)
-    benchmark_total = float((benchmark.iloc[-1] - 1) * 100)
-
-    return {
-        "start_date": str(strategy.index[0].date()),
-        "end_date": str(strategy.index[-1].date()),
-        "months": months,
-        "strategy_total_pct": round(strategy_total, 2),
-        "strategy_cagr_pct": round(_cagr_pct(strategy_total, months) or 0.0, 2),
-        "strategy_mdd_pct": round(_drawdown_pct(strategy), 2),
-        "strategy_sortino": _sortino(strategy.pct_change().dropna()),
-        "benchmark_total_pct": round(benchmark_total, 2),
-        "benchmark_cagr_pct": round(_cagr_pct(benchmark_total, months) or 0.0, 2),
-        "benchmark_mdd_pct": round(_drawdown_pct(benchmark), 2),
-        "benchmark_sortino": _sortino(benchmark.pct_change().dropna()),
-        "benchmark_name": benchmark_info(pool)["name"],
-        **summarize_trades(trades),
-        "trades": sorted(trades, key=lambda t: t["exit_date"], reverse=True),
-        "as_of": str(last_day.date()),
-        "open_positions": open_positions,
-        "sleeve_cash_weight_pct": sleeve_cash_weight_pct,
-        "exited_today": exited_today,
-        "daily": [
-            {
-                "date": str(d.date()),
-                "strategy_pct": round((v - 1) * 100, 2),
-                "benchmark_pct": round((float(benchmark.loc[d]) - 1) * 100, 2),
-                "adr": adr_at(d),
-            }
-            for d, v in strategy.items()
-        ],
-    }
+    return run_slot_backtest(
+        pool=pool,
+        months=months,
+        panel=context["panel"],
+        entry=breakout & qualifies,
+        exit_signal=below_ma,
+        priority=value_mult.fillna(0.0),
+        slots=slots,
+        adr_floor=settings.get("adr_floor"),
+        name_by=context["name_by"],
+        industry_by=context["industry_by"],
+        exit_reason="이탈",
+    )
 
 
 def _meets_min_mult(mult: Any, minimum: float | None) -> bool:
@@ -342,212 +115,14 @@ def _meets_min_mult(mult: Any, minimum: float | None) -> bool:
     return bool(pd.notna(mult)) and float(mult) >= minimum
 
 
-def _market_caps(pool: str) -> dict[str, float]:
-    """티커 → 시가총액. 배치 B 가 메타 캐시에 적어 둔 값을 읽기만 한다.
-
-    한국 개별주는 예전에 여기서 네이버 시세표를 직접 순회했다(424종목에 4초). 그런데 그
-    목록은 시총 **순위**를 매기려고 배치가 이미 받아 오는 값이라, 배치가 금액까지 적게
-    하고(`utils/market_cap_rank`) 화면은 DB 만 읽는다. 국가별 분기도 함께 사라졌다.
-
-    값이 없는 종목은 맵에서 빠진다 — 화면은 '-' 로 둔다(임의 보정 없음).
-    현재 값만 있고 과거 이력이 없다. 그래서 백테스트 우선순위에는 쓰지 않는다.
-    """
-    from utils.db_manager import get_db_connection
-
-    db = get_db_connection()
-    if db is None:
-        return {}
-    caps: dict[str, float] = {}
-    for doc in db["stock_cache_meta"].find({"ticker_type": pool}, {"ticker": 1, "meta_cache": 1}):
-        value = (doc.get("meta_cache") or {}).get("total_net_assets")
-        if value:
-            caps[str(doc.get("ticker") or "").strip().upper()] = float(value)
-    return caps
-
-
 # 보유를 재구성할 때 돌리는 구간. 관측된 최장 보유가 100거래일 안쪽이라 1년이면 충분하다.
 _HOLDINGS_LOOKBACK_MONTHS = 12
-
-
-def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> dict[str, Any]:
-    """진행 중인 세션의 실시간 시세. 캐시에 아직 안 들어온 날일 때만 의미가 있다.
-
-    반환 ``{"live": bool, "pre_market": bool, "traded_at": str|None,
-    "by_ticker": {티커: {price, high, change_pct}}}``.
-    ``live`` 는 마지막 체결일이 가격 캐시의 마지막 거래일보다 **뒤**라는 뜻 —
-    그날 종가가 아직 확정되지 않았으므로 화면은 '돌파중'처럼 잠정 상태로 표시한다.
-    캐시와 같은 날이면 이미 확정된 세션이라 실시간을 쓰지 않는다.
-
-    장전(동시호가) 구간은 ``live`` 로 보지 않는다. 그 시각 스냅샷의 고가·저가·시가는
-    아직 **직전 세션의 값**이고 현재가만 오늘 예상체결가라, 둘을 섞으면 어제 확정된
-    돌파가 오늘 예상가에 밀려 '터치 후 밀림'으로 뒤집힌다. 오늘 값이 다 갖춰지는
-    정규장부터 쓴다.
-    """
-    from utils.settings_loader import get_ticker_type_settings
-
-    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
-    if not country or not tickers:
-        return {"live": False, "pre_market": False, "traded_at": None, "by_ticker": {}}
-
-    from services.price_service import get_realtime_snapshot
-
-    try:
-        snapshot = get_realtime_snapshot(country, tickers)
-    except Exception:
-        logger.exception("[new_high] 실시간 시세 조회 실패 (%s)", pool)
-        return {"live": False, "pre_market": False, "traded_at": None, "by_ticker": {}}
-
-    by_ticker: dict[str, dict[str, float]] = {}
-    traded_at: str | None = None
-    pre_market = False
-    for ticker, quote in snapshot.items():
-        price = quote.get("nowVal")
-        if price is None or float(price) <= 0:
-            continue
-        # 오늘 시가 — 어제 확정된 진입·청산이 체결된 가격이다. ETF 는 이 값이 안 와서
-        # None 이 되고, 그런 종목은 체결로 처리하지 않는다(가격을 지어내지 않는다).
-        open_val = quote.get("open")
-        by_ticker[ticker] = {
-            "price": float(price),
-            "high": float(quote.get("high") or price),
-            "open": float(open_val) if open_val is not None and float(open_val) > 0 else None,
-            "change_pct": float(quote.get("changeRate")) if quote.get("changeRate") is not None else None,
-        }
-        if quote.get("is_pre_market"):
-            pre_market = True
-        stamp = str(quote.get("localTradedAt") or "")
-        if stamp and (traded_at is None or stamp > traded_at):
-            traded_at = stamp
-
-    live = bool(traded_at) and not pre_market and str(traded_at)[:10] > str(cached_last.date())
-    return {
-        "live": live,
-        "pre_market": pre_market,
-        "traded_at": traded_at,
-        # 시세는 항상 담는다. 현재가·등락률은 어느 구간이든 오늘 값이라 표시에 쓰고,
-        # 돌파 판정은 `live` 일 때만 한다 — ETF 처럼 체결 시각·고가를 안 주는 종목도
-        # 일간(%) 은 정상으로 보여야 한다.
-        "by_ticker": by_ticker,
-    }
 
 
 # 장전에 화면을 주기적으로 다시 받기 시작할 시점 — 개장 몇 분 전부터인가.
 # 실제로 예상체결가가 움직이는 구간은 동시호가(개장 30분 전~개장)라 한 시간이면 넉넉하다.
 # 시세 제공처의 '장전' 플래그는 새벽부터 켜져 있을 수 있어 그것만 믿고 돌리지 않는다.
 _PRE_MARKET_REFRESH_LEAD_MINUTES = 60
-
-
-def _should_auto_refresh(pool: str, quotes: dict[str, Any]) -> bool:
-    """화면이 주기 갱신을 걸어야 하는 시점인지.
-
-    장중이면 늘 참이고, 장전이면 개장이 가까울 때만 참이다. 개장 시각은 시장마다 달라
-    화면이 알 수 없으므로 여기서 판단해 내려준다.
-    """
-    if quotes["live"]:
-        return True
-    if not quotes["pre_market"]:
-        return False
-
-    from config import MARKET_SCHEDULES
-    from utils.settings_loader import get_ticker_type_settings
-
-    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
-    schedule = (MARKET_SCHEDULES or {}).get(country)
-    if not isinstance(schedule, dict):
-        return False
-    tz_name = str(schedule.get("timezone") or "").strip()
-    open_time = schedule.get("open")
-    if not tz_name or open_time is None:
-        return False
-    try:
-        now_local = pd.Timestamp.now(tz=tz_name)
-        opens_at = pd.Timestamp(f"{now_local.date()} {open_time.hour:02d}:{open_time.minute:02d}", tz=tz_name)
-    except Exception:
-        return False
-    return opens_at - pd.Timedelta(minutes=_PRE_MARKET_REFRESH_LEAD_MINUTES) <= now_local <= opens_at
-
-
-def _pool_country(pool: str) -> str:
-    """종목풀의 국가 코드(kor·us·au). 시장별 규칙을 고르는 단일 소스."""
-    from utils.settings_loader import get_ticker_type_settings
-
-    return str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
-
-
-def _market_today(pool: str) -> str | None:
-    """그 시장의 **현지 오늘** 날짜(YYYY-MM-DD). 시간대를 모르면 None — 날짜를 지어내지 않는다.
-
-    미국 풀을 한국에서 보면 브라우저·서버의 날짜가 시장의 날짜와 하루 어긋난다. '그 세션이
-    지났는지' 는 시장 현지 날짜로 따져야 한다.
-    """
-    from config import MARKET_SCHEDULES
-
-    tz_name = str(((MARKET_SCHEDULES or {}).get(_pool_country(pool)) or {}).get("timezone") or "").strip()
-    if not tz_name:
-        return None
-    try:
-        return str(pd.Timestamp.now(tz=tz_name).date())
-    except Exception:
-        logger.exception("[new_high] 시장 현지 날짜 계산 실패 (%s)", pool)
-        return None
-
-
-def _next_session(pool: str, last: pd.Timestamp) -> str | None:
-    """캐시 마지막 거래일 **다음**의 거래일 — 진입·청산이 체결되는 날.
-
-    화면이 '오늘 매수'인지 '내일 매수'인지 가리는 데 쓴다. 장 시작 전에는 캐시의
-    마지막 거래일이 아직 어제라, '다음 거래일' 이 곧 오늘이다.
-    캘린더가 답할 수 없으면 None 을 돌려준다 — 날짜를 지어내지 않는다.
-    """
-    from utils.settings_loader import get_ticker_type_settings
-    from utils.trading_calendar import get_trading_days
-
-    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
-    if not country:
-        return None
-    try:
-        days = get_trading_days(
-            str((last + pd.Timedelta(days=1)).date()),
-            str((last + pd.Timedelta(days=14)).date()),
-            country,
-        )
-    except Exception:
-        logger.exception("[new_high] 다음 거래일 조회 실패 (%s)", pool)
-        return None
-    return str(days[0].date()) if days else None
-
-
-def _apply_display_quotes(
-    rows: list[dict[str, Any]],
-    holdings: list[dict[str, Any]],
-    by_ticker: dict[str, dict[str, Any]],
-) -> None:
-    """현재가·일간(%)·보유 수익률만 실시간으로 바꾼다. **판정에는 쓰지 않는다.**
-
-    돌파 거리·터치·진입 예정은 확정 종가로 정해지고, 이 함수는 사람이 보는 숫자만 바꾼다.
-    그래서 체결 시각이나 고가를 안 주는 종목(국내 ETF)도 일간(%) 은 정상으로 나온다.
-    """
-    for row in rows:
-        quote = by_ticker.get(row["ticker"])
-        if not quote:
-            continue
-        row["price"] = quote["price"]
-        if quote["change_pct"] is not None:
-            row["change_pct"] = round(quote["change_pct"], 2)
-    for held in holdings:
-        quote = by_ticker.get(held["ticker"])
-        if not quote:
-            continue
-        held["price"] = quote["price"]
-        held["return_pct"] = round((quote["price"] / held["entry_price"] - 1) * 100, 2)
-
-
-def _cache_refreshed_at(pool: str) -> str | None:
-    """이 종목풀 가격 캐시의 마지막 갱신 시각(ISO). 배치가 안 돌았으면 None."""
-    from utils.cache_utils import get_cache_refresh_completed_at
-
-    completed = get_cache_refresh_completed_at(pool)
-    return completed.isoformat() if completed else None
 
 
 # 유니버스 전체를 현재까지 돌리는 계산이라 수십 초 걸린다 — 설정이 같으면
@@ -685,19 +260,19 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
             held["status"] = "sell" if hit_ma else "hold"
             held["exit_reason"] = "이탈" if hit_ma else None
 
-    # ADR 진입 게이트 — 발동하면 오늘은 신규 진입이 없다(보유 관리는 그대로).
+    # ADR 진입 게이트 — 발동하면 오늘은 신규 진입이 없다(보유 관리는 그대로). 백테스트가
+    # 쓰는 공용 게이트와 **같은 함수**라 화면 표시와 실제 판정이 갈리지 않는다.
     adr_gate: dict[str, Any] | None = None
     if settings.get("adr_floor") is not None:
-        from utils.momentum_service import adr_gate_blocked, adr_market_of_pool, load_adr_series
+        from utils.momentum_service import adr_market_of_pool
+        from utils.slot_backtest import adr_entry_gate
 
-        gate_market = adr_market_of_pool(pool)
-        gate_series = load_adr_series(gate_market) if gate_market else pd.Series(dtype=float)
-        gate_value = gate_series.asof(last) if not gate_series.empty else None
+        gate_blocked, gate_at = adr_entry_gate(pool, settings["adr_floor"])
         adr_gate = {
-            "market": gate_market,
+            "market": adr_market_of_pool(pool),
             "floor": settings["adr_floor"],
-            "value": round(float(gate_value), 1) if gate_value is not None and pd.notna(gate_value) else None,
-            "blocked": adr_gate_blocked(settings, last),
+            "value": gate_at(last),
+            "blocked": gate_blocked(last),
         }
 
     def pick_entries() -> list[dict[str, Any]]:

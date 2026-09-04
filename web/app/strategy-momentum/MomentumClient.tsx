@@ -25,11 +25,11 @@ import { readRememberedTickerType, writeRememberedTickerType } from "../componen
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 import { formatMarketCapWon } from "@/lib/market-cap-format";
 import {
-  type BacktestDayRow,
-  type BacktestMonthRow,
-  type BacktestYearRow,
-  toCalendarMonthRows,
-  toYearRows,
+  VIEW_MODES,
+  toPeriodRows,
+  weekKeyOf,
+  type PeriodRow,
+  type ViewMode,
 } from "@/lib/backtest-periods";
 import {
   industryColumn,
@@ -37,11 +37,16 @@ import {
   adrColumn as sharedAdrColumn,
   formatSignedPct,
   maExitGapColumn,
-  renderHighDrawdownCell,
+  highDrawdownColumn,
   signColor,
   marketCapRankColumn,
+  slotStatusColumn,
+  slotTradeColumns,
   stockMemoColumn,
   tradeValueMultColumn,
+  STATUS_COLUMN_MIN_WIDTH,
+  STATUS_COLUMN_WIDTH,
+  type SlotPlan,
 } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { updateStockMemo } from "@/lib/stocks-store";
@@ -103,108 +108,119 @@ type PoolSettings = {
 
 type Settings = PoolSettings & { pool: string };
 
-type PickRow = {
-  rank: number | null;
-  // 다음 주 예상 순위 — 현재 가격 기준으로 같은 선정 규칙을 돌린 순위 (자격 미달은 null).
-  expected_rank: number | null;
-  is_reserve: boolean;
-  // 현재 표(선정+후보) 밖인데 다음 주 편입이 예상되는 종목 — 하단 별도 행.
-  is_expected_only: boolean;
-  /** 지금 실제로 들고 있는가 — 교체가 확정됐어도 체결 전이면 거짓. */
-  is_held?: boolean;
-  // 주중 매도 — 보유 자격(장기>0 & 단기≥0) 상실로 매도됨(체결 완료) / 다음 시가 매도 예정.
-  is_exited?: boolean;
-  is_exit_pending?: boolean;
-  exit_date?: string | null;
-  /** 주중 매도 사유 — "ADR 게이트"(시장 하한 미달) 하나뿐이다. */
-  exit_reason?: string | null;
-  /** 주중에 이평선을 이탈했지만 ADR이 하한 이상이라 보유 중 — 유지 표시에 (이탈·ADR)을 붙인다. */
-  held_ma_dip?: boolean;
-  streak_weeks: number | null;
-  /** 연속 편입이 시작된 교체일 — 차트 탭의 Buy 마커 위치. 선정분만 값이 있다. */
-  entry_date?: string | null;
-  /** 편입 후 수익률(%) — 연속 편입 시작 교체일 시가 대비. 보유 중인 종목만 값이 있다. */
-  entry_return_pct?: number | null;
-  next_week_expected: boolean;
+/** 보유 표 한 행 — 보유·매도 예정·진입 예정·이탈·빈 슬롯을 한 표에 담는다(신고가와 같다). */
+type PlanRow = {
   ticker: string;
   name: string;
-  // 종목의 소속 마켓(KOSPI/KOSDAQ) — 한국 통합 풀 구분 표시용, 없으면 빈 값.
-  market: string;
   industry: string;
-  currency: string;
+  market_cap_rank?: number | null;
+  change_pct: number | null;
+  /** 현재 시세 — 이탈 행도 지금 값이다(청산가는 exit_price). */
   price: number | null;
-  monthly_returns: Record<string, number | null>;
-  daily_change_pct: number | null;
-  high_drawdown_pct: number | null;
-  market_cap: number | null;
-  market_cap_rank: number | null;
-  /** 20일 평균 대비 거래대금 배수 — 순위·신고가 화면과 같은 소스(배치 확정 + 실시간). */
+  /** 청산가 — 마지막 세션에 이탈한 행에만 있다. */
+  exit_price: number | null;
+  entry_date: string | null;
+  entry_price: number | null;
+  return_pct: number | null;
+  plan: SlotPlan;
   value_mult?: number | null;
   value_mult_live?: number | null;
-  /** 종목 메모 — 계좌가 아니라 종목에 붙는다(자산 관리·순위 화면과 같은 값). */
+  days: number | null;
+  is_new: boolean;
+  exit_reason: string | null;
+  /** 종목에 붙는 메모 — 순위·신고가·자산 관리 화면과 같은 값. */
   memo?: string;
-  signal_short_pct: number | null;
-  signal_long_pct: number | null;
-  current_short_pct: number | null;
-  current_long_pct: number | null;
+  /** 단기 이평선까지 남은 여유(%) — 0 이하면 이탈. */
+  short_gap_pct?: number | null;
+  /** 장기 이평선까지 남은 여유(%) — 0 이하면 이탈. */
+  long_gap_pct?: number | null;
+  high_drawdown_pct?: number | null;
+  /** 실계좌 보유 여부 — 전략 보유와 뜻이 다르다. */
+  account_held?: boolean;
 };
 
-type PicksResult = {
+/** 진입 후보 한 행 — 자리가 나면 담을 순서대로. 상태는 「보유 중」과 「후보」 둘뿐이다. */
+type CandidateRow = {
+  ticker: string;
+  name: string;
+  industry: string;
+  market_cap_rank?: number | null;
+  change_pct: number | null;
+  price: number | null;
+  value_mult?: number | null;
+  value_mult_live?: number | null;
+  memo?: string;
+  /** 이 순위표에서의 자리 — 우선순위(장기 이격률) 순. */
+  rank: number;
+  short_gap_pct: number | null;
+  long_gap_pct: number | null;
+  high_drawdown_pct: number | null;
+  market_cap: number | null;
+  /** 전략이 이미 들고 있는 종목 — 다시 사지 않지만 순위에는 남는다. */
+  is_held: boolean;
+  account_held?: boolean;
+};
+
+/** 체결 한 건 — 진입~청산 한 쌍. */
+type Trade = {
+  ticker: string;
+  name: string;
+  industry: string;
+  entry_date: string;
+  entry_price: number;
+  exit_date: string;
+  exit_price: number;
+  return_pct: number;
+  days: number;
+  reason: string;
+  price?: number | null;
+  change_pct?: number | null;
+  market_cap_rank?: number | null;
+  value_mult?: number | null;
+  value_mult_live?: number | null;
+  memo?: string;
+};
+
+type Positions = {
   as_of: string;
-  portfolio_week: string;
-  rebalance_date: string;
-  signal_date: string;
-  universe_count: number;
-  candidate_count: number;
-  // 풀의 국가·통화 — 마켓·시가총액 컬럼 표시와 티커 표기(ASX: 등)를 정한다.
+  /** 동시 보유 상한 — 빈 슬롯 행 수를 세는 데 쓴다. */
+  top_n: number;
+  /** 표시용 시세 갱신에 쓰는 국가 코드(시세 소스가 국가별로 다르다). */
   country: string;
+  /** 가격 표기 통화 — 화면이 원·달러 표기를 이 값으로 정한다. */
   currency: string;
-  monthly_return_labels: string[];
-  /**
-   * ADR 게이트 상태 — 하한 미설정이면 null. blocked 면 이번 주는 전량 현금.
-   * `intraweek` 는 마지막 확정 종가 기준의 주중 게이트 — 주간 판정을 통과한 뒤 ADR 이
-   * 무너지면 여기가 blocked 가 되고 다음 거래일 시가에 전량 매도한다.
-   */
+  /** 진입 예정·매도 예정이 실제로 체결되는 날. */
+  next_session: string | null;
+  /** 장중인가 — 참이면 오늘 종가 확정 전이라 판정이 잠정이다. */
+  live: boolean;
+  /** 가격 캐시가 마지막으로 갱신된 시각(KST). */
+  cache_refreshed_at?: string | null;
+  holdings: PlanRow[];
+  /** 다음 시가에 살 종목 — 자리·자격·우선순위를 모두 적용한 결과. */
+  planned_entries: CandidateRow[];
+  /** 마지막 세션에 청산된 종목. */
+  exited_today: Trade[];
+  /** 진입 후보 — 우선순위 순 top_n 개. */
+  candidates: CandidateRow[];
+  /** ADR 게이트 — 하한 미설정이면 null. blocked 면 오늘은 신규 진입이 없다. */
   adr_gate?: {
     market: string | null;
     floor: number;
     value: number | null;
     blocked: boolean;
-    intraweek: { date: string; value: number | null; blocked: boolean };
   } | null;
-  rows: PickRow[];
 };
 
-// 월간 행은 집계만 담는다 — 매매 내역(편입·편출·교체율·보유 수)은 주간 행이 담당한다.
-// 타입·집계는 자산 헬퍼와 공용(@/lib/backtest-periods).
-
-// 주간 행 — 달력 주 단위. 기준일은 그 주 마지막 거래일, 편입·편출은 그 주 체결분.
-type BacktestWeekRow = {
-  week_end: string;
-  /** 판정일(기준일)의 시장 ADR — 다음 주 게이트를 결정한 값. */
-  adr?: number | null;
-  strategy_pct: number | null;
-  benchmark_pct: number | null;
-  holdings_count: number;
-  holdings_start?: number;
-  /** 주중 매도(ADR 게이트) — "종목명(코드) · 사유" 형식. */
-  exited?: string[];
-  turnover_pct: number | null;
-  added: string[];
-  removed: string[];
-  // 다음 교체일에 실행될 예정 행 — 아직 수익률 없음.
-  is_pending?: boolean;
-};
-
-// 체결 행 — 편입~편출 한 쌍. exit_date 가 없으면 아직 보유 중이다.
+// 체결 행 — 진입~청산 한 쌍.
 type BacktestTradeRow = {
   ticker: string;
   name: string;
+  industry: string;
   entry_date: string;
   entry_price: number;
-  exit_date: string | null;
-  exit_price: number | null;
-  return_pct: number | null;
+  exit_date: string;
+  exit_price: number;
+  return_pct: number;
   days: number;
   reason: string;
 };
@@ -222,9 +238,8 @@ type BacktestResult = {
   strategy_cagr_pct: number | null;
   benchmark_cagr_pct: number | null;
   benchmark_name: string;
-  benchmark_ticker: string;
-  weekly: BacktestWeekRow[];
-  daily: BacktestDayRow[];
+  /** 일별 누적(%) 곡선 — 연간·월간·주간·일간 표를 전부 여기서 잘라 낸다. */
+  daily: { date: string; strategy_pct: number; benchmark_pct: number; adr?: number | null }[];
   trades: BacktestTradeRow[];
   /** 체결 통계 — 백엔드 공용 계산(utils/trade_stats.py). 청산분만 센다. */
   trade_count: number;
@@ -263,7 +278,7 @@ type View = {
   constraints?: {
     adr_floor_options?: (number | null)[];
   };
-  picks: PicksResult | null;
+  positions: Positions | null;
 };
 
 // 운용 현황 안쪽 탭 — 신고가 화면과 같은 구성. 차트는 선정 종목 수만큼 그리므로 열 때만 그린다.
@@ -273,15 +288,6 @@ const CURRENT_TABS = [
 ] as const;
 type CurrentTab = (typeof CURRENT_TABS)[number]["key"];
 
-// 백테스트 표 보기 단위 — /compare 의 연간·월간·일간 구분에 주간을 더한 것.
-const VIEW_MODES = [
-  { key: "yearly", label: "연간" },
-  { key: "monthly", label: "월간" },
-  { key: "weekly", label: "주간" },
-  { key: "daily", label: "일간" },
-  { key: "trades", label: "체결" },
-] as const;
-type ViewMode = (typeof VIEW_MODES)[number]["key"];
 
 const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--fs-sm)" };
 const numberInputStyle: React.CSSProperties = { width: 88, textAlign: "right" };
@@ -392,13 +398,13 @@ export function MomentumClient() {
     const stopRamp = startProgressRamp(setPickProgress);
     try {
       // 지금 화면이 고른 풀로 계산한다 — 안 넘기면 서버가 기본 풀로 돌린다.
-      const resp = await fetch(`/api/strategy-momentum/picks?pool=${encodeURIComponent(pool)}`, {
+      const resp = await fetch(`/api/strategy-momentum/positions?pool=${encodeURIComponent(pool)}`, {
         method: "POST",
       });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "선정에 실패했습니다.");
       setPickProgress({ percent: 100, message: "선정 결과 반영 중" });
-      setView((prev) => (prev ? { ...prev, picks: payload as PicksResult } : prev));
+      setView((prev) => (prev ? { ...prev, positions: payload as Positions } : prev));
     } catch (error) {
       setPickFailed(true);
       toast.error(error instanceof Error ? error.message : "선정에 실패했습니다.");
@@ -436,7 +442,7 @@ export function MomentumClient() {
         // 이 폼의 설정(종목풀·이평선·ADR 하한)은 전부 선정·매도 예정에
         // 영향을 준다 — 저장하면 무조건 다시 계산한다. (예전의 "선정 무관 설정" 예외 목록은
         // 슬리피지가 이 폼에 있던 시절의 유물이라 제거했다.)
-        applyView({ ...saved, picks: null });
+        applyView({ ...saved, positions: null });
         // 백테스트는 어느 설정이 바뀌든 결과가 달라지므로 비운다.
         setBacktest(null);
         toast.success(`${successMessage} 선정을 다시 계산합니다.`);
@@ -510,7 +516,7 @@ export function MomentumClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // 한 번 실행으로 연간·월간·주간·일간을 모두 만든다 — 탭 전환 시 재실행이 없도록.
-        body: JSON.stringify({ months, include_daily: true }),
+        body: JSON.stringify({ months }),
       });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "백테스트에 실패했습니다.");
@@ -525,16 +531,106 @@ export function MomentumClient() {
     }
   }, [backtestMonths, draftPool, toast]);
 
-  // 표시용 현재가·일간(%)만 60초마다 갱신한다 — 선정 판정은 종가 기준이라 5분 캐시로 둔다.
-  const quotes = useRealtimeQuotes(view?.picks?.country ?? "", (view?.picks?.rows ?? []).map((row) => row.ticker));
-  const pickRows = useMemo(() => {
-    const rows = view?.picks?.rows ?? [];
-    if (Object.keys(quotes).length === 0) return rows;
-    return rows.map((row) => {
+  // 표시용 현재가·일간(%)만 60초마다 갱신한다 — 진입·청산 판정은 종가 기준이라 다시 계산하지 않는다.
+  const positions = view?.positions ?? null;
+  const quoteTickers = useMemo(
+    () =>
+      [
+        ...(positions?.holdings ?? []).map((row) => row.ticker),
+        ...(positions?.planned_entries ?? []).map((row) => row.ticker),
+        ...(positions?.candidates ?? []).map((row) => row.ticker),
+      ].filter((ticker, index, all) => all.indexOf(ticker) === index),
+    [positions],
+  );
+  const quotes = useRealtimeQuotes(positions?.country ?? "", quoteTickers);
+  /** 시세가 들어온 종목만 현재가·등락률을 덮어쓴다(나머지 값은 판정 결과 그대로). */
+  const withQuote = useCallback(
+    <T extends { ticker: string; price: number | null; change_pct: number | null }>(row: T): T => {
       const quote = quotes[row.ticker];
-      return quote ? { ...row, price: quote.price, daily_change_pct: quote.change_pct } : row;
-    });
-  }, [view?.picks?.rows, quotes]);
+      return quote ? { ...row, price: quote.price, change_pct: quote.change_pct } : row;
+    },
+    [quotes],
+  );
+
+  // 보유 + 다음 시가 매수 + 빈 슬롯 + 이탈을 한 표로 — 이 표만 보고 주문을 낼 수 있게.
+  const planRows = useMemo<PlanRow[]>(() => {
+    if (!positions) return [];
+    const held = positions.holdings;
+    const buys: PlanRow[] = positions.planned_entries.map((row) => ({
+      ticker: row.ticker,
+      name: row.name,
+      industry: row.industry,
+      market_cap_rank: row.market_cap_rank ?? null,
+      change_pct: row.change_pct,
+      price: row.price,
+      value_mult: row.value_mult ?? null,
+      value_mult_live: row.value_mult_live ?? null,
+      exit_price: null,
+      entry_date: null,
+      entry_price: null,
+      return_pct: null,
+      // 아직 안 샀다 — days 를 null 로 두면 보유일 칸과 차트 배지가 통째로 비어 진입 전인지 알 수 없다.
+      plan: "buy",
+      days: 0,
+      is_new: false,
+      exit_reason: null,
+      memo: row.memo,
+      short_gap_pct: row.short_gap_pct,
+      long_gap_pct: row.long_gap_pct,
+      high_drawdown_pct: row.high_drawdown_pct,
+      account_held: row.account_held,
+    }));
+    const exited: PlanRow[] = positions.exited_today.map((trade) => ({
+      ticker: trade.ticker,
+      name: trade.name,
+      industry: trade.industry,
+      market_cap_rank: trade.market_cap_rank ?? null,
+      change_pct: trade.change_pct ?? null,
+      price: trade.price ?? null,
+      exit_price: trade.exit_price,
+      value_mult: trade.value_mult ?? null,
+      value_mult_live: trade.value_mult_live ?? null,
+      entry_date: trade.entry_date,
+      entry_price: trade.entry_price,
+      return_pct: trade.return_pct,
+      plan: "exited",
+      days: trade.days,
+      is_new: false,
+      exit_reason: trade.reason,
+      memo: trade.memo,
+    }));
+    // 빈 슬롯 — 상한에서 '다음 시가 이후에 실제로 차 있을 자리' 를 뺀 만큼. 매도 예정은 곧
+    // 비고, 진입 예정은 곧 찬다. 자리가 남았다는 것은 자격을 갖춘 후보가 없었다는 뜻이라,
+    // 표에 자리를 그려 두면 "왜 안 샀지" 를 표만 보고 알 수 있다.
+    const filled = held.filter((row) => row.plan !== "sell").length + buys.length;
+    const empty: PlanRow[] = Array.from({ length: Math.max(positions.top_n - filled, 0) }, (_, index) => ({
+      ticker: `__EMPTY_${index}__`,
+      name: "(빈 슬롯)",
+      industry: "",
+      market_cap_rank: null,
+      change_pct: null,
+      price: null,
+      exit_price: null,
+      value_mult: null,
+      value_mult_live: null,
+      entry_date: null,
+      entry_price: null,
+      return_pct: null,
+      plan: "empty",
+      days: null,
+      is_new: false,
+      exit_reason: null,
+    }));
+    // 보유(매도 예정 포함)가 위, 아직 안 산 것, 빈 자리, 이미 끝난 것 순.
+    // 같은 묶음 안에서는 **오래 들고 있는 것이 위** — 편입일이 이른 순이다.
+    const order = { hold: 0, sell: 0, buy: 1, empty: 2, exited: 3 } as const;
+    return [...held, ...buys, ...empty, ...exited].sort(
+      (a, b) => order[a.plan] - order[b.plan] || (a.entry_date ?? "").localeCompare(b.entry_date ?? ""),
+    );
+  }, [positions]);
+
+  const candidateRows = useMemo(() => (positions?.candidates ?? []).map(withQuote), [positions, withQuote]);
+  const heldCount = planRows.filter((row) => row.plan === "hold" || row.plan === "sell").length;
 
   // ── 차트 탭 (신고가 화면과 같은 구성 — 공용 HoldingChart) ──
   const [currentTab, setCurrentTab] = useState<CurrentTab>("list");
@@ -543,10 +639,10 @@ export function MomentumClient() {
   const [chartsError, setChartsError] = useState<string | null>(null);
   // 차트 기간(개월) — 백엔드 config.HOLDING_CHART_MONTHS 가 단일 소스. 응답에서 받아 문구에 쓴다.
   const [chartMonths, setChartMonths] = useState<number | null>(null);
-  // 차트를 그릴 대상 — 선정분(1~N)만. 차순위·예상 전용·이미 매도된 종목은 뺀다.
+  // 차트를 그릴 대상 — 이미 나간 종목과 빈 슬롯은 뺀다. 표와 같은 순서로 그린다.
   const chartRows = useMemo(
-    () => pickRows.filter((row) => !row.is_reserve && !row.is_expected_only && !row.is_exited),
-    [pickRows],
+    () => planRows.filter((row) => row.plan !== "exited" && row.plan !== "empty"),
+    [planRows],
   );
   // 풀·구성이 바뀌면 이전 차트는 버린다.
   // 사용자가 고른 풀(draftPool)을 앞에 둔다 — `view` 는 저장 응답이 와야 바뀌므로,
@@ -561,7 +657,7 @@ export function MomentumClient() {
   }, [chartKey]);
   // 차트 탭을 열 때만 받는다 — 선정 종목 수만큼 일봉을 실어 오므로 목록 탭에서는 낭비다.
   useEffect(() => {
-    if (currentTab !== "chart" || !view?.picks || charts || chartsLoading || chartsError) return;
+    if (currentTab !== "chart" || !view || !positions || charts || chartsLoading || chartsError) return;
     // 풀을 막 바꾼 직후에는 `view` 가 아직 이전 풀 것이다 — 그 목록으로 차트를 받으면
     // 다른 풀의 종목이 뜬다. 저장 응답이 와서 두 값이 맞을 때까지 기다린다.
     if (saving || picking || view.settings.pool !== draftPool) return;
@@ -607,287 +703,231 @@ export function MomentumClient() {
     );
   }, [draftAdrFloor, draftMaRule, draftPool, view]);
 
-  const monthlyLabels = view?.picks?.monthly_return_labels ?? [];
-  // 선정 결과 풀의 국가 — 마켓·시가총액 컬럼 표시와 티커 표기(ASX:)를 정한다.
-  const picksCountry = view?.picks?.country ?? "";
-  const pickColumns = useMemo<ColDef<PickRow>[]>(() => {
-    return [
+  const fillDay = positions?.next_session ?? "다음 거래일";
+  const country = positions?.country ?? "";
+
+  /** 티커 셀 — 호주는 `ASX:` 접두사를 붙여 다른 화면과 같게 보여준다. */
+  const renderTicker = useCallback(
+    (value: string | null | undefined) => {
+      const raw = String(value ?? "").trim();
+      if (!raw) return <span>-</span>;
+      return <TickerDetailLink ticker={country === "au" && !raw.startsWith("ASX:") ? `ASX:${raw}` : raw} />;
+    },
+    [country],
+  );
+
+  // 보유 표 — 신고가와 같은 구성(공용 빌더). 모멘텀 고유는 이평선 이격 둘이다.
+  const holdingColumns = useMemo<ColDef<PlanRow>[]>(
+    () => [
+      slotStatusColumn<PlanRow>({ live: Boolean(positions?.live) }),
+      marketCapRankColumn<PlanRow>("market_cap_rank", !hasMarketCap),
       {
-        headerName: "순위",
-        field: "rank",
-        headerTooltip:
-          "선정 1~N 은 판정일 종가 이격 순(확정된 편입 순서). 그 아래(차순위·예상)는 현재 이격 순 — " +
-          "다음 교체에 무엇이 올라오는지 보기 위함. 매도예정 = 자격 상실로 다음 시가 매도, 매도 = 주중에 이미 매도됨",
-        width: 68,
-        type: "numericColumn",
-        cellDataType: "text",
-        cellRenderer: (p: { value?: number | null; data?: PickRow }) => {
-          if (p.data?.is_exited) return <span style={{ color: "var(--text-muted)" }}>매도</span>;
-          if (p.data?.is_exit_pending) return <span style={{ color: "#d62828", fontWeight: 700 }}>매도예정</span>;
-          return <span>{p.value == null ? "-" : String(p.value)}</span>;
-        },
+        field: "ticker",
+        headerName: "티커",
+        width: 108,
+        cellRenderer: (p: { value?: string | null }) => renderTicker(p.value),
       },
       {
-        headerName: "연속",
-        field: "streak_weeks",
-        headerTooltip:
-          "이번 포트폴리오까지 몇 주 연속 편입됐는지 (신규 = 이번 주 첫 편입). " +
-          "화살표 — →유지/→신규(초록)는 다음 주 예상, 확정은 교체일 직전 판정일 종가. " +
-          "빨강은 빠지는 종목이다: →교체예정은 다음 주 교체에서 빠질 예상, " +
-          "→매도예정은 ADR 게이트 확정 후 다음 시가 매도, →매도(굵게)는 주중에 이미 매도된 것. " +
-          "(이탈·ADR)은 주중에 이평선을 이탈했지만 시장 ADR이 하한 이상이라 주말 판정까지 보유 중이라는 표시다.",
-        width: 148,
-        cellDataType: "text",
-        cellRenderer: (p: { value?: number | null; data?: PickRow }) => {
-          const streak =
-            p.value == null ? "-" : p.value <= 1 ? "신규" : `${p.value}주`;
-          const isNewPick = p.value != null && p.value <= 1 && !p.data?.is_reserve;
-          const held = Boolean(p.data && !p.data.is_reserve && !p.data.is_expected_only);
-          // 빠지는 종목은 빨강으로 쓰고 원인을 문구로 가른다 — 다음 주 교체에서 빠지면
-          // 교체예정, ADR 게이트가 확정됐지만 미체결이면 매도예정, 이미 매도됐으면 굵게.
-          let next: React.ReactNode = null;
-          if (p.data?.is_exited) {
-            next = <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}> →매도</span>;
-          } else if (p.data?.is_exit_pending) {
-            next = <span style={{ color: "var(--up-color, #d64545)" }}> →매도예정</span>;
-          } else if (p.data?.next_week_expected) {
-            // (이탈·ADR) — 주중에 이평선을 이탈했지만 ADR이 하한 이상이라 판 대신 보유 중.
-            const dip = held && p.data?.held_ma_dip;
-            next = (
-              <span
-                style={{ color: "#2f9e44", fontWeight: 700 }}
-                title={dip ? "주중에 이평선을 이탈했지만 시장 ADR이 하한 이상이라 주말 판정까지 보유합니다." : undefined}
-              >
-                {" "}→{held ? (dip ? "유지(이탈·ADR)" : "유지") : "신규"}
-              </span>
-            );
-          } else if (held) {
-            const dip = p.data?.held_ma_dip;
-            next = (
-              <span
-                style={{ color: "var(--up-color, #d64545)" }}
-                title={dip ? "주중에 이평선을 이탈했지만 시장 ADR이 하한 이상이라 주말 판정까지 보유합니다. 지금 기준으로는 다음 교체에서 빠집니다." : undefined}
-              >
-                {" "}→교체예정{dip ? "(이탈·ADR)" : ""}
-              </span>
-            );
-          }
-          return (
-            <span>
-              <span style={{ color: isNewPick ? "var(--up-color, #d64545)" : "inherit" }}>{streak}</span>
-              {next}
-            </span>
-          );
-        },
+        field: "name",
+        headerName: "종목명",
+        flex: 1,
+        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
+        cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
       },
+      stockMemoColumn<PlanRow>({
+        field: "memo",
+        editable: (row) => row?.plan !== "empty",
+        onSave: (row, memo) => void saveMemo(row.ticker, memo),
+      }),
+      industryColumn<PlanRow>({ hide: !hasIndustryData }),
       {
-        headerName: "수익률",
-        field: "entry_return_pct",
-        headerTooltip: "편입 후 수익률 — 연속 편입이 시작된 교체일 시가 대비 현재가. 보유 중인 종목만 표시.",
-        width: 92,
+        field: "change_pct",
+        headerName: "일간(%)",
+        width: 96,
         type: "numericColumn",
-        valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number)),
+        valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
         cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
       },
-      maExitGapColumn<PickRow>({
-        field: "current_short_pct",
-        maDays: view?.settings.short_ma_days,
-      }),
       {
-        headerName: "고점",
-        field: "high_drawdown_pct",
-        headerTooltip: "캐시 전 기간 최고가 대비 마지막 종가(%) — pools-rank 고점과 같은 규칙, 0 = 신고점",
-        width: 80,
-        type: "rightAligned",
-        // `/pools-rank` 고점 컬럼과 같은 공용 렌더러 — 0 이면 ⭐신고점.
-        cellRenderer: (p: { value?: number | null }) => renderHighDrawdownCell(p.value, 1),
+        field: "price",
+        headerName: "현재가",
+        width: 110,
+        type: "numericColumn",
+        headerTooltip: "이탈한 종목도 지금 시세다 — 판 뒤의 흐름을 청산가와 견줘 볼 수 있다.",
+        valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number, positions?.currency)),
       },
-      // 시총은 개별주에만 있는 값이라 업종과 판정이 다르다(`@/lib/pool-industry`).
-      marketCapRankColumn<PickRow>("market_cap_rank", !hasMarketCap),
+      tradeValueMultColumn<PlanRow>(),
+      ...slotTradeColumns<PlanRow>({ fillDay }),
+      // 이탈까지 남은 여유 — 둘 중 하나라도 0 이하가 되면 다음 거래일 시가에 판다.
+      maExitGapColumn<PlanRow>({ field: "short_gap_pct", maDays: view?.settings.short_ma_days }),
+      maExitGapColumn<PlanRow>({ field: "long_gap_pct", maDays: view?.settings.long_ma_days }),
+      highDrawdownColumn<PlanRow>("high_drawdown_pct"),
+    ],
+    [
+      fillDay,
+      hasIndustryData,
+      hasMarketCap,
+      positions?.live,
+      renderTicker,
+      saveMemo,
+      view?.settings.long_ma_days,
+      view?.settings.short_ma_days,
+    ],
+  );
+
+  // 진입 후보 표 — 자리가 나면 담을 순서. 상태는 「보유 중」과 「후보」 둘뿐이다.
+  const candidateColumns = useMemo<ColDef<CandidateRow>[]>(
+    () => [
       {
-        headerName: "티커",
+        headerName: "상태",
+        width: STATUS_COLUMN_WIDTH,
+        minWidth: STATUS_COLUMN_MIN_WIDTH,
+        cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+        valueGetter: (p) => (p.data?.is_held ? "보유 중" : "후보"),
+        cellRenderer: (p: { data?: CandidateRow }) =>
+          p.data?.is_held ? (
+            <span style={{ color: "var(--text-muted)" }}>보유 중</span>
+          ) : (
+            <strong style={{ color: "#2f9e44" }}>후보</strong>
+          ),
+      },
+      {
+        field: "rank",
+        headerName: "순위",
+        width: 68,
+        type: "numericColumn",
+        headerTooltip: "장기 이격률이 큰 순 — 자리가 나면 이 순서로 담는다.",
+      },
+      marketCapRankColumn<CandidateRow>("market_cap_rank", !hasMarketCap),
+      {
         field: "ticker",
-        // 한국 6자리 코드 + 상세 링크 아이콘이 잘리지 않는 폭.
-        width: 96,
-        // 호주 풀은 미국 동일 심볼과 구분되게 ASX: 접두를 붙인다 (pools-rank 와 동일).
-        cellRenderer: (p: { value: string | null | undefined }) => {
-          const raw = String(p.value ?? "-");
-          const display = picksCountry === "au" && raw !== "-" && !raw.startsWith("ASX:") ? `ASX:${raw}` : raw;
-          return <TickerDetailLink ticker={display} displayTicker={display} />;
-        },
+        headerName: "티커",
+        width: 108,
+        cellRenderer: (p: { value?: string | null }) => renderTicker(p.value),
       },
       {
-        headerName: "종목명",
         field: "name",
-        // 이 표에서 유일한 flex 컬럼 — 남는 폭을 종목명이 가져간다.
-        // 상한(maxWidth)을 두지 않아 넓은 화면에서 계속 늘어난다.
+        headerName: "종목명",
         flex: 1,
-        minWidth: 220,
-        // 종목명 셀 표준(`@/lib/name-highlight`) — 말줄임·레버리지 강조·추세 이탈 배지가 전 화면 공통이다.
-        // 이탈 판정은 `현재-단기/장기` 기준이다. 선정 당시가 아니라 지금 상태를 보여준다.
-        cellRenderer: (p: { value?: string | null; data?: PickRow }) =>
-          renderStockNameCell(p.value, {
-            trendBroken: isTrendBroken(p.data?.current_short_pct, p.data?.current_long_pct),
-          }),
+        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
+        cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
       },
-      // 종목 메모 — 순위·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
-      stockMemoColumn<PickRow>({
+      stockMemoColumn<CandidateRow>({
         field: "memo",
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
       }),
-      // 업종 데이터가 아예 없는 풀(ETF 모음 등)에서는 빈 컬럼을 숨긴다.
-      industryColumn<PickRow>({ hide: !hasIndustryData }),
+      industryColumn<CandidateRow>({ hide: !hasIndustryData }),
       {
+        field: "change_pct",
         headerName: "일간(%)",
-        field: "daily_change_pct",
-        headerTooltip: "실시간 일간 등락률 (실시간 실패 시 캐시 종가 기준)",
-        width: 88,
+        width: 96,
         type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value, 2),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
+        valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
+        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
       },
       {
-        headerName: "현재가",
         field: "price",
-        headerTooltip: "실시간 현재가 (실시간 실패 시 가격 캐시 최신 종가, 통화는 종목풀 기준)",
-        width: 100,
+        headerName: "현재가",
+        width: 110,
         type: "numericColumn",
-        valueFormatter: (p) => formatPrice(p.value, p.data?.currency),
+        valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number, positions?.currency)),
       },
-      // 표준 배치(일간(%) → 현재가 → 거래대금) — 순위·신고가 화면과 같은 공용 컬럼.
-      tradeValueMultColumn<PickRow>(),
-      // 시가총액 — 배치 B 가 메타 캐시에 적어 둔 값(개별주 풀만). 신고가 화면과 같은 소스·같은 표기.
-      ...(hasMarketCap
-        ? [
-          {
-            headerName: "시가총액",
-            field: "market_cap",
-            headerTooltip: "배치가 하루 한 번 적어 둔 시가총액 (순위·신고가 화면과 같은 값)",
-            width: 120,
-            type: "numericColumn",
-            valueFormatter: (p) => formatMarketCapWon(p.value),
-          } as ColDef<PickRow>,
-        ]
-        : []),
-      // 월별 수익률 — pools-rank 월별과 같은 계산(전월 말 종가 대비, 이번 달은 마지막
-      // 종가까지)의 최근 6개월. 라벨은 서버가 내려주고 헤더는 (%) 없이 표시한다.
-      ...monthlyLabels.map(
-        (label): ColDef<PickRow> => ({
-          headerName: label.replace("(%)", ""),
-          colId: label,
-          headerTooltip: "전월 말 종가 대비 수익률 (이번 달은 실시간 현재가까지) — pools-rank 월별과 같은 계산",
-          width: 92,
-          type: "numericColumn",
-          valueGetter: (p) => p.data?.monthly_returns?.[label] ?? null,
-          valueFormatter: (p) => formatSigned(p.value, 1),
-          cellStyle: (p) => ({ color: signColor(p.value) }),
-        }),
-      ),
-    ];
-    // 월별 라벨·국가·업종 유무가 선정 응답에 실려 온다 — 바뀌면(월 전환·풀 전환) 컬럼도 다시 만든다.
-  }, [hasIndustryData, monthlyLabels, picksCountry, saveMemo, view?.settings.short_ma_days]);
-
-  // 월간 표 — 연간과 같은 집계형(월/전략/벤치). 매매 내역은 주간 표가 담당한다.
-  // 표 헤더의 지수 이름 — 신고가·합성 화면과 같은 표기(값에 % 가 붙으므로 헤더엔 붙이지 않는다).
-  const benchmarkLabel = backtest?.benchmark_name ?? "벤치마크";
-
-  // ADR 컬럼 — 값이 하나도 없으면(레짐 시장 없는 풀) 컬럼을 숨긴다.
-  const hasAdr = useMemo(() => (backtest?.daily ?? []).some((row) => row.adr != null), [backtest]);
-  // 월간·연간의 최저 ADR — 일간 값에서 직접 구한다(집계 공용 함수는 수익률만 다룬다).
-  const adrMinByPrefix = useMemo(() => {
-    const min = new Map<string, number>();
-    for (const row of backtest?.daily ?? []) {
-      if (row.adr == null) continue;
-      for (const prefix of [row.date.slice(0, 7), row.date.slice(0, 4)]) {
-        const known = min.get(prefix);
-        if (known == null || row.adr < known) min.set(prefix, row.adr);
-      }
-    }
-    return min;
-  }, [backtest]);
-  // 주간의 최저 ADR — 월간·연간은 날짜 접두사로 묶이지만 주는 접두사가 없어 **구간**으로 나눈다
-  // (직전 기준일 다음날 ~ 이번 기준일). 표는 최신순이라 여기서 오름차순으로 세워 훑는다.
-  const adrMinByWeekEnd = useMemo(() => {
-    const min = new Map<string, number>();
-    const weekEnds = (backtest?.weekly ?? []).map((row) => row.week_end).sort();
-    if (weekEnds.length === 0) return min;
-    const days = [...(backtest?.daily ?? [])].sort((a, b) => a.date.localeCompare(b.date));
-    let index = 0;
-    for (const row of days) {
-      if (row.adr == null) continue;
-      while (index < weekEnds.length && row.date > weekEnds[index]) index += 1;
-      if (index >= weekEnds.length) break;
-      const known = min.get(weekEnds[index]);
-      if (known == null || row.adr < known) min.set(weekEnds[index], row.adr);
-    }
-    return min;
-  }, [backtest]);
-
-  /** ADR 컬럼 — 정의는 공용(@/lib/grid-cells), 여기서는 숨김 여부만 바인딩한다. */
-  const adrColumn = useCallback(
-    <T,>(headerName: string, getter: (row: T) => number | null | undefined, headerTooltip: string): ColDef<T> =>
-      sharedAdrColumn<T>({ headerName, headerTooltip, hide: !hasAdr, getter }),
-    [hasAdr],
+      tradeValueMultColumn<CandidateRow>(),
+      maExitGapColumn<CandidateRow>({ field: "short_gap_pct", maDays: view?.settings.short_ma_days }),
+      maExitGapColumn<CandidateRow>({ field: "long_gap_pct", maDays: view?.settings.long_ma_days }),
+      highDrawdownColumn<CandidateRow>("high_drawdown_pct"),
+      {
+        field: "market_cap",
+        headerName: "시가총액",
+        width: 128,
+        hide: !hasMarketCap,
+        type: "numericColumn",
+        valueFormatter: (p) => (p.value == null ? "-" : formatMarketCapWon(p.value as number)),
+      },
+    ],
+    [
+      hasIndustryData,
+      hasMarketCap,
+      renderTicker,
+      saveMemo,
+      view?.settings.long_ma_days,
+      view?.settings.short_ma_days,
+    ],
   );
 
-  const backtestColumns = useMemo<ColDef<BacktestMonthRow>[]>(() => {
-    if (!backtest) return [];
-    const columns: ColDef<BacktestMonthRow>[] = [
-      {
-        headerName: "월",
-        field: "month",
-        width: 148,
-        cellStyle: () => ({ fontWeight: 700 }),
-      },
-      {
-        headerName: "전략",
-        field: "strategy_pct",
-        flex: 1,
-        minWidth: 110,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value),
-        cellStyle: (p) => ({ color: signColor(p.value), fontWeight: 700 }),
-      },
-      {
-        headerName: benchmarkLabel,
-        headerTooltip: `벤치마크 ${backtest.benchmark_name}(${backtest.benchmark_ticker})`,
-        field: "benchmark_pct",
-        flex: 1,
-        minWidth: 110,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
-      },
-    ];
-    columns.push(excessColumn<BacktestMonthRow>());
-    columns.push(adrColumn<BacktestMonthRow>("최저 ADR", (row) => adrMinByPrefix.get(row.month) ?? null, "그 달의 시장 ADR 최저값"));
-    return columns;
-  }, [backtest, adrColumn, adrMinByPrefix]);
+  // 표 헤더의 지수 이름 — 신고가·합성 화면과 같은 표기(값에 % 가 붙으므로 헤더엔 붙이지 않는다).
+  const benchmarkLabel = backtest?.benchmark_name ?? "벤치마크";
+  // ADR 컬럼 — 값이 하나도 없으면(레짐 시장 없는 풀) 컬럼을 숨긴다.
+  const hasAdr = useMemo(() => (backtest?.daily ?? []).some((row) => row.adr != null), [backtest]);
 
-  const dailyColumns = useMemo<ColDef<BacktestDayRow>[]>(() => {
-    if (!backtest) return [];
-    const pctColumn = (headerName: string, field: keyof BacktestDayRow, headerTooltip?: string): ColDef<BacktestDayRow> => ({
-      headerName,
-      field,
-      headerTooltip,
-      flex: 1,
-      minWidth: 110,
-      type: "numericColumn",
-      valueFormatter: (p) => formatSigned(p.value),
-      cellStyle: (p) => ({ color: signColor(p.value), fontWeight: field === "strategy_pct" ? 700 : 400 }),
-    });
-    const columns: ColDef<BacktestDayRow>[] = [
-      { headerName: "날짜", field: "date", width: 148, cellStyle: () => ({ fontWeight: 700 }) },
-      pctColumn("전략", "strategy_pct", "보유 종목 동일가중 일간 변동률 (교체일에는 리밸런싱 비용 반영)"),
-      pctColumn(benchmarkLabel, "benchmark_pct", `${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
-    ];
-    columns.push(excessColumn<BacktestDayRow>());
-    columns.push(adrColumn<BacktestDayRow>("ADR", (row) => row.adr, "그날의 시장 ADR(20일 등락비율)"));
-    return columns;
-  }, [backtest, adrColumn]);
-
-  const tradeColumns = useMemo<ColDef<BacktestTradeRow>[]>(
+  // 기간 표(연간·월간·주간·일간) — 신고가와 **같은 공용 계산**(`toPeriodRows`)을 쓴다.
+  // 일별 누적 곡선 하나에서 잘라 내므로 기간이 달라도 합계가 어긋나지 않는다.
+  const periodColumns = useMemo<ColDef<PeriodRow>[]>(
     () => [
+      {
+        field: "period",
+        headerName:
+          viewMode === "yearly" ? "연도" : viewMode === "monthly" ? "월" : viewMode === "weekly" ? "주" : "일자",
+        width: 148,
+        valueFormatter: (p) =>
+          viewMode === "weekly" || viewMode === "daily"
+            ? formatDateWithWeekday(String(p.value ?? ""))
+            : String(p.value ?? ""),
+      },
+      {
+        field: "strategy_pct",
+        headerName: "전략",
+        flex: 1,
+        minWidth: 110,
+        type: "numericColumn",
+        valueFormatter: (p) => formatSignedPct(p.value as number, 2),
+        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
+      },
+      {
+        field: "benchmark_pct",
+        headerName: benchmarkLabel,
+        flex: 1,
+        minWidth: 110,
+        type: "numericColumn",
+        valueFormatter: (p) => formatSignedPct(p.value as number, 2),
+        cellStyle: (p) => ({ color: signColor(p.value as number) }),
+      },
+      excessColumn<PeriodRow>(),
+      // ADR — 일간=당일, 주간=판정일(주 마지막 거래일), 월간·연간=기간 최저. 신고가 표와 같다.
+      viewMode === "daily"
+        ? sharedAdrColumn<PeriodRow>({
+            headerName: "ADR",
+            headerTooltip: "그날의 시장 ADR(20일 등락비율)",
+            hide: !hasAdr,
+            getter: (row) => row.adr,
+          })
+        : viewMode === "weekly"
+          ? sharedAdrColumn<PeriodRow>({
+              headerName: "판정일 ADR",
+              headerTooltip: "그 주 마지막 거래일의 시장 ADR — 다음 거래일 진입 게이트를 결정한 값",
+              hide: !hasAdr,
+              getter: (row) => row.adr,
+            })
+          : sharedAdrColumn<PeriodRow>({
+              headerName: "최저 ADR",
+              headerTooltip: `${viewMode === "yearly" ? "그 해" : "그 달"}의 시장 ADR 최저값`,
+              hide: !hasAdr,
+              getter: (row) => row.adr_min,
+            }),
+    ],
+    [viewMode, benchmarkLabel, hasAdr],
+  );
+
+  const periodRows = useMemo<PeriodRow[]>(() => {
+    if (!backtest) return [];
+    if (viewMode === "weekly") return toPeriodRows(backtest.daily, weekKeyOf, true);
+    const keyLength = viewMode === "yearly" ? 4 : viewMode === "monthly" ? 7 : viewMode === "daily" ? 10 : 0;
+    return keyLength ? toPeriodRows(backtest.daily, (date) => date.slice(0, keyLength)) : [];
+  }, [backtest, viewMode]);
+
+  const tradeColumns = useMemo<ColDef<BacktestTradeRow>[]>(() => {
+    const price = (value: unknown) => formatPrice(value as number, positions?.currency);
+    return [
       { headerName: "티커", field: "ticker", width: 96 },
       {
         headerName: "종목명",
@@ -896,178 +936,23 @@ export function MomentumClient() {
         minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
         cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
       },
+      industryColumn<BacktestTradeRow>({ hide: !hasIndustryData }),
       { headerName: "편입일", field: "entry_date", width: 116 },
-      {
-        headerName: "매수가",
-        field: "entry_price",
-        width: 110,
-        type: "numericColumn",
-        valueFormatter: (p) => formatPrice(p.value as number, view?.picks?.currency),
-      },
-      {
-        headerName: "청산일",
-        field: "exit_date",
-        width: 116,
-        valueFormatter: (p) => (p.value ? String(p.value) : "-"),
-      },
-      {
-        headerName: "청산가",
-        field: "exit_price",
-        headerTooltip: "보유중 행은 마지막 종가",
-        width: 110,
-        type: "numericColumn",
-        valueFormatter: (p) => formatPrice(p.value as number, view?.picks?.currency),
-      },
+      { headerName: "매수가", field: "entry_price", width: 110, type: "numericColumn", valueFormatter: (p) => price(p.value) },
+      { headerName: "청산일", field: "exit_date", width: 116 },
+      { headerName: "청산가", field: "exit_price", width: 110, type: "numericColumn", valueFormatter: (p) => price(p.value) },
       {
         headerName: "수익률(%)",
         field: "return_pct",
-        width: 110,
+        width: 116,
         type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value),
-        cellStyle: (p) => ({ color: signColor(p.value), fontWeight: 700 }),
+        valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
+        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
       },
       { headerName: "보유일", field: "days", width: 84, type: "numericColumn" },
       { headerName: "사유", field: "reason", width: 110 },
-    ],
-    [view?.picks?.currency],
-  );
-
-  // 월간·연간은 **달력 기준**으로 다시 만든다(신고가·합성 화면과 같은 경계).
-  const monthRows = useMemo<BacktestMonthRow[]>(
-    () => (backtest ? toCalendarMonthRows(backtest.daily) : []),
-    [backtest],
-  );
-  const yearRows = useMemo<BacktestYearRow[]>(() => toYearRows(monthRows), [monthRows]);
-
-
-  // 주간 표 — 매매 일지. 주 수익률 + 그 주에 체결된 편입·편출과 주말 보유 수·교체율.
-  const weeklyColumns = useMemo<ColDef<BacktestWeekRow>[]>(() => {
-    if (!backtest) return [];
-    const pctColumn = (headerName: string, field: keyof BacktestWeekRow, headerTooltip?: string): ColDef<BacktestWeekRow> => ({
-      headerName,
-      field,
-      headerTooltip,
-      width: 120,
-      type: "numericColumn",
-      valueFormatter: (p) => formatSigned(p.value as number | null),
-      cellStyle: (p) => ({ color: signColor(p.value as number | null), fontWeight: field === "strategy_pct" ? 700 : 400 }),
-    });
-    const columns: ColDef<BacktestWeekRow>[] = [
-      {
-        headerName: "기준일",
-        field: "week_end",
-        headerTooltip: "그 주 마지막 거래일 — 수익률은 그 주 성과, 편입·편출은 그 주에 체결된 매매",
-        width: 148,
-        valueFormatter: (p) => formatDateWithWeekday(String(p.value ?? "")),
-        cellStyle: () => ({ fontWeight: 700 }),
-      },
-      pctColumn("전략", "strategy_pct", "그 주 보유 포트폴리오의 수익률 (교체 비용 반영)"),
-      pctColumn(benchmarkLabel, "benchmark_pct", `${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
-      adrColumn<BacktestWeekRow>("판정일 ADR", (row) => row.adr, "기준일(판정일) 종가 기준 시장 ADR — 다음 주 게이트를 결정한 값"),
-      adrColumn<BacktestWeekRow>(
-        "최저 ADR",
-        (row) => adrMinByWeekEnd.get(row.week_end) ?? null,
-        "그 주의 시장 ADR 최저값 — 주중 게이트가 걸렸는지 본다",
-      ),
     ];
-    columns.push(
-      {
-        headerName: "종목 수",
-        field: "holdings_count",
-        headerTooltip: "교체 직후 → 주말 종목 수. 화살표가 있으면 주중 ADR 게이트 매도로 줄어든 것(주중 매도 컬럼 참고).",
-        width: 84,
-        type: "numericColumn",
-        cellDataType: "text",
-        valueFormatter: (p) => {
-          const start = p.data?.holdings_start;
-          const end = p.value as number | null;
-          if (end == null) return "-";
-          return start != null && start !== end ? `${start} → ${end}` : String(end);
-        },
-      },
-      {
-        headerName: "교체율(%)",
-        field: "turnover_pct",
-        headerTooltip: "이 교체에서 편입된 슬롯 비중 (편입 수 ÷ 종목 수 설정)",
-        width: 84,
-        type: "numericColumn",
-        valueFormatter: (p) => (p.value == null ? "-" : formatNumber(p.value)),
-      },
-      {
-        headerName: "편입",
-        field: "added",
-        flex: 1,
-        minWidth: 200,
-        wrapText: true,
-        autoHeight: true,
-        cellClass: "momentumWrapCell",
-        valueFormatter: (p) => (p.value?.length ? p.value.join(", ") : "-"),
-        cellStyle: () => ({ color: "var(--up-color, #d64545)" }),
-      },
-      {
-        headerName: "편출",
-        field: "removed",
-        flex: 1,
-        minWidth: 200,
-        wrapText: true,
-        autoHeight: true,
-        cellClass: "momentumWrapCell",
-        valueFormatter: (p) => (p.value?.length ? p.value.join(", ") : "-"),
-        cellStyle: () => ({ color: "var(--down-color, #2f6fd0)" }),
-      },
-      {
-        headerName: "주중 매도",
-        field: "exited",
-        headerTooltip: "주중에 ADR 게이트로 전량 매도된 종목 (교체 편출과 별개, 판 슬롯은 다음 교체까지 현금)",
-        flex: 1,
-        minWidth: 200,
-        wrapText: true,
-        autoHeight: true,
-        cellClass: "momentumWrapCell",
-        valueFormatter: (p) => (p.value?.length ? p.value.join(", ") : "-"),
-        cellStyle: () => ({ color: "var(--down-color, #2f6fd0)", opacity: 0.8 }),
-      },
-    );
-    columns.push(excessColumn<BacktestWeekRow>());
-    return columns;
-  }, [backtest, adrColumn, adrMinByWeekEnd]);
-
-  const yearColumns = useMemo<ColDef<BacktestYearRow>[]>(() => {
-    if (!backtest) return [];
-    // 부분 기간은 /compare 와 같은 규칙으로 값 뒤에 `*` 를 붙인다.
-    const pctColumn = (
-      headerName: string,
-      field: "strategy_pct" | "benchmark_pct",
-      partialField: "strategy_partial" | "benchmark_partial",
-      headerTooltip?: string,
-    ): ColDef<BacktestYearRow> => ({
-      headerName,
-      field,
-      headerTooltip,
-      flex: 1,
-      minWidth: 110,
-      type: "numericColumn",
-      valueFormatter: (p) =>
-        p.value == null ? "-" : `${formatSigned(p.value)}${p.data?.[partialField] ? "*" : ""}`,
-      cellStyle: (p) => ({ color: signColor(p.value), fontWeight: field === "strategy_pct" ? 700 : 400 }),
-      tooltipValueGetter: (p) =>
-        p.data?.[partialField] ? "12개월이 다 차지 않은 해 — 있는 달만 합성한 부분 기간" : undefined,
-    });
-
-    const columns: ColDef<BacktestYearRow>[] = [
-      { headerName: "연도", field: "year", width: 148, cellStyle: () => ({ fontWeight: 700 }) },
-      pctColumn("전략", "strategy_pct", "strategy_partial"),
-      pctColumn(
-        benchmarkLabel,
-        "benchmark_pct",
-        "benchmark_partial",
-        `${backtest.benchmark_name}(${backtest.benchmark_ticker})`,
-      ),
-    ];
-    columns.push(excessColumn<BacktestYearRow>());
-    columns.push(adrColumn<BacktestYearRow>("최저 ADR", (row) => adrMinByPrefix.get(row.year) ?? null, "그 해의 시장 ADR 최저값"));
-    return columns;
-  }, [backtest, adrColumn, adrMinByPrefix]);
+  }, [hasIndustryData, positions?.currency]);
 
   if (loading && !view) {
     return (
@@ -1092,10 +977,6 @@ export function MomentumClient() {
       </PageFrame>
     );
   }
-
-  // 보유 수 — 판정일 선정 − 주중 매도(체결 완료).
-  const selectedCount = view.picks?.rows.filter((row) => !row.is_reserve && !row.is_exited).length ?? 0;
-  const reserveCount = view.picks?.rows.filter((row) => row.is_reserve).length ?? 0;
 
   return (
     <PageFrame title="모멘텀 전략" fullWidth>
@@ -1186,39 +1067,27 @@ export function MomentumClient() {
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
                 <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>운용 현황</span>
-                {view.picks ? (
+                {positions ? (
                   <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>
-                    <b style={{ color: "inherit" }}>{formatDateWithWeekday(view.picks.portfolio_week)} 포트폴리오</b> ·
-                    체결 {view.picks.rebalance_date} (판정 {view.picks.signal_date}) · {view.picks.universe_count} →{" "}
-                    {view.picks.candidate_count} → {selectedCount}
-                    {reserveCount > 0 ? ` (+${reserveCount})` : ""}
-                    {view.picks.adr_gate ? (
-                      view.picks.adr_gate.blocked ? (
+                    <b style={{ color: "inherit" }}>
+                      보유 {heldCount} / {positions.top_n}
+                    </b>{" "}
+                    · 기준 {formatDateWithWeekday(positions.as_of)}
+                    {planRows.some((row) => row.plan === "sell")
+                      ? ` · ${fillDay} 매도 ${planRows.filter((row) => row.plan === "sell").length}`
+                      : ""}
+                    {positions.planned_entries.length ? ` · ${fillDay} 매수 ${positions.planned_entries.length}` : ""}
+                    {positions.exited_today.length ? ` · 이탈 ${positions.exited_today.length}` : ""}
+                    {positions.adr_gate ? (
+                      positions.adr_gate.blocked ? (
                         <b style={{ color: "#d9480f" }}>
-                          {" "}· ADR 게이트 발동 — {view.picks.adr_gate.market} {view.picks.adr_gate.value ?? "-"} &lt;{" "}
-                          {view.picks.adr_gate.floor}, 이번 주 전량 현금
-                        </b>
-                      ) : view.picks.adr_gate.intraweek.blocked ? (
-                        // 주간 판정은 통과했는데 그 뒤 ADR 이 무너진 상태 — 판정일 값만 보여 주면
-                        // 왜 전량 매도 예정인지 화면에서 알 수가 없다. 최신 값을 함께 세운다.
-                        <b
-                          style={{ color: "#d9480f" }}
-                          title={`판정일 ${view.picks.signal_date} 에는 하한을 넘어 선정이 실행됐지만, 그 뒤 ${view.picks.adr_gate.intraweek.date} 에 하한 아래로 내려갔습니다.`}
-                        >
-                          {" "}· ADR {view.picks.adr_gate.market} 판정일 {view.picks.adr_gate.value ?? "-"} → 주중 게이트 발동{" "}
-                          {view.picks.adr_gate.intraweek.value ?? "-"} &lt; {view.picks.adr_gate.floor}, 다음 거래일 시가 전량 매도
+                          {" "}· ADR 게이트 발동 — {positions.adr_gate.market} {positions.adr_gate.value ?? "-"} &lt;{" "}
+                          {positions.adr_gate.floor}, 오늘 신규 진입 없음
                         </b>
                       ) : (
-                        // 두 값의 시점이 다르다 — 앞은 이번 주를 정한 판정일, 뒤는 마지막 거래일.
-                        // 라벨 없이 숫자만 두면 무엇을 보는 값인지 알 수가 없다.
-                        <span
-                          title={`판정일 ${view.picks.signal_date} 의 ADR 이 하한 이상이라 이번 주 선정이 실행됐습니다. 최신은 마지막 거래일 ${view.picks.adr_gate.intraweek.date} 값으로, 주중 게이트가 이 값을 봅니다.`}
-                        >
-                          {" "}· ADR {view.picks.adr_gate.market} 판정일 {view.picks.adr_gate.value ?? "-"}
-                          {view.picks.adr_gate.intraweek.value != null
-                            ? ` · 최신 ${view.picks.adr_gate.intraweek.value}`
-                            : ""}
-                          {" "}(하한 {view.picks.adr_gate.floor})
+                        <span title="하한 이상이면 빈 슬롯을 후보로 채운다. 미만이면 신규 진입만 멈추고 보유는 그대로 둔다.">
+                          {" "}· ADR {positions.adr_gate.market} {positions.adr_gate.value ?? "-"} (하한{" "}
+                          {positions.adr_gate.floor})
                         </span>
                       )
                     ) : null}
@@ -1226,7 +1095,7 @@ export function MomentumClient() {
                 ) : (
                   <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>
                     {pickFailed
-                      ? "선정 결과를 불러오지 못했습니다. 설정을 저장하거나 새로고침하세요."
+                      ? "운용 현황을 불러오지 못했습니다. 설정을 저장하거나 새로고침하세요."
                       : "계산 중…"}
                   </span>
                 )}
@@ -1240,49 +1109,51 @@ export function MomentumClient() {
               label="운용 현황 보기"
               style={{ marginBottom: 12 }}
             />
-            {picking ? <AppLoadingProgress title="선정 계산 중..." progress={pickProgress} /> : null}
-            {view.picks && !picking && currentTab === "list" ? (
-              // autoHeight — 그리드가 행 수만큼만 높이를 차지해 하단 낭비가 없다.
-              <AppAgGrid<PickRow>
-                rowData={pickRows}
-                columnDefs={pickColumns}
-                theme={gridTheme}
-                minHeight={0}
-                height="auto"
-                gridOptions={{ domLayout: "autoHeight" }}
-                getRowClass={(p) => {
-                  // 추세 이탈은 종목명 뒤 ❗ 와 같은 조건으로 행을 연한 회색으로 눌러 둔다.
-                  const classes: string[] = [];
-                  if (p.data?.is_reserve) classes.push("momentumReserveRow");
-                  // 주중 매도 예정 — 판정만 끝나고 체결 전 (백테스트 예정 행과 같은 스타일).
-                  if (p.data?.is_exit_pending) classes.push("momentumPendingRow");
-                  // 주중 매도 완료 — 더는 보유가 아니다.
-                  if (p.data?.is_exited) classes.push("appTrendBrokenRow");
-                  if (isTrendBroken(p.data?.current_short_pct, p.data?.current_long_pct)) {
-                    classes.push("appTrendBrokenRow");
-                  }
-                  return classes.join(" ");
-                }}
-                getRowId={(p) => p.data.ticker}
-              />
+            {picking ? <AppLoadingProgress title="운용 현황 계산 중..." progress={pickProgress} /> : null}
+            {positions && !picking && currentTab === "list" ? (
+              <>
+                <div style={{ ...hintStyle, fontWeight: 700, margin: "4px 0 6px" }}>보유 종목 ({heldCount}개)</div>
+                {/* autoHeight — 그리드가 행 수만큼만 높이를 차지해 하단 낭비가 없다. */}
+                <AppAgGrid<PlanRow>
+                  rowData={planRows.map(withQuote)}
+                  columnDefs={holdingColumns}
+                  theme={gridTheme}
+                  minHeight={0}
+                  height="auto"
+                  getRowClass={(p) => (p.data?.plan === "empty" ? "appEmptySlotRow" : "")}
+                  gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                />
+                <div style={{ ...hintStyle, fontWeight: 700, margin: "16px 0 6px" }}>
+                  진입 후보 ({candidateRows.length}개)
+                </div>
+                <AppAgGrid<CandidateRow>
+                  rowData={candidateRows}
+                  columnDefs={candidateColumns}
+                  theme={gridTheme}
+                  minHeight={0}
+                  height="auto"
+                  // 실계좌 보유 종목은 행 배경 녹색 — 시장 화면과 같은 표준.
+                  getRowClass={(p) => (p.data?.account_held ? "appHeldRow" : "")}
+                  gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                />
+              </>
             ) : null}
-            {view.picks && !picking && currentTab === "chart" ? (
+            {positions && !picking && currentTab === "chart" ? (
               <StrategyHoldingCharts
                 charts={charts}
                 loading={chartsLoading || saving || picking}
                 error={chartsError}
-                emptyMessage="선정된 종목이 없습니다."
-                hint="장기선 위 & 단기선 위(자격)를 잃으면 편출되고, 편입이 시작된 교체일에 Buy 화살표가 표시됩니다."
+                emptyMessage="보유 중인 종목이 없습니다."
+                hint="장기선 위 & 단기선 위(자격)를 잃으면 다음 거래일 시가에 팔고, 진입일에 Buy 화살표가 표시됩니다."
                 months={chartMonths}
                 chartProps={(item) => {
                   const row = chartRows.find((candidate) => candidate.ticker === item.ticker);
                   return {
                     strategyLabel: "모멘텀",
-                    entryDate: row?.entry_date,
-                    returnPct: row?.entry_return_pct,
-                    // 아직 안 산 종목은 0주 — streak_weeks 는 '이번 주 선정 1주차'라 1 이 들어온다.
-                    days: row?.is_held ? row.streak_weeks : 0,
-                    daysUnit: "주",
+                    entryDate: row?.entry_date ?? undefined,
+                    returnPct: row?.return_pct,
+                    days: row?.days ?? 0,
+                    daysUnit: "일",
                   };
                 }}
               />
@@ -1329,7 +1200,7 @@ export function MomentumClient() {
                     sortino: backtest.strategy_sortino,
                   }}
                   benchmark={{
-                    label: `${backtest.benchmark_name}(${backtest.benchmark_ticker})`,
+                    label: backtest.benchmark_name,
                     totalPct: backtest.benchmark_total_pct,
                     cagrPct: backtest.benchmark_cagr_pct,
                     mddPct: backtest.benchmark_mdd_pct,
@@ -1352,59 +1223,18 @@ export function MomentumClient() {
                     minHeight={0}
                     height="auto"
                     gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
-                    getRowClass={(p) => (p.data?.exit_date ? "" : "momentumPendingRow")}
-                  />
-                ) : viewMode === "weekly" ? (
-                  <AppAgGrid<BacktestWeekRow>
-                    rowData={backtest.weekly}
-                    columnDefs={weeklyColumns}
-                    theme={gridTheme}
-                    minHeight={0}
-                    height="auto"
-                    gridOptions={{ domLayout: "autoHeight" }}
-                    getRowClass={(p) => (p.data?.is_pending ? "momentumPendingRow" : "")}
-                    getRowId={(p) => p.data.week_end}
-                  />
-                ) : viewMode === "daily" ? (
-                  // 월간·연간과 같이 autoHeight — 카드 안에서 스크롤하지 않고 브라우저 스크롤로 본다.
-                  <AppAgGrid<BacktestDayRow>
-                    rowData={backtest.daily}
-                    columnDefs={dailyColumns}
-                    theme={gridTheme}
-                    minHeight={0}
-                    height="auto"
-                    gridOptions={{ domLayout: "autoHeight" }}
-                    getRowId={(p) => p.data.date}
-                  />
-                ) : viewMode === "monthly" ? (
-                  <AppAgGrid<BacktestMonthRow>
-                    rowData={monthRows}
-                    columnDefs={backtestColumns}
-                    theme={gridTheme}
-                    minHeight={0}
-                    height="auto"
-                    gridOptions={{ domLayout: "autoHeight" }}
-                    getRowId={(p) => p.data.month}
                   />
                 ) : (
-                  <>
-                    <AppAgGrid<BacktestYearRow>
-                      rowData={yearRows}
-                      columnDefs={yearColumns}
-                      theme={gridTheme}
-                      minHeight={0}
-                      height="auto"
-                      gridOptions={{ domLayout: "autoHeight" }}
-                      getRowId={(p) => p.data.year}
-                    />
-                    {yearRows.some(
-                      (row) => row.strategy_partial || row.benchmark_partial,
-                    ) ? (
-                      <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>
-                        * 12개월이 다 차지 않은 해 — 있는 달만 합성한 부분 기간입니다.
-                      </span>
-                    ) : null}
-                  </>
+                  // 연간·월간·주간·일간은 같은 일별 곡선에서 잘라 낸다 — 기간이 달라도 합계가 맞는다.
+                  <AppAgGrid<PeriodRow>
+                    rowData={periodRows}
+                    columnDefs={periodColumns}
+                    theme={gridTheme}
+                    minHeight={0}
+                    height="auto"
+                    gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                    getRowId={(p) => p.data.period}
+                  />
                 )}
               </>
             ) : !backtesting ? (

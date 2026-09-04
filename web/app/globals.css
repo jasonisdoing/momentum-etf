@@ -3666,13 +3666,7 @@ a {
   font-weight: 700;
 }
 
-/* 모멘텀 전략 차순위 후보 행 — 선정과 구분되게 흐리게 */
-.ag-row.momentumReserveRow {
-  background: rgba(148, 163, 184, 0.08);
-  opacity: 0.75;
-}
-
-/* 모멘텀 전략 백테스트 예정 행 — 판정만 끝나고 체결 전인 달 */
+/* 보유중(청산 전) 체결 행 — 합성 화면의 체결 목록이 쓴다 */
 .ag-row.momentumPendingRow {
   background: rgba(11, 123, 220, 0.07);
   font-style: italic;

@@ -296,3 +296,103 @@ export function stockMemoColumn<T>(options: {
     },
   };
 }
+
+/** 고점 대비(%) — 캐시 전 기간 최고가 대비 마지막 종가. 0 이면 ⭐신고점. */
+export function highDrawdownColumn<T>(field: ColDefField<T>): ColDef<T> {
+  return {
+    field,
+    headerName: "고점",
+    headerTooltip: "최근 고점 대비 현재가(%) — pools-rank 고점과 같은 규칙, 0 = 신고점",
+    width: 80,
+    type: "rightAligned",
+    cellRenderer: (p: { value?: number | null }) => renderHighDrawdownCell(p.value, 1),
+  };
+}
+
+/**
+ * 슬롯 전략의 **상태** 컬럼 — 신고가·모멘텀이 같은 폭·같은 문구를 쓴다.
+ *
+ * 두 표(보유·후보)가 나란히 있어 폭이 다르면 어긋나 보인다. 장중 판정은 오늘 종가로
+ * 확정되기 전이라 `(예상)` 꼬리표를 붙인다.
+ */
+export const STATUS_COLUMN_WIDTH = 124;
+export const STATUS_COLUMN_MIN_WIDTH = 110;
+
+export type SlotPlan = "hold" | "sell" | "buy" | "exited" | "empty";
+
+export function slotStatusColumn<T extends { plan: SlotPlan; days: number | null; is_new: boolean; exit_reason: string | null }>(options: {
+  live: boolean;
+}): ColDef<T> {
+  const tag = options.live ? "(예상)" : "";
+  return {
+    headerName: "상태",
+    width: STATUS_COLUMN_WIDTH,
+    minWidth: STATUS_COLUMN_MIN_WIDTH,
+    cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+    valueGetter: (p) => p.data?.plan ?? "",
+    cellRenderer: (p: { data?: T }) => {
+      if (!p.data || p.data.plan === "empty") return null;
+      const reason = p.data.exit_reason ? ` (${p.data.exit_reason})` : "";
+      if (p.data.plan === "buy") return <strong style={{ color: "#d62828" }}>진입 예정{tag}</strong>;
+      if (p.data.plan === "sell") {
+        const label = `매도 예정${tag}${reason}`;
+        return (
+          <strong style={{ color: "#1971c2", whiteSpace: "nowrap" }} title={label}>
+            {label}
+          </strong>
+        );
+      }
+      if (p.data.plan === "exited") {
+        const label = `이탈${reason}`;
+        return (
+          <span style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }} title={label}>
+            {label}
+          </span>
+        );
+      }
+      return <span>{p.data.is_new ? "진입" : `${p.data.days}일`}</span>;
+    },
+  };
+}
+
+/** 편입일·매수가·청산가·수익률 — 보유 표의 공통 꼬리 컬럼(두 전략이 같다). */
+export function slotTradeColumns<T>(options: { fillDay: string }): ColDef<T>[] {
+  const price = (value: unknown) =>
+    value == null || !Number.isFinite(Number(value))
+      ? "-"
+      : Number(value).toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+  return [
+    {
+      field: "entry_date" as ColDefField<T>,
+      headerName: "편입일",
+      width: 116,
+      // 아직 안 산 종목은 편입일이 없다 — 다음 시가에 정해진다.
+      valueFormatter: (p) => (p.value ? String(p.value) : "-"),
+    },
+    {
+      field: "entry_price" as ColDefField<T>,
+      headerName: "매수가",
+      width: 110,
+      type: "numericColumn",
+      headerTooltip: `진입 예정 종목은 ${options.fillDay} 시가에 체결되므로 아직 값이 없다.`,
+      valueFormatter: (p) => price(p.value),
+    },
+    {
+      field: "exit_price" as ColDefField<T>,
+      headerName: "청산가",
+      width: 110,
+      type: "numericColumn",
+      headerTooltip: "오늘 이탈한 종목의 체결가. 아직 들고 있는 종목은 값이 없다.",
+      valueFormatter: (p) => price(p.value),
+    },
+    {
+      field: "return_pct" as ColDefField<T>,
+      headerName: "수익률",
+      width: 108,
+      type: "numericColumn",
+      headerTooltip: "아직 청산 전이라 매도 슬리피지는 빠져 있다.",
+      valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
+      cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
+    },
+  ];
+}
