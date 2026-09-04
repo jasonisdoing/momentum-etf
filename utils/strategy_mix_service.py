@@ -974,6 +974,15 @@ def _attach_account_targets(
         row["unaffordable"] = bool(
             target_qty == 0 and float(row.get("weight_pct") or 0) > 0 and not row.get("is_sell_all") and price_krw
         )
+        # **실제 가능한 비중** — 목표 주수 × 1주 값 ÷ 총자산. 계좌 금액과 단주 때문에 백테스트
+        # 비중에 못 미치는 만큼이 여기서 드러난다(DELL 목표 5.97% ↔ 실제 3.75% = 1주).
+        # 목표 비중(`weight_pct`)은 백테스트 값 그대로 둔다 — 덮어쓰면 전략이 원래 무엇을
+        # 원했는지가 사라져, 못 맞추고 있다는 사실 자체가 안 보인다.
+        row["actual_weight_pct"] = (
+            round(target_qty * price_krw / total_assets * 100.0, 4)
+            if target_qty is not None and price_krw and total_assets > 0
+            else None
+        )
     target_tickers = {row["ticker"] for row in holdings}
     sell_all: list[dict[str, Any]] = []
     for ticker, item in sorted(account["holdings"].items()):
@@ -1345,6 +1354,8 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
 
     # 비중 합계·슬리브 현금 — 고정 자산 축소가 끝난 뒤의 값이라야 실제 계좌와 맞는다.
     stock_pct = sum(row["weight_pct"] for row in holdings)
+    # 실제 가능한 주식 비중 — 단주로 못 채운 나머지는 전부 현금이다.
+    actual_stock_pct = sum(float(row.get("actual_weight_pct") or 0) for row in holdings)
     # 슬리브 현금 = 그 슬리브 몫에서 담긴 종목 비중을 뺀 나머지. 빈 슬롯 수로 세면
     # 흘러간 비중과 맞지 않는다(종목이 오르면 남는 현금은 그만큼 줄어든다).
     sleeve_cash = {key: max(shares[key] - sum(row[f"{key}_weight"] for row in holdings), 0.0) for key in keys}
@@ -1374,6 +1385,10 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         "summary": {
             "stock_pct": round(stock_pct, 2),
             "cash_pct": round(100 - stock_pct, 2),
+            # 계좌 금액·단주를 감안해 **실제로 도달할 수 있는** 비중. 목표(위)와의 차이가
+            # 곧 단주로 못 채워 현금으로 남는 몫이다.
+            "actual_stock_pct": round(actual_stock_pct, 2),
+            "actual_cash_pct": round(100 - actual_stock_pct, 2),
             # 총 현금 중 **두 전략에 아예 주지 않고 비워 둔 몫**. 나머지는 빈 슬롯에서 생긴다.
             "reserved_cash_pct": round(reserved_cash_share, 2),
             # 월초에 되돌릴 배분 — 화면이 "지금 몫"과 "목표 배분"을 함께 보여준다.
