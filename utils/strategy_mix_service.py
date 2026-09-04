@@ -988,6 +988,8 @@ def _attach_account_targets(
             if row.get("held_value") and total_assets > 0
             else 0.0
         )
+        # 주수를 정하기 전의 임시값(비중 기준). 아래에서 **목표 주수 × 1주 값**으로 덮어쓴다 —
+        # 화면에 보이는 목표 금액은 실제로 주문할 금액이어야 한다.
         row["target_amount"] = round(total_assets * row["weight_pct"] / 100.0, 2)
         price = row.get("price")
         if price and krw_rate > 0:
@@ -1026,6 +1028,9 @@ def _attach_account_targets(
             if target_qty is not None and price_krw and total_assets > 0
             else None
         )
+        # 목표 금액 = 목표 주수 × 1주 값 — 비중이 아니라 실제 주문 금액이다.
+        if target_qty is not None and price_krw:
+            row["target_amount"] = round(target_qty * price_krw, 2)
     target_tickers = {row["ticker"] for row in holdings}
     sell_all: list[dict[str, Any]] = []
     for ticker, item in sorted(account["holdings"].items()):

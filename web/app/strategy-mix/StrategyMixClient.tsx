@@ -63,10 +63,13 @@ const CURRENT_NOTES = [
       "이 비중은 백테스트가 정한 값 그대로이고, 화면이 다시 판정하거나 문턱을 두지 않습니다.",
   },
   {
-    title: "실제목표 (단주)",
+    title: "목표 주수",
     body:
-      "목표 주수 = 백테스트 주수 × 비율의 내림입니다. 비율은 계좌 슬리브 몫 ÷ 백테스트 슬리브 평가액이고, " +
-      "1주 값을 못 채운 나머지는 현금으로 둡니다. 그래서 실제목표는 목표비중보다 낮고, 계좌가 클수록 차이가 줄어듭니다. " +
+      "백테스트 주수 × 비율(계좌 슬리브 몫 ÷ 백테스트 슬리브 평가액)을 세 단계로 정수로 만듭니다. " +
+      "① 내림 — 목표를 넘겨 사지 않습니다. " +
+      "② 유지 — 보유가 딱 「내림+1」이면 그대로 둡니다. ③이 어제 얹어 준 결과인데 소수부가 시세 따라 뒤집혀서, " +
+      "매번 다시 세우면 어제 산 것을 오늘 팔라고 하기 때문입니다. 크게 벗어난 보유는 조정 지시가 그대로 납니다. " +
+      "③ 최대잉여법 — 남는 돈으로 부족분이 큰 종목부터 한 주씩 채우고, 못 사는 종목이 나오면 거기서 멈춥니다. " +
       "1주도 못 사는 종목은 목록에서 지우지 않고 「1주 못 삼」으로 표시합니다.",
   },
   {
@@ -82,13 +85,6 @@ const CURRENT_NOTES = [
     body:
       "슬리브 재조정은 현금 우선으로 이관합니다 — 종목은 그대로 두고 장부상 현금만 옮깁니다. " +
       "한 슬리브의 주식만으로 그 슬리브 몫을 넘을 때만 초과분 매도 지시가 나옵니다.",
-  },
-  {
-    title: "앞으로 바꿀 것",
-    body:
-      "① 내림으로 남는 현금을 최대잉여법으로 채웁니다 — 부족분(소수부)이 큰 종목부터 1주씩. " +
-      "② 목표 주수를 「내림」 또는 「내림+1」로 보고, 계좌 보유가 그 범위 안이면 그대로 둡니다. " +
-      "가격이 조금 움직였다고 사고팔라는 지시가 생기지 않게 하기 위해서이고, 범위를 크게 벗어난 보유는 그대로 조정 지시가 납니다.",
   },
 ];
 
@@ -698,7 +694,7 @@ export function StrategyMixClient() {
       amount:
         totalAsset == null
           ? null
-          : (totalAsset * positions.summary.cash_pct) / 100,
+          : (totalAsset * positions.summary.actual_cash_pct) / 100,
       shares: null,
     };
     // 목표 종목 행은 백엔드가 종목 단위로 합쳐 계산한 값을 그대로 쓴다.
@@ -916,29 +912,28 @@ export function StrategyMixClient() {
         : []),
       {
         field: "actual_weight_pct",
-        headerName: "실제목표",
-        headerTooltip:
-          "계좌 금액과 단주를 감안해 실제로 도달할 수 있는 비중 (목표 주수 × 1주 값 ÷ 총자산). 목표비중과의 차이가 1주 값을 못 채워 현금으로 남는 몫이다.",
+        headerName: "목표비중",
+        headerTooltip: `목표 주수 × 1주 값 ÷ 총자산 — 단주까지 반영한 실제 목표다. 백테스트 비중(${slotKeys
+          .map(slotLabel)
+          .join(" + ")} 슬리브 몫의 합)을 정수 주수로 맞춘 값이라 계좌가 작을수록 조금씩 낮다.`,
         width: 88,
         type: "numericColumn",
         valueFormatter: (p) =>
           p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`,
         cellStyle: { fontWeight: 600 },
       },
-      {
-        field: "weight_pct",
-        headerName: "목표비중",
-        headerTooltip: `백테스트가 정한 비중 (${slotKeys.map(slotLabel).join(" + ")} 슬리브 몫의 합). 계좌가 작으면 단주 때문에 여기에 못 미친다 — 실제 도달치는 왼쪽 '실제목표'.`,
-        width: 88,
-        type: "numericColumn",
-        valueFormatter: (p) =>
-          p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`,
-        cellStyle: { color: "var(--text-muted)" },
-      },
     ];
     // 계좌 총자산을 알 때만 매매 지시 컬럼을 붙인다 — 목표와 실제 보유의 차이가 주문 수량이다.
     if (totalAsset != null) {
       columns.push(
+        {
+          field: "amount",
+          headerName: "목표 금액",
+          headerTooltip: "목표 주수 × 1주 값 — 실제로 주문할 금액이다.",
+          width: 120,
+          type: "numericColumn",
+          valueFormatter: (p) => formatAmount(p.value as number),
+        },
         {
           field: "held_quantity",
           headerName: "수량",
@@ -1056,13 +1051,6 @@ export function StrategyMixClient() {
               .filter((text): text is string => Boolean(text));
             return bits.join(" · ");
           },
-        },
-        {
-          field: "amount",
-          headerName: "목표 금액",
-          width: 120,
-          type: "numericColumn",
-          valueFormatter: (p) => formatAmount(p.value as number),
         },
       );
     }
@@ -1674,7 +1662,7 @@ export function StrategyMixClient() {
                     }}
                   >
                     <span style={{ fontSize: "var(--fs-lg)", fontWeight: 800 }}>
-                      실제목표 주식 {positions.summary.actual_stock_pct.toFixed(1)}% · 현금{" "}
+                      목표 주식 {positions.summary.actual_stock_pct.toFixed(1)}% · 현금{" "}
                       {positions.summary.actual_cash_pct.toFixed(1)}%
                       {positions.account && totalAsset
                         ? // 고정 자산(IS)도 주식으로 센다 — 목표 주식%에 그 몫이 들어 있어
@@ -1688,8 +1676,8 @@ export function StrategyMixClient() {
                     </span>
                     {/* 백테스트가 정한 목표 — 단주로 못 채운 만큼 위의 '실제목표'와 벌어진다. */}
                     <span style={{ ...hintStyle }}>
-                      백테스트 목표 주식 {positions.summary.stock_pct.toFixed(1)}% · 현금{" "}
-                      {positions.summary.cash_pct.toFixed(1)}% — 차이는 1주 값을 못 채워 남는 현금입니다
+                      백테스트 비중 그대로면 주식 {positions.summary.stock_pct.toFixed(1)}% · 현금{" "}
+                      {positions.summary.cash_pct.toFixed(1)}% — 차이는 1주 값을 못 채워 남는 몫입니다
                     </span>
                     {/* 적용 계좌 — 목표 금액의 기준이 되는 실제 잔고. */}
                     {positions.account ? (
