@@ -333,7 +333,18 @@ def pool_of_market_key(market: str) -> str | None:
     return text[len(POOL_MARKET_PREFIX) :] if text.startswith(POOL_MARKET_PREFIX) else None
 
 
-def _pool_daily_counts(pool: str, since: str | None = None) -> tuple[int, dict[str, dict[str, int]]]:
+def _pool_display_name(pool: str) -> str:
+    """풀 표시 이름 — 종목풀 설정의 name. 없으면 풀 id 그대로(지어내지 않는다)."""
+    from utils.settings_loader import get_ticker_type_settings
+
+    try:
+        settings = get_ticker_type_settings(pool) or {}
+    except Exception:
+        settings = {}
+    return str(settings.get("name") or "").strip() or pool
+
+
+def _pool_daily_counts(pool: str, since: str | None = None) -> tuple[int, dict[str, dict[str, Any]]]:
     """가격 캐시에서 그 풀의 일별 상승/하락 종목수를 센다.
 
     전일 종가 대비로 판정한다 — 시장 4개(등락률·일봉)와 같은 기준이다.
@@ -370,7 +381,7 @@ def _pool_daily_counts(pool: str, since: str | None = None) -> tuple[int, dict[s
             return len(tickers), {}
         close_df = close_df.iloc[max(keep_from - 1, 0) :]
     change = close_df.pct_change()
-    counts: dict[str, dict[str, int]] = {}
+    counts: dict[str, dict[str, Any]] = {}
     for day, row in change.iterrows():
         valid = row.dropna()
         if valid.empty:
@@ -379,6 +390,10 @@ def _pool_daily_counts(pool: str, since: str | None = None) -> tuple[int, dict[s
             "advance": int((valid > 0).sum()),
             "decline": int((valid < 0).sum()),
             "counted": int(len(valid)),
+            # 동일가중 평균 등락률(%) — 풀 합성 지수(/market-trend)가 이 값을 누적해
+            # 지수 레벨을 만든다. 시총가중을 쓰지 않는 이유: 전략 배분이 동일가중이고
+            # 과거 시총 이력이 없어 재현이 안 된다.
+            "avg_move_pct": round(float(valid.mean()) * 100.0, 6),
         }
     return len(tickers), counts
 
@@ -448,6 +463,33 @@ def refresh_pool_breadth(pools: list[str] | None = None, *, full: bool = False) 
             "latest_date": target_date,
         }
     return summary
+
+
+def load_pool_index_series(pool: str) -> pd.Series:
+    """풀 동일가중 합성 지수 레벨(시작 100) — 적립된 일별 평균 등락률을 누적한다.
+
+    `/market-trend` 가 풀을 지수처럼 보여줄 때 쓴다. 지수 레벨을 따로 저장하지 않는
+    이유는 ADR 과 같다 — 하루치(평균 등락률)만 남기면 과거를 다시 받을 일이 없다.
+    ``avg_move_pct`` 가 없는 날(필드 추가 전 미백필 문서)은 건너뛴다 — 그날 포인트가
+    없는 것으로 두지, 0% 로 지어내지 않는다.
+    """
+    db = _require_db()
+    docs = list(
+        db[COLLECTION_NAME]
+        .find({"market": pool_market_key(pool)}, {"_id": 0, "date": 1, "avg_move_pct": 1})
+        .sort("date", 1)
+    )
+    level = 100.0
+    dates: list[pd.Timestamp] = []
+    levels: list[float] = []
+    for doc in docs:
+        move = doc.get("avg_move_pct")
+        if move is None:
+            continue
+        level *= 1.0 + float(move) / 100.0
+        dates.append(pd.Timestamp(str(doc["date"])))
+        levels.append(level)
+    return pd.Series(levels, index=dates, dtype=float)
 
 
 def refresh_market_breadth() -> dict[str, Any]:
@@ -614,10 +656,19 @@ def _count_level_streak(points: list[dict[str, Any]]) -> tuple[str | None, int]:
 
 
 def load_adr_for_index(yf_ticker: str, limit_days: int | None = None) -> dict[str, Any] | None:
-    """지수 티커에 대응하는 ADR. 집계 대상이 아닌 지수(다우·필라델피아 등)는 None."""
-    market = MARKET_BY_INDEX_TICKER.get(yf_ticker)
-    if not market:
-        return None
+    """지수 티커에 대응하는 ADR. 집계 대상이 아닌 지수(다우·필라델피아 등)는 None.
+
+    풀 합성 지수(`pool:<풀>`)는 티커가 곧 시장 키다 — 풀 ADR 이 이미 같은 키로 쌓인다.
+    """
+    pool = pool_of_market_key(yf_ticker)
+    if pool is not None:
+        market = yf_ticker
+        market_name = _pool_display_name(pool)
+    else:
+        market = MARKET_BY_INDEX_TICKER.get(yf_ticker)
+        if not market:
+            return None
+        market_name = MARKETS[market]["name"]
 
     points = load_adr_series(market, limit_days)
     if not points:
@@ -633,7 +684,7 @@ def load_adr_for_index(yf_ticker: str, limit_days: int | None = None) -> dict[st
     level, level_days = _count_level_streak(points)
     return {
         "market": market,
-        "market_name": MARKETS[market]["name"],
+        "market_name": market_name,
         "universe_size": int(latest_doc.get("universe_size") or 0),
         "window_days": MARKET_ADR_WINDOW_DAYS,
         "overheated": MARKET_ADR_OVERHEATED,
