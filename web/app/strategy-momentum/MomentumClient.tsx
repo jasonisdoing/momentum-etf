@@ -792,9 +792,7 @@ export function MomentumClient() {
         minWidth: STATUS_COLUMN_MIN_WIDTH,
         headerTooltip: "장기 이격률이 큰 순 — 자리가 나면 이 순서로 담는다.",
         cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
-        cellRenderer: (p: { value?: number | null }) => (
-          <strong style={{ color: "#2f9e44" }}>{p.value ?? "-"}</strong>
-        ),
+        valueFormatter: (p) => (p.value == null ? "-" : String(p.value)),
       },
       marketCapRankColumn<CandidateRow>("market_cap_rank", !hasMarketCap),
       {
@@ -1118,7 +1116,10 @@ export function MomentumClient() {
                   theme={gridTheme}
                   minHeight={0}
                   height="auto"
-                  getRowClass={(p) => (p.data?.plan === "empty" ? "appEmptySlotRow" : "")}
+                  // 빈 슬롯은 값을 비우고, 실계좌 보유는 행 배경 녹색 — 시장 화면과 같은 표준.
+                  getRowClass={(p) =>
+                    p.data?.plan === "empty" ? "appEmptySlotRow" : p.data?.account_held ? "appHeldRow" : ""
+                  }
                   gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
                 />
                 <div style={{ ...hintStyle, fontWeight: 700, margin: "16px 0 6px" }}>

@@ -144,6 +144,8 @@ type Holding = {
   exit_reason: string | null;
   /** 종목에 붙는 메모 — 순위·모멘텀·자산 관리 화면과 같은 값. */
   memo?: string;
+  /** 실계좌 보유 여부 — 행 배경 녹색으로 표시한다(전략 보유와 뜻이 다르다). */
+  account_held?: boolean;
   exit_ma_gap_pct?: number | null;
   exit_ma?: number | null;
 };
@@ -176,6 +178,8 @@ type PlanRow = {
   exit_ma?: number | null;
   /** 고점 대비(%) — 0 이면 신고점. 모멘텀 운용 현황과 같은 값. */
   high_drawdown_pct?: number | null;
+  /** 실계좌 보유 여부 — 전략 보유와 뜻이 다르다. 행 배경 녹색으로 표시한다. */
+  account_held?: boolean;
 };
 
 type Positions = {
@@ -222,6 +226,8 @@ type Trade = {
   value_mult_live?: number | null;
   /** 종목 메모 — 운용 현황 표에서만 쓴다(백테스트 체결 목록에는 없다). */
   memo?: string;
+  /** 실계좌 보유 여부 — 운용 현황 표에서만 쓴다. */
+  account_held?: boolean;
   entry_date: string;
   entry_price: number;
   exit_date: string;
@@ -754,7 +760,7 @@ export function NewHighClient() {
       exit_price: null,
       entry_date: h.entry_date, entry_price: h.entry_price, return_pct: h.return_pct,
       plan: h.status, days: h.days, is_new: h.is_new, exit_reason: h.exit_reason,
-      memo: h.memo,
+      memo: h.memo, account_held: h.account_held,
       exit_ma_gap_pct: h.exit_ma_gap_pct, exit_ma: h.exit_ma,
     }));
     const buys: PlanRow[] = positions.planned_entries.map((row) => ({
@@ -765,7 +771,7 @@ export function NewHighClient() {
       entry_date: null, entry_price: null, return_pct: null,
       // 아직 안 샀다 — null 로 두면 보유일 칸과 차트 배지가 통째로 비어 진입 전인지 알 수 없다.
       plan: "buy", days: 0, is_new: false, exit_reason: null,
-      memo: row.memo,
+      memo: row.memo, account_held: row.account_held,
     }));
     // 오늘 이미 청산된 종목 — 현재가는 지금 시세, 청산가는 따로 담는다.
     const exited: PlanRow[] = positions.exited_today.map((t) => ({
@@ -775,7 +781,7 @@ export function NewHighClient() {
       value_mult: t.value_mult ?? null, value_mult_live: t.value_mult_live ?? null,
       entry_date: t.entry_date, entry_price: t.entry_price, return_pct: t.return_pct,
       plan: "exited", days: t.days, is_new: false, exit_reason: t.reason,
-      memo: t.memo,
+      memo: t.memo, account_held: t.account_held,
     }));
     // 빈 슬롯 — 상한에서 '다음 시가 이후에 실제로 차 있을 자리' 를 뺀 만큼. 매도 예정은
     // 곧 비고, 진입 예정은 곧 찬다. 자리가 남았다는 것은 자격을 갖춘 돌파가 없었다는 뜻이라,
@@ -1166,7 +1172,14 @@ export function NewHighClient() {
                     theme={gridTheme}
                     minHeight={0}
                     height="auto"
-                    getRowClass={(params) => (params.data?.plan === "empty" ? "appEmptySlotRow" : "")}
+                    // 빈 슬롯은 값을 비우고, 실계좌 보유는 행 배경 녹색 — 시장 화면과 같은 표준.
+                    getRowClass={(params) =>
+                      params.data?.plan === "empty"
+                        ? "appEmptySlotRow"
+                        : params.data?.account_held
+                          ? "appHeldRow"
+                          : ""
+                    }
                     gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
                   />
                   {/* 진입 후보 표 — 항상 펼쳐 둔다. 상태 설명만 표 아래에서 접고 펼친다. */}
