@@ -227,12 +227,6 @@ MIN_VALUE_MULT_OPTIONS_BY_COUNTRY: dict[str, tuple[float | None, ...]] = {
     "au": (3.0, 2.0, 1.0, None),
 }
 
-# 합성 전략의 비중 조정 지시 밴드 — 목표와의 차이가 「슬롯 목표비중 × RATIO」(최소 MIN_PCT %p)
-# 이상일 때만 매매 지시로 만든다. 고정 %p 만 쓰면 슬롯이 큰 종목은 하루 가격 변동(드리프트)만으로
-# 지시가 떠서, 백테스트에 없는 주중 재조정 매매를 시키게 된다. 화면 설명 문구도 이 값으로 만든다.
-MIX_REBALANCE_BAND_RATIO = 0.10
-MIX_REBALANCE_BAND_MIN_PCT = 0.5
-
 # 편도 슬리피지(%) — 0.05 ~ 0.50, 0.05 단위. 종목풀 설정에서 고른다.
 SLIPPAGE_PCT_OPTIONS: tuple[float, ...] = (0.2, 0.3, 0.4, 0.5, 1.0)
 

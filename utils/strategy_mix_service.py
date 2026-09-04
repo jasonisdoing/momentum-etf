@@ -9,6 +9,10 @@
 화면은 신고가 화면과 같은 방식으로 이 일별 누적에서 연간·월간·일간 표를 만든다.
 
 캐시는 두지 않는다 — 각 전략 화면의 백테스트와 같은 패턴(요청 시 계산)이다.
+
+**여기서 판정하지 않는다.** 보유·진입·이탈은 슬리브 엔진(`utils/slot_backtest.py`)이 정한
+것을 읽어 온다. 합성이 하는 일은 슬리브 곡선에 월초 이관을 얹는 것과, 계좌 보유와 목표
+주수의 차이를 지시로 내는 것뿐이다. 그 차이는 문턱 없이 전부 낸다(AGENTS.md 10).
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
-from config import CACHE_TTL_COMPUTE, MIX_REBALANCE_BAND_MIN_PCT, MIX_REBALANCE_BAND_RATIO
+from config import CACHE_TTL_COMPUTE
 from utils.logger import get_app_logger
 from utils.mix_sleeve import STRATEGY_LABELS, SleeveSpec
 from utils.share_allocation import ShareTarget, allocate_integer_shares
@@ -488,12 +492,13 @@ def _build_action_groups(
     """오늘의 액션 — 체결일 묶음(매도 먼저, 같은 방향은 티커 순).
 
     화면과 슬랙 알람이 **이 결과를 그대로** 쓴다 — 조립을 한 곳에 두어 둘이 어긋나지
-    않게 한다. 규칙은 화면에 있던 것 그대로:
-      · 목표는 흘러간 비중을 따라가므로, 밴드(슬롯 비중 × config.MIX_REBALANCE_BAND_RATIO,
-        최소 MIX_REBALANCE_BAND_MIN_PCT %p) 이상 차이만 지시로 만든다
-        — 가격 드리프트는 지시가 안 되고, 큰 단위 입출금·교체·진입·이탈만 지시가 된다.
+    않게 한다. 규칙:
+      · 계좌 보유와 목표 주수의 차이를 **거르지 않고 전부** 낸다. 예전에는 「목표비중의
+        10% 이상 차이만」 이라는 문턱(밴드)을 종목마다 따로 걸었는데, 백테스트에 없는
+        규칙이라 화면과 백테스트가 갈라졌다. 게다가 목표 주수 배분은 12종목을 한 번에
+        계산해 매수 합이 매도 합 + 현금을 넘지 않는데, 문턱이 큰 매수만 통과시키고
+        작은 매도를 걸러 **살 돈이 없는 매수 지시**를 만들었다.
       · 교체가 확정됐지만 미체결이면 그 슬리브 몫은 교체일 시가 그룹, 나머지는 다음 거래일 그룹.
-      · 전량 매도·이탈은 금액과 무관하게 항상 남긴다.
     슬리브가 어떤 전략인지는 보지 않는다 — 있는 액션만 읽는다(교체가 없는 전략은 rebalance=None).
     """
     slots: dict[str, dict[str, Any]] = actions["slots"]
@@ -566,11 +571,6 @@ def _build_action_groups(
                 break
         reason = sell_reason.get(ticker)
         weight = float(row.get("weight_pct") or 0)
-        if not row.get("is_sell_all") and not (reason and trade < 0 and weight <= 0):
-            gap = abs(weight - float(row.get("current_weight_pct") or 0))
-            band = max(MIX_REBALANCE_BAND_MIN_PCT, weight * MIX_REBALANCE_BAND_RATIO)
-            if gap < band:
-                continue
         held = float(row.get("held_quantity") or 0) > 0
         sell_reason_applies = bool(reason) and trade < 0 and weight <= 0
         if row.get("is_sell_all"):
@@ -1427,11 +1427,6 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         next_trading_day,
         currency=currency,
     )
-    # 지시 밴드 — 화면 설명 문구가 이 값으로 만들어진다(config 이 단일 소스).
-    payload["actions"]["band"] = {
-        "ratio_pct": round(MIX_REBALANCE_BAND_RATIO * 100, 1),
-        "min_pct": MIX_REBALANCE_BAND_MIN_PCT,
-    }
     # 다음주 교체 가정 미리보기 — 실시간 순위 기준 잠정치.
     payload["actions"]["next_week_preview"] = _build_next_week_preview(
         states,
