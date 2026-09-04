@@ -25,6 +25,7 @@ import { createAppGridTheme } from "../components/app-grid-theme";
 import {
   industryColumn,
   STOCK_NAME_COLUMN_WIDTH,
+  slotStatusColumn,
   adrColumn,
   formatSignedPct,
   maExitGapColumn,
@@ -163,6 +164,8 @@ type PlanRow = {
   price: number | null;
   /** 청산가 — 오늘 이탈한 행에만 있다. */
   exit_price: number | null;
+  /** 청산일 — 이탈 행에만 있다. 상태 문구에 붙인다. */
+  exit_date?: string | null;
   entry_date: string | null;
   entry_price: number | null;
   return_pct: number | null;
@@ -230,6 +233,10 @@ type Trade = {
   memo?: string;
   /** 실계좌 보유 여부 — 운용 현황 표에서만 쓴다. */
   account_held?: boolean;
+  /** 표시용 — 운용 현황 표가 보유 행과 같은 칸을 채운다. */
+  high_drawdown_pct?: number | null;
+  exit_ma_gap_pct?: number | null;
+  exit_ma?: number | null;
   entry_date: string;
   entry_price: number;
   exit_date: string;
@@ -780,11 +787,14 @@ export function NewHighClient() {
     const exited: PlanRow[] = positions.exited_today.map((t) => ({
       ticker: t.ticker, name: t.name, industry: t.industry, market_cap_rank: t.market_cap_rank ?? null,
       change_pct: t.change_pct ?? null,
-      price: t.price ?? null, exit_price: t.exit_price,
+      price: t.price ?? null, exit_price: t.exit_price, exit_date: t.exit_date,
       value_mult: t.value_mult ?? null, value_mult_live: t.value_mult_live ?? null,
       entry_date: t.entry_date, entry_price: t.entry_price, return_pct: t.return_pct,
       plan: "exited", days: t.days, is_new: false, exit_reason: t.reason,
       memo: t.memo, account_held: t.account_held,
+      // 이탈 행도 표의 모든 칸이 채워져야 한다 — 판 뒤의 상태를 같은 기준으로 본다.
+      high_drawdown_pct: t.high_drawdown_pct,
+      exit_ma_gap_pct: t.exit_ma_gap_pct, exit_ma: t.exit_ma,
     }));
     // 빈 슬롯 — 상한에서 '다음 시가 이후에 실제로 차 있을 자리' 를 뺀 만큼. 매도 예정은
     // 곧 비고, 진입 예정은 곧 찬다. 자리가 남았다는 것은 자격을 갖춘 돌파가 없었다는 뜻이라,
@@ -860,31 +870,7 @@ export function NewHighClient() {
 
   const holdingColumns = useMemo<ColDef<PlanRow>[]>(
     () => [
-      {
-        headerName: "상태",
-        // 진입 후보 표의 상태와 같은 폭 — 두 표가 나란히 있어 폭이 다르면 어긋나 보인다.
-        // "매도 예정(예상) (이탈)" 같은 긴 문구는 잘릴 수 있어 전체를 툴팁으로 둔다.
-        width: STATUS_COLUMN_WIDTH,
-        minWidth: STATUS_COLUMN_MIN_WIDTH,
-        cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
-        valueGetter: (p) => p.data?.plan ?? "",
-        cellRenderer: (p: { data?: PlanRow }) => {
-          if (!p.data || p.data.plan === "empty") return null;
-          // 장중 판정은 오늘 종가로 확정되기 전이라 (예상) — 종가 확정 후에는 꼬리표가 빠진다.
-          const tag = positions?.live ? "(예상)" : "";
-          const reason = p.data.exit_reason ? ` (${p.data.exit_reason})` : "";
-          if (p.data.plan === "buy") return <strong style={{ color: "#d62828" }}>진입 예정{tag}</strong>;
-          if (p.data.plan === "sell") {
-            const label = `매도 예정${tag}${reason}`;
-            return <strong style={{ color: "#1971c2", whiteSpace: "nowrap" }} title={label}>{label}</strong>;
-          }
-          if (p.data.plan === "exited") {
-            const label = `이탈${reason}`;
-            return <span style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }} title={label}>{label}</span>;
-          }
-          return <span>{p.data.is_new ? "진입" : `${p.data.days}일`}</span>;
-        },
-      },
+      slotStatusColumn<PlanRow>({ live: Boolean(positions?.live), fillDay: positions?.next_session }),
       marketCapRankColumn<PlanRow>("market_cap_rank", !hasMarketCap),
       // 고점 대비 — 모멘텀 운용 현황과 같은 공용 컬럼(두 화면이 같은 값을 본다).
       highDrawdownColumn<PlanRow>("high_drawdown_pct"),

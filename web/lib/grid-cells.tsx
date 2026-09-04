@@ -6,6 +6,8 @@
 import type { ColDef, ColDefField } from "ag-grid-community";
 import type React from "react";
 
+import { formatSlashDateWithWeekday } from "@/lib/datetime";
+
 /** 부호를 붙인 퍼센트 표기: +1.23% / -4.56% / "-"(값 없음). */
 export function formatSignedPct(value: number | null | undefined, digits = 2): string {
   if (value == null || !Number.isFinite(value)) return "-";
@@ -326,15 +328,21 @@ export function highDrawdownColumn<T>(field: ColDefField<T>): ColDef<T> {
  * 두 표(보유·후보)가 나란히 있어 폭이 다르면 어긋나 보인다. 장중 판정은 오늘 종가로
  * 확정되기 전이라 `(예상)` 꼬리표를 붙인다.
  */
-export const STATUS_COLUMN_WIDTH = 124;
-export const STATUS_COLUMN_MIN_WIDTH = 110;
+export const STATUS_COLUMN_WIDTH = 156;
+export const STATUS_COLUMN_MIN_WIDTH = 140;
 
 export type SlotPlan = "hold" | "sell" | "buy" | "exited" | "empty";
 
-export function slotStatusColumn<T extends { plan: SlotPlan; days: number | null; is_new: boolean; exit_reason: string | null }>(options: {
+export function slotStatusColumn<
+  T extends { plan: SlotPlan; days: number | null; is_new: boolean; exit_reason: string | null; exit_date?: string | null },
+>(options: {
   live: boolean;
+  /** 매수·매도 예정이 체결되는 날 — 상태 문구 앞에 붙인다. */
+  fillDay?: string | null;
 }): ColDef<T> {
   const tag = options.live ? "(예상)" : "";
+  // 언제 벌어지는(벌어진) 일인지를 상태와 같이 읽어야 주문을 낼 수 있다.
+  const fill = options.fillDay ? `${formatSlashDateWithWeekday(options.fillDay)} ` : "";
   return {
     headerName: "상태",
     width: STATUS_COLUMN_WIDTH,
@@ -344,19 +352,28 @@ export function slotStatusColumn<T extends { plan: SlotPlan; days: number | null
     cellRenderer: (p: { data?: T }) => {
       if (!p.data || p.data.plan === "empty") return null;
       const reason = p.data.exit_reason ? ` (${p.data.exit_reason})` : "";
-      if (p.data.plan === "buy") return <strong style={{ color: "#d62828" }}>진입 예정{tag}</strong>;
-      if (p.data.plan === "sell") {
-        const label = `매도 예정${tag}${reason}`;
+      if (p.data.plan === "buy") {
+        const label = `${fill}진입 예정${tag}`;
         return (
-          <strong style={{ color: "#1971c2", whiteSpace: "nowrap" }} title={label}>
+          <strong style={{ color: "#d62828", whiteSpace: "nowrap" }} title={label}>
+            {label}
+          </strong>
+        );
+      }
+      if (p.data.plan === "sell") {
+        const label = `${fill}매도 예정${tag}`;
+        return (
+          <strong style={{ color: "#1971c2", whiteSpace: "nowrap" }} title={`${label}${reason}`}>
             {label}
           </strong>
         );
       }
       if (p.data.plan === "exited") {
-        const label = `이탈${reason}`;
+        // 이탈은 이미 체결된 날짜가 행에 있다 — 예정 체결일이 아니라 그 날짜를 쓴다.
+        const day = p.data.exit_date ? `${formatSlashDateWithWeekday(p.data.exit_date)} ` : "";
+        const label = `${day}이탈`;
         return (
-          <span style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }} title={label}>
+          <span style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }} title={`${label}${reason}`}>
             {label}
           </span>
         );

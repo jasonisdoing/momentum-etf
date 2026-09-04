@@ -292,7 +292,8 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     held_tickers = {h["ticker"] for h in holdings}
     entry_tickers = {row["ticker"] for row in entries}
     # 순위 — 우선순위(장기 이격률) 순 자리. 진입 예정과 후보가 **같은 번호 체계**를 쓴다.
-    rank_by_ticker = {row["ticker"]: index for index, row in enumerate(rows, start=1)}
+    # 자격 미달 종목은 자리를 차지하지 않는다 — 세면 화면 순위가 6·7·9 처럼 건너뛴다.
+    rank_by_ticker = {row["ticker"]: index for index, row in enumerate([r for r in rows if r["eligible"]], start=1)}
     # 진입 후보 — 우선순위 순 top_n 개. 이미 담은(보유·진입 예정) 종목은 표에서 뺀다.
     candidates = [
         {**row, "rank": rank_by_ticker[row["ticker"]]}
