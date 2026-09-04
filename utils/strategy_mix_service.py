@@ -901,11 +901,13 @@ def _sleeve_target_shares(
 
     계좌가 작아 1주도 못 사는 종목은 목록에서 지우지 않고 「1주 못 삼」 경고로 드러낸다.
     """
+    from utils.share_allocation import ShareTarget, allocate_integer_shares
+
     held_by_ticker = held_by_ticker or {}
     # 소수 목표를 **티커별로 합산**한다 — 두 슬리브가 같은 종목을 담으면 몫이 더해진다.
     # 슬리브마다 따로 정하면 뒤에 온 슬리브가 앞의 값을 덮어써, 목표비중(합산)과 목표 주수가
     # 어긋난다(kor_test 에서 125.5주 + 111.1주가 113주가 되어 115주를 팔라는 지시가 났다).
-    exact_by_ticker: dict[str, float] = {}
+    amount_by_ticker: dict[str, float] = {}
     unit_by_ticker: dict[str, float] = {}
     for key, state in states.items():
         budget = sleeve_amount_krw.get(key, 0.0)
@@ -922,34 +924,18 @@ def _sleeve_target_shares(
             if weight <= 0:
                 continue
             ticker = str(row["ticker"]).strip()
-            unit = float(price) * krw_rate
-            unit_by_ticker[ticker] = unit
-            exact_by_ticker[ticker] = exact_by_ticker.get(ticker, 0.0) + budget * weight / 100.0 / unit
+            unit_by_ticker[ticker] = float(price) * krw_rate
+            amount_by_ticker[ticker] = amount_by_ticker.get(ticker, 0.0) + budget * weight / 100.0
 
-    targets: dict[str, int] = {}
-    # 남는 돈을 채울 후보 — (부족분, 티커, 1주 값). 부족분이 큰 순서로 한 주씩 준다.
-    remainders: list[tuple[float, str, float]] = []
-    spent = 0.0
-    for ticker, exact in exact_by_ticker.items():
-        unit = unit_by_ticker[ticker]
-        floored = int(exact)
-        held = int(held_by_ticker.get(ticker, 0))
-        if held == floored + 1:
-            targets[ticker] = held  # 2. 유지
-        else:
-            targets[ticker] = floored  # 1. 내림
-            remainders.append((exact - floored, ticker, unit))
-        spent += targets[ticker] * unit
-
-    # 3. 최대잉여법 — 남는 돈으로 부족분이 큰 종목부터 한 주씩.
-    leftover = sum(sleeve_amount_krw.values()) - spent
-    for shortfall, ticker, unit in sorted(remainders, reverse=True):
-        del shortfall
-        if unit > leftover:
-            break
-        targets[ticker] += 1
-        leftover -= unit
-    return targets
+    return allocate_integer_shares(
+        [
+            ShareTarget(
+                key=ticker, target_amount=amount, price=unit_by_ticker[ticker], held=int(held_by_ticker.get(ticker, 0))
+            )
+            for ticker, amount in amount_by_ticker.items()
+        ],
+        budget=sum(sleeve_amount_krw.values()),
+    )
 
 
 def _attach_account_targets(
