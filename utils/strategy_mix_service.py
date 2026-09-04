@@ -873,24 +873,40 @@ def _sleeve_target_shares(
     states: dict[str, Any],
     sleeve_amount_krw: dict[str, float],
     krw_rate: float,
+    held_by_ticker: dict[str, float] | None = None,
 ) -> dict[str, int]:
-    """목표 주수 = **백테스트 주수 × 비율**, 내림. 남는 돈은 현금으로 둔다.
+    """목표 주수 = **백테스트 주수 × 비율**, 정수로 맞춘 값.
 
     비율 = 계좌 슬리브 몫 ÷ 백테스트 슬리브 평가액. 백테스트가 지금 들고 있는 구성을 계좌
-    크기로 줄인 것이 곧 목표다. 소수는 **내림** — 1주 값을 못 채운 나머지는 백테스트에서도
-    현금으로 남아 있으므로 그대로 현금으로 둔다.
+    크기로 줄인 것이 곧 목표다. 소수는 세 단계로 정수로 만든다.
+
+    1. **내림.** 목표를 넘겨 사는 일이 없다.
+    2. **유지.** 계좌 보유가 딱 「내림+1」이면 그 값을 그대로 목표로 둔다. 3 단계가 어제 그
+       종목에 한 주를 얹어 준 결과인데, 소수부는 시세 따라 계속 움직여 순위가 뒤집힌다.
+       매번 다시 세우면 어제 산 것을 오늘 팔라고 하게 된다. 그보다 많이 들고 있으면(손으로 산
+       10주 같은) 내림까지 팔라는 지시가 그대로 난다.
+    3. **최대잉여법.** 그러고도 남는 돈으로, 부족분(소수부)이 큰 종목부터 한 주씩 채운다.
+       내림만 하면 1주 값이 비싼 종목에서 큰 돈이 놀기 때문이다(VOO 는 3.98 주가 3 주가 되어
+       총자산의 5% 가 현금으로 남았다). 각 종목이 받는 건 최대 한 주다.
+       살 수 없는 종목이 나오면 **거기서 멈춘다** — 건너뛰고 더 싼 종목을 사면 부족분과 상관없이
+       싼 것만 담기게 된다(부족분 0.045 인 BMY 를 사려고 0.601 인 DELL 을 건너뛰는 식).
 
     하지 말아야 할 두 가지(둘 다 실제로 넣었다가 걷어냈다):
-      · **남는 돈을 다시 나눠 주는 배분** — 목표를 넘겨 사게 된다. DELL 이 1.58주인데 2주가
-        되고(125%), 그 돈 때문에 BMY 가 13주 목표에 11주로 깎였다. 백테스트는 진입할 때 한 번
-        사고 더 사지 않는다.
+      · **남는 돈을 목표 비율대로 다시 나눠 주는 배분** — 한 종목이 여러 주를 더 받아 목표를
+        크게 넘긴다. DELL 이 1.6주인데 2주가 되고(125%), 그 돈 때문에 BMY 가 13주 목표에
+        11주로 깎였다.
       · **계좌 금액으로 백테스트 다시 돌리기** — 자본이 작으면 비싼 종목을 1주도 못 사 그
         진입을 건너뛰고 빈 슬롯에 다른 종목이 들어와, 보유 종목 자체가 달라진다
         (실측: $15,000 은 ASML 진입, $1,976 은 SLB 진입 → 7월에 APD 까지 이어졌다).
 
     계좌가 작아 1주도 못 사는 종목은 목록에서 지우지 않고 「1주 못 삼」 경고로 드러낸다.
     """
-    targets: dict[str, int] = {}
+    held_by_ticker = held_by_ticker or {}
+    # 소수 목표를 **티커별로 합산**한다 — 두 슬리브가 같은 종목을 담으면 몫이 더해진다.
+    # 슬리브마다 따로 정하면 뒤에 온 슬리브가 앞의 값을 덮어써, 목표비중(합산)과 목표 주수가
+    # 어긋난다(kor_test 에서 125.5주 + 111.1주가 113주가 되어 115주를 팔라는 지시가 났다).
+    exact_by_ticker: dict[str, float] = {}
+    unit_by_ticker: dict[str, float] = {}
     for key, state in states.items():
         budget = sleeve_amount_krw.get(key, 0.0)
         if budget <= 0 or krw_rate <= 0:
@@ -905,7 +921,34 @@ def _sleeve_target_shares(
             weight = slot_pct if weight is None else float(weight)
             if weight <= 0:
                 continue
-            targets[str(row["ticker"]).strip()] = int(budget * weight / 100.0 // (float(price) * krw_rate))
+            ticker = str(row["ticker"]).strip()
+            unit = float(price) * krw_rate
+            unit_by_ticker[ticker] = unit
+            exact_by_ticker[ticker] = exact_by_ticker.get(ticker, 0.0) + budget * weight / 100.0 / unit
+
+    targets: dict[str, int] = {}
+    # 남는 돈을 채울 후보 — (부족분, 티커, 1주 값). 부족분이 큰 순서로 한 주씩 준다.
+    remainders: list[tuple[float, str, float]] = []
+    spent = 0.0
+    for ticker, exact in exact_by_ticker.items():
+        unit = unit_by_ticker[ticker]
+        floored = int(exact)
+        held = int(held_by_ticker.get(ticker, 0))
+        if held == floored + 1:
+            targets[ticker] = held  # 2. 유지
+        else:
+            targets[ticker] = floored  # 1. 내림
+            remainders.append((exact - floored, ticker, unit))
+        spent += targets[ticker] * unit
+
+    # 3. 최대잉여법 — 남는 돈으로 부족분이 큰 종목부터 한 주씩.
+    leftover = sum(sleeve_amount_krw.values()) - spent
+    for shortfall, ticker, unit in sorted(remainders, reverse=True):
+        del shortfall
+        if unit > leftover:
+            break
+        targets[ticker] += 1
+        leftover -= unit
     return targets
 
 
@@ -1328,7 +1371,12 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         # 목표 주수 — 슬리브마다 자기 몫 예산 안에서 배분. 종목·비중은 백테스트 것 그대로다.
         total_assets = float(account.get("total_assets") or 0)
         sleeve_amount_krw = {key: total_assets * shares[key] / 100.0 for key in keys}
-        target_shares = _sleeve_target_shares(states, sleeve_amount_krw, krw_rate)
+        target_shares = _sleeve_target_shares(
+            states,
+            sleeve_amount_krw,
+            krw_rate,
+            {ticker: item["quantity"] for ticker, item in account["holdings"].items()},
+        )
         account["sell_all"] = _attach_account_targets(
             holdings, account, krw_rate, slot_keys=keys, target_shares=target_shares
         )
@@ -1344,6 +1392,9 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
             row["held_quantity"] = None
             row["target_quantity"] = None
             row["trade_quantity"] = None
+            # 살 수도 팔 수도 없는 자산이라 목표 = 현재다. 실제목표에도 같은 값을 넣어야
+            # 두 합계가 같은 기준이 된다(안 넣으면 고정 자산 몫만큼 실제목표가 낮게 보인다).
+            row["actual_weight_pct"] = fixed_pct
             # 수익률 — 평단이 없는 항목이라 평가액과 손익으로 낸다(원금 = 평가액 − 손익).
             principal = float(account.get("fixed_asset_native") or 0) - float(
                 account.get("fixed_asset_change_native") or 0
