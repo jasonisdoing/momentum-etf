@@ -34,6 +34,7 @@ from utils.slot_positions import (
     _cache_refreshed_at,
     _live_quotes,
     _market_caps,
+    _market_today,
     _next_session,
     _pool_country,
     _should_auto_refresh,
@@ -419,17 +420,13 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
         # 진입 예정은 확정 종가 기준 그대로 둔다.
         _apply_display_quotes(rows, holdings, quotes["by_ticker"])
 
-    # ── 마지막 **체결 세션**의 청산만 남긴다 ────────────────────────────────
-    # 매도와 그 자리를 채운 매수는 같은 날 같은 시가에 체결된다. 그래서 그 세션을 기준으로
-    # 자르면 나간 것과 들어온 것이 표에 **짝으로** 남는다(무엇이 무엇을 대체했는지 읽힌다).
-    # 시장 현지 날짜로 자르면, 들어온 쪽은 보유라 남고 나간 쪽만 사라져 한쪽만 보인다.
-    # 더 최근 체결이 생기면 옛 청산은 그때 밀려난다. 행마다 체결일이 붙으므로 그게 오늘
-    # 일인지 지난 세션 일인지는 표에서 바로 읽힌다.
-    last_fill = max(
-        [str(h.get("entry_date") or "") for h in holdings] + [str(t["exit_date"]) for t in simulated["exited_today"]],
-        default="",
-    )
-    simulated["exited_today"] = [t for t in simulated["exited_today"] if str(t["exit_date"]) == last_fill]
+    # ── 지난 세션의 청산분은 버린다 ─────────────────────────────────────────
+    # 그 세션이 이미 마감했으면 보유 표에 있을 이유가 없다 — 내역은 「체결」 탭에 남는다.
+    # 캐시가 하루 늦게 채워지는 동안(미국 종가는 한국 시간 새벽) 어제 팔린 종목이 계속
+    # '이탈' 로 보이던 것을 여기서 끊는다. 실시간 시세 유무와 무관하게 시장 현지 날짜로만 본다.
+    market_today = _market_today(pool)
+    if market_today:
+        simulated["exited_today"] = [t for t in simulated["exited_today"] if str(t["exit_date"]) >= market_today]
 
     # 이미 보유 중인 종목은 다시 사지 않는다(백테스트도 같다). 목록에는 남기되 표시를 구분한다 —
     # 보유 종목이 아직 신고가를 갱신 중인지가 추세 판단에 쓸모 있다.
