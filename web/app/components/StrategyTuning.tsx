@@ -8,6 +8,7 @@ import { MonthsSelect } from "./MonthsSelect";
 import { AppLoadingProgress, type LoadingProgress } from "./AppLoadingProgress";
 import { useToast } from "./ToastProvider";
 import { createAppGridTheme } from "./app-grid-theme";
+import { signColor } from "@/lib/grid-cells";
 
 /** 축 값 — 숫자 외에 "off"/"on" 같은 상태값도 쓴다(모멘텀 주중 이탈). */
 export type TuningValue = number | string | null;
@@ -29,6 +30,10 @@ export type TuningRow = {
   quarter_wins: number;
   trade_count?: number;
   win_rate_pct?: number;
+  /** 이긴 거래의 평균 수익률(%) — 승률과 함께 봐야 손익비가 보인다. */
+  avg_win_pct?: number | null;
+  /** 진 거래의 평균 손실률(%) — 음수다. */
+  avg_loss_pct?: number | null;
 };
 
 export type TuningResult = {
@@ -52,6 +57,8 @@ type GridRow = {
   sortino: number | null;
   trade_count?: number;
   win_rate_pct?: number;
+  avg_win_pct?: number | null;
+  avg_loss_pct?: number | null;
   quarter_wins: number;
   is_current: boolean;
 } & Record<string, unknown>;
@@ -291,6 +298,8 @@ export function StrategyTuning({
         sortino: row.sortino,
         trade_count: row.trade_count,
         win_rate_pct: row.win_rate_pct,
+        avg_win_pct: row.avg_win_pct,
+        avg_loss_pct: row.avg_loss_pct,
         quarter_wins: row.quarter_wins,
         is_current: isCurrent(row),
       })),
@@ -328,6 +337,24 @@ export function StrategyTuning({
       // 그러면 1등 조합이 거래 0건(승률 null)이면 나머지 행의 값까지 통째로 사라졌다.
       { headerName: "거래", field: "trade_count", width: 80, ...right },
       { headerName: "승률", field: "win_rate_pct", width: 84, valueFormatter: num(0, false, "%"), ...right },
+      // 평균이익·평균손실 — 승률 옆에 둬야 손익비를 한눈에 견준다(승률이 높아도 손익비가
+      // 나쁘면 못 쓰는 조합이다). 백엔드 공용 계산(utils/trade_stats.py)이 단일 소스다.
+      {
+        headerName: "평균이익",
+        field: "avg_win_pct",
+        width: 96,
+        valueFormatter: num(1, true, "%"),
+        ...right,
+        cellStyle: (p) => ({ color: signColor(p.value as number) }),
+      },
+      {
+        headerName: "평균손실",
+        field: "avg_loss_pct",
+        width: 96,
+        valueFormatter: num(1, true, "%"),
+        ...right,
+        cellStyle: (p) => ({ color: signColor(p.value as number) }),
+      },
       {
         headerName: "분기승수",
         field: "quarter_wins",
@@ -438,8 +465,9 @@ export function StrategyTuning({
                   }}
                 />
                 <div style={hint}>
-                  기본 소르티노 내림차순(헤더를 눌러 정렬) · CAGR = 기간 수익의 연환산 · 분기승수 = 그 분기에 조합들 중 상위
-                  절반에 든 횟수(구간 일관성) · 적용 = 그 조합을 상단 설정에 넣고 저장
+                  기본 소르티노 내림차순(헤더를 눌러 정렬) · CAGR = 기간 수익의 연환산 · 평균이익·평균손실 = 이긴/진
+                  거래의 평균 손익률(청산분만) · 분기승수 = 그 분기에 조합들 중 상위 절반에 든 횟수(구간 일관성) ·
+                  적용 = 그 조합을 상단 설정에 넣고 저장
                 </div>
               </>
             )}
