@@ -564,9 +564,7 @@ def purge_owner(owner_kind: str, owner_id: str) -> dict[str, int]:
             cleared = [] if ref.array_field else None
             target = ref.array_field or ref.field
             count = (
-                db[ref.collection]
-                .update_many({ref.query_path: owner_id}, {"$set": {target: cleared}})
-                .modified_count
+                db[ref.collection].update_many({ref.query_path: owner_id}, {"$set": {target: cleared}}).modified_count
             )
         except Exception as exc:
             logger.warning("[정리] %s.%s 참조 해제 실패: %s", ref.collection, ref.query_path, exc)

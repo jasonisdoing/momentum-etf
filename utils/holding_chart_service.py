@@ -49,9 +49,7 @@ def holding_charts(
     # 끄면(config.HOLDING_CHART_SHOW_AVG_BUY_PRICE) 계좌를 아예 읽지 않는다.
     pool_currency = str((get_ticker_type_settings(pool) or {}).get("currency") or "").strip()
     avg_buy_by = (
-        average_buy_price_by_ticker(wanted, currency=pool_currency or None)
-        if HOLDING_CHART_SHOW_AVG_BUY_PRICE
-        else {}
+        average_buy_price_by_ticker(wanted, currency=pool_currency or None) if HOLDING_CHART_SHOW_AVG_BUY_PRICE else {}
     )
 
     # 한 요청의 차트들이 **같은 날짜 축**을 쓰도록, 이 풀의 거래일을 먼저 모은다.

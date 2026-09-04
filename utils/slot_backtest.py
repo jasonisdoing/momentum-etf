@@ -170,7 +170,10 @@ def run_slot_backtest(
                     "exit_date": str(nxt.date()),
                     "exit_price": round(float(exit_price), 2),
                     "return_pct": round(ret * 100, 2),
-                    "days": len(close_df.loc[position["date"] : day]) - 1,
+                    # 보유일 — **들고 있던 거래일 수**(체결일 포함). 시가에 사서 그날 종가까지
+                    # 들고 있었으면 1일이다. 예전에는 경과일(-1)로 세서 하루 만에 판 거래가
+                    # 「보유일 0」 으로, 오늘 산 종목이 「0일」 로 나왔다.
+                    "days": len(close_df.loc[position["date"] : day]),
                     "reason": exit_reason,
                 }
             )
@@ -247,7 +250,7 @@ def run_slot_backtest(
                 "price": float(price),
                 # 표시용 평가손익 — 아직 안 팔았으니 매도 슬리피지는 빼지 않는다.
                 "return_pct": round((float(price) / position["open"] - 1) * 100, 2),
-                "days": len(close_df.loc[position["date"] : last_day]) - 1,
+                "days": len(close_df.loc[position["date"] : last_day]),
                 # 오늘 편입된 종목은 목록에서 따로 표시한다.
                 "is_new": position["date"] == last_day,
                 # 이 슬리브 안에서의 비중(%) — 슬리브 전체를 100 으로 본다.
