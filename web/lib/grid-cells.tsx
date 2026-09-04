@@ -32,6 +32,13 @@ export function marketBadgeCellStyle(value: unknown): React.CSSProperties | null
  *  긴 이름은 2줄까지 보이고 넘치면 말줄임 (renderStockNameCell). */
 export const STOCK_NAME_COLUMN_MIN_WIDTH = 220;
 
+/** 종목명 컬럼 **고정** 폭 — 한 화면에 표가 둘 이상 있고 칸을 맞춰야 할 때 쓴다.
+ *
+ *  `flex: 1` 은 남는 공간을 종목명이 가져가는데, 표마다 뒤쪽 컬럼 총폭이 달라서 남는 공간도
+ *  달라진다. 그러면 두 표의 앞쪽 칸(상태~거래대금)이 서로 어긋난다. 고정 폭을 주면 앞쪽이
+ *  정확히 맞고, 넘치는 폭은 표가 가로로 스크롤한다. */
+export const STOCK_NAME_COLUMN_WIDTH = 240;
+
 /** 업종 컬럼 폭 — 업종 컬럼이 있는 모든 화면이 같은 값을 쓴다.
  *
  *  셀은 2줄까지 보이고 넘치면 말줄임(`renderIndustryCell`)이라, **2줄이 꽉 차는 폭**이

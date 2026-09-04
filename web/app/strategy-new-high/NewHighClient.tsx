@@ -24,7 +24,7 @@ import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import {
   industryColumn,
-  STOCK_NAME_COLUMN_MIN_WIDTH,
+  STOCK_NAME_COLUMN_WIDTH,
   adrColumn,
   formatSignedPct,
   maExitGapColumn,
@@ -600,8 +600,8 @@ export function NewHighClient() {
       {
         field: "name",
         headerName: "종목명",
-        flex: 1,
-        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
+        // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
+        width: STOCK_NAME_COLUMN_WIDTH,
         cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
       },
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
@@ -887,8 +887,8 @@ export function NewHighClient() {
       {
         field: "name",
         headerName: "종목명",
-        flex: 1,
-        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
+        // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
+        width: STOCK_NAME_COLUMN_WIDTH,
         cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
       },
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
@@ -965,8 +965,8 @@ export function NewHighClient() {
       {
         field: "name",
         headerName: "종목명",
-        flex: 1,
-        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
+        // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
+        width: STOCK_NAME_COLUMN_WIDTH,
         cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
       },
       industryColumn<Trade>({ hide: !hasIndustryData }),
