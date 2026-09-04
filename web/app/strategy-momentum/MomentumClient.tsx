@@ -119,6 +119,8 @@ type PlanRow = {
   price: number | null;
   /** 청산가 — 마지막 세션에 이탈한 행에만 있다. */
   exit_price: number | null;
+  /** 청산일 — 이탈 행에만 있다. 상태 문구에 붙인다. */
+  exit_date?: string | null;
   entry_date: string | null;
   entry_price: number | null;
   return_pct: number | null;
@@ -177,6 +179,11 @@ type Trade = {
   value_mult?: number | null;
   value_mult_live?: number | null;
   memo?: string;
+  account_held?: boolean;
+  /** 표시용 — 운용 현황 표가 보유 행과 같은 칸을 채운다. */
+  short_gap_pct?: number | null;
+  long_gap_pct?: number | null;
+  high_drawdown_pct?: number | null;
 };
 
 /** 엔진이 주는 보유 한 행 — 표는 여기에 `plan` 을 붙여 한 축으로 다룬다. */
@@ -590,6 +597,7 @@ export function MomentumClient() {
       change_pct: trade.change_pct ?? null,
       price: trade.price ?? null,
       exit_price: trade.exit_price,
+      exit_date: trade.exit_date,
       value_mult: trade.value_mult ?? null,
       value_mult_live: trade.value_mult_live ?? null,
       entry_date: trade.entry_date,
@@ -600,6 +608,11 @@ export function MomentumClient() {
       is_new: false,
       exit_reason: trade.reason,
       memo: trade.memo,
+      account_held: trade.account_held,
+      // 이탈 행도 표의 모든 칸이 채워져야 한다 — 판 뒤의 상태를 같은 기준으로 본다.
+      short_gap_pct: trade.short_gap_pct,
+      long_gap_pct: trade.long_gap_pct,
+      high_drawdown_pct: trade.high_drawdown_pct,
     }));
     // 빈 슬롯 — 상한에서 '다음 시가 이후에 실제로 차 있을 자리' 를 뺀 만큼. 매도 예정은 곧
     // 비고, 진입 예정은 곧 찬다. 자리가 남았다는 것은 자격을 갖춘 후보가 없었다는 뜻이라,
@@ -722,7 +735,7 @@ export function MomentumClient() {
   // 보유 표 — 신고가와 같은 구성(공용 빌더). 모멘텀 고유는 이평선 이격 둘이다.
   const holdingColumns = useMemo<ColDef<PlanRow>[]>(
     () => [
-      slotStatusColumn<PlanRow>({ live: Boolean(positions?.live) }),
+      slotStatusColumn<PlanRow>({ live: Boolean(positions?.live), fillDay: positions?.next_session }),
       marketCapRankColumn<PlanRow>("market_cap_rank", !hasMarketCap),
       highDrawdownColumn<PlanRow>("high_drawdown_pct"),
       {

@@ -24,6 +24,14 @@ export function formatMonthDayWithWeekday(date: string): string {
   return `${parsed.getMonth() + 1}월 ${parsed.getDate()}일(${WEEKDAYS[parsed.getDay()]})`;
 }
 
+/** `2026-09-04` → `9/4(금)`. 표 셀처럼 아주 좁은 자리에서 날짜를 붙일 때 쓴다.
+ *  `formatMonthDayWithWeekday`(8월 23일(월))보다 짧다. */
+export function formatSlashDateWithWeekday(date: string): string {
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return `${parsed.getMonth() + 1}/${parsed.getDate()}(${WEEKDAYS[parsed.getDay()]})`;
+}
+
 export function formatKstDateTime(input?: string | null): string {
   if (!input) return "-";
   let s = input;

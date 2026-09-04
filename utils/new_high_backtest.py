@@ -247,8 +247,11 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     exit_ma_last = signals["exit_ma"].loc[last]
 
     def attach_exit_ma_gap() -> None:
-        """보유 행에 이탈선 값과 현재가 대비 여유(%)를 붙인다. 값이 없으면 채우지 않는다."""
-        for held in holdings:
+        """보유·이탈 행에 이탈선 값과 현재가 대비 여유(%)를 붙인다. 값이 없으면 채우지 않는다.
+
+        이탈 행도 표의 같은 칸을 채운다 — 판 뒤 그 종목이 어디에 있는지 같은 기준으로 본다.
+        """
+        for held in [*holdings, *simulated["exited_today"]]:
             line = exit_ma_last.get(held["ticker"])
             price = held.get("price")
             if line is None or pd.isna(line) or float(line) <= 0 or price is None:
