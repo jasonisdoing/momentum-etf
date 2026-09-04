@@ -117,6 +117,8 @@ type PositionRow = {
   value_mult: number | null;
   /** 장중 시간 환산 배수(누적 ÷ 장 경과율). 장중에만 값이 있고 괄호로 보여준다. */
   value_mult_live?: number | null;
+  /** 고점 대비(%) — 0 이면 신고점. 보유 표와 같은 공용 값. */
+  high_drawdown_pct?: number | null;
   /** 종목에 붙는 메모 — 순위·모멘텀·자산 관리 화면과 같은 값. */
   memo?: string;
 };
@@ -597,6 +599,7 @@ export function NewHighClient() {
       // 실계좌 보유는 컬럼 대신 행 배경(appHeldRow, 녹색)으로 표시한다 — 시장 화면과 같은 표준.
       // 시총은 개별주에만 있는 값이라 업종과 판정이 다르다(`@/lib/pool-industry`).
       marketCapRankColumn<PositionRow>("market_cap_rank", !hasMarketCap),
+      highDrawdownColumn<PositionRow>("high_drawdown_pct"),
       {
         field: "ticker",
         headerName: "티커",
@@ -883,6 +886,8 @@ export function NewHighClient() {
         },
       },
       marketCapRankColumn<PlanRow>("market_cap_rank", !hasMarketCap),
+      // 고점 대비 — 모멘텀 운용 현황과 같은 공용 컬럼(두 화면이 같은 값을 본다).
+      highDrawdownColumn<PlanRow>("high_drawdown_pct"),
       {
         field: "ticker",
         headerName: "티커",
@@ -952,8 +957,6 @@ export function NewHighClient() {
         getMaValue: (row) => row?.exit_ma,
         formatMaValue: (value) => formatPrice(value),
       }),
-      // 고점 대비 — 모멘텀 운용 현황과 같은 공용 컬럼(두 화면이 같은 값을 본다).
-      highDrawdownColumn<PlanRow>("high_drawdown_pct"),
     ],
     [hasIndustryData, fillDay, positions?.live, draft?.exit_ma_days],
   );
