@@ -291,10 +291,12 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
 
     held_tickers = {h["ticker"] for h in holdings}
     entry_tickers = {row["ticker"] for row in entries}
+    # 순위 — 우선순위(장기 이격률) 순 자리. 진입 예정과 후보가 **같은 번호 체계**를 쓴다.
+    rank_by_ticker = {row["ticker"]: index for index, row in enumerate(rows, start=1)}
     # 진입 후보 — 우선순위 순 top_n 개. 이미 담은(보유·진입 예정) 종목은 표에서 뺀다.
     candidates = [
-        {**row, "rank": index, "is_held": row["ticker"] in held_tickers}
-        for index, row in enumerate(rows, start=1)
+        {**row, "rank": rank_by_ticker[row["ticker"]]}
+        for row in rows
         if row["eligible"] and row["ticker"] not in held_tickers and row["ticker"] not in entry_tickers
     ][:slots]
 
@@ -308,7 +310,7 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
         "top_n": slots,
         "next_session": _next_session(pool, fill_base),
         "holdings": holdings,
-        "planned_entries": [{**row, "rank": 0, "is_held": False} for row in entries],
+        "planned_entries": [{**row, "rank": rank_by_ticker[row["ticker"]]} for row in entries],
         "exited_today": exited_today,
         "candidates": candidates,
         "adr_gate": adr_gate,
