@@ -33,7 +33,7 @@ import {
 } from "@/lib/backtest-periods";
 import {
   industryColumn,
-  STOCK_NAME_COLUMN_MIN_WIDTH,
+  STOCK_NAME_COLUMN_WIDTH,
   adrColumn as sharedAdrColumn,
   formatSignedPct,
   maExitGapColumn,
@@ -734,8 +734,8 @@ export function MomentumClient() {
       {
         field: "name",
         headerName: "종목명",
-        flex: 1,
-        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
+        // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
+        width: STOCK_NAME_COLUMN_WIDTH,
         cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
       },
       stockMemoColumn<PlanRow>({
@@ -806,8 +806,8 @@ export function MomentumClient() {
       {
         field: "name",
         headerName: "종목명",
-        flex: 1,
-        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
+        // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
+        width: STOCK_NAME_COLUMN_WIDTH,
         cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
       },
       stockMemoColumn<CandidateRow>({
@@ -930,8 +930,8 @@ export function MomentumClient() {
       {
         headerName: "종목명",
         field: "name",
-        flex: 1,
-        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
+        // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
+        width: STOCK_NAME_COLUMN_WIDTH,
         cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
       },
       industryColumn<BacktestTradeRow>({ hide: !hasIndustryData }),
