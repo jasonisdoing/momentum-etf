@@ -631,7 +631,7 @@ export function MomentumClient() {
         headerName: "연속",
         field: "streak_weeks",
         headerTooltip:
-          "이번 포트폴리오까지 몇 주 연속 편입됐는지 (신규 = 이번 주 첫 편입, 최대 12주 추적). " +
+          "이번 포트폴리오까지 몇 주 연속 편입됐는지 (신규 = 이번 주 첫 편입). " +
           "화살표 — →유지/→신규(초록)는 다음 주 예상, 확정은 교체일 직전 판정일 종가. " +
           "빨강은 빠지는 종목이다: →교체예정은 다음 주 교체에서 빠질 예상, " +
           "→매도예정은 ADR 게이트 확정 후 다음 시가 매도, →매도(굵게)는 주중에 이미 매도된 것. " +
@@ -640,7 +640,7 @@ export function MomentumClient() {
         cellDataType: "text",
         cellRenderer: (p: { value?: number | null; data?: PickRow }) => {
           const streak =
-            p.value == null ? "-" : p.value <= 1 ? "신규" : p.value >= 12 ? "12+" : `${p.value}주`;
+            p.value == null ? "-" : p.value <= 1 ? "신규" : `${p.value}주`;
           const isNewPick = p.value != null && p.value <= 1 && !p.data?.is_reserve;
           const held = Boolean(p.data && !p.data.is_reserve && !p.data.is_expected_only);
           // 빠지는 종목은 빨강으로 쓰고 원인을 문구로 가른다 — 다음 주 교체에서 빠지면

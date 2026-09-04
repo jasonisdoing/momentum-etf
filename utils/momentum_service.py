@@ -1042,14 +1042,15 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
     selected_tickers = {item["ticker"] for item in selected}
 
     # 연속 편입 주 — 재생 경로의 주 시작 보유로 센다. 자격 유지에서 연속의 의미는
-    # '상위 N 연속'이 아니라 **들고 있었는가**다. 최대 11주까지 거슬러 세고, 끊기면 중단.
-    streak_lookback = 11
-    recent_path = hold_path[-streak_lookback:]
+    # '상위 N 연속'이 아니라 **들고 있었는가**다. 끊기는 주까지 거슬러 세고 중단한다.
+    # 조회 창을 두지 않는다 — `hold_path` 가 이미 데이터 시작부터 재생돼 있어 더 거슬러도
+    # 판정을 다시 돌리지 않는다(리스트를 더 순회할 뿐이다). 창을 두면 2주와 14주가
+    # 다른 규칙을 받아, 오래 들고 있는 종목만 편입 후 수익률이 비었다.
     streaks = {item["ticker"]: 1 for item in selected}
     alive = set(streaks)
     # 연속 편입이 시작된 교체일 — '편입 후 수익률'(그날 시가 대비)의 기준점이다.
     streak_entry = {item["ticker"]: rebalance_date for item in selected}
-    for record in reversed(recent_path):
+    for record in reversed(hold_path):
         if not alive:
             break
         week_holdings = set(record["holdings"])
@@ -1059,8 +1060,6 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
                 streak_entry[ticker] = record["rebalance"]
             else:
                 alive.discard(ticker)
-    # 조회 창(11주)을 다 써도 살아 있으면 시작점을 모른다 — 수익률을 지어내지 않는다.
-    streak_capped = alive if len(recent_path) >= streak_lookback else set()
 
     # 이 포트폴리오를 들고 가는 주 — 체결일이 속한 주의 마지막 거래일로 부른다.
     portfolio_week = week_last_trading_day(info["country"], rebalance_date)
@@ -1113,10 +1112,10 @@ def _compute_picks(settings: dict[str, Any]) -> dict[str, Any]:
     def entry_return_pct(ticker: str) -> float | None:
         """편입 후 수익률(%) — 연속 편입 시작 교체일의 **시가** 대비 현재가.
 
-        실제로 들고 있는 종목만 계산한다(신규 선정·미체결은 None). 조회 창(11주)을
-        넘겨 시작점을 모르는 종목도 None — 값을 지어내지 않는다.
+        실제로 들고 있는 종목만 계산한다(신규 선정·미체결은 None). 연속 편입 시작일은
+        재생 경로를 끝까지 거슬러 찾으므로 보유 기간이 길다고 비지 않는다.
         """
-        if ticker not in set(held_tickers) or ticker in streak_capped:
+        if ticker not in set(held_tickers):
             return None
         entry_date = streak_entry.get(ticker)
         if entry_date is None:
