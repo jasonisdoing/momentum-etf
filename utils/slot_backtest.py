@@ -34,7 +34,7 @@ from typing import Any
 import pandas as pd
 
 from utils.pool_settings_store import get_pool_slippage
-from utils.share_allocation import ShareTarget, allocate_integer_shares, backtest_initial_capital
+from utils.share_allocation import backtest_initial_capital
 from utils.trade_stats import summarize_trades
 
 
@@ -209,24 +209,33 @@ def run_slot_backtest(
             row = entry.loc[day]
             picks = [t for t in row[row].index if t not in holdings and not pd.isna(open_df.at[nxt, t])]
             picks.sort(key=lambda ticker: priority_of(ticker, day), reverse=True)
-            picks = picks[:free]
-            # 주수 배분은 운용 현황과 **같은 함수**를 쓴다 — 규칙이 갈라지면 백테스트가
-            # 실제로 못 내는 성과를 내게 된다. 예산은 살 수 있는 현금까지만(팔지 않은
-            # 평가익으로는 못 산다). 손익 계산에는 슬리피지를 얹은 값을 쓴다.
-            fill_price_by_ticker = {t: float(open_df.at[nxt, t]) * (1 + buy_slippage / 100) for t in picks}
+            # 슬롯 하나에 슬롯 몫만큼만 쓴다 — **내림**이라 자기 몫을 넘겨 사지 않는다.
+            # 예전에는 예산을 `슬롯 몫 × 후보 수` 로 한 덩어리로 넘겨 배분 함수에 맡겼는데,
+            # 그 함수는 예산이 남는 한 계속 한 주씩 주므로 1주 값이 비싼 종목이 자기 몫을
+            # 넘겨 사고 그만큼 다른 슬롯이 못 채웠다(슬롯 1,000 에서 ASML 이 1주 1,400 을
+            # 사서 140% 가 되고, 그 바람에 BMY 가 목표 14.93주에 8주만 샀다).
+            #
+            # **최소 1주 원칙** — 슬롯 몫으로 1주도 못 사는 후보는 자리를 차지하지 않고
+            # 다음 순위가 그 슬롯을 채운다. 예전에는 후보를 `[:free]` 로 먼저 자른 뒤
+            # 0주가 나오면 그 슬롯을 빈 채로 뒀다(다음 순위는 쳐다보지도 않았다).
             slot_amount = fill_value / slots if slots else 0.0
-            quantities = allocate_integer_shares(
-                [
-                    ShareTarget(key=ticker, target_amount=slot_amount, price=price)
-                    for ticker, price in fill_price_by_ticker.items()
-                    if price > 0
-                ],
-                budget=min(slot_amount * len(picks), cash),
-            )
+            fill_price_by_ticker: dict[str, float] = {}
+            quantities: dict[str, int] = {}
             for ticker in picks:
-                shares = quantities.get(ticker, 0)
-                if shares <= 0:
+                if len(quantities) >= free:
+                    break
+                price = float(open_df.at[nxt, ticker]) * (1 + buy_slippage / 100)
+                if price <= 0:
                     continue
+                shares = int(
+                    min(slot_amount, cash - sum(quantities[t] * fill_price_by_ticker[t] for t in quantities)) // price
+                )
+                if shares <= 0:
+                    continue  # 1주도 못 사면 자리를 비우지 않고 다음 순위로 넘어간다
+                fill_price_by_ticker[ticker] = price
+                quantities[ticker] = shares
+            for ticker in quantities:
+                shares = quantities[ticker]
                 fill_price = fill_price_by_ticker[ticker]
                 holdings[ticker] = {
                     "open": float(open_df.at[nxt, ticker]),
