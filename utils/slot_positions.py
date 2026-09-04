@@ -143,6 +143,24 @@ def _pool_country(pool: str) -> str:
     return str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
 
 
+def _market_today(pool: str) -> str | None:
+    """그 시장의 **현지 오늘** 날짜(YYYY-MM-DD). 시간대를 모르면 None — 날짜를 지어내지 않는다.
+
+    미국 풀을 한국에서 보면 서버·브라우저의 날짜가 시장의 날짜와 하루 어긋난다. '그 세션이
+    지났는지' 는 시장 현지 날짜로 따져야 한다.
+    """
+    from config import MARKET_SCHEDULES
+
+    tz_name = str(((MARKET_SCHEDULES or {}).get(_pool_country(pool)) or {}).get("timezone") or "").strip()
+    if not tz_name:
+        return None
+    try:
+        return str(pd.Timestamp.now(tz=tz_name).date())
+    except Exception:
+        logger.exception("[slot] 시장 현지 날짜 계산 실패 (%s)", pool)
+        return None
+
+
 def _next_session(pool: str, last: pd.Timestamp) -> str | None:
     """캐시 마지막 거래일 **다음**의 거래일 — 진입·청산이 체결되는 날.
 

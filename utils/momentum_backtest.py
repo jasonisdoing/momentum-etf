@@ -41,6 +41,7 @@ from utils.slot_positions import (
     _cache_refreshed_at,
     _live_quotes,
     _market_caps,
+    _market_today,
     _next_session,
     _pool_country,
     _should_auto_refresh,
@@ -258,16 +259,13 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
 
     entries = pick_entries()
 
-    # ── 마지막 **체결 세션**의 청산만 남긴다 ────────────────────────────────
-    # 매도와 그 자리를 채운 매수는 같은 날 같은 시가에 체결된다. 그래서 그 세션을 기준으로
-    # 자르면 나간 것과 들어온 것이 표에 **짝으로** 남는다(무엇이 무엇을 대체했는지 읽힌다).
-    # 시장 현지 날짜로 자르면, 들어온 쪽은 보유라 남고 나간 쪽만 사라져 한쪽만 보인다.
-    # 더 최근 체결이 생기면 옛 청산은 그때 밀려난다.
-    last_fill = max(
-        [str(h.get("entry_date") or "") for h in holdings] + [str(t["exit_date"]) for t in exited_today],
-        default="",
-    )
-    exited_today = [t for t in exited_today if str(t["exit_date"]) == last_fill]
+    # ── 지난 세션의 청산분은 버린다 ─────────────────────────────────────────
+    # 그 세션이 이미 마감했으면 보유 표에 있을 이유가 없다 — 내역은 「체결」 탭에 남는다.
+    # 들어온 쪽(대체 매수)은 보유라 남고 나간 쪽만 사라지지만, 짝을 맞추자고 지난 매도를
+    # 계속 세워 두면 오늘 할 일과 섞인다.
+    market_today = _market_today(pool)
+    if market_today:
+        exited_today = [t for t in exited_today if str(t["exit_date"]) >= market_today]
 
     # 표시용 시세·부가 정보 — 보유·이탈 행에도 후보 표와 같은 값을 붙인다.
     for item in [*holdings, *exited_today]:

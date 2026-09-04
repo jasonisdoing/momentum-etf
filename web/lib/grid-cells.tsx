@@ -385,9 +385,10 @@ export function slotStatusColumn<
           </span>
         );
       }
-      // 보유는 들고 있던 거래일 수로만 쓴다. 「진입」 같은 말을 따로 두면 언제 산 것인지가
-      // 되레 흐려진다 — 산 날짜는 편입일 컬럼이 보여준다.
-      return <span>{`${p.data.days}일`}</span>;
+      // 보유는 「편입일 보유일」로 쓴다 — 언제 담아 며칠째인지가 한 칸에서 읽힌다.
+      // 다른 상태(예정·이탈)도 앞에 날짜가 붙어 있어 표가 같은 방식으로 읽힌다.
+      const since = p.data.entry_date ? `${formatSlashDateWithWeekday(p.data.entry_date)} ` : "";
+      return <span style={{ whiteSpace: "nowrap" }}>{`${since}${p.data.days}일`}</span>;
     },
   };
 }
