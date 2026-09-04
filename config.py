@@ -311,6 +311,10 @@ MARKET_TREND_SUPERTREND_MULTIPLIER: dict[str, float] = {
     "KRW=X": 1.5,  # 미국달러
 }
 
+# 풀 합성 지수(pool:<풀>)의 슈퍼트렌드 곱수 — 풀은 동적이라 지수처럼 개별 등록할 수 없어
+# 공통 하나를 쓴다. 동일가중 평균이라 개별주 지수보다 변동이 완만해 지수 표준값(3.0)을 따른다.
+MARKET_TREND_SUPERTREND_MULTIPLIER_POOL = 3.0
+
 # ADR(등락비율, Advance-Decline Ratio) 설정.
 # ADR = 기간 내 상승종목수 합 / 하락종목수 합 × 100. 지수는 대형주 몇 종목에 끌려가지만
 # ADR 은 '얼마나 많은 종목이 함께 오르는가'(시장 폭)를 본다. 지수가 오르는데 ADR 이 빠지면

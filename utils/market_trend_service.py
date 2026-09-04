@@ -25,11 +25,12 @@ from config import (
     MARKET_TREND_SCORE_ANCHOR_PERCENTILE,
     MARKET_TREND_SCORE_MA_DAYS,
     MARKET_TREND_SUPERTREND_MULTIPLIER,
+    MARKET_TREND_SUPERTREND_MULTIPLIER_POOL,
     MARKET_TREND_SUPERTREND_PERIOD,
     METRIC_WINDOW_MONTHS,
     TRADING_DAYS_PER_MONTH,
 )
-from utils.market_breadth_service import load_adr_for_index
+from utils.market_breadth_service import load_adr_for_index, load_pool_index_series, pool_of_market_key
 from utils.moving_averages import calculate_moving_average
 from utils.yfinance_guard import yfinance_lock
 
@@ -50,6 +51,46 @@ INDICES: list[dict[str, str]] = [
     # (원화 자산 기준으로 읽으면 강세 = 원화 약세다.)
     {"name": "미국달러", "yf_ticker": "KRW=X"},
 ]
+
+
+def pool_index_entries() -> list[dict[str, str]]:
+    """풀 동일가중 합성 지수 목록 — INDICES 뒤에 붙는 동적 항목.
+
+    티커는 시장 폭과 같은 `pool:<풀>` 키를 그대로 쓴다(ADR 이 이미 그 키로 쌓여 있어
+    지수·ADR·차트가 키 하나로 이어진다). 표시 순서는 종목풀 order 순.
+    """
+    from utils.market_breadth_service import pool_market_key
+    from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
+
+    entries: list[dict[str, Any]] = []
+    for pool in list_available_ticker_types():
+        try:
+            settings = get_ticker_type_settings(pool) or {}
+        except Exception:
+            settings = {}
+        entries.append(
+            {
+                "name": str(settings.get("name") or "").strip() or pool,
+                "yf_ticker": pool_market_key(pool),
+                "order": settings.get("order"),
+            }
+        )
+    entries.sort(key=lambda item: (item["order"] is None, item["order"]))
+    return [{"name": item["name"], "yf_ticker": item["yf_ticker"]} for item in entries]
+
+
+def _pool_index_ohlc(pool: str) -> pd.DataFrame | None:
+    """풀 합성 지수의 OHLC 표 — 적립된 동일가중 지수 레벨(종가)뿐이라 O/H/L 도 종가로 둔다.
+
+    시가·고저를 지어내지 않는 대신 슈퍼트렌드의 ATR 이 종가 간 변동만 보게 된다 —
+    합성 지수라 실제 호가가 없으니 이것이 정직한 표현이다.
+    """
+    level = load_pool_index_series(pool)
+    if level.empty:
+        return None
+    return pd.DataFrame(
+        {"Open": level, "High": level, "Low": level, "Close": level, "Volume": float("nan")}, index=level.index
+    )
 
 # 네이버 차트 (legacy XML) — 일봉 OHLCV 조회는 공통 헬퍼(utils/naver_chart.py)를 쓴다.
 
@@ -163,6 +204,9 @@ def _apply_intraday_boost(close_series: pd.Series | None, yf_ticker: str) -> pd.
     """
     if close_series is None or close_series.empty:
         return close_series
+    # 풀 합성 지수는 외부 시세가 없다 — 적립된 레벨이 전부라 보강할 것이 없다.
+    if pool_of_market_key(yf_ticker) is not None:
+        return close_series
     toss_code = _TOSS_DAILY_OVERLAY.get(yf_ticker)
     if toss_code:
         boosted = _apply_toss_latest_overlay(close_series, toss_code)
@@ -235,10 +279,18 @@ def compute_market_trend() -> dict[str, Any]:
             kor_ohlc_by_ticker[idx["yf_ticker"]] = ohlc
 
     items: list[dict[str, Any]] = []
-    for idx in INDICES:
+    # 풀 합성 지수 — 적립된 지수 레벨(DB)만 읽으므로 외부 조회가 없다. 지수들 뒤에 붙인다.
+    pool_entries = pool_index_entries()
+    for entry in pool_entries:
+        pool = pool_of_market_key(entry["yf_ticker"])
+        ohlc = _pool_index_ohlc(pool) if pool else None
+        if ohlc is not None and not ohlc.empty:
+            kor_ohlc_by_ticker[entry["yf_ticker"]] = ohlc
+
+    for idx in [*INDICES, *pool_entries]:
         kor_ohlc = kor_ohlc_by_ticker.get(idx["yf_ticker"])
         item = _build_item(df, idx["yf_ticker"], idx["name"], ma_days, kor_ohlc)
-        # ADR 단계·지속일수 — 구성종목 데이터가 있는 한국 지수만 값이 붙는다.
+        # ADR 단계·지속일수 — 구성종목 데이터가 있는 한국 지수와 풀 합성 지수만 값이 붙는다.
         adr = load_adr_for_index(idx["yf_ticker"])
         item["adr"] = adr["latest_adr"] if adr else None
         item["adr_level"] = adr["level"] if adr else None
@@ -473,6 +525,9 @@ def _trend_pct_at(
 
 def _resolve_supertrend_params(yf_ticker: str) -> tuple[int, float]:
     """차트 표시용 SuperTrend 기간/곱수를 반환한다."""
+    # 풀 합성 지수는 동적이라 개별 등록 대신 공통 곱수(config)를 쓴다.
+    if pool_of_market_key(yf_ticker) is not None:
+        return MARKET_TREND_SUPERTREND_PERIOD, MARKET_TREND_SUPERTREND_MULTIPLIER_POOL
     if yf_ticker not in MARKET_TREND_SUPERTREND_MULTIPLIER:
         raise ValueError(
             f"MARKET_TREND_SUPERTREND_MULTIPLIER 에 지수 '{yf_ticker}' 의 곱수가 등록되지 않았습니다. "
@@ -579,6 +634,11 @@ def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
 
     compute_index_history 와 시장 레짐 계산이 공유하는 단일 소스.
     """
+    # 풀 합성 지수 — 적립된 동일가중 지수 레벨(DB)이 소스다.
+    pool = pool_of_market_key(yf_ticker)
+    if pool is not None:
+        return _pool_index_ohlc(pool)
+
     index_meta = next((idx for idx in INDICES if idx["yf_ticker"] == yf_ticker), None)
     naver_symbol = (index_meta or {}).get("kor_naver_symbol")
 
@@ -633,7 +693,7 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
     레짐은 SuperTrend 방향(2단계: 상승 accel_up / 하락 accel_down)이다. SuperTrend 는 즉시
     전환이라 지연 없이 전환 가격선(up_price/dn_price)만 함께 준다.
     """
-    index_meta = next((idx for idx in INDICES if idx["yf_ticker"] == yf_ticker), None)
+    index_meta = next((idx for idx in [*INDICES, *pool_index_entries()] if idx["yf_ticker"] == yf_ticker), None)
     name = index_meta["name"] if index_meta else yf_ticker
 
     ma_short_days = MARKET_TREND_SCORE_MA_DAYS
