@@ -14,24 +14,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
-from config import (
-    CACHE_TTL_COMPUTE,
-    MIX_REBALANCE_BAND_MIN_PCT,
-    MIX_REBALANCE_BAND_RATIO,
-    MIX_TARGET_HOLD_DEADBAND_SHARES,
-)
+from config import CACHE_TTL_COMPUTE, MIX_REBALANCE_BAND_MIN_PCT, MIX_REBALANCE_BAND_RATIO
 from utils.logger import get_app_logger
-from utils.mix_sleeve import MOMENTUM, PORTFOLIO, STRATEGY_LABELS, SleeveSpec
-from utils.share_allocation import (
-    ShareTarget,
-    account_target_shares,
-    allocate_integer_shares,
-    backtest_initial_capital,
-)
+from utils.mix_sleeve import STRATEGY_LABELS, SleeveSpec
+from utils.share_allocation import ShareTarget, allocate_integer_shares
 from utils.stock_memo_store import attach_stock_memos
 from utils.trade_stats import summarize_trades
 from utils.ttl_cache import TtlCache
@@ -489,97 +478,12 @@ def _slot_labels(slots: list[SleeveSpec]) -> dict[str, str]:
     return {spec.key: f"{spec.key.upper()}. {spec.label}" for spec in slots}
 
 
-def _fund_buys_with_sells(
-    items: list[dict[str, Any]],
-    row_by_ticker: dict[str, dict[str, Any]],
-    cash_krw: float,
-    krw_rate: float,
-) -> None:
-    """매수 대금이 모자라면 **초과 보유 종목을 팔아** 채운다 — 지시는 실행 가능해야 한다.
-
-    밴드는 종목마다 따로 걸리므로 매수는 통과하고 그 돈을 만들 매도는 잘려 나갈 수 있다.
-    그러면 "현금 0.8% 인데 $514 짜리를 사라"는 지시가 남는다.
-
-    자금원은 **한 주 팔아도 목표 주수가 안 바뀌는 종목**만 쓴다(config 의 문턱 안). 목표가
-    따라 내려오지 않으면 다음 날 "되사라"가 나와 왕복이 된다. 그 안에서 **목표비중에서
-    멀어지는 폭이 작은 순**으로 한 주씩 판다 — 사려는 종목이 목표에 가까워지는 폭이 훨씬
-    커서 계좌 전체로는 오차가 준다.
-
-    후보를 다 써도 모자라면 그 매수를 지시에서 뺀다(팔 것이 없는데 사라고 하지 않는다).
-    매도·매수는 같은 시가에 체결되므로 대금이 제때 들어온다.
-    """
-
-    def price_krw(ticker: str) -> float:
-        price = (row_by_ticker.get(ticker) or {}).get("price")
-        return float(price) * krw_rate if price else 0.0
-
-    buys = [item for item in items if item["side"] == "buy"]
-    if not buys:
-        return
-    need = sum(price_krw(item["ticker"]) * item["quantity"] for item in buys)
-    have = cash_krw + sum(price_krw(item["ticker"]) * item["quantity"] for item in items if item["side"] == "sell")
-    shortfall = need - have
-    if shortfall <= 0:
-        return
-
-    listed = {item["ticker"] for item in items}
-    candidates: list[tuple[float, str, float]] = []
-    for ticker, row in row_by_ticker.items():
-        unit = price_krw(ticker)
-        held = float(row.get("held_quantity") or 0)
-        if ticker in listed or unit <= 0 or held < 2:
-            continue  # 이미 지시가 있거나, 팔면 보유가 사라지는 종목은 자금원이 아니다
-        current, target = float(row.get("current_weight_pct") or 0), float(row.get("weight_pct") or 0)
-        if current <= target:
-            continue  # 목표보다 적게 든 종목에서 더 빼지 않는다
-        ideal = float(row.get("target_amount") or 0) / unit
-        if abs(ideal - (held - 1)) >= MIX_TARGET_HOLD_DEADBAND_SHARES:
-            continue  # 팔면 목표 주수가 따라 내려오지 않아 다음 날 되사기가 된다
-        after = current - unit / (float(row.get("held_value") or 0) or unit) * current
-        candidates.append((abs(after - target) - abs(current - target), ticker, unit))
-    candidates.sort()
-
-    added: list[dict[str, Any]] = []
-    for _cost, ticker, unit in candidates:
-        if shortfall <= 0:
-            break
-        shortfall -= unit
-        row = row_by_ticker[ticker]
-        held = int(float(row.get("held_quantity") or 0))
-        # 목표도 함께 내린다 — 표의 매매수량과 지시가 어긋나지 않고, 다음 날 되사기도 없다.
-        row["target_quantity"] = held - 1
-        row["trade_quantity"] = -1
-        added.append(
-            {
-                "key": f"act-{ticker}",
-                "ticker": ticker,
-                "side": "sell",
-                "title": "매수 자금 매도",
-                "text": f"{row.get('name') or ticker}({ticker}) {held:,}주 → 목표 {held - 1:,}주 · 매수 자금",
-                "date": buys[0]["date"],
-                "quantity": 1,
-            }
-        )
-    if shortfall > 0:
-        # 팔 것을 다 끌어와도 모자란다 — 살 수 없는 지시는 내지 않는다.
-        for item in buys:
-            items.remove(item)
-        for item in added:
-            row = row_by_ticker[item["ticker"]]
-            row["target_quantity"] = int(float(row.get("held_quantity") or 0))
-            row["trade_quantity"] = 0
-        return
-    items.extend(added)
-
-
 def _build_action_groups(
     holdings: list[dict[str, Any]],
     actions: dict[str, Any],
     next_trading_day: str | None,
     *,
     currency: str = "KRW",
-    cash_krw: float = 0.0,
-    krw_rate: float = 1.0,
 ) -> list[dict[str, Any]]:
     """오늘의 액션 — 체결일 묶음(매도 먼저, 같은 방향은 티커 순).
 
@@ -734,9 +638,6 @@ def _build_action_groups(
             }
         )
         seen_keys.add(f"act-{ticker}")
-
-    # 매수 대금이 모자라면 초과 보유를 팔아 채운다 — 지시는 실행 가능해야 한다.
-    _fund_buys_with_sells(items, row_by_ticker, cash_krw, krw_rate)
 
     by_date: dict[str, list[dict[str, Any]]] = {}
     for item in items:
@@ -1009,22 +910,17 @@ def _attach_account_targets(
         if price and krw_rate > 0:
             price_krw_by_ticker[row["ticker"]] = float(price) * krw_rate
 
-    # 목표수량은 종목마다 **가장 가까운 정수**로 정하되, 지금 보유에서 문턱(deadband)만큼
-    # 벌어지지 않았으면 보유를 그대로 둔다. 예전에는 예산 배분(`allocate_integer_shares`)을 썼는데, 마지막 한 주를
-    # 누가 가져가느냐가 가격에 민감해 지시가 생겼다 사라지기를 반복했다. 반올림이 위로 튀어
-    # 매수 대금이 현금을 넘는 문제는 지시 단계에서 초과 보유를 팔아 맞춘다.
-    quantities = account_target_shares(
+    # 주수는 종목마다 따로 반올림하지 않고 **한 번에 배분**한다 — 백테스트가 진입할 때 쓰는
+    # 함수 그대로다(`utils.share_allocation`). 따로 반올림하면 위로 튄 종목이 제 목표 금액보다
+    # 더 써서 총액이 예산을 넘고(못 사는 지시가 나온다), 아래로 깎인 몫은 현금으로 남아 논다.
+    # 예산은 주식 목표금액의 합 — 지금 현금이 아니다(초과 보유를 팔면 그 대금이 들어온다).
+    quantities = allocate_integer_shares(
         [
-            ShareTarget(
-                key=row["ticker"],
-                target_amount=float(row["target_amount"]),
-                price=price_krw,
-                held=float(row.get("held_quantity") or 0),
-            )
+            ShareTarget(key=row["ticker"], target_amount=float(row["target_amount"]), price=price_krw)
             for row in holdings
             if (price_krw := price_krw_by_ticker.get(row["ticker"]))
         ],
-        deadband=MIX_TARGET_HOLD_DEADBAND_SHARES,
+        budget=sum(float(row["target_amount"]) for row in holdings if row["ticker"] in price_krw_by_ticker),
     )
     for row in holdings:
         target_qty = quantities.get(row["ticker"]) if row["ticker"] in price_krw_by_ticker else None
@@ -1530,9 +1426,6 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         payload["actions"],
         next_trading_day,
         currency=currency,
-        # 자금이 모자란 매수는 초과 보유를 팔아 채운다 — 가용 현금은 계좌 원장에서 온다.
-        cash_krw=float((payload.get("account") or {}).get("cash_balance") or 0.0),
-        krw_rate=krw_rate,
     )
     # 지시 밴드 — 화면 설명 문구가 이 값으로 만들어진다(config 이 단일 소스).
     payload["actions"]["band"] = {
@@ -1576,279 +1469,71 @@ def _merge_trades(slots: list[SleeveSpec], results: dict[str, dict[str, Any]]) -
     return holding + closed
 
 
-@dataclass
-class _SlotRuntime:
-    """시뮬레이션 도중의 슬리브 하나 — 보유 주수·현금과 그 슬리브만의 준비물."""
+def _simulate_mix_daily(ctx: dict[str, Any], curves: dict[str, dict[str, float]]) -> Any:
+    """한 계좌에서 슬리브들을 함께 굴린 일별 자산 곡선(시작 1.0). 반환은 pandas.Series.
 
-    spec: SleeveSpec
-    close_df: Any
-    open_df: Any
-    buy_slip: float
-    sell_slip: float
-    top_n: int
-    cash: float
-    shares: dict[str, float] = field(default_factory=dict)
-    # 포트폴리오 — 목표 비중(계좌 전체 대비 %)과 되돌리기 규칙
-    target_weights: dict[str, float] = field(default_factory=dict)
-    band_pct: float = 0.0
-    rebalance_period: str = ""
-    last_period: str | None = None
-    # 모멘텀·신고가 — 신호에서 다시 판정하는 데 필요한 것(같은 슬롯 엔진이라 형태가 같다)
-    breakout: Any = None
-    below_ma: Any = None
-    value_mult: Any = None
-    min_mult: Any = None
+    **판정을 다시 하지 않는다.** 슬리브별 곡선(`utils.mix_sleeve.daily_curve`)은 각 전략
+    엔진이 낸 결과 그대로이고, 여기서는 그 위에 **월초 이관**만 얹는다. 예전에는 이 함수가
+    슬롯 엔진의 청산·진입 루프를 통째로 다시 구현했는데, 그러면 엔진을 고칠 때마다 합성이
+    조용히 갈라진다(실제로 포트폴리오 슬리브는 이 루프에서 아무것도 사지 않아 현금으로만
+    남아 있었다). 판정은 엔진 한 곳, 합성은 읽기만 — 이게 이 파일이 지켜야 할 선이다.
 
-
-def _portfolio_period_key(day: Any, rebalance: str) -> str | None:
-    """그 날짜가 속한 리밸런싱 구간의 키 — 포트폴리오 백테스트 엔진과 같은 규칙.
-
-    'none' 이면 None(최초 매수 뒤로는 되돌리지 않는다).
-    """
-    from utils.portfolio_backtest import _period_key
-
-    return _period_key(day, rebalance)
-
-
-def _build_slot_runtime(
-    spec: SleeveSpec,
-    result: dict[str, Any],
-    context: dict[str, Any] | None,
-    panel: dict[str, Any],
-    months: int,
-    cash: float,
-) -> _SlotRuntime:
-    """슬리브 하나를 시뮬레이션에 쓸 형태로 준비한다.
-
-    모멘텀·신고가는 **신호(진입·청산)에서 다시 판정**한다. 진입 여부가 슬리브 현금에 달려
-    있어, 월초 이관으로 현금이 달라지면 엔진의 체결 내역을 그대로 재생할 수 없기 때문이다.
-    두 전략이 같은 슬롯 엔진이라 신호 표 세 장만 다르다.
-    """
-    from utils.pool_settings_store import get_pool_slippage
-
-    buy_slip, sell_slip = (value / 100.0 for value in get_pool_slippage(spec.pool))
-    runtime = _SlotRuntime(
-        spec=spec,
-        close_df=panel["close"],
-        open_df=panel["open"],
-        buy_slip=buy_slip,
-        sell_slip=sell_slip,
-        # 포트폴리오는 슬롯 개수 개념이 없다 — 담은 종목 수가 곧 슬롯 수다.
-        top_n=len(spec.settings.get("weights") or []) if spec.strategy == PORTFOLIO else int(spec.settings["top_n"]),
-        cash=cash,
-    )
-    if spec.strategy == PORTFOLIO:
-        # 판정이 없다 — 저장된 비중과 주기만 싣는다. 슬리브 몫 안에서의 비율로 환산해
-        # 두면 아래 되돌리기가 슬리브 자산만 보고 계산할 수 있다.
-        # 종목 합이 100 미만이면 나머지는 슬리브 안의 현금이다(그대로 둔다).
-        weights = list(spec.settings.get("weights") or [])
-        runtime.target_weights = {str(row["ticker"]).strip(): float(row["weight_pct"]) / 100.0 for row in weights}
-        runtime.band_pct = float(spec.settings.get("band_pct") or 0.0)
-        runtime.rebalance_period = str(spec.settings.get("rebalance") or "none")
-        return runtime
-
-    # 모멘텀·신고가는 같은 슬롯 엔진이라 신호 표 세 장만 다르다.
-    signals = (context or {})["signals"]
-    if spec.strategy == MOMENTUM:
-        runtime.breakout = signals["eligible"]
-        runtime.below_ma = signals["exit"]
-        runtime.value_mult = signals["priority"]
-        # 모멘텀에는 거래대금 하한이 없다 — 진입 자격은 이평선 두 개가 전부다.
-        runtime.min_mult = None
-        return runtime
-    runtime.breakout = signals["breakout"]
-    runtime.below_ma = signals["below_ma"]
-    runtime.value_mult = signals["value_mult"]
-    runtime.min_mult = spec.settings["min_value_mult"]
-    return runtime
-
-
-def _simulate_mix_daily(
-    ctx: dict[str, Any],
-    results: dict[str, dict[str, Any]],
-    contexts: dict[str, dict[str, Any] | None],
-    months: int,
-) -> Any:  # 반환은 pandas.Series — 임포트는 함수 안에서 한다(모듈 로드를 가볍게 유지)
-    """한 계좌(현금·주수)에서 슬리브들을 함께 굴린 일별 자산 곡선(시작 1.0).
-
-    슬리브가 몇 개든, 어떤 전략 조합이든 같은 코드가 돈다 — 전략별 차이는
-    `_build_slot_runtime` 과 아래 단계별 분기에만 있다.
-
-    - 매월 첫 거래일 시가에 계좌 설정 배분으로 — **현금 우선** 이관. 넘기는 쪽 현금부터 쓰고,
-      모자랄 때만 주식을 비례 매도한다. 받는 쪽은 현금으로만 받는다(기존 보유 불변).
-    슬리피지는 **슬리브마다 자기 종목풀 설정**을 쓴다 — 풀이 다르면 거래비용도 다르다.
-    모든 체결은 시가, 편도 슬리피지를 물린다.
+    월초 첫 거래일에 계좌 설정 배분으로 되돌린다. 넘치는 슬리브에서 빼 모은 뒤 모자란
+    슬리브에 넘기고, 남는 것이 비워 두는 현금 몫이 된다. 이관에는 넘기는 슬리브 종목풀의
+    **매도 슬리피지**를 물린다(받는 쪽이 그 돈을 굴리는 비용은 이미 그 슬리브 곡선 안에 있다).
     """
     import pandas as pd
 
-    from utils.new_high_backtest import _meets_min_mult
+    from utils.pool_settings_store import get_pool_slippage
 
     slots: list[SleeveSpec] = ctx["slots"]
-    capital = backtest_initial_capital(slots[0].pool)
     weights = mix_weights_for_account(ctx["account_id"])
+    keys = [spec.key for spec in slots]
+    sell_slip = {spec.key: get_pool_slippage(spec.pool)[1] / 100.0 for spec in slots}
 
-    # 가격 패널 — 슬리브마다 자기 풀 것이 필요하다. 하나로 쓰면 다른 풀 종목이 통째로 빠져
-    # 그 슬리브가 현금만 남는다. 같은 풀을 공유하면 재사용한다(패널 생성이 가장 비싸다).
-    panels: dict[str, dict[str, Any]] = {}
-    for spec in slots:
-        if spec.pool in panels:
-            continue
-        context = contexts.get(spec.key)
-        if context is not None:
-            panels[spec.pool] = context["panel"]
-            continue
-        from utils.new_high_backtest import build_price_panel, load_price_frames, load_universe
+    # 슬리브 곡선을 한 표로 — 거래일이 다른 풀이 섞이면 쉬는 날은 직전 값을 이어간다
+    # (그 시장이 닫힌 날 그 슬리브의 평가액은 변하지 않는다). 모든 슬리브에 값이 생기기
+    # 전의 앞부분은 버린다 — 한 슬리브만으로 합성을 만들 수는 없다.
+    frame = pd.DataFrame({key: pd.Series(curves[key]) for key in keys}).sort_index().ffill().dropna()
+    if len(frame) < 2:
+        raise RuntimeError("슬리브 전략들의 공통 백테스트 구간이 부족합니다.")
+    growth = (frame / frame.shift(1)).iloc[1:]
 
-        universe = load_universe(spec.pool)
-        panels[spec.pool] = build_price_panel(universe, load_price_frames(universe))
-
-    runtimes = [
-        _build_slot_runtime(
-            spec,
-            results[spec.key],
-            contexts.get(spec.key),
-            panels[spec.pool],
-            months,
-            weights[f"{spec.key}_pct"] / 100.0 * capital,
-        )
-        for spec in slots
-    ]
-
-    # 시뮬레이션 날짜 — 슬리브 패널의 합집합. 같은 국가 풀이면 거래일이 같아 결과가 같고,
-    # 어긋나는 날은 아래 `px` 가 값 없음으로 넘긴다.
-    all_days = sorted({day for panel in panels.values() for day in panel["close"].index})
-    # 시작일 — 요청 기간(`months`)만큼 자른다. 세 전략 모두 신호에서 다시 판정하므로
-    # 시작일이 곧 첫 판정일이다(예전에는 모멘텀만 체결 내역을 재생해 첫 매수일을 찾았다).
-    period_start = all_days[-1] - pd.DateOffset(months=months)
-    span = [day for day in all_days if day >= period_start]
-
+    values = {key: weights[f"{key}_pct"] / 100.0 for key in keys}
     # 두 전략에 주지 않고 비워 두는 몫 — 자라지 않고, 월초에만 다시 맞춘다.
-    cash_reserved = weights["cash_pct"] / 100.0 * capital
-    prev_month: str | None = None
-    curve: dict[str, float] = {}
+    cash_reserved = weights["cash_pct"] / 100.0
+    days = list(frame.index)
+    curve: dict[str, float] = {days[0]: sum(values.values()) + cash_reserved}
 
-    def px(df: pd.DataFrame, day: pd.Timestamp, ticker: str) -> float | None:
-        # 슬리브마다 패널이 다를 수 있어 날짜도 확인한다 — 두 풀의 거래일이 항상 같지는 않다.
-        if ticker not in df.columns or day not in df.index:
-            return None
-        value = df.at[day, ticker]
-        return float(value) if pd.notna(value) else None
+    for i, day in enumerate(days[1:], start=1):
+        for key in keys:
+            values[key] *= float(growth.at[day, key])
 
-    def value_at(rt: _SlotRuntime, day: pd.Timestamp, df: pd.DataFrame) -> float:
-        total = rt.cash
-        for ticker, qty in rt.shares.items():
-            price = px(df, day, ticker) or px(rt.close_df, day, ticker)
-            if price:
-                total += qty * price
-        return total
-
-    for i in range(1, len(span)):
-        prev, day = span[i - 1], span[i]
-        day_key = str(day.date())
-
-        # 1) 청산 — prev 종가 판정 → 오늘 시가 체결 (모멘텀·신고가 공통)
-        for rt in runtimes:
-            if rt.spec.strategy == PORTFOLIO:
-                continue
-            for ticker in list(rt.shares):
-                price = px(rt.close_df, prev, ticker)
-                if price is None:
-                    continue
-                if not bool(rt.below_ma.at[prev, ticker]):
-                    continue
-                fill = px(rt.open_df, day, ticker) or price
-                rt.cash += rt.shares.pop(ticker) * fill * (1 - rt.sell_slip)
-
-        # 2) 월초 배분 되돌리기 — 현금 우선 이관(시가). 교체·진입보다 먼저.
-        #    넘치는 슬리브에서 뽑아 한 곳에 모은 뒤 모자란 슬리브에 현금으로만 넘긴다.
-        #    남는 것이 비워 두는 현금 몫이 된다(대수적으로 목표와 정확히 일치한다).
-        if prev_month is not None and day_key[:7] != prev_month:
-            values = [value_at(rt, day, rt.open_df) for rt in runtimes]
-            total_value = sum(values) + cash_reserved
-            targets = [total_value * weights[f"{rt.spec.key}_pct"] / 100.0 for rt in runtimes]
+        # 월초 배분 되돌리기 — 현금 우선 이관.
+        if day[:7] != days[i - 1][:7]:
+            total = sum(values.values()) + cash_reserved
+            targets = {key: total * weights[f"{key}_pct"] / 100.0 for key in keys}
             pool_cash = cash_reserved
             cash_reserved = 0.0
-
-            for rt, value, target in zip(runtimes, values, targets):
-                excess = value - target
+            for key in keys:
+                excess = values[key] - targets[key]
                 if excess <= 1e-12:
                     continue
-                from_cash = min(rt.cash, excess)
-                remain = excess - from_cash
-                proceeds = 0.0
-                stock_value = value - rt.cash
-                if remain > 1e-12 and stock_value > 0:
-                    fraction = min(remain / stock_value, 1.0)
-                    for ticker in list(rt.shares):
-                        fill = px(rt.open_df, day, ticker) or px(rt.close_df, prev, ticker)
-                        if not fill:
-                            continue
-                        sell_qty = rt.shares[ticker] * fraction
-                        proceeds += sell_qty * fill * (1 - rt.sell_slip)
-                        rt.shares[ticker] -= sell_qty
-                pool_cash += from_cash + proceeds
-                rt.cash -= from_cash
-
-            for rt, value, target in zip(runtimes, values, targets):
-                need = target - value
+                values[key] -= excess
+                pool_cash += excess * (1 - sell_slip[key])
+            for key in keys:
+                need = targets[key] - values[key]
                 if need <= 1e-12:
                     continue
                 give = min(need, pool_cash)
+                values[key] += give
                 pool_cash -= give
-                rt.cash += give
-
             cash_reserved = pool_cash
-        prev_month = day_key[:7]
-
-        # 3) 진입 — prev 종가 판정 → 오늘 시가, 배정은 min(슬리브/N, 현금) (모멘텀·신고가 공통)
-        for rt in runtimes:
-            if rt.spec.strategy == PORTFOLIO:
-                continue
-            free = rt.top_n - len(rt.shares)
-            if free <= 0:
-                continue
-            row = rt.breakout.loc[prev]
-            picks = [
-                ticker
-                for ticker in row[row].index
-                if ticker not in rt.shares
-                and px(rt.open_df, day, ticker) is not None
-                and _meets_min_mult(rt.value_mult.at[prev, ticker], rt.min_mult)
-            ]
-            score_row = rt.value_mult.loc[prev]
-
-            def priority(ticker: str, scores: Any = score_row) -> float:
-                score = scores.get(ticker)
-                return float(score) if pd.notna(score) else 0.0
-
-            picks.sort(key=priority, reverse=True)
-            picks = picks[:free]
-            open_value = value_at(rt, day, rt.open_df)
-            # 슬리브도 백테스트와 같은 배분 함수. 예산은 살 수 있는 현금까지만이다
-            # (팔지 않은 평가익으로는 못 산다).
-            slot_amount = open_value / rt.top_n if rt.top_n else 0.0
-            fills = {ticker: px(rt.open_df, day, ticker) * (1 + rt.buy_slip) for ticker in picks}
-            entered = allocate_integer_shares(
-                [
-                    ShareTarget(key=ticker, target_amount=slot_amount, price=fill)
-                    for ticker, fill in fills.items()
-                    if fill
-                ],
-                budget=min(slot_amount * len(picks), rt.cash),
-            )
-            for ticker in picks:
-                bought = entered.get(ticker, 0)
-                if bought <= 0:
-                    continue
-                rt.shares[ticker] = bought
-                rt.cash -= bought * fills[ticker]
 
         # 비워 둔 현금도 계좌 자산이다 — 곡선에서 빼면 배분을 늘릴수록 총자산이 줄어 보인다.
-        curve[day_key] = sum(value_at(rt, day, rt.close_df) for rt in runtimes) + cash_reserved
+        curve[day] = sum(values.values()) + cash_reserved
 
-    # 시작 1.0 배수로 되돌린다 — 시작 자본은 정수 주수를 세기 위한 것이고, 성과 지표는
-    # 예전과 같은 배수 기준으로 읽어야 한다.
-    return pd.Series(curve).sort_index() / capital
+    return pd.Series(curve).sort_index()
 
 
 def run_mix_backtest(account_id: str | None = None, months: int | None = None) -> dict[str, Any]:
@@ -1903,8 +1588,8 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
 
     curves = {spec.key: sleeve_curve(spec, results[spec.key]) for spec in ctx["slots"]}
 
-    # 합성 곡선 — 한 계좌 금액 기반 시뮬레이션(월초 배분 복구는 현금 우선 이관).
-    mix_curve = _simulate_mix_daily(ctx, results, contexts, months)
+    # 합성 곡선 — 위 슬리브 곡선 위에 월초 배분 이관만 얹는다(판정은 엔진이 이미 했다).
+    mix_curve = _simulate_mix_daily(ctx, curves)
     dates = [d for d in mix_curve.index if d in bench_curve]
     if len(dates) < 2:
         raise RuntimeError("슬리브 전략들의 공통 백테스트 구간이 부족합니다.")

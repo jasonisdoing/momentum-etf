@@ -129,6 +129,11 @@ def run_slot_backtest(
     # 한 번에 무너진다(us_etf 가 마지막 하루로 -100% 가 됐다).
     valuation_close = close_df.ffill()
 
+    def priority_of(ticker: str, day: pd.Timestamp) -> float:
+        """자리가 모자랄 때의 줄 세우기 값 — 모르는 종목은 맨 뒤."""
+        score = priority.at[day, ticker]
+        return float(score) if pd.notna(score) else 0.0
+
     def _value_at(day: pd.Timestamp) -> float:
         """그날 종가로 평가한 총자산 — 현금 + 보유 평가액."""
         total = cash
@@ -193,12 +198,7 @@ def run_slot_backtest(
                     fill_value += held_position["shares"] * float(held_price)
             row = entry.loc[day]
             picks = [t for t in row[row].index if t not in holdings and not pd.isna(open_df.at[nxt, t])]
-
-            def priority_of(ticker: str, today: pd.Timestamp = day) -> float:
-                score = priority.at[today, ticker]
-                return float(score) if pd.notna(score) else 0.0
-
-            picks.sort(key=priority_of, reverse=True)
+            picks.sort(key=lambda ticker: priority_of(ticker, day), reverse=True)
             picks = picks[:free]
             # 주수 배분은 운용 현황과 **같은 함수**를 쓴다 — 규칙이 갈라지면 백테스트가
             # 실제로 못 내는 성과를 내게 된다. 예산은 살 수 있는 현금까지만(팔지 않은
@@ -261,6 +261,23 @@ def run_slot_backtest(
     # 쓰는 합성 슬리브도 같은 순서가 된다.
     open_positions.sort(key=lambda row: row["entry_date"])
 
+    # ── 마지막 날 판정 — **다음 거래일 시가에 할 일** ─────────────────────────
+    # 위 루프는 마지막 날을 판정하지 않는다(체결할 다음 날이 없어서). 그래서 여기서 한 번 더
+    # 본다. 이걸 엔진이 안 내주면 화면이 같은 판정을 **다시 구현**하게 되고, 한쪽만 고치는
+    # 순간 "화면은 사라는데 백테스트는 안 샀다"가 된다 — 그러면 성과 숫자를 믿을 수 없다.
+    planned_exits = [
+        ticker
+        for ticker in holdings
+        if pd.notna(close_df.at[last_day, ticker]) and bool(exit_signal.at[last_day, ticker])
+    ]
+    planned_entries: list[str] = []
+    free = slots - (len(holdings) - len(planned_exits))
+    if free > 0 and not entry_blocked(last_day):
+        row = entry.loc[last_day]
+        picks = [ticker for ticker in row[row].index if ticker not in holdings]
+        picks.sort(key=lambda ticker: priority_of(ticker, last_day), reverse=True)
+        planned_entries = picks[:free]
+
     # 곡선은 시작 1.0 배수로 되돌린다 — 시작 자본은 정수 주수를 세기 위한 것이고,
     # 성과 지표(수익률·MDD·벤치마크 대비)는 배수 기준으로 읽는다.
     strategy = pd.Series(curve, index=span) / initial_capital
@@ -289,6 +306,9 @@ def run_slot_backtest(
         "trades": sorted(trades, key=lambda t: t["exit_date"], reverse=True),
         "as_of": str(last_day.date()),
         "open_positions": open_positions,
+        # 다음 거래일 시가에 할 일 — 화면은 이걸 읽기만 한다(판정을 다시 하지 않는다).
+        "planned_exits": planned_exits,
+        "planned_entries": planned_entries,
         # 빈 슬롯·잔여 현금 비중 — 종목 비중과 합쳐 100 이 된다.
         "sleeve_cash_weight_pct": round(cash / sleeve_value * 100, 4) if sleeve_value > 0 else 100.0,
         "exited_today": [t for t in trades if t["exit_date"] == str(last_day.date())],
