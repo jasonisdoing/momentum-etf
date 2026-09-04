@@ -207,6 +207,9 @@ type Holding = {
   /** 1주도 못 사는 종목 — 계좌가 백테스트 자본보다 작아 도달할 수 없는 목표다.
    *  종목·비중은 백테스트 것 그대로 두고 경고만 붙인다(목록에서 지우지 않는다). */
   unaffordable?: boolean;
+  /** 계좌 금액·단주를 감안해 실제로 도달할 수 있는 비중 — 목표 주수 × 1주 값 ÷ 총자산.
+   *  목표비중(백테스트 값)과의 차이가 단주로 못 채워 현금으로 남는 몫이다. */
+  actual_weight_pct?: number | null;
   held_quantity?: number | null;
   /** 계좌 매입 평단 — 현재가를 실시간으로 덮어쓸 때 수익률을 다시 계산하는 데 쓴다. */
   average_buy_price?: number | null;
@@ -264,6 +267,9 @@ type Positions = {
   summary: {
     stock_pct: number;
     cash_pct: number;
+    /** 계좌 금액·단주를 감안해 실제로 도달할 수 있는 비중(%). 목표와의 차이가 현금으로 남는다. */
+    actual_stock_pct: number;
+    actual_cash_pct: number;
     /** 총 현금 중 두 전략에 주지 않고 비워 둔 몫(%). 나머지는 빈 슬롯에서 생긴다. */
     reserved_cash_pct: number;
     /** 월초에 되돌릴 배분(%) — 화면 헤더에서 저장한 값. `{슬롯키}_pct` 와 `cash_pct`. */
@@ -705,6 +711,7 @@ export function StrategyMixClient() {
             amount: holding.target_amount ?? null,
             shares: holding.target_quantity ?? null,
             unaffordable: holding.unaffordable ?? false,
+            actual_weight_pct: holding.actual_weight_pct ?? null,
           };
         }),
     ];
@@ -893,14 +900,25 @@ export function StrategyMixClient() {
         ] as ColDef<PositionRow>[])
         : []),
       {
-        field: "weight_pct",
-        headerName: "목표비중",
-        headerTooltip: `${slotKeys.map(slotLabel).join(" + ")} 슬리브 몫의 합`,
+        field: "actual_weight_pct",
+        headerName: "실제목표",
+        headerTooltip:
+          "계좌 금액과 단주를 감안해 실제로 도달할 수 있는 비중 (목표 주수 × 1주 값 ÷ 총자산). 목표비중과의 차이가 1주 값을 못 채워 현금으로 남는 몫이다.",
         width: 88,
         type: "numericColumn",
         valueFormatter: (p) =>
           p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`,
         cellStyle: { fontWeight: 600 },
+      },
+      {
+        field: "weight_pct",
+        headerName: "목표비중",
+        headerTooltip: `백테스트가 정한 비중 (${slotKeys.map(slotLabel).join(" + ")} 슬리브 몫의 합). 계좌가 작으면 단주 때문에 여기에 못 미친다 — 실제 도달치는 왼쪽 '실제목표'.`,
+        width: 88,
+        type: "numericColumn",
+        valueFormatter: (p) =>
+          p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`,
+        cellStyle: { color: "var(--text-muted)" },
       },
     ];
     // 계좌 총자산을 알 때만 매매 지시 컬럼을 붙인다 — 목표와 실제 보유의 차이가 주문 수량이다.
@@ -1641,8 +1659,8 @@ export function StrategyMixClient() {
                     }}
                   >
                     <span style={{ fontSize: "var(--fs-lg)", fontWeight: 800 }}>
-                      목표 주식 {positions.summary.stock_pct.toFixed(1)}% · 현금{" "}
-                      {positions.summary.cash_pct.toFixed(1)}%
+                      실제목표 주식 {positions.summary.actual_stock_pct.toFixed(1)}% · 현금{" "}
+                      {positions.summary.actual_cash_pct.toFixed(1)}%
                       {positions.account && totalAsset
                         ? // 고정 자산(IS)도 주식으로 센다 — 목표 주식%에 그 몫이 들어 있어
                           // 빼면 목표와 현재가 짝이 안 맞는다.
@@ -1652,6 +1670,11 @@ export function StrategyMixClient() {
                             100
                           ).toFixed(1)}% · ${((positions.account.cash_balance / totalAsset) * 100).toFixed(1)}%)`
                         : ""}
+                    </span>
+                    {/* 백테스트가 정한 목표 — 단주로 못 채운 만큼 위의 '실제목표'와 벌어진다. */}
+                    <span style={{ ...hintStyle }}>
+                      백테스트 목표 주식 {positions.summary.stock_pct.toFixed(1)}% · 현금{" "}
+                      {positions.summary.cash_pct.toFixed(1)}% — 차이는 1주 값을 못 채워 남는 현금입니다
                     </span>
                     {/* 적용 계좌 — 목표 금액의 기준이 되는 실제 잔고. */}
                     {positions.account ? (
