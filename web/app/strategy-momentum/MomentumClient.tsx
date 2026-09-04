@@ -724,6 +724,7 @@ export function MomentumClient() {
     () => [
       slotStatusColumn<PlanRow>({ live: Boolean(positions?.live) }),
       marketCapRankColumn<PlanRow>("market_cap_rank", !hasMarketCap),
+      highDrawdownColumn<PlanRow>("high_drawdown_pct"),
       {
         field: "ticker",
         headerName: "티커",
@@ -764,7 +765,6 @@ export function MomentumClient() {
       // 이탈까지 남은 여유 — 둘 중 하나라도 0 이하가 되면 다음 거래일 시가에 판다.
       maExitGapColumn<PlanRow>({ field: "short_gap_pct", maDays: view?.settings.short_ma_days }),
       maExitGapColumn<PlanRow>({ field: "long_gap_pct", maDays: view?.settings.long_ma_days }),
-      highDrawdownColumn<PlanRow>("high_drawdown_pct"),
     ],
     [
       fillDay,
@@ -794,6 +794,7 @@ export function MomentumClient() {
         valueFormatter: (p) => (p.value == null ? "-" : String(p.value)),
       },
       marketCapRankColumn<CandidateRow>("market_cap_rank", !hasMarketCap),
+      highDrawdownColumn<CandidateRow>("high_drawdown_pct"),
       {
         field: "ticker",
         headerName: "티커",
@@ -830,7 +831,6 @@ export function MomentumClient() {
       tradeValueMultColumn<CandidateRow>(),
       maExitGapColumn<CandidateRow>({ field: "short_gap_pct", maDays: view?.settings.short_ma_days }),
       maExitGapColumn<CandidateRow>({ field: "long_gap_pct", maDays: view?.settings.long_ma_days }),
-      highDrawdownColumn<CandidateRow>("high_drawdown_pct"),
       {
         field: "market_cap",
         headerName: "시가총액",
