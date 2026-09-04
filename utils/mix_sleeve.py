@@ -210,10 +210,6 @@ class SlotState:
     # 데이터 기준일·장중 반영 — 이 정보를 주는 전략만 채운다.
     as_of: str | None = None
     live: bool = False
-    # 백테스트가 지금 굴리고 있는 슬리브 평가액과 슬롯 하나의 몫(그 풀 통화).
-    # 합성이 계좌 금액을 역산할 때 쓴다 — 판정이 없는 포트폴리오는 0.
-    sleeve_value: float = 0.0
-    slot_amount: float = 0.0
 
 
 def slot_state(spec: SleeveSpec) -> SlotState:
@@ -369,23 +365,11 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
         rebalance=None,
         as_of=raw.get("as_of"),
         live=bool(raw.get("live")),
-        sleeve_value=float(raw.get("sleeve_value") or 0.0),
-        slot_amount=float(raw.get("slot_amount") or 0.0),
     )
 
 
-def run_backtest(
-    spec: SleeveSpec,
-    months: int,
-    context: dict[str, Any] | None = None,
-    initial_capital: float | None = None,
-) -> dict[str, Any]:
-    """이 슬리브를 **혼자** 굴린 백테스트 — 엔진 원본 형태 그대로.
-
-    ``initial_capital`` 을 주면 그 돈으로 돌린다. 합성 운용 현황이 계좌 금액을 역산해 넘겨
-    마지막 날 보유 주수를 그대로 목표 주수로 쓴다. 포트폴리오는 소수 주수로 비중만 맞추는
-    전략이라 시작 자본이 결과를 바꾸지 않는다 — 받지 않는다.
-    """
+def run_backtest(spec: SleeveSpec, months: int, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    """이 슬리브를 **혼자** 굴린 백테스트 — 엔진 원본 형태 그대로."""
     if spec.strategy == PORTFOLIO:
         from utils.portfolio_backtest import run_backtest as portfolio_backtest
 
@@ -393,10 +377,10 @@ def run_backtest(
     if spec.strategy == MOMENTUM:
         from utils.momentum_backtest import run_backtest as sm_backtest
 
-        return sm_backtest(months, spec.settings, context, initial_capital)
+        return sm_backtest(months, spec.settings, context)
     from utils.new_high_backtest import run_backtest as nh_backtest
 
-    return nh_backtest(months, spec.settings, context, initial_capital)
+    return nh_backtest(months, spec.settings, context)
 
 
 def trade_rows(spec: SleeveSpec, result: dict[str, Any]) -> list[dict[str, Any]]:

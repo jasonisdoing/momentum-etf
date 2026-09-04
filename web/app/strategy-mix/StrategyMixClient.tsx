@@ -1,6 +1,6 @@
 "use client";
 
-import type { ColDef } from "ag-grid-community";
+import type { CellStyle, ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconCheck } from "@tabler/icons-react";
 
@@ -204,6 +204,9 @@ type Holding = {
   /** 적용 계좌가 있을 때만 온다 — 계좌 총자산 기준 목표 금액·주수와 현재 보유. */
   target_amount?: number | null;
   target_quantity?: number | null;
+  /** 1주도 못 사는 종목 — 계좌가 백테스트 자본보다 작아 도달할 수 없는 목표다.
+   *  종목·비중은 백테스트 것 그대로 두고 경고만 붙인다(목록에서 지우지 않는다). */
+  unaffordable?: boolean;
   held_quantity?: number | null;
   /** 계좌 매입 평단 — 현재가를 실시간으로 덮어쓸 때 수익률을 다시 계산하는 데 쓴다. */
   average_buy_price?: number | null;
@@ -701,6 +704,7 @@ export function StrategyMixClient() {
             return_pct: returnPct,
             amount: holding.target_amount ?? null,
             shares: holding.target_quantity ?? null,
+            unaffordable: holding.unaffordable ?? false,
           };
         }),
     ];
@@ -914,10 +918,13 @@ export function StrategyMixClient() {
           field: "shares",
           headerName: "목표수량",
           headerTooltip:
-            "목표비중 × 총자산 ÷ 현재가. 주중 이탈이 예상되는 종목은 이탈 후 남을 목표를 (예상)으로 보여준다.",
+            "슬리브 몫 안에서 백테스트 비중대로 배분한 정수 주수. 1주 값보다 몫이 작으면 「1주 못 삼」. 주중 이탈이 예상되는 종목은 이탈 후 남을 목표를 (예상)으로 보여준다.",
           width: 88,
           type: "numericColumn",
           valueFormatter: (p) => {
+            // 1주도 못 사는 종목 — 수량 대신 경고를 쓴다. 계좌가 작아 도달할 수 없는 목표라,
+            // 0 으로만 두면 "안 사도 되는 종목" 으로 읽힌다.
+            if (p.data?.unaffordable) return "1주 못 삼";
             // 예상 이벤트(주중 이탈)가 있는 행만 예상 목표로 겹쳐 쓴다.
             // 가격 변동으로 목표와 조금 어긋나는 것은 예상이 아니라 그대로 둔다.
             const forecast = p.data?.forecast_target_quantity;
@@ -926,10 +933,14 @@ export function StrategyMixClient() {
             }
             return p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR");
           },
-          cellStyle: (p) =>
-            p.data?.is_exit_forecast && p.data?.forecast_target_quantity != null
+          cellStyle: (p): CellStyle | null => {
+            if (p.data?.unaffordable) {
+              return { color: "var(--up-color, #d64545)", fontWeight: 700 };
+            }
+            return p.data?.is_exit_forecast && p.data?.forecast_target_quantity != null
               ? { color: "var(--down-color, #2f6fd0)", fontWeight: 600, opacity: 0.65 }
-              : null,
+              : null;
+          },
         },
         {
           field: "trade_quantity",
