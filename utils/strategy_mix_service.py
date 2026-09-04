@@ -874,21 +874,22 @@ def _sleeve_target_shares(
     sleeve_amount_krw: dict[str, float],
     krw_rate: float,
 ) -> dict[str, int]:
-    """슬리브마다 **자기 몫 예산 안에서** 목표 주수를 정한다.
+    """목표 주수 = **백테스트 주수 × 비율**, 내림. 남는 돈은 현금으로 둔다.
 
-    종목과 비중은 백테스트가 정한 것을 그대로 쓴다 — 계좌 금액으로 백테스트를 다시 돌리지
-    않는다. 자본을 줄이면 비싼 종목을 1주도 못 사서 그 진입을 건너뛰고, 빈 슬롯에 다른 종목이
-    들어와 **보유 종목 자체가 달라진다**(실측: $15,000 은 2026-01-05 ASML 진입, $1,976 은 그걸
-    못 사고 다음 날 SLB 진입 → 7월에 APD 까지 이어졌다). 그러면 전략 화면과 합성 화면이 다른
-    종목을 보게 된다 — AGENTS.md 10 위반이다.
+    비율 = 계좌 슬리브 몫 ÷ 백테스트 슬리브 평가액. 백테스트가 지금 들고 있는 구성을 계좌
+    크기로 줄인 것이 곧 목표다. 소수는 **내림** — 1주 값을 못 채운 나머지는 백테스트에서도
+    현금으로 남아 있으므로 그대로 현금으로 둔다.
 
-    계좌가 작아서 못 사는 것은 목록에서 지우지 않고 **「1주 못 삼」 경고로 드러낸다**.
+    하지 말아야 할 두 가지(둘 다 실제로 넣었다가 걷어냈다):
+      · **남는 돈을 다시 나눠 주는 배분** — 목표를 넘겨 사게 된다. DELL 이 1.58주인데 2주가
+        되고(125%), 그 돈 때문에 BMY 가 13주 목표에 11주로 깎였다. 백테스트는 진입할 때 한 번
+        사고 더 사지 않는다.
+      · **계좌 금액으로 백테스트 다시 돌리기** — 자본이 작으면 비싼 종목을 1주도 못 사 그
+        진입을 건너뛰고 빈 슬롯에 다른 종목이 들어와, 보유 종목 자체가 달라진다
+        (실측: $15,000 은 ASML 진입, $1,976 은 SLB 진입 → 7월에 APD 까지 이어졌다).
 
-    예산을 슬리브별로 끊는 이유: 한 슬리브의 남는 돈으로 다른 슬리브 종목을 사면 배분이
-    무너진다. 배분 함수는 백테스트가 진입할 때 쓰는 것과 같은 함수다.
+    계좌가 작아 1주도 못 사는 종목은 목록에서 지우지 않고 「1주 못 삼」 경고로 드러낸다.
     """
-    from utils.share_allocation import ShareTarget, allocate_integer_shares
-
     targets: dict[str, int] = {}
     for key, state in states.items():
         budget = sleeve_amount_krw.get(key, 0.0)
@@ -896,7 +897,6 @@ def _sleeve_target_shares(
             continue
         # 슬리브 안 비중 — 이미 산 종목은 흘러간 실제 비중(drift_pct), 진입 예정은 슬롯 1칸.
         slot_pct = 100.0 / state.top_n if state.top_n else 0.0
-        items: list[ShareTarget] = []
         for row in state.targets:
             price = row.get("price")
             if not price or row.get("is_exiting"):
@@ -905,14 +905,7 @@ def _sleeve_target_shares(
             weight = slot_pct if weight is None else float(weight)
             if weight <= 0:
                 continue
-            items.append(
-                ShareTarget(
-                    key=str(row["ticker"]).strip(),
-                    target_amount=budget * weight / 100.0,
-                    price=float(price) * krw_rate,
-                )
-            )
-        targets.update(allocate_integer_shares(items, budget=sum(item.target_amount for item in items)))
+            targets[str(row["ticker"]).strip()] = int(budget * weight / 100.0 // (float(price) * krw_rate))
     return targets
 
 
@@ -979,11 +972,7 @@ def _attach_account_targets(
         # 작으면 도달할 수 없는 목표가 생기는데, 이걸 숨기면 백테스트 수익률을 낼 수 있다고
         # 착각하게 된다. 비중은 백테스트 것 그대로 둔다(종목·비중은 절대 바꾸지 않는다).
         row["unaffordable"] = bool(
-            target_qty == 0
-            and float(row.get("weight_pct") or 0) > 0
-            and not row.get("is_sell_all")
-            and price_krw
-            and float(row["target_amount"]) < price_krw
+            target_qty == 0 and float(row.get("weight_pct") or 0) > 0 and not row.get("is_sell_all") and price_krw
         )
     target_tickers = {row["ticker"] for row in holdings}
     sell_all: list[dict[str, Any]] = []
