@@ -148,6 +148,38 @@ from utils.settings_loader import (  # noqa: E402
 
 
 @lru_cache(maxsize=1)
+def load_pool_universe(pool: str) -> list[dict[str, str]]:
+    """종목풀 1개의 투자 후보 목록 — 전략 화면·백테스트가 함께 쓰는 단일 정의.
+
+    제외 종목(exclude_from_ranking)은 후보가 아니므로 뺀다(순위·종목풀 백테스트와 같은 규칙).
+    업종은 공용 맵이 단일 소스다 — 미국은 종목 문서에 없고 지수 구성종목(yfinance)에 있다.
+
+    예전에는 모멘텀·신고가가 각자 이 함수를 갖고 있었고 신고가 것만 업종을 담아, 두 엔진을
+    합친 뒤 모멘텀 화면의 업종 컬럼이 통째로 비었다.
+    """
+    from utils.industry_map import industry_map
+
+    industry_by = industry_map(pool)
+    universe: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in _load_ticker_type_stocks_raw(pool):
+        ticker = str(item.get("ticker") or "").strip()
+        if not ticker or ticker in seen or bool(item.get("exclude_from_ranking")):
+            continue
+        seen.add(ticker)
+        universe.append(
+            {
+                "ticker": ticker,
+                "name": str(item.get("name") or ticker),
+                "pool": pool,
+                # 한국 통합 풀(코스피+코스닥)에서 마켓 구분 표시용 — 없으면 빈 값.
+                "market": str(item.get("market") or "").strip(),
+                "industry": industry_by.get(ticker, ""),
+            }
+        )
+    return universe
+
+
 def _build_active_pool_ticker_map() -> dict[str, list[str]]:
     """활성 종목풀 기준 티커 -> ticker_type 목록 맵을 구성한다."""
     ticker_map: dict[str, list[str]] = {}

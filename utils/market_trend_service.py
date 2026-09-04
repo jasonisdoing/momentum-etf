@@ -92,6 +92,7 @@ def _pool_index_ohlc(pool: str) -> pd.DataFrame | None:
         {"Open": level, "High": level, "Low": level, "Close": level, "Volume": float("nan")}, index=level.index
     )
 
+
 # 네이버 차트 (legacy XML) — 일봉 OHLCV 조회는 공통 헬퍼(utils/naver_chart.py)를 쓴다.
 
 

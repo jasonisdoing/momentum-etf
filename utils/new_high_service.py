@@ -137,30 +137,10 @@ def pool_options() -> list[dict[str, Any]]:
 
 
 def load_universe(pool: str) -> list[dict[str, str]]:
-    """선택한 종목풀의 종목 목록. 제외 종목은 투자 후보가 아니라 제외한다."""
-    from utils.industry_map import industry_map
-    from utils.stock_list_io import _load_ticker_type_stocks_raw
+    """선택한 종목풀의 투자 후보 목록 — 정의는 `utils.stock_list_io` 한 곳이다."""
+    from utils.stock_list_io import load_pool_universe
 
-    # 업종은 공용 맵이 단일 소스 — 미국은 종목 문서에 없고 지수 구성종목(yfinance)에 있다.
-    industry_by = industry_map(pool)
-
-    universe: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for item in _load_ticker_type_stocks_raw(pool):
-        ticker = str(item.get("ticker") or "").strip()
-        if not ticker or ticker in seen or bool(item.get("exclude_from_ranking")):
-            continue
-        seen.add(ticker)
-        universe.append(
-            {
-                "ticker": ticker,
-                "name": str(item.get("name") or ticker),
-                "pool": pool,
-                "market": str(item.get("market") or "").strip(),
-                "industry": industry_by.get(ticker, ""),
-            }
-        )
-    return universe
+    return load_pool_universe(pool)
 
 
 def load_price_frames(universe: list[dict[str, str]]) -> dict[str, pd.DataFrame]:

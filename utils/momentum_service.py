@@ -345,32 +345,10 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_universe(pool: str) -> list[dict[str, str]]:
-    """선택한 종목풀 1개의 종목 목록. [{ticker, name, pool}]
+    """선택한 종목풀의 투자 후보 목록 — 정의는 `utils.stock_list_io` 한 곳이다."""
+    from utils.stock_list_io import load_pool_universe
 
-    제외 종목(exclude_from_ranking)은 투자 후보가 아니므로 제외한다
-    (순위·종목풀 백테스트와 같은 규칙).
-    """
-    from utils.stock_list_io import _load_ticker_type_stocks_raw
-
-    universe: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for item in _load_ticker_type_stocks_raw(pool):
-        ticker = str(item.get("ticker") or "").strip()
-        if not ticker or ticker in seen:
-            continue
-        if bool(item.get("exclude_from_ranking")):
-            continue
-        seen.add(ticker)
-        universe.append(
-            {
-                "ticker": ticker,
-                "name": str(item.get("name") or ticker),
-                "pool": pool,
-                # 한국 통합 풀(코스피+코스닥)에서 마켓 구분 표시용 — 없으면 빈 값.
-                "market": str(item.get("market") or "").strip(),
-            }
-        )
-    return universe
+    return load_pool_universe(pool)
 
 
 def load_price_frames(universe: list[dict[str, str]]) -> dict[str, pd.DataFrame]:
