@@ -262,7 +262,8 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
             held["exit_ma_gap_pct"] = round((float(price) / float(line) - 1) * 100, 2)
 
     def mark_exits(price_of) -> None:
-        """청산 여부를 표시한다. price_of 가 None 을 돌려주면 판정하지 않는다."""
+        """**장중 잠정 종가**로 청산 여부를 다시 본다 — 확정 판정은 엔진 값을 쓴다.
+        price_of 가 None 을 돌려주면 판정하지 않는다."""
         for held in holdings:
             price = price_of(held["ticker"])
             if price is None:
@@ -287,11 +288,11 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
         }
 
     def pick_entries() -> list[dict[str, Any]]:
-        """자리·자격·우선순위를 적용해 다음 시가에 살 종목을 고른다."""
+        """**장중 잠정 종가**로 다시 고른 진입 후보 — 확정 판정은 엔진 값을 쓴다."""
         if adr_gate is not None and adr_gate["blocked"]:
             return []
-        planned_exits = sum(1 for h in holdings if h.get("status") == "sell")
-        free = int(settings["top_n"]) - (len(holdings) - planned_exits)
+        planned = sum(1 for h in holdings if h.get("status") == "sell")
+        free = int(settings["top_n"]) - (len(holdings) - planned)
         if free <= 0:
             return []
         ready = [
@@ -302,16 +303,18 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
         ready.sort(key=lambda row: row["value_mult"] or 0.0, reverse=True)
         return ready[:free]
 
-    def confirmed_close(ticker: str) -> float | None:
-        price = close_df.at[last, ticker]
-        return None if pd.isna(price) else float(price)
-
-    mark_exits(confirmed_close)
+    # 확정 판정('다음 시가에 할 일')은 **엔진이 낸 값**을 그대로 쓴다 — 화면이 다시 판정하면
+    # 백테스트와 갈라진다(tests/test_screen_matches_backtest.py 가 이 관계를 지킨다).
+    engine_exits = set(simulated["planned_exits"])
+    for held in holdings:
+        held["status"] = "sell" if held["ticker"] in engine_exits else "hold"
+        held["exit_reason"] = "이탈" if held["status"] == "sell" else None
     attach_exit_ma_gap()
     # 확정 종가 기준 판정 — 장중이면 아래에서 잠정 종가로 다시 판정하며 예상으로 바꾼다.
     for held in holdings:
         held["is_exit_forecast"] = False
-    entries = pick_entries()
+    row_by_ticker = {row["ticker"]: row for row in rows}
+    entries = [row_by_ticker[ticker] for ticker in simulated["planned_entries"] if ticker in row_by_ticker]
 
     if quotes["live"]:
         # 장이 열려 있다는 것은 위에서 고른 진입·청산이 **오늘 시가에 이미 체결됐다**는 뜻이다.

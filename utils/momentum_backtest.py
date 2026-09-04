@@ -229,12 +229,12 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     row_by_ticker = {row["ticker"]: row for row in rows}
 
     quotes = _live_quotes(pool, tickers, last)
-    # 마지막 거래일 종가로 '다음 시가에 할 일' 을 판정한다. 백테스트 루프는 마지막 날을
-    # 판정하지 않는다(체결할 다음 날이 없어서). 그래서 여기서 한 번 더 본다.
+    # '다음 시가에 할 일' 은 **엔진이 판정한 값**을 그대로 쓴다 — 화면이 다시 판정하면
+    # 백테스트와 갈라진다(tests/test_screen_matches_backtest.py 가 이 관계를 지킨다).
+    planned_exits = set(simulated["planned_exits"])
     for held in holdings:
-        row = row_by_ticker.get(held["ticker"])
-        held["status"] = "hold" if row is None or row["eligible"] else "sell"
-        held["exit_reason"] = None if held["status"] == "hold" else "이탈"
+        held["status"] = "sell" if held["ticker"] in planned_exits else "hold"
+        held["exit_reason"] = "이탈" if held["status"] == "sell" else None
 
     entry_blocked, adr_at = adr_entry_gate(pool, settings.get("adr_floor"))
     adr_gate: dict[str, Any] | None = None
@@ -246,18 +246,8 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
             "blocked": entry_blocked(last),
         }
 
-    def pick_entries() -> list[dict[str, Any]]:
-        """자리·자격·우선순위를 적용해 다음 시가에 살 종목을 고른다(백테스트와 같은 규칙)."""
-        if adr_gate is not None and adr_gate["blocked"]:
-            return []
-        held_tickers = {h["ticker"] for h in holdings}
-        planned_exits = sum(1 for h in holdings if h.get("status") == "sell")
-        free = slots - (len(holdings) - planned_exits)
-        if free <= 0:
-            return []
-        return [row for row in rows if row["eligible"] and row["ticker"] not in held_tickers][:free]
-
-    entries = pick_entries()
+    # 다음 시가에 살 종목 — 엔진이 고른 티커에 화면 표시용 값만 붙인다.
+    entries = [row_by_ticker[ticker] for ticker in simulated["planned_entries"] if ticker in row_by_ticker]
 
     # ── 지난 세션의 청산분은 버린다 ─────────────────────────────────────────
     # 그 세션이 이미 마감했으면 보유 표에 있을 이유가 없다 — 내역은 「체결」 탭에 남는다.
