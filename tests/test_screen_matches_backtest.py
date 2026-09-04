@@ -26,6 +26,20 @@ def _load_env() -> None:
 
 
 def _skip_if_unavailable(error: Exception) -> None:
+    """환경 문제만 건너뛴다 — 나머지는 그대로 터뜨린다.
+
+    예전에는 모든 예외를 SkipTest 로 바꿨다. 그러면 회귀로 코드가 터져도 초록불이 뜬다.
+    DB·네트워크·파일이 없는 경우만 걸러내고, 그 밖의 예외는 실패로 드러나야 한다.
+    """
+    unavailable: tuple[type[BaseException], ...] = (ConnectionError, TimeoutError, OSError)
+    try:
+        from pymongo.errors import PyMongoError
+
+        unavailable = (*unavailable, PyMongoError)
+    except ImportError:
+        pass
+    if not isinstance(error, unavailable):
+        raise error
     raise unittest.SkipTest(f"가격 캐시·DB 를 읽을 수 없어 건너뜁니다: {type(error).__name__}: {error}")
 
 
@@ -119,6 +133,41 @@ class MixScreenMatchesSleeveBacktests(unittest.TestCase):
             targets,
             expected,
             "합성 화면의 목표 종목이 슬리브 백테스트의 보유와 다릅니다 — 합성이 판정을 다시 하고 있습니다.",
+        )
+        self._assert_targets_are_consistent(screen)
+
+    def _assert_targets_are_consistent(self, screen: dict[str, Any]) -> None:
+        """목표 주수·금액·비중이 서로 맞는지 — 종목만 같고 수량이 틀리는 회귀를 잡는다.
+
+        실제로 이 세 가지가 어긋난 적이 있다. 두 슬리브가 같은 종목을 담을 때 목표 주수가
+        합산되지 않고 덮어써졌고(보유 228주에서 115주를 팔라는 지시가 났다), 고정 자산이
+        비중 합계에서 빠져 목표가 27%p 낮게 보였다. 둘 다 티커 집합은 같아 위 비교를 통과했다.
+        """
+        total = float(screen["account"]["total_assets"])
+        self.assertGreater(total, 0)
+
+        weight_sum = 0.0
+        for row in screen["holdings"]:
+            weight = row.get("actual_weight_pct")
+            if weight is not None:
+                weight_sum += float(weight)
+            quantity, amount, price = row.get("target_quantity"), row.get("target_amount"), row.get("price")
+            if quantity is None or not price:
+                continue
+            # 목표 금액은 **주문할 금액**이라 목표 주수와 1주 값의 곱이어야 한다.
+            self.assertAlmostEqual(
+                float(amount) / total * 100.0,
+                float(weight),
+                places=2,
+                msg=f"{row['ticker']} 의 목표 금액과 목표 비중이 다릅니다 — 서로 다른 기준으로 계산됐습니다.",
+            )
+        # 현금은 종목 행이 아니라 요약에 있다 — 빼면 합이 100 이 안 된다.
+        weight_sum += float(screen["summary"]["actual_cash_pct"])
+        self.assertAlmostEqual(
+            weight_sum,
+            100.0,
+            places=1,
+            msg="목표 비중의 합이 100% 가 아닙니다 — 표에서 빠진 몫이 있습니다(고정 자산·현금 행 확인).",
         )
 
 
