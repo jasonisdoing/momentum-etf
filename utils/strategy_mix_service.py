@@ -18,10 +18,20 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
-from config import CACHE_TTL_COMPUTE, MIX_REBALANCE_BAND_MIN_PCT, MIX_REBALANCE_BAND_RATIO
+from config import (
+    CACHE_TTL_COMPUTE,
+    MIX_REBALANCE_BAND_MIN_PCT,
+    MIX_REBALANCE_BAND_RATIO,
+    MIX_TARGET_HOLD_DEADBAND_SHARES,
+)
 from utils.logger import get_app_logger
 from utils.mix_sleeve import MOMENTUM, PORTFOLIO, STRATEGY_LABELS, SleeveSpec
-from utils.share_allocation import ShareTarget, allocate_integer_shares, backtest_initial_capital
+from utils.share_allocation import (
+    ShareTarget,
+    account_target_shares,
+    allocate_integer_shares,
+    backtest_initial_capital,
+)
 from utils.stock_memo_store import attach_stock_memos
 from utils.trade_stats import summarize_trades
 from utils.ttl_cache import TtlCache
@@ -479,12 +489,97 @@ def _slot_labels(slots: list[SleeveSpec]) -> dict[str, str]:
     return {spec.key: f"{spec.key.upper()}. {spec.label}" for spec in slots}
 
 
+def _fund_buys_with_sells(
+    items: list[dict[str, Any]],
+    row_by_ticker: dict[str, dict[str, Any]],
+    cash_krw: float,
+    krw_rate: float,
+) -> None:
+    """매수 대금이 모자라면 **초과 보유 종목을 팔아** 채운다 — 지시는 실행 가능해야 한다.
+
+    밴드는 종목마다 따로 걸리므로 매수는 통과하고 그 돈을 만들 매도는 잘려 나갈 수 있다.
+    그러면 "현금 0.8% 인데 $514 짜리를 사라"는 지시가 남는다.
+
+    자금원은 **한 주 팔아도 목표 주수가 안 바뀌는 종목**만 쓴다(config 의 문턱 안). 목표가
+    따라 내려오지 않으면 다음 날 "되사라"가 나와 왕복이 된다. 그 안에서 **목표비중에서
+    멀어지는 폭이 작은 순**으로 한 주씩 판다 — 사려는 종목이 목표에 가까워지는 폭이 훨씬
+    커서 계좌 전체로는 오차가 준다.
+
+    후보를 다 써도 모자라면 그 매수를 지시에서 뺀다(팔 것이 없는데 사라고 하지 않는다).
+    매도·매수는 같은 시가에 체결되므로 대금이 제때 들어온다.
+    """
+
+    def price_krw(ticker: str) -> float:
+        price = (row_by_ticker.get(ticker) or {}).get("price")
+        return float(price) * krw_rate if price else 0.0
+
+    buys = [item for item in items if item["side"] == "buy"]
+    if not buys:
+        return
+    need = sum(price_krw(item["ticker"]) * item["quantity"] for item in buys)
+    have = cash_krw + sum(price_krw(item["ticker"]) * item["quantity"] for item in items if item["side"] == "sell")
+    shortfall = need - have
+    if shortfall <= 0:
+        return
+
+    listed = {item["ticker"] for item in items}
+    candidates: list[tuple[float, str, float]] = []
+    for ticker, row in row_by_ticker.items():
+        unit = price_krw(ticker)
+        held = float(row.get("held_quantity") or 0)
+        if ticker in listed or unit <= 0 or held < 2:
+            continue  # 이미 지시가 있거나, 팔면 보유가 사라지는 종목은 자금원이 아니다
+        current, target = float(row.get("current_weight_pct") or 0), float(row.get("weight_pct") or 0)
+        if current <= target:
+            continue  # 목표보다 적게 든 종목에서 더 빼지 않는다
+        ideal = float(row.get("target_amount") or 0) / unit
+        if abs(ideal - (held - 1)) >= MIX_TARGET_HOLD_DEADBAND_SHARES:
+            continue  # 팔면 목표 주수가 따라 내려오지 않아 다음 날 되사기가 된다
+        after = current - unit / (float(row.get("held_value") or 0) or unit) * current
+        candidates.append((abs(after - target) - abs(current - target), ticker, unit))
+    candidates.sort()
+
+    added: list[dict[str, Any]] = []
+    for _cost, ticker, unit in candidates:
+        if shortfall <= 0:
+            break
+        shortfall -= unit
+        row = row_by_ticker[ticker]
+        held = int(float(row.get("held_quantity") or 0))
+        # 목표도 함께 내린다 — 표의 매매수량과 지시가 어긋나지 않고, 다음 날 되사기도 없다.
+        row["target_quantity"] = held - 1
+        row["trade_quantity"] = -1
+        added.append(
+            {
+                "key": f"act-{ticker}",
+                "ticker": ticker,
+                "side": "sell",
+                "title": "매수 자금 매도",
+                "text": f"{row.get('name') or ticker}({ticker}) {held:,}주 → 목표 {held - 1:,}주 · 매수 자금",
+                "date": buys[0]["date"],
+                "quantity": 1,
+            }
+        )
+    if shortfall > 0:
+        # 팔 것을 다 끌어와도 모자란다 — 살 수 없는 지시는 내지 않는다.
+        for item in buys:
+            items.remove(item)
+        for item in added:
+            row = row_by_ticker[item["ticker"]]
+            row["target_quantity"] = int(float(row.get("held_quantity") or 0))
+            row["trade_quantity"] = 0
+        return
+    items.extend(added)
+
+
 def _build_action_groups(
     holdings: list[dict[str, Any]],
     actions: dict[str, Any],
     next_trading_day: str | None,
     *,
     currency: str = "KRW",
+    cash_krw: float = 0.0,
+    krw_rate: float = 1.0,
 ) -> list[dict[str, Any]]:
     """오늘의 액션 — 체결일 묶음(매도 먼저, 같은 방향은 티커 순).
 
@@ -640,6 +735,9 @@ def _build_action_groups(
         )
         seen_keys.add(f"act-{ticker}")
 
+    # 매수 대금이 모자라면 초과 보유를 팔아 채운다 — 지시는 실행 가능해야 한다.
+    _fund_buys_with_sells(items, row_by_ticker, cash_krw, krw_rate)
+
     by_date: dict[str, list[dict[str, Any]]] = {}
     for item in items:
         by_date.setdefault(item["date"] or "", []).append(item)
@@ -739,6 +837,19 @@ def _build_action_groups(
             }
         )
     return groups
+
+
+def _attach_industry(holdings: list[dict[str, Any]], country: str) -> None:
+    """행마다 업종을 붙인다 — 순위·모멘텀·신고가 화면과 **같은 공용 맵**이 단일 소스다.
+
+    합성은 여러 종목풀이 섞이고 슬리브에 없는 계좌 보유분(전량 매도 대상)도 있어서, 풀
+    하나가 아니라 그 계좌 **국가 전체**의 맵을 본다. 분류가 없는 종목은 빈 값으로 둔다.
+    """
+    from utils.industry_map import industry_map_for_country
+
+    industry_by = industry_map_for_country(country)
+    for row in holdings:
+        row["industry"] = industry_by.get(str(row.get("ticker") or "").strip(), "")
 
 
 def _attach_disparity(holdings: list[dict[str, Any]], pool_by_source: dict[str, str]) -> None:
@@ -898,16 +1009,22 @@ def _attach_account_targets(
         if price and krw_rate > 0:
             price_krw_by_ticker[row["ticker"]] = float(price) * krw_rate
 
-    # 주수는 종목마다 따로 반올림하지 않고 **한 번에 배분**한다. 따로 반올림하면 위로 튄
-    # 종목이 제 목표 금액보다 더 써서 총액이 예산을 넘고(못 사는 지시가 나온다), 아래로
-    # 깎인 몫은 현금으로 남아 논다. 예산은 주식 목표금액의 합 — 지금 현금이 아니다.
-    quantities = allocate_integer_shares(
+    # 목표수량은 종목마다 **가장 가까운 정수**로 정하되, 지금 보유에서 문턱(deadband)만큼
+    # 벌어지지 않았으면 보유를 그대로 둔다. 예전에는 예산 배분(`allocate_integer_shares`)을 썼는데, 마지막 한 주를
+    # 누가 가져가느냐가 가격에 민감해 지시가 생겼다 사라지기를 반복했다. 반올림이 위로 튀어
+    # 매수 대금이 현금을 넘는 문제는 지시 단계에서 초과 보유를 팔아 맞춘다.
+    quantities = account_target_shares(
         [
-            ShareTarget(key=row["ticker"], target_amount=float(row["target_amount"]), price=price_krw)
+            ShareTarget(
+                key=row["ticker"],
+                target_amount=float(row["target_amount"]),
+                price=price_krw,
+                held=float(row.get("held_quantity") or 0),
+            )
             for row in holdings
             if (price_krw := price_krw_by_ticker.get(row["ticker"]))
         ],
-        budget=sum(float(row["target_amount"]) for row in holdings if row["ticker"] in price_krw_by_ticker),
+        deadband=MIX_TARGET_HOLD_DEADBAND_SHARES,
     )
     for row in holdings:
         target_qty = quantities.get(row["ticker"]) if row["ticker"] in price_krw_by_ticker else None
@@ -1316,6 +1433,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
 
     # 종목명 옆 추세 이탈 배지(❗)용 — 행이 속한 슬리브의 **종목풀 설정** 이평선 기준.
     _attach_disparity(holdings, {spec.key: spec.pool for spec in slots})
+    _attach_industry(holdings, ctx["country"])
 
     # 종목 메모 — 계좌가 아니라 **종목**에 붙는다(utils/stock_memo_store). 순위·자산 관리·
     # 모멘텀 화면과 같은 값이다. 전량 매도 행까지 붙은 뒤에 한 번에 읽는다.
@@ -1408,7 +1526,13 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     # 오늘의 액션 — 화면·슬랙 알람이 같은 결과를 쓴다(조립 단일 소스).
     currency = next((states[key].currency for key in keys if states[key].currency), "KRW")
     payload["actions"]["groups"] = _build_action_groups(
-        payload["holdings"], payload["actions"], next_trading_day, currency=currency
+        payload["holdings"],
+        payload["actions"],
+        next_trading_day,
+        currency=currency,
+        # 자금이 모자란 매수는 초과 보유를 팔아 채운다 — 가용 현금은 계좌 원장에서 온다.
+        cash_krw=float((payload.get("account") or {}).get("cash_balance") or 0.0),
+        krw_rate=krw_rate,
     )
     # 지시 밴드 — 화면 설명 문구가 이 값으로 만들어진다(config 이 단일 소스).
     payload["actions"]["band"] = {

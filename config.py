@@ -233,6 +233,13 @@ MIN_VALUE_MULT_OPTIONS_BY_COUNTRY: dict[str, tuple[float | None, ...]] = {
 MIX_REBALANCE_BAND_RATIO = 0.10
 MIX_REBALANCE_BAND_MIN_PCT = 0.5
 
+# 합성 실계좌에서 **목표 주수를 바꾸는 문턱**(주 단위).
+# 목표금액을 주가로 나눈 값이 지금 보유 주수에서 이만큼 넘게 벌어져야 목표를 옮긴다.
+# 덜 벌어졌으면 지금 주수를 그대로 목표로 둔다.
+# 0.5(반올림 경계)로 두면 경계에 앉은 종목이 가격 한 틱에 뒤집혀, 살 수 없는 지시가 생겼다
+# 사라지기를 반복한다(DELL 1.55주에서 가격 0.07% 변동에 목표가 2주↔1주로 왕복했다).
+MIX_TARGET_HOLD_DEADBAND_SHARES = 0.6
+
 # 편도 슬리피지(%) — 0.05 ~ 0.50, 0.05 단위. 종목풀 설정에서 고른다.
 SLIPPAGE_PCT_OPTIONS: tuple[float, ...] = (0.2, 0.3, 0.4, 0.5, 1.0)
 
