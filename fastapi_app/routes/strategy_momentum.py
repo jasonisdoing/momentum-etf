@@ -7,7 +7,6 @@ from config import HOLDING_CHART_MONTHS
 from fastapi_app.dependencies import require_internal_token
 from fastapi_app.streaming import sse_stream
 from utils.momentum_service import (
-    compute_picks,
     load_settings,
     load_settings_map,
     pool_options,
@@ -116,7 +115,7 @@ def get_strategy_momentum(
         "tuning_month_options": _tuning_month_options(settings),
         "ma_rule": _ma_rule_payload(settings),
         "constraints": _constraints_payload(),
-        "picks": None,
+        "positions": None,
     }
 
 
@@ -143,12 +142,12 @@ def put_strategy_momentum_settings(
         "tuning_month_options": _tuning_month_options(saved),
         "ma_rule": _ma_rule_payload(saved),
         "constraints": _constraints_payload(),
-        "picks": None,
+        "positions": None,
     }
 
 
-@router.post("/picks")
-def post_strategy_momentum_picks(
+@router.post("/positions")
+def post_strategy_momentum_positions(
     pool: str | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict:
@@ -156,7 +155,9 @@ def post_strategy_momentum_picks(
 
     ``pool`` 은 화면이 고른 종목풀이다 — 없으면 저장분이 있는 첫 풀.
     """
-    return compute_picks(load_settings(pool))
+    from utils.momentum_backtest import current_positions
+
+    return current_positions(load_settings(pool))
 
 
 @router.post("/backtest")
@@ -165,21 +166,16 @@ def post_strategy_momentum_backtest(
     pool: str | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """주간 리밸런싱 백테스트.
+    """일간 슬롯 백테스트.
 
-    body: ``{"months": 12, "include_daily": false}``.
-    ``include_daily`` 는 일간 탭을 볼 때만 참으로 보낸다. 성과는 항상 일별로 계산하며,
-    이 값은 응답에 수천 개의 일별 행을 포함할지만 정한다.
+    body: ``{"months": 12}``. 연간·월간·주간·일간 표는 화면이 일별 곡선에서 잘라 만든다.
     """
     from utils.momentum_backtest import run_backtest
 
     months = payload.get("months") if isinstance(payload, dict) else None
     if not isinstance(months, int) or isinstance(months, bool):
         raise ValueError("'months' 는 정수여야 합니다.")
-    include_daily = payload.get("include_daily") if isinstance(payload, dict) else None
-    if not isinstance(include_daily, bool):
-        raise ValueError("'include_daily' 는 참/거짓이어야 합니다.")
-    return run_backtest(months, settings=load_settings(pool), include_daily=include_daily, tuning_only=False)
+    return run_backtest(months, load_settings(pool))
 
 
 @router.post("/tuning")

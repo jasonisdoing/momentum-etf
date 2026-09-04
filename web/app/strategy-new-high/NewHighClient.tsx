@@ -32,7 +32,15 @@ import {
   tradeValueMultColumn,
   marketCapRankColumn,
   stockMemoColumn,
+  highDrawdownColumn,
 } from "@/lib/grid-cells";
+import {
+  VIEW_MODES,
+  toPeriodRows,
+  weekKeyOf,
+  type PeriodRow,
+  type ViewMode,
+} from "@/lib/backtest-periods";
 import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
 import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
 import { renderStockNameCell } from "@/lib/name-highlight";
@@ -166,6 +174,8 @@ type PlanRow = {
   exit_ma_gap_pct?: number | null;
   /** 이탈 이평선 값 — 여유율 툴팁에 함께 보여준다. */
   exit_ma?: number | null;
+  /** 고점 대비(%) — 0 이면 신고점. 모멘텀 운용 현황과 같은 값. */
+  high_drawdown_pct?: number | null;
 };
 
 type Positions = {
@@ -254,73 +264,6 @@ const CURRENT_TABS = [
   { key: "chart", label: "차트" },
 ] as const;
 type CurrentTab = (typeof CURRENT_TABS)[number]["key"];
-
-const VIEW_MODES = [
-  { key: "yearly", label: "연간" },
-  { key: "monthly", label: "월간" },
-  { key: "weekly", label: "주간" },
-  { key: "daily", label: "일간" },
-  { key: "trades", label: "체결" },
-] as const;
-type ViewMode = (typeof VIEW_MODES)[number]["key"];
-
-type PeriodRow = {
-  period: string;
-  strategy_pct: number;
-  benchmark_pct: number;
-  /** 구간 마지막 날의 시장 ADR — 일간·주간(판정일) 컬럼이 쓴다. */
-  adr: number | null;
-  /** 구간 최저 시장 ADR — 월간·연간 컬럼이 쓴다. */
-  adr_min: number | null;
-};
-
-/** 그 날짜가 속한 주의 월요일 — 주간 묶음 키. 로컬 기준으로 조립한다(UTC 파싱은 하루 밀린다). */
-function weekKeyOf(date: string): string {
-  const parsed = new Date(`${date}T00:00:00`);
-  parsed.setDate(parsed.getDate() - ((parsed.getDay() + 6) % 7));
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
-}
-
-/** 누적(%) 시계열을 기간별 수익률로 자른다. 구간 양끝의 누적값 비로 계산한다.
- *  주간은 묶음 키(월요일)와 표시 라벨(그 주 마지막 거래일)이 달라 따로 담는다. */
-function toPeriodRows(daily: Backtest["daily"], keyOf: (date: string) => string, labelByLastDate = false): PeriodRow[] {
-  if (daily.length === 0) return [];
-  const lastByPeriod = new Map<
-    string,
-    { strategy: number; benchmark: number; lastDate: string; adr: number | null; adrMin: number | null }
-  >();
-  const order: string[] = [];
-  for (const point of daily) {
-    const key = keyOf(point.date);
-    if (!lastByPeriod.has(key)) order.push(key);
-    const knownMin = lastByPeriod.get(key)?.adrMin ?? null;
-    const adr = point.adr ?? null;
-    lastByPeriod.set(key, {
-      strategy: point.strategy_pct,
-      benchmark: point.benchmark_pct,
-      lastDate: point.date,
-      adr,
-      adrMin: adr == null ? knownMin : knownMin == null ? adr : Math.min(knownMin, adr),
-    });
-  }
-  // 첫 구간의 기준은 시작 시점(누적 0%)이다.
-  let prev = { strategy: 0, benchmark: 0 };
-  const rows: PeriodRow[] = [];
-  for (const key of order) {
-    const current = lastByPeriod.get(key)!;
-    const step = (now: number, before: number) => ((1 + now / 100) / (1 + before / 100) - 1) * 100;
-    rows.push({
-      period: labelByLastDate ? current.lastDate : key,
-      strategy_pct: step(current.strategy, prev.strategy),
-      benchmark_pct: step(current.benchmark, prev.benchmark),
-      adr: current.adr,
-      adr_min: current.adrMin,
-    });
-    prev = current;
-  }
-  return rows.reverse();
-}
 
 /** 상태 단계 — 색·설명을 여기 한 곳에서만 정한다.
  *
@@ -1002,6 +945,8 @@ export function NewHighClient() {
         getMaValue: (row) => row?.exit_ma,
         formatMaValue: (value) => formatPrice(value),
       }),
+      // 고점 대비 — 모멘텀 운용 현황과 같은 공용 컬럼(두 화면이 같은 값을 본다).
+      highDrawdownColumn<PlanRow>("high_drawdown_pct"),
     ],
     [hasIndustryData, fillDay, positions?.live, draft?.exit_ma_days],
   );

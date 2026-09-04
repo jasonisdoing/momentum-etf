@@ -1531,19 +1531,15 @@ def _build_slot_runtime(
         runtime.rebalance_period = str(spec.settings.get("rebalance") or "none")
         return runtime
 
-    if spec.strategy == MOMENTUM:
-        from utils.momentum_backtest import _rebalance_dates
-        from utils.momentum_service import load_benchmark_close
-
-        for trade in result["trades"]:
-            runtime.buys.setdefault(trade["entry_date"], []).append(trade["ticker"])
-            if trade.get("exit_date"):
-                runtime.sells.setdefault(trade["exit_date"], []).append(trade["ticker"])
-        # 교체일 달력은 그 슬리브 풀의 벤치마크 시계열에서 — 모멘텀 화면과 같은 기준.
-        runtime.rebalance_days = {str(day.date()) for day in _rebalance_dates(load_benchmark_close(spec.pool), months)}
-        return runtime
-
+    # 모멘텀·신고가는 같은 슬롯 엔진이라 신호 표 세 장만 다르다.
     signals = (context or {})["signals"]
+    if spec.strategy == MOMENTUM:
+        runtime.breakout = signals["eligible"]
+        runtime.below_ma = signals["exit"]
+        runtime.value_mult = signals["priority"]
+        # 모멘텀에는 거래대금 하한이 없다 — 진입 자격은 이평선 두 개가 전부다.
+        runtime.min_mult = None
+        return runtime
     runtime.breakout = signals["breakout"]
     runtime.below_ma = signals["below_ma"]
     runtime.value_mult = signals["value_mult"]

@@ -19,7 +19,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
 from utils.env import load_env_if_present
-from utils.momentum_service import compute_picks, load_settings
+from utils.momentum_backtest import current_positions
+from utils.momentum_service import load_settings
 from utils.report import render_table_eaw
 
 
@@ -29,38 +30,37 @@ def main() -> int:
     settings = load_settings()
     print(f"설정: {settings}")
 
-    result = compute_picks(settings)
+    result = current_positions(settings)
 
-    headers = ["순위", "연속", "티커", "종목명", "업종", "판정-단기(%)", "판정-장기(%)", "현재-장기(%)"]
-    aligns = ["r", "c", "l", "l", "l", "r", "r", "r"]
+    headers = ["상태", "티커", "종목명", "업종", "단기 여유(%)", "장기 여유(%)"]
+    aligns = ["c", "l", "l", "l", "r", "r"]
 
     def _pct(value: float | None) -> str:
         return f"{value:+.1f}" if value is not None else "-"
 
-    rows = []
-    for row in result["rows"]:
-        streak = row["streak_weeks"]
-        streak_label = "-" if streak is None else ("신규" if streak <= 1 else f"{streak}주")
-        rank_label = "예상" if row["is_expected_only"] else str(row["rank"]) + ("*" if row["is_reserve"] else "")
-        rows.append(
-            [
-                rank_label,
-                streak_label,
-                row["ticker"],
-                row["name"][:16],
-                row["industry"][:10],
-                _pct(row["signal_short_pct"]),
-                _pct(row["signal_long_pct"]),
-                _pct(row["current_long_pct"]),
-            ]
-        )
+    def _row(status: str, row: dict) -> list[str]:
+        return [
+            status,
+            row["ticker"],
+            str(row.get("name") or "")[:16],
+            str(row.get("industry") or "")[:10],
+            _pct(row.get("short_gap_pct")),
+            _pct(row.get("long_gap_pct")),
+        ]
+
+    rows = [
+        _row("매도 예정" if row.get("status") == "sell" else ("진입" if row.get("is_new") else f"{row['days']}일"), row)
+        for row in result["holdings"]
+    ]
+    rows += [_row("매수 예정", row) for row in result["planned_entries"]]
+    rows += [_row("후보", row) for row in result["candidates"]]
 
     print()
     print(
-        f"모멘텀 전략 {result['portfolio_week']} 주 포트폴리오 · 교체 {result['rebalance_date']} "
-        f"(판정 {result['signal_date']}) · 유니버스 {result['universe_count']} → 후보 {result['candidate_count']}"
+        f"모멘텀 전략 {result['as_of']} 기준 · 다음 체결 {result['next_session']} · "
+        f"보유 {len(result['holdings'])}/{result['top_n']} · 유니버스 {result['universe_count']}"
     )
-    print("점수 = 장기 이평선 이격(%) (전략 전용 이평선) · 순위* = 차순위 후보 · 예상 = 다음 주 편입 예상")
+    print("장기 이평선 이격(%)이 큰 순으로 담는다 · 단기·장기 여유가 0 이하가 되면 다음 거래일 시가에 판다")
     for line in render_table_eaw(headers, rows, aligns):
         print(line)
     return 0

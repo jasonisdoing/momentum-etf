@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from utils import momentum_service, momentum_tuning, strategy_tuning
-from utils.moving_averages import calculate_moving_average
+from core.strategy.scoring import hold_eligible
+from utils import momentum_backtest, momentum_tuning, strategy_tuning
 from utils.perf_metrics import daily_return_metrics
 
 
@@ -151,63 +151,52 @@ class DailyPerformanceMetricsTest(unittest.TestCase):
         self.assertEqual(summary["sortino"], round(float(metrics["sortino"]), 2))
 
 
-class MomentumIntraweekCacheTest(unittest.TestCase):
-    def test_candidate_dates_reuse_same_moving_average_series(self) -> None:
+class MomentumSignalsTest(unittest.TestCase):
+    """모멘텀 신호 표 — 진입·청산·우선순위가 공용 규칙과 같은지."""
+
+    def _panel(self) -> tuple[dict[str, pd.DataFrame], pd.DatetimeIndex]:
         dates = pd.date_range("2026-01-02", periods=12, freq="B")
-        close = pd.Series([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111], index=dates)
-        frames = {"AAA": pd.DataFrame({"Open": close, "Close": close}, index=dates)}
-        universe = [{"ticker": "AAA", "name": "테스트", "pool": "us_stock"}]
-        settings = {
-            "short_ma_days": 2,
-            "long_ma_days": 3,
-            "adr_floor": None,
+        rising = pd.Series([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111], index=dates, dtype=float)
+        falling = pd.Series([120, 119, 118, 117, 116, 115, 114, 113, 112, 111, 110, 109], index=dates, dtype=float)
+        panel = {
+            "close": pd.DataFrame({"UP": rising, "DOWN": falling}),
+            "open": pd.DataFrame({"UP": rising, "DOWN": falling}),
         }
-        series_cache: momentum_service.IntraweekSeriesCache = {}
+        return panel, dates
 
-        with patch(
-            "utils.moving_averages.calculate_moving_average",
-            wraps=calculate_moving_average,
-        ) as moving_average:
-            first = momentum_service.select_candidates(
-                universe,
-                frames,
-                settings,
-                as_of=dates[8],
-                series_cache=series_cache,
-            )
-            second = momentum_service.select_candidates(
-                universe,
-                frames,
-                settings,
-                as_of=dates[10],
-                series_cache=series_cache,
-            )
+    def test_entry_matches_shared_hold_rule(self) -> None:
+        """진입 자격은 순위 화면과 **같은 공용 함수**(`hold_eligible`)여야 한다."""
+        panel, dates = self._panel()
+        signals = momentum_backtest.compute_signals(panel, short_ma_days=2, long_ma_days=3)
+        last = dates[-1]
 
-        expected_first = momentum_service.momentum_metrics(
-            close,
-            short_ma_days=2,
-            long_ma_days=3,
-            as_of=dates[8],
+        # 오르는 종목은 두 이평선 위 — 진입 가능. 내리는 종목은 아래 — 청산 신호.
+        self.assertTrue(bool(signals["eligible"].at[last, "UP"]))
+        self.assertFalse(bool(signals["eligible"].at[last, "DOWN"]))
+        self.assertTrue(bool(signals["exit"].at[last, "DOWN"]))
+        self.assertFalse(bool(signals["exit"].at[last, "UP"]))
+        self.assertTrue(
+            bool(hold_eligible(signals["long"].at[last, "UP"], signals["short"].at[last, "UP"])),
         )
-        expected_second = momentum_service.momentum_metrics(
-            close,
-            short_ma_days=2,
-            long_ma_days=3,
-            as_of=dates[10],
-        )
-        assert expected_first is not None and expected_second is not None
-        self.assertEqual(moving_average.call_count, 2)
-        self.assertAlmostEqual(first[0]["disparity_pct"], expected_first["disparity_pct"])
-        self.assertAlmostEqual(second[0]["disparity_pct"], expected_second["disparity_pct"])
 
-    def test_intraweek_exits_only_fire_on_adr_gate(self) -> None:
-        """주중 매도는 ADR 게이트만 — 게이트가 없으면(하한 미설정) 주중 매도가 없다."""
-        dates = pd.date_range("2026-01-02", periods=10, freq="B")
-        settings = {"adr_floor": None, "pool": "us_stock"}
+    def test_unknown_days_are_neither_entry_nor_exit(self) -> None:
+        """이평선을 못 채운 날은 사지도 팔지도 않는다 — 값을 추정하지 않는다."""
+        panel, dates = self._panel()
+        signals = momentum_backtest.compute_signals(panel, short_ma_days=2, long_ma_days=3)
+        first = dates[0]
 
-        exits = momentum_service.simulate_intraweek_exits(settings, {"AAA"}, dates, dates[5], dates[8])
+        self.assertFalse(bool(signals["known"].at[first, "UP"]))
+        self.assertFalse(bool(signals["eligible"].at[first, "UP"]))
+        self.assertFalse(bool(signals["exit"].at[first, "UP"]))
 
-        self.assertEqual(exits, [])
+    def test_priority_is_long_disparity(self) -> None:
+        """자리 경쟁 우선순위는 순위 화면과 같은 기준(`rank_score`, 장기 이격률)이다."""
+        panel, dates = self._panel()
+        signals = momentum_backtest.compute_signals(panel, short_ma_days=2, long_ma_days=3)
+        last = dates[-1]
+
+        self.assertAlmostEqual(signals["priority"].at[last, "UP"], signals["long"].at[last, "UP"])
+        self.assertGreater(signals["priority"].at[last, "UP"], signals["priority"].at[last, "DOWN"])
 
 
 if __name__ == "__main__":

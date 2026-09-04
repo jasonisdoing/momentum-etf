@@ -138,6 +138,13 @@ def compute_ma_disparity(close_series: pd.Series, ma_days: int) -> float | None:
     return float(score.iloc[-1])
 
 
+def _numeric(values: Any) -> Any:
+    """Series·DataFrame 을 숫자로 — 표(날짜 × 종목) 단위 판정에서 열마다 변환한다."""
+    if isinstance(values, pd.DataFrame):
+        return values.apply(pd.to_numeric, errors="coerce")
+    return pd.to_numeric(values, errors="coerce")
+
+
 def rank_score(long_disparity_pct: Any, short_disparity_pct: Any = None) -> Any:
     """**순위 점수** — 종목을 줄 세우는 단일 기준. 정의는 **장기 이격률**이다.
 
@@ -156,8 +163,8 @@ def rank_score(long_disparity_pct: Any, short_disparity_pct: Any = None) -> Any:
     값이 없으면 None/NaN 을 그대로 돌려준다(임의 값으로 채우지 않는다).
     """
     del short_disparity_pct  # 순위는 장기만 본다 (이탈 판정은 hold_eligible 이 따로 한다)
-    if isinstance(long_disparity_pct, pd.Series):
-        return pd.to_numeric(long_disparity_pct, errors="coerce")
+    if isinstance(long_disparity_pct, (pd.Series, pd.DataFrame)):
+        return _numeric(long_disparity_pct)
     if long_disparity_pct is None or pd.isna(long_disparity_pct):
         return None
     return float(long_disparity_pct)
@@ -202,10 +209,11 @@ def hold_eligible(long_disparity_pct: Any, short_disparity_pct: Any) -> Any:
     스칼라와 Series 둘 다 받는다 — `rank_score` 와 같다. 종목풀 조건(제외 종목)은
     호출부에서 따로 건다.
     """
-    if isinstance(long_disparity_pct, pd.Series) or isinstance(short_disparity_pct, pd.Series):
-        long_series = pd.to_numeric(long_disparity_pct, errors="coerce")
-        short_series = pd.to_numeric(short_disparity_pct, errors="coerce")
-        return long_series.notna() & (long_series > 0) & short_series.notna() & (short_series >= 0)
+    frames = (pd.Series, pd.DataFrame)
+    if isinstance(long_disparity_pct, frames) or isinstance(short_disparity_pct, frames):
+        long_values = _numeric(long_disparity_pct)
+        short_values = _numeric(short_disparity_pct)
+        return long_values.notna() & (long_values > 0) & short_values.notna() & (short_values >= 0)
     if long_disparity_pct is None or short_disparity_pct is None:
         return False
     if pd.isna(long_disparity_pct) or pd.isna(short_disparity_pct):

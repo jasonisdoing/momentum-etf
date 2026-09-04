@@ -131,8 +131,13 @@ def validate_settings(strategy: str, settings: dict[str, Any]) -> dict[str, Any]
 def load_context(spec: SleeveSpec) -> dict[str, Any] | None:
     """백테스트·현재 상태가 함께 쓰는 무거운 준비물(가격 패널). 필요 없는 전략은 None.
 
-    신고가는 패널 생성이 이 계산에서 가장 비싼 부분이라, 한 번 만들어 재사용해야 한다.
+    패널 생성이 이 계산에서 가장 비싼 부분이라, 한 번 만들어 재사용해야 한다. 모멘텀·신고가는
+    같은 슬롯 엔진을 쓰므로 둘 다 필요하고, 포트폴리오는 판정이 없어 필요 없다.
     """
+    if spec.strategy == MOMENTUM:
+        from utils.momentum_backtest import load_context as sm_load_context
+
+        return sm_load_context(spec.settings)
     if spec.strategy == NEW_HIGH:
         from utils.new_high_backtest import load_context as nh_load_context
 
@@ -143,9 +148,9 @@ def load_context(spec: SleeveSpec) -> dict[str, Any] | None:
 def current_state(spec: SleeveSpec) -> dict[str, Any]:
     """오늘 기준 이 슬리브의 선정·보유 상태 — 엔진 원본 형태 그대로."""
     if spec.strategy == MOMENTUM:
-        from utils.momentum_service import compute_picks
+        from utils.momentum_backtest import current_positions as sm_positions
 
-        return compute_picks(spec.settings)
+        return sm_positions(spec.settings)
     if spec.strategy == PORTFOLIO:
         # 포트폴리오는 판정이 없다 — 저장된 목표 비중이 곧 현재 상태다.
         return dict(spec.settings)
@@ -212,111 +217,10 @@ def slot_state(spec: SleeveSpec) -> SlotState:
     raw = current_state(spec)
     # 포트폴리오는 슬롯 개수 개념이 없다 — 담은 종목 수가 곧 슬롯 수다.
     top_n = len(spec.settings.get("weights") or []) if spec.strategy == PORTFOLIO else int(spec.settings["top_n"])
-    if spec.strategy == MOMENTUM:
-        return _momentum_slot_state(spec, raw, top_n)
     if spec.strategy == PORTFOLIO:
         return _portfolio_slot_state(spec, raw)
-    return _new_high_slot_state(spec, raw, top_n)
-
-
-def _momentum_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> SlotState:
-    # 확정된 다음 교체분을 목표로 본다 — 이 화면은 '무엇을 보유해야 하는지' 를 본다.
-    # 주중에 **이미 팔린** 종목(`is_exited`)은 뺀다. 선정 목록에는 자리를 유지한 채로
-    # 남아 있는데 계좌 수량은 0 이라, 두면 방금 판 종목을 다시 사라는 지시가 나온다.
-    selected = [
-        row
-        for row in raw["rows"]
-        if not row.get("is_reserve")
-        and not row.get("is_expected_only")
-        and not row.get("is_exited")
-        and (row.get("rank") or 999) <= top_n
-    ]
-    held = list(raw.get("holdings") or [])
-    held_tickers = {str(row["ticker"]).strip() for row in held}
-    selected_tickers = {str(row["ticker"]).strip() for row in selected}
-
-    # 교체가 확정됐지만 아직 체결 전이면(is_filled=False) 교체분은 체결일에 1/N 으로
-    # 다시 맞춰지므로 흘러간 비중이 아니라 균등 몫을 쓴다.
-    drift_by_ticker: dict[str, float] = {}
-    if raw.get("is_filled"):
-        for row in held:
-            weight = row.get("sleeve_weight_pct")
-            if weight is not None:
-                drift_by_ticker[str(row["ticker"]).strip()] = float(weight)
-
-    targets: list[dict[str, Any]] = []
-    for row in selected:
-        ticker = str(row["ticker"]).strip()
-        holding = bool(row.get("is_held"))
-        if holding:
-            streak = row.get("streak_weeks")
-            status = f"유지 ({streak}주째)" if streak else "유지"
-        else:
-            status = f"매수 예정 ({raw.get('rebalance_date')} 시가)"
-        exiting = bool(row.get("is_exit_pending"))
-        if exiting:
-            status += f" · 매도 예정({row.get('exit_reason') or 'ADR 게이트'})"
-        targets.append(
-            {
-                "ticker": ticker,
-                "name": row.get("name"),
-                "price": row.get("price"),
-                "change_pct": row.get("daily_change_pct"),
-                "status": status,
-                "return_pct": row.get("entry_return_pct"),
-                # 아직 안 산 종목은 보유 기간이 0 이다 — `streak_weeks` 는 '이번 주 선정 1주차'라
-                # 1 이 들어와서, 그대로 쓰면 진입 전인데 1주 들고 있는 것처럼 보인다.
-                "held_label": _held_label(row.get("streak_weeks") if holding else 0, unit="주", zero="0주"),
-                # 차트의 진입 화살표용 — 연속 편입이 시작된 교체일. 모멘텀은 매수가를 따로 들지 않는다.
-                "entry_date": row.get("entry_date"),
-                "entry_price": None,
-                "is_exiting": exiting,
-                "drift_pct": drift_by_ticker.get(ticker),
-            }
-        )
-
-    return SlotState(
-        spec=spec,
-        top_n=top_n,
-        currency=str(raw.get("currency") or "KRW"),
-        targets=targets,
-        held_tickers=held_tickers,
-        held_count=len(held),
-        active_count=sum(1 for row in targets if not row["is_exiting"]),
-        sells=[
-            {
-                "ticker": str(row["ticker"]).strip(),
-                "name": row.get("name") or row["ticker"],
-                # 발동 사유 — 주중 매도는 ADR 게이트(전량)뿐이다(판정 함수가 정한 값).
-                "reason": "시장 ADR 하한 미달",
-                "return_pct": None,
-            }
-            for row in selected
-            if row.get("is_exit_pending")
-        ],
-        # 모멘텀은 주중 개별 이탈 예보가 없다 — 주중 매도는 ADR 게이트(확정 종가 판정)뿐.
-        exit_forecast=[],
-        entries=[],
-        rebalance={
-            "is_filled": bool(raw.get("is_filled")),
-            "fill_date": raw.get("rebalance_date"),
-            "signal_date": raw.get("signal_date"),
-            "portfolio_week": raw.get("portfolio_week"),
-            "buys": [
-                {"ticker": str(r["ticker"]).strip(), "name": r.get("name") or r["ticker"], "price": r.get("price")}
-                for r in selected
-                if str(r["ticker"]).strip() not in held_tickers
-            ],
-            "sells": [
-                {"ticker": str(r["ticker"]).strip(), "name": r.get("name") or r["ticker"]}
-                for r in held
-                if str(r["ticker"]).strip() not in selected_tickers
-            ],
-        },
-        next_expected={
-            str(row["ticker"]).strip(): row for row in (raw.get("rows") or []) if row.get("next_week_expected")
-        },
-    )
+    # 모멘텀·신고가는 같은 슬롯 엔진이라 상태 형태도 같다.
+    return _slot_state_from_positions(spec, raw, top_n)
 
 
 def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
@@ -378,7 +282,7 @@ def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
     )
 
 
-def _new_high_slot_state(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> SlotState:
+def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> SlotState:
     held = list(raw.get("holdings") or [])
     # 빈 슬롯을 채울 진입 예정 — 다음 시가에 사므로 목표에 포함한다. 매도 예정(이탈·손절)
     # 종목은 같은 시가에 슬롯이 비므로 빈 슬롯으로 센다 — 엔진의 pick_entries 와 같은
@@ -473,7 +377,7 @@ def run_backtest(spec: SleeveSpec, months: int, context: dict[str, Any] | None =
     if spec.strategy == MOMENTUM:
         from utils.momentum_backtest import run_backtest as sm_backtest
 
-        return sm_backtest(months, spec.settings, include_daily=True, tuning_only=False)
+        return sm_backtest(months, spec.settings, context)
     from utils.new_high_backtest import run_backtest as nh_backtest
 
     return nh_backtest(months, spec.settings, context)
@@ -482,10 +386,9 @@ def run_backtest(spec: SleeveSpec, months: int, context: dict[str, Any] | None =
 def trade_rows(spec: SleeveSpec, result: dict[str, Any]) -> list[dict[str, Any]]:
     """백테스트 결과의 체결을 **한 형태로** 맞춘다 — 합성 화면의 체결 목록이 이걸 쓴다.
 
-    엔진마다 다른 것:
-      - 모멘텀은 보유중 행을 `trades` 안에 섞어 넣고, 신고가는 `open_positions` 로 따로 준다.
-      - 포트폴리오는 '보유 기간' 개념이 없다 — 체결이 종목 교체가 아니라 **비중 되돌리기**다.
-        그래서 진입·청산일이 같은 한 줄로 만든다(매매 기록으로 읽힌다).
+    모멘텀·신고가는 같은 슬롯 엔진이라 형태가 같다(보유중은 `open_positions`, 청산은 `trades`).
+    포트폴리오만 '보유 기간' 개념이 없다 — 체결이 종목 교체가 아니라 **비중 되돌리기**라
+    진입·청산일이 같은 한 줄로 만든다(매매 기록으로 읽힌다).
 
     공통 키: ticker · name · entry_date · entry_price · exit_date · exit_price ·
              return_pct · days · reason
@@ -532,18 +435,11 @@ def trade_rows(spec: SleeveSpec, result: dict[str, Any]) -> list[dict[str, Any]]
 def daily_curve(spec: SleeveSpec, result: dict[str, Any]) -> dict[str, float]:
     """백테스트 결과의 일별을 **누적 배수(시작 1.0)** 로 통일한다.
 
-    모멘텀은 전일 대비 변동률(%)이라 곱해 나가고, 신고가는 구간 시작 대비 누적(%)이라
-    그대로 배수로 바꾼다. 합성은 이 함수만 쓰고 형태 차이를 알 필요가 없다.
+    세 엔진 모두 구간 시작 대비 누적(%)을 주므로 그대로 배수로 바꾼다.
     """
+    del spec
     rows = sorted(result.get("daily") or [], key=lambda row: row["date"])
     curve: dict[str, float] = {}
-    if spec.strategy == MOMENTUM:
-        value = 1.0
-        for row in rows:
-            if row.get("strategy_pct") is not None:
-                value *= 1 + row["strategy_pct"] / 100
-            curve[row["date"]] = value
-        return curve
     for row in rows:
         if row.get("strategy_pct") is not None:
             curve[row["date"]] = 1 + row["strategy_pct"] / 100
