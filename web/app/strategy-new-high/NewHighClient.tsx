@@ -794,11 +794,10 @@ export function NewHighClient() {
       entry_date: null, entry_price: null, return_pct: null,
       plan: "empty", days: null, is_new: false, exit_reason: null,
     }));
-    // 보유(매도 예정 포함)가 위, 그 아래로 빈 자리 → 이미 끝난 것 → 아직 안 산 것 순.
-    // 진입 예정을 맨 아래에 두는 이유: 지금 계좌에 있는 것과 없는 것을 먼저 가르고, 없는 것
-    // 중에서도 **앞으로 살 것**을 마지막에 봐야 주문 순서와 읽는 순서가 맞는다.
+    // 계속 들고 갈 것 → 팔 것 → 살 것 → 빈 자리 → 이미 끝난 것 순.
+    // 오늘 계좌에서 할 일의 순서다: 그대로 두고, 팔고, 사고, 남은 자리를 확인한다.
     // 같은 묶음 안에서는 **오래 들고 있는 것이 위** — 편입일이 이른 순이다.
-    const rank = { hold: 0, sell: 0, empty: 1, exited: 2, buy: 3 } as const;
+    const rank = { hold: 0, sell: 1, buy: 2, empty: 3, exited: 4 } as const;
     return [...held, ...buys, ...empty, ...exited].sort(
       (a, b) => rank[a.plan] - rank[b.plan] || (a.entry_date ?? "").localeCompare(b.entry_date ?? ""),
     );

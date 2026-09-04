@@ -93,6 +93,10 @@ export function renderHighDrawdownCell(value: number | null | undefined, digits 
   return <span>{`${value.toFixed(digits)}%`}</span>;
 }
 
+/** 이탈 이평선 컬럼 폭 — 헤더가 가장 긴 `MA200 이탈` 이 안 잘리는 값이다.
+ *  96px 이었을 때 세 자리 이평선(MA120·MA200)에서 `MA120 ...` 으로 말줄임됐다. */
+export const MA_EXIT_COLUMN_WIDTH = 112;
+
 /** 이탈 이평선까지 남은 이격 컬럼 — 신고가·모멘텀 운용 현황 공용.
  *  0 이하면 이탈이고, 5% 안으로 가까워지면 빨강·굵게 표시한다. */
 export function maExitGapColumn<T>(options: {
@@ -105,7 +109,7 @@ export function maExitGapColumn<T>(options: {
   return {
     field: options.field,
     headerName: `${label} 이탈`,
-    width: 96,
+    width: MA_EXIT_COLUMN_WIDTH,
     type: "numericColumn",
     headerTooltip: `현재가가 이탈 이평선(${label})보다 몇 % 위인지. 0에 가까울수록 매도가 가깝다.`,
     tooltipValueGetter: (p) => {

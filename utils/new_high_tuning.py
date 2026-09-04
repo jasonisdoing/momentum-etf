@@ -127,7 +127,13 @@ def _run_group(task: tuple) -> list[dict[str, Any]]:
                     "adr_floor": adr_floor,
                 },
                 returns,
-                {"trade_count": result["trade_count"], "win_rate_pct": result["win_rate_pct"]},
+                {
+                    "trade_count": result["trade_count"],
+                    "win_rate_pct": result["win_rate_pct"],
+                    # 평균이익·평균손실 — 승률만 보면 '자주 이기지만 크게 잃는' 조합을 못 가른다.
+                    "avg_win_pct": result["avg_win_pct"],
+                    "avg_loss_pct": result["avg_loss_pct"],
+                },
             )
         )
     return rows

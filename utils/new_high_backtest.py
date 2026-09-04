@@ -180,6 +180,13 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     # 일간 등락률 — 다른 화면(순위·시장추세)과 같은 기준으로 직전 거래일 종가 대비.
     prev_close = close_df.loc[close_df.index[-2]] if len(close_df.index) >= 2 else None
 
+    def high_drawdown(ticker: str) -> float | None:
+        """고점 대비(%) — 모멘텀 운용 현황·순위 화면과 **같은 공용 계산**."""
+        from core.strategy.scoring import drawdown_from_high_pct
+
+        value = drawdown_from_high_pct(close_df[ticker].dropna())
+        return None if value is None else round(value, 2)
+
     rows = []
     for ticker in close_df.columns:
         price = close_df.at[last, ticker]
@@ -214,6 +221,7 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
                 "gap_high_pct": round((float(price) / float(intraday) - 1) * 100, 2) if has_intraday else None,
                 # 0 이상이면 돌파, 음수면 최고 종가까지 남은 거리.
                 "gap_pct": round(gap_pct, 2),
+                "high_drawdown_pct": high_drawdown(ticker),
                 "touched": touched,
                 "value_mult": round(float(value_mult_by[ticker]), 2) if ticker in value_mult_by else None,
                 "value_mult_live": value_mult_live_by.get(ticker),
@@ -457,10 +465,12 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     # 컬럼을 두고 있어 통째로 비어 보였다.
     # 거래대금 배수도 후보 행과 같은 값을 붙인다 — 화면 표준 배치(현재가 뒤 거래대금)용.
     value_mult_by = {row["ticker"]: (row.get("value_mult"), row.get("value_mult_live")) for row in rows}
+    drawdown_by = {row["ticker"]: row["high_drawdown_pct"] for row in rows}
     for item in [*holdings, *simulated["exited_today"]]:
         item["market_cap"] = market_cap_by.get(item["ticker"])
         item["market_cap_rank"] = rank_by_ticker.get(item["ticker"])
         item["value_mult"], item["value_mult_live"] = value_mult_by.get(item["ticker"], (None, None))
+        item["high_drawdown_pct"] = drawdown_by.get(item["ticker"])
 
     # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.
     fill_base = pd.Timestamp(str(quotes["traded_at"])[:10]) if quotes["live"] else last
