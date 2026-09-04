@@ -934,6 +934,10 @@ def _sleeve_target_shares(
             )
             for ticker, amount in amount_by_ticker.items()
         ],
+        # 예산은 **계좌 전체**다 — 슬리브별로 끊지 않는다. 단주 잔여는 어느 슬리브에도 속하지
+        # 않는 자투리이고, 슬리브별로 끊으면 각자 1주 값을 못 채운 돈이 그대로 논다
+        # (aus_account 에서 현금 목표가 27% 까지 올라갔다. 계좌 전체로 돌리니 0.70% 다).
+        # 슬리브 몫이 잠깐 어긋나는 건 월초 이관이 되돌린다.
         budget=sum(sleeve_amount_krw.values()),
     )
 
