@@ -158,7 +158,6 @@ def mix_accounts() -> list[dict[str, Any]]:
                 "mix_slack_enabled": bool(inner.get("mix_slack_enabled")),
                 # 비워 두는 현금 몫(%) — 슬리브 배분은 sleeves 안에 있다.
                 "mix_cash_pct": mix_weights(inner)["cash_pct"],
-                "mix_start_date": inner.get("mix_start_date"),
             }
         )
     accounts.sort(key=lambda item: (item["order"] is None, item["order"]))
@@ -416,14 +415,13 @@ def _sleeve_shares(ctx: dict[str, Any]) -> dict[str, float]:
     슬리브가 오르면 상대적으로 현금 비중이 줄어든다.
 
     곡선 형태(전일 대비 vs 누적)는 어댑터가 **누적 배수**로 통일해 주므로 전략을 가리지 않는다.
-    곡선을 못 구하면(데이터 부족 등) 저장된 월초 배분을 그대로 쓴다 — 임의 보정 대신
-    '아직 안 흘러간 상태' 로 명시한다.
+    보유와 같은 운용 시작일로 곡선을 계산한다. 데이터 부족은 오류로 알린다.
     """
     # 캐시 키는 계좌 + **슬리브 구성**이다. 조합이나 배분을 바꾸면 몫이 달라지므로
     # 구성까지 키에 넣어야 저장 직후 옛 몫이 그대로 나오지 않는다.
     key = _SHARES_CACHE.make_key(
         ctx["account_id"],
-        [(spec.key, spec.strategy, spec.pool) for spec in ctx["slots"]],
+        [(spec.key, spec.strategy, spec.pool, spec.settings) for spec in ctx["slots"]],
         mix_weights_for_account(ctx["account_id"]),
     )
     return _SHARES_CACHE.get_or_compute(key, lambda: _compute_sleeve_shares(ctx))
@@ -431,19 +429,18 @@ def _sleeve_shares(ctx: dict[str, Any]) -> dict[str, float]:
 
 def _compute_sleeve_shares(ctx: dict[str, Any]) -> dict[str, float]:
     from utils.mix_sleeve import daily_curve, load_context, run_backtest
+    from utils.strategy_settings import require_start_date
 
     base = mix_weights_for_account(ctx["account_id"])
 
-    try:
-        curves = {spec.key: daily_curve(spec, run_backtest(spec, 2, load_context(spec))) for spec in ctx["slots"]}
-    except Exception:
-        logger.warning(
-            "[STRATEGY-MIX] %s 슬리브 몫 계산 실패 — 월초 배분 그대로 둔다", ctx["account_id"], exc_info=True
+    curves = {
+        spec.key: daily_curve(
+            spec, run_backtest(spec, 12, load_context(spec), start_date=require_start_date(spec.settings))
         )
-        return base
-
+        for spec in ctx["slots"]
+    }
     if not curves or not all(curves.values()):
-        return base
+        raise RuntimeError("운용 시작일 이후 슬리브 가격 데이터가 부족합니다.")
     trimmed = curves
     # 기준 달 — 어느 슬리브든 마지막 날짜가 같은 달이다(같은 국가 달력).
     month = max(max(curve) for curve in trimmed.values())[:7]
@@ -1202,6 +1199,10 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     slots: list[SleeveSpec] = ctx["slots"]
     keys = [spec.key for spec in slots]
     labels = _slot_labels(slots)
+    from utils.strategy_settings import require_start_date
+
+    for spec in slots:
+        require_start_date(spec.settings)
     states = {spec.key: slot_state(spec) for spec in slots}
 
     # ── 슬리브 몫 — 월초 배분에서 각 슬리브가 흘러간 비율을 역산한다 ──

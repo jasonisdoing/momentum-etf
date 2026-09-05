@@ -36,7 +36,7 @@ from core.strategy.scoring import (
     rank_score,
 )
 from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
-from utils.strategy_settings import coerce_to_options
+from utils.strategy_settings import coerce_to_options, require_start_date, validate_start_date
 
 warnings.filterwarnings("ignore")
 
@@ -116,6 +116,7 @@ def pool_info(pool: str) -> dict[str, str]:
 # 슬리피지는 종목풀 설정(BUY/SELL_SLIPPAGE_PCT)을 쓰고, 백테스트 기간은 화면에서
 # 실행할 때 고른다 — 둘 다 전략 설정으로 저장하지 않는다.
 PER_POOL_SETTING_KEYS = (
+    "start_date",
     "short_ma_days",
     "long_ma_days",
     "adr_floor",
@@ -175,6 +176,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "pool": pool,
+        "start_date": validate_start_date(settings.get("start_date")),
         # 종목 수는 순위·신고가·종목풀 백테스트와 같은 풀 설정을 쓴다.
         "top_n": _pool_top_n_hold(pool),
         "short_ma_days": short_ma_days,
@@ -222,6 +224,7 @@ def pool_options() -> list[dict[str, Any]]:
 # 풀 설정 문서의 대문자 키 ↔ 전략 설정의 소문자 키. 저장 위치는 `pool_settings` 문서 하나다
 # (예전에는 `system_config.momentum_settings` 에 따로 저장돼 같은 풀의 값이 갈렸다).
 _POOL_KEY_BY_SETTING: dict[str, str] = {
+    "start_date": "MOMENTUM_START_DATE",
     "short_ma_days": "SHORT_MA_DAYS",
     "long_ma_days": "LONG_MA_DAYS",
     "adr_floor": "ADR_FLOOR",
@@ -234,11 +237,12 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
     for setting_key, pool_key in _POOL_KEY_BY_SETTING.items():
         if pool_key not in config:
             # None 을 값으로 갖는 항목(ADR 하한 등)은 키 자체는 있어야 한다.
-            if setting_key == "adr_floor":
+            if setting_key in ("adr_floor", "start_date"):
                 continue
             return None
         result[setting_key] = config[pool_key]
     # 없는 선택 항목은 '미설정' 기본값으로 채운다 — 임의 보정이 아니라 스키마 기본이다.
+    result.setdefault("start_date", None)
     result.setdefault("adr_floor", None)
     return result
 
@@ -328,6 +332,7 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
     보유종목 알림·종목풀 백테스트가 곧바로 같은 값을 본다 — 튜닝 「적용」의 목적이다.
     """
     normalized = validate_settings(settings)
+    require_start_date(normalized)
     from utils.pool_settings_store import save_pool_settings
 
     pool = normalized["pool"]

@@ -118,8 +118,6 @@ type AccountOption = AccountOptionBase & {
   mix_slack_enabled?: boolean;
   /** 비워 두는 현금 몫(%) — 슬리브 배분과 합이 100 이다. */
   mix_cash_pct: number;
-  /** 계좌별로 저장한 운용 시작일. 미설정이면 빈칸으로 표시한다. */
-  mix_start_date?: string | null;
 };
 type StrategyOption = { value: string; label: string };
 type MixPoolOption = PoolLabelSource & { country_code?: string | null };
@@ -1237,7 +1235,6 @@ export function StrategyMixClient() {
   // 슬리브 초안 — 저장된 배열 그대로 편집한다. 순서가 곧 슬롯(A·B·C)이라 인덱스로 고친다.
   const [draftSleeves, setDraftSleeves] = useState<MixSleeve[]>([]);
   const [cashPct, setCashPct] = useState("0");
-  const [startDate, setStartDate] = useState("");
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [slackTesting, setSlackTesting] = useState(false);
   // 슬롯 개수 제한 — 백엔드 상수가 단일 소스(응답으로 받는다).
@@ -1247,7 +1244,6 @@ export function StrategyMixClient() {
     setSlackEnabled(Boolean(selectedAccount?.mix_slack_enabled));
     setDraftSleeves(sleeves.map((row) => ({ ...row })));
     setCashPct(selectedAccount ? String(selectedAccount.mix_cash_pct) : "0");
-    setStartDate(selectedAccount?.mix_start_date ?? "");
   }, [selectedAccount, sleeves]);
 
   /** 슬리브 한 칸 수정 — 배열을 통째로 다시 만든다(초안이라 참조 공유를 피한다). */
@@ -1311,7 +1307,6 @@ export function StrategyMixClient() {
       (!selectedAccount.sleeves?.length ||
         slackEnabled !== Boolean(selectedAccount.mix_slack_enabled) ||
         Number(cashPct) !== selectedAccount.mix_cash_pct ||
-        startDate !== (selectedAccount.mix_start_date ?? "") ||
         draftSleeves.length !== sleeves.length ||
         draftSleeves.some((row, index) => {
           const saved = sleeves[index];
@@ -1345,7 +1340,6 @@ export function StrategyMixClient() {
               weight_pct: row.weight_pct,
             })),
             mix_cash_pct: Number(cashPct),
-            mix_start_date: startDate || null,
           },
         }),
       });
@@ -1366,7 +1360,6 @@ export function StrategyMixClient() {
                 })),
                 mix_ready: draftSleeves.every((row) => row.strategy && row.pool),
                 mix_cash_pct: Number(cashPct),
-                mix_start_date: startDate || null,
               }
             : option,
         ),
@@ -1443,6 +1436,7 @@ export function StrategyMixClient() {
                   </label>
                   {selectedAccount ? (
                     <>
+
                       {/* 배분(%)은 전부 아래 슬리브 표에 있다 — 현금도 같은 줄 형태로 둔다. */}
                       <label className="appLabeledField" style={{ marginBottom: 0 }}>
                         <span className="appLabeledFieldLabel">슬랙 알람</span>
@@ -1481,7 +1475,7 @@ export function StrategyMixClient() {
                       className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                       disabled={settingsSaving || !weightOk || !settingsDirty}
                       onClick={() => void saveHeaderSettings()}
-                      title={weightOk ? "운용 시작일·배분·슬랙 알람을 함께 저장한다." : "배분 합계가 100%가 아니면 저장할 수 없다."}
+                      title={weightOk ? "배분·슬랙 알람을 함께 저장한다." : "배분 합계가 100%가 아니면 저장할 수 없다."}
                     >
                       <IconCheck size={16} />
                       <span>{settingsSaving ? "저장 중…" : "저장"}</span>
@@ -1493,19 +1487,6 @@ export function StrategyMixClient() {
                   "이 조합에 몇 %" 가 한눈에 읽힌다(헤더에 늘어놓으면 짝이 안 보인다). */}
               {selectedAccount ? (
                 <div className="mixSleeveRows">
-                  <div className="d-flex align-items-center gap-2 flex-wrap mb-2">
-                    <label htmlFor="mix-start-date" className="mb-0">운용 시작일</label>
-                    <input
-                      id="mix-start-date"
-                      type="date"
-                      className="form-control form-control-sm"
-                      style={{ width: 160 }}
-                      value={startDate}
-                      disabled={settingsSaving}
-                      onChange={(event) => setStartDate(event.target.value)}
-                    />
-                    <span style={hintStyle}>시작일은 저장되며, 현재 계산에는 아직 적용되지 않습니다.</span>
-                  </div>
                   {/* 현금 — 슬리브가 아니라 '비워 두는 몫' 이지만, 배분을 한눈에 맞추려면
                       같은 열에 있어야 한다. 앞쪽 세 칸(전략·종목풀·이름)은 비운다. */}
                   <div className="mixSleeveRow">

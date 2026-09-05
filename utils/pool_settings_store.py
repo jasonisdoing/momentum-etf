@@ -60,6 +60,7 @@ OVERRIDABLE_KEYS: tuple[str, ...] = (
 # 모멘텀 전략 전용 값 — 위 셋과 함께 한 풀의 전략 설정을 이룬다. 기존 문서에 없을 수 있어
 # 로딩 필수값은 아니다(미설정이면 전략 화면에서 저장해야 한다).
 MOMENTUM_KEYS: tuple[str, ...] = (
+    "MOMENTUM_START_DATE",
     "ADR_FLOOR",  # None = 게이트 없음 (모멘텀 ADR 하한 — 시장은 MARKET_REGIME_INDEX 를 따름)
 )
 
@@ -332,6 +333,10 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
         cleaned[key] = num
 
     # 모멘텀 전용 — 숫자/불리언이 섞여 있고 None 이 '없음' 을 뜻한다(임의 보정하지 않는다).
+    if "MOMENTUM_START_DATE" in values:
+        from utils.strategy_settings import validate_start_date
+
+        cleaned["MOMENTUM_START_DATE"] = validate_start_date(values["MOMENTUM_START_DATE"])
     if "ADR_FLOOR" in values:
         raw = values["ADR_FLOOR"]
         floor = None if raw in (None, "", "none") else int(raw)

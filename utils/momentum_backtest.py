@@ -113,6 +113,8 @@ def run_backtest(
     months: int | None = None,
     settings: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
+    *,
+    start_date: str | None = None,
 ) -> dict[str, Any]:
     """모멘텀 백테스트. 일별 자산곡선과 체결 내역을 함께 돌려준다(신고가와 같은 형태)."""
     settings = validate_settings(settings or load_settings())
@@ -125,6 +127,7 @@ def run_backtest(
     return run_slot_backtest(
         pool=settings["pool"],
         months=months,
+        start_date=start_date,
         panel=context["panel"],
         entry=signals["eligible"],
         exit_signal=signals["exit"],
@@ -139,9 +142,7 @@ def run_backtest(
 
 
 # ── 운용 현황 ─────────────────────────────────────────────────────────────
-# 보유 재구성용 시뮬레이션 기간 — 신고가와 같은 값. 슬롯은 청산 규칙이 비우므로 더 거슬러
-# 올라가도 현재 보유가 거의 달라지지 않는다(주간 '자격 유지' 시절의 경로 재생과 다른 점이다).
-_HOLDINGS_LOOKBACK_MONTHS = 12
+# 보유 재구성은 전략·종목풀에 저장된 시작일부터 이어 계산한다.
 _POSITIONS_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="momentum_positions")
 
 
@@ -152,14 +153,17 @@ def current_positions(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     코드로 갈라지면 표시된 보유와 성과가 어긋나므로 계산을 나누지 않는다.
     """
     settings = validate_settings(settings or load_settings())
-    cache_key = _POSITIONS_CACHE.make_key(settings)
-    result = _POSITIONS_CACHE.get_or_compute(cache_key, lambda: _current_positions(settings))
+    from utils.strategy_settings import require_start_date
+
+    start_date = require_start_date(settings)
+    cache_key = _POSITIONS_CACHE.make_key(settings, start_date)
+    result = _POSITIONS_CACHE.get_or_compute(cache_key, lambda: _current_positions(settings, start_date=start_date))
     # 종목 메모는 **캐시 밖**에서 붙인다 — 다른 화면에서 고친 값이 즉시 보여야 한다.
     attach_stock_memos(result["candidates"], result["holdings"], result["planned_entries"], result["exited_today"])
     return result
 
 
-def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
+def _current_positions(settings: dict[str, Any], *, start_date: str | None) -> dict[str, Any]:
     pool = settings["pool"]
     context = load_context(settings)
     name_by, industry_by = context["name_by"], context["industry_by"]
@@ -223,7 +227,7 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     rows.sort(key=lambda row: row["long_gap_pct"], reverse=True)
 
     # 보유·이탈은 백테스트 엔진의 마지막 상태를 그대로 쓴다.
-    simulated = run_backtest(_HOLDINGS_LOOKBACK_MONTHS, settings, context)
+    simulated = run_backtest(DEFAULT_BACKTEST_MONTHS, settings, context, start_date=start_date)
     holdings = simulated["open_positions"]
     exited_today = simulated["exited_today"]
     row_by_ticker = {row["ticker"]: row for row in rows}

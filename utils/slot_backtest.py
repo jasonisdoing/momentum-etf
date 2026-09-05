@@ -100,6 +100,7 @@ def run_slot_backtest(
     name_by: dict[str, str],
     industry_by: dict[str, str],
     exit_reason: str,
+    start_date: str | None = None,
 ) -> dict[str, Any]:
     """일간 슬롯 시뮬레이션. 자산곡선·지표·체결 내역·현재 보유를 한 형태로 돌려준다.
 
@@ -111,7 +112,9 @@ def run_slot_backtest(
     buy_slippage, sell_slippage = get_pool_slippage(pool)
 
     dates = close_df.index
-    span = [d for d in dates if d >= dates[-1] - pd.DateOffset(months=months)]
+    # 합성 운용은 고정 시작일을 쓰고, 기간 비교 백테스트만 이동 구간을 쓴다.
+    start = pd.Timestamp(start_date) if start_date is not None else dates[-1] - pd.DateOffset(months=months)
+    span = [d for d in dates if d >= start]
     if len(span) < 2:
         raise RuntimeError("백테스트할 구간의 가격 데이터가 부족합니다.")
 

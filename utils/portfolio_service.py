@@ -20,6 +20,7 @@ from typing import Any
 
 from config import REBALANCE_BAND_PCT_OPTIONS, REBALANCE_LABELS, REBALANCE_OPTIONS
 from utils.logger import get_app_logger
+from utils.strategy_settings import require_start_date, validate_start_date
 
 logger = get_app_logger()
 
@@ -33,7 +34,7 @@ DEFAULT_BACKTEST_MONTHS = 12
 MAX_HOLDINGS = 30
 
 # 풀을 바꾸면 그 풀의 값으로 전환되는 항목. 여기 빠진 키는 저장을 눌러도 버려진다.
-PER_POOL_SETTING_KEYS = ("weights", "cash_weight_pct", "rebalance", "band_pct")
+PER_POOL_SETTING_KEYS = ("start_date", "weights", "cash_weight_pct", "rebalance", "band_pct")
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     # [{ticker, weight_pct}] — 순서가 화면 표 순서다(사용자가 드래그로 바꾼다).
@@ -246,6 +247,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "pool": pool,
+        "start_date": validate_start_date(settings.get("start_date")),
         "weights": weights,
         "cash_weight_pct": cash,
         "rebalance": rebalance,
@@ -292,6 +294,7 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """검증 후 그 풀의 설정으로 저장한다. 다른 풀의 저장분은 건드리지 않는다."""
     normalized = validate_settings(settings)
+    require_start_date(normalized)
     pool = normalized["pool"]
     per_pool = {key: normalized[key] for key in PER_POOL_SETTING_KEYS}
     _db()[_CONFIG_COLLECTION].update_one(

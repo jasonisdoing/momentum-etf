@@ -1,5 +1,7 @@
 "use client";
 
+import { StrategyStartDate } from "../components/StrategyStartDate";
+
 import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconCheck } from "@tabler/icons-react";
@@ -98,6 +100,7 @@ const CURRENT_NOTES = [
 // 풀별로 따로 저장되는 설정 — 풀 셀렉트를 바꾸면 그 풀의 저장분으로 폼이 전환된다.
 // 슬리피지는 종목풀 설정을, 백테스트 기간은 실행할 때 고른 값을 쓴다 — 여기 없다.
 type PoolSettings = {
+  start_date?: string | null;
   /** 종목풀 설정의 보유종목 수 — 이 화면에서는 표시·계산에만 쓴다. */
   top_n: number;
   short_ma_days: number;
@@ -344,11 +347,13 @@ export function MomentumClient() {
   // 이평선 초안 — 종목풀 설정에 풀별로 저장된다(순위 화면·보유종목 알림과 같은 값).
   const [draftMaRule, setDraftMaRule] = useState<{ short: number; long: number } | null>(null);
   // ADR 하한 — "" 은 없음(기본). 시장은 풀 설정의 시장 레짐 지수를 따른다.
+  const [draftStartDate, setDraftStartDate] = useState("");
   const [draftAdrFloor, setDraftAdrFloor] = useState<string>("");
 
   // 풀별 설정을 폼 초안에 채운다 — 풀 셀렉트 전환과 응답 반영이 같은 경로를 쓴다.
   const fillDrafts = useCallback((values: PoolSettings) => {
     setDraft({});
+    setDraftStartDate(values.start_date ?? "");
     setDraftMaRule({ short: values.short_ma_days, long: values.long_ma_days });
     setDraftAdrFloor(values.adr_floor == null ? "" : String(values.adr_floor));
   }, []);
@@ -384,9 +389,10 @@ export function MomentumClient() {
       const requested = (payload as { requested_pool?: string }).requested_pool;
       if (requested && data.settings_by_pool?.[requested] == null) {
         setDraftPool(requested);
+        setDraftStartDate("");
         return null;
       }
-      return data.settings.pool;
+      return data.settings.start_date ? data.settings.pool : null;
     } catch (error) {
       // 설정을 못 받으면 값을 지어내지 않는다 — 폼을 그리지 않고 실패만 알린다.
       // (기본값을 그렸다가 그대로 저장되면 저장돼 있던 설정이 덮어써진다.)
@@ -454,7 +460,7 @@ export function MomentumClient() {
         // 백테스트는 어느 설정이 바뀌든 결과가 달라지므로 비운다.
         setBacktest(null);
         toast.success(`${successMessage} 선정을 다시 계산합니다.`);
-        await runPicks(saved.settings.pool);
+        if (saved.settings.start_date) await runPicks(saved.settings.pool);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "설정을 저장하지 못했습니다.");
       } finally {
@@ -474,13 +480,14 @@ export function MomentumClient() {
   const hasIndustryData = poolHasIndustry(selectedPoolOption);
   const hasMarketCap = poolHasMarketCap(selectedPoolOption);
   const saveSettings = useCallback(async () => {
-    if (draftMaRule == null) {
+    if (draftMaRule == null || !draftStartDate) {
       toast.error("설정 값이 올바르지 않습니다.");
       return;
     }
     await persistSettings(
       {
         pool: draftPool,
+        start_date: draftStartDate,
         // 종목 수(공통 config)·업종 상한(폐기)은 더 이상 보내지 않는다.
         top_n: view?.settings.top_n ?? 0,
         // 이평선은 전략 전용 값 — 설정의 일부로 풀별 저장한다(종목풀 설정과 무관).
@@ -490,7 +497,7 @@ export function MomentumClient() {
       },
       "설정을 저장했습니다.",
     );
-  }, [draftAdrFloor, draftMaRule, draftPool, persistSettings, toast, view?.settings.top_n]);
+  }, [draftStartDate, draftAdrFloor, draftMaRule, draftPool, persistSettings, toast, view?.settings.top_n]);
 
   // 풀 셀렉트 변경 — 그 풀의 저장 설정이 있으면 **즉시 전환·저장·재선정**한다
   // (전환은 초안이 아니라 컨텍스트 스위치다). 저장분이 없는 풀(첫 설정)만 초안으로
@@ -504,9 +511,14 @@ export function MomentumClient() {
       // 튜닝 결과는 StrategyTuning 이 key={draftPool} 로 재마운트되며 함께 비워진다.
       setBacktest(null);
       const saved = view?.settings_by_pool?.[pool];
+      setDraftStartDate(saved?.start_date ?? "");
       if (saved) {
         fillDrafts(saved);
-        void persistSettings({ pool, ...saved }, "풀을 전환했습니다.");
+        if (saved.start_date) {
+          void persistSettings({ pool, ...saved }, "풀을 전환했습니다.");
+        } else {
+          setView((current) => current && ({ ...current, settings: { pool, ...saved }, positions: null }));
+        }
       }
     },
     [fillDrafts, persistSettings, view],
@@ -711,13 +723,14 @@ export function MomentumClient() {
     if (view.coerced?.length) return true;
     return (
       draftPool !== saved.pool ||
+      draftStartDate !== (saved.start_date ?? "") ||
       (draftAdrFloor === "" ? null : Number(draftAdrFloor)) !== (saved.adr_floor ?? null) ||
       (draftMaRule != null &&
         view.ma_rule != null &&
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
           draftMaRule.long !== view.ma_rule.long_ma_days))
     );
-  }, [draftAdrFloor, draftMaRule, draftPool, view]);
+  }, [draftStartDate, draftAdrFloor, draftMaRule, draftPool, view]);
 
   const fillDay = positions?.next_session ?? "다음 거래일";
   const country = positions?.country ?? "";
@@ -992,6 +1005,9 @@ export function MomentumClient() {
         {/* ① 변수 설정 */}
         <div className="card appCard">
           <div className="card-body">
+            {!view.settings.start_date ? (
+              <div className="alert alert-info">전략 시작일을 선택하고 저장하면 이용할 수 있습니다.</div>
+            ) : null}
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
                 <label className="appLabeledField">
@@ -1009,6 +1025,7 @@ export function MomentumClient() {
                     ))}
                   </select>
                 </label>
+                <StrategyStartDate value={draftStartDate} disabled={saving} onChange={setDraftStartDate} />
                 {draftMaRule != null && view.ma_rule != null ? (
                   <>
                     <label className="appLabeledField">
@@ -1059,7 +1076,7 @@ export function MomentumClient() {
                   type="button"
                   className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                   onClick={() => void saveSettings()}
-                  disabled={saving || !isDirty}
+                  disabled={saving || !isDirty || !draftStartDate}
                 >
                   <IconCheck size={16} />
                   <span>{saving ? "저장 중…" : "저장"}</span>
@@ -1191,7 +1208,7 @@ export function MomentumClient() {
                   type="button"
                   className="btn btn-sm btn-dark"
                   onClick={() => void runBacktest()}
-                  disabled={backtesting || isDirty}
+                  disabled={backtesting || isDirty || !view.settings.start_date}
                 >
                   {backtesting ? "실행 중…" : "실행"}
                 </button>
@@ -1264,7 +1281,7 @@ export function MomentumClient() {
           monthOptions={view.tuning_month_options ?? view.month_options ?? [backtestMonths]}
           defaultMonths={backtestMonths}
           // 튜닝도 백테스트와 같이 **저장된 설정** 기준이라 실행 조건을 같게 둔다.
-          disabled={backtesting || isDirty}
+          disabled={backtesting || isDirty || !view.settings.start_date}
           disabledHint={isDirty ? "설정을 저장해야 실행할 수 있습니다" : undefined}
           fixedLabel={`저장된 설정 기준 (종목풀 ${draftPool} · 종목 수 ${view.settings.top_n} 공통 고정 · 교체 규칙 자격 유지 · 주중 매도는 ADR 게이트만)`}
           current={{
