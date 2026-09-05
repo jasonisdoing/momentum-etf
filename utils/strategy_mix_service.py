@@ -877,6 +877,8 @@ def _sleeve_target_shares(
     실제 보유 수량은 입력하지 않는다. 계좌 규모를 바꿔 백테스트를 다시 실행하면
     비싼 종목의 진입 가능 여부가 바뀌므로, 엔진 결과를 비례 환산만 한다.
     """
+    from math import fsum
+
     from utils.share_allocation import ShareTarget, allocate_integer_shares
 
     # 소수 목표를 **티커별로 합산**한다 — 두 슬리브가 같은 종목을 담으면 몫이 더해진다.
@@ -907,11 +909,10 @@ def _sleeve_target_shares(
             ShareTarget(key=ticker, target_amount=amount, price=unit_by_ticker[ticker])
             for ticker, amount in amount_by_ticker.items()
         ],
-        # 예산은 **계좌 전체**다 — 슬리브별로 끊지 않는다. 단주 잔여는 어느 슬리브에도 속하지
-        # 않는 자투리이고, 슬리브별로 끊으면 각자 1주 값을 못 채운 돈이 그대로 논다
-        # (aus_account 에서 현금 목표가 27% 까지 올라갔다. 계좌 전체로 돌리니 0.70% 다).
-        # 슬리브 몫이 잠깐 어긋나는 건 월초 이관이 되돌린다.
-        budget=sum(sleeve_amount_krw.values()),
+        # 합성 유보 현금은 슬리브 배정액에서 이미 제외된다. 전략 내부 현금도 보호하려면
+        # 주식 목표 금액까지만 쓸 수 있다. 추가 주수에는 내림으로 생긴 단주 잔여만 쓴다.
+        # 동시에 전체 슬리브 배정액을 넘지 않도록 계좌 예산 한도도 유지한다.
+        budget=min(fsum(amount_by_ticker.values()), fsum(sleeve_amount_krw.values())),
     )
 
 
