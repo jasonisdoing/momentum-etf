@@ -116,6 +116,7 @@ type AccountOption = AccountOptionBase & {
   country_code: string;
   /** 오늘의 액션 슬랙 알람 — 새 지시·수량 증가 시 발송. */
   mix_slack_enabled?: boolean;
+  mix_min_adjustment_amount: number;
   /** 비워 두는 현금 몫(%) — 슬리브 배분과 합이 100 이다. */
   mix_cash_pct: number;
 };
@@ -1231,6 +1232,7 @@ export function StrategyMixClient() {
   const actions = positions?.actions ?? null;
 
   // 헤더 설정 — 합성 배분(%) 3칸과 슬랙 알람을 한 버튼으로 저장한다(계좌 설정에 보관).
+  const [minAdjustment, setMinAdjustment] = useState("0");
   const [slackEnabled, setSlackEnabled] = useState(false);
   // 슬리브 초안 — 저장된 배열 그대로 편집한다. 순서가 곧 슬롯(A·B·C)이라 인덱스로 고친다.
   const [draftSleeves, setDraftSleeves] = useState<MixSleeve[]>([]);
@@ -1242,6 +1244,7 @@ export function StrategyMixClient() {
   const maxSleeves = meta?.max_sleeves ?? SLOT_KEY_ORDER.length;
   useEffect(() => {
     setSlackEnabled(Boolean(selectedAccount?.mix_slack_enabled));
+    setMinAdjustment(String(selectedAccount?.mix_min_adjustment_amount ?? 0));
     setDraftSleeves(sleeves.map((row) => ({ ...row })));
     setCashPct(selectedAccount ? String(selectedAccount.mix_cash_pct) : "0");
   }, [selectedAccount, sleeves]);
@@ -1309,6 +1312,7 @@ export function StrategyMixClient() {
       (!selectedAccount.sleeves?.length ||
         slackEnabled !== Boolean(selectedAccount.mix_slack_enabled) ||
         Number(cashPct) !== selectedAccount.mix_cash_pct ||
+        Number(minAdjustment) !== selectedAccount.mix_min_adjustment_amount ||
         draftSleeves.length !== sleeves.length ||
         draftSleeves.some((row, index) => {
           const saved = sleeves[index];
@@ -1325,6 +1329,10 @@ export function StrategyMixClient() {
 
   const saveHeaderSettings = async () => {
     if (!selectedAccount || !weightOk) return;
+    if (!minAdjustment.trim() || !Number.isFinite(Number(minAdjustment)) || Number(minAdjustment) < 0) {
+      toast.error("수량 조정 최소 금액은 0 이상의 숫자로 입력하세요.");
+      return;
+    }
     try {
       setSettingsSaving(true);
       const resp = await fetch("/api/account-settings", {
@@ -1334,6 +1342,7 @@ export function StrategyMixClient() {
           account_id: selectedAccount.account_id,
           values: {
             mix_slack_enabled: slackEnabled,
+            mix_min_adjustment_amount: Number(minAdjustment),
             // 순서가 곧 슬롯이라 키는 보내지 않는다 — 서버가 순서대로 다시 붙인다.
             mix_sleeves: draftSleeves.map((row) => ({
               strategy: row.strategy,
@@ -1354,6 +1363,7 @@ export function StrategyMixClient() {
             ? {
                 ...option,
                 mix_slack_enabled: slackEnabled,
+            mix_min_adjustment_amount: Number(minAdjustment),
                 // 라벨도 즉시 반영 — 이름을 지우면 전략 이름으로 돌아간다.
                 sleeves: draftSleeves.map((row) => ({
                   ...row,
@@ -1439,6 +1449,20 @@ export function StrategyMixClient() {
                   {selectedAccount ? (
                     <>
 
+                      <label className="appLabeledField" style={{ marginBottom: 0 }}>
+                        <span className="appLabeledFieldLabel">수량 조정 최소 금액 ({selectedAccount.currency})</span>
+                        <input
+                          className="form-control form-control-sm"
+                          type="number"
+                          min="0"
+                          step="any"
+                          style={{ width: 150 }}
+                          value={minAdjustment}
+                          onChange={(event) => setMinAdjustment(event.target.value)}
+                          disabled={settingsSaving}
+                          title="0이면 모두 표시합니다. 소액 수량 조정만 액션·알림에서 제외하며 전략 신호는 항상 표시합니다."
+                        />
+                      </label>
                       {/* 배분(%)은 전부 아래 슬리브 표에 있다 — 현금도 같은 줄 형태로 둔다. */}
                       <label className="appLabeledField" style={{ marginBottom: 0 }}>
                         <span className="appLabeledFieldLabel">슬랙 알람</span>

@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from config import CACHE_TTL_COMPUTE
+from utils.cash_model import currency_for_country
 from utils.logger import get_app_logger
 from utils.mix_sleeve import STRATEGY_LABELS, SleeveSpec
 from utils.stock_memo_store import attach_stock_memos
@@ -148,13 +149,15 @@ def mix_accounts() -> list[dict[str, Any]]:
                 "name": str(inner.get("name") or account_id),
                 "icon": str(inner.get("icon") or ""),
                 "order": inner.get("order"),
-                "currency": str(inner.get("currency") or "").strip().upper(),
+                "currency": currency_for_country(inner["country_code"]),
                 "country_code": str(inner.get("country_code") or "").strip().lower(),
                 "sleeves": sleeves,
                 # 조합이 다 갖춰졌는지 — 화면이 "고르세요" 상태를 판단하는 데 쓴다.
                 "mix_ready": bool(sleeves) and all(row["strategy"] and row["pool"] for row in sleeves),
                 # 오늘의 액션 슬랙 알람 토글 상태 — 화면 헤더가 그대로 보여준다.
                 "mix_slack_enabled": bool(inner.get("mix_slack_enabled")),
+                # 미설정 기존 계좌는 필터를 적용하지 않는다.
+                "mix_min_adjustment_amount": float(inner.get("mix_min_adjustment_amount", 0)),
                 # 비워 두는 현금 몫(%) — 슬리브 배분은 sleeves 안에 있다.
                 "mix_cash_pct": mix_weights(inner)["cash_pct"],
             }
@@ -308,14 +311,22 @@ def _resolve_mix_account(account_id: str | None) -> dict[str, Any]:
     ]
 
     # 국가·통화는 모든 슬리브 풀이 같도록 계좌 설정이 강제하므로 첫 슬리브에서 대표로 읽는다.
-    first_pool_settings = get_ticker_type_settings(slots[0].pool) or {}
+    country = str(account_settings["country_code"]).strip().lower()
+    if country not in {"kor", "us", "au"}:
+        raise RuntimeError(f"지원하지 않는 계좌 국가입니다: {country}")
+    currency = currency_for_country(country)
+    for spec in slots:
+        pool_settings = get_ticker_type_settings(spec.pool) or {}
+        if pool_settings.get("country_code") != country or pool_settings.get("currency") != currency:
+            raise RuntimeError(f"{spec.pool}의 국가·통화가 계좌 국가 기준과 다릅니다.")
     return {
         "slots": slots,
         "account_id": account["account_id"],
         "account_name": account["name"],
         # 국가·통화 — 거래 달력(월초 리밸런싱 판정)과 원화 환산에 쓴다.
-        "country": str(first_pool_settings.get("country_code") or "kor").strip().lower(),
-        "currency": str(first_pool_settings.get("currency") or "KRW").strip().upper(),
+        "country": country,
+        "currency": currency,
+        "mix_min_adjustment_amount": float(account_settings.get("mix_min_adjustment_amount", 0)),
         "benchmark_ticker": benchmark_ticker,
         "benchmark_name": str(benchmark.get("name") or benchmark_ticker).strip(),
     }
@@ -653,6 +664,13 @@ def _build_action_groups(
     by_date: dict[str, list[dict[str, Any]]] = {}
     for item in items:
         item["reasons"] = _action_reasons(item["ticker"], item["side"], actions)
+        # 목표 계산·테이블은 그대로 두고, 신호 없는 소액 주문만 액션에서 제외한다.
+        minimum = float(actions.get("min_adjustment_amount", 0))
+        only_adjustment = all(reason["code"] == "target_difference" for reason in item["reasons"])
+        price = row_by_ticker.get(item["ticker"], {}).get("price")
+        if only_adjustment and price is not None and float(price) > 0:
+            if abs(item["quantity"]) * float(price) < minimum:
+                continue
         reason_text = " · ".join(reason["label"] for reason in item["reasons"])
         item["text"] += f" · 사유: {reason_text}"
         by_date.setdefault(item["date"] or "", []).append(item)
@@ -1456,6 +1474,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
                 for key in keys
             },
             "sleeve_rebalance_today": sleeve_rebalance_today,
+            "min_adjustment_amount": ctx["mix_min_adjustment_amount"],
         },
     }
     # 주중 이탈 예상 — 표의 매매수량·상태 칸에 예상을 겹쳐 보여주기 위한 행 플래그.
@@ -1484,7 +1503,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         row["forecast_trade_quantity"] = -slot_qty if slot_qty > 0 else 0
 
     # 오늘의 액션 — 화면·슬랙 알람이 같은 결과를 쓴다(조립 단일 소스).
-    currency = next((states[key].currency for key in keys if states[key].currency), "KRW")
+    currency = ctx["currency"]
     payload["actions"]["groups"] = _build_action_groups(
         payload["holdings"],
         payload["actions"],
