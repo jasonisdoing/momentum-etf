@@ -206,6 +206,8 @@ class SlotState:
     entries: list[dict[str, Any]] = field(default_factory=list)
     # 주기적 교체가 있는 전략만 — {is_filled, fill_date, signal_date, portfolio_week, buys, sells}
     rebalance: dict[str, Any] | None = None
+    # 기준일에 엔진이 체결한 거래 — 목표 판정이 아니라 액션 사유 표시용이다.
+    engine_trades: list[dict[str, Any]] = field(default_factory=list)
     # 다음 교체 예상 종목 {ticker: row} — 교체가 있는 전략만. 다음주 가정 미리보기가 쓴다.
     next_expected: dict[str, dict[str, Any]] = field(default_factory=dict)
     # 데이터 기준일·장중 반영 — 이 정보를 주는 전략만 채운다.
@@ -267,6 +269,7 @@ def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
         exit_forecast=[],
         entries=[],
         rebalance=None,
+        engine_trades=[trade for trade in raw["trades"] if trade["date"] == raw["as_of"]],
         as_of=raw["as_of"],
     )
 

@@ -37,6 +37,7 @@ class PortfolioMixStateTest(unittest.TestCase):
             patch("utils.settings_loader.get_ticker_type_settings", return_value={"currency": "USD"}),
         ):
             state = slot_state(spec)
+        self.assertEqual(state.engine_trades, [t for t in result["trades"] if t["date"] == result["as_of"]])
         for source, target in zip(result["open_positions"], state.targets, strict=True):
             self.assertEqual(source["sleeve_weight_pct"], target["drift_pct"])
             self.assertEqual(source["price"], target["price"])
