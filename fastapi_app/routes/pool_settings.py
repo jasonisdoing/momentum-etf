@@ -78,8 +78,12 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
     except PoolSettingsError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    from utils.pool_backtest_store import load_results
+
     return {
         "pools": pools,
+        # 전략별 12개월 백테스트 — 「백테스트」로 계산해 저장해 둔 값. 설정이 바뀌면 지워진다.
+        "backtests": load_results(),
         "constraints": {
             "ma_options_by_country": ma_options_by_country(),
             "top_n_hold_options": list(TOP_N_HOLD_OPTIONS),
@@ -154,3 +158,59 @@ def delete_pool_definition(pool_id: str, _: None = Depends(require_internal_toke
     except PoolSettingsError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "deleted": deleted}
+
+
+@router.get("/backtest")
+def get_pool_strategy_backtest(
+    pool: str,
+    strategy: str,
+    _: None = Depends(require_internal_token),
+) -> dict[str, Any]:
+    """그 종목풀·전략의 저장 설정으로 12개월 백테스트를 돌려 요약만 돌려준다.
+
+    종목풀 설정 화면이 전략별 성과를 나란히 보기 위해 쓴다. 풀×전략을 한꺼번에 돌리면
+    수십 초가 걸려서, 화면이 버튼을 눌렀을 때 하나씩만 부른다.
+    설정이 없는 전략은 값을 만들어 내지 않고 빈 결과(None)를 돌려준다.
+    """
+    from utils.mix_sleeve import MOMENTUM, NEW_HIGH, PORTFOLIO, normalize_strategy, settings_map
+
+    months = 12
+    name = normalize_strategy(strategy)
+    stored = settings_map(name).get(pool)
+    if not stored:
+        from utils.pool_backtest_store import save_result
+
+        # 설정이 없어 못 돌린 것과 「아직 안 돌린 것」은 화면에서 구분돼야 한다 — 그 사실을 저장한다.
+        empty = {"cagr_pct": None, "mdd_pct": None, "sortino": None, "no_settings": True}
+        return {"pool": pool, "strategy": name, "result": save_result(pool, name, empty)}
+
+    settings = {**stored, "pool": pool}
+    try:
+        if name == MOMENTUM:
+            from utils.momentum_backtest import run_backtest
+
+            result = run_backtest(months, settings)
+        elif name == NEW_HIGH:
+            from utils.new_high_backtest import run_backtest as nh_backtest
+
+            result = nh_backtest(months, settings)
+        else:
+            from utils.portfolio_backtest import run_backtest as portfolio_backtest
+
+            assert name == PORTFOLIO
+            result = portfolio_backtest(months, settings)
+    except Exception as error:  # noqa: BLE001 - 한 전략 실패가 화면을 막지 않게 한다
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    from utils.pool_backtest_store import save_result
+
+    saved = save_result(
+        pool,
+        name,
+        {
+            "cagr_pct": result.get("strategy_cagr_pct"),
+            "mdd_pct": result.get("strategy_mdd_pct"),
+            "sortino": result.get("strategy_sortino"),
+        },
+    )
+    return {"pool": pool, "strategy": name, "result": saved}

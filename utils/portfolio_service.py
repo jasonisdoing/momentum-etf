@@ -291,6 +291,39 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
     return validate_settings({"pool": selected, **DEFAULT_SETTINGS, **stored})
 
 
+def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], list[str]]:
+    """화면용 로드 — **종목풀에서 빠진 종목은 걷어내고** 그 내역을 함께 돌려준다.
+
+    종목을 다른 풀로 옮기면 저장된 비중에 없는 티커가 남는다. `load_settings` 는 그걸
+    에러로 막아서 화면이 열리지도 않고 고칠 수도 없었다. 화면에서는 빠진 종목을 빼고 열어
+    사용자가 비중을 다시 맞출 수 있게 한다. 배치·백테스트는 그대로 `load_settings` 를 쓴다.
+
+    반환: (설정, ["ASX:GGUS 종목풀에 없어 제외", ...])
+    """
+    doc = _load_doc()
+    pools = available_pools()
+    selected = str(pool or default_pool()).strip()
+    if selected not in pools:
+        raise ValueError(f"지원하지 않는 종목풀입니다: {pool}")
+    stored = dict((doc.get("settings_by_pool") or {}).get(selected) or {})
+    settings = {"pool": selected, **DEFAULT_SETTINGS, **stored}
+    try:
+        return validate_settings(settings), []
+    except ValueError:
+        pass
+
+    universe = {row["ticker"] for row in load_universe(selected)}
+    dropped: list[str] = []
+    kept: list[dict[str, Any]] = []
+    for item in settings.get("weights") or []:
+        ticker = str((item or {}).get("ticker") or "").strip().upper()
+        if ticker and ticker in universe:
+            kept.append(item)
+        elif ticker:
+            dropped.append(f"{ticker} 종목풀에 없어 제외")
+    return validate_settings({**settings, "weights": kept}), dropped
+
+
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """검증 후 그 풀의 설정으로 저장한다. 다른 풀의 저장분은 건드리지 않는다."""
     normalized = validate_settings(settings)

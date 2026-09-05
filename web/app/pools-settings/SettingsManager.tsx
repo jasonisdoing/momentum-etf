@@ -70,6 +70,33 @@ type PoolEntry = {
   save_method?: string;
 };
 
+/** 전략 하나의 12개월 백테스트 요약 — 버튼을 눌러야 채워진다. */
+type StrategyBacktest = {
+  cagr_pct: number | null;
+  mdd_pct: number | null;
+  sortino: number | null;
+  /** 그 전략의 저장 설정이 없어 돌릴 수 없었던 경우. */
+  no_settings?: boolean;
+  /** 계산해 저장한 시각. 설정이 바뀌면 서버가 지운다. */
+  updated_at?: string | null;
+};
+
+/** 종목풀 → 전략 → 결과. 값이 없으면 아직 안 돌린 것이다. */
+type BacktestByPool = Record<string, Partial<Record<StrategyKey, StrategyBacktest>>>;
+
+/** 소수 자리 맞춘 숫자 — 값이 없으면 빈칸(설정이 없거나 못 돌린 전략). */
+function fmt(value: number | null, digits: number): string {
+  return value == null ? "-" : value.toFixed(digits);
+}
+
+const STRATEGY_COLUMNS: { key: StrategyKey; label: string }[] = [
+  { key: "momentum", label: "모멘텀" },
+  { key: "new_high", label: "신고가" },
+  { key: "portfolio", label: "포트폴리오" },
+];
+
+type StrategyKey = "momentum" | "new_high" | "portfolio";
+
 type PoolSettingsResponse = {
   pools: PoolEntry[];
   constraints: {
@@ -81,6 +108,8 @@ type PoolSettingsResponse = {
     market_indices?: MarketIndexOption[];
     editable_keys: string[];
   };
+  /** 전략별 12개월 백테스트 — 저장된 값. 설정이 바뀌면 서버가 지운다. */
+  backtests?: BacktestByPool;
   error?: string;
 };
 
@@ -363,6 +392,14 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
   const [loading, setLoading] = useState(true);
 
   const [error, setError] = useState<string | null>(null);
+  // 전략별 12개월 백테스트 — 버튼을 눌렀을 때만 계산한다(풀×전략이라 한 번에 다 돌리면 느리다).
+  const [backtests, setBacktests] = useState<BacktestByPool>({});
+  const [backtestRunning, setBacktestRunning] = useState<string | null>(null);
+  // 진행 상황 — {끝난 수, 전체}. 버튼에 「12/33 백테스트 진행중」으로 보여준다.
+  const [backtestProgress, setBacktestProgress] = useState<{ done: number; total: number } | null>(null);
+  // 전략 컬럼은 평소에 숨긴다 — 값이 길어(「565.6% · -32.1% · 3.95」) 늘 펼쳐 두면
+  // 설정 컬럼들이 밀린다. 「백테스트」를 누르면 그때 펼친다.
+  const [showBacktests, setShowBacktests] = useState(false);
   // 이평선 선택지 — 백엔드가 단일 소스다. 새 풀 초안의 기본값도 여기서 고른다.
   const maOptionsByCountry = useMemo(() => data?.constraints.ma_options_by_country ?? {}, [data]);
   const [drafts, setDrafts] = useState<Record<string, PoolDraft>>({});
@@ -420,6 +457,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         throw new Error(payload.error ?? "설정을 불러오지 못했습니다.");
       }
       setData(payload);
+      setBacktests(payload.backtests ?? {});
       const nextDrafts: Record<string, PoolDraft> = {};
       payload.pools.forEach((pool) => {
         nextDrafts[pool.ticker_type] = toDraft(pool);
@@ -439,6 +477,44 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
   const updateDraft = useCallback((id: string, key: keyof PoolDraft, value: string) => {
     setDrafts((prev) => ({ ...prev, [id]: { ...prev[id], [key]: value } }));
   }, []);
+
+  /** 모든 종목풀 × 전략을 **한 건씩 순서대로** 돌린다.
+   *
+   *  한꺼번에 보내면 서버가 백테스트 수십 개를 동시에 돌려 느려지고, 어디까지 됐는지도
+   *  안 보인다. 한 건이 끝날 때마다 화면에 채워 진행 상황이 그대로 드러나게 한다.
+   *  설정이 없는 조합은 서버가 빈 결과를 돌려주므로 칸이 비어 있는다. */
+  const runAllBacktests = useCallback(async () => {
+    setShowBacktests(true);
+    const pools = rows.map((row) => row.ticker_type).filter(Boolean);
+    const total = pools.length * STRATEGY_COLUMNS.length;
+    let done = 0;
+    setBacktestProgress({ done: 0, total });
+    let failed = 0;
+    for (const pool of pools) {
+      for (const { key } of STRATEGY_COLUMNS) {
+        setBacktestRunning(`${pool}:${key}`);
+        try {
+          const resp = await fetch(`/api/pool-settings/backtest?pool=${encodeURIComponent(pool)}&strategy=${key}`);
+          const payload = await resp.json();
+          if (!resp.ok || payload.error) {
+            throw new Error(payload.error ?? "백테스트에 실패했습니다.");
+          }
+          setBacktests((prev) => ({ ...prev, [pool]: { ...prev[pool], [key]: payload.result } }));
+        } catch {
+          failed += 1;
+        }
+        done += 1;
+        setBacktestProgress({ done, total });
+      }
+    }
+    setBacktestRunning(null);
+    setBacktestProgress(null);
+    if (failed > 0) {
+      toast.error(`백테스트 ${failed}건이 실패했습니다.`);
+    } else {
+      toast.success("백테스트를 마쳤습니다.");
+    }
+  }, [rows, toast]);
 
   const updateNewDraft = useCallback(
     (key: keyof PoolDraft, value: string) => {
@@ -624,8 +700,35 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
   });
 
   const columnDefs: ColDef<PoolGridRow>[] = [
-    { field: "ticker_type", headerName: "ID", width: 112 },
-    { field: "name", headerName: "이름", width: 176, editable: true },
+    // 컬럼이 많아 가로로 스크롤한다 — 어느 풀의 행인지 잃지 않게 ID·이름은 왼쪽에 고정한다.
+    { field: "ticker_type", headerName: "ID", width: 112, pinned: "left" },
+    { field: "name", headerName: "이름", width: 176, editable: true, pinned: "left" },
+    ...(showBacktests ? STRATEGY_COLUMNS : []).map<ColDef<PoolGridRow>>(({ key, label }) => ({
+      colId: `backtest_${key}`,
+      headerName: label,
+      width: 186,
+      sortable: false,
+      headerTooltip: `${label} 전략의 저장 설정으로 돌린 12개월 백테스트 — CAGR · MDD · 소르티노. 상단 「백테스트」로 갱신합니다.`,
+      cellRenderer: (params: ICellRendererParams<PoolGridRow>) => {
+        const pool = params.data?.ticker_type;
+        if (!pool) return null;
+        const result = backtests[pool]?.[key];
+        if (backtestRunning === `${pool}:${key}`) {
+          return <span style={{ color: "var(--text-muted)" }}>계산 중…</span>;
+        }
+        if (result?.no_settings) {
+          return <span style={{ color: "var(--text-muted)" }}>설정없음</span>;
+        }
+        if (!result || result.cagr_pct == null) {
+          return null;
+        }
+        return (
+          <span title={result.updated_at ? `계산 ${formatKstDateTime(result.updated_at)}` : undefined}>
+            {`${fmt(result.cagr_pct, 1)}% · ${fmt(result.mdd_pct, 1)}% · ${fmt(result.sortino, 2)}`}
+          </span>
+        );
+      },
+    })),
     selectCol("icon", "아이콘", 72, () => ["🇰🇷", "🇦🇺", "🇺🇸"]),
     numberCol("order", "순서", 64),
     selectCol("country_code", "국가", 76, () => [...COUNTRY_OPTIONS]),
@@ -922,6 +1025,17 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
                   onClick={() => void handleDeleteSelected()}
                 >
                   {deletingId ? "삭제 중…" : `삭제${selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}`}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-secondary"
+                  disabled={backtestRunning !== null || loading}
+                  title="모든 종목풀의 모멘텀·신고가·포트폴리오를 12개월 백테스트합니다. 한 건씩 순서대로 돌며 결과가 채워집니다."
+                  onClick={() => void runAllBacktests()}
+                >
+                  {backtestProgress
+                    ? `${backtestProgress.done}/${backtestProgress.total} 백테스트 진행중`
+                    : "백테스트"}
                 </button>
                 <button type="button" className="btn btn-sm btn-primary" onClick={() => setIsCreatingNew(!isCreatingNew)}>
                   등록
