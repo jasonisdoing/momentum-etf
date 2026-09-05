@@ -29,22 +29,16 @@ from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
 from utils.ttl_cache import TtlCache
 
-_RankCacheKey = tuple[str, tuple[tuple[int, int], ...]]
+_RankCacheKey = tuple[str]
 _RANK_DATA_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="rank_data")
+# 종목풀별 직전 이평선 — 값이 바뀌면 그 종목풀 캐시를 버린다.
+_LAST_MA_RULES: dict[str, tuple[tuple[int, int], ...]] = {}
 
 
-def _build_rank_cache_key(
-    ticker_type: str,
-    ma_rules: list[dict[str, Any]],
-) -> _RankCacheKey:
-    ma_rule_key = tuple(
-        (
-            int(rule.get("short_ma_days") or 0),
-            int(rule.get("long_ma_days") or 0),
-        )
-        for rule in ma_rules
-    )
-    return (ticker_type, ma_rule_key)
+def _build_rank_cache_key(ticker_type: str, ma_rules: list[dict[str, Any]]) -> _RankCacheKey:
+    """캐시 키는 종목풀 하나다. 이평선이 바뀌면 캐시를 버리고 다시 계산한다."""
+    del ma_rules
+    return (ticker_type,)
 
 
 def invalidate_rank_data_cache(ticker_type: str | None = None) -> None:
@@ -716,6 +710,13 @@ def load_rank_data(
         raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
 
     cache_key = _build_rank_cache_key(selected_ticker_type, ma_rules)
+    # 이평선이 직전과 다르면 캐시를 버린다.
+    previous = _LAST_MA_RULES.get(selected_ticker_type)
+    current = tuple((int(r.get("short_ma_days") or 0), int(r.get("long_ma_days") or 0)) for r in ma_rules)
+    if previous is not None and previous != current:
+        _RANK_DATA_CACHE.invalidate(lambda key: key[0] == selected_ticker_type)
+    _LAST_MA_RULES[selected_ticker_type] = current
+
     return _RANK_DATA_CACHE.get_or_compute(
         cache_key,
         lambda: _compute_rank_data_payload(
