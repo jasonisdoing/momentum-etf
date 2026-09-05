@@ -117,3 +117,5 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 합성 액션 사유는 `strategy_mix_service._action_reasons`에서 조립하며 화면·슬랙이 같은 문구를 읽는다. 포트폴리오 `current_positions`의 거래 내역 중 기준일 거래를 `SlotState.engine_trades`로 전달하며 목표 계산에는 사용하지 않는다.
 
 계좌 설정 `mix_min_adjustment_amount`는 계좌 국가의 현지 통화 금액이다. 미설정 기존 계좌는 0(필터 없음)으로 해석한다. 합성은 `cash_model.currency_for_country`로 통화를 결정하고 슬리브의 국가·통화 일치를 확인한다. 액션 조립에서 전략 이벤트 없는 목표 수량 조정만 걸러 화면·슬랙에 공통 적용한다.
+
+합성 운용 응답의 `currency`·`krw_rate`는 계좌 국가 통화와 평가에 사용한 환율이다. 화면의 총액·평가액·목표액·배분액은 원화 계산값을 해당 환율로 나누어 표시하고, 종목 가격은 원래 현지 통화 값을 표시한다.

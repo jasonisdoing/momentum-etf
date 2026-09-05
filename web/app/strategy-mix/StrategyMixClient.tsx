@@ -2,6 +2,7 @@
 
 import type { CellStyle, ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { formatCurrencyPrice } from "@/lib/price-format";
 import { IconCheck } from "@tabler/icons-react";
 
 import {
@@ -266,6 +267,9 @@ type AccountState = {
 };
 
 type Positions = {
+  currency: string;
+  /** 금액 필드는 원화 계산값이며 표시할 때 이 환율로 나눈다. */
+  krw_rate: number;
   computed_at: string;
   account_id: string;
   /** 표시용 시세 갱신에 쓰는 국가 코드(시세 소스가 국가별로 다르다). */
@@ -427,16 +431,6 @@ function toPeriodRows(
     prev = current;
   }
   return rows.reverse();
-}
-
-function formatPrice(value: number | null | undefined): string {
-  if (value == null) return "-";
-  return value.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
-}
-
-function formatAmount(value: number | null | undefined): string {
-  if (value == null) return "-";
-  return value.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
 }
 
 /** 슬롯 키는 순서가 정한다 — 백엔드 `MIX_SLEEVE_KEYS` 와 같은 순서여야 한다. */
@@ -662,6 +656,16 @@ export function StrategyMixClient() {
 
   // 목표 금액의 기준 = 적용 계좌의 총자산(주식 평가액 + 현금). 계좌가 없으면 비중만 보여준다.
   const totalAsset = positions?.account?.total_assets ?? null;
+  const displayCurrency = selectedAccount?.currency;
+  const displayRate = positions?.krw_rate;
+  const formatPrice = useCallback((value: number | null | undefined): string => {
+    if (value == null || !displayCurrency) return "-";
+    return formatCurrencyPrice(value, displayCurrency);
+  }, [displayCurrency]);
+  const formatAmount = useCallback((value: number | null | undefined): string => {
+    if (value == null || !displayCurrency || !displayRate || displayRate <= 0) return "-";
+    return formatCurrencyPrice(value / displayRate, displayCurrency);
+  }, [displayCurrency, displayRate]);
 
   // 표시용 현재가·일간(%)만 60초마다 갱신한다 — 목표·매매수량은 5분 캐시된 판정 결과다.
   const quotes = useRealtimeQuotes(
@@ -1085,7 +1089,7 @@ export function StrategyMixClient() {
     });
     return columns;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
-  }, [totalAsset, slotKeys, sleeves, saveMemo, hasIndustryData]);
+  }, [totalAsset, slotKeys, sleeves, saveMemo, hasIndustryData, formatAmount, formatPrice]);
 
   const periodRows = useMemo<PeriodRow[]>(() => {
     if (!view || viewMode === "trades") return [];
@@ -1151,7 +1155,7 @@ export function StrategyMixClient() {
       { headerName: "보유일", field: "days", width: 84, type: "numericColumn" },
       { headerName: "사유", field: "reason", width: 110 },
     ],
-    [],
+    [formatPrice, sleeves],
   );
 
   const periodColumns = useMemo<ColDef<PeriodRow>[]>(() => {
