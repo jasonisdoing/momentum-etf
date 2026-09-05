@@ -465,6 +465,34 @@ def _slot_labels(slots: list[SleeveSpec]) -> dict[str, str]:
     return {spec.key: f"{spec.key.upper()}. {spec.label}" for spec in slots}
 
 
+def _action_reasons(ticker: str, side: str, actions: dict[str, Any]) -> list[dict[str, str]]:
+    """주문 원인을 추측하지 않고 엔진 이벤트와 배분 일정만 함께 표시한다."""
+    reasons = []
+    for slot in actions["slots"].values():
+        event = "entries" if side == "buy" else "sells"
+        if any(row["ticker"] == ticker for row in slot[event]):
+            signal = "진입" if side == "buy" else "청산"
+            forecast = " 예상" if slot.get("live") else ""
+            reasons.append({"code": "strategy_signal", "label": f"{slot['label']} {signal}{forecast}"})
+        for trade in slot.get("engine_trades", []):
+            if trade["ticker"] == ticker and trade["side"] == side:
+                reasons.append(
+                    {
+                        "code": "engine_trade",
+                        "label": f"{slot['label']} {trade['date']} 엔진 {trade['reason']} 반영",
+                    }
+                )
+        rebalance = slot.get("rebalance")
+        if rebalance and not rebalance["is_filled"]:
+            rows = rebalance["buys" if side == "buy" else "sells"]
+            if any(row["ticker"] == ticker for row in rows):
+                reasons.append({"code": "strategy_rebalance", "label": f"{slot['label']} 정기 교체"})
+    if actions.get("sleeve_rebalance_today"):
+        reasons.append({"code": "mix_rebalance", "label": "합성 월초 재배분 반영"})
+    reasons.append({"code": "target_difference", "label": "목표 수량과 실제 보유 차이"})
+    return reasons
+
+
 def _build_action_groups(
     holdings: list[dict[str, Any]],
     actions: dict[str, Any],
@@ -562,15 +590,15 @@ def _build_action_groups(
             if sell_reason_applies:
                 title = "매도 예정(예상)" if ticker in forecast_sell_tickers else "매도 예정"
             else:
-                title = "비중 조정 매도"
+                title = "목표 수량 조정 매도"
         elif held:
-            title = "비중 조정 매수"
+            title = "목표 수량 조정 매수"
         elif ticker in rebalance_buys:
             title = "교체 매수"
         elif ticker in entry_tickers:
             title = "진입(예상)" if ticker in live_entry_tickers else "진입"
         else:
-            title = "신규 매수"
+            title = "목표 수량 조정 매수"
         after = f" → 목표 {int(row['target_quantity']):,}주" if row.get("target_quantity") is not None else ""
         amount = _format_trade_amount(trade, row.get("price"), currency)
         amount_note = f" · {amount}" if amount else ""
@@ -624,6 +652,9 @@ def _build_action_groups(
 
     by_date: dict[str, list[dict[str, Any]]] = {}
     for item in items:
+        item["reasons"] = _action_reasons(item["ticker"], item["side"], actions)
+        reason_text = " · ".join(reason["label"] for reason in item["reasons"])
+        item["text"] += f" · 사유: {reason_text}"
         by_date.setdefault(item["date"] or "", []).append(item)
     # 교체일 묶음에는 어느 슬리브의 교체인지 적는다 — 한 계좌에 교체가 둘일 수 있다.
     rebalance_note: dict[str, list[str]] = {}
@@ -1420,6 +1451,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
                     "entries": states[key].entries,
                     # 주기적 교체가 있는 전략만 — 판정은 끝났고 체결만 남았다.
                     "rebalance": states[key].rebalance,
+                    "engine_trades": states[key].engine_trades,
                 }
                 for key in keys
             },

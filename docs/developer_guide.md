@@ -113,3 +113,5 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | 삭제한 종목풀 데이터가 수백 건 남음 | 지울 자리가 `delete_pool`/`delete_account` 안에 흩어져 컬렉션이 늘 때 누락 | `utils/data_table_catalog.py` 로 소유 관계를 선언하고 삭제·점검·화면이 공유 |
 | 고아 점검이 환율 캐시를 "주인 없는 데이터" 로 잡음 | OHLCV 저장 코드를 재사용하려고 환율·레버리지도 `cache_<토큰>_stocks` 에 넣어, 소유자 캐시와 이름 형식이 같았다 | 참조 시세를 `reference_*` 로 분리(`cache_utils._REFERENCE_COLLECTIONS`). 예외 목록으로 막지 않고 형식을 갈랐다 |
 | `/batch` 에 뜨는데 실행 버튼이 400 (`kor_dividend_stocks`) | `SCHEDULE_ROWS` 에만 등록되고 `SystemAction`·`_SCRIPT_BY_ACTION`·crontab 누락 | 위 7곳 체크리스트대로 채움 |
+
+합성 액션 사유는 `strategy_mix_service._action_reasons`에서 조립하며 화면·슬랙이 같은 문구를 읽는다. 포트폴리오 `current_positions`의 거래 내역 중 기준일 거래를 `SlotState.engine_trades`로 전달하며 목표 계산에는 사용하지 않는다.

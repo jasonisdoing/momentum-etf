@@ -247,4 +247,4 @@ def current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     from utils.strategy_settings import require_start_date
 
     result = run_backtest(DEFAULT_BACKTEST_MONTHS, settings, start_date=require_start_date(settings))
-    return {key: result[key] for key in ("as_of", "open_positions", "sleeve_cash_weight_pct")}
+    return {key: result[key] for key in ("as_of", "open_positions", "sleeve_cash_weight_pct", "trades")}
