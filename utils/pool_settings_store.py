@@ -480,6 +480,11 @@ def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = 
         upsert=True,
     )
 
+    # 설정이 바뀌었으니 그 풀의 전략 백테스트 결과는 옛 값이다 — 지운다.
+    from utils.pool_backtest_store import clear_pool
+
+    clear_pool(norm_id)
+
     # 오버라이드 캐시 + 이 값에 의존하는 랭킹 캐시 무효화
     invalidate_overlay_cache()
     try:
