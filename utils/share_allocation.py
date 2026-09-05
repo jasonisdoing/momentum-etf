@@ -7,7 +7,8 @@
   2. **유지.** 보유가 딱 「내림+1」이면 그 값을 그대로 목표로 둔다. 3 단계가 어제 그 종목에
      한 주를 얹어 준 결과인데, 소수부는 시세 따라 계속 움직여 순위가 뒤집힌다. 매번 다시
      세우면 어제 산 것을 오늘 팔라고 하게 된다. 그보다 많이 들고 있으면(손으로 산 10주 같은)
-     내림까지 팔라는 지시가 그대로 난다.
+     내림까지 팔라는 지시가 그대로 난다. 단, 예산을 넘으면 소수부가 작은 종목부터
+     유지한 추가 1주를 취소한다 — 목표 대비 올림 폭이 가장 큰 것부터 줄인다.
   3. **최대잉여법.** 남는 돈으로 부족분(소수부)이 큰 종목부터 한 주씩 채운다. 내림만 하면
      1주 값이 비싼 종목에서 큰 돈이 논다(VOO 는 3.98주가 3주가 되어 총자산의 5% 가 현금으로
      남았다). 살 수 없는 종목이 나오면 **거기서 멈춘다** — 건너뛰고 더 싼 종목을 사면 부족분과
@@ -24,6 +25,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import fsum, isfinite
 
 from config import BACKTEST_INITIAL_CAPITAL
 
@@ -70,28 +72,46 @@ def allocate_integer_shares(targets: list[ShareTarget], budget: float) -> dict[s
     Returns:
         {식별자: 주수}. 배정이 0 인 종목도 키는 있다.
     """
+    if not isfinite(budget) or budget < 0:
+        raise ValueError("주수 배분 예산은 0 이상의 유한한 금액이어야 합니다.")
     quantities = {item.key: 0 for item in targets}
     # (부족분, 식별자, 1주 값) — 3 단계에서 부족분이 큰 순서로 한 주씩 준다.
     remainders: list[tuple[float, str, float]] = []
-    spent = 0.0
+    retained: list[tuple[float, str, float]] = []
+    floor_costs: list[float] = []
     for item in targets:
         if item.price <= 0 or item.target_amount <= 0:
             continue
         floored = int(item.target_amount // item.price)
+        floor_costs.append(floored * item.price)
         if item.held == floored + 1:
             quantities[item.key] = item.held  # 2. 유지
+            retained.append((item.target_amount / item.price - floored, item.key, item.price))
         else:
             quantities[item.key] = floored  # 1. 내림
             remainders.append((item.target_amount / item.price - floored, item.key, item.price))
-        spent += quantities[item.key] * item.price
+
+    if fsum(floor_costs) > budget:
+        raise ValueError("목표 내림 수량만으로 배분 예산을 초과합니다. 목표 비중과 배정 예산을 확인하세요.")
+
+    def allocated_amount() -> float:
+        """누적 차감 오차 없이 현재 목표 수량의 총액을 계산한다."""
+        return fsum(quantities[item.key] * item.price for item in targets if quantities[item.key])
+
+    # 보유 유지보다 예산이 우선이다. 내림 몫은 지키고, 유지한 추가 주수만 줄인다.
+    spent = allocated_amount()
+    for _, key, _ in sorted(retained):
+        if spent <= budget:
+            break
+        quantities[key] -= 1
+        spent = allocated_amount()
 
     # 3. 최대잉여법 — 못 사는 종목이 나오면 거기서 멈춘다.
-    leftover = float(budget) - spent
     for shortfall, key, price in sorted(remainders, reverse=True):
         del shortfall
-        if price > leftover:
-            break
         quantities[key] += 1
-        leftover -= price
+        if allocated_amount() > budget:
+            quantities[key] -= 1
+            break
 
     return quantities
