@@ -71,6 +71,8 @@ def run_backtest(
     months: int | None = None,
     settings: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
+    *,
+    start_date: str | None = None,
 ) -> dict[str, Any]:
     """돌파 전략 백테스트. 일별 자산곡선과 체결 내역을 함께 돌려준다."""
     settings = validate_settings(settings or load_settings())
@@ -93,6 +95,7 @@ def run_backtest(
     return run_slot_backtest(
         pool=pool,
         months=months,
+        start_date=start_date,
         panel=context["panel"],
         entry=breakout & qualifies,
         exit_signal=below_ma,
@@ -115,10 +118,6 @@ def _meets_min_mult(mult: Any, minimum: float | None) -> bool:
     return bool(pd.notna(mult)) and float(mult) >= minimum
 
 
-# 보유를 재구성할 때 돌리는 구간. 관측된 최장 보유가 100거래일 안쪽이라 1년이면 충분하다.
-_HOLDINGS_LOOKBACK_MONTHS = 12
-
-
 # 장전에 화면을 주기적으로 다시 받기 시작할 시점 — 개장 몇 분 전부터인가.
 # 실제로 예상체결가가 움직이는 구간은 동시호가(개장 30분 전~개장)라 한 시간이면 넉넉하다.
 # 시세 제공처의 '장전' 플래그는 새벽부터 켜져 있을 수 있어 그것만 믿고 돌리지 않는다.
@@ -137,8 +136,11 @@ def current_positions(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     다른 코드로 갈라지면 표시된 보유와 성과가 어긋나므로 계산을 나누지 않는다.
     """
     settings = validate_settings(settings or load_settings())
-    cache_key = _POSITIONS_CACHE.make_key(settings)
-    result = _POSITIONS_CACHE.get_or_compute(cache_key, lambda: _current_positions(settings))
+    from utils.strategy_settings import require_start_date
+
+    start_date = require_start_date(settings)
+    cache_key = _POSITIONS_CACHE.make_key(settings, start_date)
+    result = _POSITIONS_CACHE.get_or_compute(cache_key, lambda: _current_positions(settings, start_date=start_date))
     # 종목 메모는 **캐시 밖**에서 붙인다 — 다른 화면에서 고친 값이 즉시 보여야 한다.
     attach_stock_memos(
         result["breakouts"], result["candidates"], result["holdings"], result["planned_entries"], result["exited_today"]
@@ -146,7 +148,7 @@ def current_positions(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     return result
 
 
-def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
+def _current_positions(settings: dict[str, Any], *, start_date: str | None) -> dict[str, Any]:
     pool = settings["pool"]
     context = load_context(settings)
     universe = context["universe"]
@@ -233,7 +235,7 @@ def _current_positions(settings: dict[str, Any]) -> dict[str, Any]:
         )
 
     # 보유·이탈은 백테스트 엔진의 마지막 상태를 그대로 쓴다.
-    simulated = run_backtest(_HOLDINGS_LOOKBACK_MONTHS, settings, context)
+    simulated = run_backtest(DEFAULT_BACKTEST_MONTHS, settings, context, start_date=start_date)
     holdings = simulated["open_positions"]
 
     quotes = _live_quotes(pool, [r["ticker"] for r in rows] + [h["ticker"] for h in holdings], last)

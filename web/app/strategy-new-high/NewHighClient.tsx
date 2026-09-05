@@ -1,5 +1,7 @@
 "use client";
 
+import { StrategyStartDate } from "../components/StrategyStartDate";
+
 import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconCheck } from "@tabler/icons-react";
@@ -53,6 +55,7 @@ const gridTheme = createAppGridTheme();
 const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--fs-sm)" };
 
 type Settings = {
+  start_date?: string | null;
   pool: string;
   /** 종목풀 설정의 보유종목 수 — 이 화면에서는 표시·계산에만 쓴다. */
   top_n: number;
@@ -486,7 +489,7 @@ export function NewHighClient() {
 
   // 설정을 받으면 곧바로 오늘 상태를 채운다 — 빈 화면을 먼저 보여주지 않는다.
   useEffect(() => {
-    if (view?.settings && !positions && !running) void runPositions(view.settings);
+    if (view?.settings.start_date && !positions && !running) void runPositions(view.settings);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
@@ -507,7 +510,7 @@ export function NewHighClient() {
         setBacktest(null);
         setBacktestError(null);
         toast.success(message);
-        void runPositions(payload.settings);
+        if (payload.settings.start_date) void runPositions(payload.settings);
       } catch (saveError) {
         toast.error(saveError instanceof Error ? saveError.message : "설정을 저장하지 못했습니다.");
       } finally {
@@ -546,8 +549,16 @@ export function NewHighClient() {
       if (!view) return;
       writeRememberedTickerType(pool);
       const saved = view.settings_by_pool?.[pool];
+      const next = { ...view.default_settings, ...(saved ?? {}), pool, start_date: saved?.start_date ?? null };
+      setPositions(null);
+      setBacktest(null);
+      if (!next.start_date) {
+        setDraft(next);
+        setView({ ...view, settings: next });
+        return;
+      }
       void persistSettings(
-        { ...view.default_settings, ...(saved ?? {}), pool },
+        next,
         saved ? "종목풀을 전환했습니다." : "저장 이력이 없어 기본값으로 시작합니다.",
       );
     },
@@ -1016,7 +1027,10 @@ export function NewHighClient() {
           <div className="card appCard">
             <div className="card-body appCardBodyTight">
               {/* 메인 헤더 — 주 제어(셀렉터·토글). CRUD 버튼은 아래 보조 액션 헤더로 뺀다. */}
-              <div className="appMainHeader">
+              {!view.settings.start_date ? (
+              <div className="alert alert-info">전략 시작일을 선택하고 저장하면 이용할 수 있습니다.</div>
+            ) : null}
+            <div className="appMainHeader">
                 <div className="appMainHeaderLeft">
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">종목풀</span>
@@ -1032,6 +1046,7 @@ export function NewHighClient() {
                       ))}
                     </select>
                   </label>
+                <StrategyStartDate value={draft.start_date} disabled={saving} onChange={(start_date) => setDraft({ ...draft, start_date })} />
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">이탈 이평선</span>
                     <MaDaysSelect
@@ -1084,7 +1099,7 @@ export function NewHighClient() {
                     type="button"
                     className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                     onClick={() => void persistSettings(effectiveDraft ?? draft, "설정을 저장했습니다.")}
-                    disabled={saving || !isDirty}
+                    disabled={saving || !isDirty || !draft.start_date}
                   >
                     <IconCheck size={16} />
                     <span>{saving ? "저장 중…" : "저장"}</span>
@@ -1257,14 +1272,14 @@ export function NewHighClient() {
                 <MonthsSelect
                   value={backtestMonths}
                   options={constraints.month_options}
-                  disabled={backtesting}
+                  disabled={backtesting || !view.settings.start_date}
                   onChange={setBacktestMonths}
                 />
                 <button
                   type="button"
                   className="btn btn-sm btn-dark"
                   onClick={() => void handleBacktest()}
-                  disabled={backtesting}
+                  disabled={backtesting || !view.settings.start_date}
                 >
                   {backtesting ? "실행 중…" : "실행"}
                 </button>
@@ -1339,7 +1354,7 @@ export function NewHighClient() {
           monthOptions={constraints.tuning_month_options ?? constraints.month_options}
           defaultMonths={backtestMonths}
           // 튜닝도 백테스트와 같이 **화면 초안** 기준이라(fixedLabel 참고) 실행 조건을 같게 둔다.
-          disabled={backtesting}
+          disabled={backtesting || !view.settings.start_date}
           fixedLabel={`현재 화면 값 기준 (종목 수 ${draft.top_n} 공통 고정)`}
           current={{
             exit_ma_days: draft.exit_ma_days,

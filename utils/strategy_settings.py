@@ -35,3 +35,27 @@ def coerce_to_options(
             coerced.append(f"{label} {_label(value)} → {_label(options[0])}")
             merged[key] = options[0]
     return validate(merged), coerced
+
+
+def validate_start_date(value: Any) -> str | None:
+    """미설정은 유지하고, 입력한 전략 시작일은 ISO 날짜로 엄격히 검증한다."""
+    import re
+    from datetime import date
+
+    if value is None:
+        return None
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise ValueError("전략 시작일은 YYYY-MM-DD 형식이어야 합니다.")
+    try:
+        date.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("전략 시작일이 올바른 날짜가 아닙니다.") from error
+    return value
+
+
+def require_start_date(settings: dict[str, Any]) -> str:
+    """운용은 전략·종목풀에 저장된 시작일 없이는 계산하지 않는다."""
+    value = validate_start_date(settings.get("start_date"))
+    if value is None:
+        raise ValueError(f"{settings.get('pool', '')} 전략 시작일을 선택하고 저장하세요.")
+    return value

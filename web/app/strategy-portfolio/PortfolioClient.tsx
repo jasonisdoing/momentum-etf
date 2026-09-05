@@ -1,5 +1,7 @@
 "use client";
 
+import { StrategyStartDate } from "../components/StrategyStartDate";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ColDef } from "ag-grid-community";
 
@@ -110,6 +112,7 @@ type PeriodRow = { period: string; strategy_pct: number; benchmark_pct: number }
 type PoolOption = { ticker_type: string; name: string; icon?: string; order?: number | null };
 
 type Settings = {
+  start_date?: string | null;
   pool: string;
   weights: { ticker: string; weight_pct: number }[];
   /** 현금 비중(%) — 사용자가 직접 정한다(`/asset-helper` 와 같은 규칙, 자동 흡수 없음). */
@@ -648,6 +651,9 @@ export function PortfolioClient() {
         {/* ① 설정 — 종목풀 · 리밸런싱 주기 · 리밸런싱 기준. 모멘텀·신고가 화면과 같은 자리. */}
         <div className="card appCard">
           <div className="card-body">
+            {!view.settings.start_date ? (
+              <div className="alert alert-info">전략 시작일을 선택하고 저장하면 이용할 수 있습니다.</div>
+            ) : null}
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
                 <label className="appLabeledField">
@@ -665,6 +671,7 @@ export function PortfolioClient() {
                     ))}
                   </select>
                 </label>
+                <StrategyStartDate value={draft.start_date} disabled={saving} onChange={(start_date) => setDraft({ ...draft, start_date })} />
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">리밸런싱</span>
                   <select
@@ -703,7 +710,7 @@ export function PortfolioClient() {
                   type="button"
                   className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                   onClick={() => void saveSettings()}
-                  disabled={saving || !isDirty || !weightOk}
+                  disabled={saving || !isDirty || !weightOk || !draft.start_date}
                   title={weightOk ? undefined : "종목 비중 합이 100%를 넘습니다"}
                 >
                   <IconCheck size={16} />
@@ -850,7 +857,7 @@ export function PortfolioClient() {
                   type="button"
                   className="btn btn-sm btn-dark"
                   onClick={() => void runBacktest()}
-                  disabled={backtesting || isDirty || draft.weights.length === 0}
+                  disabled={backtesting || isDirty || !view.settings.start_date || draft.weights.length === 0}
                 >
                   {backtesting ? "실행 중…" : "실행"}
                 </button>

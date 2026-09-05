@@ -59,7 +59,7 @@ class MomentumScreenMatchesBacktest(unittest.TestCase):
         try:
             settings = load_settings(MOMENTUM_POOL)
             context = momentum_backtest.load_context(settings)
-            simulated = momentum_backtest.run_backtest(momentum_backtest._HOLDINGS_LOOKBACK_MONTHS, settings, context)
+            simulated = momentum_backtest.run_backtest(12, settings, context, start_date=settings["start_date"])
             screen = momentum_backtest.current_positions(settings)
         except Exception as error:  # noqa: BLE001 - 환경 문제와 회귀를 구분한다
             _skip_if_unavailable(error)
@@ -83,7 +83,7 @@ class NewHighScreenMatchesBacktest(unittest.TestCase):
         try:
             settings = load_settings(NEW_HIGH_POOL)
             context = new_high_backtest.load_context(settings)
-            simulated = new_high_backtest.run_backtest(new_high_backtest._HOLDINGS_LOOKBACK_MONTHS, settings, context)
+            simulated = new_high_backtest.run_backtest(12, settings, context, start_date=settings["start_date"])
             screen = new_high_backtest.current_positions(settings)
         except Exception as error:  # noqa: BLE001
             _skip_if_unavailable(error)
@@ -116,7 +116,7 @@ class MixScreenMatchesSleeveBacktests(unittest.TestCase):
                     # 포트폴리오는 판정이 없다 — 저장된 비중이 곧 목표다.
                     expected |= {str(row["ticker"]).strip() for row in (spec.settings.get("weights") or [])}
                     continue
-                result = run_backtest(spec, 12, load_context(spec))
+                result = run_backtest(spec, 12, load_context(spec), start_date=spec.settings["start_date"])
                 held = {str(row["ticker"]) for row in result["open_positions"]}
                 expected |= (held - set(result["planned_exits"])) | set(result["planned_entries"])
             screen = mix_positions(MIX_ACCOUNT)

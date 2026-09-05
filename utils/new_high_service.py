@@ -29,7 +29,7 @@ import pandas as pd
 from config import ADR_FLOOR_OPTIONS, MIN_VALUE_MULT_OPTIONS_BY_COUNTRY
 from utils.ma_options import SHORT_MA_OPTIONS
 from utils.price_series import positive_prices as _positive
-from utils.strategy_settings import coerce_to_options
+from utils.strategy_settings import coerce_to_options, require_start_date, validate_start_date
 
 # 신고가 판정 창 — 거래일 수가 아니라 달력 기간으로 자른다. 거래일로 고정하면
 # 공휴일 수에 따라 실제 기간이 흔들려 이름과 어긋난다(12개월 × 20거래일 = 240거래일은
@@ -61,6 +61,7 @@ _SETTINGS_KEY = "new_high_settings"
 # 슬리피지는 종목풀 설정(BUY/SELL_SLIPPAGE_PCT)을 쓰고, 백테스트 기간은 실행할 때
 # 화면에서 고른다 — 둘 다 여기 저장하지 않는다.
 PER_POOL_SETTING_KEYS = (
+    "start_date",
     "exit_ma_days",
     "min_value_mult",
     "adr_floor",
@@ -288,6 +289,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "pool": pool,
+        "start_date": validate_start_date(settings.get("start_date")),
         "min_value_mult": min_value_mult,
         "adr_floor": adr_floor,
         # 종목 수(슬롯)는 순위·모멘텀·종목풀 백테스트와 같은 풀 설정을 쓴다.
@@ -359,6 +361,7 @@ def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], lis
 
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
     normalized = validate_settings(settings)
+    require_start_date(normalized)
     pool = normalized["pool"]
     per_pool = {key: normalized[key] for key in PER_POOL_SETTING_KEYS}
     _db()[_CONFIG_COLLECTION].update_one(

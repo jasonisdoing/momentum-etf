@@ -86,6 +86,8 @@ def run_backtest(
     months: int | None = None,
     settings: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
+    *,
+    start_date: str | None = None,
 ) -> dict[str, Any]:
     """고정 비중 리밸런싱 백테스트. 일별 자산곡선과 리밸런싱 내역을 함께 돌려준다.
 
@@ -121,7 +123,7 @@ def run_backtest(
     index = close_df.dropna().index.intersection(benchmark_close.index)
     if len(index) < 2:
         raise RuntimeError("종목과 벤치마크의 공통 가격 구간이 부족합니다.")
-    start = index[-1] - pd.DateOffset(months=months)
+    start = pd.Timestamp(start_date) if start_date is not None else index[-1] - pd.DateOffset(months=months)
     index = index[index >= start]
     if len(index) < 2:
         raise RuntimeError(f"{months}개월치 가격이 부족합니다.")

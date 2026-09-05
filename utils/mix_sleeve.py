@@ -368,19 +368,21 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
     )
 
 
-def run_backtest(spec: SleeveSpec, months: int, context: dict[str, Any] | None = None) -> dict[str, Any]:
+def run_backtest(
+    spec: SleeveSpec, months: int, context: dict[str, Any] | None = None, *, start_date: str | None = None
+) -> dict[str, Any]:
     """이 슬리브를 **혼자** 굴린 백테스트 — 엔진 원본 형태 그대로."""
     if spec.strategy == PORTFOLIO:
         from utils.portfolio_backtest import run_backtest as portfolio_backtest
 
-        return portfolio_backtest(months, spec.settings)
+        return portfolio_backtest(months, spec.settings, start_date=start_date)
     if spec.strategy == MOMENTUM:
         from utils.momentum_backtest import run_backtest as sm_backtest
 
-        return sm_backtest(months, spec.settings, context)
+        return sm_backtest(months, spec.settings, context, start_date=start_date)
     from utils.new_high_backtest import run_backtest as nh_backtest
 
-    return nh_backtest(months, spec.settings, context)
+    return nh_backtest(months, spec.settings, context, start_date=start_date)
 
 
 def trade_rows(spec: SleeveSpec, result: dict[str, Any]) -> list[dict[str, Any]]:
