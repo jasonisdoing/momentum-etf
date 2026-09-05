@@ -158,6 +158,7 @@ def mix_accounts() -> list[dict[str, Any]]:
                 "mix_slack_enabled": bool(inner.get("mix_slack_enabled")),
                 # 비워 두는 현금 몫(%) — 슬리브 배분은 sleeves 안에 있다.
                 "mix_cash_pct": mix_weights(inner)["cash_pct"],
+                "mix_start_date": inner.get("mix_start_date"),
             }
         )
     accounts.sort(key=lambda item: (item["order"] is None, item["order"]))
