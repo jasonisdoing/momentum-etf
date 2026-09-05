@@ -555,13 +555,17 @@ def move_active_stock(from_pool: str, to_pool: str, ticker: str) -> dict[str, An
     from utils.cache_utils import move_cached_frame
     from utils.stock_list_io import add_stock
 
-    # 옛 풀에서 먼저 뺀다 — 남겨 두면 '이미 다른 종목풀에 있습니다' 로 막힌다.
+    # **대상에 먼저 담고, 성공한 뒤에 출발 풀에서 뺀다.** 순서가 중요하다 — 예전에는 먼저
+    # 뺐는데, 담기나 되돌리기가 실패하면 종목이 어느 풀에도 없이 사라졌다(2026-08-26 AOA,
+    # 2026-09-05 kor_kr 70종목). 이 순서면 어느 단계에서 실패해도 종목이 없어지지 않고,
+    # 최악이라도 양쪽에 남아 눈에 보인다. `add_stock` 은 **같은 풀**에 있을 때만 막으므로
+    # 출발 풀에 남아 있어도 담기가 걸리지 않는다(다른 풀 중복은 위에서 이미 검사했다).
     # 가격 캐시·배치 계산값은 지우지 않고 새 풀로 옮긴다(같은 시세라 다시 받을 이유가 없다).
-    if not hard_remove_stock(source, ticker_norm):
-        raise RuntimeError(f"'{_pool_label(source)}' 에서 빼지 못했습니다: {ticker_norm}")
+    if not add_stock(target, ticker_norm, name=carried_name, **carried):
+        raise RuntimeError(f"'{_pool_label(target)}' 에 담지 못했습니다: {ticker_norm}")
     try:
-        if not add_stock(target, ticker_norm, name=carried_name, **carried):
-            raise RuntimeError("대상 종목풀에 담지 못했습니다.")
+        if not hard_remove_stock(source, ticker_norm):
+            raise RuntimeError(f"'{_pool_label(source)}' 에서 빼지 못했습니다.")
         move_cached_frame(source, target, ticker_norm)
         for meta_coll in ("stock_cache_meta", "previous_stock_cache_meta"):
             # 대상 풀에 남아 있던 옛 계산값은 먼저 지운다 — (ticker_type, ticker) 유일 인덱스가
@@ -569,9 +573,8 @@ def move_active_stock(from_pool: str, to_pool: str, ticker: str) -> dict[str, An
             db[meta_coll].delete_many({"ticker_type": target, "ticker": ticker_norm})
             db[meta_coll].update_many({"ticker_type": source, "ticker": ticker_norm}, {"$set": {"ticker_type": target}})
     except Exception as exc:
-        # 새 풀에 담지 못했으면 옛 풀로 되돌린다 — 이미 뺀 뒤라 되돌리지 않으면 종목이 사라진다.
-        # 대상 풀 문서도 이동 전 상태로 돌린다. add_stock 이 성공한 뒤 그 다음 단계에서
-        # 실패하면 종목이 출발·대상 양쪽에 활성으로 남는다(실제로 그렇게 됐다).
+        # 여기 온 시점에 **출발 풀 종목은 아직 그대로다**(빼기 전에 실패했거나, 빼기 자체가
+        # 실패했다). 그러니 대상 풀에 담은 것만 이동 전 상태로 되돌리면 된다.
         try:
             if target_before is None:
                 hard_remove_stock(target, ticker_norm)
@@ -579,11 +582,17 @@ def move_active_stock(from_pool: str, to_pool: str, ticker: str) -> dict[str, An
                 db.stock_meta.replace_one({"_id": target_before["_id"]}, target_before, upsert=True)
         except Exception as revert_error:
             get_app_logger().error("[이동] %s 대상 풀 되돌리기 실패: %s", ticker_norm, revert_error)
-        try:
-            restored = add_stock(source, ticker_norm, name=carried_name, **carried)
-        except Exception as restore_error:
-            restored = False
-            get_app_logger().error("[이동] %s 복구 중 오류: %s", ticker_norm, restore_error)
+        # 출발 풀에서 이미 빠진 뒤에 실패했을 수도 있다(캐시 이동 단계 등) — 그때만 되살린다.
+        still_in_source = db.stock_meta.find_one(
+            {"ticker_type": source, "ticker": ticker_norm, "is_deleted": {"$ne": True}}
+        )
+        restored = True
+        if still_in_source is None:
+            try:
+                restored = add_stock(source, ticker_norm, name=carried_name, **carried)
+            except Exception as restore_error:
+                restored = False
+                get_app_logger().error("[이동] %s 복구 중 오류: %s", ticker_norm, restore_error)
         if not restored:
             # 조용히 넘기면 안 된다 — 종목이 어느 풀에도 없는 상태로 남는다.
             get_app_logger().error(
