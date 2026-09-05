@@ -58,8 +58,8 @@ EDITABLE_KEYS: tuple[str, ...] = (
 # 합성 슬롯 — 최소 둘(합성이려면 섞을 것이 둘은 있어야 한다), 최대 셋.
 # 슬롯을 가리키는 키는 배열 순서로 준다(첫째 "a", 둘째 "b", 셋째 "c") — 저장하지 않는다.
 MIN_MIX_SLEEVES = 2
-MAX_MIX_SLEEVES = 3
-MIX_SLEEVE_KEYS: tuple[str, ...] = ("a", "b", "c")
+MAX_MIX_SLEEVES = 4
+MIX_SLEEVE_KEYS: tuple[str, ...] = ("a", "b", "c", "d")
 
 # 슬리브 항목의 필드 — 전략·종목풀·표시 이름·배분(%).
 MIX_SLEEVE_FIELDS: tuple[str, ...] = ("strategy", "pool", "name", "weight_pct")

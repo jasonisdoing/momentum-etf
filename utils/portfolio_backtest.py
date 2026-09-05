@@ -179,6 +179,7 @@ def run_backtest(
     current_period = _period_key(index[0], rebalance)
 
     curve: list[float] = []
+    cash_curve: dict[pd.Timestamp, float] = {}
     for day in index:
         period = _period_key(day, rebalance)
         if period is not None and period != current_period:
@@ -186,6 +187,7 @@ def run_backtest(
             current_period = period
         prices = close_df.loc[day]
         curve.append(cash + sum(shares.get(t, 0.0) * float(prices[t]) for t in tickers))
+        cash_curve[day] = cash / curve[-1] * 100.0
 
     strategy = pd.Series(curve, index=index)
     # 벤치마크는 **시작일 시가**를 1 로 둔다 — 전략도 그날 시가에 사기 때문이다(공용 함수).
@@ -231,6 +233,7 @@ def run_backtest(
         "daily": [
             {
                 "date": str(day.date()),
+                "cash_weight_pct": cash_curve[day],
                 "strategy_pct": round((float(strategy_norm.loc[day]) - 1) * 100, 2),
                 "benchmark_pct": round((float(benchmark.loc[day]) - 1) * 100, 2),
             }
