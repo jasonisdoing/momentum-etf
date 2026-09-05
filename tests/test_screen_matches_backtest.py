@@ -113,8 +113,8 @@ class MixScreenMatchesSleeveBacktests(unittest.TestCase):
             expected: set[str] = set()
             for spec in ctx["slots"]:
                 if spec.strategy == PORTFOLIO:
-                    # 포트폴리오는 판정이 없다 — 저장된 비중이 곧 목표다.
-                    expected |= {str(row["ticker"]).strip() for row in (spec.settings.get("weights") or [])}
+                    result = run_backtest(spec, 12, start_date=spec.settings["start_date"])
+                    expected |= {row["ticker"] for row in result["open_positions"] if row["sleeve_weight_pct"] > 0}
                     continue
                 result = run_backtest(spec, 12, load_context(spec), start_date=spec.settings["start_date"])
                 held = {str(row["ticker"]) for row in result["open_positions"]}

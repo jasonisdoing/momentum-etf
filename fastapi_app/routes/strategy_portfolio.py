@@ -32,7 +32,18 @@ def _constraints() -> dict:
 
 
 def _view(settings: dict) -> dict:
+    from utils.portfolio_backtest import current_positions
+
+    positions, positions_error = None, None
+    if settings.get("start_date") and settings.get("weights"):
+        try:
+            positions = current_positions(settings)
+        except (ValueError, RuntimeError) as error:
+            # 설정 편집은 열어두되 운용 계산 실패를 명시한다.
+            positions_error = str(error)
     return {
+        "positions": positions,
+        "positions_error": positions_error,
         "settings": settings,
         # 저장 이력이 없는 풀로 전환할 때 화면이 채울 값.
         "default_settings": dict(DEFAULT_SETTINGS),

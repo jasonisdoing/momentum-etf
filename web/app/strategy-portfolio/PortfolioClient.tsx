@@ -78,6 +78,7 @@ type WeightRow = {
   memo?: string;
   /** 목표 비중(%) — 사용자가 직접 정한다. 현금 행도 같은 컬럼을 쓴다. */
   fixed_weight_pct: number | null;
+  strategy_weight_pct?: number | null;
   daily_change_pct: number | null;
   current_price: number | null;
   return_1m_pct: number | null;
@@ -122,6 +123,8 @@ type Settings = {
 };
 
 type View = {
+  positions: { as_of: string; open_positions: { ticker: string; sleeve_weight_pct: number }[]; sleeve_cash_weight_pct: number } | null;
+  positions_error: string | null;
   settings: Settings;
   default_settings: Settings;
   settings_by_pool: Record<string, Partial<Settings>>;
@@ -377,7 +380,7 @@ export function PortfolioClient() {
   });
 
   /** 현금 고정행 — **표 맨 위**(`/asset-helper` 와 같은 순서). 비중은 직접 편집한다. */
-  const cashRow: WeightRow = { ticker: CASH_TICKER, name: "현금", fixed_weight_pct: cashPct, ...emptyMetrics };
+  const cashRow: WeightRow = { ticker: CASH_TICKER, name: "현금", fixed_weight_pct: cashPct, strategy_weight_pct: view?.positions?.sleeve_cash_weight_pct ?? null, ...emptyMetrics };
   const addingRow: WeightRow | null = add.addingRow
     ? { ticker: add.addingRow.ticker, name: add.addingRow.name, fixed_weight_pct: 0, is_adding: true, ...emptyMetrics }
     : null;
@@ -405,6 +408,7 @@ export function PortfolioClient() {
         ticker: row.ticker,
         name: metrics?.name ?? row.ticker,
         fixed_weight_pct: row.weight_pct,
+        strategy_weight_pct: view?.positions?.open_positions.find((position) => position.ticker === row.ticker)?.sleeve_weight_pct ?? null,
       };
     }),
   ];
@@ -554,8 +558,16 @@ export function PortfolioClient() {
         valueFormatter: (p) => fmtNum(p.value as number | null),
       },
       {
+        field: "strategy_weight_pct",
+        headerName: "운용 비중",
+        headerTooltip: "저장된 시작일·조건으로 계산한 백테스트 현재 비중. 합성이 같은 값을 사용합니다.",
+        width: 105,
+        type: "rightAligned",
+        valueFormatter: (p) => p.value == null ? "-" : Number(p.value).toFixed(2),
+      },
+      {
         field: "fixed_weight_pct",
-        headerName: "비중",
+        headerName: "설정 비중",
         minWidth: 92,
         width: 92,
         type: "rightAligned",
@@ -721,6 +733,8 @@ export function PortfolioClient() {
           </div>
         </div>
 
+        {view.positions_error ? <div className="alert alert-danger">운용 비중 계산 실패: {view.positions_error}</div> : null}
+        {view.positions ? <div className="text-muted">운용 비중 기준일: {view.positions.as_of} · 저장된 전략 조건 기준</div> : null}
         {/* ② 목표 비중 — 컬럼·버튼은 `/asset-helper` 표준을 따른다. */}
         <div className="card appCard">
           <div className="card-body">

@@ -198,6 +198,21 @@ def run_backtest(
 
     return {
         "start_date": str(index[0].date()),
+        # 합성은 저장 비중 대신 이 최종 상태를 읽는다. 주기·밴드 판정을 다시 만들지 않는다.
+        "as_of": str(index[-1].date()),
+        "open_positions": [
+            {
+                "ticker": ticker,
+                "shares": shares.get(ticker, 0.0),
+                "price": float(close_df.at[index[-1], ticker]),
+                "sleeve_weight_pct": shares.get(ticker, 0.0)
+                * float(close_df.at[index[-1], ticker])
+                / float(strategy.iloc[-1])
+                * 100.0,
+            }
+            for ticker in tickers
+        ],
+        "sleeve_cash_weight_pct": cash / float(strategy.iloc[-1]) * 100.0,
         "end_date": str(index[-1].date()),
         "months": months,
         "strategy_total_pct": round(strategy_total, 2),
@@ -222,3 +237,11 @@ def run_backtest(
             for day in index
         ],
     }
+
+
+def current_positions(settings: dict[str, Any]) -> dict[str, Any]:
+    """개별 운용 현황과 합성이 공유하는 고정 시작일 기준 포트폴리오 상태."""
+    from utils.strategy_settings import require_start_date
+
+    result = run_backtest(DEFAULT_BACKTEST_MONTHS, settings, start_date=require_start_date(settings))
+    return {key: result[key] for key in ("as_of", "open_positions", "sleeve_cash_weight_pct")}
