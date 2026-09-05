@@ -32,7 +32,7 @@ def _constraints() -> dict:
     }
 
 
-def _view(settings: dict, coerced: list[str] | None = None) -> dict:
+def _view(settings: dict, unknown: list[str] | None = None) -> dict:
     from utils.portfolio_backtest import current_positions
 
     positions, positions_error = None, None
@@ -46,8 +46,8 @@ def _view(settings: dict, coerced: list[str] | None = None) -> dict:
         "positions": positions,
         "positions_error": positions_error,
         "settings": settings,
-        # 종목풀에서 빠져 걷어낸 종목 — 화면이 「저장해 확정하세요」로 알린다.
-        "coerced": list(coerced or []),
+        # 종목풀에 없는 종목 티커 — 화면이 그 행을 경고로 칠하고 저장을 막는다.
+        "unknown_tickers": list(unknown or []),
         # 저장 이력이 없는 풀로 전환할 때 화면이 채울 값.
         "default_settings": dict(DEFAULT_SETTINGS),
         "settings_by_pool": load_settings_map(),
@@ -68,8 +68,8 @@ def get_strategy_portfolio(
 
     ``pool`` 은 화면이 로컬스토리지에 기억해 둔 선택이다 — 없으면 저장분이 있는 첫 풀.
     """
-    settings, coerced = load_settings_for_view(pool)
-    return _view(settings, coerced)
+    settings, unknown = load_settings_for_view(pool)
+    return _view(settings, unknown)
 
 
 @router.put("/settings")

@@ -79,6 +79,8 @@ type WeightRow = {
   /** 목표 비중(%) — 사용자가 직접 정한다. 현금 행도 같은 컬럼을 쓴다. */
   fixed_weight_pct: number | null;
   strategy_weight_pct?: number | null;
+  /** 종목풀에 없는 종목 — 옮겼거나 지운 것. 지워야 저장된다. */
+  is_unknown?: boolean;
   daily_change_pct: number | null;
   current_price: number | null;
   return_1m_pct: number | null;
@@ -126,6 +128,8 @@ type View = {
   positions: { as_of: string; open_positions: { ticker: string; sleeve_weight_pct: number }[]; sleeve_cash_weight_pct: number } | null;
   positions_error: string | null;
   settings: Settings;
+  /** 종목풀에 없는 종목 — 표에 남겨 두고 경고로 칠한다. 지워야 저장된다. */
+  unknown_tickers?: string[];
   default_settings: Settings;
   settings_by_pool: Record<string, Partial<Settings>>;
   pool_options: PoolOption[];
@@ -327,8 +331,12 @@ export function PortfolioClient() {
   const cashPct = draft?.cash_weight_pct ?? 0;
   const totalSum = Math.round((stockSum + cashPct) * 100) / 100;
   const weightOk = Math.abs(totalSum - 100) <= 0.01;
+  // 종목풀에 없는 종목이 남아 있으면 저장할 수 없다 — 서버 검증에서 막힌다.
+  const unknownTickers = view?.unknown_tickers ?? [];
+  const hasUnknown = (draft?.weights ?? []).some((row) => unknownTickers.includes(row.ticker));
   const isDirty = useMemo(
-    () => Boolean(view && draft) && JSON.stringify(view!.settings) !== JSON.stringify(draft),
+    () =>
+      Boolean(view && draft) && JSON.stringify(view!.settings) !== JSON.stringify(draft),
     [view, draft],
   );
 
@@ -407,6 +415,7 @@ export function PortfolioClient() {
           : {}),
         ticker: row.ticker,
         name: metrics?.name ?? row.ticker,
+        is_unknown: !metrics,
         fixed_weight_pct: row.weight_pct,
         strategy_weight_pct: view?.positions?.open_positions.find((position) => position.ticker === row.ticker)?.sleeve_weight_pct ?? null,
       };
@@ -507,6 +516,13 @@ export function PortfolioClient() {
         cellRenderer: (params: { data?: WeightRow; value?: string }) => {
           const row = params.data;
           if (!row) return null;
+          if (row.is_unknown) {
+            return (
+              <span style={{ color: "var(--up-color, #d64545)", fontWeight: 600 }}>
+                {row.ticker} — 종목풀에 없음
+              </span>
+            );
+          }
           if (row.is_adding) {
             return (
               <div className="assetsNameLookup">
@@ -722,8 +738,14 @@ export function PortfolioClient() {
                   type="button"
                   className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                   onClick={() => void saveSettings()}
-                  disabled={saving || !isDirty || !weightOk || !draft.start_date}
-                  title={weightOk ? undefined : "종목 비중 합이 100%를 넘습니다"}
+                  disabled={saving || !isDirty || !weightOk || hasUnknown || !draft.start_date}
+                  title={
+                    hasUnknown
+                      ? "종목풀에 없는 종목이 있습니다 — 그 행을 지우고 비중을 다시 나눠주세요."
+                      : weightOk
+                        ? undefined
+                        : "종목 비중 합이 100%를 넘습니다"
+                  }
                 >
                   <IconCheck size={16} />
                   <span>{saving ? "저장 중…" : "저장"}</span>
@@ -753,6 +775,7 @@ export function PortfolioClient() {
                   title="종목 + 현금 = 100% 여야 저장됩니다"
                 >
                   합계 {totalSum.toFixed(2)}%{weightOk ? "" : " — 100% 여야 저장됩니다"}
+                  {hasUnknown ? " · 종목풀에 없는 종목이 있습니다 (지우고 비중을 다시 나눠주세요)" : ""}
                 </span>
               </div>
               <div className="appMainHeaderRight">

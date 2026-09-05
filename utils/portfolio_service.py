@@ -298,7 +298,11 @@ def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], lis
     에러로 막아서 화면이 열리지도 않고 고칠 수도 없었다. 화면에서는 빠진 종목을 빼고 열어
     사용자가 비중을 다시 맞출 수 있게 한다. 배치·백테스트는 그대로 `load_settings` 를 쓴다.
 
-    반환: (설정, ["ASX:GGUS 종목풀에 없어 제외", ...])
+    빠진 종목은 **비중을 그대로 둔 채** 설정에 남겨 화면 표에 보이게 하고, 티커 목록만
+    함께 돌려준다. 화면이 그 행을 「종목풀에 없음」으로 칠하고 저장을 막는다 —
+    사용자가 지우고 비중을 다시 나눠야 저장된다.
+
+    반환: (설정, ["ASX:GGUS", ...])
     """
     doc = _load_doc()
     pools = available_pools()
@@ -313,15 +317,22 @@ def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], lis
         pass
 
     universe = {row["ticker"] for row in load_universe(selected)}
-    dropped: list[str] = []
-    kept: list[dict[str, Any]] = []
+    weights: list[dict[str, Any]] = []
+    unknown: list[str] = []
     for item in settings.get("weights") or []:
         ticker = str((item or {}).get("ticker") or "").strip().upper()
-        if ticker and ticker in universe:
-            kept.append(item)
-        elif ticker:
-            dropped.append(f"{ticker} 종목풀에 없어 제외")
-    return validate_settings({**settings, "weights": kept}), dropped
+        if not ticker:
+            continue
+        try:
+            weight = round(float((item or {}).get("weight_pct") or 0), 2)
+        except (TypeError, ValueError):
+            weight = 0.0
+        weights.append({"ticker": ticker, "weight_pct": weight})
+        if ticker not in universe:
+            unknown.append(ticker)
+
+    # 검증을 통과시키지 않고 그대로 돌려준다 — 화면이 고칠 수 있게 보여 주는 것이 목적이다.
+    return {**settings, "weights": weights}, unknown
 
 
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
