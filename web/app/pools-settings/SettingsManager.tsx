@@ -109,16 +109,40 @@ const EMPTY_DRAFT: PoolDraft = {
   currency: "KRW",
   pool_kind: "etf",
   TOP_N_HOLD: "5",
-  SHORT_MA_DAYS: "10",
-  LONG_MA_DAYS: "20",
-  BUY_SLIPPAGE_PCT: "0.25",
-  SELL_SLIPPAGE_PCT: "0.25",
+  // 이평선은 국가마다 선택지가 달라 여기서 못 정한다 — `withDefaultMaDays` 가 채운다.
+  SHORT_MA_DAYS: "",
+  LONG_MA_DAYS: "",
+  // 슬리피지는 보수적으로 — 낙관적인 값으로 열면 백테스트가 실제보다 좋게 나온다.
+  BUY_SLIPPAGE_PCT: "0.5",
+  SELL_SLIPPAGE_PCT: "0.5",
   STOPLOSS_THRESHOLD_PCT: "-10",
   benchmarkTicker: "",
   benchmarkName: "",
   marketRegimeTicker: "",
   marketRegimeName: "",
 };
+
+/** 이평선 기본값을 그 국가 선택지 중 **가장 작은 값**으로 채운다.
+ *
+ *  선택지에 없는 값(예전 기본값 10/20)을 초안에 두면 셀렉트가 빈 채로 열리고, 사용자가
+ *  건드리지 않으면 저장할 수 없는 값이 그대로 남는다. 목록은 국가마다 달라 상수로 못 둔다. */
+function withDefaultMaDays(
+  draft: PoolDraft,
+  optionsByCountry: Record<string, { short_ma_options: number[]; long_ma_options: number[] }>,
+): PoolDraft {
+  const options = optionsByCountry[draft.country_code];
+  if (!options) return draft;
+  const smallest = (days: number[]) => (days.length ? String(Math.min(...days)) : "");
+  return {
+    ...draft,
+    SHORT_MA_DAYS: options.short_ma_options.includes(Number(draft.SHORT_MA_DAYS))
+      ? draft.SHORT_MA_DAYS
+      : smallest(options.short_ma_options),
+    LONG_MA_DAYS: options.long_ma_options.includes(Number(draft.LONG_MA_DAYS))
+      ? draft.LONG_MA_DAYS
+      : smallest(options.long_ma_options),
+  };
+}
 
 /** 그리드 행 — 편집 중인 초안 그대로에 표시용 필드를 얹는다. */
 type PoolGridRow = PoolDraft & {
@@ -339,6 +363,8 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
   const [loading, setLoading] = useState(true);
 
   const [error, setError] = useState<string | null>(null);
+  // 이평선 선택지 — 백엔드가 단일 소스다. 새 풀 초안의 기본값도 여기서 고른다.
+  const maOptionsByCountry = useMemo(() => data?.constraints.ma_options_by_country ?? {}, [data]);
   const [drafts, setDrafts] = useState<Record<string, PoolDraft>>({});
   const [newDraft, setNewDraft] = useState<PoolDraft>(EMPTY_DRAFT);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -414,9 +440,13 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     setDrafts((prev) => ({ ...prev, [id]: { ...prev[id], [key]: value } }));
   }, []);
 
-  const updateNewDraft = useCallback((key: keyof PoolDraft, value: string) => {
-    setNewDraft((prev) => ({ ...prev, [key]: value }));
-  }, []);
+  const updateNewDraft = useCallback(
+    (key: keyof PoolDraft, value: string) => {
+      // 국가를 바꾸면 이평선 선택지가 통째로 바뀐다 — 목록 밖 값이 남지 않게 다시 채운다.
+      setNewDraft((prev) => withDefaultMaDays({ ...prev, [key]: value }, maOptionsByCountry));
+    },
+    [maOptionsByCountry],
+  );
 
   const handleCreate = useCallback(async () => {
     setCreating(true);
@@ -431,7 +461,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         throw new Error(payload.error ?? payload.detail ?? "종목풀 생성에 실패했습니다.");
       }
       toast.success("종목풀을 추가했습니다.");
-      setNewDraft(EMPTY_DRAFT);
+      setNewDraft(withDefaultMaDays(EMPTY_DRAFT, maOptionsByCountry));
       setIsCreatingNew(false);
       await load();
     } catch (err) {
@@ -439,7 +469,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     } finally {
       setCreating(false);
     }
-  }, [load, newDraft, toast]);
+  }, [load, maOptionsByCountry, newDraft, toast]);
 
   /** 변경된 행만 모아 한 번에 저장한다 — 상단 저장 버튼 1개가 전부를 처리한다. */
   const handleSaveAll = useCallback(async () => {
@@ -1015,7 +1045,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         title="신규 종목풀"
         subtitle="ticker_type 은 생성 후 변경할 수 없습니다."
         onClose={() => {
-          setNewDraft(EMPTY_DRAFT);
+          setNewDraft(withDefaultMaDays(EMPTY_DRAFT, maOptionsByCountry));
           setIsCreatingNew(false);
         }}
         size="xl"
@@ -1025,7 +1055,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
               type="button"
               className="btn btn-outline-secondary"
               onClick={() => {
-                setNewDraft(EMPTY_DRAFT);
+                setNewDraft(withDefaultMaDays(EMPTY_DRAFT, maOptionsByCountry));
                 setIsCreatingNew(false);
               }}
             >
