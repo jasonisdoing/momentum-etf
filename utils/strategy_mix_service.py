@@ -1328,8 +1328,10 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
 
     # ── 적용 계좌 — 이 계산의 기준 계좌 그대로다(슬리브별 풀이 여기서 나왔다).
     account = _load_account_state(ctx["account_id"])
+    krw_rate = _krw_rate(pool_currency)
+    if krw_rate <= 0:
+        raise RuntimeError(f"{pool_currency} 환율을 읽을 수 없습니다.")
     if account is not None:
-        krw_rate = _krw_rate(pool_currency)
         _value_account(account, krw_rate, {row["ticker"]: row["price"] for row in holdings if row.get("price")})
 
         # ── 고정 자산 몫만큼 슬리브·현금 비중을 줄인다 ──
@@ -1419,6 +1421,8 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
 
     payload = {
         "computed_at": datetime.now().astimezone().isoformat(),
+        "currency": ctx["currency"],
+        "krw_rate": krw_rate,
         "account_id": ctx["account_id"],
         # 화면이 표시용 시세를 60초마다 갱신할 때 쓴다(시세 소스가 국가별로 다르다).
         "country": country,
