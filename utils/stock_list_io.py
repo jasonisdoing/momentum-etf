@@ -81,14 +81,17 @@ def seed_pool_stocks(stocks_by_pool: dict[str, list[dict]]) -> None:
 
 
 def _invalidate_cache(ticker_type: str | None = None) -> None:
-    """종목 목록 변경에 딸린 캐시를 모두 무효화한다.
+    """종목 목록 변경에 딸린 캐시를 무효화한다.
 
-    ``_build_active_pool_ticker_map`` 은 만료가 없는 ``lru_cache`` 라 여기서 지우지 않으면
-    영영 옛 상태로 남는다 — 이 모듈의 쓰기 함수들이 모두 이 하나만 부르므로 여기에 둔다.
+    ``_build_active_pool_ticker_map`` 은 `lru_cache` 가 아니라 매번 DB 를 읽는다 — 예전에
+    여기서 `.cache_clear()` 를 부르다가 `AttributeError` 가 났고, 그 예외를 호출부가
+    「삭제 실패」로 오인해 종목풀 하나가 통째로 사라졌다(2026-09-05 kor_kr 70종목).
+    캐시가 다시 생기면 그때 여기에 추가한다.
     """
-    del ticker_type  # 두 캐시 모두 풀 구분이 없어 항상 전체를 지운다
+    del ticker_type  # 풀 구분이 없어 항상 전체를 지운다
     _LISTING_CACHE.clear()
-    _build_active_pool_ticker_map.cache_clear()
+    # 유니버스는 `lru_cache` 라 여기서 안 지우면 화면·백테스트가 옛 목록을 계속 본다.
+    load_pool_universe.cache_clear()
 
 
 # 외부 모듈(예: stocks_service)에서 stock_meta 를 직접 갱신한 뒤 호출할 수 있도록
@@ -670,14 +673,21 @@ def hard_remove_stock(ticker_type: str, ticker: str) -> bool:
 
     try:
         result = coll.delete_one({"ticker_type": type_norm, "ticker": ticker_norm})
-        if result.deleted_count > 0:
-            _invalidate_cache(type_norm)
-            logger.info("종목 완전 삭제(Hard): %s (type=%s)", ticker_norm, type_norm)
-            return True
-        return False
     except Exception as exc:
         logger.warning("종목 완전 삭제 실패 %s (type=%s): %s", ticker_norm, type_norm, exc)
         return False
+    if result.deleted_count <= 0:
+        return False
+
+    # 여기서부터는 **이미 지워졌다.** 캐시 무효화가 실패해도 True 를 돌려줘야 한다 —
+    # False 를 돌리면 호출부가 '못 지웠다'고 보고 되돌리기를 건너뛰어, DB 에서는 사라졌는데
+    # 어느 풀에도 없는 종목이 된다(실제로 kor_kr 70종목이 그렇게 날아갔다).
+    logger.info("종목 완전 삭제(Hard): %s (type=%s)", ticker_norm, type_norm)
+    try:
+        _invalidate_cache(type_norm)
+    except Exception as exc:
+        logger.error("종목 삭제 후 캐시 무효화 실패 %s (type=%s): %s", ticker_norm, type_norm, exc)
+    return True
 
 
 def get_deleted_etfs(ticker_type: str) -> list[dict[str, Any]]:
