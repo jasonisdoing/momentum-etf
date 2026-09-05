@@ -243,7 +243,7 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
         result[setting_key] = config[pool_key]
     # 없는 선택 항목은 '미설정' 기본값으로 채운다 — 임의 보정이 아니라 스키마 기본이다.
     result.setdefault("start_date", None)
-    result.setdefault("adr_floor", None)
+    result.setdefault("adr_floor", min(ADR_FLOOR_OPTIONS))
     return result
 
 
