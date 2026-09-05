@@ -1273,7 +1273,9 @@ export function StrategyMixClient() {
 
   /** 슬리브 오른쪽의 읽기 전용 설정 — 그 전략 화면에 저장된 값을 그대로 보여준다. */
   const settingsOf = (strategy: string, pool: string) => {
-    if (!strategy || !pool) return null;
+    // 행은 `display: contents` 라 칸 수가 맞아야 한다 — 아직 안 고른 슬리브도 빈 칸을 채운다.
+    // null 을 돌려주면 그 칸이 비어 다음 행이 통째로 밀린다.
+    if (!strategy || !pool) return <span className="mixSleeveSettings" />;
     const summaries = meta?.settings_summaries ?? {};
     // 전략 전체를 못 읽은 경우는 `전략:*` 로 들어온다.
     const items = summaries[`${strategy}:${pool}`] ?? summaries[`${strategy}:*`];
