@@ -724,7 +724,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         }
         return (
           <span title={result.updated_at ? `계산 ${formatKstDateTime(result.updated_at)}` : undefined}>
-            {`${fmt(result.cagr_pct, 1)}% · ${fmt(result.mdd_pct, 1)}% · ${fmt(result.sortino, 2)}`}
+            {`${fmt(result.cagr_pct, 1)}% / ${fmt(result.mdd_pct, 1)}% / ${fmt(result.sortino, 2)}`}
           </span>
         );
       },
