@@ -73,7 +73,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "min_value_mult": None,
     # ADR 하한 — 전일 시장 ADR 이 미만이면 그날 **신규 진입만** 차단(보유는 이탈이 관리).
     # 기본 없음. 시장은 풀 설정의 시장 레짐 지수를 따른다(모멘텀과 같은 공용 판정).
-    "adr_floor": None,
+    "adr_floor": min(ADR_FLOOR_OPTIONS),
 }
 
 
