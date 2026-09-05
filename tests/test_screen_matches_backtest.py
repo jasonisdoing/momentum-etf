@@ -13,6 +13,13 @@ from __future__ import annotations
 
 import unittest
 from typing import Any
+from unittest.mock import patch
+
+import pandas as pd
+
+from utils.mix_sleeve import SleeveSpec, slot_state
+from utils.portfolio_backtest import current_positions, run_backtest
+from utils.strategy_mix_service import _simulate_mix
 
 MOMENTUM_POOL = "us_stock"
 NEW_HIGH_POOL = "us_stock"
@@ -134,41 +141,73 @@ class MixScreenMatchesSleeveBacktests(unittest.TestCase):
             expected,
             "합성 화면의 목표 종목이 슬리브 백테스트의 보유와 다릅니다 — 합성이 판정을 다시 하고 있습니다.",
         )
-        self._assert_targets_are_consistent(screen)
 
-    def _assert_targets_are_consistent(self, screen: dict[str, Any]) -> None:
-        """목표 주수·금액·비중이 서로 맞는지 — 종목만 같고 수량이 틀리는 회귀를 잡는다.
 
-        실제로 이 세 가지가 어긋난 적이 있다. 두 슬리브가 같은 종목을 담을 때 목표 주수가
-        합산되지 않고 덮어써졌고(보유 228주에서 115주를 팔라는 지시가 났다), 고정 자산이
-        비중 합계에서 빠져 목표가 27%p 낮게 보였다. 둘 다 티커 집합은 같아 위 비교를 통과했다.
-        """
-        total = float(screen["account"]["total_assets"])
-        self.assertGreater(total, 0)
+class PortfolioMixStateTest(unittest.TestCase):
+    def test_screen_and_mix_match_portfolio_engine(self):
+        dates = ["2026-01-02", "2026-02-02", "2026-02-03"]
+        a_prices, rebalance, band, cash = [100, 200, 220], "monthly", 3, 20
+        index = pd.to_datetime(dates)
+        frame = pd.DataFrame({"A": a_prices, "B": [100.0] * len(dates)}, index=index)
+        settings = {
+            "pool": "test",
+            "start_date": dates[0],
+            "rebalance": rebalance,
+            "band_pct": band,
+            "cash_weight_pct": cash,
+            "weights": [{"ticker": t, "weight_pct": (100 - cash) / 2} for t in ("A", "B")],
+        }
+        with (
+            patch("utils.portfolio_backtest.validate_settings", side_effect=lambda s: s),
+            patch("utils.portfolio_backtest._load_close_frame", return_value=frame),
+            patch("utils.portfolio_backtest.get_pool_slippage", return_value=(0, 0)),
+            patch("utils.benchmark_curve.load_benchmark_frame", return_value=pd.DataFrame({"Close": 100}, index=index)),
+            patch("utils.benchmark_curve.benchmark_growth", side_effect=lambda pool, ix: pd.Series(1.0, index=ix)),
+            patch("utils.portfolio_backtest.benchmark_info", return_value={"name": "기준"}),
+        ):
+            result = run_backtest(12, settings, start_date=dates[0])
+            screen = current_positions(settings)
+        self.assertEqual(screen["open_positions"], result["open_positions"])
+        self.assertEqual(screen["sleeve_cash_weight_pct"], result["sleeve_cash_weight_pct"])
+        spec = SleeveSpec("a", "portfolio", "test", settings)
+        with (
+            patch("utils.mix_sleeve.current_state", return_value=screen),
+            patch("utils.portfolio_service.universe_metrics", return_value=[]),
+            patch("utils.settings_loader.get_ticker_type_settings", return_value={"currency": "USD"}),
+        ):
+            state = slot_state(spec)
+        for source, target in zip(result["open_positions"], state.targets, strict=True):
+            self.assertEqual(source["sleeve_weight_pct"], target["drift_pct"])
+            self.assertEqual(source["price"], target["price"])
+        self.assertAlmostEqual(sum(t["drift_pct"] for t in state.targets) + result["sleeve_cash_weight_pct"], 100)
 
-        weight_sum = 0.0
-        for row in screen["holdings"]:
-            weight = row.get("actual_weight_pct")
-            if weight is not None:
-                weight_sum += float(weight)
-            quantity, amount, price = row.get("target_quantity"), row.get("target_amount"), row.get("price")
-            if quantity is None or not price:
-                continue
-            # 목표 금액은 **주문할 금액**이라 목표 주수와 1주 값의 곱이어야 한다.
-            self.assertAlmostEqual(
-                float(amount) / total * 100.0,
-                float(weight),
-                places=2,
-                msg=f"{row['ticker']} 의 목표 금액과 목표 비중이 다릅니다 — 서로 다른 기준으로 계산됐습니다.",
-            )
-        # 현금은 종목 행이 아니라 요약에 있다 — 빼면 합이 100 이 안 된다.
-        weight_sum += float(screen["summary"]["actual_cash_pct"])
-        self.assertAlmostEqual(
-            weight_sum,
-            100.0,
-            places=1,
-            msg="목표 비중의 합이 100% 가 아닙니다 — 표에서 빠진 몫이 있습니다(고정 자산·현금 행 확인).",
-        )
+
+class MixRebalanceMatchesBacktest(unittest.TestCase):
+    def test_pending_month_start_matches_backtest(self):
+        slots = [SleeveSpec("a", "momentum", "us_stock", {}), SleeveSpec("b", "momentum", "us_stock", {})]
+        ctx = {"account_id": "test", "slots": slots}
+        results = {
+            key: {
+                "daily": [
+                    {"date": "2026-08-28", "strategy_pct": 0, "cash_weight_pct": 50},
+                    {"date": "2026-08-31", "strategy_pct": pct, "cash_weight_pct": 50},
+                ]
+            }
+            for key, pct in [("a", 20), ("b", 0)]
+        }
+        with (
+            patch(
+                "utils.strategy_mix_service.mix_weights_for_account",
+                return_value={"a_pct": 40, "b_pct": 40, "cash_pct": 20},
+            ),
+            patch("utils.pool_settings_store.get_pool_slippage", return_value=(0.1, 0.2)),
+        ):
+            pending = _simulate_mix(ctx, results, through_date="2026-09-01")
+            for result in results.values():
+                result["daily"].append({**result["daily"][-1], "date": "2026-09-01"})
+            actual = _simulate_mix(ctx, results, through_date=None)
+        self.assertEqual(pending["values"], actual["values"])
+        self.assertEqual(pending["cash"], actual["cash"])
 
 
 if __name__ == "__main__":
