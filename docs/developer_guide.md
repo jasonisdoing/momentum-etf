@@ -56,7 +56,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | 컬렉션 / 문서 | 내용 |
 | --- | --- |
 | `pool_settings` | 종목풀 정의(국가·통화·벤치마크·풀 성격 stock/etf·보유 종목 수·순위용 이평). 화면 `/pools-settings` |
-| `account_settings` | 계좌 정의·합성 배분. 추가/삭제는 DB 직접 |
+| `account_settings` | 계좌 정의·합성 배분·운용 시작일(`mix_start_date`, nullable ISO 날짜). 시작일은 저장만 하며 계산 연동은 미구현. 추가/삭제는 DB 직접 |
 | `stock_meta` | 종목 관리 원본(버킷·종목명). 삭제는 즉시 하드 딜리트 |
 | `stock_cache_meta` | 저빈도 메타(`meta_cache`)·ETF 구성종목(`holdings_cache`) |
 | 가격 캐시 | `utils/cache_utils.py` Parquet → Mongo. 요청한 풀만 읽고 다른 풀로 fallback 하지 않는다. **소유자 캐시는 `cache_<소유자>_stocks`, 소유자 없는 참조 시세(환율·레버리지 지수)는 `reference_*`** — 수명이 정반대라 이름 형식을 나눠 둔다(§6) |

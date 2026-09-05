@@ -46,6 +46,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "mix_sleeves",
     "mix_slack_enabled",
     "mix_cash_pct",
+    "mix_start_date",
     "broker_api",
     "URL",
     # 보유종목 알림 — 계좌는 **On/Off 만** 갖는다.
@@ -336,6 +337,18 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
         elif key == "mix_cash_pct":
             # 합성에서 비워 두는 현금 몫(%). 슬리브 배분과의 합이 100 인지는 아래에서 본다.
             cleaned[key] = _validate_pct(account_id, key, raw)
+        elif key == "mix_start_date":
+            # 미설정은 그대로 보관하고, 입력한 날짜를 임의로 보정하지 않는다.
+            if raw is None:
+                cleaned[key] = None
+                continue
+            if not isinstance(raw, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+                raise AccountSettingsStoreError("운용 시작일은 YYYY-MM-DD 형식이어야 합니다.")
+            try:
+                datetime.strptime(raw, "%Y-%m-%d")
+            except ValueError as exc:
+                raise AccountSettingsStoreError("운용 시작일이 올바른 날짜가 아닙니다.") from exc
+            cleaned[key] = raw
         elif key == "broker_api":
             # 증권사 API 연동 — {provider, account_no}. 없음이면 null.
             # provider 는 커넥터 레지스트리에 있어야 하고, 계좌번호는 화면의 '확인' 이
