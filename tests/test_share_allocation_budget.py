@@ -44,3 +44,34 @@ class ShareAllocationBudgetTest(unittest.TestCase):
             _attach_account_targets(rows, account, krw_rate=1, slot_keys=(), target_shares=target)
             self.assertEqual(rows[0]["target_quantity"], 5)
             self.assertEqual(rows[0]["trade_quantity"], trade)
+
+
+class MixCashPreservationTest(unittest.TestCase):
+    def allocate(self, rows):
+        from types import SimpleNamespace
+
+        from utils.strategy_mix_service import _sleeve_target_shares
+
+        states = {key: SimpleNamespace(top_n=2, targets=targets) for key, targets in rows.items()}
+        return _sleeve_target_shares(states, {"a": 400, "b": 400}, 1)
+
+    def test_mix_reserve_and_both_sleeve_cash_are_preserved(self):
+        # 총자산 1,000: 합성 현금 200 + 전략 A 현금 200 + 전략 B 현금 300.
+        rows = {
+            "a": [{"ticker": "A", "price": 80, "drift_pct": 50}],
+            "b": [{"ticker": "B", "price": 60, "drift_pct": 25}],
+        }
+        result = self.allocate(rows)
+        self.assertEqual(result, {"A": 2, "B": 2})
+        self.assertEqual(1000 - result["A"] * 80 - result["B"] * 60, 720)
+
+    def test_overlap_keeps_cash_after_combining_targets(self):
+        rows = {
+            "a": [{"ticker": "X", "price": 80, "drift_pct": 50}],
+            "b": [{"ticker": "X", "price": 80, "drift_pct": 25}],
+        }
+        self.assertEqual(self.allocate(rows), {"X": 3})
+
+    def test_empty_and_exiting_slots_are_cash(self):
+        rows = {"a": [], "b": [{"ticker": "X", "price": 80, "drift_pct": 50, "is_exiting": True}]}
+        self.assertEqual(self.allocate(rows), {})
