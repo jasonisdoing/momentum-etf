@@ -573,26 +573,25 @@ def move_active_stock(from_pool: str, to_pool: str, ticker: str) -> dict[str, An
             db[meta_coll].delete_many({"ticker_type": target, "ticker": ticker_norm})
             db[meta_coll].update_many({"ticker_type": source, "ticker": ticker_norm}, {"$set": {"ticker_type": target}})
     except Exception as exc:
-        # 여기 온 시점에 **출발 풀 종목은 아직 그대로다**(빼기 전에 실패했거나, 빼기 자체가
-        # 실패했다). 그러니 대상 풀에 담은 것만 이동 전 상태로 되돌리면 된다.
-        try:
-            if target_before is None:
-                hard_remove_stock(target, ticker_norm)
-            else:
-                db.stock_meta.replace_one({"_id": target_before["_id"]}, target_before, upsert=True)
-        except Exception as revert_error:
-            get_app_logger().error("[이동] %s 대상 풀 되돌리기 실패: %s", ticker_norm, revert_error)
-        # 출발 풀에서 이미 빠진 뒤에 실패했을 수도 있다(캐시 이동 단계 등) — 그때만 되살린다.
-        still_in_source = db.stock_meta.find_one(
-            {"ticker_type": source, "ticker": ticker_norm, "is_deleted": {"$ne": True}}
-        )
+        # 되돌리기도 **되살리기 먼저, 지우기 나중**이다. 반대로 하면 두 단계 사이에 프로세스가
+        # 죽었을 때 종목이 어느 풀에도 없게 된다 — 이동 순서를 뒤집은 것과 같은 이유다.
+        # 이 순서면 중간에 죽어도 양쪽에 남을 뿐이라 화면에서 보이고 손으로 고칠 수 있다.
         restored = True
-        if still_in_source is None:
+        if db.stock_meta.find_one({"ticker_type": source, "ticker": ticker_norm, "is_deleted": {"$ne": True}}) is None:
             try:
                 restored = add_stock(source, ticker_norm, name=carried_name, **carried)
             except Exception as restore_error:
                 restored = False
                 get_app_logger().error("[이동] %s 복구 중 오류: %s", ticker_norm, restore_error)
+        if restored:
+            # 출발 풀이 확실해진 뒤에야 대상 풀을 이동 전 상태로 돌린다.
+            try:
+                if target_before is None:
+                    hard_remove_stock(target, ticker_norm)
+                else:
+                    db.stock_meta.replace_one({"_id": target_before["_id"]}, target_before, upsert=True)
+            except Exception as revert_error:
+                get_app_logger().error("[이동] %s 대상 풀 되돌리기 실패: %s", ticker_norm, revert_error)
         if not restored:
             # 조용히 넘기면 안 된다 — 종목이 어느 풀에도 없는 상태로 남는다.
             get_app_logger().error(
