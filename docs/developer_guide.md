@@ -47,6 +47,8 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | `/data-tables` | DB 컬렉션 카탈로그 — 분류·크기·고아 데이터 | `utils/data_table_catalog.py` |
 | `/m` | 폰 전용. 모바일 전용 API 는 만들지 않는다(`web/app/m/mobile-data.ts` 가 기존 API 합성) | |
 
+합성 운용 배분·백테스트는 `utils/strategy_mix_service._simulate_mix`를 공유하며 월초 배분은 `core/strategy/mix_rebalance.py`가 담당한다. 각 엔진의 일별 결과 `cash_weight_pct`를 읽어 전략 내부 현금을 보존한다.
+
 전략 공용 모듈:
 - 전략 시작일은 모멘텀의 `pool_settings.MOMENTUM_START_DATE`, 신고가·포트폴리오의 풀별 `start_date`에 저장한다. 검증은 `utils/strategy_settings.py`, 개별 운용 현황과 합성은 같은 저장일로 계산한다.
 - `utils/strategy_settings.py` — 선택지 밖 저장값을 첫 선택지로 보정하고 내역을 돌려준다(화면만; 배치·백테스트는 엄격 검증).

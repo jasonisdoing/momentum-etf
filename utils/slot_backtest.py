@@ -135,6 +135,7 @@ def run_slot_backtest(
     holdings: dict[str, dict[str, Any]] = {}
     trades: list[dict[str, Any]] = []
     curve: list[float] = []
+    cash_curve: dict[pd.Timestamp, float] = {}
     last_day = span[-1]
 
     # 평가 전용 종가 — 그날 값이 없으면 **직전 유효 종가**로 본다.
@@ -162,6 +163,7 @@ def run_slot_backtest(
         # 판정 뒤에 재면 아직 사지도 않은 주식이 오늘 종가로 평가되고 그 대금은 이미 현금에서
         # 빠져 곡선 첫날이 어긋난다(총수익과 일별 합성이 4%p 갈렸다).
         curve.append(_value_at(day))
+        cash_curve[day] = cash / curve[-1] * 100.0
 
         # 1) 청산 판정 (오늘 종가) → 내일 시가 체결
         for ticker in list(holdings):
@@ -255,6 +257,7 @@ def run_slot_backtest(
     # 마지막 날은 판정·체결이 없다(체결할 다음 거래일이 없어서). 다만 그날 종가로
     # **평가**는 해야 곡선이 하루 짧아지지 않는다.
     curve.append(_value_at(last_day))
+    cash_curve[last_day] = cash / curve[-1] * 100.0
 
     # 아직 청산하지 않은 종목 — 성과에는 평가손익으로 이미 반영돼 있지만 체결 내역에는 없다.
     # 슬리브 안에서의 현재 비중도 함께 담는다. 진입할 때 1/slots 였다가 시세대로 흘러간
@@ -347,6 +350,7 @@ def run_slot_backtest(
                 "strategy_pct": round((v - 1) * 100, 6),
                 "benchmark_pct": round((float(benchmark.loc[d]) - 1) * 100, 6),
                 "adr": adr_at(d),
+                "cash_weight_pct": cash_curve[d],
             }
             for d, v in strategy.items()
         ],

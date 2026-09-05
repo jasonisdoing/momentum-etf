@@ -4,8 +4,7 @@
 **선택한 계좌의 슬리브들**(계좌 설정의 `mix_sleeves` 배열)에 저장된
 각 전략 화면 설정을 그대로 가져와 두 백테스트를 돌리고,
 매월 첫 거래일에 계좌 설정의 배분(A·B·비워 두는 현금)으로 되돌리되,
-**현금 우선**으로 이관한다 —
-넘기는 슬리브의 현금부터 쓰고, 모자랄 때만 주식을 비례 매도한다(오르는 종목 유지).
+각 전략 내부 주식·현금 비율을 유지하며 비례 이관한다.
 화면은 신고가 화면과 같은 방식으로 이 일별 누적에서 연간·월간·일간 표를 만든다.
 
 캐시는 두지 않는다 — 각 전략 화면의 백테스트와 같은 패턴(요청 시 계산)이다.
@@ -402,20 +401,16 @@ def _load_account_state(account_id: str) -> dict[str, Any]:
 
 
 # 슬리브 몫 캐시 — 이 값은 **종가 기준 백테스트 곡선**에서 나오므로 장중에는 바뀌지 않는데,
-# 캐시가 없을 때는 요청마다 슬리브 수만큼 2개월 백테스트를 새로 돌려 17초 넘게 썼다.
+# 캐시가 없을 때는 요청마다 슬리브 수만큼 백테스트를 새로 돌려 17초 넘게 썼다.
 # 계좌 잔고·보유 수량은 이 캐시 밖이라 그대로 매 요청 새로 읽는다.
 _SHARES_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="mix_sleeve_shares")
 
 
 def _sleeve_shares(ctx: dict[str, Any]) -> dict[str, float]:
-    """{슬롯키: 몫 %} + cash_pct — 직전 월초 배분 이후 흘러간 비율.
+    """전략 시작일부터 공용 합성 재생으로 계산한 슬리브 몫과 유보 현금 비중.
 
-    각 슬리브의 일별 곡선에서 이번 달 첫 거래일 이후 성장률을 읽어, 월초 배분에 곱한 뒤
-    전체를 100 으로 정규화한다. 비워 두는 현금은 자라지 않으므로 그 몫은 그대로 두고,
-    슬리브가 오르면 상대적으로 현금 비중이 줄어든다.
-
-    곡선 형태(전일 대비 vs 누적)는 어댑터가 **누적 배수**로 통일해 주므로 전략을 가리지 않는다.
-    보유와 같은 운용 시작일로 곡선을 계산한다. 데이터 부족은 오류로 알린다.
+    월초 재배분과 비용은 합성 백테스트와 같은 경로를 사용한다.
+    실제 계좌 보유는 계산에 사용하지 않는다.
     """
     # 캐시 키는 계좌 + **슬리브 구성**이다. 조합이나 배분을 바꾸면 몫이 달라지므로
     # 구성까지 키에 넣어야 저장 직후 옛 몫이 그대로 나오지 않는다.
@@ -428,37 +423,28 @@ def _sleeve_shares(ctx: dict[str, Any]) -> dict[str, float]:
 
 
 def _compute_sleeve_shares(ctx: dict[str, Any]) -> dict[str, float]:
-    from utils.mix_sleeve import daily_curve, load_context, run_backtest
+    import pandas as pd
+
+    from config import MARKET_SCHEDULES
+    from utils.mix_sleeve import load_context, run_backtest
     from utils.strategy_settings import require_start_date
+    from utils.trading_calendar import get_trading_days
 
-    base = mix_weights_for_account(ctx["account_id"])
-
-    curves = {
-        spec.key: daily_curve(
-            spec, run_backtest(spec, 12, load_context(spec), start_date=require_start_date(spec.settings))
-        )
+    results = {
+        spec.key: run_backtest(spec, 12, load_context(spec), start_date=require_start_date(spec.settings))
         for spec in ctx["slots"]
     }
-    if not curves or not all(curves.values()):
-        raise RuntimeError("운용 시작일 이후 슬리브 가격 데이터가 부족합니다.")
-    trimmed = curves
-    # 기준 달 — 어느 슬리브든 마지막 날짜가 같은 달이다(같은 국가 달력).
-    month = max(max(curve) for curve in trimmed.values())[:7]
-
-    growths: dict[str, float] = {}
-    for key, curve in trimmed.items():
-        days = sorted(d for d in curve if d[:7] == month)
-        # 월초 첫 거래일 값이 기준점이다 — 그날까지의 변동은 직전 달 몫이다.
-        growths[key] = curve[days[-1]] / curve[days[0]] if len(days) >= 2 and curve[days[0]] > 0 else 1.0
-
-    values = {key: base[f"{key}_pct"] * growths[key] for key in growths}
-    cash_value = base["cash_pct"]  # 비워 둔 현금은 자라지 않는다.
-    total = sum(values.values()) + cash_value
-    if total <= 0:
-        return base
-    shares = {f"{key}_pct": round(value / total * 100.0, 4) for key, value in values.items()}
-    shares["cash_pct"] = round(cash_value / total * 100.0, 4)
-    return shares
+    country = ctx["country"]
+    today = pd.Timestamp.now(tz=MARKET_SCHEDULES[country]["timezone"]).date()
+    month_days = get_trading_days(str(today.replace(day=1)), str(today), country)
+    # 월초 시가 전에는 최신 확정 가격으로 같은 재배분을 미리 계산한다.
+    through_date = str(today) if month_days and month_days[0].date() == today else None
+    state = _simulate_mix(ctx, results, through_date=through_date)
+    total = sum(state["values"].values()) + state["cash"]
+    return {
+        **{f"{key}_pct": value / total * 100.0 for key, value in state["values"].items()},
+        "cash_pct": state["cash"] / total * 100.0,
+    }
 
 
 _WEEKDAYS_KO = ("월", "화", "수", "목", "금", "토", "일")
@@ -1015,6 +1001,7 @@ def _attach_account_targets(
                 **{f"{key}_weight": 0.0 for key in slot_keys},
                 **{f"{key}_status": None for key in slot_keys},
                 "is_sell_all": True,
+                "actual_weight_pct": 0.0,
                 "held_quantity": item["quantity"],
                 "held_value": value,
                 "average_buy_price": item.get("average_buy_price"),
@@ -1268,23 +1255,8 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     month_days = get_trading_days(month_start.strftime("%Y-%m-%d"), today_local.strftime("%Y-%m-%d"), country)
     sleeve_rebalance_today = bool(month_days) and month_days[0].date() == today_local
 
-    # ── 월초 배분 되돌리기는 **현금 우선**으로 이관한다 (백테스트와 같은 규칙) ──
-    # 종목 비중은 흘러간 그대로 두고(오르는 종목 유지), 장부상 현금만 슬리브 사이에서
-    # 옮긴다. 한 슬리브의 주식만으로 제 몫을 넘을 때만 — 현금으로 이관액을 다 못 채울
-    # 때만 — 초과분을 비례 매도한다. 그래서 여기서는 주식 비중을 그 몫에 맞춰 깎고,
-    # 슬리브 몫 표시는 월초 배분으로 되돌린다. 비워 두는 현금 몫도 여기서 함께 복구된다.
-    if sleeve_rebalance_today:
-        for key in keys:
-            target_pct = base_weights[f"{key}_pct"]
-            sleeve_stock = sum(row[f"{key}_weight"] for row in holdings)
-            if sleeve_stock > target_pct:
-                scale = (target_pct / sleeve_stock) if sleeve_stock > 0 else 0.0
-                for row in holdings:
-                    trimmed = row[f"{key}_weight"] * scale
-                    row["weight_pct"] += trimmed - row[f"{key}_weight"]
-                    row[f"{key}_weight"] = trimmed
-        shares = {key: base_weights[f"{key}_pct"] for key in keys}
-        reserved_cash_share = base_weights["cash_pct"]
+    # 월초 배분은 _sleeve_shares가 백테스트와 같은 재생 경로에서 이미 반영했다.
+    # 종목 비중과 목표 주수 모두 그 배분을 사용하므로 별도 보정하지 않는다.
 
     # 다음 거래일 — 모든 체결은 시가라 액션 묶음의 실제 날짜가 된다. 연휴가 끼면
     # 이 날짜가 교체일과 같아질 수 있고, 그러면 화면이 한 묶음으로 합친다.
@@ -1524,71 +1496,52 @@ def _merge_trades(slots: list[SleeveSpec], results: dict[str, dict[str, Any]]) -
     return holding + closed
 
 
-def _simulate_mix_daily(ctx: dict[str, Any], curves: dict[str, dict[str, float]]) -> Any:
-    """한 계좌에서 슬리브들을 함께 굴린 일별 자산 곡선(시작 1.0). 반환은 pandas.Series.
-
-    **판정을 다시 하지 않는다.** 슬리브별 곡선(`utils.mix_sleeve.daily_curve`)은 각 전략
-    엔진이 낸 결과 그대로이고, 여기서는 그 위에 **월초 이관**만 얹는다. 예전에는 이 함수가
-    슬롯 엔진의 청산·진입 루프를 통째로 다시 구현했는데, 그러면 엔진을 고칠 때마다 합성이
-    조용히 갈라진다(실제로 포트폴리오 슬리브는 이 루프에서 아무것도 사지 않아 현금으로만
-    남아 있었다). 판정은 엔진 한 곳, 합성은 읽기만 — 이게 이 파일이 지켜야 할 선이다.
-
-    월초 첫 거래일에 계좌 설정 배분으로 되돌린다. 넘치는 슬리브에서 빼 모은 뒤 모자란
-    슬리브에 넘기고, 남는 것이 비워 두는 현금 몫이 된다. 이관에는 넘기는 슬리브 종목풀의
-    **매도 슬리피지**를 물린다(받는 쪽이 그 돈을 굴리는 비용은 이미 그 슬리브 곡선 안에 있다).
-    """
+def _simulate_mix(
+    ctx: dict[str, Any], results: dict[str, dict[str, Any]], *, through_date: str | None
+) -> dict[str, Any]:
+    """합성 백테스트와 운용 배분의 공용 재생. 내부 주식·현금 비율은 엔진 값을 쓴다."""
     import pandas as pd
 
+    from core.strategy.mix_rebalance import rebalance_sleeves
+    from utils.mix_sleeve import daily_curve
     from utils.pool_settings_store import get_pool_slippage
 
     slots: list[SleeveSpec] = ctx["slots"]
-    weights = mix_weights_for_account(ctx["account_id"])
-    keys = [spec.key for spec in slots]
-    sell_slip = {spec.key: get_pool_slippage(spec.pool)[1] / 100.0 for spec in slots}
-
-    # 슬리브 곡선을 한 표로 — 거래일이 다른 풀이 섞이면 쉬는 날은 직전 값을 이어간다
-    # (그 시장이 닫힌 날 그 슬리브의 평가액은 변하지 않는다). 모든 슬리브에 값이 생기기
-    # 전의 앞부분은 버린다 — 한 슬리브만으로 합성을 만들 수는 없다.
-    frame = pd.DataFrame({key: pd.Series(curves[key]) for key in keys}).sort_index().ffill().dropna()
-    if len(frame) < 2:
-        raise RuntimeError("슬리브 전략들의 공통 백테스트 구간이 부족합니다.")
-    growth = (frame / frame.shift(1)).iloc[1:]
-
-    values = {key: weights[f"{key}_pct"] / 100.0 for key in keys}
-    # 두 전략에 주지 않고 비워 두는 몫 — 자라지 않고, 월초에만 다시 맞춘다.
-    cash_reserved = weights["cash_pct"] / 100.0
+    base = mix_weights_for_account(ctx["account_id"])
+    weights = {spec.key: base[f"{spec.key}_pct"] / 100.0 for spec in slots}
+    weights["cash"] = base["cash_pct"] / 100.0
+    slippage = {spec.key: tuple(rate / 100.0 for rate in get_pool_slippage(spec.pool)) for spec in slots}
+    curves = {spec.key: daily_curve(spec, results[spec.key]) for spec in slots}
+    frame = pd.DataFrame({key: pd.Series(curve) for key, curve in curves.items()}).sort_index().ffill().dropna()
+    stock = (
+        pd.DataFrame(
+            {
+                key: pd.Series({row["date"]: 1 - float(row["cash_weight_pct"]) / 100.0 for row in result["daily"]})
+                for key, result in results.items()
+            }
+        )
+        .sort_index()
+        .ffill()
+        .reindex(frame.index)
+    )
+    if len(frame) < 2 or stock.isna().any().any():
+        raise RuntimeError("합성에 필요한 공통 가격·현금 비중 데이터가 부족합니다.")
+    if through_date is not None and through_date > frame.index[-1] and through_date[:7] != frame.index[-1][:7]:
+        # 아직 월초 종가가 없으면 직전 확정 가격으로 목표만 계산한다.
+        frame.loc[through_date] = frame.iloc[-1]
+        stock.loc[through_date] = stock.iloc[-1]
     days = list(frame.index)
-    curve: dict[str, float] = {days[0]: sum(values.values()) + cash_reserved}
-
+    values = {spec.key: weights[spec.key] for spec in slots}
+    cash = weights["cash"]
+    curve = {days[0]: sum(values.values()) + cash}
+    growth = frame / frame.shift(1)
     for i, day in enumerate(days[1:], start=1):
-        for key in keys:
+        for key in values:
             values[key] *= float(growth.at[day, key])
-
-        # 월초 배분 되돌리기 — 현금 우선 이관.
         if day[:7] != days[i - 1][:7]:
-            total = sum(values.values()) + cash_reserved
-            targets = {key: total * weights[f"{key}_pct"] / 100.0 for key in keys}
-            pool_cash = cash_reserved
-            cash_reserved = 0.0
-            for key in keys:
-                excess = values[key] - targets[key]
-                if excess <= 1e-12:
-                    continue
-                values[key] -= excess
-                pool_cash += excess * (1 - sell_slip[key])
-            for key in keys:
-                need = targets[key] - values[key]
-                if need <= 1e-12:
-                    continue
-                give = min(need, pool_cash)
-                values[key] += give
-                pool_cash -= give
-            cash_reserved = pool_cash
-
-        # 비워 둔 현금도 계좌 자산이다 — 곡선에서 빼면 배분을 늘릴수록 총자산이 줄어 보인다.
-        curve[day] = sum(values.values()) + cash_reserved
-
-    return pd.Series(curve).sort_index()
+            values, cash, _ = rebalance_sleeves(values, cash, weights, stock.loc[day].to_dict(), slippage)
+        curve[day] = sum(values.values()) + cash
+    return {"curve": pd.Series(curve).sort_index(), "values": values, "cash": cash}
 
 
 def _value_account(account: dict[str, Any], krw_rate: float, price_hint: dict[str, float] | None = None) -> None:
@@ -1688,7 +1641,7 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
     curves = {spec.key: sleeve_curve(spec, results[spec.key]) for spec in ctx["slots"]}
 
     # 합성 곡선 — 위 슬리브 곡선 위에 월초 배분 이관만 얹는다(판정은 엔진이 이미 했다).
-    mix_curve = _simulate_mix_daily(ctx, curves)
+    mix_curve = _simulate_mix(ctx, results, through_date=None)["curve"]
     dates = [d for d in mix_curve.index if d in bench_curve]
     if len(dates) < 2:
         raise RuntimeError("슬리브 전략들의 공통 백테스트 구간이 부족합니다.")

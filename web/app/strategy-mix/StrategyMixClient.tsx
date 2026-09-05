@@ -439,7 +439,7 @@ function formatAmount(value: number | null | undefined): string {
 }
 
 /** 슬롯 키는 순서가 정한다 — 백엔드 `MIX_SLEEVE_KEYS` 와 같은 순서여야 한다. */
-const SLOT_KEY_ORDER = ["a", "b", "c"] as const;
+const SLOT_KEY_ORDER = ["a", "b", "c", "d"] as const;
 
 
 /** 보유 표 행 — 현금 행도 같은 표에 넣는다 (비중 합이 100%임을 한눈에 보이게). */
