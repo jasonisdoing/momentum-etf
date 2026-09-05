@@ -132,7 +132,7 @@ def load_context(spec: SleeveSpec) -> dict[str, Any] | None:
     """백테스트·현재 상태가 함께 쓰는 무거운 준비물(가격 패널). 필요 없는 전략은 None.
 
     패널 생성이 이 계산에서 가장 비싼 부분이라, 한 번 만들어 재사용해야 한다. 모멘텀·신고가는
-    같은 슬롯 엔진을 쓰므로 둘 다 필요하고, 포트폴리오는 판정이 없어 필요 없다.
+    같은 슬롯 엔진을 쓰므로 둘 다 필요하고, 포트폴리오는 백테스트가 직접 가격을 읽는다.
     """
     if spec.strategy == MOMENTUM:
         from utils.momentum_backtest import load_context as sm_load_context
@@ -152,8 +152,9 @@ def current_state(spec: SleeveSpec) -> dict[str, Any]:
 
         return sm_positions(spec.settings)
     if spec.strategy == PORTFOLIO:
-        # 포트폴리오는 판정이 없다 — 저장된 목표 비중이 곧 현재 상태다.
-        return dict(spec.settings)
+        from utils.portfolio_backtest import current_positions as portfolio_positions
+
+        return portfolio_positions(spec.settings)
     from utils.new_high_backtest import current_positions
 
     return current_positions(spec.settings)
@@ -224,45 +225,32 @@ def slot_state(spec: SleeveSpec) -> SlotState:
 
 
 def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
-    """포트폴리오 — 저장된 목표 비중이 그대로 슬롯이다.
-
-    이 전략에는 판정이 없어 `SlotState` 의 대부분이 빈다: 교체(`rebalance`)·이탈(`sells`)·
-    진입 예정(`entries`)·이탈 예상이 모두 없다. 대신 **종목마다 비중이 다르므로**
-    `drift_pct` 에 저장 비중을 그대로 싣는다 — 합성이 `슬리브 몫 × drift_pct / 100` 으로
-    목표를 잡으므로 균등 분배 전략과 같은 코드로 굴러간다.
-
-    남는 몫(현금)은 슬롯을 채우지 않는 것으로 표현된다 — 합성이 이미 그렇게 센다.
-    """
-    # 현재가·일간은 /strategy-portfolio 화면과 **같은 공용 함수**로 구한다. 판정이 없다고
-    # 시세까지 비워 두면 합성이 목표수량·매매수량을 못 내고(가격 없는 종목은 수량 계산에서
-    # 빠진다) 그 슬롯의 오늘의 액션이 통째로 사라진다.
+    """포트폴리오 엔진이 주기·밴드를 적용한 최종 비중을 합성에 전달한다."""
     from utils.portfolio_service import universe_metrics
 
     metrics_by = {row["ticker"]: row for row in universe_metrics(spec.pool)}
     targets: list[dict[str, Any]] = []
-    for row in list(raw.get("weights") or []):
+    for row in raw["open_positions"]:
         ticker = str(row["ticker"]).strip()
         metrics = metrics_by.get(ticker) or {}
         targets.append(
             {
                 "ticker": ticker,
                 "name": metrics.get("name") or ticker,
-                "price": metrics.get("current_price"),
+                "price": row["price"],
                 "change_pct": metrics.get("daily_change_pct"),
-                "status": f"목표 {float(row['weight_pct']):.2f}%",
+                "status": f"전략 비중 {float(row['sleeve_weight_pct']):.2f}%",
                 "return_pct": None,
                 "held_label": "",
                 # 포트폴리오는 진입 판정이 없다 — 매수 시점을 만들어 내지 않는다.
                 "entry_date": None,
                 "entry_price": None,
                 "is_exiting": False,
-                # 저장 비중을 그대로 싣는다 — 합성이 `슬리브 몫 × drift_pct / 100` 으로 목표를
-                # 잡으므로, 종목 30% + 현금 10% 는 슬리브 몫의 30%·10% 가 된다(비율 유지).
-                "drift_pct": float(row["weight_pct"]),
+                # 비중과 가격은 같은 엔진 평가 시점으로 맞춘다.
+                "drift_pct": float(row["sleeve_weight_pct"]),
             }
         )
-    # 종목 비중 합이 100 미만이면 나머지가 현금이다 — 슬리브 몫에서 그만큼이 안 채워진다
-    # (합성이 `슬리브 몫 − 담긴 종목 비중 합` 을 그 슬리브의 현금으로 센다).
+    # 설정상 현금 비중이 아니라 엔진의 잔여 현금이 비중 합의 나머지로 반영된다.
     # 통화는 종목풀 설정 것 — 비워 두면 두 슬롯이 모두 포트폴리오일 때 합성이 KRW 로
     # 떨어져 미국 풀의 액션 금액이 원화로 찍힌다.
     from utils.settings_loader import get_ticker_type_settings
@@ -272,13 +260,14 @@ def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
         top_n=len(targets),
         currency=str((get_ticker_type_settings(spec.pool) or {}).get("currency") or "KRW").strip().upper(),
         targets=targets,
-        held_tickers={row["ticker"] for row in targets},
-        held_count=len(targets),
-        active_count=len(targets),
+        held_tickers={row["ticker"] for row in raw["open_positions"] if row["shares"] > 0},
+        held_count=sum(row["shares"] > 0 for row in raw["open_positions"]),
+        active_count=sum(row["shares"] > 0 for row in raw["open_positions"]),
         sells=[],
         exit_forecast=[],
         entries=[],
         rebalance=None,
+        as_of=raw["as_of"],
     )
 
 
