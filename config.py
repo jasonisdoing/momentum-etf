@@ -221,9 +221,9 @@ ADR_FLOOR_OPTIONS: tuple[int | None, ...] = (None, 85, 90, 95)
 # **국가별**이다 — 이평선 선택지(SHORT_MA_DAYS_BY_COUNTRY)와 같은 방식으로, 신고가의
 # 화면 셀렉트·튜닝 축·저장 검증이 풀 국가의 목록을 쓴다(`utils/new_high_service` 가 골라 준다).
 MIN_VALUE_MULT_OPTIONS_BY_COUNTRY: dict[str, tuple[float | None, ...]] = {
-    "kor": (5.0, 3.0, 1.0, None),
-    "us": (3.0, 2.0, 1.0, None),
-    "au": (3.0, 2.0, 1.0, None),
+    "kor": (5.0, 2.0, None),
+    "us": (3.0, 2.0, None),
+    "au": (3.0, 2.0, None),
 }
 
 # 편도 슬리피지(%) — 0.05 ~ 0.50, 0.05 단위. 종목풀 설정에서 고른다.

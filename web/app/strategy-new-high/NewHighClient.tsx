@@ -438,6 +438,19 @@ export function NewHighClient() {
   // 진입·청산 체결일 — 장 시작 전에는 '오늘', 마감 뒤 캐시가 갱신되면 '내일' 이 된다.
   const fillDay = formatFillDay(positions?.next_session);
 
+  /** 서버 응답(GET)을 화면에 반영한다 — 초기 로드와 풀 전환이 같은 경로를 쓴다.
+   *  선택지 밖 저장값은 서버가 보정(coerce)해 보내므로 여기서 경고만 띄운다. */
+  const applyViewPayload = useCallback(
+    (payload: View) => {
+      setView(payload);
+      setDraft(payload.settings);
+      if (payload.coerced?.length) {
+        toast.warning(`저장값이 선택지에 없어 보정했습니다: ${payload.coerced.join(", ")} — 확인 후 저장하세요.`);
+      }
+    },
+    [toast],
+  );
+
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -449,11 +462,7 @@ export function NewHighClient() {
         const payload = (await response.json()) as View & { error?: string };
         if (!response.ok) throw new Error(payload.error ?? "설정을 불러오지 못했습니다.");
         if (!alive) return;
-        setView(payload);
-        setDraft(payload.settings);
-        if (payload.coerced?.length) {
-          toast.warning(`저장값이 선택지에 없어 보정했습니다: ${payload.coerced.join(", ")} — 확인 후 저장하세요.`);
-        }
+        applyViewPayload(payload);
       } catch (loadError) {
         if (alive) setError(loadError instanceof Error ? loadError.message : "설정을 불러오지 못했습니다.");
       } finally {
@@ -463,6 +472,7 @@ export function NewHighClient() {
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const runPositions = useCallback(async (settings: Settings) => {
@@ -542,27 +552,30 @@ export function NewHighClient() {
     return (Object.keys(effectiveDraft) as (keyof Settings)[]).some((key) => effectiveDraft[key] !== saved[key]);
   }, [effectiveDraft, view?.settings, view?.coerced]);
 
-  /** 풀을 바꾸면 그 풀에 저장된 설정으로 전환한다. 저장 이력이 없으면 **기본값**으로 채운다 —
-   *  직전 풀의 값을 물려받으면 다른 풀의 설정이 섞여 풀별로 보관하는 의미가 없어진다. */
+  /** 풀을 바꾸면 서버에서 그 풀의 설정을 **다시 읽는다**(새로고침과 같은 GET 경로).
+   *  저장 문서를 화면에서 합쳐 PUT 으로 전환하면, 선택지 밖 저장값이 있는 풀은 검증에
+   *  막혀 전환 자체가 실패한다 — GET 은 서버가 보정(coerce)해 주므로 항상 전환된다.
+   *  저장 이력이 없는 풀은 서버가 기본값을 돌려준다(start_date 없음 → 저장 요구). */
   const handlePoolChange = useCallback(
     (pool: string) => {
       if (!view) return;
       writeRememberedTickerType("strategy-new-high", pool);
-      const saved = view.settings_by_pool?.[pool];
-      const next = { ...view.default_settings, ...(saved ?? {}), pool, start_date: saved?.start_date ?? null };
       setPositions(null);
       setBacktest(null);
-      if (!next.start_date) {
-        setDraft(next);
-        setView({ ...view, settings: next });
-        return;
-      }
-      void persistSettings(
-        next,
-        saved ? "종목풀을 전환했습니다." : "저장 이력이 없어 기본값으로 시작합니다.",
-      );
+      void (async () => {
+        try {
+          const response = await fetch(`/api/strategy-new-high?pool=${encodeURIComponent(pool)}`, {
+            cache: "no-store",
+          });
+          const payload = (await response.json()) as View & { error?: string };
+          if (!response.ok) throw new Error(payload.error ?? "설정을 불러오지 못했습니다.");
+          applyViewPayload(payload);
+        } catch (switchError) {
+          toast.error(switchError instanceof Error ? switchError.message : "설정을 불러오지 못했습니다.");
+        }
+      })();
     },
-    [persistSettings, view],
+    [applyViewPayload, toast, view],
   );
 
   const handleBacktest = useCallback(async () => {
