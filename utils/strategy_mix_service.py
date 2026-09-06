@@ -609,7 +609,7 @@ def _build_action_groups(
         elif ticker in entry_tickers:
             title = "진입(예상)" if ticker in live_entry_tickers else "진입"
         else:
-            title = "목표 수량 조정 매수"
+            title = "신규 매수"
         after = f" → 목표 {int(row['target_quantity']):,}주" if row.get("target_quantity") is not None else ""
         amount = _format_trade_amount(trade, row.get("price"), currency)
         amount_note = f" · {amount}" if amount else ""
