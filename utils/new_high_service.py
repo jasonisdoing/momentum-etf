@@ -28,6 +28,7 @@ import pandas as pd
 
 from config import ADR_FLOOR_OPTIONS, MIN_VALUE_MULT_OPTIONS_BY_COUNTRY
 from utils.ma_options import SHORT_MA_OPTIONS
+from utils.momentum_service import default_adr_floor
 from utils.price_series import positive_prices as _positive
 from utils.strategy_settings import coerce_to_options, require_start_date, validate_start_date
 
@@ -73,7 +74,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "min_value_mult": None,
     # ADR 하한 — 전일 시장 ADR 이 미만이면 그날 **신규 진입만** 차단(보유는 이탈이 관리).
     # 기본 없음. 시장은 풀 설정의 시장 레짐 지수를 따른다(모멘텀과 같은 공용 판정).
-    "adr_floor": min(ADR_FLOOR_OPTIONS),
+    "adr_floor": default_adr_floor(),
 }
 
 

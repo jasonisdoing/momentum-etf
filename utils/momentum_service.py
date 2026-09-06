@@ -38,6 +38,16 @@ from core.strategy.scoring import (
 from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
 from utils.strategy_settings import coerce_to_options, require_start_date, validate_start_date
 
+
+def default_adr_floor() -> int | None:
+    """ADR 하한 기본값 — 선택지 중 **가장 작은 값**. 「없음」(None)만 있으면 None.
+
+    선택지에 `None`(없음)이 섞여 있어 `min()` 을 그대로 쓰면 int 와 None 을 비교해 터진다.
+    """
+    numbers = [value for value in ADR_FLOOR_OPTIONS if value is not None]
+    return min(numbers) if numbers else None
+
+
 warnings.filterwarnings("ignore")
 
 # ── 상수 ──────────────────────────────────────────────────────────────────
@@ -243,7 +253,7 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
         result[setting_key] = config[pool_key]
     # 없는 선택 항목은 '미설정' 기본값으로 채운다 — 임의 보정이 아니라 스키마 기본이다.
     result.setdefault("start_date", None)
-    result.setdefault("adr_floor", min(ADR_FLOOR_OPTIONS))
+    result.setdefault("adr_floor", default_adr_floor())
     return result
 
 
