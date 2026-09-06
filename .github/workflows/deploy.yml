@@ -5,6 +5,14 @@ on:
     branches:
       - upgrade   # upgrade 브랜치에 push 시 자동 배포
 
+# 배포 직렬화 — 연달아 푸시하면 실행 2개가 서버에서 동시에 compose up 을 돌리고,
+# 한쪽의 유령 컨테이너 제거가 다른 쪽 recreate 의 임시 컨테이너(<hash>_이름)를 지워
+# "No such container" 로 실패한다. 진행 중 배포는 취소하지 않고(서버가 반쯤 교체된
+# 채 끊기면 안 된다) 뒤 실행이 끝나기를 기다렸다가 돈다.
+concurrency:
+  group: deploy-oracle-vm
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
   IMAGE_FASTAPI: ghcr.io/${{ github.repository_owner }}/momentum-etf-fastapi
@@ -109,6 +117,10 @@ jobs:
             set -euo pipefail
             echo ">>> Connecting to Oracle VM and starting deployment..."
             cd ~/apps/momentum-etf
+            # 서버 쪽 직렬화 — 워크플로 concurrency 가 막지 못하는 겹침(수동 배포 등)까지
+            # 잠근다. 30분(scheduler stop_grace)보다 짧게 기다렸다가 못 잡으면 실패시킨다.
+            exec 9>/tmp/momentum-etf-deploy.lock
+            flock -w 1500 9 || { echo "::error::다른 배포가 진행 중입니다 — 락 대기 초과"; exit 1; }
             export COMPOSE_PARALLEL_LIMIT=1
             # 배포 진행 플래그 — fastapi_app 컨테이너 안에서 헬퍼 스크립트 실행.
             sudo docker compose exec -T -w /app fastapi_app env PYTHONPATH=/app python infra/cron/deploy_flag_set.py \
