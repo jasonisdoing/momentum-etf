@@ -110,6 +110,7 @@ type PoolSettingsResponse = {
   };
   /** 전략별 12개월 백테스트 — 저장된 값. 설정이 바뀌면 서버가 지운다. */
   backtests?: BacktestByPool;
+  mix_usage: Record<string, Partial<Record<StrategyKey, string[]>>>;
   error?: string;
 };
 
@@ -708,6 +709,15 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       headerName: label,
       width: 186,
       sortable: false,
+      cellStyle: (params) => ({
+        backgroundColor: params.data && data.mix_usage[params.data.ticker_type]?.[key]?.length
+          ? "color-mix(in srgb, var(--bs-orange, #fd7e14) 22%, transparent)"
+          : "transparent",
+      }),
+      tooltipValueGetter: (params) => {
+        const accounts = params.data ? data.mix_usage[params.data.ticker_type]?.[key] : undefined;
+        return accounts?.length ? `합성 전략 슬리브로 사용 중: ${accounts.join(" · ")}` : "";
+      },
       headerTooltip: `${label} 전략의 저장 설정으로 돌린 12개월 백테스트 — CAGR · MDD · 소르티노. 상단 「백테스트」로 갱신합니다.`,
       cellRenderer: (params: ICellRendererParams<PoolGridRow>) => {
         const pool = params.data?.ticker_type;
