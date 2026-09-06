@@ -103,10 +103,12 @@ warnings.filterwarnings("ignore")
 
 # ── 풀 정보 (종목풀 설정 단일 소스) ─────────────────────────────────────────
 def available_pools() -> list[str]:
-    """DB(pool_settings)의 활성 종목풀 목록."""
+    """이 전략을 쓰기로 켠 종목풀만 — 종목풀 설정 화면의 「사용」 토글이 단일 소스다."""
+    from utils.pool_strategy_use import pools_using
     from utils.settings_loader import list_available_ticker_types
 
-    return list_available_ticker_types()
+    active = set(list_available_ticker_types())
+    return [pool for pool in pools_using("momentum") if pool in active]
 
 
 def pool_info(pool: str) -> dict[str, str]:
@@ -542,3 +544,20 @@ def adr_max_backtest_months(pool: str) -> int | None:
         return 0
     span_days = (pd.Timestamp.now().normalize() - series.index[0]).days
     return max(0, span_days * 12 // 365)
+
+
+def delete_settings(pool: str) -> None:
+    """그 풀의 모멘텀 설정을 지운다 — 종목풀 설정 화면에서 「사용」을 끄면 부른다.
+
+    모멘텀은 전용 문서가 아니라 **종목풀 설정 문서**에 값을 넣는다(순위·알림이 같은 값을
+    보게 하려고). 그래서 지울 때도 그 키들만 걷어낸다.
+    """
+    from utils.db_manager import get_db_connection
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결에 실패했습니다.")
+    db["pool_settings"].update_one(
+        {"_id": str(pool).strip().lower()},
+        {"$unset": {pool_key: "" for pool_key in _POOL_KEY_BY_SETTING.values()}},
+    )

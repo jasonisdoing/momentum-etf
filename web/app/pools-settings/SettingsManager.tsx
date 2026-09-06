@@ -110,6 +110,8 @@ type PoolSettingsResponse = {
   };
   /** 전략별 12개월 백테스트 — 저장된 값. 설정이 바뀌면 서버가 지운다. */
   backtests?: BacktestByPool;
+  /** 전략 사용 여부 — {종목풀: {전략: 사용}}. 그 풀에 설정이 저장돼 있으면 사용 중이다. */
+  strategy_use?: Record<string, Partial<Record<StrategyKey, boolean>>>;
   mix_usage: Record<string, Partial<Record<StrategyKey, string[]>>>;
   error?: string;
 };
@@ -401,6 +403,9 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
   // 전략 컬럼은 평소에 숨긴다 — 값이 길어(「565.6% · -32.1% · 3.95」) 늘 펼쳐 두면
   // 설정 컬럼들이 밀린다. 「백테스트」를 누르면 그때 펼친다.
   const [showBacktests, setShowBacktests] = useState(false);
+  // 전략 사용 여부 — {종목풀: {전략: 사용}}. 그 풀에 그 전략 설정이 저장돼 있는지다.
+  // 저장 전까지는 화면 상태로만 들고 있다(저장하면 설정 생성·삭제까지 반영된다).
+  const [strategyUse, setStrategyUse] = useState<Record<string, Partial<Record<StrategyKey, boolean>>>>({});
   // 이평선 선택지 — 백엔드가 단일 소스다. 새 풀 초안의 기본값도 여기서 고른다.
   const maOptionsByCountry = useMemo(() => data?.constraints.ma_options_by_country ?? {}, [data]);
   const [drafts, setDrafts] = useState<Record<string, PoolDraft>>({});
@@ -459,6 +464,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       }
       setData(payload);
       setBacktests(payload.backtests ?? {});
+      setStrategyUse(payload.strategy_use ?? {});
       const nextDrafts: Record<string, PoolDraft> = {};
       payload.pools.forEach((pool) => {
         nextDrafts[pool.ticker_type] = toDraft(pool);
@@ -484,6 +490,35 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
    *  한꺼번에 보내면 서버가 백테스트 수십 개를 동시에 돌려 느려지고, 어디까지 됐는지도
    *  안 보인다. 한 건이 끝날 때마다 화면에 채워 진행 상황이 그대로 드러나게 한다.
    *  설정이 없는 조합은 서버가 빈 결과를 돌려주므로 칸이 비어 있는다. */
+  /** 사용 토글 — 즉시 저장한다. 끄면 그 전략의 설정과 백테스트 결과가 함께 지워진다. */
+  const toggleStrategyUse = useCallback(
+    (pool: string, strategy: StrategyKey, next: boolean) => {
+      setStrategyUse((prev) => ({ ...prev, [pool]: { ...prev[pool], [strategy]: next } }));
+      void (async () => {
+        try {
+          const resp = await fetch("/api/pool-settings/strategy-use", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pool, strategy, used: next }),
+          });
+          const payload = await resp.json();
+          if (!resp.ok || payload.error) {
+            throw new Error(payload.error ?? "사용 여부를 저장하지 못했습니다.");
+          }
+          if (!next) {
+            // 설정이 지워졌으니 저장된 백테스트 결과도 화면에서 비운다.
+            setBacktests((prev) => ({ ...prev, [pool]: {} }));
+          }
+        } catch (err) {
+          // 저장에 실패하면 토글을 되돌린다 — 화면만 켜진 채로 두면 실제와 어긋난다.
+          setStrategyUse((prev) => ({ ...prev, [pool]: { ...prev[pool], [strategy]: !next } }));
+          toast.error(err instanceof Error ? err.message : "사용 여부를 저장하지 못했습니다.");
+        }
+      })();
+    },
+    [toast],
+  );
+
   const runAllBacktests = useCallback(async () => {
     setShowBacktests(true);
     const pools = rows.map((row) => row.ticker_type).filter(Boolean);
@@ -704,40 +739,71 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     // 컬럼이 많아 가로로 스크롤한다 — 어느 풀의 행인지 잃지 않게 ID·이름은 왼쪽에 고정한다.
     { field: "ticker_type", headerName: "ID", width: 112, pinned: "left" },
     { field: "name", headerName: "이름", width: 176, editable: true, pinned: "left" },
+    // 전략별 2단 헤더 — 「모멘텀」 아래 백테스트 결과와 사용 토글을 나란히 둔다.
+    // 「사용」은 그 종목풀에 그 전략 설정이 저장돼 있는지다 — 끄고 저장하면 설정을 지운다.
     ...(showBacktests ? STRATEGY_COLUMNS : []).map<ColDef<PoolGridRow>>(({ key, label }) => ({
-      colId: `backtest_${key}`,
       headerName: label,
-      width: 186,
-      sortable: false,
-      cellStyle: (params) => ({
-        backgroundColor: params.data && data.mix_usage[params.data.ticker_type]?.[key]?.length
-          ? "color-mix(in srgb, var(--bs-orange, #fd7e14) 22%, transparent)"
-          : "transparent",
-      }),
-      tooltipValueGetter: (params) => {
-        const accounts = params.data ? data.mix_usage[params.data.ticker_type]?.[key] : undefined;
-        return accounts?.length ? `합성 전략 슬리브로 사용 중: ${accounts.join(" · ")}` : "";
-      },
-      headerTooltip: `${label} 전략의 저장 설정으로 돌린 12개월 백테스트 — CAGR · MDD · 소르티노. 상단 「백테스트」로 갱신합니다.`,
-      cellRenderer: (params: ICellRendererParams<PoolGridRow>) => {
-        const pool = params.data?.ticker_type;
-        if (!pool) return null;
-        const result = backtests[pool]?.[key];
-        if (backtestRunning === `${pool}:${key}`) {
-          return <span style={{ color: "var(--text-muted)" }}>계산 중…</span>;
-        }
-        if (result?.no_settings) {
-          return <span style={{ color: "var(--text-muted)" }}>설정없음</span>;
-        }
-        if (!result || result.cagr_pct == null) {
-          return null;
-        }
-        return (
-          <span title={result.updated_at ? `계산 ${formatKstDateTime(result.updated_at)}` : undefined}>
-            {`${fmt(result.cagr_pct, 1)}% / ${fmt(result.mdd_pct, 1)}% / ${fmt(result.sortino, 2)}`}
-          </span>
-        );
-      },
+      marryChildren: true,
+      children: [
+        {
+          colId: `backtest_${key}`,
+          headerName: "백테스트",
+          width: 168,
+          sortable: false,
+          cellStyle: (params: { data?: PoolGridRow }) => ({
+            backgroundColor: params.data && data.mix_usage[params.data.ticker_type]?.[key]?.length
+              ? "color-mix(in srgb, var(--bs-orange, #fd7e14) 22%, transparent)"
+              : "transparent",
+          }),
+          tooltipValueGetter: (params: { data?: PoolGridRow }) => {
+            const accounts = params.data ? data.mix_usage[params.data.ticker_type]?.[key] : undefined;
+            return accounts?.length ? `합성 전략 슬리브로 사용 중: ${accounts.join(" · ")}` : "";
+          },
+          headerTooltip: `${label} 전략의 저장 설정으로 돌린 12개월 백테스트 — CAGR / MDD / 소르티노.`,
+          cellRenderer: (params: ICellRendererParams<PoolGridRow>) => {
+            const pool = params.data?.ticker_type;
+            if (!pool) return null;
+            const result = backtests[pool]?.[key];
+            if (backtestRunning === `${pool}:${key}`) {
+              return <span style={{ color: "var(--text-muted)" }}>계산 중…</span>;
+            }
+            if (result?.no_settings) {
+              return <span style={{ color: "var(--text-muted)" }}>설정없음</span>;
+            }
+            if (!result || result.cagr_pct == null) {
+              return null;
+            }
+            return (
+              <span title={result.updated_at ? `계산 ${formatKstDateTime(result.updated_at)}` : undefined}>
+                {`${fmt(result.cagr_pct, 1)}% / ${fmt(result.mdd_pct, 1)}% / ${fmt(result.sortino, 2)}`}
+              </span>
+            );
+          },
+        },
+        {
+          colId: `use_${key}`,
+          headerName: "사용",
+          width: 72,
+          sortable: false,
+          headerTooltip: `이 종목풀에서 ${label} 전략을 쓸지. 끄고 저장하면 그 설정과 백테스트 결과가 지워지고, ${label} 화면의 종목풀 목록에서도 빠집니다.`,
+          cellRenderer: (params: ICellRendererParams<PoolGridRow>) => {
+            const pool = params.data?.ticker_type;
+            if (!pool) return null;
+            const checked = strategyUse[pool]?.[key] ?? false;
+            return (
+              <div className="form-check form-switch" style={{ marginBottom: 0 }}>
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  role="switch"
+                  checked={checked}
+                  onChange={(event) => toggleStrategyUse(pool, key, event.target.checked)}
+                />
+              </div>
+            );
+          },
+        },
+      ],
     })),
     selectCol("icon", "아이콘", 72, () => ["🇰🇷", "🇦🇺", "🇺🇸"]),
     numberCol("order", "순서", 64),
@@ -1045,7 +1111,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
                 >
                   {backtestProgress
                     ? `${backtestProgress.done}/${backtestProgress.total} 백테스트 진행중`
-                    : "백테스트"}
+                    : "전략"}
                 </button>
                 <button type="button" className="btn btn-sm btn-primary" onClick={() => setIsCreatingNew(!isCreatingNew)}>
                   등록
