@@ -94,7 +94,6 @@ type SystemScheduleGridRow = SystemScheduleRow & {
   lastRunClickable: boolean;          // 현재 인스턴스에서 다운로드 가능?
   lastRunStartedAt: string | null;    // ISO — 로그 다운로드 파라미터
   lastRunEndedAt: string | null;
-  estimatedDisplay: string; // "4분 7초" 또는 "-" (이력 없음)
   waitDisplay: string;
   serverDisplay: string;
   localDisplay: string;
@@ -278,14 +277,6 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
       const ownerLabel = row.lastRunOwner ? ` [${row.lastRunOwner.toUpperCase()}]` : "";
       return `${row.lastRunDisplay}${ownerLabel}`;
     },
-  },
-  {
-    field: "estimatedDisplay",
-    headerName: "예상시간",
-    minWidth: 85,
-    width: 95,
-    tooltipValueGetter: () => "최근 성공한 5건의 평균 소요시간 (성공 이력 없으면 실패 포함). 출처: logs/cron/{job}.log",
-    cellRenderer: (params: { value: string }) => params.value || "-",
   },
   {
     field: "serverDisplay",
@@ -511,7 +502,6 @@ export function SystemManager({
       lastRunClickable: Boolean(lastRunByJob[row.key]?.is_clickable),
       lastRunStartedAt: lastRunByJob[row.key]?.started_at ?? null,
       lastRunEndedAt: lastRunByJob[row.key]?.ended_at ?? null,
-      estimatedDisplay: String(estimatedByJob[row.key]?.display ?? "-"),
       waitDisplay: String(estimatedByJob[row.key]?.wait_display ?? "-"),
       serverDisplay: String(estimatedByJob[row.key]?.server_display ?? "-"),
       localDisplay: String(estimatedByJob[row.key]?.local_display ?? "-"),
