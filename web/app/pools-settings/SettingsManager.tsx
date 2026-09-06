@@ -77,6 +77,8 @@ type StrategyBacktest = {
   sortino: number | null;
   /** 그 전략의 저장 설정이 없어 돌릴 수 없었던 경우. */
   no_settings?: boolean;
+  /** 백테스트 실행이 실패한 경우 — 셀에 "실패"와 사유(툴팁)를 보여준다. */
+  error?: string;
   /** 계산해 저장한 시각. 설정이 바뀌면 서버가 지운다. */
   updated_at?: string | null;
 };
@@ -536,8 +538,14 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
             throw new Error(payload.error ?? "백테스트에 실패했습니다.");
           }
           setBacktests((prev) => ({ ...prev, [pool]: { ...prev[pool], [key]: payload.result } }));
-        } catch {
+        } catch (err) {
           failed += 1;
+          // 실패한 칸에 사유를 남긴다 — 토스트 합계만으로는 어느 조합이 왜 죽었는지 알 수 없다.
+          const message = err instanceof Error ? err.message : "백테스트에 실패했습니다.";
+          setBacktests((prev) => ({
+            ...prev,
+            [pool]: { ...prev[pool], [key]: { cagr_pct: null, mdd_pct: null, sortino: null, error: message } },
+          }));
         }
         done += 1;
         setBacktestProgress({ done, total });
@@ -769,6 +777,13 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
             }
             if (result?.no_settings) {
               return <span style={{ color: "var(--text-muted)" }}>설정없음</span>;
+            }
+            if (result?.error) {
+              return (
+                <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }} title={result.error}>
+                  실패
+                </span>
+              );
             }
             if (!result || result.cagr_pct == null) {
               return null;
