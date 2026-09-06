@@ -103,12 +103,10 @@ warnings.filterwarnings("ignore")
 
 # ── 풀 정보 (종목풀 설정 단일 소스) ─────────────────────────────────────────
 def available_pools() -> list[str]:
-    """이 전략을 쓰기로 켠 종목풀만 — 종목풀 설정 화면의 「사용」 토글이 단일 소스다."""
+    """이 전략을 쓰기로 켠 종목풀만(order 순) — 종목풀 설정의 「사용」 토글이 단일 소스다."""
     from utils.pool_strategy_use import pools_using
-    from utils.settings_loader import list_available_ticker_types
 
-    active = set(list_available_ticker_types())
-    return [pool for pool in pools_using("momentum") if pool in active]
+    return pools_using("momentum")
 
 
 def pool_info(pool: str) -> dict[str, str]:

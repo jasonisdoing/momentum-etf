@@ -42,16 +42,22 @@ def load_usage() -> dict[str, dict[str, bool]]:
 
 
 def pools_using(strategy: str) -> list[str]:
-    """그 전략을 쓰기로 켠 종목풀 — 전략 화면의 종목풀 목록이 이 값이다."""
+    """그 전략을 쓰기로 켠 **활성** 종목풀 — 전략 화면의 종목풀 목록이 이 값이다.
+
+    순서는 종목풀 order 순이다(셀렉트 번호와 같은 순서) — 활성 풀 목록
+    (`list_available_ticker_types`, order 정렬)을 기준으로 켠 풀만 남긴다.
+    """
     name = str(strategy or "").strip().lower()
     if name not in STRATEGIES:
         raise ValueError(f"알 수 없는 전략입니다: {strategy}")
-    pools = [
+    used = {
         str(doc["_id"])
         for doc in _db()[COLLECTION].find({f"{FIELD}.{name}": True}, {"_id": 1})
         if not str(doc["_id"]).startswith("__")
-    ]
-    return sorted(pools)
+    }
+    from utils.settings_loader import list_available_ticker_types
+
+    return [pool for pool in list_available_ticker_types() if pool in used]
 
 
 def set_usage(pool: str, strategy: str, used: bool) -> None:
