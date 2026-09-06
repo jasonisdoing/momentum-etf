@@ -210,7 +210,7 @@ export function AusMarketStockManager({
     if (selectedTickers.length === 0) return;
 
     const stockPools = tickerPools.filter(isAusTickerPool);
-    const remembered = readRememberedTickerType();
+    const remembered = readRememberedTickerType("market-stock-aus");
 
     if (remembered && stockPools.some((p) => p.ticker_type === remembered)) {
       setSelectedTickerPool(remembered);
@@ -539,7 +539,7 @@ export function AusMarketStockManager({
               onChange={(event) => {
                 const nextType = event.target.value;
                 setSelectedTickerPool(nextType);
-                if (nextType) writeRememberedTickerType(nextType);
+                if (nextType) writeRememberedTickerType("market-stock-aus", nextType);
               }}
             >
               <option value="">종목풀 선택</option>

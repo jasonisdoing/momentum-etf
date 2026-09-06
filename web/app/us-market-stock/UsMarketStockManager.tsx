@@ -312,7 +312,7 @@ export function UsMarketStockManager({
     if (selectedTickers.length === 0) return;
 
     const stockPools = tickerPools.filter(isUsTickerPool);
-    const remembered = readRememberedTickerType();
+    const remembered = readRememberedTickerType("market-stock-us");
 
     if (remembered && stockPools.some((p) => p.ticker_type === remembered)) {
       setSelectedTickerPool(remembered);
@@ -686,7 +686,7 @@ export function UsMarketStockManager({
               onChange={(event) => {
                 const nextType = event.target.value;
                 setSelectedTickerPool(nextType);
-                if (nextType) writeRememberedTickerType(nextType);
+                if (nextType) writeRememberedTickerType("market-stock-us", nextType);
               }}
             >
               <option value="">종목풀 선택</option>

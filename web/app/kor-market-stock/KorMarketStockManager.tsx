@@ -213,7 +213,7 @@ export function KorMarketStockManager({
     if (selectedTickers.length === 0) return;
 
     const stockPools = tickerPools.filter((p) => p.country_code === "kor");
-    const remembered = readRememberedTickerType();
+    const remembered = readRememberedTickerType("market-stock-kor");
 
     if (remembered && stockPools.some(p => p.ticker_type === remembered)) {
       setSelectedTickerPool(remembered);
@@ -569,7 +569,7 @@ export function KorMarketStockManager({
               onChange={(event) => {
                 const nextType = event.target.value;
                 setSelectedTickerPool(nextType);
-                if (nextType) writeRememberedTickerType(nextType);
+                if (nextType) writeRememberedTickerType("market-stock-kor", nextType);
               }}
             >
               <option value="">종목풀 선택</option>

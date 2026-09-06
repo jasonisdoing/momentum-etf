@@ -404,7 +404,7 @@ export function MarketManager({
     if (!hasSelectedRows) {
       return;
     }
-    setSelectedTickerPool(readRememberedTickerType() || "");
+    setSelectedTickerPool(readRememberedTickerType("market") || "");
     setSelectedBucketId("");
     setAddModalOpen(true);
   }, [hasSelectedRows]);
@@ -884,7 +884,7 @@ export function MarketManager({
               onChange={(event) => {
                 const nextType = event.target.value;
                 setSelectedTickerPool(nextType);
-                if (nextType) writeRememberedTickerType(nextType);
+                if (nextType) writeRememberedTickerType("market", nextType);
               }}
             >
               <option value="">종목풀 선택</option>
