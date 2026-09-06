@@ -68,7 +68,15 @@ type SystemResponse = {
   last_run_by_job?: Record<string, SystemLastRunInfo>;
   running_job_details?: Record<string, SystemRunningJobDetail>;
   next_run_by_job?: Record<string, SystemNextRunInfo>;
-  estimated_by_job?: Record<string, { seconds: number | null; display: string | null }>;
+  estimated_by_job?: Record<string, {
+    seconds: number | null;
+    display: string | null;
+    /** 큐에 들어간 뒤 실행이 시작되기까지의 평균. 앞선 배치가 돌면 그만큼 늘어난다. */
+    wait_display?: string | null;
+    /** 서버·로컬 각각의 평균 실행 시간 — 두 환경의 성능 차이를 본다. */
+    server_display?: string | null;
+    local_display?: string | null;
+  }>;
   batch_queue?: BatchQueueItem[];
   error?: string;
 };
@@ -87,6 +95,9 @@ type SystemScheduleGridRow = SystemScheduleRow & {
   lastRunStartedAt: string | null;    // ISO — 로그 다운로드 파라미터
   lastRunEndedAt: string | null;
   estimatedDisplay: string; // "4분 7초" 또는 "-" (이력 없음)
+  waitDisplay: string;
+  serverDisplay: string;
+  localDisplay: string;
   runningCommandPrefix: string;
   runningCancellable: boolean; // 같은 인스턴스의 worker 가 처리 중이라 중단 가능
   runningCancelRequested: boolean; // 이미 중단 요청 보냈는지
@@ -277,6 +288,31 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
     cellRenderer: (params: { value: string }) => params.value || "-",
   },
   {
+    field: "serverDisplay",
+    headerName: "예상시간(서버)",
+    minWidth: 110,
+    width: 118,
+    tooltipValueGetter: () => "서버에서 성공한 최근 5건의 평균 실행 시간. 출처: batch_queue",
+    cellRenderer: (params: { value: string }) => params.value || "-",
+  },
+  {
+    field: "localDisplay",
+    headerName: "예상시간(로컬)",
+    minWidth: 110,
+    width: 118,
+    tooltipValueGetter: () => "로컬에서 성공한 최근 5건의 평균 실행 시간. 출처: batch_queue",
+    cellRenderer: (params: { value: string }) => params.value || "-",
+  },
+  {
+    field: "waitDisplay",
+    headerName: "대기시간",
+    minWidth: 85,
+    width: 95,
+    tooltipValueGetter: () =>
+      "크론이 걸거나 사람이 누른 뒤 실제 실행이 시작되기까지의 평균 (최근 5건). 앞선 배치가 돌고 있으면 그만큼 늘어난다. 출처: batch_queue",
+    cellRenderer: (params: { value: string }) => params.value || "-",
+  },
+  {
     field: "command",
     headerName: "실행 명령 (클릭하여 백그라운드 실행)",
     minWidth: 320,
@@ -393,7 +429,15 @@ export function SystemManager({
   const [lastRunByJob, setLastRunByJob] = useState<Record<string, SystemLastRunInfo>>({});
   const [runningJobDetails, setRunningJobDetails] = useState<Record<string, SystemRunningJobDetail>>({});
   const [nextRunByJob, setNextRunByJob] = useState<Record<string, SystemNextRunInfo>>({});
-  const [estimatedByJob, setEstimatedByJob] = useState<Record<string, { seconds: number | null; display: string | null }>>({});
+  const [estimatedByJob, setEstimatedByJob] = useState<Record<string, {
+    seconds: number | null;
+    display: string | null;
+    /** 큐에 들어간 뒤 실행이 시작되기까지의 평균. 앞선 배치가 돌면 그만큼 늘어난다. */
+    wait_display?: string | null;
+    /** 서버·로컬 각각의 평균 실행 시간 — 두 환경의 성능 차이를 본다. */
+    server_display?: string | null;
+    local_display?: string | null;
+  }>>({});
   const [batchQueue, setBatchQueue] = useState<BatchQueueItem[]>([]);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [, startTransition] = useTransition();
@@ -468,6 +512,9 @@ export function SystemManager({
       lastRunStartedAt: lastRunByJob[row.key]?.started_at ?? null,
       lastRunEndedAt: lastRunByJob[row.key]?.ended_at ?? null,
       estimatedDisplay: String(estimatedByJob[row.key]?.display ?? "-"),
+      waitDisplay: String(estimatedByJob[row.key]?.wait_display ?? "-"),
+      serverDisplay: String(estimatedByJob[row.key]?.server_display ?? "-"),
+      localDisplay: String(estimatedByJob[row.key]?.local_display ?? "-"),
       runningCommandPrefix,
       runningCancellable:
         isRunning && Boolean(runningJobDetails[runningDetailKey]?.is_mine),

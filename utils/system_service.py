@@ -573,6 +573,63 @@ def _format_duration_seconds(seconds: float | int | None) -> str | None:
     return f"{hours}시간 {remain_minutes}분" if remain_minutes else f"{hours}시간"
 
 
+def _read_queue_averages(sample_size: int = 5) -> dict[str, dict[str, float]]:
+    """잡별 평균을 큐에서 낸다 — `{잡: {지표: 초}}`.
+
+    지표는 셋이다.
+      wait            큐에 들어간 뒤 실행이 시작되기까지 (`triggered_at → started_at`)
+      elapsed_server  서버에서 실행한 시간 (`started_at → ended_at`)
+      elapsed_local   로컬에서 실행한 시간
+
+    크론이 걸든 사람이 클릭하든 배치는 큐를 거친다. 앞선 작업이 돌고 있으면 그만큼 기다리므로,
+    실행 시간만으로는 언제 끝날지 알 수 없다. 실행 시간을 서버·로컬로 나누는 것은 두 환경의
+    성능 차이를 보기 위해서다(큐가 `app_type` 을 기록한다).
+    """
+    from utils.batch_queue import BATCH_QUEUE_COLLECTION
+
+    db = get_db_connection()
+    if db is None:
+        return {}
+
+    samples: dict[str, dict[str, list[float]]] = {}
+
+    def add(job: str, metric: str, value: float) -> None:
+        bucket = samples.setdefault(job, {}).setdefault(metric, [])
+        if len(bucket) < sample_size:
+            bucket.append(max(0.0, value))
+
+    try:
+        cursor = (
+            db[BATCH_QUEUE_COLLECTION]
+            .find(
+                {"started_at": {"$ne": None}},
+                {"job_name": 1, "triggered_at": 1, "started_at": 1, "ended_at": 1, "app_type": 1, "exit_code": 1},
+            )
+            .sort("started_at", -1)
+            .limit(sample_size * 80)
+        )
+        for doc in cursor:
+            job = str(doc.get("job_name") or "").split(":")[0]
+            triggered_at, started_at, ended_at = doc.get("triggered_at"), doc.get("started_at"), doc.get("ended_at")
+            if not job or started_at is None:
+                continue
+            if triggered_at is not None:
+                add(job, "wait", (started_at - triggered_at).total_seconds())
+            # 실패한 실행은 중간에 끊긴 시간이라 성능 비교에 넣지 않는다.
+            if ended_at is None or doc.get("exit_code") not in (0, None):
+                continue
+            where = "local" if str(doc.get("app_type") or "").strip().lower() == "local" else "server"
+            add(job, f"elapsed_{where}", (ended_at - started_at).total_seconds())
+    except Exception as exc:  # noqa: BLE001 - 참고 값이라 화면을 막지 않는다
+        _logger.warning("배치 큐 평균 계산 실패: %s", exc)
+        return {}
+
+    return {
+        job: {metric: sum(values) / len(values) for metric, values in metrics.items() if values}
+        for job, metrics in samples.items()
+    }
+
+
 def _read_average_job_elapsed_seconds(job_key: str, sample_size: int = 5) -> float | None:
     """최근 성공 실행의 평균 소요시간(초)을 반환한다. 성공 로그가 없으면 최근 종료 로그를 사용한다."""
     log_path = _LOG_DIR / f"{job_key}.log"
@@ -1130,6 +1187,7 @@ def load_system_data() -> dict[str, object]:
             }
         )
     estimated_by_job: dict[str, dict[str, object]] = {}
+    queue_averages = _read_queue_averages()
     for row in SCHEDULE_ROWS:
         key = str(row["key"])
         seconds = _read_average_job_elapsed_seconds(key)
@@ -1137,6 +1195,11 @@ def load_system_data() -> dict[str, object]:
             "seconds": int(round(seconds)) if seconds is not None else None,
             "display": _format_duration_seconds(seconds) if seconds is not None else None,
         }
+        averages = queue_averages.get(key, {})
+        for metric, prefix in (("wait", "wait"), ("elapsed_server", "server"), ("elapsed_local", "local")):
+            value = averages.get(metric)
+            estimated_by_job[key][f"{prefix}_seconds"] = int(round(value)) if value is not None else None
+            estimated_by_job[key][f"{prefix}_display"] = _format_duration_seconds(value) if value is not None else None
 
     return {
         "pool_rows": _build_pool_summary_rows(),
