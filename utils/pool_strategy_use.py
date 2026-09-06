@@ -64,10 +64,11 @@ def set_usage(pool: str, strategy: str, used: bool) -> None:
     if used:
         return
 
-    from utils.pool_backtest_store import clear_pool
+    from utils.pool_backtest_store import clear_result
 
     _delete_strategy_settings(pool, name)
-    clear_pool(pool)
+    # 그 전략 결과만 지운다 — 풀 전체를 지우면 다른 전략의 백테스트까지 사라진다.
+    clear_result(pool, name)
 
 
 def _delete_strategy_settings(pool: str, strategy: str) -> None:
