@@ -89,9 +89,12 @@ def _db():
 
 # ── 종목풀 ─────────────────────────────────────────────────────────────────
 def available_pools() -> list[str]:
+    """이 전략을 쓰기로 켠 종목풀만 — 종목풀 설정 화면의 「사용」 토글이 단일 소스다."""
+    from utils.pool_strategy_use import pools_using
     from utils.settings_loader import list_available_ticker_types
 
-    return list(list_available_ticker_types())
+    active = set(list_available_ticker_types())
+    return [pool for pool in pools_using("new_high") if pool in active]
 
 
 def pool_country(pool: str) -> str:
@@ -396,3 +399,11 @@ __all__ = [
     "save_settings",
     "validate_settings",
 ]
+
+
+def delete_settings(pool: str) -> None:
+    """그 풀의 신고가 설정을 지운다 — 종목풀 설정 화면에서 「사용」을 끄면 부른다."""
+    _db()[_CONFIG_COLLECTION].update_one(
+        {"_id": _SETTINGS_KEY},
+        {"$unset": {f"settings_by_pool.{str(pool).strip()}": ""}},
+    )

@@ -79,6 +79,7 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     from utils.pool_backtest_store import load_results
+    from utils.pool_strategy_use import load_usage
     from utils.strategy_mix_service import mix_accounts
 
     # 활성 합성 계좌의 종목풀·전략 조합만 표시한다. 백테스트 결과 유무와 무관하다.
@@ -93,6 +94,8 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
 
     return {
         "pools": pools,
+        # 전략별 사용 여부 — 전략 화면의 종목풀 목록이 이 값으로 걸러진다.
+        "strategy_use": load_usage(),
         # 전략별 12개월 백테스트 — 「백테스트」로 계산해 저장해 둔 값. 설정이 바뀌면 지워진다.
         "backtests": load_results(),
         "mix_usage": mix_usage,
@@ -226,3 +229,28 @@ def get_pool_strategy_backtest(
         },
     )
     return {"pool": pool, "strategy": name, "result": saved}
+
+
+class StrategyUsePayload(BaseModel):
+    pool: str
+    strategy: str
+    used: bool
+
+
+@router.put("/strategy-use")
+def put_pool_strategy_use(
+    payload: StrategyUsePayload,
+    _: None = Depends(require_internal_token),
+) -> dict[str, Any]:
+    """종목풀에서 그 전략을 쓸지 저장한다.
+
+    끄면 그 전략의 저장 설정과 백테스트 결과를 함께 지운다 — 다시 켰을 때 옛 설정이
+    되살아나면 혼란스럽다. 켤 때는 설정을 만들지 않는다(그 전략 화면에서 채운다).
+    """
+    from utils.pool_strategy_use import set_usage
+
+    try:
+        set_usage(payload.pool, payload.strategy, payload.used)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"pool": payload.pool, "strategy": payload.strategy, "used": payload.used}
