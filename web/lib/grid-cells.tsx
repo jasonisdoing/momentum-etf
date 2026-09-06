@@ -276,7 +276,6 @@ export function stockMemoColumn<T>(options: {
     headerName: "메모",
     headerTooltip: "종목에 붙는 메모 — 자산 관리·순위·전략 화면이 같은 값을 본다",
     width,
-    sortable: false,
     // 빈 문자열이 많아 자동 추론이 흔들린다 — 문자열 에디터를 명시한다.
     cellDataType: "text",
     editable: (params) => canEdit(params.data),
