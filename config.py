@@ -42,7 +42,7 @@ MOVING_AVERAGE_TYPE = "SMA"
 # 버킷(Bucket) 설정 및 스타일링
 # -----------------------------------------------------------------------
 # 버킷 테마의 단일 소스 — 웹(web/lib/bucket-theme.ts)이 정적 임포트하는 파일을
-# 파이썬도 같이 읽는다 (예전 shared/ 사본은 중복이라 제거).
+# 파이썬도 같이 읽는다.
 _BUCKET_THEME_PATH = Path(__file__).resolve().parent / "web" / "lib" / "bucket_theme.json"
 with _BUCKET_THEME_PATH.open("r", encoding="utf-8") as bucket_theme_file:
     _BUCKET_THEME = json.load(bucket_theme_file)
@@ -78,9 +78,8 @@ NAVER_STOCK_MARKET_VALUE_HEADERS = {
     "Accept": "application/json, text/plain, */*",
 }
 
-# 토스증권 API 설정 (미국 주식 실시간 / 시장지표 mini-chart)
+# 토스증권 API 설정 (미국·국내 주식 실시간 시세·캔들)
 TOSS_INVEST_API_BASE_URL = "https://wts-info-api.tossinvest.com"
-TOSS_INVEST_CERT_API_BASE_URL = "https://wts-cert-api.tossinvest.com"
 TOSS_INVEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Referer": "https://tossinvest.com/",

@@ -25,6 +25,11 @@ _BLACKLIST_PATH = Path(__file__).resolve().parents[1] / "data" / "yahoo_resolve_
 _TTL = timedelta(seconds=CACHE_TTL_SLOW)
 _LOCK = threading.Lock()
 
+# 항상 존재하는 야후 지표 심볼 — 실패해도 블랙리스트에 넣지 않는다.
+# 종목 심볼과 달리 '해석 불가'가 아니라 일시 장애(레이트리밋 등)라 재시도하면 되는데,
+# 1시간 숨기면 상단 헤더·/live-24h 지표 카드가 그동안 통째로 빈다.
+NEVER_BLACKLIST_SYMBOLS: frozenset[str] = frozenset({"NQ=F", "KRW=X", "^VIX"})
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat()
@@ -58,6 +63,8 @@ def _filter_active(entries: dict[str, dict[str, Any]], now: datetime) -> dict[st
     active: dict[str, dict[str, Any]] = {}
     for symbol, info in entries.items():
         if not isinstance(info, dict):
+            continue
+        if symbol in NEVER_BLACKLIST_SYMBOLS:
             continue
         failed_at = _parse_iso(info.get("failed_at"))
         if failed_at is None:
@@ -105,7 +112,7 @@ def mark_failed(symbol: str, *, source: str, reason: str = "") -> None:
         reason: 사람이 읽을 실패 사유.
     """
     normalized = str(symbol or "").strip().upper()
-    if not normalized:
+    if not normalized or normalized in NEVER_BLACKLIST_SYMBOLS:
         return
     now = datetime.now(timezone.utc)
     with _LOCK:
