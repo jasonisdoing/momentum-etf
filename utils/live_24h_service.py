@@ -134,6 +134,16 @@ _KR_TOSS_STOCK_SPECS = (
     {"symbol": "SMSN_KR_TOSS", "name": "삼성전자", "ticker": "005930"},
 )
 
+# 지표 카드(나스닥 100 선물 · 달러 환율 · VIX) — 시세·캔들 모두 야후.
+# 상단 헤더 환율(get_exchange_rates, KRW=X)과 같은 소스라 값이 어긋나지 않는다.
+# 환율은 사실상 실시간이고, 선물(CME)·VIX(CBOE)는 야후가 10~15분 지연 시세를 준다
+# — 화면이 그 카드에 '15분 지연' 배지를 붙인다.
+_YAHOO_INDICATOR_SYMBOLS = (
+    ("NQ_FUT", "NQ=F"),
+    ("USDKRW", "KRW=X"),
+    ("VIX", "^VIX"),
+)
+
 
 def _update_candle_caches_sync(usd_krw: float | None) -> None:
     """모든 심볼의 24H OHLC 캔들 데이터를 동기적으로 갱신한다."""
@@ -176,14 +186,7 @@ def _update_candle_caches_sync(usd_krw: float | None) -> None:
         if hl_candles:
             hl_temp[symbol] = hl_candles
 
-    # 토스 15분봉 (최근 24시간 = 96개) — 나스닥 100 선물 · VIX
     from services.toss_market_service import fetch_toss_candles, fetch_toss_stock_candles
-
-    for cache_key, toss_code in (("NQ_FUT", "RFU.NQc1"), ("VIX", "RGI..VIX")):
-        try:
-            hl_temp[cache_key] = fetch_toss_candles(toss_code, interval="min:15", count=96)
-        except Exception as exc:
-            logger.warning("토스 캔들 조회 실패 (%s): %s", toss_code, exc)
 
     toss_stock_tickers = [ticker for spec in _TOSS_STOCK_SPECS for ticker in spec["tickers"]]
     toss_product_codes = resolve_toss_us_product_codes(toss_stock_tickers)
@@ -209,32 +212,34 @@ def _update_candle_caches_sync(usd_krw: float | None) -> None:
         except Exception as exc:
             logger.warning("토스 국내주식 캔들 조회 실패 (%s): %s", toss_code, exc)
 
-    # 달러 환율(USD/KRW) 15분봉 — 토스는 환율 캔들 API 미확인이라 야후(KRW=X) 사용
-    try:
-        import yfinance as yf
+    # 지표 15분봉 (최근 24시간 = 96개) — 나스닥 100 선물 · 달러 환율 · VIX 전부 야후.
+    # 지표 카드의 현재가·기준가와 소스를 맞춘다(상단 헤더 환율도 같은 야후 기준).
+    import yfinance as yf
 
-        from utils.yfinance_guard import yfinance_lock
+    from utils.yfinance_guard import yfinance_lock
 
-        # 동시 호출 시 남의 티커 데이터를 받는 것을 막는다(utils/yfinance_guard).
-        with yfinance_lock():
-            fx = yf.Ticker("KRW=X").history(period="2d", interval="15m")
-        fx_candles = []
-        for timestamp, row in fx.iterrows():
-            o, h, low, c = (_to_float(row.get(k)) for k in ("Open", "High", "Low", "Close"))
-            if None not in (o, h, low, c):
-                fx_candles.append(
-                    {
-                        "t": int(timestamp.timestamp() * 1000),
-                        "o": o,
-                        "h": h,
-                        "l": low,
-                        "c": c,
-                    }
-                )
-        if fx_candles:
-            hl_temp["USDKRW"] = fx_candles[-96:]
-    except Exception as exc:
-        logger.warning("환율(KRW=X) 캔들 조회 실패: %s", exc)
+    for cache_key, yf_symbol in _YAHOO_INDICATOR_SYMBOLS:
+        try:
+            # 동시 호출 시 남의 티커 데이터를 받는 것을 막는다(utils/yfinance_guard).
+            with yfinance_lock():
+                bars = yf.Ticker(yf_symbol).history(period="2d", interval="15m")
+            candles = []
+            for timestamp, row in bars.iterrows():
+                o, h, low, c = (_to_float(row.get(k)) for k in ("Open", "High", "Low", "Close"))
+                if None not in (o, h, low, c):
+                    candles.append(
+                        {
+                            "t": int(timestamp.timestamp() * 1000),
+                            "o": o,
+                            "h": h,
+                            "l": low,
+                            "c": c,
+                        }
+                    )
+            if candles:
+                hl_temp[cache_key] = candles[-96:]
+        except Exception as exc:
+            logger.warning("야후 지표 캔들 조회 실패 (%s): %s", yf_symbol, exc)
 
     with _CACHE_LOCK:
         _HYPERLIQUID_CANDLE_CACHE.update(hl_temp)
@@ -300,19 +305,32 @@ def load_live_24h_quotes() -> dict[str, Any]:
 
     quotes: list[dict[str, Any]] = []
 
-    # ── 토스 실시간 지표 카드 (나스닥 100 선물 · 달러 환율) — 실패 시 카드만 생략 ──
+    # ── 야후 지표 카드 (나스닥 100 선물 · 달러 환율 · VIX) — 실패 시 카드만 생략 ──
+    # 환율은 상단 헤더와 같은 함수(get_exchange_rates)를 써서 값·캐시가 헤더와 일치한다.
     try:
-        from services.toss_market_service import fetch_toss_indicator_prices
+        from services.price_service import get_yahoo_symbol_snapshot
 
-        toss = fetch_toss_indicator_prices()
-        for symbol, code, currency in (
-            ("NQ_FUT", "RFU.NQc1", "POINT"),
-            ("USDKRW", "EXCHANGE_RATE", "FX"),
-            ("VIX", "RGI..VIX", "POINT"),
+        snapshot = get_yahoo_symbol_snapshot([code for _, code in _YAHOO_INDICATOR_SYMBOLS if code != "KRW=X"])
+        # 환율 기준가(전일 종가)는 rate·change_pct 에서 되구한다 — 둘 다 같은 야후 조회다.
+        usd_change = _to_float((rates.get("USD") or {}).get("change_pct")) if usd_krw is not None else None
+        usd_base = usd_krw / (1.0 + usd_change / 100.0) if usd_krw is not None and usd_change is not None else None
+        indicator_prices = {
+            "NQ_FUT": (
+                _to_float((snapshot.get("NQ=F") or {}).get("nowVal")),
+                _to_float((snapshot.get("NQ=F") or {}).get("prevClose")),
+            ),
+            "USDKRW": (usd_krw, usd_base),
+            "VIX": (
+                _to_float((snapshot.get("^VIX") or {}).get("nowVal")),
+                _to_float((snapshot.get("^VIX") or {}).get("prevClose")),
+            ),
+        }
+        for symbol, name, currency in (
+            ("NQ_FUT", "나스닥 100 선물", "POINT"),
+            ("USDKRW", "달러 환율", "FX"),
+            ("VIX", "VIX", "POINT"),
         ):
-            info = toss.get(code) or {}
-            latest = _to_float(info.get("latest"))
-            base = _to_float(info.get("base"))
+            latest, base = indicator_prices[symbol]
             candles = _HYPERLIQUID_CANDLE_CACHE.get(symbol) or []
             change_24h = None
             if len(candles) >= 2 and candles[0].get("c"):
@@ -320,8 +338,8 @@ def load_live_24h_quotes() -> dict[str, Any]:
             quotes.append(
                 {
                     "symbol": symbol,
-                    "name": str(info.get("name") or symbol),
-                    "type": "toss",
+                    "name": name,
+                    "type": "yahoo",
                     "country": "us",
                     "currency": currency,
                     "hyper_price": latest,
@@ -334,7 +352,7 @@ def load_live_24h_quotes() -> dict[str, Any]:
                 }
             )
     except Exception as exc:
-        logger.warning("토스 지표 카드 구성 실패: %s", exc)
+        logger.warning("야후 지표 카드 구성 실패: %s", exc)
 
     toss_stock_tickers = [ticker for spec in _TOSS_STOCK_SPECS for ticker in spec["tickers"]]
     try:

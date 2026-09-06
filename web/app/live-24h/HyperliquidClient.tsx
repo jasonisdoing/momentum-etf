@@ -12,7 +12,8 @@ type Candle = { t: number; o: number; h: number; l: number; c: number };
 type Quote = {
   symbol: string;
   name: string;
-  type: "stock" | "index" | "toss";
+  /** yahoo = 지표 카드(나스닥 선물·환율·VIX, 야후 시세 — 환율만 실시간, 나머지는 지연). */
+  type: "stock" | "index" | "toss" | "yahoo";
   country: "kor" | "us";
   currency: "KRW" | "USD" | "POINT" | "FX";
   hyper_price: number | null;
@@ -122,13 +123,13 @@ function recentMove(candles: Candle[] | undefined, hours: number): number | null
 }
 
 const SYMBOL_DISPLAY: Record<string, string> = {
-  NQ_FUT: "토스 나스닥 100 선물",
-  USDKRW: "토스 환율",
+  NQ_FUT: "NQ=F",
+  USDKRW: "KRW=X",
   SKHY_TOSS: "토스 SKHY",
   MU_TOSS: "토스 MU",
   SKHX_KR_TOSS: "000660",
   SMSN_KR_TOSS: "005930",
-  VIX: "토스 VIX",
+  VIX: "^VIX",
 };
 
 function displaySymbol(symbol: string, sourceTicker?: string): string {
@@ -138,9 +139,9 @@ function displaySymbol(symbol: string, sourceTicker?: string): string {
 
 function getQuoteLink(symbol: string, sourceTicker?: string): string {
   const upper = symbol.toUpperCase();
-  if (upper === "NQ_FUT") return "https://www.tossinvest.com/indices/RFU.NQc1";
-  if (upper === "USDKRW") return "https://www.tossinvest.com/indices/exchange-rate";
-  if (upper === "VIX") return "https://www.tossinvest.com/indices/RGI..VIX";
+  if (upper === "NQ_FUT") return "https://finance.yahoo.com/quote/NQ%3DF/";
+  if (upper === "USDKRW") return "https://finance.yahoo.com/quote/KRW%3DX/";
+  if (upper === "VIX") return "https://finance.yahoo.com/quote/%5EVIX/";
   if (upper === "SKHY_TOSS" || upper === "MU_TOSS") return "https://www.tossinvest.com";
   const map: Record<string, string> = {
     SMSN: "SAMSUNG",
@@ -426,7 +427,7 @@ function QuoteCard({ q, title, controls, compact = false }: { q: Quote; title: s
           {controls}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-          {q.type !== "toss" ? (
+          {q.type !== "toss" && q.type !== "yahoo" ? (
             <img
               src="/static/HL%20symbol_mint%20green.svg"
               alt="Hyperliquid"
@@ -436,7 +437,7 @@ function QuoteCard({ q, title, controls, compact = false }: { q: Quote; title: s
             />
           ) : null}
           <span aria-label={q.country === "kor" ? "한국" : "미국"} style={{ fontSize: "var(--fs-base)", lineHeight: 1 }}>
-            {q.type === "toss" && !q.source_ticker ? "" : q.country === "kor" ? "🇰🇷" : "🇺🇸"}
+            {q.type === "yahoo" ? "" : q.country === "kor" ? "🇰🇷" : "🇺🇸"}
           </span>
           <span style={{ fontSize: "var(--fs-lg)", fontWeight: 800 }}>{q.name}</span>
           <a
@@ -462,8 +463,10 @@ function QuoteCard({ q, title, controls, compact = false }: { q: Quote; title: s
                 color: q.session_open ? "#16a34a" : "#475569",
               }}
             >
-              {q.type === "toss" && !q.source_ticker
-                ? "실시간"
+              {q.type === "yahoo"
+                ? q.symbol === "USDKRW"
+                  ? "실시간"
+                  : "15분 지연"
                 : q.type === "toss" && q.country === "kor" && !q.session_open
                   ? "휴장"
                   : q.session_open
@@ -493,8 +496,9 @@ function QuoteCard({ q, title, controls, compact = false }: { q: Quote; title: s
           </span>
           <span style={{ opacity: 0.5 }}>·</span>
           <span>
-            {q.type === "toss" ? "전일 기준" : "정규장 종가"} {formatPrice(q.actual_price, q.currency)}
-            {q.type !== "toss" ? (
+            {q.type === "toss" || q.type === "yahoo" ? "전일 기준" : "정규장 종가"}{" "}
+            {formatPrice(q.actual_price, q.currency)}
+            {q.type !== "toss" && q.type !== "yahoo" ? (
               <>
                 {" "}
                 <strong style={{ color: signColor(q.actual_change_pct) }}>{formatPct(q.actual_change_pct)}</strong>

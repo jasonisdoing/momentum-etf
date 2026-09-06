@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import LIVE_24H_ALERT_PCT
 from utils.env import load_env_if_present
 from utils.live_24h_service import load_live_24h_quotes
-from utils.notification import app_link, send_slack_message_v2
+from utils.notification import send_slack_message_v2
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -117,11 +117,12 @@ def main():
 
     rows = []
     # VIX 는 슬랙 알림 대상에서 제외한다(/live-24h 화면에는 그대로 표시).
-    for symbol, name in (("NQ_FUT", "나스닥 100 선물"), ("USDKRW", "달러 환율")):
+    # 지표 시세는 야후 — 환율(KRW=X)은 실시간, 나스닥 선물(CME)은 지연 시세다.
+    for symbol, name, status in (("NQ_FUT", "나스닥 100 선물", "15분 지연"), ("USDKRW", "달러 환율", "실시간")):
         quote = quotes_by_symbol.get(symbol)
         if not quote:
             raise RuntimeError(f"필수 시장지표 시세가 없습니다: {symbol}")
-        rows.append((":us:", name, symbol, quote, "실시간", quote.get("diff_pct"), symbol != "NQ_FUT"))
+        rows.append((":us:", name, symbol, quote, status, quote.get("diff_pct"), symbol != "NQ_FUT"))
 
     for flag, name, toss_symbol, hyperliquid_symbol in (
         (":kr:", "SK하이닉스", "SKHX_KR_TOSS", "SKHX"),
