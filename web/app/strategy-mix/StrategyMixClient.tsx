@@ -1819,6 +1819,8 @@ export function StrategyMixClient() {
                       const status = slotKeys
                         .map((slot) => params.data?.slots?.[slot]?.status ?? "")
                         .join(" ");
+                      // 들어오는 줄과 빠지는 줄을 색으로 가른다 — 회색은 「빠짐」으로 읽힌다.
+                      if (status.includes("진입 예정")) return "momentumPendingRow";
                       return status.includes("예정") ? "appTrendBrokenRow" : "";
                     }}
                     gridOptions={{
