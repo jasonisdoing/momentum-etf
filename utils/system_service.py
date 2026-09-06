@@ -573,7 +573,11 @@ def _format_duration_seconds(seconds: float | int | None) -> str | None:
     return f"{hours}시간 {remain_minutes}분" if remain_minutes else f"{hours}시간"
 
 
-def _read_queue_averages(sample_size: int = 5) -> dict[str, dict[str, float]]:
+#: 대기시간·예상시간을 낼 때 쓰는 최근 실행 표본 수 — 화면 안내 문구도 이 값을 쓴다.
+AVERAGE_SAMPLE_SIZE = 10
+
+
+def _read_queue_averages(sample_size: int = AVERAGE_SAMPLE_SIZE) -> dict[str, dict[str, float]]:
     """잡별 평균을 큐에서 낸다 — `{잡: {지표: 초}}`.
 
     지표는 셋이다.
@@ -630,7 +634,7 @@ def _read_queue_averages(sample_size: int = 5) -> dict[str, dict[str, float]]:
     }
 
 
-def _read_average_job_elapsed_seconds(job_key: str, sample_size: int = 5) -> float | None:
+def _read_average_job_elapsed_seconds(job_key: str, sample_size: int = AVERAGE_SAMPLE_SIZE) -> float | None:
     """최근 성공 실행의 평균 소요시간(초)을 반환한다. 성공 로그가 없으면 최근 종료 로그를 사용한다."""
     log_path = _LOG_DIR / f"{job_key}.log"
     if not log_path.exists():
@@ -1213,7 +1217,8 @@ def load_system_data() -> dict[str, object]:
             "`infra/cron/crontab` 파일이 단일 진실 소스입니다. "
             "큐 워커는 서버와 로컬(`python run_local_dev.py` 실행 중) 양쪽에서 함께 동작하며 "
             "MongoDB `find_one_and_update` 로 한 곳에서만 atomic 하게 claim 합니다. "
-            "트리거(수동 클릭 / 스케줄)는 큐에 추가되어 FIFO 순서로 직렬 처리됩니다."
+            "트리거(수동 클릭 / 스케줄)는 큐에 추가되어 FIFO 순서로 직렬 처리됩니다. "
+            f"대기시간과 예상시간(서버/로컬)은 각각 최근 {AVERAGE_SAMPLE_SIZE}회 실행의 평균입니다."
         ),
         "running_jobs": get_running_jobs(),
         "running_job_details": get_running_job_details(),
