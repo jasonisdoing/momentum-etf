@@ -40,12 +40,12 @@ from utils.strategy_settings import coerce_to_options, require_start_date, valid
 
 
 def default_adr_floor() -> int | None:
-    """ADR 하한 기본값 — 선택지 중 **가장 작은 값**. 「없음」(None)만 있으면 None.
+    """ADR 하한 기본값 — 선택지의 **첫 값**.
 
-    선택지에 `None`(없음)이 섞여 있어 `min()` 을 그대로 쓰면 int 와 None 을 비교해 터진다.
+    선택지는 느슨한 것부터 죈 순서(`없음 · 85 · 90 · 95`)라 첫 값이 곧 가장 약한 게이트다.
+    「없음」이 85 보다 작은 값이므로 숫자만 놓고 `min()` 을 쓰면 안 된다.
     """
-    numbers = [value for value in ADR_FLOOR_OPTIONS if value is not None]
-    return min(numbers) if numbers else None
+    return ADR_FLOOR_OPTIONS[0] if ADR_FLOOR_OPTIONS else None
 
 
 warnings.filterwarnings("ignore")
@@ -553,14 +553,16 @@ def delete_settings(pool: str) -> None:
     """그 풀의 모멘텀 설정을 지운다 — 종목풀 설정 화면에서 「사용」을 끄면 부른다.
 
     모멘텀은 전용 문서가 아니라 **종목풀 설정 문서**에 값을 넣는다(순위·알림이 같은 값을
-    보게 하려고). 그래서 지울 때도 그 키들만 걷어낸다.
+    보게 하려고). 그래서 **모멘텀 전용 키만** 걷어낸다 — 이평선·보유종목 수는 순위·신고가·
+    종목풀 백테스트가 함께 쓰는 값이라 지우면 그 화면들이 미설정이 된다.
     """
     from utils.db_manager import get_db_connection
+    from utils.pool_settings_store import MOMENTUM_KEYS
 
     db = get_db_connection()
     if db is None:
         raise RuntimeError("MongoDB 연결에 실패했습니다.")
     db["pool_settings"].update_one(
         {"_id": str(pool).strip().lower()},
-        {"$unset": {pool_key: "" for pool_key in _POOL_KEY_BY_SETTING.values()}},
+        {"$unset": {pool_key: "" for pool_key in MOMENTUM_KEYS}},
     )
