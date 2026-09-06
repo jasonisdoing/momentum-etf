@@ -332,63 +332,74 @@ export const STATUS_COLUMN_MIN_WIDTH = 140;
 
 export type SlotPlan = "hold" | "sell" | "buy" | "exited" | "empty";
 
-export function slotStatusColumn<
-  T extends {
-    plan: SlotPlan;
-    days: number | null;
-    is_new: boolean;
-    exit_reason: string | null;
-    entry_date?: string | null;
-    exit_date?: string | null;
-  },
->(options: {
+/** 상태 한 칸의 값 — 컬럼과 합성 화면이 같은 이 함수로 그린다. */
+export type SlotStatusRow = {
+  plan: SlotPlan;
+  days: number | null;
+  is_new: boolean;
+  exit_reason: string | null;
+  entry_date?: string | null;
+  exit_date?: string | null;
+};
+
+/** 슬롯 상태 문구 — **여기 한 곳**에서만 만든다.
+ *
+ *  모멘텀·신고가는 컬럼(`slotStatusColumn`)으로, 합성은 슬리브마다 이 함수로 그린다.
+ *  화면마다 문구를 따로 만들면 같은 상태가 다르게 보인다(실제로 합성만 「3일째」로 달랐다). */
+export function renderSlotStatus(
+  row: SlotStatusRow,
+  options: { live: boolean; fillDay?: string | null },
+): React.ReactNode {
+  if (row.plan === "empty") return null;
+  const tag = options.live ? "(예상)" : "";
+  // 언제 벌어지는(벌어진) 일인지를 상태와 같이 읽어야 주문을 낼 수 있다.
+  const fill = options.fillDay ? `${formatSlashDateWithWeekday(options.fillDay)} ` : "";
+  const reason = row.exit_reason ? ` (${row.exit_reason})` : "";
+
+  if (row.plan === "buy") {
+    const label = `${fill}진입 예정${tag}`;
+    return (
+      <strong style={{ color: "#d62828", whiteSpace: "nowrap" }} title={label}>
+        {label}
+      </strong>
+    );
+  }
+  if (row.plan === "sell") {
+    const label = `${fill}매도 예정${tag}`;
+    return (
+      <strong style={{ color: "#1971c2", whiteSpace: "nowrap" }} title={`${label}${reason}`}>
+        {label}
+      </strong>
+    );
+  }
+  if (row.plan === "exited") {
+    // 이탈은 이미 체결된 날짜가 행에 있다 — 예정 체결일이 아니라 그 날짜를 쓴다.
+    const day = row.exit_date ? `${formatSlashDateWithWeekday(row.exit_date)} ` : "";
+    const label = `${day}이탈`;
+    return (
+      <span style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }} title={`${label}${reason}`}>
+        {label}
+      </span>
+    );
+  }
+  // 보유는 「편입일 보유일」로 쓴다 — 언제 담아 며칠째인지가 한 칸에서 읽힌다.
+  // 다른 상태(예정·이탈)도 앞에 날짜가 붙어 있어 표가 같은 방식으로 읽힌다.
+  const since = row.entry_date ? `${formatSlashDateWithWeekday(row.entry_date)} ` : "";
+  return <span style={{ whiteSpace: "nowrap" }}>{`${since}${row.days}일`}</span>;
+}
+
+export function slotStatusColumn<T extends SlotStatusRow>(options: {
   live: boolean;
   /** 매수·매도 예정이 체결되는 날 — 상태 문구 앞에 붙인다. */
   fillDay?: string | null;
 }): ColDef<T> {
-  const tag = options.live ? "(예상)" : "";
-  // 언제 벌어지는(벌어진) 일인지를 상태와 같이 읽어야 주문을 낼 수 있다.
-  const fill = options.fillDay ? `${formatSlashDateWithWeekday(options.fillDay)} ` : "";
   return {
     headerName: "상태",
     width: STATUS_COLUMN_WIDTH,
     minWidth: STATUS_COLUMN_MIN_WIDTH,
     cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
     valueGetter: (p) => p.data?.plan ?? "",
-    cellRenderer: (p: { data?: T }) => {
-      if (!p.data || p.data.plan === "empty") return null;
-      const reason = p.data.exit_reason ? ` (${p.data.exit_reason})` : "";
-      if (p.data.plan === "buy") {
-        const label = `${fill}진입 예정${tag}`;
-        return (
-          <strong style={{ color: "#d62828", whiteSpace: "nowrap" }} title={label}>
-            {label}
-          </strong>
-        );
-      }
-      if (p.data.plan === "sell") {
-        const label = `${fill}매도 예정${tag}`;
-        return (
-          <strong style={{ color: "#1971c2", whiteSpace: "nowrap" }} title={`${label}${reason}`}>
-            {label}
-          </strong>
-        );
-      }
-      if (p.data.plan === "exited") {
-        // 이탈은 이미 체결된 날짜가 행에 있다 — 예정 체결일이 아니라 그 날짜를 쓴다.
-        const day = p.data.exit_date ? `${formatSlashDateWithWeekday(p.data.exit_date)} ` : "";
-        const label = `${day}이탈`;
-        return (
-          <span style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }} title={`${label}${reason}`}>
-            {label}
-          </span>
-        );
-      }
-      // 보유는 「편입일 보유일」로 쓴다 — 언제 담아 며칠째인지가 한 칸에서 읽힌다.
-      // 다른 상태(예정·이탈)도 앞에 날짜가 붙어 있어 표가 같은 방식으로 읽힌다.
-      const since = p.data.entry_date ? `${formatSlashDateWithWeekday(p.data.entry_date)} ` : "";
-      return <span style={{ whiteSpace: "nowrap" }}>{`${since}${p.data.days}일`}</span>;
-    },
+    cellRenderer: (p: { data?: T }) => (p.data ? renderSlotStatus(p.data, options) : null),
   };
 }
 
