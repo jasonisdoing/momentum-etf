@@ -506,8 +506,8 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
             throw new Error(payload.error ?? "사용 여부를 저장하지 못했습니다.");
           }
           if (!next) {
-            // 설정이 지워졌으니 저장된 백테스트 결과도 화면에서 비운다.
-            setBacktests((prev) => ({ ...prev, [pool]: {} }));
+            // 그 전략 결과만 비운다 — 같은 풀의 다른 전략 결과는 그대로다.
+            setBacktests((prev) => ({ ...prev, [pool]: { ...prev[pool], [strategy]: undefined } }));
           }
         } catch (err) {
           // 저장에 실패하면 토글을 되돌린다 — 화면만 켜진 채로 두면 실제와 어긋난다.

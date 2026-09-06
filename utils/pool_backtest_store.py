@@ -57,6 +57,14 @@ def load_results() -> dict[str, dict[str, dict[str, Any]]]:
     return out
 
 
+def clear_result(pool: str, strategy: str) -> None:
+    """그 종목풀·전략 결과 하나만 지운다 — 「사용」을 끌 때 다른 전략 결과가 같이 사라지면 안 된다."""
+    try:
+        _db()[COLLECTION].delete_many({"pool": pool, "strategy": strategy})
+    except Exception as exc:  # noqa: BLE001 - 저장은 이미 끝났으므로 여기서 막지 않는다
+        logger.warning("종목풀 백테스트 결과 삭제 실패 (%s/%s): %s", pool, strategy, exc)
+
+
 def clear_pool(pool: str) -> None:
     """그 종목풀의 저장 결과를 모두 지운다 — 설정이 바뀌면 옛 성과를 남기지 않는다."""
     try:
