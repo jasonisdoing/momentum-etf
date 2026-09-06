@@ -316,7 +316,11 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None) -> d
     for held in holdings:
         held["is_exit_forecast"] = False
     row_by_ticker = {row["ticker"]: row for row in rows}
-    entries = [row_by_ticker[ticker] for ticker in simulated["planned_entries"] if ticker in row_by_ticker]
+    entries = [
+        {**row_by_ticker[ticker], "sleeve_weight_pct": simulated["planned_entry_weights"][ticker]}
+        for ticker in simulated["planned_entries"]
+        if ticker in row_by_ticker
+    ]
 
     if quotes["live"]:
         # 장이 열려 있다는 것은 위에서 고른 진입·청산이 **오늘 시가에 이미 체결됐다**는 뜻이다.

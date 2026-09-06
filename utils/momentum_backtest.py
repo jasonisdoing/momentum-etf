@@ -251,7 +251,11 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None) -> d
         }
 
     # 다음 시가에 살 종목 — 엔진이 고른 티커에 화면 표시용 값만 붙인다.
-    entries = [row_by_ticker[ticker] for ticker in simulated["planned_entries"] if ticker in row_by_ticker]
+    entries = [
+        {**row_by_ticker[ticker], "sleeve_weight_pct": simulated["planned_entry_weights"][ticker]}
+        for ticker in simulated["planned_entries"]
+        if ticker in row_by_ticker
+    ]
 
     # ── 지난 세션의 청산분은 버린다 ─────────────────────────────────────────
     # 그 세션이 이미 마감했으면 보유 표에 있을 이유가 없다 — 내역은 「체결」 탭에 남는다.

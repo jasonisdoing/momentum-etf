@@ -38,6 +38,24 @@ from utils.share_allocation import backtest_initial_capital
 from utils.trade_stats import summarize_trades
 
 
+def _entry_quantities(
+    picks: list[str], prices: dict[str, float], free: int, slot_amount: float, cash: float
+) -> dict[str, int]:
+    """체결과 다음 진입 예상이 같은 슬롯·잔여 현금 제한을 사용한다."""
+    quantities: dict[str, int] = {}
+    for ticker in picks:
+        if len(quantities) >= free:
+            break
+        price = prices[ticker]
+        if not pd.notna(price) or price <= 0:
+            continue
+        remaining = cash - sum(quantities[t] * prices[t] for t in quantities)
+        shares = int(min(slot_amount, remaining) // price)
+        if shares > 0:
+            quantities[ticker] = shares
+    return quantities
+
+
 def _drawdown_pct(series: pd.Series) -> float:
     """최대 낙폭(%) — 고점 대비 최저."""
     return float(((series / series.cummax()) - 1).min() * 100)
@@ -228,21 +246,10 @@ def run_slot_backtest(
             # 다음 순위가 그 슬롯을 채운다. 예전에는 후보를 `[:free]` 로 먼저 자른 뒤
             # 0주가 나오면 그 슬롯을 빈 채로 뒀다(다음 순위는 쳐다보지도 않았다).
             slot_amount = fill_value / slots if slots else 0.0
-            fill_price_by_ticker: dict[str, float] = {}
-            quantities: dict[str, int] = {}
-            for ticker in picks:
-                if len(quantities) >= free:
-                    break
-                price = float(open_df.at[nxt, ticker]) * (1 + buy_slippage / 100)
-                if price <= 0:
-                    continue
-                shares = int(
-                    min(slot_amount, cash - sum(quantities[t] * fill_price_by_ticker[t] for t in quantities)) // price
-                )
-                if shares <= 0:
-                    continue  # 1주도 못 사면 자리를 비우지 않고 다음 순위로 넘어간다
-                fill_price_by_ticker[ticker] = price
-                quantities[ticker] = shares
+            fill_price_by_ticker = {
+                ticker: float(open_df.at[nxt, ticker]) * (1 + buy_slippage / 100) for ticker in picks
+            }
+            quantities = _entry_quantities(picks, fill_price_by_ticker, free, slot_amount, cash)
             for ticker in quantities:
                 shares = quantities[ticker]
                 fill_price = fill_price_by_ticker[ticker]
@@ -300,12 +307,22 @@ def run_slot_backtest(
         if pd.notna(close_df.at[last_day, ticker]) and bool(exit_signal.at[last_day, ticker])
     ]
     planned_entries: list[str] = []
+    planned_entry_weights: dict[str, float] = {}
     free = slots - (len(holdings) - len(planned_exits))
     if free > 0 and not entry_blocked(last_day):
         row = entry.loc[last_day]
         picks = [ticker for ticker in row[row].index if ticker not in holdings]
         picks.sort(key=lambda ticker: priority_of(ticker, last_day), reverse=True)
-        planned_entries = picks[:free]
+        # 다음 시가가 없으므로 최종 종가로 예상한다. 청산 비용과 정수 수량도 체결 규칙과 같다.
+        proceeds = sum(holdings[t]["shares"] * float(close_df.at[last_day, t]) for t in planned_exits)
+        available = cash + proceeds * (1 - sell_slippage / 100)
+        fill_value = sleeve_value - proceeds * sell_slippage / 100
+        prices = {t: float(close_df.at[last_day, t]) * (1 + buy_slippage / 100) for t in picks}
+        quantities = _entry_quantities(picks, prices, free, fill_value / slots, available)
+        planned_entries = list(quantities)
+        planned_entry_weights = {
+            t: quantity * float(close_df.at[last_day, t]) / sleeve_value * 100 for t, quantity in quantities.items()
+        }
 
     # 곡선은 시작 1.0 배수로 되돌린다 — 시작 자본은 정수 주수를 세기 위한 것이고,
     # 성과 지표(수익률·MDD·벤치마크 대비)는 배수 기준으로 읽는다.
@@ -338,6 +355,7 @@ def run_slot_backtest(
         # 다음 거래일 시가에 할 일 — 화면은 이걸 읽기만 한다(판정을 다시 하지 않는다).
         "planned_exits": planned_exits,
         "planned_entries": planned_entries,
+        "planned_entry_weights": planned_entry_weights,
         # 빈 슬롯·잔여 현금 비중 — 종목 비중과 합쳐 100 이 된다.
         "sleeve_cash_weight_pct": round(cash / sleeve_value * 100, 4) if sleeve_value > 0 else 100.0,
         "exited_today": [t for t in trades if t["exit_date"] == str(last_day.date())],
