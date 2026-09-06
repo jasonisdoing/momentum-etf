@@ -42,6 +42,8 @@ import {
   stockMemoColumn,
   formatSignedPct,
   signColor,
+  renderSlotStatus,
+  type SlotPlan,
 } from "@/lib/grid-cells";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
@@ -197,6 +199,11 @@ type HoldingSlot = {
   /** 슬리브별 몫(%) — 슬롯 합이 목표비중이다. */
   weight?: number | null;
   status?: string | null;
+  /** 각 전략 화면과 같은 상태 컬럼(`renderSlotStatus`)이 쓰는 값. */
+  plan?: SlotPlan | null;
+  days?: number | null;
+  is_new?: boolean | null;
+  exit_reason?: string | null;
   /** 전략 수익률(이론값) — 모멘텀: 연속 시작 교체일 시가 대비 · 신고가: 진입가 대비. */
   return_pct?: number | null;
   /** 보유 기간 — 전략마다 단위가 달라 백엔드가 완성된 문자열로 내려준다("3주"·"12일"·"신규"). */
@@ -793,6 +800,35 @@ export function StrategyMixClient() {
 
   const positionColumns = useMemo<ColDef<PositionRow>[]>(() => {
     const columns: ColDef<PositionRow>[] = [
+      // 슬리브별 상태 — 맨 앞에 슬리브 수만큼. 색(진입 파랑 / 매도 회색)만으로는 어느
+      // 슬리브에서 무슨 일이 나는지 알 수 없어, 슬리브 몫 컬럼과 같은 이름으로 나란히 둔다.
+      ...slotKeys.map<ColDef<PositionRow>>((slot) => ({
+        colId: `slot_status_${slot}`,
+        headerName: slotLabel(slot),
+        width: 150,
+        sortable: false,
+        cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+        // 문구는 각 전략 화면과 **같은 함수**로 그린다 — 여기서 만들면 표현이 갈린다.
+        // 포트폴리오만 진입·이탈 판정이 없어 저장 비중 문구를 그대로 보여준다.
+        valueGetter: (p: { data?: PositionRow }) => p.data?.slots?.[slot]?.plan ?? "",
+        cellRenderer: (p: { data?: PositionRow }) => {
+          const cell = p.data?.slots?.[slot];
+          if (!cell?.plan) return null;
+          if (String(cell.status ?? "").startsWith("전략 비중")) {
+            return <span style={{ color: "var(--text-muted)" }}>{cell.status}</span>;
+          }
+          return renderSlotStatus(
+            {
+              plan: cell.plan,
+              days: cell.days ?? null,
+              is_new: Boolean(cell.is_new),
+              exit_reason: cell.exit_reason ?? null,
+              entry_date: cell.entry_date ?? null,
+            },
+            { live: Boolean(positions?.live), fillDay: positions?.next_trading_day },
+          );
+        },
+      })),
       {
         field: "ticker",
         headerName: "티커",

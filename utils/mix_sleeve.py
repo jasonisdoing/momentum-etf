@@ -242,6 +242,11 @@ def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
                 "price": row["price"],
                 "change_pct": metrics.get("daily_change_pct"),
                 "status": f"전략 비중 {float(row['sleeve_weight_pct']):.2f}%",
+                # 포트폴리오는 진입·이탈 판정이 없다 — 늘 보유 상태다.
+                "plan": "hold",
+                "days": None,
+                "is_new": False,
+                "exit_reason": None,
                 "return_pct": None,
                 "held_label": "",
                 # 포트폴리오는 진입 판정이 없다 — 매수 시점을 만들어 내지 않는다.
@@ -297,6 +302,12 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
                 "price": row.get("price"),
                 "change_pct": row.get("change_pct"),
                 "status": status,
+                # 각 전략 화면과 **같은 상태 컬럼**(`web/lib/grid-cells.slotStatusColumn`)을
+                # 쓰기 위한 값. 문구를 여기서 만들면 화면마다 표현이 갈린다.
+                "plan": "sell" if exiting else "hold",
+                "days": row.get("days"),
+                "is_new": bool(row.get("is_new")),
+                "exit_reason": row.get("exit_reason"),
                 "return_pct": row.get("return_pct"),
                 "held_label": _held_label(row.get("days"), unit="일", zero="진입"),
                 # 차트의 진입 화살표용.
@@ -314,6 +325,10 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
                 "price": row.get("price"),
                 "change_pct": row.get("change_pct"),
                 "status": "진입 예정 (다음 시가 매수)",
+                "plan": "buy",
+                "days": None,
+                "is_new": False,
+                "exit_reason": None,
                 "return_pct": None,
                 # 아직 안 샀다 — 빈칸으로 두면 보유일 컬럼·차트 배지가 통째로 사라진다.
                 "held_label": "0일",

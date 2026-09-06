@@ -890,7 +890,20 @@ def _krw_rate(currency: str) -> float:
 
 # 슬리브별 값이 붙는 자리 — 내부 계산은 `a_weight` 처럼 평평하게 들고 다니고(키가 늘어도
 # 코드가 그대로다), 화면에 내보낼 때만 `slots` 아래로 모은다. 화면은 슬롯 키를 돌며 읽는다.
-_SLOT_ROW_FIELDS: tuple[str, ...] = ("weight", "status", "return_pct", "held_label", "entry_date", "entry_price")
+# 슬리브별로 행에 실리는 값 — `plan`·`days`·`is_new`·`exit_reason` 은 각 전략 화면과
+# 같은 상태 컬럼(`web/lib/grid-cells.slotStatusColumn`)이 요구하는 필드다.
+_SLOT_ROW_FIELDS: tuple[str, ...] = (
+    "weight",
+    "status",
+    "plan",
+    "days",
+    "is_new",
+    "exit_reason",
+    "return_pct",
+    "held_label",
+    "entry_date",
+    "entry_price",
+)
 
 
 def _holding_payload(row: dict[str, Any], slot_keys: Sequence[str]) -> dict[str, Any]:
@@ -1248,6 +1261,11 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
             for key in keys:
                 row[f"{key}_weight"] = 0.0
                 row[f"{key}_status"] = None
+                # 각 전략 화면과 같은 상태 컬럼이 쓰는 값 — 문구는 화면이 공용 함수로 만든다.
+                row[f"{key}_plan"] = None
+                row[f"{key}_days"] = None
+                row[f"{key}_is_new"] = None
+                row[f"{key}_exit_reason"] = None
                 # 전략 수익률(이론값) — 그 전략이 잡은 편입가 대비.
                 row[f"{key}_return_pct"] = None
                 # 보유 기간 표기 — 전략마다 단위가 다르다("3주" vs "12일"). 슬롯에 어느
@@ -1269,6 +1287,10 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         if row.get("change_pct") is None:
             row["change_pct"] = target.get("change_pct")
         row[f"{source}_status"] = target.get("status")
+        row[f"{source}_plan"] = target.get("plan")
+        row[f"{source}_days"] = target.get("days")
+        row[f"{source}_is_new"] = bool(target.get("is_new"))
+        row[f"{source}_exit_reason"] = target.get("exit_reason")
         if target.get("return_pct") is not None:
             row[f"{source}_return_pct"] = round(float(target["return_pct"]), 2)
         if target.get("held_label"):
