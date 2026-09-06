@@ -373,7 +373,7 @@ export function MomentumClient() {
     setLoading(true);
     try {
       // 마지막으로 고른 풀은 브라우저에 기억한다(다른 화면들과 같은 공용 키).
-      const remembered = readRememberedTickerType();
+      const remembered = readRememberedTickerType("strategy-momentum");
       const query = remembered ? `?pool=${encodeURIComponent(remembered)}` : "";
       const resp = await fetch(`/api/strategy-momentum${query}`, { cache: "no-store" });
       const payload = await resp.json();
@@ -505,7 +505,7 @@ export function MomentumClient() {
   const handlePoolChange = useCallback(
     (pool: string) => {
       setDraftPool(pool);
-      writeRememberedTickerType(pool);
+      writeRememberedTickerType("strategy-momentum", pool);
       // 풀이 바뀌면 이전 풀의 백테스트 결과는 의미가 없다 — 저장 이력이 없어 아래 분기를 타지
       // 않는 풀(그 풀 첫 진입)도 마찬가지라 분기 밖에서 비운다.
       // 튜닝 결과는 StrategyTuning 이 key={draftPool} 로 재마운트되며 함께 비워진다.

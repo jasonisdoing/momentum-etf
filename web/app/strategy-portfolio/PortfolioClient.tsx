@@ -214,7 +214,7 @@ export function PortfolioClient() {
     (async () => {
       try {
         // 마지막으로 고른 풀은 브라우저에 기억한다(다른 화면들과 같은 공용 키).
-        const remembered = readRememberedTickerType();
+        const remembered = readRememberedTickerType("strategy-portfolio");
         const query = remembered ? `?pool=${encodeURIComponent(remembered)}` : "";
         const response = await fetch(`/api/strategy-portfolio${query}`, { cache: "no-store" });
         const payload = (await response.json()) as View;
@@ -247,7 +247,7 @@ export function PortfolioClient() {
       setBacktest(null);
       setBacktestError(null);
       setSelected([]);
-      writeRememberedTickerType(nextPool);
+      writeRememberedTickerType("strategy-portfolio", nextPool);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "설정을 불러오지 못했습니다.");
     } finally {

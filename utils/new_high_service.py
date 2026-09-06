@@ -358,7 +358,10 @@ def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], lis
     pools = available_pools()
     selected = str(pool or default_pool()).strip()
     if selected not in pools:
-        raise ValueError(f"지원하지 않는 종목풀입니다: {pool}")
+        # 그 화면이 기억한 풀이 이 전략에서 꺼졌을 수 있다 — 막지 말고 기본 풀로 연다.
+        selected = default_pool()
+        if not selected:
+            raise ValueError("이 전략을 쓰는 종목풀이 없습니다 — 종목풀 설정에서 「사용」을 켜세요.")
     merged = {"pool": selected, **DEFAULT_SETTINGS, **dict((doc.get("settings_by_pool") or {}).get(selected) or {})}
     return coerce_to_options(merged, _option_fields(selected), validate_settings)
 

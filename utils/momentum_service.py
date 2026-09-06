@@ -305,6 +305,9 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
     """
     stored = _load_settings_doc()
     pool = str(pool or default_pool()).strip().lower()
+    # 그 화면이 기억한 풀이 이 전략에서 꺼졌을 수 있다 — 막지 말고 기본 풀로 연다.
+    if pool not in available_pools():
+        pool = default_pool()
     per_pool = stored["settings_by_pool"].get(pool)
     if not isinstance(per_pool, dict):
         raise RuntimeError(f"종목풀({pool})의 모멘텀 전략 설정이 없습니다 — 화면에서 저장하세요.")

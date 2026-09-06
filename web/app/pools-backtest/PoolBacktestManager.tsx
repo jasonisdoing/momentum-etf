@@ -183,7 +183,7 @@ export function PoolBacktestManager() {
             );
           }
           if (list.length > 0) {
-            const rem = readRememberedTickerType();
+            const rem = readRememberedTickerType("pools-backtest");
             const defaultPool = rem && list.some((p) => p.ticker_type === rem) ? rem : list[0].ticker_type;
             setPoolId(defaultPool);
           }
@@ -246,7 +246,7 @@ export function PoolBacktestManager() {
                     onChange={(e) => {
                       const val = e.target.value;
                       setPoolId(val);
-                      writeRememberedTickerType(val);
+                      writeRememberedTickerType("pools-backtest", val);
                     }}
                   >
                     {pools.length === 0 ? <option value="">불러오는 중…</option> : null}

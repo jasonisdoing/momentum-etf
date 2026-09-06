@@ -389,7 +389,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setAccounts(payload.ticker_types ?? []);
     const nextAccountId = payload.ticker_type ?? "";
     setSelectedAccountId(nextAccountId);
-    writeRememberedTickerType(nextAccountId);
+    writeRememberedTickerType("rank", nextAccountId);
     setMaRule(payload.ma_rules?.[0] ?? null);
     const nextMaOptions = { short_ma_options: payload.short_ma_options, long_ma_options: payload.long_ma_options };
     setMaOptions(nextMaOptions);
@@ -418,11 +418,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   function applyRankToolbarPayload(payload: RankResponse) {
     const nextTickerTypes = payload.ticker_types ?? [];
-    const nextAccountId = payload.ticker_type ?? readRememberedTickerType() ?? "";
+    const nextAccountId = payload.ticker_type ?? readRememberedTickerType("rank") ?? "";
     setAccounts(nextTickerTypes);
     setSelectedAccountId(nextAccountId);
     if (nextAccountId) {
-      writeRememberedTickerType(nextAccountId);
+      writeRememberedTickerType("rank", nextAccountId);
     }
     setMaRule(payload.ma_rules?.[0] ?? null);
     const nextMaOptions = { short_ma_options: payload.short_ma_options, long_ma_options: payload.long_ma_options };
@@ -446,7 +446,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
     try {
       const search = new URLSearchParams();
-      const rememberedTickerType = readRememberedTickerType();
+      const rememberedTickerType = readRememberedTickerType("rank");
       if (rememberedTickerType) {
         search.set("ticker_type", rememberedTickerType);
       }
@@ -540,7 +540,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   useEffect(() => {
     void loadToolbar();
     void load({
-      ticker_type: readRememberedTickerType() ?? undefined,
+      ticker_type: readRememberedTickerType("rank") ?? undefined,
       bootstrap: true,
     });
   }, []);
@@ -1347,7 +1347,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   function handleTickerTypeChange(accountId: string) {
     setSelectedAccountId(accountId);
-    writeRememberedTickerType(accountId);
+    writeRememberedTickerType("rank", accountId);
     if (accountId === "all") {
       setPageMode("rank");
     }

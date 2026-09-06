@@ -443,7 +443,7 @@ export function NewHighClient() {
     (async () => {
       try {
         // 마지막으로 고른 풀은 브라우저에 기억한다(다른 화면들과 같은 공용 키).
-        const remembered = readRememberedTickerType();
+        const remembered = readRememberedTickerType("strategy-new-high");
         const query = remembered ? `?pool=${encodeURIComponent(remembered)}` : "";
         const response = await fetch(`/api/strategy-new-high${query}`, { cache: "no-store" });
         const payload = (await response.json()) as View & { error?: string };
@@ -547,7 +547,7 @@ export function NewHighClient() {
   const handlePoolChange = useCallback(
     (pool: string) => {
       if (!view) return;
-      writeRememberedTickerType(pool);
+      writeRememberedTickerType("strategy-new-high", pool);
       const saved = view.settings_by_pool?.[pool];
       const next = { ...view.default_settings, ...(saved ?? {}), pool, start_date: saved?.start_date ?? null };
       setPositions(null);
