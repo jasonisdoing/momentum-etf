@@ -336,7 +336,7 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
                 "entry_date": None,
                 "entry_price": None,
                 "is_exiting": False,
-                "drift_pct": None,
+                "drift_pct": row.get("sleeve_weight_pct"),
             }
         )
 
