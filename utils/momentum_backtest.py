@@ -256,6 +256,9 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None) -> d
         for ticker in simulated["planned_entries"]
         if ticker in row_by_ticker
     ]
+    # 실시간 표시·장중 예상이 기준일 목표의 가격과 판정을 바꾸지 못하게 분리한다.
+    target_holdings = [dict(row) for row in holdings]
+    target_entries = [dict(row) for row in entries]
 
     # ── 지난 세션의 청산분은 버린다 ─────────────────────────────────────────
     # 그 세션이 이미 마감했으면 보유 표에 있을 이유가 없다 — 내역은 「체결」 탭에 남는다.
@@ -312,6 +315,8 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None) -> d
         "top_n": slots,
         "next_session": _next_session(pool, fill_base),
         "holdings": holdings,
+        "target_holdings": target_holdings,
+        "target_entries": target_entries,
         "planned_entries": [{**row, "rank": rank_by_ticker[row["ticker"]]} for row in entries],
         "exited_today": exited_today,
         "candidates": candidates,

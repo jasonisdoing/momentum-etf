@@ -1354,7 +1354,14 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     if krw_rate <= 0:
         raise RuntimeError(f"{pool_currency} 환율을 읽을 수 없습니다.")
     if account is not None:
-        _value_account(account, krw_rate, {row["ticker"]: row["price"] for row in holdings if row.get("price")})
+        # 목표와 같은 확정일로 계좌를 평가한다. 표시용 실시간 가격은 수량 계산에 넣지 않는다.
+        valuation_date = min(state.as_of for state in states.values() if state.as_of)
+        _value_account(
+            account,
+            krw_rate,
+            {row["ticker"]: row["price"] for row in holdings if row.get("price")},
+            as_of=valuation_date,
+        )
 
         # ── 고정 자산 몫만큼 슬리브·현금 비중을 줄인다 ──
         # 슬리브 배분(50:50 등)은 **고정 자산을 뺀 나머지**에 대한 비율이다. 고정 자산은
@@ -1621,7 +1628,9 @@ def _simulate_mix(
     return {"curve": pd.Series(curve).sort_index(), "values": values, "cash": cash}
 
 
-def _value_account(account: dict[str, Any], krw_rate: float, price_hint: dict[str, float] | None = None) -> None:
+def _value_account(
+    account: dict[str, Any], krw_rate: float, price_hint: dict[str, float] | None = None, *, as_of: str | None = None
+) -> None:
     """계좌 보유를 원화로 평가해 ``total_assets``·``stock_value``·고정 자산 몫을 채운다.
 
     운용 현황과 백테스트가 **같은 총자산**을 봐야 한다 — 백테스트도 이 돈으로 돌리기
@@ -1641,6 +1650,8 @@ def _value_account(account: dict[str, Any], krw_rate: float, price_hint: dict[st
         for ticker, frame in load_cached_frames_bulk_from_all_ticker_types(missing).items():
             if frame is None or frame.empty or "Close" not in frame.columns:
                 continue
+            if as_of is not None:
+                frame = frame.loc[:as_of]
             close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
             if not close.empty:
                 price_by_ticker[ticker] = float(close.iloc[-1])
