@@ -188,6 +188,7 @@ def refresh_us_etf_market_cache() -> int:
 
     today = pd.Timestamp.now(tz="America/New_York").tz_localize(None).normalize()
     bases = {n: today - pd.DateOffset(months=n) for n in (1, 2, 3)}
+    week_bases = {n: today - pd.DateOffset(weeks=n) for n in (1, 2)}
 
     def _return_pct(now_val: float, base_close: float | None) -> float | None:
         if base_close in (None, 0) or pd.isna(base_close):
@@ -206,6 +207,7 @@ def refresh_us_etf_market_cache() -> int:
         prev_close = float(closes.iloc[-2]) if len(closes) >= 2 else None
         volumes = pd.to_numeric(frame.get("Volume"), errors="coerce").dropna()
         base_closes = {n: closes.asof(base) for n, base in bases.items()}
+        week_closes = {n: closes.asof(base) for n, base in week_bases.items()}
         rows.append(
             {
                 "ticker": ticker,
@@ -213,6 +215,8 @@ def refresh_us_etf_market_cache() -> int:
                 "exchange": by_ticker[ticker]["exchange"],
                 "current_price": round(now_val, 4),
                 "daily_change_pct": _return_pct(now_val, prev_close),
+                "return_1w_pct": _return_pct(now_val, week_closes[1]),
+                "return_2w_pct": _return_pct(now_val, week_closes[2]),
                 "return_1m_pct": _return_pct(now_val, base_closes[1]),
                 "return_2m_pct": _return_pct(now_val, base_closes[2]),
                 "return_3m_pct": _return_pct(now_val, base_closes[3]),
