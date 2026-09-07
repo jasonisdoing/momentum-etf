@@ -265,8 +265,11 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None) -> d
 
     def mark_exits(price_of) -> None:
         """**장중 잠정 종가**로 청산 여부를 다시 본다 — 확정 판정은 엔진 값을 쓴다.
-        price_of 가 None 을 돌려주면 판정하지 않는다."""
+        price_of 가 None 을 돌려주면 판정하지 않는다. 어제 확정된 매도(오늘 체결 예정,
+        fill_date 있음)는 다시 판정하지 않는다 — 잠정으로 덮으면 오늘 할 매도가 내일로 밀린다."""
         for held in holdings:
+            if held.get("fill_date"):
+                continue
             price = price_of(held["ticker"])
             if price is None:
                 continue
@@ -330,12 +333,18 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None) -> d
         # 그 결과를 반영하지 않으면 마감 후 배치가 돌 때까지(한국은 16시 이후) 하루 종일
         # '진입 예정' 으로 남아 실제 계좌와 어긋난다.
         session = str(quotes["traded_at"])[:10]
+        # 어제 확정 판정의 체결일은 **오늘**이다. 체결가(시가)를 모르는 종목(ETF 등)은 체결로
+        # 처리하지 않는 대신, 확정 판정을 잠정 재판정으로 덮지 않고 오늘 체결 예정으로 남긴다.
+        confirmed_fill = _next_session(pool, last)
         # ① 청산 — 오늘 시가에 나갔다. 보유일은 청산 신호가 난 어제까지로 세므로 그대로 쓴다.
-        #    시가를 모르는 종목(ETF 등)은 체결로 처리하지 않고 그대로 둔다.
         stayed = []
         for held in holdings:
             open_px = (quotes["by_ticker"].get(held["ticker"]) or {}).get("open")
-            if held.get("status") != "sell" or not open_px:
+            if held.get("status") != "sell":
+                stayed.append(held)
+                continue
+            if not open_px:
+                held["fill_date"] = confirmed_fill
                 stayed.append(held)
                 continue
             simulated["exited_today"].append(
@@ -357,13 +366,18 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None) -> d
         # ② 남은 보유의 보유일을 하루 늘린다. 백테스트가 매긴 값은 마지막 확정 거래일
         #    기준이고, 오늘은 그 다음 거래일이다. 이걸 안 하면 어제 산 종목이 계속 '진입' 으로 보인다.
         for held in holdings:
+            if held.get("fill_date"):
+                continue  # 확정 매도 예정 — 보유일은 청산 신호가 난 어제까지다
             held["days"] = int(held["days"]) + 1
             held["is_new"] = False
 
-        # ③ 진입 — 어제 종가로 확정된 목록이 오늘 시가에 체결됐다.
+        # ③ 진입 — 어제 종가로 확정된 목록이 오늘 시가에 체결됐다. 시가를 모르는 종목은
+        #    체결로 처리하지 않고 **오늘 체결 예정**으로 남긴다 — 잠정 재선정이 대체하지 못한다.
+        pending_entries: list[dict[str, Any]] = []
         for row in entries:
             open_px = (quotes["by_ticker"].get(row["ticker"]) or {}).get("open")
             if not open_px:
+                pending_entries.append({**row, "fill_date": confirmed_fill})
                 continue
             holdings.append(
                 {
@@ -419,11 +433,17 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None) -> d
                 exit_ma_last[held["ticker"]] = live_line
         mark_exits(lambda ticker: (quotes["by_ticker"].get(ticker) or {}).get("price"))
         attach_exit_ma_gap()
-        # 장중 판정은 **오늘 잠정 종가** 기준이라 확정이 아니다. 종가가 바뀌면 결과도 바뀌므로
-        # 화면·합성이 '(예상)' 으로 구분할 수 있게 표시한다(모멘텀의 `is_exit_forecast` 와 같은 뜻).
+        # 장중 판정은 **오늘 잠정 종가** 기준이라 종가가 확정되기 전까지 바뀔 수 있다.
+        # 어제 확정된 매도(fill_date 있음)는 잠정이 아니므로 표시 플래그에서 제외한다.
         for held in holdings:
-            held["is_exit_forecast"] = held.get("status") == "sell"
-        entries = pick_entries()
+            held["is_exit_forecast"] = held.get("status") == "sell" and not held.get("fill_date")
+        # 어제 확정된 진입(오늘 체결 예정)이 자리를 먼저 차지하고, 남는 자리만 잠정으로 채운다.
+        picked = pick_entries()
+        pending_tickers = {row["ticker"] for row in pending_entries}
+        free_after_pending = max(len(picked) - len(pending_entries), 0)
+        entries = pending_entries + [row for row in picked if row["ticker"] not in pending_tickers][
+            :free_after_pending
+        ]
 
     else:
         # 장중으로 인정되지 않는 구간(장전, 또는 ETF 처럼 체결 시각을 안 주는 종목).

@@ -280,13 +280,16 @@ def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
 
 
 def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> SlotState:
-    held = list(raw["target_holdings"])
-    # 빈 슬롯을 채울 진입 예정 — 다음 시가에 사므로 목표에 포함한다. 매도 예정(이탈·손절)
+    # 각 전략 화면과 **같은 라이브 반영본**을 쓴다(AGENTS.md §10-6) — 장중에는 실시간
+    # 마지막 봉 기준의 판정이고, 종가가 확정되면 백테스트와 같다. 확정 스냅샷(target_*)은
+    # 화면=엔진 검증 테스트가 쓴다.
+    held = list(raw["holdings"])
+    # 빈 슬롯을 채울 진입 예정 — 다음 시가에 사므로 목표에 포함한다. 매도 예정(이탈)
     # 종목은 같은 시가에 슬롯이 비므로 빈 슬롯으로 센다 — 엔진의 pick_entries 와 같은
     # 계산이라 신고가 화면의 '진입 예정' 과 어긋나지 않는다.
     exiting_count = sum(1 for row in held if str(row.get("status")) == "sell")
     free = max(top_n - (len(held) - exiting_count), 0)
-    planned = list(raw["target_entries"])[:free]
+    planned = list(raw["planned_entries"])[:free]
 
     targets: list[dict[str, Any]] = []
     for row in held:
@@ -313,6 +316,8 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
                 # 차트의 진입 화살표용.
                 "entry_date": row.get("entry_date"),
                 "entry_price": row.get("entry_price"),
+                # 행별 체결일 — 어제 확정 판정(오늘 체결)과 오늘 잠정 판정(내일 체결)을 가른다.
+                "fill_date": row.get("fill_date"),
                 "is_exiting": exiting,
                 "drift_pct": float(weight) if weight is not None else None,
             }
@@ -335,6 +340,7 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
                 # 아직 안 샀다.
                 "entry_date": None,
                 "entry_price": None,
+                "fill_date": row.get("fill_date"),
                 "is_exiting": False,
                 "drift_pct": row.get("sleeve_weight_pct"),
             }

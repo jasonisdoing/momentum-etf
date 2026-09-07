@@ -9,6 +9,8 @@
 4. 자리 배분: 동시 보유 상한 top_n, 균등 배분(정수 주수).
    자리가 꽉 차 있으면 더 좋은 후보가 와도 **교체하지 않는다** — 신고가와 같은 결론이다.
 5. ADR 하한: 그날 시장 ADR 이 하한 미만이면 **신규 진입만** 건너뛴다. 보유는 그대로 둔다.
+6. 장중 화면: 실시간 가격을 **마지막 봉**으로 쓴 같은 신호 계산으로 판정을 보여준다
+   (AGENTS.md §10-6). 규칙은 그대로고 입력만 잠정이라, 종가가 확정되면 백테스트와 일치한다.
 
 예전에는 주 1회 교체(판정일 종가 → 다음 주 첫 거래일 시가)에 '자격 유지' 규칙을 얹고,
 ADR 만 주중에 매일 봐서 하한 미달이면 전량 매도했다. 주간 전략에 일간 예외가 붙은 꼴이라
@@ -256,9 +258,128 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None) -> d
         for ticker in simulated["planned_entries"]
         if ticker in row_by_ticker
     ]
-    # 실시간 표시·장중 예상이 기준일 목표의 가격과 판정을 바꾸지 못하게 분리한다.
+    # 실시간 표시·장중 판정이 기준일 목표의 가격과 판정을 바꾸지 못하게 분리한다.
     target_holdings = [dict(row) for row in holdings]
     target_entries = [dict(row) for row in entries]
+    for held in holdings:
+        held["is_exit_forecast"] = False
+
+    if quotes["live"]:
+        # 장이 열려 있으면 위 확정 판정(어제 종가 기준)의 진입·청산은 오늘 시가에 이미
+        # 체결됐다. 반영하지 않으면 마감 후 배치가 돌 때까지 '예정'으로 남아 실계좌와 어긋난다.
+        # (신고가와 같은 규칙 — 시가를 모르는 종목은 체결로 처리하지 않는다.)
+        session = str(quotes["traded_at"])[:10]
+        # 어제 확정 판정의 체결일은 **오늘**이다. 체결가(시가)를 모르는 종목(ETF 등)은 체결로
+        # 처리하지 않는 대신, 확정 판정을 잠정 재판정으로 덮지 않고 오늘 체결 예정으로 남긴다
+        # — 그러지 않으면 오늘 할 매도가 내일로 하루 밀려 보인다.
+        confirmed_fill = _next_session(pool, last)
+        stayed = []
+        for held in holdings:
+            open_px = (quotes["by_ticker"].get(held["ticker"]) or {}).get("open")
+            if held.get("status") != "sell":
+                stayed.append(held)
+                continue
+            if not open_px:
+                held["fill_date"] = confirmed_fill
+                stayed.append(held)
+                continue
+            exited_today.append(
+                {
+                    "ticker": held["ticker"],
+                    "name": held["name"],
+                    "industry": held["industry"],
+                    "entry_date": held["entry_date"],
+                    "entry_price": held["entry_price"],
+                    "exit_date": session,
+                    "exit_price": float(open_px),
+                    "return_pct": round((float(open_px) / held["entry_price"] - 1) * 100, 2),
+                    "days": held["days"],
+                    "reason": held.get("exit_reason") or "이탈",
+                }
+            )
+        holdings[:] = stayed
+        # 남은 보유의 보유일을 하루 늘린다 — 백테스트 값은 마지막 확정 거래일 기준이다.
+        # 확정 매도 예정으로 남긴 행은 제외한다(보유일은 청산 신호가 난 어제까지다).
+        for held in holdings:
+            if held.get("fill_date"):
+                continue
+            held["days"] = int(held["days"]) + 1
+            held["is_new"] = False
+        # 어제 종가로 확정된 진입이 오늘 시가에 체결됐다. 시가를 모르는 종목은 체결로
+        # 처리하지 않고 **오늘 체결 예정**으로 남긴다 — 잠정 재선정이 대체하지 못한다.
+        pending_entries: list[dict[str, Any]] = []
+        for row in entries:
+            open_px = (quotes["by_ticker"].get(row["ticker"]) or {}).get("open")
+            if not open_px:
+                pending_entries.append({**row, "fill_date": confirmed_fill})
+                continue
+            holdings.append(
+                {
+                    "ticker": row["ticker"],
+                    "name": row["name"],
+                    "industry": row["industry"],
+                    "entry_date": session,
+                    "entry_price": float(open_px),
+                    "price": float(open_px),
+                    "return_pct": 0.0,
+                    "days": 0,
+                    "is_new": True,
+                    "status": "hold",
+                    "exit_reason": None,
+                }
+            )
+
+        # ── 장중 판정 — 실시간 가격을 **마지막 봉**으로 쓴 같은 신호 계산(compute_signals)이다.
+        # 규칙·수식은 백테스트와 동일하고 입력(마지막 봉)만 잠정이다. 종가가 확정되기 전까지
+        # 뒤집힐 수 있고, 마감에 가까울수록 확정에 수렴한다(AGENTS.md §10-6).
+        session_ts = pd.Timestamp(session)
+        live_prices = {t: q["price"] for t, q in quotes["by_ticker"].items() if t in close_df.columns}
+        eff_close = close_df.copy()
+        eff_close.loc[session_ts] = pd.Series(live_prices).reindex(eff_close.columns)
+        eff = compute_signals(
+            {"close": eff_close}, int(settings["short_ma_days"]), int(settings["long_ma_days"])
+        )
+        eff_short = eff["short"].loc[session_ts]
+        eff_long = eff["long"].loc[session_ts]
+        eff_eligible = eff["eligible"].loc[session_ts]
+        eff_exit = eff["exit"].loc[session_ts]
+
+        # 이격·자격을 잠정 봉 기준으로 갱신한다. 실시간 시세가 없는 종목은 판정 불가라
+        # 확정값을 유지한다(엔진의 known 규칙과 같다).
+        for row in rows:
+            ticker = row["ticker"]
+            if ticker not in live_prices:
+                continue
+            short_value, long_value = eff_short.get(ticker), eff_long.get(ticker)
+            if pd.notna(short_value):
+                row["short_gap_pct"] = round(float(short_value), 2)
+            if pd.notna(long_value):
+                row["long_gap_pct"] = round(float(long_value), 2)
+            row["eligible"] = bool(eff_eligible.get(ticker, False))
+        rows.sort(key=lambda row: row["long_gap_pct"], reverse=True)
+
+        # 잠정 청산 — 오늘 잠정 종가로 자격을 잃은 보유. 체결은 어차피 다음 거래일 시가라
+        # 종가 확정 후의 최종 판정이 실제 행동을 정한다.
+        # 어제 확정된 매도(오늘 체결 예정, fill_date 있음)는 다시 판정하지 않는다 —
+        # 이미 확정된 판정을 잠정으로 덮으면 오늘 할 매도가 내일로 밀려 보인다.
+        for held in holdings:
+            if held.get("fill_date") or held["ticker"] not in live_prices:
+                continue
+            hit = bool(eff_exit.get(held["ticker"], False))
+            held["status"] = "sell" if hit else "hold"
+            held["exit_reason"] = "이탈" if hit else None
+            held["is_exit_forecast"] = hit
+        # 잠정 진입 — 오늘 ADR 게이트가 열려 있으면 빈 자리를 잠정 우선순위로 채운다.
+        # 어제 확정된 진입(오늘 체결 예정)이 자리를 먼저 차지하고, 남는 자리만 잠정으로 채운다.
+        held_now = {h["ticker"] for h in holdings} | {row["ticker"] for row in pending_entries}
+        if entry_blocked(session_ts):
+            entries = list(pending_entries)
+        else:
+            planned = sum(1 for h in holdings if h.get("status") == "sell")
+            free = max(slots - (len(holdings) - planned) - len(pending_entries), 0)
+            entries = pending_entries + [
+                row for row in rows if row["eligible"] and row["ticker"] not in held_now
+            ][:free]
 
     # ── 지난 세션의 청산분은 버린다 ─────────────────────────────────────────
     # 그 세션이 이미 마감했으면 보유 표에 있을 이유가 없다 — 내역은 「체결」 탭에 남는다.

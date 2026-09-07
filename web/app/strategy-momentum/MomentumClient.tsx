@@ -124,6 +124,8 @@ type PlanRow = {
   exit_price: number | null;
   /** 청산일 — 이탈 행에만 있다. 상태 문구에 붙인다. */
   exit_date?: string | null;
+  /** 행별 체결일 — 어제 확정 판정(오늘 체결)과 오늘 잠정 판정(내일 체결)을 가른다. */
+  fill_date?: string | null;
   entry_date: string | null;
   entry_price: number | null;
   return_pct: number | null;
@@ -748,7 +750,7 @@ export function MomentumClient() {
   // 보유 표 — 신고가와 같은 구성(공용 빌더). 모멘텀 고유는 이평선 이격 둘이다.
   const holdingColumns = useMemo<ColDef<PlanRow>[]>(
     () => [
-      slotStatusColumn<PlanRow>({ live: Boolean(positions?.live), fillDay: positions?.next_session }),
+      slotStatusColumn<PlanRow>({ fillDay: positions?.next_session }),
       marketCapRankColumn<PlanRow>("market_cap_rank", !hasMarketCap),
       highDrawdownColumn<PlanRow>("high_drawdown_pct"),
       {

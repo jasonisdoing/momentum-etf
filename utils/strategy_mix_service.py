@@ -903,6 +903,8 @@ _SLOT_ROW_FIELDS: tuple[str, ...] = (
     "held_label",
     "entry_date",
     "entry_price",
+    # 행별 체결일 — 어제 확정 판정(오늘 체결)과 오늘 잠정 판정(내일 체결)을 가른다.
+    "fill_date",
 )
 
 
@@ -1274,6 +1276,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
                 # 차트의 진입 화살표 — 슬리브마다 편입 시점이 다르므로 슬롯별로 들고 간다.
                 row[f"{key}_entry_date"] = None
                 row[f"{key}_entry_price"] = None
+                row[f"{key}_fill_date"] = None
             row["price"] = target.get("price")
             row["change_pct"] = target.get("change_pct")
             by_ticker[ticker] = row
@@ -1299,6 +1302,8 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
             row[f"{source}_entry_date"] = str(target["entry_date"])[:10]
         if target.get("entry_price") is not None:
             row[f"{source}_entry_price"] = float(target["entry_price"])
+        if target.get("fill_date"):
+            row[f"{source}_fill_date"] = str(target["fill_date"])[:10]
 
     # 매도 예정(자격 상실·이탈)은 목표 비중 0 이다 — 다음 시가에 전량 팔고 그 슬롯은
     # 다음 교체까지 현금이다. 비중을 남겨두면 팔아야 할 종목의 매매수량이 0 으로 보인다.
