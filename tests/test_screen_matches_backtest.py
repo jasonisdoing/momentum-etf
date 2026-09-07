@@ -465,23 +465,115 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
                 "weight_pct": 33,
             },
         ]
-        groups = build_action_groups(account_rows, actions, "2026-09-07", currency="USD")
+        groups = build_action_groups(
+            account_rows,
+            actions,
+            "2026-09-07",
+            currency="USD",
+            target_schedule={
+                "2026-09-04": {"quantities": {"T2": 1}, "weights": {"T2": 33}},
+                "2026-09-07": {"quantities": {"T2": 1, "T4": 1}, "weights": {"T2": 33, "T4": 33}},
+            },
+        )
         items = {item["ticker"]: item for group in groups for item in group["items"]}
         for ticker in ("T1", "T2"):
             self.assertEqual(items[ticker]["date"], result["as_of"])
             self.assertNotIn("예상", items[ticker]["title"] + items[ticker]["text"])
         self.assertEqual(items["T4"]["date"], "2026-09-07")
         self.assertIn("예상", items["T4"]["title"])
-        # 날짜별 수량이 없는 합산 목표를 서로 다른 체결일 중 하나로 임의 배정하지 않는다.
-        actions["slots"]["b"] = {
-            "label": "B",
-            "live": True,
-            "sells": [],
-            "entries": [{"ticker": "T2"}],
-            "exit_forecast": [],
+        # 같은 종목의 날짜별 목표를 슬리브 배분에서 산출한다. 실제 보유는 차이 계산에만 쓴다.
+        from core.strategy.mix.targets import dated_target_shares, sleeve_target_shares
+
+        for first_plan, second_plan, held_qty, expected_trades in [
+            ("buy", "buy", 0, [2, 3]),
+            ("sell", "sell", 5, [-2, -3]),
+            ("buy", "sell", 3, [2, -3]),
+            ("sell", "buy", 2, [-2, 3]),
+        ]:
+            with self.subTest(first=first_plan, second=second_plan):
+                targets = {
+                    key: [
+                        {
+                            "ticker": "SAME",
+                            "price": 10.0,
+                            "drift_pct": 100.0,
+                            "plan": plan,
+                            "is_exiting": plan == "sell",
+                            "fill_date": date,
+                        }
+                    ]
+                    for key, plan, date in [("a", first_plan, "2026-09-04"), ("b", second_plan, None)]
+                }
+                budgets = {"a": 20.0, "b": 30.0}
+                schedule = dated_target_shares(targets, budgets, 1.0, 50.0, "2026-09-07")
+                final = sleeve_target_shares(targets, budgets, 1.0)
+                self.assertEqual(schedule["2026-09-07"]["quantities"], final)
+                event_slots = {}
+                for key, plan in [("a", first_plan), ("b", second_plan)]:
+                    event_slots[key] = {
+                        "label": key,
+                        "live": True,
+                        "exit_forecast": [],
+                        "entries": [{"ticker": "SAME", "fill_date": targets[key][0]["fill_date"]}]
+                        if plan == "buy"
+                        else [],
+                        "sells": [{"ticker": "SAME", "fill_date": targets[key][0]["fill_date"], "reason": "이탈"}]
+                        if plan == "sell"
+                        else [],
+                    }
+                rows = [
+                    {
+                        "ticker": "SAME",
+                        "price": 10.0,
+                        "held_quantity": held_qty,
+                        "target_quantity": final.get("SAME", 0),
+                        "weight_pct": 0,
+                    }
+                ]
+                groups = build_action_groups(
+                    rows, {"slots": event_slots}, "2026-09-07", target_schedule=schedule, currency="USD"
+                )
+                orders = [item for group in groups for item in group["items"]]
+                self.assertEqual(
+                    [item["quantity"] * (1 if item["side"] == "buy" else -1) for item in orders], expected_trades
+                )
+                self.assertEqual([item["date"] for item in orders], ["2026-09-04", "2026-09-07"])
+                self.assertEqual(len({item["key"] for item in orders}), 2)
+                self.assertNotIn("예상", orders[0]["text"])
+                self.assertIn("예상", orders[1]["text"])
+                self.assertEqual(held_qty + sum(expected_trades), final.get("SAME", 0))
+                # 앞선 목표를 이미 맞췄다면 다음 날짜 주문만 남고 키·수량도 유지된다.
+                rows[0]["held_quantity"] = schedule["2026-09-04"]["quantities"].get("SAME", 0)
+                remaining = build_action_groups(
+                    rows, {"slots": event_slots}, "2026-09-07", target_schedule=schedule, currency="USD"
+                )
+                remaining_items = [item for group in remaining for item in group["items"]]
+                self.assertEqual(len(remaining_items), 1)
+                self.assertEqual(remaining_items[0]["key"], orders[1]["key"])
+                self.assertEqual(remaining_items[0]["quantity"], orders[1]["quantity"])
+
+        # 같은 날짜의 반대 방향은 목표 합산에서 상계하며, 순변화 0이면 액션이 없다.
+        same_day = {
+            "a": [{"ticker": "SAME", "price": 10, "drift_pct": 100, "plan": "buy", "is_exiting": False}],
+            "b": [{"ticker": "SAME", "price": 10, "drift_pct": 100, "plan": "sell", "is_exiting": True}],
         }
-        with self.assertRaisesRegex(ValueError, "체결일이 다릅니다"):
-            build_action_groups(account_rows, actions, "2026-09-07", currency="USD")
+        schedule = dated_target_shares(same_day, {"a": 20, "b": 20}, 1, 40, "2026-09-07")
+        self.assertEqual(
+            build_action_groups(
+                [{"ticker": "SAME", "price": 10, "held_quantity": 2, "target_quantity": 2}],
+                {"slots": {}},
+                "2026-09-07",
+                target_schedule=schedule,
+                currency="USD",
+            ),
+            [],
+        )
+        # 슬리브별로 반올림하지 않고 날짜마다 중복 종목을 합친 뒤 기존 정수 배분을 쓴다.
+        for key, target in same_day.items():
+            target[0].update(price=7, plan="buy", is_exiting=False, fill_date="2026-09-04" if key == "a" else None)
+        schedule = dated_target_shares(same_day, {"a": 20, "b": 30}, 1, 50, "2026-09-07")
+        self.assertEqual(schedule["2026-09-04"]["quantities"], {"SAME": 2})
+        self.assertEqual(schedule["2026-09-07"]["quantities"], {"SAME": 7})
 
     def test_mark_engine_statuses_labels_without_judging(self):
         from core.strategy.intraday import mark_engine_statuses
