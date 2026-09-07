@@ -351,6 +351,7 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
                 "ticker": str(row["ticker"]).strip(),
                 "name": row.get("name") or row["ticker"],
                 "reason": row.get("exit_reason") or "이탈",
+                "fill_date": row.get("fill_date"),
                 "return_pct": row.get("return_pct"),
             }
             for row in held
@@ -364,6 +365,7 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
                 "price": row.get("price"),
                 "change_pct": row.get("change_pct"),
                 "value_mult": row.get("value_mult"),
+                "fill_date": row.get("fill_date"),
             }
             for row in planned
         ],

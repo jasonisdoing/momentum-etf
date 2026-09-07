@@ -1,6 +1,6 @@
 """모멘텀 전략 튜닝 — 설정 항목들의 범위 조합을 한 번에 백테스트해 비교한다.
 
-화면 '튜닝' 섹션용. 축(화면 순서): 선정 이평(단기·장기) · ADR 하한.
+화면 '튜닝' 섹션용. 축(화면 순서): 선정 이평(단기·장기) · 진입 문턱(변동성 배수) · ADR 하한.
 종목 수는 풀 설정(`pool_settings.TOP_N_HOLD`) 고정, 업종 상한은 폐기, 교체 규칙(자격 유지)과
 주중 이탈(사용)은 전략에 고정 — 튜닝은 "그 시장이 어떤 이동평균에 반응하는가"를 재는 용도로만
 쓴다(종목 수까지 돌리면 과적합 탐색이 된다).
@@ -16,7 +16,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import ADR_FLOOR_OPTIONS
+from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS
 from utils.momentum_service import (
     LONG_MA_OPTIONS,
     SHORT_MA_OPTIONS,
@@ -35,12 +35,21 @@ from utils.strategy_tuning import (
     tuning_cancelled,
 )
 
-TUNING_AXES = ("short_ma_days", "long_ma_days", "adr_floor")
+TUNING_AXES = ("short_ma_days", "long_ma_days", "entry_vol_mult", "adr_floor")
 
 
 def _checked_optional_ints(values: list[Any], options: tuple, label: str) -> list[Any]:
     """None(없음)이 섞인 정수 선택지 축 검증."""
     cleaned = list(dict.fromkeys(None if v in (None, "", "none") else int(v) for v in values))
+    bad = [v for v in cleaned if v not in options]
+    if not cleaned or bad:
+        raise ValueError(f"'{label}' 범위가 올바르지 않습니다: {bad or cleaned}")
+    return cleaned
+
+
+def _checked_optional_floats(values: list[Any], options: tuple, label: str) -> list[Any]:
+    """None(없음)이 섞인 실수 선택지 축 검증."""
+    cleaned = list(dict.fromkeys(None if v in (None, "", "none") else float(v) for v in values))
     bad = [v for v in cleaned if v not in options]
     if not cleaned or bad:
         raise ValueError(f"'{label}' 범위가 올바르지 않습니다: {bad or cleaned}")
@@ -102,11 +111,12 @@ def _preload(pool: str) -> dict[str, Any]:
 
 def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
     """(단기, 장기) 쌍 하나의 조합 — 별도 프로세스에서 돈다."""
-    months, base, short, long, adr_floors = task
+    months, base, short, long, entry_mults, adr_floors = task
     from core.strategy.momentum.signals import compute_signals
     from utils.momentum_backtest import run_backtest
 
-    # 신호는 이평선 쌍에만 의존한다 — 이 쌍의 전 조합(ADR 하한)이 하나를 나눠 쓴다.
+    # 신호는 이평선 쌍에만 의존한다 — 이 쌍의 전 조합(진입 문턱 × ADR 하한)이 하나를 나눠 쓴다.
+    # 진입 문턱은 run_backtest 안에서 같은 신호에 얹으므로 여기서 조합별로 만들지 않는다.
     context = {
         "pool": base["pool"],
         "universe": _PRELOAD["universe"],
@@ -117,10 +127,10 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
     }
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
-    for adr_floor in adr_floors:
+    for entry_vol_mult, adr_floor in ((m, f) for m in entry_mults for f in adr_floors):
         if tuning_cancelled():
             break
-        combo = dict(base, short_ma_days=short, long_ma_days=long, adr_floor=adr_floor)
+        combo = dict(base, short_ma_days=short, long_ma_days=long, entry_vol_mult=entry_vol_mult, adr_floor=adr_floor)
         try:
             result = run_backtest(months, combo, context)
         except ValueError as error:  # 장기 이평이 길어 기간이 모자라는 조합 — 그 이평 쌍은 통째로 건너뛴다
@@ -132,7 +142,12 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
         returns = cumulative_to_returns(daily.set_index("date")["strategy_pct"])
         rows.append(
             summarize_combo(
-                {"short_ma_days": short, "long_ma_days": long, "adr_floor": adr_floor},
+                {
+                    "short_ma_days": short,
+                    "long_ma_days": long,
+                    "entry_vol_mult": entry_vol_mult,
+                    "adr_floor": adr_floor,
+                },
                 returns,
                 {
                     "trade_count": result["trade_count"],
@@ -178,13 +193,14 @@ def _stream_tuning(
     base = validate_settings(settings or load_settings())
     shorts = _checked(ranges.get("short_ma_days", []), SHORT_MA_OPTIONS, "단기 이평")
     adr_floors = _checked_optional_ints(ranges.get("adr_floor", []), ADR_FLOOR_OPTIONS, "ADR 하한")
+    entry_mults = _checked_optional_floats(ranges.get("entry_vol_mult", []), ENTRY_VOL_MULT_OPTIONS, "진입 문턱")
     longs = _checked(ranges.get("long_ma_days", []), LONG_MA_OPTIONS, "장기 이평")
     ma_pairs = [(short, long) for short in shorts for long in longs if short < long]
     if not ma_pairs:
         raise ValueError("단기 이평이 장기 이평보다 작은 조합이 없습니다.")
 
-    tasks = [(months, base, short, long, adr_floors) for short, long in ma_pairs]
-    combos_per_group = len(adr_floors)
+    tasks = [(months, base, short, long, entry_mults, adr_floors) for short, long in ma_pairs]
+    combos_per_group = len(entry_mults) * len(adr_floors)
     total_combos = len(tasks) * combos_per_group
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []

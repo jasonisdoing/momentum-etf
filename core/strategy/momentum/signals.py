@@ -7,6 +7,27 @@ import pandas as pd
 from core.strategy.scoring import calculate_maps_score, hold_eligible, rank_score
 from utils.moving_averages import calculate_moving_average
 
+# 진입 문턱의 변동성 창(거래일) — 일간 수익률 표준편차(%). 문턱 = 배수 × 이 값.
+ENTRY_VOL_WINDOW = 20
+
+
+def entry_signal(
+    close_df: pd.DataFrame, signals: dict[str, pd.DataFrame], entry_vol_mult: float | None
+) -> pd.DataFrame:
+    """진입 자격 — 보유 자격(`eligible`)에 변동성 문턱을 얹는다. **청산 판정은 불변.**
+
+    문턱 = ``entry_vol_mult`` × 그 종목의 20일 일간 변동성(%). 단기·장기 이격이 모두
+    문턱 이상이어야 진입한다 — 청산선(0선) 바로 위의 종목을 사서 하루 만에 되파는 왕복을
+    막는다. 진입·청산 기준선이 달라지는 히스테리시스라, 보유 유지는 기존 0선 그대로다.
+    None 이면 문턱 없음(진입 = 보유 자격). 변동성을 못 잰 종목(워밍업)은 진입 불가 —
+    값을 추정하지 않는다.
+    """
+    if entry_vol_mult is None:
+        return signals["eligible"]
+    volatility = close_df.pct_change().rolling(ENTRY_VOL_WINDOW).std() * 100
+    floor = float(entry_vol_mult) * volatility
+    return signals["eligible"] & (signals["long"] > floor) & (signals["short"] >= floor) & volatility.notna()
+
 
 def compute_signals(panel: dict[str, pd.DataFrame], short_ma_days: int, long_ma_days: int) -> dict[str, pd.DataFrame]:
     """이평선 두 개로 만드는 신호 표(행 = 거래일, 열 = 종목) — 백테스트·화면이 같은 값을 본다.

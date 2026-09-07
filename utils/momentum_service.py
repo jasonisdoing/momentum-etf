@@ -30,7 +30,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import ADR_FLOOR_OPTIONS
+from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS
 from core.strategy.scoring import (
     compute_ma_disparity,
     rank_score,
@@ -184,6 +184,13 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     if adr_floor is not None and adr_market_of_pool(pool) is None:
         raise ValueError("ADR 하한을 쓰려면 /pools-settings 에서 이 풀의 시장 레짐 지수를 먼저 설정하세요.")
 
+    # 진입 문턱 — 이격 ≥ 배수 × 20일 변동성일 때만 진입 자격. None = 문턱 없음(청산은 항상 0선).
+    raw_mult = settings.get("entry_vol_mult")
+    entry_vol_mult = None if raw_mult in (None, "", "none") else float(raw_mult)
+    if entry_vol_mult not in ENTRY_VOL_MULT_OPTIONS:
+        allowed = ", ".join("없음" if v is None else f"{v:g}" for v in ENTRY_VOL_MULT_OPTIONS)
+        raise ValueError(f"'entry_vol_mult' 는 {allowed} 중 하나여야 합니다 (받은 값: {raw_mult}).")
+
     return {
         "pool": pool,
         "start_date": validate_start_date(settings.get("start_date")),
@@ -192,6 +199,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "short_ma_days": short_ma_days,
         "long_ma_days": long_ma_days,
         "adr_floor": adr_floor,
+        "entry_vol_mult": entry_vol_mult,
     }
 
 
@@ -238,6 +246,7 @@ _POOL_KEY_BY_SETTING: dict[str, str] = {
     "short_ma_days": "SHORT_MA_DAYS",
     "long_ma_days": "LONG_MA_DAYS",
     "adr_floor": "ADR_FLOOR",
+    "entry_vol_mult": "ENTRY_VOL_MULT",
 }
 
 
@@ -246,14 +255,15 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
     result: dict[str, Any] = {}
     for setting_key, pool_key in _POOL_KEY_BY_SETTING.items():
         if pool_key not in config:
-            # None 을 값으로 갖는 항목(ADR 하한 등)은 키 자체는 있어야 한다.
-            if setting_key in ("adr_floor", "start_date"):
+            # None 을 값으로 갖는 항목(ADR 하한·진입 문턱 등)은 키 자체는 있어야 한다.
+            if setting_key in ("adr_floor", "start_date", "entry_vol_mult"):
                 continue
             return None
         result[setting_key] = config[pool_key]
     # 없는 선택 항목은 '미설정' 기본값으로 채운다 — 임의 보정이 아니라 스키마 기본이다.
     result.setdefault("start_date", None)
     result.setdefault("adr_floor", default_adr_floor())
+    result.setdefault("entry_vol_mult", ENTRY_VOL_MULT_OPTIONS[0])
     return result
 
 
@@ -320,6 +330,7 @@ _OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
     ("short_ma_days", "단기 이평", SHORT_MA_OPTIONS),
     ("adr_floor", "ADR 하한", ADR_FLOOR_OPTIONS),
     ("long_ma_days", "장기 이평", LONG_MA_OPTIONS),
+    ("entry_vol_mult", "진입 문턱", ENTRY_VOL_MULT_OPTIONS),
 )
 
 
