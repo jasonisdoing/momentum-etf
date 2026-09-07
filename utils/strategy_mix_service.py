@@ -22,7 +22,7 @@ from typing import Any
 
 from config import CACHE_TTL_COMPUTE
 from core.strategy.mix.actions import build_action_groups
-from core.strategy.mix.targets import sleeve_target_shares
+from core.strategy.mix.targets import dated_target_shares
 from utils.cash_model import currency_for_country
 from utils.logger import get_app_logger
 from utils.mix_sleeve import STRATEGY_LABELS, SleeveSpec
@@ -940,11 +940,14 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         # 목표 주수 — 슬리브마다 자기 몫 예산 안에서 배분. 종목·비중은 백테스트 것 그대로다.
         total_assets = float(account.get("total_assets") or 0)
         sleeve_amount_krw = {key: total_assets * shares[key] / 100.0 for key in keys}
-        target_shares = sleeve_target_shares(
+        target_schedule = dated_target_shares(
             {key: state.targets for key, state in states.items()},
             sleeve_amount_krw,
             krw_rate,
+            total_assets,
+            next_trading_day,
         )
+        target_shares = target_schedule[max(target_schedule)]["quantities"]
         account["sell_all"] = _attach_account_targets(
             holdings, account, krw_rate, slot_keys=keys, target_shares=target_shares
         )
@@ -1084,6 +1087,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         payload["actions"],
         next_trading_day,
         currency=currency,
+        target_schedule=target_schedule if account is not None else {},
     )
     # 슬리브별 값을 `slots[키]` 로 모아 내보낸다 — 화면은 슬롯 키를 돌며 읽는다.
     payload["holdings"] = [_holding_payload(row, keys) for row in payload["holdings"]]

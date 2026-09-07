@@ -26,20 +26,6 @@ def _is_forecast(slot: dict[str, Any], event: dict[str, Any]) -> bool:
     return bool(slot.get("live")) and not event.get("fill_date")
 
 
-def _action_date(ticker: str, side: str, slots: dict[str, Any], next_trading_day: str | None) -> str | None:
-    """해당 방향의 엔진 체결일을 따른다. 서로 다른 날짜의 주수를 임의로 합치지 않는다."""
-    event = "entries" if side == "buy" else "sells"
-    dates = {
-        row.get("fill_date") or next_trading_day
-        for slot in slots.values()
-        for row in slot[event]
-        if row["ticker"] == ticker
-    }
-    if len(dates) > 1:
-        raise ValueError(f"{ticker} {side} 주문의 슬리브별 체결일이 다릅니다. 날짜별 목표 수량 분리가 필요합니다.")
-    return next(iter(dates)) if dates else next_trading_day
-
-
 def _action_reasons(ticker: str, side: str, actions: dict[str, Any]) -> list[dict[str, str]]:
     """주문 원인을 추측하지 않고 엔진 이벤트와 배분 일정만 함께 표시한다."""
     reasons = []
@@ -65,6 +51,60 @@ def _action_reasons(ticker: str, side: str, actions: dict[str, Any]) -> list[dic
 
 
 def build_action_groups(
+    holdings: list[dict[str, Any]],
+    actions: dict[str, Any],
+    next_trading_day: str | None,
+    *,
+    target_schedule: dict[str, dict[str, Any]],
+    currency: str = "KRW",
+) -> list[dict[str, Any]]:
+    """날짜별 엔진 목표 차이를 주문으로 만든다. 이후 주문은 앞선 목표 달성을 전제로 한다."""
+    previous = {row["ticker"]: int(row.get("held_quantity") or 0) for row in holdings}
+    groups = []
+    for index, (day, target) in enumerate(sorted(target_schedule.items())):
+        stage_rows = []
+        for source in holdings:
+            if source.get("is_cash") or source.get("is_fixed_asset") or source.get("target_quantity") is None:
+                continue
+            ticker = source["ticker"]
+            quantity = target["quantities"].get(ticker, 0)
+            held = previous.get(ticker, 0)
+            stage_rows.append(
+                {
+                    **source,
+                    "held_quantity": held,
+                    "target_quantity": quantity,
+                    "trade_quantity": quantity - held,
+                    "weight_pct": target["weights"].get(ticker, 0.0),
+                    "is_sell_all": quantity == 0 and held > 0,
+                }
+            )
+        stage_actions = {
+            **actions,
+            "sleeve_rebalance_today": bool(actions.get("sleeve_rebalance_today")) and index == 0,
+            "slots": {
+                key: {
+                    **slot,
+                    **{
+                        event: [row for row in slot[event] if (row.get("fill_date") or next_trading_day) == day]
+                        for event in ("entries", "sells")
+                    },
+                    "engine_trades": slot.get("engine_trades", []) if index == 0 else [],
+                }
+                for key, slot in actions["slots"].items()
+            },
+        }
+        stage_groups = _build_action_group_stage(stage_rows, stage_actions, day, currency=currency)
+        groups.extend(stage_groups)
+        previous = target["quantities"]
+    # 날짜를 키에 포함하면 앞선 주문이 사라진 뒤에도 다음 주문의 키가 유지된다.
+    for group in groups:
+        for item in group["items"]:
+            item["key"] = f"{item['key']}-{item['date']}"
+    return groups
+
+
+def _build_action_group_stage(
     holdings: list[dict[str, Any]],
     actions: dict[str, Any],
     next_trading_day: str | None,
@@ -114,7 +154,7 @@ def build_action_groups(
         if not trade:
             continue
         ticker = row["ticker"]
-        date = _action_date(ticker, "buy" if trade > 0 else "sell", slots, next_trading_day)
+        date = next_trading_day
         reason = sell_reason.get(ticker)
         weight = float(row.get("weight_pct") or 0)
         held = float(row.get("held_quantity") or 0) > 0
@@ -177,7 +217,7 @@ def build_action_groups(
                         else ""
                     )
                 ),
-                "date": _action_date(ticker, "sell", slots, next_trading_day),
+                "date": next_trading_day,
                 "quantity": abs(int(float(row.get("held_quantity") or 0))),
             }
         )
