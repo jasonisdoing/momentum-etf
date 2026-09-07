@@ -119,3 +119,5 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 계좌 설정 `mix_min_adjustment_amount`는 계좌 국가의 현지 통화 금액이다. 미설정 기존 계좌는 0(필터 없음)으로 해석한다. 합성은 `cash_model.currency_for_country`로 통화를 결정하고 슬리브의 국가·통화 일치를 확인한다. 액션 조립에서 전략 이벤트 없는 목표 수량 조정만 걸러 화면·슬랙에 공통 적용한다.
 
 합성 운용 응답의 `currency`·`krw_rate`는 계좌 국가 통화와 평가에 사용한 환율이다. 화면의 총액·평가액·목표액·배분액은 원화 계산값을 해당 환율로 나누어 표시하고, 종목 가격은 원래 현지 통화 값을 표시한다.
+
+모멘텀·신고가 `current_positions`의 `target_holdings`·`target_entries`는 실시간 표시를 적용하기 전 확정 엔진 상태다. 합성 목표는 이 상태만 읽으며, 목표 밖 계좌 종목의 평가도 엔진 기준일까지의 종가로 제한한다.

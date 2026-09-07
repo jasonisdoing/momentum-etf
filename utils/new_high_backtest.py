@@ -321,6 +321,9 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None) -> d
         for ticker in simulated["planned_entries"]
         if ticker in row_by_ticker
     ]
+    # 실시간 표시·장중 예상이 기준일 목표의 가격과 판정을 바꾸지 못하게 분리한다.
+    target_holdings = [dict(row) for row in holdings]
+    target_entries = [dict(row) for row in entries]
 
     if quotes["live"]:
         # 장이 열려 있다는 것은 위에서 고른 진입·청산이 **오늘 시가에 이미 체결됐다**는 뜻이다.
@@ -495,6 +498,8 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None) -> d
         # **이 결과를 만든 값**을 그대로 내려, 저장 전 화면 값과 어긋나지 않게 한다.
         "top_n": int(settings["top_n"]),
         "holdings": holdings,
+        "target_holdings": target_holdings,
+        "target_entries": target_entries,
         # 내일 시가에 살 종목 (자리·자격·우선순위를 모두 적용한 결과).
         "planned_entries": entries,
         # ADR 게이트 — 하한 미설정이면 None. blocked=True 면 오늘은 신규 진입이 없다.

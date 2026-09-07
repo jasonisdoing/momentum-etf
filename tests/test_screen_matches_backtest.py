@@ -77,6 +77,11 @@ class MomentumScreenMatchesBacktest(unittest.TestCase):
             "모멘텀 화면의 보유가 백테스트 마지막 상태와 다릅니다 — 화면이 판정을 다시 하고 있습니다.",
         )
         self.assertEqual(screen["as_of"], simulated["as_of"])
+        # 장중 표시 가격이 바뀌어도 합성의 기준 가격·비중은 엔진과 같아야 한다.
+        engine = {row["ticker"]: row for row in simulated["open_positions"]}
+        for row in screen["target_holdings"]:
+            self.assertEqual(row["price"], engine[row["ticker"]]["price"])
+            self.assertEqual(row["sleeve_weight_pct"], engine[row["ticker"]]["sleeve_weight_pct"])
 
 
 class NewHighScreenMatchesBacktest(unittest.TestCase):
@@ -101,6 +106,11 @@ class NewHighScreenMatchesBacktest(unittest.TestCase):
             "신고가 화면의 보유가 백테스트 마지막 상태와 다릅니다 — 화면이 판정을 다시 하고 있습니다.",
         )
         self.assertEqual(screen["as_of"], simulated["as_of"])
+        # 장중 표시 가격이 바뀌어도 합성의 기준 가격·비중은 엔진과 같아야 한다.
+        engine = {row["ticker"]: row for row in simulated["open_positions"]}
+        for row in screen["target_holdings"]:
+            self.assertEqual(row["price"], engine[row["ticker"]]["price"])
+            self.assertEqual(row["sleeve_weight_pct"], engine[row["ticker"]]["sleeve_weight_pct"])
 
 
 class MixScreenMatchesSleeveBacktests(unittest.TestCase):

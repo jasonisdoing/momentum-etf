@@ -280,13 +280,13 @@ def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
 
 
 def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> SlotState:
-    held = list(raw.get("holdings") or [])
+    held = list(raw["target_holdings"])
     # 빈 슬롯을 채울 진입 예정 — 다음 시가에 사므로 목표에 포함한다. 매도 예정(이탈·손절)
     # 종목은 같은 시가에 슬롯이 비므로 빈 슬롯으로 센다 — 엔진의 pick_entries 와 같은
     # 계산이라 신고가 화면의 '진입 예정' 과 어긋나지 않는다.
     exiting_count = sum(1 for row in held if str(row.get("status")) == "sell")
     free = max(top_n - (len(held) - exiting_count), 0)
-    planned = list(raw.get("planned_entries") or [])[:free]
+    planned = list(raw["target_entries"])[:free]
 
     targets: list[dict[str, Any]] = []
     for row in held:
