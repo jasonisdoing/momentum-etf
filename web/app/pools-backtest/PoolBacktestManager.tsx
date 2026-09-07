@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef, GridOptions } from "ag-grid-community";
 
 import { formatPoolLabel } from "@/lib/pool-label";
@@ -107,6 +107,8 @@ export function PoolBacktestManager() {
   const toast = useToast();
   const [pools, setPools] = useState<PoolOption[]>([]);
   const [poolId, setPoolId] = useState("");
+  /** 마지막 실행 요청 번호 — 풀·조건을 바꿔 다시 실행했을 때 이전 실행의 늦은 응답을 버린다. */
+  const runSequenceRef = useRef(0);
   const [forwardDays, setForwardDays] = useState(5);
   const [months, setMonths] = useState(12);
   const [monthOptions, setMonthOptions] = useState(MONTH_OPTIONS);
@@ -213,6 +215,7 @@ export function PoolBacktestManager() {
     }
     setLoading(true);
     setError(null);
+    const requestSequence = ++runSequenceRef.current;
     try {
       const params = new URLSearchParams({ pool_id: poolId, forward_days: String(forwardDays), months: String(months) });
       if (topN != null) params.set("top_n", String(topN));
@@ -221,13 +224,15 @@ export function PoolBacktestManager() {
       if (holdK != null) params.set("hold_threshold_k", String(holdK));
       const resp = await fetch(`/api/pool-backtest?${params.toString()}`, { cache: "no-store" });
       const payload = (await resp.json()) as BacktestResult & { detail?: string };
+      if (requestSequence !== runSequenceRef.current) return; // 조건을 바꿔 다시 실행한 뒤 도착한 이전 응답
       if (!resp.ok || payload.error) throw new Error(payload.error ?? payload.detail ?? "백테스트에 실패했습니다.");
       setResult(payload);
     } catch (e) {
+      if (requestSequence !== runSequenceRef.current) return;
       setError(e instanceof Error ? e.message : "백테스트에 실패했습니다.");
       setResult(null);
     } finally {
-      setLoading(false);
+      if (requestSequence === runSequenceRef.current) setLoading(false);
     }
   }, [forwardDays, months, poolId, topN, shortMa, longMa, holdK, toast]);
 
