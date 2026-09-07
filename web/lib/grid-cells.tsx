@@ -113,7 +113,9 @@ export function maExitGapColumn<T>(options: {
     headerName: `${label} 이탈`,
     width: MA_EXIT_COLUMN_WIDTH,
     type: "numericColumn",
-    headerTooltip: `현재가가 이탈 이평선(${label})보다 몇 % 위인지. 0에 가까울수록 매도가 가깝다.`,
+    headerTooltip:
+      `현재가가 이탈 이평선(${label})보다 몇 % 위인지. 0에 가까울수록 매도가 가깝다. ` +
+      "장중에는 실시간 가격을 마지막 봉으로 쓴 잠정 값이고, 종가가 확정되면 백테스트와 같은 값이 된다.",
     tooltipValueGetter: (p) => {
       const value = options.getMaValue?.(p.data);
       if (value == null) return "";
@@ -324,8 +326,9 @@ export function highDrawdownColumn<T>(field: ColDefField<T>): ColDef<T> {
 /**
  * 슬롯 전략의 **상태** 컬럼 — 신고가·모멘텀이 같은 폭·같은 문구를 쓴다.
  *
- * 두 표(보유·후보)가 나란히 있어 폭이 다르면 어긋나 보인다. 장중 판정은 오늘 종가로
- * 확정되기 전이라 `(예상)` 꼬리표를 붙인다.
+ * 두 표(보유·후보)가 나란히 있어 폭이 다르면 어긋나 보인다. 장중에는 실시간 가격을
+ * 마지막 봉으로 쓴 같은 판정이다(AGENTS.md §10-6) — 종가 확정 전까지 바뀔 수 있고,
+ * 체결은 항상 다음 거래일 시가라 별도 꼬리표 없이 판정 그대로 보여준다.
  */
 export const STATUS_COLUMN_WIDTH = 156;
 export const STATUS_COLUMN_MIN_WIDTH = 140;
@@ -340,6 +343,8 @@ export type SlotStatusRow = {
   exit_reason: string | null;
   entry_date?: string | null;
   exit_date?: string | null;
+  /** 행별 체결일 — 어제 확정 판정(오늘 체결)과 오늘 잠정 판정(내일 체결)을 가른다. 없으면 공통 체결일. */
+  fill_date?: string | null;
 };
 
 /** 슬롯 상태 문구 — **여기 한 곳**에서만 만든다.
@@ -348,16 +353,17 @@ export type SlotStatusRow = {
  *  화면마다 문구를 따로 만들면 같은 상태가 다르게 보인다(실제로 합성만 「3일째」로 달랐다). */
 export function renderSlotStatus(
   row: SlotStatusRow,
-  options: { live: boolean; fillDay?: string | null },
+  options: { fillDay?: string | null },
 ): React.ReactNode {
   if (row.plan === "empty") return null;
-  const tag = options.live ? "(예상)" : "";
   // 언제 벌어지는(벌어진) 일인지를 상태와 같이 읽어야 주문을 낼 수 있다.
-  const fill = options.fillDay ? `${formatSlashDateWithWeekday(options.fillDay)} ` : "";
+  // 행에 체결일이 있으면 그것이 우선 — 어제 확정 판정은 오늘, 오늘 잠정 판정은 내일 체결이다.
+  const fillDay = row.fill_date ?? options.fillDay;
+  const fill = fillDay ? `${formatSlashDateWithWeekday(fillDay)} ` : "";
   const reason = row.exit_reason ? ` (${row.exit_reason})` : "";
 
   if (row.plan === "buy") {
-    const label = `${fill}진입 예정${tag}`;
+    const label = `${fill}진입 예정`;
     return (
       <strong style={{ color: "#d62828", whiteSpace: "nowrap" }} title={label}>
         {label}
@@ -365,7 +371,7 @@ export function renderSlotStatus(
     );
   }
   if (row.plan === "sell") {
-    const label = `${fill}매도 예정${tag}`;
+    const label = `${fill}매도 예정`;
     return (
       <strong style={{ color: "#1971c2", whiteSpace: "nowrap" }} title={`${label}${reason}`}>
         {label}
@@ -389,7 +395,6 @@ export function renderSlotStatus(
 }
 
 export function slotStatusColumn<T extends SlotStatusRow>(options: {
-  live: boolean;
   /** 매수·매도 예정이 체결되는 날 — 상태 문구 앞에 붙인다. */
   fillDay?: string | null;
 }): ColDef<T> {

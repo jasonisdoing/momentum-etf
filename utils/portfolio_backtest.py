@@ -82,16 +82,45 @@ def _sortino(returns: pd.Series) -> float | None:
     return round(float(returns.mean()) / deviation * (252**0.5), 2)
 
 
+def _overlay_live_last_bar(
+    pool: str, close_df: pd.DataFrame, benchmark_close: pd.Series
+) -> tuple[pd.DataFrame, pd.Series]:
+    """장중이면 실시간 가격을 **마지막 봉**으로 얹는다(AGENTS.md §10-6) — 운용 현황 전용.
+
+    규칙·수식은 그대로고 입력만 잠정이라, 종가가 확정되면 확정 계산과 일치한다.
+    전 종목의 실시간 시세가 있어야 얹는다 — 일부만 잠정이면 비중 판정이 뒤섞인다.
+    벤치마크는 오늘 값이 없어 마지막 확정값을 이월한다 — 현황(보유·지시)만 읽는 경로라
+    성과 숫자에는 쓰이지 않는다.
+    """
+    from utils.slot_positions import _live_quotes
+
+    tickers = list(close_df.columns)
+    quotes = _live_quotes(pool, tickers, close_df.index[-1])
+    if not quotes["live"]:
+        return close_df, benchmark_close
+    prices = {t: (quotes["by_ticker"].get(t) or {}).get("price") for t in tickers}
+    if any(p is None for p in prices.values()):
+        return close_df, benchmark_close
+    session_ts = pd.Timestamp(str(quotes["traded_at"])[:10])
+    close_df = close_df.copy()
+    close_df.loc[session_ts] = pd.Series(prices)
+    benchmark_close = benchmark_close.copy()
+    benchmark_close.loc[session_ts] = float(benchmark_close.iloc[-1])
+    return close_df, benchmark_close
+
+
 def run_backtest(
     months: int | None = None,
     settings: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
     *,
     start_date: str | None = None,
+    with_live_last_bar: bool = False,
 ) -> dict[str, Any]:
     """고정 비중 리밸런싱 백테스트. 일별 자산곡선과 리밸런싱 내역을 함께 돌려준다.
 
     `context` 는 어댑터 계약을 맞추기 위한 자리다 — 이 전략은 무거운 준비물이 없어 쓰지 않는다.
+    ``with_live_last_bar`` 는 운용 현황 전용이다 — 성과 비교 백테스트는 확정 데이터만 쓴다.
     """
     del context  # 이 전략은 사전 준비물이 없다(계약만 맞춘다)
 
@@ -118,6 +147,9 @@ def run_backtest(
 
     benchmark_frame = load_benchmark_frame(pool)
     benchmark_close = pd.to_numeric(benchmark_frame["Close"], errors="coerce").dropna()
+
+    if with_live_last_bar:
+        close_df, benchmark_close = _overlay_live_last_bar(pool, close_df, benchmark_close)
 
     # 구간 — 종목·벤치마크가 모두 있는 날만 쓴다.
     index = close_df.dropna().index.intersection(benchmark_close.index)
@@ -243,8 +275,14 @@ def run_backtest(
 
 
 def current_positions(settings: dict[str, Any]) -> dict[str, Any]:
-    """개별 운용 현황과 합성이 공유하는 고정 시작일 기준 포트폴리오 상태."""
+    """개별 운용 현황과 합성이 공유하는 고정 시작일 기준 포트폴리오 상태.
+
+    장중이면 실시간 가격을 마지막 봉으로 쓴 같은 엔진의 상태다(AGENTS.md §10-6) —
+    보유 비중·리밸런싱 지시가 실시간 기준으로 움직이고, 종가 확정 후 백테스트와 일치한다.
+    """
     from utils.strategy_settings import require_start_date
 
-    result = run_backtest(DEFAULT_BACKTEST_MONTHS, settings, start_date=require_start_date(settings))
+    result = run_backtest(
+        DEFAULT_BACKTEST_MONTHS, settings, start_date=require_start_date(settings), with_live_last_bar=True
+    )
     return {key: result[key] for key in ("as_of", "open_positions", "sleeve_cash_weight_pct", "trades")}

@@ -60,7 +60,11 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
     """
     from utils.settings_loader import get_ticker_type_settings
 
-    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+    try:
+        country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+    except Exception:
+        # 설정이 없는 풀(테스트 등)은 실시간이 없다 — 시세 조회 실패와 같은 취급이다.
+        country = ""
     if not country or not tickers:
         return {"live": False, "pre_market": False, "traded_at": None, "by_ticker": {}}
 
@@ -95,6 +99,20 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
             traded_at = stamp
 
     live = bool(traded_at) and not pre_market and str(traded_at)[:10] > str(cached_last.date())
+    if not live and traded_at is None and by_ticker and not pre_market:
+        # 체결 시각을 안 주는 종목(국내 ETF 등)은 시장 **세션 시계**로 장중을 판정한다 —
+        # 정규장·애프터가 진행 중이면 스냅샷 현재가는 오늘 세션의 값이다. 체결 시각에만
+        # 기대면 ETF 풀은 장중 판정(실시간 마지막 봉, AGENTS.md §10-6)이 영영 켜지지 않는다.
+        from utils.market_session import AFTERMARKET, REGULAR, market_session
+
+        try:
+            session_now = market_session(country)["session"]
+        except Exception:
+            session_now = None
+        today = _country_today(country)
+        if session_now in (REGULAR, AFTERMARKET) and today and today > str(cached_last.date()):
+            live = True
+            traded_at = today
     return {
         "live": live,
         "pre_market": pre_market,
@@ -143,22 +161,27 @@ def _pool_country(pool: str) -> str:
     return str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
 
 
-def _market_today(pool: str) -> str | None:
-    """그 시장의 **현지 오늘** 날짜(YYYY-MM-DD). 시간대를 모르면 None — 날짜를 지어내지 않는다.
-
-    미국 풀을 한국에서 보면 서버·브라우저의 날짜가 시장의 날짜와 하루 어긋난다. '그 세션이
-    지났는지' 는 시장 현지 날짜로 따져야 한다.
-    """
+def _country_today(country: str) -> str | None:
+    """그 시장의 **현지 오늘** 날짜(YYYY-MM-DD). 시간대를 모르면 None — 날짜를 지어내지 않는다."""
     from config import MARKET_SCHEDULES
 
-    tz_name = str(((MARKET_SCHEDULES or {}).get(_pool_country(pool)) or {}).get("timezone") or "").strip()
+    tz_name = str(((MARKET_SCHEDULES or {}).get(country) or {}).get("timezone") or "").strip()
     if not tz_name:
         return None
     try:
         return str(pd.Timestamp.now(tz=tz_name).date())
     except Exception:
-        logger.exception("[slot] 시장 현지 날짜 계산 실패 (%s)", pool)
+        logger.exception("[slot] 시장 현지 날짜 계산 실패 (%s)", country)
         return None
+
+
+def _market_today(pool: str) -> str | None:
+    """그 종목풀 시장의 현지 오늘 날짜.
+
+    미국 풀을 한국에서 보면 서버·브라우저의 날짜가 시장의 날짜와 하루 어긋난다. '그 세션이
+    지났는지' 는 시장 현지 날짜로 따져야 한다.
+    """
+    return _country_today(_pool_country(pool))
 
 
 def _next_session(pool: str, last: pd.Timestamp) -> str | None:

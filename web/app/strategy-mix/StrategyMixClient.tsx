@@ -209,6 +209,8 @@ type HoldingSlot = {
   /** 차트의 진입 화살표 — 슬리브마다 편입 시점이 다르다. 모멘텀은 매수가를 들지 않아 날짜만 온다. */
   entry_date?: string | null;
   entry_price?: number | null;
+  /** 행별 체결일 — 어제 확정 판정(오늘 체결)과 오늘 잠정 판정(내일 체결)을 가른다. */
+  fill_date?: string | null;
 };
 
 type Holding = {
@@ -822,8 +824,9 @@ export function StrategyMixClient() {
               is_new: Boolean(cell.is_new),
               exit_reason: cell.exit_reason ?? null,
               entry_date: cell.entry_date ?? null,
+              fill_date: cell.fill_date ?? null,
             },
-            { live: Boolean(positions?.live), fillDay: positions?.next_trading_day },
+            { fillDay: positions?.next_trading_day },
           );
         },
       })),
