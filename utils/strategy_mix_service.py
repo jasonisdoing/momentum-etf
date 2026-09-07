@@ -9,7 +9,7 @@
 
 캐시는 두지 않는다 — 각 전략 화면의 백테스트와 같은 패턴(요청 시 계산)이다.
 
-**여기서 판정하지 않는다.** 보유·진입·이탈은 슬리브 엔진(`utils/slot_backtest.py`)이 정한
+**여기서 판정하지 않는다.** 보유·진입·이탈은 슬리브 엔진(`core/strategy/slot_backtest.py`)이 정한
 것을 읽어 온다. 합성이 하는 일은 슬리브 곡선에 월초 이관을 얹는 것과, 계좌 보유와 목표
 주수의 차이를 지시로 내는 것뿐이다. 그 차이는 문턱 없이 전부 낸다(AGENTS.md 10).
 """
@@ -21,6 +21,8 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from config import CACHE_TTL_COMPUTE
+from core.strategy.mix.actions import build_action_groups
+from core.strategy.mix.targets import sleeve_target_shares
 from utils.cash_model import currency_for_country
 from utils.logger import get_app_logger
 from utils.mix_sleeve import STRATEGY_LABELS, SleeveSpec
@@ -423,11 +425,13 @@ def _sleeve_shares(ctx: dict[str, Any]) -> dict[str, float]:
     월초 재배분과 비용은 합성 백테스트와 같은 경로를 사용한다.
     실제 계좌 보유는 계산에 사용하지 않는다.
     """
-    # 캐시 키는 계좌 + **슬리브 구성**이다. 조합이나 배분을 바꾸면 몫이 달라지므로
-    # 구성까지 키에 넣어야 저장 직후 옛 몫이 그대로 나오지 않는다.
+    # 캐시 키는 계좌 + **슬리브 구성 + 풀 슬리피지**다. 조합·배분·비용을 바꾸면 몫이
+    # 달라지므로 전부 키에 넣어야 저장 직후 옛 몫이 그대로 나오지 않는다.
+    from utils.pool_settings_store import get_pool_slippage
+
     key = _SHARES_CACHE.make_key(
         ctx["account_id"],
-        [(spec.key, spec.strategy, spec.pool, spec.settings) for spec in ctx["slots"]],
+        [(spec.key, spec.strategy, spec.pool, spec.settings, get_pool_slippage(spec.pool)) for spec in ctx["slots"]],
         mix_weights_for_account(ctx["account_id"]),
     )
     return _SHARES_CACHE.get_or_compute(key, lambda: _compute_sleeve_shares(ctx))
@@ -437,14 +441,13 @@ def _compute_sleeve_shares(ctx: dict[str, Any]) -> dict[str, float]:
     import pandas as pd
 
     from config import MARKET_SCHEDULES
-    from utils.mix_sleeve import load_context, run_backtest
-    from utils.strategy_settings import require_start_date
+    from utils.mix_sleeve import current_state
     from utils.trading_calendar import get_trading_days
 
-    results = {
-        spec.key: run_backtest(spec, 12, load_context(spec), start_date=require_start_date(spec.settings))
-        for spec in ctx["slots"]
-    }
+    # 운용 현황과 **같은 엔진 실행 결과**를 읽는다(장중이면 잠정 실행, §10-6) — 확정 종가로
+    # 계산한 슬리브 배분과 장중 내부 비중이 섞이지 않고, 같은 입력을 다시 돌리지도 않는다
+    # (전략별 운용 현황 5분 캐시를 그대로 공유한다).
+    results = {spec.key: {"daily": current_state(spec)["daily"]} for spec in ctx["slots"]}
     country = ctx["country"]
     today = pd.Timestamp.now(tz=MARKET_SCHEDULES[country]["timezone"]).date()
     month_days = get_trading_days(str(today.replace(day=1)), str(today), country)
@@ -458,318 +461,9 @@ def _compute_sleeve_shares(ctx: dict[str, Any]) -> dict[str, float]:
     }
 
 
-_WEEKDAYS_KO = ("월", "화", "수", "목", "금", "토", "일")
-
-
-def _format_date_weekday(date: str) -> str:
-    from datetime import date as date_cls
-
-    try:
-        parsed = date_cls.fromisoformat(date)
-    except ValueError:
-        return date
-    return f"{date} ({_WEEKDAYS_KO[parsed.weekday()]})"
-
-
 def _slot_labels(slots: list[SleeveSpec]) -> dict[str, str]:
     """슬롯 표시 이름 — 「A. 모멘텀」. 같은 전략이 두 슬롯에 올 수 있어 기호를 앞에 둔다."""
     return {spec.key: f"{spec.key.upper()}. {spec.label}" for spec in slots}
-
-
-def _action_reasons(ticker: str, side: str, actions: dict[str, Any]) -> list[dict[str, str]]:
-    """주문 원인을 추측하지 않고 엔진 이벤트와 배분 일정만 함께 표시한다."""
-    reasons = []
-    for slot in actions["slots"].values():
-        event = "entries" if side == "buy" else "sells"
-        if any(row["ticker"] == ticker for row in slot[event]):
-            signal = "진입" if side == "buy" else "청산"
-            forecast = " 예상" if slot.get("live") else ""
-            reasons.append({"code": "strategy_signal", "label": f"{slot['label']} {signal}{forecast}"})
-        for trade in slot.get("engine_trades", []):
-            if trade["ticker"] == ticker and trade["side"] == side:
-                reasons.append(
-                    {
-                        "code": "engine_trade",
-                        "label": f"{slot['label']} {trade['date']} 엔진 {trade['reason']} 반영",
-                    }
-                )
-        rebalance = slot.get("rebalance")
-        if rebalance and not rebalance["is_filled"]:
-            rows = rebalance["buys" if side == "buy" else "sells"]
-            if any(row["ticker"] == ticker for row in rows):
-                reasons.append({"code": "strategy_rebalance", "label": f"{slot['label']} 정기 교체"})
-    if actions.get("sleeve_rebalance_today"):
-        reasons.append({"code": "mix_rebalance", "label": "합성 월초 재배분 반영"})
-    reasons.append({"code": "target_difference", "label": "목표 수량과 실제 보유 차이"})
-    return reasons
-
-
-def _build_action_groups(
-    holdings: list[dict[str, Any]],
-    actions: dict[str, Any],
-    next_trading_day: str | None,
-    *,
-    currency: str = "KRW",
-) -> list[dict[str, Any]]:
-    """오늘의 액션 — 체결일 묶음(매도 먼저, 같은 방향은 티커 순).
-
-    화면과 슬랙 알람이 **이 결과를 그대로** 쓴다 — 조립을 한 곳에 두어 둘이 어긋나지
-    않게 한다. 규칙:
-      · 계좌 보유와 목표 주수의 차이를 **거르지 않고 전부** 낸다. 예전에는 「목표비중의
-        10% 이상 차이만」 이라는 문턱(밴드)을 종목마다 따로 걸었는데, 백테스트에 없는
-        규칙이라 화면과 백테스트가 갈라졌다. 게다가 목표 주수 배분은 12종목을 한 번에
-        계산해 매수 합이 매도 합 + 현금을 넘지 않는데, 문턱이 큰 매수만 통과시키고
-        작은 매도를 걸러 **살 돈이 없는 매수 지시**를 만들었다.
-      · 교체가 확정됐지만 미체결이면 그 슬리브 몫은 교체일 시가 그룹, 나머지는 다음 거래일 그룹.
-    슬리브가 어떤 전략인지는 보지 않는다 — 있는 액션만 읽는다(교체가 없는 전략은 rebalance=None).
-    """
-    slots: dict[str, dict[str, Any]] = actions["slots"]
-
-    # 교체가 아직 체결 전인 슬리브 — 그 슬리브 몫의 지시는 교체일 시가 그룹으로 간다.
-    pending_fill: dict[str, str] = {}
-    rebalance_tickers: dict[str, str] = {}  # ticker → 그 교체가 속한 슬롯
-    rebalance_buys: set[str] = set()
-    rebalance_sells: set[str] = set()
-    for key, slot in slots.items():
-        rebalance = slot.get("rebalance")
-        if not rebalance:
-            continue
-        if not rebalance["is_filled"] and rebalance["fill_date"]:
-            pending_fill[key] = rebalance["fill_date"]
-        for row in rebalance["buys"]:
-            rebalance_tickers[row["ticker"]] = key
-            rebalance_buys.add(row["ticker"])
-        for row in rebalance["sells"]:
-            rebalance_tickers[row["ticker"]] = key
-            rebalance_sells.add(row["ticker"])
-
-    # 슬리브별 즉시 이벤트(진입·매도) — 그 종목은 교체일이 아니라 다음 거래일에 움직인다.
-    event_tickers: dict[str, set[str]] = {
-        key: {row["ticker"] for row in slot["entries"]} | {row["ticker"] for row in slot["sells"]}
-        for key, slot in slots.items()
-    }
-    entry_tickers = {row["ticker"] for slot in slots.values() for row in slot["entries"]}
-    live_entry_tickers = {row["ticker"] for slot in slots.values() if slot.get("live") for row in slot["entries"]}
-    sell_pending = [row["ticker"] for slot in slots.values() for row in slot["sells"]]
-
-    # 장중 판정은 오늘 종가로 확정되기 전이라 **예상**이다 — 문구로 구분한다.
-    # 장중을 쓰는지는 슬리브마다 다르므로 그 슬리브의 플래그를 본다.
-    sell_reason: dict[str, str] = {}
-    forecast_sell_tickers: set[str] = set()
-    for slot in slots.values():
-        live_tag = " · 예상" if slot.get("live") else ""
-        for row in slot["sells"]:
-            # 수익률이 함께 오는 건 진입가를 아는 전략뿐이다(모멘텀 자격 상실은 사유만).
-            suffix = f", {row['return_pct']:+.2f}%" if row.get("return_pct") is not None else ""
-            sell_reason[row["ticker"]] = f"{row['reason']}{suffix}{live_tag}"
-            if live_tag:
-                forecast_sell_tickers.add(row["ticker"])
-
-    def label(ticker: str, name: str, quantity: float | None) -> str:
-        base = f"{name}({ticker})"
-        return base if not quantity else f"{base} {abs(int(quantity)):,}주"
-
-    row_by_ticker = {row["ticker"]: row for row in holdings}
-    items: list[dict[str, Any]] = []
-    for row in holdings:
-        trade = row.get("trade_quantity")
-        if not trade:
-            continue
-        ticker = row["ticker"]
-        sources = row.get("sources") or []
-        date = next_trading_day
-        if ticker in rebalance_tickers:
-            slot_key = rebalance_tickers[ticker]
-            date = pending_fill.get(slot_key) or next_trading_day
-        elif not row.get("is_sell_all"):
-            # 교체 대기 중인 슬리브 몫이면 그 교체일에 함께 맞춘다 — 단, 다른 슬리브에서
-            # 즉시 움직일 일이 잡혀 있으면 그쪽(다음 거래일)이 먼저다.
-            for key, fill_date in pending_fill.items():
-                if key not in sources:
-                    continue
-                if any(ticker in event_tickers[other] for other in event_tickers if other != key):
-                    continue
-                date = fill_date
-                break
-        reason = sell_reason.get(ticker)
-        weight = float(row.get("weight_pct") or 0)
-        held = float(row.get("held_quantity") or 0) > 0
-        sell_reason_applies = bool(reason) and trade < 0 and weight <= 0
-        if row.get("is_sell_all"):
-            title = "교체 매도" if ticker in rebalance_sells else "전량 매도"
-        elif trade < 0:
-            if sell_reason_applies:
-                title = "매도 예정(예상)" if ticker in forecast_sell_tickers else "매도 예정"
-            else:
-                title = "목표 수량 조정 매도"
-        elif held:
-            title = "목표 수량 조정 매수"
-        elif ticker in rebalance_buys:
-            title = "교체 매수"
-        elif ticker in entry_tickers:
-            title = "진입(예상)" if ticker in live_entry_tickers else "진입"
-        else:
-            title = "신규 매수"
-        after = f" → 목표 {int(row['target_quantity']):,}주" if row.get("target_quantity") is not None else ""
-        amount = _format_trade_amount(trade, row.get("price"), currency)
-        amount_note = f" · {amount}" if amount else ""
-        if sell_reason_applies:
-            note = f"{after} ({reason}){amount_note}".strip()
-        elif row.get("is_sell_all"):
-            note = f"· 목표에 없는 보유 종목{amount_note}"
-        else:
-            note = f"{after} · {weight:.2f}%{amount_note}".strip()
-        items.append(
-            {
-                "key": f"act-{ticker}",
-                "ticker": ticker,
-                "side": "buy" if trade > 0 else "sell",
-                "title": title,
-                "text": f"{label(ticker, row.get('name') or ticker, trade)} {note}".strip(),
-                "date": date,
-                # 알람 비교용 — 새 지시·수량 증가만 발송하고 감소(체결 반영)는 조용히 넘긴다.
-                "quantity": abs(int(trade)),
-            }
-        )
-
-    # 매도 예정인데 매매수량이 0인 경우(목표가 아직 그대로라 차이가 없음)도 알려야 한다.
-    seen_keys = {item["key"] for item in items}
-    for ticker in sell_pending:
-        if f"act-{ticker}" in seen_keys:
-            continue
-        row = row_by_ticker.get(ticker)
-        if not row or float(row.get("held_quantity") or 0) <= 0 or float(row.get("weight_pct") or 0) > 0:
-            continue
-        items.append(
-            {
-                "key": f"act-{ticker}",
-                "ticker": ticker,
-                "side": "sell",
-                "title": "매도 예정",
-                "text": (
-                    f"{label(ticker, row.get('name') or ticker, row.get('held_quantity'))}"
-                    f" ({sell_reason.get(ticker) or '이탈'})"
-                    + (
-                        f" · {amt}"
-                        if (amt := _format_trade_amount(row.get("held_quantity"), row.get("price"), currency))
-                        else ""
-                    )
-                ),
-                "date": next_trading_day,
-                "quantity": abs(int(float(row.get("held_quantity") or 0))),
-            }
-        )
-        seen_keys.add(f"act-{ticker}")
-
-    by_date: dict[str, list[dict[str, Any]]] = {}
-    for item in items:
-        item["reasons"] = _action_reasons(item["ticker"], item["side"], actions)
-        # 목표 계산·테이블은 그대로 두고, 신호 없는 소액 주문만 액션에서 제외한다.
-        minimum = float(actions.get("min_adjustment_amount", 0))
-        only_adjustment = all(reason["code"] == "target_difference" for reason in item["reasons"])
-        price = row_by_ticker.get(item["ticker"], {}).get("price")
-        if only_adjustment and price is not None and float(price) > 0:
-            if abs(item["quantity"]) * float(price) < minimum:
-                continue
-        reason_text = " · ".join(reason["label"] for reason in item["reasons"])
-        item["text"] += f" · 사유: {reason_text}"
-        by_date.setdefault(item["date"] or "", []).append(item)
-    # 교체일 묶음에는 어느 슬리브의 교체인지 적는다 — 한 계좌에 교체가 둘일 수 있다.
-    rebalance_note: dict[str, list[str]] = {}
-    for key, fill_date in pending_fill.items():
-        rebalance_note.setdefault(fill_date, []).append(slots[key]["label"])
-    groups = []
-    for date in sorted(by_date):
-        group_items = sorted(by_date[date], key=lambda x: (0 if x["side"] == "sell" else 1, x["ticker"]))
-        if date:
-            note = rebalance_note.get(date)
-            title = f"{_format_date_weekday(date)} 시가" + (f" · {' · '.join(note)} 교체 포함" if note else "")
-        else:
-            title = "체결일 미정"
-        groups.append({"key": date or "unscheduled", "title": title, "items": group_items})
-
-    # 주중 이탈 **예상** 그룹 — 판정(오늘 종가) 확정 전의 미리보기. 같은 체결일(다음 거래일)
-    # 시가지만 확정 지시와 섞이지 않게 별도 그룹으로 뒤에 둔다. 슬랙 알람은 이 그룹을 보내지
-    # 않는다(장중 출렁일 때마다 알람이 나가면 노이즈 — notify 가 forecast 그룹을 거른다).
-    # 이탈 예상 종목의 **매수** 지시는 유예한다 — "오늘 사서 내일 팔라"가 된다. 조용히 지우지
-    # 않고 '(예상)' 그룹에 유예 사유를 남긴다(수량이 부족해 보여도 오늘은 사지 말라는 안내).
-    forecast_rows = [(key, row) for key, slot in slots.items() for row in slot["exit_forecast"]]
-    forecast_tickers = {row["ticker"] for _, row in forecast_rows}
-    suspended_buys: list[dict[str, Any]] = []
-    if forecast_tickers:
-        for group in groups:
-            kept = []
-            for item in group["items"]:
-                if item["side"] == "buy" and item["ticker"] in forecast_tickers:
-                    suspended_buys.append(item)
-                else:
-                    kept.append(item)
-            group["items"] = kept
-        groups = [group for group in groups if group["items"]]
-
-    confirmed_sells = {item["ticker"] for group in groups for item in group["items"] if item["side"] == "sell"}
-    forecast_items = []
-    forecast_slot_by_ticker: dict[str, str] = {}
-    for key, row in forecast_rows:
-        ticker = row["ticker"]
-        held = row_by_ticker.get(ticker)
-        if ticker in confirmed_sells or not held:
-            continue
-        # 파는 건 **그 슬리브 몫**뿐이다 — 예상 수량 = 보유 − 이탈 후 남을 목표(다른 슬리브 몫).
-        # 계좌가 이미 그 몫을 팔아뒀으면 0 이 되어 자동으로 표시되지 않는다.
-        held_qty = float(held.get("held_quantity") or 0)
-        target_qty = float(held.get("target_quantity") or 0)
-        weight_all = float(held.get("weight_pct") or 0)
-        slot_weight = float(held.get(f"{key}_weight") or 0)
-        remain_qty = round(target_qty * (weight_all - slot_weight) / weight_all) if weight_all > 0 else 0
-        slot_qty = int(round(held_qty - remain_qty))
-        if slot_qty <= 0:
-            continue
-        both = slot_weight > 0 and (weight_all - slot_weight) > 0
-        reason = f"{row.get('reason')} · {slots[key]['label']} 몫" if both else str(row.get("reason"))
-        forecast_slot_by_ticker[ticker] = key
-        forecast_items.append(
-            {
-                "key": f"forecast-{ticker}",
-                "ticker": ticker,
-                "side": "sell",
-                "title": "매도 예정(예상)",
-                "text": (
-                    f"{label(ticker, row.get('name') or ticker, slot_qty)} ({reason})"
-                    + (f" · {amt}" if (amt := _format_trade_amount(slot_qty, held.get("price"), currency)) else "")
-                ),
-                "date": next_trading_day,
-                # 알람 상태 비교용 — 예상도 '처음 등장할 때 1건' 발송되도록 실제 수량을 싣는다.
-                "quantity": abs(slot_qty),
-            }
-        )
-    # 매수 유예 안내는 매도 예상이 **없는** 종목에만 — 전량 매도 예상이 이미 '사지 말라'를
-    # 내포하므로 같은 종목에 두 줄이 나오면 소음이다.
-    forecast_sold = {item["ticker"] for item in forecast_items}
-    forecast_slot_all = {row["ticker"]: key for key, row in forecast_rows}
-    for item in suspended_buys:
-        if item["ticker"] in forecast_sold:
-            continue
-        slot_label = slots[forecast_slot_all[item["ticker"]]]["label"]
-        forecast_items.append(
-            {
-                **item,
-                "key": f"suspend-{item['ticker']}",
-                "title": "매수 유예(예상)",
-                "text": f"{item['text']} — 내일 {slot_label} 몫 매도 예상이라 오늘은 사지 않음",
-                "date": next_trading_day,
-            }
-        )
-    if forecast_items and next_trading_day:
-        groups.append(
-            {
-                "key": f"{next_trading_day}-forecast",
-                "title": f"{_format_date_weekday(next_trading_day)} 시가 (예상 — 오늘 종가 확정 시)",
-                "forecast": True,
-                "items": sorted(forecast_items, key=lambda x: x["ticker"]),
-            }
-        )
-    return groups
 
 
 def _attach_industry(holdings: list[dict[str, Any]], country: str) -> None:
@@ -887,24 +581,6 @@ def _attach_disparity(holdings: list[dict[str, Any]], pool_by_source: dict[str, 
         row["current_long_pct"] = round(metrics["disparity_pct"], 1)
 
 
-def _format_trade_amount(quantity: float | None, price: float | None, currency: str) -> str:
-    """지시 금액 표기 — 원화는 'N억 1,234만원', 미국·호주는 현지 통화($ / A$)."""
-    if not quantity or not price or float(price) <= 0:
-        return ""
-    amount = abs(float(quantity)) * float(price)
-    code = str(currency or "KRW").strip().upper()
-    if code == "KRW":
-        if amount >= 1_0000_0000:
-            uk = int(amount // 1_0000_0000)
-            man = int(round((amount - uk * 1_0000_0000) / 1_0000))
-            return f"{uk}억 {man:,}만원" if man else f"{uk}억원"
-        if amount >= 1_0000:
-            return f"{int(round(amount / 1_0000)):,}만원"
-        return f"{amount:,.0f}원"
-    symbol = {"USD": "$", "AUD": "A$"}.get(code, f"{code} ")
-    return f"{symbol}{amount:,.0f}"
-
-
 def _krw_rate(currency: str) -> float:
     """종목 통화 → 원화 환율. 원화면 1.0.
 
@@ -954,55 +630,6 @@ def _holding_payload(row: dict[str, Any], slot_keys: Sequence[str]) -> dict[str,
     return payload
 
 
-def _sleeve_target_shares(
-    states: dict[str, Any],
-    sleeve_amount_krw: dict[str, float],
-    krw_rate: float,
-) -> dict[str, int]:
-    """백테스트 목표 비중을 계좌 금액으로 환산하고 정수 주수로 배분한다.
-
-    실제 보유 수량은 입력하지 않는다. 계좌 규모를 바꿔 백테스트를 다시 실행하면
-    비싼 종목의 진입 가능 여부가 바뀌므로, 엔진 결과를 비례 환산만 한다.
-    """
-    from math import fsum
-
-    from utils.share_allocation import ShareTarget, allocate_integer_shares
-
-    # 소수 목표를 **티커별로 합산**한다 — 두 슬리브가 같은 종목을 담으면 몫이 더해진다.
-    # 슬리브마다 따로 정하면 뒤에 온 슬리브가 앞의 값을 덮어써, 목표비중(합산)과 목표 주수가
-    # 어긋난다(kor_test 에서 125.5주 + 111.1주가 113주가 되어 115주를 팔라는 지시가 났다).
-    amount_by_ticker: dict[str, float] = {}
-    unit_by_ticker: dict[str, float] = {}
-    for key, state in states.items():
-        budget = sleeve_amount_krw.get(key, 0.0)
-        if budget <= 0 or krw_rate <= 0:
-            continue
-        # 슬리브 안 비중 — 이미 산 종목은 흘러간 실제 비중(drift_pct), 진입 예정은 슬롯 1칸.
-        slot_pct = 100.0 / state.top_n if state.top_n else 0.0
-        for row in state.targets:
-            price = row.get("price")
-            if not price or row.get("is_exiting"):
-                continue
-            weight = row.get("drift_pct")
-            weight = slot_pct if weight is None else float(weight)
-            if weight <= 0:
-                continue
-            ticker = str(row["ticker"]).strip()
-            unit_by_ticker[ticker] = float(price) * krw_rate
-            amount_by_ticker[ticker] = amount_by_ticker.get(ticker, 0.0) + budget * weight / 100.0
-
-    return allocate_integer_shares(
-        [
-            ShareTarget(key=ticker, target_amount=amount, price=unit_by_ticker[ticker])
-            for ticker, amount in amount_by_ticker.items()
-        ],
-        # 합성 유보 현금은 슬리브 배정액에서 이미 제외된다. 전략 내부 현금도 보호하려면
-        # 주식 목표 금액까지만 쓸 수 있다. 추가 주수에는 내림으로 생긴 단주 잔여만 쓴다.
-        # 동시에 전체 슬리브 배정액을 넘지 않도록 계좌 예산 한도도 유지한다.
-        budget=min(fsum(amount_by_ticker.values()), fsum(sleeve_amount_krw.values())),
-    )
-
-
 def _attach_account_targets(
     holdings: list[dict[str, Any]],
     account: dict[str, Any],
@@ -1046,7 +673,7 @@ def _attach_account_targets(
         if price and krw_rate > 0:
             price_krw_by_ticker[row["ticker"]] = float(price) * krw_rate
 
-    # 목표 주수 = **계좌 금액으로 돌린 백테스트가 지금 들고 있는 주수**(`_sleeve_target_shares`).
+    # 목표 주수 = **계좌 금액으로 돌린 백테스트가 지금 들고 있는 주수**(`sleeve_target_shares`).
     #
     # 예전에는 여기서 `allocate_integer_shares` 로 예산을 끝까지 소진하는 배분을 매일 돌렸다.
     # 그건 백테스트가 **진입할 때** 쓰는 규칙이다. 백테스트는 진입 후 이탈까지 주수를
@@ -1120,131 +747,6 @@ def _attach_account_targets(
             }
         )
     return sell_all
-
-
-def _build_next_week_preview(
-    states: dict[str, Any],
-    holdings: list[dict[str, Any]],
-    actions: dict[str, Any],
-    slot_weight: dict[str, float],
-    account: dict[str, Any] | None,
-    ahead: list,
-    today_local,
-    currency: str,
-    krw_rate: float,
-) -> dict[str, Any] | None:
-    """다음 교체를 **지금 순위 그대로 확정된다고 가정**했을 때의 전체 액션.
-
-    오늘의 액션과 **같은 조립기**(`_build_action_groups`)를 가정 목표에 돌린다 —
-    전량 매도(목표에 없는 보유 종목)까지 포함한 완전한 그림이라, 종목 교체가 없으면
-    오늘의 액션과 똑같이 나온다. 주기적 교체가 있는 슬리브만 다음 교체 예상
-    (`next_expected` — 실시간 순위 기준)으로 목표를 바꾸고, 나머지 슬리브는 그대로 둔다.
-
-    이번 교체가 아직 체결 전이면(오늘의 액션에 교체일 그룹이 이미 있으면) 만들지
-    않는다 — 같은 교체가 두 번 보이면 헷갈린다. 수량은 현재가·현재 총자산 기준
-    추정치라 실제 체결 수량과 다를 수 있다.
-    """
-    if account is None:
-        return None
-    # 교체가 있고 이미 체결된 슬리브만 대상 — 미체결이면 오늘의 액션이 이미 보여준다.
-    rotating = [
-        key for key, state in states.items() if state.rebalance and state.rebalance["is_filled"] and state.next_expected
-    ]
-    if not rotating:
-        return None
-
-    expected_by_slot = {key: states[key].next_expected for key in rotating}
-
-    # ── 가정 목표 — 현재 목표에서 교체 슬리브 몫만 다음 예상으로 바꾼다 ──
-    keys = list(states)
-    hypo: list[dict[str, Any]] = []
-    for row in holdings:
-        if row.get("is_sell_all"):
-            continue  # 전량 매도 행은 계좌 대조가 다시 만든다
-        copy = {
-            "ticker": row["ticker"],
-            "name": row.get("name"),
-            "sources": list(row.get("sources") or []),
-            "weight_pct": float(row.get("weight_pct") or 0),
-            "price": row.get("price"),
-        }
-        for key in keys:
-            copy[f"{key}_weight"] = float(row.get(f"{key}_weight") or 0)
-        for key in rotating:
-            if key in copy["sources"] and copy["ticker"] not in expected_by_slot[key]:
-                # 편출 예상 — 그 슬리브 몫을 뺀다. 다른 슬리브 몫이 없으면 행 자체가 빠진다.
-                copy["weight_pct"] -= copy[f"{key}_weight"]
-                copy[f"{key}_weight"] = 0.0
-                copy["sources"] = [s for s in copy["sources"] if s != key]
-        if not copy["sources"] and copy["weight_pct"] <= 0:
-            continue
-        hypo.append(copy)
-
-    preview_buys: list[dict[str, Any]] = []
-    preview_sells: list[dict[str, Any]] = []
-    for key in rotating:
-        expected = expected_by_slot[key]
-        for ticker in sorted(expected):
-            existing = next((r for r in hypo if r["ticker"] == ticker), None)
-            if existing is not None and key in existing["sources"]:
-                continue  # 유지 — 이미 그 슬리브 몫이 있다
-            row = expected[ticker]
-            if existing is None:
-                existing = {
-                    "ticker": ticker,
-                    "name": row.get("name") or ticker,
-                    "sources": [],
-                    "weight_pct": 0.0,
-                    "price": row.get("price"),
-                    **{f"{k}_weight": 0.0 for k in keys},
-                }
-                hypo.append(existing)
-            existing["sources"].append(key)
-            existing["weight_pct"] += slot_weight[key]
-            existing[f"{key}_weight"] += slot_weight[key]
-            preview_buys.append({"ticker": ticker, "name": row.get("name") or ticker, "price": row.get("price")})
-        preview_sells.extend(
-            {"ticker": row["ticker"], "name": row.get("name") or row["ticker"]}
-            for row in holdings
-            if not row.get("is_sell_all") and key in (row.get("sources") or []) and row["ticker"] not in expected
-        )
-
-    # 환율을 반드시 넘긴다 — 계좌 원장은 원화이고 종목 가격은 그 시장 통화라, 빠뜨리면
-    # 원화 총자산을 달러 가격으로 나눠 수량이 환율 배수만큼 부풀어 오른다.
-    _attach_account_targets(hypo, account, krw_rate, slot_keys=keys)
-
-    # 다음 교체 체결일 — 주간 리듬 기준 다음주 첫 거래일.
-    this_week = today_local.isocalendar()[:2]
-    fill_date = next((str(day.date()) for day in ahead if day.date().isocalendar()[:2] > tuple(this_week)), None)
-
-    # 오늘의 액션과 같은 조립 — 교체 예상분만 rebalance 로 넘겨 '교체 매수/매도' 라벨을 받는다.
-    hypo_slots: dict[str, dict[str, Any]] = {}
-    for key in keys:
-        slot = actions["slots"][key]
-        hypo_slots[key] = {
-            "label": slot["label"],
-            "live": slot.get("live", False),
-            "sells": slot["sells"],
-            "entries": slot["entries"],
-            "exit_forecast": [],
-            "rebalance": (
-                {"is_filled": True, "fill_date": None, "buys": preview_buys, "sells": preview_sells}
-                if key == rotating[0]
-                else None
-            ),
-        }
-    groups = _build_action_groups(hypo, {"slots": hypo_slots}, fill_date, currency=currency)
-    # 주중 이탈 예상 종목은 뺀다 — 다음주가 아니라 내일 시가에 팔릴 예상이라 오늘의 액션의
-    # '(예상)' 그룹이 담당한다. 여기 두면 '교체 매도 · 체결일 미정' 으로 잘못 안내된다.
-    forecast_tickers = {row["ticker"] for slot in actions["slots"].values() for row in slot["exit_forecast"]}
-    if forecast_tickers:
-        groups = [
-            {**group, "items": [item for item in group["items"] if item["ticker"] not in forecast_tickers]}
-            for group in groups
-            if not group.get("forecast")
-        ]
-        groups = [group for group in groups if group["items"]]
-    return {"fill_date": fill_date, "groups": groups}
 
 
 def mix_positions(account_id: str | None = None) -> dict[str, Any]:
@@ -1438,8 +940,8 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         # 목표 주수 — 슬리브마다 자기 몫 예산 안에서 배분. 종목·비중은 백테스트 것 그대로다.
         total_assets = float(account.get("total_assets") or 0)
         sleeve_amount_krw = {key: total_assets * shares[key] / 100.0 for key in keys}
-        target_shares = _sleeve_target_shares(
-            states,
+        target_shares = sleeve_target_shares(
+            {key: state.targets for key, state in states.items()},
             sleeve_amount_krw,
             krw_rate,
         )
@@ -1542,8 +1044,6 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
                     "exit_forecast": states[key].exit_forecast,
                     # 다음 거래일 시가에 새로 담는 것.
                     "entries": states[key].entries,
-                    # 주기적 교체가 있는 전략만 — 판정은 끝났고 체결만 남았다.
-                    "rebalance": states[key].rebalance,
                     "engine_trades": states[key].engine_trades,
                 }
                 for key in keys
@@ -1579,23 +1079,11 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
 
     # 오늘의 액션 — 화면·슬랙 알람이 같은 결과를 쓴다(조립 단일 소스).
     currency = ctx["currency"]
-    payload["actions"]["groups"] = _build_action_groups(
+    payload["actions"]["groups"] = build_action_groups(
         payload["holdings"],
         payload["actions"],
         next_trading_day,
         currency=currency,
-    )
-    # 다음주 교체 가정 미리보기 — 실시간 순위 기준 잠정치.
-    payload["actions"]["next_week_preview"] = _build_next_week_preview(
-        states,
-        payload["holdings"],
-        payload["actions"],
-        slot_weight,
-        account,
-        ahead,
-        today_local,
-        currency,
-        _krw_rate(pool_currency),
     )
     # 슬리브별 값을 `slots[키]` 로 모아 내보낸다 — 화면은 슬롯 키를 돌며 읽는다.
     payload["holdings"] = [_holding_payload(row, keys) for row in payload["holdings"]]
@@ -1625,10 +1113,10 @@ def _merge_trades(slots: list[SleeveSpec], results: dict[str, dict[str, Any]]) -
 def _simulate_mix(
     ctx: dict[str, Any], results: dict[str, dict[str, Any]], *, through_date: str | None
 ) -> dict[str, Any]:
-    """합성 백테스트와 운용 배분의 공용 재생. 내부 주식·현금 비율은 엔진 값을 쓴다."""
+    """합성 재생 — 계좌 배분·슬리피지·슬리브 곡선을 수집해 핵심 재생(`replay_mix`)에 넘긴다."""
     import pandas as pd
 
-    from core.strategy.mix_rebalance import rebalance_sleeves
+    from core.strategy.mix.simulate import replay_mix
     from utils.mix_sleeve import daily_curve
     from utils.pool_settings_store import get_pool_slippage
 
@@ -1650,24 +1138,7 @@ def _simulate_mix(
         .ffill()
         .reindex(frame.index)
     )
-    if len(frame) < 2 or stock.isna().any().any():
-        raise RuntimeError("합성에 필요한 공통 가격·현금 비중 데이터가 부족합니다.")
-    if through_date is not None and through_date > frame.index[-1] and through_date[:7] != frame.index[-1][:7]:
-        # 아직 월초 종가가 없으면 직전 확정 가격으로 목표만 계산한다.
-        frame.loc[through_date] = frame.iloc[-1]
-        stock.loc[through_date] = stock.iloc[-1]
-    days = list(frame.index)
-    values = {spec.key: weights[spec.key] for spec in slots}
-    cash = weights["cash"]
-    curve = {days[0]: sum(values.values()) + cash}
-    growth = frame / frame.shift(1)
-    for i, day in enumerate(days[1:], start=1):
-        for key in values:
-            values[key] *= float(growth.at[day, key])
-        if day[:7] != days[i - 1][:7]:
-            values, cash, _ = rebalance_sleeves(values, cash, weights, stock.loc[day].to_dict(), slippage)
-        curve[day] = sum(values.values()) + cash
-    return {"curve": pd.Series(curve).sort_index(), "values": values, "cash": cash}
+    return replay_mix(frame, stock, weights, slippage, through_date=through_date)
 
 
 def _value_account(

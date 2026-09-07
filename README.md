@@ -29,7 +29,7 @@
 유지보수용 문서 3개(`docs/`). 사용법·설정값은 적지 않는다 — 코드가 단일 소스다.
 
 *   **[개발자 가이드](docs/developer_guide.md)**: 구조, 화면·모듈, DB 단일 소스, 지켜야 할 규칙
-*   **[전략 로직](docs/strategy_logic.md)**: 전략별 규칙과 시도 후 폐기한 것
+*   **[전략 로직](core/strategy/strategy_logic.md)**: 전략별 규칙과 시도 후 폐기한 것
 *   **[서버 인프라](docs/server_infrastructure.md)**: 배포, 배치, 도메인, 환경변수
 
 ## ⚡️ 빠른 시작 (Quick Start)

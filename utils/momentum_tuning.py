@@ -72,6 +72,7 @@ def _init_worker(bundle: dict[str, Any]) -> None:
 
 def _preload(pool: str) -> dict[str, Any]:
     """부모가 한 번 읽는 공유 데이터 — 워커 초기화 때 통째로 넘긴다."""
+    from core.strategy.price_panel import build_price_panel
     from utils.momentum_service import (
         adr_market_of_pool,
         load_adr_series,
@@ -79,7 +80,6 @@ def _preload(pool: str) -> dict[str, Any]:
         load_price_frames,
         load_universe,
     )
-    from utils.new_high_service import build_price_panel
     from utils.settings_loader import _load_pool_configs
     from utils.stock_list_io import _load_ticker_type_stocks_raw
 
@@ -103,7 +103,8 @@ def _preload(pool: str) -> dict[str, Any]:
 def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
     """(단기, 장기) 쌍 하나의 조합 — 별도 프로세스에서 돈다."""
     months, base, short, long, adr_floors = task
-    from utils.momentum_backtest import compute_signals, run_backtest
+    from core.strategy.momentum.signals import compute_signals
+    from utils.momentum_backtest import run_backtest
 
     # 신호는 이평선 쌍에만 의존한다 — 이 쌍의 전 조합(ADR 하한)이 하나를 나눠 쓴다.
     context = {

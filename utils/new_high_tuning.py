@@ -16,10 +16,10 @@ from typing import Any
 import pandas as pd
 
 from config import ADR_FLOOR_OPTIONS
+from core.strategy.new_high.signals import compute_signals
+from core.strategy.price_panel import build_price_panel
 from utils.new_high_service import (
     EXIT_MA_OPTIONS,
-    build_price_panel,
-    compute_signals,
     load_price_frames,
     load_settings,
     load_universe,

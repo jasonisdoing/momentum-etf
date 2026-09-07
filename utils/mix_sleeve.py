@@ -4,11 +4,9 @@
 "모멘텀 2개" 나 "신고가 2개" 같은 조합을 만들 수 없었다. 여기서 두 엔진의 차이를 흡수해,
 합성은 **슬롯 목록**만 알고 어느 전략인지는 신경 쓰지 않게 한다.
 
-두 엔진이 원래 다른 점(이 모듈이 흡수하는 것):
-  - 현재 상태 함수 이름과 반환 형태 (`compute_picks` vs `current_positions`)
-  - 일별 곡선 형태 — 모멘텀은 전일 대비 변동률(%), 신고가는 구간 시작 대비 누적(%)
-  - 사전 준비 — 신고가만 가격 패널(`load_context`)이 필요하다
-  - 백테스트 인자 순서
+전략마다 다른 점(이 모듈이 흡수하는 것):
+  - 상태·백테스트 함수의 인자와 반환 형태 (포트폴리오는 슬롯·보유 기간 개념이 없다)
+  - 사전 준비 — 모멘텀·신고가만 가격 패널(`load_context`)이 필요하다
 
 일별 곡선은 **누적 배수**(시작 1.0)로 통일해서 돌려준다 — 합성이 형태를 다시 따질 일이 없다.
 """
@@ -182,9 +180,8 @@ class SlotState:
     """슬리브 하나의 **오늘 상태**를 전략과 무관한 한 형태로 담는다.
 
     합성 운용 현황(`mix_positions`)이 이것만 보고 돈다. 전략마다 다른 것:
-      - 슬롯을 채우는 방식 — 모멘텀은 순위 상위 N, 신고가는 보유 + 진입 예정
-      - 매도 리듬 — 모멘텀은 주간 교체 + 주중 자격 상실, 신고가는 이탈·손절
-      - 보유 기간 단위 — "주" vs "일"
+      - 슬롯을 채우는 방식 — 모멘텀은 이격 순위, 신고가는 돌파 순, 포트폴리오는 고정 비중
+      - 매도 신호 — 모멘텀은 자격 상실, 신고가는 이탈, 포트폴리오는 없음(비중 되돌리기만)
     이 차이는 전부 `slot_state()` 안에서 흡수하고, 밖으로는 아래 필드만 낸다.
     """
 
@@ -204,12 +201,8 @@ class SlotState:
     exit_forecast: list[dict[str, Any]] = field(default_factory=list)
     # 다음 거래일 시가에 새로 담는 것 — {ticker, name, price, change_pct, value_mult}
     entries: list[dict[str, Any]] = field(default_factory=list)
-    # 주기적 교체가 있는 전략만 — {is_filled, fill_date, signal_date, portfolio_week, buys, sells}
-    rebalance: dict[str, Any] | None = None
     # 기준일에 엔진이 체결한 거래 — 목표 판정이 아니라 액션 사유 표시용이다.
     engine_trades: list[dict[str, Any]] = field(default_factory=list)
-    # 다음 교체 예상 종목 {ticker: row} — 교체가 있는 전략만. 다음주 가정 미리보기가 쓴다.
-    next_expected: dict[str, dict[str, Any]] = field(default_factory=dict)
     # 데이터 기준일·장중 반영 — 이 정보를 주는 전략만 채운다.
     as_of: str | None = None
     live: bool = False
@@ -273,7 +266,6 @@ def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
         sells=[],
         exit_forecast=[],
         entries=[],
-        rebalance=None,
         engine_trades=[trade for trade in raw["trades"] if trade["date"] == raw["as_of"]],
         as_of=raw["as_of"],
     )
@@ -375,7 +367,6 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
             }
             for row in planned
         ],
-        rebalance=None,
         as_of=raw.get("as_of"),
         live=bool(raw.get("live")),
     )
