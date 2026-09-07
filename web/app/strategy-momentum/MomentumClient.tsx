@@ -198,6 +198,8 @@ type Holding = Omit<PlanRow, "plan"> & { status: "hold" | "sell" };
 
 type Positions = {
   as_of: string;
+  /** 이 결과를 계산한 종목풀 — 풀 전환 중 도착한 이전 풀의 늦은 응답을 거르는 기준. */
+  pool?: string;
   /** 동시 보유 상한 — 빈 슬롯 행 수를 세는 데 쓴다. */
   top_n: number;
   /** 표시용 시세 갱신에 쓰는 국가 코드(시세 소스가 국가별로 다르다). */
@@ -362,8 +364,13 @@ export function MomentumClient() {
     setDraftAdrFloor(values.adr_floor == null ? "" : String(values.adr_floor));
   }, []);
 
+  /** 지금 화면이 보고 있는 풀 — 풀 전환 중 도착한 **이전 풀의 늦은 응답**을 버리는 기준. */
+  const currentPoolRef = useRef<string>("");
+
   const applyView = useCallback(
     (data: View) => {
+      if (currentPoolRef.current && data.settings.pool !== currentPoolRef.current) return;
+      currentPoolRef.current = data.settings.pool;
       setView(data);
       setDraftPool(data.settings.pool);
       fillDrafts(data.settings);
@@ -421,6 +428,8 @@ export function MomentumClient() {
       });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "선정에 실패했습니다.");
+      // 풀 전환 중 도착한 이전 풀의 응답은 버린다 — 셀렉트와 표가 다른 풀로 어긋난다.
+      if ((payload as Positions).pool && (payload as Positions).pool !== currentPoolRef.current) return;
       setPickProgress({ percent: 100, message: "선정 결과 반영 중" });
       setView((prev) => (prev ? { ...prev, positions: payload as Positions } : prev));
     } catch (error) {
@@ -510,6 +519,8 @@ export function MomentumClient() {
     (pool: string) => {
       setDraftPool(pool);
       writeRememberedTickerType("strategy-momentum", pool);
+      // 전환 즉시 기준 풀을 바꾼다 — 진행 중이던 이전 풀 요청의 늦은 응답이 여기서 걸러진다.
+      currentPoolRef.current = pool;
       // 풀이 바뀌면 이전 풀의 백테스트 결과는 의미가 없다 — 저장 이력이 없어 아래 분기를 타지
       // 않는 풀(그 풀 첫 진입)도 마찬가지라 분기 밖에서 비운다.
       // 튜닝 결과는 StrategyTuning 이 key={draftPool} 로 재마운트되며 함께 비워진다.
