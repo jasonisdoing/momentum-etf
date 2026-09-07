@@ -2,7 +2,7 @@
 
 import { StrategyStartDate } from "../components/StrategyStartDate";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -186,6 +186,8 @@ function fmtNum(value: number | null | undefined, digits = 2): string {
 export function PortfolioClient() {
   const toast = useToast();
   const [view, setView] = useState<View | null>(null);
+  /** 지금 화면이 보고 있는 풀 — 풀 전환 중 도착한 이전 풀의 늦은 응답을 버리는 기준. */
+  const currentPoolRef = useRef<string>("");
   const [draft, setDraft] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -220,6 +222,8 @@ export function PortfolioClient() {
         const payload = (await response.json()) as View;
         if (!response.ok) throw new Error(payload.error ?? "설정을 불러오지 못했습니다.");
         if (!alive) return;
+        if (currentPoolRef.current && payload.settings.pool !== currentPoolRef.current) return;
+        currentPoolRef.current = payload.settings.pool;
         setView(payload);
         setDraft(payload.settings);
         setBacktestMonths(payload.constraints.default_backtest_months);
@@ -237,10 +241,13 @@ export function PortfolioClient() {
   const loadPool = useCallback(async (nextPool: string) => {
     setLoading(true);
     setError(null);
+    // 전환 즉시 기준 풀을 바꾼다 — 진행 중이던 이전 풀 요청의 늦은 응답이 화면을 덮지 못한다.
+    currentPoolRef.current = nextPool;
     try {
       const response = await fetch(`/api/strategy-portfolio?pool=${encodeURIComponent(nextPool)}`, { cache: "no-store" });
       const payload = (await response.json()) as View;
       if (!response.ok) throw new Error(payload.error ?? "설정을 불러오지 못했습니다.");
+      if (payload.settings.pool !== currentPoolRef.current) return;
       setView(payload);
       setDraft(payload.settings);
       // 풀이 바뀌면 전 풀의 백테스트 결과는 의미가 없다.
