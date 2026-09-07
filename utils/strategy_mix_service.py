@@ -825,15 +825,47 @@ def _attach_disparity(holdings: list[dict[str, Any]], pool_by_source: dict[str, 
         return ma_by_pool[pool]
 
     frames = load_cached_frames_bulk_from_all_ticker_types(tickers)
+
+    # 장중에는 실시간 가격을 마지막 봉으로 얹어 판정한다(AGENTS.md §10-6) — 순위 화면과
+    # 같은 공용 함수(`build_effective_close_series`)라 두 화면의 ❗ 배지가 갈리지 않는다.
+    from services.price_service import get_realtime_snapshot
+    from utils.rankings import build_effective_close_series
+
+    country_of_pool: dict[str, str] = {}
+
+    def country_of(pool: str) -> str:
+        if pool not in country_of_pool:
+            config = get_ticker_type_settings(pool) or {}
+            country_of_pool[pool] = str(config.get("country_code") or "").strip().lower()
+        return country_of_pool[pool]
+
+    def pool_of_row(row: dict[str, Any]) -> str:
+        # 여러 슬리브에 함께 잡힌 종목은 **첫 슬리브**의 풀 이평선으로 본다 — 배지가
+        # 하나뿐이라 기준도 하나여야 한다(슬롯 순서가 그 우선순위다).
+        ticker = str(row.get("ticker") or "").strip()
+        sources = row.get("sources") or []
+        source = next((key for key in pool_by_source if key in sources), "")
+        return pool_by_source.get(source, "") if source else pool_by_ticker.get(ticker.upper(), "")
+
+    tickers_by_country: dict[str, list[str]] = {}
+    for row in holdings:
+        ticker = str(row.get("ticker") or "").strip()
+        pool = pool_of_row(row)
+        country = country_of(pool) if pool else ""
+        if ticker and country:
+            tickers_by_country.setdefault(country, []).append(ticker)
+    realtime: dict[str, dict[str, Any]] = {}
+    for country, country_tickers in tickers_by_country.items():
+        try:
+            realtime.update(get_realtime_snapshot(country, country_tickers))
+        except Exception:
+            logger.warning("[합성] 실시간 시세 조회 실패(%s) — 확정 종가로 판정", country, exc_info=True)
+
     for row in holdings:
         row["current_short_pct"] = None
         row["current_long_pct"] = None
         ticker = str(row.get("ticker") or "").strip()
-        # 여러 슬리브에 함께 잡힌 종목은 **첫 슬리브**의 풀 이평선으로 본다 — 배지가
-        # 하나뿐이라 기준도 하나여야 한다(슬롯 순서가 그 우선순위다).
-        sources = row.get("sources") or []
-        source = next((key for key in pool_by_source if key in sources), "")
-        pool = pool_by_source.get(source, "") if source else pool_by_ticker.get(ticker.upper(), "")
+        pool = pool_of_row(row)
         days = ma_days_of(pool) if pool else None
         if days is None:
             continue
@@ -843,6 +875,11 @@ def _attach_disparity(holdings: list[dict[str, Any]], pool_by_source: dict[str, 
         close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
         if close.empty:
             continue
+        entry = realtime.get(ticker)
+        if entry:
+            effective = build_effective_close_series(close, entry)
+            if effective is not None:
+                close = effective
         metrics = momentum_metrics(close, short_ma_days=days[0], long_ma_days=days[1], as_of=None)
         if not metrics:
             continue

@@ -261,7 +261,7 @@ REBALANCE_BAND_PCT_OPTIONS: tuple[float, ...] = (1.0, 2.0, 3.0, 4.0, 5.0)
 SHORT_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {
     "kor": (5, 10, 20, 30, 40, 60, 120),
     "us":  (10, 20, 30, 50, 100),
-    "au":  (10, 20, 30, 50, 100),
+    "au":  (10, 20, 30, 50, 100, 150),
 }
 LONG_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {
     "kor": (60, 90, 120, 180, 240),
