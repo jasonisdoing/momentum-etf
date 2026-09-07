@@ -3,7 +3,7 @@
 import { StrategyStartDate } from "../components/StrategyStartDate";
 
 import type { ColDef } from "ag-grid-community";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconCheck } from "@tabler/icons-react";
 
 import { formatMarketCapWon } from "@/lib/market-cap-format";
@@ -444,10 +444,16 @@ export function NewHighClient() {
   // 진입·청산 체결일 — 장 시작 전에는 '오늘', 마감 뒤 캐시가 갱신되면 '내일' 이 된다.
   const fillDay = formatFillDay(positions?.next_session);
 
+  /** 지금 화면이 보고 있는 풀 — 풀 전환 중 도착한 **이전 풀의 늦은 응답**을 버리는 기준.
+   *  로딩 중에 풀을 바꾸면 이전 요청의 응답이 나중에 도착해 다른 풀의 보유가 표에 남는다. */
+  const currentPoolRef = useRef<string>("");
+
   /** 서버 응답(GET)을 화면에 반영한다 — 초기 로드와 풀 전환이 같은 경로를 쓴다.
    *  선택지 밖 저장값은 서버가 보정(coerce)해 보내므로 여기서 경고만 띄운다. */
   const applyViewPayload = useCallback(
     (payload: View) => {
+      if (currentPoolRef.current && payload.settings.pool !== currentPoolRef.current) return;
+      currentPoolRef.current = payload.settings.pool;
       setView(payload);
       setDraft(payload.settings);
       if (payload.coerced?.length) {
@@ -493,6 +499,8 @@ export function NewHighClient() {
       });
       const payload = (await response.json()) as Positions & { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "돌파 종목을 불러오지 못했습니다.");
+      // 풀 전환 중 도착한 이전 풀의 응답은 버린다 — 셀렉트와 표가 다른 풀로 어긋난다.
+      if (payload.pool && payload.pool !== currentPoolRef.current) return;
       setPositions(payload);
     } catch (runError) {
       toast.error(runError instanceof Error ? runError.message : "돌파 종목을 불러오지 못했습니다.");
@@ -566,6 +574,8 @@ export function NewHighClient() {
     (pool: string) => {
       if (!view) return;
       writeRememberedTickerType("strategy-new-high", pool);
+      // 전환 즉시 기준 풀을 바꾼다 — 진행 중이던 이전 풀 요청의 늦은 응답이 여기서 걸러진다.
+      currentPoolRef.current = pool;
       setPositions(null);
       setBacktest(null);
       void (async () => {
