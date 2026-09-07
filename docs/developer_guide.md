@@ -47,7 +47,9 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | `/data-tables` | DB 컬렉션 카탈로그 — 분류·크기·고아 데이터 | `utils/data_table_catalog.py` |
 | `/m` | 폰 전용. 모바일 전용 API 는 만들지 않는다(`web/app/m/mobile-data.ts` 가 기존 API 합성) | |
 
-합성 운용 배분·백테스트는 `utils/strategy_mix_service._simulate_mix`를 공유하며 월초 배분은 `core/strategy/mix_rebalance.py`가 담당한다. 각 엔진의 일별 결과 `cash_weight_pct`를 읽어 전략 내부 현금을 보존한다.
+합성 운용 배분·백테스트는 `utils/strategy_mix_service._simulate_mix`를 공유하며 월초 배분은 `core/strategy/mix/rebalance.py`가 담당한다. 각 엔진의 일별 결과 `cash_weight_pct`를 읽어 전략 내부 현금을 보존한다.
+
+전략 핵심 코드 이동은 `core/strategy/to_do.md`에서 추적한다. 공통 슬롯 엔진은 `core/strategy/slot_backtest.py`, 합성 월초 배분은 `core/strategy/mix/rebalance.py`, 전략 규칙은 `core/strategy/strategy_logic.md`가 단일 소스다. 엔진의 외부 데이터 조회 의존성 분리는 아직 진행 전이다.
 
 전략 공용 모듈:
 - 전략 시작일은 모멘텀의 `pool_settings.MOMENTUM_START_DATE`, 신고가·포트폴리오의 풀별 `start_date`에 저장한다. 검증은 `utils/strategy_settings.py`, 개별 운용 현황과 합성은 같은 저장일로 계산한다.
@@ -114,7 +116,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | 고아 점검이 환율 캐시를 "주인 없는 데이터" 로 잡음 | OHLCV 저장 코드를 재사용하려고 환율·레버리지도 `cache_<토큰>_stocks` 에 넣어, 소유자 캐시와 이름 형식이 같았다 | 참조 시세를 `reference_*` 로 분리(`cache_utils._REFERENCE_COLLECTIONS`). 예외 목록으로 막지 않고 형식을 갈랐다 |
 | `/batch` 에 뜨는데 실행 버튼이 400 (`kor_dividend_stocks`) | `SCHEDULE_ROWS` 에만 등록되고 `SystemAction`·`_SCRIPT_BY_ACTION`·crontab 누락 | 위 7곳 체크리스트대로 채움 |
 
-합성 액션 사유는 `strategy_mix_service._action_reasons`에서 조립하며 화면·슬랙이 같은 문구를 읽는다. 포트폴리오 `current_positions`의 거래 내역 중 기준일 거래를 `SlotState.engine_trades`로 전달하며 목표 계산에는 사용하지 않는다.
+합성 액션 사유는 `core/strategy/mix/actions.py`에서 조립하며 화면·슬랙이 같은 문구를 읽는다. 포트폴리오 `current_positions`의 거래 내역 중 기준일 거래를 `SlotState.engine_trades`로 전달하며 목표 계산에는 사용하지 않는다.
 
 계좌 설정 `mix_min_adjustment_amount`는 계좌 국가의 현지 통화 금액이다. 미설정 기존 계좌는 0(필터 없음)으로 해석한다. 합성은 `cash_model.currency_for_country`로 통화를 결정하고 슬리브의 국가·통화 일치를 확인한다. 액션 조립에서 전략 이벤트 없는 목표 수량 조정만 걸러 화면·슬랙에 공통 적용한다.
 

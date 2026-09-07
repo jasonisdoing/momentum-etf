@@ -1,6 +1,6 @@
 """운용 현황 공용 — 신고가·모멘텀이 함께 쓰는 **오늘 상태** 조회 도구.
 
-백테스트 엔진(`utils.slot_backtest`)이 굴린 결과를 화면이 읽을 수 있게 만들 때 필요한
+백테스트 엔진(`core.strategy.slot_backtest`)이 굴린 결과를 화면이 읽을 수 있게 만들 때 필요한
 것들이다: 진행 중인 세션의 실시간 시세, 시장 현지 날짜, 다음 거래일, 시가총액·표시 시세.
 두 전략이 같은 표를 그리므로 판정 내용만 각자 하고 이 부분은 함께 쓴다.
 """
@@ -19,6 +19,57 @@ logger = get_app_logger()
 # 실제로 예상체결가가 움직이는 구간은 동시호가(개장 30분 전~개장)라 한 시간이면 넉넉하다.
 # 시세 제공처의 '장전' 플래그는 새벽부터 켜져 있을 수 있어 그것만 믿고 돌리지 않는다.
 _PRE_MARKET_REFRESH_LEAD_MINUTES = 60
+
+
+def adr_entry_gate(pool: str, adr_floor: Any) -> tuple[Any, Any]:
+    """ADR 진입 게이트와 표시값 조회 함수를 한 쌍으로 만든다 — (entry_blocked, adr_at).
+
+    게이트는 **신규 진입만** 막는다 — 보유 청산은 그대로 돈다. 하한이 없거나 레짐 시장이
+    없는 풀이면 아무것도 막지 않고, 표시값도 None 이다. ADR 이력 이전 날짜는 미적용이다.
+    DB 조회(ADR 이력)가 있어 엔진 밖에 둔다 — 엔진은 이 함수 쌍을 인자로 받는다.
+    """
+    from utils.momentum_service import adr_market_of_pool, load_adr_series
+
+    market = adr_market_of_pool(pool)
+    series = load_adr_series(market) if market else pd.Series(dtype=float)
+
+    def adr_at(stamp: pd.Timestamp) -> float | None:
+        if series.empty:
+            return None
+        value = series.asof(pd.Timestamp(stamp))
+        return round(float(value), 1) if pd.notna(value) else None
+
+    def entry_blocked(stamp: pd.Timestamp) -> bool:
+        if adr_floor is None or series.empty:
+            return False
+        value = series.asof(pd.Timestamp(stamp))
+        return bool(pd.notna(value) and float(value) < float(adr_floor))
+
+    return entry_blocked, adr_at
+
+
+def load_slot_market(pool: str, adr_floor: Any) -> dict[str, Any]:
+    """슬롯 엔진 실행에 필요한 시장 파라미터 수집 — 엔진은 조회 없이 이 값들만 받는다.
+
+    슬리피지·시작 자본은 운용 현황 **캐시 키에도 들어간다** — 키에 없으면 풀 설정을 바꿔도
+    5분 동안 이전 값으로 계산된 결과가 보인다.
+    """
+    from utils.benchmark_curve import benchmark_growth
+    from utils.new_high_service import benchmark_info
+    from utils.pool_settings_store import get_pool_slippage
+    from utils.share_allocation import backtest_initial_capital
+
+    buy_slippage, sell_slippage = get_pool_slippage(pool)
+    entry_blocked, adr_at = adr_entry_gate(pool, adr_floor)
+    return {
+        "buy_slippage": buy_slippage,
+        "sell_slippage": sell_slippage,
+        "initial_capital": backtest_initial_capital(pool),
+        "entry_blocked": entry_blocked,
+        "adr_at": adr_at,
+        "benchmark_growth": lambda index: benchmark_growth(pool, index),
+        "benchmark_name": benchmark_info(pool)["name"],
+    }
 
 
 def _market_caps(pool: str) -> dict[str, float]:

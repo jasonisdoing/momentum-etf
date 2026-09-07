@@ -4,11 +4,11 @@ from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import StreamingResponse
 
 from config import HOLDING_CHART_MONTHS
+from core.strategy.new_high.signals import HIGH_WINDOW_WEEKS
 from fastapi_app.dependencies import require_internal_token
 from fastapi_app.streaming import sse_stream
 from utils.new_high_service import (
     DEFAULT_SETTINGS,
-    HIGH_WINDOW_WEEKS,
     load_settings,
     load_settings_for_view,
     load_settings_map,

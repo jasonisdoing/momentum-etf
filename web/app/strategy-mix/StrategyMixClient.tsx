@@ -239,7 +239,7 @@ type Holding = {
   held_value?: number | null;
   current_weight_pct?: number;
   trade_quantity?: number | null;
-  /** 주중 이탈 예상(오늘 종가 확정 시) — 매매수량·상태에 예상으로 겹쳐 보여준다. */
+  /** 장중 이탈 예상(오늘 종가 확정 시) — 매매수량·상태에 예상으로 겹쳐 보여준다. */
   is_exit_forecast?: boolean;
   forecast_trade_quantity?: number | null;
   /** 이탈 후 남을 목표수량 — 목표수량 칸에 (예상)으로 겹쳐 쓴다. */
@@ -319,12 +319,6 @@ type Positions = {
     sleeve_rebalance_today: boolean;
     /** 오늘의 액션 — 서버가 조립한 체결일 묶음(화면·슬랙 알람 공용 단일 소스). */
     groups: ActionGroup[];
-    /** 다음주 교체 가정 미리보기 — 오늘의 액션과 같은 조립을 다음주 가정 목표로 돌린 결과.
-     *  종목 교체가 없으면 오늘의 액션과 똑같다. 과거 조회면 null. */
-    next_week_preview: {
-      fill_date: string | null;
-      groups: ActionGroup[];
-    } | null;
   };
 };
 
@@ -344,15 +338,6 @@ type SlotActions = {
     change_pct: number | null;
     value_mult: number | null;
   }[];
-  /** 주기적 교체가 있는 전략만 — 판정은 끝났고 체결만 남았다. 없으면 null. */
-  rebalance: {
-    is_filled: boolean;
-    fill_date: string | null;
-    signal_date: string | null;
-    portfolio_week: string | null;
-    buys: { ticker: string; name: string; price: number | null }[];
-    sells: { ticker: string; name: string }[];
-  } | null;
 };
 
 const VIEW_MODES = [
@@ -524,9 +509,6 @@ export function StrategyMixClient() {
     useState<LoadingProgress | null>(null);
   /** 계좌를 저장하면 목표 금액이 달라지므로 운용 현황를 다시 계산한다. */
   const [positionsReloadKey, setPositionsReloadKey] = useState(0);
-  /** 다음주 교체 가정 — 기본 접힘 (참고 정보). */
-  const [nextWeekOpen, setNextWeekOpen] = useState(false);
-
   // 백테스트 탭.
   const [view, setView] = useState<View | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
@@ -988,14 +970,14 @@ export function StrategyMixClient() {
           field: "shares",
           headerName: "목표수량",
           headerTooltip:
-            "슬리브 몫 안에서 백테스트 비중대로 배분한 정수 주수. 1주 값보다 몫이 작으면 「1주 못 삼」. 주중 이탈이 예상되는 종목은 이탈 후 남을 목표를 (예상)으로 보여준다.",
+            "슬리브 몫 안에서 백테스트 비중대로 배분한 정수 주수. 1주 값보다 몫이 작으면 「1주 못 삼」. 장중 이탈이 예상되는 종목은 이탈 후 남을 목표를 (예상)으로 보여준다.",
           width: 88,
           type: "numericColumn",
           valueFormatter: (p) => {
             // 1주도 못 사는 종목 — 수량 대신 경고를 쓴다. 계좌가 작아 도달할 수 없는 목표라,
             // 0 으로만 두면 "안 사도 되는 종목" 으로 읽힌다.
             if (p.data?.unaffordable) return "1주 못 삼";
-            // 예상 이벤트(주중 이탈)가 있는 행만 예상 목표로 겹쳐 쓴다.
+            // 예상 이벤트(장중 이탈)가 있는 행만 예상 목표로 겹쳐 쓴다.
             // 가격 변동으로 목표와 조금 어긋나는 것은 예상이 아니라 그대로 둔다.
             const forecast = p.data?.forecast_target_quantity;
             if (p.data?.is_exit_forecast && forecast != null) {
@@ -1029,7 +1011,7 @@ export function StrategyMixClient() {
             return `${value > 0 ? "+" : ""}${value.toLocaleString("ko-KR")}`;
           },
           // 매수(+)·매도(−) 색은 사이트 공용 기준을 따른다 — 한국 관례로 매수 빨강·매도 파랑.
-          // 주중 이탈 예상은 확정이 아니므로 흐리게 구분한다.
+          // 장중 이탈 예상은 확정이 아니므로 흐리게 구분한다.
           cellStyle: (p) => {
             if (p.data?.is_exit_forecast && p.data?.forecast_trade_quantity != null) {
               return { color: "var(--down-color, #2f6fd0)", fontWeight: 600, opacity: 0.65 };
@@ -1449,7 +1431,6 @@ export function StrategyMixClient() {
   // 오늘의 액션 — 조립은 서버(`_build_action_groups`)가 한다. 슬랙 알람과 같은 결과를
   // 쓰기 위한 단일 소스라, 화면은 받은 그대로 그리기만 한다.
   const actionGroups = actions?.groups ?? [];
-  const nextWeekPreview = actions?.next_week_preview ?? null;
 
   const hasActions =
     actionGroups.length > 0 || Boolean(actions?.sleeve_rebalance_today);
@@ -1781,17 +1762,6 @@ export function StrategyMixClient() {
                         .filter(Boolean)
                         .join(" · ")}
                     </span>
-                    {/* 미체결 교체 안내 — 교체가 있는 슬리브마다 한 줄. 계좌에 여럿일 수 있다. */}
-                    {slotKeys.map((slot) => {
-                      const rebalance = actions?.slots?.[slot]?.rebalance;
-                      if (!rebalance || rebalance.is_filled || !rebalance.fill_date) return null;
-                      return (
-                        <span key={slot} style={hintStyle}>
-                          {slotLabel(slot)} {rebalance.portfolio_week} 포트폴리오 · 체결{" "}
-                          {rebalance.fill_date} (판정 {rebalance.signal_date})
-                        </span>
-                      );
-                    })}
                     {actions?.sleeve_rebalance_today ? (
                       <span
                         style={{
@@ -1981,97 +1951,6 @@ export function StrategyMixClient() {
                       </div>
                     )}
                   </div>
-
-                  {/* ⑤ 다음주 교체 가정 — 지금 순위 그대로 확정될 때의 예상 (주기적 교체가 있는 슬리브만).
-                      기본 접힘 — 금요일쯤 궁금할 때 열어 보는 참고 정보라 평소에는 줄만 차지한다. */}
-                  {nextWeekPreview ? (
-                    <div>
-                      <button
-                        type="button"
-                        onClick={() => setNextWeekOpen((value) => !value)}
-                        style={{
-                          fontWeight: 700,
-                          margin: 0,
-                          padding: 0,
-                          background: "none",
-                          border: "none",
-                          cursor: "pointer",
-                          color: "inherit",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                        }}
-                      >
-                        <span>{nextWeekOpen ? "▾" : "▸"}</span>
-                        다음주 교체 가정
-                        <span style={{ ...hintStyle, fontWeight: 500 }}>
-                          매도{" "}
-                          {nextWeekPreview.groups.reduce(
-                            (n, g) =>
-                              n + g.items.filter((i) => i.side === "sell").length,
-                            0,
-                          )}
-                          건 · 매수{" "}
-                          {nextWeekPreview.groups.reduce(
-                            (n, g) =>
-                              n + g.items.filter((i) => i.side === "buy").length,
-                            0,
-                          )}
-                          건 (예상)
-                        </span>
-                      </button>
-                      {nextWeekOpen ? (
-                        <div style={{ marginTop: 6 }}>
-                          <div style={{ ...hintStyle, marginBottom: 6 }}>
-                            지금 순위가 그대로 다음주 교체로 확정된다고 가정하고,
-                            오늘의 액션과 같은 방식으로 조립한 월요일 예상입니다 —
-                            종목 교체가 없으면 오늘의 액션과 똑같습니다. 판정은
-                            이번주 마지막 거래일 종가로 확정되므로 그때까지 바뀔 수
-                            있고, 수량은 현재가·현재 총자산 기준 추정치입니다.
-                          </div>
-                          {nextWeekPreview.groups.length === 0 ? (
-                            <div style={hintStyle}>
-                              예상되는 매매가 없습니다 — 보유 목록이 그대로
-                              유지됩니다.
-                            </div>
-                          ) : (
-                            nextWeekPreview.groups.map((group) => (
-                              <div key={`nw-${group.key}`}>
-                                <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                                  {group.title} (예상)
-                                </div>
-                                <ul
-                                  style={{
-                                    margin: 0,
-                                    paddingLeft: 18,
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: 4,
-                                  }}
-                                >
-                                  {group.items.map((item) => (
-                                    <li key={`nw-${item.key}`}>
-                                      <strong
-                                        style={{
-                                          color:
-                                            item.side === "sell"
-                                              ? "var(--down-color, #2f6fd0)"
-                                              : "var(--up-color, #d64545)",
-                                        }}
-                                      >
-                                        {item.title}
-                                      </strong>{" "}
-                                      — {item.text}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
                 </div>
               )}
             </div>

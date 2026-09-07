@@ -55,6 +55,28 @@ def _positions_of(holdings: list[dict[str, Any]]) -> dict[str, str]:
     return {str(row["ticker"]): str(row["entry_date"]) for row in holdings}
 
 
+def _expected_mix_targets(ctx: dict[str, Any]) -> set[str]:
+    """합성 목표의 기대값 — 각 전략 운용 현황(합성이 실제로 읽는 그 페이로드)에서 만든다.
+
+    확정·장중 어느 경우든 유효하다: 보유에서 매도(체결 예정·잠정 예정 포함)를 빼고
+    진입 예정(빈 자리만큼)을 더한 '다음 시가 이후의 보유'다.
+    """
+    from utils.mix_sleeve import PORTFOLIO, current_state
+
+    expected: set[str] = set()
+    for spec in ctx["slots"]:
+        positions = current_state(spec)
+        if spec.strategy == PORTFOLIO:
+            expected |= {row["ticker"] for row in positions["open_positions"] if row["sleeve_weight_pct"] > 0}
+            continue
+        held = positions["holdings"]
+        exiting = sum(1 for row in held if row.get("status") == "sell")
+        free = max(int(positions["top_n"]) - (len(held) - exiting), 0)
+        expected |= {str(row["ticker"]) for row in held if row.get("status") != "sell"}
+        expected |= {str(row["ticker"]) for row in positions["planned_entries"][:free]}
+    return expected
+
+
 class MomentumScreenMatchesBacktest(unittest.TestCase):
     """모멘텀 운용 현황의 보유 = 백테스트를 현재까지 돌린 마지막 상태."""
 
@@ -122,21 +144,12 @@ class MixScreenMatchesSleeveBacktests(unittest.TestCase):
 
     def test_target_tickers_come_from_sleeve_backtests(self) -> None:
         _load_env()
-        from utils.mix_sleeve import PORTFOLIO, load_context, run_backtest
         from utils.strategy_mix_service import _resolve_mix_account, mix_positions
 
         try:
             ctx = _resolve_mix_account(MIX_ACCOUNT)
-            expected: set[str] = set()
-            for spec in ctx["slots"]:
-                if spec.strategy == PORTFOLIO:
-                    result = run_backtest(spec, 12, start_date=spec.settings["start_date"])
-                    expected |= {row["ticker"] for row in result["open_positions"] if row["sleeve_weight_pct"] > 0}
-                    continue
-                result = run_backtest(spec, 12, load_context(spec), start_date=spec.settings["start_date"])
-                held = {str(row["ticker"]) for row in result["open_positions"]}
-                expected |= (held - set(result["planned_exits"])) | set(result["planned_entries"])
             screen = mix_positions(MIX_ACCOUNT)
+            expected = _expected_mix_targets(ctx)
         except Exception as error:  # noqa: BLE001
             _skip_if_unavailable(error)
 
@@ -153,27 +166,121 @@ class MixScreenMatchesSleeveBacktests(unittest.TestCase):
         )
 
 
+class IntradayScreenMixConsistencyTest(unittest.TestCase):
+    """장중 고정 입력 — 실시간 시세를 흉내 내(일부는 시가 미상) 화면·합성이 **같은 잠정
+    실행**을 읽는지 검증한다(AGENTS.md §10-6, 3단계 일치 검증).
+
+    가격 수준은 인위적이어도 된다 — 여기서 지키는 것은 값이 아니라 '합성이 판정을 다시
+    하지 않고 전략 운용 현황(잠정 실행 반영본)을 그대로 소비한다'는 관계다.
+    """
+
+    def test_live_screen_and_mix_share_the_same_run(self) -> None:
+        _load_env()
+        import utils.momentum_backtest as momentum_backtest
+        import utils.new_high_backtest as new_high_backtest
+        from utils.strategy_mix_service import _SHARES_CACHE, _resolve_mix_account, mix_positions
+
+        def fake_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> dict[str, Any]:
+            session = str((cached_last + pd.Timedelta(days=1)).date())
+            by_ticker = {}
+            for index, ticker in enumerate(sorted(set(tickers))):
+                by_ticker[ticker] = {
+                    "price": 50.0,
+                    "high": 51.0,
+                    # 절반은 시가 미상(국내 ETF 흉내) — 체결 예정 경로까지 함께 태운다.
+                    "open": None if index % 2 else 50.0,
+                    "change_pct": -1.0,
+                }
+            return {"live": True, "pre_market": False, "traded_at": session, "by_ticker": by_ticker}
+
+        from utils.portfolio_backtest import _POSITIONS_CACHE as _PORTFOLIO_CACHE
+
+        caches = (
+            momentum_backtest._POSITIONS_CACHE,
+            new_high_backtest._POSITIONS_CACHE,
+            _PORTFOLIO_CACHE,
+            _SHARES_CACHE,
+        )
+        try:
+            for cache in caches:
+                cache.invalidate()
+            with (
+                patch.object(momentum_backtest, "_live_quotes", fake_quotes),
+                patch.object(new_high_backtest, "_live_quotes", fake_quotes),
+                patch("utils.slot_positions._live_quotes", fake_quotes),
+            ):
+                from utils.mix_sleeve import PORTFOLIO, current_state
+
+                ctx = _resolve_mix_account(MIX_ACCOUNT)
+                mix = mix_positions(MIX_ACCOUNT)
+                expected = _expected_mix_targets(ctx)
+                slot_positions = {spec.key: current_state(spec) for spec in ctx["slots"] if spec.strategy != PORTFOLIO}
+        except Exception as error:  # noqa: BLE001
+            _skip_if_unavailable(error)
+        finally:
+            # 가짜 실시간이 든 결과를 다른 테스트·다음 계산이 읽지 않게 비운다.
+            for cache in caches:
+                cache.invalidate()
+
+        targets = {
+            str(row["ticker"])
+            for row in mix["holdings"]
+            if not row.get("is_cash") and float(row.get("weight_pct") or 0) > 0
+        }
+        self.assertEqual(targets, expected, "장중 합성 목표가 전략 운용 현황(잠정 실행)과 다릅니다.")
+        for key, positions in slot_positions.items():
+            self.assertTrue(positions["live"], f"{key} 슬리브가 장중 실행을 쓰지 않았습니다.")
+            for row in positions["planned_entries"]:
+                self.assertIsNotNone(row.get("sleeve_weight_pct"), f"{key} 진입 예정 비중 누락: {row['ticker']}")
+            for row in positions["holdings"]:
+                if row.get("fill_date"):
+                    # 체결 예정 매도(확정)는 잠정 예상 표시가 아니어야 한다.
+                    self.assertEqual(row.get("status"), "sell")
+                    self.assertFalse(row.get("is_exit_forecast"))
+
+
 class PortfolioMixStateTest(unittest.TestCase):
     def test_screen_and_mix_match_portfolio_engine(self):
+        cases = [
+            # 일반 리밸런싱과 의도한 현금을 같은 엔진 상태로 전달한다.
+            ({"A": [100, 200, 220], "B": [100, 100, 100]}, [40, 40], 20, (0, 0)),
+            # 매수만 밴드를 벗어나도 화면·합성이 차입한 목표를 받으면 안 된다.
+            ({"A": [100, 90, 90], "B": [100, 320 / 3, 320 / 3], "C": [100, 320 / 3, 320 / 3]}, [40, 30, 30], 0, (0, 0)),
+            # 매도 비용이 있는 경우에도 실제 체결 후 비중을 공유한다.
+            ({"A": [100, 200, 220], "B": [100, 100, 100]}, [40, 40], 20, (0.1, 0.2)),
+        ]
+        for prices, weights, cash, slippage in cases:
+            with self.subTest(prices=prices, cash=cash, slippage=slippage):
+                self._assert_shared_state(prices, weights, cash, slippage)
+
+    def _assert_shared_state(self, prices, weights, cash, slippage):
+        # 케이스마다 슬리피지(설정 밖 외부 조회)만 바뀌므로 결과 캐시를 비운다 —
+        # 캐시 키는 설정·시작일 기준이라 이전 케이스의 실행이 재사용된다.
+        from utils.portfolio_backtest import _POSITIONS_CACHE
+
+        _POSITIONS_CACHE.invalidate()
         dates = ["2026-01-02", "2026-02-02", "2026-02-03"]
-        a_prices, rebalance, band, cash = [100, 200, 220], "monthly", 3, 20
         index = pd.to_datetime(dates)
-        frame = pd.DataFrame({"A": a_prices, "B": [100.0] * len(dates)}, index=index)
+        frame = pd.DataFrame(prices, index=index)
         settings = {
             "pool": "test",
             "start_date": dates[0],
-            "rebalance": rebalance,
-            "band_pct": band,
+            "rebalance": "monthly",
+            "band_pct": 3,
             "cash_weight_pct": cash,
-            "weights": [{"ticker": t, "weight_pct": (100 - cash) / 2} for t in ("A", "B")],
+            "weights": [{"ticker": t, "weight_pct": w} for t, w in zip(prices, weights, strict=True)],
         }
         with (
             patch("utils.portfolio_backtest.validate_settings", side_effect=lambda s: s),
             patch("utils.portfolio_backtest._load_close_frame", return_value=frame),
-            patch("utils.portfolio_backtest.get_pool_slippage", return_value=(0, 0)),
+            patch("utils.portfolio_backtest.get_pool_slippage", return_value=slippage),
             patch("utils.benchmark_curve.load_benchmark_frame", return_value=pd.DataFrame({"Close": 100}, index=index)),
             patch("utils.benchmark_curve.benchmark_growth", side_effect=lambda pool, ix: pd.Series(1.0, index=ix)),
             patch("utils.portfolio_backtest.benchmark_info", return_value={"name": "기준"}),
+            patch(
+                "utils.portfolio_backtest._overlay_live_last_bar",
+                side_effect=lambda pool, close, benchmark: (close, benchmark),
+            ),
         ):
             result = run_backtest(12, settings, start_date=dates[0])
             screen = current_positions(settings)
@@ -189,7 +296,12 @@ class PortfolioMixStateTest(unittest.TestCase):
         for source, target in zip(result["open_positions"], state.targets, strict=True):
             self.assertEqual(source["sleeve_weight_pct"], target["drift_pct"])
             self.assertEqual(source["price"], target["price"])
+            self.assertGreaterEqual(target["drift_pct"], 0)
+        self.assertGreaterEqual(result["sleeve_cash_weight_pct"], 0)
         self.assertAlmostEqual(sum(t["drift_pct"] for t in state.targets) + result["sleeve_cash_weight_pct"], 100)
+        if cash == 0:
+            self.assertFalse([trade for trade in result["trades"] if trade["reason"] == "리밸런싱"])
+            self.assertEqual([round(t["drift_pct"], 6) for t in state.targets], [36, 32, 32])
 
 
 class MixRebalanceMatchesBacktest(unittest.TestCase):
@@ -218,6 +330,95 @@ class MixRebalanceMatchesBacktest(unittest.TestCase):
             actual = _simulate_mix(ctx, results, through_date=None)
         self.assertEqual(pending["values"], actual["values"])
         self.assertEqual(pending["cash"], actual["cash"])
+
+
+class SlotEngineProvisionalBarTest(unittest.TestCase):
+    """슬롯 엔진의 잠정 마지막 봉 모드 — 고정 입력으로 §10-6 체결 규칙을 검증한다.
+
+    어제 확정된 주문이 오늘 시가에 체결되는 날, 시가를 안 주는 종목은 체결가를 지어내지
+    않고 '오늘 체결 예정'이 된다(매도는 보유 유지 + fill_date, 매수는 자리만 차지).
+    잠정일의 마지막 판정은 체결 예정을 재판정하지 않고 남은 자리만 잠정 후보로 채운다.
+    """
+
+    def test_pending_orders_and_provisional_judgment(self):
+        from core.strategy.slot_backtest import run_slot_backtest
+
+        dates = pd.to_datetime(["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"])
+        tickers = ["T1", "T2", "T3", "T4"]
+
+        def frame(rows: dict[str, list[float]]) -> pd.DataFrame:
+            return pd.DataFrame(rows, index=dates)[tickers]
+
+        nan = float("nan")
+        # T1: D1 진입 신호 → D2 시가 100 체결, D3 청산 신호 → D4 시가 없음(체결 예정 매도).
+        # T2: D3 진입 신호 → D4 시가 없음(체결 예정 매수, 우선순위 최상 — 자리를 먼저 차지).
+        # T3: D3 진입 신호 → D4 시가 41 체결(오늘 진입). T4: D4(잠정) 진입 신호 → 내일 예정.
+        close = frame(
+            {"T1": [100, 100, 100, 95], "T2": [100, 100, 100, nan], "T3": [40, 40, 40, 45], "T4": [10, 10, 10, 12]}
+        )
+        opens = frame(
+            {"T1": [100, 100, 100, nan], "T2": [100, 100, 100, nan], "T3": [40, 40, 40, 41], "T4": [10, 10, 10, nan]}
+        )
+        panel = {"close": close, "open": opens, "high": close, "value": close}
+        entry = frame({"T1": [1, 0, 0, 0], "T2": [0, 0, 1, 0], "T3": [0, 0, 1, 0], "T4": [0, 0, 0, 1]}).astype(bool)
+        exit_signal = frame({"T1": [0, 0, 1, 1], "T2": [0] * 4, "T3": [0] * 4, "T4": [0] * 4}).astype(bool)
+        priority = frame({"T1": [1.0] * 4, "T2": [9.0] * 4, "T3": [5.0] * 4, "T4": [3.0] * 4})
+
+        # 엔진은 외부 조회가 없다 — 시장 파라미터를 값으로 그대로 넘긴다(패치 불필요).
+        result = run_slot_backtest(
+            months=1,
+            panel=panel,
+            entry=entry,
+            exit_signal=exit_signal,
+            priority=priority,
+            slots=3,
+            name_by={t: t for t in tickers},
+            industry_by={},
+            exit_reason="이탈",
+            buy_slippage=0.0,
+            sell_slippage=0.0,
+            initial_capital=3000.0,
+            entry_blocked=lambda day: False,
+            adr_at=lambda day: None,
+            benchmark_growth=lambda index: pd.Series(1.0, index=index),
+            benchmark_name="BM",
+            start_date="2026-09-01",
+            provisional_last_bar=True,
+        )
+
+        # 체결 예정 매도 — 보유 유지, fill_date 부착, 보유일은 신호가 난 어제까지, 표시는 확정 종가.
+        self.assertEqual(result["pending_exits"], ["T1"])
+        by_ticker = {row["ticker"]: row for row in result["open_positions"]}
+        self.assertEqual(by_ticker["T1"]["fill_date"], "2026-09-04")
+        self.assertEqual(by_ticker["T1"]["days"], 2)
+        self.assertEqual(by_ticker["T1"]["price"], 95.0)  # 실시간 현재가는 표시하되 체결로 쓰지 않는다
+        self.assertEqual(result["exited_today"], [])  # 체결가를 지어내 이탈 표로 보내지 않는다
+        # 체결 예정 매수 — 우선순위대로 자리를 차지하고 슬롯 1칸 비중을 싣는다.
+        self.assertEqual(result["pending_entries"], [{"ticker": "T2", "sleeve_weight_pct": 100.0 / 3}])
+        # 시가를 아는 진입은 오늘 체결 — 슬롯 몫(현금 3,000 중 1,000)으로 41에 24주.
+        self.assertTrue(by_ticker["T3"]["is_new"])
+        self.assertEqual(by_ticker["T3"]["entry_date"], "2026-09-04")
+        self.assertEqual(by_ticker["T3"]["entry_price"], 41.0)
+        # 잠정일 판정 — 체결 예정 둘이 자리를 차지해 남은 한 자리만 잠정 후보(T4)로 채운다.
+        self.assertEqual(result["planned_exits"], [])
+        self.assertEqual(result["planned_entries"], ["T4"])
+        self.assertGreater(result["planned_entry_weights"]["T4"], 0.0)
+        # 잠정일이 일별 곡선에 포함된다(실시간 마지막 봉 평가).
+        self.assertEqual(result["daily"][-1]["date"], "2026-09-04")
+
+    def test_mark_engine_statuses_labels_without_judging(self):
+        from core.strategy.intraday import mark_engine_statuses
+
+        rows = [{"ticker": "PEND", "fill_date": "2026-09-04"}, {"ticker": "PLAN"}, {"ticker": "KEEP"}]
+        mark_engine_statuses(rows, ["PLAN"])
+        # 체결 예정 매도는 확정 'sell'(예상 아님), 잠정 매도 예정은 예상 표시, 나머지는 유지.
+        self.assertEqual((rows[0]["status"], rows[0]["is_exit_forecast"]), ("sell", False))
+        self.assertEqual(
+            (rows[1]["status"], rows[1]["exit_reason"], rows[1]["is_exit_forecast"]), ("sell", "이탈", True)
+        )
+        self.assertEqual(
+            (rows[2]["status"], rows[2]["exit_reason"], rows[2]["is_exit_forecast"]), ("hold", None, False)
+        )
 
 
 if __name__ == "__main__":

@@ -12,13 +12,13 @@ from typing import Any
 import pandas as pd
 
 from config import TRADING_DAYS_PER_MONTH
-from core.strategy.metrics import period_return_pct
 from utils.cache_utils import (
     get_all_ticker_type_lookup_keys,
     load_cached_close_series_bulk,
     load_cached_close_series_bulk_with_fallback,
 )
 from utils.logger import get_app_logger
+from utils.price_series import period_return_pct
 
 logger = get_app_logger()
 
