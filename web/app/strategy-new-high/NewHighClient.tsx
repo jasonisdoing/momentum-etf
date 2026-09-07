@@ -95,6 +95,8 @@ type PositionRow = {
   ticker: string;
   name: string;
   industry: string;
+  /** 행별 체결일 — 어제 확정된 진입 예정(오늘 체결)에만 있다. */
+  fill_date?: string | null;
   /** 지금 계좌에 실제로 들고 있는지 — 전략상 보유(is_held)와 뜻이 다르다. */
   account_held?: boolean;
   /** 직전 거래일 종가 대비 등락률 — 다른 화면과 같은 기준. */
@@ -148,6 +150,8 @@ type Holding = {
   /** hold = 계속 보유, sell = 내일 시가에 청산 */
   status: "hold" | "sell";
   exit_reason: string | null;
+  /** 행별 체결일 — 어제 확정된 매도(오늘 체결)에만 있다. */
+  fill_date?: string | null;
   /** 종목에 붙는 메모 — 순위·모멘텀·자산 관리 화면과 같은 값. */
   memo?: string;
   /** 실계좌 보유 여부 — 행 배경 녹색으로 표시한다(전략 보유와 뜻이 다르다). */
@@ -795,6 +799,7 @@ export function NewHighClient() {
       value_mult: h.value_mult ?? null, value_mult_live: h.value_mult_live ?? null,
       exit_price: null,
       entry_date: h.entry_date, entry_price: h.entry_price, return_pct: h.return_pct,
+      fill_date: h.fill_date ?? null,
       plan: h.status, days: h.days, is_new: h.is_new, exit_reason: h.exit_reason,
       memo: h.memo, account_held: h.account_held,
       exit_ma_gap_pct: h.exit_ma_gap_pct, exit_ma: h.exit_ma,
@@ -805,6 +810,7 @@ export function NewHighClient() {
       value_mult: row.value_mult ?? null, value_mult_live: row.value_mult_live ?? null,
       exit_price: null,
       entry_date: null, entry_price: null, return_pct: null,
+      fill_date: row.fill_date ?? null,
       // 아직 안 샀다 — null 로 두면 보유일 칸과 차트 배지가 통째로 비어 진입 전인지 알 수 없다.
       plan: "buy", days: 0, is_new: false, exit_reason: null,
       memo: row.memo, account_held: row.account_held,

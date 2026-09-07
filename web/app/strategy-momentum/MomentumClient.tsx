@@ -154,6 +154,8 @@ type CandidateRow = {
   market_cap_rank?: number | null;
   change_pct: number | null;
   price: number | null;
+  /** 행별 체결일 — 어제 확정된 진입 예정(오늘 체결)에만 있다. */
+  fill_date?: string | null;
   value_mult?: number | null;
   value_mult_live?: number | null;
   memo?: string;
@@ -592,6 +594,8 @@ export function MomentumClient() {
       entry_date: null,
       entry_price: null,
       return_pct: null,
+      // 행별 체결일 — 어제 확정 진입(오늘 체결)은 이 값이 있고, 잠정 진입은 공통 체결일을 쓴다.
+      fill_date: row.fill_date ?? null,
       // 아직 안 샀다 — days 를 null 로 두면 보유일 칸과 차트 배지가 통째로 비어 진입 전인지 알 수 없다.
       plan: "buy",
       days: 0,
