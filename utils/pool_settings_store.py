@@ -32,6 +32,7 @@ from typing import Any
 
 from config import (
     ADR_FLOOR_OPTIONS,
+    ENTRY_VOL_MULT_OPTIONS,
     POOL_KIND_OPTIONS,
     SLIPPAGE_PCT_OPTIONS,
     TOP_N_HOLD_OPTIONS,
@@ -62,6 +63,7 @@ OVERRIDABLE_KEYS: tuple[str, ...] = (
 MOMENTUM_KEYS: tuple[str, ...] = (
     "MOMENTUM_START_DATE",
     "ADR_FLOOR",  # None = 게이트 없음 (모멘텀 ADR 하한 — 시장은 MARKET_REGIME_INDEX 를 따름)
+    "ENTRY_VOL_MULT",  # None = 문턱 없음 (진입 이격 ≥ 배수 × 20일 변동성 — 청산은 불변)
 )
 
 # 보유종목 손절 알림 기준(%). 이평선과 같은 성격의 **종목 판정 기준**이라 계좌가 아니라
@@ -344,6 +346,13 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
             allowed = ", ".join("없음" if v is None else str(v) for v in ADR_FLOOR_OPTIONS)
             raise PoolSettingsError(f"ADR_FLOOR 는 {allowed} 중 하나여야 합니다: {raw}")
         cleaned["ADR_FLOOR"] = floor
+    if "ENTRY_VOL_MULT" in values:
+        raw = values["ENTRY_VOL_MULT"]
+        mult = None if raw in (None, "", "none") else float(raw)
+        if check_options and mult not in ENTRY_VOL_MULT_OPTIONS:
+            allowed = ", ".join("없음" if v is None else f"{v:g}" for v in ENTRY_VOL_MULT_OPTIONS)
+            raise PoolSettingsError(f"ENTRY_VOL_MULT 는 {allowed} 중 하나여야 합니다: {raw}")
+        cleaned["ENTRY_VOL_MULT"] = mult
 
     for key in _FLOAT_KEYS:
         if key not in values:

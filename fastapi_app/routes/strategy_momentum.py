@@ -74,11 +74,13 @@ def _ma_rule_payload(settings: dict) -> dict:
 
 def _constraints_payload() -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트 복사본 제거)."""
-    from config import ADR_FLOOR_OPTIONS
+    from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS
 
     return {
-        # ADR 하한 — 판정일의 시장 ADR 이 미만이면 그 주 전량 현금. None = 게이트 없음(기본).
+        # ADR 하한 — 그날 시장 ADR 이 미만이면 신규 진입만 건너뛴다. None = 게이트 없음(기본).
         "adr_floor_options": list(ADR_FLOOR_OPTIONS),
+        # 진입 문턱 — 이격 ≥ 배수 × 20일 변동성일 때만 진입 자격. None = 없음(기본).
+        "entry_vol_mult_options": list(ENTRY_VOL_MULT_OPTIONS),
     }
 
 

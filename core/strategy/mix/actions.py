@@ -21,14 +21,34 @@ def _format_date_weekday(date: str) -> str:
     return f"{date} ({_WEEKDAYS_KO[parsed.weekday()]})"
 
 
+def _is_forecast(slot: dict[str, Any], event: dict[str, Any]) -> bool:
+    """장중이라도 엔진이 체결일을 지정한 확정 주문은 예상이 아니다."""
+    return bool(slot.get("live")) and not event.get("fill_date")
+
+
+def _action_date(ticker: str, side: str, slots: dict[str, Any], next_trading_day: str | None) -> str | None:
+    """해당 방향의 엔진 체결일을 따른다. 서로 다른 날짜의 주수를 임의로 합치지 않는다."""
+    event = "entries" if side == "buy" else "sells"
+    dates = {
+        row.get("fill_date") or next_trading_day
+        for slot in slots.values()
+        for row in slot[event]
+        if row["ticker"] == ticker
+    }
+    if len(dates) > 1:
+        raise ValueError(f"{ticker} {side} 주문의 슬리브별 체결일이 다릅니다. 날짜별 목표 수량 분리가 필요합니다.")
+    return next(iter(dates)) if dates else next_trading_day
+
+
 def _action_reasons(ticker: str, side: str, actions: dict[str, Any]) -> list[dict[str, str]]:
     """주문 원인을 추측하지 않고 엔진 이벤트와 배분 일정만 함께 표시한다."""
     reasons = []
     for slot in actions["slots"].values():
         event = "entries" if side == "buy" else "sells"
-        if any(row["ticker"] == ticker for row in slot[event]):
+        events = [row for row in slot[event] if row["ticker"] == ticker]
+        if events:
             signal = "진입" if side == "buy" else "청산"
-            forecast = " 예상" if slot.get("live") else ""
+            forecast = " 예상" if all(_is_forecast(slot, row) for row in events) else ""
             reasons.append({"code": "strategy_signal", "label": f"{slot['label']} {signal}{forecast}"})
         for trade in slot.get("engine_trades", []):
             if trade["ticker"] == ticker and trade["side"] == side:
@@ -65,7 +85,9 @@ def build_action_groups(
     slots: dict[str, dict[str, Any]] = actions["slots"]
 
     entry_tickers = {row["ticker"] for slot in slots.values() for row in slot["entries"]}
-    live_entry_tickers = {row["ticker"] for slot in slots.values() if slot.get("live") for row in slot["entries"]}
+    live_entry_tickers = {
+        row["ticker"] for slot in slots.values() for row in slot["entries"] if _is_forecast(slot, row)
+    }
     sell_pending = [row["ticker"] for slot in slots.values() for row in slot["sells"]]
 
     # 장중 판정은 오늘 종가로 확정되기 전이라 **예상**이다 — 문구로 구분한다.
@@ -73,8 +95,8 @@ def build_action_groups(
     sell_reason: dict[str, str] = {}
     forecast_sell_tickers: set[str] = set()
     for slot in slots.values():
-        live_tag = " · 예상" if slot.get("live") else ""
         for row in slot["sells"]:
+            live_tag = " · 예상" if _is_forecast(slot, row) else ""
             # 수익률이 함께 오는 건 진입가를 아는 전략뿐이다(모멘텀 자격 상실은 사유만).
             suffix = f", {row['return_pct']:+.2f}%" if row.get("return_pct") is not None else ""
             sell_reason[row["ticker"]] = f"{row['reason']}{suffix}{live_tag}"
@@ -92,7 +114,7 @@ def build_action_groups(
         if not trade:
             continue
         ticker = row["ticker"]
-        date = next_trading_day
+        date = _action_date(ticker, "buy" if trade > 0 else "sell", slots, next_trading_day)
         reason = sell_reason.get(ticker)
         weight = float(row.get("weight_pct") or 0)
         held = float(row.get("held_quantity") or 0) > 0
@@ -155,7 +177,7 @@ def build_action_groups(
                         else ""
                     )
                 ),
-                "date": next_trading_day,
+                "date": _action_date(ticker, "sell", slots, next_trading_day),
                 "quantity": abs(int(float(row.get("held_quantity") or 0))),
             }
         )

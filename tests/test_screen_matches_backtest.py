@@ -406,6 +406,83 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
         # 잠정일이 일별 곡선에 포함된다(실시간 마지막 봉 평가).
         self.assertEqual(result["daily"][-1]["date"], "2026-09-04")
 
+        # 엔진의 확정 주문 날짜가 합성 이벤트·액션까지 보존되는지 함께 검증한다.
+        from core.strategy.intraday import mark_engine_statuses
+        from core.strategy.mix.actions import build_action_groups
+        from utils.mix_sleeve import _slot_state_from_positions
+
+        held = [dict(row) for row in result["open_positions"]]
+        mark_engine_statuses(held, result["planned_exits"])
+        raw = {
+            "holdings": held,
+            "planned_entries": [
+                {**row, "price": 100.0, "fill_date": result["as_of"]} for row in result["pending_entries"]
+            ]
+            + [
+                {"ticker": t, "price": 12.0, "sleeve_weight_pct": result["planned_entry_weights"][t]}
+                for t in result["planned_entries"]
+            ],
+            "live": True,
+            "as_of": result["as_of"],
+            "currency": "USD",
+        }
+        state = _slot_state_from_positions(SleeveSpec("a", "momentum", "test", {}), raw, 3)
+        actions = {
+            "slots": {
+                "a": {
+                    "label": "A",
+                    "live": state.live,
+                    "sells": state.sells,
+                    "entries": state.entries,
+                    "exit_forecast": [],
+                }
+            }
+        }
+        account_rows = [
+            {
+                "ticker": "T1",
+                "price": 95,
+                "held_quantity": 1,
+                "trade_quantity": -1,
+                "target_quantity": 0,
+                "weight_pct": 0,
+                "is_sell_all": True,
+            },
+            {
+                "ticker": "T2",
+                "price": 100,
+                "held_quantity": 0,
+                "trade_quantity": 1,
+                "target_quantity": 1,
+                "weight_pct": 33,
+            },
+            {
+                "ticker": "T4",
+                "price": 12,
+                "held_quantity": 0,
+                "trade_quantity": 1,
+                "target_quantity": 1,
+                "weight_pct": 33,
+            },
+        ]
+        groups = build_action_groups(account_rows, actions, "2026-09-07", currency="USD")
+        items = {item["ticker"]: item for group in groups for item in group["items"]}
+        for ticker in ("T1", "T2"):
+            self.assertEqual(items[ticker]["date"], result["as_of"])
+            self.assertNotIn("예상", items[ticker]["title"] + items[ticker]["text"])
+        self.assertEqual(items["T4"]["date"], "2026-09-07")
+        self.assertIn("예상", items["T4"]["title"])
+        # 날짜별 수량이 없는 합산 목표를 서로 다른 체결일 중 하나로 임의 배정하지 않는다.
+        actions["slots"]["b"] = {
+            "label": "B",
+            "live": True,
+            "sells": [],
+            "entries": [{"ticker": "T2"}],
+            "exit_forecast": [],
+        }
+        with self.assertRaisesRegex(ValueError, "체결일이 다릅니다"):
+            build_action_groups(account_rows, actions, "2026-09-07", currency="USD")
+
     def test_mark_engine_statuses_labels_without_judging(self):
         from core.strategy.intraday import mark_engine_statuses
 

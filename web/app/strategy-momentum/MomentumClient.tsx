@@ -66,6 +66,8 @@ const CURRENT_NOTES = [
     body:
       "매일 종가 기준, 보유 자격(장기 이격 > 0, 단기 이격 ≥ 0)을 갖춘 종목을 " +
       "장기 이평선 이격(%) 순으로 줄 세워 빈 자리만큼 담습니다. 체결은 다음 거래일 시가입니다. " +
+      "진입 문턱을 설정하면 이격이 '배수 × 20일 변동성' 이상인 종목만 진입 자격이 됩니다(청산은 불변) — " +
+      "청산선 바로 위의 종목을 사서 하루 만에 되파는 왕복을 막습니다. " +
       "종목 수는 종목풀 설정값을 사용하고, 자리가 차 있으면 더 좋은 후보가 와도 교체하지 않습니다.",
   },
   {
@@ -103,6 +105,8 @@ type PoolSettings = {
   long_ma_days: number;
   /** ADR 하한 — 그날 시장 ADR(풀의 시장 레짐 지수 시장)이 미만이면 신규 진입만 건너뛴다. null = 없음. */
   adr_floor?: number | null;
+  /** 진입 문턱 — 이격 ≥ 배수 × 20일 변동성일 때만 진입 자격(청산은 불변). null = 없음. */
+  entry_vol_mult?: number | null;
 };
 
 type Settings = PoolSettings & { pool: string };
@@ -290,6 +294,7 @@ type View = {
   // 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다).
   constraints?: {
     adr_floor_options?: (number | null)[];
+    entry_vol_mult_options?: (number | null)[];
   };
   positions: Positions | null;
 };
@@ -351,6 +356,7 @@ export function MomentumClient() {
   // ADR 하한 — "" 은 없음(기본). 시장은 풀 설정의 시장 레짐 지수를 따른다.
   const [draftStartDate, setDraftStartDate] = useState("");
   const [draftAdrFloor, setDraftAdrFloor] = useState<string>("");
+  const [draftEntryVolMult, setDraftEntryVolMult] = useState<string>("");
 
   // 풀별 설정을 폼 초안에 채운다 — 풀 셀렉트 전환과 응답 반영이 같은 경로를 쓴다.
   const fillDrafts = useCallback((values: PoolSettings) => {
@@ -358,6 +364,7 @@ export function MomentumClient() {
     setDraftStartDate(values.start_date ?? "");
     setDraftMaRule({ short: values.short_ma_days, long: values.long_ma_days });
     setDraftAdrFloor(values.adr_floor == null ? "" : String(values.adr_floor));
+    setDraftEntryVolMult(values.entry_vol_mult == null ? "" : String(values.entry_vol_mult));
   }, []);
 
   /** 지금 화면이 보고 있는 풀 — 풀 전환 중 도착한 **이전 풀의 늦은 응답**을 버리는 기준. */
@@ -503,10 +510,11 @@ export function MomentumClient() {
         short_ma_days: draftMaRule.short,
         long_ma_days: draftMaRule.long,
         adr_floor: draftAdrFloor === "" ? null : Number(draftAdrFloor),
+        entry_vol_mult: draftEntryVolMult === "" ? null : Number(draftEntryVolMult),
       },
       "설정을 저장했습니다.",
     );
-  }, [draftStartDate, draftAdrFloor, draftMaRule, draftPool, persistSettings, toast, view?.settings.top_n]);
+  }, [draftStartDate, draftAdrFloor, draftEntryVolMult, draftMaRule, draftPool, persistSettings, toast, view?.settings.top_n]);
 
   // 풀 셀렉트 변경 — 그 풀의 저장 설정이 있으면 **즉시 전환·저장·재선정**한다
   // (전환은 초안이 아니라 컨텍스트 스위치다). 저장분이 없는 풀(첫 설정)만 초안으로
@@ -738,12 +746,13 @@ export function MomentumClient() {
       draftPool !== saved.pool ||
       draftStartDate !== (saved.start_date ?? "") ||
       (draftAdrFloor === "" ? null : Number(draftAdrFloor)) !== (saved.adr_floor ?? null) ||
+      (draftEntryVolMult === "" ? null : Number(draftEntryVolMult)) !== (saved.entry_vol_mult ?? null) ||
       (draftMaRule != null &&
         view.ma_rule != null &&
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
           draftMaRule.long !== view.ma_rule.long_ma_days))
     );
-  }, [draftStartDate, draftAdrFloor, draftMaRule, draftPool, view]);
+  }, [draftStartDate, draftAdrFloor, draftEntryVolMult, draftMaRule, draftPool, view]);
 
   const fillDay = positions?.next_session ?? "다음 거래일";
   const country = positions?.country ?? "";
@@ -1059,13 +1068,29 @@ export function MomentumClient() {
                       </span>
                     </label>
                     <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">진입 문턱</span>
+                      <select
+                        className="form-select form-select-sm"
+                        style={{ width: 88 }}
+                        value={draftEntryVolMult}
+                        onChange={(e) => setDraftEntryVolMult(e.target.value)}
+                        title="단기·장기 이격이 모두 '배수 × 그 종목의 20일 일간 변동성(%)' 이상일 때만 진입 자격. 청산선(0선) 바로 위의 종목을 사서 하루 만에 되파는 왕복을 막는다 — 청산 판정은 그대로다."
+                      >
+                        {(view.constraints?.entry_vol_mult_options ?? []).map((value) => (
+                          <option key={String(value)} value={value == null ? "" : String(value)}>
+                            {value == null ? "없음" : `${value}×`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">ADR 하한</span>
                       <select
                         className="form-select form-select-sm"
                         style={{ width: 88 }}
                         value={draftAdrFloor}
                         onChange={(e) => setDraftAdrFloor(e.target.value)}
-                        title="판정일의 시장 ADR(20일 등락비율)이 이 값 미만이면 그 주는 전량 현금. 시장은 종목풀 설정의 시장 레짐 지수를 따른다."
+                        title="그날 시장 ADR(20일 등락비율)이 이 값 미만이면 신규 진입만 건너뛴다. 시장은 종목풀 설정의 시장 레짐 지수를 따른다."
                       >
                         {(view.constraints?.adr_floor_options ?? []).map((value) => (
                           <option key={String(value)} value={value == null ? "" : String(value)}>
@@ -1300,6 +1325,7 @@ export function MomentumClient() {
           current={{
             short_ma_days: view.settings.short_ma_days,
             long_ma_days: view.settings.long_ma_days,
+            entry_vol_mult: view.settings.entry_vol_mult ?? null,
             adr_floor: view.settings.adr_floor ?? null,
           }}
           axes={[
@@ -1307,6 +1333,11 @@ export function MomentumClient() {
             // 종목 수(공통 고정)·교체 규칙(전략 고정)은 축이 아니다 — 튜닝은 시장의 이평 반응만 잰다.
             { key: "short_ma_days", label: "단기 이평", values: (view.ma_rule?.short_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },
             { key: "long_ma_days", label: "장기 이평", values: (view.ma_rule?.long_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },
+            {
+              key: "entry_vol_mult",
+              label: "진입 문턱",
+              values: (view.constraints?.entry_vol_mult_options ?? []).map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: `${n}×` })),
+            },
             {
               key: "adr_floor",
               label: "ADR 하한",
@@ -1320,6 +1351,7 @@ export function MomentumClient() {
               pool: draftPool,
               short_ma_days: Number(params.short_ma_days),
               long_ma_days: Number(params.long_ma_days),
+              entry_vol_mult: params.entry_vol_mult == null ? null : Number(params.entry_vol_mult),
               adr_floor: params.adr_floor == null ? null : Number(params.adr_floor),
             };
             fillDrafts(next);

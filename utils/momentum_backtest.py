@@ -28,7 +28,7 @@ from config import CACHE_TTL_COMPUTE
 from core.strategy.intraday import effective_close_frame, mark_engine_statuses
 from core.strategy.momentum import signals as momentum_signals
 from core.strategy.price_panel import build_price_panel
-from core.strategy.scoring import drawdown_from_high_pct, hold_eligible
+from core.strategy.scoring import drawdown_from_high_pct
 from core.strategy.slot_backtest import run_slot_backtest
 from utils.logger import get_app_logger
 from utils.momentum_service import (
@@ -106,7 +106,8 @@ def run_backtest(
         months=months,
         start_date=start_date,
         panel=context["panel"],
-        entry=signals["eligible"],
+        # 진입은 보유 자격에 변동성 문턱(설정)을 얹은 신호 — 청산은 아래 0선 그대로다.
+        entry=momentum_signals.entry_signal(context["panel"]["close"], signals, settings["entry_vol_mult"]),
         exit_signal=signals["exit"],
         # 순위를 모르는 종목은 맨 뒤로 — 자리 경쟁에서 밀린다(0 으로 채우면 음수 이격보다 앞선다).
         priority=signals["priority"].fillna(float("-inf")),
@@ -159,6 +160,8 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     info = pool_info(pool)
 
     short_gap, long_gap = signals["short"].loc[last], signals["long"].loc[last]
+    # 진입 자격 — 백테스트와 같은 신호(보유 자격 + 변동성 문턱). 후보 표가 이 값으로 순위를 매긴다.
+    entry_last = momentum_signals.entry_signal(close_df, signals, settings["entry_vol_mult"]).loc[last]
     market_cap_by = _market_caps(pool)
     from utils.market_cap_rank import market_cap_rank_of
     from utils.rank_service import _load_trade_value_mult
@@ -204,8 +207,8 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
                 "short_gap_pct": round(float(short_value), 2),
                 "long_gap_pct": round(float(long_value), 2),
                 "high_drawdown_pct": high_drawdown(ticker),
-                # 진입 자격 — 백테스트와 같은 공용 규칙.
-                "eligible": bool(hold_eligible(float(long_value), float(short_value))),
+                # 진입 자격 — 백테스트와 같은 신호(보유 자격 + 진입 문턱).
+                "eligible": bool(entry_last.get(ticker, False)),
             }
         )
     # 우선순위 — 장기 이격률이 큰 순(백테스트의 `priority` 와 같은 기준).
@@ -262,11 +265,12 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         eff = momentum_signals.compute_signals(
             {"close": eff_close}, int(settings["short_ma_days"]), int(settings["long_ma_days"])
         )
+        eff_entry = momentum_signals.entry_signal(eff_close, eff, settings["entry_vol_mult"])
         live_result = run_slot_backtest(
             months=DEFAULT_BACKTEST_MONTHS,
             start_date=start_date,
             panel={"close": eff_close, "open": effective_close_frame(panel["open"], live_opens, session_ts)},
-            entry=eff["eligible"],
+            entry=eff_entry,
             exit_signal=eff["exit"],
             priority=eff["priority"].fillna(float("-inf")),
             slots=slots,
@@ -285,7 +289,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         # 확정값을 유지한다(엔진의 known 규칙과 같다).
         eff_short = eff["short"].loc[session_ts]
         eff_long = eff["long"].loc[session_ts]
-        eff_eligible = eff["eligible"].loc[session_ts]
+        eff_eligible = eff_entry.loc[session_ts]
         for row in rows:
             ticker = row["ticker"]
             if ticker not in live_prices:
