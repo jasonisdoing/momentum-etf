@@ -485,7 +485,9 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None) -> d
     except Exception:
         logger.warning("[신고가] 실계좌 보유 조회 실패 — '보유' 컬럼을 비운다", exc_info=True)
         account_held = set()
-    for item in [*rows, *holdings, *simulated["exited_today"]]:
+    # 진입 예정도 포함한다 — 확정 진입 예정 행은 복사본(fill_date 부착)이라 rows 쪽 갱신이
+    # 반영되지 않는다. 실계좌에 있으면 어떤 행이든 보유 표시(녹색)가 붙어야 한다.
+    for item in [*rows, *holdings, *simulated["exited_today"], *entries]:
         item["account_held"] = str(item.get("ticker") or "").strip().upper() in account_held
 
     # 이탈 행은 청산가와 별개로 현재 시세도 담는다 — 판 뒤로 얼마나 더 갔는지 보이게.
