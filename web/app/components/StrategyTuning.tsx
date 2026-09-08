@@ -456,7 +456,7 @@ export function StrategyTuning({
                   theme={gridTheme}
                   minHeight={320}
                   height="34rem"
-                  getRowClass={(p) => (p.data?.is_current ? "appHeldRow" : "")}
+                  getRowClass={(p) => (p.data?.is_current ? "appCurrentSettingRow" : "")}
                   // 결과 행은 수백 개라 고정 높이에서 가상화한다. autoHeight 는 모든 셀을 한꺼번에
                   // 만들어 완료 화면과 중단 버튼을 수 초 동안 멈추게 했다.
                   gridOptions={{

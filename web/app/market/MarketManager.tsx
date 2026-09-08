@@ -5,6 +5,7 @@ import { IconPlus } from "@tabler/icons-react";
 import type { ColDef, RowClassParams } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { addTickersToPool, buildPoolAddSkipNotice, splitByPoolMembership } from "@/lib/pool-add";
 import type { PoolAddProgress } from "@/lib/pool-add";
@@ -13,7 +14,6 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { AppModal } from "../components/AppModal";
-import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import {
@@ -479,30 +479,10 @@ export function MarketManager({
         maxWidth: 116,
         cellRenderer: (params: { value: string }) => String(params.value ?? "").trim() || "-",
       },
-      {
-        field: "ticker",
-        headerName: "티커",
-        width: 104,
-        cellRenderer: (params: { value: string }) => {
-          const value = String(params.value ?? "-");
-          return <TickerDetailLink ticker={value} />;
-        },
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        minWidth: 220,
-        flex: 1,
-        cellClass: "marketNameCell",
-        cellRenderer: (params: { value: string | null | undefined }) => {
-          const value = String(params.value ?? "-");
-          return (
-            <span className="marketNameMain" title={value}>
-              {value}
-            </span>
-          );
-        },
-      },
+      // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
+      // (예전 marketNameCell/marketNameMain 클래스는 CSS 정의가 없는 죽은 이름이라 지웠다.)
+      tickerColumn<MarketGridRow>({ width: 104 }),
+      stockNameColumn<MarketGridRow>({}),
       {
         field: "daily_change_pct",
         headerName: "일간(%)",

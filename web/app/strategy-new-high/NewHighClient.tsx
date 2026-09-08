@@ -19,19 +19,19 @@ import { StrategyNotes } from "../components/StrategyNotes";
 import { StrategyTuning } from "../components/StrategyTuning";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
-import { TickerDetailLink } from "../components/TickerDetailLink";
 import { MaDaysSelect } from "../components/MaDaysSelect";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import {
   industryColumn,
-  STOCK_NAME_COLUMN_WIDTH,
   slotStatusColumn,
   adrColumn,
   formatSignedPct,
   maExitGapColumn,
   signColor,
+  stockNameColumn,
+  tickerColumn,
   tradeValueMultColumn,
   volatilityColumn,
   marketCapRankColumn,
@@ -47,7 +47,7 @@ import {
 } from "@/lib/backtest-periods";
 import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
 import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
-import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
+import { isTrendBroken } from "@/lib/name-highlight";
 import { updateStockMemo } from "@/lib/stocks-store";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
@@ -165,7 +165,7 @@ type Holding = {
   fill_date?: string | null;
   /** 종목에 붙는 메모 — 순위·모멘텀·자산 관리 화면과 같은 값. */
   memo?: string;
-  /** 실계좌 보유 여부 — 행 배경 녹색으로 표시한다(전략 보유와 뜻이 다르다). */
+  /** 실계좌 보유 여부 — 티커·종목명 칸을 녹색으로 표시한다(전략 보유와 뜻이 다르다). */
   account_held?: boolean;
   exit_ma_gap_pct?: number | null;
   exit_ma?: number | null;
@@ -208,7 +208,7 @@ type PlanRow = {
   exit_ma?: number | null;
   /** 고점 대비(%) — 0 이면 신고점. 모멘텀 운용 현황과 같은 값. */
   high_drawdown_pct?: number | null;
-  /** 실계좌 보유 여부 — 전략 보유와 뜻이 다르다. 행 배경 녹색으로 표시한다. */
+  /** 실계좌 보유 여부 — 전략 보유와 뜻이 다르다. 티커·종목명 칸을 녹색으로 표시한다. */
   account_held?: boolean;
 };
 
@@ -663,24 +663,17 @@ export function NewHighClient() {
           return <strong style={{ color: stage.color }}>{stage.label}</strong>;
         },
       },
-      // 실계좌 보유는 컬럼 대신 행 배경(appHeldRow, 녹색)으로 표시한다 — 시장 화면과 같은 표준.
+      // 실계좌 보유는 컬럼 대신 티커·종목명 칸 녹색(appHeldRow)으로 표시한다 — 시장 화면과 같은 표준.
       // 시총은 개별주에만 있는 값이라 업종과 판정이 다르다(`@/lib/pool-industry`).
       marketCapRankColumn<PositionRow>("market_cap_rank", !hasMarketCap),
       highDrawdownColumn<PositionRow>("high_drawdown_pct"),
-      {
-        field: "ticker",
-        headerName: "티커",
-        width: 108,
-        cellRenderer: (p: { value?: string }) => <TickerDetailLink ticker={p.value} />,
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
-        width: STOCK_NAME_COLUMN_WIDTH,
-        cellRenderer: (p: { value?: string | null; data?: PositionRow }) =>
-          renderStockNameCell(p.value, { trendBroken: isTrendBroken(p.data?.short_gap_pct, p.data?.long_gap_pct) }),
-      },
+      // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
+      // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
+      tickerColumn<PositionRow>({}),
+      stockNameColumn<PositionRow>({
+        fixedWidth: true,
+        nameOptions: (row) => ({ trendBroken: isTrendBroken(row?.short_gap_pct, row?.long_gap_pct) }),
+      }),
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
       stockMemoColumn<PositionRow>({
         field: "memo",
@@ -943,20 +936,12 @@ export function NewHighClient() {
       marketCapRankColumn<PlanRow>("market_cap_rank", !hasMarketCap),
       // 고점 대비 — 모멘텀 운용 현황과 같은 공용 컬럼(두 화면이 같은 값을 본다).
       highDrawdownColumn<PlanRow>("high_drawdown_pct"),
-      {
-        field: "ticker",
-        headerName: "티커",
-        width: 108,
-        cellRenderer: (p: { value?: string }) => <TickerDetailLink ticker={p.value} />,
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
-        width: STOCK_NAME_COLUMN_WIDTH,
-        cellRenderer: (p: { value?: string | null; data?: PlanRow }) =>
-          renderStockNameCell(p.value, { trendBroken: isTrendBroken(p.data?.short_gap_pct, p.data?.long_gap_pct) }),
-      },
+      // 티커·종목명 — 공용 컬럼. 고정 폭 — 보유 표와 후보 표의 앞쪽 칸을 맞춘다.
+      tickerColumn<PlanRow>({}),
+      stockNameColumn<PlanRow>({
+        fixedWidth: true,
+        nameOptions: (row) => ({ trendBroken: isTrendBroken(row?.short_gap_pct, row?.long_gap_pct) }),
+      }),
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
       stockMemoColumn<PlanRow>({
         field: "memo",
@@ -1021,19 +1006,9 @@ export function NewHighClient() {
   const tradeColumns = useMemo<ColDef<Trade>[]>(
     () => [
       { field: "exit_date", headerName: "청산일", width: 116 },
-      {
-        field: "ticker",
-        headerName: "티커",
-        width: 108,
-        cellRenderer: (p: { value?: string }) => <TickerDetailLink ticker={p.value} />,
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
-        width: STOCK_NAME_COLUMN_WIDTH,
-        cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
-      },
+      // 티커·종목명 — 공용 컬럼. 과거 체결이라 배지(이격 데이터) 없이 기본 표기.
+      tickerColumn<Trade>({}),
+      stockNameColumn<Trade>({ fixedWidth: true }),
       industryColumn<Trade>({ hide: !hasIndustryData }),
       { field: "entry_date", headerName: "진입일", width: 116 },
       {
@@ -1235,7 +1210,7 @@ export function NewHighClient() {
                     theme={gridTheme}
                     minHeight={0}
                     height="auto"
-                    // 빈 슬롯은 값을 비우고, 실계좌 보유는 행 배경 녹색 — 시장 화면과 같은 표준.
+                    // 빈 슬롯은 값을 비우고, 실계좌 보유는 티커·종목명 칸 녹색 — 시장 화면과 같은 표준.
                     getRowClass={(params) =>
                       params.data?.plan === "empty"
                         ? "appEmptySlotRow"
@@ -1256,7 +1231,7 @@ export function NewHighClient() {
                     theme={gridTheme}
                     minHeight={0}
                     height="auto"
-                    // 실계좌 보유 종목은 행 배경 녹색 — 시장 화면과 같은 표준(보유 컬럼 대체).
+                    // 실계좌 보유 종목은 티커·종목명 칸 녹색 — 시장 화면과 같은 표준(보유 컬럼 대체).
                     getRowClass={(params) => (params.data?.account_held ? "appHeldRow" : "")}
                     gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
                   />

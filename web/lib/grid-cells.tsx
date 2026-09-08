@@ -5,8 +5,11 @@
 
 import type { ColDef, ColDefField } from "ag-grid-community";
 import type React from "react";
+import type { ReactNode } from "react";
 
+import { TickerDetailLink } from "@/app/components/TickerDetailLink";
 import { formatSlashDateWithWeekday } from "@/lib/datetime";
+import { renderStockNameCell, type StockNameOptions } from "@/lib/name-highlight";
 
 /** 부호를 붙인 퍼센트 표기: +1.23% / -4.56% / "-"(값 없음). */
 export function formatSignedPct(value: number | null | undefined, digits = 2): string {
@@ -40,6 +43,82 @@ export const STOCK_NAME_COLUMN_MIN_WIDTH = 220;
  *  달라진다. 그러면 두 표의 앞쪽 칸(상태~거래대금)이 서로 어긋난다. 고정 폭을 주면 앞쪽이
  *  정확히 맞고, 넘치는 폭은 표가 가로로 스크롤한다. */
 export const STOCK_NAME_COLUMN_WIDTH = 240;
+
+/** 티커 컬럼 표준 폭 — 한국 6자리·미국 4~5자·호주 `ASX:XXX` 가 한 줄에 들어간다. */
+export const TICKER_COLUMN_WIDTH = 108;
+
+/** 티커·종목명 연속 컬럼의 col-id 표준.
+ *
+ *  보유 강조(globals.css `.appHeldRow` — 티커·종목명 칸만 녹색)와 빈 슬롯 행
+ *  (`.appEmptySlotRow` — 종목명만 남김)이 이 col-id 로 칸을 찾는다. 화면 데이터 키가
+ *  한국어(순위 화면 `티커`/`종목명`)여도 col-id 는 항상 이 값이다. */
+export const TICKER_COL_ID = "ticker";
+export const STOCK_NAME_COL_ID = "name";
+
+/** 티커 컬럼 — 티커·종목명 쌍이 있는 모든 화면이 이걸 쓴다(`stockNameColumn` 과 세트).
+ *
+ *  화면마다 폭·col-id·렌더러가 제각각이면 보유 강조·배지 같은 공통 변경이 한 번에 안 된다.
+ *  기본 렌더러는 종목 상세 링크, `mono` 는 링크 없는 코드 표기(시장 전광판 화면),
+ *  `cellRenderer` 는 화면 고유 칸(추가 행 입력칸·현금 행 등)용이다. */
+export function tickerColumn<T>(options?: {
+  field?: string;
+  width?: number;
+  minWidth?: number;
+  pinned?: "left";
+  cellClass?: string;
+  /** true = 모노스페이스 코드 표기(시장 전광판 화면). 렌더러(상세 링크)는 그대로다. */
+  mono?: boolean;
+  cellRenderer?: (p: { value?: string | null; data?: T }) => ReactNode;
+}): ColDef<T> {
+  return {
+    colId: TICKER_COL_ID,
+    field: (options?.field ?? "ticker") as ColDefField<T>,
+    headerName: "티커",
+    width: options?.width ?? TICKER_COLUMN_WIDTH,
+    minWidth: options?.minWidth,
+    pinned: options?.pinned,
+    cellClass: options?.cellClass,
+    ...(options?.mono
+      ? { cellStyle: { fontFamily: "var(--font-mono, monospace)", fontSize: "var(--fs-sm)" } }
+      : {}),
+    cellRenderer:
+      options?.cellRenderer ?? ((p: { value?: string | null }) => <TickerDetailLink ticker={p.value} />),
+  };
+}
+
+/** 종목명 컬럼 — `tickerColumn` 과 세트. 렌더러는 항상 `renderStockNameCell` 기반이라
+ *  배지(❗·🆕·💣)·2줄 말줄임 같은 공통 표기는 `lib/name-highlight.tsx` 한 곳만 고치면 된다.
+ *
+ *  기본은 남는 폭을 가져가는 flex, `fixedWidth` 는 한 화면에 표가 둘 이상일 때 칸을 맞춘다.
+ *  `nameOptions` 로 행별 배지(추세 이탈 등)를, `cellRenderer` 로 화면 고유 칸(추가 행
+ *  안내문·현금 행 등)을 넘긴다. */
+export function stockNameColumn<T>(options?: {
+  field?: string;
+  /** 한 화면에 표가 둘 이상이라 칸을 맞춰야 하면 고정 폭(STOCK_NAME_COLUMN_WIDTH). */
+  fixedWidth?: boolean;
+  flex?: number;
+  minWidth?: number;
+  cellClass?: ColDef<T>["cellClass"];
+  cellStyle?: ColDef<T>["cellStyle"];
+  /** 행별 배지·강조 — `renderStockNameCell` 에 그대로 전달된다. */
+  nameOptions?: (row: T | undefined) => (StockNameOptions & { badge?: string }) | undefined;
+  cellRenderer?: (p: { value?: string | null; data?: T }) => ReactNode;
+}): ColDef<T> {
+  const sizing = options?.fixedWidth
+    ? { width: STOCK_NAME_COLUMN_WIDTH }
+    : { flex: options?.flex ?? 1, minWidth: options?.minWidth ?? STOCK_NAME_COLUMN_MIN_WIDTH };
+  return {
+    colId: STOCK_NAME_COL_ID,
+    field: (options?.field ?? "name") as ColDefField<T>,
+    headerName: "종목명",
+    ...sizing,
+    cellClass: options?.cellClass,
+    cellStyle: options?.cellStyle,
+    cellRenderer:
+      options?.cellRenderer ??
+      ((p: { value?: string | null; data?: T }) => renderStockNameCell(p.value, options?.nameOptions?.(p.data))),
+  };
+}
 
 /** 업종 컬럼 폭 — 업종 컬럼이 있는 모든 화면이 같은 값을 쓴다.
  *
