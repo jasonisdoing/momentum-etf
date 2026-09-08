@@ -11,6 +11,15 @@ from utils.moving_averages import calculate_moving_average
 ENTRY_VOL_WINDOW = 20
 
 
+def daily_volatility_pct(close):
+    """최근 20일 일간 수익률 표준편차(%) — "하루에 보통 이만큼 출렁인다".
+
+    진입 문턱 판정(`entry_signal`)과 화면 변동성 컬럼(순위·모멘텀·신고가)이 **같은 이 값**을
+    쓴다 — 화면 숫자와 판정 기준이 갈리면 안 된다. Series·DataFrame 모두 받는다.
+    """
+    return close.pct_change().rolling(ENTRY_VOL_WINDOW).std() * 100
+
+
 def entry_signal(
     close_df: pd.DataFrame, signals: dict[str, pd.DataFrame], entry_vol_mult: float | None
 ) -> pd.DataFrame:
@@ -24,7 +33,7 @@ def entry_signal(
     """
     if entry_vol_mult is None:
         return signals["eligible"]
-    volatility = close_df.pct_change().rolling(ENTRY_VOL_WINDOW).std() * 100
+    volatility = daily_volatility_pct(close_df)
     floor = float(entry_vol_mult) * volatility
     return signals["eligible"] & (signals["long"] > floor) & (signals["short"] >= floor) & volatility.notna()
 

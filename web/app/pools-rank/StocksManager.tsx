@@ -13,6 +13,7 @@ import {
   marketBadgeCellStyle,
   renderHighDrawdownCell,
   tradeValueMultColumn,
+  volatilityColumn,
   marketCapRankColumn,
   stockMemoColumn,
 } from "@/lib/grid-cells";
@@ -85,6 +86,8 @@ type RankRow = {
   보유대상?: boolean;
   보유: string;
   현재가: number | null;
+  /** 20일 일간 수익률 표준편차(%) — 모멘텀 진입 문턱 판정과 같은 값. */
+  변동성?: number | null;
   /** 20일 평균 거래대금 대비 배수(KRX 확정) — 전략이 판정에 쓰는 값. */
   거래대금: number | null;
   /** 장중 시간 환산 배수(누적 ÷ 장 경과율). 장중에만 값이 있고 괄호로 보여준다. */
@@ -1112,6 +1115,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
       },
       // 공용 컬럼 — 전략 화면들과 같은 정의. 이 화면의 행 필드명만 한국어라 지정해 준다.
+      volatilityColumn<RankGridRow>({ field: "변동성" }),
       tradeValueMultColumn<RankGridRow>({
         field: "거래대금",
         liveField: "거래대금(실시간)",

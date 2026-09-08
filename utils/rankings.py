@@ -343,6 +343,7 @@ def _extract_price_metrics_from_close_series(
     )
     empty_result = {
         "현재가": None,
+        "변동성": None,
         "괴리율": None,
         "일간(%)": None,
         "1주(%)": None,
@@ -385,8 +386,15 @@ def _extract_price_metrics_from_close_series(
     # 고점 대비(%) — 모멘텀 전략과 **같은 함수**(core.strategy.scoring.drawdown_from_high_pct).
     drawdown = drawdown_from_high_pct(series, current_price)
 
+    from core.strategy.momentum.signals import daily_volatility_pct
+
+    volatility = daily_volatility_pct(series)
+    latest_volatility = float(volatility.iloc[-1]) if len(volatility) and pd.notna(volatility.iloc[-1]) else None
+
     return {
         "현재가": current_price,
+        # 20일 일간 수익률 표준편차(%) — 모멘텀 진입 문턱 판정과 같은 정의(화면 공용 컬럼).
+        "변동성": round(latest_volatility, 2) if latest_volatility is not None else None,
         "일간(%)": daily_pct,
         "1주(%)": _calc_period_return(series, 5),
         "2주(%)": _calc_period_return(series, 10),
