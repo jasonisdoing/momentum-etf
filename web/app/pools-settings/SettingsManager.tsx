@@ -23,10 +23,14 @@ const NUMERIC_KEYS = [
   "STOPLOSS_THRESHOLD_PCT",
 ] as const;
 
+/** '없음'(null)을 허용하는 모멘텀 전략 키 — 전략 화면과 같은 저장소(풀 문서). */
+const OPTIONAL_NUMERIC_KEYS = ["ENTRY_VOL_MULT", "ADR_FLOOR"] as const;
+
 /** 화면 표시 순서 = 헤더 순서. 셀도 반드시 이 순서로 그려야 한다. */
-const EDITABLE_KEYS = [...NUMERIC_KEYS, "BENCHMARK", "MARKET_REGIME_INDEX"] as const;
+const EDITABLE_KEYS = [...NUMERIC_KEYS, ...OPTIONAL_NUMERIC_KEYS, "BENCHMARK", "MARKET_REGIME_INDEX"] as const;
 
 type NumericKey = (typeof NUMERIC_KEYS)[number];
+type OptionalNumericKey = (typeof OPTIONAL_NUMERIC_KEYS)[number];
 type EditableKey = (typeof EDITABLE_KEYS)[number];
 
 const KEY_LABELS: Record<EditableKey, string> = {
@@ -36,6 +40,8 @@ const KEY_LABELS: Record<EditableKey, string> = {
   BUY_SLIPPAGE_PCT: "매수 슬리피지(%)",
   SELL_SLIPPAGE_PCT: "매도 슬리피지(%)",
   STOPLOSS_THRESHOLD_PCT: "손절 기준(%)",
+  ENTRY_VOL_MULT: "진입 문턱",
+  ADR_FLOOR: "ADR 하한",
   BENCHMARK: "벤치마크",
   MARKET_REGIME_INDEX: "ADR 기준",
 };
@@ -107,6 +113,8 @@ type PoolSettingsResponse = {
     top_n_hold_options: number[];
     slippage_pct_options?: number[];
     stoploss_pct_options?: number[];
+    entry_vol_mult_options?: (number | null)[];
+    adr_floor_options?: (number | null)[];
     market_indices?: MarketIndexOption[];
     editable_keys: string[];
   };
@@ -132,7 +140,7 @@ type PoolDraft = {
   benchmarkName: string;
   marketRegimeTicker: string;
   marketRegimeName: string;
-} & Record<NumericKey, string>;
+} & Record<NumericKey, string> & Record<OptionalNumericKey, string>;
 
 const EMPTY_DRAFT: PoolDraft = {
   ticker_type: "",
@@ -150,6 +158,9 @@ const EMPTY_DRAFT: PoolDraft = {
   BUY_SLIPPAGE_PCT: "0.5",
   SELL_SLIPPAGE_PCT: "0.5",
   STOPLOSS_THRESHOLD_PCT: "-10",
+  // 모멘텀 전략 설정 — 기본은 '없음'(빈 값). 값은 전략 화면·튜닝에서도 저장된다.
+  ENTRY_VOL_MULT: "",
+  ADR_FLOOR: "",
   benchmarkTicker: "",
   benchmarkName: "",
   marketRegimeTicker: "",
@@ -226,6 +237,8 @@ function toDraft(pool: PoolEntry): PoolDraft {
     BUY_SLIPPAGE_PCT: String(pool.settings.BUY_SLIPPAGE_PCT?.value ?? ""),
     SELL_SLIPPAGE_PCT: String(pool.settings.SELL_SLIPPAGE_PCT?.value ?? ""),
     STOPLOSS_THRESHOLD_PCT: String(pool.settings.STOPLOSS_THRESHOLD_PCT?.value ?? ""),
+    ENTRY_VOL_MULT: pool.settings.ENTRY_VOL_MULT?.value == null ? "" : String(pool.settings.ENTRY_VOL_MULT.value),
+    ADR_FLOOR: pool.settings.ADR_FLOOR?.value == null ? "" : String(pool.settings.ADR_FLOOR.value),
     benchmarkTicker: toBenchmark(pool.settings.BENCHMARK).ticker ?? "",
     benchmarkName: toBenchmark(pool.settings.BENCHMARK).name ?? "",
     marketRegimeTicker: toMarketRegimeIndex(pool.settings.MARKET_REGIME_INDEX)?.ticker ?? "",
@@ -253,6 +266,9 @@ function draftToValues(draft: PoolDraft) {
     BUY_SLIPPAGE_PCT: Number(draft.BUY_SLIPPAGE_PCT),
     SELL_SLIPPAGE_PCT: Number(draft.SELL_SLIPPAGE_PCT),
     STOPLOSS_THRESHOLD_PCT: Number(draft.STOPLOSS_THRESHOLD_PCT),
+    // '없음'(빈 값)은 null 로 보낸다 — 미설정이 아니라 명시적 '문턱/게이트 없음'이다.
+    ENTRY_VOL_MULT: draft.ENTRY_VOL_MULT === "" ? null : Number(draft.ENTRY_VOL_MULT),
+    ADR_FLOOR: draft.ADR_FLOOR === "" ? null : Number(draft.ADR_FLOOR),
     // 티커/이름이 모두 비면 미설정(null). 하나만 있으면 백엔드가 거부한다.
     BENCHMARK: benchmarkTicker
       ? { ticker: benchmarkTicker, name: draft.benchmarkName.trim() }
@@ -689,6 +705,9 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     ? data.constraints.stoploss_pct_options
     : DEFAULT_STOPLOSS_PCT_OPTIONS;
   const marketIndices = data.constraints.market_indices ?? [];
+  // '없음'을 첫 선택지로 — 모멘텀 화면 셀렉트와 같은 목록(백엔드 상수가 단일 소스).
+  const entryVolMultOptions = ["", ...(data.constraints.entry_vol_mult_options ?? []).filter((v): v is number => v != null).map(String)];
+  const adrFloorOptions = ["", ...(data.constraints.adr_floor_options ?? []).filter((v): v is number => v != null).map(String)];
   /** 셀렉트 편집 컬럼 — 목록 밖 저장값도 후보에 남겨 빈 셀렉트가 되지 않게 한다. */
   const selectCol = (
     field: keyof PoolDraft & ColDef<PoolGridRow>["field"],
@@ -854,6 +873,18 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       (row) => data.constraints.ma_options_by_country[row.country_code]?.long_ma_options ?? [],
       { valueFormatter: (params) => (params.value ? `${params.value}일` : "미설정") },
     ),
+    selectCol("ENTRY_VOL_MULT", "진입 문턱", 92, () => entryVolMultOptions, {
+      valueFormatter: (params) => (params.value === "" || params.value == null ? "없음" : `${params.value}×`),
+      headerTooltip:
+        "모멘텀 진입 문턱 — 이격이 '배수 × 20일 변동성' 이상인 종목만 진입 자격(청산은 불변). " +
+        "모멘텀 전략 화면·튜닝 적용과 같은 저장값이다.",
+    }),
+    selectCol("ADR_FLOOR", "ADR 하한", 88, () => adrFloorOptions, {
+      valueFormatter: (params) => (params.value === "" || params.value == null ? "없음" : String(params.value)),
+      headerTooltip:
+        "모멘텀 ADR 하한 — 그날 시장 ADR(20일 등락비율)이 이 값 미만이면 신규 진입만 건너뛴다. " +
+        "ADR 기준(레짐 지수)이 있어야 쓸 수 있다. 모멘텀 전략 화면과 같은 저장값이다.",
+    }),
     selectCol("BUY_SLIPPAGE_PCT", "매수", 72, () => slippageOptions, {
       valueFormatter: (params) => (params.value === "" ? "미설정" : `${params.value}%`),
     }),
@@ -1036,6 +1067,24 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
           "장기",
           <MaDaysSelect value={Number(draft.LONG_MA_DAYS) || null} options={data.constraints.ma_options_by_country[draft.country_code]?.long_ma_options} onChange={(days) => onChange("LONG_MA_DAYS", String(days))} />,
           { minWidth: 160, labelWidth: 44 },
+        )}
+        {renderField(
+          "진입 문턱",
+          <select className="form-select form-select-sm" style={{ width: 84 }} value={draft.ENTRY_VOL_MULT} onChange={(e) => onChange("ENTRY_VOL_MULT", e.target.value)}>
+            {entryVolMultOptions.map((value) => (
+              <option key={value || "none"} value={value}>{value === "" ? "없음" : `${value}×`}</option>
+            ))}
+          </select>,
+          { minWidth: 170, labelWidth: 68 },
+        )}
+        {renderField(
+          "ADR 하한",
+          <select className="form-select form-select-sm" style={{ width: 84 }} value={draft.ADR_FLOOR} onChange={(e) => onChange("ADR_FLOOR", e.target.value)}>
+            {adrFloorOptions.map((value) => (
+              <option key={value || "none"} value={value}>{value === "" ? "없음" : value}</option>
+            ))}
+          </select>,
+          { minWidth: 170, labelWidth: 68 },
         )}
       </div>
 

@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from config import TOP_N_HOLD_OPTIONS
+from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS, TOP_N_HOLD_OPTIONS
 from fastapi_app.dependencies import require_internal_token
 from utils.ma_options import ma_options_by_country
 from utils.market_breadth_service import MARKET_BY_INDEX_TICKER, SELF_POOL_REGIME_TICKER
@@ -104,6 +104,9 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
             "top_n_hold_options": list(TOP_N_HOLD_OPTIONS),
             "slippage_pct_options": list(SLIPPAGE_PCT_OPTIONS),
             "stoploss_pct_options": list(STOPLOSS_PCT_OPTIONS),
+            # 모멘텀 전략 설정(진입 문턱·ADR 하한) — 전략 화면과 같은 저장소(풀 문서)라 여기서도 편집한다.
+            "entry_vol_mult_options": list(ENTRY_VOL_MULT_OPTIONS),
+            "adr_floor_options": list(ADR_FLOOR_OPTIONS),
             "editable_keys": list(POOL_EDITABLE_KEYS),
             # ADR 기준 후보 — 지수 4개(코스피·코스닥·S&P500·나스닥100) + 그 종목풀 자신.
             # 종목풀은 지수와 구성이 달라(us_stock 은 S&P100+나스닥100 조합) 매매하는
