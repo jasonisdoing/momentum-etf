@@ -555,6 +555,15 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
                 self.assertNotIn("예상", orders[0]["text"])
                 self.assertIn("예상", orders[1]["text"])
                 self.assertEqual(held_qty + sum(expected_trades), final.get("SAME", 0))
+                if first_plan == second_plan == "buy":
+                    complete = [{**rows[0], "held_quantity": final["SAME"]}]
+                    self.assertEqual(
+                        build_action_groups(
+                            complete, {"slots": event_slots}, "2026-09-07", target_schedule=schedule, currency="USD"
+                        ),
+                        [],
+                    )
+
                 # 앞선 목표를 이미 맞췄다면 다음 날짜 주문만 남고 키·수량도 유지된다.
                 rows[0]["held_quantity"] = schedule["2026-09-04"]["quantities"].get("SAME", 0)
                 remaining = build_action_groups(
@@ -564,6 +573,40 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
                 self.assertEqual(len(remaining_items), 1)
                 self.assertEqual(remaining_items[0]["key"], orders[1]["key"])
                 self.assertEqual(remaining_items[0]["quantity"], orders[1]["quantity"])
+
+        # 미래 진입 종목을 미리 보유해도 다른 종목의 오늘 주문 때문에 왕복매매를 만들지 않는다.
+        future_actions = {
+            "slots": {
+                "a": {
+                    "label": "A",
+                    "live": True,
+                    "sells": [],
+                    "exit_forecast": [],
+                    "entries": [{"ticker": "TODAY", "fill_date": "2026-09-08"}, {"ticker": "139260"}],
+                }
+            }
+        }
+        future_schedule = {
+            "2026-09-08": {"quantities": {"TODAY": 1}, "weights": {"TODAY": 10}},
+            "2026-09-09": {"quantities": {"TODAY": 1, "139260": 34}, "weights": {"TODAY": 10, "139260": 10}},
+        }
+        for already_held, difference in [(34, 0), (32, 2), (36, -2), (0, 34)]:
+            with self.subTest(already_held=already_held):
+                rows = [
+                    {"ticker": "TODAY", "price": 10, "held_quantity": 0, "target_quantity": 1},
+                    {"ticker": "139260", "price": 100, "held_quantity": already_held, "target_quantity": 34},
+                ]
+                groups = build_action_groups(
+                    rows, future_actions, "2026-09-09", target_schedule=future_schedule, currency="KRW"
+                )
+                orders = [item for group in groups for item in group["items"] if item["ticker"] == "139260"]
+                if difference == 0:
+                    self.assertEqual(orders, [])
+                else:
+                    self.assertEqual(len(orders), 1)
+                    self.assertEqual(orders[0]["date"], "2026-09-09")
+                    self.assertEqual(orders[0]["quantity"], abs(difference))
+                    self.assertEqual(orders[0]["side"], "buy" if difference > 0 else "sell")
 
         # 같은 날짜의 반대 방향은 목표 합산에서 상계하며, 순변화 0이면 액션이 없다.
         same_day = {

@@ -59,6 +59,14 @@ def build_action_groups(
     currency: str = "KRW",
 ) -> list[dict[str, Any]]:
     """날짜별 엔진 목표 차이를 주문으로 만든다. 이후 주문은 앞선 목표 달성을 전제로 한다."""
+    # 다른 종목의 오늘 주문 때문에 미래 진입 종목을 오늘의 0주 목표로 먼저 청산하지 않는다.
+    first_event: dict[str, str] = {}
+    for slot in actions["slots"].values():
+        for event in (*slot["entries"], *slot["sells"]):
+            date = event.get("fill_date") or next_trading_day
+            if date is not None:
+                ticker = event["ticker"]
+                first_event[ticker] = min(first_event.get(ticker, date), date)
     previous = {row["ticker"]: int(row.get("held_quantity") or 0) for row in holdings}
     groups = []
     for index, (day, target) in enumerate(sorted(target_schedule.items())):
@@ -67,8 +75,21 @@ def build_action_groups(
             if source.get("is_cash") or source.get("is_fixed_asset") or source.get("target_quantity") is None:
                 continue
             ticker = source["ticker"]
+            first_date = first_event.get(ticker, next_trading_day)
+            if first_date is not None and day < first_date:
+                continue
             quantity = target["quantities"].get(ticker, 0)
             held = previous.get(ticker, 0)
+            if next_trading_day is not None and day < next_trading_day and quantity != held:
+                event_name = "entries" if quantity > held else "sells"
+                # 오늘 매수 신호만 있는데 이미 더 보유했다고 조정 매도를 앞당기지 않는다.
+                matching_signal = any(
+                    event["ticker"] == ticker and (event.get("fill_date") or next_trading_day) == day
+                    for slot in actions["slots"].values()
+                    for event in slot[event_name]
+                )
+                if not matching_signal:
+                    continue
             stage_rows.append(
                 {
                     **source,
@@ -96,7 +117,8 @@ def build_action_groups(
         }
         stage_groups = _build_action_group_stage(stage_rows, stage_actions, day, currency=currency)
         groups.extend(stage_groups)
-        previous = target["quantities"]
+        # 이번 날짜에 비교한 종목만 목표 달성을 가정한다. 대기 종목의 실제 보유는 그대로 둔다.
+        previous.update({row["ticker"]: row["target_quantity"] for row in stage_rows})
     # 날짜를 키에 포함하면 앞선 주문이 사라진 뒤에도 다음 주문의 키가 유지된다.
     for group in groups:
         for item in group["items"]:
