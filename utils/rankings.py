@@ -570,11 +570,15 @@ def hold_eligible_mask(disparity: pd.Series, short_disparity: pd.Series) -> pd.S
 def _mark_hold_targets(
     df: pd.DataFrame,
     top_n: int,
+    entry_vol_mult: float | None = None,
 ) -> pd.DataFrame:
     """규칙상 보유 대상인 종목에 ``보유대상`` 을 표시한다. 화면의 추천(✅) 기준.
 
     선정 자체는 **모멘텀 전략과 같은 공용 함수**(`core.strategy.scoring.select_holdings`)가
     한다 — 자격(장기 이격 > 0, 단기 이격 >= 0) → 순위 점수 순이다.
+    풀에 진입 문턱(`entry_vol_mult`)이 저장돼 있으면 모멘텀 진입과 같은 문턱
+    (이격 ≥ 배수 × 20일 변동성, `entry_gap_ok`)을 후보에 함께 건다 — 이 표시는
+    "오늘 새로 고른다면"이라 진입 관점이고, 자격 회색·❗ 배지는 보유 기준(0선) 그대로다.
 
     여기서 따로 거는 건 **제외**(`exclude_from_ranking`)뿐이다 — 투자 후보가 아니다.
     벤치마크는 빼지 않는다(종목풀에 있으면 매수 후보다. 모멘텀·신고가도 같다).
@@ -584,6 +588,8 @@ def _mark_hold_targets(
     if "이격" not in df.columns or "단기이격" not in df.columns:
         return df
 
+    from core.strategy.momentum.signals import entry_gap_ok
+
     candidates = [
         {
             "ticker": str(row.get("티커") or "").strip().upper(),
@@ -592,6 +598,7 @@ def _mark_hold_targets(
         }
         for _, row in df.iterrows()
         if not bool(row.get("exclude_from_ranking"))
+        and entry_gap_ok(row.get("이격"), row.get("단기이격"), row.get("변동성"), entry_vol_mult)
     ]
     picked = set(select_holdings(candidates, top_n=int(top_n)))
     if picked:
@@ -721,10 +728,15 @@ def _apply_common_rank_scores(
     return df
 
 
+# 진입 문턱 기본값 표시 — 인자를 안 주면 풀 저장값(ENTRY_VOL_MULT)을 쓴다는 뜻의 센티널.
+_ENTRY_VOL_MULT_STORED = object()
+
+
 def build_ticker_type_rankings(
     ticker_type: str,
     *,
     ma_rules: list[dict[str, Any]] | None = None,
+    entry_vol_mult: Any = _ENTRY_VOL_MULT_STORED,
     as_of_date: pd.Timestamp | None = None,
     realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
     status_callback: Any | None = None,
@@ -939,7 +951,11 @@ def build_ticker_type_rankings(
     # 추천 ✅ 개수는 모멘텀·신고가·종목풀 백테스트와 같은 풀 설정을 쓴다.
     from utils.pool_settings_store import get_pool_top_n_hold
 
-    df = _mark_hold_targets(df, get_pool_top_n_hold(ticker_type))
+    # 진입 문턱 — 화면 툴바가 미리보기 값을 넘기면 그걸, 아니면 그 풀의 모멘텀 설정
+    # (ENTRY_VOL_MULT)을 쓴다. 보유 대상(✅)이 모멘텀 후보 표와 같아진다.
+    if entry_vol_mult is _ENTRY_VOL_MULT_STORED:
+        entry_vol_mult = (get_ticker_type_settings(ticker_type) or {}).get("ENTRY_VOL_MULT")
+    df = _mark_hold_targets(df, get_pool_top_n_hold(ticker_type), entry_vol_mult=entry_vol_mult)
     df = _normalize_ranking_values(df, country_code, monthly_labels=monthly_labels)
     df.attrs["realtime_active"] = realtime_active
     df.attrs["ranking_computed_at"] = ranking_computed_at

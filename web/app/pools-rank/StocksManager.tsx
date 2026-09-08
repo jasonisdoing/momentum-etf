@@ -13,6 +13,7 @@ import {
   marketBadgeCellStyle,
   renderHighDrawdownCell,
   tradeValueMultColumn,
+  maExitGapColumn,
   volatilityColumn,
   marketCapRankColumn,
   stockMemoColumn,
@@ -127,6 +128,9 @@ type RankResponse = {
   ticker_types?: RankTickerType[];
   ticker_type?: string;
   ma_rules?: RankMaRule[];
+  /** 이번 응답의 보유 대상(✅)에 적용된 진입 문턱과 선택지 — 모멘텀 화면과 같은 값. */
+  entry_vol_mult?: number | null;
+  entry_vol_mult_options?: (number | null)[];
   /** 이평선 일수 선택지 — 백엔드 상수(utils/ma_options)가 단일 소스. */
   short_ma_options?: number[];
   long_ma_options?: number[];
@@ -349,6 +353,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     rankToolbarCache?.ticker_type ?? DEFAULT_TICKER_TYPE,
   );
   const [maRule, setMaRule] = useState<RankMaRule | null>(rankToolbarCache?.ma_rule ?? null);
+  const [entryVolMult, setEntryVolMult] = useState<string>("");
+  const [entryVolMultOptions, setEntryVolMultOptions] = useState<(number | null)[]>([]);
 
   // 백엔드가 내려주는 선택지를 쓴다 — 화면이 복사본을 들고 있으면 값이 추가될 때 여기만 옛 목록이 남는다.
   const [maOptions, setMaOptions] = useState<Partial<MaOptionsPayload>>(rankToolbarCache?.ma_options ?? {});
@@ -394,6 +400,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setSelectedAccountId(nextAccountId);
     writeRememberedTickerType("rank", nextAccountId);
     setMaRule(payload.ma_rules?.[0] ?? null);
+    setEntryVolMult(payload.entry_vol_mult == null ? "" : String(payload.entry_vol_mult));
+    setEntryVolMultOptions(payload.entry_vol_mult_options ?? []);
     const nextMaOptions = { short_ma_options: payload.short_ma_options, long_ma_options: payload.long_ma_options };
     setMaOptions(nextMaOptions);
     setMonthlyReturnLabels(payload.monthly_return_labels ?? []);
@@ -428,6 +436,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       writeRememberedTickerType("rank", nextAccountId);
     }
     setMaRule(payload.ma_rules?.[0] ?? null);
+    setEntryVolMult(payload.entry_vol_mult == null ? "" : String(payload.entry_vol_mult));
+    setEntryVolMultOptions(payload.entry_vol_mult_options ?? []);
     const nextMaOptions = { short_ma_options: payload.short_ma_options, long_ma_options: payload.long_ma_options };
     setMaOptions(nextMaOptions);
     rankToolbarCache = {
@@ -477,6 +487,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   async function load(next?: {
     ticker_type?: string;
     ma_rule_override?: RankMaRule;
+    /** 진입 문턱 미리보기 — "none" = 문턱 없음. 안 주면 풀 저장값을 쓴다. */
+    entry_vol_mult_override?: string;
     bootstrap?: boolean;
   }) {
     const requestSequence = ++loadSequenceRef.current;
@@ -492,6 +504,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       if (next?.ma_rule_override) {
         search.set("short_ma_days", String(next.ma_rule_override.short_ma_days));
         search.set("long_ma_days", String(next.ma_rule_override.long_ma_days));
+      }
+      if (next?.entry_vol_mult_override != null) {
+        search.set("entry_vol_mult", next.entry_vol_mult_override);
       }
 
       const query = search.size > 0 ? `?${search.toString()}` : "";
@@ -1125,6 +1140,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
     // 순위 산정에 직접 쓰이는 지표들. 종목을 고르는 눈으로 볼 때만 필요하다.
     const rankingColumns: ColDef<RankGridRow>[] = [
+      // 이탈까지 여유 — 모멘텀 화면과 같은 공용 컬럼(같은 이격을 '이탈 임박' 강조로 본다).
+      maExitGapColumn<RankGridRow>({ field: "단기이격", maDays: maRule?.short_ma_days }),
+      maExitGapColumn<RankGridRow>({ field: "이격", maDays: maRule?.long_ma_days }),
       {
         field: "단기이격",
         headerName: "단기",
@@ -1370,6 +1388,15 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     void load({
       ticker_type: selectedTickerType,
       ma_rule_override: nextRule,
+    });
+  }
+
+  function handleEntryVolMultChange(value: string) {
+    setEntryVolMult(value);
+    void load({
+      ticker_type: selectedTickerType,
+      ma_rule_override: maRule ?? undefined,
+      entry_vol_mult_override: value === "" ? "none" : value,
     });
   }
 
@@ -1753,6 +1780,25 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                           onChange={(days) => handleMaRuleDaysChange("long_ma_days", days)}
                         />
                       </div>
+                    </label>
+                  ) : null}
+                  {/* 진입 문턱 — 모멘텀 화면과 같은 값(보유 대상 ✅ 판정에 적용). 미리보기라 저장은 모멘텀 화면에서. */}
+                  {entryVolMultOptions.length > 0 ? (
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">진입 문턱</span>
+                      <select
+                        className="form-select form-select-sm"
+                        style={{ width: 80 }}
+                        value={entryVolMult}
+                        onChange={(e) => handleEntryVolMultChange(e.target.value)}
+                        title="보유 대상(✅) 판정에 쓰는 진입 문턱 — 이격이 '배수 × 20일 변동성' 이상인 종목만 고른다(모멘텀 진입과 같은 규칙). 여기서는 미리보기이고, 저장은 모멘텀 화면에서 한다."
+                      >
+                        {entryVolMultOptions.map((value) => (
+                          <option key={String(value)} value={value == null ? "" : String(value)}>
+                            {value == null ? "없음" : `${value}×`}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   ) : null}
                   {/* 컬럼 묶음 전환 — 그리드에만 쓰는 설정이라 차트 모드에서는 감춘다. */}

@@ -22,6 +22,7 @@ def get_rank_data(
     ticker_type: str | None = Query(default=None),
     short_ma_days: int | None = Query(default=None),
     long_ma_days: int | None = Query(default=None),
+    entry_vol_mult: str | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
     ma_rule_override: dict[str, object] | None = None
@@ -33,6 +34,7 @@ def get_rank_data(
     return load_rank_data(
         ticker_type=ticker_type,
         ma_rule_override=ma_rule_override,
+        entry_vol_mult_override=entry_vol_mult,
     )
 
 
