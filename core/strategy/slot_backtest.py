@@ -142,8 +142,14 @@ def run_slot_backtest(
     # 합성 운용은 고정 시작일을 쓰고, 기간 비교 백테스트만 이동 구간을 쓴다.
     start = pd.Timestamp(start_date) if start_date is not None else dates[-1] - pd.DateOffset(months=months)
     span = [d for d in dates if d >= start]
-    if len(span) < 2:
-        raise RuntimeError("백테스트할 구간의 가격 데이터가 부족합니다.")
+    # 1거래일(시작일 = 마지막 봉)도 허용한다 — 오늘 시작하는 새 전략은 체결 이력 없이
+    # 그날 판정(다음 시가에 살 종목)만 내면 된다. 곡선은 한 점(0%)이고 루프는 돌지 않는다.
+    if not span:
+        # 시작일이 마지막 봉보다 뒤 — 첫 거래일 봉(장중엔 잠정 봉)이 생기면 그때부터 표시된다.
+        raise RuntimeError(
+            f"전략 시작일({start.date()}) 이후의 가격 데이터가 아직 없습니다"
+            f" (마지막 봉 {dates[-1].date()}) — 첫 거래일 봉이 생기면 표시됩니다."
+        )
 
     # 자산은 현금 + 보유 주수로 들고 간다. 포지션 손익을 자산에 곱하면 동시에 들고 있던
     # 종목의 손익이 합산이 아니라 곱으로 쌓여 수익이 부풀려진다.
