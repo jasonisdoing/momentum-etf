@@ -46,6 +46,7 @@ import {
   slotTradeColumns,
   stockMemoColumn,
   tradeValueMultColumn,
+  volatilityColumn,
   STATUS_COLUMN_MIN_WIDTH,
   STATUS_COLUMN_WIDTH,
   type SlotPlan,
@@ -808,6 +809,7 @@ export function MomentumClient() {
         headerTooltip: "이탈한 종목도 지금 시세다 — 판 뒤의 흐름을 청산가와 견줘 볼 수 있다.",
         valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number, positions?.currency)),
       },
+      volatilityColumn<PlanRow>(),
       tradeValueMultColumn<PlanRow>(),
       ...slotTradeColumns<PlanRow>({ fillDay }),
       // 이탈까지 남은 여유 — 둘 중 하나라도 0 이하가 되면 다음 거래일 시가에 판다.
@@ -876,6 +878,7 @@ export function MomentumClient() {
         type: "numericColumn",
         valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number, positions?.currency)),
       },
+      volatilityColumn<CandidateRow>(),
       tradeValueMultColumn<CandidateRow>(),
       maExitGapColumn<CandidateRow>({ field: "short_gap_pct", maDays: view?.settings.short_ma_days }),
       maExitGapColumn<CandidateRow>({ field: "long_gap_pct", maDays: view?.settings.long_ma_days }),

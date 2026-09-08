@@ -217,6 +217,26 @@ export function tradeValueMultColumn<T>(options?: {
   };
 }
 
+/** 변동성 컬럼 — 순위·모멘텀·신고가 공용. 최근 20일 일간 수익률 표준편차(%).
+ *  모멘텀 진입 문턱(배수 × 이 값)의 기준값과 **같은 계산**이다.
+ *  표준 배치는 「현재가 → 변동성 → 거래대금」 — 현재가 바로 뒤에 둔다. */
+export function volatilityColumn<T>(options?: { field?: string }): ColDef<T> {
+  const field = options?.field ?? "volatility_pct";
+  return {
+    colId: field,
+    valueGetter: (p) => ((p.data as Record<string, unknown> | undefined)?.[field] as number | null | undefined) ?? null,
+    headerName: "변동성",
+    width: 84,
+    minWidth: 72,
+    type: "numericColumn",
+    headerTooltip:
+      "최근 20일 일간 수익률 표준편차(%) — 하루에 보통 이만큼 출렁인다는 뜻. " +
+      "모멘텀 진입 문턱(배수 × 이 값)의 기준값과 같은 계산입니다.",
+    valueFormatter: (p) => (p.value == null ? "-" : `${Number(p.value).toFixed(2)}%`),
+    cellStyle: { color: "var(--text-muted)" },
+  };
+}
+
 /** 시장 ADR 컬럼 — 모멘텀·신고가 백테스트 표 공용. 일간=당일 값, 주간=판정일 값,
  *  월간·연간=기간 최저. 값이 하나도 없으면(레짐 시장 없는 풀) `hide` 로 숨긴다. */
 export function adrColumn<T>(options: {

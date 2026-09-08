@@ -188,6 +188,10 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     from utils.trade_value import live_min_value_mult
 
     value_mult_by, value_mult_live_by = _load_trade_value_mult(pool, list(close_df.columns))
+    # 변동성(%) — 모멘텀 진입 문턱과 같은 정의(20일 일간 수익률 표준편차). 화면 공용 컬럼용.
+    from core.strategy.momentum.signals import daily_volatility_pct
+
+    vol_last = daily_volatility_pct(close_df).loc[last]
     min_value_mult = settings["min_value_mult"]
     # 장중 누적 배수에 맞춘 하한 — 그 시장의 세션 경과 비율만큼 낮춘다.
     live_required = live_min_value_mult(min_value_mult, _pool_country(pool))
@@ -237,6 +241,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
                 "gap_pct": round(gap_pct, 2),
                 "high_drawdown_pct": high_drawdown(ticker),
                 "touched": touched,
+                "volatility_pct": round(float(vol_last[ticker]), 2) if pd.notna(vol_last.get(ticker)) else None,
                 "value_mult": round(float(value_mult_by[ticker]), 2) if ticker in value_mult_by else None,
                 "value_mult_live": value_mult_live_by.get(ticker),
                 # 돌파했더라도 이 값이 거짓이면 사지 않는다 (백테스트와 같은 판정).
@@ -473,10 +478,12 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     # 거래대금 배수도 후보 행과 같은 값을 붙인다 — 화면 표준 배치(현재가 뒤 거래대금)용.
     value_mult_by = {row["ticker"]: (row.get("value_mult"), row.get("value_mult_live")) for row in rows}
     drawdown_by = {row["ticker"]: row["high_drawdown_pct"] for row in rows}
+    volatility_by = {row["ticker"]: row.get("volatility_pct") for row in rows}
     for item in [*holdings, *simulated["exited_today"]]:
         item["market_cap"] = market_cap_by.get(item["ticker"])
         item["market_cap_rank"] = rank_by_ticker.get(item["ticker"])
         item["value_mult"], item["value_mult_live"] = value_mult_by.get(item["ticker"], (None, None))
+        item["volatility_pct"] = volatility_by.get(item["ticker"])
         item["high_drawdown_pct"] = drawdown_by.get(item["ticker"])
 
     # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.

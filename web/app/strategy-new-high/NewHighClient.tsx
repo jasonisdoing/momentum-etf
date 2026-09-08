@@ -33,6 +33,7 @@ import {
   maExitGapColumn,
   signColor,
   tradeValueMultColumn,
+  volatilityColumn,
   marketCapRankColumn,
   stockMemoColumn,
   highDrawdownColumn,
@@ -676,6 +677,7 @@ export function NewHighClient() {
         type: "numericColumn",
         valueFormatter: (p) => formatPrice(p.value as number),
       },
+      volatilityColumn<PositionRow>(),
       tradeValueMultColumn<PositionRow>({
         qualifies: (row) => row?.qualifies,
         headerTooltip:
@@ -946,6 +948,7 @@ export function NewHighClient() {
         valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number)),
       },
       // 표준 배치(일간(%) → 현재가 → 거래대금) — 순위·진입 후보 표와 같은 공용 컬럼.
+      volatilityColumn<PlanRow>(),
       tradeValueMultColumn<PlanRow>(),
       {
         field: "entry_date",

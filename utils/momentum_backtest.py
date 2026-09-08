@@ -162,6 +162,8 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     short_gap, long_gap = signals["short"].loc[last], signals["long"].loc[last]
     # 진입 자격 — 백테스트와 같은 신호(보유 자격 + 변동성 문턱). 후보 표가 이 값으로 순위를 매긴다.
     entry_last = momentum_signals.entry_signal(close_df, signals, settings["entry_vol_mult"]).loc[last]
+    # 변동성(%) — 진입 문턱 판정과 같은 값(20일 일간 수익률 표준편차). 화면 공용 컬럼용.
+    vol_last = momentum_signals.daily_volatility_pct(close_df).loc[last]
     market_cap_by = _market_caps(pool)
     from utils.market_cap_rank import market_cap_rank_of
     from utils.rank_service import _load_trade_value_mult
@@ -203,6 +205,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
                 "market_cap_rank": rank_by_ticker.get(ticker),
                 "value_mult": round(float(value_mult_by[ticker]), 2) if ticker in value_mult_by else None,
                 "value_mult_live": value_mult_live_by.get(ticker),
+                "volatility_pct": round(float(vol_last[ticker]), 2) if pd.notna(vol_last.get(ticker)) else None,
                 # 이탈까지 남은 여유(%) — 둘 중 하나라도 0 이하가 되면 다음 거래일 시가에 판다.
                 "short_gap_pct": round(float(short_value), 2),
                 "long_gap_pct": round(float(long_value), 2),
@@ -290,6 +293,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         eff_short = eff["short"].loc[session_ts]
         eff_long = eff["long"].loc[session_ts]
         eff_eligible = eff_entry.loc[session_ts]
+        eff_vol = momentum_signals.daily_volatility_pct(eff_close).loc[session_ts]
         for row in rows:
             ticker = row["ticker"]
             if ticker not in live_prices:
@@ -299,6 +303,8 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
                 row["short_gap_pct"] = round(float(short_value), 2)
             if pd.notna(long_value):
                 row["long_gap_pct"] = round(float(long_value), 2)
+            if pd.notna(eff_vol.get(ticker)):
+                row["volatility_pct"] = round(float(eff_vol[ticker]), 2)
             row["eligible"] = bool(eff_eligible.get(ticker, False))
         rows.sort(key=lambda row: row["long_gap_pct"], reverse=True)
 
@@ -328,6 +334,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         item["market_cap_rank"] = (row or {}).get("market_cap_rank")
         item["value_mult"] = (row or {}).get("value_mult")
         item["value_mult_live"] = (row or {}).get("value_mult_live")
+        item["volatility_pct"] = (row or {}).get("volatility_pct")
         item["short_gap_pct"] = (row or {}).get("short_gap_pct")
         item["long_gap_pct"] = (row or {}).get("long_gap_pct")
         item["high_drawdown_pct"] = (row or {}).get("high_drawdown_pct")
