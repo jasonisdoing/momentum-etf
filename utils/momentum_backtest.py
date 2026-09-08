@@ -151,7 +151,22 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     pool = settings["pool"]
     context = load_context(settings)
     # 확정 실행 — 이 결과의 daily 를 페이로드에 실어 합성 슬리브 몫이 같은 실행을 읽는다.
-    simulated = run_backtest(DEFAULT_BACKTEST_MONTHS, settings, context, start_date=start_date, market=market)
+    try:
+        simulated = run_backtest(DEFAULT_BACKTEST_MONTHS, settings, context, start_date=start_date, market=market)
+    except RuntimeError as error:
+        if "이후의 가격 데이터가 아직 없습니다" not in str(error):
+            raise
+        # 시작일이 오늘인데 오늘 확정 봉이 아직 없는 경우 — 확정 구간은 「시작 전」이라
+        # 빈 상태로 두고, 장중이면 아래 잠정 실행이 오늘 잠정 봉으로 첫 판정을 낸다.
+        # 값을 지어내는 게 아니라 '아직 아무 것도 하지 않은 전략'의 실제 상태다.
+        simulated = {
+            "open_positions": [],
+            "exited_today": [],
+            "planned_exits": [],
+            "planned_entries": [],
+            "planned_entry_weights": {},
+            "daily": [],
+        }
     name_by, industry_by = context["name_by"], context["industry_by"]
     panel, signals = context["panel"], context["signals"]
     close_df = panel["close"]

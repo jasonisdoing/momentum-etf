@@ -305,6 +305,25 @@ class PortfolioMixStateTest(unittest.TestCase):
 
 
 class MixRebalanceMatchesBacktest(unittest.TestCase):
+    def test_first_operating_day_uses_saved_mix_weights(self):
+        slots = [SleeveSpec("a", "momentum", "us_stock", {}), SleeveSpec("b", "portfolio", "us_etf", {})]
+        ctx = {"account_id": "test", "slots": slots}
+        results = {
+            "a": {"daily": [{"date": "2026-09-08", "strategy_pct": 0, "cash_weight_pct": 100}]},
+            "b": {"daily": [{"date": "2026-09-08", "strategy_pct": 0, "cash_weight_pct": 0}]},
+        }
+        with (
+            patch(
+                "utils.strategy_mix_service.mix_weights_for_account",
+                return_value={"a_pct": 40, "b_pct": 30, "cash_pct": 30},
+            ),
+            patch("utils.pool_settings_store.get_pool_slippage", return_value=(0.1, 0.2)),
+        ):
+            state = _simulate_mix(ctx, results, through_date=None)
+        self.assertEqual(state["curve"].to_dict(), {"2026-09-08": 1.0})
+        self.assertEqual(state["values"], {"a": 0.4, "b": 0.3})
+        self.assertEqual(state["cash"], 0.3)
+
     def test_pending_month_start_matches_backtest(self):
         slots = [SleeveSpec("a", "momentum", "us_stock", {}), SleeveSpec("b", "momentum", "us_stock", {})]
         ctx = {"account_id": "test", "slots": slots}

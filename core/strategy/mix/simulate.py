@@ -27,8 +27,11 @@ def replay_mix(
     슬리브별 주식 비율(0~1)이다. ``through_date`` 가 다음 달이면 아직 월초 종가가 없는
     상태 — 직전 확정 가격으로 같은 재배분을 미리 계산한다(실제 거래일 계산과 같은 함수).
     """
-    if len(frame) < 2 or stock.isna().any().any():
+    if frame.empty or stock.isna().any().any():
         raise RuntimeError("합성에 필요한 공통 가격·현금 비중 데이터가 부족합니다.")
+    # 한 슬리브가 오늘 시작하면 공통 구간도 오늘 한 행뿐일 수 있다. 이때는 아직
+    # 수익률 변화나 월초 재배분이 없으므로, 저장한 합성 배분이 곧 첫 운용일의 상태다.
+    # 가격·현금 비중을 추정하지 않고 입력 첫 행만 사용한다.
     if through_date is not None and through_date > frame.index[-1] and through_date[:7] != frame.index[-1][:7]:
         # 아직 월초 종가가 없으면 직전 확정 가격으로 목표만 계산한다.
         frame = frame.copy()
