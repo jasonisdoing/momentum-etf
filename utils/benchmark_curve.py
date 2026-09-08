@@ -37,8 +37,12 @@ def growth_from_frame(frame: pd.DataFrame, index: pd.Index, *, label: str = "벤
     이후는 그 시가 대비 종가 비율이다. 전략 곡선과 같은 시점·같은 기준이 된다.
 
     시가를 못 구하면 **에러**다 — 종가로 슬쩍 대체하면 이 함수를 만든 이유가 사라진다.
+    예외는 하나뿐: 첫날이 **아직 확정 봉이 없는 오늘**(전략 시작일 = 오늘, 잠정 실행)이면
+    직전 확정 종가를 기준으로 둔다 — 오늘 시가는 존재하지만 캐시에 아직 없는 값이고,
+    종가가 확정되면 같은 실행이 실제 시가 기준으로 다시 계산된다(잠정→확정 수렴).
     """
-    close = positive_prices(frame["Close"]).dropna().reindex(index, method="ffill")
+    confirmed_close = positive_prices(frame["Close"]).dropna()
+    close = confirmed_close.reindex(index, method="ffill")
     if close.empty or pd.isna(close.iloc[0]):
         raise RuntimeError(f"{label} 종가가 비어 있습니다.")
 
@@ -46,7 +50,10 @@ def growth_from_frame(frame: pd.DataFrame, index: pd.Index, *, label: str = "벤
     first_day = index[0]
     base = opens.get(first_day)
     if base is None or pd.isna(base) or float(base) <= 0:
-        raise RuntimeError(f"{label} {first_day.date()} 시가가 없어 시작 기준을 잡을 수 없습니다.")
+        if not confirmed_close.empty and first_day > confirmed_close.index[-1]:
+            base = confirmed_close.iloc[-1]
+        else:
+            raise RuntimeError(f"{label} {first_day.date()} 시가가 없어 시작 기준을 잡을 수 없습니다.")
 
     return close / float(base)
 
