@@ -234,6 +234,7 @@ export function KorDividendManager({ onSummaryChange }: { onSummaryChange?: (cou
       {
         headerName: "순위",
         colId: "rank",
+        pinned: "left",
         width: 68,
         valueGetter: (params) => (params.node?.rowIndex ?? 0) + 1,
         type: "numericColumn",
@@ -243,6 +244,7 @@ export function KorDividendManager({ onSummaryChange }: { onSummaryChange?: (cou
       {
         field: "high_drawdown",
         headerName: "고점",
+        pinned: "left",
         width: 80,
         minWidth: 80,
         type: "rightAligned",

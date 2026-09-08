@@ -826,6 +826,7 @@ export function AccountHoldingsDetailPanel({
     {
       field: "bucket",
       headerName: "버킷",
+      pinned: "left",
       width: 96,
       cellClass: (params) => getBucketCellClass(params.data?.bucket_id ?? 0),
     },

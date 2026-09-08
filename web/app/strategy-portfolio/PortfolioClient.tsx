@@ -499,7 +499,6 @@ export function PortfolioClient() {
       tickerColumn<WeightRow>({
         minWidth: 110,
         width: 110,
-        pinned: "left",
         cellRenderer: (params: { data?: WeightRow }) => {
           const row = params.data;
           if (!row) return "-";

@@ -788,6 +788,7 @@ export function StrategyMixClient() {
       ...slotKeys.map<ColDef<PositionRow>>((slot) => ({
         colId: `slot_status_${slot}`,
         headerName: slotLabel(slot),
+        pinned: "left",
         width: 150,
         sortable: false,
         cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
@@ -1115,6 +1116,7 @@ export function StrategyMixClient() {
         headerName: "전략",
         field: "strategy",
         width: 110,
+        pinned: "left",
         valueFormatter: (p) => slotLabel(String(p.value ?? "")),
         cellStyle: (p) => ({
           fontWeight: 700,

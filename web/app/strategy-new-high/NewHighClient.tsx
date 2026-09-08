@@ -658,6 +658,7 @@ export function NewHighClient() {
         minWidth: STATUS_COLUMN_MIN_WIDTH,
         cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
         valueGetter: (p) => p.data?.gap_pct ?? null,
+        pinned: "left",
         cellRenderer: (p: { data?: PositionRow }) => {
           if (!p.data) return null;
           const stage = describeStage(p.data);
@@ -1000,7 +1001,7 @@ export function NewHighClient() {
 
   const tradeColumns = useMemo<ColDef<Trade>[]>(
     () => [
-      { field: "exit_date", headerName: "청산일", width: 116 },
+      { field: "exit_date", headerName: "청산일", width: 116, pinned: "left" },
       // 티커·종목명 — 공용 컬럼. 과거 체결이라 배지(이격 데이터) 없이 기본 표기.
       tickerColumn<Trade>({}),
       stockNameColumn<Trade>({}),

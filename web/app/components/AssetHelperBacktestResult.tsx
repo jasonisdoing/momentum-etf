@@ -283,6 +283,7 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
       {
         field: "bucket",
         headerName: "버킷",
+        pinned: "left",
         width: 108,
         minWidth: 108,
         valueGetter: (params) => getBucketName(params.data?.bucket),

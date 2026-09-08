@@ -292,6 +292,7 @@ export function KorMarketStockManager({
       {
         headerName: "#",
         field: "rank",
+        pinned: "left",
         width: 64,
         minWidth: 56,
         maxWidth: 76,
@@ -302,6 +303,7 @@ export function KorMarketStockManager({
       {
         headerName: "종목풀",
         field: "ticker_pools",
+        pinned: "left",
         width: 180,
         maxWidth: 320,
         cellRenderer: (params: { value: string }) => String(params.value ?? "").trim() || "-",

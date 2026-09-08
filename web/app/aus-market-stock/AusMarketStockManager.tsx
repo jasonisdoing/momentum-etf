@@ -281,6 +281,7 @@ export function AusMarketStockManager({
       {
         headerName: "#",
         field: "rank",
+        pinned: "left",
         width: 64,
         minWidth: 56,
         maxWidth: 76,
@@ -291,6 +292,7 @@ export function AusMarketStockManager({
       {
         headerName: "종목풀",
         field: "ticker_pools",
+        pinned: "left",
         width: 108,
         maxWidth: 160,
         cellClass: "usMarketStockTextCell",
