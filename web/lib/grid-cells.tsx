@@ -206,22 +206,30 @@ export function renderHighDrawdownCell(value: number | null | undefined, digits 
  *  96px 이었을 때 세 자리 이평선(MA120·MA200)에서 `MA120 ...` 으로 말줄임됐다. */
 export const MA_EXIT_COLUMN_WIDTH = 112;
 
-/** 이탈 이평선까지 남은 이격 컬럼 — 신고가·모멘텀 운용 현황 공용.
- *  0 이하면 이탈이고, 5% 안으로 가까워지면 빨강·굵게 표시한다. */
+/** 이탈 이평선까지 남은 이격 컬럼 — 순위·신고가·모멘텀 공용.
+ *
+ *  색은 단기·장기 이격 컬럼과 같은 부호 관례(굵기 없음)를 따른다:
+ *  · 파랑(부정) = 이탈(음수), `entry` 를 넘긴 화면에서는 진입 문턱 안(값 < 배수×변동성)까지.
+ *  · 빨강 = 그 외(여유 있음). 문턱 판정은 회색 행·✅과 같은 기준(`entry_gap_ok`)이다. */
 export function maExitGapColumn<T>(options: {
   field: ColDefField<T>;
   maDays: number | null | undefined;
   getMaValue?: (row: T | undefined) => number | null | undefined;
   formatMaValue?: (value: number, row: T | undefined) => string;
+  /** 진입 문턱 — 모멘텀 계열 화면만 넘긴다. mult 가 null(없음)이면 음수만 파랑. */
+  entry?: { mult: number | null; getVolatility: (row: T | undefined) => number | null | undefined };
 }): ColDef<T> {
   const label = `MA${options.maDays ?? ""}`;
+  const colorNote = options.entry
+    ? "파랑 = 이탈(음수) 또는 진입 문턱(배수×변동성) 안 — 지금 새로 담을 수 없는 값."
+    : "파랑 = 이탈(음수).";
   return {
     field: options.field,
     headerName: `${label} 이탈`,
     width: MA_EXIT_COLUMN_WIDTH,
     type: "numericColumn",
     headerTooltip:
-      `현재가가 이탈 이평선(${label})보다 몇 % 위인지. 0에 가까울수록 매도가 가깝다. ` +
+      `현재가가 이탈 이평선(${label})보다 몇 % 위인지. 0에 가까울수록 매도가 가깝다. ${colorNote} ` +
       "장중에는 실시간 가격을 마지막 봉으로 쓴 잠정 값이고, 종가가 확정되면 백테스트와 같은 값이 된다.",
     tooltipValueGetter: (p) => {
       const value = options.getMaValue?.(p.data);
@@ -229,10 +237,14 @@ export function maExitGapColumn<T>(options: {
       return `이탈선 ${options.formatMaValue?.(value, p.data) ?? String(value)}`;
     },
     valueFormatter: (p) => (p.value == null ? "-" : `${Number(p.value).toFixed(1)}%`),
-    cellStyle: (p): { color: string; fontWeight: number } | null => {
+    cellStyle: (p): { color: string } | null => {
       const value = p.value as number | null;
-      if (value != null && value <= 5) return { color: "var(--up-color, #d64545)", fontWeight: 700 };
-      return null;
+      if (value == null) return null;
+      const mult = options.entry?.mult ?? null;
+      const volatility = options.entry?.getVolatility(p.data);
+      const floor = mult != null && volatility != null ? mult * volatility : 0;
+      if (value < floor) return { color: "var(--down-color, #2f6fd0)" };
+      return { color: "var(--up-color, #d64545)" };
     },
   };
 }

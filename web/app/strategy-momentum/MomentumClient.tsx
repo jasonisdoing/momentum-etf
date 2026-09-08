@@ -814,8 +814,16 @@ export function MomentumClient() {
       tradeValueMultColumn<PlanRow>(),
       ...slotTradeColumns<PlanRow>({ fillDay }),
       // 이탈까지 남은 여유 — 둘 중 하나라도 0 이하가 되면 다음 거래일 시가에 판다.
-      maExitGapColumn<PlanRow>({ field: "short_gap_pct", maDays: view?.settings.short_ma_days }),
-      maExitGapColumn<PlanRow>({ field: "long_gap_pct", maDays: view?.settings.long_ma_days }),
+      maExitGapColumn<PlanRow>({
+        field: "short_gap_pct",
+        maDays: view?.settings.short_ma_days,
+        entry: { mult: view?.settings.entry_vol_mult ?? null, getVolatility: (row) => row?.volatility_pct },
+      }),
+      maExitGapColumn<PlanRow>({
+        field: "long_gap_pct",
+        maDays: view?.settings.long_ma_days,
+        entry: { mult: view?.settings.entry_vol_mult ?? null, getVolatility: (row) => row?.volatility_pct },
+      }),
     ],
     [
       fillDay,
@@ -824,6 +832,7 @@ export function MomentumClient() {
       positions?.live,
       renderTicker,
       saveMemo,
+      view?.settings.entry_vol_mult,
       view?.settings.long_ma_days,
       view?.settings.short_ma_days,
     ],
@@ -871,8 +880,16 @@ export function MomentumClient() {
       },
       volatilityColumn<CandidateRow>(),
       tradeValueMultColumn<CandidateRow>(),
-      maExitGapColumn<CandidateRow>({ field: "short_gap_pct", maDays: view?.settings.short_ma_days }),
-      maExitGapColumn<CandidateRow>({ field: "long_gap_pct", maDays: view?.settings.long_ma_days }),
+      maExitGapColumn<CandidateRow>({
+        field: "short_gap_pct",
+        maDays: view?.settings.short_ma_days,
+        entry: { mult: view?.settings.entry_vol_mult ?? null, getVolatility: (row) => row?.volatility_pct },
+      }),
+      maExitGapColumn<CandidateRow>({
+        field: "long_gap_pct",
+        maDays: view?.settings.long_ma_days,
+        entry: { mult: view?.settings.entry_vol_mult ?? null, getVolatility: (row) => row?.volatility_pct },
+      }),
       {
         field: "market_cap",
         headerName: "시가총액",
@@ -887,6 +904,7 @@ export function MomentumClient() {
       hasMarketCap,
       renderTicker,
       saveMemo,
+      view?.settings.entry_vol_mult,
       view?.settings.long_ma_days,
       view?.settings.short_ma_days,
     ],

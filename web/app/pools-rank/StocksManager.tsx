@@ -1142,27 +1142,19 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     // 순위 산정에 직접 쓰이는 지표들. 종목을 고르는 눈으로 볼 때만 필요하다.
     const rankingColumns: ColDef<RankGridRow>[] = [
       // 이탈까지 여유 — 모멘텀 화면과 같은 공용 컬럼(같은 이격을 '이탈 임박' 강조로 본다).
-      maExitGapColumn<RankGridRow>({ field: "단기이격", maDays: maRule?.short_ma_days }),
-      maExitGapColumn<RankGridRow>({ field: "이격", maDays: maRule?.long_ma_days }),
-      {
+      // 진입 문턱(헤더 미리보기 값 포함) — 문턱 안이면 파랑(회색 행·✅과 같은 기준).
+      maExitGapColumn<RankGridRow>({
         field: "단기이격",
-        headerName: "단기",
-        minWidth: 86,
-        width: 86,
-        type: "rightAligned",
-        headerTooltip:
-          "종가와 단기 이평선의 이격률. 음수면 단기 추세가 꺾인 것으로 보고 보유하지 않는다(순위에는 쓰지 않는다).",
-        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
-      },
-      {
+        maDays: maRule?.short_ma_days,
+        entry: { mult: entryVolMult === "" ? null : Number(entryVolMult), getVolatility: (row) => row?.변동성 },
+      }),
+      maExitGapColumn<RankGridRow>({
         field: "이격",
-        headerName: "장기",
-        minWidth: 86,
-        width: 86,
-        type: "rightAligned",
-        headerTooltip: "종가와 장기 이평선의 이격률. 이 값 내림차순이 표의 순위다.",
-        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
-      },
+        maDays: maRule?.long_ma_days,
+        entry: { mult: entryVolMult === "" ? null : Number(entryVolMult), getVolatility: (row) => row?.변동성 },
+      }),
+      // (단기·장기 이격률 컬럼은 제거 — 위 MA 이탈 두 컬럼과 같은 값의 중복 표시였다.
+      //  MA{장기} 이탈 내림차순 정렬이 곧 표의 순위 순서다.)
       {
         field: "RSI",
         headerName: "RSI",
@@ -1354,6 +1346,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [
     addingRow,
     dirtyCellKeys,
+    entryVolMult,
     hasIndustryData,
     maRule,
     metricMode,
