@@ -480,22 +480,41 @@ def movable_pools(ticker_type: str) -> list[dict[str, Any]]:
     **같은 국가 + 같은 구분(`pool_kind`)** 만 허용한다. 국가가 다르면 거래 달력·통화가 갈리고,
     구분이 다르면(개별주 ↔ ETF) 업종 상한 같은 설정의 의미가 달라진다. 자기 자신은 뺀다.
     구분이 미설정인 풀은 무엇과도 같다고 볼 수 없어 대상에서 제외한다(추정하지 않는다).
-    """
-    from utils.momentum_service import pool_options
-    from utils.settings_loader import get_ticker_type_settings
 
-    source = get_ticker_type_settings(str(ticker_type or "").strip().lower()) or {}
+    목록은 **전체 종목풀**이다 — 이동은 전략 사용 여부와 무관하다. 예전에는 모멘텀을 켠
+    풀만 주는 `pool_options()` 를 써서, 모멘텀 미사용 풀(us_div_etf 등)로 옮길 수 없었다.
+    """
+    from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
+
+    norm_type = str(ticker_type or "").strip().lower()
+    source = get_ticker_type_settings(norm_type) or {}
     country = str(source.get("country_code") or "").strip().lower()
     kind = str(source.get("pool_kind") or "").strip().lower()
     if not country or not kind:
         return []
-    return [
-        option
-        for option in pool_options()
-        if option["ticker_type"] != str(ticker_type or "").strip().lower()
-        and option.get("country_code") == country
-        and option.get("pool_kind") == kind
-    ]
+    options: list[dict[str, Any]] = []
+    for pool in list_available_ticker_types():
+        if pool == norm_type:
+            continue
+        settings = get_ticker_type_settings(pool) or {}
+        if str(settings.get("country_code") or "").strip().lower() != country:
+            continue
+        if str(settings.get("pool_kind") or "").strip().lower() != kind:
+            continue
+        options.append(
+            {
+                "ticker_type": pool,
+                "name": str(settings.get("name") or "").strip() or pool,
+                "icon": str(settings.get("icon") or "").strip(),
+                "order": settings.get("order"),
+                "country_code": country,
+                "currency": str(settings.get("currency") or "").strip().upper(),
+                "pool_kind": kind,
+            }
+        )
+    # 화면 셀렉트가 종목풀 order 순으로 읽히게 정렬한다. order 미설정은 맨 뒤.
+    options.sort(key=lambda option: option["order"] if isinstance(option["order"], (int, float)) else float("inf"))
+    return options
 
 
 def move_active_stock(from_pool: str, to_pool: str, ticker: str) -> dict[str, Any]:
