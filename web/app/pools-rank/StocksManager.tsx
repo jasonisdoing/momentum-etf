@@ -20,7 +20,7 @@ import {
   stockNameColumn,
   tickerColumn,
 } from "@/lib/grid-cells";
-import { isTrendBroken, renderStockNameCell, renderTextWithSearchHighlight } from "@/lib/name-highlight";
+import { entryGapOk, isTrendBroken, renderStockNameCell, renderTextWithSearchHighlight } from "@/lib/name-highlight";
 import type { PoolAddProgress } from "@/lib/pool-add";
 import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
@@ -1916,15 +1916,22 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 theme={rankGridTheme}
                 getRowClass={(params: RowClassParams<RankGridRow>) => {
                   const classes: string[] = [];
-                  // 추세 이탈(장기·단기 중 하나라도 음수) — 행 전체 연한 회색(전 화면 공통 표시).
-                  if (isTrendBroken(params.data?.단기이격, params.data?.이격)) {
+                  // 회색 행 — 보유 행은 청산 기준(0선 이탈), 미보유 행은 **진입 기준**
+                  // (0선 + 이 풀의 진입 문턱, 헤더 미리보기 값 포함). 문턱이 '없음'이면 둘이 같다.
+                  const isHeld = Boolean(String(params.data?.보유 ?? "").trim());
+                  const zeroLineBroken = isTrendBroken(params.data?.단기이격, params.data?.이격);
+                  const mult = entryVolMult === "" ? null : Number(entryVolMult);
+                  const broken = isHeld
+                    ? zeroLineBroken
+                    : zeroLineBroken || !entryGapOk(params.data?.이격, params.data?.단기이격, params.data?.변동성, mult);
+                  if (broken) {
                     classes.push("appTrendBrokenRow");
                   }
                   if (params.data?.exclude_from_ranking) {
                     classes.push("rankFixedRow");
                   }
                   // 실제 보유 중인 종목 — 공용 보유 표시(티커·종목명 칸만 녹색, 전 화면 동일).
-                  if (String(params.data?.보유 ?? "").trim()) {
+                  if (isHeld) {
                     classes.push("appHeldRow");
                   }
                   return classes.join(" ");

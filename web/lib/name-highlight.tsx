@@ -33,6 +33,23 @@ export function isTrendBroken(
   return shortDisparity < 0 || longDisparity < 0;
 }
 
+/** 진입 문턱 판정 — 백엔드 `core/strategy/momentum/signals.entry_gap_ok` 와 **같은 수식**.
+ *
+ * 순위 화면이 미보유 행의 회색 판정(진입 기준)에 쓴다. 문턱 없음(null)이면 항상 참
+ * (진입 = 보유 자격 = 0선 그대로), 이격·변동성을 모르면 거짓 — 값을 추정하지 않는다.
+ */
+export function entryGapOk(
+  longDisparity: number | null | undefined,
+  shortDisparity: number | null | undefined,
+  volatilityPct: number | null | undefined,
+  entryVolMult: number | null,
+): boolean {
+  if (entryVolMult == null) return true;
+  if (volatilityPct == null || longDisparity == null || shortDisparity == null) return false;
+  const floor = entryVolMult * volatilityPct;
+  return longDisparity > floor && shortDisparity >= floor;
+}
+
 function getNameHighlight(part: string): { color: string; emoji: string } | undefined {
   const lower = part.toLowerCase();
   for (const [keyword, style] of Object.entries(NAME_HIGHLIGHT_KEYWORDS)) {
