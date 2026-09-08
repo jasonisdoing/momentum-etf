@@ -847,6 +847,7 @@ export function MomentumClient() {
       {
         field: "rank",
         headerName: "순위",
+        pinned: "left",
         width: STATUS_COLUMN_WIDTH,
         minWidth: STATUS_COLUMN_MIN_WIDTH,
         headerTooltip: "장기 이격률이 큰 순 — 자리가 나면 이 순서로 담는다.",

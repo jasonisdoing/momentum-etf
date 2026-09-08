@@ -471,10 +471,11 @@ export function MarketManager({
 
   const columns = useMemo<ColDef<MarketGridRow>[]>(
     () => [
-      { field: "row_number", headerName: "#", width: 72, maxWidth: 80 },
+      { field: "row_number", headerName: "#", width: 72, maxWidth: 80, pinned: "left" },
       {
         field: "ticker_pools",
         headerName: "종목풀",
+        pinned: "left",
         width: 108,
         maxWidth: 116,
         cellRenderer: (params: { value: string }) => String(params.value ?? "").trim() || "-",

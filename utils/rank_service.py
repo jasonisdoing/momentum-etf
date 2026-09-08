@@ -598,6 +598,35 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
     }
 
 
+def _pool_adr_payload(pool: str) -> dict[str, Any] | None:
+    """풀의 ADR 기준 시장과 최신 값 — 순위 화면 헤더 표시용. 기준(레짐 지수)이 없으면 None.
+
+    모멘텀 ADR 게이트와 같은 소스(`adr_market_of_pool` + `load_adr_series`)라 화면 간 값이
+    갈리지 않는다. 하한(ADR_FLOOR)은 설정된 풀만 참고로 함께 싣는다.
+    """
+    from utils.market_breadth_service import load_adr_series
+    from utils.momentum_service import adr_market_of_pool
+    from utils.settings_loader import get_ticker_type_settings
+
+    try:
+        market = adr_market_of_pool(pool)
+    except Exception:
+        return None
+    if not market:
+        return None
+    series = load_adr_series(market)
+    last = series[-1] if series else None
+    if not last or last.get("adr") is None:
+        return None
+    floor = (get_ticker_type_settings(pool) or {}).get("ADR_FLOOR")
+    return {
+        "market": market,
+        "date": last.get("date"),
+        "value": round(float(last["adr"]), 1),
+        "floor": float(floor) if isinstance(floor, (int, float)) and not isinstance(floor, bool) else None,
+    }
+
+
 def _compute_rank_data_payload(
     *,
     configs_payload: list[dict[str, Any]],
@@ -667,6 +696,8 @@ def _compute_rank_data_payload(
         # 진입 문턱 — 이번 응답의 보유 대상(✅)에 적용된 값과 선택지(툴바 셀렉트용).
         "entry_vol_mult": entry_vol_mult,
         "entry_vol_mult_options": list(__import__("config").ENTRY_VOL_MULT_OPTIONS),
+        # 시장 ADR — 헤더 표시용(모멘텀 ADR 게이트와 같은 소스). 레짐 지수 없는 풀은 None.
+        "adr": _pool_adr_payload(selected_ticker_type),
         "as_of_date": _serialize_datetime(effective_as_of_date),
         "monthly_return_labels": get_recent_monthly_return_labels(
             MONTHLY_RETURN_LABEL_COUNT,

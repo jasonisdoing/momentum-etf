@@ -812,7 +812,6 @@ export function AssetHelperClient() {
       tickerColumn<GridRow>({
         minWidth: 110,
         width: 110,
-        pinned: "left",
         cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
           const row = params.data;
           if (!row) return "-";

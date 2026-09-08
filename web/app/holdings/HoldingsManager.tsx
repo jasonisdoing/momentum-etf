@@ -405,6 +405,7 @@ export function HoldingsManager({
     {
       headerName: "버킷",
       field: "bucket",
+      pinned: "left",
       width: 108,
       sortable: true,
       comparator: (_a, _b, nodeA, nodeB) => {

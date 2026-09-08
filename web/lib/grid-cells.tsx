@@ -79,7 +79,6 @@ export function tickerColumn<T>(options?: {
   field?: string;
   width?: number;
   minWidth?: number;
-  pinned?: "left";
   sortable?: boolean;
   cellClass?: string;
   cellStyle?: ColDef<T>["cellStyle"];
@@ -93,7 +92,8 @@ export function tickerColumn<T>(options?: {
     headerName: "티커",
     width: options?.width ?? TICKER_COLUMN_WIDTH,
     minWidth: options?.minWidth,
-    pinned: options?.pinned,
+    // 티커·종목명(과 그 앞 컬럼들)은 왼쪽 고정 — 가로 스크롤에도 어떤 종목의 행인지 보인다.
+    pinned: "left",
     sortable: options?.sortable,
     cellClass: options?.cellClass,
     cellStyle: options?.mono
@@ -126,6 +126,7 @@ export function stockNameColumn<T>(options?: {
     field: (options?.field ?? "name") as ColDefField<T>,
     headerName: "종목명",
     width: STOCK_NAME_COLUMN_WIDTH,
+    pinned: "left",
     sortable: options?.sortable,
     cellClass: options?.cellClass,
     cellStyle: options?.cellStyle,
@@ -372,6 +373,8 @@ export function marketCapRankColumn<T>(field: ColDefField<T>, hide: boolean): Co
   return {
     headerName: "시총",
     field,
+    // 티커 앞에 서는 컬럼 — 티커·종목명과 함께 왼쪽 고정(순서 유지).
+    pinned: "left",
     width: 72,
     type: "numericColumn",
     hide,
@@ -445,6 +448,8 @@ export function highDrawdownColumn<T>(field: ColDefField<T>): ColDef<T> {
     field,
     headerName: "고점",
     headerTooltip: "최근 고점 대비 현재가(%) — pools-rank 고점과 같은 규칙, 0 = 신고점",
+    // 티커 앞에 서는 컬럼 — 티커·종목명과 함께 왼쪽 고정(순서 유지).
+    pinned: "left",
     width: 80,
     type: "rightAligned",
     cellRenderer: (p: { value?: number | null }) => renderHighDrawdownCell(p.value, 1),
@@ -530,6 +535,8 @@ export function slotStatusColumn<T extends SlotStatusRow>(options: {
 }): ColDef<T> {
   return {
     headerName: "상태",
+    // 티커 앞에 서는 컬럼 — 티커·종목명과 함께 왼쪽 고정(순서 유지).
+    pinned: "left",
     width: STATUS_COLUMN_WIDTH,
     minWidth: STATUS_COLUMN_MIN_WIDTH,
     cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },

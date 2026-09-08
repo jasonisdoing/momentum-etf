@@ -133,6 +133,8 @@ type RankResponse = {
   /** 이번 응답의 보유 대상(✅)에 적용된 진입 문턱과 선택지 — 모멘텀 화면과 같은 값. */
   entry_vol_mult?: number | null;
   entry_vol_mult_options?: (number | null)[];
+  /** 시장 ADR — 모멘텀 ADR 게이트와 같은 소스. 레짐 지수 없는 풀은 null. */
+  adr?: { market: string; date?: string | null; value: number; floor: number | null } | null;
   /** 이평선 일수 선택지 — 백엔드 상수(utils/ma_options)가 단일 소스. */
   short_ma_options?: number[];
   long_ma_options?: number[];
@@ -193,6 +195,8 @@ type RankHeaderSummary = {
   upPct: number;
   totalCount: number;
   ruleSummary: string;
+  /** 시장 ADR — 값 (하한 설정 시 함께). 레짐 지수 없는 풀은 null. */
+  adr: { market: string; value: number; floor: number | null } | null;
 };
 
 let rankToolbarCache: RankToolbarCache | null = null;
@@ -356,6 +360,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [maRule, setMaRule] = useState<RankMaRule | null>(rankToolbarCache?.ma_rule ?? null);
   const [entryVolMult, setEntryVolMult] = useState<string>("");
   const [entryVolMultOptions, setEntryVolMultOptions] = useState<(number | null)[]>([]);
+  const [adrInfo, setAdrInfo] = useState<{ market: string; value: number; floor: number | null } | null>(null);
 
   // 백엔드가 내려주는 선택지를 쓴다 — 화면이 복사본을 들고 있으면 값이 추가될 때 여기만 옛 목록이 남는다.
   const [maOptions, setMaOptions] = useState<Partial<MaOptionsPayload>>(rankToolbarCache?.ma_options ?? {});
@@ -403,6 +408,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setMaRule(payload.ma_rules?.[0] ?? null);
     setEntryVolMult(payload.entry_vol_mult == null ? "" : String(payload.entry_vol_mult));
     setEntryVolMultOptions(payload.entry_vol_mult_options ?? []);
+    setAdrInfo(payload.adr ?? null);
     const nextMaOptions = { short_ma_options: payload.short_ma_options, long_ma_options: payload.long_ma_options };
     setMaOptions(nextMaOptions);
     setMonthlyReturnLabels(payload.monthly_return_labels ?? []);
@@ -439,6 +445,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setMaRule(payload.ma_rules?.[0] ?? null);
     setEntryVolMult(payload.entry_vol_mult == null ? "" : String(payload.entry_vol_mult));
     setEntryVolMultOptions(payload.entry_vol_mult_options ?? []);
+    setAdrInfo(payload.adr ?? null);
     const nextMaOptions = { short_ma_options: payload.short_ma_options, long_ma_options: payload.long_ma_options };
     setMaOptions(nextMaOptions);
     rankToolbarCache = {
@@ -748,12 +755,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     ];
   }, [addingRow, pageMode, searchedGridRows]);
 
-  const maRuleSummary = useMemo(
-    () => (maRule ? [`${maRule.ma_type} 단기 ${maRule.short_ma_days}일 · 장기 ${maRule.long_ma_days}일`] : []),
-    [maRule],
-  );
-
-
   // 업종 컬럼 노출 여부 — 종목풀 설정의 풀 성격(pool_kind) 토글이 1순위
   // (개별주=표시, ETF=숨김), 미설정 풀은 행 값 유무로 추정 (strategy-momentum 과 같은 기준).
   // 업종 컬럼·업종 상한 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
@@ -765,6 +766,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "순위",
         headerName: "순위",
+        pinned: "left",
         minWidth: 86,
         width: 86,
         cellStyle: { justifyContent: "center", textAlign: "center", overflow: "hidden", paddingLeft: 2, paddingRight: 2 },
@@ -808,6 +810,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "이전순위",
         headerName: "이전",
+        pinned: "left",
         minWidth: 58,
         width: 58,
         cellStyle: { justifyContent: "center", textAlign: "center" },
@@ -834,6 +837,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         colId: "1주순위변동",
         headerName: "1주",
+        pinned: "left",
         minWidth: 66,
         width: 66,
         cellStyle: { textAlign: "center" },
@@ -853,6 +857,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         colId: "추천",
         headerName: "✓",
+        pinned: "left",
         headerTooltip: "추천 — 제외 종목·벤치마크가 아니고, 장기가 양수이며, 단기가 음수가 아닌 종목 중 장기 상위 N개(보유 종목수)",
         minWidth: 44,
         width: 44,
@@ -868,6 +873,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "고점",
         headerName: "고점",
+        pinned: "left",
         minWidth: 80,
         width: 80,
         type: "rightAligned",
@@ -878,6 +884,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "버킷",
         headerName: "버킷",
+        pinned: "left",
         minWidth: 108,
         width: 108,
         sortable: true,
@@ -939,6 +946,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           {
             field: "exclude_from_ranking",
             headerName: "제외 종목",
+            pinned: "left",
             minWidth: 84,
             width: 84,
             cellStyle: { textAlign: "center" },
@@ -980,6 +988,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           {
             field: "종목풀",
             headerName: "종목풀",
+            pinned: "left",
             minWidth: 125,
             width: 125,
             cellClass: "appTextEllipsisCell",
@@ -1005,6 +1014,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           {
             field: "마켓",
             headerName: "마켓",
+            pinned: "left",
             minWidth: 80,
             width: 80,
             // 공용 마켓 배지 스타일 (strategy-momentum 과 동일).
@@ -1664,14 +1674,15 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     if (configuredTopN != null && !Number.isNaN(configuredTopN)) {
       ruleSummaryParts.push(`TOP ${formatNumber(configuredTopN, 0)}`);
     }
-    ruleSummaryParts.push(...maRuleSummary);
+    // 이평선 요약은 뺐다 — 헤더의 단기·장기 셀렉트에 이미 보이는 값이다.
     return {
       upCount,
       upPct,
       totalCount,
       ruleSummary: ruleSummaryParts.join(" / ") || "-",
+      adr: adrInfo,
     };
-  }, [gridRows, maRuleSummary, selectedTickerTypeItem?.top_n_hold]);
+  }, [adrInfo, gridRows, selectedTickerTypeItem?.top_n_hold]);
 
   useEffect(() => {
     onHeaderSummaryChange?.(headerSummary);
