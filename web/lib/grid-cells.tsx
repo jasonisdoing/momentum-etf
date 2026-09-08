@@ -55,6 +55,25 @@ export const TICKER_COLUMN_WIDTH = 108;
 export const TICKER_COL_ID = "ticker";
 export const STOCK_NAME_COL_ID = "name";
 
+/** 종목 행 공통 클래스 — 상태 표시는 이 두 가지뿐이고 전 화면이 같은 규칙을 쓴다.
+ *
+ *  · 보유(`appHeldRow`): 티커·종목명 칸만 녹색.
+ *  · 추세 이탈(`appTrendBrokenRow`): 행 전체 연한 회색 — 배지(❗) 대신 이것 하나다.
+ *  빈 슬롯 행은 다른 표시가 무의미해 빈 슬롯 클래스만 남긴다.
+ *  이격 데이터가 없는 표(과거 체결 등)는 `trendBroken` 을 넘기지 말 것 —
+ *  `isTrendBroken` 은 값이 없으면 이탈 취급이라 전 행이 회색이 된다. */
+export function stockRowClass(options: {
+  held?: boolean;
+  trendBroken?: boolean;
+  emptySlot?: boolean;
+}): string {
+  if (options.emptySlot) return "appEmptySlotRow";
+  const classes: string[] = [];
+  if (options.held) classes.push("appHeldRow");
+  if (options.trendBroken) classes.push("appTrendBrokenRow");
+  return classes.join(" ");
+}
+
 /** 티커 컬럼 — 티커·종목명 쌍이 있는 모든 화면이 이걸 쓴다(`stockNameColumn` 과 세트).
  *
  *  화면마다 폭·col-id·렌더러가 제각각이면 보유 강조·배지 같은 공통 변경이 한 번에 안 된다.
@@ -65,7 +84,9 @@ export function tickerColumn<T>(options?: {
   width?: number;
   minWidth?: number;
   pinned?: "left";
+  sortable?: boolean;
   cellClass?: string;
+  cellStyle?: ColDef<T>["cellStyle"];
   /** true = 모노스페이스 코드 표기(시장 전광판 화면). 렌더러(상세 링크)는 그대로다. */
   mono?: boolean;
   cellRenderer?: (p: { value?: string | null; data?: T }) => ReactNode;
@@ -77,17 +98,18 @@ export function tickerColumn<T>(options?: {
     width: options?.width ?? TICKER_COLUMN_WIDTH,
     minWidth: options?.minWidth,
     pinned: options?.pinned,
+    sortable: options?.sortable,
     cellClass: options?.cellClass,
-    ...(options?.mono
-      ? { cellStyle: { fontFamily: "var(--font-mono, monospace)", fontSize: "var(--fs-sm)" } }
-      : {}),
+    cellStyle: options?.mono
+      ? { fontFamily: "var(--font-mono, monospace)", fontSize: "var(--fs-sm)" }
+      : options?.cellStyle,
     cellRenderer:
       options?.cellRenderer ?? ((p: { value?: string | null }) => <TickerDetailLink ticker={p.value} />),
   };
 }
 
 /** 종목명 컬럼 — `tickerColumn` 과 세트. 렌더러는 항상 `renderStockNameCell` 기반이라
- *  배지(❗·🆕·💣)·2줄 말줄임 같은 공통 표기는 `lib/name-highlight.tsx` 한 곳만 고치면 된다.
+ *  배지(🆕·💣·🚫)·2줄 말줄임 같은 공통 표기는 `lib/name-highlight.tsx` 한 곳만 고치면 된다.
  *
  *  기본은 남는 폭을 가져가는 flex, `fixedWidth` 는 한 화면에 표가 둘 이상일 때 칸을 맞춘다.
  *  `nameOptions` 로 행별 배지(추세 이탈 등)를, `cellRenderer` 로 화면 고유 칸(추가 행
@@ -98,8 +120,11 @@ export function stockNameColumn<T>(options?: {
   fixedWidth?: boolean;
   flex?: number;
   minWidth?: number;
+  sortable?: boolean;
   cellClass?: ColDef<T>["cellClass"];
   cellStyle?: ColDef<T>["cellStyle"];
+  valueGetter?: ColDef<T>["valueGetter"];
+  tooltipValueGetter?: ColDef<T>["tooltipValueGetter"];
   /** 행별 배지·강조 — `renderStockNameCell` 에 그대로 전달된다. */
   nameOptions?: (row: T | undefined) => (StockNameOptions & { badge?: string }) | undefined;
   cellRenderer?: (p: { value?: string | null; data?: T }) => ReactNode;
@@ -112,8 +137,11 @@ export function stockNameColumn<T>(options?: {
     field: (options?.field ?? "name") as ColDefField<T>,
     headerName: "종목명",
     ...sizing,
+    sortable: options?.sortable,
     cellClass: options?.cellClass,
     cellStyle: options?.cellStyle,
+    valueGetter: options?.valueGetter,
+    tooltipValueGetter: options?.tooltipValueGetter,
     cellRenderer:
       options?.cellRenderer ??
       ((p: { value?: string | null; data?: T }) => renderStockNameCell(p.value, options?.nameOptions?.(p.data))),

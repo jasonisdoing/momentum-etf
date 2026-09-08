@@ -483,7 +483,7 @@ def _attach_disparity(holdings: list[dict[str, Any]], pool_by_source: dict[str, 
     """행마다 단기·장기 이격(%)을 붙인다 — **그 종목이 속한 종목풀 설정**의 이평선이 기준.
 
     순위 화면(`/pools-rank`)·보유종목 알림과 같은 기준이다. 화면은 이 값으로 종목명 옆
-    추세 이탈 배지(❗)를 붙이므로, 다른 기준으로 계산하면 같은 종목에 화면마다 다른
+    추세 이탈(행 전체 회색)을 표시하므로, 다른 기준으로 계산하면 같은 종목에 화면마다 다른
     배지가 붙는다. 계산 자체도 같은 함수(`momentum_metrics`)를 쓴다.
 
     행의 풀을 정하는 순서:
@@ -521,7 +521,7 @@ def _attach_disparity(holdings: list[dict[str, Any]], pool_by_source: dict[str, 
     frames = load_cached_frames_bulk_from_all_ticker_types(tickers)
 
     # 장중에는 실시간 가격을 마지막 봉으로 얹어 판정한다(AGENTS.md §10-6) — 순위 화면과
-    # 같은 공용 함수(`build_effective_close_series`)라 두 화면의 ❗ 배지가 갈리지 않는다.
+    # 같은 공용 함수(`build_effective_close_series`)라 두 화면의 추세 이탈 표시가 갈리지 않는다.
     from services.price_service import get_realtime_snapshot
     from utils.rankings import build_effective_close_series
 
@@ -982,7 +982,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     # 흘러간 비중과 맞지 않는다(종목이 오르면 남는 현금은 그만큼 줄어든다).
     sleeve_cash = {key: max(shares[key] - sum(row[f"{key}_weight"] for row in holdings), 0.0) for key in keys}
 
-    # 종목명 옆 추세 이탈 배지(❗)용 — 행이 속한 슬리브의 **종목풀 설정** 이평선 기준.
+    # 추세 이탈(행 전체 회색)용 — 행이 속한 슬리브의 **종목풀 설정** 이평선 기준.
     _attach_disparity(holdings, {spec.key: spec.pool for spec in slots})
     _attach_industry(holdings, ctx["country"])
 

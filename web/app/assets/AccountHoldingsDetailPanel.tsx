@@ -11,7 +11,7 @@ import { AppLoadingState } from "../components/AppLoadingState";
 import { AppModal } from "../components/AppModal";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { renderStockNameCell } from "@/lib/name-highlight";
-import { stockMemoColumn } from "@/lib/grid-cells";
+import { stockMemoColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { reorderHoldings } from "@/lib/holdings-store";
@@ -829,11 +829,10 @@ export function AccountHoldingsDetailPanel({
       width: 96,
       cellClass: (params) => getBucketCellClass(params.data?.bucket_id ?? 0),
     },
-    {
-      field: "ticker",
-      headerName: "티커",
+    // 티커·종목명 — 공용 컬럼(col-id 표준). 추가 행 입력칸·현금·고정 자산만 화면 고유 표기다.
+    tickerColumn<GridRow>({
       width: 98,
-      cellRenderer: (params: { data?: GridRow; value?: string }) => {
+      cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
         const row = params.data;
         if (!row) {
           return null;
@@ -865,10 +864,8 @@ export function AccountHoldingsDetailPanel({
           />
         );
       },
-    },
-    {
-      field: "name",
-      headerName: "종목명",
+    }),
+    stockNameColumn<GridRow>({
       minWidth: 248,
       flex: 1.35,
       cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
@@ -925,7 +922,7 @@ export function AccountHoldingsDetailPanel({
           badge: alertBadges[normalizeBadgeTicker(params.data?.ticker ?? "")] ?? "",
         });
       },
-    },
+    }),
     // 메모 — 종목명 옆의 수기 칸. 값은 계좌가 아니라 **종목**에 붙는다(전 화면 공용 컬럼).
     // 저장 경로만 이 화면 고유다: `onSave` 없이 그리드 값만 바꾸고, 수량·매입단가와 같은
     // 흐름(셀을 벗어나면 0.7초 뒤 자동 저장 + 상단 저장 버튼)을 탄다.

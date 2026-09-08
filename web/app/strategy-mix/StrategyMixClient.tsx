@@ -247,7 +247,7 @@ type Holding = {
   forecast_target_quantity?: number | null;
   /** 업종 — 순위·모멘텀·신고가 화면과 같은 공용 맵(계좌 국가 전체). 없으면 빈 값. */
   industry?: string;
-  /** 종목풀 설정 이평선 기준 이격(%) — 종목명 옆 추세 이탈 배지(❗)에 쓴다. */
+  /** 종목풀 설정 이평선 기준 이격(%) — 추세 이탈(행 전체 회색) 판정에 쓴다. */
   current_short_pct?: number | null;
   current_long_pct?: number | null;
   /** 목표 포트폴리오에 없는 보유 종목 — 목표 비중 0% 행으로 표 하단에 온다. */
@@ -832,9 +832,7 @@ export function StrategyMixClient() {
           ) : p.data?.is_cash ? (
             <span>{p.value ?? "-"}</span>
           ) : (
-            renderStockNameCell(p.value, {
-              trendBroken: isTrendBroken(p.data?.current_short_pct, p.data?.current_long_pct),
-            })
+            renderStockNameCell(p.value)
           ),
       }),
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다).
@@ -1817,7 +1815,12 @@ export function StrategyMixClient() {
                         .join(" ");
                       // 들어오는 줄과 빠지는 줄을 색으로 가른다 — 회색은 「빠짐」으로 읽힌다.
                       if (status.includes("진입 예정")) return "momentumPendingRow";
-                      return status.includes("예정") ? "appTrendBrokenRow" : "";
+                      if (status.includes("예정")) return "appTrendBrokenRow";
+                      // 추세 이탈 — 전 화면 공통 표시(행 전체 회색, ❗ 배지 대체). 현금 행은 종목이 아니라 제외.
+                      if (!params.data?.is_cash && isTrendBroken(params.data?.current_short_pct, params.data?.current_long_pct)) {
+                        return "appTrendBrokenRow";
+                      }
+                      return "";
                     }}
                     gridOptions={{
                       domLayout: "autoHeight",

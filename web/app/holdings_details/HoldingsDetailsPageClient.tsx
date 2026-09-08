@@ -7,6 +7,7 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { createAppGridTheme } from "../components/app-grid-theme";
+import { stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { readSessionTtlCache, writeSessionTtlCache } from "../../lib/session-ttl-cache";
 
 // ─── 타입 ────────────────────────────────────────────────────────────────────
@@ -410,22 +411,18 @@ export function HoldingsDetailsPageClient() {
   }, [data, expandedTicker]);
 
   const columnDefs = useMemo<ColDef<GridRow>[]>(() => [
-    {
-      headerName: "티커",
-      field: "ticker",
+    // 티커·종목명 — 공용 컬럼(col-id 표준). 상세 행·펼침 화살표만 화면 고유 표기다.
+    tickerColumn<GridRow>({
       width: 100,
-      cellRenderer: (params: { data?: GridRow; value?: string }) => {
+      cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
         if (!params.data || isDetailRow(params.data)) return null;
         return <TickerDetailLink ticker={String(params.value ?? "")} className="text-muted fw-semibold" />;
       },
-    },
-    {
-      headerName: "종목명",
-      field: "name",
-      flex: 1,
+    }),
+    stockNameColumn<GridRow>({
       minWidth: 140,
       cellClass: "holdingsDetailsNameAgCell",
-      cellRenderer: (params: { data?: GridRow; value?: string }) => {
+      cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
         if (!params.data || isDetailRow(params.data)) return null;
         const mainRow = params.data as MainGridRow;
         const isExpanded = expandedTicker === mainRow.ticker;
@@ -444,7 +441,7 @@ export function HoldingsDetailsPageClient() {
           </div>
         );
       },
-    },
+    }),
     {
       headerName: "비중",
       field: "total_weight",

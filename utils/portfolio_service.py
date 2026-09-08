@@ -133,7 +133,7 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
     items = [{"ticker": row["ticker"], "ticker_type": pool, "country_code": country} for row in universe]
 
     close_frame, _ = _load_close_frame(items)
-    # ❗ 추세 이탈 배지용 이격 — 그 풀의 이평선 기준(순위·합성·보유 알림과 같은 공용 규칙).
+    # 추세 이탈(행 전체 회색)용 이격 — 그 풀의 이평선 기준(순위·합성·보유 알림과 같은 공용 규칙).
     # 이 화면 지표들과 같은 확정 종가 기준이다. 풀에 이평선이 없으면 값 없음(배지 없음).
     gap_by: dict[str, tuple[float | None, float | None]] = {}
     pool_config = get_ticker_type_settings(pool) or {}
@@ -187,7 +187,7 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
                 "return_12m_pct": returns.get("return_12m_pct"),
                 "mdd_pct": mdd_by.get(ticker),
                 "sortino": _sortino(ticker),
-                # ❗ 배지용 — 풀 이평선 이격(단기·장기).
+                # 추세 이탈 표시용 — 풀 이평선 이격(단기·장기).
                 "short_gap_pct": gap_by.get(ticker, (None, None))[0],
                 "long_gap_pct": gap_by.get(ticker, (None, None))[1],
             }

@@ -5,6 +5,7 @@ import { IconCheck, IconPlus } from "@tabler/icons-react";
 import { useSearchParams } from "next/navigation";
 
 import { formatCurrencyPrice } from "@/lib/price-format";
+import { stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import {
   createChart,
   ColorType,
@@ -1130,14 +1131,13 @@ export function TickerDetailManager({
   const holdingColumns = useMemo<ColDef[]>(
     () => {
       const columns: ColDef[] = [
-        {
-          field: "ticker",
-          headerName: "티커",
+        // 티커·종목명 — 공용 컬럼(col-id 표준·종목명 표기 공용). 종목풀 추가 버튼만 화면 고유.
+        tickerColumn<TickerHoldingRow>({
           minWidth: 120,
           width: 120,
           cellClass: "tickerDetailCodeCell",
           cellStyle: { fontWeight: 700 },
-          cellRenderer: (params: { value: string; data?: TickerHoldingRow }) => {
+          cellRenderer: (params: { value?: string | null; data?: TickerHoldingRow }) => {
             const ticker = String(params.value ?? "").trim();
             const row = params.data;
             const isUsCandidate = Boolean(row?.is_us_pool_candidate);
@@ -1182,14 +1182,8 @@ export function TickerDetailManager({
               </div>
             );
           },
-        },
-        {
-          field: "name",
-          headerName: "종목명",
-          minWidth: 148,
-          flex: 1.2,
-          cellClass: "tickerDetailNameCell",
-        },
+        }),
+        stockNameColumn<TickerHoldingRow>({ minWidth: 148, flex: 1.2, cellClass: "tickerDetailNameCell" }),
       ];
 
       if (showHoldingsWeightColumn) {
