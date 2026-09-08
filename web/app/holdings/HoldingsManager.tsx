@@ -114,7 +114,7 @@ export function HoldingsManager({
       cellStyle: { fontWeight: 700 },
       cellRenderer: (p) => <span>{String(p.value ?? "-")}</span>,
     }),
-    stockNameColumn<ConstituentRow>({ minWidth: 148, flex: 1.2, cellClass: "tickerDetailNameCell" }),
+    stockNameColumn<ConstituentRow>({ cellClass: "tickerDetailNameCell" }),
     {
       field: "weight",
       headerName: "비중",
@@ -439,8 +439,6 @@ export function HoldingsManager({
       },
     }),
     stockNameColumn<ParentRow>({
-      flex: 1.4,
-      minWidth: 210,
       sortable: true,
       cellRenderer: (params: { value?: string | null; data?: ParentRow }) => {
         if (!params.data || isDetailRow(params.data)) return null;

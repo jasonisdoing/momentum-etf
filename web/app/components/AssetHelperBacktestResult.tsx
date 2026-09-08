@@ -300,7 +300,6 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
         },
       }),
       stockNameColumn<LabPosition>({
-        minWidth: 180,
         cellClass: "assetHelperNameCell",
         valueGetter: (params) => {
           const row = params.data;

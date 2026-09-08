@@ -866,8 +866,6 @@ export function AccountHoldingsDetailPanel({
       },
     }),
     stockNameColumn<GridRow>({
-      minWidth: 248,
-      flex: 1.35,
       cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
         if (params.data?.id === "__adding__") {
           return (

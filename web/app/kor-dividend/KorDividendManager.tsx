@@ -251,7 +251,7 @@ export function KorDividendManager({ onSummaryChange }: { onSummaryChange?: (cou
       },
       // 티커·종목명 — 공용 컬럼(다른 시장 화면과 같은 표기·col-id 표준).
       tickerColumn<DividendRow>({ width: 100, minWidth: 84, mono: true }),
-      stockNameColumn<DividendRow>({ minWidth: 180 }),
+      stockNameColumn<DividendRow>({}),
       {
         field: "current_price",
         headerName: "현재가",

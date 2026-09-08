@@ -32,16 +32,12 @@ export function marketBadgeCellStyle(value: unknown): React.CSSProperties | null
   return { textAlign: "center" };
 }
 
-/** 종목명 컬럼 폭 — 종목명 컬럼이 있는 모든 화면이 같은 값을 쓴다.
- *  남는 폭은 종목명이 가져가되(flex), 좁아져도 이 폭 아래로는 줄지 않는다.
- *  긴 이름은 2줄까지 보이고 넘치면 말줄임 (renderStockNameCell). */
-export const STOCK_NAME_COLUMN_MIN_WIDTH = 220;
-
-/** 종목명 컬럼 **고정** 폭 — 한 화면에 표가 둘 이상 있고 칸을 맞춰야 할 때 쓴다.
+/** 종목명 컬럼 폭 — 티커·종목명이 있는 **모든 화면이 이 고정 폭 하나**를 쓴다.
  *
- *  `flex: 1` 은 남는 공간을 종목명이 가져가는데, 표마다 뒤쪽 컬럼 총폭이 달라서 남는 공간도
- *  달라진다. 그러면 두 표의 앞쪽 칸(상태~거래대금)이 서로 어긋난다. 고정 폭을 주면 앞쪽이
- *  정확히 맞고, 넘치는 폭은 표가 가로로 스크롤한다. */
+ *  남는 폭을 종목명이 흡수(flex)하지 않는다 — 표는 왼쪽부터 채우고 남는 폭은 빈 공간으로
+ *  둔다. flex 는 표마다 종목명 폭이 달라져 화면 간·표 간(보유/후보) 칸이 어긋났다.
+ *  긴 이름은 2줄 말줄임 + 전체 이름 툴팁(renderStockNameCell). 한국 긴 ETF 명이 2줄에
+ *  거의 다 들어오는 최소선이 240px 이다. */
 export const STOCK_NAME_COLUMN_WIDTH = 240;
 
 /** 티커 컬럼 표준 폭 — 한국 6자리·미국 4~5자·호주 `ASX:XXX` 가 한 줄에 들어간다. */
@@ -111,15 +107,11 @@ export function tickerColumn<T>(options?: {
 /** 종목명 컬럼 — `tickerColumn` 과 세트. 렌더러는 항상 `renderStockNameCell` 기반이라
  *  배지(🆕·💣·🚫)·2줄 말줄임 같은 공통 표기는 `lib/name-highlight.tsx` 한 곳만 고치면 된다.
  *
- *  기본은 남는 폭을 가져가는 flex, `fixedWidth` 는 한 화면에 표가 둘 이상일 때 칸을 맞춘다.
- *  `nameOptions` 로 행별 배지(추세 이탈 등)를, `cellRenderer` 로 화면 고유 칸(추가 행
+ *  폭은 전 화면 공통 고정(STOCK_NAME_COLUMN_WIDTH) — 화면별 flex/폭 지정을 두지 않는다.
+ *  `nameOptions` 로 행별 배지(신규상장 등)를, `cellRenderer` 로 화면 고유 칸(추가 행
  *  안내문·현금 행 등)을 넘긴다. */
 export function stockNameColumn<T>(options?: {
   field?: string;
-  /** 한 화면에 표가 둘 이상이라 칸을 맞춰야 하면 고정 폭(STOCK_NAME_COLUMN_WIDTH). */
-  fixedWidth?: boolean;
-  flex?: number;
-  minWidth?: number;
   sortable?: boolean;
   cellClass?: ColDef<T>["cellClass"];
   cellStyle?: ColDef<T>["cellStyle"];
@@ -129,14 +121,11 @@ export function stockNameColumn<T>(options?: {
   nameOptions?: (row: T | undefined) => (StockNameOptions & { badge?: string }) | undefined;
   cellRenderer?: (p: { value?: string | null; data?: T }) => ReactNode;
 }): ColDef<T> {
-  const sizing = options?.fixedWidth
-    ? { width: STOCK_NAME_COLUMN_WIDTH }
-    : { flex: options?.flex ?? 1, minWidth: options?.minWidth ?? STOCK_NAME_COLUMN_MIN_WIDTH };
   return {
     colId: STOCK_NAME_COL_ID,
     field: (options?.field ?? "name") as ColDefField<T>,
     headerName: "종목명",
-    ...sizing,
+    width: STOCK_NAME_COLUMN_WIDTH,
     sortable: options?.sortable,
     cellClass: options?.cellClass,
     cellStyle: options?.cellStyle,

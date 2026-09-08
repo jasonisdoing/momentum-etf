@@ -823,7 +823,6 @@ export function StrategyMixClient() {
         },
       }),
       stockNameColumn<PositionRow>({
-        flex: 1.4,
         // 굵기는 주지 않는다 — 다른 화면의 종목명과 같은 무게로 보여야 표가 한 벌로 읽힌다.
         cellStyle: (p) => (p.data?.is_cash ? { color: "var(--text-muted)" } : null),
         cellRenderer: (p) =>
@@ -1073,7 +1072,7 @@ export function StrategyMixClient() {
     columns.push({
       colId: "status",
       headerName: "상태",
-      flex: 1.6,
+      width: 260,
       minWidth: 260,
       valueGetter: (p) => {
         if (!p.data) return "";

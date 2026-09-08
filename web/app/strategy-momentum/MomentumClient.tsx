@@ -787,7 +787,7 @@ export function MomentumClient() {
       // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
       // 티커는 호주 접두사(ASX:)만 화면 고유. 고정 폭 — 보유·후보 표의 앞쪽 칸을 맞춘다.
       tickerColumn<PlanRow>({ cellRenderer: (p) => renderTicker(p.value) }),
-      stockNameColumn<PlanRow>({ fixedWidth: true }),
+      stockNameColumn<PlanRow>({}),
       stockMemoColumn<PlanRow>({
         field: "memo",
         editable: (row) => row?.plan !== "empty",
@@ -857,7 +857,7 @@ export function MomentumClient() {
       highDrawdownColumn<CandidateRow>("high_drawdown_pct"),
       // 티커·종목명 — 공용 컬럼. 고정 폭으로 보유 표와 앞쪽 칸을 맞춘다.
       tickerColumn<CandidateRow>({ cellRenderer: (p) => renderTicker(p.value) }),
-      stockNameColumn<CandidateRow>({ fixedWidth: true }),
+      stockNameColumn<CandidateRow>({}),
       stockMemoColumn<CandidateRow>({
         field: "memo",
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
@@ -985,7 +985,7 @@ export function MomentumClient() {
     return [
       // 티커·종목명 — 공용 컬럼. 과거 체결이라 배지(이격 데이터) 없이 기본 표기.
       tickerColumn<BacktestTradeRow>({ width: 96, cellRenderer: (p) => renderTicker(p.value) }),
-      stockNameColumn<BacktestTradeRow>({ fixedWidth: true }),
+      stockNameColumn<BacktestTradeRow>({}),
       industryColumn<BacktestTradeRow>({ hide: !hasIndustryData }),
       { headerName: "편입일", field: "entry_date", width: 116 },
       { headerName: "매수가", field: "entry_price", width: 110, type: "numericColumn", valueFormatter: (p) => price(p.value) },
