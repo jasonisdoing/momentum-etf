@@ -322,7 +322,7 @@ export function AssetHelperClient() {
     selectedAccountRef.current = selectedAccount;
   }, [selectedAccount]);
   const [marketTrendItems, setMarketTrendItems] = useState<MarketTrendItem[]>([]);
-  // 알람 배지(이동선 이탈·손절 아이콘) — 계좌 설정의 알람 On/Off·판정 그대로. 보조 정보라 실패 시 빈 맵.
+  // 손절 배지(🚫)·이동선 이탈(회색 행) — 슬랙 알람과 같은 판정, 알람 On/Off 와 무관한 표준 표시. 보조 정보라 실패 시 빈 맵.
   const [alertBadges, setAlertBadges] = useState<AlertBadges>({});
   // 이동선 이탈 종목 — 배지와 같은 조건으로 행을 회색 처리한다.
   const [maBrokenTickers, setMaBrokenTickers] = useState<Set<string>>(new Set());

@@ -246,10 +246,11 @@ def _invalidate_badges_cache() -> None:
 
 
 def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
-    """자산 화면(종목명 배지)용: 계좌의 알람 트리거를 티커→아이콘 문자열 맵으로 반환한다.
+    """자산 화면 표시용: 손절 배지(🚫) 맵과 이동선 이탈 목록(회색 행)을 반환한다.
 
-    슬랙 알람(compute_account_alerts)과 **같은 설정·같은 판정**을 쓴다. 꺼진 알람 종류의
-    배지는 붙지 않는다. 티커는 접두사 없는 형태로 정규화한다.
+    판정은 슬랙 알람(compute_account_alerts)과 **같은 수식·같은 풀 기준**이지만, 계좌의
+    알람 On/Off 는 **무시한다** — 그 스위치는 슬랙 발송 여부만 제어하고, 화면 표시
+    (회색 행·🚫)는 모든 계좌 공통 표준이다. 티커는 접두사 없는 형태로 정규화한다.
     """
     norm_id = str(account_id or "").strip().lower()
     import time as _time
@@ -261,7 +262,8 @@ def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
     if account_doc is None:
         raise ValueError(f"알 수 없는 계좌입니다: {account_id}")
 
-    alerts, _errors = compute_account_alerts(account_doc)
+    # 화면 표시는 알람 On/Off 와 무관하게 항상 판정한다 — 스위치를 켠 것처럼 넘긴다.
+    alerts, _errors = compute_account_alerts({**account_doc, "ma_alarm_enabled": True, "stoploss_alarm_enabled": True})
 
     badge_by_ticker: dict[str, str] = {}
 
