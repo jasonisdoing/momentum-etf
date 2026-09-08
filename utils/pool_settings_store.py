@@ -476,8 +476,17 @@ def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = 
         raise PoolSettingsError(f"알 수 없는 종목풀입니다: {pool_id}")
 
     cleaned = _validate_values(values)
-    country_code = str(get_ticker_type_settings(norm_id).get("country_code") or "").strip().lower()
+    existing = get_ticker_type_settings(norm_id) or {}
+    country_code = str(existing.get("country_code") or "").strip().lower()
     _normalize_benchmark_for_country(cleaned, country_code)
+
+    # ADR 하한은 레짐 지수(ADR 기준)가 있어야 판정할 시장이 정해진다 — 저장 후 병합 기준으로 검사.
+    merged_floor = cleaned["ADR_FLOOR"] if "ADR_FLOOR" in cleaned else existing.get("ADR_FLOOR")
+    merged_regime = (
+        cleaned["MARKET_REGIME_INDEX"] if "MARKET_REGIME_INDEX" in cleaned else existing.get("MARKET_REGIME_INDEX")
+    )
+    if merged_floor is not None and not merged_regime:
+        raise PoolSettingsError("ADR 하한을 쓰려면 ADR 기준(시장 레짐 지수)을 먼저 설정하세요.")
 
     db = _db()
     db[COLLECTION].update_one(
