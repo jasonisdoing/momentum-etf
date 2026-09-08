@@ -191,10 +191,13 @@ type RankToolbarCache = {
 };
 
 type RankHeaderSummary = {
-  upCount: number;
-  upPct: number;
+  /** 진입 가능 종목 수 — 진입 기준(장기>0·단기≥0·문턱 통과, 회색 아님) 충족 행. */
+  entryCount: number;
+  entryPct: number;
   totalCount: number;
   ruleSummary: string;
+  /** 실계좌 보유 종목 수 — 표의 녹색(티커·종목명 칸) 행 수와 같다. */
+  heldCount: number;
   /** 시장 ADR — 값 (하한 설정 시 함께). 레짐 지수 없는 풀은 null. */
   adr: { market: string; value: number; floor: number | null } | null;
 };
@@ -1667,22 +1670,31 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const headerSummary = useMemo<RankHeaderSummary>(() => {
     const candidateRows = gridRows.filter((r) => !r.is_benchmark && !r.exclude_from_ranking);
     const totalCount = candidateRows.length;
-    const upCount = candidateRows.filter((r) => (r["추세"] ?? 0) > 0).length;
-    const upPct = totalCount > 0 ? Math.round((upCount / totalCount) * 100) : 0;
+    // 진입 가능 — 미보유 행 회색 판정과 같은 기준(0선 + 진입 문턱). 옛 '매수 후보'(장기>0)를 대체.
+    const mult = entryVolMult === "" ? null : Number(entryVolMult);
+    const entryCount = candidateRows.filter(
+      (r) => !isTrendBroken(r.단기이격, r.이격) && entryGapOk(r.이격, r.단기이격, r.변동성, mult),
+    ).length;
+    const entryPct = totalCount > 0 ? Math.round((entryCount / totalCount) * 100) : 0;
     const configuredTopN = selectedTickerTypeItem?.top_n_hold;
     const ruleSummaryParts: string[] = [];
     if (configuredTopN != null && !Number.isNaN(configuredTopN)) {
       ruleSummaryParts.push(`TOP ${formatNumber(configuredTopN, 0)}`);
     }
     // 이평선 요약은 뺐다 — 헤더의 단기·장기 셀렉트에 이미 보이는 값이다.
+    // 보유 — 벤치마크 행을 뺀 전 행 기준(제외 종목이어도 들고 있으면 보유다).
+    const heldCount = gridRows.filter(
+      (r) => !r.is_benchmark && !r.__isAddingRow && Boolean(String(r.보유 ?? "").trim()),
+    ).length;
     return {
-      upCount,
-      upPct,
+      entryCount,
+      entryPct,
       totalCount,
       ruleSummary: ruleSummaryParts.join(" / ") || "-",
+      heldCount,
       adr: adrInfo,
     };
-  }, [adrInfo, gridRows, selectedTickerTypeItem?.top_n_hold]);
+  }, [adrInfo, entryVolMult, gridRows, selectedTickerTypeItem?.top_n_hold]);
 
   useEffect(() => {
     onHeaderSummaryChange?.(headerSummary);
