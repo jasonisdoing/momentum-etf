@@ -173,11 +173,10 @@ const DEFAULT_TICKER_TYPE = "";
 const RANK_CHART_PAGE_SIZE = 20;
 
 /** 그리드에 어떤 컬럼 묶음을 보여줄지. 화면 전환용 `pageMode` 와는 다른 축이다. */
-type MetricMode = "basic" | "ranking" | "monthly" | "info";
+type MetricMode = "basic" | "monthly" | "info";
 
 const METRIC_MODE_OPTIONS: { value: MetricMode; label: string }[] = [
   { value: "basic", label: "기본" },
-  { value: "ranking", label: "랭킹" },
   { value: "monthly", label: "월별" },
   { value: "info", label: "정보" },
 ];
@@ -1139,8 +1138,29 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       }),
     ];
 
-    // 순위 산정에 직접 쓰이는 지표들. 종목을 고르는 눈으로 볼 때만 필요하다.
-    const rankingColumns: ColDef<RankGridRow>[] = [
+    // 가격과 기간별 수익률. 종목의 성적을 훑어볼 때 보는 기본 화면이다.
+    const basicColumns: ColDef<RankGridRow>[] = [
+      ...(showDeviationColumn
+        ? [
+          {
+            field: "괴리율",
+            headerName: "괴리율",
+            minWidth: 78,
+            width: 78,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null | undefined }) => {
+              const val = params.value ?? 0;
+              const isExtreme = val > 2.0 || val < -2.0;
+              return (
+                <span style={{ color: isExtreme ? "#d63939" : "inherit", fontWeight: isExtreme ? 700 : 400 }}>
+                  {formatPercent(params.value ?? null)}
+                </span>
+              );
+            },
+          } as ColDef<RankGridRow>,
+        ]
+        : []),
+      // 순위 산정 지표(옛 '랭킹' 모드) — 기본 컬럼으로 합쳤다(거래대금과 1주 사이).
       // 이탈까지 여유 — 모멘텀 화면과 같은 공용 컬럼(같은 이격을 '이탈 임박' 강조로 본다).
       // 진입 문턱(헤더 미리보기 값 포함) — 문턱 안이면 파랑(회색 행·✅과 같은 기준).
       maExitGapColumn<RankGridRow>({
@@ -1208,30 +1228,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return null;
         },
       },
-    ];
-
-    // 가격과 기간별 수익률. 종목의 성적을 훑어볼 때 보는 기본 화면이다.
-    const basicColumns: ColDef<RankGridRow>[] = [
-      ...(showDeviationColumn
-        ? [
-          {
-            field: "괴리율",
-            headerName: "괴리율",
-            minWidth: 78,
-            width: 78,
-            type: "rightAligned",
-            cellRenderer: (params: { value: number | null | undefined }) => {
-              const val = params.value ?? 0;
-              const isExtreme = val > 2.0 || val < -2.0;
-              return (
-                <span style={{ color: isExtreme ? "#d63939" : "inherit", fontWeight: isExtreme ? 700 : 400 }}>
-                  {formatPercent(params.value ?? null)}
-                </span>
-              );
-            },
-          } as ColDef<RankGridRow>,
-        ]
-        : []),
       {
         field: "1주(%)",
         headerName: "1주",
@@ -1337,7 +1333,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
     const columnsByMode: Record<MetricMode, ColDef<RankGridRow>[]> = {
       basic: basicColumns,
-      ranking: rankingColumns,
       monthly: monthlyColumns,
       info: infoColumns,
     };
