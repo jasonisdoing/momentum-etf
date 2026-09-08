@@ -1183,7 +1183,7 @@ export function TickerDetailManager({
             );
           },
         }),
-        stockNameColumn<TickerHoldingRow>({ minWidth: 148, flex: 1.2, cellClass: "tickerDetailNameCell" }),
+        stockNameColumn<TickerHoldingRow>({ cellClass: "tickerDetailNameCell" }),
       ];
 
       if (showHoldingsWeightColumn) {

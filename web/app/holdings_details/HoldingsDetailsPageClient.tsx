@@ -420,7 +420,6 @@ export function HoldingsDetailsPageClient() {
       },
     }),
     stockNameColumn<GridRow>({
-      minWidth: 140,
       cellClass: "holdingsDetailsNameAgCell",
       cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
         if (!params.data || isDetailRow(params.data)) return null;

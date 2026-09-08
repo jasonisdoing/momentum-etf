@@ -1059,8 +1059,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       }),
       stockNameColumn<RankGridRow>({
         field: "종목명",
-        minWidth: 249,
-        flex: 1.05,
         cellRenderer: (params: { value?: string | null; data?: RankGridRow }) => {
           if (params.data?.__isAddingRow) {
             const draftTicker = normalizeTicker(addingTickerDraftRef.current);

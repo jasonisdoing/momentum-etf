@@ -313,7 +313,7 @@ export function KorMarketStockManager({
         mono: true,
         cellClass: "korMarketStockTickerCell",
       }),
-      stockNameColumn<KorMarketStockGridRow>({ minWidth: 180 }),
+      stockNameColumn<KorMarketStockGridRow>({}),
       industryColumn<KorMarketStockGridRow>(),
       {
         headerName: "일간(%)",
