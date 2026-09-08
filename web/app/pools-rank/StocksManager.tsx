@@ -1141,12 +1141,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
       },
       // 공용 컬럼 — 전략 화면들과 같은 정의. 이 화면의 행 필드명만 한국어라 지정해 준다.
-      volatilityColumn<RankGridRow>({ field: "변동성" }),
       tradeValueMultColumn<RankGridRow>({
         field: "거래대금",
         liveField: "거래대금(실시간)",
         hide: metricMode !== "basic",
       }),
+      volatilityColumn<RankGridRow>({ field: "변동성" }),
     ];
 
     // 가격과 기간별 수익률. 종목의 성적을 훑어볼 때 보는 기본 화면이다.
