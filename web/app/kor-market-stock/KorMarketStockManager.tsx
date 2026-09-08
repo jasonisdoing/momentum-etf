@@ -7,6 +7,8 @@ import type { CellStyle, ColDef } from "ag-grid-community";
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import {
   industryColumn,
+  stockNameColumn,
+  tickerColumn,
 } from "@/lib/grid-cells";
 import { formatKorMarketCap } from "@/lib/market-cap-format";
 import { useLatestRequest } from "@/lib/use-latest-request";
@@ -19,7 +21,6 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
 import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
-import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import {
@@ -305,24 +306,14 @@ export function KorMarketStockManager({
         maxWidth: 320,
         cellRenderer: (params: { value: string }) => String(params.value ?? "").trim() || "-",
       },
-      {
-        headerName: "티커",
-        field: "ticker",
+      // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
+      tickerColumn<KorMarketStockGridRow>({
         width: 100,
         minWidth: 84,
-        cellStyle: {
-          fontFamily: "var(--font-mono, monospace)",
-          fontSize: "var(--fs-sm)",
-        } as CellStyle,
+        mono: true,
         cellClass: "korMarketStockTickerCell",
-        cellRenderer: (params: { value?: string }) => <TickerDetailLink ticker={String(params.value ?? "")} />,
-      },
-      {
-        headerName: "종목명",
-        field: "name",
-        flex: 1,
-        minWidth: 180,
-      },
+      }),
+      stockNameColumn<KorMarketStockGridRow>({ minWidth: 180 }),
       industryColumn<KorMarketStockGridRow>(),
       {
         headerName: "일간(%)",

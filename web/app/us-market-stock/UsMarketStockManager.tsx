@@ -5,7 +5,7 @@ import { IconPlus } from "@tabler/icons-react";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
-import { industryColumn } from "@/lib/grid-cells";
+import { industryColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { useLatestRequest } from "@/lib/use-latest-request";
 import { loadStocksTable } from "@/lib/stocks-store";
@@ -16,7 +16,6 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
 import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
-import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import {
@@ -405,28 +404,10 @@ export function UsMarketStockManager({
         cellClass: "usMarketStockTextCell",
         cellRenderer: (params: { value: string }) => renderTruncatedText(params.value),
       },
-      {
-        headerName: "티커",
-        field: "ticker",
-        width: 104,
-        minWidth: 88,
-        cellStyle: {
-          fontFamily: "var(--font-mono, monospace)",
-          fontSize: "var(--fs-sm)",
-        } as CellStyle,
-        cellRenderer: (params: { value?: string }) => {
-          const raw = String(params.value ?? "").trim();
-          return <TickerDetailLink ticker={raw} displayTicker={raw} />;
-        },
-      },
-      {
-        headerName: "종목명",
-        field: "name",
-        flex: 1,
-        minWidth: 180,
-        cellClass: "usMarketStockTextCell",
-        cellRenderer: (params: { value?: string }) => renderTruncatedText(params.value),
-      },
+      // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
+      // 종목명 표기도 공용(2줄 말줄임·레버리지 💣) — 화면 고유 1줄 말줄임을 대체한다.
+      tickerColumn<UsMarketStockGridRow>({ width: 104, minWidth: 88, mono: true }),
+      stockNameColumn<UsMarketStockGridRow>({ minWidth: 180 }),
       {
         headerName: "섹터",
         field: "sector",

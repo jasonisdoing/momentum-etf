@@ -35,7 +35,6 @@ import {
 } from "@/lib/backtest-periods";
 import {
   industryColumn,
-  STOCK_NAME_COLUMN_WIDTH,
   adrColumn as sharedAdrColumn,
   formatSignedPct,
   maExitGapColumn,
@@ -45,13 +44,15 @@ import {
   slotStatusColumn,
   slotTradeColumns,
   stockMemoColumn,
+  stockNameColumn,
+  tickerColumn,
   tradeValueMultColumn,
   volatilityColumn,
   STATUS_COLUMN_MIN_WIDTH,
   STATUS_COLUMN_WIDTH,
   type SlotPlan,
 } from "@/lib/grid-cells";
-import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
+import { isTrendBroken } from "@/lib/name-highlight";
 import { updateStockMemo } from "@/lib/stocks-store";
 import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
 import { MaDaysSelect } from "../components/MaDaysSelect";
@@ -782,20 +783,13 @@ export function MomentumClient() {
       slotStatusColumn<PlanRow>({ fillDay: positions?.next_session }),
       marketCapRankColumn<PlanRow>("market_cap_rank", !hasMarketCap),
       highDrawdownColumn<PlanRow>("high_drawdown_pct"),
-      {
-        field: "ticker",
-        headerName: "티커",
-        width: 108,
-        cellRenderer: (p: { value?: string | null }) => renderTicker(p.value),
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
-        width: STOCK_NAME_COLUMN_WIDTH,
-        cellRenderer: (p: { value?: string | null; data?: PlanRow }) =>
-          renderStockNameCell(p.value, { trendBroken: isTrendBroken(p.data?.short_gap_pct, p.data?.long_gap_pct) }),
-      },
+      // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
+      // 티커는 호주 접두사(ASX:)만 화면 고유. 고정 폭 — 보유·후보 표의 앞쪽 칸을 맞춘다.
+      tickerColumn<PlanRow>({ cellRenderer: (p) => renderTicker(p.value) }),
+      stockNameColumn<PlanRow>({
+        fixedWidth: true,
+        nameOptions: (row) => ({ trendBroken: isTrendBroken(row?.short_gap_pct, row?.long_gap_pct) }),
+      }),
       stockMemoColumn<PlanRow>({
         field: "memo",
         editable: (row) => row?.plan !== "empty",
@@ -854,20 +848,12 @@ export function MomentumClient() {
       },
       marketCapRankColumn<CandidateRow>("market_cap_rank", !hasMarketCap),
       highDrawdownColumn<CandidateRow>("high_drawdown_pct"),
-      {
-        field: "ticker",
-        headerName: "티커",
-        width: 108,
-        cellRenderer: (p: { value?: string | null }) => renderTicker(p.value),
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
-        width: STOCK_NAME_COLUMN_WIDTH,
-        cellRenderer: (p: { value?: string | null; data?: CandidateRow }) =>
-          renderStockNameCell(p.value, { trendBroken: isTrendBroken(p.data?.short_gap_pct, p.data?.long_gap_pct) }),
-      },
+      // 티커·종목명 — 공용 컬럼. 고정 폭으로 보유 표와 앞쪽 칸을 맞춘다.
+      tickerColumn<CandidateRow>({ cellRenderer: (p) => renderTicker(p.value) }),
+      stockNameColumn<CandidateRow>({
+        fixedWidth: true,
+        nameOptions: (row) => ({ trendBroken: isTrendBroken(row?.short_gap_pct, row?.long_gap_pct) }),
+      }),
       stockMemoColumn<CandidateRow>({
         field: "memo",
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
@@ -984,14 +970,9 @@ export function MomentumClient() {
   const tradeColumns = useMemo<ColDef<BacktestTradeRow>[]>(() => {
     const price = (value: unknown) => formatPrice(value as number, positions?.currency);
     return [
-      { headerName: "티커", field: "ticker", width: 96 },
-      {
-        headerName: "종목명",
-        field: "name",
-        // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
-        width: STOCK_NAME_COLUMN_WIDTH,
-        cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
-      },
+      // 티커·종목명 — 공용 컬럼. 과거 체결이라 배지(이격 데이터) 없이 기본 표기.
+      tickerColumn<BacktestTradeRow>({ width: 96, cellRenderer: (p) => renderTicker(p.value) }),
+      stockNameColumn<BacktestTradeRow>({ fixedWidth: true }),
       industryColumn<BacktestTradeRow>({ hide: !hasIndustryData }),
       { headerName: "편입일", field: "entry_date", width: 116 },
       { headerName: "매수가", field: "entry_price", width: 110, type: "numericColumn", valueFormatter: (p) => price(p.value) },
@@ -1008,7 +989,7 @@ export function MomentumClient() {
       { headerName: "보유일", field: "days", width: 84, type: "numericColumn" },
       { headerName: "사유", field: "reason", width: 110 },
     ];
-  }, [hasIndustryData, positions?.currency]);
+  }, [hasIndustryData, positions?.currency, renderTicker]);
 
   if (loading && !view) {
     return (
@@ -1196,7 +1177,7 @@ export function MomentumClient() {
                   theme={gridTheme}
                   minHeight={0}
                   height="auto"
-                  // 빈 슬롯은 값을 비우고, 실계좌 보유는 행 배경 녹색 — 시장 화면과 같은 표준.
+                  // 빈 슬롯은 값을 비우고, 실계좌 보유는 티커·종목명 칸 녹색 — 시장 화면과 같은 표준.
                   getRowClass={(p) =>
                     p.data?.plan === "empty" ? "appEmptySlotRow" : p.data?.account_held ? "appHeldRow" : ""
                   }
@@ -1211,7 +1192,7 @@ export function MomentumClient() {
                   theme={gridTheme}
                   minHeight={0}
                   height="auto"
-                  // 실계좌 보유 종목은 행 배경 녹색 — 시장 화면과 같은 표준.
+                  // 실계좌 보유 종목은 티커·종목명 칸 녹색 — 시장 화면과 같은 표준.
                   getRowClass={(p) => (p.data?.account_held ? "appHeldRow" : "")}
                   gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
                 />

@@ -3620,20 +3620,31 @@ a {
   color: var(--text-muted);
 }
 
-.appAgGridTheme .ag-row.appHeldRow {
+/* 실계좌 보유 종목 — 행 전체가 아니라 **티커·종목명 칸만** 녹색으로 칠한다.
+   col-id 는 공용 티커·종목명 컬럼(lib/grid-cells.tsx tickerColumn/stockNameColumn)이 고정한다. */
+.appAgGridTheme .ag-row.appHeldRow .ag-cell[col-id="ticker"],
+.appAgGridTheme .ag-row.appHeldRow .ag-cell[col-id="name"],
+.appAgGridThemeLegacy .ag-row.appHeldRow .ag-cell[col-id="ticker"],
+.appAgGridThemeLegacy .ag-row.appHeldRow .ag-cell[col-id="name"] {
   background: rgba(102, 204, 102, 0.35);
 }
 
-.appAgGridTheme .ag-row.appHeldRow:hover {
+.appAgGridTheme .ag-row.appHeldRow:hover .ag-cell[col-id="ticker"],
+.appAgGridTheme .ag-row.appHeldRow:hover .ag-cell[col-id="name"],
+.appAgGridThemeLegacy .ag-row.appHeldRow:hover .ag-cell[col-id="ticker"],
+.appAgGridThemeLegacy .ag-row.appHeldRow:hover .ag-cell[col-id="name"] {
   background: rgba(102, 204, 102, 0.42);
 }
 
-
-.appAgGridThemeLegacy .ag-row.appHeldRow {
+/* 튜닝 표의 '현재 설정' 행 — 종목 행이 아니라 예전처럼 **행 전체**를 칠한다
+   (모멘텀·신고가 튜닝 StrategyTuning, 레버리지 튜닝). */
+.appAgGridTheme .ag-row.appCurrentSettingRow,
+.appAgGridThemeLegacy .ag-row.appCurrentSettingRow {
   background: rgba(102, 204, 102, 0.35);
 }
 
-.appAgGridThemeLegacy .ag-row.appHeldRow:hover {
+.appAgGridTheme .ag-row.appCurrentSettingRow:hover,
+.appAgGridThemeLegacy .ag-row.appCurrentSettingRow:hover {
   background: rgba(102, 204, 102, 0.42);
 }
 
@@ -3822,6 +3833,14 @@ a {
   background: #ffffff;
 }
 
+/* 계좌 상세는 보유가 기본 상태라 녹색 강조를 쓰지 않는다 — 공용 보유 칠(티커·종목명 칸)을 끈다. */
+.assetsAgGrid .ag-row.appHeldRow .ag-cell[col-id="ticker"],
+.assetsAgGrid .ag-row.appHeldRow .ag-cell[col-id="name"],
+.assetsAgGrid .ag-row.appHeldRow:hover .ag-cell[col-id="ticker"],
+.assetsAgGrid .ag-row.appHeldRow:hover .ag-cell[col-id="name"] {
+  background: transparent;
+}
+
 /* 추세 이탈 회색은 보유 행(흰 배경)보다 뒤에 와야 보인다 — 자산 화면은 보유가 곧 기본 상태라
    위 흰색 규칙이 모든 행을 덮는다. 편집 중인 행은 편집 색이 계속 우선한다(아래에 정의). */
 .assetsAgGrid .ag-row.appTrendBrokenRow,
@@ -3981,16 +4000,8 @@ a {
   background: rgba(199, 210, 254, 0.62);
 }
 
-/* 실제 보유 중인 종목 — 배경 녹색(보유 컬럼 대체). 고정 행보다 우선. */
-.rankAgGrid .ag-row.rankHeldRow,
-.rankAgGrid .ag-row.rankHeldRow.rankFixedRow {
-  background: rgba(34, 197, 94, 0.28);
-}
-
-.rankAgGrid .ag-row.rankHeldRow:hover,
-.rankAgGrid .ag-row.rankHeldRow.rankFixedRow:hover {
-  background: rgba(34, 197, 94, 0.38);
-}
+/* 실제 보유 중인 종목 — 공용 .appHeldRow(티커·종목명 칸만 녹색)를 그대로 쓴다.
+   고정 행(rankFixedRow)의 남색 줄 위에도 두 칸의 녹색이 그대로 얹힌다. */
 
 .rankAgGrid .ag-cell-value,
 .rankAgGrid .ag-group-value {
@@ -4014,7 +4025,7 @@ a {
   line-height: 1.1;
 }
 
-.rankAgGrid .ag-cell[col-id="종목명"],
+.rankAgGrid .ag-cell[col-id="name"],
 .assetsAgGrid .ag-cell[col-id="name"] {
   overflow: hidden;
 }

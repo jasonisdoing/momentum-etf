@@ -23,7 +23,7 @@ import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { createAppGridTheme } from "../components/app-grid-theme";
-import { formatSignedPct, signColor, stockMemoColumn } from "@/lib/grid-cells";
+import { formatSignedPct, signColor, stockMemoColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { updateStockMemo } from "@/lib/stocks-store";
@@ -495,9 +495,8 @@ export function PortfolioClient() {
         cellClass: "assetsDragCell",
         valueGetter: () => "",
       },
-      {
-        field: "ticker",
-        headerName: "티커",
+      // 티커·종목명 — 공용 컬럼(col-id 표준). 추가 행 입력칸·현금 행만 화면 고유 표기다.
+      tickerColumn<WeightRow>({
         minWidth: 110,
         width: 110,
         pinned: "left",
@@ -519,13 +518,9 @@ export function PortfolioClient() {
           }
           return <TickerDetailLink ticker={row.ticker} displayTicker={row.ticker} />;
         },
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        minWidth: 220,
-        flex: 1,
-        cellRenderer: (params: { data?: WeightRow; value?: string }) => {
+      }),
+      stockNameColumn<WeightRow>({
+        cellRenderer: (params: { data?: WeightRow; value?: string | null }) => {
           const row = params.data;
           if (!row) return null;
           if (row.is_unknown) {
@@ -557,7 +552,7 @@ export function PortfolioClient() {
             trendBroken: isTrendBroken(row.short_gap_pct, row.long_gap_pct),
           });
         },
-      },
+      }),
       // 종목 메모 — 전 화면 공용 컬럼(`@/lib/grid-cells`). 순위·자산 관리 화면과 같은 값이고
       // 저장 경로도 같다(셀을 벗어나면 바로 저장). 현금 행·추가행은 종목이 아니라 편집 불가.
       stockMemoColumn<WeightRow>({

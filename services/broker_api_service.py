@@ -145,7 +145,10 @@ def _publish_token_to_db() -> None:
     doc = coll.find_one({"_id": _TOKEN_DOC_ID}) or {}
     if doc.get("token") != token:
         coll.update_one({"_id": _TOKEN_DOC_ID}, {"$set": {"token": token, "exp": exp}}, upsert=True)
-        logger.info("[BROKER-SYNC] 새 나무증권 토큰을 DB 에 공유했습니다 (만료 %s)", time.strftime("%m-%d %H:%M", time.localtime(exp)))
+        logger.info(
+            "[BROKER-SYNC] 새 나무증권 토큰을 DB 에 공유했습니다 (만료 %s)",
+            time.strftime("%m-%d %H:%M", time.localtime(exp)),
+        )
 
 
 def _namu_call(path: str, payload: dict[str, Any]) -> dict[str, Any]:

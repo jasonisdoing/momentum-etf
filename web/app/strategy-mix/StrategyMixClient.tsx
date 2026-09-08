@@ -37,9 +37,10 @@ import { createAppGridTheme } from "../components/app-grid-theme";
 import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
 import { FIXED_ASSET_NAME, FIXED_ASSET_ROW_CLASS, FIXED_ASSET_TICKER } from "@/lib/fixed-asset";
 import {
-  STOCK_NAME_COLUMN_MIN_WIDTH,
   industryColumn,
   stockMemoColumn,
+  stockNameColumn,
+  tickerColumn,
   formatSignedPct,
   signColor,
   renderSlotStatus,
@@ -812,27 +813,20 @@ export function StrategyMixClient() {
           );
         },
       })),
-      {
-        field: "ticker",
-        headerName: "티커",
-        width: 108,
-        cellRenderer: (p: { value?: string; data?: PositionRow }) => {
-          // 현금·고정 자산은 종목이 아니라 상세 링크를 걸지 않는다.
+      // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
+      // 현금·고정 자산 행만 화면 고유 표기다(종목이 아니라 링크·배지를 걸지 않는다).
+      tickerColumn<PositionRow>({
+        cellRenderer: (p) => {
           if (p.data?.is_cash) return <span>-</span>;
           if (p.data?.is_fixed_asset) return <span>{FIXED_ASSET_TICKER}</span>;
           return <TickerDetailLink ticker={p.value} />;
         },
-      },
-      {
-        field: "name",
-        headerName: "종목명",
+      }),
+      stockNameColumn<PositionRow>({
         flex: 1.4,
-        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
         // 굵기는 주지 않는다 — 다른 화면의 종목명과 같은 무게로 보여야 표가 한 벌로 읽힌다.
         cellStyle: (p) => (p.data?.is_cash ? { color: "var(--text-muted)" } : null),
-        // 종목명 표기는 순위·전략 화면과 같은 공용 렌더러를 쓴다 — 레버리지 강조(💣)와
-        // 긴 이름 2줄 줄임이 여기서만 빠져 있었다. 현금 행은 종목이 아니라 그대로 둔다.
-        cellRenderer: (p: { value?: string | null; data?: PositionRow }) =>
+        cellRenderer: (p) =>
           p.data?.is_fixed_asset ? (
             <span>{FIXED_ASSET_NAME}</span>
           ) : p.data?.is_cash ? (
@@ -842,7 +836,7 @@ export function StrategyMixClient() {
               trendBroken: isTrendBroken(p.data?.current_short_pct, p.data?.current_long_pct),
             })
           ),
-      },
+      }),
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다).
       // 현금 행은 종목이 아니라 편집 대상이 아니다.
       stockMemoColumn<PositionRow>({
@@ -1130,14 +1124,9 @@ export function StrategyMixClient() {
           color: p.value === "a" ? "#1c7ed6" : "#e8590c",
         }),
       },
-      { headerName: "티커", field: "ticker", width: 96 },
-      {
-        headerName: "종목명",
-        field: "name",
-        flex: 1,
-        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
-        cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
-      },
+      // 티커·종목명 — 공용 컬럼. 과거 체결이라 배지 없이 기본 표기.
+      tickerColumn<MixTradeRow>({ width: 96 }),
+      stockNameColumn<MixTradeRow>({}),
       { headerName: "편입일", field: "entry_date", width: 116 },
       {
         headerName: "매수가",

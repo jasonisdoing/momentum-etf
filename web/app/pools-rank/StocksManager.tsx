@@ -17,6 +17,8 @@ import {
   volatilityColumn,
   marketCapRankColumn,
   stockMemoColumn,
+  stockNameColumn,
+  tickerColumn,
 } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell, renderTextWithSearchHighlight } from "@/lib/name-highlight";
 import type { PoolAddProgress } from "@/lib/pool-add";
@@ -1013,12 +1015,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         : []),
       // 시총은 개별주에만 있는 값이라 업종과 판정이 다르다(`@/lib/pool-industry`).
       marketCapRankColumn<RankGridRow>("시총순위", !hasMarketCap),
-      {
+      // 티커·종목명 — 공용 컬럼(colId "ticker"/"name" 고정, 보유 강조·배지의 기준).
+      // 이 화면은 데이터 키가 한국어고 추가 행(티커 입력·확인) UI 가 붙어 렌더러만 고유다.
+      tickerColumn<RankGridRow>({
         field: "티커",
-        headerName: "티커",
         minWidth: 95,
         width: 95,
-        cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
+        cellRenderer: (params: { value?: string | null; data?: RankGridRow }) => {
           if (params.data?.__isAddingRow) {
             return (
               <div className="stocksTickerLookup">
@@ -1054,13 +1057,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             />
           );
         },
-      },
-      {
+      }),
+      stockNameColumn<RankGridRow>({
         field: "종목명",
-        headerName: "종목명",
         minWidth: 249,
         flex: 1.05,
-        cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
+        cellRenderer: (params: { value?: string | null; data?: RankGridRow }) => {
           if (params.data?.__isAddingRow) {
             const draftTicker = normalizeTicker(addingTickerDraftRef.current);
             const validatedTicker = normalizeTicker(addingRow?.ticker ?? "");
@@ -1099,7 +1101,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             searchQuery: tickerSearch,
           });
         },
-      },
+      }),
       // 종목 메모 — 전 화면 공용 컬럼(`@/lib/grid-cells`). 순위와 무관한 수기 칸이라
       // 모드와 상관없이 바로 고칠 수 있다(셀을 벗어나면 저장).
       stockMemoColumn<RankGridRow>({
@@ -1922,9 +1924,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   if (params.data?.exclude_from_ranking) {
                     classes.push("rankFixedRow");
                   }
-                  // 실제 보유 중인 종목은 배경을 녹색으로(보유 컬럼 대체). 보유가 다른 색보다 우선한다.
+                  // 실제 보유 중인 종목 — 공용 보유 표시(티커·종목명 칸만 녹색, 전 화면 동일).
                   if (String(params.data?.보유 ?? "").trim()) {
-                    classes.push("rankHeldRow");
+                    classes.push("appHeldRow");
                   }
                   return classes.join(" ");
                 }}

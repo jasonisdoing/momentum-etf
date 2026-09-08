@@ -891,7 +891,7 @@ export function LeverageSettingsClient() {
                     currentPeakDrawdownPct != null &&
                     p.data.peak_drawdown_pct != null &&
                     Math.abs(p.data.peak_drawdown_pct - currentPeakDrawdownPct) < 0.0001
-                    ? "appHeldRow"
+                    ? "appCurrentSettingRow"
                     : "";
                 }}
                 getRowId={(p) => (p.data.isBenchmark ? `bm:${p.data.label}` : `${p.data.ma_days}:${p.data.peak_drawdown_pct}`)}
