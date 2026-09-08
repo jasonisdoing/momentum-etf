@@ -38,6 +38,20 @@ def entry_signal(
     return signals["eligible"] & (signals["long"] > floor) & (signals["short"] >= floor) & volatility.notna()
 
 
+def entry_gap_ok(long_disparity_pct, short_disparity_pct, volatility_pct, entry_vol_mult: float | None) -> bool:
+    """진입 문턱 판정(행 단위) — `entry_signal`(프레임)과 **같은 수식**. 순위 화면이 쓴다.
+
+    문턱 없음(None)이면 항상 참(진입 = 보유 자격). 변동성이나 이격을 모르면 거짓 —
+    값을 추정하지 않는다(프레임 버전의 `volatility.notna()` 가드와 같다).
+    """
+    if entry_vol_mult is None:
+        return True
+    if volatility_pct is None or long_disparity_pct is None or short_disparity_pct is None:
+        return False
+    floor = float(entry_vol_mult) * float(volatility_pct)
+    return float(long_disparity_pct) > floor and float(short_disparity_pct) >= floor
+
+
 def compute_signals(panel: dict[str, pd.DataFrame], short_ma_days: int, long_ma_days: int) -> dict[str, pd.DataFrame]:
     """이평선 두 개로 만드는 신호 표(행 = 거래일, 열 = 종목) — 백테스트·화면이 같은 값을 본다.
 

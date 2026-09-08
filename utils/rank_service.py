@@ -604,9 +604,10 @@ def _compute_rank_data_payload(
     selected_ticker_type: str,
     country_code: str,
     ma_rules: list[dict[str, Any]],
+    entry_vol_mult: float | None = None,
 ) -> dict[str, Any]:
     # 기준일은 항상 오늘이다 — 아래에서 데이터가 실제로 어느 날짜인지(effective) 다시 읽는다.
-    dataframe = build_ticker_type_rankings(selected_ticker_type, ma_rules=ma_rules)
+    dataframe = build_ticker_type_rankings(selected_ticker_type, ma_rules=ma_rules, entry_vol_mult=entry_vol_mult)
     effective_as_of_date: pd.Timestamp | None = None
     raw_as_of_date = dataframe.attrs.get("as_of_date")
     if raw_as_of_date is not None:
@@ -663,6 +664,9 @@ def _compute_rank_data_payload(
         "ticker_type": selected_ticker_type,
         "ma_rules": ma_rules,
         **ma_options_payload(_pool_country(selected_ticker_type)),
+        # 진입 문턱 — 이번 응답의 보유 대상(✅)에 적용된 값과 선택지(툴바 셀렉트용).
+        "entry_vol_mult": entry_vol_mult,
+        "entry_vol_mult_options": list(__import__("config").ENTRY_VOL_MULT_OPTIONS),
         "as_of_date": _serialize_datetime(effective_as_of_date),
         "monthly_return_labels": get_recent_monthly_return_labels(
             MONTHLY_RETURN_LABEL_COUNT,
@@ -689,6 +693,7 @@ def load_rank_data(
     *,
     ticker_type: str | None = None,
     ma_rule_override: dict[str, Any] | None = None,
+    entry_vol_mult_override: str | None = None,
 ) -> dict[str, Any]:
     configs_payload, default_config = _build_configs_payload()
 
@@ -709,10 +714,26 @@ def load_rank_data(
     if selected_config is None:
         raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
 
+    # 진입 문턱 — 툴바 미리보기 값("none"=없음)이 오면 그걸, 아니면 풀 저장값을 쓴다.
+    from config import ENTRY_VOL_MULT_OPTIONS
+    from utils.settings_loader import get_ticker_type_settings
+
+    if entry_vol_mult_override is None:
+        entry_vol_mult = (get_ticker_type_settings(selected_ticker_type) or {}).get("ENTRY_VOL_MULT")
+    else:
+        raw = str(entry_vol_mult_override).strip().lower()
+        entry_vol_mult = None if raw in ("", "none") else float(raw)
+        if entry_vol_mult not in ENTRY_VOL_MULT_OPTIONS:
+            allowed = ", ".join("없음" if v is None else f"{v:g}" for v in ENTRY_VOL_MULT_OPTIONS)
+            raise ValueError(f"진입 문턱은 {allowed} 중 하나여야 합니다 (받은 값: {entry_vol_mult_override}).")
+
     cache_key = _build_rank_cache_key(selected_ticker_type, ma_rules)
-    # 이평선이 직전과 다르면 캐시를 버린다.
+    # 이평선·진입 문턱이 직전과 다르면 캐시를 버린다(키는 풀 단위 — 미리보기 값 전환용).
     previous = _LAST_MA_RULES.get(selected_ticker_type)
-    current = tuple((int(r.get("short_ma_days") or 0), int(r.get("long_ma_days") or 0)) for r in ma_rules)
+    current = (
+        tuple((int(r.get("short_ma_days") or 0), int(r.get("long_ma_days") or 0)) for r in ma_rules),
+        entry_vol_mult,
+    )
     if previous is not None and previous != current:
         _RANK_DATA_CACHE.invalidate(lambda key: key[0] == selected_ticker_type)
     _LAST_MA_RULES[selected_ticker_type] = current
@@ -724,5 +745,6 @@ def load_rank_data(
             selected_ticker_type=selected_ticker_type,
             country_code=country_code,
             ma_rules=ma_rules,
+            entry_vol_mult=entry_vol_mult,
         ),
     )
