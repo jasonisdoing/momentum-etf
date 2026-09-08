@@ -133,6 +133,26 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
     items = [{"ticker": row["ticker"], "ticker_type": pool, "country_code": country} for row in universe]
 
     close_frame, _ = _load_close_frame(items)
+    # ❗ 추세 이탈 배지용 이격 — 그 풀의 이평선 기준(순위·합성·보유 알림과 같은 공용 규칙).
+    # 이 화면 지표들과 같은 확정 종가 기준이다. 풀에 이평선이 없으면 값 없음(배지 없음).
+    gap_by: dict[str, tuple[float | None, float | None]] = {}
+    pool_config = get_ticker_type_settings(pool) or {}
+    ma_short, ma_long = pool_config.get("SHORT_MA_DAYS"), pool_config.get("LONG_MA_DAYS")
+    if ma_short and ma_long and not close_frame.empty:
+        import pandas as pd
+
+        from core.strategy.momentum.signals import compute_signals as momentum_compute
+
+        disparity = momentum_compute({"close": close_frame}, int(ma_short), int(ma_long))
+        short_row = disparity["short"].iloc[-1]
+        long_row = disparity["long"].iloc[-1]
+        gap_by = {
+            ticker: (
+                round(float(short_row[ticker]), 2) if pd.notna(short_row.get(ticker)) else None,
+                round(float(long_row[ticker]), 2) if pd.notna(long_row.get(ticker)) else None,
+            )
+            for ticker in close_frame.columns
+        }
     price_by = _build_current_price_map(items, close_frame)
     change_by = _build_daily_change_map(items, close_frame)
     return_by = _build_return_map(close_frame)
@@ -167,6 +187,9 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
                 "return_12m_pct": returns.get("return_12m_pct"),
                 "mdd_pct": mdd_by.get(ticker),
                 "sortino": _sortino(ticker),
+                # ❗ 배지용 — 풀 이평선 이격(단기·장기).
+                "short_gap_pct": gap_by.get(ticker, (None, None))[0],
+                "long_gap_pct": gap_by.get(ticker, (None, None))[1],
             }
         )
     return rows

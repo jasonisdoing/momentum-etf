@@ -24,7 +24,7 @@ import { useToast } from "../components/ToastProvider";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { formatSignedPct, signColor, stockMemoColumn } from "@/lib/grid-cells";
-import { renderStockNameCell } from "@/lib/name-highlight";
+import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { updateStockMemo } from "@/lib/stocks-store";
 
@@ -89,6 +89,9 @@ type WeightRow = {
   return_12m_pct: number | null;
   mdd_pct: number | null;
   sortino: number | null;
+  /** ❗ 배지용 — 풀 이평선 기준 단기·장기 이격(%). 순위·합성과 같은 공용 규칙. */
+  short_gap_pct?: number | null;
+  long_gap_pct?: number | null;
   /** 티커를 입력받는 중인 행 — 확인을 눌러야 확정된다(`/asset-helper` 와 같은 흐름). */
   is_adding?: boolean;
 };
@@ -358,6 +361,8 @@ export function PortfolioClient() {
     return_12m_pct: null,
     mdd_pct: null,
     sortino: null,
+    short_gap_pct: null,
+    long_gap_pct: null,
   };
 
   /** 종목 추가 — `/assets`·`/asset-helper` 와 **같은 훅·같은 조회 API** 를 쓴다.
@@ -548,7 +553,9 @@ export function PortfolioClient() {
             );
           }
           if (row.ticker === CASH_TICKER) return <span style={{ color: "var(--text-muted)" }}>현금</span>;
-          return renderStockNameCell(params.value);
+          return renderStockNameCell(params.value, {
+            trendBroken: isTrendBroken(row.short_gap_pct, row.long_gap_pct),
+          });
         },
       },
       // 종목 메모 — 전 화면 공용 컬럼(`@/lib/grid-cells`). 순위·자산 관리 화면과 같은 값이고
