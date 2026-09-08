@@ -192,6 +192,28 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     from core.strategy.momentum.signals import daily_volatility_pct
 
     vol_last = daily_volatility_pct(close_df).loc[last]
+    # ❗ 추세 이탈 배지용 이격 — **그 풀의 이평선** 기준(순위·합성·보유 알림과 같은 공용 규칙,
+    # 계산도 모멘텀과 같은 compute_signals). 풀에 이평선이 없으면 값 없음(배지 없음).
+    from core.strategy.momentum import signals as momentum_signals
+    from utils.settings_loader import get_ticker_type_settings
+
+    pool_config = get_ticker_type_settings(pool) or {}
+    ma_short, ma_long = pool_config.get("SHORT_MA_DAYS"), pool_config.get("LONG_MA_DAYS")
+    disparity_short = disparity_long = None
+    if ma_short and ma_long:
+        disparity = momentum_signals.compute_signals({"close": close_df}, int(ma_short), int(ma_long))
+        disparity_short = disparity["short"].loc[last]
+        disparity_long = disparity["long"].loc[last]
+
+    def gap_pair(ticker: str) -> tuple[float | None, float | None]:
+        if disparity_short is None:
+            return None, None
+        short_value, long_value = disparity_short.get(ticker), disparity_long.get(ticker)
+        return (
+            round(float(short_value), 2) if pd.notna(short_value) else None,
+            round(float(long_value), 2) if pd.notna(long_value) else None,
+        )
+
     min_value_mult = settings["min_value_mult"]
     # 장중 누적 배수에 맞춘 하한 — 그 시장의 세션 경과 비율만큼 낮춘다.
     live_required = live_min_value_mult(min_value_mult, _pool_country(pool))
@@ -242,6 +264,9 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
                 "high_drawdown_pct": high_drawdown(ticker),
                 "touched": touched,
                 "volatility_pct": round(float(vol_last[ticker]), 2) if pd.notna(vol_last.get(ticker)) else None,
+                # ❗ 배지용 — 풀 이평선 이격(단기·장기). 장중이면 아래에서 잠정 봉 기준으로 갱신.
+                "short_gap_pct": gap_pair(ticker)[0],
+                "long_gap_pct": gap_pair(ticker)[1],
                 "value_mult": round(float(value_mult_by[ticker]), 2) if ticker in value_mult_by else None,
                 "value_mult_live": value_mult_live_by.get(ticker),
                 # 돌파했더라도 이 값이 거짓이면 사지 않는다 (백테스트와 같은 판정).
@@ -403,6 +428,21 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             # 장중 고가가 선을 건드렸는지도 실시간 고가로 다시 본다.
             row["touched"] = bool(live["high"] >= row["prior_high"] and price < row["prior_high"])
 
+        # ❗ 배지 이격도 잠정 봉 기준으로 갱신 — 합성 화면과 같은 실시간 기준(§10-6).
+        if ma_short and ma_long:
+            eff_disparity = momentum_signals.compute_signals({"close": eff_close}, int(ma_short), int(ma_long))
+            eff_disp_short = eff_disparity["short"].loc[session_ts]
+            eff_disp_long = eff_disparity["long"].loc[session_ts]
+            for row in rows:
+                if row["ticker"] not in live_prices:
+                    continue
+                short_value = eff_disp_short.get(row["ticker"])
+                long_value = eff_disp_long.get(row["ticker"])
+                if pd.notna(short_value):
+                    row["short_gap_pct"] = round(float(short_value), 2)
+                if pd.notna(long_value):
+                    row["long_gap_pct"] = round(float(long_value), 2)
+
         # 이탈선 표시도 잠정 값으로 — 판정에 쓴 그 선이라 화면 숫자와 매도 판정이 갈리지 않는다.
         for held in holdings:
             if held["ticker"] not in live_prices:
@@ -479,11 +519,13 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     value_mult_by = {row["ticker"]: (row.get("value_mult"), row.get("value_mult_live")) for row in rows}
     drawdown_by = {row["ticker"]: row["high_drawdown_pct"] for row in rows}
     volatility_by = {row["ticker"]: row.get("volatility_pct") for row in rows}
+    gap_by = {row["ticker"]: (row.get("short_gap_pct"), row.get("long_gap_pct")) for row in rows}
     for item in [*holdings, *simulated["exited_today"]]:
         item["market_cap"] = market_cap_by.get(item["ticker"])
         item["market_cap_rank"] = rank_by_ticker.get(item["ticker"])
         item["value_mult"], item["value_mult_live"] = value_mult_by.get(item["ticker"], (None, None))
         item["volatility_pct"] = volatility_by.get(item["ticker"])
+        item["short_gap_pct"], item["long_gap_pct"] = gap_by.get(item["ticker"], (None, None))
         item["high_drawdown_pct"] = drawdown_by.get(item["ticker"])
 
     # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.

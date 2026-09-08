@@ -114,6 +114,8 @@ type Settings = PoolSettings & { pool: string };
 
 /** 보유 표 한 행 — 보유·매도 예정·진입 예정·이탈·빈 슬롯을 한 표에 담는다(신고가와 같다). */
 type PlanRow = {
+  /** 20일 일간 수익률 표준편차(%) — 화면 공용 변동성 컬럼. */
+  volatility_pct?: number | null;
   ticker: string;
   name: string;
   industry: string;
@@ -149,6 +151,8 @@ type PlanRow = {
 
 /** 진입 후보 한 행 — 자리가 나면 담을 순서대로. 상태는 「보유 중」과 「후보」 둘뿐이다. */
 type CandidateRow = {
+  /** 20일 일간 수익률 표준편차(%) — 화면 공용 변동성 컬럼. */
+  volatility_pct?: number | null;
   ticker: string;
   name: string;
   industry: string;
@@ -171,6 +175,8 @@ type CandidateRow = {
 
 /** 체결 한 건 — 진입~청산 한 쌍. */
 type Trade = {
+  /** 20일 일간 수익률 표준편차(%) — 화면 공용 변동성 컬럼. */
+  volatility_pct?: number | null;
   ticker: string;
   name: string;
   industry: string;
@@ -621,6 +627,7 @@ export function MomentumClient() {
       short_gap_pct: row.short_gap_pct,
       long_gap_pct: row.long_gap_pct,
       high_drawdown_pct: row.high_drawdown_pct,
+      volatility_pct: row.volatility_pct,
       account_held: row.account_held,
     }));
     const exited: PlanRow[] = positions.exited_today.map((trade) => ({
@@ -647,6 +654,7 @@ export function MomentumClient() {
       short_gap_pct: trade.short_gap_pct,
       long_gap_pct: trade.long_gap_pct,
       high_drawdown_pct: trade.high_drawdown_pct,
+      volatility_pct: trade.volatility_pct,
     }));
     // 빈 슬롯 — 상한에서 '다음 시가 이후에 실제로 차 있을 자리' 를 뺀 만큼. 매도 예정은 곧
     // 비고, 진입 예정은 곧 찬다. 자리가 남았다는 것은 자격을 갖춘 후보가 없었다는 뜻이라,
@@ -785,7 +793,8 @@ export function MomentumClient() {
         headerName: "종목명",
         // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
         width: STOCK_NAME_COLUMN_WIDTH,
-        cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
+        cellRenderer: (p: { value?: string | null; data?: PlanRow }) =>
+          renderStockNameCell(p.value, { trendBroken: isTrendBroken(p.data?.short_gap_pct, p.data?.long_gap_pct) }),
       },
       stockMemoColumn<PlanRow>({
         field: "memo",
@@ -856,7 +865,8 @@ export function MomentumClient() {
         headerName: "종목명",
         // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
         width: STOCK_NAME_COLUMN_WIDTH,
-        cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
+        cellRenderer: (p: { value?: string | null; data?: CandidateRow }) =>
+          renderStockNameCell(p.value, { trendBroken: isTrendBroken(p.data?.short_gap_pct, p.data?.long_gap_pct) }),
       },
       stockMemoColumn<CandidateRow>({
         field: "memo",
