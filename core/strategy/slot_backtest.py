@@ -54,6 +54,7 @@ def _entry_quantities(
     """
     quantities: dict[str, int] = {}
     pending: list[str] = []
+    reserved = 0.0
     for ticker in picks:
         if len(quantities) + len(pending) >= free:
             break
@@ -61,10 +62,13 @@ def _entry_quantities(
         if price is None:
             if pending_ok:
                 pending.append(ticker)
+                # 확정 주문의 몫을 후순위 시가 체결이 먼저 쓰지 않게 예약한다.
+                remaining = cash - sum(quantities[t] * prices[t] for t in quantities) - reserved
+                reserved += min(slot_amount, max(remaining, 0.0))
             continue
         if not pd.notna(price) or price <= 0:
             continue
-        remaining = cash - sum(quantities[t] * prices[t] for t in quantities)
+        remaining = max(cash - sum(quantities[t] * prices[t] for t in quantities) - reserved, 0.0)
         shares = int(min(slot_amount, remaining) // price)
         if shares > 0:
             quantities[ticker] = shares
@@ -348,6 +352,24 @@ def run_slot_backtest(
     planned_entries: list[str] = []
     planned_entry_weights: dict[str, float] = {}
     pending_entry_set = set(pending_entry_tickers)
+    # 오늘 확정 미체결 매수는 오늘 현금·확정 미체결 매도 예상대금에서 우선 예약한다.
+    # 내일 잠정 청산 대금을 오늘 주문의 자금으로 앞당겨 쓰지 않는다.
+    pending_proceeds = sum(
+        holdings[t]["shares"] * float(valuation_close.at[last_day, t])
+        for t in pending_exits
+        if pd.notna(valuation_close.at[last_day, t])
+    )
+    available = cash + pending_proceeds * (1 - sell_slippage / 100)
+    pending_slot_amount = (sleeve_value - pending_proceeds * sell_slippage / 100) / slots if slots else 0.0
+    pending_entry_weights: dict[str, float] = {}
+    pending_buy_cost = 0.0
+    for ticker in pending_entry_tickers:
+        spend = min(pending_slot_amount, max(available, 0.0))
+        # 시가·체결 주수는 만들지 않는다. 미체결 목표는 비용을 포함한 예약액으로 제한한다.
+        stock_value = spend / (1 + buy_slippage / 100)
+        pending_entry_weights[ticker] = stock_value / sleeve_value * 100 if sleeve_value > 0 else 0.0
+        pending_buy_cost += spend - stock_value
+        available -= spend
     free = slots - (len(holdings) - len(planned_exits) - len(pending_exits)) - len(pending_entry_tickers)
     if free > 0 and not entry_blocked(last_day):
         row = entry.loc[last_day]
@@ -355,14 +377,8 @@ def run_slot_backtest(
         picks.sort(key=lambda ticker: priority_of(ticker, last_day), reverse=True)
         # 다음 시가가 없으므로 최종 종가로 예상한다. 청산 비용과 정수 수량도 체결 규칙과 같다.
         proceeds = sum(holdings[t]["shares"] * float(close_df.at[last_day, t]) for t in planned_exits)
-        # 체결 예정 매도(오늘 시가 미상)의 대금은 잠정 종가(없으면 마지막 확정 종가)로 예상한다.
-        proceeds += sum(
-            holdings[t]["shares"] * float(valuation_close.at[last_day, t])
-            for t in pending_exits
-            if pd.notna(valuation_close.at[last_day, t])
-        )
-        available = cash + proceeds * (1 - sell_slippage / 100)
-        fill_value = sleeve_value - proceeds * sell_slippage / 100
+        available += proceeds * (1 - sell_slippage / 100)
+        fill_value = sleeve_value - (pending_proceeds + proceeds) * sell_slippage / 100 - pending_buy_cost
         prices = {t: float(close_df.at[last_day, t]) * (1 + buy_slippage / 100) for t in picks}
         quantities, _ = _entry_quantities(picks, prices, free, fill_value / slots, available)
         planned_entries = list(quantities)
@@ -400,11 +416,11 @@ def run_slot_backtest(
         "planned_entries": planned_entries,
         "planned_entry_weights": planned_entry_weights,
         # 잠정 마지막 봉 모드에서만 채워진다 — 오늘 시가를 몰라 체결하지 못한 확정 주문.
-        # 매도는 open_positions 행의 fill_date 로도 표시된다. 진입 비중은 엔진의 진입 배분
-        # 규칙과 같은 슬롯 1칸이다(체결가를 모르니 수량은 종가 확정 실행이 정한다).
+        # 매도는 open_positions 행의 fill_date 로도 표시된다. 진입 비중은 우선 예약한
+        # 예산 범위이며 체결가·체결 주수를 지어내지 않는다.
         "pending_exits": sorted(pending_exits),
         "pending_entries": [
-            {"ticker": ticker, "sleeve_weight_pct": 100.0 / slots if slots else 0.0} for ticker in pending_entry_tickers
+            {"ticker": ticker, "sleeve_weight_pct": pending_entry_weights[ticker]} for ticker in pending_entry_tickers
         ],
         # 빈 슬롯·잔여 현금 비중 — 종목 비중과 합쳐 100 이 된다. 반올림 없음(계산 소비자용).
         "sleeve_cash_weight_pct": cash / sleeve_value * 100 if sleeve_value > 0 else 100.0,

@@ -5,17 +5,15 @@
 
 ## 재개 지점
 
-- 상태: 1번 복수 체결일 목표·액션 분리까지 구현·검증 완료. 현재 변경은 미커밋.
-- 변경 파일: `core/strategy/mix/targets.py`, `core/strategy/mix/actions.py`,
-  `utils/strategy_mix_service.py`, `tests/test_screen_matches_backtest.py`, 전략 문서와 이 문서.
-- 결과: 날짜별 엔진 목표를 기존 정수 배분으로 계산. 최초 액션은 실제 보유, 이후는 직전 목표와 비교한다.
-  최종 날짜 목표를 표에서도 사용하고, 동일 종목의 액션 키는 날짜를 포함한다.
-- 검증: 핵심 테스트 8개·Next 빌드·변경 파일 코드 검사 성공. 추가 고정 입력 검증도 성공(아래 기록).
-- 다음 행동: 2번 `core/strategy/slot_backtest.py`의 `_entry_quantities`, `pending_entries`,
-  `planned_entry_weights`를 함께 점검한다. 시가 미상 진입이 자금 예약 없이 1/N로 전달되는 경로를
-  엔진의 동일한 현금 제한 안에서 처리하고, 기존 잠정 상태 일치 테스트를 확장한다.
-- 동작 전제: 이후 날짜 주문은 앞선 날짜 목표 달성을 가정한 계획이다. 실제 체결 이력 저장을 추가하지 않았다.
-  소액 조정 필터는 날짜별 액션에 기존 방식으로 적용된다.
+- 상태: 2번 시가 미상 진입의 예산 예약 구현·검증 완료. 현재 변경은 미커밋.
+- 재현: kor_test A 목표 100.9769%, 계좌 예산 49,524,116원 대비 내림 비용 49,537,065원.
+- 조치: 슬롯 엔진에서 확정 미체결 매수를 먼저 예약. 후순위 체결·잠정 진입이 같은 돈을 재사용하지 않게 함.
+  pending 비중은 고정 1/N 대신 슬롯 몫·가용액 한도 내 비용 제외 예약액으로 전달.
+  확정 주문의 자금에는 미래 잠정 청산 대금을 포함하지 않음. 실제 체결·현금 원장을 임의로 바꾸지 않음.
+- 변경 파일: `core/strategy/slot_backtest.py`, 기존 핵심 테스트, 전략 문서와 이 문서.
+- 검증: kor_test 두 날짜 계산 성공, 핵심 테스트 8개·Next 빌드·코드 검사 성공(아래 기록).
+- 다음 행동: 3번 반올림 전 계산값 분리. `utils/portfolio_backtest.py`의 일별 응답과
+  `core/strategy/slot_backtest.py`, `utils/mix_sleeve.daily_curve`의 계산 계약을 함께 변경한다.
 
 ## 실행 순서
 
@@ -25,9 +23,9 @@
    - [x] 동일·반대 방향의 복수 체결일을 날짜별 엔진 목표로 분리. 임시 충돌 오류 경로 제거.
      날짜별 정수 목표의 차이를 사용하고 최종 표의 목표와 일치하도록 연결.
    - [x] 같은 날짜 상계, 앞선 주문 처리 후 후속 주문 수량·키 유지, 중복 종목 정수 배분 검증.
-2. [ ] **시가 미상 진입의 예산** — `pending_entries`의 고정 `100 / slots` 비중은
-   합성 목표에도 사용된다. 현금·다른 진입의 자금 예약을 고려하는 엔진 배분으로 점검·수정한다.
-   일반 `planned_entries`는 이미 잔여 현금을 고려하므로 둘을 혼동하지 않는다.
+2. [x] **시가 미상 진입의 예산** — 확정 미체결 매수 우선 예약·비용 제외 목표 비중 전달.
+   잠정 진입은 예약 후 잔여만 사용한다. kor_test의 날짜별 예산 초과 해소 및
+   기존 엔진→합성 일치 테스트에 전체 목표 비중 검증 추가.
 3. [ ] **반올림 전 계산값** — 포트폴리오 일별 `strategy_pct`는 2자리, 슬롯은 6자리이고
    합성은 이를 다시 배수로 변환한다. 계산용 원값과 표시값을 분리해 세 전략·합성에 연결한다.
 4. [ ] **실제 장중 검증** — 고정 입력 테스트와 별개로 개장 후 모멘텀·신고가·합성 확인.
@@ -70,3 +68,17 @@
   `git diff --check` 성공. 실거래·슬랙 발송은 하지 않음.
 - 액션 키가 종목+날짜로 바뀌므로 기존 알림 비교 캐시와 처음 비교할 때 새 항목으로 인식될 수 있다.
   이후에는 앞 날짜 액션이 사라져도 후속 날짜 액션 키가 유지된다. 알림 캐시를 임의 삭제하지 않았다.
+
+### 2026-09-08 kor_test 예산 초과 수정
+
+- `PYTHONPATH=. .venv/bin/python /tmp/diagnose_mix_budget.py`: 로컬 DB를 읽고
+  `mix_positions('kor_test')`의 날짜별 배분을 검사. 수정 전 두 번째 날짜 예산 초과,
+  수정 후 `STAGE 1 OK`, `STAGE 2 OK`, 정상 종료(한국 시간 09:15~09:16).
+  임시 스크립트는 유지보수 의존성이 아니며 같은 검증은 `mix_positions('kor_test')`로 재실행 가능.
+- `.venv/bin/python -m unittest tests.test_screen_matches_backtest`: 8개 성공(45.756초).
+  기존 잠정 상태 테스트에 유지 목표+확정 미체결 목표+잠정 진입 목표 합계 검증을 포함.
+- `SKIP=update-app-datetime pre-commit run --files core/strategy/slot_backtest.py tests/test_screen_matches_backtest.py core/strategy/strategy_logic.md core/strategy/to_do.md`:
+  Next 빌드·flake8·ruff 성공. 포맷이 테스트 파일 1개 수정 후 종료.
+- 위 파일 목록으로 `SKIP=update-app-datetime,next-build` 재실행: 전체 코드 검사 성공.
+  `git diff --check` 성공. 브라우저 화면·슬랙 발송·주문 실행은 하지 않음.
+  따라서 4번 실제 장중 화면 검증 전체를 완료 처리하지 않는다.
