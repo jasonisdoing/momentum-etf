@@ -211,8 +211,8 @@ export function maExitGapColumn<T>(options: {
 }): ColDef<T> {
   const label = `MA${options.maDays ?? ""}`;
   const colorNote = options.entry
-    ? "파랑 = 이탈(음수) 또는 진입 문턱(배수×변동성) 안 — 지금 새로 담을 수 없는 값."
-    : "파랑 = 이탈(음수).";
+    ? "파랑 = 이탈(음수), 검정 = 진입 문턱(배수×변동성) 미달, 빨강 = 문턱까지 통과."
+    : "파랑 = 이탈(음수), 빨강 = 0선 위.";
   return {
     field: options.field,
     headerName: `${label} 이탈`,
@@ -230,10 +230,12 @@ export function maExitGapColumn<T>(options: {
     cellStyle: (p): { color: string } | null => {
       const value = p.value as number | null;
       if (value == null) return null;
+      // 파랑 = 이탈(음수) · 검정(기본색) = 0선 위지만 문턱 미달 · 빨강 = 문턱까지 통과.
+      if (value < 0) return { color: "var(--down-color, #2f6fd0)" };
       const mult = options.entry?.mult ?? null;
       const volatility = options.entry?.getVolatility(p.data);
       const floor = mult != null && volatility != null ? mult * volatility : 0;
-      if (value < floor) return { color: "var(--down-color, #2f6fd0)" };
+      if (value < floor) return null;
       return { color: "var(--up-color, #d64545)" };
     },
   };
