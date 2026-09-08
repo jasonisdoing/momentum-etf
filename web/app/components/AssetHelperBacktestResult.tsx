@@ -8,6 +8,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 
 import { cumulativeToDailyRows } from "@/lib/backtest-periods";
 import { BUCKET_COLORS, BUCKET_THEME } from "@/lib/bucket-theme";
+import { stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { AppAgGrid } from "./AppAgGrid";
 import { BacktestPeriodTables } from "./BacktestPeriodTables";
 import { TickerDetailLink } from "./TickerDetailLink";
@@ -287,9 +288,8 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
         valueGetter: (params) => getBucketName(params.data?.bucket),
         cellClass: (params) => getBucketCellClass(params.data?.bucket),
       },
-      {
-        field: "ticker",
-        headerName: "티커",
+      // 티커·종목명 — 공용 컬럼(col-id 표준·종목명 표기 공용). 현금 행·비중 색만 화면 고유.
+      tickerColumn<LabPosition>({
         width: 95,
         minWidth: 95,
         cellRenderer: (params: { data?: LabPosition }) => {
@@ -298,32 +298,20 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
           if (row.ticker === "__CASH__") return <span style={{ fontWeight: 800 }}>현금</span>;
           return <TickerDetailLink ticker={row.ticker} displayTicker={row.ticker} />;
         },
-      },
-      {
-        field: "name",
-        headerName: "종목명",
+      }),
+      stockNameColumn<LabPosition>({
         minWidth: 180,
-        flex: 1,
         cellClass: "assetHelperNameCell",
         valueGetter: (params) => {
           const row = params.data;
           if (!row) return "-";
           return row.ticker === "__CASH__" ? "" : row.name ?? row.ticker;
         },
-        tooltipValueGetter: (params) => String(params.value ?? ""),
-        cellRenderer: (params: { value: string | null | undefined }) => {
-          const name = params.value || "-";
-          return (
-            <span className="assetHelperNameCellText" title={name}>
-              {name}
-            </span>
-          );
-        },
         cellStyle: (params) => ({
           color: getAssetHelperWeightColor(result.weight_items, params.data?.ticker ?? ""),
           fontWeight: 800,
         }),
-      },
+      }),
       {
         field: "buy_date",
         headerName: "매수일",

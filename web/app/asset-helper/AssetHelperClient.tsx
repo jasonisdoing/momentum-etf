@@ -14,6 +14,7 @@ import { TickerDetailLink } from "../components/TickerDetailLink";
 import { AssetHelperBacktestResult, type LabResult } from "../components/AssetHelperBacktestResult";
 import { BUCKET_THEME } from "@/lib/bucket-theme";
 import { FIXED_ASSET_NAME, FIXED_ASSET_PRICE_PROXY, FIXED_ASSET_ROW_CLASS, FIXED_ASSET_TICKER } from "@/lib/fixed-asset";
+import { stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { renderStockNameCell } from "@/lib/name-highlight";
 import { reorderHoldings } from "@/lib/holdings-store";
 import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
@@ -807,13 +808,12 @@ export function AssetHelperClient() {
         cellClass: (params) => getBucketCellClass(params.data?.bucket),
         cellRenderer: (params: { data?: GridRow }) => <span>{getBucketName(params.data?.bucket)}</span>,
       },
-      {
-        field: "ticker",
-        headerName: "티커",
+      // 티커·종목명 — 공용 컬럼(col-id 표준). 추가 행 입력칸·현금·고정 자산만 화면 고유 표기다.
+      tickerColumn<GridRow>({
         minWidth: 110,
         width: 110,
         pinned: "left",
-        cellRenderer: (params: { data?: GridRow; value?: string }) => {
+        cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
           const row = params.data;
           if (!row) return "-";
           if (row.ticker === CASH_TICKER) return <span>-</span>;
@@ -839,13 +839,9 @@ export function AssetHelperClient() {
             return <TickerDetailLink ticker={dt} displayTicker={dt} />;
           }
         },
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        minWidth: 220,
-        flex: 1,
-        cellRenderer: (params: { data?: GridRow; value?: string }) => {
+      }),
+      stockNameColumn<GridRow>({
+        cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
           const row = params.data;
           if (!row) return null;
           if (row.is_adding) {
@@ -872,7 +868,7 @@ export function AssetHelperClient() {
             badge: alertBadges[normalizeBadgeTicker(row.ticker)] ?? "",
           });
         },
-      },
+      }),
       { field: "daily_change_pct", headerName: "일간", minWidth: 88, width: 88, type: "rightAligned", cellRenderer: renderPctCell },
       {
         field: "current_price",

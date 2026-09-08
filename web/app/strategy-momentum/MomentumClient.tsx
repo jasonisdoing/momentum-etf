@@ -45,6 +45,7 @@ import {
   slotTradeColumns,
   stockMemoColumn,
   stockNameColumn,
+  stockRowClass,
   tickerColumn,
   tradeValueMultColumn,
   volatilityColumn,
@@ -786,10 +787,7 @@ export function MomentumClient() {
       // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
       // 티커는 호주 접두사(ASX:)만 화면 고유. 고정 폭 — 보유·후보 표의 앞쪽 칸을 맞춘다.
       tickerColumn<PlanRow>({ cellRenderer: (p) => renderTicker(p.value) }),
-      stockNameColumn<PlanRow>({
-        fixedWidth: true,
-        nameOptions: (row) => ({ trendBroken: isTrendBroken(row?.short_gap_pct, row?.long_gap_pct) }),
-      }),
+      stockNameColumn<PlanRow>({ fixedWidth: true }),
       stockMemoColumn<PlanRow>({
         field: "memo",
         editable: (row) => row?.plan !== "empty",
@@ -850,10 +848,7 @@ export function MomentumClient() {
       highDrawdownColumn<CandidateRow>("high_drawdown_pct"),
       // 티커·종목명 — 공용 컬럼. 고정 폭으로 보유 표와 앞쪽 칸을 맞춘다.
       tickerColumn<CandidateRow>({ cellRenderer: (p) => renderTicker(p.value) }),
-      stockNameColumn<CandidateRow>({
-        fixedWidth: true,
-        nameOptions: (row) => ({ trendBroken: isTrendBroken(row?.short_gap_pct, row?.long_gap_pct) }),
-      }),
+      stockNameColumn<CandidateRow>({ fixedWidth: true }),
       stockMemoColumn<CandidateRow>({
         field: "memo",
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
@@ -1177,9 +1172,13 @@ export function MomentumClient() {
                   theme={gridTheme}
                   minHeight={0}
                   height="auto"
-                  // 빈 슬롯은 값을 비우고, 실계좌 보유는 티커·종목명 칸 녹색 — 시장 화면과 같은 표준.
+                  // 공통 행 표시 — 보유는 티커·종목명 칸 녹색, 추세 이탈은 행 전체 회색(전 화면 동일).
                   getRowClass={(p) =>
-                    p.data?.plan === "empty" ? "appEmptySlotRow" : p.data?.account_held ? "appHeldRow" : ""
+                    stockRowClass({
+                      emptySlot: p.data?.plan === "empty",
+                      held: p.data?.account_held,
+                      trendBroken: isTrendBroken(p.data?.short_gap_pct, p.data?.long_gap_pct),
+                    })
                   }
                   gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
                 />
@@ -1192,8 +1191,13 @@ export function MomentumClient() {
                   theme={gridTheme}
                   minHeight={0}
                   height="auto"
-                  // 실계좌 보유 종목은 티커·종목명 칸 녹색 — 시장 화면과 같은 표준.
-                  getRowClass={(p) => (p.data?.account_held ? "appHeldRow" : "")}
+                  // 공통 행 표시 — 보유는 티커·종목명 칸 녹색, 추세 이탈은 행 전체 회색(전 화면 동일).
+                  getRowClass={(p) =>
+                    stockRowClass({
+                      held: p.data?.account_held,
+                      trendBroken: isTrendBroken(p.data?.short_gap_pct, p.data?.long_gap_pct),
+                    })
+                  }
                   gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
                 />
               </>

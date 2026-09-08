@@ -31,6 +31,7 @@ import {
   maExitGapColumn,
   signColor,
   stockNameColumn,
+  stockRowClass,
   tickerColumn,
   tradeValueMultColumn,
   volatilityColumn,
@@ -98,7 +99,7 @@ type PositionRow = {
   industry: string;
   /** 20일 일간 수익률 표준편차(%) — 화면 공용 변동성 컬럼. */
   volatility_pct?: number | null;
-  /** ❗ 배지용 — 풀 이평선 기준 단기·장기 이격(%). 순위·합성과 같은 공용 규칙. */
+  /** 추세 이탈(행 전체 회색)용 — 풀 이평선 기준 단기·장기 이격(%). 순위·합성과 같은 공용 규칙. */
   short_gap_pct?: number | null;
   long_gap_pct?: number | null;
   /** 행별 체결일 — 어제 확정된 진입 예정(오늘 체결)에만 있다. */
@@ -178,7 +179,7 @@ type PlanRow = {
   industry: string;
   /** 20일 일간 수익률 표준편차(%) — 화면 공용 변동성 컬럼. */
   volatility_pct?: number | null;
-  /** ❗ 배지용 — 풀 이평선 기준 단기·장기 이격(%). 순위·합성과 같은 공용 규칙. */
+  /** 추세 이탈(행 전체 회색)용 — 풀 이평선 기준 단기·장기 이격(%). 순위·합성과 같은 공용 규칙. */
   short_gap_pct?: number | null;
   long_gap_pct?: number | null;
   market_cap_rank?: number | null;
@@ -670,10 +671,7 @@ export function NewHighClient() {
       // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
       // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
       tickerColumn<PositionRow>({}),
-      stockNameColumn<PositionRow>({
-        fixedWidth: true,
-        nameOptions: (row) => ({ trendBroken: isTrendBroken(row?.short_gap_pct, row?.long_gap_pct) }),
-      }),
+      stockNameColumn<PositionRow>({ fixedWidth: true }),
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
       stockMemoColumn<PositionRow>({
         field: "memo",
@@ -938,10 +936,7 @@ export function NewHighClient() {
       highDrawdownColumn<PlanRow>("high_drawdown_pct"),
       // 티커·종목명 — 공용 컬럼. 고정 폭 — 보유 표와 후보 표의 앞쪽 칸을 맞춘다.
       tickerColumn<PlanRow>({}),
-      stockNameColumn<PlanRow>({
-        fixedWidth: true,
-        nameOptions: (row) => ({ trendBroken: isTrendBroken(row?.short_gap_pct, row?.long_gap_pct) }),
-      }),
+      stockNameColumn<PlanRow>({ fixedWidth: true }),
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
       stockMemoColumn<PlanRow>({
         field: "memo",
@@ -1210,13 +1205,13 @@ export function NewHighClient() {
                     theme={gridTheme}
                     minHeight={0}
                     height="auto"
-                    // 빈 슬롯은 값을 비우고, 실계좌 보유는 티커·종목명 칸 녹색 — 시장 화면과 같은 표준.
+                    // 공통 행 표시 — 보유는 티커·종목명 칸 녹색, 추세 이탈은 행 전체 회색(전 화면 동일).
                     getRowClass={(params) =>
-                      params.data?.plan === "empty"
-                        ? "appEmptySlotRow"
-                        : params.data?.account_held
-                          ? "appHeldRow"
-                          : ""
+                      stockRowClass({
+                        emptySlot: params.data?.plan === "empty",
+                        held: params.data?.account_held,
+                        trendBroken: isTrendBroken(params.data?.short_gap_pct, params.data?.long_gap_pct),
+                      })
                     }
                     gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
                   />
@@ -1231,8 +1226,13 @@ export function NewHighClient() {
                     theme={gridTheme}
                     minHeight={0}
                     height="auto"
-                    // 실계좌 보유 종목은 티커·종목명 칸 녹색 — 시장 화면과 같은 표준(보유 컬럼 대체).
-                    getRowClass={(params) => (params.data?.account_held ? "appHeldRow" : "")}
+                    // 공통 행 표시 — 보유는 티커·종목명 칸 녹색, 추세 이탈은 행 전체 회색(전 화면 동일).
+                    getRowClass={(params) =>
+                      stockRowClass({
+                        held: params.data?.account_held,
+                        trendBroken: isTrendBroken(params.data?.short_gap_pct, params.data?.long_gap_pct),
+                      })
+                    }
                     gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
                   />
                   <button

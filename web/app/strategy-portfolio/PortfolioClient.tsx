@@ -23,7 +23,7 @@ import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { createAppGridTheme } from "../components/app-grid-theme";
-import { formatSignedPct, signColor, stockMemoColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
+import { formatSignedPct, signColor, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { updateStockMemo } from "@/lib/stocks-store";
@@ -89,7 +89,7 @@ type WeightRow = {
   return_12m_pct: number | null;
   mdd_pct: number | null;
   sortino: number | null;
-  /** ❗ 배지용 — 풀 이평선 기준 단기·장기 이격(%). 순위·합성과 같은 공용 규칙. */
+  /** 추세 이탈(행 전체 회색)용 — 풀 이평선 기준 단기·장기 이격(%). 순위·합성과 같은 공용 규칙. */
   short_gap_pct?: number | null;
   long_gap_pct?: number | null;
   /** 티커를 입력받는 중인 행 — 확인을 눌러야 확정된다(`/asset-helper` 와 같은 흐름). */
@@ -548,9 +548,7 @@ export function PortfolioClient() {
             );
           }
           if (row.ticker === CASH_TICKER) return <span style={{ color: "var(--text-muted)" }}>현금</span>;
-          return renderStockNameCell(params.value, {
-            trendBroken: isTrendBroken(row.short_gap_pct, row.long_gap_pct),
-          });
+          return renderStockNameCell(params.value);
         },
       }),
       // 종목 메모 — 전 화면 공용 컬럼(`@/lib/grid-cells`). 순위·자산 관리 화면과 같은 값이고
@@ -830,6 +828,15 @@ export function PortfolioClient() {
               theme={gridTheme}
               minHeight={0}
               height="auto"
+              // 공통 행 표시 — 추세 이탈은 행 전체 회색(전 화면 동일, ❗ 배지 대체).
+              // 현금·추가 행은 종목이 아니라 제외한다.
+              getRowClass={(p) =>
+                stockRowClass({
+                  trendBroken:
+                    Boolean(p.data && !p.data.is_adding && p.data.ticker !== CASH_TICKER && !p.data.is_unknown) &&
+                    isTrendBroken(p.data?.short_gap_pct, p.data?.long_gap_pct),
+                })
+              }
               gridOptions={{
                 domLayout: "autoHeight",
                 suppressMovableColumns: true,

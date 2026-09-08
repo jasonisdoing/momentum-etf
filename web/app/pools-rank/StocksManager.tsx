@@ -1097,7 +1097,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return renderStockNameCell(params.value, {
             // MDD·소르티노 노란색과 같은 기준 — 상장 기간이 백테스트 기준 창(METRIC_WINDOW_MONTHS)보다 짧은 종목.
             isNew: params.data?.backtest_stats?.is_partial === true,
-            trendBroken: isTrendBroken(params.data?.단기이격, params.data?.이격),
             searchQuery: tickerSearch,
           });
         },
@@ -1917,7 +1916,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 theme={rankGridTheme}
                 getRowClass={(params: RowClassParams<RankGridRow>) => {
                   const classes: string[] = [];
-                  // 추세 이탈(장기·단기 중 하나라도 음수) — 종목명 뒤 ❗ 와 같은 조건으로 행을 연한 회색으로.
+                  // 추세 이탈(장기·단기 중 하나라도 음수) — 행 전체 연한 회색(전 화면 공통 표시).
                   if (isTrendBroken(params.data?.단기이격, params.data?.이격)) {
                     classes.push("appTrendBrokenRow");
                   }

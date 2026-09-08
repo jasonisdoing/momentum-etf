@@ -38,7 +38,7 @@ from utils.stock_list_io import pools_by_ticker
 logger = get_app_logger()
 
 # 자산 화면 종목명 배지 아이콘. 계좌마다 다르게 둘 이유가 없어 코드에 고정한다.
-_MA_ICON = "❗"  # 이동선 이탈(단기·장기 공용)
+# 이동선 이탈은 배지가 아니라 행 전체 회색(ma_tickers → appTrendBrokenRow)으로만 표시한다.
 _STOPLOSS_ICON = "🚫"
 
 
@@ -102,7 +102,7 @@ def _ma_status(
     `max(단기, 장기) + 40` 영업일만 잘라 왔는데, 이 시스템의 이동평균은 EMA 라 전체 이력에
     지수적으로 의존해서 값이 어긋났다 — 잘린 창의 시작값 영향이 남는다.
     (TIGER 지주회사 MA90: 전체 이력 21,686 vs 130봉 22,044 → 이격 -0.22% vs -1.83%.
-    순위 화면은 이탈이 아닌데 알림만 ❗ 가 붙었다.)
+    순위 화면은 이탈이 아닌데 알림만 붙었다.)
 
     실시간 현재가(스냅샷)를 종가 시리즈에 덮어씌우는 것도 순위 화면과 같다
     (``build_effective_close_series``). **하나라도 아래면 이탈**로 본다 — 순위 화면의
@@ -268,12 +268,11 @@ def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
     def _norm_ticker(value: str) -> str:
         return str(value or "").strip().upper().split(":")[-1]
 
-    # 이동선 이탈 종목 — 배지와 별개로 화면이 행 전체를 회색 처리하는 데 쓴다.
+    # 이동선 이탈 종목 — 화면이 행 전체를 회색 처리하는 데 쓴다(배지는 붙이지 않는다).
     ma_tickers: list[str] = []
     for hit in alerts["ma"]:
         key = _norm_ticker(hit["ticker"])
         if key:
-            badge_by_ticker[key] = badge_by_ticker.get(key, "") + _MA_ICON
             ma_tickers.append(key)
     for hit in alerts["stoploss"]:
         key = _norm_ticker(hit["ticker"])

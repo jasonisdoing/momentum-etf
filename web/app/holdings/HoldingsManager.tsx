@@ -7,6 +7,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { createAppGridTheme } from "../components/app-grid-theme";
+import { stockNameColumn, tickerColumn } from "@/lib/grid-cells";
+import { renderStockNameCell } from "@/lib/name-highlight";
 import { readSessionTtlCache, writeSessionTtlCache } from "../../lib/session-ttl-cache";
 
 type HoldingsRow = {
@@ -104,21 +106,15 @@ export function HoldingsManager({
   const [detailLoading, setDetailLoading] = useState(false);
 
   const constituentColDefs = useMemo<ColDef<ConstituentRow>[]>(() => [
-    {
-      field: "ticker",
-      headerName: "티커",
+    // 티커·종목명 — 공용 컬럼(col-id 표준·종목명 표기 공용). 구성종목은 코드 표기만(링크 없음).
+    tickerColumn<ConstituentRow>({
       minWidth: 120,
       width: 120,
       cellClass: "tickerDetailCodeCell",
       cellStyle: { fontWeight: 700 },
-    },
-    {
-      field: "name",
-      headerName: "종목명",
-      minWidth: 148,
-      flex: 1.2,
-      cellClass: "tickerDetailNameCell",
-    },
+      cellRenderer: (p) => <span>{String(p.value ?? "-")}</span>,
+    }),
+    stockNameColumn<ConstituentRow>({ minWidth: 148, flex: 1.2, cellClass: "tickerDetailNameCell" }),
     {
       field: "weight",
       headerName: "비중",
@@ -427,12 +423,12 @@ export function HoldingsManager({
         return <span>{row.bucket || "-"}</span>;
       },
     },
-    {
-      headerName: "티커",
-      field: "ticker",
+    // 티커·종목명 — 공용 컬럼(col-id 표준·종목명 표기 공용). 현금·IS 행과 펼침 화살표만 화면 고유.
+    // (예전 tableAlignCenter·holdingsTickerCell·holdingsNameCell·holdingsNameMain·holdingsExpandIcon
+    //  클래스는 CSS 정의가 없는 죽은 이름이라 지웠다.)
+    tickerColumn<ParentRow>({
       width: 110,
       sortable: true,
-      cellClass: "tableAlignCenter holdingsTickerCell",
       cellRenderer: (params: { value?: string | null; data?: ParentRow }) => {
         if (!params.data || isDetailRow(params.data)) return null;
         const rawTicker = String(params.value ?? "-");
@@ -441,35 +437,26 @@ export function HoldingsManager({
         if (displayTicker === "IS") return <span className="appCodeText">{displayTicker}</span>;
         return <TickerDetailLink ticker={rawTicker} displayTicker={displayTicker} />;
       },
-    },
-    {
-      headerName: "종목명",
-      field: "name",
+    }),
+    stockNameColumn<ParentRow>({
       flex: 1.4,
       minWidth: 210,
       sortable: true,
-      cellClass: "holdingsNameCell",
       cellRenderer: (params: { value?: string | null; data?: ParentRow }) => {
         if (!params.data || isDetailRow(params.data)) return null;
         const row = params.data as AggregatedHoldingRow;
         if (!params.value) return "-";
-        const isCash = row.ticker === "__CASH__";
-        const expandable = canHaveConstituents(row);
-        const isExpanded = expandedTicker === row.ticker;
+        if (row.ticker === "__CASH__") {
+          return <span style={{ color: "#8b949e", fontWeight: 500 }}>{params.value}</span>;
+        }
         return (
-          <span
-            className={`holdingsNameMain${expandable ? " holdingsNameExpandable" : ""}`}
-            title={params.value}
-            style={isCash ? { color: "#8b949e", fontWeight: 500 } : undefined}
-          >
-            {expandable && (
-              <span className={`holdingsExpandIcon${isExpanded ? " is-open" : ""}`}>▶</span>
-            )}
-            {params.value}
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+            {canHaveConstituents(row) && <span>▶</span>}
+            {renderStockNameCell(params.value)}
           </span>
         );
       },
-    },
+    }),
     {
       headerName: "비중",
       field: "portfolio_weight_pct",
@@ -553,7 +540,7 @@ export function HoldingsManager({
         return row.is_etf ? <span className="holdingsCheckMark">✅</span> : "-";
       },
     },
-  ], [isCashRow, isDetailRow, showAmounts, expandedTicker, handleNameClick]);
+  ], [isCashRow, isDetailRow, showAmounts]);
 
   // detail(자식) fullWidth renderer — ticker 페이지와 동일한 2패널(구성종목 + 일별) 레이아웃
   const DetailRenderer = useCallback(

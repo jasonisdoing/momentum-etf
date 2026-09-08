@@ -192,7 +192,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     from core.strategy.momentum.signals import daily_volatility_pct
 
     vol_last = daily_volatility_pct(close_df).loc[last]
-    # ❗ 추세 이탈 배지용 이격 — **그 풀의 이평선** 기준(순위·합성·보유 알림과 같은 공용 규칙,
+    # 추세 이탈(행 전체 회색)용 이격 — **그 풀의 이평선** 기준(순위·합성·보유 알림과 같은 공용 규칙,
     # 계산도 모멘텀과 같은 compute_signals). 풀에 이평선이 없으면 값 없음(배지 없음).
     from core.strategy.momentum import signals as momentum_signals
     from utils.settings_loader import get_ticker_type_settings
@@ -264,7 +264,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
                 "high_drawdown_pct": high_drawdown(ticker),
                 "touched": touched,
                 "volatility_pct": round(float(vol_last[ticker]), 2) if pd.notna(vol_last.get(ticker)) else None,
-                # ❗ 배지용 — 풀 이평선 이격(단기·장기). 장중이면 아래에서 잠정 봉 기준으로 갱신.
+                # 추세 이탈 표시용 — 풀 이평선 이격(단기·장기). 장중이면 아래에서 잠정 봉 기준으로 갱신.
                 "short_gap_pct": gap_pair(ticker)[0],
                 "long_gap_pct": gap_pair(ticker)[1],
                 "value_mult": round(float(value_mult_by[ticker]), 2) if ticker in value_mult_by else None,
@@ -428,7 +428,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             # 장중 고가가 선을 건드렸는지도 실시간 고가로 다시 본다.
             row["touched"] = bool(live["high"] >= row["prior_high"] and price < row["prior_high"])
 
-        # ❗ 배지 이격도 잠정 봉 기준으로 갱신 — 합성 화면과 같은 실시간 기준(§10-6).
+        # 추세 이탈 이격도 잠정 봉 기준으로 갱신 — 합성 화면과 같은 실시간 기준(§10-6).
         if ma_short and ma_long:
             eff_disparity = momentum_signals.compute_signals({"close": eff_close}, int(ma_short), int(ma_long))
             eff_disp_short = eff_disparity["short"].loc[session_ts]
