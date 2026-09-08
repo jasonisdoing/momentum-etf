@@ -90,6 +90,7 @@ def settings_summary(strategy: str, settings: dict[str, Any]) -> list[dict[str, 
         return [
             {"label": "종목 수", "value": optional(settings.get("top_n"), "개")},
             {"label": "이평선", "value": f"{settings.get('short_ma_days')}/{settings.get('long_ma_days')}일"},
+            {"label": "진입 문턱", "value": optional(settings.get("entry_vol_mult"), "×")},
             {"label": "ADR 하한", "value": optional(settings.get("adr_floor"))},
         ]
     if strategy == NEW_HIGH:
