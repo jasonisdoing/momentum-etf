@@ -106,10 +106,15 @@ type RankMaRuleOverride = {
 export async function loadRankData(params?: {
   ticker_type?: string;
   ma_rule_override?: RankMaRuleOverride;
+  /** 진입 문턱 미리보기 — "none" = 문턱 없음. 안 주면 풀 저장값. */
+  entry_vol_mult_override?: string;
 }, signal?: AbortSignal): Promise<RankData> {
   const search = new URLSearchParams();
   if (params?.ticker_type) {
     search.set("ticker_type", params.ticker_type);
+  }
+  if (params?.entry_vol_mult_override != null) {
+    search.set("entry_vol_mult", params.entry_vol_mult_override);
   }
   const override = params?.ma_rule_override;
   if (override) {

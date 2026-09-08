@@ -33,9 +33,12 @@ export async function GET(request: NextRequest) {
       }
       return value;
     };
+    // 진입 문턱 미리보기 — 값 검증은 FastAPI(rank_service)가 한다. "none" = 문턱 없음.
+    const entryVolMult = searchParams.get("entry_vol_mult");
     const data = await loadRankData({
       ticker_type: tickerType,
       ma_rule_override: hasMaRuleOverride ? maRuleOverride : undefined,
+      entry_vol_mult_override: entryVolMult === null || entryVolMult === "" ? undefined : entryVolMult,
     }, request.signal);
     return jsonNoStore(data);
   } catch (error) {
