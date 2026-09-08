@@ -403,6 +403,19 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
         self.assertEqual(result["planned_exits"], [])
         self.assertEqual(result["planned_entries"], ["T4"])
         self.assertGreater(result["planned_entry_weights"]["T4"], 0.0)
+        # 확정 미체결 매수와 잠정 진입이 같은 현금을 중복 사용하지 않아야 한다.
+        remaining_holdings = sum(
+            row["sleeve_weight_pct"]
+            for row in result["open_positions"]
+            if row["ticker"] not in set(result["pending_exits"]) | set(result["planned_exits"])
+        )
+        target_stock = (
+            remaining_holdings
+            + sum(row["sleeve_weight_pct"] for row in result["pending_entries"])
+            + sum(result["planned_entry_weights"].values())
+        )
+        self.assertLessEqual(target_stock, 100.0)
+
         # 잠정일이 일별 곡선에 포함된다(실시간 마지막 봉 평가).
         self.assertEqual(result["daily"][-1]["date"], "2026-09-04")
 
