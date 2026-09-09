@@ -37,12 +37,20 @@ class ShareTarget:
 
 
 def allocate_integer_shares(targets: list[ShareTarget], budget: float) -> dict[str, int]:
-    """목표 금액을 정수 주수로 배분한다 — **종목별 내림만**, 단주 잔여는 현금으로 남긴다.
+    """목표 금액을 정수 주수로 배분한다 — 종목별 내림 + **최소 1주 올림**.
 
     예전에는 내림 후 남는 예산을 소수부가 큰 종목부터 한 주씩 더 줬다(최대잉여법).
     그 +1주가 어느 종목에 가는지는 장중 가격 미세 변동에 아주 민감해서, 합성 오늘의
     액션이 A −1주 / B +1주 식으로 널뛰고 알림이 반복됐다 — 2026-09 제거. 남는 단주
     잔여(종목당 1주 가격 미만)는 현금으로 남아 다음 재배분·진입 예산에 다시 포함된다.
+
+    **최소 1주 올림**(2026-09): 목표 금액이 있는데 내림이 0주인 종목은 예산이 남는 한
+    목표 금액 큰 순으로 1주를 배정한다. 계좌가 백테스트 자본보다 작으면 비싼 종목이
+    통째로 0주가 되어 현금만 쌓였는데(1주 값 $1,022 vs 목표 $900), 엔진의 최소 1주
+    원칙(1주도 못 사면 자리를 안 차지한다)을 환산 쪽에서는 "보유 종목이면 최소 1주는
+    산다"로 맞춘 것이다. 목표가 1주 값 근처면 내림 1주와 올림 1주가 같은 결과라
+    경계에서 수량이 널뛰지 않는다. 예산이 모자라 못 채운 종목은 0주로 남는다(숨기지
+    않고 화면이 「1주 못 삼」으로 드러낸다).
 
     Args:
         targets: 종목별 목표 금액·1주 값.
@@ -57,15 +65,25 @@ def allocate_integer_shares(targets: list[ShareTarget], budget: float) -> dict[s
     if not isfinite(budget) or budget < 0:
         raise ValueError("주수 배분 예산은 0 이상의 유한한 금액이어야 합니다.")
     quantities = {item.key: 0 for item in targets}
-    floor_costs: list[float] = []
+    spent = 0.0
+    unaffordable: list[ShareTarget] = []
     for item in targets:
         if item.price <= 0 or item.target_amount <= 0:
             continue
         floored = int(item.target_amount // item.price)
-        floor_costs.append(floored * item.price)
+        if floored <= 0:
+            unaffordable.append(item)
+            continue
+        spent = fsum([spent, floored * item.price])
         quantities[item.key] = floored
 
-    if fsum(floor_costs) > budget:
+    if spent > budget:
         raise ValueError("목표 내림 수량만으로 배분 예산을 초과합니다. 목표 비중과 배정 예산을 확인하세요.")
+
+    for item in sorted(unaffordable, key=lambda entry: entry.target_amount, reverse=True):
+        if spent + item.price > budget:
+            continue
+        quantities[item.key] = 1
+        spent += item.price
 
     return quantities
