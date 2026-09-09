@@ -51,7 +51,7 @@ def sleeve_target_shares(
             for ticker, amount in amount_by_ticker.items()
         ],
         # 합성 유보 현금은 슬리브 배정액에서 이미 제외된다. 전략 내부 현금도 보호하려면
-        # 주식 목표 금액까지만 쓸 수 있다. 추가 주수에는 내림으로 생긴 단주 잔여만 쓴다.
+        # 주식 목표 금액까지만 쓸 수 있다(배분은 종목별 내림만 — 단주 잔여는 현금으로 남긴다).
         # 동시에 전체 슬리브 배정액을 넘지 않도록 계좌 예산 한도도 유지한다.
         budget=min(fsum(amount_by_ticker.values()), fsum(sleeve_amount_krw.values())),
     )
