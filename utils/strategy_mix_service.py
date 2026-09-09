@@ -159,7 +159,7 @@ def mix_accounts() -> list[dict[str, Any]]:
                 # 오늘의 액션 슬랙 알람 토글 상태 — 화면 헤더가 그대로 보여준다.
                 "mix_slack_enabled": bool(inner.get("mix_slack_enabled")),
                 # 미설정 기존 계좌는 필터를 적용하지 않는다.
-                "mix_min_adjustment_amount": float(inner.get("mix_min_adjustment_amount", 0)),
+                "mix_excess_holding_allowance": float(inner["mix_excess_holding_allowance"]),
                 # 비워 두는 현금 몫(%) — 슬리브 배분은 sleeves 안에 있다.
                 "mix_cash_pct": mix_weights(inner)["cash_pct"],
             }
@@ -328,7 +328,7 @@ def _resolve_mix_account(account_id: str | None) -> dict[str, Any]:
         # 국가·통화 — 거래 달력(월초 리밸런싱 판정)과 원화 환산에 쓴다.
         "country": country,
         "currency": currency,
-        "mix_min_adjustment_amount": float(account_settings.get("mix_min_adjustment_amount", 0)),
+        "mix_excess_holding_allowance": float(account_settings["mix_excess_holding_allowance"]),
         "benchmark_ticker": benchmark_ticker,
         "benchmark_name": str(benchmark.get("name") or benchmark_ticker).strip(),
     }
@@ -1073,7 +1073,6 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
                 for key in keys
             },
             "sleeve_rebalance_today": sleeve_rebalance_today,
-            "min_adjustment_amount": ctx["mix_min_adjustment_amount"],
         },
     }
     # 주중 이탈 예상 — 표의 매매수량·상태 칸에 예상을 겹쳐 보여주기 위한 행 플래그.
@@ -1107,6 +1106,10 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         payload["holdings"],
         payload["actions"],
         next_trading_day,
+        excess_holding_allowance=ctx["mix_excess_holding_allowance"],
+        cash_balance=account["cash_balance"] / krw_rate if account is not None else 0,
+        total_assets=account["total_assets"] / krw_rate if account is not None else 0,
+        fixed_asset_value=account["fixed_asset_value"] / krw_rate if account is not None else 0,
         currency=currency,
         adjustment_day=adjustment_day,
         adjustment_intraday=adjustment_intraday,

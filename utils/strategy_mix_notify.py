@@ -44,6 +44,8 @@ def _format_message(account_name: str, groups: list[dict[str, Any]]) -> str:
     lines = [f"🧭 합성 오늘의 액션 — {account_name}"]
     for group in groups:
         lines.append(f"*{group['title']}*")
+        if group.get("funding_warning"):
+            lines.append(f"⚠️ {group['funding_warning']}")
         for item in group["items"]:
             emoji = "🔴" if item["side"] == "buy" else "🔵"
             lines.append(f"{emoji} {item['title']} — {item['text']}")

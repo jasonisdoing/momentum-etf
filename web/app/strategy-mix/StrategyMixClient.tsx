@@ -71,15 +71,17 @@ const CURRENT_NOTES = [
       "조회할 때마다 계좌 보유를 기준일 가격으로 평가하고 현재 현금을 더한 계좌 평가액으로 목표 금액을 환산합니다. " +
       "매매 대상이 아닌 고정 자산은 배분에서 제외합니다. 중복 종목의 목표 금액을 합친 뒤 주수를 내림만 합니다 — " +
       "단주 잔여는 현금으로 남아 다음 재배분 예산에 포함됩니다(남은 예산을 종목에 +1주씩 주던 추가 배정은 폐기 — " +
-      "행선지가 장중 가격에 민감해 액션이 널뛰었습니다). 기존 보유가 내림보다 한 주 많다는 이유로 유지하지 않습니다. " +
+      "행선지가 장중 가격에 민감해 액션이 널뛰었습니다). 목표는 실제 보유에 맞춰 보정하지 않습니다. " +
       "기준일 가격·계좌 평가액이 바뀌면 내림 결과가 달라져 소액 조정이 생길 수 있습니다.",
   },
   {
     title: "액션",
     body:
-      "목표 주수와 실제 보유의 차이를 매매 수량으로 표시합니다. 수량 조정 최소 금액보다 작은 단순 조정은 " +
-      "오늘의 액션과 슬랙에서 제외하되, 테이블의 목표와 수량 차이는 그대로 보여줍니다. 0이면 모두 표시합니다. " +
-      "금액 기준은 계좌 국가 통화입니다. 전략 신호·엔진 거래·월초 재배분 사유가 있는 지시는 제외하지 않습니다. " +
+      "목표보다 부족한 수량은 금액과 관계없이 매수로 표시합니다. 계좌 전체의 목표 초과 보유 허용 금액 안에서 " +
+      "허용된 초과분은 오늘의 액션의 조정 매도와 슬랙 알림에서 제외합니다. " +
+      "부족분 매수와 전략 청산이 우선이며, 매수 자금이나 전략이 남겨야 할 현금이 부족하면 매도를 유지합니다. " +
+      "테이블의 목표와 수량 차이는 그대로 표시합니다. 한도는 계좌 통화 기준이며 0이면 초과 보유를 허용하지 않습니다. " +
+      "전량 청산·전략 신호·엔진 거래·월초 재배분은 허용 대상이 아닙니다. 매도 후 매수를 전제로 하며 체결가·수수료는 별도입니다. " +
       "종목별 신호 적용일에 목표와 보유 수량을 비교합니다.",
   },
   {
@@ -118,7 +120,7 @@ type AccountOption = AccountOptionBase & {
   country_code: string;
   /** 오늘의 액션 슬랙 알람 — 새 지시·수량 증가 시 발송. */
   mix_slack_enabled?: boolean;
-  mix_min_adjustment_amount: number;
+  mix_excess_holding_allowance: number;
   /** 비워 두는 현금 몫(%) — 슬리브 배분과 합이 100 이다. */
   mix_cash_pct: number;
 };
@@ -457,7 +459,7 @@ type ActionItem = {
   /** 정렬용 — 표(티커 순)와 같은 기준으로 세운다. */
   ticker: string;
 };
-type ActionGroup = { key: string; title: string; items: ActionItem[] };
+type ActionGroup = { key: string; title: string; items: ActionItem[]; funding_warning?: string };
 
 /** 합성 전략 — SM·신고가를 저장된 배분으로 함께 운용하는 화면.
  *  운용 현황 탭은 오늘 보유해야 할 종목과 현금 비중·오늘의 액션을,
@@ -1245,7 +1247,7 @@ export function StrategyMixClient() {
   const actions = positions?.actions ?? null;
 
   // 헤더 설정 — 합성 배분(%) 3칸과 슬랙 알람을 한 버튼으로 저장한다(계좌 설정에 보관).
-  const [minAdjustment, setMinAdjustment] = useState("0");
+  const [excessAllowance, setExcessAllowance] = useState("0");
   const [slackEnabled, setSlackEnabled] = useState(false);
   // 슬리브 초안 — 저장된 배열 그대로 편집한다. 순서가 곧 슬롯(A·B·C)이라 인덱스로 고친다.
   const [draftSleeves, setDraftSleeves] = useState<MixSleeve[]>([]);
@@ -1257,7 +1259,7 @@ export function StrategyMixClient() {
   const maxSleeves = meta?.max_sleeves ?? SLOT_KEY_ORDER.length;
   useEffect(() => {
     setSlackEnabled(Boolean(selectedAccount?.mix_slack_enabled));
-    setMinAdjustment(String(selectedAccount?.mix_min_adjustment_amount ?? 0));
+    setExcessAllowance(String(selectedAccount?.mix_excess_holding_allowance ?? 0));
     setDraftSleeves(sleeves.map((row) => ({ ...row })));
     setCashPct(selectedAccount ? String(selectedAccount.mix_cash_pct) : "0");
   }, [selectedAccount, sleeves]);
@@ -1325,7 +1327,7 @@ export function StrategyMixClient() {
       (!selectedAccount.sleeves?.length ||
         slackEnabled !== Boolean(selectedAccount.mix_slack_enabled) ||
         Number(cashPct) !== selectedAccount.mix_cash_pct ||
-        Number(minAdjustment) !== selectedAccount.mix_min_adjustment_amount ||
+        Number(excessAllowance) !== selectedAccount.mix_excess_holding_allowance ||
         draftSleeves.length !== sleeves.length ||
         draftSleeves.some((row, index) => {
           const saved = sleeves[index];
@@ -1342,8 +1344,8 @@ export function StrategyMixClient() {
 
   const saveHeaderSettings = async () => {
     if (!selectedAccount || !weightOk) return;
-    if (!minAdjustment.trim() || !Number.isFinite(Number(minAdjustment)) || Number(minAdjustment) < 0) {
-      toast.error("수량 조정 최소 금액은 0 이상의 숫자로 입력하세요.");
+    if (!excessAllowance.trim() || !Number.isFinite(Number(excessAllowance)) || Number(excessAllowance) < 0) {
+      toast.error("목표 초과 보유 허용 금액은 0 이상의 숫자로 입력하세요.");
       return;
     }
     try {
@@ -1355,7 +1357,7 @@ export function StrategyMixClient() {
           account_id: selectedAccount.account_id,
           values: {
             mix_slack_enabled: slackEnabled,
-            mix_min_adjustment_amount: Number(minAdjustment),
+            mix_excess_holding_allowance: Number(excessAllowance),
             // 순서가 곧 슬롯이라 키는 보내지 않는다 — 서버가 순서대로 다시 붙인다.
             mix_sleeves: draftSleeves.map((row) => ({
               strategy: row.strategy,
@@ -1376,7 +1378,7 @@ export function StrategyMixClient() {
             ? {
                 ...option,
                 mix_slack_enabled: slackEnabled,
-            mix_min_adjustment_amount: Number(minAdjustment),
+            mix_excess_holding_allowance: Number(excessAllowance),
                 // 라벨도 즉시 반영 — 이름을 지우면 전략 이름으로 돌아간다.
                 sleeves: draftSleeves.map((row) => ({
                   ...row,
@@ -1462,17 +1464,17 @@ export function StrategyMixClient() {
                     <>
 
                       <label className="appLabeledField" style={{ marginBottom: 0 }}>
-                        <span className="appLabeledFieldLabel">수량 조정 최소 금액 ({selectedAccount.currency})</span>
+                        <span className="appLabeledFieldLabel">목표 초과 보유 허용 금액 ({selectedAccount.currency})</span>
                         <input
                           className="form-control form-control-sm"
                           type="number"
                           min="0"
                           step="any"
                           style={{ width: 150 }}
-                          value={minAdjustment}
-                          onChange={(event) => setMinAdjustment(event.target.value)}
+                          value={excessAllowance}
+                          onChange={(event) => setExcessAllowance(event.target.value)}
                           disabled={settingsSaving}
-                          title="0이면 모두 표시합니다. 소액 수량 조정만 액션·알림에서 제외하며 전략 신호는 항상 표시합니다."
+                          title="계좌 전체에서 허용할 목표 초과 보유 금액입니다. 부족분 매수·전략 현금·청산이 우선이며, 0이면 초과 보유를 허용하지 않습니다."
                         />
                       </label>
                       {/* 배분(%)은 전부 아래 슬리브 표에 있다 — 현금도 같은 줄 형태로 둔다. */}
@@ -1873,7 +1875,7 @@ export function StrategyMixClient() {
                       오늘의 액션
                       <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
                         총자산을 백테스트의 오늘 비중에 맞춘 목표 주수와 계좌 보유의 차이 —
-                        최소 금액 미만의 단순 조정은 제외합니다 · 종목별 신호 적용일 기준
+                        계좌 한도와 매수 자금 안에서 초과 보유를 허용합니다 · 종목별 신호 적용일 기준
                       </span>
                     </div>
                     {!hasActions ? (
@@ -1890,6 +1892,7 @@ export function StrategyMixClient() {
                       >
                         {actionGroups.map((group, groupIndex) => (
                           <div key={group.key}>
+                            {group.funding_warning ? <div role="alert">{group.funding_warning}</div> : null}
                             <div style={{ fontWeight: 700, marginBottom: 4 }}>
                               {groupIndex + 1}. {group.title}
                               <span
