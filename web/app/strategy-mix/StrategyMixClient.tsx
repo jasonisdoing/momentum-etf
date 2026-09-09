@@ -77,7 +77,7 @@ const CURRENT_NOTES = [
   {
     title: "액션",
     body:
-      "목표보다 부족한 수량은 금액과 관계없이 매수로 표시합니다. 계좌 전체의 목표 초과 보유 허용 금액 안에서 " +
+      "목표보다 부족한 수량은 금액과 관계없이 매수로 표시합니다. 종목별 초과 보유 허용 금액 안에서 " +
       "허용된 초과분은 오늘의 액션의 조정 매도와 슬랙 알림에서 제외합니다. " +
       "부족분 매수와 전략 청산이 우선이며, 매수 자금이나 전략이 남겨야 할 현금이 부족하면 매도를 유지합니다. " +
       "테이블의 목표와 수량 차이는 그대로 표시합니다. 한도는 계좌 통화 기준이며 0이면 초과 보유를 허용하지 않습니다. " +
@@ -1345,7 +1345,7 @@ export function StrategyMixClient() {
   const saveHeaderSettings = async () => {
     if (!selectedAccount || !weightOk) return;
     if (!excessAllowance.trim() || !Number.isFinite(Number(excessAllowance)) || Number(excessAllowance) < 0) {
-      toast.error("목표 초과 보유 허용 금액은 0 이상의 숫자로 입력하세요.");
+      toast.error("초과 보유 허용 금액은 0 이상의 숫자로 입력하세요.");
       return;
     }
     try {
@@ -1464,7 +1464,7 @@ export function StrategyMixClient() {
                     <>
 
                       <label className="appLabeledField" style={{ marginBottom: 0 }}>
-                        <span className="appLabeledFieldLabel">목표 초과 보유 허용 금액 ({selectedAccount.currency})</span>
+                        <span className="appLabeledFieldLabel">초과 보유 허용 금액 ({selectedAccount.currency})</span>
                         <input
                           className="form-control form-control-sm"
                           type="number"
@@ -1474,7 +1474,7 @@ export function StrategyMixClient() {
                           value={excessAllowance}
                           onChange={(event) => setExcessAllowance(event.target.value)}
                           disabled={settingsSaving}
-                          title="계좌 전체에서 허용할 목표 초과 보유 금액입니다. 부족분 매수·전략 현금·청산이 우선이며, 0이면 초과 보유를 허용하지 않습니다."
+                          title="각 종목에 적용하는 초과 보유 허용 금액입니다. 부족분 매수·전략 현금·청산이 우선이며, 0이면 초과 보유를 허용하지 않습니다."
                         />
                       </label>
                       {/* 배분(%)은 전부 아래 슬리브 표에 있다 — 현금도 같은 줄 형태로 둔다. */}
@@ -1875,7 +1875,7 @@ export function StrategyMixClient() {
                       오늘의 액션
                       <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
                         총자산을 백테스트의 오늘 비중에 맞춘 목표 주수와 계좌 보유의 차이 —
-                        계좌 한도와 매수 자금 안에서 초과 보유를 허용합니다 · 종목별 신호 적용일 기준
+                        종목별 한도와 계좌 매수 자금 안에서 초과 보유를 허용합니다 · 종목별 신호 적용일 기준
                       </span>
                     </div>
                     {!hasActions ? (
