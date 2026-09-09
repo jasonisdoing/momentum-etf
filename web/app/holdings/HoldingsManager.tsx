@@ -694,16 +694,6 @@ export function HoldingsManager({
           background-color: #ffffff !important;
           border-bottom: 1px solid #d0daea;
         }
-        .holdingsGrid .rankBucketCell {
-          justify-content: center;
-          font-weight: 600;
-          white-space: nowrap;
-        }
-        .holdingsGrid .rankBucketCell1 { background: var(--bucket-1); color: #fff; }
-        .holdingsGrid .rankBucketCell2 { background: var(--bucket-2); color: #fff; }
-        .holdingsGrid .rankBucketCell3 { background: var(--bucket-3); color: #fff; }
-        .holdingsGrid .rankBucketCell4 { background: var(--bucket-4); color: #fff; }
-
       `}</style>
 
       <style jsx>{`

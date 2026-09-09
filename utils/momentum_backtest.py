@@ -39,6 +39,7 @@ from utils.momentum_service import (
     pool_info,
     validate_settings,
 )
+from utils.pool_signal_backtest_service import validate_backtest_months
 from utils.slot_positions import (
     _apply_display_quotes,
     _cache_refreshed_at,
@@ -55,7 +56,6 @@ from utils.ttl_cache import TtlCache
 
 logger = get_app_logger()
 
-MAX_BACKTEST_MONTHS = 60
 DEFAULT_BACKTEST_MONTHS = 12
 
 
@@ -96,8 +96,7 @@ def run_backtest(
     """
     settings = validate_settings(settings or load_settings())
     months = int(months or DEFAULT_BACKTEST_MONTHS)
-    if not 1 <= months <= MAX_BACKTEST_MONTHS:
-        raise ValueError(f"'months' 는 1~{MAX_BACKTEST_MONTHS} 사이여야 합니다.")
+    validate_backtest_months(months)
 
     context = context or load_context(settings)
     market = market or load_slot_market(settings["pool"], settings.get("adr_floor"))
@@ -418,4 +417,4 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     }
 
 
-__all__ = ["MAX_BACKTEST_MONTHS", "current_positions", "load_context", "run_backtest"]
+__all__ = ["current_positions", "load_context", "run_backtest"]

@@ -8,8 +8,22 @@ import type React from "react";
 import type { ReactNode } from "react";
 
 import { TickerDetailLink } from "@/app/components/TickerDetailLink";
+import { BUCKET_THEME } from "@/lib/bucket-theme";
 import { formatSlashDateWithWeekday } from "@/lib/datetime";
 import { renderStockNameCell, type StockNameOptions } from "@/lib/name-highlight";
+
+/** 자산 도우미·포트폴리오가 공유하는 읽기 전용 버킷 컬럼. */
+export function bucketColumn<T extends { bucket?: number | null }>(): ColDef<T> {
+  return {
+    colId: "bucket",
+    headerName: "버킷",
+    minWidth: 108,
+    width: 108,
+    pinned: "left",
+    valueGetter: ({ data }) => data?.bucket ? BUCKET_THEME[String(data.bucket)]?.name ?? "-" : "-",
+    cellClass: ({ data }) => data?.bucket ? `rankBucketCell rankBucketCell${data.bucket}` : "rankBucketCell",
+  };
+}
 
 /** 부호를 붙인 퍼센트 표기: +1.23% / -4.56% / "-"(값 없음). */
 export function formatSignedPct(value: number | null | undefined, digits = 2): string {

@@ -23,7 +23,7 @@ import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { createAppGridTheme } from "../components/app-grid-theme";
-import { formatSignedPct, signColor, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
+import { bucketColumn, formatSignedPct, signColor, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { updateStockMemo } from "@/lib/stocks-store";
@@ -73,6 +73,7 @@ const VIEW_MODES = [
 ];
 
 type WeightRow = {
+  bucket?: number | null;
   ticker: string;
   name: string;
   memo?: string;
@@ -100,6 +101,7 @@ type WeightRow = {
 
 /** 종목풀 종목 + 표시 지표 — 백엔드 `universe_metrics()` 가 채운다. */
 type UniverseRow = {
+  bucket: number | null;
   ticker: string;
   name: string;
   /** 종목 메모 — 계좌가 아니라 종목에 붙는다(순위·자산 관리 화면과 같은 값). */
@@ -421,6 +423,7 @@ export function PortfolioClient() {
         // 지표는 종목풀 목록에서 온다 — 저장 설정에는 비중만 들어 있다.
         ...(metrics
           ? {
+              bucket: metrics.bucket,
               current_price: metrics.current_price,
               daily_change_pct: metrics.daily_change_pct,
               return_1m_pct: metrics.return_1m_pct,
@@ -507,6 +510,7 @@ export function PortfolioClient() {
         valueGetter: () => "",
       },
       // 티커·종목명 — 공용 컬럼(col-id 표준). 추가 행 입력칸·현금 행만 화면 고유 표기다.
+      bucketColumn<WeightRow>(),
       tickerColumn<WeightRow>({
         minWidth: 110,
         width: 110,
