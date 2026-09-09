@@ -426,6 +426,8 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         eff_prior_high = eff["prior_high"].loc[session_ts]
         eff_prior_high_intraday = eff["prior_high_intraday"].loc[session_ts]
         eff_exit_ma = eff["exit_ma"].loc[session_ts]
+        from core.strategy.scoring import drawdown_from_high_pct
+
         for row in rows:
             live = quotes["by_ticker"].get(row["ticker"])
             if not live:
@@ -442,6 +444,11 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
                 row["gap_high_pct"] = round((price / row["prior_high_intraday"] - 1) * 100, 2)
             # 장중 고가가 선을 건드렸는지도 실시간 고가로 다시 본다.
             row["touched"] = bool(live["high"] >= row["prior_high"] and price < row["prior_high"])
+            # 고점 대비 — 순위·모멘텀 화면과 같은 실시간 기준(잠정 봉 포함 시리즈).
+            # 확정 기준으로 두면 어제 신고점(⭐)이 오늘 내리는 중에도 그대로 남는다.
+            live_drawdown = drawdown_from_high_pct(eff_close[row["ticker"]].dropna())
+            if live_drawdown is not None:
+                row["high_drawdown_pct"] = round(live_drawdown, 2)
 
         # 추세 이탈 이격도 잠정 봉 기준으로 갱신 — 합성 화면과 같은 실시간 기준(§10-6).
         if ma_short and ma_long:

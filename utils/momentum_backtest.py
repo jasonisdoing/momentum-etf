@@ -321,6 +321,11 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             if pd.notna(eff_vol.get(ticker)):
                 row["volatility_pct"] = round(float(eff_vol[ticker]), 2)
             row["eligible"] = bool(eff_eligible.get(ticker, False))
+            # 고점 대비 — 순위 화면과 같은 실시간 기준(잠정 봉 포함). 확정 기준으로 두면
+            # 어제 신고점(⭐)이 오늘 장중에 내리는 중에도 그대로 남는다.
+            live_drawdown = drawdown_from_high_pct(eff_close[ticker].dropna())
+            if live_drawdown is not None:
+                row["high_drawdown_pct"] = round(live_drawdown, 2)
         rows.sort(key=lambda row: row["long_gap_pct"], reverse=True)
 
         # 진입 예정 — 체결 예정(오늘 시가, fill_date)이 앞자리, 잠정 예정(내일 시가)이 뒷자리.
