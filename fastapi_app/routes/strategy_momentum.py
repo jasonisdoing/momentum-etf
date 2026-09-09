@@ -25,7 +25,7 @@ def _month_options(settings: dict) -> list[int]:
     from utils.momentum_service import available_backtest_months, load_benchmark_close
     from utils.pool_signal_backtest_service import get_month_options
 
-    limit = available_backtest_months(load_benchmark_close(settings["pool"]), int(settings["long_ma_days"]))
+    limit = available_backtest_months(load_benchmark_close(settings["pool"]))
     months = [month for month in get_month_options() if month <= limit]
 
     # ADR 하한이 켜진 풀은 게이트가 전 구간에 적용되는 기간만 고른다 — ADR 이력 이전이 섞인
@@ -55,7 +55,7 @@ def _tuning_month_options(settings: dict) -> list[int]:
     from utils.momentum_service import available_backtest_months, load_benchmark_close
     from utils.pool_signal_backtest_service import get_month_options
 
-    limit = available_backtest_months(load_benchmark_close(settings["pool"]), int(settings["long_ma_days"]))
+    limit = available_backtest_months(load_benchmark_close(settings["pool"]))
     months = [month for month in get_month_options() if month <= limit]
     return _clip_months_to_adr(months, settings["pool"], limit)
 

@@ -530,16 +530,20 @@ def seed_adr_series(market: str, series: pd.Series) -> None:
     _ADR_SERIES_CACHE[market] = series
 
 
-def available_backtest_months(benchmark_close: pd.Series, long_ma_days: int) -> int:
+def available_backtest_months(benchmark_close: pd.Series) -> int:
     """이 종목풀에서 실제로 돌릴 수 있는 최대 개월 수.
 
-    이격 계산에 쓸 ``장기 이평선 일수 + 4`` 거래일이 쌓인 뒤부터가 유효 구간이다. 그 전은
-    후보가 하나도 안 잡혀 성과가 통째로 비므로 백테스트 범위에서 아예 뺀다 — 그래야 전략과
-    벤치마크가 **같은 달**을 비교한다. 가격 캐시 시작일만 보는 `get_max_backtest_months()`
-    는 이 워밍업을 몰라 실제보다 크게 나온다.
+    판정에 포함되려면 누적 ``MIN_TRADING_DAYS`` 거래일이 필요하다(순위·엔진 공용 기준,
+    이평선은 부분 평균이라 기간을 다 채울 필요가 없다 — 2026-09 통일. 예전에는 장기
+    이평선 일수만큼 워밍업을 뺐다). 그 전은 후보가 하나도 안 잡혀 성과가 통째로 비므로
+    백테스트 범위에서 아예 뺀다 — 그래야 전략과 벤치마크가 **같은 달**을 비교한다.
+    가격 캐시 시작일만 보는 `get_max_backtest_months()` 는 이 워밍업을 몰라 실제보다
+    크게 나온다.
     """
+    from config import MIN_TRADING_DAYS
+
     index = benchmark_close.index
-    required_bars = int(long_ma_days) + 4
+    required_bars = int(MIN_TRADING_DAYS)
     if len(index) <= required_bars:
         return 1
     usable_days = len(index) - required_bars

@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from core.strategy.scoring import calculate_maps_score, hold_eligible, rank_score
-from utils.moving_averages import calculate_moving_average
+from core.strategy.scoring import compute_eligibility_mask, compute_trend_frame, hold_eligible, rank_score
 
 # 진입 문턱의 변동성 창(거래일) — 일간 수익률 표준편차(%). 문턱 = 배수 × 이 값.
 ENTRY_VOL_WINDOW = 20
@@ -55,23 +54,16 @@ def entry_gap_ok(long_disparity_pct, short_disparity_pct, volatility_pct, entry_
 def compute_signals(panel: dict[str, pd.DataFrame], short_ma_days: int, long_ma_days: int) -> dict[str, pd.DataFrame]:
     """이평선 두 개로 만드는 신호 표(행 = 거래일, 열 = 종목) — 백테스트·화면이 같은 값을 본다.
 
-    ``short``/``long`` 은 이격률(%)이다. 이평선을 못 채운 날은 NaN 이고, 그런 날은 ``known``
-    이 거짓이라 사고팔지 않는다 — 값을 추정하지 않는다.
+    ``short``/``long`` 은 이격률(%)이다. 계산은 순위 화면과 **같은 공용 함수**를 쓴다 —
+    이평선은 부분 평균(`compute_trend_frame`, min_periods=1)이고, 판정 포함 여부는
+    누적 `MIN_TRADING_DAYS` 거래일(`compute_eligibility_mask`)이다. 예전에는 이평선
+    기간을 다 채워야(`min_periods=기간`) 자격을 줬는데, 순위 화면은 신규 상장도 부분
+    평균으로 ✅를 주는데 엔진만 못 사는 불일치가 있었다(2026-09 통일).
     """
     close_df = panel["close"]
-    short_gap, long_gap, ready = {}, {}, {}
-    for ticker in close_df.columns:
-        close = close_df[ticker]
-        short_ma = calculate_moving_average(close, short_ma_days, min_periods=short_ma_days)
-        long_ma = calculate_moving_average(close, long_ma_days, min_periods=long_ma_days)
-        short_gap[ticker] = calculate_maps_score(close, short_ma)
-        long_gap[ticker] = calculate_maps_score(close, long_ma)
-        # 판정 가능 여부는 **이평선 자체**로 본다 — `calculate_maps_score` 는 못 채운 날을
-        # 0 으로 메우므로(fillna) 이격만 보면 워밍업 구간이 '이격 0' 인 정상 값처럼 보인다.
-        ready[ticker] = close.notna() & short_ma.notna() & long_ma.notna()
-    short_frame = pd.DataFrame(short_gap, index=close_df.index)
-    long_frame = pd.DataFrame(long_gap, index=close_df.index)
-    known = pd.DataFrame(ready, index=close_df.index)
+    short_frame = compute_trend_frame(close_df, short_ma_days)
+    long_frame = compute_trend_frame(close_df, long_ma_days)
+    known = close_df.notna() & compute_eligibility_mask(close_df)
     # 보유 자격은 순위 화면·종목풀 백테스트와 **같은 공용 규칙**(`hold_eligible`)이다.
     eligible = known & hold_eligible(long_frame, short_frame)
     return {
