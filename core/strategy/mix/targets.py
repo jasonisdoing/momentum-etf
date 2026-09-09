@@ -63,11 +63,17 @@ def dated_target_shares(
     krw_rate: float,
     total_assets_krw: float,
     next_trading_day: str,
+    *,
+    adjustment_day: str | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """엔진의 날짜별 목표를 같은 정수 배분으로 환산한다. 실제 보유는 입력하지 않는다."""
+    """엔진의 날짜별 목표를 같은 정수 배분으로 환산한다. 실제 보유는 입력하지 않는다.
+
+    ``adjustment_day`` 는 이벤트 없는 조정(목표·보유 차이)의 기준일 — 마감 전이면 오늘이라
+    다음 거래일보다 앞설 수 있다. 미지정 이벤트의 체결일 기본값은 여전히 다음 거래일이다.
+    """
     if not next_trading_day:
         raise ValueError("목표 수량을 배정할 다음 거래일이 없습니다.")
-    dates = {next_trading_day}
+    dates = {adjustment_day or next_trading_day, next_trading_day}
     for targets in targets_by_key.values():
         dates.update(row["fill_date"] for row in targets if row.get("fill_date"))
     schedule = {}
