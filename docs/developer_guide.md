@@ -49,7 +49,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 
 합성 운용 배분·백테스트는 `utils/strategy_mix_service._simulate_mix`를 공유하며 월초 배분은 `core/strategy/mix/rebalance.py`가 담당한다. 각 엔진의 일별 결과 `cash_weight_pct`를 읽어 전략 내부 현금을 보존한다.
 
-전략 핵심 코드 이동은 `core/strategy/to_do.md`에서 추적한다. 공통 슬롯 엔진은 `core/strategy/slot_backtest.py`, 합성 월초 배분은 `core/strategy/mix/rebalance.py`, 전략 규칙은 `core/strategy/strategy_logic.md`가 단일 소스다. 엔진의 외부 데이터 조회 의존성 분리는 아직 진행 전이다.
+공통 슬롯 엔진은 `core/strategy/slot_backtest.py`, 합성 월초 배분은 `core/strategy/mix/rebalance.py`, 전략 규칙은 `core/strategy/strategy_logic.md`가 단일 소스다.
 
 전략 공용 모듈:
 - 전략 시작일은 모멘텀의 `pool_settings.MOMENTUM_START_DATE`, 신고가·포트폴리오의 풀별 `start_date`에 저장한다. 검증은 `utils/strategy_settings.py`, 개별 운용 현황과 합성은 같은 저장일로 계산한다.
@@ -118,7 +118,9 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 
 합성 액션 사유는 `core/strategy/mix/actions.py`에서 조립하며 화면·슬랙이 같은 문구를 읽는다. 포트폴리오 `current_positions`의 거래 내역 중 기준일 거래를 `SlotState.engine_trades`로 전달하며 목표 계산에는 사용하지 않는다.
 
-계좌 설정 `mix_min_adjustment_amount`는 계좌 국가의 현지 통화 금액이다. 미설정 기존 계좌는 0(필터 없음)으로 해석한다. 합성은 `cash_model.currency_for_country`로 통화를 결정하고 슬리브의 국가·통화 일치를 확인한다. 액션 조립에서 전략 이벤트 없는 목표 수량 조정만 걸러 화면·슬랙에 공통 적용한다.
+계좌 설정 `mix_excess_holding_allowance`는 계좌 전체 초과 보유 허용 한도다. 합성은 `cash_model.currency_for_country`로 통화를 결정하며, 원장의 원화 현금을 계좌 통화로 환산해 `mix/actions.py`에 전달한다. 목표는 유지하고 날짜별 액션·예상 현금 흐름만 조정하며 화면·슬랙이 같은 결과를 사용한다.
+
+2026-09-09 전환: 기존 설정값은 새 정책에 전용하지 않고 사용자 결정으로 전 계좌 0 초기화 후 옛 필드를 제거했다. 전환 전 로컬 백업은 `backups/mix-allowance-20260909T090452Z.json`이며 저장소 추적 대상이 아니다.
 
 합성 운용 응답의 `currency`·`krw_rate`는 계좌 국가 통화와 평가에 사용한 환율이다. 화면의 총액·평가액·목표액·배분액은 원화 계산값을 해당 환율로 나누어 표시하고, 종목 가격은 원래 현지 통화 값을 표시한다.
 

@@ -46,7 +46,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
     # 필드를 추가하지 않도록 배열 하나로 둔다. 순서가 곧 슬롯 순서(A·B·C)다.
     "mix_sleeves",
     "mix_slack_enabled",
-    "mix_min_adjustment_amount",
+    "mix_excess_holding_allowance",
     "mix_cash_pct",
     "broker_api",
     "URL",
@@ -335,13 +335,13 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
         elif key == "mix_slack_enabled":
             # 합성 오늘의 액션 슬랙 알람 — 새 지시·수량 증가가 생기면 발송한다.
             cleaned[key] = bool(raw)
-        elif key == "mix_min_adjustment_amount":
+        elif key == "mix_excess_holding_allowance":
             try:
                 amount = float(raw)
             except (TypeError, ValueError) as error:
-                raise AccountSettingsStoreError("수량 조정 최소 금액은 0 이상의 숫자여야 합니다.") from error
+                raise AccountSettingsStoreError("목표 초과 보유 허용 금액은 0 이상의 숫자여야 합니다.") from error
             if isinstance(raw, bool) or not math.isfinite(amount) or amount < 0:
-                raise AccountSettingsStoreError("수량 조정 최소 금액은 유한한 0 이상의 숫자여야 합니다.")
+                raise AccountSettingsStoreError("목표 초과 보유 허용 금액은 유한한 0 이상의 숫자여야 합니다.")
             cleaned[key] = amount
         elif key == "mix_cash_pct":
             # 합성에서 비워 두는 현금 몫(%). 슬리브 배분과의 합이 100 인지는 아래에서 본다.
@@ -483,6 +483,7 @@ def create_account(
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
         "save_method": "계좌 추가",
+        "mix_excess_holding_allowance": 0.0,
     }
     db[COLLECTION].insert_one(doc)
     invalidate_account_settings_cache()

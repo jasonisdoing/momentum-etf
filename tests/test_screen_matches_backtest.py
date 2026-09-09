@@ -454,9 +454,20 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
         self.assertEqual(result["daily"][-1]["date"], "2026-09-04")
 
         # 엔진의 확정 주문 날짜가 합성 이벤트·액션까지 보존되는지 함께 검증한다.
+        from functools import partial
+
         from core.strategy.intraday import mark_engine_statuses
         from core.strategy.mix.actions import build_action_groups
         from utils.mix_sleeve import _slot_state_from_positions
+
+        # 날짜 전달 검증용 계좌: 충분한 현금, 초과 허용 없음. 목표는 아래 엔진 결과로만 만든다.
+        build_action_groups = partial(
+            build_action_groups,
+            excess_holding_allowance=0,
+            cash_balance=1_000_000,
+            total_assets=0,
+            fixed_asset_value=0,
+        )
 
         held = [dict(row) for row in result["open_positions"]]
         mark_engine_statuses(held, result["planned_exits"])
@@ -664,6 +675,26 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
         schedule = dated_target_shares(same_day, {"a": 20, "b": 30}, 1, 50, "2026-09-07")
         self.assertEqual(schedule["2026-09-04"]["quantities"], {"SAME": 2})
         self.assertEqual(schedule["2026-09-07"]["quantities"], {"SAME": 7})
+
+        # 초과 보유 허용은 화면 액션의 예외이며 엔진에서 받은 목표·표의 목표는 바꾸지 않는다.
+        from copy import deepcopy
+
+        original_schedule = deepcopy(schedule)
+        rows = [{"ticker": "SAME", "price": 7, "held_quantity": 9, "target_quantity": 7}]
+        original_rows = deepcopy(rows)
+        groups = build_action_groups(
+            rows,
+            {"slots": {}},
+            "2026-09-04",
+            target_schedule=schedule,
+            excess_holding_allowance=14,
+            currency="USD",
+        )
+        self.assertEqual(schedule, original_schedule)
+        self.assertEqual(rows, original_rows)
+        orders = [item for group in groups for item in group["items"]]
+        # 첫날 목표 2주+허용 2주로 5주 매도, 다음 목표 7주에는 부족한 3주 전부 매수.
+        self.assertEqual([(item["side"], item["quantity"]) for item in orders], [("sell", 5), ("buy", 3)])
 
     def test_mark_engine_statuses_labels_without_judging(self):
         from core.strategy.intraday import mark_engine_statuses

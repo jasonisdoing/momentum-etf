@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 _WEEKDAYS_KO = ("월", "화", "수", "목", "금", "토", "일")
@@ -55,6 +56,10 @@ def build_action_groups(
     actions: dict[str, Any],
     next_trading_day: str | None,
     *,
+    excess_holding_allowance: float,
+    cash_balance: float,
+    total_assets: float,
+    fixed_asset_value: float,
     target_schedule: dict[str, dict[str, Any]],
     adjustment_day: str | None = None,
     adjustment_intraday: bool = False,
@@ -75,6 +80,7 @@ def build_action_groups(
                 ticker = event["ticker"]
                 first_event[ticker] = min(first_event.get(ticker, date), date)
     previous = {row["ticker"]: int(row.get("held_quantity") or 0) for row in holdings}
+    projected_cash = cash_balance
     groups = []
     for index, (day, target) in enumerate(sorted(target_schedule.items())):
         stage_rows = []
@@ -122,10 +128,25 @@ def build_action_groups(
                 for key, slot in actions["slots"].items()
             },
         }
+        # 엔진이 남긴 현금만 보호한다. 내림으로 생긴 잔여 현금은 초과 보유에 사용할 수 있다.
+        protected_cash = max(total_assets * (1 - sum(target["weights"].values()) / 100) - fixed_asset_value, 0)
+        projected_cash = _apply_excess_allowance(
+            stage_rows,
+            stage_actions,
+            allowance=excess_holding_allowance,
+            cash_balance=projected_cash,
+            protected_cash=protected_cash,
+        )
         stage_groups = _build_action_group_stage(stage_rows, stage_actions, day, currency=currency)
+        if projected_cash < -0.01 and stage_groups:
+            # 체결가·수수료를 추정해 목표를 줄이지 않는다. 부족분은 주문과 함께 명시한다.
+            stage_groups[0]["funding_warning"] = (
+                f"표시된 매도 후에도 매수 자금 {abs(projected_cash):,.2f} {currency} 부족"
+                " · 기준 가격 추정이며 실제 체결가·수수료는 별도입니다."
+            )
         groups.extend(stage_groups)
-        # 이번 날짜에 비교한 종목만 목표 달성을 가정한다. 대기 종목의 실제 보유는 그대로 둔다.
-        previous.update({row["ticker"]: row["target_quantity"] for row in stage_rows})
+        # 허용한 초과 보유는 팔린 것으로 가정하지 않고 다음 날짜에도 실제 예상 보유로 넘긴다.
+        previous.update({row["ticker"]: row["held_quantity"] + row["trade_quantity"] for row in stage_rows})
     # 장중 조정 그룹 — 오늘 시가는 지났으니 '시가'가 아니라 '장중(지금 주문)'으로 단다.
     if adjustment_intraday and adjustment_day:
         for group in groups:
@@ -136,6 +157,45 @@ def build_action_groups(
         for item in group["items"]:
             item["key"] = f"{item['key']}-{item['date']}"
     return groups
+
+
+def _apply_excess_allowance(
+    rows: list[dict[str, Any]],
+    actions: dict[str, Any],
+    *,
+    allowance: float,
+    cash_balance: float,
+    protected_cash: float,
+) -> float:
+    """목표는 유지하고 계좌 전체 한도·매수 자금 안에서 조정 매도만 생략한다.
+
+    티커 순으로 정수 초과분을 허용한다. 시세 순위로 허용 종목이 뒤집히지 않도록 한다.
+    모든 부족분 매수와 필수 매도를 먼저 반영한 현금에서만 허용 예산을 꺼낸다.
+    """
+    prices = {}
+    for row in rows:
+        if not row["trade_quantity"]:
+            continue
+        price = row.get("price")
+        if price is None or not math.isfinite(float(price)) or float(price) <= 0:
+            raise ValueError(f"초과 보유·매수 자금 계산에 필요한 가격이 없습니다: {row['ticker']}")
+        prices[row["ticker"]] = float(price)
+    after_cash = cash_balance - math.fsum(row["trade_quantity"] * prices.get(row["ticker"], 0) for row in rows)
+    remaining = min(allowance, max(after_cash - protected_cash, 0))
+    for row in sorted(rows, key=lambda item: item["ticker"]):
+        trade = row["trade_quantity"]
+        if trade >= 0 or row["target_quantity"] <= 0:
+            continue
+        reasons = _action_reasons(row["ticker"], "sell", actions)
+        if any(reason["code"] != "target_difference" for reason in reasons):
+            continue
+        price = prices[row["ticker"]]
+        retained = min(-trade, math.floor(remaining / price))
+        row["trade_quantity"] += retained
+        row["retained_excess_quantity"] = retained
+        remaining -= retained * price
+        after_cash -= retained * price
+    return after_cash
 
 
 def _build_action_group_stage(
@@ -209,6 +269,8 @@ def _build_action_group_stage(
         after = f" → 목표 {int(row['target_quantity']):,}주" if row.get("target_quantity") is not None else ""
         amount = _format_trade_amount(trade, row.get("price"), currency)
         amount_note = f" · {amount}" if amount else ""
+        if row.get("retained_excess_quantity"):
+            amount_note += f" · 목표 초과 {row['retained_excess_quantity']:,}주 허용"
         if sell_reason_applies:
             note = f"{after} ({reason}){amount_note}".strip()
         elif row.get("is_sell_all"):
@@ -260,13 +322,6 @@ def _build_action_group_stage(
     by_date: dict[str, list[dict[str, Any]]] = {}
     for item in items:
         item["reasons"] = _action_reasons(item["ticker"], item["side"], actions)
-        # 목표 계산·테이블은 그대로 두고, 신호 없는 소액 주문만 액션에서 제외한다.
-        minimum = float(actions.get("min_adjustment_amount", 0))
-        only_adjustment = all(reason["code"] == "target_difference" for reason in item["reasons"])
-        price = row_by_ticker.get(item["ticker"], {}).get("price")
-        if only_adjustment and price is not None and float(price) > 0:
-            if abs(item["quantity"]) * float(price) < minimum:
-                continue
         reason_text = " · ".join(reason["label"] for reason in item["reasons"])
         item["text"] += f" · 사유: {reason_text}"
         by_date.setdefault(item["date"] or "", []).append(item)
