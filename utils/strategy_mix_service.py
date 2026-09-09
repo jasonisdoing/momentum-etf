@@ -1108,8 +1108,6 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         next_trading_day,
         excess_holding_allowance=ctx["mix_excess_holding_allowance"],
         cash_balance=account["cash_balance"] / krw_rate if account is not None else 0,
-        total_assets=account["total_assets"] / krw_rate if account is not None else 0,
-        fixed_asset_value=account["fixed_asset_value"] / krw_rate if account is not None else 0,
         currency=currency,
         adjustment_day=adjustment_day,
         adjustment_intraday=adjustment_intraday,
