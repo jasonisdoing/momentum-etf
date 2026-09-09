@@ -339,9 +339,9 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             try:
                 amount = float(raw)
             except (TypeError, ValueError) as error:
-                raise AccountSettingsStoreError("목표 초과 보유 허용 금액은 0 이상의 숫자여야 합니다.") from error
+                raise AccountSettingsStoreError("초과 보유 허용 금액은 0 이상의 숫자여야 합니다.") from error
             if isinstance(raw, bool) or not math.isfinite(amount) or amount < 0:
-                raise AccountSettingsStoreError("목표 초과 보유 허용 금액은 유한한 0 이상의 숫자여야 합니다.")
+                raise AccountSettingsStoreError("초과 보유 허용 금액은 유한한 0 이상의 숫자여야 합니다.")
             cleaned[key] = amount
         elif key == "mix_cash_pct":
             # 합성에서 비워 두는 현금 몫(%). 슬리브 배분과의 합이 100 인지는 아래에서 본다.

@@ -118,7 +118,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 
 합성 액션 사유는 `core/strategy/mix/actions.py`에서 조립하며 화면·슬랙이 같은 문구를 읽는다. 포트폴리오 `current_positions`의 거래 내역 중 기준일 거래를 `SlotState.engine_trades`로 전달하며 목표 계산에는 사용하지 않는다.
 
-계좌 설정 `mix_excess_holding_allowance`는 계좌 전체 초과 보유 허용 한도다. 합성은 `cash_model.currency_for_country`로 통화를 결정하며, 원장의 원화 현금을 계좌 통화로 환산해 `mix/actions.py`에 전달한다. 목표는 유지하고 날짜별 액션·예상 현금 흐름만 조정하며 화면·슬랙이 같은 결과를 사용한다.
+계좌 설정 `mix_excess_holding_allowance`는 계좌에 저장하며 각 종목에 적용하는 초과 보유 허용 한도다. 합성은 `cash_model.currency_for_country`로 통화를 결정하며, 원장의 원화 현금을 계좌 통화로 환산해 `mix/actions.py`에 전달한다. 목표는 유지하고 날짜별 액션·예상 현금 흐름만 조정하며 화면·슬랙이 같은 결과를 사용한다.
 
 2026-09-09 전환: 기존 설정값은 새 정책에 전용하지 않고 사용자 결정으로 전 계좌 0 초기화 후 옛 필드를 제거했다. 전환 전 로컬 백업은 `backups/mix-allowance-20260909T090452Z.json`이며 저장소 추적 대상이 아니다.
 

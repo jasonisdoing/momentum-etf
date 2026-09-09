@@ -167,7 +167,7 @@ def _apply_excess_allowance(
     cash_balance: float,
     protected_cash: float,
 ) -> float:
-    """목표는 유지하고 계좌 전체 한도·매수 자금 안에서 조정 매도만 생략한다.
+    """목표는 유지하고 종목별 한도·계좌 매수 자금 안에서 조정 매도만 생략한다.
 
     티커 순으로 정수 초과분을 허용한다. 시세 순위로 허용 종목이 뒤집히지 않도록 한다.
     모든 부족분 매수와 필수 매도를 먼저 반영한 현금에서만 허용 예산을 꺼낸다.
@@ -181,7 +181,7 @@ def _apply_excess_allowance(
             raise ValueError(f"초과 보유·매수 자금 계산에 필요한 가격이 없습니다: {row['ticker']}")
         prices[row["ticker"]] = float(price)
     after_cash = cash_balance - math.fsum(row["trade_quantity"] * prices.get(row["ticker"], 0) for row in rows)
-    remaining = min(allowance, max(after_cash - protected_cash, 0))
+    remaining = max(after_cash - protected_cash, 0)
     for row in sorted(rows, key=lambda item: item["ticker"]):
         trade = row["trade_quantity"]
         if trade >= 0 or row["target_quantity"] <= 0:
@@ -190,7 +190,7 @@ def _apply_excess_allowance(
         if any(reason["code"] != "target_difference" for reason in reasons):
             continue
         price = prices[row["ticker"]]
-        retained = min(-trade, math.floor(remaining / price))
+        retained = min(-trade, math.floor(min(allowance, remaining) / price))
         row["trade_quantity"] += retained
         row["retained_excess_quantity"] = retained
         remaining -= retained * price
