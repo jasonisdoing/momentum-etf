@@ -99,6 +99,8 @@ type PositionRow = {
   industry: string;
   /** 20일 일간 수익률 표준편차(%) — 화면 공용 변동성 컬럼. */
   volatility_pct?: number | null;
+  /** 신규상장(🆕) — 전 화면 공용 판정. */
+  new_listing?: boolean | null;
   /** 추세 이탈(행 전체 회색)용 — 풀 이평선 기준 단기·장기 이격(%). 순위·합성과 같은 공용 규칙. */
   short_gap_pct?: number | null;
   long_gap_pct?: number | null;
@@ -140,6 +142,8 @@ type Holding = {
   ticker: string;
   /** 20일 일간 수익률 표준편차(%) — 화면 공용 변동성 컬럼. */
   volatility_pct?: number | null;
+  /** 신규상장(🆕) — 전 화면 공용 판정. */
+  new_listing?: boolean | null;
   short_gap_pct?: number | null;
   long_gap_pct?: number | null;
   high_drawdown_pct?: number | null;
@@ -179,6 +183,8 @@ type PlanRow = {
   industry: string;
   /** 20일 일간 수익률 표준편차(%) — 화면 공용 변동성 컬럼. */
   volatility_pct?: number | null;
+  /** 신규상장(🆕) — 전 화면 공용 판정. */
+  new_listing?: boolean | null;
   /** 추세 이탈(행 전체 회색)용 — 풀 이평선 기준 단기·장기 이격(%). 순위·합성과 같은 공용 규칙. */
   short_gap_pct?: number | null;
   long_gap_pct?: number | null;
@@ -247,6 +253,8 @@ type Trade = {
   ticker: string;
   /** 20일 일간 수익률 표준편차(%) — 화면 공용 변동성 컬럼. */
   volatility_pct?: number | null;
+  /** 신규상장(🆕) — 전 화면 공용 판정. */
+  new_listing?: boolean | null;
   short_gap_pct?: number | null;
   long_gap_pct?: number | null;
   name: string;
@@ -672,7 +680,7 @@ export function NewHighClient() {
       // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
       // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
       tickerColumn<PositionRow>({}),
-      stockNameColumn<PositionRow>({}),
+      stockNameColumn<PositionRow>({ nameOptions: (row) => ({ isNew: Boolean(row?.new_listing) }) }),
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
       stockMemoColumn<PositionRow>({
         field: "memo",
@@ -827,7 +835,7 @@ export function NewHighClient() {
       plan: h.status, days: h.days, is_new: h.is_new, exit_reason: h.exit_reason,
       memo: h.memo, account_held: h.account_held,
       exit_ma_gap_pct: h.exit_ma_gap_pct, exit_ma: h.exit_ma,
-      volatility_pct: h.volatility_pct, high_drawdown_pct: h.high_drawdown_pct,
+      volatility_pct: h.volatility_pct, high_drawdown_pct: h.high_drawdown_pct, new_listing: h.new_listing,
       short_gap_pct: h.short_gap_pct, long_gap_pct: h.long_gap_pct,
     }));
     const buys: PlanRow[] = positions.planned_entries.map((row) => ({
@@ -840,7 +848,7 @@ export function NewHighClient() {
       // 아직 안 샀다 — null 로 두면 보유일 칸과 차트 배지가 통째로 비어 진입 전인지 알 수 없다.
       plan: "buy", days: 0, is_new: false, exit_reason: null,
       memo: row.memo, account_held: row.account_held,
-      volatility_pct: row.volatility_pct, high_drawdown_pct: row.high_drawdown_pct,
+      volatility_pct: row.volatility_pct, high_drawdown_pct: row.high_drawdown_pct, new_listing: row.new_listing,
       short_gap_pct: row.short_gap_pct, long_gap_pct: row.long_gap_pct,
     }));
     // 오늘 이미 청산된 종목 — 현재가는 지금 시세, 청산가는 따로 담는다.
@@ -853,7 +861,7 @@ export function NewHighClient() {
       plan: "exited", days: t.days, is_new: false, exit_reason: t.reason,
       memo: t.memo, account_held: t.account_held,
       // 이탈 행도 표의 모든 칸이 채워져야 한다 — 판 뒤의 상태를 같은 기준으로 본다.
-      high_drawdown_pct: t.high_drawdown_pct, volatility_pct: t.volatility_pct,
+      high_drawdown_pct: t.high_drawdown_pct, volatility_pct: t.volatility_pct, new_listing: t.new_listing,
       short_gap_pct: t.short_gap_pct, long_gap_pct: t.long_gap_pct,
       exit_ma_gap_pct: t.exit_ma_gap_pct, exit_ma: t.exit_ma,
     }));
@@ -937,7 +945,7 @@ export function NewHighClient() {
       highDrawdownColumn<PlanRow>("high_drawdown_pct"),
       // 티커·종목명 — 공용 컬럼. 고정 폭 — 보유 표와 후보 표의 앞쪽 칸을 맞춘다.
       tickerColumn<PlanRow>({}),
-      stockNameColumn<PlanRow>({}),
+      stockNameColumn<PlanRow>({ nameOptions: (row) => ({ isNew: Boolean(row?.new_listing) }) }),
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
       stockMemoColumn<PlanRow>({
         field: "memo",

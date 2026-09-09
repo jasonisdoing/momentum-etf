@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Any
 
 from config import REBALANCE_BAND_PCT_OPTIONS, REBALANCE_LABELS, REBALANCE_OPTIONS
+from core.strategy.scoring import is_new_listing
 from utils.logger import get_app_logger
 from utils.strategy_settings import require_start_date, validate_start_date
 
@@ -190,6 +191,10 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
                 # 추세 이탈 표시용 — 풀 이평선 이격(단기·장기).
                 "short_gap_pct": gap_by.get(ticker, (None, None))[0],
                 "long_gap_pct": gap_by.get(ticker, (None, None))[1],
+                # 신규상장(🆕) — 전 화면 공용 판정(core.strategy.scoring.is_new_listing).
+                "new_listing": (
+                    is_new_listing(close_frame[ticker].dropna()) if ticker in close_frame.columns else False
+                ),
             }
         )
     return rows

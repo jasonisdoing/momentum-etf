@@ -558,6 +558,7 @@ def _attach_disparity(holdings: list[dict[str, Any]], pool_by_source: dict[str, 
     for row in holdings:
         row["current_short_pct"] = None
         row["current_long_pct"] = None
+        row["new_listing"] = None
         ticker = str(row.get("ticker") or "").strip()
         pool = pool_of_row(row)
         days = ma_days_of(pool) if pool else None
@@ -569,6 +570,10 @@ def _attach_disparity(holdings: list[dict[str, Any]], pool_by_source: dict[str, 
         close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
         if close.empty:
             continue
+        # 신규상장(🆕) — 전 화면 공용 판정(확정 시리즈 기준, 잠정 봉과 무관).
+        from core.strategy.scoring import is_new_listing
+
+        row["new_listing"] = is_new_listing(close)
         entry = realtime.get(ticker)
         if entry:
             effective = build_effective_close_series(close, entry)

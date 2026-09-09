@@ -15,9 +15,11 @@ export type AlertBadgeInfo = {
   badgeByTicker: AlertBadges;
   /** 이동선 이탈로 배지가 붙은 티커(정규화된 형태). */
   maTickers: string[];
+  /** 신규상장(🆕) 티커 — 전 화면 공용 판정(순위 is_partial 과 같은 기준). */
+  newTickers: string[];
 };
 
-const EMPTY_BADGE_INFO: AlertBadgeInfo = { badgeByTicker: {}, maTickers: [] };
+const EMPTY_BADGE_INFO: AlertBadgeInfo = { badgeByTicker: {}, maTickers: [], newTickers: [] };
 
 // 서버 배지 계산이 수 초 걸려, 화면 재방문 시 세션 캐시로 즉시 표시한다(서버에도 별도 TTL 캐시 있음).
 const BADGES_SESSION_CACHE_TTL_MS = 60_000;
@@ -35,18 +37,20 @@ export async function fetchAlertBadges(accountId: string): Promise<AlertBadgeInf
   const cacheKey = `${BADGES_SESSION_CACHE_PREFIX}${accountId}`;
   const cached = readSessionTtlCache<AlertBadgeInfo>(cacheKey, BADGES_SESSION_CACHE_TTL_MS);
   // 예전 버전이 남긴 캐시(티커→아이콘 맵)는 형태가 달라 그대로 쓰면 화면이 깨진다. 모양을 확인한다.
-  if (cached !== null && cached.badgeByTicker) return cached;
+  if (cached !== null && cached.badgeByTicker && cached.newTickers) return cached;
   try {
     const resp = await fetch(`/api/alarms/badges?account=${encodeURIComponent(accountId)}`, { cache: "no-store" });
     const payload = (await resp.json()) as {
       badge_by_ticker?: Record<string, string>;
       ma_tickers?: string[];
+      new_tickers?: string[];
       error?: string;
     };
     if (!resp.ok || payload.error) return EMPTY_BADGE_INFO;
     const info: AlertBadgeInfo = {
       badgeByTicker: payload.badge_by_ticker ?? {},
       maTickers: payload.ma_tickers ?? [],
+      newTickers: payload.new_tickers ?? [],
     };
     writeSessionTtlCache(cacheKey, info);
     return info;
