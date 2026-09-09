@@ -28,7 +28,7 @@ from config import CACHE_TTL_COMPUTE
 from core.strategy.intraday import effective_close_frame, mark_engine_statuses
 from core.strategy.momentum import signals as momentum_signals
 from core.strategy.price_panel import build_price_panel
-from core.strategy.scoring import drawdown_from_high_pct
+from core.strategy.scoring import drawdown_from_high_pct, is_new_listing
 from core.strategy.slot_backtest import run_slot_backtest
 from utils.logger import get_app_logger
 from utils.momentum_service import (
@@ -221,6 +221,8 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
                 "value_mult": round(float(value_mult_by[ticker]), 2) if ticker in value_mult_by else None,
                 "value_mult_live": value_mult_live_by.get(ticker),
                 "volatility_pct": round(float(vol_last[ticker]), 2) if pd.notna(vol_last.get(ticker)) else None,
+                # 신규상장(🆕) — 전 화면 공용 판정(core.strategy.scoring.is_new_listing).
+                "new_listing": is_new_listing(close_df[ticker].dropna()),
                 # 이탈까지 남은 여유(%) — 둘 중 하나라도 0 이하가 되면 다음 거래일 시가에 판다.
                 "short_gap_pct": round(float(short_value), 2),
                 "long_gap_pct": round(float(long_value), 2),
@@ -358,6 +360,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         item["short_gap_pct"] = (row or {}).get("short_gap_pct")
         item["long_gap_pct"] = (row or {}).get("long_gap_pct")
         item["high_drawdown_pct"] = (row or {}).get("high_drawdown_pct")
+        item["new_listing"] = (row or {}).get("new_listing")
     for item in exited_today:
         item["price"] = (row_by_ticker.get(item["ticker"]) or {}).get("price")
     _apply_display_quotes(rows, holdings, quotes["by_ticker"])

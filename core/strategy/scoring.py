@@ -170,6 +170,19 @@ def rank_score(long_disparity_pct: Any, short_disparity_pct: Any = None) -> Any:
     return float(long_disparity_pct)
 
 
+def is_new_listing(close_series: pd.Series, *, window_months: int = METRIC_WINDOW_MONTHS) -> bool:
+    """신규상장(🆕) — 첫 봉이 기준 창(기본 12개월) 시작보다 뒤(상장 기간 < 창).
+
+    순위 화면의 `is_partial`(perf_metrics.single_stock_backtest_stats)과 **같은 수식**이다.
+    모든 화면의 🆕 배지가 이 판정 하나를 쓴다 — 화면마다 기준이 갈리면 같은 종목에
+    다른 배지가 붙는다. 시리즈가 비면 판정 불가로 False(배지를 추정해 붙이지 않는다).
+    """
+    series = pd.to_numeric(close_series, errors="coerce").dropna()
+    if series.empty:
+        return False
+    return bool(series.index[0] > series.index[-1] - pd.DateOffset(months=int(window_months)))
+
+
 def drawdown_from_high_pct(
     close_series: pd.Series,
     current_price: float | None = None,

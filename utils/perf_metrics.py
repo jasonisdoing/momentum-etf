@@ -133,8 +133,10 @@ def single_stock_backtest_stats(close_prices, lookback_months: int) -> dict:
         last_date = close_prices.index[-1]
         start_date = last_date - pd.DateOffset(months=int(lookback_months))
 
-        # 상장일이 시작일보다 나중인지 여부 판정
-        is_partial = close_prices.index[0] > start_date
+        # 상장일이 시작일보다 나중인지 — 전 화면 🆕 배지와 같은 공용 판정.
+        from core.strategy.scoring import is_new_listing
+
+        is_partial = is_new_listing(close_prices, window_months=int(lookback_months))
 
         target_series = close_prices.loc[start_date:]
         if len(target_series) < 2:
