@@ -897,6 +897,21 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
 
     next_trading_day = next((str(day.date()) for day in ahead if _can_fill_at_open(day.date())), None)
 
+    # 이벤트 없는 조정(목표·보유 차이)의 기준일 — 시가 체결 신호가 아니라 "지금 낼" 주문이다.
+    # 오늘이 거래일이고 아직 마감 전이면(개장 전=오늘 시가, 장중=즉시) 오늘, 마감 후·휴장은
+    # 다음 거래일. 예전에는 장중이면 다음 거래일로 밀려, 이미 벌어진 수량 차이의 매수 지시가
+    # 하루 뒤 시가로 나왔다.
+    from utils.trading_calendar import is_market_day_completed
+
+    today_is_trading = bool(ahead) and ahead[0].date() == today_local
+    adjustment_day = (
+        today_local.strftime("%Y-%m-%d")
+        if today_is_trading and not is_market_day_completed(country, pd.Timestamp(today_local))
+        else next_trading_day
+    )
+    # 장중 조정이면 그룹 제목이 '시가'가 아니라 '장중'이어야 한다.
+    adjustment_intraday = adjustment_day is not None and adjustment_day != next_trading_day
+
     # ── 적용 계좌 — 이 계산의 기준 계좌 그대로다(슬리브별 풀이 여기서 나왔다).
     account = _load_account_state(ctx["account_id"])
     krw_rate = _krw_rate(pool_currency)
@@ -951,6 +966,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
             krw_rate,
             total_assets,
             next_trading_day,
+            adjustment_day=adjustment_day,
         )
         target_shares = target_schedule[max(target_schedule)]["quantities"]
         account["sell_all"] = _attach_account_targets(
@@ -1092,6 +1108,8 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         payload["actions"],
         next_trading_day,
         currency=currency,
+        adjustment_day=adjustment_day,
+        adjustment_intraday=adjustment_intraday,
         target_schedule=target_schedule if account is not None else {},
     )
     # 슬리브별 값을 `slots[키]` 로 모아 내보낸다 — 화면은 슬롯 키를 돌며 읽는다.

@@ -56,9 +56,16 @@ def build_action_groups(
     next_trading_day: str | None,
     *,
     target_schedule: dict[str, dict[str, Any]],
+    adjustment_day: str | None = None,
+    adjustment_intraday: bool = False,
     currency: str = "KRW",
 ) -> list[dict[str, Any]]:
-    """날짜별 엔진 목표 차이를 주문으로 만든다. 이후 주문은 앞선 목표 달성을 전제로 한다."""
+    """날짜별 엔진 목표 차이를 주문으로 만든다. 이후 주문은 앞선 목표 달성을 전제로 한다.
+
+    ``adjustment_day`` 는 이벤트 없는 조정의 기준일(마감 전이면 오늘) — 엔진 예정 주문의
+    체결일(다음 거래일 시가)과 다를 수 있다. ``adjustment_intraday`` 면 그 그룹 제목을
+    '시가'가 아니라 '장중'으로 단다(오늘 시가는 이미 지났다)."""
+    baseline_day = adjustment_day or next_trading_day
     # 다른 종목의 오늘 주문 때문에 미래 진입 종목을 오늘의 0주 목표로 먼저 청산하지 않는다.
     first_event: dict[str, str] = {}
     for slot in actions["slots"].values():
@@ -75,12 +82,12 @@ def build_action_groups(
             if source.get("is_cash") or source.get("is_fixed_asset") or source.get("target_quantity") is None:
                 continue
             ticker = source["ticker"]
-            first_date = first_event.get(ticker, next_trading_day)
+            first_date = first_event.get(ticker, baseline_day)
             if first_date is not None and day < first_date:
                 continue
             quantity = target["quantities"].get(ticker, 0)
             held = previous.get(ticker, 0)
-            if next_trading_day is not None and day < next_trading_day and quantity != held:
+            if baseline_day is not None and day < baseline_day and quantity != held:
                 event_name = "entries" if quantity > held else "sells"
                 # 오늘 매수 신호만 있는데 이미 더 보유했다고 조정 매도를 앞당기지 않는다.
                 matching_signal = any(
@@ -119,6 +126,11 @@ def build_action_groups(
         groups.extend(stage_groups)
         # 이번 날짜에 비교한 종목만 목표 달성을 가정한다. 대기 종목의 실제 보유는 그대로 둔다.
         previous.update({row["ticker"]: row["target_quantity"] for row in stage_rows})
+    # 장중 조정 그룹 — 오늘 시가는 지났으니 '시가'가 아니라 '장중(지금 주문)'으로 단다.
+    if adjustment_intraday and adjustment_day:
+        for group in groups:
+            if group["key"] == adjustment_day:
+                group["title"] = f"{_format_date_weekday(adjustment_day)} 장중 — 지금 주문"
     # 날짜를 키에 포함하면 앞선 주문이 사라진 뒤에도 다음 주문의 키가 유지된다.
     for group in groups:
         for item in group["items"]:
