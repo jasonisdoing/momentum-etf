@@ -94,6 +94,7 @@ def _safe_realtime_snapshot(country: str, tickers: list[str]) -> dict[str, dict[
 def _ma_status(
     close_series: pd.Series | None,
     ma_days: tuple[int, int],
+    country: str,
     realtime_entry: dict[str, float] | None = None,
 ) -> dict[str, Any] | None:
     """종가와 단기·장기 이평선을 계산해 이탈 여부를 반환한다. 데이터 부족/실패 시 None.
@@ -119,7 +120,7 @@ def _ma_status(
         return None
     close = close_series.astype(float).dropna()
     close.index = pd.to_datetime(close.index)
-    effective = build_effective_close_series(close, realtime_entry)
+    effective = build_effective_close_series(close, realtime_entry, country)
     if effective is not None and not effective.empty:
         close = effective
     if close.empty:
@@ -223,7 +224,7 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
         for row, cache_ticker, quote_ticker, pool, country, ma_days in candidates:
             entry = snapshots.get(country, {}).get(quote_ticker)
             try:
-                status = _ma_status(close_by_ticker.get(cache_ticker), ma_days, entry)
+                status = _ma_status(close_by_ticker.get(cache_ticker), ma_days, country, entry)
             except Exception as exc:  # 한 종목 실패가 전체를 막지 않게
                 _unknown(row, f"판정 실패 ({exc})")
                 continue

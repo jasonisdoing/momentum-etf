@@ -576,7 +576,7 @@ def _attach_disparity(holdings: list[dict[str, Any]], pool_by_source: dict[str, 
         row["new_listing"] = is_new_listing(close)
         entry = realtime.get(ticker)
         if entry:
-            effective = build_effective_close_series(close, entry)
+            effective = build_effective_close_series(close, entry, country_of(pool))
             if effective is not None:
                 close = effective
         metrics = momentum_metrics(close, short_ma_days=days[0], long_ma_days=days[1], as_of=None)

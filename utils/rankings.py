@@ -470,8 +470,15 @@ def _apply_realtime_overlay(
 def build_effective_close_series(
     cached_close_series: pd.Series | None,
     realtime_entry: dict[str, float] | None,
+    country_code: str,
 ) -> pd.Series | None:
-    """실시간 가격을 반영한 종가 시리즈를 생성합니다."""
+    """실시간 가격을 반영한 종가 시리즈를 생성합니다.
+
+    「오늘」은 **그 시장의 현지 날짜**다. 한국 날짜로 보면 미국 장중(한국 새벽)에
+    진행 중인 세션의 캐시 봉(장중에 캐시를 갱신하면 스냅샷이 저장된다)을 어제
+    확정 종가로 착각해 그대로 두고, 존재하지 않는 다음 날짜에 실시간 가격을
+    얹었다 — 스냅샷이 가짜 기록 종가로 남아 고점·이격 기준을 오염시킬 수 있었다.
+    """
     if cached_close_series is None or cached_close_series.empty:
         return None
     if not isinstance(realtime_entry, dict) or not realtime_entry:
@@ -487,7 +494,7 @@ def build_effective_close_series(
         return cached_close_series
 
     adjusted = cached_close_series.copy()
-    today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
+    today = pd.Timestamp.now(tz=_get_market_timezone(country_code)).tz_localize(None).normalize()
     last_index = pd.Timestamp(adjusted.index[-1])
     if last_index.tzinfo is not None:
         last_index = last_index.tz_localize(None)
@@ -844,7 +851,7 @@ def build_ticker_type_rankings(
         realtime_entry = realtime_snapshot.get(ticker)
         preprocess_started_at = perf_counter()
         base_close_series = _slice_close_series_to_date(cached_close_series, latest_trading_day)
-        effective_close_series = build_effective_close_series(base_close_series, realtime_entry)
+        effective_close_series = build_effective_close_series(base_close_series, realtime_entry, country_code)
         if effective_close_series is not None and not effective_close_series.empty:
             effective_close_series_map[ticker] = effective_close_series
         preprocess_elapsed += perf_counter() - preprocess_started_at
