@@ -58,8 +58,6 @@ def build_action_groups(
     *,
     excess_holding_allowance: float,
     cash_balance: float,
-    total_assets: float,
-    fixed_asset_value: float,
     target_schedule: dict[str, dict[str, Any]],
     adjustment_day: str | None = None,
     adjustment_intraday: bool = False,
@@ -128,14 +126,11 @@ def build_action_groups(
                 for key, slot in actions["slots"].items()
             },
         }
-        # 엔진이 남긴 현금만 보호한다. 내림으로 생긴 잔여 현금은 초과 보유에 사용할 수 있다.
-        protected_cash = max(total_assets * (1 - sum(target["weights"].values()) / 100) - fixed_asset_value, 0)
         projected_cash = _apply_excess_allowance(
             stage_rows,
             stage_actions,
             allowance=excess_holding_allowance,
             cash_balance=projected_cash,
-            protected_cash=protected_cash,
         )
         stage_groups = _build_action_group_stage(stage_rows, stage_actions, day, currency=currency)
         if projected_cash < -0.01 and stage_groups:
@@ -165,12 +160,14 @@ def _apply_excess_allowance(
     *,
     allowance: float,
     cash_balance: float,
-    protected_cash: float,
 ) -> float:
-    """목표는 유지하고 종목별 한도·계좌 매수 자금 안에서 조정 매도만 생략한다.
+    """목표는 유지하고 종목별 한도 안에서 조정 매도를 생략한다.
 
-    티커 순으로 정수 초과분을 허용한다. 시세 순위로 허용 종목이 뒤집히지 않도록 한다.
-    모든 부족분 매수와 필수 매도를 먼저 반영한 현금에서만 허용 예산을 꺼낸다.
+    초과 보유(보유 > 목표)는 종목별 허용 금액 이내면 팔지 않는다. 남긴 초과 때문에 이
+    날짜의 매수 자금이 모자라면 **초과 금액이 큰 종목부터** 부족분이 채워질 만큼만 초과분을
+    도로 매도한다 — 목표 이하로는 내려가지 않는다. 예전에는 백테스트의 현금 비중만큼 실제
+    현금을 미리 채우라는 선제 매도를 냈는데(보호 현금), 어차피 매수가 생기는 날 여기서
+    매도가 같이 나오므로 과한 지시였다(2026-09 제거).
     """
     prices = {}
     for row in rows:
@@ -180,8 +177,7 @@ def _apply_excess_allowance(
         if price is None or not math.isfinite(float(price)) or float(price) <= 0:
             raise ValueError(f"초과 보유·매수 자금 계산에 필요한 가격이 없습니다: {row['ticker']}")
         prices[row["ticker"]] = float(price)
-    after_cash = cash_balance - math.fsum(row["trade_quantity"] * prices.get(row["ticker"], 0) for row in rows)
-    remaining = max(after_cash - protected_cash, 0)
+    retained_rows = []
     for row in sorted(rows, key=lambda item: item["ticker"]):
         trade = row["trade_quantity"]
         if trade >= 0 or row["target_quantity"] <= 0:
@@ -190,11 +186,23 @@ def _apply_excess_allowance(
         if any(reason["code"] != "target_difference" for reason in reasons):
             continue
         price = prices[row["ticker"]]
-        retained = min(-trade, math.floor(min(allowance, remaining) / price))
+        retained = min(-trade, math.floor(allowance / price))
+        if retained <= 0:
+            continue
         row["trade_quantity"] += retained
         row["retained_excess_quantity"] = retained
-        remaining -= retained * price
-        after_cash -= retained * price
+        retained_rows.append(row)
+    after_cash = cash_balance - math.fsum(row["trade_quantity"] * prices.get(row["ticker"], 0) for row in rows)
+    for row in sorted(
+        retained_rows, key=lambda item: item["retained_excess_quantity"] * prices[item["ticker"]], reverse=True
+    ):
+        if after_cash >= 0:
+            break
+        price = prices[row["ticker"]]
+        reclaim = min(row["retained_excess_quantity"], math.ceil(-after_cash / price))
+        row["trade_quantity"] -= reclaim
+        row["retained_excess_quantity"] -= reclaim
+        after_cash += reclaim * price
     return after_cash
 
 

@@ -465,8 +465,6 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
             build_action_groups,
             excess_holding_allowance=0,
             cash_balance=1_000_000,
-            total_assets=0,
-            fixed_asset_value=0,
         )
 
         held = [dict(row) for row in result["open_positions"]]
