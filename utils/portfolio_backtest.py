@@ -18,6 +18,7 @@ from config import CACHE_TTL_COMPUTE
 from core.strategy.portfolio.backtest import simulate_portfolio
 from utils.logger import get_app_logger
 from utils.pool_settings_store import get_pool_slippage
+from utils.pool_signal_backtest_service import validate_backtest_months
 from utils.portfolio_service import (
     DEFAULT_BACKTEST_MONTHS,
     benchmark_info,
@@ -27,8 +28,6 @@ from utils.portfolio_service import (
 from utils.ttl_cache import TtlCache
 
 logger = get_app_logger()
-
-MAX_BACKTEST_MONTHS = 60
 
 
 def _load_close_frame(pool: str, tickers: list[str]) -> pd.DataFrame:
@@ -115,8 +114,7 @@ def run_backtest(
 
     settings = validate_settings(settings or load_settings())
     months = int(months or DEFAULT_BACKTEST_MONTHS)
-    if not 1 <= months <= MAX_BACKTEST_MONTHS:
-        raise ValueError(f"'months' 는 1~{MAX_BACKTEST_MONTHS} 사이여야 합니다.")
+    validate_backtest_months(months)
 
     pool = settings["pool"]
     weights = settings["weights"]

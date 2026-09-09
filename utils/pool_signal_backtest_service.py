@@ -47,6 +47,17 @@ def get_max_backtest_months(today: date | None = None) -> int:
     return max(months, 1)
 
 
+def validate_backtest_months(months: int) -> None:
+    """백테스트 기간(개월) 입력 가드 — 상한은 실제 데이터 한도(가격 캐시 시작일 기준).
+
+    예전에는 고정 60이었는데, 캐시가 그보다 길어지자 화면이 제안한 동적 옵션(예 79개월)을
+    엔진이 거부했다. 화면 선택지와 같은 한도를 본다.
+    """
+    limit = get_max_backtest_months()
+    if not 1 <= months <= limit:
+        raise ValueError(f"'months' 는 1~{limit} 사이여야 합니다.")
+
+
 def get_month_options() -> list[int]:
     """기간 셀렉트 옵션. 가격 캐시가 못 채우는 구간은 뺀다.
 

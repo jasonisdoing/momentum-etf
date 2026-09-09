@@ -90,7 +90,7 @@ def pool_options() -> list[dict[str, Any]]:
     return sorted(options, key=lambda item: (item["order"] is None, item["order"]))
 
 
-def load_universe(pool: str) -> list[dict[str, str]]:
+def load_universe(pool: str) -> list[dict[str, Any]]:
     """그 종목풀에 담긴 종목 — 비중을 매길 수 있는 후보다.
 
     제외 종목(`exclude_from_ranking`)도 후보에 넣는다. 이 전략은 순위를 매기지 않으므로
@@ -98,14 +98,16 @@ def load_universe(pool: str) -> list[dict[str, str]]:
     """
     from utils.stock_list_io import get_etfs
 
-    universe: list[dict[str, str]] = []
+    universe: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in get_etfs(pool) or []:
         ticker = str(item.get("ticker") or "").strip().upper()
         if not ticker or ticker in seen:
             continue
         seen.add(ticker)
-        universe.append({"ticker": ticker, "name": str(item.get("name") or ticker), "pool": pool})
+        universe.append(
+            {"ticker": ticker, "name": str(item.get("name") or ticker), "pool": pool, "bucket": item.get("bucket")}
+        )
     return universe
 
 

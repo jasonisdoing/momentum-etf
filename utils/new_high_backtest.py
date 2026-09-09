@@ -28,6 +28,7 @@ from utils.new_high_service import (
     load_universe,
     validate_settings,
 )
+from utils.pool_signal_backtest_service import validate_backtest_months
 from utils.slot_positions import (
     _apply_display_quotes,
     _cache_refreshed_at,
@@ -43,9 +44,6 @@ from utils.stock_memo_store import attach_stock_memos
 from utils.ttl_cache import TtlCache
 
 logger = logging.getLogger(__name__)
-
-# 백테스트 기간 상한 — 신고가 창(52주)만큼 앞선 데이터가 있어야 판정이 된다.
-MAX_BACKTEST_MONTHS = 60
 
 
 def load_context(settings: dict[str, Any]) -> dict[str, Any]:
@@ -82,8 +80,7 @@ def run_backtest(
     """
     settings = validate_settings(settings or load_settings())
     months = int(months or DEFAULT_BACKTEST_MONTHS)
-    if not 1 <= months <= MAX_BACKTEST_MONTHS:
-        raise ValueError(f"'months' 는 1~{MAX_BACKTEST_MONTHS} 사이여야 합니다.")
+    validate_backtest_months(months)
 
     slots = int(settings["top_n"])
 
@@ -602,4 +599,4 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     }
 
 
-__all__ = ["MAX_BACKTEST_MONTHS", "current_positions", "load_context", "run_backtest"]
+__all__ = ["current_positions", "load_context", "run_backtest"]

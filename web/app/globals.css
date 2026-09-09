@@ -3933,33 +3933,34 @@ a {
   text-decoration: none;
 }
 
-.rankAgGrid .ag-cell.rankBucketCell {
+/* 버킷 셀 — 그리드를 가리지 않는 공용 색(grid-cells `bucketColumn` 등이 이 클래스를 단다). */
+.ag-cell.rankBucketCell {
   justify-content: center;
   font-weight: 600;
   white-space: nowrap;
 }
 
-.rankAgGrid .ag-cell.rankBucketCell1 {
+.ag-cell.rankBucketCell1 {
   background: var(--bucket-1);
   color: #fff;
 }
 
-.rankAgGrid .ag-cell.rankBucketCell2 {
+.ag-cell.rankBucketCell2 {
   background: var(--bucket-2);
   color: #fff;
 }
 
-.rankAgGrid .ag-cell.rankBucketCell3 {
+.ag-cell.rankBucketCell3 {
   background: var(--bucket-3);
   color: #fff;
 }
 
-.rankAgGrid .ag-cell.rankBucketCell4 {
+.ag-cell.rankBucketCell4 {
   background: var(--bucket-4);
   color: #fff;
 }
 
-.rankAgGrid .ag-cell.rankBucketCell5 {
+.ag-cell.rankBucketCell5 {
   background: var(--bucket-5);
   color: #fff;
 }

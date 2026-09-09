@@ -12,19 +12,12 @@ import { StableInlineInput } from "../components/StableInlineInput";
 import { useAddingTickerRow } from "../components/useAddingTickerRow";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { AssetHelperBacktestResult, type LabResult } from "../components/AssetHelperBacktestResult";
-import { BUCKET_THEME } from "@/lib/bucket-theme";
 import { FIXED_ASSET_NAME, FIXED_ASSET_PRICE_PROXY, FIXED_ASSET_ROW_CLASS, FIXED_ASSET_TICKER } from "@/lib/fixed-asset";
-import { stockNameColumn, tickerColumn } from "@/lib/grid-cells";
+import { bucketColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { renderStockNameCell } from "@/lib/name-highlight";
 import { reorderHoldings } from "@/lib/holdings-store";
 import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
 
-function getBucketName(bucketId: number | undefined): string {
-  return bucketId ? BUCKET_THEME[String(bucketId)]?.name ?? "-" : "-";
-}
-function getBucketCellClass(bucketId: number | undefined): string {
-  return bucketId ? `rankBucketCell rankBucketCell${bucketId}` : "rankBucketCell";
-}
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import {
@@ -800,16 +793,7 @@ export function AssetHelperClient() {
         cellClass: "assetsDragCell",
         valueGetter: () => "",
       },
-      {
-        colId: "bucket",
-        headerName: "버킷",
-        minWidth: 108,
-        width: 108,
-        pinned: "left",
-        valueGetter: (params) => getBucketName(params.data?.bucket),
-        cellClass: (params) => getBucketCellClass(params.data?.bucket),
-        cellRenderer: (params: { data?: GridRow }) => <span>{getBucketName(params.data?.bucket)}</span>,
-      },
+      bucketColumn<GridRow>(),
       // 티커·종목명 — 공용 컬럼(col-id 표준). 추가 행 입력칸·현금·고정 자산만 화면 고유 표기다.
       tickerColumn<GridRow>({
         minWidth: 110,
