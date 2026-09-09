@@ -37,13 +37,19 @@ class ShareTarget:
 
 
 def allocate_integer_shares(targets: list[ShareTarget], budget: float) -> dict[str, int]:
-    """목표 금액을 정수 주수로 배분한다. 총 배정액은 ``budget`` 을 넘지 않는다.
+    """목표 금액을 정수 주수로 배분한다 — **종목별 내림만**, 단주 잔여는 현금으로 남긴다.
+
+    예전에는 내림 후 남는 예산을 소수부가 큰 종목부터 한 주씩 더 줬다(최대잉여법).
+    그 +1주가 어느 종목에 가는지는 장중 가격 미세 변동에 아주 민감해서, 합성 오늘의
+    액션이 A −1주 / B +1주 식으로 널뛰고 알림이 반복됐다 — 2026-09 제거. 남는 단주
+    잔여(종목당 1주 가격 미만)는 현금으로 남아 다음 재배분·진입 예산에 다시 포함된다.
 
     Args:
         targets: 종목별 목표 금액·1주 값.
         budget: 주식에 쓸 총액(= 총자산 × 주식 목표비중). **보유 현금이 아니다** —
             초과 보유분을 팔면 그 대금이 부족분 매수에 쓰이므로, 지금 현금이 얼마인지는
-            목표 수량을 정하는 데 쓰지 않는다.
+            목표 수량을 정하는 데 쓰지 않는다. 내림 수량만으로 이 예산을 넘는 입력은
+            목표 비중이 잘못됐다는 뜻이라 오류다.
 
     Returns:
         {식별자: 주수}. 배정이 0 인 종목도 키는 있다.
@@ -51,8 +57,6 @@ def allocate_integer_shares(targets: list[ShareTarget], budget: float) -> dict[s
     if not isfinite(budget) or budget < 0:
         raise ValueError("주수 배분 예산은 0 이상의 유한한 금액이어야 합니다.")
     quantities = {item.key: 0 for item in targets}
-    # (부족분, 식별자, 1주 값) — 3 단계에서 부족분이 큰 순서로 한 주씩 준다.
-    remainders: list[tuple[float, str, float]] = []
     floor_costs: list[float] = []
     for item in targets:
         if item.price <= 0 or item.target_amount <= 0:
@@ -60,23 +64,8 @@ def allocate_integer_shares(targets: list[ShareTarget], budget: float) -> dict[s
         floored = int(item.target_amount // item.price)
         floor_costs.append(floored * item.price)
         quantities[item.key] = floored
-        remainder = item.target_amount / item.price - floored
-        if remainder > 0:
-            remainders.append((remainder, item.key, item.price))
 
     if fsum(floor_costs) > budget:
         raise ValueError("목표 내림 수량만으로 배분 예산을 초과합니다. 목표 비중과 배정 예산을 확인하세요.")
-
-    def allocated_amount() -> float:
-        """누적 차감 오차 없이 현재 목표 수량의 총액을 계산한다."""
-        return fsum(quantities[item.key] * item.price for item in targets if quantities[item.key])
-
-    # 소수부가 큰 종목부터 최대 한 주만 더한다. 예산에 안 맞으면 멈춘다.
-    for shortfall, key, price in sorted(remainders, reverse=True):
-        del shortfall
-        quantities[key] += 1
-        if allocated_amount() > budget:
-            quantities[key] -= 1
-            break
 
     return quantities
