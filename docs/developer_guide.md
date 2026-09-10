@@ -120,6 +120,8 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 
 계좌 설정 `mix_excess_holding_allowance`는 계좌에 저장하며 각 종목에 적용하는 초과 보유 허용 한도다. 합성은 `cash_model.currency_for_country`로 통화를 결정하며, 원장의 원화 현금을 계좌 통화로 환산해 `mix/actions.py`에 전달한다. 목표는 유지하고 날짜별 액션·예상 현금 흐름만 조정하며 화면·슬랙이 같은 결과를 사용한다.
 
+자산 상세 수량 배분은 `utils/assets_share_allocation.py`로 분리했다. 목표 현금을 제외한 예산을 최대잉여 순으로 채우며, 합성의 `utils/share_allocation.py`를 호출하지 않는다. 잔여 현금 활용 요구가 서로 달라 배분 정책을 공유하지 않는다.
+
 2026-09-09 전환: 기존 설정값은 새 정책에 전용하지 않고 사용자 결정으로 전 계좌 0 초기화 후 옛 필드를 제거했다. 전환 전 로컬 백업은 `backups/mix-allowance-20260909T090452Z.json`이며 저장소 추적 대상이 아니다.
 
 합성 운용 응답의 `currency`·`krw_rate`는 계좌 국가 통화와 평가에 사용한 환율이다. 화면의 총액·평가액·목표액·배분액은 원화 계산값을 해당 환율로 나누어 표시하고, 종목 가격은 원래 현지 통화 값을 표시한다.

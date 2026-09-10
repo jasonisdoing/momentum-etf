@@ -1009,7 +1009,7 @@ export function AccountHoldingsDetailPanel({
       type: "rightAligned",
       sortable: false,
       cellStyle: { backgroundColor: "#f1f3f5" },
-      headerTooltip: "목표비중 × 총자산 ÷ 현재가 (단주거래 전제, 정수 반올림)",
+      headerTooltip: "목표비중 × 총자산 ÷ 현재가를 내림한 뒤 최대잉여법으로 잔여 예산을 추가 배분합니다. 목표 현금은 보존합니다.",
       cellRenderer: (params: { data?: GridRow }) => {
         const row = params.data;
         if (!row || row.id === "__adding__" || row.ticker === CASH_ROW_TICKER || row.ticker === "IS") {
