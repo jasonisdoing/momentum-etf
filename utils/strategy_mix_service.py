@@ -444,10 +444,16 @@ def _compute_sleeve_shares(ctx: dict[str, Any]) -> dict[str, float]:
     from utils.mix_sleeve import current_state
     from utils.trading_calendar import get_trading_days
 
-    # 운용 현황과 **같은 엔진 실행 결과**를 읽는다(장중이면 잠정 실행, §10-6) — 확정 종가로
-    # 계산한 슬리브 배분과 장중 내부 비중이 섞이지 않고, 같은 입력을 다시 돌리지도 않는다
-    # (전략별 운용 현황 5분 캐시를 그대로 공유한다).
-    results = {spec.key: {"daily": current_state(spec)["daily"]} for spec in ctx["slots"]}
+    # 운용 현황과 **같은 엔진 실행 결과**를 읽되(전략별 운용 현황 5분 캐시 공유), 장중이면
+    # 잠정 마지막 봉은 빼고 **확정 구간까지만** 쓴다 — 슬리브 몫은 목표 주수 환산의 예산이라,
+    # 잠정 곡선을 쓰면 조회마다 몫이 흔들려 목표 주수가 내림 경계에서 ±1 로 왕복한다.
+    results: dict[str, dict[str, Any]] = {}
+    for spec in ctx["slots"]:
+        state = current_state(spec)
+        daily = list(state["daily"])
+        if state.get("live") and len(daily) > 1:
+            daily = daily[:-1]
+        results[spec.key] = {"daily": daily}
     country = ctx["country"]
     today = pd.Timestamp.now(tz=MARKET_SCHEDULES[country]["timezone"]).date()
     month_days = get_trading_days(str(today.replace(day=1)), str(today), country)
