@@ -274,9 +274,16 @@ def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
 
 def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> SlotState:
     # 각 전략 화면과 **같은 라이브 반영본**을 쓴다(AGENTS.md §10-6) — 장중에는 실시간
-    # 마지막 봉 기준의 판정이고, 종가가 확정되면 백테스트와 같다. 확정 스냅샷(target_*)은
-    # 화면=엔진 검증 테스트가 쓴다.
+    # 마지막 봉 기준의 판정이고, 종가가 확정되면 백테스트와 같다.
     held = list(raw["holdings"])
+    # 환산 숫자(가격·비중)는 **확정 스냅샷**(target_*)으로 고정한다 — 잠정 실행의 값은
+    # 조회마다 장중 가격 따라 움직여, 목표 주수가 내림 경계에서 ±1 로 왕복했다(1주 팔라고
+    # 했다가 다시 사라는 지시, 2026-09). 종목 목록·상태·이탈 예상은 위 라이브 판정을
+    # 그대로 쓰고, 잠정 판정으로만 존재하는 종목(오늘 교체 예상)은 잠정 값이 전부라 그대로 쓴다.
+    confirmed_by: dict[str, dict[str, Any]] = {
+        str(row.get("ticker") or "").strip(): row
+        for row in [*(raw.get("target_holdings") or []), *(raw.get("target_entries") or [])]
+    }
     # 빈 슬롯을 채울 진입 예정 — 다음 시가에 사므로 목표에 포함한다. 매도 예정(이탈)
     # 종목은 같은 시가에 슬롯이 비므로 빈 슬롯으로 센다 — 엔진의 pick_entries 와 같은
     # 계산이라 신고가 화면의 '진입 예정' 과 어긋나지 않는다.
@@ -290,12 +297,13 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
         exiting = str(row.get("status")) == "sell"
         if exiting:
             status += f" · 매도 예정({row.get('exit_reason') or '이탈'})"
-        weight = row.get("sleeve_weight_pct")
+        confirmed = confirmed_by.get(str(row["ticker"]).strip(), row)
+        weight = confirmed.get("sleeve_weight_pct")
         targets.append(
             {
                 "ticker": str(row["ticker"]).strip(),
                 "name": row.get("name"),
-                "price": row.get("price"),
+                "price": confirmed.get("price"),
                 "change_pct": row.get("change_pct"),
                 "status": status,
                 # 각 전략 화면과 **같은 상태 컬럼**(`web/lib/grid-cells.slotStatusColumn`)을
@@ -316,11 +324,12 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
             }
         )
     for row in planned:
+        confirmed = confirmed_by.get(str(row["ticker"]).strip(), row)
         targets.append(
             {
                 "ticker": str(row["ticker"]).strip(),
                 "name": row.get("name"),
-                "price": row.get("price"),
+                "price": confirmed.get("price"),
                 "change_pct": row.get("change_pct"),
                 "status": "진입 예정 (다음 시가 매수)",
                 "plan": "buy",
@@ -335,7 +344,7 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
                 "entry_price": None,
                 "fill_date": row.get("fill_date"),
                 "is_exiting": False,
-                "drift_pct": row.get("sleeve_weight_pct"),
+                "drift_pct": confirmed.get("sleeve_weight_pct"),
             }
         )
 
