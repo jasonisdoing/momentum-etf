@@ -460,7 +460,48 @@ type ActionItem = {
   /** 정렬용 — 표(티커 순)와 같은 기준으로 세운다. */
   ticker: string;
 };
-type ActionGroup = { key: string; title: string; items: ActionItem[]; funding_warning?: string };
+type ActionGroup = {
+  key: string;
+  title: string;
+  items: ActionItem[];
+  funding_warning?: string;
+  // "today" = 실행일이 그 시장의 현지 오늘(오늘의 액션), "later" = 다음 거래일(내일의 액션).
+  section?: "today" | "later";
+};
+
+/** 액션 그룹 목록 — 오늘·내일 두 섹션이 같은 모양으로 그린다. */
+function ActionGroupList({ groups }: { groups: ActionGroup[] }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {groups.map((group, groupIndex) => (
+        <div key={group.key}>
+          {group.funding_warning ? <div role="alert">{group.funding_warning}</div> : null}
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>
+            {groupIndex + 1}. {group.title}
+            <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
+              매도 {group.items.filter((item) => item.side === "sell").length}건 · 매수{" "}
+              {group.items.filter((item) => item.side === "buy").length}건
+            </span>
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
+            {group.items.map((item) => (
+              <li key={item.key}>
+                <strong
+                  style={{
+                    color: item.side === "sell" ? "var(--down-color, #2f6fd0)" : "var(--up-color, #d64545)",
+                  }}
+                >
+                  {item.title}
+                </strong>{" "}
+                — {item.text}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** 합성 전략 — SM·신고가를 저장된 배분으로 함께 운용하는 화면.
  *  운용 현황 탭은 오늘 보유해야 할 종목과 현금 비중·오늘의 액션을,
@@ -1424,9 +1465,10 @@ export function StrategyMixClient() {
   // 오늘의 액션 — 조립은 서버(`_build_action_groups`)가 한다. 슬랙 알람과 같은 결과를
   // 쓰기 위한 단일 소스라, 화면은 받은 그대로 그리기만 한다.
   const actionGroups = actions?.groups ?? [];
-
-  const hasActions =
-    actionGroups.length > 0 || Boolean(actions?.sleeve_rebalance_today);
+  // 오늘의 액션 = 실행일이 그 시장의 현지 오늘(개장 전 시가 체결·장중 지금 주문),
+  // 내일의 액션 = 다음 거래일(연휴면 실제로는 며칠 뒤 — 세부 날짜는 그룹 제목에).
+  const todayActionGroups = actionGroups.filter((group) => group.section === "today");
+  const laterActionGroups = actionGroups.filter((group) => group.section !== "today");
 
   return (
     <PageFrame title="합성 전략" fullWidth>
@@ -1870,7 +1912,7 @@ export function StrategyMixClient() {
                     })()}
                   </div>
 
-                  {/* ④ 오늘의 액션 — 체결 시점별 묶음, 각 묶음은 매도 → 매수 순서. */}
+                  {/* ④ 오늘의 액션 — 실행일이 그 시장의 현지 오늘인 묶음(매도 → 매수 순서). */}
                   <div>
                     <div style={{ fontWeight: 700, marginBottom: 6 }}>
                       오늘의 액션
@@ -1879,77 +1921,30 @@ export function StrategyMixClient() {
                         종목별 한도 안에서 초과 보유를 허용하고, 매수 자금이 부족할 때만 초과분을 매도합니다 · 종목별 신호 적용일 기준
                       </span>
                     </div>
-                    {!hasActions ? (
+                    {todayActionGroups.length === 0 ? (
                       <div style={hintStyle}>
                         오늘은 할 일이 없습니다 — 보유 목록을 그대로 유지하세요.
                       </div>
                     ) : (
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 10,
-                        }}
-                      >
-                        {actionGroups.map((group, groupIndex) => (
-                          <div key={group.key}>
-                            {group.funding_warning ? <div role="alert">{group.funding_warning}</div> : null}
-                            <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                              {groupIndex + 1}. {group.title}
-                              <span
-                                style={{
-                                  ...hintStyle,
-                                  marginLeft: 8,
-                                  fontWeight: 500,
-                                }}
-                              >
-                                매도{" "}
-                                {
-                                  group.items.filter(
-                                    (item) => item.side === "sell",
-                                  ).length
-                                }
-                                건 · 매수{" "}
-                                {
-                                  group.items.filter(
-                                    (item) => item.side === "buy",
-                                  ).length
-                                }
-                                건
-                              </span>
-                            </div>
-                            <ul
-                              style={{
-                                margin: 0,
-                                paddingLeft: 18,
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: 4,
-                              }}
-                            >
-                              {group.items.map((item) => (
-                                <li key={item.key}>
-                                  <strong
-                                    style={{
-                                      color:
-                                        item.side === "sell"
-                                          ? "var(--down-color, #2f6fd0)"
-                                          : "var(--up-color, #d64545)",
-                                    }}
-                                  >
-                                    {item.title}
-                                  </strong>{" "}
-                                  — {item.text}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        ))}
-                        {/* 월초 슬리브 리밸런싱 안내문은 제거했다 — 실제 할 일은 위 지시 목록에
-                            이미 나오는데 "다시 맞추세요" 명령문이 별도 수동 작업처럼 읽혔다. */}
-                      </div>
+                      <ActionGroupList groups={todayActionGroups} />
                     )}
+                    {/* 월초 슬리브 리밸런싱 안내문은 제거했다 — 실제 할 일은 위 지시 목록에
+                        이미 나오는데 "다시 맞추세요" 명령문이 별도 수동 작업처럼 읽혔다. */}
                   </div>
+
+                  {/* ⑤ 내일의 액션 — 다음 거래일 주문. 장중에는 잠정 판정이라 마감까지 바뀔 수
+                      있고, 슬랙 알림은 실행일이 오늘이 되는 아침에 발송된다. */}
+                  {laterActionGroups.length > 0 ? (
+                    <div>
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                        내일의 액션
+                        <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
+                          다음 거래일 주문 — 장중에는 잠정 판정이라 마감까지 바뀔 수 있습니다 · 슬랙 알림은 실행일 아침에 발송
+                        </span>
+                      </div>
+                      <ActionGroupList groups={laterActionGroups} />
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>

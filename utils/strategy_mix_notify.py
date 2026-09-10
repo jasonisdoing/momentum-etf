@@ -4,6 +4,11 @@
 발송 조건은 **새 지시 또는 수량 증가**다 — 지시가 줄거나 사라지는 변화(체결 반영,
 증권사 동기화)는 조용히 넘긴다. 매번 전체 목록을 보내면 체결할 때마다 알람이 와서
 소음이 된다. 상태는 DB(system_config)에 남긴다(신고가 알림과 같은 패턴).
+
+**오늘의 액션(`section == "today"`)만 보낸다**(2026-09) — 내일의 액션(다음 거래일,
+장중 잠정 판정)은 지시가 계속 바뀌어 반복 알림이 됐다. 그 시장 현지 날짜가 실행일이
+되는 아침 배치에서 오늘의 액션이 되어 새 지시로 감지·발송된다(개장 전 주문 타이밍).
+화면은 오늘·내일 두 섹션을 모두 보여준다.
 """
 
 from __future__ import annotations
@@ -88,9 +93,9 @@ def notify_all(country: str | None = None) -> dict[str, Any]:
             logger.warning("[MIX-NOTIFY] %s 계산 실패: %s", account_id, exc)
             results.append({"account_id": account_id, "name": target["name"], "error": str(exc)})
             continue
-        # (예상) 그룹도 포함 — 처음 등장할 때 1건 발송되고, 종가 확정 후 확정 지시로 바뀌면
-        # 키가 달라져 다시 1건 나간다. 경계에서 빠졌다 재진입하면 재발송된다(예상 알림의 비용).
-        groups = positions["actions"]["groups"]
+        # 오늘의 액션만 발송·비교한다 — 내일의 액션(장중 잠정 판정)은 제외. 상태 비교에서도
+        # 빼야, 실행일 아침에 오늘의 액션이 되는 순간 새 지시로 발송된다.
+        groups = [group for group in positions["actions"]["groups"] if group.get("section") == "today"]
         current = {item["key"]: int(item.get("quantity") or 0) for group in groups for item in group["items"]}
         stored = _load_state(account_id)
         grown = {key: qty for key, qty in current.items() if qty > int(stored.get(key, 0))}
@@ -126,7 +131,8 @@ def send_test(account_id: str) -> dict[str, Any]:
     if not sleeves or not all(row["strategy"] and row["pool"] for row in sleeves):
         raise ValueError(f"'{account_id}' 에 합성 슬리브가 설정돼 있지 않습니다.")
     positions = mix_positions(account_id)
-    groups = positions["actions"]["groups"]
+    # 실제 알람과 같은 범위 — 오늘의 액션만.
+    groups = [group for group in positions["actions"]["groups"] if group.get("section") == "today"]
     name = str(settings.get("name") or account_id)
     message = _format_message(name, groups) if groups else f"🧭 합성 오늘의 액션 — {name}\n(지시 없음)"
     send_slack_message_v2("[테스트] " + message)
