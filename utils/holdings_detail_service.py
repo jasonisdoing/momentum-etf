@@ -10,11 +10,11 @@ from config import BUCKET_MAPPING
 from services.price_service import get_exchange_rates
 from utils.account_registry import load_account_configs
 from utils.assets_service import load_cash_accounts
+from utils.assets_share_allocation import AssetShareTarget, allocate_asset_shares
 from utils.asx_ticker import ensure_asx_prefix, strip_asx_prefix
 from utils.cash_model import cash_total_krw
 from utils.logger import get_app_logger
 from utils.portfolio_io import load_portfolio_master, load_real_holdings_table, save_portfolio_master
-from utils.share_allocation import ShareTarget, allocate_integer_shares
 
 logger = get_app_logger()
 
@@ -96,7 +96,7 @@ def _apply_target_metrics(
         return rate if rate > 0 else None
 
     enriched_rows: list[dict[str, Any]] = []
-    allocation_targets: list[ShareTarget] = []
+    allocation_targets: list[AssetShareTarget] = []
     for row in rows:
         target_ratio = target_map.get(_normalize_target_ticker(str(row.get("ticker") or "")))
         next_row = dict(row)
@@ -113,7 +113,7 @@ def _apply_target_metrics(
             # NaN 은 `<= 0` 비교를 통과하므로(NaN 비교는 항상 False) 유한성 검사를 먼저 한다.
             if math.isfinite(price_krw) and price_krw > 0:
                 allocation_targets.append(
-                    ShareTarget(
+                    AssetShareTarget(
                         key=str(next_row.get("ticker") or ""),
                         target_amount=account_total_krw * (target_ratio / 100.0),
                         price=price_krw,
@@ -122,11 +122,13 @@ def _apply_target_metrics(
             next_row["target_quantity"] = None  # 배분 후 채운다
         enriched_rows.append(next_row)
 
-    # 종목마다 따로 내림하면 1주 값에 걸려 남은 몫이 현금으로 놀고 아무도 다시 쓰지 않는다.
-    # 합성 전략·백테스트와 **같은 함수**로 한 번에 배분한다.
-    quantities = allocate_integer_shares(
-        allocation_targets, budget=sum(item.target_amount for item in allocation_targets)
+    # 자산 화면만 잔여 예산을 추가 배분한다. 합성의 내림·최소 1주 규칙과 공유하지 않는다.
+    cash_ratio = float((cash_info or {}).get("cash_target_ratio") or 0.0)
+    fixed_value = sum(float(row.get("valuation_krw") or 0.0) for row in rows if row.get("ticker") == "IS")
+    budget = min(
+        sum(item.target_amount for item in allocation_targets), account_total_krw * (1 - cash_ratio / 100) - fixed_value
     )
+    quantities = allocate_asset_shares(allocation_targets, budget=budget)
     for row in enriched_rows:
         if row.get("target_ratio") is not None and str(row.get("ticker") or "") in quantities:
             row["target_quantity"] = quantities[str(row["ticker"])]
