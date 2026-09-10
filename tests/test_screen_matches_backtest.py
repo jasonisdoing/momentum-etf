@@ -263,6 +263,8 @@ class PortfolioMixStateTest(unittest.TestCase):
             ({"A": [100, 90, 90], "B": [100, 320 / 3, 320 / 3], "C": [100, 320 / 3, 320 / 3]}, [40, 30, 30], 0, (0, 0)),
             # 매도 비용이 있는 경우에도 실제 체결 후 비중을 공유한다.
             ({"A": [100, 200, 220], "B": [100, 100, 100]}, [40, 40], 20, (0.1, 0.2)),
+            # 상장 전 현금과 첫 가격 이후 보유를 개별 화면·합성이 같은 엔진에서 받는다.
+            ({"A": [100, 100, 100], "B": [float("nan"), float("nan"), 100]}, [40, 40], 20, (0, 0)),
         ]
         for prices, weights, cash, slippage in cases:
             with self.subTest(prices=prices, cash=cash, slippage=slippage):
@@ -300,6 +302,10 @@ class PortfolioMixStateTest(unittest.TestCase):
             result = run_backtest(12, settings, start_date=dates[0])
             screen = current_positions(settings)
         self.assertEqual(screen["open_positions"], result["open_positions"])
+        self.assertEqual(result["start_date"], dates[0])
+        if frame.iloc[0].isna().any():
+            self.assertAlmostEqual(result["daily"][0]["cash_weight_pct"], 60)
+            self.assertEqual([t["date"] for t in result["trades"] if t["ticker"] == "B"], [dates[-1]])
         self.assertEqual(screen["sleeve_cash_weight_pct"], result["sleeve_cash_weight_pct"])
         spec = SleeveSpec("a", "portfolio", "test", settings)
         with (

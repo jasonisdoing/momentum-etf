@@ -11,7 +11,7 @@ import { AppLoadingState } from "../components/AppLoadingState";
 import { AppModal } from "../components/AppModal";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { renderStockNameCell } from "@/lib/name-highlight";
-import { stockMemoColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
+import { signColor, stockMemoColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { reorderHoldings } from "@/lib/holdings-store";
@@ -1023,6 +1023,22 @@ export function AccountHoldingsDetailPanel({
       },
     },
     {
+      colId: "trade_quantity",
+      headerName: "매매",
+      headerTooltip: "목표수량 − 수량. +는 매수, −는 매도",
+      width: 84,
+      type: "rightAligned",
+      valueGetter: ({ data: row }) => {
+        if (!row || row.id === "__adding__" || row.ticker === CASH_ROW_TICKER || row.ticker === "IS") return null;
+        if (row.target_quantity == null || row.quantity == null) return null;
+        const target = Number(row.target_quantity);
+        const held = Number(row.quantity);
+        return Number.isFinite(target) && Number.isFinite(held) ? Math.round(target) - held : null;
+      },
+      valueFormatter: ({ value }) => value == null ? "-" : `${value > 0 ? "+" : ""}${Number(value).toLocaleString("ko-KR")}`,
+      cellStyle: ({ value }) => ({ color: value === 0 ? "#000000" : signColor(value), fontWeight: 700 }),
+    },
+    {
       field: "quantity",
       // 다섯 자리 + 천 단위 쉼표("12,345")까지 안 잘리게. 헤더보다 값이 넓다.
       headerName: "수량",
@@ -1437,4 +1453,3 @@ export function AccountHoldingsDetailPanel({
     </div>
   );
 }
-

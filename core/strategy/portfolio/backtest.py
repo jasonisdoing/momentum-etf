@@ -44,18 +44,23 @@ def simulate_portfolio(
     shares: dict[str, float] = {}
     cash = 1.0
     trades: list[dict[str, Any]] = []
+    first_prices = {ticker: close_df[ticker].first_valid_index() for ticker in tickers}
 
-    def rebalance_to_target(day: pd.Timestamp, reason: str) -> None:
+    def total_value(prices: pd.Series) -> float:
+        """미상장 종목은 주수가 없으며, 보유한 종목만 유효 가격으로 평가한다."""
+        return cash + sum(quantity * float(prices[ticker]) for ticker, quantity in shares.items() if quantity)
+
+    def rebalance_to_target(day: pd.Timestamp, reason: str, selected: list[str]) -> None:
         """밴드를 벗어난 종목을 매도한 뒤 가용 현금으로 매수한다."""
         nonlocal cash
         prices = close_df.loc[day]
-        total = cash + sum(shares.get(t, 0.0) * float(prices[t]) for t in tickers)
+        total = total_value(prices)
         if total <= 0:
             return
         orders: list[tuple[str, float, float]] = []
-        for ticker in tickers:
+        for ticker in selected:
             price = float(prices[ticker])
-            if price <= 0:
+            if pd.isna(price) or price <= 0:
                 continue
             held_value = shares.get(ticker, 0.0) * price
             current_pct = held_value / total * 100.0
@@ -82,12 +87,14 @@ def simulate_portfolio(
         # 밴드 안의 종목을 강제로 팔지 않는다. 부족하면 매수 요청액 비율로 나눈다.
         # 설정한 현금 몫은 남겨 두며, 매수 비용도 이 예산 안에서 지불한다.
         requested = sum(value for _, value, _ in orders if value > 0)
-        available = max(cash - total * cash_target, 0.0)
+        # 아직 살 수 없는 종목의 배정분을 다른 종목 매수에 쓰지 않는다.
+        reserved_weight = cash_target + sum(target_by_ticker[t] for t in tickers if pd.isna(prices[t]))
+        available = max(cash - total * reserved_weight, 0.0)
         scale = min(1.0, available / requested) if requested > 0 else 0.0
         for ticker, diff_value, current_pct in orders:
             if diff_value <= 0 or scale <= 0:
                 continue
-            spend = min(diff_value * scale, max(cash - total * cash_target, 0.0))
+            spend = min(diff_value * scale, max(cash - total * reserved_weight, 0.0))
             if spend <= 0:
                 continue
             fill = float(prices[ticker]) * (1 + buy_slippage / 100.0)
@@ -95,7 +102,7 @@ def simulate_portfolio(
             cash -= spend
             executed.append((ticker, "buy", fill, current_pct))
 
-        final_total = cash + sum(shares.get(t, 0.0) * float(prices[t]) for t in tickers)
+        final_total = total_value(prices)
         for ticker, side, fill, current_pct in executed:
             trades.append(
                 {
@@ -109,7 +116,7 @@ def simulate_portfolio(
                 }
             )
 
-    rebalance_to_target(index[0], "최초 매수")
+    rebalance_to_target(index[0], "최초 매수", tickers)
     current_period = period_key(index[0], rebalance)
 
     curve: list[float] = []
@@ -117,10 +124,14 @@ def simulate_portfolio(
     for day in index:
         period = period_key(day, rebalance)
         if period is not None and period != current_period:
-            rebalance_to_target(day, "리밸런싱")
+            rebalance_to_target(day, "리밸런싱", tickers)
             current_period = period
+        elif day != index[0]:
+            newly_available = [ticker for ticker in tickers if first_prices[ticker] == day]
+            if newly_available:
+                rebalance_to_target(day, "가격 이력 시작 후 최초 매수", newly_available)
         prices = close_df.loc[day]
-        curve.append(cash + sum(shares.get(t, 0.0) * float(prices[t]) for t in tickers))
+        curve.append(total_value(prices))
         cash_curve[day] = cash / curve[-1] * 100.0
 
     return {
