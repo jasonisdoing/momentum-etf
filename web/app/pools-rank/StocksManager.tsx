@@ -1140,6 +1140,20 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return formatPrice(params.value ?? null, rowCurrency);
         },
       },
+      // 단기 수익률(1주·2주·1달)은 현재가 바로 오른쪽 — 최근 흐름을 가격과 붙여 본다.
+      ...(["1주(%)", "2주(%)", "1달(%)"] as const).map(
+        (field) =>
+          ({
+            field,
+            headerName: field.replace("(%)", ""),
+            hide: metricMode !== "basic",
+            minWidth: 88,
+            width: 88,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null | undefined }) =>
+              renderSignedPercentCell(params.value ?? null),
+          }) as ColDef<RankGridRow>,
+      ),
       // 공용 컬럼 — 전략 화면들과 같은 정의. 이 화면의 행 필드명만 한국어라 지정해 준다.
       tradeValueMultColumn<RankGridRow>({
         field: "거래대금",
@@ -1239,24 +1253,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return null;
         },
       },
-      {
-        field: "1주(%)",
-        headerName: "1주",
-        minWidth: 88,
-        width: 88,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
-      },
-      {
-        field: "2주(%)",
-        headerName: "2주",
-        minWidth: 88,
-        width: 88,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
-      },
       ...[
-        { field: "1달(%)", headerName: "1달" },
         { field: "3달(%)", headerName: "3달" },
         { field: "6달(%)", headerName: "6달" },
         { field: "12달(%)", headerName: "1년" },
