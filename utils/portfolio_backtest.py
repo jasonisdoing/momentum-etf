@@ -138,15 +138,15 @@ def run_backtest(
     if with_live_last_bar:
         close_df, benchmark_close = _overlay_live_last_bar(pool, close_df, benchmark_close)
 
-    # 구간 — 종목·벤치마크가 모두 있는 날만 쓴다.
-    index = close_df.dropna().index.intersection(benchmark_close.index)
+    # 상장 전 종목의 빈 가격 때문에 다른 종목의 운용 기간을 줄이지 않는다.
+    index = benchmark_close.index
     if len(index) < 2:
         raise RuntimeError("종목과 벤치마크의 공통 가격 구간이 부족합니다.")
     start = pd.Timestamp(start_date) if start_date is not None else index[-1] - pd.DateOffset(months=months)
     index = index[index >= start]
     if len(index) < 2:
         raise RuntimeError(f"{months}개월치 가격이 부족합니다.")
-    close_df = close_df.loc[index, tickers]
+    close_df = close_df.reindex(index=index, columns=tickers).ffill()
     benchmark_close = benchmark_close.loc[index]
 
     # ── 시뮬레이션 — 핵심 계산은 core 로 분리했다(외부 조회 없는 순수 함수) ──
@@ -190,6 +190,7 @@ def run_backtest(
                 * 100.0,
             }
             for ticker in tickers
+            if shares.get(ticker, 0.0) > 0
         ],
         "sleeve_cash_weight_pct": cash / float(strategy.iloc[-1]) * 100.0,
         "end_date": str(index[-1].date()),

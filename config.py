@@ -221,7 +221,7 @@ ADR_FLOOR_OPTIONS: tuple[int | None, ...] = (None, 85, 90, 95)
 # 청산선(0선) 바로 위의 종목을 사서 하루 만에 되파는 왕복을 막는다(진입에만 적용, 청산 불변).
 # None = 문턱 없음(기본·첫 선택지 = 미설정 풀의 보정값이라 도입 전 동작과 같다).
 # 12·24개월 검증에서 한국 풀만 유효(kor_etf 2.0, kor_stock 1.5~2.0), 미국은 무효(없음 권장).
-ENTRY_VOL_MULT_OPTIONS: tuple[float | None, ...] = (None, 1.0, 1.5, 2.0, 2.5)
+ENTRY_VOL_MULT_OPTIONS: tuple[float | None, ...] = (None, 1.0, 2.0, 3.0)
 
 # 거래대금 하한 — 평소(20일 평균) 대비 몇 배 이상이어야 신호로 인정할지. None = 제한 없음.
 # **국가별**이다 — 이평선 선택지(SHORT_MA_DAYS_BY_COUNTRY)와 같은 방식으로, 신고가의
