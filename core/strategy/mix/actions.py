@@ -61,13 +61,19 @@ def build_action_groups(
     target_schedule: dict[str, dict[str, Any]],
     adjustment_day: str | None = None,
     adjustment_intraday: bool = False,
+    today: str | None = None,
     currency: str = "KRW",
 ) -> list[dict[str, Any]]:
     """날짜별 엔진 목표 차이를 주문으로 만든다. 이후 주문은 앞선 목표 달성을 전제로 한다.
 
     ``adjustment_day`` 는 이벤트 없는 조정의 기준일(마감 전이면 오늘) — 엔진 예정 주문의
     체결일(다음 거래일 시가)과 다를 수 있다. ``adjustment_intraday`` 면 그 그룹 제목을
-    '시가'가 아니라 '장중'으로 단다(오늘 시가는 이미 지났다)."""
+    '시가'가 아니라 '장중'으로 단다(오늘 시가는 이미 지났다).
+
+    ``today`` 는 **그 시장의 현지 오늘**(YYYY-MM-DD)이다. 그룹마다 ``section`` 을 단다 —
+    실행일이 오늘이면 "today"(오늘의 액션: 개장 전 시가 체결·장중 지금 주문), 그 뒤면
+    "later"(내일의 액션 — 다음 거래일, 연휴면 실제로는 며칠 뒤). 화면은 두 섹션으로
+    나눠 보여주고, 슬랙 알람은 "today" 만 보낸다. 미지정(None)이면 전부 "later" 다."""
     baseline_day = adjustment_day or next_trading_day
     # 다른 종목의 오늘 주문 때문에 미래 진입 종목을 오늘의 0주 목표로 먼저 청산하지 않는다.
     first_event: dict[str, str] = {}
@@ -151,6 +157,7 @@ def build_action_groups(
     for group in groups:
         for item in group["items"]:
             item["key"] = f"{item['key']}-{item['date']}"
+        group["section"] = "today" if today is not None and group["key"] == today else "later"
     return groups
 
 

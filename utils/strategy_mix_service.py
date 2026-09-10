@@ -1117,6 +1117,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         currency=currency,
         adjustment_day=adjustment_day,
         adjustment_intraday=adjustment_intraday,
+        today=today_local.strftime("%Y-%m-%d"),
         target_schedule=target_schedule if account is not None else {},
     )
     # 슬리브별 값을 `slots[키]` 로 모아 내보낸다 — 화면은 슬롯 키를 돌며 읽는다.
