@@ -634,6 +634,12 @@ def _read_queue_averages(sample_size: int = AVERAGE_SAMPLE_SIZE) -> dict[str, di
     }
 
 
+def _job_estimate_for_owner(job_key: str, owner: str, averages: dict[str, dict[str, float]]) -> float | None:
+    """실행 환경에 해당하는 큐 이력만 사용한다. 반대 환경의 시간으로 대체하지 않는다."""
+    metric = "elapsed_local" if owner.strip().lower() == "local" else "elapsed_server"
+    return averages.get(job_key.split(":")[0], {}).get(metric)
+
+
 def _read_average_job_elapsed_seconds(job_key: str, sample_size: int = AVERAGE_SAMPLE_SIZE) -> float | None:
     """최근 성공 실행의 평균 소요시간(초)을 반환한다. 성공 로그가 없으면 최근 종료 로그를 사용한다."""
     log_path = _LOG_DIR / f"{job_key}.log"
@@ -912,7 +918,8 @@ def _cleanup_stale_locks() -> int:
         now_kst = datetime.now(kst)
         now_utc = datetime.now(timezone.utc)
         deleted = 0
-        for doc in db.batch_locks.find({}, {"_id": 1, "acquired_at": 1, "expires_at": 1}):
+        queue_averages = _read_queue_averages()
+        for doc in db.batch_locks.find({}, {"_id": 1, "acquired_at": 1, "expires_at": 1, "app_type": 1}):
             key = str(doc.get("_id") or "")
             if key.split(":")[0] not in _SCRIPT_BY_ACTION:
                 continue
@@ -947,7 +954,8 @@ def _cleanup_stale_locks() -> int:
             if elapsed_seconds <= 0:
                 continue
 
-            estimated_seconds = _read_average_job_elapsed_seconds(key)
+            owner_app_type = (str(doc.get("app_type") or "") or "PROD").strip()
+            estimated_seconds = _job_estimate_for_owner(key, owner_app_type, queue_averages)
             should_delete = False
             reason = ""
             if estimated_seconds is not None and estimated_seconds > 0:
@@ -1059,6 +1067,7 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
         now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
         my_app_type = (os.environ.get("APP_TYPE") or "PROD").strip() or "PROD"
         details: dict[str, dict[str, object]] = {}
+        queue_averages = _read_queue_averages()
 
         # 1) batch_locks 기반 (락이 살아있는 작업)
         for doc in db.batch_locks.find({}, {"_id": 1, "expires_at": 1, "acquired_at": 1, "app_type": 1}):
@@ -1082,14 +1091,14 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
                     else acquired_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
                 )
 
-            estimated_seconds = _read_average_job_elapsed_seconds(key.split(":")[0])
+            owner_app_type = (str(doc.get("app_type") or "") or "PROD").strip()
+            estimated_seconds = _job_estimate_for_owner(key, owner_app_type, queue_averages)
             elapsed_seconds = max(0, int((now_kst - started_at).total_seconds())) if started_at else None
             remaining_seconds = (
                 max(0, int(round(estimated_seconds)) - int(elapsed_seconds))
                 if estimated_seconds is not None and elapsed_seconds is not None
                 else None
             )
-            owner_app_type = (str(doc.get("app_type") or "") or "PROD").strip()
             is_mine = owner_app_type.lower() == my_app_type.lower()
             details[key] = {
                 "started_at": started_at.isoformat() if started_at else None,
@@ -1139,7 +1148,8 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
                         if started_raw.tzinfo
                         else started_raw.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
                     )
-                q_estimated_seconds = _read_average_job_elapsed_seconds(key.split(":")[0])
+                owner_app_type = (str(doc.get("app_type") or "") or "Server").strip()
+                q_estimated_seconds = _job_estimate_for_owner(key, owner_app_type, queue_averages)
                 q_elapsed_seconds = (
                     max(0, int((now_kst - queue_started_at).total_seconds())) if queue_started_at else None
                 )
@@ -1148,7 +1158,6 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
                     if q_estimated_seconds is not None and q_elapsed_seconds is not None
                     else None
                 )
-                owner_app_type = (str(doc.get("app_type") or "") or "Server").strip()
                 is_mine = owner_app_type.lower() == my_app_type.lower()
                 details[key] = {
                     "started_at": queue_started_at.isoformat() if queue_started_at else None,
