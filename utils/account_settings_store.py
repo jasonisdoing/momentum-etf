@@ -57,9 +57,9 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "stoploss_alarm_enabled",
 )
 
-# 합성 슬롯 — 최소 둘(합성이려면 섞을 것이 둘은 있어야 한다), 최대 셋.
+# 합성 슬롯 — 최소 하나(전략 하나만 계좌에서 굴리는 용도도 허용, 2026-09), 최대 넷.
 # 슬롯을 가리키는 키는 배열 순서로 준다(첫째 "a", 둘째 "b", 셋째 "c") — 저장하지 않는다.
-MIN_MIX_SLEEVES = 2
+MIN_MIX_SLEEVES = 1
 MAX_MIX_SLEEVES = 4
 MIX_SLEEVE_KEYS: tuple[str, ...] = ("a", "b", "c", "d")
 
