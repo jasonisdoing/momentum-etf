@@ -1256,7 +1256,7 @@ export function StrategyMixClient() {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [slackTesting, setSlackTesting] = useState(false);
   // 슬롯 개수 제한 — 백엔드 상수가 단일 소스(응답으로 받는다).
-  const minSleeves = meta?.min_sleeves ?? 2;
+  const minSleeves = meta?.min_sleeves ?? 1;
   const maxSleeves = meta?.max_sleeves ?? SLOT_KEY_ORDER.length;
   useEffect(() => {
     setSlackEnabled(Boolean(selectedAccount?.mix_slack_enabled));
