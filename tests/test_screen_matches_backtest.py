@@ -26,6 +26,30 @@ NEW_HIGH_POOL = "us_stock"
 MIX_ACCOUNT = "us_test"
 
 
+def _mix_account() -> str:
+    """검증에 쓸 합성 계좌 — 기본 계좌가 합성을 껐으면 켜져 있는 첫 계좌로 대체한다.
+
+    검증 대상은 '합성 = 슬리브 백테스트' 관계지 특정 계좌가 아니다. 계좌 설정 토글에
+    테스트가 좌우되면 안 된다. 켜진 계좌가 없으면 건너뛴다.
+    """
+    from utils.strategy_mix_service import _resolve_mix_account
+
+    candidates = [MIX_ACCOUNT]
+    try:
+        from utils.strategy_mix_service import mix_accounts
+
+        candidates += [row["account_id"] for row in mix_accounts() if row["account_id"] not in candidates]
+    except Exception:  # noqa: BLE001 - 목록 조회 실패는 아래 개별 시도에서 걸러진다
+        pass
+    for account_id in candidates:
+        try:
+            _resolve_mix_account(account_id)
+        except Exception:  # noqa: BLE001 - 조합 미완성 계좌는 다음 후보로
+            continue
+        return account_id
+    raise unittest.SkipTest("합성 전략을 운용하는 계좌가 없습니다.")
+
+
 def _load_env() -> None:
     from utils.env import load_env_if_present
 
@@ -160,8 +184,9 @@ class MixScreenMatchesSleeveBacktests(unittest.TestCase):
         from utils.strategy_mix_service import _resolve_mix_account, mix_positions
 
         try:
-            ctx = _resolve_mix_account(MIX_ACCOUNT)
-            screen = mix_positions(MIX_ACCOUNT)
+            account_id = _mix_account()
+            ctx = _resolve_mix_account(account_id)
+            screen = mix_positions(account_id)
             expected = _expected_mix_targets(ctx)
         except Exception as error:  # noqa: BLE001
             _skip_if_unavailable(error)
@@ -226,8 +251,9 @@ class IntradayScreenMixConsistencyTest(unittest.TestCase):
             ):
                 from utils.mix_sleeve import PORTFOLIO, current_state
 
-                ctx = _resolve_mix_account(MIX_ACCOUNT)
-                mix = mix_positions(MIX_ACCOUNT)
+                account_id = _mix_account()
+                ctx = _resolve_mix_account(account_id)
+                mix = mix_positions(account_id)
                 expected = _expected_mix_targets(ctx)
                 slot_positions = {spec.key: current_state(spec) for spec in ctx["slots"] if spec.strategy != PORTFOLIO}
         except Exception as error:  # noqa: BLE001
