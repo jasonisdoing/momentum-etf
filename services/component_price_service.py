@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time as _time_module
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
@@ -526,10 +527,24 @@ def _fetch_cached_baseline_prices(
     return result
 
 
+# 콜드 조회 시 종목 간 간격(초) — 가격 캐시 배치(KOR_FETCH_TARGET_SECONDS)와 같은 이유다.
+# KRX 는 무지연 연속 자동 호출을 차단(연결 리셋)한다. 기준일 종가는 아래 영속 캐시로
+# 한 번만 받으면 되므로, 이 간격은 처음 보는 종목에만 든다.
+_PYKRX_BASELINE_INTERVAL_SECONDS = 1.0
+
+
 def _fetch_pykrx_baseline_prices(
     tickers: list[str],
     base_date: str,
 ) -> dict[str, dict[str, Any]]:
+    """가격 캐시에 없는 구성종목의 기준일 종가 — pykrx(KRX) 폴백.
+
+    기준일 종가는 불변이라 **영속 캐시**(야후 baseline 과 같은 컬렉션, "KRX:" 접두)를
+    먼저 본다. 예전에는 비교 화면을 열 때마다 같은 누락 종목을 KRX 에 무지연 연속
+    조회해서, KRX 가 연결을 리셋하면 종목마다 타임아웃을 기다리며 화면이 몇 분씩
+    멈췄다(2026-09-11). 연결 오류가 나면 남은 종목 조회도 중단한다 — 리셋 상태에서는
+    다음 종목도 똑같이 실패하며 대기만 쌓인다.
+    """
     try:
         from pykrx import stock as _stock
     except ImportError:
@@ -540,8 +555,18 @@ def _fetch_pykrx_baseline_prices(
     start_str = start_ts.strftime("%Y%m%d")
     end_str = base_ts.strftime("%Y%m%d")
 
-    result: dict[str, dict[str, Any]] = {}
-    for ticker in tickers:
+    # 0) 영속 캐시 조회 — (symbol, base_date) 별 불변 값.
+    cache_keys = [(f"KRX:{ticker}", base_date, False) for ticker in tickers]
+    persisted = _load_persisted_yahoo_baselines(cache_keys)
+    result: dict[str, dict[str, Any]] = {
+        ticker: data for (symbol, _bd, _ip), data in persisted.items() for ticker in [symbol[len("KRX:") :]]
+    }
+
+    fetched: dict[tuple[str, str, bool], dict[str, Any]] = {}
+    remaining = [ticker for ticker in tickers if ticker not in result]
+    for index, ticker in enumerate(remaining):
+        if index:
+            _time_module.sleep(_PYKRX_BASELINE_INTERVAL_SECONDS)
         try:
             df = _stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
             if df is None or df.empty:
@@ -553,12 +578,21 @@ def _fetch_pykrx_baseline_prices(
             close_series = close_series[close_series > 0]
             if close_series.empty:
                 continue
-            result[ticker] = {
+            entry = {
                 "price": float(close_series.iloc[-1]),
                 "date": pd.Timestamp(close_series.index[-1]).strftime("%Y-%m-%d"),
             }
+            result[ticker] = entry
+            fetched[(f"KRX:{ticker}", base_date, False)] = entry
         except Exception as exc:
             logger.warning("pykrx 기준일 가격 조회 실패(ticker=%s): %s", ticker, exc)
+            if isinstance(exc, OSError) or "Connection" in str(exc):
+                logger.warning(
+                    "KRX 연결 오류 — 남은 %d개 종목의 기준일 조회를 중단합니다(다음 요청에서 재시도).",
+                    len(remaining) - index - 1,
+                )
+                break
+    _persist_yahoo_baselines(fetched)
     return result
 
 

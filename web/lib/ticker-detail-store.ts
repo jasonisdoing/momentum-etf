@@ -67,22 +67,6 @@ export async function loadTickerDetailData(params: {
   return fetchFastApiJson<TickerDetailData>(`/internal/ticker-detail?${search.toString()}`);
 }
 
-// 여러 ETF 상세를 한 번에 — 구성종목 합집합을 1회만 조회해 공유한다.
-// 같은 구성종목이 여러 ETF에 나와도 동일 시세/변동률로 보이고 중복 조회가 사라진다.
-export async function loadTickerDetailCompare(
-  items: { ticker: string; ticker_type: string; country_code: string }[],
-  includeHoldings: boolean = true,
-): Promise<{ results: TickerDetailData[] }> {
-  // 여러 ETF를 한 요청에서 계산하므로(특히 미국 구성종목 ETF) 첫 콜드 호출은 오래 걸릴 수 있다.
-  // 기본 30초로는 잘리므로 90초로 늘린다(이후 결과 캐시로 즉시 응답).
-  return fetchFastApiJson<{ results: TickerDetailData[] }>(
-    `/internal/ticker-detail/compare`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // include_holdings=false 면 구성종목 계산을 건너뛴다(성과분석·월간분석 탭).
-      body: JSON.stringify({ items, include_holdings: includeHoldings }),
-    },
-    90_000,
-  );
-}
+// 비교(여러 ETF 일괄) 호출은 SSE 스트림으로 이전했다 — `/api/ticker-detail-compare` 가
+// `stream-proxy` 로 FastAPI `/internal/ticker-detail/compare` 를 그대로 통과시킨다.
+// JSON 일괄 응답은 8종목 × 구성종목 조회에서 프록시 타임아웃(90초)에 걸려 폐기했다.
