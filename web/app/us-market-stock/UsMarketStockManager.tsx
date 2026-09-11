@@ -181,6 +181,7 @@ export function UsMarketStockManager({
   const [rows, setRows] = useState<UsMarketStockRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [tickerPools, setTickerPools] = useState<StocksAccountItem[]>([]);
+  const [tickerSearch, setTickerSearch] = useState("");
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
   const [registeredTickers, setRegisteredTickers] = useState<Set<string>>(new Set());
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -284,9 +285,21 @@ export function UsMarketStockManager({
     [visibleRows],
   );
 
+  // 검색 — 순위 화면과 같은 방식(티커·종목명 부분 일치). `#` 번호는 전체 목록 기준을 유지한다.
+  const searchedGridRows = useMemo(() => {
+    const query = tickerSearch.trim().toLocaleLowerCase();
+    if (!query) return gridRows;
+    return gridRows.filter((row) => {
+      const ticker = String(row.ticker ?? "").toLocaleLowerCase();
+      const name = String(row.name ?? "").toLocaleLowerCase();
+      const englishName = String(row.english_name ?? "").toLocaleLowerCase();
+      return ticker.includes(query) || name.includes(query) || englishName.includes(query);
+    });
+  }, [gridRows, tickerSearch]);
+
   const allVisibleSelected = useMemo(() => {
-    return gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker));
-  }, [gridRows, selectedTickers]);
+    return searchedGridRows.length > 0 && searchedGridRows.every((row) => selectedTickers.includes(row.ticker));
+  }, [searchedGridRows, selectedTickers]);
 
   const toggleTickerSelection = useCallback((ticker: string) => {
     setSelectedTickers((current) =>
@@ -295,7 +308,7 @@ export function UsMarketStockManager({
   }, []);
 
   const toggleSelectAllVisible = useCallback(() => {
-    const selectableTickers = gridRows
+    const selectableTickers = searchedGridRows
       .map((row) => row.ticker);
     setSelectedTickers((current) => {
       if (selectableTickers.length === 0) return current;
@@ -305,7 +318,7 @@ export function UsMarketStockManager({
       }
       return [...new Set([...current, ...selectableTickers])];
     });
-  }, [gridRows, registeredTickers]);
+  }, [searchedGridRows, registeredTickers]);
 
   const handleOpenAddModal = useCallback(() => {
     if (selectedTickers.length === 0) return;
@@ -598,6 +611,18 @@ export function UsMarketStockManager({
                     placeholder="최소 시가총액(억 달러)"
                   />
                 </label>
+
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">검색</span>
+                  <input
+                    className="form-control"
+                    type="search"
+                    value={tickerSearch}
+                    placeholder="티커 또는 종목명"
+                    aria-label="티커 또는 종목명 검색"
+                    onChange={(event) => setTickerSearch(event.target.value)}
+                  />
+                </label>
               </div>
               <div className="appMainHeaderRight">
                 <button
@@ -624,7 +649,7 @@ export function UsMarketStockManager({
           <div className="appGridFillWrap">
             <AppAgGrid<UsMarketStockGridRow>
               className="usMarketStockGrid"
-              rowData={gridRows}
+              rowData={searchedGridRows}
               columnDefs={columnDefs}
               loading={loading}
               theme={usMarketStockGridTheme}
