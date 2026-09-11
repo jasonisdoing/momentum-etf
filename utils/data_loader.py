@@ -1618,13 +1618,10 @@ def _get_display_name(country: str, ticker: str) -> str:
     except Exception:
         pass
 
-    if not name:
-        try:
-            if country_code == "kor":
-                name = fetch_pykrx_name(ticker)
-        except Exception:
-            pass
-
+    # 여기서 pykrx 로 되묻지 않는다 — `fetch_pykrx_name` 이 마지막 폴백으로 이 함수를
+    # 부르므로, 여기서 다시 pykrx 를 부르면 이름이 어디에도 없는 티커에서 상호 무한
+    # 재귀가 됐다(종목 추가 검증이 RecursionError 폭주로 타임아웃, 2026-09-11).
+    # 이 함수의 역할은 풀 목록의 저장 이름 조회까지다. 못 찾으면 빈 이름이 답이다.
     _etf_name_cache[key] = name or ""
     return _etf_name_cache[key]
 
