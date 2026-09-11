@@ -220,7 +220,7 @@ def _build_action_group_stage(
     *,
     currency: str = "KRW",
 ) -> list[dict[str, Any]]:
-    """오늘의 액션 — 체결일 묶음(매도 먼저, 같은 방향은 티커 순).
+    """오늘의 액션 — 체결일 묶음(묶음 안 순서는 보유 표와 같은 종목 순서).
 
     화면과 슬랙 알람이 **이 결과를 그대로** 쓴다 — 조립을 한 곳에 두어 둘이 어긋나지
     않게 한다. 규칙:
@@ -340,9 +340,12 @@ def _build_action_group_stage(
         reason_text = " · ".join(reason["label"] for reason in item["reasons"])
         item["text"] += f" · 사유: {reason_text}"
         by_date.setdefault(item["date"] or "", []).append(item)
+    # 그룹 안 순서는 **보유 표(그리드) 순서** 그대로다(2026-09) — 예전에는 매도 먼저·티커순
+    # 이었는데, 표에서 종목을 찾아가며 주문하기에는 표와 같은 순서가 읽기 쉽다.
+    grid_order = {str(row.get("ticker") or ""): index for index, row in enumerate(holdings)}
     groups = []
     for date in sorted(by_date):
-        group_items = sorted(by_date[date], key=lambda x: (0 if x["side"] == "sell" else 1, x["ticker"]))
+        group_items = sorted(by_date[date], key=lambda x: grid_order.get(x["ticker"], len(grid_order)))
         title = f"{_format_date_weekday(date)} 시가" if date else "체결일 미정"
         groups.append({"key": date or "unscheduled", "title": title, "items": group_items})
 

@@ -451,7 +451,7 @@ type PositionRow = Holding & {
   shares: number | null;
 };
 
-/** 오늘의 액션 한 줄. 같은 체결 시점끼리 묶고 묶음 안에서는 매도 → 매수 순서다. */
+/** 오늘의 액션 한 줄. 같은 체결 시점끼리 묶고 묶음 안에서는 보유 표와 같은 종목 순서다. */
 type ActionItem = {
   key: string;
   side: "sell" | "buy";
@@ -1912,7 +1912,7 @@ export function StrategyMixClient() {
                     })()}
                   </div>
 
-                  {/* ④ 오늘의 액션 — 실행일이 그 시장의 현지 오늘인 묶음(매도 → 매수 순서). */}
+                  {/* ④ 오늘의 액션 — 실행일이 그 시장의 현지 오늘인 묶음(보유 표와 같은 종목 순서). */}
                   <div>
                     <div style={{ fontWeight: 700, marginBottom: 6 }}>
                       오늘의 액션
