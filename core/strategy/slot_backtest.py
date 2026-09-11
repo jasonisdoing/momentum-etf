@@ -33,7 +33,7 @@ from typing import Any
 
 import pandas as pd
 
-from utils.trade_stats import summarize_trades
+from utils.trade_stats import OPEN_REASON, summarize_trades
 
 
 def _entry_quantities(
@@ -400,6 +400,27 @@ def run_slot_backtest(
     strategy_total = float((strategy.iloc[-1] - 1) * 100)
     benchmark_total = float((benchmark.iloc[-1] - 1) * 100)
 
+    # 체결 목록·거래 통계에 **보유중 행도 포함**한다(2026-09) — 청산분만 보여주면 장기
+    # 이평 설정에서 승자(계속 보유)는 표·통계에서 빠지고 먼저 꺾인 패자만 잡혀, 총수익은
+    # 큰데 승률·평균이익이 초라해 보이는 착시가 났다. 보유중 행은 청산일 없음·청산가
+    # 자리에 현재가(마지막 봉)·수익률은 평가 기준이다. 합성 체결 목록과 같은 형태다.
+    open_trade_rows = [
+        {
+            "ticker": row["ticker"],
+            "name": row["name"],
+            "industry": row["industry"],
+            "entry_date": row["entry_date"],
+            "entry_price": row["entry_price"],
+            "exit_date": None,
+            "exit_price": round(float(row["price"]), 2),
+            "return_pct": row["return_pct"],
+            "days": row["days"],
+            "reason": OPEN_REASON,
+        }
+        for row in open_positions
+    ]
+    all_trades = open_trade_rows + sorted(trades, key=lambda t: t["exit_date"], reverse=True)
+
     return {
         "start_date": str(strategy.index[0].date()),
         "end_date": str(strategy.index[-1].date()),
@@ -413,8 +434,8 @@ def run_slot_backtest(
         "benchmark_mdd_pct": round(_drawdown_pct(benchmark), 2),
         "benchmark_sortino": _sortino(benchmark.pct_change().dropna()),
         "benchmark_name": benchmark_name,
-        **summarize_trades(trades),
-        "trades": sorted(trades, key=lambda t: t["exit_date"], reverse=True),
+        **summarize_trades(all_trades),
+        "trades": all_trades,
         "as_of": str(last_day.date()),
         "open_positions": open_positions,
         # 다음 거래일 시가에 할 일 — 화면은 이걸 읽기만 한다(판정을 다시 하지 않는다).
