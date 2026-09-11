@@ -967,15 +967,26 @@ def _compare_events(payload: dict[str, object]):
             except Exception as exc:
                 raise RuntimeError(f"구성종목 가격 스냅샷 조회 실패: {exc}") from exc
 
+    # 진행·에러 메시지용 종목명 — 풀 목록에서 읽는다(티커만으로는 어떤 종목인지 알기 어렵다).
+    name_by_ticker: dict[tuple[str, str], str] = {}
+    for pool in {str(item.get("ticker_type") or "") for item in pending if item.get("ticker_type")}:
+        try:
+            for row in get_etfs(pool):
+                name_by_ticker[(pool, str(row.get("ticker") or "").strip().upper())] = str(row.get("name") or "")
+        except Exception:  # noqa: BLE001 - 이름은 표시용이라 못 읽으면 티커만 쓴다
+            continue
+
     # 2) ETF 별 detail 을 공유 스냅샷으로 계산 (번들 캐시 우회 → 종목당 동일 값 보장).
     #    **끝나는 즉시 종목 캐시에 저장한다** — 뒤 종목에서 실패해도 앞의 성공분은 남는다.
     total = max(len(pending), 1)
     for index, item in enumerate(pending):
         ticker = str(item.get("ticker") or "")
+        name = name_by_ticker.get((str(item.get("ticker_type") or ""), ticker.strip().upper()), "")
+        label = f"{name}({ticker})" if name else ticker
         yield {
             "type": "progress",
             "percent": round(30 + 65 * index / total),
-            "message": f"{index + 1}/{total} {ticker} 상세 계산 중",
+            "message": f"{index + 1}/{total} {label} 상세 계산 중",
         }
         try:
             detail = build_ticker_detail_payload(
@@ -988,7 +999,7 @@ def _compare_events(payload: dict[str, object]):
             )
         except Exception as exc:
             raise RuntimeError(
-                f"「{ticker}」 상세 계산 실패 ({index + 1}/{total}) — 계산이 끝난 종목은 캐시에 남아 "
+                f"「{label}」 상세 계산 실패 ({index + 1}/{total}) — 계산이 끝난 종목은 캐시에 남아 "
                 f"재시도 시 이 종목부터 이어집니다: {exc}"
             ) from exc
         # 어느 요청 항목의 결과인지 응답에 실어 둔다 — 화면이 순서(인덱스)가 아니라
