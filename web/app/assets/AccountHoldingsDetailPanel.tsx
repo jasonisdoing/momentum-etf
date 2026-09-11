@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { ColDef, ColumnState, GridApi, GridOptions, RowClassParams } from "ag-grid-community";
+
+// 사용자가 건 임시 컬럼 정렬 — 계좌별로 페이지 수명 동안 보존한다(새로고침하면 사라짐).
+// 컴포넌트 상태로 두면 안 된다: 부모 요약이 갱신될 때 패널·그리드가 통째로 다시 만들어져
+// 정렬이 초기화됐다(수량 저장 → 리로드 → 저장 순서로 복귀 증상).
+const SORT_STATE_BY_ACCOUNT = new Map<string, ColumnState[]>();
 import { IconLoader2 } from "@tabler/icons-react";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { GridToolbarButton } from "../components/GridToolbarButton";
@@ -161,15 +166,10 @@ export function AccountHoldingsDetailPanel({
     setEditingRowId(null);
     setAddingRow(null);
     setIsReorderDirty(false);
-    queueMicrotask(() => {
-      if (!gridApiRef.current) {
-        return;
-      }
-      gridApiRef.current.applyColumnState({
-        state: [],
-        applyOrder: false,
-      });
-    });
+    // 컬럼 정렬 상태는 여기서 건드리지 않는다 — 예전에는 리로드마다 정렬을 초기화해서,
+    // 티커로 임시 정렬해 쓰다가 수량을 저장하면 저장 순서로 되돌아갔다. 사용자가 건
+    // 정렬은 화면을 새로고침할 때까지 유지한다(정렬 중에는 행 드래그가 잠기는 것은
+    // AG Grid 표준 동작 — 헤더를 한 번 더 눌러 정렬을 풀면 된다).
   }, [hydrateRows, initialRows]);
 
   useEffect(() => {
@@ -1351,6 +1351,16 @@ export function AccountHoldingsDetailPanel({
             },
             onGridReady: (params) => {
               gridApiRef.current = params.api;
+              const savedSort = SORT_STATE_BY_ACCOUNT.get(summary.account_id);
+              if (savedSort?.length) {
+                params.api.applyColumnState({ state: savedSort, defaultState: { sort: null } });
+              }
+            },
+            onSortChanged: (params) => {
+              SORT_STATE_BY_ACCOUNT.set(
+                summary.account_id,
+                params.api.getColumnState().filter((column) => column.sort != null),
+              );
             },
             getRowId: (params) => String(params.data.id),
             rowClassRules: {
