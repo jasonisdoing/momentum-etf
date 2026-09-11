@@ -404,7 +404,7 @@ def run_backtest(
 def trade_rows(spec: SleeveSpec, result: dict[str, Any]) -> list[dict[str, Any]]:
     """백테스트 결과의 체결을 **한 형태로** 맞춘다 — 합성 화면의 체결 목록이 이걸 쓴다.
 
-    모멘텀·신고가는 같은 슬롯 엔진이라 형태가 같다(보유중은 `open_positions`, 청산은 `trades`).
+    모멘텀·신고가는 같은 슬롯 엔진이라 형태가 같다(`trades` 에 보유중·청산 행이 함께 온다).
     포트폴리오만 '보유 기간' 개념이 없다 — 체결이 종목 교체가 아니라 **비중 되돌리기**라
     진입·청산일이 같은 한 줄로 만든다(매매 기록으로 읽힌다).
 
@@ -431,23 +431,9 @@ def trade_rows(spec: SleeveSpec, result: dict[str, Any]) -> list[dict[str, Any]]
             )
         return rows
 
-    rows = []
-    for row in result.get("open_positions") or []:
-        rows.append(
-            {
-                "ticker": row["ticker"],
-                "name": row["name"],
-                "entry_date": row["entry_date"],
-                "entry_price": row["entry_price"],
-                "exit_date": None,
-                "exit_price": row.get("price"),
-                "return_pct": row.get("return_pct"),
-                "days": row.get("days"),
-                "reason": "보유중",
-            }
-        )
-    rows.extend(dict(row) for row in result.get("trades") or [])
-    return rows
+    # 슬롯 엔진(모멘텀·신고가)은 보유중 행을 `trades` 에 이미 포함한다(엔진 단일 소스,
+    # 2026-09) — 여기서 open_positions 를 다시 합치면 보유 행이 이중으로 나온다.
+    return [dict(row) for row in result.get("trades") or []]
 
 
 def daily_curve(spec: SleeveSpec, result: dict[str, Any]) -> dict[str, float]:

@@ -243,14 +243,14 @@ type Positions = {
   } | null;
 };
 
-// 체결 행 — 진입~청산 한 쌍.
+// 체결 행 — 진입~청산 한 쌍. 보유중 행은 청산일이 없고 청산가 자리에 현재가가 온다.
 type BacktestTradeRow = {
   ticker: string;
   name: string;
   industry: string;
   entry_date: string;
   entry_price: number;
-  exit_date: string;
+  exit_date: string | null;
   exit_price: number;
   return_pct: number;
   days: number;
