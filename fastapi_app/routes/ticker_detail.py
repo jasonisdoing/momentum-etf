@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import threading
 import time as _time
 from datetime import datetime, timezone
@@ -12,6 +11,7 @@ from fastapi import APIRouter, Body, Depends, Query
 
 from config import CACHE_TTL_LIVE, HOLDING_CHART_SHOW_AVG_BUY_PRICE, MARKET_SCHEDULES
 from fastapi_app.dependencies import require_internal_token
+from fastapi_app.streaming import sse_stream
 from services.component_price_service import build_component_price_snapshot, enrich_component_prices
 from services.portfolio_change_service import (
     build_daily_fx_rates as _build_daily_fx_rates_for_holdings,
@@ -50,9 +50,10 @@ from utils.ticker_resolver import resolve_ticker_meta
 
 router = APIRouter(prefix="/internal/ticker-detail", tags=["ticker-detail"])
 
-# 비교(/compare) 결과 캐시 — 같은 ETF 세트의 반복 로드/갱신이 매번 재계산·외부 API 호출을
-# 하지 않도록 짧은 TTL 로 캐시한다(타임아웃 후 재시도도 즉시 응답).
-_COMPARE_CACHE: dict[str, tuple[dict[str, object], float]] = {}
+# 비교(/compare) 결과 캐시 — **종목 단위** 짧은 TTL. 세트 단위로 캐시하면 8종목 중 7개가
+# 끝나고 하나에서 실패했을 때 아무것도 남지 않아 새로고침이 전부 재계산이 됐다. 종목마다
+# 끝나는 즉시 저장하므로, 실패 후 재시도는 성공분을 캐시에서 읽고 실패분만 다시 계산한다.
+_COMPARE_CACHE: dict[tuple[str, str, str, bool], tuple[dict[str, object], float]] = {}
 _COMPARE_CACHE_LOCK = threading.Lock()
 _COMPARE_CACHE_TTL = CACHE_TTL_LIVE
 
@@ -897,7 +898,7 @@ def get_ticker_detail(
 def get_ticker_detail_compare(
     payload: dict[str, object] = Body(...),
     _: None = Depends(require_internal_token),
-) -> dict[str, object]:
+):
     """여러 ETF 상세를 한 번에 계산한다 — 구성종목 합집합을 1회만 조회해 공유한다.
 
     같은 구성종목(예: SK스퀘어)이 여러 ETF에 등장해도 **동일한 시세/변동률**로 보이고,
@@ -906,41 +907,46 @@ def get_ticker_detail_compare(
 
     ``include_holdings=False`` (성과분석 탭 초기 로딩)면 구성종목 시세 평가·포트폴리오 변동
     계산을 생략해 응답이 크게 빨라진다. 구성종목/기본정보 탭을 열 때 true 로 다시 요청한다.
+
+    응답은 **SSE**(튜닝과 같은 형식)다 — 8종목 × 구성종목 시세 조회가 한 요청에 몰리면
+    일반 JSON 응답은 프록시 타임아웃(90초)에 걸렸고, 화면 진행 바도 추정으로만 움직였다.
+    단계마다 진행 이벤트를 흘리고, 실패하면 어느 종목·단계인지 에러 이벤트로 알린다.
     """
+    return sse_stream(lambda: _compare_events(payload))
+
+
+def _compare_events(payload: dict[str, object]):
+    """compare 계산 본체 — 진행(progress)·결과(result) 이벤트를 흘리는 제너레이터."""
     raw_items = payload.get("items") if isinstance(payload, dict) else None
     items = [it for it in raw_items if isinstance(it, dict)] if isinstance(raw_items, list) else []
     include_holdings = bool(payload.get("include_holdings", True)) if isinstance(payload, dict) else True
 
-    # 0) 결과 캐시 — 같은 ETF 세트면 TTL 내 재계산 없이 즉시 반환.
-    #    (구성종목 포함 여부가 다르면 페이로드가 달라 캐시 키를 분리한다.)
-    cache_key = json.dumps(
-        {
-            "include_holdings": include_holdings,
-            "items": sorted(
-                (
-                    str(it.get("ticker") or ""),
-                    str(it.get("ticker_type") or ""),
-                    str(it.get("country_code") or "kor"),
-                )
-                for it in items
-            ),
-        }
-    )
+    def item_cache_key(item: dict[str, object]) -> tuple[str, str, str, bool]:
+        return (
+            str(item.get("ticker") or ""),
+            str(item.get("ticker_type") or ""),
+            str(item.get("country_code") or "kor"),
+            include_holdings,
+        )
+
+    # 0) 종목 단위 캐시 — TTL 안이면 재계산하지 않는다. 부분 실패 후 재시도가
+    #    성공분을 여기서 읽고 실패분만 다시 계산한다(진행 바도 그만큼 건너뛴다).
     now_ts = _time.time()
+    detail_by_key: dict[tuple[str, str, str, bool], dict[str, object]] = {}
     with _COMPARE_CACHE_LOCK:
-        cached = _COMPARE_CACHE.get(cache_key)
-        if cached and now_ts - cached[1] < _COMPARE_CACHE_TTL:
-            # 캐시 키는 종목 집합(정렬)이라 **순서가 달라도 같은 키**다. 화면이 카드 순서를
-            # 바꿔 다시 요청하면 옛 순서 결과가 그대로 나가므로, 여기서 요청 순서로 맞춘다.
-            # (맞추지 않으면 화면이 이름과 시세를 다른 종목끼리 짝지어 보여준다.)
-            return {"results": _order_compare_results(cached[0].get("results") or [], items)}
+        for item in items:
+            cached = _COMPARE_CACHE.get(item_cache_key(item))
+            if cached and now_ts - cached[1] < _COMPARE_CACHE_TTL:
+                detail_by_key[item_cache_key(item)] = cached[0]
+    pending = [item for item in items if item_cache_key(item) not in detail_by_key]
 
     # 1) 한국 ETF 구성종목 합집합 → 공유 가격 스냅샷 1회 구성 (build_component_price_snapshot 가 중복 제거)
+    #    캐시된 종목은 뺀다 — 새로 계산할 종목의 구성종목만 필요하다.
     #    구성종목이 필요 없는 호출이면 이 조회 자체를 건너뛴다(성과분석 탭 초기 로딩 단축).
     shared_snapshot: dict[str, dict[str, Any]] = {}
-    if include_holdings:
+    if include_holdings and pending:
         union_holdings: list[dict[str, object]] = []
-        for item in items:
+        for item in pending:
             if str(item.get("country_code") or "kor").strip().lower() != "kor":
                 continue
             cache_doc = get_stock_cache_meta(str(item.get("ticker_type") or ""), str(item.get("ticker") or ""))
@@ -949,54 +955,51 @@ def get_ticker_detail_compare(
             holdings_cache = dict(cache_doc.get("holdings_cache") or {})
             union_holdings.extend(list(holdings_cache.get("items") or []))
 
-        shared_snapshot = build_component_price_snapshot(union_holdings) if union_holdings else {}
+        if union_holdings:
+            yield {
+                "type": "progress",
+                "percent": 5,
+                "message": f"구성종목 합집합 {len(union_holdings):,}건 가격 스냅샷 조회 중"
+                + (f" (캐시 재사용 {len(items) - len(pending)}종목 제외)" if len(pending) < len(items) else ""),
+            }
+            try:
+                shared_snapshot = build_component_price_snapshot(union_holdings)
+            except Exception as exc:
+                raise RuntimeError(f"구성종목 가격 스냅샷 조회 실패: {exc}") from exc
 
-    # 2) ETF 별 detail 을 공유 스냅샷으로 계산 (캐시 우회 → 종목당 동일 값 보장)
-    results: list[dict[str, object]] = []
-    for item in items:
-        detail = build_ticker_detail_payload(
-            str(item.get("ticker") or ""),
-            str(item.get("ticker_type") or ""),
-            str(item.get("country_code") or "kor"),
-            component_price_snapshot=shared_snapshot,
-            use_bundle_cache=False,
-            include_holdings=include_holdings,
-        )
+    # 2) ETF 별 detail 을 공유 스냅샷으로 계산 (번들 캐시 우회 → 종목당 동일 값 보장).
+    #    **끝나는 즉시 종목 캐시에 저장한다** — 뒤 종목에서 실패해도 앞의 성공분은 남는다.
+    total = max(len(pending), 1)
+    for index, item in enumerate(pending):
+        ticker = str(item.get("ticker") or "")
+        yield {
+            "type": "progress",
+            "percent": round(30 + 65 * index / total),
+            "message": f"{index + 1}/{total} {ticker} 상세 계산 중",
+        }
+        try:
+            detail = build_ticker_detail_payload(
+                ticker,
+                str(item.get("ticker_type") or ""),
+                str(item.get("country_code") or "kor"),
+                component_price_snapshot=shared_snapshot,
+                use_bundle_cache=False,
+                include_holdings=include_holdings,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"「{ticker}」 상세 계산 실패 ({index + 1}/{total}) — 계산이 끝난 종목은 캐시에 남아 "
+                f"재시도 시 이 종목부터 이어집니다: {exc}"
+            ) from exc
         # 어느 요청 항목의 결과인지 응답에 실어 둔다 — 화면이 순서(인덱스)가 아니라
         # 이 값으로 짝을 지어야 순서가 바뀌어도 이름과 시세가 어긋나지 않는다.
         detail["ticker_type"] = str(item.get("ticker_type") or "")
         detail["country_code"] = str(item.get("country_code") or "kor")
-        results.append(detail)
-    result = {"results": results}
-    with _COMPARE_CACHE_LOCK:
-        _COMPARE_CACHE[cache_key] = (result, now_ts)
-    return result
+        detail_by_key[item_cache_key(item)] = detail
+        with _COMPARE_CACHE_LOCK:
+            _COMPARE_CACHE[item_cache_key(item)] = (detail, now_ts)
 
-
-def _compare_result_key(ticker: object, ticker_type: object, country_code: object) -> tuple[str, str, str]:
-    """비교 결과를 요청 항목과 이어 붙일 때 쓰는 키."""
-    return (
-        str(ticker or "").strip().upper(),
-        str(ticker_type or "").strip().lower(),
-        str(country_code or "kor").strip().lower(),
-    )
-
-
-def _order_compare_results(results: list[dict[str, object]], items: list[dict[str, object]]) -> list[dict[str, object]]:
-    """캐시된 결과를 이번 요청의 종목 순서로 다시 세운다.
-
-    짝을 못 찾은 항목이 하나라도 있으면 순서를 못 맞춘다는 뜻이므로 원본을 그대로 둔다 —
-    임의로 채워 넣으면 다른 종목의 값이 붙는다.
-    """
-    by_key = {
-        _compare_result_key(row.get("ticker"), row.get("ticker_type"), row.get("country_code")): row
-        for row in results
-        if isinstance(row, dict)
-    }
-    ordered: list[dict[str, object]] = []
-    for item in items:
-        row = by_key.get(_compare_result_key(item.get("ticker"), item.get("ticker_type"), item.get("country_code")))
-        if row is None:
-            return results
-        ordered.append(row)
-    return ordered
+    # 요청 순서대로 조립 — 캐시·신규 계산이 섞여도 화면 카드 순서와 일치한다.
+    results = [detail_by_key[item_cache_key(item)] for item in items]
+    yield {"type": "progress", "percent": 100, "message": "비교 데이터 반영 중"}
+    yield {"type": "result", "results": results}

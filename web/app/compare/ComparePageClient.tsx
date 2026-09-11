@@ -707,9 +707,13 @@ function buildHoldingExposureRows(products: SelectedProduct[]): CompareHoldingEx
 
 // 여러 ETF를 한 번에 — 서버에서 구성종목 합집합을 1회 조회해 공유한다.
 // 같은 종목(예: SK스퀘어)이 여러 ETF에 나와도 동일 시세/변동률로 나오고, 중복 조회가 사라진다.
+// 응답은 SSE 스트림(튜닝과 같은 형식) — 서버가 단계마다 진행을 흘려 진행 바가 실제
+// 진행을 보여주고, 실패하면 어느 종목·단계에서 왜 실패했는지 에러 이벤트로 온다.
+// (JSON 일괄 응답은 8종목 × 구성종목 조회에서 프록시 타임아웃에 걸려 폐기했다.)
 async function loadTickerDetailsBatch(
   items: TickerItem[],
-  includeHoldings: boolean = true,
+  includeHoldings: boolean,
+  onProgress: (progress: CompareLoadingProgress) => void,
 ): Promise<TickerDetailResponse[]> {
   const response = await fetch(`/api/ticker-detail-compare`, {
     method: "POST",
@@ -725,11 +729,48 @@ async function loadTickerDetailsBatch(
       include_holdings: includeHoldings,
     }),
   });
-  const payload = (await response.json()) as { results?: TickerDetailResponse[]; error?: string };
-  if (!response.ok || payload.error) {
-    throw new Error(payload.error ?? "비교 데이터를 불러오지 못했습니다.");
+  if (!response.ok || !response.body) {
+    const message = await response.text().catch(() => "");
+    throw new Error(message.trim() || `비교 데이터를 불러오지 못했습니다. (${response.status})`);
   }
-  return payload.results ?? [];
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let results: TickerDetailResponse[] | null = null;
+
+  // SSE — 이벤트 하나가 `data: {...}` 한 줄이다. 주석(`:` 시작)은 연결 확인용이라 버린다.
+  const handleLine = (line: string) => {
+    const text = line.trim();
+    if (!text || text.startsWith(":") || !text.startsWith("data:")) return;
+    const event = JSON.parse(text.slice("data:".length).trim()) as
+      | { type: "progress"; percent: number; message: string }
+      | { type: "result"; results: TickerDetailResponse[] }
+      | { type: "error"; message: string };
+    if (event.type === "progress") {
+      onProgress({ percent: event.percent, message: event.message });
+    } else if (event.type === "result") {
+      results = event.results;
+    } else {
+      throw new Error(event.message);
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let cut = buffer.indexOf("\n");
+    while (cut >= 0) {
+      handleLine(buffer.slice(0, cut));
+      buffer = buffer.slice(cut + 1);
+      cut = buffer.indexOf("\n");
+    }
+  }
+  handleLine(buffer);
+
+  if (!results) throw new Error("비교 결과를 받지 못했습니다 — 서버 연결이 중간에 끊겼습니다.");
+  return results;
 }
 
 function ProductSearchField({
@@ -985,37 +1026,13 @@ export function ComparePageClient() {
       return;
     }
     setLoading(true);
-    setLoadingProgress({ percent: 10, message: `${items.length}개 ETF 비교 요청 준비 중` });
+    setLoadingProgress({ percent: 0, message: `${items.length}개 ETF 비교 요청 준비 중` });
     setError(null);
-    const progressTimers: number[] = [];
-    let progressInterval: number | null = null;
     try {
-      progressTimers.push(
-        window.setTimeout(() => {
-          setLoadingProgress({ percent: 35, message: "구성종목 합집합과 가격 스냅샷 조회 중" });
-        }, 400),
-      );
-      progressTimers.push(
-        window.setTimeout(() => {
-          setLoadingProgress((previous) => ({
-            percent: Math.max(previous?.percent ?? 0, 55),
-            message: "ETF별 비교 데이터 계산 중",
-          }));
-          progressInterval = window.setInterval(() => {
-            setLoadingProgress((previous) => {
-              if (!previous) return previous;
-              return {
-                ...previous,
-                percent: Math.min(90, previous.percent + 5),
-              };
-            });
-          }, 1200);
-        }, 1400),
-      );
       // 한 번의 일괄 호출 — 서버가 구성종목 합집합을 1회 조회해 공유하므로
       // 같은 종목은 ETF 간 동일 값이 되고, 중복 조회/전역 lock 직렬화 문제도 사라진다.
-      const details = await loadTickerDetailsBatch(items, includeHoldings);
-      setLoadingProgress({ percent: 100, message: "비교 데이터 반영 중" });
+      // 진행 바는 서버가 흘리는 실제 단계(스냅샷 조회 → i/N 종목 계산)를 그대로 보여준다.
+      const details = await loadTickerDetailsBatch(items, includeHoldings, setLoadingProgress);
       // 인덱스가 아니라 티커로 짝을 짓는다 — 서버 캐시가 순서를 다르게 돌려줘도
       // 이름과 시세가 다른 종목끼리 붙지 않는다(카드 순서를 바꿀 때 실제로 겪은 문제).
       const detailByKey = new Map(details.map((detail) => [detailKey(detail), detail] as const));
@@ -1032,8 +1049,6 @@ export function ComparePageClient() {
       setError(loadError instanceof Error ? loadError.message : "비교 데이터를 불러오지 못했습니다.");
       loadedSignatureRef.current = null; // 실패한 요청은 '로드됨'으로 두지 않는다(재시도 가능하게).
     } finally {
-      progressTimers.forEach((timer) => window.clearTimeout(timer));
-      if (progressInterval !== null) window.clearInterval(progressInterval);
       setLoading(false);
       setLoadingProgress(null);
     }
