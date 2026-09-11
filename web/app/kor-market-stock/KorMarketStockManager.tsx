@@ -101,6 +101,7 @@ export function KorMarketStockManager({
   const [market, setMarket] = useState<MarketOption>("KOSPI");
   const [limit, setLimit] = useState<number>(200);
   const [minMarketCapJo, setMinMarketCapJo] = useState("");
+  const [tickerSearch, setTickerSearch] = useState("");
   const [rows, setRows] = useState<KorMarketStockRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [tickerPools, setTickerPools] = useState<StocksAccountItem[]>([]);
@@ -187,9 +188,20 @@ export function KorMarketStockManager({
     [rows],
   );
 
+  // 검색 — 순위 화면과 같은 방식(티커·종목명 부분 일치).
+  const searchedGridRows = useMemo(() => {
+    const query = tickerSearch.trim().toLocaleLowerCase();
+    if (!query) return gridRows;
+    return gridRows.filter((row) => {
+      const ticker = String(row.ticker ?? "").toLocaleLowerCase();
+      const name = String(row.name ?? "").toLocaleLowerCase();
+      return ticker.includes(query) || name.includes(query);
+    });
+  }, [gridRows, tickerSearch]);
+
   const allVisibleSelected = useMemo(() => {
-    return gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker));
-  }, [gridRows, selectedTickers]);
+    return searchedGridRows.length > 0 && searchedGridRows.every((row) => selectedTickers.includes(row.ticker));
+  }, [searchedGridRows, selectedTickers]);
 
   const toggleTickerSelection = useCallback((ticker: string) => {
     setSelectedTickers((current) =>
@@ -198,7 +210,7 @@ export function KorMarketStockManager({
   }, []);
 
   const toggleSelectAllVisible = useCallback(() => {
-    const selectableTickers = gridRows
+    const selectableTickers = searchedGridRows
       .map((row) => row.ticker);
     setSelectedTickers((current) => {
       if (selectableTickers.length === 0) return current;
@@ -208,7 +220,7 @@ export function KorMarketStockManager({
       }
       return [...new Set([...current, ...selectableTickers])];
     });
-  }, [gridRows, registeredTickers]);
+  }, [searchedGridRows, registeredTickers]);
 
   const handleOpenAddModal = useCallback(() => {
     if (selectedTickers.length === 0) return;
@@ -492,6 +504,18 @@ export function KorMarketStockManager({
                     placeholder="최소 시가총액(조)"
                   />
                 </label>
+
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">검색</span>
+                  <input
+                    className="form-control"
+                    type="search"
+                    value={tickerSearch}
+                    placeholder="티커 또는 종목명"
+                    aria-label="티커 또는 종목명 검색"
+                    onChange={(event) => setTickerSearch(event.target.value)}
+                  />
+                </label>
               </div>
               <div className="appMainHeaderRight">
                 <button
@@ -517,7 +541,7 @@ export function KorMarketStockManager({
 
           <div className="appGridFillWrap">
             <AppAgGrid<KorMarketStockGridRow>
-              rowData={gridRows}
+              rowData={searchedGridRows}
               columnDefs={columnDefs}
               loading={loading}
               theme={korMarketStockGridTheme}
