@@ -130,10 +130,6 @@ export function AccountHoldingsDetailPanel({
   const reorderSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reorderSavingRef = useRef(false);
   const reorderQueuedRef = useRef(false);
-  const cashDraftRef = useRef({
-    cashBalanceKrw: Number(summary.cash_balance_krw ?? 0),
-    cashTargetRatio: Number(summary.cash_target_ratio ?? 0),
-  });
   const isAusAccount = String(summary.currency || "KRW").toUpperCase() === "AUD";
   const intlDraftRef = useRef({
     intlSharesValue: Number(summary.intl_shares_value ?? 0),
@@ -182,10 +178,6 @@ export function AccountHoldingsDetailPanel({
 
   useEffect(() => {
     summaryRef.current = summary;
-    cashDraftRef.current = {
-      cashBalanceKrw: Number(summary.cash_balance_krw ?? 0),
-      cashTargetRatio: Number(summary.cash_target_ratio ?? 0),
-    };
     cashMapDraftRef.current = { ...(summary.cash ?? {}) };
     setCashMapDirty(false);
   }, [summary]);
@@ -402,34 +394,6 @@ export function AccountHoldingsDetailPanel({
     }
   }, [summary.account_id]);
 
-  const processCashUpdate = useCallback(async (cashBalanceKrw: number, cashTargetRatio: number) => {
-    const isAud = String(summary.currency || "KRW").toUpperCase() === "AUD";
-    const currentCashKrw = Number(summary.cash_balance_krw ?? 0);
-    const currentCashNative = Number(summary.cash_balance_native ?? 0);
-    const nextCashNative =
-      isAud && currentCashKrw > 0 && currentCashNative > 0
-        ? (cashBalanceKrw / currentCashKrw) * currentCashNative
-        : (isAud ? currentCashNative : cashBalanceKrw);
-    const response = await fetch("/api/assets", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        account_id: summary.account_id,
-        total_principal: summary.total_principal,
-        cash_balance_krw: cashBalanceKrw,
-        cash_balance_native: nextCashNative,
-        cash_currency: summary.cash_currency,
-        cash_target_ratio: cashTargetRatio,
-        intl_shares_value: summary.account_id === "aus_account" ? summary.intl_shares_value : null,
-        intl_shares_change: summary.account_id === "aus_account" ? summary.intl_shares_change : null,
-      }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error || "현금 저장에 실패했습니다.");
-    }
-  }, [summary]);
-
   // Intl Value/Change 만 저장한다. 현금 키를 함께 보내면 백엔드가 통화별 `cash` 맵을
   // 레거시 필드로 재합성해 잔액이 0 으로 덮이므로, 현금 관련 필드는 보내지 않는다.
   const processIntlUpdate = useCallback(async (intlSharesValue: number, intlSharesChange: number) => {
@@ -602,14 +566,6 @@ export function AccountHoldingsDetailPanel({
       reorderSaveTimerRef.current = null;
     }
 
-    const cashRowId = `${summary.account_id}-${CASH_ROW_TICKER}`;
-    if (dirtyRowIdsRef.current.includes(cashRowId)) {
-      void processCashUpdate(
-        cashDraftRef.current.cashBalanceKrw,
-        cashDraftRef.current.cashTargetRatio,
-      ).catch(() => undefined);
-    }
-
     const dirtyRows = rowsRef.current
       .map((row) => ({ ...row, id: buildGridRowId(row) }))
       .filter((row) => dirtyRowIdsRef.current.includes(row.id));
@@ -622,7 +578,7 @@ export function AccountHoldingsDetailPanel({
       void processReorderUpdate(rowsRef.current).catch(() => undefined);
     }
 
-  }, [processCashUpdate, processReorderUpdate, processRowUpdate, summary.account_id]);
+  }, [processReorderUpdate, processRowUpdate]);
 
   useEffect(() => {
     return () => {
@@ -639,15 +595,6 @@ export function AccountHoldingsDetailPanel({
     flushPendingSaves();
 
     try {
-      const cashRowId = `${summary.account_id}-${CASH_ROW_TICKER}`;
-      if (dirtyRowIds.includes(cashRowId)) {
-        await processCashUpdate(
-          cashDraftRef.current.cashBalanceKrw,
-          cashDraftRef.current.cashTargetRatio,
-        );
-        clearDirtyRowState(cashRowId);
-      }
-
       const dirtyRows = rowsRef.current
         .map((row) => ({
           ...row,
@@ -689,7 +636,6 @@ export function AccountHoldingsDetailPanel({
     onReload,
     persistRowOrder,
     processAddingRow,
-    processCashUpdate,
     processRowUpdate,
     processingId,
     summary,
@@ -744,43 +690,8 @@ export function AccountHoldingsDetailPanel({
     if (!row) {
       return;
     }
-    if (isCashGridRow(row)) {
-      const nextCashBalance = Math.max(0, Number(row.valuation_krw ?? 0));
-      const nextCashTargetRatio = Number(row.target_ratio ?? 0);
-      cashDraftRef.current = {
-        cashBalanceKrw: nextCashBalance,
-        cashTargetRatio: nextCashTargetRatio,
-      };
-      setDirtyRowIds((previous) => {
-        const next = previous.includes(row.id) ? previous : [...previous, row.id];
-        dirtyRowIdsRef.current = next;
-        return next;
-      });
-      if (field) {
-        const dirtyCellKey = buildDirtyCellKey(row.id, field);
-        setDirtyCellKeys((previous) => (previous.includes(dirtyCellKey) ? previous : [...previous, dirtyCellKey]));
-      }
-      onCashSync(summary.account_id, nextCashBalance, nextCashTargetRatio);
-      const timerKey = row.id;
-      const currentTimer = childSaveTimersRef.current.get(timerKey);
-      if (currentTimer) {
-        clearTimeout(currentTimer);
-      }
-      const nextTimer = setTimeout(async () => {
-        childSaveTimersRef.current.delete(timerKey);
-        try {
-          await processCashUpdate(nextCashBalance, nextCashTargetRatio);
-          clearDirtyRowState(timerKey);
-          toast.success("현금 저장 완료");
-        } catch (error) {
-          await onReload();
-          toast.error(error instanceof Error ? error.message : "현금 저장에 실패했습니다.");
-        }
-      }, 700);
-      childSaveTimersRef.current.set(timerKey, nextTimer);
-      return;
-    }
-    if (!isEditableHoldingRow(row)) {
+    // 현금 행은 그리드에서 편집할 수 없다 — 현금은 상단 통화별 입력(cash 맵)만이 진실이다.
+    if (isCashGridRow(row) || !isEditableHoldingRow(row)) {
       return;
     }
 
@@ -808,7 +719,7 @@ export function AccountHoldingsDetailPanel({
       setDirtyCellKeys((previous) => (previous.includes(dirtyCellKey) ? previous : [...previous, dirtyCellKey]));
     }
     scheduleSilentRowSave(row.id);
-  }, [clearDirtyRowState, isCashGridRow, isEditableHoldingRow, onCashSync, onReload, onRowsSync, processCashUpdate, scheduleSilentRowSave, summary, toast]);
+  }, [isCashGridRow, isEditableHoldingRow, onRowsSync, scheduleSilentRowSave, summary]);
 
   const columns = useMemo<ColDef<GridRow>[]>(() => [
     {

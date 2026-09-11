@@ -241,15 +241,14 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
     parentSavingAccountIdsRef.current.add(accountId);
     try {
-      const isAud = String(summary.currency || "KRW").toUpperCase() === "AUD";
+      // 현금 키는 보내지 않는다 — 이 그리드는 총 원금만 편집한다. 예전에는 현금 환산액을
+      // 같이 보내 백엔드가 통화별 잔액을 KRW 하나로 덮어썼다(USD 현금 증발 버그).
       const response = await fetch("/api/assets", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           account_id: summary.account_id,
           total_principal: summary.total_principal,
-          cash_balance_krw: isAud ? 0 : summary.cash_balance_krw,
-          cash_balance_native: isAud ? summary.cash_balance_native : summary.cash_balance_krw,
           cash_currency: summary.cash_currency,
           intl_shares_value: summary.account_id === "aus_account" ? summary.intl_shares_value : null,
           intl_shares_change: summary.account_id === "aus_account" ? summary.intl_shares_change : null,
