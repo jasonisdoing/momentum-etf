@@ -122,7 +122,7 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
     showListing: true,
     capHeader: "시가총액(억)",
     // 기본 필터 — 소형·저유동 ETF 를 걸러 보는 것이 기본 사용 패턴이라 초기값을 둔다.
-    capFilterDefault: "100",
+    capFilterDefault: "",
     volumeFilterDefault: "10000",
     // 국내 주식형 ETF 는 매매차익이 비과세고 그 밖(해외·파생·원자재·채권)은 과세다.
     showTaxFilter: true,
@@ -642,16 +642,6 @@ export function MarketManager({
               <div className="appMainHeader marketMainHeader">
                 <div className="appMainHeaderLeft marketMainHeaderLeft">
                   <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">티커/종목명</span>
-                    <input
-                      className="field compactField"
-                      type="text"
-                      placeholder="티커 또는 종목명을 입력"
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                    />
-                  </label>
-                  <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">{variant.capHeader}</span>
                     <input
                       className="field compactField"
@@ -693,8 +683,9 @@ export function MarketManager({
                       </div>
                     </label>
                   ) : null}
-                  {/* 신규 — 누르면 일수 입력과 안내가 옆으로 늘어난다. 그래서 왼쪽 묶음의
-                      **맨 끝**에 둔다(가운데 있으면 펼칠 때마다 뒤 칸이 밀린다). */}
+                  {/* 신규 — 누르면 일수 입력과 안내가 옆으로 늘어난다. 그래서 필터들 뒤에
+                      둔다(가운데 있으면 펼칠 때마다 뒤 칸이 밀린다). 검색은 다른 화면과
+                      통일해 가장 오른쪽이다. */}
                   {variant.showListing ? (
                     <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">신규 상장</span>
@@ -726,6 +717,17 @@ export function MarketManager({
                       </div>
                     </label>
                   ) : null}
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">검색</span>
+                    <input
+                      className="field compactField"
+                      type="search"
+                      placeholder="티커 또는 종목명"
+                      aria-label="티커 또는 종목명 검색"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                    />
+                  </label>
                 </div>
                 <div className="appMainHeaderRight">
                   <button
