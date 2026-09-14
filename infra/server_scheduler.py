@@ -198,16 +198,52 @@ def _run_subprocess(job_name: str, script_path: str, arguments: list[str] | None
                 return exit_code if exit_code != 0 else 130
 
 
+def _execute_queue_item(item: dict[str, Any]) -> None:
+    """claim 한 큐 항목 1건을 실행하고 done/failed 로 마킹한다 — 잡별 스레드에서 돈다."""
+    from utils.batch_queue import mark_done, mark_failed, update_heartbeat
+
+    item_id = item["_id"]
+    job_name = item["job_name"]
+    log.info("큐 → 실행: %s (id=%s, args=%s)", job_name, item_id, item.get("arguments"))
+
+    # heartbeat 갱신 스레드 — 30초마다
+    hb_stop = threading.Event()
+
+    def _heartbeat() -> None:
+        while not hb_stop.is_set():
+            try:
+                update_heartbeat(item_id)
+            except Exception:
+                pass
+            hb_stop.wait(30.0)
+
+    hb_thread = threading.Thread(target=_heartbeat, daemon=True)
+    hb_thread.start()
+
+    try:
+        exit_code = _run_subprocess(job_name, item["script_path"], item.get("arguments"), item_id)
+        mark_done(item_id, exit_code)
+    except Exception as exc:
+        log.exception("큐 항목 처리 실패: %s — %s", job_name, exc)
+        mark_failed(item_id, str(exc))
+    finally:
+        hb_stop.set()
+        hb_thread.join(timeout=2)
+
+
 def _queue_worker_loop(stop_event: threading.Event) -> None:
-    """큐 컨슈머 스레드. pending 항목을 FIFO 로 직렬 실행한다."""
+    """큐 컨슈머 스레드. pending 항목을 레인별 FIFO 로 실행한다.
+
+    잡은 **잡별 스레드**로 띄우고 루프는 계속 claim 한다 — 그래야 이 워커 하나가
+    data 레인의 무거운 잡을 돌리는 동안 light 레인의 알림 잡을 나란히 돌릴 수 있다.
+    동시 실행 상한은 (status, lane) 유니크 인덱스가 레인 수(3)로 보장하므로 워커는
+    스레드 수를 따로 제한하지 않는다.
+    """
     sys.path.insert(0, str(ROOT_DIR))
     from utils.batch_queue import (
         claim_next_pending,
         ensure_indexes,
-        mark_done,
-        mark_failed,
         reap_stale_running,
-        update_heartbeat,
     )
 
     ensure_indexes()
@@ -216,10 +252,12 @@ def _queue_worker_loop(stop_event: threading.Event) -> None:
     if reaped > 0:
         log.warning("워커 시작 시점 stale running %d건 → failed 마킹", reaped)
 
-    log.info("큐 워커 시작 (1초 polling)")
+    log.info("큐 워커 시작 (1초 polling, 레인 병렬)")
     last_stale_check = time.monotonic()
+    job_threads: list[threading.Thread] = []
     while not stop_event.is_set():
         try:
+            job_threads = [thread for thread in job_threads if thread.is_alive()]
             item = claim_next_pending()
             if item is None:
                 # 주기적으로 stale running 청소 (1분마다)
@@ -229,39 +267,16 @@ def _queue_worker_loop(stop_event: threading.Event) -> None:
                 stop_event.wait(1.0)
                 continue
 
-            item_id = item["_id"]
-            job_name = item["job_name"]
-            script_path = item["script_path"]
-            arguments = item.get("arguments")
-            log.info("큐 → 실행: %s (id=%s, args=%s)", job_name, item_id, arguments)
-
-            # heartbeat 갱신 스레드 — 30초마다
-            hb_stop = threading.Event()
-
-            def _heartbeat() -> None:
-                while not hb_stop.is_set():
-                    try:
-                        update_heartbeat(item_id)
-                    except Exception:
-                        pass
-                    hb_stop.wait(30.0)
-
-            hb_thread = threading.Thread(target=_heartbeat, daemon=True)
-            hb_thread.start()
-
-            try:
-                exit_code = _run_subprocess(job_name, script_path, arguments, item_id)
-                mark_done(item_id, exit_code)
-            except Exception as exc:
-                log.exception("큐 항목 처리 실패: %s — %s", job_name, exc)
-                mark_failed(item_id, str(exc))
-            finally:
-                hb_stop.set()
-                hb_thread.join(timeout=2)
+            thread = threading.Thread(target=_execute_queue_item, args=(item,), daemon=True)
+            thread.start()
+            job_threads.append(thread)
         except Exception as exc:
             log.exception("큐 워커 루프 예외: %s", exc)
             stop_event.wait(2.0)
 
+    # 종료 시 진행 중인 잡을 기다린다 — 예전(직렬 루프)에도 현재 잡이 끝나야 내려갔다.
+    for thread in job_threads:
+        thread.join()
     log.info("큐 워커 종료")
 
 
