@@ -228,8 +228,8 @@ ENTRY_VOL_MULT_OPTIONS: tuple[float | None, ...] = (None, 1.0, 2.0)
 # 화면 셀렉트·튜닝 축·저장 검증이 풀 국가의 목록을 쓴다(`utils/new_high_service` 가 골라 준다).
 MIN_VALUE_MULT_OPTIONS_BY_COUNTRY: dict[str, tuple[float | None, ...]] = {
     "kor": (None, 2.0, 5.0),
-    "us": (None, 2.0, 3.0),
-    "au": (None, 2.0, 3.0),
+    "us": (None, 1.0, 2.0, 3.0),
+    "au": (None, 1.0, 2.0, 3.0),
 }
 
 # 편도 슬리피지(%) — 0.05 ~ 0.50, 0.05 단위. 종목풀 설정에서 고른다.

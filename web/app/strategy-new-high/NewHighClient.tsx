@@ -962,8 +962,23 @@ export function NewHighClient() {
         headerTooltip: "이탈한 종목도 지금 시세다 — 판 뒤의 흐름을 청산가와 견줘 볼 수 있다.",
         valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number)),
       },
-      // 표준 배치(일간(%) → 현재가 → 거래대금) — 순위·진입 후보 표와 같은 공용 컬럼.
       volatilityColumn<PlanRow>(),
+      // 수익률과 이탈 여유는 매일 보는 판단 칸이라 거래대금 앞에 모은다(모멘텀 보유 표와 같은 취지).
+      {
+        field: "return_pct",
+        headerName: "수익률",
+        width: 108,
+        type: "numericColumn",
+        headerTooltip: "아직 청산 전이라 매도 슬리피지는 빠져 있다.",
+        valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
+        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
+      },
+      maExitGapColumn<PlanRow>({
+        field: "exit_ma_gap_pct",
+        maDays: draft?.exit_ma_days,
+        getMaValue: (row) => row?.exit_ma,
+        formatMaValue: (value) => formatPrice(value),
+      }),
       tradeValueMultColumn<PlanRow>(),
       {
         field: "entry_date",
@@ -988,21 +1003,6 @@ export function NewHighClient() {
         headerTooltip: "오늘 이탈한 종목의 체결가. 아직 들고 있는 종목은 값이 없다.",
         valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number)),
       },
-      {
-        field: "return_pct",
-        headerName: "수익률",
-        width: 108,
-        type: "numericColumn",
-        headerTooltip: "아직 청산 전이라 매도 슬리피지는 빠져 있다.",
-        valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
-        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
-      },
-      maExitGapColumn<PlanRow>({
-        field: "exit_ma_gap_pct",
-        maDays: draft?.exit_ma_days,
-        getMaValue: (row) => row?.exit_ma,
-        formatMaValue: (value) => formatPrice(value),
-      }),
     ],
     [hasIndustryData, fillDay, positions?.live, draft?.exit_ma_days],
   );
