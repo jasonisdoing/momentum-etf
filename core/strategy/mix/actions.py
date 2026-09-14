@@ -170,8 +170,9 @@ def _apply_tolerance(
 ) -> float:
     """허용 오차(±, 종목당 금액) — 조정 지시를 양방향으로 생략한다.
 
-    사유가 「목표 수량과 실제 보유 차이」뿐인 **조정** 종목에서, 차이 금액(|매매수량 ×
-    가격|)이 허용 오차 이내면 부족이든 초과든 지시를 내지 않는다. 넘으면 **목표까지
+    사유가 「목표 수량과 실제 보유 차이」뿐인 종목에서, 차이 금액(|매매수량 × 가격|)이
+    허용 오차 이내면 지시를 내지 않는다 — 조정(부족·초과)뿐 아니라 **목표에 없는 소액
+    보유(전량 매도)** 도 포함한다(현금 몫 안의 재량 매수 허용). 넘으면 **목표까지
     전부** 맞추는 지시를 낸다 — 오차 언저리까지만 맞추면 직후의 미세 드리프트로 또
     걸려 왕복하는데, 목표로 완전 복귀시키면 오차 전체가 버퍼로 리셋된다. 신규 매수
     (보유 0)·전량 매도·전략 신호·엔진 이벤트·월초 재배분 지시는 금액과 무관하게 그대로
@@ -193,10 +194,13 @@ def _apply_tolerance(
     tolerated_excess: list[dict[str, Any]] = []
     for row in rows:
         trade = row["trade_quantity"]
-        if not trade or row["target_quantity"] <= 0:
+        if not trade:
             continue
         if trade > 0 and float(row.get("held_quantity") or 0) <= 0:
             continue  # 신규 매수(진입)는 허용 대상이 아니다 — 전략 신호를 놓친다.
+        # 목표에 없는 보유(전량 매도)도 사유가 목표 차이뿐이면 오차 대상이다(2026-09) —
+        # 현금 몫 안에서 소액 재량 매수를 하는 사용 방식을 합성이 간섭하지 않기 위해서다.
+        # 전략 청산·엔진 이벤트로 파는 종목은 아래 사유 검사에서 걸러져 항상 표시된다.
         reasons = _action_reasons(row["ticker"], "sell" if trade < 0 else "buy", actions)
         if any(reason["code"] != "target_difference" for reason in reasons):
             continue
