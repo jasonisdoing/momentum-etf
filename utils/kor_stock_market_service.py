@@ -14,6 +14,7 @@ from services.price_service import get_realtime_snapshot
 from utils.industry_map import industry_map_for_country
 from utils.market_service import load_ticker_pool_map, load_ticker_pool_type_map
 from utils.naver_chart import fetch_naver_daily_ohlc
+from utils.perf_metrics import period_sortino
 from utils.portfolio_io import load_all_holding_tickers
 
 logger = logging.getLogger(__name__)
@@ -281,18 +282,35 @@ def _apply_kor_history_metrics(rows: list[dict[str, Any]]) -> None:
             continue
         history = fetch_naver_daily_ohlc(ticker, count=280)
         if history is None or history.empty or "Close" not in history.columns:
-            row.update({"return_1m_pct": None, "return_3m_pct": None, "return_12m_pct": None, "mdd_12m_pct": None})
+            row.update(
+                {
+                    "return_1m_pct": None,
+                    "return_3m_pct": None,
+                    "return_12m_pct": None,
+                    "mdd_12m_pct": None,
+                    "sortino_12m": None,
+                }
+            )
             continue
         close = pd.to_numeric(history["Close"], errors="coerce").dropna()
         close = close[close > 0]
         if close.empty:
-            row.update({"return_1m_pct": None, "return_3m_pct": None, "return_12m_pct": None, "mdd_12m_pct": None})
+            row.update(
+                {
+                    "return_1m_pct": None,
+                    "return_3m_pct": None,
+                    "return_12m_pct": None,
+                    "mdd_12m_pct": None,
+                    "sortino_12m": None,
+                }
+            )
             continue
         latest_price = float(row.get("current_price") or close.iloc[-1])
         row["return_1m_pct"] = _calculate_period_return(close, latest_price, 1)
         row["return_3m_pct"] = _calculate_period_return(close, latest_price, 3)
         row["return_12m_pct"] = _calculate_period_return(close, latest_price, 12)
         row["mdd_12m_pct"] = _calculate_mdd(close, 12)
+        row["sortino_12m"] = period_sortino(close, 12)
 
 
 # 티커→시가총액 맵은 화면 재방문마다 페이지 순회를 반복하지 않게 짧은 TTL 로 캐시한다.

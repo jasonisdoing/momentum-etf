@@ -139,6 +139,7 @@ def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -
                     "return_12m_base_price": None,
                     "return_12m_pct": None,
                     "mdd_12m_pct": None,
+                    "sortino_12m": None,
                 }
             )
             if len(rows) >= target_count:
@@ -206,6 +207,7 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
                 "return_12m_base_price": item.get("return_12m_base_price"),
                 "return_12m_pct": item.get("return_12m_pct"),
                 "mdd_12m_pct": item.get("mdd_12m_pct"),
+                "sortino_12m": item.get("sortino_12m"),
             }
         )
 

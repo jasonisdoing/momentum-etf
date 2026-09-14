@@ -25,7 +25,6 @@ import { createAppGridTheme } from "../components/app-grid-theme";
 import { formatDateWithWeekday } from "@/lib/datetime";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
-import { formatMarketCapWon } from "@/lib/market-cap-format";
 import {
   VIEW_MODES,
   toPeriodRows,
@@ -820,7 +819,8 @@ export function MomentumClient() {
       },
       volatilityColumn<PlanRow>(),
       tradeValueMultColumn<PlanRow>(),
-      ...slotTradeColumns<PlanRow>({ fillDay }),
+      // 이탈 여유와 수익률은 매일 보는 판단 칸이라 거래대금 바로 오른쪽에 모은다 —
+      // 공용 꼬리 컬럼(slotTradeColumns)에서 수익률만 앞으로 빼고 나머지는 뒤에 둔다.
       // 이탈까지 남은 여유 — 둘 중 하나라도 0 이하가 되면 다음 거래일 시가에 판다.
       maExitGapColumn<PlanRow>({
         field: "short_gap_pct",
@@ -832,6 +832,8 @@ export function MomentumClient() {
         maDays: view?.settings.long_ma_days,
         entry: { mult: view?.settings.entry_vol_mult ?? null, getVolatility: (row) => row?.volatility_pct },
       }),
+      ...slotTradeColumns<PlanRow>({ fillDay }).filter((col) => col.field === "return_pct"),
+      ...slotTradeColumns<PlanRow>({ fillDay }).filter((col) => col.field !== "return_pct"),
     ],
     [
       fillDay,
@@ -899,14 +901,6 @@ export function MomentumClient() {
         maDays: view?.settings.long_ma_days,
         entry: { mult: view?.settings.entry_vol_mult ?? null, getVolatility: (row) => row?.volatility_pct },
       }),
-      {
-        field: "market_cap",
-        headerName: "시가총액",
-        width: 128,
-        hide: !hasMarketCap,
-        type: "numericColumn",
-        valueFormatter: (p) => (p.value == null ? "-" : formatMarketCapWon(p.value as number)),
-      },
     ],
     [
       hasIndustryData,

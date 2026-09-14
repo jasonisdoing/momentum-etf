@@ -75,6 +75,20 @@ def sortino_from_curve(start_val: float, values: np.ndarray) -> float:
     return ann_ret / downside_std
 
 
+def period_sortino(close: pd.Series, months: int) -> float | None:
+    """최근 N개월 종가의 단순 보유 소르티노 — 마켓 화면(미국·한국 개별주)의 12개월 컬럼 공용.
+
+    가용 기간이 N개월에 못 미치면 전체 기간으로 계산한다(같은 화면의 MDD와 같은 창 규칙).
+    """
+    target_date = pd.Timestamp.today().normalize() - pd.DateOffset(months=months)
+    period = close[close.index >= target_date]
+    if period.empty:
+        period = close
+    if len(period) < 2:
+        return None
+    return round(sortino_from_curve(float(period.iloc[0]), period.iloc[1:].to_numpy()), 4)
+
+
 def mdd_span(values: np.ndarray) -> tuple[int, int, float]:
     """곡선에서 최대낙폭(MDD)의 (고점 인덱스, 저점 인덱스, MDD%)를 반환한다.
 

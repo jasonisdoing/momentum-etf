@@ -40,6 +40,7 @@ from utils.index_constituents_loader import (  # noqa: E402
     load_index_meta,
     save_index_constituents,
 )
+from utils.perf_metrics import period_sortino  # noqa: E402
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -225,6 +226,7 @@ def _calculate_return_metrics(series: pd.Series) -> dict[str, Any]:
             "return_12m_latest_price": None,
             "return_12m_pct": None,
             "mdd_12m_pct": None,
+            "sortino_12m": None,
         }
 
     latest_date = clean.index.max()
@@ -234,6 +236,7 @@ def _calculate_return_metrics(series: pd.Series) -> dict[str, Any]:
         **_calculate_period_return(clean, latest_price, 3),
         **_calculate_period_return(clean, latest_price, 12),
         **_calculate_mdd(clean, 12),
+        "sortino_12m": period_sortino(clean, 12),
     }
 
 
@@ -334,6 +337,7 @@ def _enrich_constituents(items: list[dict[str, Any]], index: str, refresh_classi
             item[f"return_{months}m_latest_price"] = meta.get(f"return_{months}m_latest_price")
             item[f"return_{months}m_pct"] = meta.get(f"return_{months}m_pct")
         item["mdd_12m_pct"] = meta.get("mdd_12m_pct")
+        item["sortino_12m"] = meta.get("sortino_12m")
 
     missing = [item["ticker"] for item in items if not item["industry"]]
     if missing:
