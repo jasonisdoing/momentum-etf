@@ -1,9 +1,14 @@
 """배치 작업 큐 (MongoDB `batch_queue`).
 
 설계 결정:
-    - 단일 작업 단위 FIFO 직렬 처리. 워커는 서버 scheduler 컨테이너 + 로컬
-      (`python run_local_dev.py`) 다중 인스턴스 가능. MongoDB find_one_and_update
-      로 동시 claim 안전.
+    - **레인(lane)별 FIFO 직렬 처리** — 레인당 running 1건, 레인끼리는 병렬(2026-09).
+      예전에는 전역 1건 직렬이라 무거운 가격 캐시 갱신 동안 가벼운 알림 잡까지
+      기다렸다. 순서 의존(가격 캐시 → 지표)과 외부 소스 예절은 같은 레인 안의
+      직렬로 지키고, 겹치지 않는 부류는 나란히 돈다. 레인 한도는 서버·로컬 합산
+      **전역** 기준이다 — 머신별로 나누면 캐시 갱신과 지표 계산이 서버·로컬에서
+      겹쳐 옛 가격으로 지표를 만들 수 있다.
+    - 워커는 서버 scheduler 컨테이너 + 로컬(`python run_local_dev.py`) 다중 인스턴스
+      가능. MongoDB find_one_and_update 로 동시 claim 안전.
     - 중복 enqueue 무시 (같은 job_name 이 pending/running 이면 추가 안 함)
     - 24시간 TTL — 워커가 꺼져 있는 동안 무한 누적되는 것 방지
     - heartbeat: 워커가 30초마다 last_heartbeat 갱신
@@ -44,9 +49,39 @@ _HEARTBEAT_STALE_MINUTES = 5
 # (broker_balance_sync 는 나무증권 토큰을 DB 로 공유하므로 어느 워커든 잡아도 된다 — broker_api_service 참고)
 LOCAL_ONLY_JOBS: set[str] = {"db_backup"}
 
+# 잡 → 레인. 레인당 running 1건(서버·로컬 합산), 레인끼리는 병렬.
+#   data  — 시세·수집 헤비(KRX·네이버·야후 외부 조회 + 가격 캐시·지표 쓰기). 가격 캐시 →
+#           지표처럼 순서 의존이 있고, 같은 소스를 동시에 치면 차단(연결 리셋)당한다.
+#   light — 알림·판정·동기화 경량(DB 계산 + 슬랙·증권사 API). data 소스와 겹치지 않아
+#           가격 캐시 갱신을 기다릴 이유가 없다(합성 알림이 늦던 원인).
+#   local — 로컬 전용(백업, 로컬 디스크).
+# 매핑에 없는 새 잡은 가장 보수적인 data(직렬)로 흐른다 — 병렬이 안전한지 확인한 뒤 등록한다.
+LANE_LIGHT_JOBS: set[str] = {
+    "broker_balance_sync",
+    "strategy_mix_notify_kor",
+    "strategy_mix_notify_us",
+    "asset_summary",
+    "live_24h_slack",
+    "leverage_ma_cross",
+    "holdings_alarm",
+}
+LANE_LOCAL_JOBS: set[str] = set(LOCAL_ONLY_JOBS)
 
-# running 을 1건으로 묶는 부분 유니크 인덱스 이름.
-_SINGLE_RUNNING_INDEX = "only_one_running"
+
+def lane_of(job_name: str) -> str:
+    """잡의 레인 — job_name 은 "잡:접미사" 형태일 수 있어 앞부분으로 판정한다."""
+    base = str(job_name or "").split(":")[0]
+    if base in LANE_LOCAL_JOBS:
+        return "local"
+    if base in LANE_LIGHT_JOBS:
+        return "light"
+    return "data"
+
+
+# 레인당 running 1건으로 묶는 부분 유니크 인덱스 이름.
+_SINGLE_RUNNING_INDEX = "only_one_running_per_lane"
+# 전역 1건 시절의 옛 인덱스 — 남아 있으면 레인 병렬을 막으므로 지운다.
+_LEGACY_SINGLE_RUNNING_INDEX = "only_one_running"
 
 
 def _now_utc() -> datetime:
@@ -54,20 +89,26 @@ def _now_utc() -> datetime:
 
 
 def _ensure_single_running_index(coll: Any) -> None:
-    """running 1건 제한 인덱스를 만든다. 이미 2건 이상 running 이면 만들 수 없다.
+    """레인당 running 1건 제한 인덱스를 만든다. 같은 레인이 이미 2건 running 이면 만들 수 없다.
 
     워커가 병렬로 돌던 시점에 걸쳐 있으면 생성이 실패한다 — 그때는 stale 정리 뒤
     다음 워커 시작에서 다시 시도한다(실패해도 워커는 계속 떠야 하므로 예외를 삼킨다).
     """
     try:
+        # 전역 1건 시절의 옛 인덱스가 남아 있으면 레인 병렬을 막는다 — 먼저 지운다.
+        if _LEGACY_SINGLE_RUNNING_INDEX in coll.index_information():
+            coll.drop_index(_LEGACY_SINGLE_RUNNING_INDEX)
+    except Exception as exc:
+        logger.warning("[배치큐] 옛 직렬화 인덱스 제거 실패: %s", exc)
+    try:
         coll.create_index(
-            [("status", 1)],
+            [("status", 1), ("lane", 1)],
             unique=True,
             partialFilterExpression={"status": STATUS_RUNNING},
             name=_SINGLE_RUNNING_INDEX,
         )
     except Exception as exc:
-        logger.warning("[배치큐] 직렬화 인덱스 생성 실패 — 병렬 실행이 남을 수 있음: %s", exc)
+        logger.warning("[배치큐] 레인 직렬화 인덱스 생성 실패 — 병렬 실행이 남을 수 있음: %s", exc)
 
 
 def ensure_indexes() -> None:
@@ -80,10 +121,9 @@ def ensure_indexes() -> None:
     coll.create_index([("status", 1), ("triggered_at", 1)])
     # 중복 enqueue 체크용
     coll.create_index([("job_name", 1), ("status", 1)])
-    # 전역 직렬화 — running 상태 문서를 컬렉션 전체에서 1건으로 제한한다.
-    # 서버 워커와 로컬 워커가 각자 claim 하면 배치 2건이 동시에 DB 를 때린다. standalone
-    # MongoDB 라 트랜잭션을 못 쓰므로, 부분 유니크 인덱스로 DB 가 직접 막게 한다.
-    # 두 번째 워커의 claim 은 DuplicateKeyError 로 튕기고 다음 폴링에서 다시 시도한다.
+    # 레인별 직렬화 — running 을 (status, lane) 부분 유니크로 레인당 1건으로 제한한다.
+    # standalone MongoDB 라 트랜잭션을 못 쓰므로, 부분 유니크 인덱스로 DB 가 직접 막게
+    # 한다. 같은 레인을 노린 두 번째 워커의 claim 은 DuplicateKeyError 로 튕긴다.
     _ensure_single_running_index(coll)
     # TTL — expires_at 이 지나면 자동 삭제 (모든 상태에 적용)
     try:
@@ -120,6 +160,7 @@ def enqueue(
         "triggered_at": now,
         "status": STATUS_PENDING,
         "local_only": job_name.split(":")[0] in LOCAL_ONLY_JOBS,
+        "lane": lane_of(job_name),
         "arguments": arguments,
         "started_at": None,
         "ended_at": None,
@@ -134,9 +175,11 @@ def enqueue(
 
 
 def claim_next_pending() -> dict[str, Any] | None:
-    """가장 오래된 pending 1건을 원자적으로 running 으로 변경하고 반환.
+    """레인이 비어 있는 가장 오래된 pending 1건을 원자적으로 running 으로 변경하고 반환.
 
-    동시 워커 안전 (find_one_and_update 사용).
+    레인 안에서는 FIFO 다 — 어떤 레인이 이미 running 이면 그 레인의 pending 은
+    건너뛰지 않고(순서 유지) 레인째 제외한 뒤, 다른 레인의 가장 오래된 잡을 본다.
+    동시 워커 안전 (find_one_and_update + (status, lane) 부분 유니크 인덱스).
     워커를 실행 중인 인스턴스의 APP_TYPE 도 함께 기록해 시스템 UI 에서
     "어느 인스턴스가 처리 중인지" 식별 가능하게 한다 (락이 만료된 장시간 작업도 인식).
     """
@@ -150,24 +193,42 @@ def claim_next_pending() -> dict[str, Any] | None:
     claim_filter: dict[str, Any] = {"status": STATUS_PENDING}
     if worker_app_type != "Local":
         claim_filter["local_only"] = {"$ne": True}
-    try:
-        return coll.find_one_and_update(
-            claim_filter,
-            {
-                "$set": {
-                    "status": STATUS_RUNNING,
-                    "started_at": now,
-                    "last_heartbeat": now,
-                    "app_type": worker_app_type,
-                }
-            },
-            sort=[("triggered_at", 1)],
-            return_document=True,  # type: ignore[arg-type]
-        )
-    except DuplicateKeyError:
-        # 다른 워커가 이미 1건을 돌리고 있다 — 전역 직렬화가 막은 정상 경로다.
-        # 아무것도 집지 않고 다음 폴링(1초)에서 다시 시도한다.
-        return None
+
+    busy_lanes: set[str] = set()
+    skipped_ids: list[Any] = []  # lane 필드가 없는 옛 문서는 레인 제외 조건에 안 걸려 id 로 뺀다
+    while True:
+        candidate_filter = dict(claim_filter)
+        if busy_lanes:
+            candidate_filter["lane"] = {"$nin": sorted(busy_lanes)}
+        if skipped_ids:
+            candidate_filter["_id"] = {"$nin": skipped_ids}
+        candidate = coll.find_one(candidate_filter, sort=[("triggered_at", 1)])
+        if not candidate:
+            return None
+        # 배포 전에 쌓인 옛 문서는 lane 이 없다 — claim 시점에 채워야 인덱스가 레인으로 센다.
+        lane = str(candidate.get("lane") or lane_of(str(candidate.get("job_name") or "")))
+        try:
+            claimed = coll.find_one_and_update(
+                {"_id": candidate["_id"], "status": STATUS_PENDING},
+                {
+                    "$set": {
+                        "status": STATUS_RUNNING,
+                        "lane": lane,
+                        "started_at": now,
+                        "last_heartbeat": now,
+                        "app_type": worker_app_type,
+                    }
+                },
+                return_document=True,  # type: ignore[arg-type]
+            )
+        except DuplicateKeyError:
+            # 그 레인은 이미 1건이 돌고 있다 — 레인째 제외하고 다른 레인의 잡을 찾는다.
+            busy_lanes.add(lane)
+            skipped_ids.append(candidate["_id"])
+            continue
+        if claimed is not None:
+            return claimed
+        # 그 사이 다른 워커가 이 문서를 집어갔다 — 같은 조건으로 다음 후보를 본다.
 
 
 def update_heartbeat(item_id: Any) -> None:
