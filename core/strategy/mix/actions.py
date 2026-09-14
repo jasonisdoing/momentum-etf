@@ -132,7 +132,7 @@ def build_action_groups(
                 for key, slot in actions["slots"].items()
             },
         }
-        projected_cash = _apply_excess_allowance(
+        projected_cash = _apply_tolerance(
             stage_rows,
             stage_actions,
             allowance=excess_holding_allowance,
@@ -146,7 +146,7 @@ def build_action_groups(
                 " · 기준 가격 추정이며 실제 체결가·수수료는 별도입니다."
             )
         groups.extend(stage_groups)
-        # 허용한 초과 보유는 팔린 것으로 가정하지 않고 다음 날짜에도 실제 예상 보유로 넘긴다.
+        # 허용 오차로 생략한 차이(부족·초과)는 다음 날짜에도 실제 예상 보유로 넘긴다.
         previous.update({row["ticker"]: row["held_quantity"] + row["trade_quantity"] for row in stage_rows})
     # 장중 조정 그룹 — 오늘 시가는 지났으니 '시가'가 아니라 '장중(지금 주문)'으로 단다.
     if adjustment_intraday and adjustment_day:
@@ -161,20 +161,26 @@ def build_action_groups(
     return groups
 
 
-def _apply_excess_allowance(
+def _apply_tolerance(
     rows: list[dict[str, Any]],
     actions: dict[str, Any],
     *,
     allowance: float,
     cash_balance: float,
 ) -> float:
-    """목표는 유지하고 종목별 한도 안에서 조정 매도를 생략한다.
+    """허용 오차(±, 종목당 금액) — 조정 지시를 양방향으로 생략한다.
 
-    초과 보유(보유 > 목표)는 종목별 허용 금액 이내면 팔지 않는다. 남긴 초과 때문에 이
-    날짜의 매수 자금이 모자라면 **초과 금액이 큰 종목부터** 부족분이 채워질 만큼만 초과분을
-    도로 매도한다 — 목표 이하로는 내려가지 않는다. 예전에는 백테스트의 현금 비중만큼 실제
-    현금을 미리 채우라는 선제 매도를 냈는데(보호 현금), 어차피 매수가 생기는 날 여기서
-    매도가 같이 나오므로 과한 지시였다(2026-09 제거).
+    사유가 「목표 수량과 실제 보유 차이」뿐인 **조정** 종목에서, 차이 금액(|매매수량 ×
+    가격|)이 허용 오차 이내면 부족이든 초과든 지시를 내지 않는다. 넘으면 **목표까지
+    전부** 맞추는 지시를 낸다 — 오차 언저리까지만 맞추면 직후의 미세 드리프트로 또
+    걸려 왕복하는데, 목표로 완전 복귀시키면 오차 전체가 버퍼로 리셋된다. 신규 매수
+    (보유 0)·전량 매도·전략 신호·엔진 이벤트·월초 재배분 지시는 금액과 무관하게 그대로
+    낸다. 예전 형태(초과 보유만 허용, 한도 초과분은 부분 매도)에서 2026-09 확장 —
+    구성 교체·환산 이동이 만드는 소액 조정 지시가 계속 나와 귀찮았다.
+
+    생략한 초과 보유는 이 날짜의 매수 자금이 모자랄 때만 **초과 금액이 큰 종목부터**
+    부족분이 채워질 만큼 도로 매도한다(목표 이하로는 내려가지 않는다). 백테스트 현금
+    비중을 미리 채우라던 선제 매도(보호 현금)는 과한 지시라 폐기했다(2026-09).
     """
     prices = {}
     for row in rows:
@@ -182,26 +188,29 @@ def _apply_excess_allowance(
             continue
         price = row.get("price")
         if price is None or not math.isfinite(float(price)) or float(price) <= 0:
-            raise ValueError(f"초과 보유·매수 자금 계산에 필요한 가격이 없습니다: {row['ticker']}")
+            raise ValueError(f"허용 오차·매수 자금 계산에 필요한 가격이 없습니다: {row['ticker']}")
         prices[row["ticker"]] = float(price)
-    retained_rows = []
-    for row in sorted(rows, key=lambda item: item["ticker"]):
+    tolerated_excess: list[dict[str, Any]] = []
+    for row in rows:
         trade = row["trade_quantity"]
-        if trade >= 0 or row["target_quantity"] <= 0:
+        if not trade or row["target_quantity"] <= 0:
             continue
-        reasons = _action_reasons(row["ticker"], "sell", actions)
+        if trade > 0 and float(row.get("held_quantity") or 0) <= 0:
+            continue  # 신규 매수(진입)는 허용 대상이 아니다 — 전략 신호를 놓친다.
+        reasons = _action_reasons(row["ticker"], "sell" if trade < 0 else "buy", actions)
         if any(reason["code"] != "target_difference" for reason in reasons):
             continue
         price = prices[row["ticker"]]
-        retained = min(-trade, math.floor(allowance / price))
-        if retained <= 0:
+        if abs(trade) * price > allowance:
             continue
-        row["trade_quantity"] += retained
-        row["retained_excess_quantity"] = retained
-        retained_rows.append(row)
+        if trade < 0:
+            # 생략한 초과분 — 아래 매수 자금 재확보의 후보로 남긴다.
+            row["retained_excess_quantity"] = -trade
+            tolerated_excess.append(row)
+        row["trade_quantity"] = 0
     after_cash = cash_balance - math.fsum(row["trade_quantity"] * prices.get(row["ticker"], 0) for row in rows)
     for row in sorted(
-        retained_rows, key=lambda item: item["retained_excess_quantity"] * prices[item["ticker"]], reverse=True
+        tolerated_excess, key=lambda item: item["retained_excess_quantity"] * prices[item["ticker"]], reverse=True
     ):
         if after_cash >= 0:
             break

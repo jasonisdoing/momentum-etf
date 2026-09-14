@@ -706,7 +706,7 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
         self.assertEqual(schedule["2026-09-04"]["quantities"], {"SAME": 2})
         self.assertEqual(schedule["2026-09-07"]["quantities"], {"SAME": 7})
 
-        # 초과 보유 허용은 화면 액션의 예외이며 엔진에서 받은 목표·표의 목표는 바꾸지 않는다.
+        # 허용 오차는 화면 액션의 예외이며 엔진에서 받은 목표·표의 목표는 바꾸지 않는다.
         from copy import deepcopy
 
         original_schedule = deepcopy(schedule)
@@ -723,8 +723,9 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
         self.assertEqual(schedule, original_schedule)
         self.assertEqual(rows, original_rows)
         orders = [item for group in groups for item in group["items"]]
-        # 첫날 목표 2주+허용 2주로 5주 매도, 다음 목표 7주에는 부족한 3주 전부 매수.
-        self.assertEqual([(item["side"], item["quantity"]) for item in orders], [("sell", 5), ("buy", 3)])
+        # 차이 금액(7주 × 7 = 49)이 허용 오차(14)를 넘으므로 목표까지 전부 맞춘다 —
+        # 첫날 목표 2주로 7주 전량 매도, 다음 목표 7주에는 부족한 5주 전부 매수.
+        self.assertEqual([(item["side"], item["quantity"]) for item in orders], [("sell", 7), ("buy", 5)])
 
     def test_mark_engine_statuses_labels_without_judging(self):
         from core.strategy.intraday import mark_engine_statuses
