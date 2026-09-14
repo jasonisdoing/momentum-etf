@@ -121,8 +121,9 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
     showNavColumns: true,
     showListing: true,
     capHeader: "시가총액(억)",
-    capFilterDefault: "",
-    volumeFilterDefault: "",
+    // 기본 필터 — 소형·저유동 ETF 를 걸러 보는 것이 기본 사용 패턴이라 초기값을 둔다.
+    capFilterDefault: "100",
+    volumeFilterDefault: "10000",
     // 국내 주식형 ETF 는 매매차익이 비과세고 그 밖(해외·파생·원자재·채권)은 과세다.
     showTaxFilter: true,
   },
@@ -504,23 +505,23 @@ export function MarketManager({
       },
       ...(variant.showNavColumns
         ? ([
-            {
-              field: "nav",
-              headerName: "Nav",
-              width: 110,
-              type: "rightAligned",
-              cellRenderer: (params: { value: number | null }) => formatNullableNumber(params.value),
-            },
-            {
-              field: "deviation",
-              headerName: "괴리율",
-              width: 96,
-              type: "rightAligned",
-              cellRenderer: (params: { value: number | null }) => (
-                <span className={getDeviationClass(params.value)}>{formatPercent(params.value)}</span>
-              ),
-            },
-          ] as ColDef<MarketGridRow>[])
+          {
+            field: "nav",
+            headerName: "Nav",
+            width: 110,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null }) => formatNullableNumber(params.value),
+          },
+          {
+            field: "deviation",
+            headerName: "괴리율",
+            width: 96,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null }) => (
+              <span className={getDeviationClass(params.value)}>{formatPercent(params.value)}</span>
+            ),
+          },
+        ] as ColDef<MarketGridRow>[])
         : []),
       // 기간 수익률 — 짧은 기간부터. 값 없음이 맨 아래로 가도록 정렬 비교자를 같이 준다.
       ...RETURN_PERIODS.map(({ field, header }) => ({
