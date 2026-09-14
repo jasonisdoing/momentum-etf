@@ -45,6 +45,7 @@ type KorMarketStockRow = {
   return_3m_pct: number | null;
   return_12m_pct: number | null;
   mdd_12m_pct: number | null;
+  sortino_12m: number | null;
 };
 
 type KorMarketStockGridRow = KorMarketStockRow & {
@@ -392,6 +393,18 @@ export function KorMarketStockManager({
         minWidth: 122,
         type: "rightAligned",
         valueFormatter: (p) => formatPercent(p.value),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
+      },
+      {
+        headerName: "소르티노(12개월)",
+        field: "sortino_12m",
+        width: 132,
+        minWidth: 122,
+        type: "rightAligned",
+        valueFormatter: (p) => (p.value == null ? "-" : Number(p.value).toFixed(2)),
         cellClassRules: {
           metricPositive: (p) => p.value != null && p.value > 0,
           metricNegative: (p) => p.value != null && p.value < 0,

@@ -23,6 +23,7 @@ type KorMarketStocksResponse = {
     return_3m_pct: number | null;
     return_12m_pct: number | null;
     mdd_12m_pct: number | null;
+    sortino_12m: number | null;
   }>;
 };
 
