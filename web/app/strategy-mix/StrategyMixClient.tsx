@@ -78,11 +78,11 @@ const CURRENT_NOTES = [
   {
     title: "액션",
     body:
-      "목표보다 부족한 수량은 금액과 관계없이 매수로 표시합니다. 종목별 초과 보유 허용 금액 안에서 " +
-      "허용된 초과분은 오늘의 액션의 조정 매도와 슬랙 알림에서 제외합니다. " +
-      "매수 자금이 부족한 날에만 초과 금액이 큰 종목부터 부족분이 채워질 만큼 초과분을 매도합니다(목표 이하로는 내려가지 않음). " +
-      "테이블의 목표와 수량 차이는 그대로 표시합니다. 한도는 계좌 통화 기준이며 0이면 초과 보유를 허용하지 않습니다. " +
-      "전량 청산·전략 신호·엔진 거래·월초 재배분은 허용 대상이 아닙니다. 매도 후 매수를 전제로 하며 체결가·수수료는 별도입니다. " +
+      "종목별 허용 오차 금액(±) 이내의 조정 차이(부족·초과)는 오늘의 액션과 슬랙 알림에서 제외합니다 — " +
+      "차이가 오차를 넘으면 목표까지 전부 맞추는 지시를 냅니다. " +
+      "매수 자금이 부족한 날에만 생략한 초과분을 초과 금액이 큰 종목부터 부족분이 채워질 만큼 매도합니다(목표 이하로는 내려가지 않음). " +
+      "테이블의 목표와 수량 차이는 그대로 표시합니다. 오차는 계좌 통화 기준이며 0이면 오차를 허용하지 않습니다. " +
+      "신규 매수·전량 청산·전략 신호·엔진 거래·월초 재배분은 금액과 무관하게 항상 표시합니다. 매도 후 매수를 전제로 하며 체결가·수수료는 별도입니다. " +
       "종목별 신호 적용일에 목표와 보유 수량을 비교합니다.",
   },
   {
@@ -1387,7 +1387,7 @@ export function StrategyMixClient() {
   const saveHeaderSettings = async () => {
     if (!selectedAccount || !weightOk) return;
     if (!excessAllowance.trim() || !Number.isFinite(Number(excessAllowance)) || Number(excessAllowance) < 0) {
-      toast.error("초과 보유 허용 금액은 0 이상의 숫자로 입력하세요.");
+      toast.error("허용 오차 금액은 0 이상의 숫자로 입력하세요.");
       return;
     }
     try {
@@ -1507,7 +1507,7 @@ export function StrategyMixClient() {
                     <>
 
                       <label className="appLabeledField" style={{ marginBottom: 0 }}>
-                        <span className="appLabeledFieldLabel">초과 보유 허용 금액 ({selectedAccount.currency})</span>
+                        <span className="appLabeledFieldLabel">허용 오차 금액(±) ({selectedAccount.currency})</span>
                         <input
                           className="form-control form-control-sm"
                           type="number"
@@ -1517,7 +1517,7 @@ export function StrategyMixClient() {
                           value={excessAllowance}
                           onChange={(event) => setExcessAllowance(event.target.value)}
                           disabled={settingsSaving}
-                          title="각 종목에 적용하는 초과 보유 허용 금액입니다. 매수 자금이 부족하면 초과 금액이 큰 종목부터 초과분을 매도하며, 0이면 초과 보유를 허용하지 않습니다."
+                          title="종목별 조정 지시의 허용 오차(±)입니다. 목표와 보유의 차이 금액이 이내면 부족·초과 모두 지시하지 않고, 넘으면 목표까지 전부 맞춥니다. 신규 매수·전량 매도·전략 신호·월초 재배분은 항상 표시되고, 매수 자금이 부족하면 생략한 초과분부터 매도합니다. 0이면 오차를 허용하지 않습니다."
                         />
                       </label>
                       {/* 배분(%)은 전부 아래 슬리브 표에 있다 — 현금도 같은 줄 형태로 둔다. */}
@@ -1918,7 +1918,7 @@ export function StrategyMixClient() {
                       오늘의 액션
                       <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
                         총자산을 백테스트의 오늘 비중에 맞춘 목표 주수와 계좌 보유의 차이 —
-                        종목별 한도 안에서 초과 보유를 허용하고, 매수 자금이 부족할 때만 초과분을 매도합니다 · 종목별 신호 적용일 기준
+                        종목별 허용 오차(±) 이내의 조정 차이는 지시하지 않습니다 · 종목별 신호 적용일 기준
                       </span>
                     </div>
                     {todayActionGroups.length === 0 ? (
