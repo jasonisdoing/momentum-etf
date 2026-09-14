@@ -4,6 +4,7 @@
 data_loader 가 re-export 로 유지한다. TTL 캐시는 모듈 전역이라 프로세스 내 공유된다.
 """
 
+import re
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
@@ -690,8 +691,9 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
             data = resp.json()
             stocks = (data.get("result") or {}).get("stocks") or []
 
-            # 한국 종목(stockCode가 'A'로 시작)을 제외하고 미국 주식만 필터링
-            us_stocks = [s for s in stocks if not str(s.get("stockCode") or "").startswith("A")]
+            # 한국 종목(stockCode가 'A' + 숫자 6자리)만 제외한다 — 단순 'A' 시작 판정은
+            # AMEX 상장 종목(AMX… 코드, 예: DRAM)까지 한국 종목으로 오인해 버린다.
+            us_stocks = [s for s in stocks if not re.fullmatch(r"A\d{6}", str(s.get("stockCode") or ""))]
 
             # matchType이 EXACT인 첫 번째 미국 종목 사용
             for stock in us_stocks:
