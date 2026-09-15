@@ -692,10 +692,10 @@ export function MomentumClient() {
       is_new: false,
       exit_reason: null,
     }));
-    // 계속 들고 갈 것 → 팔 것 → 살 것 → 빈 자리 → 이미 끝난 것 순.
-    // 오늘 계좌에서 할 일의 순서다: 그대로 두고, 팔고, 사고, 남은 자리를 확인한다.
+    // 계속 들고 갈 것 → 매도(오늘 체결) → 매도 예정 → 살 것 → 빈 자리 순.
+    // 매도가 한 묶음으로 날짜순(체결된 것 → 내일 예정)으로 읽힌다.
     // 같은 묶음 안에서는 **오래 들고 있는 것이 위** — 편입일이 이른 순이다.
-    const order = { hold: 0, sell: 1, buy: 2, empty: 3, exited: 4 } as const;
+    const order = { hold: 0, exited: 1, sell: 2, buy: 3, empty: 4 } as const;
     return [...held, ...buys, ...empty, ...exited].sort(
       (a, b) => order[a.plan] - order[b.plan] || (a.entry_date ?? "").localeCompare(b.entry_date ?? ""),
     );
