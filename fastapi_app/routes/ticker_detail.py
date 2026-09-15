@@ -836,14 +836,23 @@ def build_ticker_detail_payload(
                 bundle_fx_rates = bundle.get("fx_rates") or []
                 if etf_info is not None:
                     etf_info["portfolio_change_base_date"] = bundle.get("base_date")
+                    # 화면의 포트폴리오 변동 계산용 — 기준일 이후 누적 환율(백엔드 합계와 같은 값).
+                    etf_info["portfolio_change_fx_rates"] = bundle.get("cumulative_fx_rates") or []
             else:
+                fallback_base_date = str(etf_info.get("portfolio_change_base_date") or "") if etf_info else None
                 priced_holdings, holdings_price_as_of_date = enrich_component_prices(
                     holdings,
                     price_fetch_limit=100,
-                    cumulative_base_date=str(etf_info.get("portfolio_change_base_date") or "") if etf_info else None,
+                    cumulative_base_date=fallback_base_date,
                     component_price_snapshot=component_price_snapshot,
                 )
                 bundle_fx_rates = None
+                if etf_info is not None:
+                    from services.portfolio_change_service import build_cumulative_fx_rates
+
+                    etf_info["portfolio_change_fx_rates"] = build_cumulative_fx_rates(
+                        priced_holdings, get_exchange_rates(), fallback_base_date
+                    )
 
             enriched_holdings: list[dict[str, object]] = []
             for source_item in priced_holdings:

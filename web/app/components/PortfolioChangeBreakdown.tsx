@@ -1,14 +1,7 @@
 import type { PortfolioChangeBreakdownItem } from "@/lib/portfolio-change";
 
-type PortfolioChangeFxRate = {
-  currency: string;
-  change_pct?: number | null;
-};
-
 type PortfolioChangeBreakdownProps = {
   items: PortfolioChangeBreakdownItem[];
-  /** 호환용 — 더 이상 사용하지 않음 (합산값은 item.adjusted_change_pct 에 포함). */
-  fxRates?: PortfolioChangeFxRate[];
   variant: "detail" | "compact";
   emptyText: string;
 };
