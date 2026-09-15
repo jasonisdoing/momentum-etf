@@ -192,8 +192,8 @@ TRADING_DAYS_PER_MONTH = 20
 # 지표 계산에 필요한 절대 최소 거래일 수 (항상 적용)
 # ENABLE_DATA_SUFFICIENCY_CHECK = True  → 엄격 기준 적용
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
-# 20일(4주) 미만 데이터는 추세 판단이 불가하므로 제외
-MIN_TRADING_DAYS = 20
+# 60일(3달) 미만 데이터는 추세 판단이 불가하므로 제외
+MIN_TRADING_DAYS = 60
 
 # -----------------------------------------------------------------------
 # 전략 공용 셀렉트 선택지
@@ -270,7 +270,7 @@ SHORT_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {
     "au": (10, 20, 30, 50, 100),
 }
 LONG_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {
-    "kor": (40, 60, 90, 120, 150, 180, 240),
+    "kor": (60, 90, 120, 150, 180, 240),
     "us": (50, 100, 150, 200, 250),
     "au": (50, 100, 150, 200, 250),
 }
