@@ -57,6 +57,42 @@ def _next_trading_day(country: str, after: date) -> date:
     return day
 
 
+def _previous_trading_day(country: str, before: date) -> date:
+    """`before` **이전**의 거래일. 달력을 못 읽으면 직전 평일로 둔다."""
+    try:
+        from utils.trading_calendar import get_trading_days
+
+        days = get_trading_days(
+            (before - timedelta(days=14)).strftime("%Y-%m-%d"),
+            (before - timedelta(days=1)).strftime("%Y-%m-%d"),
+            country,
+        )
+        for day in reversed(days):
+            if day.date() < before:
+                return day.date()
+    except Exception:
+        pass
+    day = before - timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
+
+
+def last_closed_session_date(country: str, now: datetime | None = None) -> str:
+    """그 시장에서 마지막으로 **정규장이 마감된** 거래일(YYYY-MM-DD).
+
+    오늘이 거래일이고 정규장 마감 시각을 지났으면 오늘, 아니면(장전·장중·휴장) 직전 거래일.
+    「마지막 확정 종가」를 기준으로 삼는 계산(예: ETF 포트폴리오 변동)의 앵커다.
+    """
+    schedule = _schedule(country)
+    zone = ZoneInfo(str(schedule["timezone"]))
+    now_local = (now or datetime.now(zone)).astimezone(zone)
+    today = now_local.date()
+    if _is_trading_day(country, today) and now_local >= _at(zone, today, schedule["close"]):
+        return today.strftime("%Y-%m-%d")
+    return _previous_trading_day(country, today).strftime("%Y-%m-%d")
+
+
 def _is_trading_day(country: str, day: date) -> bool:
     """그 날짜가 거래일인지. 달력을 못 읽으면 평일 여부로 본다."""
     try:
