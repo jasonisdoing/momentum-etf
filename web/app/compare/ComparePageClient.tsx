@@ -78,6 +78,8 @@ type TickerEtfInfo = {
   market_cap_krw?: number | null;
   volume?: number | null;
   fx_rates?: TickerFxRate[];
+  /** 포트폴리오 변동 계산용 — 기준일 이후 누적 환율(백엔드 합계와 같은 값). */
+  portfolio_change_fx_rates?: TickerFxRate[];
   portfolio_change_base_date?: string | null;
 };
 
@@ -392,9 +394,10 @@ function getLatestChangeAmount(detail: TickerDetailResponse): number | null {
 }
 
 function getPortfolioChange(detail: TickerDetailResponse): PortfolioChangeResult {
+  // 환율은 기준일 이후 누적(백엔드 합계와 같은 값) — 일간 환율로 환산하면 종목(누적)과 어긋난다.
   return calcPortfolioChange(
     detail.holdings ?? [],
-    detail.etf_info?.fx_rates ?? [],
+    detail.etf_info?.portfolio_change_fx_rates ?? [],
   );
 }
 
@@ -911,7 +914,6 @@ function BasicInfoValue({ product, metric }: { product: SelectedProduct; metric:
       <div className="compareBasicValue">
         <PortfolioChangeBreakdown
           items={portfolioChange.breakdown}
-          fxRates={etfInfo?.fx_rates ?? []}
           variant="compact"
           emptyText="-"
         />

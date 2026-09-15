@@ -109,6 +109,8 @@ type TickerEtfInfo = {
   fx_rate?: number | null;
   fx_change_pct?: number | null;
   fx_rates?: TickerFxRate[];
+  /** 포트폴리오 변동 계산용 — 기준일 이후 누적 환율(백엔드 합계와 같은 값). */
+  portfolio_change_fx_rates?: TickerFxRate[];
   portfolio_change_base_date?: string | null;
   source?: string | null;
 };
@@ -1003,22 +1005,19 @@ export function TickerDetailManager({
   const navDelta = etfInfo?.nav_change ?? null;
   const navChangePct = etfInfo?.nav_change_pct ?? null;
 
-  const displayFxRates = useMemo<TickerFxRate[]>(() => {
-    return etfInfo?.fx_rates ?? [];
-  }, [etfInfo?.fx_rates]);
-
   const portfolioChange = useMemo<{
     total_pct: number | null;
     breakdown: PortfolioChangeBreakdownItem[];
     coverage_weight: number;
   }>(() => {
-    const result = calcPortfolioChange(holdings, displayFxRates);
+    // 환율은 기준일 이후 누적(백엔드 합계와 같은 값) — 일간 환율로 환산하면 종목(누적)과 어긋난다.
+    const result = calcPortfolioChange(holdings, etfInfo?.portfolio_change_fx_rates ?? []);
     return {
       total_pct: result.totalPct,
       breakdown: result.breakdown,
       coverage_weight: result.coverageWeight,
     };
-  }, [holdings, displayFxRates]);
+  }, [holdings, etfInfo?.portfolio_change_fx_rates]);
   const portfolioChangeBreakdown = portfolioChange.breakdown;
   const portfolioChangeBaseDate = etfInfo?.portfolio_change_base_date ?? null;
   const dailyColumns = useMemo<ColDef[]>(
@@ -1343,7 +1342,6 @@ export function TickerDetailManager({
                                 <div className="tickerDetailInfoTrackerHint">
                                   <PortfolioChangeBreakdown
                                     items={portfolioChangeBreakdown}
-                                    fxRates={displayFxRates}
                                     variant="detail"
                                     emptyText="구성종목 가중 평균"
                                   />

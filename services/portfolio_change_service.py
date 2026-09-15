@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 _HOLDINGS_PRICE_FETCH_LIMIT = 100
 _TTL_SECONDS = CACHE_TTL_COMPUTE
-_PORTFOLIO_CHANGE_CALC_VERSION = 5  # 기준일을 직전 스냅샷에서 「마지막 확정 국내 종가일」로 전환
+_PORTFOLIO_CHANGE_CALC_VERSION = 6  # 기준일을 마지막 확정 국내 종가일로 전환 + 누적 환율 동봉
 
 _PORTFOLIO_CHANGE_CACHE: dict[str, dict[str, Any]] = {}
 _PORTFOLIO_CHANGE_LOCK = threading.Lock()
@@ -538,6 +538,9 @@ def compute_portfolio_change_bundle(
 
     result = {
         "calc_version": _PORTFOLIO_CHANGE_CALC_VERSION,
+        # 화면의 포트폴리오 변동 계산이 백엔드와 같은 환율(기준일 이후 누적)을 쓰도록 내려보낸다 —
+        # 일간 환율로 환산하면 종목은 누적인데 환율만 오늘 몫이 되어 내역이 어긋난다(홍콩 +0.87% 사례).
+        "cumulative_fx_rates": fx_rates_for_calc,
         "base_date": base_date,
         "priced_holdings": priced_holdings,
         "fx_rates": fx_rates,
