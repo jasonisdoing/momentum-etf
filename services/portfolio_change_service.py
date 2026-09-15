@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 _HOLDINGS_PRICE_FETCH_LIMIT = 100
 _TTL_SECONDS = CACHE_TTL_COMPUTE
-_PORTFOLIO_CHANGE_CALC_VERSION = 4  # 합계 계산을 base_date 누적(cumulative_change_pct)로 전환
+_PORTFOLIO_CHANGE_CALC_VERSION = 5  # 기준일을 직전 스냅샷에서 「마지막 확정 국내 종가일」로 전환
 
 _PORTFOLIO_CHANGE_CACHE: dict[str, dict[str, Any]] = {}
 _PORTFOLIO_CHANGE_LOCK = threading.Lock()
@@ -190,16 +190,19 @@ def _is_trading_day_kor(date_str: str) -> bool:
         return True
 
 
-def determine_portfolio_change_base_date(ticker_type: str, ticker: str) -> str | None:
-    """비교 기준일 — 직전 스냅샷의 날짜. 직전값이 없으면 None.
+def determine_portfolio_change_base_date() -> str:
+    """비교 기준일 = 마지막으로 **정규장이 마감된 국내 거래일**(마지막 확정 종가일).
 
-    저장 시점에 이미 거래일로 정해 넣으므로 휴장일 보정이 필요 없다
-    (예전에는 날짜별 히스토리를 최대 7번 거슬러 올라가며 보정했다).
+    이 값이 「어제 종가 이후 구성종목이 얼마나 움직였나」의 앵커다 — 국내 상장 해외 ETF 의
+    다음 세션 가격을 가늠하는 용도라, ETF 가격에 이미 반영된 과거 세션이 섞이면 안 된다.
+    예전에는 직전 메타 스냅샷의 날짜를 썼는데, 배치 주기에 묶여 한두 세션씩 뒤처졌고
+    그 사이 변동(이미 ETF 가격에 반영된 몫)까지 '변동'으로 집계됐다(2026-09).
+    거래일 캘린더로 직접 정한다. 대상 화면이 전부 국내 상장 ETF 라 국내 달력 고정이다
+    (스냅샷 귀속일 `_resolve_snapshot_date` 와 같은 기준).
     """
-    previous = get_previous_stock_cache_meta(ticker_type, ticker)
-    if not previous:
-        return None
-    return str(previous.get("date") or "").strip() or None
+    from utils.market_session import last_closed_session_date
+
+    return last_closed_session_date("kor")
 
 
 def _build_fx_rates_for_currencies(currencies: set[str], rates: dict[str, Any]) -> list[dict[str, Any]]:
@@ -489,10 +492,8 @@ def compute_portfolio_change_bundle(
     holdings_reference_date = str(holdings_cache.get("reference_date") or "").strip() or None
 
     # 캐시 검증 단계에서 base_date 변경 여부를 확인하기 위해 먼저 결정한다.
-    # 휴장일 캘린더 수정 등으로 base_date 가 바뀐 경우 stale 캐시를 회피한다.
-    base_date = determine_portfolio_change_base_date(norm_type, norm_ticker)
-    if not base_date:
-        return None
+    # 날짜가 넘어가 base_date 가 바뀌면 stale 캐시를 회피한다.
+    base_date = determine_portfolio_change_base_date()
 
     if use_cache:
         with _PORTFOLIO_CHANGE_LOCK:
@@ -514,17 +515,11 @@ def compute_portfolio_change_bundle(
                 }
             return persisted
 
-    # base_date 가 국내 당일이면 국내 구성종목 baseline 을 '당일 시초가'로 써서 장중 변동을 보여준다.
-    # (미국·호주 등 해외 구성종목은 시차상 base_date 당일 시초가가 없어 종가 baseline 을 유지한다.)
-    today_kst = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
-    use_open_baseline = norm_type.startswith("kor") and base_date == today_kst
-
     priced_holdings, _ = enrich_component_prices(
         holdings,
         price_fetch_limit=_HOLDINGS_PRICE_FETCH_LIMIT,
         cumulative_base_date=base_date,
         component_price_snapshot=component_price_snapshot,
-        use_open_baseline=use_open_baseline,
     )
     rates = get_exchange_rates()
     # 합계 계산은 base_date 이후 누적 변동을 사용하므로 환율도 누적률을 적용한다.
@@ -544,7 +539,6 @@ def compute_portfolio_change_bundle(
     result = {
         "calc_version": _PORTFOLIO_CHANGE_CALC_VERSION,
         "base_date": base_date,
-        "base_is_open": use_open_baseline,
         "priced_holdings": priced_holdings,
         "fx_rates": fx_rates,
         "total_pct": total_pct,

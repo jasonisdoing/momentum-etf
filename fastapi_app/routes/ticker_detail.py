@@ -304,13 +304,14 @@ def _build_korean_etf_info_payload(
             market_cap_krw = None
 
     # 비교는 (현재 값 vs 직전 영업일 값) 한 쌍 — 조회 1회.
-    # 직전값의 date 는 저장 시점에 이미 거래일이라 휴장일 보정이 필요 없다.
     previous_meta = get_previous_stock_cache_meta(ticker_type, ticker)
     prev_nav = None
-    portfolio_change_base_date = None
     if previous_meta and "meta_cache" in previous_meta:
         prev_nav = previous_meta["meta_cache"].get("nav")
-        portfolio_change_base_date = str(previous_meta.get("date") or "").strip() or None
+    # 포트폴리오 변동 기준일 — 계산과 같은 공용 함수(마지막 확정 국내 종가일).
+    from services.portfolio_change_service import determine_portfolio_change_base_date
+
+    portfolio_change_base_date = determine_portfolio_change_base_date()
 
     nav_change = None
     nav_change_pct = None
@@ -835,7 +836,6 @@ def build_ticker_detail_payload(
                 bundle_fx_rates = bundle.get("fx_rates") or []
                 if etf_info is not None:
                     etf_info["portfolio_change_base_date"] = bundle.get("base_date")
-                    etf_info["portfolio_change_base_is_open"] = bool(bundle.get("base_is_open"))
             else:
                 priced_holdings, holdings_price_as_of_date = enrich_component_prices(
                     holdings,

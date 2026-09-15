@@ -79,7 +79,6 @@ type TickerEtfInfo = {
   volume?: number | null;
   fx_rates?: TickerFxRate[];
   portfolio_change_base_date?: string | null;
-  portfolio_change_base_is_open?: boolean | null;
 };
 
 type TickerHoldingRow = {
@@ -1457,16 +1456,6 @@ export function ComparePageClient() {
     return null;
   }, [sortedProducts]);
 
-  // base_date 를 뽑은 것과 동일한 상품 기준 — 당일 시초가 baseline 이면 라벨을 "시초가 이후"로.
-  const portfolioChangeBaseIsOpen = useMemo(() => {
-    for (const p of sortedProducts) {
-      if (p.detail.etf_info?.portfolio_change_base_date) {
-        return !!p.detail.etf_info.portfolio_change_base_is_open;
-      }
-    }
-    return false;
-  }, [sortedProducts]);
-
   // 매칭 색상 계산용: 전체 종목 (이전엔 상위 10개만이었지만 컬럼 스크롤로 전부 노출되므로 전부 대상).
   const holdingExposureRows = useMemo(() => buildHoldingExposureRows(sortedProducts), [sortedProducts]);
   const holdingColorByCode = useMemo(() => {
@@ -1881,8 +1870,7 @@ export function ComparePageClient() {
                   <div className="compareMatrixLabelText">{metric.label}</div>
                   {metric.label === "포트폴리오 변동" && portfolioChangeBaseDate && (
                     <div className="compareMatrixLabelHint" style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)", fontWeight: "normal", marginTop: "4px" }}>
-                      ({formatKoreanDateLabel(portfolioChangeBaseDate)}
-                      {portfolioChangeBaseIsOpen ? " 시초가" : ""} 이후)
+                      ({formatKoreanDateLabel(portfolioChangeBaseDate)} 이후)
                     </div>
                   )}
                 </div>
