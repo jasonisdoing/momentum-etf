@@ -245,6 +245,12 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
 
         return is_new_listing(close_df[ticker].dropna())
 
+    def new_listing_months(ticker: str) -> int | None:
+        """상장 후 경과 개월(내림) — 🆕(N개월) 표기(core.strategy.scoring.listing_months)."""
+        from core.strategy.scoring import listing_months
+
+        return listing_months(close_df[ticker].dropna())
+
     rows = []
     for ticker in close_df.columns:
         price = close_df.at[last, ticker]
@@ -282,6 +288,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
                 "high_drawdown_pct": high_drawdown(ticker),
                 # 신규상장(🆕) — 전 화면 공용 판정(core.strategy.scoring.is_new_listing).
                 "new_listing": new_listing(ticker),
+                "listing_months": new_listing_months(ticker),
                 "touched": touched,
                 "volatility_pct": round(float(vol_last[ticker]), 2) if pd.notna(vol_last.get(ticker)) else None,
                 # 추세 이탈 표시용 — 풀 이평선 이격(단기·장기). 장중이면 아래에서 잠정 봉 기준으로 갱신.
@@ -546,6 +553,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     value_mult_by = {row["ticker"]: (row.get("value_mult"), row.get("value_mult_live")) for row in rows}
     drawdown_by = {row["ticker"]: row["high_drawdown_pct"] for row in rows}
     new_listing_by = {row["ticker"]: row.get("new_listing") for row in rows}
+    listing_months_by = {row["ticker"]: row.get("listing_months") for row in rows}
     volatility_by = {row["ticker"]: row.get("volatility_pct") for row in rows}
     gap_by = {row["ticker"]: (row.get("short_gap_pct"), row.get("long_gap_pct")) for row in rows}
     for item in [*holdings, *simulated["exited_today"]]:
@@ -556,6 +564,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         item["short_gap_pct"], item["long_gap_pct"] = gap_by.get(item["ticker"], (None, None))
         item["high_drawdown_pct"] = drawdown_by.get(item["ticker"])
         item["new_listing"] = new_listing_by.get(item["ticker"])
+        item["listing_months"] = listing_months_by.get(item["ticker"])
 
     # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.
     fill_base = pd.Timestamp(str(quotes["traded_at"])[:10]) if quotes["live"] else last

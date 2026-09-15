@@ -183,6 +183,22 @@ def is_new_listing(close_series: pd.Series, *, window_months: int = METRIC_WINDO
     return bool(series.index[0] > series.index[-1] - pd.DateOffset(months=int(window_months)))
 
 
+def listing_months(close_series: pd.Series) -> int | None:
+    """상장 후 경과 개월 수(내림) — 🆕 배지의 「🆕(N개월)」 표기용. 시리즈가 비면 None.
+
+    첫 봉과 마지막 봉 사이의 만(滿) 개월 수다. `is_new_listing` 과 같은 시리즈로 계산해야
+    배지 유무와 개월 수가 어긋나지 않는다.
+    """
+    series = pd.to_numeric(close_series, errors="coerce").dropna()
+    if series.empty:
+        return None
+    first, last = series.index[0], series.index[-1]
+    months = (last.year - first.year) * 12 + (last.month - first.month)
+    if last.day < first.day:
+        months -= 1
+    return max(0, int(months))
+
+
 def drawdown_from_high_pct(
     close_series: pd.Series,
     current_price: float | None = None,
