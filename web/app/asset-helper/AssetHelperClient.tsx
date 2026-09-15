@@ -319,7 +319,7 @@ export function AssetHelperClient() {
   const [alertBadges, setAlertBadges] = useState<AlertBadges>({});
   // 이동선 이탈 종목 — 배지와 같은 조건으로 행을 회색 처리한다.
   const [maBrokenTickers, setMaBrokenTickers] = useState<Set<string>>(new Set());
-  const [newListingTickers, setNewListingTickers] = useState<Set<string>>(new Set());
+  const [newListingMonths, setNewListingMonths] = useState<Record<string, number | null>>({});
   const [accountReturns, setAccountReturns] = useState<Record<string, AccountReturns>>({});
   const [memo, setMemo] = useState("");
   const [savedMemo, setSavedMemo] = useState("");
@@ -497,7 +497,7 @@ export function AssetHelperClient() {
       if (!alive) return;
       setAlertBadges(info.badgeByTicker);
       setMaBrokenTickers(new Set(info.maTickers));
-      setNewListingTickers(new Set(info.newTickers));
+      setNewListingMonths(info.newMonthsByTicker);
     });
     return () => {
       alive = false;
@@ -850,7 +850,8 @@ export function AssetHelperClient() {
             return <span>{FIXED_ASSET_NAME}</span>;
           }
           return renderStockNameCell(params.value, {
-            isNew: newListingTickers.has(normalizeBadgeTicker(row.ticker)),
+            isNew: normalizeBadgeTicker(row.ticker) in newListingMonths,
+            newMonths: newListingMonths[normalizeBadgeTicker(row.ticker)] ?? null,
             badge: alertBadges[normalizeBadgeTicker(row.ticker)] ?? "",
           });
         },
