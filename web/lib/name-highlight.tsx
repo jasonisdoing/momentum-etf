@@ -63,6 +63,8 @@ function getNameHighlight(part: string): { color: string; emoji: string } | unde
 export type StockNameOptions = {
   /** 상장 기간이 백테스트 기준 창보다 짧은 종목 */
   isNew?: boolean;
+  /** 상장 후 경과 개월(내림) — 있으면 🆕(N개월)로 표기한다. */
+  newMonths?: number | null;
   /** 티커·종목명 검색어 — 일치하는 글자만 굵게 표시한다. */
   searchQuery?: string;
 };
@@ -96,7 +98,9 @@ export function renderNameWithLeverageHighlight(
   options?: StockNameOptions,
 ): ReactNode {
   const newBadge = options?.isNew ? (
-    <span title="신규상장 — 백테스트 기준 기간(12개월)보다 상장 기간이 짧습니다"> {NEW_LISTING_BADGE}</span>
+    <span title="신규상장 — 백테스트 기준 기간(12개월)보다 상장 기간이 짧습니다">
+      {` ${NEW_LISTING_BADGE}${options?.newMonths != null ? `(${options.newMonths}개월)` : ""}`}
+    </span>
   ) : null;
 
   const parts = name.split(NAME_HIGHLIGHT_RE);

@@ -252,6 +252,7 @@ type Holding = {
   industry?: string;
   /** 신규상장(🆕) — 전 화면 공용 판정. */
   new_listing?: boolean | null;
+  listing_months?: number | null;
   /** 종목풀 설정 이평선 기준 이격(%) — 추세 이탈(행 전체 회색) 판정에 쓴다. */
   current_short_pct?: number | null;
   current_long_pct?: number | null;
@@ -878,7 +879,7 @@ export function StrategyMixClient() {
           ) : p.data?.is_cash ? (
             <span>{p.value ?? "-"}</span>
           ) : (
-            renderStockNameCell(p.value, { isNew: Boolean(p.data?.new_listing) })
+            renderStockNameCell(p.value, { isNew: Boolean(p.data?.new_listing), newMonths: p.data?.listing_months ?? null })
           ),
       }),
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다).

@@ -95,6 +95,7 @@ type WeightRow = {
   long_gap_pct?: number | null;
   /** 신규상장(🆕) — 전 화면 공용 판정. */
   new_listing?: boolean | null;
+  listing_months?: number | null;
   /** 티커를 입력받는 중인 행 — 확인을 눌러야 확정된다(`/asset-helper` 와 같은 흐름). */
   is_adding?: boolean;
 };
@@ -118,6 +119,7 @@ type UniverseRow = {
   long_gap_pct?: number | null;
   /** 신규상장(🆕) — 전 화면 공용 판정. */
   new_listing?: boolean | null;
+  listing_months?: number | null;
 };
 
 type PeriodRow = { period: string; strategy_pct: number; benchmark_pct: number };
@@ -372,6 +374,7 @@ export function PortfolioClient() {
     short_gap_pct: null,
     long_gap_pct: null,
     new_listing: null,
+    listing_months: null,
   };
 
   /** 종목 추가 — `/assets`·`/asset-helper` 와 **같은 훅·같은 조회 API** 를 쓴다.
@@ -437,6 +440,7 @@ export function PortfolioClient() {
               short_gap_pct: metrics.short_gap_pct,
               long_gap_pct: metrics.long_gap_pct,
               new_listing: metrics.new_listing,
+              listing_months: metrics.listing_months,
             }
           : {}),
         ticker: row.ticker,
@@ -562,7 +566,7 @@ export function PortfolioClient() {
             );
           }
           if (row.ticker === CASH_TICKER) return <span style={{ color: "var(--text-muted)" }}>현금</span>;
-          return renderStockNameCell(params.value, { isNew: Boolean(row.new_listing) });
+          return renderStockNameCell(params.value, { isNew: Boolean(row.new_listing), newMonths: row.listing_months ?? null });
         },
       }),
       // 종목 메모 — 전 화면 공용 컬럼(`@/lib/grid-cells`). 순위·자산 관리 화면과 같은 값이고

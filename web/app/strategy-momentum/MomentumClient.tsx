@@ -119,6 +119,7 @@ type PlanRow = {
   volatility_pct?: number | null;
   /** 신규상장(🆕) — 전 화면 공용 판정. */
   new_listing?: boolean | null;
+  listing_months?: number | null;
   ticker: string;
   name: string;
   industry: string;
@@ -158,6 +159,7 @@ type CandidateRow = {
   volatility_pct?: number | null;
   /** 신규상장(🆕) — 전 화면 공용 판정. */
   new_listing?: boolean | null;
+  listing_months?: number | null;
   ticker: string;
   name: string;
   industry: string;
@@ -184,6 +186,7 @@ type Trade = {
   volatility_pct?: number | null;
   /** 신규상장(🆕) — 전 화면 공용 판정. */
   new_listing?: boolean | null;
+  listing_months?: number | null;
   ticker: string;
   name: string;
   industry: string;
@@ -636,6 +639,7 @@ export function MomentumClient() {
       high_drawdown_pct: row.high_drawdown_pct,
       volatility_pct: row.volatility_pct,
       new_listing: row.new_listing,
+      listing_months: row.listing_months,
       account_held: row.account_held,
     }));
     const exited: PlanRow[] = positions.exited_today.map((trade) => ({
@@ -664,6 +668,7 @@ export function MomentumClient() {
       high_drawdown_pct: trade.high_drawdown_pct,
       volatility_pct: trade.volatility_pct,
       new_listing: trade.new_listing,
+      listing_months: trade.listing_months,
     }));
     // 빈 슬롯 — 상한에서 '다음 시가 이후에 실제로 차 있을 자리' 를 뺀 만큼. 매도 예정은 곧
     // 비고, 진입 예정은 곧 찬다. 자리가 남았다는 것은 자격을 갖춘 후보가 없었다는 뜻이라,
@@ -794,7 +799,7 @@ export function MomentumClient() {
       // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
       // 티커는 호주 접두사(ASX:)만 화면 고유. 고정 폭 — 보유·후보 표의 앞쪽 칸을 맞춘다.
       tickerColumn<PlanRow>({ cellRenderer: (p) => renderTicker(p.value) }),
-      stockNameColumn<PlanRow>({ nameOptions: (row) => ({ isNew: Boolean(row?.new_listing) }) }),
+      stockNameColumn<PlanRow>({ nameOptions: (row) => ({ isNew: Boolean(row?.new_listing), newMonths: row?.listing_months ?? null }) }),
       stockMemoColumn<PlanRow>({
         field: "memo",
         editable: (row) => row?.plan !== "empty",
@@ -868,7 +873,7 @@ export function MomentumClient() {
       highDrawdownColumn<CandidateRow>("high_drawdown_pct"),
       // 티커·종목명 — 공용 컬럼. 고정 폭으로 보유 표와 앞쪽 칸을 맞춘다.
       tickerColumn<CandidateRow>({ cellRenderer: (p) => renderTicker(p.value) }),
-      stockNameColumn<CandidateRow>({ nameOptions: (row) => ({ isNew: Boolean(row?.new_listing) }) }),
+      stockNameColumn<CandidateRow>({ nameOptions: (row) => ({ isNew: Boolean(row?.new_listing), newMonths: row?.listing_months ?? null }) }),
       stockMemoColumn<CandidateRow>({
         field: "memo",
         onSave: (row, memo) => void saveMemo(row.ticker, memo),

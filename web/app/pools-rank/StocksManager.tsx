@@ -69,6 +69,7 @@ type RankRow = {
     mdd: number;
     sortino: number;
     is_partial?: boolean;
+    listing_months?: number | null;
   } | null;
   순번: string;
   순위: number | null;
@@ -1107,6 +1108,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return renderStockNameCell(params.value, {
             // MDD·소르티노 노란색과 같은 기준 — 상장 기간이 백테스트 기준 창(METRIC_WINDOW_MONTHS)보다 짧은 종목.
             isNew: params.data?.backtest_stats?.is_partial === true,
+            newMonths: params.data?.backtest_stats?.listing_months ?? null,
             searchQuery: tickerSearch,
           });
         },

@@ -139,7 +139,7 @@ def single_stock_backtest_stats(close_prices, lookback_months: int) -> dict:
     """
     import pandas as pd
 
-    empty = {"cagr": 0.0, "mdd": 0.0, "sortino": 0.0, "is_partial": False}
+    empty = {"cagr": 0.0, "mdd": 0.0, "sortino": 0.0, "is_partial": False, "listing_months": None}
     if close_prices is None or len(close_prices) == 0:
         return empty
 
@@ -148,13 +148,14 @@ def single_stock_backtest_stats(close_prices, lookback_months: int) -> dict:
         start_date = last_date - pd.DateOffset(months=int(lookback_months))
 
         # 상장일이 시작일보다 나중인지 — 전 화면 🆕 배지와 같은 공용 판정.
-        from core.strategy.scoring import is_new_listing
+        from core.strategy.scoring import is_new_listing, listing_months
 
         is_partial = is_new_listing(close_prices, window_months=int(lookback_months))
+        months_listed = listing_months(close_prices)
 
         target_series = close_prices.loc[start_date:]
         if len(target_series) < 2:
-            return {**empty, "is_partial": is_partial}
+            return {**empty, "is_partial": is_partial, "listing_months": months_listed}
 
         start_val = float(target_series.iloc[0])
         values = target_series.iloc[1:].to_numpy()
@@ -165,6 +166,7 @@ def single_stock_backtest_stats(close_prices, lookback_months: int) -> dict:
             "mdd": round(float(metrics.get("mdd_pct", 0.0)), 2),
             "sortino": round(float(metrics.get("sortino", 0.0)), 2),
             "is_partial": is_partial,
+            "listing_months": months_listed,
         }
     except Exception:
         return empty
