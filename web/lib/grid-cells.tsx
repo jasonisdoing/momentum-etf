@@ -530,13 +530,14 @@ export function renderSlotStatus(
     );
   }
   if (row.plan === "exited") {
-    // 이탈은 이미 체결된 날짜가 행에 있다 — 예정 체결일이 아니라 그 날짜를 쓴다.
+    // 이미 체결된 매도 — 날짜는 예정 체결일이 아니라 행의 체결일. 매도 예정과 같은 파랑으로
+    // 「매도」 묶음으로 읽히게 하고, 판이 끝난 것은 행 전체 회색이 말해 준다.
     const day = row.exit_date ? `${formatSlashDateWithWeekday(row.exit_date)} ` : "";
-    const label = `${day}이탈`;
+    const label = `${day}매도`;
     return (
-      <span style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }} title={`${label}${reason}`}>
+      <strong style={{ color: "#1971c2", whiteSpace: "nowrap" }} title={`${label}${reason}`}>
         {label}
-      </span>
+      </strong>
     );
   }
   // 보유는 「편입일 보유일」로 쓴다 — 언제 담아 며칠째인지가 한 칸에서 읽힌다.
