@@ -101,14 +101,14 @@ export function AccountHoldingsDetailPanel({
   const [alertBadges, setAlertBadges] = useState<AlertBadges>({});
   // 이동선 이탈 종목 — 배지와 같은 조건으로 행을 회색 처리한다.
   const [maBrokenTickers, setMaBrokenTickers] = useState<Set<string>>(new Set());
-  const [newListingTickers, setNewListingTickers] = useState<Set<string>>(new Set());
+  const [newListingMonths, setNewListingMonths] = useState<Record<string, number | null>>({});
   useEffect(() => {
     let alive = true;
     void fetchAlertBadges(summary.account_id).then((info) => {
       if (!alive) return;
       setAlertBadges(info.badgeByTicker);
       setMaBrokenTickers(new Set(info.maTickers));
-      setNewListingTickers(new Set(info.newTickers));
+      setNewListingMonths(info.newMonthsByTicker);
     });
     return () => {
       alive = false;
@@ -831,7 +831,8 @@ export function AccountHoldingsDetailPanel({
         }
         // 종목명 표기 규칙은 전 화면 공통(`@/lib/name-highlight`).
         return renderStockNameCell(params.value, {
-          isNew: newListingTickers.has(normalizeBadgeTicker(params.data?.ticker ?? "")),
+          isNew: normalizeBadgeTicker(params.data?.ticker ?? "") in newListingMonths,
+          newMonths: newListingMonths[normalizeBadgeTicker(params.data?.ticker ?? "")] ?? null,
           badge: alertBadges[normalizeBadgeTicker(params.data?.ticker ?? "")] ?? "",
         });
       },

@@ -286,20 +286,21 @@ def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
         "account_id": norm_id,
         "badge_by_ticker": badge_by_ticker,
         "ma_tickers": sorted(set(ma_tickers)),
-        # 신규상장(🆕) — 전 화면 공용 판정(순위 화면과 같은 기준). 보조 표시라 실패는 빈 목록.
-        "new_tickers": _new_listing_tickers(norm_id),
+        # 신규상장(🆕) — 전 화면 공용 판정(순위 화면과 같은 기준). 보조 표시라 실패는 빈 맵.
+        # 값은 상장 후 경과 개월(내림) — 종목명 배지가 「🆕(N개월)」로 표기한다.
+        "new_months_by_ticker": _new_listing_months(norm_id),
     }
     _badges_cache[norm_id] = (_time.monotonic(), dict(result))
     return result
 
 
-def _new_listing_tickers(account_id: str) -> list[str]:
-    """계좌 보유 중 신규상장(상장 기간 < 기준 창) 티커 — 자산 화면 종목명 🆕 배지용.
+def _new_listing_months(account_id: str) -> dict[str, int | None]:
+    """계좌 보유 중 신규상장 종목의 {티커: 상장 후 경과 개월(내림)} — 자산 화면 🆕(N개월) 배지용.
 
     판정은 `core.strategy.scoring.is_new_listing`(순위 is_partial 과 같은 수식) 하나다.
     가격 시리즈는 이동선 판정과 같은 소스(종목풀 캐시)를 풀별로 묶어 읽는다.
     """
-    from core.strategy.scoring import is_new_listing
+    from core.strategy.scoring import is_new_listing, listing_months
 
     try:
         detail = load_all_holdings_detail(account_id)
@@ -315,16 +316,16 @@ def _new_listing_tickers(account_id: str) -> list[str]:
             pool = pool_by_ticker.get(ticker)
             if pool:
                 tickers_by_pool.setdefault(pool, []).append(ticker)
-        result: list[str] = []
+        result: dict[str, int | None] = {}
         for pool, pool_tickers in tickers_by_pool.items():
             for ticker, series in load_cached_close_series_bulk_with_fallback(pool, pool_tickers).items():
                 if series is not None and is_new_listing(series):
                     # 배지 맵과 같은 정규화(접두사 없는 형태) — 화면이 같은 키로 찾는다.
-                    result.append(ticker.split(":")[-1])
-        return sorted(set(result))
+                    result[ticker.split(":")[-1]] = listing_months(series)
+        return result
     except Exception:
         logger.warning("[HOLDINGS ALARM] 신규상장 판정 실패 — 🆕 배지를 비운다", exc_info=True)
-        return []
+        return {}
 
 
 def _post_slack(sections: list[dict[str, Any]], *, manual: bool) -> bool:
