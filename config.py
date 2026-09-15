@@ -34,8 +34,8 @@ BACKTEST_INITIAL_CAPITAL = {
 
 # 전략 이동평균 종류 — 추세선·이격도·순위 계산에 쓰는 이동평균. "SMA"(단순) 또는 "EMA"(지수).
 # 이 값 하나로 시스템 전체의 이동평균 계산·표시 문구가 바뀐다
-MOVING_AVERAGE_TYPE = "SMA"
-# MOVING_AVERAGE_TYPE = "EMA"
+# MOVING_AVERAGE_TYPE = "SMA"
+MOVING_AVERAGE_TYPE = "EMA"
 
 
 # -----------------------------------------------------------------------
@@ -266,8 +266,8 @@ REBALANCE_BAND_PCT_OPTIONS: tuple[float, ...] = (1.0, 2.0, 3.0, 4.0, 5.0)
 # 비교할 수 있다. 값을 늘릴 때 이 대응이 깨지지 않는지 함께 본다. 단기는 세 국가 공통.
 SHORT_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {
     "kor": (10, 20, 30, 40, 50),
-    "us": (10, 20, 30, 50, 100),
-    "au": (10, 20, 30, 50, 100),
+    "us": (10, 20, 30, 40),
+    "au": (10, 20, 30, 40),
 }
 LONG_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {
     "kor": (60, 90, 120, 150, 180, 240),
