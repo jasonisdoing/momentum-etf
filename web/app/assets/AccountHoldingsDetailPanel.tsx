@@ -10,6 +10,7 @@ import type { ColDef, ColumnState, GridApi, GridOptions, RowClassParams } from "
 const SORT_STATE_BY_ACCOUNT = new Map<string, ColumnState[]>();
 import { IconLoader2 } from "@tabler/icons-react";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { AccountMemoSection } from "./AccountMemoSection";
 import { GridToolbarButton } from "../components/GridToolbarButton";
 import { StableInlineInput } from "../components/StableInlineInput";
 import { AppLoadingState } from "../components/AppLoadingState";
@@ -1372,6 +1373,8 @@ export function AccountHoldingsDetailPanel({
         />
       </div>
 
+      {/* 계좌 메모 — asset-helper 에서 옮겨온 접이 섹션(같은 /api/note, 데이터 공유). */}
+      <AccountMemoSection accountId={summary.account_id} />
     </div>
   );
 }

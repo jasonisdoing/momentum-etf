@@ -56,6 +56,8 @@ export function AppAgGrid<TData>({
   useEffect(() => {
     apiRef.current?.redrawRows();
   }, [rowData, rowClassDepsKey]);
+  // 호출부가 gridOptions.onGridReady 를 넘겨도 내부 api 캡처가 덮이지 않게 둘을 합쳐 부른다.
+  const { onGridReady: callerOnGridReady, ...restGridOptions } = gridOptions ?? {};
   return (
     <div className={className ? `appAgGridWrap ${className}` : "appAgGridWrap"} style={{ minHeight, height }}>
       <div className={themeClassName}>
@@ -75,10 +77,11 @@ export function AppAgGrid<TData>({
           }}
           getRowClass={getRowClass}
           getRowId={getRowId}
+          {...restGridOptions}
           onGridReady={(event) => {
             apiRef.current = event.api;
+            callerOnGridReady?.(event);
           }}
-          {...gridOptions}
         />
       </div>
     </div>

@@ -17,6 +17,12 @@ import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/
 
 import { AccountHoldingsDetailPanel } from "./AccountHoldingsDetailPanel";
 import {
+  MEMO_COLLAPSED_HEIGHT,
+  MEMO_OPEN_EXTRA_HEIGHT,
+  isAccountMemoOpen,
+  subscribeAccountMemoToggle,
+} from "./AccountMemoSection";
+import {
   AccountSummary,
   AssetsHeaderSummary,
   CASH_ROW_TICKER,
@@ -50,6 +56,8 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [parentDirtyCellKeys, setParentDirtyCellKeys] = useState<string[]>([]);
   const [editingParentId, setEditingParentId] = useState<string | null>(null);
   const summariesRef = useRef<AccountSummary[]>([]);
+  // 부모 그리드 api — 메모 펼침/접힘 때 자식 패널 행 높이 재계산에 쓴다.
+  const parentGridApiRef = useRef<GridApi<ParentGridRow> | null>(null);
   const parentSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const parentSavingAccountIdsRef = useRef<Set<string>>(new Set());
   const parentQueuedAccountIdsRef = useRef<Set<string>>(new Set());
@@ -650,8 +658,11 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         }
         // 기본적으로 현금(1) + 추가 가능 공간(1)을 고려하여 최소 +2행 공간을 확보합니다.
         const rowCount = (params.data.rows?.length ?? 0) + 2;
+        // 자식 테이블 아래 메모 섹션 — 접힘/펼침에 따라 높이가 달라진다(펼침 토글 시 재계산).
+        const memoHeight =
+          MEMO_COLLAPSED_HEIGHT + (isAccountMemoOpen(params.data.summary.account_id) ? MEMO_OPEN_EXTRA_HEIGHT : 0);
         // 툴바(50) + 그리드 헤더(36) + 행(실제 rowHeight 34) + 가로 스크롤바/테두리 안전 마진(5 + 30).
-        return 50 + 36 + rowCount * 34 + 5 + 30;
+        return 50 + 36 + rowCount * 34 + 5 + 30 + memoHeight;
       },
       onCellClicked: (params) => {
         if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {
@@ -683,8 +694,20 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         snapshotsExpandedMainRow: (params) =>
           Boolean(params.data && !isDetailRow(params.data) && !isTotalRow(params.data) && params.data.account_id === expandedId),
       },
+      onGridReady: (params) => {
+        parentGridApiRef.current = params.api;
+      },
     }),
     [DetailRenderer, editingParentId, expandedId, handleParentCellValueChanged],
+  );
+
+  // 메모 펼침/접힘은 자식 패널 행 높이를 바꾼다 — 토글 시 부모 그리드 행 높이를 재계산한다.
+  useEffect(
+    () =>
+      subscribeAccountMemoToggle(() => {
+        parentGridApiRef.current?.resetRowHeights();
+      }),
+    [],
   );
 
   if (loading && !summaries.length) {
