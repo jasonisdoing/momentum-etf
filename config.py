@@ -192,8 +192,8 @@ TRADING_DAYS_PER_MONTH = 20
 # 지표 계산에 필요한 절대 최소 거래일 수 (항상 적용)
 # ENABLE_DATA_SUFFICIENCY_CHECK = True  → 엄격 기준 적용
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
-# 40일(2달) 미만 데이터는 추세 판단이 불가하므로 제외
-MIN_TRADING_DAYS = 40
+# 20일(1달) 미만 데이터는 추세 판단이 불가하므로 제외
+MIN_TRADING_DAYS = 20
 
 # -----------------------------------------------------------------------
 # 전략 공용 셀렉트 선택지
@@ -206,7 +206,7 @@ MIN_TRADING_DAYS = 40
 # 화면 셀렉트는 API 응답으로 받은 목록만 렌더한다(프론트에 복사본을 두지 않는다).
 
 # 풀별 보유 종목 수 선택지 — 실제 값은 DB(pool_settings)의 각 풀 문서에 저장한다.
-TOP_N_HOLD_OPTIONS: tuple[int, ...] = (2, 3, 4, 5, 10)
+TOP_N_HOLD_OPTIONS: tuple[int, ...] = (2, 3, 4, 5, 6, 10)
 
 # 손절 기준(%) — 평단 대비 하락률. **보유종목 손절 알림**(pool_settings_store.
 # STOPLOSS_PCT_OPTIONS)만 쓴다.
@@ -265,12 +265,12 @@ REBALANCE_BAND_PCT_OPTIONS: tuple[float, ...] = (1.0, 2.0, 3.0, 4.0, 5.0)
 # 50·75·100·150 — 한국:미국 = 1.2 배로 칸마다 짝이 맞아 두 시장 결과를 같은 자리끼리
 # 비교할 수 있다. 값을 늘릴 때 이 대응이 깨지지 않는지 함께 본다. 단기는 세 국가 공통.
 SHORT_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {
-    "kor": (10, 20, 30, 40, 50),
+    "kor": (10, 20, 30, 40, 50, 120, 180, 240),
     "us": (10, 20, 30, 40, 50, 60),
     "au": (10, 20, 30, 40),
 }
 LONG_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {
-    "kor": (90, 120, 150, 180, 240),
+    "kor": (90, 120, 150, 180, 240, 300),
     "us": (100, 150, 200, 250),
     "au": (100, 150, 200, 250),
 }

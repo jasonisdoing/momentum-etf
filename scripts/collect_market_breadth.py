@@ -42,7 +42,7 @@ def main() -> int:
         f"{pool}=실패({info['error']})"
         if info.get("error")
         else f"{pool}=스킵({info['reason']})"
-        if info.get("skipped")
+        if info.get("pool_skipped")
         else f"{pool}=대상{info['universe_size']}·신규{info['inserted']}일·갱신{info['updated']}일({info['latest_date']})"
         for pool, info in pool_summary["pools"].items()
     ]
