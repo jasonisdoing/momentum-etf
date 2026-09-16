@@ -60,15 +60,15 @@ def _load_series(
 
 
 def _candidate_range(ma_min: int, ma_max: int, ma_step: int) -> list[int]:
-    """이동선 범위를 min~max(끝값 포함) step 간격으로 나열한다. 임의 보정 없이 검증만."""
+    """이평선 범위를 min~max(끝값 포함) step 간격으로 나열한다. 임의 보정 없이 검증만."""
     if not all(isinstance(v, int) for v in (ma_min, ma_max, ma_step)):
-        raise ValueError("이동선 범위(min/max/step)는 정수여야 합니다.")
+        raise ValueError("이평선 범위(min/max/step)는 정수여야 합니다.")
     if ma_min < 2:
-        raise ValueError(f"이동선 min 은 2 이상이어야 합니다: {ma_min}")
+        raise ValueError(f"이평선 min 은 2 이상이어야 합니다: {ma_min}")
     if ma_step < 1:
-        raise ValueError(f"이동선 step 은 1 이상이어야 합니다: {ma_step}")
+        raise ValueError(f"이평선 step 은 1 이상이어야 합니다: {ma_step}")
     if ma_max < ma_min:
-        raise ValueError(f"이동선 max({ma_max})는 min({ma_min}) 이상이어야 합니다.")
+        raise ValueError(f"이평선 max({ma_max})는 min({ma_min}) 이상이어야 합니다.")
     return list(range(ma_min, ma_max + 1, ma_step))
 
 
@@ -213,10 +213,10 @@ def compute_ma_cross_tune(
     peak_max: float,
     peak_step: float,
 ) -> dict[str, Any]:
-    """사용자가 지정한 기간·이동선 범위로 튜닝 sweep 을 즉시 계산해 반환한다.
+    """사용자가 지정한 기간·이평선 범위로 튜닝 sweep 을 즉시 계산해 반환한다.
 
     - ``months``: 최근 N 개월(평가 창)
-    - ``ma_min``/``ma_max``/``ma_step``: 이동선 후보 범위(끝값 포함)
+    - ``ma_min``/``ma_max``/``ma_step``: 이평선 후보 범위(끝값 포함)
     - ``peak_min``/``peak_max``/``peak_step``: 지수 고점대비 허용 하락폭 후보 범위(%)
     - ``rows``: 후보별 수익/MDD/소르티노(소르티노 내림차순) — 특정 값만 튀는지(과적합) 판단용
     """
