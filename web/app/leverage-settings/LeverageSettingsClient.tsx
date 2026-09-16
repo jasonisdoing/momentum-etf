@@ -386,6 +386,9 @@ export function LeverageSettingsClient() {
   const autoTunedMarket = useRef<Market | null>(null);
   useEffect(() => {
     if (loadingConfig || !config || configMissing) return;
+    // 시장 전환 직후에는 이전 시장의 설정·기간이 아직 상태에 남아 있다 —
+    // 로드가 끝나 config 가 현재 탭의 것일 때만 그 값으로 튜닝을 돌린다.
+    if (config.market !== market) return;
     if (autoTunedMarket.current === market) return;
     autoTunedMarket.current = market;
     void runTune();
