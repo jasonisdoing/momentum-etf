@@ -879,10 +879,36 @@ def build_ticker_detail_payload(
                         get_exchange_rates(),
                     )
 
+    # 차트 이평선 — 그 종목풀의 단기·장기 이평선을 **엔진과 같은 공용 함수**로 계산해 내려준다
+    # (모멘텀 보유 차트와 같은 형태·같은 수식). 풀에 이평선이 없으면 빈 목록(선 없음).
+    from utils.moving_averages import calculate_moving_average
+    from utils.settings_loader import get_ticker_type_settings
+
+    try:
+        pool_config = get_ticker_type_settings(ticker_type) or {}
+    except Exception:
+        pool_config = {}
+    ma_lines: list[dict[str, object]] = []
+    short_ma, long_ma = pool_config.get("SHORT_MA_DAYS"), pool_config.get("LONG_MA_DAYS")
+    if short_ma and long_ma:
+        close_series = pd.to_numeric(df[close_col], errors="coerce").dropna()
+        for days in (int(short_ma), int(long_ma)):
+            ma_series = calculate_moving_average(close_series, days).dropna()
+            ma_lines.append(
+                {
+                    "ma_days": days,
+                    "points": [
+                        {"time": pd.Timestamp(idx).strftime("%Y-%m-%d"), "value": round(float(value), 4)}
+                        for idx, value in ma_series.items()
+                    ],
+                }
+            )
+
     return {
         "ticker": ticker,
         "rows": rows,
         "etf_info": etf_info,
+        "ma_lines": ma_lines,
         "holdings": holdings,
         "holdings_as_of_date": holdings_as_of_date,
         "holdings_price_as_of_date": holdings_price_as_of_date,

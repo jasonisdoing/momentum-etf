@@ -92,8 +92,12 @@ type TickerDetailResponse = {
   holdings_price_as_of_date?: string | null;
   holdings_error?: string | null;
   my_average_buy_price?: number | null;
+  /** 종목풀의 단기·장기 이평선 — 엔진과 같은 공용 계산(모멘텀 보유 차트와 같은 형태). */
+  ma_lines?: MaLine[];
   error?: string;
 };
+
+type MaLine = { ma_days: number; points: { time: string; value: number }[] };
 
 type TickerEtfInfo = {
   nav?: number | null;
@@ -174,12 +178,8 @@ type ChartAverageBadge = {
 
 // --- 상수 ---
 
-const MA_PERIODS = [
-  { period: 10, color: "#E03131", label: "10" },
-  { period: 20, color: "#FF9800", label: "20" },
-  { period: 60, color: "#F2C94C", label: "60" },
-  { period: 120, color: "#2F9E44", label: "120" },
-];
+// 이평선 팔레트 — 모멘텀 보유 차트(HoldingChart)와 같은 순서(단기 청록, 장기 주황).
+const MA_LINE_COLORS = ["#12b886", "#f76707"];
 
 const gridTheme = createAppGridTheme();
 
@@ -284,20 +284,6 @@ function getSignedClass(value: number | null): string {
   return value > 0 ? "metricPositive" : "metricNegative";
 }
 
-function calculateMA(data: PriceRow[], period: number): LineData[] {
-  const result: LineData[] = [];
-  for (let i = period - 1; i < data.length; i++) {
-    let sum = 0;
-    let count = 0;
-    for (let j = i - period + 1; j <= i; j++) {
-      if (data[j].close !== null) { sum += data[j].close!; count++; }
-    }
-    if (count === period) {
-      result.push({ time: data[i].date as Time, value: sum / count });
-    }
-  }
-  return result;
-}
 
 function getWeekBucketStart(value: string): string {
   const date = new Date(`${value}T00:00:00`);
@@ -469,6 +455,7 @@ export function TickerDetailManager({
   const [holdingsPriceAsOfDate, setHoldingsPriceAsOfDate] = useState<string | null>(null);
   const [holdingsError, setHoldingsError] = useState<string | null>(null);
   const [myAverageBuyPrice, setMyAverageBuyPrice] = useState<number | null>(null);
+  const [maLines, setMaLines] = useState<MaLine[]>([]);
   const [addingPoolKeys, setAddingPoolKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -612,6 +599,7 @@ export function TickerDetailManager({
       setHoldingsPriceAsOfDate(payload.holdings_price_as_of_date ?? null);
       setHoldingsError(payload.holdings_error ?? null);
       setMyAverageBuyPrice(payload.my_average_buy_price ?? null);
+      setMaLines(payload.ma_lines ?? []);
       persistRecentTickerSearch({
         ticker: matchedItem.ticker,
         name: matchedItem.name,
@@ -875,19 +863,24 @@ export function TickerDetailManager({
         }),
     );
 
-    for (const ma of MA_PERIODS) {
-      if (chartRows.length < ma.period) continue;
-      const maData = calculateMA(chartRows, ma.period);
-      if (maData.length === 0) continue;
+    // 종목풀의 단기·장기 이평선 — 서버(엔진 공용 계산)가 내려준 일별 값.
+    // 주/월봉에서는 그 봉 날짜의 값만 골라 그린다(축의 날짜와 맞춘다).
+    maLines.forEach((line, index) => {
+      const valueByDate = new Map(line.points.map((point) => [point.time, point.value]));
+      const maData: LineData[] = chartRows
+        .filter((row) => valueByDate.has(row.date))
+        .map((row) => ({ time: row.date as Time, value: valueByDate.get(row.date)! }));
+      if (maData.length === 0) return;
       chart.addSeries(LineSeries, {
-        color: ma.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        color: MA_LINE_COLORS[index % MA_LINE_COLORS.length], lineWidth: 2,
+        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
         priceFormat: {
           type: "custom",
           minMove: priceMinMove,
           formatter: (price: number) => formatCurrencyPrice(price, selectedCountryCode),
         },
       }).setData(maData);
-    }
+    });
 
     chart.subscribeCrosshairMove((param: MouseEventParams) => {
       if (!param.time) { setCrosshairInfo(null); return; }
@@ -921,7 +914,7 @@ export function TickerDetailManager({
       chart.remove();
       chartRef.current = null;
     };
-  }, [chartInterval, chartRows, dateRowMap, myAverageBuyPrice, priceMinMove, selectedCountryCode]);
+  }, [chartInterval, chartRows, dateRowMap, maLines, myAverageBuyPrice, priceMinMove, selectedCountryCode]);
 
   const reversedRows = useMemo(
     () => [...rows].reverse().map((r, i) => ({ ...r, id: `${r.date}-${i}` })),
@@ -1395,6 +1388,7 @@ export function TickerDetailManager({
                     )}
                     <div className="tickerDetailChartWrap">
                       <div className="tickerDetailChartToolbar">
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                         <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="차트 봉 기준">
                           {[
                             { value: "day", label: "일" },
@@ -1411,7 +1405,15 @@ export function TickerDetailManager({
                             </button>
                           ))}
                         </div>
-                        <div className="tickerDetailChartMaLegend" />
+                        {/* 이평선 범례 — 차트 밖 툴바 왼쪽. 차트 안 어떤 라벨과도 겹치지 않는다. */}
+                        <span style={{ display: "flex", gap: 10, fontSize: "var(--fs-sm)", fontWeight: 700 }}>
+                          {maLines.map((line, index) => (
+                            <span key={line.ma_days} style={{ color: MA_LINE_COLORS[index % MA_LINE_COLORS.length] }}>
+                              MA{line.ma_days}
+                            </span>
+                          ))}
+                        </span>
+                        </div>
                       </div>
                       <div ref={chartContainerRef} style={{ width: "100%", position: "relative" }} />
                       {chartAverageBadge ? (
