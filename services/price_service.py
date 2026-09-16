@@ -448,45 +448,6 @@ def _is_market_active(country: str) -> bool:
     return market_open_dt <= now_local <= market_close_dt
 
 
-def _fetch_bulk_fx_closes(symbols: list[str]) -> dict[str, tuple[float, float]]:
-    """여러 통화의 (최신 종가, 직전 종가)를 **한 번의 요청**으로 받는다.
-
-    통화마다 따로 부르면 8회 요청이라 야후 레이트리밋에 쉽게 걸린다(전 통화 동시 실패의
-    원인). 일봉 마지막 종가는 `fast_info.last_price` 와 같은 값이라 결과는 동일하다.
-    데이터가 모자란 통화는 결과에서 빠지며, 호출자가 개별 조회로 보완한다.
-    """
-    import yfinance as yf
-
-    out: dict[str, tuple[float, float]] = {}
-    try:
-        with yfinance_lock():
-            frame = yf.download(
-                tickers=symbols,
-                period="10d",
-                interval="1d",
-                progress=False,
-                auto_adjust=False,
-                threads=False,
-                group_by="ticker",
-            )
-    except Exception as exc:
-        logger.warning("환율 일괄 조회 실패(개별 조회로 진행): %s", exc)
-        return out
-    if frame is None or frame.empty:
-        return out
-
-    import pandas as pd
-
-    for symbol in symbols:
-        try:
-            closes = pd.to_numeric(frame[symbol]["Close"], errors="coerce").dropna()
-            if len(closes) >= 2:
-                out[symbol] = (float(closes.iloc[-1]), float(closes.iloc[-2]))
-        except Exception:
-            continue
-    return out
-
-
 def _fetch_exchange_rates() -> dict[str, Any]:
     import yfinance as yf
 
@@ -506,19 +467,14 @@ def _fetch_exchange_rates() -> dict[str, Any]:
         rates[currency] = {"rate": current_rate, "change_pct": change_pct}
 
     rates: dict[str, Any] = {}
-    # 야후가 간헐적으로 전 통화를 한꺼번에 거절한다(일시 장애·레이트리밋). 그때마다 배치가
-    # 통째로 죽으므로, 요청 수를 줄이고(일괄 조회) 남은 것만 짧게 재시도한다.
-    # `_FX_CACHE` 는 프로세스 메모리라 매번 새로 뜨는 배치에는 stale 폴백이 없다 —
-    # 배치가 기댈 수 있는 건 이 재시도뿐이다.
+    # 통화별 quote 요약(fast_info)으로 (현재가, 전일 종가)를 받는다. 예전엔 일봉 일괄
+    # 조회(_fetch_bulk_fx_closes)로 요청 수를 줄였는데, 야후 일봉의 직전 봉 종가가 실제
+    # 공식 전일 종가보다 하루 이상 뒤처져 변동률이 크게 부풀었다(관측: USD +1.65% vs
+    # 실제 +0.27%, 2026-09-16). 레이트리밋은 아래 재시도 + TTL 캐시로 감당한다.
     pending = dict(mapping)
     for attempt in range(1, _FX_FETCH_MAX_ATTEMPTS + 1):
-        bulk = _fetch_bulk_fx_closes(list(pending.values()))
         failed: dict[str, str] = {}
         for currency, symbol in pending.items():
-            if symbol in bulk:
-                _put(currency, *bulk[symbol])
-                continue
-            # 일괄 조회에서 빠진 통화만 개별로 보완한다(데이터가 짧은 통화 등).
             try:
                 with yfinance_lock():
                     ticker = yf.Ticker(symbol)
@@ -608,6 +564,18 @@ def _fetch_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, 
         prev_close = None
         if len(close_series) >= 2:
             prev_close = float(close_series.iloc[-2])
+
+        # 24시간 연속 거래 상품(선물 =F, 환율 =X)은 야후 일봉의 직전 봉 종가가 실제
+        # 공식 전일 종가보다 하루 이상 뒤처져 온다(관측: NQ=F +1.6% vs 실제 +0.3%,
+        # 2026-09-16). 이런 상품만 quote 요약(fast_info)의 previous_close 로 바로잡는다.
+        if symbol.endswith(("=F", "=X")):
+            try:
+                with yfinance_lock():
+                    official_prev = float(yf.Ticker(symbol).fast_info.previous_close)
+                if official_prev > 0:
+                    prev_close = official_prev
+            except Exception as exc:
+                logger.warning("공식 전일 종가 조회 실패(%s) — 일봉 직전 종가 사용: %s", symbol, exc)
 
         change_rate = None
         if prev_close not in (None, 0):
