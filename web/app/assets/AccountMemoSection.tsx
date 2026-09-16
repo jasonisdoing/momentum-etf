@@ -115,13 +115,16 @@ export function AccountMemoSection({ accountId }: { accountId: string }) {
     // 패널(flex column, overflow hidden) 안에서 메모가 줄어들거나 잘리지 않게 고정한다 —
     // 높이 부족분은 위의 그리드 래퍼(flex 1, min-height 0)가 흡수한다.
     <div style={{ flexShrink: 0, borderTop: "1px solid rgba(148,163,184,0.3)", paddingTop: 3 }}>
+      {/* 배경은 종목 메모 칸(.appMemoCell)과 같은 노랑 — 메모 자리임이 한눈에 보이게. */}
       <button
         type="button"
         onClick={toggle}
         style={{
           border: "none",
-          background: "transparent",
-          padding: "2px 0",
+          background: "rgba(240, 180, 41, 0.14)",
+          borderRadius: 6,
+          padding: "3px 8px",
+          width: "100%",
           cursor: "pointer",
           color: "var(--text-normal, #1f2937)",
           fontSize: "var(--fs-sm)",
