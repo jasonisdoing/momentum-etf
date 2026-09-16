@@ -36,8 +36,6 @@ export type HoldingsRow = {
   daily_change_pct?: number | null;
   buy_amount_krw: number;
   valuation_krw: number;
-  target_ratio?: number | null;
-  target_quantity?: number | null;
   memo?: string | null;
   sort_order?: number | null;
   original_quantity?: number;
@@ -76,8 +74,6 @@ export type AccountSummary = {
   cash_display_native?: number;
   cash_display_currency?: string;
   cash_target_ratio: number;
-  // 자산 헬퍼에서 저장한 현금 목표 비중(%) — 미저장이면 null ('-' 표시, 파생·기본값 없음)
-  helper_cash_weight_pct?: number | null;
   intl_shares_value: number | null;
   intl_shares_change: number | null;
   updated_at: string | null;
@@ -86,7 +82,6 @@ export type AccountSummary = {
   valuation_krw: number;
   total_assets_krw: number;
   holdings_count: number;
-  target_ratio_total: number;
   cash_ratio: number;
   net_profit: number;
   net_profit_pct: number;
@@ -112,7 +107,6 @@ export type ParentGridRow =
     total_principal: number;
     /** 표시용 현금(원화 환산). 이 그리드에서는 편집하지 않는다. */
     cash_krw: number;
-    target_ratio_total: number | null;
     holdings_count: number;
     cash_ratio: number;
     net_profit: number;
@@ -483,7 +477,6 @@ export function buildCashGridRow(summary: AccountSummary): GridRow {
     daily_change_pct: null,
     buy_amount_krw: cashValue,
     valuation_krw: cashValue,
-    target_ratio: Number(summary.cash_target_ratio ?? 0),
     sort_order: -1,
     original_quantity: 0,
     original_average_buy_price: 0,

@@ -208,7 +208,6 @@ export function AccountHoldingsDetailPanel({
         id: buildGridRowId(row),
         quantity: typeof row.quantity === "number" ? row.quantity : parseInt(String(row.quantity), 10) || 0,
         average_buy_price: safeParseFloat(row.average_buy_price),
-        target_ratio: row.target_ratio ?? 0,
         memo: row.memo ?? "",
       }));
 
@@ -235,7 +234,6 @@ export function AccountHoldingsDetailPanel({
         weight_pct: 0,
         buy_amount_krw: 0,
         valuation_krw: 0,
-        target_ratio: 0,
         memo: "",
       } as GridRow,
       ...baseRows,
@@ -602,8 +600,7 @@ export function AccountHoldingsDetailPanel({
           id: buildGridRowId(row),
           quantity: typeof row.quantity === "number" ? row.quantity : parseInt(String(row.quantity), 10) || 0,
           average_buy_price: safeParseFloat(row.average_buy_price),
-          target_ratio: row.target_ratio ?? 0,
-          memo: String(row.memo ?? "").trim(),
+            memo: String(row.memo ?? "").trim(),
         }))
         .filter((row) => dirtyRowIds.includes(row.id));
 
@@ -891,65 +888,6 @@ export function AccountHoldingsDetailPanel({
           </span>
         );
       },
-    },
-    {
-      colId: "target_weight_pct",
-      headerName: "목표비중",
-      width: 84,
-      type: "rightAligned",
-      sortable: false,
-      cellStyle: { backgroundColor: "#f1f3f5" },
-      cellRenderer: (params: { data?: GridRow }) => {
-        const row = params.data;
-        if (!row || row.id === "__adding__") return <span style={{ color: "var(--text-muted)" }}>-</span>;
-        // 현금 행: 자산 헬퍼에서 저장한 현금 목표 비중만 표시한다(미저장 = '-', 파생·기본값 없음).
-        if (row.ticker === CASH_ROW_TICKER) {
-          const saved = summary.helper_cash_weight_pct;
-          if (saved == null || !Number.isFinite(Number(saved))) {
-            return <span style={{ color: "var(--text-muted)" }}>-</span>;
-          }
-          return <span style={{ color: "#000000", fontWeight: 700 }}>{Number(saved).toFixed(2)}%</span>;
-        }
-        // IS 행: 자동값(현재 비중)이 곧 목표 비중. 나머지는 저장된 target_ratio 그대로.
-        const w = row.ticker === "IS" ? row.weight_pct : row.target_ratio;
-        return <span style={{ color: w == null ? "var(--text-muted)" : "#000000", fontWeight: 700 }}>{w == null ? "-" : `${Number(w).toFixed(2)}%`}</span>;
-      },
-    },
-    {
-      colId: "target_quantity",
-      headerName: "목표수량",
-      width: 84,
-      type: "rightAligned",
-      sortable: false,
-      cellStyle: { backgroundColor: "#f1f3f5" },
-      headerTooltip: "목표비중 × 총자산 ÷ 현재가를 내림한 뒤 최대잉여법으로 잔여 예산을 추가 배분합니다. 목표 현금은 보존합니다.",
-      cellRenderer: (params: { data?: GridRow }) => {
-        const row = params.data;
-        if (!row || row.id === "__adding__" || row.ticker === CASH_ROW_TICKER || row.ticker === "IS") {
-          return <span style={{ color: "var(--text-muted)" }}>-</span>;
-        }
-        const quantity = row.target_quantity;
-        if (quantity == null || !Number.isFinite(Number(quantity))) {
-          return <span style={{ color: "var(--text-muted)" }}>-</span>;
-        }
-        return <span style={{ fontWeight: 700 }}>{Math.round(Number(quantity)).toLocaleString()}</span>;
-      },
-    },
-    {
-      colId: "trade_quantity",
-      headerName: "매매",
-      headerTooltip: "목표수량 − 수량. +는 매수, −는 매도",
-      width: 84,
-      type: "rightAligned",
-      valueGetter: ({ data: row }) => {
-        if (!row || row.id === "__adding__" || row.ticker === CASH_ROW_TICKER || row.ticker === "IS") return null;
-        if (row.target_quantity == null || row.quantity == null) return null;
-        const target = Number(row.target_quantity);
-        const held = Number(row.quantity);
-        return Number.isFinite(target) && Number.isFinite(held) ? Math.round(target) - held : null;
-      },
-      valueFormatter: ({ value }) => value == null ? "-" : `${value > 0 ? "+" : ""}${Number(value).toLocaleString("ko-KR")}`,
-      cellStyle: ({ value }) => ({ color: value === 0 ? "#000000" : signColor(value), fontWeight: 700 }),
     },
     {
       field: "quantity",

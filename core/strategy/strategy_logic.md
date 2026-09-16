@@ -70,10 +70,6 @@
 
 - 12·24개월 교차 비교 결과(2026-08): 같은 축이라도 풀마다 최적이 다르다 — 거래대금 하한은 kor_kr 2.5배, kospi200 5배, us 없음; 주중 이탈은 한국 유리·미국 불리. 풀별로 따로 튜닝한다.
 
-## 자산 헬퍼 (`/asset-helper`)
-
-`utils/asset_helper_service.py`. 계좌별 목표 비중 = 1/N 슬롯, 종목이 풀의 장기 추세선 위면 투자·아래면 현금. 백테스트는 같은 규칙을 과거 리밸런싱마다 적용. 저장은 `portfolio_master` 하나(옛 `asset_helper_settings`·`account_targets` 컬렉션은 2026-07 통합 삭제). 호주 IS(퇴직연금 가상 종목)는 VGS 가격으로 대리.
-
 ## 시장지수 추세 (`/market-trend`)
 
 추세 점수 = MA20 이격을 최근 12개월 분포의 퍼센타일로 −100~+100 정규화(이상치 둔감). 레짐은 SuperTrend 방향. 파라미터는 `config.py`.

@@ -47,7 +47,6 @@ def patch_one_holding(
         quantity=body.get("quantity"),
         average_buy_price=body.get("average_buy_price"),
         memo=body.get("memo"),
-        target_ratio=body.get("target_ratio"),
     )
 
 
@@ -73,7 +72,6 @@ def post_one_holding(
         quantity=body.get("quantity", 0),
         average_buy_price=body.get("average_buy_price", 0),
         memo=body.get("memo"),
-        target_ratio=body.get("target_ratio"),
     )
 
 

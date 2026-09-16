@@ -114,19 +114,18 @@ def load_universe(pool: str) -> list[dict[str, Any]]:
 def universe_metrics(pool: str) -> list[dict[str, Any]]:
     """그 풀 종목의 표시 지표 — 일간·현재가·기간수익률·MDD·소르티노.
 
-    계산은 `/asset-helper` 와 **같은 공용 함수**를 쓴다(`utils/asset_helper_market_data`).
-    화면 표가 같은 컬럼을 같은 기준으로 보여줘야 두 화면을 나란히 비교할 수 있다.
+    계산은 공용 시장 데이터 층(`utils/portfolio_market_data`)을 쓴다.
     지표를 못 구한 종목은 그 값만 None 이다 — 목록에서 빼지 않는다(비중은 정할 수 있다).
     """
     from config import METRIC_WINDOW_MONTHS
-    from utils.asset_helper_market_data import (
+    from utils.portfolio_market_data import (
         _build_current_price_map,
         _build_daily_change_map,
         _build_mdd_map,
         _build_return_map,
+        _compute_sortino_raw_frame,
         _load_close_frame,
     )
-    from utils.asset_helper_service import _compute_sortino_raw_frame
     from utils.settings_loader import get_ticker_type_settings
 
     universe = load_universe(pool)

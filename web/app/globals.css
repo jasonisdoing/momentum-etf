@@ -3301,13 +3301,6 @@ a {
   white-space: nowrap;
 }
 
-/* 자산 헬퍼 종목명: 공용 2줄 말줄임(appNameCellText)이 넘칠 수 있게 셀이 자리를 내준다. */
-.assetHelperPreviewGrid .ag-cell.assetHelperNameCell,
-.assetHelperPreviewGrid .ag-cell.assetHelperNameCell .ag-cell-value {
-  min-width: 0;
-  overflow: hidden;
-}
-
 .tickerDetailCodeContent {
   display: inline-flex;
   align-items: center;
