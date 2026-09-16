@@ -38,7 +38,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | `/strategy-mix` | 두 전략 합성 — 목표 비중·오늘의 액션·백테스트(열람 전용) | `utils/strategy_mix_service.py` |
 | `/leverage-settings` | 레버리지 이동평균 크로스 설정·튜닝 | `leverage/` |
 | `/account-settings` | 계좌 메타·증권사 연동·합성 슬리브별 종목풀·보유종목 알림 On/Off | `utils/account_settings_store.py`, `utils/holdings_alarm_service.py` |
-| `/assets`, `/asset-helper`, `/holdings*` | 자산·보유·목표 비중 | `utils/asset_helper_service.py`, `portfolio_master` |
+| `/assets`, `/holdings*` | 자산·보유 | `utils/holdings_detail_service.py`, `portfolio_master` |
 | `/daily`, `/weekly`, `/monthly`, `/yearly`, `/dashboard`, `/snapshots` | 일별 원장과 집계 | `utils/daily_fund_service.py` 등 |
 | `/market-trend`, `/market`, `/live-24h` | 시장 지수 추세·지표 | `services/toss_market_service.py` 등 |
 | `/kor-market-stock`, `/us-market-stock`, `/aus-market-stock`, `/kor-market-etf` | 시장별 종목 탐색·종목풀 추가 | `index_constituents`, KIS 마스터 |

@@ -19,7 +19,6 @@ type HoldingsRow = {
   return_pct: number;
   buy_amount_krw: number;
   valuation_krw: number;
-  target_ratio?: number | null;
   memo?: string | null;
   sort_order: number;
   ticker_type?: string;
@@ -134,7 +133,6 @@ export async function POST(request: Request) {
           ticker: body.ticker,
           quantity: body.quantity,
           average_buy_price: body.average_buy_price,
-          target_ratio: body.target_ratio,
         }),
       },
     );

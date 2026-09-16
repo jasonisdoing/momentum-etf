@@ -63,7 +63,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     icon: IconCash,
     items: [
       { href: "/assets", label: "자산 관리", icon: IconList },
-      { href: "/asset-helper", label: "자산 헬퍼", icon: IconListDetails },
       { href: "/asset-status", label: "자산 현황", icon: IconTrendingUp },
       { href: "/daily", label: "기간별", icon: IconReceipt2 },
       { href: "/snapshots", label: "스냅샷", icon: IconReceipt2 },
@@ -134,7 +133,6 @@ export function isNavItemActive(itemHref: string, currentPathname: string | null
 // 전체폭(사이드바 자동 숨김) 라우트 — 큰 그리드 중심 화면. 화면별로 점진 조정한다.
 export const FULL_WIDTH_ROUTES: readonly string[] = [
   "/assets",
-  "/asset-helper",
   "/pools-rank",
   "/pools-backtest",
   "/kor-market-stock",

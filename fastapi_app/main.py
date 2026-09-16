@@ -7,7 +7,6 @@ from utils.env import load_env_if_present
 
 from .routes.account_settings import router as account_settings_router
 from .routes.alarms import router as alarms_router
-from .routes.asset_helper import router as asset_helper_router
 from .routes.assets import router as assets_router
 from .routes.aus_market_stocks import router as aus_market_stocks_router
 from .routes.broker_api import router as broker_api_router
@@ -101,7 +100,6 @@ app.include_router(quotes_router)
 app.include_router(rank_router)
 app.include_router(snapshots_router)
 app.include_router(stocks_router)
-app.include_router(asset_helper_router)
 app.include_router(strategy_mix_router)
 app.include_router(strategy_new_high_router)
 app.include_router(strategy_portfolio_router)

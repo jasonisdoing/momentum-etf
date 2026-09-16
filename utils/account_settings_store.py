@@ -320,7 +320,7 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
                 raise AccountSettingsStoreError(f"'{account_id}' 의 benchmark 에는 ticker/name 이 모두 필요합니다.")
             # 호주 계좌는 `ASX:` 를 붙여 저장한다. 가격 캐시가 호주 종목을 그 형태로 보관하고,
             # 미국에도 같은 티커가 있어(예: IVV) 접두사가 없으면 구분되지 않는다.
-            # 이 값이 없으면 자산 헬퍼 백테스트가 "가격 캐시 누락: IVV" 로 실패한다.
+            # 접두사가 없으면 가격 조회가 미국 티커로 잘못 붙는다(예: "가격 캐시 누락: IVV").
             country = str(values.get("country_code") or existing_doc.get("country_code") or "").strip().lower()
             if country == "au":
                 from utils.asx_ticker import ensure_asx_prefix
@@ -488,7 +488,7 @@ def create_account(
     db[COLLECTION].insert_one(doc)
     invalidate_account_settings_cache()
 
-    # 보유 원장(portfolio_master)에도 빈 항목을 만들어 자산 헬퍼에서 바로 종목을 추가할 수 있게 한다.
+    # 보유 원장(portfolio_master)에도 빈 항목을 만들어 자산 관리에서 바로 종목을 추가할 수 있게 한다.
     # (없으면 "계좌 데이터를 찾을 수 없습니다" 에러가 난다.)
     try:
         from utils.portfolio_io import save_portfolio_master

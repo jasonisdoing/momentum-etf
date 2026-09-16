@@ -10,7 +10,6 @@ from config import BUCKET_MAPPING
 from services.price_service import get_exchange_rates
 from utils.account_registry import load_account_configs
 from utils.assets_service import load_cash_accounts
-from utils.assets_share_allocation import AssetShareTarget, allocate_asset_shares
 from utils.asx_ticker import ensure_asx_prefix, strip_asx_prefix
 from utils.cash_model import cash_total_krw
 from utils.logger import get_app_logger
@@ -60,87 +59,6 @@ def _compute_account_total_assets_native(
         return (total_valuation_krw / aud_rate) + float(cash_native or 0.0)
 
     return total_valuation_krw
-
-
-def _apply_target_metrics(
-    rows: list[dict[str, Any]],
-    account_id: str,
-    cash_info: dict[str, Any] | None,
-    account_currency: str,
-    rates: dict[str, Any],
-) -> list[dict[str, Any]]:
-    if not account_id:
-        return rows
-
-    if not rows:
-        return rows
-
-    # 목표비중은 보유 항목(portfolio_master.holdings)의 target_ratio 필드가 단일 소스다.
-    master = load_portfolio_master(account_id) or {}
-    target_map = {
-        _normalize_target_ticker(str(h.get("ticker") or "")): float(h["target_ratio"])
-        for h in master.get("holdings") or []
-        if h.get("target_ratio") is not None
-    }
-    account_total_assets = _compute_account_total_assets_native(rows, cash_info, account_currency, rates)
-    # 목표수량은 통화 혼합 계좌(KRW 계좌의 USD 종목 등)를 위해 전부 KRW 로 환산해 계산한다.
-    account_total_krw = sum(float(row.get("valuation_krw") or 0.0) for row in rows) + float(
-        (cash_info or {}).get("cash_balance_krw") or 0.0
-    )
-
-    def _row_fx_rate_krw(row_currency: str) -> float | None:
-        currency_code = str(row_currency or "KRW").strip().upper() or "KRW"
-        if currency_code == "KRW":
-            return 1.0
-        rate = float(((rates or {}).get(currency_code) or {}).get("rate") or 0.0)
-        return rate if rate > 0 else None
-
-    enriched_rows: list[dict[str, Any]] = []
-    allocation_targets: list[AssetShareTarget] = []
-    for row in rows:
-        target_ratio = target_map.get(_normalize_target_ticker(str(row.get("ticker") or "")))
-        next_row = dict(row)
-        next_row["target_ratio"] = target_ratio
-        if target_ratio is None:
-            next_row["target_amount"] = None
-            next_row["target_quantity"] = None
-        else:
-            next_row["target_amount"] = round(account_total_assets * (target_ratio / 100.0), 2)
-            # 목표수량은 아래에서 전 종목을 **한 번에** 배분한다 — 여기서 개별로 나누지 않는다.
-            # 목표금액·1주값은 통화 혼합 계좌(KRW 계좌의 USD 종목 등)를 위해 KRW 로 맞춘다.
-            fx_rate = _row_fx_rate_krw(str(next_row.get("currency") or ""))
-            price_krw = float(next_row.get("current_price_num") or 0.0) * fx_rate if fx_rate else 0.0
-            # NaN 은 `<= 0` 비교를 통과하므로(NaN 비교는 항상 False) 유한성 검사를 먼저 한다.
-            if math.isfinite(price_krw) and price_krw > 0:
-                allocation_targets.append(
-                    AssetShareTarget(
-                        key=str(next_row.get("ticker") or ""),
-                        target_amount=account_total_krw * (target_ratio / 100.0),
-                        price=price_krw,
-                    )
-                )
-            next_row["target_quantity"] = None  # 배분 후 채운다
-        enriched_rows.append(next_row)
-
-    # 자산 화면만 잔여 예산을 추가 배분한다. 합성의 내림·최소 1주 규칙과 공유하지 않는다.
-    cash_ratio = float((cash_info or {}).get("cash_target_ratio") or 0.0)
-    fixed_value = sum(float(row.get("valuation_krw") or 0.0) for row in rows if row.get("ticker") == "IS")
-    budget = min(
-        sum(item.target_amount for item in allocation_targets), account_total_krw * (1 - cash_ratio / 100) - fixed_value
-    )
-    quantities = allocate_asset_shares(allocation_targets, budget=budget)
-    for row in enriched_rows:
-        if row.get("target_ratio") is not None and str(row.get("ticker") or "") in quantities:
-            row["target_quantity"] = quantities[str(row["ticker"])]
-    return enriched_rows
-
-
-def _set_holding_target_ratio(holding: dict[str, Any], target_ratio: float | None) -> None:
-    """보유 항목의 목표비중 필드를 갱신한다 — 0 이하/None 은 미설정(필드 제거)으로 처리."""
-    if target_ratio is not None and float(target_ratio) > 0:
-        holding["target_ratio"] = float(target_ratio)
-    else:
-        holding.pop("target_ratio", None)
 
 
 def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
@@ -284,13 +202,6 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                 }
             )
 
-        account_rows = _apply_target_metrics(
-            account_rows,
-            account_id=curr_account_id,
-            cash_info=cash_info,
-            account_currency=currency,
-            rates=rates,
-        )
         all_rows.extend(account_rows)
 
         valuation_krw = sum(float(row.get("valuation_krw") or 0.0) for row in account_rows)
@@ -314,7 +225,6 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
         else:
             base_rate = float(((rates or {}).get(currency) or {}).get("rate") or 0.0)
         cash_display_native = round(cash_balance_krw / base_rate, 2) if base_rate > 0 else cash_balance_krw
-        target_ratio_total = sum(float(row.get("target_ratio") or 0.0) for row in account_rows) + cash_target_ratio
         account_summaries.append(
             {
                 "account_id": curr_account_id,
@@ -332,11 +242,6 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                 "cash_display_native": cash_display_native,
                 "cash_display_currency": currency,
                 "cash_target_ratio": cash_target_ratio,
-                # 자산 헬퍼에서 저장한 현금 목표 비중(%) — /assets 목표비중 칸의 유일한 소스.
-                # 미저장이면 None 그대로 내려 화면이 '-' 로 표시한다(파생·기본값 금지).
-                "helper_cash_weight_pct": (
-                    (load_portfolio_master(curr_account_id) or {}).get("asset_helper") or {}
-                ).get("cash_weight_pct"),
                 "intl_shares_value": (cash_info or {}).get("intl_shares_value"),
                 "intl_shares_change": (cash_info or {}).get("intl_shares_change"),
                 "updated_at": (cash_info or {}).get("updated_at"),
@@ -344,7 +249,6 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                 "valuation_krw": valuation_krw,
                 "total_assets_krw": valuation_krw + cash_balance_krw,
                 "holdings_count": len([r for r in account_rows if str(r.get("ticker") or "") != "IS"]),
-                "target_ratio_total": target_ratio_total,
             }
         )
 
@@ -411,7 +315,6 @@ def update_holding(
     quantity: int | None = None,
     average_buy_price: float | None = None,
     memo: str | None = None,
-    target_ratio: float | None = None,
 ) -> dict[str, str]:
     """계좌의 특정 종목 수량/매입단가를 수정한다."""
     account_id = str(account_id or "").strip()
@@ -439,8 +342,6 @@ def update_holding(
                 from utils.stock_memo_store import set_stock_memo
 
                 set_stock_memo(h.get("ticker") or ticker, memo)
-            if target_ratio is not None:
-                _set_holding_target_ratio(h, float(target_ratio))
             found = True
             break
 
@@ -468,7 +369,6 @@ def add_holding(
     quantity: int,
     average_buy_price: float,
     memo: str | None = None,
-    target_ratio: float | None = None,
 ) -> dict[str, Any]:
     """계좌에 새로운 종목을 추가한다."""
     account_id = str(account_id or "").strip()
@@ -510,8 +410,6 @@ def add_holding(
         "sort_order": next_sort_order,
     }
 
-    if target_ratio is not None:
-        _set_holding_target_ratio(new_holding, float(target_ratio))
     if memo is not None:
         # 메모는 계좌 보유가 아니라 **종목**에 붙는다(utils/stock_memo_store).
         from utils.stock_memo_store import set_stock_memo

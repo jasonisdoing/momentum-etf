@@ -1,7 +1,6 @@
-"""자산 헬퍼 시장 데이터 층 — 종가 프레임·환산·수익률/MDD/실시간 맵·계좌 스냅샷.
+"""포트폴리오 전략 시장 데이터 층 — 종가 프레임·환산·수익률/MDD/소르티노 맵.
 
-`utils/asset_helper_service.py` 에서 분리(이동만, 로직 불변). 서비스가 이 모듈을
-임포트하며, 이 모듈은 서비스에 의존하지 않는다(단방향).
+옛 자산 헬퍼 화면에서 왔다(2026-09 화면 폐기, 포트폴리오 전략이 지표 계산에 계속 사용).
 """
 
 from __future__ import annotations
@@ -9,9 +8,10 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
-from config import TRADING_DAYS_PER_MONTH
+from config import MIN_TRADING_DAYS, TRADING_DAYS_PER_MONTH
 from utils.cache_utils import (
     get_all_ticker_type_lookup_keys,
     load_cached_close_series_bulk,
@@ -431,3 +431,27 @@ def _normalize_bucket_label(bucket_val: Any) -> str | None:
         "현금": "5. 현금",
     }
     return mapping.get(pure_name, val_str)
+
+
+def _compute_sortino_raw_frame(close_frame: pd.DataFrame, window_months: int) -> pd.DataFrame:
+    if close_frame.empty:
+        return pd.DataFrame(index=close_frame.index, columns=close_frame.columns, dtype=float)
+
+    window = max(2, int(window_months) * int(TRADING_DAYS_PER_MONTH))
+    # 상장 이력이 window(=지표 기간)보다 짧아도 "보유 기간만큼"(가용 데이터)으로 계산한다.
+    # 최소 표본은 종목 데이터 충분 여부의 표준 기준(MIN_TRADING_DAYS)을 재사용한다.
+    min_obs = min(window, max(2, int(MIN_TRADING_DAYS)))
+    daily_ret = close_frame.pct_change(fill_method=None)
+    mean = daily_ret.rolling(window=window, min_periods=min_obs).mean()
+
+    def _calc_downside_std(values: np.ndarray) -> float:
+        # 윈도우가 종목 첫 행까지 닿으면 pct_change 첫 NaN이 섞여 들어온다 — 제거 후 계산한다.
+        valid = values[~np.isnan(values)]
+        if valid.size <= 1:
+            return np.nan
+        downside = np.minimum(0.0, valid)
+        result = np.sqrt(np.sum(downside**2) / (valid.size - 1))
+        return float(result) if result > 0 else np.nan
+
+    downside_std = daily_ret.rolling(window=window, min_periods=min_obs).apply(_calc_downside_std, raw=True)
+    return (mean / downside_std.replace(0, np.nan)) * np.sqrt(252.0)
