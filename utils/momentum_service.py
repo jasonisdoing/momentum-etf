@@ -171,8 +171,9 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         if value not in options:
             allowed = ", ".join(str(v) for v in options)
             raise ValueError(f"'{key}' 는 {allowed} 중 하나여야 합니다.")
-    if short_ma_days >= long_ma_days:
-        raise ValueError("'short_ma_days' 는 'long_ma_days' 보다 작아야 합니다.")
+    # 같은 값 허용 — 단기=장기면 두 이격률이 동일해져 사실상 단일 이평선 전략으로 동작한다.
+    if short_ma_days > long_ma_days:
+        raise ValueError("'short_ma_days' 는 'long_ma_days' 이하여야 합니다.")
 
     # ADR 하한 — 판정일의 시장 ADR 이 이 값 미만이면 그 주는 전량 현금. None = 게이트 없음(기본).
     # 시장은 풀 설정의 시장 레짐 지수(ADR 이 있는 4개 시장으로 제한됨)를 따른다.
