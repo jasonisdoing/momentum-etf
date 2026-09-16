@@ -780,8 +780,9 @@ export function TickerDetailManager({
         ? ((latestClose / myAverageBuyPrice) - 1) * 100
         : null;
       const chartTop = container.offsetTop;
+      // 최소 top 을 넉넉히 둬 차트 최상단의 최고가 라벨 영역과 겹치지 않게 한다.
       setChartAverageBadge({
-        top: chartTop + Math.max(8, Math.min(averageY - 16, container.clientHeight - 34)),
+        top: chartTop + Math.max(36, Math.min(averageY - 16, container.clientHeight - 34)),
         returnPct,
       });
     }
