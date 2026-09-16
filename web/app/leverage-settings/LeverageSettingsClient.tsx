@@ -35,8 +35,9 @@ const compactLabelStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-// 슬리피지 편도(%). 종목풀 설정과 동일한 0.05~0.5 (0.05 단위).
-const SLIPPAGE_OPTIONS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5] as const;
+// 표준 슬리피지 선택지(config.SLIPPAGE_PCT_OPTIONS) — 서버 constraints 가 단일 소스,
+// 아래는 응답을 아직 못 받았을 때의 표시용 폴백이다(종목풀 설정과 같은 방식).
+const DEFAULT_SLIPPAGE_PCT_OPTIONS = [0.2, 0.3, 0.4, 0.5, 1.0];
 const leverageTuneGridTheme = createAppGridTheme();
 
 type Market = "kor" | "us";
@@ -61,6 +62,11 @@ type MaConfig = {
     peak_max: number;
     peak_step: number;
   };
+};
+
+/** 서버가 내려주는 표준 선택지(config.py) — 슬리피지는 종목풀 설정과 같은 목록 하나만 쓴다. */
+type LeverageConstraints = {
+  slippage_pct_options?: number[];
 };
 
 type TuneRow = {
@@ -171,7 +177,7 @@ function blankConfig(market: Market): MaConfig {
     defense: { ticker: "CASH", name: "현금" },
     ma_days: 120,
     peak_drawdown_pct: 7,
-    slippage: 0.1,
+    slippage: DEFAULT_SLIPPAGE_PCT_OPTIONS[0],
   };
 }
 
@@ -231,6 +237,7 @@ export function LeverageSettingsClient() {
   const [peakMin, setPeakMin] = useState(1);
   const [peakMax, setPeakMax] = useState(10);
   const [peakStep, setPeakStep] = useState(1);
+  const [constraints, setConstraints] = useState<LeverageConstraints | null>(null);
   const [tuneResult, setTuneResult] = useState<TuneResult | null>(null);
   const [tuning, setTuning] = useState(false);
   const [tuneError, setTuneError] = useState<string | null>(null);
@@ -241,13 +248,21 @@ export function LeverageSettingsClient() {
   const profile = `ma_cross_${market}`;
   const maOptions = useMemo(() => buildNumberRange(tuneMin, tuneMax, tuneStep), [tuneMin, tuneMax, tuneStep]);
   const peakDrawdownOptions = useMemo(() => buildNumberRange(peakMin, peakMax, peakStep, 1), [peakMin, peakMax, peakStep]);
+  const slippageOptions = constraints?.slippage_pct_options?.length
+    ? constraints.slippage_pct_options
+    : DEFAULT_SLIPPAGE_PCT_OPTIONS;
 
   const loadConfig = useCallback(async (m: Market) => {
     setLoadingConfig(true);
     setConfigMissing(false);
     try {
       const resp = await fetch(`/api/leverage-config?profile=ma_cross_${m}`, { cache: "no-store" });
-      const payload = (await resp.json()) as { config?: Partial<MaConfig>; error?: string };
+      const payload = (await resp.json()) as {
+        config?: Partial<MaConfig>;
+        constraints?: LeverageConstraints;
+        error?: string;
+      };
+      if (payload.constraints) setConstraints(payload.constraints);
       if (!resp.ok || payload.error || !payload.config?.index) {
         // 아직 설정이 없는 시장 — 빈 폼으로 새로 작성 (임의 계산 기본값 아님, 사용자 입력 대기)
         setConfig(blankConfig(m));
@@ -264,7 +279,7 @@ export function LeverageSettingsClient() {
         defense: c.defense ?? { ticker: "CASH", name: "현금" },
         ma_days: c.ma_days ?? 120,
         peak_drawdown_pct: Number(c.peak_drawdown_pct ?? tuning?.peak_min ?? 7),
-        slippage: c.slippage ?? 0.1,
+        slippage: c.slippage ?? DEFAULT_SLIPPAGE_PCT_OPTIONS[0],
         slack_enabled: Boolean(c.slack_enabled),
         tuning: tuning && typeof tuning === "object" ? {
           months: Number(tuning.months),
@@ -650,7 +665,10 @@ export function LeverageSettingsClient() {
                     <div style={compactRowStyle}>
                       <span style={compactLabelStyle}>슬리피지</span>
                       <select style={{ ...inputStyle, width: 88 }} value={config.slippage} onChange={(e) => setConfig((c) => c && { ...c, slippage: Number(e.target.value) })}>
-                        {SLIPPAGE_OPTIONS.map((s) => <option key={s} value={s}>{s.toFixed(2)}%</option>)}
+                        {!slippageOptions.includes(config.slippage) && (
+                          <option value={config.slippage}>{config.slippage.toFixed(2)}%</option>
+                        )}
+                        {slippageOptions.map((s) => <option key={s} value={s}>{s.toFixed(2)}%</option>)}
                       </select>
                     </div>
                   </>
