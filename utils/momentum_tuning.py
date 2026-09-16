@@ -195,7 +195,8 @@ def _stream_tuning(
     adr_floors = _checked_optional_ints(ranges.get("adr_floor", []), ADR_FLOOR_OPTIONS, "ADR 하한")
     entry_mults = _checked_optional_floats(ranges.get("entry_vol_mult", []), ENTRY_VOL_MULT_OPTIONS, "진입 문턱")
     longs = _checked(ranges.get("long_ma_days", []), LONG_MA_OPTIONS, "장기 이평")
-    ma_pairs = [(short, long) for short in shorts for long in longs if short < long]
+    # 단기=장기 허용(단일 이평선 전략과 동일) — 설정 검증(momentum_service)과 같은 기준.
+    ma_pairs = [(short, long) for short in shorts for long in longs if short <= long]
     if not ma_pairs:
         raise ValueError("단기 이평이 장기 이평보다 작은 조합이 없습니다.")
 
