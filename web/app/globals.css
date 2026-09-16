@@ -3374,6 +3374,10 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* 캔들·이평선 위에 얹혀도 읽히게 반투명 배경을 깐다(차트는 항상 밝은 배경). */
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: 4px;
+  padding: 0 4px;
 }
 
 .tickerDetailChartBadgeArrow {
