@@ -61,8 +61,12 @@ type MaConfig = {
     peak_min: number;
     peak_max: number;
     peak_step: number;
+    /** 튜닝 결과 표의 정렬 기준 — 저장돼 다음에도 유지된다. */
+    sort_by?: TuneSortBy;
   };
 };
+
+type TuneSortBy = "sortino" | "cagr";
 
 /** 서버가 내려주는 표준 선택지(config.py) — 슬리피지는 종목풀 설정과 같은 목록 하나만 쓴다. */
 type LeverageConstraints = {
@@ -237,6 +241,7 @@ export function LeverageSettingsClient() {
   const [peakMin, setPeakMin] = useState(1);
   const [peakMax, setPeakMax] = useState(10);
   const [peakStep, setPeakStep] = useState(1);
+  const [tuneSortBy, setTuneSortBy] = useState<TuneSortBy>("sortino");
   const [constraints, setConstraints] = useState<LeverageConstraints | null>(null);
   const [tuneResult, setTuneResult] = useState<TuneResult | null>(null);
   const [tuning, setTuning] = useState(false);
@@ -289,6 +294,7 @@ export function LeverageSettingsClient() {
           peak_min: Number(tuning.peak_min ?? 1),
           peak_max: Number(tuning.peak_max ?? 10),
           peak_step: Number(tuning.peak_step ?? 1),
+          sort_by: tuning.sort_by === "cagr" ? "cagr" : "sortino",
         } : undefined,
       });
       setTuneMonths(Number(tuning?.months ?? 36));
@@ -298,6 +304,7 @@ export function LeverageSettingsClient() {
       setPeakMin(Number(tuning?.peak_min ?? 1));
       setPeakMax(Number(tuning?.peak_max ?? 10));
       setPeakStep(Number(tuning?.peak_step ?? 1));
+      setTuneSortBy(tuning?.sort_by === "cagr" ? "cagr" : "sortino");
       setSlackEnabled(Boolean(c.slack_enabled));
     } catch {
       setConfig(blankConfig(m));
@@ -441,6 +448,7 @@ export function LeverageSettingsClient() {
           peak_min: peakMin,
           peak_max: peakMax,
           peak_step: peakStep,
+          sort_by: tuneSortBy,
         },
       };
       const resp = await fetch(`/api/leverage-config?profile=${profile}`, {
@@ -507,13 +515,14 @@ export function LeverageSettingsClient() {
     { headerName: "이동선", field: "ma_days", width: 120, valueGetter: (p) => p.data?.label ?? p.data?.ma_days },
     { headerName: "고점대비", field: "peak_drawdown_pct", width: 100, valueFormatter: (p) => fmtWholePct(p.value) },
     { headerName: "누적수익", field: "cumulative_pct", width: 104, valueFormatter: (p) => fmtPct(p.value) },
-    { headerName: "CAGR", field: "cagr_pct", width: 150, sort: "desc", sortIndex: 1, valueFormatter: (p) => fmtPct(p.value) },
+    // 정렬 기준(저장값) — 고른 지표가 1순위, 다른 지표가 2순위(둘 다 내림차순).
+    { headerName: "CAGR", field: "cagr_pct", width: 150, sort: "desc", sortIndex: tuneSortBy === "cagr" ? 0 : 1, valueFormatter: (p) => fmtPct(p.value) },
     { headerName: "MDD", field: "mdd_pct", width: 82, valueFormatter: (p) => fmtPct(p.value) },
-    { headerName: "소르티노", field: "sortino", width: 150, sort: "desc", sortIndex: 0, valueFormatter: (p) => (p.value == null ? "-" : p.value.toFixed(2)) },
+    { headerName: "소르티노", field: "sortino", width: 150, sort: "desc", sortIndex: tuneSortBy === "sortino" ? 0 : 1, valueFormatter: (p) => (p.value == null ? "-" : p.value.toFixed(2)) },
     { headerName: "전환수", field: "switches", width: 76 },
     { headerName: "거래일", field: "days", width: 76 },
     { headerName: "보유일", field: "leverage_days", width: 76, valueFormatter: (p) => (p.value == null ? "" : String(p.value)) },
-  ], []);
+  ], [tuneSortBy]);
 
   // 벤치마크(지수/레버리지 보유)를 후보 행과 함께 섞어 현재 정렬 기준에 맞는 위치에 넣는다.
   const gridRows = useMemo<LeverageTuneGridRow[]>(() => {
@@ -686,6 +695,17 @@ export function LeverageSettingsClient() {
                   <label className="appLabeledField" style={{ minWidth: 130, flex: "0 0 auto" }}>
                     <span className="appLabeledFieldLabel">기간(개월)</span>
                     <MonthsSelect value={tuneMonths} options={MONTH_OPTIONS} onChange={setTuneMonths} />
+                  </label>
+                  <label className="appLabeledField" style={{ minWidth: 110, flex: "0 0 auto" }}>
+                    <span className="appLabeledFieldLabel">정렬 기준</span>
+                    <select
+                      className="form-select form-select-sm"
+                      value={tuneSortBy}
+                      onChange={(e) => setTuneSortBy(e.target.value === "cagr" ? "cagr" : "sortino")}
+                    >
+                      <option value="sortino">소르티노</option>
+                      <option value="cagr">CAGR</option>
+                    </select>
                   </label>
                   <div style={{ display: "flex", gap: 7, alignItems: "flex-end", flexWrap: "wrap" }}>
                     <span style={{ color: "var(--text-muted)", fontWeight: 700, paddingBottom: 7, fontSize: "var(--fs-sm)" }}>이동선</span>
@@ -894,6 +914,7 @@ export function LeverageSettingsClient() {
                 </div>
               ) : null}
               <AppAgGrid<LeverageTuneGridRow>
+                key={tuneSortBy}
                 rowData={gridRows}
                 columnDefs={columnDefs}
                 loading={tuning}
