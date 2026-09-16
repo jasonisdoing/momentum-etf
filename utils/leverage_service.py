@@ -24,10 +24,16 @@ def load_leverage_settings(profile: str = "switch") -> dict[str, Any]:
     if state and state.get("holding_start_date"):
         state["holding_days"] = count_holding_trading_days(state.get("target", ""), state["holding_start_date"])
 
+    from config import SLIPPAGE_PCT_OPTIONS
+
     return {
         "profile": profile,
         "config": load_leverage_config_raw(profile),
         "state": state,
+        # 슬리피지 표준 선택지(config.py) — 종목풀 설정과 같은 목록 하나만 쓴다.
+        "constraints": {
+            "slippage_pct_options": list(SLIPPAGE_PCT_OPTIONS),
+        },
     }
 
 
@@ -70,8 +76,13 @@ def save_leverage_settings(profile: str, config: dict[str, Any]) -> dict[str, An
     - switch(기존): 벤치마크를 후보군(tuning)에서 파생해 함께 저장(단일 소스 유지).
     """
     if isinstance(config, dict) and config.get("strategy") == "ma_cross":
+        from config import SLIPPAGE_PCT_OPTIONS
+
+        config = dict(config)
+        if float(config.get("slippage") or 0) not in SLIPPAGE_PCT_OPTIONS:
+            raise ValueError(f"슬리피지는 표준 선택지 중 하나여야 합니다: {SLIPPAGE_PCT_OPTIONS}")
         normalize_settings(dict(config))  # 사본으로 검증 — 파생 키가 저장값에 섞이지 않게
-        save_leverage_config_raw(profile, dict(config))
+        save_leverage_config_raw(profile, config)
         return load_leverage_settings(profile)
 
     _validate_leverage_config(config)

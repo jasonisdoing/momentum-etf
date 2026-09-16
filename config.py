@@ -232,7 +232,7 @@ MIN_VALUE_MULT_OPTIONS_BY_COUNTRY: dict[str, tuple[float | None, ...]] = {
     "au": (None, 1.0, 2.0, 3.0),
 }
 
-# 편도 슬리피지(%) — 0.05 ~ 0.50, 0.05 단위. 종목풀 설정에서 고른다.
+# 편도 슬리피지(%) — 종목풀·레버리지 설정이 이 목록 하나만 쓴다(표준 셀렉트).
 SLIPPAGE_PCT_OPTIONS: tuple[float, ...] = (0.2, 0.3, 0.4, 0.5, 1.0)
 
 # 종목풀 성격 — 'stock'(개별주) 또는 'etf'. 업종 개념이 있는 풀인지 화면들이 이 값으로 본다.
