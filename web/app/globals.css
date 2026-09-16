@@ -3235,31 +3235,9 @@ a {
   flex-wrap: wrap;
 }
 
-.tickerDetailChartMaLegend {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  flex-wrap: wrap;
-}
 
-.tickerDetailChartMaLabel {
-  font-size: var(--fs-sm);
-  color: #5b6778;
-  font-weight: 600;
-}
 
-.tickerDetailChartMaItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--fs-sm);
-}
 
-.tickerDetailChartMaSwatch {
-  width: 14px;
-  height: 2px;
-  display: inline-block;
-}
 
 .tickerDetailHoldingsPanel {
   grid-area: holdings;
