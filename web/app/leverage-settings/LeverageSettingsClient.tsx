@@ -1,7 +1,7 @@
 "use client";
 
 import type { ColDef } from "ag-grid-community";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { formatKstDateTime } from "@/lib/datetime";
 import { formatSignedPct, signColor } from "@/lib/grid-cells";
@@ -380,6 +380,16 @@ export function LeverageSettingsClient() {
     setTuneResult(null); // 시장 전환 시 이전 시장의 튜닝 결과는 폐기
     setTuneError(null);
   }, [market, loadConfig, loadView]);
+
+  // 화면 진입·시장 전환 시 저장된 범위로 튜닝을 자동 실행한다(버튼을 누른 것과 같다).
+  // 설정이 아직 없는 시장(configMissing)은 돌릴 범위가 없으므로 건너뛴다.
+  const autoTunedMarket = useRef<Market | null>(null);
+  useEffect(() => {
+    if (loadingConfig || !config || configMissing) return;
+    if (autoTunedMarket.current === market) return;
+    autoTunedMarket.current = market;
+    void runTune();
+  }, [loadingConfig, config, configMissing, market, runTune]);
 
   const setAsset = (key: "index" | "leverage" | "defense", field: "ticker" | "name", value: string) =>
     setConfig((c) => (c ? { ...c, [key]: { ...c[key], [field]: value } } : c));
