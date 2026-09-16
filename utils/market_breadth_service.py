@@ -434,7 +434,9 @@ def refresh_pool_breadth(pools: list[str] | None = None, *, full: bool = False) 
             summary["pools"][pool] = {"error": str(exc)}
             continue
         if not counts_by_date:
-            summary["pools"][pool] = {"skipped": True, "reason": "가격 캐시에 종가가 없습니다."}
+            # 키 이름을 `skipped` 로 쓰지 않는다 — 정상 형태의 `skipped_days` 처럼 '건너뛴
+            # 날짜 수'와 뜻이 겹치면 요약을 찍는 쪽이 둘을 구분 못해 죽는다(markets 와 같은 규칙).
+            summary["pools"][pool] = {"pool_skipped": True, "reason": "가격 캐시에 종가가 없습니다."}
             continue
 
         # 표본 가드 — 종목풀은 시장 4개보다 느슨하다(위 상수 주석 참고).
@@ -459,7 +461,7 @@ def refresh_pool_breadth(pools: list[str] | None = None, *, full: bool = False) 
             "universe_size": universe_size,
             "inserted": inserted,
             "updated": updated,
-            "skipped": skipped,
+            "skipped_days": skipped,
             "latest_date": target_date,
         }
     return summary
