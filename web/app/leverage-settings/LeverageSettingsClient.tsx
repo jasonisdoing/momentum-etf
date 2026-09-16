@@ -930,6 +930,7 @@ export function LeverageSettingsClient() {
                 key={tuneSortBy}
                 rowData={gridRows}
                 columnDefs={columnDefs}
+                rowClassDeps={[config?.ma_days, config?.peak_drawdown_pct, view?.ma_days, view?.peak_drawdown_pct]}
                 loading={tuning}
                 theme={leverageTuneGridTheme}
                 minHeight={0}
