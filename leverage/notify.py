@@ -52,7 +52,7 @@ def send_slack_ma_cross(
     """이동평균선 크로스(+고점대비) 전략 추천을 Slack 으로 전송한다.
 
     ``view`` 는 ``utils.leverage_ma_service.compute_ma_cross_view`` 의 반환값.
-    기존 스위칭(드로다운 컷) 메시지와 형식은 맞추되, 기준이 이동선/고점대비로 바뀐 내용을 반영한다.
+    기존 스위칭(드로다운 컷) 메시지와 형식은 맞추되, 기준이 이평선/고점대비로 바뀐 내용을 반영한다.
     """
     market = str(view.get("market") or "kor")
     market_name = "🇺🇸 미국" if market == "us" else "🇰🇷 한국"
@@ -88,13 +88,12 @@ def send_slack_ma_cross(
     ]
 
     # 전략 설정(파라미터)
-    ma_type = get_moving_average_type()
     param_text = (
         "*🏆 전략 설정 (이동평균선 크로스 + 고점대비)*\n"
         f"• 지수(신호): {index_display}\n"
         f"• 레버리지 자산: {leverage_display}\n"
         f"• 방어 자산: {defense_display}\n"
-        f"• 이동선: {ma_type} {ma_days}일\n"
+        f"• 이평선: {ma_days}일\n"
         f"• 고점대비 한도: {peak_limit:.0f}%"
     )
     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": param_text}})
@@ -109,7 +108,7 @@ def send_slack_ma_cross(
         peak_ok = peak_dd >= -limit
         judge_text = (
             "*=== 판정 근거 ===*\n"
-            f"• 이격({ma_type} {ma_days}일): {gap_pct:+.2f}% / 기준 ≥ 0% {'✅' if gap_ok else '❌'}\n"
+            f"• 이격({ma_days}일): {gap_pct:+.2f}% / 기준 ≥ 0% {'✅' if gap_ok else '❌'}\n"
             f"• 고점대비: {peak_dd:+.2f}% / 한도 ≥ -{limit:.0f}% {'✅' if peak_ok else '❌'}\n"
             f"• 결과: {'🟢 레버리지 보유' if want_leverage else '🔵 방어 보유'} → *{target_display}*"
         )
