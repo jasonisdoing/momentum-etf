@@ -474,6 +474,7 @@ def _enrich_rows_with_base_closes(rows: list[dict]) -> None:
     from concurrent.futures import ThreadPoolExecutor
 
     from utils.naver_chart import fetch_naver_daily_ohlc
+    from utils.trade_value import latest_trade_value_fields
 
     today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
     base_dates = {suffix: today - offset for suffix, offset in _BASE_CLOSE_OFFSETS}
@@ -481,6 +482,7 @@ def _enrich_rows_with_base_closes(rows: list[dict]) -> None:
     def _one(row: dict) -> None:
         for suffix in base_dates:
             row[f"기준종가_{suffix}"] = None
+        row["거래대금배수"] = None
         ticker = str(row.get("티커") or "").strip()
         if not ticker:
             return
@@ -491,6 +493,11 @@ def _enrich_rows_with_base_closes(rows: list[dict]) -> None:
         for suffix, base_date in base_dates.items():
             value = closes.asof(base_date)
             row[f"기준종가_{suffix}"] = float(value) if pd.notna(value) else None
+        # 거래대금 배수 — 순위·신고가 화면과 같은 공용 계산(20일 평균 대비). 이력 부족이면 None.
+        if "Volume" in df.columns:
+            fields = latest_trade_value_fields(closes, df["Volume"])
+            if fields:
+                row["거래대금배수"] = fields["trade_value_mult"]
 
     with ThreadPoolExecutor(max_workers=8) as executor:
         list(executor.map(_one, rows))

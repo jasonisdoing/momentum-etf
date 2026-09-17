@@ -152,6 +152,8 @@ def load_market_data() -> dict[str, Any]:
                 f"base_close_{suffix}": normalize_nullable_number(row.get(f"기준종가_{suffix}"))
                 for suffix in BASE_CLOSE_SUFFIXES
             },
+            # 거래대금 배수(20일 평균 대비) — 순위 화면과 같은 공용 계산, 일일 배치 저장값.
+            "value_mult": normalize_nullable_number(row.get("거래대금배수")),
             # 매매차익 비과세 여부(국내 주식형만). 분류를 못 받은 종목은 None = 모름.
             "is_tax_free": row.get("is_tax_free"),
         }
