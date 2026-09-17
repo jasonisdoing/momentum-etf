@@ -17,9 +17,11 @@ export type AlertBadgeInfo = {
   maTickers: string[];
   /** 신규상장(🆕) 티커 → 상장 후 경과 개월(내림) — 전 화면 공용 판정(순위 is_partial 과 같은 기준). */
   newMonthsByTicker: Record<string, number | null>;
+  /** 티커 → 최근 고점 대비(%) — 순위 화면 「고점」 컬럼과 같은 공용 판정. */
+  highDrawdownByTicker: Record<string, number>;
 };
 
-const EMPTY_BADGE_INFO: AlertBadgeInfo = { badgeByTicker: {}, maTickers: [], newMonthsByTicker: {} };
+const EMPTY_BADGE_INFO: AlertBadgeInfo = { badgeByTicker: {}, maTickers: [], newMonthsByTicker: {}, highDrawdownByTicker: {} };
 
 // 서버 배지 계산이 수 초 걸려, 화면 재방문 시 세션 캐시로 즉시 표시한다(서버에도 별도 TTL 캐시 있음).
 const BADGES_SESSION_CACHE_TTL_MS = 60_000;
@@ -37,13 +39,14 @@ export async function fetchAlertBadges(accountId: string): Promise<AlertBadgeInf
   const cacheKey = `${BADGES_SESSION_CACHE_PREFIX}${accountId}`;
   const cached = readSessionTtlCache<AlertBadgeInfo>(cacheKey, BADGES_SESSION_CACHE_TTL_MS);
   // 예전 버전이 남긴 캐시(티커→아이콘 맵)는 형태가 달라 그대로 쓰면 화면이 깨진다. 모양을 확인한다.
-  if (cached !== null && cached.badgeByTicker && cached.newMonthsByTicker) return cached;
+  if (cached !== null && cached.badgeByTicker && cached.newMonthsByTicker && cached.highDrawdownByTicker) return cached;
   try {
     const resp = await fetch(`/api/alarms/badges?account=${encodeURIComponent(accountId)}`, { cache: "no-store" });
     const payload = (await resp.json()) as {
       badge_by_ticker?: Record<string, string>;
       ma_tickers?: string[];
       new_months_by_ticker?: Record<string, number | null>;
+      high_drawdown_by_ticker?: Record<string, number>;
       error?: string;
     };
     if (!resp.ok || payload.error) return EMPTY_BADGE_INFO;
@@ -51,6 +54,7 @@ export async function fetchAlertBadges(accountId: string): Promise<AlertBadgeInf
       badgeByTicker: payload.badge_by_ticker ?? {},
       maTickers: payload.ma_tickers ?? [],
       newMonthsByTicker: payload.new_months_by_ticker ?? {},
+      highDrawdownByTicker: payload.high_drawdown_by_ticker ?? {},
     };
     writeSessionTtlCache(cacheKey, info);
     return info;

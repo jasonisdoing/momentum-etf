@@ -11,14 +11,15 @@ type StockSummary = {
   totalCount: number;
 };
 
-/** 지수 구성종목 마켓의 총계 라벨 — 시총 상위 마켓은 "<마켓> 전체" 로 쓴다. */
-const INDEX_MARKET_TOTAL_LABELS: Record<string, string> = {
+/** 마켓별 총계 라벨 — 목록에 없으면 "<마켓> 전체" 로 쓴다. */
+const MARKET_TOTAL_LABELS: Record<string, string> = {
+  COMBINED: "코스피+코스닥 전체",
   KOSPI200: "KODEX 200 구성",
   KOSDAQ150: "KODEX 코스닥150 구성",
 };
 
 export function KorMarketStockPageClient() {
-  const [summary, setSummary] = useState<StockSummary>({ market: "KOSPI", count: 0, totalCount: 0 });
+  const [summary, setSummary] = useState<StockSummary>({ market: "COMBINED", count: 0, totalCount: 0 });
 
   const handleSummaryChange = useCallback((s: StockSummary) => setSummary(s), []);
 
@@ -30,7 +31,7 @@ export function KorMarketStockPageClient() {
           <span className="appHeaderMetricValue">{summary.count}개</span>
         </div>
         <div className="appHeaderMetric">
-          <span>{INDEX_MARKET_TOTAL_LABELS[summary.market] ?? `${summary.market} 전체`}:</span>
+          <span>{MARKET_TOTAL_LABELS[summary.market] ?? `${summary.market} 전체`}:</span>
           <span className="appHeaderMetricValue">{new Intl.NumberFormat("ko-KR").format(summary.totalCount)}개</span>
         </div>
       </div>

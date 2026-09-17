@@ -19,7 +19,7 @@ import { AppLoadingState } from "../components/AppLoadingState";
 import { AppModal } from "../components/AppModal";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { renderStockNameCell } from "@/lib/name-highlight";
-import { signColor, stockMemoColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
+import { highDrawdownColumn, signColor, stockMemoColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { reorderHoldings, saveHoldingsGroups, type HoldingsGroup } from "@/lib/holdings-store";
@@ -105,6 +105,8 @@ export function AccountHoldingsDetailPanel({
   // 이동선 이탈 종목 — 배지와 같은 조건으로 행을 회색 처리한다.
   const [maBrokenTickers, setMaBrokenTickers] = useState<Set<string>>(new Set());
   const [newListingMonths, setNewListingMonths] = useState<Record<string, number | null>>({});
+  // 고점 대비(%) — 순위 화면 「고점」 컬럼과 같은 공용 판정(배지 응답에 함께 온다).
+  const [highDrawdownByTicker, setHighDrawdownByTicker] = useState<Record<string, number>>({});
   useEffect(() => {
     let alive = true;
     void fetchAlertBadges(summary.account_id).then((info) => {
@@ -112,6 +114,7 @@ export function AccountHoldingsDetailPanel({
       setAlertBadges(info.badgeByTicker);
       setMaBrokenTickers(new Set(info.maTickers));
       setNewListingMonths(info.newMonthsByTicker);
+      setHighDrawdownByTicker(info.highDrawdownByTicker);
     });
     return () => {
       alive = false;
@@ -855,6 +858,17 @@ export function AccountHoldingsDetailPanel({
       pinned: "left",
       width: 96,
       cellClass: (params) => getBucketCellClass(params.data?.bucket_id ?? 0),
+    },
+    // 고점 대비 — 순위 화면과 같은 공용 컬럼(같은 판정·같은 표기).
+    {
+      ...highDrawdownColumn<GridRow>("high_drawdown_pct" as never),
+      valueGetter: (params: { data?: GridRow }) => {
+        const row = params.data;
+        if (!row || row.is_group || row.id === "__adding__" || row.ticker === CASH_ROW_TICKER || row.ticker === "IS") {
+          return null;
+        }
+        return highDrawdownByTicker[normalizeBadgeTicker(row.ticker)] ?? null;
+      },
     },
     // 티커·종목명 — 공용 컬럼(col-id 표준). 추가 행 입력칸·현금·고정 자산만 화면 고유 표기다.
     tickerColumn<GridRow>({

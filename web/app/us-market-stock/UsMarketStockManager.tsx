@@ -14,6 +14,13 @@ import type { PoolAddProgress } from "@/lib/pool-add";
 import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
+import {
+  TopCountSelect,
+  readRememberedTopCount,
+  stepTopOptions,
+  withCurrentTopOption,
+  writeRememberedTopCount,
+} from "../components/TopCountSelect";
 import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { useToast } from "../components/ToastProvider";
@@ -81,57 +88,18 @@ function viewIndices(view: ViewOption): readonly string[] {
 }
 
 // 시총 상위 몇 개까지 볼지 — 응답이 시총 순 정렬이라 상위 N 절단으로 처리한다.
-// null 이면 전체(절단 없음).
-// 통합은 두 지수를 합쳐 600 종목에 가까워 100 단위로는 구간이 너무 성기다 → 50 단위.
-// 단일 지수는 종목 수가 적어 100 단위 그대로 둔다.
-// 마지막으로 고른 상위 N — 다음 방문에도 같은 범위로 열리게 기억한다.
-// 키 형식은 시스템 공통(`momentum-etf:<화면>:<항목>`)을 따른다.
+// null 이면 전체(절단 없음). 셀렉트·저장·선택지 생성은 한국 개별주와 공용(TopCountSelect).
 const US_MARKET_TOP_COUNT_KEY = "momentum-etf:us-market-stock:top-count";
 
-/** 저장된 상위 N. `"all"`(전체)이거나 값이 없으면 null. */
-function readRememberedTopCount(): number | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  const raw = window.localStorage.getItem(US_MARKET_TOP_COUNT_KEY);
-  if (!raw || raw === "all") {
-    return null;
-  }
-  const parsed = Number(raw);
-  // 못 읽는 값은 전체로 둔다 — 임의의 숫자로 잘라 보여주면 무엇이 적용됐는지 알 수 없다.
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function writeRememberedTopCount(value: number | null): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(US_MARKET_TOP_COUNT_KEY, value === null ? "all" : String(value));
-}
-
+// 통합은 두 지수를 합쳐 600 종목에 가까워 100 단위로는 구간이 너무 성기다 → 50 단위.
+// 단일 지수는 종목 수가 적어 100 단위 고정 목록 그대로 둔다.
 const COMBINED_TOP_STEP = 50;
 const SINGLE_TOP_OPTIONS: readonly (number | null)[] = [null, 100, 200, 300, 400, 500];
 
-/**
- * 보기별 상위 N 선택지. 통합은 실제 종목 수까지만 50 단위로 채운다
- * (전체 개수 이상은 `전체` 와 같은 결과라 만들지 않는다).
- *
- * 지금 고른 값이 목록에 없으면 함께 노출한다 — 빼면 셀렉트가 빈칸이 되어
- * 무엇이 적용 중인지 알 수 없다.
- */
 function topOptions(view: ViewOption, rowCount: number, current: number | null): (number | null)[] {
-  const options: (number | null)[] =
-    view === "COMBINED"
-      ? [null, ...Array.from(
-          { length: Math.max(0, Math.ceil(rowCount / COMBINED_TOP_STEP) - 1) },
-          (_, i) => (i + 1) * COMBINED_TOP_STEP,
-        )]
-      : [...SINGLE_TOP_OPTIONS];
-  if (current !== null && !options.includes(current)) {
-    options.push(current);
-    options.sort((a, b) => (a ?? -1) - (b ?? -1));
-  }
-  return options;
+  return view === "COMBINED"
+    ? stepTopOptions(COMBINED_TOP_STEP, rowCount, current)
+    : withCurrentTopOption([...SINGLE_TOP_OPTIONS], current);
 }
 
 function formatUsd(value: number | null): string {
@@ -201,7 +169,7 @@ export function UsMarketStockManager({
   // 마지막으로 고른 상위 N 복원 — 서버 렌더에는 localStorage 가 없어 초기값으로 못 쓴다.
   // 상위 N 은 이미 받아둔 행을 자르기만 해서(재조회 없음) 늦게 반영돼도 값싸다.
   useEffect(() => {
-    setTopCount(readRememberedTopCount());
+    setTopCount(readRememberedTopCount(US_MARKET_TOP_COUNT_KEY));
   }, []);
 
   const toast = useToast();
@@ -595,27 +563,14 @@ export function UsMarketStockManager({
                         {option.label}
                       </button>
                     ))}
-                    <select
-                      value={topCount === null ? "all" : String(topCount)}
-                      onChange={(event) => {
-                        const next = event.target.value === "all" ? null : Number(event.target.value);
+                    <TopCountSelect
+                      value={topCount}
+                      options={topChoices}
+                      onChange={(next) => {
                         setTopCount(next);
-                        writeRememberedTopCount(next);
+                        writeRememberedTopCount(US_MARKET_TOP_COUNT_KEY, next);
                       }}
-                      style={{
-                        border: "1px solid rgba(148,163,184,0.4)",
-                        borderRadius: 6,
-                        padding: "3px 6px",
-                        fontSize: "var(--fs-sm)",
-                        marginLeft: 6,
-                      }}
-                    >
-                      {topChoices.map((count) => (
-                        <option key={count ?? "all"} value={count === null ? "all" : String(count)}>
-                          {count === null ? "전체" : `상위 ${count}`}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </div>
                 </label>
 

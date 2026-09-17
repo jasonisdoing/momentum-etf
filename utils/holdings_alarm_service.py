@@ -286,21 +286,23 @@ def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
         "account_id": norm_id,
         "badge_by_ticker": badge_by_ticker,
         "ma_tickers": sorted(set(ma_tickers)),
-        # 신규상장(🆕) — 전 화면 공용 판정(순위 화면과 같은 기준). 보조 표시라 실패는 빈 맵.
-        # 값은 상장 후 경과 개월(내림) — 종목명 배지가 「🆕(N개월)」로 표기한다.
-        "new_months_by_ticker": _new_listing_months(norm_id),
+        # 신규상장(🆕)·고점 대비 — 전 화면 공용 판정(순위 화면과 같은 기준). 보조 표시라 실패는 빈 맵.
+        **_holding_series_metrics(norm_id),
     }
     _badges_cache[norm_id] = (_time.monotonic(), dict(result))
     return result
 
 
-def _new_listing_months(account_id: str) -> dict[str, int | None]:
-    """계좌 보유 중 신규상장 종목의 {티커: 상장 후 경과 개월(내림)} — 자산 화면 🆕(N개월) 배지용.
+def _holding_series_metrics(account_id: str) -> dict[str, dict[str, Any]]:
+    """계좌 보유 종목의 종가 시리즈 파생 표시값 — 자산 화면 보조 컬럼·배지용.
 
-    판정은 `core.strategy.scoring.is_new_listing`(순위 is_partial 과 같은 수식) 하나다.
+    - ``new_months_by_ticker``: 신규상장 종목의 {티커: 상장 후 경과 개월(내림)} — 🆕(N개월) 배지.
+    - ``high_drawdown_by_ticker``: {티커: 최근 고점 대비 %} — 순위 화면 「고점」 컬럼과 같은 공용 판정.
+
+    판정은 `core.strategy.scoring`(순위 화면과 같은 수식) 하나다.
     가격 시리즈는 이동선 판정과 같은 소스(종목풀 캐시)를 풀별로 묶어 읽는다.
     """
-    from core.strategy.scoring import is_new_listing, listing_months
+    from core.strategy.scoring import drawdown_from_high_pct, is_new_listing, listing_months
 
     try:
         detail = load_all_holdings_detail(account_id)
@@ -316,16 +318,23 @@ def _new_listing_months(account_id: str) -> dict[str, int | None]:
             pool = pool_by_ticker.get(ticker)
             if pool:
                 tickers_by_pool.setdefault(pool, []).append(ticker)
-        result: dict[str, int | None] = {}
+        new_months: dict[str, int | None] = {}
+        drawdown: dict[str, float] = {}
         for pool, pool_tickers in tickers_by_pool.items():
             for ticker, series in load_cached_close_series_bulk_with_fallback(pool, pool_tickers).items():
-                if series is not None and is_new_listing(series):
-                    # 배지 맵과 같은 정규화(접두사 없는 형태) — 화면이 같은 키로 찾는다.
-                    result[ticker.split(":")[-1]] = listing_months(series)
-        return result
+                if series is None:
+                    continue
+                # 배지 맵과 같은 정규화(접두사 없는 형태) — 화면이 같은 키로 찾는다.
+                key = ticker.split(":")[-1]
+                if is_new_listing(series):
+                    new_months[key] = listing_months(series)
+                value = drawdown_from_high_pct(series)
+                if value is not None:
+                    drawdown[key] = round(value, 2)
+        return {"new_months_by_ticker": new_months, "high_drawdown_by_ticker": drawdown}
     except Exception:
-        logger.warning("[HOLDINGS ALARM] 신규상장 판정 실패 — 🆕 배지를 비운다", exc_info=True)
-        return {}
+        logger.warning("[HOLDINGS ALARM] 보유 시리즈 표시값 계산 실패 — 배지·고점을 비운다", exc_info=True)
+        return {"new_months_by_ticker": {}, "high_drawdown_by_ticker": {}}
 
 
 def _post_slack(sections: list[dict[str, Any]], *, manual: bool) -> bool:
