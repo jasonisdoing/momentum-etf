@@ -685,6 +685,35 @@ def load_real_holdings_table(
     return df_holdings
 
 
+def save_account_holdings_groups(account_id: str, groups: list[dict[str, Any]]) -> None:
+    """자산 화면 자식 표의 사용자 그룹(표시 구분선)을 계좌에 저장한다.
+
+    [{"id", "name", "before_ticker"|None}] — before_ticker 앞에 그룹 행을 그린다(None=맨 끝).
+    보유 원장(holdings)과 무관한 순수 표시 정보라 백테스트·알람에 영향이 없다.
+    """
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결 실패 — portfolio_master 를 저장할 수 없습니다.")
+    doc = db.portfolio_master.find_one({"master_id": "GLOBAL"})
+    if not doc:
+        raise RuntimeError("portfolio_master 문서가 없습니다.")
+    accounts = doc.get("accounts", [])
+    account = next((a for a in accounts if str(a.get("account_id")) == str(account_id)), None)
+    if account is None:
+        raise RuntimeError(f"portfolio_master 에 계좌가 없습니다: {account_id}")
+    cleaned = [
+        {
+            "id": str(g.get("id") or "").strip(),
+            "name": str(g.get("name") or "").strip(),
+            "before_ticker": (str(g["before_ticker"]).strip().upper() if g.get("before_ticker") else None),
+        }
+        for g in groups
+        if str(g.get("name") or "").strip()
+    ]
+    account["holdings_groups"] = cleaned
+    db.portfolio_master.update_one({"master_id": "GLOBAL"}, {"$set": {"accounts": accounts}})
+
+
 def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
     """Load the current live balance (master) for a specific account from the consolidated document."""
     db = get_db_connection()
@@ -726,6 +755,7 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
                 "intl_shares_value": intl_val,
                 "intl_shares_change": intl_change,
                 "holdings": acc.get("holdings", []),
+                "holdings_groups": acc.get("holdings_groups", []),
                 "intl_shares_sort_order": acc.get("intl_shares_sort_order"),
                 "updated_at": acc.get("updated_at"),
                 "updated_by": acc.get("updated_by"),

@@ -249,6 +249,8 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                 "valuation_krw": valuation_krw,
                 "total_assets_krw": valuation_krw + cash_balance_krw,
                 "holdings_count": len([r for r in account_rows if str(r.get("ticker") or "") != "IS"]),
+                # 자식 표의 사용자 그룹(표시 구분선) — 보유 원장과 무관한 표시 정보.
+                "holdings_groups": (load_portfolio_master(curr_account_id) or {}).get("holdings_groups") or [],
             }
         )
 

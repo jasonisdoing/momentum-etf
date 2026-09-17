@@ -85,7 +85,12 @@ export async function PUT(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json();
-    const endpoint = body.action === "reorder" ? "/internal/holdings/order" : "/internal/holdings";
+    const endpoint =
+      body.action === "reorder"
+        ? "/internal/holdings/order"
+        : body.action === "groups"
+          ? "/internal/holdings/groups"
+          : "/internal/holdings";
     const payload = await fetchFastApiJson<{ updated?: string; reordered?: number; error?: string }>(
       endpoint,
       {

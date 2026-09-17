@@ -61,6 +61,18 @@ def patch_holdings_order(
     )
 
 
+@router.patch("/groups")
+def patch_holdings_groups(
+    body: dict[str, Any] = Body(...),
+    _: None = Depends(require_internal_token),
+) -> dict[str, Any]:
+    """자식 표 사용자 그룹(표시 구분선) 저장 — 보유 원장과 무관한 표시 정보."""
+    from utils.portfolio_io import save_account_holdings_groups
+
+    save_account_holdings_groups(str(body.get("account_id") or ""), list(body.get("groups") or []))
+    return {"ok": True}
+
+
 @router.post("")
 def post_one_holding(
     body: dict[str, Any] = Body(...),

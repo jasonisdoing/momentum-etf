@@ -38,6 +38,8 @@ export type HoldingsRow = {
   valuation_krw: number;
   memo?: string | null;
   sort_order?: number | null;
+  /** 사용자 그룹 헤더 행(표시 구분선) — 데이터가 아니라 표시 전용 행이다. */
+  is_group?: boolean;
   original_quantity?: number;
   original_average_buy_price?: number;
   original_buy_amount_krw?: number;
@@ -74,6 +76,8 @@ export type AccountSummary = {
   cash_display_native?: number;
   cash_display_currency?: string;
   cash_target_ratio: number;
+  /** 자식 표 사용자 그룹(표시 구분선) — [{id, name, before_ticker}]. */
+  holdings_groups?: { id: string; name: string; before_ticker: string | null }[];
   intl_shares_value: number | null;
   intl_shares_change: number | null;
   updated_at: string | null;

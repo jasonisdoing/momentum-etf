@@ -8,6 +8,8 @@ import type { ColDef, ColumnState, GridApi, GridOptions, RowClassParams } from "
 // 컴포넌트 상태로 두면 안 된다: 부모 요약이 갱신될 때 패널·그리드가 통째로 다시 만들어져
 // 정렬이 초기화됐다(수량 저장 → 리로드 → 저장 순서로 복귀 증상).
 const SORT_STATE_BY_ACCOUNT = new Map<string, ColumnState[]>();
+// 사용자 그룹(표시 구분선) — 저장 반영 전 리마운트에도 편집본을 유지한다(계좌별).
+const GROUPS_BY_ACCOUNT = new Map<string, HoldingsGroup[]>();
 import { IconLoader2 } from "@tabler/icons-react";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AccountMemoSection } from "./AccountMemoSection";
@@ -20,7 +22,7 @@ import { renderStockNameCell } from "@/lib/name-highlight";
 import { signColor, stockMemoColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
-import { reorderHoldings } from "@/lib/holdings-store";
+import { reorderHoldings, saveHoldingsGroups, type HoldingsGroup } from "@/lib/holdings-store";
 import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
 import { formatKstDateTime } from "@/lib/datetime";
 import {
@@ -193,8 +195,27 @@ export function AccountHoldingsDetailPanel({
 
   const isEditableHoldingRow = useCallback(
     (row: GridRow | undefined | null) =>
-      Boolean(row && row.id !== "__adding__" && row.ticker !== "IS" && row.ticker !== CASH_ROW_TICKER),
+      Boolean(row && !row.is_group && row.id !== "__adding__" && row.ticker !== "IS" && row.ticker !== CASH_ROW_TICKER),
     [],
+  );
+  // 사용자 그룹(표시 구분선) — 서버 저장값으로 시작, 편집본은 모듈 맵으로 리마운트에도 유지.
+  const [groups, setGroups] = useState<HoldingsGroup[]>(
+    () => GROUPS_BY_ACCOUNT.get(summary.account_id) ?? summary.holdings_groups ?? [],
+  );
+  // 정렬이 걸려 있으면 순서가 무의미해 그룹 행을 잠시 숨긴다.
+  const [sortActive, setSortActive] = useState(() =>
+    Boolean(SORT_STATE_BY_ACCOUNT.get(summary.account_id)?.length),
+  );
+  const [groupModal, setGroupModal] = useState<{ id: string | null; name: string } | null>(null);
+  const persistGroups = useCallback(
+    (next: HoldingsGroup[]) => {
+      GROUPS_BY_ACCOUNT.set(summary.account_id, next);
+      setGroups(next);
+      void saveHoldingsGroups(summary.account_id, next).catch(() => {
+        toast.error("그룹 저장에 실패했습니다.");
+      });
+    },
+    [summary.account_id, toast],
   );
   const isCashGridRow = useCallback(
     (row: GridRow | undefined | null) => Boolean(row && row.ticker === CASH_ROW_TICKER),
@@ -211,8 +232,49 @@ export function AccountHoldingsDetailPanel({
         memo: row.memo ?? "",
       }));
 
+    // 그룹 헤더 행 주입 — 앵커(before_ticker) 앞에 끼운다. 앵커가 없거나 못 찾으면 맨 끝.
+    const withGroups = (stockRows: GridRow[]): GridRow[] => {
+      if (sortActive || !groups.length) return stockRows;
+      const groupRow = (group: HoldingsGroup): GridRow =>
+        ({
+          id: group.id,
+          account_id: summary.account_id,
+          account_name: summary.name,
+          currency: summary.currency,
+          bucket: "",
+          bucket_id: 0,
+          ticker: "__GROUP__",
+          name: group.name,
+          quantity: 0,
+          average_buy_price: 0,
+          current_price: "",
+          pnl_krw: 0,
+          return_pct: 0,
+          weight_pct: 0,
+          buy_amount_krw: 0,
+          valuation_krw: 0,
+          is_group: true,
+        }) as GridRow;
+      const result: GridRow[] = [];
+      const used = new Set<string>();
+      for (const row of stockRows) {
+        const anchor = String(row.ticker || "").trim().toUpperCase();
+        for (const group of groups) {
+          if (!used.has(group.id) && group.before_ticker === anchor) {
+            used.add(group.id);
+            result.push(groupRow(group));
+          }
+        }
+        result.push(row);
+      }
+      for (const group of groups) {
+        if (!used.has(group.id)) result.push(groupRow(group));
+      }
+      return result;
+    };
+
     if (!addingRow) {
-      return [cashRow, ...baseRows];
+      return [cashRow, ...withGroups(baseRows)];
     }
 
     return [
@@ -236,9 +298,9 @@ export function AccountHoldingsDetailPanel({
         valuation_krw: 0,
         memo: "",
       } as GridRow,
-      ...baseRows,
+      ...withGroups(baseRows),
     ];
-  }, [addingRow, rows, summary]);
+  }, [addingRow, rows, summary, groups, sortActive]);
 
   const hasPendingAdd = Boolean(addingRow);
   const hasSelectedRows = selectedRowIds.length > 0;
@@ -731,6 +793,7 @@ export function AccountHoldingsDetailPanel({
       suppressMovable: true,
       rowDrag: (params) =>
         Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== CASH_ROW_TICKER),
+      // 그룹 헤더 행도 같은 손잡이로 옮긴다 — 아래 첫 종목이 새 앵커가 된다.
       cellClass: "assetsDragCell",
       valueGetter: () => "",
     },
@@ -763,6 +826,7 @@ export function AccountHoldingsDetailPanel({
             />
           );
         }
+        if (row.is_group) return null;
         if (row.ticker === CASH_ROW_TICKER) return <span>-</span>;
         // 고정 자산(IS) — 실제 상장 종목이 아니라 상세로 연결하지 않는다. 표기는 전 화면 공용.
         if (isFixedAssetTicker(row.ticker)) {
@@ -824,6 +888,35 @@ export function AccountHoldingsDetailPanel({
           );
         }
 
+        if (params.data?.is_group) {
+          const group = params.data;
+          return (
+            <span className="assetsGroupName">
+              <span
+                role="button"
+                title="이름 수정"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setGroupModal({ id: group.id, name: String(group.name || "") });
+                }}
+              >
+                {String(group.name || "그룹")}
+              </span>
+              <button
+                type="button"
+                className="btn btn-sm btn-link p-0 assetsGroupDelete"
+                title="그룹 삭제"
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  persistGroups((GROUPS_BY_ACCOUNT.get(summary.account_id) ?? groups).filter((g) => g.id !== group.id));
+                }}
+              >
+                ✕
+              </button>
+            </span>
+          );
+        }
         if (isFixedAssetTicker(params.data?.ticker)) {
           return <span>{FIXED_ASSET_NAME}</span>;
         }
@@ -1127,6 +1220,18 @@ export function AccountHoldingsDetailPanel({
             ) : null}
           </div>
           <div className="d-flex align-items-center gap-2 ms-auto">
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              title="표시용 그룹 구분선 추가 — 드래그로 위치를 옮기고, 이름을 클릭해 수정합니다."
+              onMouseDown={stopActionButtonMouseDown}
+              onClick={(event) => {
+                stopActionButtonClick(event);
+                setGroupModal({ id: null, name: "" });
+              }}
+            >
+              그룹
+            </button>
             <GridToolbarButton
               variant="add"
               onMouseDown={stopActionButtonMouseDown}
@@ -1159,6 +1264,53 @@ export function AccountHoldingsDetailPanel({
           </div>
         </div>
       </div>
+      <AppModal
+        open={groupModal !== null}
+        title={groupModal?.id ? "그룹 이름 수정" : "그룹 추가"}
+        subtitle="표시용 구분선입니다 — 계산·백테스트에는 영향이 없습니다."
+        onClose={() => setGroupModal(null)}
+        footer={(
+          <>
+            <button type="button" className="btn btn-outline-secondary" onClick={() => setGroupModal(null)}>
+              취소
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!groupModal?.name.trim()}
+              onClick={() => {
+                if (!groupModal || !groupModal.name.trim()) return;
+                const current = GROUPS_BY_ACCOUNT.get(summary.account_id) ?? groups;
+                if (groupModal.id) {
+                  persistGroups(current.map((g) => (g.id === groupModal.id ? { ...g, name: groupModal.name.trim() } : g)));
+                } else {
+                  const firstTicker =
+                    rowsRef.current.map((row) => String(row.ticker || "").trim().toUpperCase()).find((t) => t && t !== "IS") ?? null;
+                  persistGroups([...current, { id: `group-${Date.now()}`, name: groupModal.name.trim(), before_ticker: firstTicker }]);
+                }
+                setGroupModal(null);
+              }}
+            >
+              저장
+            </button>
+          </>
+        )}
+      >
+        <input
+          className="form-control"
+          autoFocus
+          placeholder="그룹 이름"
+          value={groupModal?.name ?? ""}
+          onChange={(event) => setGroupModal((prev) => (prev ? { ...prev, name: event.target.value } : prev))}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && groupModal?.name.trim()) {
+              (event.currentTarget.closest(".modal") ?? document)
+                .querySelectorAll("button.btn-primary")
+                .forEach((b) => (b as HTMLButtonElement).click());
+            }
+          }}
+        />
+      </AppModal>
       <AppModal
         open={deleteConfirmOpen}
         title="종목 삭제 확인"
@@ -1226,7 +1378,7 @@ export function AccountHoldingsDetailPanel({
             rowSelection: {
               mode: "multiRow",
               checkboxes: (params) =>
-                Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS" && params.data.ticker !== CASH_ROW_TICKER),
+                Boolean(params.data && !params.data.is_group && params.data.id !== "__adding__" && params.data.ticker !== "IS" && params.data.ticker !== CASH_ROW_TICKER),
               headerCheckbox: true,
               hideDisabledCheckboxes: true,
               enableClickSelection: false,
@@ -1268,13 +1420,36 @@ export function AccountHoldingsDetailPanel({
             },
             onRowDragEnd: (params) => {
               const orderedTickers: string[] = [];
+              // 그룹 행의 새 앵커 = 그 아래 첫 종목. 맨 끝이면 null.
+              const pendingGroupIds: string[] = [];
+              const nextAnchorById = new Map<string, string | null>();
               params.api.forEachNode((node) => {
+                if (node.data?.is_group) {
+                  pendingGroupIds.push(String(node.data.id));
+                  return;
+                }
                 const ticker = String(node.data?.ticker || "").trim().toUpperCase();
                 if (!ticker || ticker === "IS" || ticker === CASH_ROW_TICKER) {
                   return;
                 }
+                while (pendingGroupIds.length) {
+                  nextAnchorById.set(pendingGroupIds.shift()!, ticker);
+                }
                 orderedTickers.push(ticker);
               });
+              while (pendingGroupIds.length) {
+                nextAnchorById.set(pendingGroupIds.shift()!, null);
+              }
+              if (nextAnchorById.size) {
+                const currentGroups = GROUPS_BY_ACCOUNT.get(summary.account_id) ?? groups;
+                persistGroups(
+                  currentGroups.map((group) =>
+                    nextAnchorById.has(group.id)
+                      ? { ...group, before_ticker: nextAnchorById.get(group.id) ?? null }
+                      : group,
+                  ),
+                );
+              }
               if (!orderedTickers.length) {
                 return;
               }
@@ -1297,15 +1472,16 @@ export function AccountHoldingsDetailPanel({
               }
             },
             onSortChanged: (params) => {
-              SORT_STATE_BY_ACCOUNT.set(
-                summary.account_id,
-                params.api.getColumnState().filter((column) => column.sort != null),
-              );
+              const sorted = params.api.getColumnState().filter((column) => column.sort != null);
+              SORT_STATE_BY_ACCOUNT.set(summary.account_id, sorted);
+              // 정렬 중에는 그룹 행을 숨긴다(순서 기반 표시라 정렬과 공존 불가).
+              setSortActive(sorted.length > 0);
             },
             getRowId: (params) => String(params.data.id),
             rowClassRules: {
               assetsAddingRow: (params) => params.data?.id === "__adding__",
               assetsEditingRow: (params) => Boolean(params.data?.id && params.data.id === editingRowId),
+              assetsGroupRow: (params) => Boolean(params.data?.is_group),
             },
           }}
         />
