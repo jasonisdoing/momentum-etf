@@ -189,7 +189,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     except Exception:
         meta_docs = {}
     rank_by_ticker = {t: market_cap_rank_of((doc or {}).get("meta_cache")) for t, doc in meta_docs.items()}
-    value_mult_by, value_mult_live_by = _load_trade_value_mult(pool, tickers)
+    value_mult_by, value_mult_live_by, _week_mult_by = _load_trade_value_mult(pool, tickers)
     # 일간 등락률 — 다른 화면(순위·시장추세)과 같은 기준으로 직전 거래일 종가 대비.
     prev_close = close_df.loc[close_df.index[-2]] if len(close_df.index) >= 2 else None
 

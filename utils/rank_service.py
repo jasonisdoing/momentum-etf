@@ -151,8 +151,13 @@ def _apply_industry_labels(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
     return dataframe
 
 
-def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> tuple[dict[str, float], dict[str, float]]:
-    """티커별 거래대금 배수(20일 평균 대비) — `(본값, 시간 환산)` 두 벌.
+def _load_trade_value_mult(
+    ticker_type: str, tickers: list[str]
+) -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
+    """티커별 거래대금 배수(20일 평균 대비) — `(본값, 시간 환산, 1주 평균)` 세 벌.
+
+    **1주 평균**: 최근 5거래일 거래대금 평균을 같은 분모(20일 평균)와 비교한 배수 —
+    하루 급증이 아니라 한 주 단위의 수급 변화를 본다(배치 저장값, 장중 환산 없음).
 
     **본값**: 한국·미국 장중에는 토스 실시간 누적 배수, 그 외에는 가격 캐시 배치가
     ``stock_meta``에 저장해 둔 완료 거래일 값이다.
@@ -164,26 +169,31 @@ def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> tuple[dict[s
     배치가 안 돌았거나 20일치가 없는 종목은 키가 없다 — 화면은 '-' 로 둔다.
     """
     if not tickers:
-        return {}, {}
+        return {}, {}, {}
     try:
         from utils.db_manager import get_db_connection
 
         db = get_db_connection()
         if db is None:
-            return {}, {}
+            return {}, {}, {}
         docs = list(
             db.stock_meta.find(
                 {"ticker_type": ticker_type, "ticker": {"$in": tickers}},
-                {"_id": 0, "ticker": 1, "trade_value_mult": 1, "trade_value_sum19": 1},
+                {"_id": 0, "ticker": 1, "trade_value_mult": 1, "trade_value_mult_week": 1, "trade_value_sum19": 1},
             )
         )
     except Exception:
-        return {}, {}
+        return {}, {}, {}
 
     result = {
         str(doc["ticker"]).strip().upper(): float(doc["trade_value_mult"])
         for doc in docs
         if doc.get("trade_value_mult") is not None
+    }
+    week = {
+        str(doc["ticker"]).strip().upper(): float(doc["trade_value_mult_week"])
+        for doc in docs
+        if doc.get("trade_value_mult_week") is not None
     }
     sum19 = {
         str(doc["ticker"]).strip().upper(): float(doc["trade_value_sum19"])
@@ -202,11 +212,11 @@ def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> tuple[dict[s
         for ticker, value in live.items():
             result[ticker] = round(value, 2)
             pace[ticker] = round(value / fraction, 1)
-        return result, pace
+        return result, pace, week
     # 장중이 아니면 확정값이 본값 — 배치 값이 없는 종목(오늘 상장 등)만 실시간으로 채운다.
     for ticker, value in live.items():
         result.setdefault(ticker, round(value, 2))
-    return result, {}
+    return result, {}, week
 
 
 def _live_trade_value_mult(ticker_type: str, sum19: dict[str, float]) -> dict[str, float]:
@@ -261,7 +271,7 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
     ]
     # 거래대금 배수는 가격 캐시 배치가 stock_meta 에 미리 넣어둔 값을 읽는다.
     # 여기서 직접 계산하려면 거래량이 든 큰 blob 을 받아야 해서 순위 계산이 3초 더 걸린다.
-    mult_map, live_mult_map = _load_trade_value_mult(ticker_type, tickers)
+    mult_map, live_mult_map, week_mult_map = _load_trade_value_mult(ticker_type, tickers)
 
     cache_map = get_stock_cache_meta_map(ticker_type, tickers)
     if not cache_map:
@@ -275,9 +285,11 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
             keys = enriched["티커"].map(lambda t: str(t or "").strip().upper())
             enriched["거래대금"] = keys.map(mult_map.get)
             enriched["거래대금(실시간)"] = keys.map(live_mult_map.get)
+            enriched["거래대금(1주)"] = keys.map(week_mult_map.get)
         else:
             enriched["거래대금"] = None
             enriched["거래대금(실시간)"] = None
+            enriched["거래대금(1주)"] = None
         enriched.attrs.update(dict(dataframe.attrs))
         return enriched
 
@@ -295,6 +307,8 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         row["거래대금"] = mult_map.get(ticker)
         # 대체거래소(NXT) 합산 실시간 배수 — 화면이 확정값 옆에 괄호로 보여준다.
         row["거래대금(실시간)"] = live_mult_map.get(ticker)
+        # 1주 배수 — 최근 5거래일 평균 ÷ 20일 평균(배치 저장값).
+        row["거래대금(1주)"] = week_mult_map.get(ticker)
 
         rows.append(row)
 

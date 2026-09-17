@@ -199,7 +199,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     from utils.rank_service import _load_trade_value_mult
     from utils.trade_value import live_min_value_mult
 
-    value_mult_by, value_mult_live_by = _load_trade_value_mult(pool, list(close_df.columns))
+    value_mult_by, value_mult_live_by, _week_mult_by = _load_trade_value_mult(pool, list(close_df.columns))
     # 변동성(%) — 모멘텀 진입 문턱과 같은 정의(20일 일간 수익률 표준편차). 화면 공용 컬럼용.
     from core.strategy.momentum.signals import daily_volatility_pct
 

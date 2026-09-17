@@ -96,6 +96,8 @@ type RankRow = {
   거래대금: number | null;
   /** 장중 시간 환산 배수(누적 ÷ 장 경과율). 장중에만 값이 있고 괄호로 보여준다. */
   "거래대금(실시간)"?: number | null;
+  /** 최근 5거래일 평균 거래대금 ÷ 20일 평균 — 1주 단위 수급 배수(배치 저장값). */
+  "거래대금(1주)"?: number | null;
   "괴리율": number | null;
   "일간(%)": number | null;
   "1주(%)": number | null;
@@ -727,6 +729,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         보유대상: false,
         현재가: null,
         거래대금: null,
+        "거래대금(1주)": null,
         괴리율: null,
         "일간(%)": null,
         "1주(%)": null,
@@ -1155,6 +1158,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       tradeValueMultColumn<RankGridRow>({
         field: "거래대금",
         liveField: "거래대금(실시간)",
+        hide: metricMode !== "basic",
+      }),
+      // 1주일 배수 — 최근 5거래일 평균 거래대금을 같은 분모(20일 평균)와 비교한 값.
+      tradeValueMultColumn<RankGridRow>({
+        field: "거래대금(1주)",
+        liveField: "__none__",
+        headerName: "1주일거래",
+        headerTooltip: "최근 5거래일 평균 거래대금 ÷ 20일 평균 — 하루 급증이 아니라 한 주 단위의 수급 변화(배치 저장값).",
         hide: metricMode !== "basic",
       }),
       volatilityColumn<RankGridRow>({ field: "변동성" }),
