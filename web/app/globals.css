@@ -3903,9 +3903,9 @@ a {
 }
 
 .assetsDetailGridWrap {
-  /* 그리드는 컬럼 합 크기까지만(기본 1500px) — 남는 폭은 오른쪽 메모가 가져간다.
+  /* 그리드는 컬럼 합 크기까지만(기본 1580px) — 남는 폭은 오른쪽 메모가 가져간다.
      창이 좁으면 그리드가 줄며 내부 가로 스크롤. */
-  flex: 0 1 1500px;
+  flex: 0 1 1580px;
   min-width: 0;
   min-height: 0;
   overflow: hidden;

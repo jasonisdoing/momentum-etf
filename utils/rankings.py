@@ -421,6 +421,25 @@ def _extract_price_metrics_from_close_series(
     }
 
 
+def _touched_new_high_today(confirmed_close_series: pd.Series | None, realtime_entry: dict[str, float] | None) -> bool:
+    """오늘 장중 고가가 최근 12개월 최고 종가 이상인가 — 그날 하루 ⭐신고점 표시용.
+
+    이전 최고 종가보다 높은 가격을 이미 기록했고 장이 아직 안 끝났으니, 이대로 끝나면
+    신고점이 된다 — 그래서 장중에 내려와도 당일에는 신고점으로 표시한다(확정은 종가가 한다).
+    비교 기준은 고점 컬럼과 같은 공용 창(`drawdown_from_high_pct`, 12개월 최고 종가)이다.
+    """
+    if not isinstance(realtime_entry, dict):
+        return False
+    high = realtime_entry.get("high")
+    if high is None:
+        return False
+    try:
+        value = drawdown_from_high_pct(confirmed_close_series, float(high))
+    except Exception:
+        return False
+    return value is not None and value >= 0
+
+
 def _load_realtime_snapshot(country_code: str, tickers: list[str]) -> dict[str, dict[str, float]]:
     """국가별 실시간 현재가/등락률 스냅샷을 로드합니다."""
     if not tickers:
@@ -867,6 +886,8 @@ def build_ticker_type_rankings(
                 monthly_labels=monthly_labels,
             )
             price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
+            # 장중 신고 터치 — 오늘 고가 기준(위 헬퍼 주석 참조). 당일에만 참이 될 수 있다.
+            price_metrics["고점터치"] = _touched_new_high_today(base_close_series, realtime_entry)
         metric_elapsed += perf_counter() - metric_started_at
 
         # 추세(%)는 아래 공통 엔진에서 한 번에 주입된다.
