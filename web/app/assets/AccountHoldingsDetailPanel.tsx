@@ -207,6 +207,58 @@ export function AccountHoldingsDetailPanel({
     Boolean(SORT_STATE_BY_ACCOUNT.get(summary.account_id)?.length),
   );
   const [groupModal, setGroupModal] = useState<{ id: string | null; name: string } | null>(null);
+  // 메모 패널 폭 — null 이면 자동(남는 폭, 최소 300px). 경계선 드래그로 수동 조절하고,
+  // 더블클릭하면 자동으로 되돌린다. 선호는 브라우저에 저장(표시 전용).
+  // v2 — 옛 드래그 구현이 남긴 저장값(자동 배분 도입 전)을 무시하기 위해 키를 올렸다.
+  const MEMO_WIDTH_KEY = "momentum-etf:assets:memo-width:v2";
+  const [memoWidth, setMemoWidth] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = Number(window.localStorage.getItem(MEMO_WIDTH_KEY));
+      return Number.isFinite(raw) && raw >= 300 ? Math.min(raw, 1200) : null;
+    } catch {
+      return null;
+    }
+  });
+  const memoDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const handleMemoDividerMouseDown = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const pane = (event.currentTarget.nextElementSibling as HTMLElement | null)?.getBoundingClientRect();
+      memoDragRef.current = { startX: event.clientX, startWidth: memoWidth ?? Math.round(pane?.width ?? 300) };
+      const onMove = (move: MouseEvent) => {
+        const drag = memoDragRef.current;
+        if (!drag) return;
+        // 메모가 오른쪽에 있으므로 왼쪽으로 끌면 넓어진다.
+        setMemoWidth(Math.max(300, Math.min(1200, drag.startWidth + (drag.startX - move.clientX))));
+      };
+      const onUp = () => {
+        memoDragRef.current = null;
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        setMemoWidth((current) => {
+          try {
+            if (current === null) window.localStorage.removeItem(MEMO_WIDTH_KEY);
+            else window.localStorage.setItem(MEMO_WIDTH_KEY, String(current));
+          } catch {
+            /* 저장 실패 무시 — 표시 선호일 뿐 */
+          }
+          return current;
+        });
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [memoWidth],
+  );
+  const resetMemoWidth = useCallback(() => {
+    setMemoWidth(null);
+    try {
+      window.localStorage.removeItem(MEMO_WIDTH_KEY);
+    } catch {
+      /* 무시 */
+    }
+  }, []);
   const persistGroups = useCallback(
     (next: HoldingsGroup[]) => {
       GROUPS_BY_ACCOUNT.set(summary.account_id, next);
@@ -1346,6 +1398,8 @@ export function AccountHoldingsDetailPanel({
           <div className="text-secondary small">삭제된 종목은 복구되지 않으며 즉시 제거됩니다.</div>
         </div>
       </AppModal>
+      {/* 본문 — 왼쪽 그리드(고정 폭) + 오른쪽 메모 패널. 좁은 창에서는 그리드가 줄고 가로 스크롤. */}
+      <div className="assetsDetailBody">
       <div className="assetsDetailGridWrap">
         <AppAgGrid
           rowData={gridRows}
@@ -1487,8 +1541,20 @@ export function AccountHoldingsDetailPanel({
         />
       </div>
 
-      {/* 계좌 메모 — asset-helper 에서 옮겨온 접이 섹션(같은 /api/note, 데이터 공유). */}
-      <AccountMemoSection accountId={summary.account_id} />
+      {/* 경계선 — 드래그로 메모 폭 수동 조절, 더블클릭이면 자동(남는 폭)으로 복귀. */}
+      <div
+        className="assetsDetailSplitter"
+        role="separator"
+        aria-label="메모 폭 조절 (더블클릭: 자동)"
+        title="드래그: 메모 폭 조절 · 더블클릭: 자동"
+        onMouseDown={handleMemoDividerMouseDown}
+        onDoubleClick={resetMemoWidth}
+      />
+      {/* 계좌 메모 — 오른쪽 세로 패널(같은 /api/note, 데이터 공유). 남는 폭 자동, 최소 300px. */}
+      <div className="assetsDetailMemoPane" style={memoWidth !== null ? { flex: `0 0 ${memoWidth}px`, width: memoWidth } : undefined}>
+        <AccountMemoSection accountId={summary.account_id} variant="side" />
+      </div>
+      </div>
     </div>
   );
 }

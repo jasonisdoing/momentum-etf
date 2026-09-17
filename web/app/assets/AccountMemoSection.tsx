@@ -19,7 +19,14 @@ function formatNoteUpdatedAt(value: string | null): string {
   return new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
-export function AccountMemoSection({ accountId }: { accountId: string }) {
+export function AccountMemoSection({
+  accountId,
+  variant = "collapsible",
+}: {
+  accountId: string;
+  /** "side" 는 모달 오른쪽 세로 패널 — 항상 펼쳐져 남은 높이를 채운다. */
+  variant?: "collapsible" | "side";
+}) {
   const toast = useToast();
   const [open, setOpen] = useState(() => OPEN_BY_ACCOUNT.get(accountId) ?? false);
   const [memo, setMemo] = useState(() => DRAFT_BY_ACCOUNT.get(accountId) ?? "");
@@ -82,6 +89,43 @@ export function AccountMemoSection({ accountId }: { accountId: string }) {
   };
 
   const dirty = memo !== savedMemo;
+  if (variant === "side") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            padding: "3px 8px",
+            marginBottom: 6,
+            background: "rgba(240, 180, 41, 0.14)",
+            borderRadius: 6,
+            fontSize: "var(--fs-sm)",
+          }}
+        >
+          <span style={{ fontWeight: 700 }}>
+            메모
+            <span style={{ fontWeight: 400, marginLeft: 6, color: "var(--text-muted)" }}>
+              {!loaded ? "" : savedMemo ? `저장 ${formatNoteUpdatedAt(updatedAt)}` : "없음"}
+              {dirty ? " · 저장 안 됨" : ""}
+            </span>
+          </span>
+          <GridToolbarButton variant="save" disabled={saving || !dirty} onClick={() => void save()}>
+            {saving ? "저장 중..." : "저장"}
+          </GridToolbarButton>
+        </div>
+        <textarea
+          className="form-control"
+          style={{ fontSize: "var(--fs-base)", flex: "1 1 auto", minHeight: 0, resize: "none" }}
+          placeholder="이 계좌에 대한 투자 전략이나 주의사항을 메모하세요."
+          value={memo}
+          onChange={(e) => changeMemo(e.target.value)}
+        />
+      </div>
+    );
+  }
   return (
     // 패널(flex column, overflow hidden) 안에서 메모가 줄어들거나 잘리지 않게 고정한다 —
     // 높이 부족분은 위의 그리드 래퍼(flex 1, min-height 0)가 흡수한다.
