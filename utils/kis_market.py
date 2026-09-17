@@ -483,6 +483,7 @@ def _enrich_rows_with_base_closes(rows: list[dict]) -> None:
         for suffix in base_dates:
             row[f"기준종가_{suffix}"] = None
         row["거래대금배수"] = None
+        row["거래대금배수_1주"] = None
         ticker = str(row.get("티커") or "").strip()
         if not ticker:
             return
@@ -498,6 +499,7 @@ def _enrich_rows_with_base_closes(rows: list[dict]) -> None:
             fields = latest_trade_value_fields(closes, df["Volume"])
             if fields:
                 row["거래대금배수"] = fields["trade_value_mult"]
+                row["거래대금배수_1주"] = fields["trade_value_mult_week"]
 
     with ThreadPoolExecutor(max_workers=8) as executor:
         list(executor.map(_one, rows))
