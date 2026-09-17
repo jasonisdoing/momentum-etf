@@ -208,6 +208,8 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
                 "return_12m_pct": item.get("return_12m_pct"),
                 "mdd_12m_pct": item.get("mdd_12m_pct"),
                 "sortino_12m": item.get("sortino_12m"),
+                # 같은 회사의 클래스 중복(GOOGL/GOOG 등) — 배치가 거래량 큰 클래스만 대표로 남긴다.
+                "duplicate_class": bool(item.get("duplicate_class")),
             }
         )
 
