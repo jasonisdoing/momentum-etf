@@ -19,8 +19,9 @@ load_dotenv()
 APP_VERSION = "2026-09-02-14"
 APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_VERSION}")
 
-LOG_LEVEL = os.environ.get("APP_LOG_LEVEL", "INFO").upper()
-DEBUG_ENABLED = LOG_LEVEL == "DEBUG"
+# 로그 레벨 — 상수 고정(APP_LOG_LEVEL 환경변수 override 폐기, 2026-09 미사용 정리).
+LOG_LEVEL = "INFO"
+DEBUG_ENABLED = False
 
 
 _LOGGER: logging.Logger | None = None

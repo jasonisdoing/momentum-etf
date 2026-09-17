@@ -42,33 +42,21 @@ def _resolve_connection_string() -> str:
 
 
 def _build_client(connection_string: str) -> MongoClient:
-    """환경 변수 기반으로 MongoClient를 생성한다."""
-    max_pool = int(os.environ.get("MONGO_DB_MAX_POOL_SIZE", "10"))
-    min_pool = int(os.environ.get("MONGO_DB_MIN_POOL_SIZE", "0"))
-    max_idle = int(os.environ.get("MONGO_DB_MAX_IDLE_TIME_MS", "60000"))
-    wait_q_timeout = int(os.environ.get("MONGO_DB_WAIT_QUEUE_TIMEOUT_MS", "15000"))
-    server_selection_timeout = int(os.environ.get("MONGO_DB_SERVER_SELECTION_TIMEOUT_MS", "10000"))
-    connect_timeout = int(os.environ.get("MONGO_DB_CONNECT_TIMEOUT_MS", "10000"))
-    socket_timeout = int(os.environ.get("MONGO_DB_SOCKET_TIMEOUT_MS", "10000"))
-    heartbeat_frequency = int(os.environ.get("MONGO_DB_HEARTBEAT_FREQUENCY_MS", "10000"))
-
-    client_kwargs = dict(
-        maxPoolSize=max_pool,
-        minPoolSize=min_pool,
+    """MongoClient 를 생성한다 — 튜닝값은 상수다(환경변수 override 폐기, 2026-09 미사용 정리)."""
+    return MongoClient(
+        connection_string,
+        maxPoolSize=10,
+        minPoolSize=0,
         retryWrites=True,
         retryReads=True,
-        serverSelectionTimeoutMS=server_selection_timeout,
-        connectTimeoutMS=connect_timeout,
-        socketTimeoutMS=socket_timeout,
-        heartbeatFrequencyMS=heartbeat_frequency,
+        serverSelectionTimeoutMS=10_000,
+        connectTimeoutMS=10_000,
+        socketTimeoutMS=10_000,
+        heartbeatFrequencyMS=10_000,
+        maxIdleTimeMS=60_000,
+        waitQueueTimeoutMS=15_000,
         appname="momentum-etf",
     )
-    if max_idle > 0:
-        client_kwargs["maxIdleTimeMS"] = max_idle
-    if wait_q_timeout > 0:
-        client_kwargs["waitQueueTimeoutMS"] = wait_q_timeout
-
-    return MongoClient(connection_string, **client_kwargs)
 
 
 def get_db_connection():
