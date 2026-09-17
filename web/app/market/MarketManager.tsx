@@ -5,7 +5,7 @@ import { IconPlus } from "@tabler/icons-react";
 import type { ColDef, RowClassParams } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
-import { stockNameColumn, tickerColumn } from "@/lib/grid-cells";
+import { stockNameColumn, tickerColumn, tradeValueMultColumn } from "@/lib/grid-cells";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { addTickersToPool, buildPoolAddSkipNotice, splitByPoolMembership } from "@/lib/pool-add";
 import type { PoolAddProgress } from "@/lib/pool-add";
@@ -37,6 +37,8 @@ type MarketRowItem = {
   return_2m_pct: number | null;
   return_3m_pct: number | null;
   prev_volume: number;
+  /** 거래대금 배수(20일 평균 대비) — 순위 화면과 같은 공용 계산, 일일 배치 저장값. 한국 전용. */
+  value_mult?: number | null;
   market_cap: number;
   is_held: boolean;
   /** PTP(Publicly Traded Partnership) — 국내 매도 시 총액 10% 원천징수라 사실상 거래 대상이 아니다.
@@ -543,6 +545,14 @@ export function MarketManager({
         type: "rightAligned",
         cellRenderer: (params: { value: number }) => formatCount(params.value),
       },
+      // 거래대금 배수 — 순위 화면과 같은 공용 컬럼(일일 배치 값이라 장중 환산 괄호는 없다). 한국 전용.
+      ...(market === "kor"
+        ? [
+            tradeValueMultColumn<MarketGridRow>({
+              headerTooltip: "20일 평균 거래대금 대비 배수 — 순위·신고가 화면과 같은 계산(일일 배치 저장값).",
+            }),
+          ]
+        : []),
       {
         field: "market_cap",
         headerName: variant.capHeader,
