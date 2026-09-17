@@ -238,14 +238,22 @@ export function UsMarketStockManager({
     void load(view, minMarketCapUkm);
   }, [view, minMarketCapUkm, load]);
 
-  // 시총 상위 N 만 표시 (전체면 절단 없음). rows 는 이미 시총 내림차순이다.
   // 중복 클래스 필터는 절단 전에 적용한다 — 숨긴 만큼 다음 순위가 올라온다.
-  const visibleRows = useMemo(() => {
-    const deduped = showDuplicateClasses ? rows : rows.filter((row) => !row.duplicate_class);
-    return topCount === null ? deduped : deduped.slice(0, topCount);
-  }, [rows, topCount, showDuplicateClasses]);
+  const dedupedRows = useMemo(
+    () => (showDuplicateClasses ? rows : rows.filter((row) => !row.duplicate_class)),
+    [rows, showDuplicateClasses],
+  );
 
-  const topChoices = useMemo(() => topOptions(view, rows.length, topCount), [view, rows.length, topCount]);
+  // 시총 상위 N 만 표시 (전체면 절단 없음). rows 는 이미 시총 내림차순이다.
+  const visibleRows = useMemo(
+    () => (topCount === null ? dedupedRows : dedupedRows.slice(0, topCount)),
+    [dedupedRows, topCount],
+  );
+
+  const topChoices = useMemo(
+    () => topOptions(view, dedupedRows.length, topCount),
+    [view, dedupedRows.length, topCount],
+  );
 
   useEffect(() => {
     onSummaryChange?.({ index: view, count: visibleRows.length, totalCount });
@@ -566,6 +574,7 @@ export function UsMarketStockManager({
                     <TopCountSelect
                       value={topCount}
                       options={topChoices}
+                      totalCount={dedupedRows.length}
                       onChange={(next) => {
                         setTopCount(next);
                         writeRememberedTopCount(US_MARKET_TOP_COUNT_KEY, next);

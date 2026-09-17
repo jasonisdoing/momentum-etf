@@ -542,6 +542,7 @@ export function KorMarketStockManager({
                       <TopCountSelect
                         value={topCount}
                         options={topChoices}
+                        totalCount={rows.length}
                         onChange={(next) => {
                           setTopCount(next);
                           writeRememberedTopCount(KOR_MARKET_TOP_COUNT_KEY, next);
