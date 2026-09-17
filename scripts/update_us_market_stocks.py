@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -339,10 +340,42 @@ def _enrich_constituents(items: list[dict[str, Any]], index: str, refresh_classi
         item["mdd_12m_pct"] = meta.get("mdd_12m_pct")
         item["sortino_12m"] = meta.get("sortino_12m")
 
+    _mark_duplicate_classes(items)
+
     missing = [item["ticker"] for item in items if not item["industry"]]
     if missing:
         print(f"  업종 조회 실패 {len(missing)}종목: {', '.join(missing[:10])}{' 외' if len(missing) > 10 else ''}")
     return items
+
+
+def _company_key(name: str) -> str:
+    """클래스 표기를 뗀 회사명 정규화 키 — 같은 회사의 이중 상장(GOOGL/GOOG 등)을 묶는다.
+
+    관측된 표기: "Alphabet Inc. (Class A)" · "Alphabet Inc. Class C Capital Stock" ·
+    "Fox Corporation (Class B)". 클래스 문구를 제거하고 영숫자만 남겨 비교한다.
+    """
+    text = re.sub(r"\(class [a-z]\)|class [a-z]( capital| common)?( stock)?", "", str(name or "").lower())
+    return re.sub(r"[^a-z0-9]", "", text)
+
+
+def _mark_duplicate_classes(items: list[dict[str, Any]]) -> None:
+    """같은 회사의 클래스 중복 티커에 duplicate_class=True 를 표시한다.
+
+    거래량이 가장 큰 클래스 하나만 대표로 남긴다(유동성 기준 — GOOGL > GOOG).
+    화면이 기본으로 중복 클래스를 숨기되, 데이터는 남겨 표시 전환이 가능하게 한다.
+    """
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        key = _company_key(item.get("name") or "")
+        if key:
+            groups.setdefault(key, []).append(item)
+    for members in groups.values():
+        keep = max(members, key=lambda m: float(m.get("volume") or 0))
+        for member in members:
+            member["duplicate_class"] = member is not keep
+    marked = [item["ticker"] for item in items if item.get("duplicate_class")]
+    if marked:
+        print(f"  중복 클래스 표시: {', '.join(sorted(marked))}")
 
 
 def main() -> None:

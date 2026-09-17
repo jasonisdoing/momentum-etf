@@ -50,6 +50,8 @@ type UsMarketStockRow = {
   return_12m_pct: number | null;
   mdd_12m_pct: number | null;
   sortino_12m: number | null;
+  /** 같은 회사의 클래스 중복(GOOGL/GOOG 등) — 배치가 거래량 큰 클래스만 대표로 남긴다. */
+  duplicate_class?: boolean;
 };
 
 type UsMarketStockGridRow = UsMarketStockRow & {
@@ -183,6 +185,8 @@ export function UsMarketStockManager({
   const [totalCount, setTotalCount] = useState(0);
   const [tickerPools, setTickerPools] = useState<StocksAccountItem[]>([]);
   const [tickerSearch, setTickerSearch] = useState("");
+  // 같은 회사의 클래스 중복(GOOGL/GOOG 등)은 기본으로 숨긴다 — 켜면 전부 보인다.
+  const [showDuplicateClasses, setShowDuplicateClasses] = useState(false);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
   const [registeredTickers, setRegisteredTickers] = useState<Set<string>>(new Set());
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -267,10 +271,11 @@ export function UsMarketStockManager({
   }, [view, minMarketCapUkm, load]);
 
   // 시총 상위 N 만 표시 (전체면 절단 없음). rows 는 이미 시총 내림차순이다.
-  const visibleRows = useMemo(
-    () => (topCount === null ? rows : rows.slice(0, topCount)),
-    [rows, topCount],
-  );
+  // 중복 클래스 필터는 절단 전에 적용한다 — 숨긴 만큼 다음 순위가 올라온다.
+  const visibleRows = useMemo(() => {
+    const deduped = showDuplicateClasses ? rows : rows.filter((row) => !row.duplicate_class);
+    return topCount === null ? deduped : deduped.slice(0, topCount);
+  }, [rows, topCount, showDuplicateClasses]);
 
   const topChoices = useMemo(() => topOptions(view, rows.length, topCount), [view, rows.length, topCount]);
 
@@ -623,6 +628,20 @@ export function UsMarketStockManager({
                     onChange={(e) => setMinMarketCapUkm(e.target.value.replace(/[^\d]/g, ""))}
                     placeholder="최소 시가총액(억 달러)"
                   />
+                </label>
+
+                <label className="appLabeledField" title="같은 회사의 클래스 중복 티커(GOOGL/GOOG 등)를 표시할지 — 기본은 거래량 큰 클래스만 남깁니다.">
+                  <span className="appLabeledFieldLabel">중복 티커 보이기</span>
+                  <div className="form-check form-switch" style={{ paddingLeft: "2.6em", marginTop: 6 }}>
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      role="switch"
+                      checked={showDuplicateClasses}
+                      aria-label="중복 티커 보이기"
+                      onChange={(event) => setShowDuplicateClasses(event.target.checked)}
+                    />
+                  </div>
                 </label>
 
                 <label className="appLabeledField">
