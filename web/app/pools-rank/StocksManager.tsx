@@ -812,30 +812,25 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
       },
       {
-        field: "이전순위",
+        colId: "이전순위변동",
         headerName: "이전",
         pinned: "left",
-        minWidth: 58,
-        width: 58,
-        cellStyle: { justifyContent: "center", textAlign: "center" },
+        minWidth: 66,
+        width: 66,
+        cellStyle: { textAlign: "center" },
         sortable: true,
-        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
+        headerTooltip: "직전 저장 순위 대비 상승분 — 1주 컬럼과 같은 표기.",
+        // 1주 컬럼과 같은 상승분 표기 — 원래는 이전 순위 숫자를 그대로 보여줬다.
+        valueGetter: (params) => {
           const currentRank = params.data?.순위 ?? null;
-          const previousRank = params.value ?? null;
+          const previousRank = params.data?.이전순위 ?? null;
           if (currentRank === null || currentRank === undefined || previousRank === null || previousRank === undefined) {
-            return <span style={{ fontWeight: 600 }}>-</span>;
+            return null;
           }
-
-          if (currentRank === previousRank) {
-            return <span style={{ fontWeight: 600 }}>{previousRank}</span>;
-          }
-
-          const isRise = currentRank < previousRank;
-          return (
-            <span style={{ color: isRise ? "#d63939" : "#206bc4", fontWeight: 700 }}>
-              {previousRank}
-            </span>
-          );
+          return previousRank - currentRank;
+        },
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          return renderRankDelta(params.value);
         },
       },
       {
