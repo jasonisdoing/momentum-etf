@@ -316,6 +316,7 @@ export function tradeValueMultColumn<T>(options?: {
   liveField?: string;
   qualifies?: (row: T | undefined) => boolean | undefined;
   hide?: boolean;
+  headerName?: string;
   headerTooltip?: string;
 }): ColDef<T> {
   const field = options?.field ?? "value_mult";
@@ -323,7 +324,7 @@ export function tradeValueMultColumn<T>(options?: {
   return {
     colId: field,
     valueGetter: (p) => ((p.data as Record<string, unknown> | undefined)?.[field] as number | null | undefined) ?? null,
-    headerName: "거래대금",
+    headerName: options?.headerName ?? "거래대금",
     width: TRADE_VALUE_COLUMN_WIDTH,
     minWidth: TRADE_VALUE_COLUMN_MIN_WIDTH,
     hide: options?.hide,

@@ -52,6 +52,8 @@ def latest_trade_value_fields(close: pd.Series, volume: pd.Series) -> dict[str, 
     return {
         "trade_value": round(float(values.iloc[-1]), 2),
         "trade_value_mult": round(float(values.iloc[-1]) / base, 4),
+        # 1주 배수 — 최근 5개 유효 관측(1주)의 평균을 같은 분모(20일 평균)와 비교한다.
+        "trade_value_mult_week": round(float(window.iloc[-5:].mean()) / base, 4),
         # 다음 거래일 장중 계산의 '직전 19거래일' — 최신 완료일을 포함하고 가장 오래된 날을 뺀다.
         "trade_value_sum19": round(float(window.iloc[1:].sum()), 2),
     }
