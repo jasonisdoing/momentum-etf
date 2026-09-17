@@ -1,8 +1,9 @@
 """포트폴리오 전략 — 종목별 목표 비중을 정해 그대로 들고 가는 전략.
 
 모멘텀·신고가와 달리 **종목을 고르지 않는다.** 순위·이평선 판정이 없으므로 교체·이탈·
-손절도 없다. 사용자가 종목풀에서 종목을 골라 비중(%)을 직접 정하고, 정한 주기마다 그
-비중으로 되돌린다. 종목 비중 합의 나머지는 현금이다.
+손절도 없다. 사용자가 종목풀에서 종목을 골라 비중(%)을 직접 정하고, 시작일에 그 비중으로
+산 뒤 그대로 들고 간다(바이앤홀드 — 주기 리밸런싱은 쓰인 적이 없어 2026-09 폐기,
+비중을 다시 맞추려면 시작일을 바꾼다). 종목 비중 합의 나머지는 현금이다.
 
 설정은 MongoDB `system_config.portfolio_settings` 에 **풀별로** 저장한다
 (`{settings_by_pool: {풀: {...}}}`) — 신고가와 같은 구조다. 모멘텀은 이 프로젝트의
@@ -18,7 +19,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from config import REBALANCE_BAND_PCT_OPTIONS, REBALANCE_LABELS, REBALANCE_OPTIONS
 from core.strategy.scoring import is_new_listing, listing_months
 from utils.logger import get_app_logger
 from utils.strategy_settings import require_start_date, validate_start_date
@@ -35,7 +35,7 @@ DEFAULT_BACKTEST_MONTHS = 12
 MAX_HOLDINGS = 30
 
 # 풀을 바꾸면 그 풀의 값으로 전환되는 항목. 여기 빠진 키는 저장을 눌러도 버려진다.
-PER_POOL_SETTING_KEYS = ("start_date", "weights", "cash_weight_pct", "rebalance", "band_pct")
+PER_POOL_SETTING_KEYS = ("start_date", "weights", "cash_weight_pct")
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     # [{ticker, weight_pct}] — 순서가 화면 표 순서다(사용자가 드래그로 바꾼다).
@@ -44,8 +44,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # 종목합의 나머지로 자동 계산하지 않는다: 자동이면 종목 하나를 줄일 때 그만큼이
     # 조용히 현금으로 흘러가, 사용자가 어디를 조정할지 정할 기회를 잃는다.
     "cash_weight_pct": 100.0,
-    "rebalance": "quarterly",
-    "band_pct": 3.0,
 }
 
 
@@ -226,19 +224,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     if pool not in available_pools():
         raise ValueError(f"지원하지 않는 종목풀입니다: {settings.get('pool')}")
 
-    rebalance = str(settings.get("rebalance") or "").strip().lower()
-    if rebalance not in REBALANCE_OPTIONS:
-        allowed = ", ".join(REBALANCE_LABELS[key] for key in REBALANCE_OPTIONS)
-        raise ValueError(f"'rebalance' 는 {allowed} 중 하나여야 합니다 (받은 값: {settings.get('rebalance')}).")
-
-    try:
-        band_pct = round(float(settings.get("band_pct")), 2)
-    except (TypeError, ValueError) as error:
-        raise ValueError(f"'band_pct' 는 숫자여야 합니다: {settings.get('band_pct')}") from error
-    if band_pct not in {round(option, 2) for option in REBALANCE_BAND_PCT_OPTIONS}:
-        allowed = ", ".join(f"{option:g}" for option in REBALANCE_BAND_PCT_OPTIONS)
-        raise ValueError(f"'band_pct' 는 {allowed} 중 하나여야 합니다 (받은 값: {band_pct}).")
-
     raw_weights = settings.get("weights")
     if not isinstance(raw_weights, (list, tuple)):
         raise ValueError("'weights' 는 목록이어야 합니다.")
@@ -283,8 +268,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "start_date": validate_start_date(settings.get("start_date")),
         "weights": weights,
         "cash_weight_pct": cash,
-        "rebalance": rebalance,
-        "band_pct": band_pct,
     }
 
 
@@ -395,8 +378,6 @@ __all__ = [
     "DEFAULT_SETTINGS",
     "MAX_HOLDINGS",
     "PER_POOL_SETTING_KEYS",
-    "REBALANCE_LABELS",
-    "REBALANCE_OPTIONS",
     "available_pools",
     "benchmark_info",
     "default_pool",

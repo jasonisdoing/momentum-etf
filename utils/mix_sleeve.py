@@ -100,14 +100,9 @@ def settings_summary(strategy: str, settings: dict[str, Any]) -> list[dict[str, 
             {"label": "거래대금 하한", "value": optional(settings.get("min_value_mult"), "배")},
             {"label": "ADR 하한", "value": optional(settings.get("adr_floor"))},
         ]
-    from config import REBALANCE_LABELS
-
     weights = list(settings.get("weights") or [])
-    rebalance = str(settings.get("rebalance") or "none")
     return [
         {"label": "종목 수", "value": f"{len(weights)}개"},
-        {"label": "리밸런싱", "value": REBALANCE_LABELS.get(rebalance, rebalance)},
-        {"label": "허용 밴드", "value": optional(settings.get("band_pct"), "%p")},
         {"label": "현금", "value": optional(settings.get("cash_weight_pct"), "%")},
     ]
 

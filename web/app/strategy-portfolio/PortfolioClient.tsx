@@ -49,10 +49,10 @@ const STRATEGY_NOTES = [
       "종목을 고르지 않으므로 교체·이탈이 없습니다. 현금 비중도 직접 정합니다.",
   },
   {
-    title: "리밸런싱",
+    title: "보유 방식",
     body:
-      "정한 주기마다 목표 비중으로 되돌립니다. 그 사이에는 시세대로 흘러가게 두고, " +
-      "리밸런싱 기준을 넘긴 종목만 매매 지시가 나옵니다.",
+      "전략 시작일에 목표 비중대로 사고, 이후에는 시세대로 흘러가게 둡니다(바이앤홀드). " +
+      "비중을 다시 맞추고 싶으면 전략 시작일을 원하는 날로 바꾸면 됩니다.",
   },
   {
     title: "합성 전략",
@@ -133,8 +133,6 @@ type Settings = {
   weights: { ticker: string; weight_pct: number }[];
   /** 현금 비중(%) — 사용자가 직접 정한다(`/asset-helper` 와 같은 규칙, 자동 흡수 없음). */
   cash_weight_pct: number;
-  rebalance: string;
-  band_pct: number;
 };
 
 type View = {
@@ -149,8 +147,6 @@ type View = {
   /** 이 풀에서 담을 수 있는 종목 + 표시 지표 — 티커 검증·이름·지표 컬럼이 여기서 온다. */
   universe: UniverseRow[];
   constraints: {
-    rebalance_options: { value: string; label: string }[];
-    band_pct_options: number[];
     month_options: number[];
     default_backtest_months: number;
     max_holdings: number;
@@ -170,7 +166,6 @@ type Backtest = {
   benchmark_mdd_pct: number;
   benchmark_sortino: number | null;
   benchmark_name: string;
-  rebalance_count: number;
   cash_weight_pct: number;
   trades: {
     date: string;
@@ -701,7 +696,7 @@ export function PortfolioClient() {
   return (
     <PageFrame title="포트폴리오 전략" fullWidth>
       <div className="appPageStack">
-        {/* ① 설정 — 종목풀 · 리밸런싱 주기 · 리밸런싱 기준. 모멘텀·신고가 화면과 같은 자리. */}
+        {/* ① 설정 — 종목풀 · 전략 시작일. 모멘텀·신고가 화면과 같은 자리. */}
         <div className="card appCard">
           <div className="card-body">
             {!view.settings.start_date ? (
@@ -725,37 +720,6 @@ export function PortfolioClient() {
                   </select>
                 </label>
                 <StrategyStartDate value={draft.start_date} disabled={saving} onChange={(start_date) => setDraft({ ...draft, start_date })} />
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">리밸런싱</span>
-                  <select
-                    className="form-select form-select-sm"
-                    style={{ width: "auto" }}
-                    value={draft.rebalance}
-                    onChange={(event) => setDraft({ ...draft, rebalance: event.target.value })}
-                  >
-                    {view.constraints.rebalance_options.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">리밸런싱 기준</span>
-                  <select
-                    className="form-select form-select-sm"
-                    style={{ width: "auto" }}
-                    value={String(draft.band_pct)}
-                    title="목표 비중과 이만큼(%) 벌어져야 되돌립니다"
-                    onChange={(event) => setDraft({ ...draft, band_pct: Number(event.target.value) })}
-                  >
-                    {view.constraints.band_pct_options.map((option) => (
-                      <option key={option} value={String(option)}>
-                        {option}%
-                      </option>
-                    ))}
-                  </select>
-                </label>
               </div>
               <div className="appMainHeaderRight">
                 <UnsavedChangesBadge show={isDirty} />
@@ -960,7 +924,7 @@ export function PortfolioClient() {
                   }}
                 />
                 <div style={{ ...hintStyle, marginBottom: 10 }}>
-                  리밸런싱 매매 {backtest.rebalance_count}건 · 현금 {backtest.cash_weight_pct}%
+                  현금 {backtest.cash_weight_pct}%
                 </div>
                 <NavTabs
                   items={VIEW_MODES}

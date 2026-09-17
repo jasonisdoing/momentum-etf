@@ -1,7 +1,7 @@
 """포트폴리오 전략 백테스트 — 정한 비중으로 시작해 주기마다 그 비중으로 되돌린다.
 
-모멘텀·신고가와 달리 **종목을 고르지 않으므로 체결 내역이 종목 교체가 아니다.** 리밸런싱
-때 리밸런싱 기준을 넘긴 종목만 사고팔며, 그 매매만 비용(슬리피지)을 문다. 그 사이에는 시세대로
+모멘텀·신고가와 달리 **종목을 고르지 않으므로 체결 내역이 종목 교체가 아니다.** 시작일에
+정한 비중대로 사고(슬리피지 부담), 이후에는 시세대로
 흘러가게 둔다 — 그게 이 전략의 전부다.
 
 결과 형태는 신고가·모멘텀과 같다(`start_date`·`strategy_total_pct`·`daily` …). 화면과
@@ -105,7 +105,7 @@ def run_backtest(
     start_date: str | None = None,
     with_live_last_bar: bool = False,
 ) -> dict[str, Any]:
-    """고정 비중 리밸런싱 백테스트. 일별 자산곡선과 리밸런싱 내역을 함께 돌려준다.
+    """고정 비중 바이앤홀드 백테스트. 일별 자산곡선과 체결 내역을 함께 돌려준다.
 
     `context` 는 어댑터 계약을 맞추기 위한 자리다 — 이 전략은 무거운 준비물이 없어 쓰지 않는다.
     ``with_live_last_bar`` 는 운용 현황 전용이다 — 성과 비교 백테스트는 확정 데이터만 쓴다.
@@ -121,8 +121,6 @@ def run_backtest(
     if not weights:
         raise ValueError("담긴 종목이 없습니다 — 화면에서 종목과 비중을 먼저 저장하세요.")
 
-    rebalance = settings["rebalance"]
-    band_pct = float(settings["band_pct"])
     buy_slippage, sell_slippage = get_pool_slippage(pool)
 
     target_by_ticker = {row["ticker"]: float(row["weight_pct"]) / 100.0 for row in weights}
@@ -157,8 +155,6 @@ def run_backtest(
         close_df=close_df,
         target_by_ticker=target_by_ticker,
         cash_target=cash_target,
-        band_pct=band_pct,
-        rebalance=rebalance,
         buy_slippage=buy_slippage,
         sell_slippage=sell_slippage,
     )
@@ -177,7 +173,7 @@ def run_backtest(
 
     return {
         "start_date": str(index[0].date()),
-        # 합성은 저장 비중 대신 이 최종 상태를 읽는다. 주기·밴드 판정을 다시 만들지 않는다.
+        # 합성은 저장 비중 대신 이 최종 상태를 읽는다(시작일 이후 바이앤홀드 보유).
         "as_of": str(index[-1].date()),
         "open_positions": [
             {
@@ -204,9 +200,8 @@ def run_backtest(
         "benchmark_mdd_pct": round(_drawdown_pct(benchmark), 2),
         "benchmark_sortino": _sortino(benchmark.pct_change().dropna()),
         "benchmark_name": benchmark_info(pool)["name"],
-        # 이 전략의 '체결'은 종목 교체가 아니라 비중 되돌리기다 — 승률·평균손익 개념이 없다.
+        # 이 전략의 '체결'은 최초 매수(및 늦게 상장한 종목의 첫 매수)뿐이다.
         "trades": list(reversed(trades)),
-        "rebalance_count": sum(1 for trade in trades if trade["reason"] == "리밸런싱"),
         "cash_weight_pct": round(cash_target * 100, 2),
         "daily": [
             {
@@ -229,7 +224,7 @@ def current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     """개별 운용 현황과 합성이 공유하는 고정 시작일 기준 포트폴리오 상태.
 
     장중이면 실시간 가격을 마지막 봉으로 쓴 같은 엔진의 상태다(AGENTS.md §10-6) —
-    보유 비중·리밸런싱 지시가 실시간 기준으로 움직이고, 종가 확정 후 백테스트와 일치한다.
+    보유 비중이 실시간 기준으로 움직이고, 종가 확정 후 백테스트와 일치한다.
     ``daily`` 는 이 상태를 만든 실행의 일별 곡선 — 합성 슬리브 몫이 같은 실행 결과를 읽는다.
     """
     from utils.strategy_settings import require_start_date
