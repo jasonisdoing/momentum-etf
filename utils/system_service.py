@@ -361,6 +361,13 @@ _DAILY_LINE_TS_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
 DEPLOY_LOCK_DOC_ID = "__deploy__"
 
 
+def _batch_timeout_minutes() -> int:
+    """배치 타임아웃(분) — 단일 소스는 `infra/cron/run_batch.BATCH_TIMEOUT_MINUTES` 다."""
+    from infra.cron.run_batch import BATCH_TIMEOUT_MINUTES
+
+    return int(BATCH_TIMEOUT_MINUTES)
+
+
 def is_deploying() -> bool:
     """MongoDB batch_locks 에서 배포 진행 플래그 조회."""
     try:
@@ -1230,7 +1237,9 @@ def load_system_data() -> dict[str, object]:
             "시세·수집(data) · 알림·동기화(light) · 백업(local) 레인이 서로 병렬로 돌고, "
             "같은 레인 안에서는 순서대로 1건씩 직렬입니다 — 가격 캐시 → 지표 순서와 "
             "외부 소스 동시 호출 방지는 레인 안의 직렬이 지키고, 레인 한도는 서버·로컬 합산 기준입니다. "
-            f"대기시간과 예상시간(서버/로컬)은 각각 최근 {AVERAGE_SAMPLE_SIZE}회 실행의 평균입니다."
+            f"대기시간과 예상시간(서버/로컬)은 각각 최근 {AVERAGE_SAMPLE_SIZE}회 실행의 평균입니다. "
+            f"배치 실행이 {_batch_timeout_minutes()}분을 초과하면 hang 으로 간주하여 "
+            "자동 종료(SIGKILL)되고 Slack 알림이 전송됩니다."
         ),
         "running_jobs": get_running_jobs(),
         "running_job_details": get_running_job_details(),
