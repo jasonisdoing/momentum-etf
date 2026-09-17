@@ -12,28 +12,6 @@ import { useToast } from "../components/ToastProvider";
 const OPEN_BY_ACCOUNT = new Map<string, boolean>();
 const DRAFT_BY_ACCOUNT = new Map<string, string>();
 
-// 부모(자산 관리) 그리드는 자식 패널 행 높이를 공식으로 계산한다 — 메모 펼침이 높이를
-// 바꾸므로, 부모가 상태를 읽고(toggle 시점에) 행 높이를 재계산할 수 있게 내보낸다.
-const TOGGLE_LISTENERS = new Set<() => void>();
-
-export function isAccountMemoOpen(accountId: string): boolean {
-  return OPEN_BY_ACCOUNT.get(accountId) ?? false;
-}
-
-/** 접힌 제목 줄/펼친 편집기의 높이(px) — 부모 행 높이 공식에 더한다.
-    접힘은 제목 줄만큼만 더한다(모자라면 그리드의 여유 공간이 흡수) — 표 아래 공백을 만들지 않는다.
-    펼침 추가분은 편집기 실제 높이(버튼줄 34 + 입력창 224 + 여백)와 **정확히** 맞춘다 —
-    크면 남는 높이가 그리드(flex 1)로 흘러 표 아래 공백이 같이 늘어난다. */
-export const MEMO_COLLAPSED_HEIGHT = 34;
-export const MEMO_OPEN_EXTRA_HEIGHT = 264;
-
-export function subscribeAccountMemoToggle(listener: () => void): () => void {
-  TOGGLE_LISTENERS.add(listener);
-  return () => {
-    TOGGLE_LISTENERS.delete(listener);
-  };
-}
-
 function formatNoteUpdatedAt(value: string | null): string {
   if (!value) return "아직 저장된 메모가 없습니다.";
   const date = new Date(value);
@@ -49,12 +27,6 @@ export function AccountMemoSection({ accountId }: { accountId: string }) {
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-
-  // 패널이 (다시) 만들어질 때 부모 그리드가 메모 포함 높이로 재계산하게 알린다 —
-  // 행 높이는 행 생성 시점 값이 캐시되므로, 마운트마다 한 번 건드린다.
-  useEffect(() => {
-    TOGGLE_LISTENERS.forEach((listener) => listener());
-  }, [accountId]);
 
   useEffect(() => {
     let alive = true;
@@ -81,7 +53,6 @@ export function AccountMemoSection({ accountId }: { accountId: string }) {
     const next = !open;
     OPEN_BY_ACCOUNT.set(accountId, next);
     setOpen(next);
-    TOGGLE_LISTENERS.forEach((listener) => listener());
   };
 
   const changeMemo = (value: string) => {
@@ -147,11 +118,9 @@ export function AccountMemoSection({ accountId }: { accountId: string }) {
               {saving ? "저장 중..." : "메모 저장"}
             </GridToolbarButton>
           </div>
-          {/* 높이를 고정한다(리사이즈 금지) — 부모 행 높이 공식(MEMO_OPEN_EXTRA_HEIGHT)과 맞아야
-              남는 높이가 표 아래 공백으로 흐르지 않는다. */}
           <textarea
             className="form-control"
-            style={{ fontSize: "var(--fs-base)", height: 224, resize: "none" }}
+            style={{ fontSize: "var(--fs-base)", minHeight: 224 }}
             placeholder="이 계좌에 대한 투자 전략이나 주의사항을 메모하세요."
             value={memo}
             onChange={(e) => changeMemo(e.target.value)}

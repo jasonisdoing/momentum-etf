@@ -3844,6 +3844,34 @@ a {
   overflow: hidden;
 }
 
+/* 최대창 모달 — 화면을 거의 채우고, 본문이 세로 flex 로 내부 스크롤을 갖는다. */
+.appModalFull {
+  max-width: calc(100vw - 48px);
+  width: calc(100vw - 48px);
+  height: calc(100vh - 48px);
+  margin: 24px auto;
+}
+
+.appModalFull .modal-content {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.appModalFull .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0.5rem 0.75rem 0.75rem;
+}
+
+.appModalFull .assetsDetailPanel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .assetsAgGrid .ag-row.assetsGroupRow {
   background: rgba(148, 163, 184, 0.22);
   font-weight: 800;

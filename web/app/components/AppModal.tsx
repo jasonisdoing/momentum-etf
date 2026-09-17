@@ -4,7 +4,8 @@ type AppModalProps = {
   open: boolean;
   title: string;
   subtitle?: string;
-  size?: "md" | "xl";
+  /** "full" 은 화면을 거의 채우는 최대창 — 자식 표처럼 내용 높이가 유동적인 화면용. */
+  size?: "md" | "xl" | "full";
   onClose: () => void;
   footer?: ReactNode;
   children: ReactNode;
@@ -24,7 +25,11 @@ export function AppModal({
   }
 
   const dialogClassName =
-    size === "xl" ? "modal-dialog modal-xl modal-dialog-centered" : "modal-dialog modal-dialog-centered";
+    size === "full"
+      ? "modal-dialog modal-dialog-centered appModalFull"
+      : size === "xl"
+        ? "modal-dialog modal-xl modal-dialog-centered"
+        : "modal-dialog modal-dialog-centered";
 
   return (
     <>
