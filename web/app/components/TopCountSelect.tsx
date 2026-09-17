@@ -65,10 +65,13 @@ export function stepTopOptions(
 export function TopCountSelect({
   value,
   options,
+  totalCount,
   onChange,
 }: {
   value: number | null;
   options: (number | null)[];
+  /** `전체` 선택 시 보이게 될 종목 수 — 라벨 `전체(N개)` 에 쓴다. */
+  totalCount: number;
   onChange: (next: number | null) => void;
 }) {
   return (
@@ -85,7 +88,7 @@ export function TopCountSelect({
     >
       {options.map((count) => (
         <option key={count ?? "all"} value={count === null ? "all" : String(count)}>
-          {count === null ? "전체" : `상위 ${count}`}
+          {count === null ? `전체(${totalCount}개)` : `상위 ${count}`}
         </option>
       ))}
     </select>
