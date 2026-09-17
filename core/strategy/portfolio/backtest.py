@@ -1,8 +1,10 @@
 """포트폴리오 시뮬레이션 핵심 — 가격 프레임을 받아 굴린다. 외부 조회는 하지 않는다.
 
-정한 비중으로 시작해 주기마다 그 비중으로 되돌린다. 리밸런싱 때 허용 밴드를 넘긴
-종목만 사고팔며, 그 매매만 비용(슬리피지)을 문다. 그 사이에는 시세대로 흘러가게 둔다.
-가격 로딩·실시간 오버레이·벤치마크·화면 페이로드는 호출자(`utils/portfolio_backtest`) 몫이다.
+정한 비중으로 **시작일에 한 번** 사고, 이후에는 시세대로 흘러가게 둔다(바이앤홀드).
+주기 리밸런싱·허용 밴드는 쓰인 적이 없어 폐기했다(2026-09) — 비중을 다시 맞추고
+싶으면 전략 시작일을 원하는 날로 바꾸면 된다. 가격 이력이 늦게 시작하는 종목만
+그 첫날에 배정분으로 사 준다. 가격 로딩·실시간 오버레이·벤치마크·화면 페이로드는
+호출자(`utils/portfolio_backtest`) 몫이다.
 """
 
 from __future__ import annotations
@@ -12,24 +14,11 @@ from typing import Any
 import pandas as pd
 
 
-def period_key(day: pd.Timestamp, rebalance: str) -> str | None:
-    """그 날짜가 속한 리밸런싱 구간의 키. 'none' 이면 None(되돌리지 않음)."""
-    if rebalance == "monthly":
-        return day.strftime("%Y-%m")
-    if rebalance == "quarterly":
-        return f"{day.year}-Q{(day.month - 1) // 3 + 1}"
-    if rebalance == "yearly":
-        return str(day.year)
-    return None
-
-
 def simulate_portfolio(
     *,
     close_df: pd.DataFrame,
     target_by_ticker: dict[str, float],
     cash_target: float,
-    band_pct: float,
-    rebalance: str,
     buy_slippage: float,
     sell_slippage: float,
 ) -> dict[str, Any]:
@@ -37,7 +26,7 @@ def simulate_portfolio(
 
     ``close_df`` 는 이미 구간·종목이 잘린 (날짜 × 티커) 종가 프레임이고, 첫 행이 최초
     매수일이다. 비중·슬리피지 비율은 0~1 단위가 아니라 저장 형태 그대로다
-    (``target_by_ticker`` 는 0~1, ``band_pct`` 는 %p, 슬리피지는 %).
+    (``target_by_ticker`` 는 0~1, 슬리피지는 %).
     """
     tickers = list(target_by_ticker)
     index = close_df.index
@@ -64,10 +53,6 @@ def simulate_portfolio(
                 continue
             held_value = shares.get(ticker, 0.0) * price
             current_pct = held_value / total * 100.0
-            target_pct = target_by_ticker[ticker] * 100.0
-            # 모든 종목을 매매 전 같은 평가액으로 판정한다.
-            if abs(target_pct - current_pct) < band_pct:
-                continue
             diff_value = total * target_by_ticker[ticker] - held_value
             if diff_value != 0:
                 orders.append((ticker, diff_value, current_pct))
@@ -117,16 +102,11 @@ def simulate_portfolio(
             )
 
     rebalance_to_target(index[0], "최초 매수", tickers)
-    current_period = period_key(index[0], rebalance)
 
     curve: list[float] = []
     cash_curve: dict[pd.Timestamp, float] = {}
     for day in index:
-        period = period_key(day, rebalance)
-        if period is not None and period != current_period:
-            rebalance_to_target(day, "리밸런싱", tickers)
-            current_period = period
-        elif day != index[0]:
+        if day != index[0]:
             newly_available = [ticker for ticker in tickers if first_prices[ticker] == day]
             if newly_available:
                 rebalance_to_target(day, "가격 이력 시작 후 최초 매수", newly_available)

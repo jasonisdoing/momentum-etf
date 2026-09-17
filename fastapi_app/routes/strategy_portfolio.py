@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Body, Depends, Query
 
-from config import HOLDING_CHART_MONTHS, REBALANCE_BAND_PCT_OPTIONS, REBALANCE_LABELS, REBALANCE_OPTIONS
+from config import HOLDING_CHART_MONTHS
 from fastapi_app.dependencies import require_internal_token
 from utils.pool_signal_backtest_service import get_month_options
 from utils.portfolio_service import (
@@ -23,8 +23,6 @@ router = APIRouter(prefix="/internal/strategy-portfolio", tags=["strategy-portfo
 def _constraints() -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다)."""
     return {
-        "rebalance_options": [{"value": key, "label": REBALANCE_LABELS[key]} for key in REBALANCE_OPTIONS],
-        "band_pct_options": list(REBALANCE_BAND_PCT_OPTIONS),
         # 기간 선택지 — 종목풀 백테스트와 같은 목록이 단일 소스(전략별로 따로 두지 않는다).
         "month_options": get_month_options(),
         "default_backtest_months": DEFAULT_BACKTEST_MONTHS,
