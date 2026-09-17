@@ -567,8 +567,16 @@ def _fetch_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, 
 
         # 24시간 연속 거래 상품(선물 =F, 환율 =X)은 야후 일봉의 직전 봉 종가가 실제
         # 공식 전일 종가보다 하루 이상 뒤처져 온다(관측: NQ=F +1.6% vs 실제 +0.3%,
-        # 2026-09-16). 이런 상품만 quote 요약(fast_info)의 previous_close 로 바로잡는다.
-        if symbol.endswith(("=F", "=X")):
+        # 2026-09-16). 환율은 quote 요약(fast_info)의 previous_close 가 관례(뉴욕 17시
+        # 마감)와 일치해 그것을 쓰고, 선물은 fast_info 도 정산가가 아니라 자정(GMT) 부근
+        # 값을 줘서(관측: NQ=F +1.14% 가 +0.43% 로, 2026-09-17) 세션 경계로 직접 계산한다.
+        if symbol.endswith("=F"):
+            settle = _futures_previous_settle(symbol)
+            if settle is not None:
+                prev_close = settle
+            else:
+                logger.warning("선물 전일 정산가 계산 실패(%s) — 일봉 직전 종가 사용", symbol)
+        elif symbol.endswith("=X"):
             try:
                 with yfinance_lock():
                     official_prev = float(yf.Ticker(symbol).fast_info.previous_close)
@@ -588,6 +596,41 @@ def _fetch_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, 
         }
 
     return result
+
+
+def _futures_previous_settle(symbol: str) -> float | None:
+    """선물의 공식 전일 정산가 근사 — 직전 세션 마감(뉴욕 17:00) 직전 시간봉의 종가.
+
+    CME 선물의 전일 대비 기준은 17:00 ET 정산가다(토스·트레이딩뷰와 같은 관례).
+    16:00 봉의 종가가 곧 17:00 시점 가격이라 그 값을 쓴다. 주말·휴장은 봉이 없어
+    자연히 직전 거래 세션으로 넘어간다. 계산 불가면 None(호출부가 일봉으로 폴백).
+    """
+    import pandas as pd
+    import yfinance as yf
+
+    try:
+        with yfinance_lock():
+            frame = yf.download(symbol, period="5d", interval="1h", progress=False, auto_adjust=False)
+    except Exception as exc:
+        logger.warning("선물 시간봉 조회 실패(%s): %s", symbol, exc)
+        return None
+    if frame is None or frame.empty or "Close" not in frame:
+        return None
+    closes = frame["Close"]
+    if hasattr(closes, "columns"):
+        closes = closes.iloc[:, 0]
+    closes = pd.to_numeric(closes, errors="coerce").dropna()
+    if closes.empty:
+        return None
+
+    new_york = ZoneInfo("America/New_York")
+    now_ny = datetime.now(new_york)
+    boundary = now_ny.replace(hour=17, minute=0, second=0, microsecond=0)
+    if now_ny.hour < 17:
+        boundary -= timedelta(days=1)
+    index_ny = closes.index.tz_convert(new_york)
+    before = closes[index_ny < boundary]
+    return float(before.iloc[-1]) if len(before) else None
 
 
 __all__ = [
