@@ -3844,6 +3844,29 @@ a {
   overflow: hidden;
 }
 
+.assetsAgGrid .ag-row.assetsGroupRow {
+  background: rgba(148, 163, 184, 0.22);
+  font-weight: 800;
+  border-top: 2px solid rgba(100, 116, 139, 0.55);
+}
+
+.assetsAgGrid .ag-row.assetsGroupRow:hover {
+  background: rgba(148, 163, 184, 0.3);
+}
+
+.assetsGroupName {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.assetsGroupDelete {
+  color: var(--text-muted);
+  text-decoration: none;
+  line-height: 1;
+}
+
 .assetsDetailGridWrap {
   flex: 1 1 auto;
   min-height: 0;
