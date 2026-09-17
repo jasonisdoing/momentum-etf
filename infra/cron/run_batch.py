@@ -30,16 +30,16 @@ from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
 
-# 배치 실행 절대 상한 (초). 외부 API hang / 무한 루프로 인한 무한 대기 방지.
-# 정상 배치(가격 캐시 / 메타 등)는 가장 큰 것도 최대 10분 안에 끝남.
-# 30분(1800s) = 정상의 ~3배 — 진짜 hang 만 잡고 정상 작업은 영향 없는 마진.
-# 작업별 예외는 아래 JOB_TIMEOUT_OVERRIDES 로 등록한다(환경변수 override 폐기, 2026-09).
-BATCH_TIMEOUT_SECONDS = 1800
+# 배치 실행 절대 상한 — 외부 API hang / 무한 루프로 인한 무한 대기 방지.
+# 정상 배치(가격 캐시 / 메타 등)는 가장 큰 것도 최대 10분 안에 끝난다 — 진짜 hang 만
+# 잡고 정상 작업은 영향 없는 마진. 작업별 예외는 아래 JOB_TIMEOUT_OVERRIDES 로 등록한다.
+BATCH_TIMEOUT_MINUTES = 30
+BATCH_TIMEOUT_SECONDS = BATCH_TIMEOUT_MINUTES * 60
 
-# 작업별 타임아웃 override — **정상 소요가 전역 기본(20분)에 근접·초과하는 배치**만 등록한다.
+# 작업별 타임아웃 override — **정상 소요가 전역 기본에 근접·초과하는 배치**만 등록한다.
 # 전역을 늘리면 1~2분짜리 배치의 hang 감지가 함께 무뎌지므로 작업 단위로만 푼다.
 JOB_TIMEOUT_OVERRIDES: dict[str, int] = {
-    # 전체 히스토리 재수집(--full)은 정상 소요가 ~20분이라 기본 한도에 걸린다. 60분 허용.
+    # 전체 히스토리 재수집(--full)은 정상 소요가 ~20분이라 전역 한도에 근접한다. 60분 허용.
     "cache_refresh_full": 3600,
 }
 

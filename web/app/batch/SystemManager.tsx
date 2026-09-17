@@ -659,10 +659,8 @@ export function SystemManager({
               }}
             />
             {(() => {
-              // 백엔드 schedule_note 한 문장 + 20분 timeout 안내 한 문장.
-              // 모두 한국어 문장이라 "다. " 단위로 split 하여 한 문장 한 줄로 표시.
-              const timeoutLine = "배치 실행이 20분을 초과하면 hang 으로 간주하여 자동 종료(SIGKILL)되고 Slack 알림이 전송됩니다.";
-              const combined = scheduleNote ? `${scheduleNote} ${timeoutLine}` : timeoutLine;
+              // 백엔드 schedule_note(타임아웃 안내 포함)를 "다. " 단위로 split 하여 한 문장 한 줄로 표시.
+              const combined = scheduleNote ?? "";
               // "다. " 뒤에서 split 후 종결 마침표 복원.
               const sentences = combined
                 .split(/(?<=다\.) +/)
