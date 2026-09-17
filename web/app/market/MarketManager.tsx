@@ -39,6 +39,8 @@ type MarketRowItem = {
   prev_volume: number;
   /** 거래대금 배수(20일 평균 대비) — 순위 화면과 같은 공용 계산, 일일 배치 저장값. 한국 전용. */
   value_mult?: number | null;
+  /** 1주 배수 — 최근 5거래일 평균 ÷ 20일 평균(같은 배치 저장값). 한국 전용. */
+  value_mult_week?: number | null;
   market_cap: number;
   is_held: boolean;
   /** PTP(Publicly Traded Partnership) — 국내 매도 시 총액 10% 원천징수라 사실상 거래 대상이 아니다.
@@ -550,6 +552,12 @@ export function MarketManager({
         ? [
             tradeValueMultColumn<MarketGridRow>({
               headerTooltip: "20일 평균 거래대금 대비 배수 — 순위·신고가 화면과 같은 계산(일일 배치 저장값).",
+            }),
+            tradeValueMultColumn<MarketGridRow>({
+              field: "value_mult_week",
+              liveField: "__none__",
+              headerName: "1주일거래",
+              headerTooltip: "최근 5거래일 평균 거래대금 ÷ 20일 평균 — 한 주 단위의 수급 변화(일일 배치 저장값).",
             }),
           ]
         : []),
