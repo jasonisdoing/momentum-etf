@@ -1144,7 +1144,25 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return formatPrice(params.value ?? null, rowCurrency);
         },
       },
-      // 단기 수익률(1주·2주·1달)은 현재가 바로 오른쪽 — 최근 흐름을 가격과 붙여 본다.
+      // MA 이탈(단기·장기) — 현재가 바로 오른쪽. 모멘텀 화면과 같은 공용 컬럼(이탈 임박 강조).
+      // 진입 문턱(헤더 미리보기 값 포함) — 문턱 안이면 파랑(회색 행·✅과 같은 기준).
+      {
+        ...maExitGapColumn<RankGridRow>({
+          field: "단기이격",
+          maDays: maRule?.short_ma_days,
+          entry: { mult: entryVolMult === "" ? null : Number(entryVolMult), getVolatility: (row) => row?.변동성 },
+        }),
+        hide: metricMode !== "basic",
+      },
+      {
+        ...maExitGapColumn<RankGridRow>({
+          field: "이격",
+          maDays: maRule?.long_ma_days,
+          entry: { mult: entryVolMult === "" ? null : Number(entryVolMult), getVolatility: (row) => row?.변동성 },
+        }),
+        hide: metricMode !== "basic",
+      },
+      // 단기 수익률(1주·2주·1달)은 그 오른쪽 — 최근 흐름을 가격과 붙여 본다.
       ...(["1주(%)", "2주(%)", "1달(%)"] as const).map(
         (field) =>
           ({
@@ -1197,20 +1215,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           } as ColDef<RankGridRow>,
         ]
         : []),
-      // 순위 산정 지표(옛 '랭킹' 모드) — 기본 컬럼으로 합쳤다(거래대금과 1주 사이).
-      // 이탈까지 여유 — 모멘텀 화면과 같은 공용 컬럼(같은 이격을 '이탈 임박' 강조로 본다).
-      // 진입 문턱(헤더 미리보기 값 포함) — 문턱 안이면 파랑(회색 행·✅과 같은 기준).
-      maExitGapColumn<RankGridRow>({
-        field: "단기이격",
-        maDays: maRule?.short_ma_days,
-        entry: { mult: entryVolMult === "" ? null : Number(entryVolMult), getVolatility: (row) => row?.변동성 },
-      }),
-      maExitGapColumn<RankGridRow>({
-        field: "이격",
-        maDays: maRule?.long_ma_days,
-        entry: { mult: entryVolMult === "" ? null : Number(entryVolMult), getVolatility: (row) => row?.변동성 },
-      }),
-      // (단기·장기 이격률 컬럼은 제거 — 위 MA 이탈 두 컬럼과 같은 값의 중복 표시였다.
+      // (MA 이탈 단기·장기 컬럼은 현재가 오른쪽으로 이동 — 위 leadingColumns 참조.
+      //  단기·장기 이격률 컬럼은 제거 — MA 이탈 두 컬럼과 같은 값의 중복 표시였다.
       //  MA{장기} 이탈 내림차순 정렬이 곧 표의 순위 순서다.)
       {
         field: "RSI",
@@ -1934,9 +1940,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 theme={rankGridTheme}
                 getRowClass={(params: RowClassParams<RankGridRow>) => {
                   const classes: string[] = [];
-                  // 회색 행 — 보유 여부와 무관하게 두 단계로 칠한다(헤더 미리보기 값 포함).
-                  //   진한 회색 = 0선(이평선) 이탈(매도 기준), 밝은 회색 = 0선 위인데 진입 문턱만 미달.
-                  // 진입 문턱이 '없음'인 풀은 문턱 판정이 항상 통과라 밝은 회색이 안 나온다.
+                  // 행 배경 — 보유 여부와 무관하게 두 단계로 칠한다(헤더 미리보기 값 포함).
+                  //   회색 = 0선(이평선) 이탈(매도 기준), 연한 남색 = 0선 위인데 진입 문턱만 미달.
+                  // 진입 문턱이 '없음'인 풀은 문턱 판정이 항상 통과라 남색이 안 나온다.
                   const isHeld = Boolean(String(params.data?.보유 ?? "").trim());
                   const zeroLineBroken = isTrendBroken(params.data?.단기이격, params.data?.이격);
                   const mult = entryVolMult === "" ? null : Number(entryVolMult);

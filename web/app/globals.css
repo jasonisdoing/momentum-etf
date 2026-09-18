@@ -15,12 +15,18 @@
      12/14/16/18/20/24 를 쓴다 — 널리 쓰여 눈에 익고 rem 값도 딱 떨어진다.
      크기를 바꿀 일이 생기면 --fs-base 만 고치지 말고 여섯 줄을 같이 조정한다.
      (단계 간격이 무너지면 토큰을 나눠 둔 의미가 없어진다) */
-  --fs-xs: 0.75rem; /* 12px — 본문 아님. 접기 화살표 같은 글리프, 첨자(sub/sup) */
-  --fs-sm: 0.875rem; /* 14px — 보조 라벨, 캡션, 표(그리드) 전체 */
-  --fs-base: 1rem; /* 16px — 본문, 입력, 버튼, 카드 (기준) */
-  --fs-lg: 1.125rem; /* 18px — 카드·섹션 제목 */
-  --fs-xl: 1.25rem; /* 20px — 화면 제목 */
-  --fs-2xl: 1.5rem; /* 24px — 대시보드 큰 숫자 */
+  --fs-xs: 0.75rem;
+  /* 12px — 본문 아님. 접기 화살표 같은 글리프, 첨자(sub/sup) */
+  --fs-sm: 0.875rem;
+  /* 14px — 보조 라벨, 캡션, 표(그리드) 전체 */
+  --fs-base: 1rem;
+  /* 16px — 본문, 입력, 버튼, 카드 (기준) */
+  --fs-lg: 1.125rem;
+  /* 18px — 카드·섹션 제목 */
+  --fs-xl: 1.25rem;
+  /* 20px — 화면 제목 */
+  --fs-2xl: 1.5rem;
+  /* 24px — 대시보드 큰 숫자 */
 
   --app-content-max-width: 1680px;
   --app-page-inset: 0.875rem;
@@ -582,10 +588,12 @@ a {
   padding: 0 12px 1rem;
   align-items: flex-start;
 }
+
 .appHomeMainCol {
   flex: 1 1 auto;
   min-width: 0;
 }
+
 .appHomeRail {
   flex: 0 0 200px;
   width: 200px;
@@ -598,15 +606,18 @@ a {
   max-height: calc(100vh - 64px);
   overflow-y: auto;
 }
+
 .appHomeRail .hubMenuCard {
   position: static;
 }
+
 .appHomeRailFooter {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 0 2px;
 }
+
 /* 레일 기간 수익률(금일/금주/금월/금년) — CNN 아래 4줄 */
 .appRailPeriod {
   display: flex;
@@ -617,6 +628,7 @@ a {
   border-radius: 8px;
   background: #fff;
 }
+
 .appRailPeriodRow {
   display: flex;
   align-items: baseline;
@@ -624,18 +636,22 @@ a {
   gap: 10px;
   font-size: var(--fs-sm);
 }
+
 .appRailPeriodLabel {
   color: var(--text-muted, #64748b);
   font-weight: 600;
 }
+
 .appRailPeriodRow strong {
   font-size: var(--fs-sm);
   font-weight: 700;
 }
+
 @media (max-width: 900px) {
   .appContentHome {
     flex-direction: column;
   }
+
   .appHomeRail {
     flex: none;
     width: 100%;
@@ -2866,7 +2882,7 @@ a {
   grid-auto-rows: min-content;
 }
 
-.compareMatrixPerformance > .compareMatrixWide {
+.compareMatrixPerformance>.compareMatrixWide {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2883,7 +2899,8 @@ a {
      flex 아이템으로 늘려야 년월(왼쪽)·평균(오른쪽) 끝이 셀 양끝에 정확히 맞는다. */
   flex: 1 1 auto;
   min-width: 0;
-  font-size: var(--fs-base); /* 값 셀이 .appContent 에서 상속받는 크기와 동일 */
+  font-size: var(--fs-base);
+  /* 값 셀이 .appContent 에서 상속받는 크기와 동일 */
   /* 자릿수가 달라도(-1.90 / +10.52) 숫자 폭이 같아야 끝이 가지런히 맞는다.
      폰트가 font-variant-numeric 을 무시하는 경우까지 대비해 feature-settings 도 함께 준다. */
   font-variant-numeric: tabular-nums;
@@ -2893,14 +2910,14 @@ a {
 
 /* 기간 라벨(2026 / 202607 / 20260724)은 폭을 고정한다 — 등폭 폰트라 자릿수만큼 늘어난다.
    '1' 이 '0' 보다 좁은 비례폭 폰트로 폴백돼도 201911/201910 폭이 같아진다. */
-.compareMonthlyLabelRow > span:first-child {
+.compareMonthlyLabelRow>span:first-child {
   flex: 0 0 auto;
   min-width: 4ch;
   text-align: left;
 }
 
 /* 평균값은 항상 오른쪽 끝에 붙인다(년월 길이와 무관하게). */
-.compareMonthlyLabelRow > span:last-child {
+.compareMonthlyLabelRow>span:last-child {
   margin-left: auto;
   text-align: right;
 }
@@ -3610,27 +3627,35 @@ a {
   background: rgba(102, 204, 102, 0.42);
 }
 
+/* 호버 행 테두리 — "지금 커서가 있는 줄" 표시(전 그리드 공용). 상태 배경색(이탈 회색·
+   문턱 남색·보유 녹색 등)을 안 건드리려고 배경 대신 위·아래 얇은 선으로 잡아준다.
+   border 는 행 높이를 밀어 흔들리므로 inset box-shadow 를 쓴다(레이아웃 불변). */
+.ag-row.ag-row-hover {
+  box-shadow: inset 0 1px 0 rgba(32, 107, 196, 0.55), inset 0 -1px 0 rgba(32, 107, 196, 0.55);
+}
+
 /* 추세 이탈 행 — 행 전체를 연한 회색으로 눌러 둔다. 추세 이탈 표시는 **이것 하나**다
    (예전의 종목명 ❗ 배지는 제거). 이격 기준은 종목이 속한 풀의 이평선 — 계좌·화면과 무관하게 같다.
    보유 강조(녹색)는 티커·종목명 칸에만 칠해지므로 회색 행 위에 그대로 얹힌다. */
 .ag-row.appTrendBrokenRow {
-  background: rgba(148, 163, 184, 0.26);
+  background: rgba(148, 163, 184, 0.8);
   color: var(--text-muted, #64748b);
 }
 
 .ag-row.appTrendBrokenRow:hover {
-  background: rgba(148, 163, 184, 0.36);
+  background: rgba(148, 163, 184, 0.5);
 }
 
 /* 진입 문턱 미달 행(순위 화면) — 0선(이평선) 위인데 이 풀의 진입 문턱만 못 넘은 상태.
-   이탈(진한 회색)과 구분되게 **밝은 회색**으로만 눌러 둔다. 문턱이 '없음'인 풀에는 안 나온다. */
+   이탈(회색)과 색상 자체가 다르게 **연한 남색** — 문턱 안 값의 파랑 표시와 의미가 이어지고,
+   화면에 한 종류만 있어도 회색과 즉시 구분된다. 문턱이 '없음'인 풀에는 안 나온다. */
 .ag-row.appEntryBlockedRow {
-  background: rgba(148, 163, 184, 0.12);
+  background: rgba(59, 100, 184, 0.3);
   color: var(--text-muted, #64748b);
 }
 
 .ag-row.appEntryBlockedRow:hover {
-  background: rgba(148, 163, 184, 0.2);
+  background: rgba(59, 100, 184, 0.3);
 }
 
 /* 고정 자산(IS) 행 — 사고팔 수 없는 항목이라 **줄 전체**를 노란 배경으로 구분한다.
@@ -3818,7 +3843,7 @@ a {
    위 흰색 규칙이 모든 행을 덮는다. 편집 중인 행은 편집 색이 계속 우선한다(아래에 정의). */
 .assetsAgGrid .ag-row.appTrendBrokenRow,
 .assetsAgGrid .ag-row.appTrendBrokenRow.appHeldRow {
-  background: rgba(148, 163, 184, 0.26);
+  background: rgba(148, 163, 184, 0.4);
 }
 
 .assetsAgGrid .ag-row.appFixedAssetRow,
@@ -4398,7 +4423,7 @@ a {
 /* Tabler 의 card-header-tabs 는 카드 헤더 패딩이 기본값(1rem/1.25rem)이라고 보고 음수 마진을
    준다. 이 앱은 헤더를 더 좁게 쓰므로(.appCard>.card-header = 0.375rem 1rem) 그대로 두면
    탭 띠가 헤더 밖으로 밀려 옆에 놓인 문구와 높이가 어긋난다. 실제 패딩에 맞춰 다시 잡는다. */
-.appCard > .card-header > .card-header-tabs {
+.appCard>.card-header>.card-header-tabs {
   /* flex:1 을 풀어 탭 너비만 차지하게 한다 — 오른쪽 문구가 제자리(우측 끝)에 놓인다. */
   flex: 0 1 auto;
   margin: -0.375rem 0 -0.375rem -1rem;
@@ -4512,7 +4537,7 @@ a {
   white-space: nowrap;
 }
 
-.mixSleeveSettingItem > b {
+.mixSleeveSettingItem>b {
   color: #1f2d3d;
   font-weight: 600;
 }
