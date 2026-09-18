@@ -1934,16 +1934,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 theme={rankGridTheme}
                 getRowClass={(params: RowClassParams<RankGridRow>) => {
                   const classes: string[] = [];
-                  // 회색 행 — 보유 행은 청산 기준(0선 이탈), 미보유 행은 **진입 기준**
-                  // (0선 + 이 풀의 진입 문턱, 헤더 미리보기 값 포함). 문턱이 '없음'이면 둘이 같다.
+                  // 회색 행 — 보유 여부와 무관하게 두 단계로 칠한다(헤더 미리보기 값 포함).
+                  //   진한 회색 = 0선(이평선) 이탈(매도 기준), 밝은 회색 = 0선 위인데 진입 문턱만 미달.
+                  // 진입 문턱이 '없음'인 풀은 문턱 판정이 항상 통과라 밝은 회색이 안 나온다.
                   const isHeld = Boolean(String(params.data?.보유 ?? "").trim());
                   const zeroLineBroken = isTrendBroken(params.data?.단기이격, params.data?.이격);
                   const mult = entryVolMult === "" ? null : Number(entryVolMult);
-                  const broken = isHeld
-                    ? zeroLineBroken
-                    : zeroLineBroken || !entryGapOk(params.data?.이격, params.data?.단기이격, params.data?.변동성, mult);
-                  if (broken) {
+                  if (zeroLineBroken) {
                     classes.push("appTrendBrokenRow");
+                  } else if (!entryGapOk(params.data?.이격, params.data?.단기이격, params.data?.변동성, mult)) {
+                    classes.push("appEntryBlockedRow");
                   }
                   if (params.data?.exclude_from_ranking) {
                     classes.push("rankFixedRow");

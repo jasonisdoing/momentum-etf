@@ -35,8 +35,9 @@ export function isTrendBroken(
 
 /** 진입 문턱 판정 — 백엔드 `core/strategy/momentum/signals.entry_gap_ok` 와 **같은 수식**.
  *
- * 순위 화면이 미보유 행의 회색 판정(진입 기준)에 쓴다. 문턱 없음(null)이면 항상 참
- * (진입 = 보유 자격 = 0선 그대로), 이격·변동성을 모르면 거짓 — 값을 추정하지 않는다.
+ * 순위 화면이 보유 여부와 무관하게 밝은 회색 행 판정(0선 위·문턱 미달)에 쓴다.
+ * 문턱 없음(null)이면 항상 참(진입 = 보유 자격 = 0선 그대로 → 밝은 회색 없음),
+ * 이격·변동성을 모르면 거짓 — 값을 추정하지 않는다.
  */
 export function entryGapOk(
   longDisparity: number | null | undefined,
