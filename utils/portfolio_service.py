@@ -185,6 +185,8 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
                 "return_3m_pct": returns.get("return_3m_pct"),
                 "return_6m_pct": returns.get("return_6m_pct"),
                 "return_12m_pct": returns.get("return_12m_pct"),
+                "return_24m_pct": returns.get("return_24m_pct"),
+                "return_36m_pct": returns.get("return_36m_pct"),
                 "mdd_pct": mdd_by.get(ticker),
                 "sortino": _sortino(ticker),
                 # 추세 이탈 표시용 — 풀 이평선 이격(단기·장기).

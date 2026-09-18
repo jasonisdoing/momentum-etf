@@ -88,6 +88,8 @@ type WeightRow = {
   return_3m_pct: number | null;
   return_6m_pct: number | null;
   return_12m_pct: number | null;
+  return_24m_pct: number | null;
+  return_36m_pct: number | null;
   mdd_pct: number | null;
   sortino: number | null;
   /** 추세 이탈(행 전체 회색)용 — 풀 이평선 기준 단기·장기 이격(%). 순위·합성과 같은 공용 규칙. */
@@ -113,6 +115,8 @@ type UniverseRow = {
   return_3m_pct: number | null;
   return_6m_pct: number | null;
   return_12m_pct: number | null;
+  return_24m_pct: number | null;
+  return_36m_pct: number | null;
   mdd_pct: number | null;
   sortino: number | null;
   short_gap_pct?: number | null;
@@ -364,6 +368,8 @@ export function PortfolioClient() {
     return_3m_pct: null,
     return_6m_pct: null,
     return_12m_pct: null,
+    return_24m_pct: null,
+    return_36m_pct: null,
     mdd_pct: null,
     sortino: null,
     short_gap_pct: null,
@@ -428,6 +434,8 @@ export function PortfolioClient() {
               return_3m_pct: metrics.return_3m_pct,
               return_6m_pct: metrics.return_6m_pct,
               return_12m_pct: metrics.return_12m_pct,
+              return_24m_pct: metrics.return_24m_pct,
+              return_36m_pct: metrics.return_36m_pct,
               mdd_pct: metrics.mdd_pct,
               sortino: metrics.sortino,
               memo: metrics.memo,
@@ -584,6 +592,9 @@ export function PortfolioClient() {
       { field: "return_3m_pct", headerName: "3달", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
       { field: "return_6m_pct", headerName: "6달", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
       { field: "return_12m_pct", headerName: "1년", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
+      // 캐시 이력이 그 기간보다 짧은 종목은 "-" (백엔드가 None 을 준다 — 값을 추정하지 않는다).
+      { field: "return_24m_pct", headerName: "2년", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
+      { field: "return_36m_pct", headerName: "3년", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
       { field: "mdd_pct", headerName: "MDD", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
       {
         field: "sortino",

@@ -181,6 +181,9 @@ def _build_return_map(close_frame: pd.DataFrame) -> dict[str, dict[str, float | 
             "return_3m_pct": period_return_pct(series, 3, eval_date),
             "return_6m_pct": period_return_pct(series, 6, eval_date),
             "return_12m_pct": period_return_pct(series, 12, eval_date),
+            # 캐시 이력이 그 기간보다 짧으면 None(화면 "-") — 값을 추정하지 않는다.
+            "return_24m_pct": period_return_pct(series, 24, eval_date),
+            "return_36m_pct": period_return_pct(series, 36, eval_date),
         }
     return result
 
