@@ -3622,6 +3622,17 @@ a {
   background: rgba(148, 163, 184, 0.36);
 }
 
+/* 진입 문턱 미달 행(순위 화면) — 0선(이평선) 위인데 이 풀의 진입 문턱만 못 넘은 상태.
+   이탈(진한 회색)과 구분되게 **밝은 회색**으로만 눌러 둔다. 문턱이 '없음'인 풀에는 안 나온다. */
+.ag-row.appEntryBlockedRow {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-muted, #64748b);
+}
+
+.ag-row.appEntryBlockedRow:hover {
+  background: rgba(148, 163, 184, 0.2);
+}
+
 /* 고정 자산(IS) 행 — 사고팔 수 없는 항목이라 **줄 전체**를 노란 배경으로 구분한다.
    추세 이탈 행(.appTrendBrokenRow)이 회색 줄로 구분되는 것과 같은 방식이다.
    자산 관리·자산 헬퍼·합성 화면이 같은 클래스를 쓴다(web/lib/fixed-asset.ts). */
