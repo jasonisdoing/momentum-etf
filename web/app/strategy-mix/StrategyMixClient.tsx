@@ -832,7 +832,9 @@ export function StrategyMixClient() {
           held_value: groupHeld > 0 ? groupHeld : null,
           actual_weight_pct: groupActual > 0 ? groupActual : null,
           current_weight_pct: groupCurrent > 0 ? groupCurrent : undefined,
-          group_note: `슬롯 ${summary.slots_used}/${summary.top_n} · 슬리브 현금 ${summary.cash_pct.toFixed(1)}%`,
+          group_note:
+            `슬롯 ${summary.slots_used}/${summary.top_n} · 슬리브 현금 ${summary.cash_pct.toFixed(1)}%` +
+            (totalAsset == null ? "" : ` ${formatAmount((totalAsset * summary.cash_pct) / 100)}`),
         },
         ...members,
       );
@@ -867,7 +869,7 @@ export function StrategyMixClient() {
 
     return [totalRow, cashRow, ...groupedRows, ...leftoverRows];
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
-  }, [positions, quotes, totalAsset, sleeves]);
+  }, [positions, quotes, totalAsset, sleeves, formatAmount]);
 
   // ── 차트 탭 (공용 HoldingChart — 슬리브별 기준선은 백엔드가 내려준다) ──
   const [holdingsTab, setHoldingsTab] = useState<HoldingsTab>("list");
@@ -1977,40 +1979,8 @@ export function StrategyMixClient() {
                   />
                   )}
 
-                  {/* ③ 배분 — 합계 · 모멘텀 · 신고가 세 줄. 각 줄에 배정 금액과 주식·현금. */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {(() => {
-                      const amount = (pct: number) => (totalAsset == null ? null : (totalAsset * pct) / 100);
-                      // 슬리브 몫은 월초 배분에서 각자 흘러간 비율(alloc_pct)이다.
-                      // 그 안에서 채운 슬롯이 주식·빈 슬롯이 현금이다.
-                      const rows = slotKeys.flatMap((slot) => {
-                        const summary = positions.summary.slots[slot];
-                        if (!summary) return [];
-                        return [
-                          {
-                            key: slot,
-                            label: slotLabel(slot),
-                            allocPct: summary.alloc_pct,
-                            stockPct: summary.alloc_pct - summary.cash_pct,
-                            cashPct: summary.cash_pct,
-                            slots: `${summary.slots_used}/${summary.top_n}`,
-                          },
-                        ];
-                      });
-                      return rows.map((row) => (
-                        <div key={row.key} style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                          <strong style={{ minWidth: 52 }}>{row.label}</strong>
-                          <span style={hintStyle}>
-                            {totalAsset != null ? `${formatAmount(amount(row.allocPct))} · ` : ""}
-                            주식 {row.stockPct.toFixed(1)}%
-                            {totalAsset != null ? ` ${formatAmount(amount(row.stockPct))}` : ""} · 현금{" "}
-                            {row.cashPct.toFixed(1)}%
-                            {totalAsset != null ? ` ${formatAmount(amount(row.cashPct))}` : ""} · 슬롯 {row.slots}
-                          </span>
-                        </div>
-                      ));
-                    })()}
-                  </div>
+                  {/* (예전 ③ 슬리브별 배분 요약 줄은 제거 — 같은 정보가 보유 표의
+                      슬리브 그룹 헤더 행(금액·몫·슬롯·슬리브 현금)에 들어갔다.) */}
 
                   {/* ④ 오늘의 액션 — 실행일이 그 시장의 현지 오늘인 묶음(보유 표와 같은 종목 순서). */}
                   <div>
