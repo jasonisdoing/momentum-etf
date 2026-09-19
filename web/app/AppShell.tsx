@@ -101,7 +101,7 @@ function formatRate(value: number | undefined): string {
   if (!value || Number.isNaN(value)) {
     return "-";
   }
-  return `${new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(value)}원`;
+  return `${new Intl.NumberFormat("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}원`;
 }
 
 function formatChangePct(value: number | undefined): string {
