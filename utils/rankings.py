@@ -828,6 +828,24 @@ def build_ticker_type_rankings(
     if callable(status_callback):
         status_callback("기준 종가 캐시 로드")
     cached_close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, tickers)
+    # 확정 종가 결손 차단 — 위에서 캐시 문서 존재·신선도를 이미 통과했으므로, 여기서 시리즈가
+    # 없거나 비면 조회·역직렬화 결함이다. 그대로 진행하면 실시간 한 점으로 이평선을 계산해
+    # 이탈 0.0% 같은 그럴듯한 오답이 표가 되므로, 표 대신 차단 결과(에러 표시)를 내보낸다.
+    series_missing_tickers = sorted(
+        ticker for ticker in tickers if (series := cached_close_series_map.get(ticker)) is None or series.empty
+    )
+    if series_missing_tickers:
+        logger.warning(
+            "[rankings] type=%s blocked 확정 종가 시리즈 결손 tickers=%s",
+            ticker_type,
+            series_missing_tickers[:20],
+        )
+        return _build_blocked_rankings_result(
+            latest_trading_day=latest_trading_day,
+            cache_updated_at=latest_cache_updated_at,
+            missing_tickers=series_missing_tickers,
+            stale_tickers=[],
+        )
     if callable(status_callback):
         status_callback("실시간 가격 조회")
     today_korea = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()

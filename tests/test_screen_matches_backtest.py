@@ -90,9 +90,14 @@ def _expected_mix_targets(ctx: dict[str, Any]) -> set[str]:
     진입 예정(빈 자리만큼)을 더한 '다음 시가 이후의 보유'다.
     """
     from utils.mix_sleeve import PORTFOLIO, current_state
+    from utils.strategy_mix_service import mix_weights_for_account
 
+    weights = mix_weights_for_account(ctx["account_id"])
     expected: set[str] = set()
     for spec in ctx["slots"]:
+        # 계좌 비중 0% 슬리브 — 배분이 없으니 목표 주수도 0 이 맞다(화면과 동일 기준).
+        if float(weights.get(f"{spec.key}_pct") or 0) <= 0:
+            continue
         positions = current_state(spec)
         if spec.strategy == PORTFOLIO:
             expected |= {row["ticker"] for row in positions["open_positions"] if row["sleeve_weight_pct"] > 0}

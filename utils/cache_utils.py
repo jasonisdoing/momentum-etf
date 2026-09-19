@@ -399,10 +399,9 @@ def _load_cached_frames_bulk_uncached(account_id: str, tickers: Iterable[str]) -
         return {}
 
     frames: dict[str, pd.DataFrame] = {}
-    try:
-        cursor = collection.find({"ticker": {"$in": list(set(normalized))}})
-    except Exception:
-        return {}
+    # DB 조회 실패는 그대로 예외로 올린다 — 빈 결과로 삼키면 "데이터 없음"과 구분이 안 되고,
+    # 그 빈 결과가 프레임 캐시에 저장돼 이격 0.0% 같은 그럴듯한 오답이 화면에 남는다.
+    cursor = collection.find({"ticker": {"$in": list(set(normalized))}})
 
     for doc in cursor:
         ticker = (doc.get("ticker") or "").strip().upper()
@@ -433,12 +432,11 @@ def load_cached_close_series_bulk(account_id: str, tickers: Iterable[str]) -> di
     series_map: dict[str, pd.Series] = {}
     collection_name = collection.name
 
-    try:
-        metadata_cursor = collection.find(
-            {"ticker": {"$in": list(set(normalized))}}, {"_id": 0, "ticker": 1, "updated_at": 1}
-        )
-    except Exception:
-        return {}
+    # DB 조회 실패는 그대로 예외로 올린다 — 빈/부분 결과로 삼키면 호출부가 "종가 없음"으로
+    # 오인해 실시간 한 점짜리 시리즈(이격 0.0%)를 만든다. silent default 금지.
+    metadata_cursor = collection.find(
+        {"ticker": {"$in": list(set(normalized))}}, {"_id": 0, "ticker": 1, "updated_at": 1}
+    )
 
     pending_tickers: list[str] = []
     for doc in metadata_cursor:
@@ -456,13 +454,10 @@ def load_cached_close_series_bulk(account_id: str, tickers: Iterable[str]) -> di
     if not pending_tickers:
         return series_map
 
-    try:
-        cursor = collection.find(
-            {"ticker": {"$in": pending_tickers}},
-            {"_id": 0, "ticker": 1, "updated_at": 1, "close_data": 1, "close_column": 1},
-        )
-    except Exception:
-        return series_map
+    cursor = collection.find(
+        {"ticker": {"$in": pending_tickers}},
+        {"_id": 0, "ticker": 1, "updated_at": 1, "close_data": 1, "close_column": 1},
+    )
 
     fallback_tickers: list[str] = []
     for doc in cursor:
@@ -480,13 +475,10 @@ def load_cached_close_series_bulk(account_id: str, tickers: Iterable[str]) -> di
     if not fallback_tickers:
         return series_map
 
-    try:
-        fallback_cursor = collection.find(
-            {"ticker": {"$in": fallback_tickers}},
-            {"_id": 0, "ticker": 1, "updated_at": 1, "data": 1, "columns": 1},
-        )
-    except Exception:
-        return series_map
+    fallback_cursor = collection.find(
+        {"ticker": {"$in": fallback_tickers}},
+        {"_id": 0, "ticker": 1, "updated_at": 1, "data": 1, "columns": 1},
+    )
 
     for doc in fallback_cursor:
         ticker = (doc.get("ticker") or "").strip().upper()
@@ -527,16 +519,14 @@ def load_cached_close_series_bulk_before_or_at(
     series_map: dict[str, pd.Series] = {}
     collection_name = collection.name
 
-    try:
-        metadata_cursor = collection.find(
-            {
-                "ticker": {"$in": list(set(normalized))},
-                "updated_at": {"$lte": completed_at},
-            },
-            {"_id": 0, "ticker": 1, "updated_at": 1},
-        )
-    except Exception:
-        return {}
+    # DB 조회 실패는 그대로 예외로 올린다 — 부분 결과로 삼키면 결손이 데이터 없음으로 보인다.
+    metadata_cursor = collection.find(
+        {
+            "ticker": {"$in": list(set(normalized))},
+            "updated_at": {"$lte": completed_at},
+        },
+        {"_id": 0, "ticker": 1, "updated_at": 1},
+    )
 
     pending_tickers: list[str] = []
     for doc in metadata_cursor:
@@ -554,16 +544,13 @@ def load_cached_close_series_bulk_before_or_at(
     if not pending_tickers:
         return series_map
 
-    try:
-        cursor = collection.find(
-            {
-                "ticker": {"$in": pending_tickers},
-                "updated_at": {"$lte": completed_at},
-            },
-            {"_id": 0, "ticker": 1, "updated_at": 1, "close_data": 1, "close_column": 1},
-        )
-    except Exception:
-        return series_map
+    cursor = collection.find(
+        {
+            "ticker": {"$in": pending_tickers},
+            "updated_at": {"$lte": completed_at},
+        },
+        {"_id": 0, "ticker": 1, "updated_at": 1, "close_data": 1, "close_column": 1},
+    )
 
     fallback_tickers: list[str] = []
     for doc in cursor:
@@ -581,16 +568,13 @@ def load_cached_close_series_bulk_before_or_at(
     if not fallback_tickers:
         return series_map
 
-    try:
-        fallback_cursor = collection.find(
-            {
-                "ticker": {"$in": fallback_tickers},
-                "updated_at": {"$lte": completed_at},
-            },
-            {"_id": 0, "ticker": 1, "updated_at": 1, "data": 1, "columns": 1},
-        )
-    except Exception:
-        return series_map
+    fallback_cursor = collection.find(
+        {
+            "ticker": {"$in": fallback_tickers},
+            "updated_at": {"$lte": completed_at},
+        },
+        {"_id": 0, "ticker": 1, "updated_at": 1, "data": 1, "columns": 1},
+    )
 
     for doc in fallback_cursor:
         ticker = (doc.get("ticker") or "").strip().upper()
