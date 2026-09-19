@@ -450,6 +450,18 @@ type PositionRow = Holding & {
   memo?: string;
   amount: number | null;
   shares: number | null;
+  /** 행 고유 키 — 같은 종목이 여러 슬리브에 분리 표시되므로 티커만으로는 겹친다. */
+  row_key?: string;
+  /** 맨 위 전체 합계 행. */
+  is_total?: boolean;
+  /** 슬리브 그룹 헤더 행 — 그 슬리브의 합계·요약을 담는다. */
+  is_group?: boolean;
+  /** 이 행이 속한 슬리브(분리 표시). 현금·전량 매도·고정 자산 행은 없다. */
+  group_slot?: string;
+  /** 그룹·합계 행의 상태 칸 문구(슬롯 n/n · 현금 % 등). */
+  group_note?: string;
+  /** 여러 슬리브에 걸친 종목의 이 슬리브 몫 비율(0~1) — 금액 분할에 쓴 값. */
+  split_factor?: number;
 };
 
 /** 오늘의 액션 한 줄. 같은 체결 시점끼리 묶고 묶음 안에서는 보유 표와 같은 종목 순서다. */
@@ -739,36 +751,123 @@ export function StrategyMixClient() {
           : (totalAsset * positions.summary.actual_cash_pct) / 100,
       shares: null,
     };
-    // 목표 종목 행은 백엔드가 종목 단위로 합쳐 계산한 값을 그대로 쓴다.
-    // 현금만 맨 위에 두고, 나머지는 **백엔드가 준 순서 그대로** 둔다 — A 슬리브의 선정 순위,
-    // 그 다음 B 슬리브, 마지막이 목표에 없는 보유(전량 매도)다. 각 전략 화면과 같은 순서라
-    // 두 화면을 나란히 놓고 대조할 수 있다. 티커 순으로 다시 세우면 그 순위가 사라진다.
-    return [
-      cashRow,
-      ...positions.holdings
-        .map((holding) => {
-          // 표시용 가격만 실시간으로 덮어쓴다 — 목표·매매수량은 판정 결과 그대로.
-          const quote = quotes[holding.ticker];
-          const price = quote ? quote.price : holding.price;
-          // 수익률은 **화면에 보이는 현재가**로 다시 낸다. 백엔드 값은 판정 시점(전날 종가)
-          // 기준이라, 가격만 실시간으로 바꾸면 한 행에서 현재가와 수익률의 기준이 갈린다
-          // (장중 +7.77% 인 종목이 수익률 칸에서는 -6.19% 로 보였다).
-          const avg = holding.average_buy_price;
-          const returnPct =
-            price != null && price > 0 && avg != null && avg > 0 ? (price / avg - 1) * 100 : holding.return_pct ?? null;
-          return {
-            ...holding,
-            price,
-            change_pct: quote ? quote.change_pct : holding.change_pct,
-            return_pct: returnPct,
-            amount: holding.target_amount ?? null,
-            shares: holding.target_quantity ?? null,
-            unaffordable: holding.unaffordable ?? false,
-            actual_weight_pct: holding.actual_weight_pct ?? null,
-          };
-        }),
-    ];
-  }, [positions, quotes, totalAsset]);
+    // 목표 종목 행은 백엔드가 종목 단위로 합쳐 계산한 값에서 출발한다(표시용 가격만 실시간).
+    const toRow = (holding: Holding): PositionRow => {
+      const quote = quotes[holding.ticker];
+      const price = quote ? quote.price : holding.price;
+      // 수익률은 **화면에 보이는 현재가**로 다시 낸다. 백엔드 값은 판정 시점(전날 종가)
+      // 기준이라, 가격만 실시간으로 바꾸면 한 행에서 현재가와 수익률의 기준이 갈린다
+      // (장중 +7.77% 인 종목이 수익률 칸에서는 -6.19% 로 보였다).
+      const avg = holding.average_buy_price;
+      const returnPct =
+        price != null && price > 0 && avg != null && avg > 0 ? (price / avg - 1) * 100 : holding.return_pct ?? null;
+      return {
+        ...holding,
+        row_key: holding.ticker,
+        price,
+        change_pct: quote ? quote.change_pct : holding.change_pct,
+        return_pct: returnPct,
+        amount: holding.target_amount ?? null,
+        shares: holding.target_quantity ?? null,
+        unaffordable: holding.unaffordable ?? false,
+        actual_weight_pct: holding.actual_weight_pct ?? null,
+      };
+    };
+
+    // 슬리브별 그룹으로 나눈다 — 종목 순서는 슬리브 안에서 백엔드 순서(전략 선정 순위) 그대로.
+    // 여러 슬리브에 걸친 종목은 **분리 표시**한다: 각 그룹에 그 슬리브 몫만큼 나눠 담아
+    // 그룹 합계가 정확해진다(비중·금액은 몫 비율로 분할, 계좌 수량은 종목 단위라 그대로 둔다).
+    const slotSummaries = positions.summary.slots;
+    const groupedRows: PositionRow[] = [];
+    const sums = { amount: 0, held: 0, actual: 0, current: 0 };
+    for (const slot of Object.keys(slotSummaries)) {
+      const members: PositionRow[] = [];
+      for (const holding of positions.holdings) {
+        if (holding.is_sell_all || holding.is_fixed_asset) continue;
+        if (!(holding.sources ?? []).includes(slot)) continue;
+        const base = toRow(holding);
+        const slotWeight = holding.slots?.[slot]?.weight ?? 0;
+        const factor =
+          holding.weight_pct > 0
+            ? slotWeight / holding.weight_pct
+            : 1 / Math.max(holding.sources.length, 1);
+        members.push({
+          ...base,
+          row_key: `${slot}:${holding.ticker}`,
+          group_slot: slot,
+          sources: [slot],
+          slots: { [slot]: holding.slots?.[slot] ?? {} },
+          weight_pct: slotWeight,
+          split_factor: factor,
+          amount: base.amount == null ? null : base.amount * factor,
+          held_value: base.held_value == null ? null : base.held_value * factor,
+          actual_weight_pct: base.actual_weight_pct == null ? null : base.actual_weight_pct * factor,
+          current_weight_pct:
+            base.current_weight_pct == null ? undefined : base.current_weight_pct * factor,
+        });
+      }
+      const summary = slotSummaries[slot];
+      const groupAmount = totalAsset == null ? null : (totalAsset * summary.alloc_pct) / 100;
+      const groupHeld = members.reduce((acc, row) => acc + (row.held_value ?? 0), 0);
+      const groupActual = members.reduce((acc, row) => acc + (row.actual_weight_pct ?? 0), 0);
+      const groupCurrent = members.reduce((acc, row) => acc + (row.current_weight_pct ?? 0), 0);
+      sums.amount += groupAmount ?? 0;
+      sums.held += groupHeld;
+      sums.actual += groupActual;
+      sums.current += groupCurrent;
+      groupedRows.push(
+        {
+          ticker: `__group_${slot}__`,
+          row_key: `__group_${slot}__`,
+          name: slotLabel(slot),
+          is_group: true,
+          group_slot: slot,
+          sources: [],
+          slots: {},
+          weight_pct: summary.alloc_pct,
+          price: null,
+          change_pct: null,
+          amount: groupAmount,
+          shares: null,
+          held_value: groupHeld > 0 ? groupHeld : null,
+          actual_weight_pct: groupActual > 0 ? groupActual : null,
+          current_weight_pct: groupCurrent > 0 ? groupCurrent : undefined,
+          group_note: `슬롯 ${summary.slots_used}/${summary.top_n} · 슬리브 현금 ${summary.cash_pct.toFixed(1)}%`,
+        },
+        ...members,
+      );
+    }
+
+    // 전량 매도·고정 자산·소속 슬리브 없는 행 — 어느 그룹에도 안 들어가 맨 아래에 둔다.
+    const leftoverRows = positions.holdings
+      .filter(
+        (holding) =>
+          holding.is_sell_all || holding.is_fixed_asset || (holding.sources ?? []).length === 0,
+      )
+      .map(toRow);
+
+    // 전체 합계 — 계좌 총자산 기준. 수량 컬럼은 종목 단위 값이라 합계를 내지 않는다.
+    const totalRow: PositionRow = {
+      ticker: "__total__",
+      row_key: "__total__",
+      name: "합계",
+      is_total: true,
+      sources: [],
+      slots: {},
+      weight_pct: 100,
+      price: null,
+      change_pct: null,
+      amount: totalAsset,
+      shares: null,
+      held_value: totalAsset,
+      actual_weight_pct: positions.summary.actual_stock_pct + positions.summary.actual_cash_pct,
+      current_weight_pct: totalAsset != null ? 100 : undefined,
+      group_note: `주식 ${positions.summary.stock_pct.toFixed(1)}% · 현금 ${positions.summary.cash_pct.toFixed(1)}%`,
+    };
+
+    return [totalRow, cashRow, ...groupedRows, ...leftoverRows];
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
+  }, [positions, quotes, totalAsset, sleeves]);
 
   // ── 차트 탭 (공용 HoldingChart — 슬리브별 기준선은 백엔드가 내려준다) ──
   const [holdingsTab, setHoldingsTab] = useState<HoldingsTab>("list");
@@ -777,11 +876,17 @@ export function StrategyMixClient() {
   const [chartsError, setChartsError] = useState<string | null>(null);
   // 차트 기간(개월) — 백엔드 config.HOLDING_CHART_MONTHS 가 단일 소스. 응답에서 받아 문구에 쓴다.
   const [chartMonths, setChartMonths] = useState<number | null>(null);
-  // 차트 대상 — 현금·고정 자산 제외. 전량 매도 대상은 아직 보유 중이라 포함한다.
-  const chartRows = useMemo(
-    () => positionRows.filter((row) => !row.is_cash && !row.is_fixed_asset),
-    [positionRows],
-  );
+  // 차트 대상 — 현금·고정 자산·합계·그룹 행 제외. 전량 매도 대상은 아직 보유 중이라 포함한다.
+  // 분리 표시로 같은 종목이 두 그룹에 있으면 차트는 한 번만 그린다.
+  const chartRows = useMemo(() => {
+    const seen = new Set<string>();
+    return positionRows.filter((row) => {
+      if (row.is_cash || row.is_fixed_asset || row.is_group || row.is_total) return false;
+      if (seen.has(row.ticker)) return false;
+      seen.add(row.ticker);
+      return true;
+    });
+  }, [positionRows]);
   const chartKey = useMemo(
     () => `${accountId}|${chartRows.map((row) => row.ticker).join(",")}`,
     [accountId, chartRows],
@@ -830,19 +935,24 @@ export function StrategyMixClient() {
 
   const positionColumns = useMemo<ColDef<PositionRow>[]>(() => {
     const columns: ColDef<PositionRow>[] = [
-      // 슬리브별 상태 — 맨 앞에 슬리브 수만큼. 색(진입 파랑 / 매도 회색)만으로는 어느
-      // 슬리브에서 무슨 일이 나는지 알 수 없어, 슬리브 몫 컬럼과 같은 이름으로 나란히 둔다.
-      ...slotKeys.map<ColDef<PositionRow>>((slot) => ({
-        colId: `slot_status_${slot}`,
-        headerName: slotLabel(slot),
+      // 상태 — 행이 속한 슬리브 하나의 상태만 보여주면 되므로(분리 표시) 컬럼 1개로 충분하다.
+      // 예전에는 슬리브 수만큼 옆으로 늘어놔 빈 칸이 대부분이었다.
+      {
+        colId: "slot_status",
+        headerName: "상태",
         pinned: "left",
-        width: 150,
+        width: 132,
         sortable: false,
         cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+        valueGetter: (p: { data?: PositionRow }) => {
+          const slot = p.data?.group_slot;
+          return slot ? (p.data?.slots?.[slot]?.plan ?? "") : "";
+        },
         // 문구는 각 전략 화면과 **같은 함수**로 그린다 — 여기서 만들면 표현이 갈린다.
         // 포트폴리오만 진입·이탈 판정이 없어 저장 비중 문구를 그대로 보여준다.
-        valueGetter: (p: { data?: PositionRow }) => p.data?.slots?.[slot]?.plan ?? "",
         cellRenderer: (p: { data?: PositionRow }) => {
+          const slot = p.data?.group_slot;
+          if (!slot || p.data?.is_group) return null;
           const cell = p.data?.slots?.[slot];
           if (!cell?.plan) return null;
           if (String(cell.status ?? "").startsWith("전략 비중")) {
@@ -860,59 +970,44 @@ export function StrategyMixClient() {
             { fillDay: positions?.next_trading_day },
           );
         },
-      })),
+      },
       // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
       // 현금·고정 자산 행만 화면 고유 표기다(종목이 아니라 링크·배지를 걸지 않는다).
       tickerColumn<PositionRow>({
         cellRenderer: (p) => {
-          if (p.data?.is_cash) return <span>-</span>;
+          if (p.data?.is_cash || p.data?.is_group || p.data?.is_total) return <span>-</span>;
           if (p.data?.is_fixed_asset) return <span>{FIXED_ASSET_TICKER}</span>;
           return <TickerDetailLink ticker={p.value} />;
         },
       }),
       stockNameColumn<PositionRow>({
         // 굵기는 주지 않는다 — 다른 화면의 종목명과 같은 무게로 보여야 표가 한 벌로 읽힌다.
-        cellStyle: (p) => (p.data?.is_cash ? { color: "var(--text-muted)" } : null),
+        // (합계·그룹 행만 굵게 — 종목이 아니라 구분선이다.)
+        cellStyle: (p): CellStyle | null => {
+          if (p.data?.is_group || p.data?.is_total) return { fontWeight: 700 };
+          if (p.data?.is_cash) return { color: "var(--text-muted)" };
+          return null;
+        },
         cellRenderer: (p) =>
           p.data?.is_fixed_asset ? (
             <span>{FIXED_ASSET_NAME}</span>
-          ) : p.data?.is_cash ? (
+          ) : p.data?.is_cash || p.data?.is_group || p.data?.is_total ? (
             <span>{p.value ?? "-"}</span>
           ) : (
             renderStockNameCell(p.value, { isNew: Boolean(p.data?.new_listing), newMonths: p.data?.listing_months ?? null })
           ),
       }),
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다).
-      // 현금 행은 종목이 아니라 편집 대상이 아니다.
+      // 현금·합계·그룹 행은 종목이 아니라 편집 대상이 아니다.
       stockMemoColumn<PositionRow>({
         field: "memo",
-        editable: (row) => !row?.is_cash && !row?.is_fixed_asset,
+        editable: (row) => !row?.is_cash && !row?.is_fixed_asset && !row?.is_group && !row?.is_total,
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
       }),
       // 업종 — 전략 화면과 같은 공용 컬럼. ETF 만 담은 계좌는 값이 없어 통째로 숨긴다.
       industryColumn<PositionRow>({ hide: !hasIndustryData }),
-      {
-        field: "sources",
-        headerName: "전략",
-        width: 110,
-        cellClass: "appWrapCell",
-        // 배열 필드는 AG Grid가 object 타입으로 추론하므로 문자열 포매터를 명시한다.
-        valueFormatter: (p) => {
-          const sources = Array.isArray(p.value) ? p.value : [];
-          return sources.length === 0 ? "-" : sources.map((source) => slotLabel(String(source))).join("·");
-        },
-        // 슬리브 이름은 사용자가 붙이는 값이라 길어질 수 있다. 종목명과 같은 공용 클래스로
-        // 최대 2줄까지 보여주고 넘치면 말줄임한다(칸 폭을 늘리면 표가 옆으로 밀린다).
-        cellRenderer: (p: { valueFormatted?: string | null }) => {
-          // 여러 슬리브가 같은 종목을 담으면 한 행에 모두 표시된다 (비중은 합산).
-          const text = p.valueFormatted ?? "-";
-          return (
-            <span className="appNameCellText" title={text}>
-              {text}
-            </span>
-          );
-        },
-      },
+      // (예전 「전략」 컬럼은 제거 — 슬리브 그룹 행이 소속을 보여준다. 여러 슬리브에 걸친
+      //  종목은 각 그룹에 분리 표시된다.)
       // 아래 순서·명칭은 /assets 계좌 보유 표와 맞춘다
       // (일간→현재가→비중→목표비중→목표수량→수량→수익률→평가 금액).
       {
@@ -1058,16 +1153,17 @@ export function StrategyMixClient() {
             return { color: signColor(p.value as number), fontWeight: 700, opacity: 1 };
           },
         },
-        ...slotKeys.map<ColDef<PositionRow>>((slot) => ({
-          colId: `slot_weight_${slot}`,
-          headerName: slotLabel(slot),
-          width: 104,
+        {
+          colId: "slot_weight",
+          headerName: "몫(%)",
+          headerTooltip: "이 슬리브 안에서 이 종목이 차지하는 몫 — 그룹 행은 슬리브 전체 몫(월초 배분에서 흘러간 비율).",
+          width: 84,
           type: "numericColumn",
-          valueGetter: (p) => p.data?.slots?.[slot]?.weight ?? null,
+          valueGetter: (p) => (p.data?.is_cash ? null : p.data?.weight_pct ?? null),
           valueFormatter: (p) =>
             p.value == null || (p.value as number) === 0 ? "-" : `${(p.value as number).toFixed(2)}%`,
           cellStyle: { color: "var(--text-muted)" },
-        })),
+        },
         {
           colId: "held_for",
           headerName: "보유일",
@@ -1124,6 +1220,7 @@ export function StrategyMixClient() {
       minWidth: 260,
       valueGetter: (p) => {
         if (!p.data) return "";
+        if (p.data.is_total || p.data.is_group) return p.data.group_note ?? "";
         if (p.data.is_cash) return "미배분 현금";
         if (p.data.is_fixed_asset) return "고정 자산 (합성이 매매하지 않음)";
         if (p.data.is_sell_all) return "전량 매도 (목표에 없음)";
@@ -1852,10 +1949,12 @@ export function StrategyMixClient() {
                     columnDefs={positionColumns}
                     theme={gridTheme}
                     minHeight="auto"
-                    getRowId={(p) => p.data.ticker}
+                    getRowId={(p) => p.data.row_key ?? p.data.ticker}
                     // 아직 체결 전인 행(진입 예정)과 곧 나갈 행(매도 예정)은 확정 보유와
                     // 구분되게 회색으로 눌러 둔다 — 추세 이탈 행과 같은 공용 클래스.
                     getRowClass={(params) => {
+                      // 합계·슬리브 그룹 행 — 자산 화면 그룹 구분선과 같은 공용 클래스.
+                      if (params.data?.is_total || params.data?.is_group) return "assetsGroupRow";
                       // 고정 자산은 사고팔 수 없는 줄이라 전체를 노랗게 구분한다.
                       if (params.data?.is_fixed_asset) return FIXED_ASSET_ROW_CLASS;
                       if (params.data?.is_sell_all) return "appTrendBrokenRow";

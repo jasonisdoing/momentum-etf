@@ -1357,6 +1357,22 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return null;
         },
       },
+      // 기간 수익률 — 기본 모드와 중복이지만 정보 모드에서도 성과를 함께 보게 둔다.
+      ...[
+        { field: "12달(%)", headerName: "1년" },
+        { field: "24달(%)", headerName: "2년" },
+        { field: "36달(%)", headerName: "3년" },
+      ].map(
+        ({ field, headerName }) =>
+          ({
+            field,
+            headerName,
+            minWidth: 78,
+            width: 78,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
+          }) as ColDef<RankGridRow>,
+      ),
     ];
 
     const columnsByMode: Record<MetricMode, ColDef<RankGridRow>[]> = {
