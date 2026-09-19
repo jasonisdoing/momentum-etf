@@ -462,6 +462,8 @@ type PositionRow = Holding & {
   group_note?: string;
   /** 여러 슬리브에 걸친 종목의 이 슬리브 몫 비율(0~1) — 금액 분할에 쓴 값. */
   split_factor?: number;
+  /** 그룹·합계 행의 전략수익률(몫 가중 평균) — 종목 행은 slots 에서 계산한다. */
+  strategy_return_pct?: number | null;
 };
 
 /** 오늘의 액션 한 줄. 같은 체결 시점끼리 묶고 묶음 안에서는 보유 표와 같은 종목 순서다. */
@@ -780,6 +782,23 @@ export function StrategyMixClient() {
     const slotSummaries = positions.summary.slots;
     const groupedRows: PositionRow[] = [];
     const sums = { amount: 0, held: 0, actual: 0, current: 0 };
+    // 가중 평균 — 평가 금액이 하나도 없으면(첫날 등) 목표 금액으로 가중하고, 둘 다 없으면 null.
+    const weightedAvg = (
+      rows: PositionRow[],
+      value: (row: PositionRow) => number | null | undefined,
+      weight: (row: PositionRow) => number,
+    ): number | null => {
+      const pairs = rows
+        .map((row) => ({ v: value(row), w: weight(row) }))
+        .filter((pair): pair is { v: number; w: number } => pair.v != null && pair.w > 0);
+      const total = pairs.reduce((acc, pair) => acc + pair.w, 0);
+      if (total <= 0) return null;
+      return pairs.reduce((acc, pair) => acc + (pair.v * pair.w) / total, 0);
+    };
+    const valueWeight = (row: PositionRow) => row.held_value ?? row.amount ?? 0;
+    const memberStrategyReturn = (row: PositionRow): number | null =>
+      row.group_slot ? (row.slots?.[row.group_slot]?.return_pct ?? null) : null;
+    const allMembers: PositionRow[] = [];
     for (const slot of Object.keys(slotSummaries)) {
       const members: PositionRow[] = [];
       for (const holding of positions.holdings) {
@@ -815,6 +834,7 @@ export function StrategyMixClient() {
       sums.held += groupHeld;
       sums.actual += groupActual;
       sums.current += groupCurrent;
+      allMembers.push(...members);
       groupedRows.push(
         {
           ticker: `__group_${slot}__`,
@@ -826,7 +846,10 @@ export function StrategyMixClient() {
           slots: {},
           weight_pct: summary.alloc_pct,
           price: null,
-          change_pct: null,
+          // 일간·수익률 = 평가 금액 가중 평균, 전략수익률 = 슬리브 몫 가중 평균.
+          change_pct: weightedAvg(members, (row) => row.change_pct, valueWeight),
+          return_pct: weightedAvg(members, (row) => row.return_pct, (row) => row.held_value ?? 0),
+          strategy_return_pct: weightedAvg(members, memberStrategyReturn, (row) => row.weight_pct),
           amount: groupAmount,
           shares: null,
           held_value: groupHeld > 0 ? groupHeld : null,
@@ -858,7 +881,15 @@ export function StrategyMixClient() {
       slots: {},
       weight_pct: 100,
       price: null,
-      change_pct: null,
+      // 합계 일간(%) — 현금(변동 0%)을 포함한 계좌 전체의 오늘 움직임.
+      change_pct: weightedAvg(
+        [...allMembers, { change_pct: 0, held_value: positions.account?.cash_balance ?? 0 } as PositionRow],
+        (row) => row.change_pct,
+        valueWeight,
+      ),
+      return_pct: weightedAvg(allMembers, (row) => row.return_pct, (row) => row.held_value ?? 0),
+      // 전략수익률은 슬리브마다 기준(편입가)이 달라 전체 평균은 두지 않는다 — 그룹 행에만 표시.
+      strategy_return_pct: null,
       amount: totalAsset,
       shares: null,
       held_value: totalAsset,
@@ -1189,6 +1220,8 @@ export function StrategyMixClient() {
             "전략 이론값(계좌 실손익 아님) — 각 전략이 잡은 편입가 대비. 여러 슬리브에 걸치면 몫 가중 평균.",
           valueGetter: (p) => {
             if (!p.data) return null;
+            // 그룹·합계 행 — 행 구성 단계에서 몫 가중 평균으로 계산해 둔 값.
+            if (p.data.is_group || p.data.is_total) return p.data.strategy_return_pct ?? null;
             const slots = slotKeys.map((slot) => p.data?.slots?.[slot]).filter(Boolean);
             const parts = slots
               .filter((slot) => slot?.return_pct != null && (slot?.weight ?? 0) > 0)
