@@ -1144,7 +1144,18 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return formatPrice(params.value ?? null, rowCurrency);
         },
       },
-      // MA 이탈(단기·장기) — 현재가 바로 오른쪽. 모멘텀 화면과 같은 공용 컬럼(이탈 임박 강조).
+      // 변동성·RSI — MA 이탈 왼쪽. 진입 문턱(배수×변동성) 판정과 붙여 본다.
+      volatilityColumn<RankGridRow>({ field: "변동성" }),
+      {
+        field: "RSI",
+        headerName: "RSI",
+        hide: metricMode !== "basic",
+        minWidth: 68,
+        width: 68,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => renderRsiCell(params.value ?? null),
+      },
+      // MA 이탈(단기·장기) — 모멘텀 화면과 같은 공용 컬럼(이탈 임박 강조).
       // 진입 문턱(헤더 미리보기 값 포함) — 문턱 안이면 파랑(회색 행·✅과 같은 기준).
       {
         ...maExitGapColumn<RankGridRow>({
@@ -1162,21 +1173,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         }),
         hide: metricMode !== "basic",
       },
-      // 단기 수익률(1주·2주·1달)은 그 오른쪽 — 최근 흐름을 가격과 붙여 본다.
-      ...(["1주(%)", "2주(%)", "1달(%)"] as const).map(
-        (field) =>
-          ({
-            field,
-            headerName: field.replace("(%)", ""),
-            hide: metricMode !== "basic",
-            minWidth: 88,
-            width: 88,
-            type: "rightAligned",
-            cellRenderer: (params: { value: number | null | undefined }) =>
-              renderSignedPercentCell(params.value ?? null),
-          }) as ColDef<RankGridRow>,
-      ),
-      // 공용 컬럼 — 전략 화면들과 같은 정의. 이 화면의 행 필드명만 한국어라 지정해 준다.
+      // 거래대금(공용 컬럼)·1주일 배수 — 1주 수익률 왼쪽. 이 화면의 행 필드명만 한국어라 지정해 준다.
       tradeValueMultColumn<RankGridRow>({
         field: "거래대금",
         liveField: "거래대금(실시간)",
@@ -1190,7 +1187,20 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         headerTooltip: "최근 5거래일 평균 거래대금 ÷ 20일 평균 — 하루 급증이 아니라 한 주 단위의 수급 변화(배치 저장값).",
         hide: metricMode !== "basic",
       }),
-      volatilityColumn<RankGridRow>({ field: "변동성" }),
+      // 단기 수익률(1주·2주·1달) — 최근 흐름.
+      ...(["1주(%)", "2주(%)", "1달(%)"] as const).map(
+        (field) =>
+          ({
+            field,
+            headerName: field.replace("(%)", ""),
+            hide: metricMode !== "basic",
+            minWidth: 88,
+            width: 88,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null | undefined }) =>
+              renderSignedPercentCell(params.value ?? null),
+          }) as ColDef<RankGridRow>,
+      ),
     ];
 
     // 가격과 기간별 수익률. 종목의 성적을 훑어볼 때 보는 기본 화면이다.
@@ -1215,62 +1225,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           } as ColDef<RankGridRow>,
         ]
         : []),
-      // (MA 이탈 단기·장기 컬럼은 현재가 오른쪽으로 이동 — 위 leadingColumns 참조.
+      // (MA 이탈·변동성·RSI·거래대금 컬럼은 현재가 오른쪽으로 이동 — 위 leadingColumns 참조.
       //  단기·장기 이격률 컬럼은 제거 — MA 이탈 두 컬럼과 같은 값의 중복 표시였다.
-      //  MA{장기} 이탈 내림차순 정렬이 곧 표의 순위 순서다.)
-      {
-        field: "RSI",
-        headerName: "RSI",
-        minWidth: 68,
-        width: 68,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) =>
-          renderRsiCell(params.value ?? null),
-      },
-      {
-        headerName: "MDD",
-        minWidth: 80,
-        width: 80,
-        type: "rightAligned",
-        valueGetter: (params) => {
-          const stats = params.data?.backtest_stats;
-          const val = stats?.mdd;
-          return val != null ? val : null;
-        },
-        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
-          if (params.value == null) return "-";
-          return `${params.value.toFixed(2)}%`;
-        },
-        cellStyle: (params: { data?: RankGridRow }) => {
-          const stats = params.data?.backtest_stats;
-          if (stats?.is_partial) {
-            return { color: "#ca8a04", fontWeight: 700 };
-          }
-          return null;
-        },
-      },
-      {
-        headerName: "소르티노",
-        minWidth: 80,
-        width: 80,
-        type: "rightAligned",
-        valueGetter: (params) => {
-          const stats = params.data?.backtest_stats;
-          const val = stats?.sortino;
-          return val != null ? val : null;
-        },
-        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
-          if (params.value == null) return "-";
-          return params.value.toFixed(2);
-        },
-        cellStyle: (params: { data?: RankGridRow }) => {
-          const stats = params.data?.backtest_stats;
-          if (stats?.is_partial) {
-            return { color: "#ca8a04", fontWeight: 700 };
-          }
-          return null;
-        },
-      },
+      //  MA{장기} 이탈 내림차순 정렬이 곧 표의 순위 순서다. MDD·소르티노는 정보 모드로 이동.)
       ...[
         { field: "3달(%)", headerName: "3달" },
         { field: "6달(%)", headerName: "6달" },
@@ -1354,6 +1311,51 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         minWidth: 110,
         width: 110,
         cellRenderer: (params: { value: string | null | undefined }) => String(params.value ?? "-"),
+      },
+      // MDD·소르티노 — 기본 모드에서 옮겨 왔다. 노랑 = 상장 기간이 기준 창보다 짧은 종목(🆕과 같은 기준).
+      {
+        headerName: "MDD",
+        minWidth: 80,
+        width: 80,
+        type: "rightAligned",
+        valueGetter: (params) => {
+          const stats = params.data?.backtest_stats;
+          const val = stats?.mdd;
+          return val != null ? val : null;
+        },
+        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
+          if (params.value == null) return "-";
+          return `${params.value.toFixed(2)}%`;
+        },
+        cellStyle: (params: { data?: RankGridRow }) => {
+          const stats = params.data?.backtest_stats;
+          if (stats?.is_partial) {
+            return { color: "#ca8a04", fontWeight: 700 };
+          }
+          return null;
+        },
+      },
+      {
+        headerName: "소르티노",
+        minWidth: 80,
+        width: 80,
+        type: "rightAligned",
+        valueGetter: (params) => {
+          const stats = params.data?.backtest_stats;
+          const val = stats?.sortino;
+          return val != null ? val : null;
+        },
+        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
+          if (params.value == null) return "-";
+          return params.value.toFixed(2);
+        },
+        cellStyle: (params: { data?: RankGridRow }) => {
+          const stats = params.data?.backtest_stats;
+          if (stats?.is_partial) {
+            return { color: "#ca8a04", fontWeight: 700 };
+          }
+          return null;
+        },
       },
     ];
 
