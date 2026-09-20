@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from datetime import datetime, timedelta
+from math import isfinite
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -523,6 +524,27 @@ def _fetch_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, 
         return {}
 
     result: dict[str, dict[str, float]] = {}
+    if "NQ=F" in normalized_symbols:
+        # 연속 선물 일봉은 월물 전환·사후 갱신으로 quote의 전일 기준과 달라질 수 있다.
+        # 같은 응답의 가격·기준가·변동률만 사용하며 일봉이나 시간봉으로 대체하지 않는다.
+        with yfinance_lock():
+            metadata = yf.Ticker("NQ=F").get_history_metadata()
+        values = {}
+        for field in ("regularMarketPrice", "previousClose", "regularMarketChangePercent"):
+            value = metadata.get(field)
+            if value is None or not isfinite(float(value)):
+                raise RuntimeError(f"나스닥선물 시세 응답에 유효한 {field} 값이 없습니다.")
+            values[field] = float(value)
+        if values["regularMarketPrice"] <= 0 or values["previousClose"] <= 0:
+            raise RuntimeError("나스닥선물 현재가·전일 기준가는 양수여야 합니다.")
+        result["NQ=F"] = {
+            "nowVal": values["regularMarketPrice"],
+            "prevClose": values["previousClose"],
+            "changeRate": round(values["regularMarketChangePercent"], 2),
+        }
+        normalized_symbols = [symbol for symbol in normalized_symbols if symbol != "NQ=F"]
+        if not normalized_symbols:
+            return result
     downloaded = yf.download(
         normalized_symbols,
         period="7d",
@@ -565,8 +587,6 @@ def _fetch_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, 
         if len(close_series) >= 2:
             prev_close = float(close_series.iloc[-2])
 
-        # 선물은 같은 일봉 시계열의 마지막 두 거래일을 비교한다. 조회 시각으로
-        # 시간봉 마감값을 선택하면 주말에 같은 거래일을 전일로 오인하고 가격 기준도 섞인다.
         # 환율의 기존 quote 기준가 처리는 유지한다.
         if symbol.endswith("=X"):
             try:
