@@ -63,10 +63,22 @@ def dated_target_shares(
     for day in sorted(dates):
         effective = {}
         weights: dict[str, float] = {}
+        previous_amounts: dict[str, float] = {}
         for key, targets in targets_by_key.items():
             rows = []
             for target in targets:
                 fill_date = target.get("fill_date") or next_trading_day
+                # 해당 날짜의 진입·청산 직전 합산액. 첫 액션 날짜에도 실제 보유로 추정하지 않는다.
+                existed_before = not (target.get("plan") == "buy" and fill_date >= day)
+                exited_before = bool(target.get("is_exiting")) and fill_date < day
+                if existed_before and not exited_before:
+                    weight = target.get("drift_pct")
+                    if weight is None:
+                        raise ValueError(f"목표 비중이 없습니다: {key} 슬리브 {target.get('ticker')}")
+                    ticker = target["ticker"]
+                    previous_amounts[ticker] = previous_amounts.get(ticker, 0.0) + (
+                        sleeve_amount_krw[key] * float(weight) / 100.0 / krw_rate
+                    )
                 if target.get("plan") == "buy" and fill_date > day:
                     continue
                 row = dict(target)
@@ -83,6 +95,7 @@ def dated_target_shares(
                     )
             effective[key] = rows
         schedule[day] = {
+            "previous_amounts": previous_amounts,
             "quantities": sleeve_target_shares(effective, sleeve_amount_krw, krw_rate),
             "weights": weights,
             "amounts": {ticker: total_assets_krw * weight / 100.0 / krw_rate for ticker, weight in weights.items()},

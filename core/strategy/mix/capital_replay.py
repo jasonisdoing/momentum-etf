@@ -30,6 +30,7 @@ def replay_capital(
     curve = {}
     trades = []
     previous_targets: dict[str, float] = {}
+    first_price_days = {ticker: close[ticker].first_valid_index() for ticker in close.columns}
     for i, day in enumerate(close.index):
         date = str(day.date())
         amounts = targets[date]
@@ -40,19 +41,21 @@ def replay_capital(
             amount = amounts.get(ticker, 0.0)
             price = decision_prices[ticker]
             if pd.isna(price):
-                # 상장 전에는 배정금을 현금으로 유지한다. 과거 가격을 역으로 채우지 않는다.
-                continue
-            exiting = amount < previous_targets.get(ticker, 0.0)
+                # 엔진이 최초 가격일에 편입한 종목만 그날 시가로 초기 배정한다.
+                # 이후의 데이터 누락을 현재가로 메우거나 상장 전으로 가격을 역채우지 않는다.
+                if day != first_price_days[ticker] or amount <= 0:
+                    continue
+                price = opened.at[day, ticker]
+                if pd.isna(price) or price <= 0:
+                    raise ValueError(f"합성 최초 진입 시가가 없습니다: {date} {ticker}")
             trade = capital_trade_quantity(
                 held=held[ticker],
                 price=float(price),
                 target_amount=amount / decision_fx,
                 harvest_pct=harvest_pct,
                 refill_pct=refill_pct,
-                force_exit=False,
+                previous_target_amount=previous_targets.get(ticker, 0.0) / decision_fx,
             )
-            if exiting:
-                trade = min(trade, min(0, math.floor(amount / decision_fx / float(price)) - held[ticker]))
             if trade:
                 orders[ticker] = trade
         # 매도 대금으로 당일 매수를 충당하되 가용 현금을 넘기는 체결은 만들지 않는다.

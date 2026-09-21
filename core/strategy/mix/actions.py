@@ -112,6 +112,7 @@ def build_action_groups(
                     "held_quantity": held,
                     "target_quantity": quantity,
                     "basis_amount": target["amounts"].get(ticker, 0.0),
+                    "previous_basis_amount": target["previous_amounts"].get(ticker, 0.0),
                     "trade_quantity": quantity - held,
                     "weight_pct": target["weights"].get(ticker, 0.0),
                     "is_sell_all": quantity == 0 and held > 0,
@@ -133,7 +134,6 @@ def build_action_groups(
         }
         projected_cash = _apply_tolerance(
             stage_rows,
-            stage_actions,
             harvest_pct=harvest_pct,
             refill_pct=refill_pct,
             cash_balance=projected_cash,
@@ -163,7 +163,6 @@ def build_action_groups(
 
 def _apply_tolerance(
     rows: list[dict[str, Any]],
-    actions: dict[str, Any],
     *,
     harvest_pct: float,
     refill_pct: float,
@@ -178,19 +177,13 @@ def _apply_tolerance(
         price = row.get("price")
         if price is None or not math.isfinite(float(price)) or float(price) <= 0:
             raise ValueError(f"회수·채우기 가격이 없습니다: {row['ticker']}")
-        # 다른 슬리브가 같은 종목을 유지하면 청산된 몫만 강제로 줄인다.
-        exit_signal = any(
-            event["ticker"] == row["ticker"] for slot in actions["slots"].values() for event in slot["sells"]
-        )
-        if exit_signal and row["trade_quantity"] < 0:
-            continue
         row["trade_quantity"] = capital_trade_quantity(
             held=int(row["held_quantity"]),
             price=float(price),
             target_amount=row["basis_amount"],
             harvest_pct=harvest_pct,
             refill_pct=refill_pct,
-            force_exit=False,
+            previous_target_amount=row["previous_basis_amount"],
         )
     # 부족 자금은 경고로 노출한다. 허용 범위 안의 종목을 자금 마련용으로 팔지 않는다.
     return cash_balance - math.fsum(row["trade_quantity"] * float(row.get("price") or 0) for row in rows)
