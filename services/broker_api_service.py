@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import os
-import threading
+import re
 import time
 from typing import Any
 
@@ -25,22 +25,35 @@ _FETCH_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="broker-balance")
 
 # NH API 호출 간격 — 유량 제한(IGW42902, 엔드포인트별 초당 제한)에 걸리지 않게
 # **모든 호출을 최소 1초 간격**으로 직렬화한다. 연속조회 페이지·계좌 순회 포함.
-_MIN_CALL_INTERVAL_SECONDS = 1.0
-_throttle_lock = threading.Lock()
-_last_call_at = 0.0
+# 스로틀 자체는 SDK 가 하고(`NHPLUG_RATE_LIMIT`, 슬라이딩 1초 창), 우리는 값만 정한다 —
+# 여기서 따로 재면 SDK 호출분과 이중으로 걸려 간격이 두 배가 된다.
+_CALLS_PER_SECOND = "1"
 
+# 업무 성공 판정 — SDK 0.4.0 부터 `call()` 은 HTTP 상태만 보고 업무 판정을 하지 않는다
+# (같은 rsp_cd 가 API 마다 뜻이 달라 SDK 가 판정하면 오판한다는 이유로 빠졌다).
+# 나무증권 조회 API 의 성공 코드·메시지 규칙을 여기 한 곳에 둔다.
+_SUCCESS_CODES = frozenset({"00000", "00166", "00221", "13578"})
+#: 성공 메시지 안전망 — NH 성공 응답은 "…완료되었습니다" 형태다. 목록에 없는 정상 코드를
+#: 실패로 오판하지 않기 위한 2차 방어.
+_SUCCESS_MESSAGE_RE = re.compile(r"완료")
 
-def _throttle() -> None:
-    global _last_call_at
-    with _throttle_lock:
-        wait = _last_call_at + _MIN_CALL_INTERVAL_SECONDS - time.monotonic()
-        if wait > 0:
-            time.sleep(wait)
-        _last_call_at = time.monotonic()
-
+# 연속조회 폭주 방지 — 잔고가 이 페이지 수를 넘을 일은 없다.
+_MAX_PAGES = 20
 
 # 등록된 커넥터 — 화면 셀렉트가 이 목록을 그대로 쓴다.
 PROVIDERS: tuple[dict[str, str], ...] = ({"id": "NAMU_PLUG", "name": "나무증권 (NH PLUG)"},)
+
+
+def _is_business_success(rsp_cd: str | None, rsp_msg: str | None) -> bool:
+    """업무 성공 여부 — 코드 allowlist 우선, 없으면 메시지의 '완료' 로 본다.
+
+    `rsp_cd` 가 없는 응답(토큰 등)은 판정 대상이 아니라 성공으로 둔다.
+    """
+    if rsp_cd is None:
+        return True
+    if str(rsp_cd) in _SUCCESS_CODES:
+        return True
+    return bool(rsp_msg and _SUCCESS_MESSAGE_RE.search(rsp_msg))
 
 
 class BrokerApiError(RuntimeError):
@@ -72,6 +85,7 @@ def _ensure_env() -> None:
         raise BrokerApiError(f".env 에 {key_name} / {secret_name} 가 필요합니다.")
     os.environ.setdefault("NHPLUG_APP_KEY", key)
     os.environ.setdefault("NHPLUG_APP_SECRET", secret)
+    os.environ.setdefault("NHPLUG_RATE_LIMIT", _CALLS_PER_SECOND)
 
 
 # ── 토큰 공유(DB) ─────────────────────────────────────────────────────────
@@ -152,91 +166,55 @@ def _publish_token_to_db() -> None:
 
 
 def _namu_call(path: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """nhplug 단건 호출 (연속조회 없는 API 용)."""
+    """nhplug 단건 호출 (연속조회 없는 API 용).
+
+    SDK 는 HTTP 오류만 예외로 올린다 — 업무 오류(HTTP 200 + 실패 rsp_cd)는 여기서 가른다.
+    """
     _ensure_env()
     try:
-        from nhplug import NhplugError, call
+        from nhplug import NhplugError, call, status_of
     except ImportError as exc:
         raise BrokerApiError("nhplug 패키지가 설치돼 있지 않습니다 (pip install nhplug).") from exc
     _seed_token_from_db()
     try:
-        _throttle()
         result = call(path, payload)
     except NhplugError as exc:
         raise BrokerApiError(f"나무증권 API 오류: {exc.message} (코드 {exc.code})") from exc
+    code, message = status_of(result)
+    if not _is_business_success(code, message):
+        raise BrokerApiError(f"나무증권 API 오류: {message or '업무 오류'} (코드 {code})")
     _publish_token_to_db()
     return result
 
 
 def _namu_call_paged(path: str, payload: dict[str, Any], list_key: str = "Output_1") -> dict[str, Any]:
-    """연속조회(rsp_cd 00218) 지원 호출 — 목록(list_key)을 전 페이지 이어 붙여 돌려준다.
+    """연속조회 지원 호출 — 목록(list_key)을 전 페이지 이어 붙여 돌려준다.
 
-    NH 규약: 한 페이지를 넘는 목록은 rsp_cd=00218 로 오고, **응답 헤더 `cts`** 의
-    연속키를 다음 요청 헤더에 실어 이어서 받는다. SDK 의 `call()` 은 응답 헤더를
-    노출하지 않아 여기서만 requests 로 직접 호출한다 — 인증(토큰 캐시)·성공 판정은
-    SDK 것을 그대로 재사용해 동작이 어긋나지 않게 한다.
+    연속키(cts·cts_flag) 주고받기·토큰 재발급·유량 스로틀은 전부 SDK `paginate()` 가 한다.
+    여기서 하는 건 **업무 성공 판정과 페이지 병합**뿐이다 — 마지막 페이지만 판정한다
+    (중간 페이지의 '계속' 코드는 오류가 아니다).
     """
-    import json
-
-    import requests
-
     _ensure_env()
-    from nhplug import clear_token, get_base_url, get_token
-    from nhplug.client import _is_invalid_token, is_success
+    try:
+        from nhplug import NhplugError, paginate
+    except ImportError as exc:
+        raise BrokerApiError("nhplug 패키지가 설치돼 있지 않습니다 (pip install nhplug).") from exc
 
     _seed_token_from_db()
-
-    url = f"{get_base_url()}{path}"
-    body = json.dumps({"Input_0": payload})
     merged: dict[str, Any] = {}
     items: list[Any] = []
-    cts = ""
-    refreshed = False
-    for _page in range(20):  # 폭주 방지 — 잔고가 20페이지를 넘을 일은 없다
-        headers = {
-            "x-client-id": os.environ["NHPLUG_APP_KEY"],
-            "x-client-secret": os.environ["NHPLUG_APP_SECRET"],
-            "authorization": f"Bearer {get_token()}",
-            "content-type": "application/json; charset=UTF-8",
-        }
-        if cts:
-            # 연속 요청은 키(cts)와 플래그(cts_flag=Y) **둘 다** 필요하다 — 키만 보내면
-            # 서버가 같은 첫 페이지를 반복해 돌려준다(실측).
-            headers["cts"] = cts
-            headers["cts_flag"] = "Y"
-        try:
-            _throttle()
-            res = requests.post(url, headers=headers, data=body, timeout=10)
-        except requests.RequestException as exc:
-            raise BrokerApiError(f"나무증권 API 네트워크 오류: {exc}") from exc
-        # 토큰 무효는 401 뿐 아니라 **업무 응답(IGW40043)** 으로도 온다 — 다른 머신이 새 토큰을
-        # 발급하면 이쪽 캐시 토큰이 죽는 케이스. SDK 단건 call() 과 같은 판별로 1회 재발급 재시도.
-        if _is_invalid_token(res.status_code, res.text) and not refreshed:
-            clear_token()
-            refreshed = True
-            continue
-        try:
-            data = res.json()
-        except Exception as exc:
-            raise BrokerApiError(f"나무증권 API 응답 해석 실패 (HTTP {res.status_code})") from exc
-        if not res.ok:
-            raise BrokerApiError(
-                f"나무증권 API 오류: {data.get('rsp_msg') or res.status_code} (코드 {data.get('rsp_cd')})"
-            )
-        code = str(data.get("rsp_cd") or "")
-        has_more = code == "00218"
-        if not has_more and not is_success(code, data.get("rsp_msg")):
-            raise BrokerApiError(f"나무증권 API 오류: {data.get('rsp_msg') or '업무 오류'} (코드 {code})")
-        if not merged:
-            merged = {k: v for k, v in data.items() if k != list_key}
-        items.extend(data.get(list_key) or [])
-        if not has_more:
-            break
-        cts = res.headers.get("cts", "")
-        if not cts:
-            raise BrokerApiError("나무증권 API 연속조회 키(cts)가 응답 헤더에 없습니다.")
-    else:
-        raise BrokerApiError("나무증권 API 연속조회가 20페이지를 넘었습니다 — 응답을 확인하세요.")
+    try:
+        for page, (data, meta) in enumerate(paginate(path, payload, want_meta=True), start=1):
+            if not meta.has_next and not _is_business_success(meta.rsp_cd, meta.rsp_msg):
+                raise BrokerApiError(f"나무증권 API 오류: {meta.rsp_msg or '업무 오류'} (코드 {meta.rsp_cd})")
+            if not merged:
+                merged = {key: value for key, value in data.items() if key != list_key}
+            items.extend(data.get(list_key) or [])
+            # 상한에 닿았는데 더 남았으면 잘린 목록을 돌려주지 않고 막는다.
+            if page >= _MAX_PAGES and meta.has_next:
+                raise BrokerApiError(f"나무증권 API 연속조회가 {_MAX_PAGES}페이지를 넘었습니다 — 응답을 확인하세요.")
+    except NhplugError as exc:
+        raise BrokerApiError(f"나무증권 API 오류: {exc.message} (코드 {exc.code})") from exc
     merged[list_key] = items
     _publish_token_to_db()
     return merged
