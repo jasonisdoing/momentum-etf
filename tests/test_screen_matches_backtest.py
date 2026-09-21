@@ -393,7 +393,12 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                         refill_pct=refill,
                         cash_balance=10000,
                         target_schedule={
-                            date: {"quantities": {"A": target}, "weights": {"A": 10}, "amounts": {"A": 1000 / rate}}
+                            date: {
+                                "quantities": {"A": target},
+                                "weights": {"A": 10},
+                                "amounts": {"A": 1000 / rate},
+                                "previous_amounts": {"A": 1000 / rate},
+                            }
                         },
                     )
                     for group in groups:
@@ -403,6 +408,141 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                 self.assertEqual(expected, [(r["date"], r["side"], r["quantity"]) for r in replay["executions"]])
                 if refill == 100:
                     self.assertEqual(expected, [])
+
+    def test_sleeve_exit_net_amount_matches_replay(self):
+        from core.strategy.mix.actions import build_action_groups
+        from core.strategy.mix.capital_replay import replay_capital
+        from core.strategy.mix.targets import dated_target_shares
+
+        index = pd.to_datetime(["2026-09-01", "2026-09-02"])
+        for after, expected in [(0, -12), (500, -7), (1000, 0), (1500, 3)]:
+            with self.subTest(after=after):
+                targets = {
+                    "a": [
+                        {
+                            "ticker": "X",
+                            "price": 100,
+                            "drift_pct": 100,
+                            "plan": "sell",
+                            "is_exiting": True,
+                            "fill_date": "2026-09-02",
+                        }
+                    ],
+                    "b": [
+                        {
+                            "ticker": "X",
+                            "price": 100,
+                            "drift_pct": 100,
+                            "plan": "buy",
+                            "is_exiting": False,
+                            "fill_date": "2026-09-02",
+                        }
+                    ],
+                }
+                schedule = dated_target_shares(targets, {"a": 1000, "b": after}, 1, 3000, "2026-09-02")
+                actions = {
+                    "slots": {
+                        "a": {
+                            "label": "A",
+                            "live": False,
+                            "entries": [],
+                            "sells": [{"ticker": "X", "reason": "청산", "fill_date": "2026-09-02"}],
+                            "exit_forecast": [],
+                        },
+                        "b": {
+                            "label": "B",
+                            "live": False,
+                            "entries": [{"ticker": "X", "fill_date": "2026-09-02"}],
+                            "sells": [],
+                            "exit_forecast": [],
+                        },
+                    }
+                }
+                groups = build_action_groups(
+                    [{"ticker": "X", "price": 100, "held_quantity": 12, "target_quantity": after // 100}],
+                    actions,
+                    "2026-09-02",
+                    harvest_pct=50,
+                    refill_pct=0,
+                    cash_balance=2040,
+                    target_schedule=schedule,
+                )
+                screen = sum(
+                    item["quantity"] * (1 if item["side"] == "buy" else -1)
+                    for group in groups
+                    for item in group["items"]
+                )
+                replay = replay_capital(
+                    close=pd.DataFrame({"X": [100, 100]}, index=index),
+                    opened=pd.DataFrame({"X": [80, 100]}, index=index),
+                    fx=pd.Series(1.0, index=index),
+                    targets={"2026-09-01": {"X": 1000}, "2026-09-02": {"X": after}},
+                    capital_krw=3000,
+                    harvest_pct=50,
+                    refill_pct=0,
+                    costs={"X": (0, 0)},
+                )
+                executed = sum(
+                    row["quantity"] * (1 if row["side"] == "buy" else -1)
+                    for row in replay["executions"]
+                    if row["date"] == "2026-09-02"
+                )
+                self.assertEqual(screen, expected)
+                self.assertEqual(executed, expected)
+
+    def test_first_price_and_threshold_match_screen(self):
+        from core.strategy.mix.actions import build_action_groups
+        from core.strategy.mix.capital_replay import replay_capital
+
+        index = pd.date_range("2026-09-01", periods=3)
+        cases = [
+            # 늦게 상장한 종목은 첫날 시가에 매수하고 채우기 100이면 매수하지 않는다.
+            ([float("nan"), 100, 110], [float("nan"), 100, 110], 1000, 20, "2026-09-02", 0, 100, 10),
+            ([float("nan"), 100, 110], [float("nan"), 100, 110], 1000, 100, "2026-09-02", 0, 100, 0),
+            # 회수 경계 도달과 직전 값을 구별한다.
+            ([10, 11, 11], [10, 10, 11], 100, 20, "2026-09-03", 10, 11, -1),
+            ([10, 10.999, 10.999], [10, 10, 10.999], 100, 20, "2026-09-03", 10, 10.999, 0),
+        ]
+        for closes, opens, amount, refill, day, held, price, expected in cases:
+            with self.subTest(amount=amount, refill=refill, price=price):
+                replay = replay_capital(
+                    close=pd.DataFrame({"X": closes}, index=index),
+                    opened=pd.DataFrame({"X": opens}, index=index),
+                    fx=pd.Series(1.0, index=index),
+                    targets={str(d.date()): {"X": amount} for d in index},
+                    capital_krw=2000,
+                    harvest_pct=10,
+                    refill_pct=refill,
+                    costs={"X": (0, 0)},
+                )
+                groups = build_action_groups(
+                    [{"ticker": "X", "price": price, "held_quantity": held, "target_quantity": int(amount / price)}],
+                    {"slots": {}},
+                    day,
+                    harvest_pct=10,
+                    refill_pct=refill,
+                    cash_balance=2000,
+                    target_schedule={
+                        day: {
+                            "quantities": {"X": int(amount / price)},
+                            "weights": {"X": 50},
+                            "amounts": {"X": amount},
+                            "previous_amounts": {"X": amount},
+                        }
+                    },
+                )
+                screen = sum(
+                    item["quantity"] * (1 if item["side"] == "buy" else -1)
+                    for group in groups
+                    for item in group["items"]
+                )
+                executed = sum(
+                    row["quantity"] * (1 if row["side"] == "buy" else -1)
+                    for row in replay["executions"]
+                    if row["date"] == day
+                )
+                self.assertEqual(screen, expected)
+                self.assertEqual(executed, expected)
 
 
 class SlotEngineProvisionalBarTest(unittest.TestCase):
@@ -567,11 +707,17 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
             "2026-09-07",
             currency="USD",
             target_schedule={
-                "2026-09-04": {"quantities": {"T2": 1}, "weights": {"T2": 33}, "amounts": {"T2": 100}},
+                "2026-09-04": {
+                    "quantities": {"T2": 1},
+                    "weights": {"T2": 33},
+                    "amounts": {"T2": 100},
+                    "previous_amounts": {},
+                },
                 "2026-09-07": {
                     "quantities": {"T2": 1, "T4": 1},
                     "weights": {"T2": 33, "T4": 33},
                     "amounts": {"T2": 100, "T4": 12},
+                    "previous_amounts": {"T2": 100},
                 },
             },
         )
@@ -674,11 +820,17 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
             }
         }
         future_schedule = {
-            "2026-09-08": {"quantities": {"TODAY": 1}, "weights": {"TODAY": 10}, "amounts": {"TODAY": 10}},
+            "2026-09-08": {
+                "quantities": {"TODAY": 1},
+                "weights": {"TODAY": 10},
+                "amounts": {"TODAY": 10},
+                "previous_amounts": {},
+            },
             "2026-09-09": {
                 "quantities": {"TODAY": 1, "139260": 34},
                 "weights": {"TODAY": 10, "139260": 10},
                 "amounts": {"TODAY": 10, "139260": 3400},
+                "previous_amounts": {"TODAY": 10},
             },
         }
         for already_held, difference in [(34, 0), (32, 2), (36, -2), (0, 34)]:
