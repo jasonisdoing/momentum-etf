@@ -29,7 +29,6 @@ from utils.cache_utils import (
 )
 from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
-from utils.market_session import REGULAR
 from utils.moving_averages import get_moving_average_type
 from utils.perf_metrics import single_stock_backtest_stats
 from utils.pool_settings_store import get_pool_benchmark_ticker
@@ -487,18 +486,6 @@ def _apply_realtime_overlay(
     return updated
 
 
-def _session_of(country_code: str) -> str | None:
-    """그 시장의 지금 세션(regular·aftermarket·closed …). 못 읽으면 None."""
-    from utils.market_session import market_session  # 순환 임포트를 피해 호출 시 읽는다
-
-    try:
-        return str(market_session(country_code)["session"])
-    except Exception:
-        # 세션 시계를 못 읽으면 확정 봉을 덮지 않는 쪽으로 둔다 — 판정은 보수적으로.
-        logger.exception("[rankings] 시장 세션 조회 실패 (%s)", country_code)
-        return None
-
-
 def build_effective_close_series(
     cached_close_series: pd.Series | None,
     realtime_entry: dict[str, float] | None,
@@ -511,11 +498,11 @@ def build_effective_close_series(
     확정 종가로 착각해 그대로 두고, 존재하지 않는 다음 날짜에 실시간 가격을
     얹었다 — 스냅샷이 가짜 기록 종가로 남아 고점·이격 기준을 오염시킬 수 있었다.
 
-    **이미 확정된 봉은 덮어쓰지 않는다.** 정규장이 끝나면 그 세션의 종가가 정해지므로,
-    그 뒤의 시간외 가격으로 판정을 바꾸면 전략 엔진(확정 종가로 판정하고 다음 시가에
-    체결)과 갈린다. 백테스트에 없는 값이라 재현도 되지 않고, 체결은 어차피 다음 정규장
-    시가다. 마감 후 현지 날짜가 바뀌기 전(미국은 한국시간 05:00~13:00) 순위·알람만
-    시간외 가격으로 이탈을 판정하던 문제를 막는다(2026-09).
+    **마지막 봉은 세션과 무관하게 항상 실시간으로 갱신한다.** 마감 뒤에는 확정 종가라
+    덮어쓰면 안 된다고 보고 세션 가드를 달았다가 되돌렸다(2026-09) — 캐시의 마지막 봉은
+    매시 배치가 **장중에 찍은 스냅샷**일 수 있어서, 마감 뒤에 그대로 두면 오히려 그 세션의
+    종가가 아닌 값(예: 마감 5시간 전 가격)으로 판정하게 된다. 가장 최신 체결가가 언제나
+    그 세션의 종가에 가장 가깝다.
     """
     if cached_close_series is None or cached_close_series.empty:
         return None
@@ -540,12 +527,8 @@ def build_effective_close_series(
 
     if last_index < today:
         adjusted.loc[today] = realtime_price
-        return adjusted.sort_index()
-    # 마지막 봉이 현지 오늘 — 정규장이 도는 중이면 아직 미확정이라 현재가로 갱신하고,
-    # 마감 뒤(시간외·휴장)면 확정 종가라 그대로 둔다.
-    if _session_of(country_code) != REGULAR:
-        return cached_close_series
-    adjusted.iloc[-1] = realtime_price
+    else:
+        adjusted.iloc[-1] = realtime_price
     return adjusted.sort_index()
 
 
