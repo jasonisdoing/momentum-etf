@@ -95,14 +95,19 @@ def _market_caps(pool: str) -> dict[str, float]:
     return caps
 
 
-def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> dict[str, Any]:
-    """진행 중인 세션의 실시간 시세. 캐시에 아직 안 들어온 날일 때만 의미가 있다.
+def _live_quotes(pool: str, tickers: list[str]) -> dict[str, Any]:
+    """마지막 봉에 붙일 실시간 시세.
 
     반환 ``{"live": bool, "pre_market": bool, "traded_at": str|None,
     "by_ticker": {티커: {price, high, change_pct}}}``.
-    ``live`` 는 마지막 체결일이 가격 캐시의 마지막 거래일보다 **뒤**라는 뜻 —
-    그날 종가가 아직 확정되지 않았으므로 화면은 '돌파중'처럼 잠정 상태로 표시한다.
-    캐시와 같은 날이면 이미 확정된 세션이라 실시간을 쓰지 않는다.
+    ``live`` 는 실시간 값이 있어 **마지막 봉을 그 값으로 쓴다**는 뜻이다. 시스템 전체가
+    「정규장 종가 시리즈 + 마지막 봉만 실시간」 하나로 돌아간다 — 순위·알람이 쓰는
+    ``rankings.build_effective_close_series`` 와 같은 규칙이다.
+
+    예전에는 체결일이 캐시 마지막 봉보다 **뒤**일 때만 실시간을 썼다. 캐시에 그날 봉이
+    있으면 확정 종가라고 봤기 때문인데, 가격 캐시는 매시 배치가 **장중에도** 그날 봉을
+    써 두므로 그 전제가 성립하지 않는다(실측: 미국 마감 5시간 전 가격이 그날 봉으로 남아
+    전략만 그 값으로 판정했다). 확정 여부를 알 수 없으니 언제나 최신 체결가를 쓴다.
 
     장전(동시호가) 구간은 ``live`` 로 보지 않는다. 그 시각 스냅샷의 고가·저가·시가는
     아직 **직전 세션의 값**이고 현재가만 오늘 예상체결가라, 둘을 섞으면 어제 확정된
@@ -149,7 +154,7 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
         if stamp and (traded_at is None or stamp > traded_at):
             traded_at = stamp
 
-    live = bool(traded_at) and not pre_market and str(traded_at)[:10] > str(cached_last.date())
+    live = bool(traded_at) and not pre_market
     if not live and traded_at is None and by_ticker and not pre_market:
         # 체결 시각을 안 주는 종목(국내 ETF 등)은 시장 **세션 시계**로 장중을 판정한다 —
         # 정규장·애프터가 진행 중이면 스냅샷 현재가는 오늘 세션의 값이다. 체결 시각에만
@@ -161,7 +166,7 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
         except Exception:
             session_now = None
         today = _country_today(country)
-        if session_now in (REGULAR, AFTERMARKET) and today and today > str(cached_last.date()):
+        if session_now in (REGULAR, AFTERMARKET) and today:
             live = True
             traded_at = today
     return {
