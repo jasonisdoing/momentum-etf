@@ -8,6 +8,8 @@ beautifulsoup4
 yfinance
 # pandas_market_calendars  # 거래일 캘린더 생성은 수동 작업으로만 사용
 slack-sdk
+# 나무증권(NH PLUG) SDK — 0.4.0 에서 is_success 제거·paginate 추가라 버전을 고정한다.
+nhplug==0.4.0
 fastapi
 uvicorn
 lxml

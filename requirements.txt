@@ -68,6 +68,8 @@ multitasking==0.0.12
     # via yfinance
 narwhals==2.5.0
     # via altair
+nhplug==0.4.0
+    # via -r requirements.in
 numpy==1.26.4
     # via
     #   -r requirements.in
@@ -172,4 +174,3 @@ zope-interface==8.0
 
 # The following packages are considered to be unsafe in a requirements file:
 # setuptools
-nhplug
