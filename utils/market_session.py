@@ -93,6 +93,25 @@ def last_closed_session_date(country: str, now: datetime | None = None) -> str:
     return _previous_trading_day(country, today).strftime("%Y-%m-%d")
 
 
+def market_today(country: str, now: datetime | None = None) -> date:
+    """그 시장의 **현지 오늘 날짜**. 한국 날짜로 미국 봉을 세면 하루가 어긋난다."""
+    zone = ZoneInfo(str(_schedule(country)["timezone"]))
+    return (now or datetime.now(zone)).astimezone(zone).date()
+
+
+def regular_session_started(country: str, now: datetime | None = None) -> bool:
+    """오늘 **정규장이 이미 시작**됐는지 — 장중·마감 후 모두 참, 장 전·휴장일은 거짓.
+
+    「오늘 봉이 존재할 수 있는가」를 묻는 자리에 쓴다. 프리장·데이장은 정규장 전이라
+    그날 봉이 아직 없고, 여기서 봉을 만들면 가짜 봉이 된다.
+    """
+    schedule = _schedule(country)
+    zone = ZoneInfo(str(schedule["timezone"]))
+    now_local = (now or datetime.now(zone)).astimezone(zone)
+    today = now_local.date()
+    return _is_trading_day(country, today) and now_local >= _at(zone, today, schedule["open"])
+
+
 def _is_trading_day(country: str, day: date) -> bool:
     """그 날짜가 거래일인지. 달력을 못 읽으면 평일 여부로 본다."""
     try:

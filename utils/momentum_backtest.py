@@ -25,11 +25,12 @@ from typing import Any
 import pandas as pd
 
 from config import CACHE_TTL_COMPUTE
-from core.strategy.intraday import effective_close_frame, mark_engine_statuses
+from core.strategy.intraday import mark_engine_statuses
 from core.strategy.momentum import signals as momentum_signals
 from core.strategy.price_panel import build_price_panel
 from core.strategy.scoring import drawdown_from_high_pct, is_new_listing, listing_months
 from core.strategy.slot_backtest import run_slot_backtest
+from utils.effective_prices import apply_realtime_closes
 from utils.logger import get_app_logger
 from utils.momentum_service import (
     adr_market_of_pool,
@@ -275,13 +276,12 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         # ── 장중 실행 — 실시간 가격을 **마지막 봉**으로 붙인 같은 엔진의 잠정 실행이다
         # (AGENTS.md §10-6). 어제 확정 판정의 오늘 시가 체결(시가를 모르면 체결 예정),
         # 오늘 잠정 봉의 재판정, 진입 예정 비중까지 전부 엔진이 낸다 — 화면은 표시만 한다.
-        session = str(quotes["traded_at"])[:10]
-        session_ts = pd.Timestamp(session)
+        session_ts = quotes["session_ts"]
         live_prices = {t: q["price"] for t, q in quotes["by_ticker"].items() if t in close_df.columns}
         live_opens = {
             t: float(q["open"]) for t, q in quotes["by_ticker"].items() if t in close_df.columns and q.get("open")
         }
-        eff_close = effective_close_frame(close_df, live_prices, session_ts)
+        eff_close = apply_realtime_closes(close_df, live_prices, session_ts)
         eff = momentum_signals.compute_signals(
             {"close": eff_close}, int(settings["short_ma_days"]), int(settings["long_ma_days"])
         )
@@ -289,7 +289,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         live_result = run_slot_backtest(
             months=DEFAULT_BACKTEST_MONTHS,
             start_date=start_date,
-            panel={"close": eff_close, "open": effective_close_frame(panel["open"], live_opens, session_ts)},
+            panel={"close": eff_close, "open": apply_realtime_closes(panel["open"], live_opens, session_ts)},
             entry=eff_entry,
             exit_signal=eff["exit"],
             priority=eff["priority"].fillna(float("-inf")),
@@ -332,7 +332,11 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
 
         # 진입 예정 — 체결 예정(오늘 시가, fill_date)이 앞자리, 잠정 예정(내일 시가)이 뒷자리.
         entries = [
-            {**row_by_ticker[row["ticker"]], "sleeve_weight_pct": row["sleeve_weight_pct"], "fill_date": session}
+            {
+                **row_by_ticker[row["ticker"]],
+                "sleeve_weight_pct": row["sleeve_weight_pct"],
+                "fill_date": str(session_ts.date()),
+            }
             for row in live_result["pending_entries"]
             if row["ticker"] in row_by_ticker
         ] + [
@@ -364,7 +368,10 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         item["listing_months"] = (row or {}).get("listing_months")
     for item in exited_today:
         item["price"] = (row_by_ticker.get(item["ticker"]) or {}).get("price")
-    _apply_display_quotes(rows, holdings, quotes["by_ticker"])
+    # 진입 예정도 함께 — 이 목록은 위에서 후보 행을 **복사**해 만들기 때문에, 후보 행만
+    # 갱신하면 같은 종목의 현재가가 순위 화면과 어긋난 채로 남는다(기준일 목표인
+    # `target_entries` 는 이미 따로 복사해 뒀으므로 확정값 그대로다).
+    _apply_display_quotes([*rows, *entries], holdings, quotes["by_ticker"])
 
     # 실계좌 보유 여부 — 전략상 보유와 별개로 "지금 계좌에 실제로 있는가".
     from utils.portfolio_io import load_all_holding_tickers
@@ -392,7 +399,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     ][:slots]
 
     # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.
-    fill_base = pd.Timestamp(str(quotes["traded_at"])[:10]) if quotes["live"] else last
+    fill_base = quotes["session_ts"] if quotes["live"] else last
     return {
         "as_of": str(last.date()),
         "pool": pool,

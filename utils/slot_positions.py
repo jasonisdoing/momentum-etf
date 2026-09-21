@@ -96,20 +96,34 @@ def _market_caps(pool: str) -> dict[str, float]:
 
 
 def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> dict[str, Any]:
-    """진행 중인 세션의 실시간 시세. 캐시에 아직 안 들어온 날일 때만 의미가 있다.
+    """실시간 시세와 그것을 붙일 봉의 날짜.
 
-    반환 ``{"live": bool, "pre_market": bool, "traded_at": str|None,
-    "by_ticker": {티커: {price, high, change_pct}}}``.
-    ``live`` 는 마지막 체결일이 가격 캐시의 마지막 거래일보다 **뒤**라는 뜻 —
-    그날 종가가 아직 확정되지 않았으므로 화면은 '돌파중'처럼 잠정 상태로 표시한다.
-    캐시와 같은 날이면 이미 확정된 세션이라 실시간을 쓰지 않는다.
+    반환 ``{"live": bool, "pre_market": bool, "country": str, "session_ts": Timestamp|None,
+    "by_ticker": {티커: {price, high, open, change_pct}}}``.
 
-    장전(동시호가) 구간은 ``live`` 로 보지 않는다. 그 시각 스냅샷의 고가·저가·시가는
-    아직 **직전 세션의 값**이고 현재가만 오늘 예상체결가라, 둘을 섞으면 어제 확정된
-    돌파가 오늘 예상가에 밀려 '터치 후 밀림'으로 뒤집힌다. 오늘 값이 다 갖춰지는
-    정규장부터 쓴다.
+    ``live`` 는 **실시간 가격이 하나라도 있는지**다. 예전에는 「마지막 체결일이 캐시
+    마지막 봉보다 뒤」일 때만 참이었는데, 가격 캐시는 장중에도 그날 봉을 쓰기 때문에
+    (증분 배치가 이미 있는 날짜를 다시 안 가져온다) 마감 뒤에도 장중 스냅샷으로 판정이
+    굳었다. 같은 시각 순위 화면은 마지막 봉을 늘 실시간으로 갈아끼웠으므로 두 화면의
+    진입 목록이 갈렸다. 이제 붙일 봉은 `utils.effective_prices` 가 정한다.
+
+    ``session_ts`` 가 그 봉의 날짜다 — 오늘 정규장이 이미 시작됐으면 오늘, 아니면
+    캐시 마지막 봉(프리·데이장·휴장일에 가짜 봉을 만들지 않는다).
+
+    장전(동시호가) 구간은 ``pre_market`` 으로 표시만 하고 막지는 않는다. 그 시각
+    스냅샷의 고가·시가는 아직 **직전 세션의 값**이라 호출부가 그 값들만 빼고 쓴다.
     """
+    from utils.effective_prices import effective_bar_date
     from utils.settings_loader import get_ticker_type_settings
+
+    empty: dict[str, Any] = {
+        "live": False,
+        "pre_market": False,
+        "country": "",
+        "session_ts": None,
+        "traded_at": None,
+        "by_ticker": {},
+    }
 
     try:
         country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
@@ -117,7 +131,7 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
         # 설정이 없는 풀(테스트 등)은 실시간이 없다 — 시세 조회 실패와 같은 취급이다.
         country = ""
     if not country or not tickers:
-        return {"live": False, "pre_market": False, "traded_at": None, "by_ticker": {}}
+        return empty
 
     from services.price_service import get_realtime_snapshot
 
@@ -125,11 +139,11 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
         snapshot = get_realtime_snapshot(country, tickers)
     except Exception:
         logger.exception("[new_high] 실시간 시세 조회 실패 (%s)", pool)
-        return {"live": False, "pre_market": False, "traded_at": None, "by_ticker": {}}
+        return empty
 
     by_ticker: dict[str, dict[str, float]] = {}
-    traded_at: str | None = None
     pre_market = False
+    traded_at: str | None = None
     for ticker, quote in snapshot.items():
         price = quote.get("nowVal")
         if price is None or float(price) <= 0:
@@ -149,28 +163,17 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
         if stamp and (traded_at is None or stamp > traded_at):
             traded_at = stamp
 
-    live = bool(traded_at) and not pre_market and str(traded_at)[:10] > str(cached_last.date())
-    if not live and traded_at is None and by_ticker and not pre_market:
-        # 체결 시각을 안 주는 종목(국내 ETF 등)은 시장 **세션 시계**로 장중을 판정한다 —
-        # 정규장·애프터가 진행 중이면 스냅샷 현재가는 오늘 세션의 값이다. 체결 시각에만
-        # 기대면 ETF 풀은 장중 판정(실시간 마지막 봉, AGENTS.md §10-6)이 영영 켜지지 않는다.
-        from utils.market_session import AFTERMARKET, REGULAR, market_session
+    if not by_ticker:
+        return {**empty, "country": country}
 
-        try:
-            session_now = market_session(country)["session"]
-        except Exception:
-            session_now = None
-        today = _country_today(country)
-        if session_now in (REGULAR, AFTERMARKET) and today and today > str(cached_last.date()):
-            live = True
-            traded_at = today
     return {
-        "live": live,
+        "live": True,
         "pre_market": pre_market,
+        "country": country,
+        "session_ts": effective_bar_date(cached_last, country),
+        # 화면 표기용 시세 시각 — 판정에는 쓰지 않는다(붙일 봉은 session_ts 가 정한다).
         "traded_at": traded_at,
-        # 시세는 항상 담는다. 현재가·등락률은 어느 구간이든 오늘 값이라 표시에 쓰고,
-        # 돌파 판정은 `live` 일 때만 한다 — ETF 처럼 체결 시각·고가를 안 주는 종목도
-        # 일간(%) 은 정상으로 보여야 한다.
+        # 시세는 항상 담는다. 현재가·등락률은 어느 구간이든 오늘 값이라 표시에 쓴다.
         "by_ticker": by_ticker,
     }
 

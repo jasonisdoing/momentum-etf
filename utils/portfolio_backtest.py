@@ -16,6 +16,7 @@ import pandas as pd
 
 from config import CACHE_TTL_COMPUTE
 from core.strategy.portfolio.backtest import simulate_portfolio
+from utils.effective_prices import apply_realtime_closes
 from utils.logger import get_app_logger
 from utils.pool_settings_store import get_pool_slippage
 from utils.pool_signal_backtest_service import validate_backtest_months
@@ -89,9 +90,8 @@ def _overlay_live_last_bar(
     prices = {t: (quotes["by_ticker"].get(t) or {}).get("price") for t in tickers}
     if any(p is None for p in prices.values()):
         return close_df, benchmark_close
-    session_ts = pd.Timestamp(str(quotes["traded_at"])[:10])
-    close_df = close_df.copy()
-    close_df.loc[session_ts] = pd.Series(prices)
+    session_ts = quotes["session_ts"]
+    close_df = apply_realtime_closes(close_df, prices, session_ts)
     benchmark_close = benchmark_close.copy()
     benchmark_close.loc[session_ts] = float(benchmark_close.iloc[-1])
     return close_df, benchmark_close
