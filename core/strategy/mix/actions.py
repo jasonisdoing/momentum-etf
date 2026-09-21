@@ -45,8 +45,6 @@ def _action_reasons(ticker: str, side: str, actions: dict[str, Any]) -> list[dic
                         "label": f"{slot['label']} {trade['date']} 엔진 {trade['reason']} 반영",
                     }
                 )
-    if actions.get("sleeve_rebalance_today"):
-        reasons.append({"code": "mix_rebalance", "label": "합성 월초 재배분 반영"})
     reasons.append({"code": "target_difference", "label": "목표 수량과 실제 보유 차이"})
     return reasons
 
@@ -56,7 +54,8 @@ def build_action_groups(
     actions: dict[str, Any],
     next_trading_day: str | None,
     *,
-    excess_holding_allowance: float,
+    harvest_pct: float,
+    refill_pct: float,
     cash_balance: float,
     target_schedule: dict[str, dict[str, Any]],
     adjustment_day: str | None = None,
@@ -112,6 +111,7 @@ def build_action_groups(
                     **source,
                     "held_quantity": held,
                     "target_quantity": quantity,
+                    "basis_amount": target["amounts"].get(ticker, 0.0),
                     "trade_quantity": quantity - held,
                     "weight_pct": target["weights"].get(ticker, 0.0),
                     "is_sell_all": quantity == 0 and held > 0,
@@ -119,7 +119,6 @@ def build_action_groups(
             )
         stage_actions = {
             **actions,
-            "sleeve_rebalance_today": bool(actions.get("sleeve_rebalance_today")) and index == 0,
             "slots": {
                 key: {
                     **slot,
@@ -135,7 +134,8 @@ def build_action_groups(
         projected_cash = _apply_tolerance(
             stage_rows,
             stage_actions,
-            allowance=excess_holding_allowance,
+            harvest_pct=harvest_pct,
+            refill_pct=refill_pct,
             cash_balance=projected_cash,
         )
         stage_groups = _build_action_group_stage(stage_rows, stage_actions, day, currency=currency)
@@ -146,7 +146,7 @@ def build_action_groups(
                 " · 기준 가격 추정이며 실제 체결가·수수료는 별도입니다."
             )
         groups.extend(stage_groups)
-        # 허용 오차로 생략한 차이(부족·초과)는 다음 날짜에도 실제 예상 보유로 넘긴다.
+        # 회수·채우기 문턱에 못 미쳐 생략한 차이는 다음 날짜에도 실제 예상 보유로 넘긴다.
         previous.update({row["ticker"]: row["held_quantity"] + row["trade_quantity"] for row in stage_rows})
     # 장중 조정 그룹 — 오늘 시가는 지났으니 '시가'가 아니라 '장중(지금 주문)'으로 단다.
     if adjustment_intraday and adjustment_day:
@@ -165,65 +165,35 @@ def _apply_tolerance(
     rows: list[dict[str, Any]],
     actions: dict[str, Any],
     *,
-    allowance: float,
+    harvest_pct: float,
+    refill_pct: float,
     cash_balance: float,
 ) -> float:
-    """허용 오차(±, 종목당 금액) — 조정 지시를 양방향으로 생략한다.
+    """자금 부족으로 목표를 보정하지 않고 공통 금액 기준 판정을 적용한다."""
+    from core.strategy.mix.capital_policy import capital_trade_quantity
 
-    사유가 「목표 수량과 실제 보유 차이」뿐인 종목에서, 차이 금액(|매매수량 × 가격|)이
-    허용 오차 이내면 지시를 내지 않는다 — 조정(부족·초과)뿐 아니라 **목표에 없는 소액
-    보유(전량 매도)** 도 포함한다(현금 몫 안의 재량 매수 허용). 넘으면 **목표까지
-    전부** 맞추는 지시를 낸다 — 오차 언저리까지만 맞추면 직후의 미세 드리프트로 또
-    걸려 왕복하는데, 목표로 완전 복귀시키면 오차 전체가 버퍼로 리셋된다. 신규 매수
-    (보유 0)·전량 매도·전략 신호·엔진 이벤트·월초 재배분 지시는 금액과 무관하게 그대로
-    낸다. 예전 형태(초과 보유만 허용, 한도 초과분은 부분 매도)에서 2026-09 확장 —
-    구성 교체·환산 이동이 만드는 소액 조정 지시가 계속 나와 귀찮았다.
-
-    생략한 초과 보유는 이 날짜의 매수 자금이 모자랄 때만 **초과 금액이 큰 종목부터**
-    부족분이 채워질 만큼 도로 매도한다(목표 이하로는 내려가지 않는다). 백테스트 현금
-    비중을 미리 채우라던 선제 매도(보호 현금)는 과한 지시라 폐기했다(2026-09).
-    """
-    prices = {}
     for row in rows:
         if not row["trade_quantity"]:
             continue
         price = row.get("price")
         if price is None or not math.isfinite(float(price)) or float(price) <= 0:
-            raise ValueError(f"허용 오차·매수 자금 계산에 필요한 가격이 없습니다: {row['ticker']}")
-        prices[row["ticker"]] = float(price)
-    tolerated_excess: list[dict[str, Any]] = []
-    for row in rows:
-        trade = row["trade_quantity"]
-        if not trade:
+            raise ValueError(f"회수·채우기 가격이 없습니다: {row['ticker']}")
+        # 다른 슬리브가 같은 종목을 유지하면 청산된 몫만 강제로 줄인다.
+        exit_signal = any(
+            event["ticker"] == row["ticker"] for slot in actions["slots"].values() for event in slot["sells"]
+        )
+        if exit_signal and row["trade_quantity"] < 0:
             continue
-        if trade > 0 and float(row.get("held_quantity") or 0) <= 0:
-            continue  # 신규 매수(진입)는 허용 대상이 아니다 — 전략 신호를 놓친다.
-        # 목표에 없는 보유(전량 매도)도 사유가 목표 차이뿐이면 오차 대상이다(2026-09) —
-        # 현금 몫 안에서 소액 재량 매수를 하는 사용 방식을 합성이 간섭하지 않기 위해서다.
-        # 전략 청산·엔진 이벤트로 파는 종목은 아래 사유 검사에서 걸러져 항상 표시된다.
-        reasons = _action_reasons(row["ticker"], "sell" if trade < 0 else "buy", actions)
-        if any(reason["code"] != "target_difference" for reason in reasons):
-            continue
-        price = prices[row["ticker"]]
-        if abs(trade) * price > allowance:
-            continue
-        if trade < 0:
-            # 생략한 초과분 — 아래 매수 자금 재확보의 후보로 남긴다.
-            row["retained_excess_quantity"] = -trade
-            tolerated_excess.append(row)
-        row["trade_quantity"] = 0
-    after_cash = cash_balance - math.fsum(row["trade_quantity"] * prices.get(row["ticker"], 0) for row in rows)
-    for row in sorted(
-        tolerated_excess, key=lambda item: item["retained_excess_quantity"] * prices[item["ticker"]], reverse=True
-    ):
-        if after_cash >= 0:
-            break
-        price = prices[row["ticker"]]
-        reclaim = min(row["retained_excess_quantity"], math.ceil(-after_cash / price))
-        row["trade_quantity"] -= reclaim
-        row["retained_excess_quantity"] -= reclaim
-        after_cash += reclaim * price
-    return after_cash
+        row["trade_quantity"] = capital_trade_quantity(
+            held=int(row["held_quantity"]),
+            price=float(price),
+            target_amount=row["basis_amount"],
+            harvest_pct=harvest_pct,
+            refill_pct=refill_pct,
+            force_exit=False,
+        )
+    # 부족 자금은 경고로 노출한다. 허용 범위 안의 종목을 자금 마련용으로 팔지 않는다.
+    return cash_balance - math.fsum(row["trade_quantity"] * float(row.get("price") or 0) for row in rows)
 
 
 def _build_action_group_stage(
@@ -233,17 +203,7 @@ def _build_action_group_stage(
     *,
     currency: str = "KRW",
 ) -> list[dict[str, Any]]:
-    """오늘의 액션 — 체결일 묶음(묶음 안 순서는 보유 표와 같은 종목 순서).
-
-    화면과 슬랙 알람이 **이 결과를 그대로** 쓴다 — 조립을 한 곳에 두어 둘이 어긋나지
-    않게 한다. 규칙:
-      · 계좌 보유와 목표 주수의 차이를 **거르지 않고 전부** 낸다. 예전에는 「목표비중의
-        10% 이상 차이만」 이라는 문턱(밴드)을 종목마다 따로 걸었는데, 백테스트에 없는
-        규칙이라 화면과 백테스트가 갈라졌다. 게다가 목표 주수 배분은 12종목을 한 번에
-        계산해 매수 합이 매도 합 + 현금을 넘지 않는데, 문턱이 큰 매수만 통과시키고
-        작은 매도를 걸러 **살 돈이 없는 매수 지시**를 만들었다.
-    슬리브가 어떤 전략인지는 보지 않는다 — 있는 액션만 읽는다.
-    """
+    """공통 회수·채우기 판정을 통과한 수량을 화면·슬랙의 날짜별 문구로 만든다."""
     slots: dict[str, dict[str, Any]] = actions["slots"]
 
     entry_tickers = {row["ticker"] for slot in slots.values() for row in slot["entries"]}
@@ -287,9 +247,9 @@ def _build_action_group_stage(
             if sell_reason_applies:
                 title = "매도 예정(예상)" if ticker in forecast_sell_tickers else "매도 예정"
             else:
-                title = "목표 수량 조정 매도"
+                title = "회수 매도"
         elif held:
-            title = "목표 수량 조정 매수"
+            title = "채우기 매수"
         elif ticker in entry_tickers:
             title = "진입(예상)" if ticker in live_entry_tickers else "진입"
         else:

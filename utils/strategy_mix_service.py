@@ -20,7 +20,6 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
-from config import CACHE_TTL_COMPUTE
 from core.strategy.mix.actions import build_action_groups
 from core.strategy.mix.targets import dated_target_shares
 from utils.cash_model import currency_for_country
@@ -28,7 +27,6 @@ from utils.logger import get_app_logger
 from utils.mix_sleeve import STRATEGY_LABELS, SleeveSpec
 from utils.stock_memo_store import attach_stock_memos
 from utils.trade_stats import summarize_trades
-from utils.ttl_cache import TtlCache
 
 logger = get_app_logger()
 
@@ -159,7 +157,7 @@ def mix_accounts() -> list[dict[str, Any]]:
                 # 오늘의 액션 슬랙 알람 토글 상태 — 화면 헤더가 그대로 보여준다.
                 "mix_slack_enabled": bool(inner.get("mix_slack_enabled")),
                 # 미설정 기존 계좌는 필터를 적용하지 않는다.
-                "mix_excess_holding_allowance": float(inner["mix_excess_holding_allowance"]),
+                **{key: inner.get(key) for key in ("mix_capital_krw", "mix_harvest_pct", "mix_refill_pct")},
                 # 비워 두는 현금 몫(%) — 슬리브 배분은 sleeves 안에 있다.
                 "mix_cash_pct": mix_weights(inner)["cash_pct"],
             }
@@ -292,6 +290,10 @@ def _resolve_mix_account(account_id: str | None) -> dict[str, Any]:
     from utils.settings_loader import get_account_settings
 
     account_settings = get_account_settings(account["account_id"]) or {}
+    if any(account_settings.get(key) is None for key in ("mix_capital_krw", "mix_harvest_pct", "mix_refill_pct")):
+        raise RuntimeError(
+            "운용 기준금액(KRW)·회수 기준·채우기 기준을 먼저 저장하세요. 새 방식의 주문은 아직 생성하지 않습니다."
+        )
     benchmark = account_settings.get("benchmark") or {}
     benchmark_ticker = str(benchmark.get("ticker") or "").strip().upper()
     if not benchmark_ticker:
@@ -328,7 +330,7 @@ def _resolve_mix_account(account_id: str | None) -> dict[str, Any]:
         # 국가·통화 — 거래 달력(월초 리밸런싱 판정)과 원화 환산에 쓴다.
         "country": country,
         "currency": currency,
-        "mix_excess_holding_allowance": float(account_settings["mix_excess_holding_allowance"]),
+        **{key: float(account_settings[key]) for key in ("mix_capital_krw", "mix_harvest_pct", "mix_refill_pct")},
         "benchmark_ticker": benchmark_ticker,
         "benchmark_name": str(benchmark.get("name") or benchmark_ticker).strip(),
     }
@@ -410,60 +412,6 @@ def _load_account_state(account_id: str) -> dict[str, Any]:
         "cash_balance": cash,
         "fixed_asset_native": fixed_native,
         "fixed_asset_change_native": fixed_change,
-    }
-
-
-# 슬리브 몫 캐시 — 이 값은 **종가 기준 백테스트 곡선**에서 나오므로 장중에는 바뀌지 않는데,
-# 캐시가 없을 때는 요청마다 슬리브 수만큼 백테스트를 새로 돌려 17초 넘게 썼다.
-# 계좌 잔고·보유 수량은 이 캐시 밖이라 그대로 매 요청 새로 읽는다.
-_SHARES_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="mix_sleeve_shares")
-
-
-def _sleeve_shares(ctx: dict[str, Any]) -> dict[str, float]:
-    """전략 시작일부터 공용 합성 재생으로 계산한 슬리브 몫과 유보 현금 비중.
-
-    월초 재배분과 비용은 합성 백테스트와 같은 경로를 사용한다.
-    실제 계좌 보유는 계산에 사용하지 않는다.
-    """
-    # 캐시 키는 계좌 + **슬리브 구성 + 풀 슬리피지**다. 조합·배분·비용을 바꾸면 몫이
-    # 달라지므로 전부 키에 넣어야 저장 직후 옛 몫이 그대로 나오지 않는다.
-    from utils.pool_settings_store import get_pool_slippage
-
-    key = _SHARES_CACHE.make_key(
-        ctx["account_id"],
-        [(spec.key, spec.strategy, spec.pool, spec.settings, get_pool_slippage(spec.pool)) for spec in ctx["slots"]],
-        mix_weights_for_account(ctx["account_id"]),
-    )
-    return _SHARES_CACHE.get_or_compute(key, lambda: _compute_sleeve_shares(ctx))
-
-
-def _compute_sleeve_shares(ctx: dict[str, Any]) -> dict[str, float]:
-    import pandas as pd
-
-    from config import MARKET_SCHEDULES
-    from utils.mix_sleeve import current_state
-    from utils.trading_calendar import get_trading_days
-
-    # 운용 현황과 **같은 엔진 실행 결과**를 읽되(전략별 운용 현황 5분 캐시 공유), 장중이면
-    # 잠정 마지막 봉은 빼고 **확정 구간까지만** 쓴다 — 슬리브 몫은 목표 주수 환산의 예산이라,
-    # 잠정 곡선을 쓰면 조회마다 몫이 흔들려 목표 주수가 내림 경계에서 ±1 로 왕복한다.
-    results: dict[str, dict[str, Any]] = {}
-    for spec in ctx["slots"]:
-        state = current_state(spec)
-        daily = list(state["daily"])
-        if state.get("live") and len(daily) > 1:
-            daily = daily[:-1]
-        results[spec.key] = {"daily": daily}
-    country = ctx["country"]
-    today = pd.Timestamp.now(tz=MARKET_SCHEDULES[country]["timezone"]).date()
-    month_days = get_trading_days(str(today.replace(day=1)), str(today), country)
-    # 월초 시가 전에는 최신 확정 가격으로 같은 재배분을 미리 계산한다.
-    through_date = str(today) if month_days and month_days[0].date() == today else None
-    state = _simulate_mix(ctx, results, through_date=through_date)
-    total = sum(state["values"].values()) + state["cash"]
-    return {
-        **{f"{key}_pct": value / total * 100.0 for key, value in state["values"].items()},
-        "cash_pct": state["cash"] / total * 100.0,
     }
 
 
@@ -649,6 +597,8 @@ def _attach_account_targets(
     krw_rate: float = 1.0,
     slot_keys: Sequence[str] = (),
     target_shares: dict[str, int] | None = None,
+    *,
+    capital_krw: float,
 ) -> list[dict[str, Any]]:
     """계좌 보유와 목표를 대조해 수량 지시를 붙인다. 전량 매도 요약 목록을 돌려준다.
 
@@ -681,17 +631,14 @@ def _attach_account_targets(
         )
         # 주수를 정하기 전의 임시값(비중 기준). 아래에서 **목표 주수 × 1주 값**으로 덮어쓴다 —
         # 화면에 보이는 목표 금액은 실제로 주문할 금액이어야 한다.
-        row["target_amount"] = round(total_assets * row["weight_pct"] / 100.0, 2)
+        row["target_amount"] = round(capital_krw * row["weight_pct"] / 100.0, 2)
         price = row.get("price")
         if price and krw_rate > 0:
             price_krw_by_ticker[row["ticker"]] = float(price) * krw_rate
 
-    # 목표 주수 = **계좌 금액으로 돌린 백테스트가 지금 들고 있는 주수**(`sleeve_target_shares`).
-    #
-    # 예전에는 여기서 `allocate_integer_shares` 로 예산을 끝까지 소진하는 배분을 매일 돌렸다.
-    # 그건 백테스트가 **진입할 때** 쓰는 규칙이다. 백테스트는 진입 후 이탈까지 주수를
-    # 건드리지 않는데, 매일 다시 배분하면 남는 돈이 그날그날 다른 종목에 얹혀 백테스트가
-    # 하지도 않는 매매를 시킨다.
+    # 목표 주수 = **고정 기준금액 ÷ 1주 값의 내림**(`capital_policy`). 계좌 평가액으로 예산을
+    # 매일 다시 나누지 않는다 — 그러면 남는 돈이 그날그날 다른 종목에 얹혀, 엔진이 하지도
+    # 않는 매매를 시킨다. 실제 보유는 목표를 바꾸지 않고 회수·채우기 판단에만 쓴다.
     target_shares = target_shares or {}
     for row in holdings:
         price_krw = price_krw_by_ticker.get(row["ticker"])
@@ -715,7 +662,7 @@ def _attach_account_targets(
         # 목표 비중(`weight_pct`)은 백테스트 값 그대로 둔다 — 덮어쓰면 전략이 원래 무엇을
         # 원했는지가 사라져, 못 맞추고 있다는 사실 자체가 안 보인다.
         row["actual_weight_pct"] = (
-            round(target_qty * price_krw / total_assets * 100.0, 4)
+            round(target_qty * price_krw / capital_krw * 100.0, 4)
             if target_qty is not None and price_krw and total_assets > 0
             else None
         )
@@ -765,8 +712,8 @@ def _attach_account_targets(
 def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     """오늘 기준 합성 운영 상태 — 보유 목록(목표 비중)·현금 비중·오늘의 액션.
 
-    각 슬리브의 전략 화면이 계산하는 것을 어댑터(`utils.mix_sleeve.slot_state`)로 같은
-    형태로 받아 합칠 뿐, 새 판정 로직은 없다. 비중은 슬리브 몫 ÷ 슬롯 수(빈 슬롯 = 현금).
+    개별 엔진의 종목·진입·청산을 받아 고정 원화 기준금액과 회수·채우기 정책을 적용한다.
+    포트폴리오는 저장 비중, 슬롯 전략은 슬리브 몫 ÷ 슬롯 수(빈 슬롯 = 현금).
     겹치는 종목은 한 행으로 합친다 — 계좌에는 그 종목이 하나뿐이라, 슬리브별로 나누면
     보유 수량이 두 번 세어지고 매매 지시가 반대로 나온다.
     """
@@ -784,19 +731,19 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         require_start_date(spec.settings)
     states = {spec.key: slot_state(spec) for spec in slots}
 
-    # ── 슬리브 몫 — 월초 배분에서 각 슬리브가 흘러간 비율을 역산한다 ──
-    # 재조정은 매월 첫 거래일에만 하므로, 그 사이에는 잘 나간 슬리브의 몫이 커진 채로
-    # 가는 것이 백테스트다. 항상 월초 배분으로 보면 승자 슬리브를 매주 깎는 지시가 나온다.
-    base_weights = mix_weights_for_account(ctx["account_id"])
-    drifted = _sleeve_shares(ctx)
-    reserved_cash_share = drifted["cash_pct"]
-    shares = {key: drifted[f"{key}_pct"] for key in keys}
+    from core.strategy.mix.capital_policy import internal_target_weights
 
-    # 새로 담는 슬롯의 몫 — 진입·교체 시점에는 그 슬리브 몫의 1/N 을 배정한다.
-    # 이미 들고 있는 종목은 **흘러간 실제 비중**(drift_pct)을 목표로 쓴다. 진입할 때
-    # 1/N 이었다가 시세대로 벌어진 값이고, 백테스트도 그 상태를 그대로 들고 간다.
-    # 고정 1/N 을 목표로 두면 목표와 보유가 매일 어긋나 실제로는 하지 않을 매매가 나온다.
-    slot_weight = {key: shares[key] / states[key].top_n for key in keys}
+    base_weights = mix_weights_for_account(ctx["account_id"])
+    reserved_cash_share = base_weights["cash_pct"]
+    shares = {key: base_weights[f"{key}_pct"] for key in keys}
+    # 엔진은 종목·시점을 정하고 합성은 고정 배정 비중을 적용한다.
+    for spec in slots:
+        weights = internal_target_weights(strategy=spec.strategy, settings=spec.settings)
+        for target in states[spec.key].targets:
+            weight = weights[str(target["ticker"])] if isinstance(weights, dict) else weights
+            target["drift_pct"] = weight
+            if spec.strategy == "portfolio":
+                target["status"] = f"설정 비중 {weight:.2f}%"
 
     holdings: list[dict[str, Any]] = []
     by_ticker: dict[str, dict[str, Any]] = {}
@@ -867,7 +814,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
             elif target.get("drift_pct") is not None:
                 weight = shares[key] * float(target["drift_pct"]) / 100.0
             else:
-                weight = slot_weight[key]
+                raise ValueError(f"{key}: 종목 기준 비중이 없습니다.")
             add_target(key, target, weight)
 
     # 매월 첫 거래일 = 슬리브 배분 리밸런싱 날 (그 시장 달력 기준).
@@ -879,12 +826,6 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     pool_currency = ctx["currency"]
     tz_name = str((MARKET_SCHEDULES.get(country) or {}).get("timezone") or "Asia/Seoul")
     today_local = pd.Timestamp.now(tz=tz_name).date()
-    month_start = today_local.replace(day=1)
-    month_days = get_trading_days(month_start.strftime("%Y-%m-%d"), today_local.strftime("%Y-%m-%d"), country)
-    sleeve_rebalance_today = bool(month_days) and month_days[0].date() == today_local
-
-    # 월초 배분은 _sleeve_shares가 백테스트와 같은 재생 경로에서 이미 반영했다.
-    # 종목 비중과 목표 주수 모두 그 배분을 사용하므로 별도 보정하지 않는다.
 
     # 다음 거래일 — 모든 체결은 시가라 액션 묶음의 실제 날짜가 된다. 연휴가 끼면
     # 이 날짜가 교체일과 같아질 수 있고, 그러면 화면이 한 묶음으로 합친다.
@@ -935,72 +876,40 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
             as_of=valuation_date,
         )
 
-        # ── 고정 자산 몫만큼 슬리브·현금 비중을 줄인다 ──
-        # 슬리브 배분(50:50 등)은 **고정 자산을 뺀 나머지**에 대한 비율이다. 고정 자산은
-        # 사용자가 못 바꾸는 값이라 배분 대상이 아니고, 총자산 대비로 두면 슬리브 합 + 고정
-        # 자산이 100% 를 넘는다. 여기서 줄여야 목표 금액이 실제 계좌와 맞는다.
+        # 고정 기준금액은 실제 평가액·인출·고정 자산 규모에 맞춰 축소하지 않는다.
         fixed_pct = float(account["fixed_asset_pct"])
-        if fixed_pct > 0:
-            scale = max(1.0 - fixed_pct / 100.0, 0.0)
-            for row in holdings:
-                row["weight_pct"] *= scale
-                for key in keys:
-                    row[f"{key}_weight"] *= scale
-            shares = {key: value * scale for key, value in shares.items()}
-            reserved_cash_share *= scale
-            base_weights = {name: value * scale for name, value in base_weights.items()}
-            # 고정 자산 행 — 표에서 비중 합이 100% 가 되게 한다. 목표 = 현재라 매매 지시가
-            # 나오지 않는다(수량·목표수량을 아래에서 같은 값으로 채운다).
-            holdings.append(
-                {
-                    "ticker": FIXED_ASSET_TICKER,
-                    "name": FIXED_ASSET_NAME,
-                    "sources": [],
-                    "weight_pct": fixed_pct,
-                    "price": None,
-                    "change_pct": None,
-                    **{f"{key}_weight": 0.0 for key in keys},
-                    **{f"{key}_status": None for key in keys},
-                    "is_fixed_asset": True,
-                }
-            )
-
-        # 목표 주수 — 슬리브마다 자기 몫 예산 안에서 배분. 종목·비중은 백테스트 것 그대로다.
-        total_assets = float(account.get("total_assets") or 0)
-        sleeve_amount_krw = {key: total_assets * shares[key] / 100.0 for key in keys}
+        sleeve_amount_krw = {key: ctx["mix_capital_krw"] * shares[key] / 100.0 for key in keys}
         target_schedule = dated_target_shares(
             {key: state.targets for key, state in states.items()},
             sleeve_amount_krw,
             krw_rate,
-            total_assets,
+            ctx["mix_capital_krw"],
             next_trading_day,
             adjustment_day=adjustment_day,
         )
         target_shares = target_schedule[max(target_schedule)]["quantities"]
         account["sell_all"] = _attach_account_targets(
-            holdings, account, krw_rate, slot_keys=keys, target_shares=target_shares
+            holdings, account, krw_rate, slot_keys=keys, target_shares=target_shares, capital_krw=ctx["mix_capital_krw"]
         )
 
-        # 고정 자산 행 마무리 — 목표 대조(위)는 계좌 원장 holdings 만 보므로 이 행은 비어 있다.
-        # 평가액은 그대로 채우고 수량 지시는 만들지 않는다(살 수도 팔 수도 없는 자산이다).
-        for row in holdings:
-            if not row.get("is_fixed_asset"):
-                continue
-            row["held_value"] = account["fixed_asset_value"]
-            row["current_weight_pct"] = fixed_pct
-            row["target_amount"] = account["fixed_asset_value"]
-            row["held_quantity"] = None
-            row["target_quantity"] = None
-            row["trade_quantity"] = None
-            # 살 수도 팔 수도 없는 자산이라 목표 = 현재다. 실제목표에도 같은 값을 넣어야
-            # 두 합계가 같은 기준이 된다(안 넣으면 고정 자산 몫만큼 실제목표가 낮게 보인다).
-            row["actual_weight_pct"] = fixed_pct
-            # 수익률 — 평단이 없는 항목이라 평가액과 손익으로 낸다(원금 = 평가액 − 손익).
-            principal = float(account.get("fixed_asset_native") or 0) - float(
-                account.get("fixed_asset_change_native") or 0
-            )
-            row["return_pct"] = (
-                round(float(account["fixed_asset_change_native"]) / principal * 100.0, 2) if principal > 0 else None
+        if account["fixed_asset_value"]:
+            holdings.append(
+                {
+                    "ticker": FIXED_ASSET_TICKER,
+                    "name": FIXED_ASSET_NAME,
+                    "sources": [],
+                    "is_fixed_asset": True,
+                    "price": None,
+                    "weight_pct": 0.0,
+                    "actual_weight_pct": 0.0,
+                    "held_value": account["fixed_asset_value"],
+                    "current_weight_pct": fixed_pct,
+                    "target_amount": None,
+                    "held_quantity": None,
+                    "target_quantity": None,
+                    "trade_quantity": None,
+                    **{f"{key}_weight": 0.0 for key in keys},
+                }
             )
 
     # 비중 합계·슬리브 현금 — 고정 자산 축소가 끝난 뒤의 값이라야 실제 계좌와 맞는다.
@@ -1028,6 +937,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         "computed_at": datetime.now().astimezone().isoformat(),
         "currency": ctx["currency"],
         "krw_rate": krw_rate,
+        "capital_krw": ctx["mix_capital_krw"],
         "account_id": ctx["account_id"],
         # 화면이 표시용 시세를 60초마다 갱신할 때 쓴다(시세 소스가 국가별로 다르다).
         "country": country,
@@ -1080,7 +990,6 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
                 }
                 for key in keys
             },
-            "sleeve_rebalance_today": sleeve_rebalance_today,
         },
     }
     # 주중 이탈 예상 — 표의 매매수량·상태 칸에 예상을 겹쳐 보여주기 위한 행 플래그.
@@ -1114,7 +1023,8 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         payload["holdings"],
         payload["actions"],
         next_trading_day,
-        excess_holding_allowance=ctx["mix_excess_holding_allowance"],
+        harvest_pct=ctx["mix_harvest_pct"],
+        refill_pct=ctx["mix_refill_pct"],
         cash_balance=account["cash_balance"] / krw_rate if account is not None else 0,
         currency=currency,
         adjustment_day=adjustment_day,
@@ -1127,55 +1037,84 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     return payload
 
 
-def _merge_trades(slots: list[SleeveSpec], results: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    """슬리브들의 체결을 한 목록으로 — 보유중 행이 먼저, 그 아래는 청산일 최신순.
-
-    엔진별 형태 차이는 어댑터(`utils.mix_sleeve.trade_rows`)가 흡수한다 — 여기서는 슬롯
-    키만 붙여 합친다. ``strategy`` 에 전략 이름이 아니라 **슬롯 키**를 담는 것은 같은
-    전략이 두 슬롯에 올 수 있어서다(어느 슬리브인지는 화면이 계좌 설정으로 풀어 쓴다).
-    """
-    from utils.mix_sleeve import trade_rows
-
-    merged: list[dict[str, Any]] = []
-    for spec in slots:
-        for row in trade_rows(spec, results[spec.key]):
-            merged.append({**row, "strategy": spec.key})
-    holding = sorted(
-        (row for row in merged if row.get("exit_date") is None), key=lambda row: row["entry_date"], reverse=True
-    )
-    closed = sorted((row for row in merged if row.get("exit_date")), key=lambda row: row["exit_date"], reverse=True)
-    return holding + closed
-
-
 def _simulate_mix(
     ctx: dict[str, Any], results: dict[str, dict[str, Any]], *, through_date: str | None
 ) -> dict[str, Any]:
-    """합성 재생 — 계좌 배분·슬리피지·슬리브 곡선을 수집해 핵심 재생(`replay_mix`)에 넘긴다."""
+    """전략별 엔진의 종목 편입 기간을 읽어 공통 고정 기준금액 재생에 전달한다."""
     import pandas as pd
 
-    from core.strategy.mix.simulate import replay_mix
-    from utils.mix_sleeve import daily_curve
+    from core.strategy.mix.capital_policy import internal_target_weights
+    from core.strategy.mix.capital_replay import replay_capital
+    from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
+    from utils.data_loader import get_exchange_rate_series
     from utils.pool_settings_store import get_pool_slippage
 
-    slots: list[SleeveSpec] = ctx["slots"]
+    if through_date is not None:
+        raise ValueError("고정 기준금액 합성은 미래 월초 재배분을 하지 않습니다.")
     base = mix_weights_for_account(ctx["account_id"])
-    weights = {spec.key: base[f"{spec.key}_pct"] / 100.0 for spec in slots}
-    weights["cash"] = base["cash_pct"] / 100.0
-    slippage = {spec.key: tuple(rate / 100.0 for rate in get_pool_slippage(spec.pool)) for spec in slots}
-    curves = {spec.key: daily_curve(spec, results[spec.key]) for spec in slots}
-    frame = pd.DataFrame({key: pd.Series(curve) for key, curve in curves.items()}).sort_index().ffill().dropna()
-    stock = (
-        pd.DataFrame(
-            {
-                key: pd.Series({row["date"]: 1 - float(row["cash_weight_pct"]) / 100.0 for row in result["daily"]})
-                for key, result in results.items()
-            }
-        )
-        .sort_index()
-        .ffill()
-        .reindex(frame.index)
+    starts = [result["daily"][0]["date"] for result in results.values()]
+    ends = [result["daily"][-1]["date"] for result in results.values()]
+    start, end = max(starts), min(ends)
+    intervals = []
+    costs = {}
+    for spec in ctx["slots"]:
+        weights = internal_target_weights(strategy=spec.strategy, settings=spec.settings)
+        cost = tuple(value / 100.0 for value in get_pool_slippage(spec.pool))
+        for row in results[spec.key]["trades"]:
+            if spec.strategy == "portfolio" and row["side"] != "buy":
+                continue
+            ticker = row["ticker"]
+            weight = weights[ticker] if isinstance(weights, dict) else weights
+            amount = ctx["mix_capital_krw"] * base[f"{spec.key}_pct"] / 100.0 * weight / 100.0
+            entry = row["date"] if spec.strategy == "portfolio" else row["entry_date"]
+            exit_date = None if spec.strategy == "portfolio" else row.get("exit_date")
+            intervals.append((ticker, entry, exit_date, amount))
+            if ticker in costs and costs[ticker] != cost:
+                raise ValueError(f"중복 종목 {ticker}의 슬리브별 슬리피지가 다릅니다. 같은 값으로 설정하세요.")
+            costs[ticker] = cost
+    frames = load_cached_frames_bulk_from_all_ticker_types(sorted(costs))
+    # 거래일은 엔진의 일별 결과 교집합이다. 특정 종목의 상장일로 전체 구간을 줄이지 않는다.
+    common = set.intersection(*[{row["date"] for row in result["daily"]} for result in results.values()])
+    index = pd.DatetimeIndex(sorted(day for day in common if start <= day <= end))
+    if index.empty:
+        raise ValueError("합성 재생의 공통 거래일이 없습니다.")
+    close = pd.DataFrame(index=index)
+    opened = pd.DataFrame(index=index)
+    for ticker in costs:
+        frame = frames.get(ticker)
+        if frame is None or frame.empty or not {"Open", "Close"}.issubset(frame.columns):
+            raise ValueError(f"합성 재생 가격이 없습니다: {ticker}")
+        close[ticker] = frame["Close"].reindex(frame.index.union(index)).sort_index().ffill().reindex(index)
+        opened[ticker] = frame["Open"].reindex(index)
+    if ctx["currency"] == "KRW":
+        fx = pd.Series(1.0, index=index)
+    else:
+        symbol = {"USD": "KRW=X", "AUD": "AUDKRW=X"}[ctx["currency"]]
+        raw_fx = get_exchange_rate_series(index[0] - pd.Timedelta(days=10), index[-1], symbol=symbol)
+        fx = raw_fx.reindex(raw_fx.index.union(index)).sort_index().ffill().reindex(index)
+        if fx.isna().any() or (fx <= 0).any():
+            raise ValueError("합성 백테스트의 일별 환율이 부족합니다.")
+    targets = {}
+    for day in index:
+        date = str(day.date())
+        amounts = {}
+        for ticker, entry, exited, amount in intervals:
+            if entry <= date and (exited is None or date < exited):
+                amounts[ticker] = amounts.get(ticker, 0.0) + amount
+        targets[date] = amounts
+    replayed = replay_capital(
+        close=close,
+        opened=opened,
+        fx=fx,
+        targets=targets,
+        costs=costs,
+        capital_krw=ctx["mix_capital_krw"],
+        harvest_pct=ctx["mix_harvest_pct"],
+        refill_pct=ctx["mix_refill_pct"],
     )
-    return replay_mix(frame, stock, weights, slippage, through_date=through_date)
+
+    replayed["fx"] = {str(day.date()): float(rate) for day, rate in fx.items()}
+    return replayed
 
 
 def _value_account(
@@ -1278,13 +1217,14 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
 
     curves = {spec.key: sleeve_curve(spec, results[spec.key]) for spec in ctx["slots"]}
 
-    # 합성 곡선 — 위 슬리브 곡선 위에 월초 배분 이관만 얹는다(판정은 엔진이 이미 했다).
-    mix_curve = _simulate_mix(ctx, results, through_date=None)["curve"]
+    # 합성 곡선은 개별 곡선의 가중 합이 아니라 종목별 회수·채우기 체결을 재생한다.
+    replayed = _simulate_mix(ctx, results, through_date=None)
+    mix_curve = replayed["curve"]
     dates = [d for d in mix_curve.index if d in bench_curve]
     if len(dates) < 2:
         raise RuntimeError("슬리브 전략들의 공통 백테스트 구간이 부족합니다.")
 
-    first_mix = float(mix_curve[dates[0]])
+    first_mix = 1.0  # 최초 매수 비용도 성과에 포함한다.
     # 벤치마크는 **시작일 시가**를 1 로 둔다 — 전략도 그날 시가에 사기 때문이다(공용 함수).
     from utils.benchmark_curve import growth_from_frame
 
@@ -1293,7 +1233,16 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
         bench_index[bench_index.isin(pd.to_datetime(dates))],
         label=f"벤치마크({ctx['benchmark_name']})",
     )
-    bench_curve = {str(day.date()): float(value) for day, value in bench_growth.items()}
+    fx_by_day = replayed["fx"]
+    initial_fx = fx_by_day[dates[0]]
+    bench_curve = {
+        str(day.date()): float(value) * fx_by_day[str(day.date())] / initial_fx for day, value in bench_growth.items()
+    }
+    # 비교 곡선도 같은 날짜별 환율로 원화 환산한다.
+    curves = {
+        key: {date: value * fx_by_day[date] / initial_fx for date, value in curve.items() if date in fx_by_day}
+        for key, curve in curves.items()
+    }
     first_bench = 1.0  # 시작 기준이 이미 시가라 곡선 자체가 1 에서 출발한다
     # 슬리브별 시작값 — 합성과 같은 시작일로 다시 맞추는 기준점.
     first_by_slot = {key: curve.get(dates[0]) for key, curve in curves.items()}
@@ -1337,7 +1286,21 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
     strategy_curve = pd.Series([1 + row["strategy_pct"] / 100 for row in daily_rows])
     benchmark_curve = pd.Series([1 + row["benchmark_pct"] / 100 for row in daily_rows])
     strategy_stats, benchmark_stats = _summarize(strategy_curve), _summarize(benchmark_curve)
-    merged_trades = _merge_trades(ctx["slots"], results)
+    merged_trades = [
+        {
+            "ticker": row["ticker"],
+            "name": row["ticker"],
+            "entry_date": row["date"],
+            "exit_date": row["date"],
+            "entry_price": row["price"],
+            "exit_price": row["price"],
+            "return_pct": None,
+            "days": None,
+            "reason": f"합성 {row['side']} {row['quantity']}주",
+            "strategy": "mix",
+        }
+        for row in replayed["executions"]
+    ]
 
     return {
         "computed_at": datetime.now().astimezone().isoformat(),
@@ -1361,4 +1324,5 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
         "trades": merged_trades,
         # 거래 수·승률·평균 손익 — 각 전략 화면과 같은 공용 계산.
         **summarize_trades(merged_trades),
+        "trade_count": len(merged_trades),
     }

@@ -42,9 +42,7 @@ def invalidate_strategy_caches() -> None:
     그 사이 달라진 종목 목록이 반영되지 않은 결과가 다시 나오기 때문이다.
     """
     from utils import momentum_backtest, new_high_backtest
-    from utils.strategy_mix_service import _SHARES_CACHE
 
     momentum_backtest._POSITIONS_CACHE.invalidate()
     new_high_backtest._POSITIONS_CACHE.invalidate()
-    # 합성 슬리브 몫 — 슬리브 백테스트 곡선에서 나오므로 전략 설정·종목풀이 바뀌면 다시 계산해야 한다.
-    _SHARES_CACHE.invalidate()
+    # 합성은 자체 캐시가 없다 — 고정 기준금액 재생이 위 슬리브 결과를 그때그때 읽는다.
