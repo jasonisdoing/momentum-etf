@@ -142,6 +142,9 @@ def _fetch_etf_inav_all() -> dict[str, dict[str, float]]:
         entry: dict[str, Any] = {
             "nav": nav_value,
             "nowVal": price_value,
+            # 네이버 ETF API 는 정규장 값만 준다(실측: KODEX 200 localTradedAt 15:30,
+            # overMarketPriceInfo 없음) — 되돌릴 시간외 값이 따로 없다.
+            "regularClose": price_value,
             "deviation": deviation,
         }
 
@@ -266,22 +269,27 @@ def _parse_naver_signed_change_rate(item: dict[str, Any]) -> float | None:
     return change_rate
 
 
-def _get_naver_pre_market_price_info(item: dict[str, Any]) -> dict[str, Any] | None:
-    """네이버 국내주식 응답에서 열린 장전 거래 가격 정보를 반환한다."""
+def _get_naver_over_market_price_info(item: dict[str, Any]) -> tuple[dict[str, Any], str] | None:
+    """네이버 국내주식 응답에서 **열려 있는** 시간외 가격 정보와 그 구간을 반환한다.
+
+    장전(``PRE_MARKET``)·장후(``AFTER_MARKET``) 모두 대상이다. 닫힌 뒤에도 `overPrice`
+    값은 응답에 남아 있으므로 ``overMarketStatus == "OPEN"`` 일 때만 쓴다 — 시간외가
+    끝나면 정규장 종가(`closePrice`)로 돌아온다.
+    """
     over_market_info = item.get("overMarketPriceInfo")
     if not isinstance(over_market_info, dict):
         return None
 
     trading_session_type = str(over_market_info.get("tradingSessionType") or "").strip().upper()
     over_market_status = str(over_market_info.get("overMarketStatus") or "").strip().upper()
-    if trading_session_type != "PRE_MARKET" or over_market_status != "OPEN":
+    if trading_session_type not in ("PRE_MARKET", "AFTER_MARKET") or over_market_status != "OPEN":
         return None
 
     over_price = _parse_comma_number(over_market_info.get("overPrice"))
     if over_price is None:
         return None
 
-    return over_market_info
+    return over_market_info, trading_session_type
 
 
 def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, Any]]:
@@ -325,20 +333,28 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
             if not code:
                 continue
 
-            pre_market_info = _get_naver_pre_market_price_info(item)
-            price_source = pre_market_info or item
-            price_field = "overPrice" if price_source is not item else "closePrice"
+            # `closePrice` 는 시간외가 열려 있어도 **정규장 종가**를 유지한다(실측 확인:
+            # SK하이닉스 closePrice 1,879,000 = 일봉 종가, 같은 응답 overPrice 1,878,000).
+            regular_close = _parse_comma_number(item.get("closePrice"))
+            over_market = _get_naver_over_market_price_info(item)
+            price_source = over_market[0] if over_market else item
+            price_field = "overPrice" if over_market else "closePrice"
             price_value = _parse_comma_number(price_source.get(price_field))
             if price_value is None:
                 continue
 
             entry: dict[str, Any] = {"nowVal": price_value}
+            # 시간외가 닫히면 여기로 돌아온다 — 공통 가격 함수가 쓴다.
+            if regular_close is not None:
+                entry["regularClose"] = regular_close
             # 일봉 스냅샷(fetch_naver_daily_ohlcv_snapshot)이 날짜 정합 검증에 쓴다.
             local_traded_at = str(item.get("localTradedAt") or "").strip()
             if local_traded_at:
                 entry["localTradedAt"] = local_traded_at
-            if pre_market_info is not None:
-                entry["is_pre_market"] = True
+            if over_market is not None:
+                entry["session"] = over_market[1]
+                if over_market[1] == "PRE_MARKET":
+                    entry["is_pre_market"] = True
 
             change_rate = _parse_naver_signed_change_rate(price_source)
             if change_rate is not None:
@@ -356,6 +372,17 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
             vol_val = _parse_comma_number(price_source.get("accumulatedTradingVolume"))
             if vol_val is not None:
                 entry["volume"] = vol_val
+
+            # 확정 일봉 저장용 — 시간외 구간에도 정규장 OHLCV 를 그대로 보존한다.
+            for key, field in (
+                ("regularOpen", "openPrice"),
+                ("regularHigh", "highPrice"),
+                ("regularLow", "lowPrice"),
+                ("regularVolume", "accumulatedTradingVolume"),
+            ):
+                parsed = _parse_comma_number(item.get(field))
+                if parsed is not None:
+                    entry[key] = parsed
 
             result[code] = entry
 
@@ -379,6 +406,9 @@ def fetch_naver_daily_ohlcv_snapshot(tickers: Sequence[str], target_day: pd.Time
     target_day 와 다르거나(거래정지·이월 표시), 장 전 예상가 상태(is_pre_market)거나,
     OHLC 중 하나라도 없는 종목은 **제외**한다 — 잘못된 일봉을 저장하느니 빼고
     종목별 pykrx 경로에 맡기는 쪽이 안전하다.
+
+    쓰는 값은 **정규장 OHLCV**(`regular*`)다. 표시용 `nowVal`·`open`·`high` 등은 장후
+    시간외가 열려 있으면 시간외 값으로 바뀌므로, 그대로 저장하면 일봉이 오염된다.
     """
     target = pd.Timestamp(target_day).normalize()
     snapshot = fetch_naver_stock_realtime_snapshot(tickers)
@@ -390,11 +420,11 @@ def fetch_naver_daily_ohlcv_snapshot(tickers: Sequence[str], target_day: pd.Time
         traded_ts = pd.to_datetime(traded_at, errors="coerce")
         if traded_ts is pd.NaT or pd.Timestamp(traded_ts).normalize() != target:
             continue
-        open_val = entry.get("open")
-        high_val = entry.get("high")
-        low_val = entry.get("low")
-        close_val = entry.get("nowVal")
-        volume_val = entry.get("volume")
+        open_val = entry.get("regularOpen")
+        high_val = entry.get("regularHigh")
+        low_val = entry.get("regularLow")
+        close_val = entry.get("regularClose")
+        volume_val = entry.get("regularVolume")
         if any(v is None for v in (open_val, high_val, low_val, close_val, volume_val)):
             continue
         if min(float(open_val), float(high_val), float(low_val), float(close_val)) <= 0:
@@ -453,7 +483,8 @@ def fetch_naver_worldstock_snapshot(reuters_codes: Sequence[str]) -> dict[str, d
             if price_value is None:
                 continue
 
-            entry: dict[str, float | str] = {"nowVal": price_value}
+            # worldstock 은 정규장 종가만 주는 지연 시세다 — 시간외 값이 따로 없다.
+            entry: dict[str, float | str] = {"nowVal": price_value, "regularClose": price_value}
 
             prev_close = _parse_comma_number(item.get("compareToPreviousClosePrice"))
             compare_code = str(((item.get("compareToPreviousPrice") or {}).get("code")) or "").strip()
@@ -543,6 +574,9 @@ def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
 
             entry: dict[str, float] = {
                 "nowVal": float(price),
+                # 호주는 정규장 밖 거래가 없다(MARKET_SCHEDULES 에 프리·애프터 키 없음)
+                # — 되돌릴 시간외 값이 없어 정규장 가격과 같다.
+                "regularClose": float(price),
             }
 
             prev_close = quote.get("prevClose")
@@ -733,14 +767,21 @@ def resolve_toss_us_product_codes(symbols: Sequence[str]) -> dict[str, str]:
 
 
 def _toss_us_price_entry(item: dict[str, Any]) -> dict[str, Any]:
-    """응답 거래 시각의 세션으로 가격을 선택한다. 애프터 값을 정규 종가로 저장하지 않는다."""
+    """**지금 열려 있는 세션**의 가격을 고른다. 애프터 값을 정규 종가로 저장하지 않는다.
+
+    세션은 응답의 거래 시각이 아니라 **현재 시각**으로 판정한다. `tradeDateTime` 은
+    종목별 마지막 체결 시각이라, 그 기준으로 고르면 애프터가 끝난 뒤에도 마지막 체결이
+    애프터 시각이어서 애프터 가격에 눌러앉는다 — 세션이 끝나면 정규장 종가로 돌아와야 한다.
+    """
     from utils.market_session import AFTERMARKET, PREMARKET, market_session
 
     stamp = pd.Timestamp(item.get("tradeDateTime"))
     if pd.isna(stamp) or stamp.tzinfo is None:
         raise ValueError("토스 미국 시세의 tradeDateTime(시간대 포함)이 필요합니다.")
     local_stamp = stamp.tz_convert(ZoneInfo("America/New_York"))
-    session = market_session("us", now=local_stamp.to_pydatetime())["session"]
+    session = market_session("us")["session"]
+    # 프리장·데이장 전용 필드는 응답에 없다 — 그 구간은 `close` 가 현재가를 준다는
+    # 기존 동작을 그대로 둔다(애프터만 전용 필드가 있어 갈라진다).
     price_field = "afterMarketClose" if session == AFTERMARKET else "close"
     price = _safe_float(item.get(price_field))
     regular_close = _safe_float(item.get("close"))

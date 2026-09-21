@@ -235,7 +235,15 @@ class IntradayScreenMixConsistencyTest(unittest.TestCase):
                     "open": None if index % 2 else 50.0,
                     "change_pct": -1.0,
                 }
-            return {"live": True, "pre_market": False, "traded_at": session, "by_ticker": by_ticker}
+            return {
+                "live": True,
+                "pre_market": False,
+                "country": "kor",
+                # 붙일 봉의 날짜 — 실제 경로에서는 `utils.effective_prices` 가 정한다.
+                "session_ts": pd.Timestamp(session),
+                "traded_at": session,
+                "by_ticker": by_ticker,
+            }
 
         from utils.portfolio_backtest import _POSITIONS_CACHE as _PORTFOLIO_CACHE
 

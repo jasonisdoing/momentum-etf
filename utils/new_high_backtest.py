@@ -17,10 +17,11 @@ from typing import Any
 import pandas as pd
 
 from config import CACHE_TTL_COMPUTE
-from core.strategy.intraday import effective_close_frame, mark_engine_statuses
+from core.strategy.intraday import mark_engine_statuses
 from core.strategy.new_high.signals import HIGH_WINDOW_WEEKS, compute_signals
 from core.strategy.price_panel import build_price_panel
 from core.strategy.slot_backtest import run_slot_backtest
+from utils.effective_prices import apply_realtime_closes
 from utils.new_high_service import (
     DEFAULT_BACKTEST_MONTHS,
     load_price_frames,
@@ -373,18 +374,23 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         # 오늘 봉이 붙으면 '직전' 최고선도 하루 앞당겨진다 — 어제 신고가를 찍은 종목의
         # 돌파 거리가 부풀려지지 않고, 이탈 이평선도 오늘 잠정 종가를 넣은 값이 된다.
         # 실시간이 없는 종목과 워밍업 미달(NaN)은 확정값을 유지한다 — 값을 추정하지 않는다.
-        session = str(quotes["traded_at"])[:10]
-        session_ts = pd.Timestamp(session)
+        session_ts = quotes["session_ts"]
         live_prices = {t: q["price"] for t, q in quotes["by_ticker"].items() if t in close_df.columns}
-        live_highs = {t: q["high"] for t, q in quotes["by_ticker"].items() if t in close_df.columns}
-        live_opens = {
-            t: float(q["open"]) for t, q in quotes["by_ticker"].items() if t in close_df.columns and q.get("open")
-        }
-        eff_close = effective_close_frame(close_df, live_prices, session_ts)
+        # 장전(동시호가)의 고가·시가는 아직 **직전 세션의 값**이다. 그대로 오늘 봉에
+        # 붙이면 어제 확정된 돌파가 밀려 '터치 후 밀림'으로 뒤집히므로 그 구간에서는 뺀다.
+        if quotes["pre_market"]:
+            live_highs: dict[str, float] = {}
+            live_opens: dict[str, float] = {}
+        else:
+            live_highs = {t: q["high"] for t, q in quotes["by_ticker"].items() if t in close_df.columns}
+            live_opens = {
+                t: float(q["open"]) for t, q in quotes["by_ticker"].items() if t in close_df.columns and q.get("open")
+            }
+        eff_close = apply_realtime_closes(close_df, live_prices, session_ts)
         eff = compute_signals(
             {
                 "close": eff_close,
-                "high": effective_close_frame(panel["high"], live_highs, session_ts),
+                "high": apply_realtime_closes(panel["high"], live_highs, session_ts),
                 # 오늘 거래대금은 이 패널에 없다(NaN) — 장중 배수는 공용 실시간 경로가 담당한다.
                 "value": panel["value"],
             },
@@ -416,7 +422,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         live_result = run_slot_backtest(
             months=DEFAULT_BACKTEST_MONTHS,
             start_date=start_date,
-            panel={"close": eff_close, "open": effective_close_frame(panel["open"], live_opens, session_ts)},
+            panel={"close": eff_close, "open": apply_realtime_closes(panel["open"], live_opens, session_ts)},
             entry=entry_frame,
             exit_signal=eff["below_ma"],
             priority=priority_frame,
@@ -488,7 +494,11 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
 
         # 진입 예정 — 체결 예정(오늘 시가, fill_date)이 앞자리, 잠정 예정(내일 시가)이 뒷자리.
         entries = [
-            {**row_by_ticker[row["ticker"]], "sleeve_weight_pct": row["sleeve_weight_pct"], "fill_date": session}
+            {
+                **row_by_ticker[row["ticker"]],
+                "sleeve_weight_pct": row["sleeve_weight_pct"],
+                "fill_date": str(session_ts.date()),
+            }
             for row in live_result["pending_entries"]
             if row["ticker"] in row_by_ticker
         ] + [
@@ -567,7 +577,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         item["listing_months"] = listing_months_by.get(item["ticker"])
 
     # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.
-    fill_base = pd.Timestamp(str(quotes["traded_at"])[:10]) if quotes["live"] else last
+    fill_base = quotes["session_ts"] if quotes["live"] else last
     from utils.settings_loader import get_ticker_type_settings
 
     return {
