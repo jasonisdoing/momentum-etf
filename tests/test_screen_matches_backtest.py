@@ -222,10 +222,10 @@ class IntradayScreenMixConsistencyTest(unittest.TestCase):
         import utils.new_high_backtest as new_high_backtest
         from utils.strategy_mix_service import _resolve_mix_account, mix_positions
 
-        def fake_quotes(pool: str, tickers: list[str]) -> dict[str, Any]:
-            # 모의 세션은 오늘 — 실제 장중(오늘 세션)과 같은 의미라, 전략 시작일이 오늘이어도
-            # 잠정 실행이 '시작 전'으로 빠지지 않는다.
-            session = str(pd.Timestamp.today().normalize().date())
+        def fake_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> dict[str, Any]:
+            # 모의 세션은 (캐시 다음 날, 오늘) 중 늦은 날 — 실제 장중(오늘 세션)과 같은 의미라,
+            # 전략 시작일이 오늘이어도 잠정 실행이 '시작 전'으로 빠지지 않는다.
+            session = str(max(cached_last + pd.Timedelta(days=1), pd.Timestamp.today().normalize()).date())
             by_ticker = {}
             for index, ticker in enumerate(sorted(set(tickers))):
                 by_ticker[ticker] = {
