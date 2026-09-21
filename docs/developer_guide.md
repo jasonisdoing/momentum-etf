@@ -35,7 +35,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | `/pools-backtest` | 종목풀 백테스트 | `utils/pool_signal_backtest_service.py` |
 | `/strategy-momentum` | 모멘텀 전략(주간) 선정·백테스트·튜닝 | `utils/momentum_service.py`, `momentum_backtest.py`, `momentum_tuning.py` |
 | `/strategy-new-high` | 신고가 전략 선정·백테스트·튜닝 | `utils/new_high_service.py`, `new_high_backtest.py`, `new_high_tuning.py` |
-| `/strategy-mix` | 두 전략 합성 — 목표 비중·오늘의 액션·백테스트(열람 전용) | `utils/strategy_mix_service.py` |
+| `/strategy-mix` | 고정 KRW 기준금액 합성 — 회수·채우기·백테스트 | `utils/strategy_mix_service.py` |
 | `/leverage-settings` | 레버리지 이동평균 크로스 설정·튜닝 | `leverage/` |
 | `/account-settings` | 계좌 메타·증권사 연동·합성 슬리브별 종목풀·보유종목 알림 On/Off | `utils/account_settings_store.py`, `utils/holdings_alarm_service.py` |
 | `/assets`, `/holdings*` | 자산·보유 | `utils/holdings_detail_service.py`, `portfolio_master` |
@@ -46,10 +46,6 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | `/batch`, `/system` | 배치 수동 실행·상태 | `utils/system_service.py`, `utils/batch_queue.py` |
 | `/data-tables` | DB 컬렉션 카탈로그 — 분류·크기·고아 데이터 | `utils/data_table_catalog.py` |
 | `/m` | 폰 전용. 모바일 전용 API 는 만들지 않는다(`web/app/m/mobile-data.ts` 가 기존 API 합성) | |
-
-합성 운용 배분·백테스트는 `utils/strategy_mix_service._simulate_mix`를 공유하며 월초 배분은 `core/strategy/mix/rebalance.py`가 담당한다. 각 엔진의 일별 결과 `cash_weight_pct`를 읽어 전략 내부 현금을 보존한다.
-
-공통 슬롯 엔진은 `core/strategy/slot_backtest.py`, 합성 월초 배분은 `core/strategy/mix/rebalance.py`, 전략 규칙은 `core/strategy/strategy_logic.md`가 단일 소스다.
 
 전략 공용 모듈:
 - 전략 시작일은 모멘텀의 `pool_settings.MOMENTUM_START_DATE`, 신고가·포트폴리오의 풀별 `start_date`에 저장한다. 검증은 `utils/strategy_settings.py`, 개별 운용 현황과 합성은 같은 저장일로 계산한다.
@@ -68,7 +64,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | `index_constituents` | SP500/NDX100/ASX200/KOSPI200/KOSDAQ150 구성종목. 파일이 아닌 DB 인 이유: 서버 `data/` 가 읽기 전용. 한국은 공식 API 가 없어 **추종 ETF 보유종목**을 명단으로 쓴다(`KOR_INDEX_SOURCES`) |
 | `system_config.momentum_settings` / `new_high_settings` | 전략 설정, 풀별 `settings_by_pool` |
 | `leverage_config` / `leverage_state` | 레버리지 전략 설정·상태 |
-| `portfolio_master` | 계좌 보유·목표 비중·자산 헬퍼 설정(단일 컬렉션) |
+| `portfolio_master` | 계좌 보유·메모·표시용 그룹 구분선(단일 컬렉션) |
 | `daily_fund_data` → `weekly_fund_data` / `monthly_fund_data` | 일별 원장이 기준, 주/월은 재집계 |
 | `batch_locks`, `batch_queue` | 배치 락·큐 |
 | `daily_snapshots` | 일자별 계좌 자산 스냅샷. **계좌를 지워도 남긴다** — 지우면 지난 수익률 그래프가 바뀐다 |
@@ -119,12 +115,13 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 
 합성 액션 사유는 `core/strategy/mix/actions.py`에서 조립하며 화면·슬랙이 같은 문구를 읽는다. 포트폴리오 `current_positions`의 거래 내역 중 기준일 거래를 `SlotState.engine_trades`로 전달하며 목표 계산에는 사용하지 않는다.
 
-계좌 설정 `mix_excess_holding_allowance`는 계좌에 저장하며 각 종목에 적용하는 초과 보유 허용 한도다. 합성은 `cash_model.currency_for_country`로 통화를 결정하며, 원장의 원화 현금을 계좌 통화로 환산해 `mix/actions.py`에 전달한다. 목표는 유지하고 날짜별 액션·예상 현금 흐름만 조정하며 화면·슬랙이 같은 결과를 사용한다.
-
-자산 상세 수량 배분은 `utils/assets_share_allocation.py`로 분리했다. 목표 현금을 제외한 예산을 최대잉여 순으로 채우며, 합성의 `utils/share_allocation.py`를 호출하지 않는다. 잔여 현금 활용 요구가 서로 달라 배분 정책을 공유하지 않는다.
+`utils/share_allocation.py`에는 슬롯 엔진의 백테스트 시작 자본(`backtest_initial_capital`)만 남아 있다. 목표 금액을 정수 주수로 나누던 배분은 합성이 고정 기준금액 회수·채우기로 바뀌며 폐기했다.
 
 2026-09-09 전환: 기존 설정값은 새 정책에 전용하지 않고 사용자 결정으로 전 계좌 0 초기화 후 옛 필드를 제거했다. 전환 전 로컬 백업은 `backups/mix-allowance-20260909T090452Z.json`이며 저장소 추적 대상이 아니다.
 
 합성 운용 응답의 `currency`·`krw_rate`는 계좌 국가 통화와 평가에 사용한 환율이다. 화면의 총액·평가액·목표액·배분액은 원화 계산값을 해당 환율로 나누어 표시하고, 종목 가격은 원래 현지 통화 값을 표시한다.
 
 모멘텀·신고가 `current_positions`의 `target_holdings`·`target_entries`는 실시간 표시를 적용하기 전 확정 엔진 상태다. 합성 목표는 이 상태만 읽으며, 목표 밖 계좌 종목의 평가도 엔진 기준일까지의 종가로 제한한다.
+
+합성 계좌 설정은 `mix_capital_krw`·`mix_harvest_pct`·`mix_refill_pct`를 함께 저장한다.
+`mix/capital_policy.py`가 화면·슬랙·합성 재생의 단일 판정 경로다. 미설정 계좌는 주문을 생성하지 않는다.

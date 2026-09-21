@@ -19,7 +19,6 @@ import pandas as pd
 
 from utils.mix_sleeve import SleeveSpec, slot_state
 from utils.portfolio_backtest import current_positions, run_backtest
-from utils.strategy_mix_service import _simulate_mix
 
 MOMENTUM_POOL = "us_stock"
 NEW_HIGH_POOL = "us_stock"
@@ -221,7 +220,7 @@ class IntradayScreenMixConsistencyTest(unittest.TestCase):
         _load_env()
         import utils.momentum_backtest as momentum_backtest
         import utils.new_high_backtest as new_high_backtest
-        from utils.strategy_mix_service import _SHARES_CACHE, _resolve_mix_account, mix_positions
+        from utils.strategy_mix_service import _resolve_mix_account, mix_positions
 
         def fake_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> dict[str, Any]:
             # 모의 세션은 (캐시 다음 날, 오늘) 중 늦은 날 — 실제 장중(오늘 세션)과 같은 의미라,
@@ -240,11 +239,12 @@ class IntradayScreenMixConsistencyTest(unittest.TestCase):
 
         from utils.portfolio_backtest import _POSITIONS_CACHE as _PORTFOLIO_CACHE
 
+        # 합성은 자체 캐시를 두지 않는다(고정 기준금액 재생은 슬리브 결과를 그대로 읽는다) —
+        # 비울 대상은 각 전략 운용 현황 캐시뿐이다.
         caches = (
             momentum_backtest._POSITIONS_CACHE,
             new_high_backtest._POSITIONS_CACHE,
             _PORTFOLIO_CACHE,
-            _SHARES_CACHE,
         )
         try:
             for cache in caches:
@@ -356,51 +356,53 @@ class PortfolioMixStateTest(unittest.TestCase):
             self.assertEqual([round(t["drift_pct"], 6) for t in state.targets], [36, 32, 32])
 
 
-class MixRebalanceMatchesBacktest(unittest.TestCase):
-    def test_first_operating_day_uses_saved_mix_weights(self):
-        slots = [SleeveSpec("a", "momentum", "us_stock", {}), SleeveSpec("b", "portfolio", "us_etf", {})]
-        ctx = {"account_id": "test", "slots": slots}
-        results = {
-            "a": {"daily": [{"date": "2026-09-08", "strategy_pct": 0, "cash_weight_pct": 100}]},
-            "b": {"daily": [{"date": "2026-09-08", "strategy_pct": 0, "cash_weight_pct": 0}]},
-        }
-        with (
-            patch(
-                "utils.strategy_mix_service.mix_weights_for_account",
-                return_value={"a_pct": 40, "b_pct": 30, "cash_pct": 30},
-            ),
-            patch("utils.pool_settings_store.get_pool_slippage", return_value=(0.1, 0.2)),
-        ):
-            state = _simulate_mix(ctx, results, through_date=None)
-        self.assertEqual(state["curve"].to_dict(), {"2026-09-08": 1.0})
-        self.assertEqual(state["values"], {"a": 0.4, "b": 0.3})
-        self.assertEqual(state["cash"], 0.3)
+class MixCapitalScreenMatchesBacktest(unittest.TestCase):
+    def test_screen_actions_match_capital_replay(self):
+        from core.strategy.mix.actions import build_action_groups
+        from core.strategy.mix.capital_replay import replay_capital
 
-    def test_pending_month_start_matches_backtest(self):
-        slots = [SleeveSpec("a", "momentum", "us_stock", {}), SleeveSpec("b", "momentum", "us_stock", {})]
-        ctx = {"account_id": "test", "slots": slots}
-        results = {
-            key: {
-                "daily": [
-                    {"date": "2026-08-28", "strategy_pct": 0, "cash_weight_pct": 50},
-                    {"date": "2026-08-31", "strategy_pct": pct, "cash_weight_pct": 50},
-                ]
-            }
-            for key, pct in [("a", 20), ("b", 0)]
-        }
-        with (
-            patch(
-                "utils.strategy_mix_service.mix_weights_for_account",
-                return_value={"a_pct": 40, "b_pct": 40, "cash_pct": 20},
-            ),
-            patch("utils.pool_settings_store.get_pool_slippage", return_value=(0.1, 0.2)),
-        ):
-            pending = _simulate_mix(ctx, results, through_date="2026-09-01")
-            for result in results.values():
-                result["daily"].append({**result["daily"][-1], "date": "2026-09-01"})
-            actual = _simulate_mix(ctx, results, through_date=None)
-        self.assertEqual(pending["values"], actual["values"])
-        self.assertEqual(pending["cash"], actual["cash"])
+        index = pd.date_range("2026-09-01", periods=5)
+        close = pd.DataFrame({"A": [100, 120, 90, 70, 70]}, index=index)
+        opened = pd.DataFrame({"A": [100, 100, 120, 90, 70]}, index=index)
+        fx = pd.Series([1.0, 1.1, 1.1, 1.0, 1.0], index=index)
+        amounts = {str(day.date()): {"A": 1000.0} for day in index}
+        for refill in (0, 20, 100):
+            with self.subTest(refill=refill):
+                replay = replay_capital(
+                    close=close,
+                    opened=opened,
+                    fx=fx,
+                    targets=amounts,
+                    capital_krw=10000,
+                    harvest_pct=10,
+                    refill_pct=refill,
+                    costs={"A": (0, 0)},
+                )
+                held = 0
+                expected = []
+                for i, day in enumerate(index):
+                    date = str(day.date())
+                    rate = float(fx.iloc[max(i - 1, 0)])
+                    price = float(close.iloc[i - 1]["A"]) if i else 100.0
+                    target = int(1000 / rate / price)
+                    groups = build_action_groups(
+                        [{"ticker": "A", "price": price, "held_quantity": held, "target_quantity": target}],
+                        {"slots": {}},
+                        date,
+                        harvest_pct=10,
+                        refill_pct=refill,
+                        cash_balance=10000,
+                        target_schedule={
+                            date: {"quantities": {"A": target}, "weights": {"A": 10}, "amounts": {"A": 1000 / rate}}
+                        },
+                    )
+                    for group in groups:
+                        for item in group["items"]:
+                            expected.append((date, item["side"], item["quantity"]))
+                            held += item["quantity"] * (1 if item["side"] == "buy" else -1)
+                self.assertEqual(expected, [(r["date"], r["side"], r["quantity"]) for r in replay["executions"]])
+                if refill == 100:
+                    self.assertEqual(expected, [])
 
 
 class SlotEngineProvisionalBarTest(unittest.TestCase):
@@ -500,7 +502,8 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
         # 날짜 전달 검증용 계좌: 충분한 현금, 초과 허용 없음. 목표는 아래 엔진 결과로만 만든다.
         build_action_groups = partial(
             build_action_groups,
-            excess_holding_allowance=0,
+            harvest_pct=0,
+            refill_pct=0,
             cash_balance=1_000_000,
         )
 
@@ -564,8 +567,12 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
             "2026-09-07",
             currency="USD",
             target_schedule={
-                "2026-09-04": {"quantities": {"T2": 1}, "weights": {"T2": 33}},
-                "2026-09-07": {"quantities": {"T2": 1, "T4": 1}, "weights": {"T2": 33, "T4": 33}},
+                "2026-09-04": {"quantities": {"T2": 1}, "weights": {"T2": 33}, "amounts": {"T2": 100}},
+                "2026-09-07": {
+                    "quantities": {"T2": 1, "T4": 1},
+                    "weights": {"T2": 33, "T4": 33},
+                    "amounts": {"T2": 100, "T4": 12},
+                },
             },
         )
         items = {item["ticker"]: item for group in groups for item in group["items"]}
@@ -667,8 +674,12 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
             }
         }
         future_schedule = {
-            "2026-09-08": {"quantities": {"TODAY": 1}, "weights": {"TODAY": 10}},
-            "2026-09-09": {"quantities": {"TODAY": 1, "139260": 34}, "weights": {"TODAY": 10, "139260": 10}},
+            "2026-09-08": {"quantities": {"TODAY": 1}, "weights": {"TODAY": 10}, "amounts": {"TODAY": 10}},
+            "2026-09-09": {
+                "quantities": {"TODAY": 1, "139260": 34},
+                "weights": {"TODAY": 10, "139260": 10},
+                "amounts": {"TODAY": 10, "139260": 3400},
+            },
         }
         for already_held, difference in [(34, 0), (32, 2), (36, -2), (0, 34)]:
             with self.subTest(already_held=already_held):
@@ -722,7 +733,7 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
             {"slots": {}},
             "2026-09-04",
             target_schedule=schedule,
-            excess_holding_allowance=14,
+            harvest_pct=20,
             currency="USD",
         )
         self.assertEqual(schedule, original_schedule)

@@ -52,45 +52,10 @@ const gridTheme = createAppGridTheme();
 
 /** 접이식 전략 설명 — 운용 현황·백테스트 섹션 상단(기본 접힘). */
 const CURRENT_NOTES = [
-  {
-    title: "구성",
-    body:
-      "각 슬리브(전략 + 종목풀)의 저장된 시작일과 조건으로 계산한 백테스트 결과를 합칩니다. " +
-      "슬리브 배분은 합성 백테스트의 운용 흐름을 따릅니다. 합성 유보 현금과 각 전략이 남긴 현금은 유지합니다.",
-  },
-  {
-    title: "목표 비중",
-    body:
-      "종목 목표 비중은 슬리브 몫 × 전략 내부 비중이며, 같은 종목은 합산합니다. " +
-      "진입·청산과 내부 비중은 각 전략 엔진의 결과를 사용합니다. 실제 계좌 보유에 맞춰 목표 비중을 보정하지 않습니다. " +
-      "목표 계산(비중·가격·계좌 평가)은 마지막 확정 종가 기준으로 고정합니다 — 장중 시세는 종목 교체·이탈의 잠정 판정과 표시에만 쓰여, 목표 주수가 장중에 흔들리지 않습니다.",
-  },
-  {
-    title: "목표 주수",
-    body:
-      "계좌 보유를 마지막 확정 종가로 평가하고 현재 현금을 더한 계좌 평가액으로 목표 금액을 환산합니다 — 장중 시세 변동으로는 목표 주수가 바뀌지 않습니다. " +
-      "매매 대상이 아닌 고정 자산은 배분에서 제외합니다. 중복 종목의 목표 금액을 합친 뒤 주수를 내림하되, " +
-      "목표가 있는데 내림이 0주인 종목은 예산 안에서 목표 금액 큰 순으로 최소 1주를 배정합니다(그래도 못 채우면 「1주 못 삼」). " +
-      "단주 잔여는 현금으로 남아 다음 재배분 예산에 포함됩니다(남은 예산을 종목에 +1주씩 주던 추가 배정은 폐기 — " +
-      "행선지가 장중 가격에 민감해 액션이 널뛰었습니다). 목표는 실제 보유에 맞춰 보정하지 않습니다. " +
-      "기준일 가격·계좌 평가액이 바뀌면 내림 결과가 달라져 소액 조정이 생길 수 있습니다.",
-  },
-  {
-    title: "액션",
-    body:
-      "종목별 허용 오차 금액(±) 이내의 차이는 오늘의 액션과 슬랙 알림에서 제외합니다 — 조정(부족·초과)과 " +
-      "목표에 없는 소액 보유(현금 몫 안의 재량 매수)가 대상이며, 오차를 넘으면 목표까지 전부 맞추는 지시를 냅니다. " +
-      "매수 자금이 부족한 날에만 생략한 초과분을 초과 금액이 큰 종목부터 부족분이 채워질 만큼 매도합니다(목표 이하로는 내려가지 않음). " +
-      "테이블의 목표와 수량 차이는 그대로 표시합니다. 오차는 계좌 통화 기준이며 0이면 오차를 허용하지 않습니다. " +
-      "신규 매수·전략 신호·엔진 거래·월초 재배분과 오차를 넘는 전량 매도는 항상 표시합니다. 매도 후 매수를 전제로 하며 체결가·수수료는 별도입니다. " +
-      "종목별 신호 적용일에 목표와 보유 수량을 비교합니다.",
-  },
-  {
-    title: "월초 배분 복구",
-    body:
-      "매월 첫 거래일에는 저장한 슬리브 배분으로 되돌립니다. 각 전략 내부의 주식·현금 비율을 유지하며 비례 재배분하고, " +
-      "주식 증감분에만 매수·매도 비용을 반영합니다. 이 계산은 합성 운용 현황과 합성 백테스트가 공유합니다.",
-  },
+  { title: "기준금액", body: "저장한 원화 운용 기준금액을 슬리브에 배정합니다. 인출이나 계좌 평가액 변화로 기준금액을 바꾸지 않습니다. 해외 종목은 현재 환율로 환산하므로 환율 변동도 반영됩니다." },
+  { title: "종목 배정", body: "개별 전략 엔진이 종목과 진입·청산 시점을 정합니다. 포트폴리오는 설정 비중, 모멘텀·신고가는 슬롯당 1/N로 배정합니다. 빈 슬롯은 현금이며 중복 종목 기준금액은 합산합니다." },
+  { title: "회수·채우기", body: "종목 기준금액 대비 초과율·부족률이 각각 설정값에 도달하면 기준금액까지 정수 수량으로 조정합니다. 채우기 100%는 미보유도 매수 안내하지 않습니다. 전략 청산은 유지합니다." },
+  { title: "현금", body: "월초 자동 재배분은 하지 않습니다. 매수 자금이 부족하면 부족액을 표시하며 다른 종목을 임의로 매도하지 않습니다. 수익 인출은 현금 잔액에 반영합니다." },
 ];
 
 const hintStyle: React.CSSProperties = {
@@ -121,7 +86,9 @@ type AccountOption = AccountOptionBase & {
   country_code: string;
   /** 오늘의 액션 슬랙 알람 — 새 지시·수량 증가 시 발송. */
   mix_slack_enabled?: boolean;
-  mix_excess_holding_allowance: number;
+  mix_capital_krw: number | null;
+  mix_harvest_pct: number | null;
+  mix_refill_pct: number | null;
   /** 비워 두는 현금 몫(%) — 슬리브 배분과 합이 100 이다. */
   mix_cash_pct: number;
 };
@@ -281,6 +248,7 @@ type AccountState = {
 };
 
 type Positions = {
+  capital_krw: number;
   currency: string;
   /** 금액 필드는 원화 계산값이며 표시할 때 이 환율로 나눈다. */
   krw_rate: number;
@@ -323,7 +291,6 @@ type Positions = {
   actions: {
     /** 슬리브별 액션 — 슬롯 키(a/b)로 담긴다. 그 전략에 없는 항목은 빈 목록/null 이다. */
     slots: Record<string, SlotActions>;
-    sleeve_rebalance_today: boolean;
     /** 오늘의 액션 — 서버가 조립한 체결일 묶음(화면·슬랙 알람 공용 단일 소스). */
     groups: ActionGroup[];
   };
@@ -750,7 +717,7 @@ export function StrategyMixClient() {
       amount:
         totalAsset == null
           ? null
-          : (totalAsset * positions.summary.actual_cash_pct) / 100,
+          : (positions.capital_krw * positions.summary.actual_cash_pct) / 100,
       shares: null,
     };
     // 목표 종목 행은 백엔드가 종목 단위로 합쳐 계산한 값에서 출발한다(표시용 가격만 실시간).
@@ -826,7 +793,7 @@ export function StrategyMixClient() {
         });
       }
       const summary = slotSummaries[slot];
-      const groupAmount = totalAsset == null ? null : (totalAsset * summary.alloc_pct) / 100;
+      const groupAmount = totalAsset == null ? null : (positions.capital_krw * summary.alloc_pct) / 100;
       const groupHeld = members.reduce((acc, row) => acc + (row.held_value ?? 0), 0);
       const groupActual = members.reduce((acc, row) => acc + (row.actual_weight_pct ?? 0), 0);
       const groupCurrent = members.reduce((acc, row) => acc + (row.current_weight_pct ?? 0), 0);
@@ -857,7 +824,7 @@ export function StrategyMixClient() {
           current_weight_pct: groupCurrent > 0 ? groupCurrent : undefined,
           group_note:
             `슬롯 ${summary.slots_used}/${summary.top_n} · 슬리브 현금 ${summary.cash_pct.toFixed(1)}%` +
-            (totalAsset == null ? "" : ` ${formatAmount((totalAsset * summary.cash_pct) / 100)}`),
+            (totalAsset == null ? "" : ` ${formatAmount((positions.capital_krw * summary.cash_pct) / 100)}`),
         },
         ...members,
       );
@@ -1104,9 +1071,7 @@ export function StrategyMixClient() {
       {
         field: "actual_weight_pct",
         headerName: "목표비중",
-        headerTooltip: `목표 주수 × 1주 값 ÷ 총자산 — 단주까지 반영한 실제 목표다. 백테스트 비중(${slotKeys
-          .map(slotLabel)
-          .join(" + ")} 슬리브 몫의 합)을 정수 주수로 맞춘 값이라 계좌가 작을수록 조금씩 낮다.`,
+        headerTooltip: "목표 주수 × 기준 가격(KRW) ÷ 고정 운용 기준금액. 현재 계좌 비중과 분모가 다릅니다.",
         width: 88,
         type: "numericColumn",
         valueFormatter: (p) =>
@@ -1137,7 +1102,7 @@ export function StrategyMixClient() {
           field: "shares",
           headerName: "목표수량",
           headerTooltip:
-            "슬리브 몫 안에서 백테스트 비중대로 배분한 정수 주수. 내림 0주여도 예산 안이면 최소 1주를 배정하고, 그래도 못 채우면 「1주 못 삼」. 장중 이탈이 예상되는 종목은 이탈 후 남을 목표를 (예상)으로 보여준다.",
+            "고정 원화 기준금액을 종목별로 배정한 뒤 기준 가격과 현재 환율로 나눈 내림 수량. 1주를 못 사면 「1주 못 삼」. 장중 이탈이 예상되는 종목은 이탈 후 남을 목표를 (예상)으로 보여준다.",
           width: 88,
           type: "numericColumn",
           valueFormatter: (p) => {
@@ -1189,7 +1154,7 @@ export function StrategyMixClient() {
         {
           colId: "slot_weight",
           headerName: "몫(%)",
-          headerTooltip: "이 슬리브 안에서 이 종목이 차지하는 몫 — 그룹 행은 슬리브 전체 몫(월초 배분에서 흘러간 비율).",
+          headerTooltip: "이 슬리브 안에서 이 종목이 차지하는 몫 — 그룹 행은 슬리브의 저장된 배정 비율.",
           width: 84,
           type: "numericColumn",
           valueGetter: (p) => (p.data?.is_cash ? null : p.data?.weight_pct ?? null),
@@ -1422,7 +1387,9 @@ export function StrategyMixClient() {
   const actions = positions?.actions ?? null;
 
   // 헤더 설정 — 합성 배분(%) 3칸과 슬랙 알람을 한 버튼으로 저장한다(계좌 설정에 보관).
-  const [excessAllowance, setExcessAllowance] = useState("0");
+  const [capitalKrw, setCapitalKrw] = useState("");
+  const [harvestPct, setHarvestPct] = useState("");
+  const [refillPct, setRefillPct] = useState("");
   const [slackEnabled, setSlackEnabled] = useState(false);
   // 슬리브 초안 — 저장된 배열 그대로 편집한다. 순서가 곧 슬롯(A·B·C)이라 인덱스로 고친다.
   const [draftSleeves, setDraftSleeves] = useState<MixSleeve[]>([]);
@@ -1434,7 +1401,9 @@ export function StrategyMixClient() {
   const maxSleeves = meta?.max_sleeves ?? SLOT_KEY_ORDER.length;
   useEffect(() => {
     setSlackEnabled(Boolean(selectedAccount?.mix_slack_enabled));
-    setExcessAllowance(String(selectedAccount?.mix_excess_holding_allowance ?? 0));
+    setCapitalKrw(String(selectedAccount?.mix_capital_krw ?? ""));
+    setHarvestPct(String(selectedAccount?.mix_harvest_pct ?? ""));
+    setRefillPct(String(selectedAccount?.mix_refill_pct ?? ""));
     setDraftSleeves(sleeves.map((row) => ({ ...row })));
     setCashPct(selectedAccount ? String(selectedAccount.mix_cash_pct) : "0");
   }, [selectedAccount, sleeves]);
@@ -1502,7 +1471,9 @@ export function StrategyMixClient() {
       (!selectedAccount.sleeves?.length ||
         slackEnabled !== Boolean(selectedAccount.mix_slack_enabled) ||
         Number(cashPct) !== selectedAccount.mix_cash_pct ||
-        Number(excessAllowance) !== selectedAccount.mix_excess_holding_allowance ||
+        Number(capitalKrw) !== selectedAccount.mix_capital_krw ||
+        Number(harvestPct) !== selectedAccount.mix_harvest_pct ||
+        Number(refillPct) !== selectedAccount.mix_refill_pct ||
         draftSleeves.length !== sleeves.length ||
         draftSleeves.some((row, index) => {
           const saved = sleeves[index];
@@ -1519,8 +1490,8 @@ export function StrategyMixClient() {
 
   const saveHeaderSettings = async () => {
     if (!selectedAccount || !weightOk) return;
-    if (!excessAllowance.trim() || !Number.isFinite(Number(excessAllowance)) || Number(excessAllowance) < 0) {
-      toast.error("허용 오차 금액은 0 이상의 숫자로 입력하세요.");
+    if ([capitalKrw, harvestPct, refillPct].some((value) => !value.trim() || !Number.isFinite(Number(value))) || Number(capitalKrw) <= 0 || Number(harvestPct) < 0 || Number(refillPct) < 0 || Number(refillPct) > 100) {
+      toast.error("기준금액은 양수(KRW), 회수 기준은 0% 이상, 채우기 기준은 0~100%로 입력하세요.");
       return;
     }
     try {
@@ -1532,7 +1503,9 @@ export function StrategyMixClient() {
           account_id: selectedAccount.account_id,
           values: {
             mix_slack_enabled: slackEnabled,
-            mix_excess_holding_allowance: Number(excessAllowance),
+            mix_capital_krw: Number(capitalKrw),
+            mix_harvest_pct: Number(harvestPct),
+            mix_refill_pct: Number(refillPct),
             // 순서가 곧 슬롯이라 키는 보내지 않는다 — 서버가 순서대로 다시 붙인다.
             mix_sleeves: draftSleeves.map((row) => ({
               strategy: row.strategy,
@@ -1553,7 +1526,9 @@ export function StrategyMixClient() {
             ? {
                 ...option,
                 mix_slack_enabled: slackEnabled,
-            mix_excess_holding_allowance: Number(excessAllowance),
+            mix_capital_krw: Number(capitalKrw),
+            mix_harvest_pct: Number(harvestPct),
+            mix_refill_pct: Number(refillPct),
                 // 라벨도 즉시 반영 — 이름을 지우면 전략 이름으로 돌아간다.
                 sleeves: draftSleeves.map((row) => ({
                   ...row,
@@ -1639,20 +1614,19 @@ export function StrategyMixClient() {
                   {selectedAccount ? (
                     <>
 
-                      <label className="appLabeledField" style={{ marginBottom: 0 }}>
-                        <span className="appLabeledFieldLabel">허용 오차 금액(±) ({selectedAccount.currency})</span>
-                        <input
-                          className="form-control form-control-sm"
-                          type="number"
-                          min="0"
-                          step="any"
-                          style={{ width: 150 }}
-                          value={excessAllowance}
-                          onChange={(event) => setExcessAllowance(event.target.value)}
-                          disabled={settingsSaving}
-                          title="종목별 지시의 허용 오차(±)입니다. 차이 금액이 이내면 조정(부족·초과)과 목표에 없는 소액 보유 모두 지시하지 않고, 넘으면 목표까지 전부 맞춥니다. 신규 매수·전략 신호·월초 재배분은 항상 표시되고, 매수 자금이 부족하면 생략한 초과분부터 매도합니다. 0이면 오차를 허용하지 않습니다."
-                        />
-                      </label>
+                      {[
+                        { label: "운용 기준금액 (KRW)", value: capitalKrw, set: setCapitalKrw, max: undefined, hint: "인출 후에도 유지하는 고정 원화 기준금액" },
+                        { label: "+ 회수 기준 (%)", value: harvestPct, set: setHarvestPct, max: undefined, hint: "종목 기준금액 대비 초과율에 도달하면 기준금액까지 매도" },
+                        { label: "− 채우기 기준 (%)", value: refillPct, set: setRefillPct, max: 100, hint: "부족률에 도달하면 기준금액까지 매수. 100%는 미보유를 포함해 채우기 끔" },
+                      ].map((field) => (
+                        <label key={field.label} className="appLabeledField" style={{ marginBottom: 0 }}>
+                          <span className="appLabeledFieldLabel">{field.label}</span>
+                          <input className="form-control form-control-sm" type="number" min="0" max={field.max}
+                            step="any" style={{ width: field.max === 100 ? 150 : 180 }} value={field.value}
+                            onChange={(event) => field.set(event.target.value)} disabled={settingsSaving} title={field.hint}
+                            placeholder="설정 필요" />
+                        </label>
+                      ))}
                       {/* 배분(%)은 전부 아래 슬리브 표에 있다 — 현금도 같은 줄 형태로 둔다. */}
                       <label className="appLabeledField" style={{ marginBottom: 0 }}>
                         <span className="appLabeledFieldLabel">슬랙 알람</span>
@@ -1879,7 +1853,7 @@ export function StrategyMixClient() {
                     }}
                   >
                     <span style={{ fontSize: "var(--fs-lg)", fontWeight: 800 }}>
-                      목표 주식 {positions.summary.actual_stock_pct.toFixed(1)}% · 현금{" "}
+                      기준금액 대비 목표 주식 {positions.summary.actual_stock_pct.toFixed(1)}% · 현금{" "}
                       {positions.summary.actual_cash_pct.toFixed(1)}%
                       {positions.account && totalAsset
                         ? // 고정 자산(IS)도 주식으로 센다 — 목표 주식%에 그 몫이 들어 있어
@@ -1893,7 +1867,7 @@ export function StrategyMixClient() {
                     </span>
                     {/* 백테스트가 정한 목표 — 단주로 못 채운 만큼 위의 '실제목표'와 벌어진다. */}
                     <span style={{ ...hintStyle }}>
-                      백테스트 비중 그대로면 주식 {positions.summary.stock_pct.toFixed(1)}% · 현금{" "}
+                      기준금액 배정은 주식 {positions.summary.stock_pct.toFixed(1)}% · 현금{" "}
                       {positions.summary.cash_pct.toFixed(1)}% — 차이는 1주 값을 못 채워 남는 몫입니다
                     </span>
                     {/* 적용 계좌 — 목표 금액의 기준이 되는 실제 잔고. */}
@@ -1930,21 +1904,6 @@ export function StrategyMixClient() {
                         .filter(Boolean)
                         .join(" · ")}
                     </span>
-                    {actions?.sleeve_rebalance_today ? (
-                      <span
-                        style={{
-                          fontSize: "var(--fs-sm)",
-                          fontWeight: 700,
-                          color: "#d9480f",
-                          background: "rgba(247, 103, 7, 0.12)",
-                          padding: "4px 10px",
-                          borderRadius: 999,
-                        }}
-                      >
-                        오늘은 매월 첫 거래일 — 슬리브 배분 복구는 현금으로 이관
-                        (주식 매도 지시는 현금이 모자랄 때만 나옵니다)
-                      </span>
-                    ) : null}
                   </div>
 
                   {/* ② 보유 목록 — 현금까지 한 표로, 비중 합 100%. */}
@@ -2020,8 +1979,8 @@ export function StrategyMixClient() {
                     <div style={{ fontWeight: 700, marginBottom: 6 }}>
                       오늘의 액션
                       <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
-                        총자산을 백테스트의 오늘 비중에 맞춘 목표 주수와 계좌 보유의 차이 —
-                        종목별 허용 오차(±) 이내의 조정 차이는 지시하지 않습니다 · 종목별 신호 적용일 기준
+                        고정 원화 기준금액과 실제 보유를 비교한 매매 지시 —
+                        고정 KRW 기준금액의 회수·채우기 조건 적용 · 채우기 100%는 매수 안내 끔
                       </span>
                     </div>
                     {todayActionGroups.length === 0 ? (
