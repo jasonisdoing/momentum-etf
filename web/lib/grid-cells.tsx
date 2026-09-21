@@ -547,6 +547,28 @@ export function renderSlotStatus(
   return <span style={{ whiteSpace: "nowrap" }}>{`${since}${row.days}일`}</span>;
 }
 
+/** 운용 현황 헤더의 체결일별 건수 문구 — 「 · 2026-09-21 매수 1 · 2026-09-22 매수 2」.
+ *
+ * 같은 '예정'이라도 체결일이 갈린다 — 어제 확정 판정분은 오늘 시가(행의 `fill_date`),
+ * 오늘 잠정 판정분은 다음 거래일(`fillDay`) 시가다. 한 날짜로 묶으면 표의 행별 날짜와
+ * 헤더 숫자가 어긋난다(모멘텀·신고가 화면이 같은 문구를 쓴다).
+ */
+export function fillDaySummary(
+  rows: { fill_date?: string | null }[],
+  label: string,
+  fillDay: string,
+): string {
+  const countByDay = new Map<string, number>();
+  for (const row of rows) {
+    const day = row.fill_date ?? fillDay;
+    countByDay.set(day, (countByDay.get(day) ?? 0) + 1);
+  }
+  return [...countByDay.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([day, count]) => ` · ${day} ${label} ${count}`)
+    .join("");
+}
+
 export function slotStatusColumn<T extends SlotStatusRow>(options: {
   /** 매수·매도 예정이 체결되는 날 — 상태 문구 앞에 붙인다. */
   fillDay?: string | null;

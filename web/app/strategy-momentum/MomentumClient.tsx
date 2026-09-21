@@ -37,6 +37,7 @@ import {
   adrColumn as sharedAdrColumn,
   formatSignedPct,
   maExitGapColumn,
+  fillDaySummary,
   highDrawdownColumn,
   signColor,
   marketCapRankColumn,
@@ -780,6 +781,7 @@ export function MomentumClient() {
   const fillDay = positions?.next_session ?? "다음 거래일";
   const country = positions?.country ?? "";
 
+
   /** 티커 셀 — 호주는 `ASX:` 접두사를 붙여 다른 화면과 같게 보여준다. */
   const renderTicker = useCallback(
     (value: string | null | undefined) => {
@@ -1151,10 +1153,8 @@ export function MomentumClient() {
                       보유 {heldCount} / {positions.top_n}
                     </b>{" "}
                     · 기준 {formatDateWithWeekday(positions.as_of)}
-                    {planRows.some((row) => row.plan === "sell")
-                      ? ` · ${fillDay} 매도 ${planRows.filter((row) => row.plan === "sell").length}`
-                      : ""}
-                    {positions.planned_entries.length ? ` · ${fillDay} 매수 ${positions.planned_entries.length}` : ""}
+                    {fillDaySummary(planRows.filter((row) => row.plan === "sell"), "매도", fillDay)}
+                    {fillDaySummary(positions.planned_entries, "매수", fillDay)}
                     {positions.exited_today.length ? ` · 이탈 ${positions.exited_today.length}` : ""}
                     {positions.adr_gate ? (
                       positions.adr_gate.blocked ? (

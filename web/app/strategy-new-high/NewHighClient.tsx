@@ -27,6 +27,7 @@ import {
   industryColumn,
   slotStatusColumn,
   adrColumn,
+  fillDaySummary,
   formatSignedPct,
   maExitGapColumn,
   signColor,
@@ -1191,12 +1192,8 @@ export function NewHighClient() {
                 <>
                   <div style={{ ...hintStyle, fontWeight: 700, margin: "4px 0 6px" }}>
                     보유 종목 ({positions?.holdings.length ?? 0}개)
-                    {positions?.holdings.some((h) => h.status === "sell")
-                      ? ` · ${fillDay} 매도 ${positions.holdings.filter((h) => h.status === "sell").length}`
-                      : ""}
-                    {positions?.planned_entries.length
-                      ? ` · ${fillDay} 매수 ${positions.planned_entries.length}`
-                      : ""}
+                    {fillDaySummary(positions?.holdings.filter((h) => h.status === "sell") ?? [], "매도", fillDay)}
+                    {fillDaySummary(positions?.planned_entries ?? [], "매수", fillDay)}
                     {positions?.exited_today.length ? ` · 오늘 이탈 ${positions.exited_today.length}` : ""}
                     {positions?.adr_gate ? (
                       positions.adr_gate.blocked ? (
