@@ -83,7 +83,7 @@ def _overlay_live_last_bar(
     from utils.slot_positions import _live_quotes
 
     tickers = list(close_df.columns)
-    quotes = _live_quotes(pool, tickers, close_df.index[-1])
+    quotes = _live_quotes(pool, tickers)
     if not quotes["live"]:
         return close_df, benchmark_close
     prices = {t: (quotes["by_ticker"].get(t) or {}).get("price") for t in tickers}
