@@ -7,7 +7,9 @@ data_loader 가 re-export 로 유지한다. TTL 캐시는 모듈 전역이라 �
 import re
 from collections.abc import Sequence
 from datetime import datetime, timedelta
+from math import isfinite
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -730,7 +732,46 @@ def resolve_toss_us_product_codes(symbols: Sequence[str]) -> dict[str, str]:
     return _resolve_toss_product_codes(normalized_symbols)
 
 
-def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
+def _toss_us_price_entry(item: dict[str, Any]) -> dict[str, Any]:
+    """응답 거래 시각의 세션으로 가격을 선택한다. 애프터 값을 정규 종가로 저장하지 않는다."""
+    from utils.market_session import AFTERMARKET, PREMARKET, market_session
+
+    stamp = pd.Timestamp(item.get("tradeDateTime"))
+    if pd.isna(stamp) or stamp.tzinfo is None:
+        raise ValueError("토스 미국 시세의 tradeDateTime(시간대 포함)이 필요합니다.")
+    local_stamp = stamp.tz_convert(ZoneInfo("America/New_York"))
+    session = market_session("us", now=local_stamp.to_pydatetime())["session"]
+    price_field = "afterMarketClose" if session == AFTERMARKET else "close"
+    price = _safe_float(item.get(price_field))
+    regular_close = _safe_float(item.get("close"))
+    if price is None or not isfinite(price) or price <= 0:
+        raise ValueError(f"토스 미국 {session} 시세의 {price_field}가 유효하지 않습니다.")
+    if regular_close is None or not isfinite(regular_close) or regular_close <= 0:
+        raise ValueError("토스 미국 시세의 close가 유효하지 않습니다.")
+
+    entry: dict[str, Any] = {
+        "nowVal": price,
+        "regularClose": regular_close,
+        "localTradedAt": local_stamp.isoformat(),
+        "tradeDateTime": stamp.isoformat(),
+        "session": session,
+        "priceSource": f"toss_invest.{price_field}",
+        "is_pre_market": session == PREMARKET,
+    }
+    # 일간 등락률은 애프터장에서도 전일 정규장 기준가 대비로 유지한다.
+    base = _safe_float(item.get("base"))
+    if base is not None and isfinite(base) and base > 0:
+        entry["prevClose"] = base
+        entry["changeRate"] = (price / base - 1.0) * 100.0
+    # 거래량·거래대금은 API의 누적값을 전달한다. 세션별 값으로 임의 분리하지 않는다.
+    for key, field in (("tradeValue", "value"), ("tradeVolume", "volume"), ("volume", "volume")):
+        parsed = _safe_float(item.get(field))
+        if parsed is not None and isfinite(parsed) and parsed > 0:
+            entry[key] = parsed
+    return entry
+
+
+def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, Any]]:
     """토스증권 API에서 미국 주식의 실시간 가격 정보를 조회합니다.
 
     Args:
@@ -762,7 +803,7 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
     # 2단계: productCode로 벌크 가격 조회 (50개씩 청크)
     price_url = f"{TOSS_INVEST_API_BASE_URL}/api/v3/stock-prices/details"
     all_codes = list(symbol_to_code.values())
-    snapshot: dict[str, dict[str, float]] = {}
+    snapshot: dict[str, dict[str, Any]] = {}
 
     chunk_size = 50
     for i in range(0, len(all_codes), chunk_size):
@@ -791,35 +832,10 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
             if not sym:
                 continue
 
-            close_price = item.get("close")
-            if close_price is None:
-                continue
-
             try:
-                close_val = float(close_price)
-            except (TypeError, ValueError):
-                continue
-
-            # 토스 필드 의미: close = 현재 세션의 최신 체결가(프리/정규/야간 모두),
-            # base = 그 세션의 기준가(정규장 중엔 전일 종가, 야간엔 당일 정규장 종가).
-            # 세션별로 분기하지 않고 그대로 쓴다 — 예전에는 야간에 afterMarketClose 를
-            # 현재가로 보고 close 를 전일 종가로 뒤집어 써서 등락 부호가 반대로 나왔다.
-            now_val = close_val
-            prev_val = _safe_float(item.get("base"))
-
-            entry: dict[str, float] = {"nowVal": now_val}
-            if prev_val is not None and prev_val > 0:
-                entry["prevClose"] = prev_val
-                entry["changeRate"] = ((now_val - prev_val) / prev_val) * 100.0
-
-            # 오늘 누적 거래량·거래대금 — 국내 스냅샷과 같은 키로 담는다(장중 거래대금
-            # 배수를 두 시장이 같은 계산으로 쓴다). 토스의 `value` 는 이미 통화 금액이다.
-            for key, field in (("tradeValue", "value"), ("tradeVolume", "volume"), ("volume", "volume")):
-                parsed = _safe_float(item.get(field))
-                if parsed is not None and parsed > 0:
-                    entry[key] = parsed
-
-            snapshot[sym] = entry
+                snapshot[sym] = _toss_us_price_entry(item)
+            except (ValueError, TypeError) as exc:
+                logger.warning("토스 미국 시세 제외 (%s): %s", sym, exc)
 
     if snapshot:
         logger.info("[US] 토스증권 API에서 %d개 종목의 실시간 가격을 조회했습니다.", len(snapshot))
