@@ -239,7 +239,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     exited_today = simulated["exited_today"]
     row_by_ticker = {row["ticker"]: row for row in rows}
 
-    quotes = _live_quotes(pool, tickers)
+    quotes = _live_quotes(pool, tickers, last)
     # '다음 시가에 할 일' 은 **엔진이 판정한 값**을 그대로 쓴다 — 화면이 다시 판정하면
     # 백테스트와 갈라진다(tests/test_screen_matches_backtest.py 가 이 관계를 지킨다).
     planned_exits = set(simulated["planned_exits"])
