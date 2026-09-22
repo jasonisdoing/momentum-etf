@@ -108,7 +108,7 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
     장전(동시호가) 구간은 ``pre_market`` 으로 표시만 하고 막지는 않는다. 그 시각
     스냅샷의 고가·시가는 아직 **직전 세션의 값**이라 호출부가 그 값들만 빼고 쓴다.
     """
-    from utils.effective_prices import effective_bar_date
+    from utils.effective_prices import effective_bar_date, live_prices_for_bar
     from utils.settings_loader import get_ticker_type_settings
 
     empty: dict[str, Any] = {
@@ -136,12 +136,17 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
         logger.exception("[new_high] 실시간 시세 조회 실패 (%s)", pool)
         return empty
 
+    # 붙일 봉을 먼저 정한 뒤, **그 봉보다 오래된 시세는 버린다** — 시세가 멈춘 종목의
+    # 며칠 전 가격이 오늘 봉으로 들어가는 것을 막는다(공용 검증, `live_prices_for_bar`).
+    session_ts = effective_bar_date(cached_last, country)
+    fresh = live_prices_for_bar(snapshot, session_ts)
+
     by_ticker: dict[str, dict[str, float]] = {}
     pre_market = False
     traded_at: str | None = None
     for ticker, quote in snapshot.items():
-        price = quote.get("nowVal")
-        if price is None or float(price) <= 0:
+        price = fresh.get(ticker)
+        if price is None:
             continue
         # 오늘 시가 — 어제 확정된 진입·청산이 체결된 가격이다. ETF 는 이 값이 안 와서
         # None 이 되고, 그런 종목은 체결로 처리하지 않는다(가격을 지어내지 않는다).
@@ -165,7 +170,7 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
         "live": True,
         "pre_market": pre_market,
         "country": country,
-        "session_ts": effective_bar_date(cached_last, country),
+        "session_ts": session_ts,
         # 화면 표기용 시세 시각 — 판정에는 쓰지 않는다(붙일 봉은 session_ts 가 정한다).
         "traded_at": traded_at,
         # 시세는 항상 담는다. 현재가·등락률은 어느 구간이든 오늘 값이라 표시에 쓴다.

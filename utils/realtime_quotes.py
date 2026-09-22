@@ -767,13 +767,20 @@ def _toss_us_price_entry(item: dict[str, Any]) -> dict[str, Any]:
     세션은 응답의 거래 시각이 아니라 **현재 시각**으로 판정한다. `tradeDateTime` 은
     종목별 마지막 체결 시각이라, 그 기준으로 고르면 애프터가 끝난 뒤에도 마지막 체결이
     애프터 시각이어서 애프터 가격에 눌러앉는다 — 세션이 끝나면 정규장 종가로 돌아와야 한다.
+
+    `tradeDateTime` 이 없는 종목도 **버리지 않는다**. 실측(2026-09-22 데이장)에서 ALL·ADP 가
+    `tradeDateTime: null` 인데 `close`·`base` 는 유효했다 — 그 세션에 체결이 없었을 뿐이다.
+    예전에는 이 값을 세션 판정에 썼기 때문에 필수였지만 지금은 쓰지 않으므로, 없으면
+    **거래 시각만 비우고** 가격은 그대로 쓴다(비운 값은 신선도 검증에서 '알 수 없음'이 된다).
     """
     from utils.market_session import AFTERMARKET, CLOSED, PREMARKET, market_session
 
-    stamp = pd.Timestamp(item.get("tradeDateTime"))
-    if pd.isna(stamp) or stamp.tzinfo is None:
-        raise ValueError("토스 미국 시세의 tradeDateTime(시간대 포함)이 필요합니다.")
-    local_stamp = stamp.tz_convert(ZoneInfo("America/New_York"))
+    raw_stamp = item.get("tradeDateTime")
+    local_stamp = None
+    if raw_stamp is not None:
+        stamp = pd.Timestamp(raw_stamp)
+        if not pd.isna(stamp) and stamp.tzinfo is not None:
+            local_stamp = stamp.tz_convert(ZoneInfo("America/New_York"))
     session = market_session("us")["session"]
     # 세션별 필드 — 2026-09-21/22 실측으로 확정했다.
     #   애프터(16:00~20:00 ET): `afterMarketClose`. 애프터가 끝나면 이 값은 0.0 으로 리셋된다.
@@ -794,12 +801,13 @@ def _toss_us_price_entry(item: dict[str, Any]) -> dict[str, Any]:
 
     entry: dict[str, Any] = {
         "nowVal": price,
-        "localTradedAt": local_stamp.isoformat(),
-        "tradeDateTime": stamp.isoformat(),
         "session": session,
         "priceSource": f"toss_invest.{price_field}",
         "is_pre_market": session == PREMARKET,
     }
+    if local_stamp is not None:
+        entry["localTradedAt"] = local_stamp.isoformat()
+        entry["tradeDateTime"] = local_stamp.tz_convert("UTC").isoformat()
     # 일간 등락률은 애프터장에서도 전일 정규장 기준가 대비로 유지한다.
     # 마감 구간은 가격 자체가 `base` 라 여기서 계산하면 항상 0% 가 된다 — 그때는 실시간으로
     # 덮지 않고 비워 두어, 화면이 확정 종가 시리즈로 계산한 일간(%) 을 그대로 쓰게 한다.

@@ -491,9 +491,11 @@ def build_effective_close_series(
     cached_close_series: pd.Series | None,
     realtime_entry: dict[str, float] | None,
     country_code: str,
+    *,
+    last_bar: pd.Timestamp | None = None,
 ) -> pd.Series | None:
     """실시간 가격을 반영한 종가 시리즈 — 규칙은 `utils.effective_prices` 한 곳에 있다."""
-    return apply_realtime_close(cached_close_series, realtime_entry, country_code)
+    return apply_realtime_close(cached_close_series, realtime_entry, country_code, last_bar=last_bar)
 
 
 def _normalize_ranking_values(
@@ -849,6 +851,18 @@ def build_ticker_type_rankings(
     if callable(status_callback):
         status_callback("순위 계산")
 
+    # 붙일 봉의 기준은 **풀 전체의 마지막 확정 봉** 하나다 — 전략이 쓰는 가격 패널의
+    # `index[-1]` 과 같은 값이다. 종목별 마지막 봉으로 각자 정하면 캐시가 종목마다 다른
+    # 날짜에서 끝날 때 두 화면이 다른 봉을 쓴다(장 시작 전 재현: 순위 9/17, 전략 9/18).
+    pool_last_bar: pd.Timestamp | None = None
+    for series in cached_close_series_map.values():
+        sliced = _slice_close_series_to_date(series, latest_trading_day)
+        if sliced is None or sliced.empty:
+            continue
+        candidate = pd.Timestamp(sliced.index[-1]).normalize()
+        if pool_last_bar is None or candidate > pool_last_bar:
+            pool_last_bar = candidate
+
     for etf in etfs:
         ticker = str(etf.get("ticker") or "").strip().upper()
         if not ticker:
@@ -858,7 +872,9 @@ def build_ticker_type_rankings(
         realtime_entry = realtime_snapshot.get(ticker)
         preprocess_started_at = perf_counter()
         base_close_series = _slice_close_series_to_date(cached_close_series, latest_trading_day)
-        effective_close_series = build_effective_close_series(base_close_series, realtime_entry, country_code)
+        effective_close_series = build_effective_close_series(
+            base_close_series, realtime_entry, country_code, last_bar=pool_last_bar
+        )
         if effective_close_series is not None and not effective_close_series.empty:
             effective_close_series_map[ticker] = effective_close_series
         preprocess_elapsed += perf_counter() - preprocess_started_at

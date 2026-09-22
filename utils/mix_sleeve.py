@@ -220,15 +220,20 @@ def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
     from utils.portfolio_service import universe_metrics
 
     metrics_by = {row["ticker"]: row for row in universe_metrics(spec.pool)}
+    # 목표 수량의 기준 가격·비중은 **확정 스냅샷**(`target_positions`)으로 고정한다 —
+    # 모멘텀·신고가가 `target_holdings` 로 하는 것과 같다. 장중 가격을 쓰면 목표 주수가
+    # 내림 경계에서 ±1 로 왕복한다(1주 팔라고 했다가 다시 사라는 지시).
+    confirmed_by = {str(row.get("ticker") or "").strip(): row for row in (raw.get("target_positions") or [])}
     targets: list[dict[str, Any]] = []
     for row in raw["open_positions"]:
         ticker = str(row["ticker"]).strip()
         metrics = metrics_by.get(ticker) or {}
+        confirmed = confirmed_by.get(ticker) or row
         targets.append(
             {
                 "ticker": ticker,
                 "name": metrics.get("name") or ticker,
-                "price": row["price"],
+                "price": confirmed["price"],
                 "change_pct": metrics.get("daily_change_pct"),
                 "status": f"전략 비중 {float(row['sleeve_weight_pct']):.2f}%",
                 # 포트폴리오는 진입·이탈 판정이 없다 — 늘 보유 상태다.
@@ -242,8 +247,8 @@ def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
                 "entry_date": None,
                 "entry_price": None,
                 "is_exiting": False,
-                # 비중과 가격은 같은 엔진 평가 시점으로 맞춘다.
-                "drift_pct": float(row["sleeve_weight_pct"]),
+                # 비중과 가격은 같은 엔진 평가 시점으로 맞춘다 — 둘 다 확정 스냅샷이다.
+                "drift_pct": float(confirmed["sleeve_weight_pct"]),
             }
         )
     # 설정상 현금 비중이 아니라 엔진의 잔여 현금이 비중 합의 나머지로 반영된다.
