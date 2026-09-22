@@ -117,22 +117,22 @@ def apply_realtime_close(
     realtime_entry: Mapping[str, Any] | None,
     country_code: str,
     *,
-    last_bar: Any | None = None,
+    last_bar: pd.Timestamp,
     now: datetime | None = None,
 ) -> pd.Series | None:
     """확정 종가 시리즈에 실시간 마지막 봉을 반영한다(한 종목).
 
-    ``last_bar`` 를 주면 그 날짜를 기준으로 붙일 봉을 정한다. 주지 않으면 **이 종목의**
-    마지막 봉을 쓰는데, 그러면 캐시가 종목마다 다른 날짜에서 끝날 때 순위(종목별)와
-    전략(프레임 전체)이 서로 다른 봉에 같은 가격을 넣는다 — 장 시작 전에 재현된다
-    (순위 9/17, 전략 9/18). 풀 단위로 계산하는 호출부는 공통 기준을 넘긴다.
+    ``last_bar`` 는 호출부가 `bar_anchor`로 정한 공통 기준 날짜다. 종목별 캐시 마지막
+    날짜로 대체하면 화면마다 다른 봉에 가격을 넣게 되므로 반드시 전달해야 한다.
     """
+    if last_bar is None or pd.isna(last_bar):
+        raise ValueError("실시간 봉의 공통 기준 날짜(last_bar)가 필요합니다.")
     if cached_close_series is None or cached_close_series.empty:
         return None
 
     adjusted = cached_close_series.copy()
     adjusted.index = pd.DatetimeIndex([_normalize_day(idx) for idx in adjusted.index])
-    reference = adjusted.index[-1] if last_bar is None else _normalize_day(last_bar)
+    reference = _normalize_day(last_bar)
     target = effective_bar_date(reference, country_code, now=now)
 
     price = _realtime_price(realtime_entry, target)
