@@ -79,7 +79,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 - **호주 티커는 `ASX:` 접두사.** 미국과 영문 티커가 겹친다(`TECH`, `HACK`). DB·API·화면까지 붙인 채로 유통하고, 외부 호출 직전에만 `utils/asx_ticker.py` 로 벗긴다. 구성종목의 상장 국가는 수집 소스 신호로만 판별(추정 금지).
 - **캐시 TTL 은 `config.py` 상수 4개**(`CACHE_TTL_LIVE/COMPUTE/SLOW/META`)와 `utils/ttl_cache.TtlCache` 만 쓴다.
 - **실시간 가격 외에는 종목 캐시에서 읽는다.** 화면 진입 시 외부 원천을 다시 부르지 않는다.
-- **최신 거래일 기준 날짜는 모든 시장 공통 한국 날짜.**
+- **최신 거래일 기준 날짜(화면 `as_of`)는 모든 시장 공통 한국 날짜.** 단 **실시간을 붙일 봉의 날짜**는 그 시장 현지 날짜다(`utils/effective_prices.effective_bar_date`) — 한국 날짜로 미국 봉을 세면 하루 어긋난다.
 - **제외 종목(`exclude_from_ranking`)** 은 비교 기준일 뿐 — 모든 선정·백테스트 유니버스에서 제외.
 - **배치 추가·삭제는 7곳을 함께 고친다**: `utils/system_service.py` 의 `SystemAction`·`SCHEDULE_ROWS`·`_SCRIPT_BY_ACTION`, `web/app/api/system/route.ts` 의 `allowed`, `web/lib/system-store.ts`, `web/app/batch/SystemManager.tsx`, `infra/cron/crontab`. 한 곳이 빠지면 `/batch` 에서 400.
 - **새 컬렉션은 `utils/data_table_catalog.py` 에 등록한다.** 종목풀·계좌 삭제(`purge_owner`)와 고아 점검(`scan_orphans`)이 이 카탈로그 하나만 본다. 등록하지 않으면 `/data-tables` 에 **미분류**로 뜨고, 소유자를 지울 때 함께 정리되지 않는다.

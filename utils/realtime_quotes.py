@@ -142,9 +142,6 @@ def _fetch_etf_inav_all() -> dict[str, dict[str, float]]:
         entry: dict[str, Any] = {
             "nav": nav_value,
             "nowVal": price_value,
-            # 네이버 ETF API 는 정규장 값만 준다(실측: KODEX 200 localTradedAt 15:30,
-            # overMarketPriceInfo 없음) — 되돌릴 시간외 값이 따로 없다.
-            "regularClose": price_value,
             "deviation": deviation,
         }
 
@@ -344,7 +341,8 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
                 continue
 
             entry: dict[str, Any] = {"nowVal": price_value}
-            # 시간외가 닫히면 여기로 돌아온다 — 공통 가격 함수가 쓴다.
+            # 정규장 종가 — 확정 일봉 저장(`fetch_naver_daily_ohlcv_snapshot`)이 쓴다.
+            # 표시·판정용 `nowVal` 은 시간외가 닫히면 이 값으로 돌아온다(위 분기).
             if regular_close is not None:
                 entry["regularClose"] = regular_close
             # 일봉 스냅샷(fetch_naver_daily_ohlcv_snapshot)이 날짜 정합 검증에 쓴다.
@@ -484,7 +482,7 @@ def fetch_naver_worldstock_snapshot(reuters_codes: Sequence[str]) -> dict[str, d
                 continue
 
             # worldstock 은 정규장 종가만 주는 지연 시세다 — 시간외 값이 따로 없다.
-            entry: dict[str, float | str] = {"nowVal": price_value, "regularClose": price_value}
+            entry: dict[str, float | str] = {"nowVal": price_value}
 
             prev_close = _parse_comma_number(item.get("compareToPreviousClosePrice"))
             compare_code = str(((item.get("compareToPreviousPrice") or {}).get("code")) or "").strip()
@@ -574,9 +572,6 @@ def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
 
             entry: dict[str, float] = {
                 "nowVal": float(price),
-                # 호주는 정규장 밖 거래가 없다(MARKET_SCHEDULES 에 프리·애프터 키 없음)
-                # — 되돌릴 시간외 값이 없어 정규장 가격과 같다.
-                "regularClose": float(price),
             }
 
             prev_close = quote.get("prevClose")
@@ -773,26 +768,32 @@ def _toss_us_price_entry(item: dict[str, Any]) -> dict[str, Any]:
     종목별 마지막 체결 시각이라, 그 기준으로 고르면 애프터가 끝난 뒤에도 마지막 체결이
     애프터 시각이어서 애프터 가격에 눌러앉는다 — 세션이 끝나면 정규장 종가로 돌아와야 한다.
     """
-    from utils.market_session import AFTERMARKET, PREMARKET, market_session
+    from utils.market_session import AFTERMARKET, CLOSED, PREMARKET, market_session
 
     stamp = pd.Timestamp(item.get("tradeDateTime"))
     if pd.isna(stamp) or stamp.tzinfo is None:
         raise ValueError("토스 미국 시세의 tradeDateTime(시간대 포함)이 필요합니다.")
     local_stamp = stamp.tz_convert(ZoneInfo("America/New_York"))
     session = market_session("us")["session"]
-    # 프리장·데이장 전용 필드는 응답에 없다 — 그 구간은 `close` 가 현재가를 준다는
-    # 기존 동작을 그대로 둔다(애프터만 전용 필드가 있어 갈라진다).
-    price_field = "afterMarketClose" if session == AFTERMARKET else "close"
+    # 세션별 필드 — 2026-09-21/22 실측으로 확정했다.
+    #   애프터(16:00~20:00 ET): `afterMarketClose`. 애프터가 끝나면 이 값은 0.0 으로 리셋된다.
+    #   데이장(20:00~03:50 ET): `close` 가 데이장 현재가를 준다(HOOD 121.82→121.89 로 움직임).
+    #                           프리장·정규장도 `close` 가 그 세션의 현재가다.
+    #   마감(03:50~04:00 ET·주말·휴장): `close` 는 **데이장 마지막 가격에 머문다**. 그걸 쓰면
+    #                           금요일 봉이 금요일 밤 데이장 가격으로 덮이므로, 직전 정규장
+    #                           종가인 `base` 로 되돌린다(애프터·데이장 모두 123.30 로 일치).
+    if session == AFTERMARKET:
+        price_field = "afterMarketClose"
+    elif session == CLOSED:
+        price_field = "base"
+    else:
+        price_field = "close"
     price = _safe_float(item.get(price_field))
-    regular_close = _safe_float(item.get("close"))
     if price is None or not isfinite(price) or price <= 0:
         raise ValueError(f"토스 미국 {session} 시세의 {price_field}가 유효하지 않습니다.")
-    if regular_close is None or not isfinite(regular_close) or regular_close <= 0:
-        raise ValueError("토스 미국 시세의 close가 유효하지 않습니다.")
 
     entry: dict[str, Any] = {
         "nowVal": price,
-        "regularClose": regular_close,
         "localTradedAt": local_stamp.isoformat(),
         "tradeDateTime": stamp.isoformat(),
         "session": session,
@@ -800,8 +801,10 @@ def _toss_us_price_entry(item: dict[str, Any]) -> dict[str, Any]:
         "is_pre_market": session == PREMARKET,
     }
     # 일간 등락률은 애프터장에서도 전일 정규장 기준가 대비로 유지한다.
+    # 마감 구간은 가격 자체가 `base` 라 여기서 계산하면 항상 0% 가 된다 — 그때는 실시간으로
+    # 덮지 않고 비워 두어, 화면이 확정 종가 시리즈로 계산한 일간(%) 을 그대로 쓰게 한다.
     base = _safe_float(item.get("base"))
-    if base is not None and isfinite(base) and base > 0:
+    if session != CLOSED and base is not None and isfinite(base) and base > 0:
         entry["prevClose"] = base
         entry["changeRate"] = (price / base - 1.0) * 100.0
     # 거래량·거래대금은 API의 누적값을 전달한다. 세션별 값으로 임의 분리하지 않는다.

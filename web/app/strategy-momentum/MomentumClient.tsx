@@ -226,7 +226,7 @@ type Positions = {
   currency: string;
   /** 진입 예정·매도 예정이 실제로 체결되는 날. */
   next_session: string | null;
-  /** 장중인가 — 참이면 오늘 종가 확정 전이라 판정이 잠정이다. */
+  /** 실시간 시세를 마지막 봉으로 얹었는지. 세션이 닫힌 뒤에도 참이다(그때 값은 정규장 종가). */
   live: boolean;
   /** 가격 캐시가 마지막으로 갱신된 시각(KST). */
   cache_refreshed_at?: string | null;

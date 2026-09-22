@@ -73,8 +73,8 @@ def _sortino(returns: pd.Series) -> float | None:
 
 def _overlay_live_last_bar(
     pool: str, close_df: pd.DataFrame, benchmark_close: pd.Series
-) -> tuple[pd.DataFrame, pd.Series]:
-    """장중이면 실시간 가격을 **마지막 봉**으로 얹는다(AGENTS.md §10-6) — 운용 현황 전용.
+) -> tuple[pd.DataFrame, pd.Series, bool]:
+    """장중이면 실시간 가격을 **마지막 봉**으로 얹는다(strategy_logic.md 「장중 잠정 실행」) — 운용 현황 전용.
 
     규칙·수식은 그대로고 입력만 잠정이라, 종가가 확정되면 확정 계산과 일치한다.
     전 종목의 실시간 시세가 있어야 얹는다 — 일부만 잠정이면 비중 판정이 뒤섞인다.
@@ -86,15 +86,15 @@ def _overlay_live_last_bar(
     tickers = list(close_df.columns)
     quotes = _live_quotes(pool, tickers, close_df.index[-1])
     if not quotes["live"]:
-        return close_df, benchmark_close
+        return close_df, benchmark_close, False
     prices = {t: (quotes["by_ticker"].get(t) or {}).get("price") for t in tickers}
     if any(p is None for p in prices.values()):
-        return close_df, benchmark_close
+        return close_df, benchmark_close, False
     session_ts = quotes["session_ts"]
     close_df = apply_realtime_closes(close_df, prices, session_ts)
     benchmark_close = benchmark_close.copy()
     benchmark_close.loc[session_ts] = float(benchmark_close.iloc[-1])
-    return close_df, benchmark_close
+    return close_df, benchmark_close, True
 
 
 def run_backtest(
@@ -133,8 +133,9 @@ def run_backtest(
     benchmark_frame = load_benchmark_frame(pool)
     benchmark_close = pd.to_numeric(benchmark_frame["Close"], errors="coerce").dropna()
 
+    live_last_bar = False
     if with_live_last_bar:
-        close_df, benchmark_close = _overlay_live_last_bar(pool, close_df, benchmark_close)
+        close_df, benchmark_close, live_last_bar = _overlay_live_last_bar(pool, close_df, benchmark_close)
 
     # 상장 전 종목의 빈 가격 때문에 다른 종목의 운용 기간을 줄이지 않는다.
     index = benchmark_close.index
@@ -175,6 +176,8 @@ def run_backtest(
         "start_date": str(index[0].date()),
         # 합성은 저장 비중 대신 이 최종 상태를 읽는다(시작일 이후 바이앤홀드 보유).
         "as_of": str(index[-1].date()),
+        # 실시간을 마지막 봉으로 얹었는지 — 합성 화면이 세션 표기에 쓴다(`utils.mix_sleeve`).
+        "live": live_last_bar,
         "open_positions": [
             {
                 "ticker": ticker,
@@ -223,7 +226,7 @@ _POSITIONS_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="portfolio_positions")
 def current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     """개별 운용 현황과 합성이 공유하는 고정 시작일 기준 포트폴리오 상태.
 
-    장중이면 실시간 가격을 마지막 봉으로 쓴 같은 엔진의 상태다(AGENTS.md §10-6) —
+    장중이면 실시간 가격을 마지막 봉으로 쓴 같은 엔진의 상태다(strategy_logic.md 「장중 잠정 실행」) —
     보유 비중이 실시간 기준으로 움직이고, 종가 확정 후 백테스트와 일치한다.
     ``daily`` 는 이 상태를 만든 실행의 일별 곡선 — 합성 슬리브 몫이 같은 실행 결과를 읽는다.
     """
@@ -233,7 +236,9 @@ def current_positions(settings: dict[str, Any]) -> dict[str, Any]:
 
     def compute() -> dict[str, Any]:
         result = run_backtest(DEFAULT_BACKTEST_MONTHS, settings, start_date=start_date, with_live_last_bar=True)
-        return {key: result[key] for key in ("as_of", "open_positions", "sleeve_cash_weight_pct", "trades", "daily")}
+        return {
+            key: result[key] for key in ("as_of", "live", "open_positions", "sleeve_cash_weight_pct", "trades", "daily")
+        }
 
     # 키에 슬리피지까지 넣는다 — 풀 설정을 바꾸면 즉시 새 값으로 계산돼야 한다.
     key = _POSITIONS_CACHE.make_key(settings, start_date, get_pool_slippage(settings["pool"]))

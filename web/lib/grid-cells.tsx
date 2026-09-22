@@ -459,7 +459,7 @@ export function stockMemoColumn<T>(options: {
   };
 }
 
-/** 고점 대비(%) — 캐시 전 기간 최고가 대비 마지막 종가. 0 이면 ⭐신고점. */
+/** 고점 대비(%) — **최근 12개월** 최고가 대비 현재가. 0 이면 ⭐신고점. */
 export function highDrawdownColumn<T>(field: ColDefField<T>): ColDef<T> {
   return {
     field,
@@ -477,7 +477,7 @@ export function highDrawdownColumn<T>(field: ColDefField<T>): ColDef<T> {
  * 슬롯 전략의 **상태** 컬럼 — 신고가·모멘텀이 같은 폭·같은 문구를 쓴다.
  *
  * 두 표(보유·후보)가 나란히 있어 폭이 다르면 어긋나 보인다. 장중에는 실시간 가격을
- * 마지막 봉으로 쓴 같은 판정이다(AGENTS.md §10-6) — 종가 확정 전까지 바뀔 수 있고,
+ * 마지막 봉으로 쓴 같은 판정이다(strategy_logic.md 「장중 잠정 실행」) — 종가 확정 전까지 바뀔 수 있고,
  * 체결은 항상 다음 거래일 시가라 별도 꼬리표 없이 판정 그대로 보여준다.
  */
 export const STATUS_COLUMN_WIDTH = 156;

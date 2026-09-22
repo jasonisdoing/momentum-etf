@@ -120,12 +120,6 @@ def _meets_min_mult(mult: Any, minimum: float | None) -> bool:
     return bool(pd.notna(mult)) and float(mult) >= minimum
 
 
-# 장전에 화면을 주기적으로 다시 받기 시작할 시점 — 개장 몇 분 전부터인가.
-# 실제로 예상체결가가 움직이는 구간은 동시호가(개장 30분 전~개장)라 한 시간이면 넉넉하다.
-# 시세 제공처의 '장전' 플래그는 새벽부터 켜져 있을 수 있어 그것만 믿고 돌리지 않는다.
-_PRE_MARKET_REFRESH_LEAD_MINUTES = 60
-
-
 # 유니버스 전체를 현재까지 돌리는 계산이라 수십 초 걸린다 — 설정이 같으면
 # 결과도 같으므로 짧게 재사용한다(설정을 바꾸면 키가 달라져 새로 계산한다).
 _POSITIONS_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="new_high_positions")
@@ -363,13 +357,13 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     # 실시간 표시·장중 예상이 기준일 목표의 가격과 판정을 바꾸지 못하게 분리한다.
     target_holdings = [dict(row) for row in holdings]
     target_entries = [dict(row) for row in entries]
-    # 합성 슬리브 몫이 읽는 일별 곡선 — 이 현황을 만든 **같은 실행**의 값이다(§10-6).
+    # 합성 슬리브 몫이 읽는 일별 곡선 — 이 현황을 만든 **같은 실행**의 값이다(strategy_logic.md 「장중 잠정 실행」).
     # 장중이면 아래에서 잠정 실행의 곡선(오늘 잠정 봉 포함)으로 바뀐다.
     engine_daily = simulated["daily"]
 
     if quotes["live"]:
         # ── 장중 실행 — 실시간 가격을 **마지막 봉**으로 붙인 같은 엔진의 잠정 실행이다
-        # (AGENTS.md §10-6). 어제 확정 판정의 오늘 시가 체결(시가를 모르면 체결 예정),
+        # (strategy_logic.md 「장중 잠정 실행」). 어제 확정 판정의 오늘 시가 체결(시가를 모르면 체결 예정),
         # 오늘 잠정 봉의 재판정, 진입 예정 비중까지 전부 엔진이 낸다 — 화면은 표시만 한다.
         # 오늘 봉이 붙으면 '직전' 최고선도 하루 앞당겨진다 — 어제 신고가를 찍은 종목의
         # 돌파 거리가 부풀려지지 않고, 이탈 이평선도 오늘 잠정 종가를 넣은 값이 된다.
@@ -468,7 +462,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             if live_drawdown is not None:
                 row["high_drawdown_pct"] = round(live_drawdown, 2)
 
-        # 추세 이탈 이격도 잠정 봉 기준으로 갱신 — 합성 화면과 같은 실시간 기준(§10-6).
+        # 추세 이탈 이격도 잠정 봉 기준으로 갱신 — 합성 화면과 같은 실시간 기준(strategy_logic.md 「장중 잠정 실행」).
         if ma_short and ma_long:
             eff_disparity = momentum_signals.compute_signals({"close": eff_close}, int(ma_short), int(ma_long))
             eff_disp_short = eff_disparity["short"].loc[session_ts]
@@ -508,10 +502,9 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         ]
 
     else:
-        # 장중으로 인정되지 않는 구간(장전, 또는 ETF 처럼 체결 시각을 안 주는 종목).
-        # 현재가·등락률·보유 수익률만 얹는다 — 종목풀 순위 화면과 같은 기준이라 두 화면의
-        # '일간(%)' 이 어긋나지 않는다. 고가·시가가 없거나 직전 세션 값이라 돌파 거리·터치·
-        # 진입 예정은 확정 종가 기준 그대로 둔다.
+        # 실시간 시세가 **하나도 없는** 구간(시세 조회 실패, 설정이 없는 풀 등).
+        # 붙일 값이 없으므로 확정 종가 기준 그대로 두고 표시만 맞춘다. 장전이나 ETF 는
+        # 여기로 오지 않는다 — 시세가 있으면 위쪽 잠정 실행을 탄다.
         _apply_display_quotes(rows, holdings, quotes["by_ticker"])
 
     # ── 지난 세션의 청산분은 버린다 ─────────────────────────────────────────
@@ -605,11 +598,12 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         "min_value_mult": settings["min_value_mult"],
         # 가격 캐시가 마지막으로 갱신된 시각 — 화면이 "언제 기준인지"를 알린다.
         "refreshed_at": _cache_refreshed_at(pool),
-        # 진행 중인 세션의 시세를 얹었는지 — 화면이 '돌파중/돌파성공'을 가르는 데 쓴다.
+        # 실시간 시세를 마지막 봉으로 얹었는지 — 화면이 '돌파중/돌파성공'을 가르는 데 쓴다.
+        # 세션이 닫힌 뒤에도 참이다(그때의 실시간 값은 정규장 종가다).
         "live": quotes["live"],
-        # 장전 구간 — 판정에는 안 쓰고 현재가·등락률만 얹었다는 표시.
+        # 장전 구간 — 종가(현재가)는 판정에 쓰고 **고가·시가만** 뺐다는 표시.
         "pre_market": quotes["pre_market"],
-        # 화면이 주기 갱신을 걸어야 하는지. 장중이거나 개장이 가까운 장전이면 참.
+        # 화면이 주기 갱신을 걸어야 하는지. 거래가 일어나는 세션이 열려 있으면 참.
         "auto_refresh": _should_auto_refresh(pool, quotes),
         "quote_at": quotes["traded_at"],
         "breakouts": [r for r in rows if r["gap_pct"] >= 0],
