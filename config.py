@@ -257,7 +257,7 @@ SHORT_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {
 }
 LONG_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {
     "kor": (90, 120, 150, 180, 240),
-    "us": (100, 150, 200),
+    "us": (75, 100, 125, 150, 175, 200),
     "au": (100, 150, 200),
 }
 
