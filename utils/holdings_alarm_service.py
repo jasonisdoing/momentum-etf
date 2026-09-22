@@ -28,6 +28,7 @@ from config import CACHE_TTL_COMPUTE
 from core.strategy.scoring import compute_ma_disparity
 from utils.account_settings_store import load_account_docs
 from utils.cache_utils import load_cached_close_series_bulk_with_fallback
+from utils.effective_prices import bar_anchor
 from utils.holdings_detail_service import load_all_holdings_detail
 from utils.logger import get_app_logger
 from utils.moving_averages import get_moving_average_type
@@ -120,7 +121,9 @@ def _ma_status(
         return None
     close = close_series.astype(float).dropna()
     close.index = pd.to_datetime(close.index)
-    effective = build_effective_close_series(close, realtime_entry, country)
+    # 붙일 봉의 기준은 순위 화면과 같은 공용 앵커다 — 종목별 마지막 봉으로 정하면 캐시가
+    # 종목마다 다른 날짜에서 끝날 때 순위는 회색이 아닌데 알림만 붙는다.
+    effective = build_effective_close_series(close, realtime_entry, country, last_bar=bar_anchor(country))
     if effective is not None and not effective.empty:
         close = effective
     if close.empty:

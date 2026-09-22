@@ -28,7 +28,7 @@ from utils.cache_utils import (
     load_cached_updated_at_bulk_with_fallback,
 )
 from utils.data_loader import get_latest_trading_day, get_trading_days
-from utils.effective_prices import apply_realtime_close
+from utils.effective_prices import apply_realtime_close, bar_anchor
 from utils.logger import get_app_logger
 from utils.moving_averages import get_moving_average_type
 from utils.perf_metrics import single_stock_backtest_stats
@@ -851,17 +851,9 @@ def build_ticker_type_rankings(
     if callable(status_callback):
         status_callback("순위 계산")
 
-    # 붙일 봉의 기준은 **풀 전체의 마지막 확정 봉** 하나다 — 전략이 쓰는 가격 패널의
-    # `index[-1]` 과 같은 값이다. 종목별 마지막 봉으로 각자 정하면 캐시가 종목마다 다른
-    # 날짜에서 끝날 때 두 화면이 다른 봉을 쓴다(장 시작 전 재현: 순위 9/17, 전략 9/18).
-    pool_last_bar: pd.Timestamp | None = None
-    for series in cached_close_series_map.values():
-        sliced = _slice_close_series_to_date(series, latest_trading_day)
-        if sliced is None or sliced.empty:
-            continue
-        candidate = pd.Timestamp(sliced.index[-1]).normalize()
-        if pool_last_bar is None or candidate > pool_last_bar:
-            pool_last_bar = candidate
+    # 붙일 봉의 기준 — 합성·보유 알림과 **같은 공용 앵커**를 쓴다(정의가 한 곳뿐이라
+    # 경로마다 갈리지 않는다).
+    pool_last_bar = bar_anchor(country_code)
 
     for etf in etfs:
         ticker = str(etf.get("ticker") or "").strip().upper()
