@@ -955,7 +955,7 @@ export function StrategyMixClient() {
           if (!slot || p.data?.is_group) return null;
           const cell = p.data?.slots?.[slot];
           if (!cell?.plan) return null;
-          if (String(cell.status ?? "").startsWith("전략 비중")) {
+          if (sleeves.find((sleeve) => sleeve.key === slot)?.strategy === "portfolio") {
             return <span style={{ color: "var(--text-muted)" }}>{cell.status}</span>;
           }
           return renderSlotStatus(
