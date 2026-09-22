@@ -50,8 +50,34 @@ def effective_bar_date(
     return today if today > last_day else last_day
 
 
-def _realtime_price(entry: Mapping[str, Any] | None) -> float | None:
-    """시세 항목의 실시간 가격. 소스가 이미 현재 세션에 맞는 값을 담아 준다."""
+def quote_trade_day(entry: Mapping[str, Any] | None) -> pd.Timestamp | None:
+    """시세 항목의 **마지막 체결 날짜**(시장 현지). 소스가 시각을 안 주면 None.
+
+    미국은 `localTradedAt`(토스 `tradeDateTime` 을 ET 로 변환한 값), 한국 개별주는
+    네이버 `localTradedAt` 이다. 한국 ETF·호주·해외 지연 시세는 시각을 주지 않아 None 이고,
+    그때는 신선도를 **검증할 수 없다**(추정하지 않는다).
+    """
+    if not isinstance(entry, Mapping) or not entry:
+        return None
+    raw = entry.get("localTradedAt") or entry.get("tradeDateTime")
+    if not raw:
+        return None
+    try:
+        stamp = pd.Timestamp(raw)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(stamp):
+        return None
+    return _normalize_day(stamp)
+
+
+def _realtime_price(entry: Mapping[str, Any] | None, bar_day: pd.Timestamp) -> float | None:
+    """붙여도 되는 실시간 가격. 소스가 이미 현재 세션에 맞는 값을 담아 준다.
+
+    **붙일 봉보다 오래된 시세는 버린다.** 시세 소스가 멈춰 있거나(그 세션에 체결이 없는
+    종목) 캐시된 값을 주면 며칠 전 가격이 오늘 봉으로 들어간다 — 재현: 금요일 시세 99.0 이
+    화요일 봉에 그대로 들어갔다. 거래 시각을 모르는 소스는 검증을 건너뛴다(위 함수 주석).
+    """
     if not isinstance(entry, Mapping) or not entry:
         return None
     raw = entry.get("nowVal")
@@ -61,7 +87,12 @@ def _realtime_price(entry: Mapping[str, Any] | None) -> float | None:
         price = float(raw)
     except (TypeError, ValueError):
         return None
-    return price if price > 0 else None
+    if price <= 0:
+        return None
+    trade_day = quote_trade_day(entry)
+    if trade_day is not None and trade_day < bar_day:
+        return None
+    return price
 
 
 def apply_realtime_close(
@@ -69,21 +100,67 @@ def apply_realtime_close(
     realtime_entry: Mapping[str, Any] | None,
     country_code: str,
     *,
+    last_bar: Any | None = None,
     now: datetime | None = None,
 ) -> pd.Series | None:
-    """확정 종가 시리즈에 실시간 마지막 봉을 반영한다(한 종목)."""
+    """확정 종가 시리즈에 실시간 마지막 봉을 반영한다(한 종목).
+
+    ``last_bar`` 를 주면 그 날짜를 기준으로 붙일 봉을 정한다. 주지 않으면 **이 종목의**
+    마지막 봉을 쓰는데, 그러면 캐시가 종목마다 다른 날짜에서 끝날 때 순위(종목별)와
+    전략(프레임 전체)이 서로 다른 봉에 같은 가격을 넣는다 — 장 시작 전에 재현된다
+    (순위 9/17, 전략 9/18). 풀 단위로 계산하는 호출부는 공통 기준을 넘긴다.
+    """
     if cached_close_series is None or cached_close_series.empty:
         return None
 
-    price = _realtime_price(realtime_entry)
+    adjusted = cached_close_series.copy()
+    adjusted.index = pd.DatetimeIndex([_normalize_day(idx) for idx in adjusted.index])
+    reference = adjusted.index[-1] if last_bar is None else _normalize_day(last_bar)
+    target = effective_bar_date(reference, country_code, now=now)
+
+    price = _realtime_price(realtime_entry, target)
     if price is None:
         return cached_close_series
 
-    adjusted = cached_close_series.copy()
-    adjusted.index = pd.DatetimeIndex([_normalize_day(idx) for idx in adjusted.index])
-    target = effective_bar_date(adjusted.index[-1], country_code, now=now)
     adjusted.loc[target] = price
     return adjusted.sort_index()
+
+
+def live_prices_for_bar(
+    snapshot: Mapping[str, Mapping[str, Any]] | None,
+    bar_date: Any,
+    *,
+    field: str = "nowVal",
+) -> dict[str, float]:
+    """스냅샷에서 **그 봉에 붙여도 되는** 값만 골라 `{티커: 값}` 으로 만든다.
+
+    프레임 경로(`apply_realtime_closes`)는 이미 추출된 숫자를 받으므로, 신선도 검증은
+    시세 항목이 남아 있는 이 자리에서 해야 한다 — 순위(단일 종목)와 전략(프레임)이
+    같은 기준을 쓰도록 여기 한 곳에 둔다.
+
+    `field` 는 종가 외 프레임(시가 등)을 만들 때 바꿔 쓴다.
+    """
+    target = _normalize_day(bar_date)
+    live: dict[str, float] = {}
+    for ticker, entry in (snapshot or {}).items():
+        if not isinstance(entry, Mapping):
+            continue
+        if field == "nowVal":
+            value = _realtime_price(entry, target)
+        else:
+            raw = entry.get(field)
+            trade_day = quote_trade_day(entry)
+            if trade_day is not None and trade_day < target:
+                continue
+            try:
+                value = float(raw) if raw is not None else None
+            except (TypeError, ValueError):
+                value = None
+            if value is not None and value <= 0:
+                value = None
+        if value is not None:
+            live[str(ticker)] = value
+    return live
 
 
 def apply_realtime_closes(

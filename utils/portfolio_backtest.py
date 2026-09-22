@@ -134,6 +134,7 @@ def run_backtest(
     benchmark_close = pd.to_numeric(benchmark_frame["Close"], errors="coerce").dropna()
 
     live_last_bar = False
+    confirmed_close_df = close_df
     if with_live_last_bar:
         close_df, benchmark_close, live_last_bar = _overlay_live_last_bar(pool, close_df, benchmark_close)
 
@@ -146,6 +147,7 @@ def run_backtest(
     if len(index) < 2:
         raise RuntimeError(f"{months}개월치 가격이 부족합니다.")
     close_df = close_df.reindex(index=index, columns=tickers).ffill()
+    confirmed_close_df = confirmed_close_df.reindex(index=index, columns=tickers).ffill()
     benchmark_close = benchmark_close.loc[index]
 
     # ── 시뮬레이션 — 핵심 계산은 core 로 분리했다(외부 조회 없는 순수 함수) ──
@@ -158,6 +160,21 @@ def run_backtest(
         cash_target=cash_target,
         buy_slippage=buy_slippage,
         sell_slippage=sell_slippage,
+    )
+    # 기준일 목표 — 합성이 읽는 **확정 스냅샷**이다. 모멘텀·신고가는 `target_holdings` 로
+    # 같은 것을 주는데(장중 가격으로 목표 주수가 내림 경계에서 ±1 왕복하는 것을 막는다),
+    # 포트폴리오만 실시간 반영 가격을 그대로 넘겨 한 계좌 안에서 기준이 갈렸다.
+    # 데이터 적재는 위에서 이미 했으므로 여기서는 순수 계산만 한 번 더 돈다.
+    confirmed = (
+        simulate_portfolio(
+            close_df=confirmed_close_df,
+            target_by_ticker=target_by_ticker,
+            cash_target=float(settings["cash_weight_pct"]) / 100.0,
+            buy_slippage=buy_slippage,
+            sell_slippage=sell_slippage,
+        )
+        if live_last_bar
+        else simulated
     )
     strategy = simulated["curve"]
     cash_curve = simulated["cash_curve"]
@@ -178,6 +195,20 @@ def run_backtest(
         "as_of": str(index[-1].date()),
         # 실시간을 마지막 봉으로 얹었는지 — 합성 화면이 세션 표기에 쓴다(`utils.mix_sleeve`).
         "live": live_last_bar,
+        # 기준일 목표 — **확정 종가로만** 계산한 상태. 합성의 목표 수량이 이것을 읽는다.
+        "target_positions": [
+            {
+                "ticker": ticker,
+                "shares": confirmed["shares"].get(ticker, 0.0),
+                "price": float(confirmed_close_df.at[index[-1], ticker]),
+                "sleeve_weight_pct": confirmed["shares"].get(ticker, 0.0)
+                * float(confirmed_close_df.at[index[-1], ticker])
+                / float(confirmed["curve"].iloc[-1])
+                * 100.0,
+            }
+            for ticker in tickers
+            if confirmed["shares"].get(ticker, 0.0) > 0
+        ],
         "open_positions": [
             {
                 "ticker": ticker,
@@ -237,7 +268,16 @@ def current_positions(settings: dict[str, Any]) -> dict[str, Any]:
     def compute() -> dict[str, Any]:
         result = run_backtest(DEFAULT_BACKTEST_MONTHS, settings, start_date=start_date, with_live_last_bar=True)
         return {
-            key: result[key] for key in ("as_of", "live", "open_positions", "sleeve_cash_weight_pct", "trades", "daily")
+            key: result[key]
+            for key in (
+                "as_of",
+                "live",
+                "open_positions",
+                "target_positions",
+                "sleeve_cash_weight_pct",
+                "trades",
+                "daily",
+            )
         }
 
     # 키에 슬리피지까지 넣는다 — 풀 설정을 바꾸면 즉시 새 값으로 계산돼야 한다.

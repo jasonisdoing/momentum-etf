@@ -70,7 +70,7 @@ def _overlay_realtime(frame: pd.DataFrame, country: str, field: str) -> pd.DataF
     현재가를 시가로 대신 쓰면 오늘 체결가를 지어내는 것이 된다.
     """
     from services.price_service import get_realtime_snapshot
-    from utils.effective_prices import apply_realtime_closes, effective_bar_date
+    from utils.effective_prices import apply_realtime_closes, effective_bar_date, live_prices_for_bar
 
     tickers = [t for t in frame.columns if t != "CASH"]
     if frame.empty or not tickers:
@@ -81,20 +81,14 @@ def _overlay_realtime(frame: pd.DataFrame, country: str, field: str) -> pd.DataF
     except Exception:
         return frame
 
-    key = "nowVal" if field == "Close" else "open"
-    live: dict[str, float] = {}
-    for ticker in tickers:
-        raw = (snapshot.get(ticker) or {}).get(key)
-        try:
-            value = float(raw) if raw is not None else None
-        except (TypeError, ValueError):
-            value = None
-        if value is not None and value > 0:
-            live[ticker] = value
+    bar_date = effective_bar_date(frame.index[-1], country)
+    # 신선도 검증(봉보다 오래된 시세 버리기)도 공용 함수가 한다 — 순위·전략과 같은 기준.
+    live = live_prices_for_bar(snapshot, bar_date, field="nowVal" if field == "Close" else "open")
+    live = {t: v for t, v in live.items() if t in tickers}
     if not live:
         return frame
 
-    return apply_realtime_closes(frame, live, effective_bar_date(frame.index[-1], country))
+    return apply_realtime_closes(frame, live, bar_date)
 
 
 def _fetch_field(settings: dict, start, field: str) -> pd.DataFrame:
