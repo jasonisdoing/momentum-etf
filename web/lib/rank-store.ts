@@ -82,7 +82,6 @@ type RankToolbarData = {
   ma_rules: RankMaRule[];
   short_ma_options: number[];
   long_ma_options: number[];
-  /** 종목 수·업종 상한 선택지 — 백엔드 `config` 가 단일 소스(-1 = 제한 없음). */
 };
 
 export async function loadRankToolbarData(params?: {

@@ -138,16 +138,15 @@ DATA_SOURCES: list[dict[str, Any]] = [
     },
     # ── 업종 분류 ────────────────────────────────────────────────────
     # 섹터는 쓰지 않는다. 11종뿐이라 5~10종목 포트폴리오에서는 해상도가 낮고,
-    # 집중도 관리는 업종 상한(max_per_industry)이 담당한다.
     {
         "category": "업종 분류",
         "country": "kor",
         "provider": "네이버 증권",
         "endpoint": "m.stock.naver.com/api/stock/{ticker}/integration + /api/stocks/industry/{code}",
-        "usage": "한국 종목 업종 — 업종 상한 그룹핑·화면 표시",
+        "usage": "한국 종목 업종 — 계열 분류·화면 표시",
         "code_ref": "services/naver_industry_service.py",
         "note": (
-            "yfinance 는 국내 종목 911개 중 312개(34%)에 분류가 없어 그만큼 업종 상한에서 빠졌다. "
+            "yfinance 는 국내 종목 911개 중 312개(34%)에 분류가 없어 해당 종목의 업종을 표시할 수 없었다. "
             "네이버는 한국어 원본이라 번역이 필요 없고 용어도 사업 실체에 가깝다(가비아=IT서비스)."
         ),
     },
@@ -156,7 +155,7 @@ DATA_SOURCES: list[dict[str, Any]] = [
         "country": "us",
         "provider": "yfinance (Yahoo Finance)",
         "endpoint": "지수 구성종목 수집 시 함께 저장",
-        "usage": "미국 종목 업종 — 업종 상한 그룹핑·화면 표시",
+        "usage": "미국 종목 업종 — 계열 분류·화면 표시",
         "code_ref": "scripts/update_us_market_stocks.py",
         "note": "영문 원본을 그대로 쓴다(번역하지 않는다).",
     },

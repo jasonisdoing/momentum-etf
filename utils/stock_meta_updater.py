@@ -766,7 +766,7 @@ def _update_reference_meta_for_type(
 
             kor_etf_industry_map = fetch_etf_industry_map()
         except Exception as exc:
-            # 업종은 표시·업종 상한용이라 없으면 그만큼 상한이 안 걸릴 뿐, 배치는 계속한다.
+            # 업종 표시 데이터 수집 실패를 기록하고 나머지 배치는 계속한다.
             logger.warning(f"[{type_norm.upper()}] 국내 ETF 업종 맵 수집 실패 — 업종 없이 진행: {exc}")
 
     # 한국 종목풀: 기존 메타 캐시 문서를 1회 일괄 로드해 ETF 상세 TTL 판정에 사용한다.
@@ -1296,9 +1296,9 @@ def update_single_stock_metadata(
                 logger.warning(f"[{account_norm.upper()}/{ticker}] 마켓 정보 조회 실패: {e}")
 
         # 4. 업종 — 국내 개별주는 네이버에서 받는다(한국어 원본, 번역 불필요).
-        # yfinance 는 국내 종목 셋 중 하나에 분류가 없어서 그만큼 업종 상한에서 빠졌다.
+        # yfinance 는 국내 종목 셋 중 하나에 분류가 없어 업종을 표시할 수 없었다.
         # 값이 이미 있으면 건너뛴다 — 최초 1회만 무겁고 이후엔 신규 종목만 조회한다.
-        # 빈 문자열은 '미설정'이라 그대로 둔다(임의 값으로 메우면 업종 상한이 엉뚱하게 묶인다).
+        # 빈 문자열은 '미설정'이라 그대로 둔다(임의 분류로 채우지 않는다).
         if not stock.get("is_etf") and not stock.get("industry"):
             from services.naver_industry_service import fetch_industry
 
@@ -1310,7 +1310,7 @@ def update_single_stock_metadata(
 
         # 5. ETF 업종 — 네이버 「(주식)섹터」 중분류(소재·IT·헬스케어 …). 배치 앞에서 만든
         # 맵에서 꺼낸다. 개별주 업종과 달리 **매번 덮어쓴다** — 분류가 바뀌면 따라가야 하고,
-        # 맵에 없으면(섹터형이 아닌 ETF) 비운다. 임의 값으로 채우면 업종 상한이 엉뚱하게 묶인다.
+        # 맵에 없으면(섹터형이 아닌 ETF) 비운다. 임의 분류로 채우지 않는다.
         if stock.get("is_etf"):
             stock["industry"] = (kor_etf_industry_map or {}).get(str(ticker).strip(), "")
 

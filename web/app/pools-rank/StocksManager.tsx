@@ -47,7 +47,6 @@ type RankTickerType = {
   // 풀 성격(stock/etf) — 종목풀 설정의 '구분' 토글. 미설정이면 빈 값.
   pool_kind?: string;
   top_n_hold?: number;
-  /** 업종 상한 — 종목풀 저장값. null/미설정 = 제한 없음. */
   currency?: string;
   include?: string[];
 };
@@ -766,7 +765,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   // 업종 컬럼 노출 여부 — 종목풀 설정의 풀 성격(pool_kind) 토글이 1순위
   // (개별주=표시, ETF=숨김), 미설정 풀은 행 값 유무로 추정 (strategy-momentum 과 같은 기준).
-  // 업종 컬럼·업종 상한 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
+  // 업종 컬럼 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
   const hasIndustryData = poolHasIndustry(selectedTickerTypeItem);
   const hasMarketCap = poolHasMarketCap(selectedTickerTypeItem);
 

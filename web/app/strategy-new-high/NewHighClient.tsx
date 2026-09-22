@@ -591,7 +591,7 @@ export function NewHighClient() {
   // 저장 응답을 그대로 초안에 넣으므로 두 객체의 키 구성은 항상 같다.
   // 업종 컬럼 노출 여부 — 표시 중인 결과의 풀 성격(pool_kind)이 1순위(개별주=표시, ETF=숨김),
   // 미설정 풀은 행 값 유무로 추정 (pools-rank·strategy-momentum 과 같은 기준).
-  // 업종 컬럼·업종 상한 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
+  // 업종 컬럼 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
   const selectedPoolOption = useMemo(() => {
     const pool = positions?.pool ?? view?.settings.pool ?? "";
     return view?.pool_options?.find((option) => option.ticker_type === pool);
