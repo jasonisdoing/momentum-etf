@@ -95,6 +95,23 @@ def _realtime_price(entry: Mapping[str, Any] | None, bar_day: pd.Timestamp) -> f
     return price
 
 
+def bar_anchor(country_code: str, *, now: datetime | None = None) -> pd.Timestamp:
+    """실시간을 붙일 봉의 **기준 날짜** — 그 시장에서 마지막으로 정규장이 마감된 거래일.
+
+    순위·합성·보유 알림이 모두 이 한 값을 쓴다. 경로마다 「가진 데이터의 마지막 날짜」로
+    각자 정하면(순위는 풀 전체, 합성·알람은 종목별) 캐시가 종목마다 다른 날짜에서 끝날 때
+    같은 가격이 서로 다른 봉에 들어간다 — 장 시작 전 재현: 순위는 9/21 에 새 봉을 추가하고
+    합성·알람은 9/18 을 덮어썼다.
+
+    달력 계산이라 가격 조회가 없고, **어떤 티커를 로드했는지에 의존하지 않아** 경로 간
+    일치가 구조적으로 보장된다. 이 값이 결과를 가르는 구간은 장 시작 전뿐이다 —
+    정규장이 시작되면 `effective_bar_date` 가 앵커와 무관하게 오늘을 반환한다.
+    """
+    from utils.market_session import last_closed_session_date
+
+    return _normalize_day(last_closed_session_date(country_code, now=now))
+
+
 def apply_realtime_close(
     cached_close_series: pd.Series | None,
     realtime_entry: Mapping[str, Any] | None,

@@ -477,6 +477,7 @@ def _attach_disparity(holdings: list[dict[str, Any]], pool_by_source: dict[str, 
     # 장중에는 실시간 가격을 마지막 봉으로 얹어 판정한다(strategy_logic.md 「장중 잠정 실행」) — 순위 화면과
     # 같은 공용 함수(`build_effective_close_series`)라 두 화면의 추세 이탈 표시가 갈리지 않는다.
     from services.price_service import get_realtime_snapshot
+    from utils.effective_prices import bar_anchor
     from utils.rankings import build_effective_close_series
 
     country_of_pool: dict[str, str] = {}
@@ -532,7 +533,10 @@ def _attach_disparity(holdings: list[dict[str, Any]], pool_by_source: dict[str, 
         row["listing_months"] = listing_months(close)
         entry = realtime.get(ticker)
         if entry:
-            effective = build_effective_close_series(close, entry, country_of(pool))
+            # 붙일 봉의 기준은 순위 화면과 같은 공용 앵커다 — 종목별 마지막 봉으로 정하면
+            # 캐시가 종목마다 다른 날짜에서 끝날 때 합성의 이격이 순위와 갈린다.
+            country = country_of(pool)
+            effective = build_effective_close_series(close, entry, country, last_bar=bar_anchor(country))
             if effective is not None:
                 close = effective
         metrics = momentum_metrics(close, short_ma_days=days[0], long_ma_days=days[1], as_of=None)
