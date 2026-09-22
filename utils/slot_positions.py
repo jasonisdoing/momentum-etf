@@ -15,11 +15,6 @@ from utils.logger import get_app_logger
 
 logger = get_app_logger()
 
-# 장전에 화면을 주기적으로 다시 받기 시작할 시점 — 개장 몇 분 전부터인가.
-# 실제로 예상체결가가 움직이는 구간은 동시호가(개장 30분 전~개장)라 한 시간이면 넉넉하다.
-# 시세 제공처의 '장전' 플래그는 새벽부터 켜져 있을 수 있어 그것만 믿고 돌리지 않는다.
-_PRE_MARKET_REFRESH_LEAD_MINUTES = 60
-
 
 def adr_entry_gate(pool: str, adr_floor: Any) -> tuple[Any, Any]:
     """ADR 진입 게이트와 표시값 조회 함수를 한 쌍으로 만든다 — (entry_blocked, adr_at).
@@ -179,33 +174,24 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
 
 
 def _should_auto_refresh(pool: str, quotes: dict[str, Any]) -> bool:
-    """화면이 주기 갱신을 걸어야 하는 시점인지.
+    """화면이 주기 갱신을 걸어야 하는 시점인지 — **거래가 일어나는 세션이 열려 있는가**.
 
-    장중이면 늘 참이고, 장전이면 개장이 가까울 때만 참이다. 개장 시각은 시장마다 달라
-    화면이 알 수 없으므로 여기서 판단해 내려준다.
+    시세 유무(`live`)로 판단하면 안 된다. 시세 소스는 세션이 모두 닫힌 뒤에도 마지막
+    값(정규장 종가)을 계속 주므로, 그걸 기준으로 하면 주말·야간에도 60초마다 다시 받는다.
+    개장 시각은 시장마다 달라 화면이 알 수 없으므로 여기서 판단해 내려준다.
     """
-    if quotes["live"]:
-        return True
-    if not quotes["pre_market"]:
+    if not quotes["by_ticker"]:
         return False
 
-    from config import MARKET_SCHEDULES
-    from utils.settings_loader import get_ticker_type_settings
+    from utils.market_session import CLOSED, market_session
 
-    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
-    schedule = (MARKET_SCHEDULES or {}).get(country)
-    if not isinstance(schedule, dict):
-        return False
-    tz_name = str(schedule.get("timezone") or "").strip()
-    open_time = schedule.get("open")
-    if not tz_name or open_time is None:
+    country = quotes["country"] or _pool_country(pool)
+    if not country:
         return False
     try:
-        now_local = pd.Timestamp.now(tz=tz_name)
-        opens_at = pd.Timestamp(f"{now_local.date()} {open_time.hour:02d}:{open_time.minute:02d}", tz=tz_name)
+        return market_session(country)["session"] != CLOSED
     except Exception:
         return False
-    return opens_at - pd.Timedelta(minutes=_PRE_MARKET_REFRESH_LEAD_MINUTES) <= now_local <= opens_at
 
 
 def _pool_country(pool: str) -> str:
@@ -268,10 +254,11 @@ def _apply_display_quotes(
     holdings: list[dict[str, Any]],
     by_ticker: dict[str, dict[str, Any]],
 ) -> None:
-    """현재가·일간(%)·보유 수익률만 실시간으로 바꾼다. **판정에는 쓰지 않는다.**
+    """현재가·일간(%)·보유 수익률만 실시간으로 바꾼다. **이 함수는 판정을 하지 않는다.**
 
-    돌파 거리·터치·진입 예정은 확정 종가로 정해지고, 이 함수는 사람이 보는 숫자만 바꾼다.
-    그래서 체결 시각이나 고가를 안 주는 종목(국내 ETF)도 일간(%) 은 정상으로 나온다.
+    판정 자체는 `utils.effective_prices` 가 실시간을 마지막 봉으로 붙인 프레임 위에서
+    엔진이 한다(잠정 마지막 봉 모드). 여기서는 그 결과 행의 표시 숫자만 맞춰,
+    체결 시각이나 고가를 안 주는 종목(국내 ETF)도 일간(%) 이 정상으로 나오게 한다.
     """
     for row in rows:
         quote = by_ticker.get(row["ticker"])

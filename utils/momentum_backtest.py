@@ -10,7 +10,7 @@
    자리가 꽉 차 있으면 더 좋은 후보가 와도 **교체하지 않는다** — 신고가와 같은 결론이다.
 5. ADR 하한: 그날 시장 ADR 이 하한 미만이면 **신규 진입만** 건너뛴다. 보유는 그대로 둔다.
 6. 장중 화면: 실시간 가격을 **마지막 봉**으로 쓴 같은 신호 계산으로 판정을 보여준다
-   (AGENTS.md §10-6). 규칙은 그대로고 입력만 잠정이라, 종가가 확정되면 백테스트와 일치한다.
+   (strategy_logic.md 「장중 잠정 실행」). 규칙은 그대로고 입력만 잠정이라, 종가가 확정되면 백테스트와 일치한다.
 
 예전에는 주 1회 교체(판정일 종가 → 다음 주 첫 거래일 시가)에 '자격 유지' 규칙을 얹고,
 ADR 만 주중에 매일 봐서 하한 미달이면 전량 매도했다. 주간 전략에 일간 예외가 붙은 꼴이라
@@ -268,13 +268,13 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     target_entries = [dict(row) for row in entries]
     for held in holdings:
         held["is_exit_forecast"] = False
-    # 합성 슬리브 몫이 읽는 일별 곡선 — 이 현황을 만든 **같은 실행**의 값이다(§10-6).
+    # 합성 슬리브 몫이 읽는 일별 곡선 — 이 현황을 만든 **같은 실행**의 값이다(strategy_logic.md 「장중 잠정 실행」).
     # 장중이면 아래에서 잠정 실행의 곡선(오늘 잠정 봉 포함)으로 바뀐다.
     engine_daily = simulated["daily"]
 
     if quotes["live"]:
         # ── 장중 실행 — 실시간 가격을 **마지막 봉**으로 붙인 같은 엔진의 잠정 실행이다
-        # (AGENTS.md §10-6). 어제 확정 판정의 오늘 시가 체결(시가를 모르면 체결 예정),
+        # (strategy_logic.md 「장중 잠정 실행」). 어제 확정 판정의 오늘 시가 체결(시가를 모르면 체결 예정),
         # 오늘 잠정 봉의 재판정, 진입 예정 비중까지 전부 엔진이 낸다 — 화면은 표시만 한다.
         session_ts = quotes["session_ts"]
         live_prices = {t: q["price"] for t, q in quotes["by_ticker"].items() if t in close_df.columns}

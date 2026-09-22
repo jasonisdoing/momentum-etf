@@ -221,7 +221,7 @@ def load_kor_stock_market(
 
 
 def _apply_kor_realtime_overlay(rows: list[dict[str, Any]]) -> None:
-    """한국 개별주 리스트에 네이버 실시간/장전 가격을 반영한다."""
+    """한국 개별주 리스트에 네이버 실시간 가격을 반영한다(시간외 구간이면 시간외가)."""
     tickers = [str(row.get("ticker") or "").strip().upper() for row in rows if str(row.get("ticker") or "").strip()]
     if not tickers:
         return

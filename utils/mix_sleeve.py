@@ -264,11 +264,12 @@ def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
         entries=[],
         engine_trades=[trade for trade in raw["trades"] if trade["date"] == raw["as_of"]],
         as_of=raw["as_of"],
+        live=bool(raw.get("live")),
     )
 
 
 def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int) -> SlotState:
-    # 각 전략 화면과 **같은 라이브 반영본**을 쓴다(AGENTS.md §10-6) — 장중에는 실시간
+    # 각 전략 화면과 **같은 라이브 반영본**을 쓴다(strategy_logic.md 「장중 잠정 실행」) — 장중에는 실시간
     # 마지막 봉 기준의 판정이고, 종가가 확정되면 백테스트와 같다.
     held = list(raw["holdings"])
     # 환산 숫자(가격·비중)는 **확정 스냅샷**(target_*)으로 고정한다 — 잠정 실행의 값은

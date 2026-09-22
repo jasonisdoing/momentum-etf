@@ -530,7 +530,9 @@ def _regular_close_from_series(
 def _fetch_regular_close(yahoo_symbol: str, session_open: bool) -> tuple[float | None, float | None, float | None]:
     """US 종목/지수의 '직전 완료 정규장 종가'와 그 정규장 변동률 (yfinance 정규장 일봉, 세션 인지).
 
-    토스 base/naver nowVal 은 실시간/시간외가라 '직전 완료 종가'를 안정적으로 못 주므로 일봉을 쓴다.
+    naver nowVal 은 실시간/시간외가라 '직전 완료 종가'를 안정적으로 못 준다. 토스 `base` 는
+    전일 정규장 기준가라 **오늘** 정규장이 마감된 뒤에는 하루 이전 값이 된다 — 둘 다
+    세션에 따라 뜻이 달라져 일봉을 쓴다.
     """
     if not yahoo_symbol:
         return None, None, None

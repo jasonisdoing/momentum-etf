@@ -474,7 +474,7 @@ def _attach_disparity(holdings: list[dict[str, Any]], pool_by_source: dict[str, 
 
     frames = load_cached_frames_bulk_from_all_ticker_types(tickers)
 
-    # 장중에는 실시간 가격을 마지막 봉으로 얹어 판정한다(AGENTS.md §10-6) — 순위 화면과
+    # 장중에는 실시간 가격을 마지막 봉으로 얹어 판정한다(strategy_logic.md 「장중 잠정 실행」) — 순위 화면과
     # 같은 공용 함수(`build_effective_close_series`)라 두 화면의 추세 이탈 표시가 갈리지 않는다.
     from services.price_service import get_realtime_snapshot
     from utils.rankings import build_effective_close_series

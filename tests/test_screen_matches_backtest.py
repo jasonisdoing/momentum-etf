@@ -210,7 +210,7 @@ class MixScreenMatchesSleeveBacktests(unittest.TestCase):
 
 class IntradayScreenMixConsistencyTest(unittest.TestCase):
     """장중 고정 입력 — 실시간 시세를 흉내 내(일부는 시가 미상) 화면·합성이 **같은 잠정
-    실행**을 읽는지 검증한다(AGENTS.md §10-6, 3단계 일치 검증).
+    실행**을 읽는지 검증한다(strategy_logic.md 「장중 잠정 실행」, 3단계 일치 검증).
 
     가격 수준은 인위적이어도 된다 — 여기서 지키는 것은 값이 아니라 '합성이 판정을 다시
     하지 않고 전략 운용 현황(잠정 실행 반영본)을 그대로 소비한다'는 관계다.
@@ -335,7 +335,8 @@ class PortfolioMixStateTest(unittest.TestCase):
             patch("utils.portfolio_backtest.benchmark_info", return_value={"name": "기준"}),
             patch(
                 "utils.portfolio_backtest._overlay_live_last_bar",
-                side_effect=lambda pool, close, benchmark: (close, benchmark),
+                # 실시간을 얹지 않은 경우 — 세 번째 값은 '얹었는지' 플래그다.
+                side_effect=lambda pool, close, benchmark: (close, benchmark, False),
             ),
         ):
             result = run_backtest(12, settings, start_date=dates[0])
@@ -554,7 +555,7 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
 
 
 class SlotEngineProvisionalBarTest(unittest.TestCase):
-    """슬롯 엔진의 잠정 마지막 봉 모드 — 고정 입력으로 §10-6 체결 규칙을 검증한다.
+    """슬롯 엔진의 잠정 마지막 봉 모드 — 고정 입력으로 strategy_logic.md 「장중 잠정 실행」 체결 규칙을 검증한다.
 
     어제 확정된 주문이 오늘 시가에 체결되는 날, 시가를 안 주는 종목은 체결가를 지어내지
     않고 '오늘 체결 예정'이 된다(매도는 보유 유지 + fill_date, 매수는 자리만 차지).

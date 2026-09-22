@@ -242,11 +242,11 @@ type Positions = {
   min_value_mult: number | null;
   /** 가격 캐시가 마지막으로 갱신된 시각(ISO). 배치가 안 돌았으면 null. */
   refreshed_at: string | null;
-  /** 진행 중인 세션의 실시간 시세를 얹었는지. 참이면 종가가 아직 확정 전이다. */
+  /** 실시간 시세를 마지막 봉으로 얹었는지. 세션이 닫힌 뒤에도 참이다(그때 값은 정규장 종가). */
   live: boolean;
-  /** 장전(동시호가) 구간 — 판정에는 안 쓰고 현재가·등락률만 얹었다. */
+  /** 장전(동시호가) 구간 — 종가(현재가)는 판정에 쓰고 고가·시가만 뺐다. */
   pre_market: boolean;
-  /** 주기 갱신을 걸 시점인지(장중이거나 개장이 가까운 장전). 개장 시각은 시장마다 달라 백엔드가 판단한다. */
+  /** 주기 갱신을 걸 시점인지 — 거래가 일어나는 세션이 열려 있는가. 개장 시각은 시장마다 달라 백엔드가 판단한다. */
   auto_refresh: boolean;
   quote_at: string | null;
   breakouts: PositionRow[];
@@ -337,6 +337,15 @@ const STAGE_STYLE = {
   near: { color: "#2f9e44", text: "최고 종가까지 3% 초과 7% 이내로 남은 종목입니다." },
   held: { color: "#495057", text: "전략이 이미 들고 있는 종목이 신고가를 다시 넘은 상태입니다. 돌파 신호는 매일 나오지만 재매수하지 않아 목록에만 남습니다." },
 } as const;
+
+/**
+ * 시세가 어느 구간의 값인지 — `live` 로는 가를 수 없다(세션이 닫혀도 참이다).
+ * 거래가 일어나는 세션이 열려 있는지는 백엔드가 `auto_refresh` 로 내려준다.
+ */
+function sessionLabel(positions: { pre_market: boolean; auto_refresh: boolean }): string {
+  if (positions.pre_market) return "장전";
+  return positions.auto_refresh ? "장중" : "마감";
+}
 
 function describeStage(row: PositionRow): { label: string; color: string } {
   // 전략이 이미 들고 있으면 상태보다 '못 산다'는 사실이 먼저다.
@@ -1162,15 +1171,15 @@ export function NewHighClient() {
                 {positions ? (
                   <span style={hintStyle}>
                     {positions.live || positions.pre_market
-                      ? `${formatKstDateTime(positions.quote_at)} 시세 · ${positions.live ? "장중" : "장전"}`
+                      ? `${formatKstDateTime(positions.quote_at)} 시세 · ${sessionLabel(positions)}`
                       : `${formatKstDateTime(positions.refreshed_at)} 갱신`}
                   </span>
                 ) : null}
-                {/* 기준일 셀렉트를 없앤 뒤에도 "언제 기준인지"는 남긴다 — 장중이면 자동 갱신 중이라는 표시. */}
+                {/* 기준일 셀렉트를 없앤 뒤에도 "언제 기준인지"는 남긴다 — 세션이 열려 있으면 자동 갱신 중이라는 표시. */}
                 {positions ? (
                   <span style={hintStyle}>
                     {positions.auto_refresh
-                      ? `오늘 (${positions.live ? "장중" : "장전"} 자동 갱신)`
+                      ? `오늘 (${sessionLabel(positions)} 자동 갱신)`
                       : `오늘 (${formatDateWithWeekday(positions.as_of)})`}
                   </span>
                 ) : null}
