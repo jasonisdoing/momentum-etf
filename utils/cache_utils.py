@@ -894,7 +894,10 @@ def _alert_price_anomalies(cache_owner: str, ticker: str, df: pd.DataFrame) -> N
         recent = close.iloc[-_ANOMALY_ALERT_WINDOW_DAYS:]
         # 부호를 살려 둔다 — 하락 사고를 (+60%) 로 보여주면 오독한다.
         change = recent.pct_change() * 100
-        jumps = change[change.abs() > _ANOMALY_ALERT_PCT]
+        # 한도 **초과**만 걸러낸다. 경계값(정확히 ±60%)은 이론상 최대라 정상인데, 부동소수점
+        # 때문에 초과로 잡혔다 — 200,000 → 320,000 이 `60.00000000000001` 이 되어 2배
+        # 레버리지 ETF 의 정상 상승에 알림이 갔다(2026-07-31 TIGER 200IT레버리지).
+        jumps = change[change.abs().round(6) > _ANOMALY_ALERT_PCT]
         if jumps.empty:
             return
 
