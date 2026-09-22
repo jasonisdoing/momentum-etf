@@ -90,7 +90,7 @@ def _market_caps(pool: str) -> dict[str, float]:
     return caps
 
 
-def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> dict[str, Any]:
+def _live_quotes(pool: str, tickers: list[str]) -> dict[str, Any]:
     """실시간 시세와 그것을 붙일 봉의 날짜.
 
     반환 ``{"live": bool, "pre_market": bool, "country": str, "session_ts": Timestamp|None,
@@ -103,12 +103,12 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
     진입 목록이 갈렸다. 이제 붙일 봉은 `utils.effective_prices` 가 정한다.
 
     ``session_ts`` 가 그 봉의 날짜다 — 오늘 정규장이 이미 시작됐으면 오늘, 아니면
-    캐시 마지막 봉(프리·데이장·휴장일에 가짜 봉을 만들지 않는다).
+    마지막 정규장 마감 거래일이다. 순위·합성·알림과 같은 시장 기준을 쓴다.
 
     장전(동시호가) 구간은 ``pre_market`` 으로 표시만 하고 막지는 않는다. 그 시각
     스냅샷의 고가·시가는 아직 **직전 세션의 값**이라 호출부가 그 값들만 빼고 쓴다.
     """
-    from utils.effective_prices import effective_bar_date, live_prices_for_bar
+    from utils.effective_prices import bar_anchor, effective_bar_date, live_prices_for_bar
     from utils.settings_loader import get_ticker_type_settings
 
     empty: dict[str, Any] = {
@@ -138,7 +138,7 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
 
     # 붙일 봉을 먼저 정한 뒤, **그 봉보다 오래된 시세는 버린다** — 시세가 멈춘 종목의
     # 며칠 전 가격이 오늘 봉으로 들어가는 것을 막는다(공용 검증, `live_prices_for_bar`).
-    session_ts = effective_bar_date(cached_last, country)
+    session_ts = effective_bar_date(bar_anchor(country), country)
     fresh = live_prices_for_bar(snapshot, session_ts)
 
     by_ticker: dict[str, dict[str, float]] = {}
