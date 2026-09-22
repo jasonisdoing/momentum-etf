@@ -151,6 +151,30 @@ def _fetch_yf_intraday_last_close(yf_ticker: str) -> tuple[pd.Timestamp, float] 
     return pd.Timestamp(close.index[-1]), float(close.iloc[-1])
 
 
+def _merge_boosted_close(frame: pd.DataFrame, close_series: pd.Series) -> pd.DataFrame:
+    """보강된 종가를 OHLC 프레임에 반영한다 — 표(`_build_item`)와 차트가 같은 입력을 쓴다.
+
+    예전에는 `reindex(...).ffill()` 이었다. 보강으로 **새로 생긴 날짜**는 고가·저가·시가가
+    비어 있어서, ffill 이 **전일 값을 그 행에 복사**했다. 그 행이 SuperTrend 의 ATR 로
+    들어가 실제로 일어나지 않은 변동폭을 읽었고(전일 고가~저가), 레짐 판정이 그 위에서
+    계산됐다.
+
+    새로 생긴 날짜에 우리가 아는 값은 **그 종가 하나**뿐이다. 그래서 고가·저가·시가를
+    그 종가로 둔다 — 없는 범위를 만들지 않고, 그날의 실질 변동폭은
+    `|종가 - 전일 종가|`(ATR 의 tr2·tr3)로 잡힌다. 기존 날짜의 값은 건드리지 않는다.
+    """
+    merged = frame.reindex(close_series.index)
+    merged["Close"] = close_series
+    added = close_series.index.difference(frame.index)
+    for column in ("Open", "High", "Low"):
+        if column in merged.columns and len(added) > 0:
+            merged.loc[added, column] = close_series.loc[added]
+    if "Volume" in merged.columns and len(added) > 0:
+        # 거래량은 알 수 없다 — 0 으로 두고 지어내지 않는다.
+        merged.loc[added, "Volume"] = 0.0
+    return merged
+
+
 def _apply_intraday_boost(close_series: pd.Series | None, yf_ticker: str) -> pd.Series | None:
     """미국 인덱스 daily 마지막 종가가 Yahoo 갱신 지연으로 누락된 경우 최신 종가를 보강한다.
 
@@ -315,10 +339,8 @@ def _build_item(
         # 미국 인덱스 daily 마지막 종가가 지연 누락되면 intraday 마감가로 보강 (한국=네이버 제외).
         close_series = _apply_intraday_boost(close_series, yf_ticker)
 
-        # 보정된 close_series 를 df 에 다시 반영 (인덱스가 확장되었을 경우 대비 reindex 적용)
-        full_df = full_df.reindex(close_series.index)
-        full_df["Close"] = close_series
-        full_df = full_df.ffill()
+        # 보정된 close_series 를 df 에 다시 반영 — 새로 생긴 날짜의 OHLC 처리는 공용 함수가 한다.
+        full_df = _merge_boosted_close(full_df, close_series)
 
     if close_series is None or close_series.empty or len(close_series) < 2:
         return base
@@ -666,10 +688,8 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
     # 표(_build_item)와 동일하게 intraday 보정 — 마지막 점/레짐이 일치하도록.
     close_series = _apply_intraday_boost(close_series, yf_ticker)
 
-    # 보정된 close_series 를 df 에 다시 반영 (인덱스가 확장되었을 경우 대비 reindex 적용)
-    df = df.reindex(close_series.index)
-    df["Close"] = close_series
-    df = df.ffill()
+    # 보정된 close_series 를 df 에 다시 반영 — 표(_build_item)와 같은 공용 함수를 쓴다.
+    df = _merge_boosted_close(df, close_series)
 
     if len(close_series) < 2:
         return empty_payload
