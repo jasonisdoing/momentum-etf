@@ -301,7 +301,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     # 보유·이탈은 백테스트 엔진의 마지막 상태를 그대로 쓴다(위 확정 실행).
     holdings = simulated["open_positions"]
 
-    quotes = _live_quotes(pool, [r["ticker"] for r in rows] + [h["ticker"] for h in holdings], last)
+    quotes = _live_quotes(pool, [r["ticker"] for r in rows] + [h["ticker"] for h in holdings])
     # 마지막 거래일 종가로 '다음 시가에 할 일' 을 판정한다. 백테스트 루프는 마지막 날을
     # 판정하지 않는다(체결할 다음 날이 없어서). 그래서 여기서 한 번 더 본다 — 이게 없으면
     # 화면에 살 종목만 보이고 팔 종목이 안 보인다.
