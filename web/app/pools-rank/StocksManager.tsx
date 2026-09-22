@@ -1144,6 +1144,26 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return formatPrice(params.value ?? null, rowCurrency);
         },
       },
+      // 기간 수익률은 현재가 바로 오른쪽에 짧은 기간부터 모아 둔다.
+      ...(metricMode === "basic"
+        ? [
+            { field: "1주(%)", headerName: "1주", width: 88 },
+            { field: "2주(%)", headerName: "2주", width: 88 },
+            { field: "1달(%)", headerName: "1달", width: 88 },
+            { field: "3달(%)", headerName: "3달", width: 78 },
+            { field: "6달(%)", headerName: "6달", width: 78 },
+            { field: "12달(%)", headerName: "1년", width: 78 },
+            { field: "24달(%)", headerName: "2년", width: 78 },
+            { field: "36달(%)", headerName: "3년", width: 78 },
+          ].map(({ field, headerName, width }) => ({
+            field,
+            headerName,
+            minWidth: width,
+            width,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
+          }) as ColDef<RankGridRow>)
+        : []),
       // 변동성·RSI — MA 이탈 왼쪽. 진입 문턱(배수×변동성) 판정과 붙여 본다.
       volatilityColumn<RankGridRow>({ field: "변동성" }),
       {
@@ -1173,7 +1193,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         }),
         hide: metricMode !== "basic",
       },
-      // 거래대금(공용 컬럼)·1주일 배수 — 1주 수익률 왼쪽. 이 화면의 행 필드명만 한국어라 지정해 준다.
+      // 거래대금(공용 컬럼)·1주일 배수 — 이 화면의 행 필드명만 한국어라 지정해 준다.
       tradeValueMultColumn<RankGridRow>({
         field: "거래대금",
         liveField: "거래대금(실시간)",
@@ -1187,20 +1207,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         headerTooltip: "최근 5거래일 평균 거래대금 ÷ 20일 평균 — 하루 급증이 아니라 한 주 단위의 수급 변화(배치 저장값).",
         hide: metricMode !== "basic",
       }),
-      // 단기 수익률(1주·2주·1달) — 최근 흐름.
-      ...(["1주(%)", "2주(%)", "1달(%)"] as const).map(
-        (field) =>
-          ({
-            field,
-            headerName: field.replace("(%)", ""),
-            hide: metricMode !== "basic",
-            minWidth: 88,
-            width: 88,
-            type: "rightAligned",
-            cellRenderer: (params: { value: number | null | undefined }) =>
-              renderSignedPercentCell(params.value ?? null),
-          }) as ColDef<RankGridRow>,
-      ),
     ];
 
     // 가격과 기간별 수익률. 종목의 성적을 훑어볼 때 보는 기본 화면이다.
@@ -1225,26 +1231,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           } as ColDef<RankGridRow>,
         ]
         : []),
-      // (MA 이탈·변동성·RSI·거래대금 컬럼은 현재가 오른쪽으로 이동 — 위 leadingColumns 참조.
-      //  단기·장기 이격률 컬럼은 제거 — MA 이탈 두 컬럼과 같은 값의 중복 표시였다.
-      //  MA{장기} 이탈 내림차순 정렬이 곧 표의 순위 순서다. MDD·소르티노는 정보 모드로 이동.)
-      ...[
-        { field: "3달(%)", headerName: "3달" },
-        { field: "6달(%)", headerName: "6달" },
-        { field: "12달(%)", headerName: "1년" },
-        { field: "24달(%)", headerName: "2년" },
-        { field: "36달(%)", headerName: "3년" },
-      ].map(
-        ({ field, headerName }) =>
-          ({
-            field,
-            headerName,
-            minWidth: headerName.length > 4 ? 94 : 78,
-            width: headerName.length > 4 ? 94 : 78,
-            type: "rightAligned",
-            cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
-          }) as ColDef<RankGridRow>,
-      ),
     ];
 
     const monthlyColumns: ColDef<RankGridRow>[] = monthlyReturnLabels.map(
