@@ -2,26 +2,20 @@
 
 기존 logic/backtest/data.py 가 제공하던 인터페이스(compute_bounds / download_prices /
 download_opens / download_fx / _extract_field)를 그대로 노출하되, 실제 시세 조회는
-momentum-etf 의 `utils.data_loader.fetch_ohlcv`(캐시 + 실시간 보강)를 사용한다.
+momentum-etf 의 `utils.data_loader.fetch_ohlcv`(확정 캐시)를 쓰고, 실시간 마지막 봉은
+`utils.effective_prices` 의 공통 규칙으로 붙인다(순위·전략과 같은 규칙).
 
 fetch_ohlcv 반환 DataFrame 컬럼: Open/High/Low/Close/Volume (날짜 인덱스).
 """
 
 import pandas as pd
 
-from utils.data_loader import fetch_naver_realtime_price, fetch_ohlcv, get_latest_trading_day, is_trading_day
+from utils.data_loader import fetch_ohlcv, get_latest_trading_day
 
 
 def current_trading_day(market: str) -> pd.Timestamp:
     """momentum-etf 거래일 달력 기준 '현재(최신) 거래일'. 장중에는 오늘, 휴장일엔 마지막 거래일."""
     return pd.Timestamp(get_latest_trading_day(market)).normalize()
-
-
-def realtime_price(ticker: str, market: str) -> float | None:
-    """실시간 현재가 (한국만 지원). 데이터 계층이 막혀 있으면 None."""
-    if market != "kor" or ticker == "CASH":
-        return None
-    return fetch_naver_realtime_price(ticker)
 
 
 # 신호 계산용 워밍업(영업일). 기존 엔진과 동일하게 12개월(252영업일) 사용.
@@ -69,8 +63,48 @@ def _market_tickers(settings: dict) -> list[str]:
     return list(seen.keys())
 
 
+def _overlay_realtime(frame: pd.DataFrame, country: str, field: str) -> pd.DataFrame:
+    """확정 프레임에 실시간 마지막 봉을 붙인다 — 붙일 봉과 교체·추가 판정은 공통 규칙이 한다.
+
+    `Open` 은 스냅샷이 오늘 시가를 주는 종목만 붙인다(ETF 는 안 주는 경우가 있어 비운다) —
+    현재가를 시가로 대신 쓰면 오늘 체결가를 지어내는 것이 된다.
+    """
+    from services.price_service import get_realtime_snapshot
+    from utils.effective_prices import apply_realtime_closes, effective_bar_date
+
+    tickers = [t for t in frame.columns if t != "CASH"]
+    if frame.empty or not tickers:
+        return frame
+
+    try:
+        snapshot = get_realtime_snapshot(country, tickers)
+    except Exception:
+        return frame
+
+    key = "nowVal" if field == "Close" else "open"
+    live: dict[str, float] = {}
+    for ticker in tickers:
+        raw = (snapshot.get(ticker) or {}).get(key)
+        try:
+            value = float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            value = None
+        if value is not None and value > 0:
+            live[ticker] = value
+    if not live:
+        return frame
+
+    return apply_realtime_closes(frame, live, effective_bar_date(frame.index[-1], country))
+
+
 def _fetch_field(settings: dict, start, field: str) -> pd.DataFrame:
-    """대상 티커들의 특정 필드(Open/Close)를 momentum-etf 데이터로 조회해 DataFrame 으로 만든다."""
+    """대상 티커들의 특정 필드(Open/Close)를 momentum-etf 데이터로 조회해 DataFrame 으로 만든다.
+
+    실시간 마지막 봉은 **공통 규칙**(`utils.effective_prices`)으로 붙인다. 예전에는 여기서
+    「최신 거래일 > 캐시 마지막 봉」일 때만 붙였는데, 가격 캐시는 장중에도 그날 봉을 쓰기
+    때문에 장중·마감 뒤에 실시간이 반영되지 않고 장중 스냅샷으로 판정이 굳었다 — 순위·전략이
+    버린 바로 그 조건이다. 시세도 네이버 웹 스크래핑 대신 공용 스냅샷 경로를 쓴다.
+    """
     country = settings.get("market", "kor")
     start_str = pd.Timestamp(start).strftime("%Y-%m-%d")
 
@@ -79,24 +113,6 @@ def _fetch_field(settings: dict, start, field: str) -> pd.DataFrame:
         df = fetch_ohlcv(ticker, country, months_back=None, date_range=[start_str, None], ticker_type=_TICKER_TYPE)
         if df is None or df.empty:
             raise ValueError(f"가격 데이터를 받아오지 못했습니다: {ticker} ({country})")
-
-        # 장중 실시간 데이터 보강 (오늘 가격이 캐시에 없을 경우 실시간 스냅샷을 덧붙임)
-        today_ts = pd.Timestamp.today().normalize()
-        if is_trading_day(country, today_ts):
-            latest_day = today_ts
-        else:
-            latest_day = get_latest_trading_day(country).normalize()
-
-        df_last_day = pd.Timestamp(df.index[-1]).normalize()
-        if latest_day > df_last_day:
-            rt_val = realtime_price(ticker, country)
-            if rt_val is not None and rt_val > 0:
-                today_row = pd.DataFrame(
-                    {"Open": [rt_val], "High": [rt_val], "Low": [rt_val], "Close": [rt_val], "Volume": [0.0]},
-                    index=[latest_day],
-                )
-                df = pd.concat([df, today_row])
-                df = df[~df.index.duplicated(keep="last")].sort_index()
 
         if field not in df.columns:
             raise ValueError(f"{ticker} 데이터에 '{field}' 컬럼이 없습니다. 사용 가능: {list(df.columns)}")
@@ -108,6 +124,7 @@ def _fetch_field(settings: dict, start, field: str) -> pd.DataFrame:
     out = pd.DataFrame(series)
     out.index = pd.to_datetime(out.index)
     out = out.sort_index()
+    out = _overlay_realtime(out, country, field)
 
     # 방어 자산이 현금이면 1.0 컬럼 주입
     if settings.get("defense_ticker") == "CASH":
