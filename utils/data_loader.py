@@ -14,7 +14,6 @@ from io import StringIO
 import pandas as pd
 
 from config import (
-    MARKET_SCHEDULES,
     MIN_TRADING_DAYS,
 )
 
@@ -1140,59 +1139,6 @@ def fetch_ohlcv_for_tickers(
     except Exception:
         required_end = pd.Timestamp.now().normalize()
 
-    # 오늘 날짜인지 확인: 요청 범위의 끝이 해당 국가 최신 거래일 이상이면 활성화
-    country_lower = country.lower()
-    target_today = get_latest_trading_day(country_lower)
-    is_today = required_end >= target_today
-    today = target_today  # 실시간 데이터 인덱스로 사용될 날짜
-
-    # 실시간 데이터 가져오기 (거래일 + 장 시작 이후에만)
-    realtime_data = {}
-    supports_realtime = country_lower in ("kor", "au")
-
-    if is_today and supports_realtime:
-        # 거래일 여부 확인 (target_today 기준)
-        try:
-            today_str = today.strftime("%Y-%m-%d")
-            trading_days = get_trading_days(today_str, today_str, country)
-            today_is_trading_day = len(trading_days) > 0
-        except Exception:
-            today_is_trading_day = False
-
-        # 시장 개장 시간 확인 (해당 국가 타임존 기준 장 시작 이후)
-        is_market_open_time = False
-        if today_is_trading_day:
-            try:
-                from datetime import datetime
-
-                import pytz
-
-                schedule = MARKET_SCHEDULES.get(country_lower)
-                if schedule:
-                    tz_name = schedule.get("timezone")
-                    tz = pytz.timezone(tz_name)
-                    now_local = datetime.now(tz)
-                    market_open = schedule["open"]
-
-                    # 장 시작 시간을 지났거나, 현지 날짜가 인덱스 날짜보다 크면 허용
-                    is_market_open_time = (now_local.time() >= market_open) or (now_local.date() > today.date())
-                else:
-                    is_market_open_time = True
-            except Exception:
-                is_market_open_time = True
-
-        # 거래일이고 장 시작 이후라면 실시간 데이터 조회 (장 마감 후에도 지연 데이터 보완용)
-        if today_is_trading_day and is_market_open_time:
-            try:
-                from services.price_service import get_realtime_snapshot
-
-                if country_lower == "kor":
-                    realtime_data = get_realtime_snapshot("kor", tickers)
-                elif country_lower == "au":
-                    realtime_data = get_realtime_snapshot("au", tickers)
-            except Exception as e:
-                logger.warning(f"실시간 데이터 조회 중 오류 발생: {e}")
-
     cached_frames = load_cached_frames_bulk_with_fallback(ticker_type or country, tickers)
     missing: list[str] = []
 
@@ -1224,59 +1170,6 @@ def fetch_ohlcv_for_tickers(
             cache_start = cached_df.index.min().normalize()
             cache_end = cached_df.index.max().normalize()
 
-            # [User Request] 오늘 날짜이고 실시간 데이터가 있는 경우 (캐시에 이미 있어도 덮어씌움)
-            if is_today and tkr in realtime_data:
-                # 캐시 데이터에 오늘 날짜의 실시간 데이터를 추가
-                rt_info = realtime_data[tkr]
-                rt_price = rt_info.get("nowVal", 0)
-                if rt_price > 0:
-                    # 오늘 날짜의 임시 데이터 생성 (OHLCV 모두 실시간 가격으로 설정)
-                    today_row = pd.DataFrame(
-                        {"Open": [rt_price], "High": [rt_price], "Low": [rt_price], "Close": [rt_price], "Volume": [0]},
-                        index=[today],
-                    )
-
-                    # 국가별 가격 포맷을 사용해 로그를 남긴다.
-                    price_str = _format_realtime_price_for_log(rt_price, country_lower)
-                    change_suffix = ""
-
-                    # [안전장치] 실시간 가격이 기존 캐시의 마지막 종가와 너무 큰 차이가 나면 경고 (예: 15% 이상)
-                    if not cached_df.empty:
-                        last_close = _safe_float(cached_df.iloc[-1].get("Close") or cached_df.iloc[-1].get("close"))
-                        if last_close > 0:
-                            change_suffix = _format_realtime_change_for_log(rt_price, last_close)
-                            diff_pct = abs(rt_price - last_close) / last_close * 100.0
-                            if diff_pct > 15.0:
-                                logger.warning(
-                                    f"⚠️ [{tkr}] 실시간 가격({price_str})이 직전 종가({last_close:,.2f}) 대비 비정상적 변동({diff_pct:.2f}%)을 보입니다. 데이터 오염 가능성이 있으니 확인이 필요합니다."
-                                )
-                                # 극단적인 오차(예: 25% 이상)인 경우 실시간 데이터 무시 처리 고려 가능
-                                if diff_pct > 25.0:
-                                    logger.error(f"❌ [{tkr}] 변동폭이 너무 커서 실시간 데이터를 무시합니다.")
-                                    continue
-                    # 캐시 데이터와 오늘 데이터 병합
-                    cached_df = pd.concat([cached_df, today_row])
-                    cached_df = cached_df[~cached_df.index.duplicated(keep="last")]
-                    cached_df.sort_index(inplace=True)
-                    cache_end = cached_df.index.max().normalize()
-                    logger.info(f"[실시간] {tkr} 오늘 데이터를 실시간 가격({price_str})으로 보완{change_suffix}")
-
-            # [User Request] 장 개시 전이거나 실시간 데이터가 없는 경우 마지막 종가로 패딩
-            if is_today and cache_end < required_end:
-                last_p = _safe_float(cached_df.iloc[-1]["Close"])
-                if last_p is not None and last_p > 0:
-                    last_p_str = _format_realtime_price_for_log(last_p, country_lower)
-
-                    padding_row = pd.DataFrame(
-                        {"Open": [last_p], "High": [last_p], "Low": [last_p], "Close": [last_p], "Volume": [0]},
-                        index=[today],
-                    )
-                    cached_df = pd.concat([cached_df, padding_row])
-                    cached_df = cached_df[~cached_df.index.duplicated(keep="last")]
-                    cached_df.sort_index(inplace=True)
-                    cache_end = cached_df.index.max().normalize()
-                    logger.debug(f"[패딩] {tkr} 오늘 데이터를 이전 종가({last_p_str})로 보완 (0%% 변동)")
-
             # 캐시 범위가 요청 범위를 충분히 커버하는지 확인
             # ticker_start가 cache_start보다 이전이어도, cache_end가 required_end를 커버하면 OK
             if cache_end >= required_end:
@@ -1289,49 +1182,6 @@ def fetch_ohlcv_for_tickers(
 
         if needs_fetch:
             if not allow_remote_fetch:
-                # 실시간 데이터로 대체 가능한지 확인
-                if is_today and tkr in realtime_data:
-                    rt_info = realtime_data[tkr]
-                    rt_price = rt_info.get("nowVal", 0)
-                    if rt_price > 0:
-                        # 오늘 날짜만 필요한 경우 실시간 데이터로 생성
-                        today_row = pd.DataFrame(
-                            {
-                                "Open": [rt_price],
-                                "High": [rt_price],
-                                "Low": [rt_price],
-                                "Close": [rt_price],
-                                "Volume": [0],
-                            },
-                            index=[pd.to_datetime(today)],
-                        )
-                        if cached_df is not None and not cached_df.empty:
-                            last_close = _safe_float(cached_df.iloc[-1].get("Close") or cached_df.iloc[-1].get("close"))
-                            change_suffix = _format_realtime_change_for_log(rt_price, last_close)
-                            effective_start = max(ticker_start, cached_df.index.min().normalize())
-                            sliced = cached_df.loc[cached_df.index >= effective_start].copy()
-                            merged = pd.concat([sliced, today_row])
-                            merged = merged[~merged.index.duplicated(keep="last")].sort_index()
-
-                            if len(merged) < MIN_TRADING_DAYS:
-                                logger.warning(
-                                    f"[데이터부족] {tkr} 데이터가 충분하지 않습니다 (현재 {len(merged)}일, 최소 {MIN_TRADING_DAYS}일 필요). 누락 처리합니다."
-                                )
-                                missing.append(tkr)
-                                continue
-
-                            prefetched_data[key] = merged
-                            logger.info(
-                                f"[실시간보완] {tkr} 기존 데이터에 실시간 가격({_format_realtime_price_for_log(rt_price, country)}) 추가{change_suffix} (캐시 범위: {len(sliced)}일)"
-                            )
-                        else:
-                            # 캐시가 전혀 없는 경우 오늘의 실시간 데이터만으로는 MIN_TRADING_DAYS를 충족할 수 없음
-                            logger.warning(
-                                f"[캐시없음] {tkr} 캐시 데이터가 없고 실시간 데이터만 존재합니다. 최소 {MIN_TRADING_DAYS}일의 데이터가 필요합니다."
-                            )
-                            missing.append(tkr)
-                        continue
-
                 missing.append(tkr)
                 continue
             ticker_date_range = [ticker_start.strftime("%Y-%m-%d"), adjusted_date_range[1]]
@@ -1343,26 +1193,6 @@ def fetch_ohlcv_for_tickers(
                 ticker_type=ticker_type,
             )
             if df is None or df.empty:
-                # 실시간 데이터로 대체 시도
-                if is_today and tkr in realtime_data:
-                    rt_info = realtime_data[tkr]
-                    rt_price = rt_info.get("nowVal", 0)
-                    if rt_price > 0:
-                        today_row = pd.DataFrame(
-                            {
-                                "Open": [rt_price],
-                                "High": [rt_price],
-                                "Low": [rt_price],
-                                "Close": [rt_price],
-                                "Volume": [0],
-                            },
-                            index=[today],
-                        )
-                        prefetched_data[key] = today_row
-                        logger.info(
-                            f"[실시간] {tkr} 데이터를 실시간 가격({_format_realtime_price_for_log(rt_price, country)})으로 생성"
-                        )
-                        continue
                 missing.append(tkr)
                 continue
 
