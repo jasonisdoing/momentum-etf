@@ -109,6 +109,34 @@ def load_universe(pool: str) -> list[dict[str, Any]]:
     return universe
 
 
+def display_quotes(pool: str, tickers: Sequence[str]) -> dict[str, dict[str, Any]]:
+    """표에 필요한 **최소 집합**만 — `{티커: {name, daily_change_pct}}`.
+
+    합성 표(`utils/mix_sleeve._portfolio_slot_state`)는 종목명과 일간 등락률 둘만 쓰는데,
+    예전에는 `universe_metrics(pool)` 을 불러 풀 **전체**의 기간수익률·MDD·소르티노·이격까지
+    만들었다. us_etf(180종목) 실측으로 그 호출이 5.8초였고 그중 합성이 쓰는 부분은 8ms 였다
+    (종가 프레임 1,616ms + 현재가 맵 2,871ms + 소르티노 1,049ms + 수익률 140ms …).
+
+    여기서는 **넘겨받은 종목만** 계산한다. 포트폴리오 슬리브는 보유 4~20종목이라 프레임도
+    스냅샷도 그만큼만 만든다. 계산 자체는 `universe_metrics` 와 같은 공용 시장 데이터 층을
+    쓰므로 값이 갈리지 않는다.
+    """
+    from utils.portfolio_market_data import _build_daily_change_map, _load_close_frame
+    from utils.settings_loader import get_ticker_type_settings
+
+    wanted = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
+    if not wanted:
+        return {}
+
+    name_by = {row["ticker"]: row.get("name") for row in load_universe(pool)}
+    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+    items = [{"ticker": t, "ticker_type": pool, "country_code": country} for t in wanted]
+
+    close_frame, _ = _load_close_frame(items)
+    change_by = _build_daily_change_map(items, close_frame)
+    return {t: {"name": name_by.get(t) or t, "daily_change_pct": change_by.get(t)} for t in wanted}
+
+
 def universe_metrics(pool: str) -> list[dict[str, Any]]:
     """그 풀 종목의 표시 지표 — 일간·현재가·기간수익률·MDD·소르티노.
 

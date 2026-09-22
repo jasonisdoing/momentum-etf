@@ -492,7 +492,7 @@ def build_effective_close_series(
     realtime_entry: dict[str, float] | None,
     country_code: str,
     *,
-    last_bar: pd.Timestamp | None = None,
+    last_bar: pd.Timestamp,
 ) -> pd.Series | None:
     """실시간 가격을 반영한 종가 시리즈 — 규칙은 `utils.effective_prices` 한 곳에 있다."""
     return apply_realtime_close(cached_close_series, realtime_entry, country_code, last_bar=last_bar)
