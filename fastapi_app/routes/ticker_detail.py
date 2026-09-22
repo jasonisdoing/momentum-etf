@@ -37,9 +37,8 @@ from utils.data_loader import (
     fetch_naver_etf_inav_snapshot,
     fetch_ohlcv,
     fetch_overseas_etf_nav_snapshot,
-    get_latest_trading_day,
-    get_trading_days,
 )
+from utils.effective_prices import effective_bar_date
 from utils.kis_market import load_cached_kis_domestic_etf_master
 from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import list_available_accounts, load_common_settings
@@ -414,6 +413,13 @@ def _apply_realtime_snapshot_to_dataframe(
     ticker: str,
     country_code: str,
 ) -> tuple[pd.DataFrame, float | None]:
+    """상세 차트 일봉에 실시간 마지막 봉을 반영한다 — 붙일 봉은 공통 규칙이 정한다.
+
+    예전에는 여기서 대상일을 따로 계산했다(미국은 프리마켓 04:00 ET 부터 오늘 봉을 새로
+    만들었다). 그러면 순위·전략이 쓰는 `utils.effective_prices` 와 규칙이 갈려, 같은 종목의
+    차트와 이평선이 프리장 구간에만 다른 봉 위에서 계산됐다. 날짜는 공통 함수에 맡기고
+    여기서는 그 봉의 OHLC 갱신(고가·저가 확장)만 한다 — 공통 함수는 종가만 다룬다.
+    """
     country = str(country_code or "").strip().lower()
     if country not in {"kor", "au", "us"}:
         return df, None
@@ -443,14 +449,12 @@ def _apply_realtime_snapshot_to_dataframe(
         except (TypeError, ValueError):
             realtime_change_pct = None
 
-    target_trading_day = _resolve_realtime_target_trading_day(country)
-    if country == "kor" and realtime_entry.get("is_pre_market") is True:
-        target_trading_day = pd.Timestamp(datetime.now(ZoneInfo("Asia/Seoul")).date()).normalize()
-    latest_trading_day = (target_trading_day or get_latest_trading_day(country)).normalize()
     adjusted = df.copy()
 
     if adjusted.empty:
         return adjusted, realtime_change_pct
+
+    latest_trading_day = effective_bar_date(adjusted.index.max(), country)
 
     close_col = "Close" if "Close" in adjusted.columns else "close"
     open_col = "Open" if "Open" in adjusted.columns else "open"
@@ -489,37 +493,6 @@ def _apply_realtime_snapshot_to_dataframe(
 
     adjusted.sort_index(inplace=True)
     return adjusted, realtime_change_pct
-
-
-def _resolve_realtime_target_trading_day(country_code: str) -> pd.Timestamp | None:
-    country = str(country_code or "").strip().lower()
-    schedule = MARKET_SCHEDULES.get(country)
-    if not isinstance(schedule, dict):
-        return None
-
-    timezone_name = str(schedule.get("timezone") or "").strip() or "UTC"
-    market_open = schedule.get("open")
-    if market_open is None:
-        return None
-
-    now_local = datetime.now(ZoneInfo(timezone_name))
-    # 미국은 프리마켓(4:00 ET)부터 토스 API로 가격 제공, 한국/호주는 장 시작 기준
-    from datetime import time as dt_time
-
-    earliest_time = dt_time(4, 0) if country == "us" else market_open
-    if now_local.time() < earliest_time:
-        return None
-
-    today_local = pd.Timestamp(now_local.date()).normalize()
-    trading_days = get_trading_days(
-        today_local.strftime("%Y-%m-%d"),
-        today_local.strftime("%Y-%m-%d"),
-        country,
-    )
-    if not trading_days:
-        return None
-
-    return pd.Timestamp(trading_days[-1]).normalize()
 
 
 @router.get("/tickers")
