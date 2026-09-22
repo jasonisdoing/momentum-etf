@@ -217,9 +217,12 @@ def slot_state(spec: SleeveSpec) -> SlotState:
 
 def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
     """포트폴리오 엔진이 주기·밴드를 적용한 최종 비중을 합성에 전달한다."""
-    from utils.portfolio_service import universe_metrics
+    from utils.portfolio_service import display_quotes
 
-    metrics_by = {row["ticker"]: row for row in universe_metrics(spec.pool)}
+    # 표에 쓰는 건 종목명·일간 등락률 둘뿐이다. 예전에는 `universe_metrics(spec.pool)` 로
+    # 풀 전체의 기간수익률·MDD·소르티노까지 만들었는데(us_etf 180종목 5.8초, 그중 합성이
+    # 쓰는 부분은 8ms), 보유 종목만 넘겨 그만큼만 계산한다.
+    metrics_by = display_quotes(spec.pool, [str(row["ticker"]).strip() for row in raw["open_positions"]])
     # 목표 수량의 기준 가격·비중은 **확정 스냅샷**(`target_positions`)으로 고정한다 —
     # 모멘텀·신고가가 `target_holdings` 로 하는 것과 같다. 장중 가격을 쓰면 목표 주수가
     # 내림 경계에서 ±1 로 왕복한다(1주 팔라고 했다가 다시 사라는 지시).
