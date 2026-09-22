@@ -510,7 +510,7 @@ export function MomentumClient() {
   // 숨겨도 동작은 그대로다.
   const selectedPoolOption = view?.pool_options?.find((option) => option.ticker_type === view?.settings.pool);
   const poolKind = selectedPoolOption?.pool_kind ?? "";
-  // 업종 컬럼·업종 상한 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
+  // 업종 컬럼 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
   const hasIndustryData = poolHasIndustry(selectedPoolOption);
   const hasMarketCap = poolHasMarketCap(selectedPoolOption);
   const saveSettings = useCallback(async () => {

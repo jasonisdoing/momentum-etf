@@ -307,7 +307,7 @@ def get_overrides() -> dict[str, dict[str, Any]]:
 def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> dict[str, Any]:
     """입력값을 검증/정규화한다. 잘못된 값은 PoolSettingsError.
 
-    ``check_options`` — 선택지(이평선·업종상한·손절·슬리피지) 포함 여부 검사. **저장할 때만** 켠다.
+    ``check_options`` — 선택지(이평선·손절·슬리피지) 포함 여부 검사. **저장할 때만** 켠다.
     DB 에서 읽을 때는 끈다: 선택지가 바뀐 뒤 옛 값이 남아 있거나(또는 서버가 옛 코드를 돌리거나)
     하면, 읽기에서 막는 순간 그 풀을 쓰지 않는 배치·화면까지 전부 죽는다. 선택지 밖 값은
     화면이 "(선택지 밖)"으로 보여주고 사용자가 고쳐 저장한다.

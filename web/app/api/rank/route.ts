@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
       maRuleOverride[key] = value;
     }
     const hasMaRuleOverride = Object.keys(maRuleOverride).length > 0;
-    // 종목 수·업종 상한 — 화면에서 바꿔 본 값. 없으면 종목풀 저장값(업종 상한의 -1 = 제한 없음).
+    // 정수형 조회 인자를 검증한다.
     const readIntParam = (key: string, label: string): number | undefined => {
       const raw = searchParams.get(key);
       if (raw === null || raw === "") return undefined;

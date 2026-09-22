@@ -606,9 +606,6 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
         "ma_rules": ma_rules,
         # 이평선 일수 선택지 — 백엔드 상수가 단일 소스(풀 국가별).
         **ma_options_payload(_pool_country(selected_ticker_type)),
-        # 종목 수·업종 상한 선택지도 같은 단일 소스(`config`)다. 화면에 복사본을 두면
-        # config 를 고쳐도 이 화면만 옛 목록이 남는다(실제로 업종 상한 4 가 빠져 있었다).
-        # 업종 상한의 None(제한 없음)은 쿼리로 넘길 수 있게 -1 로 바꿔 보낸다.
     }
 
 
