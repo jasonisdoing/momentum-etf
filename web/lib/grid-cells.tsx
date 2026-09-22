@@ -497,6 +497,18 @@ export type SlotStatusRow = {
   fill_date?: string | null;
 };
 
+/** 진입·매도 문구는 상태 컬럼과 합성 설명이 같은 체결일·확정 여부로 만든다. */
+export function formatSlotTradeStatus(
+  row: Pick<SlotStatusRow, "plan" | "fill_date">,
+  fillDay: string | null | undefined,
+  includeOpen: boolean,
+): string {
+  const day = row.fill_date ?? fillDay;
+  const date = day ? `${formatSlashDateWithWeekday(day)} ` : "";
+  const action = row.plan === "buy" ? "진입" : "매도";
+  return `${date}${includeOpen ? "시가 " : ""}${action}${row.fill_date ? "" : " 예정"}`;
+}
+
 /** 슬롯 상태 문구 — **여기 한 곳**에서만 만든다.
  *
  *  모멘텀·신고가는 컬럼(`slotStatusColumn`)으로, 합성은 슬리브마다 이 함수로 그린다.
@@ -509,13 +521,10 @@ export function renderSlotStatus(
   // 언제 벌어지는(벌어진) 일인지를 상태와 같이 읽어야 주문을 낼 수 있다.
   // 행에 체결일이 있으면 그것이 우선 — 어제 확정 판정은 오늘, 오늘 잠정 판정은 내일 체결이다.
   // 확정 판정(fill_date 있음)은 체결 시각(오늘 시가)이 이미 지났으므로 '예정'을 떼고 쓴다.
-  const confirmed = Boolean(row.fill_date);
-  const fillDay = row.fill_date ?? options.fillDay;
-  const fill = fillDay ? `${formatSlashDateWithWeekday(fillDay)} ` : "";
   const reason = row.exit_reason ? ` (${row.exit_reason})` : "";
 
   if (row.plan === "buy") {
-    const label = `${fill}${confirmed ? "진입" : "진입 예정"}`;
+    const label = formatSlotTradeStatus(row, options.fillDay, false);
     return (
       <strong style={{ color: "#d62828", whiteSpace: "nowrap" }} title={label}>
         {label}
@@ -523,7 +532,7 @@ export function renderSlotStatus(
     );
   }
   if (row.plan === "sell") {
-    const label = `${fill}${confirmed ? "매도" : "매도 예정"}`;
+    const label = formatSlotTradeStatus(row, options.fillDay, false);
     return (
       <strong style={{ color: "#1971c2", whiteSpace: "nowrap" }} title={`${label}${reason}`}>
         {label}

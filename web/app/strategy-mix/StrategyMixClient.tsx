@@ -44,6 +44,7 @@ import {
   formatSignedPct,
   signColor,
   renderSlotStatus,
+  formatSlotTradeStatus,
   type SlotPlan,
 } from "@/lib/grid-cells";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
@@ -1226,8 +1227,12 @@ export function StrategyMixClient() {
         if (p.data.is_sell_all) return "전량 매도 (목표에 없음)";
         const parts = slotKeys
           .map((slot) => {
-            const status = p.data?.slots?.[slot]?.status;
-            return status ? `${slotLabel(slot)} ${status}` : null;
+            const cell = p.data?.slots?.[slot];
+            if (!cell) return null;
+            const status = cell.plan === "buy" || cell.plan === "sell"
+              ? formatSlotTradeStatus({ plan: cell.plan, fill_date: cell.fill_date }, positions?.next_trading_day, true)
+              : cell.status;
+            return status ? `${slotLabel(slot)} · ${status}` : null;
           })
           .filter((text): text is string => Boolean(text));
         if (p.data.is_exit_forecast) parts.push("매도 예정(예상)");
@@ -1235,16 +1240,16 @@ export function StrategyMixClient() {
       },
       cellStyle: (p) => {
         const text = String(p.value ?? "");
-        if (text.includes("매도 예정"))
+        if (text.includes("매도"))
           return { color: "var(--down-color, #2f6fd0)", fontWeight: 600 };
-        if (text.includes("진입 예정") || text.includes("매수 예정"))
+        if (text.includes("진입") || text.includes("매수 예정"))
           return { color: "var(--up-color, #d64545)", fontWeight: 600 };
         return null;
       },
     });
     return columns;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
-  }, [totalAsset, slotKeys, sleeves, saveMemo, hasIndustryData, formatAmount, formatPrice]);
+  }, [totalAsset, slotKeys, sleeves, saveMemo, hasIndustryData, formatAmount, formatPrice, positions?.next_trading_day]);
 
   const periodRows = useMemo<PeriodRow[]>(() => {
     if (!view || viewMode === "trades") return [];
