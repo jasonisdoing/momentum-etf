@@ -192,8 +192,8 @@ TRADING_DAYS_PER_MONTH = 20
 # 지표 계산에 필요한 절대 최소 거래일 수 (항상 적용)
 # ENABLE_DATA_SUFFICIENCY_CHECK = True  → 엄격 기준 적용
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
-# 40일(8주) 미만 데이터는 추세 판단이 불가하므로 제외
-MIN_TRADING_DAYS = 40
+# 20일(4주) 미만 데이터는 추세 판단이 불가하므로 제외
+MIN_TRADING_DAYS = 20
 
 # -----------------------------------------------------------------------
 # 전략 공용 셀렉트 선택지
@@ -263,7 +263,7 @@ INDUSTRY_DISPLAY_CONFIG = {
             "Advertising Agencies": "Advertising Agencies",
             "Electronic Gaming & Multimedia": "Electronic Gaming & Multimedia",
             "Entertainment": "Entertainment",
-            "Internet Content & Information": "Internet Content & Information",
+            "Internet Content & Information": "인터넷",
             "Telecom Services": "Telecom Services",
         },
     },
@@ -310,31 +310,31 @@ INDUSTRY_DISPLAY_CONFIG = {
     },
     "Energy": {
         "label": "에너지",
-        "display": "industry",
-        "industries": {
-            "Oil & Gas E&P": "Oil & Gas E&P",
-            "Oil & Gas Equipment & Services": "Oil & Gas Equipment & Services",
-            "Oil & Gas Integrated": "Oil & Gas Integrated",
-            "Oil & Gas Midstream": "Oil & Gas Midstream",
-            "Oil & Gas Refining & Marketing": "Oil & Gas Refining & Marketing",
-        },
+        "display": "sector",
+        # "industries": {
+        #     "Oil & Gas E&P": "Oil & Gas E&P",
+        #     "Oil & Gas Equipment & Services": "Oil & Gas Equipment & Services",
+        #     "Oil & Gas Integrated": "Oil & Gas Integrated",
+        #     "Oil & Gas Midstream": "Oil & Gas Midstream",
+        #     "Oil & Gas Refining & Marketing": "Oil & Gas Refining & Marketing",
+        # },
     },
     "Financial Services": {
         "label": "금융",
-        "display": "industry",
-        "industries": {
-            "Asset Management": "Asset Management",
-            "Banks - Diversified": "Banks - Diversified",
-            "Banks - Regional": "Banks - Regional",
-            "Capital Markets": "Capital Markets",
-            "Credit Services": "Credit Services",
-            "Financial Data & Stock Exchanges": "Financial Data & Stock Exchanges",
-            "Insurance - Diversified": "Insurance - Diversified",
-            "Insurance - Life": "Insurance - Life",
-            "Insurance - Property & Casualty": "Insurance - Property & Casualty",
-            "Insurance - Reinsurance": "Insurance - Reinsurance",
-            "Insurance Brokers": "Insurance Brokers",
-        },
+        "display": "sector",
+        # "industries": {
+        #     "Asset Management": "Asset Management",
+        #     "Banks - Diversified": "Banks - Diversified",
+        #     "Banks - Regional": "Banks - Regional",
+        #     "Capital Markets": "Capital Markets",
+        #     "Credit Services": "Credit Services",
+        #     "Financial Data & Stock Exchanges": "Financial Data & Stock Exchanges",
+        #     "Insurance - Diversified": "Insurance - Diversified",
+        #     "Insurance - Life": "Insurance - Life",
+        #     "Insurance - Property & Casualty": "Insurance - Property & Casualty",
+        #     "Insurance - Reinsurance": "Insurance - Reinsurance",
+        #     "Insurance Brokers": "Insurance Brokers",
+        # },
     },
     "Healthcare": {
         "label": "헬스케어",
@@ -396,16 +396,16 @@ INDUSTRY_DISPLAY_CONFIG = {
         "label": "기술",
         "display": "industry",
         "industries": {
-            "Communication Equipment": "Communication Equipment",
-            "Computer Hardware": "Computer Hardware",
+            "Communication Equipment": "컴퓨터장비",
+            "Computer Hardware": "컴퓨터장비",
             "Consumer Electronics": "Consumer Electronics",
             "Electronic Components": "Electronic Components",
             "Information Technology Services": "Information Technology Services",
             "Scientific & Technical Instruments": "Scientific & Technical Instruments",
             "Semiconductor Equipment & Materials": "Semiconductor Equipment & Materials",
-            "Semiconductors": "Semiconductors",
-            "Software - Application": "응용SW",
-            "Software - Infrastructure": "Software - Infrastructure",
+            "Semiconductors": "반도체",
+            "Software - Application": "소프트웨어",
+            "Software - Infrastructure": "소프트웨어",
             "Solar": "Solar",
         },
     },

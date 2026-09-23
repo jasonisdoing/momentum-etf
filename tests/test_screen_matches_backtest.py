@@ -365,6 +365,62 @@ class PortfolioMixStateTest(unittest.TestCase):
 
 
 class MixCapitalScreenMatchesBacktest(unittest.TestCase):
+    def test_slot_exit_waits_for_first_available_open(self):
+        from core.strategy.slot_backtest import run_slot_backtest
+
+        index = pd.date_range("2026-09-01", periods=6)
+        close = pd.DataFrame({"X": [100, 100, 100, 100, 110, 110]}, index=index)
+        opened = pd.DataFrame({"X": [100, 100, 100, float("nan"), 110, 110]}, index=index)
+        entry = pd.DataFrame({"X": [True, False, False, False, False, False]}, index=index)
+        exit_signal = pd.DataFrame({"X": [False, False, True, False, False, False]}, index=index)
+        result = run_slot_backtest(
+            months=1,
+            panel={"close": close, "open": opened},
+            entry=entry,
+            exit_signal=exit_signal,
+            priority=pd.DataFrame({"X": [1] * 6}, index=index),
+            slots=1,
+            name_by={"X": "X"},
+            industry_by={},
+            exit_reason="청산",
+            buy_slippage=0,
+            sell_slippage=0,
+            initial_capital=1000,
+            entry_blocked=lambda day: False,
+            adr_at=lambda day: None,
+            benchmark_growth=lambda days: pd.Series(1.0, index=days),
+            benchmark_name="기준",
+        )
+        exits = [row for row in result["trades"] if row["exit_date"] is not None]
+        self.assertEqual([(row["exit_date"], row["exit_price"]) for row in exits], [("2026-09-05", 110)])
+
+    def test_replay_missing_open_matches_slot_fill_rules(self):
+        from core.strategy.mix.capital_replay import replay_capital
+
+        index = pd.date_range("2026-09-01", periods=5)
+        replay = replay_capital(
+            close=pd.DataFrame({"X": [100, 120, 120, 120, 120], "Y": [100] * 5}, index=index),
+            opened=pd.DataFrame({"X": [100, 0, 0, 100, 100], "Y": [100, 0, 100, 100, 100]}, index=index),
+            fx=pd.Series(1.0, index=index),
+            targets={str(day.date()): {"X": 1000, "Y": 1000 if i else 0} for i, day in enumerate(index)},
+            capital_krw=3000,
+            harvest_pct=10,
+            refill_pct=0,
+            costs={"X": (0, 0), "Y": (0, 0)},
+        )
+        executions = replay["executions"]
+        self.assertIn(
+            {"date": "2026-09-04", "ticker": "X", "side": "sell", "quantity": 2, "price": 100.0},
+            executions,
+        )
+        self.assertFalse(
+            any(row["ticker"] == "X" and row["date"] in ("2026-09-02", "2026-09-03") for row in executions)
+        )
+        self.assertIn(
+            {"date": "2026-09-03", "ticker": "Y", "side": "buy", "quantity": 10, "price": 100.0},
+            executions,
+        )
+
     def test_screen_actions_match_capital_replay(self):
         from core.strategy.mix.actions import build_action_groups
         from core.strategy.mix.capital_replay import replay_capital
