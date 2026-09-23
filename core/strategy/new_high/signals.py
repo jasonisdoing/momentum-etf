@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from utils.moving_averages import calculate_moving_average
+
 # 신고가 판정 창 — 거래일 수가 아니라 달력 기간으로 자른다. 거래일로 고정하면
 # 공휴일 수에 따라 실제 기간이 흔들려 이름과 어긋난다(12개월 × 20거래일 = 240거래일은
 # 실제 52주보다 짧아서, 1년 전 고점이 창 밖으로 일찍 밀려난다).
@@ -24,7 +26,12 @@ def compute_signals(panel: dict[str, pd.DataFrame], exit_ma_days: int) -> dict[s
     prior_high = close_df.rolling(HIGH_WINDOW, min_periods=HIGH_WINDOW_MIN_DAYS).max().shift(1)
     # 관례상의 '52주 신고가'(장중 고가)는 화면 표시용으로만 쓴다 — 판정에는 쓰지 않는다.
     prior_high_intraday = panel["high"].rolling(HIGH_WINDOW, min_periods=HIGH_WINDOW_MIN_DAYS).max().shift(1)
-    exit_ma = close_df.rolling(exit_ma_days, min_periods=exit_ma_days).mean()
+    # 이탈선은 **시스템 공용 이동평균**(`config.MOVING_AVERAGE_TYPE`)을 따른다. 예전에는
+    # 여기만 `rolling().mean()` 으로 SMA 를 박아 둬서, 설정을 EMA 로 바꿔도 순위·모멘텀·
+    # 보유 알림만 EMA 가 되고 신고가 이탈선은 SMA 로 남았다.
+    # `min_periods` 는 기존 동작 그대로 **기간을 다 채워야** 값이 나온다 — 상장 직후
+    # 부분 평균으로 이탈을 판정하면 근거가 얇은 채로 팔게 된다.
+    exit_ma = calculate_moving_average(close_df, exit_ma_days, min_periods=exit_ma_days)
     value_df = panel["value"]
     from utils.trade_value import trade_value_multiplier_frame
 

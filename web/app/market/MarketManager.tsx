@@ -127,7 +127,7 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
     capHeader: "시가총액(억)",
     // 기본 필터 — 소형·저유동 ETF 를 걸러 보는 것이 기본 사용 패턴이라 초기값을 둔다.
     capFilterDefault: "",
-    volumeFilterDefault: "10000",
+    volumeFilterDefault: "20000",
     // 국내 주식형 ETF 는 매매차익이 비과세고 그 밖(해외·파생·원자재·채권)은 과세다.
     showTaxFilter: true,
   },
@@ -550,16 +550,16 @@ export function MarketManager({
       // 거래대금 배수 — 순위 화면과 같은 공용 컬럼(일일 배치 값이라 장중 환산 괄호는 없다). 한국 전용.
       ...(market === "kor"
         ? [
-            tradeValueMultColumn<MarketGridRow>({
-              headerTooltip: "20일 평균 거래대금 대비 배수 — 순위·신고가 화면과 같은 계산(일일 배치 저장값).",
-            }),
-            tradeValueMultColumn<MarketGridRow>({
-              field: "value_mult_week",
-              liveField: "__none__",
-              headerName: "1주일거래",
-              headerTooltip: "최근 5거래일 평균 거래대금 ÷ 20일 평균 — 한 주 단위의 수급 변화(일일 배치 저장값).",
-            }),
-          ]
+          tradeValueMultColumn<MarketGridRow>({
+            headerTooltip: "20일 평균 거래대금 대비 배수 — 순위·신고가 화면과 같은 계산(일일 배치 저장값).",
+          }),
+          tradeValueMultColumn<MarketGridRow>({
+            field: "value_mult_week",
+            liveField: "__none__",
+            headerName: "1주일거래",
+            headerTooltip: "최근 5거래일 평균 거래대금 ÷ 20일 평균 — 한 주 단위의 수급 변화(일일 배치 저장값).",
+          }),
+        ]
         : []),
       {
         field: "market_cap",

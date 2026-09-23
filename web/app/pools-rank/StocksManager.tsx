@@ -192,6 +192,8 @@ type RankToolbarCache = {
   ticker_type: string;
   ma_rule: RankMaRule | null;
   ma_options: Partial<MaOptionsPayload>;
+  entry_vol_mult: number | null;
+  entry_vol_mult_options: (number | null)[];
 };
 
 type RankHeaderSummary = {
@@ -365,8 +367,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     rankToolbarCache?.ticker_type ?? DEFAULT_TICKER_TYPE,
   );
   const [maRule, setMaRule] = useState<RankMaRule | null>(rankToolbarCache?.ma_rule ?? null);
-  const [entryVolMult, setEntryVolMult] = useState<string>("");
-  const [entryVolMultOptions, setEntryVolMultOptions] = useState<(number | null)[]>([]);
+  const [entryVolMult, setEntryVolMult] = useState<string>(
+    rankToolbarCache?.entry_vol_mult == null ? "" : String(rankToolbarCache.entry_vol_mult),
+  );
+  const [entryVolMultOptions, setEntryVolMultOptions] = useState<(number | null)[]>(
+    rankToolbarCache?.entry_vol_mult_options ?? [],
+  );
   const [adrInfo, setAdrInfo] = useState<{ market: string; value: number; floor: number | null } | null>(null);
 
   // 백엔드가 내려주는 선택지를 쓴다 — 화면이 복사본을 들고 있으면 값이 추가될 때 여기만 옛 목록이 남는다.
@@ -424,6 +430,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ticker_type: nextAccountId,
       ma_rule: payload.ma_rules?.[0] ?? null,
       ma_options: nextMaOptions,
+      entry_vol_mult: payload.entry_vol_mult ?? null,
+      entry_vol_mult_options: payload.entry_vol_mult_options ?? [],
     };
     setAddingRow(null);
     addingTickerDraftRef.current = "";
@@ -460,6 +468,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ticker_type: nextAccountId,
       ma_rule: payload.ma_rules?.[0] ?? null,
       ma_options: nextMaOptions,
+      entry_vol_mult: payload.entry_vol_mult ?? null,
+      entry_vol_mult_options: payload.entry_vol_mult_options ?? [],
     };
   }
 
@@ -1810,24 +1820,24 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                     </label>
                   ) : null}
                   {/* 진입 문턱 — 모멘텀 화면과 같은 값(보유 대상 ✅ 판정에 적용). 미리보기라 저장은 모멘텀 화면에서. */}
-                  {entryVolMultOptions.length > 0 ? (
-                    <label className="appLabeledField">
+                  <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">진입 문턱</span>
                       <select
                         className="form-select form-select-sm"
                         style={{ width: 80 }}
                         value={entryVolMult}
                         onChange={(e) => handleEntryVolMultChange(e.target.value)}
+                        disabled={entryVolMultOptions.length === 0}
                         title="보유 대상(✅) 판정에 쓰는 진입 문턱 — 이격이 '배수 × 20일 변동성' 이상인 종목만 고른다(모멘텀 진입과 같은 규칙). 여기서는 미리보기이고, 저장은 모멘텀 화면에서 한다."
                       >
+                        {entryVolMultOptions.length === 0 ? <option value="">로딩 중…</option> : null}
                         {entryVolMultOptions.map((value) => (
                           <option key={String(value)} value={value == null ? "" : String(value)}>
                             {value == null ? "없음" : `${value}×`}
                           </option>
                         ))}
                       </select>
-                    </label>
-                  ) : null}
+                  </label>
                   {/* 컬럼 묶음 전환 — 그리드에만 쓰는 설정이라 차트 모드에서는 감춘다. */}
                   {pageMode === "chart" ? null : (
                     <label className="appLabeledField">
