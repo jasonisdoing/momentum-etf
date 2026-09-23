@@ -438,9 +438,9 @@ def momentum_metrics(
 # 선정)에서 빈 목록을 돌려주면 엔진이 자연히 전량 매도·현금 대기로 흘러간다 —
 # 선정·백테스트·연속 추적·합성이 같은 경로라 한 곳으로 충분하다.
 
-# 시리즈 캐시 — 백테스트가 판정일마다 부르므로 DB 를 반복해서 읽지 않는다.
-# 튜닝 워커는 DB 를 건드리지 않는 규칙이라, 부모가 프리로드해 `seed_adr_series` 로 심는다.
-_ADR_SERIES_CACHE: dict[str, pd.Series] = {}
+# 튜닝 워커만 부모가 전달한 시계열을 고정한다. 일반 서버는 호출마다 최신 집계를 읽고,
+# 엔진의 날짜별 판정은 adr_entry_gate 클로저에 담긴 한 시계열을 재사용한다.
+_WORKER_ADR_SERIES: dict[str, pd.Series] = {}
 
 
 def adr_market_of_pool(pool: str) -> str | None:
@@ -471,7 +471,7 @@ def adr_market_of_pool(pool: str) -> str | None:
 
 def load_adr_series(market: str) -> pd.Series:
     """시장의 일별 ADR 시계열 (날짜 오름차순). 창이 차기 전 구간은 없다."""
-    cached = _ADR_SERIES_CACHE.get(market)
+    cached = _WORKER_ADR_SERIES.get(market)
     if cached is not None:
         return cached
     from utils.market_breadth_service import load_adr_series as load_points
@@ -479,13 +479,12 @@ def load_adr_series(market: str) -> pd.Series:
     series = pd.Series(
         {pd.Timestamp(point["date"]): float(point["adr"]) for point in load_points(market) if point["adr"] is not None}
     ).sort_index()
-    _ADR_SERIES_CACHE[market] = series
     return series
 
 
 def seed_adr_series(market: str, series: pd.Series) -> None:
     """튜닝 워커용 — 부모가 읽은 시계열을 심어 워커의 DB 접근을 없앤다."""
-    _ADR_SERIES_CACHE[market] = series
+    _WORKER_ADR_SERIES[market] = series
 
 
 def available_backtest_months(benchmark_close: pd.Series) -> int:
