@@ -16,7 +16,7 @@ HIGH_WINDOW = f"{HIGH_WINDOW_WEEKS * 7}D"
 HIGH_WINDOW_MIN_DAYS = 230
 
 
-def compute_signals(panel: dict[str, pd.DataFrame], exit_ma_days: int) -> dict[str, pd.DataFrame]:
+def compute_signals(panel: dict[str, pd.DataFrame], exit_ma_days: int, ma_type: str) -> dict[str, pd.DataFrame]:
     """돌파·이탈 신호와 거래대금 급증 배수(진입 정렬 기준)를 한 번에 만든다."""
     close_df = panel["close"]
     # 진입 판정은 **직전 최고 종가** 기준이다. 종가끼리 비교하므로 종가가 오르는 동안
@@ -26,12 +26,12 @@ def compute_signals(panel: dict[str, pd.DataFrame], exit_ma_days: int) -> dict[s
     prior_high = close_df.rolling(HIGH_WINDOW, min_periods=HIGH_WINDOW_MIN_DAYS).max().shift(1)
     # 관례상의 '52주 신고가'(장중 고가)는 화면 표시용으로만 쓴다 — 판정에는 쓰지 않는다.
     prior_high_intraday = panel["high"].rolling(HIGH_WINDOW, min_periods=HIGH_WINDOW_MIN_DAYS).max().shift(1)
-    # 이탈선은 **시스템 공용 이동평균**(`config.MOVING_AVERAGE_TYPE`)을 따른다. 예전에는
-    # 여기만 `rolling().mean()` 으로 SMA 를 박아 둬서, 설정을 EMA 로 바꿔도 순위·모멘텀·
-    # 보유 알림만 EMA 가 되고 신고가 이탈선은 SMA 로 남았다.
+    # 이탈선은 **그 종목풀의 이동평균 종류**(`pool_settings.MOVING_AVERAGE_TYPE`)를 따른다.
+    # 예전에는 여기만 `rolling().mean()` 으로 SMA 를 박아 둬서, 다른 화면이 EMA 여도
+    # 신고가 이탈선만 SMA 로 남았다.
     # `min_periods` 는 기존 동작 그대로 **기간을 다 채워야** 값이 나온다 — 상장 직후
     # 부분 평균으로 이탈을 판정하면 근거가 얇은 채로 팔게 된다.
-    exit_ma = calculate_moving_average(close_df, exit_ma_days, min_periods=exit_ma_days)
+    exit_ma = calculate_moving_average(close_df, exit_ma_days, min_periods=exit_ma_days, ma_type=ma_type)
     value_df = panel["value"]
     from utils.trade_value import trade_value_multiplier_frame
 

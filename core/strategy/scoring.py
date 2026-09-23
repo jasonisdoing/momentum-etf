@@ -94,6 +94,7 @@ def calculate_signed_percentile_score(data: pd.Series | pd.DataFrame) -> pd.Seri
 def compute_trend_frame(
     close_frame: pd.DataFrame,
     ma_days: int,
+    ma_type: str,
 ) -> pd.DataFrame:
     """[일자 × 티커] 구조의 종가 프레임으로부터 MA 대비 트렌드(%) 프레임을 계산한다.
 
@@ -108,7 +109,7 @@ def compute_trend_frame(
         if series.empty:
             ma_cols[ticker] = pd.Series(np.nan, index=close_frame.index, dtype=float)
             continue
-        ma_series = calculate_moving_average(series, days)
+        ma_series = calculate_moving_average(series, days, ma_type=ma_type)
         ma_cols[ticker] = ma_series.reindex(close_frame.index)
     ma_frame = pd.DataFrame(ma_cols, index=close_frame.index)
     trend = pd.DataFrame(
@@ -118,7 +119,7 @@ def compute_trend_frame(
     return trend
 
 
-def compute_ma_disparity(close_series: pd.Series, ma_days: int) -> float | None:
+def compute_ma_disparity(close_series: pd.Series, ma_days: int, ma_type: str) -> float | None:
     """종목 하나의 **최신 이격률(%)** — 종가가 이동평균보다 몇 % 위/아래인가.
 
     `compute_trend_frame` 의 1종목 버전이다. 순위 화면(프레임 단위)과 보유종목 알림(종목
@@ -131,7 +132,7 @@ def compute_ma_disparity(close_series: pd.Series, ma_days: int) -> float | None:
     series = close_series.dropna()
     if series.empty:
         return None
-    ma_series = calculate_moving_average(series, int(ma_days))
+    ma_series = calculate_moving_average(series, int(ma_days), ma_type=ma_type)
     score = calculate_maps_score(series, ma_series)
     if score.empty or pd.isna(score.iloc[-1]):
         return None
@@ -284,9 +285,10 @@ def select_holdings(
 def compute_rule_percentile_frame(
     close_frame: pd.DataFrame,
     ma_days: int,
+    ma_type: str,
 ) -> pd.DataFrame:
     """단일 MA 규칙에 대한 signed-percentile 점수 프레임을 계산한다."""
-    trend = compute_trend_frame(close_frame, ma_days)
+    trend = compute_trend_frame(close_frame, ma_days, ma_type)
     return calculate_signed_percentile_score(trend)
 
 
@@ -327,6 +329,7 @@ def combine_rule_percentiles(
 def build_composite_rank_scores(
     close_frame: pd.DataFrame,
     ma_rules: list[dict[str, Any]],
+    ma_type: str,
 ) -> tuple[pd.DataFrame, dict[int, pd.DataFrame], dict[int, pd.DataFrame]]:
     """랭킹/백테스트 공통: MA 규칙들을 받아 ``(composite, trend_by_order, percentile_by_order)`` 반환.
 
@@ -338,7 +341,7 @@ def build_composite_rank_scores(
     percentile_by_order: dict[int, pd.DataFrame] = {}
     for rule in ma_rules:
         order = int(rule["order"])
-        trend = compute_trend_frame(close_frame, _resolve_rule_ma_days(rule))
+        trend = compute_trend_frame(close_frame, _resolve_rule_ma_days(rule), ma_type)
         trend_by_order[order] = trend
         percentile_by_order[order] = calculate_signed_percentile_score(trend)
 

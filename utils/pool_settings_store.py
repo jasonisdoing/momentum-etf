@@ -3,7 +3,7 @@
 MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 보관한다.
 
     구조: ticker_type, name, icon, order, country_code, currency, pool_kind
-    편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS,             ← 전략 공용 설정
+    편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, MOVING_AVERAGE_TYPE,  ← 전략 공용 설정
           ADR_FLOOR,                                            ← 모멘텀 전용
           BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, STOPLOSS_THRESHOLD_PCT,
           BENCHMARK, MARKET_REGIME_INDEX (선택 — 비우면 미설정)
@@ -20,7 +20,7 @@ MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 
 컬렉션 문서 형태:
     {
       _id: <ticker_type>, name, icon, order, country_code, currency,
-      SHORT_MA_DAYS, LONG_MA_DAYS,
+      SHORT_MA_DAYS, LONG_MA_DAYS, MOVING_AVERAGE_TYPE,
       BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, BENCHMARK, MARKET_REGIME_INDEX, updated_at
     }
 """
@@ -33,6 +33,7 @@ from typing import Any
 from config import (
     ADR_FLOOR_OPTIONS,
     ENTRY_VOL_MULT_OPTIONS,
+    MOVING_AVERAGE_TYPE_OPTIONS,
     POOL_KIND_OPTIONS,
     SLIPPAGE_PCT_OPTIONS,
     TOP_N_HOLD_OPTIONS,
@@ -49,16 +50,21 @@ COLLECTION = "pool_settings"
 INTERNAL_POOL_ID_PREFIX = "__"
 
 # DB 오버라이드 대상 키 — 전부 필수이며 비어 있으면 로딩 자체가 실패한다.
-# 이 셋은 **모멘텀 전략 설정이기도 하다** — 이 프로젝트에서 모멘텀은 그 풀의 기본 판정
+# 이 항목들은 **모멘텀 전략 설정이기도 하다** — 이 프로젝트에서 모멘텀은 그 풀의 기본 판정
 # 기준이라, 전략 설정을 따로 두지 않고 풀 문서 하나에 모은다(순위 화면·보유종목 알림·
 # 종목풀 백테스트가 같은 값을 본다). 신고가는 자기 설정 문서를 따로 쓴다.
 OVERRIDABLE_KEYS: tuple[str, ...] = (
     "TOP_N_HOLD",
     "SHORT_MA_DAYS",
     "LONG_MA_DAYS",
+    # 이동평균 **종류** — 일수와 같은 성격의 판정 기준이라 같은 자리에 둔다. 실측에서
+    # 최적이 풀마다 갈렸다(us_stock 60개월 SMA +828.6% vs EMA +608.1%, kor_stock
+    # SMA +1393.4% vs EMA +1958.5%). 풀에 속하지 않는 계산(시장지수 추세·레버리지)은
+    # 계속 `config.MOVING_AVERAGE_TYPE` 를 쓴다.
+    "MOVING_AVERAGE_TYPE",
 )
 
-# 모멘텀 전략 전용 값 — 위 셋과 함께 한 풀의 전략 설정을 이룬다. 기존 문서에 없을 수 있어
+# 모멘텀 전략 전용 값 — 위 항목과 함께 한 풀의 전략 설정을 이룬다. 기존 문서에 없을 수 있어
 # 로딩 필수값은 아니다(미설정이면 전략 화면에서 저장해야 한다).
 MOMENTUM_KEYS: tuple[str, ...] = (
     "MOMENTUM_START_DATE",
@@ -333,6 +339,16 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
             options = ", ".join(str(value) for value in TOP_N_HOLD_OPTIONS)
             raise PoolSettingsError(f"{key} 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
         cleaned[key] = num
+
+    # 이동평균 종류 — 이평선 일수와 같은 성격의 판정 기준. 선택지 밖 값은 막는다.
+    if "MOVING_AVERAGE_TYPE" in values:
+        raw = str(values["MOVING_AVERAGE_TYPE"] or "").strip().upper()
+        if check_options and raw not in MOVING_AVERAGE_TYPE_OPTIONS:
+            options = ", ".join(MOVING_AVERAGE_TYPE_OPTIONS)
+            raise PoolSettingsError(
+                f"MOVING_AVERAGE_TYPE 는 다음 값 중 하나여야 합니다: {options}. 입력값: {values['MOVING_AVERAGE_TYPE']}"
+            )
+        cleaned["MOVING_AVERAGE_TYPE"] = raw
 
     # 모멘텀 전용 — 숫자/불리언이 섞여 있고 None 이 '없음' 을 뜻한다(임의 보정하지 않는다).
     if "MOMENTUM_START_DATE" in values:

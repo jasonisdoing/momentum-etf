@@ -51,7 +51,9 @@ def entry_gap_ok(long_disparity_pct, short_disparity_pct, volatility_pct, entry_
     return float(long_disparity_pct) > floor and float(short_disparity_pct) >= floor
 
 
-def compute_signals(panel: dict[str, pd.DataFrame], short_ma_days: int, long_ma_days: int) -> dict[str, pd.DataFrame]:
+def compute_signals(
+    panel: dict[str, pd.DataFrame], short_ma_days: int, long_ma_days: int, ma_type: str
+) -> dict[str, pd.DataFrame]:
     """이평선 두 개로 만드는 신호 표(행 = 거래일, 열 = 종목) — 백테스트·화면이 같은 값을 본다.
 
     ``short``/``long`` 은 이격률(%)이다. 계산은 순위 화면과 **같은 공용 함수**를 쓴다 —
@@ -61,8 +63,8 @@ def compute_signals(panel: dict[str, pd.DataFrame], short_ma_days: int, long_ma_
     평균으로 ✅를 주는데 엔진만 못 사는 불일치가 있었다(2026-09 통일).
     """
     close_df = panel["close"]
-    short_frame = compute_trend_frame(close_df, short_ma_days)
-    long_frame = compute_trend_frame(close_df, long_ma_days)
+    short_frame = compute_trend_frame(close_df, short_ma_days, ma_type)
+    long_frame = compute_trend_frame(close_df, long_ma_days, ma_type)
     known = close_df.notna() & compute_eligibility_mask(close_df)
     # 보유 자격은 순위 화면·종목풀 백테스트와 **같은 공용 규칙**(`hold_eligible`)이다.
     eligible = known & hold_eligible(long_frame, short_frame)

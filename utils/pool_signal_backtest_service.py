@@ -24,7 +24,7 @@ from config import CACHE_START_DATE, FORWARD_DAY_OPTIONS
 from utils.cache_utils import load_cached_close_series_bulk
 from utils.logger import get_app_logger
 from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
-from utils.moving_averages import calculate_moving_average
+from utils.moving_averages import calculate_moving_average, pool_moving_average_type
 from utils.pool_settings_store import (
     get_pool_benchmark_ticker,
 )
@@ -495,14 +495,16 @@ def compute_pool_signal_backtest(
         raise ValueError(f"'{pool_id}' 종목풀에 분석 가능한 종목이 없습니다(제외 종목·벤치마크를 뺀 후 0개).")
 
     series_map = load_cached_close_series_bulk(pool_id, [item["ticker"] for item in etfs])
+    # 이평 종류도 일수와 같이 그 풀의 설정을 따른다.
+    ma_type = pool_moving_average_type(pool_id)
     frames: list[pd.DataFrame] = []
     min_length = long_days + 20
     for ticker, series in series_map.items():
         close = pd.to_numeric(series, errors="coerce").dropna()
         if len(close) < min_length:
             continue
-        short_ma = calculate_moving_average(close, short_days, min_periods=short_days)
-        long_ma = calculate_moving_average(close, long_days, min_periods=long_days)
+        short_ma = calculate_moving_average(close, short_days, min_periods=short_days, ma_type=ma_type)
+        long_ma = calculate_moving_average(close, long_days, min_periods=long_days, ma_type=ma_type)
         frame = pd.DataFrame(
             {
                 "close": close,

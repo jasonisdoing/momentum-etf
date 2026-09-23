@@ -7,7 +7,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS, TOP_N_HOLD_OPTIONS
+from config import (
+    ADR_FLOOR_OPTIONS,
+    ENTRY_VOL_MULT_OPTIONS,
+    MOVING_AVERAGE_TYPE_OPTIONS,
+    TOP_N_HOLD_OPTIONS,
+)
 from fastapi_app.dependencies import require_internal_token
 from utils.ma_options import ma_options_by_country
 from utils.market_breadth_service import MARKET_BY_INDEX_TICKER, SELF_POOL_REGIME_TICKER
@@ -101,6 +106,8 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
         "mix_usage": mix_usage,
         "constraints": {
             "ma_options_by_country": ma_options_by_country(),
+            # 이평 **종류** — 일수와 같은 자리의 풀별 설정이다(시장지수·레버리지는 공통값).
+            "moving_average_type_options": list(MOVING_AVERAGE_TYPE_OPTIONS),
             "top_n_hold_options": list(TOP_N_HOLD_OPTIONS),
             "slippage_pct_options": list(SLIPPAGE_PCT_OPTIONS),
             "stoploss_pct_options": list(STOPLOSS_PCT_OPTIONS),

@@ -30,7 +30,7 @@ from utils.cache_utils import (
 from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.effective_prices import apply_realtime_close, bar_anchor
 from utils.logger import get_app_logger
-from utils.moving_averages import get_moving_average_type
+from utils.moving_averages import pool_moving_average_type
 from utils.perf_metrics import single_stock_backtest_stats
 from utils.pool_settings_store import get_pool_benchmark_ticker
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
@@ -74,7 +74,8 @@ def _normalize_ma_rule(ticker_type: str, ma_rule_raw: Any) -> dict[str, Any]:
         "short_ma_days": short_days,
         "long_ma_days": long_days,
         "score_column": _build_ma_rule_score_column(),
-        "ma_type": get_moving_average_type(),
+        # 이평 종류도 일수와 같이 **그 풀의 설정**이다(화면 표기·계산이 같은 값을 본다).
+        "ma_type": pool_moving_average_type(ticker_type),
     }
 
 
@@ -658,7 +659,8 @@ def _apply_common_rank_scores(
         index=pd.DatetimeIndex(union_index),
     )
 
-    composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
+    ma_type = str(ma_rules[0]["ma_type"])
+    composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules, ma_type)
     eval_date = close_frame.index.max()
 
     # 티커별 값 매핑. composite 는 signed-percentile 이지만 여기서는 자격 마스크 용도로만 쓴다.
@@ -708,7 +710,7 @@ def _apply_common_rank_scores(
     # 단기이격 = 종가와 단기 이평선의 이격률(%). 이격(장기 기준)과 같은 함수를 써서
     # 두 값이 항상 동일한 지표의 기간만 다른 버전이 되도록 한다.
     # 종목 선택은 이격(장기), 손절/익절 판단은 단기이격이 담당한다.
-    short_trend_frame = compute_trend_frame(close_frame, short_days)
+    short_trend_frame = compute_trend_frame(close_frame, short_days, ma_type)
     short_trend_row = short_trend_frame.loc[eval_date]
     df["단기이격"] = tickers_col.map(
         {

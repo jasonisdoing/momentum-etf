@@ -22,6 +22,7 @@ from core.strategy.new_high.signals import HIGH_WINDOW_WEEKS, compute_signals
 from core.strategy.price_panel import build_price_panel
 from core.strategy.slot_backtest import run_slot_backtest
 from utils.effective_prices import apply_realtime_closes
+from utils.moving_averages import pool_moving_average_type
 from utils.new_high_service import (
     DEFAULT_BACKTEST_MONTHS,
     load_price_frames,
@@ -62,7 +63,7 @@ def load_context(settings: dict[str, Any]) -> dict[str, Any]:
         "name_by": {row["ticker"]: row["name"] for row in universe},
         "industry_by": {row["ticker"]: row.get("industry", "") for row in universe},
         "panel": panel,
-        "signals": compute_signals(panel, int(settings["exit_ma_days"])),
+        "signals": compute_signals(panel, int(settings["exit_ma_days"]), pool_moving_average_type(pool)),
     }
 
 
@@ -138,7 +139,12 @@ def current_positions(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     market = load_slot_market(settings["pool"], settings.get("adr_floor"))
     # 키에 슬리피지·시작 자본까지 넣는다 — 풀 설정을 바꾸면 즉시 새 값으로 계산돼야 한다.
     cache_key = _POSITIONS_CACHE.make_key(
-        settings, start_date, market["buy_slippage"], market["sell_slippage"], market["initial_capital"]
+        settings,
+        start_date,
+        market["buy_slippage"],
+        market["sell_slippage"],
+        market["initial_capital"],
+        pool_moving_average_type(settings["pool"]),
     )
     result = _POSITIONS_CACHE.get_or_compute(
         cache_key, lambda: _current_positions(settings, start_date=start_date, market=market)
@@ -208,7 +214,9 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     ma_short, ma_long = pool_config.get("SHORT_MA_DAYS"), pool_config.get("LONG_MA_DAYS")
     disparity_short = disparity_long = None
     if ma_short and ma_long:
-        disparity = momentum_signals.compute_signals({"close": close_df}, int(ma_short), int(ma_long))
+        disparity = momentum_signals.compute_signals(
+            {"close": close_df}, int(ma_short), int(ma_long), pool_moving_average_type(pool)
+        )
         disparity_short = disparity["short"].loc[last]
         disparity_long = disparity["long"].loc[last]
 
@@ -389,6 +397,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
                 "value": panel["value"],
             },
             exit_ma_days,
+            pool_moving_average_type(pool),
         )
 
         # 진입 자격 프레임 — 과거 구간은 백테스트와 같은 확정 배수 판정, 잠정 행(오늘)만
@@ -464,7 +473,9 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
 
         # 추세 이탈 이격도 잠정 봉 기준으로 갱신 — 합성 화면과 같은 실시간 기준(strategy_logic.md 「장중 잠정 실행」).
         if ma_short and ma_long:
-            eff_disparity = momentum_signals.compute_signals({"close": eff_close}, int(ma_short), int(ma_long))
+            eff_disparity = momentum_signals.compute_signals(
+                {"close": eff_close}, int(ma_short), int(ma_long), pool_moving_average_type(pool)
+            )
             eff_disp_short = eff_disparity["short"].loc[session_ts]
             eff_disp_long = eff_disparity["long"].loc[session_ts]
             for row in rows:
@@ -595,6 +606,8 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         "pool": pool,
         "universe_count": len(rows),
         "window_weeks": HIGH_WINDOW_WEEKS,
+        # 이평 종류 — 화면이 "SMA20 이탈" 처럼 표기한다(종목풀별 설정).
+        "ma_type": pool_moving_average_type(pool),
         "min_value_mult": settings["min_value_mult"],
         # 가격 캐시가 마지막으로 갱신된 시각 — 화면이 "언제 기준인지"를 알린다.
         "refreshed_at": _cache_refreshed_at(pool),

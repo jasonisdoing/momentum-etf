@@ -224,6 +224,8 @@ type PlanRow = {
 };
 
 type Positions = {
+  /** 그 종목풀의 이평 종류(SMA/EMA) — 표기·컬럼 헤더가 쓴다. */
+  ma_type?: string | null;
   as_of: string;
   /** 동시 보유 상한 — 빈 슬롯 행 수를 세는 데 쓴다. */
   top_n: number;
@@ -990,6 +992,7 @@ export function NewHighClient() {
       maExitGapColumn<PlanRow>({
         field: "exit_ma_gap_pct",
         maDays: draft?.exit_ma_days,
+        maType: positions?.ma_type,
         getMaValue: (row) => row?.exit_ma,
         formatMaValue: (value) => formatPrice(value),
       }),
@@ -1018,7 +1021,7 @@ export function NewHighClient() {
         valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number)),
       },
     ],
-    [hasIndustryData, fillDay, positions?.live, draft?.exit_ma_days],
+    [hasIndustryData, fillDay, positions?.live, positions?.ma_type, draft?.exit_ma_days],
   );
 
   const tradeColumns = useMemo<ColDef<Trade>[]>(
@@ -1103,6 +1106,7 @@ export function NewHighClient() {
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">이탈 이평선</span>
                     <MaDaysSelect
+                      maType={positions?.ma_type}
                       value={draft.exit_ma_days}
                       options={constraints.exit_ma_options}
                       onChange={(days) => setDraft({ ...draft, exit_ma_days: days })}

@@ -171,8 +171,11 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
         import pandas as pd
 
         from core.strategy.momentum.signals import compute_signals as momentum_compute
+        from utils.moving_averages import pool_moving_average_type
 
-        disparity = momentum_compute({"close": close_frame}, int(ma_short), int(ma_long))
+        disparity = momentum_compute(
+            {"close": close_frame}, int(ma_short), int(ma_long), pool_moving_average_type(pool)
+        )
         short_row = disparity["short"].iloc[-1]
         long_row = disparity["long"].iloc[-1]
         gap_by = {

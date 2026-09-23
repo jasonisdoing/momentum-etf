@@ -395,12 +395,13 @@ def momentum_metrics(
     *,
     short_ma_days: int,
     long_ma_days: int,
+    ma_type: str,
     as_of: pd.Timestamp | None = None,
 ) -> dict[str, float] | None:
     """종목풀 설정 이평선 기준 이격 — 순위 화면과 같은 신호의 월간 버전.
 
     이격률 계산은 (종가 ÷ 이평 − 1) × 100 이고, 이평선 일수는 종목풀 설정
-    (SHORT_MA_DAYS/LONG_MA_DAYS)을, 이평 종류(SMA/EMA)는 공통 설정을 그대로 쓴다 —
+    (SHORT_MA_DAYS/LONG_MA_DAYS)과 종류(MOVING_AVERAGE_TYPE)를 그대로 쓴다 —
     순위/종목풀 백테스트와 신호가 같고 리듬(월간 유지)만 다르다.
     순위 점수(`momentum_score`)는 순위 화면과 같은 `rank_score` 가 정한다 — **장기 이격률**이다.
     단기 이격은 순위에 넣지 않고 후보 자격 판정(hold_eligible_mask)에만 쓴다.
@@ -417,8 +418,8 @@ def momentum_metrics(
 
     # 이격률 — 순위 화면·보유종목 알림과 **같은 함수**(core.strategy.scoring.compute_ma_disparity).
     # 예전에는 여기서 따로 계산해 경계 종목에서 순위 화면과 값이 갈렸다.
-    disparity_pct = compute_ma_disparity(series, long_ma_days)
-    short_disparity_pct = compute_ma_disparity(series, short_ma_days)
+    disparity_pct = compute_ma_disparity(series, long_ma_days, ma_type)
+    short_disparity_pct = compute_ma_disparity(series, short_ma_days, ma_type)
     if disparity_pct is None or short_disparity_pct is None:
         return None
 

@@ -7,6 +7,8 @@
  *  신고가는 이탈 이평선 1줄, 모멘텀은 단기·장기 2줄. 색은 여기 팔레트 순서로 정한다.
  */
 
+import { formatMaLabel } from "./MaDaysSelect";
+
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -29,7 +31,7 @@ export type HoldingChartData = {
   /** 전략명(모멘텀·신고가·포트폴리오) — 합성처럼 카드마다 다른 화면은 백엔드가 내려준다. */
   strategy_label?: string;
   candles: { time: string; open: number; high: number; low: number; close: number }[];
-  ma_lines: { ma_days: number; points: { time: string; value: number }[] }[];
+  ma_lines: { ma_days: number; ma_type: string; points: { time: string; value: number }[] }[];
   /** 내 평균 매입가 — 실제로 들고 있는 종목에만 온다(`/ticker` 상세와 같은 값). */
   avg_buy_price?: number | null;
   /** 통화(KRW·USD·AUD) — 가격에 기호를 붙이는 데 쓴다. 풀마다 다르다. */
@@ -281,7 +283,7 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
         >
           {chart.ma_lines.map((line, index) => (
             <span key={line.ma_days} style={{ color: MA_COLORS[index % MA_COLORS.length] }}>
-              MA{line.ma_days}
+              {formatMaLabel(line.ma_days, line.ma_type)}
             </span>
           ))}
         </span>

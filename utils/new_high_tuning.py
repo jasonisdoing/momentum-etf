@@ -18,6 +18,7 @@ import pandas as pd
 from config import ADR_FLOOR_OPTIONS
 from core.strategy.new_high.signals import compute_signals
 from core.strategy.price_panel import build_price_panel
+from utils.moving_averages import pool_moving_average_type
 from utils.new_high_service import (
     EXIT_MA_OPTIONS,
     load_price_frames,
@@ -88,7 +89,10 @@ def _preload(pool: str) -> dict[str, Any]:
 def _worker_context(exit_ma: int) -> dict[str, Any]:
     universe = _PRELOAD["universe"]
     if exit_ma not in _WORKER_SIGNALS:
-        _WORKER_SIGNALS[exit_ma] = compute_signals(_PRELOAD["panel"], int(exit_ma))
+        # spawn 워커라 전역 설정에 기대면 안 된다 — 풀 값을 명시적으로 읽어 넘긴다.
+        _WORKER_SIGNALS[exit_ma] = compute_signals(
+            _PRELOAD["panel"], int(exit_ma), pool_moving_average_type(_PRELOAD["pool"])
+        )
     return {
         "pool": _PRELOAD["pool"],
         "universe": universe,

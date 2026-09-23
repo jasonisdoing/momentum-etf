@@ -40,6 +40,7 @@ from utils.momentum_service import (
     pool_info,
     validate_settings,
 )
+from utils.moving_averages import pool_moving_average_type
 from utils.pool_signal_backtest_service import validate_backtest_months
 from utils.slot_positions import (
     _apply_display_quotes,
@@ -77,7 +78,10 @@ def load_context(settings: dict[str, Any]) -> dict[str, Any]:
         "industry_by": {row["ticker"]: row.get("industry", "") for row in universe},
         "panel": panel,
         "signals": momentum_signals.compute_signals(
-            panel, int(settings["short_ma_days"]), int(settings["long_ma_days"])
+            panel,
+            int(settings["short_ma_days"]),
+            int(settings["long_ma_days"]),
+            pool_moving_average_type(pool),
         ),
     }
 
@@ -137,7 +141,12 @@ def current_positions(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     market = load_slot_market(settings["pool"], settings.get("adr_floor"))
     # 키에 슬리피지·시작 자본까지 넣는다 — 풀 설정을 바꾸면 즉시 새 값으로 계산돼야 한다.
     cache_key = _POSITIONS_CACHE.make_key(
-        settings, start_date, market["buy_slippage"], market["sell_slippage"], market["initial_capital"]
+        settings,
+        start_date,
+        market["buy_slippage"],
+        market["sell_slippage"],
+        market["initial_capital"],
+        pool_moving_average_type(settings["pool"]),
     )
     result = _POSITIONS_CACHE.get_or_compute(
         cache_key, lambda: _current_positions(settings, start_date=start_date, market=market)
@@ -283,7 +292,10 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         }
         eff_close = apply_realtime_closes(close_df, live_prices, session_ts)
         eff = momentum_signals.compute_signals(
-            {"close": eff_close}, int(settings["short_ma_days"]), int(settings["long_ma_days"])
+            {"close": eff_close},
+            int(settings["short_ma_days"]),
+            int(settings["long_ma_days"]),
+            pool_moving_average_type(pool),
         )
         eff_entry = momentum_signals.entry_signal(eff_close, eff, settings["entry_vol_mult"])
         live_result = run_slot_backtest(
@@ -403,6 +415,8 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     return {
         "as_of": str(last.date()),
         "pool": pool,
+        # 이평 종류 — 화면이 "SMA50 이탈" 처럼 표기한다(종목풀별 설정).
+        "ma_type": pool_moving_average_type(pool),
         "country": info["country"],
         "currency": info["currency"],
         "top_n": slots,
