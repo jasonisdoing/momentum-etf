@@ -268,9 +268,11 @@ export function PortfolioClient() {
       setSelected([]);
       writeRememberedTickerType("strategy-portfolio", nextPool);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "설정을 불러오지 못했습니다.");
+      if (currentPoolRef.current === nextPool) {
+        setError(loadError instanceof Error ? loadError.message : "설정을 불러오지 못했습니다.");
+      }
     } finally {
-      setLoading(false);
+      if (currentPoolRef.current === nextPool) setLoading(false);
     }
   }, []);
 
@@ -689,10 +691,12 @@ export function PortfolioClient() {
 
   const hintStyle = { fontSize: "var(--fs-sm)", color: "var(--text-muted)" } as const;
 
-  if (loading && !view) {
+  if (loading) {
     return (
       <PageFrame title="포트폴리오 전략" fullWidth>
-        <div className="appPageStack">불러오는 중…</div>
+        <div className="appPageStack" role="status" aria-live="polite">
+          {view ? "종목풀을 바꾸는 중…" : "불러오는 중…"}
+        </div>
       </PageFrame>
     );
   }
@@ -707,6 +711,7 @@ export function PortfolioClient() {
   return (
     <PageFrame title="포트폴리오 전략" fullWidth>
       <div className="appPageStack">
+        {error ? <div className="alert alert-danger">{error}</div> : null}
         {/* ① 설정 — 종목풀 · 전략 시작일. 모멘텀·신고가 화면과 같은 자리. */}
         <div className="card appCard">
           <div className="card-body">
