@@ -19,7 +19,7 @@ import { StrategyNotes } from "../components/StrategyNotes";
 import { StrategyTuning } from "../components/StrategyTuning";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
-import { MaDaysSelect } from "../components/MaDaysSelect";
+import { formatMaLabel, MaDaysSelect } from "../components/MaDaysSelect";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
@@ -1301,7 +1301,7 @@ export function NewHighClient() {
                   hint={
                     <>
                       종가가 직전 최고 종가를 넘으면 진입,{" "}
-                      <strong style={{ color: "#12b886" }}>MA{draft.exit_ma_days}</strong>를 하회하면 청산합니다.
+                      <strong style={{ color: "#12b886" }}>{formatMaLabel(draft.exit_ma_days, positions?.ma_type)}</strong>를 하회하면 청산합니다.
                       진입한 종목은 매수가와 함께 Buy 화살표가 표시됩니다.
                     </>
                   }
@@ -1422,7 +1422,7 @@ export function NewHighClient() {
           axes={[
             // 축 값 = 상단 셀렉트 선택지(서버 상수) — 순서·이름도 상단 설정과 같다.
             // 종목 수(공통 고정)·업종 상한(폐기)은 축이 아니다 — 튜닝은 시장의 반응 속도와 급증 기준만 잰다.
-            { key: "exit_ma_days", label: "이탈 이평선", values: constraints.exit_ma_options.map((n) => ({ value: n, label: `${n}일` })) },
+            { key: "exit_ma_days", label: "이탈 이평선", values: constraints.exit_ma_options.map((n) => ({ value: n, label: formatMaLabel(n, positions?.ma_type) })) },
             {
               key: "min_value_mult",
               label: "거래대금 하한",

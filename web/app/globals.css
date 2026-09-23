@@ -4810,15 +4810,6 @@ a {
   gap: 0.5rem;
 }
 
-/* 이평선 일수 셀렉트(MaDaysSelect) — 모든 화면이 이 폭 하나를 쓴다. 화면에서 폭을 따로 주지 않는다.
-   Tabler 기본은 화살표 자리로 오른쪽에 3rem 을 비워 두는데 값이 짧아 그만큼 필요 없으므로 줄인다. */
-.appMaDaysSelect {
-  width: 6.5rem;
-  min-width: 6.5rem;
-  padding-right: 1.75rem;
-  background-position: right 0.5rem center;
-}
-
 .rankSwitchField {
   display: inline-flex;
   align-items: center;
