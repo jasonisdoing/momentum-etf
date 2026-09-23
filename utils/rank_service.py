@@ -5,7 +5,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import CACHE_TTL_COMPUTE
+from config import CACHE_TTL_COMPUTE, ENTRY_VOL_MULT_OPTIONS
 from services.stock_cache_service import get_stock_cache_meta_map
 from utils.data_loader import get_trading_days
 from utils.ma_options import ma_options_payload
@@ -583,6 +583,8 @@ def _strip_pool_order_prefix(name: str) -> str:
 
 
 def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
+    from utils.settings_loader import get_ticker_type_settings
+
     configs_payload, default_config = _build_configs_payload()
     target = str(ticker_type or "").strip().lower()
     available_ids = [str(cfg["ticker_type"]).lower() for cfg in configs_payload]
@@ -606,6 +608,8 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
         "ma_rules": ma_rules,
         # 이평선 일수 선택지 — 백엔드 상수가 단일 소스(풀 국가별).
         **ma_options_payload(_pool_country(selected_ticker_type)),
+        "entry_vol_mult": (get_ticker_type_settings(selected_ticker_type) or {}).get("ENTRY_VOL_MULT"),
+        "entry_vol_mult_options": list(ENTRY_VOL_MULT_OPTIONS),
     }
 
 
@@ -706,7 +710,7 @@ def _compute_rank_data_payload(
         **ma_options_payload(_pool_country(selected_ticker_type)),
         # 진입 문턱 — 이번 응답의 보유 대상(✅)에 적용된 값과 선택지(툴바 셀렉트용).
         "entry_vol_mult": entry_vol_mult,
-        "entry_vol_mult_options": list(__import__("config").ENTRY_VOL_MULT_OPTIONS),
+        "entry_vol_mult_options": list(ENTRY_VOL_MULT_OPTIONS),
         # 시장 ADR — 헤더 표시용(모멘텀 ADR 게이트와 같은 소스). 레짐 지수 없는 풀은 None.
         "adr": _pool_adr_payload(selected_ticker_type),
         "as_of_date": _serialize_datetime(effective_as_of_date),
