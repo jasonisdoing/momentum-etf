@@ -423,22 +423,24 @@ def _extract_price_metrics_from_close_series(
 
 
 def _touched_new_high_today(confirmed_close_series: pd.Series | None, realtime_entry: dict[str, float] | None) -> bool:
-    """오늘 장중 고가가 최근 12개월 최고 종가 이상인가 — 그날 하루 ⭐신고점 표시용.
+    """장중 최고 종가 돌파 후 현재가도 그 기준 이상일 때만 ⭐신고점 표시.
 
-    이전 최고 종가보다 높은 가격을 이미 기록했고 장이 아직 안 끝났으니, 이대로 끝나면
-    신고점이 된다 — 그래서 장중에 내려와도 당일에는 신고점으로 표시한다(확정은 종가가 한다).
+    오늘 처음 돌파한 종목도 포함한다. 고가에서 내려왔더라도 이전 최고 종가 위에
+    머무르면 표시하고, 그 아래로 밀리면 표시하지 않는다.
     비교 기준은 고점 컬럼과 같은 공용 창(`drawdown_from_high_pct`, 12개월 최고 종가)이다.
     """
     if not isinstance(realtime_entry, dict):
         return False
     high = realtime_entry.get("high")
-    if high is None:
+    now = realtime_entry.get("nowVal")
+    if high is None or now is None:
         return False
     try:
-        value = drawdown_from_high_pct(confirmed_close_series, float(high))
-    except Exception:
+        high_gap = drawdown_from_high_pct(confirmed_close_series, float(high))
+        now_gap = drawdown_from_high_pct(confirmed_close_series, float(now))
+    except (TypeError, ValueError):
         return False
-    return value is not None and value >= 0
+    return high_gap is not None and high_gap > 0 and now_gap is not None and now_gap >= 0
 
 
 def _load_realtime_snapshot(country_code: str, tickers: list[str]) -> dict[str, dict[str, float]]:
