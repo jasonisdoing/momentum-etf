@@ -30,6 +30,7 @@ def replay_capital(
     curve = {}
     trades = []
     previous_targets: dict[str, float] = {}
+    pending_sells: dict[str, int] = {}
     first_price_days = {ticker: close[ticker].first_valid_index() for ticker in close.columns}
     for i, day in enumerate(close.index):
         date = str(day.date())
@@ -58,15 +59,20 @@ def replay_capital(
             )
             if trade:
                 orders[ticker] = trade
+        for ticker, quantity in pending_sells.items():
+            # 거래정지 중 확정된 매도는 이후 목표가 달라져도 첫 체결 가능일에 실행한다.
+            orders[ticker] = -min(held[ticker], max(quantity, -orders.get(ticker, 0)))
         # 매도 대금으로 당일 매수를 충당하되 가용 현금을 넘기는 체결은 만들지 않는다.
         for ticker, trade in orders.items():
             if trade >= 0:
                 continue
             price = opened.at[day, ticker]
             if pd.isna(price) or price <= 0:
-                raise ValueError(f"합성 매도 시가가 없습니다: {date} {ticker}")
+                pending_sells[ticker] = -trade
+                continue
             cash -= trade * float(price) * (1 - costs[ticker][1])
             held[ticker] += trade
+            pending_sells.pop(ticker, None)
             trades.append({"date": date, "ticker": ticker, "side": "sell", "quantity": -trade, "price": float(price)})
         requests = {}
         for ticker, trade in orders.items():
@@ -74,7 +80,8 @@ def replay_capital(
                 continue
             price = opened.at[day, ticker]
             if pd.isna(price) or price <= 0:
-                raise ValueError(f"합성 매수 시가가 없습니다: {date} {ticker}")
+                # 시가 없는 날의 신규 진입은 슬롯 엔진처럼 체결하지 않는다.
+                continue
             requests[ticker] = trade * float(price) * (1 + costs[ticker][0])
         total = sum(requests.values())
         scale = min(1.0, max(cash, 0.0) / total) if total else 0.0

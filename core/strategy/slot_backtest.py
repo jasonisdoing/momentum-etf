@@ -171,6 +171,7 @@ def run_slot_backtest(
     last_day = span[-1]
     # 잠정 마지막 봉 모드에서만 채워진다 — 오늘 시가를 몰라 체결하지 못한 확정 주문.
     pending_exits: set[str] = set()
+    blocked_exits: set[str] = set()
     pending_entry_tickers: list[str] = []
 
     # 평가 전용 종가 — 그날 값이 없으면 **직전 유효 종가**로 본다.
@@ -206,9 +207,7 @@ def run_slot_backtest(
         for ticker in list(holdings):
             position = holdings[ticker]
             price = close_df.at[day, ticker]
-            if pd.isna(price):
-                continue
-            if not bool(exit_signal.at[day, ticker]):
+            if ticker not in blocked_exits and (pd.isna(price) or not bool(exit_signal.at[day, ticker])):
                 continue
             exit_price = open_df.at[nxt, ticker]
             if pd.isna(exit_price):
@@ -217,7 +216,10 @@ def run_slot_backtest(
                     # 보유를 유지한 채 '오늘 체결 예정'으로 남긴다. 현금도 움직이지 않는다.
                     pending_exits.add(ticker)
                     continue
-                exit_price = price  # 다음 날 시가가 없으면(거래정지) 오늘 종가로 본다
+                # 거래정지에는 가상의 종가 체결을 만들지 않고 다음 시가까지 보유한다.
+                blocked_exits.add(ticker)
+                continue
+            blocked_exits.discard(ticker)
             ret = (float(exit_price) * (1 - sell_slippage / 100)) / position["entry"] - 1
             cash += position["shares"] * float(exit_price) * (1 - sell_slippage / 100)
             trades.append(
