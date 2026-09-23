@@ -497,6 +497,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       if (!response.ok) {
         throw new Error(payload.error ?? "종목풀 정보를 불러오지 못했습니다.");
       }
+      if (abortController.signal.aborted) return;
       applyRankToolbarPayload(payload);
     } catch (loadError) {
       if (loadError instanceof DOMException && loadError.name === "AbortError") {
@@ -1397,6 +1398,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   ]);
 
   function handleTickerTypeChange(accountId: string) {
+    // 이전 풀의 설정과 늦게 도착하는 툴바 응답을 새 풀에 표시하지 않는다.
+    toolbarFetchAbortRef.current?.abort();
+    setMaRule(null);
+    setEntryVolMult("");
+    setEntryVolMultOptions([]);
     setSelectedAccountId(accountId);
     writeRememberedTickerType("rank", accountId);
     if (accountId === "all") {
@@ -1802,10 +1808,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   </label>
                   {/* 이평선 — 순위 판정선이자 차트에 그리는 선이라 두 모드 모두에서 바꾼다.
                       관리 모드에서만 감춘다(거기서는 종목을 담고 빼는 것만 한다). */}
-                  {pageMode !== "manage" && maRule ? (
+                  {pageMode !== "manage" ? (
                     <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">이평선</span>
                       <div className="appMaRuleRow">
+                        {maRule ? <>
                         <MaDaysSelect
                           maType={maRule?.ma_type}
                           title="단기 이평선"
@@ -1820,6 +1827,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                           options={maOptions.long_ma_options}
                           onChange={(days) => handleMaRuleDaysChange("long_ma_days", days)}
                         />
+                        </> : <span role="status">{loading ? "이평선 설정 로딩 중…" : "이평선 설정을 불러오지 못했습니다."}</span>}
                       </div>
                     </label>
                   ) : null}
