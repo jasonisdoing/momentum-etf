@@ -215,6 +215,8 @@ type Trade = {
 type Holding = Omit<PlanRow, "plan"> & { status: "hold" | "sell" };
 
 type Positions = {
+  /** 그 종목풀의 이평 종류(SMA/EMA) — 표기·컬럼 헤더가 쓴다. */
+  ma_type?: string | null;
   as_of: string;
   /** 이 결과를 계산한 종목풀 — 풀 전환 중 도착한 이전 풀의 늦은 응답을 거르는 기준. */
   pool?: string;
@@ -832,11 +834,13 @@ export function MomentumClient() {
       maExitGapColumn<PlanRow>({
         field: "short_gap_pct",
         maDays: view?.settings.short_ma_days,
+        maType: positions?.ma_type,
         entry: { mult: view?.settings.entry_vol_mult ?? null, getVolatility: (row) => row?.volatility_pct },
       }),
       maExitGapColumn<PlanRow>({
         field: "long_gap_pct",
         maDays: view?.settings.long_ma_days,
+        maType: positions?.ma_type,
         entry: { mult: view?.settings.entry_vol_mult ?? null, getVolatility: (row) => row?.volatility_pct },
       }),
       ...slotTradeColumns<PlanRow>({ fillDay }).filter((col) => col.field === "return_pct"),
@@ -850,6 +854,7 @@ export function MomentumClient() {
       renderTicker,
       saveMemo,
       view?.settings.entry_vol_mult,
+      positions?.ma_type,
       view?.settings.long_ma_days,
       view?.settings.short_ma_days,
     ],
@@ -901,11 +906,13 @@ export function MomentumClient() {
       maExitGapColumn<CandidateRow>({
         field: "short_gap_pct",
         maDays: view?.settings.short_ma_days,
+        maType: positions?.ma_type,
         entry: { mult: view?.settings.entry_vol_mult ?? null, getVolatility: (row) => row?.volatility_pct },
       }),
       maExitGapColumn<CandidateRow>({
         field: "long_gap_pct",
         maDays: view?.settings.long_ma_days,
+        maType: positions?.ma_type,
         entry: { mult: view?.settings.entry_vol_mult ?? null, getVolatility: (row) => row?.volatility_pct },
       }),
     ],
@@ -915,6 +922,7 @@ export function MomentumClient() {
       renderTicker,
       saveMemo,
       view?.settings.entry_vol_mult,
+      positions?.ma_type,
       view?.settings.long_ma_days,
       view?.settings.short_ma_days,
     ],
@@ -1071,12 +1079,14 @@ export function MomentumClient() {
                       <span className="appLabeledFieldLabel">이평선</span>
                       <span className="appMaRuleRow">
                         <MaDaysSelect
+                          maType={positions?.ma_type}
                           title="단기 이평선"
                           value={draftMaRule.short}
                           options={view.ma_rule.short_ma_options}
                           onChange={(days) => setDraftMaRule((r) => r && { ...r, short: days })}
                         />
                         <MaDaysSelect
+                          maType={positions?.ma_type}
                           title="장기 이평선"
                           value={draftMaRule.long}
                           options={view.ma_rule.long_ma_options}

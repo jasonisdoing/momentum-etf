@@ -23,6 +23,7 @@ from utils.momentum_service import (
     load_settings,
     validate_settings,
 )
+from utils.moving_averages import pool_moving_average_type
 from utils.strategy_tuning import (
     TuningRun,
     begin_tuning,
@@ -123,7 +124,8 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
         "name_by": _PRELOAD["name_by"],
         "industry_by": _PRELOAD["industry_by"],
         "panel": _PRELOAD["panel"],
-        "signals": compute_signals(_PRELOAD["panel"], short, long),
+        # spawn 워커라 전역 설정에 기대면 안 된다 — 풀 값을 명시적으로 읽어 넘긴다.
+        "signals": compute_signals(_PRELOAD["panel"], short, long, pool_moving_average_type(base["pool"])),
     }
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []

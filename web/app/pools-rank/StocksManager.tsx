@@ -1189,6 +1189,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         ...maExitGapColumn<RankGridRow>({
           field: "단기이격",
           maDays: maRule?.short_ma_days,
+          maType: maRule?.ma_type,
           entry: { mult: entryVolMult === "" ? null : Number(entryVolMult), getVolatility: (row) => row?.변동성 },
         }),
         hide: metricMode !== "basic",
@@ -1197,6 +1198,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         ...maExitGapColumn<RankGridRow>({
           field: "이격",
           maDays: maRule?.long_ma_days,
+          maType: maRule?.ma_type,
           entry: { mult: entryVolMult === "" ? null : Number(entryVolMult), getVolatility: (row) => row?.변동성 },
         }),
         hide: metricMode !== "basic",
@@ -1805,12 +1807,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       <span className="appLabeledFieldLabel">이평선</span>
                       <div className="appMaRuleRow">
                         <MaDaysSelect
+                          maType={maRule?.ma_type}
                           title="단기 이평선"
                           value={maRule.short_ma_days}
                           options={maOptions.short_ma_options}
                           onChange={(days) => handleMaRuleDaysChange("short_ma_days", days)}
                         />
                         <MaDaysSelect
+                          maType={maRule?.ma_type}
                           title="장기 이평선"
                           value={maRule.long_ma_days}
                           options={maOptions.long_ma_options}

@@ -218,12 +218,15 @@ export const MA_EXIT_COLUMN_WIDTH = 112;
 export function maExitGapColumn<T>(options: {
   field: ColDefField<T>;
   maDays: number | null | undefined;
+  /** 이평 종류(SMA/EMA) — 종목풀별 설정이라 화면마다 그 풀 값을 넘긴다. 없으면 "MA" 로 쓴다. */
+  maType?: string | null;
   getMaValue?: (row: T | undefined) => number | null | undefined;
   formatMaValue?: (value: number, row: T | undefined) => string;
   /** 진입 문턱 — 모멘텀 계열 화면만 넘긴다. mult 가 null(없음)이면 음수만 파랑. */
   entry?: { mult: number | null; getVolatility: (row: T | undefined) => number | null | undefined };
 }): ColDef<T> {
-  const label = `MA${options.maDays ?? ""}`;
+  // 종류를 아는 화면은 "SMA50", 모르면 예전처럼 "MA50" — 같은 선을 두 이름으로 부르지 않는다.
+  const label = `${String(options.maType ?? "").trim().toUpperCase() || "MA"}${options.maDays ?? ""}`;
   const colorNote = options.entry
     ? "파랑 = 이탈(음수), 검정 = 진입 문턱(배수×변동성) 미달, 빨강 = 문턱까지 통과."
     : "파랑 = 이탈(음수), 빨강 = 0선 위.";

@@ -15,6 +15,7 @@ from typing import Any
 import pandas as pd
 
 from config import HOLDING_CHART_MONTHS, HOLDING_CHART_SHOW_AVG_BUY_PRICE
+from utils.moving_averages import calculate_moving_average, pool_moving_average_type
 from utils.price_series import positive_prices as _positive
 
 _CANDLE_KEYS = ("Open", "High", "Low", "Close")
@@ -40,6 +41,7 @@ def holding_charts(
     ma_days_list = sorted({int(days) for days in ma_days_list if int(days) > 0})
     if not wanted or not ma_days_list:
         return []
+    ma_type = pool_moving_average_type(pool)
     name_by = {
         str(item.get("ticker") or "").strip(): str(item.get("name") or "").strip()
         for item in _load_ticker_type_stocks_raw(pool)
@@ -75,7 +77,9 @@ def holding_charts(
         cols = {key: _positive(frame[key]) for key in _CANDLE_KEYS}
         close = cols["Close"]
         # 화면이 보는 구간만 잘라 보내되, 이평선은 잘린 앞부분까지 써서 계산한다.
-        ma_by_days = {days: close.rolling(days, min_periods=days).mean() for days in ma_days_list}
+        ma_by_days = {
+            days: calculate_moving_average(close, days, min_periods=days, ma_type=ma_type) for days in ma_days_list
+        }
         span = frame.index[frame.index >= frame.index[-1] - pd.DateOffset(months=months)]
         if window_dates:
             # 공용 창 밖(이 종목만 더 과거를 들고 있는 경우)은 잘라 축을 맞춘다.
@@ -101,7 +105,9 @@ def holding_charts(
                 "ticker": ticker,
                 "name": name_by.get(ticker) or ticker,
                 "candles": candles,
-                "ma_lines": [{"ma_days": days, "points": points_by_days[days]} for days in ma_days_list],
+                "ma_lines": [
+                    {"ma_days": days, "ma_type": ma_type, "points": points_by_days[days]} for days in ma_days_list
+                ],
                 # 내 평균 매입가 — 실제로 들고 있는 종목에만 붙는다(`/ticker` 상세와 같은 값).
                 "avg_buy_price": avg_buy_by.get(ticker),
                 # 통화 — 화면이 가격에 기호를 붙인다(원 · $ · A$). 풀마다 다르므로 함께 보낸다.

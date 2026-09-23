@@ -7,7 +7,7 @@ import { formatKstDateTime } from "@/lib/datetime";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { LastSavedCell } from "../components/LastSavedCell";
-import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
+import { MaDaysSelect, MaTypeSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { AppModal } from "../components/AppModal";
@@ -27,7 +27,13 @@ const NUMERIC_KEYS = [
 const OPTIONAL_NUMERIC_KEYS = ["ENTRY_VOL_MULT", "ADR_FLOOR"] as const;
 
 /** 화면 표시 순서 = 헤더 순서. 셀도 반드시 이 순서로 그려야 한다. */
-const EDITABLE_KEYS = [...NUMERIC_KEYS, ...OPTIONAL_NUMERIC_KEYS, "BENCHMARK", "MARKET_REGIME_INDEX"] as const;
+const EDITABLE_KEYS = [
+  ...NUMERIC_KEYS,
+  ...OPTIONAL_NUMERIC_KEYS,
+  "MOVING_AVERAGE_TYPE",
+  "BENCHMARK",
+  "MARKET_REGIME_INDEX",
+] as const;
 
 type NumericKey = (typeof NUMERIC_KEYS)[number];
 type OptionalNumericKey = (typeof OPTIONAL_NUMERIC_KEYS)[number];
@@ -37,6 +43,7 @@ const KEY_LABELS: Record<EditableKey, string> = {
   TOP_N_HOLD: "보유종목 수",
   SHORT_MA_DAYS: "단기 이평선",
   LONG_MA_DAYS: "장기 이평선",
+  MOVING_AVERAGE_TYPE: "이평 종류",
   BUY_SLIPPAGE_PCT: "매수 슬리피지(%)",
   SELL_SLIPPAGE_PCT: "매도 슬리피지(%)",
   STOPLOSS_THRESHOLD_PCT: "손절 기준(%)",
@@ -110,6 +117,8 @@ type PoolSettingsResponse = {
   constraints: {
     /** 이평선 선택지 — 국가별(풀의 country_code 로 고른다). 백엔드 utils/ma_options 가 단일 소스. */
     ma_options_by_country: Record<string, MaOptionsPayload>;
+    /** 이평 **종류** 선택지(SMA/EMA) — 일수와 같은 자리의 풀별 설정. config 가 단일 소스. */
+    moving_average_type_options?: string[];
     top_n_hold_options: number[];
     slippage_pct_options?: number[];
     stoploss_pct_options?: number[];
@@ -140,6 +149,8 @@ type PoolDraft = {
   benchmarkName: string;
   marketRegimeTicker: string;
   marketRegimeName: string;
+  // 이평 **종류**(SMA/EMA) — 숫자가 아니라 문자열 선택지라 NumericKey 와 따로 둔다.
+  MOVING_AVERAGE_TYPE: string;
 } & Record<NumericKey, string> & Record<OptionalNumericKey, string>;
 
 const EMPTY_DRAFT: PoolDraft = {
@@ -154,6 +165,8 @@ const EMPTY_DRAFT: PoolDraft = {
   // 이평선은 국가마다 선택지가 달라 여기서 못 정한다 — `withDefaultMaDays` 가 채운다.
   SHORT_MA_DAYS: "",
   LONG_MA_DAYS: "",
+  // 이평 **종류** — 일수와 같은 풀별 판정 기준. 기본은 단순(SMA).
+  MOVING_AVERAGE_TYPE: "SMA",
   // 슬리피지는 보수적으로 — 낙관적인 값으로 열면 백테스트가 실제보다 좋게 나온다.
   BUY_SLIPPAGE_PCT: "0.5",
   SELL_SLIPPAGE_PCT: "0.5",
@@ -234,6 +247,7 @@ function toDraft(pool: PoolEntry): PoolDraft {
     TOP_N_HOLD: String(pool.settings.TOP_N_HOLD?.value ?? ""),
     SHORT_MA_DAYS: String(pool.settings.SHORT_MA_DAYS?.value ?? ""),
     LONG_MA_DAYS: String(pool.settings.LONG_MA_DAYS?.value ?? ""),
+    MOVING_AVERAGE_TYPE: String(pool.settings.MOVING_AVERAGE_TYPE?.value ?? ""),
     BUY_SLIPPAGE_PCT: String(pool.settings.BUY_SLIPPAGE_PCT?.value ?? ""),
     SELL_SLIPPAGE_PCT: String(pool.settings.SELL_SLIPPAGE_PCT?.value ?? ""),
     STOPLOSS_THRESHOLD_PCT: String(pool.settings.STOPLOSS_THRESHOLD_PCT?.value ?? ""),
@@ -263,6 +277,7 @@ function draftToValues(draft: PoolDraft) {
     TOP_N_HOLD: Number(draft.TOP_N_HOLD),
     SHORT_MA_DAYS: Number(draft.SHORT_MA_DAYS),
     LONG_MA_DAYS: Number(draft.LONG_MA_DAYS),
+    MOVING_AVERAGE_TYPE: draft.MOVING_AVERAGE_TYPE,
     BUY_SLIPPAGE_PCT: Number(draft.BUY_SLIPPAGE_PCT),
     SELL_SLIPPAGE_PCT: Number(draft.SELL_SLIPPAGE_PCT),
     STOPLOSS_THRESHOLD_PCT: Number(draft.STOPLOSS_THRESHOLD_PCT),
@@ -859,6 +874,13 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       valueGetter: (params) => params.data?.__stockCount ?? null,
       valueFormatter: (params) => (params.value == null ? "-" : Number(params.value).toLocaleString("ko-KR")),
     },
+    selectCol("MOVING_AVERAGE_TYPE", "이평 종류", 96, () => data.constraints.moving_average_type_options ?? [], {
+      valueFormatter: (params) => (params.value ? String(params.value) : "미설정"),
+      headerTooltip:
+        "이동평균 종류(SMA/EMA) — 단기·장기 이평선과 신고가 이탈선 판정에 쓴다. " +
+        "이평선 일수와 같은 종목풀별 설정이다. 시장지수 추세·레버리지는 종목풀에 속하지 않아 " +
+        "공통값(config.MOVING_AVERAGE_TYPE)을 쓴다.",
+    }),
     selectCol(
       "SHORT_MA_DAYS",
       "단기",
@@ -1060,13 +1082,18 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         )}
         {renderField(
           "단기",
-          <MaDaysSelect value={Number(draft.SHORT_MA_DAYS) || null} options={data.constraints.ma_options_by_country[draft.country_code]?.short_ma_options} onChange={(days) => onChange("SHORT_MA_DAYS", String(days))} />,
+          <MaDaysSelect maType={draft.MOVING_AVERAGE_TYPE} value={Number(draft.SHORT_MA_DAYS) || null} options={data.constraints.ma_options_by_country[draft.country_code]?.short_ma_options} onChange={(days) => onChange("SHORT_MA_DAYS", String(days))} />,
           { minWidth: 160, labelWidth: 44 },
         )}
         {renderField(
           "장기",
-          <MaDaysSelect value={Number(draft.LONG_MA_DAYS) || null} options={data.constraints.ma_options_by_country[draft.country_code]?.long_ma_options} onChange={(days) => onChange("LONG_MA_DAYS", String(days))} />,
+          <MaDaysSelect maType={draft.MOVING_AVERAGE_TYPE} value={Number(draft.LONG_MA_DAYS) || null} options={data.constraints.ma_options_by_country[draft.country_code]?.long_ma_options} onChange={(days) => onChange("LONG_MA_DAYS", String(days))} />,
           { minWidth: 160, labelWidth: 44 },
+        )}
+        {renderField(
+          "종류",
+          <MaTypeSelect value={draft.MOVING_AVERAGE_TYPE} options={data.constraints.moving_average_type_options} onChange={(maType) => onChange("MOVING_AVERAGE_TYPE", maType)} />,
+          { minWidth: 150, labelWidth: 44 },
         )}
         {renderField(
           "진입 문턱",

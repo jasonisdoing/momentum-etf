@@ -31,7 +31,7 @@ from utils.cache_utils import load_cached_close_series_bulk_with_fallback
 from utils.effective_prices import bar_anchor
 from utils.holdings_detail_service import load_all_holdings_detail
 from utils.logger import get_app_logger
-from utils.moving_averages import get_moving_average_type
+from utils.moving_averages import pool_moving_average_type
 from utils.notification import send_slack_message_v2
 from utils.rankings import build_effective_close_series
 from utils.stock_list_io import pools_by_ticker
@@ -97,6 +97,8 @@ def _ma_status(
     ma_days: tuple[int, int],
     country: str,
     realtime_entry: dict[str, float] | None = None,
+    *,
+    ma_type: str,
 ) -> dict[str, Any] | None:
     """종가와 단기·장기 이평선을 계산해 이탈 여부를 반환한다. 데이터 부족/실패 시 None.
 
@@ -130,9 +132,9 @@ def _ma_status(
         return None
 
     last = float(close.iloc[-1])
-    result: dict[str, Any] = {"last": last}
+    result: dict[str, Any] = {"last": last, "ma_type": ma_type}
     for label, days in (("short", short_days), ("long", long_days)):
-        disparity = compute_ma_disparity(close, days)
+        disparity = compute_ma_disparity(close, days, ma_type)
         if disparity is None:
             return None
         result[f"{label}_days"] = days
@@ -227,7 +229,13 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
         for row, cache_ticker, quote_ticker, pool, country, ma_days in candidates:
             entry = snapshots.get(country, {}).get(quote_ticker)
             try:
-                status = _ma_status(close_by_ticker.get(cache_ticker), ma_days, country, entry)
+                status = _ma_status(
+                    close_by_ticker.get(cache_ticker),
+                    ma_days,
+                    country,
+                    entry,
+                    ma_type=pool_moving_average_type(pool),
+                )
             except Exception as exc:  # 한 종목 실패가 전체를 막지 않게
                 _unknown(row, f"판정 실패 ({exc})")
                 continue
@@ -348,8 +356,9 @@ def _post_slack(sections: list[dict[str, Any]], *, manual: bool) -> bool:
     for s in sections:
         parts: list[str] = [f"*{s['account']}*"]
         if s["ma"]:
-            # 기준(이평선 일수)이 종목의 종목풀마다 달라 계좌 헤더에 못 쓴다 — 종목 줄 끝에 붙인다.
-            parts.append(f"📉 *이동선 이탈* ({get_moving_average_type()})")
+            # 기준(이평선 종류·일수)이 종목의 종목풀마다 달라 계좌 헤더에 못 쓴다 —
+            # 종목 줄 끝에 `[SMA 20/120]` 형태로 붙인다.
+            parts.append("📉 *이동선 이탈*")
             for b in s["ma"]:
                 # 어느 쪽이 꺾였는지 보이게 이탈한 선만 표시한다.
                 broken = [
@@ -358,7 +367,8 @@ def _post_slack(sections: list[dict[str, Any]], *, manual: bool) -> bool:
                     if b[f"{key}_below"]
                 ]
                 parts.append(
-                    f"  • {b['name']}({b['ticker']}): {' / '.join(broken)}  `[{b['short_days']}/{b['long_days']}]`"
+                    f"  • {b['name']}({b['ticker']}): {' / '.join(broken)}  "
+                    f"`[{b['ma_type']} {b['short_days']}/{b['long_days']}]`"
                 )
         if s["stoploss"]:
             # 기준(%)이 종목풀마다 달라 계좌 헤더에 못 쓴다 — 종목 줄 끝에 붙인다.

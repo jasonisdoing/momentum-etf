@@ -32,7 +32,7 @@ from utils.ttl_cache import TtlCache
 _RankCacheKey = tuple[str]
 _RANK_DATA_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="rank_data")
 # 종목풀별 직전 이평선 — 값이 바뀌면 그 종목풀 캐시를 버린다.
-_LAST_MA_RULES: dict[str, tuple[tuple[int, int], ...]] = {}
+_LAST_MA_RULES: dict[str, tuple[tuple[tuple[int, int, str], ...], float | None]] = {}
 
 
 def _build_rank_cache_key(ticker_type: str, ma_rules: list[dict[str, Any]]) -> _RankCacheKey:
@@ -777,7 +777,7 @@ def load_rank_data(
     # 이평선·진입 문턱이 직전과 다르면 캐시를 버린다(키는 풀 단위 — 미리보기 값 전환용).
     previous = _LAST_MA_RULES.get(selected_ticker_type)
     current = (
-        tuple((int(r.get("short_ma_days") or 0), int(r.get("long_ma_days") or 0)) for r in ma_rules),
+        tuple((int(r.get("short_ma_days") or 0), int(r.get("long_ma_days") or 0), r["ma_type"]) for r in ma_rules),
         entry_vol_mult,
     )
     if previous is not None and previous != current:

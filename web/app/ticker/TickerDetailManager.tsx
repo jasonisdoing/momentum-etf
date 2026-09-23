@@ -1,5 +1,7 @@
 "use client";
 
+import { formatMaLabel } from "../components/MaDaysSelect";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { IconCheck, IconPlus } from "@tabler/icons-react";
 import { useSearchParams } from "next/navigation";
@@ -97,7 +99,7 @@ type TickerDetailResponse = {
   error?: string;
 };
 
-type MaLine = { ma_days: number; points: { time: string; value: number }[] };
+type MaLine = { ma_days: number; ma_type: string; points: { time: string; value: number }[] };
 
 type TickerEtfInfo = {
   nav?: number | null;
@@ -1408,7 +1410,7 @@ export function TickerDetailManager({
                         <span style={{ display: "flex", gap: 10, fontSize: "var(--fs-sm)", fontWeight: 700 }}>
                           {maLines.map((line, index) => (
                             <span key={line.ma_days} style={{ color: MA_LINE_COLORS[index % MA_LINE_COLORS.length] }}>
-                              MA{line.ma_days}
+                              {formatMaLabel(line.ma_days, line.ma_type)}
                             </span>
                           ))}
                         </span>
