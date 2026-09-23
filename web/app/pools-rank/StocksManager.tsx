@@ -118,7 +118,7 @@ type RankRow = {
   "24달(%)": number | null;
   "36달(%)": number | null;
   고점: number | null;
-  /** 오늘 장중 고가가 12개월 최고 종가 이상 — 당일 ⭐신고점 유지 표시. */
+  /** 장중 고가가 12개월 최고 종가를 넘고 현재가도 그 이상일 때 ⭐신고점 표시. */
   고점터치?: boolean;
   RSI: number | null;
   배당률: number | null;
@@ -881,8 +881,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         width: 80,
         type: "rightAligned",
         // 공용 고점 렌더러 (strategy-momentum 과 동일) — 0 이면 ⭐신고점.
-        // 오늘 장중 고가가 과거 12개월 최고 종가를 넘었으면(터치) 내려와도 당일은 ⭐신고점 —
-        // 이전 최고 종가보다 높은 가격을 이미 기록했고 장이 안 끝났으니, 이대로 끝나면 신고점이라서다.
+        // 오늘 고가가 이전 최고 종가를 넘고 현재가도 그 이상일 때만 ⭐신고점으로 표시한다.
         cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) =>
           params.data?.고점터치 ? renderHighDrawdownCell(0, 2) : renderHighDrawdownCell(params.value, 2),
       },
