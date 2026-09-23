@@ -110,8 +110,6 @@ type TickerEtfInfo = {
   total_net_assets_eok?: number | null;
   market_cap_krw?: number | null;
   volume?: number | null;
-  fx_rate?: number | null;
-  fx_change_pct?: number | null;
   fx_rates?: TickerFxRate[];
   /** 포트폴리오 변동 계산용 — 기준일 이후 누적 환율(백엔드 합계와 같은 값). */
   portfolio_change_fx_rates?: TickerFxRate[];

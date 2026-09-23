@@ -140,9 +140,11 @@ def _infer_yahoo_symbol_currency(symbol: str) -> str | None:
     return None
 
 
-def _build_fx_rates_for_holdings(
-    holdings: list[dict[str, object]], rates: dict[str, object]
-) -> list[dict[str, object]]:
+def _holdings_currencies(holdings: list[dict[str, object]]) -> set[str]:
+    """구성종목이 쓰는 통화 집합 — 환율을 **얼마나** 조회할지 정하는 단일 기준.
+
+    현금성 항목(KRD 코드·이름에 '현금')은 뺀다. 통화가 비어 있으면 야후 심볼에서 추론한다.
+    """
     currencies: set[str] = set()
     for item in holdings:
         ticker = str(item.get("ticker") or "").strip().upper()
@@ -155,8 +157,15 @@ def _build_fx_rates_for_holdings(
         if not currency:
             inferred_currency = _infer_yahoo_symbol_currency(str(item.get("yahoo_symbol") or ""))
             currency = str(inferred_currency or "").strip().upper()
-        if currency:
+        if currency and currency != "KRW":
             currencies.add(currency)
+    return currencies
+
+
+def _build_fx_rates_for_holdings(
+    holdings: list[dict[str, object]], rates: dict[str, object]
+) -> list[dict[str, object]]:
+    currencies = _holdings_currencies(holdings)
 
     result: list[dict[str, object]] = []
     for currency in sorted(currencies):
@@ -318,19 +327,17 @@ def _build_korean_etf_info_payload(
         nav_change = float(nav_value) - float(prev_nav)
         nav_change_pct = round((nav_change / float(prev_nav)) * 100, 2)
 
-    # 환율 정보 (무조건 제공)
-    rates = get_exchange_rates()
-    usd_info = rates.get("USD", {})
-    fx_rate = usd_info.get("rate")
-    fx_change_pct = usd_info.get("change_pct")
-    fx_rates = _build_fx_rates_for_holdings(holdings, rates)
+    # 환율은 **구성종목에 원화 아닌 통화가 있을 때만** 조회한다. 예전에는 조건 없이
+    # 8개 통화를 전부 받았는데(실측 3.7초, 전체 응답의 67%), 국내 구성종목뿐인 ETF 는
+    # 그 결과를 하나도 쓰지 않았다(`fx_rates` 빈 배열). 필요한 통화만 넘긴다.
+    fx_currencies = _holdings_currencies(holdings)
+    rates = get_exchange_rates(fx_currencies) if fx_currencies else {}
+    fx_rates = _build_fx_rates_for_holdings(holdings, rates) if rates else []
 
     return {
         "nav": float(nav_value) if nav_value is not None else None,
         "nav_change": nav_change,
         "nav_change_pct": nav_change_pct,
-        "fx_rate": fx_rate,
-        "fx_change_pct": fx_change_pct,
         "fx_rates": fx_rates,
         "portfolio_change_base_date": portfolio_change_base_date,
         "deviation": float(deviation_value) if deviation_value is not None else None,
@@ -823,8 +830,14 @@ def build_ticker_detail_payload(
                 if etf_info is not None:
                     from services.portfolio_change_service import build_cumulative_fx_rates
 
-                    etf_info["portfolio_change_fx_rates"] = build_cumulative_fx_rates(
-                        priced_holdings, get_exchange_rates(), fallback_base_date
+                    # 평가된 구성종목의 통화만 — 없으면 조회 자체가 일어나지 않는다.
+                    cumulative_currencies = _holdings_currencies(priced_holdings)
+                    etf_info["portfolio_change_fx_rates"] = (
+                        build_cumulative_fx_rates(
+                            priced_holdings, get_exchange_rates(cumulative_currencies), fallback_base_date
+                        )
+                        if cumulative_currencies
+                        else []
                     )
 
             enriched_holdings: list[dict[str, object]] = []
@@ -847,9 +860,11 @@ def build_ticker_detail_payload(
                 if bundle_fx_rates is not None:
                     etf_info["fx_rates"] = bundle_fx_rates
                 else:
-                    etf_info["fx_rates"] = _build_daily_fx_rates_for_holdings(
-                        holdings,
-                        get_exchange_rates(),
+                    daily_currencies = _holdings_currencies(holdings)
+                    etf_info["fx_rates"] = (
+                        _build_daily_fx_rates_for_holdings(holdings, get_exchange_rates(daily_currencies))
+                        if daily_currencies
+                        else []
                     )
 
     # 차트 이평선 — 그 종목풀의 단기·장기 이평선을 **엔진과 같은 공용 함수**로 계산해 내려준다

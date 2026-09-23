@@ -223,34 +223,61 @@ def get_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, flo
     return {**cached_result, **fetched_filtered}
 
 
-def get_exchange_rates() -> dict[str, Any]:
-    """주요 통화의 원화 환율을 반환한다.
+def get_exchange_rates(currencies: Sequence[str] | None = None) -> dict[str, Any]:
+    """원화 환율을 반환한다 — ``currencies`` 를 주면 **그 통화만** 조회한다.
 
-    소스는 야후 하나다(`KRW=X` 등 일괄 조회). 현재가와 전일 종가가 같은 소스라
-    변동률 기준이 어긋나지 않는다.
+    소스는 야후 하나다. 현재가와 전일 종가가 같은 소스라 변동률 기준이 어긋나지 않는다.
+
+    캐시는 **통화 단위**다. 예전에는 8개를 한 덩어리(`fx:major`)로 받아 캐시했는데,
+    필요한 통화가 하나뿐인 화면도 8개 값을 전부 기다려야 했다(실측 3.7초). 통화별로
+    나누면 이미 받아 둔 통화는 그대로 쓰고 모자란 것만 조회한다.
+
+    ``currencies=None`` 은 지원 통화 전체다 — 무엇이 필요한지 모르는 호출부의 기본값이다.
     """
+    wanted = (
+        list(_FX_SYMBOL_BY_CODE)
+        if currencies is None
+        else [c for c in dict.fromkeys(str(c).strip().upper() for c in currencies) if c in _FX_SYMBOL_BY_CODE]
+    )
+    if not wanted:
+        return {}
 
-    cache_key = "fx:major"
-    cached_entry = _FX_CACHE.get(cache_key)
     now = datetime.now()
+    rates: dict[str, Any] = {}
+    missing: list[str] = []
+    for currency in wanted:
+        entry = _FX_CACHE.get(f"fx:{currency}")
+        if _is_cache_alive(entry, now):
+            rates[currency] = dict(entry["data"])
+        else:
+            missing.append(currency)
 
-    if _is_cache_alive(cached_entry, now):
-        return dict(cached_entry["data"])
+    if not missing:
+        return rates
 
     try:
-        rates = _fetch_exchange_rates()
+        fetched = _fetch_exchange_rates(missing)
     except Exception as exc:
-        stale_rates = _reuse_stale_fx_cache(cache_key, exc)
-        if stale_rates is not None:
-            return dict(stale_rates)
+        for currency in missing:
+            stale = _reuse_stale_fx_cache(f"fx:{currency}", exc)
+            if stale is not None:
+                rates[currency] = dict(stale)
+        if len(rates) == len(wanted):
+            return rates
         raise
 
-    _FX_CACHE[cache_key] = {
-        "data": dict(rates),
-        "fetched_at": now,
-        "expires_at": now + timedelta(seconds=_FX_TTL_SECONDS),
-        "is_stale": False,
-    }
+    for currency in missing:
+        value = fetched.get(currency)
+        if not isinstance(value, dict):
+            continue
+        rates[currency] = value
+        _FX_CACHE[f"fx:{currency}"] = {
+            "data": dict(value),
+            "fetched_at": now,
+            "expires_at": now + timedelta(seconds=_FX_TTL_SECONDS),
+            "is_stale": False,
+        }
+    rates["updated_at"] = fetched.get("updated_at", now)
     return rates
 
 
@@ -449,19 +476,29 @@ def _is_market_active(country: str) -> bool:
     return market_open_dt <= now_local <= market_close_dt
 
 
-def _fetch_exchange_rates() -> dict[str, Any]:
+# 지원 통화 → 야후 심볼. 조회 대상은 호출부가 고른다 — 8개를 전부 받는 데 실측 3.7초가
+# 들었고(통화당 ~0.39초 순차), 국내 구성종목뿐인 ETF 상세는 그 결과를 하나도 쓰지 않았다.
+_FX_SYMBOL_BY_CODE: dict[str, str] = {
+    "USD": "KRW=X",
+    "AUD": "AUDKRW=X",
+    "JPY": "JPYKRW=X",
+    "CNY": "CNYKRW=X",
+    "TWD": "TWDKRW=X",
+    "HKD": "HKDKRW=X",
+    "GBP": "GBPKRW=X",
+    "EUR": "EURKRW=X",
+}
+
+
+def _fetch_exchange_rates(currencies: Sequence[str] | None = None) -> dict[str, Any]:
     import yfinance as yf
 
-    mapping = {
-        "USD": "KRW=X",
-        "AUD": "AUDKRW=X",
-        "JPY": "JPYKRW=X",
-        "CNY": "CNYKRW=X",
-        "TWD": "TWDKRW=X",
-        "HKD": "HKDKRW=X",
-        "GBP": "GBPKRW=X",
-        "EUR": "EURKRW=X",
-    }
+    if currencies is None:
+        mapping = dict(_FX_SYMBOL_BY_CODE)
+    else:
+        mapping = {c: _FX_SYMBOL_BY_CODE[c] for c in currencies if c in _FX_SYMBOL_BY_CODE}
+    if not mapping:
+        return {"updated_at": datetime.now()}
 
     def _put(currency: str, current_rate: float, previous_close: float) -> None:
         change_pct = ((current_rate - previous_close) / previous_close * 100.0) if previous_close > 0 else 0.0
