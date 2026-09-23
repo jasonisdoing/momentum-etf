@@ -1,9 +1,11 @@
 "use client";
 
+import styles from "./MaDaysSelect.module.css";
+
 /**
  * 이평선 일수 셀렉트 — 시스템 공용. 종목풀 설정·순위·종목풀 백테스트·모멘텀·신고가·알림이
  * 전부 이 컴포넌트를 쓴다. 선택지는 백엔드(`utils/ma_options.py`)가 응답으로 내려준 목록만
- * 렌더하고, 폭·표기("20일")는 여기(`appMaDaysSelect`)서만 정한다 — 화면은 값과 핸들러만 준다.
+ * 렌더하고, 폭·표기는 이 컴포넌트에서만 정한다 — 화면은 값과 핸들러만 준다.
  */
 
 export type MaOptionsPayload = {
@@ -40,7 +42,7 @@ export function MaTypeSelect({
   const outside = current !== "" && !list.includes(current);
   return (
     <select
-      className="form-select form-select-sm appMaDaysSelect"
+      className={`form-select form-select-sm ${styles.select}`}
       value={current}
       disabled={disabled || list.length === 0}
       title={title}
@@ -78,7 +80,7 @@ export function MaDaysSelect({
   const outside = value != null && !list.includes(value);
   return (
     <select
-      className="form-select form-select-sm appMaDaysSelect"
+      className={`form-select form-select-sm ${styles.select}`}
       value={value == null ? "" : String(value)}
       disabled={disabled || list.length === 0}
       title={title}

@@ -56,7 +56,7 @@ import {
 import { isTrendBroken } from "@/lib/name-highlight";
 import { updateStockMemo } from "@/lib/stocks-store";
 import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
-import { MaDaysSelect } from "../components/MaDaysSelect";
+import { formatMaLabel, MaDaysSelect } from "../components/MaDaysSelect";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { formatPrice } from "../../lib/price-format";
 
@@ -1365,8 +1365,8 @@ export function MomentumClient() {
           axes={[
             // 축 값 = 상단 셀렉트 선택지(서버 상수) — 여기서 따로 정하지 않는다.
             // 종목 수(공통 고정)·교체 규칙(전략 고정)은 축이 아니다 — 튜닝은 시장의 이평 반응만 잰다.
-            { key: "short_ma_days", label: "단기 이평", values: (view.ma_rule?.short_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },
-            { key: "long_ma_days", label: "장기 이평", values: (view.ma_rule?.long_ma_options ?? []).map((n) => ({ value: n, label: `${n}일` })) },
+            { key: "short_ma_days", label: "단기 이평", values: (view.ma_rule?.short_ma_options ?? []).map((n) => ({ value: n, label: formatMaLabel(n, positions?.ma_type) })) },
+            { key: "long_ma_days", label: "장기 이평", values: (view.ma_rule?.long_ma_options ?? []).map((n) => ({ value: n, label: formatMaLabel(n, positions?.ma_type) })) },
             {
               key: "entry_vol_mult",
               label: "진입 문턱",

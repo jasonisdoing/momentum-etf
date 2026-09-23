@@ -1,0 +1,8 @@
+/* 종류·세 자리 일수·화살표를 함께 표시하고 좁은 행에서도 폭을 유지한다. */
+.select {
+  width: 9.5rem;
+  min-width: 9.5rem;
+  flex-shrink: 0;
+  padding-right: 2rem;
+  background-position: right 0.5rem center;
+}

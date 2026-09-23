@@ -63,7 +63,7 @@ type PoolOption = {
   name: string;
   order: number;
   icon: string;
-  settings?: Partial<Record<"SHORT_MA_DAYS" | "LONG_MA_DAYS", PoolSettingField>>;
+  settings?: Partial<Record<"SHORT_MA_DAYS" | "LONG_MA_DAYS" | "MOVING_AVERAGE_TYPE", PoolSettingField>>;
 };
 type PoolSettingsResponse = {
   pools?: PoolOption[];
@@ -107,6 +107,7 @@ export function PoolBacktestManager() {
   const toast = useToast();
   const [pools, setPools] = useState<PoolOption[]>([]);
   const [poolId, setPoolId] = useState("");
+  const maType = String(pools.find((pool) => pool.ticker_type === poolId)?.settings?.MOVING_AVERAGE_TYPE?.value ?? "");
   /** 마지막 실행 요청 번호 — 풀·조건을 바꿔 다시 실행했을 때 이전 실행의 늦은 응답을 버린다. */
   const runSequenceRef = useRef(0);
   const [forwardDays, setForwardDays] = useState(5);
@@ -293,11 +294,11 @@ export function PoolBacktestManager() {
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 104, flex: "0 0 auto" }}>
                   <span className="appLabeledFieldLabel">단기 이평선</span>
-                  <MaDaysSelect value={shortMa} options={maOptions.short_ma_options} onChange={setShortMa} />
+                  <MaDaysSelect maType={maType} value={shortMa} options={maOptions.short_ma_options} onChange={setShortMa} />
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 104, flex: "0 0 auto" }}>
                   <span className="appLabeledFieldLabel">장기 이평선</span>
-                  <MaDaysSelect value={longMa} options={maOptions.long_ma_options} onChange={setLongMa} />
+                  <MaDaysSelect maType={maType} value={longMa} options={maOptions.long_ma_options} onChange={setLongMa} />
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 120, flex: "0 0 auto" }}>
                   <span
