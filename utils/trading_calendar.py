@@ -193,17 +193,16 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> list[pd.Ti
             f"file_start={file_start_ts.strftime('%Y-%m-%d')}, file_end={file_end_ts.strftime('%Y-%m-%d')}"
         )
 
-    trading_days_ts: list[pd.Timestamp] = []
-    for raw_day in raw_days:
-        normalized_day = str(raw_day or "").strip()
-        if not normalized_day:
-            continue
-        trading_days_ts.append(pd.to_datetime(normalized_day).normalize())
+    # 날짜를 **한 번에** 변환한다. 예전에는 한 건씩 `pd.to_datetime(문자열)` 을 불렀는데,
+    # 포맷을 안 주면 pandas 가 문자열마다 형식을 추론한다 — 한국 달력 2,211일 기준
+    # `_guess_datetime_format` 만 6,666회 0.81초였고 이 함수 전체가 1.27초였다.
+    cleaned = [text for text in (str(raw_day or "").strip() for raw_day in raw_days) if text]
+    parsed = pd.to_datetime(pd.Index(cleaned), format="%Y-%m-%d", errors="coerce").normalize()
+    parsed = parsed[parsed.notna()]
 
     # 최종적으로 start_date와 end_date 사이의 날짜만 반환하고, 중복 제거 및 정렬합니다.
-    final_list = [d for d in trading_days_ts if start_date_ts <= d <= end_date_ts]
-
-    return sorted(list(set(final_list)))
+    in_range = parsed[(parsed >= start_date_ts) & (parsed <= end_date_ts)]
+    return sorted(set(in_range))
 
 
 def get_trading_days_any(start_date: str, end_date: str, countries: list[str]) -> list[pd.Timestamp]:
