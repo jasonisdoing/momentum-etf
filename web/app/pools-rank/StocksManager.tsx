@@ -1836,7 +1836,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       <span className="appLabeledFieldLabel">진입 문턱</span>
                       <select
                         className="form-select form-select-sm"
-                        style={{ width: 80 }}
+                        style={{ width: 104, minWidth: 104 }}
                         value={entryVolMult}
                         onChange={(e) => handleEntryVolMultChange(e.target.value)}
                         disabled={entryVolMultOptions.length === 0}
