@@ -92,14 +92,15 @@ function viewIndices(view: ViewOption): readonly string[] {
 const US_MARKET_TOP_COUNT_KEY = "momentum-etf:us-market-stock:top-count";
 
 // 통합은 두 지수를 합쳐 600 종목에 가까워 100 단위로는 구간이 너무 성기다 → 50 단위.
-// 단일 지수는 종목 수가 적어 100 단위 고정 목록 그대로 둔다.
+// S&P는 서버에서 시총 상위 300개까지만 받는다.
 const COMBINED_TOP_STEP = 50;
 const SINGLE_TOP_OPTIONS: readonly (number | null)[] = [null, 100, 200, 300, 400, 500];
+const SP500_TOP_OPTIONS: readonly (number | null)[] = [null, 100, 200, 300];
 
 function topOptions(view: ViewOption, rowCount: number, current: number | null): (number | null)[] {
   return view === "COMBINED"
     ? stepTopOptions(COMBINED_TOP_STEP, rowCount, current)
-    : withCurrentTopOption([...SINGLE_TOP_OPTIONS], current);
+    : withCurrentTopOption([...(view === "SP500" ? SP500_TOP_OPTIONS : SINGLE_TOP_OPTIONS)], current);
 }
 
 function formatUsd(value: number | null): string {
@@ -244,15 +245,18 @@ export function UsMarketStockManager({
     [rows, showDuplicateClasses],
   );
 
+  // 이전 화면에서 기억한 400·500 설정은 S&P에선 전체(최대 300)로 보여준다.
+  const effectiveTopCount = view === "SP500" && topCount !== null && topCount > 300 ? null : topCount;
+
   // 시총 상위 N 만 표시 (전체면 절단 없음). rows 는 이미 시총 내림차순이다.
   const visibleRows = useMemo(
-    () => (topCount === null ? dedupedRows : dedupedRows.slice(0, topCount)),
-    [dedupedRows, topCount],
+    () => (effectiveTopCount === null ? dedupedRows : dedupedRows.slice(0, effectiveTopCount)),
+    [dedupedRows, effectiveTopCount],
   );
 
   const topChoices = useMemo(
-    () => topOptions(view, dedupedRows.length, topCount),
-    [view, dedupedRows.length, topCount],
+    () => topOptions(view, dedupedRows.length, effectiveTopCount),
+    [view, dedupedRows.length, effectiveTopCount],
   );
 
   useEffect(() => {
@@ -565,7 +569,7 @@ export function UsMarketStockManager({
                       </button>
                     ))}
                     <TopCountSelect
-                      value={topCount}
+                      value={effectiveTopCount}
                       options={topChoices}
                       totalCount={dedupedRows.length}
                       onChange={(next) => {

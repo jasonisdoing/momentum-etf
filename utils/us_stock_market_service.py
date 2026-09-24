@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 _SUPPORTED_MARKETS = {"NYS", "NSQ"}
 _NAVER_US_PAGE_SIZE_MAX = 200
+_SP500_MARKET_CAP_LIMIT = 300
 
 
 def _parse_float(value: Any) -> float | None:
@@ -162,8 +163,7 @@ def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -
 
 
 def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str, Any]:
-    """S&P500 또는 NASDAQ100 구성종목을 JSON에서 읽어 실시간 가격을 더해 반환한다.
-    시가총액은 JSON에 저장된 값(yfinance 기준)을 사용한다."""
+    """저장된 지수 구성종목에 실시간 시세를 붙인다. S&P500은 시총 상위 300개만 보여준다."""
     constituents = load_index_constituents(index)
     meta = load_index_meta(index)
 
@@ -216,8 +216,10 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
             }
         )
 
-    _apply_us_realtime_overlay(rows)
     rows.sort(key=lambda r: (-(r["market_cap"] or 0), r["ticker"]))
+    if index.upper() == "SP500":
+        rows = rows[:_SP500_MARKET_CAP_LIMIT]
+    _apply_us_realtime_overlay(rows)
 
     for idx, row in enumerate(rows, start=1):
         row["rank"] = idx
