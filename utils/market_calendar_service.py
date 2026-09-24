@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+from math import isfinite
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from config import MARKET_SCHEDULES
-from services.price_service import get_exchange_rate_series
+from services.price_service import get_exchange_rate_series, get_yahoo_symbol_snapshot
 from utils.market_breadth_service import load_adr_series, pool_market_key
 from utils.market_trend_service import _apply_intraday_boost, load_index_ohlc
-from utils.settings_loader import list_available_ticker_types
+from utils.momentum_service import adr_market_of_pool
+from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
+from utils.slot_positions import adr_entry_gate
 from utils.trading_calendar import get_trading_days, is_market_day_completed, is_market_day_started
 
 INDEX_COUNTRIES = {"^KS11": "kor", "^KQ11": "kor", "^GSPC": "us", "^NDX": "us"}
 CALENDAR_ADR_POOLS = ("kor_stock", "us_stock")
 CALENDAR_FX_SYMBOL = "KRW=X"
+FUTURES_BY_INDEX = {"^GSPC": "ES=F", "^NDX": "NQ=F"}
+MAX_FUTURE_QUOTE_AGE_SECONDS = 3600
 
 
 def _daily_changes(series: pd.Series, start: date, end: date) -> dict[str, dict[str, float | bool | None]]:
@@ -60,9 +66,7 @@ def _index_changes(start: date, end: date) -> tuple[dict[str, dict[str, Any]], l
 
 
 def _fx_changes(start: date, end: date) -> dict[str, dict[str, float | bool | None]]:
-    series = get_exchange_rate_series(
-        start - timedelta(days=14), end, symbol=CALENDAR_FX_SYMBOL, allow_partial=True
-    )
+    series = get_exchange_rate_series(start - timedelta(days=14), end, symbol=CALENDAR_FX_SYMBOL, allow_partial=True)
     if series is None or series.empty:
         return {}
     result = _daily_changes(series, start, end)
@@ -94,19 +98,67 @@ def _market_sessions(start: date, end: date) -> dict[str, dict[str, str]]:
     return result
 
 
-def _pool_adrs(start: date, end: date) -> dict[str, dict[str, Any]]:
+def _pool_adrs(start: date, end: date) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     available = set(list_available_ticker_types())
     missing = [pool for pool in CALENDAR_ADR_POOLS if pool not in available]
     if missing:
         raise ValueError(f"시장 캘린더 종목풀이 없습니다: {', '.join(missing)}")
-    return {
-        pool: {
+    values: dict[str, dict[str, Any]] = {}
+    meta: dict[str, dict[str, Any]] = {}
+    for pool in CALENDAR_ADR_POOLS:
+        settings = get_ticker_type_settings(pool) or {}
+        floor = settings.get("ADR_FLOOR")
+        entry_blocked, gate_adr_at = adr_entry_gate(pool, floor)
+        meta[pool] = {"floor": floor, "gate_market": adr_market_of_pool(pool)}
+        values[pool] = {
             point["date"]: point
             for point in load_adr_series(pool_market_key(pool))
             if start.isoformat() <= point["date"] <= end.isoformat()
         }
-        for pool in CALENDAR_ADR_POOLS
-    }
+        for day, point in values[pool].items():
+            stamp = pd.Timestamp(day)
+            point["entry_allowed"] = not entry_blocked(stamp)
+            point["gate_adr"] = gate_adr_at(stamp)
+    return values, meta
+
+
+def _today_us_futures(
+    start: date, end: date, sessions: dict[str, dict[str, str]], indices: dict[str, dict[str, Any]]
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """오늘 미국 정규장 개장 전 빈 지수 칸에만 신선한 선물 시세를 제공한다."""
+    now = datetime.now(timezone.utc)
+    today = now.astimezone(ZoneInfo("Asia/Seoul")).date()
+    day = today.isoformat()
+    if not (start <= today <= end) or sessions.get(day, {}).get("us") != "scheduled":
+        return {}, []
+
+    result: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
+    for index_ticker, future_symbol in FUTURES_BY_INDEX.items():
+        if indices.get(index_ticker, {}).get(day, {}).get("change_pct") is not None:
+            continue
+        try:
+            quote = get_yahoo_symbol_snapshot([future_symbol]).get(future_symbol) or {}
+            price = float(quote["nowVal"])
+            change = float(quote["changeRate"])
+            quoted_at = datetime.fromtimestamp(float(quote["quoteTime"]), tz=timezone.utc)
+            age = (now - quoted_at).total_seconds()
+            if not (isfinite(price) and isfinite(change) and price > 0):
+                raise ValueError("가격 또는 변동률이 유효하지 않습니다")
+            if (
+                not (0 <= age <= MAX_FUTURE_QUOTE_AGE_SECONDS)
+                or quoted_at.astimezone(ZoneInfo("Asia/Seoul")).date() != today
+            ):
+                raise ValueError("오늘의 최신 선물 시세가 아닙니다")
+            result[index_ticker] = {
+                "close": price,
+                "change_pct": change,
+                "provisional": True,
+                "quote_at": quoted_at.isoformat(),
+            }
+        except Exception as exc:
+            warnings.append(f"{future_symbol} 선물 시세를 표시하지 못했습니다: {exc}")
+    return {day: result} if result else {}, warnings
 
 
 def get_market_calendar(start: date, end: date) -> dict[str, Any]:
@@ -115,17 +167,20 @@ def get_market_calendar(start: date, end: date) -> dict[str, Any]:
         raise ValueError("시장 캘린더 조회 범위는 최대 43일입니다.")
     sessions = _market_sessions(start, end)
     indices, warnings = _index_changes(start, end)
+    futures, future_warnings = _today_us_futures(start, end, sessions, indices)
+    warnings.extend(future_warnings)
     fx_values = _fx_changes(start, end)
     if not fx_values:
         warnings.append("USD/KRW 환율 가격을 조회하지 못했습니다.")
-    adr_values = _pool_adrs(start, end)
+    adr_values, adr_meta = _pool_adrs(start, end)
     days = {
         day: {
             "sessions": status,
             "indices": {ticker: points.get(day) for ticker, points in indices.items()},
+            "futures": futures.get(day),
             "fx": fx_values.get(day),
             "adr": {pool: points.get(day) for pool, points in adr_values.items()},
         }
         for day, status in sessions.items()
     }
-    return {"days": days, "warnings": warnings}
+    return {"days": days, "adr_meta": adr_meta, "warnings": warnings}
