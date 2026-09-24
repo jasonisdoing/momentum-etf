@@ -9,7 +9,7 @@ from typing import Any
 import requests
 
 from config import NAVER_FINANCE_HEADERS, NAVER_US_STOCK_MARKET_VALUE_URL
-from utils.index_constituents_loader import load_index_constituents, load_index_meta
+from utils.index_constituents_loader import load_index_constituents, load_index_meta, us_market_constituents
 from utils.industry_map import us_display_industry, us_sector_label
 from utils.market_service import load_ticker_pool_map, load_ticker_pool_type_map
 from utils.portfolio_io import load_all_holding_tickers
@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 _SUPPORTED_MARKETS = {"NYS", "NSQ"}
 _NAVER_US_PAGE_SIZE_MAX = 200
-_SP500_MARKET_CAP_LIMIT = 300
 
 
 def _parse_float(value: Any) -> float | None:
@@ -164,7 +163,7 @@ def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -
 
 def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str, Any]:
     """저장된 지수 구성종목에 실시간 시세를 붙인다. S&P500은 시총 상위 300개만 보여준다."""
-    constituents = load_index_constituents(index)
+    constituents = us_market_constituents(index, load_index_constituents(index))
     meta = load_index_meta(index)
 
     ticker_pool_map = load_ticker_pool_map(country_code="us")
@@ -217,8 +216,6 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
         )
 
     rows.sort(key=lambda r: (-(r["market_cap"] or 0), r["ticker"]))
-    if index.upper() == "SP500":
-        rows = rows[:_SP500_MARKET_CAP_LIMIT]
     _apply_us_realtime_overlay(rows)
 
     for idx, row in enumerate(rows, start=1):
