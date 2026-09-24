@@ -43,7 +43,7 @@ def main() -> int:
         if info.get("error")
         else f"{pool}=스킵({info['reason']})"
         if info.get("pool_skipped")
-        else f"{pool}=대상{info['universe_size']}·신규{info['inserted']}일·갱신{info['updated']}일({info['latest_date']})"
+        else f"{pool}=대상{info['universe_size']}·기록{info['written']}일·삭제{info['removed']}일({info['latest_date']})"
         for pool, info in pool_summary["pools"].items()
     ]
     print(f"[market_breadth] 종목풀 ADR 집계 완료: {' '.join(pool_parts)}")

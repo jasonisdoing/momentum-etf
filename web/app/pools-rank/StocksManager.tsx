@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
 import { formatPoolLabel } from "@/lib/pool-label";
-import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
+import { poolHasIndustry, poolHasMarketCap, poolHasUsStockSector } from "@/lib/pool-industry";
 import {
   industryColumn,
   sectorColumn,
@@ -783,8 +783,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   // (개별주=표시, ETF=숨김), 미설정 풀은 행 값 유무로 추정 (strategy-momentum 과 같은 기준).
   // 업종 컬럼 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
   const hasIndustryData = poolHasIndustry(selectedTickerTypeItem);
-  const hasUsStockSector = selectedTickerTypeItem?.country_code?.toLowerCase() === "us"
-    && selectedTickerTypeItem?.pool_kind?.toLowerCase() === "stock";
+  const hasUsStockSector = poolHasUsStockSector(selectedTickerTypeItem);
   const hasMarketCap = poolHasMarketCap(selectedTickerTypeItem);
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
