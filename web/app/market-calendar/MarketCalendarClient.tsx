@@ -13,10 +13,12 @@ type CalendarDay = {
 };
 
 type PricePoint = { close: number; change_pct: number | null; provisional: boolean; quote_at?: string };
+type IndexIssue = { label: string; reason: string };
 type AdrPoint = { date: string; adr: number | null; advance: number; decline: number; entry_allowed: boolean; gate_adr: number | null };
 type DayData = {
   sessions: Record<"kor" | "us", "closed" | "closed_future" | "finished" | "open" | "scheduled">;
   indices: Record<string, PricePoint | null>;
+  index_issues: Record<string, IndexIssue>;
   futures: Record<string, PricePoint> | null;
   fx: PricePoint | null;
   adr: Record<"kor_stock" | "us_stock", AdrPoint | null>;
@@ -195,6 +197,7 @@ export function MarketCalendarClient({ today }: { today: string }) {
                       const session = data?.sessions[row.country];
                       const holiday = session === "closed" || session === "closed_future";
                       const point = "ticker" in row ? data?.indices[row.ticker] : null;
+                      const issue = "ticker" in row ? data?.index_issues[row.ticker] : undefined;
                       const future = "ticker" in row && row.country === "us" && point?.change_pct == null
                         ? data?.futures?.[row.ticker] : null;
                       const displayPoint = future ?? point;
@@ -207,7 +210,7 @@ export function MarketCalendarClient({ today }: { today: string }) {
                                 className={adrPoint?.adr == null ? "" : adrPoint.entry_allowed ? styles.positive : styles.negative}
                                 title={adrDecisionTitle(adrPoint, calendar?.adr_meta[row.pool])}
                               >ADR {adrPoint?.adr == null ? "—" : adrPoint.adr.toFixed(1)}</span>
-                            : <span className={changeClass(displayPoint?.change_pct)} title={future ? "Yahoo 선물 지연 시세" : undefined}>{formatChange(displayPoint?.change_pct)}{displayPoint?.provisional ? "*" : ""}</span>}
+                            : <span className={issue && !future ? styles.dataIssue : changeClass(displayPoint?.change_pct)} title={issue?.reason ?? (future ? "Yahoo 선물 지연 시세" : undefined)}>{issue && !future ? issue.label : formatChange(displayPoint?.change_pct)}{displayPoint?.provisional && !issue ? "*" : ""}</span>}
                         </span>
                       );
                     })}
@@ -222,14 +225,21 @@ export function MarketCalendarClient({ today }: { today: string }) {
         <section className={styles.detail} aria-label="선택한 날짜의 상세 정보">
           <div><strong>{dayLabel(selectedDay)}</strong><span>선택한 날짜의 상세 정보</span></div>
           {calendar?.days[selectedDay] ? (
-            <p>
-              한국 {SESSION_LABELS[calendar.days[selectedDay].sessions.kor]} · 미국 {SESSION_LABELS[calendar.days[selectedDay].sessions.us]}
-              {(["kor_stock", "us_stock"] as const).map((pool) => {
-                const point = calendar.days[selectedDay].adr[pool];
-                return point ? ` · ${pool === "kor_stock" ? "한국" : "미국"} 개별주 ADR ${point.adr?.toFixed(1) ?? "—"} (상승 ${point.advance} · 하락 ${point.decline})` : "";
+            <>
+              <p>
+                한국 {SESSION_LABELS[calendar.days[selectedDay].sessions.kor]} · 미국 {SESSION_LABELS[calendar.days[selectedDay].sessions.us]}
+                {(["kor_stock", "us_stock"] as const).map((pool) => {
+                  const point = calendar.days[selectedDay].adr[pool];
+                  return point ? ` · ${pool === "kor_stock" ? "한국" : "미국"} 개별주 ADR ${point.adr?.toFixed(1) ?? "—"} (상승 ${point.advance} · 하락 ${point.decline})` : "";
+                })}
+                {calendar.days[selectedDay].fx ? ` · USD/KRW ${calendar.days[selectedDay].fx.close.toFixed(2)}원` : ""}
+              </p>
+              {MARKET_ROWS.flatMap((row) => {
+                if (!("ticker" in row)) return [];
+                const issue = calendar.days[selectedDay].index_issues[row.ticker];
+                return issue ? [<p key={row.label} className={styles.dataIssue} role="status">{row.label}: {issue.reason}</p>] : [];
               })}
-              {calendar.days[selectedDay].fx ? ` · USD/KRW ${calendar.days[selectedDay].fx.close.toFixed(2)}원` : ""}
-            </p>
+            </>
           ) : <p>이 날짜의 데이터가 없습니다.</p>}
         </section>
       </div>
