@@ -429,17 +429,15 @@ function getInitialVisibleLogicalRange(
 
 // --- 컴포넌트 ---
 
-export function TickerDetailManager({
-}: {
-  }) {
+export function TickerDetailManager({ tickerOverride }: { tickerOverride?: string }) {
   const searchParams = useSearchParams();
   const toast = useToast();
 
   // URL query params
-  const qTicker = searchParams.get("ticker") ?? "";
-  const qTickerType = searchParams.get("ticker_type") ?? "";
-  const qCountryCode = searchParams.get("country_code") ?? "";
-  const qName = searchParams.get("name") ?? "";
+  const qTicker = tickerOverride ?? searchParams.get("ticker") ?? "";
+  const qTickerType = tickerOverride ? "" : searchParams.get("ticker_type") ?? "";
+  const qCountryCode = tickerOverride ? "" : searchParams.get("country_code") ?? "";
+  const qName = tickerOverride ? "" : searchParams.get("name") ?? "";
 
   // 전체 종목 목록
   const [allTickers, setAllTickers] = useState<TickerItem[]>([]);

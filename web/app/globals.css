@@ -3908,6 +3908,15 @@ a {
   min-height: 0;
 }
 
+.tickerDetailModalContent {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
 .assetsAgGrid .ag-row.assetsGroupRow {
   background: rgba(148, 163, 184, 0.22);
   font-weight: 800;
