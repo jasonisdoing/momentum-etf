@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 import { TickerDetailLink } from "@/app/components/TickerDetailLink";
 import { BUCKET_THEME } from "@/lib/bucket-theme";
 import { formatSlashDateWithWeekday } from "@/lib/datetime";
-import { renderStockNameCell, type StockNameOptions } from "@/lib/name-highlight";
+import { isLeverageName, renderStockNameCell, type StockNameOptions } from "@/lib/name-highlight";
 
 /** 자산 도우미·포트폴리오가 공유하는 읽기 전용 버킷 컬럼. */
 export function bucketColumn<T extends { bucket?: number | null }>(): ColDef<T> {
@@ -91,6 +91,8 @@ export function stockRowClass(options: {
  *  `cellRenderer` 는 화면 고유 칸(추가 행 입력칸·현금 행 등)용이다. */
 export function tickerColumn<T>(options?: {
   field?: string;
+  /** 종목명 데이터 키. 기본은 name이며 순위 화면은 종목명을 쓴다. */
+  nameField?: string;
   width?: number;
   minWidth?: number;
   sortable?: boolean;
@@ -109,7 +111,11 @@ export function tickerColumn<T>(options?: {
     // 티커·종목명(과 그 앞 컬럼들)은 왼쪽 고정 — 가로 스크롤에도 어떤 종목의 행인지 보인다.
     pinned: "left",
     sortable: options?.sortable,
-    cellClass: options?.cellClass,
+    cellClass: ({ data }) => {
+      const name = (data as Record<string, unknown> | undefined)?.[options?.nameField ?? "name"];
+      return [options?.cellClass, isLeverageName(typeof name === "string" ? name : null) ? "appLeverageTickerCell" : null]
+        .filter(Boolean).join(" ");
+    },
     cellStyle: options?.mono
       ? { fontFamily: "var(--font-mono, monospace)", fontSize: "var(--fs-sm)" }
       : options?.cellStyle,

@@ -1,20 +1,13 @@
 /** 종목명 하이라이트 표준.
  *
- * 레버리지 등 위험·특성 키워드를 색+굵게 강조하고 뒤에 이모지를 붙인다.
+ * 레버리지 등 위험·특성 키워드가 있으면 종목명 전체를 강조하고 뒤에 이모지를 붙인다.
  * 여러 화면(종목풀 순위·자산 헬퍼 등)이 같은 규칙을 쓰도록 여기서만 정의한다.
  * 신규상장(백테스트 기간 미달) 종목은 호출부가 isNew 를 넘기면 맨 뒤에 🆕 를 붙인다.
  */
 
 import type { ReactNode } from "react";
 
-const NAME_HIGHLIGHT_KEYWORDS: Record<string, { color: string; emoji: string }> = {
-  레버리지: { color: "#d63939", emoji: "💣" },
-  Geared: { color: "#d63939", emoji: "💣" },
-  "3X": { color: "#d63939", emoji: "💣" },
-  Ultra: { color: "#d63939", emoji: "💣" },
-};
-
-const NAME_HIGHLIGHT_RE = new RegExp(`(${Object.keys(NAME_HIGHLIGHT_KEYWORDS).join("|")})`, "i");
+const LEVERAGE_NAME_RE = /레버리지|Geared|3X|Ultra/i;
 
 const NEW_LISTING_BADGE = "🆕";
 
@@ -51,14 +44,8 @@ export function entryGapOk(
   return longDisparity > floor && shortDisparity >= floor;
 }
 
-function getNameHighlight(part: string): { color: string; emoji: string } | undefined {
-  const lower = part.toLowerCase();
-  for (const [keyword, style] of Object.entries(NAME_HIGHLIGHT_KEYWORDS)) {
-    if (keyword.toLowerCase() === lower) {
-      return style;
-    }
-  }
-  return undefined;
+export function isLeverageName(name: string | null | undefined): boolean {
+  return LEVERAGE_NAME_RE.test(name ?? "");
 }
 
 export type StockNameOptions = {
@@ -104,37 +91,11 @@ export function renderNameWithLeverageHighlight(
     </span>
   ) : null;
 
-  const parts = name.split(NAME_HIGHLIGHT_RE);
-  if (parts.length === 1) {
-    const highlightedName = renderTextWithSearchHighlight(name, options?.searchQuery);
-    return newBadge ? (
-      <>
-        {highlightedName}
-        {newBadge}
-      </>
-    ) : (
-      highlightedName
-    );
-  }
-  const emojis: string[] = [];
-  const rendered = parts.map((part, index) => {
-    const style = index % 2 === 1 ? getNameHighlight(part) : undefined;
-    if (!style) {
-      return <span key={index}>{renderTextWithSearchHighlight(part, options?.searchQuery)}</span>;
-    }
-    if (!emojis.includes(style.emoji)) {
-      emojis.push(style.emoji);
-    }
-    return (
-      <span key={index} style={{ color: style.color, fontWeight: 700 }}>
-        {renderTextWithSearchHighlight(part, options?.searchQuery)}
-      </span>
-    );
-  });
+  const highlightedName = renderTextWithSearchHighlight(name, options?.searchQuery);
+  if (!isLeverageName(name)) return <>{highlightedName}{newBadge}</>;
   return (
     <>
-      {rendered}
-      {emojis.length > 0 && <span> {emojis.join("")}</span>}
+      <span className="appLeverageName">{highlightedName}</span> 💣
       {newBadge}
     </>
   );

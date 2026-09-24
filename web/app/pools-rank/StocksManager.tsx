@@ -1046,6 +1046,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       // 이 화면은 데이터 키가 한국어고 추가 행(티커 입력·확인) UI 가 붙어 렌더러만 고유다.
       tickerColumn<RankGridRow>({
         field: "티커",
+        nameField: "종목명",
         minWidth: 95,
         width: 95,
         cellRenderer: (params: { value?: string | null; data?: RankGridRow }) => {
