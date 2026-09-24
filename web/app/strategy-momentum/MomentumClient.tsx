@@ -832,8 +832,8 @@ export function MomentumClient() {
         editable: (row) => row?.plan !== "empty",
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
       }),
-      industryColumn<PlanRow>({ hide: !hasIndustryData }),
       ...(hasUsStockSector ? [sectorColumn<PlanRow>()] : []),
+      industryColumn<PlanRow>({ hide: !hasIndustryData }),
       {
         field: "change_pct",
         headerName: "일간(%)",
@@ -906,8 +906,8 @@ export function MomentumClient() {
         field: "memo",
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
       }),
-      industryColumn<CandidateRow>({ hide: !hasIndustryData }),
       ...(hasUsStockSector ? [sectorColumn<CandidateRow>()] : []),
+      industryColumn<CandidateRow>({ hide: !hasIndustryData }),
       {
         field: "change_pct",
         headerName: "일간(%)",
@@ -1027,8 +1027,8 @@ export function MomentumClient() {
       // 티커·종목명 — 공용 컬럼. 과거 체결이라 배지(이격 데이터) 없이 기본 표기.
       tickerColumn<BacktestTradeRow>({ width: 96, cellRenderer: (p) => renderTicker(p.value) }),
       stockNameColumn<BacktestTradeRow>({}),
-      industryColumn<BacktestTradeRow>({ hide: !hasIndustryData }),
       ...(hasUsStockSector ? [sectorColumn<BacktestTradeRow>()] : []),
+      industryColumn<BacktestTradeRow>({ hide: !hasIndustryData }),
       { headerName: "편입일", field: "entry_date", width: 116 },
       { headerName: "매수가", field: "entry_price", width: 110, type: "numericColumn", valueFormatter: (p) => price(p.value) },
       { headerName: "청산일", field: "exit_date", width: 116 },
