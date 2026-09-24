@@ -63,6 +63,7 @@ def dated_target_shares(
     for day in sorted(dates):
         effective = {}
         weights: dict[str, float] = {}
+        amounts: dict[str, float] = {}
         previous_amounts: dict[str, float] = {}
         for key, targets in targets_by_key.items():
             rows = []
@@ -90,6 +91,11 @@ def dated_target_shares(
                     if weight is None:
                         raise ValueError(f"목표 비중이 없습니다: {key} 슬리브 {row.get('ticker')}")
                     ticker = row["ticker"]
+                    # 이전 목표와 같은 식으로 금액을 합산한다. 비중으로 바꿨다 역산하면
+                    # 미세한 오차가 목표 감소로 판정돼 회수 문턱을 우회할 수 있다.
+                    amounts[ticker] = amounts.get(ticker, 0.0) + (
+                        sleeve_amount_krw[key] * float(weight) / 100.0 / krw_rate
+                    )
                     weights[ticker] = weights.get(ticker, 0.0) + (
                         sleeve_amount_krw[key] * float(weight) / total_assets_krw if total_assets_krw > 0 else 0.0
                     )
@@ -98,6 +104,6 @@ def dated_target_shares(
             "previous_amounts": previous_amounts,
             "quantities": sleeve_target_shares(effective, sleeve_amount_krw, krw_rate),
             "weights": weights,
-            "amounts": {ticker: total_assets_krw * weight / 100.0 / krw_rate for ticker, weight in weights.items()},
+            "amounts": amounts,
         }
     return schedule
