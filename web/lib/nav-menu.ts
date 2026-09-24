@@ -8,6 +8,7 @@ import type { ComponentType } from "react";
 import {
   IconActivity,
   IconCash,
+  IconCalendarStats,
   IconChartHistogram,
   IconChartInfographic,
   IconChartPie,
@@ -75,6 +76,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     icon: IconTrendingUp,
     items: [
       { href: "/market-trend", label: "시장지수 추세", icon: IconChartLine },
+      { href: "/market-calendar", label: "시장 캘린더", icon: IconCalendarStats },
       { href: "/compare", label: "ETF 비교", icon: IconListDetails },
       { href: "/kor-market-stock", label: "한국 개별주", icon: "🇰🇷" },
       { href: "/us-market-stock", label: "미국 개별주", icon: "🇺🇸" },
