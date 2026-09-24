@@ -20,12 +20,10 @@ router = APIRouter(prefix="/internal/market-trend", tags=["market-trend"])
 def get_market_trend_calendar(
     start: date = Query(...),
     end: date = Query(...),
-    pool: str | None = Query(None),
-    fx: str = Query("USD/KRW"),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
     """시장 현지 거래일 기준 달력 데이터."""
-    return get_market_calendar(start, end, pool, fx)
+    return get_market_calendar(start, end)
 
 
 @router.get("/indices")
