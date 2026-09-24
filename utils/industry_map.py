@@ -135,9 +135,16 @@ def industry_map_for_country(country_code: str) -> dict[str, str]:
 
 def us_industry_map() -> dict[str, str]:
     """미국 티커 → 설정에 따른 섹터·업종 표시명. 풀과 무관하게 같다."""
+    industry_by, _ = us_classification_maps()
+    return industry_by
+
+
+def us_classification_maps() -> tuple[dict[str, str], dict[str, str]]:
+    """미국 지수 구성종목에서 업종·섹터 표시명을 한 번에 읽는다."""
     from utils.index_constituents_loader import load_index_constituents
 
-    result: dict[str, str] = {}
+    industry_by: dict[str, str] = {}
+    sector_by: dict[str, str] = {}
     for index_name in _US_INDEX_SOURCES:
         try:
             constituents = load_index_constituents(index_name)
@@ -149,6 +156,10 @@ def us_industry_map() -> dict[str, str]:
             ticker = str(item.get("ticker") or "").strip().upper()
             sector = str(item.get("sector") or "").strip()
             industry = str(item.get("industry") or "").strip()
-            if ticker and industry and ticker not in result:
-                result[ticker] = us_display_industry(sector, industry)
-    return result
+            if not ticker:
+                continue
+            if sector:
+                sector_by.setdefault(ticker, us_sector_label(sector))
+            if industry:
+                industry_by.setdefault(ticker, us_display_industry(sector, industry))
+    return industry_by, sector_by

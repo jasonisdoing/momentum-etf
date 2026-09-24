@@ -10,6 +10,7 @@ import { formatPoolLabel } from "@/lib/pool-label";
 import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
 import {
   industryColumn,
+  sectorColumn,
   marketBadgeCellStyle,
   renderHighDrawdownCell,
   tradeValueMultColumn,
@@ -80,6 +81,7 @@ type RankRow = {
   시총순위?: number | null;
   마켓?: string;
   종목명: string;
+  섹터?: string;
   /** 종목 메모 — 자산 관리 화면과 같은 값(종목에 붙는다). */
   메모?: string;
   상장일: string;
@@ -781,6 +783,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   // (개별주=표시, ETF=숨김), 미설정 풀은 행 값 유무로 추정 (strategy-momentum 과 같은 기준).
   // 업종 컬럼 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
   const hasIndustryData = poolHasIndustry(selectedTickerTypeItem);
+  const hasUsStockSector = selectedTickerTypeItem?.country_code?.toLowerCase() === "us"
+    && selectedTickerTypeItem?.pool_kind?.toLowerCase() === "stock";
   const hasMarketCap = poolHasMarketCap(selectedTickerTypeItem);
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
@@ -1135,6 +1139,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         onSave: (row, memo) => void handleMemoChange(String(row.티커 ?? ""), memo),
         editable: (row) => !row?.__isAddingRow,
       }),
+      ...(hasUsStockSector ? [sectorColumn<RankGridRow>({ field: "섹터" })] : []),
       industryColumn<RankGridRow>({ field: "업종", hide: !hasIndustryData }),
       {
         field: "일간(%)",
@@ -1394,6 +1399,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     dirtyCellKeys,
     entryVolMult,
     hasIndustryData,
+    hasUsStockSector,
     maRule,
     metricMode,
     monthlyReturnLabels,
