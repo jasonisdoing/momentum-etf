@@ -11,12 +11,12 @@ from config import MARKET_SCHEDULES
 from services.price_service import get_exchange_rate_series
 from utils.market_breadth_service import load_adr_series, pool_market_key
 from utils.market_trend_service import _apply_intraday_boost, load_index_ohlc
-from utils.momentum_service import adr_market_of_pool
-from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
+from utils.settings_loader import list_available_ticker_types
 from utils.trading_calendar import get_trading_days, is_market_day_completed, is_market_day_started
 
 INDEX_COUNTRIES = {"^KS11": "kor", "^KQ11": "kor", "^GSPC": "us", "^NDX": "us"}
-FX_SYMBOLS = {"USD/KRW": "KRW=X", "AUD/KRW": "AUDKRW=X"}
+CALENDAR_ADR_POOLS = ("kor_stock", "us_stock")
+CALENDAR_FX_SYMBOL = "KRW=X"
 
 
 def _daily_changes(series: pd.Series, start: date, end: date) -> dict[str, dict[str, float | bool | None]]:
@@ -59,9 +59,9 @@ def _index_changes(start: date, end: date) -> tuple[dict[str, dict[str, Any]], l
     return result, warnings
 
 
-def _fx_changes(start: date, end: date, fx: str) -> dict[str, dict[str, float | bool | None]]:
+def _fx_changes(start: date, end: date) -> dict[str, dict[str, float | bool | None]]:
     series = get_exchange_rate_series(
-        start - timedelta(days=14), end, symbol=FX_SYMBOLS[fx], allow_partial=True
+        start - timedelta(days=14), end, symbol=CALENDAR_FX_SYMBOL, allow_partial=True
     )
     if series is None or series.empty:
         return {}
@@ -94,43 +94,38 @@ def _market_sessions(start: date, end: date) -> dict[str, dict[str, str]]:
     return result
 
 
-def _pool_adr(pool: str | None, start: date, end: date) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    if not pool:
-        return {}, None
-    if pool not in list_available_ticker_types():
-        raise ValueError(f"존재하지 않는 종목풀입니다: {pool}")
-    gate_market = adr_market_of_pool(pool)
-    market = gate_market or pool_market_key(pool)
-    settings = get_ticker_type_settings(pool) or {}
-    floor = settings.get("ADR_FLOOR") if gate_market else None
-    values = {
-        point["date"]: point
-        for point in load_adr_series(market)
-        if start.isoformat() <= point["date"] <= end.isoformat()
+def _pool_adrs(start: date, end: date) -> dict[str, dict[str, Any]]:
+    available = set(list_available_ticker_types())
+    missing = [pool for pool in CALENDAR_ADR_POOLS if pool not in available]
+    if missing:
+        raise ValueError(f"시장 캘린더 종목풀이 없습니다: {', '.join(missing)}")
+    return {
+        pool: {
+            point["date"]: point
+            for point in load_adr_series(pool_market_key(pool))
+            if start.isoformat() <= point["date"] <= end.isoformat()
+        }
+        for pool in CALENDAR_ADR_POOLS
     }
-    return values, {"market": market, "floor": float(floor) if isinstance(floor, (int, float)) else None}
 
 
-def get_market_calendar(start: date, end: date, pool: str | None, fx: str) -> dict[str, Any]:
+def get_market_calendar(start: date, end: date) -> dict[str, Any]:
     """달력에 필요한 날짜 범위를 한 번에 조회한다."""
     if end < start or (end - start).days > 42:
         raise ValueError("시장 캘린더 조회 범위는 최대 43일입니다.")
-    if fx not in FX_SYMBOLS:
-        raise ValueError(f"지원하지 않는 환율입니다: {fx}")
-
     sessions = _market_sessions(start, end)
     indices, warnings = _index_changes(start, end)
-    fx_values = _fx_changes(start, end, fx)
+    fx_values = _fx_changes(start, end)
     if not fx_values:
-        warnings.append(f"{fx} 환율 가격을 조회하지 못했습니다.")
-    adr_values, adr_meta = _pool_adr(pool, start, end)
+        warnings.append("USD/KRW 환율 가격을 조회하지 못했습니다.")
+    adr_values = _pool_adrs(start, end)
     days = {
         day: {
             "sessions": status,
             "indices": {ticker: points.get(day) for ticker, points in indices.items()},
             "fx": fx_values.get(day),
-            "adr": adr_values.get(day),
+            "adr": {pool: points.get(day) for pool, points in adr_values.items()},
         }
         for day, status in sessions.items()
     }
-    return {"days": days, "adr_meta": adr_meta, "warnings": warnings}
+    return {"days": days, "warnings": warnings}
