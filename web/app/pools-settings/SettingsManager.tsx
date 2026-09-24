@@ -24,7 +24,7 @@ const NUMERIC_KEYS = [
 ] as const;
 
 /** '없음'(null)을 허용하는 모멘텀 전략 키 — 전략 화면과 같은 저장소(풀 문서). */
-const OPTIONAL_NUMERIC_KEYS = ["ENTRY_VOL_MULT", "ADR_FLOOR"] as const;
+const OPTIONAL_NUMERIC_KEYS = ["ENTRY_VOL_MULT", "RANK_BUFFER_MULT", "ADR_FLOOR"] as const;
 
 /** 화면 표시 순서 = 헤더 순서. 셀도 반드시 이 순서로 그려야 한다. */
 const EDITABLE_KEYS = [
@@ -48,6 +48,7 @@ const KEY_LABELS: Record<EditableKey, string> = {
   SELL_SLIPPAGE_PCT: "매도 슬리피지(%)",
   STOPLOSS_THRESHOLD_PCT: "손절 기준(%)",
   ENTRY_VOL_MULT: "진입 문턱",
+  RANK_BUFFER_MULT: "순위 버퍼",
   ADR_FLOOR: "ADR 하한",
   BENCHMARK: "벤치마크",
   MARKET_REGIME_INDEX: "ADR 기준",
@@ -123,6 +124,7 @@ type PoolSettingsResponse = {
     slippage_pct_options?: number[];
     stoploss_pct_options?: number[];
     entry_vol_mult_options?: (number | null)[];
+    rank_buffer_mult_options?: (number | null)[];
     adr_floor_options?: (number | null)[];
     market_indices?: MarketIndexOption[];
     editable_keys: string[];
@@ -173,6 +175,7 @@ const EMPTY_DRAFT: PoolDraft = {
   STOPLOSS_THRESHOLD_PCT: "-10",
   // 모멘텀 전략 설정 — 기본은 '없음'(빈 값). 값은 전략 화면·튜닝에서도 저장된다.
   ENTRY_VOL_MULT: "",
+  RANK_BUFFER_MULT: "",
   ADR_FLOOR: "",
   benchmarkTicker: "",
   benchmarkName: "",
@@ -252,6 +255,7 @@ function toDraft(pool: PoolEntry): PoolDraft {
     SELL_SLIPPAGE_PCT: String(pool.settings.SELL_SLIPPAGE_PCT?.value ?? ""),
     STOPLOSS_THRESHOLD_PCT: String(pool.settings.STOPLOSS_THRESHOLD_PCT?.value ?? ""),
     ENTRY_VOL_MULT: pool.settings.ENTRY_VOL_MULT?.value == null ? "" : String(pool.settings.ENTRY_VOL_MULT.value),
+    RANK_BUFFER_MULT: pool.settings.RANK_BUFFER_MULT?.value == null ? "" : String(pool.settings.RANK_BUFFER_MULT.value),
     ADR_FLOOR: pool.settings.ADR_FLOOR?.value == null ? "" : String(pool.settings.ADR_FLOOR.value),
     benchmarkTicker: toBenchmark(pool.settings.BENCHMARK).ticker ?? "",
     benchmarkName: toBenchmark(pool.settings.BENCHMARK).name ?? "",
@@ -283,6 +287,7 @@ function draftToValues(draft: PoolDraft) {
     STOPLOSS_THRESHOLD_PCT: Number(draft.STOPLOSS_THRESHOLD_PCT),
     // '없음'(빈 값)은 null 로 보낸다 — 미설정이 아니라 명시적 '문턱/게이트 없음'이다.
     ENTRY_VOL_MULT: draft.ENTRY_VOL_MULT === "" ? null : Number(draft.ENTRY_VOL_MULT),
+    RANK_BUFFER_MULT: draft.RANK_BUFFER_MULT === "" ? null : Number(draft.RANK_BUFFER_MULT),
     ADR_FLOOR: draft.ADR_FLOOR === "" ? null : Number(draft.ADR_FLOOR),
     // 티커/이름이 모두 비면 미설정(null). 하나만 있으면 백엔드가 거부한다.
     BENCHMARK: benchmarkTicker
@@ -722,6 +727,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
   const marketIndices = data.constraints.market_indices ?? [];
   // '없음'을 첫 선택지로 — 모멘텀 화면 셀렉트와 같은 목록(백엔드 상수가 단일 소스).
   const entryVolMultOptions = ["", ...(data.constraints.entry_vol_mult_options ?? []).filter((v): v is number => v != null).map(String)];
+  const rankBufferMultOptions = ["", ...(data.constraints.rank_buffer_mult_options ?? []).filter((v): v is number => v != null).map(String)];
   const adrFloorOptions = ["", ...(data.constraints.adr_floor_options ?? []).filter((v): v is number => v != null).map(String)];
   /** 셀렉트 편집 컬럼 — 목록 밖 저장값도 후보에 남겨 빈 셀렉트가 되지 않게 한다. */
   const selectCol = (
@@ -899,6 +905,12 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       valueFormatter: (params) => (params.value === "" || params.value == null ? "없음" : `${params.value}×`),
       headerTooltip:
         "모멘텀 진입 문턱 — 이격이 '배수 × 20일 변동성' 이상인 종목만 진입 자격(청산은 불변). " +
+        "모멘텀 전략 화면·튜닝 적용과 같은 저장값이다.",
+    }),
+    selectCol("RANK_BUFFER_MULT", "순위 버퍼", 92, () => rankBufferMultOptions, {
+      valueFormatter: (params) => (params.value === "" || params.value == null ? "없음" : `${params.value}×`),
+      headerTooltip:
+        "모멘텀 순위 버퍼 — 보유 종목 순위가 '배수 × 보유종목 수' 밖이면 청산한다. " +
         "모멘텀 전략 화면·튜닝 적용과 같은 저장값이다.",
     }),
     selectCol("ADR_FLOOR", "ADR 하한", 88, () => adrFloorOptions, {
@@ -1099,6 +1111,15 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
           "진입 문턱",
           <select className="form-select form-select-sm" style={{ width: 84 }} value={draft.ENTRY_VOL_MULT} onChange={(e) => onChange("ENTRY_VOL_MULT", e.target.value)}>
             {entryVolMultOptions.map((value) => (
+              <option key={value || "none"} value={value}>{value === "" ? "없음" : `${value}×`}</option>
+            ))}
+          </select>,
+          { minWidth: 170, labelWidth: 68 },
+        )}
+        {renderField(
+          "순위 버퍼",
+          <select className="form-select form-select-sm" style={{ width: 84 }} value={draft.RANK_BUFFER_MULT} onChange={(e) => onChange("RANK_BUFFER_MULT", e.target.value)}>
+            {rankBufferMultOptions.map((value) => (
               <option key={value || "none"} value={value}>{value === "" ? "없음" : `${value}×`}</option>
             ))}
           </select>,

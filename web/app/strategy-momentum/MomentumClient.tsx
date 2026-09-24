@@ -111,9 +111,16 @@ type PoolSettings = {
   adr_floor?: number | null;
   /** 진입 문턱 — 이격 ≥ 배수 × 20일 변동성일 때만 진입 자격(청산은 불변). null = 없음. */
   entry_vol_mult?: number | null;
+  /** 순위 버퍼 — 보유 종목 순위가 배수 × 보유 종목 수 밖이면 청산. null = 없음. */
+  rank_buffer_mult?: number | null;
 };
 
 type Settings = PoolSettings & { pool: string };
+
+/** 순위 버퍼 표기 — "2× (20위)". 컷 순위는 서버가 엔진과 같은 함수로 계산해 준다. */
+function formatRankBuffer(option: { value: number | null; limit: number | null }): string {
+  return option.value == null ? "없음" : `${option.value}× (${option.limit}위)`;
+}
 
 /** 보유 표 한 행 — 보유·매도 예정·진입 예정·이탈·빈 슬롯을 한 표에 담는다(신고가와 같다). */
 type PlanRow = {
@@ -320,6 +327,8 @@ type View = {
   constraints?: {
     adr_floor_options?: (number | null)[];
     entry_vol_mult_options?: (number | null)[];
+    /** 순위 버퍼 선택지 + 그 풀의 컷 순위(엔진과 같은 함수로 서버가 계산). */
+    rank_buffer_options?: { value: number | null; limit: number | null }[];
   };
   positions: Positions | null;
 };
@@ -382,6 +391,7 @@ export function MomentumClient() {
   const [draftStartDate, setDraftStartDate] = useState("");
   const [draftAdrFloor, setDraftAdrFloor] = useState<string>("");
   const [draftEntryVolMult, setDraftEntryVolMult] = useState<string>("");
+  const [draftRankBufferMult, setDraftRankBufferMult] = useState<string>("");
 
   // 풀별 설정을 폼 초안에 채운다 — 풀 셀렉트 전환과 응답 반영이 같은 경로를 쓴다.
   const fillDrafts = useCallback((values: PoolSettings) => {
@@ -390,6 +400,7 @@ export function MomentumClient() {
     setDraftMaRule({ short: values.short_ma_days, long: values.long_ma_days });
     setDraftAdrFloor(values.adr_floor == null ? "" : String(values.adr_floor));
     setDraftEntryVolMult(values.entry_vol_mult == null ? "" : String(values.entry_vol_mult));
+    setDraftRankBufferMult(values.rank_buffer_mult == null ? "" : String(values.rank_buffer_mult));
   }, []);
 
   /** 지금 화면이 보고 있는 풀 — 풀 전환 중 도착한 **이전 풀의 늦은 응답**을 버리는 기준. */
@@ -537,10 +548,11 @@ export function MomentumClient() {
         long_ma_days: draftMaRule.long,
         adr_floor: draftAdrFloor === "" ? null : Number(draftAdrFloor),
         entry_vol_mult: draftEntryVolMult === "" ? null : Number(draftEntryVolMult),
+        rank_buffer_mult: draftRankBufferMult === "" ? null : Number(draftRankBufferMult),
       },
       "설정을 저장했습니다.",
     );
-  }, [draftStartDate, draftAdrFloor, draftEntryVolMult, draftMaRule, draftPool, persistSettings, toast, view?.settings.top_n]);
+  }, [draftStartDate, draftAdrFloor, draftEntryVolMult, draftRankBufferMult, draftMaRule, draftPool, persistSettings, toast, view?.settings.top_n]);
 
   // 풀 셀렉트 변경 — 그 풀의 저장 설정이 있으면 **즉시 전환·저장·재선정**한다
   // (전환은 초안이 아니라 컨텍스트 스위치다). 저장분이 없는 풀(첫 설정)만 초안으로
@@ -779,12 +791,13 @@ export function MomentumClient() {
       draftStartDate !== (saved.start_date ?? "") ||
       (draftAdrFloor === "" ? null : Number(draftAdrFloor)) !== (saved.adr_floor ?? null) ||
       (draftEntryVolMult === "" ? null : Number(draftEntryVolMult)) !== (saved.entry_vol_mult ?? null) ||
+      (draftRankBufferMult === "" ? null : Number(draftRankBufferMult)) !== (saved.rank_buffer_mult ?? null) ||
       (draftMaRule != null &&
         view.ma_rule != null &&
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
           draftMaRule.long !== view.ma_rule.long_ma_days))
     );
-  }, [draftStartDate, draftAdrFloor, draftEntryVolMult, draftMaRule, draftPool, view]);
+  }, [draftStartDate, draftAdrFloor, draftEntryVolMult, draftRankBufferMult, draftMaRule, draftPool, view]);
 
   const fillDay = positions?.next_session ?? "다음 거래일";
   const country = positions?.country ?? "";
@@ -1122,6 +1135,22 @@ export function MomentumClient() {
                       </select>
                     </label>
                     <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">순위 버퍼</span>
+                      <select
+                        className="form-select form-select-sm"
+                        style={{ width: 120 }}
+                        value={draftRankBufferMult}
+                        onChange={(e) => setDraftRankBufferMult(e.target.value)}
+                        title="보유 종목의 순위(장기 이격률, 그날 진입 자격 종목 + 보유 종목 기준)가 '배수 × 보유 종목 수' 밖으로 밀리면 청산한다. 빈 자리는 기존 규칙대로 상위 후보가 채운다. 없음 = 자격을 잃을 때만 청산."
+                      >
+                        {(view.constraints?.rank_buffer_options ?? []).map((option) => (
+                          <option key={String(option.value)} value={option.value == null ? "" : String(option.value)}>
+                            {formatRankBuffer(option)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">ADR 하한</span>
                       <select
                         className="form-select form-select-sm"
@@ -1366,22 +1395,28 @@ export function MomentumClient() {
           // 튜닝도 백테스트와 같이 **저장된 설정** 기준이라 실행 조건을 같게 둔다.
           disabled={backtesting || isDirty || !view.settings.start_date}
           disabledHint={isDirty ? "설정을 저장해야 실행할 수 있습니다" : undefined}
-          fixedLabel={`저장된 설정 기준 (종목풀 ${draftPool} · 종목 수 ${view.settings.top_n} 공통 고정 · 일간 슬롯 · 교체 없음)`}
+          fixedLabel={`저장된 설정 기준 (종목풀 ${draftPool} · 종목 수 ${view.settings.top_n} 공통 고정 · 일간 슬롯)`}
           current={{
             short_ma_days: view.settings.short_ma_days,
             long_ma_days: view.settings.long_ma_days,
             entry_vol_mult: view.settings.entry_vol_mult ?? null,
+            rank_buffer_mult: view.settings.rank_buffer_mult ?? null,
             adr_floor: view.settings.adr_floor ?? null,
           }}
           axes={[
             // 축 값 = 상단 셀렉트 선택지(서버 상수) — 여기서 따로 정하지 않는다.
-            // 종목 수(공통 고정)·교체 규칙(전략 고정)은 축이 아니다 — 튜닝은 시장의 이평 반응만 잰다.
+            // 종목 수(공통 고정)는 축이 아니다.
             { key: "short_ma_days", label: "단기 이평", values: (view.ma_rule?.short_ma_options ?? []).map((n) => ({ value: n, label: formatMaLabel(n, positions?.ma_type) })) },
             { key: "long_ma_days", label: "장기 이평", values: (view.ma_rule?.long_ma_options ?? []).map((n) => ({ value: n, label: formatMaLabel(n, positions?.ma_type) })) },
             {
               key: "entry_vol_mult",
               label: "진입 문턱",
               values: (view.constraints?.entry_vol_mult_options ?? []).map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: `${n}×` })),
+            },
+            {
+              key: "rank_buffer_mult",
+              label: "순위 버퍼",
+              values: (view.constraints?.rank_buffer_options ?? []).map((option) => ({ value: option.value, label: formatRankBuffer(option) })),
             },
             {
               key: "adr_floor",
@@ -1397,6 +1432,7 @@ export function MomentumClient() {
               short_ma_days: Number(params.short_ma_days),
               long_ma_days: Number(params.long_ma_days),
               entry_vol_mult: params.entry_vol_mult == null ? null : Number(params.entry_vol_mult),
+              rank_buffer_mult: params.rank_buffer_mult == null ? null : Number(params.rank_buffer_mult),
               adr_floor: params.adr_floor == null ? null : Number(params.adr_floor),
             };
             fillDrafts(next);

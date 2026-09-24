@@ -7,7 +7,7 @@
    자리가 모자라면 **장기 이격률**이 큰 순으로 담는다(순위 화면과 같은 `rank_score`).
 3. 청산: 둘 중 하나라도 깨진 날. 판정은 종가, 체결은 다음 거래일 시가.
 4. 자리 배분: 동시 보유 상한 top_n, 균등 배분(정수 주수).
-   자리가 꽉 차 있으면 더 좋은 후보가 와도 **교체하지 않는다** — 신고가와 같은 결론이다.
+   순위 버퍼가 없으면 교체하지 않고, 있으면 컷 밖 보유 종목을 청산한다.
 5. ADR 하한: 그날 시장 ADR 이 하한 미만이면 **신규 진입만** 건너뛴다. 보유는 그대로 둔다.
 6. 장중 화면: 실시간 가격을 **마지막 봉**으로 쓴 같은 신호 계산으로 판정을 보여준다
    (strategy_logic.md 「장중 잠정 실행」). 규칙은 그대로고 입력만 잠정이라, 종가가 확정되면 백테스트와 일치한다.
@@ -27,6 +27,7 @@ import pandas as pd
 from config import CACHE_TTL_COMPUTE
 from core.strategy.intraday import mark_engine_statuses
 from core.strategy.momentum import signals as momentum_signals
+from core.strategy.momentum.signals import rank_buffer_limit
 from core.strategy.price_panel import build_price_panel
 from core.strategy.scoring import drawdown_from_high_pct, is_new_listing, listing_months
 from core.strategy.slot_backtest import run_slot_backtest
@@ -116,6 +117,7 @@ def run_backtest(
         # 순위를 모르는 종목은 맨 뒤로 — 자리 경쟁에서 밀린다(0 으로 채우면 음수 이격보다 앞선다).
         priority=signals["priority"].fillna(float("-inf")),
         slots=int(settings["top_n"]),
+        rank_exit_limit=rank_buffer_limit(settings["rank_buffer_mult"], int(settings["top_n"])),
         name_by=context["name_by"],
         industry_by=context["industry_by"],
         exit_reason="이탈",
@@ -255,7 +257,9 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     planned_exits = set(simulated["planned_exits"])
     for held in holdings:
         held["status"] = "sell" if held["ticker"] in planned_exits else "hold"
-        held["exit_reason"] = "이탈" if held["status"] == "sell" else None
+        held["exit_reason"] = (
+            simulated.get("planned_exit_reasons", {}).get(held["ticker"], "이탈") if held["status"] == "sell" else None
+        )
 
     adr_gate: dict[str, Any] | None = None
     if settings.get("adr_floor") is not None:
@@ -306,6 +310,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             exit_signal=eff["exit"],
             priority=eff["priority"].fillna(float("-inf")),
             slots=slots,
+            rank_exit_limit=rank_buffer_limit(settings["rank_buffer_mult"], slots),
             name_by=name_by,
             industry_by=industry_by,
             exit_reason="이탈",
@@ -316,6 +321,12 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         exited_today = live_result["exited_today"]
         engine_daily = live_result["daily"]
         mark_engine_statuses(holdings, live_result["planned_exits"])
+        for held in holdings:
+            if held["status"] == "sell":
+                ticker = held["ticker"]
+                held["exit_reason"] = live_result["planned_exit_reasons"].get(
+                    ticker, live_result["pending_exit_reasons"].get(ticker, "이탈")
+                )
 
         # 이격·자격 표시를 잠정 봉 기준으로 갱신한다. 실시간 시세가 없는 종목은 판정 불가라
         # 확정값을 유지한다(엔진의 known 규칙과 같다).

@@ -30,7 +30,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS
+from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS, RANK_BUFFER_MULT_OPTIONS
 from core.strategy.scoring import (
     compute_ma_disparity,
     rank_score,
@@ -78,24 +78,9 @@ def pool_info(pool: str) -> dict[str, str]:
 
 
 # ── 설정 ──────────────────────────────────────────────────────────────────
-# 풀별로 따로 저장되는 항목 — 풀을 바꾸면 이 값들이 그 풀의 저장분으로 전환된다.
 # 슬리피지는 종목풀 설정(BUY/SELL_SLIPPAGE_PCT)을 쓰고, 백테스트 기간은 화면에서
 # 실행할 때 고른다 — 둘 다 전략 설정으로 저장하지 않는다.
-PER_POOL_SETTING_KEYS = (
-    "start_date",
-    "short_ma_days",
-    "long_ma_days",
-    "adr_floor",
-)
-
-# 교체 규칙·주중 매도는 **전략의 일부**라 설정이 아니다.
-#   교체 규칙 = 자격 유지 : 후보 자격이 남아 있으면 순위와 무관하게 계속 들고 가고, 자격을
-#               잃어 빈 자리만 그 시점 상위 후보로 채운다(신고가 전략의 편입 방식과 같은 결).
-#               매주 상위 N 을 새로 뽑는 방식은 순위 몇 계단 차이로 왕복 비용만 쌓아 폐기했다.
-#   주중 매도 = ADR 게이트만 : 시장 ADR 이 하한 미만으로 내려간 날 전량 매도한다.
-#               개별 종목이 주중에 이평선을 이탈해도 ADR 이 하한 이상이면 주말 판정까지
-#               보유한다 — 개별 이탈은 주 교체(자격 유지 재선정)가 처리한다. 주중 개별
-#               매도는 거래만 늘리고 반등분을 놓쳐 폐기했다.
+# 판정·교체 규칙은 슬롯 엔진(`core/strategy/slot_backtest.py`) 주석이 단일 소스다.
 
 # 전략 전용 이평선 선택지 — 화면 셀렉트와 튜닝 축이 같은 값을 쓴다.
 # 그리드 결과(kor_kr·kospi200·us)에서 장기 60~120 이 고원, 140 부터 열위라 140 까지만 둔다.
@@ -131,7 +116,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     if short_ma_days > long_ma_days:
         raise ValueError("'short_ma_days' 는 'long_ma_days' 이하여야 합니다.")
 
-    # ADR 하한 — 판정일의 시장 ADR 이 이 값 미만이면 그 주는 전량 현금. None = 게이트 없음(기본).
+    # ADR 하한 — 판정일의 시장 ADR 이 이 값 미만이면 신규 진입만 건너뛴다. None = 게이트 없음(기본).
     # 시장은 풀 설정의 시장 레짐 지수(ADR 이 있는 4개 시장으로 제한됨)를 따른다.
     raw_adr = settings.get("adr_floor")
     adr_floor = None if raw_adr in (None, "", "none") else int(raw_adr)
@@ -148,6 +133,13 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         allowed = ", ".join("없음" if v is None else f"{v:g}" for v in ENTRY_VOL_MULT_OPTIONS)
         raise ValueError(f"'entry_vol_mult' 는 {allowed} 중 하나여야 합니다 (받은 값: {raw_mult}).")
 
+    # 순위 버퍼 — 보유 종목 순위가 배수 × 보유 종목 수 밖이면 청산. None = 없음(기본).
+    raw_buffer = settings.get("rank_buffer_mult")
+    rank_buffer_mult = None if raw_buffer in (None, "", "none") else float(raw_buffer)
+    if rank_buffer_mult not in RANK_BUFFER_MULT_OPTIONS:
+        allowed = ", ".join("없음" if v is None else f"{v:g}" for v in RANK_BUFFER_MULT_OPTIONS)
+        raise ValueError(f"'rank_buffer_mult' 는 {allowed} 중 하나여야 합니다 (받은 값: {raw_buffer}).")
+
     return {
         "pool": pool,
         "start_date": validate_start_date(settings.get("start_date")),
@@ -157,6 +149,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "long_ma_days": long_ma_days,
         "adr_floor": adr_floor,
         "entry_vol_mult": entry_vol_mult,
+        "rank_buffer_mult": rank_buffer_mult,
     }
 
 
@@ -204,6 +197,7 @@ _POOL_KEY_BY_SETTING: dict[str, str] = {
     "long_ma_days": "LONG_MA_DAYS",
     "adr_floor": "ADR_FLOOR",
     "entry_vol_mult": "ENTRY_VOL_MULT",
+    "rank_buffer_mult": "RANK_BUFFER_MULT",
 }
 
 
@@ -213,7 +207,7 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
     for setting_key, pool_key in _POOL_KEY_BY_SETTING.items():
         if pool_key not in config:
             # None 을 값으로 갖는 항목(ADR 하한·진입 문턱 등)은 키 자체는 있어야 한다.
-            if setting_key in ("adr_floor", "start_date", "entry_vol_mult"):
+            if setting_key in ("adr_floor", "start_date", "entry_vol_mult", "rank_buffer_mult"):
                 continue
             return None
         result[setting_key] = config[pool_key]
@@ -221,6 +215,7 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
     result.setdefault("start_date", None)
     result.setdefault("adr_floor", default_adr_floor())
     result.setdefault("entry_vol_mult", ENTRY_VOL_MULT_OPTIONS[0])
+    result.setdefault("rank_buffer_mult", RANK_BUFFER_MULT_OPTIONS[0])
     return result
 
 
@@ -288,6 +283,7 @@ _OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
     ("adr_floor", "ADR 하한", ADR_FLOOR_OPTIONS),
     ("long_ma_days", "장기 이평", LONG_MA_OPTIONS),
     ("entry_vol_mult", "진입 문턱", ENTRY_VOL_MULT_OPTIONS),
+    ("rank_buffer_mult", "순위 버퍼", RANK_BUFFER_MULT_OPTIONS),
 )
 
 
