@@ -364,7 +364,13 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
                 if over_market[1] == "PRE_MARKET":
                     entry["is_pre_market"] = True
 
-            change_rate = _parse_naver_signed_change_rate(price_source)
+            # 등락률은 **정규장이 진행 중일 때만** 이 응답 값을 쓴다. 장이 닫힌 뒤에는 폴링
+            # API 의 기준가가 실제 전일 종가와 다르다 — 실측(2026-09-24 휴장, 60종목 중 43종목):
+            # 가온전선 closePrice 318,000 은 맞는데 compareToPreviousClosePrice 가 -3,500
+            # (기준가 321,500)이라 -1.09% 로 나온다. 네이버 **일별 시세** API·KRX·가격 캐시는
+            # 모두 09-22 종가를 324,000 으로 준다(실제 -1.85%).
+            # 비우면 `price_service._fill_missing_change_rate` 가 확정 종가로 채운다.
+            change_rate = _parse_naver_signed_change_rate(price_source) if regular_running else None
             if change_rate is not None:
                 entry["changeRate"] = change_rate
 
@@ -819,8 +825,8 @@ def _toss_us_price_entry(item: dict[str, Any]) -> dict[str, Any]:
         entry["localTradedAt"] = local_stamp.isoformat()
         entry["tradeDateTime"] = local_stamp.tz_convert("UTC").isoformat()
     # 일간 등락률은 애프터장에서도 전일 정규장 기준가 대비로 유지한다.
-    # 마감 구간은 가격 자체가 `base` 라 여기서 계산하면 항상 0% 가 된다 — 그때는 실시간으로
-    # 덮지 않고 비워 두어, 화면이 확정 종가 시리즈로 계산한 일간(%) 을 그대로 쓰게 한다.
+    # 마감 구간은 가격 자체가 `base` 라 여기서 계산하면 항상 0% 가 된다 — 그때는 비워 두고
+    # `price_service._fill_missing_change_rate` 가 확정 종가로 채운다.
     base = _safe_float(item.get("base"))
     if base is not None and isfinite(base) and base > 0:
         # 마지막으로 **마감된 정규장**의 종가. 날짜가 아니라 세션을 따라간다 — 애프터·데이장
