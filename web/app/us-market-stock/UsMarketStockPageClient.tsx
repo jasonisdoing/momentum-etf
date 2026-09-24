@@ -12,9 +12,9 @@ type StockSummary = {
 };
 
 function formatIndexLabel(index: string): string {
-  if (index === "COMBINED") return "통합";
-  if (index === "SP500") return "S&P500";
-  if (index === "NDX100") return "NASDAQ100";
+  if (index === "COMBINED") return "S&P300 + 나스닥100";
+  if (index === "SP500") return "S&P300";
+  if (index === "NDX100") return "나스닥100";
   return index;
 }
 

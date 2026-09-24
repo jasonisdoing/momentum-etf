@@ -562,7 +562,7 @@ export function UsMarketStockManager({
                             ? "btn appSegmentedToggleButton is-active"
                             : "btn appSegmentedToggleButton"
                         }
-                        title={option.key === "COMBINED" ? "S&P 500 과 나스닥 100 의 합집합" : undefined}
+                        title={option.key === "COMBINED" ? "S&P 시총 상위 300종목과 나스닥100의 합집합" : undefined}
                         onClick={() => setView(option.key)}
                       >
                         {option.label}
