@@ -71,6 +71,31 @@ def quote_trade_day(entry: Mapping[str, Any] | None) -> pd.Timestamp | None:
     return _normalize_day(stamp)
 
 
+def last_regular_close(entry: Mapping[str, Any] | None) -> float | None:
+    """시세가 알려 주는 **마지막으로 마감된 정규장 종가**. 모르면 None.
+
+    앵커 날짜(`bar_anchor`) 봉의 확정 종가가 필요한 자리에 쓴다. 가격 캐시의 그 봉을 그냥
+    읽으면 안 된다 — 증분 배치가 장중에 그날 봉을 쓰고 실시간이 그 봉을 교체하므로,
+    캐시의 마지막 봉은 **설계상 잠정값**이다. 미국은 정규장 마감(05:00 KST) 후 전체
+    재정렬(17:10 KST)까지 12시간 동안 그 잠정 봉이 남는다 — 실측(2026-09-24 데이장)에서
+    us_stock 20종목 전부 캐시 09-23 봉이 실제 종가와 달랐다(MRNA 184.27 vs 182.11).
+
+    `prevClose` 와 구분한다. 토스는 세션을 따라가지만(애프터·데이장이면 그날 종가)
+    거래소 시세 API 의 `prevClose` 는 날짜 기준 전일 종가여서 마감 후에는 하루 어긋난다.
+    그래서 **의미를 실측으로 확정한 소스만** 이 키를 채운다(지금은 토스 미국).
+    """
+    if not isinstance(entry, Mapping) or not entry:
+        return None
+    raw = entry.get("lastRegularClose")
+    if raw is None:
+        return None
+    try:
+        price = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return price if price > 0 else None
+
+
 def _realtime_price(entry: Mapping[str, Any] | None, bar_day: pd.Timestamp) -> float | None:
     """붙여도 되는 실시간 가격. 소스가 이미 현재 세션에 맞는 값을 담아 준다.
 
