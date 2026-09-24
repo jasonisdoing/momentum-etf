@@ -26,7 +26,7 @@ type CalendarDay = {
 type PricePoint = { close: number; change_pct: number | null; provisional: boolean };
 type AdrPoint = { date: string; adr: number | null; advance: number; decline: number };
 type DayData = {
-  sessions: Record<"kor" | "us", "closed" | "finished" | "open" | "scheduled">;
+  sessions: Record<"kor" | "us", "closed" | "closed_future" | "finished" | "open" | "scheduled">;
   indices: Record<string, PricePoint | null>;
   fx: PricePoint | null;
   adr: AdrPoint | null;
@@ -44,6 +44,7 @@ const FX_OPTIONS = ["USD/KRW", "AUD/KRW"];
 const INDEX_TICKERS = ["^KS11", "^KQ11", "^GSPC", "^NDX"];
 const SESSION_LABELS: Record<DayData["sessions"]["kor"], string> = {
   closed: "휴장",
+  closed_future: "휴장 예정",
   finished: "마감",
   open: "장중",
   scheduled: "개장 예정",
@@ -219,14 +220,12 @@ export function MarketCalendarClient({ today }: { today: string }) {
                   }}
                 >
                   <span className={styles.dayHeader}><strong>{date.day}</strong>{date.key === today ? <span className={styles.todayBadge}>오늘</span> : null}</span>
-                  <span className={styles.sessionRow}>
-                    <span>한국</span><span>{data ? SESSION_LABELS[data.sessions.kor] : "—"}</span>
-                    <span>미국</span><span>{data ? SESSION_LABELS[data.sessions.us] : "—"}</span>
-                  </span>
                   <span className={styles.indexRows}>
                     {INDEX_LABELS.map((label, index) => {
+                      const session = data?.sessions[index < 2 ? "kor" : "us"];
+                      const holiday = session === "closed" || session === "closed_future";
                       const point = data?.indices[INDEX_TICKERS[index]];
-                      return <span key={label}><span>{label}</span><span className={changeClass(point?.change_pct)}>{formatChange(point?.change_pct)}{point?.provisional ? "*" : ""}</span></span>;
+                      return <span key={label}><span>{holiday ? `${label} ${SESSION_LABELS[session]}` : label}</span>{holiday ? null : <span className={changeClass(point?.change_pct)}>{formatChange(point?.change_pct)}{point?.provisional ? "*" : ""}</span>}</span>;
                     })}
                   </span>
                   <span className={styles.extraRow}><span>{selectedFx}</span><span className={changeClass(data?.fx?.change_pct)}>{formatChange(data?.fx?.change_pct)}{data?.fx?.provisional ? "*" : ""}</span></span>

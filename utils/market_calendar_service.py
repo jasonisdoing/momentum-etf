@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from config import MARKET_SCHEDULES
 from services.price_service import get_exchange_rate_series
 from utils.market_breadth_service import load_adr_series, pool_market_key
 from utils.market_trend_service import _apply_intraday_boost, load_index_ohlc
@@ -76,11 +77,12 @@ def _market_sessions(start: date, end: date) -> dict[str, dict[str, str]]:
     result: dict[str, dict[str, str]] = {}
     for country in ("kor", "us"):
         trading_days = {stamp.date().isoformat() for stamp in get_trading_days(start_text, end_text, country)}
+        local_today = pd.Timestamp.now(tz=MARKET_SCHEDULES[country]["timezone"]).date()
         day = start
         while day <= end:
             key = day.isoformat()
             if key not in trading_days:
-                status = "closed"
+                status = "closed_future" if day > local_today else "closed"
             elif is_market_day_completed(country, pd.Timestamp(day)):
                 status = "finished"
             elif is_market_day_started(country, pd.Timestamp(day)):
