@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query
 
 import config
 from fastapi_app.dependencies import require_internal_token
+from utils.market_calendar_service import get_market_calendar
 from utils.market_trend_service import (
     INDICES,
     compute_index_history,
@@ -11,6 +14,18 @@ from utils.market_trend_service import (
 )
 
 router = APIRouter(prefix="/internal/market-trend", tags=["market-trend"])
+
+
+@router.get("/calendar")
+def get_market_trend_calendar(
+    start: date = Query(...),
+    end: date = Query(...),
+    pool: str | None = Query(None),
+    fx: str = Query("USD/KRW"),
+    _: None = Depends(require_internal_token),
+) -> dict[str, object]:
+    """시장 현지 거래일 기준 달력 데이터."""
+    return get_market_calendar(start, end, pool, fx)
 
 
 @router.get("/indices")

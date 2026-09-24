@@ -9,6 +9,8 @@
 .notice, .error { margin: 0; padding: 0.5rem 0.75rem; border-radius: 0.375rem; font-size: var(--fs-sm); }
 .notice { background: var(--accent-soft); color: var(--text-muted); }
 .error { background: #fff0f0; color: #b42318; }
+.positive, .adrBelow { color: #d63939; font-weight: 700; }
+.negative { color: #206bc4; font-weight: 700; }
 .calendarScroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 0.5rem; background: var(--panel); }
 .calendar { display: grid; grid-template-columns: repeat(7, minmax(9.5rem, 1fr)); min-width: 68rem; }
 .weekday { padding: 0.4rem; text-align: center; background: var(--app-table-head-bg); color: var(--app-table-head-color); border-bottom: 1px solid var(--line); font-size: var(--fs-sm); font-weight: 700; }
