@@ -124,6 +124,7 @@ function formatRankBuffer(option: { value: number | null; limit: number | null }
 
 /** 보유 표 한 행 — 보유·매도 예정·진입 예정·이탈·빈 슬롯을 한 표에 담는다(신고가와 같다). */
 type PlanRow = {
+  rank?: number | null;
   /** 20일 일간 수익률 표준편차(%) — 화면 공용 변동성 컬럼. */
   volatility_pct?: number | null;
   /** 신규상장(🆕) — 전 화면 공용 판정. */
@@ -193,6 +194,7 @@ type CandidateRow = {
 
 /** 체결 한 건 — 진입~청산 한 쌍. */
 type Trade = {
+  rank?: number | null;
   /** 20일 일간 수익률 표준편차(%) — 화면 공용 변동성 컬럼. */
   volatility_pct?: number | null;
   /** 신규상장(🆕) — 전 화면 공용 판정. */
@@ -635,6 +637,7 @@ export function MomentumClient() {
     // 엔진은 `status`(hold/sell) 로 준다 — 표는 진입 예정·빈 슬롯까지 한 축(`plan`)으로 본다.
     const held: PlanRow[] = positions.holdings.map((row) => ({ ...row, plan: row.status }));
     const buys: PlanRow[] = positions.planned_entries.map((row) => ({
+      rank: row.rank,
       ticker: row.ticker,
       name: row.name,
       industry: row.industry,
@@ -664,6 +667,7 @@ export function MomentumClient() {
       account_held: row.account_held,
     }));
     const exited: PlanRow[] = positions.exited_today.map((trade) => ({
+      rank: trade.rank,
       ticker: trade.ticker,
       name: trade.name,
       industry: trade.industry,
@@ -813,10 +817,23 @@ export function MomentumClient() {
     [country],
   );
 
+  const rankColumn = <T extends { rank?: number | null }>(): ColDef<T> => ({
+    colId: "rank",
+    valueGetter: (p) => p.data?.rank ?? null,
+    headerName: "순위",
+    pinned: "left",
+    width: 76,
+    minWidth: 76,
+    headerTooltip: "진입 자격 종목과 보유 종목을 장기 이격률 순으로 매긴 순위",
+    cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+    valueFormatter: (p) => (p.value == null ? "-" : String(p.value)),
+  });
+
   // 보유 표 — 신고가와 같은 구성(공용 빌더). 모멘텀 고유는 이평선 이격 둘이다.
   const holdingColumns = useMemo<ColDef<PlanRow>[]>(
     () => [
       slotStatusColumn<PlanRow>({ fillDay: positions?.next_session }),
+      rankColumn<PlanRow>(),
       marketCapRankColumn<PlanRow>("market_cap_rank", !hasMarketCap),
       highDrawdownColumn<PlanRow>("high_drawdown_pct"),
       // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
@@ -881,22 +898,18 @@ export function MomentumClient() {
     ],
   );
 
-  // 진입 후보 표 — 자리가 나면 담을 순서. 상태는 「보유 중」과 「후보」 둘뿐이다.
+  // 진입 후보 표 — 보유 표와 상태부터 장기 이탈까지 같은 순서와 폭을 쓴다.
   const candidateColumns = useMemo<ColDef<CandidateRow>[]>(
     () => [
-      // 첫 컬럼은 보유 표의 '상태' 와 **같은 폭**이다 — 두 표가 위아래로 붙어 있어
-      // 거래대금까지 칸이 어긋나면 읽기 어렵다. 이 표에 담긴 것은 전부 후보라 상태를
-      // 따로 쓸 것이 없으므로 그 자리에 순위를 넣는다.
       {
-        field: "rank",
-        headerName: "순위",
+        headerName: "상태",
         pinned: "left",
         width: STATUS_COLUMN_WIDTH,
         minWidth: STATUS_COLUMN_MIN_WIDTH,
-        headerTooltip: "장기 이격률이 큰 순 — 자리가 나면 이 순서로 담는다.",
         cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
-        valueFormatter: (p) => (p.value == null ? "-" : String(p.value)),
+        cellRenderer: () => "대기",
       },
+      rankColumn<CandidateRow>(),
       marketCapRankColumn<CandidateRow>("market_cap_rank", !hasMarketCap),
       highDrawdownColumn<CandidateRow>("high_drawdown_pct"),
       // 티커·종목명 — 공용 컬럼. 고정 폭으로 보유 표와 앞쪽 칸을 맞춘다.

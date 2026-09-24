@@ -411,9 +411,19 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
 
     held_tickers = {h["ticker"] for h in holdings}
     entry_tickers = {row["ticker"] for row in entries}
-    # 순위 — 우선순위(장기 이격률) 순 자리. 진입 예정과 후보가 **같은 번호 체계**를 쓴다.
-    # 자격 미달 종목은 자리를 차지하지 않는다 — 세면 화면 순위가 6·7·9 처럼 건너뛴다.
-    rank_by_ticker = {row["ticker"]: index for index, row in enumerate([r for r in rows if r["eligible"]], start=1)}
+    # 엔진의 순위 버퍼와 같이 진입 자격 종목과 보유 종목을 함께 센다.
+    # 자격이 잠시 사라진 보유 종목도 현재 순위를 보여준다.
+    ranked_tickers = {row["ticker"] for row in rows if row["eligible"]} | held_tickers
+    score_by_ticker = {row["ticker"]: row["long_gap_pct"] for row in rows}
+    rank_by_ticker = {
+        ticker: index
+        for index, ticker in enumerate(
+            sorted(ranked_tickers, key=lambda ticker: (-score_by_ticker.get(ticker, 0.0), ticker)),
+            start=1,
+        )
+    }
+    for item in [*holdings, *exited_today]:
+        item["rank"] = rank_by_ticker.get(item["ticker"])
     # 진입 후보 — 우선순위 순 top_n 개. 이미 담은(보유·진입 예정) 종목은 표에서 뺀다.
     candidates = [
         {**row, "rank": rank_by_ticker[row["ticker"]]}
@@ -437,7 +447,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         "target_entries": target_entries,
         # 이 현황을 만든 엔진 실행의 일별 곡선 — 합성 슬리브 몫이 같은 실행 결과를 읽는다.
         "daily": engine_daily,
-        # 순위는 잠정 자격 기준이라 체결 예정(어제 확정) 종목이 오늘 자격 밖이면 값이 없다.
+        # 순위는 잠정 자격·보유 기준이라 체결 예정 종목이 둘 다 아니면 값이 없다.
         "planned_entries": [{**row, "rank": rank_by_ticker.get(row["ticker"])} for row in entries],
         "exited_today": exited_today,
         "candidates": candidates,

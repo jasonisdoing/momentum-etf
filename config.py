@@ -233,7 +233,7 @@ ENTRY_VOL_MULT_OPTIONS: tuple[float | None, ...] = (None, 1.0, 2.0)
 # 밖으로 밀리면 청산한다(빈 자리는 기존 규칙대로 상위 후보가 채운다). 순위는 그날 진입 자격
 # 종목 + 보유 종목 안에서 매긴다. 보유 종목 수가 풀마다 달라(4·5·10) 절대 순위 대신 배수로 둔다.
 # None = 버퍼 없음(기본·자격을 잃을 때만 청산하는 기존 동작).
-RANK_BUFFER_MULT_OPTIONS: tuple[float | None, ...] = (None, 2.0, 3.0, 4.0)
+RANK_BUFFER_MULT_OPTIONS: tuple[float | None, ...] = (None, 2.0, 3.0)
 
 # 거래대금 하한 — 평소(20일 평균) 대비 몇 배 이상이어야 신호로 인정할지. None = 제한 없음.
 # **국가별**이다 — 이평선 선택지(SHORT_MA_DAYS_BY_COUNTRY)와 같은 방식으로, 신고가의
