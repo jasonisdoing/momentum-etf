@@ -12,6 +12,7 @@ import { buildBucketCssVariables } from "../lib/bucket-theme";
 import { ServiceWorkerRegistrar } from "./components/ServiceWorkerRegistrar";
 import { SessionExpiryWatcher } from "./components/SessionExpiryWatcher";
 import { ToastProvider } from "./components/ToastProvider";
+import { TickerDetailModalProvider } from "./components/TickerDetailModalProvider";
 import { HideMoneyProvider } from "@/lib/hide-money-context";
 import "./globals.css";
 
@@ -44,7 +45,9 @@ export default function RootLayout({ children }: RootLayoutProps) {
         <SessionExpiryWatcher />
         <ToastProvider>
           <HideMoneyProvider>
-            <AppShell>{children}</AppShell>
+            <TickerDetailModalProvider>
+              <AppShell>{children}</AppShell>
+            </TickerDetailModalProvider>
           </HideMoneyProvider>
         </ToastProvider>
       </body>
