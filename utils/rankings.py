@@ -1016,7 +1016,7 @@ def build_ticker_type_rankings(
         return float(value)
 
     def _sort_key(row: pd.Series) -> tuple[int, float, str]:
-        # 순위 점수(장기·단기 이격률 평균) 내림차순. 값이 없는 종목은 뒤로.
+        # 순위 점수(장기 이격률) 내림차순. 값이 없는 종목은 뒤로.
         score = row.get("점수")
         return (
             1 if score is None or pd.isna(score) else 0,
