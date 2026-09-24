@@ -26,14 +26,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from utils.index_constituents_loader import (  # noqa: E402
     KOR_INDEX_SOURCES,
+    load_index_constituents,
     refresh_kor_index_from_etf,
 )
+from utils.index_pool_alert import notify_unregistered_index_stocks  # noqa: E402
 from utils.logger import get_app_logger  # noqa: E402
 
 
 def main() -> None:
     logger = get_app_logger()
     total = len(KOR_INDEX_SOURCES)
+    alert_items = {}
     for step, (index, source) in enumerate(KOR_INDEX_SOURCES.items(), start=1):
         print(f"[{step}/{total}] {index} 구성종목 갱신 ({source['etf_name']}({source['etf_ticker']}) 보유종목)...")
         result = refresh_kor_index_from_etf(index)
@@ -44,6 +47,10 @@ def main() -> None:
             result["as_of_date"] or "-",
         )
         print(f"  저장 완료: {result['count']}개 (ETF 기준일 {result['as_of_date'] or '-'})")
+        alert_items[index] = load_index_constituents(index)
+
+    count = notify_unregistered_index_stocks("kor", alert_items)
+    print(f"한국 지수 구성종목 종목풀 미등록: {count}개")
 
 
 if __name__ == "__main__":
