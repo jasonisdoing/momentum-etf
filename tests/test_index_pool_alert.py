@@ -42,6 +42,22 @@ class IndexPoolAlertTests(unittest.TestCase):
         self.assertEqual(count, 0)
         send.assert_not_called()
 
+    def test_us_duplicate_class_is_not_reported(self):
+        targets = {
+            "NDX100": [
+                {"ticker": "GOOG", "duplicate_class": True},
+                {"ticker": "GOOGL", "duplicate_class": False},
+            ]
+        }
+        with (
+            patch("utils.index_pool_alert.load_ticker_pool_type_map", return_value={"GOOGL": ["us_stock"]}),
+            patch("utils.index_pool_alert.send_slack_message_v2") as send,
+        ):
+            count = notify_unregistered_index_stocks("us", targets)
+
+        self.assertEqual(count, 0)
+        send.assert_not_called()
+
     def test_slack_failure_fails_batch(self):
         with (
             patch("utils.index_pool_alert.load_ticker_pool_type_map", return_value={}),

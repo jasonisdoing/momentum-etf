@@ -13,7 +13,11 @@ def notify_unregistered_index_stocks(country: str, index_items: dict[str, list[d
     registered = set(load_ticker_pool_type_map(country))
     missing_by_index: dict[str, list[str]] = {}
     for index, items in index_items.items():
-        tickers = {str(item.get("ticker") or "").strip().upper() for item in items}
+        tickers = {
+            str(item.get("ticker") or "").strip().upper()
+            for item in items
+            if country != "us" or not item.get("duplicate_class")
+        }
         missing = sorted(ticker for ticker in tickers - registered if ticker)
         if missing:
             missing_by_index[index] = missing
