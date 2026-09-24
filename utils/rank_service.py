@@ -133,21 +133,27 @@ def _format_listed_date(value: Any) -> str | None:
 
 
 def _apply_industry_labels(dataframe: pd.DataFrame, ticker_type: str) -> pd.DataFrame:
-    """업종을 붙인다 — 공용 맵(utils/industry_map)이 단일 소스.
-
-    한국 종목은 네이버 분류(한국어 원본), 미국은 지수 구성종목의 yfinance 분류다.
-    번역하지 않는다 — 각 시장에서 쓰는 용어 그대로 보여주는 게 정확하다.
-    분류가 없는 종목(ETF 등)은 빈 값이며, 화면은 값이 있는 풀에서만 컬럼을 노출한다.
-    """
+    """공용 분류 맵으로 업종을 붙이고 미국 개별주에는 섹터도 붙인다."""
     if dataframe.empty or "티커" not in dataframe.columns:
         return dataframe
 
-    from utils.industry_map import industry_map
+    from utils.industry_map import industry_map, us_classification_maps
+    from utils.settings_loader import get_ticker_type_settings
 
-    industry_by = {str(k).strip().upper(): v for k, v in industry_map(ticker_type).items()}
+    settings = get_ticker_type_settings(ticker_type) or {}
+    us_stock = (
+        str(settings.get("country_code") or "").strip().lower() == "us"
+        and str(settings.get("pool_kind") or "").strip().lower() == "stock"
+    )
+    if us_stock:
+        industry_by, sector_by = us_classification_maps()
+    else:
+        industry_by = industry_map(ticker_type)
 
     upper = dataframe["티커"].astype(str).str.strip().str.upper()
     dataframe["업종"] = upper.map(lambda t: industry_by.get(t, ""))
+    if us_stock:
+        dataframe["섹터"] = upper.map(lambda t: sector_by.get(t, ""))
     return dataframe
 
 

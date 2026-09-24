@@ -5,7 +5,7 @@ import { IconPlus } from "@tabler/icons-react";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
-import { industryColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
+import { industryColumn, sectorColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { useLatestRequest } from "@/lib/use-latest-request";
 import { loadStocksTable } from "@/lib/stocks-store";
@@ -405,14 +405,7 @@ export function UsMarketStockManager({
       // 종목명 표기도 공용(2줄 말줄임·레버리지 💣) — 화면 고유 1줄 말줄임을 대체한다.
       tickerColumn<UsMarketStockGridRow>({ width: 104, minWidth: 88, mono: true }),
       stockNameColumn<UsMarketStockGridRow>({}),
-      {
-        headerName: "섹터",
-        field: "sector",
-        width: 160,
-        minWidth: 120,
-        cellClass: "usMarketStockTextCell",
-        cellRenderer: (params: { value?: string }) => renderTruncatedText(params.value),
-      },
+      sectorColumn<UsMarketStockGridRow>({ cellClass: "usMarketStockTextCell", width: 160, minWidth: 120 }),
       industryColumn<UsMarketStockGridRow>({ cellClass: "usMarketStockTextCell" }),
       {
         headerName: "일간(%)",

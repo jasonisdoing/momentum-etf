@@ -205,6 +205,24 @@ export function industryColumn<T>(options?: {
   };
 }
 
+/** 미국 개별주 섹터 컬럼 — 업종과 같은 폭·말줄임 표시를 쓴다. */
+export function sectorColumn<T>(options?: {
+  field?: string;
+  cellClass?: string;
+  width?: number;
+  minWidth?: number;
+}): ColDef<T> {
+  return {
+    colId: "sector",
+    field: (options?.field ?? "sector") as ColDefField<T>,
+    headerName: "섹터",
+    width: options?.width ?? INDUSTRY_COLUMN_WIDTH,
+    minWidth: options?.minWidth ?? INDUSTRY_COLUMN_MIN_WIDTH,
+    cellClass: options?.cellClass,
+    cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
+  };
+}
+
 /** 고점 대비(%) 셀 — 정확히 0 이면 ⭐신고점(빨강 볼드), 그 외 퍼센트 표기. */
 export function renderHighDrawdownCell(value: number | null | undefined, digits = 1) {
   if (value === 0) return <span style={{ color: "#d93025", fontWeight: 700 }}>⭐신고점</span>;
