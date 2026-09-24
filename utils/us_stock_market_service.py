@@ -10,6 +10,7 @@ import requests
 
 from config import NAVER_FINANCE_HEADERS, NAVER_US_STOCK_MARKET_VALUE_URL
 from utils.index_constituents_loader import load_index_constituents, load_index_meta
+from utils.industry_map import us_display_industry, us_sector_label
 from utils.market_service import load_ticker_pool_map, load_ticker_pool_type_map
 from utils.portfolio_io import load_all_holding_tickers
 
@@ -178,6 +179,8 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
         ticker = str(item.get("ticker") or "").strip().upper()
         if not ticker:
             continue
+        sector = str(item.get("sector") or "").strip()
+        industry = str(item.get("industry") or "").strip()
         market_cap = item.get("market_cap")
         if min_market_cap_usd > 0 and (market_cap is None or market_cap < min_market_cap_usd):
             continue
@@ -187,8 +190,8 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
                 "ticker": ticker,
                 "name": item.get("name") or ticker,
                 "english_name": item.get("name") or "",
-                "industry": item.get("industry") or item.get("sector") or "",
-                "sector": item.get("sector") or "",
+                "industry": us_display_industry(sector, industry) if industry else us_sector_label(sector),
+                "sector": us_sector_label(sector),
                 "market": "",
                 "ticker_pools": ", ".join(ticker_pool_map.get(ticker, [])),
                 "ticker_pool_types": ticker_pool_type_map.get(ticker, []),

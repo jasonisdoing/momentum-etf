@@ -47,13 +47,19 @@ def group_yf_industry(industry: str) -> str:
     return base
 
 
-def _us_display_industry(sector: str, industry: str) -> str:
+def us_sector_label(sector: str) -> str:
+    """미국 Yahoo 섹터의 화면 표시명."""
+    setting = INDUSTRY_DISPLAY_CONFIG.get(sector)
+    return setting["label"] if setting is not None else sector
+
+
+def us_display_industry(sector: str, industry: str) -> str:
     """미국 Yahoo 원본 분류를 설정에 따라 화면 표시명으로 바꾼다."""
     setting = INDUSTRY_DISPLAY_CONFIG.get(sector)
     if setting is None:
         return industry
     if setting["display"] == "sector":
-        return setting["label"]
+        return us_sector_label(sector)
     return setting["industries"].get(industry, industry)
 
 
@@ -144,5 +150,5 @@ def us_industry_map() -> dict[str, str]:
             sector = str(item.get("sector") or "").strip()
             industry = str(item.get("industry") or "").strip()
             if ticker and industry and ticker not in result:
-                result[ticker] = _us_display_industry(sector, industry)
+                result[ticker] = us_display_industry(sector, industry)
     return result
