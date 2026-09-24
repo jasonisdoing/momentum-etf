@@ -42,27 +42,48 @@ def _daily_changes(series: pd.Series, start: date, end: date) -> dict[str, dict[
     return result
 
 
-def _index_changes(start: date, end: date) -> tuple[dict[str, dict[str, Any]], list[str]]:
+def _index_changes(
+    start: date, end: date, sessions: dict[str, dict[str, str]]
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, dict[str, str]]], list[str]]:
     result: dict[str, dict[str, Any]] = {}
+    issues: dict[str, dict[str, dict[str, str]]] = {}
     warnings: list[str] = []
     for ticker, country in INDEX_COUNTRIES.items():
         frame = load_index_ohlc(ticker)
         if frame is None or frame.empty:
             warnings.append(f"{ticker} 지수 가격을 조회하지 못했습니다.")
-            result[ticker] = {}
-            continue
-        close = frame["Close"].dropna()
-        if country == "us" and end >= pd.Timestamp.now(tz="America/New_York").date():
-            close = _apply_intraday_boost(close, ticker)
-        if close is None or close.empty:
-            warnings.append(f"{ticker} 지수 종가가 없습니다.")
-            result[ticker] = {}
-            continue
+            close = pd.Series(dtype=float)
+        else:
+            close = frame["Close"].dropna()
+            if country == "us" and end >= pd.Timestamp.now(tz="America/New_York").date():
+                close = _apply_intraday_boost(close, ticker)
+            if close is None or close.empty:
+                warnings.append(f"{ticker} 지수 종가가 없습니다.")
+                close = pd.Series(dtype=float)
         values = _daily_changes(close, start, end)
         for day, point in values.items():
             point["provisional"] = not is_market_day_completed(country, pd.Timestamp(day))
+        trading_days = [
+            stamp.date().isoformat()
+            for stamp in get_trading_days((start - timedelta(days=10)).isoformat(), end.isoformat(), country)
+        ]
+        close_days = {pd.Timestamp(stamp).date().isoformat() for stamp in close.index}
+        for previous_day, day in zip(trading_days, trading_days[1:]):
+            if day < start.isoformat() or sessions.get(day, {}).get(country) != "finished":
+                continue
+            if day not in values:
+                issues.setdefault(day, {})[ticker] = {
+                    "label": "종가 누락",
+                    "reason": f"{day} 거래일의 확정 종가 데이터가 조회되지 않았습니다.",
+                }
+            elif previous_day not in close_days:
+                values[day]["change_pct"] = None
+                issues.setdefault(day, {})[ticker] = {
+                    "label": "전일 종가 누락",
+                    "reason": f"전 거래일({previous_day}) 종가가 없어 당일 변동률을 계산할 수 없습니다.",
+                }
         result[ticker] = values
-    return result, warnings
+    return result, issues, warnings
 
 
 def _fx_changes(start: date, end: date) -> dict[str, dict[str, float | bool | None]]:
@@ -166,7 +187,7 @@ def get_market_calendar(start: date, end: date) -> dict[str, Any]:
     if end < start or (end - start).days > 42:
         raise ValueError("시장 캘린더 조회 범위는 최대 43일입니다.")
     sessions = _market_sessions(start, end)
-    indices, warnings = _index_changes(start, end)
+    indices, index_issues, warnings = _index_changes(start, end, sessions)
     futures, future_warnings = _today_us_futures(start, end, sessions, indices)
     warnings.extend(future_warnings)
     fx_values = _fx_changes(start, end)
@@ -177,6 +198,7 @@ def get_market_calendar(start: date, end: date) -> dict[str, Any]:
         day: {
             "sessions": status,
             "indices": {ticker: points.get(day) for ticker, points in indices.items()},
+            "index_issues": index_issues.get(day, {}),
             "futures": futures.get(day),
             "fx": fx_values.get(day),
             "adr": {pool: points.get(day) for pool, points in adr_values.items()},
