@@ -96,6 +96,27 @@ def last_regular_close(entry: Mapping[str, Any] | None) -> float | None:
     return price if price > 0 else None
 
 
+def confirmed_close_before(close_series: pd.Series | None, bar_date: Any) -> float | None:
+    """`bar_date` 보다 **앞선** 마지막 확정 종가. 없으면 None.
+
+    앵커 봉(`bar_anchor`)의 전일 대비 변동을 재는 분모다. 앵커 봉 자체는 잠정값일 수
+    있지만(`last_regular_close` 주석) 그 앞 봉은 이미 전체 재정렬을 거친 확정 종가다.
+    """
+    if close_series is None or close_series.empty:
+        return None
+    series = pd.to_numeric(close_series, errors="coerce").dropna()
+    if series.empty:
+        return None
+    index = pd.DatetimeIndex(series.index)
+    if index.tz is not None:
+        index = index.tz_localize(None)
+    position = int(index.normalize().searchsorted(_normalize_day(bar_date), side="left")) - 1
+    if position < 0:
+        return None
+    value = float(series.iloc[position])
+    return value if value > 0 else None
+
+
 def _realtime_price(entry: Mapping[str, Any] | None, bar_day: pd.Timestamp) -> float | None:
     """붙여도 되는 실시간 가격. 소스가 이미 현재 세션에 맞는 값을 담아 준다.
 

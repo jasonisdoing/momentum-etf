@@ -28,7 +28,12 @@ from utils.cache_utils import (
     load_cached_updated_at_bulk_with_fallback,
 )
 from utils.data_loader import get_latest_trading_day, get_trading_days
-from utils.effective_prices import apply_realtime_close, bar_anchor, last_regular_close
+from utils.effective_prices import (
+    apply_realtime_close,
+    bar_anchor,
+    confirmed_close_before,
+    last_regular_close,
+)
 from utils.logger import get_app_logger
 from utils.moving_averages import pool_moving_average_type
 from utils.perf_metrics import single_stock_backtest_stats
@@ -257,38 +262,35 @@ def _confirmed_day_change_pct(
     내려간다 — 캐시의 마지막 봉은 설계상 잠정값이다(`effective_prices.last_regular_close`).
     분모는 앵커 **직전** 거래일의 캐시 봉이고, 이쪽은 이미 확정된 봉이다.
     """
-    if close_series is None or close_series.empty:
-        return None
-    series = pd.to_numeric(close_series, errors="coerce").dropna()
-    if series.empty:
-        return None
-
-    index = pd.DatetimeIndex(series.index)
-    if index.tz is not None:
-        index = index.tz_localize(None)
-    index = index.normalize()
-    target = pd.Timestamp(bar_date)
-    if target.tzinfo is not None:
-        target = target.tz_localize(None)
-    target = target.normalize()
-
-    prev_position = int(index.searchsorted(target, side="left")) - 1
-    if prev_position < 0:
-        return None
-    prev_close = float(series.iloc[prev_position])
-    if prev_close <= 0:
+    prev_close = confirmed_close_before(close_series, bar_date)
+    if prev_close is None:
         return None
 
     if anchor_close is not None and anchor_close > 0:
         close = float(anchor_close)
     else:
-        # 앵커 봉이 캐시에 없는 종목(거래정지·상장 직후)은 비워 둔다 — 며칠치 변동을
-        # 하루치로 표기하지 않는다.
-        anchor_position = int(index.searchsorted(target, side="right")) - 1
-        if anchor_position <= prev_position:
+        # 앵커 **그 날짜** 봉만 쓴다. 없는 종목(거래정지·상장 직후)은 비워 둔다 —
+        # 며칠치 변동을 하루치로 표기하지 않는다.
+        close = _confirmed_close_on(close_series, bar_date)
+        if close is None:
             return None
-        close = float(series.iloc[anchor_position])
     return ((close / prev_close) - 1.0) * 100.0
+
+
+def _confirmed_close_on(close_series: pd.Series, bar_date: pd.Timestamp) -> float | None:
+    """**그 날짜** 확정 종가. 그 날짜 봉이 없으면 None."""
+    series = pd.to_numeric(close_series, errors="coerce").dropna()
+    index = pd.DatetimeIndex(series.index)
+    if index.tz is not None:
+        index = index.tz_localize(None)
+    target = pd.Timestamp(bar_date)
+    if target.tzinfo is not None:
+        target = target.tz_localize(None)
+    matched = series[index.normalize() == target.normalize()]
+    if matched.empty:
+        return None
+    value = float(matched.iloc[-1])
+    return value if value > 0 else None
 
 
 def _calc_period_return(close_series: pd.Series, days: int) -> float | None:
