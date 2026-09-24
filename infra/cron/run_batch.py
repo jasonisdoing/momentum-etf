@@ -72,7 +72,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 MAX_TAIL_LINES = 15
-MAX_TAIL_CHARS = 1500
+MAX_TAIL_CHARS = 3000
 
 LOCK_DIR = PROJECT_ROOT / "logs" / "cron"
 EXIT_ALREADY_NOTIFIED = 66

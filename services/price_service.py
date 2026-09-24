@@ -37,8 +37,7 @@ _WORLDSTOCK_TTL_SECONDS = CACHE_TTL_COMPUTE
 _YAHOO_SYMBOL_TTL_SECONDS = CACHE_TTL_COMPUTE
 _IDLE_TTL_SECONDS = CACHE_TTL_LIVE
 _FX_TTL_SECONDS = CACHE_TTL_COMPUTE
-# 환율 조회 재시도 횟수. `_FX_CACHE` 는 프로세스 메모리라 매번 새로 뜨는 배치에서는
-# stale 폴백이 없다 — 배치가 기댈 수 있는 건 이 재시도뿐이다.
+# 환율은 유효기간 내 값을 DB로 공유해 별도 배치 프로세스의 중복 조회를 줄인다.
 _FX_FETCH_MAX_ATTEMPTS = 3
 _FX_RETRY_BASE_SECONDS = 3.0
 
@@ -255,6 +254,24 @@ def get_exchange_rates(currencies: Sequence[str] | None = None) -> dict[str, Any
     if not missing:
         return rates
 
+    from utils.db_manager import get_db_connection
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("환율 공유 캐시 DB 연결 실패")
+    collection = db["fx_quote_cache"]
+    for doc in collection.find({"_id": {"$in": missing}, "expires_at": {"$gt": datetime.utcnow()}}):
+        currency = doc["_id"]
+        rates[currency] = dict(doc["data"])
+        _FX_CACHE[f"fx:{currency}"] = {key: doc[key] for key in ("data", "fetched_at", "expires_at")}
+        # DB 시각은 UTC, 기존 메모리 캐시 시각은 로컬이다.
+        remaining = max(0, (doc["expires_at"] - datetime.utcnow()).total_seconds())
+        _FX_CACHE[f"fx:{currency}"]["expires_at"] = datetime.now() + timedelta(seconds=remaining)
+        _FX_CACHE[f"fx:{currency}"]["fetched_at"] = datetime.now() - (datetime.utcnow() - doc["fetched_at"])
+        missing.remove(currency)
+    if not missing:
+        return rates
+
     try:
         fetched = _fetch_exchange_rates(missing)
     except Exception as exc:
@@ -271,6 +288,18 @@ def get_exchange_rates(currencies: Sequence[str] | None = None) -> dict[str, Any
         if not isinstance(value, dict):
             continue
         rates[currency] = value
+        saved_at = datetime.utcnow()
+        collection.update_one(
+            {"_id": currency},
+            {
+                "$set": {
+                    "data": dict(value),
+                    "fetched_at": saved_at,
+                    "expires_at": saved_at + timedelta(seconds=_FX_TTL_SECONDS),
+                }
+            },
+            upsert=True,
+        )
         _FX_CACHE[f"fx:{currency}"] = {
             "data": dict(value),
             "fetched_at": now,
@@ -510,6 +539,7 @@ def _fetch_exchange_rates(currencies: Sequence[str] | None = None) -> dict[str, 
     # 공식 전일 종가보다 하루 이상 뒤처져 변동률이 크게 부풀었다(관측: USD +1.65% vs
     # 실제 +0.27%, 2026-09-16). 레이트리밋은 아래 재시도 + TTL 캐시로 감당한다.
     pending = dict(mapping)
+    errors: dict[str, str] = {}
     for attempt in range(1, _FX_FETCH_MAX_ATTEMPTS + 1):
         failed: dict[str, str] = {}
         for currency, symbol in pending.items():
@@ -518,6 +548,7 @@ def _fetch_exchange_rates(currencies: Sequence[str] | None = None) -> dict[str, 
                     ticker = yf.Ticker(symbol)
                     _put(currency, float(ticker.fast_info.last_price), float(ticker.fast_info.previous_close))
             except Exception as exc:
+                errors[currency] = f"{type(exc).__name__}: {str(exc)[:240]}"
                 if attempt >= _FX_FETCH_MAX_ATTEMPTS:
                     logger.warning("%s 환율 조회 실패: %s", currency, exc)
                 failed[currency] = symbol
@@ -539,7 +570,10 @@ def _fetch_exchange_rates(currencies: Sequence[str] | None = None) -> dict[str, 
 
     if pending:
         joined = ", ".join(sorted(pending))
-        raise RuntimeError(f"환율 데이터를 조회하지 못했습니다: {joined}")
+        raise RuntimeError(
+            f"Yahoo 환율 조회 실패 ({_FX_FETCH_MAX_ATTEMPTS}회 시도): {joined}. "
+            + " | ".join(f"{currency}({mapping[currency]}): {errors[currency]}" for currency in sorted(pending))
+        )
 
     rates["updated_at"] = datetime.now()
     return rates

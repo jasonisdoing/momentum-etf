@@ -379,16 +379,20 @@ def load_real_holdings_table(
             return 0.0
         return float(df_cached["Close"].iloc[-1])
 
-    rates = preloaded_exchange_rates if preloaded_exchange_rates is not None else get_exchange_rates()
-    usd_krw = float((rates.get("USD") or {}).get("rate"))
-    aud_krw = float((rates.get("AUD") or {}).get("rate"))
+    required_currencies = sorted(
+        (set(df_holdings["currency"]) & {"USD", "AUD"}) | ({"AUD"} if account_id == "aus_account" else set())
+    )
+    rates = (
+        preloaded_exchange_rates if preloaded_exchange_rates is not None else get_exchange_rates(required_currencies)
+    )
 
     def _get_multiplier(currency):
-        if currency == "USD":
-            return usd_krw
-        elif currency == "AUD":
-            return aud_krw
-        return 1.0
+        if currency not in {"USD", "AUD"}:
+            return 1.0
+        rate = float((rates.get(currency) or {}).get("rate") or 0)
+        if rate <= 0:
+            raise RuntimeError(f"{currency} 평가 환율이 없거나 유효하지 않습니다.")
+        return rate
 
     def _calc_period_return(close_series: pd.Series, days: int) -> float | None:
         try:
@@ -533,6 +537,7 @@ def load_real_holdings_table(
     if account_id == "aus_account":
         intl_princi = intl_val - intl_change
 
+        aud_krw = _get_multiplier("AUD")
         intl_princi_krw = intl_princi * aud_krw
         intl_val_krw = intl_val * aud_krw
 

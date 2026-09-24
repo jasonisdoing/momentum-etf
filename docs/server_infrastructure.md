@@ -19,7 +19,7 @@ VM 의 역할은 컨테이너 가동뿐이다. 자동 배치는 돌지 않는다
 - 락: Mongo `batch_locks`(`_id=<job>`). 로컬 자동 실행과 `/batch` 수동 실행이 같은 락을 쓴다. 소유자는 `APP_TYPE`(`Local` / 미설정=PROD). 꺼져 있던 시간의 누락분은 따라잡지 않는다.
 - 큐는 서버·로컬이 공유. 로컬에만 결과가 남는 잡은 `utils/batch_queue.LOCAL_ONLY_JOBS` 에 등록하면 서버 워커가 claim 하지 않는다.
 - 배치 코드는 Docker 이미지에 포함 → 변경 시 재배포. `crontab`/`run_batch` 는 마운트라 즉시 반영.
-- 로그: `logs/cron/<job>.log`. 실패 시에만 래퍼 슬랙 알림.
+- 로그: `logs/cron/<job>.log`. 실패 시에만 래퍼 슬랙 알림. 환율 실패 예외에는 통화·Yahoo 심볼·시도 횟수·원본 오류가 포함된다.
 - 배치 추가·삭제 시 함께 고칠 7곳은 [developer_guide.md](developer_guide.md) §4.
 - 미국 가격 캐시는 야후 수집 뒤 네이버로 빈 OHLC를 복구하고, 토스로 최근 완료 거래일의 빈 거래량을 복구한 다음 `stock_meta` 가격 파생값을 계산한다. 복구 실패 항목은 가격 캐시 점검 알림에 포함한다.
 

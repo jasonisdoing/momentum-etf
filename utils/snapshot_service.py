@@ -115,7 +115,6 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
     from utils.portfolio_io import load_portfolio_master, load_real_holdings_table, save_daily_snapshot
 
     configs = load_account_configs()
-    exchange_rates = get_exchange_rates()
     account_summaries = []
     global_principal = 0.0
     global_cash = 0.0
@@ -135,7 +134,7 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
             if cash_currency and cash_currency != "KRW" and acc_cash <= 0:
                 native_cash = cash_balance_native
                 if native_cash > 0:
-                    rate_info = (exchange_rates or {}).get(cash_currency)
+                    rate_info = get_exchange_rates([cash_currency]).get(cash_currency)
                     rate = normalize_number((rate_info or {}).get("rate"))
                     if rate <= 0:
                         raise RuntimeError(f"{cash_currency} 환율을 가져오지 못했습니다.")
@@ -165,9 +164,7 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
             from utils.logger import get_app_logger
 
             get_app_logger().error(f"Failed to calculate valuation for account {aid}: {e}")
-            acc_valuation = 0.0
-            acc_purchase = 0.0
-            holding_details = []
+            raise RuntimeError(f"계좌 {aid} 스냅샷 평가 실패: {e}") from e
 
         acc_total_assets = acc_valuation + acc_cash
         global_valuation += acc_valuation

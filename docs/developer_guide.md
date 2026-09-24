@@ -56,6 +56,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 
 | 컬렉션 / 문서 | 내용 |
 | --- | --- |
+| `fx_quote_cache` | `services/price_service.py`의 통화별 환율 공유 캐시. 서버·배치가 유효기간 내 Yahoo 조회 결과를 재사용 |
 | `pool_settings` | 종목풀 정의(국가·통화·벤치마크·풀 성격 stock/etf·보유 종목 수·이평 종류와 기간). 화면 `/pools-settings` |
 | `account_settings` | 계좌 정의·합성 배분. 추가/삭제는 DB 직접 |
 | `stock_meta` | 종목 관리 원본(버킷·종목명). 삭제는 즉시 하드 딜리트 |
