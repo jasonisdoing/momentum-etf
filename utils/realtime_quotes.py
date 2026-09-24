@@ -292,6 +292,8 @@ def _get_naver_over_market_price_info(item: dict[str, Any]) -> tuple[dict[str, A
 def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, Any]]:
     """stock.naver.com 폴링 API에서 한국 개별 종목의 실시간 가격 정보를 조회합니다."""
 
+    from utils.market_session import REGULAR, market_session
+
     normalized_codes = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
     if not normalized_codes:
         return {}
@@ -299,6 +301,9 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
     if not requests:
         logger.debug("requests 라이브러리가 없어 네이버 주식 조회를 건너뜁니다.")
         return {}
+
+    # 한 번만 본다 — 한 응답 안에서 종목마다 세션 판정이 갈리면 안 된다.
+    regular_running = market_session("kor")["session"] == REGULAR
 
     naver_stock_polling_url = "https://stock.naver.com/api/polling/domestic/stock"
     naver_stock_polling_headers = {
@@ -345,6 +350,11 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
             # 표시·판정용 `nowVal` 은 시간외가 닫히면 이 값으로 돌아온다(위 분기).
             if regular_close is not None:
                 entry["regularClose"] = regular_close
+                # 정규장이 **진행 중이 아닐 때만** 이 값이 「마지막으로 마감된 정규장 종가」다.
+                # 장중에는 아직 확정되지 않은 그날 현재가여서, 앵커(전 거래일)와 하루 어긋난다.
+                # 의미는 소스마다 달라 여기서 맞춘다 — `effective_prices.last_regular_close` 주석.
+                if not regular_running:
+                    entry["lastRegularClose"] = regular_close
             # 일봉 스냅샷(fetch_naver_daily_ohlcv_snapshot)이 날짜 정합 검증에 쓴다.
             local_traded_at = str(item.get("localTradedAt") or "").strip()
             if local_traded_at:
@@ -812,9 +822,15 @@ def _toss_us_price_entry(item: dict[str, Any]) -> dict[str, Any]:
     # 마감 구간은 가격 자체가 `base` 라 여기서 계산하면 항상 0% 가 된다 — 그때는 실시간으로
     # 덮지 않고 비워 두어, 화면이 확정 종가 시리즈로 계산한 일간(%) 을 그대로 쓰게 한다.
     base = _safe_float(item.get("base"))
-    if session != CLOSED and base is not None and isfinite(base) and base > 0:
-        entry["prevClose"] = base
-        entry["changeRate"] = (price / base - 1.0) * 100.0
+    if base is not None and isfinite(base) and base > 0:
+        # 마지막으로 **마감된 정규장**의 종가. 날짜가 아니라 세션을 따라간다 — 애프터·데이장
+        # 구간에서는 그날 정규장 종가이고, 정규장 중에는 전일 종가다. 가격 캐시의 그날 봉은
+        # 장중 스냅샷일 수 있어(증분 배치가 장중에 쓰고 실시간이 그 봉을 교체한다) 확정
+        # 종가로 쓸 수 없으므로, 확정값이 필요한 자리는 이 값을 본다.
+        entry["lastRegularClose"] = base
+        if session != CLOSED:
+            entry["prevClose"] = base
+            entry["changeRate"] = (price / base - 1.0) * 100.0
     # 거래량·거래대금은 API의 누적값을 전달한다. 세션별 값으로 임의 분리하지 않는다.
     for key, field in (("tradeValue", "value"), ("tradeVolume", "volume"), ("volume", "volume")):
         parsed = _safe_float(item.get(field))
