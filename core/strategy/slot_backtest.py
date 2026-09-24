@@ -4,10 +4,11 @@
 
     매일 종가로 판정 → **다음 거래일 시가**에 체결
     동시 보유 상한 ``slots``, 균등 배분(정수 주수)
-    자리가 차 있으면 더 좋은 후보가 와도 **교체하지 않는다**
+    순위 버퍼를 설정하지 않으면 자리가 차 있을 때 교체하지 않는다
+    순위 버퍼가 있으면 진입 가능 종목과 보유 종목의 순위에서 컷 밖 보유분을 청산한다
     ADR 하한에 걸린 날은 **신규 진입만** 건너뛴다(보유 청산은 그대로 돈다)
 
-교체하지 않는 이유: 2026-08-14 kor(24개월)·us(60개월) 백테스트에서 최저수익/손실만/최장보유
+기본적으로 교체하지 않는 이유: 2026-08-14 kor(24개월)·us(60개월) 백테스트에서 최저수익/손실만/최장보유
 교체 전부가 현행보다 나빴다(kor +1912% vs 교체 시 +142~779%, us +240% vs -76~+95%).
 보유 중이라는 것 자체가 청산에 안 걸린 살아있는 추세라, 교체는 청산 규칙을 앞질러 이익
 종목을 자르고 슬리피지 왕복 비용만 쌓는다.
@@ -106,6 +107,7 @@ def run_slot_backtest(
     exit_signal: pd.DataFrame,
     priority: pd.DataFrame,
     slots: int,
+    rank_exit_limit: int | None,
     name_by: dict[str, str],
     industry_by: dict[str, str],
     exit_reason: str,
@@ -170,8 +172,8 @@ def run_slot_backtest(
     cash_curve: dict[pd.Timestamp, float] = {}
     last_day = span[-1]
     # 잠정 마지막 봉 모드에서만 채워진다 — 오늘 시가를 몰라 체결하지 못한 확정 주문.
-    pending_exits: set[str] = set()
-    blocked_exits: set[str] = set()
+    pending_exits: dict[str, str] = {}
+    blocked_exits: dict[str, str] = {}
     pending_entry_tickers: list[str] = []
 
     # 평가 전용 종가 — 그날 값이 없으면 **직전 유효 종가**로 본다.
@@ -183,6 +185,18 @@ def run_slot_backtest(
         """자리가 모자랄 때의 줄 세우기 값 — 모르는 종목은 맨 뒤."""
         score = priority.at[day, ticker]
         return float(score) if pd.notna(score) else 0.0
+
+    def rank_buffer_exits(day: pd.Timestamp) -> set[str]:
+        """진입 가능 종목과 현재 보유 종목의 순위에서 버퍼 밖 보유분만 고른다."""
+        if rank_exit_limit is None or entry_blocked(day):
+            return set()
+        eligible = set(entry.columns[entry.loc[day].fillna(False).astype(bool)])
+        ordered = sorted(eligible | set(holdings), key=lambda ticker: (-priority_of(ticker, day), ticker))
+        return {
+            ticker
+            for ticker in set(holdings) - set(ordered[:rank_exit_limit])
+            if pd.notna(close_df.at[day, ticker]) and pd.notna(priority.at[day, ticker])
+        }
 
     def _value_at(day: pd.Timestamp) -> float:
         """그날 종가로 평가한 총자산 — 현금 + 보유 평가액."""
@@ -204,22 +218,30 @@ def run_slot_backtest(
         cash_curve[day] = cash / curve[-1] * 100.0
 
         # 1) 청산 판정 (오늘 종가) → 내일 시가 체결
+        rank_exits = rank_buffer_exits(day)
         for ticker in list(holdings):
             position = holdings[ticker]
             price = close_df.at[day, ticker]
-            if ticker not in blocked_exits and (pd.isna(price) or not bool(exit_signal.at[day, ticker])):
+            if (
+                ticker not in blocked_exits
+                and ticker not in rank_exits
+                and (pd.isna(price) or not bool(exit_signal.at[day, ticker]))
+            ):
                 continue
+            reason = blocked_exits.get(ticker) or (
+                exit_reason if pd.notna(price) and bool(exit_signal.at[day, ticker]) else "순위 버퍼"
+            )
             exit_price = open_df.at[nxt, ticker]
             if pd.isna(exit_price):
                 if provisional_fill:
                     # 오늘 시가를 안 주는 종목(국내 ETF 등) — 체결가를 지어내지 않고
                     # 보유를 유지한 채 '오늘 체결 예정'으로 남긴다. 현금도 움직이지 않는다.
-                    pending_exits.add(ticker)
+                    pending_exits[ticker] = reason
                     continue
                 # 거래정지에는 가상의 종가 체결을 만들지 않고 다음 시가까지 보유한다.
-                blocked_exits.add(ticker)
+                blocked_exits[ticker] = reason
                 continue
-            blocked_exits.discard(ticker)
+            blocked_exits.pop(ticker, None)
             ret = (float(exit_price) * (1 - sell_slippage / 100)) / position["entry"] - 1
             cash += position["shares"] * float(exit_price) * (1 - sell_slippage / 100)
             trades.append(
@@ -238,7 +260,7 @@ def run_slot_backtest(
                     # 들고 있었으면 1일이다. 예전에는 경과일(-1)로 세서 하루 만에 판 거래가
                     # 「보유일 0」 으로, 오늘 산 종목이 「0일」 로 나왔다.
                     "days": len(close_df.loc[position["date"] : day]),
-                    "reason": exit_reason,
+                    "reason": reason,
                 }
             )
             del holdings[ticker]
@@ -350,13 +372,17 @@ def run_slot_backtest(
     # 본다. 이걸 엔진이 안 내주면 화면이 같은 판정을 **다시 구현**하게 되고, 한쪽만 고치는
     # 순간 "화면은 사라는데 백테스트는 안 샀다"가 된다 — 그러면 성과 숫자를 믿을 수 없다.
     # 체결 예정(fill_date) 주문은 잠정으로 다시 판정하지 않는다 — 이미 확정된 판정이다.
+    last_rank_exits = rank_buffer_exits(last_day)
     planned_exits = [
         ticker
         for ticker in holdings
         if ticker not in pending_exits
         and pd.notna(close_df.at[last_day, ticker])
-        and bool(exit_signal.at[last_day, ticker])
+        and (bool(exit_signal.at[last_day, ticker]) or ticker in last_rank_exits)
     ]
+    planned_exit_reasons = {
+        ticker: exit_reason if bool(exit_signal.at[last_day, ticker]) else "순위 버퍼" for ticker in planned_exits
+    }
     planned_entries: list[str] = []
     planned_entry_weights: dict[str, float] = {}
     pending_entry_set = set(pending_entry_tickers)
@@ -442,12 +468,14 @@ def run_slot_backtest(
         "open_positions": open_positions,
         # 다음 거래일 시가에 할 일 — 화면은 이걸 읽기만 한다(판정을 다시 하지 않는다).
         "planned_exits": planned_exits,
+        "planned_exit_reasons": planned_exit_reasons,
         "planned_entries": planned_entries,
         "planned_entry_weights": planned_entry_weights,
         # 잠정 마지막 봉 모드에서만 채워진다 — 오늘 시가를 몰라 체결하지 못한 확정 주문.
         # 매도는 open_positions 행의 fill_date 로도 표시된다. 진입 비중은 우선 예약한
         # 예산 범위이며 체결가·체결 주수를 지어내지 않는다.
         "pending_exits": sorted(pending_exits),
+        "pending_exit_reasons": pending_exits,
         "pending_entries": [
             {"ticker": ticker, "sleeve_weight_pct": pending_entry_weights[ticker]} for ticker in pending_entry_tickers
         ],

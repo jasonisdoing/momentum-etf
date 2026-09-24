@@ -16,6 +16,30 @@ from utils.momentum_service import (
 router = APIRouter(prefix="/internal/strategy-momentum", tags=["strategy-momentum"])
 
 
+def _with_us_stock_sectors(result: dict, pool: str, row_keys: tuple[str, ...]) -> dict:
+    """미국 개별주 화면 행에만 표시용 섹터를 붙인다. 엔진 결과는 변경하지 않는다."""
+    from utils.industry_map import us_classification_maps
+    from utils.settings_loader import get_ticker_type_settings
+
+    settings = get_ticker_type_settings(pool) or {}
+    if str(settings.get("country_code") or "").strip().lower() != "us":
+        return result
+    if str(settings.get("pool_kind") or "").strip().lower() != "stock":
+        return result
+
+    _, sectors = us_classification_maps()
+    return {
+        **result,
+        **{
+            key: [
+                {**row, "sector": sectors.get(str(row.get("ticker") or "").strip().upper(), "")}
+                for row in result.get(key, [])
+            ]
+            for key in row_keys
+        },
+    }
+
+
 def _month_options(settings: dict) -> list[int]:
     """기간 선택지 — 시스템 공용 목록에서 이 전략이 실제로 돌릴 수 있는 개월 수까지만 남긴다.
 
@@ -72,15 +96,21 @@ def _ma_rule_payload(settings: dict) -> dict:
     }
 
 
-def _constraints_payload() -> dict:
+def _constraints_payload(top_n: int) -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트 복사본 제거)."""
-    from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS
+    from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS, RANK_BUFFER_MULT_OPTIONS
+    from core.strategy.momentum.signals import rank_buffer_limit
 
     return {
         # ADR 하한 — 그날 시장 ADR 이 미만이면 신규 진입만 건너뛴다. None = 게이트 없음(기본).
         "adr_floor_options": list(ADR_FLOOR_OPTIONS),
         # 진입 문턱 — 이격 ≥ 배수 × 20일 변동성일 때만 진입 자격. None = 없음(기본).
         "entry_vol_mult_options": list(ENTRY_VOL_MULT_OPTIONS),
+        # 순위 버퍼 — 보유 종목 순위가 컷 순위 밖이면 청산. None = 없음(기본).
+        # 컷 순위는 그 풀의 보유 종목 수에 달려 있어 엔진과 같은 함수로 여기서 붙인다.
+        "rank_buffer_options": [
+            {"value": mult, "limit": rank_buffer_limit(mult, top_n)} for mult in RANK_BUFFER_MULT_OPTIONS
+        ],
     }
 
 
@@ -116,7 +146,7 @@ def get_strategy_momentum(
         "month_options": _month_options(settings),
         "tuning_month_options": _tuning_month_options(settings),
         "ma_rule": _ma_rule_payload(settings),
-        "constraints": _constraints_payload(),
+        "constraints": _constraints_payload(settings["top_n"]),
         "positions": None,
     }
 
@@ -143,7 +173,7 @@ def put_strategy_momentum_settings(
         "month_options": _month_options(saved),
         "tuning_month_options": _tuning_month_options(saved),
         "ma_rule": _ma_rule_payload(saved),
-        "constraints": _constraints_payload(),
+        "constraints": _constraints_payload(saved["top_n"]),
         "positions": None,
     }
 
@@ -159,7 +189,10 @@ def post_strategy_momentum_positions(
     """
     from utils.momentum_backtest import current_positions
 
-    return current_positions(load_settings(pool))
+    settings = load_settings(pool)
+    return _with_us_stock_sectors(
+        current_positions(settings), settings["pool"], ("holdings", "planned_entries", "exited_today", "candidates")
+    )
 
 
 @router.post("/backtest")
@@ -177,7 +210,8 @@ def post_strategy_momentum_backtest(
     months = payload.get("months") if isinstance(payload, dict) else None
     if not isinstance(months, int) or isinstance(months, bool):
         raise ValueError("'months' 는 정수여야 합니다.")
-    return run_backtest(months, load_settings(pool))
+    settings = load_settings(pool)
+    return _with_us_stock_sectors(run_backtest(months, settings), settings["pool"], ("trades",))
 
 
 @router.post("/tuning")
