@@ -34,6 +34,7 @@ import {
 } from "@/lib/backtest-periods";
 import {
   industryColumn,
+  sectorColumn,
   adrColumn as sharedAdrColumn,
   formatSignedPct,
   maExitGapColumn,
@@ -55,7 +56,7 @@ import {
 } from "@/lib/grid-cells";
 import { isTrendBroken } from "@/lib/name-highlight";
 import { updateStockMemo } from "@/lib/stocks-store";
-import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
+import { poolHasIndustry, poolHasMarketCap, poolHasUsStockSector } from "@/lib/pool-industry";
 import { formatMaLabel, MaDaysSelect } from "../components/MaDaysSelect";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { formatPrice } from "../../lib/price-format";
@@ -124,6 +125,7 @@ type PlanRow = {
   ticker: string;
   name: string;
   industry: string;
+  sector?: string;
   market_cap_rank?: number | null;
   change_pct: number | null;
   /** 현재 시세 — 이탈 행도 지금 값이다(청산가는 exit_price). */
@@ -164,6 +166,7 @@ type CandidateRow = {
   ticker: string;
   name: string;
   industry: string;
+  sector?: string;
   market_cap_rank?: number | null;
   change_pct: number | null;
   price: number | null;
@@ -191,6 +194,7 @@ type Trade = {
   ticker: string;
   name: string;
   industry: string;
+  sector?: string;
   entry_date: string;
   entry_price: number;
   exit_date: string;
@@ -253,6 +257,7 @@ type BacktestTradeRow = {
   ticker: string;
   name: string;
   industry: string;
+  sector?: string;
   entry_date: string;
   entry_price: number;
   exit_date: string | null;
@@ -514,6 +519,7 @@ export function MomentumClient() {
   const poolKind = selectedPoolOption?.pool_kind ?? "";
   // 업종 컬럼 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
   const hasIndustryData = poolHasIndustry(selectedPoolOption);
+  const hasUsStockSector = poolHasUsStockSector(selectedPoolOption);
   const hasMarketCap = poolHasMarketCap(selectedPoolOption);
   const saveSettings = useCallback(async () => {
     if (draftMaRule == null || !draftStartDate) {
@@ -810,6 +816,7 @@ export function MomentumClient() {
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
       }),
       industryColumn<PlanRow>({ hide: !hasIndustryData }),
+      ...(hasUsStockSector ? [sectorColumn<PlanRow>()] : []),
       {
         field: "change_pct",
         headerName: "일간(%)",
@@ -849,6 +856,7 @@ export function MomentumClient() {
     [
       fillDay,
       hasIndustryData,
+      hasUsStockSector,
       hasMarketCap,
       positions?.live,
       renderTicker,
@@ -886,6 +894,7 @@ export function MomentumClient() {
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
       }),
       industryColumn<CandidateRow>({ hide: !hasIndustryData }),
+      ...(hasUsStockSector ? [sectorColumn<CandidateRow>()] : []),
       {
         field: "change_pct",
         headerName: "일간(%)",
@@ -918,6 +927,7 @@ export function MomentumClient() {
     ],
     [
       hasIndustryData,
+      hasUsStockSector,
       hasMarketCap,
       renderTicker,
       saveMemo,
@@ -1005,6 +1015,7 @@ export function MomentumClient() {
       tickerColumn<BacktestTradeRow>({ width: 96, cellRenderer: (p) => renderTicker(p.value) }),
       stockNameColumn<BacktestTradeRow>({}),
       industryColumn<BacktestTradeRow>({ hide: !hasIndustryData }),
+      ...(hasUsStockSector ? [sectorColumn<BacktestTradeRow>()] : []),
       { headerName: "편입일", field: "entry_date", width: 116 },
       { headerName: "매수가", field: "entry_price", width: 110, type: "numericColumn", valueFormatter: (p) => price(p.value) },
       { headerName: "청산일", field: "exit_date", width: 116 },
@@ -1020,7 +1031,7 @@ export function MomentumClient() {
       { headerName: "보유일", field: "days", width: 84, type: "numericColumn" },
       { headerName: "사유", field: "reason", width: 110 },
     ];
-  }, [hasIndustryData, positions?.currency, renderTicker]);
+  }, [hasIndustryData, hasUsStockSector, positions?.currency, renderTicker]);
 
   if (loading && !view) {
     return (

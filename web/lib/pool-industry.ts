@@ -40,3 +40,9 @@ export function poolHasIndustry(pool: PoolIndustrySource | null | undefined): bo
 export function poolHasMarketCap(pool: PoolIndustrySource | null | undefined): boolean {
   return String(pool?.pool_kind ?? "").trim().toLowerCase() === "stock";
 }
+
+/** 미국 개별주만 Yahoo 섹터 분류를 별도 컬럼으로 표시한다. */
+export function poolHasUsStockSector(pool: PoolIndustrySource | null | undefined): boolean {
+  return String(pool?.country_code ?? "").trim().toLowerCase() === "us"
+    && String(pool?.pool_kind ?? "").trim().toLowerCase() === "stock";
+}
