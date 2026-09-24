@@ -887,8 +887,15 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
             as_of=valuation_date,
         )
 
-        # 고정 기준금액은 실제 평가액·인출·고정 자산 규모에 맞춰 축소하지 않는다.
+        # IS는 매매하지 않고 현재 비중을 목표에도 보존한다. 남은 몫만 슬리브와 현금에 배정한다.
         fixed_pct = float(account["fixed_asset_pct"])
+        investable_ratio = 1.0 - fixed_pct / 100.0
+        shares = {key: value * investable_ratio for key, value in shares.items()}
+        reserved_cash_share *= investable_ratio
+        for row in holdings:
+            row["weight_pct"] *= investable_ratio
+            for key in keys:
+                row[f"{key}_weight"] *= investable_ratio
         sleeve_amount_krw = {key: ctx["mix_capital_krw"] * shares[key] / 100.0 for key in keys}
         target_schedule = dated_target_shares(
             {key: state.targets for key, state in states.items()},
@@ -911,11 +918,11 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
                     "sources": [],
                     "is_fixed_asset": True,
                     "price": None,
-                    "weight_pct": 0.0,
-                    "actual_weight_pct": 0.0,
+                    "weight_pct": fixed_pct,
+                    "actual_weight_pct": fixed_pct,
                     "held_value": account["fixed_asset_value"],
                     "current_weight_pct": fixed_pct,
-                    "target_amount": None,
+                    "target_amount": ctx["mix_capital_krw"] * fixed_pct / 100.0,
                     "held_quantity": None,
                     "target_quantity": None,
                     "trade_quantity": None,
