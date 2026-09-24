@@ -40,7 +40,9 @@ from utils.index_constituents_loader import (  # noqa: E402
     load_index_constituents,
     load_index_meta,
     save_index_constituents,
+    us_market_constituents,
 )
+from utils.index_pool_alert import notify_unregistered_index_stocks  # noqa: E402
 from utils.perf_metrics import period_sortino  # noqa: E402
 
 _HEADERS = {
@@ -388,6 +390,7 @@ def main() -> None:
     args = parser.parse_args()
 
     failed: list[str] = []
+    alert_items: dict[str, list[dict[str, Any]]] = {}
 
     for label, index, fetch, source in (
         ("S&P500", "SP500", _fetch_sp500, _SP500_URL),
@@ -400,6 +403,7 @@ def main() -> None:
             print(f"  {len(items)}개 종목 확인. 시가총액/기간 수익률 조회 시작...")
             items = _enrich_constituents(items, index, args.refresh_classification)
             _save(index, items, source)
+            alert_items[index] = us_market_constituents(index, items)
         except Exception as exc:
             print(f"{label} 조회 실패: {exc}", file=sys.stderr)
             failed.append(label)
@@ -408,6 +412,9 @@ def main() -> None:
         # 종료 코드를 남겨야 cron 래퍼가 실패로 보고 슬랙 알림을 보낸다.
         print(f"실패한 인덱스: {', '.join(failed)}", file=sys.stderr)
         sys.exit(1)
+
+    count = notify_unregistered_index_stocks("us", alert_items)
+    print(f"미국 지수 구성종목 종목풀 미등록: {count}개")
 
 
 if __name__ == "__main__":
