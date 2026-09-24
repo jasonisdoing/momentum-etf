@@ -99,6 +99,8 @@ type RankRow = {
   "거래대금(1주)"?: number | null;
   "괴리율": number | null;
   "일간(%)": number | null;
+  /** 직전 거래일 종가의 그 전날 대비 변동률 — 일간(%)이 장중 값일 때 마지막으로 확정된 하루. */
+  "전거래일(%)": number | null;
   "1주(%)": number | null;
   "2주(%)": number | null;
   "3주(%)": number | null;
@@ -744,6 +746,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         "거래대금(1주)": null,
         괴리율: null,
         "일간(%)": null,
+        "전거래일(%)": null,
         "1주(%)": null,
         "2주(%)": null,
         "3주(%)": null,
@@ -1154,8 +1157,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
       },
       // 기간 수익률은 현재가 바로 오른쪽에 짧은 기간부터 모아 둔다.
+      // 맨 앞의 전거래일은 기간이 아니라 **직전 한 봉**이다 — 장중에는 일간(%)이 흔들리므로
+      // 마지막으로 확정된 하루를 바로 옆에서 같이 본다.
       ...(metricMode === "basic"
-        ? [
+        ? ([
+            { field: "전거래일(%)", headerName: "전거래일", width: 96, tooltip: "직전 거래일 종가의 그 전날 대비 변동률 — 장중에도 값이 바뀌지 않는다." },
             { field: "1주(%)", headerName: "1주", width: 88 },
             { field: "2주(%)", headerName: "2주", width: 88 },
             { field: "1달(%)", headerName: "1달", width: 88 },
@@ -1164,14 +1170,17 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             { field: "12달(%)", headerName: "1년", width: 78 },
             { field: "24달(%)", headerName: "2년", width: 78 },
             { field: "36달(%)", headerName: "3년", width: 78 },
-          ].map(({ field, headerName, width }) => ({
-            field,
-            headerName,
-            minWidth: width,
-            width,
-            type: "rightAligned",
-            cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
-          }) as ColDef<RankGridRow>)
+          ] as { field: string; headerName: string; width: number; tooltip?: string }[]).map(
+            ({ field, headerName, width, tooltip }) => ({
+              field,
+              headerName,
+              headerTooltip: tooltip,
+              minWidth: width,
+              width,
+              type: "rightAligned",
+              cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
+            }) as ColDef<RankGridRow>,
+          )
         : []),
       // 변동성·RSI — MA 이탈 왼쪽. 진입 문턱(배수×변동성) 판정과 붙여 본다.
       volatilityColumn<RankGridRow>({ field: "변동성" }),

@@ -240,6 +240,20 @@ def _slice_close_series_to_date(close_series: pd.Series | None, cutoff_date: pd.
     return sliced.sort_index()
 
 
+def _bar_change_pct(series: pd.Series, back: int) -> float | None:
+    """한 봉의 직전 봉 대비 변동률(%).
+
+    `back=0` 이면 마지막 봉(일간), `back=1` 이면 그 앞 봉(전거래일)이다. 장중에는
+    마지막 봉이 실시간이라 `back=1` 이 마지막으로 **확정된** 하루가 된다.
+    """
+    if len(series) < back + 2:
+        return None
+    prev_close = float(series.iloc[-(back + 2)])
+    if prev_close <= 0:
+        return None
+    return ((float(series.iloc[-(back + 1)]) / prev_close) - 1.0) * 100.0
+
+
 def _calc_period_return(close_series: pd.Series, days: int) -> float | None:
     series = pd.to_numeric(close_series, errors="coerce").dropna()
     if series.empty:
@@ -348,6 +362,7 @@ def _extract_price_metrics_from_close_series(
         "변동성": None,
         "괴리율": None,
         "일간(%)": None,
+        "전거래일(%)": None,
         "1주(%)": None,
         "2주(%)": None,
         "3주(%)": None,
@@ -379,11 +394,10 @@ def _extract_price_metrics_from_close_series(
         return empty_result
 
     current_price = float(series.iloc[-1])
-    daily_pct = None
-    if len(series) > 1:
-        prev_close = float(series.iloc[-2])
-        if prev_close > 0:
-            daily_pct = ((current_price / prev_close) - 1.0) * 100.0
+    daily_pct = _bar_change_pct(series, 0)
+    # 전거래일 — 장중에는 마지막 봉이 실시간이라 이 값이 마지막 확정 하루다.
+    # 실시간 오버레이(`_apply_realtime_overlay`)는 일간(%)만 덮으므로 여기는 흔들리지 않는다.
+    prev_day_pct = _bar_change_pct(series, 1)
 
     # 고점 대비(%) — 모멘텀 전략과 **같은 함수**(core.strategy.scoring.drawdown_from_high_pct).
     drawdown = drawdown_from_high_pct(series, current_price)
@@ -398,6 +412,7 @@ def _extract_price_metrics_from_close_series(
         # 20일 일간 수익률 표준편차(%) — 모멘텀 진입 문턱 판정과 같은 정의(화면 공용 컬럼).
         "변동성": round(latest_volatility, 2) if latest_volatility is not None else None,
         "일간(%)": daily_pct,
+        "전거래일(%)": prev_day_pct,
         "1주(%)": _calc_period_return(series, 5),
         "2주(%)": _calc_period_return(series, 10),
         "3주(%)": _calc_period_return(series, 15),
@@ -514,6 +529,7 @@ def _normalize_ranking_values(
     percent_columns = [
         "괴리율",
         "일간(%)",
+        "전거래일(%)",
         "1주(%)",
         "2주(%)",
         "3주(%)",

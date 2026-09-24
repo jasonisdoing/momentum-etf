@@ -34,6 +34,8 @@ type RankRow = {
   현재가: number | null;
   "괴리율": number | null;
   "일간(%)": number | null;
+  /** 직전 거래일 종가의 그 전날 대비 변동률 — 일간(%)이 장중 값일 때 마지막으로 확정된 하루. */
+  "전거래일(%)": number | null;
   "1주(%)": number | null;
   "2주(%)": number | null;
   "3주(%)": number | null;
