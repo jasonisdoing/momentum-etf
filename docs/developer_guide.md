@@ -40,7 +40,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | `/account-settings` | 계좌 메타·증권사 연동·합성 슬리브별 종목풀·보유종목 알림 On/Off | `utils/account_settings_store.py`, `utils/holdings_alarm_service.py` |
 | `/assets`, `/holdings*` | 자산·보유 | `utils/holdings_detail_service.py`, `portfolio_master` |
 | `/daily`, `/weekly`, `/monthly`, `/yearly`, `/dashboard`, `/snapshots` | 일별 원장과 집계 | `utils/daily_fund_service.py` 등 |
-| `/market-trend`, `/market`, `/live-24h` | 시장 지수 추세·지표 | `services/toss_market_service.py` 등 |
+| `/market-trend`, `/market-calendar`, `/market`, `/live-24h` | 시장 지수 추세·캘린더·지표 | `services/toss_market_service.py` 등 |
 | `/kor-market-stock`, `/us-market-stock`, `/aus-market-stock`, `/kor-market-etf` | 시장별 종목 탐색·종목풀 추가 | `index_constituents`, KIS 마스터 |
 | `/ticker`, `/compare` | 개별 종목 상세·비교 | `services/etf_holdings_service.py` |
 | `/batch`, `/system` | 배치 수동 실행·상태 | `utils/system_service.py`, `utils/batch_queue.py` |
