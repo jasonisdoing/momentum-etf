@@ -12,16 +12,18 @@ type CalendarDay = {
   inMonth: boolean;
 };
 
-type PricePoint = { close: number; change_pct: number | null; provisional: boolean };
-type AdrPoint = { date: string; adr: number | null; advance: number; decline: number };
+type PricePoint = { close: number; change_pct: number | null; provisional: boolean; quote_at?: string };
+type AdrPoint = { date: string; adr: number | null; advance: number; decline: number; entry_allowed: boolean; gate_adr: number | null };
 type DayData = {
   sessions: Record<"kor" | "us", "closed" | "closed_future" | "finished" | "open" | "scheduled">;
   indices: Record<string, PricePoint | null>;
+  futures: Record<string, PricePoint> | null;
   fx: PricePoint | null;
   adr: Record<"kor_stock" | "us_stock", AdrPoint | null>;
 };
 type CalendarResponse = {
   days: Record<string, DayData>;
+  adr_meta: Record<"kor_stock" | "us_stock", { floor: number | null; gate_market: string | null }>;
   warnings: string[];
   error?: string;
 };
@@ -52,6 +54,13 @@ function formatChange(value: number | null | undefined): string {
 function changeClass(value: number | null | undefined): string {
   if (value == null || value === 0) return "";
   return value > 0 ? styles.positive : styles.negative;
+}
+
+function adrDecisionTitle(point: AdrPoint | null | undefined, meta: CalendarResponse["adr_meta"]["kor_stock"] | undefined): string | undefined {
+  if (!point || !meta) return undefined;
+  if (meta.floor == null) return "ADR 하한 없음 · 신규 진입 허용";
+  const reference = point.gate_adr == null ? "기준 ADR 데이터 없음" : `기준 ADR 약 ${point.gate_adr.toFixed(1)}`;
+  return `${meta.gate_market ?? "기준 시장 없음"} · ${reference} / 하한 ${meta.floor} · 신규 진입 ${point.entry_allowed ? "허용" : "제한"}`;
 }
 
 function dateKey(year: number, month: number, day: number): string {
@@ -154,8 +163,8 @@ export function MarketCalendarClient({ today }: { today: string }) {
         {calendarError ? <p className={styles.error} role="alert">{calendarError}</p> : null}
         {calendar?.warnings.length ? <p className={styles.error} role="status">{calendar.warnings.join(" ")}</p> : null}
         <p className={styles.notice}>
-          {loading ? "날짜별 시장 데이터를 불러오는 중…" : "지수는 시장 현지 거래일·환율은 일봉 날짜 기준 · 장중 수치는 잠정값(*) · ‘—’는 수집되지 않은 값입니다."}
-          {loading ? "" : " 한국·미국 개별주는 각 종목풀의 종가 ADR이며 다음 거래일 진입 판단에 사용됩니다."}
+          {loading ? "날짜별 시장 데이터를 불러오는 중…" : "지수는 시장 현지 거래일·환율은 일봉 날짜 기준 · 장중·선물은 잠정값(*) · 미국 개장 전 지수 값이 없으면 오늘의 지연 선물 시세를 표시합니다."}
+          {loading ? "" : " 한국·미국 개별주는 각 종목풀의 종가 ADR입니다. 빨강은 모멘텀 신규 진입 허용, 파랑은 ADR 하한 미달입니다."}
         </p>
 
         <div className={styles.calendarScroll}>
@@ -186,13 +195,19 @@ export function MarketCalendarClient({ today }: { today: string }) {
                       const session = data?.sessions[row.country];
                       const holiday = session === "closed" || session === "closed_future";
                       const point = "ticker" in row ? data?.indices[row.ticker] : null;
-                      const adr = "pool" in row ? data?.adr[row.pool]?.adr : null;
+                      const future = "ticker" in row && row.country === "us" && point?.change_pct == null
+                        ? data?.futures?.[row.ticker] : null;
+                      const displayPoint = future ?? point;
+                      const adrPoint = "pool" in row ? data?.adr[row.pool] : null;
                       return (
                         <span key={row.label}>
-                          <span>{holiday ? `${row.label} ${SESSION_LABELS[session]}` : row.label}</span>
+                          <span>{holiday ? `${row.label} ${SESSION_LABELS[session]}` : future ? `${row.label} 선물` : row.label}</span>
                           {holiday ? null : "pool" in row
-                            ? <span>ADR {adr == null ? "—" : adr.toFixed(1)}</span>
-                            : <span className={changeClass(point?.change_pct)}>{formatChange(point?.change_pct)}{point?.provisional ? "*" : ""}</span>}
+                            ? <span
+                                className={adrPoint?.adr == null ? "" : adrPoint.entry_allowed ? styles.positive : styles.negative}
+                                title={adrDecisionTitle(adrPoint, calendar?.adr_meta[row.pool])}
+                              >ADR {adrPoint?.adr == null ? "—" : adrPoint.adr.toFixed(1)}</span>
+                            : <span className={changeClass(displayPoint?.change_pct)} title={future ? "Yahoo 선물 지연 시세" : undefined}>{formatChange(displayPoint?.change_pct)}{displayPoint?.provisional ? "*" : ""}</span>}
                         </span>
                       );
                     })}
