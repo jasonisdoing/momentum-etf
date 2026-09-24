@@ -96,21 +96,15 @@ def _ma_rule_payload(settings: dict) -> dict:
     }
 
 
-def _constraints_payload(top_n: int) -> dict:
+def _constraints_payload() -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트 복사본 제거)."""
-    from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS, RANK_BUFFER_MULT_OPTIONS
-    from core.strategy.momentum.signals import rank_buffer_limit
+    from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS
 
     return {
         # ADR 하한 — 그날 시장 ADR 이 미만이면 신규 진입만 건너뛴다. None = 게이트 없음(기본).
         "adr_floor_options": list(ADR_FLOOR_OPTIONS),
         # 진입 문턱 — 이격 ≥ 배수 × 20일 변동성일 때만 진입 자격. None = 없음(기본).
         "entry_vol_mult_options": list(ENTRY_VOL_MULT_OPTIONS),
-        # 순위 버퍼 — 보유 종목 순위가 컷 순위 밖이면 청산. None = 없음(기본).
-        # 컷 순위는 그 풀의 보유 종목 수에 달려 있어 엔진과 같은 함수로 여기서 붙인다.
-        "rank_buffer_options": [
-            {"value": mult, "limit": rank_buffer_limit(mult, top_n)} for mult in RANK_BUFFER_MULT_OPTIONS
-        ],
     }
 
 
@@ -146,7 +140,7 @@ def get_strategy_momentum(
         "month_options": _month_options(settings),
         "tuning_month_options": _tuning_month_options(settings),
         "ma_rule": _ma_rule_payload(settings),
-        "constraints": _constraints_payload(settings["top_n"]),
+        "constraints": _constraints_payload(),
         "positions": None,
     }
 
@@ -173,7 +167,7 @@ def put_strategy_momentum_settings(
         "month_options": _month_options(saved),
         "tuning_month_options": _tuning_month_options(saved),
         "ma_rule": _ma_rule_payload(saved),
-        "constraints": _constraints_payload(saved["top_n"]),
+        "constraints": _constraints_payload(),
         "positions": None,
     }
 

@@ -7,7 +7,6 @@
    자리가 모자라면 **장기 이격률**이 큰 순으로 담는다(순위 화면과 같은 `rank_score`).
 3. 청산: 둘 중 하나라도 깨진 날. 판정은 종가, 체결은 다음 거래일 시가.
 4. 자리 배분: 동시 보유 상한 top_n, 균등 배분(정수 주수).
-   순위 버퍼가 없으면 교체하지 않고, 있으면 컷 밖 보유 종목을 청산한다.
 5. ADR 하한: 그날 시장 ADR 이 하한 미만이면 **신규 진입만** 건너뛴다. 보유는 그대로 둔다.
 6. 장중 화면: 실시간 가격을 **마지막 봉**으로 쓴 같은 신호 계산으로 판정을 보여준다
    (strategy_logic.md 「장중 잠정 실행」). 규칙은 그대로고 입력만 잠정이라, 종가가 확정되면 백테스트와 일치한다.
@@ -27,7 +26,6 @@ import pandas as pd
 from config import CACHE_TTL_COMPUTE
 from core.strategy.intraday import mark_engine_statuses
 from core.strategy.momentum import signals as momentum_signals
-from core.strategy.momentum.signals import rank_buffer_limit
 from core.strategy.price_panel import build_price_panel
 from core.strategy.scoring import drawdown_from_high_pct, is_new_listing, listing_months
 from core.strategy.slot_backtest import run_slot_backtest
@@ -117,7 +115,6 @@ def run_backtest(
         # 순위를 모르는 종목은 맨 뒤로 — 자리 경쟁에서 밀린다(0 으로 채우면 음수 이격보다 앞선다).
         priority=signals["priority"].fillna(float("-inf")),
         slots=int(settings["top_n"]),
-        rank_exit_limit=rank_buffer_limit(settings["rank_buffer_mult"], int(settings["top_n"])),
         name_by=context["name_by"],
         industry_by=context["industry_by"],
         exit_reason="이탈",
@@ -310,7 +307,6 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             exit_signal=eff["exit"],
             priority=eff["priority"].fillna(float("-inf")),
             slots=slots,
-            rank_exit_limit=rank_buffer_limit(settings["rank_buffer_mult"], slots),
             name_by=name_by,
             industry_by=industry_by,
             exit_reason="이탈",
@@ -411,17 +407,8 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
 
     held_tickers = {h["ticker"] for h in holdings}
     entry_tickers = {row["ticker"] for row in entries}
-    # 엔진의 순위 버퍼와 같이 진입 자격 종목과 보유 종목을 함께 센다.
-    # 자격이 잠시 사라진 보유 종목도 현재 순위를 보여준다.
-    ranked_tickers = {row["ticker"] for row in rows if row["eligible"]} | held_tickers
-    score_by_ticker = {row["ticker"]: row["long_gap_pct"] for row in rows}
-    rank_by_ticker = {
-        ticker: index
-        for index, ticker in enumerate(
-            sorted(ranked_tickers, key=lambda ticker: (-score_by_ticker.get(ticker, 0.0), ticker)),
-            start=1,
-        )
-    }
+    # 진입 자격 종목의 장기 이격률 순위 — 보유·진입 예정·후보 표가 같은 번호를 쓴다.
+    rank_by_ticker = {row["ticker"]: index for index, row in enumerate([r for r in rows if r["eligible"]], start=1)}
     for item in [*holdings, *exited_today]:
         item["rank"] = rank_by_ticker.get(item["ticker"])
     # 진입 후보 — 우선순위 순 top_n 개. 이미 담은(보유·진입 예정) 종목은 표에서 뺀다.
@@ -447,7 +434,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         "target_entries": target_entries,
         # 이 현황을 만든 엔진 실행의 일별 곡선 — 합성 슬리브 몫이 같은 실행 결과를 읽는다.
         "daily": engine_daily,
-        # 순위는 잠정 자격·보유 기준이라 체결 예정 종목이 둘 다 아니면 값이 없다.
+        # 순위는 잠정 진입 자격 기준이라 체결 예정 종목이 오늘 자격 밖이면 값이 없다.
         "planned_entries": [{**row, "rank": rank_by_ticker.get(row["ticker"])} for row in entries],
         "exited_today": exited_today,
         "candidates": candidates,

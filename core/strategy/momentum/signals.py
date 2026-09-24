@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-
 import pandas as pd
 
 from core.strategy.scoring import compute_eligibility_mask, compute_trend_frame, hold_eligible, rank_score
@@ -37,17 +35,6 @@ def entry_signal(
     volatility = daily_volatility_pct(close_df)
     floor = float(entry_vol_mult) * volatility
     return signals["eligible"] & (signals["long"] > floor) & (signals["short"] >= floor) & volatility.notna()
-
-
-def rank_buffer_limit(rank_buffer_mult: float | None, top_n: int) -> int | None:
-    """순위 버퍼의 **컷 순위** — 보유 종목 순위가 이 값보다 크면 청산한다. None = 버퍼 없음.
-
-    배수 × 보유 종목 수를 올림한다(5종목 × 1.5 = 7.5 → 8위). 내림하면 버퍼가 설정보다
-    좁아진다. 엔진 판정과 화면 표기("2× (20위)")가 이 함수 하나를 쓴다.
-    """
-    if rank_buffer_mult is None:
-        return None
-    return math.ceil(float(rank_buffer_mult) * int(top_n))
 
 
 def entry_gap_ok(long_disparity_pct, short_disparity_pct, volatility_pct, entry_vol_mult: float | None) -> bool:

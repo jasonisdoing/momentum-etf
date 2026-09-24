@@ -4,8 +4,7 @@
 
     매일 종가로 판정 → **다음 거래일 시가**에 체결
     동시 보유 상한 ``slots``, 균등 배분(정수 주수)
-    순위 버퍼를 설정하지 않으면 자리가 차 있을 때 교체하지 않는다
-    순위 버퍼가 있으면 진입 가능 종목과 보유 종목의 순위에서 컷 밖 보유분을 청산한다
+    자리가 차 있을 때는 순위만으로 보유 종목을 교체하지 않는다
     ADR 하한에 걸린 날은 **신규 진입만** 건너뛴다(보유 청산은 그대로 돈다)
 
 기본적으로 교체하지 않는 이유: 2026-08-14 kor(24개월)·us(60개월) 백테스트에서 최저수익/손실만/최장보유
@@ -107,7 +106,6 @@ def run_slot_backtest(
     exit_signal: pd.DataFrame,
     priority: pd.DataFrame,
     slots: int,
-    rank_exit_limit: int | None,
     name_by: dict[str, str],
     industry_by: dict[str, str],
     exit_reason: str,
@@ -186,18 +184,6 @@ def run_slot_backtest(
         score = priority.at[day, ticker]
         return float(score) if pd.notna(score) else 0.0
 
-    def rank_buffer_exits(day: pd.Timestamp) -> set[str]:
-        """진입 가능 종목과 현재 보유 종목의 순위에서 버퍼 밖 보유분만 고른다."""
-        if rank_exit_limit is None or entry_blocked(day):
-            return set()
-        eligible = set(entry.columns[entry.loc[day].fillna(False).astype(bool)])
-        ordered = sorted(eligible | set(holdings), key=lambda ticker: (-priority_of(ticker, day), ticker))
-        return {
-            ticker
-            for ticker in set(holdings) - set(ordered[:rank_exit_limit])
-            if pd.notna(close_df.at[day, ticker]) and pd.notna(priority.at[day, ticker])
-        }
-
     def _value_at(day: pd.Timestamp) -> float:
         """그날 종가로 평가한 총자산 — 현금 + 보유 평가액."""
         total = cash
@@ -218,19 +204,12 @@ def run_slot_backtest(
         cash_curve[day] = cash / curve[-1] * 100.0
 
         # 1) 청산 판정 (오늘 종가) → 내일 시가 체결
-        rank_exits = rank_buffer_exits(day)
         for ticker in list(holdings):
             position = holdings[ticker]
             price = close_df.at[day, ticker]
-            if (
-                ticker not in blocked_exits
-                and ticker not in rank_exits
-                and (pd.isna(price) or not bool(exit_signal.at[day, ticker]))
-            ):
+            if ticker not in blocked_exits and (pd.isna(price) or not bool(exit_signal.at[day, ticker])):
                 continue
-            reason = blocked_exits.get(ticker) or (
-                exit_reason if pd.notna(price) and bool(exit_signal.at[day, ticker]) else "순위 버퍼"
-            )
+            reason = blocked_exits.get(ticker) or exit_reason
             exit_price = open_df.at[nxt, ticker]
             if pd.isna(exit_price):
                 if provisional_fill:
@@ -372,17 +351,14 @@ def run_slot_backtest(
     # 본다. 이걸 엔진이 안 내주면 화면이 같은 판정을 **다시 구현**하게 되고, 한쪽만 고치는
     # 순간 "화면은 사라는데 백테스트는 안 샀다"가 된다 — 그러면 성과 숫자를 믿을 수 없다.
     # 체결 예정(fill_date) 주문은 잠정으로 다시 판정하지 않는다 — 이미 확정된 판정이다.
-    last_rank_exits = rank_buffer_exits(last_day)
     planned_exits = [
         ticker
         for ticker in holdings
         if ticker not in pending_exits
         and pd.notna(close_df.at[last_day, ticker])
-        and (bool(exit_signal.at[last_day, ticker]) or ticker in last_rank_exits)
+        and bool(exit_signal.at[last_day, ticker])
     ]
-    planned_exit_reasons = {
-        ticker: exit_reason if bool(exit_signal.at[last_day, ticker]) else "순위 버퍼" for ticker in planned_exits
-    }
+    planned_exit_reasons = {ticker: exit_reason for ticker in planned_exits}
     planned_entries: list[str] = []
     planned_entry_weights: dict[str, float] = {}
     pending_entry_set = set(pending_entry_tickers)

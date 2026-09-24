@@ -365,49 +365,33 @@ class PortfolioMixStateTest(unittest.TestCase):
 
 
 class MixCapitalScreenMatchesBacktest(unittest.TestCase):
-    def test_rank_buffer_planned_exit_matches_next_open_fill_and_adr_gate(self):
+    def test_higher_rank_candidate_does_not_replace_held_position(self):
         from core.strategy.slot_backtest import run_slot_backtest
 
         index = pd.date_range("2026-09-01", periods=4)
         close = pd.DataFrame({"A": [100] * 4, "B": [100] * 4}, index=index)
         entry = pd.DataFrame({"A": [True] * 4, "B": [False, True, True, True]}, index=index)
-        priority = pd.DataFrame({"A": [2, 1, 1, 1], "B": [0, 3, 3, 3]}, index=index)
-
-        def simulate(days: int, blocked=False):
-            return run_slot_backtest(
-                months=1,
-                panel={"close": close.iloc[:days], "open": close.iloc[:days]},
-                entry=entry.iloc[:days],
-                exit_signal=pd.DataFrame(False, index=index[:days], columns=close.columns),
-                priority=priority.iloc[:days],
-                slots=1,
-                rank_exit_limit=1,
-                name_by={"A": "A", "B": "B"},
-                industry_by={},
-                exit_reason="이탈",
-                buy_slippage=0,
-                sell_slippage=0,
-                initial_capital=1000,
-                entry_blocked=lambda day: blocked and day == index[1],
-                adr_at=lambda day: None,
-                benchmark_growth=lambda days: pd.Series(1.0, index=days),
-                benchmark_name="기준",
-            )
-
-        self.assertEqual(simulate(2)["planned_exits"], ["A"])
-        self.assertEqual(simulate(2)["planned_exit_reasons"], {"A": "순위 버퍼"})
-        self.assertEqual(simulate(2)["planned_entries"], ["B"])
-        self.assertEqual(simulate(2, blocked=True)["planned_exits"], [])
-        filled = simulate(4)
-        self.assertEqual(
-            [
-                (trade["ticker"], trade["exit_date"], trade["reason"])
-                for trade in filled["trades"]
-                if trade["exit_date"]
-            ],
-            [("A", "2026-09-03", "순위 버퍼")],
+        result = run_slot_backtest(
+            months=1,
+            panel={"close": close, "open": close},
+            entry=entry,
+            exit_signal=pd.DataFrame(False, index=index, columns=close.columns),
+            priority=pd.DataFrame({"A": [2, 1, 1, 1], "B": [0, 3, 3, 3]}, index=index),
+            slots=1,
+            name_by={"A": "A", "B": "B"},
+            industry_by={},
+            exit_reason="이탈",
+            buy_slippage=0,
+            sell_slippage=0,
+            initial_capital=1000,
+            entry_blocked=lambda day: False,
+            adr_at=lambda day: None,
+            benchmark_growth=lambda days: pd.Series(1.0, index=days),
+            benchmark_name="기준",
         )
-        self.assertEqual([row["ticker"] for row in filled["open_positions"]], ["B"])
+        self.assertEqual([row["ticker"] for row in result["open_positions"]], ["A"])
+        self.assertEqual(result["planned_exits"], [])
+        self.assertEqual(result["planned_entries"], [])
 
     def test_slot_exit_waits_for_first_available_open(self):
         from core.strategy.slot_backtest import run_slot_backtest
@@ -424,7 +408,6 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
             exit_signal=exit_signal,
             priority=pd.DataFrame({"X": [1] * 6}, index=index),
             slots=1,
-            rank_exit_limit=None,
             name_by={"X": "X"},
             industry_by={},
             exit_reason="청산",
@@ -694,7 +677,6 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
             exit_signal=exit_signal,
             priority=priority,
             slots=3,
-            rank_exit_limit=None,
             name_by={t: t for t in tickers},
             industry_by={},
             exit_reason="이탈",

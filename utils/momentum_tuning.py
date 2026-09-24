@@ -1,6 +1,6 @@
 """모멘텀 전략 튜닝 — 설정 항목들의 범위 조합을 한 번에 백테스트해 비교한다.
 
-화면 '튜닝' 섹션용. 축(화면 순서): 선정 이평(단기·장기) · 진입 문턱 · 순위 버퍼 · ADR 하한.
+화면 '튜닝' 섹션용. 축(화면 순서): 선정 이평(단기·장기) · 진입 문턱 · ADR 하한.
 종목 수는 풀 설정(`pool_settings.TOP_N_HOLD`)으로 고정한다.
 (단기, 장기) 쌍을 작업 단위로 별도 프로세스에서 병렬로 돌린다 — 각 프로세스는 가격·판정일별
 후보를 한 번 읽어 그 쌍의 전 조합에 공유(run_backtest 의 context)하므로 조합당 0.5초 수준이고,
@@ -14,7 +14,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS, RANK_BUFFER_MULT_OPTIONS
+from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS
 from utils.momentum_service import (
     LONG_MA_OPTIONS,
     SHORT_MA_OPTIONS,
@@ -34,7 +34,7 @@ from utils.strategy_tuning import (
     tuning_cancelled,
 )
 
-TUNING_AXES = ("short_ma_days", "long_ma_days", "entry_vol_mult", "rank_buffer_mult", "adr_floor")
+TUNING_AXES = ("short_ma_days", "long_ma_days", "entry_vol_mult", "adr_floor")
 
 
 def _checked_optional_ints(values: list[Any], options: tuple, label: str) -> list[Any]:
@@ -110,7 +110,7 @@ def _preload(pool: str) -> dict[str, Any]:
 
 def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
     """(단기, 장기) 쌍 하나의 조합 — 별도 프로세스에서 돈다."""
-    months, base, short, long, entry_mults, buffer_mults, adr_floors = task
+    months, base, short, long, entry_mults, adr_floors = task
     from core.strategy.momentum.signals import compute_signals
     from utils.momentum_backtest import run_backtest
 
@@ -127,9 +127,7 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
     }
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
-    for entry_vol_mult, rank_buffer_mult, adr_floor in (
-        (m, b, f) for m in entry_mults for b in buffer_mults for f in adr_floors
-    ):
+    for entry_vol_mult, adr_floor in ((m, f) for m in entry_mults for f in adr_floors):
         if tuning_cancelled():
             break
         combo = dict(
@@ -137,7 +135,6 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
             short_ma_days=short,
             long_ma_days=long,
             entry_vol_mult=entry_vol_mult,
-            rank_buffer_mult=rank_buffer_mult,
             adr_floor=adr_floor,
         )
         try:
@@ -155,7 +152,6 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
                     "short_ma_days": short,
                     "long_ma_days": long,
                     "entry_vol_mult": entry_vol_mult,
-                    "rank_buffer_mult": rank_buffer_mult,
                     "adr_floor": adr_floor,
                 },
                 returns,
@@ -204,15 +200,14 @@ def _stream_tuning(
     shorts = _checked(ranges.get("short_ma_days", []), SHORT_MA_OPTIONS, "단기 이평")
     adr_floors = _checked_optional_ints(ranges.get("adr_floor", []), ADR_FLOOR_OPTIONS, "ADR 하한")
     entry_mults = _checked_optional_floats(ranges.get("entry_vol_mult", []), ENTRY_VOL_MULT_OPTIONS, "진입 문턱")
-    buffer_mults = _checked_optional_floats(ranges.get("rank_buffer_mult", []), RANK_BUFFER_MULT_OPTIONS, "순위 버퍼")
     longs = _checked(ranges.get("long_ma_days", []), LONG_MA_OPTIONS, "장기 이평")
     # 단기=장기 허용(단일 이평선 전략과 동일) — 설정 검증(momentum_service)과 같은 기준.
     ma_pairs = [(short, long) for short in shorts for long in longs if short <= long]
     if not ma_pairs:
         raise ValueError("단기 이평이 장기 이평보다 작은 조합이 없습니다.")
 
-    tasks = [(months, base, short, long, entry_mults, buffer_mults, adr_floors) for short, long in ma_pairs]
-    combos_per_group = len(entry_mults) * len(buffer_mults) * len(adr_floors)
+    tasks = [(months, base, short, long, entry_mults, adr_floors) for short, long in ma_pairs]
+    combos_per_group = len(entry_mults) * len(adr_floors)
     total_combos = len(tasks) * combos_per_group
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []

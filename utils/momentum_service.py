@@ -30,7 +30,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS, RANK_BUFFER_MULT_OPTIONS
+from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS
 from core.strategy.scoring import (
     compute_ma_disparity,
     rank_score,
@@ -133,13 +133,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         allowed = ", ".join("없음" if v is None else f"{v:g}" for v in ENTRY_VOL_MULT_OPTIONS)
         raise ValueError(f"'entry_vol_mult' 는 {allowed} 중 하나여야 합니다 (받은 값: {raw_mult}).")
 
-    # 순위 버퍼 — 보유 종목 순위가 배수 × 보유 종목 수 밖이면 청산. None = 없음(기본).
-    raw_buffer = settings.get("rank_buffer_mult")
-    rank_buffer_mult = None if raw_buffer in (None, "", "none") else float(raw_buffer)
-    if rank_buffer_mult not in RANK_BUFFER_MULT_OPTIONS:
-        allowed = ", ".join("없음" if v is None else f"{v:g}" for v in RANK_BUFFER_MULT_OPTIONS)
-        raise ValueError(f"'rank_buffer_mult' 는 {allowed} 중 하나여야 합니다 (받은 값: {raw_buffer}).")
-
     return {
         "pool": pool,
         "start_date": validate_start_date(settings.get("start_date")),
@@ -149,7 +142,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "long_ma_days": long_ma_days,
         "adr_floor": adr_floor,
         "entry_vol_mult": entry_vol_mult,
-        "rank_buffer_mult": rank_buffer_mult,
     }
 
 
@@ -197,7 +189,6 @@ _POOL_KEY_BY_SETTING: dict[str, str] = {
     "long_ma_days": "LONG_MA_DAYS",
     "adr_floor": "ADR_FLOOR",
     "entry_vol_mult": "ENTRY_VOL_MULT",
-    "rank_buffer_mult": "RANK_BUFFER_MULT",
 }
 
 
@@ -207,7 +198,7 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
     for setting_key, pool_key in _POOL_KEY_BY_SETTING.items():
         if pool_key not in config:
             # None 을 값으로 갖는 항목(ADR 하한·진입 문턱 등)은 키 자체는 있어야 한다.
-            if setting_key in ("adr_floor", "start_date", "entry_vol_mult", "rank_buffer_mult"):
+            if setting_key in ("adr_floor", "start_date", "entry_vol_mult"):
                 continue
             return None
         result[setting_key] = config[pool_key]
@@ -215,7 +206,6 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
     result.setdefault("start_date", None)
     result.setdefault("adr_floor", default_adr_floor())
     result.setdefault("entry_vol_mult", ENTRY_VOL_MULT_OPTIONS[0])
-    result.setdefault("rank_buffer_mult", RANK_BUFFER_MULT_OPTIONS[0])
     return result
 
 
@@ -283,7 +273,6 @@ _OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
     ("adr_floor", "ADR 하한", ADR_FLOOR_OPTIONS),
     ("long_ma_days", "장기 이평", LONG_MA_OPTIONS),
     ("entry_vol_mult", "진입 문턱", ENTRY_VOL_MULT_OPTIONS),
-    ("rank_buffer_mult", "순위 버퍼", RANK_BUFFER_MULT_OPTIONS),
 )
 
 
