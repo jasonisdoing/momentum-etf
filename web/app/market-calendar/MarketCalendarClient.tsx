@@ -58,6 +58,13 @@ function changeClass(value: number | null | undefined): string {
   return value > 0 ? styles.positive : styles.negative;
 }
 
+function indexChangeForBackground(data: DayData | undefined, country: "kor" | "us", ticker: string): number | null {
+  const point = data?.indices[ticker];
+  const future = country === "us" && point?.change_pct == null ? data?.futures?.[ticker] : null;
+  if (data?.index_issues[ticker] && !future) return null;
+  return (future ?? point)?.change_pct ?? null;
+}
+
 function adrDecisionTitle(point: AdrPoint | null | undefined, meta: CalendarResponse["adr_meta"]["kor_stock"] | undefined): string | undefined {
   if (!point || !meta) return undefined;
   if (meta.floor == null) return "ADR 하한 없음 · 신규 진입 허용";
@@ -193,8 +200,20 @@ export function MarketCalendarClient({ today }: { today: string }) {
                 >
                   <span className={styles.dayHeader}><strong>{date.day}</strong>{date.key === today ? <span className={styles.todayBadge}>오늘</span> : null}</span>
                   <span className={styles.indexGroups}>
-                    {(["kor", "us"] as const).map((country) => (
-                      <span key={country} className={styles.indexRows}>
+                    {(["kor", "us"] as const).map((country) => {
+                      const session = data?.sessions[country];
+                      const holiday = session === "closed" || session === "closed_future";
+                      const tickers = country === "kor" ? ["^KS11", "^KQ11"] : ["^GSPC", "^NDX"];
+                      const first = indexChangeForBackground(data, country, tickers[0]);
+                      const second = indexChangeForBackground(data, country, tickers[1]);
+                      const sum = holiday || first == null || second == null ? null : first + second;
+                      const background = sum == null || sum === 0 ? "" : sum > 0 ? styles.marketUp : styles.marketDown;
+                      return (
+                        <span
+                          key={country}
+                          className={[styles.indexRows, background].filter(Boolean).join(" ")}
+                          title={sum == null ? undefined : `${country === "kor" ? "코스피 + 코스닥" : "S&P 500 + 나스닥 100"} 등락률 합 ${formatChange(sum)}`}
+                        >
                         {MARKET_ROWS.filter((row) => row.country === country).map((row) => {
                           const session = data?.sessions[row.country];
                           const holiday = session === "closed" || session === "closed_future";
@@ -216,8 +235,9 @@ export function MarketCalendarClient({ today }: { today: string }) {
                             </span>
                           );
                         })}
-                      </span>
-                    ))}
+                        </span>
+                      );
+                    })}
                   </span>
                   <span className={styles.extraRow}><span>USD/KRW</span><span className={changeClass(data?.fx?.change_pct)}>{formatChange(data?.fx?.change_pct)}{data?.fx?.provisional ? "*" : ""}</span></span>
                 </button>
