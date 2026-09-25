@@ -1,6 +1,6 @@
 "use client";
 
-/** 전략 화면의 「차트」 탭 — 로딩·에러·빈 상태와 2열 격자를 담당한다.
+/** 전략 화면의 차트 — 로딩·에러·빈 상태와 격자를 담당한다.
  *
  *  네 화면(모멘텀·신고가·합성·포트폴리오)이 같은 블록을 각자 들고 있었다. 문구와
  *  카드에 넘길 값만 다르고 나머지는 글자 하나까지 같아서, 한 곳을 고치면 나머지 셋이
@@ -38,6 +38,7 @@ export function StrategyHoldingCharts({
   months,
   emptyMessage,
   chartProps,
+  chartHeight,
 }: {
   /** 아직 안 받았으면 null — 로딩과 구분한다. */
   charts: HoldingChartData[] | null;
@@ -51,6 +52,7 @@ export function StrategyHoldingCharts({
   months?: number | null;
   emptyMessage: string;
   chartProps: (chart: HoldingChartData) => HoldingChartExtras;
+  chartHeight?: number;
 }) {
   if (loading || (!charts && !error)) return <div style={centeredHint}>차트를 불러오는 중…</div>;
   if (error) return <div className="alert alert-danger">{error}</div>;
@@ -62,10 +64,9 @@ export function StrategyHoldingCharts({
         {months != null ? `최근 ${months}개월 일봉입니다. ` : null}
         {hint}
       </div>
-      {/* 최대 2열, 좁으면 1열 — 규칙은 globals.css 의 `.appChartGrid` 한 곳에 있다. */}
       <div className="appChartGrid">
         {charts.map((item) => (
-          <HoldingChart key={item.ticker} chart={item} {...chartProps(item)} />
+          <HoldingChart key={item.ticker} chart={item} height={chartHeight} {...chartProps(item)} />
         ))}
       </div>
     </>

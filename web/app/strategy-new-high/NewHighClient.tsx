@@ -8,7 +8,7 @@ import { IconCheck } from "@tabler/icons-react";
 
 import { formatMarketCapWon } from "@/lib/market-cap-format";
 import { type HoldingChartData } from "../components/HoldingChart";
-import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
+import { StrategyChartModal } from "../components/StrategyChartModal";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { MonthsSelect } from "../components/MonthsSelect";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
@@ -318,13 +318,6 @@ type Backtest = {
 // 장중 자동 갱신 주기. 계산이 수 초 걸려 더 짧게 잡으면 요청이 겹친다.
 const LIVE_REFRESH_MS = 5 * 60 * 1000;
 
-/** 운용 현황 안쪽 탭. 차트는 보유 종목 수만큼 그리므로 열 때만 그린다. */
-const CURRENT_TABS = [
-  { key: "list", label: "종목" },
-  { key: "chart", label: "차트" },
-] as const;
-type CurrentTab = (typeof CURRENT_TABS)[number]["key"];
-
 /** 상태 단계 — 색·설명을 여기 한 곳에서만 정한다.
  *
  * 거리 척도(근접 → 임박 → 돌파)는 초록·주황·빨강으로 온도가 올라가고,
@@ -474,7 +467,7 @@ export function NewHighClient() {
   const [draft, setDraft] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("monthly");
-  const [currentTab, setCurrentTab] = useState<CurrentTab>("list");
+  const [chartsOpen, setChartsOpen] = useState(false);
   // 기준일 — 빈 값이면 최신 거래일. 과거 날짜를 고르면 그 시점 상태를 재현한다.
   const [candidatesOpen, setCandidatesOpen] = useState(false);
   const [charts, setCharts] = useState<HoldingChartData[] | null>(null);
@@ -919,9 +912,8 @@ export function NewHighClient() {
     setChartsError(null);
   }, [chartKey]);
 
-  // 차트 탭을 열 때만 받는다 — 보유 종목 수만큼 일봉을 실어 오므로 목록 탭에서는 낭비다.
   useEffect(() => {
-    if (currentTab !== "chart" || !draft || !positions || charts || chartsLoading || chartsError) return;
+    if (!chartsOpen || !draft || !positions || charts || chartsLoading || chartsError) return;
     // 재계산 중이면 목록이 옛 풀 것이거나 비어 있다 — 여기서 확정하지 않는다.
     if (running || saving) return;
     if (chartRows.length === 0) {
@@ -936,7 +928,7 @@ export function NewHighClient() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             settings: draft,
-            tickers: chartRows.map((row) => row.ticker),
+            tickers: chartRows.slice(0, 10).map((row) => row.ticker),
           }),
         });
         const payload = (await response.json()) as { charts?: HoldingChartData[]; months?: number; error?: string };
@@ -951,7 +943,7 @@ export function NewHighClient() {
         setChartsLoading(false);
       }
     })();
-  }, [currentTab, draft, positions, charts, chartsLoading, chartsError, chartRows, toast]);
+  }, [chartsOpen, draft, positions, charts, chartsLoading, chartsError, chartRows, running, saving, toast]);
 
   const holdingColumns = useMemo<ColDef<PlanRow>[]>(
     () => [
@@ -1188,20 +1180,16 @@ export function NewHighClient() {
                   </span>
                 ) : null}
                 <span style={hintStyle}>{running ? "계산 중…" : ""}</span>
+                <button type="button" className="btn btn-outline-primary btn-sm" onClick={() => setChartsOpen(true)} disabled={!positions || running || saving}>
+                  차트 전체 보기
+                </button>
               </span>
             </div>
             <div className="card-body appCardBodyTight">
               <StrategyNotes items={CURRENT_NOTES} />
-              <NavTabs
-                items={CURRENT_TABS}
-                value={currentTab}
-                onChange={setCurrentTab}
-                label="운용 현황 보기"
-                style={{ marginBottom: 12 }}
-              />
               {running && !positions ? (
                 <AppLoadingProgress title="운용 현황 계산 중..." progress={positionsProgress} />
-              ) : currentTab === "list" ? (
+              ) : (
                 <>
                   <div style={{ ...hintStyle, fontWeight: 700, margin: "4px 0 6px" }}>
                     보유 종목 ({positions?.holdings.length ?? 0}개)
@@ -1291,8 +1279,11 @@ export function NewHighClient() {
                     </div>
                   ) : null}
                 </>
-              ) : (
-                <StrategyHoldingCharts
+              )}
+              <StrategyChartModal
+                  open={chartsOpen}
+                  onClose={() => setChartsOpen(false)}
+                  title="신고가 차트"
                   charts={charts}
                   loading={chartsLoading || running || saving}
                   error={chartsError}
@@ -1316,7 +1307,6 @@ export function NewHighClient() {
                     };
                   }}
                 />
-              )}
             </div>
           </div>
         </section>

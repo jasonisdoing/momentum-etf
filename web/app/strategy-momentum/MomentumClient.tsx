@@ -16,7 +16,7 @@ import { StrategyTuning } from "../components/StrategyTuning";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { type HoldingChartData } from "../components/HoldingChart";
-import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
+import { StrategyChartModal } from "../components/StrategyChartModal";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
@@ -325,14 +325,6 @@ type View = {
   };
   positions: Positions | null;
 };
-
-// 운용 현황 안쪽 탭 — 신고가 화면과 같은 구성. 차트는 선정 종목 수만큼 그리므로 열 때만 그린다.
-const CURRENT_TABS = [
-  { key: "list", label: "종목" },
-  { key: "chart", label: "차트" },
-] as const;
-type CurrentTab = (typeof CURRENT_TABS)[number]["key"];
-
 
 const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--fs-sm)" };
 const numberInputStyle: React.CSSProperties = { width: 88, textAlign: "right" };
@@ -717,8 +709,8 @@ export function MomentumClient() {
   const candidateRows = useMemo(() => (positions?.candidates ?? []).map(withQuote), [positions, withQuote]);
   const heldCount = planRows.filter((row) => row.plan === "hold" || row.plan === "sell").length;
 
-  // ── 차트 탭 (신고가 화면과 같은 구성 — 공용 HoldingChart) ──
-  const [currentTab, setCurrentTab] = useState<CurrentTab>("list");
+  // 차트는 모달을 열 때만 받는다.
+  const [chartsOpen, setChartsOpen] = useState(false);
   const [charts, setCharts] = useState<HoldingChartData[] | null>(null);
   const [chartsLoading, setChartsLoading] = useState(false);
   const [chartsError, setChartsError] = useState<string | null>(null);
@@ -740,9 +732,8 @@ export function MomentumClient() {
     setCharts(null);
     setChartsError(null);
   }, [chartKey]);
-  // 차트 탭을 열 때만 받는다 — 선정 종목 수만큼 일봉을 실어 오므로 목록 탭에서는 낭비다.
   useEffect(() => {
-    if (currentTab !== "chart" || !view || !positions || charts || chartsLoading || chartsError) return;
+    if (!chartsOpen || !view || !positions || charts || chartsLoading || chartsError) return;
     // 풀을 막 바꾼 직후에는 `view` 가 아직 이전 풀 것이다 — 그 목록으로 차트를 받으면
     // 다른 풀의 종목이 뜬다. 저장 응답이 와서 두 값이 맞을 때까지 기다린다.
     if (saving || picking || view.settings.pool !== draftPool) return;
@@ -756,7 +747,7 @@ export function MomentumClient() {
         const response = await fetch("/api/strategy-momentum/charts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pool: view.settings.pool, tickers: chartRows.map((row) => row.ticker) }),
+          body: JSON.stringify({ pool: view.settings.pool, tickers: chartRows.slice(0, 10).map((row) => row.ticker) }),
         });
         const payload = (await response.json()) as { charts?: HoldingChartData[]; months?: number; error?: string };
         if (!response.ok) throw new Error(payload.error ?? "차트를 불러오지 못했습니다.");
@@ -770,7 +761,7 @@ export function MomentumClient() {
         setChartsLoading(false);
       }
     })();
-  }, [currentTab, view, charts, chartsLoading, chartsError, chartRows, draftPool, saving, picking, toast]);
+  }, [chartsOpen, view, charts, chartsLoading, chartsError, chartRows, draftPool, saving, picking, toast]);
 
   // 저장하지 않은 입력이 있으면 실행 결과가 화면 값과 어긋난다 — 저장을 먼저 요구한다.
   const isDirty = useMemo(() => {
@@ -1212,17 +1203,15 @@ export function MomentumClient() {
                   </span>
                 )}
               </div>
+              <div className="appMainHeaderRight">
+                <button type="button" className="btn btn-outline-primary btn-sm" onClick={() => setChartsOpen(true)} disabled={!positions || picking}>
+                  차트 전체 보기
+                </button>
+              </div>
             </div>
             <StrategyNotes items={CURRENT_NOTES} />
-            <NavTabs
-              items={CURRENT_TABS}
-              value={currentTab}
-              onChange={setCurrentTab}
-              label="운용 현황 보기"
-              style={{ marginBottom: 12 }}
-            />
             {picking ? <AppLoadingProgress title="운용 현황 계산 중..." progress={pickProgress} /> : null}
-            {positions && !picking && currentTab === "list" ? (
+            {positions && !picking ? (
               <>
                 <div style={{ ...hintStyle, fontWeight: 700, margin: "4px 0 6px" }}>보유 종목 ({heldCount}개)</div>
                 {/* autoHeight — 그리드가 행 수만큼만 높이를 차지해 하단 낭비가 없다. */}
@@ -1262,8 +1251,10 @@ export function MomentumClient() {
                 />
               </>
             ) : null}
-            {positions && !picking && currentTab === "chart" ? (
-              <StrategyHoldingCharts
+            <StrategyChartModal
+                open={chartsOpen}
+                onClose={() => setChartsOpen(false)}
+                title="모멘텀 차트"
                 charts={charts}
                 loading={chartsLoading || saving || picking}
                 error={chartsError}
@@ -1281,7 +1272,6 @@ export function MomentumClient() {
                   };
                 }}
               />
-            ) : null}
           </div>
         </div>
 
