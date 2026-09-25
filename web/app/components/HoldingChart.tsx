@@ -70,6 +70,7 @@ type Props = {
    *  순위 화면처럼 보유 개념이 없고 순위·고점 같은 다른 값을 보여줄 때 쓴다. */
   badges?: ChartBadge[];
   height?: number;
+  stackedHeader?: boolean;
 };
 
 // 한국 관례 — 상승 빨강, 하락 파랑. 다른 화면(티커 상세)과 같은 색을 쓴다.
@@ -89,7 +90,7 @@ const badgeStyle: React.CSSProperties = {
   fontWeight: 700,
 };
 
-export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, daysUnit = "일", daysLabel, strategyLabel, badges, height = 320 }: Props) {
+export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, daysUnit = "일", daysLabel, strategyLabel, badges, height = 320, stackedHeader = false }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   // 내 평균 배지 — 평단 선 높이에 맞춰 왼쪽에 띄운다(`/ticker` 상세와 같은 표기).
@@ -207,10 +208,7 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
 
   return (
     <div className="card appCard" style={{ padding: "12px 14px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        {/* [전략명] 티커 종목명 — 세 화면 공통 표기. */}
-        {/* 이름이 길어도 카드 높이가 늘지 않게 한 줄로 자른다 — 카드가 2열이라 한 장만 높아지면
-            옆 카드까지 같이 늘어난다. minWidth:0 이 없으면 flex 자식이 줄지 않아 말줄임이 안 걸린다. */}
+      <div style={{ display: "flex", flexDirection: stackedHeader ? "column" : "row", alignItems: stackedHeader ? "stretch" : "center", gap: 8, marginBottom: 8 }}>
         <strong
           style={{
             fontSize: "var(--fs-base)",
@@ -219,16 +217,16 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
           }}
-          title={`${chart.ticker} ${chart.name}`}
+          title={stackedHeader ? `${chart.name} - ${chart.ticker}` : `${chart.ticker} ${chart.name}`}
         >
-          {(() => {
+          {stackedHeader ? `${chart.name} - ${chart.ticker}` : (() => {
             const label = strategyLabel ?? chart.strategy_label;
             return `${label ? `[${label}] ` : ""}${chart.ticker} ${chart.name}`;
           })()}
         </strong>
         {/* 오른쪽 배지 — 산 날 → 들고 있는 기간 → 수익률 순. 왼쪽부터 시간 순으로 읽힌다.
             `badges` 를 주면 화면이 정한 배지로 통째로 갈아 끼운다(순위 화면). */}
-        <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+        <span style={{ marginLeft: stackedHeader ? 0 : "auto", display: "flex", alignItems: "center", gap: 6, flexShrink: 0, flexWrap: stackedHeader ? "wrap" : "nowrap" }}>
           {badges ? (
             badges.map((badge) => (
               <span
