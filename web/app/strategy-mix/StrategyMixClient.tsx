@@ -1365,10 +1365,10 @@ export function StrategyMixClient() {
       },
       pctColumn(
         "strategy_pct",
-        "전략통합",
+        "합성",
         (row) => row.strategy_pct,
         "%",
-        "슬리브들을 한 계좌에서 고정 KRW 기준금액으로 함께 굴린 결과. 회수한 현금은 자동 재투자하지 않습니다.",
+        "슬리브들을 한 계좌에서 함께 굴린 기간 수익률. 인출은 외부 현금 흐름으로 처리해 수익률에서 제외합니다.",
       ),
       {
         colId: "withdrawal_pct",
@@ -1387,7 +1387,7 @@ export function StrategyMixClient() {
         }),
       },
       // 각 전략을 혼자 굴렸을 때 — 합성이 단독보다 나은지 같은 줄에서 비교한다.
-      // 이관이 없는 곡선이라 전략통합은 슬리브 값들의 단순 평균과 일치하지 않는다.
+      // 합성 곡선은 각 슬리브를 단독 운용한 수익률의 단순 평균과 일치하지 않는다.
       ...slotKeys.map((slot) =>
         pctColumn(
           `slot_${slot}`,
@@ -1398,7 +1398,7 @@ export function StrategyMixClient() {
         ),
       ),
       pctColumn("benchmark_pct", view?.benchmark_name ?? "벤치마크", (row) => row.benchmark_pct, "%", "계좌의 벤치마크."),
-      pctColumn("excess_pp", "초과", (row) => row.excess_pp, "%p", "전략통합 − 벤치마크."),
+      pctColumn("excess_pp", "초과", (row) => row.excess_pp, "%p", "합성 − 벤치마크."),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
   }, [viewMode, view?.benchmark_name, slotKeys, sleeves]);

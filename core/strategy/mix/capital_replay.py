@@ -23,12 +23,15 @@ def replay_capital(
     """전일 종가로 수량을 정하고 당일 시가에 체결한다. 현금 부족 시 차입하지 않는다.
 
     목표는 KRW, 가격·매수 가능 현금은 계좌 통화다. 회수 매도 대금은 KRW 인출 누계로
-    격리해 이후 매수에 쓰지 않는다. 수익률에는 인출 누계도 포함한다.
+    격리해 이후 매수에 쓰지 않는다. 수익률은 인출을 외부 현금 흐름으로 제외한다.
     첫날에는 이전 봉이 없으므로 당일 시가로 초기 배정하며, 이후 회수 판단에는 미래 가격을 쓰지 않는다.
     """
     held = {ticker: 0 for ticker in close.columns}
     cash = capital_krw / float(fx.iloc[0])
     withdrawn_krw = 0.0
+    previous_equity_krw = capital_krw
+    previous_withdrawn_krw = 0.0
+    growth = 1.0
     curve = {}
     withdrawn_curve = {}
     trades = []
@@ -113,8 +116,15 @@ def replay_capital(
                 if pd.isna(price):
                     raise ValueError(f"합성 평가 종가가 없습니다: {date} {ticker}")
                 value += quantity * float(price)
-        curve[date] = (value * float(fx.iloc[i]) + withdrawn_krw) / capital_krw
+        equity_krw = value * float(fx.iloc[i])
+        if previous_equity_krw <= 0:
+            raise ValueError(f"합성 기간 수익률의 전일 운용자산이 없습니다: {date}")
+        # 인출 당일만 그 금액을 돌려놓아 수익률을 구하고, 다음 날 분모는 남은 운용자산이다.
+        growth *= (equity_krw + withdrawn_krw - previous_withdrawn_krw) / previous_equity_krw
+        curve[date] = growth
         withdrawn_curve[date] = withdrawn_krw / capital_krw
+        previous_equity_krw = equity_krw
+        previous_withdrawn_krw = withdrawn_krw
         previous_targets = amounts
     return {
         "curve": pd.Series(curve),

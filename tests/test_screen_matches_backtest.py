@@ -383,6 +383,7 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
         )
         self.assertEqual(replay["withdrawn_curve"].tolist(), [0, 0, 0.264, 0.264, 0.264])
         self.assertEqual(replay["curve"].iloc[2], 1.32)
+        self.assertAlmostEqual(replay["curve"].iloc[3], 1.44)
         self.assertFalse(any(row["ticker"] == "Y" and row["date"] == "2026-09-04" for row in replay["executions"]))
         self.assertTrue(any(row["ticker"] == "Y" and row["date"] == "2026-09-05" for row in replay["executions"]))
 
