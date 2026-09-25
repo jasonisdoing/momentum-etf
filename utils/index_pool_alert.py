@@ -26,12 +26,10 @@ def notify_unregistered_index_stocks(country: str, index_items: dict[str, list[d
         return 0
 
     country_label = {"us": "미국", "kor": "한국"}[country]
-    page = "us-market-stock" if country == "us" else "kor-market-stock"
     unique_missing = set().union(*(set(tickers) for tickers in missing_by_index.values()))
     lines = [
         "<!channel>",
         f"⚠️ *{country_label} 지수 구성종목 중 종목풀 미등록 {len(unique_missing)}개*",
-        f"{app_link(page, '종목풀 추가 화면')}",
     ]
     for index, tickers in missing_by_index.items():
         label = "S&P500 시총 상위 300" if index == "SP500" else index
