@@ -10,9 +10,9 @@ type ChartProps = ComponentProps<typeof StrategyHoldingCharts>;
 function chartLayout(width: number, height: number, count: number) {
   if (count === 0 || width === 0 || height === 0) return { columns: 1, chartHeight: 240 };
   const desired = Math.ceil(Math.sqrt(count * width / height));
-  const columns = Math.max(1, Math.min(count, 5, desired, Math.floor((width + 20) / 320)));
+  const columns = Math.max(1, Math.min(count, 3, desired, Math.floor((width + 20) / 420)));
   const rows = Math.ceil(count / columns);
-  const chartHeight = Math.max(110, Math.floor((height - 44 - 18 * (rows - 1)) / rows - 76));
+  const chartHeight = Math.max(180, Math.floor((height - 44 - 18 * (rows - 1)) / rows - 112));
   return { columns, chartHeight };
 }
 
@@ -40,7 +40,7 @@ export function StrategyChartModal({
   return (
     <AppModal open={open} onClose={onClose} title={title} size="full">
       <div ref={bodyRef} className="strategyChartModalBody">
-        <StrategyHoldingCharts charts={visibleCharts} chartHeight={layout.chartHeight} columns={layout.columns} {...chartProps} />
+        <StrategyHoldingCharts charts={visibleCharts} chartHeight={layout.chartHeight} columns={layout.columns} stackedHeader {...chartProps} />
       </div>
     </AppModal>
   );
