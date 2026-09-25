@@ -431,6 +431,7 @@ INDUSTRY_DISPLAY_CONFIG = {
 # 기간 셀렉트(개월) — 시스템 전체가 이 목록 하나만 쓴다(전략·화면별로 따로 두지 않는다).
 # 가격 캐시가 못 채우는 구간을 빼는 건 `pool_signal_backtest_service.get_month_options()`.
 BACKTEST_MONTH_OPTIONS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 12, 24, 36, 48, 60)
+BACKTEST_DEFAULT_DISPLAY_MONTHS = 60
 
 # 종목풀 신호 백테스트의 보유일(거래일) 선택지.
 FORWARD_DAY_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60)

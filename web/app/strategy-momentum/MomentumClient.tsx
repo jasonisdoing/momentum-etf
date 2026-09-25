@@ -563,7 +563,7 @@ export function MomentumClient() {
     [fillDrafts, persistSettings, view],
   );
 
-  const [backtestMonths, setBacktestMonths] = useState<number>(12);
+  const [backtestMonths, setBacktestMonths] = useState<number>(60);
 
   const runBacktest = useCallback(async () => {
     const months = backtestMonths;
