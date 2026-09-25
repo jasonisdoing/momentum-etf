@@ -1,17 +1,8 @@
-"""합성 전략 — 슬리브(전략 + 종목풀) 1~4개를 한 계좌에서 함께 굴린 백테스트·운용 현황.
+"""합성 전략 — 계좌 슬리브의 운용 현황과 고정 기준금액 백테스트.
 
-`/strategy-mix` 열람 전용 화면의 백엔드. 설정은 이 화면이 갖지 않는다 —
-**선택한 계좌의 슬리브들**(계좌 설정의 `mix_sleeves` 배열)에 저장된
-각 전략 화면 설정을 그대로 가져와 슬리브별 백테스트를 돌리고,
-매월 첫 거래일에 계좌 설정의 배분(A·B·비워 두는 현금)으로 되돌리되,
-각 전략 내부 주식·현금 비율을 유지하며 비례 이관한다.
-화면은 신고가 화면과 같은 방식으로 이 일별 누적에서 연간·월간·일간 표를 만든다.
-
-캐시는 두지 않는다 — 각 전략 화면의 백테스트와 같은 패턴(요청 시 계산)이다.
-
-**여기서 판정하지 않는다.** 보유·진입·이탈은 슬리브 엔진(`core/strategy/slot_backtest.py`)이 정한
-것을 읽어 온다. 합성이 하는 일은 슬리브 곡선에 월초 이관을 얹는 것과, 계좌 보유와 목표
-주수의 차이를 지시로 내는 것뿐이다. 그 차이는 문턱 없이 전부 낸다(AGENTS.md 10).
+종목과 진입·청산 시점은 각 전략 엔진이 정한다. 합성은 저장된 KRW 기준금액에
+슬리브 배분과 회수·채우기 정책을 적용한다. 백테스트에서 회수 기준 매도 대금은
+KRW 인출 누계로 격리하며 이후 매수에 쓰지 않는다.
 """
 
 from __future__ import annotations
@@ -1238,6 +1229,7 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
     # 합성 곡선은 개별 곡선의 가중 합이 아니라 종목별 회수·채우기 체결을 재생한다.
     replayed = _simulate_mix(ctx, results, through_date=None)
     mix_curve = replayed["curve"]
+    withdrawn_curve = replayed["withdrawn_curve"]
     dates = [d for d in mix_curve.index if d in bench_curve]
     if len(dates) < 2:
         raise RuntimeError("슬리브 전략들의 공통 백테스트 구간이 부족합니다.")
@@ -1276,6 +1268,7 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
         {
             "date": date,
             "strategy_pct": round((float(mix_curve[date]) / first_mix - 1) * 100, 2),
+            "withdrawn_to_initial_pct": round(float(withdrawn_curve[date]) * 100, 2),
             # 슬리브 단독 누적(%) — 합성과 같은 시작일 기준으로 다시 맞춘다.
             # 슬롯 키로 담는다(화면이 키 목록을 돌며 표를 만든다).
             "slots": {key: _rebased(curve, first_by_slot[key], date) for key, curve in curves.items()},

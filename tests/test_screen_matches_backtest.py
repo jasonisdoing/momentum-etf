@@ -365,6 +365,44 @@ class PortfolioMixStateTest(unittest.TestCase):
 
 
 class MixCapitalScreenMatchesBacktest(unittest.TestCase):
+    def test_harvest_proceeds_are_withdrawn_and_never_refilled(self):
+        from core.strategy.mix.capital_replay import replay_capital
+
+        index = pd.date_range("2026-09-01", periods=5)
+        replay = replay_capital(
+            close=pd.DataFrame({"X": [100, 120, 120, 120, 120], "Y": [100] * 5}, index=index),
+            opened=pd.DataFrame({"X": [100, 120, 120, 120, 120], "Y": [100] * 5}, index=index),
+            fx=pd.Series([1.0, 1.0, 1.1, 1.2, 1.3], index=index),
+            targets={
+                str(day.date()): {"X": 0 if i == 4 else 1000, "Y": 200 if i >= 3 else 0} for i, day in enumerate(index)
+            },
+            capital_krw=1000,
+            harvest_pct=20,
+            refill_pct=20,
+            costs={"X": (0, 0), "Y": (0, 0)},
+        )
+        self.assertEqual(replay["withdrawn_curve"].tolist(), [0, 0, 0.264, 0.264, 0.264])
+        self.assertEqual(replay["curve"].iloc[2], 1.32)
+        self.assertFalse(any(row["ticker"] == "Y" and row["date"] == "2026-09-04" for row in replay["executions"]))
+        self.assertTrue(any(row["ticker"] == "Y" and row["date"] == "2026-09-05" for row in replay["executions"]))
+
+    def test_delayed_harvest_keeps_withdrawal_reason(self):
+        from core.strategy.mix.capital_replay import replay_capital
+
+        index = pd.date_range("2026-09-01", periods=4)
+        replay = replay_capital(
+            close=pd.DataFrame({"X": [100, 120, 120, 120]}, index=index),
+            opened=pd.DataFrame({"X": [100, 120, float("nan"), 120]}, index=index),
+            fx=pd.Series(1.0, index=index),
+            targets={str(day.date()): {"X": 1000} for day in index},
+            capital_krw=1000,
+            harvest_pct=20,
+            refill_pct=20,
+            costs={"X": (0, 0)},
+        )
+        self.assertEqual(replay["withdrawn_curve"].tolist(), [0, 0, 0, 0.24])
+        self.assertEqual(replay["cash"], 0)
+
     def test_higher_rank_candidate_does_not_replace_held_position(self):
         from core.strategy.slot_backtest import run_slot_backtest
 
