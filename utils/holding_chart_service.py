@@ -75,6 +75,7 @@ def holding_charts(
         if frame is None or frame.empty or any(key not in frame for key in _CANDLE_KEYS):
             continue
         cols = {key: _positive(frame[key]) for key in _CANDLE_KEYS}
+        volumes = pd.to_numeric(frame["Volume"], errors="coerce") if "Volume" in frame else None
         close = cols["Close"]
         # 화면이 보는 구간만 잘라 보내되, 이평선은 잘린 앞부분까지 써서 계산한다.
         ma_by_days = {
@@ -93,7 +94,12 @@ def holding_charts(
             if any(pd.isna(value) for value in values):
                 continue
             date = str(day.date())
-            candles.append(dict(zip(("open", "high", "low", "close"), (float(v) for v in values)), time=date))
+            candle = dict(zip(("open", "high", "low", "close"), (float(v) for v in values)), time=date)
+            # 거래량 — 화면이 캔들 아래 막대로 그린다(`/ticker` 상세와 같은 모양). 캐시에 없는
+            # 봉은 None 으로 두고 막대를 그리지 않는다(0 으로 채우지 않는다).
+            volume = volumes.get(day) if volumes is not None else None
+            candle["volume"] = None if volume is None or pd.isna(volume) else float(volume)
+            candles.append(candle)
             candle_dates.append(day)
             for days, ma in ma_by_days.items():
                 if pd.notna(ma.get(day)):

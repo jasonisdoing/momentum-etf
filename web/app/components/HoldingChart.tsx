@@ -23,6 +23,7 @@ import type { IChartApi, Time } from "lightweight-charts";
 
 import { formatMonthDayWithWeekday } from "@/lib/datetime";
 import { getSignedNullableClass } from "../assets/assets-helpers";
+import { PRICE_SCALE_BOTTOM_WITH_VOLUME, addVolumeHistogram } from "@/lib/chart-volume";
 import { formatCurrencyPrice, priceDecimals } from "@/lib/price-format";
 
 export type HoldingChartData = {
@@ -30,7 +31,8 @@ export type HoldingChartData = {
   name: string;
   /** 전략명(모멘텀·신고가·포트폴리오) — 합성처럼 카드마다 다른 화면은 백엔드가 내려준다. */
   strategy_label?: string;
-  candles: { time: string; open: number; high: number; low: number; close: number }[];
+  /** `volume` 은 가격 캐시에 거래량이 없는 봉이면 null — 그 봉은 막대를 그리지 않는다. */
+  candles: { time: string; open: number; high: number; low: number; close: number; volume?: number | null }[];
   ma_lines: { ma_days: number; ma_type: string; points: { time: string; value: number }[] }[];
   /** 내 평균 매입가 — 실제로 들고 있는 종목에만 온다(`/ticker` 상세와 같은 값). */
   avg_buy_price?: number | null;
@@ -115,7 +117,8 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
       height,
       layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#5b6778", fontSize: 12 },
       grid: { vertLines: { color: "#f0f2f5" }, horzLines: { color: "#f0f2f5" } },
-      rightPriceScale: { borderColor: "#e6e8ec", scaleMargins: { top: 0.1, bottom: 0.08 } },
+      // 아래는 거래량 영역이라 캔들 축이 비워 둔다(`/ticker` 상세와 같은 비율).
+      rightPriceScale: { borderColor: "#e6e8ec", scaleMargins: { top: 0.1, bottom: PRICE_SCALE_BOTTOM_WITH_VOLUME } },
       timeScale: { borderColor: "#e6e8ec", timeVisible: false },
       handleScroll: false,
       handleScale: false,
@@ -134,7 +137,10 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
         formatter: (price: number) => formatCurrencyPrice(price, currency),
       },
     });
-    candles.setData(chart.candles.map((row) => ({ ...row, time: row.time as Time })));
+    candles.setData(
+      chart.candles.map((row) => ({ time: row.time as Time, open: row.open, high: row.high, low: row.low, close: row.close })),
+    );
+    addVolumeHistogram(api, chart.candles.map((row) => ({ time: row.time, close: row.close, volume: row.volume ?? null })));
 
     chart.ma_lines.forEach((line, index) => {
       api.addSeries(LineSeries, {
