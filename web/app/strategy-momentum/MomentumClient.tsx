@@ -747,7 +747,7 @@ export function MomentumClient() {
         const response = await fetch("/api/strategy-momentum/charts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pool: view.settings.pool, tickers: chartRows.slice(0, 10).map((row) => row.ticker) }),
+          body: JSON.stringify({ pool: view.settings.pool, tickers: chartRows.slice(0, 9).map((row) => row.ticker) }),
         });
         const payload = (await response.json()) as { charts?: HoldingChartData[]; months?: number; error?: string };
         if (!response.ok) throw new Error(payload.error ?? "차트를 불러오지 못했습니다.");

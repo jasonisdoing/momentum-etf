@@ -42,6 +42,13 @@ export type HoldingChartData = {
   leading_bars?: number | null;
 };
 
+function actualReturnPct(chart: HoldingChartData): number | null {
+  const buyPrice = chart.avg_buy_price;
+  const lastClose = chart.candles[chart.candles.length - 1]?.close;
+  if (buyPrice == null || !Number.isFinite(buyPrice) || buyPrice <= 0 || lastClose == null || !Number.isFinite(lastClose) || lastClose <= 0) return null;
+  return (lastClose / buyPrice - 1) * 100;
+}
+
 /** 카드 오른쪽 배지 하나. 색은 화면이 정한다(전략 배지와 같은 모양을 쓴다). */
 export type ChartBadge = {
   key: string;
@@ -182,10 +189,9 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
         setAverageBadge(null);
         return;
       }
-      const lastClose = chart.candles[chart.candles.length - 1]?.close ?? null;
       setAverageBadge({
         top: Math.max(4, Math.min(y - 14, el.clientHeight - 30)),
-        returnPct: lastClose != null && lastClose > 0 ? (lastClose / avgBuyPrice - 1) * 100 : null,
+        returnPct: actualReturnPct(chart),
       });
     }
     updateAverageBadge(container);
@@ -205,6 +211,7 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
   }, [chart, entryDate, entryPrice, height]);
 
   const returnColor = returnPct == null || returnPct === 0 ? "inherit" : returnPct > 0 ? UP : DOWN;
+  const actualReturn = stackedHeader ? actualReturnPct(chart) : null;
 
   return (
     <div className="card appCard" style={{ padding: "12px 14px" }}>
@@ -255,11 +262,20 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
           ) : null}
           {returnPct != null ? (
             <span style={{ ...badgeStyle, border: "1px solid rgba(148,163,184,0.45)" }}>
-              수익률 <span style={{ color: returnColor }}>{`${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(2)}%`}</span>
+              {stackedHeader ? "전략수익률 " : "수익률 "}<span style={{ color: returnColor }}>{`${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(2)}%`}</span>
             </span>
           ) : (
             <span style={{ ...badgeStyle, background: "#fff0f0", color: UP }}>진입 예정</span>
           )}
+          {stackedHeader ? (
+            <span style={{ ...badgeStyle, border: "1px solid rgba(148,163,184,0.45)" }}>
+              수익률: {actualReturn == null ? "N/A" : (
+                <span style={{ color: actualReturn > 0 ? UP : actualReturn < 0 ? DOWN : "inherit" }}>
+                  {`${actualReturn >= 0 ? "+" : ""}${actualReturn.toFixed(2)}%`}
+                </span>
+              )}
+            </span>
+          ) : null}
             </>
           )}
         </span>
