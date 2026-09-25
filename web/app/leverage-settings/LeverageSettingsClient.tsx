@@ -115,6 +115,8 @@ type LeverageTuneGridRow = {
 
 type MaView = {
   market: Market;
+  /** 저장된 설정의 지수·레버리지·방어 — 판정 문구는 편집 중인 초안이 아니라 이 값을 쓴다. */
+  assets: Record<"index" | "leverage" | "defense", AssetRef>;
   ma_days: number;
   ma_type: string;
   peak_drawdown_pct: number;
@@ -166,17 +168,11 @@ type TuneResult = {
 
 const MARKET_LABEL: Record<Market, string> = { kor: "🇰🇷 한국", us: "🇺🇸 미국" };
 
-// 지수는 시장별로 고정: 한국=코스피(^KS11), 미국=나스닥100(^NDX). 사용자가 편집하지 않는다.
-const FIXED_INDEX: Record<Market, AssetRef> = {
-  kor: { ticker: "^KS11", name: "코스피" },
-  us: { ticker: "^NDX", name: "나스닥 100" },
-};
-
 function blankConfig(market: Market): MaConfig {
   return {
     strategy: "ma_cross",
     market,
-    index: FIXED_INDEX[market],
+    index: { ticker: "", name: "" },
     leverage: { ticker: "", name: "" },
     defense: { ticker: "CASH", name: "현금" },
     ma_days: 120,
@@ -195,16 +191,10 @@ function fmtWholePct(v: number | string | null | undefined): string {
   return Number.isFinite(n) ? `${Math.round(n)}%` : "";
 }
 
-function fmtIndexPoint(v: number | null | undefined): string {
+/** 지수 수준 — 지수(포인트)든 추종 ETF(가격)든 단위 없이 숫자만 쓴다. */
+function fmtIndexLevel(v: number | null | undefined): string {
   if (v == null) return "-";
-  return `${v.toLocaleString("ko-KR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}pt`;
-}
-
-function indexPointLabel(market: Market): string {
-  return market === "us" ? "나스닥 100" : "코스피";
+  return v.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
 }
 
 function buildNumberRange(min: number, max: number, step: number, decimals = 0): number[] {
@@ -268,18 +258,18 @@ export function LeverageSettingsClient() {
         error?: string;
       };
       if (payload.constraints) setConstraints(payload.constraints);
-      if (!resp.ok || payload.error || !payload.config?.index) {
+      const c = payload.config;
+      if (!resp.ok || payload.error || !c?.index) {
         // 아직 설정이 없는 시장 — 빈 폼으로 새로 작성 (임의 계산 기본값 아님, 사용자 입력 대기)
         setConfig(blankConfig(m));
         setConfigMissing(true);
         return;
       }
-      const c = payload.config;
       const tuning = c.tuning;
       setConfig({
         strategy: "ma_cross",
         market: m,
-        index: FIXED_INDEX[m],
+        index: c.index,
         leverage: c.leverage ?? { ticker: "", name: "" },
         defense: c.defense ?? { ticker: "CASH", name: "현금" },
         ma_days: c.ma_days ?? 120,
@@ -407,13 +397,15 @@ export function LeverageSettingsClient() {
     }
     try {
       const resp = await fetch(`/api/leverage-config/resolve?ticker=${encodeURIComponent(ticker)}`);
-      const data = (await resp.json()) as { name?: string; error?: string };
-      if (!resp.ok || data.error || !data.name) {
+      const data = (await resp.json()) as { ticker?: string; name?: string; error?: string };
+      if (!resp.ok || data.error || !data.name || !data.ticker) {
         toast.error(data.error ?? "존재하지 않는 티커입니다.");
         return;
       }
+      // 서버가 정규화한 티커로 저장한다(^ks11 → ^KS11).
+      setAsset(key, "ticker", data.ticker);
       setAsset(key, "name", data.name);
-      toast.success(`${data.name}(${ticker}) 확인 완료`);
+      toast.success(`${data.name}(${data.ticker}) 확인 완료`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "티커 조회 중 오류가 발생했습니다.");
     }
@@ -657,15 +649,7 @@ export function LeverageSettingsClient() {
                   <div style={{ color: "var(--text-muted)", padding: 12 }}>불러오는 중…</div>
                 ) : (
                   <>
-                    <div style={compactRowStyle}>
-                      <span style={compactLabelStyle}>지수</span>
-                      <input
-                        style={{ ...inputStyle, flex: "1 1 0", minWidth: 0, backgroundColor: "#f8fafc", color: "var(--text-muted)", cursor: "not-allowed" }}
-                        value={config.index?.name ? `${config.index.name}(${config.index.ticker})` : ""}
-                        readOnly
-                      />
-                      <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", whiteSpace: "nowrap" }}>고정</span>
-                    </div>
+                    {assetRow("index", "지수", false)}
                     {assetRow("leverage", "레버리지", false)}
                     {assetRow("defense", "방어", true)}
                     <div style={compactRowStyle}>
@@ -805,9 +789,9 @@ export function LeverageSettingsClient() {
                             marginBottom: 10,
                           }}
                         >
-                          {isLeverage ? "방어 전환 기준 지수" : "전환 필요 지수"}: {indexPointLabel(view.market)}{" "}
+                          {isLeverage ? "방어 전환 기준 지수" : "전환 필요 지수"}: {view.assets.index.name}{" "}
                           <span style={{ color: isLeverage ? "#2563eb" : "#dc2626" }}>
-                            {fmtIndexPoint(j.required_index_close)} {isLeverage ? "이하" : "이상"} ({fmtPct(requiredMovePct)})
+                            {fmtIndexLevel(j.required_index_close)} {isLeverage ? "이하" : "이상"} ({fmtPct(requiredMovePct)})
                           </span>
                         </div>
                       );

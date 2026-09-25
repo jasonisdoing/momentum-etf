@@ -206,7 +206,7 @@ type RankHeaderSummary = {
   entryPct: number;
   totalCount: number;
   ruleSummary: string;
-  /** 실계좌 보유 종목 수 — 표의 녹색(티커·종목명 칸) 행 수와 같다. */
+  /** 실계좌 보유 종목 수 — 표의 녹색 행 수와 같다. */
   heldCount: number;
   /** 시장 ADR — 값 (하한 설정 시 함께). 레짐 지수 없는 풀은 null. */
   adr: { market: string; value: number; floor: number | null } | null;
@@ -1995,7 +1995,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   if (params.data?.exclude_from_ranking) {
                     classes.push("rankFixedRow");
                   }
-                  // 실제 보유 중인 종목 — 공용 보유 표시(티커·종목명 칸만 녹색, 전 화면 동일).
+                  // 실제 보유 중인 종목 — 순위 화면에서는 행 전체를 녹색으로 표시한다.
                   if (isHeld) {
                     classes.push("appHeldRow");
                   }

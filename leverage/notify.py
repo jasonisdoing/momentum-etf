@@ -25,12 +25,17 @@ def _required_number(source: dict[str, Any], key: str) -> float:
     return float(value)
 
 
-def _index_point_label(market: str) -> str:
-    return "나스닥 100" if market == "us" else "코스피"
+def _index_label(assets: dict[str, Any]) -> str:
+    """판정 기준 지수의 이름 — 설정에 저장된 값(지수 또는 지수추종 ETF)."""
+    name = str((assets.get("index") or {}).get("name") or "").strip()
+    if not name:
+        raise ValueError("레버리지 슬랙 메시지에 지수 이름이 없습니다.")
+    return name
 
 
-def _format_index_point(value: float) -> str:
-    return f"{value:,.2f}pt"
+def _format_index_level(value: float) -> str:
+    """지수 수준 — 지수(포인트)든 추종 ETF(가격)든 단위 없이 숫자만 쓴다."""
+    return f"{value:,.2f}".rstrip("0").rstrip(".")
 
 
 def _post(text: str, blocks: list[dict], label: str) -> bool:
@@ -144,8 +149,8 @@ def send_slack_ma_cross(
 
         if want_leverage:
             threshold_line = (
-                f"  • 방어 전환 기준 지수: {_index_point_label(market)} "
-                f"*{_format_index_point(required_index_close)} 이하 ({required_move_pct:+.2f}%)*"
+                f"  • 방어 전환 기준 지수: {_index_label(assets)} "
+                f"*{_format_index_level(required_index_close)} 이하 ({required_move_pct:+.2f}%)*"
             )
             needs = [
                 f"① {ma_days}일 이동평균선 아래로 *{ma_recovery_pct:+.2f}%* 하락하기 전까지 레버리지 보유",
@@ -159,8 +164,8 @@ def send_slack_ma_cross(
             )
         else:
             threshold_line = (
-                f"  • 전환 필요 지수: {_index_point_label(market)} "
-                f"*{_format_index_point(required_index_close)} 이상 ({required_move_pct:+.2f}%)*"
+                f"  • 전환 필요 지수: {_index_label(assets)} "
+                f"*{_format_index_level(required_index_close)} 이상 ({required_move_pct:+.2f}%)*"
             )
             needs = []
             if not gap_ok:
