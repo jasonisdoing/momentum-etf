@@ -39,6 +39,7 @@ export function StrategyHoldingCharts({
   emptyMessage,
   chartProps,
   chartHeight,
+  columns,
 }: {
   /** 아직 안 받았으면 null — 로딩과 구분한다. */
   charts: HoldingChartData[] | null;
@@ -53,6 +54,7 @@ export function StrategyHoldingCharts({
   emptyMessage: string;
   chartProps: (chart: HoldingChartData) => HoldingChartExtras;
   chartHeight?: number;
+  columns?: number;
 }) {
   if (loading || (!charts && !error)) return <div style={centeredHint}>차트를 불러오는 중…</div>;
   if (error) return <div className="alert alert-danger">{error}</div>;
@@ -64,7 +66,7 @@ export function StrategyHoldingCharts({
         {months != null ? `최근 ${months}개월 일봉입니다. ` : null}
         {hint}
       </div>
-      <div className="appChartGrid">
+      <div className="appChartGrid" style={columns ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } : undefined}>
         {charts.map((item) => (
           <HoldingChart key={item.ticker} chart={item} height={chartHeight} {...chartProps(item)} />
         ))}
