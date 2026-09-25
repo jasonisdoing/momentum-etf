@@ -154,7 +154,7 @@ export function MarketCalendarClient({ today }: { today: string }) {
   }
 
   return (
-    <PageFrame title="시장 캘린더" fullWidth>
+    <PageFrame title="시장 캘린더" fullWidth fullHeight>
       <div className={styles.root}>
         <div className={styles.toolbar}>
           <div className={styles.monthNav} aria-label="월 선택">

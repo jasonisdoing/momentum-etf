@@ -1,4 +1,4 @@
-.root { display: flex; flex-direction: column; gap: 0.5rem; }
+.root { --calendar-divider: color-mix(in srgb, var(--line) 70%, var(--ink) 30%); display: flex; flex: 1 1 auto; flex-direction: column; gap: 0.5rem; min-height: 0; }
 .toolbar { display: flex; align-items: end; gap: 1rem; }
 .monthNav { display: flex; align-items: center; gap: 0.5rem; }
 .monthNav strong { min-width: 8.5rem; text-align: center; font-size: var(--fs-lg); }
@@ -8,10 +8,11 @@
 .positive { color: #d63939; font-weight: 700; }
 .negative { color: #206bc4; font-weight: 700; }
 .dataIssue { color: #a35a00 !important; font-weight: 700; }
-.calendarScroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 0.5rem; background: var(--panel); }
-.calendar { display: grid; grid-template-columns: repeat(5, minmax(24rem, 1fr)); min-width: 120rem; }
-.weekday { padding: 0.4rem; text-align: center; background: var(--app-table-head-bg); color: var(--app-table-head-color); border-bottom: 1px solid var(--line); font-size: var(--fs-sm); font-weight: 700; }
-.day { display: flex; flex-direction: column; gap: 0.2rem; min-height: 8.25rem; padding: 0.4rem 0.55rem; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel); text-align: left; color: var(--ink); font-size: var(--fs-sm); cursor: pointer; }
+.calendarScroll { display: flex; flex: 1 1 auto; min-height: 0; overflow-x: auto; border: 1px solid var(--calendar-divider); border-radius: 0.5rem; background: var(--panel); }
+.calendar { display: grid; flex: 1 0 auto; grid-template-columns: repeat(5, minmax(24rem, 1fr)); grid-template-rows: 2rem; grid-auto-rows: minmax(8.25rem, 1fr); min-width: 120rem; }
+.weekday { padding: 0.4rem; text-align: center; background: var(--app-table-head-bg); color: var(--app-table-head-color); border-right: 1px solid var(--calendar-divider); border-bottom: 2px solid var(--calendar-divider); font-size: var(--fs-sm); font-weight: 700; }
+.weekday:nth-child(5) { border-right: 0; }
+.day { display: flex; flex-direction: column; gap: 0.2rem; min-height: 8.25rem; padding: 0.4rem 0.55rem; border: 0; border-right: 1px solid var(--calendar-divider); border-bottom: 1px solid var(--calendar-divider); background: var(--panel); text-align: left; color: var(--ink); font-size: var(--fs-sm); cursor: pointer; }
 .day:nth-child(5n) { border-right: 0; }
 .day:hover { background: var(--accent-soft); }
 .day:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
