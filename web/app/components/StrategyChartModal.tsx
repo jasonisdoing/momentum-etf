@@ -12,7 +12,7 @@ function chartLayout(width: number, height: number, count: number) {
   const desired = Math.ceil(Math.sqrt(count * width / height));
   const columns = Math.max(1, Math.min(count, 3, desired, Math.floor((width + 20) / 420)));
   const rows = Math.ceil(count / columns);
-  const chartHeight = Math.max(180, Math.floor((height - 44 - 18 * (rows - 1)) / rows - 112));
+  const chartHeight = Math.max(280, Math.min(650, Math.floor((height - 44 - 18 * (rows - 1)) / rows - 112)));
   return { columns, chartHeight };
 }
 
@@ -35,7 +35,7 @@ export function StrategyChartModal({
     return () => observer.disconnect();
   }, [open]);
 
-  const visibleCharts = charts?.slice(0, 10) ?? null;
+  const visibleCharts = charts?.slice(0, 9) ?? null;
   const layout = chartLayout(size.width, size.height, visibleCharts?.length ?? 0);
   return (
     <AppModal open={open} onClose={onClose} title={title} size="full">
