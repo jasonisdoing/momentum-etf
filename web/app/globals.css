@@ -4099,8 +4099,22 @@ a {
   background: rgba(199, 210, 254, 0.62);
 }
 
-/* 실제 보유 중인 종목 — 공용 .appHeldRow(티커·종목명 칸만 녹색)를 그대로 쓴다.
-   고정 행(rankFixedRow)의 남색 줄 위에도 두 칸의 녹색이 그대로 얹힌다. */
+/* 순위 화면의 실제 보유 종목은 이탈·문턱·고정 행보다 우선해 행 전체를 강조한다.
+   버킷 셀의 분류 색상은 유지한다. */
+.rankAgGrid .ag-row.appHeldRow {
+  background: rgba(102, 204, 102, 0.35);
+}
+
+.rankAgGrid .ag-row.appHeldRow:hover {
+  background: rgba(102, 204, 102, 0.42);
+}
+
+.rankAgGrid .ag-row.appHeldRow .ag-cell[col-id="ticker"],
+.rankAgGrid .ag-row.appHeldRow .ag-cell[col-id="name"],
+.rankAgGrid .ag-row.appHeldRow:hover .ag-cell[col-id="ticker"],
+.rankAgGrid .ag-row.appHeldRow:hover .ag-cell[col-id="name"] {
+  background: transparent;
+}
 
 .rankAgGrid .ag-cell-value,
 .rankAgGrid .ag-group-value {

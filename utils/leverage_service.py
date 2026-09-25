@@ -93,13 +93,23 @@ def save_leverage_settings(profile: str, config: dict[str, Any]) -> dict[str, An
     return load_leverage_settings(profile)
 
 
-def resolve_pool_ticker(ticker: str) -> dict[str, Any]:
-    """종목풀(stock_meta)에서 해당 티커를 가진 활성 종목을 찾아 종목명을 반환합니다."""
+def resolve_leverage_asset(ticker: str) -> dict[str, Any]:
+    """레버리지 설정의 자산 티커를 확인해 이름을 반환한다.
+
+    시장 지수(^KS11 등)는 종목풀에 없으므로 시장지수 목록(`market_trend_service.INDICES`)에서
+    먼저 찾는다 — 판정 기준을 지수추종 ETF 로 바꿨다가 지수로 되돌릴 수 있어야 한다.
+    그 밖의 티커(레버리지·방어·지수추종 ETF)는 종목풀(stock_meta)에서 찾는다.
+    """
     from utils.db_manager import get_db_connection
+    from utils.market_trend_service import INDICES
 
     ticker_norm = str(ticker or "").strip().upper()
     if not ticker_norm:
         raise ValueError("조회할 티커가 필요합니다.")
+
+    for index in INDICES:
+        if index["yf_ticker"].startswith("^") and index["yf_ticker"] == ticker_norm:
+            return {"ticker": index["yf_ticker"], "name": index["name"], "ticker_type": "index"}
 
     db = get_db_connection()
     if db is None:

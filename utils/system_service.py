@@ -148,7 +148,7 @@ SCHEDULE_ROWS = [
         "key": "leverage_ma_cross",
         "group": "장중 실행",
         "job": "레버리지 스위칭",
-        "target": "한국/미국 지수(코스피·나스닥100)",
+        "target": "한국/미국 (설정한 지수·지수추종 ETF)",
         "cadence": "평일 09:10 · 15:00 · 16:00 KST",
         "command": "python scripts/leverage_recommend_ma_cross.py",
         # 한국·미국 두 시장의 마감을 각각 커버해야 해서 여러 번 돈다. 09:10 은 미국 마감
