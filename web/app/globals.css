@@ -4898,6 +4898,24 @@ a {
   gap: 18px 20px;
 }
 
+.strategyChartModalBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+@media (min-width: 1500px) {
+  .strategyChartModalBody .appChartGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (min-width: 2100px) {
+  .strategyChartModalBody .appChartGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (min-width: 3000px) {
+  .strategyChartModalBody .appChartGrid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+
 /* 카드 하나가 420px 아래로 눌리면 캔들이 뭉개진다 — 그 전에 1열로 떨어뜨린다. */
 @media (max-width: 900px) {
   .appChartGrid {
