@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { IconCheck, IconPlus } from "@tabler/icons-react";
 import { useSearchParams } from "next/navigation";
 
+import { PRICE_SCALE_BOTTOM_WITH_VOLUME, addVolumeHistogram } from "@/lib/chart-volume";
 import { formatCurrencyPrice } from "@/lib/price-format";
 import { stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import {
@@ -14,7 +15,6 @@ import {
   CrosshairMode,
   CandlestickSeries,
   LineSeries,
-  HistogramSeries,
   LineStyle,
 } from "lightweight-charts";
 import type {
@@ -730,7 +730,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
       layout: { background: { type: ColorType.Solid, color: "#ffffff" }, textColor: "#5b6778", fontSize: 12 },
       grid: { vertLines: { color: "#f0f2f5" }, horzLines: { color: "#f0f2f5" } },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: "#e6e8ec", scaleMargins: { top: 0.12, bottom: 0.25 } },
+      rightPriceScale: { borderColor: "#e6e8ec", scaleMargins: { top: 0.12, bottom: PRICE_SCALE_BOTTOM_WITH_VOLUME } },
       timeScale: { borderColor: "#e6e8ec", timeVisible: false },
     });
     chartRef.current = chart;
@@ -850,17 +850,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
       ]);
     }
 
-    const volumeSeries = chart.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "volume" });
-    chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-    volumeSeries.setData(
-      chartRows
-        .filter((r) => r.volume !== null && r.close !== null)
-        .map((r, i) => {
-          const prevClose = i > 0 ? chartRows[i - 1].close : null;
-          const isUp = prevClose !== null && r.close !== null ? r.close >= prevClose : true;
-          return { time: r.date as Time, value: r.volume!, color: isUp ? "rgba(224, 49, 49, 0.32)" : "rgba(32, 107, 196, 0.32)" };
-        }),
-    );
+    addVolumeHistogram(chart, chartRows.map((r) => ({ time: r.date, close: r.close, volume: r.volume })));
 
     // 종목풀의 단기·장기 이평선 — 서버(엔진 공용 계산)가 내려준 일별 값.
     // 주/월봉에서는 그 봉 날짜의 값만 골라 그린다(축의 날짜와 맞춘다).

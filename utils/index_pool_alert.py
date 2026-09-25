@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from utils.market_service import load_ticker_pool_type_map
-from utils.notification import app_link, send_slack_message_v2
+from utils.notification import send_slack_message_v2
 
 
 def notify_unregistered_index_stocks(country: str, index_items: dict[str, list[dict[str, Any]]]) -> int:
