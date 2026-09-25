@@ -137,6 +137,7 @@ type View = {
   daily: {
     date: string;
     strategy_pct: number;
+    withdrawn_to_initial_pct: number;
     /** 슬리브 단독 누적(%) — 슬롯 키로 담긴다. 그 날짜 데이터가 없으면 null. */
     slots: Record<string, number | null>;
     benchmark_pct: number;
@@ -328,6 +329,7 @@ type PeriodRow = {
   period: string;
   /** 합성(슬리브들을 한 계좌에서 굴린 결과). */
   strategy_pct: number;
+  withdrawal_pct: number;
   /** 각 전략을 **혼자** 굴렸을 때 — 합성이 단독보다 나은지 바로 읽으라고 함께 둔다. */
   slots: Record<string, number | null>;
   benchmark_pct: number;
@@ -353,6 +355,7 @@ function toPeriodRows(
   if (daily.length === 0) return [];
   type Snapshot = {
     strategy: number;
+    withdrawnToInitial: number;
     slots: Record<string, number | null>;
     benchmark: number;
     lastDate: string;
@@ -364,6 +367,7 @@ function toPeriodRows(
     if (!lastByPeriod.has(key)) order.push(key);
     lastByPeriod.set(key, {
       strategy: point.strategy_pct,
+      withdrawnToInitial: point.withdrawn_to_initial_pct,
       slots: point.slots,
       benchmark: point.benchmark_pct,
       lastDate: point.date,
@@ -373,6 +377,7 @@ function toPeriodRows(
   const slotKeys = Object.keys(daily[0].slots ?? {});
   let prev: Snapshot = {
     strategy: 0,
+    withdrawnToInitial: 0,
     slots: Object.fromEntries(slotKeys.map((key) => [key, 0])),
     benchmark: 0,
     lastDate: "",
@@ -389,6 +394,7 @@ function toPeriodRows(
     rows.push({
       period: labelByLastDate ? current.lastDate : key,
       strategy_pct: strategy,
+      withdrawal_pct: current.withdrawnToInitial - prev.withdrawnToInitial,
       slots: Object.fromEntries(
         slotKeys.map((slot) => [slot, step(current.slots?.[slot] ?? null, prev.slots?.[slot] ?? null)]),
       ),
@@ -1362,8 +1368,24 @@ export function StrategyMixClient() {
         "전략통합",
         (row) => row.strategy_pct,
         "%",
-        "슬리브들을 한 계좌에서 함께 굴린 결과 — 매월 첫 거래일에 전략 내부 주식·현금 비율을 유지하며 배분을 되돌린다.",
+        "슬리브들을 한 계좌에서 고정 KRW 기준금액으로 함께 굴린 결과. 회수한 현금은 자동 재투자하지 않습니다.",
       ),
+      {
+        colId: "withdrawal_pct",
+        headerName: "인출현금",
+        headerTooltip: "해당 연·월·주·일에 회수 기준으로 매도해 인출한 금액(KRW) ÷ 백테스트 최초 운용 기준금액(KRW). 청산·교체 대금은 포함하지 않습니다.",
+        valueGetter: (p) => p.data?.withdrawal_pct ?? null,
+        flex: 1,
+        minWidth: 108,
+        type: "numericColumn",
+        valueFormatter: (p) => p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`,
+        cellStyle: (p) => ({
+          color: p.value == null ? "inherit" : (p.value as number) > 0
+            ? "var(--up-color, #d64545)"
+            : "var(--down-color, #2f6fd0)",
+          fontWeight: 600,
+        }),
+      },
       // 각 전략을 혼자 굴렸을 때 — 합성이 단독보다 나은지 같은 줄에서 비교한다.
       // 이관이 없는 곡선이라 전략통합은 슬리브 값들의 단순 평균과 일치하지 않는다.
       ...slotKeys.map((slot) =>
