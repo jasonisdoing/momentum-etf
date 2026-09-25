@@ -459,7 +459,7 @@ export function NewHighClient() {
   const [running, setRunning] = useState(false);
   const [backtesting, setBacktesting] = useState(false);
   // 백테스트 기간 — 저장하지 않고 실행할 때 고른다.
-  const [backtestMonths, setBacktestMonths] = useState<number>(12);
+  const [backtestMonths, setBacktestMonths] = useState<number>(60);
   const [backtestProgress, setBacktestProgress] = useState<LoadingProgress | null>(null);
   const [positionsProgress, setPositionsProgress] = useState<LoadingProgress | null>(null);
   const [error, setError] = useState<string | null>(null);

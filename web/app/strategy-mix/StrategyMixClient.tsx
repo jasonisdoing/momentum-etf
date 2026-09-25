@@ -515,7 +515,7 @@ export function StrategyMixClient() {
   const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
   // 조합 셀렉트 선택지(전략·종목풀) — 계좌 목록과 같은 응답으로 온다.
   const [meta, setMeta] = useState<Meta | null>(null);
-  const [months, setMonths] = useState<number>(12);
+  const [months, setMonths] = useState<number>(60);
   const [monthOptions, setMonthOptions] = useState<number[]>([]);
 
   // 계산 기준은 계좌다 — 슬리브별 풀은 서버가 계좌 설정에서 꺼낸다(계좌 설정이 단일 소스).

@@ -2,11 +2,10 @@
 
 from fastapi import APIRouter, Body, Depends, Query
 
-from config import HOLDING_CHART_MONTHS
+from config import BACKTEST_DEFAULT_DISPLAY_MONTHS, HOLDING_CHART_MONTHS
 from fastapi_app.dependencies import require_internal_token
 from utils.pool_signal_backtest_service import get_month_options
 from utils.portfolio_service import (
-    DEFAULT_BACKTEST_MONTHS,
     DEFAULT_SETTINGS,
     MAX_HOLDINGS,
     load_settings,
@@ -25,7 +24,7 @@ def _constraints() -> dict:
     return {
         # 기간 선택지 — 종목풀 백테스트와 같은 목록이 단일 소스(전략별로 따로 두지 않는다).
         "month_options": get_month_options(),
-        "default_backtest_months": DEFAULT_BACKTEST_MONTHS,
+        "default_backtest_months": BACKTEST_DEFAULT_DISPLAY_MONTHS,
         "max_holdings": MAX_HOLDINGS,
     }
 

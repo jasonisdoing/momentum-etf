@@ -63,7 +63,7 @@ const STRATEGY_NOTES = [
 ];
 
 /** 백테스트 기간 기본값 — 서버 응답(`constraints.default_backtest_months`)이 오기 전 초기 상태용. */
-const DEFAULT_BACKTEST_MONTHS = 12;
+const DEFAULT_BACKTEST_MONTHS = 60;
 
 /** 백테스트 보기 단위 — 모멘텀·신고가 화면과 같은 목록. */
 const VIEW_MODES = [
@@ -215,7 +215,7 @@ export function PortfolioClient() {
   const [chartMonths, setChartMonths] = useState<number | null>(null);
 
 
-  // 백테스트 — 기본 12개월(모멘텀·신고가 화면과 같다).
+  // 백테스트 — 서버가 종목풀과 관계없이 화면 기본 기간을 내려준다.
   const [backtestMonths, setBacktestMonths] = useState(DEFAULT_BACKTEST_MONTHS);
   const [viewMode, setViewMode] = useState("yearly");
   const [backtest, setBacktest] = useState<Backtest | null>(null);
