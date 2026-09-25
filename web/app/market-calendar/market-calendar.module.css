@@ -1,4 +1,4 @@
-.root { --calendar-divider: color-mix(in srgb, var(--line) 70%, var(--ink) 30%); display: flex; flex: 1 1 auto; flex-direction: column; gap: 0.5rem; min-height: 0; }
+.root { --calendar-divider: color-mix(in srgb, var(--line) 70%, var(--ink) 30%); --calendar-select: #238636; --calendar-select-soft: #e8f7ec; display: flex; flex: 1 1 auto; flex-direction: column; gap: 0.5rem; min-height: 0; }
 .toolbar { display: flex; align-items: end; gap: 1rem; }
 .monthNav { display: flex; align-items: center; gap: 0.5rem; }
 .monthNav strong { min-width: 8.5rem; text-align: center; font-size: var(--fs-lg); }
@@ -14,13 +14,13 @@
 .weekday:nth-child(5) { border-right: 0; }
 .day { display: flex; flex-direction: column; gap: 0.2rem; min-height: 8.25rem; padding: 0.4rem 0.55rem; border: 0; border-right: 1px solid var(--calendar-divider); border-bottom: 1px solid var(--calendar-divider); background: var(--panel); text-align: left; color: var(--ink); font-size: var(--fs-sm); cursor: pointer; }
 .day:nth-child(5n) { border-right: 0; }
-.day:hover { background: var(--accent-soft); }
-.day:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.day.selected { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+.day:hover { background: var(--calendar-select-soft); }
+.day:focus-visible { outline: 2px solid var(--calendar-select); outline-offset: -2px; }
+.day.selected { background: var(--calendar-select-soft); box-shadow: inset 0 0 0 2px var(--calendar-select); }
 .day.outside { color: var(--text-muted); opacity: 0.55; }
 .dayHeader, .indexRows > span, .extraRow { display: flex; align-items: center; justify-content: space-between; gap: 0.35rem; }
 .dayHeader strong { font-size: var(--fs-base); }
-.todayBadge { padding: 0.08rem 0.35rem; border-radius: 1rem; background: var(--accent); color: white; font-size: var(--fs-xs); }
+.todayBadge { padding: 0.08rem 0.35rem; border-radius: 1rem; background: var(--calendar-select); color: white; font-size: var(--fs-xs); }
 .indexGroups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; min-width: 0; }
 .indexGroups > :first-child { border-right: 1px solid var(--line); }
 .indexRows { display: flex; flex-direction: column; gap: 0; line-height: 1.15; padding: 0.2rem 0.3rem; border-radius: 0.25rem; }
