@@ -9,7 +9,7 @@
 .negative { color: #206bc4; font-weight: 700; }
 .dataIssue { color: #a35a00 !important; font-weight: 700; }
 .calendarScroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 0.5rem; background: var(--panel); }
-.calendar { display: grid; grid-template-columns: repeat(5, minmax(9.5rem, 1fr)); min-width: 48rem; }
+.calendar { display: grid; grid-template-columns: repeat(5, minmax(24rem, 1fr)); min-width: 120rem; }
 .weekday { padding: 0.4rem; text-align: center; background: var(--app-table-head-bg); color: var(--app-table-head-color); border-bottom: 1px solid var(--line); font-size: var(--fs-sm); font-weight: 700; }
 .day { display: flex; flex-direction: column; gap: 0.2rem; min-height: 8.25rem; padding: 0.4rem 0.55rem; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel); text-align: left; color: var(--ink); font-size: var(--fs-sm); cursor: pointer; }
 .day:nth-child(5n) { border-right: 0; }
@@ -20,7 +20,12 @@
 .dayHeader, .indexRows > span, .extraRow { display: flex; align-items: center; justify-content: space-between; gap: 0.35rem; }
 .dayHeader strong { font-size: var(--fs-base); }
 .todayBadge { padding: 0.08rem 0.35rem; border-radius: 1rem; background: var(--accent); color: white; font-size: var(--fs-xs); }
+.indexGroups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; min-width: 0; }
+.indexGroups > :first-child { border-right: 1px solid var(--line); padding-right: 0.5rem; }
 .indexRows { display: flex; flex-direction: column; gap: 0; line-height: 1.15; }
+.indexRows > span { min-width: 0; }
+.indexRows > span > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.indexRows > span > span:last-child { white-space: nowrap; }
 .indexRows > span > span:first-child, .extraRow > span:first-child { color: var(--text-muted); }
 .extraRow { border-top: 1px solid var(--line); padding-top: 0.15rem; line-height: 1.15; }
 .detail { border: 1px solid var(--line); border-radius: 0.5rem; padding: 0.75rem 1rem; background: var(--panel); }

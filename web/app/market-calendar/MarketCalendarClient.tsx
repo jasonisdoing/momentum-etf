@@ -192,28 +192,32 @@ export function MarketCalendarClient({ today }: { today: string }) {
                   }}
                 >
                   <span className={styles.dayHeader}><strong>{date.day}</strong>{date.key === today ? <span className={styles.todayBadge}>오늘</span> : null}</span>
-                  <span className={styles.indexRows}>
-                    {MARKET_ROWS.map((row) => {
-                      const session = data?.sessions[row.country];
-                      const holiday = session === "closed" || session === "closed_future";
-                      const point = "ticker" in row ? data?.indices[row.ticker] : null;
-                      const issue = "ticker" in row ? data?.index_issues[row.ticker] : undefined;
-                      const future = "ticker" in row && row.country === "us" && point?.change_pct == null
-                        ? data?.futures?.[row.ticker] : null;
-                      const displayPoint = future ?? point;
-                      const adrPoint = "pool" in row ? data?.adr[row.pool] : null;
-                      return (
-                        <span key={row.label}>
-                          <span>{holiday ? `${row.label} ${SESSION_LABELS[session]}` : future ? `${row.label} 선물` : row.label}</span>
-                          {holiday ? null : "pool" in row
-                            ? <span
-                                className={adrPoint?.adr == null ? "" : adrPoint.entry_allowed ? styles.positive : styles.negative}
-                                title={adrDecisionTitle(adrPoint, calendar?.adr_meta[row.pool])}
-                              >ADR {adrPoint?.adr == null ? "—" : adrPoint.adr.toFixed(1)}</span>
-                            : <span className={issue && !future ? styles.dataIssue : changeClass(displayPoint?.change_pct)} title={issue?.reason ?? (future ? "Yahoo 선물 지연 시세" : undefined)}>{issue && !future ? issue.label : formatChange(displayPoint?.change_pct)}{displayPoint?.provisional && !issue ? "*" : ""}</span>}
-                        </span>
-                      );
-                    })}
+                  <span className={styles.indexGroups}>
+                    {(["kor", "us"] as const).map((country) => (
+                      <span key={country} className={styles.indexRows}>
+                        {MARKET_ROWS.filter((row) => row.country === country).map((row) => {
+                          const session = data?.sessions[row.country];
+                          const holiday = session === "closed" || session === "closed_future";
+                          const point = "ticker" in row ? data?.indices[row.ticker] : null;
+                          const issue = "ticker" in row ? data?.index_issues[row.ticker] : undefined;
+                          const future = "ticker" in row && row.country === "us" && point?.change_pct == null
+                            ? data?.futures?.[row.ticker] : null;
+                          const displayPoint = future ?? point;
+                          const adrPoint = "pool" in row ? data?.adr[row.pool] : null;
+                          return (
+                            <span key={row.label}>
+                              <span>{holiday ? `${row.label} ${SESSION_LABELS[session]}` : future ? `${row.label} 선물` : row.label}</span>
+                              {holiday ? null : "pool" in row
+                                ? <span
+                                    className={adrPoint?.adr == null ? "" : adrPoint.entry_allowed ? styles.positive : styles.negative}
+                                    title={adrDecisionTitle(adrPoint, calendar?.adr_meta[row.pool])}
+                                  >ADR {adrPoint?.adr == null ? "—" : adrPoint.adr.toFixed(1)}</span>
+                                : <span className={issue && !future ? styles.dataIssue : changeClass(displayPoint?.change_pct)} title={issue?.reason ?? (future ? "Yahoo 선물 지연 시세" : undefined)}>{issue && !future ? issue.label : formatChange(displayPoint?.change_pct)}{displayPoint?.provisional && !issue ? "*" : ""}</span>}
+                            </span>
+                          );
+                        })}
+                      </span>
+                    ))}
                   </span>
                   <span className={styles.extraRow}><span>USD/KRW</span><span className={changeClass(data?.fx?.change_pct)}>{formatChange(data?.fx?.change_pct)}{data?.fx?.provisional ? "*" : ""}</span></span>
                 </button>
