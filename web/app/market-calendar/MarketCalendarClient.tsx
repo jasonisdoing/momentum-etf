@@ -58,6 +58,15 @@ function changeClass(value: number | null | undefined): string {
   return value > 0 ? styles.positive : styles.negative;
 }
 
+function marketBackground(sum: number | null): string {
+  if (sum == null || Math.abs(sum) < 0.5) return "";
+  const magnitude = Math.abs(sum);
+  const level = magnitude >= 2 ? 4 : magnitude >= 1.5 ? 3 : magnitude >= 1 ? 2 : 1;
+  const up = [styles.marketUp1, styles.marketUp2, styles.marketUp3, styles.marketUp4];
+  const down = [styles.marketDown1, styles.marketDown2, styles.marketDown3, styles.marketDown4];
+  return (sum > 0 ? up : down)[level - 1];
+}
+
 function indexChangeForBackground(data: DayData | undefined, country: "kor" | "us", ticker: string): number | null {
   const point = data?.indices[ticker];
   const future = country === "us" && point?.change_pct == null ? data?.futures?.[ticker] : null;
@@ -207,7 +216,7 @@ export function MarketCalendarClient({ today }: { today: string }) {
                       const first = indexChangeForBackground(data, country, tickers[0]);
                       const second = indexChangeForBackground(data, country, tickers[1]);
                       const sum = holiday || first == null || second == null ? null : first + second;
-                      const background = sum == null || sum === 0 ? "" : sum > 0 ? styles.marketUp : styles.marketDown;
+                      const background = marketBackground(sum);
                       return (
                         <span
                           key={country}
