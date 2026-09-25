@@ -1274,6 +1274,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
     const isUsTickerType = String(selectedTickerTypeItem?.country_code || "").toLowerCase() === "us";
     const isAuTickerType = String(selectedTickerTypeItem?.country_code || "").toLowerCase() === "au";
+    const showExpenseRatio = isAllTickerType || String(selectedTickerTypeItem?.pool_kind || "").toLowerCase() === "etf";
     const infoColumns: ColDef<RankGridRow>[] = [
       {
         field: "배당률",
@@ -1283,13 +1284,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatPercent(params.value ?? null),
       },
-      ...(!isUsTickerType
+      ...(showExpenseRatio
         ? [
           {
             field: "보수",
-            headerName: "보수",
-            minWidth: 92,
-            width: 92,
+            headerName: "운용보수",
+            minWidth: 104,
+            width: 104,
             type: "rightAligned",
             cellRenderer: (params: { value: number | null | undefined }) => formatPercent(params.value ?? null),
           } as ColDef<RankGridRow>,
@@ -1406,6 +1407,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     selectedTickerType,
     isAllTickerType,
     selectedTickerTypeItem?.country_code,
+    selectedTickerTypeItem?.pool_kind,
     selectedTickerTypeItem?.top_n_hold,
     selectedTickerTypeItem?.currency,
     tickerSearch,
