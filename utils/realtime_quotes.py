@@ -802,13 +802,18 @@ def _toss_us_price_entry(item: dict[str, Any]) -> dict[str, Any]:
     #   애프터(16:00~20:00 ET): `afterMarketClose`. 애프터가 끝나면 이 값은 0.0 으로 리셋된다.
     #   데이장(20:00~03:50 ET): `close` 가 데이장 현재가를 준다(HOOD 121.82→121.89 로 움직임).
     #                           프리장·정규장도 `close` 가 그 세션의 현재가다.
-    #   마감(03:50~04:00 ET·주말·휴장): `close` 는 **데이장 마지막 가격에 머문다**. 그걸 쓰면
-    #                           금요일 봉이 금요일 밤 데이장 가격으로 덮이므로, 직전 정규장
-    #                           종가인 `base` 로 되돌린다(애프터·데이장 모두 123.30 로 일치).
+    #   마감: 마지막 체결일이 확정 봉 날짜면 `close` 가 그 정규장 종가다. 이후 데이장
+    #   체결이 있으면 `close` 는 데이장 가격이므로 `base` 를 쓴다.
+    #   주말 MRNA 실측: close 198.88, base 194.82(비교 기준가).
+    from utils.market_session import last_closed_session_date
+
     if session == AFTERMARKET:
         price_field = "afterMarketClose"
     elif session == CLOSED:
-        price_field = "base"
+        closed_day = last_closed_session_date("us")
+        if local_stamp is None:
+            raise ValueError("토스 미국 마감 시세의 거래 시각이 없어 확정 종가를 판별할 수 없습니다.")
+        price_field = "close" if local_stamp.date().isoformat() == closed_day else "base"
     else:
         price_field = "close"
     price = _safe_float(item.get(price_field))
@@ -824,17 +829,17 @@ def _toss_us_price_entry(item: dict[str, Any]) -> dict[str, Any]:
     if local_stamp is not None:
         entry["localTradedAt"] = local_stamp.isoformat()
         entry["tradeDateTime"] = local_stamp.tz_convert("UTC").isoformat()
-    # 일간 등락률은 애프터장에서도 전일 정규장 기준가 대비로 유지한다.
-    # 마감 구간은 가격 자체가 `base` 라 여기서 계산하면 항상 0% 가 된다 — 그때는 비워 두고
+    # 일간 등락률은 애프터장에서도 정규장 기준가 대비로 유지한다.
+    # 마감 구간은 비교 기준가가 전일 값일 수 있으므로 등락률을 비워 두고
     # `price_service._fill_missing_change_rate` 가 확정 종가로 채운다.
     base = _safe_float(item.get("base"))
+    if session == CLOSED:
+        entry["lastRegularClose"] = price
     if base is not None and isfinite(base) and base > 0:
-        # 마지막으로 **마감된 정규장**의 종가. 날짜가 아니라 세션을 따라간다 — 애프터·데이장
-        # 구간에서는 그날 정규장 종가이고, 정규장 중에는 전일 종가다. 가격 캐시의 그날 봉은
-        # 장중 스냅샷일 수 있어(증분 배치가 장중에 쓰고 실시간이 그 봉을 교체한다) 확정
-        # 종가로 쓸 수 없으므로, 확정값이 필요한 자리는 이 값을 본다.
-        entry["lastRegularClose"] = base
+        # 애프터·데이장에서는 그날 정규장 종가, 정규장 중에는 전일 종가다.
+        # 마감에는 `base` 가 전일 비교 기준가일 수도 있어 선택한 가격을 위에서 저장한다.
         if session != CLOSED:
+            entry["lastRegularClose"] = base
             entry["prevClose"] = base
             entry["changeRate"] = (price / base - 1.0) * 100.0
     # 거래량·거래대금은 API의 누적값을 전달한다. 세션별 값으로 임의 분리하지 않는다.

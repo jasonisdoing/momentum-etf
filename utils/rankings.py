@@ -909,7 +909,7 @@ def build_ticker_type_rankings(
     local_today = market_today(country_code).strftime("%Y-%m-%d")
     market_open_today = bool(get_trading_days(local_today, local_today, country_code))
     nontrading_today = selected_as_of_date == today_korea and not market_open_today
-    realtime_allowed = selected_as_of_date == today_korea and market_open_today
+    realtime_allowed = selected_as_of_date == today_korea
     realtime_snapshot = (
         realtime_snapshot_override
         if realtime_snapshot_override is not None
