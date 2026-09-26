@@ -4,81 +4,21 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
-from datetime import time as dt_time
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import requests
 
-from config import CACHE_TTL_LIVE, HYPERLIQUID_DEX, HYPERLIQUID_INFO_URL, HYPERLIQUID_SYMBOLS, MARKET_SCHEDULES
-from services.price_service import get_exchange_rates, get_realtime_snapshot
-from utils.data_loader import fetch_toss_kr_stock_snapshot, resolve_toss_us_product_codes
-from utils.market_trend_service import _fetch_naver_kor_index_close
+from config import HYPERLIQUID_DEX, HYPERLIQUID_INFO_URL, HYPERLIQUID_SYMBOLS
+from services.price_service import (
+    get_confirmed_regular_close,
+    get_exchange_rates,
+    get_realtime_snapshot,
+    quote_daily_change,
+)
+from utils.data_loader import resolve_toss_us_product_codes
+from utils.market_session import CLOSED, REGULAR, market_session
 
 logger = logging.getLogger(__name__)
-
-
-def _is_regular_session_open(country: str) -> bool:
-    """해당 국가 정규장이 진행 중인지 — 정확한 현지 시간창 + 평일.
-
-    (get_latest_trading_day 기반 판정은 진행 중 세션을 '미완료 거래일'로 보고 놓치므로 쓰지 않는다.
-    평일 공휴일엔 시세 소스의 현재가가 직전 종가와 같아 평일만 보면 충분하다.)
-    """
-    schedule = MARKET_SCHEDULES.get(country) or {}
-    tz_name = schedule.get("timezone")
-    open_t = schedule.get("open")
-    close_t = schedule.get("close")
-    if not tz_name or open_t is None or close_t is None:
-        return False
-    now_local = datetime.now(ZoneInfo(tz_name))
-    if now_local.weekday() >= 5:
-        return False
-    return open_t <= now_local.time() <= close_t
-
-
-def _get_kr_price_data_session() -> str:
-    """국내 토스 분봉의 장전·정규장·애프터장 상태를 반환한다."""
-    schedule = MARKET_SCHEDULES["kor"]
-    now_local = datetime.now(ZoneInfo(schedule["timezone"]))
-    if now_local.weekday() >= 5:
-        return "closed"
-    premarket_open = schedule["open"].replace(hour=8)
-    after_market_close = schedule["close"].replace(hour=20, minute=0)
-    if premarket_open <= now_local.time() < schedule["open"]:
-        return "premarket"
-    if schedule["open"] <= now_local.time() <= schedule["close"]:
-        return "regular"
-    if schedule["close"] < now_local.time() <= after_market_close:
-        return "aftermarket"
-    return "closed"
-
-
-def _get_us_price_data_session() -> str:
-    """미국 토스 시세의 데이장·프리장·본장·애프터장 상태를 반환한다."""
-    schedule = MARKET_SCHEDULES["us"]
-    now_local = datetime.now(ZoneInfo(schedule["timezone"]))
-    weekday = now_local.weekday()
-    current_time = now_local.time()
-    day_market_close = dt_time(3, 50)
-    premarket_open = dt_time(4, 0)
-    aftermarket_close = dt_time(20, 0)
-
-    if weekday == 5:
-        return "closed"
-    if weekday == 6:
-        return "daymarket" if current_time >= aftermarket_close else "closed"
-    if current_time < day_market_close:
-        return "daymarket"
-    if premarket_open <= current_time < schedule["open"]:
-        return "premarket"
-    if schedule["open"] <= current_time < schedule["close"]:
-        return "regular"
-    if schedule["close"] <= current_time < aftermarket_close:
-        return "aftermarket"
-    if weekday < 4 and current_time >= aftermarket_close:
-        return "daymarket"
-    return "closed"
 
 
 def _fetch_dex_ctxs(*, max_attempts: int = 3) -> dict[str, dict[str, Any]]:
@@ -297,11 +237,11 @@ def load_live_24h_quotes() -> dict[str, Any]:
     if need_sync:
         _update_candle_caches_sync(usd_krw)
 
-    # 종목별 '장중/시간외' 표기 + 정규장 종가 기준에 쓸 각 시장의 정규장 개장 여부.
-    # (정규장 종가/변동률은 한국주=네이버 일봉, 미국주/지수=yfinance 일봉으로 세션 인지 산출)
-    us_market_open = _is_regular_session_open("us")
-    kor_market_open = _is_regular_session_open("kor")
-    us_price_data_session = _get_us_price_data_session()
+    # 카드의 세션 표시는 공통 시장 시간표를 따른다.
+    us_price_data_session = market_session("us")["session"]
+    kr_price_data_session = market_session("kor")["session"]
+    us_market_open = us_price_data_session == REGULAR
+    kor_market_open = kr_price_data_session == REGULAR
 
     quotes: list[dict[str, Any]] = []
 
@@ -367,8 +307,7 @@ def load_live_24h_quotes() -> dict[str, Any]:
             continue
         info = toss_stock_snapshot[resolved_ticker]
         latest = _to_float(info.get("nowVal"))
-        base = _to_float(info.get("prevClose"))
-        change_pct = _to_float(info.get("changeRate"))
+        base, change_pct = quote_daily_change("us", resolved_ticker, info)
         candles = _HYPERLIQUID_CANDLE_CACHE.get(spec["symbol"]) or []
         change_24h = None
         if len(candles) >= 2 and candles[0].get("c"):
@@ -386,22 +325,20 @@ def load_live_24h_quotes() -> dict[str, Any]:
                 "actual_change_pct": None,
                 "diff_pct": change_pct,
                 "session_open": us_market_open,
-                "price_data_open": us_price_data_session != "closed",
+                "price_data_open": us_price_data_session != CLOSED,
                 "price_data_session": us_price_data_session,
                 "candles": candles,
                 "source_ticker": resolved_ticker,
             }
         )
 
-    kr_price_data_session = _get_kr_price_data_session()
     kr_toss_tickers = [spec["ticker"] for spec in _KR_TOSS_STOCK_SPECS]
-    kr_toss_stock_snapshot = fetch_toss_kr_stock_snapshot(kr_toss_tickers)
+    kr_toss_stock_snapshot = get_realtime_snapshot("kor", kr_toss_tickers)
     for spec in _KR_TOSS_STOCK_SPECS:
         ticker = spec["ticker"]
         info = kr_toss_stock_snapshot.get(ticker) or {}
         latest = _to_float(info.get("nowVal"))
-        previous_close = _to_float(info.get("prevClose"))
-        change_pct = _to_float(info.get("changeRate"))
+        previous_close, change_pct = quote_daily_change("kor", ticker, info)
         candles = _HYPERLIQUID_CANDLE_CACHE.get(spec["symbol"]) or []
         change_24h = None
         if len(candles) >= 2 and candles[0].get("c"):
@@ -419,7 +356,7 @@ def load_live_24h_quotes() -> dict[str, Any]:
                 "actual_change_pct": None,
                 "diff_pct": change_pct,
                 "session_open": kor_market_open,
-                "price_data_open": kr_price_data_session != "closed",
+                "price_data_open": kr_price_data_session != CLOSED,
                 "price_data_session": kr_price_data_session,
                 "candles": candles,
                 "source_ticker": ticker,
@@ -438,27 +375,17 @@ def load_live_24h_quotes() -> dict[str, Any]:
             currency = "POINT"
             country = "us"
             hyper_price = mark
-            actual_price, actual_change_pct, reference_prev_close = _fetch_regular_close(
-                str(spec.get("yahoo_symbol") or ""), us_market_open
-            )
+            actual_price, actual_change_pct = get_confirmed_regular_close("us", str(spec.get("yahoo_symbol") or ""))
         elif spec["country"] == "kor":
             currency = "KRW"
             country = "kor"
             hyper_price = (mark * usd_krw) if (mark is not None and usd_krw) else None
-            # US 와 동일: 네이버 정규장 일봉(세션 인지, 원화). 장중=전일 종가 기준(당일 변화),
-            # 마감 후=당일 종가 기준. naver nowVal(실시간가) 기준의 '프리미엄만' 보이던 문제 해결.
-            actual_price, actual_change_pct, reference_prev_close = _fetch_kr_regular_close(
-                spec["actual_ticker"], kor_market_open
-            )
+            actual_price, actual_change_pct = get_confirmed_regular_close("kor", spec["actual_ticker"])
         else:
             currency = "USD"
             country = "us"
             hyper_price = mark
-            # 토스 base 는 마감 후에도 '어제 종가'라 시간외 변동만 떼어내지 못한다.
-            # yfinance 정규장 일봉(세션 인지)으로 '직전 완료 정규장 종가'를 일관되게 쓴다.
-            actual_price, actual_change_pct, reference_prev_close = _fetch_regular_close(
-                str(spec.get("actual_ticker") or ""), us_market_open
-            )
+            actual_price, actual_change_pct = get_confirmed_regular_close("us", str(spec.get("actual_ticker") or ""))
 
         diff_pct = (
             (hyper_price / actual_price - 1.0) * 100.0
@@ -483,7 +410,6 @@ def load_live_24h_quotes() -> dict[str, Any]:
                 "change_24h_pct": change_24h,
                 "actual_price": actual_price,
                 "actual_change_pct": actual_change_pct,
-                "reference_prev_close": reference_prev_close,
                 "diff_pct": diff_pct,
                 "session_open": session_open,
                 "candles": hl_candles,
@@ -491,92 +417,3 @@ def load_live_24h_quotes() -> dict[str, Any]:
         )
 
     return {"quotes": quotes, "usd_krw": usd_krw}
-
-
-_REGULAR_CLOSE_CACHE: dict[tuple[str, bool], tuple[tuple[float | None, float | None, float | None], float]] = {}
-_REGULAR_CLOSE_TTL = CACHE_TTL_LIVE  # 정규장 종가는 하루 1회만 바뀌므로 짧은 TTL 로 yfinance 호출을 줄인다.
-
-
-def _regular_close_from_series(
-    closes, session_open: bool, tz_name: str
-) -> tuple[float | None, float | None, float | None]:
-    """완료 정규장 종가·변동률과 현재 거래일의 전일 종가를 반환한다.
-
-    장중이고 마지막 봉이 '오늘'(현지 기준)이면 형성 중이므로 제외하고 직전(어제) 종가를 앵커로 한다.
-    → 장중엔 전일 종가 기준(당일 변화), 마감 후엔 당일 종가 기준(시간외 변화).
-    """
-    if closes is None or closes.empty:
-        return None, None, None
-    latest_is_today = False
-    try:
-        latest_is_today = closes.index[-1].date() == datetime.now(ZoneInfo(tz_name)).date()
-    except Exception:
-        pass
-    anchor = -1
-    if session_open and latest_is_today and len(closes) >= 2:
-        anchor = -2
-    close = float(closes.iloc[anchor])
-    change = None
-    previous_close = None
-    if len(closes) >= abs(anchor) + 1:
-        prev = float(closes.iloc[anchor - 1])
-        if prev:
-            change = (close / prev - 1.0) * 100.0
-            previous_close = prev
-    reference_prev_close = previous_close if latest_is_today and anchor == -1 else close
-    return close, change, reference_prev_close
-
-
-def _fetch_regular_close(yahoo_symbol: str, session_open: bool) -> tuple[float | None, float | None, float | None]:
-    """US 종목/지수의 '직전 완료 정규장 종가'와 그 정규장 변동률 (yfinance 정규장 일봉, 세션 인지).
-
-    naver nowVal 은 실시간/시간외가라 '직전 완료 종가'를 안정적으로 못 준다. 토스 `base` 는
-    전일 정규장 기준가라 **오늘** 정규장이 마감된 뒤에는 하루 이전 값이 된다 — 둘 다
-    세션에 따라 뜻이 달라져 일봉을 쓴다.
-    """
-    if not yahoo_symbol:
-        return None, None, None
-    key = (f"us:{yahoo_symbol}", session_open)
-    now = time.time()
-    cached = _REGULAR_CLOSE_CACHE.get(key)
-    if cached and now - cached[1] < _REGULAR_CLOSE_TTL:
-        return cached[0]
-    result: tuple[float | None, float | None, float | None] = (None, None, None)
-    try:
-        import yfinance as yf
-
-        from utils.yfinance_guard import yfinance_lock
-
-        with yfinance_lock():
-            hist = yf.Ticker(yahoo_symbol).history(period="7d", interval="1d")
-        closes = hist["Close"].dropna() if hist is not None and "Close" in hist else None
-        result = _regular_close_from_series(closes, session_open, "America/New_York")
-    except Exception as exc:
-        logger.warning("Hyperliquid 정규장 종가 조회 실패 (%s): %s", yahoo_symbol, exc)
-        result = cached[0] if cached else (None, None)
-    _REGULAR_CLOSE_CACHE[key] = (result, now)
-    return result
-
-
-def _fetch_kr_regular_close(ticker: str, session_open: bool) -> tuple[float | None, float | None, float | None]:
-    """한국 종목의 '직전 완료 정규장 종가'와 변동률 (네이버 일봉, 세션 인지). US 와 동일 의미.
-
-    naver nowVal 은 장중에 실시간 정규장가라 '전일 종가 기준 당일 변화'를 못 준다.
-    그래서 일봉으로 장중엔 전일 종가, 마감 후엔 당일 종가를 앵커로 쓴다.
-    """
-    if not ticker:
-        return None, None, None
-    key = (f"kr:{ticker}", session_open)
-    now = time.time()
-    cached = _REGULAR_CLOSE_CACHE.get(key)
-    if cached and now - cached[1] < _REGULAR_CLOSE_TTL:
-        return cached[0]
-    result: tuple[float | None, float | None, float | None] = (None, None, None)
-    try:
-        closes = _fetch_naver_kor_index_close(ticker, 10)
-        result = _regular_close_from_series(closes, session_open, "Asia/Seoul")
-    except Exception as exc:
-        logger.warning("Hyperliquid 한국 정규장 종가 조회 실패 (%s): %s", ticker, exc)
-        result = cached[0] if cached else (None, None)
-    _REGULAR_CLOSE_CACHE[key] = (result, now)
-    return result

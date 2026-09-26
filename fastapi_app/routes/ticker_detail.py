@@ -450,7 +450,7 @@ def _apply_realtime_snapshot_to_dataframe(
         return df, None
 
     realtime_change_pct: float | None = None
-    if country == "us" and realtime_entry.get("changeRate") is not None:
+    if realtime_entry.get("changeRate") is not None:
         try:
             realtime_change_pct = round(float(realtime_entry["changeRate"]), 2)
         except (TypeError, ValueError):

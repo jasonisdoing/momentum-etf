@@ -240,13 +240,17 @@ def _live_trade_value_mult(ticker_type: str, sum19: dict[str, float]) -> dict[st
     country = str(settings.get("country_code") or "").strip().lower()
     if not sum19:
         return {}
-    from utils.data_loader import fetch_toss_kr_stock_snapshot, fetch_toss_us_stock_snapshot
-
-    fetch = {"kor": fetch_toss_kr_stock_snapshot, "us": fetch_toss_us_stock_snapshot}.get(country)
-    if fetch is None:
+    if country not in {"kor", "us"}:
         return {}
     try:
-        snapshot = fetch(list(sum19))
+        if country == "kor":
+            from utils.data_loader import fetch_toss_kr_trade_value_snapshot
+
+            snapshot = fetch_toss_kr_trade_value_snapshot(list(sum19))
+        else:
+            from services.price_service import get_realtime_snapshot
+
+            snapshot = get_realtime_snapshot("us", list(sum19))
     except Exception:
         return {}
 

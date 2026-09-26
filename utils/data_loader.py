@@ -24,13 +24,10 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated", categor
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API")
 warnings.filterwarnings("ignore", category=UserWarning, module="pykrx")
 
-# 웹 스크레이핑을 위한 라이브러리
 try:
     import requests
-    from bs4 import BeautifulSoup
 except ImportError:
     requests = None
-    BeautifulSoup = None
 
 # yfinance가 설치되지 않았을 경우를 대비한 예외 처리
 try:
@@ -93,17 +90,15 @@ from utils.cache_utils import (
 from utils.logger import get_app_logger
 
 # ── 분리 이동된 모듈 re-export (하위 호환) ─────────────────────────────────
-# 거래일 캘린더와 실시간 시세는 별도 모듈로 분리했다. 기존 `from utils.data_loader
-# import X` 경로가 전부 유효하도록 같은 이름을 그대로 다시 내보낸다.
+# 거래일 캘린더와 시세 수집 어댑터를 기존 호출 경로에 다시 내보낸다.
 from utils.realtime_quotes import (  # noqa: F401
     _safe_float,
     fetch_au_quoteapi_snapshot,
     fetch_naver_etf_inav_snapshot,
-    fetch_naver_realtime_price,
     fetch_naver_stock_realtime_snapshot,
     fetch_naver_worldstock_snapshot,
     fetch_overseas_etf_nav_snapshot,
-    fetch_toss_kr_stock_snapshot,
+    fetch_toss_kr_trade_value_snapshot,
     fetch_toss_us_stock_snapshot,
     get_cached_au_etf_snapshot_entry,
     get_cached_naver_etf_snapshot_entry,
