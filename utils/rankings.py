@@ -35,6 +35,7 @@ from utils.effective_prices import (
     last_regular_close,
 )
 from utils.logger import get_app_logger
+from utils.market_session import market_today
 from utils.moving_averages import pool_moving_average_type
 from utils.perf_metrics import single_stock_backtest_stats
 from utils.pool_settings_store import get_pool_benchmark_ticker
@@ -275,6 +276,17 @@ def _confirmed_day_change_pct(
         if close is None:
             return None
     return ((close / prev_close) - 1.0) * 100.0
+
+
+def _prior_confirmed_day_change_pct(close_series: pd.Series | None, bar_date: pd.Timestamp) -> float | None:
+    """휴장일에는 마지막 확정 봉의 직전 거래일 변동률을 전거래일 칸에 표시한다."""
+    if close_series is None or close_series.empty:
+        return None
+    series = pd.to_numeric(close_series, errors="coerce").dropna()
+    prior = series.loc[pd.DatetimeIndex(series.index).normalize() < pd.Timestamp(bar_date).normalize()]
+    if prior.empty:
+        return None
+    return _confirmed_day_change_pct(series, pd.Timestamp(prior.index[-1]), anchor_close=None)
 
 
 def _confirmed_close_on(close_series: pd.Series, bar_date: pd.Timestamp) -> float | None:
@@ -894,7 +906,10 @@ def build_ticker_type_rankings(
     if callable(status_callback):
         status_callback("실시간 가격 조회")
     today_korea = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
-    realtime_allowed = selected_as_of_date == today_korea
+    local_today = market_today(country_code).strftime("%Y-%m-%d")
+    market_open_today = bool(get_trading_days(local_today, local_today, country_code))
+    nontrading_today = selected_as_of_date == today_korea and not market_open_today
+    realtime_allowed = selected_as_of_date == today_korea and market_open_today
     realtime_snapshot = (
         realtime_snapshot_override
         if realtime_snapshot_override is not None
@@ -957,6 +972,8 @@ def build_ticker_type_rankings(
                 reference_date=selected_as_of_date,
                 monthly_labels=monthly_labels,
             )
+            if nontrading_today:
+                price_metrics["전거래일(%)"] = _prior_confirmed_day_change_pct(base_close_series, pool_last_bar)
             price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
             # 장중 신고 터치 — 오늘 고가 기준(위 헬퍼 주석 참조). 당일에만 참이 될 수 있다.
             price_metrics["고점터치"] = _touched_new_high_today(base_close_series, realtime_entry)
