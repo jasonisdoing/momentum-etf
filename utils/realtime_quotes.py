@@ -31,6 +31,7 @@ from config import (
     AU_QUOTEAPI_URL,
     CACHE_TTL_COMPUTE,
     CACHE_TTL_LIVE,
+    MARKET_SCHEDULES,
     NAVER_FINANCE_ETF_API_URL,
     NAVER_FINANCE_HEADERS,
     TOSS_INVEST_API_BASE_URL,
@@ -142,6 +143,7 @@ def _fetch_etf_inav_all() -> dict[str, dict[str, float]]:
         entry: dict[str, Any] = {
             "nav": nav_value,
             "nowVal": price_value,
+            "regularClose": price_value,
             "deviation": deviation,
         }
 
@@ -588,6 +590,7 @@ def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
 
             entry: dict[str, float] = {
                 "nowVal": float(price),
+                "regularClose": float(price),
             }
 
             prev_close = quote.get("prevClose")
@@ -777,19 +780,16 @@ def resolve_toss_us_product_codes(symbols: Sequence[str]) -> dict[str, str]:
     return _resolve_toss_product_codes(normalized_symbols)
 
 
-def _toss_us_price_entry(item: dict[str, Any]) -> dict[str, Any]:
-    """**지금 열려 있는 세션**의 가격을 고른다. 애프터 값을 정규 종가로 저장하지 않는다.
+def _toss_closed_regular_close_field(local_stamp: pd.Timestamp | None, closed_day: str, in_daymarket_gap: bool) -> str:
+    """토스의 마감 응답에서 마지막 정규장 종가 필드를 식별한다."""
+    if local_stamp is not None:
+        return "close" if local_stamp.date().isoformat() == closed_day else "base"
+    return "base" if in_daymarket_gap else "close"
 
-    세션은 응답의 거래 시각이 아니라 **현재 시각**으로 판정한다. `tradeDateTime` 은
-    종목별 마지막 체결 시각이라, 그 기준으로 고르면 애프터가 끝난 뒤에도 마지막 체결이
-    애프터 시각이어서 애프터 가격에 눌러앉는다 — 세션이 끝나면 정규장 종가로 돌아와야 한다.
 
-    `tradeDateTime` 이 없는 종목도 **버리지 않는다**. 실측(2026-09-22 데이장)에서 ALL·ADP 가
-    `tradeDateTime: null` 인데 `close`·`base` 는 유효했다 — 그 세션에 체결이 없었을 뿐이다.
-    예전에는 이 값을 세션 판정에 썼기 때문에 필수였지만 지금은 쓰지 않으므로, 없으면
-    **거래 시각만 비우고** 가격은 그대로 쓴다(비운 값은 신선도 검증에서 '알 수 없음'이 된다).
-    """
-    from utils.market_session import AFTERMARKET, CLOSED, PREMARKET, market_session
+def _toss_us_price_entry(item: dict[str, Any], session: str, closed_day: str, in_daymarket_gap: bool) -> dict[str, Any]:
+    """토스 응답을 현재 세션 가격과 정규장 종가로 변환한다."""
+    from utils.market_session import AFTERMARKET, CLOSED, PREMARKET
 
     raw_stamp = item.get("tradeDateTime")
     local_stamp = None
@@ -797,28 +797,19 @@ def _toss_us_price_entry(item: dict[str, Any]) -> dict[str, Any]:
         stamp = pd.Timestamp(raw_stamp)
         if not pd.isna(stamp) and stamp.tzinfo is not None:
             local_stamp = stamp.tz_convert(ZoneInfo("America/New_York"))
-    session = market_session("us")["session"]
-    # 세션별 필드 — 2026-09-21/22 실측으로 확정했다.
-    #   애프터(16:00~20:00 ET): `afterMarketClose`. 애프터가 끝나면 이 값은 0.0 으로 리셋된다.
-    #   데이장(20:00~03:50 ET): `close` 가 데이장 현재가를 준다(HOOD 121.82→121.89 로 움직임).
-    #                           프리장·정규장도 `close` 가 그 세션의 현재가다.
-    #   마감: 마지막 체결일이 확정 봉 날짜면 `close` 가 그 정규장 종가다. 이후 데이장
-    #   체결이 있으면 `close` 는 데이장 가격이므로 `base` 를 쓴다.
-    #   주말 MRNA 실측: close 198.88, base 194.82(비교 기준가).
-    from utils.market_session import last_closed_session_date
-
-    if session == AFTERMARKET:
-        price_field = "afterMarketClose"
-    elif session == CLOSED:
-        closed_day = last_closed_session_date("us")
-        if local_stamp is None:
-            raise ValueError("토스 미국 마감 시세의 거래 시각이 없어 확정 종가를 판별할 수 없습니다.")
-        price_field = "close" if local_stamp.date().isoformat() == closed_day else "base"
-    else:
-        price_field = "close"
+    regular_field = (
+        _toss_closed_regular_close_field(local_stamp, closed_day, in_daymarket_gap) if session == CLOSED else "base"
+    )
+    price_field = regular_field if session == CLOSED else ("afterMarketClose" if session == AFTERMARKET else "close")
     price = _safe_float(item.get(price_field))
     if price is None or not isfinite(price) or price <= 0:
         raise ValueError(f"토스 미국 {session} 시세의 {price_field}가 유효하지 않습니다.")
+
+    regular_close = price if session == CLOSED else _safe_float(item.get(regular_field))
+    if regular_close is not None and (not isfinite(regular_close) or regular_close <= 0):
+        regular_close = None
+    if session == CLOSED and regular_close is None:
+        raise ValueError(f"토스 미국 정규장 종가의 {regular_field}가 유효하지 않습니다.")
 
     entry: dict[str, Any] = {
         "nowVal": price,
@@ -829,19 +820,12 @@ def _toss_us_price_entry(item: dict[str, Any]) -> dict[str, Any]:
     if local_stamp is not None:
         entry["localTradedAt"] = local_stamp.isoformat()
         entry["tradeDateTime"] = local_stamp.tz_convert("UTC").isoformat()
-    # 일간 등락률은 애프터장에서도 정규장 기준가 대비로 유지한다.
-    # 마감 구간은 비교 기준가가 전일 값일 수 있으므로 등락률을 비워 두고
-    # `price_service._fill_missing_change_rate` 가 확정 종가로 채운다.
-    base = _safe_float(item.get("base"))
-    if session == CLOSED:
-        entry["lastRegularClose"] = price
-    if base is not None and isfinite(base) and base > 0:
-        # 애프터·데이장에서는 그날 정규장 종가, 정규장 중에는 전일 종가다.
-        # 마감에는 `base` 가 전일 비교 기준가일 수도 있어 선택한 가격을 위에서 저장한다.
-        if session != CLOSED:
-            entry["lastRegularClose"] = base
-            entry["prevClose"] = base
-            entry["changeRate"] = (price / base - 1.0) * 100.0
+    if regular_close is not None:
+        entry["regularClose"] = regular_close
+    if session != CLOSED and regular_close is not None:
+        entry["lastRegularClose"] = regular_close
+        entry["prevClose"] = regular_close
+        entry["changeRate"] = (price / regular_close - 1.0) * 100.0
     # 거래량·거래대금은 API의 누적값을 전달한다. 세션별 값으로 임의 분리하지 않는다.
     for key, field in (("tradeValue", "value"), ("tradeVolume", "volume"), ("volume", "volume")):
         parsed = _safe_float(item.get(field))
@@ -870,6 +854,20 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
     if not requests:
         logger.debug("requests 라이브러리가 없어 토스 가격 조회를 건너뜁니다.")
         return {}
+
+    from utils.market_session import CLOSED, last_closed_session_date, market_session
+    from utils.trading_calendar import get_trading_days
+
+    session = market_session("us")["session"]
+    closed_day = last_closed_session_date("us") if session == CLOSED else ""
+    now_local = datetime.now(ZoneInfo("America/New_York"))
+    day = now_local.date().isoformat()
+    schedule = MARKET_SCHEDULES["us"]
+    in_daymarket_gap = (
+        session == CLOSED
+        and schedule["daymarket_close"] <= now_local.time() < schedule["premarket_open"]
+        and bool(get_trading_days(day, day, "us"))
+    )
 
     # 1단계: symbol → productCode 매핑
     symbol_to_code = _resolve_toss_product_codes(normalized_symbols)
@@ -912,7 +910,7 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
                 continue
 
             try:
-                snapshot[sym] = _toss_us_price_entry(item)
+                snapshot[sym] = _toss_us_price_entry(item, session, closed_day, in_daymarket_gap)
             except (ValueError, TypeError) as exc:
                 logger.warning("토스 미국 시세 제외 (%s): %s", sym, exc)
 

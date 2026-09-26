@@ -423,18 +423,7 @@ def _is_cache_alive(cache_entry: dict[str, Any] | None, now: datetime) -> bool:
 
 
 def _fill_missing_change_rate(country: str, snapshot: dict[str, dict[str, Any]]) -> None:
-    """시세가 등락률을 안 주면 **확정 종가로 계산해 채운다**(제자리 수정).
-
-    장이 닫힌 구간에서 생긴다. 토스 미국 마감 구간은 가격이 곧 기준가라 등락률을 비우고,
-    네이버 국내주식 폴링은 기준가가 틀려서 비운다 — 실측(2026-09-24 휴장): 가온전선
-    `closePrice` 318,000 은 맞는데 기준가가 321,500 이라 -1.09% 가 나온다(네이버 일별
-    시세·KRX·가격 캐시는 09-22 종가를 324,000 으로 준다 → 실제 -1.85%).
-
-    비워 두면 확정 시리즈를 들고 있는 화면만 제 값을 내고(순위·포트폴리오) 시세만 보는
-    화면은 빈칸이 된다(대시보드·보유 구성·시세 API). 그래서 시세를 만드는 이 자리에서
-    한 번 채운다 — 분자는 시세의 마지막 정규장 종가, 분모는 그 앞 거래일의 확정 종가다.
-    값을 못 구하면 **비워 둔다**(지어내지 않는다).
-    """
+    """등락률이 없으면 마지막 정규장 종가와 직전 확정 종가로 계산한다."""
     from utils.cache_utils import load_cached_close_series_bulk
     from utils.effective_prices import bar_anchor, confirmed_close_before, last_regular_close
     from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
@@ -468,8 +457,38 @@ def _fill_missing_change_rate(country: str, snapshot: dict[str, dict[str, Any]])
 
 def _fetch_realtime_snapshot(country: str, tickers: Sequence[str]) -> tuple[dict[str, dict[str, float]], str]:
     snapshot, source = _fetch_quotes_by_country(country, tickers)
+    _normalize_closed_prices(country, snapshot)
     _fill_missing_change_rate(country, snapshot)
     return snapshot, source
+
+
+def _normalize_closed_prices(country: str, snapshot: dict[str, dict[str, Any]]) -> None:
+    """소스가 전달한 정규장 종가를 마감 시세의 공통 현재가로 확정한다."""
+    from utils.market_session import CLOSED, market_session
+
+    if market_session(country)["session"] != CLOSED:
+        return
+    for ticker, entry in list(snapshot.items()):
+        if not isinstance(entry, dict):
+            continue
+        regular_close = entry.get("regularClose")
+        if regular_close is None:
+            logger.warning("%s 마감 시세 제외 (%s): 정규장 종가가 없습니다.", country, ticker)
+            snapshot.pop(ticker)
+            continue
+        try:
+            price = float(regular_close)
+        except (TypeError, ValueError):
+            price = float("nan")
+        if not isfinite(price) or price <= 0:
+            logger.warning(
+                "%s 마감 시세 제외 (%s): 정규장 종가가 유효하지 않습니다: %s", country, ticker, regular_close
+            )
+            snapshot.pop(ticker)
+            continue
+        entry["nowVal"] = price
+        entry["lastRegularClose"] = price
+        entry.pop("changeRate", None)
 
 
 def _fetch_quotes_by_country(country: str, tickers: Sequence[str]) -> tuple[dict[str, dict[str, float]], str]:
