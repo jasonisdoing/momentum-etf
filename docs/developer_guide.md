@@ -79,8 +79,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 - **암묵적 기본값 금지.** 설정이 없으면 에러. 화면은 폼 대신 실패 사유를 보여준다.
 - **호주 티커는 `ASX:` 접두사.** 미국과 영문 티커가 겹친다(`TECH`, `HACK`). DB·API·화면까지 붙인 채로 유통하고, 외부 호출 직전에만 `utils/asx_ticker.py` 로 벗긴다. 구성종목의 상장 국가는 수집 소스 신호로만 판별(추정 금지).
 - **캐시 TTL 은 `config.py` 상수 4개**(`CACHE_TTL_LIVE/COMPUTE/SLOW/META`)와 `utils/ttl_cache.TtlCache` 만 쓴다.
-- **실시간 가격 외에는 종목 캐시에서 읽는다.** 화면 진입 시 외부 원천을 다시 부르지 않는다.
-- **가격 경로는 수집 어댑터(`utils/realtime_quotes.py`) → 공통 시세 서비스(`services/price_service.py`) → 봉 반영(`utils/effective_prices.py`)이다.** 화면·전략·알림은 이 결과만 사용한다.
+- **종목 가격 경로는 수집 어댑터(`utils/realtime_quotes.py`) → 공통 시세 서비스(`services/price_service.py`) → 봉 반영(`utils/effective_prices.py`)이다.** 화면·전략·알림은 공통 시세·확정 종가 결과만 사용한다. 거래대금·NAV 수집은 가격 판정과 별개다.
 - **최신 거래일 기준 날짜(화면 `as_of`)는 모든 시장 공통 한국 날짜.** 단 **실시간을 붙일 봉의 날짜**는 그 시장 현지 날짜다(`utils/effective_prices.effective_bar_date`) — 한국 날짜로 미국 봉을 세면 하루 어긋난다.
 - **제외 종목(`exclude_from_ranking`)** 은 비교 기준일 뿐 — 모든 선정·백테스트 유니버스에서 제외.
 - **배치 추가·삭제는 7곳을 함께 고친다**: `utils/system_service.py` 의 `SystemAction`·`SCHEDULE_ROWS`·`_SCRIPT_BY_ACTION`, `web/app/api/system/route.ts` 의 `allowed`, `web/lib/system-store.ts`, `web/app/batch/SystemManager.tsx`, `infra/cron/crontab`. 한 곳이 빠지면 `/batch` 에서 400.

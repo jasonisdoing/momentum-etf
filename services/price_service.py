@@ -29,6 +29,7 @@ logger = get_app_logger()
 # ────────────────────────────────────────────
 # key: "{country}:{ticker}" → {"data": {...}, "fetched_at": dt, "expires_at": dt, "source": str}
 _TICKER_PRICE_CACHE: dict[str, dict[str, Any]] = {}
+_CONFIRMED_CLOSE_CACHE: dict[tuple[str, str], tuple[str, tuple[float | None, float | None], float]] = {}
 
 _KOR_ACTIVE_TTL_SECONDS = CACHE_TTL_LIVE
 _AU_ACTIVE_TTL_SECONDS = CACHE_TTL_LIVE
@@ -47,6 +48,7 @@ _FX_CACHE: dict[str, dict[str, Any]] = {}
 
 def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str, dict[str, float]]:
     """국가별 실시간 스냅샷을 반환한다. 종목별 캐시를 사용한다."""
+    from utils.market_session import market_session
 
     country = _normalize_country_code(country_code)
     normalized_tickers = _normalize_tickers(tickers)
@@ -55,6 +57,7 @@ def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str
 
     now = datetime.now()
     ttl_seconds = _get_realtime_ttl_seconds(country)
+    session = market_session(country)["session"]
 
     # 캐시 히트/만료 분리
     cached_result: dict[str, dict[str, float]] = {}
@@ -67,7 +70,10 @@ def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str
         # 장 전에 idle TTL(3600s)로 캐시된 항목도 개장 후 active TTL(30s) 경과 즉시 만료된다.
         fetched_at = entry.get("fetched_at") if entry else None
         is_alive = (
-            entry is not None and isinstance(fetched_at, datetime) and (now - fetched_at).total_seconds() < ttl_seconds
+            entry is not None
+            and entry.get("session") == session
+            and isinstance(fetched_at, datetime)
+            and (now - fetched_at).total_seconds() < ttl_seconds
         )
         if is_alive:
             cached_result[ticker] = entry["data"]  # type: ignore[index]
@@ -94,6 +100,7 @@ def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str
             "fetched_at": fetched_at,
             "expires_at": expires_at,
             "source": source,
+            "session": session,
             "is_stale": False,
         }
 
@@ -102,7 +109,7 @@ def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str
     for ticker in missing_tickers:
         cache_key = f"{country}:{ticker}"
         entry = _TICKER_PRICE_CACHE.get(cache_key)
-        if entry and "data" in entry:
+        if entry and entry.get("session") == session and "data" in entry:
             cached_result[ticker] = entry["data"]
 
     # 캐시 히트 + 새로 조회한 데이터 병합
@@ -331,6 +338,7 @@ def clear_price_service_cache() -> None:
     """가격 서비스 메모리 캐시를 초기화한다."""
 
     _TICKER_PRICE_CACHE.clear()
+    _CONFIRMED_CLOSE_CACHE.clear()
     _FX_CACHE.clear()
 
 
@@ -451,8 +459,94 @@ def _fill_missing_change_rate(country: str, snapshot: dict[str, dict[str, Any]])
             prev_close = confirmed_close_before(series, anchor)
             if prev_close is None:
                 continue
+            snapshot[ticker]["prevClose"] = prev_close
             snapshot[ticker]["changeRate"] = (targets[ticker] / prev_close - 1.0) * 100.0
             missing.discard(ticker)
+
+
+def quote_daily_change(country: str, ticker: str, entry: dict[str, Any]) -> tuple[float | None, float | None]:
+    """현재가의 직전 종가와 등락률을 공통 시세·확정 일봉에서 구한다."""
+    try:
+        price = float(entry.get("nowVal"))
+    except (TypeError, ValueError):
+        return None, None
+    if not isfinite(price) or price <= 0:
+        return None, None
+    try:
+        previous = float(entry.get("prevClose"))
+    except (TypeError, ValueError):
+        previous = float("nan")
+    if isfinite(previous) and previous > 0:
+        return previous, (price / previous - 1.0) * 100.0
+    try:
+        change = float(entry.get("changeRate"))
+    except (TypeError, ValueError):
+        change = float("nan")
+    factor = 1 + change / 100
+    if isfinite(price) and isfinite(factor) and price > 0 and factor > 0:
+        return price / factor, change
+    confirmed_close, confirmed_change = get_confirmed_regular_close(country, ticker)
+    if confirmed_close is None or confirmed_change is None:
+        return None, None
+    confirmed_factor = 1 + confirmed_change / 100
+    if confirmed_factor <= 0:
+        return None, None
+    previous = confirmed_close / confirmed_factor
+    return previous, (price / previous - 1.0) * 100.0
+
+
+def get_confirmed_regular_close(country: str, ticker: str) -> tuple[float | None, float | None]:
+    """마지막 확정 정규장 종가와 직전 종가 대비 등락률을 반환한다."""
+    import pandas as pd
+
+    from utils.effective_prices import bar_anchor, confirmed_close_before
+
+    country = _normalize_country_code(country)
+    symbol = str(ticker or "").strip().upper()
+    if not symbol:
+        raise ValueError("ticker는 필수입니다.")
+    anchor = bar_anchor(country)
+    anchor_day = anchor.date().isoformat()
+    key = (country, symbol)
+    cached = _CONFIRMED_CLOSE_CACHE.get(key)
+    if cached and cached[0] == anchor_day and time.monotonic() - cached[2] < CACHE_TTL_LIVE:
+        return cached[1]
+
+    try:
+        if country == "kor":
+            from utils.naver_chart import fetch_naver_daily_ohlc
+
+            history = fetch_naver_daily_ohlc(symbol, 14)
+            closes = history["Close"] if history is not None and "Close" in history else None
+        else:
+            import yfinance as yf
+
+            from utils.asx_ticker import to_yahoo_symbol
+
+            yahoo_symbol = to_yahoo_symbol(symbol) if country == "au" else symbol
+            with yfinance_lock():
+                history = yf.Ticker(yahoo_symbol).history(period="1mo", interval="1d")
+            closes = history["Close"] if history is not None and "Close" in history else None
+        if closes is None or closes.empty:
+            return None, None
+        series = pd.to_numeric(closes, errors="coerce").dropna()
+        index = pd.DatetimeIndex(series.index)
+        if index.tz is not None:
+            index = index.tz_localize(None)
+        eligible = series.loc[index.normalize() <= anchor]
+        if eligible.empty:
+            return None, None
+        if pd.Timestamp(eligible.index[-1]).date() != anchor.date():
+            logger.warning("확정 정규장 봉 누락 (%s %s): 기준일=%s", country, symbol, anchor.date())
+            return None, None
+        close = float(eligible.iloc[-1])
+        previous = confirmed_close_before(eligible, eligible.index[-1])
+        result = (close, (close / previous - 1.0) * 100.0 if previous else None)
+    except Exception as exc:
+        logger.warning("확정 정규장 종가 조회 실패 (%s %s): %s", country, symbol, exc)
+        return None, None
+    _CONFIRMED_CLOSE_CACHE[key] = (anchor_day, result, time.monotonic())
+    return result
 
 
 def _fetch_realtime_snapshot(country: str, tickers: Sequence[str]) -> tuple[dict[str, dict[str, float]], str]:
@@ -489,6 +583,7 @@ def _normalize_closed_prices(country: str, snapshot: dict[str, dict[str, Any]]) 
         entry["nowVal"] = price
         entry["lastRegularClose"] = price
         entry.pop("changeRate", None)
+        entry.pop("prevClose", None)
 
 
 def _fetch_quotes_by_country(country: str, tickers: Sequence[str]) -> tuple[dict[str, dict[str, float]], str]:
@@ -520,11 +615,14 @@ def _reuse_stale_ticker_cache(
     """조회 실패 시 만료된 종목별 캐시를 재사용한다."""
 
     logger.warning("실시간 가격 조회 실패로 stale 캐시를 재사용합니다. country=%s error=%s", country, exc)
+    from utils.market_session import market_session
+
+    session = market_session(country)["session"]
     result: dict[str, dict[str, float]] = {}
     for ticker in tickers:
         cache_key = f"{country}:{ticker}"
         entry = _TICKER_PRICE_CACHE.get(cache_key)
-        if entry and "data" in entry:
+        if entry and entry.get("session") == session and "data" in entry:
             entry["is_stale"] = True
             result[ticker] = entry["data"]
     return result

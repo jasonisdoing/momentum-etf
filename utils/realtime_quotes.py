@@ -15,10 +15,8 @@ import pandas as pd
 
 try:
     import requests
-    from bs4 import BeautifulSoup
 except ImportError:  # pragma: no cover
     requests = None  # type: ignore
-    BeautifulSoup = None  # type: ignore
 
 try:
     import yfinance as yf
@@ -48,35 +46,6 @@ def _safe_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def fetch_naver_realtime_price(ticker: str) -> float | None:
-    """
-    네이버 금융 웹 스크레이핑을 통해 종목의 실시간 현재가를 조회합니다.
-    주의: 이 방법은 웹페이지 구조 변경에 취약하며, 비공식적인 방법입니다.
-    """
-    if not requests or not BeautifulSoup:
-        return None
-
-    try:
-        url = f"https://finance.naver.com/item/sise.naver?code={ticker}"
-        # 네이버의 차단을 피하기 위해 브라우저처럼 보이는 User-Agent를 설정합니다.
-        headers = {  # noqa: F841
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-        }
-        response = requests.get(url, headers=headers, timeout=5)
-        response.raise_for_status()  # HTTP 오류 발생 시 예외 발생
-
-        soup = BeautifulSoup(response.text, "html.parser")
-        # 현재가를 담고 있는 HTML 요소를 id를 통해 찾습니다.
-        price_element = soup.select_one("#_nowVal")
-
-        if price_element:
-            price_str = price_element.get_text().replace(",", "")
-            return float(price_str)
-    except Exception as e:
-        logger.warning("%s의 실시간 가격 조회 중 오류 발생: %s", ticker, e)
-    return None
 
 
 # ─── ETF iNAV 글로벌 캐시 ───
@@ -926,13 +895,8 @@ _TOSS_KR_SNAPSHOT_TTL_SECONDS = CACHE_TTL_LIVE
 _TOSS_KR_SNAPSHOT_CACHE: dict[str, tuple[datetime, dict[str, float]]] = {}
 
 
-def fetch_toss_kr_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
-    """토스증권 API에서 한국 주식의 실시간 시세를 조회한다.
-
-    같은 응답에 **당일 누적 거래대금(`value`)·거래량(`volume`)** 도 들어 있어 함께 담는다.
-    가격 캐시의 거래대금은 `종가 × 거래량` 추정이고 그나마 마감된 날 것뿐이라,
-    장중 거래대금을 보여주려면 이 값이 필요하다. 50개씩 묶어 부르므로 358종목이 8회다.
-    """
+def fetch_toss_kr_trade_value_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
+    """한국 주식의 당일 누적 거래대금·거래량만 조회한다."""
     normalized_tickers = [str(ticker).strip().upper() for ticker in tickers if str(ticker or "").strip()]
     if not normalized_tickers or not requests:
         return {}
@@ -975,20 +939,16 @@ def fetch_toss_kr_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
             if not isinstance(item, dict):
                 continue
             ticker = code_to_ticker.get(str(item.get("code") or ""))
-            close_val = _safe_float(item.get("close"))
-            if not ticker or close_val is None or close_val <= 0:
+            if not ticker:
                 continue
-            base_val = _safe_float(item.get("base"))
-            entry: dict[str, float] = {"nowVal": close_val}
-            if base_val is not None and base_val > 0:
-                entry["prevClose"] = base_val
-                entry["changeRate"] = ((close_val - base_val) / base_val) * 100.0
+            entry: dict[str, float] = {}
             for key, field in (("tradeValue", "value"), ("tradeVolume", "volume")):
                 parsed = _safe_float(item.get(field))
                 if parsed is not None and parsed > 0:
                     entry[key] = parsed
-            snapshot[ticker] = entry
-            _TOSS_KR_SNAPSHOT_CACHE[ticker] = (now, entry)
+            if entry:
+                snapshot[ticker] = entry
+                _TOSS_KR_SNAPSHOT_CACHE[ticker] = (now, entry)
 
     return snapshot
 
