@@ -145,6 +145,7 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
     지표를 못 구한 종목은 그 값만 None 이다 — 목록에서 빼지 않는다(비중은 정할 수 있다).
     """
     from config import METRIC_WINDOW_MONTHS
+    from core.strategy.scoring import drawdown_from_high_pct
     from utils.portfolio_market_data import (
         _build_current_price_map,
         _build_daily_change_map,
@@ -192,6 +193,12 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
     sortino_frame = _compute_sortino_raw_frame(close_frame, METRIC_WINDOW_MONTHS)
     sortino_row = sortino_frame.iloc[-1] if not sortino_frame.empty else None
 
+    def _high_drawdown(ticker: str) -> float | None:
+        if ticker not in close_frame.columns:
+            return None
+        value = drawdown_from_high_pct(close_frame[ticker].dropna(), price_by.get(ticker))
+        return None if value is None else round(value, 2)
+
     def _sortino(ticker: str) -> float | None:
         if sortino_row is None or ticker not in sortino_row.index:
             return None
@@ -221,6 +228,8 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
                 "return_36m_pct": returns.get("return_36m_pct"),
                 "mdd_pct": mdd_by.get(ticker),
                 "sortino": _sortino(ticker),
+                # 고점 대비(%) — 순위·모멘텀·신고가와 같은 공용 함수·창(12개월), 현재가 기준.
+                "high_drawdown_pct": _high_drawdown(ticker),
                 # 추세 이탈 표시용 — 풀 이평선 이격(단기·장기).
                 "short_gap_pct": gap_by.get(ticker, (None, None))[0],
                 "long_gap_pct": gap_by.get(ticker, (None, None))[1],
