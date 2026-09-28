@@ -656,14 +656,52 @@ def get_cached_au_etf_snapshot_entry(ticker: str) -> dict[str, float] | None:
 # 토스증권 API — 미국 주식 실시간 가격
 # ────────────────────────────────────────────
 
-# symbol → productCode 영구 매핑 캐시 (프로세스 수명 동안 유효)
+# symbol → productCode 매핑. 메모리가 1차, MongoDB `toss_symbol_codes` 가 2차(영구)다.
+# 메모리에만 두면 서버가 재시작될 때마다(코드 수정 시 자동 리로드 포함) 처음 보는 심볼을
+# 전부 다시 검색한다 — 실측: 미국 ETF 1,000종목 첫 로드 14~18초 → 이후 약 2초.
+# 코드는 상장 기준이라 바뀌지 않으므로 만료를 두지 않는다.
 _TOSS_SYMBOL_CODE_CACHE: dict[str, str] = {}
+_TOSS_SYMBOL_CODE_COLLECTION = "toss_symbol_codes"
+
+
+def _toss_code_collection():
+    from utils.db_manager import get_db_connection
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결에 실패했습니다 — 토스 상품코드를 읽을 수 없습니다.")
+    return db[_TOSS_SYMBOL_CODE_COLLECTION]
+
+
+def _load_persisted_toss_codes(symbols: Sequence[str]) -> dict[str, str]:
+    """DB 에 저장된 상품코드를 한 번에 읽는다."""
+    if not symbols:
+        return {}
+    cursor = _toss_code_collection().find({"_id": {"$in": list(symbols)}}, {"code": 1})
+    return {str(doc["_id"]): str(doc["code"]) for doc in cursor if doc.get("code")}
+
+
+def _persist_toss_codes(codes: dict[str, str]) -> None:
+    """새로 찾은 상품코드를 DB 에 저장한다(다음 프로세스가 검색 없이 쓴다)."""
+    if not codes:
+        return
+    from pymongo import UpdateOne
+
+    now = datetime.now()
+    _toss_code_collection().bulk_write(
+        [
+            UpdateOne({"_id": sym}, {"$set": {"code": code, "updated_at": now}}, upsert=True)
+            for sym, code in codes.items()
+        ],
+        ordered=False,
+    )
 
 
 def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
     """미국 티커 심볼을 토스 productCode로 변환한다.
 
-    캐시에 없는 심볼만 검색 API를 호출하고, 결과를 영구 캐시에 저장한다.
+    메모리 → DB(`toss_symbol_codes`) 순으로 찾고, 둘 다 없는 심볼만 검색 API 를 호출한다.
+    새로 찾은 코드는 메모리와 DB 에 함께 저장한다.
     Returns:
         {symbol: productCode} 매핑 (매핑 실패 심볼은 제외)
     """
@@ -676,15 +714,24 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
 
     blacklist = get_active_blacklist()
 
+    not_in_memory: list[str] = []
     for sym in symbols:
         cached_code = _TOSS_SYMBOL_CODE_CACHE.get(sym)
         if cached_code:
             result[sym] = cached_code
-        elif sym in blacklist:
-            # 24시간 내 실패한 심볼은 재시도하지 않음
-            continue
         else:
-            uncached.append(sym)
+            not_in_memory.append(sym)
+
+    persisted = _load_persisted_toss_codes(not_in_memory)
+    _TOSS_SYMBOL_CODE_CACHE.update(persisted)
+    result.update(persisted)
+    for sym in not_in_memory:
+        if sym in persisted:
+            continue
+        if sym in blacklist:
+            # 최근 실패한 심볼은 재시도하지 않음
+            continue
+        uncached.append(sym)
 
     if not uncached:
         return result
@@ -734,11 +781,14 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
 
     # 심볼당 1회 요청이라 순차로 돌면 수백 개일 때 수십 초가 걸린다(응답 자체는 ~80ms).
     # 실시간 시세 병렬 조회와 동일하게 10 스레드로 제한해 동시에 요청한다.
+    found: dict[str, str] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         for sym, product_code in executor.map(_search_one, uncached):
             if product_code:
-                _TOSS_SYMBOL_CODE_CACHE[sym] = product_code
-                result[sym] = product_code
+                found[sym] = product_code
+    _TOSS_SYMBOL_CODE_CACHE.update(found)
+    result.update(found)
+    _persist_toss_codes(found)
 
     return result
 

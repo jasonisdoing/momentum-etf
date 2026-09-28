@@ -154,6 +154,7 @@ _REFERENCE_TABLES: tuple[TableSpec, ...] = (
     TableSpec("reference_fx_prices", "reference", "환율 일봉 캐시"),
     TableSpec("reference_index_prices", "reference", "레버리지 추천이 쓰는 지수·ETF 일봉 캐시"),
     TableSpec("reference_price_anomalies", "reference", "참조 시세에서 발견한 이상 변동 기록"),
+    TableSpec("toss_symbol_codes", "reference", "토스 상품코드 매핑(티커 → productCode)"),
 )
 
 # ── 실행 상태 — 큐·락·진행 기록 ────────────────────────────────────────────
