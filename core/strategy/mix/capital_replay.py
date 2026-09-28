@@ -113,7 +113,7 @@ def replay_capital(
         affordable = allocate_target_shares(
             requests,
             {ticker: float(opened.at[day, ticker]) * (1 + costs[ticker][0]) for ticker in requests},
-            max(cash, 0.0),
+            min(max(cash, 0.0), sum(requests.values())),
         )
         for ticker in requests:
             quantity = affordable[ticker]
