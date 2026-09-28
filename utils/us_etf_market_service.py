@@ -4,8 +4,10 @@
 - 유니버스: KIS 미국 3개 거래소(NAS/NYS/AMS) 종목 마스터에서 증권종류=ETF 만.
   전체 약 6천 개 중 **20일 평균 거래대금 상위 N 개**(`US_ETF_MARKET_TOP_COUNT`)만 담는다 —
   나머지 대부분은 거래가 거의 없는 초소형이라 목록만 무거워진다.
-- 가격·수익률: yfinance 일봉으로 배치 때 계산해 함께 저장한다. 한국과 달리 실시간
-  스냅샷이 없으므로 화면 값의 기준 시각 = 배치 시각(`updated_at`)이다.
+- 가격·수익률: 한국 ETF 마켓과 같은 방식이다. 배치는 yfinance 일봉으로 **기간별 기준종가**만
+  저장하고, 화면은 열 때의 **실시간 시세**(`get_realtime_snapshot`, 순위 화면과 같은 소스)로
+  현재가·일간(%)을 채우고 기간 수익률을 계산한다. 예전에는 배치 시각의 종가로 계산한 값을
+  저장해, 프리장에 순위 화면은 하락인데 이 화면은 전 거래일 상승이 그대로 보였다.
 - 저장: 한국과 같은 컬렉션 ``etf_market_master``, master_id ``us_etf_market``.
 """
 
@@ -21,6 +23,7 @@ import requests
 
 from config import KIS_US_MASTER_URLS, US_ETF_MARKET_TOP_COUNT
 from utils.db_manager import get_db_connection
+from utils.kis_market import BASE_CLOSE_OFFSETS
 from utils.logger import get_app_logger
 from utils.normalization import to_iso_string
 
@@ -37,6 +40,9 @@ _F_SECURITY_TYPE = 8  # 2=주식, 3=ETF
 _F_CURRENCY = 9
 
 _ETF_TYPE = "3"
+# 기간 수익률의 기준일 — 한국 ETF 마켓과 같은 기간에 3달을 더한다. 한국은 3달을 네이버
+# 실시간 스냅샷이 직접 주지만, 미국 시세에는 그 값이 없어 기준종가로 계산한다.
+_BASE_CLOSE_OFFSETS: tuple[tuple[str, pd.DateOffset], ...] = (*BASE_CLOSE_OFFSETS, ("3m", pd.DateOffset(months=3)))
 _DOLLAR_VOLUME_DAYS = 20  # 거래대금 순위의 평균 일수
 _YF_CHUNK = 300
 
@@ -187,13 +193,7 @@ def refresh_us_etf_market_cache() -> int:
     frames_long = _download_daily(top_tickers, period="4mo")
 
     today = pd.Timestamp.now(tz="America/New_York").tz_localize(None).normalize()
-    bases = {n: today - pd.DateOffset(months=n) for n in (1, 2, 3)}
-    week_bases = {n: today - pd.DateOffset(weeks=n) for n in (1, 2)}
-
-    def _return_pct(now_val: float, base_close: float | None) -> float | None:
-        if base_close in (None, 0) or pd.isna(base_close):
-            return None
-        return round((now_val / float(base_close) - 1.0) * 100.0, 4)
+    base_dates = {suffix: today - offset for suffix, offset in _BASE_CLOSE_OFFSETS}
 
     rows: list[dict[str, Any]] = []
     for ticker in top_tickers:
@@ -203,23 +203,17 @@ def refresh_us_etf_market_cache() -> int:
         closes = pd.to_numeric(frame["Close"], errors="coerce").dropna()
         if closes.empty:
             continue
-        now_val = float(closes.iloc[-1])
-        prev_close = float(closes.iloc[-2]) if len(closes) >= 2 else None
         volumes = pd.to_numeric(frame.get("Volume"), errors="coerce").dropna()
-        base_closes = {n: closes.asof(base) for n, base in bases.items()}
-        week_closes = {n: closes.asof(base) for n, base in week_bases.items()}
         rows.append(
             {
                 "ticker": ticker,
                 "name": by_ticker[ticker]["name"],
                 "exchange": by_ticker[ticker]["exchange"],
-                "current_price": round(now_val, 4),
-                "daily_change_pct": _return_pct(now_val, prev_close),
-                "return_1w_pct": _return_pct(now_val, week_closes[1]),
-                "return_2w_pct": _return_pct(now_val, week_closes[2]),
-                "return_1m_pct": _return_pct(now_val, base_closes[1]),
-                "return_2m_pct": _return_pct(now_val, base_closes[2]),
-                "return_3m_pct": _return_pct(now_val, base_closes[3]),
+                # 기준일이 휴장이면 직전 거래일 종가(asof). 현재가·수익률은 화면이 실시간으로 계산한다.
+                **{
+                    f"base_close_{suffix}": _positive_or_none(closes.asof(base_date))
+                    for suffix, base_date in base_dates.items()
+                },
                 "prev_volume": int(volumes.iloc[-1]) if not volumes.empty else 0,
                 # 20일 평균 거래대금(백만$) — 시가총액 대신 규모 지표로 쓴다.
                 "dollar_volume_musd": round(dollar_volume_by[ticker] / 1e6, 1),
@@ -236,6 +230,10 @@ def refresh_us_etf_market_cache() -> int:
     )
     logger.info("[미국 ETF] 캐시 저장 %d건", len(rows))
     return len(rows)
+
+
+def _positive_or_none(value: Any) -> float | None:
+    return float(value) if value is not None and pd.notna(value) and float(value) > 0 else None
 
 
 def us_etf_name_of(ticker: str) -> str | None:
@@ -256,8 +254,9 @@ def us_etf_name_of(ticker: str) -> str | None:
 
 
 def load_us_etf_market_data() -> dict[str, Any]:
-    """화면용 목록 — 배치가 저장한 값에 종목풀·보유 표시만 붙인다."""
-    from utils.market_service import load_ticker_pool_map, load_ticker_pool_type_map
+    """화면용 목록 — 배치가 저장한 기준종가에 **실시간 시세**와 종목풀·보유 표시를 붙인다."""
+    from services.price_service import get_realtime_snapshot
+    from utils.market_service import load_ticker_pool_map, load_ticker_pool_type_map, return_pct_from_base
     from utils.portfolio_io import load_all_holding_tickers
 
     db = get_db_connection()
@@ -271,10 +270,27 @@ def load_us_etf_market_data() -> dict[str, Any]:
     ticker_pool_map = load_ticker_pool_map()
     ticker_pool_type_map = load_ticker_pool_type_map()
     held_tickers = load_all_holding_tickers()
+    # 현재가·일간(%)은 순위 화면과 **같은 실시간 소스**다 — 세션(프리·정규·애프터·데이장)
+    # 가격 선택과 기준가 규칙이 한 곳(`utils.realtime_quotes`)에서 정해진다.
+    snapshot = get_realtime_snapshot("us", [row["ticker"] for row in rows])
+
+    def _live_fields(row: dict[str, Any]) -> dict[str, Any]:
+        snap = snapshot.get(row["ticker"]) or {}
+        now_val = snap.get("nowVal")
+        return {
+            "current_price": now_val,
+            "daily_change_pct": snap.get("changeRate"),
+            **{
+                f"return_{suffix}_pct": return_pct_from_base(now_val, row.get(f"base_close_{suffix}"))
+                for suffix, _ in _BASE_CLOSE_OFFSETS
+            },
+        }
 
     result_rows = [
         {
-            **row,
+            # 기준종가는 화면에 내보내지 않는다 — 수익률로만 쓴다.
+            **{key: value for key, value in row.items() if not key.startswith("base_close_")},
+            **_live_fields(row),
             "ticker_pools": ", ".join(ticker_pool_map.get(row["ticker"], [])),
             # 종목풀 추가 사전 필터(공용 pool-add)가 풀 id 로 판별한다 — 이름은 표시용.
             "ticker_pool_types": ticker_pool_type_map.get(row["ticker"], []),
