@@ -642,13 +642,17 @@ def delete_pool(pool_id: str) -> dict[str, Any]:
     # 딸림 데이터는 카탈로그(`utils/data_table_catalog`)가 단일 소스다 — 종목·메타 캐시·
     # 가격 캐시 컬렉션·전략 설정의 풀별 항목·이 풀을 가리키던 계좌 참조까지 한 번에 지운다.
     # 예전에는 지울 자리를 이 함수가 직접 들고 있어서, 컬렉션이 늘 때마다 조용히 빠졌다.
+    from utils.cache_owner_lock import cache_owner_lock
     from utils.data_table_catalog import purge_owner
 
-    cleanup = purge_owner("pool", norm_id)
+    with cache_owner_lock(norm_id):
+        try:
+            cleanup = purge_owner("pool", norm_id)
+        except RuntimeError as exc:
+            raise PoolSettingsError(f"종목풀 딸림 데이터 정리에 실패해 삭제를 중단했습니다: {exc}") from exc
 
-    # 종목풀 문서 자체는 딸림 데이터를 다 지운 뒤에 없앤다(순서가 뒤집히면 소유자를 잃은
-    # 데이터가 중간 상태로 남는다).
-    deleted_pool = db[COLLECTION].delete_one({"_id": norm_id}).deleted_count
+        # 삭제 중 캐시를 다시 쓰지 못하게 소유자 문서 삭제까지 같은 잠금으로 묶는다.
+        deleted_pool = db[COLLECTION].delete_one({"_id": norm_id}).deleted_count
     deleted_stocks = int(cleanup.get("stock_meta", 0))
 
     invalidate_overlay_cache()

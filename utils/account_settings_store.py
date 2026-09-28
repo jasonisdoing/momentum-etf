@@ -534,12 +534,17 @@ def delete_account(account_id: str) -> dict[str, Any]:
     # 직접 들고 있으면 컬렉션이 늘 때마다 조용히 빠진다.
     # 과거 자산 기록(`daily_snapshots` 등 집계 분류)은 카탈로그가 보존으로 못박아 뒀다 —
     # 계좌를 지웠다고 지난 수익률 그래프가 바뀌면 안 된다.
+    from utils.cache_owner_lock import cache_owner_lock
     from utils.data_table_catalog import purge_owner
 
-    cleanup = purge_owner("account", norm_id)
+    with cache_owner_lock(norm_id):
+        try:
+            cleanup = purge_owner("account", norm_id)
+        except RuntimeError as exc:
+            raise AccountSettingsStoreError(f"계좌 딸림 데이터 정리에 실패해 삭제를 중단했습니다: {exc}") from exc
 
-    # 계좌 문서 자체는 딸림 데이터를 다 지운 뒤에 없앤다.
-    db[COLLECTION].delete_one({"_id": norm_id})
+        # 계좌 문서 삭제까지 같은 잠금으로 묶어 캐시 재생성을 막는다.
+        db[COLLECTION].delete_one({"_id": norm_id})
     invalidate_account_settings_cache()
 
     return {"account_id": norm_id, "deleted": True, **cleanup}

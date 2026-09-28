@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from utils.cache_owner_lock import cache_owner_lock
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 
@@ -30,11 +31,15 @@ def save_result(pool: str, strategy: str, result: dict[str, Any]) -> dict[str, A
     """한 조합의 결과를 저장하고 저장 시각을 붙여 돌려준다."""
     updated_at = datetime.now(timezone.utc)
     doc = {**result, "updated_at": updated_at}
-    _db()[COLLECTION].update_one(
-        {"pool": pool, "strategy": strategy},
-        {"$set": {"pool": pool, "strategy": strategy, **doc}},
-        upsert=True,
-    )
+    with cache_owner_lock(pool):
+        db = _db()
+        if db["pool_settings"].find_one({"_id": pool}, {"_id": 1}) is None:
+            raise RuntimeError(f"삭제됐거나 존재하지 않는 종목풀의 백테스트 결과를 저장할 수 없습니다: {pool}")
+        db[COLLECTION].update_one(
+            {"pool": pool, "strategy": strategy},
+            {"$set": {"pool": pool, "strategy": strategy, **doc}},
+            upsert=True,
+        )
     return {**result, "updated_at": updated_at.isoformat()}
 
 

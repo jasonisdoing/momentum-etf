@@ -85,6 +85,8 @@ _POOL_TABLES: tuple[TableSpec, ...] = (
         owner_field="ticker_type",
     ),
     TableSpec("pool_rank_summary", "pool", "종목풀 순위 요약(화면 진입 시 즉시 표시용)", owner_is_id=True),
+    TableSpec("pool_strategy_backtest", "pool", "종목풀별 전략 백테스트 결과", owner_field="pool"),
+    TableSpec("cache_refresh_status", "pool", "종목풀별 마지막 가격 캐시 갱신 완료 시각", owner_field="target_id"),
     TableSpec(
         "price_anomaly_alerts",
         "pool",
@@ -152,6 +154,7 @@ _REFERENCE_TABLES: tuple[TableSpec, ...] = (
     TableSpec("kor_dividend_stocks", "reference", "한국 배당주 화면의 종목별 재무·배당 지표"),
     TableSpec("yahoo_baseline_prices", "reference", "yfinance 기준가 캐시(전일 종가 대조용)"),
     TableSpec("reference_fx_prices", "reference", "환율 일봉 캐시"),
+    TableSpec("fx_quote_cache", "reference", "통화별 환율 시세 공유 캐시"),
     TableSpec("reference_index_prices", "reference", "레버리지 추천이 쓰는 지수·ETF 일봉 캐시"),
     TableSpec("reference_price_anomalies", "reference", "참조 시세에서 발견한 이상 변동 기록"),
     TableSpec("toss_symbol_codes", "reference", "토스 상품코드 매핑(티커 → productCode)"),
@@ -161,7 +164,6 @@ _REFERENCE_TABLES: tuple[TableSpec, ...] = (
 _RUNTIME_TABLES: tuple[TableSpec, ...] = (
     TableSpec("batch_queue", "runtime", "배치 실행 큐(24시간 TTL)"),
     TableSpec("batch_locks", "runtime", "배치 중복 실행 방지 락 · 배포 플래그"),
-    TableSpec("cache_refresh_status", "runtime", "가격 캐시 갱신 완료 시각"),
     TableSpec("leverage_state", "runtime", "레버리지 알림 발송 상태"),
 )
 
@@ -510,8 +512,7 @@ def purge_owner(owner_kind: str, owner_id: str) -> dict[str, int]:
         try:
             count = db[spec.name].delete_many({field_name: owner_id}).deleted_count
         except Exception as exc:
-            logger.warning("[정리] %s 삭제 실패 (%s=%s): %s", spec.name, field_name, owner_id, exc)
-            continue
+            raise RuntimeError(f"{spec.name} 정리 실패 ({field_name}={owner_id})") from exc
         if count:
             removed[spec.name] = count
 
@@ -525,7 +526,7 @@ def purge_owner(owner_kind: str, owner_id: str) -> dict[str, int]:
                 db.drop_collection(name)
                 removed[name] = 1
         except Exception as exc:
-            logger.warning("[정리] %s 컬렉션 삭제 실패: %s", name, exc)
+            raise RuntimeError(f"{name} 컬렉션 정리 실패") from exc
 
     # 3) 설정 문서 안쪽 키
     for key_spec in OWNED_KEY_SPECS:
@@ -536,8 +537,7 @@ def purge_owner(owner_kind: str, owner_id: str) -> dict[str, int]:
                 {"_id": key_spec.doc_id}, {"$unset": {f"{key_spec.path}.{owner_id}": ""}}
             )
         except Exception as exc:
-            logger.warning("[정리] system_config/%s 키 삭제 실패: %s", key_spec.doc_id, exc)
-            continue
+            raise RuntimeError(f"system_config/{key_spec.doc_id} 키 정리 실패") from exc
         if result.modified_count:
             removed[f"system_config › {key_spec.doc_id}.{key_spec.path}"] = 1
 
@@ -551,8 +551,7 @@ def purge_owner(owner_kind: str, owner_id: str) -> dict[str, int]:
                 {"$pull": {array_spec.array_field: {array_spec.match_field: owner_id}}},
             )
         except Exception as exc:
-            logger.warning("[정리] %s.%s 항목 삭제 실패: %s", array_spec.collection, array_spec.array_field, exc)
-            continue
+            raise RuntimeError(f"{array_spec.collection}.{array_spec.array_field} 항목 정리 실패") from exc
         if result.modified_count:
             removed[f"{array_spec.collection}.{array_spec.array_field}"] = 1
 
@@ -568,8 +567,7 @@ def purge_owner(owner_kind: str, owner_id: str) -> dict[str, int]:
                 db[ref.collection].update_many({ref.query_path: owner_id}, {"$set": {target: cleared}}).modified_count
             )
         except Exception as exc:
-            logger.warning("[정리] %s.%s 참조 해제 실패: %s", ref.collection, ref.query_path, exc)
-            continue
+            raise RuntimeError(f"{ref.collection}.{ref.query_path} 참조 정리 실패") from exc
         if count:
             removed[f"{ref.collection}.{ref.query_path}"] = count
 
