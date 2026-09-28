@@ -638,9 +638,9 @@ def _attach_account_targets(
         if price and krw_rate > 0:
             price_krw_by_ticker[row["ticker"]] = float(price) * krw_rate
 
-    # 목표 주수 = **고정 기준금액 ÷ 1주 값의 내림**(`capital_policy`). 계좌 평가액으로 예산을
-    # 매일 다시 나누지 않는다 — 그러면 남는 돈이 그날그날 다른 종목에 얹혀, 엔진이 하지도
-    # 않는 매매를 시킨다. 실제 보유는 목표를 바꾸지 않고 회수·채우기 판단에만 쓴다.
+    # 목표 주수는 고정 기준금액에서 비싼 종목의 첫 1주를 확보한 뒤 남은 예산으로 정한다.
+    # 계좌 평가액으로 예산을 매일 다시 나누지 않는다. 실제 보유는 목표를 바꾸지 않고
+    # 회수·채우기 판단에만 쓴다.
     target_shares = target_shares or {}
     for row in holdings:
         price_krw = price_krw_by_ticker.get(row["ticker"])

@@ -1109,7 +1109,7 @@ export function StrategyMixClient() {
           field: "shares",
           headerName: "목표수량",
           headerTooltip:
-            "고정 원화 기준금액을 종목별로 배정한 뒤 기준 가격과 현재 환율로 나눈 내림 수량. 1주를 못 사면 「1주 못 삼」. 장중 이탈이 예상되는 종목은 이탈 후 남을 목표를 (예상)으로 보여준다.",
+            "고정 운용 예산에서 비싼 종목부터 최소 1주를 확보하고, 남은 금액으로 추가 주수를 배정합니다. 예산이 부족해 1주도 못 사면 「1주 못 삼」. 장중 이탈이 예상되는 종목은 이탈 후 남을 목표를 (예상)으로 보여줍니다.",
           width: 88,
           type: "numericColumn",
           valueFormatter: (p) => {

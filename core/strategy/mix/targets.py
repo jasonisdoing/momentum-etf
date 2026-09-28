@@ -10,8 +10,8 @@ def sleeve_target_shares(
     sleeve_amount_krw: dict[str, float],
     krw_rate: float,
 ) -> dict[str, int]:
-    """고정 슬리브 배정액과 종목별 기준 비중을 합쳐 내림 수량을 만든다."""
-    import math
+    """고정 슬리브 배정액과 종목별 기준 비중을 합쳐 정수 주수를 만든다."""
+    from core.strategy.mix.capital_policy import allocate_target_shares
 
     # 소수 목표를 **티커별로 합산**한다 — 두 슬리브가 같은 종목을 담으면 몫이 더해진다.
     # 슬리브마다 따로 정하면 뒤에 온 슬리브가 앞의 값을 덮어써, 목표비중(합산)과 목표 주수가
@@ -37,7 +37,11 @@ def sleeve_target_shares(
             unit_by_ticker[ticker] = float(price) * krw_rate
             amount_by_ticker[ticker] = amount_by_ticker.get(ticker, 0.0) + budget * weight / 100.0
 
-    return {ticker: math.floor(amount / unit_by_ticker[ticker]) for ticker, amount in amount_by_ticker.items()}
+    return allocate_target_shares(
+        amount_by_ticker,
+        unit_by_ticker,
+        min(sum(amount_by_ticker.values()), sum(sleeve_amount_krw.values())),
+    )
 
 
 def dated_target_shares(
