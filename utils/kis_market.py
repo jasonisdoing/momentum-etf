@@ -453,7 +453,7 @@ def load_kis_domestic_etf_master() -> pd.DataFrame:
 
 # 마켓 화면의 기간 수익률 컬럼 — (필드 접미사, 기준일 오프셋).
 # 일봉 한 번으로 전부 뽑으므로 기간을 늘려도 조회 비용은 그대로다.
-_BASE_CLOSE_OFFSETS: tuple[tuple[str, pd.DateOffset], ...] = (
+BASE_CLOSE_OFFSETS: tuple[tuple[str, pd.DateOffset], ...] = (
     ("1w", pd.DateOffset(weeks=1)),
     ("2w", pd.DateOffset(weeks=2)),
     ("1m", pd.DateOffset(months=1)),
@@ -462,7 +462,7 @@ _BASE_CLOSE_OFFSETS: tuple[tuple[str, pd.DateOffset], ...] = (
 
 
 # 화면·서비스가 같은 기간 목록을 쓰도록 접미사만 따로 노출한다.
-BASE_CLOSE_SUFFIXES: tuple[str, ...] = tuple(suffix for suffix, _ in _BASE_CLOSE_OFFSETS)
+BASE_CLOSE_SUFFIXES: tuple[str, ...] = tuple(suffix for suffix, _ in BASE_CLOSE_OFFSETS)
 
 
 def _enrich_rows_with_base_closes(rows: list[dict]) -> None:
@@ -477,7 +477,7 @@ def _enrich_rows_with_base_closes(rows: list[dict]) -> None:
     from utils.trade_value import latest_trade_value_fields
 
     today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
-    base_dates = {suffix: today - offset for suffix, offset in _BASE_CLOSE_OFFSETS}
+    base_dates = {suffix: today - offset for suffix, offset in BASE_CLOSE_OFFSETS}
 
     def _one(row: dict) -> None:
         for suffix in base_dates:
@@ -505,7 +505,7 @@ def _enrich_rows_with_base_closes(rows: list[dict]) -> None:
         list(executor.map(_one, rows))
 
     filled = sum(1 for r in rows if r.get("기준종가_1m") is not None)
-    periods = "/".join(suffix for suffix, _ in _BASE_CLOSE_OFFSETS)
+    periods = "/".join(suffix for suffix, _ in BASE_CLOSE_OFFSETS)
     logger.info("ETF 기준종가(%s 전) 수집 완료: %d/%d건", periods, filled, len(rows))
 
 

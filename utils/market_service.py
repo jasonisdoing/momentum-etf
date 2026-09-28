@@ -81,6 +81,16 @@ def load_ticker_pool_type_map(country_code: str | None = None) -> dict[str, list
     return result
 
 
+def return_pct_from_base(now_val: float | None, base_close: float | None) -> float | None:
+    """실시간 현재가 대비 기준종가 수익률(%) — 한국·미국 ETF 마켓 화면 공용.
+
+    기준종가는 일일 배치가 저장하고, 현재가는 화면을 열 때의 실시간 시세다.
+    """
+    if now_val is None or base_close in (None, 0):
+        return None
+    return round((float(now_val) / float(base_close) - 1.0) * 100.0, 4)
+
+
 def _load_kor_etf_realtime_snapshot(tickers: list[str]) -> dict[str, dict[str, float | None]]:
     if not tickers:
         return {}
@@ -170,12 +180,6 @@ def load_market_data() -> dict[str, Any]:
 
     held_tickers = load_all_holding_tickers()
 
-    def _return_pct(now_val: float | None, base_close: float | None) -> float | None:
-        """실시간 현재가 대비 기준종가 수익률(%). 기준종가는 일일 배치가 저장한다."""
-        if now_val is None or base_close in (None, 0):
-            return None
-        return round((now_val / base_close - 1.0) * 100.0, 4)
-
     result_rows = []
     for row in normalized_rows:
         snap = snapshot.get(row["ticker"], {})
@@ -193,7 +197,10 @@ def load_market_data() -> dict[str, Any]:
                 "current_price": now_val,
                 "nav": snap.get("nav"),
                 "deviation": snap.get("deviation"),
-                **{f"return_{suffix}_pct": _return_pct(now_val, bases[suffix]) for suffix in BASE_CLOSE_SUFFIXES},
+                **{
+                    f"return_{suffix}_pct": return_pct_from_base(now_val, bases[suffix])
+                    for suffix in BASE_CLOSE_SUFFIXES
+                },
                 # 3달은 실시간 스냅샷이 직접 준다(기준종가를 따로 받지 않는다).
                 "return_3m_pct": snap.get("threeMonthEarnRate"),
             }
