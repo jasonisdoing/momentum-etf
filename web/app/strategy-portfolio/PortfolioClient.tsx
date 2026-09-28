@@ -23,7 +23,7 @@ import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { createAppGridTheme } from "../components/app-grid-theme";
-import { bucketColumn, formatSignedPct, signColor, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
+import { bucketColumn, formatSignedPct, highDrawdownColumn, signColor, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { updateStockMemo } from "@/lib/stocks-store";
@@ -92,6 +92,8 @@ type WeightRow = {
   return_36m_pct: number | null;
   mdd_pct: number | null;
   sortino: number | null;
+  /** 고점 대비(%) — 순위·모멘텀·신고가와 같은 공용 계산(12개월 최고가 대비 현재가). */
+  high_drawdown_pct?: number | null;
   /** 추세 이탈(행 전체 회색)용 — 풀 이평선 기준 단기·장기 이격(%). 순위·합성과 같은 공용 규칙. */
   short_gap_pct?: number | null;
   long_gap_pct?: number | null;
@@ -119,6 +121,7 @@ type UniverseRow = {
   return_36m_pct: number | null;
   mdd_pct: number | null;
   sortino: number | null;
+  high_drawdown_pct: number | null;
   short_gap_pct?: number | null;
   long_gap_pct?: number | null;
   /** 신규상장(🆕) — 전 화면 공용 판정. */
@@ -374,6 +377,7 @@ export function PortfolioClient() {
     return_36m_pct: null,
     mdd_pct: null,
     sortino: null,
+    high_drawdown_pct: null,
     short_gap_pct: null,
     long_gap_pct: null,
     new_listing: null,
@@ -440,6 +444,7 @@ export function PortfolioClient() {
               return_36m_pct: metrics.return_36m_pct,
               mdd_pct: metrics.mdd_pct,
               sortino: metrics.sortino,
+              high_drawdown_pct: metrics.high_drawdown_pct,
               memo: metrics.memo,
               // 회색 행(추세 이탈)·🆕 판정값 — 빠뜨리면 '값 없음 = 이탈 취급'으로 전 행이 회색이 된다.
               short_gap_pct: metrics.short_gap_pct,
@@ -519,6 +524,8 @@ export function PortfolioClient() {
         valueGetter: () => "",
       },
       // 티커·종목명 — 공용 컬럼(col-id 표준). 추가 행 입력칸·현금 행만 화면 고유 표기다.
+      // 고점 — 순위·모멘텀·신고가와 같은 공용 컬럼(0 이면 ⭐신고점). 순위 화면처럼 버킷 왼쪽.
+      highDrawdownColumn<WeightRow>("high_drawdown_pct"),
       bucketColumn<WeightRow>(),
       tickerColumn<WeightRow>({
         minWidth: 110,
