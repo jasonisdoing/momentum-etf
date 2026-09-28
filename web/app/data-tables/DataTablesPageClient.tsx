@@ -345,6 +345,10 @@ export function DataTablesPageClient() {
               </div>
               <ul className="mb-0 ps-3">
                 <li>경고에 나온 항목의 생성·삭제 경로를 확인해 코드를 고칩니다.</li>
+                <li>
+                  사용 중인 컬렉션은 <code>utils/data_table_catalog.py</code>에 등록합니다. 종목풀·계좌 소유
+                  데이터는 소유 관계도 등록해 삭제 시 함께 정리되게 합니다.
+                </li>
                 <li>사용하지 않는 데이터나 컬렉션만 삭제합니다.</li>
                 <li>보존 목적이 등록되지 않은 임시 백업 컬렉션도 제거합니다.</li>
                 <li>
@@ -381,10 +385,6 @@ export function DataTablesPageClient() {
             <div className="alert alert-warning mb-0">
               카탈로그에 없는 컬렉션 {data.unclassified.length}개:{" "}
               <b>{data.unclassified.map((row) => row.name).join(", ")}</b>
-              <div style={{ fontSize: "var(--fs-sm)", marginTop: 4 }}>
-                사용 중인 컬렉션은 <code>utils/data_table_catalog.py</code> 에 등록하고, 사용하지 않는 것은
-                정리합니다. 종목풀·계좌 소유 데이터라면 카탈로그에 등록해야 소유자 삭제에 함께 처리됩니다.
-              </div>
             </div>
           </div>
         ) : null}
