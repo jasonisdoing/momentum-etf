@@ -12,7 +12,7 @@ import {
   industryColumn,
   sectorColumn,
   marketBadgeCellStyle,
-  renderHighDrawdownCell,
+  highDrawdownColumn,
   tradeValueMultColumn,
   maExitGapColumn,
   volatilityColumn,
@@ -890,18 +890,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return <span style={{ fontSize: "var(--fs-base)" }}>✅</span>;
         },
       },
-      {
-        field: "고점",
-        headerName: "고점",
-        pinned: "left",
-        minWidth: 80,
-        width: 80,
-        type: "rightAligned",
-        // 공용 고점 렌더러 (strategy-momentum 과 동일) — 0 이면 ⭐신고점.
-        // 오늘 고가가 이전 최고 종가를 넘고 현재가도 그 이상일 때만 ⭐신고점으로 표시한다.
-        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) =>
-          params.data?.고점터치 ? renderHighDrawdownCell(0, 2) : renderHighDrawdownCell(params.value, 2),
-      },
+      // 고점 — 공용 컬럼. 순위 화면만 장중 신고점 터치(고점터치)를 함께 ⭐로 표시한다.
+      highDrawdownColumn<RankGridRow>("고점", { isTouched: (row) => Boolean(row?.고점터치) }),
       {
         field: "버킷",
         headerName: "버킷",
