@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ColDef, ColGroupDef } from "ag-grid-community";
 
-import { marketCapRankColumn, renderHighDrawdownCell, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
+import { highDrawdownColumn, marketCapRankColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { TrendSparkline, type TrendPoint } from "../components/TrendSparkline";
@@ -241,16 +241,7 @@ export function KorDividendManager({ onSummaryChange }: { onSummaryChange?: (cou
       },
       // 시총 순위·고점 대비 — 종목풀 순위(/pools-rank) 화면과 같은 공용 컬럼·같은 정의.
       marketCapRankColumn<DividendRow>("market_cap_rank", false),
-      {
-        field: "high_drawdown",
-        headerName: "고점",
-        pinned: "left",
-        width: 80,
-        minWidth: 80,
-        type: "rightAligned",
-        headerTooltip: "최근 12개월 최고가 대비(%) — 0 이면 신고점",
-        cellRenderer: (params: { value: number | null | undefined }) => renderHighDrawdownCell(params.value, 2),
-      },
+      highDrawdownColumn<DividendRow>("high_drawdown"),
       // 티커·종목명 — 공용 컬럼(다른 시장 화면과 같은 표기·col-id 표준).
       tickerColumn<DividendRow>({ width: 100, minWidth: 84, mono: true }),
       stockNameColumn<DividendRow>({}),

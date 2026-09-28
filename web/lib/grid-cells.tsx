@@ -223,11 +223,11 @@ export function sectorColumn<T>(options?: {
   };
 }
 
-/** 고점 대비(%) 셀 — 정확히 0 이면 ⭐신고점(빨강 볼드), 그 외 퍼센트 표기. */
-export function renderHighDrawdownCell(value: number | null | undefined, digits = 1) {
+/** 고점 대비(%) 셀 — 정확히 0 이면 ⭐신고점(빨강 볼드), 그 외 소수 2자리 퍼센트. */
+function renderHighDrawdownCell(value: number | null | undefined) {
   if (value === 0) return <span style={{ color: "#d93025", fontWeight: 700 }}>⭐신고점</span>;
   if (value == null || Number.isNaN(value)) return <span>-</span>;
-  return <span>{`${value.toFixed(digits)}%`}</span>;
+  return <span>{`${value.toFixed(2)}%`}</span>;
 }
 
 /** 이탈 이평선 컬럼 폭 — 헤더가 가장 긴 `MA200 이탈` 이 안 잘리는 값이다.
@@ -486,17 +486,26 @@ export function stockMemoColumn<T>(options: {
   };
 }
 
-/** 고점 대비(%) — **최근 12개월** 최고가 대비 현재가. 0 이면 ⭐신고점. */
-export function highDrawdownColumn<T>(field: ColDefField<T>): ColDef<T> {
+/** 고점 대비(%) 컬럼 — **최근 12개월** 최고가 대비 현재가. 0 이면 ⭐신고점.
+ *  순위·모멘텀·신고가·포트폴리오·배당주 화면 공용이다. 화면마다 따로 만들면 소수 자리·
+ *  ⭐ 규칙이 갈린다(순위 2자리·전략 1자리로 같은 종목이 다르게 보였다).
+ *  `isTouched` 를 주면 장중 신고점 터치(오늘 고가가 이전 최고 종가를 넘고 현재가도 그 이상)도
+ *  ⭐신고점으로 표시한다 — 그 판정값을 주는 화면(순위)만 넘긴다. */
+export function highDrawdownColumn<T>(
+  field: ColDefField<T>,
+  options: { isTouched?: (row: T | undefined) => boolean } = {},
+): ColDef<T> {
   return {
     field,
     headerName: "고점",
-    headerTooltip: "최근 고점 대비 현재가(%) — pools-rank 고점과 같은 규칙, 0 = 신고점",
+    headerTooltip: "최근 12개월 최고가 대비 현재가(%) — 0 이면 신고점",
     // 티커 앞에 서는 컬럼 — 티커·종목명과 함께 왼쪽 고정(순서 유지).
     pinned: "left",
     width: 80,
+    minWidth: 80,
     type: "rightAligned",
-    cellRenderer: (p: { value?: number | null }) => renderHighDrawdownCell(p.value, 1),
+    cellRenderer: (p: { data?: T; value?: number | null }) =>
+      renderHighDrawdownCell(options.isTouched?.(p.data) ? 0 : p.value),
   };
 }
 
