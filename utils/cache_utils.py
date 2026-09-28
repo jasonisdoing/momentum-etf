@@ -13,6 +13,7 @@ from bson.binary import Binary
 from pymongo.errors import PyMongoError
 
 from config import CACHE_TTL_LIVE
+from utils.cache_owner_lock import cache_owner_lock
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.ttl_cache import TtlCache
@@ -154,29 +155,40 @@ def _resolve_collection_name(account_id: str) -> str:
     return f"cache_{token}_stocks"
 
 
-def _get_collection(account_id: str):
+def _get_collection(account_id: str, *, ensure_index: bool = False):
     db = get_db_connection()
     if db is None:
         return None
     collection_name = _resolve_collection_name(account_id)
     collection = db[collection_name]
-    # 보조 인덱스 생성 (존재 시 무시)
-    try:
+    # 조회 중에는 컬렉션을 만들지 않는다. 인덱스는 실제 저장 시에만 준비한다.
+    if ensure_index:
         collection.create_index("ticker", unique=True, name="ticker_unique", background=True)
-    except Exception:
-        pass
     return collection
 
 
-def _get_refresh_status_collection():
+def _require_cache_owner(account_id: str) -> None:
+    """참조 캐시가 아닌 가격 캐시는 살아있는 종목풀·계좌에만 저장한다."""
+    token = str(account_id).strip().lower().split("_tmp_", 1)[0]
+    if token in _REFERENCE_COLLECTIONS:
+        return
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("가격 캐시 소유자 확인을 위한 DB 연결에 실패했습니다.")
+    if db["pool_settings"].find_one({"_id": token}, {"_id": 1}):
+        return
+    if db["account_settings"].find_one({"_id": token}, {"_id": 1}):
+        return
+    raise RuntimeError(f"가격 캐시 소유자가 존재하지 않습니다: {token}")
+
+
+def _get_refresh_status_collection(*, ensure_index: bool = False):
     db = get_db_connection()
     if db is None:
         return None
     collection = db[_REFRESH_STATUS_COLLECTION]
-    try:
+    if ensure_index:
         collection.create_index("target_id", unique=True, name="target_id_unique", background=True)
-    except Exception:
-        pass
     return collection
 
 
@@ -820,7 +832,17 @@ def set_cache_refresh_completed_at(target_id: str, completed_at: datetime) -> No
     if not target_norm:
         raise ValueError("target_id가 필요합니다.")
 
-    collection = _get_refresh_status_collection()
+    with cache_owner_lock(target_norm):
+        db = get_db_connection()
+        if db is None:
+            raise RuntimeError("캐시 완료 시각의 소유자 확인을 위한 DB 연결에 실패했습니다.")
+        if db["pool_settings"].find_one({"_id": target_norm}, {"_id": 1}) is None:
+            raise RuntimeError(f"삭제됐거나 존재하지 않는 종목풀의 캐시 완료 시각을 저장할 수 없습니다: {target_norm}")
+        _set_cache_refresh_completed_at_unlocked(target_norm, completed_at)
+
+
+def _set_cache_refresh_completed_at_unlocked(target_norm: str, completed_at: datetime) -> None:
+    collection = _get_refresh_status_collection(ensure_index=True)
     if collection is None:
         raise RuntimeError("캐시 완료 시각 컬렉션을 열 수 없습니다.")
 
@@ -944,10 +966,16 @@ def _alert_price_anomalies(cache_owner: str, ticker: str, df: pd.DataFrame) -> N
 
 def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
     """캐시 DataFrame을 저장합니다. CACHE_START_DATE 이전 데이터는 제외합니다."""
+    with cache_owner_lock(account_id):
+        _require_cache_owner(account_id)
+        _save_cached_frame_unlocked(account_id, ticker, df)
+
+
+def _save_cached_frame_unlocked(account_id: str, ticker: str, df: pd.DataFrame) -> None:
     if df is None or df.empty:
         raise ValueError("저장할 캐시 데이터가 비어 있습니다.")
 
-    collection = _get_collection(account_id)
+    collection = _get_collection(account_id, ensure_index=True)
     if collection is None:
         raise RuntimeError(f"캐시 컬렉션을 열 수 없습니다: {account_id}")
 
@@ -1030,19 +1058,21 @@ def move_cached_frame(from_owner: str, to_owner: str, ticker: str) -> bool:
     종목풀 이동에 쓴다 — 원천에서 다시 받으면 종목당 1~2초가 드는데, 같은 시세를 옮기는
     것뿐이라 받을 이유가 없다. 대상에 이미 있으면 덮어쓴다.
     """
-    db = get_db_connection()
-    if db is None:
-        return False
-    ticker_norm = str(ticker or "").strip().upper()
-    source = db[_resolve_collection_name(from_owner)]
-    doc = source.find_one({"ticker": ticker_norm})
-    if not doc:
-        return False
-    doc.pop("_id", None)
-    db[_resolve_collection_name(to_owner)].replace_one({"ticker": ticker_norm}, doc, upsert=True)
-    source.delete_one({"ticker": ticker_norm})
-    invalidate_frames_cache()
-    return True
+    with cache_owner_lock(to_owner):
+        _require_cache_owner(to_owner)
+        db = get_db_connection()
+        if db is None:
+            raise RuntimeError("가격 캐시 이동을 위한 DB 연결에 실패했습니다.")
+        ticker_norm = str(ticker or "").strip().upper()
+        source = db[_resolve_collection_name(from_owner)]
+        doc = source.find_one({"ticker": ticker_norm})
+        if not doc:
+            return False
+        doc.pop("_id", None)
+        db[_resolve_collection_name(to_owner)].replace_one({"ticker": ticker_norm}, doc, upsert=True)
+        source.delete_one({"ticker": ticker_norm})
+        invalidate_frames_cache()
+        return True
 
 
 def delete_cached_frame(account_id: str, ticker: str) -> None:
@@ -1157,7 +1187,7 @@ def swap_cache_collection(account_id: str, temp_token: str) -> None:
             }
         )
         # rename 후 새 컬렉션 핸들을 초기화하여 (재)인덱스 보장
-        _get_collection(account_id)
+        _get_collection(account_id, ensure_index=True)
     except PyMongoError as exc:
         logger.error("캐시 컬렉션 교체 실패 (%s <- %s): %s", main_collection_name, temp_collection_name, exc)
         raise

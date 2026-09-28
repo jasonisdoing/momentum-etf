@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from services.component_price_service import build_component_price_snapshot, select_component_holdings_for_pricing
 from services.portfolio_change_service import compute_and_store_portfolio_change_bundle
 from services.stock_cache_service import get_stock_cache_meta
+from utils.cache_owner_lock import cache_owner_lock
 from utils.cache_utils import (
     get_cached_date_range,
     load_cached_frame_with_fallback,
@@ -528,18 +529,22 @@ def _update_pool_rank_summary(target_id: str) -> None:
         if db is None:
             logger.warning("[%s] 종목풀 요약 저장 생략: DB 연결 실패", target_id.upper())
             return
-        db.pool_rank_summary.update_one(
-            {"_id": target_id},
-            {
-                "$set": {
-                    "ticker_type": target_id,
-                    "score_up_count": up_count,
-                    "score_total_count": total_count,
-                    "updated_at": pd.Timestamp.utcnow().to_pydatetime(),
-                }
-            },
-            upsert=True,
-        )
+        with cache_owner_lock(target_id):
+            if db.pool_settings.find_one({"_id": target_id}, {"_id": 1}) is None:
+                logger.info("[%s] 삭제된 종목풀의 순위 요약 저장 생략", target_id.upper())
+                return
+            db.pool_rank_summary.update_one(
+                {"_id": target_id},
+                {
+                    "$set": {
+                        "ticker_type": target_id,
+                        "score_up_count": up_count,
+                        "score_total_count": total_count,
+                        "updated_at": pd.Timestamp.utcnow().to_pydatetime(),
+                    }
+                },
+                upsert=True,
+            )
         logger.info(
             "[%s] 매수 후보 요약 저장 완료: 후보 %d / 전체 %d",
             target_id.upper(),
@@ -696,16 +701,17 @@ def refresh_cache_for_target(
     logger = get_app_logger()
     target_norm = (target_id or "").strip().lower()
 
-    try:
-        available_types = list_available_ticker_types()
-        if target_norm in available_types:
-            settings = get_ticker_type_settings(target_norm)
-            country_code = settings.get("country_code", "kor").lower()
-        else:
-            country_code = "kor"
-    except Exception:
-        logger.warning(f"대상 종목풀 설정을 불러올 수 없어 기본 국가코드(kor)를 사용합니다: {target_norm}")
-        country_code = "kor"
+    from utils.db_manager import get_db_connection
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("가격 캐시 갱신을 위한 DB 연결에 실패했습니다.")
+    pool_doc = db.pool_settings.find_one({"_id": target_norm}, {"country_code": 1})
+    if pool_doc is None:
+        raise RuntimeError(f"삭제됐거나 존재하지 않는 종목풀의 가격 캐시를 갱신할 수 없습니다: {target_norm}")
+    country_code = str(pool_doc.get("country_code") or "").strip().lower()
+    if not country_code:
+        raise RuntimeError(f"종목풀 국가 코드가 없습니다: {target_norm}")
 
     logger.info("[%s] 캐시 갱신 시작 (국가설정: %s, 시작일: %s)", target_norm.upper(), country_code, start_date)
 

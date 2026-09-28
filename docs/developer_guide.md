@@ -61,6 +61,8 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | `account_settings` | 계좌 정의·합성 배분. 추가/삭제는 DB 직접 |
 | `stock_meta` | 종목 관리 원본(버킷·종목명). 삭제는 즉시 하드 딜리트 |
 | `stock_cache_meta` | 저빈도 메타(`meta_cache`)·ETF 구성종목(`holdings_cache`) |
+| `pool_strategy_backtest` | 종목풀별 저장된 전략 백테스트 결과. 풀 삭제 시 함께 제거 |
+| `cache_refresh_status` | 종목풀별 가격 캐시 갱신 완료 시각. 풀 삭제 시 함께 제거 |
 | 가격 캐시 | `utils/cache_utils.py` Parquet → Mongo. 요청한 풀만 읽고 다른 풀로 fallback 하지 않는다. **소유자 캐시는 `cache_<소유자>_stocks`, 소유자 없는 참조 시세(환율·레버리지 지수)는 `reference_*`** — 수명이 정반대라 이름 형식을 나눠 둔다(§6) |
 | `index_constituents` | SP500/NDX100/ASX200/KOSPI200/KOSDAQ150 구성종목. 파일이 아닌 DB 인 이유: 서버 `data/` 가 읽기 전용. 한국은 공식 API 가 없어 **추종 ETF 보유종목**을 명단으로 쓴다(`KOR_INDEX_SOURCES`) |
 | `system_config.momentum_settings` / `new_high_settings` | 전략 설정, 풀별 `settings_by_pool` |
@@ -85,6 +87,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 - **배치 추가·삭제는 7곳을 함께 고친다**: `utils/system_service.py` 의 `SystemAction`·`SCHEDULE_ROWS`·`_SCRIPT_BY_ACTION`, `web/app/api/system/route.ts` 의 `allowed`, `web/lib/system-store.ts`, `web/app/batch/SystemManager.tsx`, `infra/cron/crontab`. 한 곳이 빠지면 `/batch` 에서 400.
 - **새 컬렉션은 `utils/data_table_catalog.py` 에 등록한다.** 종목풀·계좌 삭제(`purge_owner`)와 고아 점검(`scan_orphans`)이 이 카탈로그 하나만 본다. 등록하지 않으면 `/data-tables` 에 **미분류**로 뜨고, 소유자를 지울 때 함께 정리되지 않는다.
 - **종목풀·계좌 삭제는 `purge_owner()` 를 쓴다.** 지울 자리를 삭제 함수가 직접 들고 있으면 컬렉션이 늘 때마다 한쪽만 갱신돼 찌꺼기가 남는다(§6).
+- **소유자 삭제와 가격 캐시·저장 백테스트 쓰기는 같은 소유자 잠금으로 직렬화한다.** 정리 실패 시 소유자 문서를 지우지 않는다.
 - **폐기는 코드·DB·crontab·문서까지 전부 제거.**
 - 실시간 값을 주는 Next API 는 응답에 `Cache-Control: no-store`.
 
