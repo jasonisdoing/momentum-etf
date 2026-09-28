@@ -332,6 +332,13 @@ export function DataTablesPageClient() {
   return (
     <PageFrame title="테이블" fullHeight fullWidth titleRight={titleRight}>
       <div className="appPageStack appPageStackFill">
+        <div className="appBannerStack">
+          <div className="alert alert-info mb-0">
+            <b>목적:</b> 종목풀·계좌 삭제 후 남은 고아 데이터와 등록되지 않은 옛·임시 컬렉션을 찾아 정리 누락을
+            점검합니다. <b>사용법:</b> 경고에 나온 항목의 생성·삭제 경로를 확인해 코드를 고치고, 사용하지 않는
+            데이터나 컬렉션만 삭제합니다.
+          </div>
+        </div>
         {error ? (
           <div className="appBannerStack">
             <div className="bannerError alert alert-danger mb-0">{error}</div>
@@ -360,8 +367,8 @@ export function DataTablesPageClient() {
               카탈로그에 없는 컬렉션 {data.unclassified.length}개:{" "}
               <b>{data.unclassified.map((row) => row.name).join(", ")}</b>
               <div style={{ fontSize: "var(--fs-sm)", marginTop: 4 }}>
-                새로 만든 컬렉션이면 <code>utils/data_table_catalog.py</code> 에 등록하고, 쓰지 않는 것이면
-                지웁니다. 등록하지 않으면 종목풀·계좌를 지울 때 함께 정리되지 않습니다.
+                사용 중인 컬렉션은 <code>utils/data_table_catalog.py</code> 에 등록하고, 사용하지 않는 것은
+                정리합니다. 종목풀·계좌 소유 데이터라면 카탈로그에 등록해야 소유자 삭제에 함께 처리됩니다.
               </div>
             </div>
           </div>
