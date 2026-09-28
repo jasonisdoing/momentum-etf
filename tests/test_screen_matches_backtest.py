@@ -540,6 +540,71 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                 if refill == 100:
                     self.assertEqual(expected, [])
 
+    def test_minimum_one_share_screen_orders_match_capital_replay(self):
+        from core.strategy.mix.actions import build_action_groups
+        from core.strategy.mix.capital_replay import replay_capital
+        from core.strategy.mix.targets import sleeve_target_shares
+
+        prices = {f"C{i}": 10_000.0 for i in range(9)} | {"EXP": 300_000.0}
+        targets = {
+            "a": [
+                {"ticker": ticker, "price": price, "drift_pct": 10.0, "plan": "buy", "is_exiting": False}
+                for ticker, price in prices.items()
+            ]
+        }
+        quantities = sleeve_target_shares(targets, {"a": 1_000_000.0}, 1.0)
+        self.assertEqual(quantities["EXP"], 1)
+        self.assertTrue(all(quantity >= 1 for quantity in quantities.values()))
+        self.assertLessEqual(sum(quantities[ticker] * price for ticker, price in prices.items()), 1_000_000)
+
+        index = pd.date_range("2026-09-01", periods=2)
+        close = pd.DataFrame({ticker: [price, price] for ticker, price in prices.items()}, index=index)
+        opened = close.copy()
+        amounts = {str(day.date()): {ticker: 100_000.0 for ticker in prices} for day in index}
+        replay = replay_capital(
+            close=close,
+            opened=opened,
+            fx=pd.Series(1.0, index=index),
+            targets=amounts,
+            capital_krw=1_000_000,
+            harvest_pct=30,
+            refill_pct=0,
+            costs={ticker: (0, 0) for ticker in prices},
+        )
+        day = str(index[0].date())
+        groups = build_action_groups(
+            [
+                {
+                    "ticker": ticker,
+                    "name": ticker,
+                    "price": price,
+                    "held_quantity": 0,
+                    "target_quantity": quantities[ticker],
+                }
+                for ticker, price in prices.items()
+            ],
+            {"slots": {}},
+            day,
+            harvest_pct=30,
+            refill_pct=0,
+            cash_balance=1_000_000,
+            target_schedule={
+                day: {
+                    "quantities": quantities,
+                    "weights": {ticker: 10.0 for ticker in prices},
+                    "amounts": {ticker: 100_000.0 for ticker in prices},
+                    "previous_amounts": {},
+                }
+            },
+        )
+        screen_buys = sorted(
+            (item["ticker"], item["quantity"]) for group in groups for item in group["items"] if item["side"] == "buy"
+        )
+        replay_buys = sorted(
+            (trade["ticker"], trade["quantity"]) for trade in replay["executions"] if trade["side"] == "buy"
+        )
+        self.assertEqual(screen_buys, replay_buys)
+
     def test_sleeve_exit_net_amount_matches_replay(self):
         from core.strategy.mix.actions import build_action_groups
         from core.strategy.mix.capital_replay import replay_capital

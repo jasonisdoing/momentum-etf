@@ -184,6 +184,7 @@ def _apply_tolerance(
             harvest_pct=harvest_pct,
             refill_pct=refill_pct,
             previous_target_amount=row["previous_basis_amount"],
+            target_quantity=int(row["target_quantity"]),
         )
     # 부족 자금은 경고로 노출한다. 허용 범위 안의 종목을 자금 마련용으로 팔지 않는다.
     return cash_balance - math.fsum(row["trade_quantity"] * float(row.get("price") or 0) for row in rows)

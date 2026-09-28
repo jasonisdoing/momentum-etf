@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import math
-
 import pandas as pd
 
-from core.strategy.mix.capital_policy import CapitalTradeDecision, capital_trade_decision
+from core.strategy.mix.capital_policy import CapitalTradeDecision, allocate_target_shares, capital_trade_decision
 
 
 def replay_capital(
@@ -43,6 +41,18 @@ def replay_capital(
         amounts = targets[date]
         decision_prices = close.iloc[i - 1] if i else opened.iloc[0]
         decision_fx = float(fx.iloc[i - 1] if i else fx.iloc[0])
+        priced_amounts = {}
+        priced_units = {}
+        for ticker, amount in amounts.items():
+            price = decision_prices[ticker]
+            if pd.isna(price) and day == first_price_days[ticker] and amount > 0:
+                price = opened.at[day, ticker]
+            if pd.notna(price) and price > 0:
+                priced_amounts[ticker] = amount
+                priced_units[ticker] = float(price) * decision_fx
+        target_quantities = allocate_target_shares(
+            priced_amounts, priced_units, min(capital_krw, sum(priced_amounts.values()))
+        )
         orders = {}
         for ticker in held:
             amount = amounts.get(ticker, 0.0)
@@ -62,6 +72,7 @@ def replay_capital(
                 harvest_pct=harvest_pct,
                 refill_pct=refill_pct,
                 previous_target_amount=previous_targets.get(ticker, 0.0) / decision_fx,
+                target_quantity=target_quantities.get(ticker, 0),
             )
             if decision.quantity:
                 orders[ticker] = decision
@@ -99,10 +110,13 @@ def replay_capital(
                 # 시가 없는 날의 신규 진입은 슬롯 엔진처럼 체결하지 않는다.
                 continue
             requests[ticker] = trade * float(price) * (1 + costs[ticker][0])
-        total = sum(requests.values())
-        scale = min(1.0, max(cash, 0.0) / total) if total else 0.0
+        affordable = allocate_target_shares(
+            requests,
+            {ticker: float(opened.at[day, ticker]) * (1 + costs[ticker][0]) for ticker in requests},
+            max(cash, 0.0),
+        )
         for ticker in requests:
-            quantity = math.floor(orders[ticker].quantity * scale)
+            quantity = affordable[ticker]
             if not quantity:
                 continue
             price = float(opened.at[day, ticker])
