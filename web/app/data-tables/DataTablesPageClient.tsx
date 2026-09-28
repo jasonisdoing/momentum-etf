@@ -334,9 +334,24 @@ export function DataTablesPageClient() {
       <div className="appPageStack appPageStackFill">
         <div className="appBannerStack">
           <div className="alert alert-info mb-0">
-            <b>목적:</b> 종목풀·계좌 삭제 후 남은 고아 데이터와 등록되지 않은 옛·임시 컬렉션을 찾아 정리 누락을
-            점검합니다. <b>사용법:</b> 경고에 나온 항목의 생성·삭제 경로를 확인해 코드를 고치고, 사용하지 않는
-            데이터나 컬렉션만 삭제합니다.
+            {/* .alert 는 flex 라 자식이 좌우로 놓인다 — 한 블록으로 감싸 위아래로 쌓는다. */}
+            <div>
+              <div>
+                <b>목적:</b> 종목풀·계좌 삭제 후 남은 고아 데이터와 등록되지 않은 옛·임시 컬렉션을 찾아 정리 누락을
+                점검합니다.
+              </div>
+              <div>
+                <b>사용법:</b>
+              </div>
+              <ul className="mb-0 ps-3">
+                <li>경고에 나온 항목의 생성·삭제 경로를 확인해 코드를 고칩니다.</li>
+                <li>사용하지 않는 데이터나 컬렉션만 삭제합니다.</li>
+                <li>
+                  원인을 찾을 수 없으면 지우기 전에 다음에 다시 생겼을 때 찾을 수 있도록 코드를 먼저 개선합니다(생성
+                  시각·만든 경로를 문서에 남기거나 카탈로그에 등록하는 식).
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
         {error ? (
