@@ -42,7 +42,7 @@ from utils.index_constituents_loader import (  # noqa: E402
     save_index_constituents,
     us_market_constituents,
 )
-from utils.index_pool_alert import notify_unregistered_index_stocks  # noqa: E402
+from utils.index_pool_alert import notify_unregistered_market_stocks  # noqa: E402
 from utils.perf_metrics import period_sortino  # noqa: E402
 
 _HEADERS = {
@@ -413,8 +413,8 @@ def main() -> None:
         print(f"실패한 인덱스: {', '.join(failed)}", file=sys.stderr)
         sys.exit(1)
 
-    count = notify_unregistered_index_stocks("us", alert_items)
-    print(f"미국 지수 구성종목 종목풀 미등록: {count}개")
+    count = notify_unregistered_market_stocks("us", alert_items)
+    print(f"미국 시장 통합 종목 종목풀 미등록: {count}개")
 
 
 if __name__ == "__main__":
