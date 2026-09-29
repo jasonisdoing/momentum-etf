@@ -100,7 +100,7 @@ type RankRow = {
   "거래대금(1주)"?: number | null;
   "괴리율": number | null;
   "일간(%)": number | null;
-  /** 직전 거래일 종가의 그 전날 대비 변동률 — 일간(%)이 장중 값일 때 마지막으로 확정된 하루. */
+  /** 일간(%)이 나타내는 구간 바로 앞 거래일의 확정 등락률. */
   "전거래일(%)": number | null;
   "1주(%)": number | null;
   "2주(%)": number | null;
@@ -1139,7 +1139,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       // 마지막으로 확정된 하루를 바로 옆에서 같이 본다.
       ...(metricMode === "basic"
         ? ([
-            { field: "전거래일(%)", headerName: "전거래일", width: 96, tooltip: "직전 거래일 종가의 그 전날 대비 변동률 — 장중에도 값이 바뀌지 않는다." },
+            { field: "전거래일(%)", headerName: "전거래일", width: 96, tooltip: "일간(%)이 나타내는 구간 바로 앞 거래일의 확정 등락률." },
             { field: "1주(%)", headerName: "1주", width: 88 },
             { field: "2주(%)", headerName: "2주", width: 88 },
             { field: "1달(%)", headerName: "1달", width: 88 },

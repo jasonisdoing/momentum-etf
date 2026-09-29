@@ -32,10 +32,11 @@ from utils.effective_prices import (
     apply_realtime_close,
     bar_anchor,
     confirmed_close_before,
+    confirmed_close_on,
     last_regular_close,
 )
 from utils.logger import get_app_logger
-from utils.market_session import market_today
+from utils.market_session import CLOSED, market_session
 from utils.moving_averages import pool_moving_average_type
 from utils.perf_metrics import single_stock_backtest_stats
 from utils.pool_settings_store import get_pool_benchmark_ticker
@@ -272,14 +273,14 @@ def _confirmed_day_change_pct(
     else:
         # 앵커 **그 날짜** 봉만 쓴다. 없는 종목(거래정지·상장 직후)은 비워 둔다 —
         # 며칠치 변동을 하루치로 표기하지 않는다.
-        close = _confirmed_close_on(close_series, bar_date)
+        close = confirmed_close_on(close_series, bar_date)
         if close is None:
             return None
     return ((close / prev_close) - 1.0) * 100.0
 
 
 def _prior_confirmed_day_change_pct(close_series: pd.Series | None, bar_date: pd.Timestamp) -> float | None:
-    """휴장일에는 마지막 확정 봉의 직전 거래일 변동률을 전거래일 칸에 표시한다."""
+    """마감·휴장에는 마지막 확정 봉보다 한 거래일 앞선 변동률을 반환한다."""
     if close_series is None or close_series.empty:
         return None
     series = pd.to_numeric(close_series, errors="coerce").dropna()
@@ -287,22 +288,6 @@ def _prior_confirmed_day_change_pct(close_series: pd.Series | None, bar_date: pd
     if prior.empty:
         return None
     return _confirmed_day_change_pct(series, pd.Timestamp(prior.index[-1]), anchor_close=None)
-
-
-def _confirmed_close_on(close_series: pd.Series, bar_date: pd.Timestamp) -> float | None:
-    """**그 날짜** 확정 종가. 그 날짜 봉이 없으면 None."""
-    series = pd.to_numeric(close_series, errors="coerce").dropna()
-    index = pd.DatetimeIndex(series.index)
-    if index.tz is not None:
-        index = index.tz_localize(None)
-    target = pd.Timestamp(bar_date)
-    if target.tzinfo is not None:
-        target = target.tz_localize(None)
-    matched = series[index.normalize() == target.normalize()]
-    if matched.empty:
-        return None
-    value = float(matched.iloc[-1])
-    return value if value > 0 else None
 
 
 def _calc_period_return(close_series: pd.Series, days: int) -> float | None:
@@ -862,9 +847,7 @@ def build_ticker_type_rankings(
     if callable(status_callback):
         status_callback("실시간 가격 조회")
     today_korea = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
-    local_today = market_today(country_code).strftime("%Y-%m-%d")
-    market_open_today = bool(get_trading_days(local_today, local_today, country_code))
-    nontrading_today = selected_as_of_date == today_korea and not market_open_today
+    closed_session_today = selected_as_of_date == today_korea and market_session(country_code)["session"] == CLOSED
     realtime_allowed = selected_as_of_date == today_korea
     realtime_snapshot = (
         realtime_snapshot_override
@@ -928,7 +911,7 @@ def build_ticker_type_rankings(
                 reference_date=selected_as_of_date,
                 monthly_labels=monthly_labels,
             )
-            if nontrading_today:
+            if closed_session_today:
                 price_metrics["전거래일(%)"] = _prior_confirmed_day_change_pct(base_close_series, pool_last_bar)
             price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
             # 장중 신고 터치 — 오늘 고가 기준(위 헬퍼 주석 참조). 당일에만 참이 될 수 있다.

@@ -151,12 +151,18 @@ def _fetch_etf_inav_all() -> dict[str, dict[str, float]]:
 def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
     """네이버 API에서 한국 ETF의 실시간 NAV 정보를 조회합니다. 글로벌 캐시를 사용합니다."""
 
+    from utils.market_session import REGULAR, market_session
+
     normalized_codes = {str(t).strip().upper() for t in tickers if str(t or "").strip()}
     if not normalized_codes:
         return {}
 
     all_data = _fetch_etf_inav_all()
-    return {code: all_data[code] for code in normalized_codes if code in all_data}
+    snapshot = {code: dict(all_data[code]) for code in normalized_codes if code in all_data}
+    if market_session("kor")["session"] != REGULAR:
+        for entry in snapshot.values():
+            entry.pop("changeRate", None)
+    return snapshot
 
 
 # 해외 ETF NAV 캐시 — 종목별로 조회하므로 티커 단위로 담는다(한국은 전체 목록 1회 조회).
@@ -263,7 +269,7 @@ def _get_naver_over_market_price_info(item: dict[str, Any]) -> tuple[dict[str, A
 def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, Any]]:
     """stock.naver.com 폴링 API에서 한국 개별 종목의 실시간 가격 정보를 조회합니다."""
 
-    from utils.market_session import REGULAR, market_session
+    from utils.market_session import PREMARKET, REGULAR, market_session
 
     normalized_codes = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
     if not normalized_codes:
@@ -274,7 +280,8 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
         return {}
 
     # 한 번만 본다 — 한 응답 안에서 종목마다 세션 판정이 갈리면 안 된다.
-    regular_running = market_session("kor")["session"] == REGULAR
+    session = market_session("kor")["session"]
+    regular_running = session == REGULAR
 
     naver_stock_polling_url = "https://stock.naver.com/api/polling/domestic/stock"
     naver_stock_polling_headers = {
@@ -321,10 +328,9 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
             # 표시·판정용 `nowVal` 은 시간외가 닫히면 이 값으로 돌아온다(위 분기).
             if regular_close is not None:
                 entry["regularClose"] = regular_close
-                # 정규장이 **진행 중이 아닐 때만** 이 값이 「마지막으로 마감된 정규장 종가」다.
-                # 장중에는 아직 확정되지 않은 그날 현재가여서, 앵커(전 거래일)와 하루 어긋난다.
-                # 의미는 소스마다 달라 여기서 맞춘다 — `effective_prices.last_regular_close` 주석.
-                if not regular_running:
+                # 장전 closePrice는 확정 일봉과 다른 기준가일 수 있어 공통 캐시에서 확정한다.
+                # 장중 값도 잠정값이므로 마지막 확정 종가로 넘기지 않는다.
+                if not regular_running and session != PREMARKET:
                     entry["lastRegularClose"] = regular_close
             # 일봉 스냅샷(fetch_naver_daily_ohlcv_snapshot)이 날짜 정합 검증에 쓴다.
             local_traded_at = str(item.get("localTradedAt") or "").strip()
