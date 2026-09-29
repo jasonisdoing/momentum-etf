@@ -30,19 +30,18 @@ type KorMarketStocksResponse = {
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const market = searchParams.get("market");
-  const limit = searchParams.get("limit");
   const minMarketCapJo = searchParams.get("min_market_cap_jo");
 
-  if (!market || !limit || !minMarketCapJo) {
+  if (!market || !minMarketCapJo) {
     return jsonNoStore(
-      { error: "market, limit, min_market_cap_jo 쿼리 파라미터가 모두 필요합니다." },
+      { error: "market, min_market_cap_jo 쿼리 파라미터가 모두 필요합니다." },
       { status: 400 },
     );
   }
 
   try {
     const data = await fetchFastApiJson<KorMarketStocksResponse>(
-      `/internal/kor-market-stocks?market=${encodeURIComponent(market)}&limit=${encodeURIComponent(limit)}&min_market_cap_jo=${encodeURIComponent(minMarketCapJo)}`,
+      `/internal/kor-market-stocks?market=${encodeURIComponent(market)}&min_market_cap_jo=${encodeURIComponent(minMarketCapJo)}`,
     );
     return jsonNoStore(data);
   } catch (error) {

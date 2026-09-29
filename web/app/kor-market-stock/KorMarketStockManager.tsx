@@ -104,15 +104,6 @@ function viewMarkets(view: ViewOption): readonly string[] {
 const INDEX_MARKETS: readonly ViewOption[] = ["KOSPI200", "KOSDAQ150"];
 const usesTopLimit = (view: ViewOption): boolean => !INDEX_MARKETS.includes(view);
 
-// 서버가 마켓별로 들고 있는 시총 상위 개수(백엔드 limit 상한과 일치) — 항상 전부 받아
-// 화면에서 상위 N 절단만 한다(미국 화면과 같은 방식, 재조회 없음).
-const MARKET_FETCH_LIMITS: Record<string, number> = {
-  KOSPI: 200,
-  KOSDAQ: 150,
-  KOSPI200: 200,
-  KOSDAQ150: 150,
-};
-
 // 마지막으로 고른 상위 N — 셀렉트·저장·선택지 생성은 미국 개별주와 공용(TopCountSelect).
 const KOR_MARKET_TOP_COUNT_KEY = "momentum-etf:kor-market-stock:top-count";
 const KOR_TOP_STEP = 50;
@@ -162,7 +153,7 @@ export function KorMarketStockManager({
         Promise.all(
           markets.map((m) =>
             fetch(
-              `/api/kor-market-stocks?market=${m}&limit=${MARKET_FETCH_LIMITS[m]}&min_market_cap_jo=${encodeURIComponent(minCapJo)}`,
+              `/api/kor-market-stocks?market=${m}&min_market_cap_jo=${encodeURIComponent(minCapJo)}`,
               { cache: "no-store" },
             ),
           ),
