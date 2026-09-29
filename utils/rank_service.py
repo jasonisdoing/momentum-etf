@@ -516,7 +516,7 @@ def _normalize_trend_value(value: Any) -> float | None:
 
 
 def _build_score_ranked_rows(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
-    """순위 번호(「순위」 컬럼)를 매긴다 — 기준은 순위 점수(`core.strategy.scoring.rank_score`).
+    """행을 순위 점수 순으로 세운다 — 번호(「순위」)는 순위 계산이 `rank_numbers` 로 매겨 온다.
 
     표시용 「장기」(이격)·「단기」(단기이격)는 원천 값 그대로 두고, 줄 세우기만 점수로 한다.
     벤치마크 대비 표시(`is_below_benchmark`)도 같은 점수로 비교해야 순위와 어긋나지 않는다.
@@ -547,7 +547,6 @@ def _build_score_ranked_rows(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
             break
 
     ranked_rows: list[dict[str, Any]] = []
-    current_rank = 1
     for row in rows_with_index:
         normalized = dict(row)
         normalized.pop("__base_index", None)
@@ -559,8 +558,9 @@ def _build_score_ranked_rows(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
 
         normalized["is_below_benchmark"] = is_below_bm
 
-        normalized["순위"] = current_rank
-        current_rank += 1
+        # 번호는 순위 계산(`build_ticker_type_rankings`)이 공용 규칙(`rank_numbers`)으로 매겨 온다.
+        rank = normalized.get("순위")
+        normalized["순위"] = None if rank is None or pd.isna(rank) else int(rank)
         ranked_rows.append(normalized)
     return ranked_rows
 
