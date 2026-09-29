@@ -793,9 +793,9 @@ def _update_reference_meta_for_type(
             for stock in ticker_entries
             if str(stock.get("ticker") or "").strip()
         }
-        logger.info(f"[{type_norm.upper()}] 네이버 미국 종목 업종 맵을 구성합니다...")
+        logger.info(f"[{type_norm.upper()}] 네이버 미국 종목 기초 정보 맵을 구성합니다...")
         naver_us_stock_map = fetch_naver_us_stock_info_map(us_tickers)
-        logger.info(f"[{type_norm.upper()}] 네이버 미국 종목 업종 {len(naver_us_stock_map)}건 수집")
+        logger.info(f"[{type_norm.upper()}] 네이버 미국 종목 기초 정보 {len(naver_us_stock_map)}건 수집")
 
     def _process_one_stock(stock: dict[str, Any]) -> tuple[str, str, dict[str, Any] | None, list[str]]:
         """단일 종목 처리 (워커 스레드). 반환: (ticker, name, update_doc|None, 실패목록).
@@ -1364,18 +1364,27 @@ def update_single_stock_metadata(
                                     f"종목명({yahoo_name})이 ETF 로 끝나 ETF 로 판정합니다."
                                 )
                         stock["is_etf"] = is_etf
-                    # 호주 개별주의 시총·업종 — 미국은 네이버 맵에서 받으므로 여기서 채우지 않는다.
-                    # 통화는 그 시장 통화 그대로다(호주=AUD). 국가를 섞어 비교하면 안 된다.
+                    # 호주 시총은 현지 통화 그대로 저장한다. 미국 시총은 네이버 맵에서 받는다.
                     if country_code == "au":
                         cap = info.get("marketCap")
                         if isinstance(cap, (int, float)) and not isinstance(cap, bool) and cap > 0:
                             stock["market_cap"] = int(cap)
+                    # 미국 개별주와 호주 종목은 종목별 Yahoo 분류를 저장한다.
+                    if country_code == "au" or (country_code == "us" and not is_etf):
                         sector = str(info.get("sector") or "").strip()
                         if sector:
                             stock["sector"] = sector
                         industry = str(info.get("industry") or "").strip()
                         if industry:
                             stock["industry"] = industry
+                        if country_code == "us" and (not sector or not industry):
+                            logger.warning(
+                                "[%s/%s] 미국 개별주 섹터·업종 조회 누락 (sector=%r, industry=%r)",
+                                account_norm.upper(),
+                                ticker,
+                                sector,
+                                industry,
+                            )
                     if need_name:
                         fetched_name = info.get("longName") or info.get("shortName")
                         if fetched_name:

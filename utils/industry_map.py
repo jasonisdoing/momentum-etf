@@ -4,8 +4,8 @@
 - 한국: 종목 문서(`stock_meta.industry`). 네이버 분류(한국어 원본)를 메타 배치가 채운다.
 - 호주: 종목 문서(`stock_meta.industry`). 메타 배치가 yfinance `.info` 로 채우고
   `group_yf_industry`로 계열을 묶는다.
-- 미국: 지수 구성종목(SP500/NDX100)의 yfinance 분류. 미국 종목 문서에는 이 필드를
-  채우지 않으므로 구성종목에서 가져와야 한다. 표시명은 config.py 설정을 쓴다.
+- 미국: 종목 문서(`stock_meta.sector/industry`). 메타 배치가 종목별 yfinance 분류를
+  저장하므로 지수 구성 여부와 무관하다. 표시명은 config.py 설정을 쓴다.
 
 종목풀이 국가별로 나뉘어 있어 한 풀 안에서는 항상 한 체계다.
 순위(`/pools-rank`)·전략 SM(`/strategy-momentum`)·신고점(`/strategy-new-high`)이 같은 값을
@@ -20,9 +20,6 @@ from config import INDUSTRY_DISPLAY_CONFIG
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
-
-# 미국 업종을 가져올 지수 구성종목. 앞선 지수의 값을 우선한다(중복 종목은 먼저 만난 값 유지).
-_US_INDEX_SOURCES = ("SP500", "NDX100")
 
 # 호주의 yfinance 세부 업종을 화면에서 같은 계열로 묶어 표시한다.
 _YF_INDUSTRY_FAMILIES = (
@@ -140,19 +137,22 @@ def us_industry_map() -> dict[str, str]:
 
 
 def us_classification_maps() -> tuple[dict[str, str], dict[str, str]]:
-    """미국 지수 구성종목에서 업종·섹터 표시명을 한 번에 읽는다."""
-    from utils.index_constituents_loader import load_index_constituents
+    """미국 종목풀의 개별주 메타에서 업종·섹터 표시명을 한 번에 읽는다."""
+    from utils.settings_loader import _load_pool_configs
+    from utils.stock_list_io import _load_ticker_type_stocks_raw
 
     industry_by: dict[str, str] = {}
     sector_by: dict[str, str] = {}
-    for index_name in _US_INDEX_SOURCES:
-        try:
-            constituents = load_index_constituents(index_name)
-        except (FileNotFoundError, LookupError) as error:
-            warnings.warn(f"{index_name} 구성종목이 없어 업종을 채우지 못했습니다: {error}", stacklevel=2)
-            logger.warning("%s 구성종목이 없어 업종을 채우지 못했습니다: %s", index_name, error)
+    for config in _load_pool_configs():
+        if (
+            str(config.get("country_code") or "").strip().lower() != "us"
+            or str(config.get("pool_kind") or "").strip().lower() != "stock"
+        ):
             continue
-        for item in constituents:
+        pool = str(config.get("ticker_type") or "").strip().lower()
+        for item in _load_ticker_type_stocks_raw(pool):
+            if item.get("is_etf"):
+                continue
             ticker = str(item.get("ticker") or "").strip().upper()
             sector = str(item.get("sector") or "").strip()
             industry = str(item.get("industry") or "").strip()
