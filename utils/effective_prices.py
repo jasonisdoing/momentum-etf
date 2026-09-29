@@ -79,9 +79,8 @@ def last_regular_close(entry: Mapping[str, Any] | None) -> float | None:
     재정렬(17:10 KST)까지 12시간 동안 그 잠정 봉이 남는다 — 실측(2026-09-24 데이장)에서
     us_stock 20종목 전부 캐시 09-23 봉이 실제 종가와 달랐다(MRNA 184.27 vs 182.11).
 
-    `prevClose` 와 구분한다. 토스는 세션을 따라가지만(애프터·데이장이면 그날 종가)
-    거래소 시세 API 의 `prevClose` 는 날짜 기준 전일 종가여서 마감 후에는 하루 어긋난다.
-    그래서 **의미를 실측으로 확정한 소스만** 이 키를 채운다(지금은 토스 미국).
+    `prevClose` 는 일간 등락률의 비교 기준이며 세션에 따라 날짜가 달라진다.
+    소스가 확정 종가를 주지 않는 경우 공통 가격 경로가 앵커 날짜의 캐시 봉으로 채운다.
     """
     if not isinstance(entry, Mapping) or not entry:
         return None
@@ -113,6 +112,23 @@ def confirmed_close_before(close_series: pd.Series | None, bar_date: Any) -> flo
     if position < 0:
         return None
     value = float(series.iloc[position])
+    return value if value > 0 else None
+
+
+def confirmed_close_on(close_series: pd.Series | None, bar_date: Any) -> float | None:
+    """지정한 거래일의 확정 종가. 그 날짜의 봉이 없으면 값을 추정하지 않는다."""
+    if close_series is None or close_series.empty:
+        return None
+    series = pd.to_numeric(close_series, errors="coerce").dropna()
+    if series.empty:
+        return None
+    index = pd.DatetimeIndex(series.index)
+    if index.tz is not None:
+        index = index.tz_localize(None)
+    matched = series[index.normalize() == _normalize_day(bar_date)]
+    if matched.empty:
+        return None
+    value = float(matched.iloc[-1])
     return value if value > 0 else None
 
 

@@ -431,22 +431,22 @@ def _is_cache_alive(cache_entry: dict[str, Any] | None, now: datetime) -> bool:
 
 
 def _fill_missing_change_rate(country: str, snapshot: dict[str, dict[str, Any]]) -> None:
-    """등락률이 없으면 마지막 정규장 종가와 직전 확정 종가로 계산한다."""
+    """등락률이 없으면 현재 세션과 확정 종가 봉을 이어 일간 등락률을 계산한다."""
     from utils.cache_utils import load_cached_close_series_bulk
-    from utils.effective_prices import bar_anchor, confirmed_close_before, last_regular_close
+    from utils.effective_prices import bar_anchor, confirmed_close_before, confirmed_close_on, last_regular_close
+    from utils.market_session import CLOSED, market_session
     from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
 
     targets = {
-        ticker: close
+        ticker: entry
         for ticker, entry in snapshot.items()
-        if isinstance(entry, dict)
-        and entry.get("changeRate") is None
-        and (close := last_regular_close(entry)) is not None
+        if isinstance(entry, dict) and entry.get("changeRate") is None and entry.get("nowVal") is not None
     }
     if not targets:
         return
 
     anchor = bar_anchor(country)
+    closed = market_session(country)["session"] == CLOSED
     missing = set(targets)
     # **그 시장의 종목풀만** 뒤진다. 다른 시장 캐시까지 훑으면 심볼이 겹치는 종목의 다른
     # 시장 종가를 집을 수 있다.
@@ -456,11 +456,21 @@ def _fill_missing_change_rate(country: str, snapshot: dict[str, dict[str, Any]])
         if str(get_ticker_type_settings(pool).get("country_code") or "").strip().lower() != country:
             continue
         for ticker, series in (load_cached_close_series_bulk(pool, missing) or {}).items():
-            prev_close = confirmed_close_before(series, anchor)
-            if prev_close is None:
+            entry = targets[ticker]
+            regular_close = last_regular_close(entry) or confirmed_close_on(series, anchor)
+            comparison_close = confirmed_close_before(series, anchor) if closed else regular_close
+            if regular_close is None or comparison_close is None:
                 continue
-            snapshot[ticker]["prevClose"] = prev_close
-            snapshot[ticker]["changeRate"] = (targets[ticker] / prev_close - 1.0) * 100.0
+            try:
+                current_price = float(entry["nowVal"])
+            except (TypeError, ValueError):
+                continue
+            if not isfinite(current_price) or current_price <= 0:
+                continue
+            entry["regularClose"] = regular_close
+            entry["lastRegularClose"] = regular_close
+            entry["prevClose"] = comparison_close
+            entry["changeRate"] = (current_price / comparison_close - 1.0) * 100.0
             missing.discard(ticker)
 
 
