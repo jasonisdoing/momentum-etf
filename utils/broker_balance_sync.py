@@ -1,7 +1,7 @@
 """증권사 잔고 동기화 배치 — `broker_api` 연동이 저장된 계좌를 순회해 잔고를 덮어쓴다.
 
 수동 '증권사 데이터 덮어쓰기' 와 같은 코드(`apply_fetched_balance`)를 쓴다.
-실패 슬랙은 폭주하지 않게 **실패 시작 1회 + 복구 1회**만 보낸다 — 10분 간격 배치라
+실패 슬랙은 폭주하지 않게 **실패 시작 1회 + 복구 1회**만 보낸다 — 주기 실행 배치라
 장애가 이어지면 매번 알리는 게 소음이다. 상태는 DB(system_config)에 남긴다.
 """
 
@@ -100,7 +100,7 @@ def _diff_lines(current: dict[str, Any] | None, fetched: dict[str, Any]) -> list
 def sync_all() -> dict[str, Any]:
     """연동된 전 계좌 동기화. 계좌별 결과 목록을 돌려준다 (스크립트가 로그로 남긴다).
 
-    저장값과 차이가 없으면 저장도 슬랙도 건너뛴다 — 10분마다 updated_at 만 바뀌면
+    저장값과 차이가 없으면 저장도 슬랙도 건너뛴다 — 주기마다 updated_at 만 바뀌면
     '최종 변경' 표시가 의미를 잃고, 변화 없는 알림은 소음이다.
     """
     from services.broker_api_service import BrokerApiError, apply_fetched_balance, fetch_broker_balance

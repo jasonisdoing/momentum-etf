@@ -79,8 +79,7 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 0,10,20,30,40,50 0-3 * * 2-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_mix_notify_us python scripts/strategy_mix_notify.py us >> logs/cron/strategy_mix_notify_us.log 2>&1
 0,10,20,30,40,50 4 * * 2-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_mix_notify_us python scripts/strategy_mix_notify.py us >> logs/cron/strategy_mix_notify_us.log 2>&1
 
-# ── 증권사 잔고 동기화 (평일 09:00~15:40, 20분 간격) ──────────────────────
-# API 연동(broker_api) 저장된 계좌의 잔고·보유를 증권사 값으로 덮어쓴다. 계좌당 2콜
-# (잔고 + 연속조회), 호출은 1초 간격 직렬화. 15:40 마지막 회가 장 마감(15:30) 후
-# 확정 상태를 담는다. 변화 없으면 저장·슬랙 생략.
-0,20,40 9-15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py broker_balance_sync python scripts/broker_balance_sync.py >> logs/cron/broker_balance_sync.log 2>&1
+# ── 증권사 잔고 동기화 (평일 09:00~15:40, 5분 간격) ───────────────────────
+# API 연동 계좌의 잔고·보유를 동기화한다. 15:40 마지막 회는 장 마감 후 실행한다.
+*/5 9-14 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py broker_balance_sync python scripts/broker_balance_sync.py >> logs/cron/broker_balance_sync.log 2>&1
+0,5,10,15,20,25,30,35,40 15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py broker_balance_sync python scripts/broker_balance_sync.py >> logs/cron/broker_balance_sync.log 2>&1

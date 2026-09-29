@@ -45,9 +45,13 @@ _WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
 _WEEKDAYS_TUE_SAT = [1, 2, 3, 4, 5]
 _WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6]
 
-# 증권사 잔고 동기화 슬롯 — 20분 간격(09:00~15:40). 계좌당 2콜·1초 직렬화라 하루 42콜 수준.
-# 15:40 이 마감 후 1회.
-_BROKER_SYNC_SLOTS = [{"hour": hour, "minute": minute} for hour in range(9, 16) for minute in (0, 20, 40)]
+# 증권사 잔고 동기화 — 평일 09:00~15:40 5분 간격. 마지막 회는 장 마감 후다.
+_BROKER_SYNC_SLOTS = [
+    {"hour": hour, "minute": minute}
+    for hour in range(9, 16)
+    for minute in range(0, 60, 5)
+    if (hour, minute) <= (15, 40)
+]
 
 # 미국 장중 10분 슬롯 — 22:40~23:50 + 00:00~04:50 KST (서머타임 정규장 22:30~05:00 에서
 # 개장 직후·마감 직전 10분을 뺀 구간). 자정을 넘는 구간이라 요일은 월~토로 잡는다.
@@ -104,7 +108,7 @@ SCHEDULE_ROWS = [
         "group": "장중 실행",
         "job": "증권사 잔고 동기화",
         "target": "API 연동(broker_api) 저장된 계좌",
-        "cadence": "평일 09:00~15:40 KST 20분 간격",
+        "cadence": "평일 09:00~15:40 KST 5분 간격",
         "command": "python scripts/broker_balance_sync.py",
         # 15:40 마지막 회가 마감(15:30) 후 확정 상태를 담는다. 실패 슬랙은 시작·복구 1회씩.
         "schedule": {"slots": _BROKER_SYNC_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
