@@ -149,7 +149,7 @@ def _numeric(values: Any) -> Any:
 def rank_score(long_disparity_pct: Any, short_disparity_pct: Any = None) -> Any:
     """**순위 점수** — 종목을 줄 세우는 단일 기준. 정의는 **장기 이격률**이다.
 
-    순위 화면(`/pools-rank`)의 정렬·추천(✅)과 모멘텀 전략(`/strategy-momentum`)의 선정이
+    순위 화면(`/pools-rank`)의 정렬과 모멘텀 전략(`/strategy-momentum`)의 선정이
     이 함수 하나만 쓴다. 예전에는 두 곳이 각자 계산해서, 정의를 바꾸려면 양쪽을 따로
     고쳐야 했고 한쪽만 고치면 두 화면의 순서가 조용히 갈렸다.
 
@@ -250,7 +250,7 @@ def hold_eligible(long_disparity_pct: Any, short_disparity_pct: Any) -> Any:
 
     장기 이평선은 종목 선택, 단기 이평선은 손절/익절을 담당한다. **둘 중 하나라도
     이탈하면 이탈**이다 — 장기 추세가 죽었거나 단기 추세가 꺾이면 보유하지 않는다.
-    순위 화면의 추천(✅)·모멘텀 선정·백테스트가 같은 규칙을 쓰도록 여기서만 정의한다.
+    모멘텀 선정·백테스트가 같은 규칙을 쓰도록 여기서만 정의한다.
 
     순위(`rank_score`)는 장기만 본다 — 이 함수와 역할이 다르다.
 

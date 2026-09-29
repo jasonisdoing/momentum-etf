@@ -88,7 +88,6 @@ type RankRow = {
   추세: number | null;
   이격?: number | null;
   단기이격?: number | null;
-  보유대상?: boolean;
   보유: string;
   현재가: number | null;
   /** 20일 일간 수익률 표준편차(%) — 모멘텀 진입 문턱 판정과 같은 값. */
@@ -138,7 +137,7 @@ type RankResponse = {
   ticker_types?: RankTickerType[];
   ticker_type?: string;
   ma_rules?: RankMaRule[];
-  /** 이번 응답의 보유 대상(✅)에 적용된 진입 문턱과 선택지 — 모멘텀 화면과 같은 값. */
+  /** 이번 응답에 적용된 진입 문턱과 선택지 — 모멘텀 화면과 같은 값. */
   entry_vol_mult?: number | null;
   entry_vol_mult_options?: (number | null)[];
   /** 시장 ADR — 모멘텀 ADR 게이트와 같은 소스. 레짐 지수 없는 풀은 null. */
@@ -206,7 +205,7 @@ type RankHeaderSummary = {
   entryPct: number;
   totalCount: number;
   ruleSummary: string;
-  /** 실계좌 보유 종목 수 — 표의 녹색 행 수와 같다. */
+  /** 실계좌 보유 종목 수 — 표의 녹색 티커·종목명 칸 수와 같다. */
   heldCount: number;
   /** 시장 ADR — 값 (하한 설정 시 함께). 레짐 지수 없는 풀은 null. */
   adr: { market: string; value: number; floor: number | null } | null;
@@ -742,7 +741,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         이격: null,
         단기이격: null,
         보유: "",
-        보유대상: false,
         현재가: null,
         거래대금: null,
         "거래대금(1주)": null,
@@ -872,22 +870,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
         cellRenderer: (params: { value: number | null | undefined }) => {
           return renderRankDelta(params.value);
-        },
-      },
-      {
-        colId: "추천",
-        headerName: "✓",
-        pinned: "left",
-        headerTooltip: "추천 — 제외 종목·벤치마크가 아니고, 장기가 양수이며, 단기가 음수가 아닌 종목 중 장기 상위 N개(보유 종목수)",
-        minWidth: 44,
-        width: 44,
-        sortable: true,
-        filter: false,
-        cellStyle: { textAlign: "center" },
-        valueGetter: (params) => (params.data?.보유대상 ? 1 : 0),
-        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
-          if (!params.value) return <span style={{ color: "var(--text-muted)" }}>-</span>;
-          return <span style={{ fontSize: "var(--fs-base)" }}>✅</span>;
         },
       },
       // 고점 — 공용 컬럼. 순위 화면만 장중 신고점 터치(고점터치)를 함께 ⭐로 표시한다.
@@ -1189,7 +1171,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellRenderer: (params: { value: number | null | undefined }) => renderRsiCell(params.value ?? null),
       },
       // MA 이탈(단기·장기) — 모멘텀 화면과 같은 공용 컬럼(이탈 임박 강조).
-      // 진입 문턱(헤더 미리보기 값 포함) — 문턱 안이면 파랑(회색 행·✅과 같은 기준).
+      // 진입 문턱(헤더 미리보기 값 포함) — 문턱 안이면 파랑(행 배경과 같은 기준).
       {
         ...maExitGapColumn<RankGridRow>({
           field: "단기이격",
@@ -1838,7 +1820,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       </div>
                     </label>
                   ) : null}
-                  {/* 진입 문턱 — 모멘텀 화면과 같은 값(보유 대상 ✅ 판정에 적용). 미리보기라 저장은 모멘텀 화면에서. */}
+                  {/* 진입 문턱 — 모멘텀 화면과 같은 값. 미리보기라 저장은 모멘텀 화면에서. */}
                   <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">진입 문턱</span>
                       <select
@@ -1847,7 +1829,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                         value={entryVolMult}
                         onChange={(e) => handleEntryVolMultChange(e.target.value)}
                         disabled={entryVolMultOptions.length === 0}
-                        title="보유 대상(✅) 판정에 쓰는 진입 문턱 — 이격이 '배수 × 20일 변동성' 이상인 종목만 고른다(모멘텀 진입과 같은 규칙). 여기서는 미리보기이고, 저장은 모멘텀 화면에서 한다."
+                        title="이격이 '배수 × 20일 변동성' 이상인 종목만 진입 후보로 고른다(모멘텀 진입과 같은 규칙). 여기서는 미리보기이고, 저장은 모멘텀 화면에서 한다."
                       >
                         {entryVolMultOptions.length === 0 ? <option value="">로딩 중…</option> : null}
                         {entryVolMultOptions.map((value) => (
@@ -1985,7 +1967,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   if (params.data?.exclude_from_ranking) {
                     classes.push("rankFixedRow");
                   }
-                  // 실제 보유 중인 종목 — 순위 화면에서는 행 전체를 녹색으로 표시한다.
+                  // 실제 보유 중인 종목 — 공통 규칙으로 티커·종목명 칸만 녹색으로 표시한다.
                   if (isHeld) {
                     classes.push("appHeldRow");
                   }

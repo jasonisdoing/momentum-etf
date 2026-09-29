@@ -657,7 +657,7 @@ export function HoldingsManager({
                   if (isDetailRow(params.data)) return "holdingsRow holdingsDetailFullRow";
                   return (params.data as AggregatedHoldingRow)?.ticker === "__CASH__"
                     ? "holdingsRow holdingsRowCash"
-                    : "holdingsRow";
+                    : "holdingsRow appHeldRow";
                 }}
                 gridOptions={holdingsGridOptions}
               />

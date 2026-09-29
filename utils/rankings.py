@@ -20,7 +20,6 @@ from core.strategy.scoring import (
     hold_eligible,
     rank_numbers,
     rank_score,
-    select_holdings,
 )
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
 from utils.asx_ticker import ensure_asx_prefix
@@ -650,45 +649,6 @@ def hold_eligible_mask(disparity: pd.Series, short_disparity: pd.Series) -> pd.S
     return hold_eligible(disparity, short_disparity)
 
 
-def _mark_hold_targets(
-    df: pd.DataFrame,
-    top_n: int,
-    entry_vol_mult: float | None = None,
-) -> pd.DataFrame:
-    """규칙상 보유 대상인 종목에 ``보유대상`` 을 표시한다. 화면의 추천(✅) 기준.
-
-    선정 자체는 **모멘텀 전략과 같은 공용 함수**(`core.strategy.scoring.select_holdings`)가
-    한다 — 자격(장기 이격 > 0, 단기 이격 >= 0) → 순위 점수 순이다.
-    풀에 진입 문턱(`entry_vol_mult`)이 저장돼 있으면 모멘텀 진입과 같은 문턱
-    (이격 ≥ 배수 × 20일 변동성, `entry_gap_ok`)을 후보에 함께 건다 — 이 표시는
-    "오늘 새로 고른다면"이라 진입 관점이고, 자격·추세 이탈 회색은 보유 기준(0선) 그대로다.
-
-    여기서 따로 거는 건 **제외**(`exclude_from_ranking`)뿐이다 — 투자 후보가 아니다.
-    벤치마크는 빼지 않는다(종목풀에 있으면 매수 후보다. 모멘텀·신고가도 같다).
-    조건을 만족하는 종목이 ``top_n`` 보다 적으면 그만큼만 표시한다(억지로 채우지 않는다).
-    """
-    df["보유대상"] = False
-    if "이격" not in df.columns or "단기이격" not in df.columns:
-        return df
-
-    from core.strategy.momentum.signals import entry_gap_ok
-
-    candidates = [
-        {
-            "ticker": str(row.get("티커") or "").strip().upper(),
-            "long_disparity_pct": row.get("이격"),
-            "short_disparity_pct": row.get("단기이격"),
-        }
-        for _, row in df.iterrows()
-        if not bool(row.get("exclude_from_ranking"))
-        and entry_gap_ok(row.get("이격"), row.get("단기이격"), row.get("변동성"), entry_vol_mult)
-    ]
-    picked = set(select_holdings(candidates, top_n=int(top_n)))
-    if picked:
-        df.loc[df["티커"].astype(str).str.strip().str.upper().isin(picked), "보유대상"] = True
-    return df
-
-
 def _apply_common_rank_scores(
     df: pd.DataFrame,
     effective_close_series_map: dict[str, pd.Series],
@@ -802,7 +762,7 @@ def _apply_common_rank_scores(
     ).astype("object")
     df.loc[composite_missing, "단기이격"] = None
 
-    # 순위 점수 — 정렬과 추천(✅)이 쓰는 단일 기준. 모멘텀 전략과 **같은 함수**다.
+    # 순위 점수 — 화면 정렬과 모멘텀 전략이 쓰는 단일 기준.
     # 정의는 장기 이격률이라 「장기」와 같은 값이고, 화면에는 컬럼으로 내보내지 않는다.
     # 그래도 따로 두는 이유: 줄 세우는 기준을 정의 한 곳(rank_score)에만 두기 위해서다 —
     # 정렬이 「이격」 컬럼을 직접 읽으면 정의를 바꿀 때 이 파일까지 고쳐야 한다.
@@ -812,15 +772,10 @@ def _apply_common_rank_scores(
     return df
 
 
-# 진입 문턱 기본값 표시 — 인자를 안 주면 풀 저장값(ENTRY_VOL_MULT)을 쓴다는 뜻의 센티널.
-_ENTRY_VOL_MULT_STORED = object()
-
-
 def build_ticker_type_rankings(
     ticker_type: str,
     *,
     ma_rules: list[dict[str, Any]] | None = None,
-    entry_vol_mult: Any = _ENTRY_VOL_MULT_STORED,
     as_of_date: pd.Timestamp | None = None,
     realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
     status_callback: Any | None = None,
@@ -1073,14 +1028,6 @@ def build_ticker_type_rankings(
         number_by_ticker = rank_numbers(dict(zip(df.loc[numbered, "티커"], df.loc[numbered, "점수"])))
         df["순위"] = df["티커"].map(number_by_ticker).astype("object").where(numbered, None)
 
-    # 추천 ✅ 개수는 모멘텀·신고가·종목풀 백테스트와 같은 풀 설정을 쓴다.
-    from utils.pool_settings_store import get_pool_top_n_hold
-
-    # 진입 문턱 — 화면 툴바가 미리보기 값을 넘기면 그걸, 아니면 그 풀의 모멘텀 설정
-    # (ENTRY_VOL_MULT)을 쓴다. 보유 대상(✅)이 모멘텀 후보 표와 같아진다.
-    if entry_vol_mult is _ENTRY_VOL_MULT_STORED:
-        entry_vol_mult = (get_ticker_type_settings(ticker_type) or {}).get("ENTRY_VOL_MULT")
-    df = _mark_hold_targets(df, get_pool_top_n_hold(ticker_type), entry_vol_mult=entry_vol_mult)
     df = _normalize_ranking_values(df, country_code, monthly_labels=monthly_labels)
     df.attrs["realtime_active"] = realtime_active
     df.attrs["ranking_computed_at"] = ranking_computed_at
