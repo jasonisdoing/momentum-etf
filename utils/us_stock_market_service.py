@@ -75,6 +75,41 @@ def _fetch_us_market_value_page(
     raise RuntimeError("네이버 미국 주식 리스트 조회에 실패했습니다.")  # 도달 불가, 안전망
 
 
+def load_us_market_caps() -> dict[str, float]:
+    """NYSE·NASDAQ 개별주 전체의 시총(USD)을 배치 순위 계산용으로 받는다."""
+    caps: dict[str, float] = {}
+    for market in ("NSQ", "NYS"):
+        page_index = 0
+        market_tickers: set[str] = set()
+        while True:
+            items = _fetch_us_market_value_page(market, start_idx=page_index, page_size=_NAVER_US_PAGE_SIZE_MAX)
+            if not items:
+                if page_index == 0:
+                    raise RuntimeError(f"네이버 미국 시총 명단이 비어 있습니다: {market}")
+                break
+
+            page_tickers: set[str] = set()
+            for item in items:
+                ticker = str(item.get("symbolCode") or "").strip().upper().replace(".", "-").replace(" ", "-")
+                if not ticker:
+                    raise RuntimeError(f"네이버 미국 시총 명단에 티커가 없습니다: {market} {page_index}페이지")
+                if ticker in market_tickers or ticker in page_tickers:
+                    raise RuntimeError(f"네이버 미국 시총 명단의 페이지가 중복되었습니다: {market} {ticker}")
+                page_tickers.add(ticker)
+                cap = _parse_float(item.get("marketValue"))
+                if cap is not None and cap > 0:
+                    caps[ticker] = max(cap, caps.get(ticker, 0.0))
+
+            market_tickers.update(page_tickers)
+            if len(items) < _NAVER_US_PAGE_SIZE_MAX:
+                break
+            page_index += 1
+
+    if not caps:
+        raise RuntimeError("네이버 미국 시총 명단에서 유효한 시총을 찾지 못했습니다.")
+    return caps
+
+
 def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -> dict[str, Any]:
     """네이버 API에서 미국 시가총액 상위 종목 리스트를 가져온다."""
     if market not in _SUPPORTED_MARKETS:
