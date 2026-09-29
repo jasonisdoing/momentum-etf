@@ -49,6 +49,8 @@ export function isLeverageName(name: string | null | undefined): boolean {
 }
 
 export type StockNameOptions = {
+  /** 실제 계좌 보유 종목이면 종목명 뒤 배지의 맨 앞에 ✅를 붙인다. */
+  isHeld?: boolean;
   /** 상장 기간이 백테스트 기준 창보다 짧은 종목 */
   isNew?: boolean;
   /** 상장 후 경과 개월(내림) — 있으면 🆕(N개월)로 표기한다. */
@@ -85,6 +87,9 @@ export function renderNameWithLeverageHighlight(
   name: string,
   options?: StockNameOptions,
 ): ReactNode {
+  const badges = [options?.isHeld ? "✅" : null, isLeverageName(name) ? "💣" : null]
+    .filter(Boolean)
+    .join("");
   const newBadge = options?.isNew ? (
     <span title="신규상장 — 백테스트 기준 기간(12개월)보다 상장 기간이 짧습니다">
       {` ${NEW_LISTING_BADGE}${options?.newMonths != null ? `(${options.newMonths}개월)` : ""}`}
@@ -92,13 +97,8 @@ export function renderNameWithLeverageHighlight(
   ) : null;
 
   const highlightedName = renderTextWithSearchHighlight(name, options?.searchQuery);
-  if (!isLeverageName(name)) return <>{highlightedName}{newBadge}</>;
-  return (
-    <>
-      <span className="appLeverageName">{highlightedName}</span> 💣
-      {newBadge}
-    </>
-  );
+  const displayName = isLeverageName(name) ? <span className="appLeverageName">{highlightedName}</span> : highlightedName;
+  return <>{displayName}{badges ? ` ${badges}` : null}{newBadge}</>;
 }
 
 /** 그리드 종목명 셀 표준. 말줄임 스타일·툴팁·배지를 한곳에서 정한다.

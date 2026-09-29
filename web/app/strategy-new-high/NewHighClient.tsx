@@ -689,7 +689,7 @@ export function NewHighClient() {
       // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
       // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
       tickerColumn<PositionRow>({}),
-      stockNameColumn<PositionRow>({ nameOptions: (row) => ({ isNew: Boolean(row?.new_listing), newMonths: row?.listing_months ?? null }) }),
+      stockNameColumn<PositionRow>({ nameOptions: (row) => ({ isHeld: row?.account_held, isNew: Boolean(row?.new_listing), newMonths: row?.listing_months ?? null }) }),
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
       stockMemoColumn<PositionRow>({
         field: "memo",
@@ -953,7 +953,7 @@ export function NewHighClient() {
       highDrawdownColumn<PlanRow>("high_drawdown_pct"),
       // 티커·종목명 — 공용 컬럼. 고정 폭 — 보유 표와 후보 표의 앞쪽 칸을 맞춘다.
       tickerColumn<PlanRow>({}),
-      stockNameColumn<PlanRow>({ nameOptions: (row) => ({ isNew: Boolean(row?.new_listing), newMonths: row?.listing_months ?? null }) }),
+      stockNameColumn<PlanRow>({ nameOptions: (row) => ({ isHeld: row?.account_held, isNew: Boolean(row?.new_listing), newMonths: row?.listing_months ?? null }) }),
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
       stockMemoColumn<PlanRow>({
         field: "memo",

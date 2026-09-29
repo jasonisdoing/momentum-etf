@@ -309,7 +309,7 @@ export function AusMarketStockManager({
           return <TickerDetailLink ticker={raw} />;
         },
       }),
-      stockNameColumn<AusMarketStockGridRow>({}),
+      stockNameColumn<AusMarketStockGridRow>({ nameOptions: (row) => ({ isHeld: row?.is_held }) }),
       {
         headerName: "섹터",
         field: "sector",

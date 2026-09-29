@@ -817,7 +817,7 @@ export function MomentumClient() {
       // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
       // 티커는 호주 접두사(ASX:)만 화면 고유. 고정 폭 — 보유·후보 표의 앞쪽 칸을 맞춘다.
       tickerColumn<PlanRow>({ cellRenderer: (p) => renderTicker(p.value) }),
-      stockNameColumn<PlanRow>({ nameOptions: (row) => ({ isNew: Boolean(row?.new_listing), newMonths: row?.listing_months ?? null }) }),
+      stockNameColumn<PlanRow>({ nameOptions: (row) => ({ isHeld: row?.account_held, isNew: Boolean(row?.new_listing), newMonths: row?.listing_months ?? null }) }),
       stockMemoColumn<PlanRow>({
         field: "memo",
         editable: (row) => row?.plan !== "empty",
@@ -892,7 +892,7 @@ export function MomentumClient() {
       highDrawdownColumn<CandidateRow>("high_drawdown_pct"),
       // 티커·종목명 — 공용 컬럼. 고정 폭으로 보유 표와 앞쪽 칸을 맞춘다.
       tickerColumn<CandidateRow>({ cellRenderer: (p) => renderTicker(p.value) }),
-      stockNameColumn<CandidateRow>({ nameOptions: (row) => ({ isNew: Boolean(row?.new_listing), newMonths: row?.listing_months ?? null }) }),
+      stockNameColumn<CandidateRow>({ nameOptions: (row) => ({ isHeld: row?.account_held, isNew: Boolean(row?.new_listing), newMonths: row?.listing_months ?? null }) }),
       stockMemoColumn<CandidateRow>({
         field: "memo",
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
