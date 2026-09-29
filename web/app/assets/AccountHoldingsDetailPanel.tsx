@@ -988,6 +988,7 @@ export function AccountHoldingsDetailPanel({
         }
         // 종목명 표기 규칙은 전 화면 공통(`@/lib/name-highlight`).
         return renderStockNameCell(params.value, {
+          isHeld: Number(params.data?.quantity ?? 0) > 0,
           isNew: normalizeBadgeTicker(params.data?.ticker ?? "") in newListingMonths,
           newMonths: newListingMonths[normalizeBadgeTicker(params.data?.ticker ?? "")] ?? null,
           badge: alertBadges[normalizeBadgeTicker(params.data?.ticker ?? "")] ?? "",

@@ -1002,7 +1002,11 @@ export function StrategyMixClient() {
           ) : p.data?.is_cash || p.data?.is_group || p.data?.is_total ? (
             <span>{p.value ?? "-"}</span>
           ) : (
-            renderStockNameCell(p.value, { isNew: Boolean(p.data?.new_listing), newMonths: p.data?.listing_months ?? null })
+            renderStockNameCell(p.value, {
+              isHeld: Number(p.data?.held_quantity ?? 0) > 0,
+              isNew: Boolean(p.data?.new_listing),
+              newMonths: p.data?.listing_months ?? null,
+            })
           ),
       }),
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다).

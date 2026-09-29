@@ -368,7 +368,7 @@ export function KorMarketStockManager({
         mono: true,
         cellClass: "korMarketStockTickerCell",
       }),
-      stockNameColumn<KorMarketStockGridRow>({}),
+      stockNameColumn<KorMarketStockGridRow>({ nameOptions: (row) => ({ isHeld: row?.is_held }) }),
       industryColumn<KorMarketStockGridRow>(),
       {
         headerName: "일간(%)",

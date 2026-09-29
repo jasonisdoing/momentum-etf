@@ -408,7 +408,7 @@ export function UsMarketStockManager({
       // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
       // 종목명 표기도 공용(2줄 말줄임·레버리지 💣) — 화면 고유 1줄 말줄임을 대체한다.
       tickerColumn<UsMarketStockGridRow>({ width: 104, minWidth: 88, mono: true }),
-      stockNameColumn<UsMarketStockGridRow>({}),
+      stockNameColumn<UsMarketStockGridRow>({ nameOptions: (row) => ({ isHeld: row?.is_held }) }),
       sectorColumn<UsMarketStockGridRow>({ cellClass: "usMarketStockTextCell", width: 160, minWidth: 120 }),
       industryColumn<UsMarketStockGridRow>({ cellClass: "usMarketStockTextCell" }),
       {

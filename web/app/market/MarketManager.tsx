@@ -488,7 +488,7 @@ export function MarketManager({
       // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
       // (예전 marketNameCell/marketNameMain 클래스는 CSS 정의가 없는 죽은 이름이라 지웠다.)
       tickerColumn<MarketGridRow>({ width: 104 }),
-      stockNameColumn<MarketGridRow>({}),
+      stockNameColumn<MarketGridRow>({ nameOptions: (row) => ({ isHeld: row?.is_held }) }),
       {
         field: "daily_change_pct",
         headerName: "일간(%)",

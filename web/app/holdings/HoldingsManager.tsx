@@ -451,7 +451,7 @@ export function HoldingsManager({
         return (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0 }}>
             {canHaveConstituents(row) && <span>▶</span>}
-            {renderStockNameCell(params.value)}
+            {renderStockNameCell(params.value, { isHeld: true })}
           </span>
         );
       },
