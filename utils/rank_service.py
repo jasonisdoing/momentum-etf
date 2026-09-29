@@ -428,7 +428,6 @@ def _build_missing_ticker_rows(
                 "추세": None,
                 "점수": None,
                 "보유": "",
-                "보유대상": False,
                 "현재가": None,
                 "exclude_from_ranking": False,
                 "cache_missing": True,
@@ -661,7 +660,7 @@ def _compute_rank_data_payload(
     entry_vol_mult: float | None = None,
 ) -> dict[str, Any]:
     # 기준일은 항상 오늘이다 — 아래에서 데이터가 실제로 어느 날짜인지(effective) 다시 읽는다.
-    dataframe = build_ticker_type_rankings(selected_ticker_type, ma_rules=ma_rules, entry_vol_mult=entry_vol_mult)
+    dataframe = build_ticker_type_rankings(selected_ticker_type, ma_rules=ma_rules)
     effective_as_of_date: pd.Timestamp | None = None
     raw_as_of_date = dataframe.attrs.get("as_of_date")
     if raw_as_of_date is not None:
@@ -718,7 +717,7 @@ def _compute_rank_data_payload(
         "ticker_type": selected_ticker_type,
         "ma_rules": ma_rules,
         **ma_options_payload(_pool_country(selected_ticker_type)),
-        # 진입 문턱 — 이번 응답의 보유 대상(✅)에 적용된 값과 선택지(툴바 셀렉트용).
+        # 진입 문턱 — 행 표시 미리보기 값과 선택지(툴바 셀렉트용).
         "entry_vol_mult": entry_vol_mult,
         "entry_vol_mult_options": list(ENTRY_VOL_MULT_OPTIONS),
         # 시장 ADR — 헤더 표시용(모멘텀 ADR 게이트와 같은 소스). 레짐 지수 없는 풀은 None.
@@ -784,7 +783,7 @@ def load_rank_data(
             raise ValueError(f"진입 문턱은 {allowed} 중 하나여야 합니다 (받은 값: {entry_vol_mult_override}).")
 
     cache_key = _build_rank_cache_key(selected_ticker_type, ma_rules)
-    # 이평선·진입 문턱이 직전과 다르면 캐시를 버린다(키는 풀 단위 — 미리보기 값 전환용).
+    # 이평선·진입 문턱이 직전과 다르면 캐시를 버린다(키는 풀 단위 — 미리보기 응답 전환용).
     previous = _LAST_MA_RULES.get(selected_ticker_type)
     current = (
         tuple((int(r.get("short_ma_days") or 0), int(r.get("long_ma_days") or 0), r["ma_type"]) for r in ma_rules),

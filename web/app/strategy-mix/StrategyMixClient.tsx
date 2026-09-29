@@ -40,6 +40,7 @@ import {
   industryColumn,
   stockMemoColumn,
   stockNameColumn,
+  stockRowClass,
   tickerColumn,
   formatSignedPct,
   signColor,
@@ -1978,18 +1979,19 @@ export function StrategyMixClient() {
                       if (params.data?.is_total || params.data?.is_group) return "assetsGroupRow";
                       // 고정 자산은 사고팔 수 없는 줄이라 전체를 노랗게 구분한다.
                       if (params.data?.is_fixed_asset) return FIXED_ASSET_ROW_CLASS;
-                      if (params.data?.is_sell_all) return "appTrendBrokenRow";
+                      const held = Number(params.data?.held_quantity ?? 0) > 0;
+                      if (params.data?.is_sell_all) return stockRowClass({ held, trendBroken: true });
                       const status = slotKeys
                         .map((slot) => params.data?.slots?.[slot]?.status ?? "")
                         .join(" ");
                       // 들어오는 줄과 빠지는 줄을 색으로 가른다 — 회색은 「빠짐」으로 읽힌다.
-                      if (status.includes("진입 예정")) return "momentumPendingRow";
-                      if (status.includes("예정")) return "appTrendBrokenRow";
+                      if (status.includes("진입 예정")) return `${stockRowClass({ held })} momentumPendingRow`.trim();
+                      if (status.includes("예정")) return stockRowClass({ held, trendBroken: true });
                       // 추세 이탈 — 전 화면 공통 표시(행 전체 회색, ❗ 배지 대체). 현금 행은 종목이 아니라 제외.
                       if (!params.data?.is_cash && isTrendBroken(params.data?.current_short_pct, params.data?.current_long_pct)) {
-                        return "appTrendBrokenRow";
+                        return stockRowClass({ held, trendBroken: true });
                       }
-                      return "";
+                      return stockRowClass({ held });
                     }}
                     gridOptions={{
                       domLayout: "autoHeight",

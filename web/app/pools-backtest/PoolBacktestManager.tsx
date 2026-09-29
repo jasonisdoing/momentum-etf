@@ -347,7 +347,7 @@ export function PoolBacktestManager() {
 
       {result ? (
         <>
-          {/* 현재 설정 그대로 돌렸을 때의 기간 실적 — 순위 화면의 추천(✅) 규칙과 동일 */}
+          {/* 현재 설정 그대로 돌렸을 때의 기간 실적 — 공통 순위·진입 자격 규칙을 쓴다. */}
           {result.performance ? (
             <div className="card appCard">
               <div className="card-body">
@@ -360,7 +360,7 @@ export function PoolBacktestManager() {
                   </span>
                 </div>
                 <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", margin: "0 0 10px" }}>
-                  순위 화면의 추천(✅)과 같은 규칙: 이격 상위 {result.performance.top_n_hold}종목, 단기이격이 음수면 제외.
+                  순위·진입 자격 규칙: 이격 상위 {result.performance.top_n_hold}종목, 단기이격이 음수면 제외.
                   {result.forward_days}일마다 리밸런싱({result.performance.rounds}회
                   {result.performance.cash_rounds > 0 ? `, 전부 현금 ${result.performance.cash_rounds}회` : ""}
                   {result.performance.partial_rounds > 0 ? `, 일부 현금 ${result.performance.partial_rounds}회` : ""}).

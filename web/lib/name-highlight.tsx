@@ -7,7 +7,7 @@
 
 import type { ReactNode } from "react";
 
-const LEVERAGE_NAME_RE = /레버리지|Geared|3X|Ultra/i;
+const LEVERAGE_NAME_RE = /인버스|레버리지|Geared|3X|Ultra/i;
 
 const NEW_LISTING_BADGE = "🆕";
 

@@ -238,7 +238,7 @@ export const MA_EXIT_COLUMN_WIDTH = 112;
  *
  *  색은 단기·장기 이격 컬럼과 같은 부호 관례(굵기 없음)를 따른다:
  *  · 파랑(부정) = 이탈(음수), `entry` 를 넘긴 화면에서는 진입 문턱 안(값 < 배수×변동성)까지.
- *  · 빨강 = 그 외(여유 있음). 문턱 판정은 회색 행·✅과 같은 기준(`entry_gap_ok`)이다. */
+ *  · 빨강 = 그 외(여유 있음). 문턱 판정은 회색 행과 같은 기준(`entry_gap_ok`)이다. */
 export function maExitGapColumn<T>(options: {
   field: ColDefField<T>;
   maDays: number | null | undefined;

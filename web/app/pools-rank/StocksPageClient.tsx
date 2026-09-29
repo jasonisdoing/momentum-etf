@@ -11,7 +11,7 @@ type StocksHeaderSummary = {
   entryPct: number;
   totalCount: number;
   ruleSummary: string;
-  /** 실계좌 보유 종목 수 — 표의 녹색 행 수와 같다. */
+  /** 실계좌 보유 종목 수 — 표의 녹색 티커·종목명 칸 수와 같다. */
   heldCount: number;
   /** 시장 ADR(모멘텀 ADR 게이트와 같은 소스) — 레짐 지수 없는 풀은 null. */
   adr: { market: string; value: number; floor: number | null } | null;
@@ -51,7 +51,7 @@ export function StocksPageClient() {
             </span>
           </div>
         ) : null}
-        <div className="appHeaderMetric" title="실계좌 보유 종목 수 — 표의 녹색(티커·종목명 칸) 행과 같다">
+        <div className="appHeaderMetric" title="실계좌 보유 종목 수 — 표의 녹색 티커·종목명 칸 수와 같다">
           <span>보유:</span>
           <span className="appHeaderMetricValue is-success">{summary.heldCount}개</span>
         </div>
