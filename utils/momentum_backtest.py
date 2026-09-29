@@ -27,7 +27,7 @@ from config import CACHE_TTL_COMPUTE
 from core.strategy.intraday import mark_engine_statuses
 from core.strategy.momentum import signals as momentum_signals
 from core.strategy.price_panel import build_price_panel
-from core.strategy.scoring import drawdown_from_high_pct, is_new_listing, listing_months
+from core.strategy.scoring import drawdown_from_high_pct, is_new_listing, listing_months, rank_numbers
 from core.strategy.slot_backtest import run_slot_backtest
 from utils.effective_prices import apply_realtime_closes
 from utils.logger import get_app_logger
@@ -207,12 +207,17 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         return None if value is None else round(value, 2)
 
     rows: list[dict[str, Any]] = []
+    # 순위 번호에 쓰는 점수(반올림 전) — 판정할 수 있는 종목(`known`)만. 장중에는 아래에서
+    # 잠정 봉 값으로 바꾼다(표의 이격과 같은 기준).
+    priority_last, known_last = signals["priority"].loc[last], signals["known"].loc[last]
+    rank_score_by: dict[str, float | None] = {}
     for ticker in tickers:
         price = close_df.at[last, ticker]
         short_value, long_value = short_gap.get(ticker), long_gap.get(ticker)
         if pd.isna(price) or pd.isna(short_value) or pd.isna(long_value):
             continue  # 판정할 수 없는 종목은 후보로도 세지 않는다 — 값을 추정하지 않는다.
         before = None if prev_close is None else prev_close.get(ticker)
+        rank_score_by[ticker] = priority_last.get(ticker) if bool(known_last.get(ticker, False)) else None
         rows.append(
             {
                 "ticker": ticker,
@@ -342,6 +347,9 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             if pd.notna(eff_vol.get(ticker)):
                 row["volatility_pct"] = round(float(eff_vol[ticker]), 2)
             row["eligible"] = bool(eff_eligible.get(ticker, False))
+            rank_score_by[ticker] = (
+                eff["priority"].at[session_ts, ticker] if bool(eff["known"].at[session_ts, ticker]) else None
+            )
             # 고점 대비 — 순위 화면과 같은 실시간 기준(잠정 봉 포함). 확정 기준으로 두면
             # 어제 신고점(⭐)이 오늘 장중에 내리는 중에도 그대로 남는다.
             live_drawdown = drawdown_from_high_pct(eff_close[ticker].dropna())
@@ -407,8 +415,9 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
 
     held_tickers = {h["ticker"] for h in holdings}
     entry_tickers = {row["ticker"] for row in entries}
-    # 진입 자격 종목의 장기 이격률 순위 — 보유·진입 예정·후보 표가 같은 번호를 쓴다.
-    rank_by_ticker = {row["ticker"]: index for index, row in enumerate([r for r in rows if r["eligible"]], start=1)}
+    # 순위 번호 — 순위 화면과 같은 공용 규칙(`rank_numbers`)으로 **종목풀 후보 전부**에 매긴다
+    # (진입 자격과 무관). 보유·진입 예정·후보 표가 같은 번호를 쓰고, 순위 화면 번호와 일치한다.
+    rank_by_ticker = rank_numbers({row["ticker"]: rank_score_by.get(row["ticker"]) for row in rows})
     for item in [*holdings, *exited_today]:
         item["rank"] = rank_by_ticker.get(item["ticker"])
     # 진입 후보 — 우선순위 순 top_n 개. 이미 담은(보유·진입 예정) 종목은 표에서 뺀다.

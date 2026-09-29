@@ -171,6 +171,24 @@ def rank_score(long_disparity_pct: Any, short_disparity_pct: Any = None) -> Any:
     return float(long_disparity_pct)
 
 
+def rank_numbers(scores: Mapping[str, Any]) -> dict[str, int]:
+    """**순위 번호** {티커: 번호} — 순위 점수 큰 순, 동점은 티커 순. 점수가 없으면 번호도 없다.
+
+    순위 화면(`/pools-rank`)과 모멘텀 전략(`/strategy-momentum`)이 같은 번호를 쓰도록 여기서만
+    매긴다. 예전에는 순위 화면은 표의 모든 행에, 모멘텀은 진입 자격 종목에만 번호를 줘서 같은
+    종목이 한쪽은 7위, 한쪽은 3위로 보이고 보유 종목은 번호가 비었다.
+
+    번호는 **종목풀의 후보 종목 전부**(진입 자격과 무관)에 준다. 호출부는 벤치마크 행과
+    순위 제외 종목(`exclude_from_ranking`)을 넘기지 않는다 — 후보가 아니고 모멘텀에는 없는 행이다.
+    점수는 반올림 전 값을 넘긴다(반올림 값으로 줄 세우면 동점 처리가 화면마다 갈린다).
+    """
+    valid = [
+        (str(ticker), float(score)) for ticker, score in scores.items() if score is not None and not pd.isna(score)
+    ]
+    valid.sort(key=lambda item: (-item[1], item[0]))
+    return {ticker: number for number, (ticker, _) in enumerate(valid, start=1)}
+
+
 def is_new_listing(close_series: pd.Series, *, window_months: int = METRIC_WINDOW_MONTHS) -> bool:
     """신규상장(🆕) — 첫 봉이 기준 창(기본 12개월) 시작보다 뒤(상장 기간 < 창).
 
@@ -354,6 +372,7 @@ def build_composite_rank_scores(
 
 
 __all__ = [
+    "rank_numbers",
     "calculate_maps_score",
     "calculate_signed_percentile_score",
     "compute_trend_frame",
