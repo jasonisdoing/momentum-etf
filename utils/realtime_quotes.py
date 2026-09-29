@@ -817,7 +817,11 @@ def _toss_us_price_entry(item: dict[str, Any], session: str, closed_day: str, in
         if not pd.isna(stamp) and stamp.tzinfo is not None:
             local_stamp = stamp.tz_convert(ZoneInfo("America/New_York"))
     regular_field = (
-        _toss_closed_regular_close_field(local_stamp, closed_day, in_daymarket_gap) if session == CLOSED else "base"
+        _toss_closed_regular_close_field(local_stamp, closed_day, in_daymarket_gap)
+        if session == CLOSED
+        else "close"
+        if session == AFTERMARKET
+        else "base"
     )
     price_field = regular_field if session == CLOSED else ("afterMarketClose" if session == AFTERMARKET else "close")
     price = _safe_float(item.get(price_field))
@@ -843,8 +847,12 @@ def _toss_us_price_entry(item: dict[str, Any], session: str, closed_day: str, in
         entry["regularClose"] = regular_close
     if session != CLOSED and regular_close is not None:
         entry["lastRegularClose"] = regular_close
-        entry["prevClose"] = regular_close
-        entry["changeRate"] = (price / regular_close - 1.0) * 100.0
+        # 애프터장에서는 close가 방금 끝난 정규장 종가이고 base는 그 전날 종가다.
+        # 일간은 전일 종가 대비 현재가, 전거래일은 확정 정규장 종가 대비 계산한다.
+        comparison_close = _safe_float(item.get("base")) if session == AFTERMARKET else regular_close
+        if comparison_close is not None and isfinite(comparison_close) and comparison_close > 0:
+            entry["prevClose"] = comparison_close
+            entry["changeRate"] = (price / comparison_close - 1.0) * 100.0
     # 거래량·거래대금은 API의 누적값을 전달한다. 세션별 값으로 임의 분리하지 않는다.
     for key, field in (("tradeValue", "value"), ("tradeVolume", "volume"), ("volume", "volume")):
         parsed = _safe_float(item.get(field))
