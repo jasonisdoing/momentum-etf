@@ -158,16 +158,12 @@ export function stockNameColumn<T>(options?: {
   };
 }
 
-/** 업종 컬럼 폭 — 업종 컬럼이 있는 모든 화면이 같은 값을 쓴다.
- *
- *  셀은 2줄까지 보이고 넘치면 말줄임(`renderIndustryCell`)이라, **2줄이 꽉 차는 폭**이
- *  기준이다. 실측: 미국·호주는 90%가 30자 안쪽(최장 35자)이고 한국은 최장 12자
- *  (`섬유,의류,신발,호화품`)다. 30자를 2줄에 담으려면 15자/줄, 13px 영문 평균 자폭
- *  6.8px 에 셀 좌우 패딩을 더해 약 124px 이다.
- *
- *  예전 200px 은 영문 기준으로도 남았고, 한국 화면에서는 절반이 빈 채로 있었다. */
-export const INDUSTRY_COLUMN_WIDTH = 124;
-export const INDUSTRY_COLUMN_MIN_WIDTH = 104;
+/** 업종 컬럼은 14px 한글 10자와 셀 좌우 여백이 한 줄에 들어가는 폭을 쓴다. */
+export const INDUSTRY_COLUMN_WIDTH = 135;
+export const INDUSTRY_COLUMN_MIN_WIDTH = 114;
+
+const SECTOR_COLUMN_WIDTH = 124;
+const SECTOR_COLUMN_MIN_WIDTH = 104;
 
 /** 업종 셀 — 종목풀 화면의 종목명과 같이 2줄까지 보이고 넘치면 말줄임(전체 값은 툴팁). */
 export function renderIndustryCell(value: string | null | undefined) {
@@ -216,8 +212,8 @@ export function sectorColumn<T>(options?: {
     colId: "sector",
     field: (options?.field ?? "sector") as ColDefField<T>,
     headerName: "섹터",
-    width: options?.width ?? INDUSTRY_COLUMN_WIDTH,
-    minWidth: options?.minWidth ?? INDUSTRY_COLUMN_MIN_WIDTH,
+    width: options?.width ?? SECTOR_COLUMN_WIDTH,
+    minWidth: options?.minWidth ?? SECTOR_COLUMN_MIN_WIDTH,
     cellClass: options?.cellClass,
     cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
   };
