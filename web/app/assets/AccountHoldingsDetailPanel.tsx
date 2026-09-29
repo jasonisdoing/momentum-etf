@@ -19,7 +19,7 @@ import { AppLoadingState } from "../components/AppLoadingState";
 import { AppModal } from "../components/AppModal";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { renderStockNameCell } from "@/lib/name-highlight";
-import { highDrawdownColumn, signColor, stockMemoColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
+import { highDrawdownColumn, rankColumn, signColor, stockMemoColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { reorderHoldings, saveHoldingsGroups, type HoldingsGroup } from "@/lib/holdings-store";
@@ -64,6 +64,12 @@ import {
   stopActionButtonMouseDown,
 } from "./assets-helpers";
 
+type PoolRank = { rank: number | null };
+
+function poolRankKey(pool: string | undefined, ticker: string): string {
+  return `${String(pool ?? "").trim().toLowerCase()}:${normalizeBadgeTicker(ticker)}`;
+}
+
 export function AccountHoldingsDetailPanel({
   summary,
   initialRows,
@@ -107,6 +113,60 @@ export function AccountHoldingsDetailPanel({
   const [newListingMonths, setNewListingMonths] = useState<Record<string, number | null>>({});
   // 고점 대비(%) — 순위 화면 「고점」 컬럼과 같은 공용 판정(배지 응답에 함께 온다).
   const [highDrawdownByTicker, setHighDrawdownByTicker] = useState<Record<string, number>>({});
+  const [poolRanks, setPoolRanks] = useState<Record<string, PoolRank>>({});
+  const [poolRankError, setPoolRankError] = useState<string | null>(null);
+  const rankPoolKey = Array.from(new Set(initialRows
+    .filter((row) => row.ticker !== "IS" && row.ticker !== CASH_ROW_TICKER)
+    .map((row) => String(row.ticker_type ?? "").trim().toLowerCase())
+    .filter(Boolean))).sort().join("|");
+  const missingRankPoolTickers = initialRows
+    .filter((row) => row.ticker !== "IS" && row.ticker !== CASH_ROW_TICKER && !String(row.ticker_type ?? "").trim())
+    .map((row) => row.ticker).join(", ");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setPoolRanks({});
+    const missingPoolError = missingRankPoolTickers ? `종목풀 정보 없음 — ${missingRankPoolTickers}` : null;
+    setPoolRankError(missingPoolError);
+    const pools = rankPoolKey ? rankPoolKey.split("|") : [];
+    if (!pools.length) return () => controller.abort();
+
+    void Promise.allSettled(pools.map(async (pool) => {
+      const response = await fetch(`/api/rank?ticker_type=${encodeURIComponent(pool)}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      const payload = await response.json() as {
+        rows?: { 티커: string; 순위?: number | null }[];
+        cache_blocked?: boolean;
+        error?: string;
+      };
+      if (!response.ok || payload.error || payload.cache_blocked || !Array.isArray(payload.rows) || !payload.rows.length) {
+        throw new Error(`${pool}: ${payload.error || "순위 데이터를 사용할 수 없습니다"}`);
+      }
+      return { pool, rows: payload.rows };
+    })).then((results) => {
+      if (controller.signal.aborted) return;
+      const nextRanks: Record<string, PoolRank> = {};
+      const errors: string[] = [];
+      results.forEach((result, index) => {
+        if (result.status === "rejected") {
+          errors.push(result.reason instanceof Error ? result.reason.message : `${pools[index]}: 순위 조회 실패`);
+          return;
+        }
+        for (const row of result.value.rows) {
+          nextRanks[poolRankKey(result.value.pool, row.티커)] = {
+            rank: row.순위 ?? null,
+          };
+        }
+      });
+      setPoolRanks(nextRanks);
+      setPoolRankError([missingPoolError, errors.length ? `순위 조회 실패 — ${errors.join(" / ")}` : null]
+        .filter(Boolean).join(" / ") || null);
+    });
+    return () => controller.abort();
+  }, [missingRankPoolTickers, rankPoolKey]);
+
   useEffect(() => {
     let alive = true;
     void fetchAlertBadges(summary.account_id).then((info) => {
@@ -134,6 +194,9 @@ export function AccountHoldingsDetailPanel({
   const dirtyRowIdsRef = useRef<string[]>([]);
   const isReorderDirtyRef = useRef(false);
   const gridApiRef = useRef<GridApi<GridRow> | null>(null);
+  useEffect(() => {
+    gridApiRef.current?.refreshCells({ force: true });
+  }, [poolRanks]);
   const lastSavedSnapshotsRef = useRef<Map<string, HoldingEditableSnapshot>>(new Map());
   const childSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const childSavingRowIdsRef = useRef<Set<string>>(new Set());
@@ -852,13 +915,7 @@ export function AccountHoldingsDetailPanel({
       cellClass: "assetsDragCell",
       valueGetter: () => "",
     },
-    {
-      field: "bucket",
-      headerName: "버킷",
-      pinned: "left",
-      width: 96,
-      cellClass: (params) => getBucketCellClass(params.data?.bucket_id ?? 0),
-    },
+    rankColumn<GridRow>((row) => row ? poolRanks[poolRankKey(row.ticker_type, row.ticker)]?.rank : null),
     // 고점 대비 — 순위 화면과 같은 공용 컬럼(같은 판정·같은 표기).
     {
       ...highDrawdownColumn<GridRow>("high_drawdown_pct" as never),
@@ -869,6 +926,13 @@ export function AccountHoldingsDetailPanel({
         }
         return highDrawdownByTicker[normalizeBadgeTicker(row.ticker)] ?? null;
       },
+    },
+    {
+      field: "bucket",
+      headerName: "버킷",
+      pinned: "left",
+      width: 96,
+      cellClass: (params) => getBucketCellClass(params.data?.bucket_id ?? 0),
     },
     // 티커·종목명 — 공용 컬럼(col-id 표준). 추가 행 입력칸·현금·고정 자산만 화면 고유 표기다.
     tickerColumn<GridRow>({
@@ -1170,7 +1234,7 @@ export function AccountHoldingsDetailPanel({
         <span className="appGridNumericValue">{params.data ? formatHiddenAmount(showAmounts, formatKrw(getPreviewValuationKrw(params.data))) : "-"}</span>
       ),
     },
-  ], [addingRow, alertBadges, handleValidateTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, processingId, showAmounts]);
+  ], [addingRow, alertBadges, handleValidateTicker, highDrawdownByTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, poolRanks, processingId, showAmounts]);
 
   return (
     <div className="assetsDetailPanel">
@@ -1414,6 +1478,7 @@ export function AccountHoldingsDetailPanel({
         </div>
       </AppModal>
       {/* 본문 — 왼쪽 그리드(고정 폭) + 오른쪽 메모 패널. 좁은 창에서는 그리드가 줄고 가로 스크롤. */}
+      {poolRankError && <div className="alert alert-warning py-1 px-2 mb-0" role="alert">{poolRankError}</div>}
       <div className="assetsDetailBody">
       <div className="assetsDetailGridWrap">
         <AppAgGrid

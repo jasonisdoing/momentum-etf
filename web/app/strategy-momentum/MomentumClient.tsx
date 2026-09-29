@@ -42,6 +42,7 @@ import {
   highDrawdownColumn,
   signColor,
   marketCapRankColumn,
+  rankColumn,
   slotStatusColumn,
   slotTradeColumns,
   stockMemoColumn,
@@ -795,23 +796,11 @@ export function MomentumClient() {
     [country],
   );
 
-  const rankColumn = <T extends { rank?: number | null }>(): ColDef<T> => ({
-    colId: "rank",
-    valueGetter: (p) => p.data?.rank ?? null,
-    headerName: "순위",
-    pinned: "left",
-    width: 76,
-    minWidth: 76,
-    headerTooltip: "진입 자격 종목을 장기 이격률 순으로 매긴 순위",
-    cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
-    valueFormatter: (p) => (p.value == null ? "-" : String(p.value)),
-  });
-
   // 보유 표 — 신고가와 같은 구성(공용 빌더). 모멘텀 고유는 이평선 이격 둘이다.
   const holdingColumns = useMemo<ColDef<PlanRow>[]>(
     () => [
       slotStatusColumn<PlanRow>({ fillDay: positions?.next_session }),
-      rankColumn<PlanRow>(),
+      rankColumn<PlanRow>((row) => row?.rank),
       marketCapRankColumn<PlanRow>("market_cap_rank", !hasMarketCap),
       highDrawdownColumn<PlanRow>("high_drawdown_pct"),
       // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
@@ -887,7 +876,7 @@ export function MomentumClient() {
         cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
         cellRenderer: () => "대기",
       },
-      rankColumn<CandidateRow>(),
+      rankColumn<CandidateRow>((row) => row?.rank),
       marketCapRankColumn<CandidateRow>("market_cap_rank", !hasMarketCap),
       highDrawdownColumn<CandidateRow>("high_drawdown_pct"),
       // 티커·종목명 — 공용 컬럼. 고정 폭으로 보유 표와 앞쪽 칸을 맞춘다.

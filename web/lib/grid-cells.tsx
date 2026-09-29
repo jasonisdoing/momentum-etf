@@ -406,6 +406,21 @@ export function adrColumn<T>(options: {
   };
 }
 
+/** 종목풀 순위 — 모멘텀·자산 관리가 같은 폭과 빈 값 표기를 쓴다. */
+export function rankColumn<T>(getRank: (row: T | undefined) => number | null | undefined): ColDef<T> {
+  return {
+    colId: "rank",
+    valueGetter: (params) => getRank(params.data) ?? null,
+    headerName: "순위",
+    pinned: "left",
+    width: 76,
+    minWidth: 76,
+    headerTooltip: "종목풀의 장기 이격률 순위",
+    cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+    valueFormatter: (params) => (params.value == null ? "-" : String(params.value)),
+  };
+}
+
 /** 시총 순위 컬럼 — 순위·모멘텀·신고가 화면 공용. 배치 B 가 메타 캐시에 적어 둔 국가별 시장 전체
  *  시총 순위(한국=KOSPI+KOSDAQ, 미국=S&P500∪NDX100, 호주=ASX200)다. 개별주 풀에서만 보이고
  *  (`hide`), 값이 없으면 "-". 티커 컬럼 바로 앞에 둔다. */

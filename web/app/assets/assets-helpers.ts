@@ -24,6 +24,7 @@ export type HoldingsRow = {
   bucket: string;
   bucket_id: number;
   ticker: string;
+  ticker_type?: string;
   name: string;
   quantity: number;
   average_buy_price: string | number;
