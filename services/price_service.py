@@ -458,6 +458,16 @@ def _fill_missing_change_rate(country: str, snapshot: dict[str, dict[str, Any]])
         for ticker, series in (load_cached_close_series_bulk(pool, missing) or {}).items():
             entry = targets[ticker]
             regular_close = last_regular_close(entry) or confirmed_close_on(series, anchor)
+            if entry.get("hasSessionTrade") is False:
+                if regular_close is None:
+                    continue
+                entry["nowVal"] = regular_close
+                entry["regularClose"] = regular_close
+                entry["lastRegularClose"] = regular_close
+                entry["prevClose"] = regular_close
+                entry["changeRate"] = 0.0
+                missing.discard(ticker)
+                continue
             comparison_close = confirmed_close_before(series, anchor) if closed else regular_close
             if regular_close is None or comparison_close is None:
                 continue
@@ -472,6 +482,10 @@ def _fill_missing_change_rate(country: str, snapshot: dict[str, dict[str, Any]])
             entry["prevClose"] = comparison_close
             entry["changeRate"] = (current_price / comparison_close - 1.0) * 100.0
             missing.discard(ticker)
+    for ticker in missing:
+        if targets[ticker].get("hasSessionTrade") is False:
+            logger.warning("%s %s 프리장 미체결 시세 제외: 확정 종가가 없습니다.", country, ticker)
+            snapshot.pop(ticker, None)
 
 
 def quote_daily_change(country: str, ticker: str, entry: dict[str, Any]) -> tuple[float | None, float | None]:

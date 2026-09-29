@@ -324,6 +324,14 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
                 continue
 
             entry: dict[str, Any] = {"nowVal": price_value}
+            if (
+                session == PREMARKET
+                and over_market is None
+                and item.get("marketStatus") == "PREOPEN"
+                and _parse_comma_number(item.get("accumulatedTradingVolumeRaw")) is None
+            ):
+                entry["hasSessionTrade"] = False
+                entry["is_pre_market"] = True
             # 정규장 종가 — 확정 일봉 저장(`fetch_naver_daily_ohlcv_snapshot`)이 쓴다.
             # 표시·판정용 `nowVal` 은 시간외가 닫히면 이 값으로 돌아온다(위 분기).
             if regular_close is not None:
