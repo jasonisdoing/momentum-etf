@@ -431,7 +431,11 @@ def _is_cache_alive(cache_entry: dict[str, Any] | None, now: datetime) -> bool:
 
 
 def _fill_missing_change_rate(country: str, snapshot: dict[str, dict[str, Any]]) -> None:
-    """등락률이 없으면 현재 세션과 확정 종가 봉을 이어 일간 등락률을 계산한다."""
+    """등락률이 없으면 현재 세션 가격과 기준가로 일간 등락률을 계산한다.
+
+    기준가는 장 마감이면 확정 봉의 전일 종가, 소스가 그 세션의 기준가(`prevClose`)를 주면
+    그 값(한국 프리장), 그 밖에는 정규장 종가다.
+    """
     from utils.cache_utils import load_cached_close_series_bulk
     from utils.effective_prices import bar_anchor, confirmed_close_before, confirmed_close_on, last_regular_close
     from utils.market_session import CLOSED, market_session
@@ -468,7 +472,14 @@ def _fill_missing_change_rate(country: str, snapshot: dict[str, dict[str, Any]])
                 entry["changeRate"] = 0.0
                 missing.discard(ticker)
                 continue
-            comparison_close = confirmed_close_before(series, anchor) if closed else regular_close
+            # 등락률 기준가 — 장이 닫혔으면 확정 봉의 전일 종가, 소스가 이 세션의 기준가를
+            # 넘겼으면 그 값(한국 프리장 = 통합 전일가, `realtime_quotes` 주석), 아니면 정규장 종가.
+            if closed:
+                comparison_close = confirmed_close_before(series, anchor)
+            elif entry.get("prevClose") is not None:
+                comparison_close = float(entry["prevClose"])
+            else:
+                comparison_close = regular_close
             if regular_close is None or comparison_close is None:
                 continue
             try:
