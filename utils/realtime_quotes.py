@@ -313,9 +313,14 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
             if not code:
                 continue
 
-            # `closePrice` 는 시간외가 열려 있어도 **정규장 종가**를 유지한다(실측 확인:
-            # SK하이닉스 closePrice 1,879,000 = 일봉 종가, 같은 응답 overPrice 1,878,000).
+            # `closePrice` 의 뜻은 장 상태에 따라 다르다(실측).
+            #   장후 시간외·마감: 그날 **KRX 정규장 종가**를 유지한다
+            #     (SK하이닉스 closePrice 1,879,000 = 일봉 종가, 같은 응답 overPrice 1,878,000).
+            #   장 시작 전(`PREOPEN`, 프리장): **통합 전일가**로 바뀐다 — 넥스트레이드 애프터까지
+            #     포함한 전일 마지막 가격이다(2026-09-30 SK하이닉스 1,765,000 = 네이버 「전일」,
+            #     KRX 09-29 종가는 1,790,000). 네이버·토스의 프리장 등락률 기준이 이 값이다.
             regular_close = _parse_comma_number(item.get("closePrice"))
+            preopen = item.get("marketStatus") == "PREOPEN"
             over_market = _get_naver_over_market_price_info(item)
             price_source = over_market[0] if over_market else item
             price_field = "overPrice" if over_market else "closePrice"
@@ -327,18 +332,24 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
             if (
                 session == PREMARKET
                 and over_market is None
-                and item.get("marketStatus") == "PREOPEN"
+                and preopen
                 and _parse_comma_number(item.get("accumulatedTradingVolumeRaw")) is None
             ):
                 entry["hasSessionTrade"] = False
                 entry["is_pre_market"] = True
-            # 정규장 종가 — 확정 일봉 저장(`fetch_naver_daily_ohlcv_snapshot`)이 쓴다.
-            # 표시·판정용 `nowVal` 은 시간외가 닫히면 이 값으로 돌아온다(위 분기).
-            if regular_close is not None:
+            if preopen:
+                # 장 시작 전 `closePrice` 는 정규장 종가가 아니라 **통합 전일가**다(위 주석).
+                # 정규장 종가로 넘기지 않고 이 세션 등락률의 기준가(`prevClose`)로만 넘긴다 —
+                # 프리장 등락률이 네이버·토스와 같아진다(SK하이닉스 1,780,000 → +0.85%).
+                # 정규장 종가는 공통 경로가 확정 일봉에서 채운다.
+                if regular_close is not None and over_market is not None:
+                    entry["prevClose"] = regular_close
+            elif regular_close is not None:
+                # 정규장 종가 — 확정 일봉 저장(`fetch_naver_daily_ohlcv_snapshot`)이 쓴다.
+                # 표시·판정용 `nowVal` 은 시간외가 닫히면 이 값으로 돌아온다(위 분기).
                 entry["regularClose"] = regular_close
-                # 장전 closePrice는 확정 일봉과 다른 기준가일 수 있어 공통 캐시에서 확정한다.
-                # 장중 값도 잠정값이므로 마지막 확정 종가로 넘기지 않는다.
-                if not regular_running and session != PREMARKET:
+                # 장중 값은 잠정값이므로 마지막 확정 종가로 넘기지 않는다.
+                if not regular_running:
                     entry["lastRegularClose"] = regular_close
             # 일봉 스냅샷(fetch_naver_daily_ohlcv_snapshot)이 날짜 정합 검증에 쓴다.
             local_traded_at = str(item.get("localTradedAt") or "").strip()
@@ -354,7 +365,8 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
             # 가온전선 closePrice 318,000 은 맞는데 compareToPreviousClosePrice 가 -3,500
             # (기준가 321,500)이라 -1.09% 로 나온다. 네이버 **일별 시세** API·KRX·가격 캐시는
             # 모두 09-22 종가를 324,000 으로 준다(실제 -1.85%).
-            # 비우면 `price_service._fill_missing_change_rate` 가 확정 종가로 채운다.
+            # 비우면 `price_service._fill_missing_change_rate` 가 채운다 — 프리장은 위의 통합
+            # 전일가(`prevClose`), 그 밖에는 확정 종가 기준이다.
             change_rate = _parse_naver_signed_change_rate(price_source) if regular_running else None
             if change_rate is not None:
                 entry["changeRate"] = change_rate
