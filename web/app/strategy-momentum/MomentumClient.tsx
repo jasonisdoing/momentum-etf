@@ -21,6 +21,7 @@ import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
+import { useStockMemoSave, withTickerMemo } from "../components/useStockMemoSave";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { formatDateWithWeekday } from "@/lib/datetime";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
@@ -56,7 +57,6 @@ import {
   type SlotPlan,
 } from "@/lib/grid-cells";
 import { isTrendBroken } from "@/lib/name-highlight";
-import { updateStockMemo } from "@/lib/stocks-store";
 import { poolHasIndustry, poolHasMarketCap, poolHasUsStockSector } from "@/lib/pool-industry";
 import { formatMaLabel, MaDaysSelect } from "../components/MaDaysSelect";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
@@ -340,19 +340,26 @@ const formatSigned = formatSignedPct;
 
 export function MomentumClient() {
   const toast = useToast();
-  /** 종목 메모 저장 — 계좌가 아니라 종목에 붙는다(순위·자산 관리 화면과 같은 값·같은 API). */
-  const saveMemo = useCallback(
-    async (ticker: string, memo: string) => {
-      try {
-        await updateStockMemo(ticker, memo);
-        toast.success("메모 저장 완료");
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "메모 저장에 실패했습니다.");
-      }
-    },
-    [toast],
-  );
   const [view, setView] = useState<View | null>(null);
+  /** 종목 메모 저장 — 계좌가 아니라 종목에 붙는다(순위·자산 관리 화면과 같은 값·같은 API). */
+  const saveMemo = useStockMemoSave(
+    useCallback((ticker: string, memo: string) => {
+      setView((prev) => {
+        const p = prev?.positions;
+        if (!prev || !p) return prev;
+        return {
+          ...prev,
+          positions: {
+            ...p,
+            holdings: withTickerMemo(p.holdings, ticker, memo),
+            planned_entries: withTickerMemo(p.planned_entries, ticker, memo),
+            exited_today: withTickerMemo(p.exited_today, ticker, memo),
+            candidates: withTickerMemo(p.candidates, ticker, memo),
+          },
+        };
+      });
+    }, []),
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [picking, setPicking] = useState(false);

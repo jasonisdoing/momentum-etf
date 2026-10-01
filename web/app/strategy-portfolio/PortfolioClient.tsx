@@ -26,7 +26,7 @@ import { createAppGridTheme } from "../components/app-grid-theme";
 import { bucketColumn, formatSignedPct, highDrawdownColumn, signColor, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { formatPoolLabel } from "@/lib/pool-label";
-import { updateStockMemo } from "@/lib/stocks-store";
+import { useStockMemoSave, withTickerMemo } from "../components/useStockMemoSave";
 
 const gridTheme = createAppGridTheme();
 
@@ -280,16 +280,10 @@ export function PortfolioClient() {
   }, []);
 
   /** 종목 메모 저장 — 계좌가 아니라 종목에 붙는다(순위·자산 관리 화면과 같은 API). */
-  const saveMemo = useCallback(
-    async (ticker: string, memo: string) => {
-      try {
-        await updateStockMemo(ticker, memo);
-        toast.success("메모 저장 완료");
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "메모 저장에 실패했습니다.");
-      }
-    },
-    [toast],
+  const saveMemo = useStockMemoSave(
+    useCallback((ticker: string, memo: string) => {
+      setView((prev) => (prev ? { ...prev, universe: withTickerMemo(prev.universe, ticker, memo) } : prev));
+    }, []),
   );
 
   const saveSettings = useCallback(async () => {
