@@ -165,6 +165,11 @@ MARKET_SCHEDULES = {
         "close_offset_minutes": 30,
         "premarket_open": time(8, 0),
         "aftermarket_close": time(20, 0),
+        # 일간(%)이 가리키는 「오늘」의 시작 — 그날 첫 세션(프리장). 이 시각부터 자정까지는 그날의
+        # 변동을 일간(%)에, 그 전 거래일 변동을 전거래일에 보인다. 자정이 지나 다음 첫 세션
+        # 전까지는 아직 거래가 없어 일간 0% 다. 자정을 넘는 세션(미국 데이장)이 있는 시장은
+        # 날짜와 세션이 어긋나서 이 규칙을 두지 않는다.
+        "session_day_start": time(8, 0),
         "timezone": "Asia/Seoul",
         "name": "한국",
     },
@@ -198,8 +203,8 @@ TRADING_DAYS_PER_MONTH = 20
 # 지표 계산에 필요한 절대 최소 거래일 수 (항상 적용)
 # ENABLE_DATA_SUFFICIENCY_CHECK = True  → 엄격 기준 적용
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
-# 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
-MIN_TRADING_DAYS = 5
+# 20일(4주) 미만 데이터는 추세 판단이 불가하므로 제외
+MIN_TRADING_DAYS = 20
 
 # -----------------------------------------------------------------------
 # 전략 공용 셀렉트 선택지
@@ -546,7 +551,7 @@ HOLDING_CHART_MONTHS = 13
 # 실제로 들고 있는 종목에만 나오므로(`utils/portfolio_io.average_buy_price_by_ticker`)
 # 전략 판단에 내 단가가 끼어드는 게 싫을 때 끈다 — 물타기 유혹을 줄이려는 목적이다.
 # 계산은 계좌 원장을 한 번 읽는 정도라 켜 두어도 비용이 거의 없다.
-HOLDING_CHART_SHOW_AVG_BUY_PRICE = True
+HOLDING_CHART_SHOW_AVG_BUY_PRICE = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────

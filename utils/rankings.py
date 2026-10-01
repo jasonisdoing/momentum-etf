@@ -36,7 +36,7 @@ from utils.effective_prices import (
     last_regular_close,
 )
 from utils.logger import get_app_logger
-from utils.market_session import CLOSED, market_session
+from utils.market_session import CLOSED, has_session_day, market_session, session_day
 from utils.moving_averages import pool_moving_average_type
 from utils.perf_metrics import single_stock_backtest_stats
 from utils.pool_settings_store import get_pool_benchmark_ticker
@@ -847,7 +847,18 @@ def build_ticker_type_rankings(
     if callable(status_callback):
         status_callback("실시간 가격 조회")
     today_korea = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
-    closed_session_today = selected_as_of_date == today_korea and market_session(country_code)["session"] == CLOSED
+    # 전거래일 컬럼이 앵커 봉보다 한 거래일 앞을 보일지 — 일간(%)이 앵커 봉(마지막 마감 거래일)의
+    # 변동을 보이는 동안이다. 「오늘」 규칙이 있는 시장(한국)은 오늘 정규장이 끝난 뒤 자정까지
+    # (애프터·마감), 없는 시장은 마감 세션이다. 자정이 지나면 일간은 0% 이고 앵커 봉이 전거래일이다.
+    if has_session_day(country_code):
+        today_session_day = session_day(country_code)
+        prior_day_column = (
+            selected_as_of_date == today_korea
+            and today_session_day is not None
+            and pd.Timestamp(today_session_day) == bar_anchor(country_code)
+        )
+    else:
+        prior_day_column = selected_as_of_date == today_korea and market_session(country_code)["session"] == CLOSED
     realtime_allowed = selected_as_of_date == today_korea
     realtime_snapshot = (
         realtime_snapshot_override
@@ -911,7 +922,7 @@ def build_ticker_type_rankings(
                 reference_date=selected_as_of_date,
                 monthly_labels=monthly_labels,
             )
-            if closed_session_today:
+            if prior_day_column:
                 price_metrics["전거래일(%)"] = _prior_confirmed_day_change_pct(base_close_series, pool_last_bar)
             price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
             # 장중 신고 터치 — 오늘 고가 기준(위 헬퍼 주석 참조). 당일에만 참이 될 수 있다.
