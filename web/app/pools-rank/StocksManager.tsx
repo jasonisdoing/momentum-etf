@@ -2,7 +2,7 @@
 
 import { IconArrowsExchange, IconDeviceFloppy, IconPlus, IconTrash } from "@tabler/icons-react";
 import type { ColDef, RowClassParams } from "ag-grid-community";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
@@ -1072,41 +1072,18 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             if (addingRow?.is_validating) {
               return <span className="text-muted">티커 확인 중...</span>;
             }
-            // 확인 버튼은 어떤 상태에서도 남긴다 — 등록된 종목을 조회한 뒤에도 다른 티커로 다시 시도해야 한다.
-            // 행 제거(✕)도 항상 있다 — 여러 행을 한꺼번에 저장하므로 잘못 만든 행을 뺄 수 있어야 한다.
-            let message: ReactNode;
+            // 확인·제거 버튼은 메모 칸에 있다(이름이 가려지지 않게) — 상태와 무관하게 항상 남는다.
             if (!isDraftDirty && addingRow?.is_validated) {
-              message = (
+              return (
                 <span className="appNameCellText fw-semibold" title={addingRow.name}>
                   {addingRow.name}
                 </span>
               );
-            } else if (!isDraftDirty && addingRow?.status === "active") {
-              message = <span className="text-danger fw-bold">이미 등록된 종목입니다.</span>;
-            } else {
-              message = <span className="text-muted">티커 확인 후 종목명이 표시됩니다.</span>;
             }
-            return (
-              <div className="rankAddingNameCell">
-                {message}
-                <button
-                  className="btn btn-outline-primary btn-sm"
-                  type="button"
-                  onClick={() => void handleValidateAddingTicker(rowId, addingTickerDraftRef.current[rowId] ?? "")}
-                  disabled={addingRow?.is_validating}
-                >
-                  확인
-                </button>
-                <button
-                  className="btn btn-outline-secondary btn-sm"
-                  type="button"
-                  title="이 행 제거"
-                  onClick={() => handleRemoveAddingRow(rowId)}
-                >
-                  ✕
-                </button>
-              </div>
-            );
+            if (!isDraftDirty && addingRow?.status === "active") {
+              return <span className="text-danger fw-bold">이미 등록된 종목입니다.</span>;
+            }
+            return <span className="text-muted">티커 확인 후 종목명이 표시됩니다.</span>;
           }
           return renderStockNameCell(params.value, {
             isHeld: Boolean(String(params.data?.보유 ?? "").trim()),
@@ -1123,6 +1100,32 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         field: "메모",
         onSave: (row, memo) => void handleMemoChange(String(row.티커 ?? ""), memo),
         editable: (row) => !row?.__isAddingRow,
+        // 추가 행은 메모를 쓰지 않는 칸이라 티커 확인·행 제거 버튼을 둔다(종목명 칸을 가리지 않게).
+        renderRow: (row) => {
+          if (!row.__isAddingRow) return null;
+          const rowId = row.id;
+          const isValidating = addingRows.find((item) => item.id === rowId)?.is_validating;
+          return (
+            <div className="d-flex align-items-center gap-1 h-100">
+              <button
+                className="btn btn-outline-primary btn-sm"
+                type="button"
+                onClick={() => void handleValidateAddingTicker(rowId, addingTickerDraftRef.current[rowId] ?? "")}
+                disabled={isValidating}
+              >
+                확인
+              </button>
+              <button
+                className="btn btn-outline-secondary btn-sm"
+                type="button"
+                title="이 행 제거"
+                onClick={() => handleRemoveAddingRow(rowId)}
+              >
+                ✕
+              </button>
+            </div>
+          );
+        },
       }),
       ...(hasUsStockSector ? [sectorColumn<RankGridRow>({ field: "섹터" })] : []),
       industryColumn<RankGridRow>({ field: "업종", hide: !hasIndustryData }),
