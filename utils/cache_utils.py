@@ -951,7 +951,7 @@ def _alert_price_anomalies(cache_owner: str, ticker: str, df: pd.DataFrame) -> N
         from utils.notification import send_slack_message_v2
 
         name = _lookup_ticker_name(cache_owner, key["ticker"])
-        title = f"{key['cache_owner'].upper()}/{key['ticker']}" + (f" {name}" if name else "")
+        title = f"{key['cache_owner'].upper()}/*{key['ticker']}*" + (f" {name}" if name else "")
         send_slack_message_v2(
             f":rotating_light: 가격 캐시 이상치 감지 — {title}\n"
             + "\n".join(lines)
