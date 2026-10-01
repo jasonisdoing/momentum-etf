@@ -1072,9 +1072,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             if (addingRow?.is_validating) {
               return <span className="text-muted">티커 확인 중...</span>;
             }
-            if (!isDraftDirty && addingRow?.status === "active") {
-              return <span className="text-danger fw-bold">이미 등록된 종목입니다.</span>;
-            }
             if (!isDraftDirty && addingRow?.is_validated) {
               return (
                 <span className="appNameCellText fw-semibold" title={addingRow.name}>
@@ -1084,7 +1081,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             }
             return (
               <div className="rankAddingNameCell">
-                <span className="text-muted">티커 확인 후 종목명이 표시됩니다.</span>
+                {!isDraftDirty && addingRow?.status === "active" ? (
+                  <span className="text-danger fw-bold">이미 등록된 종목입니다.</span>
+                ) : (
+                  <span className="text-muted">티커 확인 후 종목명이 표시됩니다.</span>
+                )}
                 <button
                   className="btn btn-outline-primary btn-sm"
                   type="button"
