@@ -350,14 +350,14 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
             ):
                 entry["hasSessionTrade"] = False
                 entry["is_pre_market"] = True
-            if over_market is not None:
-                # 시간외(프리·애프터) 시세의 등락률 기준가 — 네이버가 그 세션 대비를 계산한
-                # **통합 전일가**(넥스트레이드 애프터까지 포함한 전일 마지막 가격)다. 네이버·토스의
-                # 표시와 같다(2026-09-30 프리장 SK하이닉스 1,780,000 vs 1,765,000 → +0.85%,
-                # 2026-10-01 애프터 삼성전자 272,000 vs 268,500 → +1.30%). 정규장 종가와 다르다.
-                session_base = _naver_session_base(price_source, price_value)
-                if session_base is not None:
-                    entry["prevClose"] = session_base
+            # 등락률 기준가 — 네이버가 이 시세의 대비를 계산한 **통합 전일가**(넥스트레이드 애프터까지
+            # 포함한 전일 마지막 가격)다. 네이버·토스 표시와 같다(2026-09-30 프리장 SK하이닉스
+            # 1,780,000 vs 1,765,000 → +0.85%, 2026-10-01 애프터 삼성전자 272,000 vs 268,500 → +1.30%).
+            # 시간외 블록이 없는 종목(넥스트레이드 미거래, 예: 엑시콘 092870)도 기본 블록에 같은
+            # 대비가 있어 그대로 쓴다 — 없다고 비우면 장후에 오늘 종가와 비교돼 0% 가 됐다.
+            session_base = _naver_session_base(price_source, price_value)
+            if session_base is not None:
+                entry["prevClose"] = session_base
             # 장 시작 전 `closePrice` 는 정규장 종가가 아니라 통합 전일가다(위 주석) — 정규장
             # 종가로 넘기지 않는다. 그때 정규장 종가는 공통 경로가 확정 일봉에서 채운다.
             if not preopen and regular_close is not None:
