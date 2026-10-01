@@ -2,7 +2,7 @@
 
 import { IconArrowsExchange, IconDeviceFloppy, IconPlus, IconTrash } from "@tabler/icons-react";
 import type { ColDef, RowClassParams } from "ag-grid-community";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
@@ -22,11 +22,11 @@ import {
   tickerColumn,
 } from "@/lib/grid-cells";
 import { entryGapOk, isTrendBroken, renderStockNameCell, renderTextWithSearchHighlight } from "@/lib/name-highlight";
-import type { PoolAddProgress } from "@/lib/pool-add";
+import { addTickersToPool, type PoolAddProgress } from "@/lib/pool-add";
 import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
 import { type ChartBadge, type HoldingChartData } from "../components/HoldingChart";
-import { addStockCandidate, deleteStock, loadMovablePools, moveStockToPool, updateStockBucket, validateStockCandidate, updateStockExclude, type StocksAccountItem } from "@/lib/stocks-store";
+import { deleteStock, loadMovablePools, moveStockToPool, updateStockBucket, validateStockCandidate, updateStockExclude, type StocksAccountItem } from "@/lib/stocks-store";
 import {
   readRememberedTickerType,
   writeRememberedTickerType,
@@ -166,6 +166,8 @@ type RankGridRow = RankRow & {
 };
 
 type RankAddingRowState = {
+  /** 추가 행 식별자 — 여러 행을 동시에 들고 있어 티커 입력 초안·확인 결과를 행별로 구분한다. */
+  id: string;
   ticker: string;
   name: string;
   listing_date: string;
@@ -351,7 +353,9 @@ function formatAudMarketCap(value: number | null): string {
 export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
   const toast = useToast();
   const lastBlockedToastRef = useRef<string | null>(null);
-  const addingTickerDraftRef = useRef("");
+  // 추가 행별 티커 입력 초안(id → 입력값). 입력마다 렌더하지 않으려고 ref 로 둔다.
+  const addingTickerDraftRef = useRef<Record<string, string>>({});
+  const addingSeqRef = useRef(0);
   const loadSequenceRef = useRef(0);
   const toolbarFetchAbortRef = useRef<AbortController | null>(null);
   const rankFetchAbortRef = useRef<AbortController | null>(null);
@@ -391,7 +395,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [missingTickers, setMissingTickers] = useState<string[]>([]);
   const [missingTickerLabels, setMissingTickerLabels] = useState<string[]>([]);
   const [staleTickers, setStaleTickers] = useState<string[]>([]);
-  const [addingRow, setAddingRow] = useState<RankAddingRowState | null>(null);
+  const [addingRows, setAddingRows] = useState<RankAddingRowState[]>([]);
+  const [addProgress, setAddProgress] = useState<PoolAddProgress | null>(null);
   const [dirtyRowIds, setDirtyRowIds] = useState<string[]>([]);
   const [dirtyCellKeys, setDirtyCellKeys] = useState<string[]>([]);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
@@ -437,8 +442,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       entry_vol_mult: payload.entry_vol_mult ?? null,
       entry_vol_mult_options: payload.entry_vol_mult_options ?? [],
     };
-    setAddingRow(null);
-    addingTickerDraftRef.current = "";
+    setAddingRows([]);
+    addingTickerDraftRef.current = {};
     setDirtyRowIds([]);
     setDirtyCellKeys([]);
     setSelectedTickers([]);
@@ -722,12 +727,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   const displayGridRows = useMemo<RankGridRow[]>(() => {
     const rows = searchedGridRows;
-    if (pageMode !== "manage" || !addingRow) {
+    if (pageMode !== "manage" || addingRows.length === 0) {
       return rows;
     }
-    return [
+    const addingGridRows: RankGridRow[] = addingRows.map((addingRow) => (
       {
-        id: "adding-row",
+        id: addingRow.id,
         __isAddingRow: true,
         순번: "-",
         순위: null,
@@ -773,10 +778,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         순자산총액: null,
         "전일 거래량(주)": null,
         exclude_from_ranking: false,
-      },
-      ...rows,
-    ];
-  }, [addingRow, pageMode, searchedGridRows]);
+      }
+    ));
+    return [...addingGridRows, ...rows];
+  }, [addingRows, pageMode, searchedGridRows]);
 
   // 업종 컬럼 노출 여부 — 종목풀 설정의 풀 성격(pool_kind) 토글이 1순위
   // (개별주=표시, ETF=숨김), 미설정 풀은 행 값 유무로 추정 (strategy-momentum 과 같은 기준).
@@ -912,16 +917,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             return (
               <select
                 className="form-select form-select-sm"
-                value={addingRow?.bucket ?? 1}
+                value={addingRows.find((row) => row.id === params.data?.id)?.bucket ?? 1}
                 onChange={(event) =>
-                  setAddingRow((prev) =>
-                    prev
-                      ? {
-                        ...prev,
-                        bucket: Number(event.target.value),
-                      }
-                      : null,
-                  )
+                  updateAddingRow(String(params.data?.id), { bucket: Number(event.target.value) })
                 }
               >
                 {BUCKET_OPTIONS.map((option) => (
@@ -1032,14 +1030,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 <input
                   type="text"
                   className="form-control form-control-sm"
-                  defaultValue={addingTickerDraftRef.current}
+                  defaultValue={addingTickerDraftRef.current[params.data.id] ?? ""}
                   autoFocus
                   onChange={(event) => {
-                    addingTickerDraftRef.current = event.target.value;
+                    addingTickerDraftRef.current[params.data!.id] = event.target.value;
                   }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
-                      void handleValidateAddingTicker(event.currentTarget.value);
+                      void handleValidateAddingTicker(params.data!.id, event.currentTarget.value);
                     }
                   }}
                 />
@@ -1066,33 +1064,46 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         field: "종목명",
         cellRenderer: (params: { value?: string | null; data?: RankGridRow }) => {
           if (params.data?.__isAddingRow) {
-            const draftTicker = normalizeTicker(addingTickerDraftRef.current);
+            const rowId = params.data.id;
+            const addingRow = addingRows.find((row) => row.id === rowId);
+            const draftTicker = normalizeTicker(addingTickerDraftRef.current[rowId] ?? "");
             const validatedTicker = normalizeTicker(addingRow?.ticker ?? "");
             const isDraftDirty = Boolean(draftTicker) && draftTicker !== validatedTicker;
             if (addingRow?.is_validating) {
               return <span className="text-muted">티커 확인 중...</span>;
             }
+            // 확인 버튼은 어떤 상태에서도 남긴다 — 등록된 종목을 조회한 뒤에도 다른 티커로 다시 시도해야 한다.
+            // 행 제거(✕)도 항상 있다 — 여러 행을 한꺼번에 저장하므로 잘못 만든 행을 뺄 수 있어야 한다.
+            let message: ReactNode;
             if (!isDraftDirty && addingRow?.is_validated) {
-              return (
+              message = (
                 <span className="appNameCellText fw-semibold" title={addingRow.name}>
                   {addingRow.name}
                 </span>
               );
+            } else if (!isDraftDirty && addingRow?.status === "active") {
+              message = <span className="text-danger fw-bold">이미 등록된 종목입니다.</span>;
+            } else {
+              message = <span className="text-muted">티커 확인 후 종목명이 표시됩니다.</span>;
             }
             return (
               <div className="rankAddingNameCell">
-                {!isDraftDirty && addingRow?.status === "active" ? (
-                  <span className="text-danger fw-bold">이미 등록된 종목입니다.</span>
-                ) : (
-                  <span className="text-muted">티커 확인 후 종목명이 표시됩니다.</span>
-                )}
+                {message}
                 <button
                   className="btn btn-outline-primary btn-sm"
                   type="button"
-                  onClick={() => void handleValidateAddingTicker(addingTickerDraftRef.current)}
+                  onClick={() => void handleValidateAddingTicker(rowId, addingTickerDraftRef.current[rowId] ?? "")}
                   disabled={addingRow?.is_validating}
                 >
                   확인
+                </button>
+                <button
+                  className="btn btn-outline-secondary btn-sm"
+                  type="button"
+                  title="이 행 제거"
+                  onClick={() => handleRemoveAddingRow(rowId)}
+                >
+                  ✕
                 </button>
               </div>
             );
@@ -1370,7 +1381,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
     return [...leadingColumns, ...columnsByMode[metricMode]];
   }, [
-    addingRow,
+    addingRows,
     dirtyCellKeys,
     entryVolMult,
     hasIndustryData,
@@ -1432,19 +1443,32 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }
 
   function handleAddRow() {
-    if (addingRow) {
-      return;
-    }
-    addingTickerDraftRef.current = "";
-    setAddingRow({
-      ticker: "",
-      name: "",
-      listing_date: "-",
-      bucket: 1,
-      status: null,
-      is_validating: false,
-      is_validated: false,
-    });
+    addingSeqRef.current += 1;
+    const id = `adding-${addingSeqRef.current}`;
+    addingTickerDraftRef.current[id] = "";
+    setAddingRows((prev) => [
+      ...prev,
+      {
+        id,
+        ticker: "",
+        name: "",
+        listing_date: "-",
+        // 새 행은 직전 행의 버킷을 따른다 — 같은 버킷에 여러 종목을 넣는 경우가 대부분이다.
+        bucket: prev.length > 0 ? prev[prev.length - 1].bucket : 1,
+        status: null,
+        is_validating: false,
+        is_validated: false,
+      },
+    ]);
+  }
+
+  function updateAddingRow(id: string, patch: Partial<RankAddingRowState>) {
+    setAddingRows((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  }
+
+  function handleRemoveAddingRow(id: string) {
+    delete addingTickerDraftRef.current[id];
+    setAddingRows((prev) => prev.filter((row) => row.id !== id));
   }
 
   function handleBucketChanged(row: RankGridRow | undefined, bucketName: string) {
@@ -1468,58 +1492,84 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setDirtyCellKeys((prev) => (prev.includes(dirtyCellKey) ? prev : [...prev, dirtyCellKey]));
   }
 
-  async function handleValidateAddingTicker(tickerInput?: string) {
-    const ticker = normalizeTicker(tickerInput ?? addingTickerDraftRef.current ?? addingRow?.ticker ?? "");
-    if (!ticker || !selectedTickerType || !addingRow || addingRow.is_validating) {
+  async function handleValidateAddingTicker(id: string, tickerInput?: string) {
+    const current = addingRows.find((row) => row.id === id);
+    const ticker = normalizeTicker(tickerInput ?? addingTickerDraftRef.current[id] ?? current?.ticker ?? "");
+    if (!ticker || !selectedTickerType || !current || current.is_validating) {
       return;
     }
 
     try {
-      setAddingRow((prev) => (prev ? { ...prev, ticker, is_validating: true } : null));
+      updateAddingRow(id, { ticker, is_validating: true });
       const validated = await validateStockCandidate(selectedTickerType, ticker);
-      addingTickerDraftRef.current = normalizeTicker(validated.ticker);
-      setAddingRow((prev) =>
-        prev
-          ? {
-            ...prev,
-            ticker: normalizeTicker(validated.ticker),
-            name: String(validated.name ?? "").trim(),
-            listing_date: String(validated.listing_date ?? "-").trim() || "-",
-            bucket: Number(validated.bucket_id ?? prev.bucket ?? 1),
-            status: validated.status,
-            is_validating: false,
-            is_validated: validated.status !== "active",
-          }
-          : null,
-      );
+      addingTickerDraftRef.current[id] = normalizeTicker(validated.ticker);
+      updateAddingRow(id, {
+        ticker: normalizeTicker(validated.ticker),
+        name: String(validated.name ?? "").trim(),
+        listing_date: String(validated.listing_date ?? "-").trim() || "-",
+        bucket: Number(validated.bucket_id ?? current.bucket ?? 1),
+        status: validated.status,
+        is_validating: false,
+        is_validated: validated.status !== "active",
+      });
       if (validated.status === "active") {
         showErrorToast("이미 등록된 종목입니다.");
         return;
       }
       toast.success(`[순위] ${validated.name}(${validated.ticker}) 확인 완료`);
     } catch (validationError) {
-      addingTickerDraftRef.current = ticker;
-      setAddingRow((prev) =>
-        prev
-          ? {
-            ...prev,
-            ticker,
-            is_validating: false,
-            is_validated: false,
-          }
-          : null,
-      );
+      addingTickerDraftRef.current[id] = ticker;
+      updateAddingRow(id, { ticker, is_validating: false, is_validated: false });
       showErrorToast(validationError instanceof Error ? validationError.message : "티커 확인에 실패했습니다.");
     }
   }
 
-  async function processAddingRow() {
-    if (!addingRow || !addingRow.is_validated) {
-      throw new Error("추가할 종목을 먼저 확인하세요.");
+  /** 확인을 마친 추가 행을 한꺼번에 등록한다. 하나라도 미확인·중복이면 아무것도 보내지 않는다. */
+  async function processAddingRows() {
+    const unchecked = addingRows.filter((row) => !row.is_validated);
+    if (unchecked.length > 0) {
+      const labels = unchecked.map((row) => row.ticker || "(빈 행)").join(", ");
+      throw new Error(`확인이 끝나지 않았거나 등록할 수 없는 행이 있습니다: ${labels} — 확인하거나 ✕ 로 제거하세요.`);
+    }
+    const seen = new Set<string>();
+    const duplicated = addingRows.filter((row) => (seen.has(row.ticker) ? true : (seen.add(row.ticker), false)));
+    if (duplicated.length > 0) {
+      throw new Error(`같은 티커가 추가 행에 중복돼 있습니다: ${duplicated.map((row) => row.ticker).join(", ")}`);
     }
 
-    const created = await addStockCandidate(selectedTickerType, addingRow.ticker, addingRow.bucket);
-    toast.success(`[순위] ${created.name}(${created.ticker}) 추가 완료`);
+    // 버킷은 행마다 달라서 버킷별로 묶어 공용 추가 로직(`addTickersToPool`)에 넘긴다.
+    const nameByTicker = new Map(addingRows.map((row) => [row.ticker.toUpperCase(), row.name] as const));
+    const tickersByBucket = new Map<number, string[]>();
+    for (const row of addingRows) {
+      tickersByBucket.set(row.bucket, [...(tickersByBucket.get(row.bucket) ?? []), row.ticker]);
+    }
+    let offset = 0;
+    let added = 0;
+    let skipped = 0;
+    let blocked = 0;
+    const failed: string[] = [];
+    try {
+      for (const [bucket, tickers] of tickersByBucket) {
+        const result = await addTickersToPool(
+          tickers,
+          selectedTickerType,
+          bucket,
+          (progress) => setAddProgress({ ...progress, done: progress.done + offset, total: addingRows.length }),
+          nameByTicker,
+        );
+        offset += tickers.length;
+        added += result.added;
+        skipped += result.skipped;
+        blocked += result.blocked;
+        failed.push(...result.failed);
+      }
+    } finally {
+      setAddProgress(null);
+    }
+    if (added > 0) toast.success(`[순위] ${added}개 종목 추가 완료`);
+    if (skipped > 0) showErrorToast(`이미 등록된 종목 ${skipped}개는 건너뛰었습니다.`);
+    if (blocked > 0) showErrorToast(`다른 종목풀에 있는 ${blocked}개는 건너뛰었습니다.`);
+    if (failed.length > 0) showErrorToast(`추가 실패: ${failed.join(", ")}`);
   }
 
   async function processDirtyRows() {
@@ -1538,14 +1588,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   );
 
   function handleSaveChanges() {
-    if (!selectedTickerType || (!addingRow && dirtyRowIds.length === 0)) {
+    if (!selectedTickerType || (addingRows.length === 0 && dirtyRowIds.length === 0)) {
       return;
     }
 
     startTransition(async () => {
       try {
-        if (addingRow) {
-          await processAddingRow();
+        if (addingRows.length > 0) {
+          await processAddingRows();
         }
         if (dirtyRowIds.length > 0) {
           await processDirtyRows();
@@ -1879,7 +1929,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   className="btn btn-primary btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                   type="button"
                   onClick={handleAddRow}
-                  disabled={loading || isPending || Boolean(addingRow)}
+                  disabled={loading || isPending}
                 >
                   <IconPlus size={16} stroke={2} />
                   <span>추가</span>
@@ -1888,7 +1938,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                   type="button"
                   onClick={handleSaveChanges}
-                  disabled={loading || isPending || (!addingRow && dirtyRowIds.length === 0)}
+                  disabled={loading || isPending || (addingRows.length === 0 && dirtyRowIds.length === 0)}
                 >
                   <IconDeviceFloppy size={16} stroke={2} />
                   <span>저장</span>
@@ -1913,6 +1963,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   <span>삭제</span>
                 </button>
               </div>
+              {addProgress ? (
+                <div className="mt-2">
+                  <PoolAddProgressBar progress={addProgress} />
+                </div>
+              ) : null}
             </div>
           ) : null}
 
