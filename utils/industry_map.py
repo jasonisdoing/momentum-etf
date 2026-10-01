@@ -50,14 +50,34 @@ def us_sector_label(sector: str) -> str:
     return setting["label"] if setting is not None else sector
 
 
+def _industry_entry(sector: str, industry: str) -> tuple[str | None, str]:
+    """설정의 업종 항목 → (섹터 묶음, 업종 표시명). 묶음이 없으면 None.
+
+    설정 값은 `"표시명"` 또는 `("묶음", "표시명")` 이다(config.INDUSTRY_DISPLAY_CONFIG).
+    """
+    setting = INDUSTRY_DISPLAY_CONFIG.get(sector)
+    if setting is None:
+        return None, industry
+    entry = setting["industries"].get(industry, industry)
+    if isinstance(entry, tuple):
+        group, name = entry
+        return group, name
+    return None, entry
+
+
 def us_display_industry(sector: str, industry: str) -> str:
     """미국 Yahoo 원본 분류를 설정에 따라 화면 표시명으로 바꾼다."""
     setting = INDUSTRY_DISPLAY_CONFIG.get(sector)
-    if setting is None:
-        return industry
-    if setting["display"] == "sector":
+    if setting is not None and setting["display"] == "sector":
         return us_sector_label(sector)
-    return setting["industries"].get(industry, industry)
+    return _industry_entry(sector, industry)[1]
+
+
+def us_display_sector(sector: str, industry: str) -> str:
+    """섹터 칸 표시명 — 업종에 묶음이 있으면 `섹터/묶음`, 없으면 섹터 label 그대로."""
+    label = us_sector_label(sector)
+    group, _ = _industry_entry(sector, industry)
+    return f"{label}/{group}" if group else label
 
 
 def _pool_industry_map(pool: str, *, group: bool = False) -> dict[str, str]:
@@ -159,7 +179,7 @@ def us_classification_maps() -> tuple[dict[str, str], dict[str, str]]:
             if not ticker:
                 continue
             if sector:
-                sector_by.setdefault(ticker, us_sector_label(sector))
+                sector_by.setdefault(ticker, us_display_sector(sector, industry))
             if industry:
                 industry_by.setdefault(ticker, us_display_industry(sector, industry))
     return industry_by, sector_by

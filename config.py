@@ -253,6 +253,9 @@ POOL_KIND_OPTIONS: tuple[str, ...] = ("stock", "etf")
 # SP500·NDX100에 저장된 Yahoo 섹터·업종 관계로 작성한 목록이며 전체 업종 사전은 아니다.
 # display: sector는 섹터 label, industry는 industries의 표시명을 사용한다.
 # 원문 키는 유지하고 표시명·display를 수정한다. 한국·호주의 다른 분류체계는 포함하지 않는다.
+# industries 값: "표시명" 이면 업종 칸만 그 이름이다. ("묶음", "표시명") 이면 업종 칸은 표시명,
+# 섹터 칸은 "섹터/묶음" 으로 나온다 — 한 섹터 안에서 업종 계열을 구분하고 싶을 때 쓴다.
+# 예) "Software - Application": ("소프트웨어", "어플리케이션") → 섹터 "기술/소프트웨어", 업종 "어플리케이션".
 INDUSTRY_DISPLAY_CONFIG = {
     "Basic Materials": {
         "label": "기초소재",
@@ -407,16 +410,16 @@ INDUSTRY_DISPLAY_CONFIG = {
         "label": "기술",
         "display": "industry",
         "industries": {
-            "Communication Equipment": "컴퓨터장비",
-            "Computer Hardware": "컴퓨터장비",
+            "Communication Equipment": ("장비", "통신"),
+            "Computer Hardware": ("장비", "컴퓨터"),
             "Consumer Electronics": "전기가전",
             "Electronic Components": "전기부품",
             "Information Technology Services": "IT서비스",
-            "Scientific & Technical Instruments": "과학장비",
-            "Semiconductor Equipment & Materials": "반도체장비",
+            "Scientific & Technical Instruments": ("장비", "과학"),
+            "Semiconductor Equipment & Materials": ("장비", "반도체"),
             "Semiconductors": "반도체",
-            "Software - Application": "소프트웨어",
-            "Software - Infrastructure": "소프트웨어",
+            "Software - Application": ("소프트웨어", "어플리케이션"),
+            "Software - Infrastructure": ("소프트웨어", "인프라"),
             "Solar": "태양광",
         },
     },
