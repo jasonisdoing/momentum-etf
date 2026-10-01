@@ -456,8 +456,10 @@ export function stockMemoColumn<T>(options: {
   editable?: (row: T | undefined) => boolean;
   cellClass?: (row: T | undefined) => string | undefined;
   onSave?: (row: T, memo: string) => void;
+  /** 특정 행에서 메모 칸 대신 다른 내용을 그릴 때(예: 순위 화면의 추가 행 버튼). null 이면 기본 표시. */
+  renderRow?: (row: T) => ReactNode | null;
 }): ColDef<T> {
-  const { field, width = 150, editable, cellClass, onSave } = options;
+  const { field, width = 150, editable, cellClass, onSave, renderRow } = options;
   const canEdit = (row: T | undefined) => (editable ? editable(row) : true);
   const column: ColDef<T> = {
     field,
@@ -475,6 +477,8 @@ export function stockMemoColumn<T>(options: {
     },
     valueParser: (params) => String(params.newValue ?? "").trim(),
     cellRenderer: (params: { data?: T; value?: string | null }) => {
+      const custom = params.data ? renderRow?.(params.data) : null;
+      if (custom) return custom;
       const text = String(params.value ?? "").trim();
       if (text) return <span>{text}</span>;
       if (!canEdit(params.data)) return <span>-</span>;
