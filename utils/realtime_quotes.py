@@ -151,7 +151,7 @@ def _fetch_etf_inav_all() -> dict[str, dict[str, float]]:
 def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
     """네이버 API에서 한국 ETF의 실시간 NAV 정보를 조회합니다. 글로벌 캐시를 사용합니다."""
 
-    from utils.market_session import REGULAR, market_session
+    from utils.market_session import PREMARKET, market_session
 
     normalized_codes = {str(t).strip().upper() for t in tickers if str(t or "").strip()}
     if not normalized_codes:
@@ -159,7 +159,9 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
 
     all_data = _fetch_etf_inav_all()
     snapshot = {code: dict(all_data[code]) for code in normalized_codes if code in all_data}
-    if market_session("kor")["session"] != REGULAR:
+    # 한국 ETF 는 프리장 거래가 없다 — 프리장에 이 API 의 등락률은 전 거래일 것이라 비운다.
+    # 정규장 이후(애프터·마감)에는 그날 등락률 그대로다(애프터 거래가 없어 값이 변하지 않는다).
+    if market_session("kor")["session"] == PREMARKET:
         for entry in snapshot.values():
             entry.pop("changeRate", None)
     return snapshot
@@ -241,6 +243,17 @@ def _parse_naver_signed_change_rate(item: dict[str, Any]) -> float | None:
     if compare_code == "5" and change_rate > 0:
         return -change_rate
     return change_rate
+
+
+def _naver_session_base(source: dict[str, Any], price: float) -> float | None:
+    """네이버 시세 블록의 등락 기준가 — 가격에서 부호 붙은 대비를 뺀 값. 없으면 None."""
+    diff = _parse_comma_number(source.get("compareToPreviousClosePrice"))
+    if diff is None:
+        return None
+    compare_code = (source.get("compareToPreviousPrice") or {}).get("code", "")
+    signed_diff = -diff if compare_code == "5" and diff > 0 else diff
+    base = price - signed_diff
+    return base if base > 0 else None
 
 
 def _get_naver_over_market_price_info(item: dict[str, Any]) -> tuple[dict[str, Any], str] | None:
@@ -337,14 +350,17 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
             ):
                 entry["hasSessionTrade"] = False
                 entry["is_pre_market"] = True
-            if preopen:
-                # 장 시작 전 `closePrice` 는 정규장 종가가 아니라 **통합 전일가**다(위 주석).
-                # 정규장 종가로 넘기지 않고 이 세션 등락률의 기준가(`prevClose`)로만 넘긴다 —
-                # 프리장 등락률이 네이버·토스와 같아진다(SK하이닉스 1,780,000 → +0.85%).
-                # 정규장 종가는 공통 경로가 확정 일봉에서 채운다.
-                if regular_close is not None and over_market is not None:
-                    entry["prevClose"] = regular_close
-            elif regular_close is not None:
+            if over_market is not None:
+                # 시간외(프리·애프터) 시세의 등락률 기준가 — 네이버가 그 세션 대비를 계산한
+                # **통합 전일가**(넥스트레이드 애프터까지 포함한 전일 마지막 가격)다. 네이버·토스의
+                # 표시와 같다(2026-09-30 프리장 SK하이닉스 1,780,000 vs 1,765,000 → +0.85%,
+                # 2026-10-01 애프터 삼성전자 272,000 vs 268,500 → +1.30%). 정규장 종가와 다르다.
+                session_base = _naver_session_base(price_source, price_value)
+                if session_base is not None:
+                    entry["prevClose"] = session_base
+            # 장 시작 전 `closePrice` 는 정규장 종가가 아니라 통합 전일가다(위 주석) — 정규장
+            # 종가로 넘기지 않는다. 그때 정규장 종가는 공통 경로가 확정 일봉에서 채운다.
+            if not preopen and regular_close is not None:
                 # 정규장 종가 — 확정 일봉 저장(`fetch_naver_daily_ohlcv_snapshot`)이 쓴다.
                 # 표시·판정용 `nowVal` 은 시간외가 닫히면 이 값으로 돌아온다(위 분기).
                 entry["regularClose"] = regular_close

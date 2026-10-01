@@ -588,7 +588,26 @@ def _fetch_realtime_snapshot(country: str, tickers: Sequence[str]) -> tuple[dict
     snapshot, source = _fetch_quotes_by_country(country, tickers)
     _normalize_closed_prices(country, snapshot)
     _fill_missing_change_rate(country, snapshot)
+    _zero_change_before_session_day(country, snapshot)
     return snapshot, source
+
+
+def _zero_change_before_session_day(country: str, snapshot: dict[str, dict[str, Any]]) -> None:
+    """「오늘」 첫 세션 전(자정 이후·휴장일)에는 일간 등락률을 0% 로 둔다.
+
+    아직 오늘 거래가 없으므로 현재가가 곧 기준가다. 마지막 거래일의 변동은 전거래일 컬럼이
+    보인다(`market_session.session_day`). 이 규칙을 두는 시장(한국)만 적용한다 — 소스가 주는
+    등락률은 마지막 거래일 것이라, 두면 자정이 지나도 어제 변동이 「일간」에 남는다.
+    """
+    from utils.market_session import has_session_day, session_day
+
+    if not has_session_day(country) or session_day(country) is not None:
+        return
+    for entry in snapshot.values():
+        if not isinstance(entry, dict) or entry.get("nowVal") is None:
+            continue
+        entry["prevClose"] = entry["nowVal"]
+        entry["changeRate"] = 0.0
 
 
 def _normalize_closed_prices(country: str, snapshot: dict[str, dict[str, Any]]) -> None:
