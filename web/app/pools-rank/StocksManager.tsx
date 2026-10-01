@@ -26,7 +26,7 @@ import type { PoolAddProgress } from "@/lib/pool-add";
 import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
 import { type ChartBadge, type HoldingChartData } from "../components/HoldingChart";
-import { addStockCandidate, deleteStock, loadMovablePools, moveStockToPool, updateStockBucket, updateStockMemo, validateStockCandidate, updateStockExclude, type StocksAccountItem } from "@/lib/stocks-store";
+import { addStockCandidate, deleteStock, loadMovablePools, moveStockToPool, updateStockBucket, validateStockCandidate, updateStockExclude, type StocksAccountItem } from "@/lib/stocks-store";
 import {
   readRememberedTickerType,
   writeRememberedTickerType,
@@ -37,6 +37,7 @@ import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection
 import { AppModal } from "../components/AppModal";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
+import { useStockMemoSave } from "../components/useStockMemoSave";
 import { createAppGridTheme } from "../components/app-grid-theme";
 
 type RankTickerType = {
@@ -1527,17 +1528,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     }
   }
 
-  async function handleMemoChange(ticker: string, memo: string) {
-    if (!ticker) return;
-    try {
-      await updateStockMemo(ticker, memo);
-      // 행 데이터도 갱신해 재조회 전까지 값이 유지되게 한다.
+  // 종목 메모 저장 — 모멘텀·신고가·포트폴리오 화면과 같은 공용 훅. 행 데이터도 같이 바꿔 재조회 전까지 값을 유지한다.
+  const handleMemoChange = useStockMemoSave(
+    useCallback((ticker: string, memo: string) => {
       setRows((prev) => prev.map((row) => (String(row.티커 ?? "") === ticker ? { ...row, 메모: memo } : row)));
-      toast.success("메모 저장 완료");
-    } catch (error) {
-      showErrorToast(error instanceof Error ? error.message : "메모 저장에 실패했습니다.");
-    }
-  }
+    }, []),
+    "[순위] ",
+  );
 
   function handleSaveChanges() {
     if (!selectedTickerType || (!addingRow && dirtyRowIds.length === 0)) {

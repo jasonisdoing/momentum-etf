@@ -50,7 +50,7 @@ import {
 import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
 import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
 import { isTrendBroken } from "@/lib/name-highlight";
-import { updateStockMemo } from "@/lib/stocks-store";
+import { useStockMemoSave, withTickerMemo } from "../components/useStockMemoSave";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
@@ -440,20 +440,25 @@ function formatPrice(value: number | null | undefined): string {
 
 export function NewHighClient() {
   const toast = useToast();
-  /** 종목 메모 저장 — 계좌가 아니라 종목에 붙는다(순위·모멘텀·자산 관리 화면과 같은 값·같은 API). */
-  const saveMemo = useCallback(
-    async (ticker: string, memo: string) => {
-      try {
-        await updateStockMemo(ticker, memo);
-        toast.success("메모 저장 완료");
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "메모 저장에 실패했습니다.");
-      }
-    },
-    [toast],
-  );
   const [view, setView] = useState<View | null>(null);
   const [positions, setPositions] = useState<Positions | null>(null);
+  /** 종목 메모 저장 — 계좌가 아니라 종목에 붙는다(순위·모멘텀·자산 관리 화면과 같은 값·같은 API). */
+  const saveMemo = useStockMemoSave(
+    useCallback((ticker: string, memo: string) => {
+      setPositions((prev) =>
+        prev
+          ? {
+              ...prev,
+              holdings: withTickerMemo(prev.holdings, ticker, memo),
+              planned_entries: withTickerMemo(prev.planned_entries, ticker, memo),
+              exited_today: withTickerMemo(prev.exited_today, ticker, memo),
+              breakouts: withTickerMemo(prev.breakouts, ticker, memo),
+              candidates: withTickerMemo(prev.candidates, ticker, memo),
+            }
+          : prev,
+      );
+    }, []),
+  );
   const [backtest, setBacktest] = useState<Backtest | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
