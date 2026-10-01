@@ -863,15 +863,20 @@ def refresh_cache_for_target(
                     exc,
                 )
 
-        # ── KOR 증분: 최신 거래일 하루만 비는 종목은 네이버 일봉 스냅샷으로 일괄 적재 ──
-        # (종목당 pykrx 호출 + 1초 스로틀 → 50종목 배치 폴링 몇 번으로 대체)
-        # 스냅샷으로 채워졌거나 이미 최신인 종목은 아래 루프에서 스로틀 없이 캐시 확인만 한다.
+        # ── KOR 증분: 최근 두 봉을 네이버 일봉(fchart)으로 매번 다시 받아 덮어쓴다 ──
+        # 넥스트레이드 애프터(~20:00) 동안은 어떤 소스든 「오늘 종가」가 시간외 체결을 따라 움직인다
+        # (2026-10-01 실측: SK하이닉스 16:50 소스별 1,814,000 / 1,813,000 / 1,813,000 → 18:01
+        # 1,812,000, 삼성전자 fchart 18:01 272,500 → 18:02 272,000). 그 값을 한 번 저장하고 다시
+        # 안 덮으면 틀린 종가가 캐시에 남는다 — 09-30 봉이 다음 날 17:10 전체 갱신 전까지
+        # 1,786,000(확정 1,783,000)으로 하루 가까이 남았다. 그래서 **이미 최신인 종목도** 최근
+        # 두 봉을 매 실행마다 다시 받는다(시간 단위로 돌아 장후가 끝난 뒤 값으로 수렴한다).
+        # 종목당 pykrx 호출 + 1초 스로틀 대신 가벼운 차트 호출을 병렬로 돌린다.
         kor_snapshot_done: set[str] = set()
         if country_code == "kor" and not full_refresh:
             try:
                 from utils.cache_utils import load_cached_frame
                 from utils.data_loader import get_latest_trading_day, get_trading_days
-                from utils.realtime_quotes import fetch_naver_daily_ohlcv_snapshot
+                from utils.market_session import market_session
 
                 latest_day = get_latest_trading_day("kor").normalize()
                 recent_days = get_trading_days(
@@ -880,7 +885,15 @@ def refresh_cache_for_target(
                     "kor",
                 )
                 prev_day = recent_days[-2].normalize() if len(recent_days) >= 2 else None
-                need_latest: list[str] = []
+                # 오늘이 아직 장중·장전이면 오늘 봉은 잠정값(진행 중)이라 덮지 않는다.
+                today_in_progress = latest_day == pd.Timestamp.now().normalize() and market_session("kor")[
+                    "session"
+                ] in ("premarket", "regular")
+                refresh_days = [day for day in (prev_day, latest_day) if day is not None]
+                if today_in_progress:
+                    refresh_days = [day for day in refresh_days if day != latest_day]
+
+                refresh_tickers: list[str] = []
                 for item in target_items:
                     t = str(item.get("ticker") or "").strip().upper()
                     if not t:
@@ -890,31 +903,34 @@ def refresh_cache_for_target(
                         continue  # 캐시 없음(신규) → 종목별 전체 수집 경로
                     cache_end = pd.Timestamp(cached_range[1]).normalize()
                     if cache_end >= latest_day:
-                        kor_snapshot_done.add(t)  # 이미 최신 — 네트워크·스로틀 불필요
-                    elif prev_day is not None and cache_end == prev_day:
-                        need_latest.append(t)  # 최신 거래일 하루만 부족 → 스냅샷 대상
-                if need_latest:
-                    snapshot = fetch_naver_daily_ohlcv_snapshot(need_latest, latest_day)
-                    for t, row in snapshot.items():
-                        cached_df = load_cached_frame(target_norm, t)
-                        if cached_df is None or cached_df.empty:
-                            continue
-                        addition = pd.DataFrame([row], index=pd.DatetimeIndex([latest_day]))
-                        merged = pd.concat(
-                            [cached_df[cached_df.index.normalize() != latest_day], addition]
-                        ).sort_index()
+                        kor_snapshot_done.add(t)  # 이미 최신 — pykrx 불필요(아래에서 최근 봉만 다시 받는다)
+                    if cache_end >= latest_day or (prev_day is not None and cache_end == prev_day):
+                        refresh_tickers.append(t)
+
+                bars_by_ticker = _fetch_kor_recent_bars(refresh_tickers, refresh_days)
+                changed = 0
+                for t, bars in bars_by_ticker.items():
+                    cached_df = load_cached_frame(target_norm, t)
+                    if cached_df is None or cached_df.empty:
+                        continue
+                    kept = cached_df[~cached_df.index.normalize().isin(bars.index)]
+                    merged = pd.concat([kept, bars]).sort_index()
+                    if not merged.equals(cached_df):
                         save_cached_frame(target_norm, t, merged)
+                        changed += 1
+                    if latest_day in bars.index:
                         kor_snapshot_done.add(t)
-                    logger.info(
-                        "[%s] 네이버 일봉 스냅샷 일괄 적재: %d/%d 종목 (기준일 %s, 미적재는 pykrx fallback)",
-                        target_norm.upper(),
-                        len(snapshot),
-                        len(need_latest),
-                        latest_day.date(),
-                    )
+                logger.info(
+                    "[%s] 네이버 일봉 최근 %d봉 재적재: %d/%d 종목 조회, %d 종목 값 변경 (미적재는 pykrx fallback)",
+                    target_norm.upper(),
+                    len(refresh_days),
+                    len(bars_by_ticker),
+                    len(refresh_tickers),
+                    changed,
+                )
             except Exception as exc:
                 logger.warning(
-                    "[%s] 네이버 일봉 스냅샷 건너뜀(종목별 pykrx fallback): %s",
+                    "[%s] 네이버 일봉 재적재 건너뜀(종목별 pykrx fallback): %s",
                     target_norm.upper(),
                     exc,
                 )
@@ -1179,6 +1195,38 @@ def refresh_portfolio_change_for_all_targets() -> None:
             _refresh_portfolio_change_cache_for_target(target_norm, target_items, success_tickers)
         except Exception as exc:
             logger.warning("[%s] 포트폴리오 변동 캐시 갱신 실패: %s", target_norm.upper(), exc)
+
+
+def _fetch_kor_recent_bars(tickers: list[str], days: list[pd.Timestamp]) -> dict[str, pd.DataFrame]:
+    """네이버 일봉(fchart)에서 `days` 날짜의 OHLCV 행을 종목별로 받는다(병렬).
+
+    OHLC 중 하나라도 없거나 0 이하인 행은 버린다 — 잘못된 봉을 저장하느니 pykrx 경로에 맡긴다.
+    조회에 실패하거나 해당 날짜 행이 없는 종목은 결과에서 빠진다.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from utils.naver_chart import fetch_naver_daily_ohlc
+
+    wanted = [pd.Timestamp(day).normalize() for day in days]
+    if not tickers or not wanted:
+        return {}
+
+    def _one(ticker: str) -> tuple[str, pd.DataFrame | None]:
+        frame = fetch_naver_daily_ohlc(ticker, 5)
+        if frame is None or frame.empty:
+            return ticker, None
+        frame = frame.copy()
+        frame.index = pd.DatetimeIndex(frame.index).normalize()
+        rows = frame.loc[frame.index.isin(wanted), ["Open", "High", "Low", "Close", "Volume"]].dropna()
+        rows = rows[(rows[["Open", "High", "Low", "Close"]] > 0).all(axis=1)]
+        return ticker, (rows if not rows.empty else None)
+
+    result: dict[str, pd.DataFrame] = {}
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        for ticker, rows in executor.map(_one, tickers):
+            if rows is not None:
+                result[ticker] = rows
+    return result
 
 
 def main():
