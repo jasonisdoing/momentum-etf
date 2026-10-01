@@ -165,7 +165,7 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
     showNavColumns: false,
     showListing: false,
     capHeader: "거래대금($M)",
-    capFilterDefault: "50",
+    capFilterDefault: "100",
     volumeFilterDefault: "500000",
   },
 };
