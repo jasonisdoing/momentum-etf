@@ -342,6 +342,20 @@ def _yf_expense_ratio_pct(info: dict[str, Any]) -> float | None:
     return None
 
 
+def _holdings_cache_from(holdings_info: dict[str, Any]) -> dict[str, Any]:
+    """수집 결과 → 메타 캐시의 holdings_cache 문서. 재간접을 펼쳤으면 `nested_etfs` 도 남긴다."""
+    cache = {
+        "source": holdings_info["source"],
+        "updated_at": holdings_info["fetched_at"],
+        "reference_date": holdings_info["as_of_date"],
+        "holdings_count": holdings_info["holdings_count"],
+        "items": holdings_info["holdings"],
+    }
+    if holdings_info.get("nested_etfs"):
+        cache["nested_etfs"] = holdings_info["nested_etfs"]
+    return cache
+
+
 def _refresh_us_stock_meta_cache(
     ticker_type: str,
     ticker: str,
@@ -414,13 +428,7 @@ def _refresh_us_stock_meta_cache(
     if is_etf:
         holdings_info = fetch_yfinance_holdings(ticker_norm, is_australian=False)
         if holdings_info:
-            holdings_cache = {
-                "source": holdings_info["source"],
-                "updated_at": holdings_info["fetched_at"],
-                "reference_date": holdings_info["as_of_date"],
-                "holdings_count": holdings_info["holdings_count"],
-                "items": holdings_info["holdings"],
-            }
+            holdings_cache = _holdings_cache_from(expand_nested_etf_holdings(holdings_info, ticker_norm))
         else:
             get_app_logger().warning(
                 f"[{ticker_type_norm.upper()}/{ticker_norm}] 미국 ETF holdings 수집 실패 (메타만 저장)"
@@ -619,6 +627,94 @@ def fetch_yfinance_holdings(ticker: str, is_australian: bool = False) -> dict[st
         return None
 
 
+# 구성종목 하나가 이 비중 이상이면 재간접(feeder) 구조로 보고 ETF 인지 야후에 물어본다.
+# 그보다 작은 구성종목은 우리 DB 에 구성종목이 있는 ETF 일 때만 펼친다(네트워크 호출 없음).
+_NESTED_FEEDER_MIN_WEIGHT = 50.0
+
+
+def _registered_etf_holdings(tickers: list[str]) -> dict[str, list[dict[str, Any]]]:
+    """DB 에 구성종목이 저장된 티커 → 그 구성종목. 개별주는 구성종목이 없어 자연히 빠진다."""
+    from utils.db_manager import get_db_connection
+
+    db = get_db_connection()
+    if db is None or not tickers:
+        return {}
+    found: dict[str, list[dict[str, Any]]] = {}
+    for doc in db["stock_cache_meta"].find(
+        {"ticker": {"$in": tickers}, "holdings_cache.items.0": {"$exists": True}},
+        {"ticker": 1, "holdings_cache.items": 1},
+    ):
+        items = list((doc.get("holdings_cache") or {}).get("items") or [])
+        ticker = str(doc.get("ticker") or "")
+        # 같은 티커가 여러 풀에 있으면 구성종목이 더 많은 쪽을 쓴다.
+        if len(items) > len(found.get(ticker, [])):
+            found[ticker] = items
+    return found
+
+
+def _feeder_etf_holdings(ticker: str) -> list[dict[str, Any]] | None:
+    """DB 에 없는 큰 구성종목이 ETF 면 야후로 그 구성종목을 가져온다. ETF 가 아니면 None."""
+    is_australian = ticker.startswith("ASX:")
+    symbol = to_yahoo_symbol(ticker) if is_australian else normalize_ticker(ticker)
+    try:
+        if str((getattr(yf.Ticker(symbol), "info", {}) or {}).get("quoteType") or "").upper() != "ETF":
+            return None
+    except Exception as exc:
+        get_app_logger().debug(f"[yfinance] {symbol} 종류 확인 실패: {exc}")
+        return None
+    inner = fetch_yfinance_holdings(ticker, is_australian=is_australian)
+    return list(inner["holdings"]) if inner else None
+
+
+def expand_nested_etf_holdings(holdings_info: dict[str, Any] | None, own_ticker: str) -> dict[str, Any] | None:
+    """구성종목 중 ETF 를 그 ETF 의 구성종목으로 펼친다(재간접 ETF) — 한 단계만.
+
+    비중은 `바깥 비중 × 안쪽 비중 / 100` 이고, 같은 종목이 여러 갈래로 나오면 합친다.
+    안쪽 ETF 의 구성종목이 일부(예: 야후 상위 10개)뿐이면 펼친 결과의 비중 합이 100 보다 작다 —
+    모르는 몫을 지어내지 않는다. 어떤 ETF 를 얼마나 덮었는지는 `nested_etfs` 에 남겨 화면이 알린다.
+    펼칠 게 없으면 입력을 그대로 돌려준다.
+    """
+    if not holdings_info or not holdings_info.get("holdings"):
+        return holdings_info
+    outer = list(holdings_info["holdings"])
+    registered = _registered_etf_holdings(
+        [str(item.get("ticker") or "") for item in outer if item.get("ticker") and item["ticker"] != own_ticker]
+    )
+
+    merged: dict[str, dict[str, Any]] = {}
+    nested: list[dict[str, Any]] = []
+
+    def add(item: dict[str, Any], weight: float) -> None:
+        key = str(item.get("ticker") or "")
+        if key in merged:
+            merged[key]["weight"] += weight
+        else:
+            merged[key] = {**item, "weight": weight}
+
+    for item in outer:
+        ticker = str(item.get("ticker") or "")
+        weight = float(item.get("weight") or 0.0)
+        inner = None
+        if ticker and ticker != own_ticker:
+            inner = registered.get(ticker)
+            if not inner and weight >= _NESTED_FEEDER_MIN_WEIGHT:
+                inner = _feeder_etf_holdings(ticker)
+        if not inner:
+            add(item, weight)
+            continue
+        covered = 0.0
+        for sub in inner:
+            sub_weight = weight * float(sub.get("weight") or 0.0) / 100.0
+            add(sub, sub_weight)
+            covered += sub_weight
+        nested.append({"ticker": ticker, "weight": round(weight, 2), "covered_weight": round(covered, 2)})
+
+    if not nested:
+        return holdings_info
+    items = sorted(merged.values(), key=lambda x: x.get("weight") or 0.0, reverse=True)
+    return {**holdings_info, "holdings": items, "holdings_count": len(items), "nested_etfs": nested}
+
+
 def _refresh_overseas_etf_meta_cache(
     ticker_type: str,
     ticker: str,
@@ -651,13 +747,8 @@ def _refresh_overseas_etf_meta_cache(
     # (여기서 return 하면 캐시 문서 자체가 만들어지지 않아 화면이 통째로 빈다.)
     holdings_cache = None
     if holdings_info:
-        holdings_cache = {
-            "source": holdings_info["source"],
-            "updated_at": holdings_info["fetched_at"],
-            "reference_date": holdings_info["as_of_date"],
-            "holdings_count": holdings_info["holdings_count"],
-            "items": holdings_info["holdings"],
-        }
+        holdings_info = expand_nested_etf_holdings(holdings_info, ticker_norm)
+        holdings_cache = _holdings_cache_from(holdings_info)
     else:
         logger.warning(f"[{ticker_type_norm.upper()}/{ticker_norm}] 해외 ETF holdings 수집 실패 (메타만 저장)")
 
