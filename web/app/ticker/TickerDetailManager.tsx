@@ -88,6 +88,8 @@ type TickerDividendRow = {
 type TickerDetailResponse = {
   ticker: string;
   rows: PriceRow[];
+  /** 정규장 전 현재가·등락률 — 마지막 봉은 어제 확정 종가로 두고 헤더만 이 값을 쓴다. */
+  live?: { price: number; change_pct: number | null } | null;
   etf_info?: TickerEtfInfo | null;
   holdings: TickerHoldingRow[];
   holdings_as_of_date?: string | null;
@@ -447,6 +449,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
 
   // 데이터
   const [rows, setRows] = useState<PriceRow[]>([]);
+  const [live, setLive] = useState<{ price: number; change_pct: number | null } | null>(null);
   const [holdings, setHoldings] = useState<TickerHoldingRow[]>([]);
   const [etfInfo, setEtfInfo] = useState<TickerEtfInfo | null>(null);
   const [holdingsAsOfDate, setHoldingsAsOfDate] = useState<string | null>(null);
@@ -491,6 +494,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
     if (!qTicker) {
       setSelectedTicker(null);
       setRows([]);
+      setLive(null);
       setHoldings([]);
       setHoldingsAsOfDate(null);
       setHoldingsPriceAsOfDate(null);
@@ -518,6 +522,8 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
     }
 
     setRows([]);
+
+    setLive(null);
     setHoldings([]);
     setEtfInfo(null);
     setHoldingsAsOfDate(null);
@@ -559,6 +565,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
     setLoading(true);
     setError(null);
     setRows([]);
+    setLive(null);
     setHoldings([]);
     setHoldingsAsOfDate(null);
     setHoldingsPriceAsOfDate(null);
@@ -591,6 +598,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
           (candidate) => candidate.ticker === item.ticker && candidate.ticker_type === item.ticker_type,
         ) ?? item;
       setRows(payload.rows);
+      setLive(payload.live ?? null);
       setEtfInfo(payload.etf_info ?? null);
       setHoldings(payload.holdings ?? []);
       setHoldingsAsOfDate(payload.holdings_as_of_date ?? null);
@@ -603,13 +611,14 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
         name: matchedItem.name,
         ticker_type: matchedItem.ticker_type,
         country_code: matchedItem.country_code,
-        current_price: latestRow?.close ?? null,
-        change_pct: latestRow?.change_pct ?? null,
+        current_price: payload.live?.price ?? latestRow?.close ?? null,
+        change_pct: payload.live ? payload.live.change_pct : (latestRow?.change_pct ?? null),
       });
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "데이터를 불러오지 못했습니다.");
       setRows([]);
+      setLive(null);
       setEtfInfo(null);
       setHoldings([]);
       setHoldingsAsOfDate(null);
@@ -959,11 +968,16 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
 
   const lastPriceRow = useMemo(() => rows[rows.length - 1] ?? null, [rows]);
   const previousPriceRow = useMemo(() => rows[rows.length - 2] ?? null, [rows]);
-  const latestClose = lastPriceRow?.close ?? null;
-  const latestChangePct = lastPriceRow?.change_pct ?? null;
+  // 헤더 현재가·등락 — 정규장 전에는 live(프리장·데이장 시세), 아니면 마지막 봉.
+  const latestClose = live?.price ?? lastPriceRow?.close ?? null;
+  const latestChangePct = live ? live.change_pct : (lastPriceRow?.change_pct ?? null);
   const latestChangeAmount = useMemo(() => {
     if (latestClose === null || latestChangePct === null) {
       return null;
+    }
+    // live 의 기준은 마지막 확정 종가(= 마지막 봉)다.
+    if (live && lastPriceRow?.close != null) {
+      return latestClose - lastPriceRow.close;
     }
     if (previousPriceRow?.close != null) {
       return latestClose - previousPriceRow.close;
@@ -973,7 +987,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
       return null;
     }
     return latestClose - previousClose;
-  }, [latestClose, latestChangePct, previousPriceRow]);
+  }, [latestClose, latestChangePct, live, lastPriceRow, previousPriceRow]);
   const latestVolumeText = useMemo(() => {
     const volume = etfInfo?.volume ?? lastPriceRow?.volume ?? null;
     if (volume === null || Number.isNaN(volume)) {

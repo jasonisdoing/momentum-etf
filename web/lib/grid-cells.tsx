@@ -406,18 +406,31 @@ export function adrColumn<T>(options: {
   };
 }
 
-/** 종목풀 순위 — 모멘텀·자산 관리가 같은 폭과 빈 값 표기를 쓴다. */
-export function rankColumn<T>(getRank: (row: T | undefined) => number | null | undefined): ColDef<T> {
+/** 종목풀 순위 — 순위·모멘텀·자산 관리 공용. 폭·굵기·빈 값 표기가 한 곳에서 정해진다.
+ *  `badge` 는 순위 화면처럼 번호 앞에 표시를 붙일 때만 준다(벤치마크 ⭐ · 랭킹 제외 📌). */
+export function rankColumn<T>(
+  getRank: (row: T | undefined) => number | null | undefined,
+  options: { badge?: (row: T | undefined) => "benchmark" | "excluded" | null } = {},
+): ColDef<T> {
   return {
     colId: "rank",
     valueGetter: (params) => getRank(params.data) ?? null,
     headerName: "순위",
     pinned: "left",
-    width: 76,
-    minWidth: 76,
+    width: 64,
+    minWidth: 64,
     headerTooltip: "종목풀의 장기 이격률 순위",
     cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
-    valueFormatter: (params) => (params.value == null ? "-" : String(params.value)),
+    cellRenderer: (params: { data?: T; value?: number | null }) => {
+      const badge = options.badge?.(params.data) ?? null;
+      const title = badge === "benchmark" ? "벤치마크 종목" : badge === "excluded" ? "랭킹 제외 종목" : undefined;
+      return (
+        <span style={{ fontWeight: 700, whiteSpace: "nowrap" }} title={title}>
+          {badge === "benchmark" ? "⭐ " : badge === "excluded" ? "📌 " : ""}
+          {params.value == null ? "-" : String(params.value)}
+        </span>
+      );
+    },
   };
 }
 

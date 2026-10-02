@@ -38,8 +38,9 @@ from utils.data_loader import (
     fetch_ohlcv,
     fetch_overseas_etf_nav_snapshot,
 )
-from utils.effective_prices import effective_bar_date
+from utils.effective_prices import bar_anchor, effective_bar_date, last_regular_close
 from utils.kis_market import load_cached_kis_domestic_etf_master
+from utils.market_session import regular_session_started
 from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import list_available_accounts, load_common_settings
 from utils.stock_cache_meta_io import get_previous_stock_cache_meta
@@ -414,13 +415,41 @@ def _build_price_snapshot(close_series: pd.Series | None) -> tuple[float | None,
     return current_price, change_pct
 
 
+def _settle_last_bar(df: pd.DataFrame, realtime_entry: dict[str, object], country: str) -> pd.DataFrame:
+    """정규장 전: 마지막으로 마감된 거래일 봉의 종가를 시세가 알려 주는 정규장 종가로 확정한다.
+
+    캐시의 그 봉이 마감 전에 저장된 장중값일 수 있다(재현: MPC 10-01 봉이 413.15·거래량 57만으로
+    남아 실제 종가 420.15 와 달랐다). 시세는 현재가가 아니라 마감된 정규장 종가만 넣는다.
+    """
+    settled = last_regular_close(realtime_entry)
+    if settled is None or df.empty or df.index.max().normalize() != bar_anchor(country):
+        return df
+    close_col = "Close" if "Close" in df.columns else "close"
+    high_col = "High" if "High" in df.columns else "high"
+    low_col = "Low" if "Low" in df.columns else "low"
+    adjusted = df.copy()
+    last = adjusted.index.max()
+    adjusted.at[last, close_col] = settled
+    if high_col in adjusted.columns:
+        adjusted.at[last, high_col] = max(float(adjusted.at[last, high_col]), settled)
+    if low_col in adjusted.columns:
+        adjusted.at[last, low_col] = min(float(adjusted.at[last, low_col]), settled)
+    return adjusted
+
+
 def _apply_realtime_snapshot_to_dataframe(
     df: pd.DataFrame,
     *,
     ticker: str,
     country_code: str,
-) -> tuple[pd.DataFrame, float | None]:
+) -> tuple[pd.DataFrame, dict[str, object] | None]:
     """상세 차트 일봉에 실시간 마지막 봉을 반영한다 — 붙일 봉은 공통 규칙이 정한다.
+
+    돌려주는 `live` 는 현재가·등락률 `{"price", "change_pct", "is_bar"}` 다.
+      · 정규장이 시작된 뒤(`is_bar=True`): 현재가가 오늘 봉 자체라 봉에 반영한다.
+      · 정규장 전(프리장·데이장·휴장일, `is_bar=False`): 마지막 봉은 **어제의 확정 종가**로 두고,
+        현재가는 봉에 넣지 않고 따로 돌려준다. 어제 봉에 덮어쓰면 표의 어제 행이 프리장 등락률
+        (+0.08%)로 바뀌어 실제 어제 등락(+6%)이 사라졌다.
 
     예전에는 여기서 대상일을 따로 계산했다(미국은 프리마켓 04:00 ET 부터 오늘 봉을 새로
     만들었다). 그러면 순위·전략이 쓰는 `utils.effective_prices` 와 규칙이 갈려, 같은 종목의
@@ -456,10 +485,18 @@ def _apply_realtime_snapshot_to_dataframe(
         except (TypeError, ValueError):
             realtime_change_pct = None
 
+    if not regular_session_started(country):
+        return _settle_last_bar(df, realtime_entry, country), {
+            "price": realtime_price,
+            "change_pct": realtime_change_pct,
+            "is_bar": False,
+        }
+
+    live = {"price": realtime_price, "change_pct": realtime_change_pct, "is_bar": True}
     adjusted = df.copy()
 
     if adjusted.empty:
-        return adjusted, realtime_change_pct
+        return adjusted, live
 
     latest_trading_day = effective_bar_date(adjusted.index.max(), country)
 
@@ -499,7 +536,7 @@ def _apply_realtime_snapshot_to_dataframe(
         adjusted.loc[latest_trading_day] = new_row
 
     adjusted.sort_index(inplace=True)
-    return adjusted, realtime_change_pct
+    return adjusted, live
 
 
 @router.get("/tickers")
@@ -711,7 +748,7 @@ def build_ticker_detail_payload(
         }
 
     df = df.sort_index()
-    df, realtime_change_pct = _apply_realtime_snapshot_to_dataframe(
+    df, live = _apply_realtime_snapshot_to_dataframe(
         df,
         ticker=db_ticker,
         country_code=country_code,
@@ -751,9 +788,10 @@ def build_ticker_detail_payload(
         if close is not None:
             prev_close = close
 
-    # 미국 프리·애프터마켓은 토스가 세션에 맞는 기준가로 계산한 등락률을 사용한다.
-    if rows and realtime_change_pct is not None:
-        rows[-1]["change_pct"] = realtime_change_pct
+    # 오늘 봉이 실시간 봉일 때(정규장 이후 애프터마켓 포함)만 시세 소스가 세션에 맞는 기준가로
+    # 계산한 등락률을 쓴다. 정규장 전 시세는 봉이 아니라 `live` 로 따로 내려간다.
+    if rows and live is not None and live["is_bar"] and live["change_pct"] is not None:
+        rows[-1]["change_pct"] = live["change_pct"]
 
     holdings: list[dict[str, object]] = []
     holdings_as_of_date: str | None = None
@@ -896,6 +934,8 @@ def build_ticker_detail_payload(
     return {
         "ticker": ticker,
         "rows": rows,
+        # 정규장 전 현재가·등락률 — 헤더가 쓴다. 정규장 중에는 마지막 봉이 곧 현재가라 None.
+        "live": {"price": live["price"], "change_pct": live["change_pct"]} if live and not live["is_bar"] else None,
         "etf_info": etf_info,
         "ma_lines": ma_lines,
         "holdings": holdings,
