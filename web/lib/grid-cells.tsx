@@ -406,6 +406,24 @@ export function adrColumn<T>(options: {
   };
 }
 
+/** 전거래일(%) — 일간(%)이 나타내는 구간 바로 앞 거래일의 확정 등락률. 순위·모멘텀 공용(현재가 오른쪽).
+ *  값은 백엔드 공용 함수(`utils.effective_prices.previous_day_change_pct`)가 같은 규칙으로 낸다. */
+export function prevDayChangeColumn<T>(field: ColDefField<T>): ColDef<T> {
+  return {
+    field,
+    headerName: "전거래일",
+    headerTooltip: "일간(%)이 나타내는 구간 바로 앞 거래일의 확정 등락률.",
+    width: 96,
+    minWidth: 96,
+    type: "rightAligned",
+    cellRenderer: (params: { value?: number | null }) => {
+      const value = params.value;
+      if (value == null || Number.isNaN(value)) return <span>-</span>;
+      return <span className={value === 0 ? "" : value > 0 ? "metricPositive" : "metricNegative"}>{value.toFixed(2)}%</span>;
+    },
+  };
+}
+
 /** 종목풀 순위 — 순위·모멘텀·자산 관리 공용. 폭·굵기·빈 값 표기가 한 곳에서 정해진다.
  *  `badge` 는 순위 화면처럼 번호 앞에 표시를 붙일 때만 준다(벤치마크 ⭐ · 랭킹 제외 📌). */
 export function rankColumn<T>(

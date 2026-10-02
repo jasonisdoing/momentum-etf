@@ -43,6 +43,7 @@ import {
   highDrawdownColumn,
   signColor,
   marketCapRankColumn,
+  prevDayChangeColumn,
   rankColumn,
   slotStatusColumn,
   slotTradeColumns,
@@ -130,6 +131,8 @@ type PlanRow = {
   sector?: string;
   market_cap_rank?: number | null;
   change_pct: number | null;
+  /** 전거래일(%) — 순위 화면과 같은 공용 규칙. */
+  prev_day_change_pct?: number | null;
   /** 현재 시세 — 이탈 행도 지금 값이다(청산가는 exit_price). */
   price: number | null;
   /** 청산가 — 마지막 세션에 이탈한 행에만 있다. */
@@ -171,6 +174,8 @@ type CandidateRow = {
   sector?: string;
   market_cap_rank?: number | null;
   change_pct: number | null;
+  /** 전거래일(%) — 순위 화면과 같은 공용 규칙. */
+  prev_day_change_pct?: number | null;
   price: number | null;
   /** 행별 체결일 — 어제 확정된 진입 예정(오늘 체결)에만 있다. */
   fill_date?: string | null;
@@ -837,6 +842,7 @@ export function MomentumClient() {
         headerTooltip: "이탈한 종목도 지금 시세다 — 판 뒤의 흐름을 청산가와 견줘 볼 수 있다.",
         valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number, positions?.currency)),
       },
+      prevDayChangeColumn<PlanRow>("prev_day_change_pct"),
       volatilityColumn<PlanRow>(),
       tradeValueMultColumn<PlanRow>(),
       // 이탈 여유와 수익률은 매일 보는 판단 칸이라 거래대금 바로 오른쪽에 모은다 —
@@ -910,6 +916,7 @@ export function MomentumClient() {
         type: "numericColumn",
         valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number, positions?.currency)),
       },
+      prevDayChangeColumn<CandidateRow>("prev_day_change_pct"),
       volatilityColumn<CandidateRow>(),
       tradeValueMultColumn<CandidateRow>(),
       maExitGapColumn<CandidateRow>({

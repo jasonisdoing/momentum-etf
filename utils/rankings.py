@@ -31,12 +31,10 @@ from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.effective_prices import (
     apply_realtime_close,
     bar_anchor,
-    confirmed_close_before,
-    confirmed_close_on,
-    last_regular_close,
+    previous_day_change_pct,
+    prior_day_shown,
 )
 from utils.logger import get_app_logger
-from utils.market_session import CLOSED, has_session_day, market_session, session_day
 from utils.moving_averages import pool_moving_average_type
 from utils.perf_metrics import single_stock_backtest_stats
 from utils.pool_settings_store import get_pool_benchmark_ticker
@@ -247,49 +245,6 @@ def _slice_close_series_to_date(close_series: pd.Series | None, cutoff_date: pd.
     return sliced.sort_index()
 
 
-def _confirmed_day_change_pct(
-    close_series: pd.Series | None,
-    bar_date: pd.Timestamp,
-    *,
-    anchor_close: float | None,
-) -> float | None:
-    """앵커 날짜(`bar_anchor`) 봉의 전일 대비 변동률(%) — 전거래일 컬럼.
-
-    **날짜로 찾는다.** 실시간을 반영한 시리즈의 뒤에서 두 번째 봉을 쓰면 장 시작 전
-    (프리·데이장)에 하루 더 밀린다 — 그 구간에서는 실시간이 새 봉을 만들지 않고 마지막
-    확정 봉을 **교체**하기 때문이다(utils.effective_prices). 재현: MRNA 데이장에
-    09-23(-0.25%) 대신 09-22(+5.56%) 가 나왔다.
-
-    분자는 시세가 주는 확정 종가(`anchor_close`)를 쓰고, 없을 때만 캐시의 앵커 봉으로
-    내려간다 — 캐시의 마지막 봉은 설계상 잠정값이다(`effective_prices.last_regular_close`).
-    분모는 앵커 **직전** 거래일의 캐시 봉이고, 이쪽은 이미 확정된 봉이다.
-    """
-    prev_close = confirmed_close_before(close_series, bar_date)
-    if prev_close is None:
-        return None
-
-    if anchor_close is not None and anchor_close > 0:
-        close = float(anchor_close)
-    else:
-        # 앵커 **그 날짜** 봉만 쓴다. 없는 종목(거래정지·상장 직후)은 비워 둔다 —
-        # 며칠치 변동을 하루치로 표기하지 않는다.
-        close = confirmed_close_on(close_series, bar_date)
-        if close is None:
-            return None
-    return ((close / prev_close) - 1.0) * 100.0
-
-
-def _prior_confirmed_day_change_pct(close_series: pd.Series | None, bar_date: pd.Timestamp) -> float | None:
-    """마감·휴장에는 마지막 확정 봉보다 한 거래일 앞선 변동률을 반환한다."""
-    if close_series is None or close_series.empty:
-        return None
-    series = pd.to_numeric(close_series, errors="coerce").dropna()
-    prior = series.loc[pd.DatetimeIndex(series.index).normalize() < pd.Timestamp(bar_date).normalize()]
-    if prior.empty:
-        return None
-    return _confirmed_day_change_pct(series, pd.Timestamp(prior.index[-1]), anchor_close=None)
-
-
 def _calc_period_return(close_series: pd.Series, days: int) -> float | None:
     series = pd.to_numeric(close_series, errors="coerce").dropna()
     if series.empty:
@@ -385,17 +340,13 @@ def _build_monthly_return_metrics(
 def _extract_price_metrics_from_close_series(
     close_series: pd.Series | None,
     *,
-    confirmed_close_series: pd.Series | None,
-    confirmed_bar_date: pd.Timestamp,
-    anchor_close: float | None,
     reference_date: pd.Timestamp | None = None,
     monthly_labels: list[str] | None = None,
 ) -> dict[str, Any]:
     """표시용 가격 지표.
 
-    `close_series` 는 실시간을 반영한 시리즈(현재가·기간 수익률용), `confirmed_close_series`
-    는 실시간을 붙이기 전 확정 시리즈다. 전거래일만 확정 시리즈를 쓴다 — 이유는
-    `_confirmed_day_change_pct` 주석 참고.
+    `close_series` 는 실시간을 반영한 시리즈다. 전거래일(%)은 확정 시리즈가 필요해 여기서
+    채우지 않는다 — 호출부가 `effective_prices.previous_day_change_pct` 로 넣는다.
     """
     monthly_return_metrics = _build_monthly_return_metrics(
         close_series,
@@ -445,10 +396,6 @@ def _extract_price_metrics_from_close_series(
         if prev_close > 0:
             daily_pct = ((current_price / prev_close) - 1.0) * 100.0
 
-    # 전거래일 — 확정 시리즈에서 앵커 날짜 봉으로 찾는다(위 헬퍼 주석).
-    # 실시간 오버레이(`_apply_realtime_overlay`)는 일간(%)만 덮으므로 여기는 흔들리지 않는다.
-    prev_day_pct = _confirmed_day_change_pct(confirmed_close_series, confirmed_bar_date, anchor_close=anchor_close)
-
     # 고점 대비(%) — 모멘텀 전략과 **같은 함수**(core.strategy.scoring.drawdown_from_high_pct).
     drawdown = drawdown_from_high_pct(series, current_price)
 
@@ -462,7 +409,7 @@ def _extract_price_metrics_from_close_series(
         # 20일 일간 수익률 표준편차(%) — 모멘텀 진입 문턱 판정과 같은 정의(화면 공용 컬럼).
         "변동성": round(latest_volatility, 2) if latest_volatility is not None else None,
         "일간(%)": daily_pct,
-        "전거래일(%)": prev_day_pct,
+        "전거래일(%)": None,
         "1주(%)": _calc_period_return(series, 5),
         "2주(%)": _calc_period_return(series, 10),
         "3주(%)": _calc_period_return(series, 15),
@@ -847,18 +794,8 @@ def build_ticker_type_rankings(
     if callable(status_callback):
         status_callback("실시간 가격 조회")
     today_korea = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
-    # 전거래일 컬럼이 앵커 봉보다 한 거래일 앞을 보일지 — 일간(%)이 앵커 봉(마지막 마감 거래일)의
-    # 변동을 보이는 동안이다. 「오늘」 규칙이 있는 시장(한국)은 오늘 정규장이 끝난 뒤 자정까지
-    # (애프터·마감), 없는 시장은 마감 세션이다. 자정이 지나면 일간은 0% 이고 앵커 봉이 전거래일이다.
-    if has_session_day(country_code):
-        today_session_day = session_day(country_code)
-        prior_day_column = (
-            selected_as_of_date == today_korea
-            and today_session_day is not None
-            and pd.Timestamp(today_session_day) == bar_anchor(country_code)
-        )
-    else:
-        prior_day_column = selected_as_of_date == today_korea and market_session(country_code)["session"] == CLOSED
+    # 전거래일이 앵커 봉보다 한 거래일 앞을 보일지 — 규칙은 공용(`prior_day_shown`).
+    prior_day_column = prior_day_shown(country_code, as_of_is_today=selected_as_of_date == today_korea)
     realtime_allowed = selected_as_of_date == today_korea
     realtime_snapshot = (
         realtime_snapshot_override
@@ -916,14 +853,12 @@ def build_ticker_type_rankings(
         else:
             price_metrics = _extract_price_metrics_from_close_series(
                 effective_close_series,
-                confirmed_close_series=base_close_series,
-                confirmed_bar_date=pool_last_bar,
-                anchor_close=last_regular_close(realtime_entry),
                 reference_date=selected_as_of_date,
                 monthly_labels=monthly_labels,
             )
-            if prior_day_column:
-                price_metrics["전거래일(%)"] = _prior_confirmed_day_change_pct(base_close_series, pool_last_bar)
+            price_metrics["전거래일(%)"] = previous_day_change_pct(
+                base_close_series, realtime_entry, country_code, prior_shown=prior_day_column
+            )
             price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
             # 장중 신고 터치 — 오늘 고가 기준(위 헬퍼 주석 참조). 당일에만 참이 될 수 있다.
             price_metrics["고점터치"] = _touched_new_high_today(base_close_series, realtime_entry)
