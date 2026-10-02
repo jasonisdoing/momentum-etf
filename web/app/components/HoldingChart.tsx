@@ -36,6 +36,8 @@ export type HoldingChartData = {
   ma_lines: { ma_days: number; ma_type: string; points: { time: string; value: number }[] }[];
   /** 내 평균 매입가 — 실제로 들고 있는 종목에만 온다(`/ticker` 상세와 같은 값). */
   avg_buy_price?: number | null;
+  /** 차트에 평단 점선·배지를 그릴지(config.HOLDING_CHART_SHOW_AVG_BUY_PRICE). 수익률 배지는 이 값과 무관하다. */
+  show_avg_line?: boolean;
   /** 통화(KRW·USD·AUD) — 가격에 기호를 붙이는 데 쓴다. 풀마다 다르다. */
   currency?: string | null;
   /** 이 요청의 차트들이 공유하는 날짜 축 — 전체 거래일 수와, 창 시작부터 첫 캔들까지의 빈 칸 수.
@@ -160,7 +162,7 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
     }
     // 내 평균 매입가 — 실제로 들고 있으면 점선으로 긋는다(`/ticker` 상세와 같은 표기).
     // 전략의 진입가(Buy 마커)와 다르다: 이건 여러 계좌를 합친 내 실제 평단이다.
-    const avgBuyPrice = chart.avg_buy_price;
+    const avgBuyPrice = chart.show_avg_line ? chart.avg_buy_price : null;
     if (avgBuyPrice != null && Number.isFinite(avgBuyPrice) && avgBuyPrice > 0) {
       candles.createPriceLine({
         price: avgBuyPrice,
