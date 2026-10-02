@@ -907,6 +907,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             minWidth: 84,
             width: 84,
             cellStyle: { textAlign: "center" },
+            cellClass: (params) =>
+              params.data && dirtyCellKeys.includes(buildDirtyCellKey(params.data.id, "제외")) ? "rankDirtyCell" : "",
             cellRenderer: (params: { data?: RankGridRow; value: boolean | null | undefined }) => {
               if (params.data?.__isAddingRow) return null;
               const ticker = params.data?.티커;
@@ -918,21 +920,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                     className="form-check-input"
                     checked={!!params.value}
                     style={{ cursor: "pointer", marginTop: 0 }}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      startTransition(async () => {
-                        try {
-                          await updateStockExclude(selectedTickerType, ticker, checked);
-                          toast.success(`[${ticker}] 제외 종목 ${checked ? "설정" : "해제"} 완료`);
-                          void load({
-                            ticker_type: selectedTickerType,
-                            ma_rule_override: maRule ?? undefined,
-                          });
-                        } catch (error) {
-                          showErrorToast(error instanceof Error ? error.message : "제외 종목 설정에 실패했습니다.");
-                        }
-                      });
-                    }}
+                    onChange={(e) => handleExcludeChanged(params.data, e.target.checked)}
                   />
                 </div>
               );
@@ -1460,6 +1448,21 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setDirtyCellKeys((prev) => (prev.includes(dirtyCellKey) ? prev : [...prev, dirtyCellKey]));
   }
 
+  /** 제외 종목 토글 — 버킷과 같이 화면에만 반영하고 저장 버튼에서 한꺼번에 보낸다(매번 재계산하지 않는다). */
+  function handleExcludeChanged(row: RankGridRow | undefined, excluded: boolean) {
+    if (!row || row.__isAddingRow) {
+      return;
+    }
+    setRows((prev) =>
+      prev.map((currentRow) =>
+        getRowId(currentRow) === row.id ? { ...currentRow, exclude_from_ranking: excluded } : currentRow,
+      ),
+    );
+    setDirtyRowIds((prev) => (prev.includes(row.id) ? prev : [...prev, row.id]));
+    const dirtyCellKey = buildDirtyCellKey(row.id, "제외");
+    setDirtyCellKeys((prev) => (prev.includes(dirtyCellKey) ? prev : [...prev, dirtyCellKey]));
+  }
+
   async function handleValidateAddingTicker(id: string, tickerInput?: string) {
     const current = addingRows.find((row) => row.id === id);
     const ticker = normalizeTicker(tickerInput ?? addingTickerDraftRef.current[id] ?? current?.ticker ?? "");
@@ -1543,7 +1546,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   async function processDirtyRows() {
     const dirtyRows = rows.filter((row) => dirtyRowIds.includes(getRowId(row)));
     for (const row of dirtyRows) {
-      await updateStockBucket(selectedTickerType, String(row.티커 ?? ""), Number(row.bucket ?? 1));
+      const ticker = String(row.티커 ?? "");
+      const rowId = getRowId(row);
+      if (dirtyCellKeys.includes(buildDirtyCellKey(rowId, "버킷"))) {
+        await updateStockBucket(selectedTickerType, ticker, Number(row.bucket ?? 1));
+      }
+      if (dirtyCellKeys.includes(buildDirtyCellKey(rowId, "제외"))) {
+        await updateStockExclude(selectedTickerType, ticker, Boolean(row.exclude_from_ranking));
+      }
     }
   }
 
