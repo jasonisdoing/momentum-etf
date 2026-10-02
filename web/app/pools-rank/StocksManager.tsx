@@ -17,6 +17,7 @@ import {
   maExitGapColumn,
   volatilityColumn,
   marketCapRankColumn,
+  rankColumn,
   stockMemoColumn,
   stockNameColumn,
   tickerColumn,
@@ -792,50 +793,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
     const leadingColumns: ColDef<RankGridRow>[] = [
-      {
-        field: "순위",
-        headerName: "순위",
-        pinned: "left",
-        minWidth: 86,
-        width: 86,
-        cellStyle: { justifyContent: "center", textAlign: "center", overflow: "hidden", paddingLeft: 2, paddingRight: 2 },
-        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
-          if (params.data?.is_benchmark) {
-            return (
-              <span style={{ fontSize: "var(--fs-base)", display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: 700 }} title="벤치마크 종목">
-                ⭐ {params.value == null ? "-" : formatNumber(params.value, 0)}
-              </span>
-            );
-          }
-          if (pageMode === "rank" && params.data?.exclude_from_ranking) {
-            return (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "4px",
-                  borderRadius: "999px",
-                  border: "1px solid #c7d2fe",
-                  background: "#eef2ff",
-                  color: "#4338ca",
-                  fontSize: "var(--fs-sm)",
-                  fontWeight: 700,
-                  lineHeight: 1,
-                  padding: "0.15rem 0.4rem",
-                  whiteSpace: "nowrap",
-                  maxWidth: "100%",
-                }}
-              >
-                📌제외 {params.value == null ? "-" : formatNumber(params.value, 0)}
-              </span>
-            );
-          }
-          return (
-            <span style={{ fontWeight: 700 }}>{params.value == null ? "-" : formatNumber(params.value, 0)}</span>
-          );
+      // 순위 — 공용 컬럼(자산 관리·모멘텀과 같은 폭·굵기). 벤치마크 ⭐ · 랭킹 제외 📌 만 이 화면이 붙인다.
+      rankColumn<RankGridRow>((row) => row?.순위, {
+        badge: (row) => {
+          if (row?.is_benchmark) return "benchmark";
+          return pageMode === "rank" && row?.exclude_from_ranking ? "excluded" : null;
         },
-      },
+      }),
       {
         colId: "이전순위변동",
         headerName: "이전",
