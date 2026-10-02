@@ -25,6 +25,7 @@ from services.price_service import (
     get_realtime_snapshot_meta,
 )
 from services.stock_cache_service import get_stock_cache_meta
+from utils.asx_ticker import ensure_asx_prefix
 from utils.cache_utils import (
     get_cache_refresh_completed_at,
     load_cached_close_series_bulk_before_or_at_with_fallback,
@@ -804,7 +805,10 @@ def build_ticker_detail_payload(
     country_clean = str(country_code or "").strip().lower()
     if country_clean in ("kor", "au", "us"):
         db_ticker = ticker.split(":")[-1] if ":" in ticker else ticker
-        cache_document = get_stock_cache_meta(ticker_type, db_ticker)
+        # 메타 캐시(구성종목 포함)는 호주를 `ASX:` 접두사 키로 저장한다 — 접두사를 뗀 채 조회하면
+        # 못 찾아 호주 ETF 전체가 「구성종목 캐시 없음」으로 보였다.
+        meta_ticker = ensure_asx_prefix(db_ticker) if country_clean == "au" else db_ticker
+        cache_document = get_stock_cache_meta(ticker_type, meta_ticker)
         holdings_cache = dict(cache_document.get("holdings_cache") or {}) if isinstance(cache_document, dict) else {}
         holdings = list(holdings_cache.get("items") or [])
         if country_clean == "kor":
@@ -843,7 +847,7 @@ def build_ticker_detail_payload(
             # /holdings 엔드포인트와 동일한 캐시 결과를 공유한다.
             # 공유 스냅샷이 주어지면(비교 화면) 캐시를 우회해 동일 시세로 재계산한다.
             bundle = compute_portfolio_change_bundle(
-                db_ticker,
+                meta_ticker,
                 ticker_type,
                 use_cache=use_bundle_cache,
                 component_price_snapshot=component_price_snapshot,
