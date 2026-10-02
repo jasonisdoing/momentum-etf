@@ -108,7 +108,7 @@ def _live_quotes(pool: str, tickers: list[str]) -> dict[str, Any]:
     장전(동시호가) 구간은 ``pre_market`` 으로 표시만 하고 막지는 않는다. 그 시각
     스냅샷의 고가·시가는 아직 **직전 세션의 값**이라 호출부가 그 값들만 빼고 쓴다.
     """
-    from utils.effective_prices import bar_anchor, effective_bar_date, live_prices_for_bar
+    from utils.effective_prices import bar_anchor, effective_bar_date, last_regular_close, live_prices_for_bar
     from utils.settings_loader import get_ticker_type_settings
 
     empty: dict[str, Any] = {
@@ -156,6 +156,8 @@ def _live_quotes(pool: str, tickers: list[str]) -> dict[str, Any]:
             "high": float(quote.get("high") or price),
             "open": float(open_val) if open_val is not None and float(open_val) > 0 else None,
             "change_pct": float(quote.get("changeRate")) if quote.get("changeRate") is not None else None,
+            # 마지막으로 마감된 정규장 종가 — 전거래일(%) 계산용(순위 화면과 같은 공용 규칙).
+            "last_regular_close": last_regular_close(quote),
         }
         if quote.get("is_pre_market"):
             pre_market = True

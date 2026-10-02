@@ -17,6 +17,7 @@ import {
   maExitGapColumn,
   volatilityColumn,
   marketCapRankColumn,
+  prevDayChangeColumn,
   rankColumn,
   stockMemoColumn,
   stockNameColumn,
@@ -1117,9 +1118,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       // 기간 수익률은 현재가 바로 오른쪽에 짧은 기간부터 모아 둔다.
       // 맨 앞의 전거래일은 기간이 아니라 **직전 한 봉**이다 — 장중에는 일간(%)이 흔들리므로
       // 마지막으로 확정된 하루를 바로 옆에서 같이 본다.
+      ...(metricMode === "basic" ? [prevDayChangeColumn<RankGridRow>("전거래일(%)")] : []),
       ...(metricMode === "basic"
         ? ([
-            { field: "전거래일(%)", headerName: "전거래일", width: 96, tooltip: "일간(%)이 나타내는 구간 바로 앞 거래일의 확정 등락률." },
             { field: "1주(%)", headerName: "1주", width: 88 },
             { field: "2주(%)", headerName: "2주", width: 88 },
             { field: "1달(%)", headerName: "1달", width: 88 },

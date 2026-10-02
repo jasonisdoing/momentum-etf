@@ -29,7 +29,7 @@ from core.strategy.momentum import signals as momentum_signals
 from core.strategy.price_panel import build_price_panel
 from core.strategy.scoring import drawdown_from_high_pct, is_new_listing, listing_months, rank_numbers
 from core.strategy.slot_backtest import run_slot_backtest
-from utils.effective_prices import apply_realtime_closes
+from utils.effective_prices import apply_realtime_closes, previous_day_change_pct, prior_day_shown
 from utils.logger import get_app_logger
 from utils.momentum_service import (
     adr_market_of_pool,
@@ -254,6 +254,18 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     row_by_ticker = {row["ticker"]: row for row in rows}
 
     quotes = _live_quotes(pool, tickers)
+    # 전거래일(%) — 순위 화면과 같은 공용 규칙·같은 함수(`previous_day_change_pct`). 이 뒤에서 행을 복사해
+    # 진입 예정 등을 만들므로 여기서 먼저 채운다.
+    country = _pool_country(pool)
+    prior_shown = prior_day_shown(country, as_of_is_today=True) if country else False
+    for row in rows:
+        entry = {"lastRegularClose": (quotes["by_ticker"].get(row["ticker"]) or {}).get("last_regular_close")}
+        prev_day = (
+            previous_day_change_pct(close_df[row["ticker"]], entry, country, prior_shown=prior_shown)
+            if country
+            else None
+        )
+        row["prev_day_change_pct"] = None if prev_day is None else round(prev_day, 2)
     # '다음 시가에 할 일' 은 **엔진이 판정한 값**을 그대로 쓴다 — 화면이 다시 판정하면
     # 백테스트와 갈라진다(tests/test_screen_matches_backtest.py 가 이 관계를 지킨다).
     planned_exits = set(simulated["planned_exits"])
@@ -384,6 +396,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     for item in [*holdings, *exited_today]:
         row = row_by_ticker.get(item["ticker"])
         item["change_pct"] = (row or {}).get("change_pct")
+        item["prev_day_change_pct"] = (row or {}).get("prev_day_change_pct")
         item["market_cap_rank"] = (row or {}).get("market_cap_rank")
         item["value_mult"] = (row or {}).get("value_mult")
         item["value_mult_live"] = (row or {}).get("value_mult_live")

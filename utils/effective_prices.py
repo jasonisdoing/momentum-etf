@@ -25,7 +25,14 @@ from typing import Any
 
 import pandas as pd
 
-from utils.market_session import market_today, regular_session_started
+from utils.market_session import (
+    CLOSED,
+    has_session_day,
+    market_session,
+    market_today,
+    regular_session_started,
+    session_day,
+)
 
 
 def _normalize_day(value: Any) -> pd.Timestamp:
@@ -130,6 +137,71 @@ def confirmed_close_on(close_series: pd.Series | None, bar_date: Any) -> float |
         return None
     value = float(matched.iloc[-1])
     return value if value > 0 else None
+
+
+def day_change_pct(close_series: pd.Series | None, bar_date: Any, *, anchor_close: float | None) -> float | None:
+    """`bar_date` 봉의 전일 대비 변동률(%) — 전거래일 컬럼의 계산.
+
+    **날짜로 찾는다.** 실시간을 반영한 시리즈의 뒤에서 두 번째 봉을 쓰면 장 시작 전
+    (프리·데이장)에 하루 더 밀린다 — 그 구간에서는 실시간이 새 봉을 만들지 않고 마지막
+    확정 봉을 **교체**하기 때문이다. 재현: MRNA 데이장에 09-23(-0.25%) 대신 09-22(+5.56%) 가 나왔다.
+
+    분자는 시세가 주는 확정 종가(`anchor_close`)를 쓰고, 없을 때만 캐시의 그 날짜 봉으로
+    내려간다 — 캐시의 마지막 봉은 설계상 잠정값이다(`last_regular_close`).
+    분모는 그 날짜 **직전** 거래일의 캐시 봉이고, 이쪽은 이미 확정된 봉이다.
+    """
+    prev_close = confirmed_close_before(close_series, bar_date)
+    if prev_close is None:
+        return None
+
+    if anchor_close is not None and anchor_close > 0:
+        close = float(anchor_close)
+    else:
+        # 그 **날짜** 봉만 쓴다. 없는 종목(거래정지·상장 직후)은 비워 둔다 —
+        # 며칠치 변동을 하루치로 표기하지 않는다.
+        close = confirmed_close_on(close_series, bar_date)
+        if close is None:
+            return None
+    return ((close / prev_close) - 1.0) * 100.0
+
+
+def prior_day_shown(country_code: str, *, as_of_is_today: bool) -> bool:
+    """전거래일 컬럼이 앵커 봉보다 **한 거래일 앞**을 보일지.
+
+    일간(%)이 앵커 봉(마지막 마감 거래일)의 변동을 보이는 동안이다. 「오늘」 규칙이 있는
+    시장(한국)은 오늘 정규장이 끝난 뒤 자정까지(애프터·마감), 없는 시장은 마감 세션이다.
+    자정이 지나면 일간은 0% 이고 앵커 봉이 전거래일이다. 과거 기준일이면 항상 거짓.
+    """
+    if not as_of_is_today:
+        return False
+    if has_session_day(country_code):
+        today_session_day = session_day(country_code)
+        return today_session_day is not None and pd.Timestamp(today_session_day) == bar_anchor(country_code)
+    return market_session(country_code)["session"] == CLOSED
+
+
+def previous_day_change_pct(
+    confirmed_close_series: pd.Series | None,
+    realtime_entry: Mapping[str, Any] | None,
+    country_code: str,
+    *,
+    prior_shown: bool,
+) -> float | None:
+    """전거래일(%) — 순위·모멘텀 화면 공용. `prior_shown` 은 `prior_day_shown` 의 결과.
+
+    기본은 앵커 봉의 변동(일간이 이미 새 날을 보이는 구간)이고, 일간이 앵커 봉을 보이는
+    동안(`prior_shown`)에는 그보다 한 거래일 앞 봉의 변동이다.
+    """
+    anchor = bar_anchor(country_code)
+    if not prior_shown:
+        return day_change_pct(confirmed_close_series, anchor, anchor_close=last_regular_close(realtime_entry))
+    if confirmed_close_series is None or confirmed_close_series.empty:
+        return None
+    series = pd.to_numeric(confirmed_close_series, errors="coerce").dropna()
+    prior = series.loc[pd.DatetimeIndex(series.index).normalize() < anchor]
+    if prior.empty:
+        return None
+    return day_change_pct(series, pd.Timestamp(prior.index[-1]), anchor_close=None)
 
 
 def _realtime_price(entry: Mapping[str, Any] | None, bar_day: pd.Timestamp) -> float | None:
