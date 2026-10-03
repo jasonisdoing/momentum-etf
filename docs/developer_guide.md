@@ -19,6 +19,8 @@
 
 기존 파일은 옮기지 않는다 — 신규 코드부터 위 기준으로 수렴시킨다.
 
+미국 ETF 구성종목은 `utils/stock_meta_updater.py`의 공통 수집 경로를 거쳐 저장한다. Invesco 공식 연동은 `services/invesco_us_service.py`, 외부 소스 목록은 `utils/data_source_catalog.py`가 담당한다.
+
 ### 로컬 실행
 
 ```bash
