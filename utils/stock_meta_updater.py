@@ -1,14 +1,14 @@
 """계좌 종목 메타데이터를 업데이트합니다."""
 
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests  # noqa: F401  # 타입 힌트/하위 호환을 위해 유지
 import yfinance as yf
 
-from config import CACHE_TTL_META
 from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
 from services.etf_meta_service import fetch_korean_etf_info_from_naver
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
@@ -205,26 +205,30 @@ from collections.abc import Callable
 
 from utils.stock_list_io import bulk_update_stocks, get_all_etfs_including_deleted
 
-# ETF 메타(info) 캐시 TTL — 이 시간 안에 갱신된 메타가 있으면 네이버 info 호출을 스킵.
-# 사용자 정책: info 는 변경 빈도가 낮으므로 1일 TTL, holdings 는 항상 갱신.
-_ETF_INFO_CACHE_TTL = timedelta(seconds=CACHE_TTL_META)
 
-
+# ETF 메타(info) 갱신 주기 — 하루에 한 번(한국 날짜 기준). 같은 날 다시 돌면 네이버 info 호출을 스킵하고,
+# holdings 는 항상 갱신한다.
 def _is_meta_cache_fresh(existing_doc: dict[str, Any] | None) -> bool:
-    """기존 메타 캐시 문서의 updated_at 이 TTL 이내인지 판정."""
+    """info 를 **오늘(KST)** 이미 받았는지 판정한다.
+
+    판정은 info 를 받은 시각(`meta_cache.info_updated_at`)으로만 한다. 문서의 `updated_at` 은 holdings
+    갱신·포트폴리오 변동 캐시 저장 때마다 바뀌어서, 이걸 쓰면 info 가 영영 낡아도 매일 「방금 갱신됨」으로
+    보여 갱신이 멈춘다(2026-09-28 이후 NAV·보수·배당이 갱신되지 않았다). 주기를 24시간 경과가 아니라
+    날짜로 잡는 것은 매일 같은 시각에 도는 배치가 24시간 직전에 걸려 건너뛰는 일을 막기 위해서다.
+    """
     if not isinstance(existing_doc, dict):
         return False
     meta = existing_doc.get("meta_cache")
     if not isinstance(meta, dict) or not meta:
         return False
-    updated_at = existing_doc.get("updated_at")
-    if not isinstance(updated_at, datetime):
+    fetched_at = meta.get("info_updated_at")
+    if not isinstance(fetched_at, datetime):
         return False
-    # MongoDB datetime 은 naive(UTC) 일 수 있어 tz-aware 화
-    if updated_at.tzinfo is None:
-        updated_at = updated_at.replace(tzinfo=timezone.utc)
-    now = datetime.now(timezone.utc)
-    return (now - updated_at) < _ETF_INFO_CACHE_TTL
+    # MongoDB datetime 은 naive(UTC) 로 돌아오므로 tz-aware 화
+    if fetched_at.tzinfo is None:
+        fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+    kst = ZoneInfo("Asia/Seoul")
+    return fetched_at.astimezone(kst).date() == datetime.now(kst).date()
 
 
 def _refresh_korean_etf_meta_cache(
@@ -259,6 +263,8 @@ def _refresh_korean_etf_meta_cache(
         meta_cache = {
             "source": str(etf_info.get("source") or "naver_etf_meta"),
             "updated_at": str(etf_info.get("fetched_at") or ""),
+            # info 를 받은 시각 — 갱신 주기 판정(`_is_meta_cache_fresh`)이 이 값만 본다.
+            "info_updated_at": datetime.now(timezone.utc),
             "nav": inav_snapshot.get("nav"),
             "deviation": inav_snapshot.get("deviation"),
             "reference_date": etf_info.get("reference_date"),
