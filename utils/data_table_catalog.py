@@ -3,8 +3,7 @@
 `/data-tables` 화면이 이 목록을 그대로 보여준다. 화면이 목록을 따로 들지 않는 이유는,
 같은 목록을 **종목풀·계좌 삭제**와 **고아 데이터 점검**도 써야 하기 때문이다. 예전에는
 "무엇을 지워야 하는가" 가 `delete_pool`/`delete_account` 안에 흩어져 있어서, 컬렉션이
-하나 늘 때마다 조용히 빠졌다(그래서 `previous_stock_cache_meta` 에 삭제된 풀의 문서가
-수백 건 남았다). 여기 한 줄을 더하면 화면·삭제·점검이 함께 따라온다.
+하나 늘 때마다 조용히 빠졌다(그래서 삭제된 풀의 문서가 수백 건 남은 컬렉션이 있었다). 여기 한 줄을 더하면 화면·삭제·점검이 함께 따라온다.
 
 **카탈로그에 없는 컬렉션은 화면에 '미분류'로 뜬다.** 새 컬렉션을 만들었는데 여기 등록하지
 않으면 바로 눈에 띄라고 일부러 그렇게 둔다 — 조용히 넘어가지 않는 것이 목적이다.
@@ -78,12 +77,6 @@ class TableSpec:
 _POOL_TABLES: tuple[TableSpec, ...] = (
     TableSpec("stock_meta", "pool", "종목풀에 등록된 종목(이름·상장일·버킷·메모)", owner_field="ticker_type"),
     TableSpec("stock_cache_meta", "pool", "종목별 계산 메타(배당률·보수·시총순위 등)", owner_field="ticker_type"),
-    TableSpec(
-        "previous_stock_cache_meta",
-        "pool",
-        "전일 기준 종목 메타 스냅샷 — 변화량 표시에 쓴다",
-        owner_field="ticker_type",
-    ),
     TableSpec("pool_rank_summary", "pool", "종목풀 순위 요약(화면 진입 시 즉시 표시용)", owner_is_id=True),
     TableSpec("pool_strategy_backtest", "pool", "종목풀별 전략 백테스트 결과", owner_field="pool"),
     TableSpec("cache_refresh_status", "pool", "종목풀별 마지막 가격 캐시 갱신 완료 시각", owner_field="target_id"),

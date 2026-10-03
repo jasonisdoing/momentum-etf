@@ -195,8 +195,7 @@ def determine_portfolio_change_base_date() -> str:
     다음 세션 가격을 가늠하는 용도라, ETF 가격에 이미 반영된 과거 세션이 섞이면 안 된다.
     예전에는 직전 메타 스냅샷의 날짜를 썼는데, 배치 주기에 묶여 한두 세션씩 뒤처졌고
     그 사이 변동(이미 ETF 가격에 반영된 몫)까지 '변동'으로 집계됐다(2026-09).
-    거래일 캘린더로 직접 정한다. 대상 화면이 전부 국내 상장 ETF 라 국내 달력 고정이다
-    (스냅샷 귀속일 `_resolve_snapshot_date` 와 같은 기준).
+    거래일 캘린더로 직접 정한다. 대상 화면이 전부 국내 상장 ETF 라 국내 달력 고정이다.
     """
     from utils.market_session import last_closed_session_date
 
