@@ -45,7 +45,7 @@ const MARKET_ROWS = [
   { label: "미국 개별주", country: "us", pool: "us_stock" },
 ] as const;
 /** 요일별 통계에 넣는 지수 — 달력 칸의 지수 줄과 같은 4개. */
-const STAT_INDICES = MARKET_ROWS.flatMap((row) => ("ticker" in row ? [{ label: row.label, ticker: row.ticker }] : []));
+const STAT_INDICES = MARKET_ROWS.flatMap((row) => ("ticker" in row ? [{ label: row.label, ticker: row.ticker, country: row.country }] : []));
 const SESSION_LABELS: Record<DayData["sessions"]["kor"], string> = {
   closed: "휴장",
   closed_future: "휴장 예정",
@@ -263,6 +263,46 @@ function MonthBlockView({ block, today, daysByKey, adrMeta, onVisible, registerB
   );
 }
 
+/** 달력 맨 아래에 고정되는 한 줄 — 날짜 칸과 같은 모양·색으로 요일별 평균 등락률을 보여 준다. */
+function WeekdayStatsRow({ stats }: { stats: WeekdayStatsResponse | null }) {
+  const period = stats ? `최근 ${stats.months}개월 (${stats.start} ~ ${stats.end}) 확정 거래일 기준 평균 등락률` : "최근 12개월 평균 등락률";
+  return (
+    <section className={[styles.monthBlock, styles.statsBlock].join(" ")} aria-label="요일별 평균 등락률">
+      <div className={styles.monthColumn} title={period}>
+        <span className={styles.monthLabel}>요일별<br />평균<br />{stats?.months ?? 12}개월</span>
+      </div>
+      {VISIBLE_WEEKDAYS.map((weekday, weekdayIndex) => (
+        <div key={weekday} className={styles.day} role="gridcell" aria-label={`${weekday}요일 평균 등락률`}>
+          <span className={styles.dayHeader}><strong>{weekday}</strong></span>
+          <span className={styles.indexGroups}>
+            {(["kor", "us"] as const).map((country) => {
+              const rows = STAT_INDICES.filter((row) => row.country === country);
+              const means = rows.map((row) => stats?.stats[row.ticker]?.[String(weekdayIndex)]?.mean_pct ?? null);
+              const sum = means.some((mean) => mean == null) ? null : means.reduce<number>((acc, mean) => acc + (mean as number), 0);
+              return (
+                <span key={country} className={[styles.indexRows, marketBackground(sum)].filter(Boolean).join(" ")} title={period}>
+                  {rows.map((row, index) => {
+                    const stat = stats?.stats[row.ticker]?.[String(weekdayIndex)];
+                    return (
+                      <span key={row.ticker}>
+                        <span>{row.label}</span>
+                        <span
+                          className={changeClass(means[index])}
+                          title={stat ? `상승한 날 ${Math.round(stat.up_ratio * 100)}% · ${stat.count}거래일` : undefined}
+                        >{formatChange(means[index])}</span>
+                      </span>
+                    );
+                  })}
+                </span>
+              );
+            })}
+          </span>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 export function MarketCalendarClient({ today }: { today: string }) {
   const [todayYear, todayMonth] = today.split("-").map(Number);
   const months = useMemo(() => buildMonthBlocks(todayYear, todayMonth), [todayYear, todayMonth]);
@@ -377,6 +417,7 @@ export function MarketCalendarClient({ today }: { today: string }) {
         </div>
 
         {calendarError ? <p className={styles.error} role="alert">{calendarError}</p> : null}
+        {weekdayStatsError ? <p className={styles.error} role="alert">{weekdayStatsError}</p> : null}
         {warnings.length ? <p className={styles.error} role="status">{warnings.join(" ")}</p> : null}
         <p className={styles.notice}>
           {loading ? "날짜별 시장 데이터를 불러오는 중…" : "지수는 시장 현지 거래일·환율은 일봉 날짜 기준 · 장중·선물은 잠정값(*) · 미국 개장 전 지수 값이 없으면 오늘의 지연 선물 시세를 표시합니다."}
@@ -401,42 +442,10 @@ export function MarketCalendarClient({ today }: { today: string }) {
                 scrollRoot={scrollRoot}
               />
             ))}
+            <WeekdayStatsRow stats={weekdayStats} />
           </div>
         </div>
 
-        <section className={styles.stats} aria-label="요일별 평균 등락률">
-          <div className={styles.statsHeader}>
-            <strong>요일별 평균 등락률</strong>
-            <span>
-              최근 {weekdayStats?.months ?? 12}개월{weekdayStats ? ` (${weekdayStats.start} ~ ${weekdayStats.end})` : ""} · 확정 거래일만 · 칸 아래는 상승한 날의 비율과 거래일 수
-            </span>
-          </div>
-          {weekdayStatsError ? <p className={styles.error} role="alert">{weekdayStatsError}</p> : null}
-          <table className={styles.statsTable}>
-            <thead>
-              <tr>
-                <th />
-                {VISIBLE_WEEKDAYS.map((weekday) => <th key={weekday}>{weekday}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {STAT_INDICES.map(({ label, ticker }) => (
-                <tr key={ticker}>
-                  <th>{label}</th>
-                  {VISIBLE_WEEKDAYS.map((weekday, index) => {
-                    const stat = weekdayStats?.stats[ticker]?.[String(index)];
-                    return (
-                      <td key={weekday}>
-                        <span className={changeClass(stat?.mean_pct)}>{formatChange(stat?.mean_pct)}</span>
-                        {stat ? <small>상승 {Math.round(stat.up_ratio * 100)}% · {stat.count}일</small> : null}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
       </div>
     </PageFrame>
   );
