@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 
+import { AppLoadingState } from "../components/AppLoadingState";
 import { MonthsSelect } from "../components/MonthsSelect";
 import { PageFrame } from "../components/PageFrame";
 import styles from "./market-calendar.module.css";
@@ -411,6 +412,9 @@ export function MarketCalendarClient({ today }: { today: string }) {
     return () => controller.abort();
   }, [statsMonths]);
 
+  // 첫 데이터가 오기 전에는 빈 칸 대신 다른 화면과 같은 로딩 표시를 보인다. 이후 스크롤로 불러오는 달은 칸이 채워지는 것으로 충분하다.
+  const initialLoading = Object.keys(daysByKey).length === 0 && !calendarError;
+
   const visibleMonth = months.find((month) => month.key === visibleMonthKey) ?? months[months.length - 1];
 
   return (
@@ -448,6 +452,14 @@ export function MarketCalendarClient({ today }: { today: string }) {
                 </div>
               </div>
             </div>
+            <div className={styles.calendarArea}>
+              {initialLoading ? (
+                <div className={styles.loadingOverlay}>
+                  <div className="appPageLoading">
+                    <AppLoadingState label="시장 데이터를 불러오는 중..." />
+                  </div>
+                </div>
+              ) : null}
         <div className={styles.calendarScroll} ref={setScrollRoot} onScroll={updateVisibleMonth}>
           <div className={styles.calendarInner}>
             <div className={styles.weekdayRow} ref={stickyRef} role="row">
@@ -471,6 +483,7 @@ export function MarketCalendarClient({ today }: { today: string }) {
             <WeekdayStatsRow stats={weekdayStats} />
           </div>
         </div>
+            </div>
           </div>
         </section>
       </div>
