@@ -242,7 +242,13 @@ function MonthBlockView({ block, today, selectedDay, daysByKey, adrMeta, onSelec
                 );
               })}
             </span>
-            <span className={styles.extraRow}><span>USD/KRW</span><span className={changeClass(data?.fx?.change_pct)}>{formatChange(data?.fx?.change_pct)}{data?.fx?.provisional ? "*" : ""}</span></span>
+            <span className={styles.extraRow}>
+              <span>USD/KRW</span>
+              <span className={styles.fxValue}>
+                {data?.fx ? <span>{data.fx.close.toFixed(2)}원</span> : null}
+                <span className={changeClass(data?.fx?.change_pct)}>{formatChange(data?.fx?.change_pct)}{data?.fx?.provisional ? "*" : ""}</span>
+              </span>
+            </span>
           </button>
         );
       })}
