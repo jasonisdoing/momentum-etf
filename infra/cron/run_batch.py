@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -200,7 +201,16 @@ def _slept_during_run(started_wall: datetime, elapsed: float) -> bool:
     return wall - elapsed >= _SLEEP_GAP_SECONDS
 
 
+def _exit_on_sigterm(signum: int, _frame: object) -> None:
+    """SIGTERM(화면의 중단 버튼)을 예외로 바꿔 자식 종료와 락 해제가 돌게 한다.
+
+    기본 처리는 finally 없이 즉사해 batch_locks 기록이 남고 화면이 계속 실행 중으로 보인다.
+    """
+    raise SystemExit(128 + signum)
+
+
 def main(argv: list[str]) -> int:
+    signal.signal(signal.SIGTERM, _exit_on_sigterm)
     if len(argv) < 3:
         print(
             "usage: run_batch.py <job_name> <command...>",
