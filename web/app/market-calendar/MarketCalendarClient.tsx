@@ -24,6 +24,16 @@ type CalendarResponse = {
   error?: string;
 };
 
+type WeekdayStat = { mean_pct: number; up_ratio: number; count: number };
+type WeekdayStatsResponse = {
+  start: string;
+  end: string;
+  months: number;
+  /** 지수 티커 → 요일 번호(월=0 … 금=4) → 통계. 센 거래일이 없는 요일은 빠진다. */
+  stats: Record<string, Record<string, WeekdayStat>>;
+  error?: string;
+};
+
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const VISIBLE_WEEKDAYS = WEEKDAYS.slice(1, 6);
 const MARKET_ROWS = [
@@ -34,6 +44,8 @@ const MARKET_ROWS = [
   { label: "나스닥 100", country: "us", ticker: "^NDX" },
   { label: "미국 개별주", country: "us", pool: "us_stock" },
 ] as const;
+/** 요일별 통계에 넣는 지수 — 달력 칸의 지수 줄과 같은 4개. */
+const STAT_INDICES = MARKET_ROWS.flatMap((row) => ("ticker" in row ? [{ label: row.label, ticker: row.ticker }] : []));
 const SESSION_LABELS: Record<DayData["sessions"]["kor"], string> = {
   closed: "휴장",
   closed_future: "휴장 예정",
@@ -143,17 +155,15 @@ function buildMonthBlocks(todayYear: number, todayMonth: number): MonthBlock[] {
 type MonthBlockViewProps = {
   block: MonthBlock;
   today: string;
-  selectedDay: string;
   daysByKey: Record<string, DayData>;
   adrMeta: CalendarResponse["adr_meta"] | null;
-  onSelect: (key: string) => void;
   onVisible: (block: MonthBlock, first: string, last: string) => void;
   registerBlock: (key: string, element: HTMLElement | null) => void;
   scrollRoot: HTMLElement | null;
 };
 
 /** 한 달 묶음 — 왼쪽 좁은 월 컬럼이 이 묶음의 주들에 걸쳐 있다. 화면 가까이 오면 그때 데이터를 불러온다. */
-function MonthBlockView({ block, today, selectedDay, daysByKey, adrMeta, onSelect, onVisible, registerBlock, scrollRoot }: MonthBlockViewProps) {
+function MonthBlockView({ block, today, daysByKey, adrMeta, onVisible, registerBlock, scrollRoot }: MonthBlockViewProps) {
   const cells = useMemo(() => block.weeks.flat(), [block]);
   const firstDay = cells[0].key;
   const lastDay = cells[cells.length - 1].key;
@@ -187,15 +197,12 @@ function MonthBlockView({ block, today, selectedDay, daysByKey, adrMeta, onSelec
       {cells.map((date) => {
         const data = daysByKey[date.key];
         return (
-          <button
+          <div
             key={date.key}
             id={`cal-${date.key}`}
-            type="button"
             role="gridcell"
             aria-label={dayLabel(date.key)}
-            aria-selected={selectedDay === date.key}
-            className={[styles.day, date.month % 2 === 1 ? styles.monthAlt : "", selectedDay === date.key ? styles.selected : ""].filter(Boolean).join(" ")}
-            onClick={() => onSelect(date.key)}
+            className={[styles.day, date.month % 2 === 1 ? styles.monthAlt : ""].filter(Boolean).join(" ")}
           >
             <span className={styles.dayHeader}>
               <strong>{date.day}</strong>
@@ -249,7 +256,7 @@ function MonthBlockView({ block, today, selectedDay, daysByKey, adrMeta, onSelec
                 <span className={changeClass(data?.fx?.change_pct)}>{formatChange(data?.fx?.change_pct)}{data?.fx?.provisional ? "*" : ""}</span>
               </span>
             </span>
-          </button>
+          </div>
         );
       })}
     </section>
@@ -259,7 +266,8 @@ function MonthBlockView({ block, today, selectedDay, daysByKey, adrMeta, onSelec
 export function MarketCalendarClient({ today }: { today: string }) {
   const [todayYear, todayMonth] = today.split("-").map(Number);
   const months = useMemo(() => buildMonthBlocks(todayYear, todayMonth), [todayYear, todayMonth]);
-  const [selectedDay, setSelectedDay] = useState(() => latestVisibleDay(today));
+  const [weekdayStats, setWeekdayStats] = useState<WeekdayStatsResponse | null>(null);
+  const [weekdayStatsError, setWeekdayStatsError] = useState<string | null>(null);
   const [visibleMonthKey, setVisibleMonthKey] = useState(monthKeyOf(todayYear, todayMonth - 1));
   const [daysByKey, setDaysByKey] = useState<Record<string, DayData>>({});
   const [adrMeta, setAdrMeta] = useState<CalendarResponse["adr_meta"] | null>(null);
@@ -320,14 +328,10 @@ export function MarketCalendarClient({ today }: { today: string }) {
     const index = months.findIndex((month) => month.key === visibleMonthKey);
     const target = months[Math.min(Math.max(index + offset, 0), months.length - 1)];
     scrollToMonth(target.key);
-    const firstDayInMonth = target.weeks.flat().find((day) => day.monthKey === target.key);
-    if (firstDayInMonth) setSelectedDay(firstDayInMonth.key);
   }
 
   function goToday() {
-    const day = latestVisibleDay(today);
-    setSelectedDay(day);
-    document.getElementById(`cal-${day}`)?.scrollIntoView({ block: "center" });
+    document.getElementById(`cal-${latestVisibleDay(today)}`)?.scrollIntoView({ block: "center" });
   }
 
   // 처음에는 최근 평일이 화면 가운데에 오게 맞춘다 — 위로 스크롤하면 지난달이 이어진다.
@@ -337,8 +341,23 @@ export function MarketCalendarClient({ today }: { today: string }) {
     updateVisibleMonth();
   }, [scrollRoot, today, updateVisibleMonth]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const response = await fetch("/api/market-calendar/weekday-stats", { cache: "no-store", signal: controller.signal });
+        const payload = (await response.json()) as WeekdayStatsResponse;
+        if (!response.ok || payload.error) throw new Error(payload.error ?? "요일별 통계를 불러오지 못했습니다.");
+        setWeekdayStats(payload);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setWeekdayStatsError(error instanceof Error ? error.message : "요일별 통계를 불러오지 못했습니다.");
+      }
+    })();
+    return () => controller.abort();
+  }, []);
+
   const visibleMonth = months.find((month) => month.key === visibleMonthKey) ?? months[months.length - 1];
-  const selectedData = daysByKey[selectedDay];
   const loading = loadingCount > 0;
 
   return (
@@ -375,10 +394,8 @@ export function MarketCalendarClient({ today }: { today: string }) {
                 key={block.key}
                 block={block}
                 today={today}
-                selectedDay={selectedDay}
                 daysByKey={daysByKey}
                 adrMeta={adrMeta}
-                onSelect={setSelectedDay}
                 onVisible={loadMonth}
                 registerBlock={registerSection}
                 scrollRoot={scrollRoot}
@@ -387,25 +404,38 @@ export function MarketCalendarClient({ today }: { today: string }) {
           </div>
         </div>
 
-        <section className={styles.detail} aria-label="선택한 날짜의 상세 정보">
-          <div><strong>{dayLabel(selectedDay)}</strong><span>선택한 날짜의 상세 정보</span></div>
-          {selectedData ? (
-            <>
-              <p>
-                한국 {SESSION_LABELS[selectedData.sessions.kor]} · 미국 {SESSION_LABELS[selectedData.sessions.us]}
-                {(["kor_stock", "us_stock"] as const).map((pool) => {
-                  const point = selectedData.adr[pool];
-                  return point ? ` · ${pool === "kor_stock" ? "한국" : "미국"} 개별주 ADR ${point.adr?.toFixed(1) ?? "—"} (상승 ${point.advance} · 하락 ${point.decline})` : "";
-                })}
-                {selectedData.fx ? ` · USD/KRW ${selectedData.fx.close.toFixed(2)}원` : ""}
-              </p>
-              {MARKET_ROWS.flatMap((row) => {
-                if (!("ticker" in row)) return [];
-                const issue = selectedData.index_issues[row.ticker];
-                return issue ? [<p key={row.label} className={styles.dataIssue} role="status">{row.label}: {issue.reason}</p>] : [];
-              })}
-            </>
-          ) : <p>{loading ? "불러오는 중…" : "이 날짜의 데이터가 없습니다."}</p>}
+        <section className={styles.stats} aria-label="요일별 평균 등락률">
+          <div className={styles.statsHeader}>
+            <strong>요일별 평균 등락률</strong>
+            <span>
+              최근 {weekdayStats?.months ?? 12}개월{weekdayStats ? ` (${weekdayStats.start} ~ ${weekdayStats.end})` : ""} · 확정 거래일만 · 칸 아래는 상승한 날의 비율과 거래일 수
+            </span>
+          </div>
+          {weekdayStatsError ? <p className={styles.error} role="alert">{weekdayStatsError}</p> : null}
+          <table className={styles.statsTable}>
+            <thead>
+              <tr>
+                <th />
+                {VISIBLE_WEEKDAYS.map((weekday) => <th key={weekday}>{weekday}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {STAT_INDICES.map(({ label, ticker }) => (
+                <tr key={ticker}>
+                  <th>{label}</th>
+                  {VISIBLE_WEEKDAYS.map((weekday, index) => {
+                    const stat = weekdayStats?.stats[ticker]?.[String(index)];
+                    return (
+                      <td key={weekday}>
+                        <span className={changeClass(stat?.mean_pct)}>{formatChange(stat?.mean_pct)}</span>
+                        {stat ? <small>상승 {Math.round(stat.up_ratio * 100)}% · {stat.count}일</small> : null}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       </div>
     </PageFrame>

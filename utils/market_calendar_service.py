@@ -206,3 +206,46 @@ def get_market_calendar(start: date, end: date) -> dict[str, Any]:
         for day, status in sessions.items()
     }
     return {"days": days, "adr_meta": adr_meta, "warnings": warnings}
+
+
+WEEKDAY_STATS_MONTHS = 12
+
+
+def get_weekday_stats(today: date | None = None) -> dict[str, Any]:
+    """최근 12개월 요일별 지수 등락률 통계 — 달력 칸과 같은 값(`_index_changes`)을 요일로 묶는다.
+
+    확정된 거래일만 센다: 장중 잠정값과 전 거래일 종가가 없어 변동률을 못 구한 날은 뺀다.
+    요일은 그 지수 시장의 현지 날짜 기준이라 달력 칸의 요일과 같다.
+    `mean_pct` 는 평균 등락률, `up_ratio` 는 상승한 날의 비율(0~1), `count` 는 센 거래일 수.
+    """
+    end = today or pd.Timestamp.now(tz="Asia/Seoul").date()
+    start = (pd.Timestamp(end) - pd.DateOffset(months=WEEKDAY_STATS_MONTHS)).date()
+    sessions = _market_sessions(start, end)
+    indices, _issues, warnings = _index_changes(start, end, sessions)
+
+    stats: dict[str, dict[str, dict[str, float | int]]] = {}
+    for ticker, points in indices.items():
+        by_weekday: dict[int, list[float]] = {weekday: [] for weekday in range(5)}
+        for day, point in points.items():
+            change = point.get("change_pct")
+            if change is None or point.get("provisional"):
+                continue
+            weekday = date.fromisoformat(day).weekday()
+            if weekday < 5:
+                by_weekday[weekday].append(float(change))
+        stats[ticker] = {
+            str(weekday): {
+                "mean_pct": round(sum(values) / len(values), 3),
+                "up_ratio": round(sum(1 for value in values if value > 0) / len(values), 3),
+                "count": len(values),
+            }
+            for weekday, values in by_weekday.items()
+            if values
+        }
+    return {
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "months": WEEKDAY_STATS_MONTHS,
+        "stats": stats,
+        "warnings": warnings,
+    }
