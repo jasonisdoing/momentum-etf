@@ -99,24 +99,9 @@ def market_today(country: str, now: datetime | None = None) -> date:
     return (now or datetime.now(zone)).astimezone(zone).date()
 
 
-def has_session_day(country: str) -> bool:
-    """「오늘」 규칙(`session_day`)을 쓰는 시장인지 — 시간표에 `session_day_start` 가 있는 시장."""
-    return "session_day_start" in _schedule(country)
-
-
-def session_day(country: str, now: datetime | None = None) -> date | None:
-    """일간(%)이 가리키는 거래일 — 오늘이 거래일이고 첫 세션 시작을 지났으면 오늘, 아니면 None.
-
-    None 은 「아직 오늘 거래가 없다」는 뜻이다(자정 이후 첫 세션 전·휴장일). 이때 일간은 0% 이고,
-    마지막 거래일의 변동은 전거래일에 보인다. `has_session_day` 인 시장만 부른다.
-    """
-    schedule = _schedule(country)
-    zone = ZoneInfo(str(schedule["timezone"]))
-    now_local = (now or datetime.now(zone)).astimezone(zone)
-    today = now_local.date()
-    if _is_trading_day(country, today) and now_local >= _at(zone, today, schedule["session_day_start"]):
-        return today
-    return None
+def aftermarket_in_daily_change(country: str) -> bool:
+    """애프터마켓 가격의 일간(%)이 그날 전체 변동인 시장인지 — 시간표의 `aftermarket_in_daily_change`."""
+    return bool(_schedule(country).get("aftermarket_in_daily_change"))
 
 
 def regular_session_started(country: str, now: datetime | None = None) -> bool:

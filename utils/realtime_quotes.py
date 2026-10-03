@@ -839,6 +839,14 @@ def _toss_us_price_entry(item: dict[str, Any], session: str, closed_day: str, in
         # 정규장의 전날 대비 등락률은 확정 봉을 읽는 화면이 별도로 계산한다.
         entry["prevClose"] = regular_close
         entry["changeRate"] = (price / regular_close - 1.0) * 100.0
+    if session == CLOSED and regular_field == "close":
+        # 마감 응답이 마지막 정규장 날짜의 것이면 `base` 는 그 전 거래일 종가다 — 종목풀 밖 종목도
+        # 가격 캐시 없이 마지막 거래일의 등락률을 낸다. 응답이 이미 다음 날로 넘어간 구간
+        # (`regular_field == "base"`)은 전일 종가를 알 수 없어 비워 둔다.
+        base = _safe_float(item.get("base"))
+        if base is not None and isfinite(base) and base > 0:
+            entry["prevClose"] = base
+            entry["changeRate"] = (price / base - 1.0) * 100.0
     # 거래량·거래대금은 API의 누적값을 전달한다. 세션별 값으로 임의 분리하지 않는다.
     for key, field in (("tradeValue", "value"), ("tradeVolume", "volume"), ("volume", "volume")):
         parsed = _safe_float(item.get(field))
