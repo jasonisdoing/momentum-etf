@@ -105,8 +105,6 @@ type MaLine = { ma_days: number; ma_type: string; points: { time: string; value:
 
 type TickerEtfInfo = {
   nav?: number | null;
-  nav_change?: number | null;
-  nav_change_pct?: number | null;
   deviation?: number | null;
   expense_ratio?: number | null;
   dividend_yield_ttm?: number | null;
@@ -998,8 +996,6 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
 
   const showEtfInfoSection = Boolean(selectedTicker?.is_etf);
   const showHoldingsSection = Boolean(selectedTicker?.is_etf);
-  const navDelta = etfInfo?.nav_change ?? null;
-  const navChangePct = etfInfo?.nav_change_pct ?? null;
 
   const portfolioChange = useMemo<{
     total_pct: number | null;
@@ -1284,8 +1280,6 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
                               <span className="tickerDetailInfoLabel">iNAV</span>
                               <div className="tickerDetailInfoMain">
                                 <strong>{formatCurrencyPrice(etfInfo?.nav ?? null, "kor")}</strong>
-                                <span className={getSignedClass(navDelta)}>{formatSignedPriceDelta(navDelta, "kor")}</span>
-                                <span className={getSignedClass(navChangePct)}>{formatPercent(navChangePct)}</span>
                               </div>
                             </div>
                             <div className="tickerDetailInfoSummaryGrid">

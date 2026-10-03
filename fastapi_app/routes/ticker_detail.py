@@ -44,7 +44,6 @@ from utils.kis_market import load_cached_kis_domestic_etf_master
 from utils.market_session import regular_session_started
 from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import list_available_accounts, load_common_settings
-from utils.stock_cache_meta_io import get_previous_stock_cache_meta
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs
 from utils.ticker_resolver import resolve_ticker_meta
@@ -313,21 +312,10 @@ def _build_korean_etf_info_payload(
         except (TypeError, ValueError):
             market_cap_krw = None
 
-    # 비교는 (현재 값 vs 직전 영업일 값) 한 쌍 — 조회 1회.
-    previous_meta = get_previous_stock_cache_meta(ticker_type, ticker)
-    prev_nav = None
-    if previous_meta and "meta_cache" in previous_meta:
-        prev_nav = previous_meta["meta_cache"].get("nav")
     # 포트폴리오 변동 기준일 — 계산과 같은 공용 함수(마지막 확정 국내 종가일).
     from services.portfolio_change_service import determine_portfolio_change_base_date
 
     portfolio_change_base_date = determine_portfolio_change_base_date()
-
-    nav_change = None
-    nav_change_pct = None
-    if nav_value is not None and prev_nav is not None and prev_nav > 0:
-        nav_change = float(nav_value) - float(prev_nav)
-        nav_change_pct = round((nav_change / float(prev_nav)) * 100, 2)
 
     # 환율은 **구성종목에 원화 아닌 통화가 있을 때만** 조회한다. 예전에는 조건 없이
     # 8개 통화를 전부 받았는데(실측 3.7초, 전체 응답의 67%), 국내 구성종목뿐인 ETF 는
@@ -338,8 +326,6 @@ def _build_korean_etf_info_payload(
 
     return {
         "nav": float(nav_value) if nav_value is not None else None,
-        "nav_change": nav_change,
-        "nav_change_pct": nav_change_pct,
         "fx_rates": fx_rates,
         "portfolio_change_base_date": portfolio_change_base_date,
         "deviation": float(deviation_value) if deviation_value is not None else None,

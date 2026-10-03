@@ -70,8 +70,6 @@ type TickerFxRate = {
 
 type TickerEtfInfo = {
   nav?: number | null;
-  nav_change?: number | null;
-  nav_change_pct?: number | null;
   deviation?: number | null;
   expense_ratio?: number | null;
   dividend_yield_ttm?: number | null;
@@ -860,12 +858,6 @@ function BasicInfoValue({ product, metric }: { product: SelectedProduct; metric:
     return (
       <div className="compareBasicValue">
         <strong>{formatPrice(etfInfo?.nav ?? null, product.item.country_code)}</strong>
-        <span className={getSignedClass(etfInfo?.nav_change ?? null)}>
-          {formatSignedPriceDelta(etfInfo?.nav_change ?? null, product.item.country_code)}
-        </span>
-        <span className={getSignedClass(etfInfo?.nav_change_pct ?? null)}>
-          {formatSignedPercent(etfInfo?.nav_change_pct ?? null)}
-        </span>
       </div>
     );
   }
