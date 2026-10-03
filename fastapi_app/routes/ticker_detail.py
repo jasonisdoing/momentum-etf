@@ -24,7 +24,7 @@ from services.price_service import (
     get_realtime_snapshot,
     get_realtime_snapshot_meta,
 )
-from services.stock_cache_service import get_stock_cache_meta
+from services.stock_cache_service import get_stock_cache_meta, get_stock_cache_meta_map, stock_holdings_revision
 from utils.asx_ticker import ensure_asx_prefix
 from utils.cache_utils import (
     get_cache_refresh_completed_at,
@@ -784,6 +784,7 @@ def build_ticker_detail_payload(
     holdings_as_of_date: str | None = None
     holdings_price_as_of_date: str | None = None
     holdings_error: str | None = None
+    holdings_revision: str | None = None
     etf_info: dict[str, object] | None = None
     us_pool_tickers: set[str] = set()
     kor_pool_tickers: set[str] = set()
@@ -796,6 +797,7 @@ def build_ticker_detail_payload(
         meta_ticker = ensure_asx_prefix(db_ticker) if country_clean == "au" else db_ticker
         cache_document = get_stock_cache_meta(ticker_type, meta_ticker)
         holdings_cache = dict(cache_document.get("holdings_cache") or {}) if isinstance(cache_document, dict) else {}
+        holdings_revision = stock_holdings_revision(holdings_cache)
         holdings = list(holdings_cache.get("items") or [])
         if country_clean == "kor":
             etf_info = _build_korean_etf_info_payload(
@@ -932,6 +934,7 @@ def build_ticker_detail_payload(
         "holdings_as_of_date": holdings_as_of_date,
         "holdings_price_as_of_date": holdings_price_as_of_date,
         "holdings_error": holdings_error,
+        "holdings_revision": holdings_revision,
         "my_average_buy_price": _calculate_consolidated_average_buy_price(
             db_ticker, currency_for_country(country_code)
         ),
@@ -983,14 +986,41 @@ def _compare_events(payload: dict[str, object]):
             include_holdings,
         )
 
-    # 0) 종목 단위 캐시 — TTL 안이면 재계산하지 않는다. 부분 실패 후 재시도가
+    def meta_ticker(item: dict[str, object]) -> str:
+        ticker = str(item.get("ticker") or "").split(":")[-1].strip().upper()
+        country = str(item.get("country_code") or "kor").strip().lower()
+        return ensure_asx_prefix(ticker) if country == "au" else ticker
+
+    meta_by_pool: dict[str, dict[str, dict[str, Any]]] = {}
+    if include_holdings:
+        for pool in {str(item.get("ticker_type") or "") for item in items}:
+            meta_by_pool[pool] = get_stock_cache_meta_map(
+                pool, [meta_ticker(item) for item in items if str(item.get("ticker_type") or "") == pool]
+            )
+    revisions = (
+        {
+            item_cache_key(item): stock_holdings_revision(
+                (meta_by_pool[str(item.get("ticker_type") or "")].get(meta_ticker(item), {})).get("holdings_cache")
+                or {}
+            )
+            for item in items
+        }
+        if include_holdings
+        else {}
+    )
+
+    # 0) 종목 단위 캐시 — TTL과 구성종목 원본이 같으면 재사용한다. 부분 실패 후 재시도가
     #    성공분을 여기서 읽고 실패분만 다시 계산한다(진행 바도 그만큼 건너뛴다).
     now_ts = _time.time()
     detail_by_key: dict[tuple[str, str, str, bool], dict[str, object]] = {}
     with _COMPARE_CACHE_LOCK:
         for item in items:
             cached = _COMPARE_CACHE.get(item_cache_key(item))
-            if cached and now_ts - cached[1] < _COMPARE_CACHE_TTL:
+            if (
+                cached
+                and now_ts - cached[1] < _COMPARE_CACHE_TTL
+                and (not include_holdings or cached[0].get("holdings_revision") == revisions[item_cache_key(item)])
+            ):
                 detail_by_key[item_cache_key(item)] = cached[0]
     pending = [item for item in items if item_cache_key(item) not in detail_by_key]
 
@@ -1003,7 +1033,7 @@ def _compare_events(payload: dict[str, object]):
         for item in pending:
             if str(item.get("country_code") or "kor").strip().lower() != "kor":
                 continue
-            cache_doc = get_stock_cache_meta(str(item.get("ticker_type") or ""), str(item.get("ticker") or ""))
+            cache_doc = meta_by_pool[str(item.get("ticker_type") or "")].get(meta_ticker(item))
             if not isinstance(cache_doc, dict):
                 continue
             holdings_cache = dict(cache_doc.get("holdings_cache") or {})

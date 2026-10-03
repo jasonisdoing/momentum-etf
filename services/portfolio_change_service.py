@@ -17,7 +17,11 @@ import pandas as pd
 from config import CACHE_TTL_COMPUTE
 from services.component_price_service import enrich_component_prices
 from services.price_service import get_exchange_rate_series, get_exchange_rates
-from services.stock_cache_service import get_stock_cache_meta, refresh_stock_portfolio_change_cache
+from services.stock_cache_service import (
+    get_stock_cache_meta,
+    refresh_stock_portfolio_change_cache,
+    stock_holdings_revision,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,13 +101,10 @@ def _is_persisted_cache_alive(cache_doc: dict[str, Any], now: datetime) -> bool:
 def _is_portfolio_change_cache_usable(
     cache_data: Any,
     holdings_reference_date: str | None,
-    expected_base_date: str | None = None,
+    holdings_revision: str,
+    expected_base_date: str | None,
 ) -> bool:
-    """계산 실패로 저장된 포트폴리오 변동 캐시는 재계산 대상이다.
-
-    expected_base_date 가 주어지면 캐시의 base_date 와 일치할 때만 재사용한다.
-    (휴장일 캘린더 수정 등으로 base_date 가 변경됐을 때 stale 캐시 회피)
-    """
+    """구성종목 원본·기준일이 같고 계산에 성공한 캐시만 재사용한다."""
     if not isinstance(cache_data, dict):
         return False
     if cache_data.get("calc_version") != _PORTFOLIO_CHANGE_CALC_VERSION:
@@ -114,6 +115,8 @@ def _is_portfolio_change_cache_usable(
     if expected_base_date is not None and cached_base_date != expected_base_date:
         return False
     if cache_data.get("holdings_reference_date") != holdings_reference_date:
+        return False
+    if cache_data.get("holdings_revision") != holdings_revision:
         return False
     if cache_data.get("total_pct") is None:
         return False
@@ -463,6 +466,7 @@ def compute_portfolio_change_bundle(
     if not holdings:
         return None
     holdings_reference_date = str(holdings_cache.get("reference_date") or "").strip() or None
+    holdings_revision = stock_holdings_revision(holdings_cache)
 
     # 캐시 검증 단계에서 base_date 변경 여부를 확인하기 위해 먼저 결정한다.
     # 날짜가 넘어가 base_date 가 바뀌면 stale 캐시를 회피한다.
@@ -473,13 +477,15 @@ def compute_portfolio_change_bundle(
             cached = _PORTFOLIO_CHANGE_CACHE.get(key)
             if cached and _is_cache_alive(cached, now):
                 cached_data = cached.get("data")
-                if _is_portfolio_change_cache_usable(cached_data, holdings_reference_date, base_date):
+                if _is_portfolio_change_cache_usable(
+                    cached_data, holdings_reference_date, holdings_revision, base_date
+                ):
                     return cached_data
                 _PORTFOLIO_CHANGE_CACHE.pop(key, None)
 
         persisted = cache_doc.get("portfolio_change_cache")
         if _is_portfolio_change_cache_usable(
-            persisted, holdings_reference_date, base_date
+            persisted, holdings_reference_date, holdings_revision, base_date
         ) and _is_persisted_cache_alive(cache_doc, now):
             with _PORTFOLIO_CHANGE_LOCK:
                 _PORTFOLIO_CHANGE_CACHE[key] = {
@@ -520,6 +526,7 @@ def compute_portfolio_change_bundle(
         "breakdown": breakdown,
         "coverage_weight": coverage,
         "holdings_reference_date": holdings_reference_date,
+        "holdings_revision": holdings_revision,
     }
 
     if use_cache:
