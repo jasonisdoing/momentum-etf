@@ -433,8 +433,8 @@ def _is_cache_alive(cache_entry: dict[str, Any] | None, now: datetime) -> bool:
 def _fill_missing_change_rate(country: str, snapshot: dict[str, dict[str, Any]]) -> None:
     """등락률이 없으면 현재 세션 가격과 기준가로 일간 등락률을 계산한다.
 
-    기준가는 장 마감이면 확정 봉의 전일 종가, 소스가 그 세션의 기준가(`prevClose`)를 주면
-    그 값(한국 프리장), 그 밖에는 정규장 종가다.
+    기준가는 소스가 그 세션의 기준가(`prevClose`)를 주면 그 값(한국 통합 전일가), 없으면 장 마감일 때
+    확정 봉의 전일 종가, 그 밖에는 정규장 종가다.
     """
     from utils.cache_utils import load_cached_close_series_bulk
     from utils.effective_prices import bar_anchor, confirmed_close_before, confirmed_close_on, last_regular_close
@@ -472,12 +472,12 @@ def _fill_missing_change_rate(country: str, snapshot: dict[str, dict[str, Any]])
                 entry["changeRate"] = 0.0
                 missing.discard(ticker)
                 continue
-            # 등락률 기준가 — 장이 닫혔으면 확정 봉의 전일 종가, 소스가 이 세션의 기준가를
-            # 넘겼으면 그 값(한국 프리장 = 통합 전일가, `realtime_quotes` 주석), 아니면 정규장 종가.
-            if closed:
-                comparison_close = confirmed_close_before(series, anchor)
-            elif entry.get("prevClose") is not None:
+            # 등락률 기준가 — 소스가 이 세션의 기준가를 넘겼으면 그 값(한국 = 통합 전일가, `realtime_quotes`
+            # 주석)을 우선한다. 없을 때 장이 닫혔으면 확정 봉의 전일 종가, 아니면 정규장 종가.
+            if entry.get("prevClose") is not None:
                 comparison_close = float(entry["prevClose"])
+            elif closed:
+                comparison_close = confirmed_close_before(series, anchor)
             else:
                 comparison_close = regular_close
             if regular_close is None or comparison_close is None:
@@ -588,26 +588,7 @@ def _fetch_realtime_snapshot(country: str, tickers: Sequence[str]) -> tuple[dict
     snapshot, source = _fetch_quotes_by_country(country, tickers)
     _normalize_closed_prices(country, snapshot)
     _fill_missing_change_rate(country, snapshot)
-    _zero_change_before_session_day(country, snapshot)
     return snapshot, source
-
-
-def _zero_change_before_session_day(country: str, snapshot: dict[str, dict[str, Any]]) -> None:
-    """「오늘」 첫 세션 전(자정 이후·휴장일)에는 일간 등락률을 0% 로 둔다.
-
-    아직 오늘 거래가 없으므로 현재가가 곧 기준가다. 마지막 거래일의 변동은 전거래일 컬럼이
-    보인다(`market_session.session_day`). 이 규칙을 두는 시장(한국)만 적용한다 — 소스가 주는
-    등락률은 마지막 거래일 것이라, 두면 자정이 지나도 어제 변동이 「일간」에 남는다.
-    """
-    from utils.market_session import has_session_day, session_day
-
-    if not has_session_day(country) or session_day(country) is not None:
-        return
-    for entry in snapshot.values():
-        if not isinstance(entry, dict) or entry.get("nowVal") is None:
-            continue
-        entry["prevClose"] = entry["nowVal"]
-        entry["changeRate"] = 0.0
 
 
 def _normalize_closed_prices(country: str, snapshot: dict[str, dict[str, Any]]) -> None:
@@ -636,8 +617,8 @@ def _normalize_closed_prices(country: str, snapshot: dict[str, dict[str, Any]]) 
             continue
         entry["nowVal"] = price
         entry["lastRegularClose"] = price
-        entry.pop("changeRate", None)
-        entry.pop("prevClose", None)
+        # 소스가 준 기준가(`prevClose`)·등락률은 그대로 둔다 — 한국 개별주는 통합 전일가, 미국은 토스 전일 종가다.
+        # 소스가 주지 못한 종목만 `_fill_missing_change_rate` 가 확정 봉으로 채운다.
 
 
 def _fetch_quotes_by_country(country: str, tickers: Sequence[str]) -> tuple[dict[str, dict[str, float]], str]:

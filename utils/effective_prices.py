@@ -26,12 +26,12 @@ from typing import Any
 import pandas as pd
 
 from utils.market_session import (
+    AFTERMARKET,
     CLOSED,
-    has_session_day,
+    aftermarket_in_daily_change,
     market_session,
     market_today,
     regular_session_started,
-    session_day,
 )
 
 
@@ -168,16 +168,14 @@ def day_change_pct(close_series: pd.Series | None, bar_date: Any, *, anchor_clos
 def prior_day_shown(country_code: str, *, as_of_is_today: bool) -> bool:
     """전거래일 컬럼이 앵커 봉보다 **한 거래일 앞**을 보일지.
 
-    일간(%)이 앵커 봉(마지막 마감 거래일)의 변동을 보이는 동안이다. 「오늘」 규칙이 있는
-    시장(한국)은 오늘 정규장이 끝난 뒤 자정까지(애프터·마감), 없는 시장은 마감 세션이다.
-    자정이 지나면 일간은 0% 이고 앵커 봉이 전거래일이다. 과거 기준일이면 항상 거짓.
+    일간(%)이 앵커 봉(마지막 마감 거래일)의 변동을 보이는 동안이다. 마감 세션이 그렇고, 애프터마켓 일간이
+    그날 전체 변동인 시장(한국)은 애프터마켓도 그렇다. 네이버·토스처럼 다음 첫 세션 전까지 마지막 거래일
+    변동을 유지한다. 과거 기준일이면 항상 거짓.
     """
     if not as_of_is_today:
         return False
-    if has_session_day(country_code):
-        today_session_day = session_day(country_code)
-        return today_session_day is not None and pd.Timestamp(today_session_day) == bar_anchor(country_code)
-    return market_session(country_code)["session"] == CLOSED
+    session = market_session(country_code)["session"]
+    return session == CLOSED or (session == AFTERMARKET and aftermarket_in_daily_change(country_code))
 
 
 def previous_day_change_pct(
