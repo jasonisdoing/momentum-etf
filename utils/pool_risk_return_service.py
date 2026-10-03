@@ -12,7 +12,7 @@ from typing import Any
 import pandas as pd
 
 from core.strategy.scoring import is_new_listing
-from utils.perf_metrics import curve_metrics
+from utils.perf_metrics import annualized_return_pct, calmar_ratio, curve_metrics
 
 
 def is_short_listed(close: pd.Series, months: int) -> bool:
@@ -38,18 +38,15 @@ def risk_return_point(close: pd.Series, months: int) -> dict[str, Any] | None:
 
     start_value = float(target.iloc[0])
     values = target.iloc[1:].to_numpy()
-    days = int((target.index[-1] - target.index[0]).days)
-    growth = float(values[-1]) / start_value
-    if days <= 0 or growth <= 0:
+    cagr_pct = annualized_return_pct(start_value, float(values[-1]), int((target.index[-1] - target.index[0]).days))
+    if cagr_pct is None:
         return None
-
-    cagr_pct = (growth ** (365.0 / days) - 1.0) * 100.0
     mdd_pct = float(curve_metrics(start_value, values)["mdd_pct"])
+    calmar = calmar_ratio(cagr_pct, mdd_pct)
     return {
         "cagr_pct": round(cagr_pct, 2),
         "mdd_pct": round(mdd_pct, 2),
-        # 칼마 비율 = CAGR ÷ |MDD| — 위험(낙폭) 한 단위당 연 수익. 낙폭이 없으면 정의되지 않는다.
-        "calmar": round(cagr_pct / abs(mdd_pct), 2) if mdd_pct != 0 else None,
+        "calmar": None if calmar is None else round(calmar, 2),
     }
 
 

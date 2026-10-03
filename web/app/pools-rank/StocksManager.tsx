@@ -71,6 +71,7 @@ type RankRow = {
     cagr: number;
     mdd: number;
     sortino: number;
+    calmar?: number | null;
     is_partial?: boolean;
     listing_months?: number | null;
   } | null;
@@ -1306,6 +1307,24 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellStyle: (params: { data?: RankGridRow }) => {
           const stats = params.data?.backtest_stats;
           if (stats?.is_partial) {
+            return { color: "#ca8a04", fontWeight: 700 };
+          }
+          return null;
+        },
+      },
+      {
+        headerName: "칼마",
+        headerTooltip: "CAGR ÷ |MDD| — 낙폭 한 단위당 연 수익. 위험·수익 화면과 같은 값.",
+        minWidth: 80,
+        width: 80,
+        type: "rightAligned",
+        valueGetter: (params) => params.data?.backtest_stats?.calmar ?? null,
+        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
+          if (params.value == null) return "-";
+          return params.value.toFixed(2);
+        },
+        cellStyle: (params: { data?: RankGridRow }) => {
+          if (params.data?.backtest_stats?.is_partial) {
             return { color: "#ca8a04", fontWeight: 700 };
           }
           return null;
