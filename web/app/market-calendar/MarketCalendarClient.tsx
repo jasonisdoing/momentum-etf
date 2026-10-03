@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 
+import { MonthsSelect } from "../components/MonthsSelect";
 import { PageFrame } from "../components/PageFrame";
 import styles from "./market-calendar.module.css";
 
@@ -29,6 +30,8 @@ type WeekdayStatsResponse = {
   start: string;
   end: string;
   months: number;
+  /** 서버가 허용하는 기간 선택지(개월) — 셀렉트는 이 목록만 보여 준다. */
+  month_options: number[];
   /** 지수 티커 → 요일 번호(월=0 … 금=4) → 통계. 센 거래일이 없는 요일은 빠진다. */
   stats: Record<string, Record<string, WeekdayStat>>;
   error?: string;
@@ -266,11 +269,11 @@ function MonthBlockView({ block, today, daysByKey, adrMeta, onVisible, registerB
 
 /** 달력 맨 아래에 고정되는 한 줄 — 날짜 칸과 같은 모양·색으로 요일별 평균 등락률을 보여 준다. */
 function WeekdayStatsRow({ stats }: { stats: WeekdayStatsResponse | null }) {
-  const period = stats ? `최근 ${stats.months}개월 (${stats.start} ~ ${stats.end}) 확정 거래일 기준 평균 등락률` : "최근 12개월 평균 등락률";
+  const period = stats ? `최근 ${stats.months}개월 (${stats.start} ~ ${stats.end}) 확정 거래일 기준 평균 등락률` : "요일별 평균 등락률";
   return (
     <section className={[styles.monthBlock, styles.statsBlock].join(" ")} aria-label="요일별 평균 등락률">
       <div className={styles.monthColumn} title={period}>
-        <span className={styles.monthLabel}>요일별<br />평균<br />{stats?.months ?? 12}개월</span>
+        <span className={styles.monthLabel}>요일별<br />평균<br />{stats ? `${stats.months}개월` : ""}</span>
       </div>
       {VISIBLE_WEEKDAYS.map((weekday, weekdayIndex) => (
         <div key={weekday} className={styles.day} role="gridcell" aria-label={`${weekday}요일 평균 등락률`}>
@@ -314,7 +317,7 @@ export function MarketCalendarClient({ today }: { today: string }) {
   const [adrMeta, setAdrMeta] = useState<CalendarResponse["adr_meta"] | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [calendarError, setCalendarError] = useState<string | null>(null);
-  const [loadingCount, setLoadingCount] = useState(0);
+  const [statsMonths, setStatsMonths] = useState<number | null>(null);
   const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null);
   const stickyRef = useRef<HTMLDivElement | null>(null);
   const sectionElements = useRef<Record<string, HTMLElement | null>>({});
@@ -328,7 +331,6 @@ export function MarketCalendarClient({ today }: { today: string }) {
   const loadMonth = useCallback(async (monthRef: MonthBlock, first: string, last: string) => {
     if (requestedMonths.current.has(monthRef.key)) return;
     requestedMonths.current.add(monthRef.key);
-    setLoadingCount((count) => count + 1);
     try {
       const query = new URLSearchParams({ start: first, end: last });
       const response = await fetch(`/api/market-calendar?${query}`, { cache: "no-store" });
@@ -341,8 +343,6 @@ export function MarketCalendarClient({ today }: { today: string }) {
     } catch (error) {
       requestedMonths.current.delete(monthRef.key);
       setCalendarError(error instanceof Error ? error.message : "시장 캘린더 데이터를 불러오지 못했습니다.");
-    } finally {
-      setLoadingCount((count) => count - 1);
     }
   }, []);
 
@@ -386,33 +386,33 @@ export function MarketCalendarClient({ today }: { today: string }) {
     const controller = new AbortController();
     (async () => {
       try {
-        const response = await fetch("/api/market-calendar/weekday-stats", { cache: "no-store", signal: controller.signal });
+        // 처음에는 기간을 주지 않는다 — 기본 기간은 서버(config)가 정하고 응답으로 알려 준다.
+        const query = statsMonths == null ? "" : `?months=${statsMonths}`;
+        const response = await fetch(`/api/market-calendar/weekday-stats${query}`, { cache: "no-store", signal: controller.signal });
         const payload = (await response.json()) as WeekdayStatsResponse;
         if (!response.ok || payload.error) throw new Error(payload.error ?? "요일별 통계를 불러오지 못했습니다.");
         setWeekdayStats(payload);
+        setWeekdayStatsError(null);
       } catch (error) {
         if (controller.signal.aborted) return;
         setWeekdayStatsError(error instanceof Error ? error.message : "요일별 통계를 불러오지 못했습니다.");
       }
     })();
     return () => controller.abort();
-  }, []);
+  }, [statsMonths]);
 
   const visibleMonth = months.find((month) => month.key === visibleMonthKey) ?? months[months.length - 1];
-  const loading = loadingCount > 0;
 
   return (
     <PageFrame title="시장 캘린더" fullWidth fullHeight>
       <div className="appPageStack appPageStackFill">
-        <div className="appBannerStack">
-          {calendarError ? <div className="bannerError" role="alert">{calendarError}</div> : null}
-          {weekdayStatsError ? <div className="bannerError" role="alert">{weekdayStatsError}</div> : null}
-          {warnings.length ? <div className="bannerWarn" role="status">{warnings.join(" ")}</div> : null}
-          <div className="alert alert-info mb-0">
-            {loading ? "날짜별 시장 데이터를 불러오는 중…" : "지수는 시장 현지 거래일·환율은 일봉 날짜 기준 · 장중·선물은 잠정값(*) · 미국 개장 전 지수 값이 없으면 오늘의 지연 선물 시세를 표시합니다."}
-            {loading ? "" : " 한국·미국 개별주는 각 종목풀의 종가 ADR입니다. 빨강은 모멘텀 신규 진입 허용, 파랑은 ADR 하한 미달입니다."}
+        {calendarError || weekdayStatsError || warnings.length ? (
+          <div className="appBannerStack">
+            {calendarError ? <div className="bannerError" role="alert">{calendarError}</div> : null}
+            {weekdayStatsError ? <div className="bannerError" role="alert">{weekdayStatsError}</div> : null}
+            {warnings.length ? <div className="bannerWarn" role="status">{warnings.join(" ")}</div> : null}
           </div>
-        </div>
+        ) : null}
 
         <section className="appSection appSectionFill">
           <div className="card appCard appTableCardFill">
@@ -427,6 +427,14 @@ export function MarketCalendarClient({ today }: { today: string }) {
                     <IconChevronRight size={18} />
                   </button>
                   <button className="btn btn-outline-secondary btn-sm" type="button" onClick={goToday}>{latestVisibleDay(today) === today ? "오늘" : "최근 평일"}</button>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">요일별 평균</span>
+                    <MonthsSelect
+                      value={statsMonths ?? weekdayStats?.months}
+                      options={weekdayStats?.month_options}
+                      onChange={setStatsMonths}
+                    />
+                  </label>
                 </div>
               </div>
             </div>

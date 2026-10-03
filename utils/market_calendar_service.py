@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from config import MARKET_SCHEDULES
+from config import MARKET_SCHEDULES, WEEKDAY_STATS_MONTH_OPTIONS
 from services.price_service import get_exchange_rate_series, get_yahoo_symbol_snapshot
 from utils.market_breadth_service import load_adr_series, pool_market_key
 from utils.market_trend_service import _apply_intraday_boost, load_index_ohlc
@@ -208,18 +208,17 @@ def get_market_calendar(start: date, end: date) -> dict[str, Any]:
     return {"days": days, "adr_meta": adr_meta, "warnings": warnings}
 
 
-WEEKDAY_STATS_MONTHS = 12
-
-
-def get_weekday_stats(today: date | None = None) -> dict[str, Any]:
-    """최근 12개월 요일별 지수 등락률 통계 — 달력 칸과 같은 값(`_index_changes`)을 요일로 묶는다.
+def get_weekday_stats(months: int, today: date | None = None) -> dict[str, Any]:
+    """최근 `months`개월 요일별 지수 등락률 통계 — 달력 칸과 같은 값(`_index_changes`)을 요일로 묶는다.
 
     확정된 거래일만 센다: 장중 잠정값과 전 거래일 종가가 없어 변동률을 못 구한 날은 뺀다.
     요일은 그 지수 시장의 현지 날짜 기준이라 달력 칸의 요일과 같다.
     `mean_pct` 는 평균 등락률, `up_ratio` 는 상승한 날의 비율(0~1), `count` 는 센 거래일 수.
     """
+    if months not in WEEKDAY_STATS_MONTH_OPTIONS:
+        raise ValueError(f"요일별 통계 기간은 {', '.join(map(str, WEEKDAY_STATS_MONTH_OPTIONS))}개월 중에서 고릅니다.")
     end = today or pd.Timestamp.now(tz="Asia/Seoul").date()
-    start = (pd.Timestamp(end) - pd.DateOffset(months=WEEKDAY_STATS_MONTHS)).date()
+    start = (pd.Timestamp(end) - pd.DateOffset(months=months)).date()
     sessions = _market_sessions(start, end)
     indices, _issues, warnings = _index_changes(start, end, sessions)
 
@@ -245,7 +244,8 @@ def get_weekday_stats(today: date | None = None) -> dict[str, Any]:
     return {
         "start": start.isoformat(),
         "end": end.isoformat(),
-        "months": WEEKDAY_STATS_MONTHS,
+        "months": months,
+        "month_options": list(WEEKDAY_STATS_MONTH_OPTIONS),
         "stats": stats,
         "warnings": warnings,
     }

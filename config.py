@@ -517,6 +517,10 @@ MARKET_ADR_NEUTRAL = 100.0
 # 동전주·거래정지 종목의 잡음을 빼고 매일 같은 기준으로 비교하기 위해서다.
 MARKET_ADR_UNIVERSE_SIZE = 200
 
+# 시장 캘린더(/market-calendar) 하단 요일별 평균 등락률의 기간(개월) 선택지와 기본값.
+WEEKDAY_STATS_MONTH_OPTIONS: tuple[int, ...] = (3, 6, 12, 24, 36, 60)
+WEEKDAY_STATS_DEFAULT_MONTHS = 3
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 튜닝 병렬 프로세스 수
