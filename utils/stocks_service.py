@@ -586,11 +586,12 @@ def move_active_stock(from_pool: str, to_pool: str, ticker: str) -> dict[str, An
         if not hard_remove_stock(source, ticker_norm):
             raise RuntimeError(f"'{_pool_label(source)}' 에서 빼지 못했습니다.")
         move_cached_frame(source, target, ticker_norm)
-        for meta_coll in ("stock_cache_meta", "previous_stock_cache_meta"):
-            # 대상 풀에 남아 있던 옛 계산값은 먼저 지운다 — (ticker_type, ticker) 유일 인덱스가
-            # 걸려 있어 그대로 두면 이동이 중복 키로 실패한다. 옮겨오는 쪽이 실제 종목의 값이다.
-            db[meta_coll].delete_many({"ticker_type": target, "ticker": ticker_norm})
-            db[meta_coll].update_many({"ticker_type": source, "ticker": ticker_norm}, {"$set": {"ticker_type": target}})
+        # 대상 풀에 남아 있던 옛 계산값은 먼저 지운다 — (ticker_type, ticker) 유일 인덱스가
+        # 걸려 있어 그대로 두면 이동이 중복 키로 실패한다. 옮겨오는 쪽이 실제 종목의 값이다.
+        db.stock_cache_meta.delete_many({"ticker_type": target, "ticker": ticker_norm})
+        db.stock_cache_meta.update_many(
+            {"ticker_type": source, "ticker": ticker_norm}, {"$set": {"ticker_type": target}}
+        )
     except Exception as exc:
         # 되돌리기도 **되살리기 먼저, 지우기 나중**이다. 반대로 하면 두 단계 사이에 프로세스가
         # 죽었을 때 종목이 어느 풀에도 없게 된다 — 이동 순서를 뒤집은 것과 같은 이유다.
