@@ -18,8 +18,6 @@ from config import CACHE_TTL_COMPUTE
 from services.component_price_service import enrich_component_prices
 from services.price_service import get_exchange_rate_series, get_exchange_rates
 from services.stock_cache_service import get_stock_cache_meta, refresh_stock_portfolio_change_cache
-from utils.data_loader import fetch_naver_etf_inav_snapshot
-from utils.stock_cache_meta_io import get_previous_stock_cache_meta
 
 logger = logging.getLogger(__name__)
 
@@ -437,30 +435,6 @@ def _calc_realtime_portfolio_change(
     return gross_pct, breakdown, coverage, gross_pct
 
 
-def _resolve_nav_change_pct(ticker_type: str, ticker: str, current_nav: Any) -> float | None:
-    """네이버 현재 iNAV와 메타 히스토리로 공식 iNAV 장중 변동률을 계산한다."""
-    try:
-        nav_value = float(current_nav)
-    except (TypeError, ValueError):
-        return None
-    if nav_value <= 0:
-        return None
-
-    # 비교는 늘 (현재 값 vs 직전 영업일 값) 한 쌍이다 — 조회 1회로 끝난다.
-    previous = get_previous_stock_cache_meta(ticker_type, ticker)
-    if not previous or "meta_cache" not in previous:
-        return None
-
-    try:
-        prev_nav_value = float(previous["meta_cache"].get("nav"))
-    except (TypeError, ValueError):
-        return None
-    if prev_nav_value <= 0:
-        return None
-
-    return ((nav_value / prev_nav_value) - 1.0) * 100.0
-
-
 def compute_portfolio_change_bundle(
     ticker: str,
     ticker_type: str,
@@ -527,8 +501,6 @@ def compute_portfolio_change_bundle(
     cumulative_fx = build_cumulative_fx_rates(priced_holdings, rates, base_date)
     daily_fx = build_daily_fx_rates(priced_holdings, rates)
     fx_rates_for_calc = cumulative_fx if cumulative_fx else daily_fx
-    inav_snapshot = fetch_naver_etf_inav_snapshot([norm_ticker]).get(norm_ticker, {})
-    nav_change_pct = _resolve_nav_change_pct(norm_type, norm_ticker, inav_snapshot.get("nav"))
     total_pct, breakdown, coverage, gross_portfolio_pct = _calc_realtime_portfolio_change(
         priced_holdings,
         fx_rates_for_calc,
@@ -546,7 +518,6 @@ def compute_portfolio_change_bundle(
         "fx_rates": fx_rates,
         "total_pct": total_pct,
         "gross_portfolio_pct": gross_portfolio_pct,
-        "inav_change_pct": nav_change_pct,
         "breakdown": breakdown,
         "coverage_weight": coverage,
         "holdings_reference_date": holdings_reference_date,
