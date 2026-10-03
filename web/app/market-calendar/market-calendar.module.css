@@ -1,6 +1,8 @@
 .monthTitleNav { min-width: 8.5rem; text-align: center; font-size: var(--fs-lg); }
 .dataIssue { color: #c77a07 !important; font-weight: 700; }
-.calendarScroll { --calendar-divider: color-mix(in srgb, var(--line) 70%, var(--ink) 30%); position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--panel); }
+.calendarArea { position: relative; display: flex; flex: 1 1 auto; min-height: 0; }
+.loadingOverlay { position: absolute; inset: 0; z-index: 5; display: flex; align-items: flex-start; padding-top: 1rem; background: color-mix(in srgb, var(--panel) 88%, transparent); }
+.calendarScroll { --calendar-divider: color-mix(in srgb, var(--line) 70%, var(--ink) 30%); position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; background: var(--panel); }
 .calendarInner { min-width: 125rem; --month-column: 5rem; --calendar-select: #238636; --calendar-select-soft: #e8f7ec; }
 .weekdayRow { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: var(--month-column) repeat(5, minmax(24rem, 1fr)); }
 .weekdayCorner { background: var(--app-table-head-bg); border-right: 1px solid var(--calendar-divider); border-bottom: 2px solid var(--calendar-divider); }
@@ -35,8 +37,9 @@ button.day.selected { background: var(--calendar-select-soft); box-shadow: inset
 .indexRows > span > span:last-child { white-space: nowrap; }
 .indexRows > span > span:first-child, .extraRow > span:first-child { color: var(--text-muted); }
 .extraRow { border-top: 1px solid var(--line); padding-top: 0.15rem; line-height: 1.15; }
-.statsBlock { position: sticky; bottom: 0; z-index: 2; grid-auto-rows: auto; border-top: 2px solid var(--calendar-divider); background: var(--panel); }
-.statsBlock .day { min-height: 0; }
+.statsBlock { position: sticky; bottom: 0; z-index: 2; grid-auto-rows: auto; border-top: 3px solid var(--text-strong); background: color-mix(in srgb, var(--ink) 9%, var(--panel)); box-shadow: 0 -4px 10px rgba(15, 23, 42, 0.12); }
+.statsBlock .day { min-height: 0; background: color-mix(in srgb, var(--ink) 9%, var(--panel)); border-right-color: color-mix(in srgb, var(--ink) 30%, var(--line)); border-bottom: 0; }
+.statsBlock .monthColumn { background: color-mix(in srgb, var(--ink) 22%, var(--panel)); border-right-color: color-mix(in srgb, var(--ink) 30%, var(--line)); border-bottom: 0; }
 @media (max-width: 740px) {
     .day { min-height: 8.25rem; }
 }

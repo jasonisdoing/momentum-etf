@@ -191,7 +191,8 @@ def get_market_calendar(start: date, end: date) -> dict[str, Any]:
     futures, future_warnings = _today_us_futures(start, end, sessions, indices)
     warnings.extend(future_warnings)
     fx_values = _fx_changes(start, end)
-    if not fx_values:
+    # 아직 오지 않은 구간(스크롤 달력이 미리 불러오는 다음 달)은 환율이 없는 게 정상이다 — 경고는 오늘 이전 날짜가 있는데도 비었을 때만.
+    if not fx_values and start <= pd.Timestamp.now(tz="Asia/Seoul").date():
         warnings.append("USD/KRW 환율 가격을 조회하지 못했습니다.")
     adr_values, adr_meta = _pool_adrs(start, end)
     days = {
