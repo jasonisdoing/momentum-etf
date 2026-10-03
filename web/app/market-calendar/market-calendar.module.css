@@ -23,6 +23,7 @@
 .day:focus-visible { outline: 2px solid var(--calendar-select); outline-offset: -2px; }
 .day.selected { background: var(--calendar-select-soft); box-shadow: inset 0 0 0 2px var(--calendar-select); }
 .dayHeader, .indexRows > span, .extraRow { display: flex; align-items: center; justify-content: space-between; gap: 0.35rem; }
+.fxValue { display: flex; align-items: baseline; gap: 0.6rem; white-space: nowrap; }
 .dayHeader strong { font-size: var(--fs-base); }
 .todayBadge { padding: 0.08rem 0.35rem; border-radius: 1rem; background: var(--calendar-select); color: white; font-size: var(--fs-xs); }
 .indexGroups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; min-width: 0; }
