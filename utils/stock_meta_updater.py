@@ -11,6 +11,7 @@ import yfinance as yf
 
 from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
 from services.etf_meta_service import fetch_korean_etf_info_from_naver
+from services.invesco_us_service import fetch_invesco_us_holdings
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
 from services.vanguard_au_service import fetch_vanguard_au_expense_ratio_pct, fetch_vanguard_au_holdings
 from utils.asx_ticker import (
@@ -373,7 +374,7 @@ def _refresh_us_stock_meta_cache(
     """미국 종목 메타 캐시를 갱신한다. 네이버 미국 개별주 API 를 기본으로 하되, 네이버에 없는 종목
     (예: 미국 ETF ENFR 등)은 yfinance .info 로 배당수익률·순자산(시가총액)을 보완한다.
 
-    ``is_etf`` 이면 구성종목(holdings)도 yfinance 로 수집해 저장한다(개별주는 구성종목이 없다).
+    ``is_etf`` 이면 공통 미국 ETF 수집 경로로 구성종목도 저장한다.
     """
     ticker_type_norm = str(ticker_type or "").strip().lower()
     ticker_norm = str(ticker or "").strip().upper()
@@ -432,7 +433,7 @@ def _refresh_us_stock_meta_cache(
     # 미국 ETF 는 구성종목도 함께 저장한다(개별주는 holdings 개념이 없어 건너뜀).
     holdings_cache: dict[str, Any] | None = None
     if is_etf:
-        holdings_info = fetch_yfinance_holdings(ticker_norm, is_australian=False)
+        holdings_info = fetch_us_etf_holdings(ticker_norm)
         if holdings_info:
             holdings_cache = _holdings_cache_from(expand_nested_etf_holdings(holdings_info, ticker_norm))
         else:
@@ -658,8 +659,16 @@ def _registered_etf_holdings(tickers: list[str]) -> dict[str, list[dict[str, Any
     return found
 
 
+def fetch_us_etf_holdings(ticker: str) -> dict[str, Any] | None:
+    """Invesco는 공식 전체 목록, 다른 운용사는 기존 Yahoo 상위 목록을 사용한다."""
+    official = fetch_invesco_us_holdings(ticker)
+    if official is not None:
+        return official
+    return fetch_yfinance_holdings(ticker, is_australian=False)
+
+
 def _feeder_etf_holdings(ticker: str) -> list[dict[str, Any]] | None:
-    """DB 에 없는 큰 구성종목이 ETF 면 야후로 그 구성종목을 가져온다. ETF 가 아니면 None."""
+    """DB에 없는 큰 구성종목이 ETF면 공통 수집 경로로 조회한다. ETF가 아니면 None."""
     is_australian = ticker.startswith("ASX:")
     symbol = to_yahoo_symbol(ticker) if is_australian else normalize_ticker(ticker)
     try:
@@ -668,7 +677,7 @@ def _feeder_etf_holdings(ticker: str) -> list[dict[str, Any]] | None:
     except Exception as exc:
         get_app_logger().debug(f"[yfinance] {symbol} 종류 확인 실패: {exc}")
         return None
-    inner = fetch_yfinance_holdings(ticker, is_australian=is_australian)
+    inner = fetch_yfinance_holdings(ticker, is_australian=True) if is_australian else fetch_us_etf_holdings(ticker)
     return list(inner["holdings"]) if inner else None
 
 
@@ -747,7 +756,7 @@ def _refresh_overseas_etf_meta_cache(
         if not holdings_info:
             holdings_info = fetch_yfinance_holdings(ticker_norm, is_australian=True)
     else:
-        holdings_info = fetch_yfinance_holdings(ticker_norm, is_australian=False)
+        holdings_info = fetch_us_etf_holdings(ticker_norm)
 
     # 구성종목 수집이 실패해도 배당·상장일·순자산 등 나머지 메타는 저장한다.
     # (여기서 return 하면 캐시 문서 자체가 만들어지지 않아 화면이 통째로 빈다.)

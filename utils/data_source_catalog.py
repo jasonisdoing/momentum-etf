@@ -18,6 +18,7 @@ logger = get_app_logger()
 HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "betashares_csv": "BetaShares 공식 CSV",
     "vanguard_au_api": "Vanguard AU 공식 API",
+    "invesco_us_api": "Invesco 미국 공식 API",
     "yfinance_holdings": "yfinance (상위 10종목)",
     "naver_etf_component": "네이버 ETF 구성종목",
 }
@@ -192,9 +193,18 @@ DATA_SOURCES: list[dict[str, Any]] = [
         "country": "us",
         "provider": "yfinance (Yahoo Finance)",
         "endpoint": "yfinance funds_data / info",
-        "usage": "미국 ETF 구성종목(상위 10)·보수·배당·순자산",
+        "usage": "미국 ETF 보수·배당·순자산 및 공식 소스 미지원 ETF 구성종목(상위 10)",
         "code_ref": "utils/stock_meta_updater.py",
         "note": "미국은 보수(netExpenseRatio)가 정상 제공된다.",
+    },
+    {
+        "category": "ETF 상세",
+        "country": "us",
+        "provider": "Invesco",
+        "endpoint": "dng-api.invesco.com/cache/v1/accounts/en_US/shareclasses/{cusip}/holdings/fund",
+        "usage": "Invesco 미국 ETF 전체 구성종목·비중",
+        "code_ref": "services/invesco_us_service.py",
+        "note": "미국 종목 메타 배치에서 수집해 공통 구성종목 캐시에 저장합니다.",
     },
     # 호주 ETF 구성종목은 발행사마다 경로가 갈리므로 아래에서 실제 캐시를 보고 동적으로 만든다.
     # ── 지표·기타 ────────────────────────────────────────────────────
