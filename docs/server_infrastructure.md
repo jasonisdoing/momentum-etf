@@ -17,7 +17,7 @@ VM 의 역할은 컨테이너 가동뿐이다. 자동 배치는 돌지 않는다
 - **모든 자동 배치는 로컬(Mac)** 의 `infra/server_scheduler.py` 가 `infra/cron/crontab` 을 파싱해 APScheduler 로 실행한다. VM cron 은 CPU 100% 다운이 반복돼 제거했다(`infra/cron/install.sh --uninstall`).
 - `crontab` 이 배치 정의의 단일 소스. 잡 이름 = action 키. 비활성화는 주석이 아니라 **라인 삭제**(과거 파서가 주석 라인을 등록한 적 있음). 스크립트 뒤 인자는 전달되지만 `-m` 은 안 된다.
 - 락: Mongo `batch_locks`(`_id=<job>`). 로컬 자동 실행과 `/batch` 수동 실행이 같은 락을 쓴다. 소유자는 `APP_TYPE`(`Local` / 미설정=PROD). 꺼져 있던 시간의 누락분은 따라잡지 않는다.
-- 큐(`batch_queue`)는 대기·실행 중 항목을 24시간 TTL로, 끝난 항목은 30일(`RUN_HISTORY_DAYS`) 보관한다. 이 이력이 `/batch`의 대기·예상시간(최근 10회 평균)의 원천이다.
+- 큐(`batch_queue`)는 대기·실행 중 항목을 24시간 TTL로, 끝난 항목은 30일(`RUN_HISTORY_DAYS`) 보관한다. 이 이력 전체의 평균이 `/batch`의 대기·예상시간의 원천이다.
 - 큐는 서버·로컬이 공유. 로컬에만 결과가 남는 잡은 `utils/batch_queue.LOCAL_ONLY_JOBS` 에 등록하면 서버 워커가 claim 하지 않는다.
 - 배치 코드는 Docker 이미지에 포함 → 변경 시 재배포. `crontab`/`run_batch` 는 마운트라 즉시 반영.
 - 로그: `logs/cron/<job>.log`. 실패 시에만 래퍼 슬랙 알림. 환율 실패 예외에는 통화·Yahoo 심볼·시도 횟수·원본 오류가 포함된다.

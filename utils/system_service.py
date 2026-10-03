@@ -589,8 +589,8 @@ def _format_duration_seconds(seconds: float | int | None) -> str | None:
 AVERAGE_SAMPLE_SIZE = 10
 
 
-def _read_queue_averages(sample_size: int = AVERAGE_SAMPLE_SIZE) -> dict[str, dict[str, float]]:
-    """잡별 평균을 큐에서 낸다 — `{잡: {지표: 초}}`.
+def _read_queue_averages() -> dict[str, dict[str, float]]:
+    """잡별 평균을 큐에서 낸다 — `{잡: {지표: 초}}`. 보관 중인 이력(`RUN_HISTORY_DAYS`) 전체의 평균이다.
 
     지표는 셋이다.
       wait            큐에 들어간 뒤 실행이 시작되기까지 (`triggered_at → started_at`)
@@ -607,14 +607,12 @@ def _read_queue_averages(sample_size: int = AVERAGE_SAMPLE_SIZE) -> dict[str, di
     if db is None:
         return {}
 
-    # 서버 쪽에서 잡·지표별로 묶어 최근 N건 평균만 받는다 — 잡마다 따로 조회하면 왕복이 수십 번이다.
-    # 잡별로 묶는 이유: 자주 도는 잡(10분 간격)이 전체 최근 N건을 다 차지하면 드물게 도는 잡의 이력이 밀려난다.
+    # 서버 쪽에서 잡·지표별로 묶어 평균만 받는다 — 잡마다 따로 조회하면 왕복이 수십 번이다.
     is_local = {"$regexMatch": {"input": {"$ifNull": ["$app_type", ""]}, "regex": "^local$", "options": "i"}}
     # 실패한 실행은 중간에 끊긴 시간이라 실행시간 평균에 넣지 않는다.
     finished_ok = {"$and": [{"$ne": ["$ended_at", None]}, {"$in": [{"$ifNull": ["$exit_code", 0]}, [0]]}]}
     pipeline: list[dict[str, Any]] = [
         {"$match": {"started_at": {"$ne": None}}},
-        {"$sort": {"started_at": -1}},
         {
             "$project": {
                 "job": {"$arrayElemAt": [{"$split": ["$job_name", ":"]}, 0]},
@@ -649,7 +647,7 @@ def _read_queue_averages(sample_size: int = AVERAGE_SAMPLE_SIZE) -> dict[str, di
         },
         {"$unwind": "$samples"},
         {"$group": {"_id": {"job": "$job", "metric": "$samples.metric"}, "values": {"$push": "$samples.seconds"}}},
-        {"$project": {"average": {"$avg": {"$slice": ["$values", sample_size]}}}},
+        {"$project": {"average": {"$avg": "$values"}}},
     ]
     averages: dict[str, dict[str, float]] = {}
     try:
@@ -1259,8 +1257,7 @@ def load_system_data() -> dict[str, object]:
             "시세·수집(data) · 알림·동기화(light) · 백업(local) 레인이 서로 병렬로 돌고, "
             "같은 레인 안에서는 순서대로 1건씩 직렬입니다 — 가격 캐시 → 지표 순서와 "
             "외부 소스 동시 호출 방지는 레인 안의 직렬이 지키고, 레인 한도는 서버·로컬 합산 기준입니다. "
-            f"대기시간과 예상시간(서버/로컬)은 각각 최근 {AVERAGE_SAMPLE_SIZE}회 실행의 평균이며, "
-            f"실행 이력은 {RUN_HISTORY_DAYS}일간 보관합니다. "
+            f"대기시간과 예상시간(서버/로컬)은 보관 중인 최근 {RUN_HISTORY_DAYS}일 실행 이력 전체의 평균입니다. "
             f"배치 실행이 {_batch_timeout_minutes()}분을 초과하면 hang 으로 간주하여 "
             "자동 종료(SIGKILL)되고 Slack 알림이 전송됩니다."
         ),
