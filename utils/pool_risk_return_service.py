@@ -14,6 +14,7 @@ import pandas as pd
 from core.strategy.scoring import is_new_listing
 from utils.perf_metrics import curve_metrics
 
+
 def is_short_listed(close: pd.Series, months: int) -> bool:
     """선택한 기간(N개월)보다 상장이 짧은 종목인가 — 기간이 같지 않은 종목을 한 차트에 섞지 않으려고 뺀다.
 
@@ -102,7 +103,12 @@ def compute_pool_risk_return(pool_id: str, months: int) -> dict[str, Any]:
                 "is_held": ticker.strip().upper() in held,
             }
         )
-    return {"pool_id": pool_id, "months": months, "points": points, "excluded": len(tickers) - short_listed - len(points)}
+    return {
+        "pool_id": pool_id,
+        "months": months,
+        "points": points,
+        "excluded": len(tickers) - short_listed - len(points),
+    }
 
 
 def _display_ticker(ticker: str, country: str) -> str:
