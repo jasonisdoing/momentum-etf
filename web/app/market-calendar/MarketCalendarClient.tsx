@@ -1,16 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 
 import { PageFrame } from "../components/PageFrame";
 import styles from "./market-calendar.module.css";
-
-type CalendarDay = {
-  key: string;
-  day: number;
-  inMonth: boolean;
-};
 
 type PricePoint = { close: number; change_pct: number | null; provisional: boolean; quote_at?: string };
 type IndexIssue = { label: string; reason: string };
@@ -85,20 +79,6 @@ function dateKey(year: number, month: number, day: number): string {
   return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-function monthDays(year: number, month: number): CalendarDay[] {
-  const firstWeekday = (new Date(Date.UTC(year, month, 1)).getUTCDay() + 6) % 7;
-  const dayCount = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  const cellCount = Math.ceil((firstWeekday + dayCount) / 7) * 7;
-  return Array.from({ length: cellCount }, (_, index) => {
-    const date = new Date(Date.UTC(year, month, index - firstWeekday + 1));
-    return {
-      key: dateKey(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
-      day: date.getUTCDate(),
-      inMonth: date.getUTCMonth() === month,
-    };
-  }).filter((_, index) => index % 7 < 5);
-}
-
 function latestVisibleDay(key: string): string {
   const date = new Date(`${key}T00:00:00Z`);
   const weekday = date.getUTCDay();
@@ -112,55 +92,248 @@ function dayLabel(key: string): string {
   return `${year}년 ${month}월 ${day}일 (${weekday})`;
 }
 
-export function MarketCalendarClient({ today }: { today: string }) {
-  const [todayYear, todayMonth] = today.split("-").map(Number);
-  const [year, setYear] = useState(todayYear);
-  const [month, setMonth] = useState(todayMonth - 1);
-  const [selectedDay, setSelectedDay] = useState(() => latestVisibleDay(today));
-  const [calendar, setCalendar] = useState<CalendarResponse | null>(null);
-  const [calendarError, setCalendarError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const days = useMemo(() => monthDays(year, month), [year, month]);
-  const firstDay = days[0].key;
-  const lastDay = days[days.length - 1].key;
+/** 오늘이 속한 달에서 과거로 몇 달까지, 미래로 몇 달까지 한 화면에 이어 붙일지. */
+const MONTHS_BACK = 24;
+const MONTHS_AHEAD = 1;
+
+type DayCell = { key: string; day: number; monthKey: string; month: number; monthStart: boolean };
+/** 월 컬럼 한 칸이 가리키는 묶음 — 연속된 주들. 한 주는 그 주 금요일이 속한 달에 넣는다. */
+type MonthBlock = { key: string; year: number; month: number; weeks: DayCell[][] };
+
+function monthKeyOf(year: number, month: number): string {
+  return `${year}-${String(month + 1).padStart(2, "0")}`;
+}
+
+/**
+ * 같은 날짜가 두 번 나오지 않는 연속 주 목록을 달 묶음으로 나눈다.
+ * 한 주(월~금)는 **금요일이 속한 달**의 묶음에 들어간다 — 달이 바뀌는 주(예: 9/28~10/2)는 10월 묶음의
+ * 첫 줄이 되고, 그 줄 안에서 달이 바뀌는 날에는 칸에 달 표시(`monthStart`)가 붙는다.
+ */
+function buildMonthBlocks(todayYear: number, todayMonth: number): MonthBlock[] {
+  const startMonth = new Date(Date.UTC(todayYear, todayMonth - 1 - MONTHS_BACK, 1));
+  const endMonth = new Date(Date.UTC(todayYear, todayMonth - 1 + MONTHS_AHEAD + 1, 0)); // 마지막 달의 말일
+  const cursor = new Date(startMonth);
+  cursor.setUTCDate(cursor.getUTCDate() - ((cursor.getUTCDay() + 6) % 7)); // 시작일이 속한 주의 월요일
+  const blocks: MonthBlock[] = [];
+  let previousMonthKey = "";
+  while (cursor <= endMonth) {
+    const weekCells: DayCell[] = Array.from({ length: 5 }, (_, offset) => {
+      const date = new Date(cursor);
+      date.setUTCDate(date.getUTCDate() + offset);
+      const monthKey = monthKeyOf(date.getUTCFullYear(), date.getUTCMonth());
+      const cell: DayCell = {
+        key: dateKey(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+        day: date.getUTCDate(),
+        monthKey,
+        month: date.getUTCMonth(),
+        monthStart: previousMonthKey !== "" && previousMonthKey !== monthKey,
+      };
+      previousMonthKey = monthKey;
+      return cell;
+    });
+    const friday = weekCells[4];
+    const last = blocks[blocks.length - 1];
+    if (last && last.key === friday.monthKey) last.weeks.push(weekCells);
+    else blocks.push({ key: friday.monthKey, year: Number(friday.monthKey.slice(0, 4)), month: friday.month, weeks: [weekCells] });
+    cursor.setUTCDate(cursor.getUTCDate() + 7);
+  }
+  return blocks;
+}
+
+type MonthBlockViewProps = {
+  block: MonthBlock;
+  today: string;
+  selectedDay: string;
+  daysByKey: Record<string, DayData>;
+  adrMeta: CalendarResponse["adr_meta"] | null;
+  onSelect: (key: string) => void;
+  onVisible: (block: MonthBlock, first: string, last: string) => void;
+  registerBlock: (key: string, element: HTMLElement | null) => void;
+  scrollRoot: HTMLElement | null;
+};
+
+/** 한 달 묶음 — 왼쪽 좁은 월 컬럼이 이 묶음의 주들에 걸쳐 있다. 화면 가까이 오면 그때 데이터를 불러온다. */
+function MonthBlockView({ block, today, selectedDay, daysByKey, adrMeta, onSelect, onVisible, registerBlock, scrollRoot }: MonthBlockViewProps) {
+  const cells = useMemo(() => block.weeks.flat(), [block]);
+  const firstDay = cells[0].key;
+  const lastDay = cells[cells.length - 1].key;
+  const elementRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    const controller = new AbortController();
-    async function loadCalendar() {
-      setLoading(true);
-      setCalendar(null);
+    const element = elementRef.current;
+    if (!element || !scrollRoot) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onVisible(block, firstDay, lastDay);
+      },
+      { root: scrollRoot, rootMargin: "600px 0px" },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [scrollRoot, block, firstDay, lastDay, onVisible]);
+
+  return (
+    <section
+      ref={(element) => {
+        elementRef.current = element;
+        registerBlock(block.key, element);
+      }}
+      className={styles.monthBlock}
+      aria-label={`${block.year}년 ${block.month + 1}월`}
+    >
+      <div className={styles.monthColumn} style={{ gridRow: `1 / span ${block.weeks.length}` }}>
+        <span className={styles.monthLabel}>{block.year}년<br />{block.month + 1}월</span>
+      </div>
+      {cells.map((date) => {
+        const data = daysByKey[date.key];
+        return (
+          <button
+            key={date.key}
+            id={`cal-${date.key}`}
+            type="button"
+            role="gridcell"
+            aria-label={dayLabel(date.key)}
+            aria-selected={selectedDay === date.key}
+            className={[styles.day, date.month % 2 === 1 ? styles.monthAlt : "", selectedDay === date.key ? styles.selected : ""].filter(Boolean).join(" ")}
+            onClick={() => onSelect(date.key)}
+          >
+            <span className={styles.dayHeader}>
+              <strong>{date.day}</strong>
+              {date.monthStart ? <span className={styles.monthChip}>{date.month + 1}월</span> : null}
+              {date.key === today ? <span className={styles.todayBadge}>오늘</span> : null}
+            </span>
+            <span className={styles.indexGroups}>
+              {(["kor", "us"] as const).map((country) => {
+                const session = data?.sessions[country];
+                const holiday = session === "closed" || session === "closed_future";
+                const tickers = country === "kor" ? ["^KS11", "^KQ11"] : ["^GSPC", "^NDX"];
+                const first = indexChangeForBackground(data, country, tickers[0]);
+                const second = indexChangeForBackground(data, country, tickers[1]);
+                const sum = holiday || first == null || second == null ? null : first + second;
+                const background = marketBackground(sum);
+                return (
+                  <span
+                    key={country}
+                    className={[styles.indexRows, background].filter(Boolean).join(" ")}
+                    title={sum == null ? undefined : `${country === "kor" ? "코스피 + 코스닥" : "S&P 500 + 나스닥 100"} 등락률 합 ${formatChange(sum)}`}
+                  >
+                  {MARKET_ROWS.filter((row) => row.country === country).map((row) => {
+                    const session = data?.sessions[row.country];
+                    const holiday = session === "closed" || session === "closed_future";
+                    const point = "ticker" in row ? data?.indices[row.ticker] : null;
+                    const issue = "ticker" in row ? data?.index_issues[row.ticker] : undefined;
+                    const future = "ticker" in row && row.country === "us" && point?.change_pct == null
+                      ? data?.futures?.[row.ticker] : null;
+                    const displayPoint = future ?? point;
+                    const adrPoint = "pool" in row ? data?.adr[row.pool] : null;
+                    return (
+                      <span key={row.label}>
+                        <span>{holiday ? `${row.label} ${SESSION_LABELS[session]}` : future ? `${row.label} 선물` : row.label}</span>
+                        {holiday ? null : "pool" in row
+                          ? <span
+                              className={adrPoint?.adr == null ? "" : adrPoint.entry_allowed ? styles.positive : styles.negative}
+                              title={adrDecisionTitle(adrPoint, adrMeta?.[row.pool])}
+                            >ADR {adrPoint?.adr == null ? "—" : adrPoint.adr.toFixed(1)}</span>
+                          : <span className={issue && !future ? styles.dataIssue : changeClass(displayPoint?.change_pct)} title={issue?.reason ?? (future ? "Yahoo 선물 지연 시세" : undefined)}>{issue && !future ? issue.label : formatChange(displayPoint?.change_pct)}{displayPoint?.provisional && !issue ? "*" : ""}</span>}
+                      </span>
+                    );
+                  })}
+                  </span>
+                );
+              })}
+            </span>
+            <span className={styles.extraRow}><span>USD/KRW</span><span className={changeClass(data?.fx?.change_pct)}>{formatChange(data?.fx?.change_pct)}{data?.fx?.provisional ? "*" : ""}</span></span>
+          </button>
+        );
+      })}
+    </section>
+  );
+}
+
+export function MarketCalendarClient({ today }: { today: string }) {
+  const [todayYear, todayMonth] = today.split("-").map(Number);
+  const months = useMemo(() => buildMonthBlocks(todayYear, todayMonth), [todayYear, todayMonth]);
+  const [selectedDay, setSelectedDay] = useState(() => latestVisibleDay(today));
+  const [visibleMonthKey, setVisibleMonthKey] = useState(monthKeyOf(todayYear, todayMonth - 1));
+  const [daysByKey, setDaysByKey] = useState<Record<string, DayData>>({});
+  const [adrMeta, setAdrMeta] = useState<CalendarResponse["adr_meta"] | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [loadingCount, setLoadingCount] = useState(0);
+  const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null);
+  const stickyRef = useRef<HTMLDivElement | null>(null);
+  const sectionElements = useRef<Record<string, HTMLElement | null>>({});
+  /** 이미 요청했거나 불러온 달 — 같은 달을 두 번 받지 않는다. 실패하면 빼서 다시 화면에 올 때 재시도한다. */
+  const requestedMonths = useRef(new Set<string>());
+
+  const registerSection = useCallback((key: string, element: HTMLElement | null) => {
+    sectionElements.current[key] = element;
+  }, []);
+
+  const loadMonth = useCallback(async (monthRef: MonthBlock, first: string, last: string) => {
+    if (requestedMonths.current.has(monthRef.key)) return;
+    requestedMonths.current.add(monthRef.key);
+    setLoadingCount((count) => count + 1);
+    try {
+      const query = new URLSearchParams({ start: first, end: last });
+      const response = await fetch(`/api/market-calendar?${query}`, { cache: "no-store" });
+      const payload = (await response.json()) as CalendarResponse;
+      if (!response.ok) throw new Error(payload.error ?? "시장 캘린더 데이터를 불러오지 못했습니다.");
+      setDaysByKey((prev) => ({ ...prev, ...payload.days }));
+      setAdrMeta(payload.adr_meta);
+      if (payload.warnings.length) setWarnings((prev) => [...new Set([...prev, ...payload.warnings])]);
       setCalendarError(null);
-      const query = new URLSearchParams({ start: firstDay, end: lastDay });
-      try {
-        const response = await fetch(`/api/market-calendar?${query}`, { cache: "no-store", signal: controller.signal });
-        const payload = (await response.json()) as CalendarResponse;
-        if (!response.ok) throw new Error(payload.error ?? "시장 캘린더 데이터를 불러오지 못했습니다.");
-        if (!controller.signal.aborted) setCalendar(payload);
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        setCalendar(null);
-        setCalendarError(error instanceof Error ? error.message : "시장 캘린더 데이터를 불러오지 못했습니다.");
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
+    } catch (error) {
+      requestedMonths.current.delete(monthRef.key);
+      setCalendarError(error instanceof Error ? error.message : "시장 캘린더 데이터를 불러오지 못했습니다.");
+    } finally {
+      setLoadingCount((count) => count - 1);
     }
-    void loadCalendar();
-    return () => controller.abort();
-  }, [firstDay, lastDay]);
+  }, []);
+
+  /** 스크롤 위치에서 지금 보고 있는 달 — 위쪽 고정 줄 바로 아래에 걸친 마지막 달. */
+  const updateVisibleMonth = useCallback(() => {
+    if (!scrollRoot) return;
+    const rootTop = scrollRoot.getBoundingClientRect().top + (stickyRef.current?.offsetHeight ?? 0) + 24;
+    let current = months[0].key;
+    for (const month of months) {
+      const element = sectionElements.current[month.key];
+      if (element && element.getBoundingClientRect().top <= rootTop) current = month.key;
+    }
+    setVisibleMonthKey(current);
+  }, [months, scrollRoot]);
+
+  function scrollToMonth(key: string) {
+    const element = sectionElements.current[key];
+    if (!scrollRoot || !element) return;
+    const offset = element.getBoundingClientRect().top - scrollRoot.getBoundingClientRect().top + scrollRoot.scrollTop;
+    scrollRoot.scrollTo({ top: offset - (stickyRef.current?.offsetHeight ?? 0), behavior: "smooth" });
+  }
 
   function moveMonth(offset: number) {
-    const next = new Date(Date.UTC(year, month + offset, 1));
-    setYear(next.getUTCFullYear());
-    setMonth(next.getUTCMonth());
-    const firstDayInMonth = monthDays(next.getUTCFullYear(), next.getUTCMonth()).find((day) => day.inMonth);
+    const index = months.findIndex((month) => month.key === visibleMonthKey);
+    const target = months[Math.min(Math.max(index + offset, 0), months.length - 1)];
+    scrollToMonth(target.key);
+    const firstDayInMonth = target.weeks.flat().find((day) => day.monthKey === target.key);
     if (firstDayInMonth) setSelectedDay(firstDayInMonth.key);
   }
 
   function goToday() {
-    setYear(todayYear);
-    setMonth(todayMonth - 1);
-    setSelectedDay(latestVisibleDay(today));
+    const day = latestVisibleDay(today);
+    setSelectedDay(day);
+    document.getElementById(`cal-${day}`)?.scrollIntoView({ block: "center" });
   }
+
+  // 처음에는 최근 평일이 화면 가운데에 오게 맞춘다 — 위로 스크롤하면 지난달이 이어진다.
+  useEffect(() => {
+    if (!scrollRoot) return;
+    document.getElementById(`cal-${latestVisibleDay(today)}`)?.scrollIntoView({ block: "center" });
+    updateVisibleMonth();
+  }, [scrollRoot, today, updateVisibleMonth]);
+
+  const visibleMonth = months.find((month) => month.key === visibleMonthKey) ?? months[months.length - 1];
+  const selectedData = daysByKey[selectedDay];
+  const loading = loadingCount > 0;
 
   return (
     <PageFrame title="시장 캘린더" fullWidth fullHeight>
@@ -170,7 +343,7 @@ export function MarketCalendarClient({ today }: { today: string }) {
             <button className="btn btn-outline-secondary btn-sm" type="button" onClick={() => moveMonth(-1)} aria-label="이전 달">
               <IconChevronLeft size={18} />
             </button>
-            <strong>{year}년 {month + 1}월</strong>
+            <strong>{visibleMonth.year}년 {visibleMonth.month + 1}월</strong>
             <button className="btn btn-outline-secondary btn-sm" type="button" onClick={() => moveMonth(1)} aria-label="다음 달">
               <IconChevronRight size={18} />
             </button>
@@ -179,101 +352,54 @@ export function MarketCalendarClient({ today }: { today: string }) {
         </div>
 
         {calendarError ? <p className={styles.error} role="alert">{calendarError}</p> : null}
-        {calendar?.warnings.length ? <p className={styles.error} role="status">{calendar.warnings.join(" ")}</p> : null}
+        {warnings.length ? <p className={styles.error} role="status">{warnings.join(" ")}</p> : null}
         <p className={styles.notice}>
           {loading ? "날짜별 시장 데이터를 불러오는 중…" : "지수는 시장 현지 거래일·환율은 일봉 날짜 기준 · 장중·선물은 잠정값(*) · 미국 개장 전 지수 값이 없으면 오늘의 지연 선물 시세를 표시합니다."}
           {loading ? "" : " 한국·미국 개별주는 각 종목풀의 종가 ADR입니다. 빨강은 모멘텀 신규 진입 허용, 파랑은 ADR 하한 미달입니다."}
         </p>
 
-        <div className={styles.calendarScroll}>
-          <div className={styles.calendar} role="grid" aria-label={`${year}년 ${month + 1}월 시장 캘린더`}>
-            {VISIBLE_WEEKDAYS.map((weekday) => <div key={weekday} className={styles.weekday} role="columnheader">{weekday}</div>)}
-            {days.map((date) => {
-              const data = calendar?.days[date.key];
-              return (
-                <button
-                  key={date.key}
-                  type="button"
-                  role="gridcell"
-                  aria-label={dayLabel(date.key)}
-                  aria-selected={selectedDay === date.key}
-                  className={[styles.day, !date.inMonth ? styles.outside : "", selectedDay === date.key ? styles.selected : ""].filter(Boolean).join(" ")}
-                  onClick={() => {
-                    setSelectedDay(date.key);
-                    if (!date.inMonth) {
-                      const [nextYear, nextMonth] = date.key.split("-").map(Number);
-                      setYear(nextYear);
-                      setMonth(nextMonth - 1);
-                    }
-                  }}
-                >
-                  <span className={styles.dayHeader}><strong>{date.day}</strong>{date.key === today ? <span className={styles.todayBadge}>오늘</span> : null}</span>
-                  <span className={styles.indexGroups}>
-                    {(["kor", "us"] as const).map((country) => {
-                      const session = data?.sessions[country];
-                      const holiday = session === "closed" || session === "closed_future";
-                      const tickers = country === "kor" ? ["^KS11", "^KQ11"] : ["^GSPC", "^NDX"];
-                      const first = indexChangeForBackground(data, country, tickers[0]);
-                      const second = indexChangeForBackground(data, country, tickers[1]);
-                      const sum = holiday || first == null || second == null ? null : first + second;
-                      const background = marketBackground(sum);
-                      return (
-                        <span
-                          key={country}
-                          className={[styles.indexRows, background].filter(Boolean).join(" ")}
-                          title={sum == null ? undefined : `${country === "kor" ? "코스피 + 코스닥" : "S&P 500 + 나스닥 100"} 등락률 합 ${formatChange(sum)}`}
-                        >
-                        {MARKET_ROWS.filter((row) => row.country === country).map((row) => {
-                          const session = data?.sessions[row.country];
-                          const holiday = session === "closed" || session === "closed_future";
-                          const point = "ticker" in row ? data?.indices[row.ticker] : null;
-                          const issue = "ticker" in row ? data?.index_issues[row.ticker] : undefined;
-                          const future = "ticker" in row && row.country === "us" && point?.change_pct == null
-                            ? data?.futures?.[row.ticker] : null;
-                          const displayPoint = future ?? point;
-                          const adrPoint = "pool" in row ? data?.adr[row.pool] : null;
-                          return (
-                            <span key={row.label}>
-                              <span>{holiday ? `${row.label} ${SESSION_LABELS[session]}` : future ? `${row.label} 선물` : row.label}</span>
-                              {holiday ? null : "pool" in row
-                                ? <span
-                                    className={adrPoint?.adr == null ? "" : adrPoint.entry_allowed ? styles.positive : styles.negative}
-                                    title={adrDecisionTitle(adrPoint, calendar?.adr_meta[row.pool])}
-                                  >ADR {adrPoint?.adr == null ? "—" : adrPoint.adr.toFixed(1)}</span>
-                                : <span className={issue && !future ? styles.dataIssue : changeClass(displayPoint?.change_pct)} title={issue?.reason ?? (future ? "Yahoo 선물 지연 시세" : undefined)}>{issue && !future ? issue.label : formatChange(displayPoint?.change_pct)}{displayPoint?.provisional && !issue ? "*" : ""}</span>}
-                            </span>
-                          );
-                        })}
-                        </span>
-                      );
-                    })}
-                  </span>
-                  <span className={styles.extraRow}><span>USD/KRW</span><span className={changeClass(data?.fx?.change_pct)}>{formatChange(data?.fx?.change_pct)}{data?.fx?.provisional ? "*" : ""}</span></span>
-                </button>
-              );
-            })}
+        <div className={styles.calendarScroll} ref={setScrollRoot} onScroll={updateVisibleMonth}>
+          <div className={styles.calendarInner}>
+            <div className={styles.weekdayRow} ref={stickyRef} role="row">
+              <div className={styles.weekdayCorner} />
+              {VISIBLE_WEEKDAYS.map((weekday) => <div key={weekday} className={styles.weekday} role="columnheader">{weekday}</div>)}
+            </div>
+            {months.map((block) => (
+              <MonthBlockView
+                key={block.key}
+                block={block}
+                today={today}
+                selectedDay={selectedDay}
+                daysByKey={daysByKey}
+                adrMeta={adrMeta}
+                onSelect={setSelectedDay}
+                onVisible={loadMonth}
+                registerBlock={registerSection}
+                scrollRoot={scrollRoot}
+              />
+            ))}
           </div>
         </div>
 
         <section className={styles.detail} aria-label="선택한 날짜의 상세 정보">
           <div><strong>{dayLabel(selectedDay)}</strong><span>선택한 날짜의 상세 정보</span></div>
-          {calendar?.days[selectedDay] ? (
+          {selectedData ? (
             <>
               <p>
-                한국 {SESSION_LABELS[calendar.days[selectedDay].sessions.kor]} · 미국 {SESSION_LABELS[calendar.days[selectedDay].sessions.us]}
+                한국 {SESSION_LABELS[selectedData.sessions.kor]} · 미국 {SESSION_LABELS[selectedData.sessions.us]}
                 {(["kor_stock", "us_stock"] as const).map((pool) => {
-                  const point = calendar.days[selectedDay].adr[pool];
+                  const point = selectedData.adr[pool];
                   return point ? ` · ${pool === "kor_stock" ? "한국" : "미국"} 개별주 ADR ${point.adr?.toFixed(1) ?? "—"} (상승 ${point.advance} · 하락 ${point.decline})` : "";
                 })}
-                {calendar.days[selectedDay].fx ? ` · USD/KRW ${calendar.days[selectedDay].fx.close.toFixed(2)}원` : ""}
+                {selectedData.fx ? ` · USD/KRW ${selectedData.fx.close.toFixed(2)}원` : ""}
               </p>
               {MARKET_ROWS.flatMap((row) => {
                 if (!("ticker" in row)) return [];
-                const issue = calendar.days[selectedDay].index_issues[row.ticker];
+                const issue = selectedData.index_issues[row.ticker];
                 return issue ? [<p key={row.label} className={styles.dataIssue} role="status">{row.label}: {issue.reason}</p>] : [];
               })}
             </>
-          ) : <p>이 날짜의 데이터가 없습니다.</p>}
+          ) : <p>{loading ? "불러오는 중…" : "이 날짜의 데이터가 없습니다."}</p>}
         </section>
       </div>
     </PageFrame>
