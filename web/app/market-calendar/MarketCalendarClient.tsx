@@ -59,9 +59,10 @@ function formatChange(value: number | null | undefined): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
+/** 상승 빨강·하락 파랑 — 전 화면 공용 클래스(`metricPositive`/`metricNegative`, globals.css). */
 function changeClass(value: number | null | undefined): string {
   if (value == null || value === 0) return "";
-  return value > 0 ? styles.positive : styles.negative;
+  return value > 0 ? "metricPositive metricStrong" : "metricNegative metricStrong";
 }
 
 function marketBackground(sum: number | null): string {
@@ -238,7 +239,7 @@ function MonthBlockView({ block, today, daysByKey, adrMeta, onVisible, registerB
                         <span>{holiday ? `${row.label} ${SESSION_LABELS[session]}` : future ? `${row.label} 선물` : row.label}</span>
                         {holiday ? null : "pool" in row
                           ? <span
-                              className={adrPoint?.adr == null ? "" : adrPoint.entry_allowed ? styles.positive : styles.negative}
+                              className={adrPoint?.adr == null ? "" : adrPoint.entry_allowed ? "metricPositive metricStrong" : "metricNegative metricStrong"}
                               title={adrDecisionTitle(adrPoint, adrMeta?.[row.pool])}
                             >ADR {adrPoint?.adr == null ? "—" : adrPoint.adr.toFixed(1)}</span>
                           : <span className={issue && !future ? styles.dataIssue : changeClass(displayPoint?.change_pct)} title={issue?.reason ?? (future ? "Yahoo 선물 지연 시세" : undefined)}>{issue && !future ? issue.label : formatChange(displayPoint?.change_pct)}{displayPoint?.provisional && !issue ? "*" : ""}</span>}
@@ -402,28 +403,33 @@ export function MarketCalendarClient({ today }: { today: string }) {
 
   return (
     <PageFrame title="시장 캘린더" fullWidth fullHeight>
-      <div className={styles.root}>
-        <div className={styles.toolbar}>
-          <div className={styles.monthNav} aria-label="월 선택">
-            <button className="btn btn-outline-secondary btn-sm" type="button" onClick={() => moveMonth(-1)} aria-label="이전 달">
-              <IconChevronLeft size={18} />
-            </button>
-            <strong>{visibleMonth.year}년 {visibleMonth.month + 1}월</strong>
-            <button className="btn btn-outline-secondary btn-sm" type="button" onClick={() => moveMonth(1)} aria-label="다음 달">
-              <IconChevronRight size={18} />
-            </button>
-            <button className="btn btn-outline-secondary btn-sm" type="button" onClick={goToday}>{latestVisibleDay(today) === today ? "오늘" : "최근 평일"}</button>
+      <div className="appPageStack appPageStackFill">
+        <div className="appBannerStack">
+          {calendarError ? <div className="bannerError" role="alert">{calendarError}</div> : null}
+          {weekdayStatsError ? <div className="bannerError" role="alert">{weekdayStatsError}</div> : null}
+          {warnings.length ? <div className="bannerWarn" role="status">{warnings.join(" ")}</div> : null}
+          <div className="alert alert-info mb-0">
+            {loading ? "날짜별 시장 데이터를 불러오는 중…" : "지수는 시장 현지 거래일·환율은 일봉 날짜 기준 · 장중·선물은 잠정값(*) · 미국 개장 전 지수 값이 없으면 오늘의 지연 선물 시세를 표시합니다."}
+            {loading ? "" : " 한국·미국 개별주는 각 종목풀의 종가 ADR입니다. 빨강은 모멘텀 신규 진입 허용, 파랑은 ADR 하한 미달입니다."}
           </div>
         </div>
 
-        {calendarError ? <p className={styles.error} role="alert">{calendarError}</p> : null}
-        {weekdayStatsError ? <p className={styles.error} role="alert">{weekdayStatsError}</p> : null}
-        {warnings.length ? <p className={styles.error} role="status">{warnings.join(" ")}</p> : null}
-        <p className={styles.notice}>
-          {loading ? "날짜별 시장 데이터를 불러오는 중…" : "지수는 시장 현지 거래일·환율은 일봉 날짜 기준 · 장중·선물은 잠정값(*) · 미국 개장 전 지수 값이 없으면 오늘의 지연 선물 시세를 표시합니다."}
-          {loading ? "" : " 한국·미국 개별주는 각 종목풀의 종가 ADR입니다. 빨강은 모멘텀 신규 진입 허용, 파랑은 ADR 하한 미달입니다."}
-        </p>
-
+        <section className="appSection appSectionFill">
+          <div className="card appCard appTableCardFill">
+            <div className="card-header">
+              <div className="appMainHeader">
+                <div className="appMainHeaderLeft" aria-label="월 선택">
+                  <button className="btn btn-outline-secondary btn-sm" type="button" onClick={() => moveMonth(-1)} aria-label="이전 달">
+                    <IconChevronLeft size={18} />
+                  </button>
+                  <strong className={styles.monthTitleNav}>{visibleMonth.year}년 {visibleMonth.month + 1}월</strong>
+                  <button className="btn btn-outline-secondary btn-sm" type="button" onClick={() => moveMonth(1)} aria-label="다음 달">
+                    <IconChevronRight size={18} />
+                  </button>
+                  <button className="btn btn-outline-secondary btn-sm" type="button" onClick={goToday}>{latestVisibleDay(today) === today ? "오늘" : "최근 평일"}</button>
+                </div>
+              </div>
+            </div>
         <div className={styles.calendarScroll} ref={setScrollRoot} onScroll={updateVisibleMonth}>
           <div className={styles.calendarInner}>
             <div className={styles.weekdayRow} ref={stickyRef} role="row">
@@ -445,7 +451,8 @@ export function MarketCalendarClient({ today }: { today: string }) {
             <WeekdayStatsRow stats={weekdayStats} />
           </div>
         </div>
-
+          </div>
+        </section>
       </div>
     </PageFrame>
   );
