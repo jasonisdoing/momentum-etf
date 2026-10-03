@@ -19,6 +19,8 @@ type DataSourceRow = {
   source_label?: string;
   missing_count?: number;
   missing_tickers?: string[];
+  // 「기타」 행에만 붙는다 — 발행사를 판별하지 못한 ETF.
+  unclassified_tickers?: string[];
 };
 
 type DataSourcePayload = {
@@ -42,7 +44,6 @@ const SOURCE_TONE: Record<string, { bg: string; fg: string }> = {
   vanguard_au_api: { bg: "#dcfce7", fg: "#166534" },
   invesco_us_api: { bg: "#dcfce7", fg: "#166534" },
   yfinance_holdings: { bg: "#fef3c7", fg: "#92400e" },
-  none: { bg: "#f1f5f9", fg: "#64748b" },
   naver_etf_component: { bg: "#dbeafe", fg: "#1e40af" },
 };
 
@@ -189,6 +190,11 @@ export function DataSourcePageClient() {
                             {row.note ? (
                               <div style={{ marginTop: "0.2rem", color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
                                 {row.note}
+                              </div>
+                            ) : null}
+                            {row.unclassified_tickers?.length ? (
+                              <div style={{ marginTop: "0.2rem", color: "#92400e", fontSize: "var(--fs-sm)" }}>
+                                발행사 미분류: <span className="appCodeText">{row.unclassified_tickers.join(", ")}</span>
                               </div>
                             ) : null}
                             {row.missing_tickers?.length ? (

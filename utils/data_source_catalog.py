@@ -226,7 +226,8 @@ US_HOLDINGS_FALLBACK_ORDER: list[str] = ["invesco_us_api", "yfinance_holdings"]
 # ETF 이름 → 발행사(운용사). 미국·호주는 통합 소스가 없어 발행사별로 수집 경로가 갈리므로
 # 발행사를 기준으로 정리한다. 이름 앞부분에 발행사명이 들어가는 업계 관행을 이용하되,
 # 매칭 키워드를 명시해 둔다(추정하지 않는다 — 목록에 없으면 "기타"로 남긴다).
-# **목록의 발행사는 지금 ETF 가 없어도 행으로 보인다**(0종) — 나중에 담을 때 이미 자리가 있다.
+# 행은 **지금 ETF 가 있는 발행사만** 만든다. 목록에 없는 발행사의 ETF 는 「기타」 행에 모이고, 그 행이
+# 어떤 ETF 가 분류되지 않았는지 화면에 알려 준다 — 이 목록에 발행사를 추가하면 자기 행으로 나뉜다.
 AU_ISSUER_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("Vanguard", ("vanguard",)),
     ("BetaShares", ("betashares", "beta shares")),
@@ -235,17 +236,6 @@ AU_ISSUER_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("VanEck", ("vaneck", "van eck")),
     ("SPDR (State Street)", ("spdr", "state street")),
     ("Fidelity", ("fidelity",)),
-    ("Magellan", ("magellan",)),
-    ("Platinum", ("platinum",)),
-    ("Perpetual", ("perpetual",)),
-    ("Janus Henderson", ("janus henderson",)),
-    ("Schroders", ("schroder",)),
-    ("Antipodes", ("antipodes",)),
-    ("Hyperion", ("hyperion",)),
-    ("Ausbil", ("ausbil",)),
-    ("Macquarie", ("macquarie",)),
-    ("Russell Investments", ("russell",)),
-    ("Dimensional", ("dimensional",)),
 ]
 US_ISSUER_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("Invesco", ("invesco",)),
@@ -349,8 +339,6 @@ _SOURCE_NOTES: dict[str, str] = {
     "invesco_us_api": "상품 명단에서 CUSIP 을 찾아 전체 구성종목을 받는다. 종목 메타 배치가 공통 캐시에 저장한다.",
     "yfinance_holdings": "공식 소스가 없어 폴백. 상위 10종목까지만 나오고 운용보수는 제공되지 않는다.",
 }
-# ETF 가 하나도 없는 발행사 행의 표시(수집 실패와 구분한다).
-_NO_ETF_SOURCE = "none"
 
 
 def _build_issuer_sources(
@@ -370,24 +358,6 @@ def _build_issuer_sources(
     entries: list[dict[str, Any]] = []
     for issuer, issuer_rows in by_issuer.items():
         if not issuer_rows:
-            if issuer == ISSUER_UNKNOWN:
-                continue
-            entries.append(
-                {
-                    "category": category,
-                    "country": country,
-                    "provider": issuer,
-                    "endpoint": "",
-                    "usage": "해당 ETF 없음",
-                    "code_ref": "",
-                    "note": None,
-                    "etf_count": 0,
-                    "source": _NO_ETF_SOURCE,
-                    "source_label": "해당 ETF 없음",
-                    "missing_count": 0,
-                    "missing_tickers": [],
-                }
-            )
             continue
         # 발행사의 대표 수집 경로 = 연동된 공식 소스, 없으면 가장 많이 쓰인 소스. 그 소스로 못 받은 ETF 는 따로 센다.
         official_source = (official or {}).get(issuer)
@@ -412,7 +382,14 @@ def _build_issuer_sources(
                 "endpoint": endpoint,
                 "usage": f"{source_label} — ETF {len(issuer_rows)}종",
                 "code_ref": code_ref,
-                "note": _SOURCE_NOTES.get(primary_source),
+                "note": (
+                    f"발행사를 판별하지 못한 ETF 입니다. 이름을 보고 발행사를 {country.upper()}_ISSUER_KEYWORDS 에 추가하면 따로 나뉩니다."
+                    if issuer == ISSUER_UNKNOWN
+                    else _SOURCE_NOTES.get(primary_source)
+                ),
+                "unclassified_tickers": (
+                    [f"{row['ticker']}({row['name']})" for row in issuer_rows] if issuer == ISSUER_UNKNOWN else []
+                ),
                 "etf_count": len(issuer_rows),
                 "source": primary_source or None,
                 "source_label": source_label,
@@ -421,11 +398,11 @@ def _build_issuer_sources(
             }
         )
 
-    # 공식 소스를 쓰는 발행사를 위에, 그 다음 ETF 수 많은 순. ETF 가 없는 발행사는 맨 아래.
+    # 공식 소스를 쓰는 발행사를 위에, 그 다음 ETF 수 많은 순. 분류 안 된 「기타」는 맨 아래.
     source_rank = {source: index for index, source in enumerate(order)}
     entries.sort(
         key=lambda entry: (
-            entry["etf_count"] == 0,
+            entry["provider"] == ISSUER_UNKNOWN,
             source_rank.get(entry["source"] or "", 99),
             -entry["etf_count"],
         )
