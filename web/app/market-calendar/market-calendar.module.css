@@ -39,16 +39,8 @@
 .indexRows > span > span:last-child { white-space: nowrap; }
 .indexRows > span > span:first-child, .extraRow > span:first-child { color: var(--text-muted); }
 .extraRow { border-top: 1px solid var(--line); padding-top: 0.15rem; line-height: 1.15; }
-.stats { border: 1px solid var(--line); border-radius: 0.5rem; padding: 0.75rem 1rem; background: var(--panel); }
-.statsHeader { display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
-.statsHeader span { color: var(--text-muted); font-size: var(--fs-sm); }
-.statsTable { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: var(--fs-sm); }
-.statsTable th, .statsTable td { padding: 0.3rem 0.6rem; border-bottom: 1px solid var(--line); text-align: right; }
-.statsTable thead th { color: var(--text-muted); font-weight: 700; }
-.statsTable tbody th { width: 9rem; text-align: left; font-weight: 700; }
-.statsTable td { vertical-align: top; }
-.statsTable td > span { display: block; font-size: var(--fs-base); }
-.statsTable td small { display: block; color: var(--text-muted); font-size: var(--fs-xs); }
+.statsBlock { position: sticky; bottom: 0; z-index: 2; grid-auto-rows: auto; border-top: 2px solid var(--calendar-divider); background: var(--panel); }
+.statsBlock .day { min-height: 0; }
 @media (max-width: 740px) {
   .toolbar { align-items: stretch; width: 100%; }
   .day { min-height: 8.25rem; }
