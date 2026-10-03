@@ -130,6 +130,23 @@ def curve_metrics(start_val: float, values: np.ndarray) -> dict[str, float]:
     }
 
 
+def annualized_return_pct(start_value: float, end_value: float, days: int) -> float | None:
+    """시작·끝 값과 달력 일수로 연환산 수익률(CAGR, %). 계산할 수 없으면 None.
+
+    순위 화면(`single_stock_backtest_stats`)과 위험·수익 화면이 같은 수식을 쓰도록 한 곳에 둔다.
+    """
+    if start_value <= 0 or end_value <= 0 or days <= 0:
+        return None
+    return ((end_value / start_value) ** (365.0 / days) - 1.0) * 100.0
+
+
+def calmar_ratio(cagr_pct: float | None, mdd_pct: float | None) -> float | None:
+    """칼마 비율 = CAGR ÷ |MDD| — 낙폭 한 단위당 연 수익. 낙폭이 없거나 값이 없으면 None."""
+    if cagr_pct is None or mdd_pct is None or mdd_pct == 0:
+        return None
+    return cagr_pct / abs(mdd_pct)
+
+
 def single_stock_backtest_stats(close_prices, lookback_months: int) -> dict:
     """단일 종목 종가 시계열(pd.Series)의 최근 N개월 단순 보유 성과(수익률·MDD·소르티노)를 구한다.
 
@@ -139,7 +156,7 @@ def single_stock_backtest_stats(close_prices, lookback_months: int) -> dict:
     """
     import pandas as pd
 
-    empty = {"cagr": 0.0, "mdd": 0.0, "sortino": 0.0, "is_partial": False, "listing_months": None}
+    empty = {"cagr": 0.0, "mdd": 0.0, "sortino": 0.0, "calmar": None, "is_partial": False, "listing_months": None}
     if close_prices is None or len(close_prices) == 0:
         return empty
 
@@ -161,10 +178,18 @@ def single_stock_backtest_stats(close_prices, lookback_months: int) -> dict:
         values = target_series.iloc[1:].to_numpy()
 
         metrics = curve_metrics(start_val, values)
+        mdd_pct = float(metrics.get("mdd_pct", 0.0))
+        calmar = calmar_ratio(
+            annualized_return_pct(
+                start_val, float(values[-1]), int((target_series.index[-1] - target_series.index[0]).days)
+            ),
+            mdd_pct,
+        )
         return {
             "cagr": round(float(metrics.get("total_return_pct", 0.0)), 2),  # CAGR 대신 단순 누적 수익률(%) 저장
-            "mdd": round(float(metrics.get("mdd_pct", 0.0)), 2),
+            "mdd": round(mdd_pct, 2),
             "sortino": round(float(metrics.get("sortino", 0.0)), 2),
+            "calmar": None if calmar is None else round(calmar, 2),
             "is_partial": is_partial,
             "listing_months": months_listed,
         }
