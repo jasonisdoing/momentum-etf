@@ -278,6 +278,10 @@ US_ISSUER_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
 ]
 ISSUER_UNKNOWN = "기타"
 
+# 코드에 공식 연동이 들어 있는 발행사 → 수집 소스. 배치가 아직 안 돌아 캐시에 옛 소스(야후)가 남아 있어도
+# 행은 연동된 공식 소스로 보이고, 아직 그 소스로 받지 못한 ETF 는 「미수집」으로 센다.
+US_OFFICIAL_SOURCES: dict[str, str] = {"Invesco": "invesco_us_api"}
+
 
 def _resolve_issuer(name: str, table: list[tuple[str, tuple[str, ...]]]) -> str:
     """ETF 이름에서 발행사를 판별한다. 목록에 없으면 '기타'."""
@@ -356,6 +360,7 @@ def _build_issuer_sources(
     country: str,
     table: list[tuple[str, tuple[str, ...]]],
     order: list[str],
+    official: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """종목풀 ETF 의 구성종목 수집 현황을 발행사별로 묶어 소스 카탈로그 행으로 만든다."""
     by_issuer: dict[str, list[dict[str, Any]]] = {issuer: [] for issuer, _ in table}
@@ -384,13 +389,18 @@ def _build_issuer_sources(
                 }
             )
             continue
-        # 발행사의 대표 수집 경로 = 가장 많이 쓰인 소스. 실패분은 따로 센다.
-        source_counter = Counter(str(row["holdings_source"] or "") for row in issuer_rows)
-        missing_tickers = [row["ticker"] for row in issuer_rows if not row["holdings_source"]]
-        primary_source = next(
-            (source for source, _ in source_counter.most_common() if source),
-            "",
-        )
+        # 발행사의 대표 수집 경로 = 연동된 공식 소스, 없으면 가장 많이 쓰인 소스. 그 소스로 못 받은 ETF 는 따로 센다.
+        official_source = (official or {}).get(issuer)
+        if official_source:
+            primary_source = official_source
+            missing_tickers = [row["ticker"] for row in issuer_rows if row["holdings_source"] != official_source]
+        else:
+            source_counter = Counter(str(row["holdings_source"] or "") for row in issuer_rows)
+            missing_tickers = [row["ticker"] for row in issuer_rows if not row["holdings_source"]]
+            primary_source = next(
+                (source for source, _ in source_counter.most_common() if source),
+                "",
+            )
         endpoint, code_ref = _SOURCE_ENDPOINTS.get(primary_source, ("-", "utils/stock_meta_updater.py"))
         source_label = HOLDINGS_SOURCE_LABELS.get(primary_source, "수집 경로 없음")
 
@@ -431,16 +441,25 @@ def build_data_source_payload() -> dict[str, Any]:
         au_rows, category="ETF 상세 - 호주", country="au", table=AU_ISSUER_KEYWORDS, order=AU_HOLDINGS_FALLBACK_ORDER
     )
     us_entries = _build_issuer_sources(
-        us_rows, category="ETF 상세 - 미국", country="us", table=US_ISSUER_KEYWORDS, order=US_HOLDINGS_FALLBACK_ORDER
+        us_rows,
+        category="ETF 상세 - 미국",
+        country="us",
+        table=US_ISSUER_KEYWORDS,
+        order=US_HOLDINGS_FALLBACK_ORDER,
+        official=US_OFFICIAL_SOURCES,
     )
 
-    # "ETF 상세" 정적 항목(한국·미국 야후) 뒤에 국가별 발행사 행을 이어 붙인다 — 국가별로 표가 나뉜다.
-    sources: list[dict[str, Any]] = list(DATA_SOURCES)
+    # 표 안의 순서: 한국 → 미국(Invesco, 야후, 나머지 발행사는 ETF 많은 순) → 호주.
+    # 미국의 정적 야후 행은 발행사 행들 사이에서 Invesco 바로 뒤에 둔다.
+    static_us = [row for row in DATA_SOURCES if row["category"] == "ETF 상세 - 미국"]
+    sources: list[dict[str, Any]] = [row for row in DATA_SOURCES if row["category"] != "ETF 상세 - 미국"]
+    official_us = [entry for entry in us_entries if entry["provider"] in US_OFFICIAL_SOURCES]
+    other_us = [entry for entry in us_entries if entry["provider"] not in US_OFFICIAL_SOURCES]
     last_detail_index = max(
         (index for index, row in enumerate(sources) if row["category"].startswith("ETF 상세")),
         default=len(sources) - 1,
     )
-    sources[last_detail_index + 1 : last_detail_index + 1] = us_entries + au_entries
+    sources[last_detail_index + 1 : last_detail_index + 1] = official_us + static_us + other_us + au_entries
 
     return {
         "sources": sources,
