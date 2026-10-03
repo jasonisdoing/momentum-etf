@@ -31,6 +31,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | 화면 | 역할 | 서비스 |
 | --- | --- | --- |
 | `/pools-rank` | 종목풀 순위(추세%)와 종목 관리 | `utils/rankings.py`, `core/strategy/metrics.py` |
+| `/pools-risk-return` | 종목풀 종목별 CAGR·MDD 산점도 | `utils/pool_risk_return_service.py` |
 | `/pools-settings` | 종목풀 설정 | `utils/pool_settings_store.py` |
 | `/pools-backtest` | 종목풀 백테스트 | `utils/pool_signal_backtest_service.py` |
 | `/strategy-momentum` | 모멘텀 전략(주간) 선정·백테스트·튜닝 | `utils/momentum_service.py`, `momentum_backtest.py`, `momentum_tuning.py` |
