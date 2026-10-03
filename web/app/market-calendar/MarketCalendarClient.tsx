@@ -159,15 +159,17 @@ function buildMonthBlocks(todayYear: number, todayMonth: number): MonthBlock[] {
 type MonthBlockViewProps = {
   block: MonthBlock;
   today: string;
+  selectedDay: string;
   daysByKey: Record<string, DayData>;
   adrMeta: CalendarResponse["adr_meta"] | null;
+  onSelect: (key: string) => void;
   onVisible: (block: MonthBlock, first: string, last: string) => void;
   registerBlock: (key: string, element: HTMLElement | null) => void;
   scrollRoot: HTMLElement | null;
 };
 
 /** 한 달 묶음 — 왼쪽 좁은 월 컬럼이 이 묶음의 주들에 걸쳐 있다. 화면 가까이 오면 그때 데이터를 불러온다. */
-function MonthBlockView({ block, today, daysByKey, adrMeta, onVisible, registerBlock, scrollRoot }: MonthBlockViewProps) {
+function MonthBlockView({ block, today, selectedDay, daysByKey, adrMeta, onSelect, onVisible, registerBlock, scrollRoot }: MonthBlockViewProps) {
   const cells = useMemo(() => block.weeks.flat(), [block]);
   const firstDay = cells[0].key;
   const lastDay = cells[cells.length - 1].key;
@@ -201,12 +203,15 @@ function MonthBlockView({ block, today, daysByKey, adrMeta, onVisible, registerB
       {cells.map((date) => {
         const data = daysByKey[date.key];
         return (
-          <div
+          <button
             key={date.key}
             id={`cal-${date.key}`}
+            type="button"
             role="gridcell"
             aria-label={dayLabel(date.key)}
-            className={[styles.day, date.month % 2 === 1 ? styles.monthAlt : ""].filter(Boolean).join(" ")}
+            aria-selected={selectedDay === date.key}
+            className={[styles.day, date.month % 2 === 1 ? styles.monthAlt : "", selectedDay === date.key ? styles.selected : ""].filter(Boolean).join(" ")}
+            onClick={() => onSelect(date.key)}
           >
             <span className={styles.dayHeader}>
               <strong>{date.day}</strong>
@@ -260,7 +265,7 @@ function MonthBlockView({ block, today, daysByKey, adrMeta, onVisible, registerB
                 <span className={changeClass(data?.fx?.change_pct)}>{formatChange(data?.fx?.change_pct)}{data?.fx?.provisional ? "*" : ""}</span>
               </span>
             </span>
-          </div>
+          </button>
         );
       })}
     </section>
@@ -317,6 +322,7 @@ export function MarketCalendarClient({ today }: { today: string }) {
   const [adrMeta, setAdrMeta] = useState<CalendarResponse["adr_meta"] | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [selectedDay, setSelectedDay] = useState(() => latestVisibleDay(today));
   const [statsMonths, setStatsMonths] = useState<number | null>(null);
   const [scrollRoot, setScrollRoot] = useState<HTMLDivElement | null>(null);
   const stickyRef = useRef<HTMLDivElement | null>(null);
@@ -369,10 +375,14 @@ export function MarketCalendarClient({ today }: { today: string }) {
     const index = months.findIndex((month) => month.key === visibleMonthKey);
     const target = months[Math.min(Math.max(index + offset, 0), months.length - 1)];
     scrollToMonth(target.key);
+    const firstDayInMonth = target.weeks.flat().find((day) => day.monthKey === target.key);
+    if (firstDayInMonth) setSelectedDay(firstDayInMonth.key);
   }
 
   function goToday() {
-    document.getElementById(`cal-${latestVisibleDay(today)}`)?.scrollIntoView({ block: "center" });
+    const day = latestVisibleDay(today);
+    setSelectedDay(day);
+    document.getElementById(`cal-${day}`)?.scrollIntoView({ block: "center" });
   }
 
   // 처음에는 최근 평일이 화면 가운데에 오게 맞춘다 — 위로 스크롤하면 지난달이 이어진다.
@@ -449,8 +459,10 @@ export function MarketCalendarClient({ today }: { today: string }) {
                 key={block.key}
                 block={block}
                 today={today}
+                selectedDay={selectedDay}
                 daysByKey={daysByKey}
                 adrMeta={adrMeta}
+                onSelect={setSelectedDay}
                 onVisible={loadMonth}
                 registerBlock={registerSection}
                 scrollRoot={scrollRoot}
