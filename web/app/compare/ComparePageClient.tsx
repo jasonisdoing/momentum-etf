@@ -584,32 +584,6 @@ function formatPeriodLabel(period: string): string {
 }
 
 /**
- * 샤프지수 = (일간 수익률 평균 / 표준편차) × √252.
- * 무위험 수익률 = 0 으로 단순화 (편차로만 위험 측정).
- */
-function getSharpeRatio(rows: PriceRow[], dateRange: ChartDateRange | null): number | null {
-  if (!dateRange) return null;
-  const seriesRows = getPricedRows(rows).filter(
-    (row) => row.date >= dateRange.startDate && row.date <= dateRange.endDate,
-  );
-  if (seriesRows.length < 3) return null;
-  const dailyReturns: number[] = [];
-  for (let i = 1; i < seriesRows.length; i++) {
-    const prev = seriesRows[i - 1].close ?? 0;
-    const curr = seriesRows[i].close ?? 0;
-    if (prev <= 0 || curr <= 0) continue;
-    dailyReturns.push(curr / prev - 1);
-  }
-  if (dailyReturns.length < 2) return null;
-  const mean = dailyReturns.reduce((acc, v) => acc + v, 0) / dailyReturns.length;
-  const variance =
-    dailyReturns.reduce((acc, v) => acc + (v - mean) ** 2, 0) / (dailyReturns.length - 1);
-  const std = Math.sqrt(variance);
-  if (std === 0) return null;
-  return (mean / std) * Math.sqrt(252);
-}
-
-/**
  * 소르티노지수 = (일간 수익률 평균 / 하방 표준편차) × √252.
  * 무위험 수익률 = 0 으로 단순화.
  */
@@ -638,6 +612,28 @@ function getSortinoRatio(rows: PriceRow[], dateRange: ChartDateRange | null): nu
   const downsideStd = Math.sqrt(downsideSquareSum / (dailyReturns.length - 1));
   if (downsideStd === 0) return null;
   return (mean / downsideStd) * Math.sqrt(252);
+}
+
+/**
+ * 칼마 지수 = CAGR ÷ |MDD| — 순위 화면의 칼마 컬럼과 같은 정의(백엔드 `perf_metrics.calmar_ratio`).
+ * CAGR 은 기간의 첫·마지막 종가를 달력 일수로 연환산하고, MDD 는 위 `getMaxDrawdown` 과 같은 값이다.
+ * 낙폭이 없거나(MDD 0) 연환산할 수 없으면 null.
+ */
+function getCalmarRatio(rows: PriceRow[], dateRange: ChartDateRange | null): number | null {
+  if (!dateRange) return null;
+  const seriesRows = getPricedRows(rows).filter(
+    (row) => row.date >= dateRange.startDate && row.date <= dateRange.endDate,
+  );
+  const mdd = getMaxDrawdown(rows, dateRange);
+  if (seriesRows.length < 2 || !mdd || mdd.pct === 0) return null;
+  const first = seriesRows[0];
+  const last = seriesRows[seriesRows.length - 1];
+  const start = first.close ?? 0;
+  const end = last.close ?? 0;
+  const days = (new Date(`${last.date}T00:00:00`).getTime() - new Date(`${first.date}T00:00:00`).getTime()) / 86_400_000;
+  if (start <= 0 || end <= 0 || days <= 0) return null;
+  const cagrPct = ((end / start) ** (365 / days) - 1) * 100;
+  return cagrPct / Math.abs(mdd.pct);
 }
 
 /**
@@ -1811,7 +1807,7 @@ export function ComparePageClient() {
             ))}
 
             <div className="compareMatrixLabel compareMetricsGroupLabel compareMetricsGroupLabelSingle">
-              샤프 지수
+              칼마 지수
               <div className="compareMatrixLabelHint">
                 {chartDateRange?.shortened
                   ? `${formatDateKey(chartDateRange.startDate)} ~ ${formatDateKey(chartDateRange.endDate)}`
@@ -1819,12 +1815,12 @@ export function ComparePageClient() {
               </div>
             </div>
             {(() => {
-              const values = sortedProducts.map((product) => getSharpeRatio(product.detail.rows, chartDateRange));
+              const values = sortedProducts.map((product) => getCalmarRatio(product.detail.rows, chartDateRange));
               const bestIndex = getBestValueIndex(values);
               return sortedProducts.map((product, index) => {
                 const value = values[index];
                 return (
-                  <div key={`sharpe-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
+                  <div key={`calmar-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
                     {bestIndex === index ? "⭐ " : ""}
                     {value === null || Number.isNaN(value) ? "-" : value.toFixed(2)}
                   </div>
@@ -1832,7 +1828,7 @@ export function ComparePageClient() {
               });
             })()}
             {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
-              <div key={`empty-sharpe-${index}`} className="compareMetricCell">-</div>
+              <div key={`empty-calmar-${index}`} className="compareMetricCell">-</div>
             ))}
           </section>
         ) : PERIOD_TABS.includes(activeTab) ? (
