@@ -171,7 +171,7 @@ DATA_SOURCES: list[dict[str, Any]] = [
     },
     # ── ETF 상세 (구성종목·배당·보수) ────────────────────────────────
     {
-        "category": "ETF 상세",
+        "category": "ETF 상세 - 한국",
         "country": "kor",
         "provider": "네이버 증권",
         "endpoint": "stock.naver.com/api/domestic/detail/{ticker}/ETFComponent",
@@ -180,7 +180,7 @@ DATA_SOURCES: list[dict[str, Any]] = [
         "note": None,
     },
     {
-        "category": "ETF 상세",
+        "category": "ETF 상세 - 한국",
         "country": "kor",
         "provider": "네이버 증권",
         "endpoint": "stock.naver.com/api/domestic/detail/{ticker}/ETFDividend",
@@ -189,7 +189,7 @@ DATA_SOURCES: list[dict[str, Any]] = [
         "note": None,
     },
     {
-        "category": "ETF 상세",
+        "category": "ETF 상세 - 미국",
         "country": "us",
         "provider": "yfinance (Yahoo Finance)",
         "endpoint": "yfinance funds_data / info",
@@ -197,16 +197,7 @@ DATA_SOURCES: list[dict[str, Any]] = [
         "code_ref": "utils/stock_meta_updater.py",
         "note": "미국은 보수(netExpenseRatio)가 정상 제공된다.",
     },
-    {
-        "category": "ETF 상세",
-        "country": "us",
-        "provider": "Invesco",
-        "endpoint": "dng-api.invesco.com/cache/v1/accounts/en_US/shareclasses/{cusip}/holdings/fund",
-        "usage": "Invesco 미국 ETF 전체 구성종목·비중",
-        "code_ref": "services/invesco_us_service.py",
-        "note": "미국 종목 메타 배치에서 수집해 공통 구성종목 캐시에 저장합니다.",
-    },
-    # 호주 ETF 구성종목은 발행사마다 경로가 갈리므로 아래에서 실제 캐시를 보고 동적으로 만든다.
+    # 미국·호주 ETF 구성종목은 발행사마다 경로가 갈리므로 아래에서 실제 캐시를 보고 발행사별로 동적으로 만든다.
     # ── 지표·기타 ────────────────────────────────────────────────────
     {
         "category": "시장 지표",
@@ -228,12 +219,14 @@ DATA_SOURCES: list[dict[str, Any]] = [
     },
 ]
 
-# 호주 ETF 구성종목 수집 순서 — 실제 코드(_refresh_overseas_etf_meta_cache)와 일치시킨다.
+# ETF 구성종목 수집 순서 — 실제 코드(_refresh_overseas_etf_meta_cache / fetch_us_etf_holdings)와 일치시킨다.
 AU_HOLDINGS_FALLBACK_ORDER: list[str] = ["betashares_csv", "vanguard_au_api", "yfinance_holdings"]
+US_HOLDINGS_FALLBACK_ORDER: list[str] = ["invesco_us_api", "yfinance_holdings"]
 
-# ETF 이름 → 발행사(운용사). 호주는 통합 소스가 없어 발행사별로 수집 경로가 갈리므로
+# ETF 이름 → 발행사(운용사). 미국·호주는 통합 소스가 없어 발행사별로 수집 경로가 갈리므로
 # 발행사를 기준으로 정리한다. 이름 앞부분에 발행사명이 들어가는 업계 관행을 이용하되,
 # 매칭 키워드를 명시해 둔다(추정하지 않는다 — 목록에 없으면 "기타"로 남긴다).
+# **목록의 발행사는 지금 ETF 가 없어도 행으로 보인다**(0종) — 나중에 담을 때 이미 자리가 있다.
 AU_ISSUER_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("Vanguard", ("vanguard",)),
     ("BetaShares", ("betashares", "beta shares")),
@@ -242,23 +235,63 @@ AU_ISSUER_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("VanEck", ("vaneck", "van eck")),
     ("SPDR (State Street)", ("spdr", "state street")),
     ("Fidelity", ("fidelity",)),
+    ("Magellan", ("magellan",)),
+    ("Platinum", ("platinum",)),
+    ("Perpetual", ("perpetual",)),
+    ("Janus Henderson", ("janus henderson",)),
+    ("Schroders", ("schroder",)),
+    ("Antipodes", ("antipodes",)),
+    ("Hyperion", ("hyperion",)),
+    ("Ausbil", ("ausbil",)),
+    ("Macquarie", ("macquarie",)),
+    ("Russell Investments", ("russell",)),
+    ("Dimensional", ("dimensional",)),
 ]
-AU_ISSUER_UNKNOWN = "기타"
+US_ISSUER_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("Invesco", ("invesco",)),
+    ("iShares (BlackRock)", ("ishares", "blackrock")),
+    ("SPDR (State Street)", ("spdr", "state street", "select sector")),
+    ("Vanguard", ("vanguard",)),
+    ("Schwab", ("schwab",)),
+    ("Global X", ("global x",)),
+    ("ProShares", ("proshares",)),
+    ("VanEck", ("vaneck", "van eck")),
+    ("First Trust", ("first trust", "ft vest")),
+    ("WisdomTree", ("wisdomtree",)),
+    ("VistaShares", ("vistashares",)),
+    ("Dimensional", ("dimensional",)),
+    ("Avantis (American Century)", ("avantis",)),
+    ("Capital Group", ("capital group",)),
+    ("ARK", ("ark ",)),
+    ("Roundhill", ("roundhill",)),
+    ("Fidelity", ("fidelity",)),
+    ("Amplify", ("amplify",)),
+    ("Direxion", ("direxion",)),
+    ("Pacer", ("pacer",)),
+    ("JPMorgan", ("jpmorgan", "betabuilders")),
+    ("Alerian (ALPS)", ("alerian",)),
+    ("Simplify", ("simplify",)),
+    ("Return Stacked", ("return stacked",)),
+    ("FlexShares", ("flexshares",)),
+    ("Victory Shares", ("victoryshares", "victory shares")),
+    ("Putnam", ("putnam",)),
+]
+ISSUER_UNKNOWN = "기타"
 
 
-def resolve_au_issuer(name: str) -> str:
-    """호주 ETF 이름에서 발행사를 판별한다. 목록에 없으면 '기타'."""
+def _resolve_issuer(name: str, table: list[tuple[str, tuple[str, ...]]]) -> str:
+    """ETF 이름에서 발행사를 판별한다. 목록에 없으면 '기타'."""
     lowered = str(name or "").strip().lower()
     if not lowered:
-        return AU_ISSUER_UNKNOWN
-    for issuer, keywords in AU_ISSUER_KEYWORDS:
+        return ISSUER_UNKNOWN
+    for issuer, keywords in table:
         if any(keyword in lowered for keyword in keywords):
             return issuer
-    return AU_ISSUER_UNKNOWN
+    return ISSUER_UNKNOWN
 
 
-def _load_au_etf_rows() -> list[dict[str, Any]]:
-    """호주 종목풀의 ETF 별 구성종목·보수 수집 현황을 읽는다."""
+def _load_etf_rows(ticker_type: str) -> list[dict[str, Any]]:
+    """종목풀의 ETF 별 구성종목·보수 수집 현황을 읽는다."""
     from utils.db_manager import get_db_connection
 
     db = get_db_connection()
@@ -267,7 +300,7 @@ def _load_au_etf_rows() -> list[dict[str, Any]]:
 
     rows: list[dict[str, Any]] = []
     cursor = db.stock_cache_meta.find(
-        {"ticker_type": "aus"},
+        {"ticker_type": ticker_type},
         {"_id": 0, "ticker": 1, "name": 1, "holdings_cache": 1, "meta_cache": 1},
     )
     for doc in cursor:
@@ -300,26 +333,60 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
         "vanguard.com.au/adviser/api/data/products/holdings/{portId}",
         "services/vanguard_au_service.py",
     ),
+    "invesco_us_api": (
+        "dng-api.invesco.com/cache/v1/accounts/en_US/shareclasses/{cusip}/holdings/fund",
+        "services/invesco_us_service.py",
+    ),
     "yfinance_holdings": ("yfinance funds_data", "utils/stock_meta_updater.py"),
 }
 _SOURCE_NOTES: dict[str, str] = {
     "betashares_csv": "CSV 에 Currency·Country·Asset Class 열이 있어 구성종목의 상장 국가를 정확히 안다.",
     "vanguard_au_api": "ASX 티커가 아닌 내부 portId 로 조회한다. 운용보수(MER)도 이 API 로 함께 받는다.",
+    "invesco_us_api": "상품 명단에서 CUSIP 을 찾아 전체 구성종목을 받는다. 종목 메타 배치가 공통 캐시에 저장한다.",
     "yfinance_holdings": "공식 소스가 없어 폴백. 상위 10종목까지만 나오고 운용보수는 제공되지 않는다.",
 }
+# ETF 가 하나도 없는 발행사 행의 표시(수집 실패와 구분한다).
+_NO_ETF_SOURCE = "none"
 
 
-def _build_au_issuer_sources(au_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """호주 ETF 구성종목을 발행사별로 묶어 소스 카탈로그 행으로 만든다."""
-    by_issuer: dict[str, list[dict[str, Any]]] = {}
-    for row in au_rows:
-        by_issuer.setdefault(resolve_au_issuer(row["name"]), []).append(row)
+def _build_issuer_sources(
+    rows: list[dict[str, Any]],
+    *,
+    category: str,
+    country: str,
+    table: list[tuple[str, tuple[str, ...]]],
+    order: list[str],
+) -> list[dict[str, Any]]:
+    """종목풀 ETF 의 구성종목 수집 현황을 발행사별로 묶어 소스 카탈로그 행으로 만든다."""
+    by_issuer: dict[str, list[dict[str, Any]]] = {issuer: [] for issuer, _ in table}
+    for row in rows:
+        by_issuer.setdefault(_resolve_issuer(row["name"], table), []).append(row)
 
     entries: list[dict[str, Any]] = []
-    for issuer, rows in by_issuer.items():
+    for issuer, issuer_rows in by_issuer.items():
+        if not issuer_rows:
+            if issuer == ISSUER_UNKNOWN:
+                continue
+            entries.append(
+                {
+                    "category": category,
+                    "country": country,
+                    "provider": issuer,
+                    "endpoint": "",
+                    "usage": "해당 ETF 없음",
+                    "code_ref": "",
+                    "note": None,
+                    "etf_count": 0,
+                    "source": _NO_ETF_SOURCE,
+                    "source_label": "해당 ETF 없음",
+                    "missing_count": 0,
+                    "missing_tickers": [],
+                }
+            )
+            continue
         # 발행사의 대표 수집 경로 = 가장 많이 쓰인 소스. 실패분은 따로 센다.
-        source_counter = Counter(str(row["holdings_source"] or "") for row in rows)
-        missing_tickers = [row["ticker"] for row in rows if not row["holdings_source"]]
+        source_counter = Counter(str(row["holdings_source"] or "") for row in issuer_rows)
+        missing_tickers = [row["ticker"] for row in issuer_rows if not row["holdings_source"]]
         primary_source = next(
             (source for source, _ in source_counter.most_common() if source),
             "",
@@ -329,14 +396,14 @@ def _build_au_issuer_sources(au_rows: list[dict[str, Any]]) -> list[dict[str, An
 
         entries.append(
             {
-                "category": "ETF 상세",
-                "country": "au",
+                "category": category,
+                "country": country,
                 "provider": issuer,
                 "endpoint": endpoint,
-                "usage": f"{source_label} — ETF {len(rows)}종",
+                "usage": f"{source_label} — ETF {len(issuer_rows)}종",
                 "code_ref": code_ref,
                 "note": _SOURCE_NOTES.get(primary_source),
-                "etf_count": len(rows),
+                "etf_count": len(issuer_rows),
                 "source": primary_source or None,
                 "source_label": source_label,
                 "missing_count": len(missing_tickers),
@@ -344,27 +411,36 @@ def _build_au_issuer_sources(au_rows: list[dict[str, Any]]) -> list[dict[str, An
             }
         )
 
-    # 공식 소스를 쓰는 발행사를 위에, 그 다음 ETF 수 많은 순.
-    source_rank = {source: index for index, source in enumerate(AU_HOLDINGS_FALLBACK_ORDER)}
-    entries.sort(key=lambda entry: (source_rank.get(entry["source"] or "", 99), -entry["etf_count"]))
+    # 공식 소스를 쓰는 발행사를 위에, 그 다음 ETF 수 많은 순. ETF 가 없는 발행사는 맨 아래.
+    source_rank = {source: index for index, source in enumerate(order)}
+    entries.sort(
+        key=lambda entry: (
+            entry["etf_count"] == 0,
+            source_rank.get(entry["source"] or "", 99),
+            -entry["etf_count"],
+        )
+    )
     return entries
 
 
 def build_data_source_payload() -> dict[str, Any]:
-    """화면이 쓰는 데이터 소스 카탈로그. 호주 ETF 상세는 실제 캐시를 보고 발행사별로 만든다."""
-    au_rows = _load_au_etf_rows()
-    au_issuer_sources = _build_au_issuer_sources(au_rows)
+    """화면이 쓰는 데이터 소스 카탈로그. 미국·호주 ETF 상세는 실제 캐시를 보고 발행사별로 만든다."""
+    au_rows = _load_etf_rows("aus_etf")
+    us_rows = _load_etf_rows("us_etf")
+    au_entries = _build_issuer_sources(
+        au_rows, category="ETF 상세 - 호주", country="au", table=AU_ISSUER_KEYWORDS, order=AU_HOLDINGS_FALLBACK_ORDER
+    )
+    us_entries = _build_issuer_sources(
+        us_rows, category="ETF 상세 - 미국", country="us", table=US_ISSUER_KEYWORDS, order=US_HOLDINGS_FALLBACK_ORDER
+    )
 
-    # "ETF 상세" 정적 항목 뒤에 호주 발행사별 행을 이어 붙인다.
+    # "ETF 상세" 정적 항목(한국·미국 야후) 뒤에 국가별 발행사 행을 이어 붙인다 — 국가별로 표가 나뉜다.
     sources: list[dict[str, Any]] = list(DATA_SOURCES)
     last_detail_index = max(
-        (index for index, row in enumerate(sources) if row["category"] == "ETF 상세"),
-        default=None,
+        (index for index, row in enumerate(sources) if row["category"].startswith("ETF 상세")),
+        default=len(sources) - 1,
     )
-    if last_detail_index is None:
-        sources.extend(au_issuer_sources)
-    else:
-        sources[last_detail_index + 1 : last_detail_index + 1] = au_issuer_sources
+    sources[last_detail_index + 1 : last_detail_index + 1] = us_entries + au_entries
 
     return {
         "sources": sources,

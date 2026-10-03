@@ -5,11 +5,11 @@ from __future__ import annotations
 import math
 from datetime import datetime
 from html import unescape
-from threading import Lock
-from time import monotonic
 from typing import Any
 
+from config import CACHE_TTL_SLOW
 from utils.http_session import shared_session
+from utils.ttl_cache import TtlCache
 
 _API_BASE = "https://dng-api.invesco.com"
 _HEADERS = {
@@ -17,10 +17,7 @@ _HEADERS = {
     "Origin": "https://www.invesco.com",
     "Referer": "https://www.invesco.com/us/en/financial-products/etfs.html",
 }
-_PRODUCT_MAP_TTL_SECONDS = 3600
-_PRODUCT_MAP_LOCK = Lock()
-_product_map: dict[str, str] | None = None
-_product_map_updated_at = 0.0
+_PRODUCT_MAP_CACHE = TtlCache(CACHE_TTL_SLOW, name="invesco_us_products", max_entries=1)
 
 
 def _get_json(path: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -66,13 +63,7 @@ def _fetch_product_map() -> dict[str, str]:
 
 def _resolve_cusip(ticker: str) -> str | None:
     """공식 상품 명단에 속한 티커만 Invesco로 판정한다."""
-    global _product_map, _product_map_updated_at
-
-    with _PRODUCT_MAP_LOCK:
-        if _product_map is None or monotonic() - _product_map_updated_at >= _PRODUCT_MAP_TTL_SECONDS:
-            _product_map = _fetch_product_map()
-            _product_map_updated_at = monotonic()
-        return _product_map.get(ticker)
+    return _PRODUCT_MAP_CACHE.get_or_compute("products", _fetch_product_map).get(ticker)
 
 
 def _normalize_holding(raw: dict[str, Any]) -> dict[str, Any]:

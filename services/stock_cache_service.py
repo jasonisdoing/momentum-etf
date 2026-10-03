@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from utils.stock_cache_meta_io import (
@@ -9,6 +11,12 @@ from utils.stock_cache_meta_io import (
     update_stock_portfolio_change_cache_doc,
     upsert_stock_cache_meta_doc,
 )
+
+
+def stock_holdings_revision(holdings_cache: dict[str, Any]) -> str:
+    """원본 구성종목과 수집 메타가 같은지 확인하는 공통 식별값."""
+    encoded = json.dumps(holdings_cache, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def get_stock_cache_meta(ticker_type: str, ticker: str) -> dict[str, Any] | None:

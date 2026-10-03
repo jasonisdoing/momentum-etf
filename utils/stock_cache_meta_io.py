@@ -141,12 +141,13 @@ def upsert_stock_cache_meta_doc(
     if holdings_cache is not None:
         payload["holdings_cache"] = holdings_cache
 
+    update: dict[str, Any] = {"$set": payload, "$setOnInsert": {"created_at": now}}
+    if holdings_cache is not None:
+        update["$unset"] = {"portfolio_change_cache": "", "portfolio_change_cache_updated_at": ""}
+
     coll.update_one(
         {"ticker_type": type_norm, "ticker": ticker_norm},
-        {
-            "$set": payload,
-            "$setOnInsert": {"created_at": now},
-        },
+        update,
         upsert=True,
     )
 
