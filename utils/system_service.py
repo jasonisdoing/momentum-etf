@@ -1248,18 +1248,17 @@ def load_system_data() -> dict[str, object]:
             {**row, "run_location": "LOCAL" if row["key"] in LOCAL_ONLY_JOBS else "SERVER/LOCAL"}
             for row in SCHEDULE_ROWS
         ],
-        "schedule_note": (
-            "cron 스케줄 트리거는 서버 scheduler 컨테이너의 APScheduler 가 담당하며, "
-            "`infra/cron/crontab` 파일이 단일 진실 소스입니다. "
-            "큐 워커는 서버와 로컬(`python run_local_dev.py` 실행 중) 양쪽에서 함께 동작하며 "
-            "MongoDB `find_one_and_update` 로 한 곳에서만 atomic 하게 claim 합니다. "
-            "트리거(수동 클릭 / 스케줄)는 큐에 추가되어 레인별 FIFO 로 처리됩니다. "
-            "시세·수집(data) · 알림·동기화(light) · 백업(local) 레인이 서로 병렬로 돌고, "
-            "같은 레인 안에서는 순서대로 1건씩 직렬입니다 — 가격 캐시 → 지표 순서와 "
-            "외부 소스 동시 호출 방지는 레인 안의 직렬이 지키고, 레인 한도는 서버·로컬 합산 기준입니다. "
-            f"대기시간과 예상시간(서버/로컬)은 보관 중인 최근 {RUN_HISTORY_DAYS}일 실행 이력 전체의 평균입니다. "
-            f"배치 실행이 {_batch_timeout_minutes()}분을 초과하면 hang 으로 간주하여 "
-            "자동 종료(SIGKILL)되고 Slack 알림이 전송됩니다."
+        # 한 줄이 한 항목이다(화면이 줄바꿈으로 나눠 글머리 목록으로 보여 준다). 화면 폭이 좁아도 한 줄에 들어가게 짧게 쓴다.
+        "schedule_note": "\n".join(
+            [
+                "cron 트리거는 서버 scheduler(APScheduler)가 담당하며 `infra/cron/crontab` 이 단일 소스입니다.",
+                "큐 워커는 서버·로컬 양쪽에서 동작해 한 곳만 claim 하고, 트리거는 레인별 FIFO 로 처리됩니다.",
+                "시세·수집(data) · 알림(light) · 백업(local) 레인은 병렬, 한 레인 안에서는 1건씩 직렬입니다.",
+                f"대기·예상시간(서버/로컬)은 최근 {RUN_HISTORY_DAYS}일 실행 이력 전체의 평균입니다.",
+                f"{_batch_timeout_minutes()}분을 넘긴 배치는 hang 으로 보고 SIGKILL 로 종료하며 Slack 으로 알립니다.",
+                "죽은 워커가 남긴 락 기록은 예상시간의 2배 또는 "
+                f"{_STALE_LOCK_ABSOLUTE_MAX_SECONDS // 3600}시간을 넘으면 삭제하며, 프로세스는 종료하지 않습니다.",
+            ]
         ),
         "running_jobs": get_running_jobs(),
         "running_job_details": get_running_job_details(),
