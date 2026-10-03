@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 import config
 from fastapi_app.dependencies import require_internal_token
@@ -27,9 +27,15 @@ def get_market_trend_calendar(
 
 
 @router.get("/calendar/weekday-stats")
-def get_market_trend_weekday_stats(_: None = Depends(require_internal_token)) -> dict[str, object]:
-    """최근 12개월 요일별 지수 평균 등락률 — 시장 캘린더 하단 통계."""
-    return get_weekday_stats()
+def get_market_trend_weekday_stats(
+    months: int = Query(default=config.WEEKDAY_STATS_DEFAULT_MONTHS),
+    _: None = Depends(require_internal_token),
+) -> dict[str, object]:
+    """최근 N개월 요일별 지수 평균 등락률 — 시장 캘린더 하단 통계."""
+    try:
+        return get_weekday_stats(months)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/indices")
