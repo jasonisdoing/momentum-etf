@@ -659,27 +659,29 @@ export function SystemManager({
               }}
             />
             {(() => {
-              // 백엔드 schedule_note(타임아웃 안내 포함)를 "다. " 단위로 split 하여 한 문장 한 줄로 표시.
-              const combined = scheduleNote ?? "";
-              // "다. " 뒤에서 split 후 종결 마침표 복원.
-              const sentences = combined
-                .split(/(?<=다\.) +/)
-                .map((s) => s.trim())
-                .filter((s) => s.length > 0);
+              // 백엔드 schedule_note(타임아웃 안내 포함)는 한 줄이 한 항목이다.
+              const sentences = (scheduleNote ?? "")
+                .split("\n")
+                .map((sentence) => sentence.trim())
+                .filter((sentence) => sentence.length > 0);
+              if (sentences.length === 0) return null;
               return (
-                <div
-                  className="tableFooterMeta"
-                  style={{
-                    color: "#000",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 4,
-                    lineHeight: 1.6,
-                  }}
-                >
-                  {sentences.map((line, idx) => (
-                    <div key={idx}>{line}</div>
-                  ))}
+                // 표 하단 메타(.tableFooterMeta)는 우측 정렬이라 긴 안내문에는 쓰지 않는다 — 안내 박스로 왼쪽 정렬한다.
+                <div className="alert alert-info mb-0 mt-2">
+                  <ul className="mb-0 ps-3" style={{ lineHeight: 1.7 }}>
+                    {sentences.map((line, idx) => (
+                      <li key={idx}>
+                        {/* 백틱으로 감싼 부분은 코드 표기로 보여준다. */}
+                        {line.split(/(`[^`]+`)/).map((part, partIdx) =>
+                          part.startsWith("`") && part.endsWith("`") ? (
+                            <code key={partIdx}>{part.slice(1, -1)}</code>
+                          ) : (
+                            <span key={partIdx}>{part}</span>
+                          ),
+                        )}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               );
             })()}
