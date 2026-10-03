@@ -5,7 +5,7 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from utils.batch_queue import LOCAL_ONLY_JOBS
@@ -607,43 +607,60 @@ def _read_queue_averages(sample_size: int = AVERAGE_SAMPLE_SIZE) -> dict[str, di
     if db is None:
         return {}
 
-    samples: dict[str, dict[str, list[float]]] = {}
-
-    def add(job: str, metric: str, value: float) -> None:
-        bucket = samples.setdefault(job, {}).setdefault(metric, [])
-        if len(bucket) < sample_size:
-            bucket.append(max(0.0, value))
-
+    # 서버 쪽에서 잡·지표별로 묶어 최근 N건 평균만 받는다 — 잡마다 따로 조회하면 왕복이 수십 번이다.
+    # 잡별로 묶는 이유: 자주 도는 잡(10분 간격)이 전체 최근 N건을 다 차지하면 드물게 도는 잡의 이력이 밀려난다.
+    is_local = {"$regexMatch": {"input": {"$ifNull": ["$app_type", ""]}, "regex": "^local$", "options": "i"}}
+    # 실패한 실행은 중간에 끊긴 시간이라 실행시간 평균에 넣지 않는다.
+    finished_ok = {"$and": [{"$ne": ["$ended_at", None]}, {"$in": [{"$ifNull": ["$exit_code", 0]}, [0]]}]}
+    pipeline: list[dict[str, Any]] = [
+        {"$match": {"started_at": {"$ne": None}}},
+        {"$sort": {"started_at": -1}},
+        {
+            "$project": {
+                "job": {"$arrayElemAt": [{"$split": ["$job_name", ":"]}, 0]},
+                "samples": {
+                    "$filter": {
+                        "input": [
+                            {
+                                "metric": "wait",
+                                "seconds": {
+                                    "$cond": [
+                                        {"$ne": ["$triggered_at", None]},
+                                        {"$divide": [{"$subtract": ["$started_at", "$triggered_at"]}, 1000]},
+                                        None,
+                                    ]
+                                },
+                            },
+                            {
+                                "metric": {"$cond": [is_local, "elapsed_local", "elapsed_server"]},
+                                "seconds": {
+                                    "$cond": [
+                                        finished_ok,
+                                        {"$divide": [{"$subtract": ["$ended_at", "$started_at"]}, 1000]},
+                                        None,
+                                    ]
+                                },
+                            },
+                        ],
+                        "cond": {"$ne": ["$$this.seconds", None]},
+                    }
+                },
+            }
+        },
+        {"$unwind": "$samples"},
+        {"$group": {"_id": {"job": "$job", "metric": "$samples.metric"}, "values": {"$push": "$samples.seconds"}}},
+        {"$project": {"average": {"$avg": {"$slice": ["$values", sample_size]}}}},
+    ]
+    averages: dict[str, dict[str, float]] = {}
     try:
-        cursor = (
-            db[BATCH_QUEUE_COLLECTION]
-            .find(
-                {"started_at": {"$ne": None}},
-                {"job_name": 1, "triggered_at": 1, "started_at": 1, "ended_at": 1, "app_type": 1, "exit_code": 1},
-            )
-            .sort("started_at", -1)
-            .limit(sample_size * 80)
-        )
-        for doc in cursor:
-            job = str(doc.get("job_name") or "").split(":")[0]
-            triggered_at, started_at, ended_at = doc.get("triggered_at"), doc.get("started_at"), doc.get("ended_at")
-            if not job or started_at is None:
+        for doc in db[BATCH_QUEUE_COLLECTION].aggregate(pipeline, allowDiskUse=True):
+            if doc.get("average") is None:
                 continue
-            if triggered_at is not None:
-                add(job, "wait", (started_at - triggered_at).total_seconds())
-            # 실패한 실행은 중간에 끊긴 시간이라 성능 비교에 넣지 않는다.
-            if ended_at is None or doc.get("exit_code") not in (0, None):
-                continue
-            where = "local" if str(doc.get("app_type") or "").strip().lower() == "local" else "server"
-            add(job, f"elapsed_{where}", (ended_at - started_at).total_seconds())
+            averages.setdefault(doc["_id"]["job"], {})[doc["_id"]["metric"]] = max(0.0, float(doc["average"]))
     except Exception as exc:  # noqa: BLE001 - 참고 값이라 화면을 막지 않는다
         _logger.warning("배치 큐 평균 계산 실패: %s", exc)
         return {}
-
-    return {
-        job: {metric: sum(values) / len(values) for metric, values in metrics.items() if values}
-        for job, metrics in samples.items()
-    }
+    return averages
 
 
 def _job_estimate_for_owner(job_key: str, owner: str, averages: dict[str, dict[str, float]]) -> float | None:
@@ -1192,7 +1209,7 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
 
 
 def load_system_data() -> dict[str, object]:
-    from utils.batch_queue import list_queue
+    from utils.batch_queue import RUN_HISTORY_DAYS, list_queue
 
     queue_items = list_queue(limit=30)
     # ObjectId/datetime 직렬화 — 응답 직전 평탄화
@@ -1242,7 +1259,8 @@ def load_system_data() -> dict[str, object]:
             "시세·수집(data) · 알림·동기화(light) · 백업(local) 레인이 서로 병렬로 돌고, "
             "같은 레인 안에서는 순서대로 1건씩 직렬입니다 — 가격 캐시 → 지표 순서와 "
             "외부 소스 동시 호출 방지는 레인 안의 직렬이 지키고, 레인 한도는 서버·로컬 합산 기준입니다. "
-            f"대기시간과 예상시간(서버/로컬)은 각각 최근 {AVERAGE_SAMPLE_SIZE}회 실행의 평균입니다. "
+            f"대기시간과 예상시간(서버/로컬)은 각각 최근 {AVERAGE_SAMPLE_SIZE}회 실행의 평균이며, "
+            f"실행 이력은 {RUN_HISTORY_DAYS}일간 보관합니다. "
             f"배치 실행이 {_batch_timeout_minutes()}분을 초과하면 hang 으로 간주하여 "
             "자동 종료(SIGKILL)되고 Slack 알림이 전송됩니다."
         ),

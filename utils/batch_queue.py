@@ -10,7 +10,8 @@
     - 워커는 서버 scheduler 컨테이너 + 로컬(`python run_local_dev.py`) 다중 인스턴스
       가능. MongoDB find_one_and_update 로 동시 claim 안전.
     - 중복 enqueue 무시 (같은 job_name 이 pending/running 이면 추가 안 함)
-    - 24시간 TTL — 워커가 꺼져 있는 동안 무한 누적되는 것 방지
+    - 대기·실행 중 항목은 24시간 TTL — 워커가 꺼져 있는 동안 무한 누적되는 것 방지.
+      **끝난 항목은 30일 보관**(`RUN_HISTORY_DAYS`) — 화면의 예상·대기시간 평균(최근 10회)의 이력이다.
     - heartbeat: 워커가 30초마다 last_heartbeat 갱신
     - 워커 시작 시 stale running (heartbeat 5분 이상 끊김) → failed 자동 마킹
 
@@ -41,6 +42,8 @@ STATUS_DONE = "done"
 STATUS_FAILED = "failed"
 
 _TTL_HOURS = 24
+# 끝난(done/failed) 항목의 보관 기간. 평균을 내는 이력이라 하루 한 번 이하로 도는 잡도 표본이 쌓이게 길게 둔다.
+RUN_HISTORY_DAYS = 30
 _HEARTBEAT_STALE_MINUTES = 5
 
 # 무거운 계산이라 서버(약한 VM)에서 돌리면 안 되고, 로컬 워커(APP_TYPE=Local)만 픽하게 하는 잡들.
@@ -254,8 +257,8 @@ def mark_done(item_id: Any, exit_code: int) -> None:
                 "status": STATUS_DONE if exit_code == 0 else STATUS_FAILED,
                 "ended_at": now,
                 "exit_code": int(exit_code),
-                # 완료 항목도 TTL 24h 후 정리되도록 expires_at 갱신
-                "expires_at": now + timedelta(hours=_TTL_HOURS),
+                # 끝난 항목은 실행 이력으로 오래 보관한다.
+                "expires_at": now + timedelta(days=RUN_HISTORY_DAYS),
             }
         },
     )
@@ -273,7 +276,7 @@ def mark_failed(item_id: Any, error: str) -> None:
                 "status": STATUS_FAILED,
                 "ended_at": now,
                 "error": str(error)[:500],
-                "expires_at": now + timedelta(hours=_TTL_HOURS),
+                "expires_at": now + timedelta(days=RUN_HISTORY_DAYS),
             }
         },
     )
@@ -302,7 +305,7 @@ def reap_stale_running() -> int:
                 "status": STATUS_FAILED,
                 "ended_at": _now_utc(),
                 "error": "워커가 끊긴 것으로 추정 (heartbeat 5분 이상 없음)",
-                "expires_at": _now_utc() + timedelta(hours=_TTL_HOURS),
+                "expires_at": _now_utc() + timedelta(days=RUN_HISTORY_DAYS),
             }
         },
     )
