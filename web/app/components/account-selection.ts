@@ -35,6 +35,7 @@ export function writeRememberedMomentumEtfAccountId(accountId: string | null | u
 export type PoolScreen =
   | "rank"
   | "pools-backtest"
+  | "pools-risk-return"
   | "market"
   | "market-stock-kor"
   | "market-stock-us"

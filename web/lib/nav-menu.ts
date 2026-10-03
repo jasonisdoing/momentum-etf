@@ -9,6 +9,7 @@ import {
   IconActivity,
   IconCash,
   IconCalendarStats,
+  IconChartDots,
   IconChartHistogram,
   IconChartInfographic,
   IconChartPie,
@@ -93,6 +94,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     icon: IconTrendingUp,
     items: [
       { href: "/pools-rank", label: "순위", icon: IconMedal2 },
+      { href: "/pools-risk-return", label: "위험·수익", icon: IconChartDots },
       { href: "/pools-settings", label: "설정", icon: IconSettings },
       { href: "/pools-backtest", label: "백테스트", icon: IconChartHistogram },
     ],
@@ -136,6 +138,7 @@ export function isNavItemActive(itemHref: string, currentPathname: string | null
 export const FULL_WIDTH_ROUTES: readonly string[] = [
   "/assets",
   "/pools-rank",
+  "/pools-risk-return",
   "/pools-backtest",
   "/kor-market-stock",
   "/us-market-stock",

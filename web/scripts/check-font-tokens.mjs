@@ -31,6 +31,7 @@ const NUMERIC_ALLOWED = [
   { file: "app/components/app-grid-theme.ts", reason: "AG Grid JS 테마" },
   { file: "app/dashboard/DashboardManager.tsx", reason: "recharts 축 눈금" },
   { file: "app/asset-status/AssetChartsManager.tsx", reason: "recharts 축 눈금" },
+  { file: "app/pools-risk-return/PoolRiskReturnManager.tsx", reason: "recharts 축 눈금·라벨" },
   { file: "app/components/AssetHelperBacktestResult.tsx", reason: "recharts 축 눈금" },
   { file: "app/market-trend/MarketTrendChart.tsx", reason: "차트 라이브러리 설정" },
   { file: "app/ticker/TickerDetailManager.tsx", reason: "lightweight-charts layout" },
