@@ -8,16 +8,20 @@
 .positive { color: #d63939; font-weight: 700; }
 .negative { color: #206bc4; font-weight: 700; }
 .dataIssue { color: #a35a00 !important; font-weight: 700; }
-.calendarScroll { display: flex; flex: 1 1 auto; min-height: 0; overflow-x: auto; border: 1px solid var(--calendar-divider); border-radius: 0.5rem; background: var(--panel); }
-.calendar { display: grid; flex: 1 0 auto; grid-template-columns: repeat(5, minmax(24rem, 1fr)); grid-template-rows: 2rem; grid-auto-rows: minmax(8.25rem, 1fr); min-width: 120rem; }
+.calendarScroll { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--calendar-divider); border-radius: 0.5rem; background: var(--panel); }
+.calendarInner { min-width: 125rem; --month-column: 5rem; }
+.weekdayRow { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: var(--month-column) repeat(5, minmax(24rem, 1fr)); }
+.weekdayCorner { background: var(--app-table-head-bg); border-right: 1px solid var(--calendar-divider); border-bottom: 2px solid var(--calendar-divider); }
+.monthBlock { display: grid; grid-template-columns: var(--month-column) repeat(5, minmax(24rem, 1fr)); grid-auto-rows: 8.25rem; }
+.monthColumn { position: relative; background: var(--accent-soft); border-right: 1px solid var(--calendar-divider); border-bottom: 1px solid var(--calendar-divider); }
+.monthLabel { position: sticky; top: 2.5rem; display: block; padding: 0.6rem 0.3rem; text-align: center; font-size: var(--fs-sm); font-weight: 700; line-height: 1.35; }
+.monthChip { padding: 0.08rem 0.35rem; border-radius: 1rem; background: var(--accent-soft); color: var(--text-muted); font-size: var(--fs-xs); font-weight: 700; }
 .weekday { padding: 0.4rem; text-align: center; background: var(--app-table-head-bg); color: var(--app-table-head-color); border-right: 1px solid var(--calendar-divider); border-bottom: 2px solid var(--calendar-divider); font-size: var(--fs-sm); font-weight: 700; }
-.weekday:nth-child(5) { border-right: 0; }
 .day { display: flex; flex-direction: column; gap: 0.2rem; min-height: 8.25rem; padding: 0.4rem 0.55rem; border: 0; border-right: 1px solid var(--calendar-divider); border-bottom: 1px solid var(--calendar-divider); background: var(--panel); text-align: left; color: var(--ink); font-size: var(--fs-sm); cursor: pointer; }
-.day:nth-child(5n) { border-right: 0; }
+.day.monthAlt { background: color-mix(in srgb, var(--panel) 94%, var(--ink) 6%); }
 .day:hover { background: var(--calendar-select-soft); }
 .day:focus-visible { outline: 2px solid var(--calendar-select); outline-offset: -2px; }
 .day.selected { background: var(--calendar-select-soft); box-shadow: inset 0 0 0 2px var(--calendar-select); }
-.day.outside { color: var(--text-muted); opacity: 0.55; }
 .dayHeader, .indexRows > span, .extraRow { display: flex; align-items: center; justify-content: space-between; gap: 0.35rem; }
 .dayHeader strong { font-size: var(--fs-base); }
 .todayBadge { padding: 0.08rem 0.35rem; border-radius: 1rem; background: var(--calendar-select); color: white; font-size: var(--fs-xs); }
