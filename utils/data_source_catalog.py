@@ -20,6 +20,7 @@ HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "vanguard_au_api": "Vanguard AU 공식 API",
     "invesco_us_api": "Invesco 미국 공식 API",
     "ishares_us_csv": "iShares 미국 공식 CSV",
+    "spdr_us_xlsx": "SPDR 미국 공식 XLSX",
     "yfinance_holdings": "yfinance (상위 10종목)",
     "naver_etf_component": "네이버 ETF 구성종목",
 }
@@ -222,7 +223,7 @@ DATA_SOURCES: list[dict[str, Any]] = [
 
 # ETF 구성종목 수집 순서 — 실제 코드(_refresh_overseas_etf_meta_cache / fetch_us_etf_holdings)와 일치시킨다.
 AU_HOLDINGS_FALLBACK_ORDER: list[str] = ["betashares_csv", "vanguard_au_api", "yfinance_holdings"]
-US_HOLDINGS_FALLBACK_ORDER: list[str] = ["invesco_us_api", "ishares_us_csv", "yfinance_holdings"]
+US_HOLDINGS_FALLBACK_ORDER: list[str] = ["invesco_us_api", "ishares_us_csv", "spdr_us_xlsx", "yfinance_holdings"]
 
 # ETF 이름 → 발행사(운용사). 미국·호주는 통합 소스가 없어 발행사별로 수집 경로가 갈리므로
 # 발행사를 기준으로 정리한다. 이름 앞부분에 발행사명이 들어가는 업계 관행을 이용하되,
@@ -266,12 +267,17 @@ US_ISSUER_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("FlexShares", ("flexshares",)),
     ("Victory Shares", ("victoryshares", "victory shares")),
     ("Putnam", ("putnam",)),
+    ("MarketDesk", ("marketdesk",)),
 ]
 ISSUER_UNKNOWN = "기타"
 
 # 코드에 공식 연동이 들어 있는 발행사 → 수집 소스. 배치가 아직 안 돌아 캐시에 옛 소스(야후)가 남아 있어도
 # 행은 연동된 공식 소스로 보이고, 아직 그 소스로 받지 못한 ETF 는 「미수집」으로 센다.
-US_OFFICIAL_SOURCES: dict[str, str] = {"Invesco": "invesco_us_api", "iShares (BlackRock)": "ishares_us_csv"}
+US_OFFICIAL_SOURCES: dict[str, str] = {
+    "Invesco": "invesco_us_api",
+    "iShares (BlackRock)": "ishares_us_csv",
+    "SPDR (State Street)": "spdr_us_xlsx",
+}
 
 
 def _resolve_issuer(name: str, table: list[tuple[str, tuple[str, ...]]]) -> str:
@@ -336,6 +342,10 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
         "ishares.com/us/products/{상품 ID}/{상품 경로}/latest-holdings.csv",
         "services/ishares_us_service.py",
     ),
+    "spdr_us_xlsx": (
+        "ssga.com/library-content/products/fund-data/etfs/us/holdings-daily-us-en-{ticker}.xlsx",
+        "services/spdr_us_service.py",
+    ),
     "yfinance_holdings": ("yfinance funds_data", "utils/stock_meta_updater.py"),
 }
 _SOURCE_NOTES: dict[str, str] = {
@@ -343,6 +353,7 @@ _SOURCE_NOTES: dict[str, str] = {
     "vanguard_au_api": "ASX 티커가 아닌 내부 portId 로 조회한다. 운용보수(MER)도 이 API 로 함께 받는다.",
     "invesco_us_api": "상품 명단에서 CUSIP 을 찾아 전체 구성종목을 받는다. 종목 메타 배치가 공통 캐시에 저장한다.",
     "ishares_us_csv": "공식 상품 명단에서 티커를 찾아 전체 구성종목 CSV를 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
+    "spdr_us_xlsx": "공식 상품 명단에서 티커를 찾아 전체 구성종목 XLSX를 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "yfinance_holdings": "공식 소스가 없어 폴백. 상위 10종목까지만 나오고 운용보수는 제공되지 않는다.",
 }
 

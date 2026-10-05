@@ -21,11 +21,12 @@ from zipfile import ZipFile
 import pandas as pd
 import requests
 
-from config import KIS_US_MASTER_URLS, US_ETF_MARKET_TOP_COUNT
+from config import CACHE_TTL_SLOW, KIS_US_MASTER_URLS, US_ETF_MARKET_TOP_COUNT
 from utils.db_manager import get_db_connection
 from utils.kis_market import BASE_CLOSE_OFFSETS
 from utils.logger import get_app_logger
 from utils.normalization import to_iso_string
+from utils.ttl_cache import TtlCache
 
 logger = get_app_logger()
 
@@ -40,6 +41,7 @@ _F_SECURITY_TYPE = 8  # 2=주식, 3=ETF
 _F_CURRENCY = 9
 
 _ETF_TYPE = "3"
+_MASTER_CACHE = TtlCache(CACHE_TTL_SLOW, name="us_security_master", max_entries=1)
 # 기간 수익률의 기준일 — 한국 ETF 마켓과 같은 기간에 3달을 더한다. 한국은 3달을 네이버
 # 실시간 스냅샷이 직접 주지만, 미국 시세에는 그 값이 없어 기준종가로 계산한다.
 _BASE_CLOSE_OFFSETS: tuple[tuple[str, pd.DateOffset], ...] = (*BASE_CLOSE_OFFSETS, ("3m", pd.DateOffset(months=3)))
@@ -75,8 +77,8 @@ def _is_ptp(ticker: str, legal_name: str) -> bool:
     return ticker in _PTP_EXTRA_TICKERS or bool(_PTP_NAME_PATTERN.search(legal_name or ""))
 
 
-def _load_us_etf_master() -> list[dict[str, str]]:
-    """3개 거래소 마스터에서 USD ETF 를 모은다. 같은 티커는 먼저 만난 거래소를 유지."""
+def _fetch_us_security_master() -> list[dict[str, str]]:
+    """3개 거래소의 USD 주식·ETF 명단을 공통으로 수집한다."""
     rows: list[dict[str, str]] = []
     seen: set[str] = set()
     for exchange, url in KIS_US_MASTER_URLS.items():
@@ -92,7 +94,8 @@ def _load_us_etf_master() -> list[dict[str, str]]:
             fields = line.split("\t")
             if len(fields) <= _F_CURRENCY:
                 continue
-            if fields[_F_SECURITY_TYPE].strip() != _ETF_TYPE or fields[_F_CURRENCY].strip() != "USD":
+            security_type = fields[_F_SECURITY_TYPE].strip()
+            if security_type not in {"2", _ETF_TYPE} or fields[_F_CURRENCY].strip() != "USD":
                 continue
             ticker = fields[_F_TICKER].strip().upper()
             if not ticker or ticker in seen:
@@ -106,15 +109,25 @@ def _load_us_etf_master() -> list[dict[str, str]]:
                     # 화면 표기는 한글명 우선 — KIS 가 번역해 둔 종목만 있고, 없으면 영문명.
                     "name": name_kr or name_en,
                     "exchange": exchange,
+                    "security_type": security_type,
                     # 법적 구조가 드러나는 긴 이름 — PTP 판정용(화면에는 안 쓴다).
                     "legal_name": name_en,
                 }
             )
             count += 1
-        logger.info("[미국 ETF] %s 마스터: ETF %d건", exchange, count)
+        logger.info("[미국 종목] %s 마스터: 주식·ETF %d건", exchange, count)
     if not rows:
-        raise RuntimeError("KIS 미국 마스터에서 ETF 를 한 건도 찾지 못했습니다.")
+        raise RuntimeError("KIS 미국 마스터에서 주식·ETF를 한 건도 찾지 못했습니다.")
     return rows
+
+
+def load_us_security_master() -> list[dict[str, str]]:
+    """미국 상장 여부를 확인할 공통 명단을 반환한다."""
+    return [dict(row) for row in _MASTER_CACHE.get_or_compute("master", _fetch_us_security_master)]
+
+
+def _load_us_etf_master() -> list[dict[str, str]]:
+    return [row for row in load_us_security_master() if row["security_type"] == _ETF_TYPE]
 
 
 def _download_daily(tickers: list[str], period: str) -> dict[str, pd.DataFrame]:
