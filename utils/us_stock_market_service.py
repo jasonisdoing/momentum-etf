@@ -75,15 +75,57 @@ def _fetch_us_market_value_page(
     raise RuntimeError("네이버 미국 주식 리스트 조회에 실패했습니다.")  # 도달 불가, 안전망
 
 
+# 페이지를 쪼갤 때 쓰는 크기 사다리 — 앞 크기가 다음 크기의 정수배라 `startIdx`(쪽 번호)가 정확히 이어진다.
+_SPLIT_PAGE_SIZES = (200, 100, 50, 25, 5, 1)
+# 한 번의 시총 수집에서 건너뛸 수 있는 항목 수 — 이보다 많으면 항목 문제가 아니라 장애로 보고 실패시킨다.
+_MAX_SKIPPED_ITEMS = 3
+
+
+def _fetch_page_skipping_bad_items(
+    market: str, page_index: int, page_size: int, skipped: list[int]
+) -> list[dict[str, Any]]:
+    """한 쪽을 받되, 특정 항목 때문에 쪽 전체가 500 이면 쪽을 쪼개 그 항목만 건너뛴다.
+
+    네이버 시총 목록에는 응답을 만들다 죽는 항목이 가끔 있다(NSQ 3874번째: 그 항목이 든 구간은
+    어떤 크기로 요청해도 500). 그대로 두면 미국 시총 순위 전체가 실패한다. 건너뛴 항목의
+    개수를 `skipped` 에 쌓고, 한도를 넘으면 장애로 보고 예외를 낸다.
+    """
+    try:
+        return _fetch_us_market_value_page(market, start_idx=page_index, page_size=page_size, max_attempts=2)
+    except RuntimeError as exc:
+        if page_size == 1:
+            skipped.append(page_index)
+            logger.warning(
+                "네이버 미국 시총 목록의 읽을 수 없는 항목을 건너뜁니다 (market=%s, 위치=%d): %s",
+                market,
+                page_index,
+                exc,
+            )
+            if len(skipped) > _MAX_SKIPPED_ITEMS:
+                raise RuntimeError(
+                    f"네이버 미국 시총 목록에서 읽을 수 없는 항목이 {len(skipped)}개를 넘었습니다: {market}"
+                ) from exc
+            return []
+        smaller = _SPLIT_PAGE_SIZES[_SPLIT_PAGE_SIZES.index(page_size) + 1]
+        factor = page_size // smaller
+        items: list[dict[str, Any]] = []
+        for part in range(factor):
+            items.extend(_fetch_page_skipping_bad_items(market, page_index * factor + part, smaller, skipped))
+        return items
+
+
 def load_us_market_caps() -> dict[str, float]:
     """NYSE·NASDAQ 개별주 전체의 시총(USD)을 배치 순위 계산용으로 받는다."""
     caps: dict[str, float] = {}
+    skipped: list[int] = []
     for market in ("NSQ", "NYS"):
         page_index = 0
         market_tickers: set[str] = set()
         while True:
-            items = _fetch_us_market_value_page(market, start_idx=page_index, page_size=_NAVER_US_PAGE_SIZE_MAX)
-            if not items:
+            skipped_before = len(skipped)
+            items = _fetch_page_skipping_bad_items(market, page_index, _NAVER_US_PAGE_SIZE_MAX, skipped)
+            page_skipped = len(skipped) - skipped_before
+            if not items and not page_skipped:
                 if page_index == 0:
                     raise RuntimeError(f"네이버 미국 시총 명단이 비어 있습니다: {market}")
                 break
@@ -101,7 +143,8 @@ def load_us_market_caps() -> dict[str, float]:
                     caps[ticker] = max(cap, caps.get(ticker, 0.0))
 
             market_tickers.update(page_tickers)
-            if len(items) < _NAVER_US_PAGE_SIZE_MAX:
+            # 건너뛴 항목도 쪽을 채우던 자리라 개수에 더해야 마지막 쪽 판정이 어긋나지 않는다.
+            if len(items) + page_skipped < _NAVER_US_PAGE_SIZE_MAX:
                 break
             page_index += 1
 
