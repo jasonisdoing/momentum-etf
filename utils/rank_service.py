@@ -422,6 +422,7 @@ def _build_missing_ticker_rows(
                 "순위": None,
                 "이전순위": None,
                 "1주순위": None,
+                "2주순위": None,
                 "버킷": "",
                 "bucket": None,
                 "상장일": "-",
@@ -484,6 +485,24 @@ def _get_nth_previous_trading_day(
     if len(previous_days) < offset:
         return None
     return previous_days[-offset]
+
+
+def _rank_map_as_of(
+    selected_ticker_type: str,
+    ma_rules: list[dict[str, Any]],
+    trading_day: pd.Timestamp | None,
+) -> dict[str, int]:
+    """그 거래일 기준의 순위표(번호만). 거래일이 없으면 빈 표 — 변동 컬럼이 '-' 로 나온다."""
+    if trading_day is None:
+        return {}
+    # 번호만 쓴다 — 표시용 지표는 계산하지 않는다(scores_only).
+    dataframe = build_ticker_type_rankings(
+        selected_ticker_type,
+        ma_rules=ma_rules,
+        as_of_date=trading_day,
+        scores_only=True,
+    )
+    return _build_rank_map_from_rows(_build_score_ranked_rows(dataframe))
 
 
 def _get_previous_trading_day(country_code: str, reference_date: pd.Timestamp | None) -> pd.Timestamp | None:
@@ -672,30 +691,13 @@ def _compute_rank_data_payload(
             effective_as_of_date = parsed_as_of_date.normalize()
     current_rows = _build_score_ranked_rows(dataframe)
     current_rank_map = _build_rank_map_from_rows(current_rows)
-    previous_rank_map: dict[str, int] = {}
-    weekly_rank_map: dict[str, int] = {}
     raw_latest_trading_day = dataframe.attrs.get("latest_trading_day")
     previous_trading_day = _get_previous_trading_day(country_code, raw_latest_trading_day)
     weekly_rank_trading_day = _get_nth_previous_trading_day(country_code, raw_latest_trading_day, 5)
-    if previous_trading_day is not None:
-        # 번호만 쓴다 — 표시용 지표는 계산하지 않는다(scores_only).
-        previous_dataframe = build_ticker_type_rankings(
-            selected_ticker_type,
-            ma_rules=ma_rules,
-            as_of_date=previous_trading_day,
-            scores_only=True,
-        )
-        previous_rows = _build_score_ranked_rows(previous_dataframe)
-        previous_rank_map = _build_rank_map_from_rows(previous_rows)
-    if weekly_rank_trading_day is not None:
-        weekly_dataframe = build_ticker_type_rankings(
-            selected_ticker_type,
-            ma_rules=ma_rules,
-            as_of_date=weekly_rank_trading_day,
-            scores_only=True,
-        )
-        weekly_rows = _build_score_ranked_rows(weekly_dataframe)
-        weekly_rank_map = _build_rank_map_from_rows(weekly_rows)
+    two_week_rank_trading_day = _get_nth_previous_trading_day(country_code, raw_latest_trading_day, 10)
+    previous_rank_map = _rank_map_as_of(selected_ticker_type, ma_rules, previous_trading_day)
+    weekly_rank_map = _rank_map_as_of(selected_ticker_type, ma_rules, weekly_rank_trading_day)
+    two_week_rank_map = _rank_map_as_of(selected_ticker_type, ma_rules, two_week_rank_trading_day)
 
     if current_rows:
         dataframe_attrs = dict(dataframe.attrs)
@@ -705,6 +707,7 @@ def _compute_rank_data_payload(
             row["순위"] = current_rank_map.get(row_key)
             row["이전순위"] = previous_rank_map.get(row_key)
             row["1주순위"] = weekly_rank_map.get(row_key)
+            row["2주순위"] = two_week_rank_map.get(row_key)
             enriched_rows.append(row)
         dataframe = pd.DataFrame(enriched_rows)
         dataframe.attrs.update(dataframe_attrs)
