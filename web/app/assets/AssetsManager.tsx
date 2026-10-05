@@ -34,6 +34,9 @@ import {
   parseNumericCell,
 } from "./assets-helpers";
 
+/** 시세 갱신 주기(ms) — 서버 시세 캐시(60초)와 같은 간격. */
+const LIVE_REFRESH_MS = 60_000;
+
 export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: AssetsHeaderSummary) => void }) {
   const toast = useToast();
   const [allRows, setAllRows] = useState<HoldingsRow[]>([]);
@@ -50,6 +53,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [parentDirtyCellKeys, setParentDirtyCellKeys] = useState<string[]>([]);
   const [editingParentId, setEditingParentId] = useState<string | null>(null);
   const summariesRef = useRef<AccountSummary[]>([]);
+  const detailBusyRef = useRef(false);
   const parentSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const parentSavingAccountIdsRef = useRef<Set<string>>(new Set());
   const parentQueuedAccountIdsRef = useRef<Set<string>>(new Set());
@@ -113,6 +117,23 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   useEffect(() => {
     void load();
   }, [load]);
+
+  const handleDetailBusyChange = useCallback((busy: boolean) => {
+    detailBusyRef.current = busy;
+  }, []);
+
+  // 시세가 바뀌므로 60초마다 값만 다시 받는다. 계좌 표나 상세 모달에서 수정·선택·저장 중이면
+  // 입력이 덮어써지지 않게 그 주기는 건너뛴다.
+  const parentBusy = loading || editingParentId !== null || parentDirtyCellKeys.length > 0;
+  useEffect(() => {
+    if (parentBusy) return;
+    const timer = window.setInterval(() => {
+      if (document.hidden || detailBusyRef.current) return;
+      if (parentSavingAccountIdsRef.current.size > 0 || parentSaveTimersRef.current.size > 0) return;
+      void load({ silent: true });
+    }, LIVE_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [load, parentBusy]);
 
   useEffect(() => {
     summariesRef.current = summaries;
@@ -374,11 +395,12 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           }}
           onSortStateChange={handleChildSortStateChange}
           onReload={load}
+          onBusyChange={handleDetailBusyChange}
           showAmounts={showAmounts}
         />
       );
     },
-    [handleChildRowsSync, handleChildSortStateChange, load, showAmounts],
+    [handleChildRowsSync, handleChildSortStateChange, handleDetailBusyChange, load, showAmounts],
   );
 
   const parentColumns = useMemo<ColDef<ParentGridRow>[]>(() => [
