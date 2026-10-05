@@ -35,6 +35,10 @@ def resolve_bloomberg_listing(
     """지원하는 시장 표기 또는 미국 공식 명단으로 확인된 시세 심볼만 반환한다."""
     base, separator, market = label.rpartition(" ")
     if separator:
+        if market == "UQ" and currency in {None, "USD"}:
+            symbol = normalize_exchange_symbol(base, suffix="")
+            exchange = us_listings.get(symbol)
+            return (symbol, exchange) if exchange == "NAS" else (None, None)
         suffix = _BLOOMBERG_EXCHANGE_SUFFIXES.get(market)
         return (normalize_exchange_symbol(base, suffix=suffix), market) if suffix else (None, None)
     symbol = normalize_exchange_symbol(label, suffix="")
