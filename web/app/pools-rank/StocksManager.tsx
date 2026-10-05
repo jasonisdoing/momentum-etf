@@ -264,8 +264,8 @@ function rankChangeColumn(
     headerName,
     headerTooltip,
     pinned: "left",
-    minWidth: 92,
-    width: 92,
+    minWidth: 80,
+    width: 80,
     cellStyle: { textAlign: "center" },
     sortable: true,
     valueGetter: (params) => {

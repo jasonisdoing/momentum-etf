@@ -435,8 +435,8 @@ export function rankColumn<T>(
     valueGetter: (params) => getRank(params.data) ?? null,
     headerName: "순위",
     pinned: "left",
-    width: 64,
-    minWidth: 64,
+    width: 56,
+    minWidth: 56,
     headerTooltip: "종목풀의 장기 이격률 순위",
     cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
     cellRenderer: (params: { data?: T; value?: number | null }) => {
@@ -547,8 +547,8 @@ export function highDrawdownColumn<T>(
     headerTooltip: "최근 12개월 최고가 대비 현재가(%) — 0 이면 신고점",
     // 티커 앞에 서는 컬럼 — 티커·종목명과 함께 왼쪽 고정(순서 유지).
     pinned: "left",
-    width: 80,
-    minWidth: 80,
+    width: 72,
+    minWidth: 72,
     type: "rightAligned",
     cellRenderer: (p: { data?: T; value?: number | null }) =>
       renderHighDrawdownCell(options.isTouched?.(p.data) ? 0 : p.value),
