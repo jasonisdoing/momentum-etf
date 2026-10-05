@@ -41,7 +41,7 @@ from utils.data_loader import (
 )
 from utils.effective_prices import bar_anchor, effective_bar_date, last_regular_close
 from utils.kis_market import load_cached_kis_domestic_etf_master
-from utils.market_session import regular_session_started
+from utils.market_session import regular_session_started, trading_day_today
 from utils.normalization import to_timestamp_iso
 from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import list_available_accounts, load_common_settings
@@ -478,10 +478,12 @@ def _apply_realtime_snapshot_to_dataframe(
             realtime_change_pct = None
 
     if not regular_session_started(country):
+        session_day = trading_day_today(country)
         return _settle_last_bar(df, realtime_entry, country), {
             "price": realtime_price,
             "change_pct": realtime_change_pct,
             "is_bar": False,
+            "date": session_day.isoformat() if session_day else None,
         }
 
     live = {"price": realtime_price, "change_pct": realtime_change_pct, "is_bar": True}
@@ -935,8 +937,12 @@ def build_ticker_detail_payload(
     return {
         "ticker": ticker,
         "rows": rows,
-        # 정규장 전 현재가·등락률 — 헤더가 쓴다. 정규장 중에는 마지막 봉이 곧 현재가라 None.
-        "live": {"price": live["price"], "change_pct": live["change_pct"]} if live and not live["is_bar"] else None,
+        # 정규장 전 현재가·등락률 — 헤더와 일별 표의 임시 행이 쓴다(date: 오늘이 거래일일 때만). 정규장 중에는 마지막 봉이 곧 현재가라 None.
+        "live": (
+            {"price": live["price"], "change_pct": live["change_pct"], "date": live["date"]}
+            if live and not live["is_bar"]
+            else None
+        ),
         "etf_info": etf_info,
         "ma_lines": ma_lines,
         "holdings": holdings,

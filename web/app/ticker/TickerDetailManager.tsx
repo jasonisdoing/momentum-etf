@@ -90,7 +90,7 @@ type TickerDetailResponse = {
   ticker: string;
   rows: PriceRow[];
   /** 정규장 전 현재가·등락률 — 마지막 봉은 어제 확정 종가로 두고 헤더만 이 값을 쓴다. */
-  live?: { price: number; change_pct: number | null } | null;
+  live?: { price: number; change_pct: number | null; date: string | null } | null;
   etf_info?: TickerEtfInfo | null;
   holdings: TickerHoldingRow[];
   holdings_as_of_date?: string | null;
@@ -449,7 +449,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
 
   // 데이터
   const [rows, setRows] = useState<PriceRow[]>([]);
-  const [live, setLive] = useState<{ price: number; change_pct: number | null } | null>(null);
+  const [live, setLive] = useState<{ price: number; change_pct: number | null; date: string | null } | null>(null);
   const [holdings, setHoldings] = useState<TickerHoldingRow[]>([]);
   const [etfInfo, setEtfInfo] = useState<TickerEtfInfo | null>(null);
   const [holdingsAsOfDate, setHoldingsAsOfDate] = useState<string | null>(null);
@@ -925,6 +925,24 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
     [rows],
   );
 
+  // 정규장 전(프리장·데이장)에는 오늘 봉이 없다 — 일별 표에만 시세를 임시 행으로 맨 위에 보인다.
+  // 차트·이평선·순위는 확정 봉만 쓰므로 rows 에는 넣지 않는다.
+  const dailyTableRows = useMemo(() => {
+    if (!live?.date || rows.some((row) => row.date === live.date)) return reversedRows;
+    const provisional = {
+      id: `${live.date}-live`,
+      date: live.date,
+      open: null,
+      high: null,
+      low: null,
+      close: live.price,
+      volume: null,
+      change_pct: live.change_pct,
+      provisional: true,
+    };
+    return [provisional, ...reversedRows];
+  }, [live, reversedRows, rows]);
+
   const monthlyRows = useMemo(
     () => aggregateMonthlyRows(rows).reverse().map((row, i) => ({ ...row, id: `${row.month}-${i}` })),
     [rows],
@@ -1028,7 +1046,12 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
         minWidth: 138,
         flex: 1.45,
         cellStyle: { fontWeight: 600 },
-        cellRenderer: (params: { value: string }) => formatDateWithWeekday(params.value),
+        cellRenderer: (params: { value: string; data?: { provisional?: boolean } }) => (
+          <>
+            {formatDateWithWeekday(params.value)}
+            {params.data?.provisional ? <span className="text-muted fw-normal"> 장 시작 전</span> : null}
+          </>
+        ),
       },
       {
         field: "close", headerName: "종가", minWidth: 84, flex: 0.95, type: "rightAligned",
@@ -1497,7 +1520,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
                           <AppAgGrid
                             rowData={
                               historyTab === "daily"
-                                ? reversedRows
+                                ? dailyTableRows
                                 : historyTab === "monthly"
                                   ? monthlyRows
                                   : historyTab === "yearly"
@@ -1530,7 +1553,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
                           </div>
                           <div className="appGridFillWrap">
                             <AppAgGrid
-                              rowData={reversedRows}
+                              rowData={dailyTableRows}
                               columnDefs={dailyColumns}
                               loading={loading}
                               theme={gridTheme}

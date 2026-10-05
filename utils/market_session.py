@@ -99,6 +99,12 @@ def market_today(country: str, now: datetime | None = None) -> date:
     return (now or datetime.now(zone)).astimezone(zone).date()
 
 
+def trading_day_today(country: str, now: datetime | None = None) -> date | None:
+    """그 시장의 현지 오늘이 거래일이면 그 날짜, 휴장일이면 None."""
+    today = market_today(country, now=now)
+    return today if _is_trading_day(country, today) else None
+
+
 def aftermarket_in_daily_change(country: str) -> bool:
     """애프터마켓 가격의 일간(%)이 그날 전체 변동인 시장인지 — 시간표의 `aftermarket_in_daily_change`."""
     return bool(_schedule(country).get("aftermarket_in_daily_change"))
