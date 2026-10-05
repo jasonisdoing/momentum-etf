@@ -33,15 +33,23 @@ export function formatSlashDateWithWeekday(date: string): string {
 }
 
 export function formatKstDateTime(input?: string | null): string {
-  if (!input) return "-";
-  let s = input;
-  if (s.includes("T") && !s.endsWith("Z") && !/[+-]\d\d:?\d\d$/.test(s)) {
-    s = `${s}Z`;
-  }
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return input;
+  const parts = kstDateTimeParts(input);
+  if (!parts) return input || "-";
+  return `${parts.year}. ${parts.month}. ${parts.day}(${parts.weekday}) ${parts.dayPeriod} ${parts.hour}:${parts.minute}`;
+}
 
-  const parts = Object.fromEntries(
+/** 갱신 시각을 `2026년 10월 5일 오후 8시 23분` 형식으로 표시한다. */
+export function formatKstDateTimeKorean(input?: string | null): string {
+  const parts = kstDateTimeParts(input);
+  if (!parts) return input || "-";
+  return `${parts.year}년 ${parts.month}월 ${parts.day}일 ${parts.dayPeriod} ${parts.hour}시 ${Number(parts.minute)}분`;
+}
+
+function kstDateTimeParts(input?: string | null): Record<string, string> | null {
+  const d = parseKst(input);
+  if (!d) return null;
+
+  return Object.fromEntries(
     new Intl.DateTimeFormat("ko-KR", {
       timeZone: "Asia/Seoul",
       year: "numeric",
@@ -56,7 +64,6 @@ export function formatKstDateTime(input?: string | null): string {
       .map((p) => [p.type, p.value]),
   ) as Record<string, string>;
 
-  return `${parts.year}. ${parts.month}. ${parts.day}(${parts.weekday}) ${parts.dayPeriod} ${parts.hour}:${parts.minute}`;
 }
 
 /** `formatKstDateTime` 과 같은 입력을 Date 로 — tz 표기 없는 ISO 는 UTC 로 읽는다. */

@@ -8,6 +8,7 @@ import { useSearchParams } from "next/navigation";
 
 import { PRICE_SCALE_BOTTOM_WITH_VOLUME, addVolumeHistogram } from "@/lib/chart-volume";
 import { formatCurrencyPrice } from "@/lib/price-format";
+import { formatKstDateTimeKorean } from "@/lib/datetime";
 import { stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import {
   createChart,
@@ -93,6 +94,7 @@ type TickerDetailResponse = {
   etf_info?: TickerEtfInfo | null;
   holdings: TickerHoldingRow[];
   holdings_as_of_date?: string | null;
+  holdings_updated_at?: string | null;
   holdings_price_as_of_date?: string | null;
   holdings_error?: string | null;
   my_average_buy_price?: number | null;
@@ -451,6 +453,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
   const [holdings, setHoldings] = useState<TickerHoldingRow[]>([]);
   const [etfInfo, setEtfInfo] = useState<TickerEtfInfo | null>(null);
   const [holdingsAsOfDate, setHoldingsAsOfDate] = useState<string | null>(null);
+  const [holdingsUpdatedAt, setHoldingsUpdatedAt] = useState<string | null>(null);
   const [holdingsPriceAsOfDate, setHoldingsPriceAsOfDate] = useState<string | null>(null);
   const [holdingsError, setHoldingsError] = useState<string | null>(null);
   const [myAverageBuyPrice, setMyAverageBuyPrice] = useState<number | null>(null);
@@ -495,6 +498,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
       setLive(null);
       setHoldings([]);
       setHoldingsAsOfDate(null);
+      setHoldingsUpdatedAt(null);
       setHoldingsPriceAsOfDate(null);
       setHoldingsError(null);
       setError(null);
@@ -525,6 +529,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
     setHoldings([]);
     setEtfInfo(null);
     setHoldingsAsOfDate(null);
+    setHoldingsUpdatedAt(null);
     setHoldingsPriceAsOfDate(null);
     setHoldingsError(null);
 
@@ -566,6 +571,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
     setLive(null);
     setHoldings([]);
     setHoldingsAsOfDate(null);
+    setHoldingsUpdatedAt(null);
     setHoldingsPriceAsOfDate(null);
     setHoldingsError(null);
     setMyAverageBuyPrice(null);
@@ -600,6 +606,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
       setEtfInfo(payload.etf_info ?? null);
       setHoldings(payload.holdings ?? []);
       setHoldingsAsOfDate(payload.holdings_as_of_date ?? null);
+      setHoldingsUpdatedAt(payload.holdings_updated_at ?? null);
       setHoldingsPriceAsOfDate(payload.holdings_price_as_of_date ?? null);
       setHoldingsError(payload.holdings_error ?? null);
       setMyAverageBuyPrice(payload.my_average_buy_price ?? null);
@@ -620,6 +627,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
       setEtfInfo(null);
       setHoldings([]);
       setHoldingsAsOfDate(null);
+      setHoldingsUpdatedAt(null);
       setHoldingsPriceAsOfDate(null);
       setHoldingsError(null);
     } finally {
@@ -1358,6 +1366,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
                         <div className="tickerDetailTableHeader">
                           <span className="tickerDetailTableTitle">{holdingsPanelTitle}</span>
                           <span className="tickerDetailTableMeta">{holdingsPanelMeta}</span>
+                          <span className="tickerDetailTableMeta">갱신: {formatKstDateTimeKorean(holdingsUpdatedAt)}</span>
                         </div>
                         {holdingsRows.length > 0 ? (
                           <div className="appGridFillWrap">

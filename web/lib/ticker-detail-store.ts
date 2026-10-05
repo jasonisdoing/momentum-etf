@@ -31,6 +31,7 @@ export type TickerDetailData = {
   rows: TickerDetailRow[];
   holdings: TickerHoldingRow[];
   holdings_as_of_date?: string | null;
+  holdings_updated_at?: string | null;
   holdings_price_as_of_date?: string | null;
   holdings_error?: string | null;
   error?: string;

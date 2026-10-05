@@ -7,6 +7,7 @@ from typing import Any
 
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
+from utils.normalization import to_timestamp_iso
 
 logger = get_app_logger()
 
@@ -139,7 +140,12 @@ def upsert_stock_cache_meta_doc(
     if meta_cache is not None:
         payload["meta_cache"] = meta_cache
     if holdings_cache is not None:
-        payload["holdings_cache"] = holdings_cache
+        payload["holdings_cache"] = {
+            **holdings_cache,
+            "updated_at": to_timestamp_iso(
+                holdings_cache.get("updated_at"), naive_timezone=datetime.now().astimezone().tzinfo
+            ),
+        }
 
     update: dict[str, Any] = {"$set": payload, "$setOnInsert": {"created_at": now}}
     if holdings_cache is not None:

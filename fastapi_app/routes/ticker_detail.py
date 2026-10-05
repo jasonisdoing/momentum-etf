@@ -42,6 +42,7 @@ from utils.data_loader import (
 from utils.effective_prices import bar_anchor, effective_bar_date, last_regular_close
 from utils.kis_market import load_cached_kis_domestic_etf_master
 from utils.market_session import regular_session_started
+from utils.normalization import to_timestamp_iso
 from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import list_available_accounts, load_common_settings
 from utils.stock_list_io import get_etfs
@@ -730,6 +731,7 @@ def build_ticker_detail_payload(
             "rows": [],
             "holdings": [],
             "holdings_as_of_date": None,
+            "holdings_updated_at": None,
             "holdings_price_as_of_date": None,
             "holdings_error": None,
             "my_average_buy_price": _calculate_consolidated_average_buy_price(
@@ -786,6 +788,7 @@ def build_ticker_detail_payload(
 
     holdings: list[dict[str, object]] = []
     holdings_as_of_date: str | None = None
+    holdings_updated_at: str | None = None
     holdings_price_as_of_date: str | None = None
     holdings_error: str | None = None
     holdings_revision: str | None = None
@@ -822,6 +825,8 @@ def build_ticker_detail_payload(
                 country_code=country_clean,
             )
         holdings_as_of_date = str(holdings_cache.get("reference_date") or "").strip() or None
+        # 기존 수집 시각 문자열은 한국 시간이며 새 캐시에는 원본 시간대가 명시된다.
+        holdings_updated_at = to_timestamp_iso(holdings_cache.get("updated_at"), naive_timezone=ZoneInfo("Asia/Seoul"))
         if not include_holdings:
             # 가격 시계열만 필요한 호출(성과분석 탭) — 구성종목 시세 평가·포트폴리오 변동 계산을 건너뛴다.
             holdings = []
@@ -936,6 +941,7 @@ def build_ticker_detail_payload(
         "ma_lines": ma_lines,
         "holdings": holdings,
         "holdings_as_of_date": holdings_as_of_date,
+        "holdings_updated_at": holdings_updated_at,
         "holdings_price_as_of_date": holdings_price_as_of_date,
         "holdings_error": holdings_error,
         "holdings_revision": holdings_revision,
