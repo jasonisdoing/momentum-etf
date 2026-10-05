@@ -166,7 +166,7 @@ MARKET_SCHEDULES = {
         "aftermarket_close": time(20, 0),
         # 애프터마켓 가격의 일간(%)이 그날 전체 변동(통합 전일가 대비)이다 — 네이버·토스 기준.
         # 그래서 이 구간에는 일간이 마감일 변동을 보이고 전거래일은 그 이전 거래일을 보인다.
-        # 미국의 애프터 일간은 정규장 종가 대비 시간외 변동이라 이 키를 두지 않는다.
+        # 이 키가 없는 시장은 애프터 일간이 정규장 종가 대비 시간외 변동이다.
         "aftermarket_in_daily_change": True,
         "timezone": "Asia/Seoul",
         "name": "한국",
@@ -178,6 +178,8 @@ MARKET_SCHEDULES = {
         "close_offset_minutes": 30,
         "premarket_open": time(4, 0),
         "aftermarket_close": time(20, 0),
+        # 토스 기준 — 애프터 일간(%)은 전일 종가 대비 전체 변동이다(정규장 상승분 + 시간외).
+        "aftermarket_in_daily_change": True,
         # 데이장(오버나이트) — 애프터가 끝난 20:00 부터 다음 거래일 새벽까지. 한국 주간에
         # 미국 주식이 거래되는 구간이다. 자정을 넘기므로 시작·종료가 다른 날짜에 있다.
         "daymarket_open": time(20, 0),
