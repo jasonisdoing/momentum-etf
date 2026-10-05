@@ -19,7 +19,7 @@
 
 기존 파일은 옮기지 않는다 — 신규 코드부터 위 기준으로 수렴시킨다.
 
-미국 ETF 구성종목은 `utils/stock_meta_updater.py`의 공통 수집 경로를 거쳐 저장한다. Invesco 공식 연동은 `services/invesco_us_service.py`, 외부 소스 목록은 `utils/data_source_catalog.py`가 담당한다.
+미국 ETF 구성종목은 `utils/stock_meta_updater.py`의 공통 수집 경로를 거쳐 저장한다. 공식 연동은 `services/invesco_us_service.py`·`services/ishares_us_service.py`, 외부 소스 목록은 `utils/data_source_catalog.py`가 담당한다. 구성종목의 상장 시장을 식별할 수 없거나 시세 조회 대상이 아닌 자산은 목록에 유지하되 가격 조회에서 제외한다.
 
 ### 로컬 실행
 
