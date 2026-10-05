@@ -417,6 +417,7 @@ def _append_account_components(
                 "reuters_code": item.get("reuters_code"),
                 "yahoo_symbol": item.get("yahoo_symbol"),
                 "listing_currency": item.get("listing_currency"),
+                "price_lookup_supported": item.get("price_lookup_supported"),
             }
 
             if comp_ticker in merged:

@@ -82,6 +82,8 @@ def _load_domestic_etf_ticker_set() -> set[str]:
 
 
 def _is_us_pool_candidate(item: dict[str, object]) -> bool:
+    if item.get("price_lookup_supported") is False:
+        return False
     component_ticker = str(item.get("ticker") or "").strip().upper()
     raw_code = str(item.get("raw_code") or "").strip().upper()
     yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
@@ -100,6 +102,8 @@ def _is_us_pool_candidate(item: dict[str, object]) -> bool:
 
 
 def _is_kor_pool_candidate(item: dict[str, object], domestic_etf_tickers: set[str]) -> bool:
+    if item.get("price_lookup_supported") is False:
+        return False
     component_ticker = str(item.get("ticker") or "").strip().upper()
     raw_code = str(item.get("raw_code") or "").strip().upper()
     yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()

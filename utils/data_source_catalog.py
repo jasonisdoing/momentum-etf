@@ -19,6 +19,7 @@ HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "betashares_csv": "BetaShares 공식 CSV",
     "vanguard_au_api": "Vanguard AU 공식 API",
     "invesco_us_api": "Invesco 미국 공식 API",
+    "ishares_us_csv": "iShares 미국 공식 CSV",
     "yfinance_holdings": "yfinance (상위 10종목)",
     "naver_etf_component": "네이버 ETF 구성종목",
 }
@@ -221,7 +222,7 @@ DATA_SOURCES: list[dict[str, Any]] = [
 
 # ETF 구성종목 수집 순서 — 실제 코드(_refresh_overseas_etf_meta_cache / fetch_us_etf_holdings)와 일치시킨다.
 AU_HOLDINGS_FALLBACK_ORDER: list[str] = ["betashares_csv", "vanguard_au_api", "yfinance_holdings"]
-US_HOLDINGS_FALLBACK_ORDER: list[str] = ["invesco_us_api", "yfinance_holdings"]
+US_HOLDINGS_FALLBACK_ORDER: list[str] = ["invesco_us_api", "ishares_us_csv", "yfinance_holdings"]
 
 # ETF 이름 → 발행사(운용사). 미국·호주는 통합 소스가 없어 발행사별로 수집 경로가 갈리므로
 # 발행사를 기준으로 정리한다. 이름 앞부분에 발행사명이 들어가는 업계 관행을 이용하되,
@@ -270,7 +271,7 @@ ISSUER_UNKNOWN = "기타"
 
 # 코드에 공식 연동이 들어 있는 발행사 → 수집 소스. 배치가 아직 안 돌아 캐시에 옛 소스(야후)가 남아 있어도
 # 행은 연동된 공식 소스로 보이고, 아직 그 소스로 받지 못한 ETF 는 「미수집」으로 센다.
-US_OFFICIAL_SOURCES: dict[str, str] = {"Invesco": "invesco_us_api"}
+US_OFFICIAL_SOURCES: dict[str, str] = {"Invesco": "invesco_us_api", "iShares (BlackRock)": "ishares_us_csv"}
 
 
 def _resolve_issuer(name: str, table: list[tuple[str, tuple[str, ...]]]) -> str:
@@ -331,12 +332,17 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
         "dng-api.invesco.com/cache/v1/accounts/en_US/shareclasses/{cusip}/holdings/fund",
         "services/invesco_us_service.py",
     ),
+    "ishares_us_csv": (
+        "ishares.com/us/products/{상품 ID}/{상품 경로}/latest-holdings.csv",
+        "services/ishares_us_service.py",
+    ),
     "yfinance_holdings": ("yfinance funds_data", "utils/stock_meta_updater.py"),
 }
 _SOURCE_NOTES: dict[str, str] = {
     "betashares_csv": "CSV 에 Currency·Country·Asset Class 열이 있어 구성종목의 상장 국가를 정확히 안다.",
     "vanguard_au_api": "ASX 티커가 아닌 내부 portId 로 조회한다. 운용보수(MER)도 이 API 로 함께 받는다.",
     "invesco_us_api": "상품 명단에서 CUSIP 을 찾아 전체 구성종목을 받는다. 종목 메타 배치가 공통 캐시에 저장한다.",
+    "ishares_us_csv": "공식 상품 명단에서 티커를 찾아 전체 구성종목 CSV를 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "yfinance_holdings": "공식 소스가 없어 폴백. 상위 10종목까지만 나오고 운용보수는 제공되지 않는다.",
 }
 
@@ -426,8 +432,7 @@ def build_data_source_payload() -> dict[str, Any]:
         official=US_OFFICIAL_SOURCES,
     )
 
-    # 표 안의 순서: 한국 → 미국(Invesco, 야후, 나머지 발행사는 ETF 많은 순) → 호주.
-    # 미국의 정적 야후 행은 발행사 행들 사이에서 Invesco 바로 뒤에 둔다.
+    # 표 안의 순서: 한국 → 미국(공식 연동, 야후, 나머지 발행사) → 호주.
     static_us = [row for row in DATA_SOURCES if row["category"] == "ETF 상세 - 미국"]
     sources: list[dict[str, Any]] = [row for row in DATA_SOURCES if row["category"] != "ETF 상세 - 미국"]
     official_us = [entry for entry in us_entries if entry["provider"] in US_OFFICIAL_SOURCES]

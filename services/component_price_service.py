@@ -227,7 +227,7 @@ def select_component_holdings_for_pricing(
     price_fetch_limit=None 이면 전체 holdings 를 가격 조회 대상으로 사용한다
     (보유 상세 화면처럼 전 종목 가격이 필요한 케이스).
     """
-    holdings_list = list(holdings)
+    holdings_list = [item for item in holdings if item.get("price_lookup_supported") is not False]
     if price_fetch_limit is None:
         return holdings_list
     if price_fetch_limit <= 0:
@@ -251,6 +251,8 @@ def build_component_price_snapshot(
 
     for item in holdings_list:
         if _is_cash_like_holding(item):
+            continue
+        if item.get("price_lookup_supported") is False:
             continue
         component_ticker = _normalize_upper(item.get("ticker"))
         yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or component_ticker
@@ -392,6 +394,8 @@ def _market_opens_after_kst_close(symbol: str) -> bool:
 
 
 def _component_price_key(item: dict[str, Any]) -> str | None:
+    if item.get("price_lookup_supported") is False:
+        return None
     if _is_cash_like_holding(item):
         return None
     component_ticker = _normalize_upper(item.get("ticker"))

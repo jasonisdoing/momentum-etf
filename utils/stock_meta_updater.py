@@ -12,6 +12,7 @@ import yfinance as yf
 from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
 from services.etf_meta_service import fetch_korean_etf_info_from_naver
 from services.invesco_us_service import fetch_invesco_us_holdings
+from services.ishares_us_service import fetch_ishares_us_holdings
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
 from services.vanguard_au_service import fetch_vanguard_au_expense_ratio_pct, fetch_vanguard_au_holdings
 from utils.asx_ticker import (
@@ -660,10 +661,11 @@ def _registered_etf_holdings(tickers: list[str]) -> dict[str, list[dict[str, Any
 
 
 def fetch_us_etf_holdings(ticker: str) -> dict[str, Any] | None:
-    """Invesco는 공식 전체 목록, 다른 운용사는 기존 Yahoo 상위 목록을 사용한다."""
-    official = fetch_invesco_us_holdings(ticker)
-    if official is not None:
-        return official
+    """연동된 운용사는 공식 전체 목록, 다른 운용사는 Yahoo 상위 목록을 사용한다."""
+    for fetch_official in (fetch_invesco_us_holdings, fetch_ishares_us_holdings):
+        official = fetch_official(ticker)
+        if official is not None:
+            return official
     return fetch_yfinance_holdings(ticker, is_australian=False)
 
 
@@ -700,7 +702,12 @@ def expand_nested_etf_holdings(holdings_info: dict[str, Any] | None, own_ticker:
     nested: list[dict[str, Any]] = []
 
     def add(item: dict[str, Any], weight: float) -> None:
-        key = str(item.get("ticker") or "")
+        # 상장 시장이 다른 같은 티커와 시세 심볼 없는 채권·파생상품을 합치지 않는다.
+        key = (
+            f"unpriced:{len(merged)}"
+            if item.get("price_lookup_supported") is False
+            else str(item.get("yahoo_symbol") or item.get("ticker") or "")
+        )
         if key in merged:
             merged[key]["weight"] += weight
         else:
@@ -710,7 +717,7 @@ def expand_nested_etf_holdings(holdings_info: dict[str, Any] | None, own_ticker:
         ticker = str(item.get("ticker") or "")
         weight = float(item.get("weight") or 0.0)
         inner = None
-        if ticker and ticker != own_ticker:
+        if ticker and ticker != own_ticker and item.get("price_lookup_supported") is not False:
             inner = registered.get(ticker)
             if not inner and weight >= _NESTED_FEEDER_MIN_WEIGHT:
                 inner = _feeder_etf_holdings(ticker)
