@@ -1119,7 +1119,7 @@ def update_stock_reference_metadata(ticker_type: str | None = None):
             failures_by_pool[type_norm] = pool_failures
     logger.info("[배치 B] 식별·상세 메타 업데이트 완료.")
 
-    # 시총 순위 — 종목별 갱신이 meta_cache 를 통째로 덮으므로 반드시 그 뒤에 적는다.
+    # 시총 순위·금액 — 종목별 갱신이 meta_cache 를 통째로 덮으므로 그 뒤에 적는다(순위는 덮어도 이어 붙는다).
     try:
         from utils.market_cap_rank import update_market_cap_ranks
 

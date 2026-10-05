@@ -109,7 +109,8 @@ def load_market_cap_rank_map(country_code: str) -> dict[str, int]:
 def update_market_cap_ranks(ticker_types: list[str] | None = None) -> dict[str, int]:
     """개별주 풀(pool_kind=stock)의 종목에 시총 순위를 써 넣는다. 반환: 풀별 갱신 건수.
 
-    ``meta_cache`` 전체를 덮는 배치 B 의 종목별 갱신 **뒤에** 돌아야 한다(앞에 돌면 지워진다).
+    ``meta_cache`` 전체를 덮는 배치 B 의 종목별 갱신 **뒤에** 돌아야 한다(앞에 돌면 시총 금액이 덮인다).
+    순위(``market_cap_rank``)는 그 갱신이 이어 붙이므로, 이 단계가 실패해도 기존 순위는 남는다.
     """
     from utils.settings_loader import _load_pool_configs
     from utils.stock_cache_meta_io import set_stock_cache_meta_field
