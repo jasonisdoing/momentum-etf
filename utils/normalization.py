@@ -37,6 +37,16 @@ def normalize_text(value: Any, fallback: str = "") -> str:
     return text or fallback
 
 
+def to_timestamp_iso(value: Any, *, naive_timezone: _dt.tzinfo) -> str | None:
+    """수집 시각을 ISO로 변환하고 시간대 없는 값에는 명시한 원본 시간대를 붙인다."""
+    if value is None or value == "":
+        return None
+    parsed = value if isinstance(value, _dt.datetime) else _dt.datetime.fromisoformat(str(value))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=naive_timezone)
+    return parsed.isoformat()
+
+
 def to_iso_string(value: Any) -> str | None:
     """datetime/date를 ISO 문자열로 변환한다. None이면 None을 반환한다."""
     if value is None:
