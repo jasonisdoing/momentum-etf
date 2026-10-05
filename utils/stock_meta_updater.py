@@ -17,6 +17,7 @@ from services.spdr_us_service import fetch_spdr_us_holdings
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
 from services.vaneck_us_service import fetch_vaneck_us_holdings
 from services.vanguard_au_service import fetch_vanguard_au_expense_ratio_pct, fetch_vanguard_au_holdings
+from services.vistashares_us_service import fetch_vistashares_us_holdings
 from utils.asx_ticker import (
     ensure_asx_prefix,
     from_yahoo_symbol,
@@ -669,6 +670,7 @@ def fetch_us_etf_holdings(ticker: str) -> dict[str, Any] | None:
         fetch_ishares_us_holdings,
         fetch_spdr_us_holdings,
         fetch_vaneck_us_holdings,
+        fetch_vistashares_us_holdings,
     ):
         official = fetch_official(ticker)
         if official is not None:
