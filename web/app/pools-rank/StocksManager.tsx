@@ -79,6 +79,7 @@ type RankRow = {
   순위: number | null;
   이전순위: number | null;
   "1주순위": number | null;
+  "2주순위": number | null;
   버킷: string;
   bucket: number;
   티커: string;
@@ -249,6 +250,34 @@ function getSignedClass(value: number | null): string {
     return "";
   }
   return value > 0 ? "metricPositive" : "metricNegative";
+}
+
+/** 과거 순위 대비 상승분 컬럼 — 전거래일·1주·2주가 같은 폭과 표기를 쓴다. */
+function rankChangeColumn(
+  colId: string,
+  headerName: string,
+  headerTooltip: string,
+  pastRankField: "이전순위" | "1주순위" | "2주순위",
+): ColDef<RankGridRow> {
+  return {
+    colId,
+    headerName,
+    headerTooltip,
+    pinned: "left",
+    minWidth: 92,
+    width: 92,
+    cellStyle: { textAlign: "center" },
+    sortable: true,
+    valueGetter: (params) => {
+      const currentRank = params.data?.순위 ?? null;
+      const pastRank = params.data?.[pastRankField] ?? null;
+      if (currentRank === null || currentRank === undefined || pastRank === null || pastRank === undefined) {
+        return null;
+      }
+      return pastRank - currentRank;
+    },
+    cellRenderer: (params: { value: number | null | undefined }) => renderRankDelta(params.value),
+  };
 }
 
 function renderRankDelta(value: number | null | undefined) {
@@ -741,6 +770,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         순위: null,
         이전순위: null,
         "1주순위": null,
+        "2주순위": null,
         버킷: getBucketName(addingRow.bucket),
         bucket: addingRow.bucket,
         티커: addingRow.ticker,
@@ -802,48 +832,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return pageMode === "rank" && row?.exclude_from_ranking ? "excluded" : null;
         },
       }),
-      {
-        colId: "이전순위변동",
-        headerName: "이전",
-        pinned: "left",
-        minWidth: 66,
-        width: 66,
-        cellStyle: { textAlign: "center" },
-        sortable: true,
-        headerTooltip: "직전 저장 순위 대비 상승분 — 1주 컬럼과 같은 표기.",
-        // 1주 컬럼과 같은 상승분 표기 — 원래는 이전 순위 숫자를 그대로 보여줬다.
-        valueGetter: (params) => {
-          const currentRank = params.data?.순위 ?? null;
-          const previousRank = params.data?.이전순위 ?? null;
-          if (currentRank === null || currentRank === undefined || previousRank === null || previousRank === undefined) {
-            return null;
-          }
-          return previousRank - currentRank;
-        },
-        cellRenderer: (params: { value: number | null | undefined }) => {
-          return renderRankDelta(params.value);
-        },
-      },
-      {
-        colId: "1주순위변동",
-        headerName: "1주",
-        pinned: "left",
-        minWidth: 66,
-        width: 66,
-        cellStyle: { textAlign: "center" },
-        sortable: true,
-        valueGetter: (params) => {
-          const currentRank = params.data?.순위 ?? null;
-          const weeklyRank = params.data?.["1주순위"] ?? null;
-          if (currentRank === null || currentRank === undefined || weeklyRank === null || weeklyRank === undefined) {
-            return null;
-          }
-          return weeklyRank - currentRank;
-        },
-        cellRenderer: (params: { value: number | null | undefined }) => {
-          return renderRankDelta(params.value);
-        },
-      },
+      rankChangeColumn("전거래일변동", "전거래일", "직전 거래일 순위 대비 상승분", "이전순위"),
+      rankChangeColumn("1주순위변동", "1주변동", "5거래일 전 순위 대비 상승분", "1주순위"),
+      rankChangeColumn("2주순위변동", "2주변동", "10거래일 전 순위 대비 상승분", "2주순위"),
       // 고점 — 공용 컬럼. 순위 화면만 장중 신고점 터치(고점터치)를 함께 ⭐로 표시한다.
       highDrawdownColumn<RankGridRow>("고점", { isTouched: (row) => Boolean(row?.고점터치) }),
       {
