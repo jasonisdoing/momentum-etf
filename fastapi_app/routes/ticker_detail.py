@@ -484,6 +484,7 @@ def _apply_realtime_snapshot_to_dataframe(
             "change_pct": realtime_change_pct,
             "is_bar": False,
             "date": session_day.isoformat() if session_day else None,
+            "volume": realtime_entry.get("volume"),
         }
 
     live = {"price": realtime_price, "change_pct": realtime_change_pct, "is_bar": True}
@@ -945,7 +946,12 @@ def build_ticker_detail_payload(
         "rows": rows,
         # 정규장 전 현재가·등락률 — 헤더와 일별 표의 임시 행이 쓴다(date: 오늘이 거래일일 때만). 정규장 중에는 마지막 봉이 곧 현재가라 None.
         "live": (
-            {"price": live["price"], "change_pct": live["change_pct"], "date": live["date"]}
+            {
+                "price": live["price"],
+                "change_pct": live["change_pct"],
+                "date": live["date"],
+                "volume": live["volume"],
+            }
             if live and not live["is_bar"]
             else None
         ),
