@@ -264,8 +264,8 @@ function rankChangeColumn(
     headerName,
     headerTooltip,
     pinned: "left",
-    minWidth: 80,
-    width: 80,
+    minWidth: 73,
+    width: 73,
     cellStyle: { textAlign: "center" },
     sortable: true,
     valueGetter: (params) => {
@@ -1101,25 +1101,25 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ...(metricMode === "basic" ? [prevDayChangeColumn<RankGridRow>("전거래일(%)")] : []),
       ...(metricMode === "basic"
         ? ([
-            { field: "1주(%)", headerName: "1주", width: 88 },
-            { field: "2주(%)", headerName: "2주", width: 88 },
-            { field: "1달(%)", headerName: "1달", width: 88 },
-            { field: "3달(%)", headerName: "3달", width: 78 },
-            { field: "6달(%)", headerName: "6달", width: 78 },
-            { field: "12달(%)", headerName: "1년", width: 78 },
-            { field: "24달(%)", headerName: "2년", width: 78 },
-            { field: "36달(%)", headerName: "3년", width: 78 },
-          ] as { field: string; headerName: string; width: number; tooltip?: string }[]).map(
-            ({ field, headerName, width, tooltip }) => ({
-              field,
-              headerName,
-              headerTooltip: tooltip,
-              minWidth: width,
-              width,
-              type: "rightAligned",
-              cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
-            }) as ColDef<RankGridRow>,
-          )
+          { field: "1주(%)", headerName: "1주", width: 88 },
+          { field: "2주(%)", headerName: "2주", width: 88 },
+          { field: "1달(%)", headerName: "1달", width: 88 },
+          { field: "3달(%)", headerName: "3달", width: 78 },
+          { field: "6달(%)", headerName: "6달", width: 78 },
+          { field: "12달(%)", headerName: "1년", width: 78 },
+          { field: "24달(%)", headerName: "2년", width: 78 },
+          { field: "36달(%)", headerName: "3년", width: 78 },
+        ] as { field: string; headerName: string; width: number; tooltip?: string }[]).map(
+          ({ field, headerName, width, tooltip }) => ({
+            field,
+            headerName,
+            headerTooltip: tooltip,
+            minWidth: width,
+            width,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
+          }) as ColDef<RankGridRow>,
+        )
         : []),
       // 변동성·RSI — MA 이탈 왼쪽. 진입 문턱(배수×변동성) 판정과 붙여 본다.
       volatilityColumn<RankGridRow>({ field: "변동성" }),
@@ -1592,7 +1592,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         void load({
           ticker_type: selectedTickerType,
           ma_rule_override: maRule ?? undefined,
-            });
+        });
       } catch (saveError) {
         showErrorToast(saveError instanceof Error ? saveError.message : "변경사항 저장에 실패했습니다.");
       }
@@ -1652,7 +1652,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       void load({
         ticker_type: selectedTickerType,
         ma_rule_override: maRule ?? undefined,
-        });
+      });
     });
   }
 
@@ -1691,7 +1691,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         void load({
           ticker_type: selectedTickerType,
           ma_rule_override: maRule ?? undefined,
-            });
+        });
       } catch (deleteError) {
         showErrorToast(deleteError instanceof Error ? deleteError.message : "종목 삭제에 실패했습니다.");
       }
@@ -1839,42 +1839,42 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       <span className="appLabeledFieldLabel">이평선</span>
                       <div className="appMaRuleRow">
                         {maRule ? <>
-                        <MaDaysSelect
-                          maType={maRule?.ma_type}
-                          title="단기 이평선"
-                          value={maRule.short_ma_days}
-                          options={maOptions.short_ma_options}
-                          onChange={(days) => handleMaRuleDaysChange("short_ma_days", days)}
-                        />
-                        <MaDaysSelect
-                          maType={maRule?.ma_type}
-                          title="장기 이평선"
-                          value={maRule.long_ma_days}
-                          options={maOptions.long_ma_options}
-                          onChange={(days) => handleMaRuleDaysChange("long_ma_days", days)}
-                        />
+                          <MaDaysSelect
+                            maType={maRule?.ma_type}
+                            title="단기 이평선"
+                            value={maRule.short_ma_days}
+                            options={maOptions.short_ma_options}
+                            onChange={(days) => handleMaRuleDaysChange("short_ma_days", days)}
+                          />
+                          <MaDaysSelect
+                            maType={maRule?.ma_type}
+                            title="장기 이평선"
+                            value={maRule.long_ma_days}
+                            options={maOptions.long_ma_options}
+                            onChange={(days) => handleMaRuleDaysChange("long_ma_days", days)}
+                          />
                         </> : <span role="status">{loading ? "이평선 설정 로딩 중…" : "이평선 설정을 불러오지 못했습니다."}</span>}
                       </div>
                     </label>
                   ) : null}
                   {/* 진입 문턱 — 모멘텀 화면과 같은 값. 미리보기라 저장은 모멘텀 화면에서. */}
                   <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">진입 문턱</span>
-                      <select
-                        className="form-select form-select-sm"
-                        style={{ width: 104, minWidth: 104 }}
-                        value={entryVolMult}
-                        onChange={(e) => handleEntryVolMultChange(e.target.value)}
-                        disabled={entryVolMultOptions.length === 0}
-                        title="이격이 '배수 × 20일 변동성' 이상인 종목만 진입 후보로 고른다(모멘텀 진입과 같은 규칙). 여기서는 미리보기이고, 저장은 모멘텀 화면에서 한다."
-                      >
-                        {entryVolMultOptions.length === 0 ? <option value="">로딩 중…</option> : null}
-                        {entryVolMultOptions.map((value) => (
-                          <option key={String(value)} value={value == null ? "" : String(value)}>
-                            {value == null ? "없음" : `${value}×`}
-                          </option>
-                        ))}
-                      </select>
+                    <span className="appLabeledFieldLabel">진입 문턱</span>
+                    <select
+                      className="form-select form-select-sm"
+                      style={{ width: 104, minWidth: 104 }}
+                      value={entryVolMult}
+                      onChange={(e) => handleEntryVolMultChange(e.target.value)}
+                      disabled={entryVolMultOptions.length === 0}
+                      title="이격이 '배수 × 20일 변동성' 이상인 종목만 진입 후보로 고른다(모멘텀 진입과 같은 규칙). 여기서는 미리보기이고, 저장은 모멘텀 화면에서 한다."
+                    >
+                      {entryVolMultOptions.length === 0 ? <option value="">로딩 중…</option> : null}
+                      {entryVolMultOptions.map((value) => (
+                        <option key={String(value)} value={value == null ? "" : String(value)}>
+                          {value == null ? "없음" : `${value}×`}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                   {/* 컬럼 묶음 전환 — 그리드에만 쓰는 설정이라 차트 모드에서는 감춘다. */}
                   {pageMode === "chart" ? null : (
@@ -1983,100 +1983,100 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
               ) : null}
             </div>
           ) : (
-          <div className="card-body appCardBodyTight appTableCardBodyFill">
-            <div className="appGridFillWrap">
-              <AppAgGrid
-                key={`${selectedTickerType}:${maRule?.short_ma_days}:${maRule?.long_ma_days}`}
-                className="rankAgGrid"
-                rowData={displayGridRows}
-                columnDefs={columns}
-                getRowId={(params) => params.data.id ?? ""}
-                loading={loading || isPending}
-                theme={rankGridTheme}
-                getRowClass={(params: RowClassParams<RankGridRow>) => {
-                  const classes: string[] = [];
-                  // 행 배경 — 보유 여부와 무관하게 두 단계로 칠한다(헤더 미리보기 값 포함).
-                  //   회색 = 0선(이평선) 이탈(매도 기준), 연한 남색 = 0선 위인데 진입 문턱만 미달.
-                  // 진입 문턱이 '없음'인 풀은 문턱 판정이 항상 통과라 남색이 안 나온다.
-                  const isHeld = Boolean(String(params.data?.보유 ?? "").trim());
-                  const zeroLineBroken = isTrendBroken(params.data?.단기이격, params.data?.이격);
-                  const mult = entryVolMult === "" ? null : Number(entryVolMult);
-                  if (zeroLineBroken) {
-                    classes.push("appTrendBrokenRow");
-                  } else if (!entryGapOk(params.data?.이격, params.data?.단기이격, params.data?.변동성, mult)) {
-                    classes.push("appEntryBlockedRow");
-                  }
-                  if (params.data?.exclude_from_ranking) {
-                    classes.push("rankFixedRow");
-                  }
-                  // 실제 보유 중인 종목 — 공통 규칙으로 티커·종목명 칸만 녹색으로 표시한다.
-                  if (isHeld) {
-                    classes.push("appHeldRow");
-                  }
-                  return classes.join(" ");
-                }}
-                minHeight="100%"
-                gridOptions={{
-                  suppressMovableColumns: true,
-                  // 정렬·필터가 반영된 표시 순서를 담아 둔다 — 차트 모드가 이 순서로 그린다.
-                  onModelUpdated: (event) => {
-                    const ordered: string[] = [];
-                    event.api.forEachNodeAfterFilterAndSort((node) => {
-                      const ticker = (node.data as RankGridRow | undefined)?.티커;
-                      if (ticker && !(node.data as RankGridRow).__isAddingRow) ordered.push(String(ticker));
-                    });
-                    setDisplayedTickers((prev) =>
-                      prev.length === ordered.length && prev.every((t, i) => t === ordered[i]) ? prev : ordered,
-                    );
-                  },
-                  rowSelection: pageMode === "manage"
-                    ? {
-                      mode: "multiRow",
-                      checkboxes: (params) => !params.data?.__isAddingRow,
-                      headerCheckbox: true,
-                      hideDisabledCheckboxes: true,
-                      enableClickSelection: false,
+            <div className="card-body appCardBodyTight appTableCardBodyFill">
+              <div className="appGridFillWrap">
+                <AppAgGrid
+                  key={`${selectedTickerType}:${maRule?.short_ma_days}:${maRule?.long_ma_days}`}
+                  className="rankAgGrid"
+                  rowData={displayGridRows}
+                  columnDefs={columns}
+                  getRowId={(params) => params.data.id ?? ""}
+                  loading={loading || isPending}
+                  theme={rankGridTheme}
+                  getRowClass={(params: RowClassParams<RankGridRow>) => {
+                    const classes: string[] = [];
+                    // 행 배경 — 보유 여부와 무관하게 두 단계로 칠한다(헤더 미리보기 값 포함).
+                    //   회색 = 0선(이평선) 이탈(매도 기준), 연한 남색 = 0선 위인데 진입 문턱만 미달.
+                    // 진입 문턱이 '없음'인 풀은 문턱 판정이 항상 통과라 남색이 안 나온다.
+                    const isHeld = Boolean(String(params.data?.보유 ?? "").trim());
+                    const zeroLineBroken = isTrendBroken(params.data?.단기이격, params.data?.이격);
+                    const mult = entryVolMult === "" ? null : Number(entryVolMult);
+                    if (zeroLineBroken) {
+                      classes.push("appTrendBrokenRow");
+                    } else if (!entryGapOk(params.data?.이격, params.data?.단기이격, params.data?.변동성, mult)) {
+                      classes.push("appEntryBlockedRow");
                     }
-                    : undefined,
-                  selectionColumnDef: pageMode === "manage"
-                    ? {
-                      width: 52,
-                      minWidth: 52,
-                      maxWidth: 52,
-                      pinned: "left",
-                      sortable: false,
-                      resizable: false,
-                      suppressMovable: true,
-                      headerName: "",
-                      cellClass: "stocksSelectCell",
+                    if (params.data?.exclude_from_ranking) {
+                      classes.push("rankFixedRow");
                     }
-                    : undefined,
-                  onSelectionChanged: (params: { api: { getSelectedRows: () => RankGridRow[] } }) => {
-                    if (pageMode !== "manage") {
-                      setSelectedTickers([]);
-                      return;
+                    // 실제 보유 중인 종목 — 공통 규칙으로 티커·종목명 칸만 녹색으로 표시한다.
+                    if (isHeld) {
+                      classes.push("appHeldRow");
                     }
-                    setSelectedTickers(
-                      params.api
-                        .getSelectedRows()
-                        .map((row) => row.id)
-                        .filter((rowId) => rowId !== "__adding__"),
-                    );
-                  },
-                  onCellValueChanged: (params: {
-                    data?: RankGridRow;
-                    newValue?: unknown;
-                    oldValue?: unknown;
-                  }) => {
-                    if (pageMode !== "manage" || !params.data || params.data.__isAddingRow || params.newValue === params.oldValue) {
-                      return;
-                    }
-                    handleBucketChanged(params.data, String(params.newValue ?? ""));
-                  },
-                }}
-              />
+                    return classes.join(" ");
+                  }}
+                  minHeight="100%"
+                  gridOptions={{
+                    suppressMovableColumns: true,
+                    // 정렬·필터가 반영된 표시 순서를 담아 둔다 — 차트 모드가 이 순서로 그린다.
+                    onModelUpdated: (event) => {
+                      const ordered: string[] = [];
+                      event.api.forEachNodeAfterFilterAndSort((node) => {
+                        const ticker = (node.data as RankGridRow | undefined)?.티커;
+                        if (ticker && !(node.data as RankGridRow).__isAddingRow) ordered.push(String(ticker));
+                      });
+                      setDisplayedTickers((prev) =>
+                        prev.length === ordered.length && prev.every((t, i) => t === ordered[i]) ? prev : ordered,
+                      );
+                    },
+                    rowSelection: pageMode === "manage"
+                      ? {
+                        mode: "multiRow",
+                        checkboxes: (params) => !params.data?.__isAddingRow,
+                        headerCheckbox: true,
+                        hideDisabledCheckboxes: true,
+                        enableClickSelection: false,
+                      }
+                      : undefined,
+                    selectionColumnDef: pageMode === "manage"
+                      ? {
+                        width: 52,
+                        minWidth: 52,
+                        maxWidth: 52,
+                        pinned: "left",
+                        sortable: false,
+                        resizable: false,
+                        suppressMovable: true,
+                        headerName: "",
+                        cellClass: "stocksSelectCell",
+                      }
+                      : undefined,
+                    onSelectionChanged: (params: { api: { getSelectedRows: () => RankGridRow[] } }) => {
+                      if (pageMode !== "manage") {
+                        setSelectedTickers([]);
+                        return;
+                      }
+                      setSelectedTickers(
+                        params.api
+                          .getSelectedRows()
+                          .map((row) => row.id)
+                          .filter((rowId) => rowId !== "__adding__"),
+                      );
+                    },
+                    onCellValueChanged: (params: {
+                      data?: RankGridRow;
+                      newValue?: unknown;
+                      oldValue?: unknown;
+                    }) => {
+                      if (pageMode !== "manage" || !params.data || params.data.__isAddingRow || params.newValue === params.oldValue) {
+                        return;
+                      }
+                      handleBucketChanged(params.data, String(params.newValue ?? ""));
+                    },
+                  }}
+                />
+              </div>
             </div>
-          </div>
           )}
         </div>
       </section>

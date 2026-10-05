@@ -435,8 +435,8 @@ export function rankColumn<T>(
     valueGetter: (params) => getRank(params.data) ?? null,
     headerName: "순위",
     pinned: "left",
-    width: 56,
-    minWidth: 56,
+    width: 52,
+    minWidth: 52,
     headerTooltip: "종목풀의 장기 이격률 순위",
     cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
     cellRenderer: (params: { data?: T; value?: number | null }) => {
