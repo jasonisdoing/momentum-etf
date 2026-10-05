@@ -7,6 +7,7 @@ from typing import Any
 
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
+from utils.market_cap_rank import META_FIELD as MARKET_CAP_RANK_FIELD
 from utils.normalization import to_timestamp_iso
 
 logger = get_app_logger()
@@ -137,8 +138,6 @@ def upsert_stock_cache_meta_doc(
         "name": name_norm,
         "updated_at": now,
     }
-    if meta_cache is not None:
-        payload["meta_cache"] = meta_cache
     if holdings_cache is not None:
         payload["holdings_cache"] = {
             **holdings_cache,
@@ -147,13 +146,25 @@ def upsert_stock_cache_meta_doc(
             ),
         }
 
-    update: dict[str, Any] = {"$set": payload, "$setOnInsert": {"created_at": now}}
+    # 집계 파이프라인 업데이트 — 값은 $literal 로 감싸 `$` 로 시작하는 문자열이 식으로 읽히지 않게 한다.
+    stage: dict[str, Any] = {key: {"$literal": value} for key, value in payload.items()}
+    stage["created_at"] = {"$ifNull": ["$created_at", now]}
+    if meta_cache is not None:
+        # 메타 갱신은 meta_cache 를 통째로 바꾼다. 그 뒤 따로 적히는 시총 순위는 그 단계가 실패해도
+        # 지워지지 않게 기존 값을 이어 붙인다(없으면 키 자체가 생기지 않는다).
+        stage["meta_cache"] = {
+            "$mergeObjects": [
+                {MARKET_CAP_RANK_FIELD: f"$meta_cache.{MARKET_CAP_RANK_FIELD}"},
+                {"$literal": meta_cache},
+            ]
+        }
+    pipeline: list[dict[str, Any]] = [{"$set": stage}]
     if holdings_cache is not None:
-        update["$unset"] = {"portfolio_change_cache": "", "portfolio_change_cache_updated_at": ""}
+        pipeline.append({"$unset": ["portfolio_change_cache", "portfolio_change_cache_updated_at"]})
 
     coll.update_one(
         {"ticker_type": type_norm, "ticker": ticker_norm},
-        update,
+        pipeline,
         upsert=True,
     )
 
