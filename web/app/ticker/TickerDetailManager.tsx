@@ -713,15 +713,6 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
     return map;
   }, [chartRows]);
 
-  // 제목 옆 현재가·등락률 — **항상 전일 대비**(일봉 마지막)다.
-  // 차트 기간(일/주/월)을 따라가면 월봉을 볼 때 한 달 등락률이 제목에 떠서, 옆 ETF정보의
-  // 전일 대비와 값이 어긋난다. 제목은 종목의 지금 상태를 알리는 자리라 기간과 무관해야 한다.
-  const lastInfo = useMemo<CrosshairInfo | null>(() => {
-    if (rows.length === 0) return null;
-    const last = rows[rows.length - 1];
-    return { open: last.open, high: last.high, low: last.low, close: last.close, change_pct: last.change_pct };
-  }, [rows]);
-
   useEffect(() => {
     if (!chartContainerRef.current || chartRows.length === 0) {
       if (chartRef.current) {
@@ -992,7 +983,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
 
   const lastPriceRow = useMemo(() => rows[rows.length - 1] ?? null, [rows]);
   const previousPriceRow = useMemo(() => rows[rows.length - 2] ?? null, [rows]);
-  // 헤더 현재가·등락 — 정규장 전에는 live(프리장·데이장 시세), 아니면 마지막 봉.
+  // 제목 옆과 ETF정보의 현재가·등락 — 항상 전일 대비(차트 기간과 무관). 정규장 전에는 live(프리장·데이장 시세), 아니면 마지막 봉.
   const latestClose = live?.price ?? lastPriceRow?.close ?? null;
   const latestChangePct = live ? live.change_pct : (lastPriceRow?.change_pct ?? null);
   const latestChangeAmount = useMemo(() => {
@@ -1271,12 +1262,12 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
                   <div className="tickerDetailHero">
                     <div className="tickerDetailHeroLeft">
                       <div className="tickerDetailHeroTitle">{displayTitle}</div>
-                      {lastInfo?.close != null ? (
-                        <span className="tickerDetailHeroPrice">{formatCurrencyPrice(lastInfo.close, selectedCountryCode)}</span>
+                      {latestClose != null ? (
+                        <span className="tickerDetailHeroPrice">{formatCurrencyPrice(latestClose, selectedCountryCode)}</span>
                       ) : null}
-                      {lastInfo?.change_pct != null ? (
-                        <span className={`tickerDetailHeroChange ${getSignedClass(lastInfo.change_pct)}`}>
-                          {formatPercent(lastInfo.change_pct)}
+                      {latestChangePct != null ? (
+                        <span className={`tickerDetailHeroChange ${getSignedClass(latestChangePct)}`}>
+                          {formatPercent(latestChangePct)}
                         </span>
                       ) : null}
                     </div>
