@@ -11,6 +11,7 @@ from typing import Any
 from config import CACHE_TTL_SLOW
 from utils.asx_ticker import ensure_asx_prefix
 from utils.http_session import shared_session
+from utils.normalization import normalize_exchange_symbol
 from utils.ttl_cache import TtlCache
 
 _BASE_URL = "https://www.ishares.com"
@@ -64,14 +65,11 @@ def _resolve_symbol(ticker: str | None, exchange: str, asset_class: str) -> str 
     if not ticker or asset_class != "Equity":
         return None
     if exchange in _US_EXCHANGES:
-        return ticker.replace(" ", "-")
+        return normalize_exchange_symbol(ticker, suffix="")
     suffix = _EXCHANGE_SUFFIXES.get(exchange)
     if suffix is None:
         return None
-    base = ticker.rstrip(".").replace(" ", "-")
-    if suffix == "HK" and base.isdigit():
-        base = base.zfill(4)
-    return f"{base}.{suffix}"
+    return normalize_exchange_symbol(ticker, suffix=suffix)
 
 
 def _normalize_holding(raw: dict[str, str], weight_column: str) -> dict[str, Any]:

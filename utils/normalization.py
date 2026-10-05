@@ -7,6 +7,16 @@ import math
 from typing import Any
 
 
+def normalize_exchange_symbol(ticker: str, *, suffix: str) -> str:
+    """확인된 상장 시장의 티커를 공통 시세 심볼로 변환한다."""
+    base = ticker.strip().rstrip(".").replace(" ", "-")
+    if not suffix:
+        return base.replace(".", "-").replace("/", "-")
+    if suffix == "HK" and base.isdigit():
+        base = base.zfill(4)
+    return f"{base}.{suffix}"
+
+
 def normalize_number(value: Any) -> float:
     """숫자로 변환한다. 실패 시 0.0을 반환한다."""
     try:

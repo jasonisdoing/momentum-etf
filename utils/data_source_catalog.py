@@ -21,6 +21,7 @@ HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "invesco_us_api": "Invesco 미국 공식 API",
     "ishares_us_csv": "iShares 미국 공식 CSV",
     "spdr_us_xlsx": "SPDR 미국 공식 XLSX",
+    "vaneck_us_api": "VanEck 미국 공식 API",
     "yfinance_holdings": "yfinance (상위 10종목)",
     "naver_etf_component": "네이버 ETF 구성종목",
 }
@@ -223,7 +224,13 @@ DATA_SOURCES: list[dict[str, Any]] = [
 
 # ETF 구성종목 수집 순서 — 실제 코드(_refresh_overseas_etf_meta_cache / fetch_us_etf_holdings)와 일치시킨다.
 AU_HOLDINGS_FALLBACK_ORDER: list[str] = ["betashares_csv", "vanguard_au_api", "yfinance_holdings"]
-US_HOLDINGS_FALLBACK_ORDER: list[str] = ["invesco_us_api", "ishares_us_csv", "spdr_us_xlsx", "yfinance_holdings"]
+US_HOLDINGS_FALLBACK_ORDER: list[str] = [
+    "invesco_us_api",
+    "ishares_us_csv",
+    "spdr_us_xlsx",
+    "vaneck_us_api",
+    "yfinance_holdings",
+]
 
 # ETF 이름 → 발행사(운용사). 미국·호주는 통합 소스가 없어 발행사별로 수집 경로가 갈리므로
 # 발행사를 기준으로 정리한다. 이름 앞부분에 발행사명이 들어가는 업계 관행을 이용하되,
@@ -277,6 +284,7 @@ US_OFFICIAL_SOURCES: dict[str, str] = {
     "Invesco": "invesco_us_api",
     "iShares (BlackRock)": "ishares_us_csv",
     "SPDR (State Street)": "spdr_us_xlsx",
+    "VanEck": "vaneck_us_api",
 }
 
 
@@ -347,6 +355,10 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
         "services/spdr_us_service.py",
     ),
     "yfinance_holdings": ("yfinance funds_data", "utils/stock_meta_updater.py"),
+    "vaneck_us_api": (
+        "vaneck.com/Main/FundDatasetBlock/Get/?blockId={블록 ID}&pageId={상품 ID}&ticker={ticker}",
+        "services/vaneck_us_service.py",
+    ),
 }
 _SOURCE_NOTES: dict[str, str] = {
     "betashares_csv": "CSV 에 Currency·Country·Asset Class 열이 있어 구성종목의 상장 국가를 정확히 안다.",
@@ -354,6 +366,7 @@ _SOURCE_NOTES: dict[str, str] = {
     "invesco_us_api": "상품 명단에서 CUSIP 을 찾아 전체 구성종목을 받는다. 종목 메타 배치가 공통 캐시에 저장한다.",
     "ishares_us_csv": "공식 상품 명단에서 티커를 찾아 전체 구성종목 CSV를 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "spdr_us_xlsx": "공식 상품 명단에서 티커를 찾아 전체 구성종목 XLSX를 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
+    "vaneck_us_api": "공식 상품 명단의 상세 주소에서 전체 구성종목 JSON을 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "yfinance_holdings": "공식 소스가 없어 폴백. 상위 10종목까지만 나오고 운용보수는 제공되지 않는다.",
 }
 
