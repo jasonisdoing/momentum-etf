@@ -6,6 +6,18 @@ import datetime as _dt
 import math
 from typing import Any
 
+_BLOOMBERG_EXCHANGE_SUFFIXES = {
+    "AU": "AX",
+    "LN": "L",
+    "HK": "HK",
+    "JP": "T",
+    "C1": "SS",
+    "C2": "SZ",
+    "KS": "KS",
+    "KQ": "KQ",
+    "TT": "TW",
+}
+
 
 def normalize_exchange_symbol(ticker: str, *, suffix: str) -> str:
     """확인된 상장 시장의 티커를 공통 시세 심볼로 변환한다."""
@@ -15,6 +27,19 @@ def normalize_exchange_symbol(ticker: str, *, suffix: str) -> str:
     if suffix == "HK" and base.isdigit():
         base = base.zfill(4)
     return f"{base}.{suffix}"
+
+
+def resolve_bloomberg_listing(
+    label: str, *, currency: str | None, us_listings: dict[str, str]
+) -> tuple[str | None, str | None]:
+    """지원하는 시장 표기 또는 미국 공식 명단으로 확인된 시세 심볼만 반환한다."""
+    base, separator, market = label.rpartition(" ")
+    if separator:
+        suffix = _BLOOMBERG_EXCHANGE_SUFFIXES.get(market)
+        return (normalize_exchange_symbol(base, suffix=suffix), market) if suffix else (None, None)
+    symbol = normalize_exchange_symbol(label, suffix="")
+    exchange = us_listings.get(symbol) if currency in {None, "USD"} else None
+    return (symbol, exchange) if exchange else (None, None)
 
 
 def normalize_number(value: Any) -> float:

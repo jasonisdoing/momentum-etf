@@ -13,24 +13,12 @@ from bs4 import BeautifulSoup
 from config import CACHE_TTL_SLOW
 from utils.asx_ticker import ensure_asx_prefix
 from utils.http_session import shared_session
-from utils.normalization import normalize_exchange_symbol
+from utils.normalization import resolve_bloomberg_listing
 from utils.ttl_cache import TtlCache
 from utils.us_etf_market_service import load_us_security_exchange_map
 
 _BASE_URL = "https://www.vaneck.com"
 _PRODUCT_MAP_CACHE = TtlCache(CACHE_TTL_SLOW, name="vaneck_us_products", max_entries=1)
-# 공식 구성종목의 블룸버그 시장 표기 중 공통 가격 경로가 지원하는 시장만 변환한다.
-_EXCHANGE_SUFFIXES = {
-    "AU": "AX",
-    "LN": "L",
-    "HK": "HK",
-    "JP": "T",
-    "C1": "SS",
-    "C2": "SZ",
-    "KS": "KS",
-    "KQ": "KQ",
-    "TT": "TW",
-}
 
 
 def _official_url(value: str, prefix: str) -> str:
@@ -98,16 +86,6 @@ def _dataset_url(html: str, ticker: str) -> str:
     return urls[0]
 
 
-def _resolve_symbol(label: str, currency: str, us_listings: dict[str, str]) -> tuple[str | None, str | None]:
-    base, separator, market = label.rpartition(" ")
-    if separator:
-        suffix = _EXCHANGE_SUFFIXES.get(market)
-        return (normalize_exchange_symbol(base, suffix=suffix), market) if suffix else (None, None)
-    symbol = normalize_exchange_symbol(label, suffix="")
-    exchange = us_listings.get(symbol) if currency == "USD" else None
-    return (symbol, exchange) if exchange else (None, None)
-
-
 def _normalize_holding(raw: dict[str, Any], us_listings: dict[str, str]) -> dict[str, Any]:
     label = str(raw["Label"]).strip()
     name = str(raw["HoldingName"]).strip()
@@ -116,7 +94,11 @@ def _normalize_holding(raw: dict[str, Any], us_listings: dict[str, str]) -> dict
     currency = raw["CurrencyCode"]
     if not math.isfinite(weight):
         raise ValueError("VanEck 구성종목 비중이 잘못됐습니다.")
-    symbol, exchange = _resolve_symbol(label, currency, us_listings) if asset_class == "Stock" else (None, None)
+    symbol, exchange = (
+        resolve_bloomberg_listing(label, currency=currency, us_listings=us_listings)
+        if asset_class == "Stock"
+        else (None, None)
+    )
     ticker = label if label not in {"", "--"} else None
     if asset_class in {"Cash", "Cash Bal"}:
         name = f"현금 · {name or label}"

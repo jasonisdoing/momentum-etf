@@ -22,6 +22,7 @@ HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "ishares_us_csv": "iShares 미국 공식 CSV",
     "spdr_us_xlsx": "SPDR 미국 공식 XLSX",
     "vaneck_us_api": "VanEck 미국 공식 API",
+    "vistashares_us_csv": "VistaShares 미국 공식 CSV",
     "yfinance_holdings": "yfinance (상위 10종목)",
     "naver_etf_component": "네이버 ETF 구성종목",
 }
@@ -229,6 +230,7 @@ US_HOLDINGS_FALLBACK_ORDER: list[str] = [
     "ishares_us_csv",
     "spdr_us_xlsx",
     "vaneck_us_api",
+    "vistashares_us_csv",
     "yfinance_holdings",
 ]
 
@@ -285,6 +287,7 @@ US_OFFICIAL_SOURCES: dict[str, str] = {
     "iShares (BlackRock)": "ishares_us_csv",
     "SPDR (State Street)": "spdr_us_xlsx",
     "VanEck": "vaneck_us_api",
+    "VistaShares": "vistashares_us_csv",
 }
 
 
@@ -359,6 +362,10 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
         "vaneck.com/Main/FundDatasetBlock/Get/?blockId={블록 ID}&pageId={상품 ID}&ticker={ticker}",
         "services/vaneck_us_service.py",
     ),
+    "vistashares_us_csv": (
+        "vistashares.com/csv/top-holdings/?etf={ticker}",
+        "services/vistashares_us_service.py",
+    ),
 }
 _SOURCE_NOTES: dict[str, str] = {
     "betashares_csv": "CSV 에 Currency·Country·Asset Class 열이 있어 구성종목의 상장 국가를 정확히 안다.",
@@ -367,6 +374,7 @@ _SOURCE_NOTES: dict[str, str] = {
     "ishares_us_csv": "공식 상품 명단에서 티커를 찾아 전체 구성종목 CSV를 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "spdr_us_xlsx": "공식 상품 명단에서 티커를 찾아 전체 구성종목 XLSX를 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "vaneck_us_api": "공식 상품 명단의 상세 주소에서 전체 구성종목 JSON을 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
+    "vistashares_us_csv": "공식 상품 페이지의 Download All Holdings에서 전체 CSV를 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "yfinance_holdings": "공식 소스가 없어 폴백. 상위 10종목까지만 나오고 운용보수는 제공되지 않는다.",
 }
 
