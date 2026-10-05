@@ -45,6 +45,7 @@ const SOURCE_TONE: Record<string, { bg: string; fg: string }> = {
   invesco_us_api: { bg: "#dcfce7", fg: "#166534" },
   ishares_us_csv: { bg: "#dcfce7", fg: "#166534" },
   spdr_us_xlsx: { bg: "#dcfce7", fg: "#166534" },
+  vaneck_us_api: { bg: "#dcfce7", fg: "#166534" },
   yfinance_holdings: { bg: "#fef3c7", fg: "#92400e" },
   naver_etf_component: { bg: "#dbeafe", fg: "#1e40af" },
 };

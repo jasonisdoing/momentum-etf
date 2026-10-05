@@ -25,7 +25,7 @@ from config import CACHE_TTL_SLOW, KIS_US_MASTER_URLS, US_ETF_MARKET_TOP_COUNT
 from utils.db_manager import get_db_connection
 from utils.kis_market import BASE_CLOSE_OFFSETS
 from utils.logger import get_app_logger
-from utils.normalization import to_iso_string
+from utils.normalization import normalize_exchange_symbol, to_iso_string
 from utils.ttl_cache import TtlCache
 
 logger = get_app_logger()
@@ -128,6 +128,11 @@ def load_us_security_master() -> list[dict[str, str]]:
 
 def _load_us_etf_master() -> list[dict[str, str]]:
     return [row for row in load_us_security_master() if row["security_type"] == _ETF_TYPE]
+
+
+def load_us_security_exchange_map() -> dict[str, str]:
+    """공식 미국 상장 명단을 시세 심볼 → 거래소 맵으로 반환한다."""
+    return {normalize_exchange_symbol(row["ticker"], suffix=""): row["exchange"] for row in load_us_security_master()}
 
 
 def _download_daily(tickers: list[str], period: str) -> dict[str, pd.DataFrame]:

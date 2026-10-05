@@ -15,6 +15,7 @@ from services.invesco_us_service import fetch_invesco_us_holdings
 from services.ishares_us_service import fetch_ishares_us_holdings
 from services.spdr_us_service import fetch_spdr_us_holdings
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
+from services.vaneck_us_service import fetch_vaneck_us_holdings
 from services.vanguard_au_service import fetch_vanguard_au_expense_ratio_pct, fetch_vanguard_au_holdings
 from utils.asx_ticker import (
     ensure_asx_prefix,
@@ -663,7 +664,12 @@ def _registered_etf_holdings(tickers: list[str]) -> dict[str, list[dict[str, Any
 
 def fetch_us_etf_holdings(ticker: str) -> dict[str, Any] | None:
     """연동된 운용사는 공식 전체 목록, 다른 운용사는 Yahoo 상위 목록을 사용한다."""
-    for fetch_official in (fetch_invesco_us_holdings, fetch_ishares_us_holdings, fetch_spdr_us_holdings):
+    for fetch_official in (
+        fetch_invesco_us_holdings,
+        fetch_ishares_us_holdings,
+        fetch_spdr_us_holdings,
+        fetch_vaneck_us_holdings,
+    ):
         official = fetch_official(ticker)
         if official is not None:
             return official

@@ -11,8 +11,9 @@ from zipfile import ZipFile
 
 from config import CACHE_TTL_SLOW
 from utils.http_session import shared_session
+from utils.normalization import normalize_exchange_symbol
 from utils.ttl_cache import TtlCache
-from utils.us_etf_market_service import load_us_security_master
+from utils.us_etf_market_service import load_us_security_exchange_map
 
 _DATA_URL = "https://www.ssga.com/library-content/products/fund-data/etfs/us"
 _PRODUCT_MAP_CACHE = TtlCache(CACHE_TTL_SLOW, name="spdr_us_products", max_entries=1)
@@ -97,7 +98,7 @@ def _normalize_holding(raw: dict[str, str], us_listings: dict[str, str]) -> dict
     if ticker in {"", "-"}:
         ticker = None
     currency = raw["Local Currency"].upper()
-    symbol = _us_symbol(ticker) if ticker else None
+    symbol = normalize_exchange_symbol(ticker, suffix="") if ticker else None
     exchange = us_listings.get(symbol) if currency == "USD" else None
     if exchange is None:
         symbol = None
@@ -115,11 +116,6 @@ def _normalize_holding(raw: dict[str, str], us_listings: dict[str, str]) -> dict
     }
 
 
-def _us_symbol(ticker: str) -> str:
-    """SPDR의 BRK.B와 KIS의 BRK/B를 같은 미국 시세 심볼로 변환한다."""
-    return ticker.replace(".", "-").replace("/", "-")
-
-
 def fetch_spdr_us_holdings(ticker: str) -> dict[str, Any] | None:
     """비 SPDR 종목이면 None, 공식 수집 실패면 예외를 낸다."""
     ticker_norm = str(ticker).strip().upper()
@@ -135,7 +131,7 @@ def fetch_spdr_us_holdings(ticker: str) -> dict[str, Any] | None:
         raise ValueError(f"SPDR {ticker_norm} 구성종목 파일의 티커가 다릅니다.")
     reference_date = datetime.strptime(identity["Holdings:"], "As of %d-%b-%Y").date().isoformat()
     raw_items = _table_rows(rows, {"Name", "Ticker", "Identifier", "Weight", "Local Currency"})
-    us_listings = {_us_symbol(row["ticker"]): row["exchange"] for row in load_us_security_master()}
+    us_listings = load_us_security_exchange_map()
     items = [_normalize_holding(raw, us_listings) for raw in raw_items]
     return {
         "source": "spdr_us_xlsx",
