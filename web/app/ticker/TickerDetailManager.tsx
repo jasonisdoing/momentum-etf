@@ -28,6 +28,7 @@ import type {
 import type { ColDef, GridApi, GridReadyEvent } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
+import { AppLoadingState } from "../components/AppLoadingState";
 import { useToast } from "../components/ToastProvider";
 import { PortfolioChangeBreakdown } from "../components/PortfolioChangeBreakdown";
 import { persistRecentTickerSearch } from "@/lib/recent-ticker-searches";
@@ -444,6 +445,8 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
 
   // 전체 종목 목록
   const [allTickers, setAllTickers] = useState<TickerItem[]>([]);
+  // 목록 요청이 끝났는지(실패해도 true) — 끝나기 전에는 티커 해석을 시작하지 않고, 끝난 뒤엔 목록이 비어도 resolve 로 진행한다.
+  const [tickersLoaded, setTickersLoaded] = useState(false);
 
   // 현재 선택된 종목
   const [selectedTicker, setSelectedTicker] = useState<TickerItem | null>(null);
@@ -486,7 +489,9 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
         if (!res.ok) return;
         const data = (await res.json()) as TickerItem[];
         if (alive && Array.isArray(data)) setAllTickers(data);
-      } catch { /* 무시 */ }
+      } catch { /* 무시 */ } finally {
+        if (alive) setTickersLoaded(true);
+      }
     }
     fetchAll();
     return () => { alive = false; };
@@ -514,7 +519,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
       return;
     }
 
-    if (allTickers.length === 0) {
+    if (!tickersLoaded) {
       return;
     }
 
@@ -558,7 +563,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
         setError(error instanceof Error ? error.message : `${qTicker} 티커를 찾지 못했습니다.`);
       }
     })();
-  }, [allTickers, qTicker, qTickerType, qCountryCode, qName]);
+  }, [allTickers, tickersLoaded, qTicker, qTickerType, qCountryCode, qName]);
 
   // --- 데이터 로드 ---
 
@@ -1255,7 +1260,10 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
       <section className="appSection appSectionFill">
         <div className="card appCard appTableCardFill">
           <div className="card-body appCardBodyTight appTableCardBodyFill">
-            {!selectedTicker && !loading ? (
+            {!selectedTicker && qTicker && !error ? (
+              // 티커를 해석하는 중(목록 로드·resolve) — 검색 안내문이 잠깐 비치지 않게 로딩을 보인다.
+              <AppLoadingState />
+            ) : !selectedTicker && !loading ? (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, color: "#5b6778" }}>
                 <span style={{ fontSize: "var(--fs-base)" }}>티커 또는 종목명을 검색하세요.</span>
               </div>
