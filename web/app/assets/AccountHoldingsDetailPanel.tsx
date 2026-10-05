@@ -77,6 +77,7 @@ export function AccountHoldingsDetailPanel({
   onCashSync,
   onSortStateChange,
   onReload,
+  onBusyChange,
   showAmounts,
 }: {
   summary: AccountSummary;
@@ -85,6 +86,8 @@ export function AccountHoldingsDetailPanel({
   onCashSync: (accountId: string, balance: number, targetRatio: number, saved?: SavedCashAccount) => void;
   onSortStateChange: (accountId: string, sortState: ColumnState[]) => void;
   onReload: (options?: { silent?: boolean }) => Promise<void>;
+  /** 수정·선택·저장 중 여부 — 부모의 주기 갱신이 입력을 덮어쓰지 않게 알린다. */
+  onBusyChange: (busy: boolean) => void;
   showAmounts: boolean;
 }) {
   const toast = useToast();
@@ -423,6 +426,11 @@ export function AccountHoldingsDetailPanel({
   const hasPendingAdd = Boolean(addingRow);
   const hasSelectedRows = selectedRowIds.length > 0;
   const hasPendingSave = hasPendingAdd || dirtyRowIds.length > 0 || isReorderDirty;
+  const isBusy = hasPendingSave || hasSelectedRows || editingRowId !== null || processingId !== null;
+  useEffect(() => {
+    onBusyChange(isBusy);
+  }, [isBusy, onBusyChange]);
+  useEffect(() => () => onBusyChange(false), [onBusyChange]);
   const selectedDeletableRows = useMemo(
     () => gridRows.filter((row) => selectedRowIds.includes(row.id) && row.id !== "__adding__"),
     [gridRows, selectedRowIds],
