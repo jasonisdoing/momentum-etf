@@ -95,6 +95,7 @@ type TickerDetailResponse = {
   holdings: TickerHoldingRow[];
   holdings_as_of_date?: string | null;
   holdings_updated_at?: string | null;
+  holdings_disclosure?: { asset_name: string; url: string } | null;
   holdings_price_as_of_date?: string | null;
   holdings_error?: string | null;
   my_average_buy_price?: number | null;
@@ -454,6 +455,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
   const [etfInfo, setEtfInfo] = useState<TickerEtfInfo | null>(null);
   const [holdingsAsOfDate, setHoldingsAsOfDate] = useState<string | null>(null);
   const [holdingsUpdatedAt, setHoldingsUpdatedAt] = useState<string | null>(null);
+  const [holdingsDisclosure, setHoldingsDisclosure] = useState<{ asset_name: string; url: string } | null>(null);
   const [holdingsPriceAsOfDate, setHoldingsPriceAsOfDate] = useState<string | null>(null);
   const [holdingsError, setHoldingsError] = useState<string | null>(null);
   const [myAverageBuyPrice, setMyAverageBuyPrice] = useState<number | null>(null);
@@ -607,6 +609,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
       setHoldings(payload.holdings ?? []);
       setHoldingsAsOfDate(payload.holdings_as_of_date ?? null);
       setHoldingsUpdatedAt(payload.holdings_updated_at ?? null);
+      setHoldingsDisclosure(payload.holdings_disclosure ?? null);
       setHoldingsPriceAsOfDate(payload.holdings_price_as_of_date ?? null);
       setHoldingsError(payload.holdings_error ?? null);
       setMyAverageBuyPrice(payload.my_average_buy_price ?? null);
@@ -953,7 +956,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
     [holdingsRows],
   );
 
-  const holdingsPanelTitle = showHoldingsWeightColumn ? "구성종목비중" : "구성종목";
+  const holdingsPanelTitle = holdingsDisclosure || showHoldingsWeightColumn ? "구성종목비중" : "구성종목";
   const holdingsPanelMeta = useMemo(() => {
     if (holdingsRows.length === 0) return "데이터 없음";
     const baseText = `상위 ${new Intl.NumberFormat("ko-KR").format(holdingsRows.length)}개`;
@@ -1342,7 +1345,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
                               </div>
                             </div>
                           </div>
-                          <div className="tickerDetailInfoTracker">
+                          {!holdingsDisclosure && <div className="tickerDetailInfoTracker">
                             <div className="tickerDetailInfoTrackerRow">
                               <div>
                                 <div className="tickerDetailInfoTrackerLabel">
@@ -1371,7 +1374,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
                                 <span className="metricNegative">▼ {holdingsDirectionCounts.falling}종목</span>
                               </div>
                             </div>
-                          </div>
+                          </div>}
                         </div>
                       </div>
                     )}
@@ -1379,10 +1382,19 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
                       <div className="tickerDetailHoldingsPanel">
                         <div className="tickerDetailTableHeader">
                           <span className="tickerDetailTableTitle">{holdingsPanelTitle}</span>
-                          <span className="tickerDetailTableMeta">{holdingsPanelMeta}</span>
+                          {!holdingsDisclosure && <span className="tickerDetailTableMeta">{holdingsPanelMeta}</span>}
                           <span className="tickerDetailTableMeta">갱신: {formatKstDateTimeKorean(holdingsUpdatedAt)}</span>
                         </div>
-                        {holdingsRows.length > 0 ? (
+                        {holdingsDisclosure ? (
+                          <div className="tickerDetailHoldingsEmpty">
+                            <div>
+                              <p>{holdingsDisclosure.asset_name} 실물 보유 상품 — 주식 구성종목 없음</p>
+                              <a href={holdingsDisclosure.url} target="_blank" rel="noopener noreferrer">
+                                공식 실물 보유 목록 ↗
+                              </a>
+                            </div>
+                          </div>
+                        ) : holdingsRows.length > 0 ? (
                           <div className="appGridFillWrap">
                             <AppAgGrid
                               className="tickerDetailHoldingsGrid"

@@ -15,6 +15,7 @@ from services.invesco_us_service import fetch_invesco_us_holdings
 from services.ishares_us_service import fetch_ishares_us_holdings
 from services.spdr_us_service import fetch_spdr_us_holdings
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
+from services.us_physical_etf_service import fetch_us_physical_etf_holdings
 from services.vaneck_us_service import fetch_vaneck_us_holdings
 from services.vanguard_au_service import fetch_vanguard_au_expense_ratio_pct, fetch_vanguard_au_holdings
 from services.vistashares_us_service import fetch_vistashares_us_holdings
@@ -364,6 +365,8 @@ def _holdings_cache_from(holdings_info: dict[str, Any]) -> dict[str, Any]:
     }
     if holdings_info.get("nested_etfs"):
         cache["nested_etfs"] = holdings_info["nested_etfs"]
+    if "disclosure" in holdings_info:
+        cache["disclosure"] = holdings_info["disclosure"]
     return cache
 
 
@@ -664,8 +667,9 @@ def _registered_etf_holdings(tickers: list[str]) -> dict[str, list[dict[str, Any
 
 
 def fetch_us_etf_holdings(ticker: str) -> dict[str, Any] | None:
-    """연동된 운용사는 공식 전체 목록, 다른 운용사는 Yahoo 상위 목록을 사용한다."""
+    """실물 상품은 공식 공시, 연동 운용사는 전체 목록, 다른 운용사는 Yahoo 상위 목록을 사용한다."""
     for fetch_official in (
+        fetch_us_physical_etf_holdings,
         fetch_invesco_us_holdings,
         fetch_ishares_us_holdings,
         fetch_spdr_us_holdings,

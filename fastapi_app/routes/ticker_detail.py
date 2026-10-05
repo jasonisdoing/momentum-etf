@@ -734,6 +734,7 @@ def build_ticker_detail_payload(
             "holdings": [],
             "holdings_as_of_date": None,
             "holdings_updated_at": None,
+            "holdings_disclosure": None,
             "holdings_price_as_of_date": None,
             "holdings_error": None,
             "my_average_buy_price": _calculate_consolidated_average_buy_price(
@@ -791,6 +792,7 @@ def build_ticker_detail_payload(
     holdings: list[dict[str, object]] = []
     holdings_as_of_date: str | None = None
     holdings_updated_at: str | None = None
+    holdings_disclosure: dict[str, str] | None = None
     holdings_price_as_of_date: str | None = None
     holdings_error: str | None = None
     holdings_revision: str | None = None
@@ -808,6 +810,7 @@ def build_ticker_detail_payload(
         holdings_cache = dict(cache_document.get("holdings_cache") or {}) if isinstance(cache_document, dict) else {}
         holdings_revision = stock_holdings_revision(holdings_cache)
         holdings = list(holdings_cache.get("items") or [])
+        holdings_disclosure = holdings_cache.get("disclosure")
         if country_clean == "kor":
             etf_info = _build_korean_etf_info_payload(
                 ticker=db_ticker,
@@ -831,6 +834,9 @@ def build_ticker_detail_payload(
         holdings_updated_at = to_timestamp_iso(holdings_cache.get("updated_at"), naive_timezone=ZoneInfo("Asia/Seoul"))
         if not include_holdings:
             # 가격 시계열만 필요한 호출(성과분석 탭) — 구성종목 시세 평가·포트폴리오 변동 계산을 건너뛴다.
+            holdings = []
+        elif holdings_disclosure is not None:
+            # 실물 보유 상품은 주식 구성종목과 그 시세 평가의 대상이 아니다.
             holdings = []
         elif not holdings:
             holdings_error = (
@@ -948,6 +954,7 @@ def build_ticker_detail_payload(
         "holdings": holdings,
         "holdings_as_of_date": holdings_as_of_date,
         "holdings_updated_at": holdings_updated_at,
+        "holdings_disclosure": holdings_disclosure,
         "holdings_price_as_of_date": holdings_price_as_of_date,
         "holdings_error": holdings_error,
         "holdings_revision": holdings_revision,

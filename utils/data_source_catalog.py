@@ -16,6 +16,7 @@ logger = get_app_logger()
 
 # 구성종목 캐시의 source 값 → 사람이 읽는 이름. 배치가 저장한 값과 1:1 로 맞춘다.
 HOLDINGS_SOURCE_LABELS: dict[str, str] = {
+    "physical_asset_disclosure": "공식 실물 보유 목록 (주식 구성종목 없음)",
     "betashares_csv": "BetaShares 공식 CSV",
     "vanguard_au_api": "Vanguard AU 공식 API",
     "invesco_us_api": "Invesco 미국 공식 API",
@@ -226,6 +227,7 @@ DATA_SOURCES: list[dict[str, Any]] = [
 # ETF 구성종목 수집 순서 — 실제 코드(_refresh_overseas_etf_meta_cache / fetch_us_etf_holdings)와 일치시킨다.
 AU_HOLDINGS_FALLBACK_ORDER: list[str] = ["betashares_csv", "vanguard_au_api", "yfinance_holdings"]
 US_HOLDINGS_FALLBACK_ORDER: list[str] = [
+    "physical_asset_disclosure",
     "invesco_us_api",
     "ishares_us_csv",
     "spdr_us_xlsx",
@@ -326,6 +328,7 @@ def _load_etf_rows(ticker_type: str) -> list[dict[str, Any]]:
                 "holdings_source": source,
                 "holdings_source_label": HOLDINGS_SOURCE_LABELS.get(str(source or ""), None),
                 "holdings_count": len(holdings_cache.get("items") or []),
+                "holdings_disclosure": holdings_cache.get("disclosure"),
                 "reference_date": holdings_cache.get("reference_date"),
                 "expense_ratio": meta_cache.get("expense_ratio"),
                 "dividend_yield_ttm": meta_cache.get("dividend_yield_ttm"),
@@ -366,8 +369,10 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
         "vistashares.com/csv/top-holdings/?etf={ticker}",
         "services/vistashares_us_service.py",
     ),
+    "physical_asset_disclosure": ("공식 상품 페이지의 실물 보유 목록", "services/us_physical_etf_service.py"),
 }
 _SOURCE_NOTES: dict[str, str] = {
+    "physical_asset_disclosure": "실물 보유 상품은 주식 구성종목 대신 공식 실물 보유 목록을 안내한다.",
     "betashares_csv": "CSV 에 Currency·Country·Asset Class 열이 있어 구성종목의 상장 국가를 정확히 안다.",
     "vanguard_au_api": "ASX 티커가 아닌 내부 portId 로 조회한다. 운용보수(MER)도 이 API 로 함께 받는다.",
     "invesco_us_api": "상품 명단에서 CUSIP 을 찾아 전체 구성종목을 받는다. 종목 메타 배치가 공통 캐시에 저장한다.",
@@ -401,16 +406,25 @@ def _build_issuer_sources(
         official_source = (official or {}).get(issuer)
         if official_source:
             primary_source = official_source
-            missing_tickers = [row["ticker"] for row in issuer_rows if row["holdings_source"] != official_source]
+            missing_tickers = [
+                row["ticker"]
+                for row in issuer_rows
+                if row["holdings_source"] != official_source and row["holdings_disclosure"] is None
+            ]
         else:
             source_counter = Counter(str(row["holdings_source"] or "") for row in issuer_rows)
-            missing_tickers = [row["ticker"] for row in issuer_rows if not row["holdings_source"]]
+            missing_tickers = [
+                row["ticker"]
+                for row in issuer_rows
+                if not row["holdings_source"] and row["holdings_disclosure"] is None
+            ]
             primary_source = next(
                 (source for source, _ in source_counter.most_common() if source),
                 "",
             )
         endpoint, code_ref = _SOURCE_ENDPOINTS.get(primary_source, ("-", "utils/stock_meta_updater.py"))
         source_label = HOLDINGS_SOURCE_LABELS.get(primary_source, "수집 경로 없음")
+        physical_count = sum(row["holdings_disclosure"] is not None for row in issuer_rows)
 
         entries.append(
             {
@@ -418,7 +432,10 @@ def _build_issuer_sources(
                 "country": country,
                 "provider": issuer,
                 "endpoint": endpoint,
-                "usage": f"{source_label} — ETF {len(issuer_rows)}종",
+                "usage": (
+                    f"{source_label} — ETF {len(issuer_rows)}종"
+                    + (f" (실물 보유 {physical_count}종은 주식 구성종목 없음)" if physical_count else "")
+                ),
                 "code_ref": code_ref,
                 "note": (
                     f"발행사를 판별하지 못한 ETF 입니다. 이름을 보고 발행사를 {country.upper()}_ISSUER_KEYWORDS 에 추가하면 따로 나뉩니다."
