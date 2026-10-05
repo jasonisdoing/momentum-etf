@@ -91,7 +91,7 @@ type TickerDetailResponse = {
   ticker: string;
   rows: PriceRow[];
   /** 정규장 전 현재가·등락률 — 마지막 봉은 어제 확정 종가로 두고 헤더만 이 값을 쓴다. */
-  live?: { price: number; change_pct: number | null; date: string | null } | null;
+  live?: { price: number; change_pct: number | null; date: string | null; volume: number | null } | null;
   etf_info?: TickerEtfInfo | null;
   holdings: TickerHoldingRow[];
   holdings_as_of_date?: string | null;
@@ -453,7 +453,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
 
   // 데이터
   const [rows, setRows] = useState<PriceRow[]>([]);
-  const [live, setLive] = useState<{ price: number; change_pct: number | null; date: string | null } | null>(null);
+  const [live, setLive] = useState<{ price: number; change_pct: number | null; date: string | null; volume: number | null } | null>(null);
   const [holdings, setHoldings] = useState<TickerHoldingRow[]>([]);
   const [etfInfo, setEtfInfo] = useState<TickerEtfInfo | null>(null);
   const [holdingsAsOfDate, setHoldingsAsOfDate] = useState<string | null>(null);
@@ -935,7 +935,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
       high: null,
       low: null,
       close: live.price,
-      volume: null,
+      volume: live.volume,
       change_pct: live.change_pct,
       provisional: true,
     };
