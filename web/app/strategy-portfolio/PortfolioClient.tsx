@@ -23,7 +23,7 @@ import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { createAppGridTheme } from "../components/app-grid-theme";
-import { bucketColumn, formatSignedPct, highDrawdownColumn, signColor, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
+import { bucketColumn, formatSignedPct, highDrawdownColumn, rankColumn, signColor, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { useStockMemoSave, withTickerMemo } from "../components/useStockMemoSave";
@@ -77,6 +77,8 @@ type WeightRow = {
   ticker: string;
   name: string;
   memo?: string;
+  /** 종목풀 순위 번호 — 순위 화면과 같은 값. */
+  rank?: number | null;
   /** 목표 비중(%) — 사용자가 직접 정한다. 현금 행도 같은 컬럼을 쓴다. */
   fixed_weight_pct: number | null;
   strategy_weight_pct?: number | null;
@@ -518,7 +520,8 @@ export function PortfolioClient() {
         valueGetter: () => "",
       },
       // 티커·종목명 — 공용 컬럼(col-id 표준). 추가 행 입력칸·현금 행만 화면 고유 표기다.
-      // 고점 — 순위·모멘텀·신고가와 같은 공용 컬럼(0 이면 ⭐신고점). 순위 화면처럼 버킷 왼쪽.
+      // 순위·고점 — 순위·모멘텀·신고가와 같은 공용 컬럼(고점 0 이면 ⭐신고점). 순위 화면처럼 버킷 왼쪽.
+      rankColumn<WeightRow>((row) => row?.rank),
       highDrawdownColumn<WeightRow>("high_drawdown_pct"),
       bucketColumn<WeightRow>(),
       tickerColumn<WeightRow>({
