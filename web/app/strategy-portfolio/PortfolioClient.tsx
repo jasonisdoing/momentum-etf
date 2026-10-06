@@ -113,6 +113,8 @@ type UniverseRow = {
   name: string;
   /** 종목 메모 — 계좌가 아니라 종목에 붙는다(순위·자산 관리 화면과 같은 값). */
   memo: string;
+  /** 종목풀 순위 번호 — 순위 화면과 같은 값. */
+  rank: number | null;
   current_price: number | null;
   daily_change_pct: number | null;
   return_1m_pct: number | null;
@@ -363,6 +365,7 @@ export function PortfolioClient() {
   const setWeights = (next: Settings["weights"]) => setDraft((previous) => (previous ? { ...previous, weights: next } : previous));
 
   const emptyMetrics = {
+    rank: null,
     daily_change_pct: null,
     current_price: null,
     return_1m_pct: null,
@@ -430,6 +433,7 @@ export function PortfolioClient() {
         ...(metrics
           ? {
               bucket: metrics.bucket,
+              rank: metrics.rank,
               current_price: metrics.current_price,
               daily_change_pct: metrics.daily_change_pct,
               return_1m_pct: metrics.return_1m_pct,
