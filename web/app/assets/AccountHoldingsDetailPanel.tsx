@@ -23,7 +23,8 @@ import { highDrawdownColumn, rankColumn, signColor, stockMemoColumn, stockNameCo
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { reorderHoldings, saveHoldingsGroups, type HoldingsGroup } from "@/lib/holdings-store";
-import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
+import { fetchAlertBadges, normalizeBadgeTicker, peekAlertBadges, type AlertBadges } from "@/lib/alert-badges";
+import { loadPoolRanks, peekPoolRanks, type PoolRankRow } from "@/lib/pool-ranks";
 import { formatKstDateTime } from "@/lib/datetime";
 import {
   FIXED_ASSET_NAME,
@@ -110,12 +111,14 @@ export function AccountHoldingsDetailPanel({
   // draft 는 ref 에만 쌓고, 검증 시점에만 읽는다.
   const addingTickerDraftRef = useRef("");
   // 손절 배지(🚫)·이동선 이탈(회색 행) — 슬랙 알람과 같은 판정, 알람 On/Off 와 무관한 표준 표시. 보조 정보라 실패 시 빈 맵.
-  const [alertBadges, setAlertBadges] = useState<AlertBadges>({});
+  // 화면이 미리 받아 둔 값(`AssetsManager`)이 있으면 모달이 열리자마자 보인다 — 없을 때만 늦게 채워진다.
+  const prefetchedBadges = useMemo(() => peekAlertBadges(summary.account_id), [summary.account_id]);
+  const [alertBadges, setAlertBadges] = useState<AlertBadges>(prefetchedBadges?.badgeByTicker ?? {});
   // 이동선 이탈 종목 — 배지와 같은 조건으로 행을 회색 처리한다.
-  const [maBrokenTickers, setMaBrokenTickers] = useState<Set<string>>(new Set());
-  const [newListingMonths, setNewListingMonths] = useState<Record<string, number | null>>({});
+  const [maBrokenTickers, setMaBrokenTickers] = useState<Set<string>>(new Set(prefetchedBadges?.maTickers ?? []));
+  const [newListingMonths, setNewListingMonths] = useState<Record<string, number | null>>(prefetchedBadges?.newMonthsByTicker ?? {});
   // 고점 대비(%) — 순위 화면 「고점」 컬럼과 같은 공용 판정(배지 응답에 함께 온다).
-  const [highDrawdownByTicker, setHighDrawdownByTicker] = useState<Record<string, number>>({});
+  const [highDrawdownByTicker, setHighDrawdownByTicker] = useState<Record<string, number>>(prefetchedBadges?.highDrawdownByTicker ?? {});
   const [poolRanks, setPoolRanks] = useState<Record<string, PoolRank>>({});
   const [poolRankError, setPoolRankError] = useState<string | null>(null);
   const rankPoolKey = Array.from(new Set(initialRows
@@ -127,47 +130,42 @@ export function AccountHoldingsDetailPanel({
     .map((row) => row.ticker).join(", ");
 
   useEffect(() => {
-    const controller = new AbortController();
-    setPoolRanks({});
+    let alive = true;
     const missingPoolError = missingRankPoolTickers ? `종목풀 정보 없음 — ${missingRankPoolTickers}` : null;
     setPoolRankError(missingPoolError);
     const pools = rankPoolKey ? rankPoolKey.split("|") : [];
-    if (!pools.length) return () => controller.abort();
-
-    void Promise.allSettled(pools.map(async (pool) => {
-      const response = await fetch(`/api/rank?ticker_type=${encodeURIComponent(pool)}`, {
-        cache: "no-store",
-        signal: controller.signal,
-      });
-      const payload = await response.json() as {
-        rows?: { 티커: string; 순위?: number | null }[];
-        cache_blocked?: boolean;
-        error?: string;
-      };
-      if (!response.ok || payload.error || payload.cache_blocked || !Array.isArray(payload.rows) || !payload.rows.length) {
-        throw new Error(`${pool}: ${payload.error || "순위 데이터를 사용할 수 없습니다"}`);
+    const toRanks = (loaded: { pool: string; rows: PoolRankRow[] }[]) => {
+      const ranks: Record<string, PoolRank> = {};
+      for (const { pool, rows } of loaded) {
+        for (const row of rows) ranks[poolRankKey(pool, row.티커)] = { rank: row.순위 ?? null };
       }
-      return { pool, rows: payload.rows };
-    })).then((results) => {
-      if (controller.signal.aborted) return;
-      const nextRanks: Record<string, PoolRank> = {};
+      return ranks;
+    };
+    // 미리 받아 둔 순위가 전부 있으면(오래됐어도) 먼저 바로 채우고, 새 값은 뒤에서 받아 바꾼다.
+    const cached = pools.map((pool) => ({ pool, rows: peekPoolRanks(pool) }));
+    setPoolRanks(
+      cached.every((item) => item.rows !== null)
+        ? toRanks(cached as { pool: string; rows: PoolRankRow[] }[])
+        : {},
+    );
+    void Promise.allSettled(pools.map(async (pool) => ({ pool, rows: await loadPoolRanks(pool) }))).then((results) => {
+      if (!alive) return;
       const errors: string[] = [];
+      const loaded: { pool: string; rows: PoolRankRow[] }[] = [];
       results.forEach((result, index) => {
         if (result.status === "rejected") {
           errors.push(result.reason instanceof Error ? result.reason.message : `${pools[index]}: 순위 조회 실패`);
           return;
         }
-        for (const row of result.value.rows) {
-          nextRanks[poolRankKey(result.value.pool, row.티커)] = {
-            rank: row.순위 ?? null,
-          };
-        }
+        loaded.push(result.value);
       });
-      setPoolRanks(nextRanks);
+      setPoolRanks(toRanks(loaded));
       setPoolRankError([missingPoolError, errors.length ? `순위 조회 실패 — ${errors.join(" / ")}` : null]
         .filter(Boolean).join(" / ") || null);
     });
-    return () => controller.abort();
+    return () => {
+      alive = false;
+    };
   }, [missingRankPoolTickers, rankPoolKey]);
 
   useEffect(() => {
