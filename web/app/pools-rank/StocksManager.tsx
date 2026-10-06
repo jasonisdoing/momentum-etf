@@ -134,8 +134,6 @@ type RankRow = {
   순자산총액: number | null;
   "전일 거래량(주)": number | null;
   exclude_from_ranking?: boolean;
-  is_benchmark?: boolean;
-  is_below_benchmark?: boolean;
 };
 
 type RankResponse = {
@@ -827,10 +825,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     const leadingColumns: ColDef<RankGridRow>[] = [
       // 순위 — 공용 컬럼(자산 관리·모멘텀과 같은 폭·굵기). 벤치마크 ⭐ · 랭킹 제외 📌 만 이 화면이 붙인다.
       rankColumn<RankGridRow>((row) => row?.순위, {
-        badge: (row) => {
-          if (row?.is_benchmark) return "benchmark";
-          return pageMode === "rank" && row?.exclude_from_ranking ? "excluded" : null;
-        },
+        badge: (row) => (pageMode === "rank" && row?.exclude_from_ranking ? "excluded" : null),
       }),
       rankChangeColumn("전거래일변동", "전거래일", "직전 거래일 순위 대비 상승분", "이전순위"),
       rankChangeColumn("1주순위변동", "1주변동", "5거래일 전 순위 대비 상승분", "1주순위"),
@@ -1729,7 +1724,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [blockedMessage, toast]);
 
   const headerSummary = useMemo<RankHeaderSummary>(() => {
-    const candidateRows = gridRows.filter((r) => !r.is_benchmark && !r.exclude_from_ranking);
+    const candidateRows = gridRows.filter((r) => !r.exclude_from_ranking);
     const totalCount = candidateRows.length;
     // 진입 가능 — 미보유 행 회색 판정과 같은 기준(0선 + 진입 문턱). 옛 '매수 후보'(장기>0)를 대체.
     const mult = entryVolMult === "" ? null : Number(entryVolMult);
@@ -1743,10 +1738,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ruleSummaryParts.push(`TOP ${formatNumber(configuredTopN, 0)}`);
     }
     // 이평선 요약은 뺐다 — 헤더의 단기·장기 셀렉트에 이미 보이는 값이다.
-    // 보유 — 벤치마크 행을 뺀 전 행 기준(제외 종목이어도 들고 있으면 보유다).
-    const heldCount = gridRows.filter(
-      (r) => !r.is_benchmark && !r.__isAddingRow && Boolean(String(r.보유 ?? "").trim()),
-    ).length;
+    // 보유 — 전 행 기준(제외 종목이어도 들고 있으면 보유다).
+    const heldCount = gridRows.filter((r) => !r.__isAddingRow && Boolean(String(r.보유 ?? "").trim())).length;
     return {
       entryCount,
       entryPct,

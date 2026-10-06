@@ -951,9 +951,9 @@ def build_ticker_type_rankings(
         ]
     )
     # 순위 번호 — 모멘텀 전략과 같은 공용 규칙(`rank_numbers`). 반올림 전 점수로 매기고,
-    # 벤치마크 행·순위 제외 종목은 후보가 아니라 번호를 주지 않는다.
+    # 순위 제외 종목은 후보가 아니라 번호를 주지 않는다. 벤치마크도 풀 종목이라 똑같이 번호를 받는다.
     if not df.empty:
-        numbered = ~df["is_benchmark"].astype(bool) & ~df["exclude_from_ranking"].astype(bool)
+        numbered = ~df["exclude_from_ranking"].astype(bool)
         number_by_ticker = rank_numbers(dict(zip(df.loc[numbered, "티커"], df.loc[numbered, "점수"])))
         df["순위"] = df["티커"].map(number_by_ticker).astype("object").where(numbered, None)
 
