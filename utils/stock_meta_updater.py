@@ -18,6 +18,7 @@ from services.invesco_us_service import fetch_invesco_us_holdings
 from services.ishares_us_service import fetch_ishares_us_holdings
 from services.spdr_us_service import fetch_spdr_us_holdings
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
+from services.tortoise_us_service import fetch_tortoise_us_holdings
 from services.us_physical_etf_service import fetch_us_physical_etf_holdings
 from services.vaneck_us_service import fetch_vaneck_us_holdings
 from services.vanguard_au_service import fetch_vanguard_au_expense_ratio_pct, fetch_vanguard_au_holdings
@@ -681,6 +682,7 @@ def fetch_us_etf_holdings(ticker: str) -> dict[str, Any] | None:
         fetch_ark_us_holdings,
         fetch_firsttrust_us_holdings,
         fetch_fidelity_us_holdings,
+        fetch_tortoise_us_holdings,
     ):
         official = fetch_official(ticker)
         if official is not None:
