@@ -26,6 +26,7 @@ HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "vistashares_us_csv": "VistaShares 미국 공식 CSV",
     "ark_us_csv": "ARK 미국 공식 CSV",
     "firsttrust_us_html": "First Trust 미국 공식 전체 목록",
+    "fidelity_us_xls": "Fidelity 미국 공식 일별 XLS",
     "yfinance_holdings": "yfinance (상위 10종목)",
     "naver_etf_component": "네이버 ETF 구성종목",
 }
@@ -237,6 +238,7 @@ US_HOLDINGS_FALLBACK_ORDER: list[str] = [
     "vistashares_us_csv",
     "ark_us_csv",
     "firsttrust_us_html",
+    "fidelity_us_xls",
     "yfinance_holdings",
 ]
 
@@ -296,6 +298,7 @@ US_OFFICIAL_SOURCES: dict[str, str] = {
     "VistaShares": "vistashares_us_csv",
     "ARK": "ark_us_csv",
     "First Trust": "firsttrust_us_html",
+    "Fidelity": "fidelity_us_xls",
 }
 
 
@@ -384,6 +387,10 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
         "ftportfolios.com/Retail/Etf/EtfHoldings.aspx?Ticker={ticker}&Print=Y",
         "services/firsttrust_us_service.py",
     ),
+    "fidelity_us_xls": (
+        "actionsxchangerepository.fidelity.com/ShowDocument/documentExcel.htm?{최신 일별 공시 식별자}",
+        "services/fidelity_us_service.py",
+    ),
 }
 _SOURCE_NOTES: dict[str, str] = {
     "physical_asset_disclosure": "실물 보유 상품은 주식 구성종목 대신 공식 실물 보유 목록을 안내한다.",
@@ -396,6 +403,7 @@ _SOURCE_NOTES: dict[str, str] = {
     "vistashares_us_csv": "공식 상품 페이지의 Download All Holdings에서 전체 CSV를 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "ark_us_csv": "등록된 공식 CSV 주소에서 전체 구성종목을 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "firsttrust_us_html": "공식 상품 명단에서 티커를 찾아 전체 구성종목과 현금을 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
+    "fidelity_us_xls": "등록된 공식 CUSIP으로 최신 Daily Holdings Report XLS를 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "yfinance_holdings": "공식 소스가 없어 폴백. 상위 10종목까지만 나오고 운용보수는 제공되지 않는다.",
 }
 

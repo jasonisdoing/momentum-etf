@@ -12,6 +12,7 @@ import yfinance as yf
 from services.ark_us_service import fetch_ark_us_holdings
 from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
 from services.etf_meta_service import fetch_korean_etf_info_from_naver
+from services.fidelity_us_service import fetch_fidelity_us_holdings
 from services.firsttrust_us_service import fetch_firsttrust_us_holdings
 from services.invesco_us_service import fetch_invesco_us_holdings
 from services.ishares_us_service import fetch_ishares_us_holdings
@@ -679,6 +680,7 @@ def fetch_us_etf_holdings(ticker: str) -> dict[str, Any] | None:
         fetch_vistashares_us_holdings,
         fetch_ark_us_holdings,
         fetch_firsttrust_us_holdings,
+        fetch_fidelity_us_holdings,
     ):
         official = fetch_official(ticker)
         if official is not None:
