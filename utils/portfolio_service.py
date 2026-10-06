@@ -210,6 +210,14 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
 
     memo_by = get_stock_memos([row["ticker"] for row in universe])
 
+    # 순위 번호 — 순위 화면(`/pools-rank`)이 내려주는 번호를 그대로 쓴다(같은 캐시·같은 값).
+    from utils.rank_service import load_rank_data
+
+    rank_by = {
+        str(item.get("티커") or "").strip().upper(): item.get("순위")
+        for item in load_rank_data(ticker_type=pool)["rows"]
+    }
+
     rows: list[dict[str, Any]] = []
     for row in universe:
         ticker = row["ticker"]
@@ -218,6 +226,7 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
             {
                 **row,
                 "memo": memo_by.get(ticker, ""),
+                "rank": rank_by.get(ticker),
                 "current_price": price_by.get(ticker),
                 "daily_change_pct": change_by.get(ticker),
                 "return_1m_pct": returns.get("return_1m_pct"),
