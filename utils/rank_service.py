@@ -537,7 +537,6 @@ def _build_score_ranked_rows(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
     """행을 순위 점수 순으로 세운다 — 번호(「순위」)는 순위 계산이 `rank_numbers` 로 매겨 온다.
 
     표시용 「장기」(이격)·「단기」(단기이격)는 원천 값 그대로 두고, 줄 세우기만 점수로 한다.
-    벤치마크 대비 표시(`is_below_benchmark`)도 같은 점수로 비교해야 순위와 어긋나지 않는다.
     """
     rows_with_index: list[dict[str, Any]] = []
     for index, row in enumerate(dataframe.to_dict(orient="records")):
@@ -558,23 +557,10 @@ def _build_score_ranked_rows(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
         )
     )
 
-    bm_score = None
-    for row in rows_with_index:
-        if row.get("is_benchmark") and row.get("점수") is not None:
-            bm_score = float(row["점수"])
-            break
-
     ranked_rows: list[dict[str, Any]] = []
     for row in rows_with_index:
         normalized = dict(row)
         normalized.pop("__base_index", None)
-        score = normalized.get("점수")
-
-        is_below_bm = False
-        if bm_score is not None and score is not None:
-            is_below_bm = float(score) < bm_score
-
-        normalized["is_below_benchmark"] = is_below_bm
 
         # 번호는 순위 계산(`build_ticker_type_rankings`)이 공용 규칙(`rank_numbers`)으로 매겨 온다.
         rank = normalized.get("순위")
