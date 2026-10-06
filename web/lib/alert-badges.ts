@@ -34,6 +34,12 @@ export function normalizeBadgeTicker(ticker: string): string {
   return parts[parts.length - 1] ?? "";
 }
 
+/** 받아 둔 배지 정보 — 없으면 null. 모달이 열리자마자 값을 보이려고 미리 받아 둔 것을 읽는다. */
+export function peekAlertBadges(accountId: string): AlertBadgeInfo | null {
+  const cached = readSessionTtlCache<AlertBadgeInfo>(`${BADGES_SESSION_CACHE_PREFIX}${accountId}`, BADGES_SESSION_CACHE_TTL_MS);
+  return cached !== null && cached.badgeByTicker && cached.newMonthsByTicker && cached.highDrawdownByTicker ? cached : null;
+}
+
 /** 계좌의 배지 정보 조회(세션 TTL 캐시 우선). 보조 정보라 실패 시 빈 값(화면은 그대로). */
 export async function fetchAlertBadges(accountId: string): Promise<AlertBadgeInfo> {
   const cacheKey = `${BADGES_SESSION_CACHE_PREFIX}${accountId}`;
