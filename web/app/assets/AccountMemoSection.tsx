@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { GridToolbarButton } from "../components/GridToolbarButton";
 import { useToast } from "../components/ToastProvider";
+import { loadAccountNote, peekAccountNote, rememberAccountNote } from "@/lib/account-notes";
 
 /** 계좌 메모(/api/note) — 자식 테이블 아래 접이 섹션.
 
@@ -29,24 +30,26 @@ export function AccountMemoSection({
 }) {
   const toast = useToast();
   const [open, setOpen] = useState(() => OPEN_BY_ACCOUNT.get(accountId) ?? false);
-  const [memo, setMemo] = useState(() => DRAFT_BY_ACCOUNT.get(accountId) ?? "");
-  const [savedMemo, setSavedMemo] = useState("");
-  const [loaded, setLoaded] = useState(false);
+  // 화면이 미리 받아 둔 메모(`AssetsManager`)가 있으면 열리자마자 보인다 — 없을 때만 늦게 채워진다.
+  const prefetched = peekAccountNote(accountId);
+  const [memo, setMemo] = useState(() => DRAFT_BY_ACCOUNT.get(accountId) ?? prefetched?.content ?? "");
+  const [savedMemo, setSavedMemo] = useState(prefetched?.content ?? "");
+  const [loaded, setLoaded] = useState(prefetched !== null);
   const [saving, setSaving] = useState(false);
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(prefetched?.updated_at ?? null);
 
   useEffect(() => {
     let alive = true;
     void (async () => {
       try {
-        const resp = await fetch(`/api/note?account=${encodeURIComponent(accountId)}`, { cache: "no-store" });
-        const data = (await resp.json()) as { content?: string; updated_at?: string; error?: string };
-        if (!alive || !resp.ok || data.error) return;
-        const content = data.content ?? "";
-        setSavedMemo(content);
-        setUpdatedAt(data.updated_at ?? null);
+        const note = await loadAccountNote(accountId);
+        if (!alive) return;
+        setSavedMemo(note.content);
+        setUpdatedAt(note.updated_at);
         // 리마운트로 남은 초안이 있으면 그것을 유지한다 — 없을 때만 저장본을 채운다.
-        if (!DRAFT_BY_ACCOUNT.has(accountId)) setMemo(content);
+        if (!DRAFT_BY_ACCOUNT.has(accountId)) setMemo(note.content);
+      } catch {
+        // 메모 로드 실패는 빈 칸으로 둔다(저장은 그대로 가능).
       } finally {
         if (alive) setLoaded(true);
       }
@@ -79,6 +82,7 @@ export function AccountMemoSection({
       if (!resp.ok || data.error) throw new Error(data.error ?? "메모 저장에 실패했습니다.");
       setSavedMemo(memo);
       setUpdatedAt(data.updated_at ?? null);
+      rememberAccountNote(accountId, { content: memo, updated_at: data.updated_at ?? null });
       DRAFT_BY_ACCOUNT.delete(accountId);
       toast.success("메모 저장 완료");
     } catch (err) {
