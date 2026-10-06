@@ -452,7 +452,7 @@ ADR_FLOOR_OPTIONS: tuple[int | None, ...] = (None, 80, 85, 90, 95)
 # 비교할 수 있다. 값을 늘릴 때 이 대응이 깨지지 않는지 함께 본다. 단기는 세 국가 공통.
 SHORT_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {
     "kor": (20, 30, 40, 50, 60),
-    "us": (20, 30, 40, 50, 60, 75, 100),
+    "us": (20, 30, 40),
     "au": (20, 30, 40),
 }
 LONG_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {

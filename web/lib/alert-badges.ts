@@ -34,18 +34,33 @@ export function normalizeBadgeTicker(ticker: string): string {
   return parts[parts.length - 1] ?? "";
 }
 
-/** 받아 둔 배지 정보 — 없으면 null. 모달이 열리자마자 값을 보이려고 미리 받아 둔 것을 읽는다. */
+/** 마지막으로 받은 배지 정보 — 세션 캐시(60초)가 만료돼도 먼저 보여주려고 따로 둔다. */
+const lastBadgeInfo = new Map<string, AlertBadgeInfo>();
+
+/** 받아 둔 배지 정보 — 오래됐어도 돌려준다(없으면 null). 모달이 열리자마자 값을 보이려고 미리 받아 둔 것을 읽는다. */
 export function peekAlertBadges(accountId: string): AlertBadgeInfo | null {
-  const cached = readSessionTtlCache<AlertBadgeInfo>(`${BADGES_SESSION_CACHE_PREFIX}${accountId}`, BADGES_SESSION_CACHE_TTL_MS);
-  return cached !== null && cached.badgeByTicker && cached.newMonthsByTicker && cached.highDrawdownByTicker ? cached : null;
+  return lastBadgeInfo.get(accountId) ?? null;
 }
 
-/** 계좌의 배지 정보 조회(세션 TTL 캐시 우선). 보조 정보라 실패 시 빈 값(화면은 그대로). */
-export async function fetchAlertBadges(accountId: string): Promise<AlertBadgeInfo> {
+const inflightBadges = new Map<string, Promise<AlertBadgeInfo>>();
+
+/** 계좌의 배지 정보 조회 — 같은 계좌를 이미 요청 중이면(미리 받기) 그 요청을 같이 기다린다. */
+export function fetchAlertBadges(accountId: string): Promise<AlertBadgeInfo> {
+  const pending = inflightBadges.get(accountId);
+  if (pending) return pending;
+  const request = requestAlertBadges(accountId).finally(() => inflightBadges.delete(accountId));
+  inflightBadges.set(accountId, request);
+  return request;
+}
+
+async function requestAlertBadges(accountId: string): Promise<AlertBadgeInfo> {
   const cacheKey = `${BADGES_SESSION_CACHE_PREFIX}${accountId}`;
   const cached = readSessionTtlCache<AlertBadgeInfo>(cacheKey, BADGES_SESSION_CACHE_TTL_MS);
   // 예전 버전이 남긴 캐시(티커→아이콘 맵)는 형태가 달라 그대로 쓰면 화면이 깨진다. 모양을 확인한다.
-  if (cached !== null && cached.badgeByTicker && cached.newMonthsByTicker && cached.highDrawdownByTicker) return cached;
+  if (cached !== null && cached.badgeByTicker && cached.newMonthsByTicker && cached.highDrawdownByTicker) {
+    lastBadgeInfo.set(accountId, cached);
+    return cached;
+  }
   try {
     const resp = await fetch(`/api/alarms/badges?account=${encodeURIComponent(accountId)}`, { cache: "no-store" });
     const payload = (await resp.json()) as {
@@ -63,6 +78,7 @@ export async function fetchAlertBadges(accountId: string): Promise<AlertBadgeInf
       highDrawdownByTicker: payload.high_drawdown_by_ticker ?? {},
     };
     writeSessionTtlCache(cacheKey, info);
+    lastBadgeInfo.set(accountId, info);
     return info;
   } catch {
     return EMPTY_BADGE_INFO;

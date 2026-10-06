@@ -14,6 +14,7 @@ import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { reorderHoldings } from "@/lib/holdings-store";
 import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
+import { loadAccountNote } from "@/lib/account-notes";
 import { loadPoolRanks } from "@/lib/pool-ranks";
 
 import { AccountHoldingsDetailPanel } from "./AccountHoldingsDetailPanel";
@@ -119,7 +120,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     void load();
   }, [load]);
 
-  // 계좌 상세 모달의 순위·고점이 열릴 때 늦게 깜박이며 나타나지 않도록, 화면이 열리면 미리 받아 둔다.
+  // 계좌 상세 모달의 순위·고점·메모가 열릴 때 늦게 깜박이며 나타나지 않도록, 화면이 열리면 미리 받아 둔다.
   // 값이 갱신될 때마다(60초) 같이 새로 받아 둔다. 보조 정보라 실패해도 조용히 넘기고, 모달이 열릴 때 다시 요청한다.
   const prefetchKey = useMemo(() => {
     const pools = new Set(
@@ -134,7 +135,10 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   useEffect(() => {
     const { pools, accounts } = JSON.parse(prefetchKey) as { pools: string[]; accounts: string[] };
     for (const pool of pools) void loadPoolRanks(pool).catch(() => undefined);
-    for (const account of accounts) void fetchAlertBadges(account);
+    for (const account of accounts) {
+      void fetchAlertBadges(account);
+      void loadAccountNote(account).catch(() => undefined);
+    }
   }, [prefetchKey, allRows]);
 
   const handleDetailBusyChange = useCallback((busy: boolean) => {
