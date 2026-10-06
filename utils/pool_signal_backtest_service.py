@@ -398,7 +398,7 @@ def _rule_performance(
 def _load_benchmark_close(pool_id: str, pool_settings: dict[str, Any]) -> dict[str, Any]:
     """벤치마크 종목의 종가 시리즈와 **왜 못 쓰는지**를 함께 반환한다.
 
-    벤치마크는 매수 후보에서 빠지므로 종가를 여기서 따로 불러온다. 벤치마크 누적은
+    벤치마크 종가는 비교용으로 여기서 따로 불러온다. 벤치마크 누적은
     '규칙 운용 기간 동안 이 종목을 그냥 계속 보유'로, 시작·끝 종가비로만 계산한다
     (리밸런싱마다 끊어 곱하면 거래일 경계에서 텔레스코핑이 깨져 부정확해진다).
 
@@ -480,19 +480,12 @@ def compute_pool_signal_backtest(
         top_n_hold = int(top_n)
     if not (1 <= top_n_hold <= 100):
         raise ValueError(f"보유 종목수는 1~100 범위여야 합니다: {top_n_hold}")
-    # 벤치마크는 비교 기준일 뿐 매수 대상이 아니다 — 순위 화면의 추천 규칙과 동일하게 뺀다.
-    benchmark_ticker = get_pool_benchmark_ticker(pool_settings)
-
+    # 벤치마크도 풀 종목이라 다른 종목처럼 후보에 넣는다(순위·모멘텀 화면과 같은 규칙).
     all_etfs = get_etfs(pool_id)
-    etfs = [
-        item
-        for item in all_etfs
-        if not bool(item.get("exclude_from_ranking"))
-        and str(item.get("ticker") or "").strip().upper() != benchmark_ticker
-    ]
+    etfs = [item for item in all_etfs if not bool(item.get("exclude_from_ranking"))]
     excluded_count = len(all_etfs) - len(etfs)
     if not etfs:
-        raise ValueError(f"'{pool_id}' 종목풀에 분석 가능한 종목이 없습니다(제외 종목·벤치마크를 뺀 후 0개).")
+        raise ValueError(f"'{pool_id}' 종목풀에 분석 가능한 종목이 없습니다(제외 종목을 뺀 후 0개).")
 
     series_map = load_cached_close_series_bulk(pool_id, [item["ticker"] for item in etfs])
     # 이평 종류도 일수와 같이 그 풀의 설정을 따른다.

@@ -37,7 +37,6 @@ from utils.effective_prices import (
 from utils.logger import get_app_logger
 from utils.moving_averages import pool_moving_average_type
 from utils.perf_metrics import single_stock_backtest_stats
-from utils.pool_settings_store import get_pool_benchmark_ticker
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
 
@@ -724,7 +723,6 @@ def build_ticker_type_rankings(
         status_callback("최신 거래일 기준 캐시 상태 확인")
     started_at = perf_counter()
     settings = get_ticker_type_settings(ticker_type)
-    benchmark_ticker = get_pool_benchmark_ticker(settings)
     country_code = str(settings.get("country_code") or "").strip().lower()
 
     etfs = get_etfs(ticker_type)
@@ -878,7 +876,6 @@ def build_ticker_type_rankings(
             "country_code": country_code,
             "currency": str(settings.get("currency") or ""),
             "source_ticker_type": ticker_type,
-            "is_benchmark": ticker == benchmark_ticker,
             "상장일": etf.get("listing_date", "-"),
             # 보유: 이 종목을 실제로 들고 있는 계좌명 목록(쉼표 구분). 없으면 빈 문자열.
             "보유": ", ".join(holding_accounts.get(ensure_asx_prefix(ticker) if country_code == "au" else ticker, [])),
