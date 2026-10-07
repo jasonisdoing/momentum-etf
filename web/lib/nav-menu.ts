@@ -109,6 +109,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { href: "/strategy-momentum", label: "모멘텀 전략", icon: IconTrendingUp },
       { href: "/strategy-new-high", label: "신고가 전략", icon: IconTrendingUp },
       { href: "/strategy-portfolio", label: "포트폴리오 전략", icon: IconChartPie },
+      { href: "/strategy-trade", label: "사고팔기", icon: IconChartLine },
     ],
   },
   {

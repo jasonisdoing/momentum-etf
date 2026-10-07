@@ -36,6 +36,7 @@ from .routes.strategy_mix import router as strategy_mix_router
 from .routes.strategy_momentum import router as strategy_momentum_router
 from .routes.strategy_new_high import router as strategy_new_high_router
 from .routes.strategy_portfolio import router as strategy_portfolio_router
+from .routes.strategy_trade import router as strategy_trade_router
 from .routes.system import router as system_router
 from .routes.ticker_detail import router as ticker_detail_router
 from .routes.us_market_stocks import router as us_market_stocks_router
@@ -106,6 +107,7 @@ app.include_router(strategy_mix_router)
 app.include_router(strategy_new_high_router)
 app.include_router(strategy_portfolio_router)
 app.include_router(strategy_momentum_router)
+app.include_router(strategy_trade_router)
 from fastapi import Request
 from pymongo.errors import NetworkTimeout, PyMongoError
 from starlette.responses import JSONResponse
