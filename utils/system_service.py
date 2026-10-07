@@ -35,6 +35,7 @@ SystemAction = Literal[
     "live_24h_slack",
     "leverage_ma_cross",
     "holdings_alarm",
+    "strategy_trade_notify",
     "db_backup",
 ]
 
@@ -139,6 +140,18 @@ SCHEDULE_ROWS = [
     },
     {
         "no": 6,
+        "key": "strategy_trade_notify",
+        "group": "장중 실행",
+        "job": "전략 사고팔기 알림",
+        "target": "kor_account 코스피200·코스닥150 ETF 각 4종",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 09:10~15:20 KST 10분 간격",
+        "command": "python scripts/strategy_trade_notify.py",
+        # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
+        "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
+        "no": 7,
         "key": "holdings_alarm",
         "group": "장중 실행",
         "job": "보유종목 알람",
@@ -148,7 +161,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [10], "hours": [9], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 7,
+        "no": 8,
         "key": "leverage_ma_cross",
         "group": "장중 실행",
         "job": "레버리지 스위칭",
@@ -164,7 +177,7 @@ SCHEDULE_ROWS = [
         },
     },
     {
-        "no": 8,
+        "no": 9,
         "key": "asset_summary",
         "group": "장중 실행",
         "job": "전체 자산 요약 알림",
@@ -184,7 +197,7 @@ SCHEDULE_ROWS = [
     },
     # ③ 마감 후 지표 — 하루 1~2회.
     {
-        "no": 9,
+        "no": 10,
         "key": "market_breadth",
         "group": "마감 후 지표",
         "job": "시장 폭(ADR) 집계",
@@ -206,7 +219,7 @@ SCHEDULE_ROWS = [
         },
     },
     {
-        "no": 10,
+        "no": 11,
         "key": "cache_refresh_full",
         "group": "마감 후 지표",
         "job": "가격 캐시 전체 재수집",
@@ -219,7 +232,7 @@ SCHEDULE_ROWS = [
     },
     # ④ 개장 전 준비 — 아침에 한 번, 오래 걸린다(실행 시각 순).
     {
-        "no": 11,
+        "no": 12,
         "key": "market_hours_analysis",
         "group": "개장 전 준비",
         "job": "장 시간 분석",
@@ -230,7 +243,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [30], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 12,
+        "no": 13,
         "key": "reference_meta_updater",
         "group": "개장 전 준비",
         "job": "종목 메타 업데이트",
@@ -240,7 +253,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [45], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 13,
+        "no": 14,
         "key": "price_metrics_updater",
         "group": "개장 전 준비",
         "job": "종목 가격지표 업데이트",
@@ -250,7 +263,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [50], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 14,
+        "no": 15,
         "key": "us_market_stocks",
         "group": "개장 전 준비",
         "job": "미국 개별주 업데이트",
@@ -260,7 +273,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 15,
+        "no": 16,
         "key": "aus_market_stocks",
         "group": "개장 전 준비",
         "job": "호주 개별주 업데이트",
@@ -270,7 +283,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [10], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 16,
+        "no": 17,
         "key": "kor_market_stocks",
         "group": "개장 전 준비",
         "job": "한국 지수 구성종목",
@@ -280,7 +293,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [20], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 17,
+        "no": 18,
         "key": "kor_dividend_stocks",
         "group": "개장 전 준비",
         "job": "한국 배당주 지표",
@@ -291,7 +304,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [30], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 18,
+        "no": 19,
         "key": "us_market_etfs",
         "group": "개장 전 준비",
         "job": "미국 ETF 업데이트",
@@ -302,7 +315,7 @@ SCHEDULE_ROWS = [
     },
     # ⑤ 상시 운영 — 자동으로 돌고 손댈 일이 거의 없다.
     {
-        "no": 19,
+        "no": 20,
         "key": "live_24h_slack",
         "group": "상시 운영",
         "job": "24H 시세 알림",
@@ -312,7 +325,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
     },
     {
-        "no": 20,
+        "no": 21,
         "key": "db_backup",
         "group": "상시 운영",
         "job": "DB 백업",
@@ -345,6 +358,7 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "live_24h_slack": "scripts/live_24h_slack.py",
     "leverage_ma_cross": "scripts/leverage_recommend_ma_cross.py",
     "holdings_alarm": "scripts/holdings_alarm.py",
+    "strategy_trade_notify": "scripts/strategy_trade_notify.py",
     "db_backup": "scripts/backup_mongo_full.py",
 }
 
