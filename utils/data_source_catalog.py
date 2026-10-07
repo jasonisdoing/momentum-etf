@@ -29,6 +29,7 @@ HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "fidelity_us_xls": "Fidelity 미국 공식 일별 XLS",
     "tortoise_us_html": "Tortoise 미국 공식 전체 목록",
     "globalx_us_csv": "Global X 미국 공식 CSV",
+    "victoryshares_us_api": "VictoryShares 미국 공식 API",
     "yfinance_holdings": "yfinance (상위 10종목)",
     "naver_etf_component": "네이버 ETF 구성종목",
 }
@@ -243,6 +244,7 @@ US_HOLDINGS_FALLBACK_ORDER: list[str] = [
     "fidelity_us_xls",
     "tortoise_us_html",
     "globalx_us_csv",
+    "victoryshares_us_api",
     "yfinance_holdings",
 ]
 
@@ -306,6 +308,7 @@ US_OFFICIAL_SOURCES: dict[str, str] = {
     "Fidelity": "fidelity_us_xls",
     "Tortoise": "tortoise_us_html",
     "Global X": "globalx_us_csv",
+    "Victory Shares": "victoryshares_us_api",
 }
 
 
@@ -406,6 +409,10 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
         "assets.globalxetfs.com/funds/holdings/{ticker}_full-holdings_{기준일}.csv",
         "services/globalx_us_service.py",
     ),
+    "victoryshares_us_api": (
+        "investorapi.vcm.com/search/product/{ticker}/AllHoldings",
+        "services/victoryshares_us_service.py",
+    ),
 }
 _SOURCE_NOTES: dict[str, str] = {
     "physical_asset_disclosure": "실물 보유 상품은 주식 구성종목 대신 공식 실물 보유 목록을 안내한다.",
@@ -421,6 +428,7 @@ _SOURCE_NOTES: dict[str, str] = {
     "fidelity_us_xls": "등록된 공식 CUSIP으로 최신 Daily Holdings Report XLS를 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "tortoise_us_html": "공식 ETF 메뉴에서 티커를 찾아 Daily Fund Holdings 전체 목록을 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "globalx_us_csv": "공식 상품 명단과 상세 페이지에서 최신 전체 구성종목 CSV를 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
+    "victoryshares_us_api": "공식 상품 명단과 상세 페이지의 공개 요청 설정으로 전체 구성종목을 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "yfinance_holdings": "공식 소스가 없어 폴백. 상위 10종목까지만 나오고 운용보수는 제공되지 않는다.",
 }
 
