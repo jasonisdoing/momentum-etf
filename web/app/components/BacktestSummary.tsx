@@ -3,7 +3,7 @@
 /**
  * 백테스트 요약 줄 — 기간 · 전략 · 벤치마크 · 초과.
  *
- * 모멘텀·신고가·합성 세 화면이 같은 형식을 쓰도록 여기서만 조합한다.
+ * 모멘텀·신고가·포트폴리오·합성 화면이 같은 형식을 쓰도록 여기서만 조합한다.
  */
 
 import { formatSignedPct, signColor } from "@/lib/grid-cells";
@@ -15,16 +15,20 @@ export type BacktestStats = {
   totalPct: number | null;
   cagrPct: number | null;
   mddPct: number | null;
+  /** MDD 구간 — 고점 날짜 ~ 저점 날짜. */
+  mddFrom?: string | null;
+  mddTo?: string | null;
   sortino: number | null;
 };
 
-function StatItem({ label, totalPct, cagrPct, mddPct, sortino }: BacktestStats) {
+function StatItem({ label, totalPct, cagrPct, mddPct, mddFrom, mddTo, sortino }: BacktestStats) {
   return (
     <span>
       {label} <b style={{ color: signColor(totalPct) }}>{formatSignedPct(totalPct)}</b>
       <span style={hintStyle}>
         {` (CAGR ${cagrPct != null ? formatSignedPct(cagrPct, 1) : "-"}`}
         {mddPct != null ? ` · MDD ${mddPct.toFixed(1)}%` : ""}
+        {mddPct != null && mddFrom && mddTo ? ` (${mddFrom} ~ ${mddTo})` : ""}
         {` · 소르티노 ${sortino != null ? sortino.toFixed(2) : "-"})`}
       </span>
     </span>

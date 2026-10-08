@@ -16,6 +16,7 @@ from core.strategy.mix.targets import dated_target_shares
 from utils.cash_model import currency_for_country
 from utils.logger import get_app_logger
 from utils.mix_sleeve import STRATEGY_LABELS, SleeveSpec
+from utils.perf_metrics import max_drawdown_window
 from utils.stock_memo_store import attach_stock_memos
 from utils.trade_stats import summarize_trades
 
@@ -1287,15 +1288,19 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
         sortino = (
             round(float(returns.mean()) / deviation * (252**0.5), 2) if deviation > 0 and len(returns) >= 2 else None
         )
+        mdd = max_drawdown_window(curve)
         return {
             "total_pct": round(total, 2),
             "cagr_pct": round(((1 + total / 100) ** (12 / months) - 1) * 100, 2) if months > 0 else None,
-            "mdd_pct": round(float(((curve / curve.cummax()) - 1).min() * 100), 2),
+            "mdd_pct": round(mdd["mdd_pct"], 2),
+            "mdd_from": mdd["from"],
+            "mdd_to": mdd["to"],
             "sortino": sortino,
         }
 
-    strategy_curve = pd.Series([1 + row["strategy_pct"] / 100 for row in daily_rows])
-    benchmark_curve = pd.Series([1 + row["benchmark_pct"] / 100 for row in daily_rows])
+    curve_index = pd.to_datetime([row["date"] for row in daily_rows])
+    strategy_curve = pd.Series([1 + row["strategy_pct"] / 100 for row in daily_rows], index=curve_index)
+    benchmark_curve = pd.Series([1 + row["benchmark_pct"] / 100 for row in daily_rows], index=curve_index)
     strategy_stats, benchmark_stats = _summarize(strategy_curve), _summarize(benchmark_curve)
     merged_trades = [
         {
@@ -1324,10 +1329,14 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
         "strategy_total_pct": strategy_stats["total_pct"],
         "strategy_cagr_pct": strategy_stats["cagr_pct"],
         "strategy_mdd_pct": strategy_stats["mdd_pct"],
+        "strategy_mdd_from": strategy_stats["mdd_from"],
+        "strategy_mdd_to": strategy_stats["mdd_to"],
         "strategy_sortino": strategy_stats["sortino"],
         "benchmark_total_pct": benchmark_stats["total_pct"],
         "benchmark_cagr_pct": benchmark_stats["cagr_pct"],
         "benchmark_mdd_pct": benchmark_stats["mdd_pct"],
+        "benchmark_mdd_from": benchmark_stats["mdd_from"],
+        "benchmark_mdd_to": benchmark_stats["mdd_to"],
         "benchmark_sortino": benchmark_stats["sortino"],
         # 일별 누적(%) — 화면이 연간·월간·주간·일간 표를 이 시계열에서 만든다.
         "daily": daily_rows,
