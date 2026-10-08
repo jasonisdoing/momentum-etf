@@ -129,7 +129,7 @@ def build_repeat_line(trigger: dict[str, Any]) -> str:
     word = "지금 매도!" if trigger["action"] == "sell" else "지금 매수!"
     return (
         f"<!channel> {emoji} *{trigger['round']}호 {trigger['name']} {trigger['quantity']:,}주 {word}* "
-        f"{trigger['index_name']} {_level(trigger['index_level'])} 도달 "
+        f"{_level(trigger['index_level'])} 도달 "
         f"(현재 {_index_text(trigger['index'])})"
     )
 
@@ -224,7 +224,7 @@ def build_message(view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
             else:
                 parts.append(f"📈 {rise:.2f}% 오르면 {status['next_sell_round']}호 매도")
         lines.append(
-            f"*[{strategy_view['label']}]* {index['name']} {_index_text(index)} · {after_held}/{rounds_total}회차 · "
+            f"*[{strategy_view['label']}]* {_index_text(index)} · {after_held}/{rounds_total}회차 · "
             + " · ".join(parts)
         )
         # 1~6호 전부 나열 — 상태를 이모지로 즉시 구분한다.
@@ -237,30 +237,21 @@ def build_message(view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
                 profit_text = f"{row['profit_pct']:+.2f}%" if row["profit_pct"] is not None else "-"
                 if is_triggered:
                     lines.append(
-                        f"🔴 {row['round']}호 {row['name']} {quantity} *지금 매도!* "
-                        f"{index['name']} {_level(row['sell_index'])} 도달 ({profit_text})"
+                        f"🔴 {row['round']}호 {quantity} *지금 매도!* {_level(row['sell_index'])} 도달 ({profit_text})"
                     )
                 else:
                     lines.append(
-                        f"🟢 {row['round']}호 {row['name']} {quantity} 보유 중 ({profit_text}) · "
-                        f"매도 목표 {index['name']} {_level(row['sell_index'])}"
+                        f"🟢 {row['round']}호 {quantity} 보유 중 ({profit_text}) · "
+                        f"매도 목표 {_level(row['sell_index'])}"
                     )
             elif row["is_next"]:
                 is_triggered = (row["round"], "buy") in triggered
                 if is_triggered:
-                    lines.append(
-                        f"🔵 {row['round']}호 {row['name']} {quantity} *지금 매수!* "
-                        f"{index['name']} {_level(row['buy_index'])} 도달"
-                    )
+                    lines.append(f"🔵 {row['round']}호 {quantity} *지금 매수!* {_level(row['buy_index'])} 도달")
                 else:
-                    lines.append(
-                        f"⏳ {row['round']}호 {row['name']} {quantity} 다음 매수 대기 · {index['name']} {_level(row['buy_index'])}"
-                    )
+                    lines.append(f"⏳ {row['round']}호 {quantity} 다음 매수 대기 · {_level(row['buy_index'])}")
             else:
-                lines.append(
-                    f"⚪ {row['round']}호 {row['name']} {quantity} 이후 회차 · "
-                    f"매수 예정 {index['name']} {_level(row['buy_index'])}"
-                )
+                lines.append(f"⚪ {row['round']}호 {quantity} 이후 회차 · 매수 예정 {_level(row['buy_index'])}")
 
     return "\n".join(lines)
 
