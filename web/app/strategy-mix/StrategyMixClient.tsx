@@ -128,10 +128,14 @@ type View = {
   strategy_total_pct: number;
   strategy_cagr_pct: number | null;
   strategy_mdd_pct: number | null;
+  strategy_mdd_from?: string | null;
+  strategy_mdd_to?: string | null;
   strategy_sortino: number | null;
   benchmark_total_pct: number;
   benchmark_cagr_pct: number | null;
   benchmark_mdd_pct: number | null;
+  benchmark_mdd_from?: string | null;
+  benchmark_mdd_to?: string | null;
   benchmark_sortino: number | null;
   /** 일별 누적(%) — 연간·월간·주간·일간 표를 이 시계열에서 만든다 (신고가 화면과 동일 방식). */
   /** 일별 누적(%) — 합성·슬리브별 단독·벤치마크. 슬리브 값은 그 날짜 데이터가 없으면 null. */
@@ -2085,6 +2089,8 @@ export function StrategyMixClient() {
                       totalPct: view.strategy_total_pct,
                       cagrPct: view.strategy_cagr_pct,
                       mddPct: view.strategy_mdd_pct,
+                      mddFrom: view.strategy_mdd_from,
+                      mddTo: view.strategy_mdd_to,
                       sortino: view.strategy_sortino,
                     }}
                     benchmark={{
@@ -2094,6 +2100,8 @@ export function StrategyMixClient() {
                       totalPct: view.benchmark_total_pct,
                       cagrPct: view.benchmark_cagr_pct,
                       mddPct: view.benchmark_mdd_pct,
+                      mddFrom: view.benchmark_mdd_from,
+                      mddTo: view.benchmark_mdd_to,
                       sortino: view.benchmark_sortino,
                     }}
                   />

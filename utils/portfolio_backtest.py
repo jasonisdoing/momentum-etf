@@ -18,6 +18,7 @@ from config import CACHE_TTL_COMPUTE
 from core.strategy.portfolio.backtest import simulate_portfolio
 from utils.effective_prices import apply_realtime_closes
 from utils.logger import get_app_logger
+from utils.perf_metrics import max_drawdown_window
 from utils.pool_settings_store import get_pool_slippage
 from utils.pool_signal_backtest_service import validate_backtest_months
 from utils.portfolio_service import (
@@ -57,10 +58,6 @@ def _cagr_pct(total_pct: float, months: int) -> float:
     if months <= 0:
         return 0.0
     return ((1 + total_pct / 100) ** (12 / months) - 1) * 100
-
-
-def _drawdown_pct(curve: pd.Series) -> float:
-    return float(((curve / curve.cummax()) - 1).min() * 100)
 
 
 def _sortino(returns: pd.Series) -> float | None:
@@ -189,6 +186,7 @@ def run_backtest(
     benchmark_total = float((benchmark.iloc[-1] - 1) * 100)
     strategy_norm = strategy / float(strategy.iloc[0])
 
+    strategy_mdd, benchmark_mdd = max_drawdown_window(strategy_norm), max_drawdown_window(benchmark)
     return {
         "start_date": str(index[0].date()),
         # 합성은 저장 비중 대신 이 최종 상태를 읽는다(시작일 이후 바이앤홀드 보유).
@@ -227,11 +225,15 @@ def run_backtest(
         "months": months,
         "strategy_total_pct": round(strategy_total, 2),
         "strategy_cagr_pct": round(_cagr_pct(strategy_total, months), 2),
-        "strategy_mdd_pct": round(_drawdown_pct(strategy_norm), 2),
+        "strategy_mdd_pct": round(strategy_mdd["mdd_pct"], 2),
+        "strategy_mdd_from": strategy_mdd["from"],
+        "strategy_mdd_to": strategy_mdd["to"],
         "strategy_sortino": _sortino(strategy_norm.pct_change().dropna()),
         "benchmark_total_pct": round(benchmark_total, 2),
         "benchmark_cagr_pct": round(_cagr_pct(benchmark_total, months), 2),
-        "benchmark_mdd_pct": round(_drawdown_pct(benchmark), 2),
+        "benchmark_mdd_pct": round(benchmark_mdd["mdd_pct"], 2),
+        "benchmark_mdd_from": benchmark_mdd["from"],
+        "benchmark_mdd_to": benchmark_mdd["to"],
         "benchmark_sortino": _sortino(benchmark.pct_change().dropna()),
         "benchmark_name": benchmark_info(pool)["name"],
         # 이 전략의 '체결'은 최초 매수(및 늦게 상장한 종목의 첫 매수)뿐이다.

@@ -130,6 +130,22 @@ def curve_metrics(start_val: float, values: np.ndarray) -> dict[str, float]:
     }
 
 
+def max_drawdown_window(curve: pd.Series) -> dict[str, float | str]:
+    """최대 낙폭(MDD)과 그 구간 — 고점 날짜에서 저점 날짜까지. 곡선 인덱스는 날짜여야 한다.
+
+    백테스트 요약(모멘텀·신고가·포트폴리오·합성)이 같은 수식을 쓰도록 한 곳에 둔다.
+    반환: ``{"mdd_pct", "from", "to"}`` — ``mdd_pct`` 는 반올림 전 값(음수 %), 날짜는 ``YYYY-MM-DD``.
+    """
+    drawdown = curve / curve.cummax() - 1
+    trough = drawdown.idxmin()
+    peak = curve.loc[:trough].idxmax()
+    return {
+        "mdd_pct": float(drawdown.min() * 100),
+        "from": str(pd.Timestamp(peak).date()),
+        "to": str(pd.Timestamp(trough).date()),
+    }
+
+
 def annualized_return_pct(start_value: float, end_value: float, days: int) -> float | None:
     """시작·끝 값과 달력 일수로 연환산 수익률(CAGR, %). 계산할 수 없으면 None.
 

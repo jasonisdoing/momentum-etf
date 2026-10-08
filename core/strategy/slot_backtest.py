@@ -33,6 +33,7 @@ from typing import Any
 
 import pandas as pd
 
+from utils.perf_metrics import max_drawdown_window
 from utils.trade_stats import OPEN_REASON, summarize_trades
 
 
@@ -73,11 +74,6 @@ def _entry_quantities(
         if shares > 0:
             quantities[ticker] = shares
     return quantities, pending
-
-
-def _drawdown_pct(series: pd.Series) -> float:
-    """최대 낙폭(%) — 고점 대비 최저."""
-    return float(((series / series.cummax()) - 1).min() * 100)
 
 
 def _cagr_pct(total_pct: float, months: int) -> float | None:
@@ -426,17 +422,22 @@ def run_slot_backtest(
     ]
     all_trades = open_trade_rows + sorted(trades, key=lambda t: t["exit_date"], reverse=True)
 
+    strategy_mdd, benchmark_mdd = max_drawdown_window(strategy), max_drawdown_window(benchmark)
     return {
         "start_date": str(strategy.index[0].date()),
         "end_date": str(strategy.index[-1].date()),
         "months": months,
         "strategy_total_pct": round(strategy_total, 2),
         "strategy_cagr_pct": round(_cagr_pct(strategy_total, months) or 0.0, 2),
-        "strategy_mdd_pct": round(_drawdown_pct(strategy), 2),
+        "strategy_mdd_pct": round(strategy_mdd["mdd_pct"], 2),
+        "strategy_mdd_from": strategy_mdd["from"],
+        "strategy_mdd_to": strategy_mdd["to"],
         "strategy_sortino": _sortino(strategy.pct_change().dropna()),
         "benchmark_total_pct": round(benchmark_total, 2),
         "benchmark_cagr_pct": round(_cagr_pct(benchmark_total, months) or 0.0, 2),
-        "benchmark_mdd_pct": round(_drawdown_pct(benchmark), 2),
+        "benchmark_mdd_pct": round(benchmark_mdd["mdd_pct"], 2),
+        "benchmark_mdd_from": benchmark_mdd["from"],
+        "benchmark_mdd_to": benchmark_mdd["to"],
         "benchmark_sortino": _sortino(benchmark.pct_change().dropna()),
         "benchmark_name": benchmark_name,
         **summarize_trades(all_trades),

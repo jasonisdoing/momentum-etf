@@ -298,10 +298,14 @@ type Backtest = {
   strategy_total_pct: number;
   strategy_cagr_pct: number;
   strategy_mdd_pct: number;
+  strategy_mdd_from?: string | null;
+  strategy_mdd_to?: string | null;
   strategy_sortino: number | null;
   benchmark_total_pct: number;
   benchmark_cagr_pct: number;
   benchmark_mdd_pct: number;
+  benchmark_mdd_from?: string | null;
+  benchmark_mdd_to?: string | null;
   benchmark_sortino: number | null;
   benchmark_name: string;
   trade_count: number;
@@ -1356,6 +1360,8 @@ export function NewHighClient() {
                       totalPct: backtest.strategy_total_pct,
                       cagrPct: backtest.strategy_cagr_pct,
                       mddPct: backtest.strategy_mdd_pct,
+                      mddFrom: backtest.strategy_mdd_from,
+                      mddTo: backtest.strategy_mdd_to,
                       sortino: backtest.strategy_sortino,
                     }}
                     benchmark={{
@@ -1363,6 +1369,8 @@ export function NewHighClient() {
                       totalPct: backtest.benchmark_total_pct,
                       cagrPct: backtest.benchmark_cagr_pct,
                       mddPct: backtest.benchmark_mdd_pct,
+                      mddFrom: backtest.benchmark_mdd_from,
+                      mddTo: backtest.benchmark_mdd_to,
                       sortino: backtest.benchmark_sortino,
                     }}
                   />
