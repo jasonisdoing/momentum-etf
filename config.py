@@ -224,21 +224,6 @@ TOP_N_HOLD_OPTIONS: tuple[int, ...] = (2, 3, 4, 5, 6, 9)
 STOP_LOSS_PCT_OPTIONS: tuple[float, ...] = (-7.0, -10.0)
 
 
-# 모멘텀 진입 문턱 — 이격이 "이 배수 × 그 종목의 20일 일간 변동성(%)" 이상이어야 진입 자격.
-# 청산선(0선) 바로 위의 종목을 사서 하루 만에 되파는 왕복을 막는다(진입에만 적용, 청산 불변).
-# None = 문턱 없음(기본·첫 선택지 = 미설정 풀의 보정값이라 도입 전 동작과 같다).
-# 12·24개월 검증에서 한국 풀만 유효(kor_etf 2.0, kor_stock 1.5~2.0), 미국은 무효(없음 권장).
-ENTRY_VOL_MULT_OPTIONS: tuple[float | None, ...] = (None, 1.0, 2.0, 3.0, 4.0, 5.0)
-
-# 거래대금 하한 — 평소(20일 평균) 대비 몇 배 이상이어야 신호로 인정할지. None = 제한 없음.
-# **국가별**이다 — 이평선 선택지(SHORT_MA_DAYS_BY_COUNTRY)와 같은 방식으로, 신고가의
-# 화면 셀렉트·튜닝 축·저장 검증이 풀 국가의 목록을 쓴다(`utils/new_high_service` 가 골라 준다).
-MIN_VALUE_MULT_OPTIONS_BY_COUNTRY: dict[str, tuple[float | None, ...]] = {
-    "kor": (None, 2.0, 3.0, 5.0),
-    "us": (None, 1.0, 2.0, 3.0),
-    "au": (None, 1.0, 2.0, 3.0),
-}
-
 # 편도 슬리피지(%) — 종목풀·레버리지 설정이 이 목록 하나만 쓴다(표준 셀렉트).
 SLIPPAGE_PCT_OPTIONS: tuple[float, ...] = (0.2, 0.3, 0.4, 0.5, 1.0)
 
@@ -443,7 +428,28 @@ FORWARD_DAY_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60)
 # 모멘텀 ADR 하한 — 그날 시장 ADR(20일 등락비율)이 이 값 미만이면 신규 진입만 건너뛴다.
 # None = 게이트 없음(기본). 시장은 풀 설정의 시장 레짐 지수를 따른다.
 # 85~95 는 코스닥 검증에서 확인된 유효 구간 — 100 은 중앙값 부근이라 상시 껌뻑여 제외.
-ADR_FLOOR_OPTIONS: tuple[int | None, ...] = (None, 80, 85, 90, 95)
+ADR_FLOOR_OPTIONS: tuple[int | None, ...] = (None, 85, 90, 95)
+
+# 거래대금 하한 — 평소(20일 평균) 대비 몇 배 이상이어야 신호로 인정할지. None = 제한 없음.
+# **국가별**이다 — 이평선 선택지(SHORT_MA_DAYS_BY_COUNTRY)와 같은 방식으로, 신고가의
+# 화면 셀렉트·튜닝 축·저장 검증이 풀 국가의 목록을 쓴다(`utils/new_high_service` 가 골라 준다).
+MIN_VALUE_MULT_OPTIONS_BY_COUNTRY: dict[str, tuple[float | None, ...]] = {
+    "kor": (None, 2.0, 3.0, 5.0),
+    "us": (None, 1.0, 2.0, 3.0),
+    "au": (None, 1.0, 2.0, 3.0),
+}
+
+# 모멘텀 진입 문턱 — 이격이 "이 배수 × 그 종목의 20일 일간 변동성(%)" 이상이어야 진입 자격.
+# 청산선(0선) 바로 위의 종목을 사서 하루 만에 되파는 왕복을 막는다(진입에만 적용, 청산 불변).
+# None = 문턱 없음(기본·첫 선택지 = 미설정 풀의 보정값이라 도입 전 동작과 같다).
+# **국가별**이다 — 이평선 선택지(SHORT/LONG_MA_DAYS_BY_COUNTRY)와 같은 방식으로, 모멘텀·순위·
+# 종목풀 설정·튜닝이 풀 국가의 목록을 쓴다(`utils/entry_vol_options` 가 국가로 골라 준다).
+# 12·24개월 검증에서 한국 풀만 유효(kor_etf 2.0, kor_stock 1.5~2.0), 미국은 무효(없음 권장).
+ENTRY_VOL_MULT_OPTIONS_BY_COUNTRY: dict[str, tuple[float | None, ...]] = {
+    "kor": (None, 1.0, 2.0, 3.0),
+    "us": (None,),
+    "au": (None,),
+}
 
 # 이평선 일수 선택지 — **국가별**이다. 종목풀 설정·순위·종목풀 백테스트·모멘텀·
 # 신고가(이탈선)·보유종목 알림이 전부 여기서 받는다(`utils/ma_options` 가 국가로 골라 준다).
@@ -458,7 +464,7 @@ SHORT_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {
 LONG_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {
     "kor": (90, 120, 150, 180, 240),
     "us": (75, 100, 125, 150, 200),
-    "au": (100, 150, 200),
+    "au": (75, 100, 125, 150, 200),
 }
 
 # -----------------------------------------------------------------------
