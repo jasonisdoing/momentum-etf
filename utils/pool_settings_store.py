@@ -32,13 +32,13 @@ from typing import Any
 
 from config import (
     ADR_FLOOR_OPTIONS,
-    ENTRY_VOL_MULT_OPTIONS,
     MOVING_AVERAGE_TYPE_OPTIONS,
     POOL_KIND_OPTIONS,
     SLIPPAGE_PCT_OPTIONS,
     TOP_N_HOLD_OPTIONS,
 )
 from config import STOP_LOSS_PCT_OPTIONS as STOPLOSS_PCT_OPTIONS
+from utils.entry_vol_options import ENTRY_VOL_MULT_ANY_COUNTRY
 from utils.logger import get_app_logger
 from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
 
@@ -365,8 +365,8 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
     if "ENTRY_VOL_MULT" in values:
         raw = values["ENTRY_VOL_MULT"]
         mult = None if raw in (None, "", "none") else float(raw)
-        if check_options and mult not in ENTRY_VOL_MULT_OPTIONS:
-            allowed = ", ".join("없음" if v is None else f"{v:g}" for v in ENTRY_VOL_MULT_OPTIONS)
+        if check_options and mult not in ENTRY_VOL_MULT_ANY_COUNTRY:
+            allowed = ", ".join("없음" if v is None else f"{v:g}" for v in ENTRY_VOL_MULT_ANY_COUNTRY)
             raise PoolSettingsError(f"ENTRY_VOL_MULT 는 {allowed} 중 하나여야 합니다: {raw}")
         cleaned["ENTRY_VOL_MULT"] = mult
 

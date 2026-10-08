@@ -14,11 +14,13 @@ from typing import Any
 
 import pandas as pd
 
-from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS
+from config import ADR_FLOOR_OPTIONS
+from utils.entry_vol_options import entry_vol_mult_options
 from utils.momentum_service import (
     LONG_MA_OPTIONS,
     SHORT_MA_OPTIONS,
     load_settings,
+    pool_info,
     validate_settings,
 )
 from utils.moving_averages import pool_moving_average_type
@@ -199,7 +201,9 @@ def _stream_tuning(
     base = validate_settings(settings or load_settings())
     shorts = _checked(ranges.get("short_ma_days", []), SHORT_MA_OPTIONS, "단기 이평")
     adr_floors = _checked_optional_ints(ranges.get("adr_floor", []), ADR_FLOOR_OPTIONS, "ADR 하한")
-    entry_mults = _checked_optional_floats(ranges.get("entry_vol_mult", []), ENTRY_VOL_MULT_OPTIONS, "진입 문턱")
+    entry_mults = _checked_optional_floats(
+        ranges.get("entry_vol_mult", []), entry_vol_mult_options(pool_info(base["pool"])["country"]), "진입 문턱"
+    )
     longs = _checked(ranges.get("long_ma_days", []), LONG_MA_OPTIONS, "장기 이평")
     # 단기=장기 허용(단일 이평선 전략과 동일) — 설정 검증(momentum_service)과 같은 기준.
     ma_pairs = [(short, long) for short in shorts for long in longs if short <= long]

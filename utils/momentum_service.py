@@ -30,11 +30,12 @@ from typing import Any
 
 import pandas as pd
 
-from config import ADR_FLOOR_OPTIONS, ENTRY_VOL_MULT_OPTIONS
+from config import ADR_FLOOR_OPTIONS
 from core.strategy.scoring import (
     compute_ma_disparity,
     rank_score,
 )
+from utils.entry_vol_options import entry_vol_mult_options
 from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
 from utils.strategy_settings import coerce_to_options, require_start_date, validate_start_date
 
@@ -129,8 +130,9 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     # 진입 문턱 — 이격 ≥ 배수 × 20일 변동성일 때만 진입 자격. None = 문턱 없음(청산은 항상 0선).
     raw_mult = settings.get("entry_vol_mult")
     entry_vol_mult = None if raw_mult in (None, "", "none") else float(raw_mult)
-    if entry_vol_mult not in ENTRY_VOL_MULT_OPTIONS:
-        allowed = ", ".join("없음" if v is None else f"{v:g}" for v in ENTRY_VOL_MULT_OPTIONS)
+    mult_options = entry_vol_mult_options(pool_info(pool)["country"])
+    if entry_vol_mult not in mult_options:
+        allowed = ", ".join("없음" if v is None else f"{v:g}" for v in mult_options)
         raise ValueError(f"'entry_vol_mult' 는 {allowed} 중 하나여야 합니다 (받은 값: {raw_mult}).")
 
     return {
@@ -205,7 +207,7 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
     # 없는 선택 항목은 '미설정' 기본값으로 채운다 — 임의 보정이 아니라 스키마 기본이다.
     result.setdefault("start_date", None)
     result.setdefault("adr_floor", default_adr_floor())
-    result.setdefault("entry_vol_mult", ENTRY_VOL_MULT_OPTIONS[0])
+    result.setdefault("entry_vol_mult", None)
     return result
 
 
@@ -267,13 +269,14 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
         raise ValueError(f"저장된 모멘텀 전략 설정이 올바르지 않습니다: {error}") from error
 
 
-# 화면 로드 때 선택지 밖 저장값을 보정할 항목 — (키, 라벨, 선택지)
-_OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
-    ("short_ma_days", "단기 이평", SHORT_MA_OPTIONS),
-    ("adr_floor", "ADR 하한", ADR_FLOOR_OPTIONS),
-    ("long_ma_days", "장기 이평", LONG_MA_OPTIONS),
-    ("entry_vol_mult", "진입 문턱", ENTRY_VOL_MULT_OPTIONS),
-)
+def _option_fields(pool: str) -> tuple[tuple[str, str, tuple], ...]:
+    """화면 로드 때 선택지 밖 저장값을 보정할 항목 — (키, 라벨, 선택지). 진입 문턱은 풀 국가의 목록이다."""
+    return (
+        ("short_ma_days", "단기 이평", SHORT_MA_OPTIONS),
+        ("adr_floor", "ADR 하한", ADR_FLOOR_OPTIONS),
+        ("long_ma_days", "장기 이평", LONG_MA_OPTIONS),
+        ("entry_vol_mult", "진입 문턱", entry_vol_mult_options(pool_info(pool)["country"])),
+    )
 
 
 def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], list[str]]:
@@ -286,7 +289,7 @@ def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], lis
         raise RuntimeError(f"종목풀({pool})의 모멘텀 전략 설정이 없습니다 — 화면에서 저장하세요.")
     merged = {"pool": pool, **per_pool}
     try:
-        return coerce_to_options(merged, _OPTION_FIELDS, validate_settings)
+        return coerce_to_options(merged, _option_fields(pool), validate_settings)
     except ValueError as error:
         raise ValueError(f"저장된 모멘텀 전략 설정이 올바르지 않습니다: {error}") from error
 

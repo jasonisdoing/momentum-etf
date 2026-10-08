@@ -5,9 +5,10 @@ from typing import Any
 
 import pandas as pd
 
-from config import CACHE_TTL_COMPUTE, ENTRY_VOL_MULT_OPTIONS
+from config import CACHE_TTL_COMPUTE
 from services.stock_cache_service import get_stock_cache_meta_map
 from utils.data_loader import get_trading_days
+from utils.entry_vol_options import entry_vol_mult_options
 from utils.ma_options import ma_options_payload
 
 
@@ -623,7 +624,7 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
         # 이평선 일수 선택지 — 백엔드 상수가 단일 소스(풀 국가별).
         **ma_options_payload(_pool_country(selected_ticker_type)),
         "entry_vol_mult": (get_ticker_type_settings(selected_ticker_type) or {}).get("ENTRY_VOL_MULT"),
-        "entry_vol_mult_options": list(ENTRY_VOL_MULT_OPTIONS),
+        "entry_vol_mult_options": list(entry_vol_mult_options(_pool_country(selected_ticker_type))),
     }
 
 
@@ -708,7 +709,7 @@ def _compute_rank_data_payload(
         **ma_options_payload(_pool_country(selected_ticker_type)),
         # 진입 문턱 — 행 표시 미리보기 값과 선택지(툴바 셀렉트용).
         "entry_vol_mult": entry_vol_mult,
-        "entry_vol_mult_options": list(ENTRY_VOL_MULT_OPTIONS),
+        "entry_vol_mult_options": list(entry_vol_mult_options(_pool_country(selected_ticker_type))),
         # 시장 ADR — 헤더 표시용(모멘텀 ADR 게이트와 같은 소스). 레짐 지수 없는 풀은 None.
         "adr": _pool_adr_payload(selected_ticker_type),
         "as_of_date": _serialize_datetime(effective_as_of_date),
@@ -759,7 +760,6 @@ def load_rank_data(
         raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
 
     # 진입 문턱 — 툴바 미리보기 값("none"=없음)이 오면 그걸, 아니면 풀 저장값을 쓴다.
-    from config import ENTRY_VOL_MULT_OPTIONS
     from utils.settings_loader import get_ticker_type_settings
 
     if entry_vol_mult_override is None:
@@ -767,8 +767,9 @@ def load_rank_data(
     else:
         raw = str(entry_vol_mult_override).strip().lower()
         entry_vol_mult = None if raw in ("", "none") else float(raw)
-        if entry_vol_mult not in ENTRY_VOL_MULT_OPTIONS:
-            allowed = ", ".join("없음" if v is None else f"{v:g}" for v in ENTRY_VOL_MULT_OPTIONS)
+        allowed_mults = entry_vol_mult_options(country_code)
+        if entry_vol_mult not in allowed_mults:
+            allowed = ", ".join("없음" if v is None else f"{v:g}" for v in allowed_mults)
             raise ValueError(f"진입 문턱은 {allowed} 중 하나여야 합니다 (받은 값: {entry_vol_mult_override}).")
 
     cache_key = _build_rank_cache_key(selected_ticker_type, ma_rules)

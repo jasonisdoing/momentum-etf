@@ -42,9 +42,17 @@ _F_CURRENCY = 9
 
 _ETF_TYPE = "3"
 _MASTER_CACHE = TtlCache(CACHE_TTL_SLOW, name="us_security_master", max_entries=1)
-# 기간 수익률의 기준일 — 한국 ETF 마켓과 같은 기간에 3달을 더한다. 한국은 3달을 네이버
+# 기간 수익률의 기준일 — 한국 ETF 마켓과 같은 기간에 3달·1~3년을 더한다. 한국은 3달을 네이버
 # 실시간 스냅샷이 직접 주지만, 미국 시세에는 그 값이 없어 기준종가로 계산한다.
-_BASE_CLOSE_OFFSETS: tuple[tuple[str, pd.DateOffset], ...] = (*BASE_CLOSE_OFFSETS, ("3m", pd.DateOffset(months=3)))
+_BASE_CLOSE_OFFSETS: tuple[tuple[str, pd.DateOffset], ...] = (
+    *BASE_CLOSE_OFFSETS,
+    ("3m", pd.DateOffset(months=3)),
+    ("1y", pd.DateOffset(years=1)),
+    ("2y", pd.DateOffset(years=2)),
+    ("3y", pd.DateOffset(years=3)),
+)
+# 기준일 중 가장 먼 3년 전 종가까지 덮는 일봉 기간(yfinance 가 허용하는 값 중 다음 단계).
+_LONG_DOWNLOAD_PERIOD = "5y"
 _DOLLAR_VOLUME_DAYS = 20  # 거래대금 순위의 평균 일수
 _YF_CHUNK = 300
 
@@ -205,10 +213,10 @@ def refresh_us_etf_market_cache() -> int:
     top = [(t, dv) for t, dv in ranked if dv is not None][:US_ETF_MARKET_TOP_COUNT]
     logger.info("[미국 ETF] 유니버스 %d → 시세 수신 %d → 상위 %d", len(by_ticker), len(frames), len(top))
 
-    # 2차: 상위 N 만 4개월 일봉을 받아 기준종가(1/2/3개월 전)와 일간 변동을 계산한다.
+    # 2차: 상위 N 만 5년 일봉을 받아 기준종가(1주~3년 전)와 일간 변동을 계산한다.
     top_tickers = [t for t, _ in top]
     dollar_volume_by = dict(top)
-    frames_long = _download_daily(top_tickers, period="4mo")
+    frames_long = _download_daily(top_tickers, period=_LONG_DOWNLOAD_PERIOD)
 
     today = pd.Timestamp.now(tz="America/New_York").tz_localize(None).normalize()
     base_dates = {suffix: today - offset for suffix, offset in _BASE_CLOSE_OFFSETS}
