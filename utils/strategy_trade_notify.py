@@ -128,7 +128,7 @@ def build_repeat_line(trigger: dict[str, Any]) -> str:
     emoji = "🔴" if trigger["action"] == "sell" else "🔵"
     word = "지금 매도!" if trigger["action"] == "sell" else "지금 매수!"
     return (
-        f"<!channel> {emoji} *{trigger['round']}호 {trigger['name']} {word}* "
+        f"<!channel> {emoji} *{trigger['round']}호 {trigger['name']} {trigger['quantity']:,}주 {word}* "
         f"{trigger['index_name']} {_level(trigger['index_level'])} 도달 "
         f"(현재 {_index_text(trigger['index'])})"
     )
@@ -152,6 +152,7 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
                     "name": row["name"],
                     "limit_price": row["sell_limit"],
                     "close": row["close"],
+                    "quantity": strategy_view["config"]["round_quantity"],
                     "index_level": row["sell_index"],
                     "index_name": index["name"],
                     "index": index,
@@ -170,6 +171,7 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
                     "name": row["name"],
                     "limit_price": row["buy_limit"],
                     "close": row["close"],
+                    "quantity": strategy_view["config"]["round_quantity"],
                     "index_level": row["buy_index"],
                     "index_name": index["name"],
                     "index": index,
@@ -199,6 +201,7 @@ def build_message(view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
         index = strategy_view["index"]
         status = strategy_view["status"]
         rounds_total = strategy_view["config"]["rounds"]
+        quantity = f"{strategy_view['config']['round_quantity']:,}주"
 
         triggered = {(t["round"], t["action"]) for t in triggers if t["strategy_id"] == sid}
         buy_count = sum(1 for t in triggers if t["strategy_id"] == sid and t["action"] == "buy")
@@ -234,28 +237,28 @@ def build_message(view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
                 profit_text = f"{row['profit_pct']:+.2f}%" if row["profit_pct"] is not None else "-"
                 if is_triggered:
                     lines.append(
-                        f"🔴 {row['round']}호 {row['name']} *지금 매도!* "
+                        f"🔴 {row['round']}호 {row['name']} {quantity} *지금 매도!* "
                         f"{index['name']} {_level(row['sell_index'])} 도달 ({profit_text})"
                     )
                 else:
                     lines.append(
-                        f"🟢 {row['round']}호 {row['name']} 보유 중 ({profit_text}) · "
+                        f"🟢 {row['round']}호 {row['name']} {quantity} 보유 중 ({profit_text}) · "
                         f"매도 목표 {index['name']} {_level(row['sell_index'])}"
                     )
             elif row["is_next"]:
                 is_triggered = (row["round"], "buy") in triggered
                 if is_triggered:
                     lines.append(
-                        f"🔵 {row['round']}호 {row['name']} *지금 매수!* "
+                        f"🔵 {row['round']}호 {row['name']} {quantity} *지금 매수!* "
                         f"{index['name']} {_level(row['buy_index'])} 도달"
                     )
                 else:
                     lines.append(
-                        f"⏳ {row['round']}호 {row['name']} 다음 매수 대기 · {index['name']} {_level(row['buy_index'])}"
+                        f"⏳ {row['round']}호 {row['name']} {quantity} 다음 매수 대기 · {index['name']} {_level(row['buy_index'])}"
                     )
             else:
                 lines.append(
-                    f"⚪ {row['round']}호 {row['name']} 이후 회차 · "
+                    f"⚪ {row['round']}호 {row['name']} {quantity} 이후 회차 · "
                     f"매수 예정 {index['name']} {_level(row['buy_index'])}"
                 )
 
