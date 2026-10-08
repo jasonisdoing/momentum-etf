@@ -36,6 +36,10 @@ type MarketRowItem = {
   return_1m_pct: number | null;
   return_2m_pct: number | null;
   return_3m_pct: number | null;
+  /** 미국 ETF 마켓만 — 1~3년 전 기준종가 대비. 상장 기간이 모자라면 null. */
+  return_1y_pct?: number | null;
+  return_2y_pct?: number | null;
+  return_3y_pct?: number | null;
   prev_volume: number;
   /** 거래대금 배수(20일 평균 대비) — 순위 화면과 같은 공용 계산, 일일 배치 저장값. 한국 전용. */
   value_mult?: number | null;
@@ -83,6 +87,7 @@ type MarketVariantConfig = {
   showTaxFilter?: boolean;
   defaultExcluded: string[];
   showNavColumns: boolean; // Nav·괴리율 — 한국 실시간 스냅샷에만 있다
+  returnPeriods: readonly { field: keyof MarketRowItem; header: string }[]; // 기간 수익률 컬럼
   showListing: boolean; // 상장일 컬럼 + 신규 필터 — 미국 마스터에는 상장일이 없다
   capHeader: string; // 규모 컬럼: 한국은 시가총액, 미국은 20일 평균 거래대금
   capFilterDefault: string; // 규모 최소값 필터 초기값 ("" = 없음)
@@ -98,6 +103,13 @@ const RETURN_PERIODS = [
   { field: "return_1m_pct", header: "1달(%)" },
   { field: "return_2m_pct", header: "2달(%)" },
   { field: "return_3m_pct", header: "3달(%)" },
+] as const;
+
+/** 미국 ETF 마켓만 더 긴 기간을 보인다 — 한국 마켓 배치는 이 기준종가를 받지 않는다. */
+const LONG_RETURN_PERIODS = [
+  { field: "return_1y_pct", header: "1년(%)" },
+  { field: "return_2y_pct", header: "2년(%)" },
+  { field: "return_3y_pct", header: "3년(%)" },
 ] as const;
 
 const TAX_FILTER_OPTIONS = [
@@ -123,6 +135,7 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
     },
     defaultExcluded: ["채권(모든종류)", "혼합", "리츠", "인버스", "2X", "커버드콜"],
     showNavColumns: true,
+    returnPeriods: RETURN_PERIODS,
     showListing: true,
     capHeader: "시가총액(억)",
     // 기본 필터 — 소형·저유동 ETF 를 걸러 보는 것이 기본 사용 패턴이라 초기값을 둔다.
@@ -163,6 +176,7 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
     flagExclusions: { PTP: "is_ptp" },
     defaultExcluded: ["채권", "인버스/숏", "레버리지", "커버드콜/인컴", "리츠", "가상자산", "PTP"],
     showNavColumns: false,
+    returnPeriods: [...RETURN_PERIODS, ...LONG_RETURN_PERIODS],
     showListing: false,
     capHeader: "거래대금($M)",
     capFilterDefault: "100",
@@ -528,7 +542,7 @@ export function MarketManager({
         ] as ColDef<MarketGridRow>[])
         : []),
       // 기간 수익률 — 짧은 기간부터. 값 없음이 맨 아래로 가도록 정렬 비교자를 같이 준다.
-      ...RETURN_PERIODS.map(({ field, header }) => ({
+      ...variant.returnPeriods.map(({ field, header }) => ({
         field,
         headerName: header,
         width: 96,

@@ -331,7 +331,8 @@ type View = {
   // 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다).
   constraints?: {
     adr_floor_options?: (number | null)[];
-    entry_vol_mult_options?: (number | null)[];
+    /** 진입 문턱 선택지 — 국가별. 선택한 풀의 국가로 고른다. */
+    entry_vol_mult_options_by_country?: Record<string, (number | null)[]>;
   };
   positions: Positions | null;
 };
@@ -532,6 +533,7 @@ export function MomentumClient() {
   const hasIndustryData = poolHasIndustry(selectedPoolOption);
   const hasUsStockSector = poolHasUsStockSector(selectedPoolOption);
   const hasMarketCap = poolHasMarketCap(selectedPoolOption);
+  const entryVolMultOptions = view?.constraints?.entry_vol_mult_options_by_country?.[selectedPoolOption?.country_code ?? ""] ?? [];
   const saveSettings = useCallback(async () => {
     if (draftMaRule == null || !draftStartDate) {
       toast.error("설정 값이 올바르지 않습니다.");
@@ -1125,7 +1127,7 @@ export function MomentumClient() {
                         onChange={(e) => setDraftEntryVolMult(e.target.value)}
                         title="단기·장기 이격이 모두 '배수 × 그 종목의 20일 일간 변동성(%)' 이상일 때만 진입 자격. 청산선(0선) 바로 위의 종목을 사서 하루 만에 되파는 왕복을 막는다 — 청산 판정은 그대로다."
                       >
-                        {(view.constraints?.entry_vol_mult_options ?? []).map((value) => (
+                        {entryVolMultOptions.map((value) => (
                           <option key={String(value)} value={value == null ? "" : String(value)}>
                             {value == null ? "없음" : `${value}×`}
                           </option>
@@ -1395,7 +1397,7 @@ export function MomentumClient() {
             {
               key: "entry_vol_mult",
               label: "진입 문턱",
-              values: (view.constraints?.entry_vol_mult_options ?? []).map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: `${n}×` })),
+              values: entryVolMultOptions.map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: `${n}×` })),
             },
             {
               key: "adr_floor",

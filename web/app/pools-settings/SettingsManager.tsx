@@ -122,7 +122,8 @@ type PoolSettingsResponse = {
     top_n_hold_options: number[];
     slippage_pct_options?: number[];
     stoploss_pct_options?: number[];
-    entry_vol_mult_options?: (number | null)[];
+    /** 진입 문턱 선택지 — 국가별(이평선 선택지와 같은 방식). */
+    entry_vol_mult_options_by_country?: Record<string, (number | null)[]>;
     adr_floor_options?: (number | null)[];
     market_indices?: MarketIndexOption[];
     editable_keys: string[];
@@ -721,7 +722,10 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     : DEFAULT_STOPLOSS_PCT_OPTIONS;
   const marketIndices = data.constraints.market_indices ?? [];
   // '없음'을 첫 선택지로 — 모멘텀 화면 셀렉트와 같은 목록(백엔드 상수가 단일 소스).
-  const entryVolMultOptions = ["", ...(data.constraints.entry_vol_mult_options ?? []).filter((v): v is number => v != null).map(String)];
+  const entryVolMultOptionsFor = (country: string) => [
+    "",
+    ...(data.constraints.entry_vol_mult_options_by_country?.[country] ?? []).filter((v): v is number => v != null).map(String),
+  ];
   const adrFloorOptions = ["", ...(data.constraints.adr_floor_options ?? []).filter((v): v is number => v != null).map(String)];
   /** 셀렉트 편집 컬럼 — 목록 밖 저장값도 후보에 남겨 빈 셀렉트가 되지 않게 한다. */
   const selectCol = (
@@ -895,7 +899,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       (row) => data.constraints.ma_options_by_country[row.country_code]?.long_ma_options ?? [],
       { valueFormatter: (params) => (params.value ? `${params.value}일` : "미설정") },
     ),
-    selectCol("ENTRY_VOL_MULT", "진입 문턱", 92, () => entryVolMultOptions, {
+    selectCol("ENTRY_VOL_MULT", "진입 문턱", 92, (row) => entryVolMultOptionsFor(row.country_code), {
       valueFormatter: (params) => (params.value === "" || params.value == null ? "없음" : `${params.value}×`),
       headerTooltip:
         "모멘텀 진입 문턱 — 이격이 '배수 × 20일 변동성' 이상인 종목만 진입 자격(청산은 불변). " +
@@ -1098,7 +1102,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         {renderField(
           "진입 문턱",
           <select className="form-select form-select-sm" style={{ width: 84 }} value={draft.ENTRY_VOL_MULT} onChange={(e) => onChange("ENTRY_VOL_MULT", e.target.value)}>
-            {entryVolMultOptions.map((value) => (
+            {entryVolMultOptionsFor(draft.country_code).map((value) => (
               <option key={value || "none"} value={value}>{value === "" ? "없음" : `${value}×`}</option>
             ))}
           </select>,
