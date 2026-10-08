@@ -67,7 +67,7 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 10 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py holdings_alarm python scripts/holdings_alarm.py >> logs/cron/holdings_alarm.log 2>&1
 
 # ── 전략 사고팔기 알림 (평일 09:10~15:20, 10분 간격) ──────────────────────
-# kor_account 의 코스피200·코스닥150 ETF 를 회차로 보고, 매수/매도 신호가 나온 회차가 있을 때만
+# kor_account 의 KODEX 200·KODEX 코스닥150·KIWOOM 삼성SK그룹TOP4+ 를 종목별 회차로 보고, 신호가 나온 회차가 있을 때만
 # 슬랙 1건 발송(없으면 미발송).
 10,20,30,40,50 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
 0,10,20,30,40,50 10-14 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1

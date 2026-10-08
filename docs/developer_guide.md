@@ -39,7 +39,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | `/strategy-momentum` | 모멘텀 전략(주간) 선정·백테스트·튜닝 | `utils/momentum_service.py`, `momentum_backtest.py`, `momentum_tuning.py` |
 | `/strategy-new-high` | 신고가 전략 선정·백테스트·튜닝 | `utils/new_high_service.py`, `new_high_backtest.py`, `new_high_tuning.py` |
 | `/strategy-mix` | 고정 KRW 기준금액 합성 — 회수·채우기·백테스트 | `utils/strategy_mix_service.py` |
-| `/strategy-trade` | 코스피·코스닥 지수 하락 때 ETF를 회차별로 사고파는 분할 매매 현황·알림(설정은 `system_config.strategy_trade_settings`) | `utils/strategy_trade_service.py`, `strategy_trade_notify.py` |
+| `/strategy-trade` | 종목 1개씩(KODEX 200·코스닥150·KIWOOM TOP4+) 매매 간격마다 분할 매수·매도하는 현황·알림(설정은 `system_config.strategy_trade_settings`) | `utils/strategy_trade_service.py`, `strategy_trade_notify.py` |
 | `/leverage-settings` | 레버리지 이동평균 크로스 설정·튜닝 | `leverage/` |
 | `/account-settings` | 계좌 메타·증권사 연동·합성 슬리브별 종목풀·보유종목 알림 On/Off | `utils/account_settings_store.py`, `utils/holdings_alarm_service.py` |
 | `/assets`, `/holdings*` | 자산·보유 | `utils/holdings_detail_service.py`, `portfolio_master` |
