@@ -234,7 +234,7 @@ ENTRY_VOL_MULT_OPTIONS: tuple[float | None, ...] = (None, 1.0, 2.0)
 # **국가별**이다 — 이평선 선택지(SHORT_MA_DAYS_BY_COUNTRY)와 같은 방식으로, 신고가의
 # 화면 셀렉트·튜닝 축·저장 검증이 풀 국가의 목록을 쓴다(`utils/new_high_service` 가 골라 준다).
 MIN_VALUE_MULT_OPTIONS_BY_COUNTRY: dict[str, tuple[float | None, ...]] = {
-    "kor": (None, 2.0, 5.0),
+    "kor": (None, 2.0, 3.0, 5.0),
     "us": (None, 1.0, 2.0, 3.0),
     "au": (None, 1.0, 2.0, 3.0),
 }
