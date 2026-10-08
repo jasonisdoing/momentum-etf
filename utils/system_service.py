@@ -143,7 +143,7 @@ SCHEDULE_ROWS = [
         "key": "strategy_trade_notify",
         "group": "장중 실행",
         "job": "전략 사고팔기 알림",
-        "target": "kor_account 코스피200·코스닥150 ETF 각 4종",
+        "target": "kor_account KODEX 200·KODEX 코스닥150·KIWOOM 삼성SK그룹TOP4+ 각 1종",
         "run_location": "SERVER/LOCAL",
         "cadence": "평일 09:10~15:20 KST 10분 간격",
         "command": "python scripts/strategy_trade_notify.py",
