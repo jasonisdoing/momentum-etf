@@ -42,15 +42,9 @@ _F_CURRENCY = 9
 
 _ETF_TYPE = "3"
 _MASTER_CACHE = TtlCache(CACHE_TTL_SLOW, name="us_security_master", max_entries=1)
-# 기간 수익률의 기준일 — 한국 ETF 마켓과 같은 기간에 3달·1~3년을 더한다. 한국은 3달을 네이버
+# 기간 수익률의 기준일 — 한국 ETF 마켓과 같은 기간에 3달을 더한다. 한국은 3달을 네이버
 # 실시간 스냅샷이 직접 주지만, 미국 시세에는 그 값이 없어 기준종가로 계산한다.
-_BASE_CLOSE_OFFSETS: tuple[tuple[str, pd.DateOffset], ...] = (
-    *BASE_CLOSE_OFFSETS,
-    ("3m", pd.DateOffset(months=3)),
-    ("1y", pd.DateOffset(years=1)),
-    ("2y", pd.DateOffset(years=2)),
-    ("3y", pd.DateOffset(years=3)),
-)
+_BASE_CLOSE_OFFSETS: tuple[tuple[str, pd.DateOffset], ...] = (*BASE_CLOSE_OFFSETS, ("3m", pd.DateOffset(months=3)))
 # 기준일 중 가장 먼 3년 전 종가까지 덮는 일봉 기간(yfinance 가 허용하는 값 중 다음 단계).
 _LONG_DOWNLOAD_PERIOD = "5y"
 _DOLLAR_VOLUME_DAYS = 20  # 거래대금 순위의 평균 일수

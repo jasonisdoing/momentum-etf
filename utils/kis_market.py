@@ -458,7 +458,12 @@ BASE_CLOSE_OFFSETS: tuple[tuple[str, pd.DateOffset], ...] = (
     ("2w", pd.DateOffset(weeks=2)),
     ("1m", pd.DateOffset(months=1)),
     ("2m", pd.DateOffset(months=2)),
+    ("1y", pd.DateOffset(years=1)),
+    ("2y", pd.DateOffset(years=2)),
+    ("3y", pd.DateOffset(years=3)),
 )
+# 기준일 중 가장 먼 3년 전을 덮는 일봉 개수(3년 ≈ 756거래일 + 여유).
+BASE_CLOSE_DAILY_COUNT = 800
 
 
 # 화면·서비스가 같은 기간 목록을 쓰도록 접미사만 따로 노출한다.
@@ -487,7 +492,7 @@ def _enrich_rows_with_base_closes(rows: list[dict]) -> None:
         ticker = str(row.get("티커") or "").strip()
         if not ticker:
             return
-        df = fetch_naver_daily_ohlc(ticker, count=50)  # 2개월 ≈ 42거래일 + 여유
+        df = fetch_naver_daily_ohlc(ticker, count=BASE_CLOSE_DAILY_COUNT)
         if df is None or df.empty:
             return
         closes = df["Close"]

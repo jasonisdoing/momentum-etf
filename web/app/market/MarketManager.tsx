@@ -36,10 +36,10 @@ type MarketRowItem = {
   return_1m_pct: number | null;
   return_2m_pct: number | null;
   return_3m_pct: number | null;
-  /** 미국 ETF 마켓만 — 1~3년 전 기준종가 대비. 상장 기간이 모자라면 null. */
-  return_1y_pct?: number | null;
-  return_2y_pct?: number | null;
-  return_3y_pct?: number | null;
+  /** 1~3년 전 기준종가 대비 — 상장 기간이 모자라면 null. */
+  return_1y_pct: number | null;
+  return_2y_pct: number | null;
+  return_3y_pct: number | null;
   prev_volume: number;
   /** 거래대금 배수(20일 평균 대비) — 순위 화면과 같은 공용 계산, 일일 배치 저장값. 한국 전용. */
   value_mult?: number | null;
@@ -87,31 +87,26 @@ type MarketVariantConfig = {
   showTaxFilter?: boolean;
   defaultExcluded: string[];
   showNavColumns: boolean; // Nav·괴리율 — 한국 실시간 스냅샷에만 있다
-  returnPeriods: readonly { field: keyof MarketRowItem; header: string }[]; // 기간 수익률 컬럼
   showListing: boolean; // 상장일 컬럼 + 신규 필터 — 미국 마스터에는 상장일이 없다
   capHeader: string; // 규모 컬럼: 한국은 시가총액, 미국은 20일 평균 거래대금
   capFilterDefault: string; // 규모 최소값 필터 초기값 ("" = 없음)
   volumeFilterDefault: string; // 거래량 최소값 필터 초기값 ("" = 없음)
 };
 
-// 과세 구분 선택지 — 분류를 못 받은 종목은 '모두'에서만 보인다(어느 쪽으로도 넘겨짚지 않는다).
 /** 기간 수익률 컬럼 — 짧은 기간부터. 기준종가는 배치가 넣고(`utils/kis_market`),
- *  3달만 실시간 스냅샷이 직접 준다. 기간을 늘리려면 배치의 기준일 목록도 함께 늘린다. */
+ *  한국의 3달만 실시간 스냅샷이 직접 준다. 기간을 늘리려면 배치의 기준일 목록도 함께 늘린다. */
 const RETURN_PERIODS = [
   { field: "return_1w_pct", header: "1주(%)" },
   { field: "return_2w_pct", header: "2주(%)" },
   { field: "return_1m_pct", header: "1달(%)" },
   { field: "return_2m_pct", header: "2달(%)" },
   { field: "return_3m_pct", header: "3달(%)" },
-] as const;
-
-/** 미국 ETF 마켓만 더 긴 기간을 보인다 — 한국 마켓 배치는 이 기준종가를 받지 않는다. */
-const LONG_RETURN_PERIODS = [
   { field: "return_1y_pct", header: "1년(%)" },
   { field: "return_2y_pct", header: "2년(%)" },
   { field: "return_3y_pct", header: "3년(%)" },
 ] as const;
 
+// 과세 구분 선택지 — 분류를 못 받은 종목은 '모두'에서만 보인다(어느 쪽으로도 넘겨짚지 않는다).
 const TAX_FILTER_OPTIONS = [
   { key: "all", label: "모두", title: "과세 구분과 무관하게 전부" },
   { key: "free", label: "비과세", title: "국내 주식형 — 매매차익 비과세" },
@@ -135,7 +130,6 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
     },
     defaultExcluded: ["채권(모든종류)", "혼합", "리츠", "인버스", "2X", "커버드콜"],
     showNavColumns: true,
-    returnPeriods: RETURN_PERIODS,
     showListing: true,
     capHeader: "시가총액(억)",
     // 기본 필터 — 소형·저유동 ETF 를 걸러 보는 것이 기본 사용 패턴이라 초기값을 둔다.
@@ -176,7 +170,6 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
     flagExclusions: { PTP: "is_ptp" },
     defaultExcluded: ["채권", "인버스/숏", "레버리지", "커버드콜/인컴", "리츠", "가상자산", "PTP"],
     showNavColumns: false,
-    returnPeriods: [...RETURN_PERIODS, ...LONG_RETURN_PERIODS],
     showListing: false,
     capHeader: "거래대금($M)",
     capFilterDefault: "100",
@@ -542,7 +535,7 @@ export function MarketManager({
         ] as ColDef<MarketGridRow>[])
         : []),
       // 기간 수익률 — 짧은 기간부터. 값 없음이 맨 아래로 가도록 정렬 비교자를 같이 준다.
-      ...variant.returnPeriods.map(({ field, header }) => ({
+      ...RETURN_PERIODS.map(({ field, header }) => ({
         field,
         headerName: header,
         width: 96,
