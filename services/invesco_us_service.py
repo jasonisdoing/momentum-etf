@@ -5,10 +5,12 @@ from __future__ import annotations
 import math
 from datetime import datetime
 from html import unescape
+from time import sleep
 from typing import Any
 
 from config import CACHE_TTL_SLOW
 from utils.http_session import shared_session
+from utils.logger import get_app_logger
 from utils.ttl_cache import TtlCache
 
 _API_BASE = "https://dng-api.invesco.com"
@@ -21,7 +23,17 @@ _PRODUCT_MAP_CACHE = TtlCache(CACHE_TTL_SLOW, name="invesco_us_products", max_en
 
 
 def _get_json(path: str, params: dict[str, Any]) -> dict[str, Any]:
-    response = shared_session.get(f"{_API_BASE}{path}", params=params, headers=_HEADERS, timeout=25)
+    # 일시적인 서버 오류만 1초·2초 간격으로 재시도하고, 마지막 실패는 호출자에게 전달한다.
+    for attempt in range(3):
+        if attempt:
+            sleep(attempt)
+        response = shared_session.get(f"{_API_BASE}{path}", params=params, headers=_HEADERS, timeout=25)
+        if response.status_code not in {502, 503} or attempt == 2:
+            break
+        get_app_logger().warning(
+            f"[Invesco] HTTP {response.status_code}: {path} — {attempt + 1}초 후 재시도 ({attempt + 2}/3)"
+        )
+        response.close()
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, dict):
