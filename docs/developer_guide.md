@@ -19,7 +19,7 @@
 
 기존 파일은 옮기지 않는다 — 신규 코드부터 위 기준으로 수렴시킨다.
 
-미국 ETF 구성종목은 `utils/stock_meta_updater.py`의 공통 수집 경로를 거쳐 저장한다. 공식 연동은 `services/invesco_us_service.py`·`services/ishares_us_service.py`·`services/spdr_us_service.py`·`services/vaneck_us_service.py`·`services/vistashares_us_service.py`·`services/ark_us_service.py`·`services/firsttrust_us_service.py`·`services/fidelity_us_service.py`·`services/tortoise_us_service.py`·`services/globalx_us_service.py`·`services/victoryshares_us_service.py`·`services/vanguard_us_service.py`·`services/direxion_us_service.py`, 외부 소스 목록은 `utils/data_source_catalog.py`가 담당한다. 실물 보유 상품은 `services/us_physical_etf_service.py`에서 확인한 공식 공시를 `holdings_cache.disclosure`에 저장하며 주식 구성종목 수집과 구분한다. 구성종목의 상장 시장을 식별할 수 없거나 시세 조회 대상이 아닌 자산은 목록에 유지하되 가격 조회에서 제외한다. 미국 상장 명단은 `utils/us_etf_market_service.py`의 KIS 공통 명단을 사용한다.
+미국 ETF 구성종목은 `utils/stock_meta_updater.py`의 공통 수집 경로를 거쳐 저장한다. 공식 연동은 `services/invesco_us_service.py`·`services/ishares_us_service.py`·`services/spdr_us_service.py`·`services/vaneck_us_service.py`·`services/vistashares_us_service.py`·`services/ark_us_service.py`·`services/firsttrust_us_service.py`·`services/fidelity_us_service.py`·`services/tortoise_us_service.py`·`services/globalx_us_service.py`·`services/victoryshares_us_service.py`·`services/vanguard_us_service.py`·`services/direxion_us_service.py`·`services/roundhill_us_service.py`, 외부 소스 목록은 `utils/data_source_catalog.py`가 담당한다. 실물 보유 상품은 `services/us_physical_etf_service.py`에서 확인한 공식 공시를 `holdings_cache.disclosure`에 저장하며 주식 구성종목 수집과 구분한다. 구성종목의 상장 시장을 식별할 수 없거나 시세 조회 대상이 아닌 자산은 목록에 유지하되 가격 조회에서 제외한다. 미국 상장 명단은 `utils/us_etf_market_service.py`의 KIS 공통 명단을 사용한다.
 
 ### 로컬 실행
 

@@ -32,6 +32,7 @@ HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "victoryshares_us_api": "VictoryShares 미국 공식 API",
     "vanguard_us_api": "Vanguard 미국 공식 API",
     "direxion_us_api": "Direxion 미국 공식 API",
+    "roundhill_us_csv": "Roundhill 미국 공식 CSV",
     "yfinance_holdings": "yfinance (상위 10종목)",
     "naver_etf_component": "네이버 ETF 구성종목",
 }
@@ -249,6 +250,7 @@ US_HOLDINGS_FALLBACK_ORDER: list[str] = [
     "victoryshares_us_api",
     "vanguard_us_api",
     "direxion_us_api",
+    "roundhill_us_csv",
     "yfinance_holdings",
 ]
 
@@ -315,6 +317,7 @@ US_OFFICIAL_SOURCES: dict[str, str] = {
     "Victory Shares": "victoryshares_us_api",
     "Vanguard": "vanguard_us_api",
     "Direxion": "direxion_us_api",
+    "Roundhill": "roundhill_us_csv",
 }
 
 
@@ -427,8 +430,13 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
         "Direxion 공식 공개 GraphQL / getDailyHoldings(Ticker)",
         "services/direxion_us_service.py",
     ),
+    "roundhill_us_csv": (
+        "roundhillinvestments.com/assets/data/FilepointRoundhill.40RU.RU_Holdings_{공시일}.csv",
+        "services/roundhill_us_service.py",
+    ),
 }
 _SOURCE_NOTES: dict[str, str] = {
+    "roundhill_us_csv": "공식 ETF 명단과 최신 공시 날짜의 전체 보유 CSV에서 주식·스왑·현금을 받는다. 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "direxion_us_api": "공식 ETF 명단과 사이트의 공개 요청 설정으로 주식·스왑·현금 전체 목록을 받는다. 공시 비중을 그대로 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "physical_asset_disclosure": "실물 보유 상품은 주식 구성종목 대신 공식 실물 보유 목록을 안내한다.",
     "betashares_csv": "CSV 에 Currency·Country·Asset Class 열이 있어 구성종목의 상장 국가를 정확히 안다.",
