@@ -9,7 +9,7 @@ from fastapi_app.dependencies import require_internal_token
 from services.portfolio_change_service import compute_portfolio_change_bundle
 from utils.holdings_detail_service import (
     add_holding,
-    delete_holding,
+    delete_holdings,
     load_all_holdings_detail,
     reorder_holdings,
     update_holding,
@@ -28,12 +28,13 @@ def get_all_holdings(
 
 
 @router.delete("")
-def delete_one_holding(
+def delete_selected_holdings(
     account: str = Query(...),
-    ticker: str = Query(...),
+    ticker: list[str] = Query(...),
     _: None = Depends(require_internal_token),
 ) -> dict[str, Any]:
-    return delete_holding(account_id=account, ticker=ticker)
+    """``ticker`` 를 여러 번 주면 한 요청으로 함께 삭제한다."""
+    return delete_holdings(account_id=account, tickers=ticker)
 
 
 @router.patch("")
