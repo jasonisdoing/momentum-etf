@@ -275,26 +275,29 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
     }
 
 
-def delete_holding(account_id: str, ticker: str) -> dict[str, str]:
-    """계좌에서 특정 종목을 삭제한다."""
-    account_id = str(account_id or "").strip()
-    ticker = str(ticker or "").strip()
-    if not account_id or not ticker:
-        raise RuntimeError("계좌 ID와 종목코드가 필요합니다.")
+def delete_holdings(account_id: str, tickers: list[str]) -> dict[str, list[str]]:
+    """계좌에서 종목들을 한 번에 삭제한다 — 계좌 읽기·저장과 스냅샷 예약이 종목 수와 무관하게 1회다.
 
-    # 저장된 티커와 요청 티커 양쪽을 같은 규칙으로 정규화해 비교한다
-    # (ASX: 접두사 유무가 달라도 같은 종목으로 매칭되도록).
-    target_ticker = _normalize_target_ticker(ticker)
+    하나라도 계좌에 없으면 아무것도 지우지 않고 에러를 낸다(일부만 지워진 채 남지 않게).
+    """
+    account_id = str(account_id or "").strip()
+    requested = [str(ticker or "").strip() for ticker in tickers]
+    if not account_id or not requested or not all(requested):
+        raise RuntimeError("계좌 ID와 종목코드가 필요합니다.")
 
     master = load_portfolio_master(account_id)
     if not master:
         raise RuntimeError("계좌 데이터를 찾을 수 없습니다.")
 
     holdings = master.get("holdings", [])
-    new_holdings = [h for h in holdings if _normalize_target_ticker(str(h.get("ticker", ""))) != target_ticker]
-
-    if len(new_holdings) == len(holdings):
-        raise RuntimeError(f"종목 {ticker}을 찾을 수 없습니다.")
+    # 저장된 티커와 요청 티커 양쪽을 같은 규칙으로 정규화해 비교한다
+    # (ASX: 접두사 유무가 달라도 같은 종목으로 매칭되도록).
+    held = {_normalize_target_ticker(str(h.get("ticker", ""))) for h in holdings}
+    targets = {_normalize_target_ticker(ticker) for ticker in requested}
+    missing = [ticker for ticker in requested if _normalize_target_ticker(ticker) not in held]
+    if missing:
+        raise RuntimeError(f"종목 {', '.join(missing)}을 찾을 수 없습니다.")
+    new_holdings = [h for h in holdings if _normalize_target_ticker(str(h.get("ticker", ""))) not in targets]
 
     save_portfolio_master(account_id, _assign_sort_order(new_holdings))
 
@@ -308,7 +311,7 @@ def delete_holding(account_id: str, ticker: str) -> dict[str, str]:
 
         get_app_logger().warning(f"Failed to update snapshot after deletion: {e}")
 
-    return {"deleted": ticker}
+    return {"deleted": requested}
 
 
 def update_holding(

@@ -850,32 +850,30 @@ export function AccountHoldingsDetailPanel({
 
     setProcessingId("__deleting__");
     try {
-      let done = 0;
-      for (const row of selectedDeletableRows) {
-        setDeleteStatus(`삭제 중… (${done + 1}/${selectedDeletableRows.length})`);
-        const params = new URLSearchParams({
-          account: summary.account_id,
-          ticker: row.ticker,
-        });
-        const response = await fetch(`/api/assets?${params.toString()}`, { method: "DELETE" });
-        const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(payload.error || "삭제 실패");
-        }
-        done += 1;
+      // 한 요청으로 함께 지운다 — 서버가 계좌를 읽고 저장하는 일이 종목 수와 무관하게 1회다.
+      setDeleteStatus(`삭제 중… (${selectedDeletableRows.length}개)`);
+      const params = new URLSearchParams({ account: summary.account_id });
+      for (const row of selectedDeletableRows) params.append("ticker", row.ticker);
+      const response = await fetch(`/api/assets?${params.toString()}`, { method: "DELETE" });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "삭제 실패");
       }
-      setDeleteStatus("목록을 다시 불러오는 중…");
+      // 지운 행을 곧바로 표에서 빼고 창을 닫는다. 합계·일간 같은 계산값은 뒤에서 조용히 다시 받는다.
+      const deletedIds = new Set(selectedDeletableRows.map((row) => row.id));
+      const remaining = rowsRef.current.filter((row) => !deletedIds.has(buildGridRowId(row)));
+      onRowsSync(summary.account_id, buildSyncedHoldingRows(remaining, summary));
       setSelectedRowIds([]);
-      await onReload();
       setDeleteConfirmOpen(false);
       toast.success("삭제 완료");
+      void onReload({ silent: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "삭제 실패");
     } finally {
       setProcessingId(null);
       setDeleteStatus(null);
     }
-  }, [onReload, selectedDeletableRows, summary.account_id, toast]);
+  }, [onReload, onRowsSync, selectedDeletableRows, summary, toast]);
 
   const handleCellValueChanged = useCallback((row: GridRow | undefined, field: string | undefined) => {
     if (!row) {

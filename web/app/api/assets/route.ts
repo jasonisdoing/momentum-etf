@@ -45,11 +45,13 @@ export async function GET(request: Request) {
 export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url);
   const account = searchParams.get("account") ?? "";
-  const ticker = searchParams.get("ticker") ?? "";
+  // 종목을 여러 개 지우면 ticker 를 반복해서 보낸다(한 번에 삭제).
+  const tickers = searchParams.getAll("ticker");
+  const tickerQuery = tickers.map((ticker) => `ticker=${encodeURIComponent(ticker)}`).join("&");
 
   try {
-    const payload = await fetchFastApiJson<{ deleted?: string; error?: string }>(
-      `/internal/holdings?account=${encodeURIComponent(account)}&ticker=${encodeURIComponent(ticker)}`,
+    const payload = await fetchFastApiJson<{ deleted?: string[]; error?: string }>(
+      `/internal/holdings?account=${encodeURIComponent(account)}&${tickerQuery}`,
       { method: "DELETE" },
     );
     return jsonNoStore(payload);
