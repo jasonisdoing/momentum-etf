@@ -429,6 +429,20 @@ def _settle_last_bar(df: pd.DataFrame, realtime_entry: dict[str, object], countr
     return adjusted
 
 
+def _sorted_by_weight(holdings: list[dict[str, object]]) -> list[dict[str, object]]:
+    """구성종목을 비중 큰 순으로 — 수집 소스마다 순서가 달라(VFLO 는 이름순) 표시 때 한 번 정렬한다.
+
+    비중이 없는 항목은 맨 뒤에 두고, 같은 비중은 원래 순서를 지킨다(안정 정렬). 비중이 전혀 없는
+    ETF(한국 일부)는 순서가 그대로다.
+    """
+
+    def _weight(item: dict[str, object]) -> float | None:
+        value = item.get("weight")
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+    return sorted(holdings, key=lambda item: (_weight(item) is None, -(_weight(item) or 0.0)))
+
+
 def _apply_realtime_snapshot_to_dataframe(
     df: pd.DataFrame,
     *,
@@ -903,7 +917,7 @@ def build_ticker_detail_payload(
                 enriched_item["in_kor_pool"] = component_ticker in kor_pool_tickers
 
                 enriched_holdings.append(enriched_item)
-            holdings = enriched_holdings
+            holdings = _sorted_by_weight(enriched_holdings)
             if etf_info is not None:
                 if bundle_fx_rates is not None:
                     etf_info["fx_rates"] = bundle_fx_rates
