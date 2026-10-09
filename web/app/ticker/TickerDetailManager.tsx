@@ -1312,7 +1312,7 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
                             <div className="tickerDetailInfoSummaryRow">
                               <span className="tickerDetailInfoLabel">iNAV</span>
                               <div className="tickerDetailInfoMain">
-                                <strong>{formatCurrencyPrice(etfInfo?.nav ?? null, "kor")}</strong>
+                                <strong>{formatCurrencyPrice(etfInfo?.nav ?? null, selectedCountryCode)}</strong>
                               </div>
                             </div>
                             <div className="tickerDetailInfoSummaryGrid">
