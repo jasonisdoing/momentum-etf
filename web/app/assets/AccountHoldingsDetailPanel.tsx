@@ -187,6 +187,8 @@ export function AccountHoldingsDetailPanel({
   const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  // 삭제 진행 안내 — 확인 모달 안에서 보여준다(삭제 요청이 끝나고 목록을 다시 받을 때까지 이어진다).
+  const [deleteStatus, setDeleteStatus] = useState<string | null>(null);
   const [isReorderDirty, setIsReorderDirty] = useState(false);
   const qtyRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
@@ -848,7 +850,9 @@ export function AccountHoldingsDetailPanel({
 
     setProcessingId("__deleting__");
     try {
+      let done = 0;
       for (const row of selectedDeletableRows) {
+        setDeleteStatus(`삭제 중… (${done + 1}/${selectedDeletableRows.length})`);
         const params = new URLSearchParams({
           account: summary.account_id,
           ticker: row.ticker,
@@ -858,15 +862,18 @@ export function AccountHoldingsDetailPanel({
         if (!response.ok) {
           throw new Error(payload.error || "삭제 실패");
         }
+        done += 1;
       }
-      setDeleteConfirmOpen(false);
+      setDeleteStatus("목록을 다시 불러오는 중…");
       setSelectedRowIds([]);
       await onReload();
+      setDeleteConfirmOpen(false);
       toast.success("삭제 완료");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "삭제 실패");
     } finally {
       setProcessingId(null);
+      setDeleteStatus(null);
     }
   }, [onReload, selectedDeletableRows, summary.account_id, toast]);
 
@@ -1469,12 +1476,20 @@ export function AccountHoldingsDetailPanel({
               onClick={() => void handleConfirmDeleteSelected()}
               disabled={processingId === "__deleting__"}
             >
-              삭제
+              {processingId === "__deleting__" ? (
+                <>
+                  <IconLoader2 size={14} className="me-1" style={{ animation: "spin 1s linear infinite" }} />
+                  삭제 중…
+                </>
+              ) : (
+                "삭제"
+              )}
             </button>
           </>
         )}
       >
         <div className="d-flex flex-column gap-2">
+          {deleteStatus ? <AppLoadingState compact label={deleteStatus} /> : null}
           <div className="fw-semibold">
             {selectedDeletableRows.length === 1
               ? `${selectedDeletableRows[0].name}(${selectedDeletableRows[0].ticker}) 종목을 삭제합니다.`
