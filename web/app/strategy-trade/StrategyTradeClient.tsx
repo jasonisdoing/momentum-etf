@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 
+import AccountSelect, { type AccountOptionBase } from "../components/AccountSelect";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 
@@ -71,6 +72,8 @@ type StrategyView = {
 
 type View = {
   account_id: string;
+  /** 운용 계좌 선택지 — 한국 종목을 담는 계좌. */
+  accounts: AccountOptionBase[];
   slack_enabled: boolean;
   strategies: StrategyView[];
 };
@@ -442,6 +445,7 @@ export function StrategyTradeClient() {
   const [view, setView] = useState<View | null>(null);
   const [loading, setLoading] = useState(true);
   const [slackSaving, setSlackSaving] = useState(false);
+  const [accountSaving, setAccountSaving] = useState(false);
   const [slackTesting, setSlackTesting] = useState(false);
 
   const load = useCallback(async () => {
@@ -461,6 +465,28 @@ export function StrategyTradeClient() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const changeAccount = useCallback(
+    async (accountId: string) => {
+      setAccountSaving(true);
+      try {
+        const resp = await fetch("/api/strategy-trade", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account_id: accountId }),
+        });
+        const payload = await resp.json();
+        if (!resp.ok) throw new Error(payload?.error ?? "운용 계좌를 저장하지 못했습니다.");
+        setView(payload as View);
+        toast.success("운용 계좌를 바꿨습니다.");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "운용 계좌를 저장하지 못했습니다.");
+      } finally {
+        setAccountSaving(false);
+      }
+    },
+    [toast],
+  );
 
   const toggleSlack = useCallback(
     async (enabled: boolean) => {
@@ -517,6 +543,21 @@ export function StrategyTradeClient() {
   return (
     <PageFrame title="전략 사고팔기">
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* 운용 계좌 — 보유 수량·평균단가를 이 계좌에서 읽는다. 알림 배치도 같은 계좌를 본다. */}
+        <div className="card appCard" style={{ ...cardStyle, flexDirection: "row", alignItems: "center", gap: 14 }}>
+          <AccountSelect
+            accounts={view.accounts}
+            value={view.account_id}
+            onChange={(accountId) => void changeAccount(accountId)}
+            label="운용 계좌"
+            disabled={accountSaving}
+            style={{ minWidth: 260 }}
+          />
+          <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
+            이 계좌의 실제 보유 수량·평균단가로 회차 현황을 계산합니다. 슬랙 알림도 같은 계좌를 봅니다.
+          </span>
+        </div>
+
         {/* 전략 섹션 — 백엔드 정의 순서(KODEX 200 · 코스닥150 · KIWOOM TOP4+) */}
         {view.strategies.map((strategy) => (
           <StrategySection key={strategy.strategy_id} view={strategy} accountId={view.account_id} onSaved={setView} />

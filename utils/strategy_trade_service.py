@@ -6,7 +6,7 @@
 DB(``system_config.strategy_trade_settings.strategies``)가 단일 소스이며 화면에서
 편집한다. 슬랙 스위치는 전역 1개다.
 
-보유 현황은 백테스트가 아니라 ``ACCOUNT_ID`` 계좌의 **실제 보유 수량·평균단가**를
+보유 현황은 백테스트가 아니라 설정에서 고른 계좌(``account_id``)의 **실제 보유 수량·평균단가**를
 읽어 계산한다. 배치·원장은 없다 — 화면을 열 때마다 즉시 역산한다.
 
 회차 역산 규칙 (자세한 근거는 strategy_trade_config 모듈 설명 참고)
@@ -23,7 +23,6 @@ from datetime import datetime
 from typing import Any
 
 from utils.strategy_trade_config import (
-    ACCOUNT_ID,
     EDITABLE_CONFIG_KEYS,
     PRICE_CACHE_TICKER_TYPES,
     STRATEGIES,
@@ -41,7 +40,7 @@ def load_settings() -> dict[str, Any]:
     전략 항목이 없거나 깨졌으면 시드값으로 슬쩍 넘어가지 않고 에러를 낸다 —
     그럴듯한 값이 화면에 떴다가 그대로 저장돼 실제 설정이 덮어써지는 것을 막는다.
 
-    반환: ``{"slack_enabled", "strategies": {sid: {"trigger_pct", "round_quantity"}}}``
+    반환: ``{"account_id", "slack_enabled", "strategies": {sid: {"trigger_pct", "round_quantity"}}}``
     """
     from utils.db_manager import get_db_connection
 
@@ -56,6 +55,12 @@ def load_settings() -> dict[str, Any]:
             f"({_CONFIG_COLLECTION}.{_SETTINGS_KEY}.strategies 를 먼저 저장하세요)."
         )
 
+    account_id = str(doc.get("account_id") or "").strip()
+    if not account_id:
+        raise RuntimeError(
+            f"전략 사고팔기 운용 계좌가 없습니다 ({_CONFIG_COLLECTION}.{_SETTINGS_KEY}.account_id 를 먼저 저장하세요)."
+        )
+
     strategies: dict[str, dict[str, Any]] = {}
     for sid in STRATEGY_IDS:
         entry = stored.get(sid)
@@ -66,7 +71,11 @@ def load_settings() -> dict[str, Any]:
         except ValueError as error:
             raise ValueError(f"'{sid}' 전략 설정이 올바르지 않습니다: {error}") from error
 
-    return {"slack_enabled": bool(doc.get("slack_enabled", False)), "strategies": strategies}
+    return {
+        "account_id": account_id,
+        "slack_enabled": bool(doc.get("slack_enabled", False)),
+        "strategies": strategies,
+    }
 
 
 def save_strategy_settings(strategy_id: str, *, config: dict[str, Any]) -> dict[str, Any]:
@@ -103,16 +112,61 @@ def save_slack_enabled(enabled: bool) -> dict[str, Any]:
     return load_settings()
 
 
-def _load_account_rows() -> dict[str, dict[str, float]]:
+def account_options() -> list[dict[str, Any]]:
+    """운용 계좌 선택지 — 한국 종목을 담는 계좌(국가 kor). 표기용 이름·아이콘·순서를 함께 준다."""
+    from utils.settings_loader import get_account_settings, list_available_accounts
+
+    options: list[dict[str, Any]] = []
+    for account_id in list_available_accounts():
+        settings = get_account_settings(account_id) or {}
+        inner = settings.get("settings") or settings
+        if str(inner.get("country_code") or "").strip().lower() != "kor":
+            continue
+        options.append(
+            {
+                "account_id": account_id,
+                "name": inner.get("name"),
+                "icon": inner.get("icon"),
+                "order": inner.get("order"),
+            }
+        )
+    return sorted(options, key=lambda item: (item["order"] is None, item["order"]))
+
+
+def save_account_id(account_id: str) -> dict[str, Any]:
+    """운용 계좌를 저장하고 전체 설정을 반환한다.
+
+    계좌가 바뀌면 알림 중복 방지 기록(``sent_log``)을 비운다 — 이전 계좌의 체결 상태로
+    새 계좌의 신호를 판정하면 엉뚱한 확인·재알림이 나간다.
+    """
+    from utils.db_manager import get_db_connection
+
+    selected = str(account_id or "").strip()
+    if selected not in {option["account_id"] for option in account_options()}:
+        raise ValueError(f"운용 계좌로 쓸 수 없는 계좌입니다: {account_id}")
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("DB 연결에 실패했습니다.")
+    current = db[_CONFIG_COLLECTION].find_one({"_id": _SETTINGS_KEY}, {"account_id": 1}) or {}
+    update: dict[str, Any] = {"$set": {"account_id": selected, "updated_at": datetime.now().isoformat()}}
+    if current.get("account_id") != selected:
+        update["$unset"] = {"sent_log": "", "sent_log_updated_at": ""}
+    db[_CONFIG_COLLECTION].update_one({"_id": _SETTINGS_KEY}, update, upsert=True)
+    return load_settings()
+
+
+def _load_account_rows(account_id: str) -> dict[str, dict[str, float]]:
     """계좌에서 보유 종목의 수량·평균단가·현재가를 읽는다 (전 전략 공용, 1회 조회).
 
-    ``load_real_holdings_table`` 은 실시간 시세를 반영한 현재가까지 채워준다.
+    ``load_real_holdings_table`` 은 실시간 시세를 반영한 현재가까지 채워준다. 보유가 하나도 없는
+    계좌는 빈 결과다 — 모든 전략이 1호 진입 대기로 나온다.
     """
     from utils.portfolio_io import load_real_holdings_table
 
-    frame = load_real_holdings_table(ACCOUNT_ID)
+    frame = load_real_holdings_table(account_id)
     if frame is None or frame.empty:
-        raise RuntimeError(f"{ACCOUNT_ID} 보유 종목을 불러올 수 없습니다.")
+        return {}
 
     ticker_column = "ticker" if "ticker" in frame.columns else "티커"
     required = {ticker_column, "수량", "평균 매입가", "현재가"}
@@ -382,9 +436,10 @@ def _build_strategy_view(
 def load_strategy_trade_view() -> dict[str, Any]:
     """전 전략의 운용 현황을 화면용으로 묶어 반환한다."""
     settings = load_settings()
-    account_rows = _load_account_rows()
+    account_rows = _load_account_rows(settings["account_id"])
     return {
-        "account_id": ACCOUNT_ID,
+        "account_id": settings["account_id"],
+        "accounts": account_options(),
         "slack_enabled": settings["slack_enabled"],
         "strategies": [_build_strategy_view(sid, settings["strategies"][sid], account_rows) for sid in STRATEGY_IDS],
     }
