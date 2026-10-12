@@ -40,7 +40,8 @@ def load_settings() -> dict[str, Any]:
     전략 항목이 없거나 깨졌으면 시드값으로 슬쩍 넘어가지 않고 에러를 낸다 —
     그럴듯한 값이 화면에 떴다가 그대로 저장돼 실제 설정이 덮어써지는 것을 막는다.
 
-    반환: ``{"account_id", "slack_enabled", "strategies": {sid: {"trigger_pct", "round_quantity"}}}``
+    반환: ``{"slack_enabled", "strategies": {sid: {"account_id", "trigger_pct", "round_quantity", "rounds"}}}``
+    — 운용 계좌(``account_id``)는 전략마다 따로다.
     """
     from utils.db_manager import get_db_connection
 
@@ -55,45 +56,60 @@ def load_settings() -> dict[str, Any]:
             f"({_CONFIG_COLLECTION}.{_SETTINGS_KEY}.strategies 를 먼저 저장하세요)."
         )
 
-    account_id = str(doc.get("account_id") or "").strip()
-    if not account_id:
-        raise RuntimeError(
-            f"전략 사고팔기 운용 계좌가 없습니다 ({_CONFIG_COLLECTION}.{_SETTINGS_KEY}.account_id 를 먼저 저장하세요)."
-        )
-
     strategies: dict[str, dict[str, Any]] = {}
     for sid in STRATEGY_IDS:
         entry = stored.get(sid)
         if not isinstance(entry, dict):
             raise RuntimeError(f"'{sid}' 전략 설정이 없습니다 — 마이그레이션/저장이 필요합니다.")
+        account_id = str(entry.get("account_id") or "").strip()
+        if not account_id:
+            raise RuntimeError(f"'{sid}' 전략의 운용 계좌가 없습니다 — 화면에서 계좌를 골라 저장하세요.")
         try:
-            strategies[sid] = validate_strategy_trade_config({key: entry.get(key) for key in EDITABLE_CONFIG_KEYS})
+            strategies[sid] = {
+                "account_id": account_id,
+                **validate_strategy_trade_config({key: entry.get(key) for key in EDITABLE_CONFIG_KEYS}),
+            }
         except ValueError as error:
             raise ValueError(f"'{sid}' 전략 설정이 올바르지 않습니다: {error}") from error
 
     return {
-        "account_id": account_id,
         "slack_enabled": bool(doc.get("slack_enabled", False)),
         "strategies": strategies,
     }
 
 
 def save_strategy_settings(strategy_id: str, *, config: dict[str, Any]) -> dict[str, Any]:
-    """전략 하나의 파라미터를 저장하고, 전체 설정을 반환한다."""
+    """전략 하나의 운용 계좌와 파라미터를 저장하고, 전체 설정을 반환한다.
+
+    ``config`` 에는 ``account_id`` 와 편집 파라미터가 함께 담긴다. 계좌가 바뀌면 그 전략의
+    알림 중복 방지 기록(``sent_log``)만 비운다 — 이전 계좌의 체결 상태로 새 계좌의 신호를
+    판정하면 엉뚱한 확인·재알림이 나간다.
+    """
     from utils.db_manager import get_db_connection
 
     sid = str(strategy_id or "").strip()
     if sid not in STRATEGY_IDS:
         raise ValueError(f"알 수 없는 전략입니다: {strategy_id}")
+    if not isinstance(config, dict):
+        raise ValueError("설정 형식이 올바르지 않습니다.")
+    account_id = str(config.get("account_id") or "").strip()
+    if account_id not in {option["account_id"] for option in account_options()}:
+        raise ValueError(f"운용 계좌로 쓸 수 없는 계좌입니다: {config.get('account_id')}")
 
-    updates: dict[str, Any] = {"updated_at": datetime.now().isoformat()}
+    updates: dict[str, Any] = {"updated_at": datetime.now().isoformat(), f"strategies.{sid}.account_id": account_id}
     for key, value in validate_strategy_trade_config(config).items():
         updates[f"strategies.{sid}.{key}"] = value
 
     db = get_db_connection()
     if db is None:
         raise RuntimeError("DB 연결에 실패했습니다.")
-    db[_CONFIG_COLLECTION].update_one({"_id": _SETTINGS_KEY}, {"$set": updates}, upsert=True)
+    doc = db[_CONFIG_COLLECTION].find_one({"_id": _SETTINGS_KEY}) or {}
+    update: dict[str, Any] = {"$set": updates}
+    if ((doc.get("strategies") or {}).get(sid) or {}).get("account_id") != account_id:
+        stale = [key for key in (doc.get("sent_log") or {}) if str(key).startswith(f"{sid}:")]
+        if stale:
+            update["$unset"] = {f"sent_log.{key}": "" for key in stale}
+    db[_CONFIG_COLLECTION].update_one({"_id": _SETTINGS_KEY}, update, upsert=True)
     return load_settings()
 
 
@@ -131,29 +147,6 @@ def account_options() -> list[dict[str, Any]]:
             }
         )
     return sorted(options, key=lambda item: (item["order"] is None, item["order"]))
-
-
-def save_account_id(account_id: str) -> dict[str, Any]:
-    """운용 계좌를 저장하고 전체 설정을 반환한다.
-
-    계좌가 바뀌면 알림 중복 방지 기록(``sent_log``)을 비운다 — 이전 계좌의 체결 상태로
-    새 계좌의 신호를 판정하면 엉뚱한 확인·재알림이 나간다.
-    """
-    from utils.db_manager import get_db_connection
-
-    selected = str(account_id or "").strip()
-    if selected not in {option["account_id"] for option in account_options()}:
-        raise ValueError(f"운용 계좌로 쓸 수 없는 계좌입니다: {account_id}")
-
-    db = get_db_connection()
-    if db is None:
-        raise RuntimeError("DB 연결에 실패했습니다.")
-    current = db[_CONFIG_COLLECTION].find_one({"_id": _SETTINGS_KEY}, {"account_id": 1}) or {}
-    update: dict[str, Any] = {"$set": {"account_id": selected, "updated_at": datetime.now().isoformat()}}
-    if current.get("account_id") != selected:
-        update["$unset"] = {"sent_log": "", "sent_log_updated_at": ""}
-    db[_CONFIG_COLLECTION].update_one({"_id": _SETTINGS_KEY}, update, upsert=True)
-    return load_settings()
 
 
 def _load_account_rows(account_id: str) -> dict[str, dict[str, float]]:
@@ -408,6 +401,7 @@ def _build_strategy_view(
     return {
         "strategy_id": strategy_id,
         "label": meta["label"],
+        "account_id": strategy_settings["account_id"],
         "config": {
             "trigger_pct": trigger_pct,
             "round_quantity": round_quantity,
@@ -436,10 +430,18 @@ def _build_strategy_view(
 def load_strategy_trade_view() -> dict[str, Any]:
     """전 전략의 운용 현황을 화면용으로 묶어 반환한다."""
     settings = load_settings()
-    account_rows = _load_account_rows(settings["account_id"])
+    # 계좌 조회는 계좌당 1회 — 같은 계좌를 쓰는 전략끼리 나눠 쓴다.
+    rows_by_account = {
+        account_id: _load_account_rows(account_id)
+        for account_id in {settings["strategies"][sid]["account_id"] for sid in STRATEGY_IDS}
+    }
     return {
-        "account_id": settings["account_id"],
         "accounts": account_options(),
         "slack_enabled": settings["slack_enabled"],
-        "strategies": [_build_strategy_view(sid, settings["strategies"][sid], account_rows) for sid in STRATEGY_IDS],
+        "strategies": [
+            _build_strategy_view(
+                sid, settings["strategies"][sid], rows_by_account[settings["strategies"][sid]["account_id"]]
+            )
+            for sid in STRATEGY_IDS
+        ],
     }
