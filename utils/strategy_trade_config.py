@@ -63,9 +63,6 @@ STRATEGIES: dict[str, dict[str, Any]] = {
 }
 STRATEGY_IDS: tuple[str, ...] = tuple(STRATEGIES)
 
-# 이 전략을 운용하는 계좌. 실제 보유 수량·평균단가를 여기서 읽는다(전 전략 공용).
-ACCOUNT_ID = "kor_account"
-
 # 미보유 종목 현재가의 폴백용 가격 캐시(종목풀) 키 — 1순위는 실시간 시세다. 세 종목 모두 kor_etf 풀에 있다.
 PRICE_CACHE_TICKER_TYPES: tuple[str, ...] = ("kor_etf",)
 

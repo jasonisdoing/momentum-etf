@@ -217,7 +217,7 @@ MIN_TRADING_DAYS = 60
 # 화면 셀렉트는 API 응답으로 받은 목록만 렌더한다(프론트에 복사본을 두지 않는다).
 
 # 풀별 보유 종목 수 선택지 — 실제 값은 DB(pool_settings)의 각 풀 문서에 저장한다.
-TOP_N_HOLD_OPTIONS: tuple[int, ...] = (2, 3, 4, 5, 6, 9)
+TOP_N_HOLD_OPTIONS: tuple[int, ...] = (2, 3, 4, 5, 7, 8)
 
 # 손절 기준(%) — 평단 대비 하락률. **보유종목 손절 알림**(pool_settings_store.
 # STOPLOSS_PCT_OPTIONS)만 쓴다.
@@ -446,7 +446,7 @@ MIN_VALUE_MULT_OPTIONS_BY_COUNTRY: dict[str, tuple[float | None, ...]] = {
 # 종목풀 설정·튜닝이 풀 국가의 목록을 쓴다(`utils/entry_vol_options` 가 국가로 골라 준다).
 # 12·24개월 검증에서 한국 풀만 유효(kor_etf 2.0, kor_stock 1.5~2.0), 미국은 무효(없음 권장).
 ENTRY_VOL_MULT_OPTIONS_BY_COUNTRY: dict[str, tuple[float | None, ...]] = {
-    "kor": (None, 1.0, 2.0, 3.0),
+    "kor": (None, 1.0, 2.0),
     "us": (None,),
     "au": (None,),
 }
