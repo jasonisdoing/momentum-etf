@@ -64,6 +64,8 @@ type RoundRow = {
 type StrategyView = {
   strategy_id: string;
   label: string;
+  /** 이 전략의 운용 계좌 — 전략마다 따로 고른다. */
+  account_id: string;
   config: StrategyConfig;
   index: IndexStatus;
   status: Status;
@@ -71,7 +73,6 @@ type StrategyView = {
 };
 
 type View = {
-  account_id: string;
   /** 운용 계좌 선택지 — 한국 종목을 담는 계좌. */
   accounts: AccountOptionBase[];
   slack_enabled: boolean;
@@ -188,11 +189,11 @@ function RecentLowRow({ index }: { index: IndexStatus }) {
 /** 전략 하나(규칙 편집 + 현재 판단 표) — 4개 전략이 같은 구성을 쓴다. */
 function StrategySection({
   view,
-  accountId,
+  accounts,
   onSaved,
 }: {
   view: StrategyView;
-  accountId: string;
+  accounts: AccountOptionBase[];
   onSaved: (next: View) => void;
 }) {
   const toast = useToast();
@@ -209,6 +210,7 @@ function StrategySection({
   const [draft, setDraft] = useState(String(config.trigger_pct));
   const [qtyDraft, setQtyDraft] = useState(String(config.round_quantity));
   const [roundsDraft, setRoundsDraft] = useState(String(config.rounds));
+  const [accountDraft, setAccountDraft] = useState(view.account_id);
   const [saving, setSaving] = useState(false);
 
   // 서버가 최신 값을 돌려주면(다른 전략 저장 포함) 초안도 그 값으로 동기화한다.
@@ -216,12 +218,14 @@ function StrategySection({
     setDraft(String(config.trigger_pct));
     setQtyDraft(String(config.round_quantity));
     setRoundsDraft(String(config.rounds));
-  }, [config.trigger_pct, config.round_quantity, config.rounds]);
+    setAccountDraft(view.account_id);
+  }, [config.trigger_pct, config.round_quantity, config.rounds, view.account_id]);
 
   const isDraftDirty =
     Number(draft) !== config.trigger_pct ||
     Number(qtyDraft) !== config.round_quantity ||
-    Number(roundsDraft) !== config.rounds;
+    Number(roundsDraft) !== config.rounds ||
+    accountDraft !== view.account_id;
 
   const saveConfig = useCallback(async () => {
     const value = Number(draft);
@@ -239,7 +243,7 @@ function StrategySection({
       toast.error("회차 수는 1~12 사이 정수여야 합니다.");
       return;
     }
-    const parsed = { trigger_pct: value, round_quantity: qty, rounds };
+    const parsed = { account_id: accountDraft, trigger_pct: value, round_quantity: qty, rounds };
     setSaving(true);
     try {
       const resp = await fetch("/api/strategy-trade", {
@@ -256,7 +260,7 @@ function StrategySection({
     } finally {
       setSaving(false);
     }
-  }, [draft, qtyDraft, roundsDraft, onSaved, toast, view.label, view.strategy_id]);
+  }, [accountDraft, draft, qtyDraft, roundsDraft, onSaved, toast, view.label, view.strategy_id]);
 
   return (
     <div className="card appCard" style={cardStyle}>
@@ -277,6 +281,15 @@ function StrategySection({
           />
           %
         </span>
+        <AccountSelect
+          accounts={accounts}
+          value={accountDraft}
+          onChange={setAccountDraft}
+          label="계좌"
+          disabled={saving}
+          style={{ minWidth: 220 }}
+          labelStyle={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+        />
         <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
           회차당 수량
           <input
@@ -316,7 +329,6 @@ function StrategySection({
         >
           {saving ? "저장 중…" : "저장"}
         </button>
-        <span style={{ color: "var(--text-muted)" }}>계좌 {accountId}</span>
       </div>
 
       {/* 현재 판단 요약 */}
@@ -445,7 +457,6 @@ export function StrategyTradeClient() {
   const [view, setView] = useState<View | null>(null);
   const [loading, setLoading] = useState(true);
   const [slackSaving, setSlackSaving] = useState(false);
-  const [accountSaving, setAccountSaving] = useState(false);
   const [slackTesting, setSlackTesting] = useState(false);
 
   const load = useCallback(async () => {
@@ -465,28 +476,6 @@ export function StrategyTradeClient() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  const changeAccount = useCallback(
-    async (accountId: string) => {
-      setAccountSaving(true);
-      try {
-        const resp = await fetch("/api/strategy-trade", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ account_id: accountId }),
-        });
-        const payload = await resp.json();
-        if (!resp.ok) throw new Error(payload?.error ?? "운용 계좌를 저장하지 못했습니다.");
-        setView(payload as View);
-        toast.success("운용 계좌를 바꿨습니다.");
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "운용 계좌를 저장하지 못했습니다.");
-      } finally {
-        setAccountSaving(false);
-      }
-    },
-    [toast],
-  );
 
   const toggleSlack = useCallback(
     async (enabled: boolean) => {
@@ -543,24 +532,9 @@ export function StrategyTradeClient() {
   return (
     <PageFrame title="전략 사고팔기">
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* 운용 계좌 — 보유 수량·평균단가를 이 계좌에서 읽는다. 알림 배치도 같은 계좌를 본다. */}
-        <div className="card appCard" style={{ ...cardStyle, flexDirection: "row", alignItems: "center", gap: 14 }}>
-          <AccountSelect
-            accounts={view.accounts}
-            value={view.account_id}
-            onChange={(accountId) => void changeAccount(accountId)}
-            label="운용 계좌"
-            disabled={accountSaving}
-            style={{ minWidth: 260 }}
-          />
-          <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
-            이 계좌의 실제 보유 수량·평균단가로 회차 현황을 계산합니다. 슬랙 알림도 같은 계좌를 봅니다.
-          </span>
-        </div>
-
         {/* 전략 섹션 — 백엔드 정의 순서(KODEX 200 · 코스닥150 · KIWOOM TOP4+) */}
         {view.strategies.map((strategy) => (
-          <StrategySection key={strategy.strategy_id} view={strategy} accountId={view.account_id} onSaved={setView} />
+          <StrategySection key={strategy.strategy_id} view={strategy} accounts={view.accounts} onSaved={setView} />
         ))}
 
         {/* 슬랙 알림 (전역 스위치) */}
