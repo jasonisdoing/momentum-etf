@@ -273,8 +273,12 @@ def _load_ticker_status(
     change_pct = (current / prev_close - 1.0) * 100.0
 
     # 최근 3개월(92일) 저점 — 회차 지정가가 어느 층에 걸리는지 가늠하는 기준선.
+    # 가격 캐시는 확정 종가라 오늘 장중 현재가가 새 저점이어도 빠져 있다 — 현재가가 더 낮으면
+    # 오늘이 저점이다(그대로 두면 현재가가 3개월 저점보다 낮은 값으로 표시됐다).
     low_window = close[close.index >= close.index[-1] - pd.Timedelta(days=92)]
-    low_date = low_window.idxmin()
+    low_value, low_date = float(low_window.min()), low_window.idxmin()
+    if current < low_value:
+        low_value, low_date = current, today
 
     return {
         "name": name,
@@ -284,7 +288,7 @@ def _load_ticker_status(
         "change_pct": round(change_pct, 2),
         # 1호 진입선 — 전일 종가 대비 -간격%, 호가 단위 반올림.
         "buy_trigger": _round_to_tick(prev_close * (1.0 - float(trigger_pct) / 100.0), is_etf),
-        "recent_low": round(float(low_window.min())),
+        "recent_low": round(low_value),
         "recent_low_date": low_date.strftime("%Y-%m-%d"),
         "recent_low_label": "3개월 저점",
     }
