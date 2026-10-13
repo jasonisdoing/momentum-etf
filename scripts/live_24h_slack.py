@@ -109,11 +109,40 @@ def _select_representative(quotes_by_symbol, toss_symbol, hyperliquid_symbol):
     return hyperliquid_quote, "하이퍼리퀴드", _hyperliquid_change_from_previous_close(hyperliquid_quote)
 
 
+# 필수 시장지표 — 야후 시세라 요청 과다로 일시적으로 비는 일이 있다. 비면 잠깐 뒤 다시 받는다.
+_REQUIRED_INDICATORS = ("NQ_FUT", "USDKRW")
+_FETCH_ATTEMPTS = 3
+_RETRY_DELAY_SECONDS = 30
+
+
+def _load_quotes_by_symbol() -> dict[str, dict]:
+    """시세를 받아 심볼별로 돌려준다. 필수 지표가 비면 간격을 두고 다시 받는다(최대 3회).
+
+    실패한 조회는 캐시에 남지 않으므로 다시 불러도 같은 실패를 되풀이하지 않는다. 끝까지 비면
+    마지막 결과를 그대로 돌려주고, 호출부가 필수 지표 누락으로 실패시킨다(임의 값 대체 없음).
+    """
+    quotes_by_symbol: dict[str, dict] = {}
+    for attempt in range(1, _FETCH_ATTEMPTS + 1):
+        quotes = load_live_24h_quotes().get("quotes", [])
+        quotes_by_symbol = {str(quote.get("symbol") or ""): quote for quote in quotes}
+        missing = [symbol for symbol in _REQUIRED_INDICATORS if symbol not in quotes_by_symbol]
+        if not missing:
+            return quotes_by_symbol
+        if attempt < _FETCH_ATTEMPTS:
+            logger.warning(
+                "필수 시장지표 시세 없음(%s) — %d초 뒤 다시 시도합니다 (%d/%d)",
+                ", ".join(missing),
+                _RETRY_DELAY_SECONDS,
+                attempt,
+                _FETCH_ATTEMPTS,
+            )
+            time.sleep(_RETRY_DELAY_SECONDS)
+    return quotes_by_symbol
+
+
 def main():
     load_env_if_present()
-    data = load_live_24h_quotes()
-    quotes = data.get("quotes", [])
-    quotes_by_symbol = {str(quote.get("symbol") or ""): quote for quote in quotes}
+    quotes_by_symbol = _load_quotes_by_symbol()
 
     rows = []
     # VIX 는 슬랙 알림 대상에서 제외한다(/live-24h 화면에는 그대로 표시).
