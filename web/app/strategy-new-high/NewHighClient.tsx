@@ -937,7 +937,7 @@ export function NewHighClient() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             settings: draft,
-            tickers: chartRows.slice(0, 9).map((row) => row.ticker),
+            tickers: chartRows.map((row) => row.ticker),
           }),
         });
         const payload = (await response.json()) as { charts?: HoldingChartData[]; months?: number; error?: string };
