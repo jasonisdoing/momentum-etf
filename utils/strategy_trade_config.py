@@ -2,8 +2,8 @@
 
 전략 규칙
 ---------
-**전략 3개(KODEX 200 / KODEX 코스닥150 / KIWOOM 삼성SK그룹TOP4+)를 같은 계좌에서
-독립 운용**한다. 각 전략은 자기 종목 **하나만** 설정된 회차 수까지 분할 매수한다.
+**전략 여러 개를 독립 운용**한다. 전략마다 종목(kor_etf 풀의 ETF)·운용 계좌를 따로 고르고, 각 전략은
+자기 종목 **하나만** 설정된 회차 수까지 분할 매수한다.
 
 - 자금 배분: 회차마다 같은 **수량**(``round_quantity``, 전략별 편집)을 산다.
   수량이 같아야 계좌의 (보유 수량, 평균단가)만으로 회차 상태를 역산할 수 있다.
@@ -33,38 +33,11 @@ from __future__ import annotations
 
 from typing import Any
 
-# 전략 정의 — id 순서가 화면 표시 순서(상단부터)다. 전략당 종목 하나(티커 고정).
-# seed_config 는 최초 1회 DB 를 심을 때만 쓴다. 평상시 읽기 경로는 DB 만 본다
-# (값이 없으면 시드로 슬쩍 넘어가지 않고 에러를 낸다).
-# round_quantity 시드는 회차당 약 550만원 기준 어림값 — 화면에서 계좌에 맞게 조정한다.
-STRATEGIES: dict[str, dict[str, Any]] = {
-    # is_etf: 호가 단위 결정용 — ETF 는 5원 고정, 주식은 가격대별(50원~1,000원).
-    "kospi200": {
-        "label": "KODEX 200",
-        "ticker": "069500",
-        "name": "KODEX 200",
-        "is_etf": True,
-        "seed_config": {"trigger_pct": 5.0, "round_quantity": 50, "rounds": 4},
-    },
-    "kosdaq150": {
-        "label": "KODEX 코스닥150",
-        "ticker": "229200",
-        "name": "KODEX 코스닥150",
-        "is_etf": True,
-        "seed_config": {"trigger_pct": 5.0, "round_quantity": 400, "rounds": 4},
-    },
-    "kiwoom_top4": {
-        "label": "KIWOOM 삼성SK그룹TOP4+",
-        "ticker": "0234N0",
-        "name": "KIWOOM 삼성SK그룹TOP4+",
-        "is_etf": True,
-        "seed_config": {"trigger_pct": 5.0, "round_quantity": 500, "rounds": 4},
-    },
-}
-STRATEGY_IDS: tuple[str, ...] = tuple(STRATEGIES)
-
-# 미보유 종목 현재가의 폴백용 가격 캐시(종목풀) 키 — 1순위는 실시간 시세다. 세 종목 모두 kor_etf 풀에 있다.
-PRICE_CACHE_TICKER_TYPES: tuple[str, ...] = ("kor_etf",)
+# 전략 정의(종목·계좌·파라미터)는 DB(`system_config.strategy_trade_settings.strategies`)가 단일 소스다 —
+# 화면에서 종목을 고르고 전략을 추가·삭제한다. 고를 수 있는 종목은 이 종목풀의 ETF 뿐이다
+# (가격 이력을 그 풀의 가격 캐시에서 읽고, ETF 라 호가 단위가 5원 고정이다).
+ETF_POOL = "kor_etf"
+PRICE_CACHE_TICKER_TYPES: tuple[str, ...] = (ETF_POOL,)
 
 # 화면에서 편집하는 파라미터 키 — DB 문서에 이 키로 저장된다.
 EDITABLE_CONFIG_KEYS: tuple[str, ...] = ("trigger_pct", "round_quantity", "rounds")
