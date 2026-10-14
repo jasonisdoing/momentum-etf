@@ -51,6 +51,13 @@ export function formatCurrencyPrice(value: number | null | undefined, countryOrC
     }).format(value)}`;
   }
 
+  if (normalized === "cad") {
+    return `C$${new Intl.NumberFormat("en-CA", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)}`;
+  }
+
   if (normalized === "eur") {
     return `€${new Intl.NumberFormat("de-DE", {
       minimumFractionDigits: 2,
