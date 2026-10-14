@@ -33,6 +33,8 @@ def infer_yahoo_symbol_currency(symbol: str) -> str:
         return "CNY"
     if normalized.endswith(".AX"):
         return "AUD"
+    if normalized.endswith(".TO"):
+        return "CAD"
     return "USD"
 
 
@@ -351,7 +353,7 @@ def _is_worldstock_symbol(symbol: str) -> bool:
 
 
 def _is_yahoo_exchange_symbol(symbol: str) -> bool:
-    return _normalize_upper(symbol).endswith((".TW", ".L", ".SZ", ".SS"))
+    return _normalize_upper(symbol).endswith((".TW", ".L", ".SZ", ".SS", ".TO"))
 
 
 # 한국 정규장 마감(15:30 KST) 이후에 개장하는 시장의 야후 심볼 접미사 — 유럽·미주.

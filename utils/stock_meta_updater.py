@@ -9,6 +9,7 @@ import pandas as pd
 import requests  # noqa: F401  # 타입 힌트/하위 호환을 위해 유지
 import yfinance as yf
 
+from services.alps_us_service import fetch_alps_us_holdings
 from services.ark_us_service import fetch_ark_us_holdings
 from services.direxion_us_service import fetch_direxion_us_holdings
 from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
@@ -693,6 +694,7 @@ def fetch_us_etf_holdings(ticker: str) -> dict[str, Any] | None:
         fetch_vanguard_us_holdings,
         fetch_direxion_us_holdings,
         fetch_roundhill_us_holdings,
+        fetch_alps_us_holdings,
     ):
         official = fetch_official(ticker)
         if official is not None:

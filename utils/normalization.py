@@ -16,6 +16,7 @@ _BLOOMBERG_EXCHANGE_SUFFIXES = {
     "KS": "KS",
     "KQ": "KQ",
     "TT": "TW",
+    "CN": "TO",
 }
 
 
