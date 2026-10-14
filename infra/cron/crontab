@@ -28,8 +28,10 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 20 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
 # 하루 1회 전체 재수집(--full) — 수정주가(배당·분할) 재정렬용. 매시 라인은 증분만 수행한다.
 10 17 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh_full python scripts/stock_price_cache_updater.py --full >> logs/cron/cache_refresh_full.log 2>&1
-45 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py reference_meta_updater python scripts/stock_reference_meta_updater.py >> logs/cron/reference_meta_updater.log 2>&1
-50 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py price_metrics_updater python scripts/stock_price_metrics_updater.py >> logs/cron/price_metrics_updater.log 2>&1
+# 개장 전 준비(07:30~08:35)는 시세·수집 레인에서 한 번에 하나씩 돈다 — 앞 작업이 끝난 뒤에 다음 시각이 오도록
+# 평균 실행시간(메타 약 10분·미국 ETF 약 11분)보다 간격을 둔다. 매시 20분 가격 캐시 갱신(약 8분)과 겹치는 시각도 피한다.
+40 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py reference_meta_updater python scripts/stock_reference_meta_updater.py >> logs/cron/reference_meta_updater.log 2>&1
+55 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py price_metrics_updater python scripts/stock_price_metrics_updater.py >> logs/cron/price_metrics_updater.log 2>&1
 */10 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py data_aggregate python scripts/collect_data.py >> logs/cron/data_aggregate.log 2>&1
 40 9 * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
 10 16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
@@ -37,10 +39,10 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 0 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py us_market_stocks python scripts/update_us_market_stocks.py >> logs/cron/us_market_stocks.log 2>&1
 10 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py aus_market_stocks python scripts/update_aus_market_stocks.py >> logs/cron/aus_market_stocks.log 2>&1
 # 한국 지수 구성종목 — 공식 API 가 없어 추종 ETF(KODEX 200 / KODEX 코스닥150) 보유종목을 명단으로 쓴다.
-20 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py kor_market_stocks python scripts/update_kor_market_stocks.py >> logs/cron/kor_market_stocks.log 2>&1
+15 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py kor_market_stocks python scripts/update_kor_market_stocks.py >> logs/cron/kor_market_stocks.log 2>&1
 # 한국 배당주 지표 — 위 배치가 적재한 KOSPI200 명단을 유니버스로 읽으므로 반드시 그 뒤에 돈다.
 30 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py kor_dividend_stocks python scripts/update_kor_dividend_stocks.py >> logs/cron/kor_dividend_stocks.log 2>&1
-40 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py us_market_etfs python scripts/update_us_market_etfs.py >> logs/cron/us_market_etfs.log 2>&1
+35 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py us_market_etfs python scripts/update_us_market_etfs.py >> logs/cron/us_market_etfs.log 2>&1
 # 시장 폭(ADR) — 한국 마감(15:30) 뒤 종가 확정 시각. 코스피 200 / 코스닥 150 의 일별 상승·하락 종목수를 적립한다.
 30 16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_breadth python scripts/collect_market_breadth.py >> logs/cron/market_breadth.log 2>&1
 # 07:00 은 미국 마감(KST 새벽 05~06시) 뒤. 금요일 미국 장은 토요일 새벽에 끝나므로 화~토(2-6)에 돈다.

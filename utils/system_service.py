@@ -248,9 +248,9 @@ SCHEDULE_ROWS = [
         "group": "개장 전 준비",
         "job": "종목 메타 업데이트",
         "target": "이름·상장일·마켓·업종 + ETF holdings·배당",
-        "cadence": "평일 07:45 KST",
+        "cadence": "평일 07:40 KST",
         "command": "python scripts/stock_reference_meta_updater.py",
-        "schedule": {"minutes": [45], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
+        "schedule": {"minutes": [40], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "no": 14,
@@ -258,9 +258,9 @@ SCHEDULE_ROWS = [
         "group": "개장 전 준비",
         "job": "종목 가격지표 업데이트",
         "target": "거래량·기간수익률·backtest",
-        "cadence": "평일 07:50 KST",
+        "cadence": "평일 07:55 KST",
         "command": "python scripts/stock_price_metrics_updater.py",
-        "schedule": {"minutes": [50], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
+        "schedule": {"minutes": [55], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "no": 15,
@@ -288,9 +288,9 @@ SCHEDULE_ROWS = [
         "group": "개장 전 준비",
         "job": "한국 지수 구성종목",
         "target": "KOSPI200 (KODEX 200) · KOSDAQ150 (KODEX 코스닥150)",
-        "cadence": "평일 08:20 KST",
+        "cadence": "평일 08:15 KST",
         "command": "python scripts/update_kor_market_stocks.py",
-        "schedule": {"minutes": [20], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
+        "schedule": {"minutes": [15], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "no": 18,
@@ -298,7 +298,7 @@ SCHEDULE_ROWS = [
         "group": "개장 전 준비",
         "job": "한국 배당주 지표",
         "target": "저장된 KOSPI200 구성종목의 배당·재무 (DART + 네이버)",
-        # 구성종목 배치(08:20) 뒤에 돈다 — 그 명단을 유니버스로 읽는다.
+        # 구성종목 배치(08:15) 뒤에 돈다 — 그 명단을 유니버스로 읽는다.
         "cadence": "평일 08:30 KST",
         "command": "python scripts/update_kor_dividend_stocks.py",
         "schedule": {"minutes": [30], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
@@ -309,9 +309,9 @@ SCHEDULE_ROWS = [
         "group": "개장 전 준비",
         "job": "미국 ETF 업데이트",
         "target": "KIS 미국 마스터 → 거래대금 상위 1,000개 수익률",
-        "cadence": "평일 08:40 KST",
+        "cadence": "평일 08:35 KST",
         "command": "python scripts/update_us_market_etfs.py",
-        "schedule": {"minutes": [40], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
+        "schedule": {"minutes": [35], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     # ⑤ 상시 운영 — 자동으로 돌고 손댈 일이 거의 없다.
     {
