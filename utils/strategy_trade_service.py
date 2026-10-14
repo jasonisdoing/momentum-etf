@@ -91,6 +91,17 @@ def etf_options() -> list[dict[str, str]]:
     return [option for option in options if option["ticker"] and option["name"]]
 
 
+def resolve_etf(ticker: str) -> dict[str, str]:
+    """티커로 전략에 쓸 ETF 를 찾는다 — 종목풀(kor_etf)에 있는 것만. 없으면 ValueError."""
+    wanted = str(ticker or "").strip().upper()
+    if not wanted:
+        raise ValueError("티커를 입력하세요.")
+    for option in etf_options():
+        if option["ticker"].upper() == wanted:
+            return option
+    raise ValueError(f"{ETF_POOL} 종목풀에 없는 종목입니다: {ticker} — 종목풀에 먼저 추가하세요.")
+
+
 def _validated_target(config: dict[str, Any], *, own_strategy_id: str | None) -> dict[str, Any]:
     """편집 입력에서 계좌·종목·파라미터를 검증해 저장 값으로 돌려준다. 실패 시 ValueError."""
     if not isinstance(config, dict):
@@ -98,10 +109,8 @@ def _validated_target(config: dict[str, Any], *, own_strategy_id: str | None) ->
     account_id = str(config.get("account_id") or "").strip()
     if account_id not in {option["account_id"] for option in account_options()}:
         raise ValueError(f"운용 계좌로 쓸 수 없는 계좌입니다: {config.get('account_id')}")
-    ticker = str(config.get("ticker") or "").strip()
-    etf = next((option for option in etf_options() if option["ticker"] == ticker), None)
-    if etf is None:
-        raise ValueError(f"{ETF_POOL} 종목풀에 없는 종목입니다: {config.get('ticker')}")
+    etf = resolve_etf(str(config.get("ticker") or ""))
+    ticker = etf["ticker"]
     # 같은 계좌·같은 종목을 두 전략이 쓰면 같은 보유로 회차를 두 번 세게 된다.
     for sid, other in load_settings()["strategies"].items():
         if sid != own_strategy_id and other["account_id"] == account_id and other["ticker"] == ticker:
@@ -480,7 +489,6 @@ def load_strategy_trade_view() -> dict[str, Any]:
     }
     return {
         "accounts": account_options(),
-        "etfs": etf_options(),
         "slack_enabled": settings["slack_enabled"],
         "strategies": [
             _build_strategy_view(sid, entry, rows_by_account[entry["account_id"]])

@@ -1,12 +1,13 @@
 """전략 사고팔기(분할 매수/매도) 운용 현황 API — 종목 1개씩 운용하는 전략."""
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
 from utils.strategy_trade_service import (
     add_strategy,
     delete_strategy,
     load_strategy_trade_view,
+    resolve_etf,
     save_slack_enabled,
     save_strategy_settings,
 )
@@ -20,6 +21,15 @@ def get_strategy_trade(
 ) -> dict:
     """전략별로 고른 계좌의 실제 보유 기준 회차 현황·매수/매도 지정가를 반환한다."""
     return load_strategy_trade_view()
+
+
+@router.get("/resolve")
+def get_strategy_trade_resolve(
+    ticker: str = Query(...),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """티커 확인 — 종목풀(kor_etf)에 있는 ETF 면 {ticker, name}, 없으면 에러."""
+    return resolve_etf(ticker)
 
 
 @router.put("/settings")
