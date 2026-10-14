@@ -24,9 +24,8 @@ from typing import Any
 
 from utils.strategy_trade_config import (
     EDITABLE_CONFIG_KEYS,
+    ETF_POOL,
     PRICE_CACHE_TICKER_TYPES,
-    STRATEGIES,
-    STRATEGY_IDS,
     validate_strategy_trade_config,
 )
 
@@ -40,8 +39,8 @@ def load_settings() -> dict[str, Any]:
     전략 항목이 없거나 깨졌으면 시드값으로 슬쩍 넘어가지 않고 에러를 낸다 —
     그럴듯한 값이 화면에 떴다가 그대로 저장돼 실제 설정이 덮어써지는 것을 막는다.
 
-    반환: ``{"slack_enabled", "strategies": {sid: {"account_id", "trigger_pct", "round_quantity", "rounds"}}}``
-    — 운용 계좌(``account_id``)는 전략마다 따로다.
+    반환: ``{"slack_enabled", "strategies": {sid: {"account_id", "ticker", "name", "trigger_pct",
+    "round_quantity", "rounds"}}}`` — 종목·운용 계좌는 전략마다 따로이고, 전략 목록은 DB 가 정한다.
     """
     from utils.db_manager import get_db_connection
 
@@ -57,16 +56,19 @@ def load_settings() -> dict[str, Any]:
         )
 
     strategies: dict[str, dict[str, Any]] = {}
-    for sid in STRATEGY_IDS:
-        entry = stored.get(sid)
+    for sid, entry in stored.items():
         if not isinstance(entry, dict):
-            raise RuntimeError(f"'{sid}' 전략 설정이 없습니다 — 마이그레이션/저장이 필요합니다.")
+            raise RuntimeError(f"'{sid}' 전략 설정이 올바르지 않습니다 — 화면에서 다시 저장하세요.")
         account_id = str(entry.get("account_id") or "").strip()
-        if not account_id:
-            raise RuntimeError(f"'{sid}' 전략의 운용 계좌가 없습니다 — 화면에서 계좌를 골라 저장하세요.")
+        ticker = str(entry.get("ticker") or "").strip()
+        name = str(entry.get("name") or "").strip()
+        if not account_id or not ticker or not name:
+            raise RuntimeError(f"'{sid}' 전략의 운용 계좌·종목이 없습니다 — 화면에서 골라 저장하세요.")
         try:
             strategies[sid] = {
                 "account_id": account_id,
+                "ticker": ticker,
+                "name": name,
                 **validate_strategy_trade_config({key: entry.get(key) for key in EDITABLE_CONFIG_KEYS}),
             }
         except ValueError as error:
@@ -78,38 +80,97 @@ def load_settings() -> dict[str, Any]:
     }
 
 
-def save_strategy_settings(strategy_id: str, *, config: dict[str, Any]) -> dict[str, Any]:
-    """전략 하나의 운용 계좌와 파라미터를 저장하고, 전체 설정을 반환한다.
+def etf_options() -> list[dict[str, str]]:
+    """전략에 쓸 수 있는 종목 — kor_etf 종목풀의 ETF(티커·이름)."""
+    from utils.stock_list_io import get_etfs
 
-    ``config`` 에는 ``account_id`` 와 편집 파라미터가 함께 담긴다. 계좌가 바뀌면 그 전략의
-    알림 중복 방지 기록(``sent_log``)만 비운다 — 이전 계좌의 체결 상태로 새 계좌의 신호를
-    판정하면 엉뚱한 확인·재알림이 나간다.
-    """
-    from utils.db_manager import get_db_connection
+    options = [
+        {"ticker": str(item.get("ticker") or "").strip(), "name": str(item.get("name") or "").strip()}
+        for item in get_etfs(ETF_POOL) or []
+    ]
+    return [option for option in options if option["ticker"] and option["name"]]
 
-    sid = str(strategy_id or "").strip()
-    if sid not in STRATEGY_IDS:
-        raise ValueError(f"알 수 없는 전략입니다: {strategy_id}")
+
+def _validated_target(config: dict[str, Any], *, own_strategy_id: str | None) -> dict[str, Any]:
+    """편집 입력에서 계좌·종목·파라미터를 검증해 저장 값으로 돌려준다. 실패 시 ValueError."""
     if not isinstance(config, dict):
         raise ValueError("설정 형식이 올바르지 않습니다.")
     account_id = str(config.get("account_id") or "").strip()
     if account_id not in {option["account_id"] for option in account_options()}:
         raise ValueError(f"운용 계좌로 쓸 수 없는 계좌입니다: {config.get('account_id')}")
+    ticker = str(config.get("ticker") or "").strip()
+    etf = next((option for option in etf_options() if option["ticker"] == ticker), None)
+    if etf is None:
+        raise ValueError(f"{ETF_POOL} 종목풀에 없는 종목입니다: {config.get('ticker')}")
+    # 같은 계좌·같은 종목을 두 전략이 쓰면 같은 보유로 회차를 두 번 세게 된다.
+    for sid, other in load_settings()["strategies"].items():
+        if sid != own_strategy_id and other["account_id"] == account_id and other["ticker"] == ticker:
+            raise ValueError(f"이 계좌의 {etf['name']}({ticker}) 전략이 이미 있습니다.")
+    return {"account_id": account_id, "ticker": ticker, "name": etf["name"], **validate_strategy_trade_config(config)}
 
-    updates: dict[str, Any] = {"updated_at": datetime.now().isoformat(), f"strategies.{sid}.account_id": account_id}
-    for key, value in validate_strategy_trade_config(config).items():
-        updates[f"strategies.{sid}.{key}"] = value
+
+def _save_strategy(strategy_id: str, target: dict[str, Any], *, previous: dict[str, Any] | None) -> None:
+    from utils.db_manager import get_db_connection
 
     db = get_db_connection()
     if db is None:
         raise RuntimeError("DB 연결에 실패했습니다.")
-    doc = db[_CONFIG_COLLECTION].find_one({"_id": _SETTINGS_KEY}) or {}
-    update: dict[str, Any] = {"$set": updates}
-    if ((doc.get("strategies") or {}).get(sid) or {}).get("account_id") != account_id:
-        stale = [key for key in (doc.get("sent_log") or {}) if str(key).startswith(f"{sid}:")]
-        if stale:
-            update["$unset"] = {f"sent_log.{key}": "" for key in stale}
+    update: dict[str, Any] = {
+        "$set": {
+            "updated_at": datetime.now().isoformat(),
+            **{f"strategies.{strategy_id}.{k}": v for k, v in target.items()},
+        }
+    }
+    # 계좌나 종목이 바뀌면 그 전략의 알림 중복 방지 기록을 비운다 — 이전 보유 상태로 새 신호를
+    # 판정하면 엉뚱한 확인·재알림이 나간다.
+    if previous is not None and (previous["account_id"], previous["ticker"]) != (
+        target["account_id"],
+        target["ticker"],
+    ):
+        update["$unset"] = _sent_log_unset(db, strategy_id)
+        if not update["$unset"]:
+            del update["$unset"]
     db[_CONFIG_COLLECTION].update_one({"_id": _SETTINGS_KEY}, update, upsert=True)
+
+
+def _sent_log_unset(db: Any, strategy_id: str) -> dict[str, str]:
+    doc = db[_CONFIG_COLLECTION].find_one({"_id": _SETTINGS_KEY}, {"sent_log": 1}) or {}
+    return {f"sent_log.{key}": "" for key in (doc.get("sent_log") or {}) if str(key).startswith(f"{strategy_id}:")}
+
+
+def save_strategy_settings(strategy_id: str, *, config: dict[str, Any]) -> dict[str, Any]:
+    """전략 하나의 종목·운용 계좌·파라미터를 저장하고, 전체 설정을 반환한다."""
+    sid = str(strategy_id or "").strip()
+    current = load_settings()["strategies"]
+    if sid not in current:
+        raise ValueError(f"알 수 없는 전략입니다: {strategy_id}")
+    _save_strategy(sid, _validated_target(config, own_strategy_id=sid), previous=current[sid])
+    return load_settings()
+
+
+def add_strategy(config: dict[str, Any]) -> dict[str, Any]:
+    """전략을 하나 추가하고, 전체 설정을 반환한다."""
+    from uuid import uuid4
+
+    target = _validated_target(config, own_strategy_id=None)
+    _save_strategy(f"s{uuid4().hex[:8]}", target, previous=None)
+    return load_settings()
+
+
+def delete_strategy(strategy_id: str) -> dict[str, Any]:
+    """전략을 삭제하고(알림 중복 방지 기록 포함), 전체 설정을 반환한다."""
+    from utils.db_manager import get_db_connection
+
+    sid = str(strategy_id or "").strip()
+    if sid not in load_settings()["strategies"]:
+        raise ValueError(f"알 수 없는 전략입니다: {strategy_id}")
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("DB 연결에 실패했습니다.")
+    unset = {f"strategies.{sid}": "", **_sent_log_unset(db, sid)}
+    db[_CONFIG_COLLECTION].update_one(
+        {"_id": _SETTINGS_KEY}, {"$set": {"updated_at": datetime.now().isoformat()}, "$unset": unset}
+    )
     return load_settings()
 
 
@@ -219,33 +280,12 @@ def _load_unheld_closes(tickers: list[str]) -> dict[str, float]:
     return closes
 
 
-def _round_to_tick(price: float, is_etf: bool) -> float:
-    """KRX 호가 단위로 반올림한다 — 지정가는 이 단위로만 주문할 수 있다.
-
-    ETF 는 5원 고정, 주식은 가격대별(2023-01 개편 기준).
-    """
-    if is_etf:
-        tick = 5
-    elif price < 2_000:
-        tick = 1
-    elif price < 5_000:
-        tick = 5
-    elif price < 20_000:
-        tick = 10
-    elif price < 50_000:
-        tick = 50
-    elif price < 200_000:
-        tick = 100
-    elif price < 500_000:
-        tick = 500
-    else:
-        tick = 1_000
-    return round(price / tick) * tick
+def _round_to_tick(price: float) -> float:
+    """KRX ETF 호가 단위(5원)로 반올림한다 — 지정가는 이 단위로만 주문할 수 있다."""
+    return round(price / 5) * 5
 
 
-def _load_ticker_status(
-    ticker: str, name: str, trigger_pct: float, live_close: float | None, is_etf: bool
-) -> dict[str, Any]:
+def _load_ticker_status(ticker: str, name: str, trigger_pct: float, live_close: float | None) -> dict[str, Any]:
     """판정 기준 시세 — 이 전략 종목 자신의 현재가·전일 종가·1호 진입선·최근 저점.
 
     (이전에는 코스피/코스닥 지수를 썼지만, 이제 판정·표시 모두 자기 종목 가격이다)
@@ -287,7 +327,7 @@ def _load_ticker_status(
         "prev_close": round(prev_close),
         "change_pct": round(change_pct, 2),
         # 1호 진입선 — 전일 종가 대비 -간격%, 호가 단위 반올림.
-        "buy_trigger": _round_to_tick(prev_close * (1.0 - float(trigger_pct) / 100.0), is_etf),
+        "buy_trigger": _round_to_tick(prev_close * (1.0 - float(trigger_pct) / 100.0)),
         "recent_low": round(low_value),
         "recent_low_date": low_date.strftime("%Y-%m-%d"),
         "recent_low_label": "3개월 저점",
@@ -300,21 +340,19 @@ def _build_strategy_view(
     account_rows: dict[str, dict[str, float]],
 ) -> dict[str, Any]:
     """전략 하나의 운용 현황(회차 표·상태)을 계좌 보유에서 역산한다."""
-    meta = STRATEGIES[strategy_id]
-    ticker = str(meta["ticker"])
-    name = str(meta["name"])
+    ticker = str(strategy_settings["ticker"])
+    name = str(strategy_settings["name"])
     trigger_pct = float(strategy_settings["trigger_pct"])
     round_quantity = int(strategy_settings["round_quantity"])
     max_rounds = int(strategy_settings["rounds"])
     down_ratio = 1.0 - trigger_pct / 100.0
     up_ratio = 1.0 + trigger_pct / 100.0
 
-    is_etf = bool(meta["is_etf"])
     account = account_rows.get(ticker) or {}
     quantity = int(account.get("quantity") or 0)
     avg_price = float(account.get("avg_price") or 0)
     live_close = float(account.get("close") or 0) or _load_unheld_closes([ticker]).get(ticker)
-    index_status = _load_ticker_status(ticker, name, trigger_pct, live_close, is_etf)
+    index_status = _load_ticker_status(ticker, name, trigger_pct, live_close)
     close = float(index_status["close"])
 
     # ── 회차 역산 — 수량으로 진입 회차 수, 평균단가로 1호가 ──
@@ -338,7 +376,7 @@ def _build_strategy_view(
         is_next = round_no == held_rounds + 1
         entry = entry_price(round_no)
         if held and entry is not None:
-            sell_limit = _round_to_tick(entry * up_ratio, is_etf)
+            sell_limit = _round_to_tick(entry * up_ratio)
             rows.append(
                 {
                     "round": round_no,
@@ -365,7 +403,7 @@ def _build_strategy_view(
             buy_limit = first_entry * down_ratio ** (round_no - 1)
         else:
             buy_limit = float(index_status["prev_close"]) * down_ratio**round_no
-        buy_limit = _round_to_tick(buy_limit, is_etf)
+        buy_limit = _round_to_tick(buy_limit)
         rows.append(
             {
                 "round": round_no,
@@ -404,7 +442,8 @@ def _build_strategy_view(
     last_entry = entry_price(held_rounds) if held_rounds else None
     return {
         "strategy_id": strategy_id,
-        "label": meta["label"],
+        "label": name,
+        "ticker": ticker,
         "account_id": strategy_settings["account_id"],
         "config": {
             "trigger_pct": trigger_pct,
@@ -437,15 +476,14 @@ def load_strategy_trade_view() -> dict[str, Any]:
     # 계좌 조회는 계좌당 1회 — 같은 계좌를 쓰는 전략끼리 나눠 쓴다.
     rows_by_account = {
         account_id: _load_account_rows(account_id)
-        for account_id in {settings["strategies"][sid]["account_id"] for sid in STRATEGY_IDS}
+        for account_id in {entry["account_id"] for entry in settings["strategies"].values()}
     }
     return {
         "accounts": account_options(),
+        "etfs": etf_options(),
         "slack_enabled": settings["slack_enabled"],
         "strategies": [
-            _build_strategy_view(
-                sid, settings["strategies"][sid], rows_by_account[settings["strategies"][sid]["account_id"]]
-            )
-            for sid in STRATEGY_IDS
+            _build_strategy_view(sid, entry, rows_by_account[entry["account_id"]])
+            for sid, entry in settings["strategies"].items()
         ],
     }

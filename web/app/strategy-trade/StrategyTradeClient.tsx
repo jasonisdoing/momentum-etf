@@ -66,15 +66,20 @@ type StrategyView = {
   label: string;
   /** 이 전략의 운용 계좌 — 전략마다 따로 고른다. */
   account_id: string;
+  ticker: string;
   config: StrategyConfig;
   index: IndexStatus;
   status: Status;
   rounds: RoundRow[];
 };
 
+type EtfOption = { ticker: string; name: string };
+
 type View = {
   /** 운용 계좌 선택지 — 한국 종목을 담는 계좌. */
   accounts: AccountOptionBase[];
+  /** 전략에 쓸 수 있는 종목 — kor_etf 종목풀의 ETF. */
+  etfs: EtfOption[];
   slack_enabled: boolean;
   strategies: StrategyView[];
 };
@@ -186,14 +191,135 @@ function RecentLowRow({ index }: { index: IndexStatus }) {
   );
 }
 
-/** 전략 하나(규칙 편집 + 현재 판단 표) — 4개 전략이 같은 구성을 쓴다. */
+/** 종목 셀렉트 — kor_etf 종목풀의 ETF 중에서 고른다. */
+function EtfSelect({
+  etfs,
+  value,
+  onChange,
+  disabled,
+}: {
+  etfs: EtfOption[];
+  value: string;
+  onChange: (ticker: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="appLabeledField" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <span className="appLabeledFieldLabel">종목</span>
+      <select
+        className="form-select form-select-sm"
+        style={{ minWidth: 240 }}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {value === "" ? <option value="">종목을 고르세요</option> : null}
+        {etfs.map((etf) => (
+          <option key={etf.ticker} value={etf.ticker}>
+            {etf.ticker} {etf.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/** 전략 추가 — 종목·계좌·파라미터를 정해 새 전략 하나를 만든다. */
+function AddStrategyCard({
+  accounts,
+  etfs,
+  onSaved,
+}: {
+  accounts: AccountOptionBase[];
+  etfs: EtfOption[];
+  onSaved: (next: View) => void;
+}) {
+  const toast = useToast();
+  const [ticker, setTicker] = useState("");
+  const [account, setAccount] = useState(accounts[0]?.account_id ?? "");
+  const [pct, setPct] = useState("5");
+  const [qty, setQty] = useState("");
+  const [rounds, setRounds] = useState("4");
+  const [saving, setSaving] = useState(false);
+
+  const add = useCallback(async () => {
+    const pctValue = Number(pct);
+    const qtyValue = Number(qty);
+    const roundsValue = Number(rounds);
+    if (!ticker) return void toast.error("종목을 고르세요.");
+    if (!Number.isFinite(pctValue) || pctValue < PCT_MIN || pctValue > PCT_MAX) {
+      return void toast.error(`매매 간격은 ${PCT_MIN}~${PCT_MAX} 사이 숫자여야 합니다.`);
+    }
+    if (!Number.isInteger(qtyValue) || qtyValue < 1) return void toast.error("회차당 수량은 1 이상의 정수여야 합니다.");
+    if (!Number.isInteger(roundsValue) || roundsValue < 1 || roundsValue > 12) {
+      return void toast.error("회차 수는 1~12 사이 정수여야 합니다.");
+    }
+    setSaving(true);
+    try {
+      const resp = await fetch("/api/strategy-trade", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          add_strategy: { account_id: account, ticker, trigger_pct: pctValue, round_quantity: qtyValue, rounds: roundsValue },
+        }),
+      });
+      const payload = await resp.json();
+      if (!resp.ok) throw new Error(payload?.error ?? "전략을 추가하지 못했습니다.");
+      onSaved(payload as View);
+      setTicker("");
+      setQty("");
+      toast.success("전략을 추가했습니다.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "전략을 추가하지 못했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  }, [account, onSaved, pct, qty, rounds, ticker, toast]);
+
+  return (
+    <div className="card appCard" style={cardStyle}>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", fontSize: "var(--fs-sm)" }}>
+        <span style={{ fontWeight: 800, fontSize: "var(--fs-base)" }}>전략 추가</span>
+        <EtfSelect etfs={etfs} value={ticker} onChange={setTicker} disabled={saving} />
+        <AccountSelect
+          accounts={accounts}
+          value={account}
+          onChange={setAccount}
+          label="계좌"
+          disabled={saving}
+          style={{ minWidth: 220 }}
+          labelStyle={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+        />
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          매매 간격
+          <input type="number" step="0.1" style={pctInputStyle} value={pct} disabled={saving} onChange={(e) => setPct(e.target.value)} />%
+        </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          회차당 수량
+          <input type="number" step="1" min={1} style={pctInputStyle} value={qty} disabled={saving} onChange={(e) => setQty(e.target.value)} />주
+        </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          회차 수
+          <input type="number" step="1" min={1} max={12} style={pctInputStyle} value={rounds} disabled={saving} onChange={(e) => setRounds(e.target.value)} />회
+        </span>
+        <button type="button" className="btn btn-sm btn-dark" disabled={saving} onClick={() => void add()}>
+          {saving ? "추가 중…" : "추가"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 전략 하나(규칙 편집 + 현재 판단 표) — 모든 전략이 같은 구성을 쓴다. */
 function StrategySection({
   view,
   accounts,
+  etfs,
   onSaved,
 }: {
   view: StrategyView;
   accounts: AccountOptionBase[];
+  etfs: EtfOption[];
   onSaved: (next: View) => void;
 }) {
   const toast = useToast();
@@ -211,6 +337,8 @@ function StrategySection({
   const [qtyDraft, setQtyDraft] = useState(String(config.round_quantity));
   const [roundsDraft, setRoundsDraft] = useState(String(config.rounds));
   const [accountDraft, setAccountDraft] = useState(view.account_id);
+  const [tickerDraft, setTickerDraft] = useState(view.ticker);
+  const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // 서버가 최신 값을 돌려주면(다른 전략 저장 포함) 초안도 그 값으로 동기화한다.
@@ -219,13 +347,15 @@ function StrategySection({
     setQtyDraft(String(config.round_quantity));
     setRoundsDraft(String(config.rounds));
     setAccountDraft(view.account_id);
-  }, [config.trigger_pct, config.round_quantity, config.rounds, view.account_id]);
+    setTickerDraft(view.ticker);
+  }, [config.trigger_pct, config.round_quantity, config.rounds, view.account_id, view.ticker]);
 
   const isDraftDirty =
     Number(draft) !== config.trigger_pct ||
     Number(qtyDraft) !== config.round_quantity ||
     Number(roundsDraft) !== config.rounds ||
-    accountDraft !== view.account_id;
+    accountDraft !== view.account_id ||
+    tickerDraft !== view.ticker;
 
   const saveConfig = useCallback(async () => {
     const value = Number(draft);
@@ -243,7 +373,7 @@ function StrategySection({
       toast.error("회차 수는 1~12 사이 정수여야 합니다.");
       return;
     }
-    const parsed = { account_id: accountDraft, trigger_pct: value, round_quantity: qty, rounds };
+    const parsed = { account_id: accountDraft, ticker: tickerDraft, trigger_pct: value, round_quantity: qty, rounds };
     setSaving(true);
     try {
       const resp = await fetch("/api/strategy-trade", {
@@ -260,13 +390,34 @@ function StrategySection({
     } finally {
       setSaving(false);
     }
-  }, [accountDraft, draft, qtyDraft, roundsDraft, onSaved, toast, view.label, view.strategy_id]);
+  }, [accountDraft, tickerDraft, draft, qtyDraft, roundsDraft, onSaved, toast, view.label, view.strategy_id]);
+
+  const deleteStrategy = useCallback(async () => {
+    if (!window.confirm(`"${view.label}" 전략을 삭제할까요? (이 전략의 알림 기록도 함께 지워집니다)`)) return;
+    setDeleting(true);
+    try {
+      const resp = await fetch("/api/strategy-trade", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ delete_strategy: view.strategy_id }),
+      });
+      const payload = await resp.json();
+      if (!resp.ok) throw new Error(payload?.error ?? "전략을 삭제하지 못했습니다.");
+      onSaved(payload as View);
+      toast.success(`${view.label} 전략을 삭제했습니다.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "전략을 삭제하지 못했습니다.");
+    } finally {
+      setDeleting(false);
+    }
+  }, [onSaved, toast, view.label, view.strategy_id]);
 
   return (
     <div className="card appCard" style={cardStyle}>
       {/* 전략 제목 + 규칙 편집 */}
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", fontSize: "var(--fs-sm)" }}>
         <span style={{ fontWeight: 800, fontSize: "var(--fs-base)" }}>{view.label}</span>
+        <EtfSelect etfs={etfs} value={tickerDraft} onChange={setTickerDraft} disabled={saving || deleting} />
         <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
           매매 간격
           <input
@@ -328,6 +479,14 @@ function StrategySection({
           onClick={() => void saveConfig()}
         >
           {saving ? "저장 중…" : "저장"}
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm btn-outline-danger"
+          disabled={saving || deleting}
+          onClick={() => void deleteStrategy()}
+        >
+          {deleting ? "삭제 중…" : "삭제"}
         </button>
       </div>
 
@@ -532,10 +691,12 @@ export function StrategyTradeClient() {
   return (
     <PageFrame title="전략 사고팔기">
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* 전략 섹션 — 백엔드 정의 순서(KODEX 200 · 코스닥150 · KIWOOM TOP4+) */}
+        {/* 전략 섹션 — DB 에 저장된 순서 */}
         {view.strategies.map((strategy) => (
-          <StrategySection key={strategy.strategy_id} view={strategy} accounts={view.accounts} onSaved={setView} />
+          <StrategySection key={strategy.strategy_id} view={strategy} accounts={view.accounts} etfs={view.etfs} onSaved={setView} />
         ))}
+
+        <AddStrategyCard accounts={view.accounts} etfs={view.etfs} onSaved={setView} />
 
         {/* 슬랙 알림 (전역 스위치) */}
         <div className="card appCard" style={cardStyle}>
