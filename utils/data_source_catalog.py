@@ -34,6 +34,7 @@ HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "direxion_us_api": "Direxion 미국 공식 API",
     "roundhill_us_csv": "Roundhill 미국 공식 CSV",
     "alps_us_api": "ALPS 미국 공식 API",
+    "marketdesk_us_csv": "MarketDesk 공식 전체 CSV",
     "yfinance_holdings": "yfinance (상위 10종목)",
     "naver_etf_component": "네이버 ETF 구성종목",
 }
@@ -253,6 +254,7 @@ US_HOLDINGS_FALLBACK_ORDER: list[str] = [
     "direxion_us_api",
     "roundhill_us_csv",
     "alps_us_api",
+    "marketdesk_us_csv",
     "yfinance_holdings",
 ]
 
@@ -321,6 +323,7 @@ US_OFFICIAL_SOURCES: dict[str, str] = {
     "Direxion": "direxion_us_api",
     "Roundhill": "roundhill_us_csv",
     "Alerian (ALPS)": "alps_us_api",
+    "MarketDesk": "marketdesk_us_csv",
 }
 
 
@@ -441,8 +444,13 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
         "alpsfunds.com/_hcms/api/getData → MarketingAPI/Holding/{ticker}/Full",
         "services/alps_us_service.py",
     ),
+    "marketdesk_us_csv": (
+        "marketdesk.filepoint.live/assets/data/FilepointMktDesk.40YH.YH_ETF_Holdings.csv",
+        "services/marketdesk_us_service.py",
+    ),
 }
 _SOURCE_NOTES: dict[str, str] = {
+    "marketdesk_us_csv": "공식 상품 명단에서 ETF를 확인하고 Filepoint 공시의 전체 주식·현금을 받는다. 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "alps_us_api": "공식 상품 명단에서 ETF를 확인하고 전체 주식·현금 목록을 받는다. 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "roundhill_us_csv": "공식 ETF 명단과 최신 공시 날짜의 전체 보유 CSV에서 주식·스왑·현금을 받는다. 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "direxion_us_api": "공식 ETF 명단과 사이트의 공개 요청 설정으로 주식·스왑·현금 전체 목록을 받는다. 공시 비중을 그대로 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
