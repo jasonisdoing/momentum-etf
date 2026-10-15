@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
-from io import BytesIO
 from typing import Any
-from xml.etree import ElementTree
-from zipfile import ZipFile
 
 from config import CACHE_TTL_SLOW
+from services.spdr_holdings_service import parse_spdr_holdings_xlsx, parse_spdr_table_rows, read_spdr_xlsx_rows
 from utils.http_session import shared_session
 from utils.normalization import normalize_exchange_symbol
 from utils.ttl_cache import TtlCache
@@ -17,66 +15,12 @@ from utils.us_etf_market_service import load_us_security_exchange_map
 
 _DATA_URL = "https://www.ssga.com/library-content/products/fund-data/etfs/us"
 _PRODUCT_MAP_CACHE = TtlCache(CACHE_TTL_SLOW, name="spdr_us_products", max_entries=1)
-_NS = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
-
-
-def _xlsx_rows(content: bytes) -> list[dict[str, str]]:
-    """공식 두 파일의 첫 시트를 읽고 빈 행 경계를 보존한다."""
-    with ZipFile(BytesIO(content)) as archive:
-        strings = []
-        if "xl/sharedStrings.xml" in archive.namelist():
-            root = ElementTree.fromstring(archive.read("xl/sharedStrings.xml"))
-            strings = ["".join(node.text or "" for node in item.findall(".//s:t", _NS)) for item in root]
-        sheet = ElementTree.fromstring(archive.read("xl/worksheets/sheet1.xml"))
-    rows: list[dict[str, str]] = []
-    previous = 0
-    for row in sheet.findall("s:sheetData/s:row", _NS):
-        number = int(row.attrib["r"])
-        if number > previous + 1:
-            rows.append({})
-        cells = {}
-        for cell in row.findall("s:c", _NS):
-            if cell.find("s:f", _NS) is not None:
-                raise ValueError("SPDR 공식 파일에 계산되지 않은 수식이 있습니다.")
-            kind = cell.attrib.get("t")
-            value = cell.findtext("s:v", namespaces=_NS)
-            if kind == "s" and value is not None:
-                value = strings[int(value)]
-            elif kind == "inlineStr":
-                value = "".join(node.text or "" for node in cell.findall("s:is/s:t", _NS))
-            elif kind == "e":
-                raise ValueError("SPDR 공식 파일에 오류 셀이 있습니다.")
-            if value is not None and value.strip():
-                cells[cell.attrib["r"].rstrip("0123456789")] = value.strip()
-        rows.append(cells)
-        previous = number
-    return rows
-
-
-def _table_rows(rows: list[dict[str, str]], required: set[str]) -> list[dict[str, str]]:
-    header_index = next((index for index, row in enumerate(rows) if required <= set(row.values())), None)
-    if header_index is None:
-        raise ValueError("SPDR 공식 파일에 필수 컬럼이 없습니다.")
-    headers = rows[header_index]
-    result = []
-    for row in rows[header_index + 1 :]:
-        if not row:
-            if result:
-                break
-            continue
-        # 상품 명단의 두 번째 헤더에는 필수 컬럼의 값이 없다.
-        if not result and not any(row.get(column) for column, title in headers.items() if title in required):
-            continue
-        result.append({title: row.get(column, "") for column, title in headers.items()})
-    if not result:
-        raise ValueError("SPDR 공식 파일의 명단이 비었습니다.")
-    return result
 
 
 def _fetch_product_map() -> dict[str, str]:
     response = shared_session.get(f"{_DATA_URL}/spdr-product-data-us-en.xlsx", timeout=25)
     response.raise_for_status()
-    products = _table_rows(_xlsx_rows(response.content), {"Ticker", "Name", "CUSIP", "Asset Class"})
+    products = parse_spdr_table_rows(read_spdr_xlsx_rows(response.content), {"Ticker", "Name", "CUSIP", "Asset Class"})
     result = {}
     for product in products:
         ticker = product["Ticker"].replace("®", "").replace("™", "").upper()
@@ -125,12 +69,9 @@ def fetch_spdr_us_holdings(ticker: str) -> dict[str, Any] | None:
         return None
     response = shared_session.get(f"{_DATA_URL}/holdings-daily-us-en-{ticker_norm.lower()}.xlsx", timeout=25)
     response.raise_for_status()
-    rows = _xlsx_rows(response.content)
-    identity = {row["A"]: row.get("B", "") for row in rows if row.get("A") in {"Ticker Symbol:", "Holdings:"}}
-    if identity.get("Ticker Symbol:") != ticker_norm:
-        raise ValueError(f"SPDR {ticker_norm} 구성종목 파일의 티커가 다릅니다.")
-    reference_date = datetime.strptime(identity["Holdings:"], "As of %d-%b-%Y").date().isoformat()
-    raw_items = _table_rows(rows, {"Name", "Ticker", "Identifier", "Weight", "Local Currency"})
+    reference_date, raw_items = parse_spdr_holdings_xlsx(
+        response.content, ticker_norm, {"Name", "Ticker", "Identifier", "Weight", "Local Currency"}
+    )
     us_listings = load_us_security_exchange_map()
     items = [_normalize_holding(raw, us_listings) for raw in raw_items]
     return {

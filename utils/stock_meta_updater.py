@@ -21,6 +21,7 @@ from services.invesco_us_service import fetch_invesco_us_holdings
 from services.ishares_us_service import fetch_ishares_us_holdings
 from services.marketdesk_us_service import fetch_marketdesk_us_holdings
 from services.roundhill_us_service import fetch_roundhill_us_holdings
+from services.spdr_au_service import fetch_spdr_au_holdings
 from services.spdr_us_service import fetch_spdr_us_holdings
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
 from services.tortoise_us_service import fetch_tortoise_us_holdings
@@ -677,6 +678,15 @@ def _registered_etf_holdings(tickers: list[str]) -> dict[str, list[dict[str, Any
     return found
 
 
+def fetch_au_etf_holdings(ticker: str) -> dict[str, Any] | None:
+    """호주 ETF 구성종목을 공식 수집 경로에서 조회한다."""
+    for fetch_official in (fetch_betashares_holdings, fetch_vanguard_au_holdings, fetch_spdr_au_holdings):
+        official = fetch_official(ticker)
+        if official is not None:
+            return official
+    return fetch_yfinance_holdings(ticker, is_australian=True)
+
+
 def fetch_us_etf_holdings(ticker: str) -> dict[str, Any] | None:
     """실물 상품은 공식 공시, 연동 운용사는 전체 목록, 다른 운용사는 Yahoo 상위 목록을 사용한다."""
     for fetch_official in (
@@ -714,7 +724,7 @@ def _feeder_etf_holdings(ticker: str) -> list[dict[str, Any]] | None:
     except Exception as exc:
         get_app_logger().debug(f"[yfinance] {symbol} 종류 확인 실패: {exc}")
         return None
-    inner = fetch_yfinance_holdings(ticker, is_australian=True) if is_australian else fetch_us_etf_holdings(ticker)
+    inner = fetch_au_etf_holdings(ticker) if is_australian else fetch_us_etf_holdings(ticker)
     return list(inner["holdings"]) if inner else None
 
 
@@ -736,7 +746,7 @@ def expand_nested_etf_holdings(holdings_info: dict[str, Any] | None, own_ticker:
     merged: dict[str, dict[str, Any]] = {}
     nested: list[dict[str, Any]] = []
 
-    def add(item: dict[str, Any], weight: float) -> None:
+    def add(item: dict[str, Any], weight: float | None) -> None:
         # 상장 시장이 다른 같은 티커와 시세 심볼 없는 채권·파생상품을 합치지 않는다.
         key = (
             f"unpriced:{len(merged)}"
@@ -744,15 +754,18 @@ def expand_nested_etf_holdings(holdings_info: dict[str, Any] | None, own_ticker:
             else str(item.get("yahoo_symbol") or item.get("ticker") or "")
         )
         if key in merged:
-            merged[key]["weight"] += weight
+            existing_weight = merged[key]["weight"]
+            merged[key]["weight"] = (
+                existing_weight + weight if existing_weight is not None and weight is not None else None
+            )
         else:
             merged[key] = {**item, "weight": weight}
 
     for item in outer:
         ticker = str(item.get("ticker") or "")
-        weight = float(item.get("weight") or 0.0)
+        weight = float(item["weight"]) if item.get("weight") is not None else None
         inner = None
-        if ticker and ticker != own_ticker and item.get("price_lookup_supported") is not False:
+        if weight is not None and ticker and ticker != own_ticker and item.get("price_lookup_supported") is not False:
             inner = registered.get(ticker)
             if not inner and weight >= _NESTED_FEEDER_MIN_WEIGHT:
                 inner = _feeder_etf_holdings(ticker)
@@ -761,9 +774,10 @@ def expand_nested_etf_holdings(holdings_info: dict[str, Any] | None, own_ticker:
             continue
         covered = 0.0
         for sub in inner:
-            sub_weight = weight * float(sub.get("weight") or 0.0) / 100.0
+            sub_weight = weight * float(sub["weight"]) / 100.0 if sub.get("weight") is not None else None
             add(sub, sub_weight)
-            covered += sub_weight
+            if sub_weight is not None:
+                covered += sub_weight
         nested.append({"ticker": ticker, "weight": round(weight, 2), "covered_weight": round(covered, 2)})
 
     if not nested:
@@ -787,18 +801,7 @@ def _refresh_overseas_etf_meta_cache(
     name_norm = str(name or "").strip() or ticker_norm
     country_norm = str(country_code or "").strip().lower()
 
-    holdings_info = None
-
-    # 호주 ETF는 발행사 공식 소스(BetaShares CSV → Vanguard API)를 먼저 쓰고
-    # 둘 다 없을 때만 yfinance 로 폴백한다. 공식 소스가 구성종목 국가까지 알려준다.
-    if country_norm == "au":
-        holdings_info = fetch_betashares_holdings(ticker_norm)
-        if not holdings_info:
-            holdings_info = fetch_vanguard_au_holdings(ticker_norm)
-        if not holdings_info:
-            holdings_info = fetch_yfinance_holdings(ticker_norm, is_australian=True)
-    else:
-        holdings_info = fetch_us_etf_holdings(ticker_norm)
+    holdings_info = fetch_au_etf_holdings(ticker_norm) if country_norm == "au" else fetch_us_etf_holdings(ticker_norm)
 
     # 구성종목 수집이 실패해도 배당·상장일·순자산 등 나머지 메타는 저장한다.
     # (여기서 return 하면 캐시 문서 자체가 만들어지지 않아 화면이 통째로 빈다.)
