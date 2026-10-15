@@ -77,7 +77,9 @@ def build_message(items: list[dict[str, Any]], previous: dict[str, str] | None) 
     lines = []
     if changed:
         lines.append(f"<!channel> 🔔 *추세 전환 {len(changed)}건* — {', '.join(changed)}")
-    lines.append(f"*📊 시장 추세* ({now})" + ("" if previous is not None else " · 첫 실행이라 어제와 비교하지 않습니다"))
+    lines.append(
+        f"*📊 시장 추세* ({now})" + ("" if previous is not None else " · 첫 실행이라 어제와 비교하지 않습니다")
+    )
     for item in items:
         regime = item["current_regime"]
         days = item.get("current_regime_days")
