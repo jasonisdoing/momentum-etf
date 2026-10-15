@@ -19,6 +19,7 @@ HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "physical_asset_disclosure": "공식 실물 보유 목록 (주식 구성종목 없음)",
     "betashares_csv": "BetaShares 공식 CSV",
     "vanguard_au_api": "Vanguard AU 공식 API",
+    "spdr_au_xlsx": "SPDR 호주 공식 XLSX",
     "invesco_us_api": "Invesco 미국 공식 API",
     "ishares_us_csv": "iShares 미국 공식 CSV",
     "spdr_us_xlsx": "SPDR 미국 공식 XLSX",
@@ -236,7 +237,7 @@ DATA_SOURCES: list[dict[str, Any]] = [
 ]
 
 # ETF 구성종목 수집 순서 — 실제 코드(_refresh_overseas_etf_meta_cache / fetch_us_etf_holdings)와 일치시킨다.
-AU_HOLDINGS_FALLBACK_ORDER: list[str] = ["betashares_csv", "vanguard_au_api", "yfinance_holdings"]
+AU_HOLDINGS_FALLBACK_ORDER: list[str] = ["betashares_csv", "vanguard_au_api", "spdr_au_xlsx", "yfinance_holdings"]
 US_HOLDINGS_FALLBACK_ORDER: list[str] = [
     "physical_asset_disclosure",
     "invesco_us_api",
@@ -307,6 +308,11 @@ ISSUER_UNKNOWN = "기타"
 
 # 코드에 공식 연동이 들어 있는 발행사 → 수집 소스. 배치가 아직 안 돌아 캐시에 옛 소스(야후)가 남아 있어도
 # 행은 연동된 공식 소스로 보이고, 아직 그 소스로 받지 못한 ETF 는 「미수집」으로 센다.
+AU_OFFICIAL_SOURCES: dict[str, str] = {
+    "BetaShares": "betashares_csv",
+    "Vanguard": "vanguard_au_api",
+    "SPDR (State Street)": "spdr_au_xlsx",
+}
 US_OFFICIAL_SOURCES: dict[str, str] = {
     "Invesco": "invesco_us_api",
     "iShares (BlackRock)": "ishares_us_csv",
@@ -448,8 +454,13 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
         "marketdesk.filepoint.live/assets/data/FilepointMktDesk.40YH.YH_ETF_Holdings.csv",
         "services/marketdesk_us_service.py",
     ),
+    "spdr_au_xlsx": (
+        "ssga.com/library-content/products/fund-data/etfs/apac/holdings-daily-au-en-{ticker}.xlsx",
+        "services/spdr_au_service.py",
+    ),
 }
 _SOURCE_NOTES: dict[str, str] = {
+    "spdr_au_xlsx": "공식 호주 ETF 명단과 일별 전체 구성종목 XLSX를 사용한다. 현금·선물과 미공시 비중을 원본 그대로 보존하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "marketdesk_us_csv": "공식 상품 명단에서 ETF를 확인하고 Filepoint 공시의 전체 주식·현금을 받는다. 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "alps_us_api": "공식 상품 명단에서 ETF를 확인하고 전체 주식·현금 목록을 받는다. 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "roundhill_us_csv": "공식 ETF 명단과 최신 공시 날짜의 전체 보유 CSV에서 주식·스왑·현금을 받는다. 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
@@ -559,7 +570,12 @@ def build_data_source_payload() -> dict[str, Any]:
     au_rows = _load_etf_rows("aus_etf")
     us_rows = _load_etf_rows("us_etf")
     au_entries = _build_issuer_sources(
-        au_rows, category="ETF 상세 - 호주", country="au", table=AU_ISSUER_KEYWORDS, order=AU_HOLDINGS_FALLBACK_ORDER
+        au_rows,
+        category="ETF 상세 - 호주",
+        country="au",
+        table=AU_ISSUER_KEYWORDS,
+        order=AU_HOLDINGS_FALLBACK_ORDER,
+        official=AU_OFFICIAL_SOURCES,
     )
     us_entries = _build_issuer_sources(
         us_rows,
