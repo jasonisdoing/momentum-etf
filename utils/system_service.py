@@ -36,6 +36,7 @@ SystemAction = Literal[
     "leverage_ma_cross",
     "holdings_alarm",
     "strategy_trade_notify",
+    "market_trend_notify",
     "db_backup",
 ]
 
@@ -313,9 +314,21 @@ SCHEDULE_ROWS = [
         "command": "python scripts/update_us_market_etfs.py",
         "schedule": {"minutes": [35], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
-    # ⑤ 상시 운영 — 자동으로 돌고 손댈 일이 거의 없다.
     {
         "no": 20,
+        "key": "market_trend_notify",
+        "group": "개장 전 준비",
+        "job": "시장 추세 알림",
+        "target": "코스피~미국달러 7개의 추세 목록 · 어제와 달라지면 @channel",
+        "run_location": "SERVER/LOCAL",
+        # 미국 장이 마감(05~06시)된 뒤라 지수 일봉이 확정돼 있다. 월요일은 직전 금요일 이후 바뀐 일봉이 없어 뺀다.
+        "cadence": "화~토 08:00 KST",
+        "command": "python scripts/market_trend_notify.py",
+        "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_TUE_SAT},
+    },
+    # ⑤ 상시 운영 — 자동으로 돌고 손댈 일이 거의 없다.
+    {
+        "no": 21,
         "key": "live_24h_slack",
         "group": "상시 운영",
         "job": "24H 시세 알림",
@@ -325,7 +338,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
     },
     {
-        "no": 21,
+        "no": 22,
         "key": "db_backup",
         "group": "상시 운영",
         "job": "DB 백업",
@@ -359,6 +372,7 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "leverage_ma_cross": "scripts/leverage_recommend_ma_cross.py",
     "holdings_alarm": "scripts/holdings_alarm.py",
     "strategy_trade_notify": "scripts/strategy_trade_notify.py",
+    "market_trend_notify": "scripts/market_trend_notify.py",
     "db_backup": "scripts/backup_mongo_full.py",
 }
 

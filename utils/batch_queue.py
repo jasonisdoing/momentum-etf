@@ -69,6 +69,8 @@ LANE_LIGHT_JOBS: set[str] = {
     "holdings_alarm",
     # 보유 수량·현재가 읽기 + 알림 판정(실행 3초)만 한다 — 시세 수집을 기다릴 이유가 없다.
     "strategy_trade_notify",
+    # 지수 일봉 계산 + 슬랙 1건 — 시세 수집(가격 캐시 쓰기)과 겹치지 않는다.
+    "market_trend_notify",
 }
 LANE_LOCAL_JOBS: set[str] = set(LOCAL_ONLY_JOBS)
 
