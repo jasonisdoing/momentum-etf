@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import math
 import re
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -31,49 +32,123 @@ def _fetch_product_map() -> dict[str, str]:
     response = shared_session.get(f"{_BASE_URL}/explore", timeout=25)
     response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")
+    tables = [
+        props
+        for value in _page_records(soup).values()
+        for props in _page_props(value)
+        if "fundPathPrefix" in props and "rows" in props
+    ]
+    if len(tables) != 1 or tables[0]["fundPathPrefix"] != "funds":
+        raise ValueError("Global X 공식 전체 상품 명단을 확인할 수 없습니다.")
     products = {}
-    for anchor in soup.select("a[href]"):
-        parsed = urlparse(urljoin(_BASE_URL, anchor["href"]))
-        match = re.fullmatch(r"/funds/([A-Za-z0-9]+)", parsed.path)
-        if parsed.scheme == "https" and parsed.netloc == "www.globalxetfs.com" and match:
-            ticker = match[1].upper()
-            products[ticker] = f"{_BASE_URL}/funds/{ticker.lower()}"
+    for row in tables[0]["rows"]:
+        ticker = row["ticker"]
+        if re.fullmatch(r"[A-Z0-9]+", ticker) is None or ticker in products:
+            raise ValueError("Global X 공식 상품 명단의 티커가 잘못됐거나 중복됐습니다.")
+        products[ticker] = f"{_BASE_URL}/funds/{ticker.lower()}"
     if not products:
         raise ValueError("Global X 공식 상품 명단에 ETF가 없습니다.")
     return products
 
 
-def _find_holdings_url(html: str, ticker: str) -> tuple[str, str]:
+def _page_records(soup: BeautifulSoup) -> dict[str, Any]:
+    """공식 페이지가 전달한 다운로드 설정을 JSON으로 읽는다."""
+    chunks = []
+    for script in soup.select("script"):
+        match = re.fullmatch(r"self\.__next_f\.push\((.*)\)", script.get_text(), re.DOTALL)
+        if match:
+            entry = json.loads(match[1])
+            if entry[0] == 1:
+                chunks.append(entry[1])
+    records = {}
+    for line in "".join(chunks).splitlines():
+        match = re.fullmatch(r"([a-f0-9]+):([\[{].*)", line)
+        if match:
+            records[match[1]] = json.loads(match[2])
+    return records
+
+
+def _page_props(value: Any) -> Iterator[dict[str, Any]]:
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _page_props(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _page_props(child)
+
+
+def _find_holdings_download(html: str, ticker: str) -> tuple[str, str]:
     soup = BeautifulSoup(html, "html.parser")
     title = soup.select_one("h1")
     if title is None or title.get_text(strip=True) != ticker:
         raise ValueError(f"Global X {ticker} 공식 상품 페이지의 티커가 다릅니다.")
-    links = {
-        urljoin(_BASE_URL, anchor["href"])
-        for anchor in soup.select("a[href]")
-        if anchor.get_text(" ", strip=True) == "Full Holdings (.csv)"
-    }
-    if len(links) != 1:
-        raise ValueError(f"Global X {ticker} 전체 구성종목 CSV 주소가 없거나 중복됐습니다.")
-    url = links.pop()
-    parsed = urlparse(url)
-    match = re.fullmatch(rf"/funds/holdings/{re.escape(ticker.lower())}_full-holdings_(\d{{8}})\.csv", parsed.path)
-    if parsed.scheme != "https" or parsed.netloc != "assets.globalxetfs.com" or match is None:
-        raise ValueError(f"Global X {ticker} 공식 CSV의 호스트 또는 상품명이 다릅니다.")
-    return url, datetime.strptime(match[1], "%Y%m%d").date().isoformat()
+    records = _page_records(soup)
+    settings = [
+        props
+        for value in records.values()
+        for props in _page_props(value)
+        if props.get("data-document-type") == "Holdings CSV" and "getCsv" in props
+    ]
+    if len(settings) != 1 or settings[0].get("ticker") != ticker:
+        raise ValueError(f"Global X {ticker} 전체 구성종목 다운로드 설정이 없거나 중복됐습니다.")
+    setting = settings[0]
+    match = re.fullmatch(rf"{re.escape(ticker)}-holdings-([A-Za-z]{{3}}-\d{{1,2}}-\d{{4}})\.csv", setting["fileName"])
+    reference = re.fullmatch(r"\$h([a-f0-9]+)", setting["getCsv"])
+    action = records.get(reference[1]) if reference else None
+    if match is None or not isinstance(action, dict) or action.get("bound") is not None:
+        raise ValueError(f"Global X {ticker} 공식 CSV의 상품명 또는 다운로드 요청이 잘못됐습니다.")
+    action_id = action.get("id", "")
+    if re.fullmatch(r"[a-f0-9]{42}", action_id) is None:
+        raise ValueError(f"Global X {ticker} 공식 CSV 다운로드 식별자가 잘못됐습니다.")
+    return action_id, datetime.strptime(match[1], "%b-%d-%Y").date().isoformat()
 
 
-def _parse_holdings(text: str, ticker: str, reference_date: str) -> list[dict[str, str]]:
+def _download_csv(url: str, ticker: str, action_id: str) -> str:
+    """공식 CSV 버튼과 같은 공개 요청을 보내고 길이 지정 문자열을 읽는다."""
+    response = shared_session.post(
+        url,
+        headers={"Next-Action": action_id, "Content-Type": "text/plain;charset=UTF-8", "Accept": "text/x-component"},
+        data=json.dumps([ticker]),
+        timeout=25,
+    )
+    response.raise_for_status()
+    content = response.content
+    records = {}
+    while content:
+        match = re.match(rb"([a-f0-9]+):", content)
+        if match is None:
+            raise ValueError(f"Global X {ticker} CSV 응답 형식이 잘못됐습니다.")
+        key = match[1].decode()
+        content = content[match.end() :]
+        text_header = re.match(rb"T([a-f0-9]+),", content)
+        if text_header:
+            length = int(text_header[1], 16)
+            start = text_header.end()
+            if len(content) < start + length:
+                raise ValueError(f"Global X {ticker} CSV 응답이 잘렸습니다.")
+            records[key] = content[start : start + length].decode("utf-8")
+            content = content[start + length :]
+        else:
+            line, separator, content = content.partition(b"\n")
+            if not separator:
+                raise ValueError(f"Global X {ticker} CSV 응답이 완전하지 않습니다.")
+            records[key] = json.loads(line)
+    root = records.get("0")
+    if not isinstance(root, dict) or root.get("a") != "$@1":
+        raise ValueError(f"Global X {ticker} CSV 다운로드 결과가 없습니다.")
+    result = records.get("1")
+    if isinstance(result, str) and re.fullmatch(r"\$[a-f0-9]+", result):
+        result = records.get(result[1:])
+    if not isinstance(result, str) or not result:
+        raise ValueError(f"Global X {ticker} 전체 구성종목 CSV가 비었습니다.")
+    return result
+
+
+def _parse_holdings(text: str, ticker: str) -> list[dict[str, str]]:
     reader = csv.reader(io.StringIO(text))
-    title = next(reader, [])
-    date_row = next(reader, [])
-    match = re.fullmatch(r"Fund Holdings Data as of (\d{2}/\d{2}/\d{4})", date_row[0]) if len(date_row) == 1 else None
-    if len(title) != 1 or not title[0].startswith("Global X ") or match is None:
-        raise ValueError(f"Global X {ticker} 구성종목 CSV의 상품명 또는 기준일이 없습니다.")
-    if datetime.strptime(match[1], "%m/%d/%Y").date().isoformat() != reference_date:
-        raise ValueError(f"Global X {ticker} 공식 CSV 주소와 내용의 기준일이 다릅니다.")
     headers = next(reader, [])
-    required = {"% of Net Assets", "Ticker", "Name", "SEDOL", "Market Price ($)", "Shares Held", "Market Value ($)"}
+    required = {"Net Assets (%)", "Ticker", "Name", "SEDOL", "Market Price ($)", "Shares Held", "Market Value ($)"}
     if len(headers) != len(required) or set(headers) != required:
         raise ValueError(f"Global X {ticker} 구성종목 CSV 필수 열이 잘못됐습니다.")
     rows = []
@@ -96,7 +171,7 @@ def _normalize_holding(raw: dict[str, str], us_listings: dict[str, str]) -> dict
     label = raw["Ticker"].strip()
     name = raw["Name"].strip()
     identifier = raw["SEDOL"].strip()
-    weight = float(raw["% of Net Assets"].strip())
+    weight = float(raw["Net Assets (%)"].strip().removesuffix("%"))
     if not name or not math.isfinite(weight):
         raise ValueError("Global X 구성종목 이름 또는 비중이 잘못됐습니다.")
     symbol, exchange = (
@@ -130,10 +205,8 @@ def fetch_globalx_us_holdings(ticker: str) -> dict[str, Any] | None:
         return None
     response = shared_session.get(url, timeout=25)
     response.raise_for_status()
-    csv_url, reference_date = _find_holdings_url(response.text, ticker_norm)
-    response = shared_session.get(csv_url, timeout=25)
-    response.raise_for_status()
-    rows = _parse_holdings(response.content.decode("utf-8-sig"), ticker_norm, reference_date)
+    action_id, reference_date = _find_holdings_download(response.text, ticker_norm)
+    rows = _parse_holdings(_download_csv(url, ticker_norm, action_id), ticker_norm)
     us_listings = load_us_security_exchange_map()
     items = [_normalize_holding(raw, us_listings) for raw in rows]
     return {
