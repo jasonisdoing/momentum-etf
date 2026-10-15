@@ -479,6 +479,10 @@ MARKET_TREND_SCORE_ANCHOR_PERCENTILE = 90
 # 추세 점수용 이동평균 일수
 MARKET_TREND_SCORE_MA_DAYS = 20
 
+# 시장 추세 알림(`market_trend_notify`)이 다루는 지수·환율 — /market-trend 표의 위에서부터 미국달러까지.
+# 나스닥 100 선물과 종목풀 합성 지수는 알림 대상이 아니다.
+MARKET_TREND_ALERT_TICKERS: tuple[str, ...] = ("^KS11", "^KQ11", "^SOX", "^DJI", "^GSPC", "^NDX", "KRW=X")
+
 # 슈퍼트렌드(SuperTrend) 지표 설정.
 # 차트 보조선/화살표 표시 전용이다. 레짐 판정과 현금비중에는 쓰지 않는다.
 # ATR 계산 기간(PERIOD)은 전 지수 공통. 곱수(MULTIPLIER)는 지수마다 개별 등록한다.
