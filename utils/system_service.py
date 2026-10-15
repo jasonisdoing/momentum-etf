@@ -321,10 +321,11 @@ SCHEDULE_ROWS = [
         "job": "시장 추세 알림",
         "target": "코스피~미국달러 7개의 추세 목록 · 어제와 달라지면 @channel",
         "run_location": "SERVER/LOCAL",
-        # 미국 장이 마감(05~06시)된 뒤라 지수 일봉이 확정돼 있다. 월요일은 직전 금요일 이후 바뀐 일봉이 없어 뺀다.
-        "cadence": "화~토 08:00 KST",
+        # 미국 장이 마감(05~06시)된 뒤라 지수 일봉이 확정돼 있다. 월요일 아침 알림이 금요일 한국 장과
+        # 금요일 밤 미국 장(토요일 새벽 마감)의 변화를 담는다.
+        "cadence": "평일 08:00 KST",
         "command": "python scripts/market_trend_notify.py",
-        "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_TUE_SAT},
+        "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     # ⑤ 상시 운영 — 자동으로 돌고 손댈 일이 거의 없다.
     {
