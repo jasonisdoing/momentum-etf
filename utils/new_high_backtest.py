@@ -377,7 +377,11 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         # 돌파 거리가 부풀려지지 않고, 이탈 이평선도 오늘 잠정 종가를 넣은 값이 된다.
         # 실시간이 없는 종목과 워밍업 미달(NaN)은 확정값을 유지한다 — 값을 추정하지 않는다.
         session_ts = quotes["session_ts"]
-        live_prices = {t: q["price"] for t, q in quotes["by_ticker"].items() if t in close_df.columns}
+        live_prices = {
+            t: q["bar_price"]
+            for t, q in quotes["by_ticker"].items()
+            if t in close_df.columns and q["bar_price"] is not None
+        }
         # 장전(동시호가)의 고가·시가는 아직 **직전 세션의 값**이다. 그대로 오늘 봉에
         # 붙이면 어제 확정된 돌파가 밀려 '터치 후 밀림'으로 뒤집히므로 그 구간에서는 뺀다.
         if quotes["pre_market"]:

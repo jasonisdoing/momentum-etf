@@ -108,7 +108,14 @@ def _live_quotes(pool: str, tickers: list[str]) -> dict[str, Any]:
     장전(동시호가) 구간은 ``pre_market`` 으로 표시만 하고 막지는 않는다. 그 시각
     스냅샷의 고가·시가는 아직 **직전 세션의 값**이라 호출부가 그 값들만 빼고 쓴다.
     """
-    from utils.effective_prices import bar_anchor, effective_bar_date, last_regular_close, live_prices_for_bar
+    from utils.effective_prices import (
+        bar_anchor,
+        effective_bar_date,
+        last_regular_close,
+        live_display_prices,
+        live_prices_for_bar,
+    )
+    from utils.market_session import pre_open_trading_day
     from utils.settings_loader import get_ticker_type_settings
 
     empty: dict[str, Any] = {
@@ -139,21 +146,31 @@ def _live_quotes(pool: str, tickers: list[str]) -> dict[str, Any]:
     # 붙일 봉을 먼저 정한 뒤, **그 봉보다 오래된 시세는 버린다** — 시세가 멈춘 종목의
     # 며칠 전 가격이 오늘 봉으로 들어가는 것을 막는다(공용 검증, `live_prices_for_bar`).
     session_ts = effective_bar_date(bar_anchor(country), country)
-    fresh = live_prices_for_bar(snapshot, session_ts)
+    bar_prices = live_prices_for_bar(snapshot, session_ts, country=country)
+    display_prices = live_display_prices(snapshot, session_ts, country=country)
+    # 프리장·데이장은 N+1 새 봉의 시작이라 스냅샷의 시가·고가가 아직 직전 세션의 값이다 — 쓰지 않는다.
+    new_bar = pre_open_trading_day(country) is not None
 
     by_ticker: dict[str, dict[str, float]] = {}
     pre_market = False
     traded_at: str | None = None
     for ticker, quote in snapshot.items():
-        price = fresh.get(ticker)
+        price = display_prices.get(ticker)
         if price is None:
             continue
+        bar_price = bar_prices.get(ticker)
         # 오늘 시가 — 어제 확정된 진입·청산이 체결된 가격이다. ETF 는 이 값이 안 와서
         # None 이 되고, 그런 종목은 체결로 처리하지 않는다(가격을 지어내지 않는다).
-        open_val = quote.get("open")
+        open_val = None if new_bar else quote.get("open")
+        high_val = quote.get("high")
         by_ticker[ticker] = {
+            # 현재가 표시용 — 시간외 가격을 포함한 현재 세션 시세.
             "price": float(price),
-            "high": float(quote.get("high") or price),
+            # 봉에 넣는 판정용 가격 — 애프터·마감에는 정규장 종가다. 전략 엔진·합성은 이 값을 쓴다.
+            "bar_price": bar_price,
+            "high": float(high_val)
+            if high_val and not new_bar
+            else float(bar_price if bar_price is not None else price),
             "open": float(open_val) if open_val is not None and float(open_val) > 0 else None,
             "change_pct": float(quote.get("changeRate")) if quote.get("changeRate") is not None else None,
             # 마지막으로 마감된 정규장 종가 — 전거래일(%) 계산용(순위 화면과 같은 공용 규칙).

@@ -79,7 +79,11 @@ def compute_pool_risk_return(pool_id: str, months: int) -> dict[str, Any]:
     # 순위·모멘텀과 같은 공통 경로로 실시간 마지막 봉을 붙인다.
     quotes = _live_quotes(pool_id, tickers)
     if quotes["by_ticker"] and not close_frame.empty:
-        live = {ticker: quote["price"] for ticker, quote in quotes["by_ticker"].items()}
+        live = {
+            ticker: quote["bar_price"]
+            for ticker, quote in quotes["by_ticker"].items()
+            if quote["bar_price"] is not None
+        }
         close_frame = apply_realtime_closes(close_frame, live, quotes["session_ts"])
 
     held = load_all_holding_tickers(country_code=country or None)

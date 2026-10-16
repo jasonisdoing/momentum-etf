@@ -84,7 +84,7 @@ def _overlay_live_last_bar(
     quotes = _live_quotes(pool, tickers)
     if not quotes["live"]:
         return close_df, benchmark_close, False
-    prices = {t: (quotes["by_ticker"].get(t) or {}).get("price") for t in tickers}
+    prices = {t: (quotes["by_ticker"].get(t) or {}).get("bar_price") for t in tickers}
     if any(p is None for p in prices.values()):
         return close_df, benchmark_close, False
     session_ts = quotes["session_ts"]

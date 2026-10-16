@@ -123,6 +123,25 @@ def regular_session_started(country: str, now: datetime | None = None) -> bool:
     return _is_trading_day(country, today) and now_local >= _at(zone, today, schedule["open"])
 
 
+def pre_open_trading_day(country: str, now: datetime | None = None) -> date | None:
+    """프리장·데이장이 진행 중이면 그 세션이 속한 **다음 거래일**, 아니면 None.
+
+    데이장은 N일 저녁(20:00 ET)에 시작하지만 N+1 거래일의 세션이다 — 프리장과 함께
+    N+1 봉의 시작 구간이다. 그래서 N일 저녁 데이장은 내일 날짜를, 자정 이후 데이장·프리장은
+    오늘 날짜를 돌려준다. 정규장·애프터·마감·휴장이면 None.
+    """
+    if market_session(country, now=now)["session"] not in (PREMARKET, DAYMARKET):
+        return None
+    schedule = _schedule(country)
+    zone = ZoneInfo(str(schedule["timezone"]))
+    now_local = (now or datetime.now(zone)).astimezone(zone)
+    today = now_local.date()
+    day_open = schedule.get("daymarket_open")
+    if day_open is not None and now_local >= _at(zone, today, day_open):
+        return today + timedelta(days=1)
+    return today
+
+
 def _is_trading_day(country: str, day: date) -> bool:
     """그 날짜가 거래일인지. 달력을 못 읽으면 평일 여부로 본다."""
     try:
