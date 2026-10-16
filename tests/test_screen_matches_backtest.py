@@ -229,6 +229,7 @@ class IntradayScreenMixConsistencyTest(unittest.TestCase):
             for index, ticker in enumerate(sorted(set(tickers))):
                 by_ticker[ticker] = {
                     "price": 50.0,
+                    "bar_price": 50.0,
                     "high": 51.0,
                     # 절반은 시가 미상(국내 ETF 흉내) — 체결 예정 경로까지 함께 태운다.
                     "open": None if index % 2 else 50.0,

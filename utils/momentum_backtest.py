@@ -304,7 +304,11 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         # (strategy_logic.md 「장중 잠정 실행」). 어제 확정 판정의 오늘 시가 체결(시가를 모르면 체결 예정),
         # 오늘 잠정 봉의 재판정, 진입 예정 비중까지 전부 엔진이 낸다 — 화면은 표시만 한다.
         session_ts = quotes["session_ts"]
-        live_prices = {t: q["price"] for t, q in quotes["by_ticker"].items() if t in close_df.columns}
+        live_prices = {
+            t: q["bar_price"]
+            for t, q in quotes["by_ticker"].items()
+            if t in close_df.columns and q["bar_price"] is not None
+        }
         live_opens = {
             t: float(q["open"]) for t, q in quotes["by_ticker"].items() if t in close_df.columns and q.get("open")
         }
@@ -392,6 +396,12 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     if market_today:
         exited_today = [t for t in exited_today if str(t["exit_date"]) >= market_today]
 
+    # 표시용 시세를 **먼저** 입힌다 — 아래에서 보유·이탈 행이 후보 행의 값을 복사하므로, 순서가
+    # 바뀌면 보유 행의 일간(%)이 갱신 전 값으로 남는다. 진입 예정은 후보 행을 **복사**해 만든
+    # 목록이라 함께 넘겨야 같은 종목의 현재가가 순위 화면과 어긋나지 않는다(기준일 목표인
+    # `target_entries` 는 이미 따로 복사해 뒀으므로 확정값 그대로다).
+    _apply_display_quotes([*rows, *entries], holdings, quotes["by_ticker"])
+
     # 표시용 시세·부가 정보 — 보유·이탈 행에도 후보 표와 같은 값을 붙인다.
     for item in [*holdings, *exited_today]:
         row = row_by_ticker.get(item["ticker"])
@@ -408,11 +418,6 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         item["listing_months"] = (row or {}).get("listing_months")
     for item in exited_today:
         item["price"] = (row_by_ticker.get(item["ticker"]) or {}).get("price")
-    # 진입 예정도 함께 — 이 목록은 위에서 후보 행을 **복사**해 만들기 때문에, 후보 행만
-    # 갱신하면 같은 종목의 현재가가 순위 화면과 어긋난 채로 남는다(기준일 목표인
-    # `target_entries` 는 이미 따로 복사해 뒀으므로 확정값 그대로다).
-    _apply_display_quotes([*rows, *entries], holdings, quotes["by_ticker"])
-
     # 실계좌 보유 여부 — 전략상 보유와 별개로 "지금 계좌에 실제로 있는가".
     from utils.portfolio_io import load_all_holding_tickers
 

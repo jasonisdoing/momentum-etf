@@ -41,7 +41,7 @@ from utils.data_loader import (
 )
 from utils.effective_prices import bar_anchor, effective_bar_date, last_regular_close
 from utils.kis_market import load_cached_kis_domestic_etf_master
-from utils.market_session import regular_session_started, trading_day_today
+from utils.market_session import pre_open_trading_day, regular_session_started, trading_day_today
 from utils.normalization import to_timestamp_iso
 from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import list_available_accounts, load_common_settings
@@ -491,8 +491,9 @@ def _apply_realtime_snapshot_to_dataframe(
         except (TypeError, ValueError):
             realtime_change_pct = None
 
-    if not regular_session_started(country):
-        session_day = trading_day_today(country)
+    pre_open_day = pre_open_trading_day(country)
+    if pre_open_day is not None or not regular_session_started(country):
+        session_day = pre_open_day or trading_day_today(country)
         return _settle_last_bar(df, realtime_entry, country), {
             "price": realtime_price,
             "change_pct": realtime_change_pct,

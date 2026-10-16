@@ -83,7 +83,7 @@ def _overlay_realtime(frame: pd.DataFrame, country: str, field: str) -> pd.DataF
 
     bar_date = effective_bar_date(frame.index[-1], country)
     # 신선도 검증(봉보다 오래된 시세 버리기)도 공용 함수가 한다 — 순위·전략과 같은 기준.
-    live = live_prices_for_bar(snapshot, bar_date, field="nowVal" if field == "Close" else "open")
+    live = live_prices_for_bar(snapshot, bar_date, country=country, field="nowVal" if field == "Close" else "open")
     live = {t: v for t, v in live.items() if t in tickers}
     if not live:
         return frame
