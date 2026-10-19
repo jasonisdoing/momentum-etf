@@ -110,10 +110,9 @@ def _normalize_holding(raw: dict[str, str], weight_column: str) -> dict[str, Any
     }
 
 
-def parse_ishares_holdings(text: str, *, date_format: str) -> tuple[str, list[dict[str, Any]]]:
-    rows = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
-    date_row = next((row for row in rows if row and row[0] == "Fund Holdings as of"), None)
-    if not date_row or len(date_row) != 2:
+def _parse_holdings_section(rows: list[list[str]], date_format: str) -> tuple[str, list[dict[str, Any]]]:
+    date_row = rows[0]
+    if len(date_row) != 2:
         raise ValueError("iShares 구성종목 기준일이 없습니다.")
     reference_date = datetime.strptime(date_row[1], date_format).date().isoformat()
     header_index = next(
@@ -135,3 +134,16 @@ def parse_ishares_holdings(text: str, *, date_format: str) -> tuple[str, list[di
     if not items:
         raise ValueError("iShares 구성종목 CSV가 비었습니다.")
     return reference_date, items
+
+
+def parse_ishares_holdings(text: str, *, date_format: str) -> tuple[str, list[dict[str, Any]]]:
+    rows = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
+    starts = [index for index, row in enumerate(rows) if row and row[0] == "Fund Holdings as of"]
+    if not starts:
+        raise ValueError("iShares 구성종목 기준일이 없습니다.")
+    ends = starts[1:] + [len(rows)]
+    sections = [_parse_holdings_section(rows[start:end], date_format) for start, end in zip(starts, ends, strict=True)]
+    if len({date for date, _ in sections}) != 1:
+        raise ValueError("iShares 직접 보유와 재간접 상세 내역의 기준일이 다릅니다.")
+    # 공식 CSV의 마지막 표는 재간접 ETF까지 펼친 전체 보유 내역이다.
+    return sections[-1]

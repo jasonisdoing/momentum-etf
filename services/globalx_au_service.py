@@ -72,7 +72,15 @@ def _find_holdings_file(html: str, ticker: str) -> tuple[str, str, str]:
     reference_date = datetime.strptime(match[1], "%Y%m%d").date().isoformat()
     if setting["date"] != reference_date:
         raise ValueError(f"Global X 호주 {ticker} 공식 페이지와 파일의 기준일이 다릅니다.")
-    return url, reference_date, f"Global X {product['name']}"
+    identifiers = {
+        props["textValue"].strip()
+        for value in records.values()
+        for props in iter_globalx_page_props(value)
+        if props.get("label") == "ISIN" and props.get("valueType") == "Text"
+    }
+    if len(identifiers) != 1:
+        raise ValueError(f"Global X 호주 {ticker} 공식 상품 ISIN이 없거나 중복됐습니다.")
+    return url, reference_date, identifiers.pop()
 
 
 def _normalize_holding(raw: dict[str, str], us_listings: dict[str, str]) -> dict[str, Any]:
@@ -106,12 +114,12 @@ def _normalize_holding(raw: dict[str, str], us_listings: dict[str, str]) -> dict
     }
 
 
-def _parse_holdings(content: bytes, ticker: str, reference_date: str, fund_name: str) -> list[dict[str, Any]]:
+def _parse_holdings(content: bytes, ticker: str, reference_date: str, fund_isin: str) -> list[dict[str, Any]]:
     rows = read_xlsx_rows(content)
     metadata = {row["A"]: row.get("B", "") for row in rows if "A" in row}
     file_date = datetime.strptime(metadata["Trade Date"], "%Y%m%d").date().isoformat()
-    if file_date != reference_date or metadata["Fund Name"] != fund_name:
-        raise ValueError(f"Global X 호주 {ticker} 공식 XLSX의 상품명 또는 기준일이 다릅니다.")
+    if file_date != reference_date or metadata["ISIN"] != fund_isin:
+        raise ValueError(f"Global X 호주 {ticker} 공식 XLSX의 상품 ISIN 또는 기준일이 다릅니다.")
     raw = parse_xlsx_table_rows(rows, {"Component Name", "ISIN", "SEDOL", "Bloomberg Ticker", "Local CCY", "Weight"})
     if len(raw) != int(metadata["Number of Securities"]):
         raise ValueError(f"Global X 호주 {ticker} 공식 전체 구성종목 수가 다릅니다.")
@@ -147,10 +155,10 @@ def fetch_globalx_au_holdings(ticker: str) -> dict[str, Any] | None:
         return None
     response = shared_session.get(url, timeout=25)
     response.raise_for_status()
-    holdings_url, reference_date, fund_name = _find_holdings_file(response.text, ticker_norm)
+    holdings_url, reference_date, fund_isin = _find_holdings_file(response.text, ticker_norm)
     response = shared_session.get(holdings_url, timeout=25)
     response.raise_for_status()
-    items = _parse_holdings(response.content, ticker_norm, reference_date, fund_name)
+    items = _parse_holdings(response.content, ticker_norm, reference_date, fund_isin)
     return {
         "source": "globalx_au_xlsx",
         "fetched_at": datetime.now(timezone.utc).isoformat(),
