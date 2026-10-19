@@ -54,6 +54,7 @@ const SOURCE_TONE: Record<string, { bg: string; fg: string }> = {
   fidelity_us_xls: { bg: "#dcfce7", fg: "#166534" },
   tortoise_us_html: { bg: "#dcfce7", fg: "#166534" },
   globalx_us_csv: { bg: "#dcfce7", fg: "#166534" },
+  globalx_au_xlsx: { bg: "#dcfce7", fg: "#166534" },
   victoryshares_us_api: { bg: "#dcfce7", fg: "#166534" },
   vanguard_us_api: { bg: "#dcfce7", fg: "#166534" },
   direxion_us_api: { bg: "#dcfce7", fg: "#166534" },

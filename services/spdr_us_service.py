@@ -7,7 +7,8 @@ from datetime import datetime
 from typing import Any
 
 from config import CACHE_TTL_SLOW
-from services.spdr_holdings_service import parse_spdr_holdings_xlsx, parse_spdr_table_rows, read_spdr_xlsx_rows
+from services.spdr_holdings_service import parse_spdr_holdings_xlsx
+from services.xlsx_holdings_service import parse_xlsx_table_rows, read_xlsx_rows
 from utils.http_session import shared_session
 from utils.normalization import normalize_exchange_symbol
 from utils.ttl_cache import TtlCache
@@ -20,7 +21,7 @@ _PRODUCT_MAP_CACHE = TtlCache(CACHE_TTL_SLOW, name="spdr_us_products", max_entri
 def _fetch_product_map() -> dict[str, str]:
     response = shared_session.get(f"{_DATA_URL}/spdr-product-data-us-en.xlsx", timeout=25)
     response.raise_for_status()
-    products = parse_spdr_table_rows(read_spdr_xlsx_rows(response.content), {"Ticker", "Name", "CUSIP", "Asset Class"})
+    products = parse_xlsx_table_rows(read_xlsx_rows(response.content), {"Ticker", "Name", "CUSIP", "Asset Class"})
     result = {}
     for product in products:
         ticker = product["Ticker"].replace("®", "").replace("™", "").upper()

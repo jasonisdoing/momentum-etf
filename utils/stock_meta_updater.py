@@ -16,6 +16,7 @@ from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
 from services.etf_meta_service import fetch_korean_etf_info_from_naver
 from services.fidelity_us_service import fetch_fidelity_us_holdings
 from services.firsttrust_us_service import fetch_firsttrust_us_holdings
+from services.globalx_au_service import fetch_globalx_au_holdings
 from services.globalx_us_service import fetch_globalx_us_holdings
 from services.invesco_us_service import fetch_invesco_us_holdings
 from services.ishares_au_service import fetch_ishares_au_holdings
@@ -686,6 +687,7 @@ def fetch_au_etf_holdings(ticker: str) -> dict[str, Any] | None:
         fetch_vanguard_au_holdings,
         fetch_spdr_au_holdings,
         fetch_ishares_au_holdings,
+        fetch_globalx_au_holdings,
     ):
         official = fetch_official(ticker)
         if official is not None:

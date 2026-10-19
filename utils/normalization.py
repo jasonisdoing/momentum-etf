@@ -34,9 +34,9 @@ def resolve_bloomberg_listing(
     label: str, *, currency: str | None, us_listings: dict[str, str]
 ) -> tuple[str | None, str | None]:
     """지원하는 시장 표기 또는 미국 공식 명단으로 확인된 시세 심볼만 반환한다."""
-    base, separator, market = label.rpartition(" ")
+    base, separator, market = label.removesuffix(" Equity").rpartition(" ")
     if separator:
-        if market == "UQ" and currency in {None, "USD"}:
+        if market in {"UQ", "UW"} and currency in {None, "USD"}:
             symbol = normalize_exchange_symbol(base, suffix="")
             exchange = us_listings.get(symbol)
             return (symbol, exchange) if exchange == "NAS" else (None, None)
