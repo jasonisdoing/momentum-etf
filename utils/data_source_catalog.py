@@ -22,6 +22,7 @@ HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "spdr_au_xlsx": "SPDR 호주 공식 XLSX",
     "invesco_us_api": "Invesco 미국 공식 API",
     "ishares_us_csv": "iShares 미국 공식 CSV",
+    "ishares_au_csv": "iShares 호주 공식 CSV",
     "spdr_us_xlsx": "SPDR 미국 공식 XLSX",
     "vaneck_us_api": "VanEck 미국 공식 API",
     "vistashares_us_csv": "VistaShares 미국 공식 CSV",
@@ -237,7 +238,13 @@ DATA_SOURCES: list[dict[str, Any]] = [
 ]
 
 # ETF 구성종목 수집 순서 — 실제 코드(_refresh_overseas_etf_meta_cache / fetch_us_etf_holdings)와 일치시킨다.
-AU_HOLDINGS_FALLBACK_ORDER: list[str] = ["betashares_csv", "vanguard_au_api", "spdr_au_xlsx", "yfinance_holdings"]
+AU_HOLDINGS_FALLBACK_ORDER: list[str] = [
+    "betashares_csv",
+    "vanguard_au_api",
+    "spdr_au_xlsx",
+    "ishares_au_csv",
+    "yfinance_holdings",
+]
 US_HOLDINGS_FALLBACK_ORDER: list[str] = [
     "physical_asset_disclosure",
     "invesco_us_api",
@@ -312,6 +319,7 @@ AU_OFFICIAL_SOURCES: dict[str, str] = {
     "BetaShares": "betashares_csv",
     "Vanguard": "vanguard_au_api",
     "SPDR (State Street)": "spdr_au_xlsx",
+    "iShares (BlackRock)": "ishares_au_csv",
 }
 US_OFFICIAL_SOURCES: dict[str, str] = {
     "Invesco": "invesco_us_api",
@@ -380,6 +388,10 @@ def _load_etf_rows(ticker_type: str) -> list[dict[str, Any]]:
 
 # 발행사별 행에 붙일 호출 대상·코드 위치 (수집 소스 기준).
 _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
+    "ishares_au_csv": (
+        "blackrock.com/au/products/{상품 ID}/{상품 경로}/{공시 식별자}.ajax?fileType=csv&dataType=fund",
+        "services/ishares_au_service.py",
+    ),
     "betashares_csv": (
         "betashares.com.au/files/csv/{ticker}_Portfolio_Holdings.csv",
         "utils/stock_meta_updater.py",
@@ -460,6 +472,7 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
     ),
 }
 _SOURCE_NOTES: dict[str, str] = {
+    "ishares_au_csv": "공식 호주 ETF 명단과 전체 CSV에서 주식·현금·환헤지 등 전체 보유 항목을 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "spdr_au_xlsx": "공식 호주 ETF 명단과 일별 전체 구성종목 XLSX를 사용한다. 현금·선물과 미공시 비중을 원본 그대로 보존하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "marketdesk_us_csv": "공식 상품 명단에서 ETF를 확인하고 Filepoint 공시의 전체 주식·현금을 받는다. 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "alps_us_api": "공식 상품 명단에서 ETF를 확인하고 전체 주식·현금 목록을 받는다. 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
