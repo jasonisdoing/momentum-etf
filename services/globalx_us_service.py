@@ -7,7 +7,6 @@ import io
 import json
 import math
 import re
-from collections.abc import Iterator
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,6 +14,7 @@ from bs4 import BeautifulSoup
 
 from config import CACHE_TTL_SLOW
 from services.component_price_service import infer_yahoo_symbol_currency
+from services.globalx_page_service import iter_globalx_page_props, read_globalx_page_records
 from utils.asx_ticker import ensure_asx_prefix
 from utils.http_session import shared_session
 from utils.normalization import resolve_bloomberg_listing
@@ -34,8 +34,8 @@ def _fetch_product_map() -> dict[str, str]:
     soup = BeautifulSoup(response.text, "html.parser")
     tables = [
         props
-        for value in _page_records(soup).values()
-        for props in _page_props(value)
+        for value in read_globalx_page_records(soup).values()
+        for props in iter_globalx_page_props(value)
         if "fundPathPrefix" in props and "rows" in props
     ]
     if len(tables) != 1 or tables[0]["fundPathPrefix"] != "funds":
@@ -51,43 +51,16 @@ def _fetch_product_map() -> dict[str, str]:
     return products
 
 
-def _page_records(soup: BeautifulSoup) -> dict[str, Any]:
-    """공식 페이지가 전달한 다운로드 설정을 JSON으로 읽는다."""
-    chunks = []
-    for script in soup.select("script"):
-        match = re.fullmatch(r"self\.__next_f\.push\((.*)\)", script.get_text(), re.DOTALL)
-        if match:
-            entry = json.loads(match[1])
-            if entry[0] == 1:
-                chunks.append(entry[1])
-    records = {}
-    for line in "".join(chunks).splitlines():
-        match = re.fullmatch(r"([a-f0-9]+):([\[{].*)", line)
-        if match:
-            records[match[1]] = json.loads(match[2])
-    return records
-
-
-def _page_props(value: Any) -> Iterator[dict[str, Any]]:
-    if isinstance(value, dict):
-        yield value
-        for child in value.values():
-            yield from _page_props(child)
-    elif isinstance(value, list):
-        for child in value:
-            yield from _page_props(child)
-
-
 def _find_holdings_download(html: str, ticker: str) -> tuple[str, str]:
     soup = BeautifulSoup(html, "html.parser")
     title = soup.select_one("h1")
     if title is None or title.get_text(strip=True) != ticker:
         raise ValueError(f"Global X {ticker} 공식 상품 페이지의 티커가 다릅니다.")
-    records = _page_records(soup)
+    records = read_globalx_page_records(soup)
     settings = [
         props
         for value in records.values()
-        for props in _page_props(value)
+        for props in iter_globalx_page_props(value)
         if props.get("data-document-type") == "Holdings CSV" and "getCsv" in props
     ]
     if len(settings) != 1 or settings[0].get("ticker") != ticker:
