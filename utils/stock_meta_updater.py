@@ -18,6 +18,7 @@ from services.fidelity_us_service import fetch_fidelity_us_holdings
 from services.firsttrust_us_service import fetch_firsttrust_us_holdings
 from services.globalx_us_service import fetch_globalx_us_holdings
 from services.invesco_us_service import fetch_invesco_us_holdings
+from services.ishares_au_service import fetch_ishares_au_holdings
 from services.ishares_us_service import fetch_ishares_us_holdings
 from services.marketdesk_us_service import fetch_marketdesk_us_holdings
 from services.roundhill_us_service import fetch_roundhill_us_holdings
@@ -680,7 +681,12 @@ def _registered_etf_holdings(tickers: list[str]) -> dict[str, list[dict[str, Any
 
 def fetch_au_etf_holdings(ticker: str) -> dict[str, Any] | None:
     """호주 ETF 구성종목을 공식 수집 경로에서 조회한다."""
-    for fetch_official in (fetch_betashares_holdings, fetch_vanguard_au_holdings, fetch_spdr_au_holdings):
+    for fetch_official in (
+        fetch_betashares_holdings,
+        fetch_vanguard_au_holdings,
+        fetch_spdr_au_holdings,
+        fetch_ishares_au_holdings,
+    ):
         official = fetch_official(ticker)
         if official is not None:
             return official

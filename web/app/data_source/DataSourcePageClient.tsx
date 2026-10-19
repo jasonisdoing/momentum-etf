@@ -45,6 +45,7 @@ const SOURCE_TONE: Record<string, { bg: string; fg: string }> = {
   spdr_au_xlsx: { bg: "#dcfce7", fg: "#166534" },
   invesco_us_api: { bg: "#dcfce7", fg: "#166534" },
   ishares_us_csv: { bg: "#dcfce7", fg: "#166534" },
+  ishares_au_csv: { bg: "#dcfce7", fg: "#166534" },
   spdr_us_xlsx: { bg: "#dcfce7", fg: "#166534" },
   vaneck_us_api: { bg: "#dcfce7", fg: "#166534" },
   vistashares_us_csv: { bg: "#dcfce7", fg: "#166534" },
