@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { createChart, ColorType, CrosshairMode, LineSeries } from "lightweight-charts";
 import type { IChartApi, LineData, Time } from "lightweight-charts";
 
@@ -128,11 +129,23 @@ type PerformanceMetricRange =
   | { key: string; label: string; kind: "period"; days: number }
   | { key: string; label: string; kind: "ytd" };
 
-const MAX_PRODUCTS = 8;
+const MAX_PRODUCTS = 10;
 const COMPARE_GROUPS_KEY = "momentum-etf:compare:groups";
 const COMPARE_ACTIVE_GROUP_KEY = "momentum-etf:compare:active-group";
 const COMPARE_TEMP_SELECTION_KEY = "momentum-etf:compare:temp-selection";
-const CHART_COLORS = ["#ef4444", "#2563eb", "#16a34a", "#f59e0b", "#7c3aed", "#db2777"];
+// 상품별 선 색 — 최대 상품 수(MAX_PRODUCTS)만큼 서로 다른 색을 둔다(같은 색이 두 번 나오지 않게).
+const CHART_COLORS = [
+  "#ef4444",
+  "#2563eb",
+  "#16a34a",
+  "#f59e0b",
+  "#7c3aed",
+  "#db2777",
+  "#0891b2",
+  "#65a30d",
+  "#475569",
+  "#a16207",
+];
 const CHART_TINTS = [
   "rgba(239, 68, 68, 0.08)",
   "rgba(37, 99, 235, 0.08)",
@@ -140,6 +153,10 @@ const CHART_TINTS = [
   "rgba(245, 158, 11, 0.08)",
   "rgba(124, 58, 237, 0.08)",
   "rgba(219, 39, 119, 0.08)",
+  "rgba(8, 145, 178, 0.08)",
+  "rgba(101, 163, 13, 0.08)",
+  "rgba(71, 85, 105, 0.08)",
+  "rgba(161, 98, 7, 0.08)",
 ];
 // 옅은 파스텔 (셀 배경 매칭용). 진한 텍스트 버전과 1:1 대응되도록 유지한다.
 const HOLDING_MATCH_COLORS = [
@@ -1486,7 +1503,11 @@ export function ComparePageClient() {
 
   return (
     <PageFrame title="종목 비교" fullHeight fullWidth titleRight={titleRight}>
-      <div className="appPageStack appPageStackFill comparePage">
+      <div
+        className="appPageStack appPageStackFill comparePage"
+        // 비교 표의 상품 컬럼 수 — CSS 그리드가 이 값 하나를 쓴다(MAX_PRODUCTS 단일 소스).
+        style={{ "--compare-products": MAX_PRODUCTS } as CSSProperties}
+      >
         {error ? <div className="alert alert-danger mb-0">{error}</div> : null}
 
         <section className="appSection">

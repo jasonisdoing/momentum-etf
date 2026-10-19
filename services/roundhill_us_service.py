@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 from config import CACHE_TTL_SLOW
 from services.filepoint_holdings_service import fetch_filepoint_csv, normalize_filepoint_holding
 from utils.http_session import shared_session
+from utils.trading_calendar import get_trading_days
 from utils.ttl_cache import TtlCache
 from utils.us_etf_market_service import load_us_security_exchange_map
 
@@ -46,12 +47,18 @@ def _fetch_holdings_data() -> tuple[str, dict[str, list[dict[str, str]]], str]:
         {"Date", "Account", "StockTicker", "CUSIP", "SecurityName", "Weightings", "MoneyMarketFlag"},
         provider="Roundhill",
     )
+    file_dates = {datetime.strptime(row["Date"], "%m/%d/%Y").date() for row in rows}
+    if len(file_dates) != 1:
+        raise ValueError("Roundhill 구성종목 파일에 서로 다른 날짜가 있습니다.")
+    file_date = file_dates.pop()
+    # 파일명·NAV가 공시 기준일이며, CSV의 Date는 그 다음 미국 거래일이다.
+    trading_days = get_trading_days(reference_date.isoformat(), file_date.isoformat(), "us")
+    if [day.date() for day in trading_days] != [reference_date, file_date]:
+        raise ValueError("Roundhill 구성종목 파일과 공시 기준일의 거래일 관계가 다릅니다.")
     by_account: dict[str, list[dict[str, str]]] = {}
     for row in rows:
-        # 공식 화면은 보유 파일의 Date에서 하루를 빼 공시 기준일로 표시한다.
-        date = datetime.strptime(row["Date"], "%m/%d/%Y").date() - timedelta(days=1)
-        if date != reference_date or not row["Account"].strip():
-            raise ValueError("Roundhill 구성종목의 공시 기준일 또는 상품 식별자가 잘못됐습니다.")
+        if not row["Account"].strip():
+            raise ValueError("Roundhill 구성종목의 상품 식별자가 비었습니다.")
         by_account.setdefault(row["Account"].strip(), []).append(row)
     return reference_date.isoformat(), by_account, datetime.now(timezone.utc).isoformat()
 
