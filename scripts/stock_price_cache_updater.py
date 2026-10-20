@@ -44,7 +44,7 @@ from utils.env import load_env_if_present
 from utils.logger import get_app_logger
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types, load_common_settings
 from utils.stock_list_io import get_all_etfs_including_deleted, get_etfs
-from utils.trading_calendar import listed_after
+from utils.trading_calendar import get_latest_trading_day, listed_after
 
 FETCH_RETRY_ATTEMPTS = 3
 FETCH_RETRY_DELAY_SECONDS = 2.0
@@ -875,7 +875,7 @@ def refresh_cache_for_target(
         if country_code == "kor" and not full_refresh:
             try:
                 from utils.cache_utils import load_cached_frame
-                from utils.data_loader import get_latest_trading_day, get_trading_days
+                from utils.data_loader import get_trading_days
                 from utils.market_session import market_session
 
                 latest_day = get_latest_trading_day("kor").normalize()

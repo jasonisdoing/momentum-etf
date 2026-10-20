@@ -143,7 +143,5 @@ def parse_ishares_holdings(text: str, *, date_format: str) -> tuple[str, list[di
         raise ValueError("iShares 구성종목 기준일이 없습니다.")
     ends = starts[1:] + [len(rows)]
     sections = [_parse_holdings_section(rows[start:end], date_format) for start, end in zip(starts, ends, strict=True)]
-    if len({date for date, _ in sections}) != 1:
-        raise ValueError("iShares 직접 보유와 재간접 상세 내역의 기준일이 다릅니다.")
-    # 공식 CSV의 마지막 표는 재간접 ETF까지 펼친 전체 보유 내역이다.
+    # 마지막 표는 자체 기준일을 가진 재간접 상세 내역이며 직접 보유와 갱신 시점이 다르다.
     return sections[-1]
