@@ -144,8 +144,9 @@ def _normalize_holding(raw: dict[str, str], us_listings: dict[str, str]) -> dict
     label = raw["Ticker"].strip()
     name = raw["Name"].strip()
     identifier = raw["SEDOL"].strip()
-    weight = float(raw["Net Assets (%)"].strip().removesuffix("%"))
-    if not name or not math.isfinite(weight):
+    raw_weight = raw["Net Assets (%)"].strip().removesuffix("%")
+    weight = None if raw_weight in {"", "-"} else float(raw_weight)
+    if not name or (weight is not None and not math.isfinite(weight)):
         raise ValueError("Global X 구성종목 이름 또는 비중이 잘못됐습니다.")
     symbol, exchange = (
         resolve_bloomberg_listing(label, currency=None, us_listings=us_listings) if label else (None, None)
