@@ -292,17 +292,20 @@ def apply_realtime_close(
     """
     if last_bar is None or pd.isna(last_bar):
         raise ValueError("실시간 봉의 공통 기준 날짜(last_bar)가 필요합니다.")
+    reference = _normalize_day(last_bar)
+    target = effective_bar_date(reference, country_code, now=now)
+    price = _bar_price(realtime_entry, _price_rule(country_code, target, now), display=False)
+
     if cached_close_series is None or cached_close_series.empty:
-        return None
+        # 확정 봉이 하나도 없는 종목(상장 첫날 장중) — 실시간 봉 하나가 시리즈 전부다.
+        if price is None:
+            return None
+        return pd.Series([price], index=pd.DatetimeIndex([target]))
+    if price is None:
+        return cached_close_series
 
     adjusted = cached_close_series.copy()
     adjusted.index = pd.DatetimeIndex([_normalize_day(idx) for idx in adjusted.index])
-    reference = _normalize_day(last_bar)
-    target = effective_bar_date(reference, country_code, now=now)
-
-    price = _bar_price(realtime_entry, _price_rule(country_code, target, now), display=False)
-    if price is None:
-        return cached_close_series
 
     adjusted.loc[target] = price
     return adjusted.sort_index()

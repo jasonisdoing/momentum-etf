@@ -219,7 +219,7 @@ def listing_months(close_series: pd.Series) -> int | None:
 
 
 def drawdown_from_high_pct(
-    close_series: pd.Series,
+    close_series: pd.Series | None,
     current_price: float | None = None,
     *,
     window_months: int = METRIC_WINDOW_MONTHS,
@@ -231,7 +231,10 @@ def drawdown_from_high_pct(
     창 길이가 갈려 같은 종목에 화면마다 다른 값이 붙는다.
 
     ``current_price`` 를 주면 그 값으로 비교한다(실시간 반영가). 없으면 마지막 종가.
+    확정 종가가 없는 종목(상장 첫날 장중)은 비교할 고점이 없어 None 이다.
     """
+    if close_series is None:
+        return None
     series = pd.to_numeric(close_series, errors="coerce").dropna()
     if series.empty:
         return None

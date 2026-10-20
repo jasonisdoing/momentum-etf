@@ -232,6 +232,15 @@ def _expected_cache_trading_day(country_code: str, latest_trading_day: pd.Timest
     return max(previous).normalize() if previous else latest_trading_day
 
 
+def _listed_after(listing_date: Any, day: pd.Timestamp) -> bool:
+    """상장일이 `day`(완료된 최신 거래일)보다 뒤인지 — 상장일을 모르면 거짓."""
+    try:
+        listed = pd.Timestamp(str(listing_date)).normalize()
+    except (TypeError, ValueError):
+        return False
+    return not pd.isna(listed) and listed > pd.Timestamp(day).normalize()
+
+
 def _slice_close_series_to_date(close_series: pd.Series | None, cutoff_date: pd.Timestamp) -> pd.Series | None:
     if close_series is None or close_series.empty:
         return close_series
@@ -735,7 +744,17 @@ def build_ticker_type_rankings(
     cache_updated_map_raw = load_cached_updated_at_bulk_with_fallback(ticker_type, tickers)
     latest_trading_day = _get_latest_trading_day_for_reference(country_code, selected_as_of_date)
     monthly_labels = get_recent_monthly_return_labels(MONTHLY_RETURN_LABEL_COUNT, reference_date=selected_as_of_date)
-    missing_tickers = sorted({ticker for ticker in tickers if ticker not in cache_updated_map_raw})
+    # 상장일이 아직 완료된 거래일에 닿지 않은 종목(상장 첫날 장중)은 확정 봉이 없는 게 정상이다 —
+    # 캐시 누락으로 표 전체를 막지 않고, 실시간 봉 하나로 행을 만든다(`apply_realtime_close`).
+    # 판정은 데이터 유무가 아니라 종목 메타의 상장일로 한다.
+    unlisted_until_today = {
+        str(item.get("ticker") or "").strip().upper()
+        for item in etfs
+        if _listed_after(item.get("listing_date"), latest_trading_day)
+    }
+    missing_tickers = sorted(
+        {ticker for ticker in tickers if ticker not in cache_updated_map_raw and ticker not in unlisted_until_today}
+    )
     normalized_cache_updated = {
         ticker: normalized
         for ticker, updated_at in cache_updated_map_raw.items()
@@ -775,7 +794,10 @@ def build_ticker_type_rankings(
     # 없거나 비면 조회·역직렬화 결함이다. 그대로 진행하면 실시간 한 점으로 이평선을 계산해
     # 이탈 0.0% 같은 그럴듯한 오답이 표가 되므로, 표 대신 차단 결과(에러 표시)를 내보낸다.
     series_missing_tickers = sorted(
-        ticker for ticker in tickers if (series := cached_close_series_map.get(ticker)) is None or series.empty
+        ticker
+        for ticker in tickers
+        if ticker not in unlisted_until_today
+        and ((series := cached_close_series_map.get(ticker)) is None or series.empty)
     )
     if series_missing_tickers:
         logger.warning(
