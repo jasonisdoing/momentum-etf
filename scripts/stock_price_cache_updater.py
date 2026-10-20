@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.component_price_service import build_component_price_snapshot, select_component_holdings_for_pricing
 from services.portfolio_change_service import compute_and_store_portfolio_change_bundle
+from services.reference_data_service import get_listing_date
 from services.stock_cache_service import get_stock_cache_meta
 from utils.cache_owner_lock import cache_owner_lock
 from utils.cache_utils import (
@@ -43,6 +44,7 @@ from utils.env import load_env_if_present
 from utils.logger import get_app_logger
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types, load_common_settings
 from utils.stock_list_io import get_all_etfs_including_deleted, get_etfs
+from utils.trading_calendar import listed_after
 
 FETCH_RETRY_ATTEMPTS = 3
 FETCH_RETRY_DELAY_SECONDS = 2.0
@@ -945,6 +947,12 @@ def refresh_cache_for_target(
             """
             t = str(etf_item.get("ticker") or "").strip().upper()
             n = etf_item.get("name") or "-"
+            # 상장 첫날 장중 종목 — 완료된 거래일 봉이 아직 없어 받을 게 없는 게 정상이다(수집 실패 아님).
+            # 장 마감 뒤 다음 실행에서 첫 봉을 받는다. 순위·계좌 평가는 그동안 실시간가를 쓴다.
+            if listed_after(get_listing_date(country_code, t), get_latest_trading_day(country_code)):
+                msg = f" -> 상장 첫날 — 확정 봉 전이라 건너뜀: {idx}/{total_tickers} - {n}({t})"
+                logger.info(msg)
+                return True, t, msg
             started = time.perf_counter()
             try:
                 unresolved_days = _refresh_single_ticker_with_retry(
