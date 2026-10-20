@@ -87,6 +87,23 @@ def _fetch_naver_json(session: requests.Session, url: str) -> dict[str, Any]:
     return payload
 
 
+def _fetch_naver_dividend_summary(session: requests.Session, ticker: str) -> dict[str, Any]:
+    """배당 요약(TTM 수익률·주당 배당·최근 배당락일). 배당 이력이 없는 ETF 는 빈 dict.
+
+    네이버는 첫 배당 전인 ETF(신규 상장 등)에 본문 `null` 을 준다 — 형식 오류가 아니라 「배당 없음」이다.
+    오류로 올리면 같은 갱신의 구성종목·기본정보까지 저장되지 않았다(2026-10-20 0254S0).
+    """
+    url = NAVER_ETF_DIVIDEND_URL.format(ticker=ticker)
+    response = session.get(url, timeout=15)
+    response.raise_for_status()
+    payload = response.json()
+    if payload is None:
+        return {}
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"네이버 ETF 메타 응답 형식이 올바르지 않습니다: {url}")
+    return payload
+
+
 def _fetch_naver_dividend_history(session: requests.Session, ticker: str, size: int) -> list[dict[str, Any]]:
     """회차별 배당 내역을 최신순 리스트로 반환한다. 응답은 dict 가 아닌 배열이라 별도 파싱한다."""
     url = NAVER_ETF_DIVIDEND_HIST_URL.format(ticker=ticker, size=int(size))
@@ -125,7 +142,7 @@ def fetch_korean_etf_info_from_naver(ticker: str) -> dict[str, Any]:
 
     session = _create_naver_session()
     base_payload = _fetch_naver_json(session, NAVER_ETF_BASE_URL.format(ticker=normalized_ticker))
-    dividend_payload = _fetch_naver_json(session, NAVER_ETF_DIVIDEND_URL.format(ticker=normalized_ticker))
+    dividend_payload = _fetch_naver_dividend_summary(session, normalized_ticker)
 
     document = {
         "ticker": normalized_ticker,
