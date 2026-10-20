@@ -1504,7 +1504,14 @@ def update_single_stock_metadata(
             # 종목 자체 속성으로 ETF 판정(quoteType == "ETF"). 이름 보완·시총·업종도 같은 .info 로
             # 처리한다 — 한 종목당 .info 는 한 번만 부른다.
             need_name = not stock.get("name") or stock.get("name") == ticker
-            if country_code in ("us", "au") or need_name:
+            # 미국은 바뀌지 않는 값(ETF 여부·섹터·업종·이름)만 받으므로 **비어 있을 때만** 부른다.
+            # 매일 전 종목을 부르면 Yahoo 가 IP 를 막아(2026-10-20 07:49, 156건) 뒤이은 배치의
+            # 환율·지수 조회까지 실패했다. 호주는 시총을 매일 받아야 해서 매번 부른다.
+            need_us_info = country_code == "us" and (
+                stock.get("is_etf") is None
+                or (not stock.get("is_etf") and (not stock.get("sector") or not stock.get("industry")))
+            )
+            if country_code == "au" or need_us_info or need_name:
                 try:
                     info = t.info
                     if country_code in ("us", "au"):
