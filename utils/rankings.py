@@ -39,6 +39,7 @@ from utils.moving_averages import pool_moving_average_type
 from utils.perf_metrics import single_stock_backtest_stats
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
+from utils.trading_calendar import listed_after
 
 logger = get_app_logger()
 MONTHLY_RETURN_LABEL_COUNT = 13
@@ -230,15 +231,6 @@ def _expected_cache_trading_day(country_code: str, latest_trading_day: pd.Timest
     except Exception:
         return latest_trading_day
     return max(previous).normalize() if previous else latest_trading_day
-
-
-def _listed_after(listing_date: Any, day: pd.Timestamp) -> bool:
-    """상장일이 `day`(완료된 최신 거래일)보다 뒤인지 — 상장일을 모르면 거짓."""
-    try:
-        listed = pd.Timestamp(str(listing_date)).normalize()
-    except (TypeError, ValueError):
-        return False
-    return not pd.isna(listed) and listed > pd.Timestamp(day).normalize()
 
 
 def _slice_close_series_to_date(close_series: pd.Series | None, cutoff_date: pd.Timestamp) -> pd.Series | None:
@@ -750,7 +742,7 @@ def build_ticker_type_rankings(
     unlisted_until_today = {
         str(item.get("ticker") or "").strip().upper()
         for item in etfs
-        if _listed_after(item.get("listing_date"), latest_trading_day)
+        if listed_after(item.get("listing_date"), latest_trading_day)
     }
     missing_tickers = sorted(
         {ticker for ticker in tickers if ticker not in cache_updated_map_raw and ticker not in unlisted_until_today}

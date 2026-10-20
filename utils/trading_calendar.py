@@ -8,6 +8,7 @@ import functools
 import json
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -340,6 +341,19 @@ def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp
         end_dt.strftime("%Y-%m-%d"),
     )
     return end_dt.normalize()
+
+
+def listed_after(listing_date: Any, day: pd.Timestamp) -> bool:
+    """상장일이 `day`(완료된 최신 거래일)보다 뒤인지 — 상장 첫날 장중처럼 확정 봉이 없는 게 정상인 종목.
+
+    가격 캐시는 완료된 거래일까지만 받으므로 이런 종목은 캐시가 없다. 순위·계좌 평가가 이 판정으로
+    「캐시 누락」과 구분하고 실시간 가격을 쓴다. 상장일을 모르면 거짓(누락으로 취급)이다.
+    """
+    try:
+        listed = pd.Timestamp(str(listing_date)).normalize()
+    except (TypeError, ValueError):
+        return False
+    return not pd.isna(listed) and listed > pd.Timestamp(day).normalize()
 
 
 def get_latest_trading_day(country: str) -> pd.Timestamp:

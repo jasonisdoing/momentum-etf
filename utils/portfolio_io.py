@@ -368,11 +368,28 @@ def load_real_holdings_table(
             cached_frames.setdefault(str(ticker_key).strip().upper(), frame)
 
     missing_price_tickers: set[str] = set()
+    country_by_currency = {"KRW": "kor", "USD": "us", "AUD": "au"}
+
+    def _listing_day_pending(row) -> bool:
+        """상장 첫날 장중 종목 — 캐시가 없는 게 정상이고 아래 실시간 오버레이가 현재가를 채운다.
+
+        실시간마저 못 받으면 평가금액이 0 으로 남아 일별 집계의 0 평가 가드가 막는다.
+        """
+        from services.reference_data_service import get_listing_date
+        from utils.trading_calendar import get_latest_trading_day, listed_after
+
+        country = country_by_currency.get(str(row.get("currency") or "").strip().upper())
+        if not country:
+            return False
+        ticker = str(row["ticker"]).strip().upper()
+        return listed_after(get_listing_date(country, ticker), get_latest_trading_day(country))
 
     def _get_current_price(row):
         ticker = str(row["ticker"]).strip().upper()
         df_cached = cached_frames.get(ticker)
         if df_cached is None or df_cached.empty:
+            if _listing_day_pending(row):
+                return 0.0
             msg = f"가격 캐시에 '{ticker}'가 없습니다. 캐시 업데이트를 실행하세요."
             logger.warning(msg)
             missing_price_tickers.add(ticker)
@@ -506,7 +523,6 @@ def load_real_holdings_table(
 
     # 실시간 오버레이 — 계좌 국가가 아니라 "보유 종목의 통화" 기준으로 시장별 API 를 나눠 호출한다.
     # kor 계좌가 미국 종목을 담아도 토스 실시간(프리장·애프터 포함)이 적용된다.
-    country_by_currency = {"KRW": "kor", "USD": "us", "AUD": "au"}
     tickers_by_market: dict[str, set[str]] = {}
     for _, holding_row in df_holdings.iterrows():
         market = country_by_currency.get(str(holding_row.get("currency") or "").strip().upper())
