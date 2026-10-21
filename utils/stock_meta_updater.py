@@ -33,6 +33,7 @@ from services.vanguard_au_service import fetch_vanguard_au_expense_ratio_pct, fe
 from services.vanguard_us_service import fetch_vanguard_us_holdings
 from services.victoryshares_us_service import fetch_victoryshares_us_holdings
 from services.vistashares_us_service import fetch_vistashares_us_holdings
+from services.wisdomtree_us_service import fetch_wisdomtree_us_holdings
 from utils.asx_ticker import (
     ensure_asx_prefix,
     from_yahoo_symbol,
@@ -715,6 +716,7 @@ def fetch_us_etf_holdings(ticker: str) -> dict[str, Any] | None:
         fetch_roundhill_us_holdings,
         fetch_alps_us_holdings,
         fetch_marketdesk_us_holdings,
+        fetch_wisdomtree_us_holdings,
     ):
         official = fetch_official(ticker)
         if official is not None:

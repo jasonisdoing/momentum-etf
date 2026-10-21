@@ -38,6 +38,7 @@ HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "roundhill_us_csv": "Roundhill 미국 공식 CSV",
     "alps_us_api": "ALPS 미국 공식 API",
     "marketdesk_us_csv": "MarketDesk 공식 전체 CSV",
+    "wisdomtree_us_api": "WisdomTree 미국 공식 API",
     "yfinance_holdings": "yfinance (상위 10종목)",
     "naver_etf_component": "네이버 ETF 구성종목",
 }
@@ -265,6 +266,7 @@ US_HOLDINGS_FALLBACK_ORDER: list[str] = [
     "roundhill_us_csv",
     "alps_us_api",
     "marketdesk_us_csv",
+    "wisdomtree_us_api",
     "yfinance_holdings",
 ]
 
@@ -341,6 +343,7 @@ US_OFFICIAL_SOURCES: dict[str, str] = {
     "Roundhill": "roundhill_us_csv",
     "Alerian (ALPS)": "alps_us_api",
     "MarketDesk": "marketdesk_us_csv",
+    "WisdomTree": "wisdomtree_us_api",
 }
 
 
@@ -473,12 +476,17 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
         "marketdesk.filepoint.live/assets/data/FilepointMktDesk.40YH.YH_ETF_Holdings.csv",
         "services/marketdesk_us_service.py",
     ),
+    "wisdomtree_us_api": (
+        "wisdomtree.com/investments/etfs → /api/fund-holdings/{상품ID}",
+        "services/wisdomtree_us_service.py",
+    ),
     "spdr_au_xlsx": (
         "ssga.com/library-content/products/fund-data/etfs/apac/holdings-daily-au-en-{ticker}.xlsx",
         "services/spdr_au_service.py",
     ),
 }
 _SOURCE_NOTES: dict[str, str] = {
+    "wisdomtree_us_api": "공식 ETF 목록에서 상품 ID를 확인하고 전체 주식·현금·선물 목록을 받는다(Cloudflare 때문에 브라우저 흉내 요청). 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "globalx_au_xlsx": "공식 호주 상품 명단과 전체 보유 XLSX를 사용한다. 공시된 현금도 포함하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "ishares_au_csv": "공식 호주 ETF 명단과 전체 CSV에서 주식·현금·환헤지 등 전체 보유 항목을 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "spdr_au_xlsx": "공식 호주 ETF 명단과 일별 전체 구성종목 XLSX를 사용한다. 현금·선물과 미공시 비중을 원본 그대로 보존하며 공식 수집 실패 시 기존 데이터를 유지한다.",

@@ -6,11 +6,21 @@ import datetime as _dt
 import math
 from typing import Any
 
+# 블룸버그 미국 시장 코드 → 미국 공식 명단(KIS)의 거래소. None 은 미국 통합(US)이라 어느 거래소든 된다.
+_BLOOMBERG_US_EXCHANGES: dict[str, str | None] = {
+    "US": None,
+    "UN": "NYS",
+    "UQ": "NAS",
+    "UW": "NAS",
+    "UA": "AMS",
+    "UP": "AMS",
+}
 _BLOOMBERG_EXCHANGE_SUFFIXES = {
     "AU": "AX",
     "LN": "L",
     "HK": "HK",
     "JP": "T",
+    "JT": "T",
     "C1": "SS",
     "C2": "SZ",
     "KS": "KS",
@@ -36,10 +46,12 @@ def resolve_bloomberg_listing(
     """지원하는 시장 표기 또는 미국 공식 명단으로 확인된 시세 심볼만 반환한다."""
     base, separator, market = label.removesuffix(" Equity").rpartition(" ")
     if separator:
-        if market in {"UQ", "UW"} and currency in {None, "USD"}:
+        if market in _BLOOMBERG_US_EXCHANGES and currency in {None, "USD"}:
+            # 미국 상장은 공식 명단에 있고 거래소가 표기와 맞을 때만 쓴다(예전 티커·다른 회사로 바뀐 티커를 거른다).
             symbol = normalize_exchange_symbol(base, suffix="")
             exchange = us_listings.get(symbol)
-            return (symbol, exchange) if exchange == "NAS" else (None, None)
+            expected = _BLOOMBERG_US_EXCHANGES[market]
+            return (symbol, exchange) if exchange and expected in (None, exchange) else (None, None)
         suffix = _BLOOMBERG_EXCHANGE_SUFFIXES.get(market)
         return (normalize_exchange_symbol(base, suffix=suffix), market) if suffix else (None, None)
     symbol = normalize_exchange_symbol(label, suffix="")
