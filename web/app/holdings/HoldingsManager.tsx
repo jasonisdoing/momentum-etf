@@ -744,7 +744,9 @@ function formatHoldingsKrw(val: number) {
   const sign = val < 0 ? "-" : "";
   if (abs >= 100_000_000) return `${sign}${(abs / 100_000_000).toFixed(1)}억`;
   if (abs >= 10_000) return `${sign}${Math.floor(abs / 10_000).toLocaleString()}만`;
-  return `${sign}${Math.floor(abs).toLocaleString()}원`;
+  // 만원 미만 단위는 보이지 않는다 — 1만 미만은 1만으로 올려 표시한다(0 은 0).
+  if (abs === 0) return "0";
+  return `${sign}1만`;
 }
 
 function formatSignedPercent(val: number | null): string {
