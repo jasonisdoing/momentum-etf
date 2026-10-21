@@ -1302,7 +1302,15 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
     naver_etf_map: dict[str, str] = {}
     naver_us_stock_map: dict[str, dict[str, Any]] = {}
     if country_code == "kor":
-        naver_etf_map = dict(_get_cached_naver_etf_names_map())
+        # 배치용 캐시 맵(`_get_cached_naver_etf_names_map`)을 쓰지 않고 **새로 받는다** — 이 함수는 계속
+        # 떠 있는 API 프로세스에서 불리는데, 캐시 맵은 배치 시작 때만 비워져 신규 상장 ETF 가 빠진 옛 목록이
+        # 남는다. 그 목록으로 판정해 0254S0 이 ETF 아님으로 저장됐다(2026-10-20).
+        naver_etf_map = fetch_naver_etf_names_map()
+        if not naver_etf_map:
+            # 빈 목록으로 판정하면 모든 ETF 가 「ETF 아님」으로 덮인다 — 판정하지 않고 멈춘다.
+            raise RuntimeError(
+                f"[{type_norm.upper()}/{ticker_norm}] 네이버 ETF 목록을 받지 못해 ETF 여부를 판정할 수 없습니다."
+            )
     if country_code == "us":
         from utils.us_stock_market_service import fetch_naver_us_stock_info_map
 
