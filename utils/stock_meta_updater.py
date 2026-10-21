@@ -23,6 +23,7 @@ from services.ishares_au_service import fetch_ishares_au_holdings
 from services.ishares_us_service import fetch_ishares_us_holdings
 from services.marketdesk_us_service import fetch_marketdesk_us_holdings
 from services.roundhill_us_service import fetch_roundhill_us_holdings
+from services.schwab_us_service import fetch_schwab_us_holdings
 from services.spdr_au_service import fetch_spdr_au_holdings
 from services.spdr_us_service import fetch_spdr_us_holdings
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
@@ -717,6 +718,7 @@ def fetch_us_etf_holdings(ticker: str) -> dict[str, Any] | None:
         fetch_alps_us_holdings,
         fetch_marketdesk_us_holdings,
         fetch_wisdomtree_us_holdings,
+        fetch_schwab_us_holdings,
     ):
         official = fetch_official(ticker)
         if official is not None:

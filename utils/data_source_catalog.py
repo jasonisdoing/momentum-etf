@@ -39,6 +39,7 @@ HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "alps_us_api": "ALPS 미국 공식 API",
     "marketdesk_us_csv": "MarketDesk 공식 전체 CSV",
     "wisdomtree_us_api": "WisdomTree 미국 공식 API",
+    "schwab_us_html": "Schwab 미국 공식 전체 보유",
     "yfinance_holdings": "yfinance (상위 10종목)",
     "naver_etf_component": "네이버 ETF 구성종목",
 }
@@ -267,6 +268,7 @@ US_HOLDINGS_FALLBACK_ORDER: list[str] = [
     "alps_us_api",
     "marketdesk_us_csv",
     "wisdomtree_us_api",
+    "schwab_us_html",
     "yfinance_holdings",
 ]
 
@@ -344,6 +346,7 @@ US_OFFICIAL_SOURCES: dict[str, str] = {
     "Alerian (ALPS)": "alps_us_api",
     "MarketDesk": "marketdesk_us_csv",
     "WisdomTree": "wisdomtree_us_api",
+    "Schwab": "schwab_us_html",
 }
 
 
@@ -476,6 +479,10 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
         "marketdesk.filepoint.live/assets/data/FilepointMktDesk.40YH.YH_ETF_Holdings.csv",
         "services/marketdesk_us_service.py",
     ),
+    "schwab_us_html": (
+        "schwabassetmanagement.com/sitemap.xml → /allholdings/{ticker}?page=N",
+        "services/schwab_us_service.py",
+    ),
     "wisdomtree_us_api": (
         "wisdomtree.com/investments/etfs → /api/fund-holdings/{상품ID}",
         "services/wisdomtree_us_service.py",
@@ -486,6 +493,7 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
     ),
 }
 _SOURCE_NOTES: dict[str, str] = {
+    "schwab_us_html": "사이트맵의 공식 상품 페이지로 ETF를 확인하고 전체 보유 페이지를 끝까지 넘겨 주식·현금 전체를 받는다(브라우저 흉내 요청). 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "wisdomtree_us_api": "공식 ETF 목록에서 상품 ID를 확인하고 전체 주식·현금·선물 목록을 받는다(Cloudflare 때문에 브라우저 흉내 요청). 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "globalx_au_xlsx": "공식 호주 상품 명단과 전체 보유 XLSX를 사용한다. 공시된 현금도 포함하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "ishares_au_csv": "공식 호주 ETF 명단과 전체 CSV에서 주식·현금·환헤지 등 전체 보유 항목을 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
