@@ -29,6 +29,7 @@ from services.spdr_us_service import fetch_spdr_us_holdings
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
 from services.tortoise_us_service import fetch_tortoise_us_holdings
 from services.us_physical_etf_service import fetch_us_physical_etf_holdings
+from services.vaneck_au_service import fetch_vaneck_au_holdings
 from services.vaneck_us_service import fetch_vaneck_us_holdings
 from services.vanguard_au_service import fetch_vanguard_au_expense_ratio_pct, fetch_vanguard_au_holdings
 from services.vanguard_us_service import fetch_vanguard_us_holdings
@@ -690,6 +691,7 @@ def fetch_au_etf_holdings(ticker: str) -> dict[str, Any] | None:
         fetch_spdr_au_holdings,
         fetch_ishares_au_holdings,
         fetch_globalx_au_holdings,
+        fetch_vaneck_au_holdings,
     ):
         official = fetch_official(ticker)
         if official is not None:

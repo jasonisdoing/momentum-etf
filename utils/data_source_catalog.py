@@ -32,6 +32,7 @@ HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "tortoise_us_html": "Tortoise 미국 공식 전체 목록",
     "globalx_us_csv": "Global X 미국 공식 CSV",
     "globalx_au_xlsx": "Global X 호주 공식 XLSX",
+    "vaneck_au_xlsx": "VanEck 호주 공식 XLSX",
     "victoryshares_us_api": "VictoryShares 미국 공식 API",
     "vanguard_us_api": "Vanguard 미국 공식 API",
     "direxion_us_api": "Direxion 미국 공식 API",
@@ -247,6 +248,7 @@ AU_HOLDINGS_FALLBACK_ORDER: list[str] = [
     "spdr_au_xlsx",
     "ishares_au_csv",
     "globalx_au_xlsx",
+    "vaneck_au_xlsx",
     "yfinance_holdings",
 ]
 US_HOLDINGS_FALLBACK_ORDER: list[str] = [
@@ -327,6 +329,7 @@ AU_OFFICIAL_SOURCES: dict[str, str] = {
     "SPDR (State Street)": "spdr_au_xlsx",
     "iShares (BlackRock)": "ishares_au_csv",
     "Global X": "globalx_au_xlsx",
+    "VanEck": "vaneck_au_xlsx",
 }
 US_OFFICIAL_SOURCES: dict[str, str] = {
     "Invesco": "invesco_us_api",
@@ -397,6 +400,10 @@ def _load_etf_rows(ticker_type: str) -> list[dict[str, Any]]:
 
 # 발행사별 행에 붙일 호출 대상·코드 위치 (수집 소스 기준).
 _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
+    "vaneck_au_xlsx": (
+        "vaneck.com.au/etf/ → /etf/{분류}/{ticker}/downloads/holdings/",
+        "services/vaneck_au_service.py",
+    ),
     "globalx_au_xlsx": (
         "files.globalxetfs.com.au/GXAU_{ticker}_FULL_PCF_{기준일}.xlsx",
         "services/globalx_au_service.py",
@@ -495,6 +502,7 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
 _SOURCE_NOTES: dict[str, str] = {
     "schwab_us_html": "사이트맵의 공식 상품 페이지로 ETF를 확인하고 전체 보유 페이지를 끝까지 넘겨 주식·현금 전체를 받는다(브라우저 흉내 요청). 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "wisdomtree_us_api": "공식 ETF 목록에서 상품 ID를 확인하고 전체 주식·현금·선물 목록을 받는다(Cloudflare 때문에 브라우저 흉내 요청). 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
+    "vaneck_au_xlsx": "공식 ETF 목록에서 상품을 확인하고 전체 보유 XLSX(파일명·제목 기준일 일치 확인)로 주식·현금 전체를 받는다. 공시 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "globalx_au_xlsx": "공식 호주 상품 명단과 전체 보유 XLSX를 사용한다. 공시된 현금도 포함하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "ishares_au_csv": "공식 호주 ETF 명단과 전체 CSV에서 주식·현금·환헤지 등 전체 보유 항목을 받는다. 공식 수집 실패 시 기존 데이터를 유지한다.",
     "spdr_au_xlsx": "공식 호주 ETF 명단과 일별 전체 구성종목 XLSX를 사용한다. 현금·선물과 미공시 비중을 원본 그대로 보존하며 공식 수집 실패 시 기존 데이터를 유지한다.",
