@@ -1260,6 +1260,10 @@ export function ComparePageClient() {
       })
       .map(({ product }) => product);
   }, [products, selectedKeys]);
+  // 표의 상품 컬럼은 **담긴 종목 수만큼**만 둔다(빈 칸을 남기지 않는다). 아무것도 없을 때만
+  // 「비교 상품을 추가해 주세요」 안내 칸 하나를 둔다.
+  const emptySlotCount = sortedProducts.length === 0 ? 1 : 0;
+  const productColumnCount = sortedProducts.length + emptySlotCount;
 
   // 카드 드래그로 순서 변경 — selectedKeys 를 재배열하면 저장(useEffect)까지 자동 반영된다.
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
@@ -1375,7 +1379,7 @@ export function ComparePageClient() {
               </div>
             );
           })}
-          {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, emptyIndex) => (
+          {Array.from({ length: emptySlotCount }).map((_, emptyIndex) => (
             <div key={`empty-${options.kind}-${period}-${emptyIndex}`} className={`compareMetricCell${boundaryClass}`}>
               -
             </div>
@@ -1505,8 +1509,8 @@ export function ComparePageClient() {
     <PageFrame title="종목 비교" fullHeight fullWidth titleRight={titleRight}>
       <div
         className="appPageStack appPageStackFill comparePage"
-        // 비교 표의 상품 컬럼 수 — CSS 그리드가 이 값 하나를 쓴다(MAX_PRODUCTS 단일 소스).
-        style={{ "--compare-products": MAX_PRODUCTS } as CSSProperties}
+        // 비교 표의 상품 컬럼 수 — CSS 그리드가 이 값 하나를 쓴다(담긴 종목 수).
+        style={{ "--compare-products": productColumnCount } as CSSProperties}
       >
         {error ? <div className="alert alert-danger mb-0">{error}</div> : null}
 
@@ -1688,7 +1692,7 @@ export function ComparePageClient() {
               </div>
             </div>
           ))}
-          {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+          {Array.from({ length: emptySlotCount }).map((_, index) => (
             <div key={`empty-${index}`} className="compareProductEmpty compareProductHeaderEmpty">비교 상품을 추가해 주세요.</div>
           ))}
         </section>
@@ -1747,7 +1751,7 @@ export function ComparePageClient() {
                       </div>
                     );
                   })}
-                  {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+                  {Array.from({ length: emptySlotCount }).map((_, index) => (
                     <div
                       key={`empty-metric-${period.label}-${index}`}
                       className={`compareMetricCell ${isActiveMetricRow ? "is-active-range" : ""}`}
@@ -1790,7 +1794,7 @@ export function ComparePageClient() {
                 );
               });
             })()}
-            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+            {Array.from({ length: emptySlotCount }).map((_, index) => (
               <div key={`empty-mdd-${index}`} className="compareMetricCell">-</div>
             ))}
 
@@ -1815,7 +1819,7 @@ export function ComparePageClient() {
                 );
               });
             })()}
-            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+            {Array.from({ length: emptySlotCount }).map((_, index) => (
               <div key={`empty-sortino-${index}`} className="compareMetricCell">-</div>
             ))}
 
@@ -1840,7 +1844,7 @@ export function ComparePageClient() {
                 );
               });
             })()}
-            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+            {Array.from({ length: emptySlotCount }).map((_, index) => (
               <div key={`empty-calmar-${index}`} className="compareMetricCell">-</div>
             ))}
           </section>
@@ -1899,7 +1903,7 @@ export function ComparePageClient() {
                     <BasicInfoValue product={product} metric={metric.label} />
                   </div>
                 ))}
-                {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+                {Array.from({ length: emptySlotCount }).map((_, index) => (
                   <div key={`empty-basic-${metric.label}-${index}`} className={metric.multiline ? "compareProductEmpty" : "compareProductEmpty compareBasicCompactCell"}>-</div>
                 ))}
               </Fragment>
@@ -1920,7 +1924,7 @@ export function ComparePageClient() {
                 <BasicInfoValue product={product} metric="포트폴리오 변동" />
               </div>
             ))}
-            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+            {Array.from({ length: emptySlotCount }).map((_, index) => (
               <div key={`empty-holding-portfolio-change-${index}`} className="compareProductEmpty">-</div>
             ))}
             <div className="compareMatrixLabel compareMatrixLabelWide compareHoldingsGroupLabel">구성종목</div>
@@ -2013,7 +2017,7 @@ export function ComparePageClient() {
                 </div>
               );
             })}
-            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+            {Array.from({ length: emptySlotCount }).map((_, index) => (
               <div key={`empty-holding-scroll-${index}`} className="compareHoldingCell">-</div>
             ))}
           </section>
