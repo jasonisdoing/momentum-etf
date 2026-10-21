@@ -608,7 +608,7 @@ function StrategySection({
 
       {/* 회차 표 */}
       <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", minWidth: 920, borderCollapse: "collapse", fontSize: "var(--fs-sm)" }}>
+        <table style={{ width: "100%", minWidth: 600, borderCollapse: "collapse", fontSize: "var(--fs-sm)" }}>
           <thead>
             <tr style={{ color: "var(--text-muted)" }}>
               <th style={{ ...thStyle, textAlign: "left" }}>회차</th>
@@ -756,10 +756,12 @@ export function StrategyTradeClient() {
   return (
     <PageFrame title="전략 사고팔기">
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* 전략 섹션 — DB 에 저장된 순서 */}
-        {view.strategies.map((strategy) => (
-          <StrategySection key={strategy.strategy_id} view={strategy} accounts={view.accounts} onSaved={setView} />
-        ))}
+        {/* 전략 섹션 — DB 에 저장된 순서, 좌우 2열(좁은 화면은 1열) */}
+        <div className="strategyTradeGrid">
+          {view.strategies.map((strategy) => (
+            <StrategySection key={strategy.strategy_id} view={strategy} accounts={view.accounts} onSaved={setView} />
+          ))}
+        </div>
 
         <AddStrategyCard accounts={view.accounts} onSaved={setView} />
 

@@ -4865,6 +4865,20 @@ a {
   padding: 1rem;
 }
 
+/* 전략 사고팔기 — 종목별 전략 카드를 좌우 2열로 놓고, 좁아지면 1열로 쌓는다. */
+.strategyTradeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 1280px) {
+  .strategyTradeGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* 전략·순위 화면의 보유 종목 차트 격자 — 최대 2열이고 좁아지면 1열이다.
    auto-fit 로 두면 넓은 모니터에서 3열 이상으로 벌어져 캔들이 작아진다. */
 .appChartGrid {
