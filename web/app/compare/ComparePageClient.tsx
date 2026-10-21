@@ -130,6 +130,13 @@ type PerformanceMetricRange =
   | { key: string; label: string; kind: "ytd" };
 
 const MAX_PRODUCTS = 10;
+// 구성종목 정렬 선택지 — 버튼 순서 그대로 보인다.
+const HOLDINGS_SORT_OPTIONS = [
+  { key: "weight", label: "비중" },
+  { key: "rise", label: "상승률" },
+  { key: "fall", label: "하락률" },
+] as const;
+type HoldingsSortBy = (typeof HOLDINGS_SORT_OPTIONS)[number]["key"];
 const COMPARE_GROUPS_KEY = "momentum-etf:compare:groups";
 const COMPARE_ACTIVE_GROUP_KEY = "momentum-etf:compare:active-group";
 const COMPARE_TEMP_SELECTION_KEY = "momentum-etf:compare:temp-selection";
@@ -984,8 +991,8 @@ export function ComparePageClient() {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [products, setProducts] = useState<SelectedProduct[]>([]);
   const [activeTab, setActiveTab] = useState<CompareTab>("performance");
-  // 구성 종목 탭에서 종목 정렬 기준: weight(비중, 기본) / change(상승률 내림차순)
-  const [holdingsSortBy, setHoldingsSortBy] = useState<"weight" | "change">("weight");
+  // 구성 종목 탭에서 종목 정렬 기준(HOLDINGS_SORT_OPTIONS) — 기본은 비중순.
+  const [holdingsSortBy, setHoldingsSortBy] = useState<HoldingsSortBy>("weight");
   const [performanceRange, setPerformanceRange] = useState<string>("1y"); // 성과분석 기본 기간
   const [searchText, setSearchText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1596,28 +1603,20 @@ export function ComparePageClient() {
                       <label className="appLabeledField" style={{ marginLeft: "0.75rem", minWidth: 0, width: "auto" }}>
                         <span className="appLabeledFieldLabel">구성종목 정렬</span>
                         <div className="appSegmentedToggle" role="group" aria-label="구성종목 정렬 기준">
-                          <button
-                            type="button"
-                            className={
-                              holdingsSortBy === "weight"
-                                ? "btn appSegmentedToggleButton is-active"
-                                : "btn appSegmentedToggleButton"
-                            }
-                            onClick={() => setHoldingsSortBy("weight")}
-                          >
-                            비중
-                          </button>
-                          <button
-                            type="button"
-                            className={
-                              holdingsSortBy === "change"
-                                ? "btn appSegmentedToggleButton is-active"
-                                : "btn appSegmentedToggleButton"
-                            }
-                            onClick={() => setHoldingsSortBy("change")}
-                          >
-                            상승률
-                          </button>
+                          {HOLDINGS_SORT_OPTIONS.map((option) => (
+                            <button
+                              key={option.key}
+                              type="button"
+                              className={
+                                holdingsSortBy === option.key
+                                  ? "btn appSegmentedToggleButton is-active"
+                                  : "btn appSegmentedToggleButton"
+                              }
+                              onClick={() => setHoldingsSortBy(option.key)}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
                         </div>
                       </label>
                     ) : null}
@@ -1931,11 +1930,13 @@ export function ComparePageClient() {
             {sortedProducts.map((product) => {
               // 정렬 기준에 따라 표시용 holdings 를 만든다. 원본은 변형하지 않는다.
               const sortedHoldings = (() => {
-                if (holdingsSortBy === "change") {
+                if (holdingsSortBy === "rise" || holdingsSortBy === "fall") {
+                  // 상승률은 큰 순, 하락률은 작은 순(많이 떨어진 종목부터). 등락률이 없는 종목은 어느 쪽이든 맨 뒤.
                   return [...product.detail.holdings].sort((a, b) => {
-                    const av = a.change_pct ?? Number.NEGATIVE_INFINITY;
-                    const bv = b.change_pct ?? Number.NEGATIVE_INFINITY;
-                    return bv - av; // 상승률 내림차순
+                    if (a.change_pct == null || b.change_pct == null) {
+                      return Number(a.change_pct == null) - Number(b.change_pct == null);
+                    }
+                    return holdingsSortBy === "rise" ? b.change_pct - a.change_pct : a.change_pct - b.change_pct;
                   });
                 }
                 // 기본: 백엔드가 이미 비중순으로 내려준다고 가정. 안정성 위해 명시적 정렬.
