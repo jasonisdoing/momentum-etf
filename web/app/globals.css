@@ -2711,7 +2711,7 @@ a {
   /* .comparePage 가 flex column 이라, 본문 행이 많은 탭(월간 분석)에서 헤더 섹션이 눌려
      overflow:hidden 에 잘렸다. 섹션은 축소하지 않고 내용 높이를 유지한다. */
   flex: 0 0 auto;
-  /* 상품 컬럼 수는 `--compare-products`(ComparePageClient 의 MAX_PRODUCTS 가 넣는다)를 따른다.
+  /* 상품 컬럼 수는 `--compare-products`(ComparePageClient 가 담긴 종목 수를 넣는다)를 따른다.
      앞 2열은 지표 라벨 영역(대부분 span 2 로 합쳐 씀). 합계 7.2rem 은 라벨 폰트(0.86rem)에서
      가장 긴 문구('포트폴리오 변동')가 한 줄로 들어가는 최소 폭이다. */
   grid-template-columns: 2.9rem 4.3rem repeat(var(--compare-products), minmax(6.8rem, 1fr));
