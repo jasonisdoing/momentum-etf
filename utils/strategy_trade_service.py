@@ -294,6 +294,10 @@ def _round_to_tick(price: float) -> float:
     return round(price / 5) * 5
 
 
+# 회차 표의 저점 기준선 기간(개월).
+RECENT_LOW_MONTHS = 12
+
+
 def _load_ticker_status(ticker: str, name: str, trigger_pct: float, live_close: float | None) -> dict[str, Any]:
     """판정 기준 시세 — 이 전략 종목 자신의 현재가·전일 종가·1호 진입선·최근 저점.
 
@@ -321,10 +325,10 @@ def _load_ticker_status(ticker: str, name: str, trigger_pct: float, live_close: 
     current = float(live_close) if live_close else float(close.iloc[-1])
     change_pct = (current / prev_close - 1.0) * 100.0
 
-    # 최근 3개월(92일) 저점 — 회차 지정가가 어느 층에 걸리는지 가늠하는 기준선.
+    # 최근 RECENT_LOW_MONTHS 개월 저점 — 회차 지정가가 어느 층에 걸리는지 가늠하는 기준선.
     # 가격 캐시는 확정 종가라 오늘 장중 현재가가 새 저점이어도 빠져 있다 — 현재가가 더 낮으면
-    # 오늘이 저점이다(그대로 두면 현재가가 3개월 저점보다 낮은 값으로 표시됐다).
-    low_window = close[close.index >= close.index[-1] - pd.Timedelta(days=92)]
+    # 오늘이 저점이다(그대로 두면 현재가가 기간 저점보다 낮은 값으로 표시됐다).
+    low_window = close[close.index >= close.index[-1] - pd.DateOffset(months=RECENT_LOW_MONTHS)]
     low_value, low_date = float(low_window.min()), low_window.idxmin()
     if current < low_value:
         low_value, low_date = current, today
@@ -339,7 +343,7 @@ def _load_ticker_status(ticker: str, name: str, trigger_pct: float, live_close: 
         "buy_trigger": _round_to_tick(prev_close * (1.0 - float(trigger_pct) / 100.0)),
         "recent_low": round(low_value),
         "recent_low_date": low_date.strftime("%Y-%m-%d"),
-        "recent_low_label": "3개월 저점",
+        "recent_low_label": f"{RECENT_LOW_MONTHS}개월 저점",
     }
 
 
