@@ -400,7 +400,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     # 바뀌면 보유 행의 일간(%)이 갱신 전 값으로 남는다. 진입 예정은 후보 행을 **복사**해 만든
     # 목록이라 함께 넘겨야 같은 종목의 현재가가 순위 화면과 어긋나지 않는다(기준일 목표인
     # `target_entries` 는 이미 따로 복사해 뒀으므로 확정값 그대로다).
-    _apply_display_quotes([*rows, *entries], holdings, quotes["by_ticker"])
+    realtime_missing_tickers = _apply_display_quotes([*rows, *entries], holdings, quotes["by_ticker"])
 
     # 표시용 시세·부가 정보 — 보유·이탈 행에도 후보 표와 같은 값을 붙인다.
     for item in [*holdings, *exited_today]:
@@ -472,6 +472,8 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         "pre_market": quotes["pre_market"],
         "auto_refresh": _should_auto_refresh(pool, quotes),
         "quote_at": quotes["traded_at"],
+        # 실시간 시세를 못 받은 종목 — 일간(%)이 비어 있다(화면이 경고로 알린다).
+        "realtime_missing_tickers": realtime_missing_tickers,
     }
 
 

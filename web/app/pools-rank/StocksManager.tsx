@@ -5,6 +5,7 @@ import type { ColDef, RowClassParams } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { RealtimeMissingNotice } from "../components/RealtimeMissingNotice";
 import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { poolHasIndustry, poolHasMarketCap, poolHasUsStockSector } from "@/lib/pool-industry";
@@ -159,6 +160,8 @@ type RankResponse = {
   missing_tickers?: string[];
   missing_ticker_labels?: string[];
   stale_tickers?: string[];
+  /** 실시간 시세를 못 받은 종목 — 일간(%)이 비어 있고 현재가는 마지막 종가다. */
+  realtime_missing_tickers?: string[];
   error?: string;
 };
 
@@ -425,6 +428,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [missingTickers, setMissingTickers] = useState<string[]>([]);
   const [missingTickerLabels, setMissingTickerLabels] = useState<string[]>([]);
   const [staleTickers, setStaleTickers] = useState<string[]>([]);
+  const [realtimeMissingTickers, setRealtimeMissingTickers] = useState<string[]>([]);
   const [addingRows, setAddingRows] = useState<RankAddingRowState[]>([]);
   const [addProgress, setAddProgress] = useState<PoolAddProgress | null>(null);
   const [dirtyRowIds, setDirtyRowIds] = useState<string[]>([]);
@@ -450,6 +454,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setMissingTickers([]);
     setMissingTickerLabels([]);
     setStaleTickers([]);
+    setRealtimeMissingTickers([]);
   }
 
   function applyRankPayload(payload: RankResponse) {
@@ -486,6 +491,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setMissingTickers(payload.missing_tickers ?? []);
     setMissingTickerLabels(payload.missing_ticker_labels ?? []);
     setStaleTickers(payload.stale_tickers ?? []);
+    setRealtimeMissingTickers(payload.realtime_missing_tickers ?? []);
   }
 
   function applyRankToolbarPayload(payload: RankResponse) {
@@ -1756,6 +1762,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   return (
     <div className="appPageStack appPageStackFill">
+      <RealtimeMissingNotice tickers={realtimeMissingTickers} />
       {error ? (
         <div className="appBannerStack">
           <div className="bannerError alert alert-danger mb-0">{error}</div>

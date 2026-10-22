@@ -731,6 +731,8 @@ def _compute_rank_data_payload(
             [str(item) for item in (dataframe.attrs.get("missing_tickers") or [])],
         ),
         "stale_tickers": [str(item) for item in (dataframe.attrs.get("stale_tickers") or [])],
+        # 실시간 시세를 못 받은 종목 — 현재가는 마지막 종가, 일간(%)은 비어 있다(화면이 경고로 알린다).
+        "realtime_missing_tickers": [str(item) for item in (dataframe.attrs.get("realtime_missing_tickers") or [])],
     }
 
 

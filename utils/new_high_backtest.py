@@ -445,7 +445,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         engine_daily = live_result["daily"]
         mark_engine_statuses(holdings, live_result["planned_exits"])
 
-        _apply_display_quotes(rows, holdings, quotes["by_ticker"])
+        realtime_missing_tickers = _apply_display_quotes(rows, holdings, quotes["by_ticker"])
 
         # 돌파 거리·터치 표시를 잠정 봉 기준으로 갱신한다(판정과 같은 eff 값).
         eff_prior_high = eff["prior_high"].loc[session_ts]
@@ -520,7 +520,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         # 실시간 시세가 **하나도 없는** 구간(시세 조회 실패, 설정이 없는 풀 등).
         # 붙일 값이 없으므로 확정 종가 기준 그대로 두고 표시만 맞춘다. 장전이나 ETF 는
         # 여기로 오지 않는다 — 시세가 있으면 위쪽 잠정 실행을 탄다.
-        _apply_display_quotes(rows, holdings, quotes["by_ticker"])
+        realtime_missing_tickers = _apply_display_quotes(rows, holdings, quotes["by_ticker"])
 
     # ── 지난 세션의 청산분은 버린다 ─────────────────────────────────────────
     # 그 세션이 이미 마감했으면 보유 표에 있을 이유가 없다 — 내역은 「체결」 탭에 남는다.
@@ -623,6 +623,8 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         # 화면이 주기 갱신을 걸어야 하는지. 거래가 일어나는 세션이 열려 있으면 참.
         "auto_refresh": _should_auto_refresh(pool, quotes),
         "quote_at": quotes["traded_at"],
+        # 실시간 시세를 못 받은 종목 — 일간(%)이 비어 있다(화면이 경고로 알린다).
+        "realtime_missing_tickers": realtime_missing_tickers,
         "breakouts": [r for r in rows if r["gap_pct"] >= 0],
         # 임박(-3% 이내) → 근접(-7% 이내) 순으로 후보를 보여준다.
         "candidates": [r for r in rows if -7 <= r["gap_pct"] < 0][:30],

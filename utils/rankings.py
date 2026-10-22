@@ -33,6 +33,7 @@ from utils.effective_prices import (
     bar_anchor,
     previous_day_change_pct,
     prior_day_shown,
+    realtime_missing,
 )
 from utils.logger import get_app_logger
 from utils.moving_averages import pool_moving_average_type
@@ -841,6 +842,7 @@ def build_ticker_type_rankings(
     # 붙일 봉의 기준 — 합성·보유 알림과 **같은 공용 앵커**를 쓴다(정의가 한 곳뿐이라
     # 경로마다 갈리지 않는다).
     pool_last_bar = bar_anchor(country_code)
+    realtime_missing_tickers: list[str] = []
 
     for etf in etfs:
         ticker = str(etf.get("ticker") or "").strip().upper()
@@ -872,6 +874,10 @@ def build_ticker_type_rankings(
                 base_close_series, realtime_entry, country_code, prior_shown=prior_day_column
             )
             price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
+            if realtime_allowed and realtime_missing(realtime_entry):
+                # 시세를 못 받은 종목 — 마지막 봉 변동을 오늘 일간처럼 보이지 않게 비운다.
+                price_metrics["일간(%)"] = None
+                realtime_missing_tickers.append(ticker)
             # 장중 신고 터치 — 오늘 고가 기준(위 헬퍼 주석 참조). 당일에만 참이 될 수 있다.
             price_metrics["고점터치"] = _touched_new_high_today(base_close_series, realtime_entry)
         metric_elapsed += perf_counter() - metric_started_at
@@ -970,6 +976,7 @@ def build_ticker_type_rankings(
 
     df = _normalize_ranking_values(df, country_code, monthly_labels=monthly_labels)
     df.attrs["realtime_active"] = realtime_active
+    df.attrs["realtime_missing_tickers"] = realtime_missing_tickers
     df.attrs["ranking_computed_at"] = ranking_computed_at
     if realtime_meta:
         df.attrs["realtime_fetched_at"] = realtime_meta.get("fetched_at")

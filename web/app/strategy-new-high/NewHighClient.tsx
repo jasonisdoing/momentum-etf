@@ -14,6 +14,7 @@ import { MonthsSelect } from "../components/MonthsSelect";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
+import { RealtimeMissingNotice } from "../components/RealtimeMissingNotice";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
 import { StrategyNotes } from "../components/StrategyNotes";
 import { StrategyTuning } from "../components/StrategyTuning";
@@ -224,6 +225,8 @@ type PlanRow = {
 };
 
 type Positions = {
+  /** 서버 계산 때 실시간 시세를 못 받은 종목 — 일간(%)이 비어 있다. */
+  realtime_missing_tickers?: string[];
   /** 그 종목풀의 이평 종류(SMA/EMA) — 표기·컬럼 헤더가 쓴다. */
   ma_type?: string | null;
   as_of: string;
@@ -831,14 +834,19 @@ export function NewHighClient() {
       ].filter((ticker, index, all) => all.indexOf(ticker) === index),
     [positions],
   );
-  const quotes = useRealtimeQuotes(positions?.country ?? "", quoteTickers);
-  /** 시세가 들어온 종목만 현재가·등락률을 덮어쓴다(나머지 값은 판정 결과 그대로). */
+  const { quotes, missing: quoteMissing } = useRealtimeQuotes(positions?.country ?? "", quoteTickers);
+  /** 시세가 들어온 종목은 현재가·등락률을 덮어쓰고, 못 받은 종목은 일간(%)을 비운다(지난 값이 오늘처럼 보이지 않게). */
   const withQuote = useCallback(
     <T extends { ticker: string; price: number | null; change_pct: number | null }>(row: T): T => {
       const quote = quotes[row.ticker];
-      return quote ? { ...row, price: quote.price, change_pct: quote.change_pct } : row;
+      if (quote) return { ...row, price: quote.price, change_pct: quote.change_pct };
+      return quoteMissing.includes(row.ticker) ? { ...row, change_pct: null } : row;
     },
-    [quotes],
+    [quotes, quoteMissing],
+  );
+  const realtimeMissing = useMemo(
+    () => [...new Set([...(positions?.realtime_missing_tickers ?? []), ...quoteMissing])],
+    [positions, quoteMissing],
   );
 
   const planRows = useMemo<PlanRow[]>(() => {
@@ -1080,6 +1088,7 @@ export function NewHighClient() {
   return (
     <PageFrame title="신고가 전략" fullWidth>
       <div className="appPageStack">
+        <RealtimeMissingNotice tickers={realtimeMissing} />
         <section className="appSection">
           <div className="card appCard">
             <div className="card-body appCardBodyTight">

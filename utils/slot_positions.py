@@ -277,16 +277,23 @@ def _apply_display_quotes(
     rows: list[dict[str, Any]],
     holdings: list[dict[str, Any]],
     by_ticker: dict[str, dict[str, Any]],
-) -> None:
+) -> list[str]:
     """현재가·일간(%)·보유 수익률만 실시간으로 바꾼다. **이 함수는 판정을 하지 않는다.**
 
     판정 자체는 `utils.effective_prices` 가 실시간을 마지막 봉으로 붙인 프레임 위에서
     엔진이 한다(잠정 마지막 봉 모드). 여기서는 그 결과 행의 표시 숫자만 맞춰,
     체결 시각이나 고가를 안 주는 종목(국내 ETF)도 일간(%) 이 정상으로 나오게 한다.
+
+    시세를 못 받은 종목은 일간(%)을 비우고(현재가는 마지막 종가) 그 티커 목록을 돌려준다 —
+    마지막 봉 변동을 오늘 일간처럼 보이지 않게 하는 공용 규칙(`effective_prices.realtime_missing`)이다.
     """
+    missing: list[str] = []
     for row in rows:
         quote = by_ticker.get(row["ticker"])
         if not quote:
+            row["change_pct"] = None
+            if row["ticker"] not in missing:
+                missing.append(row["ticker"])
             continue
         row["price"] = quote["price"]
         if quote["change_pct"] is not None:
@@ -294,9 +301,12 @@ def _apply_display_quotes(
     for held in holdings:
         quote = by_ticker.get(held["ticker"])
         if not quote:
+            if held["ticker"] not in missing:
+                missing.append(held["ticker"])
             continue
         held["price"] = quote["price"]
         held["return_pct"] = round((quote["price"] / held["entry_price"] - 1) * 100, 2)
+    return missing
 
 
 def _cache_refreshed_at(pool: str) -> str | None:

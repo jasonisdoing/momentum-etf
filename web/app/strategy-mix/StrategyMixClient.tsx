@@ -24,6 +24,7 @@ import {
 } from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
+import { RealtimeMissingNotice } from "../components/RealtimeMissingNotice";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
 import { StrategyNotes } from "../components/StrategyNotes";
 import { type HoldingChartData } from "../components/HoldingChart";
@@ -698,7 +699,7 @@ export function StrategyMixClient() {
   }, [displayCurrency, displayRate]);
 
   // 표시용 현재가·일간(%)만 60초마다 갱신한다 — 목표·매매수량은 5분 캐시된 판정 결과다.
-  const quotes = useRealtimeQuotes(
+  const { quotes, missing: quoteMissing } = useRealtimeQuotes(
     positions?.country ?? "",
     (positions?.holdings ?? []).map((row) => row.ticker),
   );
@@ -746,7 +747,8 @@ export function StrategyMixClient() {
         ...holding,
         row_key: holding.ticker,
         price,
-        change_pct: quote ? quote.change_pct : holding.change_pct,
+        // 시세를 못 받은 종목은 일간(%)을 비운다 — 지난 값이 오늘처럼 보이지 않게(공용 규칙).
+        change_pct: quote ? quote.change_pct : quoteMissing.includes(holding.ticker) ? null : holding.change_pct,
         return_pct: returnPct,
         amount: holding.target_amount ?? null,
         shares: holding.target_quantity ?? null,
@@ -879,7 +881,7 @@ export function StrategyMixClient() {
 
     return [totalRow, cashRow, ...groupedRows, ...leftoverRows];
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
-  }, [positions, quotes, totalAsset, sleeves, formatAmount]);
+  }, [positions, quotes, quoteMissing, totalAsset, sleeves, formatAmount]);
 
   // ── 차트 탭 (공용 HoldingChart — 슬리브별 기준선은 백엔드가 내려준다) ──
   const [holdingsTab, setHoldingsTab] = useState<HoldingsTab>("list");
@@ -1617,6 +1619,7 @@ export function StrategyMixClient() {
   return (
     <PageFrame title="합성 전략" fullWidth>
       <div className="appPageStack">
+        <RealtimeMissingNotice tickers={quoteMissing} />
         <section className="appSection">
           <div className="card appCard">
             <div className="card-body appCardBodyTight">

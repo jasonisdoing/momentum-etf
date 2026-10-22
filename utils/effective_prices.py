@@ -85,6 +85,16 @@ def quote_trade_day(entry: Mapping[str, Any] | None) -> pd.Timestamp | None:
     return _normalize_day(stamp)
 
 
+def realtime_missing(entry: Mapping[str, Any] | None) -> bool:
+    """실시간 시세를 못 받은 종목인지 — 시세 항목이 없거나 현재가가 비었다.
+
+    이때 일간(%)은 **비워 둔다**. 가격 캐시의 마지막 봉으로 계산하면 지난 거래일 변동이 오늘 일간처럼
+    보여 전거래일(%)과 같은 값이 나란히 찍혔다(2026-10-22 토스 API 장애). 현재가는 마지막 종가를 두되
+    화면이 「실시간 아님」을 알린다(`realtime_missing_tickers`).
+    """
+    return not isinstance(entry, Mapping) or entry.get("nowVal") is None
+
+
 def last_regular_close(entry: Mapping[str, Any] | None) -> float | None:
     """시세가 알려 주는 **마지막으로 마감된 정규장 종가**. 모르면 None.
 
