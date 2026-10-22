@@ -12,10 +12,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-import requests
-
-from config import TOSS_INVEST_API_BASE_URL, TOSS_INVEST_HEADERS
+from config import TOSS_INVEST_API_BASE_URL
 from utils.logger import get_app_logger
+from utils.toss_session import toss_request
 
 logger = get_app_logger()
 
@@ -30,7 +29,7 @@ def _parse_candle_timestamp_ms(value: Any) -> int:
 def fetch_toss_candles(code: str, interval: str = "min:15", count: int = 96) -> list[dict[str, float]]:
     """토스 c-chart 캔들을 과거→최신 순 [{o,h,l,c}] 로 반환한다."""
     url = f"{TOSS_INVEST_API_BASE_URL}/api/v2/c-chart/us-s/{code}/{interval}"
-    resp = requests.get(url, headers=TOSS_INVEST_HEADERS, params={"count": int(count)}, timeout=8)
+    resp = toss_request("GET", url, params={"count": int(count)}, timeout=8)
     resp.raise_for_status()
     payload = resp.json()
     candles_raw = ((payload.get("result") or {}).get("candles")) or []
@@ -65,7 +64,7 @@ def fetch_toss_stock_candles(
     if securities_type not in {"kr-s", "us-s"}:
         raise ValueError(f"지원하지 않는 토스 증권 유형입니다: {securities_type}")
     url = f"{TOSS_INVEST_API_BASE_URL}/api/v1/c-chart/{securities_type}/{code}/{interval}"
-    resp = requests.get(url, headers=TOSS_INVEST_HEADERS, params={"count": int(count)}, timeout=8)
+    resp = toss_request("GET", url, params={"count": int(count)}, timeout=8)
     resp.raise_for_status()
     candles_raw = ((resp.json().get("result") or {}).get("candles")) or []
     if not candles_raw:
@@ -94,7 +93,7 @@ def fetch_toss_us_daily_ohlcv(code: str, count: int = 60) -> list[dict[str, floa
     네이버 해외 일봉에는 없는 거래량을 미국 가격 캐시가 보강할 때 쓴다.
     """
     url = f"{TOSS_INVEST_API_BASE_URL}/api/v2/c-chart/us-s/{code}/day:1"
-    resp = requests.get(url, headers=TOSS_INVEST_HEADERS, params={"count": int(count)}, timeout=8)
+    resp = toss_request("GET", url, params={"count": int(count)}, timeout=8)
     resp.raise_for_status()
     candles_raw = ((resp.json().get("result") or {}).get("candles")) or []
     if not candles_raw:

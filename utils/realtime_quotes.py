@@ -33,10 +33,10 @@ from config import (
     NAVER_FINANCE_ETF_API_URL,
     NAVER_FINANCE_HEADERS,
     TOSS_INVEST_API_BASE_URL,
-    TOSS_INVEST_HEADERS,
 )
 from utils.asx_ticker import strip_asx_prefix, to_yahoo_symbol
 from utils.logger import get_app_logger
+from utils.toss_session import toss_request
 
 logger = get_app_logger()
 
@@ -735,9 +735,9 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
         try:
             # 토스는 BRK-A 등 하이픈(-)이 들어간 경우 BRK.A로 검색해야 결과가 나옵니다.
             search_query = sym.replace("-", ".")
-            resp = requests.post(
+            resp = toss_request(
+                "POST",
                 search_url,
-                headers=TOSS_INVEST_HEADERS,
                 json={"query": search_query},
                 timeout=5,
             )
@@ -911,10 +911,10 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
         codes_param = ",".join(chunk)
 
         try:
-            resp = requests.get(
+            resp = toss_request(
+                "GET",
                 price_url,
                 params={"productCodes": codes_param},
-                headers=TOSS_INVEST_HEADERS,
                 timeout=5,
             )
             resp.raise_for_status()
@@ -976,10 +976,10 @@ def fetch_toss_kr_trade_value_snapshot(tickers: Sequence[str]) -> dict[str, dict
     for start in range(0, len(all_codes), 50):
         codes = all_codes[start : start + 50]
         try:
-            resp = requests.get(
+            resp = toss_request(
+                "GET",
                 price_url,
                 params={"productCodes": ",".join(codes)},
-                headers=TOSS_INVEST_HEADERS,
                 timeout=5,
             )
             resp.raise_for_status()
