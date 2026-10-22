@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -20,7 +21,9 @@ from utils.us_etf_market_service import load_us_security_exchange_map
 
 _BASE_URL = "https://www.schwabassetmanagement.com"
 _SITEMAP_URL = f"{_BASE_URL}/sitemap.xml"
-_HOLDINGS_URL = f"{_BASE_URL}/allholdings/{{ticker}}?page={{page}}"
+# `fresh` 는 캐시 우회용 값이다. 사이트 캐시(s-maxage=1800)가 페이지마다 따로 남아 일부 페이지만 몇 주 전
+# 기준일로 나왔다(2026-10-22 SCHE 21쪽 09/28, SCHA 17쪽 10/05). 쿼리를 바꾸면 최신 페이지가 온다.
+_HOLDINGS_URL = f"{_BASE_URL}/allholdings/{{ticker}}?page={{page}}&fresh={{fresh}}"
 _PRODUCT_CACHE = TtlCache(CACHE_TTL_SLOW, name="schwab_us_products", max_entries=1)
 _PRODUCT_PATH = re.compile(r"<loc>https://www\.schwabassetmanagement\.com/products/([a-z0-9]{3,6})</loc>")
 _HEADERS = ["Fund Name", "CUSIP", "Symbol", "Quantity", "% of Assets", "Market Value"]
@@ -35,9 +38,9 @@ def _fetch_products() -> set[str]:
     return products
 
 
-def _fetch_page(ticker: str, page: int) -> tuple[list[list[str]], str, int]:
+def _fetch_page(ticker: str, page: int, fresh: int) -> tuple[list[list[str]], str, int]:
     """한 페이지의 (행, 기준일 원문, 마지막 페이지 번호)."""
-    response = browser_get(_HOLDINGS_URL.format(ticker=ticker, page=page), timeout=40)
+    response = browser_get(_HOLDINGS_URL.format(ticker=ticker, page=page, fresh=fresh), timeout=40)
     soup = BeautifulSoup(response.text, "html.parser")
     table = soup.find("table")
     if table is None:
@@ -50,7 +53,7 @@ def _fetch_page(ticker: str, page: int) -> tuple[list[list[str]], str, int]:
     as_of = re.fullmatch(r"As of (\d{1,2}/\d{1,2}/\d{2})", as_of_node.get_text(" ", strip=True)) if as_of_node else None
     if as_of is None:
         raise ValueError(f"Schwab {ticker} 전체 보유 기준일이 없습니다(page={page}).")
-    pages = [int(value) for value in re.findall(r"\?page=(\d+)", response.text)]
+    pages = [int(value) for value in re.findall(r"[?&](?:amp;)?page=(\d+)", response.text)]
     return rows, as_of.group(1), max(pages, default=0)
 
 
@@ -107,9 +110,10 @@ def fetch_schwab_us_holdings(ticker: str) -> dict[str, Any] | None:
         raise ValueError("Schwab 구성종목 조회에 티커가 필요합니다.")
     if ticker_norm not in _PRODUCT_CACHE.get_or_compute("products", _fetch_products):
         return None
-    rows, as_of, last_page = _fetch_page(ticker_norm, 0)
+    fresh = int(time.time())
+    rows, as_of, last_page = _fetch_page(ticker_norm, 0, fresh)
     for page in range(1, last_page + 1):
-        page_rows, page_as_of, _ = _fetch_page(ticker_norm, page)
+        page_rows, page_as_of, _ = _fetch_page(ticker_norm, page, fresh)
         if page_as_of != as_of:
             raise ValueError(f"Schwab {ticker_norm} 전체 보유 페이지의 기준일이 다릅니다: {as_of} / {page_as_of}")
         rows.extend(page_rows)
