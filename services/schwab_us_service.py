@@ -1,6 +1,6 @@
 """Schwab 미국 ETF 공식 상품 명단(사이트맵)과 전체 보유 페이지(allholdings) 수집.
 
-사이트가 일반 HTTP 요청을 막아(403) 브라우저 TLS 지문을 흉내 내는 curl_cffi 로 받는다.
+사이트가 일반 HTTP 요청을 막아(403) 브라우저 TLS 지문을 흉내 내는 공용 요청(`browser_get`)으로 받는다.
 """
 
 from __future__ import annotations
@@ -11,9 +11,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from bs4 import BeautifulSoup
-from curl_cffi import requests as curl_requests
 
 from config import CACHE_TTL_SLOW
+from utils.http_session import browser_get
 from utils.normalization import resolve_bloomberg_listing
 from utils.ttl_cache import TtlCache
 from utils.us_etf_market_service import load_us_security_exchange_map
@@ -21,7 +21,6 @@ from utils.us_etf_market_service import load_us_security_exchange_map
 _BASE_URL = "https://www.schwabassetmanagement.com"
 _SITEMAP_URL = f"{_BASE_URL}/sitemap.xml"
 _HOLDINGS_URL = f"{_BASE_URL}/allholdings/{{ticker}}?page={{page}}"
-_SESSION = curl_requests.Session(impersonate="chrome")
 _PRODUCT_CACHE = TtlCache(CACHE_TTL_SLOW, name="schwab_us_products", max_entries=1)
 _PRODUCT_PATH = re.compile(r"<loc>https://www\.schwabassetmanagement\.com/products/([a-z0-9]{3,6})</loc>")
 _HEADERS = ["Fund Name", "CUSIP", "Symbol", "Quantity", "% of Assets", "Market Value"]
@@ -29,8 +28,7 @@ _HEADERS = ["Fund Name", "CUSIP", "Symbol", "Quantity", "% of Assets", "Market V
 
 def _fetch_products() -> set[str]:
     """Schwab 상품 페이지(`/products/<티커>`)가 있는 티커 — 사이트맵이 공식 명단이다."""
-    response = _SESSION.get(_SITEMAP_URL, timeout=40)
-    response.raise_for_status()
+    response = browser_get(_SITEMAP_URL, timeout=40)
     products = {slug.upper() for slug in _PRODUCT_PATH.findall(response.text)}
     if not products:
         raise ValueError("Schwab 사이트맵에 상품 페이지가 없습니다.")
@@ -39,8 +37,7 @@ def _fetch_products() -> set[str]:
 
 def _fetch_page(ticker: str, page: int) -> tuple[list[list[str]], str, int]:
     """한 페이지의 (행, 기준일 원문, 마지막 페이지 번호)."""
-    response = _SESSION.get(_HOLDINGS_URL.format(ticker=ticker, page=page), timeout=40)
-    response.raise_for_status()
+    response = browser_get(_HOLDINGS_URL.format(ticker=ticker, page=page), timeout=40)
     soup = BeautifulSoup(response.text, "html.parser")
     table = soup.find("table")
     if table is None:

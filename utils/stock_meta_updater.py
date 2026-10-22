@@ -50,6 +50,13 @@ from utils.data_loader import (
     fetch_ohlcv,
     fetch_pykrx_name,
 )
+from utils.data_source_catalog import (
+    AU_ISSUER_KEYWORDS,
+    AU_OFFICIAL_SOURCES,
+    US_ISSUER_KEYWORDS,
+    US_OFFICIAL_SOURCES,
+    resolve_issuer,
+)
 from utils.http_session import shared_session
 from utils.kis_market import refresh_kis_domestic_etf_master_cache
 from utils.logger import get_app_logger
@@ -457,7 +464,7 @@ def _refresh_us_stock_meta_cache(
     # 미국 ETF 는 구성종목도 함께 저장한다(개별주는 holdings 개념이 없어 건너뜀).
     holdings_cache: dict[str, Any] | None = None
     if is_etf:
-        holdings_info = fetch_us_etf_holdings(ticker_norm)
+        holdings_info = fetch_us_etf_holdings(ticker_norm, name_norm)
         if holdings_info:
             holdings_cache = _holdings_cache_from(expand_nested_etf_holdings(holdings_info, ticker_norm))
         else:
@@ -683,49 +690,89 @@ def _registered_etf_holdings(tickers: list[str]) -> dict[str, list[dict[str, Any
     return found
 
 
-def fetch_au_etf_holdings(ticker: str) -> dict[str, Any] | None:
-    """호주 ETF 구성종목을 공식 수집 경로에서 조회한다."""
-    for fetch_official in (
-        fetch_betashares_holdings,
-        fetch_vanguard_au_holdings,
-        fetch_spdr_au_holdings,
-        fetch_ishares_au_holdings,
-        fetch_globalx_au_holdings,
-        fetch_vaneck_au_holdings,
-    ):
-        official = fetch_official(ticker)
-        if official is not None:
-            return official
-    return fetch_yfinance_holdings(ticker, is_australian=True)
+# 공식 수집 소스 → 수집 함수. 발행사 → 소스는 카탈로그(`AU/US_OFFICIAL_SOURCES`)가 단일 소스다.
+_AU_OFFICIAL_FETCHERS: dict[str, Callable[[str], dict[str, Any] | None]] = {
+    "betashares_csv": fetch_betashares_holdings,
+    "vanguard_au_api": fetch_vanguard_au_holdings,
+    "spdr_au_xlsx": fetch_spdr_au_holdings,
+    "ishares_au_csv": fetch_ishares_au_holdings,
+    "globalx_au_xlsx": fetch_globalx_au_holdings,
+    "vaneck_au_xlsx": fetch_vaneck_au_holdings,
+}
+_US_OFFICIAL_FETCHERS: dict[str, Callable[[str], dict[str, Any] | None]] = {
+    "invesco_us_api": fetch_invesco_us_holdings,
+    "ishares_us_csv": fetch_ishares_us_holdings,
+    "spdr_us_xlsx": fetch_spdr_us_holdings,
+    "vaneck_us_api": fetch_vaneck_us_holdings,
+    "vistashares_us_csv": fetch_vistashares_us_holdings,
+    "ark_us_csv": fetch_ark_us_holdings,
+    "firsttrust_us_html": fetch_firsttrust_us_holdings,
+    "fidelity_us_xls": fetch_fidelity_us_holdings,
+    "tortoise_us_html": fetch_tortoise_us_holdings,
+    "globalx_us_csv": fetch_globalx_us_holdings,
+    "victoryshares_us_api": fetch_victoryshares_us_holdings,
+    "vanguard_us_api": fetch_vanguard_us_holdings,
+    "direxion_us_api": fetch_direxion_us_holdings,
+    "roundhill_us_csv": fetch_roundhill_us_holdings,
+    "alps_us_api": fetch_alps_us_holdings,
+    "marketdesk_us_csv": fetch_marketdesk_us_holdings,
+    "wisdomtree_us_api": fetch_wisdomtree_us_holdings,
+    "schwab_us_html": fetch_schwab_us_holdings,
+}
+if set(_AU_OFFICIAL_FETCHERS) != set(AU_OFFICIAL_SOURCES.values()) or set(_US_OFFICIAL_FETCHERS) != set(
+    US_OFFICIAL_SOURCES.values()
+):
+    raise RuntimeError("공식 구성종목 수집 함수 목록이 카탈로그의 공식 소스와 다릅니다.")
 
 
-def fetch_us_etf_holdings(ticker: str) -> dict[str, Any] | None:
-    """실물 상품은 공식 공시, 연동 운용사는 전체 목록, 다른 운용사는 Yahoo 상위 목록을 사용한다."""
-    for fetch_official in (
-        fetch_us_physical_etf_holdings,
-        fetch_invesco_us_holdings,
-        fetch_ishares_us_holdings,
-        fetch_spdr_us_holdings,
-        fetch_vaneck_us_holdings,
-        fetch_vistashares_us_holdings,
-        fetch_ark_us_holdings,
-        fetch_firsttrust_us_holdings,
-        fetch_fidelity_us_holdings,
-        fetch_tortoise_us_holdings,
-        fetch_globalx_us_holdings,
-        fetch_victoryshares_us_holdings,
-        fetch_vanguard_us_holdings,
-        fetch_direxion_us_holdings,
-        fetch_roundhill_us_holdings,
-        fetch_alps_us_holdings,
-        fetch_marketdesk_us_holdings,
-        fetch_wisdomtree_us_holdings,
-        fetch_schwab_us_holdings,
-    ):
-        official = fetch_official(ticker)
-        if official is not None:
-            return official
-    return fetch_yfinance_holdings(ticker, is_australian=False)
+def _fetch_issuer_holdings(
+    ticker: str,
+    name: str,
+    *,
+    table: list[tuple[str, tuple[str, ...]]],
+    official: dict[str, str],
+    fetchers: dict[str, Callable[[str], dict[str, Any] | None]],
+    is_australian: bool,
+) -> dict[str, Any] | None:
+    """ETF 이름으로 발행사를 정하고 **그 발행사의 공식 연동만** 부른다. 연동이 없으면 Yahoo 상위 목록.
+
+    예전에는 모든 운용사 연동을 차례로 불러 「우리 상품인가」를 물었다. 한 운용사 사이트가 막히면
+    (2026-10-22 WisdomTree Cloudflare 403) 그 뒤 순서의 다른 발행사 ETF 57개까지 전부 실패했다.
+    발행사 판정은 /data_source 와 같은 규칙(`resolve_issuer`)이다.
+    """
+    source = official.get(resolve_issuer(name, table))
+    if source is not None:
+        holdings = fetchers[source](ticker)
+        if holdings is not None:
+            return holdings
+    return fetch_yfinance_holdings(ticker, is_australian=is_australian)
+
+
+def fetch_au_etf_holdings(ticker: str, name: str) -> dict[str, Any] | None:
+    """호주 ETF 구성종목 — 발행사 공식 연동, 없으면 Yahoo 상위 목록."""
+    return _fetch_issuer_holdings(
+        ticker,
+        name,
+        table=AU_ISSUER_KEYWORDS,
+        official=AU_OFFICIAL_SOURCES,
+        fetchers=_AU_OFFICIAL_FETCHERS,
+        is_australian=True,
+    )
+
+
+def fetch_us_etf_holdings(ticker: str, name: str) -> dict[str, Any] | None:
+    """미국 ETF 구성종목 — 실물 상품은 공식 공시, 그 밖은 발행사 공식 연동, 없으면 Yahoo 상위 목록."""
+    physical = fetch_us_physical_etf_holdings(ticker)
+    if physical is not None:
+        return physical
+    return _fetch_issuer_holdings(
+        ticker,
+        name,
+        table=US_ISSUER_KEYWORDS,
+        official=US_OFFICIAL_SOURCES,
+        fetchers=_US_OFFICIAL_FETCHERS,
+        is_australian=False,
+    )
 
 
 def _feeder_etf_holdings(ticker: str) -> list[dict[str, Any]] | None:
@@ -733,12 +780,15 @@ def _feeder_etf_holdings(ticker: str) -> list[dict[str, Any]] | None:
     is_australian = ticker.startswith("ASX:")
     symbol = to_yahoo_symbol(ticker) if is_australian else normalize_ticker(ticker)
     try:
-        if str((getattr(yf.Ticker(symbol), "info", {}) or {}).get("quoteType") or "").upper() != "ETF":
-            return None
+        info = getattr(yf.Ticker(symbol), "info", {}) or {}
     except Exception as exc:
         get_app_logger().debug(f"[yfinance] {symbol} 종류 확인 실패: {exc}")
         return None
-    inner = fetch_au_etf_holdings(ticker) if is_australian else fetch_us_etf_holdings(ticker)
+    if str(info.get("quoteType") or "").upper() != "ETF":
+        return None
+    # 발행사 판정용 이름 — DB 에 없는 종목이라 Yahoo 이름을 쓴다.
+    name = str(info.get("longName") or info.get("shortName") or "")
+    inner = fetch_au_etf_holdings(ticker, name) if is_australian else fetch_us_etf_holdings(ticker, name)
     return list(inner["holdings"]) if inner else None
 
 
@@ -815,7 +865,11 @@ def _refresh_overseas_etf_meta_cache(
     name_norm = str(name or "").strip() or ticker_norm
     country_norm = str(country_code or "").strip().lower()
 
-    holdings_info = fetch_au_etf_holdings(ticker_norm) if country_norm == "au" else fetch_us_etf_holdings(ticker_norm)
+    holdings_info = (
+        fetch_au_etf_holdings(ticker_norm, name_norm)
+        if country_norm == "au"
+        else fetch_us_etf_holdings(ticker_norm, name_norm)
+    )
 
     # 구성종목 수집이 실패해도 배당·상장일·순자산 등 나머지 메타는 저장한다.
     # (여기서 return 하면 캐시 문서 자체가 만들어지지 않아 화면이 통째로 빈다.)

@@ -1,6 +1,6 @@
 """WisdomTree 미국 ETF 공식 상품 명단과 전체 보유 API 수집.
 
-사이트가 Cloudflare 로 일반 HTTP 요청을 막아(403) 브라우저 TLS 지문을 흉내 내는 curl_cffi 로 받는다.
+사이트가 Cloudflare 로 일반 HTTP 요청을 막아(403) 브라우저 TLS 지문을 흉내 내는 공용 요청(`browser_get`)으로 받는다.
 """
 
 from __future__ import annotations
@@ -10,10 +10,9 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from curl_cffi import requests as curl_requests
-
 from config import CACHE_TTL_SLOW
 from services.component_price_service import infer_yahoo_symbol_currency
+from utils.http_session import browser_get
 from utils.normalization import resolve_bloomberg_listing
 from utils.ttl_cache import TtlCache
 from utils.us_etf_market_service import load_us_security_exchange_map
@@ -21,7 +20,6 @@ from utils.us_etf_market_service import load_us_security_exchange_map
 _BASE_URL = "https://www.wisdomtree.com"
 _PRODUCT_LIST_URL = f"{_BASE_URL}/investments/etfs"
 _HOLDINGS_URL = f"{_BASE_URL}/api/fund-holdings/{{class_id}}"
-_SESSION = curl_requests.Session(impersonate="chrome")
 _PRODUCT_MAP_CACHE = TtlCache(CACHE_TTL_SLOW, name="wisdomtree_us_products", max_entries=1)
 # 상품 목록 페이지의 메뉴 데이터 — `{"_id":"<상품ID>.product", ..., "ticker":"GDE"}`.
 _FUTURES_NAME = re.compile(r"\bFUTR?\b|\(CBT\)")
@@ -30,8 +28,7 @@ _PRODUCT_PATTERN = re.compile(r'"_id":"(\d+)\.product","_type":"product".{0,900}
 
 def _fetch_product_map() -> dict[str, str]:
     """티커 → WisdomTree 상품 ID(wtClassID). 공식 ETF 목록 페이지의 상품 링크에서 읽는다."""
-    response = _SESSION.get(_PRODUCT_LIST_URL, timeout=40)
-    response.raise_for_status()
+    response = browser_get(_PRODUCT_LIST_URL, timeout=40)
     text = response.text.replace('\\"', '"')
     products: dict[str, str] = {}
     for match in _PRODUCT_PATTERN.finditer(text):
@@ -44,8 +41,7 @@ def _fetch_product_map() -> dict[str, str]:
 
 
 def _fetch_holdings(class_id: str, ticker: str) -> list[dict[str, Any]]:
-    response = _SESSION.get(_HOLDINGS_URL.format(class_id=class_id), timeout=30)
-    response.raise_for_status()
+    response = browser_get(_HOLDINGS_URL.format(class_id=class_id), timeout=30)
     rows = response.json()
     if not isinstance(rows, list) or not rows:
         raise ValueError(f"WisdomTree {ticker} 구성종목 응답이 비었거나 형식이 잘못됐습니다.")

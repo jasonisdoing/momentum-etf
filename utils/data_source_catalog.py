@@ -353,7 +353,7 @@ US_OFFICIAL_SOURCES: dict[str, str] = {
 }
 
 
-def _resolve_issuer(name: str, table: list[tuple[str, tuple[str, ...]]]) -> str:
+def resolve_issuer(name: str, table: list[tuple[str, tuple[str, ...]]]) -> str:
     """ETF 이름에서 발행사를 판별한다. 목록에 없으면 '기타'."""
     lowered = str(name or "").strip().lower()
     if not lowered:
@@ -541,7 +541,7 @@ def _build_issuer_sources(
     """종목풀 ETF 의 구성종목 수집 현황을 발행사별로 묶어 소스 카탈로그 행으로 만든다."""
     by_issuer: dict[str, list[dict[str, Any]]] = {issuer: [] for issuer, _ in table}
     for row in rows:
-        by_issuer.setdefault(_resolve_issuer(row["name"], table), []).append(row)
+        by_issuer.setdefault(resolve_issuer(row["name"], table), []).append(row)
 
     entries: list[dict[str, Any]] = []
     for issuer, issuer_rows in by_issuer.items():

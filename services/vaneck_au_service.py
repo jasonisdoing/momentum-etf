@@ -54,7 +54,9 @@ def _normalize_holding(raw: dict[str, str], us_listings: dict[str, str]) -> dict
         raise ValueError(f"VanEck 호주 구성종목 비중이 잘못됐습니다: {raw}")
     # 현금·기타는 티커 칸이 '--' 다(행 이름 'Other/Cash').
     is_cash = label in {"", "--"}
-    symbol, exchange = (None, None) if is_cash else resolve_bloomberg_listing(label, currency=None, us_listings=us_listings)
+    symbol, exchange = (
+        (None, None) if is_cash else resolve_bloomberg_listing(label, currency=None, us_listings=us_listings)
+    )
     ticker = None if is_cash else label
     if symbol:
         ticker = ensure_asx_prefix(symbol[:-3]) if symbol.endswith(".AX") else symbol

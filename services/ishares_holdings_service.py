@@ -141,7 +141,10 @@ def parse_ishares_holdings(text: str, *, date_format: str) -> tuple[str, list[di
     starts = [index for index, row in enumerate(rows) if row and row[0] == "Fund Holdings as of"]
     if not starts:
         raise ValueError("iShares 구성종목 기준일이 없습니다.")
-    ends = starts[1:] + [len(rows)]
+    # 다음 표 앞에 반복되는 펀드명은 구성종목 행이 아니라 표 제목이다.
+    ends = [index - 1 if len(rows[0]) == 1 and rows[index - 1] == rows[0] else index for index in starts[1:]] + [
+        len(rows)
+    ]
     sections = [_parse_holdings_section(rows[start:end], date_format) for start, end in zip(starts, ends, strict=True)]
     # 마지막 표는 자체 기준일을 가진 재간접 상세 내역이며 직접 보유와 갱신 시점이 다르다.
     return sections[-1]
