@@ -9,7 +9,12 @@ from typing import Any
 import requests
 
 from config import NAVER_FINANCE_HEADERS, NAVER_US_STOCK_MARKET_VALUE_URL
-from utils.index_constituents_loader import load_index_constituents, load_index_meta, us_market_constituents
+from utils.index_constituents_loader import (
+    US_SP500_MARKET_CAP_LIMIT,
+    load_index_constituents,
+    load_index_meta,
+    us_market_constituents,
+)
 from utils.industry_map import us_display_industry, us_display_sector, us_sector_label
 from utils.market_service import load_ticker_pool_map, load_ticker_pool_type_map
 from utils.portfolio_io import load_all_holding_tickers
@@ -240,7 +245,7 @@ def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -
 
 
 def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str, Any]:
-    """저장된 지수 구성종목에 실시간 시세를 붙인다. S&P500은 시총 상위 300개만 보여준다."""
+    """저장된 지수 구성종목에 실시간 시세를 붙인다. S&P500은 시총 상위 `US_SP500_MARKET_CAP_LIMIT`개만 보여준다."""
     constituents = us_market_constituents(index, load_index_constituents(index))
     meta = load_index_meta(index)
 
@@ -305,6 +310,8 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
         "total_count": len(rows),
         "count": len(rows),
         "rows": rows,
+        # S&P500 절단 개수 — 화면 라벨·셀렉트가 이 값을 쓴다(단일 소스는 서버 상수).
+        "sp500_limit": US_SP500_MARKET_CAP_LIMIT,
     }
 
 

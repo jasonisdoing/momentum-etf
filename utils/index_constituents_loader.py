@@ -12,11 +12,12 @@ from typing import Any
 
 COLLECTION = "index_constituents"
 SUPPORTED_INDICES = {"SP500", "NDX100", "ASX200", "KOSPI200", "KOSDAQ150"}
-US_SP500_MARKET_CAP_LIMIT = 300
+# S&P500 은 시총 상위 이 개수만 본다 — 화면(/us-market-stock)·미등록 알림이 같은 값을 쓴다.
+US_SP500_MARKET_CAP_LIMIT = 250
 
 
 def us_market_constituents(index: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """미국 개별주 화면의 대상 명단. S&P500만 저장 시총 상위 300개로 제한한다."""
+    """미국 개별주 화면의 대상 명단. S&P500만 저장 시총 상위 `US_SP500_MARKET_CAP_LIMIT`개로 제한한다."""
     if index.upper() != "SP500":
         return items
     return sorted(items, key=lambda item: (-(item.get("market_cap") or 0), str(item.get("ticker") or "")))[

@@ -71,6 +71,8 @@ type UsMarketStocksResponse = {
   total_count: number;
   count: number;
   rows: UsMarketStockRow[];
+  /** S&P500 시총 상위 절단 개수(서버 상수). */
+  sp500_limit?: number;
   error?: string;
 };
 
@@ -92,15 +94,23 @@ function viewIndices(view: ViewOption): readonly string[] {
 const US_MARKET_TOP_COUNT_KEY = "momentum-etf:us-market-stock:top-count";
 
 // 통합은 두 지수를 합쳐 600 종목에 가까워 100 단위로는 구간이 너무 성기다 → 50 단위.
-// S&P는 서버에서 시총 상위 300개까지만 받는다.
+// S&P는 서버에서 시총 상위 `sp500_limit`개까지만 받는다(서버 상수가 단일 소스).
 const COMBINED_TOP_STEP = 50;
 const SINGLE_TOP_OPTIONS: readonly (number | null)[] = [null, 100, 200, 300, 400, 500];
-const SP500_TOP_OPTIONS: readonly (number | null)[] = [null, 100, 200, 300];
 
-function topOptions(view: ViewOption, rowCount: number, current: number | null): (number | null)[] {
-  return view === "COMBINED"
-    ? stepTopOptions(COMBINED_TOP_STEP, rowCount, current)
-    : withCurrentTopOption([...(view === "SP500" ? SP500_TOP_OPTIONS : SINGLE_TOP_OPTIONS)], current);
+function topOptions(
+  view: ViewOption,
+  rowCount: number,
+  current: number | null,
+  sp500Limit: number | null,
+): (number | null)[] {
+  if (view === "COMBINED") return stepTopOptions(COMBINED_TOP_STEP, rowCount, current);
+  // S&P 선택지 — 100 단위 중 상한보다 작은 것 + 상한 자체.
+  const sp500Options =
+    sp500Limit === null
+      ? [null]
+      : [null, ...[100, 200, 300, 400].filter((n) => n < sp500Limit), sp500Limit];
+  return withCurrentTopOption([...(view === "SP500" ? sp500Options : SINGLE_TOP_OPTIONS)], current);
 }
 
 function formatUsd(value: number | null): string {
@@ -145,9 +155,10 @@ function isUsTickerPool(pool: StocksAccountItem): boolean {
 export function UsMarketStockManager({
   onSummaryChange,
 }: {
-  onSummaryChange?: (summary: { index: string; count: number; totalCount: number }) => void;
+  onSummaryChange?: (summary: { index: string; count: number; totalCount: number; sp500Limit: number | null }) => void;
 }) {
   const [view, setView] = useState<ViewOption>("COMBINED");
+  const [sp500Limit, setSp500Limit] = useState<number | null>(null);
   const [topCount, setTopCount] = useState<number | null>(null);
   const [minMarketCapUkm, setMinMarketCapUkm] = useState<string>("");
   const [rows, setRows] = useState<UsMarketStockRow[]>([]);
@@ -217,6 +228,7 @@ export function UsMarketStockManager({
         .map((row, index) => ({ ...row, rank: index + 1 }));
       if (!isLatest(token)) return;
       setRows(mergedRows);
+      setSp500Limit(payloads.find((data) => data.sp500_limit != null)?.sp500_limit ?? null);
       setTotalCount(mergedRows.length);
       setTickerPools(allStocksPayload.ticker_types ?? []);
 
@@ -245,8 +257,9 @@ export function UsMarketStockManager({
     [rows, showDuplicateClasses],
   );
 
-  // 이전 화면에서 기억한 400·500 설정은 S&P에선 전체(최대 300)로 보여준다.
-  const effectiveTopCount = view === "SP500" && topCount !== null && topCount > 300 ? null : topCount;
+  // 이전 화면에서 기억한 상한 초과 설정은 S&P에선 전체(최대 상한)로 보여준다.
+  const effectiveTopCount =
+    view === "SP500" && topCount !== null && sp500Limit !== null && topCount > sp500Limit ? null : topCount;
 
   // 시총 상위 N 만 표시 (전체면 절단 없음). rows 는 이미 시총 내림차순이다.
   const visibleRows = useMemo(
@@ -255,13 +268,13 @@ export function UsMarketStockManager({
   );
 
   const topChoices = useMemo(
-    () => topOptions(view, dedupedRows.length, effectiveTopCount),
-    [view, dedupedRows.length, effectiveTopCount],
+    () => topOptions(view, dedupedRows.length, effectiveTopCount, sp500Limit),
+    [view, dedupedRows.length, effectiveTopCount, sp500Limit],
   );
 
   useEffect(() => {
-    onSummaryChange?.({ index: view, count: visibleRows.length, totalCount });
-  }, [view, visibleRows.length, totalCount, onSummaryChange]);
+    onSummaryChange?.({ index: view, count: visibleRows.length, totalCount, sp500Limit });
+  }, [view, visibleRows.length, totalCount, sp500Limit, onSummaryChange]);
 
   // `#` 은 지금 보고 있는 목록에서의 위치다. 백엔드가 준 rank 는 지수 안에서의 순위라
   // 통합 보기에서는 두 지수의 번호가 섞여 중복·누락이 생긴다(상위 150 인데 144 까지만 보이는 등).
@@ -562,7 +575,7 @@ export function UsMarketStockManager({
                             ? "btn appSegmentedToggleButton is-active"
                             : "btn appSegmentedToggleButton"
                         }
-                        title={option.key === "COMBINED" ? "S&P 시총 상위 300종목과 나스닥100의 합집합" : undefined}
+                        title={option.key === "COMBINED" ? `S&P 시총 상위 ${sp500Limit ?? "-"}종목과 나스닥100의 합집합` : undefined}
                         onClick={() => setView(option.key)}
                       >
                         {option.label}
