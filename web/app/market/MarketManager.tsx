@@ -83,6 +83,8 @@ type MarketVariantConfig = {
   /** 이름으로 못 가르는 제외 그룹 — 배치가 판정해 둔 불리언 필드를 본다.
    *  키워드 그룹과 같은 칩으로 보이고 같은 방식으로 켜고 끈다. */
   flagExclusions?: Record<string, keyof MarketRowItem>;
+  /** 필터 칩 순서 — 없으면 키워드 그룹 다음에 플래그 그룹. 플래그 그룹 뒤에 키워드 그룹을 둘 때 쓴다. */
+  exclusionOrder?: string[];
   /** 과세 구분 토글(모두/과세/비과세)을 보일지 — 국내 ETF 만 이 구분이 있다. */
   showTaxFilter?: boolean;
   defaultExcluded: string[];
@@ -164,11 +166,14 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
         "HYPERLIQUID", "DOGECOIN", "LITECOIN", "AVALANCHE", "CHAINLINK", "CARDANO", "DIGITAL ASSET",
         "비트코인", "이더리움",
       ],
+      // 금·은 — 현물 신탁(GLD·SLV)·광산주(GDX·SIL)·레버리지까지. 단어 단위라 GOLDMAN 은 안 걸린다.
+      "금/은": [" GOLD ", " SILVER "],
     },
     // PTP — 원자재·선물형 상품(BWET·DBA·USO 등)이 여기 속한다. 짧은 이름에는 법적 구조가
     // 안 드러나 키워드로는 못 거른다(배치가 긴 이름으로 판정해 `is_ptp` 로 내려준다).
     flagExclusions: { PTP: "is_ptp" },
-    defaultExcluded: ["채권", "인버스/숏", "레버리지", "커버드콜/인컴", "리츠", "가상자산", "PTP"],
+    exclusionOrder: ["채권", "인버스/숏", "레버리지", "커버드콜/인컴", "리츠", "가상자산", "PTP", "금/은"],
+    defaultExcluded: ["채권", "인버스/숏", "레버리지", "커버드콜/인컴", "리츠", "가상자산", "PTP", "금/은"],
     showNavColumns: false,
     showListing: false,
     capHeader: "거래대금($M)",
@@ -770,7 +775,12 @@ export function MarketManager({
           </div>
           <div className="card-body appCardBodyTight appTableCardBodyFill">
             <div className="pillRow">
-              {[...Object.keys(variant.exclusionGroups), ...Object.keys(variant.flagExclusions ?? {})].map((group) => {
+              {(
+                variant.exclusionOrder ?? [
+                  ...Object.keys(variant.exclusionGroups),
+                  ...Object.keys(variant.flagExclusions ?? {}),
+                ]
+              ).map((group) => {
                 const isActive = excludedGroups.includes(group);
                 return (
                   <button
