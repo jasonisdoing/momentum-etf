@@ -13,12 +13,12 @@ import { TickerDetailLink } from "../components/TickerDetailLink";
 import { calcPortfolioChange } from "@/lib/portfolio-change";
 import type { PortfolioChangeResult } from "@/lib/portfolio-change";
 
-type CompareTab = "performance" | "basic" | "holdings" | "yearly" | "monthly" | "daily";
+type CompareTab = "performance" | "basic" | "holdings" | "yearly" | "monthly" | "weekly" | "daily";
 
 // 가격 시계열만 쓰는 탭(구성종목 계산 불필요) — 초기 로딩을 가볍게 하고 라벨 열 스타일을 공유한다.
-const PRICE_ONLY_TABS: CompareTab[] = ["performance", "yearly", "monthly", "daily"];
+const PRICE_ONLY_TABS: CompareTab[] = ["performance", "yearly", "monthly", "weekly", "daily"];
 // 기간 라벨(연/월/일 + 동일가중 평균)을 쓰는 탭 — 라벨 열 폭·스크롤 스타일이 같다.
-const PERIOD_TABS: CompareTab[] = ["yearly", "monthly", "daily"];
+const PERIOD_TABS: CompareTab[] = ["yearly", "monthly", "weekly", "daily"];
 
 // 탭 표시 순서 — 화면에 이 순서 그대로 노출된다.
 const COMPARE_TABS: { key: CompareTab; label: string }[] = [
@@ -27,6 +27,7 @@ const COMPARE_TABS: { key: CompareTab; label: string }[] = [
   { key: "holdings", label: "구성 종목" },
   { key: "yearly", label: "연간 분석" },
   { key: "monthly", label: "월간 분석" },
+  { key: "weekly", label: "주간 분석" },
   { key: "daily", label: "일간 분석" },
 ];
 type PerformanceRange = "1m" | "3m" | "6m" | "ytd" | "1y" | "3y";
@@ -576,12 +577,23 @@ function getMaxDrawdown(rows: PriceRow[], dateRange: ChartDateRange | null): Max
  */
 type PeriodReturn = { pct: number; partial: boolean };
 
-function getPeriodReturnMap(rows: PriceRow[], periodKeyLength: 4 | 7 | 10): Record<string, PeriodReturn> {
+/** 날짜("YYYY-MM-DD") → 기간 키. 연 "YYYY" · 월 "YYYY-MM" · 일 "YYYY-MM-DD" · 주 = 그 주 월요일 날짜. */
+type PeriodKeyOf = (date: string) => string | null;
+const periodKeyByLength = (length: 4 | 7 | 10): PeriodKeyOf => (date) => (date.length >= length ? date.slice(0, length) : null);
+/** 주 키 — 그 주의 월요일 날짜(정렬하면 시간순). 시간대 영향을 피하려고 UTC 로 계산한다. */
+const weekKeyOf: PeriodKeyOf = (date) => {
+  const day = new Date(`${date.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(day.getTime())) return null;
+  day.setUTCDate(day.getUTCDate() - ((day.getUTCDay() + 6) % 7));
+  return day.toISOString().slice(0, 10);
+};
+
+function getPeriodReturnMap(rows: PriceRow[], keyOf: PeriodKeyOf): Record<string, PeriodReturn> {
   const firstCloseByPeriod = new Map<string, number>();
   const lastCloseByPeriod = new Map<string, number>();
   for (const row of getPricedRows(rows)) {
-    const key = String(row.date).slice(0, periodKeyLength);
-    if (key.length !== periodKeyLength) continue;
+    const key = keyOf(String(row.date));
+    if (!key) continue;
     if (!firstCloseByPeriod.has(key)) firstCloseByPeriod.set(key, row.close as number);
     lastCloseByPeriod.set(key, row.close as number); // rows 는 날짜 오름차순 → 마지막 값이 기간말 종가
   }
@@ -1291,21 +1303,28 @@ export function ComparePageClient() {
   const monthlyReturnMaps = useMemo(() => {
     const map = new Map<string, Record<string, PeriodReturn>>();
     for (const product of sortedProducts) {
-      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, 7));
+      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, periodKeyByLength(7)));
     }
     return map;
   }, [sortedProducts]);
   const yearlyReturnMaps = useMemo(() => {
     const map = new Map<string, Record<string, PeriodReturn>>();
     for (const product of sortedProducts) {
-      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, 4));
+      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, periodKeyByLength(4)));
     }
     return map;
   }, [sortedProducts]);
   const dailyReturnMaps = useMemo(() => {
     const map = new Map<string, Record<string, PeriodReturn>>();
     for (const product of sortedProducts) {
-      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, 10));
+      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, periodKeyByLength(10)));
+    }
+    return map;
+  }, [sortedProducts]);
+  const weeklyReturnMaps = useMemo(() => {
+    const map = new Map<string, Record<string, PeriodReturn>>();
+    for (const product of sortedProducts) {
+      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, weekKeyOf));
     }
     return map;
   }, [sortedProducts]);
@@ -1319,21 +1338,22 @@ export function ComparePageClient() {
   const monthlyRows = useMemo(() => collectPeriods(monthlyReturnMaps), [collectPeriods, monthlyReturnMaps]);
   const yearlyRows = useMemo(() => collectPeriods(yearlyReturnMaps), [collectPeriods, yearlyReturnMaps]);
   const dailyRows = useMemo(() => collectPeriods(dailyReturnMaps), [collectPeriods, dailyReturnMaps]);
+  const weeklyRows = useMemo(() => collectPeriods(weeklyReturnMaps), [collectPeriods, weeklyReturnMaps]);
 
   // 기간 분석 탭의 그리드 컬럼 클래스 — 헤더/본문이 같은 컬럼 폭을 써야 정렬이 맞는다.
   const periodMatrixClass = !PERIOD_TABS.includes(activeTab)
     ? ""
-    : activeTab === "daily"
+    : activeTab === "daily" || activeTab === "weekly"
       ? "compareMatrixMonthly compareMatrixDaily"
       : "compareMatrixMonthly";
 
   // 일간·월간·연간 분석 본문 공용 렌더 — 라벨(기간 + 동일가중 평균) + 종목별 값 행.
   // 상위 단위가 바뀌는 행에 굵은 구분선을 넣는다(월간=해, 일간=월. 연간은 매 행이 새 해라 불필요).
-  const PERIOD_KIND_LABEL = { daily: "일간", monthly: "월간", yearly: "연간" } as const;
+  const PERIOD_KIND_LABEL = { daily: "일간", weekly: "주간", monthly: "월간", yearly: "연간" } as const;
   const renderPeriodRows = (
     periods: string[],
     maps: Map<string, Record<string, PeriodReturn>>,
-    options: { kind: "daily" | "monthly" | "yearly" },
+    options: { kind: "daily" | "weekly" | "monthly" | "yearly" },
   ) => {
     if (periods.length === 0) {
       return (
@@ -1342,8 +1362,9 @@ export function ComparePageClient() {
         </div>
       );
     }
-    // 구분선 기준 자릿수: 월간이면 연(4), 일간이면 연월(7).
-    const boundaryLength = options.kind === "monthly" ? 4 : options.kind === "daily" ? 7 : 0;
+    // 구분선 기준 자릿수: 월간이면 연(4), 주간·일간이면 연월(7). 주간 키는 그 주 월요일 날짜다.
+    const boundaryLength =
+      options.kind === "monthly" ? 4 : options.kind === "daily" || options.kind === "weekly" ? 7 : 0;
     return periods.map((period, index) => {
       const prevPeriod = index > 0 ? periods[index - 1] : null;
       const isYearBoundary =
@@ -1363,7 +1384,12 @@ export function ComparePageClient() {
           <div className={`compareMatrixLabel compareMatrixLabelWide compareBasicCompactLabel${boundaryClass}`}>
             <div className="compareMonthlyLabelRow">
               {/* 기간은 등폭 폰트(appCodeText)로 렌더해 201911/201910 처럼 폭이 달라지지 않게 한다. */}
-              <span className="compareMatrixLabelText appCodeText">{formatPeriodLabel(period)}</span>
+              <span
+                className="compareMatrixLabelText appCodeText"
+                title={options.kind === "weekly" ? `${period} 주(월요일 시작) — 직전 주 마지막 종가 대비` : undefined}
+              >
+                {formatPeriodLabel(period)}
+              </span>
               <span
                 className={getSignedClass(equalWeighted)}
                 title={`선택 종목 ${entries.length}개 동일가중 평균${hasPartialAvg ? " (*: 부분 기간 포함)" : ""}`}
@@ -1854,7 +1880,9 @@ export function ComparePageClient() {
                 ? { rows: yearlyRows, maps: yearlyReturnMaps, kind: "yearly" as const }
                 : activeTab === "monthly"
                   ? { rows: monthlyRows, maps: monthlyReturnMaps, kind: "monthly" as const }
-                  : { rows: dailyRows, maps: dailyReturnMaps, kind: "daily" as const };
+                  : activeTab === "weekly"
+                    ? { rows: weeklyRows, maps: weeklyReturnMaps, kind: "weekly" as const }
+                    : { rows: dailyRows, maps: dailyReturnMaps, kind: "daily" as const };
             // 부분 기간(*)이 실제로 있을 때만 범례를 보인다 — 일간은 첫 거래일이 제외돼 보통 없다.
             const hasPartial = rows.some((period) =>
               [...maps.values()].some((map) => map[period]?.partial),
