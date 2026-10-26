@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
@@ -120,10 +121,14 @@ _US_MARKET_CAP_MARKETS = ("NSQ", "NYS", "AMX")
 # 순위에서 빼는 업종 — 로이터 업종 코드 5550(집합투자: 폐쇄형 펀드·뮤추얼 펀드·투자 신탁·ETF).
 # 시총 순위는 「미국 상장 회사」 순위라 PHYS·CEF 같은 펀드가 끼어 회사들이 밀리면 안 된다.
 _FUND_INDUSTRY_CODE_PREFIX = "5550"
+# 우선주 시리즈 — 네이버 심볼 'TFIN PR'·'BAC PRL' 처럼 보통주 뒤에 PR(+시리즈 문자)이 붙는다.
+# 회사가 아니라 같은 회사의 다른 증권이고, 시총 칸에 엉뚱한 값이 오기도 한다(TFIN PR 380억 달러,
+# 2026-10-26 — 시총상위1000 에 끼어 yfinance 조회가 실패했다). 클래스 주식(BRK B·HEI A)은 남긴다.
+_PREFERRED_SYMBOL = re.compile(r"\S+ PR[A-Z]?")
 
 
 def _iter_us_market_companies():
-    """네이버 미국 시총 명단의 회사 항목(펀드 업종 제외)을 `(티커, 항목)` 으로 낸다 — 시장별 시총 내림차순."""
+    """네이버 미국 시총 명단의 회사 항목(펀드 업종·우선주 시리즈 제외)을 `(티커, 항목)` 으로 낸다 — 시장별 시총 내림차순."""
     skipped: list[int] = []
     for market in _US_MARKET_CAP_MARKETS:
         page_index = 0
@@ -146,6 +151,8 @@ def _iter_us_market_companies():
                     raise RuntimeError(f"네이버 미국 시총 명단의 페이지가 중복되었습니다: {market} {ticker}")
                 page_tickers.add(ticker)
                 if str(item.get("reutersIndustryCode") or "").startswith(_FUND_INDUSTRY_CODE_PREFIX):
+                    continue
+                if _PREFERRED_SYMBOL.fullmatch(str(item.get("symbolCode") or "").strip()):
                     continue
                 yield ticker, item
 
