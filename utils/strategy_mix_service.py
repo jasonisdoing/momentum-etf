@@ -835,19 +835,14 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     ahead = get_trading_days(
         today_local.strftime("%Y-%m-%d"), (today_local + timedelta(days=21)).strftime("%Y-%m-%d"), country
     )
-    # 체결은 **시가**다 — 오늘 장이 아직 안 열렸으면 오늘 시가에 체결할 수 있다.
-    # 오늘을 무조건 건너뛰면 개장 전인 시장에서 지시가 하루 뒤로 밀린다
-    # (뉴욕 06:35 에 보는데 체결일이 다음 거래일로 나왔다).
-    from utils.trading_calendar import is_market_day_started
+    # 체결일 표기가 없는 예정 행(엔진의 잠정 판정)이 체결되는 날 — **지금 판정에 쓴 봉의 다음 거래일**.
+    # 전략 화면(`next_session`)과 같은 기준이다. 장 시작 전(프리장·데이장)에는 판정 봉이 오늘이라
+    # 다음 거래일은 내일이다 — 오늘 시가 체결분은 엔진이 `fill_date` 를 붙여 따로 준다. 예전에는
+    # 「오늘 장이 안 열렸으면 오늘」로 따로 셈해, 같은 예정이 전략 화면은 10/27·합성은 10/26 으로 갈렸다.
+    from utils.effective_prices import bar_anchor, effective_bar_date
 
-    def _can_fill_at_open(day) -> bool:
-        if day > today_local:
-            return True
-        if day < today_local:
-            return False
-        return not is_market_day_started(country, pd.Timestamp(day))
-
-    next_trading_day = next((str(day.date()) for day in ahead if _can_fill_at_open(day.date())), None)
+    session_day = effective_bar_date(bar_anchor(country), country).date()
+    next_trading_day = next((str(day.date()) for day in ahead if day.date() > session_day), None)
 
     # 이벤트 없는 조정(목표·보유 차이)의 기준일 — 시가 체결 신호가 아니라 "지금 낼" 주문이다.
     # 오늘이 거래일이고 아직 마감 전이면(개장 전=오늘 시가, 장중=즉시) 오늘, 마감 후·휴장은
@@ -861,8 +856,13 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         if today_is_trading and not is_market_day_completed(country, pd.Timestamp(today_local))
         else next_trading_day
     )
-    # 장중 조정이면 그룹 제목이 '시가'가 아니라 '장중'이어야 한다.
-    adjustment_intraday = adjustment_day is not None and adjustment_day != next_trading_day
+    # 장중 조정이면 그룹 제목이 '시가'가 아니라 '장중'이어야 한다 — 정규장이 이미 열렸는지로 본다.
+    # (개장 전이면 오늘 시가 주문이다. 체결일 비교로 정하면 개장 전에도 '장중'이 됐다.)
+    from utils.trading_calendar import is_market_day_started
+
+    adjustment_intraday = adjustment_day == today_local.strftime("%Y-%m-%d") and is_market_day_started(
+        country, pd.Timestamp(today_local)
+    )
 
     # ── 적용 계좌 — 이 계산의 기준 계좌 그대로다(슬리브별 풀이 여기서 나왔다).
     account = _load_account_state(ctx["account_id"])
