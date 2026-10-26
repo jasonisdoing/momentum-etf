@@ -378,9 +378,11 @@ def _company_key(name: str) -> str:
     """클래스 표기를 뗀 회사명 정규화 키 — 같은 회사의 이중 상장(GOOGL/GOOG 등)을 묶는다.
 
     관측된 표기: "Alphabet Inc. (Class A)" · "Alphabet Inc. Class C Capital Stock" ·
-    "Fox Corporation (Class B)". 클래스 문구를 제거하고 영숫자만 남겨 비교한다.
+    "Fox Corporation (Class B)" · 보통주/우선주 ADR "Petroleo Brasileiro ADR Reptg 2" /
+    "… ADR Reptg 2 Pref Shs"(PBR·PBR-A). 클래스·우선주 문구를 제거하고 영숫자만 남겨 비교한다.
     """
     text = re.sub(r"\(class [a-z]\)|class [a-z]( capital| common)?( stock)?", "", str(name or "").lower())
+    text = re.sub(r"\b(pref|prf|preferred)( shs| shares| stock)?\b", "", text)
     return re.sub(r"[^a-z0-9]", "", text)
 
 
