@@ -125,10 +125,16 @@ _FUND_INDUSTRY_CODE_PREFIX = "5550"
 # 회사가 아니라 같은 회사의 다른 증권이고, 시총 칸에 엉뚱한 값이 오기도 한다(TFIN PR 380억 달러,
 # 2026-10-26 — 시총상위1000 에 끼어 yfinance 조회가 실패했다). 클래스 주식(BRK B·HEI A)은 남긴다.
 _PREFERRED_SYMBOL = re.compile(r"\S+ PR[A-Z]?")
+# 심볼에 PR 이 없는 우선주(GOOGM·GOOGN 「Alphabet … Mandatory Conv Prf Shs」, STRC)는 이름으로 거른다.
+# 단 ADR 은 남긴다 — 해외 회사의 미국 상장이 우선주 ADR 하나뿐인 경우가 있다(BBD 브라데스코).
+_PREFERRED_NAME = re.compile(r"\b(?:Prf|Pref|Preferred)\b", re.IGNORECASE)
+_ADR_NAME = re.compile(r"\bADRs?\b", re.IGNORECASE)
+# 거래정지 종목 — 네이버 `tradeStopType.code` 2(정지.Halted). 상장폐지·합병 진행 중이라 시세가 없다(CTRA).
+_HALTED_TRADE_STOP_CODE = "2"
 
 
 def _iter_us_market_companies():
-    """네이버 미국 시총 명단의 회사 항목(펀드 업종·우선주 시리즈 제외)을 `(티커, 항목)` 으로 낸다 — 시장별 시총 내림차순."""
+    """네이버 미국 시총 명단의 회사 항목(펀드 업종·우선주·거래정지 제외)을 `(티커, 항목)` 으로 낸다 — 시장별 시총 내림차순."""
     skipped: list[int] = []
     for market in _US_MARKET_CAP_MARKETS:
         page_index = 0
@@ -153,6 +159,11 @@ def _iter_us_market_companies():
                 if str(item.get("reutersIndustryCode") or "").startswith(_FUND_INDUSTRY_CODE_PREFIX):
                     continue
                 if _PREFERRED_SYMBOL.fullmatch(str(item.get("symbolCode") or "").strip()):
+                    continue
+                name = str(item.get("englishCodeName") or "")
+                if _PREFERRED_NAME.search(name) and not _ADR_NAME.search(name):
+                    continue
+                if str((item.get("tradeStopType") or {}).get("code") or "") == _HALTED_TRADE_STOP_CODE:
                     continue
                 yield ticker, item
 
