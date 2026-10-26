@@ -10,7 +10,6 @@ import requests
 
 from config import NAVER_FINANCE_HEADERS, NAVER_US_STOCK_MARKET_VALUE_URL
 from utils.index_constituents_loader import load_index_constituents, load_index_meta
-from utils.index_pool_alert import US_ALERT_BASIS
 from utils.industry_map import us_display_industry, us_display_sector, us_sector_label
 from utils.market_service import load_ticker_pool_map, load_ticker_pool_type_map
 from utils.portfolio_io import load_all_holding_tickers
@@ -337,8 +336,6 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
         "total_count": len(rows),
         "count": len(rows),
         "rows": rows,
-        # 슬랙 미등록 알림의 대상 명단 설명 — 화면 헤더가 그대로 보여준다(문구 단일 소스는 알림 모듈).
-        "alert_basis": US_ALERT_BASIS,
     }
 
 

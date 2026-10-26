@@ -71,8 +71,6 @@ type UsMarketStocksResponse = {
   total_count: number;
   count: number;
   rows: UsMarketStockRow[];
-  /** 슬랙 미등록 알림의 대상 명단 설명(서버 문구). */
-  alert_basis?: string;
   error?: string;
 };
 
@@ -146,10 +144,9 @@ function isUsTickerPool(pool: StocksAccountItem): boolean {
 export function UsMarketStockManager({
   onSummaryChange,
 }: {
-  onSummaryChange?: (summary: { index: string; count: number; totalCount: number; alertBasis: string | null }) => void;
+  onSummaryChange?: (summary: { count: number; totalCount: number }) => void;
 }) {
   const [view, setView] = useState<ViewOption>("COMBINED");
-  const [alertBasis, setAlertBasis] = useState<string | null>(null);
   const [topCount, setTopCount] = useState<number | null>(null);
   const [minMarketCapUkm, setMinMarketCapUkm] = useState<string>("");
   const [rows, setRows] = useState<UsMarketStockRow[]>([]);
@@ -219,7 +216,6 @@ export function UsMarketStockManager({
         .map((row, index) => ({ ...row, rank: index + 1 }));
       if (!isLatest(token)) return;
       setRows(mergedRows);
-      setAlertBasis(payloads.find((data) => data.alert_basis)?.alert_basis ?? null);
       setTotalCount(mergedRows.length);
       setTickerPools(allStocksPayload.ticker_types ?? []);
 
@@ -261,8 +257,8 @@ export function UsMarketStockManager({
   );
 
   useEffect(() => {
-    onSummaryChange?.({ index: view, count: visibleRows.length, totalCount, alertBasis });
-  }, [view, visibleRows.length, totalCount, alertBasis, onSummaryChange]);
+    onSummaryChange?.({ count: visibleRows.length, totalCount });
+  }, [visibleRows.length, totalCount, onSummaryChange]);
 
   // `#` 은 지금 보고 있는 목록에서의 위치다. 백엔드가 준 rank 는 지수 안에서의 순위라
   // 통합 보기에서는 두 지수의 번호가 섞여 중복·누락이 생긴다(상위 150 인데 144 까지만 보이는 등).
