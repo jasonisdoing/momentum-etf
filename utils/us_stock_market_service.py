@@ -9,12 +9,8 @@ from typing import Any
 import requests
 
 from config import NAVER_FINANCE_HEADERS, NAVER_US_STOCK_MARKET_VALUE_URL
-from utils.index_constituents_loader import (
-    US_SP500_MARKET_CAP_LIMIT,
-    load_index_constituents,
-    load_index_meta,
-    us_market_constituents,
-)
+from utils.index_constituents_loader import load_index_constituents, load_index_meta
+from utils.index_pool_alert import US_ALERT_BASIS
 from utils.industry_map import us_display_industry, us_display_sector, us_sector_label
 from utils.market_service import load_ticker_pool_map, load_ticker_pool_type_map
 from utils.portfolio_io import load_all_holding_tickers
@@ -127,9 +123,8 @@ _US_MARKET_CAP_MARKETS = ("NSQ", "NYS", "AMX")
 _FUND_INDUSTRY_CODE_PREFIX = "5550"
 
 
-def load_us_market_caps() -> dict[str, float]:
-    """미국 상장 회사 전체(NASDAQ·NYSE·AMX, 펀드 업종 제외)의 시총(USD)을 배치 순위 계산용으로 받는다."""
-    caps: dict[str, float] = {}
+def _iter_us_market_companies():
+    """네이버 미국 시총 명단의 회사 항목(펀드 업종 제외)을 `(티커, 항목)` 으로 낸다 — 시장별 시총 내림차순."""
     skipped: list[int] = []
     for market in _US_MARKET_CAP_MARKETS:
         page_index = 0
@@ -153,9 +148,7 @@ def load_us_market_caps() -> dict[str, float]:
                 page_tickers.add(ticker)
                 if str(item.get("reutersIndustryCode") or "").startswith(_FUND_INDUSTRY_CODE_PREFIX):
                     continue
-                cap = _parse_float(item.get("marketValue"))
-                if cap is not None and cap > 0:
-                    caps[ticker] = max(cap, caps.get(ticker, 0.0))
+                yield ticker, item
 
             market_tickers.update(page_tickers)
             # 건너뛴 항목도 쪽을 채우던 자리라 개수에 더해야 마지막 쪽 판정이 어긋나지 않는다.
@@ -163,9 +156,33 @@ def load_us_market_caps() -> dict[str, float]:
                 break
             page_index += 1
 
+
+def load_us_market_caps() -> dict[str, float]:
+    """미국 상장 회사 전체(NASDAQ·NYSE·AMX, 펀드 업종 제외)의 시총(USD)을 배치 순위 계산용으로 받는다."""
+    caps: dict[str, float] = {}
+    for ticker, item in _iter_us_market_companies():
+        cap = _parse_float(item.get("marketValue"))
+        if cap is not None and cap > 0:
+            caps[ticker] = max(cap, caps.get(ticker, 0.0))
     if not caps:
         raise RuntimeError("네이버 미국 시총 명단에서 유효한 시총을 찾지 못했습니다.")
     return caps
+
+
+def load_us_market_top(count: int) -> list[dict[str, Any]]:
+    """미국 상장 회사 시총 상위 `count`개 — `{ticker, name}`. 시총 순위(`load_us_market_caps`)와 같은 명단이다."""
+    by_ticker: dict[str, tuple[float, str]] = {}
+    for ticker, item in _iter_us_market_companies():
+        cap = _parse_float(item.get("marketValue"))
+        if cap is None or cap <= 0:
+            continue
+        name = str(item.get("englishCodeName") or item.get("koreanCodeName") or ticker).strip()
+        if cap > by_ticker.get(ticker, (0.0, ""))[0]:
+            by_ticker[ticker] = (cap, name)
+    ranked = sorted(by_ticker.items(), key=lambda pair: (-pair[1][0], pair[0]))[:count]
+    if len(ranked) < count:
+        raise RuntimeError(f"네이버 미국 시총 명단이 {count}개보다 적습니다: {len(ranked)}개")
+    return [{"ticker": ticker, "name": name} for ticker, (_, name) in ranked]
 
 
 def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -> dict[str, Any]:
@@ -255,8 +272,8 @@ def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -
 
 
 def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str, Any]:
-    """저장된 지수 구성종목에 실시간 시세를 붙인다. S&P500은 시총 상위 `US_SP500_MARKET_CAP_LIMIT`개만 보여준다."""
-    constituents = us_market_constituents(index, load_index_constituents(index))
+    """저장된 지수 구성종목(시총상위1000·S&P500·나스닥100)에 실시간 시세를 붙인다."""
+    constituents = load_index_constituents(index)
     meta = load_index_meta(index)
 
     ticker_pool_map = load_ticker_pool_map(country_code="us")
@@ -320,8 +337,8 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
         "total_count": len(rows),
         "count": len(rows),
         "rows": rows,
-        # S&P500 절단 개수 — 화면 라벨·셀렉트가 이 값을 쓴다(단일 소스는 서버 상수).
-        "sp500_limit": US_SP500_MARKET_CAP_LIMIT,
+        # 슬랙 미등록 알림의 대상 명단 설명 — 화면 헤더가 그대로 보여준다(문구 단일 소스는 알림 모듈).
+        "alert_basis": US_ALERT_BASIS,
     }
 
 

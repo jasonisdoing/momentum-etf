@@ -34,7 +34,7 @@ VM 의 역할은 컨테이너 가동뿐이다. 자동 배치는 돌지 않는다
 | `data_aggregate` | `collect_data.py` | 일별 원장 → 주/월 재집계 |
 | `asset_summary` | `slack_asset_summary.py` | 자산 요약 슬랙 |
 | `market_hours_analysis` | `analyze_market_hours.py` | |
-| `us_market_stocks` / `aus_market_stocks` | `update_us_market_stocks.py` / `update_aus_market_stocks.py` | `index_constituents` 갱신. 구성종목 수가 범위 밖이면 저장 안 하고 실패. 미국 배치는 시장 화면 「통합」 명단(S&P500 시총 상위·나스닥100) 중 종목풀 미등록 종목을 슬랙으로 알림 |
+| `us_market_stocks` / `aus_market_stocks` | `update_us_market_stocks.py` / `update_aus_market_stocks.py` | `index_constituents` 갱신. 구성종목 수가 범위 밖이면 저장 안 하고 실패. 미국 배치는 시총상위1000(네이버 시총 명단, 펀드 제외)·S&P500·나스닥100을 적재하고, 「통합」(세 명단 합집합)의 시총 상위 300 + 나스닥100 중 종목풀 미등록 종목을 슬랙으로 알림 |
 | `kor_market_stocks` | `update_kor_market_stocks.py` | 한국 지수 명단 갱신 후 시장 화면 「통합」 명단(코스피·코스닥 시총 상위) 중 종목풀 미등록 종목을 슬랙으로 알림 |
 | `us_market_etfs` | `update_us_market_etfs.py` | 미국 ETF 마켓 목록(`etf_market_master`) — KIS 미국 마스터 + yfinance |
 | `market_breadth` | `collect_market_breadth.py` | 한국 마감 후·미국 마감 후 |
