@@ -11,7 +11,7 @@
 
 순위의 분모(국가별 "시장"):
   - kor: 네이버 시총 목록 KOSPI + KOSDAQ 전체 (ETF·ETN 제외 — 개별주만)
-  - us : 네이버 미국 개별주 시총 목록 NYSE + NASDAQ 전체
+  - us : 네이버 미국 시총 목록 NASDAQ + NYSE + AMX(그 밖의 거래소) 전체, 펀드 업종(로이터 5550) 제외
   - au : ``index_constituents`` 의 ASX200
 목록에 없는 종목은 순위 없음(None) — 임의 보정 없이 화면은 '-'.
 """

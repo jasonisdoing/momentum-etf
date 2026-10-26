@@ -119,11 +119,19 @@ def _fetch_page_skipping_bad_items(
         return items
 
 
+# 시총 순위에 넣는 네이버 미국 시장 — NASDAQ·NYSE 와 그 밖의 거래소 묶음(AMX: NYSE American·Cboe 등).
+# AMX 를 빼면 Cboe 상장인 CBOE 같은 S&P500 종목의 시총이 비었다(2026-10-26).
+_US_MARKET_CAP_MARKETS = ("NSQ", "NYS", "AMX")
+# 순위에서 빼는 업종 — 로이터 업종 코드 5550(집합투자: 폐쇄형 펀드·뮤추얼 펀드·투자 신탁·ETF).
+# 시총 순위는 「미국 상장 회사」 순위라 PHYS·CEF 같은 펀드가 끼어 회사들이 밀리면 안 된다.
+_FUND_INDUSTRY_CODE_PREFIX = "5550"
+
+
 def load_us_market_caps() -> dict[str, float]:
-    """NYSE·NASDAQ 개별주 전체의 시총(USD)을 배치 순위 계산용으로 받는다."""
+    """미국 상장 회사 전체(NASDAQ·NYSE·AMX, 펀드 업종 제외)의 시총(USD)을 배치 순위 계산용으로 받는다."""
     caps: dict[str, float] = {}
     skipped: list[int] = []
-    for market in ("NSQ", "NYS"):
+    for market in _US_MARKET_CAP_MARKETS:
         page_index = 0
         market_tickers: set[str] = set()
         while True:
@@ -143,6 +151,8 @@ def load_us_market_caps() -> dict[str, float]:
                 if ticker in market_tickers or ticker in page_tickers:
                     raise RuntimeError(f"네이버 미국 시총 명단의 페이지가 중복되었습니다: {market} {ticker}")
                 page_tickers.add(ticker)
+                if str(item.get("reutersIndustryCode") or "").startswith(_FUND_INDUSTRY_CODE_PREFIX):
+                    continue
                 cap = _parse_float(item.get("marketValue"))
                 if cap is not None and cap > 0:
                     caps[ticker] = max(cap, caps.get(ticker, 0.0))
