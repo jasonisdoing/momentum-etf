@@ -27,6 +27,7 @@ from utils.portfolio_service import (
     load_settings,
     validate_settings,
 )
+from utils.slot_positions import _next_session
 from utils.ttl_cache import TtlCache
 
 logger = get_app_logger()
@@ -269,7 +270,7 @@ def current_positions(settings: dict[str, Any]) -> dict[str, Any]:
 
     def compute() -> dict[str, Any]:
         result = run_backtest(DEFAULT_BACKTEST_MONTHS, settings, start_date=start_date, with_live_last_bar=True)
-        return {
+        state = {
             key: result[key]
             for key in (
                 "as_of",
@@ -281,6 +282,9 @@ def current_positions(settings: dict[str, Any]) -> dict[str, Any]:
                 "daily",
             )
         }
+        # 다음 시가 체결일 — 판정에 쓴 마지막 봉(`as_of`)의 다음 거래일. 전략 화면·합성 공용 규칙(`_next_session`).
+        state["next_session"] = _next_session(settings["pool"], pd.Timestamp(state["as_of"]))
+        return state
 
     # 키에 슬리피지까지 넣는다 — 풀 설정을 바꾸면 즉시 새 값으로 계산돼야 한다.
     key = _POSITIONS_CACHE.make_key(settings, start_date, get_pool_slippage(settings["pool"]))

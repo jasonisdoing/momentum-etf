@@ -202,6 +202,8 @@ class SlotState:
     # 데이터 기준일·장중 반영 — 이 정보를 주는 전략만 채운다.
     as_of: str | None = None
     live: bool = False
+    # 체결일 표기가 없는 예정(잠정 판정)이 체결되는 날 — 그 전략 엔진이 낸 `next_session` 그대로다.
+    next_session: str | None = None
 
 
 def slot_state(spec: SleeveSpec) -> SlotState:
@@ -273,6 +275,7 @@ def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
         engine_trades=[trade for trade in raw["trades"] if trade["date"] == raw["as_of"]],
         as_of=raw["as_of"],
         live=bool(raw.get("live")),
+        next_session=raw.get("next_session"),
     )
 
 
@@ -385,6 +388,7 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
         ],
         as_of=raw.get("as_of"),
         live=bool(raw.get("live")),
+        next_session=raw.get("next_session"),
     )
 
 

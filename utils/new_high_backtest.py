@@ -37,10 +37,10 @@ from utils.slot_positions import (
     _live_quotes,
     _market_caps,
     _market_today,
-    _next_session,
     _pool_country,
     _should_auto_refresh,
     load_slot_market,
+    next_fill_session,
 )
 from utils.stock_memo_store import attach_stock_memos
 from utils.ttl_cache import TtlCache
@@ -585,7 +585,6 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         item["listing_months"] = listing_months_by.get(item["ticker"])
 
     # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.
-    fill_base = quotes["session_ts"] if quotes["live"] else last
     from utils.settings_loader import get_ticker_type_settings
 
     return {
@@ -593,7 +592,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         # 화면이 표시용 시세를 60초마다 갱신할 때 쓰는 국가 코드(시세 소스가 국가별로 다르다).
         "country": str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower(),
         # 진입 예정·매도 예정이 실제로 체결되는 날. 화면이 '오늘/내일' 을 이 값으로 가른다.
-        "next_session": _next_session(pool, fill_base),
+        "next_session": next_fill_session(pool, quotes, last),
         # 동시 보유 상한 — 화면이 '빈 슬롯' 행 수를 이 값으로 센다. 설정 초안이 아니라
         # **이 결과를 만든 값**을 그대로 내려, 저장 전 화면 값과 어긋나지 않게 한다.
         "top_n": int(settings["top_n"]),

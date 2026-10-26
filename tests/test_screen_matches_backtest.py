@@ -333,6 +333,8 @@ class PortfolioMixStateTest(unittest.TestCase):
             patch("utils.benchmark_curve.load_benchmark_frame", return_value=pd.DataFrame({"Close": 100}, index=index)),
             patch("utils.benchmark_curve.benchmark_growth", side_effect=lambda pool, ix: pd.Series(1.0, index=ix)),
             patch("utils.portfolio_backtest.benchmark_info", return_value={"name": "기준"}),
+            # 가짜 풀(test)은 거래 달력이 없다 — 다음 체결일은 이 비교와 무관하다.
+            patch("utils.portfolio_backtest._next_session", return_value=None),
             patch(
                 "utils.portfolio_backtest._overlay_live_last_bar",
                 # 실시간을 얹지 않은 경우 — 세 번째 값은 '얹었는지' 플래그다.

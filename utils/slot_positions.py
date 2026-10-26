@@ -273,6 +273,15 @@ def _next_session(pool: str, last: pd.Timestamp) -> str | None:
     return str(days[0].date()) if days else None
 
 
+def next_fill_session(pool: str, quotes: dict[str, Any], last: pd.Timestamp) -> str | None:
+    """다음 시가 체결일 — **판정에 쓴 마지막 봉**의 다음 거래일. 전략 화면·합성 공용 단일 규칙.
+
+    실시간 봉을 얹었으면 그 봉(`session_ts` — 프리장·데이장이면 다음 거래일 새 봉), 아니면 확정
+    마지막 봉이 기준이다. 합성이 따로 셈해 같은 예정이 화면마다 다른 날로 갈렸다(2026-10-26).
+    """
+    return _next_session(pool, quotes["session_ts"] if quotes["live"] else last)
+
+
 def _apply_display_quotes(
     rows: list[dict[str, Any]],
     holdings: list[dict[str, Any]],

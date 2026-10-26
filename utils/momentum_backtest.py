@@ -47,10 +47,10 @@ from utils.slot_positions import (
     _live_quotes,
     _market_caps,
     _market_today,
-    _next_session,
     _pool_country,
     _should_auto_refresh,
     load_slot_market,
+    next_fill_session,
 )
 from utils.stock_memo_store import attach_stock_memos
 from utils.ttl_cache import TtlCache
@@ -446,7 +446,6 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     ][:slots]
 
     # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.
-    fill_base = quotes["session_ts"] if quotes["live"] else last
     return {
         "as_of": str(last.date()),
         "pool": pool,
@@ -455,7 +454,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         "country": info["country"],
         "currency": info["currency"],
         "top_n": slots,
-        "next_session": _next_session(pool, fill_base),
+        "next_session": next_fill_session(pool, quotes, last),
         "holdings": holdings,
         "target_holdings": target_holdings,
         "target_entries": target_entries,
