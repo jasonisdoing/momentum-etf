@@ -1,5 +1,6 @@
 """계좌 종목 메타데이터를 업데이트합니다."""
 
+import os
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Any
@@ -53,6 +54,7 @@ from utils.data_loader import (
 from utils.data_source_catalog import (
     AU_ISSUER_KEYWORDS,
     AU_OFFICIAL_SOURCES,
+    LOCAL_ONLY_HOLDINGS_SOURCES,
     US_ISSUER_KEYWORDS,
     US_OFFICIAL_SOURCES,
     resolve_issuer,
@@ -464,10 +466,19 @@ def _refresh_us_stock_meta_cache(
     # 미국 ETF 는 구성종목도 함께 저장한다(개별주는 holdings 개념이 없어 건너뜀).
     holdings_cache: dict[str, Any] | None = None
     if is_etf:
-        holdings_info = fetch_us_etf_holdings(ticker_norm, name_norm)
+        try:
+            holdings_info = fetch_us_etf_holdings(ticker_norm, name_norm)
+        except LocalOnlyHoldingsSkipError as skipped:
+            get_app_logger().info(
+                f"[{ticker_type_norm.upper()}/{ticker_norm}] 구성종목 갱신 건너뜀(기존 유지) — {skipped}"
+            )
+            holdings_info = None
+            skipped_local_only = True
+        else:
+            skipped_local_only = False
         if holdings_info:
             holdings_cache = _holdings_cache_from(expand_nested_etf_holdings(holdings_info, ticker_norm))
-        else:
+        elif not skipped_local_only:
             get_app_logger().warning(
                 f"[{ticker_type_norm.upper()}/{ticker_norm}] 미국 ETF holdings 수집 실패 (메타만 저장)"
             )
@@ -725,6 +736,10 @@ if set(_AU_OFFICIAL_FETCHERS) != set(AU_OFFICIAL_SOURCES.values()) or set(_US_OF
     raise RuntimeError("공식 구성종목 수집 함수 목록이 카탈로그의 공식 소스와 다릅니다.")
 
 
+class LocalOnlyHoldingsSkipError(Exception):
+    """서버에서 로컬 전용 소스(`LOCAL_ONLY_HOLDINGS_SOURCES`)를 만났다 — 구성종목을 갱신하지 않고 기존 값을 둔다."""
+
+
 def _fetch_issuer_holdings(
     ticker: str,
     name: str,
@@ -741,6 +756,8 @@ def _fetch_issuer_holdings(
     발행사 판정은 /data_source 와 같은 규칙(`resolve_issuer`)이다.
     """
     source = official.get(resolve_issuer(name, table))
+    if source in LOCAL_ONLY_HOLDINGS_SOURCES and os.environ.get("APP_TYPE") == "Server":
+        raise LocalOnlyHoldingsSkipError(f"{ticker}: {LOCAL_ONLY_HOLDINGS_SOURCES[source]}")
     if source is not None:
         holdings = fetchers[source](ticker)
         if holdings is not None:
@@ -788,7 +805,11 @@ def _feeder_etf_holdings(ticker: str) -> list[dict[str, Any]] | None:
         return None
     # 발행사 판정용 이름 — DB 에 없는 종목이라 Yahoo 이름을 쓴다.
     name = str(info.get("longName") or info.get("shortName") or "")
-    inner = fetch_au_etf_holdings(ticker, name) if is_australian else fetch_us_etf_holdings(ticker, name)
+    try:
+        inner = fetch_au_etf_holdings(ticker, name) if is_australian else fetch_us_etf_holdings(ticker, name)
+    except LocalOnlyHoldingsSkipError:
+        # 서버에서 못 받는 재간접 대상은 펼치지 않고 그 ETF 한 줄로 둔다.
+        return None
     return list(inner["holdings"]) if inner else None
 
 
@@ -865,11 +886,17 @@ def _refresh_overseas_etf_meta_cache(
     name_norm = str(name or "").strip() or ticker_norm
     country_norm = str(country_code or "").strip().lower()
 
-    holdings_info = (
-        fetch_au_etf_holdings(ticker_norm, name_norm)
-        if country_norm == "au"
-        else fetch_us_etf_holdings(ticker_norm, name_norm)
-    )
+    skipped_local_only = False
+    try:
+        holdings_info = (
+            fetch_au_etf_holdings(ticker_norm, name_norm)
+            if country_norm == "au"
+            else fetch_us_etf_holdings(ticker_norm, name_norm)
+        )
+    except LocalOnlyHoldingsSkipError as skipped:
+        logger.info(f"[{ticker_type_norm.upper()}/{ticker_norm}] 구성종목 갱신 건너뜀(기존 유지) — {skipped}")
+        holdings_info = None
+        skipped_local_only = True
 
     # 구성종목 수집이 실패해도 배당·상장일·순자산 등 나머지 메타는 저장한다.
     # (여기서 return 하면 캐시 문서 자체가 만들어지지 않아 화면이 통째로 빈다.)
@@ -877,7 +904,7 @@ def _refresh_overseas_etf_meta_cache(
     if holdings_info:
         holdings_info = expand_nested_etf_holdings(holdings_info, ticker_norm)
         holdings_cache = _holdings_cache_from(holdings_info)
-    else:
+    elif not skipped_local_only:
         logger.warning(f"[{ticker_type_norm.upper()}/{ticker_norm}] 해외 ETF holdings 수집 실패 (메타만 저장)")
 
     meta_cache = {

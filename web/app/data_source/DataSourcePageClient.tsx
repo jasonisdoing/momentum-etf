@@ -19,6 +19,8 @@ type DataSourceRow = {
   source_label?: string;
   missing_count?: number;
   missing_tickers?: string[];
+  /** 로컬 워커에서만 수집하는 소스의 이유 — 서버 배치는 이 발행사 구성종목을 갱신하지 않는다. */
+  local_only_reason?: string | null;
   // 「기타」 행에만 붙는다 — 발행사를 판별하지 못한 ETF.
   unclassified_tickers?: string[];
 };
@@ -196,6 +198,14 @@ export function DataSourcePageClient() {
                               >
                                 <SourceBadge source={row.source ?? null} label={row.source_label} />
                                 <span style={{ color: "var(--text-muted)" }}>ETF {row.etf_count}종</span>
+                                {row.local_only_reason ? (
+                                  <span
+                                    style={{ color: "#92400e", fontWeight: 700 }}
+                                    title={row.local_only_reason}
+                                  >
+                                    로컬 전용
+                                  </span>
+                                ) : null}
                                 {row.missing_count ? (
                                   <span
                                     style={{ color: "#991b1b", fontWeight: 700 }}
@@ -211,6 +221,11 @@ export function DataSourcePageClient() {
                             {row.note ? (
                               <div style={{ marginTop: "0.2rem", color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
                                 {row.note}
+                              </div>
+                            ) : null}
+                            {row.local_only_reason ? (
+                              <div style={{ marginTop: "0.2rem", color: "#92400e", fontSize: "var(--fs-sm)" }}>
+                                로컬 전용: {row.local_only_reason}
                               </div>
                             ) : null}
                             {row.unclassified_tickers?.length ? (

@@ -319,6 +319,11 @@ US_ISSUER_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("MarketDesk", ("marketdesk",)),
     ("Tortoise", ("tortoise",)),
 ]
+# 로컬 워커에서만 수집하는 공식 소스 → 이유. 서버(APP_TYPE=Server)는 이 소스의 구성종목을 갱신하지 않고
+# 기존 데이터를 그대로 둔다(실패로 세지 않는다). 화면(/data_source)이 같은 이유를 표시한다.
+LOCAL_ONLY_HOLDINGS_SOURCES: dict[str, str] = {
+    "wisdomtree_us_api": "서버 IP가 Cloudflare에 막혀(2026-10-26 전 지문 403) 로컬 워커에서만 수집한다.",
+}
 ISSUER_UNKNOWN = "기타"
 
 # 코드에 공식 연동이 들어 있는 발행사 → 수집 소스. 배치가 아직 안 돌아 캐시에 옛 소스(야후)가 남아 있어도
@@ -595,6 +600,8 @@ def _build_issuer_sources(
                 "source_label": source_label,
                 "missing_count": len(missing_tickers),
                 "missing_tickers": missing_tickers,
+                # 로컬 워커에서만 수집하는 소스면 그 이유 — 서버 배치는 이 발행사 구성종목을 갱신하지 않는다.
+                "local_only_reason": LOCAL_ONLY_HOLDINGS_SOURCES.get(primary_source),
             }
         )
 
