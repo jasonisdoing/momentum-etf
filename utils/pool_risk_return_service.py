@@ -56,7 +56,7 @@ def compute_pool_risk_return(pool_id: str, months: int) -> dict[str, Any]:
     `excluded` 는 데이터가 모자라 점을 못 찍은 종목 수이고, 상장이 짧아 뺀 종목은 세지 않는다.
     """
     from utils.cache_utils import load_cached_frames_bulk_from_ticker_types
-    from utils.effective_prices import apply_realtime_closes
+    from utils.effective_prices import apply_realtime_closes, confirmed_bars
     from utils.portfolio_io import load_all_holding_tickers
     from utils.settings_loader import get_ticker_type_settings
     from utils.slot_positions import _live_quotes
@@ -70,7 +70,7 @@ def compute_pool_risk_return(pool_id: str, months: int) -> dict[str, Any]:
 
     frames = load_cached_frames_bulk_from_ticker_types([pool_id], tickers)
     close_by = {
-        ticker: pd.to_numeric(frame["Close"], errors="coerce")
+        ticker: pd.to_numeric(confirmed_bars(frame, country)["Close"], errors="coerce")
         for ticker, frame in frames.items()
         if frame is not None and not frame.empty and "Close" in frame
     }

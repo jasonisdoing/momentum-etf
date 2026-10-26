@@ -36,7 +36,12 @@ logger = get_app_logger()
 def _load_close_frame(pool: str, tickers: list[str]) -> pd.DataFrame:
     """[일자 × 티커] 종가 프레임. 가격이 없는 종목은 명시적으로 에러 — 조용히 빼지 않는다."""
     from utils.cache_utils import load_cached_frames_bulk_from_ticker_types
+    from utils.effective_prices import confirmed_bars
+    from utils.settings_loader import get_ticker_type_settings
 
+    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+    if not country:
+        raise RuntimeError(f"종목풀({pool}) 설정에 country_code 가 없습니다.")
     frames = load_cached_frames_bulk_from_ticker_types([pool], tickers)
     series: dict[str, pd.Series] = {}
     missing: list[str] = []
@@ -45,7 +50,8 @@ def _load_close_frame(pool: str, tickers: list[str]) -> pd.DataFrame:
         if frame is None or frame.empty or "Close" not in frame.columns:
             missing.append(ticker)
             continue
-        close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+        # 마지막으로 마감된 거래일까지만 — 장중 봉이 캐시에 섞여도 판정이 흔들리지 않게(`confirmed_bars`).
+        close = pd.to_numeric(confirmed_bars(frame, country)["Close"], errors="coerce").dropna()
         if close.empty:
             missing.append(ticker)
             continue

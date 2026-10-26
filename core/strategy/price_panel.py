@@ -8,14 +8,31 @@ from utils.price_series import positive_prices as _positive
 
 
 def build_price_panel(universe: list[dict[str, str]], frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
-    """(날짜 × 티커) 종가·시가·고가·거래대금 표. 백테스트와 선정이 같은 값을 쓴다."""
+    """(날짜 × 티커) 종가·시가·고가·거래대금 표. 백테스트와 선정이 같은 값을 쓴다.
+
+    봉은 그 풀 시장의 **마지막으로 마감된 거래일까지만** 쓴다(`confirmed_bars`) — 진행 중인 날은 운용 현황이
+    실시간 시세로 모든 종목에 같이 붙인다.
+    """
+    from utils.effective_prices import confirmed_bars
+    from utils.settings_loader import get_ticker_type_settings
     from utils.trade_value import trade_value_series
+
+    country_by_pool: dict[str, str] = {}
 
     closes, opens, highs, values = {}, {}, {}, {}
     for row in universe:
         ticker = row["ticker"]
         frame = frames.get(ticker)
         if frame is None or frame.empty or "Close" not in frame or "Open" not in frame or "High" not in frame:
+            continue
+        pool = row["pool"]
+        if pool not in country_by_pool:
+            country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+            if not country:
+                raise RuntimeError(f"종목풀({pool}) 설정에 country_code 가 없습니다.")
+            country_by_pool[pool] = country
+        frame = confirmed_bars(frame, country_by_pool[pool])
+        if frame.empty:
             continue
         close = _positive(frame["Close"])
         volume = pd.to_numeric(frame["Volume"], errors="coerce") if "Volume" in frame else None

@@ -326,12 +326,14 @@ def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp
 
         if trading_days:
             normalized_days = sorted(pd.Timestamp(day).normalize() for day in trading_days)
-            latest_trading_day = normalized_days[-1]
-            if is_market_day_completed(country_code, latest_trading_day):
-                return latest_trading_day
-            if len(normalized_days) >= 2:
-                return normalized_days[-2]
-            return latest_trading_day
+            # **정규장이 끝난** 가장 최근 거래일 — 거슬러 올라가며 완료 여부를 끝까지 확인한다.
+            # 한국 날짜 기준이라 한국 자정 이후엔 미국의 '내일'이 달력 끝에 오는데, 그 바로 앞날(미국 오늘)도
+            # 아직 장중일 수 있다. 예전에는 끝날만 확인하고 앞날을 무조건 돌려줘, 장중 봉이 확정 봉처럼
+            # 캐시에 저장됐다(2026-10-27 00:02 KST 미국 10/26 장중 봉 — 모멘텀 판정이 깨졌다).
+            for day in reversed(normalized_days):
+                if is_market_day_completed(country_code, day):
+                    return day
+            return normalized_days[0]
     except Exception as e:
         logger.warning("거래일 일괄 조회 중 오류 발생: %s", e)
 

@@ -287,6 +287,21 @@ def bar_anchor(country_code: str, *, now: datetime | None = None) -> pd.Timestam
     return _normalize_day(last_closed_session_date(country_code, now=now))
 
 
+def confirmed_bars(frame: pd.DataFrame, country_code: str, *, now: datetime | None = None) -> pd.DataFrame:
+    """가격 캐시 프레임에서 **마지막으로 마감된 거래일(`bar_anchor`)까지의 봉**만 남긴다 — 확정 판정의 입력.
+
+    장중인 날의 봉이 캐시에 들어와도(어떤 경로든, 한 종목만이든) 판정이 흔들리지 않게 하는 방어선이다.
+    2026-10-27 00:02 KST 에 미국 10/26 장중 봉이 NOW 한 종목에만 저장돼, 모멘텀 엔진이 "마지막 날 360종목이
+    값 없음"으로 판정해 보유·후보가 통째로 깨졌다. 진행 중인 날은 실시간 시세가 모든 종목에 같이 붙인다.
+    """
+    if frame is None or frame.empty:
+        return frame
+    index = pd.DatetimeIndex(frame.index)
+    if index.tz is not None:
+        index = index.tz_localize(None)
+    return frame.loc[index.normalize() <= bar_anchor(country_code, now=now)]
+
+
 def apply_realtime_close(
     cached_close_series: pd.Series | None,
     realtime_entry: Mapping[str, Any] | None,
