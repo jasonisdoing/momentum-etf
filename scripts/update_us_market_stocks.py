@@ -42,7 +42,7 @@ from utils.index_constituents_loader import (  # noqa: E402
     load_index_meta,
     save_index_constituents,
 )
-from utils.index_pool_alert import notify_unregistered_market_stocks  # noqa: E402
+from utils.index_pool_alert import US_ALERT_SP500_TOP, notify_unregistered_market_stocks  # noqa: E402
 from utils.perf_metrics import period_sortino  # noqa: E402
 from utils.us_stock_market_service import load_us_market_companies  # noqa: E402
 
@@ -401,6 +401,16 @@ def _mark_duplicate_classes(items: list[dict[str, Any]]) -> None:
         print(f"  중복 클래스 표시: {', '.join(sorted(marked))}")
 
 
+def _sp500_alert_top(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """알림 대상 S&P500 — 화면 S&P500 탭에서 상위 `US_ALERT_SP500_TOP` 을 골랐을 때 보이는 종목과 같다.
+
+    화면처럼 시총 내림차순(같으면 티커순)으로 세우고, 같은 회사의 다른 주식 종류(`duplicate_class`)를
+    **먼저** 숨긴 뒤 자른다 — 숨긴 만큼 다음 순위가 올라온다.
+    """
+    ranked = sorted(items, key=lambda item: (-(item.get("market_cap") or 0), str(item["ticker"])))
+    return [item for item in ranked if not item.get("duplicate_class")][:US_ALERT_SP500_TOP]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="미국 지수 구성종목 갱신")
     parser.add_argument(
@@ -434,7 +444,7 @@ def main() -> None:
         print(f"실패한 인덱스: {', '.join(failed)}", file=sys.stderr)
         sys.exit(1)
 
-    count = notify_unregistered_market_stocks("us", alert_items)
+    count = notify_unregistered_market_stocks("us", {**alert_items, "SP500": _sp500_alert_top(alert_items["SP500"])})
     print(f"미국 시장 통합 종목 종목풀 미등록: {count}개")
 
 

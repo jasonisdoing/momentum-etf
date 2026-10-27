@@ -11,7 +11,7 @@
 
 순위의 분모(국가별 "시장"):
   - kor: 네이버 시총 목록 KOSPI + KOSDAQ 전체 (ETF·ETN 제외 — 개별주만)
-  - us : 네이버 미국 시총 목록 NASDAQ + NYSE + AMX(그 밖의 거래소) 전체, 펀드 업종(로이터 5550) 제외
+  - us : ``index_constituents`` 의 S&P500 + 나스닥100 합집합(/us-market-stock 「통합」과 같은 순서)
   - au : ``index_constituents`` 의 ASX200
 목록에 없는 종목은 순위 없음(None) — 임의 보정 없이 화면은 '-'.
 """
@@ -93,9 +93,8 @@ def load_market_caps(country_code: str) -> dict[str, float]:
     if country == "kor":
         return _kor_caps()
     if country == "us":
-        from utils.us_stock_market_service import load_us_market_caps
-
-        return load_us_market_caps()
+        # /us-market-stock 「통합」(S&P500·나스닥100 합집합)의 시총 순서와 같은 번호 — 두 화면이 같은 순위를 쓴다.
+        return _index_caps(("SP500", "NDX100"))
     if country == "au":
         return _index_caps(("ASX200",))
     raise ValueError(f"시총 순위를 지원하지 않는 국가입니다: {country_code}")
