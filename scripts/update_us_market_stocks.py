@@ -3,7 +3,7 @@
 출처
 ----
 - 시총상위1000: 네이버 미국 시총 명단(NASDAQ·NYSE·AMX, 펀드 업종 제외) 상위 1000 — 시총 순위와 같은 명단
-- S&P500: 위키피디아 구성종목 표
+- S&P500: SPY(SPDR) 공식 전체 구성종목의 주식 — 매일 공시, 지수 변경이 하루 안에 반영된다
 - NASDAQ100: 나스닥 공식 API (지수 산출 주체가 직접 제공)
 - 섹터·업종: yfinance
 
@@ -22,7 +22,7 @@
 from __future__ import annotations
 
 import argparse
-import io
+import functools
 import re
 import sys
 import time
@@ -37,6 +37,7 @@ import yfinance as yf
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from services.spdr_us_service import fetch_spdr_us_holdings  # noqa: E402
 from utils.index_constituents_loader import (  # noqa: E402
     US_ALERT_TOP_COUNT,
     US_TOP_MARKET_CAP_COUNT,
@@ -46,7 +47,7 @@ from utils.index_constituents_loader import (  # noqa: E402
 )
 from utils.index_pool_alert import notify_unregistered_market_stocks  # noqa: E402
 from utils.perf_metrics import period_sortino  # noqa: E402
-from utils.us_stock_market_service import load_us_market_top  # noqa: E402
+from utils.us_stock_market_service import load_us_market_companies, load_us_market_top  # noqa: E402
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -56,7 +57,7 @@ _YFINANCE_BATCH_SIZE = 50
 _YFINANCE_BATCH_DELAY = 1.0  # 초
 _CLASSIFICATION_WORKERS = 8  # 섹터·업종 개별 조회 동시 실행 수
 
-_SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+_SP500_SOURCE = "SPY 공식 전체 구성종목(SPDR, services/spdr_us_service.py) — 주식만"
 _NDX100_API_URL = "https://api.nasdaq.com/api/quote/list-type/nasdaq100"
 _API_HEADERS = {**_HEADERS, "Accept": "application/json, */*"}
 
@@ -130,30 +131,34 @@ def _fetch_classification(tickers: list[str]) -> dict[str, dict[str, str]]:
         return dict(pool.map(one, tickers))
 
 
-def _read_html(url: str) -> list[pd.DataFrame]:
-    resp = requests.get(url, headers=_HEADERS, timeout=30)
-    resp.raise_for_status()
-    return pd.read_html(io.StringIO(resp.text))
+@functools.lru_cache(maxsize=1)
+def _us_companies() -> tuple[dict[str, Any], ...]:
+    """네이버 미국 상장 회사 명단 — 한 실행에서 한 번만 받아 시총상위·S&P500 이름에 같이 쓴다."""
+    return tuple(load_us_market_companies())
 
 
 def _fetch_us_top() -> list[dict[str, Any]]:
     """미국 상장 회사 시총 상위 — 종목풀 시총 순위(`market_cap_rank`)와 같은 네이버 명단이다."""
-    return load_us_market_top(US_TOP_MARKET_CAP_COUNT)
+    return load_us_market_top(US_TOP_MARKET_CAP_COUNT, list(_us_companies()))
 
 
 def _fetch_sp500() -> list[dict[str, Any]]:
-    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    tables = _read_html(url)
-    df = tables[0]
-    result: list[dict[str, Any]] = []
-    for _, row in df.iterrows():
-        ticker = str(row.get("Symbol") or "").strip().upper().replace(".", "-")
-        name = str(row.get("Security") or "").strip()
+    """S&P500 구성종목 — SPY(SPDR) 공식 전체 구성종목 중 **주식**(시세 조회 가능)만.
 
-        if not ticker:
-            continue
-        result.append({"ticker": ticker, "name": name})
-    return result
+    위키피디아 표를 쓰다가 옮겼다 — 문서 구조가 바뀌면 조용히 깨지고(나스닥100 이 그랬다), SPY 는
+    매일 공시돼 지수 변경이 하루 안에 반영된다. 현금·정리 중 증권(코드형 티커)은 시세 조회 대상이
+    아니라 빠진다. 이름은 시총상위 명단과 같은 네이버 표기를 쓰고(같은 회사 판정이 이름 기준이다),
+    네이버 명단에 없을 때만 SPDR 표기를 쓴다.
+    """
+    holdings = fetch_spdr_us_holdings("SPY")
+    if holdings is None:
+        raise RuntimeError("SPY 가 SPDR 공식 상품 명단에 없습니다.")
+    names = {row["ticker"]: row["name"] for row in _us_companies()}
+    return [
+        {"ticker": item["ticker"], "name": names.get(item["ticker"]) or item["name"]}
+        for item in holdings["holdings"]
+        if item["price_lookup_supported"]
+    ]
 
 
 def _fetch_ndx100() -> list[dict[str, Any]]:
@@ -436,7 +441,7 @@ def main() -> None:
 
     for label, index, fetch, source in (
         ("시총상위1000", "USTOP1000", _fetch_us_top, _NAVER_US_MARKET_SOURCE),
-        ("S&P500", "SP500", _fetch_sp500, _SP500_URL),
+        ("S&P500", "SP500", _fetch_sp500, _SP500_SOURCE),
         ("NASDAQ100", "NDX100", _fetch_ndx100, _NDX100_API_URL),
     ):
         print(f"{label} 구성종목 조회 중...")

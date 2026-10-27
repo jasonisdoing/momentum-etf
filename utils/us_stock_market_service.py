@@ -186,8 +186,8 @@ def load_us_market_caps() -> dict[str, float]:
     return caps
 
 
-def load_us_market_top(count: int) -> list[dict[str, Any]]:
-    """미국 상장 회사 시총 상위 `count`개 — `{ticker, name}`. 시총 순위(`load_us_market_caps`)와 같은 명단이다."""
+def load_us_market_companies() -> list[dict[str, Any]]:
+    """미국 상장 회사 전체 `{ticker, name, market_cap}` — 시총 내림차순. 시총 순위(`load_us_market_caps`)와 같은 명단이다."""
     by_ticker: dict[str, tuple[float, str]] = {}
     for ticker, item in _iter_us_market_companies():
         cap = _parse_float(item.get("marketValue"))
@@ -196,10 +196,16 @@ def load_us_market_top(count: int) -> list[dict[str, Any]]:
         name = str(item.get("englishCodeName") or item.get("koreanCodeName") or ticker).strip()
         if cap > by_ticker.get(ticker, (0.0, ""))[0]:
             by_ticker[ticker] = (cap, name)
-    ranked = sorted(by_ticker.items(), key=lambda pair: (-pair[1][0], pair[0]))[:count]
+    ranked = sorted(by_ticker.items(), key=lambda pair: (-pair[1][0], pair[0]))
+    return [{"ticker": ticker, "name": name, "market_cap": cap} for ticker, (cap, name) in ranked]
+
+
+def load_us_market_top(count: int, companies: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """미국 상장 회사 시총 상위 `count`개 — `{ticker, name}`. `companies` 를 주면 그 명단에서 자른다(재조회 없음)."""
+    ranked = (companies if companies is not None else load_us_market_companies())[:count]
     if len(ranked) < count:
         raise RuntimeError(f"네이버 미국 시총 명단이 {count}개보다 적습니다: {len(ranked)}개")
-    return [{"ticker": ticker, "name": name} for ticker, (_, name) in ranked]
+    return [{"ticker": row["ticker"], "name": row["name"]} for row in ranked]
 
 
 def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -> dict[str, Any]:
