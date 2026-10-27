@@ -11,6 +11,7 @@ import { PortfolioChangeBreakdown } from "../components/PortfolioChangeBreakdown
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { calcPortfolioChange } from "@/lib/portfolio-change";
+import { currentQuote } from "@/lib/ticker-quote";
 import type { PortfolioChangeResult } from "@/lib/portfolio-change";
 
 type CompareTab = "performance" | "basic" | "holdings" | "yearly" | "monthly" | "weekly" | "daily";
@@ -100,6 +101,8 @@ type TickerDetailResponse = {
   ticker_type?: string;
   country_code?: string;
   rows: PriceRow[];
+  /** 정규장 전(프리장·데이장) 현재 시세 — 있으면 현재가·등락은 이 값이다(`currentQuote`). */
+  live?: { price: number; change_pct: number | null } | null;
   etf_info?: TickerEtfInfo | null;
   holdings: TickerHoldingRow[];
   error?: string;
@@ -378,42 +381,12 @@ function formatKoreanDateLabel(value: string | null): string {
   return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일`;
 }
 
-function getLatestClose(detail: TickerDetailResponse): number | null {
-  for (let index = detail.rows.length - 1; index >= 0; index -= 1) {
-    const close = detail.rows[index]?.close;
-    if (close !== null && close !== undefined && !Number.isNaN(close)) return close;
-  }
-  return null;
-}
-
-function getPreviousClose(detail: TickerDetailResponse): number | null {
-  let foundLatest = false;
-  for (let index = detail.rows.length - 1; index >= 0; index -= 1) {
-    const close = detail.rows[index]?.close;
-    if (close === null || close === undefined || Number.isNaN(close)) continue;
-    if (foundLatest) return close;
-    foundLatest = true;
-  }
-  return null;
-}
-
 function getLatestRow(detail: TickerDetailResponse): PriceRow | null {
   for (let index = detail.rows.length - 1; index >= 0; index -= 1) {
     const row = detail.rows[index];
     if (row?.close !== null && row?.close !== undefined && !Number.isNaN(row.close)) return row;
   }
   return null;
-}
-
-function getLatestChangeAmount(detail: TickerDetailResponse): number | null {
-  const latestClose = getLatestClose(detail);
-  const latestChangePct = getLatestRow(detail)?.change_pct ?? null;
-  const previousClose = getPreviousClose(detail);
-  if (latestClose === null || latestChangePct === null) return null;
-  if (previousClose !== null) return latestClose - previousClose;
-  const calculatedPreviousClose = latestClose / (1 + latestChangePct / 100);
-  if (!Number.isFinite(calculatedPreviousClose)) return null;
-  return latestClose - calculatedPreviousClose;
 }
 
 function getPortfolioChange(detail: TickerDetailResponse): PortfolioChangeResult {
@@ -871,9 +844,11 @@ function ProductSearchField({
 
 function BasicInfoValue({ product, metric }: { product: SelectedProduct; metric: string }) {
   const latestRow = getLatestRow(product.detail);
-  const latestClose = getLatestClose(product.detail);
-  const latestChangePct = latestRow?.change_pct ?? null;
-  const latestChangeAmount = getLatestChangeAmount(product.detail);
+  const {
+    price: latestClose,
+    changePct: latestChangePct,
+    changeAmount: latestChangeAmount,
+  } = currentQuote(product.detail.rows, product.detail.live);
   const etfInfo = product.detail.etf_info ?? null;
   const portfolioChange = getPortfolioChange(product.detail);
 
@@ -1710,9 +1685,9 @@ export function ComparePageClient() {
               </div>
               <div className="compareProductName">{product.item.name}</div>
               <div className="compareProductPrice">
-                {formatPrice(getLatestClose(product.detail), product.item.country_code)}
-                <span className={getSignedClass(getLatestRow(product.detail)?.change_pct ?? null)}>
-                  {formatSignedPercent(getLatestRow(product.detail)?.change_pct ?? null)}
+                {formatPrice(currentQuote(product.detail.rows, product.detail.live).price, product.item.country_code)}
+                <span className={getSignedClass(currentQuote(product.detail.rows, product.detail.live).changePct)}>
+                  {formatSignedPercent(currentQuote(product.detail.rows, product.detail.live).changePct)}
                 </span>
               </div>
             </div>

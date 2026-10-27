@@ -36,6 +36,7 @@ import { addStockCandidate } from "@/lib/stocks-store";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { calcPortfolioChange } from "@/lib/portfolio-change";
 import type { PortfolioChangeBreakdownItem } from "@/lib/portfolio-change";
+import { currentQuote } from "@/lib/ticker-quote";
 
 // --- 타입 ---
 
@@ -990,27 +991,12 @@ export function TickerDetailManager({ tickerOverride }: { tickerOverride?: strin
   }, [holdingsRows]);
 
   const lastPriceRow = useMemo(() => rows[rows.length - 1] ?? null, [rows]);
-  const previousPriceRow = useMemo(() => rows[rows.length - 2] ?? null, [rows]);
-  // 제목 옆과 ETF정보의 현재가·등락 — 항상 전일 대비(차트 기간과 무관). 정규장 전에는 live(프리장·데이장 시세), 아니면 마지막 봉.
-  const latestClose = live?.price ?? lastPriceRow?.close ?? null;
-  const latestChangePct = live ? live.change_pct : (lastPriceRow?.change_pct ?? null);
-  const latestChangeAmount = useMemo(() => {
-    if (latestClose === null || latestChangePct === null) {
-      return null;
-    }
-    // live 의 기준은 마지막 확정 종가(= 마지막 봉)다.
-    if (live && lastPriceRow?.close != null) {
-      return latestClose - lastPriceRow.close;
-    }
-    if (previousPriceRow?.close != null) {
-      return latestClose - previousPriceRow.close;
-    }
-    const previousClose = latestClose / (1 + latestChangePct / 100);
-    if (!Number.isFinite(previousClose)) {
-      return null;
-    }
-    return latestClose - previousClose;
-  }, [latestClose, latestChangePct, live, lastPriceRow, previousPriceRow]);
+  // 제목 옆과 ETF정보의 현재가·등락 — 항상 전일 대비(차트 기간과 무관). 규칙은 비교 화면과 공용(`currentQuote`).
+  const {
+    price: latestClose,
+    changePct: latestChangePct,
+    changeAmount: latestChangeAmount,
+  } = useMemo(() => currentQuote(rows, live), [rows, live]);
   const latestVolumeText = useMemo(() => {
     const volume = etfInfo?.volume ?? lastPriceRow?.volume ?? null;
     if (volume === null || Number.isNaN(volume)) {
