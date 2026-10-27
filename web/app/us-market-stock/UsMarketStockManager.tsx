@@ -75,10 +75,9 @@ type UsMarketStocksResponse = {
 };
 
 const usMarketStockGridTheme = createAppGridTheme();
-// 화면에서 고르는 보기 — `통합` 은 세 명단(시총상위1000·S&P500·나스닥100)을 합쳐 중복 종목을 한 번만 센다.
+// 화면에서 고르는 보기 — `통합` 은 두 지수(S&P500·나스닥100)를 합쳐 중복 종목을 한 번만 센다.
 const VIEW_OPTIONS = [
-  { key: "COMBINED", label: "통합", indices: ["USTOP1000", "SP500", "NDX100"] },
-  { key: "USTOP1000", label: "시총상위1000", indices: ["USTOP1000"] },
+  { key: "COMBINED", label: "통합", indices: ["SP500", "NDX100"] },
   { key: "SP500", label: "S&P500", indices: ["SP500"] },
   { key: "NDX100", label: "나스닥100", indices: ["NDX100"] },
 ] as const;
@@ -92,13 +91,13 @@ function viewIndices(view: ViewOption): readonly string[] {
 // null 이면 전체(절단 없음). 셀렉트·저장·선택지 생성은 한국 개별주와 공용(TopCountSelect).
 const US_MARKET_TOP_COUNT_KEY = "momentum-etf:us-market-stock:top-count";
 
-// 통합·시총상위1000 은 1000종목이 넘어 100 단위 구간, 지수 탭(S&P500·나스닥100)은 고정 선택지.
-const LARGE_VIEW_TOP_STEP = 100;
+// 통합은 두 지수를 합쳐 600 종목에 가까워 100 단위로는 구간이 너무 성기다 → 50 단위. 지수 탭은 고정 선택지.
+const COMBINED_TOP_STEP = 50;
 const SINGLE_TOP_OPTIONS: readonly (number | null)[] = [null, 100, 200, 300, 400, 500];
 
 function topOptions(view: ViewOption, rowCount: number, current: number | null): (number | null)[] {
-  return view === "COMBINED" || view === "USTOP1000"
-    ? stepTopOptions(LARGE_VIEW_TOP_STEP, rowCount, current)
+  return view === "COMBINED"
+    ? stepTopOptions(COMBINED_TOP_STEP, rowCount, current)
     : withCurrentTopOption([...SINGLE_TOP_OPTIONS], current);
 }
 
@@ -559,7 +558,7 @@ export function UsMarketStockManager({
                             ? "btn appSegmentedToggleButton is-active"
                             : "btn appSegmentedToggleButton"
                         }
-                        title={option.key === "COMBINED" ? "시총상위1000·S&P500·나스닥100의 합집합" : undefined}
+                        title={option.key === "COMBINED" ? "S&P500·나스닥100의 합집합" : undefined}
                         onClick={() => setView(option.key)}
                       >
                         {option.label}

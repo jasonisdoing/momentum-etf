@@ -2,7 +2,6 @@
 
 출처
 ----
-- 시총상위1000: 네이버 미국 시총 명단(NASDAQ·NYSE·AMX, 펀드 업종 제외) 상위 1000 — 시총 순위와 같은 명단
 - S&P500: SPY(SPDR) 공식 전체 구성종목의 주식 — 매일 공시, 지수 변경이 하루 안에 반영된다
 - NASDAQ100: 나스닥 공식 API (지수 산출 주체가 직접 제공)
 - 섹터·업종: yfinance
@@ -39,15 +38,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from services.spdr_us_service import fetch_spdr_us_holdings  # noqa: E402
 from utils.index_constituents_loader import (  # noqa: E402
-    US_ALERT_TOP_COUNT,
-    US_TOP_MARKET_CAP_COUNT,
     load_index_constituents,
     load_index_meta,
     save_index_constituents,
 )
 from utils.index_pool_alert import notify_unregistered_market_stocks  # noqa: E402
 from utils.perf_metrics import period_sortino  # noqa: E402
-from utils.us_stock_market_service import load_us_market_companies, load_us_market_top  # noqa: E402
+from utils.us_stock_market_service import load_us_market_companies  # noqa: E402
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -64,11 +61,9 @@ _API_HEADERS = {**_HEADERS, "Accept": "application/json, */*"}
 # 구성종목 수가 이 범위를 벗어나면 원본이 깨진 것으로 보고 저장하지 않는다.
 # (위키 문서가 옮겨졌을 때처럼 조용히 실패하는 것을 막기 위한 장치)
 _EXPECTED_COUNTS = {
-    "시총상위1000": (US_TOP_MARKET_CAP_COUNT, US_TOP_MARKET_CAP_COUNT),
     "S&P500": (490, 510),
     "NASDAQ100": (95, 110),
 }
-_NAVER_US_MARKET_SOURCE = "https://stock.naver.com/api/foreign/market/stock/global (NSQ·NYS·AMX, 펀드 제외)"
 
 
 def _check_count(label: str, items: list[dict[str, Any]]) -> None:
@@ -80,11 +75,11 @@ def _check_count(label: str, items: list[dict[str, Any]]) -> None:
         )
 
 
-_US_INDICES = ("USTOP1000", "SP500", "NDX100")
+_US_INDICES = ("SP500", "NDX100")
 
 
 def _load_saved_classification_all() -> dict[str, dict[str, str]]:
-    """세 명단(시총상위1000·S&P500·나스닥100)에 저장된 섹터·업종을 합친다 — 같은 종목은 한 번만 조회한다."""
+    """두 명단(S&P500·나스닥100)에 저장된 섹터·업종을 합친다 — 같은 종목은 한 번만 조회한다."""
     saved: dict[str, dict[str, str]] = {}
     for index in _US_INDICES:
         saved.update(_load_saved_classification(index))
@@ -133,13 +128,8 @@ def _fetch_classification(tickers: list[str]) -> dict[str, dict[str, str]]:
 
 @functools.lru_cache(maxsize=1)
 def _us_companies() -> tuple[dict[str, Any], ...]:
-    """네이버 미국 상장 회사 명단 — 한 실행에서 한 번만 받아 시총상위·S&P500 이름에 같이 쓴다."""
+    """네이버 미국 상장 회사 명단 — S&P500 종목명(같은 회사 판정용 표기)에 쓴다. 한 실행에서 한 번만 받는다."""
     return tuple(load_us_market_companies())
-
-
-def _fetch_us_top() -> list[dict[str, Any]]:
-    """미국 상장 회사 시총 상위 — 종목풀 시총 순위(`market_cap_rank`)와 같은 네이버 명단이다."""
-    return load_us_market_top(US_TOP_MARKET_CAP_COUNT, list(_us_companies()))
 
 
 def _fetch_sp500() -> list[dict[str, Any]]:
@@ -147,7 +137,7 @@ def _fetch_sp500() -> list[dict[str, Any]]:
 
     위키피디아 표를 쓰다가 옮겼다 — 문서 구조가 바뀌면 조용히 깨지고(나스닥100 이 그랬다), SPY 는
     매일 공시돼 지수 변경이 하루 안에 반영된다. 현금·정리 중 증권(코드형 티커)은 시세 조회 대상이
-    아니라 빠진다. 이름은 시총상위 명단과 같은 네이버 표기를 쓰고(같은 회사 판정이 이름 기준이다),
+    아니라 빠진다. 이름은 네이버 미국 상장 회사 명단의 표기를 쓰고(같은 회사 판정이 이름 기준이다),
     네이버 명단에 없을 때만 SPDR 표기를 쓴다.
     """
     holdings = fetch_spdr_us_holdings("SPY")
@@ -411,22 +401,6 @@ def _mark_duplicate_classes(items: list[dict[str, Any]]) -> None:
         print(f"  중복 클래스 표시: {', '.join(sorted(marked))}")
 
 
-def _alert_lists(by_index: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
-    """미등록 알림 명단 — 화면 「통합」(세 명단 합집합)의 시총 상위 `US_ALERT_TOP_COUNT` + 나스닥100.
-
-    같은 회사의 다른 주식 종류(`duplicate_class`)는 화면도 기본으로 숨기므로 상위 집계에서 뺀다.
-    """
-    merged: dict[str, dict[str, Any]] = {}
-    for items in by_index.values():
-        for item in items:
-            merged.setdefault(str(item["ticker"]), item)
-    ranked = sorted(
-        (item for item in merged.values() if not item.get("duplicate_class")),
-        key=lambda item: (-(item.get("market_cap") or 0), str(item["ticker"])),
-    )
-    return {"US_TOP": ranked[:US_ALERT_TOP_COUNT], "NDX100": by_index["NDX100"]}
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="미국 지수 구성종목 갱신")
     parser.add_argument(
@@ -440,7 +414,6 @@ def main() -> None:
     alert_items: dict[str, list[dict[str, Any]]] = {}
 
     for label, index, fetch, source in (
-        ("시총상위1000", "USTOP1000", _fetch_us_top, _NAVER_US_MARKET_SOURCE),
         ("S&P500", "SP500", _fetch_sp500, _SP500_SOURCE),
         ("NASDAQ100", "NDX100", _fetch_ndx100, _NDX100_API_URL),
     ):
@@ -461,7 +434,7 @@ def main() -> None:
         print(f"실패한 인덱스: {', '.join(failed)}", file=sys.stderr)
         sys.exit(1)
 
-    count = notify_unregistered_market_stocks("us", _alert_lists(alert_items))
+    count = notify_unregistered_market_stocks("us", alert_items)
     print(f"미국 시장 통합 종목 종목풀 미등록: {count}개")
 
 

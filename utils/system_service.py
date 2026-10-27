@@ -292,7 +292,7 @@ SCHEDULE_ROWS = [
         "key": "us_market_stocks",
         "group": "개장 전 준비",
         "job": "미국 개별주 업데이트",
-        "target": "시총상위1000, S&P500, NASDAQ100",
+        "target": "S&P500, NASDAQ100",
         "cadence": "평일 08:00 KST",
         "command": "python scripts/update_us_market_stocks.py",
         "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},

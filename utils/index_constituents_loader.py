@@ -11,11 +11,7 @@ from datetime import datetime
 from typing import Any
 
 COLLECTION = "index_constituents"
-SUPPORTED_INDICES = {"USTOP1000", "SP500", "NDX100", "ASX200", "KOSPI200", "KOSDAQ150"}
-# 미국 시총 상위 명단(USTOP1000)의 개수 — 네이버 미국 시총 명단(펀드 제외) 상위.
-US_TOP_MARKET_CAP_COUNT = 1000
-# 미국 미등록 알림 대상 — /us-market-stock 「통합」(시총상위·S&P500·나스닥100 합집합)의 시총 상위 이 개수 + 나스닥100.
-US_ALERT_TOP_COUNT = 300
+SUPPORTED_INDICES = {"SP500", "NDX100", "ASX200", "KOSPI200", "KOSDAQ150"}
 
 
 # 한국 지수는 공식 구성종목 API 가 없어 **추종 ETF 의 보유종목**을 명단으로 쓴다.
@@ -31,7 +27,6 @@ KOR_INDEX_SOURCES: dict[str, dict[str, Any]] = {
 # 지수별 적재 배치 — 명단이 없을 때 "무엇을 돌려야 하는지" 를 정확히 알려주기 위한 것이다.
 # 배치를 옮기면 여기도 함께 고쳐야 한다(안 그러면 화면이 없는 스크립트를 안내한다).
 _REFRESH_SCRIPT_BY_INDEX: dict[str, str] = {
-    "USTOP1000": "scripts/update_us_market_stocks.py",
     "SP500": "scripts/update_us_market_stocks.py",
     "NDX100": "scripts/update_us_market_stocks.py",
     "ASX200": "scripts/update_aus_market_stocks.py",

@@ -123,7 +123,7 @@ _US_MARKET_CAP_MARKETS = ("NSQ", "NYS", "AMX")
 _FUND_INDUSTRY_CODE_PREFIX = "5550"
 # 우선주 시리즈 — 네이버 심볼 'TFIN PR'·'BAC PRL' 처럼 보통주 뒤에 PR(+시리즈 문자)이 붙는다.
 # 회사가 아니라 같은 회사의 다른 증권이고, 시총 칸에 엉뚱한 값이 오기도 한다(TFIN PR 380억 달러,
-# 2026-10-26 — 시총상위1000 에 끼어 yfinance 조회가 실패했다). 클래스 주식(BRK B·HEI A)은 남긴다.
+# 2026-10-26). 클래스 주식(BRK B·HEI A)은 남긴다.
 _PREFERRED_SYMBOL = re.compile(r"\S+ PR[A-Z]?")
 # 심볼에 PR 이 없는 우선주(GOOGM·GOOGN 「Alphabet … Mandatory Conv Prf Shs」, STRC)는 이름으로 거른다.
 # 단 ADR 은 남긴다 — 해외 회사의 미국 상장이 우선주 ADR 하나뿐인 경우가 있다(BBD 브라데스코).
@@ -198,14 +198,6 @@ def load_us_market_companies() -> list[dict[str, Any]]:
             by_ticker[ticker] = (cap, name)
     ranked = sorted(by_ticker.items(), key=lambda pair: (-pair[1][0], pair[0]))
     return [{"ticker": ticker, "name": name, "market_cap": cap} for ticker, (cap, name) in ranked]
-
-
-def load_us_market_top(count: int, companies: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
-    """미국 상장 회사 시총 상위 `count`개 — `{ticker, name}`. `companies` 를 주면 그 명단에서 자른다(재조회 없음)."""
-    ranked = (companies if companies is not None else load_us_market_companies())[:count]
-    if len(ranked) < count:
-        raise RuntimeError(f"네이버 미국 시총 명단이 {count}개보다 적습니다: {len(ranked)}개")
-    return [{"ticker": row["ticker"], "name": row["name"]} for row in ranked]
 
 
 def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -> dict[str, Any]:
@@ -295,7 +287,7 @@ def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -
 
 
 def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str, Any]:
-    """저장된 지수 구성종목(시총상위1000·S&P500·나스닥100)에 실시간 시세를 붙인다."""
+    """저장된 지수 구성종목(S&P500·나스닥100)에 실시간 시세를 붙인다."""
     constituents = load_index_constituents(index)
     meta = load_index_meta(index)
 

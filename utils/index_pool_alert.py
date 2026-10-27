@@ -4,20 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from utils.index_constituents_loader import US_ALERT_TOP_COUNT
 from utils.kor_stock_market_service import KOR_MARKET_TOP_COUNTS
 from utils.market_service import load_ticker_pool_type_map
 from utils.notification import send_slack_message_v2
 
 # 명단별 표시 이름 — 개수는 명단을 정하는 상수에서 가져온다(문구와 실제 명단이 갈리지 않게).
 _LIST_LABELS: dict[str, str] = {
-    "US_TOP": f"시총 상위 {US_ALERT_TOP_COUNT}",
+    "SP500": "S&P500",
     "NDX100": "나스닥100",
     "KOSPI": f"코스피 시총 상위 {KOR_MARKET_TOP_COUNTS['KOSPI']}",
     "KOSDAQ": f"코스닥 시총 상위 {KOR_MARKET_TOP_COUNTS['KOSDAQ']}",
 }
 # 미국 미등록 알림의 대상 명단 설명 — /us-market-stock 헤더 「슬랙 기준」이 그대로 보여준다.
-US_ALERT_BASIS = f"{_LIST_LABELS['US_TOP']} + {_LIST_LABELS['NDX100']}"
+US_ALERT_BASIS = f"{_LIST_LABELS['SP500']} + {_LIST_LABELS['NDX100']}"
 
 
 def notify_unregistered_market_stocks(country: str, list_items: dict[str, list[dict[str, Any]]]) -> int:

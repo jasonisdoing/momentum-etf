@@ -23,7 +23,7 @@ def get_us_market_stocks(
 
 @router.get("/index")
 def get_us_index_stocks(
-    index: Annotated[str, Query(pattern="^(USTOP1000|SP500|NDX100)$")],
+    index: Annotated[str, Query(pattern="^(SP500|NDX100)$")],
     min_market_cap_ukm: Annotated[int, Query(ge=0)] = 0,
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
