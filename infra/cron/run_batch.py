@@ -5,7 +5,7 @@
     python infra/cron/run_batch.py <job_name> <command...>
 
 예시:
-    python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py
+    python infra/cron/run_batch.py cache_refresh_kor python scripts/stock_price_cache_updater.py --country kor
 
 동작:
     1) subprocess 로 <command> 를 실행

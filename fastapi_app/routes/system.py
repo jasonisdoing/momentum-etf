@@ -64,7 +64,7 @@ def post_cancel_job(
 
 @router.get("/job-logs")
 def get_job_logs(
-    key: str = Query(..., description="배치 작업 키 (예: cache_refresh)"),
+    key: str = Query(..., description="배치 작업 키 (예: cache_refresh_kor)"),
     started_at: str = Query(..., description="실행 시작 ISO 시각"),
     ended_at: str | None = Query(None, description="실행 종료 ISO 시각 (없으면 시작+30분)"),
     _: None = Depends(require_internal_token),

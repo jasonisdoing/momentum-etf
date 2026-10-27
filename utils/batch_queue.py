@@ -60,6 +60,10 @@ LOCAL_ONLY_JOBS: set[str] = {"db_backup"}
 #   local — 로컬 전용(백업, 로컬 디스크).
 # 매핑에 없는 새 잡은 가장 보수적인 data(직렬)로 흐른다 — 병렬이 안전한지 확인한 뒤 등록한다.
 LANE_LIGHT_JOBS: set[str] = {
+    # 일별·주별·월별 집계(실행 9초, 10분마다) — 시세를 수집하지 않고 실시간 시세와 이미 있는 가격 캐시를
+    # 읽기만 한다. data 레인에 있으면 가격 캐시 갱신(매시 약 8분) 뒤에서 최대 22분까지 기다렸다.
+    # 캐시 문서는 종목 단위로 통째로 바뀌므로 갱신 도중에 읽어도 반쯤 쓴 값은 없다.
+    "data_aggregate",
     "broker_balance_sync",
     "strategy_mix_notify_kor",
     "strategy_mix_notify_us",

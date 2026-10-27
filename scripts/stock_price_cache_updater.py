@@ -1169,6 +1169,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="전체 히스토리를 강제 재수집한다(수정주가 재정렬 — 하루 1회 크론용). 기본은 증분 갱신.",
     )
+    parser.add_argument(
+        "--country",
+        choices=("kor", "us", "au"),
+        help="이 시장의 종목풀만 갱신한다(매시 증분 배치를 시장별로 나눠 짧은 배치가 사이에 끼어 돌게 한다). "
+        "없으면 전체.",
+    )
     return parser
 
 
@@ -1245,13 +1251,20 @@ def main():
 
     start_date = args.start or _determine_start_date()
     targets_to_update = list_available_ticker_types()
+    if args.country:
+        targets_to_update = [
+            t_id
+            for t_id in targets_to_update
+            if str((get_ticker_type_settings(t_id) or {}).get("country_code") or "").strip().lower() == args.country
+        ]
 
     if not targets_to_update:
         logger.warning("갱신할 대상이 없습니다.")
         return
 
     logger.info(
-        "전체 종목풀 가격 캐시 갱신 시작: targets=%s, start=%s, mode=%s",
+        "가격 캐시 갱신 시작(%s): targets=%s, start=%s, mode=%s",
+        args.country or "전체",
         targets_to_update,
         start_date,
         "full(전체 재수집)" if args.full else "incremental(증분)",

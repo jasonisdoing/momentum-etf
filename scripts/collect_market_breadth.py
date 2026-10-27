@@ -35,7 +35,7 @@ def main() -> int:
     ]
     print(f"[market_breadth] 시장 폭 집계 완료: {' '.join(parts)}")
 
-    # 종목풀 ADR — 가격 캐시(2번 배치, 매시 20분)만 읽으므로 이 시점에 항상 최신이다.
+    # 종목풀 ADR — 가격 캐시(시장별 가격 캐시 배치, 매시)만 읽으므로 이 시점에 항상 최신이다.
     # 시장 집계가 실패해도 여기까지 오면 돌리고, 반대로 여기서 실패해도 위 결과는 남긴다.
     pool_summary = refresh_pool_breadth()
     pool_parts = [

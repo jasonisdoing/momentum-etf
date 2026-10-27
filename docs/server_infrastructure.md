@@ -28,7 +28,7 @@ VM 의 역할은 컨테이너 가동뿐이다. 자동 배치는 돌지 않는다
 
 | 잡 | 스크립트 | 비고 |
 | --- | --- | --- |
-| `cache_refresh` / `cache_refresh_full` | `stock_price_cache_updater.py` | 매시 증분, 하루 1회 `--full`(수정주가 재정렬) |
+| `cache_refresh_kor` / `cache_refresh_us` / `cache_refresh_au` / `cache_refresh_full` | `stock_price_cache_updater.py` | 매시 증분은 시장별(`--country`)로 나눠 시각을 엇갈려 돈다(한 번에 돌면 data 레인을 오래 잡아 짧은 배치가 길게 기다렸다). 하루 1회 `--full`(수정주가 재정렬)은 전체 |
 | `reference_meta_updater` | `stock_reference_meta_updater.py` | 배치 B: 식별·상세 메타, ETF 구성종목·배당 |
 | `price_metrics_updater` | `stock_price_metrics_updater.py` | 배치 A: 거래량·기간수익률 등 가격 파생 |
 | `data_aggregate` | `collect_data.py` | 일별 원장 → 주/월 재집계 |

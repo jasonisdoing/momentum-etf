@@ -20,7 +20,9 @@ SystemAction = Literal[
     "broker_balance_sync",
     "strategy_mix_notify_kor",
     "strategy_mix_notify_us",
-    "cache_refresh",
+    "cache_refresh_kor",
+    "cache_refresh_us",
+    "cache_refresh_au",
     "cache_refresh_full",
     "market_hours_analysis",
     "reference_meta_updater",
@@ -93,19 +95,41 @@ SCHEDULE_ROWS = [
         # 1분이면 끝나는 가벼운 집계라 촘촘히 돌린다(00·10·20·30·40·50분).
         "schedule": {"minutes": list(range(0, 60, 10)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
+    # 가격 캐시 매시 증분은 시장별 3개로 나눈다 — 한 번에 돌면 data 레인을 약 12분 잡아, 그 뒤 짧은 배치가
+    # 길게는 20분씩 기다렸다. 시각을 엇갈려 두면 사이사이에 다른 배치가 끼어 돈다(레인은 그대로 data 직렬).
     {
         "no": 2,
-        "key": "cache_refresh",
+        "key": "cache_refresh_kor",
         "group": "상시 집계",
-        "job": "가격 캐시 업데이트",
-        "target": "모든 종목 가격",
+        "job": "가격 캐시 업데이트(한국)",
+        "target": "한국 종목풀 가격",
         "cadence": "월~토 24시간 매시 20분 KST",
-        "command": "python scripts/stock_price_cache_updater.py",
+        "command": "python scripts/stock_price_cache_updater.py --country kor",
         "schedule": {"minutes": [20], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
+    },
+    {
+        "no": 3,
+        "key": "cache_refresh_us",
+        "group": "상시 집계",
+        "job": "가격 캐시 업데이트(미국)",
+        "target": "미국 종목풀 가격",
+        "cadence": "월~토 24시간 매시 27분 KST",
+        "command": "python scripts/stock_price_cache_updater.py --country us",
+        "schedule": {"minutes": [27], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
+    },
+    {
+        "no": 4,
+        "key": "cache_refresh_au",
+        "group": "상시 집계",
+        "job": "가격 캐시 업데이트(호주)",
+        "target": "호주 종목풀 가격",
+        "cadence": "월~토 24시간 매시 35분 KST",
+        "command": "python scripts/stock_price_cache_updater.py --country au",
+        "schedule": {"minutes": [35], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     # ② 장중 실행 — 장중에 도는 것들. 알림과 데이터 동기화가 섞여 있다.
     {
-        "no": 3,
+        "no": 5,
         "key": "broker_balance_sync",
         "group": "장중 실행",
         "job": "증권사 잔고 동기화",
@@ -116,7 +140,7 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _BROKER_SYNC_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 4,
+        "no": 6,
         "key": "strategy_mix_notify_kor",
         "group": "장중 실행",
         "job": "한국 합성 액션 알림",
@@ -128,7 +152,7 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 5,
+        "no": 7,
         "key": "strategy_mix_notify_us",
         "group": "장중 실행",
         "job": "미국 합성 액션 알림",
@@ -140,7 +164,7 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _US_INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
-        "no": 6,
+        "no": 8,
         "key": "strategy_trade_notify",
         "group": "장중 실행",
         "job": "전략 사고팔기 알림",
@@ -152,7 +176,7 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 7,
+        "no": 9,
         "key": "holdings_alarm",
         "group": "장중 실행",
         "job": "보유종목 알람",
@@ -162,7 +186,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [10], "hours": [9], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 8,
+        "no": 10,
         "key": "leverage_ma_cross",
         "group": "장중 실행",
         "job": "레버리지 스위칭",
@@ -178,7 +202,7 @@ SCHEDULE_ROWS = [
         },
     },
     {
-        "no": 9,
+        "no": 11,
         "key": "asset_summary",
         "group": "장중 실행",
         "job": "전체 자산 요약 알림",
@@ -198,7 +222,7 @@ SCHEDULE_ROWS = [
     },
     # ③ 마감 후 지표 — 하루 1~2회.
     {
-        "no": 10,
+        "no": 12,
         "key": "market_breadth",
         "group": "마감 후 지표",
         "job": "시장 폭(ADR) 집계",
@@ -220,7 +244,7 @@ SCHEDULE_ROWS = [
         },
     },
     {
-        "no": 11,
+        "no": 13,
         "key": "cache_refresh_full",
         "group": "마감 후 지표",
         "job": "가격 캐시 전체 재수집",
@@ -233,7 +257,7 @@ SCHEDULE_ROWS = [
     },
     # ④ 개장 전 준비 — 아침에 한 번, 오래 걸린다(실행 시각 순).
     {
-        "no": 12,
+        "no": 14,
         "key": "market_hours_analysis",
         "group": "개장 전 준비",
         "job": "장 시간 분석",
@@ -244,7 +268,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [30], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 13,
+        "no": 15,
         "key": "reference_meta_updater",
         "group": "개장 전 준비",
         "job": "종목 메타 업데이트",
@@ -254,7 +278,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [40], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 14,
+        "no": 16,
         "key": "price_metrics_updater",
         "group": "개장 전 준비",
         "job": "종목 가격지표 업데이트",
@@ -264,7 +288,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [55], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 15,
+        "no": 17,
         "key": "us_market_stocks",
         "group": "개장 전 준비",
         "job": "미국 개별주 업데이트",
@@ -274,7 +298,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 16,
+        "no": 18,
         "key": "aus_market_stocks",
         "group": "개장 전 준비",
         "job": "호주 개별주 업데이트",
@@ -284,7 +308,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [10], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 17,
+        "no": 19,
         "key": "kor_market_stocks",
         "group": "개장 전 준비",
         "job": "한국 지수 구성종목",
@@ -294,7 +318,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [15], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 18,
+        "no": 20,
         "key": "kor_dividend_stocks",
         "group": "개장 전 준비",
         "job": "한국 배당주 지표",
@@ -305,7 +329,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [30], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 19,
+        "no": 21,
         "key": "us_market_etfs",
         "group": "개장 전 준비",
         "job": "미국 ETF 업데이트",
@@ -315,7 +339,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [35], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 20,
+        "no": 22,
         "key": "market_trend_notify",
         "group": "개장 전 준비",
         "job": "시장 추세 알림",
@@ -329,7 +353,7 @@ SCHEDULE_ROWS = [
     },
     # ⑤ 상시 운영 — 자동으로 돌고 손댈 일이 거의 없다.
     {
-        "no": 21,
+        "no": 23,
         "key": "live_24h_slack",
         "group": "상시 운영",
         "job": "24H 시세 알림",
@@ -339,7 +363,7 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
     },
     {
-        "no": 22,
+        "no": 24,
         "key": "db_backup",
         "group": "상시 운영",
         "job": "DB 백업",
@@ -357,7 +381,9 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "broker_balance_sync": "scripts/broker_balance_sync.py",
     "strategy_mix_notify_kor": "scripts/strategy_mix_notify.py",
     "strategy_mix_notify_us": "scripts/strategy_mix_notify.py",
-    "cache_refresh": "scripts/stock_price_cache_updater.py",
+    "cache_refresh_kor": "scripts/stock_price_cache_updater.py",
+    "cache_refresh_us": "scripts/stock_price_cache_updater.py",
+    "cache_refresh_au": "scripts/stock_price_cache_updater.py",
     "cache_refresh_full": "scripts/stock_price_cache_updater.py",
     "market_hours_analysis": "scripts/analyze_market_hours.py",
     "reference_meta_updater": "scripts/stock_reference_meta_updater.py",
@@ -379,6 +405,9 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
 
 # 액션별 추가 인자 — 워커가 스크립트 실행 시 그대로 붙인다.
 _ARGS_BY_ACTION: dict[str, list[str]] = {
+    "cache_refresh_kor": ["--country", "kor"],
+    "cache_refresh_us": ["--country", "us"],
+    "cache_refresh_au": ["--country", "au"],
     "cache_refresh_full": ["--full"],
     "db_backup": ["--gzip"],
     "strategy_mix_notify_kor": ["kor"],
@@ -439,7 +468,7 @@ def _build_pool_summary_rows() -> list[dict[str, object]]:
     if db is None:
         raise RuntimeError("DB 연결 실패로 종목풀 요약을 조회할 수 없습니다.")
 
-    # cache_refresh 배치가 저장한 풀별 매수 후보 요약 (없으면 0 표시)
+    # 가격 캐시 배치가 저장한 풀별 매수 후보 요약 (없으면 0 표시)
     rank_summary_by_type: dict[str, dict[str, object]] = {}
     try:
         for doc in db.pool_rank_summary.find({}, {"ticker_type": 1, "score_up_count": 1, "score_total_count": 1}):
@@ -461,7 +490,7 @@ def _build_pool_summary_rows() -> list[dict[str, object]]:
         )
 
         stock_count = len(docs)
-        # 매수 후보 기준 — cache_refresh 배치가 pool_rank_summary 에 저장한다.
+        # 매수 후보 기준 — 가격 캐시 배치가 pool_rank_summary 에 저장한다.
         rank_summary = rank_summary_by_type.get(ticker_type, {})
         score_up_count = int(_to_float(rank_summary.get("score_up_count")))
         score_total_count = int(_to_float(rank_summary.get("score_total_count")))
