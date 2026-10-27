@@ -313,6 +313,8 @@ def _build_item(
         # 현재 레짐 2일차 시가 대비 등락률 — 표의 "상승 9일째(+16.3%)".
         # 1일차는 신호 확정 전이라 뺀다. 구간이 하루뿐이면 아직 잡을 구간이 없어 None.
         "regime_change_pct": None,
+        # 추세가 바뀌는 SuperTrend 가격선까지 남은 등락률 — 종가가 이만큼 움직이면 다음 전환이다.
+        "switch_pct": None,
     }
     # 한국 인덱스는 네이버에서 받은 OHLC 의 종가를 우선 사용한다.
     full_df = None
@@ -378,7 +380,10 @@ def _build_item(
         st_df = _calculate_supertrend(full_df, period=st_period, multiplier=st_multiplier)
         st_dir = st_df["direction"]
     except Exception:
+        st_df = None
         st_dir = pd.Series(1, index=full_df.index)
+    if st_df is not None:
+        base["switch_pct"] = _switch_pct(_to_float(st_df["supertrend"].iloc[-1]), latest_price)
 
     regime_series = pd.Series("accel_up", index=full_df.index, dtype=object)
     regime_series[st_dir == -1] = "accel_down"
@@ -659,6 +664,13 @@ def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
     return frame.copy()
 
 
+def _switch_pct(st_val: float | None, close: float | None) -> float | None:
+    """종가 대비 SuperTrend 가격선까지의 등락률 — 종가가 그 선을 넘으면 추세가 바뀐다."""
+    if not st_val or not close:
+        return None
+    return (st_val / close - 1.0) * 100.0
+
+
 def compute_index_history(yf_ticker: str) -> dict[str, Any]:
     """단일 지수의 가격/이동평균/레짐 히스토리를 반환한다.
 
@@ -756,9 +768,9 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
         point_forecast = {
             "raw_regime": regime,
             "up_price": st_val if regime == "accel_down" else None,
-            "up_pct": ((st_val / close - 1.0) * 100.0) if regime == "accel_down" and st_val and close else None,
+            "up_pct": _switch_pct(st_val, close) if regime == "accel_down" else None,
             "dn_price": st_val if regime == "accel_up" else None,
-            "dn_pct": ((st_val / close - 1.0) * 100.0) if regime == "accel_up" and st_val and close else None,
+            "dn_pct": _switch_pct(st_val, close) if regime == "accel_up" else None,
         }
 
         history.append(

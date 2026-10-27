@@ -83,12 +83,12 @@ def build_message(items: list[dict[str, Any]], previous: dict[str, str] | None) 
     for item in items:
         regime = item["current_regime"]
         days = item.get("current_regime_days")
-        move = item.get("regime_change_pct")
+        switch = item.get("switch_pct")
         text = f"{_REGIME_EMOJI[regime]} *{item['name']}* {_REGIME_LABEL[regime]}"
         if days is not None:
             text += f" {days}일째"
-        if move is not None:
-            text += f" ({move:+.1f}%)"
+        if switch is not None:
+            text += f" (전환까지 {switch:+.1f}%)"
         if item["name"] in changed_names:
             text += " 🔔 전환"
         lines.append(text)
