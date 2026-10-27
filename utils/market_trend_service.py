@@ -310,9 +310,6 @@ def _build_item(
         "days_since_last_up": None,
         # 현재 레짐이 하락일 때: 마지막 중립 구간 종료 후 경과 거래일 (12개월 내 중립 없으면 None)
         "days_since_last_neutral": None,
-        # 현재 레짐 2일차 시가 대비 등락률 — 표의 "상승 9일째(+16.3%)".
-        # 1일차는 신호 확정 전이라 뺀다. 구간이 하루뿐이면 아직 잡을 구간이 없어 None.
-        "regime_change_pct": None,
         # 추세가 바뀌는 SuperTrend 가격선까지 남은 등락률 — 종가가 이만큼 움직이면 다음 전환이다.
         "switch_pct": None,
     }
@@ -413,18 +410,6 @@ def _build_item(
             base["days_since_last_up"] = _days_since_last("accel_up")
         else:
             base["days_since_last_neutral"] = _days_since_last("accel_down")
-
-        # 현재 구간 **2일차 시가** 대비 등락률 — 사람이 실제로 잡을 수 있었던 구간이다.
-        # 추세 전환은 1일차 종가로 확정되므로 그날 장중 등락은 신호가 나오기 전이고,
-        # 빨라야 다음 날 시가에 들어간다 (전략 백테스트의 '판정 L−1 종가 / 체결 L 시가'와 같은 기준).
-        # "N일째"의 N 번째 뒤가 1일차이므로 2일차는 N−1 번째 뒤다.
-        # 상승·하락 모두 같은 기준이다 — 레짐이 2상태뿐이라 하락 구간에서는
-        # days_since_last_up 도 현재 구간 일수와 같은 값이다.
-        regime_days = int(ranges[-1]["days"])
-        if regime_days >= 2 and "Open" in full_df.columns and regime_days - 1 <= len(full_df):
-            entry_open = _to_float(full_df["Open"].iloc[-(regime_days - 1)])
-            if entry_open is not None and entry_open > 0 and latest_price is not None:
-                base["regime_change_pct"] = (latest_price / entry_open - 1.0) * 100.0
 
     # MA 괴리율 0%를 0점으로 두고, 12개월 상위 5%(95퍼센타일)/하위 5%(5퍼센타일) 괴리율로
     # 점수 정규화한다. 단발 극단치(최대/최소)는 천장을 한 순간만 만들어 +100 이 거의 안 찍히므로,
