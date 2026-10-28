@@ -66,27 +66,10 @@ def available_pools() -> list[str]:
 
 
 def pool_options() -> list[dict[str, Any]]:
-    """화면 셀렉트용 종목풀 목록 — 다른 전략 화면과 같은 형태(`formatPoolLabel` 이 쓴다)."""
-    from utils.settings_loader import get_ticker_type_settings
+    """화면 셀렉트용 종목풀 목록 — 이 전략을 켠 종목풀(`formatPoolLabel` 이 쓴다)."""
+    from utils.pool_strategy_use import pool_options as build_pool_options
 
-    options: list[dict[str, Any]] = []
-    for pool in available_pools():
-        try:
-            settings = get_ticker_type_settings(pool) or {}
-        except Exception:
-            continue
-        options.append(
-            {
-                "ticker_type": pool,
-                "name": str(settings.get("name") or pool),
-                "icon": str(settings.get("icon") or ""),
-                "order": settings.get("order"),
-                "country_code": str(settings.get("country_code") or "").strip().lower(),
-                "currency": str(settings.get("currency") or "").strip().upper(),
-                "pool_kind": str(settings.get("pool_kind") or "").strip().lower(),
-            }
-        )
-    return sorted(options, key=lambda item: (item["order"] is None, item["order"]))
+    return build_pool_options(available_pools())
 
 
 def load_universe(pool: str) -> list[dict[str, Any]]:

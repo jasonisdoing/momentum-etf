@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 
@@ -49,6 +51,34 @@ def trade_eligible_pools() -> list[str]:
     from utils.strategy_trade_config import is_eligible_pool
 
     return [str(config["ticker_type"]) for config in _load_pool_configs() if is_eligible_pool(config)]
+
+
+def pool_options(pools: list[str]) -> list[dict[str, Any]]:
+    """화면 셀렉트용 종목풀 정보 — 공용 `formatPoolLabel` 이 쓰는 필드(ticker_type·name·icon·order)와
+    화면이 국가·통화·풀 성격으로 분기하는 값. order 순.
+
+    전략 화면(모멘텀·신고가·포트폴리오·합성·사고팔기)이 모두 이 함수를 쓴다.
+    """
+    from utils.settings_loader import get_ticker_type_settings
+
+    options: list[dict[str, Any]] = []
+    for pool in pools:
+        try:
+            settings = get_ticker_type_settings(pool) or {}
+        except Exception:
+            settings = {}
+        options.append(
+            {
+                "ticker_type": pool,
+                "name": str(settings.get("name") or "").strip() or pool,
+                "icon": str(settings.get("icon") or "").strip(),
+                "order": settings.get("order"),
+                "country_code": str(settings.get("country_code") or "").strip().lower(),
+                "currency": str(settings.get("currency") or "").strip().upper(),
+                "pool_kind": str(settings.get("pool_kind") or "").strip().lower(),
+            }
+        )
+    return sorted(options, key=lambda item: (item["order"] is None, item["order"]))
 
 
 def pools_using(strategy: str) -> list[str]:

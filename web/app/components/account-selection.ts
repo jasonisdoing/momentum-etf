@@ -42,7 +42,8 @@ export type PoolScreen =
   | "market-stock-aus"
   | "strategy-momentum"
   | "strategy-new-high"
-  | "strategy-portfolio";
+  | "strategy-portfolio"
+  | "strategy-trade";
 
 function tickerTypeKey(screen: PoolScreen): string {
   return `${MOMENTUM_ETF_TICKER_TYPE_KEY}:${screen}`;

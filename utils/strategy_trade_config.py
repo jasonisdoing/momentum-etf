@@ -36,11 +36,8 @@ from __future__ import annotations
 from datetime import time
 from typing import Any
 
-# 전략 정의(종목·계좌·파라미터)는 DB(`system_config.strategy_trade_settings.strategies`)가 단일 소스다 —
-# 화면에서 종목을 고르고 전략을 추가·삭제한다. 고를 수 있는 종목은 이 종목풀의 ETF 뿐이다
-# (가격 이력을 그 풀의 가격 캐시에서 읽고, ETF 라 호가 단위가 5원 고정이다).
-ETF_POOL = "kor_etf"
-PRICE_CACHE_TICKER_TYPES: tuple[str, ...] = (ETF_POOL,)
+# 전략 정의(풀·종목·계좌·파라미터)는 DB(`system_config.strategy_trade_settings.strategies`)가 단일 소스다 —
+# 사고팔기를 켠 종목풀에서 그 풀의 ETF 를 골라 전략을 만든다(호가 단위는 ETF 라 5원 고정).
 
 
 def is_eligible_pool(pool_config: dict[str, Any]) -> bool:

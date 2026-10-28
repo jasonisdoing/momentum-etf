@@ -29,7 +29,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from utils.order_confirm import build_confirm_line, pop_filled
-from utils.strategy_trade_service import load_settings, load_strategy_trade_view
+from utils.strategy_trade_service import load_all_strategy_views, load_settings
 
 KST = ZoneInfo("Asia/Seoul")
 _CONFIG_COLLECTION = "system_config"
@@ -290,7 +290,7 @@ def notify_strategy_trade(*, force: bool = False) -> dict[str, Any]:
     if not force and not settings["slack_enabled"]:
         return {"sent": False, "reason": "슬랙 알림이 꺼져 있습니다.", "triggers": []}
 
-    view = load_strategy_trade_view()
+    view = load_all_strategy_views()
     triggers = [t for s in view["strategies"] for t in collect_triggers(s)]
 
     if force:

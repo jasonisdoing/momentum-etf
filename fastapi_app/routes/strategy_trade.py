@@ -1,15 +1,13 @@
-"""전략 사고팔기(분할 매수/매도) 운용 현황 API — 종목 1개씩 운용하는 전략."""
+"""전략 사고팔기(분할 매수/매도) 운용 현황 API — 종목풀 단위로 종목 1개씩 운용하는 전략."""
 
 from fastapi import APIRouter, Body, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
 from utils.strategy_trade_service import (
-    add_strategy,
-    delete_strategy,
     load_strategy_trade_view,
     resolve_etf,
+    save_pool_strategies,
     save_slack_enabled,
-    save_strategy_settings,
 )
 
 router = APIRouter(prefix="/internal/strategy-trade", tags=["strategy-trade"])
@@ -17,19 +15,24 @@ router = APIRouter(prefix="/internal/strategy-trade", tags=["strategy-trade"])
 
 @router.get("")
 def get_strategy_trade(
+    pool: str | None = Query(None),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """전략별로 고른 계좌의 실제 보유 기준 회차 현황·매수/매도 지정가를 반환한다."""
-    return load_strategy_trade_view()
+    """사고팔기를 켠 종목풀 목록과, 고른 풀의 전략별 회차 현황·매수/매도 지정가를 반환한다.
+
+    ``pool`` 을 안 주면 켜진 풀 중 첫 번째다.
+    """
+    return load_strategy_trade_view(pool)
 
 
 @router.get("/resolve")
 def get_strategy_trade_resolve(
+    pool: str = Query(...),
     ticker: str = Query(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """티커 확인 — 종목풀(kor_etf)에 있는 ETF 면 {ticker, name}, 없으면 에러."""
-    return resolve_etf(ticker)
+    """티커 확인 — 그 종목풀에 있는 ETF 면 {ticker, name}, 없으면 에러."""
+    return resolve_etf(pool, ticker)
 
 
 @router.put("/settings")
@@ -37,29 +40,23 @@ def put_strategy_trade_settings(
     payload: dict = Body(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """슬랙 스위치 / 전략 편집·추가·삭제를 저장하고 갱신된 화면 데이터를 반환한다.
+    """슬랙 스위치 또는 한 종목풀의 전략 목록을 저장하고 갱신된 화면 데이터를 반환한다.
 
-    body 는 넷 중 하나:
-      ``{"slack_enabled": true}``                                    — 전역 스위치
-      ``{"strategy_id": "…", "config": {account_id·ticker + pct 3종}}`` — 전략 편집
-      ``{"add_strategy": {account_id·ticker + pct 3종}}``              — 전략 추가
-      ``{"delete_strategy": "…"}``                                    — 전략 삭제
-    config 는 모든 값을 담아야 한다 (검증은 `strategy_trade_service`).
+    body 는 둘 중 하나:
+      ``{"slack_enabled": true, "pool": "…"}``                     — 전역 스위치(응답에 볼 풀을 함께 준다)
+      ``{"pool": "…", "strategies": [{strategy_id?·account_id·ticker + pct 3종}, …]}`` — 풀의 전략 목록 전체
+    strategy_id 가 없는 행은 추가, 목록에서 빠진 전략은 삭제다 (검증은 `strategy_trade_service`).
     """
-    if not isinstance(payload, dict):
-        raise ValueError("요청 형식이 올바르지 않습니다.")
-
+    pool = str(payload.get("pool") or "").strip() or None
     if payload.get("slack_enabled") is not None:
         save_slack_enabled(bool(payload["slack_enabled"]))
-    elif payload.get("add_strategy") is not None:
-        add_strategy(payload["add_strategy"])
-    elif payload.get("delete_strategy") is not None:
-        delete_strategy(str(payload["delete_strategy"]))
-    elif payload.get("strategy_id") is not None:
-        save_strategy_settings(str(payload["strategy_id"]), config=payload.get("config"))
+    elif payload.get("strategies") is not None:
+        if pool is None:
+            raise ValueError("종목풀이 필요합니다.")
+        save_pool_strategies(pool, payload["strategies"])
     else:
         raise ValueError("요청에 저장할 항목이 없습니다.")
-    return load_strategy_trade_view()
+    return load_strategy_trade_view(pool)
 
 
 @router.post("/slack-test")

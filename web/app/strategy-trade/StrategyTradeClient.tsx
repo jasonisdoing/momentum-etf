@@ -2,9 +2,13 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 
-import AccountSelect, { type AccountOptionBase } from "../components/AccountSelect";
+import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
+
+import AccountSelect, { formatAccountLabel, type AccountOptionBase } from "../components/AccountSelect";
+import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
+import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 
 type StrategyConfig = {
   // 매매 간격(%) 하나로 진입·추가·매도를 모두 관리한다.
@@ -68,6 +72,8 @@ type RoundRow = {
 type StrategyView = {
   strategy_id: string;
   label: string;
+  /** 이 전략이 속한 종목풀. */
+  pool: string;
   /** 이 전략의 운용 계좌 — 전략마다 따로 고른다. */
   account_id: string;
   ticker: string;
@@ -81,6 +87,10 @@ type View = {
   /** 운용 계좌 선택지 — 한국 종목을 담는 계좌. */
   accounts: AccountOptionBase[];
   slack_enabled: boolean;
+  /** 사고팔기를 켠 종목풀 — 종목풀 설정의 토글이 단일 소스다. */
+  pool_options: PoolLabelSource[];
+  /** 지금 보는 종목풀. 켜진 풀이 없으면 null. */
+  pool: string | null;
   strategies: StrategyView[];
 };
 
@@ -191,14 +201,16 @@ function RecentLowRow({ index }: { index: IndexStatus }) {
   );
 }
 
-/** 종목 입력 — 티커를 적고 [확인]으로 kor_etf 종목풀의 ETF 인지 확인한다(레버리지 설정과 같은 방식).
+/** 종목 입력 — 티커를 적고 [확인]으로 그 종목풀의 ETF 인지 확인한다(레버리지 설정과 같은 방식).
  *  확인된 티커만 `onChange` 로 올라가고, 글자를 고치면 다시 확인할 때까지 null 이다. */
 function EtfTickerInput({
+  pool,
   confirmedTicker,
   confirmedName,
   onChange,
   disabled,
 }: {
+  pool: string;
   confirmedTicker: string;
   confirmedName: string;
   onChange: (ticker: string | null, name: string) => void;
@@ -218,7 +230,7 @@ function EtfTickerInput({
     if (!raw) return;
     setChecking(true);
     try {
-      const resp = await fetch(`/api/strategy-trade/resolve?ticker=${encodeURIComponent(raw)}`, { cache: "no-store" });
+      const resp = await fetch(`/api/strategy-trade/resolve?pool=${encodeURIComponent(pool)}&ticker=${encodeURIComponent(raw)}`, { cache: "no-store" });
       const data = (await resp.json()) as { ticker?: string; name?: string; error?: string };
       if (!resp.ok || data.error || !data.ticker || !data.name) {
         onChange(null, "");
@@ -233,7 +245,7 @@ function EtfTickerInput({
     } finally {
       setChecking(false);
     }
-  }, [onChange, text, toast]);
+  }, [onChange, pool, text, toast]);
 
   const isConfirmed = text.trim().toUpperCase() === confirmedTicker.toUpperCase() && confirmedTicker !== "";
   return (
@@ -271,113 +283,268 @@ function EtfTickerInput({
   );
 }
 
-/** 전략 추가 — 종목·계좌·파라미터를 정해 새 전략 하나를 만든다. */
-function AddStrategyCard({
-  accounts,
+/** 설정 표의 한 행 — 전략 하나의 편집 초안. 숫자는 입력 중 상태를 담으려 문자열이다. */
+type DraftRow = {
+  key: string;
+  strategy_id: string | null;
+  ticker: string | null;
+  tickerName: string;
+  account_id: string;
+  pct: string;
+  qty: string;
+  rounds: string;
+};
+
+let draftKeySeq = 0;
+function nextDraftKey(): string {
+  draftKeySeq += 1;
+  return `row-${draftKeySeq}`;
+}
+
+function rowsFromStrategies(strategies: StrategyView[]): DraftRow[] {
+  return strategies.map((strategy) => ({
+    key: strategy.strategy_id,
+    strategy_id: strategy.strategy_id,
+    ticker: strategy.ticker,
+    tickerName: strategy.label,
+    account_id: strategy.account_id,
+    pct: String(strategy.config.trigger_pct),
+    qty: String(strategy.config.round_quantity),
+    rounds: String(strategy.config.rounds),
+  }));
+}
+
+/** 변경 비교용 — 입력 중 문자열을 저장 값 모양으로 맞춘다. */
+function comparableRow(row: DraftRow) {
+  return [row.strategy_id, row.ticker, row.account_id, Number(row.pct), Number(row.qty), Number(row.rounds)];
+}
+
+/** 상단 설정 카드 — 종목풀 셀렉트, 전략 설정 표, 저장 버튼 하나. */
+function PoolSettingsCard({
+  view,
+  pool,
+  onPoolChange,
   onSaved,
 }: {
-  accounts: AccountOptionBase[];
+  view: View;
+  pool: string;
+  onPoolChange: (pool: string) => void;
   onSaved: (next: View) => void;
 }) {
   const toast = useToast();
-  const [ticker, setTicker] = useState<string | null>(null);
-  const [tickerName, setTickerName] = useState("");
-  const [account, setAccount] = useState(accounts[0]?.account_id ?? "");
-  const [pct, setPct] = useState("5");
-  const [qty, setQty] = useState("");
-  const [rounds, setRounds] = useState("4");
+  const [rows, setRows] = useState<DraftRow[]>(() => rowsFromStrategies(view.strategies));
   const [saving, setSaving] = useState(false);
 
-  const add = useCallback(async () => {
-    const pctValue = Number(pct);
-    const qtyValue = Number(qty);
-    const roundsValue = Number(rounds);
-    if (!ticker) return void toast.error("종목 티커를 입력하고 확인하세요.");
-    if (!Number.isFinite(pctValue) || pctValue < PCT_MIN || pctValue > PCT_MAX) {
-      return void toast.error(`매매 간격은 ${PCT_MIN}~${PCT_MAX} 사이 숫자여야 합니다.`);
-    }
-    if (!Number.isInteger(qtyValue) || qtyValue < 1) return void toast.error("회차당 수량은 1 이상의 정수여야 합니다.");
-    if (!Number.isInteger(roundsValue) || roundsValue < 1 || roundsValue > 12) {
-      return void toast.error("회차 수는 1~12 사이 정수여야 합니다.");
+  // 서버가 최신 전략 목록을 돌려주면(저장·풀 전환) 초안도 그 값으로 맞춘다.
+  useEffect(() => {
+    setRows(rowsFromStrategies(view.strategies));
+  }, [view.strategies]);
+
+  const isDirty = JSON.stringify(rows.map(comparableRow)) !== JSON.stringify(rowsFromStrategies(view.strategies).map(comparableRow));
+  const closeTime = view.strategies[0]?.status.first_entry_close_time;
+
+  const updateRow = useCallback((key: string, patch: Partial<DraftRow>) => {
+    setRows((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+  }, []);
+
+  const addRow = useCallback(() => {
+    setRows((prev) => [
+      ...prev,
+      {
+        key: nextDraftKey(),
+        strategy_id: null,
+        ticker: null,
+        tickerName: "",
+        account_id: view.accounts[0]?.account_id ?? "",
+        pct: "5",
+        qty: "",
+        rounds: "4",
+      },
+    ]);
+  }, [view.accounts]);
+
+  const handlePoolChange = useCallback(
+    (next: string) => {
+      if (isDirty && !window.confirm("저장하지 않은 변경이 사라집니다. 종목풀을 바꿀까요?")) return;
+      onPoolChange(next);
+    },
+    [isDirty, onPoolChange],
+  );
+
+  const save = useCallback(async () => {
+    const strategies = [];
+    for (const row of rows) {
+      const label = row.tickerName || row.ticker || "새 전략";
+      const pct = Number(row.pct);
+      const qty = Number(row.qty);
+      const rounds = Number(row.rounds);
+      if (!row.ticker) return void toast.error(`${label}: 종목 티커를 입력하고 확인하세요.`);
+      if (!row.account_id) return void toast.error(`${label}: 계좌를 고르세요.`);
+      if (!Number.isFinite(pct) || pct < PCT_MIN || pct > PCT_MAX) {
+        return void toast.error(`${label}: 매매 간격은 ${PCT_MIN}~${PCT_MAX} 사이 숫자여야 합니다.`);
+      }
+      if (!Number.isInteger(qty) || qty < 1) return void toast.error(`${label}: 회차당 수량은 1 이상의 정수여야 합니다.`);
+      if (!Number.isInteger(rounds) || rounds < 1 || rounds > 12) {
+        return void toast.error(`${label}: 회차 수는 1~12 사이 정수여야 합니다.`);
+      }
+      strategies.push({
+        ...(row.strategy_id ? { strategy_id: row.strategy_id } : {}),
+        account_id: row.account_id,
+        ticker: row.ticker,
+        trigger_pct: pct,
+        round_quantity: qty,
+        rounds,
+      });
     }
     setSaving(true);
     try {
       const resp = await fetch("/api/strategy-trade", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          add_strategy: { account_id: account, ticker, trigger_pct: pctValue, round_quantity: qtyValue, rounds: roundsValue },
-        }),
+        body: JSON.stringify({ pool, strategies }),
       });
       const payload = await resp.json();
-      if (!resp.ok) throw new Error(payload?.error ?? "전략을 추가하지 못했습니다.");
+      if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
       onSaved(payload as View);
-      setTicker(null);
-      setTickerName("");
-      setQty("");
-      toast.success("전략을 추가했습니다.");
+      toast.success("전략 설정을 저장했습니다.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "전략을 추가하지 못했습니다.");
+      toast.error(error instanceof Error ? error.message : "설정을 저장하지 못했습니다.");
     } finally {
       setSaving(false);
     }
-  }, [account, onSaved, pct, qty, rounds, ticker, toast]);
+  }, [onSaved, pool, rows, toast]);
 
   return (
-    <div className="card appCard" style={cardStyle}>
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", fontSize: "var(--fs-sm)" }}>
-        <span style={{ fontWeight: 800, fontSize: "var(--fs-base)" }}>전략 추가</span>
-        <EtfTickerInput
-          key={ticker ?? "empty"}
-          confirmedTicker={ticker ?? ""}
-          confirmedName={tickerName}
-          onChange={(next, name) => {
-            setTicker(next);
-            setTickerName(name);
-          }}
-          disabled={saving}
-        />
-        <AccountSelect
-          accounts={accounts}
-          value={account}
-          onChange={setAccount}
-          label="계좌"
-          disabled={saving}
-          style={{ minWidth: 220 }}
-          labelStyle={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-        />
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          매매 간격
-          <input type="number" step="0.1" style={pctInputStyle} value={pct} disabled={saving} onChange={(e) => setPct(e.target.value)} />%
-        </span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          회차당 수량
-          <input type="number" step="1" min={1} style={pctInputStyle} value={qty} disabled={saving} onChange={(e) => setQty(e.target.value)} />주
-        </span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          회차 수
-          <input type="number" step="1" min={1} max={12} style={pctInputStyle} value={rounds} disabled={saving} onChange={(e) => setRounds(e.target.value)} />회
-        </span>
-        <button type="button" className="btn btn-sm btn-dark" disabled={saving} onClick={() => void add()}>
-          {saving ? "추가 중…" : "추가"}
-        </button>
+    <section className="appSection">
+      <div className="card appCard">
+        <div className="card-body appCardBodyTight">
+          <div className="appMainHeader">
+            <div className="appMainHeaderLeft">
+              <label className="appLabeledField">
+                <span className="appLabeledFieldLabel">종목풀</span>
+                <select
+                  className="form-select form-select-sm"
+                  value={pool}
+                  disabled={saving}
+                  onChange={(event) => handlePoolChange(event.target.value)}
+                >
+                  {view.pool_options.map((option) => (
+                    <option key={option.ticker_type} value={option.ticker_type}>
+                      {formatPoolLabel(option)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
+                1호 진입 전일 종가 −간격%{closeTime ? `(미도달 시 ${closeTime} 현재가)` : ""} · 추가 진입 마지막 매수가
+                −간격% · 매도 진입가 +간격%
+              </span>
+            </div>
+            <div className="appMainHeaderRight">
+              <UnsavedChangesBadge show={isDirty} />
+              <button
+                type="button"
+                className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                disabled={saving || !isDirty}
+                onClick={() => void save()}
+              >
+                <span>{saving ? "저장 중…" : "저장"}</span>
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
+            {rows.map((row) => (
+              <div
+                key={row.key}
+                style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", fontSize: "var(--fs-sm)" }}
+              >
+                <EtfTickerInput
+                  pool={pool}
+                  confirmedTicker={row.ticker ?? ""}
+                  confirmedName={row.tickerName}
+                  onChange={(ticker, name) => updateRow(row.key, { ticker, tickerName: name })}
+                  disabled={saving}
+                />
+                <AccountSelect
+                  accounts={view.accounts}
+                  value={row.account_id}
+                  onChange={(account_id) => updateRow(row.key, { account_id })}
+                  label="계좌"
+                  disabled={saving}
+                  style={{ minWidth: 220 }}
+                  labelStyle={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+                />
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  매매 간격
+                  <input
+                    type="number"
+                    step="0.1"
+                    min={PCT_MIN}
+                    max={PCT_MAX}
+                    style={pctInputStyle}
+                    value={row.pct}
+                    disabled={saving}
+                    onChange={(event) => updateRow(row.key, { pct: event.target.value })}
+                  />
+                  %
+                </span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  회차당 수량
+                  <input
+                    type="number"
+                    step="1"
+                    min={1}
+                    style={pctInputStyle}
+                    value={row.qty}
+                    disabled={saving}
+                    onChange={(event) => updateRow(row.key, { qty: event.target.value })}
+                  />
+                  주
+                </span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  회차 수
+                  <input
+                    type="number"
+                    step="1"
+                    min={1}
+                    max={12}
+                    style={pctInputStyle}
+                    value={row.rounds}
+                    disabled={saving}
+                    onChange={(event) => updateRow(row.key, { rounds: event.target.value })}
+                  />
+                  회
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-danger"
+                  disabled={saving}
+                  onClick={() => setRows((prev) => prev.filter((item) => item.key !== row.key))}
+                >
+                  삭제
+                </button>
+              </div>
+            ))}
+            <div>
+              <button type="button" className="btn btn-sm btn-outline-secondary" disabled={saving} onClick={addRow}>
+                + 전략 추가
+              </button>
+              <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginLeft: 10 }}>
+                삭제·추가는 저장해야 반영됩니다. 전략을 지우면 그 알림 기록도 함께 지워집니다.
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }
 
-/** 전략 하나(규칙 편집 + 현재 판단 표) — 모든 전략이 같은 구성을 쓴다. */
-function StrategySection({
-  view,
-  accounts,
-  onSaved,
-}: {
-  view: StrategyView;
-  accounts: AccountOptionBase[];
-  onSaved: (next: View) => void;
-}) {
-  const toast = useToast();
+/** 전략 하나의 운용 현황(현재 판단 + 회차 표) — 설정은 상단 카드에서 편집한다. */
+function StrategySection({ view, accounts }: { view: StrategyView; accounts: AccountOptionBase[] }) {
   const { config, status, index } = view;
+  const account = accounts.find((item) => item.account_id === view.account_id);
   // 기준선이 회차 사이에 못 들어가는 경우 — 마지막 회차의 지수 환산에서 저점까지 남은 하락률.
   const lastLeveledRound = [...view.rounds].reverse().find((row) => row.buy_index != null) ?? null;
   const nextRow = view.rounds.find((row) => row.is_next) ?? null;
@@ -388,177 +555,15 @@ function StrategySection({
           pct: Number(((index.recent_low / lastLeveledRound.buy_index - 1) * 100).toFixed(2)),
         }
       : null;
-  const [draft, setDraft] = useState(String(config.trigger_pct));
-  const [qtyDraft, setQtyDraft] = useState(String(config.round_quantity));
-  const [roundsDraft, setRoundsDraft] = useState(String(config.rounds));
-  const [accountDraft, setAccountDraft] = useState(view.account_id);
-  // 확인된 티커 — 글자를 고치면 다시 확인할 때까지 null 이고, 그동안은 저장할 수 없다.
-  const [tickerDraft, setTickerDraft] = useState<string | null>(view.ticker);
-  const [tickerNameDraft, setTickerNameDraft] = useState(view.label);
-  const [deleting, setDeleting] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  // 서버가 최신 값을 돌려주면(다른 전략 저장 포함) 초안도 그 값으로 동기화한다.
-  useEffect(() => {
-    setDraft(String(config.trigger_pct));
-    setQtyDraft(String(config.round_quantity));
-    setRoundsDraft(String(config.rounds));
-    setAccountDraft(view.account_id);
-    setTickerDraft(view.ticker);
-    setTickerNameDraft(view.label);
-  }, [config.trigger_pct, config.round_quantity, config.rounds, view.account_id, view.ticker, view.label]);
-
-  const isDraftDirty =
-    Number(draft) !== config.trigger_pct ||
-    Number(qtyDraft) !== config.round_quantity ||
-    Number(roundsDraft) !== config.rounds ||
-    accountDraft !== view.account_id ||
-    tickerDraft !== view.ticker;
-
-  const saveConfig = useCallback(async () => {
-    const value = Number(draft);
-    if (!Number.isFinite(value) || value < PCT_MIN || value > PCT_MAX) {
-      toast.error(`매매 간격은 ${PCT_MIN}~${PCT_MAX} 사이 숫자여야 합니다.`);
-      return;
-    }
-    const qty = Number(qtyDraft);
-    if (!Number.isInteger(qty) || qty < 1) {
-      toast.error("회차당 수량은 1 이상의 정수여야 합니다.");
-      return;
-    }
-    const rounds = Number(roundsDraft);
-    if (!Number.isInteger(rounds) || rounds < 1 || rounds > 12) {
-      toast.error("회차 수는 1~12 사이 정수여야 합니다.");
-      return;
-    }
-    if (!tickerDraft) {
-      toast.error("종목 티커를 입력하고 확인하세요.");
-      return;
-    }
-    const parsed = { account_id: accountDraft, ticker: tickerDraft, trigger_pct: value, round_quantity: qty, rounds };
-    setSaving(true);
-    try {
-      const resp = await fetch("/api/strategy-trade", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ strategy_id: view.strategy_id, config: parsed }),
-      });
-      const payload = await resp.json();
-      if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
-      onSaved(payload as View);
-      toast.success(`${view.label} 전략 파라미터를 저장했습니다.`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "설정을 저장하지 못했습니다.");
-    } finally {
-      setSaving(false);
-    }
-  }, [accountDraft, tickerDraft, draft, qtyDraft, roundsDraft, onSaved, toast, view.label, view.strategy_id]);
-
-  const deleteStrategy = useCallback(async () => {
-    if (!window.confirm(`"${view.label}" 전략을 삭제할까요? (이 전략의 알림 기록도 함께 지워집니다)`)) return;
-    setDeleting(true);
-    try {
-      const resp = await fetch("/api/strategy-trade", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ delete_strategy: view.strategy_id }),
-      });
-      const payload = await resp.json();
-      if (!resp.ok) throw new Error(payload?.error ?? "전략을 삭제하지 못했습니다.");
-      onSaved(payload as View);
-      toast.success(`${view.label} 전략을 삭제했습니다.`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "전략을 삭제하지 못했습니다.");
-    } finally {
-      setDeleting(false);
-    }
-  }, [onSaved, toast, view.label, view.strategy_id]);
 
   return (
     <div className="card appCard" style={cardStyle}>
-      {/* 전략 제목 + 규칙 편집 */}
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", fontSize: "var(--fs-sm)" }}>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline", fontSize: "var(--fs-sm)" }}>
         <span style={{ fontWeight: 800, fontSize: "var(--fs-base)" }}>{view.label}</span>
-        <EtfTickerInput
-          confirmedTicker={tickerDraft ?? ""}
-          confirmedName={tickerNameDraft}
-          onChange={(next, name) => {
-            setTickerDraft(next);
-            setTickerNameDraft(name);
-          }}
-          disabled={saving || deleting}
-        />
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          매매 간격
-          <input
-            type="number"
-            step="0.1"
-            min={PCT_MIN}
-            max={PCT_MAX}
-            style={pctInputStyle}
-            value={draft}
-            disabled={saving}
-            onChange={(event) => setDraft(event.target.value)}
-          />
-          %
-        </span>
-        <AccountSelect
-          accounts={accounts}
-          value={accountDraft}
-          onChange={setAccountDraft}
-          label="계좌"
-          disabled={saving}
-          style={{ minWidth: 220 }}
-          labelStyle={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-        />
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          회차당 수량
-          <input
-            type="number"
-            step="1"
-            min={1}
-            style={pctInputStyle}
-            value={qtyDraft}
-            disabled={saving}
-            onChange={(event) => setQtyDraft(event.target.value)}
-          />
-          주
-        </span>
         <span style={{ color: "var(--text-muted)" }}>
-          1호 진입 전일 종가 −{config.trigger_pct}%(미도달 시 {status.first_entry_close_time} 현재가) · 추가
-          진입 마지막 매수가 −{config.trigger_pct}% ·
-          매도 진입가 +{config.trigger_pct}%
+          {view.ticker} · {account ? formatAccountLabel(account) : view.account_id} · 간격 {config.trigger_pct}% · 회차당{" "}
+          {formatNumber(config.round_quantity)}주 · {config.rounds}회
         </span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          회차 수
-          <input
-            type="number"
-            step="1"
-            min={1}
-            max={12}
-            style={pctInputStyle}
-            value={roundsDraft}
-            disabled={saving}
-            onChange={(event) => setRoundsDraft(event.target.value)}
-          />
-          회
-        </span>
-        <button
-          type="button"
-          className="btn btn-sm btn-dark"
-          disabled={saving || !isDraftDirty || tickerDraft === null}
-          onClick={() => void saveConfig()}
-        >
-          {saving ? "저장 중…" : "저장"}
-        </button>
-        <button
-          type="button"
-          className="btn btn-sm btn-outline-danger"
-          disabled={saving || deleting}
-          onClick={() => void deleteStrategy()}
-        >
-          {deleting ? "삭제 중…" : "삭제"}
-        </button>
       </div>
 
       {/* 현재 판단 요약 */}
@@ -692,22 +697,28 @@ export function StrategyTradeClient() {
   const [slackSaving, setSlackSaving] = useState(false);
   const [slackTesting, setSlackTesting] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const resp = await fetch("/api/strategy-trade", { cache: "no-store" });
-      const payload = await resp.json();
-      if (!resp.ok) throw new Error(payload?.error ?? "운용 현황을 불러오지 못했습니다.");
-      setView(payload as View);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "운용 현황을 불러오지 못했습니다.");
-    } finally {
-      setLoading(false);
-    }
-  }, [toast]);
+  const load = useCallback(
+    async (pool: string | null) => {
+      setLoading(true);
+      try {
+        const query = pool ? `?pool=${encodeURIComponent(pool)}` : "";
+        const resp = await fetch(`/api/strategy-trade${query}`, { cache: "no-store" });
+        const payload = await resp.json();
+        if (!resp.ok) throw new Error(payload?.error ?? "운용 현황을 불러오지 못했습니다.");
+        setView(payload as View);
+        writeRememberedTickerType("strategy-trade", (payload as View).pool);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "운용 현황을 불러오지 못했습니다.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [toast],
+  );
 
   useEffect(() => {
-    void load();
+    // 마지막으로 고른 풀은 브라우저에 기억한다(다른 전략 화면들과 같은 공용 키 방식).
+    void load(readRememberedTickerType("strategy-trade"));
   }, [load]);
 
   const toggleSlack = useCallback(
@@ -717,11 +728,12 @@ export function StrategyTradeClient() {
         const resp = await fetch("/api/strategy-trade", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slack_enabled: enabled }),
+          body: JSON.stringify({ slack_enabled: enabled, pool: view?.pool }),
         });
         const payload = await resp.json();
         if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
-        setView(payload as View);
+        // 스위치만 반영한다 — 전략 초안(저장 전 입력)이 서버 값으로 덮이지 않게.
+        setView((prev) => (prev ? { ...prev, slack_enabled: (payload as View).slack_enabled } : prev));
         toast.success(enabled ? "슬랙 알림을 켰습니다." : "슬랙 알림을 껐습니다.");
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "설정을 저장하지 못했습니다.");
@@ -729,7 +741,7 @@ export function StrategyTradeClient() {
         setSlackSaving(false);
       }
     },
-    [toast],
+    [toast, view?.pool],
   );
 
   const testSlack = useCallback(async () => {
@@ -749,30 +761,41 @@ export function StrategyTradeClient() {
 
   if (loading && !view) {
     return (
-      <PageFrame title="전략 사고팔기">
+      <PageFrame title="전략 사고팔기" fullWidth>
         <div style={{ color: "var(--text-muted)", padding: 20 }}>불러오는 중…</div>
       </PageFrame>
     );
   }
   if (!view) {
     return (
-      <PageFrame title="전략 사고팔기">
+      <PageFrame title="전략 사고팔기" fullWidth>
         <div style={{ color: "var(--text-muted)", padding: 20 }}>데이터가 없습니다.</div>
+      </PageFrame>
+    );
+  }
+  if (view.pool === null) {
+    return (
+      <PageFrame title="전략 사고팔기" fullWidth>
+        <div style={{ color: "var(--text-muted)", padding: 20 }}>
+          사고팔기를 켠 종목풀이 없습니다 — 종목풀 설정에서 한국 ETF 종목풀의 「사고팔기」를 켜세요.
+        </div>
       </PageFrame>
     );
   }
 
   return (
-    <PageFrame title="전략 사고팔기">
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* 전략 섹션 — DB 에 저장된 순서, 좌우 2열(좁은 화면은 1열) */}
-        <div className="strategyTradeGrid">
-          {view.strategies.map((strategy) => (
-            <StrategySection key={strategy.strategy_id} view={strategy} accounts={view.accounts} onSaved={setView} />
-          ))}
-        </div>
+    <PageFrame title="전략 사고팔기" fullWidth>
+      <div className="appPageStack">
+        <PoolSettingsCard view={view} pool={view.pool} onPoolChange={(next) => void load(next)} onSaved={setView} />
 
-        <AddStrategyCard accounts={view.accounts} onSaved={setView} />
+        {/* 운용 현황 — DB 에 저장된 순서, 좌우 2열(좁은 화면은 1열) */}
+        <section className="appSection">
+          <div className="strategyTradeGrid">
+            {view.strategies.map((strategy) => (
+              <StrategySection key={strategy.strategy_id} view={strategy} accounts={view.accounts} />
+            ))}
+          </div>
+        </section>
 
         {/* 슬랙 알림 (전역 스위치) */}
         <div className="card appCard" style={cardStyle}>

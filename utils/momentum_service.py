@@ -154,33 +154,10 @@ def _pool_top_n_hold(pool: str) -> int:
 
 
 def pool_options() -> list[dict[str, Any]]:
-    """풀 셀렉트 옵션 — 종목풀 설정(DB)의 이름·아이콘·순서를 단일 소스로 쓴다.
+    """풀 셀렉트 옵션 — 이 전략을 켠 종목풀(종목풀 설정 DB 의 이름·아이콘·순서)."""
+    from utils.pool_strategy_use import pool_options as build_pool_options
 
-    화면은 이 목록을 공용 `formatPoolLabel`(pools-rank 와 같은 표준 표기)에 그대로
-    넣는다. 반환 순서 = 종목풀 order 순.
-    """
-    from utils.settings_loader import get_ticker_type_settings
-
-    options: list[dict[str, Any]] = []
-    for pool in available_pools():
-        try:
-            settings = get_ticker_type_settings(pool) or {}
-        except Exception:
-            settings = {}
-        options.append(
-            {
-                "ticker_type": pool,
-                "name": str(settings.get("name") or "").strip() or pool,
-                "icon": str(settings.get("icon") or "").strip(),
-                "order": settings.get("order"),
-                # 화면이 국가별 컬럼(마켓·시가총액)과 통화 표기를 결정하는 데 쓴다.
-                "country_code": str(settings.get("country_code") or "").strip().lower(),
-                "currency": str(settings.get("currency") or "").strip().upper(),
-                # 풀 성격(stock/etf) — 섹터·업종 컬럼 노출 판단용. 미설정이면 빈 값.
-                "pool_kind": str(settings.get("pool_kind") or "").strip().lower(),
-            }
-        )
-    return sorted(options, key=lambda item: (item["order"] is None, item["order"]))
+    return build_pool_options(available_pools())
 
 
 # 풀 설정 문서의 대문자 키 ↔ 전략 설정의 소문자 키. 저장 위치는 `pool_settings` 문서 하나다

@@ -103,31 +103,10 @@ def min_value_mult_options(country_code: str | None) -> tuple[float | None, ...]
 
 
 def pool_options() -> list[dict[str, Any]]:
-    """풀 셀렉트 옵션 — 종목풀 설정(DB)의 이름·아이콘·순서를 단일 소스로 쓴다.
+    """풀 셀렉트 옵션 — 이 전략을 켠 종목풀(종목풀 설정 DB 의 이름·아이콘·순서)."""
+    from utils.pool_strategy_use import pool_options as build_pool_options
 
-    화면은 이 목록을 공용 `formatPoolLabel`(다른 화면과 같은 표준 표기)에 그대로 넣는다.
-    `order` 를 빼면 표기에서 번호가 조용히 사라지므로 반드시 함께 담는다.
-    """
-    from utils.settings_loader import get_ticker_type_settings
-
-    options: list[dict[str, Any]] = []
-    for pool in available_pools():
-        try:
-            settings = get_ticker_type_settings(pool) or {}
-        except Exception:
-            settings = {}
-        options.append(
-            {
-                "ticker_type": pool,
-                "name": str(settings.get("name") or "").strip() or pool,
-                "icon": str(settings.get("icon") or "").strip(),
-                "order": settings.get("order"),
-                "country_code": str(settings.get("country_code") or "").strip().lower(),
-                "currency": str(settings.get("currency") or "").strip().upper(),
-                "pool_kind": str(settings.get("pool_kind") or "").strip(),
-            }
-        )
-    return options
+    return build_pool_options(available_pools())
 
 
 def load_universe(pool: str) -> list[dict[str, str]]:

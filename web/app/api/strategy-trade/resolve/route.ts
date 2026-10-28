@@ -8,10 +8,13 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     const ticker = request.nextUrl.searchParams.get("ticker");
-    if (!ticker) {
-      return jsonNoStore({ error: "ticker 파라미터가 필요합니다." }, { status: 400 });
+    const pool = request.nextUrl.searchParams.get("pool");
+    if (!ticker || !pool) {
+      return jsonNoStore({ error: "pool·ticker 파라미터가 필요합니다." }, { status: 400 });
     }
-    const data = await fetchFastApiJson(`/internal/strategy-trade/resolve?ticker=${encodeURIComponent(ticker)}`);
+    const data = await fetchFastApiJson(
+      `/internal/strategy-trade/resolve?pool=${encodeURIComponent(pool)}&ticker=${encodeURIComponent(ticker)}`,
+    );
     return jsonNoStore(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : "티커 정보를 조회하지 못했습니다.";

@@ -17,6 +17,7 @@ from utils.cash_model import currency_for_country
 from utils.logger import get_app_logger
 from utils.mix_sleeve import STRATEGY_LABELS, SleeveSpec
 from utils.perf_metrics import max_drawdown_window
+from utils.pool_strategy_use import pool_options
 from utils.stock_memo_store import attach_stock_memos
 from utils.trade_stats import summarize_trades
 
@@ -41,31 +42,6 @@ def _all_active_pools() -> list[str]:
     from utils.settings_loader import list_available_ticker_types
 
     return list(list_available_ticker_types())
-
-
-def _pool_options(pools: list[str]) -> list[dict[str, Any]]:
-    """화면 셀렉트용 풀 정보 — 공용 formatPoolLabel 이 쓰는 필드(ticker_type·name·icon·order)."""
-    from utils.settings_loader import get_ticker_type_settings
-
-    options = []
-    for pool in pools:
-        try:
-            settings = get_ticker_type_settings(pool) or {}
-        except Exception:
-            settings = {}
-        options.append(
-            {
-                "ticker_type": pool,
-                "name": str(settings.get("name") or pool),
-                "icon": str(settings.get("icon") or ""),
-                "order": settings.get("order"),
-                # 화면이 계좌 국가에 맞는 풀만 뿌리는 데 쓴다.
-                "country_code": str(settings.get("country_code") or "").strip().lower(),
-                "pool_kind": str(settings.get("pool_kind") or "").strip().lower(),
-            }
-        )
-    options.sort(key=lambda o: (o["order"] is None, o["order"]))
-    return options
 
 
 # 백테스트 기간 선택지 — 신고가 화면과 동일한 목록 (상한 60개월 = 신고가 엔진의 최대).
@@ -114,7 +90,7 @@ def mix_accounts() -> list[dict[str, Any]]:
     from utils.account_settings_store import mix_sleeves_of
     from utils.settings_loader import get_account_settings, list_available_accounts
 
-    pool_names = {option["ticker_type"]: option for option in _pool_options(_all_active_pools())}
+    pool_names = {option["ticker_type"]: option for option in pool_options(_all_active_pools())}
 
     accounts: list[dict[str, Any]] = []
     for account_id in list_available_accounts():
@@ -215,7 +191,7 @@ def mix_meta() -> dict[str, Any]:
         # 조합 셀렉트 선택지 — 이 화면에서 전략·종목풀을 고른다(계좌 설정은 사용 여부만).
         "strategy_options": [{"value": key, "label": STRATEGY_LABELS[key]} for key in STRATEGY_OPTIONS],
         # 풀은 계좌 국가에 맞는 것만 고를 수 있어야 해서 국가 코드를 함께 준다.
-        "pool_options": _pool_options(_all_active_pools()),
+        "pool_options": pool_options(_all_active_pools()),
         # 조합별 저장 설정 요약 — 화면이 슬리브 오른쪽에 읽기 전용으로 보여준다.
         "settings_summaries": _settings_summaries(),
         # 기본 선택 — 목록의 첫 계좌. 화면이 마지막 선택을 로컬스토리지에 기억한다.
