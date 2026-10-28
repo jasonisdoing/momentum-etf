@@ -28,8 +28,11 @@ def main() -> int:
         label = row.get("name") or row["account_id"]
         if "error" in row:
             print(f"[strategy_mix_notify] {label} 실패 — {row['error']}")
-        elif row.get("changed"):
-            print(f"[strategy_mix_notify] {label} 발송 — 신규·증가 {row['new_or_grown']}건 (전체 {row['items']}건)")
+        elif row.get("changed") or row.get("confirmed"):
+            print(
+                f"[strategy_mix_notify] {label} 발송 — 신규·증가 {row['new_or_grown']}건 · "
+                f"체결확인 {row['confirmed']}건 (전체 {row['items']}건)"
+            )
         else:
             print(f"[strategy_mix_notify] {label} 변화 없음 ({row['items']}건 유지)")
     if not result["targets"]:

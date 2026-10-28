@@ -28,6 +28,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from utils.order_confirm import build_confirm_line, pop_filled
 from utils.strategy_trade_service import load_settings, load_strategy_trade_view
 
 KST = ZoneInfo("Asia/Seoul")
@@ -94,34 +95,31 @@ def _index_text(index: dict[str, Any]) -> str:
     return f"{base} ({change:+.2f}%)" if change is not None else base
 
 
-def build_confirm_line(pending: dict[str, Any], index_text: str) -> str:
-    """확인 한 줄 — 요청한 주문이 실제로 체결됐을 때 한 번만 보낸다.
-
-    조치가 이미 끝난 뒤라 `@channel` 은 붙이지 않는다.
-    """
-    word = "매도 확인" if pending["action"] == "sell" else "매수 확인"
-    asked = pending.get("index_text")
-    tail = f" · 요청 시 {asked} → 지금 {index_text}" if asked else f" · {index_text}"
-    return f"✅ *{pending['round']}호 {pending['name']} {word}*{tail}"
-
-
 def _held_counts(view: dict[str, Any]) -> dict[str, int]:
     """전략별 보유 회차 수 — 전략마다 종목이 하나라 체결 확인은 회차 수 증감으로 본다."""
     return {strategy["strategy_id"]: int(strategy["status"]["held_count"]) for strategy in view["strategies"]}
 
 
-def _confirm_fill(pending: dict[str, Any], held_count: int) -> dict[str, Any] | None:
-    """대기 중인 주문이 체결됐는지 판정한다. 체결이면 메시지에 덮어쓸 값, 아니면 None.
+def _round_filled(pending: dict[str, Any], held_count: int) -> bool:
+    """대기 중인 주문이 체결됐는지 판정한다.
 
     매수 N호는 **보유 회차 수가 N 에 닿았는지**, 매도 N호는 **N 미만으로 줄었는지**로
     본다 — 같은 종목을 회차로 나눠 담으므로(마지막 회차부터 팔림) 회차 수가 곧 상태다.
     """
     round_no = pending.get("round")
     if not isinstance(round_no, int):
-        return None
+        return False
     if pending.get("action") != "buy":
-        return {} if held_count < round_no else None
-    return {} if held_count >= round_no else None
+        return held_count < round_no
+    return held_count >= round_no
+
+
+def _confirm_line(pending: dict[str, Any], index: dict[str, Any] | None) -> str:
+    """`✅ 2호 KODEX 200 매수 확인 · 요청 시 … → 지금 …`."""
+    now_text = _index_text(index) if index else "-"
+    asked = pending.get("index_text")
+    detail = f"요청 시 {asked} → 지금 {now_text}" if asked else now_text
+    return build_confirm_line(f"{pending['round']}호 {pending['name']}", pending["action"], detail)
 
 
 def _reach_text(trigger: dict[str, Any]) -> str:
@@ -317,15 +315,9 @@ def notify_strategy_trade(*, force: bool = False) -> dict[str, Any]:
     #    바로 그 트리거가 사라지므로, 신호가 있을 때만 검사하면 확인은 영영 나가지 못한다.
     held_counts = _held_counts(view)
     index_by_strategy = {strategy["strategy_id"]: strategy["index"] for strategy in view["strategies"]}
-    confirmed: list[dict[str, Any]] = []
-    for key, pending in list(sent_log.items()):
-        strategy_id = str(pending.get("strategy_id") or key.split(":", 1)[0])
-        filled = _confirm_fill(pending, held_counts.get(strategy_id, 0))
-        if filled is None:
-            continue
-        index = index_by_strategy.get(strategy_id)
-        confirmed.append({**pending, **filled, "now_text": _index_text(index) if index else "-"})
-        sent_log.pop(key, None)
+    confirmed = pop_filled(
+        sent_log, lambda pending: _round_filled(pending, held_counts.get(str(pending.get("strategy_id")), 0))
+    )
 
     # ② 남은 신호 — 처음이면 전체 메시지, 이미 보냈으면 한 시간 간격으로 한 줄 재알림.
     fresh: list[dict[str, Any]] = []
@@ -339,7 +331,7 @@ def notify_strategy_trade(*, force: bool = False) -> dict[str, Any]:
 
     lines: list[str] = []
     for pending in confirmed:
-        lines.append(build_confirm_line(pending, pending["now_text"]))
+        lines.append(_confirm_line(pending, index_by_strategy.get(str(pending.get("strategy_id")))))
     if fresh:
         lines.append(build_message(view, fresh))
     else:
