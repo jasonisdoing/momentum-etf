@@ -9,6 +9,7 @@ import { readRememberedTickerType, writeRememberedTickerType } from "../componen
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
+import { TradeBacktestSection } from "./TradeBacktestSection";
 
 type StrategyConfig = {
   // 매매 간격(%) 하나로 진입·추가·매도를 모두 관리한다.
@@ -89,6 +90,8 @@ type View = {
   slack_enabled: boolean;
   /** 사고팔기를 켠 종목풀 — 종목풀 설정의 토글이 단일 소스다. */
   pool_options: PoolLabelSource[];
+  /** 백테스트 기간 선택지 — 백엔드가 단일 소스다. */
+  month_options: number[];
   /** 지금 보는 종목풀. 켜진 풀이 없으면 null. */
   pool: string | null;
   strategies: StrategyView[];
@@ -325,11 +328,14 @@ function PoolSettingsCard({
   pool,
   onPoolChange,
   onSaved,
+  onDirtyChange,
 }: {
   view: View;
   pool: string;
   onPoolChange: (pool: string) => void;
   onSaved: (next: View) => void;
+  /** 저장 안 한 변경이 생기거나 사라질 때 알린다 — 백테스트는 저장된 설정으로 돌기 때문이다. */
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const toast = useToast();
   const [rows, setRows] = useState<DraftRow[]>(() => rowsFromStrategies(view.strategies));
@@ -349,7 +355,9 @@ function PoolSettingsCard({
   const isDirty =
     slackEnabled !== view.slack_enabled ||
     JSON.stringify(rows.map(comparableRow)) !== JSON.stringify(rowsFromStrategies(view.strategies).map(comparableRow));
-  const closeTime = view.strategies[0]?.status.first_entry_close_time;
+  useEffect(() => {
+    onDirtyChange(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   const updateRow = useCallback((key: string, patch: Partial<DraftRow>) => {
     setRows((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)));
@@ -485,13 +493,12 @@ function PoolSettingsCard({
                   </button>
                 </span>
               </label>
-              <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
-                1호 진입 전일 종가 −간격%{closeTime ? `(미도달 시 ${closeTime} 현재가)` : ""} · 추가 진입 마지막 매수가
-                −간격% · 매도 진입가 +간격%
-              </span>
             </div>
             <div className="appMainHeaderRight">
               <UnsavedChangesBadge show={isDirty} />
+              <button type="button" className="btn btn-sm btn-outline-secondary" disabled={saving} onClick={addRow}>
+                + 전략 추가
+              </button>
               <button
                 type="button"
                 className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
@@ -576,14 +583,6 @@ function PoolSettingsCard({
                 </button>
               </div>
             ))}
-            <div>
-              <button type="button" className="btn btn-sm btn-outline-secondary" disabled={saving} onClick={addRow}>
-                + 전략 추가
-              </button>
-              <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginLeft: 10 }}>
-                삭제·추가는 저장해야 반영됩니다. 전략을 지우면 그 알림 기록도 함께 지워집니다.
-              </span>
-            </div>
           </div>
         </div>
       </div>
@@ -744,6 +743,7 @@ export function StrategyTradeClient() {
   const toast = useToast();
   const [view, setView] = useState<View | null>(null);
   const [loading, setLoading] = useState(true);
+  const [dirty, setDirty] = useState(false);
 
   const load = useCallback(
     async (pool: string | null) => {
@@ -796,7 +796,13 @@ export function StrategyTradeClient() {
   return (
     <PageFrame title="전략 사고팔기" fullWidth>
       <div className="appPageStack">
-        <PoolSettingsCard view={view} pool={view.pool} onPoolChange={(next) => void load(next)} onSaved={setView} />
+        <PoolSettingsCard
+          view={view}
+          pool={view.pool}
+          onPoolChange={(next) => void load(next)}
+          onSaved={setView}
+          onDirtyChange={setDirty}
+        />
 
         {/* 운용 현황 — DB 에 저장된 순서, 좌우 2열(좁은 화면은 1열) */}
         <section className="appSection">
@@ -806,6 +812,20 @@ export function StrategyTradeClient() {
             ))}
           </div>
         </section>
+
+        {/* 백테스트 — 설정이나 풀이 바뀌면 결과가 어긋나므로 다시 마운트해 비운다. */}
+        <TradeBacktestSection
+          key={`${view.pool}:${view.strategies.map((s) => `${s.strategy_id}/${s.ticker}/${s.config.trigger_pct}/${s.config.round_quantity}/${s.config.rounds}`).join(",")}`}
+          pool={view.pool}
+          monthOptions={view.month_options}
+          blockedReason={
+            dirty
+              ? "저장하지 않은 변경이 있습니다 — 저장한 뒤 실행하세요."
+              : view.strategies.length === 0
+                ? "이 종목풀에 전략이 없습니다."
+                : null
+          }
+        />
       </div>
     </PageFrame>
   );

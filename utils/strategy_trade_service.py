@@ -570,6 +570,7 @@ def load_strategy_trade_view(pool: str | None) -> dict[str, Any]:
     ``pool`` 이 None 이면 켜진 풀 중 첫 번째를 보여준다(다른 전략 화면과 같다). 켜진 풀이 없으면
     ``pool`` 은 None, 전략은 빈 목록이다.
     """
+    from utils.pool_signal_backtest_service import get_month_options
     from utils.pool_strategy_use import STRATEGY_TRADE, pool_options, pools_using
 
     settings = load_settings()
@@ -583,5 +584,6 @@ def load_strategy_trade_view(pool: str | None) -> dict[str, Any]:
         "slack_enabled": settings["slack_enabled"],
         "pool_options": pool_options(enabled),
         "pool": selected,
+        "month_options": get_month_options(),
         "strategies": _build_views(in_pool),
     }

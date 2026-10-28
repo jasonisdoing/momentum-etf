@@ -35,6 +35,16 @@ def get_strategy_trade_resolve(
     return resolve_etf(pool, ticker)
 
 
+@router.get("/backtest")
+def get_strategy_trade_backtest(
+    pool: str = Query(...),
+    months: int = Query(...),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """종목풀 하나의 사고팔기 백테스트 — 엔진 연결 전(UI 확인 단계)이라 명확한 오류만 낸다."""
+    raise ValueError(f"사고팔기 백테스트 엔진이 아직 연결되지 않았습니다 ({pool}, 최근 {months}개월).")
+
+
 @router.put("/settings")
 def put_strategy_trade_settings(
     payload: dict = Body(...),
