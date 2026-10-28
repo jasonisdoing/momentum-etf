@@ -333,14 +333,22 @@ function PoolSettingsCard({
 }) {
   const toast = useToast();
   const [rows, setRows] = useState<DraftRow[]>(() => rowsFromStrategies(view.strategies));
+  // 슬랙 알람은 풀이 아니라 전역 스위치지만 같은 저장 버튼으로 저장한다(합성 화면과 같은 방식).
+  const [slackEnabled, setSlackEnabled] = useState(view.slack_enabled);
+  const [slackTesting, setSlackTesting] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // 서버가 최신 전략 목록을 돌려주면(저장·풀 전환) 초안도 그 값으로 맞춘다.
+  // 서버가 최신 값을 돌려주면(저장·풀 전환) 초안도 그 값으로 맞춘다.
   useEffect(() => {
     setRows(rowsFromStrategies(view.strategies));
   }, [view.strategies]);
+  useEffect(() => {
+    setSlackEnabled(view.slack_enabled);
+  }, [view.slack_enabled]);
 
-  const isDirty = JSON.stringify(rows.map(comparableRow)) !== JSON.stringify(rowsFromStrategies(view.strategies).map(comparableRow));
+  const isDirty =
+    slackEnabled !== view.slack_enabled ||
+    JSON.stringify(rows.map(comparableRow)) !== JSON.stringify(rowsFromStrategies(view.strategies).map(comparableRow));
   const closeTime = view.strategies[0]?.status.first_entry_close_time;
 
   const updateRow = useCallback((key: string, patch: Partial<DraftRow>) => {
@@ -401,7 +409,7 @@ function PoolSettingsCard({
       const resp = await fetch("/api/strategy-trade", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pool, strategies }),
+        body: JSON.stringify({ pool, strategies, slack_enabled: slackEnabled }),
       });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
@@ -412,7 +420,22 @@ function PoolSettingsCard({
     } finally {
       setSaving(false);
     }
-  }, [onSaved, pool, rows, toast]);
+  }, [onSaved, pool, rows, slackEnabled, toast]);
+
+  const testSlack = useCallback(async () => {
+    setSlackTesting(true);
+    try {
+      const resp = await fetch("/api/strategy-trade/slack-test", { method: "POST" });
+      const payload = await resp.json();
+      if (!resp.ok) throw new Error(payload?.error ?? "슬랙 발송에 실패했습니다.");
+      if (payload?.sent) toast.success(payload?.message ?? "슬랙을 발송했습니다.");
+      else toast.warning(payload?.message ?? "슬랙을 발송하지 못했습니다.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "슬랙 발송에 실패했습니다.");
+    } finally {
+      setSlackTesting(false);
+    }
+  }, [toast]);
 
   return (
     <section className="appSection">
@@ -434,6 +457,33 @@ function PoolSettingsCard({
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="appLabeledField" style={{ marginBottom: 0 }}>
+                <span className="appLabeledFieldLabel">슬랙 알람</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <div className="form-check form-switch" style={{ marginBottom: 0 }}>
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      role="switch"
+                      checked={slackEnabled}
+                      disabled={saving}
+                      onChange={(event) => setSlackEnabled(event.target.checked)}
+                      title="평일 09:10~15:20 을 10분 간격으로 판정해 매수·매도 지정가에 닿은 회차가 있을 때만 슬랙을 보냅니다. 보유가 없는 전략은 장중에 1호 진입선에 못 닿으면 15:00 이후 1호 매수를 알립니다. 같은 전략·회차·동작은 하루 1회입니다. 저장 버튼을 눌러야 반영됩니다."
+                    />
+                  </div>
+                  <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
+                    {slackEnabled ? "켜짐" : "꺼짐"}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-secondary"
+                    disabled={slackTesting}
+                    onClick={() => void testSlack()}
+                  >
+                    {slackTesting ? "발송 중…" : "지금 발송(테스트)"}
+                  </button>
+                </span>
               </label>
               <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
                 1호 진입 전일 종가 −간격%{closeTime ? `(미도달 시 ${closeTime} 현재가)` : ""} · 추가 진입 마지막 매수가
@@ -694,8 +744,6 @@ export function StrategyTradeClient() {
   const toast = useToast();
   const [view, setView] = useState<View | null>(null);
   const [loading, setLoading] = useState(true);
-  const [slackSaving, setSlackSaving] = useState(false);
-  const [slackTesting, setSlackTesting] = useState(false);
 
   const load = useCallback(
     async (pool: string | null) => {
@@ -720,44 +768,6 @@ export function StrategyTradeClient() {
     // 마지막으로 고른 풀은 브라우저에 기억한다(다른 전략 화면들과 같은 공용 키 방식).
     void load(readRememberedTickerType("strategy-trade"));
   }, [load]);
-
-  const toggleSlack = useCallback(
-    async (enabled: boolean) => {
-      setSlackSaving(true);
-      try {
-        const resp = await fetch("/api/strategy-trade", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slack_enabled: enabled, pool: view?.pool }),
-        });
-        const payload = await resp.json();
-        if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
-        // 스위치만 반영한다 — 전략 초안(저장 전 입력)이 서버 값으로 덮이지 않게.
-        setView((prev) => (prev ? { ...prev, slack_enabled: (payload as View).slack_enabled } : prev));
-        toast.success(enabled ? "슬랙 알림을 켰습니다." : "슬랙 알림을 껐습니다.");
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "설정을 저장하지 못했습니다.");
-      } finally {
-        setSlackSaving(false);
-      }
-    },
-    [toast, view?.pool],
-  );
-
-  const testSlack = useCallback(async () => {
-    setSlackTesting(true);
-    try {
-      const resp = await fetch("/api/strategy-trade/slack-test", { method: "POST" });
-      const payload = await resp.json();
-      if (!resp.ok) throw new Error(payload?.error ?? "슬랙 발송에 실패했습니다.");
-      if (payload?.sent) toast.success(payload?.message ?? "슬랙을 발송했습니다.");
-      else toast.warning(payload?.message ?? "슬랙을 발송하지 못했습니다.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "슬랙 발송에 실패했습니다.");
-    } finally {
-      setSlackTesting(false);
-    }
-  }, [toast]);
 
   if (loading && !view) {
     return (
@@ -796,45 +806,6 @@ export function StrategyTradeClient() {
             ))}
           </div>
         </section>
-
-        {/* 슬랙 알림 (전역 스위치) */}
-        <div className="card appCard" style={cardStyle}>
-          <div style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>슬랙 알람</div>
-          <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", lineHeight: 1.45, margin: 0 }}>
-            켜두면 배치가 평일 09:10~15:20 을 10분 간격으로 판정해, 매수·매도 지정가에 닿은
-            회차가 있을 때만 슬랙을 보냅니다. 보유가 없는 전략은 장중에 1호 진입선에 못 닿으면 15:00
-            이후 1호 매수를 알립니다. 같은 전략·회차·동작은 하루 1회입니다.
-          </p>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <div className="form-check form-switch" style={{ paddingLeft: "2.6em", marginBottom: 0 }}>
-              <input
-                className="form-check-input"
-                type="checkbox"
-                role="switch"
-                id="strategyTradeSlackToggle"
-                style={{ width: "2.2em", height: "1.2em" }}
-                checked={view.slack_enabled}
-                disabled={slackSaving}
-                onChange={(event) => void toggleSlack(event.target.checked)}
-              />
-              <label
-                className="form-check-label"
-                htmlFor="strategyTradeSlackToggle"
-                style={{ fontWeight: 700, marginLeft: 6 }}
-              >
-                슬랙 알람 {view.slack_enabled ? "켜짐" : "꺼짐"}
-              </label>
-            </div>
-            <button
-              type="button"
-              className="btn btn-sm btn-outline-secondary"
-              disabled={slackTesting}
-              onClick={() => void testSlack()}
-            >
-              {slackTesting ? "발송 중…" : "지금 발송(테스트)"}
-            </button>
-          </div>
-        </div>
       </div>
     </PageFrame>
   );

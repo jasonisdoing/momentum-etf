@@ -40,22 +40,17 @@ def put_strategy_trade_settings(
     payload: dict = Body(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """슬랙 스위치 또는 한 종목풀의 전략 목록을 저장하고 갱신된 화면 데이터를 반환한다.
+    """한 종목풀의 전략 목록과 전역 슬랙 스위치를 저장하고 갱신된 화면 데이터를 반환한다.
 
-    body 는 둘 중 하나:
-      ``{"slack_enabled": true, "pool": "…"}``                     — 전역 스위치(응답에 볼 풀을 함께 준다)
-      ``{"pool": "…", "strategies": [{strategy_id?·account_id·ticker + pct 3종}, …]}`` — 풀의 전략 목록 전체
+    body: ``{"pool": "…", "strategies": [{strategy_id?·account_id·ticker + pct 3종}, …], "slack_enabled": bool}``
     strategy_id 가 없는 행은 추가, 목록에서 빠진 전략은 삭제다 (검증은 `strategy_trade_service`).
+    전략 목록을 먼저 검증·저장하고, 그게 통과해야 슬랙 스위치를 바꾼다.
     """
-    pool = str(payload.get("pool") or "").strip() or None
-    if payload.get("slack_enabled") is not None:
-        save_slack_enabled(bool(payload["slack_enabled"]))
-    elif payload.get("strategies") is not None:
-        if pool is None:
-            raise ValueError("종목풀이 필요합니다.")
-        save_pool_strategies(pool, payload["strategies"])
-    else:
-        raise ValueError("요청에 저장할 항목이 없습니다.")
+    pool = str(payload.get("pool") or "").strip()
+    if not pool or payload.get("strategies") is None or payload.get("slack_enabled") is None:
+        raise ValueError("pool·strategies·slack_enabled 가 모두 필요합니다.")
+    save_pool_strategies(pool, payload["strategies"])
+    save_slack_enabled(bool(payload["slack_enabled"]))
     return load_strategy_trade_view(pool)
 
 
