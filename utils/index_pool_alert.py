@@ -8,26 +8,25 @@ from utils.kor_stock_market_service import KOR_MARKET_TOP_COUNTS
 from utils.market_service import load_ticker_pool_type_map
 from utils.notification import send_slack_message_v2
 
-# 미국 알림의 S&P500 범위 — /us-market-stock S&P500 탭에서 상위 이 개수를 골랐을 때 보이는 종목
+# 미국 알림 범위 — /us-market-stock 「통합」(S&P500·나스닥100 합집합)에서 상위 이 개수를 골랐을 때 보이는 종목
 # (시총 내림차순, 같은 회사의 다른 주식 종류는 숨긴 뒤 자른다).
-US_ALERT_SP500_TOP = 100
+US_ALERT_COMBINED_TOP = 300
 
 # 명단별 표시 이름 — 개수는 명단을 정하는 상수에서 가져온다(문구와 실제 명단이 갈리지 않게).
 _LIST_LABELS: dict[str, str] = {
-    "SP500": f"S&P500 시총 상위 {US_ALERT_SP500_TOP}",
-    "NDX100": "나스닥100",
+    "US_COMBINED": f"통합(S&P500+나스닥100) 시총 상위 {US_ALERT_COMBINED_TOP}",
     "KOSPI": f"코스피 시총 상위 {KOR_MARKET_TOP_COUNTS['KOSPI']}",
     "KOSDAQ": f"코스닥 시총 상위 {KOR_MARKET_TOP_COUNTS['KOSDAQ']}",
 }
 # 미국 미등록 알림의 대상 명단 설명 — /us-market-stock 헤더 「슬랙 기준」이 그대로 보여준다.
-US_ALERT_BASIS = f"{_LIST_LABELS['SP500']} + {_LIST_LABELS['NDX100']}"
+US_ALERT_BASIS = _LIST_LABELS["US_COMBINED"]
 
 
 def notify_unregistered_market_stocks(country: str, list_items: dict[str, list[dict[str, Any]]]) -> int:
     """시장 화면 「통합」 명단 중 그 국가의 어느 종목풀에도 없는 종목을 한 메시지로 알린다.
 
-    명단은 호출부가 화면 「통합」 보기와 **같은 함수**로 만들어 넘긴다 — 미국은 S&P500 시총
-    상위·나스닥100, 한국은 코스피·코스닥 시총 상위다. 알림 대상과 화면이 갈리면 화면에 보이는
+    명단은 호출부가 화면 「통합」 보기와 **같은 기준**으로 만들어 넘긴다 — 미국은 S&P500·나스닥100
+    합집합의 시총 상위, 한국은 코스피·코스닥 시총 상위다. 알림 대상과 화면이 갈리면 화면에 보이는
     종목이 빠지거나 안 보이는 종목이 알림에 섞인다.
     """
     registered = set(load_ticker_pool_type_map(country))
