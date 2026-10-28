@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Body, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
+from utils.strategy_trade_backtest import run_strategy_trade_backtest
 from utils.strategy_trade_service import (
     load_strategy_trade_view,
     resolve_etf,
@@ -41,8 +42,8 @@ def get_strategy_trade_backtest(
     months: int = Query(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """종목풀 하나의 사고팔기 백테스트 — 엔진 연결 전(UI 확인 단계)이라 명확한 오류만 낸다."""
-    raise ValueError(f"사고팔기 백테스트 엔진이 아직 연결되지 않았습니다 ({pool}, 최근 {months}개월).")
+    """종목풀 하나의 사고팔기 전략 전체를 저장된 설정으로 최근 ``months`` 개월 백테스트한다."""
+    return run_strategy_trade_backtest(pool, months)
 
 
 @router.put("/settings")

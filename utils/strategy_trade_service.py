@@ -24,6 +24,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from core.strategy.trade import rules as ladder
 from utils.strategy_trade_config import (
     EDITABLE_CONFIG_KEYS,
     FIRST_ENTRY_CLOSE_TIME,
@@ -330,11 +331,6 @@ def _load_unheld_closes(tickers: list[str], pool: str) -> dict[str, float]:
     return closes
 
 
-def _round_to_tick(price: float) -> float:
-    """KRX ETF 호가 단위(5원)로 반올림한다 — 지정가는 이 단위로만 주문할 수 있다."""
-    return round(price / 5) * 5
-
-
 # 회차 표의 저점 기준선 기간(개월).
 RECENT_LOW_MONTHS = 12
 
@@ -383,7 +379,7 @@ def _load_ticker_status(
         "prev_close": round(prev_close),
         "change_pct": round(change_pct, 2),
         # 1호 진입선 — 전일 종가 대비 -간격%, 호가 단위 반올림.
-        "buy_trigger": _round_to_tick(prev_close * (1.0 - float(trigger_pct) / 100.0)),
+        "buy_trigger": ladder.first_buy_limit(prev_close, float(trigger_pct)),
         "recent_low": round(low_value),
         "recent_low_date": low_date.strftime("%Y-%m-%d"),
         "recent_low_label": f"{RECENT_LOW_MONTHS}개월 저점",
@@ -416,8 +412,6 @@ def _build_strategy_view(
     trigger_pct = float(strategy_settings["trigger_pct"])
     round_quantity = int(strategy_settings["round_quantity"])
     max_rounds = int(strategy_settings["rounds"])
-    down_ratio = 1.0 - trigger_pct / 100.0
-    up_ratio = 1.0 + trigger_pct / 100.0
 
     account = account_rows.get(ticker) or {}
     quantity = int(account.get("quantity") or 0)
@@ -435,15 +429,14 @@ def _build_strategy_view(
     if quantity > 0 and avg_price > 0:
         held_rounds = max(1, min(max_rounds, round(quantity / round_quantity)))
         quantity_mismatch = quantity != held_rounds * round_quantity
-        ladder_sum = sum(down_ratio**i for i in range(held_rounds))
-        first_entry = avg_price * held_rounds / ladder_sum
+        first_entry = ladder.first_entry_from_average(avg_price, held_rounds, trigger_pct)
     else:
         close_entry = _first_entry_close_window()
 
     def entry_price(round_no: int) -> float | None:
         if first_entry is None:
             return None
-        return first_entry * down_ratio ** (round_no - 1)
+        return ladder.entry_price(first_entry, round_no, trigger_pct)
 
     rows: list[dict[str, Any]] = []
     for round_no in range(1, max_rounds + 1):
@@ -451,7 +444,7 @@ def _build_strategy_view(
         is_next = round_no == held_rounds + 1
         entry = entry_price(round_no)
         if held and entry is not None:
-            sell_limit = _round_to_tick(entry * up_ratio)
+            sell_limit = ladder.sell_limit(entry, trigger_pct)
             rows.append(
                 {
                     "round": round_no,
@@ -476,10 +469,9 @@ def _build_strategy_view(
         # 미보유 회차 — 사다리 자리(보유가 있으면 1호가 기준, 없으면 전일 종가 기준).
         # 지정가로 바로 쓸 수 있게 호가 단위로 반올림한다.
         if first_entry is not None:
-            buy_limit = first_entry * down_ratio ** (round_no - 1)
+            buy_limit = ladder.buy_limit(first_entry, round_no, trigger_pct)
         else:
-            buy_limit = float(index_status["prev_close"]) * down_ratio**round_no
-        buy_limit = _round_to_tick(buy_limit)
+            buy_limit = ladder.preview_buy_limit(float(index_status["prev_close"]), round_no, trigger_pct)
         rows.append(
             {
                 "round": round_no,
