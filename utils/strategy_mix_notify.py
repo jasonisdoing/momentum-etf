@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Any
 
 from utils.logger import get_app_logger
+from utils.mix_sleeve import STRATEGY_TRADE
 from utils.order_confirm import build_confirm_line, pop_filled
 
 logger = get_app_logger()
@@ -205,4 +206,10 @@ def send_test(account_id: str) -> dict[str, Any]:
     message = _format_message(name, groups) if groups else f"🧭 합성 오늘의 액션 — {name}\n(지시 없음)"
     send_slack_message_v2("[테스트] " + message)
     item_count = sum(len(group["items"]) for group in groups)
+    # 사고팔기 슬리브는 합성이 주문을 만들지 않아 지정가 현황을 따로 보낸다 — 같은 테스트 버튼으로 함께 확인한다.
+    if any(row["strategy"] == STRATEGY_TRADE for row in sleeves):
+        from utils.strategy_trade_notify import send_test as send_trade_test
+
+        if not send_trade_test(account_id)["sent"]:
+            raise RuntimeError("사고팔기 슬랙 테스트를 보내지 못했습니다.")
     return {"sent": True, "items": item_count}

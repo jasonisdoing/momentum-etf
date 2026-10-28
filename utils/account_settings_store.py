@@ -184,7 +184,8 @@ def _validate_trade_sleeve(account_id: str, label: str, pool: str) -> None:
     운용 계좌는 슬리브가 붙은 계좌로 정해지므로(전략마다 계좌를 따로 고르지 않는다) 두 계좌가
     같은 풀을 가지면 어느 계좌의 보유로 회차를 세야 할지 알 수 없다.
     """
-    from utils.pool_strategy_use import STRATEGY_TRADE, pools_using
+    from utils.mix_sleeve import STRATEGY_TRADE
+    from utils.pool_strategy_use import pools_using
 
     if pool not in pools_using(STRATEGY_TRADE):
         raise AccountSettingsStoreError(
@@ -207,7 +208,7 @@ def _validate_mix_sleeves(
     순서가 곧 슬롯 순서다(첫째 A, 둘째 B, 셋째 C). 키는 저장하지 않고 읽을 때 순서로
     붙인다(`mix_sleeves_of`) — 저장된 키와 순서가 어긋날 여지를 아예 없앤다.
     """
-    from utils.mix_sleeve import STRATEGY_OPTIONS
+    from utils.mix_sleeve import STRATEGY_OPTIONS, STRATEGY_TRADE
 
     if not isinstance(raw, list):
         raise AccountSettingsStoreError(f"'{account_id}' 의 mix_sleeves 는 목록이어야 합니다.")
@@ -238,7 +239,7 @@ def _validate_mix_sleeves(
                 f"{strategy}({pool})"
             )
         seen.add((strategy, pool))
-        if strategy == "strategy_trade":
+        if strategy == STRATEGY_TRADE:
             _validate_trade_sleeve(account_id, label, pool)
 
         name = str(item.get("name") or "").strip()

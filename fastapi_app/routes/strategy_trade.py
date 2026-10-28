@@ -8,7 +8,6 @@ from utils.strategy_trade_service import (
     load_strategy_trade_view,
     resolve_etf,
     save_pool_strategies,
-    save_slack_enabled,
 )
 
 router = APIRouter(prefix="/internal/strategy-trade", tags=["strategy-trade"])
@@ -51,24 +50,14 @@ def put_strategy_trade_settings(
     payload: dict = Body(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """한 종목풀의 전략 목록과 전역 슬랙 스위치를 저장하고 갱신된 화면 데이터를 반환한다.
+    """한 종목풀의 전략 목록을 저장하고 갱신된 화면 데이터를 반환한다.
 
-    body: ``{"pool": "…", "strategies": [{strategy_id?·ticker + pct 3종}, …], "slack_enabled": bool}``
+    body: ``{"pool": "…", "strategies": [{strategy_id?·ticker + pct 3종}, …]}``
     strategy_id 가 없는 행은 추가, 목록에서 빠진 전략은 삭제다 (검증은 `strategy_trade_service`).
-    전략 목록을 먼저 검증·저장하고, 그게 통과해야 슬랙 스위치를 바꾼다.
+    슬랙 알람은 여기서 정하지 않는다 — 그 풀 슬리브가 붙은 계좌의 합성 슬랙 스위치를 따른다.
     """
     pool = str(payload.get("pool") or "").strip()
-    if not pool or payload.get("strategies") is None or payload.get("slack_enabled") is None:
-        raise ValueError("pool·strategies·slack_enabled 가 모두 필요합니다.")
+    if not pool or payload.get("strategies") is None:
+        raise ValueError("pool·strategies 가 모두 필요합니다.")
     save_pool_strategies(pool, payload["strategies"])
-    save_slack_enabled(bool(payload["slack_enabled"]))
     return load_strategy_trade_view(pool)
-
-
-@router.post("/slack-test")
-def post_strategy_trade_slack_test(_: None = Depends(require_internal_token)) -> dict:
-    """지금 수동 발송(트리거 없으면 현황만). 화면 '지금 발송(테스트)' 버튼용."""
-    from utils.strategy_trade_notify import notify_strategy_trade
-
-    result = notify_strategy_trade(force=True)
-    return {"sent": result["sent"], "message": result["reason"]}

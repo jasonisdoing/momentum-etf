@@ -14,16 +14,16 @@ from typing import Any
 
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
+from utils.mix_sleeve import STRATEGY_OPTIONS, STRATEGY_TRADE
 
 logger = get_app_logger()
 
 COLLECTION = "pool_settings"
 FIELD = "STRATEGY_USE"
 
-# 모멘텀·신고가·포트폴리오는 `utils.mix_sleeve.STRATEGY_OPTIONS` 와 같은 이름이다.
-# 사고팔기는 아직 합성 슬리브가 아니라 여기에만 있다(국장 ETF 풀 전용 — 백테스트 결과도 없다).
-STRATEGY_TRADE = "strategy_trade"
-STRATEGIES: tuple[str, ...] = ("momentum", "new_high", "portfolio", STRATEGY_TRADE)
+# 종목풀에서 켜고 끄는 전략 — 합성 슬리브 전략 목록(`utils.mix_sleeve.STRATEGY_OPTIONS`)과 같다.
+# 사고팔기는 국장 ETF 풀 전용이고 풀 단위 백테스트 결과가 없다.
+STRATEGIES: tuple[str, ...] = STRATEGY_OPTIONS
 
 
 def _db():

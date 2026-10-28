@@ -29,7 +29,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from utils.order_confirm import build_confirm_line, pop_filled
-from utils.strategy_trade_service import load_all_strategy_views, load_settings
+from utils.strategy_trade_service import load_settings, load_views_for_pools, sleeve_for_pool
 
 KST = ZoneInfo("Asia/Seoul")
 _CONFIG_COLLECTION = "system_config"
@@ -279,32 +279,52 @@ def build_message(view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def notify_strategy_trade(*, force: bool = False) -> dict[str, Any]:
-    """트리거를 판정해 필요할 때만 슬랙을 보낸다.
+def _pools_with_strategies() -> list[str]:
+    return sorted({entry["pool"] for entry in load_settings()["strategies"].values()})
 
-    Args:
-        force: 스위치·중복 방지를 무시하고 현재 상태를 발송한다(테스트 버튼용).
+
+def send_test(account_id: str) -> dict[str, Any]:
+    """그 계좌에 붙은 사고팔기 슬리브의 현재 상태를 즉시 보낸다(합성 화면의 슬랙 테스트에서 부른다).
+
+    스위치·중복 방지와 무관하고 상태는 건드리지 않는다. 신호가 없으면 현황만 보낸다.
+    """
+    from utils.notification import send_slack_message_v2
+
+    pools = [
+        pool
+        for pool in _pools_with_strategies()
+        if (sleeve := sleeve_for_pool(pool)) is not None and sleeve["account_id"] == account_id
+    ]
+    if not pools:
+        return {"sent": False, "reason": "이 계좌에 사고팔기 슬리브가 없습니다.", "triggers": []}
+    view = load_views_for_pools(pools)
+    triggers = [t for s in view["strategies"] for t in collect_triggers(s)]
+    sent = send_slack_message_v2(build_message(view, triggers))
+    return {
+        "sent": bool(sent),
+        "reason": "테스트 발송" if sent else "슬랙 전송에 실패했습니다.",
+        "triggers": triggers,
+    }
+
+
+def notify_strategy_trade() -> dict[str, Any]:
+    """트리거를 판정해 필요할 때만 슬랙을 보낸다 — 슬리브가 붙은 계좌의 합성 슬랙이 켜진 종목풀만.
 
     Returns:
         ``{"sent": bool, "reason": str, "triggers": [...]}``
     """
     from utils.notification import send_slack_message_v2
 
-    settings = load_settings()
-    if not force and not settings["slack_enabled"]:
-        return {"sent": False, "reason": "슬랙 알림이 꺼져 있습니다.", "triggers": []}
+    enabled = [
+        pool
+        for pool in _pools_with_strategies()
+        if (sleeve := sleeve_for_pool(pool)) is not None and sleeve["slack_enabled"]
+    ]
+    if not enabled:
+        return {"sent": False, "reason": "슬랙이 켜진 사고팔기 슬리브가 없습니다.", "triggers": []}
 
-    view = load_all_strategy_views()
+    view = load_views_for_pools(enabled)
     triggers = [t for s in view["strategies"] for t in collect_triggers(s)]
-
-    if force:
-        # 테스트 발송 — 트리거가 없으면 현재 현황만 보낸다.
-        sent = send_slack_message_v2(build_message(view, triggers))
-        return {
-            "sent": bool(sent),
-            "reason": "테스트 발송" if sent else "슬랙 전송에 실패했습니다.",
-            "triggers": triggers,
-        }
 
     now = datetime.now(KST)
     today = now.strftime("%Y-%m-%d")

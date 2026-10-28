@@ -1,11 +1,10 @@
 """전략 사고팔기 운용 현황 조회 서비스 (UI/API 용).
 
-전략 3개(KODEX 200 / KODEX 코스닥150 / KIWOOM 삼성SK그룹TOP4+)를 같은 계좌에서
-독립 운용한다. 각 전략은 **자기 종목 하나만** 설정된 회차 수까지 분할 매수한다.
+전략 여러 개를 독립 운용한다. 각 전략은 **자기 종목 하나만** 설정된 회차 수까지 분할 매수한다.
 전략은 종목풀(``pool``) 단위로 묶이고, 사고팔기를 켠 풀(종목풀 설정의 토글)에서만 만든다.
 파라미터(매매 간격 %·회차당 수량·회차 수)는
 DB(``system_config.strategy_trade_settings.strategies``)가 단일 소스이며 화면에서
-편집한다. 슬랙 스위치는 전역 1개다.
+편집한다. 슬랙 알람은 그 종목풀 슬리브가 붙은 계좌의 합성 슬랙 스위치를 따른다.
 
 보유 현황은 백테스트가 아니라 그 종목풀의 사고팔기 **합성 슬리브가 붙은 계좌**의 **실제 보유 수량·평균단가**를
 읽어 계산한다. 배치·원장은 없다 — 화면을 열 때마다 즉시 역산한다.
@@ -41,7 +40,7 @@ def load_settings() -> dict[str, Any]:
     전략 항목이 없거나 깨졌으면 시드값으로 슬쩍 넘어가지 않고 에러를 낸다 —
     그럴듯한 값이 화면에 떴다가 그대로 저장돼 실제 설정이 덮어써지는 것을 막는다.
 
-    반환: ``{"slack_enabled", "strategies": {sid: {"pool", "ticker", "name", "trigger_pct",
+    반환: ``{"strategies": {sid: {"pool", "ticker", "name", "trigger_pct",
     "round_quantity", "rounds"}}}`` — 풀·종목·운용 계좌는 전략마다 따로이고, 전략 목록은 DB 가 정한다.
     """
     from utils.db_manager import get_db_connection
@@ -76,10 +75,7 @@ def load_settings() -> dict[str, Any]:
         except ValueError as error:
             raise ValueError(f"'{sid}' 전략 설정이 올바르지 않습니다: {error}") from error
 
-    return {
-        "slack_enabled": bool(doc.get("slack_enabled", False)),
-        "strategies": strategies,
-    }
+    return {"strategies": strategies}
 
 
 def _require_enabled_pool(pool: str) -> None:
@@ -216,20 +212,6 @@ def delete_pool_strategies(pool: str) -> int:
     return len(doomed)
 
 
-def save_slack_enabled(enabled: bool) -> None:
-    """전역 슬랙 스위치를 저장한다."""
-    from utils.db_manager import get_db_connection
-
-    db = get_db_connection()
-    if db is None:
-        raise RuntimeError("DB 연결에 실패했습니다.")
-    db[_CONFIG_COLLECTION].update_one(
-        {"_id": _SETTINGS_KEY},
-        {"$set": {"slack_enabled": bool(enabled), "updated_at": datetime.now().isoformat()}},
-        upsert=True,
-    )
-
-
 def sleeve_for_pool(pool: str) -> dict[str, Any] | None:
     """그 종목풀의 사고팔기 합성 슬리브가 붙은 계좌와 한도 — 없으면 None.
 
@@ -258,6 +240,8 @@ def sleeve_for_pool(pool: str) -> dict[str, Any] | None:
         "account_name": str(doc.get("name") or doc["account_id"]),
         "weight_pct": float(sleeve["weight_pct"]),
         "limit_krw": capital * float(sleeve["weight_pct"]) / 100.0,
+        # 슬랙 알람은 합성의 계좌 단위 스위치를 따른다 — 사고팔기에 따로 두지 않는다.
+        "slack_enabled": bool(doc.get("mix_slack_enabled")),
     }
 
 
@@ -600,9 +584,14 @@ def load_pool_views(pool: str) -> list[dict[str, Any]]:
     return _build_views(in_pool)
 
 
-def load_all_strategy_views() -> dict[str, Any]:
-    """모든 종목풀의 전략 운용 현황 — 알림 배치용(화면은 풀 하나씩 본다)."""
-    return {"strategies": _build_views(load_settings()["strategies"])}
+def load_views_for_pools(pools: list[str]) -> dict[str, Any]:
+    """주어진 종목풀들의 전략 운용 현황 — 알림용(화면은 풀 하나씩 본다)."""
+    wanted = set(pools)
+    return {
+        "strategies": _build_views(
+            {sid: entry for sid, entry in load_settings()["strategies"].items() if entry["pool"] in wanted}
+        )
+    }
 
 
 def load_strategy_trade_view(pool: str | None) -> dict[str, Any]:
@@ -622,7 +611,6 @@ def load_strategy_trade_view(pool: str | None) -> dict[str, Any]:
     in_pool = {sid: entry for sid, entry in settings["strategies"].items() if entry["pool"] == selected}
     sleeve = sleeve_for_pool(selected) if selected is not None else None
     return {
-        "slack_enabled": settings["slack_enabled"],
         "pool_options": pool_options(enabled),
         "pool": selected,
         "month_options": get_month_options(),

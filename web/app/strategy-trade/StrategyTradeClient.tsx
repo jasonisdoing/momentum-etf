@@ -104,10 +104,11 @@ type Sleeve = {
   weight_pct: number;
   limit_krw: number;
   per_strategy_limit_krw?: number;
+  /** 슬랙 알람 — 그 계좌의 합성 슬랙 스위치를 따른다(여기서 정하지 않는다). */
+  slack_enabled: boolean;
 };
 
 type View = {
-  slack_enabled: boolean;
   /** 합성에서 이 종목풀에 붙인 사고팔기 슬리브. 없으면 null — 운용 현황을 만들 수 없다. */
   sleeve: Sleeve | null;
   /** 저장된 전략 설정 — 슬리브 유무와 무관하게 편집할 수 있다. */
@@ -366,21 +367,14 @@ function PoolSettingsCard({
 }) {
   const toast = useToast();
   const [rows, setRows] = useState<DraftRow[]>(() => rowsFromConfigs(view.configs));
-  // 슬랙 알람은 풀이 아니라 전역 스위치지만 같은 저장 버튼으로 저장한다(합성 화면과 같은 방식).
-  const [slackEnabled, setSlackEnabled] = useState(view.slack_enabled);
-  const [slackTesting, setSlackTesting] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // 서버가 최신 값을 돌려주면(저장·풀 전환) 초안도 그 값으로 맞춘다.
   useEffect(() => {
     setRows(rowsFromConfigs(view.configs));
   }, [view.configs]);
-  useEffect(() => {
-    setSlackEnabled(view.slack_enabled);
-  }, [view.slack_enabled]);
 
   const isDirty =
-    slackEnabled !== view.slack_enabled ||
     JSON.stringify(rows.map(comparableRow)) !== JSON.stringify(rowsFromConfigs(view.configs).map(comparableRow));
   useEffect(() => {
     onDirtyChange(isDirty);
@@ -441,7 +435,7 @@ function PoolSettingsCard({
       const resp = await fetch("/api/strategy-trade", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pool, strategies, slack_enabled: slackEnabled }),
+        body: JSON.stringify({ pool, strategies }),
       });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
@@ -452,22 +446,7 @@ function PoolSettingsCard({
     } finally {
       setSaving(false);
     }
-  }, [onSaved, pool, rows, slackEnabled, toast]);
-
-  const testSlack = useCallback(async () => {
-    setSlackTesting(true);
-    try {
-      const resp = await fetch("/api/strategy-trade/slack-test", { method: "POST" });
-      const payload = await resp.json();
-      if (!resp.ok) throw new Error(payload?.error ?? "슬랙 발송에 실패했습니다.");
-      if (payload?.sent) toast.success(payload?.message ?? "슬랙을 발송했습니다.");
-      else toast.warning(payload?.message ?? "슬랙을 발송하지 못했습니다.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "슬랙 발송에 실패했습니다.");
-    } finally {
-      setSlackTesting(false);
-    }
-  }, [toast]);
+  }, [onSaved, pool, rows, toast]);
 
   return (
     <section className="appSection">
@@ -489,33 +468,6 @@ function PoolSettingsCard({
                     </option>
                   ))}
                 </select>
-              </label>
-              <label className="appLabeledField" style={{ marginBottom: 0 }}>
-                <span className="appLabeledFieldLabel">슬랙 알람</span>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  <div className="form-check form-switch" style={{ marginBottom: 0 }}>
-                    <input
-                      className="form-check-input"
-                      type="checkbox"
-                      role="switch"
-                      checked={slackEnabled}
-                      disabled={saving}
-                      onChange={(event) => setSlackEnabled(event.target.checked)}
-                      title="평일 09:10~15:20 을 10분 간격으로 판정해 매수·매도 지정가에 닿은 회차가 있을 때만 슬랙을 보냅니다. 보유가 없는 전략은 장중에 1호 진입선에 못 닿으면 15:00 이후 1호 매수를 알립니다. 같은 전략·회차·동작은 하루 1회입니다. 저장 버튼을 눌러야 반영됩니다."
-                    />
-                  </div>
-                  <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
-                    {slackEnabled ? "켜짐" : "꺼짐"}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline-secondary"
-                    disabled={slackTesting}
-                    onClick={() => void testSlack()}
-                  >
-                    {slackTesting ? "발송 중…" : "지금 발송(테스트)"}
-                  </button>
-                </span>
               </label>
             </div>
             <div className="appMainHeaderRight">
@@ -541,6 +493,7 @@ function PoolSettingsCard({
               {view.sleeve.per_strategy_limit_krw != null
                 ? ` (전략당 ${formatKrwMan(view.sleeve.per_strategy_limit_krw)})`
                 : ""}
+              {` · 슬랙 알람 ${view.sleeve.slack_enabled ? "켜짐" : "꺼짐"}(합성 화면에서 설정)`}
             </div>
           ) : (
             <div className="alert alert-warning" style={{ marginTop: 10, marginBottom: 0 }}>
