@@ -42,6 +42,15 @@ from typing import Any
 ETF_POOL = "kor_etf"
 PRICE_CACHE_TICKER_TYPES: tuple[str, ...] = (ETF_POOL,)
 
+
+def is_eligible_pool(pool_config: dict[str, Any]) -> bool:
+    """사고팔기를 켤 수 있는 종목풀인지 — 국장 전용이라 한국 ETF 풀만 된다(원 단위 호가·한국 장 시간)."""
+    return (
+        str(pool_config.get("country_code") or "").strip().lower() == "kor"
+        and str(pool_config.get("pool_kind") or "").strip().lower() == "etf"
+    )
+
+
 # 1호 장 마감 매수 시각(KST) — 보유 0인데 장중 1호 진입선에 못 닿았으면 이 시각부터 정규장 마감 전까지
 # 현재가로 1호를 산다. 국장 전용 전략이라 한국 시간표의 마감과 짝을 이룬다.
 FIRST_ENTRY_CLOSE_TIME = time(15, 0)

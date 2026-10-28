@@ -18,8 +18,10 @@ logger = get_app_logger()
 COLLECTION = "pool_settings"
 FIELD = "STRATEGY_USE"
 
-# 값은 `utils.mix_sleeve.STRATEGY_OPTIONS` 와 같은 이름을 쓴다.
-STRATEGIES: tuple[str, ...] = ("momentum", "new_high", "portfolio")
+# 모멘텀·신고가·포트폴리오는 `utils.mix_sleeve.STRATEGY_OPTIONS` 와 같은 이름이다.
+# 사고팔기는 아직 합성 슬리브가 아니라 여기에만 있다(국장 ETF 풀 전용 — 백테스트 결과도 없다).
+STRATEGY_TRADE = "strategy_trade"
+STRATEGIES: tuple[str, ...] = ("momentum", "new_high", "portfolio", STRATEGY_TRADE)
 
 
 def _db():
@@ -39,6 +41,14 @@ def load_usage() -> dict[str, dict[str, bool]]:
         stored = doc.get(FIELD) or {}
         usage[pool] = {name: bool(stored.get(name)) for name in STRATEGIES}
     return usage
+
+
+def trade_eligible_pools() -> list[str]:
+    """사고팔기를 켤 수 있는 활성 종목풀 — 화면이 토글을 그릴 풀과 저장 검증이 같은 목록을 쓴다."""
+    from utils.settings_loader import _load_pool_configs
+    from utils.strategy_trade_config import is_eligible_pool
+
+    return [str(config["ticker_type"]) for config in _load_pool_configs() if is_eligible_pool(config)]
 
 
 def pools_using(strategy: str) -> list[str]:
@@ -65,16 +75,19 @@ def set_usage(pool: str, strategy: str, used: bool) -> None:
     name = str(strategy or "").strip().lower()
     if name not in STRATEGIES:
         raise ValueError(f"알 수 없는 전략입니다: {strategy}")
+    if name == STRATEGY_TRADE and pool not in trade_eligible_pools():
+        raise ValueError(f"{pool} 종목풀에서는 사고팔기를 쓸 수 없습니다 (한국 ETF 종목풀만 가능).")
 
     _db()[COLLECTION].update_one({"_id": pool}, {"$set": {f"{FIELD}.{name}": bool(used)}}, upsert=True)
     if used:
         return
 
-    from utils.pool_backtest_store import clear_result
-
     _delete_strategy_settings(pool, name)
-    # 그 전략 결과만 지운다 — 풀 전체를 지우면 다른 전략의 백테스트까지 사라진다.
-    clear_result(pool, name)
+    if name != STRATEGY_TRADE:
+        from utils.pool_backtest_store import clear_result
+
+        # 그 전략 결과만 지운다 — 풀 전체를 지우면 다른 전략의 백테스트까지 사라진다.
+        clear_result(pool, name)
 
 
 def _delete_strategy_settings(pool: str, strategy: str) -> None:
@@ -88,6 +101,10 @@ def _delete_strategy_settings(pool: str, strategy: str) -> None:
             from utils.new_high_service import delete_settings
 
             delete_settings(pool)
+        elif strategy == STRATEGY_TRADE:
+            from utils.strategy_trade_service import delete_pool_strategies
+
+            delete_pool_strategies(pool)
         else:
             from utils.portfolio_service import delete_settings
 

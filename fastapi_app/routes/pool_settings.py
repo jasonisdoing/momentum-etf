@@ -84,7 +84,7 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     from utils.pool_backtest_store import load_results
-    from utils.pool_strategy_use import load_usage
+    from utils.pool_strategy_use import load_usage, trade_eligible_pools
     from utils.strategy_mix_service import mix_accounts
 
     # 활성 합성 계좌의 종목풀·전략 조합만 표시한다. 백테스트 결과 유무와 무관하다.
@@ -101,6 +101,8 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
         "pools": pools,
         # 전략별 사용 여부 — 전략 화면의 종목풀 목록이 이 값으로 걸러진다.
         "strategy_use": load_usage(),
+        # 사고팔기 토글을 보여줄 종목풀 — 저장 검증과 같은 목록.
+        "strategy_trade_pools": trade_eligible_pools(),
         # 전략별 12개월 백테스트 — 「백테스트」로 계산해 저장해 둔 값. 설정이 바뀌면 지워진다.
         "backtests": load_results(),
         "mix_usage": mix_usage,

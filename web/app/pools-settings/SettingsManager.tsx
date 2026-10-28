@@ -112,6 +112,10 @@ const STRATEGY_COLUMNS: { key: StrategyKey; label: string }[] = [
 
 type StrategyKey = "momentum" | "new_high" | "portfolio";
 
+/** 사고팔기 — 백테스트가 없고 국장 ETF 풀에서만 켠다. 그래서 전략 컬럼 목록과 따로 둔다. */
+const TRADE_KEY = "strategy_trade";
+type UseKey = StrategyKey | typeof TRADE_KEY;
+
 type PoolSettingsResponse = {
   pools: PoolEntry[];
   constraints: {
@@ -131,7 +135,9 @@ type PoolSettingsResponse = {
   /** 전략별 12개월 백테스트 — 저장된 값. 설정이 바뀌면 서버가 지운다. */
   backtests?: BacktestByPool;
   /** 전략 사용 여부 — {종목풀: {전략: 사용}}. 그 풀에 설정이 저장돼 있으면 사용 중이다. */
-  strategy_use?: Record<string, Partial<Record<StrategyKey, boolean>>>;
+  strategy_use?: Record<string, Partial<Record<UseKey, boolean>>>;
+  /** 사고팔기 토글을 보여줄 종목풀 — 서버가 정한다(저장 검증과 같은 목록). */
+  strategy_trade_pools?: string[];
   mix_usage: Record<string, Partial<Record<StrategyKey, string[]>>>;
   error?: string;
 };
@@ -439,7 +445,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
   const [showBacktests, setShowBacktests] = useState(false);
   // 전략 사용 여부 — {종목풀: {전략: 사용}}. 그 풀에 그 전략 설정이 저장돼 있는지다.
   // 저장 전까지는 화면 상태로만 들고 있다(저장하면 설정 생성·삭제까지 반영된다).
-  const [strategyUse, setStrategyUse] = useState<Record<string, Partial<Record<StrategyKey, boolean>>>>({});
+  const [strategyUse, setStrategyUse] = useState<Record<string, Partial<Record<UseKey, boolean>>>>({});
   // 이평선 선택지 — 백엔드가 단일 소스다. 새 풀 초안의 기본값도 여기서 고른다.
   const maOptionsByCountry = useMemo(() => data?.constraints.ma_options_by_country ?? {}, [data]);
   const [drafts, setDrafts] = useState<Record<string, PoolDraft>>({});
@@ -526,7 +532,11 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
    *  설정이 없는 조합은 서버가 빈 결과를 돌려주므로 칸이 비어 있는다. */
   /** 사용 토글 — 즉시 저장한다. 끄면 그 전략의 설정과 백테스트 결과가 함께 지워진다. */
   const toggleStrategyUse = useCallback(
-    (pool: string, strategy: StrategyKey, next: boolean) => {
+    (pool: string, strategy: UseKey, next: boolean) => {
+      // 사고팔기를 끄면 전략마다 입력해 둔 계좌·종목·회차 수량이 지워져 한 번 더 묻는다.
+      if (strategy === TRADE_KEY && !next && !window.confirm("사고팔기를 끄면 이 종목풀의 사고팔기 전략(계좌·종목·회차 수량)이 모두 삭제됩니다. 끌까요?")) {
+        return;
+      }
       setStrategyUse((prev) => ({ ...prev, [pool]: { ...prev[pool], [strategy]: next } }));
       void (async () => {
         try {
@@ -539,7 +549,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
           if (!resp.ok || payload.error) {
             throw new Error(payload.error ?? "사용 여부를 저장하지 못했습니다.");
           }
-          if (!next) {
+          if (!next && strategy !== TRADE_KEY) {
             // 그 전략 결과만 비운다 — 같은 풀의 다른 전략 결과는 그대로다.
             setBacktests((prev) => ({ ...prev, [pool]: { ...prev[pool], [strategy]: undefined } }));
           }
@@ -552,6 +562,8 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     },
     [toast],
   );
+
+  const tradePools = useMemo(() => new Set(data?.strategy_trade_pools ?? []), [data]);
 
   const runAllBacktests = useCallback(async () => {
     setShowBacktests(true);
@@ -781,6 +793,31 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     },
   });
 
+  // 사고팔기 — 한국 ETF 풀에서만 켠다. 백테스트가 없어 「사용」 토글 하나만 둔다.
+  const tradeUseColumn: ColDef<PoolGridRow> = {
+    colId: `use_${TRADE_KEY}`,
+    headerName: "사고팔기",
+    width: 96,
+    sortable: false,
+    headerTooltip:
+      "이 종목풀에서 사고팔기 전략을 쓸지(국장 ETF 풀만). 끄면 이 풀의 사고팔기 전략 설정이 지워집니다.",
+    cellRenderer: (params: ICellRendererParams<PoolGridRow>) => {
+      const pool = params.data?.ticker_type;
+      if (!pool || !tradePools.has(pool)) return null;
+      return (
+        <div className="form-check form-switch" style={{ marginBottom: 0 }}>
+          <input
+            className="form-check-input"
+            type="checkbox"
+            role="switch"
+            checked={strategyUse[pool]?.[TRADE_KEY] ?? false}
+            onChange={(event) => toggleStrategyUse(pool, TRADE_KEY, event.target.checked)}
+          />
+        </div>
+      );
+    },
+  };
+
   const columnDefs: ColDef<PoolGridRow>[] = [
     // 컬럼이 많아 가로로 스크롤한다 — 어느 풀의 행인지 잃지 않게 ID·이름은 왼쪽에 고정한다.
     { field: "ticker_type", headerName: "ID", width: 112, pinned: "left" },
@@ -858,6 +895,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         },
       ],
     })),
+    ...(showBacktests ? [tradeUseColumn] : []),
     selectCol("icon", "아이콘", 72, () => ["🇰🇷", "🇦🇺", "🇺🇸"]),
     numberCol("order", "순서", 64),
     selectCol("country_code", "국가", 76, () => [...COUNTRY_OPTIONS]),

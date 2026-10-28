@@ -82,10 +82,19 @@ def load_settings() -> dict[str, Any]:
     }
 
 
+def _pool_enabled() -> bool:
+    """종목풀 설정에서 이 풀의 사고팔기가 켜져 있는지 — 꺼져 있으면 종목을 고를 수 없다."""
+    from utils.pool_strategy_use import STRATEGY_TRADE, pools_using
+
+    return ETF_POOL in pools_using(STRATEGY_TRADE)
+
+
 def etf_options() -> list[dict[str, str]]:
-    """전략에 쓸 수 있는 종목 — kor_etf 종목풀의 ETF(티커·이름)."""
+    """전략에 쓸 수 있는 종목 — kor_etf 종목풀의 ETF(티커·이름). 사고팔기가 꺼진 풀이면 빈 목록."""
     from utils.stock_list_io import get_etfs
 
+    if not _pool_enabled():
+        return []
     options = [
         {"ticker": str(item.get("ticker") or "").strip(), "name": str(item.get("name") or "").strip()}
         for item in get_etfs(ETF_POOL) or []
@@ -98,6 +107,8 @@ def resolve_etf(ticker: str) -> dict[str, str]:
     wanted = str(ticker or "").strip().upper()
     if not wanted:
         raise ValueError("티커를 입력하세요.")
+    if not _pool_enabled():
+        raise ValueError(f"{ETF_POOL} 종목풀에서 사고팔기가 꺼져 있습니다 — 종목풀 설정에서 먼저 켜세요.")
     for option in etf_options():
         if option["ticker"].upper() == wanted:
             return option
@@ -183,6 +194,24 @@ def delete_strategy(strategy_id: str) -> dict[str, Any]:
         {"_id": _SETTINGS_KEY}, {"$set": {"updated_at": datetime.now().isoformat()}, "$unset": unset}
     )
     return load_settings()
+
+
+def delete_pool_strategies(pool: str) -> int:
+    """그 종목풀의 사고팔기 전략을 모두 지운다(알림 기록 포함). 지운 개수를 반환한다.
+
+    지금은 전략이 ``ETF_POOL`` 한 곳에서만 만들어진다 — 다른 풀에는 지울 전략이 없다.
+    """
+    from utils.db_manager import get_db_connection
+
+    if pool != ETF_POOL:
+        return 0
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("DB 연결에 실패했습니다.")
+    stored = (db[_CONFIG_COLLECTION].find_one({"_id": _SETTINGS_KEY}) or {}).get("strategies") or {}
+    for sid in list(stored):
+        delete_strategy(sid)
+    return len(stored)
 
 
 def save_slack_enabled(enabled: bool) -> dict[str, Any]:
