@@ -10,7 +10,7 @@
  */
 
 import type { ColDef } from "ag-grid-community";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
 import {
   type BacktestCalendarWeekRow,
@@ -25,7 +25,7 @@ import { formatSignedPct, signColor } from "@/lib/grid-cells";
 
 import { AppAgGrid } from "./AppAgGrid";
 import { createAppGridTheme } from "./app-grid-theme";
-import { NavTabs } from "./NavTabs";
+import { NavTabs, type NavTabItem } from "./NavTabs";
 
 const gridTheme = createAppGridTheme();
 
@@ -79,18 +79,27 @@ const labelColumn = <T,>(headerName: string, field: string, width = 148): ColDef
   cellStyle: () => ({ fontWeight: 700 }),
 });
 
+const EXTRA_TAB_KEY = "extra";
+
 export function BacktestPeriodTables({
   daily,
   benchmarkLabel,
   benchmarkTooltip,
   defaultView = "monthly",
+  extraTab,
 }: {
   daily: BacktestDayRow[];
   benchmarkLabel: string;
   benchmarkTooltip?: string;
   defaultView?: BacktestPeriodView;
+  /** 기간 탭 뒤에 이어 붙는 탭 하나(예: 「체결」) — 다른 전략 화면처럼 한 줄 탭으로 보이게 한다. */
+  extraTab?: { label: string; content: ReactNode };
 }) {
-  const [view, setView] = useState<BacktestPeriodView>(defaultView);
+  const [view, setView] = useState<BacktestPeriodView | typeof EXTRA_TAB_KEY>(defaultView);
+  const tabs = useMemo<NavTabItem<BacktestPeriodView | typeof EXTRA_TAB_KEY>[]>(
+    () => (extraTab ? [...VIEW_MODES, { key: EXTRA_TAB_KEY, label: extraTab.label }] : [...VIEW_MODES]),
+    [extraTab],
+  );
 
   const monthRows = useMemo(() => toCalendarMonthRows(daily), [daily]);
   const weekRows = useMemo(() => toCalendarWeekRows(daily), [daily]);
@@ -153,13 +162,15 @@ export function BacktestPeriodTables({
   return (
     <div>
       <NavTabs
-        items={VIEW_MODES}
+        items={tabs}
         value={view}
         onChange={setView}
         label="백테스트 보기 단위"
         style={{ marginBottom: 10 }}
       />
-      {view === "yearly" ? (
+      {view === EXTRA_TAB_KEY && extraTab ? (
+        extraTab.content
+      ) : view === "yearly" ? (
         <>
           <AppAgGrid<BacktestYearRow>
             rowData={yearRows}

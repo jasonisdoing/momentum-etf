@@ -12,7 +12,6 @@ import { BacktestPeriodTables } from "../components/BacktestPeriodTables";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { MonthsSelect } from "../components/MonthsSelect";
-import { NavTabs } from "../components/NavTabs";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 
@@ -60,12 +59,6 @@ type TradeBacktest = {
   reason_counts: Record<string, number>;
 };
 
-const VIEW_MODES = [
-  { key: "periods", label: "기간별" },
-  { key: "trades", label: "체결" },
-] as const;
-type ViewMode = (typeof VIEW_MODES)[number]["key"];
-
 const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--fs-sm)" };
 
 function formatPrice(value: number | null | undefined): string {
@@ -89,7 +82,6 @@ export function TradeBacktestSection({
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<LoadingProgress | null>(null);
   const [result, setResult] = useState<TradeBacktest | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("periods");
 
   const run = useCallback(async () => {
     setLoading(true);
@@ -207,25 +199,23 @@ export function TradeBacktestSection({
                 }}
               />
               <BacktestTradeStats stats={result} style={{ marginBottom: 12 }} />
-              <NavTabs
-                items={VIEW_MODES}
-                value={viewMode}
-                onChange={setViewMode}
-                label="사고팔기 백테스트 보기 단위"
-                style={{ marginBottom: 10 }}
+              <BacktestPeriodTables
+                daily={result.daily}
+                benchmarkLabel={benchmarkLabel}
+                extraTab={{
+                  label: "체결",
+                  content: (
+                    <AppAgGrid<TradeRow>
+                      rowData={result.trades}
+                      columnDefs={tradeColumns}
+                      theme={gridTheme}
+                      minHeight="auto"
+                      gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                      getRowClass={(p) => (p.data?.exit_date ? "" : "momentumPendingRow")}
+                    />
+                  ),
+                }}
               />
-              {viewMode === "trades" ? (
-                <AppAgGrid<TradeRow>
-                  rowData={result.trades}
-                  columnDefs={tradeColumns}
-                  theme={gridTheme}
-                  minHeight="auto"
-                  gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
-                  getRowClass={(p) => (p.data?.exit_date ? "" : "momentumPendingRow")}
-                />
-              ) : (
-                <BacktestPeriodTables daily={result.daily} benchmarkLabel={benchmarkLabel} />
-              )}
             </>
           ) : (
             <div style={{ ...hintStyle, padding: "32px 0", textAlign: "center" }}>실행을 누르면 결과가 표시됩니다.</div>
