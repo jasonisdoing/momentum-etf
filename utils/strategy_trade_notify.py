@@ -1,7 +1,8 @@
 """전략 사고팔기 슬랙 알림.
 
 거래시간 중 10분마다 실행돼, **매수·매도 지정가에 현재가가 닿은 회차가 있을 때만**
-슬랙을 보낸다. 트리거가 없으면 아무것도 보내지 않는다.
+슬랙을 보낸다. 트리거가 없으면 아무것도 보내지 않는다. 보유 0 인 전략은 장중에 1호
+진입선에 못 닿았어도 15:00 이후 배치에서 1호 장 마감 매수 신호가 난다(서비스가 판정).
 
 중복 방지 · 체결 확인
 --------------------
@@ -123,13 +124,18 @@ def _confirm_fill(pending: dict[str, Any], held_count: int) -> dict[str, Any] | 
     return {} if held_count >= round_no else None
 
 
+def _reach_text(trigger: dict[str, Any]) -> str:
+    """신호가 난 까닭 — 지정가 도달, 또는 장중 미도달 1호의 장 마감 매수."""
+    return "장 마감 매수" if trigger.get("close_entry") else f"{_level(trigger['index_level'])} 도달"
+
+
 def build_repeat_line(trigger: dict[str, Any]) -> str:
     """재알림 한 줄 — 무엇을 얼마에 사고팔지만 담는다. 본문은 첫 발송에서 이미 보냈다."""
     emoji = "🔴" if trigger["action"] == "sell" else "🔵"
     word = "지금 매도!" if trigger["action"] == "sell" else "지금 매수!"
     return (
         f"<!channel> {emoji} *{trigger['round']}호 {trigger['name']} {trigger['quantity']:,}주 {word}* "
-        f"{_level(trigger['index_level'])} 도달 "
+        f"{_reach_text(trigger)} "
         f"(현재 {_index_text(trigger['index'])})"
     )
 
@@ -176,6 +182,7 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
                     "index_name": index["name"],
                     "index": index,
                     "profit_pct": None,
+                    "close_entry": row["close_entry"],
                 }
             )
     return triggers
@@ -211,8 +218,11 @@ def build_message(view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
         # 가장 중요한 정보 — 몇 % 움직이면 사고/파는지 헤더에 바로 보여준다.
         parts = []
         drop = status.get("next_buy_drop_pct")
+        next_row = next((row for row in strategy_view["rounds"] if row["is_next"]), None)
         if drop is None:
             parts.append("매수 없음(회차 소진)")
+        elif next_row is not None and next_row["close_entry"]:
+            parts.append(f"📉 *{status['next_round']}호 장 마감 매수!*")
         elif drop >= 0:
             parts.append(f"📉 *{status['next_round']}호 매수가 도달!*")
         else:
@@ -247,9 +257,20 @@ def build_message(view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
             elif row["is_next"]:
                 is_triggered = (row["round"], "buy") in triggered
                 if is_triggered:
-                    lines.append(f"🔵 {row['round']}호 {quantity} *지금 매수!* {_level(row['buy_index'])} 도달")
+                    reach = (
+                        f"장 마감 매수 · 현재가 {_level(row['close'])}"
+                        if row["close_entry"]
+                        else f"{_level(row['buy_index'])} 도달"
+                    )
+                    lines.append(f"🔵 {row['round']}호 {quantity} *지금 매수!* {reach}")
                 else:
-                    lines.append(f"⏳ {row['round']}호 {quantity} 다음 매수 대기 · {_level(row['buy_index'])}")
+                    # 보유 0 이면 장중에 못 닿아도 장 마감 매수가 있다.
+                    close_note = (
+                        f" · 미도달 시 {status['first_entry_close_time']} 매수" if status["waiting_first_entry"] else ""
+                    )
+                    lines.append(
+                        f"⏳ {row['round']}호 {quantity} 다음 매수 대기 · {_level(row['buy_index'])}{close_note}"
+                    )
             else:
                 lines.append(f"⚪ {row['round']}호 {quantity} 이후 회차 · 매수 예정 {_level(row['buy_index'])}")
 

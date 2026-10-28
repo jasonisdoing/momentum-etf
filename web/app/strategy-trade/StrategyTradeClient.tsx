@@ -29,6 +29,8 @@ type IndexStatus = {
 type Status = {
   held_count: number;
   waiting_first_entry: boolean;
+  // 보유 0 인데 장중 1호 진입선에 못 닿았을 때 1호를 사는 시각(KST, "HH:MM").
+  first_entry_close_time: string;
   // 보유 수량이 회차×회차수량과 다르면 역산이 근사가 된다 — 경고 표시용.
   quantity_mismatch: boolean;
   held_quantity: number;
@@ -57,6 +59,8 @@ type RoundRow = {
   sell_limit: number | null;
   sell_index: number | null;
   buy_reached: boolean;
+  // 진입선이 아니라 장 마감 매수로 닿은 1호 — 현재가로 산다.
+  close_entry: boolean;
   sell_reached: boolean;
   is_next: boolean;
 };
@@ -376,6 +380,7 @@ function StrategySection({
   const { config, status, index } = view;
   // 기준선이 회차 사이에 못 들어가는 경우 — 마지막 회차의 지수 환산에서 저점까지 남은 하락률.
   const lastLeveledRound = [...view.rounds].reverse().find((row) => row.buy_index != null) ?? null;
+  const nextRow = view.rounds.find((row) => row.is_next) ?? null;
   const belowLastRound =
     lastLeveledRound?.buy_index != null && lastLeveledRound.buy_index > 0
       ? {
@@ -520,7 +525,8 @@ function StrategySection({
           주
         </span>
         <span style={{ color: "var(--text-muted)" }}>
-          1호 진입 전일 종가 −{config.trigger_pct}% · 추가 진입 마지막 매수가 −{config.trigger_pct}% ·
+          1호 진입 전일 종가 −{config.trigger_pct}%(미도달 시 {status.first_entry_close_time} 현재가) · 추가
+          진입 마지막 매수가 −{config.trigger_pct}% ·
           매도 진입가 +{config.trigger_pct}%
         </span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -581,7 +587,8 @@ function StrategySection({
         ) : null}
         {status.waiting_first_entry ? (
           <span style={{ fontWeight: 700 }}>
-            1호 진입 대기 — {index.name} {formatNumber(index.buy_trigger)} 이하
+            1호 진입 대기 — {index.name} {formatNumber(index.buy_trigger)} 이하 · 미도달 시{" "}
+            {status.first_entry_close_time} 매수
           </span>
         ) : status.next_round != null ? (
           <span style={{ fontWeight: 700 }}>
@@ -592,7 +599,9 @@ function StrategySection({
         )}
         {status.next_buy_drop_pct != null ? (
           <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>
-            {status.next_buy_drop_pct >= 0
+            {nextRow?.close_entry
+              ? `📉 ${status.next_round}호 장 마감 매수!`
+              : status.next_buy_drop_pct >= 0
               ? `📉 ${status.next_round}호 매수가 도달!`
               : `📉 ${index.name} ${Math.abs(status.next_buy_drop_pct).toFixed(2)}% 더 내리면 ${status.next_round}호 매수`}
           </span>
@@ -770,7 +779,8 @@ export function StrategyTradeClient() {
           <div style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>슬랙 알람</div>
           <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", lineHeight: 1.45, margin: 0 }}>
             켜두면 배치가 평일 09:10~15:20 을 10분 간격으로 판정해, 매수·매도 지정가에 닿은
-            회차가 있을 때만 슬랙을 보냅니다. 같은 전략·회차·동작은 하루 1회입니다.
+            회차가 있을 때만 슬랙을 보냅니다. 보유가 없는 전략은 장중에 1호 진입선에 못 닿으면 15:00
+            이후 1호 매수를 알립니다. 같은 전략·회차·동작은 하루 1회입니다.
           </p>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <div className="form-check form-switch" style={{ paddingLeft: "2.6em", marginBottom: 0 }}>

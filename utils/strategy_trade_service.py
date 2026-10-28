@@ -14,7 +14,8 @@ DB(``system_config.strategy_trade_settings.strategies``)가 단일 소스이며 
 - 진입 회차 수 m = 보유 수량 ÷ 회차당 수량 (반올림, 1~회차 수로 제한).
 - 1호가 P1 = 평균단가 × m ÷ (1 + r + … + r^(m-1)),  r = 1 − 간격%.
 - k호 진입가 = P1 × r^(k-1) · 매도 지정가 = 진입가 × (1 + 간격%).
-- 다음 매수 = 마지막 매수가 × r. 보유가 없으면 1호 진입 = 전일 종가 × r.
+- 다음 매수 = 마지막 매수가 × r. 보유가 없으면 1호 진입 = 전일 종가 × r,
+  장중에 못 닿았으면 15:00(``FIRST_ENTRY_CLOSE_TIME``)부터 마감 전까지 현재가로 1호 매수.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from typing import Any
 from utils.strategy_trade_config import (
     EDITABLE_CONFIG_KEYS,
     ETF_POOL,
+    FIRST_ENTRY_CLOSE_TIME,
     PRICE_CACHE_TICKER_TYPES,
     validate_strategy_trade_config,
 )
@@ -347,6 +349,20 @@ def _load_ticker_status(ticker: str, name: str, trigger_pct: float, live_close: 
     }
 
 
+def _first_entry_close_window(now: datetime | None = None) -> bool:
+    """지금이 1호 장 마감 매수 시간인지 — 한국 거래일의 ``FIRST_ENTRY_CLOSE_TIME`` ~ 정규장 마감 전."""
+    from zoneinfo import ZoneInfo
+
+    from config import MARKET_SCHEDULES
+    from utils.market_session import trading_day_today
+
+    schedule = MARKET_SCHEDULES["kor"]
+    now_local = (now or datetime.now(ZoneInfo(schedule["timezone"]))).astimezone(ZoneInfo(schedule["timezone"]))
+    if trading_day_today("kor", now_local) is None:
+        return False
+    return FIRST_ENTRY_CLOSE_TIME <= now_local.time() < schedule["close"]
+
+
 def _build_strategy_view(
     strategy_id: str,
     strategy_settings: dict[str, Any],
@@ -367,6 +383,8 @@ def _build_strategy_view(
     live_close = float(account.get("close") or 0) or _load_unheld_closes([ticker]).get(ticker)
     index_status = _load_ticker_status(ticker, name, trigger_pct, live_close)
     close = float(index_status["close"])
+    # 보유 0 인데 장중 1호 진입선에 못 닿은 채 장 마감이 다가오면 현재가로 1호를 산다.
+    close_entry = False
 
     # ── 회차 역산 — 수량으로 진입 회차 수, 평균단가로 1호가 ──
     held_rounds = 0
@@ -377,6 +395,8 @@ def _build_strategy_view(
         quantity_mismatch = quantity != held_rounds * round_quantity
         ladder_sum = sum(down_ratio**i for i in range(held_rounds))
         first_entry = avg_price * held_rounds / ladder_sum
+    else:
+        close_entry = _first_entry_close_window()
 
     def entry_price(round_no: int) -> float | None:
         if first_entry is None:
@@ -406,6 +426,7 @@ def _build_strategy_view(
                     "sell_index": sell_limit,
                     "sell_reached": bool(close > 0 and close >= sell_limit),
                     "buy_reached": False,
+                    "close_entry": False,
                     "is_next": False,
                 }
             )
@@ -432,7 +453,9 @@ def _build_strategy_view(
                 "sell_limit": None,
                 "sell_index": None,
                 "sell_reached": False,
-                "buy_reached": bool(is_next and close > 0 and close <= buy_limit),
+                "buy_reached": bool(is_next and close > 0 and (close <= buy_limit or close_entry)),
+                # 진입선이 아니라 장 마감 매수로 닿은 1호 — 지정가 대신 현재가로 산다.
+                "close_entry": bool(is_next and close_entry and close > buy_limit),
                 "is_next": is_next,
             }
         )
@@ -468,6 +491,7 @@ def _build_strategy_view(
         "status": {
             "held_count": held_rounds,
             "waiting_first_entry": held_rounds == 0,
+            "first_entry_close_time": FIRST_ENTRY_CLOSE_TIME.strftime("%H:%M"),
             "next_round": (held_rounds + 1) if held_rounds < max_rounds else None,
             "next_ticker": ticker if held_rounds < max_rounds else None,
             "next_name": name if held_rounds < max_rounds else None,
