@@ -963,13 +963,14 @@ export function StrategyMixClient() {
           return slot ? (p.data?.slots?.[slot]?.plan ?? "") : "";
         },
         // 문구는 각 전략 화면과 **같은 함수**로 그린다 — 여기서 만들면 표현이 갈린다.
-        // 포트폴리오만 진입·이탈 판정이 없어 저장 비중 문구를 그대로 보여준다.
+        // 포트폴리오·사고팔기는 진입·이탈 판정이 없어 저장 비중·보유 회차 문구를 그대로 보여준다.
         cellRenderer: (p: { data?: PositionRow }) => {
           const slot = p.data?.group_slot;
           if (!slot || p.data?.is_group) return null;
           const cell = p.data?.slots?.[slot];
           if (!cell?.plan) return null;
-          if (sleeves.find((sleeve) => sleeve.key === slot)?.strategy === "portfolio") {
+          const slotStrategy = sleeves.find((sleeve) => sleeve.key === slot)?.strategy;
+          if (slotStrategy === "portfolio" || slotStrategy === "strategy_trade") {
             return <span style={{ color: "var(--text-muted)" }}>{cell.status}</span>;
           }
           return renderSlotStatus(

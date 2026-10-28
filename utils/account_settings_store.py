@@ -178,6 +178,27 @@ def _validate_mix_pool(
     return pool
 
 
+def _validate_trade_sleeve(account_id: str, label: str, pool: str) -> None:
+    """사고팔기 슬리브 — 사고팔기를 켠 풀이어야 하고, 한 종목풀은 한 계좌에만 붙일 수 있다.
+
+    운용 계좌는 슬리브가 붙은 계좌로 정해지므로(전략마다 계좌를 따로 고르지 않는다) 두 계좌가
+    같은 풀을 가지면 어느 계좌의 보유로 회차를 세야 할지 알 수 없다.
+    """
+    from utils.pool_strategy_use import STRATEGY_TRADE, pools_using
+
+    if pool not in pools_using(STRATEGY_TRADE):
+        raise AccountSettingsStoreError(
+            f"'{account_id}' 의 {label} 사고팔기는 종목풀 설정에서 사고팔기를 켠 풀만 고를 수 있습니다: {pool}"
+        )
+    for doc in load_account_docs():
+        if doc["account_id"] == account_id:
+            continue
+        if any(sleeve["strategy"] == STRATEGY_TRADE and sleeve["pool"] == pool for sleeve in mix_sleeves_of(doc)):
+            raise AccountSettingsStoreError(
+                f"{pool} 종목풀의 사고팔기는 이미 '{doc['account_id']}' 계좌에 붙어 있습니다 — 한 풀은 한 계좌에만 붙입니다."
+            )
+
+
 def _validate_mix_sleeves(
     account_id: str, raw: Any, values: dict[str, Any], existing_doc: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -217,6 +238,8 @@ def _validate_mix_sleeves(
                 f"{strategy}({pool})"
             )
         seen.add((strategy, pool))
+        if strategy == "strategy_trade":
+            _validate_trade_sleeve(account_id, label, pool)
 
         name = str(item.get("name") or "").strip()
         if len(name) > MIX_SLEEVE_NAME_MAX_LEN:

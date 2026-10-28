@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useState } from "react";
 
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
-import AccountSelect, { formatAccountLabel, type AccountOptionBase } from "../components/AccountSelect";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
@@ -39,6 +38,10 @@ type Status = {
   // 보유 수량이 회차×회차수량과 다르면 역산이 근사가 된다 — 경고 표시용.
   quantity_mismatch: boolean;
   held_quantity: number;
+  // 이 전략의 매수 한도(원) · 이미 산 금액(원) · 다음 회차가 한도에 막혔는지.
+  budget: number;
+  invested: number;
+  limit_blocked: boolean;
   next_round: number | null;
   next_ticker: string | null;
   next_name: string | null;
@@ -66,6 +69,8 @@ type RoundRow = {
   buy_reached: boolean;
   // 진입선이 아니라 장 마감 매수로 닿은 1호 — 현재가로 산다.
   close_entry: boolean;
+  // 다음 회차가 매수 한도를 넘는다 — 이 회차부터는 사지 않는다.
+  over_limit: boolean;
   sell_reached: boolean;
   is_next: boolean;
 };
@@ -75,8 +80,6 @@ type StrategyView = {
   label: string;
   /** 이 전략이 속한 종목풀. */
   pool: string;
-  /** 이 전략의 운용 계좌 — 전략마다 따로 고른다. */
-  account_id: string;
   ticker: string;
   config: StrategyConfig;
   index: IndexStatus;
@@ -84,10 +87,31 @@ type StrategyView = {
   rounds: RoundRow[];
 };
 
+/** 저장된 전략 설정 한 줄 — 편집 표의 행. */
+type StrategyConfigRow = {
+  strategy_id: string;
+  ticker: string;
+  name: string;
+  trigger_pct: number;
+  round_quantity: number;
+  rounds: number;
+};
+
+/** 이 종목풀의 사고팔기 합성 슬리브 — 운용 계좌와 매수 한도의 출처. */
+type Sleeve = {
+  account_id: string;
+  account_name: string;
+  weight_pct: number;
+  limit_krw: number;
+  per_strategy_limit_krw?: number;
+};
+
 type View = {
-  /** 운용 계좌 선택지 — 한국 종목을 담는 계좌. */
-  accounts: AccountOptionBase[];
   slack_enabled: boolean;
+  /** 합성에서 이 종목풀에 붙인 사고팔기 슬리브. 없으면 null — 운용 현황을 만들 수 없다. */
+  sleeve: Sleeve | null;
+  /** 저장된 전략 설정 — 슬리브 유무와 무관하게 편집할 수 있다. */
+  configs: StrategyConfigRow[];
   /** 사고팔기를 켠 종목풀 — 종목풀 설정의 토글이 단일 소스다. */
   pool_options: PoolLabelSource[];
   /** 백테스트 기간 선택지 — 백엔드가 단일 소스다. */
@@ -137,6 +161,11 @@ const tdStyle: React.CSSProperties = { padding: "6px 8px", textAlign: "right" };
 function formatNumber(value: number | null | undefined, digits = 0): string {
   if (value == null || !Number.isFinite(value)) return "-";
   return value.toLocaleString("ko-KR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+/** 원 금액을 만원 단위로 — 한도·투입금처럼 큰 금액용. */
+function formatKrwMan(value: number): string {
+  return `${Math.round(value / 10_000).toLocaleString("ko-KR")}만원`;
 }
 
 function formatSigned(value: number | null | undefined, digits = 2): string {
@@ -292,7 +321,6 @@ type DraftRow = {
   strategy_id: string | null;
   ticker: string | null;
   tickerName: string;
-  account_id: string;
   pct: string;
   qty: string;
   rounds: string;
@@ -304,22 +332,21 @@ function nextDraftKey(): string {
   return `row-${draftKeySeq}`;
 }
 
-function rowsFromStrategies(strategies: StrategyView[]): DraftRow[] {
-  return strategies.map((strategy) => ({
-    key: strategy.strategy_id,
-    strategy_id: strategy.strategy_id,
-    ticker: strategy.ticker,
-    tickerName: strategy.label,
-    account_id: strategy.account_id,
-    pct: String(strategy.config.trigger_pct),
-    qty: String(strategy.config.round_quantity),
-    rounds: String(strategy.config.rounds),
+function rowsFromConfigs(configs: StrategyConfigRow[]): DraftRow[] {
+  return configs.map((config) => ({
+    key: config.strategy_id,
+    strategy_id: config.strategy_id,
+    ticker: config.ticker,
+    tickerName: config.name,
+    pct: String(config.trigger_pct),
+    qty: String(config.round_quantity),
+    rounds: String(config.rounds),
   }));
 }
 
 /** 변경 비교용 — 입력 중 문자열을 저장 값 모양으로 맞춘다. */
 function comparableRow(row: DraftRow) {
-  return [row.strategy_id, row.ticker, row.account_id, Number(row.pct), Number(row.qty), Number(row.rounds)];
+  return [row.strategy_id, row.ticker, Number(row.pct), Number(row.qty), Number(row.rounds)];
 }
 
 /** 상단 설정 카드 — 종목풀 셀렉트, 전략 설정 표, 저장 버튼 하나. */
@@ -338,7 +365,7 @@ function PoolSettingsCard({
   onDirtyChange: (dirty: boolean) => void;
 }) {
   const toast = useToast();
-  const [rows, setRows] = useState<DraftRow[]>(() => rowsFromStrategies(view.strategies));
+  const [rows, setRows] = useState<DraftRow[]>(() => rowsFromConfigs(view.configs));
   // 슬랙 알람은 풀이 아니라 전역 스위치지만 같은 저장 버튼으로 저장한다(합성 화면과 같은 방식).
   const [slackEnabled, setSlackEnabled] = useState(view.slack_enabled);
   const [slackTesting, setSlackTesting] = useState(false);
@@ -346,15 +373,15 @@ function PoolSettingsCard({
 
   // 서버가 최신 값을 돌려주면(저장·풀 전환) 초안도 그 값으로 맞춘다.
   useEffect(() => {
-    setRows(rowsFromStrategies(view.strategies));
-  }, [view.strategies]);
+    setRows(rowsFromConfigs(view.configs));
+  }, [view.configs]);
   useEffect(() => {
     setSlackEnabled(view.slack_enabled);
   }, [view.slack_enabled]);
 
   const isDirty =
     slackEnabled !== view.slack_enabled ||
-    JSON.stringify(rows.map(comparableRow)) !== JSON.stringify(rowsFromStrategies(view.strategies).map(comparableRow));
+    JSON.stringify(rows.map(comparableRow)) !== JSON.stringify(rowsFromConfigs(view.configs).map(comparableRow));
   useEffect(() => {
     onDirtyChange(isDirty);
   }, [isDirty, onDirtyChange]);
@@ -371,13 +398,12 @@ function PoolSettingsCard({
         strategy_id: null,
         ticker: null,
         tickerName: "",
-        account_id: view.accounts[0]?.account_id ?? "",
         pct: "5",
         qty: "",
         rounds: "4",
       },
     ]);
-  }, [view.accounts]);
+  }, []);
 
   const handlePoolChange = useCallback(
     (next: string) => {
@@ -395,7 +421,6 @@ function PoolSettingsCard({
       const qty = Number(row.qty);
       const rounds = Number(row.rounds);
       if (!row.ticker) return void toast.error(`${label}: 종목 티커를 입력하고 확인하세요.`);
-      if (!row.account_id) return void toast.error(`${label}: 계좌를 고르세요.`);
       if (!Number.isFinite(pct) || pct < PCT_MIN || pct > PCT_MAX) {
         return void toast.error(`${label}: 매매 간격은 ${PCT_MIN}~${PCT_MAX} 사이 숫자여야 합니다.`);
       }
@@ -405,7 +430,6 @@ function PoolSettingsCard({
       }
       strategies.push({
         ...(row.strategy_id ? { strategy_id: row.strategy_id } : {}),
-        account_id: row.account_id,
         ticker: row.ticker,
         trigger_pct: pct,
         round_quantity: qty,
@@ -510,6 +534,21 @@ function PoolSettingsCard({
             </div>
           </div>
 
+          {view.sleeve ? (
+            <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginTop: 8 }}>
+              운용 계좌 {view.sleeve.account_name}({view.sleeve.account_id}) · 합성 슬리브 {view.sleeve.weight_pct}% · 매수
+              한도 {formatKrwMan(view.sleeve.limit_krw)}
+              {view.sleeve.per_strategy_limit_krw != null
+                ? ` (전략당 ${formatKrwMan(view.sleeve.per_strategy_limit_krw)})`
+                : ""}
+            </div>
+          ) : (
+            <div className="alert alert-warning" style={{ marginTop: 10, marginBottom: 0 }}>
+              이 종목풀의 사고팔기 슬리브가 어느 계좌에도 붙어 있지 않습니다 — 합성 화면에서 「사고팔기」 슬리브를 붙이면
+              운용 현황이 나옵니다.
+            </div>
+          )}
+
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
             {rows.map((row) => (
               <div
@@ -522,15 +561,6 @@ function PoolSettingsCard({
                   confirmedName={row.tickerName}
                   onChange={(ticker, name) => updateRow(row.key, { ticker, tickerName: name })}
                   disabled={saving}
-                />
-                <AccountSelect
-                  accounts={view.accounts}
-                  value={row.account_id}
-                  onChange={(account_id) => updateRow(row.key, { account_id })}
-                  label="계좌"
-                  disabled={saving}
-                  style={{ minWidth: 220 }}
-                  labelStyle={{ flexDirection: "row", alignItems: "center", gap: 6 }}
                 />
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                   매매 간격
@@ -591,9 +621,8 @@ function PoolSettingsCard({
 }
 
 /** 전략 하나의 운용 현황(현재 판단 + 회차 표) — 설정은 상단 카드에서 편집한다. */
-function StrategySection({ view, accounts }: { view: StrategyView; accounts: AccountOptionBase[] }) {
+function StrategySection({ view }: { view: StrategyView }) {
   const { config, status, index } = view;
-  const account = accounts.find((item) => item.account_id === view.account_id);
   // 기준선이 회차 사이에 못 들어가는 경우 — 마지막 회차의 지수 환산에서 저점까지 남은 하락률.
   const lastLeveledRound = [...view.rounds].reverse().find((row) => row.buy_index != null) ?? null;
   const nextRow = view.rounds.find((row) => row.is_next) ?? null;
@@ -610,8 +639,8 @@ function StrategySection({ view, accounts }: { view: StrategyView; accounts: Acc
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline", fontSize: "var(--fs-sm)" }}>
         <span style={{ fontWeight: 800, fontSize: "var(--fs-base)" }}>{view.label}</span>
         <span style={{ color: "var(--text-muted)" }}>
-          {view.ticker} · {account ? formatAccountLabel(account) : view.account_id} · 간격 {config.trigger_pct}% · 회차당{" "}
-          {formatNumber(config.round_quantity)}주 · {config.rounds}회
+          {view.ticker} · 간격 {config.trigger_pct}% · 회차당 {formatNumber(config.round_quantity)}주 · {config.rounds}회
+          · 한도 {formatKrwMan(status.budget)} 중 {formatKrwMan(status.invested)} 사용
         </span>
       </div>
 
@@ -651,7 +680,9 @@ function StrategySection({ view, accounts }: { view: StrategyView; accounts: Acc
         ) : (
           <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>회차 소진 — 매도 대기</span>
         )}
-        {status.next_buy_drop_pct != null ? (
+        {status.limit_blocked ? (
+          <span style={actionBadgeStyle("var(--text-muted)")}>⏸ {status.next_round}호 한도 도달 — 추가 매수 중단</span>
+        ) : status.next_buy_drop_pct != null ? (
           <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>
             {nextRow?.close_entry
               ? `📉 ${status.next_round}호 장 마감 매수!`
@@ -716,6 +747,9 @@ function StrategySection({ view, accounts }: { view: StrategyView; accounts: Acc
                 <td style={{ ...tdStyle, fontWeight: row.is_next ? 700 : undefined }}>
                   {formatNumber(row.buy_limit)}
                   {row.buy_reached ? <ReachedBadge /> : null}
+                  {row.over_limit ? (
+                    <span style={{ marginLeft: 6, color: "var(--text-muted)", fontWeight: 400 }}>한도 도달</span>
+                  ) : null}
                 </td>
                 <td style={{ ...tdStyle, fontWeight: row.sell_limit != null ? 700 : undefined }}>
                   {formatNumber(row.sell_limit)}
@@ -808,22 +842,24 @@ export function StrategyTradeClient() {
         <section className="appSection">
           <div className="strategyTradeGrid">
             {view.strategies.map((strategy) => (
-              <StrategySection key={strategy.strategy_id} view={strategy} accounts={view.accounts} />
+              <StrategySection key={strategy.strategy_id} view={strategy} />
             ))}
           </div>
         </section>
 
         {/* 백테스트 — 설정이나 풀이 바뀌면 결과가 어긋나므로 다시 마운트해 비운다. */}
         <TradeBacktestSection
-          key={`${view.pool}:${view.strategies.map((s) => `${s.strategy_id}/${s.ticker}/${s.config.trigger_pct}/${s.config.round_quantity}/${s.config.rounds}`).join(",")}`}
+          key={`${view.pool}:${view.configs.map((c) => `${c.strategy_id}/${c.ticker}/${c.trigger_pct}/${c.round_quantity}/${c.rounds}`).join(",")}:${view.sleeve?.limit_krw ?? ""}`}
           pool={view.pool}
           monthOptions={view.month_options}
           blockedReason={
             dirty
               ? "저장하지 않은 변경이 있습니다 — 저장한 뒤 실행하세요."
-              : view.strategies.length === 0
+              : view.configs.length === 0
                 ? "이 종목풀에 전략이 없습니다."
-                : null
+                : view.sleeve === null
+                  ? "사고팔기 슬리브가 계좌에 붙어 있지 않습니다."
+                  : null
           }
         />
       </div>

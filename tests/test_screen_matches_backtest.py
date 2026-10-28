@@ -88,7 +88,7 @@ def _expected_mix_targets(ctx: dict[str, Any]) -> set[str]:
     확정·장중 어느 경우든 유효하다: 보유에서 매도(체결 예정·잠정 예정 포함)를 빼고
     진입 예정(빈 자리만큼)을 더한 '다음 시가 이후의 보유'다.
     """
-    from utils.mix_sleeve import PORTFOLIO, current_state
+    from utils.mix_sleeve import PORTFOLIO, STRATEGY_TRADE, current_state
     from utils.strategy_mix_service import mix_weights_for_account
 
     weights = mix_weights_for_account(ctx["account_id"])
@@ -96,6 +96,10 @@ def _expected_mix_targets(ctx: dict[str, Any]) -> set[str]:
     for spec in ctx["slots"]:
         # 계좌 비중 0% 슬리브 — 배분이 없으니 목표 주수도 0 이 맞다(화면과 동일 기준).
         if float(weights.get(f"{spec.key}_pct") or 0) <= 0:
+            continue
+        if spec.strategy == STRATEGY_TRADE:
+            # 사고팔기는 엔진 판정이 없다 — 합성은 슬리브에 속한 전략의 종목을 보유 표에 올리기만 한다.
+            expected |= {str(row["ticker"]) for row in spec.settings["strategies"]}
             continue
         positions = current_state(spec)
         if spec.strategy == PORTFOLIO:
@@ -262,13 +266,17 @@ class IntradayScreenMixConsistencyTest(unittest.TestCase):
                 patch.object(new_high_backtest, "_live_quotes", fake_quotes),
                 patch("utils.slot_positions._live_quotes", fake_quotes),
             ):
-                from utils.mix_sleeve import PORTFOLIO, current_state
+                from utils.mix_sleeve import PORTFOLIO, STRATEGY_TRADE, current_state
 
                 account_id = _mix_account()
                 ctx = _resolve_mix_account(account_id)
                 mix = mix_positions(account_id)
                 expected = _expected_mix_targets(ctx)
-                slot_positions = {spec.key: current_state(spec) for spec in ctx["slots"] if spec.strategy != PORTFOLIO}
+                slot_positions = {
+                    spec.key: current_state(spec)
+                    for spec in ctx["slots"]
+                    if spec.strategy not in (PORTFOLIO, STRATEGY_TRADE)
+                }
         except Exception as error:  # noqa: BLE001
             _skip_if_unavailable(error)
         finally:

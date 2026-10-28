@@ -6,6 +6,8 @@
 - k호 진입가 = 1호 체결가 × (1 − 간격%)^(k−1).
 - k호 매도가 = k호 진입가 × (1 + 간격%).
 - 지정가는 ETF 호가 단위(5원)로 반올림한다.
+- 전략마다 매수 한도(원)가 있다. 이미 산 회차의 매수금액에 다음 회차 금액을 더해 한도를 넘으면
+  그 회차부터는 사지 않는다(`within_budget`).
 
 계좌 보유에서 회차를 거꾸로 맞추는 계산(`first_entry_from_average`)도 여기 둔다 — 평균단가는
 회차가 1호부터 연속으로 찬 사다리의 평균이라는 전제에서만 1호가로 되돌려진다.
@@ -54,6 +56,11 @@ def first_buy_limit(prev_close: float, trigger_pct: float) -> float:
 def preview_buy_limit(prev_close: float, round_no: int, trigger_pct: float) -> float:
     """보유가 없을 때 화면에 미리 보여주는 k호 매수 지정가 — 전일 종가에서 k번 내린 가격."""
     return round_to_tick(prev_close * down_ratio(trigger_pct) ** round_no)
+
+
+def within_budget(invested_cost: float, price: float, quantity: int, budget: float) -> bool:
+    """다음 회차를 사도 한도(원)를 넘지 않는지 — 넘으면 그 회차부터 사지 않는다. 매도는 한도와 무관하다."""
+    return invested_cost + price * quantity <= budget + 1e-9
 
 
 def sell_limit(entry: float, trigger_pct: float) -> float:

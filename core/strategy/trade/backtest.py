@@ -9,6 +9,8 @@
 - 매도는 봉이 시작될 때 이미 보유한 회차만 판다 — 그날 산 회차는 다음 봉부터 판다.
 - 매도가 있었던 날은 다시 사지 않는다(같은 봉 안의 순서를 알 수 없어 왕복 매매를 만들지 않는다).
   전량 매도 뒤 1호 진입은 다음 봉에서 그날 직전 종가 기준으로 다시 시작한다.
+- 전략마다 매수 한도(`LadderSpec.budget`, 원)가 있어, 사고 나면 이미 산 금액이 한도를 넘는 회차는
+  사지 않는다(1호 포함). 매도는 한도와 무관하다.
 - 수수료·세금은 반영하지 않는다(ETF 는 매도세가 없고 수수료는 미미하다).
 """
 
@@ -33,6 +35,8 @@ class LadderSpec:
     trigger_pct: float
     quantity: int
     rounds: int
+    # 이 전략이 쓸 수 있는 매수 한도(원) — 합성 슬리브 비중에서 온다.
+    budget: float
 
 
 def _trade_row(
@@ -100,25 +104,32 @@ def simulate_ladder(bars: pd.DataFrame, spec: LadderSpec, *, market_buy_slippage
         if not held:
             first_entry = None
 
-        # 2) 매수 — 매도가 있었던 날은 쉰다.
+        # 2) 매수 — 매도가 있었던 날은 쉰다. 한도를 넘는 회차부터는 사지 않는다.
         if not sold_today:
             limit_filled = True
             if not held:
                 limit = rules.first_buy_limit(prev_close, pct)
                 if low <= limit:
-                    first_entry = min(open_, limit)
+                    fill = min(open_, limit)
                 else:
                     # 장중에 못 닿았으면 15:00 에 사는 규칙 — 일봉에서는 종가에 시장가로 산다.
-                    first_entry = close * (1.0 + market_buy_slippage_pct / 100.0)
+                    fill = close * (1.0 + market_buy_slippage_pct / 100.0)
                     limit_filled = False
-                held[1] = (date, first_entry)
-            if limit_filled:
+                if rules.within_budget(0.0, fill, spec.quantity, spec.budget):
+                    first_entry = fill
+                    held[1] = (date, fill)
+                else:
+                    limit_filled = False
+            if held and limit_filled:
+                invested = sum(spec.quantity * fill for _, fill in held.values())
                 round_no = max(held) + 1
                 while round_no <= spec.rounds:
                     limit = rules.buy_limit(first_entry, round_no, pct)
-                    if low > limit:
+                    fill = min(open_, limit)
+                    if low > limit or not rules.within_budget(invested, fill, spec.quantity, spec.budget):
                         break
-                    held[round_no] = (date, min(open_, limit))
+                    held[round_no] = (date, fill)
+                    invested += spec.quantity * fill
                     round_no += 1
 
         unrealized = sum(spec.quantity * (close - fill) for _, fill in held.values())

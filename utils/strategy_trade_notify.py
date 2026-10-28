@@ -219,6 +219,8 @@ def build_message(view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
         next_row = next((row for row in strategy_view["rounds"] if row["is_next"]), None)
         if drop is None:
             parts.append("매수 없음(회차 소진)")
+        elif status["limit_blocked"]:
+            parts.append(f"⏸ {status['next_round']}호 한도 도달 — 추가 매수 중단")
         elif next_row is not None and next_row["close_entry"]:
             parts.append(f"📉 *{status['next_round']}호 장 마감 매수!*")
         elif drop >= 0:
@@ -252,6 +254,8 @@ def build_message(view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
                         f"🟢 {row['round']}호 {quantity} 보유 중 ({profit_text}) · "
                         f"매도 목표 {_level(row['sell_index'])}"
                     )
+            elif row["is_next"] and row["over_limit"]:
+                lines.append(f"⏸ {row['round']}호 {quantity} 한도 도달 — 추가 매수 중단")
             elif row["is_next"]:
                 is_triggered = (row["round"], "buy") in triggered
                 if is_triggered:

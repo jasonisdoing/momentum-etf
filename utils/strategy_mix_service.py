@@ -15,7 +15,7 @@ from core.strategy.mix.actions import build_action_groups
 from core.strategy.mix.targets import dated_target_shares
 from utils.cash_model import currency_for_country
 from utils.logger import get_app_logger
-from utils.mix_sleeve import STRATEGY_LABELS, SleeveSpec
+from utils.mix_sleeve import STRATEGY_LABELS, STRATEGY_TRADE, SleeveSpec
 from utils.perf_metrics import max_drawdown_window
 from utils.pool_strategy_use import pool_options
 from utils.stock_memo_store import attach_stock_memos
@@ -578,11 +578,13 @@ def _attach_account_targets(
     target_shares: dict[str, int] | None = None,
     *,
     capital_krw: float,
+    self_managed: set[str],
 ) -> list[dict[str, Any]]:
     """계좌 보유와 목표를 대조해 수량 지시를 붙인다. 전량 매도 요약 목록을 돌려준다.
 
     종목별 목표 금액·주수 → 현재 보유와의 차이가 그대로 매매 지시가 된다.
     행이 종목 단위라 계좌 보유와 1:1 로 비교된다(겹치는 종목도 한 번만 센다).
+    ``self_managed`` 종목(사고팔기)은 합성이 주문하지 않는다 — 목표 수량을 현재 보유로 두어 지시가 없다.
     목표 포트폴리오에 없는 보유 종목은 전량 매도 대상 — 목표 비중 0% 행으로 표에
     함께 넣는다 (팔아야 할 종목이 표 밖에 있으면 계좌를 표 하나로 대조할 수 없다).
     """
@@ -621,7 +623,10 @@ def _attach_account_targets(
     target_shares = target_shares or {}
     for row in holdings:
         price_krw = price_krw_by_ticker.get(row["ticker"])
-        if row["ticker"] in target_shares:
+        if row["ticker"] in self_managed:
+            # 슬리브가 지정가로 직접 운용 — 합성의 목표 수량은 지금 보유 그대로라 매매 지시가 없다.
+            target_qty = int(row["held_quantity"])
+        elif row["ticker"] in target_shares:
             target_qty = target_shares[row["ticker"]]
         elif price_krw:
             # 포트폴리오 슬리브·목표 0 행 — 판정이 없어 비중으로만 잡는다.
@@ -634,7 +639,11 @@ def _attach_account_targets(
         # 작으면 도달할 수 없는 목표가 생기는데, 이걸 숨기면 백테스트 수익률을 낼 수 있다고
         # 착각하게 된다. 비중은 백테스트 것 그대로 둔다(종목·비중은 절대 바꾸지 않는다).
         row["unaffordable"] = bool(
-            target_qty == 0 and float(row.get("weight_pct") or 0) > 0 and not row.get("is_sell_all") and price_krw
+            target_qty == 0
+            and float(row.get("weight_pct") or 0) > 0
+            and not row.get("is_sell_all")
+            and price_krw
+            and row["ticker"] not in self_managed
         )
         # **실제 가능한 비중** — 목표 주수 × 1주 값 ÷ 총자산. 계좌 금액과 단주 때문에 백테스트
         # 비중에 못 미치는 만큼이 여기서 드러난다(DELL 목표 5.97% ↔ 실제 3.75% = 1주).
@@ -688,6 +697,27 @@ def _attach_account_targets(
     return sell_all
 
 
+def _pin_self_managed(
+    target_schedule: dict[str, dict[str, Any]], account: dict[str, Any], tickers: set[str], krw_rate: float
+) -> None:
+    """합성이 주문하지 않는 종목(사고팔기)의 목표를 날짜마다 **현재 보유 그대로** 박는다.
+
+    액션 조립은 목표 일정에 없는 종목을 0주 목표로 읽어 전량 매도를 만든다. 보유 수량·금액을
+    목표와 이전 목표에 같게 넣어 차이가 없게 하고, 금액이 0 이라 청산으로 읽히는 일도 막는다.
+    """
+    for ticker in sorted(tickers):
+        item = account["holdings"].get(ticker)
+        held = int(item["quantity"]) if item else 0
+        value_krw = (item or {}).get("value")
+        if held > 0 and value_krw is None:
+            raise RuntimeError(f"{ticker} 가격을 알 수 없어 사고팔기 보유를 평가할 수 없습니다.")
+        amount = float(value_krw) / krw_rate if held > 0 else 0.0
+        for day_target in target_schedule.values():
+            day_target["quantities"][ticker] = held
+            day_target["amounts"][ticker] = amount
+            day_target["previous_amounts"][ticker] = amount
+
+
 def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     """오늘 기준 합성 운영 상태 — 보유 목록(목표 비중)·현금 비중·오늘의 액션.
 
@@ -707,8 +737,13 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     from utils.strategy_settings import require_start_date
 
     for spec in slots:
-        require_start_date(spec.settings)
+        # 사고팔기는 시작일 개념이 없다(지정가 사다리를 계좌 보유에서 읽는다).
+        if spec.strategy != STRATEGY_TRADE:
+            require_start_date(spec.settings)
     states = {spec.key: slot_state(spec) for spec in slots}
+    # 합성이 주문을 만들지 않는 슬리브(사고팔기) — 목표 수량 배분과 체결일 비교에서 뺀다.
+    managed_keys = {key for key, state in states.items() if state.self_managed}
+    managed_tickers = {str(target["ticker"]).strip() for key in managed_keys for target in states[key].targets}
 
     from core.strategy.mix.capital_policy import internal_target_weights
 
@@ -814,7 +849,10 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     # 체결일 표기가 없는 예정 행(엔진의 잠정 판정)이 체결되는 날 — **슬리브 엔진이 낸 값 그대로**
     # (`slot_positions.next_fill_session` / `_next_session`, 전략 화면의 `next_session`). 합성이 따로
     # 셈하면 같은 예정이 화면마다 다른 날로 갈린다(2026-10-26 전략 10/27·합성 10/26).
-    sessions = {states[spec.key].next_session for spec in slots}
+    # 주문을 만들지 않는 슬리브는 비교에서 뺀다 — 모두 그런 계좌면 그 슬리브의 값을 쓴다.
+    sessions = {states[spec.key].next_session for spec in slots if spec.key not in managed_keys} or {
+        states[spec.key].next_session for spec in slots
+    }
     if len(sessions) != 1:
         raise RuntimeError(f"슬리브마다 다음 체결일이 다릅니다: {sorted(str(s) for s in sessions)}")
     next_trading_day = sessions.pop()
@@ -865,16 +903,23 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
                 row[f"{key}_weight"] *= investable_ratio
         sleeve_amount_krw = {key: ctx["mix_capital_krw"] * shares[key] / 100.0 for key in keys}
         target_schedule = dated_target_shares(
-            {key: state.targets for key, state in states.items()},
-            sleeve_amount_krw,
+            {key: state.targets for key, state in states.items() if key not in managed_keys},
+            {key: amount for key, amount in sleeve_amount_krw.items() if key not in managed_keys},
             krw_rate,
             ctx["mix_capital_krw"],
             next_trading_day,
             adjustment_day=adjustment_day,
         )
+        _pin_self_managed(target_schedule, account, managed_tickers, krw_rate)
         target_shares = target_schedule[max(target_schedule)]["quantities"]
         account["sell_all"] = _attach_account_targets(
-            holdings, account, krw_rate, slot_keys=keys, target_shares=target_shares, capital_krw=ctx["mix_capital_krw"]
+            holdings,
+            account,
+            krw_rate,
+            slot_keys=keys,
+            target_shares=target_shares,
+            capital_krw=ctx["mix_capital_krw"],
+            self_managed=managed_tickers,
         )
 
         if account["fixed_asset_value"]:
@@ -1043,6 +1088,8 @@ def _simulate_mix(
     intervals = []
     costs = {}
     for spec in ctx["slots"]:
+        if spec.strategy == STRATEGY_TRADE:
+            continue  # 사고팔기는 지정가 체결이라 합성 재생 대상이 아니다 — 아래에서 원화 손익을 더한다.
         weights = internal_target_weights(strategy=spec.strategy, settings=spec.settings)
         cost = tuple(value / 100.0 for value in get_pool_slippage(spec.pool))
         for row in results[spec.key]["trades"]:
@@ -1099,6 +1146,14 @@ def _simulate_mix(
     )
 
     replayed["fx"] = {str(day.date()): float(rate) for day, rate in fx.items()}
+    # 사고팔기 슬리브 — 한도만큼의 현금이 재생에서 그대로 남아 있으므로 그 슬리브의 원화 손익을 더한다.
+    pnl_sources = [results[spec.key]["pnl_krw"] for spec in ctx["slots"] if spec.strategy == STRATEGY_TRADE]
+    if pnl_sources:
+        pnl = pd.Series(0.0, index=replayed["curve"].index)
+        for source in pnl_sources:
+            series = pd.Series(source).reindex(pnl.index.union(pd.Index(source))).sort_index().ffill().fillna(0.0)
+            pnl += series.reindex(pnl.index)
+        replayed["curve"] = replayed["curve"] + pnl / float(ctx["mix_capital_krw"])
     return replayed
 
 
@@ -1160,7 +1215,10 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
 
     ctx = _resolve_mix_account(account_id)
     if months is None:
-        months = min(int(spec.settings["backtest_months"]) for spec in ctx["slots"])
+        saved = [int(spec.settings["backtest_months"]) for spec in ctx["slots"] if spec.strategy != STRATEGY_TRADE]
+        if not saved:
+            raise ValueError("사고팔기만 있는 합성은 백테스트 기간(months)을 지정해야 합니다.")
+        months = min(saved)
     months = int(months)
     allowed = month_options()
     if months not in allowed:
@@ -1292,6 +1350,10 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
         }
         for row in replayed["executions"]
     ]
+    # 사고팔기 슬리브의 체결 — 합성 재생이 아니라 그 슬리브 시뮬레이션의 회차별 매수·매도다.
+    for spec in ctx["slots"]:
+        if spec.strategy == STRATEGY_TRADE:
+            merged_trades.extend({**row, "strategy": spec.key} for row in results[spec.key]["trades"])
 
     return {
         "computed_at": datetime.now().astimezone().isoformat(),

@@ -2,9 +2,8 @@
 
 종목별 사다리 시뮬레이션(`core.strategy.trade.backtest`)을 전략마다 돌려 손익을 합친다.
 
-- 기준 자본 = 전략마다 `회차당 수량 × 회차 수 × 기준 종가`의 합 — 회차를 전부 채웠다고 볼 때의 총
-  매수금액이다. 기준 종가는 기간 시작 직전 봉의 종가다. 수량이 고정이라 현금 한도는 두지 않고,
-  일별 수익률은 기준 자본 대비 손익으로 낸다.
+- 기준 자본 = 합성 슬리브 한도(슬리브 비중 × 합성 기준금액)다. 전략마다 한도를 균등 분할해
+  그 한도를 넘는 회차부터는 사지 않고, 일별 수익률은 기준 자본 대비 손익으로 낸다.
 - 벤치마크는 종목풀 설정의 벤치마크를 기간 내내 그냥 보유한 것이다.
 """
 
@@ -22,7 +21,7 @@ from utils.perf_metrics import daily_return_metrics, max_drawdown_window
 from utils.pool_settings_store import get_pool_benchmark_ticker
 from utils.pool_signal_backtest_service import validate_backtest_months
 from utils.settings_loader import get_ticker_type_settings
-from utils.strategy_trade_service import load_settings
+from utils.strategy_trade_service import load_settings, sleeve_for_pool, strategy_budget
 from utils.trade_stats import summarize_trades
 
 COUNTRY = "kor"
@@ -67,12 +66,16 @@ def _summarize(returns_pct: pd.Series, base_date: pd.Timestamp) -> dict[str, Any
     }
 
 
-def run_strategy_trade_backtest(pool: str, months: int) -> dict[str, Any]:
-    """종목풀의 사고팔기 전략 전체를 최근 ``months`` 개월 백테스트한다."""
+def _simulate_pool(pool: str, months: int) -> dict[str, Any]:
+    """종목풀의 사고팔기 전략 전체를 최근 ``months`` 개월 시뮬레이션해 손익(원)과 체결을 모은다."""
     validate_backtest_months(months)
     strategies = [entry for entry in load_settings()["strategies"].values() if entry["pool"] == pool]
     if not strategies:
         raise ValueError(f"{pool} 종목풀에 사고팔기 전략이 없습니다.")
+    sleeve = sleeve_for_pool(pool)
+    if sleeve is None:
+        raise ValueError(f"{pool} 종목풀의 사고팔기 슬리브가 어느 계좌에도 붙어 있지 않습니다 — 합성에서 붙이세요.")
+    budget = strategy_budget(sleeve, len(strategies))
 
     pool_settings = get_ticker_type_settings(pool) or {}
     benchmark_ticker = get_pool_benchmark_ticker(pool_settings)
@@ -87,24 +90,49 @@ def run_strategy_trade_backtest(pool: str, months: int) -> dict[str, Any]:
     end = max(bars[entry["ticker"]].index[-1] for entry in strategies)
     start = end - pd.DateOffset(months=months)
 
-    results: list[tuple[dict[str, Any], float]] = []
-    base_capital = 0.0
+    results = []
     for entry in strategies:
         data = _simulation_input(bars[entry["ticker"]], start)
         spec = LadderSpec(
-            entry["ticker"], entry["name"], entry["trigger_pct"], entry["round_quantity"], entry["rounds"]
+            entry["ticker"], entry["name"], entry["trigger_pct"], entry["round_quantity"], entry["rounds"], budget
         )
-        result = simulate_ladder(data, spec, market_buy_slippage_pct=float(slippage))
-        base = float(spec.quantity * spec.rounds * data["Close"].iloc[0])
-        results.append((result, base))
-        base_capital += base
+        results.append(simulate_ladder(data, spec, market_buy_slippage_pct=float(slippage)))
 
-    calendar = pd.DatetimeIndex(sorted(set().union(*(result["pnl"].index for result, _ in results))))
+    calendar = pd.DatetimeIndex(sorted(set().union(*(result["pnl"].index for result in results))))
     total_pnl = pd.Series(0.0, index=calendar)
-    for result, _ in results:
+    for result in results:
         # 상장 전·거래 정지일은 직전 손익을 그대로 잇는다(상장 전은 0).
         total_pnl += result["pnl"].reindex(calendar).ffill().fillna(0.0)
-    equity = base_capital + total_pnl
+    trades = [trade for result in results for trade in result["trades"]]
+    return {
+        "pool_settings": pool_settings,
+        "benchmark_ticker": benchmark_ticker,
+        "bars": bars,
+        "calendar": calendar,
+        "pnl": total_pnl,
+        "base_capital": float(sleeve["limit_krw"]),
+        "trades": trades,
+    }
+
+
+def _order_trades(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """보유중 행이 위, 그 아래 매도일 최신순."""
+    holding = sorted((row for row in trades if row["exit_date"] is None), key=lambda row: (row["ticker"], row["round"]))
+    closed = sorted(
+        (row for row in trades if row["exit_date"] is not None),
+        key=lambda row: (row["exit_date"], row["entry_date"]),
+        reverse=True,
+    )
+    return holding + closed
+
+
+def run_strategy_trade_backtest(pool: str, months: int) -> dict[str, Any]:
+    """종목풀의 사고팔기 전략 전체를 최근 ``months`` 개월 백테스트한다 — 화면 하단 백테스트."""
+    simulated = _simulate_pool(pool, months)
+    bars, calendar = simulated["bars"], simulated["calendar"]
+    pool_settings, benchmark_ticker = simulated["pool_settings"], simulated["benchmark_ticker"]
+    base_capital = simulated["base_capital"]
+    equity = base_capital + simulated["pnl"]
     strategy_pct = (equity / equity.shift(1).fillna(base_capital) - 1.0) * 100.0
 
     benchmark_close = bars[benchmark_ticker]["Close"]
@@ -122,14 +150,7 @@ def run_strategy_trade_backtest(pool: str, months: int) -> dict[str, Any]:
         for day, s, b in zip(calendar, strategy_pct, benchmark_pct, strict=True)
     ]
 
-    trades = [trade for result, _ in results for trade in result["trades"]]
-    holding = sorted((row for row in trades if row["exit_date"] is None), key=lambda row: (row["ticker"], row["round"]))
-    closed = sorted(
-        (row for row in trades if row["exit_date"] is not None),
-        key=lambda row: (row["exit_date"], row["entry_date"]),
-        reverse=True,
-    )
-    trades = holding + closed
+    trades = _order_trades(simulated["trades"])
     benchmark = pool_settings.get("BENCHMARK") or {}
     return {
         "computed_at": datetime.now().astimezone().isoformat(),
@@ -144,4 +165,22 @@ def run_strategy_trade_backtest(pool: str, months: int) -> dict[str, Any]:
         "daily": daily,
         "trades": trades,
         **summarize_trades(trades),
+    }
+
+
+def run_for_mix(pool: str, months: int) -> dict[str, Any]:
+    """합성 슬리브용 결과 — 슬리브 한도 대비 누적 수익률(%)의 일별 곡선, 체결, 원화 손익.
+
+    합성은 이 손익을 자기 곡선에 더한다(슬리브 몫은 합성 재생에서 현금으로 남아 있다).
+    """
+    simulated = _simulate_pool(pool, months)
+    base_capital = simulated["base_capital"]
+    pnl = simulated["pnl"]
+    return {
+        "daily": [
+            {"date": str(day.date()), "strategy_pct": round(float(value) / base_capital * 100.0, 4)}
+            for day, value in pnl.items()
+        ],
+        "pnl_krw": {str(day.date()): float(value) for day, value in pnl.items()},
+        "trades": _order_trades(simulated["trades"]),
     }

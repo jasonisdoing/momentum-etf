@@ -53,7 +53,7 @@ def put_strategy_trade_settings(
 ) -> dict:
     """한 종목풀의 전략 목록과 전역 슬랙 스위치를 저장하고 갱신된 화면 데이터를 반환한다.
 
-    body: ``{"pool": "…", "strategies": [{strategy_id?·account_id·ticker + pct 3종}, …], "slack_enabled": bool}``
+    body: ``{"pool": "…", "strategies": [{strategy_id?·ticker + pct 3종}, …], "slack_enabled": bool}``
     strategy_id 가 없는 행은 추가, 목록에서 빠진 전략은 삭제다 (검증은 `strategy_trade_service`).
     전략 목록을 먼저 검증·저장하고, 그게 통과해야 슬랙 스위치를 바꾼다.
     """

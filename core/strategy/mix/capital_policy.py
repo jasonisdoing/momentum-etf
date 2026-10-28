@@ -127,9 +127,13 @@ def capital_trade_decision(
 
 
 def internal_target_weights(*, strategy: str, settings: dict) -> dict[str, float] | float:
-    """포트폴리오는 저장 배분, 슬롯 전략은 고정 1/N이며 엔진의 드리프트를 쓰지 않는다."""
+    """포트폴리오는 저장 배분, 슬롯 전략은 고정 1/N, 사고팔기는 종목 균등 분할이며 엔진의 드리프트를 쓰지 않는다."""
     if strategy == "portfolio":
         return {str(row["ticker"]): float(row["weight_pct"]) for row in settings["weights"]}
+    if strategy == "strategy_trade":
+        # 사고팔기는 슬리브 한도를 전략(종목)에 균등 분할한다 — 매수 한도의 몫이지 목표 수량이 아니다.
+        count = len(settings["strategies"])
+        return {str(row["ticker"]): 100.0 / count for row in settings["strategies"]}
     count = int(settings["top_n"])
     if count <= 0:
         raise ValueError("전략 슬롯 수는 양수여야 합니다.")

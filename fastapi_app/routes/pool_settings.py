@@ -199,10 +199,12 @@ def get_pool_strategy_backtest(
     수십 초가 걸려서, 화면이 버튼을 눌렀을 때 하나씩만 부른다.
     설정이 없는 전략은 값을 만들어 내지 않고 빈 결과(None)를 돌려준다.
     """
-    from utils.mix_sleeve import MOMENTUM, NEW_HIGH, PORTFOLIO, normalize_strategy, settings_map
+    from utils.mix_sleeve import MOMENTUM, NEW_HIGH, PORTFOLIO, STRATEGY_TRADE, normalize_strategy, settings_map
 
     months = 12
     name = normalize_strategy(strategy)
+    if name == STRATEGY_TRADE:
+        raise HTTPException(status_code=400, detail="사고팔기 백테스트는 전략 사고팔기 화면에서 돌립니다.")
     stored = settings_map(name).get(pool)
     if not stored:
         from utils.pool_backtest_store import save_result
