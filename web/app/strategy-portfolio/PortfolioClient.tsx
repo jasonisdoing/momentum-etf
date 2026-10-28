@@ -12,6 +12,7 @@ import { IconCheck } from "@tabler/icons-react";
 import { GridToolbarButton } from "../components/GridToolbarButton";
 import { useAddingTickerRow } from "../components/useAddingTickerRow";
 import { MonthsSelect } from "../components/MonthsSelect";
+import { BacktestPeriodTables } from "../components/BacktestPeriodTables";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { StableInlineInput } from "../components/StableInlineInput";
@@ -64,13 +65,6 @@ const STRATEGY_NOTES = [
 
 /** 백테스트 기간 기본값 — 서버 응답(`constraints.default_backtest_months`)이 오기 전 초기 상태용. */
 const DEFAULT_BACKTEST_MONTHS = 60;
-
-/** 백테스트 보기 단위 — 모멘텀·신고가 화면과 같은 목록. */
-const VIEW_MODES = [
-  { key: "yearly", label: "연간" },
-  { key: "monthly", label: "월간" },
-  { key: "daily", label: "일간" },
-];
 
 type WeightRow = {
   bucket?: number | null;
@@ -133,7 +127,6 @@ type UniverseRow = {
   listing_months?: number | null;
 };
 
-type PeriodRow = { period: string; strategy_pct: number; benchmark_pct: number };
 
 /** 백엔드 응답 — `GET/PUT /api/strategy-portfolio`. */
 type PoolOption = { ticker_type: string; name: string; icon?: string; order?: number | null };
@@ -228,7 +221,6 @@ export function PortfolioClient() {
 
   // 백테스트 — 서버가 종목풀과 관계없이 화면 기본 기간을 내려준다.
   const [backtestMonths, setBacktestMonths] = useState(DEFAULT_BACKTEST_MONTHS);
-  const [viewMode, setViewMode] = useState("yearly");
   const [backtest, setBacktest] = useState<Backtest | null>(null);
   const [backtestError, setBacktestError] = useState<string | null>(null);
   const [backtesting, setBacktesting] = useState(false);
@@ -653,54 +645,6 @@ export function PortfolioClient() {
     [draft?.weights, nameByTicker, universeByTicker, add, saveMemo],
   );
 
-  const periodRows = useMemo<PeriodRow[]>(() => {
-    if (!backtest) return [];
-    const keyLength = viewMode === "yearly" ? 4 : viewMode === "monthly" ? 7 : 10;
-    // 일별 누적(%)을 구간별 수익률로 자른다 — 다른 전략 화면과 같은 방식.
-    const byKey = new Map<string, { first: number; last: number }>();
-    let previous: number | null = null;
-    for (const row of backtest.daily) {
-      const key = row.date.slice(0, keyLength);
-      const base = previous ?? row.strategy_pct;
-      const entry = byKey.get(key);
-      if (!entry) byKey.set(key, { first: base, last: row.strategy_pct });
-      else entry.last = row.strategy_pct;
-      previous = row.strategy_pct;
-    }
-    const benchByKey = new Map<string, { first: number; last: number }>();
-    let previousBench: number | null = null;
-    for (const row of backtest.daily) {
-      const key = row.date.slice(0, keyLength);
-      const base = previousBench ?? row.benchmark_pct;
-      const entry = benchByKey.get(key);
-      if (!entry) benchByKey.set(key, { first: base, last: row.benchmark_pct });
-      else entry.last = row.benchmark_pct;
-      previousBench = row.benchmark_pct;
-    }
-    const step = (entry: { first: number; last: number }) =>
-      Math.round(((1 + entry.last / 100) / (1 + entry.first / 100) - 1) * 10000) / 100;
-    return [...byKey.entries()]
-      .map(([period, entry]) => ({
-        period,
-        strategy_pct: step(entry),
-        benchmark_pct: benchByKey.has(period) ? step(benchByKey.get(period)!) : 0,
-      }))
-      .reverse();
-  }, [backtest, viewMode]);
-
-  const periodColumns = useMemo<ColDef<PeriodRow>[]>(
-    () => [
-      {
-        field: "period",
-        headerName: viewMode === "yearly" ? "연도" : viewMode === "monthly" ? "월" : "일자",
-        width: 140,
-      },
-      { field: "strategy_pct", headerName: "전략(%)", flex: 1, minWidth: 108, type: "rightAligned", cellRenderer: renderPctCell },
-      { field: "benchmark_pct", headerName: "벤치마크(%)", flex: 1, minWidth: 108, type: "rightAligned", cellRenderer: renderPctCell },
-    ],
-    [viewMode],
-  );
-
   const hintStyle = { fontSize: "var(--fs-sm)", color: "var(--text-muted)" } as const;
 
   if (loading) {
@@ -958,20 +902,11 @@ export function PortfolioClient() {
                 <div style={{ ...hintStyle, marginBottom: 10 }}>
                   현금 {backtest.cash_weight_pct}%
                 </div>
-                <NavTabs
-                  items={VIEW_MODES}
-                  value={viewMode}
-                  onChange={setViewMode}
-                  label="백테스트 보기 단위"
-                  style={{ marginBottom: 10 }}
-                />
-                <AppAgGrid<PeriodRow>
-                  rowData={periodRows}
-                  columnDefs={periodColumns}
-                  theme={gridTheme}
-                  minHeight={0}
-                  height="auto"
-                  gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                <BacktestPeriodTables
+                  daily={backtest.daily}
+                  strategyLabel="전략"
+                  benchmarkLabel={backtest.benchmark_name}
+                  defaultView="yearly"
                 />
               </>
             )}

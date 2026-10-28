@@ -30,6 +30,8 @@ import { StrategyNotes } from "../components/StrategyNotes";
 import { type HoldingChartData } from "../components/HoldingChart";
 import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
 import { NavTabs } from "../components/NavTabs";
+import { BacktestPeriodTables } from "../components/BacktestPeriodTables";
+import { type PeriodRow } from "@/lib/backtest-periods";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { PageFrame } from "../components/PageFrame";
@@ -322,96 +324,6 @@ type SlotActions = {
   }[];
 };
 
-const VIEW_MODES = [
-  { key: "yearly", label: "연간" },
-  { key: "monthly", label: "월간" },
-  { key: "weekly", label: "주간" },
-  { key: "daily", label: "일간" },
-  { key: "trades", label: "체결" },
-] as const;
-type ViewMode = (typeof VIEW_MODES)[number]["key"];
-
-type PeriodRow = {
-  period: string;
-  /** 합성(슬리브들을 한 계좌에서 굴린 결과). */
-  strategy_pct: number;
-  withdrawal_pct: number;
-  /** 각 전략을 **혼자** 굴렸을 때 — 합성이 단독보다 나은지 바로 읽으라고 함께 둔다. */
-  slots: Record<string, number | null>;
-  benchmark_pct: number;
-  /** 합성 − 벤치마크. */
-  excess_pp: number;
-};
-
-/** 그 날짜가 속한 주의 월요일 — 주간 묶음 키. 로컬 기준으로 조립한다(UTC 파싱은 하루 밀린다). */
-function weekKeyOf(date: string): string {
-  const parsed = new Date(`${date}T00:00:00`);
-  parsed.setDate(parsed.getDate() - ((parsed.getDay() + 6) % 7));
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
-}
-
-/** 누적(%) 시계열을 기간별 수익률로 자른다 — 신고가 화면과 같은 계산.
- *  주간은 묶음 키(월요일)와 표시 라벨(그 주 마지막 거래일)이 달라 따로 담는다. */
-function toPeriodRows(
-  daily: View["daily"],
-  keyOf: (date: string) => string,
-  labelByLastDate = false,
-): PeriodRow[] {
-  if (daily.length === 0) return [];
-  type Snapshot = {
-    strategy: number;
-    withdrawnToInitial: number;
-    slots: Record<string, number | null>;
-    benchmark: number;
-    lastDate: string;
-  };
-  const lastByPeriod = new Map<string, Snapshot>();
-  const order: string[] = [];
-  for (const point of daily) {
-    const key = keyOf(point.date);
-    if (!lastByPeriod.has(key)) order.push(key);
-    lastByPeriod.set(key, {
-      strategy: point.strategy_pct,
-      withdrawnToInitial: point.withdrawn_to_initial_pct,
-      slots: point.slots,
-      benchmark: point.benchmark_pct,
-      lastDate: point.date,
-    });
-  }
-  // 첫 구간의 기준은 시작 시점(누적 0%)이다 — 슬롯도 모두 0 에서 시작한다.
-  const slotKeys = Object.keys(daily[0].slots ?? {});
-  let prev: Snapshot = {
-    strategy: 0,
-    withdrawnToInitial: 0,
-    slots: Object.fromEntries(slotKeys.map((key) => [key, 0])),
-    benchmark: 0,
-    lastDate: "",
-  };
-  const rows: PeriodRow[] = [];
-  // 누적(%) 두 점 사이의 구간 수익률. 어느 한쪽이라도 값이 없으면 null — 0 으로 채우면
-  // 데이터가 없는 구간이 '보합' 으로 보인다.
-  const step = (now: number | null, before: number | null): number | null =>
-    now == null || before == null ? null : ((1 + now / 100) / (1 + before / 100) - 1) * 100;
-  for (const key of order) {
-    const current = lastByPeriod.get(key)!;
-    const strategy = step(current.strategy, prev.strategy) ?? 0;
-    const benchmark = step(current.benchmark, prev.benchmark) ?? 0;
-    rows.push({
-      period: labelByLastDate ? current.lastDate : key,
-      strategy_pct: strategy,
-      withdrawal_pct: current.withdrawnToInitial - prev.withdrawnToInitial,
-      slots: Object.fromEntries(
-        slotKeys.map((slot) => [slot, step(current.slots?.[slot] ?? null, prev.slots?.[slot] ?? null)]),
-      ),
-      benchmark_pct: benchmark,
-      excess_pp: strategy - benchmark,
-    });
-    prev = current;
-  }
-  return rows.reverse();
-}
-
 /** 슬롯 키는 순서가 정한다 — 백엔드 `MIX_SLEEVE_KEYS` 와 같은 순서여야 한다. */
 const SLOT_KEY_ORDER = ["a", "b", "c", "d"] as const;
 
@@ -553,7 +465,6 @@ export function StrategyMixClient() {
   const [positionsReloadKey, setPositionsReloadKey] = useState(0);
   // 백테스트 탭.
   const [view, setView] = useState<View | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("monthly");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [backtestProgress, setBacktestProgress] =
@@ -1269,14 +1180,6 @@ export function StrategyMixClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
   }, [totalAsset, slotKeys, sleeves, saveMemo, hasIndustryData, formatAmount, formatPrice, positions?.next_trading_day]);
 
-  const periodRows = useMemo<PeriodRow[]>(() => {
-    if (!view || viewMode === "trades") return [];
-    if (viewMode === "weekly") return toPeriodRows(view.daily, weekKeyOf, true);
-    const keyLength =
-      viewMode === "yearly" ? 4 : viewMode === "monthly" ? 7 : 10;
-    return toPeriodRows(view.daily, (date) => date.slice(0, keyLength));
-  }, [view, viewMode]);
-
   const tradeColumns = useMemo<ColDef<MixTradeRow>[]>(
     () => [
       {
@@ -1332,88 +1235,45 @@ export function StrategyMixClient() {
     [formatPrice, sleeves],
   );
 
-  const periodColumns = useMemo<ColDef<PeriodRow>[]>(() => {
-    /** 수익률 컬럼 — 값을 꺼내는 방법만 다르고 표시는 같다(슬리브 값은 slots 안에 있다). */
-    const pctColumn = (
-      colId: string,
-      headerName: string,
-      getValue: (row: PeriodRow) => number | null,
-      suffix = "%",
-      headerTooltip?: string,
-    ): ColDef<PeriodRow> => ({
-      colId,
-      valueGetter: (p) => (p.data ? getValue(p.data) : null),
-      headerName,
-      headerTooltip,
+  // 합성만의 기간 표 열 — 인출 현금과 각 슬리브를 혼자 굴렸을 때(합성이 단독보다 나은지 같은 줄에서 비교).
+  // 합성 곡선은 각 슬리브를 단독 운용한 수익률의 단순 평균과 일치하지 않는다.
+  const periodMiddleColumns = useCallback((): ColDef<PeriodRow>[] => {
+    const slotColumn = (slot: string): ColDef<PeriodRow> => ({
+      colId: `slot_${slot}`,
+      headerName: slotLabel(slot),
+      headerTooltip: `${slotLabel(slot)} 슬리브만 혼자 굴렸을 때 — 그 전략 화면의 백테스트와 같은 값.`,
+      valueGetter: (p) => p.data?.slots?.[slot] ?? null,
       flex: 1,
       minWidth: 108,
       type: "numericColumn",
-      valueFormatter: (p) =>
-        p.value == null
-          ? "-"
-          : `${(p.value as number) >= 0 ? "+" : ""}${(p.value as number).toFixed(2)}${suffix}`,
-      cellStyle: (p) => ({
-        color: signColor(p.value as number),
-        fontWeight: 600,
-      }),
+      valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
+      cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
     });
     return [
       {
-        field: "period",
-        headerName:
-          viewMode === "yearly"
-            ? "연도"
-            : viewMode === "monthly"
-              ? "월"
-              : viewMode === "weekly"
-                ? "주"
-                : "일자",
-        width: 148,
-        valueFormatter: (p) =>
-          viewMode === "weekly" || viewMode === "daily"
-            ? formatDateWithWeekday(String(p.value ?? ""))
-            : String(p.value ?? ""),
-        cellStyle: { fontWeight: 700 },
-      },
-      pctColumn(
-        "strategy_pct",
-        "합성",
-        (row) => row.strategy_pct,
-        "%",
-        "슬리브들을 한 계좌에서 함께 굴린 기간 수익률. 인출은 외부 현금 흐름으로 처리해 수익률에서 제외합니다.",
-      ),
-      {
         colId: "withdrawal_pct",
         headerName: "인출현금",
-        headerTooltip: "해당 연·월·주·일에 회수 기준으로 매도해 인출한 금액(KRW) ÷ 백테스트 최초 운용 기준금액(KRW). 청산·교체 대금은 포함하지 않습니다.",
+        headerTooltip:
+          "해당 연·월·주·일에 회수 기준으로 매도해 인출한 금액(KRW) ÷ 백테스트 최초 운용 기준금액(KRW). 청산·교체 대금은 포함하지 않습니다.",
         valueGetter: (p) => p.data?.withdrawal_pct ?? null,
         flex: 1,
         minWidth: 108,
         type: "numericColumn",
-        valueFormatter: (p) => p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`,
+        valueFormatter: (p) => (p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`),
         cellStyle: (p) => ({
-          color: p.value == null ? "inherit" : (p.value as number) > 0
-            ? "var(--up-color, #d64545)"
-            : "var(--down-color, #2f6fd0)",
+          color:
+            p.value == null
+              ? "inherit"
+              : (p.value as number) > 0
+                ? "var(--up-color, #d64545)"
+                : "var(--down-color, #2f6fd0)",
           fontWeight: 600,
         }),
       },
-      // 각 전략을 혼자 굴렸을 때 — 합성이 단독보다 나은지 같은 줄에서 비교한다.
-      // 합성 곡선은 각 슬리브를 단독 운용한 수익률의 단순 평균과 일치하지 않는다.
-      ...slotKeys.map((slot) =>
-        pctColumn(
-          `slot_${slot}`,
-          slotLabel(slot),
-          (row) => row.slots?.[slot] ?? null,
-          "%",
-          `${slotLabel(slot)} 슬리브만 혼자 굴렸을 때 — 그 전략 화면의 백테스트와 같은 값.`,
-        ),
-      ),
-      pctColumn("benchmark_pct", view?.benchmark_name ?? "벤치마크", (row) => row.benchmark_pct, "%", "계좌의 벤치마크."),
-      pctColumn("excess_pp", "초과", (row) => row.excess_pp, "%p", "합성 − 벤치마크."),
+      ...slotKeys.map(slotColumn),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
-  }, [viewMode, view?.benchmark_name, slotKeys, sleeves]);
+  }, [slotKeys, sleeves]);
 
   // 요약 바에 쓰는 계좌 표기 — 셀렉터와 같은 형식.
   const accountLabel = useMemo(() => {
@@ -2110,40 +1970,33 @@ export function StrategyMixClient() {
                     }}
                   />
                   <BacktestTradeStats stats={view} style={{ marginBottom: 12 }} />
-                  <NavTabs
-                    items={VIEW_MODES}
-                    value={viewMode}
-                    onChange={setViewMode}
-                    label="합성 백테스트 보기 단위"
-                    style={{ marginBottom: 10 }}
+                  <BacktestPeriodTables
+                    daily={view.daily}
+                    strategyLabel="합성"
+                    strategyTooltip="슬리브들을 한 계좌에서 함께 굴린 기간 수익률. 인출은 외부 현금 흐름으로 처리해 수익률에서 제외합니다."
+                    benchmarkLabel={view.benchmark_name}
+                    benchmarkTooltip="계좌의 벤치마크."
+                    defaultView="monthly"
+                    middleColumns={periodMiddleColumns}
+                    extraTab={{
+                      label: "체결",
+                      content: (
+                        <AppAgGrid<MixTradeRow>
+                          rowData={view.trades}
+                          columnDefs={tradeColumns}
+                          theme={gridTheme}
+                          minHeight="auto"
+                          gridOptions={{
+                            domLayout: "autoHeight",
+                            suppressMovableColumns: true,
+                          }}
+                          getRowClass={(p) =>
+                            p.data?.exit_date ? "" : "momentumPendingRow"
+                          }
+                        />
+                      ),
+                    }}
                   />
-                  {viewMode === "trades" ? (
-                    <AppAgGrid<MixTradeRow>
-                      rowData={view.trades}
-                      columnDefs={tradeColumns}
-                      theme={gridTheme}
-                      minHeight="auto"
-                      gridOptions={{
-                        domLayout: "autoHeight",
-                        suppressMovableColumns: true,
-                      }}
-                      getRowClass={(p) =>
-                        p.data?.exit_date ? "" : "momentumPendingRow"
-                      }
-                    />
-                  ) : (
-                    <AppAgGrid<PeriodRow>
-                      rowData={periodRows}
-                      columnDefs={periodColumns}
-                      theme={gridTheme}
-                      minHeight="auto"
-                      getRowId={(p) => p.data.period}
-                      gridOptions={{
-                        domLayout: "autoHeight",
-                        suppressMovableColumns: true,
-                      }}
-                    />
-                  )}
                 </>
               ) : (
                 <div

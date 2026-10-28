@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconCheck } from "@tabler/icons-react";
 
 import { AppAgGrid } from "../components/AppAgGrid";
-import { excessColumn } from "../components/BacktestPeriodTables";
+import { BacktestPeriodTables } from "../components/BacktestPeriodTables";
 import { MonthsSelect } from "../components/MonthsSelect";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { RealtimeMissingNotice } from "../components/RealtimeMissingNotice";
@@ -18,7 +18,6 @@ import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { type HoldingChartData } from "../components/HoldingChart";
 import { StrategyChartModal } from "../components/StrategyChartModal";
-import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
@@ -28,16 +27,8 @@ import { formatDateWithWeekday } from "@/lib/datetime";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 import {
-  VIEW_MODES,
-  toPeriodRows,
-  weekKeyOf,
-  type PeriodRow,
-  type ViewMode,
-} from "@/lib/backtest-periods";
-import {
   industryColumn,
   sectorColumn,
-  adrColumn as sharedAdrColumn,
   formatSignedPct,
   maExitGapColumn,
   fillDaySummary,
@@ -382,8 +373,6 @@ export function MomentumClient() {
   const [pickFailed, setPickFailed] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [backtestProgress, setBacktestProgress] = useState<LoadingProgress | null>(null);
-  // 기본 보기는 주간 — 매매 내역(편입·편출)이 실제 체결 주에 붙는 표라 주간 점검의 기준이다.
-  const [viewMode, setViewMode] = useState<ViewMode>("weekly");
   const autoPickedRef = useRef(false);
 
   // 설정 입력 초안 (문자열로 보관해 입력 중 상태를 그대로 둔다)
@@ -963,74 +952,6 @@ export function MomentumClient() {
 
   // 표 헤더의 지수 이름 — 신고가·합성 화면과 같은 표기(값에 % 가 붙으므로 헤더엔 붙이지 않는다).
   const benchmarkLabel = backtest?.benchmark_name ?? "벤치마크";
-  // ADR 컬럼 — 값이 하나도 없으면(레짐 시장 없는 풀) 컬럼을 숨긴다.
-  const hasAdr = useMemo(() => (backtest?.daily ?? []).some((row) => row.adr != null), [backtest]);
-
-  // 기간 표(연간·월간·주간·일간) — 신고가와 **같은 공용 계산**(`toPeriodRows`)을 쓴다.
-  // 일별 누적 곡선 하나에서 잘라 내므로 기간이 달라도 합계가 어긋나지 않는다.
-  const periodColumns = useMemo<ColDef<PeriodRow>[]>(
-    () => [
-      {
-        field: "period",
-        headerName:
-          viewMode === "yearly" ? "연도" : viewMode === "monthly" ? "월" : viewMode === "weekly" ? "주" : "일자",
-        width: 148,
-        valueFormatter: (p) =>
-          viewMode === "weekly" || viewMode === "daily"
-            ? formatDateWithWeekday(String(p.value ?? ""))
-            : String(p.value ?? ""),
-      },
-      {
-        field: "strategy_pct",
-        headerName: "전략",
-        flex: 1,
-        minWidth: 110,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSignedPct(p.value as number, 2),
-        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
-      },
-      {
-        field: "benchmark_pct",
-        headerName: benchmarkLabel,
-        flex: 1,
-        minWidth: 110,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSignedPct(p.value as number, 2),
-        cellStyle: (p) => ({ color: signColor(p.value as number) }),
-      },
-      excessColumn<PeriodRow>(),
-      // ADR — 일간=당일, 주간=판정일(주 마지막 거래일), 월간·연간=기간 최저. 신고가 표와 같다.
-      viewMode === "daily"
-        ? sharedAdrColumn<PeriodRow>({
-            headerName: "ADR",
-            headerTooltip: "그날의 시장 ADR(20일 등락비율)",
-            hide: !hasAdr,
-            getter: (row) => row.adr,
-          })
-        : viewMode === "weekly"
-          ? sharedAdrColumn<PeriodRow>({
-              headerName: "판정일 ADR",
-              headerTooltip: "그 주 마지막 거래일의 시장 ADR — 다음 거래일 진입 게이트를 결정한 값",
-              hide: !hasAdr,
-              getter: (row) => row.adr,
-            })
-          : sharedAdrColumn<PeriodRow>({
-              headerName: "최저 ADR",
-              headerTooltip: `${viewMode === "yearly" ? "그 해" : "그 달"}의 시장 ADR 최저값`,
-              hide: !hasAdr,
-              getter: (row) => row.adr_min,
-            }),
-    ],
-    [viewMode, benchmarkLabel, hasAdr],
-  );
-
-  const periodRows = useMemo<PeriodRow[]>(() => {
-    if (!backtest) return [];
-    if (viewMode === "weekly") return toPeriodRows(backtest.daily, weekKeyOf, true);
-    const keyLength = viewMode === "yearly" ? 4 : viewMode === "monthly" ? 7 : viewMode === "daily" ? 10 : 0;
-    return keyLength ? toPeriodRows(backtest.daily, (date) => date.slice(0, keyLength)) : [];
-  }, [backtest, viewMode]);
-
   const tradeColumns = useMemo<ColDef<BacktestTradeRow>[]>(() => {
     const price = (value: unknown) => formatPrice(value as number, positions?.currency);
     return [
@@ -1346,34 +1267,26 @@ export function MomentumClient() {
                   }}
                 />
                 <BacktestTradeStats stats={backtest} style={{ marginBottom: 12 }} />
-                <NavTabs
-                  items={VIEW_MODES}
-                  value={viewMode}
-                  onChange={setViewMode}
-                  label="백테스트 보기 단위"
-                  style={{ marginBottom: 10 }}
+                {/* 연간·월간·주간·일간·체결 — 기본 보기는 주간(매매 내역이 실제 체결 주에 붙어 주간 점검의 기준이다). */}
+                <BacktestPeriodTables
+                  daily={backtest.daily}
+                  strategyLabel="전략"
+                  benchmarkLabel={benchmarkLabel}
+                  defaultView="weekly"
+                  extraTab={{
+                    label: "체결",
+                    content: (
+                      <AppAgGrid<BacktestTradeRow>
+                        rowData={backtest.trades}
+                        columnDefs={tradeColumns}
+                        theme={gridTheme}
+                        minHeight={0}
+                        height="auto"
+                        gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                      />
+                    ),
+                  }}
                 />
-                {viewMode === "trades" ? (
-                  <AppAgGrid<BacktestTradeRow>
-                    rowData={backtest.trades}
-                    columnDefs={tradeColumns}
-                    theme={gridTheme}
-                    minHeight={0}
-                    height="auto"
-                    gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
-                  />
-                ) : (
-                  // 연간·월간·주간·일간은 같은 일별 곡선에서 잘라 낸다 — 기간이 달라도 합계가 맞는다.
-                  <AppAgGrid<PeriodRow>
-                    rowData={periodRows}
-                    columnDefs={periodColumns}
-                    theme={gridTheme}
-                    minHeight={0}
-                    height="auto"
-                    gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
-                    getRowId={(p) => p.data.period}
-                  />
-                )}
               </>
             ) : !backtesting ? (
               <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>

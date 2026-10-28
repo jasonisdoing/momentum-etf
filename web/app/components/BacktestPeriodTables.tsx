@@ -1,27 +1,18 @@
 "use client";
 
-/** 백테스트 기간별 표(연간·월간·주간·일간) — 전략 화면과 자산 헬퍼가 함께 쓴다.
+/** 백테스트 기간별 표(연간·월간·주간·일간) — 모든 전략 화면(모멘텀·신고가·포트폴리오·합성·사고팔기)이 쓴다.
  *
- *  입력은 **일간 변동률(%)** 시계열 하나다. 나머지 단위는 `@/lib/backtest-periods` 가
- *  복리로 합성하므로 화면마다 기준이 갈리지 않는다.
- *
- *  주간은 **달력 주** 기준이다. 모멘텀 화면의 주간 탭은 교체 구간 기준이고 매매 내역
- *  (편입·편출·교체율)이 함께 붙어서 다른 표다 — 그쪽은 그 화면이 직접 그린다.
+ *  입력은 백엔드가 내려주는 **일별 누적 수익률(%)** 이고, 기간별 자르기는 `@/lib/backtest-periods` 가
+ *  한 곳에서 한다. 탭 한 줄에 연간·월간·주간·일간과 화면 고유 탭(`extraTab`, 예: 「체결」)을 함께 둔다.
+ *  주간 라벨은 그 주의 마지막 거래일이다.
  */
 
 import type { ColDef } from "ag-grid-community";
 import { type ReactNode, useMemo, useState } from "react";
 
-import {
-  type BacktestCalendarWeekRow,
-  type BacktestDayRow,
-  type BacktestMonthRow,
-  type BacktestYearRow,
-  toCalendarMonthRows,
-  toCalendarWeekRows,
-  toYearRows,
-} from "@/lib/backtest-periods";
-import { formatSignedPct, signColor } from "@/lib/grid-cells";
+import { type BacktestCumulativeRow, type PeriodRow, toPeriodRows, weekKeyOf } from "@/lib/backtest-periods";
+import { formatDateWithWeekday } from "@/lib/datetime";
+import { adrColumn, formatSignedPct, signColor } from "@/lib/grid-cells";
 
 import { AppAgGrid } from "./AppAgGrid";
 import { createAppGridTheme } from "./app-grid-theme";
@@ -29,13 +20,17 @@ import { NavTabs, type NavTabItem } from "./NavTabs";
 
 const gridTheme = createAppGridTheme();
 
-const VIEW_MODES = [
+const PERIOD_VIEWS = [
   { key: "yearly", label: "연간" },
   { key: "monthly", label: "월간" },
   { key: "weekly", label: "주간" },
   { key: "daily", label: "일간" },
 ] as const;
-export type BacktestPeriodView = (typeof VIEW_MODES)[number]["key"];
+export type BacktestPeriodView = (typeof PERIOD_VIEWS)[number]["key"];
+
+const EXTRA_TAB_KEY = "extra";
+const PERIOD_LABEL: Record<BacktestPeriodView, string> = { yearly: "연도", monthly: "월", weekly: "주", daily: "일자" };
+const KEY_LENGTH = { yearly: 4, monthly: 7, daily: 10 } as const;
 
 /** 초과(%p) 컬럼 — 전략 − 벤치마크. 모든 백테스트 화면이 같은 정의를 쓴다. */
 export function excessColumn<T extends { strategy_pct: number | null; benchmark_pct: number | null }>(): ColDef<T> {
@@ -54,110 +49,108 @@ export function excessColumn<T extends { strategy_pct: number | null; benchmark_
   };
 }
 
-/** 전략·벤치마크 수익률 컬럼 한 쌍 + 초과 — 기간 단위만 다르고 나머지는 같다. */
-function pctColumns<T extends { strategy_pct: number | null; benchmark_pct: number | null }>(
-  benchmarkLabel: string,
-  benchmarkTooltip?: string,
-): ColDef<T>[] {
-  const column = (headerName: string, field: "strategy_pct" | "benchmark_pct", headerTooltip?: string): ColDef<T> => ({
-    headerName,
-    field: field as ColDef<T>["field"],
-    headerTooltip,
-    flex: 1,
-    minWidth: 110,
-    type: "numericColumn",
-    valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
-    cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: field === "strategy_pct" ? 700 : 400 }),
-  });
-  return [column("전략", "strategy_pct"), column(benchmarkLabel, "benchmark_pct", benchmarkTooltip), excessColumn<T>()];
+function periodRowsOf(daily: BacktestCumulativeRow[], view: BacktestPeriodView): PeriodRow[] {
+  return view === "weekly"
+    ? toPeriodRows(daily, weekKeyOf, true)
+    : toPeriodRows(daily, (date) => date.slice(0, KEY_LENGTH[view]));
 }
 
-const labelColumn = <T,>(headerName: string, field: string, width = 148): ColDef<T> => ({
-  headerName,
-  field: field as ColDef<T>["field"],
-  width,
-  cellStyle: () => ({ fontWeight: 700 }),
-});
-
-const EXTRA_TAB_KEY = "extra";
+/** 시장 ADR 컬럼 — 일간=당일, 주간=판정일(주 마지막 거래일), 월간·연간=기간 최저. */
+function adrColumnFor(view: BacktestPeriodView): ColDef<PeriodRow> {
+  if (view === "daily") {
+    return adrColumn<PeriodRow>({
+      headerName: "ADR",
+      headerTooltip: "그날의 시장 ADR(20일 등락비율)",
+      hide: false,
+      getter: (row) => row.adr,
+    });
+  }
+  if (view === "weekly") {
+    return adrColumn<PeriodRow>({
+      headerName: "판정일 ADR",
+      headerTooltip: "그 주 마지막 거래일의 시장 ADR — 다음 거래일 진입 게이트를 결정한 값",
+      hide: false,
+      getter: (row) => row.adr,
+    });
+  }
+  return adrColumn<PeriodRow>({
+    headerName: "최저 ADR",
+    headerTooltip: `${view === "yearly" ? "그 해" : "그 달"}의 시장 ADR 최저값`,
+    hide: false,
+    getter: (row) => row.adr_min,
+  });
+}
 
 export function BacktestPeriodTables({
   daily,
   benchmarkLabel,
   benchmarkTooltip,
-  defaultView = "monthly",
+  strategyLabel,
+  strategyTooltip,
+  defaultView,
   extraTab,
+  middleColumns,
 }: {
-  daily: BacktestDayRow[];
+  daily: BacktestCumulativeRow[];
   benchmarkLabel: string;
   benchmarkTooltip?: string;
-  defaultView?: BacktestPeriodView;
-  /** 기간 탭 뒤에 이어 붙는 탭 하나(예: 「체결」) — 다른 전략 화면처럼 한 줄 탭으로 보이게 한다. */
+  /** 전략 열 이름 — 합성은 「합성」, 나머지는 「전략」. */
+  strategyLabel: string;
+  strategyTooltip?: string;
+  defaultView: BacktestPeriodView;
+  /** 기간 탭 뒤에 이어 붙는 탭 하나(예: 「체결」) — 다른 화면과 한 줄 탭으로 보이게 한다. */
   extraTab?: { label: string; content: ReactNode };
+  /** 전략 열과 벤치마크 열 사이에 끼우는 열(합성의 인출·슬리브). 렌더마다 새로 만들지 말고 useCallback 으로 넘긴다. */
+  middleColumns?: (view: BacktestPeriodView) => ColDef<PeriodRow>[];
 }) {
   const [view, setView] = useState<BacktestPeriodView | typeof EXTRA_TAB_KEY>(defaultView);
   const tabs = useMemo<NavTabItem<BacktestPeriodView | typeof EXTRA_TAB_KEY>[]>(
-    () => (extraTab ? [...VIEW_MODES, { key: EXTRA_TAB_KEY, label: extraTab.label }] : [...VIEW_MODES]),
+    () => (extraTab ? [...PERIOD_VIEWS, { key: EXTRA_TAB_KEY, label: extraTab.label }] : [...PERIOD_VIEWS]),
     [extraTab],
   );
+  // ADR 열 — 값이 하나도 없으면(레짐 시장이 없는 풀·합성) 열을 만들지 않는다.
+  const hasAdr = useMemo(() => daily.some((row) => row.adr != null), [daily]);
+  const periodView = view === EXTRA_TAB_KEY ? null : view;
+  const rows = useMemo(() => (periodView ? periodRowsOf(daily, periodView) : []), [daily, periodView]);
 
-  const monthRows = useMemo(() => toCalendarMonthRows(daily), [daily]);
-  const weekRows = useMemo(() => toCalendarWeekRows(daily), [daily]);
-  const yearRows = useMemo(() => toYearRows(monthRows), [monthRows]);
-  // 최신이 위 — 기간별 표와 순서를 맞춘다(백엔드가 주는 순서를 그대로 믿지 않는다).
-  const dayRows = useMemo(() => [...daily].sort((a, b) => b.date.localeCompare(a.date)), [daily]);
-
-  const yearColumns = useMemo<ColDef<BacktestYearRow>[]>(() => {
-    // 부분 기간은 /compare 와 같은 규칙으로 값 뒤에 `*` 를 붙인다.
-    const column = (
-      headerName: string,
-      field: "strategy_pct" | "benchmark_pct",
-      partialField: "strategy_partial" | "benchmark_partial",
-      headerTooltip?: string,
-    ): ColDef<BacktestYearRow> => ({
-      headerName,
-      field,
-      headerTooltip,
-      flex: 1,
-      minWidth: 110,
-      type: "numericColumn",
-      valueFormatter: (p) =>
-        p.value == null ? "-" : `${formatSignedPct(p.value as number, 2)}${p.data?.[partialField] ? "*" : ""}`,
-      cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: field === "strategy_pct" ? 700 : 400 }),
-      tooltipValueGetter: (p) =>
-        p.data?.[partialField] ? "12개월이 다 차지 않은 해 — 있는 달만 합성한 부분 기간" : undefined,
-    });
+  const columns = useMemo<ColDef<PeriodRow>[]>(() => {
+    if (!periodView) return [];
     return [
-      labelColumn<BacktestYearRow>("연도", "year"),
-      column("전략", "strategy_pct", "strategy_partial"),
-      column(benchmarkLabel, "benchmark_pct", "benchmark_partial", benchmarkTooltip),
-      excessColumn<BacktestYearRow>(),
+      {
+        field: "period",
+        headerName: PERIOD_LABEL[periodView],
+        width: 148,
+        valueFormatter: (p) =>
+          periodView === "weekly" || periodView === "daily"
+            ? formatDateWithWeekday(String(p.value ?? ""))
+            : String(p.value ?? ""),
+        cellStyle: { fontWeight: 700 },
+      },
+      {
+        field: "strategy_pct",
+        headerName: strategyLabel,
+        headerTooltip: strategyTooltip,
+        flex: 1,
+        minWidth: 110,
+        type: "numericColumn",
+        valueFormatter: (p) => formatSignedPct(p.value as number, 2),
+        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
+      },
+      ...(middleColumns ? middleColumns(periodView) : []),
+      {
+        field: "benchmark_pct",
+        headerName: benchmarkLabel,
+        headerTooltip: benchmarkTooltip,
+        flex: 1,
+        minWidth: 110,
+        type: "numericColumn",
+        valueFormatter: (p) => formatSignedPct(p.value as number, 2),
+        cellStyle: (p) => ({ color: signColor(p.value as number) }),
+      },
+      excessColumn<PeriodRow>(),
+      ...(hasAdr ? [adrColumnFor(periodView)] : []),
     ];
-  }, [benchmarkLabel, benchmarkTooltip]);
-
-  const monthColumns = useMemo<ColDef<BacktestMonthRow>[]>(
-    () => [labelColumn<BacktestMonthRow>("월", "month"), ...pctColumns<BacktestMonthRow>(benchmarkLabel, benchmarkTooltip)],
-    [benchmarkLabel, benchmarkTooltip],
-  );
-  const weekColumns = useMemo<ColDef<BacktestCalendarWeekRow>[]>(
-    () => [
-      labelColumn<BacktestCalendarWeekRow>("주 종료일", "week_end"),
-      ...pctColumns<BacktestCalendarWeekRow>(benchmarkLabel, benchmarkTooltip),
-    ],
-    [benchmarkLabel, benchmarkTooltip],
-  );
-  const dayColumns = useMemo<ColDef<BacktestDayRow>[]>(
-    () => [labelColumn<BacktestDayRow>("날짜", "date"), ...pctColumns<BacktestDayRow>(benchmarkLabel, benchmarkTooltip)],
-    [benchmarkLabel, benchmarkTooltip],
-  );
-
-  // 표는 모두 autoHeight — 카드 안에서 따로 스크롤하지 않고 브라우저 스크롤로 본다.
-  const gridProps = {
-    theme: gridTheme,
-    minHeight: 0,
-    height: "auto" as const,
-    gridOptions: { domLayout: "autoHeight" as const },
-  };
+  }, [periodView, strategyLabel, strategyTooltip, benchmarkLabel, benchmarkTooltip, middleColumns, hasAdr]);
 
   return (
     <div>
@@ -170,40 +163,16 @@ export function BacktestPeriodTables({
       />
       {view === EXTRA_TAB_KEY && extraTab ? (
         extraTab.content
-      ) : view === "yearly" ? (
-        <>
-          <AppAgGrid<BacktestYearRow>
-            rowData={yearRows}
-            columnDefs={yearColumns}
-            getRowId={(p) => p.data.year}
-            {...gridProps}
-          />
-          {yearRows.some((row) => row.strategy_partial || row.benchmark_partial) ? (
-            <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
-              * 12개월이 다 차지 않은 해 — 있는 달만 합성한 부분 기간
-            </span>
-          ) : null}
-        </>
-      ) : view === "monthly" ? (
-        <AppAgGrid<BacktestMonthRow>
-          rowData={monthRows}
-          columnDefs={monthColumns}
-          getRowId={(p) => p.data.month}
-          {...gridProps}
-        />
-      ) : view === "weekly" ? (
-        <AppAgGrid<BacktestCalendarWeekRow>
-          rowData={weekRows}
-          columnDefs={weekColumns}
-          getRowId={(p) => p.data.week_end}
-          {...gridProps}
-        />
       ) : (
-        <AppAgGrid<BacktestDayRow>
-          rowData={dayRows}
-          columnDefs={dayColumns}
-          getRowId={(p) => p.data.date}
-          {...gridProps}
+        // 표는 모두 autoHeight — 카드 안에서 따로 스크롤하지 않고 브라우저 스크롤로 본다.
+        <AppAgGrid<PeriodRow>
+          rowData={rows}
+          columnDefs={columns}
+          getRowId={(p) => p.data.period}
+          theme={gridTheme}
+          minHeight={0}
+          height="auto"
+          gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
         />
       )}
     </div>

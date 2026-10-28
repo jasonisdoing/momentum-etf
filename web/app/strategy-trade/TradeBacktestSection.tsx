@@ -3,7 +3,7 @@
 import type { ColDef } from "ag-grid-community";
 import { useCallback, useMemo, useState } from "react";
 
-import { type BacktestDayRow } from "@/lib/backtest-periods";
+import { type BacktestCumulativeRow } from "@/lib/backtest-periods";
 import { formatSignedPct, signColor, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -50,7 +50,8 @@ type TradeBacktest = {
   benchmark_mdd_from: string | null;
   benchmark_mdd_to: string | null;
   benchmark_sortino: number | null;
-  daily: BacktestDayRow[];
+  /** 일별 누적 수익률(%) — 다른 전략 백테스트와 같은 형태. */
+  daily: BacktestCumulativeRow[];
   trades: TradeRow[];
   trade_count: number;
   win_rate_pct: number | null;
@@ -201,7 +202,9 @@ export function TradeBacktestSection({
               <BacktestTradeStats stats={result} style={{ marginBottom: 12 }} />
               <BacktestPeriodTables
                 daily={result.daily}
+                strategyLabel="전략"
                 benchmarkLabel={benchmarkLabel}
+                defaultView="monthly"
                 extraTab={{
                   label: "체결",
                   content: (

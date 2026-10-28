@@ -145,9 +145,12 @@ def run_strategy_trade_backtest(pool: str, months: int) -> dict[str, Any]:
     benchmark_pct = (pd.concat([prior, benchmark_window]).pct_change().dropna() * 100.0).reindex(calendar)
     base_date = prior.index[0]
 
+    # 일별 누적(%) — 다른 전략 백테스트와 같은 형태다(화면이 연·월·주·일로 자른다).
+    strategy_cumulative = (equity / base_capital - 1.0) * 100.0
+    benchmark_cumulative = (benchmark_window / float(prior.iloc[0]) - 1.0) * 100.0
     daily = [
-        {"date": str(day.date()), "strategy_pct": round(float(s), 4), "benchmark_pct": round(float(b), 4)}
-        for day, s, b in zip(calendar, strategy_pct, benchmark_pct, strict=True)
+        {"date": str(day.date()), "strategy_pct": round(float(s), 2), "benchmark_pct": round(float(b), 2)}
+        for day, s, b in zip(calendar, strategy_cumulative, benchmark_cumulative, strict=True)
     ]
 
     trades = _order_trades(simulated["trades"])
