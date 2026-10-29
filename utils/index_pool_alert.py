@@ -10,7 +10,7 @@ from utils.notification import send_slack_message_v2
 
 # 미국 알림 범위 — /us-market-stock 「통합」(S&P500·나스닥100 합집합)에서 상위 이 개수를 골랐을 때 보이는 종목
 # (시총 내림차순, 같은 회사의 다른 주식 종류는 숨긴 뒤 자른다).
-US_ALERT_COMBINED_TOP = 300
+US_ALERT_COMBINED_TOP = 100
 
 # 명단별 표시 이름 — 개수는 명단을 정하는 상수에서 가져온다(문구와 실제 명단이 갈리지 않게).
 _LIST_LABELS: dict[str, str] = {
