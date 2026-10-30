@@ -3,6 +3,8 @@
 모든 액션(주문·취소)은 확인 모달을 거친다. 메시지는 상태에 따라 버튼이 바뀐다: 주문하기 → 처리 중 → 취소하기 →
 결과 문구(체결·취소·거부). 끝난 메시지에는 버튼이 없어 같은 메시지로 다시 주문할 수 없다.
 
+끝난 주문의 알림은 배치(`notify_finished_orders`, 1분 간격)가 맡는다 — 서버 프로세스가 재시작돼도 끊기지 않는다.
+
 주문 요청은 슬랙 버튼의 value 에 담아 보내고, 서버는 따로 저장하지 않는다. 가격·수량은 모달 표시용 사본일 뿐이고,
 실제 주문은 제출 시점에 `strategy_trade_orders.place_order` 가 현재가로 다시 정한다.
 슬랙은 응답을 3초 안에 받아야 하므로 모달 열기까지만 요청 안에서 하고, 주문·취소는 응답 뒤에 처리해 결과를 스레드로 알린다.
@@ -13,7 +15,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -23,7 +24,16 @@ from slack_sdk.signature import SignatureVerifier
 from services.broker_api_service import BrokerApiError
 from services.broker_order_service import require_mock_account
 from utils.notification import send_slack_message_v2
-from utils.strategy_trade_orders import cancel_record, place_order, refreshed_order, resolve_order
+from utils.strategy_trade_orders import (
+    cancel_record,
+    finished_slack_orders,
+    mark_slack_notified,
+    place_order,
+    refresh_slack_order_accounts,
+    refreshed_order,
+    resolve_order,
+    serialize_order,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +42,6 @@ CANCEL_ACTION_ID = "mock_order_cancel"
 ORDER_CALLBACK_ID = "mock_order_confirm"
 CANCEL_CALLBACK_ID = "mock_order_cancel_confirm"
 _SIDE_LABELS = {"buy": "매수", "sell": "매도"}
-#: 접수한 주문의 체결 여부를 이 간격으로 확인해, 이 시간 안에 끝나지 않으면 확인을 멈추고 그 사실을 알린다.
-_WATCH_INTERVAL_SECONDS = 10
-_WATCH_LIMIT_SECONDS = 1800
 _FINAL_STATUSES = ("filled", "canceled", "rejected")
 
 
@@ -220,29 +227,19 @@ def _finish(target: dict[str, Any], order: dict[str, Any]) -> None:
     _update_message(target, _note_blocks(target["request"], text))
 
 
-def _watch_until_final(target: dict[str, Any], order_id: str) -> None:
-    """접수된 주문이 체결·취소·거부로 끝나면 알린다 — 제한 시간 안에 안 끝나면 그 사실을 알리고 멈춘다."""
-    account_no = target["request"]["account_no"]
-    deadline = time.monotonic() + _WATCH_LIMIT_SECONDS
-    while time.monotonic() < deadline:
-        time.sleep(_WATCH_INTERVAL_SECONDS)
-        order = refreshed_order(account_no, order_id)
-        if order["status"] in _FINAL_STATUSES:
-            _finish(target, order)
-            return
-    send_slack_message_v2(
-        f"⏳ {_WATCH_LIMIT_SECONDS // 60}분이 지나도 끝나지 않아 체결 확인을 멈춥니다 — 증권사 주문내역에서 확인하세요.",
-        thread_ts=target["message_ts"],
-    )
-
-
 def _place(target: dict[str, Any]) -> None:
     request = target["request"]
     side = _SIDE_LABELS[request["side"]]
     # 처리하는 동안 같은 메시지로 또 주문하지 못하게 버튼부터 걷어낸다.
     _update_message(target, _note_blocks(request, "⏳ 주문 처리 중…"))
     try:
-        order = place_order(request["account_no"], request["pool"], request["strategy_id"], request["side"])
+        order = place_order(
+            request["account_no"],
+            request["pool"],
+            request["strategy_id"],
+            request["side"],
+            {"channel": target["channel"], "message_ts": target["message_ts"]},
+        )
     except Exception as exc:  # 슬랙 요청은 이미 응답했으므로 실패도 스레드로 알린다.
         logger.exception("슬랙 모의 주문 처리 실패")
         send_slack_message_v2(f"❌ 모의 {side} 주문 실패: {exc}", thread_ts=target["message_ts"])
@@ -253,7 +250,6 @@ def _place(target: dict[str, Any]) -> None:
         thread_ts=target["message_ts"],
     )
     _update_message(target, _cancel_blocks(request, order["id"]))
-    _watch_until_final(target, order["id"])
 
 
 def _cancel(target: dict[str, Any]) -> None:
@@ -265,15 +261,15 @@ def _cancel(target: dict[str, Any]) -> None:
     except Exception as exc:
         logger.exception("슬랙 모의 주문 취소 실패")
         send_slack_message_v2(f"❌ 모의 {side} 주문 취소 실패: {exc}", thread_ts=target["message_ts"])
-        # 그 사이 주문이 끝났을 수 있다 — 상태를 다시 읽어 끝났으면 결과로, 아니면 취소 버튼을 되살린다.
+        # 그 사이 주문이 끝났을 수 있다 — 끝났으면 결과 알림은 배치가 하고, 아니면 취소 버튼을 되살린다.
         order = refreshed_order(request["account_no"], target["order_id"])
         if order["status"] in _FINAL_STATUSES:
-            _finish(target, order)
+            _update_message(target, _note_blocks(request, "⏳ 결과 확인 중…"))
         else:
             _update_message(target, _cancel_blocks(request, target["order_id"]))
         return
     send_slack_message_v2(f"🚫 모의 {side} 주문 취소를 요청했습니다.", thread_ts=target["message_ts"])
-    # 취소 결과(체결 수량 포함)로 메시지를 마무리하는 일은 접수 때 시작한 체결 확인(`_watch_until_final`)이 한다.
+    # 취소 결과(체결 수량 포함)로 메시지를 마무리하는 일은 배치(`notify_finished_orders`)가 한다.
 
 
 def run_submission(target: dict[str, Any]) -> None:
@@ -286,3 +282,32 @@ def run_submission(target: dict[str, Any]) -> None:
     except Exception as exc:
         logger.exception("슬랙 모의 주문 후속 처리 실패")
         send_slack_message_v2(f"⚠️ 처리 중 오류로 멈춥니다: {exc}", thread_ts=target["message_ts"])
+
+
+def _request_of(record: dict[str, Any]) -> dict[str, Any]:
+    """주문 기록으로 메시지에 그릴 주문 내용을 만든다."""
+    return {
+        "account_no": record["account_no"],
+        "pool": record["pool"],
+        "strategy_id": record["strategy_id"],
+        "side": record["side"],
+        "label": record["strategy_label"],
+        "ticker": record["ticker"],
+        "quantity": record["quantity"],
+        "price": record["price"],
+    }
+
+
+def notify_finished_orders() -> int:
+    """슬랙으로 낸 주문 중 끝난 것(체결·취소·거부)을 스레드로 알리고 메시지 버튼을 걷어낸다 — 알린 건수를 돌려준다."""
+    refresh_slack_order_accounts()
+    records = finished_slack_orders()
+    for record in records:
+        target = {
+            "request": _request_of(record),
+            "channel": record["slack"]["channel"],
+            "message_ts": record["slack"]["message_ts"],
+        }
+        _finish(target, serialize_order(record))
+        mark_slack_notified(record["_id"])
+    return len(records)

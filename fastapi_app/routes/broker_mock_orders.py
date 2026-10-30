@@ -54,7 +54,7 @@ class PlaceOrderPayload(BaseModel):
 @router.post("/orders")
 def post_order(payload: PlaceOrderPayload, _: None = Depends(require_internal_token)) -> dict:
     try:
-        return {"order": place_order(payload.account_no, payload.pool, payload.strategy_id, payload.side)}
+        return {"order": place_order(payload.account_no, payload.pool, payload.strategy_id, payload.side, None)}
     except BrokerApiError as exc:
         raise _bad_request(exc) from exc
 

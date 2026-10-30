@@ -79,8 +79,13 @@ def resolve_order(pool: str, strategy_id: str, side: str) -> dict[str, Any]:
     }
 
 
-def place_order(account_no: str, pool: str, strategy_id: str, side: str) -> dict[str, Any]:
-    """전략 종목을 현재가 지정가로 모의투자 계좌에 주문하고 기록한다."""
+def place_order(
+    account_no: str, pool: str, strategy_id: str, side: str, slack: dict[str, str] | None
+) -> dict[str, Any]:
+    """전략 종목을 현재가 지정가로 모의투자 계좌에 주문하고 기록한다.
+
+    `slack`(채널·메시지 ts)은 슬랙 메시지로 낸 주문만 넘긴다 — 있으면 끝난 뒤 그 스레드로 알린다.
+    """
     require_mock_account(account_no)
     order = resolve_order(pool, strategy_id, side)
     now = _now()
@@ -97,6 +102,8 @@ def place_order(account_no: str, pool: str, strategy_id: str, side: str) -> dict
         "message": "",
         "created_at": now.isoformat(),
         "updated_at": now.isoformat(),
+        "slack": slack,
+        "slack_notified": False,
     }
     orders = _orders()
     inserted = orders.insert_one(doc)
@@ -125,7 +132,7 @@ def place_order(account_no: str, pool: str, strategy_id: str, side: str) -> dict
             }
         },
     )
-    return _serialize(orders.find_one({"_id": inserted.inserted_id}))
+    return serialize_order(orders.find_one({"_id": inserted.inserted_id}))
 
 
 def cancel_record(order_id: str) -> dict[str, Any]:
@@ -142,7 +149,7 @@ def cancel_record(order_id: str) -> dict[str, Any]:
         {"$set": {"message": cancelled["message"], "updated_at": _now().isoformat()}},
     )
     refresh_account_orders(record["account_no"])
-    return _serialize(orders.find_one({"_id": record["_id"]}))
+    return serialize_order(orders.find_one({"_id": record["_id"]}))
 
 
 def _order_date(record: dict[str, Any]) -> str:
@@ -180,7 +187,7 @@ def refresh_account_orders(account_no: str) -> None:
             orders.update_one({"_id": record["_id"]}, {"$set": {**update, "updated_at": now.isoformat()}})
 
 
-def _serialize(record: dict[str, Any]) -> dict[str, Any]:
+def serialize_order(record: dict[str, Any]) -> dict[str, Any]:
     created = datetime.fromisoformat(record["created_at"])
     same_day = created.date() == _now().date()
     return {
@@ -204,7 +211,39 @@ def refreshed_order(account_no: str, order_id: str) -> dict[str, Any]:
     record = _orders().find_one({"_id": ObjectId(order_id)})
     if record is None:
         raise BrokerApiError("주문 기록을 찾을 수 없습니다.")
-    return _serialize(record)
+    return serialize_order(record)
+
+
+def refresh_slack_order_accounts() -> int:
+    """진행 중인 슬랙 주문이 있는 계좌의 상태를 증권사 체결 조회로 갱신하고, 갱신한 계좌 수를 돌려준다."""
+    accounts = _orders().distinct(
+        "account_no", {"env": ENV_MOCK, "slack": {"$ne": None}, "status": {"$in": list(ACTIVE_STATUSES)}}
+    )
+    for account_no in accounts:
+        refresh_account_orders(account_no)
+    return len(accounts)
+
+
+def finished_slack_orders() -> list[dict[str, Any]]:
+    """끝났는데 슬랙으로 아직 알리지 않은 슬랙 주문 — 증권사가 접수한 주문(주문번호 있음)만 대상이다.
+
+    접수 전에 거부된 주문은 슬랙 처리부가 그 자리에서 알린다.
+    """
+    return list(
+        _orders().find(
+            {
+                "env": ENV_MOCK,
+                "slack": {"$ne": None},
+                "slack_notified": False,
+                "order_no": {"$ne": None},
+                "status": {"$in": ["filled", "canceled", "rejected"]},
+            }
+        )
+    )
+
+
+def mark_slack_notified(order_id: Any) -> None:
+    _orders().update_one({"_id": order_id}, {"$set": {"slack_notified": True}})
 
 
 def list_orders(account_no: str) -> list[dict[str, Any]]:
@@ -223,7 +262,7 @@ def list_orders(account_no: str) -> list[dict[str, Any]]:
         )
         .sort("created_at", -1)
     )
-    return [_serialize(record) for record in cursor]
+    return [serialize_order(record) for record in cursor]
 
 
 def broker_orders_today(account_no: str) -> list[dict[str, Any]]:
