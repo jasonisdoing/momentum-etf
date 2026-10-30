@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { formatPrice } from "@/lib/price-format";
+import { formatKrw } from "../assets/assets-helpers";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
 
@@ -13,6 +15,16 @@ const PROVIDER = "NAMU_PLUG";
 
 type Side = "buy" | "sell";
 type MockAccount = { account_no: string; masked: string; acct_type: string };
+type MockHolding = {
+  ticker: string;
+  name: string;
+  quantity: number;
+  average_buy_price: number;
+  current_price: number | null;
+  value: number | null;
+};
+/** 증권사 잔고 — 계좌 설정의 잔고 동기화와 같은 값(현금은 D+2 예수금). */
+type MockBalance = { cash: number; total_asset: number; holdings: MockHolding[] };
 type LogEntry = { at: string; action: string; code: string; message: string };
 
 const fieldStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, marginBottom: 10 };
@@ -34,6 +46,7 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
   const [quantity, setQuantity] = useState("");
   const [price, setPrice] = useState("");
   const [orderNo, setOrderNo] = useState("");
+  const [balance] = useState<MockBalance | null>(null);
   const [log] = useState<LogEntry[]>([]);
 
   useEffect(() => {
@@ -96,6 +109,49 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
           ))}
         </select>
       </label>
+
+      <div style={{ borderTop: "1px solid var(--border-color, rgba(148,163,184,0.3))", paddingTop: 12, marginTop: 4, marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+          <span style={{ fontWeight: 700 }}>잔고</span>
+          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={!accountNo} onClick={notConnected}>
+            잔고 새로고침
+          </button>
+          <span style={{ marginLeft: "auto", fontSize: "var(--fs-sm)", color: "var(--text-muted)" }}>
+            예수금(D+2) <strong style={{ color: "inherit" }}>{balance ? formatKrw(balance.cash) : "-"}</strong>
+            {" · "}총자산 <strong style={{ color: "inherit" }}>{balance ? formatKrw(balance.total_asset) : "-"}</strong>
+          </span>
+        </div>
+        {balance === null ? (
+          <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>잔고를 불러오지 않았습니다.</div>
+        ) : balance.holdings.length === 0 ? (
+          <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>보유 종목이 없습니다.</div>
+        ) : (
+          <table className="table table-sm" style={{ fontSize: "var(--fs-sm)", marginBottom: 0 }}>
+            <thead>
+              <tr>
+                <th style={{ width: 90 }}>종목코드</th>
+                <th>종목명</th>
+                <th style={{ width: 90, textAlign: "right" }}>수량</th>
+                <th style={{ width: 110, textAlign: "right" }}>평단</th>
+                <th style={{ width: 110, textAlign: "right" }}>현재가</th>
+                <th style={{ width: 130, textAlign: "right" }}>평가금액</th>
+              </tr>
+            </thead>
+            <tbody>
+              {balance.holdings.map((row) => (
+                <tr key={row.ticker}>
+                  <td>{row.ticker}</td>
+                  <td>{row.name}</td>
+                  <td style={{ textAlign: "right" }}>{row.quantity.toLocaleString("ko-KR")}</td>
+                  <td style={{ textAlign: "right" }}>{formatPrice(row.average_buy_price, "KRW")}</td>
+                  <td style={{ textAlign: "right" }}>{formatPrice(row.current_price, "KRW")}</td>
+                  <td style={{ textAlign: "right" }}>{formatPrice(row.value, "KRW")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       <div style={{ borderTop: "1px solid var(--border-color, rgba(148,163,184,0.3))", paddingTop: 12, marginTop: 4 }}>
         <div style={{ fontWeight: 700, marginBottom: 10 }}>지정가 주문</div>
