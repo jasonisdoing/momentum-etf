@@ -3,7 +3,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getAuthCookieName, verifySessionToken } from "./lib/auth";
 
 function isPublicPath(pathname: string): boolean {
-  return pathname === "/login" || pathname === "/api/live" || pathname.startsWith("/api/auth/");
+  return (
+    pathname === "/login" ||
+    pathname === "/api/live" ||
+    pathname.startsWith("/api/auth/") ||
+    // 슬랙 인터랙션 웹훅 — 로그인 없이 오며, 서명 검증은 FastAPI 가 한다.
+    pathname === "/api/slack/interactions"
+  );
 }
 
 function isStaticPath(pathname: string): boolean {

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from fastapi_app.dependencies import require_internal_token
 from services.broker_api_service import BrokerApiError
 from services.broker_order_service import fetch_mock_balance
+from utils.slack_mock_orders import send_order_message
 from utils.strategy_trade_orders import (
     broker_orders_today,
     cancel_record,
@@ -56,6 +57,16 @@ def post_order(payload: PlaceOrderPayload, _: None = Depends(require_internal_to
         return {"order": place_order(payload.account_no, payload.pool, payload.strategy_id, payload.side)}
     except BrokerApiError as exc:
         raise _bad_request(exc) from exc
+
+
+@router.post("/slack-order")
+def post_slack_order(payload: PlaceOrderPayload, _: None = Depends(require_internal_token)) -> dict:
+    """주문 메시지(버튼)를 슬랙으로 보낸다 — 주문은 슬랙의 모달 확인 뒤에 나간다."""
+    try:
+        send_order_message(payload.account_no, payload.pool, payload.strategy_id, payload.side)
+    except BrokerApiError as exc:
+        raise _bad_request(exc) from exc
+    return {"ok": True}
 
 
 class CancelPayload(BaseModel):

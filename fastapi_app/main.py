@@ -31,6 +31,7 @@ from .routes.pool_risk_return import router as pool_risk_return_router
 from .routes.pool_settings import router as pool_settings_router
 from .routes.quotes import router as quotes_router
 from .routes.rank import router as rank_router
+from .routes.slack_interactions import router as slack_interactions_router
 from .routes.snapshots import router as snapshots_router
 from .routes.stocks import router as stocks_router
 from .routes.strategy_mix import router as strategy_mix_router
@@ -103,6 +104,7 @@ app.include_router(broker_api_router)
 app.include_router(broker_mock_orders_router)
 app.include_router(quotes_router)
 app.include_router(rank_router)
+app.include_router(slack_interactions_router)
 app.include_router(snapshots_router)
 app.include_router(stocks_router)
 app.include_router(strategy_mix_router)

@@ -67,7 +67,7 @@ def _active_key(account_no: str, strategy_id: str, side: str) -> str:
     return f"{ENV_MOCK}:{account_no}:{strategy_id}:{side}"
 
 
-def _resolve_order(pool: str, strategy_id: str, side: str) -> dict[str, Any]:
+def resolve_order(pool: str, strategy_id: str, side: str) -> dict[str, Any]:
     """주문 내용 — 전략 종목의 현재가를 호가 단위로 반올림한 지정가, 수량은 회차당 수량이다."""
     if side not in ("buy", "sell"):
         raise BrokerApiError(f"알 수 없는 주문 구분입니다: {side}")
@@ -90,7 +90,7 @@ def _resolve_order(pool: str, strategy_id: str, side: str) -> dict[str, Any]:
 def place_order(account_no: str, pool: str, strategy_id: str, side: str) -> dict[str, Any]:
     """전략 종목을 현재가 지정가로 모의투자 계좌에 주문하고 기록한다."""
     require_mock_account(account_no)
-    order = _resolve_order(pool, strategy_id, side)
+    order = resolve_order(pool, strategy_id, side)
     now = _now()
     doc = {
         "env": ENV_MOCK,

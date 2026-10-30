@@ -218,6 +218,17 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
       setBalance(await requestJson<MockBalance>(`/api/broker-api/mock/balance?${query}`));
     });
 
+  // 같은 주문 내용을 슬랙 메시지(버튼·모달)로 보낸다 — 주문은 슬랙에서 확인을 눌러야 나간다.
+  const sendSlackOrder = () =>
+    run("slack", async () => {
+      await requestJson("/api/broker-api/mock/slack-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_no: accountNo, pool, strategy_id: strategyId, side }),
+      });
+      toast.success(`${strategy?.label ?? ""} ${side === "buy" ? "매수" : "매도"} 주문 메시지를 슬랙으로 보냈습니다.`);
+    });
+
   const cancelOrder = (orderId: string) =>
     run(`cancel:${orderId}`, async () => {
       await requestJson("/api/broker-api/mock/orders/cancel", {
@@ -368,6 +379,15 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
           onClick={() => void placeOrder()}
         >
           {busy === "order" ? "주문 중…" : side === "buy" ? "매수 주문" : "매도 주문"}
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm btn-outline-secondary"
+          style={{ marginLeft: 8 }}
+          disabled={!canOrder}
+          onClick={() => void sendSlackOrder()}
+        >
+          {busy === "slack" ? "보내는 중…" : side === "buy" ? "매수 주문 메시지(슬랙)" : "매도 주문 메시지(슬랙)"}
         </button>
       </div>
 

@@ -72,6 +72,7 @@ Cloudflare 프록시(주황 구름)는 쓰지 않는다 — HTTP-01 검증이 �
 | `APP_BASE_URL` | 서비스 주소 단일 소스 |
 | `APP_TYPE` | `Local` 이면 로컬 워커·락 소유자 |
 | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` | 알림 |
+| `SLACK_SIGNING_SECRET` | 슬랙 인터랙션 웹훅(`/api/slack/interactions`) 서명 검증. 슬랙 앱의 Interactivity Request URL 이 `{APP_BASE_URL}/api/slack/interactions` |
 | `DART_API_KEY` | OpenDART 재무 조회 |
 | `KRX_DATA_ID`, `KRX_DATA_PW` | KRX 로그인 헬퍼(보관용, 자동 수집은 약관 금지) |
 | MongoDB 접속 | `utils/db_manager.py` 참조 |
