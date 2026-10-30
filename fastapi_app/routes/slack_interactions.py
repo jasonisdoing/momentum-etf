@@ -13,7 +13,7 @@ from services.broker_api_service import BrokerApiError
 from utils.slack_mock_orders import (
     open_confirm_modal,
     parse_payload,
-    place_submitted_order,
+    run_submission,
     submitted_request,
     verify_signature,
 )
@@ -39,7 +39,7 @@ def post_interaction(
         if payload["type"] == "block_actions":
             open_confirm_modal(payload)
         elif payload["type"] == "view_submission":
-            background.add_task(place_submitted_order, submitted_request(payload))
+            background.add_task(run_submission, submitted_request(payload))
         else:
             raise BrokerApiError(f"처리하지 않는 슬랙 요청 종류입니다: {payload['type']}")
     except BrokerApiError as exc:
