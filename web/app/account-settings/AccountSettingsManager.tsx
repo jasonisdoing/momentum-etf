@@ -11,6 +11,7 @@ import { LastSavedCell } from "../components/LastSavedCell";
 import { ensureAsxPrefix } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
+import { MockOrderModal } from "./MockOrderModal";
 
 type Benchmark = { ticker?: string; name?: string };
 type MarketIndexOption = { ticker: string; name: string };
@@ -646,6 +647,7 @@ export function AccountSettingsManager() {
   const [drafts, setDrafts] = useState<Record<string, AccountDraft>>({});
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
+  const [mockOrderOpen, setMockOrderOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [sendingAlarm, setSendingAlarm] = useState(false);
@@ -997,6 +999,14 @@ export function AccountSettingsManager() {
                 </button>
                 <button
                   type="button"
+                  className="btn btn-sm btn-dark"
+                  title="증권사 모의투자 계좌로 지정가 주문·취소·체결 조회를 시험합니다."
+                  onClick={() => setMockOrderOpen(true)}
+                >
+                  모의 주문 테스트
+                </button>
+                <button
+                  type="button"
                   className="btn btn-sm btn-outline-danger"
                   disabled={selectedIds.length === 0 || deleting}
                   onClick={() => void handleDeleteSelected()}
@@ -1093,6 +1103,8 @@ export function AccountSettingsManager() {
           onClose={() => setDetailId(null)}
         />
       ) : null}
+
+      {mockOrderOpen ? <MockOrderModal onClose={() => setMockOrderOpen(false)} /> : null}
 
       {addOpen ? <AddAccountModal onClose={() => setAddOpen(false)} onCreated={() => void load()} /> : null}
     </div>
