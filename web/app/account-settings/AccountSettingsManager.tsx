@@ -457,7 +457,7 @@ function AccountDetailModal({
           </select>
         ) : draft.brokerAccountNo ? (
           <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)" }}>
-            저장된 계좌: {draft.brokerAccountNo.slice(0, 3)}***{draft.brokerAccountNo.slice(-2)}
+            저장된 계좌: {draft.brokerAccountNo.slice(0, 4)}***{draft.brokerAccountNo.slice(-2)}
           </span>
         ) : null}
         {savedBrokerAccountNo ? (
@@ -921,7 +921,7 @@ export function AccountSettingsManager() {
         const row = params.data;
         if (!row?.brokerProvider) return "없음";
         return row.brokerAccountNo
-          ? `${row.brokerProvider} · ${row.brokerAccountNo.slice(0, 3)}***${row.brokerAccountNo.slice(-2)}`
+          ? `${row.brokerProvider} · ${row.brokerAccountNo.slice(0, 4)}***${row.brokerAccountNo.slice(-2)}`
           : `${row.brokerProvider} (계좌 미선택)`;
       },
     },

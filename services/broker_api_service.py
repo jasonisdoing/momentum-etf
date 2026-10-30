@@ -3,8 +3,8 @@
 커넥터는 레지스트리(`PROVIDERS`)에 등록한다. 환경변수는 `<PROVIDER>_API_KEY` /
 `<PROVIDER>_API_SECRET` 규칙을 따른다 (예: NAMU_PLUG_API_KEY).
 
-지금은 나무증권(NH PLUG, `nhplug` SDK) 하나다. 조회는 전부 읽기 전용이다 —
-주문·이체 API 는 여기서 다루지 않는다.
+지금은 나무증권(NH PLUG, `nhplug` SDK) 하나다. 여기 조회는 전부 읽기 전용이고 운영 도메인으로 간다 —
+주문은 `services/broker_order_service.py`(모의투자 서버 직접 요청)가 따로 다루고, 이체 API 는 다루지 않는다.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ _MAX_PAGES = 20
 PROVIDERS: tuple[dict[str, str], ...] = ({"id": "NAMU_PLUG", "name": "나무증권 (NH PLUG)"},)
 
 
-def _is_business_success(rsp_cd: str | None, rsp_msg: str | None) -> bool:
+def is_business_success(rsp_cd: str | None, rsp_msg: str | None) -> bool:
     """업무 성공 여부 — 코드 allowlist 우선, 없으면 메시지의 '완료' 로 본다.
 
     `rsp_cd` 가 없는 응답(토큰 등)은 판정 대상이 아니라 성공으로 둔다.
@@ -74,7 +74,8 @@ def list_providers() -> list[dict[str, Any]]:
 
 
 def _mask(account_no: str) -> str:
-    return account_no[:3] + "***" + account_no[-2:] if len(account_no) > 5 else "***"
+    # 앞 4자리를 보인다 — 모의투자 계좌는 네 번째 자리만 달라 3자리면 서로 구분이 안 된다.
+    return account_no[:4] + "***" + account_no[-2:] if len(account_no) > 6 else "***"
 
 
 def _ensure_env() -> None:
@@ -165,6 +166,36 @@ def _publish_token_to_db() -> None:
         )
 
 
+def namu_access_token() -> str:
+    """직접 요청용 접근토큰 — SDK 호출과 같은 DB 공유 토큰을 쓴다(키당 유효 토큰 1개라 따로 발급하면 서로 죽인다)."""
+    _ensure_env()
+    try:
+        from nhplug import get_token
+    except ImportError as exc:
+        raise BrokerApiError("nhplug 패키지가 설치돼 있지 않습니다 (pip install nhplug).") from exc
+    _seed_token_from_db()
+    token = get_token()
+    _publish_token_to_db()
+    return token
+
+
+def namu_invalidate_token() -> str:
+    """직접 요청이 401 을 받았을 때 — 토큰을 버리고 새로 받아 DB 에 공유한다."""
+    _ensure_env()
+    from nhplug import clear_token, get_token
+
+    clear_token()
+    token = get_token(force=True)
+    _publish_token_to_db()
+    return token
+
+
+def namu_app_credentials() -> tuple[str, str]:
+    """직접 요청 헤더(x-client-id·x-client-secret)에 쓸 앱키·시크릿."""
+    _ensure_env()
+    return os.environ["NHPLUG_APP_KEY"], os.environ["NHPLUG_APP_SECRET"]
+
+
 def _namu_call(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     """nhplug 단건 호출 (연속조회 없는 API 용).
 
@@ -181,7 +212,7 @@ def _namu_call(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     except NhplugError as exc:
         raise BrokerApiError(f"나무증권 API 오류: {exc.message} (코드 {exc.code})") from exc
     code, message = status_of(result)
-    if not _is_business_success(code, message):
+    if not is_business_success(code, message):
         raise BrokerApiError(f"나무증권 API 오류: {message or '업무 오류'} (코드 {code})")
     _publish_token_to_db()
     return result
@@ -205,7 +236,7 @@ def _namu_call_paged(path: str, payload: dict[str, Any], list_key: str = "Output
     items: list[Any] = []
     try:
         for page, (data, meta) in enumerate(paginate(path, payload, want_meta=True), start=1):
-            if not meta.has_next and not _is_business_success(meta.rsp_cd, meta.rsp_msg):
+            if not meta.has_next and not is_business_success(meta.rsp_cd, meta.rsp_msg):
                 raise BrokerApiError(f"나무증권 API 오류: {meta.rsp_msg or '업무 오류'} (코드 {meta.rsp_cd})")
             if not merged:
                 merged = {key: value for key, value in data.items() if key != list_key}
@@ -220,18 +251,33 @@ def _namu_call_paged(path: str, payload: dict[str, Any], list_key: str = "Output
     return merged
 
 
+BALANCE_PATH = "/krstock/inquiry/v1/balance"
+
+
+def balance_request(account_no: str) -> dict[str, Any]:
+    """국내주식 잔고 조회 요청 본문 — 운영·모의투자 조회가 같은 값을 쓴다."""
+    return {
+        "act_no": account_no,
+        "bnc_bse_cd": "5",  # 평가 기준(체결 기준)
+        "ltg_aot_dit_cd": "9",
+        "aet_bse": "2",
+        "qut_dit_cd": "UNT",
+    }
+
+
 def _namu_balance(account_no: str) -> dict[str, Any]:
     """국내주식 잔고 원본 응답 — Output_0 요약, Output_1 보유 목록(연속조회 병합)."""
-    return _namu_call_paged(
-        "/krstock/inquiry/v1/balance",
-        {
-            "act_no": account_no,
-            "bnc_bse_cd": "5",  # 평가 기준(체결 기준)
-            "ltg_aot_dit_cd": "9",
-            "aet_bse": "2",
-            "qut_dit_cd": "UNT",
-        },
-    )
+    return _namu_call_paged(BALANCE_PATH, balance_request(account_no))
+
+
+def account_types() -> dict[str, str]:
+    """계좌번호 → 계좌구분(01·02 운영, 03 모의투자) — 주문이 가는 서버와 계좌가 맞는지 가릴 때 쓴다."""
+    types: dict[str, str] = {}
+    for item in _namu_call("/n2/acctinfo", {}).get("Output_0", []):
+        account_no = str(item.get("act_no") or item.get("acct_no") or "").strip()
+        if account_no:
+            types[account_no] = str(item.get("acct_type") or "")
+    return types
 
 
 def list_broker_accounts(provider: str) -> list[dict[str, Any]]:
@@ -304,6 +350,19 @@ def _normalize_balance(data: dict[str, Any]) -> tuple[float, list[dict[str, Any]
     return float(summary.get("nxt2_dd_dca") or 0), holdings
 
 
+def parse_balance(data: dict[str, Any]) -> dict[str, Any]:
+    """잔고 원본 응답 → 표준형 — 운영 조회(SDK)와 모의투자 조회(직접 요청)가 같은 기준을 쓴다."""
+    summary = data.get("Output_0", {}) or {}
+    cash, holdings = _normalize_balance(data)
+    return {
+        "cash": cash,
+        # 참고용 원본 요약 — 화면이 어떤 값을 썼는지 확인할 수 있게 함께 담는다.
+        "cash_d0": float(summary.get("dca") or 0),
+        "total_asset": float(summary.get("tot_aet_amt") or 0),
+        "holdings": holdings,
+    }
+
+
 def fetch_broker_balance(provider: str, account_no: str) -> dict[str, Any]:
     """잔고를 표준형으로 정규화해 돌려주고, '적용' 용으로 잠시 캐시한다.
 
@@ -315,19 +374,7 @@ def fetch_broker_balance(provider: str, account_no: str) -> dict[str, Any]:
     """
     if provider != "NAMU_PLUG":
         raise BrokerApiError(f"등록되지 않은 커넥터입니다: {provider}")
-    data = _namu_balance(account_no)
-    summary = data.get("Output_0", {}) or {}
-    cash, holdings = _normalize_balance(data)
-
-    result = {
-        "provider": provider,
-        "account_no": account_no,
-        "cash": cash,
-        # 참고용 원본 요약 — 화면이 어떤 값을 썼는지 확인할 수 있게 함께 담는다.
-        "cash_d0": float(summary.get("dca") or 0),
-        "total_asset": float(summary.get("tot_aet_amt") or 0),
-        "holdings": holdings,
-    }
+    result = {"provider": provider, "account_no": account_no, **parse_balance(_namu_balance(account_no))}
     _FETCH_CACHE.set(_FETCH_CACHE.make_key(provider, account_no), result)
     return result
 

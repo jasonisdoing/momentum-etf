@@ -10,6 +10,7 @@ from .routes.alarms import router as alarms_router
 from .routes.assets import router as assets_router
 from .routes.aus_market_stocks import router as aus_market_stocks_router
 from .routes.broker_api import router as broker_api_router
+from .routes.broker_mock_orders import router as broker_mock_orders_router
 from .routes.daily import router as daily_router
 from .routes.dashboard import router as dashboard_router
 from .routes.data_sources import router as data_sources_router
@@ -99,6 +100,7 @@ app.include_router(pool_backtest_router)
 app.include_router(pool_risk_return_router)
 app.include_router(account_settings_router)
 app.include_router(broker_api_router)
+app.include_router(broker_mock_orders_router)
 app.include_router(quotes_router)
 app.include_router(rank_router)
 app.include_router(snapshots_router)

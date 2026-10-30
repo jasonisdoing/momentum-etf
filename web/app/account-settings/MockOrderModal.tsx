@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { formatPrice } from "@/lib/price-format";
 import { formatKrw } from "../assets/assets-helpers";
@@ -38,6 +38,13 @@ const STATUS_CHIPS: Record<OrderStatus, { label: string; className: string }> = 
   rejected: { label: "거부", className: "badge bg-red-lt" },
 };
 
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const resp = await fetch(url, { cache: "no-store", ...init });
+  const data = (await resp.json()) as T & { error?: string };
+  if (!resp.ok || data.error) throw new Error(data.error ?? "요청에 실패했습니다.");
+  return data;
+}
+
 /** 우리가 보낸 주문 한 건 — 어느 전략·회차의 주문인지와 현재 상태. */
 type OrderRecord = {
   id: string;
@@ -50,6 +57,8 @@ type OrderRecord = {
   price: number;
   filled_quantity: number;
   status: OrderStatus;
+  /** 증권사 응답·정리 사유 — 비어 있으면 정상. */
+  message: string;
 };
 
 /** 증권사 주문내역 한 줄 — 체결 조회 응답 그대로(우리 기록과 대조용). */
@@ -98,12 +107,15 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
   const [accounts, setAccounts] = useState<MockAccount[] | null>(null);
   const [accountNo, setAccountNo] = useState("");
   const [strategies, setStrategies] = useState<StrategyView[] | null>(null);
+  const [pool, setPool] = useState("");
   const [strategyId, setStrategyId] = useState("");
   const [side, setSide] = useState<Side>("buy");
   const [roundNo, setRoundNo] = useState("");
-  const [balance] = useState<MockBalance | null>(null);
-  const [orders] = useState<OrderRecord[]>([]);
-  const [brokerOrders] = useState<BrokerOrder[] | null>(null);
+  const [balance, setBalance] = useState<MockBalance | null>(null);
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [brokerOrders, setBrokerOrders] = useState<BrokerOrder[] | null>(null);
+  // 진행 중인 요청 — 같은 버튼을 연달아 눌러 주문이 두 번 나가지 않게 한다.
+  const [busy, setBusy] = useState<"balance" | "orders" | "order" | "broker" | string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,11 +146,12 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
     void (async () => {
       try {
         const resp = await fetch("/api/strategy-trade", { cache: "no-store" });
-        const data = (await resp.json()) as { strategies?: StrategyView[]; error?: string };
+        const data = (await resp.json()) as { strategies?: StrategyView[]; pool?: string | null; error?: string };
         if (!resp.ok || data.error) throw new Error(data.error ?? "사고팔기 전략을 불러오지 못했습니다.");
         if (cancelled) return;
         const list = data.strategies ?? [];
         setStrategies(list);
+        setPool(data.pool ?? "");
         if (list.length > 0) setStrategyId(list[0].strategy_id);
       } catch (err) {
         if (cancelled) return;
@@ -164,10 +177,75 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
   const limitPrice = selectedRound ? (side === "buy" ? selectedRound.buy_limit : selectedRound.sell_limit) : null;
   const quantity = strategy?.config.round_quantity ?? null;
 
-  // UI 확인 단계 — 서버 호출은 아직 연결하지 않았다.
-  const notConnected = () => toast.warning("서버 연결 전입니다 (화면 확인 단계).");
+  const run = useCallback(
+    async (key: string, work: () => Promise<void>) => {
+      setBusy(key);
+      try {
+        await work();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "요청에 실패했습니다.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [toast],
+  );
 
-  const canOrder = Boolean(accountNo && strategy && selectedRound && limitPrice !== null && quantity);
+  const query = `account_no=${encodeURIComponent(accountNo)}`;
+  const loadBalance = () =>
+    run("balance", async () => {
+      setBalance(await requestJson<MockBalance>(`/api/broker-api/mock/balance?${query}`));
+    });
+  const loadOrders = () =>
+    run("orders", async () => {
+      setOrders((await requestJson<{ orders: OrderRecord[] }>(`/api/broker-api/mock/orders?${query}`)).orders);
+    });
+  const loadBrokerOrders = () =>
+    run("broker", async () => {
+      setBrokerOrders((await requestJson<{ orders: BrokerOrder[] }>(`/api/broker-api/mock/broker-orders?${query}`)).orders);
+    });
+
+  // 계좌를 고르면 잔고와 주문 기록을 함께 읽는다.
+  useEffect(() => {
+    if (!accountNo) {
+      setBalance(null);
+      setOrders([]);
+      setBrokerOrders(null);
+      return;
+    }
+    // 모의투자 서버는 호출 간격을 두고 직렬로 받으므로 순서대로 읽는다.
+    void (async () => {
+      await loadBalance();
+      await loadOrders();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountNo]);
+
+  const placeOrder = () =>
+    run("order", async () => {
+      const data = await requestJson<{ order: OrderRecord }>("/api/broker-api/mock/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_no: accountNo, pool, strategy_id: strategyId, round: Number(roundNo || defaultRound), side }),
+      });
+      toast.success(`${data.order.strategy_label} ${data.order.round}호 ${side === "buy" ? "매수" : "매도"} 주문을 접수했습니다.`);
+      setOrders((await requestJson<{ orders: OrderRecord[] }>(`/api/broker-api/mock/orders?${query}`)).orders);
+      setBalance(await requestJson<MockBalance>(`/api/broker-api/mock/balance?${query}`));
+    });
+
+  const cancelOrder = (orderId: string) =>
+    run(`cancel:${orderId}`, async () => {
+      await requestJson("/api/broker-api/mock/orders/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_id: orderId }),
+      });
+      toast.success("취소 요청을 보냈습니다.");
+      setOrders((await requestJson<{ orders: OrderRecord[] }>(`/api/broker-api/mock/orders?${query}`)).orders);
+      setBalance(await requestJson<MockBalance>(`/api/broker-api/mock/balance?${query}`));
+    });
+
+  const canOrder = Boolean(accountNo && pool && strategy && selectedRound && limitPrice !== null && quantity && busy === null);
 
   return (
     <AppModal
@@ -205,8 +283,8 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
       <div style={{ ...sectionStyle, marginTop: 4 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
           <span style={{ fontWeight: 700 }}>잔고</span>
-          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={!accountNo} onClick={notConnected}>
-            잔고 새로고침
+          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={!accountNo || busy !== null} onClick={() => void loadBalance()}>
+            {busy === "balance" ? "불러오는 중…" : "잔고 새로고침"}
           </button>
           <span style={{ marginLeft: "auto", ...mutedStyle }}>
             예수금(D+2) <strong style={{ color: "inherit" }}>{balance ? formatKrw(balance.cash) : "-"}</strong>
@@ -323,17 +401,17 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
           type="button"
           className={side === "buy" ? "btn btn-sm btn-primary" : "btn btn-sm btn-danger"}
           disabled={!canOrder}
-          onClick={notConnected}
+          onClick={() => void placeOrder()}
         >
-          {side === "buy" ? "매수 주문" : "매도 주문"}
+          {busy === "order" ? "주문 중…" : side === "buy" ? "매수 주문" : "매도 주문"}
         </button>
       </div>
 
       <div style={sectionStyle}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
           <span style={{ fontWeight: 700 }}>주문 기록</span>
-          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={!accountNo} onClick={notConnected}>
-            상태 새로고침
+          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={!accountNo || busy !== null} onClick={() => void loadOrders()}>
+            {busy === "orders" ? "불러오는 중…" : "상태 새로고침"}
           </button>
           <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
             {(Object.keys(STATUS_CHIPS) as OrderStatus[]).map((status) => (
@@ -372,11 +450,19 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
                   <td style={rightCell}>{row.filled_quantity.toLocaleString("ko-KR")}</td>
                   <td>
                     <StatusChip status={row.status} />
+                    {row.message ? (
+                      <div style={{ ...mutedStyle, fontSize: "var(--fs-xs, 0.75rem)", whiteSpace: "normal" }}>{row.message}</div>
+                    ) : null}
                   </td>
                   <td>
                     {row.status === "pending" || row.status === "partial" ? (
-                      <button type="button" className="btn btn-sm btn-outline-danger" onClick={notConnected}>
-                        취소
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-danger"
+                        disabled={busy !== null}
+                        onClick={() => void cancelOrder(row.id)}
+                      >
+                        {busy === `cancel:${row.id}` ? "취소 중…" : "취소"}
                       </button>
                     ) : null}
                   </td>
@@ -390,8 +476,8 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
       <details style={sectionStyle}>
         <summary style={{ fontWeight: 700, cursor: "pointer" }}>증권사 주문내역 (오늘)</summary>
         <div style={{ marginTop: 10 }}>
-          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={!accountNo} onClick={notConnected}>
-            증권사 내역 불러오기
+          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={!accountNo || busy !== null} onClick={() => void loadBrokerOrders()}>
+            {busy === "broker" ? "불러오는 중…" : "증권사 내역 불러오기"}
           </button>
           <span style={{ ...mutedStyle, marginLeft: 10 }}>우리 기록과 대조합니다 — 보내지 않은 주문이나 상태가 다른 주문을 찾는 용도입니다.</span>
         </div>
