@@ -457,9 +457,9 @@ ENTRY_VOL_MULT_OPTIONS_BY_COUNTRY: dict[str, tuple[float | None, ...]] = {
 # 50·75·100·150 — 한국:미국 = 1.2 배로 칸마다 짝이 맞아 두 시장 결과를 같은 자리끼리
 # 비교할 수 있다. 값을 늘릴 때 이 대응이 깨지지 않는지 함께 본다. 단기는 세 국가 공통.
 SHORT_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {
-    "kor": (20, 30, 40),
-    "us": (20, 30, 40),
-    "au": (20, 30, 40),
+    "kor": (20, 30, 40, 50),
+    "us": (20, 30, 40, 50),
+    "au": (20, 30, 40, 50),
 }
 LONG_MA_DAYS_BY_COUNTRY: dict[str, tuple[int, ...]] = {
     "kor": (90, 120, 150, 180, 240),

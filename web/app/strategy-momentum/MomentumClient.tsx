@@ -204,6 +204,8 @@ type Trade = {
   reason: string;
   price?: number | null;
   change_pct?: number | null;
+  /** 전거래일(%) — 순위 화면과 같은 공용 규칙. */
+  prev_day_change_pct?: number | null;
   market_cap_rank?: number | null;
   value_mult?: number | null;
   value_mult_live?: number | null;
@@ -632,17 +634,11 @@ export function MomentumClient() {
     if (!positions) return [];
     // 엔진은 `status`(hold/sell) 로 준다 — 표는 진입 예정·빈 슬롯까지 한 축(`plan`)으로 본다.
     const held: PlanRow[] = positions.holdings.map((row) => ({ ...row, plan: row.status }));
+    // 후보·체결 행은 필드를 하나씩 옮기지 않고 통째로 펼친 뒤 표에 맞게 덮는다 — 옮기는 목록에서
+    // 빠진 값(전거래일 등)이 진입·이탈 행에서만 조용히 비는 일이 없다.
     const buys: PlanRow[] = positions.planned_entries.map((row) => ({
-      rank: row.rank,
-      ticker: row.ticker,
-      name: row.name,
-      industry: row.industry,
-      sector: row.sector,
+      ...row,
       market_cap_rank: row.market_cap_rank ?? null,
-      change_pct: row.change_pct,
-      price: row.price,
-      value_mult: row.value_mult ?? null,
-      value_mult_live: row.value_mult_live ?? null,
       exit_price: null,
       entry_date: null,
       entry_price: null,
@@ -654,44 +650,16 @@ export function MomentumClient() {
       days: 0,
       is_new: false,
       exit_reason: null,
-      memo: row.memo,
-      short_gap_pct: row.short_gap_pct,
-      long_gap_pct: row.long_gap_pct,
-      high_drawdown_pct: row.high_drawdown_pct,
-      volatility_pct: row.volatility_pct,
-      new_listing: row.new_listing,
-      listing_months: row.listing_months,
-      account_held: row.account_held,
     }));
+    // 이탈 행도 표의 모든 칸이 채워져야 한다 — 판 뒤의 상태를 같은 기준으로 본다.
     const exited: PlanRow[] = positions.exited_today.map((trade) => ({
-      rank: trade.rank,
-      ticker: trade.ticker,
-      name: trade.name,
-      industry: trade.industry,
-      sector: trade.sector,
+      ...trade,
       market_cap_rank: trade.market_cap_rank ?? null,
       change_pct: trade.change_pct ?? null,
       price: trade.price ?? null,
-      exit_price: trade.exit_price,
-      exit_date: trade.exit_date,
-      value_mult: trade.value_mult ?? null,
-      value_mult_live: trade.value_mult_live ?? null,
-      entry_date: trade.entry_date,
-      entry_price: trade.entry_price,
-      return_pct: trade.return_pct,
       plan: "exited",
-      days: trade.days,
       is_new: false,
       exit_reason: trade.reason,
-      memo: trade.memo,
-      account_held: trade.account_held,
-      // 이탈 행도 표의 모든 칸이 채워져야 한다 — 판 뒤의 상태를 같은 기준으로 본다.
-      short_gap_pct: trade.short_gap_pct,
-      long_gap_pct: trade.long_gap_pct,
-      high_drawdown_pct: trade.high_drawdown_pct,
-      volatility_pct: trade.volatility_pct,
-      new_listing: trade.new_listing,
-      listing_months: trade.listing_months,
     }));
     // 빈 슬롯 — 상한에서 '다음 시가 이후에 실제로 차 있을 자리' 를 뺀 만큼. 매도 예정은 곧
     // 비고, 진입 예정은 곧 찬다. 자리가 남았다는 것은 자격을 갖춘 후보가 없었다는 뜻이라,
