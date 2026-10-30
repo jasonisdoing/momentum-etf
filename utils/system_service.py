@@ -128,9 +128,20 @@ SCHEDULE_ROWS = [
         "command": "python scripts/stock_price_cache_updater.py --country au",
         "schedule": {"minutes": [35], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
-    # ② 장중 실행 — 장중에 도는 것들. 알림과 데이터 동기화가 섞여 있다.
+    # ② 슬랙 주문 연동 — 슬랙으로 낸 모의 주문의 결과 처리.
     {
         "no": 5,
+        "key": "slack_mock_order_notify",
+        "group": "슬랙 주문 연동",
+        "job": "슬랙 모의 주문 결과 알림",
+        "target": "슬랙 메시지로 낸 모의 주문 (진행 중인 것이 없으면 조회 없이 종료)",
+        "cadence": "평일 09:00~15:59 KST 1분 간격",
+        "command": "python scripts/slack_mock_order_notify.py",
+        "schedule": {"minutes": list(range(60)), "hours": list(range(9, 16)), "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    # ③ 장중 실행 — 장중에 도는 것들. 알림과 데이터 동기화가 섞여 있다.
+    {
+        "no": 6,
         "key": "broker_balance_sync",
         "group": "장중 실행",
         "job": "증권사 잔고 동기화",
@@ -141,7 +152,7 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _BROKER_SYNC_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 6,
+        "no": 7,
         "key": "strategy_mix_notify_kor",
         "group": "장중 실행",
         "job": "한국 합성 액션 알림",
@@ -153,7 +164,7 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 7,
+        "no": 8,
         "key": "strategy_mix_notify_us",
         "group": "장중 실행",
         "job": "미국 합성 액션 알림",
@@ -165,7 +176,7 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _US_INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
-        "no": 8,
+        "no": 9,
         "key": "strategy_trade_notify",
         "group": "장중 실행",
         "job": "전략 사고팔기 알림",
@@ -175,16 +186,6 @@ SCHEDULE_ROWS = [
         "command": "python scripts/strategy_trade_notify.py",
         # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
         "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
-    },
-    {
-        "no": 9,
-        "key": "slack_mock_order_notify",
-        "group": "장중 실행",
-        "job": "슬랙 모의 주문 결과 알림",
-        "target": "슬랙 메시지로 낸 모의 주문 (진행 중인 것이 없으면 조회 없이 종료)",
-        "cadence": "평일 09:00~15:59 KST 1분 간격",
-        "command": "python scripts/slack_mock_order_notify.py",
-        "schedule": {"minutes": list(range(60)), "hours": list(range(9, 16)), "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "no": 10,
@@ -231,7 +232,7 @@ SCHEDULE_ROWS = [
             "weekdays": _WEEKDAYS_MON_SAT,
         },
     },
-    # ③ 마감 후 지표 — 하루 1~2회.
+    # ④ 마감 후 지표 — 하루 1~2회.
     {
         "no": 13,
         "key": "market_breadth",
@@ -266,7 +267,7 @@ SCHEDULE_ROWS = [
         "command": "python scripts/stock_price_cache_updater.py --full",
         "schedule": {"minutes": [10], "hours": [17], "weekdays": _WEEKDAYS_MON_FRI},
     },
-    # ④ 개장 전 준비 — 아침에 한 번, 오래 걸린다(실행 시각 순).
+    # ⑤ 개장 전 준비 — 아침에 한 번, 오래 걸린다(실행 시각 순).
     {
         "no": 15,
         "key": "market_hours_analysis",
@@ -362,7 +363,7 @@ SCHEDULE_ROWS = [
         "command": "python scripts/market_trend_notify.py",
         "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
-    # ⑤ 상시 운영 — 자동으로 돌고 손댈 일이 거의 없다.
+    # ⑥ 상시 운영 — 자동으로 돌고 손댈 일이 거의 없다.
     {
         "no": 24,
         "key": "live_24h_slack",
