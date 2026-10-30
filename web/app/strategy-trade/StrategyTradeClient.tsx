@@ -53,7 +53,7 @@ type Status = {
   next_sell_rise_pct: number | null;
 };
 
-type RoundRow = {
+export type RoundRow = {
   round: number;
   fixed_round: number;
   ticker: string;
@@ -75,7 +75,7 @@ type RoundRow = {
   is_next: boolean;
 };
 
-type StrategyView = {
+export type StrategyView = {
   strategy_id: string;
   label: string;
   /** 이 전략이 속한 종목풀. */
