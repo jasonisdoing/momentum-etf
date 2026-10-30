@@ -198,6 +198,15 @@ def _serialize(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def refreshed_order(account_no: str, order_id: str) -> dict[str, Any]:
+    """증권사 체결 조회로 이 계좌의 진행 중 기록을 갱신한 뒤 주문 한 건의 현재 상태를 돌려준다."""
+    refresh_account_orders(account_no)
+    record = _orders().find_one({"_id": ObjectId(order_id)})
+    if record is None:
+        raise BrokerApiError("주문 기록을 찾을 수 없습니다.")
+    return _serialize(record)
+
+
 def list_orders(account_no: str) -> list[dict[str, Any]]:
     """증권사 상태를 반영한 주문 기록 — 오늘 낸 주문과 아직 끝나지 않은 주문, 최신순."""
     require_mock_account(account_no)

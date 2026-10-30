@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -19,13 +20,17 @@ from slack_sdk.signature import SignatureVerifier
 from services.broker_api_service import BrokerApiError
 from services.broker_order_service import require_mock_account
 from utils.notification import send_slack_message_v2
-from utils.strategy_trade_orders import place_order, resolve_order
+from utils.strategy_trade_orders import place_order, refreshed_order, resolve_order
 
 logger = logging.getLogger(__name__)
 
 OPEN_ACTION_ID = "mock_order_open"
 CONFIRM_CALLBACK_ID = "mock_order_confirm"
 _SIDE_LABELS = {"buy": "매수", "sell": "매도"}
+#: 접수한 주문의 체결 여부를 이 간격으로 확인해, 이 시간 안에 끝나지 않으면 확인을 멈추고 그 사실을 알린다.
+_WATCH_INTERVAL_SECONDS = 10
+_WATCH_LIMIT_SECONDS = 1800
+_FINAL_STATUSES = ("filled", "canceled", "rejected")
 
 
 def _require_env(name: str) -> str:
@@ -137,14 +142,46 @@ def submitted_request(payload: dict[str, Any]) -> dict[str, Any]:
     return json.loads(view["private_metadata"])
 
 
+def _final_text(order: dict[str, Any]) -> str:
+    side = _SIDE_LABELS[order["side"]]
+    head = f"{order['strategy_label']} {side} {order['quantity']:,}주 × {order['price']:,}원"
+    if order["status"] == "filled":
+        return f"✅ 모의 {side} 체결 완료: {head}"
+    if order["status"] == "canceled":
+        return f"🚫 모의 {side} 주문 취소됨: {head} (체결 {order['filled_quantity']:,}주)"
+    return f"❌ 모의 {side} 주문 거부됨: {head}" + (f" — {order['message']}" if order["message"] else "")
+
+
+def _watch_until_final(account_no: str, order_id: str, thread_ts: str) -> None:
+    """접수된 주문이 체결·취소·거부로 끝나면 스레드로 알린다 — 제한 시간 안에 안 끝나면 그 사실을 알리고 멈춘다."""
+    deadline = time.monotonic() + _WATCH_LIMIT_SECONDS
+    while time.monotonic() < deadline:
+        time.sleep(_WATCH_INTERVAL_SECONDS)
+        order = refreshed_order(account_no, order_id)
+        if order["status"] in _FINAL_STATUSES:
+            send_slack_message_v2(_final_text(order), thread_ts=thread_ts)
+            return
+    send_slack_message_v2(
+        f"⏳ {_WATCH_LIMIT_SECONDS // 60}분이 지나도 끝나지 않아 체결 확인을 멈춥니다 — 증권사 주문내역에서 확인하세요.",
+        thread_ts=thread_ts,
+    )
+
+
 def place_submitted_order(submitted: dict[str, Any]) -> None:
-    """확인된 주문을 보내고 결과를 원 메시지의 스레드로 알린다 — 응답 뒤 백그라운드에서 돈다."""
+    """확인된 주문을 보내고 접수 결과를 원 메시지의 스레드로 알린 뒤, 체결이 끝날 때까지 지켜본다 — 응답 뒤 백그라운드에서 돈다."""
     request = submitted["request"]
+    thread_ts = submitted["message_ts"]
     side = _SIDE_LABELS[request["side"]]
     try:
         order = place_order(request["account_no"], request["pool"], request["strategy_id"], request["side"])
         text = f"✅ 모의 {side} 주문 접수: {order['strategy_label']} {order['quantity']:,}주 × {order['price']:,}원 (지정가)"
     except Exception as exc:  # 슬랙 요청은 이미 응답했으므로 실패도 스레드로 알린다.
         logger.exception("슬랙 모의 주문 처리 실패")
-        text = f"❌ 모의 {side} 주문 실패: {exc}"
-    send_slack_message_v2(text, thread_ts=submitted["message_ts"])
+        send_slack_message_v2(f"❌ 모의 {side} 주문 실패: {exc}", thread_ts=thread_ts)
+        return
+    send_slack_message_v2(text, thread_ts=thread_ts)
+    try:
+        _watch_until_final(request["account_no"], order["id"], thread_ts)
+    except Exception as exc:
+        logger.exception("슬랙 모의 주문 체결 확인 실패")
+        send_slack_message_v2(f"⚠️ 체결 확인 중 오류로 멈춥니다: {exc}", thread_ts=thread_ts)
