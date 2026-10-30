@@ -1,7 +1,8 @@
 """전략 사고팔기 슬랙 알림.
 
 거래시간 중 10분마다 실행돼, **매수·매도 지정가에 현재가가 닿은 회차가 있을 때만**
-슬랙을 보낸다. 트리거가 없으면 아무것도 보내지 않는다. 보유 0 인 전략은 장중에 1호
+슬랙을 보낸다. 트리거가 없으면 아무것도 보내지 않는다. 메시지는 **전략(종목)마다 따로**
+보내고, 보낼 것(신호·재알림·체결 확인)이 있는 전략에만 보낸다. 보유 0 인 전략은 장중에 1호
 진입선에 못 닿았어도 15:00 이후 배치에서 1호 장 마감 매수 신호가 난다(서비스가 판정).
 
 중복 방지 · 체결 확인
@@ -186,9 +187,10 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
     return triggers
 
 
-def build_message(view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
-    """슬랙 본문 — 전략별 섹션으로 전 회차 현황을 나열하고 조치가 필요한 줄만 표시한다.
+def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
+    """슬랙 본문 — **전략 하나**의 전 회차 현황을 나열하고 조치가 필요한 줄만 표시한다.
 
+    종목마다 메시지를 따로 보낸다(필요한 종목만 보내고, 이후 종목별 주문 버튼을 붙이기 쉽게).
     회차 수는 신호를 **실행한 뒤**의 상태로 적는다(매수 신호면 +1, 매도면 −1).
     트리거가 없으면(테스트 발송) 같은 형식에서 '필요!' 표시만 빠진다.
     """
@@ -201,80 +203,74 @@ def build_message(view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
     else:
         lines = [f"*🧪 전략 사고팔기 테스트* ({now})", "현재 매수·매도 신호는 없습니다."]
 
-    for strategy_view in view["strategies"]:
-        sid = strategy_view["strategy_id"]
-        index = strategy_view["index"]
-        status = strategy_view["status"]
-        rounds_total = strategy_view["config"]["rounds"]
-        quantity = f"{strategy_view['config']['round_quantity']:,}주"
+    index = strategy_view["index"]
+    status = strategy_view["status"]
+    rounds_total = strategy_view["config"]["rounds"]
+    quantity = f"{strategy_view['config']['round_quantity']:,}주"
 
-        triggered = {(t["round"], t["action"]) for t in triggers if t["strategy_id"] == sid}
-        buy_count = sum(1 for t in triggers if t["strategy_id"] == sid and t["action"] == "buy")
-        sell_count = sum(1 for t in triggers if t["strategy_id"] == sid and t["action"] == "sell")
-        after_held = status["held_count"] + buy_count - sell_count
+    triggered = {(t["round"], t["action"]) for t in triggers}
+    buy_count = sum(1 for t in triggers if t["action"] == "buy")
+    sell_count = sum(1 for t in triggers if t["action"] == "sell")
+    after_held = status["held_count"] + buy_count - sell_count
 
-        # 가장 중요한 정보 — 몇 % 움직이면 사고/파는지 헤더에 바로 보여준다.
-        parts = []
-        drop = status.get("next_buy_drop_pct")
-        next_row = next((row for row in strategy_view["rounds"] if row["is_next"]), None)
-        if drop is None:
-            parts.append("매수 없음(회차 소진)")
-        elif status["limit_blocked"]:
-            parts.append(f"⏸ {status['next_round']}호 한도 도달 — 추가 매수 중단")
-        elif next_row is not None and next_row["close_entry"]:
-            parts.append(f"📉 *{status['next_round']}호 장 마감 매수!*")
-        elif drop >= 0:
-            parts.append(f"📉 *{status['next_round']}호 매수가 도달!*")
+    # 가장 중요한 정보 — 몇 % 움직이면 사고/파는지 헤더에 바로 보여준다.
+    parts = []
+    drop = status.get("next_buy_drop_pct")
+    next_row = next((row for row in strategy_view["rounds"] if row["is_next"]), None)
+    if drop is None:
+        parts.append("매수 없음(회차 소진)")
+    elif status["limit_blocked"]:
+        parts.append(f"⏸ {status['next_round']}호 한도 도달 — 추가 매수 중단")
+    elif next_row is not None and next_row["close_entry"]:
+        parts.append(f"📉 *{status['next_round']}호 장 마감 매수!*")
+    elif drop >= 0:
+        parts.append(f"📉 *{status['next_round']}호 매수가 도달!*")
+    else:
+        parts.append(f"📉 {abs(drop):.2f}% 내리면 {status['next_round']}호 매수")
+    rise = status.get("next_sell_rise_pct")
+    if rise is not None:
+        if rise <= 0:
+            parts.append(f"📈 *{status['next_sell_round']}호 매도가 도달!*")
         else:
-            parts.append(f"📉 {abs(drop):.2f}% 내리면 {status['next_round']}호 매수")
-        rise = status.get("next_sell_rise_pct")
-        if rise is not None:
-            if rise <= 0:
-                parts.append(f"📈 *{status['next_sell_round']}호 매도가 도달!*")
+            parts.append(f"📈 {rise:.2f}% 오르면 {status['next_sell_round']}호 매도")
+    lines.append(
+        f"*[{strategy_view['label']}]* {_index_text(index)} · {after_held}/{rounds_total}회차 · " + " · ".join(parts)
+    )
+    # 1~6호 전부 나열 — 상태를 이모지로 즉시 구분한다.
+    #   🔴 지금 팔 것 / 🔵 지금 살 것 / 🟢 보유 중 / ⏳ 다음 매수 대기 / ⚪ 이후 회차
+    # 회차별 줄 — 종목 가격이 아니라 **지수 환산값**으로 적는다. ETF 단가는 종목마다
+    # 달라 서로 비교가 안 되고, 판단은 결국 지수가 어디까지 왔느냐로 하기 때문이다.
+    for row in strategy_view["rounds"]:
+        if row["held"]:
+            is_triggered = (row["round"], "sell") in triggered
+            profit_text = f"{row['profit_pct']:+.2f}%" if row["profit_pct"] is not None else "-"
+            if is_triggered:
+                lines.append(
+                    f"🔴 {row['round']}호 {quantity} *지금 매도!* {_level(row['sell_index'])} 도달 ({profit_text})"
+                )
             else:
-                parts.append(f"📈 {rise:.2f}% 오르면 {status['next_sell_round']}호 매도")
-        lines.append(
-            f"*[{strategy_view['label']}]* {_index_text(index)} · {after_held}/{rounds_total}회차 · "
-            + " · ".join(parts)
-        )
-        # 1~6호 전부 나열 — 상태를 이모지로 즉시 구분한다.
-        #   🔴 지금 팔 것 / 🔵 지금 살 것 / 🟢 보유 중 / ⏳ 다음 매수 대기 / ⚪ 이후 회차
-        # 회차별 줄 — 종목 가격이 아니라 **지수 환산값**으로 적는다. ETF 단가는 종목마다
-        # 달라 서로 비교가 안 되고, 판단은 결국 지수가 어디까지 왔느냐로 하기 때문이다.
-        for row in strategy_view["rounds"]:
-            if row["held"]:
-                is_triggered = (row["round"], "sell") in triggered
-                profit_text = f"{row['profit_pct']:+.2f}%" if row["profit_pct"] is not None else "-"
-                if is_triggered:
-                    lines.append(
-                        f"🔴 {row['round']}호 {quantity} *지금 매도!* {_level(row['sell_index'])} 도달 ({profit_text})"
-                    )
-                else:
-                    lines.append(
-                        f"🟢 {row['round']}호 {quantity} 보유 중 ({profit_text}) · "
-                        f"매도 목표 {_level(row['sell_index'])}"
-                    )
-            elif row["is_next"] and row["over_limit"]:
-                lines.append(f"⏸ {row['round']}호 {quantity} 한도 도달 — 추가 매수 중단")
-            elif row["is_next"]:
-                is_triggered = (row["round"], "buy") in triggered
-                if is_triggered:
-                    reach = (
-                        f"장 마감 매수 · 현재가 {_level(row['close'])}"
-                        if row["close_entry"]
-                        else f"{_level(row['buy_index'])} 도달"
-                    )
-                    lines.append(f"🔵 {row['round']}호 {quantity} *지금 매수!* {reach}")
-                else:
-                    # 보유 0 이면 장중에 못 닿아도 장 마감 매수가 있다.
-                    close_note = (
-                        f" · 미도달 시 {status['first_entry_close_time']} 매수" if status["waiting_first_entry"] else ""
-                    )
-                    lines.append(
-                        f"⏳ {row['round']}호 {quantity} 다음 매수 대기 · {_level(row['buy_index'])}{close_note}"
-                    )
+                lines.append(
+                    f"🟢 {row['round']}호 {quantity} 보유 중 ({profit_text}) · 매도 목표 {_level(row['sell_index'])}"
+                )
+        elif row["is_next"] and row["over_limit"]:
+            lines.append(f"⏸ {row['round']}호 {quantity} 한도 도달 — 추가 매수 중단")
+        elif row["is_next"]:
+            is_triggered = (row["round"], "buy") in triggered
+            if is_triggered:
+                reach = (
+                    f"장 마감 매수 · 현재가 {_level(row['close'])}"
+                    if row["close_entry"]
+                    else f"{_level(row['buy_index'])} 도달"
+                )
+                lines.append(f"🔵 {row['round']}호 {quantity} *지금 매수!* {reach}")
             else:
-                lines.append(f"⚪ {row['round']}호 {quantity} 이후 회차 · 매수 예정 {_level(row['buy_index'])}")
+                # 보유 0 이면 장중에 못 닿아도 장 마감 매수가 있다.
+                close_note = (
+                    f" · 미도달 시 {status['first_entry_close_time']} 매수" if status["waiting_first_entry"] else ""
+                )
+                lines.append(f"⏳ {row['round']}호 {quantity} 다음 매수 대기 · {_level(row['buy_index'])}{close_note}")
+        else:
+            lines.append(f"⚪ {row['round']}호 {quantity} 이후 회차 · 매수 예정 {_level(row['buy_index'])}")
 
     return "\n".join(lines)
 
@@ -298,10 +294,14 @@ def send_test(account_id: str) -> dict[str, Any]:
     if not pools:
         return {"sent": False, "reason": "이 계좌에 사고팔기 슬리브가 없습니다.", "triggers": []}
     view = load_views_for_pools(pools)
-    triggers = [t for s in view["strategies"] for t in collect_triggers(s)]
-    sent = send_slack_message_v2(build_message(view, triggers))
+    triggers: list[dict[str, Any]] = []
+    sent = bool(view["strategies"])
+    for strategy_view in view["strategies"]:
+        strategy_triggers = collect_triggers(strategy_view)
+        triggers.extend(strategy_triggers)
+        sent = bool(send_slack_message_v2(build_message(strategy_view, strategy_triggers))) and sent
     return {
-        "sent": bool(sent),
+        "sent": sent,
         "reason": "테스트 발송" if sent else "슬랙 전송에 실패했습니다.",
         "triggers": triggers,
     }
@@ -332,66 +332,84 @@ def notify_strategy_trade() -> dict[str, Any]:
 
     # 처음 보는 신호는 전 회차 현황이 담긴 본문으로, 이미 보낸 신호는 아직 살아 있는 동안
     # 한 시간마다 한 줄 리마인더로 보낸다. 지정가에 닿아 있는데 주문을 안 넣은 채로
-    # 하루가 지나가는 것을 막기 위한 것이다.
+    # 하루가 지나가는 것을 막기 위한 것이다. 메시지는 **전략(종목)마다 따로**, 보낼 것이 있는
+    # 전략에만 보낸다.
     # ① 요청해 둔 주문이 체결됐는지 먼저 본다. 체결됐으면 확인 한 줄을 보내고 기록을 지운다 —
     #    지워야 다음에 같은 회차 신호가 나면 다시 전체 메시지로 나간다.
     #    이 검사는 트리거 유무와 무관하게 돌아야 한다: 주문을 넣는 순간 그 회차가 보유로 바뀌어
     #    바로 그 트리거가 사라지므로, 신호가 있을 때만 검사하면 확인은 영영 나가지 못한다.
+    #    지금 전략 목록에 없는 전략의 기록은 체결 여부를 알 수 없어 건드리지 않는다.
     held_counts = _held_counts(view)
-    index_by_strategy = {strategy["strategy_id"]: strategy["index"] for strategy in view["strategies"]}
     confirmed = pop_filled(
-        sent_log, lambda pending: _round_filled(pending, held_counts.get(str(pending.get("strategy_id")), 0))
+        sent_log,
+        lambda pending: str(pending.get("strategy_id")) in held_counts
+        and _round_filled(pending, held_counts[str(pending.get("strategy_id"))]),
     )
 
-    # ② 남은 신호 — 처음이면 전체 메시지, 이미 보냈으면 한 시간 간격으로 한 줄 재알림.
-    fresh: list[dict[str, Any]] = []
-    repeats: list[dict[str, Any]] = []
-    for trigger in triggers:
-        last = _parse_sent_at((sent_log.get(_trigger_key(trigger)) or {}).get("at"))
-        if last is None or last.strftime("%Y-%m-%d") != today:
-            fresh.append(trigger)
-        elif (now - last).total_seconds() >= _REPEAT_INTERVAL_SECONDS:
-            repeats.append(trigger)
+    sent_count = failed_count = 0
+    fresh_all: list[dict[str, Any]] = []
+    repeats_all: list[dict[str, Any]] = []
+    for strategy_view in view["strategies"]:
+        sid = strategy_view["strategy_id"]
+        # ② 남은 신호 — 처음이면 전체 메시지, 이미 보냈으면 한 시간 간격으로 한 줄 재알림.
+        fresh: list[dict[str, Any]] = []
+        repeats: list[dict[str, Any]] = []
+        for trigger in (t for t in triggers if t["strategy_id"] == sid):
+            last = _parse_sent_at((sent_log.get(_trigger_key(trigger)) or {}).get("at"))
+            if last is None or last.strftime("%Y-%m-%d") != today:
+                fresh.append(trigger)
+            elif (now - last).total_seconds() >= _REPEAT_INTERVAL_SECONDS:
+                repeats.append(trigger)
 
-    lines: list[str] = []
-    for pending in confirmed:
-        lines.append(_confirm_line(pending, index_by_strategy.get(str(pending.get("strategy_id")))))
-    if fresh:
-        lines.append(build_message(view, fresh))
-    else:
-        lines.extend(build_repeat_line(trigger) for trigger in repeats)
-    if not lines:
-        if not triggers:
+        own_confirmed = [pending for pending in confirmed if str(pending.get("strategy_id")) == sid]
+        lines = [_confirm_line(pending, strategy_view["index"]) for pending in own_confirmed]
+        if fresh:
+            lines.append(build_message(strategy_view, fresh))
+        else:
+            lines.extend(build_repeat_line(trigger) for trigger in repeats)
+        if not lines:
+            continue
+
+        if not send_slack_message_v2("\n".join(lines)):
+            failed_count += 1
+            # 못 보낸 확인은 기록에 되돌려 다음 배치에서 다시 보낸다.
+            sent_log.update({_trigger_key(pending): pending for pending in own_confirmed})
+            continue
+        sent_count += 1
+        fresh_all.extend(fresh)
+        repeats_all.extend(repeats)
+        stamp = now.isoformat()
+        for trigger in fresh + repeats:
+            sent_log[_trigger_key(trigger)] = {
+                "at": stamp,
+                "action": trigger["action"],
+                "strategy_id": trigger["strategy_id"],
+                "ticker": trigger["ticker"],
+                "name": trigger["name"],
+                "round": trigger["round"],
+                "index_text": f"{trigger['index_name']} {_index_text(trigger['index'])}",
+                # 발송 시점의 보유 회차 수 — 체결 확인은 회차 수 증감으로 판정한다(참고 기록).
+                "held_count": held_counts.get(trigger["strategy_id"], 0),
+            }
+
+    if not sent_count and not failed_count:
+        if not triggers and not confirmed:
             # 확인할 체결도 신호도 없다 — 10분마다 도는 배치라 여기서 DB 를 건드리면 무의미한 쓰기만 쌓인다.
             return {"sent": False, "reason": "매수·매도 신호가 없습니다.", "triggers": []}
         _save_sent_log(sent_log)
         return {"sent": False, "reason": "오늘 이미 발송한 신호입니다.", "triggers": triggers}
 
-    if not send_slack_message_v2("\n".join(lines)):
-        return {"sent": False, "reason": "슬랙 전송에 실패했습니다.", "triggers": fresh or repeats}
-
-    stamp = now.isoformat()
-    for trigger in fresh + repeats:
-        sent_log[_trigger_key(trigger)] = {
-            "at": stamp,
-            "action": trigger["action"],
-            "strategy_id": trigger["strategy_id"],
-            "ticker": trigger["ticker"],
-            "name": trigger["name"],
-            "round": trigger["round"],
-            "index_text": f"{trigger['index_name']} {_index_text(trigger['index'])}",
-            # 발송 시점의 보유 회차 수 — 체결 확인은 회차 수 증감으로 판정한다(참고 기록).
-            "held_count": held_counts.get(trigger["strategy_id"], 0),
-        }
     # 지난 날짜 이력은 정리해 문서가 커지지 않게 한다.
     sent_log = {k: v for k, v in sent_log.items() if str(v.get("at", "")).startswith(today)}
     _save_sent_log(sent_log)
 
-    parts = []
+    parts = [f"메시지 {sent_count}건 발송"]
     if confirmed:
         parts.append(f"체결확인 {len(confirmed)}건")
-    if fresh:
-        parts.append(f"신호 {len(fresh)}건")
-    if repeats:
-        parts.append(f"재알림 {len(repeats)}건")
-    return {"sent": True, "reason": " · ".join(parts) + " 발송", "triggers": fresh or repeats or confirmed}
+    if fresh_all:
+        parts.append(f"신호 {len(fresh_all)}건")
+    if repeats_all:
+        parts.append(f"재알림 {len(repeats_all)}건")
+    if failed_count:
+        parts.append(f"슬랙 전송 실패 {failed_count}건")
+    return {"sent": sent_count > 0, "reason": " · ".join(parts), "triggers": fresh_all or repeats_all or triggers}
