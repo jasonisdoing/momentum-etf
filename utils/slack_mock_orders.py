@@ -19,7 +19,7 @@ from slack_sdk.signature import SignatureVerifier
 from services.broker_api_service import BrokerApiError
 from services.broker_order_service import require_mock_account
 from utils.notification import send_slack_message_v2
-from utils.strategy_trade_orders import resolve_order, place_order
+from utils.strategy_trade_orders import place_order, resolve_order
 
 logger = logging.getLogger(__name__)
 

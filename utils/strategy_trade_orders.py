@@ -6,8 +6,6 @@
 
 - 가격·수량은 클라이언트가 보내지 않는다. 서버가 전략 운용 현황(`strategy_trade_service`)에서 현재가(호가 단위로
   반올림)와 회차당 수량을 읽는다 — 화면과 주문이 갈리지 않게 단일 소스를 지킨다.
-- 같은 전략·방향의 진행 중 주문은 하나만 둔다. 기록에 `active_key` 를 두고 sparse unique 인덱스로
-  막아, 동시 클릭도 한 건만 통과한다. 최종 상태가 되면 `active_key` 를 지워 다시 주문할 수 있다.
 - 주문번호 대응: 주문 응답의 시장주문번호(`mkt_orr_no`)를 체결 조회의 통합주문번호(`itg_orr_no`)와 같은
   번호로 본다(공식 예시가 같은 번호 공간을 쓴다). 조회 결과에서 못 찾으면 상태를 바꾸지 않고 그 사실을
   메시지로 남긴다 — 속성으로 짐작해 맞추지 않는다.
@@ -20,7 +18,6 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from bson import ObjectId
-from pymongo.errors import DuplicateKeyError
 
 from core.strategy.trade.rules import round_to_tick
 from services.broker_api_service import BrokerApiError
@@ -38,9 +35,9 @@ KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_orders"
 ENV_MOCK = "mock"
 
-#: 아직 끝나지 않은 상태 — 이 동안 `active_key` 가 기록에 남아 같은 주문을 막는다.
+#: 아직 끝나지 않은 상태 — 이 동안 체결 조회로 상태를 갱신한다.
 ACTIVE_STATUSES = ("submitting", "pending", "partial")
-#: 전송 결과를 모른 채 이 시간이 지난 기록은 거부로 정리한다(키를 풀어 다시 주문할 수 있게).
+#: 전송 결과를 모른 채 이 시간이 지난 기록은 거부로 정리한다.
 _SUBMIT_TIMEOUT_SECONDS = 120
 
 _index_ready = False
@@ -53,7 +50,6 @@ def _orders():
         raise RuntimeError("MongoDB 연결에 실패했습니다.")
     collection = db[COLLECTION]
     if not _index_ready:
-        collection.create_index("active_key", unique=True, sparse=True)
         collection.create_index([("account_no", 1), ("created_at", -1)])
         _index_ready = True
     return collection
@@ -61,10 +57,6 @@ def _orders():
 
 def _now() -> datetime:
     return datetime.now(KST)
-
-
-def _active_key(account_no: str, strategy_id: str, side: str) -> str:
-    return f"{ENV_MOCK}:{account_no}:{strategy_id}:{side}"
 
 
 def resolve_order(pool: str, strategy_id: str, side: str) -> dict[str, Any]:
@@ -105,19 +97,13 @@ def place_order(account_no: str, pool: str, strategy_id: str, side: str) -> dict
         "message": "",
         "created_at": now.isoformat(),
         "updated_at": now.isoformat(),
-        "active_key": _active_key(account_no, strategy_id, side),
     }
     orders = _orders()
-    try:
-        inserted = orders.insert_one(doc)
-    except DuplicateKeyError as exc:
-        raise BrokerApiError(
-            "같은 전략·구분의 진행 중인 주문이 있습니다 — 상태를 새로고침하거나 취소한 뒤 다시 보내세요."
-        ) from exc
+    inserted = orders.insert_one(doc)
     try:
         placed = place_limit_order(account_no, side, order["ticker"], order["quantity"], order["price"])
     except OrderUncertainError as exc:
-        # 주문이 들어갔는지 모른다 — 실패로 단정하지 않고 두 번 보내지 않게 키를 쥔 채 남긴다(`refresh` 가 정리).
+        # 주문이 들어갔는지 모른다 — 실패로 단정하지 않고 남겨 둔다(`refresh` 가 정리).
         orders.update_one(
             {"_id": inserted.inserted_id}, {"$set": {"message": str(exc), "updated_at": _now().isoformat()}}
         )
@@ -125,10 +111,7 @@ def place_order(account_no: str, pool: str, strategy_id: str, side: str) -> dict
     except BrokerApiError as exc:
         orders.update_one(
             {"_id": inserted.inserted_id},
-            {
-                "$set": {"status": "rejected", "message": str(exc), "updated_at": _now().isoformat()},
-                "$unset": {"active_key": ""},
-            },
+            {"$set": {"status": "rejected", "message": str(exc), "updated_at": _now().isoformat()}},
         )
         raise
     orders.update_one(
@@ -180,7 +163,6 @@ def refresh_account_orders(account_no: str) -> None:
     now = _now()
     for record in active:
         update: dict[str, Any] = {}
-        unset: dict[str, str] = {}
         if not record.get("order_no"):
             age = (now - datetime.fromisoformat(record["created_at"])).total_seconds()
             if age > _SUBMIT_TIMEOUT_SECONDS:
@@ -188,20 +170,14 @@ def refresh_account_orders(account_no: str) -> None:
                     "status": "rejected",
                     "message": "전송 결과를 확인하지 못했습니다 — 증권사 주문내역에서 직접 확인하세요.",
                 }
-                unset = {"active_key": ""}
         else:
             row = broker_rows.get((_order_date(record), record["order_no"]))
             if row is None:
                 update = {"message": "증권사 주문내역에서 이 주문번호를 찾지 못했습니다."}
             else:
                 update = {"status": row["status"], "filled_quantity": row["filled_quantity"], "message": ""}
-                if row["status"] not in ACTIVE_STATUSES:
-                    unset = {"active_key": ""}
         if update:
-            operation: dict[str, Any] = {"$set": {**update, "updated_at": now.isoformat()}}
-            if unset:
-                operation["$unset"] = unset
-            orders.update_one({"_id": record["_id"]}, operation)
+            orders.update_one({"_id": record["_id"]}, {"$set": {**update, "updated_at": now.isoformat()}})
 
 
 def _serialize(record: dict[str, Any]) -> dict[str, Any]:
