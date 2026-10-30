@@ -1,11 +1,12 @@
 """사고팔기 주문 기록 — 우리가 증권사에 보낸 주문과 그 상태(모의투자 시험용).
 
-기록은 **무엇을 왜 보냈는지**(전략·회차·방향·가격·수량)를 남기고, 상태(대기중·부분체결·완료·취소·거부)는
+시험 주문은 회차 사다리와 무관하다. 전략의 종목을 **지금 현재가를 지정가로** 사고판다 — 거래 경로만 시험한다.
+기록은 **무엇을 보냈는지**(전략·방향·가격·수량)를 남기고, 상태(대기중·부분체결·완료·취소·거부)는
 **증권사 체결 조회가 진실**이라 조회할 때마다 거기서 갱신한다. 우리가 상태를 추측하지 않는다.
 
-- 가격·수량은 클라이언트가 보내지 않는다. 서버가 전략 운용 현황(`strategy_trade_service`)에서 규칙이 정한 값을
-  읽는다 — 화면과 주문이 갈리지 않게 단일 소스를 지킨다.
-- 같은 전략·회차·방향의 진행 중 주문은 하나만 둔다. 기록에 `active_key` 를 두고 sparse unique 인덱스로
+- 가격·수량은 클라이언트가 보내지 않는다. 서버가 전략 운용 현황(`strategy_trade_service`)에서 현재가(호가 단위로
+  반올림)와 회차당 수량을 읽는다 — 화면과 주문이 갈리지 않게 단일 소스를 지킨다.
+- 같은 전략·방향의 진행 중 주문은 하나만 둔다. 기록에 `active_key` 를 두고 sparse unique 인덱스로
   막아, 동시 클릭도 한 건만 통과한다. 최종 상태가 되면 `active_key` 를 지워 다시 주문할 수 있다.
 - 주문번호 대응: 주문 응답의 시장주문번호(`mkt_orr_no`)를 체결 조회의 통합주문번호(`itg_orr_no`)와 같은
   번호로 본다(공식 예시가 같은 번호 공간을 쓴다). 조회 결과에서 못 찾으면 상태를 바꾸지 않고 그 사실을
@@ -21,6 +22,7 @@ from zoneinfo import ZoneInfo
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 
+from core.strategy.trade.rules import round_to_tick
 from services.broker_api_service import BrokerApiError
 from services.broker_order_service import (
     OrderUncertainError,
@@ -61,49 +63,40 @@ def _now() -> datetime:
     return datetime.now(KST)
 
 
-def _active_key(account_no: str, strategy_id: str, round_no: int, side: str) -> str:
-    return f"{ENV_MOCK}:{account_no}:{strategy_id}:{round_no}:{side}"
+def _active_key(account_no: str, strategy_id: str, side: str) -> str:
+    return f"{ENV_MOCK}:{account_no}:{strategy_id}:{side}"
 
 
-def _resolve_order(pool: str, strategy_id: str, round_no: int, side: str) -> dict[str, Any]:
-    """규칙이 정한 주문 내용 — 매수는 아직 안 산 회차, 매도는 보유 중인 회차만 낼 수 있다."""
+def _resolve_order(pool: str, strategy_id: str, side: str) -> dict[str, Any]:
+    """주문 내용 — 전략 종목의 현재가를 호가 단위로 반올림한 지정가, 수량은 회차당 수량이다."""
     if side not in ("buy", "sell"):
         raise BrokerApiError(f"알 수 없는 주문 구분입니다: {side}")
-    strategy = next((row for row in load_views_for_pools([pool])["strategies"] if row["strategy_id"] == strategy_id), None)
+    strategy = next(
+        (row for row in load_views_for_pools([pool])["strategies"] if row["strategy_id"] == strategy_id), None
+    )
     if strategy is None:
         raise BrokerApiError(f"{pool} 종목풀에 '{strategy_id}' 전략이 없습니다.")
-    row = next((item for item in strategy["rounds"] if item["round"] == round_no), None)
-    if row is None:
-        raise BrokerApiError(f"{strategy['label']} 에 {round_no}호가 없습니다.")
-    if side == "buy":
-        if row["held"]:
-            raise BrokerApiError(f"{round_no}호는 이미 보유 중이라 매수할 수 없습니다.")
-        price = row["buy_limit"]
-    else:
-        if not row["held"]:
-            raise BrokerApiError(f"{round_no}호는 보유 중이 아니라 매도할 수 없습니다.")
-        price = row["sell_limit"]
-    if price is None:
-        raise BrokerApiError(f"{strategy['label']} {round_no}호의 지정가를 정할 수 없습니다.")
+    current = float(strategy["index"]["close"] or 0)
+    if current <= 0:
+        raise BrokerApiError(f"{strategy['label']} 의 현재가를 알 수 없습니다.")
     return {
         "strategy_label": strategy["label"],
         "ticker": strategy["ticker"],
         "quantity": int(strategy["config"]["round_quantity"]),
-        "price": int(price),
+        "price": int(round_to_tick(current)),
     }
 
 
-def place_order(account_no: str, pool: str, strategy_id: str, round_no: int, side: str) -> dict[str, Any]:
-    """사고팔기 회차 하나를 모의투자 계좌에 지정가로 주문하고 기록한다."""
+def place_order(account_no: str, pool: str, strategy_id: str, side: str) -> dict[str, Any]:
+    """전략 종목을 현재가 지정가로 모의투자 계좌에 주문하고 기록한다."""
     require_mock_account(account_no)
-    order = _resolve_order(pool, strategy_id, round_no, side)
+    order = _resolve_order(pool, strategy_id, side)
     now = _now()
     doc = {
         "env": ENV_MOCK,
         "account_no": account_no,
         "pool": pool,
         "strategy_id": strategy_id,
-        "round": round_no,
         "side": side,
         **order,
         "order_no": None,
@@ -112,30 +105,42 @@ def place_order(account_no: str, pool: str, strategy_id: str, round_no: int, sid
         "message": "",
         "created_at": now.isoformat(),
         "updated_at": now.isoformat(),
-        "active_key": _active_key(account_no, strategy_id, round_no, side),
+        "active_key": _active_key(account_no, strategy_id, side),
     }
     orders = _orders()
     try:
         inserted = orders.insert_one(doc)
     except DuplicateKeyError as exc:
         raise BrokerApiError(
-            "같은 전략·회차·구분의 진행 중인 주문이 있습니다 — 상태를 새로고침하거나 취소한 뒤 다시 보내세요."
+            "같은 전략·구분의 진행 중인 주문이 있습니다 — 상태를 새로고침하거나 취소한 뒤 다시 보내세요."
         ) from exc
     try:
         placed = place_limit_order(account_no, side, order["ticker"], order["quantity"], order["price"])
     except OrderUncertainError as exc:
         # 주문이 들어갔는지 모른다 — 실패로 단정하지 않고 두 번 보내지 않게 키를 쥔 채 남긴다(`refresh` 가 정리).
-        orders.update_one({"_id": inserted.inserted_id}, {"$set": {"message": str(exc), "updated_at": _now().isoformat()}})
+        orders.update_one(
+            {"_id": inserted.inserted_id}, {"$set": {"message": str(exc), "updated_at": _now().isoformat()}}
+        )
         raise
     except BrokerApiError as exc:
         orders.update_one(
             {"_id": inserted.inserted_id},
-            {"$set": {"status": "rejected", "message": str(exc), "updated_at": _now().isoformat()}, "$unset": {"active_key": ""}},
+            {
+                "$set": {"status": "rejected", "message": str(exc), "updated_at": _now().isoformat()},
+                "$unset": {"active_key": ""},
+            },
         )
         raise
     orders.update_one(
         {"_id": inserted.inserted_id},
-        {"$set": {"status": "pending", "order_no": placed["order_no"], "message": placed["message"], "updated_at": _now().isoformat()}},
+        {
+            "$set": {
+                "status": "pending",
+                "order_no": placed["order_no"],
+                "message": placed["message"],
+                "updated_at": _now().isoformat(),
+            }
+        },
     )
     return _serialize(orders.find_one({"_id": inserted.inserted_id}))
 
@@ -179,7 +184,10 @@ def refresh_account_orders(account_no: str) -> None:
         if not record.get("order_no"):
             age = (now - datetime.fromisoformat(record["created_at"])).total_seconds()
             if age > _SUBMIT_TIMEOUT_SECONDS:
-                update = {"status": "rejected", "message": "전송 결과를 확인하지 못했습니다 — 증권사 주문내역에서 직접 확인하세요."}
+                update = {
+                    "status": "rejected",
+                    "message": "전송 결과를 확인하지 못했습니다 — 증권사 주문내역에서 직접 확인하세요.",
+                }
                 unset = {"active_key": ""}
         else:
             row = broker_rows.get((_order_date(record), record["order_no"]))
@@ -203,7 +211,6 @@ def _serialize(record: dict[str, Any]) -> dict[str, Any]:
         "id": str(record["_id"]),
         "at": created.strftime("%H:%M:%S" if same_day else "%m-%d %H:%M"),
         "strategy_label": record["strategy_label"],
-        "round": record["round"],
         "side": record["side"],
         "ticker": record["ticker"],
         "quantity": record["quantity"],
@@ -220,13 +227,17 @@ def list_orders(account_no: str) -> list[dict[str, Any]]:
     require_mock_account(account_no)
     refresh_account_orders(account_no)
     today = _now().strftime("%Y-%m-%d")
-    cursor = _orders().find(
-        {
-            "env": ENV_MOCK,
-            "account_no": account_no,
-            "$or": [{"created_at": {"$gte": today}}, {"status": {"$in": list(ACTIVE_STATUSES)}}],
-        }
-    ).sort("created_at", -1)
+    cursor = (
+        _orders()
+        .find(
+            {
+                "env": ENV_MOCK,
+                "account_no": account_no,
+                "$or": [{"created_at": {"$gte": today}}, {"status": {"$in": list(ACTIVE_STATUSES)}}],
+            }
+        )
+        .sort("created_at", -1)
+    )
     return [_serialize(record) for record in cursor]
 
 

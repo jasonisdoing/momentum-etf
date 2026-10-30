@@ -1,7 +1,7 @@
 """모의투자 계좌 주문 시험 — 잔고·사고팔기 주문·취소·주문 기록·증권사 주문내역.
 
 모의투자(03) 계좌만 받는다(`services.broker_order_service.require_mock_account`). 가격·수량은 요청에 없다 —
-서버가 사고팔기 규칙에서 읽는다(`utils.strategy_trade_orders`).
+서버가 전략의 현재가·회차당 수량을 읽는다(`utils.strategy_trade_orders`).
 """
 
 from __future__ import annotations
@@ -47,14 +47,13 @@ class PlaceOrderPayload(BaseModel):
     account_no: str
     pool: str
     strategy_id: str
-    round: int
     side: str
 
 
 @router.post("/orders")
 def post_order(payload: PlaceOrderPayload, _: None = Depends(require_internal_token)) -> dict:
     try:
-        return {"order": place_order(payload.account_no, payload.pool, payload.strategy_id, payload.round, payload.side)}
+        return {"order": place_order(payload.account_no, payload.pool, payload.strategy_id, payload.side)}
     except BrokerApiError as exc:
         raise _bad_request(exc) from exc
 

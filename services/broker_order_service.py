@@ -139,7 +139,9 @@ def _post_paged(path: str, payload: dict[str, Any], list_key: str) -> dict[str, 
         if not has_next and not is_business_success(
             str(data["rsp_cd"]) if data.get("rsp_cd") is not None else None, data.get("rsp_msg")
         ):
-            raise BrokerApiError(f"나무증권 모의투자 API 오류: {_message_of(data) or '업무 오류'} (코드 {data.get('rsp_cd')})")
+            raise BrokerApiError(
+                f"나무증권 모의투자 API 오류: {_message_of(data) or '업무 오류'} (코드 {data.get('rsp_cd')})"
+            )
         if not merged:
             merged = {key: value for key, value in data.items() if key != list_key}
         items.extend(data.get(list_key) or [])
@@ -167,7 +169,9 @@ def _accepted_order_no(data: dict[str, Any], what: str) -> str:
     output = data.get("Output_0") or {}
     order_no = output.get("mkt_orr_no") if isinstance(output, dict) else None
     if not isinstance(order_no, (int, float)) or int(order_no) <= 0:
-        raise BrokerApiError(f"{what}이 접수되지 않았습니다: {_message_of(data) or '응답에 주문번호가 없습니다'} (코드 {data.get('rsp_cd')})")
+        raise BrokerApiError(
+            f"{what}이 접수되지 않았습니다: {_message_of(data) or '응답에 주문번호가 없습니다'} (코드 {data.get('rsp_cd')})"
+        )
     return str(int(order_no))
 
 

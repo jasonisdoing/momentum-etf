@@ -6,7 +6,7 @@ import { formatPrice } from "@/lib/price-format";
 import { formatKrw } from "../assets/assets-helpers";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
-import type { RoundRow, StrategyView } from "../strategy-trade/StrategyTradeClient";
+import type { StrategyView } from "../strategy-trade/StrategyTradeClient";
 
 /** 증권사 모의투자 서버 주소 — 이 모달은 여기로만 주문한다(운영 계좌는 고를 수 없다). */
 const MOCK_DOMAIN = "moapi.nhplug.com:8443";
@@ -45,12 +45,11 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
-/** 우리가 보낸 주문 한 건 — 어느 전략·회차의 주문인지와 현재 상태. */
+/** 우리가 보낸 주문 한 건 — 어느 전략의 주문인지와 현재 상태. */
 type OrderRecord = {
   id: string;
   at: string;
   strategy_label: string;
-  round: number;
   side: Side;
   ticker: string;
   quantity: number;
@@ -96,12 +95,7 @@ function StatusChip({ status }: { status: OrderStatus }) {
   return <span className={chip.className}>{chip.label}</span>;
 }
 
-/** 이 방향으로 주문할 수 있는 회차 — 매수는 아직 안 산 회차, 매도는 보유 중인 회차. */
-function orderableRounds(rounds: RoundRow[], side: Side): RoundRow[] {
-  return rounds.filter((row) => (side === "buy" ? !row.held && row.buy_limit !== null : row.held && row.sell_limit !== null));
-}
-
-/** 모의투자 계좌로 사고팔기 전략의 지정가 주문·취소·상태 확인을 시험하는 모달 — 슬랙 버튼 주문의 서버 쪽 주문 경로를 검증한다. */
+/** 모의투자 계좌로 사고팔기 전략 종목의 현재가 지정가 주문·취소·상태 확인을 시험하는 모달 — 슬랙 버튼 주문의 서버 쪽 주문 경로를 검증한다. */
 export function MockOrderModal({ onClose }: { onClose: () => void }) {
   const toast = useToast();
   const [accounts, setAccounts] = useState<MockAccount[] | null>(null);
@@ -110,10 +104,10 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
   const [pool, setPool] = useState("");
   const [strategyId, setStrategyId] = useState("");
   const [side, setSide] = useState<Side>("buy");
-  const [roundNo, setRoundNo] = useState("");
   const [balance, setBalance] = useState<MockBalance | null>(null);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [brokerOrders, setBrokerOrders] = useState<BrokerOrder[] | null>(null);
+  const [loadingStrategies, setLoadingStrategies] = useState(false);
   // 진행 중인 요청 — 같은 버튼을 연달아 눌러 주문이 두 번 나가지 않게 한다.
   const [busy, setBusy] = useState<"balance" | "orders" | "order" | "broker" | string | null>(null);
 
@@ -140,41 +134,32 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 주문할 전략 목록 — /strategy-trade 화면과 같은 운용 현황이다(가격·수량은 사고팔기 규칙이 정한 값).
+  // 주문할 전략 종목과 현재가 — /strategy-trade 화면과 같은 운용 현황이다(현재가는 화면을 열 때와 새로고침 때 읽는다).
+  const loadStrategies = useCallback(async () => {
+    setLoadingStrategies(true);
+    try {
+      const resp = await fetch("/api/strategy-trade", { cache: "no-store" });
+      const data = (await resp.json()) as { strategies?: StrategyView[]; pool?: string | null; error?: string };
+      if (!resp.ok || data.error) throw new Error(data.error ?? "사고팔기 전략을 불러오지 못했습니다.");
+      const list = data.strategies ?? [];
+      setStrategies(list);
+      setPool(data.pool ?? "");
+      setStrategyId((current) => (list.some((row) => row.strategy_id === current) ? current : (list[0]?.strategy_id ?? "")));
+    } catch (err) {
+      setStrategies((current) => current ?? []);
+      toast.error(err instanceof Error ? err.message : "사고팔기 전략을 불러오지 못했습니다.");
+    } finally {
+      setLoadingStrategies(false);
+    }
+  }, [toast]);
+
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const resp = await fetch("/api/strategy-trade", { cache: "no-store" });
-        const data = (await resp.json()) as { strategies?: StrategyView[]; pool?: string | null; error?: string };
-        if (!resp.ok || data.error) throw new Error(data.error ?? "사고팔기 전략을 불러오지 못했습니다.");
-        if (cancelled) return;
-        const list = data.strategies ?? [];
-        setStrategies(list);
-        setPool(data.pool ?? "");
-        if (list.length > 0) setStrategyId(list[0].strategy_id);
-      } catch (err) {
-        if (cancelled) return;
-        setStrategies([]);
-        toast.error(err instanceof Error ? err.message : "사고팔기 전략을 불러오지 못했습니다.");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    void loadStrategies();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const strategy = useMemo(() => (strategies ?? []).find((row) => row.strategy_id === strategyId), [strategies, strategyId]);
-  const rounds = useMemo(() => (strategy ? orderableRounds(strategy.rounds, side) : []), [strategy, side]);
-  // 매수는 다음 회차, 매도는 가장 높은 회차(마지막에 산 것)가 기본이다.
-  const defaultRound = useMemo(() => {
-    if (rounds.length === 0) return "";
-    const pick = side === "buy" ? (rounds.find((row) => row.is_next) ?? rounds[0]) : rounds[rounds.length - 1];
-    return String(pick.round);
-  }, [rounds, side]);
-  const selectedRound = rounds.find((row) => String(row.round) === (roundNo || defaultRound));
-  const limitPrice = selectedRound ? (side === "buy" ? selectedRound.buy_limit : selectedRound.sell_limit) : null;
+  const currentPrice = strategy?.index.close ?? null;
   const quantity = strategy?.config.round_quantity ?? null;
 
   const run = useCallback(
@@ -226,9 +211,9 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
       const data = await requestJson<{ order: OrderRecord }>("/api/broker-api/mock/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_no: accountNo, pool, strategy_id: strategyId, round: Number(roundNo || defaultRound), side }),
+        body: JSON.stringify({ account_no: accountNo, pool, strategy_id: strategyId, side }),
       });
-      toast.success(`${data.order.strategy_label} ${data.order.round}호 ${side === "buy" ? "매수" : "매도"} 주문을 접수했습니다.`);
+      toast.success(`${data.order.strategy_label} ${side === "buy" ? "매수" : "매도"} 주문을 접수했습니다.`);
       setOrders((await requestJson<{ orders: OrderRecord[] }>(`/api/broker-api/mock/orders?${query}`)).orders);
       setBalance(await requestJson<MockBalance>(`/api/broker-api/mock/balance?${query}`));
     });
@@ -245,7 +230,7 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
       setBalance(await requestJson<MockBalance>(`/api/broker-api/mock/balance?${query}`));
     });
 
-  const canOrder = Boolean(accountNo && pool && strategy && selectedRound && limitPrice !== null && quantity && busy === null);
+  const canOrder = Boolean(accountNo && pool && strategy && currentPrice && quantity && busy === null && !loadingStrategies);
 
   return (
     <AppModal
@@ -332,10 +317,7 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
             style={{ width: 280 }}
             value={strategyId}
             disabled={strategies === null}
-            onChange={(e) => {
-              setStrategyId(e.target.value);
-              setRoundNo("");
-            }}
+            onChange={(e) => setStrategyId(e.target.value)}
           >
             {strategies === null ? <option value="">불러오는 중…</option> : null}
             {strategies !== null && strategies.length === 0 ? <option value="">사고팔기 전략 없음</option> : null}
@@ -352,50 +334,32 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
             <button
               type="button"
               className={side === "buy" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-              onClick={() => {
-                setSide("buy");
-                setRoundNo("");
-              }}
+              onClick={() => setSide("buy")}
             >
               매수
             </button>
             <button
               type="button"
               className={side === "sell" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-              onClick={() => {
-                setSide("sell");
-                setRoundNo("");
-              }}
+              onClick={() => setSide("sell")}
             >
               매도
             </button>
           </div>
         </div>
-        <label style={fieldStyle}>
-          <span style={labelStyle}>회차</span>
-          <select
-            className="form-select form-select-sm"
-            style={{ width: 140 }}
-            value={roundNo || defaultRound}
-            disabled={rounds.length === 0}
-            onChange={(e) => setRoundNo(e.target.value)}
-          >
-            {rounds.length === 0 ? <option value="">{side === "buy" ? "살 회차 없음" : "보유 회차 없음"}</option> : null}
-            {rounds.map((row) => (
-              <option key={row.round} value={row.round}>
-                {row.round}호
-              </option>
-            ))}
-          </select>
-        </label>
         <div style={fieldStyle}>
           <span style={labelStyle}>주문 내용</span>
           <span style={{ fontSize: "var(--fs-base)" }}>
-            {selectedRound && strategy && limitPrice !== null
-              ? `${strategy.label} ${selectedRound.round}호 · ${quantity?.toLocaleString("ko-KR")}주 × ${formatPrice(limitPrice, "KRW")}원 지정가 ${side === "buy" ? "매수" : "매도"}`
+            {strategy && currentPrice && quantity
+              ? `${strategy.label} · ${quantity.toLocaleString("ko-KR")}주 × 현재가 ${formatPrice(currentPrice, "KRW")}원 지정가 ${side === "buy" ? "매수" : "매도"}`
               : "-"}
           </span>
-          <span style={mutedStyle}>가격·수량은 사고팔기 규칙이 정합니다(직접 입력 없음).</span>
+          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={loadingStrategies || busy !== null} onClick={() => void loadStrategies()}>
+            {loadingStrategies ? "불러오는 중…" : "현재가 새로고침"}
+          </button>
+        </div>
+        <div style={{ ...mutedStyle, marginBottom: 10 }}>
+          수량은 전략의 회차당 수량이고, 가격은 주문 순간의 현재가를 호가 단위로 반올림해 서버가 정합니다(직접 입력 없음).
         </div>
         <button
           type="button"
@@ -427,7 +391,6 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
               <tr>
                 <th style={{ width: 90 }}>시각</th>
                 <th>전략</th>
-                <th style={{ width: 60, ...rightCell }}>회차</th>
                 <th style={{ width: 60 }}>구분</th>
                 <th style={{ width: 90, ...rightCell }}>수량</th>
                 <th style={{ width: 110, ...rightCell }}>지정가</th>
@@ -443,7 +406,6 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
                   <td>
                     {row.strategy_label} <span style={mutedStyle}>({row.ticker})</span>
                   </td>
-                  <td style={rightCell}>{row.round}호</td>
                   <td>{row.side === "buy" ? "매수" : "매도"}</td>
                   <td style={rightCell}>{row.quantity.toLocaleString("ko-KR")}</td>
                   <td style={rightCell}>{formatPrice(row.price, "KRW")}</td>
