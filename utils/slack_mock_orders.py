@@ -220,7 +220,7 @@ def submitted_request(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _final_text(order: dict[str, Any]) -> str:
     side = f"{_env_word(order['env'])} {_SIDE_LABELS[order['side']]}"
-    head = f"{order['strategy_label']} {side} {order['quantity']:,}주 × {order['price']:,}원"
+    head = f"{order['strategy_label']} {order['quantity']:,}주 × {order['price']:,}원"
     if order["status"] == "filled":
         return f"✅ {side} 체결 완료: {head}"
     if order["status"] == "canceled":
