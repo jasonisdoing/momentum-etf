@@ -9,10 +9,11 @@
 --------------------
 10분 간격으로 판정하므로 같은 조건이 유지되면 하루에 수십 번 발송될 수 있다. 그래서
 ``전략:회차-동작`` 단위로 처음 한 번만 전체 메시지를 보내고, 신호가 살아 있는 동안에는
-한 시간 간격으로 한 줄 리마인더만 보낸다. 발송 이력은
+한 시간 간격으로 한 줄 리마인더만 보낸다 — 리마인더는 처음 신호를 보낸 메시지(``signal_ts``)의
+스레드에 단다. 발송 이력은
 ``system_config.strategy_trade_settings.sent_log`` 에
 ``{"kospi200:2-buy": {"at": ..., "strategy_id": ..., "ticker": ..., "name": ..., "round": ...,
-"index_text": ..., "held_count": ...}}`` 형태로 남기며, 발송에 성공했을 때만 갱신한다.
+"index_text": ..., "signal_ts": ..., "held_count": ...}}`` 형태로 남기며, 발송에 성공했을 때만 갱신한다.
 
 이력에 남은 주문이 실제로 체결되면 확인 한 줄을 보내고 이력을 지운다. 이 확인은
 **신호가 없어도** 매번 검사한다 — 주문을 넣는 순간 그 회차가 보유로 바뀌어 바로 그 신호가
@@ -353,6 +354,54 @@ def _send_order_messages(strategy_view: dict[str, Any], triggers: list[dict[str,
     return 0
 
 
+def _log_entry(trigger: dict[str, Any], held_counts: dict[str, int], stamp: str, signal_ts: str) -> dict[str, Any]:
+    """발송 이력 한 건 — signal_ts 는 이 신호를 처음 알린 메시지(재알림이 달리는 스레드의 뿌리)다."""
+    return {
+        "at": stamp,
+        "action": trigger["action"],
+        "strategy_id": trigger["strategy_id"],
+        "ticker": trigger["ticker"],
+        "name": trigger["name"],
+        "round": trigger["round"],
+        "index_text": _index_text(trigger["index"]),
+        "signal_ts": signal_ts,
+        # 발송 시점의 보유 회차 수 — 체결 확인은 회차 수 증감으로 판정한다(참고 기록).
+        "held_count": held_counts.get(trigger["strategy_id"], 0),
+    }
+
+
+def _send_repeats(
+    strategy_view: dict[str, Any],
+    repeats: list[dict[str, Any]],
+    sent_log: dict[str, dict[str, Any]],
+    held_counts: dict[str, int],
+    stamp: str,
+) -> tuple[int, int, int, list[dict[str, Any]]]:
+    """재알림을 신호를 처음 알린 메시지의 스레드로 보낸다 — (보낸 메시지 수, 실패 수, 주문 메시지 실패 수, 보낸 신호).
+
+    뿌리 메시지가 기록에 없는 옛 이력은 채널에 새로 올리고 그 메시지를 뿌리로 삼는다.
+    """
+    from utils.notification import send_slack_message_v2
+
+    groups: dict[str | None, list[dict[str, Any]]] = {}
+    for trigger in repeats:
+        groups.setdefault(sent_log[_trigger_key(trigger)].get("signal_ts"), []).append(trigger)
+    sent = failed = order_failed = 0
+    delivered: list[dict[str, Any]] = []
+    for root, group in groups.items():
+        ts = send_slack_message_v2("\n".join(build_repeat_line(trigger) for trigger in group), thread_ts=root)
+        if not ts:
+            failed += 1
+            continue
+        sent += 1
+        thread_ts = root or ts
+        order_failed += _send_order_messages(strategy_view, group, thread_ts)
+        for trigger in group:
+            sent_log[_trigger_key(trigger)] = _log_entry(trigger, held_counts, stamp, thread_ts)
+        delivered.extend(group)
+    return sent, failed, order_failed, delivered
+
+
 def notify_strategy_trade() -> dict[str, Any]:
     """트리거를 판정해 필요할 때만 슬랙을 보낸다 — 슬리브가 붙은 계좌의 합성 슬랙이 켜진 종목풀만.
 
@@ -402,9 +451,10 @@ def notify_strategy_trade() -> dict[str, Any]:
     sent_count = failed_count = order_failed = 0
     fresh_all: list[dict[str, Any]] = []
     repeats_all: list[dict[str, Any]] = []
+    stamp = now.isoformat()
     for strategy_view in view["strategies"]:
         sid = strategy_view["strategy_id"]
-        # ② 남은 신호 — 처음이면 전체 메시지, 이미 보냈으면 한 시간 간격으로 한 줄 재알림.
+        # ② 남은 신호 — 처음이면 전체 메시지, 이미 보냈으면 한 시간 간격으로 재알림.
         fresh: list[dict[str, Any]] = []
         repeats: list[dict[str, Any]] = []
         for trigger in (t for t in triggers if t["strategy_id"] == sid):
@@ -422,35 +472,23 @@ def notify_strategy_trade() -> dict[str, Any]:
         lines = [_confirm_line(pending, strategy_view["index"]) for pending in own_confirmed]
         if fresh:
             lines.append(build_message(strategy_view, fresh))
-        else:
-            lines.extend(build_repeat_line(trigger) for trigger in repeats)
-        if not lines:
-            continue
-
-        signal_ts = send_slack_message_v2("\n".join(lines))
-        if not signal_ts:
-            failed_count += 1
-            # 못 보낸 확인은 기록에 되돌려 다음 배치에서 다시 보낸다.
-            sent_log.update({_trigger_key(pending): pending for pending in own_confirmed})
-            continue
-        sent_count += 1
-        # 메시지에 실린 신호(새 신호가 있으면 그것, 없으면 재알림)만 주문 메시지로 잇는다.
-        order_failed += _send_order_messages(strategy_view, fresh or repeats, signal_ts)
-        fresh_all.extend(fresh)
-        repeats_all.extend(repeats)
-        stamp = now.isoformat()
-        for trigger in fresh + repeats:
-            sent_log[_trigger_key(trigger)] = {
-                "at": stamp,
-                "action": trigger["action"],
-                "strategy_id": trigger["strategy_id"],
-                "ticker": trigger["ticker"],
-                "name": trigger["name"],
-                "round": trigger["round"],
-                "index_text": _index_text(trigger["index"]),
-                # 발송 시점의 보유 회차 수 — 체결 확인은 회차 수 증감으로 판정한다(참고 기록).
-                "held_count": held_counts.get(trigger["strategy_id"], 0),
-            }
+        if lines:
+            signal_ts = send_slack_message_v2("\n".join(lines))
+            if not signal_ts:
+                failed_count += 1
+                # 못 보낸 확인은 기록에 되돌려 다음 배치에서 다시 보낸다.
+                sent_log.update({_trigger_key(pending): pending for pending in own_confirmed})
+                continue
+            sent_count += 1
+            order_failed += _send_order_messages(strategy_view, fresh, signal_ts)
+            fresh_all.extend(fresh)
+            for trigger in fresh:
+                sent_log[_trigger_key(trigger)] = _log_entry(trigger, held_counts, stamp, signal_ts)
+        sent, failed, order_failed_here, delivered = _send_repeats(strategy_view, repeats, sent_log, held_counts, stamp)
+        sent_count += sent
+        failed_count += failed
+        order_failed += order_failed_here
+        repeats_all.extend(delivered)
 
     if not sent_count and not failed_count:
         if not triggers and not confirmed:

@@ -437,5 +437,7 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
     finally:
         # 중간에 실패해도 이미 보낸 메시지는 스레드로 추적한다.
         if sent:
-            register_signal_thread(get_slack_channel(), signal_ts, sent)
+            channel = get_slack_channel()
+            if register_signal_thread(channel, signal_ts, sent):
+                _react("reactions_remove", channel, signal_ts, REACTION_DONE)
     return sent
