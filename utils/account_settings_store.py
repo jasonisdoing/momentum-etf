@@ -63,6 +63,10 @@ EDITABLE_KEYS: tuple[str, ...] = (
     # 들어도 판정 기준이 갈리면 안 되기 때문이다.
     "ma_alarm_enabled",
     "stoploss_alarm_enabled",
+    # API 주문 안전 장치 — 운영 계좌만. 켜려면 하루 주문 건수·금액 한도가 먼저 있어야 한다(없으면 주문이 막힌다).
+    "api_order_enabled",
+    "api_order_max_count",
+    "api_order_max_amount_krw",
 )
 
 # 합성 슬롯 — 최소 하나(전략 하나만 계좌에서 굴리는 용도도 허용, 2026-09), 최대 넷.
@@ -143,6 +147,19 @@ def load_live_account_docs() -> list[dict[str, Any]]:
     모의 계좌는 API 주문 시험용이라 계좌 설정 편집 화면(`load_account_docs`)에만 나온다.
     """
     return [doc for doc in load_account_docs() if doc["env"] == ACCOUNT_ENV_LIVE]
+
+
+def _validate_order_limit(account_id: str, key: str, raw: Any) -> int | None:
+    """하루 주문 한도 — 비우면 미설정(None), 값이 있으면 1 이상의 정수."""
+    if raw in (None, ""):
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise AccountSettingsStoreError(f"'{account_id}' 의 {key} 는 정수여야 합니다: {raw}") from exc
+    if value <= 0:
+        raise AccountSettingsStoreError(f"'{account_id}' 의 {key} 는 1 이상이어야 합니다: {raw}")
+    return value
 
 
 def _validate_pct(account_id: str, label: str, raw: Any) -> float:
@@ -325,7 +342,13 @@ def _validate_broker_account_type(
 
 
 #: 모의 계좌에는 켤 수 없는 설정 — 합성·사고팔기·보유종목 알림은 운영 계좌 전용이다.
-_LIVE_ONLY_KEYS = ("mix_enabled", "mix_slack_enabled", "ma_alarm_enabled", "stoploss_alarm_enabled")
+_LIVE_ONLY_KEYS = (
+    "mix_enabled",
+    "mix_slack_enabled",
+    "ma_alarm_enabled",
+    "stoploss_alarm_enabled",
+    "api_order_enabled",
+)
 
 
 def _validate_mock_limits(account_id: str, cleaned: dict[str, Any]) -> None:
@@ -334,7 +357,7 @@ def _validate_mock_limits(account_id: str, cleaned: dict[str, Any]) -> None:
         enabled.append("mix_sleeves")
     if enabled:
         raise AccountSettingsStoreError(
-            f"'{account_id}' 는 모의 계좌라 합성·사고팔기·보유종목 알림을 쓸 수 없습니다: {', '.join(enabled)}"
+            f"'{account_id}' 는 모의 계좌라 합성·사고팔기·보유종목 알림·API 주문 스위치를 쓸 수 없습니다: {', '.join(enabled)}"
         )
 
 
@@ -474,6 +497,10 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             cleaned[key] = {"ticker": ticker, "name": allowed[ticker]}
         elif key == "URL":
             cleaned[key] = str(raw or "").strip()
+        elif key == "api_order_enabled":
+            cleaned[key] = bool(raw)
+        elif key in {"api_order_max_count", "api_order_max_amount_krw"}:
+            cleaned[key] = _validate_order_limit(account_id, key, raw)
         elif key == "ma_alarm_enabled":
             cleaned[key] = bool(raw)
         elif key == "stoploss_alarm_enabled":
@@ -500,6 +527,13 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
 
     if existing_doc["env"] == ACCOUNT_ENV_MOCK:
         _validate_mock_limits(account_id, cleaned)
+    merged = {**existing_doc, **cleaned}
+    if merged.get("api_order_enabled") and not (
+        merged.get("api_order_max_count") and merged.get("api_order_max_amount_krw")
+    ):
+        raise AccountSettingsStoreError(
+            f"'{account_id}' 의 API 주문을 켜려면 하루 주문 건수·금액 한도를 먼저 입력해야 합니다."
+        )
     if not cleaned:
         raise AccountSettingsStoreError("저장할 값이 없습니다.")
     return cleaned

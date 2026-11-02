@@ -60,16 +60,24 @@ class OrderUncertainError(BrokerApiError):
     """요청이 서버에 닿았는지 알 수 없는 네트워크 오류 — 주문이 들어갔을 수도 있어 실패로 단정하면 안 된다."""
 
 
+def linked_account_doc(account_no: str) -> dict[str, Any]:
+    """증권사 계좌가 연동된 계좌 설정 문서 — 연동되지 않은 증권사 계좌면 막는다."""
+    from utils.account_settings_store import load_account_docs
+
+    doc = next((d for d in load_account_docs() if (d.get("broker_api") or {}).get("account_no") == account_no), None)
+    if doc is None:
+        raise BrokerApiError("계좌 설정에 연동된 증권사 계좌가 아닙니다.")
+    return doc
+
+
 def account_env(account_no: str) -> str:
     """증권사 계좌가 연동된 계좌 설정의 구분(live·mock) — 이 모듈의 모든 호출이 가장 먼저 통과하는 관문이다.
 
     계좌 설정에 연동되지 않은 증권사 계좌이거나, 구분이 증권사 계좌구분과 어긋나면 막는다.
     """
-    from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
+    from utils.account_settings_store import ACCOUNT_ENV_MOCK
 
-    doc = next((d for d in load_account_docs() if (d.get("broker_api") or {}).get("account_no") == account_no), None)
-    if doc is None:
-        raise BrokerApiError("계좌 설정에 연동된 증권사 계좌가 아닙니다.")
+    doc = linked_account_doc(account_no)
     key = _ACCOUNT_TYPE_CACHE.make_key("types")
     types = _ACCOUNT_TYPE_CACHE.get(key)
     if types is None:

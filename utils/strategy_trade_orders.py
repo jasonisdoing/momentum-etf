@@ -25,10 +25,13 @@ from services.broker_order_service import (
     OrderUncertainError,
     account_env,
     cancel_order,
+    linked_account_doc,
     list_day_orders,
     place_limit_order,
 )
+from utils.account_settings_store import ACCOUNT_ENV_MOCK
 from utils.db_manager import get_db_connection
+from utils.market_session import REGULAR, market_session
 from utils.strategy_trade_service import load_views_for_pools
 
 KST = ZoneInfo("Asia/Seoul")
@@ -93,6 +96,39 @@ def _require_no_duplicate(account_no: str, strategy_id: str, side: str, round_no
         )
 
 
+def _require_order_allowed(account_no: str, env: str, amount: int) -> None:
+    """운영 계좌의 주문 안전 장치 — 계좌의 API 주문 스위치, 정규장, 하루 주문 건수·금액 한도. 모의 계좌는 막지 않는다."""
+    if env == ACCOUNT_ENV_MOCK:
+        return
+    doc = linked_account_doc(account_no)
+    if not doc.get("api_order_enabled"):
+        raise BrokerApiError(
+            f"'{doc['account_id']}' 계좌는 API 주문이 꺼져 있습니다 — 계좌 설정에서 주문 허용을 켜세요."
+        )
+    if market_session("kor")["session"] != REGULAR:
+        raise BrokerApiError("정규장(거래일 09:00~15:30)에만 주문할 수 있습니다.")
+    max_count, max_amount = doc.get("api_order_max_count"), doc.get("api_order_max_amount_krw")
+    if not max_count or not max_amount:
+        raise BrokerApiError(f"'{doc['account_id']}' 계좌의 하루 주문 건수·금액 한도가 설정돼 있지 않습니다.")
+    today = _now().strftime("%Y-%m-%d")
+    used = list(
+        _orders().find(
+            {
+                "account_no": account_no,
+                "created_at": {"$gte": today},
+                "status": {"$in": [*ACTIVE_STATUSES, "filled"]},
+            }
+        )
+    )
+    if len(used) + 1 > max_count:
+        raise BrokerApiError(f"오늘 주문 건수 한도({max_count}건)를 넘습니다 — 이미 {len(used)}건입니다.")
+    used_amount = sum(record["price"] * record["quantity"] for record in used)
+    if used_amount + amount > max_amount:
+        raise BrokerApiError(
+            f"오늘 주문 금액 한도({max_amount:,}원)를 넘습니다 — 이미 {used_amount:,}원, 이번 {amount:,}원입니다."
+        )
+
+
 def resolve_order(pool: str, strategy_id: str, side: str, round_no: int | None) -> dict[str, Any]:
     """주문 내용 — 수량은 회차당 수량이다.
 
@@ -139,6 +175,7 @@ def place_order(
     order = resolve_order(pool, strategy_id, side, round_no)
     if round_no is not None:
         _require_no_duplicate(account_no, strategy_id, side, round_no)
+    _require_order_allowed(account_no, env, order["price"] * order["quantity"])
     now = _now()
     doc = {
         "env": env,
