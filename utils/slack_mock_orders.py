@@ -1,7 +1,7 @@
 """주문의 슬랙 왕복 — 주문 메시지(버튼) → 확인 모달 → 웹훅 수신 → 주문·취소 → 결과 알림.
 
 모든 액션(주문·취소)은 확인 모달을 거친다. 메시지는 상태에 따라 버튼이 바뀐다: 주문하기 → 처리 중 → 취소하기 →
-결과 문구(체결·취소·거부). 끝난 메시지에는 버튼이 없어 같은 메시지로 다시 주문할 수 없다.
+결과 문구(체결·취소·거부). 끝난 메시지에는 버튼이 없지만, 하나도 체결되지 않고 취소된 주문만 다시 주문하기 버튼이 남는다.
 
 끝난 주문의 알림은 배치(`notify_finished_orders`, 1분 간격)가 맡는다 — 서버 프로세스가 재시작돼도 끊기지 않는다.
 
@@ -106,10 +106,10 @@ def _note(text: str) -> dict[str, Any]:
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": text}]}
 
 
-def _open_blocks(request: dict[str, Any]) -> list[dict[str, Any]]:
+def _open_blocks(request: dict[str, Any], label: str = "주문하기") -> list[dict[str, Any]]:
     side = _SIDE_LABELS[request["side"]]
     style = "primary" if request["side"] == "buy" else "danger"
-    return [_section(request), _button(OPEN_ACTION_ID, f"{side} 주문하기", style, {"request": request})]
+    return [_section(request), _button(OPEN_ACTION_ID, f"{side} {label}", style, {"request": request})]
 
 
 def _cancel_blocks(request: dict[str, Any], order_id: str) -> list[dict[str, Any]]:
@@ -241,10 +241,15 @@ def _final_text(order: dict[str, Any]) -> str:
 
 
 def _finish(target: dict[str, Any], order: dict[str, Any]) -> None:
-    """끝난 주문의 결과를 스레드로 알리고 메시지에서 버튼을 걷어낸다."""
+    """끝난 주문의 결과를 스레드로 알리고 메시지에서 버튼을 걷어낸다 — 하나도 체결 안 된 취소만 다시 주문하기 버튼을 남긴다."""
     text = _final_text(order)
     send_slack_message_v2(text, thread_ts=target["message_ts"])
-    _update_message(target, _note_blocks(target["request"], text))
+    request = target["request"]
+    if order["status"] == "canceled" and order["filled_quantity"] == 0:
+        # 다시 주문해도 서버가 신호 유효성·중복·안전 장치를 처음 주문과 똑같이 검사한다.
+        _update_message(target, [*_open_blocks(request, "다시 주문하기"), _note(text)])
+    else:
+        _update_message(target, _note_blocks(request, text))
 
 
 def _place(target: dict[str, Any]) -> None:
