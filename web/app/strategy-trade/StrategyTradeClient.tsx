@@ -72,6 +72,9 @@ export type RoundRow = {
   // 다음 회차가 매수 한도를 넘는다 — 이 회차부터는 사지 않는다.
   over_limit: boolean;
   sell_reached: boolean;
+  // 지정가에 닿은 회차의 오늘 슬랙 신호 발송 여부, 진행 중이거나 오늘 체결된 주문 여부.
+  slack_sent: boolean;
+  order_sent: boolean;
   is_next: boolean;
 };
 
@@ -179,20 +182,30 @@ function signColor(value: number | null | undefined): string {
   return value > 0 ? "var(--up-color, #d64545)" : "var(--down-color, #2f6fd0)";
 }
 
-function ReachedBadge() {
+function StatusBadge({ color, children }: { color: string; children: React.ReactNode }) {
   return (
     <span
       style={{
-        marginLeft: 6,
         padding: "1px 5px",
         borderRadius: 4,
         fontSize: "var(--fs-sm)",
         fontWeight: 700,
-        color: "var(--up-color, #d64545)",
-        border: "1px solid var(--up-color, #d64545)",
+        color,
+        border: `1px solid ${color}`,
       }}
     >
-      도달
+      {children}
+    </span>
+  );
+}
+
+/** 상태 칸 — 지정가에 닿았으면 도달, 그 신호가 슬랙으로 나갔으면 슬랙, 주문이 나갔으면 주문(녹색). */
+function RoundStatus({ row }: { row: RoundRow }) {
+  return (
+    <span style={{ display: "inline-flex", gap: 4 }}>
+      {row.buy_reached || row.sell_reached ? <StatusBadge color="var(--up-color, #d64545)">도달</StatusBadge> : null}
+      {row.slack_sent ? <StatusBadge color="var(--tblr-green, #2fb344)">슬랙</StatusBadge> : null}
+      {row.order_sent ? <StatusBadge color="var(--tblr-green, #2fb344)">주문</StatusBadge> : null}
     </span>
   );
 }
@@ -202,7 +215,7 @@ function ReachedBadge() {
 function BelowLastGapRow({ gap }: { gap: { round: number; pct: number } }) {
   return (
     <tr>
-      <td colSpan={7} style={{ padding: "22px 8px", textAlign: "center" }}>
+      <td colSpan={8} style={{ padding: "22px 8px", textAlign: "center" }}>
         <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
           {gap.round}호에서 <b style={{ color: "var(--up-color, #d64545)" }}>{formatSigned(gap.pct)}</b> 더 내려가야
           기준선
@@ -221,7 +234,7 @@ function BelowLastGapRow({ gap }: { gap: { round: number; pct: number } }) {
 function RecentLowRow({ index }: { index: IndexStatus }) {
   return (
     <tr>
-      <td colSpan={7} style={{ padding: "2px 8px" }}>
+      <td colSpan={8} style={{ padding: "2px 8px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--up-color, #d64545)", fontSize: "var(--fs-sm)", fontWeight: 700 }}>
           <span style={{ flex: 1, borderTop: "2px dashed var(--up-color, #d64545)", opacity: 0.55 }} />
           <span>
@@ -659,6 +672,7 @@ function StrategySection({ view }: { view: StrategyView }) {
           <thead>
             <tr style={{ color: "var(--text-muted)" }}>
               <th style={{ ...thStyle, textAlign: "left" }}>회차</th>
+              <th style={{ ...thStyle, textAlign: "left" }}>상태</th>
               <th style={{ ...thStyle, textAlign: "left" }}>종목</th>
               <th style={thStyle}>진입가</th>
               <th style={thStyle}>현재가</th>
@@ -690,6 +704,9 @@ function StrategySection({ view }: { view: StrategyView }) {
                   ) : null}
                 </td>
                 <td style={{ ...tdStyle, textAlign: "left" }}>
+                  <RoundStatus row={row} />
+                </td>
+                <td style={{ ...tdStyle, textAlign: "left" }}>
                   {row.ticker} {row.name}
                 </td>
                 <td style={tdStyle}>{formatNumber(row.avg_price)}</td>
@@ -699,14 +716,12 @@ function StrategySection({ view }: { view: StrategyView }) {
                 </td>
                 <td style={{ ...tdStyle, fontWeight: row.is_next ? 700 : undefined }}>
                   {formatNumber(row.buy_limit)}
-                  {row.buy_reached ? <ReachedBadge /> : null}
                   {row.over_limit ? (
                     <span style={{ marginLeft: 6, color: "var(--text-muted)", fontWeight: 400 }}>한도 도달</span>
                   ) : null}
                 </td>
                 <td style={{ ...tdStyle, fontWeight: row.sell_limit != null ? 700 : undefined }}>
                   {formatNumber(row.sell_limit)}
-                  {row.sell_reached ? <ReachedBadge /> : null}
                 </td>
               </tr>
               </React.Fragment>

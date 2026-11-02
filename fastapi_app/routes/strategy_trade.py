@@ -4,6 +4,7 @@ from fastapi import APIRouter, Body, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
 from utils.strategy_trade_backtest import run_strategy_trade_backtest
+from utils.strategy_trade_notify import mark_sent_rounds
 from utils.strategy_trade_service import (
     load_strategy_trade_view,
     resolve_etf,
@@ -22,7 +23,7 @@ def get_strategy_trade(
 
     ``pool`` 을 안 주면 켜진 풀 중 첫 번째다.
     """
-    return load_strategy_trade_view(pool)
+    return mark_sent_rounds(load_strategy_trade_view(pool))
 
 
 @router.get("/resolve")
@@ -60,4 +61,4 @@ def put_strategy_trade_settings(
     if not pool or payload.get("strategies") is None:
         raise ValueError("pool·strategies 가 모두 필요합니다.")
     save_pool_strategies(pool, payload["strategies"])
-    return load_strategy_trade_view(pool)
+    return mark_sent_rounds(load_strategy_trade_view(pool))

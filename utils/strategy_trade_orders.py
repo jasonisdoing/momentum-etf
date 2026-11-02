@@ -76,21 +76,37 @@ def _require_signal(strategy: dict[str, Any], side: str, round_no: int) -> None:
         raise BrokerApiError(f"{strategy['label']} {round_no}호 {word} 신호가 더 이상 유효하지 않습니다.")
 
 
-def find_duplicate_order(account_no: str, strategy_id: str, side: str, round_no: int) -> dict[str, Any] | None:
-    """같은 회차·구분의 주문이 진행 중이거나 오늘 체결된 기록 — 체결이 보유에 반영되기 전 같은 신호로 또 나가지 않게 본다."""
+def _in_flight_filter() -> dict[str, Any]:
+    """진행 중이거나 오늘 체결된 주문 — 체결이 보유에 반영되기 전이라 같은 신호로 또 나가면 안 되는 주문."""
     today = _now().strftime("%Y-%m-%d")
+    return {
+        "$or": [
+            {"status": {"$in": list(ACTIVE_STATUSES)}},
+            {"status": "filled", "created_at": {"$gte": today}},
+        ]
+    }
+
+
+def find_duplicate_order(account_no: str, strategy_id: str, side: str, round_no: int) -> dict[str, Any] | None:
+    """같은 회차·구분의 주문이 진행 중이거나 오늘 체결된 기록."""
     return _orders().find_one(
         {
             "account_no": account_no,
             "strategy_id": strategy_id,
             "side": side,
             "round": round_no,
-            "$or": [
-                {"status": {"$in": list(ACTIVE_STATUSES)}},
-                {"status": "filled", "created_at": {"$gte": today}},
-            ],
+            **_in_flight_filter(),
         }
     )
+
+
+def in_flight_order_keys(strategy_ids: list[str]) -> set[tuple[str, int, str]]:
+    """이 전략들의 진행 중이거나 오늘 체결된 신호 주문 — (전략, 회차, 구분) 집합(화면 표시용)."""
+    records = _orders().find(
+        {"strategy_id": {"$in": strategy_ids}, "round": {"$ne": None}, **_in_flight_filter()},
+        {"strategy_id": 1, "round": 1, "side": 1},
+    )
+    return {(record["strategy_id"], record["round"], record["side"]) for record in records}
 
 
 def _require_no_duplicate(account_no: str, strategy_id: str, side: str, round_no: int) -> None:

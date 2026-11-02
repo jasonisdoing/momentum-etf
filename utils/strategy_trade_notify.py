@@ -189,6 +189,28 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
     return triggers
 
 
+def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
+    """화면용 — 지정가에 닿은 회차마다 오늘 슬랙 신호가 나갔는지(`slack_sent`)와 주문이 나갔는지(`order_sent`)를 행에 적는다.
+
+    닿지 않은 회차는 둘 다 False 다. 신호 판정은 알림과 같은 `collect_triggers` 를 쓴다.
+    """
+    from utils.strategy_trade_orders import in_flight_order_keys
+
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    sent_log = _load_sent_log()
+    in_flight = in_flight_order_keys([strategy_view["strategy_id"] for strategy_view in view["strategies"]])
+    for strategy_view in view["strategies"]:
+        for row in strategy_view["rounds"]:
+            row["slack_sent"] = row["order_sent"] = False
+        rows = {row["round"]: row for row in strategy_view["rounds"]}
+        for trigger in collect_triggers(strategy_view):
+            row = rows[trigger["round"]]
+            last = _parse_sent_at((sent_log.get(_trigger_key(trigger)) or {}).get("at"))
+            row["slack_sent"] = last is not None and last.strftime("%Y-%m-%d") == today
+            row["order_sent"] = (trigger["strategy_id"], trigger["round"], trigger["action"]) in in_flight
+    return view
+
+
 def _already_sent_note(round_no: int, action: str, fresh: set[tuple[int, str]]) -> str:
     """지정가에 닿아 있지만 이번에 새로 보내는 신호가 아닌 회차 — 앞서 알린 신호임을 줄에 덧붙인다."""
     return "" if (round_no, action) in fresh else " · 앞서 알림"
