@@ -29,13 +29,14 @@ type MockHolding = {
 type MockBalance = { cash: number; total_asset: number; holdings: MockHolding[] };
 
 /** 주문 상태 — 증권사 체결 조회의 체결·미체결·취소 수량으로 판정한다. */
-type OrderStatus = "pending" | "partial" | "filled" | "canceled" | "rejected";
+type OrderStatus = "pending" | "partial" | "filled" | "canceled" | "rejected" | "expired";
 const STATUS_CHIPS: Record<OrderStatus, { label: string; className: string }> = {
   pending: { label: "대기중", className: "badge bg-yellow-lt" },
   partial: { label: "부분체결", className: "badge bg-blue-lt" },
   filled: { label: "완료", className: "badge bg-green-lt" },
   canceled: { label: "취소", className: "badge bg-secondary-lt" },
   rejected: { label: "거부", className: "badge bg-red-lt" },
+  expired: { label: "만료", className: "badge bg-secondary-lt" },
 };
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {

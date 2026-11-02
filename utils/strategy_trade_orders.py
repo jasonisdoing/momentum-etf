@@ -37,6 +37,8 @@ ENV_MOCK = "mock"
 
 #: 아직 끝나지 않은 상태 — 이 동안 체결 조회로 상태를 갱신한다.
 ACTIVE_STATUSES = ("submitting", "pending", "partial")
+#: 끝난 상태 — 만료는 접수일이 지났는데도 증권사가 미체결로 답하는 당일 주문이다.
+FINISHED_STATUSES = ("filled", "canceled", "rejected", "expired")
 #: 전송 결과를 모른 채 이 시간이 지난 기록은 거부로 정리한다.
 _SUBMIT_TIMEOUT_SECONDS = 120
 
@@ -156,6 +158,13 @@ def _order_date(record: dict[str, Any]) -> str:
     return str(record["created_at"])[:10].replace("-", "")
 
 
+def _broker_status(record: dict[str, Any], broker_status: str) -> str:
+    """증권사 상태를 기록 상태로 옮긴다 — 접수일이 지난 미체결 주문은 당일 주문이므로 만료로 본다."""
+    if broker_status in ("pending", "partial") and _order_date(record) < _now().strftime("%Y%m%d"):
+        return "expired"
+    return broker_status
+
+
 def refresh_account_orders(account_no: str) -> None:
     """진행 중인 기록의 상태를 증권사 체결 조회로 갱신한다 — 조회는 주문일자마다 한 번이다."""
     orders = _orders()
@@ -182,7 +191,11 @@ def refresh_account_orders(account_no: str) -> None:
             if row is None:
                 update = {"message": "증권사 주문내역에서 이 주문번호를 찾지 못했습니다."}
             else:
-                update = {"status": row["status"], "filled_quantity": row["filled_quantity"], "message": ""}
+                update = {
+                    "status": _broker_status(record, row["status"]),
+                    "filled_quantity": row["filled_quantity"],
+                    "message": "",
+                }
         if update:
             orders.update_one({"_id": record["_id"]}, {"$set": {**update, "updated_at": now.isoformat()}})
 
@@ -236,7 +249,7 @@ def finished_slack_orders() -> list[dict[str, Any]]:
                 "slack": {"$ne": None},
                 "slack_notified": False,
                 "order_no": {"$ne": None},
-                "status": {"$in": ["filled", "canceled", "rejected"]},
+                "status": {"$in": list(FINISHED_STATUSES)},
             }
         )
     )

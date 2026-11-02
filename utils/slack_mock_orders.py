@@ -25,6 +25,7 @@ from services.broker_api_service import BrokerApiError
 from services.broker_order_service import require_mock_account
 from utils.notification import send_slack_message_v2
 from utils.strategy_trade_orders import (
+    FINISHED_STATUSES,
     cancel_record,
     finished_slack_orders,
     mark_slack_notified,
@@ -42,7 +43,6 @@ CANCEL_ACTION_ID = "mock_order_cancel"
 ORDER_CALLBACK_ID = "mock_order_confirm"
 CANCEL_CALLBACK_ID = "mock_order_cancel_confirm"
 _SIDE_LABELS = {"buy": "매수", "sell": "매도"}
-_FINAL_STATUSES = ("filled", "canceled", "rejected")
 
 
 def _require_env(name: str) -> str:
@@ -217,6 +217,8 @@ def _final_text(order: dict[str, Any]) -> str:
         return f"✅ 모의 {side} 체결 완료: {head}"
     if order["status"] == "canceled":
         return f"🚫 모의 {side} 주문 취소됨: {head} (체결 {order['filled_quantity']:,}주)"
+    if order["status"] == "expired":
+        return f"⌛ 모의 {side} 주문 만료됨: {head} (체결 {order['filled_quantity']:,}주)"
     return f"❌ 모의 {side} 주문 거부됨: {head}" + (f" — {order['message']}" if order["message"] else "")
 
 
@@ -263,7 +265,7 @@ def _cancel(target: dict[str, Any]) -> None:
         send_slack_message_v2(f"❌ 모의 {side} 주문 취소 실패: {exc}", thread_ts=target["message_ts"])
         # 그 사이 주문이 끝났을 수 있다 — 끝났으면 결과 알림은 배치가 하고, 아니면 취소 버튼을 되살린다.
         order = refreshed_order(request["account_no"], target["order_id"])
-        if order["status"] in _FINAL_STATUSES:
+        if order["status"] in FINISHED_STATUSES:
             _update_message(target, _note_blocks(request, "⏳ 결과 확인 중…"))
         else:
             _update_message(target, _cancel_blocks(request, target["order_id"]))
