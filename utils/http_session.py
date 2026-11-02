@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import time
+
 import requests
 from requests.adapters import HTTPAdapter
 
@@ -22,6 +24,24 @@ shared_session = requests.Session()
 _adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
 shared_session.mount("http://", _adapter)
 shared_session.mount("https://", _adapter)
+
+
+# 응답이 없거나 연결이 끊긴 요청만 다시 시도하는 간격(초) — 시도 횟수는 간격 수 + 1 이다.
+# HTTP 오류 응답(4xx·5xx)과 잘못된 응답 내용은 다시 해도 같으므로 재시도하지 않고 호출부가 처리한다.
+_RETRY_DELAYS_SECONDS = (2.0, 5.0)
+
+
+def request_with_retry(method: str, url: str, **kwargs) -> requests.Response:
+    """`shared_session.request` 에 타임아웃·연결 끊김 재시도를 붙인다 — 마지막 시도도 실패하면 그 예외를 낸다.
+
+    사이트가 잠깐 응답하지 않는 순간에 한 요청이 전체 실패가 되지 않게 한다. 응답 상태는 검사하지 않는다.
+    """
+    for delay in _RETRY_DELAYS_SECONDS:
+        try:
+            return shared_session.request(method, url, **kwargs)
+        except (requests.Timeout, requests.ConnectionError):
+            time.sleep(delay)
+    return shared_session.request(method, url, **kwargs)
 
 
 # ── 브라우저 흉내 요청 ────────────────────────────────────────────────────

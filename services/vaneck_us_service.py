@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 
 from config import CACHE_TTL_SLOW
 from utils.asx_ticker import ensure_asx_prefix
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 from utils.normalization import resolve_bloomberg_listing
 from utils.ttl_cache import TtlCache
 from utils.us_etf_market_service import load_us_security_exchange_map
@@ -30,7 +30,7 @@ def _official_url(value: str, prefix: str) -> str:
 
 
 def _fetch_product_map() -> dict[str, str]:
-    response = shared_session.get(f"{_BASE_URL}/us/en/etf-fund-finder/", timeout=25)
+    response = request_with_retry("GET", f"{_BASE_URL}/us/en/etf-fund-finder/", timeout=25)
     response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")
     search_data = soup.select_one("script.fund-search-data")
@@ -38,7 +38,8 @@ def _fetch_product_map() -> dict[str, str]:
     if search_data is None or page_id is None:
         raise ValueError("VanEck 공식 상품 명단의 주소 또는 페이지 식별자가 없습니다.")
     paths = {str(row["Values"][0]).upper(): row["Url"] for row in json.loads(search_data.get_text())}
-    response = shared_session.post(
+    response = request_with_retry(
+        "POST",
         f"{_BASE_URL}/Main/FundListingUs/GetFundData",
         data={
             "filterJson": json.dumps(
@@ -129,9 +130,9 @@ def fetch_vaneck_us_holdings(ticker: str) -> dict[str, Any] | None:
     url = _PRODUCT_MAP_CACHE.get_or_compute("products", _fetch_product_map).get(ticker_norm)
     if url is None:
         return None
-    response = shared_session.get(url, timeout=25)
+    response = request_with_retry("GET", url, timeout=25)
     response.raise_for_status()
-    response = shared_session.get(_dataset_url(response.text, ticker_norm), timeout=25)
+    response = request_with_retry("GET", _dataset_url(response.text, ticker_norm), timeout=25)
     response.raise_for_status()
     groups = response.json()["HoldingsList"]
     if len(groups) != 1 or not groups[0]["Holdings"]:
