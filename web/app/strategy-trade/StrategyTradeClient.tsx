@@ -72,7 +72,7 @@ export type RoundRow = {
   // 다음 회차가 매수 한도를 넘는다 — 이 회차부터는 사지 않는다.
   over_limit: boolean;
   sell_reached: boolean;
-  // 오늘 슬랙 신호가 나간 방향, 진행 중이거나 오늘 체결된 주문의 방향.
+  // 오늘 슬랙 신호가 나간 방향, 아직 끝나지 않은 주문의 방향.
   slack_sides: Array<"buy" | "sell">;
   order_sides: Array<"buy" | "sell">;
   is_next: boolean;

@@ -190,12 +190,12 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
-    """화면용 — 회차마다 오늘 슬랙 신호가 나간 방향(`slack_sides`)과 주문이 진행 중이거나 오늘 체결된 방향(`order_sides`)을 행에 적는다.
+    """화면용 — 회차마다 오늘 슬랙 신호가 나간 방향(`slack_sides`)과 아직 끝나지 않은 주문의 방향(`order_sides`)을 행에 적는다.
 
     지정가에 닿아 있는지와 무관하다 — 신호·주문이 나간 뒤 가격이 물러나도 표시가 남아야 한다.
-    슬랙 기록은 체결이 확인되면 지워지므로 그 뒤에는 주문 방향만 남는다.
+    체결된 주문과 슬랙 기록(체결이 확인되면 지워진다)은 더 표시하지 않는다.
     """
-    from utils.strategy_trade_orders import in_flight_order_keys
+    from utils.strategy_trade_orders import active_order_keys
 
     today = datetime.now(KST).strftime("%Y-%m-%d")
     slack_keys = {
@@ -203,7 +203,7 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
         for entry in _load_sent_log().values()
         if (sent_at := _parse_sent_at(entry.get("at"))) is not None and sent_at.strftime("%Y-%m-%d") == today
     }
-    order_keys = in_flight_order_keys([strategy_view["strategy_id"] for strategy_view in view["strategies"]])
+    order_keys = active_order_keys([strategy_view["strategy_id"] for strategy_view in view["strategies"]])
     for strategy_view in view["strategies"]:
         for row in strategy_view["rounds"]:
             key = (strategy_view["strategy_id"], row["round"])

@@ -103,13 +103,22 @@ def find_duplicate_order(account_no: str, strategy_id: str, side: str, round_no:
     )
 
 
-def in_flight_order_keys(strategy_ids: list[str]) -> set[tuple[str, int, str]]:
-    """이 전략들의 진행 중이거나 오늘 체결된 신호 주문 — (전략, 회차, 구분) 집합(화면 표시용)."""
+def _order_keys(strategy_ids: list[str], status_filter: dict[str, Any]) -> set[tuple[str, int, str]]:
     records = _orders().find(
-        {"strategy_id": {"$in": strategy_ids}, "round": {"$ne": None}, **_in_flight_filter()},
+        {"strategy_id": {"$in": strategy_ids}, "round": {"$ne": None}, **status_filter},
         {"strategy_id": 1, "round": 1, "side": 1},
     )
     return {(record["strategy_id"], record["round"], record["side"]) for record in records}
+
+
+def in_flight_order_keys(strategy_ids: list[str]) -> set[tuple[str, int, str]]:
+    """이 전략들의 진행 중이거나 오늘 체결된 신호 주문 — (전략, 회차, 구분) 집합."""
+    return _order_keys(strategy_ids, _in_flight_filter())
+
+
+def active_order_keys(strategy_ids: list[str]) -> set[tuple[str, int, str]]:
+    """이 전략들의 아직 끝나지 않은 신호 주문 — (전략, 회차, 구분) 집합(화면 표시용)."""
+    return _order_keys(strategy_ids, {"status": {"$in": list(ACTIVE_STATUSES)}})
 
 
 def _require_no_duplicate(account_no: str, strategy_id: str, side: str, round_no: int) -> None:
