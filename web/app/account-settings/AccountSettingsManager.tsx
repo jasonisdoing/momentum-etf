@@ -11,7 +11,7 @@ import { LastSavedCell } from "../components/LastSavedCell";
 import { ensureAsxPrefix } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
-import { OrderTestModal } from "./OrderTestModal";
+import { ApiOrderModal } from "./ApiOrderModal";
 
 type Benchmark = { ticker?: string; name?: string };
 type MarketIndexOption = { ticker: string; name: string };
@@ -75,7 +75,7 @@ const DEFAULT_REGIME_TICKER = "^GSPC";
 // 현금 잔액(보유 현금 통화) 선택 옵션. 주 통화는 항상 포함되며 해제 불가.
 const CASH_CURRENCY_OPTIONS = ["KRW", "USD", "AUD"] as const;
 const COUNTRY_OPTIONS = ["kor", "au", "us"] as const;
-/** 계좌 구분 — 백엔드 `ACCOUNT_ENVS` 와 같다. 모의 계좌는 주문 시험용이라 합성·알림 설정과 사고팔기를 쓰지 않는다. */
+/** 계좌 구분 — 백엔드 `ACCOUNT_ENVS` 와 같다. 모의 계좌는 API 주문 시험용이라 합성·알림 설정과 사고팔기를 쓰지 않는다. */
 const ENV_LIVE = "live";
 const ENV_MOCK = "mock";
 const ENV_LABELS: Record<string, string> = { [ENV_LIVE]: "운영", [ENV_MOCK]: "모의" };
@@ -719,7 +719,7 @@ export function AccountSettingsManager() {
         return {
           ...draft,
           __dirty: isDirty(draft, account),
-          // 저장된 증권사 연동 — 주문 테스트는 저장된 계좌번호로 연다.
+          // 저장된 증권사 연동 — API 주문은 저장된 계좌번호로 연다.
           __brokerLinked: Boolean(account.broker_api?.account_no),
           __updatedAt: account.updated_at, __saveMethod: account.save_method };
       }),
@@ -978,11 +978,11 @@ export function AccountSettingsManager() {
       "보유 종목의 수익률이 그 종목이 속한 종목풀의 손절 기준 이하면 알립니다.",
     ),
     {
-      headerName: "주문 테스트",
+      headerName: "API 주문",
       width: 104,
       sortable: false,
       headerClass: "settingsCenterHeader",
-      headerTooltip: "증권사 연동 계좌로 지정가 주문·취소·체결 조회를 시험합니다. 운영 계좌는 실제 주문이 나갑니다.",
+      headerTooltip: "증권사 연동 계좌로 지정가 주문·취소·체결 조회를 합니다. 운영 계좌는 실제 주문이 나갑니다.",
       cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
       cellRenderer: (params: ICellRendererParams<AccountGridRow>) => {
         const row = params.data;
@@ -1161,7 +1161,7 @@ export function AccountSettingsManager() {
       ) : null}
 
       {mockOrderId ? (
-        <OrderTestModal
+        <ApiOrderModal
           isLive={accounts.find((account) => account.account_id === mockOrderId)?.env === ENV_LIVE}
           accountName={accounts.find((account) => account.account_id === mockOrderId)?.name ?? mockOrderId}
           accountNo={accounts.find((account) => account.account_id === mockOrderId)?.broker_api?.account_no ?? ""}

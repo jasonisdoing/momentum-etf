@@ -101,7 +101,7 @@ function StatusChip({ status }: { status: OrderStatus }) {
 }
 
 /** 계좌 한 곳으로 사고팔기 전략 종목의 현재가 지정가 주문·취소·상태 확인을 시험하는 모달(운영은 실제 주문) — 슬랙 버튼 주문의 서버 쪽 주문 경로를 검증한다. */
-export function OrderTestModal({
+export function ApiOrderModal({
   isLive,
   accountName,
   accountNo,
@@ -237,7 +237,7 @@ export function OrderTestModal({
   return (
     <AppModal
       open
-      title="주문 테스트"
+      title="API 주문"
       tone={isLive ? "danger" : "success"}
       badge={isLive ? "운영 · 실제 주문" : "모의"}
       subtitle={

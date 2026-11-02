@@ -27,7 +27,7 @@ logger = get_app_logger()
 
 COLLECTION = "account_settings"
 
-#: 계좌 구분 — 운영 계좌만 사고팔기·집계·알림 대상이고, 모의 계좌는 증권사 모의투자 주문 시험용이다.
+#: 계좌 구분 — 운영 계좌만 사고팔기·집계·알림 대상이고, 모의 계좌는 증권사 모의투자 API 주문 시험용이다.
 #: 만든 뒤에는 바꿀 수 없다(EDITABLE_KEYS 에 없다).
 ACCOUNT_ENV_LIVE = "live"
 ACCOUNT_ENV_MOCK = "mock"
@@ -140,7 +140,7 @@ def load_account_docs() -> list[dict[str, Any]]:
 def load_live_account_docs() -> list[dict[str, Any]]:
     """운영 계좌 문서만 order 순으로 반환한다 — 집계·알림·배치·사고팔기는 모두 이쪽을 쓴다.
 
-    모의 계좌는 주문 시험용이라 계좌 설정 편집 화면(`load_account_docs`)에만 나온다.
+    모의 계좌는 API 주문 시험용이라 계좌 설정 편집 화면(`load_account_docs`)에만 나온다.
     """
     return [doc for doc in load_account_docs() if doc["env"] == ACCOUNT_ENV_LIVE]
 
