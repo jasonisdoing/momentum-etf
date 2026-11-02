@@ -2,7 +2,7 @@
 
 (구)accounts.json 을 대체한다. 계좌별 1개 문서:
 
-    {_id: <account_id>, name, icon, order, country_code, currency,
+    {_id: <account_id>, name, icon, order, env, country_code, currency,
      benchmark: {ticker, name}, market_regime_index?, URL?,
      ma_*/stoploss_* 알람 설정, updated_at, save_method}
 
@@ -26,6 +26,12 @@ from utils.logger import get_app_logger
 logger = get_app_logger()
 
 COLLECTION = "account_settings"
+
+#: 계좌 구분 — 운영 계좌만 사고팔기·집계·알림 대상이고, 모의 계좌는 증권사 모의투자 주문 시험용이다.
+#: 만든 뒤에는 바꿀 수 없다(EDITABLE_KEYS 에 없다).
+ACCOUNT_ENV_LIVE = "live"
+ACCOUNT_ENV_MOCK = "mock"
+ACCOUNT_ENVS = (ACCOUNT_ENV_LIVE, ACCOUNT_ENV_MOCK)
 
 # 화면에서 수정 가능한 키 (account_id 는 원장/포트폴리오의 FK 라 불변)
 EDITABLE_KEYS: tuple[str, ...] = (
@@ -117,6 +123,10 @@ def load_account_docs() -> list[dict[str, Any]]:
     for doc in _db()[COLLECTION].find({}):
         entry = dict(doc)
         entry["account_id"] = str(entry.pop("_id"))
+        if entry.get("env") not in ACCOUNT_ENVS:
+            raise AccountSettingsStoreError(
+                f"'{entry['account_id']}' 계좌에 구분(env)이 없습니다 — {', '.join(ACCOUNT_ENVS)} 중 하나로 DB 문서에 채워야 합니다."
+            )
         docs.append(entry)
     if not docs:
         raise AccountSettingsStoreError("계좌 설정이 DB(account_settings)에 없습니다. 계좌 문서를 먼저 등록해주세요.")
@@ -125,6 +135,14 @@ def load_account_docs() -> list[dict[str, Any]]:
     with _cache_lock:
         _cache = (now, [dict(d) for d in docs])
     return docs
+
+
+def load_live_account_docs() -> list[dict[str, Any]]:
+    """운영 계좌 문서만 order 순으로 반환한다 — 집계·알림·배치·사고팔기는 모두 이쪽을 쓴다.
+
+    모의 계좌는 주문 시험용이라 계좌 설정 편집 화면(`load_account_docs`)에만 나온다.
+    """
+    return [doc for doc in load_account_docs() if doc["env"] == ACCOUNT_ENV_LIVE]
 
 
 def _validate_pct(account_id: str, label: str, raw: Any) -> float:
@@ -191,7 +209,7 @@ def _validate_trade_sleeve(account_id: str, label: str, pool: str) -> None:
         raise AccountSettingsStoreError(
             f"'{account_id}' 의 {label} 사고팔기는 종목풀 설정에서 사고팔기를 켠 풀만 고를 수 있습니다: {pool}"
         )
-    for doc in load_account_docs():
+    for doc in load_live_account_docs():
         if doc["account_id"] == account_id:
             continue
         if any(sleeve["strategy"] == STRATEGY_TRADE and sleeve["pool"] == pool for sleeve in mix_sleeves_of(doc)):
@@ -282,6 +300,42 @@ def mix_sleeves_of(account_settings: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return sleeves
+
+
+def _validate_broker_account_type(
+    account_id: str, existing_doc: dict[str, Any], provider: str, account_no: str
+) -> None:
+    """연동할 증권사 계좌의 구분이 이 계좌의 구분과 맞아야 한다 — 모의 계좌는 모의투자(03), 운영 계좌는 그 밖.
+
+    바꾼 계좌번호만 확인한다(그리드 저장마다 증권사를 부르지 않는다).
+    """
+    from services.broker_api_service import MOCK_ACCOUNT_TYPE, account_types
+
+    if str((existing_doc.get("broker_api") or {}).get("account_no") or "") == account_no:
+        return
+    acct_type = account_types().get(account_no)
+    if acct_type is None:
+        raise AccountSettingsStoreError(f"'{account_id}' 에 연동할 {provider} 계좌를 찾지 못했습니다: {account_no}")
+    is_mock_broker = acct_type == MOCK_ACCOUNT_TYPE
+    if (existing_doc["env"] == ACCOUNT_ENV_MOCK) != is_mock_broker:
+        raise AccountSettingsStoreError(
+            f"'{account_id}' 는 {'모의' if existing_doc['env'] == ACCOUNT_ENV_MOCK else '운영'} 계좌라 "
+            f"{'모의투자(03)' if existing_doc['env'] == ACCOUNT_ENV_MOCK else '운영'} 증권사 계좌만 연동할 수 있습니다."
+        )
+
+
+#: 모의 계좌에는 켤 수 없는 설정 — 합성·사고팔기·보유종목 알림은 운영 계좌 전용이다.
+_LIVE_ONLY_KEYS = ("mix_enabled", "mix_slack_enabled", "ma_alarm_enabled", "stoploss_alarm_enabled")
+
+
+def _validate_mock_limits(account_id: str, cleaned: dict[str, Any]) -> None:
+    enabled = [key for key in _LIVE_ONLY_KEYS if cleaned.get(key)]
+    if cleaned.get("mix_sleeves"):
+        enabled.append("mix_sleeves")
+    if enabled:
+        raise AccountSettingsStoreError(
+            f"'{account_id}' 는 모의 계좌라 합성·사고팔기·보유종목 알림을 쓸 수 없습니다: {', '.join(enabled)}"
+        )
 
 
 def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict[str, Any]) -> dict[str, Any]:
@@ -396,6 +450,7 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
                 )
             if not account_no:
                 raise AccountSettingsStoreError(f"'{account_id}' 의 broker_api.account_no 가 비어 있습니다.")
+            _validate_broker_account_type(account_id, existing_doc, provider, account_no)
             cleaned[key] = {"provider": provider, "account_no": account_no}
         elif key == "market_regime_index":
             # 계좌별 시장 레짐 판정 지수 — 시장추세 지수(INDICES) 중 하나(필수, {ticker, name}).
@@ -443,6 +498,8 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
                 f"{joined} + 현금 {cleaned['mix_cash_pct']}% = {round(total, 2)}%"
             )
 
+    if existing_doc["env"] == ACCOUNT_ENV_MOCK:
+        _validate_mock_limits(account_id, cleaned)
     if not cleaned:
         raise AccountSettingsStoreError("저장할 값이 없습니다.")
     return cleaned
@@ -476,6 +533,7 @@ def create_account(
     *,
     icon: str = "",
     order: int = 0,
+    env: str,
     country_code: str = "kor",
     currency: str = "KRW",
 ) -> dict[str, Any]:
@@ -489,6 +547,8 @@ def create_account(
     name_norm = str(name or "").strip()
     if not name_norm:
         raise AccountSettingsStoreError("계좌 이름을 입력하세요.")
+    if env not in ACCOUNT_ENVS:
+        raise AccountSettingsStoreError(f"계좌 구분(env)은 {', '.join(ACCOUNT_ENVS)} 중 하나여야 합니다: {env}")
     ccode = str(country_code or "").strip().lower()
     if ccode not in _ALLOWED_COUNTRY_CODES:
         raise AccountSettingsStoreError(
@@ -511,6 +571,7 @@ def create_account(
         "name": name_norm,
         "icon": str(icon or "").strip(),
         "order": order_int,
+        "env": env,
         "country_code": ccode,
         "currency": curr,
         "created_at": datetime.now(timezone.utc),

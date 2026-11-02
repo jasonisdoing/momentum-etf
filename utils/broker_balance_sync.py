@@ -104,11 +104,11 @@ def sync_all() -> dict[str, Any]:
     '최종 변경' 표시가 의미를 잃고, 변화 없는 알림은 소음이다.
     """
     from services.broker_api_service import BrokerApiError, apply_fetched_balance, fetch_broker_balance
-    from utils.account_settings_store import load_account_docs
+    from utils.account_settings_store import load_live_account_docs
     from utils.portfolio_io import load_portfolio_master
 
     results: list[dict[str, Any]] = []
-    for doc in load_account_docs():
+    for doc in load_live_account_docs():
         linked = doc.get("broker_api") or {}
         provider = str(linked.get("provider") or "").strip().upper()
         account_no = str(linked.get("account_no") or "").strip()

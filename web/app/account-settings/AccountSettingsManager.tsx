@@ -21,6 +21,8 @@ type AccountEntry = {
   name?: string;
   icon?: string;
   order?: number;
+  /** 계좌 구분 — 만든 뒤에는 바꿀 수 없다. */
+  env: string;
   country_code?: string;
   currency?: string;
   cash_currencies?: string[];
@@ -46,6 +48,8 @@ type BrokerAccountRow = {
   account_no: string;
   masked: string;
   acct_type: string;
+  /** 모의투자(03) 계좌 — 모의 계좌에는 이것만, 운영 계좌에는 이것만 빼고 연동한다. */
+  mock: boolean;
   ok: boolean;
   cash?: number;
   net_asset?: number;
@@ -71,6 +75,10 @@ const DEFAULT_REGIME_TICKER = "^GSPC";
 // 현금 잔액(보유 현금 통화) 선택 옵션. 주 통화는 항상 포함되며 해제 불가.
 const CASH_CURRENCY_OPTIONS = ["KRW", "USD", "AUD"] as const;
 const COUNTRY_OPTIONS = ["kor", "au", "us"] as const;
+/** 계좌 구분 — 백엔드 `ACCOUNT_ENVS` 와 같다. 모의 계좌는 주문 시험용이라 합성·알림 설정과 사고팔기를 쓰지 않는다. */
+const ENV_LIVE = "live";
+const ENV_MOCK = "mock";
+const ENV_LABELS: Record<string, string> = { [ENV_LIVE]: "운영", [ENV_MOCK]: "모의" };
 const CURRENCY_OPTIONS = ["KRW", "USD", "AUD"] as const;
 
 const inputStyle: React.CSSProperties = {
@@ -80,6 +88,7 @@ const inputStyle: React.CSSProperties = {
   fontSize: "var(--fs-base)",
 };
 const labelStyle: React.CSSProperties = { color: "var(--text-muted)", fontWeight: 600, fontSize: "var(--fs-sm)", flexShrink: 0 };
+const mutedStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--fs-sm)" };
 
 /** 편집 중인 계좌 한 건. 그리드 셀이 그대로 읽고 쓰는 평평한 형태로 든다. */
 type AccountDraft = {
@@ -87,6 +96,7 @@ type AccountDraft = {
   name: string;
   icon: string;
   order: string;
+  env: string;
   country_code: string;
   currency: string;
   cash_currencies: string[];
@@ -102,7 +112,7 @@ type AccountDraft = {
 };
 
 /** 그리드 행 — 편집 중인 초안 그대로에 표시용 필드를 얹는다. */
-type AccountGridRow = AccountDraft & { __dirty: boolean; __updatedAt?: string | null; __saveMethod?: string | null };
+type AccountGridRow = AccountDraft & { __dirty: boolean; __brokerLinked: boolean; __updatedAt?: string | null; __saveMethod?: string | null };
 
 // 셀렉트·체크박스 에디터가 들어가는 행이라 기본(34px)보다 조금 높인다.
 const accountGridTheme = createAppGridTheme({ rowHeight: 38 });
@@ -114,6 +124,7 @@ function toDraft(account: AccountEntry): AccountDraft {
     name: account.name ?? "",
     icon: account.icon ?? "",
     order: String(account.order ?? 0),
+    env: account.env,
     country_code: account.country_code ?? "kor",
     currency,
     cash_currencies:
@@ -446,21 +457,25 @@ function AccountDetailModal({
             onChange={(e) => onChange({ brokerAccountNo: e.target.value })}
           >
             <option value="">계좌 선택</option>
-            {brokerAccounts.map((row) => (
-              <option key={row.account_no} value={row.account_no} disabled={!row.ok}>
-                {row.masked}
-                {row.ok
-                  ? ` — 순자산 ${(row.net_asset ?? 0).toLocaleString("ko-KR")} · 예수금 ${(row.cash ?? 0).toLocaleString("ko-KR")} · ${row.holdings_count}종목`
-                  : " — 조회 불가"}
-              </option>
-            ))}
+            {brokerAccounts
+              .filter((row) => row.mock === (draft.env === ENV_MOCK))
+              .map((row) => (
+                <option key={row.account_no} value={row.account_no} disabled={!row.mock && !row.ok}>
+                  {row.masked}
+                  {row.mock
+                    ? " — 모의투자"
+                    : row.ok
+                      ? ` — 순자산 ${(row.net_asset ?? 0).toLocaleString("ko-KR")} · 예수금 ${(row.cash ?? 0).toLocaleString("ko-KR")} · ${row.holdings_count}종목`
+                      : " — 조회 불가"}
+                </option>
+              ))}
           </select>
         ) : draft.brokerAccountNo ? (
           <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)" }}>
             저장된 계좌: {draft.brokerAccountNo.slice(0, 4)}***{draft.brokerAccountNo.slice(-2)}
           </span>
         ) : null}
-        {savedBrokerAccountNo ? (
+        {savedBrokerAccountNo && draft.env !== ENV_MOCK ? (
           <button type="button" className="btn btn-sm btn-outline-primary" disabled={balanceLoading} onClick={() => void fetchBalance()}>
             {balanceLoading ? "동기화 중…" : "잔고 동기화"}
           </button>
@@ -556,6 +571,7 @@ function AddAccountModal({ onClose, onCreated }: { onClose: () => void; onCreate
   const [name, setName] = useState("");
   const [icon, setIcon] = useState("");
   const [order, setOrder] = useState("0");
+  const [env, setEnv] = useState("");
   const [countryCode, setCountryCode] = useState("kor");
   const [currency, setCurrency] = useState("KRW");
   const [saving, setSaving] = useState(false);
@@ -571,6 +587,7 @@ function AddAccountModal({ onClose, onCreated }: { onClose: () => void; onCreate
           name: name.trim(),
           icon: icon.trim(),
           order: Math.trunc(Number(order) || 0),
+          env,
           country_code: countryCode,
           currency: currency.trim().toUpperCase(),
         }),
@@ -601,7 +618,7 @@ function AddAccountModal({ onClose, onCreated }: { onClose: () => void; onCreate
           <button
             type="button"
             className="btn btn-primary"
-            disabled={saving || !accountId.trim() || !name.trim()}
+            disabled={saving || !accountId.trim() || !name.trim() || !env}
             onClick={() => void create()}
           >
             {saving ? "추가 중…" : "추가"}
@@ -621,6 +638,16 @@ function AddAccountModal({ onClose, onCreated }: { onClose: () => void; onCreate
             {row.el}
           </label>
         ))}
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ ...labelStyle, width: 64 }}>구분</span>
+          <select className="form-select form-select-sm" style={{ flex: 1 }} value={env} onChange={(e) => setEnv(e.target.value)}>
+            <option value="">선택</option>
+            {Object.entries(ENV_LABELS).map(([code, label]) => (
+              <option key={code} value={code}>{label}</option>
+            ))}
+          </select>
+          <span style={mutedStyle}>만든 뒤에는 바꿀 수 없습니다</span>
+        </label>
         <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ ...labelStyle, width: 64 }}>국가</span>
           <select className="form-select form-select-sm" style={{ flex: 1 }} value={countryCode} onChange={(e) => setCountryCode(e.target.value)}>
@@ -647,7 +674,7 @@ export function AccountSettingsManager() {
   const [drafts, setDrafts] = useState<Record<string, AccountDraft>>({});
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
-  const [mockOrderOpen, setMockOrderOpen] = useState(false);
+  const [mockOrderId, setMockOrderId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [sendingAlarm, setSendingAlarm] = useState(false);
@@ -689,7 +716,12 @@ export function AccountSettingsManager() {
     () =>
       rows.map((account) => {
         const draft = drafts[account.account_id] ?? toDraft(account);
-        return { ...draft, __dirty: isDirty(draft, account), __updatedAt: account.updated_at, __saveMethod: account.save_method };
+        return {
+          ...draft,
+          __dirty: isDirty(draft, account),
+          // 저장된 증권사 연동 — 주문 테스트는 저장된 계좌번호로 연다.
+          __brokerLinked: Boolean(account.broker_api?.account_no),
+          __updatedAt: account.updated_at, __saveMethod: account.save_method };
       }),
     [drafts, rows],
   );
@@ -864,6 +896,8 @@ export function AccountSettingsManager() {
     cellRenderer: (params: { data?: AccountGridRow }) => {
       const row = params.data;
       if (!row) return null;
+      // 모의 계좌는 합성·알림 대상이 아니다 — 체크박스 대신 막힌 표시.
+      if (row.env === ENV_MOCK) return <span style={mutedStyle}>—</span>;
       return (
         <input
           type="checkbox"
@@ -879,6 +913,12 @@ export function AccountSettingsManager() {
   const columnDefs: ColDef<AccountGridRow>[] = [
     { field: "account_id", headerName: "ID", width: 130 },
     { field: "name", headerName: "이름", width: 150, editable: true },
+    {
+      field: "env",
+      headerName: "구분",
+      width: 70,
+      valueFormatter: (params) => ENV_LABELS[String(params.value)] ?? String(params.value),
+    },
     { field: "icon", headerName: "아이콘", width: 62, editable: true },
     numberCol("order", "순서", 64),
     selectCol("country_code", "국가", 82, () => [...COUNTRY_OPTIONS]),
@@ -938,6 +978,30 @@ export function AccountSettingsManager() {
       "보유 종목의 수익률이 그 종목이 속한 종목풀의 손절 기준 이하면 알립니다.",
     ),
     {
+      headerName: "주문 테스트",
+      width: 104,
+      sortable: false,
+      headerClass: "settingsCenterHeader",
+      headerTooltip: "모의 계좌의 증권사 모의투자 서버로 지정가 주문·취소·체결 조회를 시험합니다.",
+      cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+      cellRenderer: (params: ICellRendererParams<AccountGridRow>) => {
+        const row = params.data;
+        if (!row || row.env !== ENV_MOCK) return null;
+        return (
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            style={{ padding: "0 8px", lineHeight: 1.4 }}
+            disabled={!row.__brokerLinked}
+            title={row.__brokerLinked ? undefined : "증권사 API 연동 계좌를 먼저 저장하세요."}
+            onClick={() => setMockOrderId(row.account_id)}
+          >
+            열기
+          </button>
+        );
+      },
+    },
+    {
       headerName: "상세",
       width: 64,
       sortable: false,
@@ -996,14 +1060,6 @@ export function AccountSettingsManager() {
                   onClick={() => void sendAlarmTest()}
                 >
                   {sendingAlarm ? "발송 중…" : "슬랙 알람 테스트"}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-dark"
-                  title="증권사 모의투자 계좌로 지정가 주문·취소·체결 조회를 시험합니다."
-                  onClick={() => setMockOrderOpen(true)}
-                >
-                  모의 주문 테스트
                 </button>
                 <button
                   type="button"
@@ -1104,7 +1160,13 @@ export function AccountSettingsManager() {
         />
       ) : null}
 
-      {mockOrderOpen ? <MockOrderModal onClose={() => setMockOrderOpen(false)} /> : null}
+      {mockOrderId ? (
+        <MockOrderModal
+          accountName={accounts.find((account) => account.account_id === mockOrderId)?.name ?? mockOrderId}
+          accountNo={accounts.find((account) => account.account_id === mockOrderId)?.broker_api?.account_no ?? ""}
+          onClose={() => setMockOrderId(null)}
+        />
+      ) : null}
 
       {addOpen ? <AddAccountModal onClose={() => setAddOpen(false)} onCreated={() => void load()} /> : null}
     </div>

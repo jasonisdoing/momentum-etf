@@ -36,6 +36,8 @@ _SUCCESS_CODES = frozenset({"00000", "00166", "00221", "13578"})
 #: 성공 메시지 안전망 — NH 성공 응답은 "…완료되었습니다" 형태다. 목록에 없는 정상 코드를
 #: 실패로 오판하지 않기 위한 2차 방어.
 _SUCCESS_MESSAGE_RE = re.compile(r"완료")
+#: 나무증권 계좌구분 — 03 이 모의투자 전용이다(그 밖은 운영).
+MOCK_ACCOUNT_TYPE = "03"
 
 # 연속조회 폭주 방지 — 잔고가 이 페이지 수를 넘을 일은 없다.
 _MAX_PAGES = 20
@@ -300,8 +302,13 @@ def list_broker_accounts(provider: str) -> list[dict[str, Any]]:
             "account_no": account_no,
             "masked": _mask(account_no),
             "acct_type": str(item.get("acct_type") or ""),
+            "mock": str(item.get("acct_type") or "") == MOCK_ACCOUNT_TYPE,
             "ok": False,
         }
+        # 모의투자 계좌는 운영 서버의 잔고 API 로 읽히지 않는다 — 미리보기 없이 구분만 알린다.
+        if row["mock"]:
+            rows.append(row)
+            continue
         # 계좌 유형에 따라 잔고 API 가 거부하는 계좌가 있다(종합/CMA 등) — 표시로 구분한다.
         try:
             data = _namu_balance(account_no)

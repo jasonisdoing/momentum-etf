@@ -20,6 +20,7 @@ import requests
 
 from services.broker_api_service import (
     BALANCE_PATH,
+    MOCK_ACCOUNT_TYPE,
     BrokerApiError,
     account_types,
     balance_request,
@@ -35,8 +36,6 @@ from utils.ttl_cache import TtlCache
 logger = get_app_logger()
 
 MOCK_BASE_URL = "https://moapi.nhplug.com:8443"
-#: 나무증권 계좌구분 — 03 이 모의투자 전용이다.
-MOCK_ACCOUNT_TYPE = "03"
 #: 주문을 보내는 시장 — KRX 로 고정한다. SOR 는 KRX·NXT 로 쪼개져 주문번호가 둘이 되고, 사고팔기는 KRX 정규장 규칙이다.
 ORDER_MARKET = "KRX"
 _PRICE_TYPE_LIMIT = "01"  # 호가유형 — 보통가(지정가)

@@ -10,12 +10,8 @@ import type { StrategyView } from "../strategy-trade/StrategyTradeClient";
 
 /** 증권사 모의투자 서버 주소 — 이 모달은 여기로만 주문한다(운영 계좌는 고를 수 없다). */
 const MOCK_DOMAIN = "moapi.nhplug.com:8443";
-/** 나무증권 계좌구분 — 03 이 모의투자 전용이다. */
-const MOCK_ACCOUNT_TYPE = "03";
-const PROVIDER = "NAMU_PLUG";
 
 type Side = "buy" | "sell";
-type MockAccount = { account_no: string; masked: string; acct_type: string };
 
 type MockHolding = {
   ticker: string;
@@ -96,11 +92,17 @@ function StatusChip({ status }: { status: OrderStatus }) {
   return <span className={chip.className}>{chip.label}</span>;
 }
 
-/** 모의투자 계좌로 사고팔기 전략 종목의 현재가 지정가 주문·취소·상태 확인을 시험하는 모달 — 슬랙 버튼 주문의 서버 쪽 주문 경로를 검증한다. */
-export function MockOrderModal({ onClose }: { onClose: () => void }) {
+/** 모의 계좌 한 곳으로 사고팔기 전략 종목의 현재가 지정가 주문·취소·상태 확인을 시험하는 모달 — 슬랙 버튼 주문의 서버 쪽 주문 경로를 검증한다. */
+export function MockOrderModal({
+  accountName,
+  accountNo,
+  onClose,
+}: {
+  accountName: string;
+  accountNo: string;
+  onClose: () => void;
+}) {
   const toast = useToast();
-  const [accounts, setAccounts] = useState<MockAccount[] | null>(null);
-  const [accountNo, setAccountNo] = useState("");
   const [strategies, setStrategies] = useState<StrategyView[] | null>(null);
   const [pool, setPool] = useState("");
   const [strategyId, setStrategyId] = useState("");
@@ -111,29 +113,6 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
   const [loadingStrategies, setLoadingStrategies] = useState(false);
   // 진행 중인 요청 — 같은 버튼을 연달아 눌러 주문이 두 번 나가지 않게 한다.
   const [busy, setBusy] = useState<"balance" | "orders" | "order" | "broker" | string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const resp = await fetch(`/api/broker-api/accounts?provider=${PROVIDER}`, { cache: "no-store" });
-        const data = (await resp.json()) as { accounts?: MockAccount[]; error?: string };
-        if (!resp.ok || data.error) throw new Error(data.error ?? "증권사 계좌를 불러오지 못했습니다.");
-        if (cancelled) return;
-        const mock = (data.accounts ?? []).filter((row) => row.acct_type === MOCK_ACCOUNT_TYPE);
-        setAccounts(mock);
-        if (mock.length === 1) setAccountNo(mock[0].account_no);
-      } catch (err) {
-        if (cancelled) return;
-        setAccounts([]);
-        toast.error(err instanceof Error ? err.message : "증권사 계좌를 불러오지 못했습니다.");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // 주문할 전략 종목과 현재가 — /strategy-trade 화면과 같은 운용 현황이다(현재가는 화면을 열 때와 새로고침 때 읽는다).
   const loadStrategies = useCallback(async () => {
@@ -248,7 +227,7 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
     <AppModal
       open
       title="모의 주문 테스트"
-      subtitle={`모의투자 서버(${MOCK_DOMAIN})로만 보냅니다. 운영 계좌는 선택할 수 없습니다.`}
+      subtitle={`모의투자 서버(${MOCK_DOMAIN})로만 보냅니다. 운영 계좌로는 주문되지 않습니다.`}
       onClose={onClose}
       size="xl"
       footer={
@@ -259,23 +238,13 @@ export function MockOrderModal({ onClose }: { onClose: () => void }) {
         </div>
       }
     >
-      <label style={fieldStyle}>
+      <div style={fieldStyle}>
         <span style={labelStyle}>모의 계좌</span>
-        <select
-          className="form-select form-select-sm"
-          style={{ width: 280 }}
-          value={accountNo}
-          disabled={accounts === null}
-          onChange={(e) => setAccountNo(e.target.value)}
-        >
-          <option value="">{accounts === null ? "불러오는 중…" : accounts.length === 0 ? "모의투자 계좌 없음" : "계좌 선택"}</option>
-          {(accounts ?? []).map((row) => (
-            <option key={row.account_no} value={row.account_no}>
-              {row.masked}
-            </option>
-          ))}
-        </select>
-      </label>
+        <strong>{accountName}</strong>
+        <span style={mutedStyle}>
+          {accountNo.slice(0, 4)}***{accountNo.slice(-2)}
+        </span>
+      </div>
 
       <div style={{ ...sectionStyle, marginTop: 4 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>

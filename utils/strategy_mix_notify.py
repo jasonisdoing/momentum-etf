@@ -124,10 +124,10 @@ def _watch_targets(country: str | None = None) -> list[dict[str, Any]]:
 
     국가는 계좌 값을 쓴다 — 슬리브 풀이 계좌와 같은 국가인 것은 계좌 설정 저장이 보장한다.
     """
-    from utils.account_settings_store import load_account_docs, mix_sleeves_of
+    from utils.account_settings_store import load_live_account_docs, mix_sleeves_of
 
     targets = []
-    for doc in load_account_docs():
+    for doc in load_live_account_docs():
         sleeves = mix_sleeves_of(doc)
         if not sleeves or not all(row["strategy"] and row["pool"] for row in sleeves):
             continue

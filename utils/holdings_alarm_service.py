@@ -26,7 +26,7 @@ import pandas as pd
 
 from config import CACHE_TTL_COMPUTE
 from core.strategy.scoring import compute_ma_disparity
-from utils.account_settings_store import load_account_docs
+from utils.account_settings_store import load_live_account_docs
 from utils.cache_utils import load_cached_close_series_bulk_with_fallback
 from utils.effective_prices import bar_anchor
 from utils.holdings_detail_service import load_all_holdings_detail
@@ -270,7 +270,7 @@ def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
     cached = _badges_cache.get(norm_id)
     if cached is not None and _time.monotonic() - cached[0] < _BADGES_CACHE_TTL_SECONDS:
         return dict(cached[1])
-    account_doc = next((doc for doc in load_account_docs() if doc["account_id"] == norm_id), None)
+    account_doc = next((doc for doc in load_live_account_docs() if doc["account_id"] == norm_id), None)
     if account_doc is None:
         raise ValueError(f"알 수 없는 계좌입니다: {account_id}")
 
@@ -401,7 +401,7 @@ def send_holdings_alarms(*, manual: bool = False) -> dict[str, Any]:
     """
     sections: list[dict[str, Any]] = []
     all_errors: list[str] = []
-    for doc in load_account_docs():
+    for doc in load_live_account_docs():
         if not (doc.get("ma_alarm_enabled") or doc.get("stoploss_alarm_enabled")):
             continue
         alerts, errors = compute_account_alerts(doc)

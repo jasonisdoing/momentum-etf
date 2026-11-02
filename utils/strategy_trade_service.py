@@ -218,12 +218,12 @@ def sleeve_for_pool(pool: str) -> dict[str, Any] | None:
     사고팔기는 계좌를 따로 고르지 않는다. 합성에서 `사고팔기 + 종목풀` 슬리브를 붙인 계좌가
     운용 계좌이고, 슬리브 비중 × 합성 기준금액이 그 종목풀 전략 전체의 매수 한도다.
     """
-    from utils.account_settings_store import load_account_docs, mix_sleeves_of
+    from utils.account_settings_store import load_live_account_docs, mix_sleeves_of
     from utils.pool_strategy_use import STRATEGY_TRADE
 
     found = [
         (doc, sleeve)
-        for doc in load_account_docs()
+        for doc in load_live_account_docs()
         for sleeve in mix_sleeves_of(doc)
         if sleeve["strategy"] == STRATEGY_TRADE and sleeve["pool"] == pool
     ]
