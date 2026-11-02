@@ -361,20 +361,18 @@ export function ApiOrderModal({
           </button>
         </div>
         <div style={{ ...mutedStyle, marginBottom: 10 }}>
-          수량은 전략의 회차당 수량이고, 가격은 주문 순간의 현재가를 호가 단위로 반올림해 서버가 정합니다(직접 입력 없음).
+          수량은 전략의 회차당 수량이고, 가격은 주문 순간의 현재가를 호가 단위로 반올림해 서버가 정합니다(직접 입력 없음). 모달의 직접 주문은 매도만 되고, 매수는 슬랙 주문 메시지로 냅니다.
         </div>
-        <button
-          type="button"
-          className={side === "buy" ? "btn btn-sm btn-primary" : "btn btn-sm btn-danger"}
-          disabled={!canOrder}
-          onClick={() => void placeOrder()}
-        >
-          {busy === "order" ? "주문 중…" : side === "buy" ? "매수 주문" : "매도 주문"}
-        </button>
+        {/* 모달의 직접 주문은 매도만 — 매수는 슬랙 주문 메시지의 사람 리뷰를 거친다. */}
+        {side === "sell" ? (
+          <button type="button" className="btn btn-sm btn-danger" disabled={!canOrder} onClick={() => void placeOrder()}>
+            {busy === "order" ? "주문 중…" : "매도 주문"}
+          </button>
+        ) : null}
         <button
           type="button"
           className="btn btn-sm btn-outline-secondary"
-          style={{ marginLeft: 8 }}
+          style={{ marginLeft: side === "sell" ? 8 : 0 }}
           disabled={!canOrder}
           onClick={() => void sendSlackOrder()}
         >

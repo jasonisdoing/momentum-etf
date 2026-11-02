@@ -64,16 +64,9 @@ def _round_text(round_no: int | None) -> str:
     return f"{round_no}호 " if round_no is not None else ""
 
 
-def _price_text(request: dict[str, Any]) -> str:
-    if request["price_kind"] == "limit":
-        return f"지정가 {request['price']:,}원 · 현재가 {request['current_price']:,}원"
-    return f"현재가 {request['price']:,}원"
-
-
 def _order_text(request: dict[str, Any]) -> str:
     side = _SIDE_LABELS[request["side"]]
-    kind = "신호 지정가" if request["price_kind"] == "limit" else "현재가 지정가"
-    return f"{_round_text(request['round'])}{request['label']} · {request['quantity']:,}주 × {kind} {side}"
+    return f"{_round_text(request['round'])}{request['label']} · {request['quantity']:,}주 × 현재가 지정가 {side}"
 
 
 # --- 메시지 ---------------------------------------------------------------------------------------------
@@ -86,7 +79,7 @@ def _section(request: dict[str, Any]) -> dict[str, Any]:
             "type": "mrkdwn",
             "text": (
                 f"*[{_env_word(request['env'])}] {_SIDE_LABELS[request['side']]} 주문*\n{_order_text(request)}\n"
-                f"{_price_text(request)} ({request['ticker']})"
+                f"버튼을 확정하는 순간의 현재가(호가 단위)로 냅니다 ({request['ticker']})"
             ),
         },
     }
@@ -153,9 +146,6 @@ def send_order_message(account_no: str, pool: str, strategy_id: str, side: str, 
         "label": order["strategy_label"],
         "ticker": order["ticker"],
         "quantity": order["quantity"],
-        "price": order["price"],
-        "price_kind": order["price_kind"],
-        "current_price": order["current_price"],
     }
     if not send_slack_message_v2(f"[{_env_word(env)}] {_order_text(request)}", _open_blocks(request)):
         raise BrokerApiError("슬랙으로 주문 메시지를 보내지 못했습니다.")
@@ -178,16 +168,10 @@ def _modal_view(callback_id: str, title: str, submit: str, body: str, metadata: 
 
 def _order_view(request: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
     side = _SIDE_LABELS[request["side"]]
-    if request["price_kind"] == "limit":
-        guide = (
-            f"{_price_text(request)} — 주문을 누르는 시점에 신호가 아직 유효한지 다시 확인하고, "
-            f"전략의 지정가로 {_env_word(request['env'])} 계좌에 보냅니다."
-        )
-    else:
-        guide = (
-            f"메시지 시점 현재가 {request['price']:,}원 — 주문을 누르는 시점의 현재가(호가 단위)로 다시 정해 "
-            f"{_env_word(request['env'])} 계좌에 보냅니다."
-        )
+    guide = (
+        f"주문을 확정하는 순간의 현재가(호가 단위)로 {_env_word(request['env'])} 계좌에 보냅니다. "
+        "현재가 지정가라 호가에 따라 체결되지 않을 수 있습니다."
+    )
     body = f"*{_order_text(request)}*\n{guide}"
     return _modal_view(ORDER_CALLBACK_ID, f"{_env_word(request['env'])} {side} 주문 확인", f"{side} 주문", body, target)
 
@@ -331,9 +315,6 @@ def _request_of(record: dict[str, Any]) -> dict[str, Any]:
         "label": record["strategy_label"],
         "ticker": record["ticker"],
         "quantity": record["quantity"],
-        "price": record["price"],
-        "price_kind": record["price_kind"],
-        "current_price": record["current_price"],
     }
 
 
