@@ -187,6 +187,11 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
     return triggers
 
 
+def _already_sent_note(round_no: int, action: str, fresh: set[tuple[int, str]]) -> str:
+    """지정가에 닿아 있지만 이번에 새로 보내는 신호가 아닌 회차 — 앞서 알린 신호임을 줄에 덧붙인다."""
+    return "" if (round_no, action) in fresh else " · 앞서 알림"
+
+
 def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
     """슬랙 본문 — **전략 하나**의 전 회차 현황을 나열하고 조치가 필요한 줄만 표시한다.
 
@@ -242,11 +247,11 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     # 달라 서로 비교가 안 되고, 판단은 결국 지수가 어디까지 왔느냐로 하기 때문이다.
     for row in strategy_view["rounds"]:
         if row["held"]:
-            is_triggered = (row["round"], "sell") in triggered
             profit_text = f"{row['profit_pct']:+.2f}%" if row["profit_pct"] is not None else "-"
-            if is_triggered:
+            if row["sell_reached"]:
                 lines.append(
                     f"🔴 {row['round']}호 {quantity} *지금 매도!* {_level(row['sell_index'])} 도달 ({profit_text})"
+                    f"{_already_sent_note(row['round'], 'sell', triggered)}"
                 )
             else:
                 lines.append(
@@ -255,14 +260,16 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
         elif row["is_next"] and row["over_limit"]:
             lines.append(f"⏸ {row['round']}호 {quantity} 한도 도달 — 추가 매수 중단")
         elif row["is_next"]:
-            is_triggered = (row["round"], "buy") in triggered
-            if is_triggered:
+            if row["buy_reached"]:
                 reach = (
                     f"장 마감 매수 · 현재가 {_level(row['close'])}"
                     if row["close_entry"]
                     else f"{_level(row['buy_index'])} 도달"
                 )
-                lines.append(f"🔵 {row['round']}호 {quantity} *지금 매수!* {reach}")
+                lines.append(
+                    f"🔵 {row['round']}호 {quantity} *지금 매수!* {reach}"
+                    f"{_already_sent_note(row['round'], 'buy', triggered)}"
+                )
             else:
                 # 보유 0 이면 장중에 못 닿아도 장 마감 매수가 있다.
                 close_note = (
