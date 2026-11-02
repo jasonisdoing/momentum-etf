@@ -275,8 +275,13 @@ def _order_date(record: dict[str, Any]) -> str:
 
 
 def _broker_status(record: dict[str, Any], broker_status: str) -> str:
-    """증권사 상태를 기록 상태로 옮긴다 — 접수일이 지난 미체결 주문은 당일 주문이므로 만료로 본다."""
-    if broker_status in ("pending", "partial") and _order_date(record) < _now().strftime("%Y%m%d"):
+    """증권사 상태를 기록 상태로 옮긴다 — 미체결 주문은 당일 주문이므로 접수일이 지났거나 정규장이 끝났으면 만료로 본다.
+
+    주문은 정규장에서만 나가므로 접수일이 오늘인데 정규장이 아니면 마감된 뒤다.
+    """
+    if broker_status in ("pending", "partial") and (
+        _order_date(record) < _now().strftime("%Y%m%d") or market_session("kor")["session"] != REGULAR
+    ):
         return "expired"
     return broker_status
 
