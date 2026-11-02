@@ -72,9 +72,9 @@ export type RoundRow = {
   // 다음 회차가 매수 한도를 넘는다 — 이 회차부터는 사지 않는다.
   over_limit: boolean;
   sell_reached: boolean;
-  // 지정가에 닿은 회차의 오늘 슬랙 신호 발송 여부, 진행 중이거나 오늘 체결된 주문 여부.
-  slack_sent: boolean;
-  order_sent: boolean;
+  // 오늘 슬랙 신호가 나간 방향, 진행 중이거나 오늘 체결된 주문의 방향.
+  slack_sides: Array<"buy" | "sell">;
+  order_sides: Array<"buy" | "sell">;
   is_next: boolean;
 };
 
@@ -199,13 +199,23 @@ function StatusBadge({ color, children }: { color: string; children: React.React
   );
 }
 
-/** 상태 칸 — 지정가에 닿았으면 도달, 그 신호가 슬랙으로 나갔으면 슬랙, 주문이 나갔으면 주문(녹색). */
+const SIDE_WORDS = { buy: "매수", sell: "매도" } as const;
+
+/** 상태 칸 — 지정가에 닿았으면 도달(빨강), 슬랙 신호·주문이 나갔으면 방향을 붙여 매도슬랙·매수주문처럼(녹색). */
 function RoundStatus({ row }: { row: RoundRow }) {
   return (
     <span style={{ display: "inline-flex", gap: 4 }}>
       {row.buy_reached || row.sell_reached ? <StatusBadge color="var(--up-color, #d64545)">도달</StatusBadge> : null}
-      {row.slack_sent ? <StatusBadge color="var(--tblr-green, #2fb344)">슬랙</StatusBadge> : null}
-      {row.order_sent ? <StatusBadge color="var(--tblr-green, #2fb344)">주문</StatusBadge> : null}
+      {row.slack_sides.map((side) => (
+        <StatusBadge key={`slack-${side}`} color="var(--tblr-green, #2fb344)">
+          {SIDE_WORDS[side]}슬랙
+        </StatusBadge>
+      ))}
+      {row.order_sides.map((side) => (
+        <StatusBadge key={`order-${side}`} color="var(--tblr-green, #2fb344)">
+          {SIDE_WORDS[side]}주문
+        </StatusBadge>
+      ))}
     </span>
   );
 }

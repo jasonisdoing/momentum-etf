@@ -190,24 +190,25 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
-    """화면용 — 지정가에 닿은 회차마다 오늘 슬랙 신호가 나갔는지(`slack_sent`)와 주문이 나갔는지(`order_sent`)를 행에 적는다.
+    """화면용 — 회차마다 오늘 슬랙 신호가 나간 방향(`slack_sides`)과 주문이 진행 중이거나 오늘 체결된 방향(`order_sides`)을 행에 적는다.
 
-    닿지 않은 회차는 둘 다 False 다. 신호 판정은 알림과 같은 `collect_triggers` 를 쓴다.
+    지정가에 닿아 있는지와 무관하다 — 신호·주문이 나간 뒤 가격이 물러나도 표시가 남아야 한다.
+    슬랙 기록은 체결이 확인되면 지워지므로 그 뒤에는 주문 방향만 남는다.
     """
     from utils.strategy_trade_orders import in_flight_order_keys
 
     today = datetime.now(KST).strftime("%Y-%m-%d")
-    sent_log = _load_sent_log()
-    in_flight = in_flight_order_keys([strategy_view["strategy_id"] for strategy_view in view["strategies"]])
+    slack_keys = {
+        (entry.get("strategy_id"), entry.get("round"), entry.get("action"))
+        for entry in _load_sent_log().values()
+        if (sent_at := _parse_sent_at(entry.get("at"))) is not None and sent_at.strftime("%Y-%m-%d") == today
+    }
+    order_keys = in_flight_order_keys([strategy_view["strategy_id"] for strategy_view in view["strategies"]])
     for strategy_view in view["strategies"]:
         for row in strategy_view["rounds"]:
-            row["slack_sent"] = row["order_sent"] = False
-        rows = {row["round"]: row for row in strategy_view["rounds"]}
-        for trigger in collect_triggers(strategy_view):
-            row = rows[trigger["round"]]
-            last = _parse_sent_at((sent_log.get(_trigger_key(trigger)) or {}).get("at"))
-            row["slack_sent"] = last is not None and last.strftime("%Y-%m-%d") == today
-            row["order_sent"] = (trigger["strategy_id"], trigger["round"], trigger["action"]) in in_flight
+            key = (strategy_view["strategy_id"], row["round"])
+            row["slack_sides"] = [side for side in ("buy", "sell") if (*key, side) in slack_keys]
+            row["order_sides"] = [side for side in ("buy", "sell") if (*key, side) in order_keys]
     return view
 
 
