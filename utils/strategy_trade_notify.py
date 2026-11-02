@@ -370,6 +370,26 @@ def _log_entry(trigger: dict[str, Any], held_counts: dict[str, int], stamp: str,
     }
 
 
+def _send_confirms(
+    strategy_view: dict[str, Any], pendings: list[dict[str, Any]], sent_log: dict[str, dict[str, Any]]
+) -> tuple[int, int]:
+    """체결 확인을 신호를 알린 메시지의 스레드로 보낸다 — (보낸 메시지 수, 실패 수). 못 보낸 확인은 기록에 되돌린다."""
+    from utils.notification import send_slack_message_v2
+
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for pending in pendings:
+        groups.setdefault(pending["signal_ts"], []).append(pending)
+    sent = failed = 0
+    for root, group in groups.items():
+        text = "\n".join(_confirm_line(pending, strategy_view["index"]) for pending in group)
+        if send_slack_message_v2(text, thread_ts=root):
+            sent += 1
+        else:
+            failed += 1
+            sent_log.update({_trigger_key(pending): pending for pending in group})
+    return sent, failed
+
+
 def _send_repeats(
     strategy_view: dict[str, Any],
     repeats: list[dict[str, Any]],
@@ -469,6 +489,12 @@ def notify_strategy_trade() -> dict[str, Any]:
                 repeats.append(trigger)
 
         own_confirmed = [pending for pending in confirmed if str(pending.get("strategy_id")) == sid]
+        # 신호 메시지가 기록된 확인은 그 스레드로, 없는 확인(옛 기록)은 새 신호 본문과 함께 채널로 보낸다.
+        threaded = [pending for pending in own_confirmed if pending.get("signal_ts")]
+        own_confirmed = [pending for pending in own_confirmed if not pending.get("signal_ts")]
+        sent, failed = _send_confirms(strategy_view, threaded, sent_log)
+        sent_count += sent
+        failed_count += failed
         lines = [_confirm_line(pending, strategy_view["index"]) for pending in own_confirmed]
         if fresh:
             lines.append(build_message(strategy_view, fresh))
