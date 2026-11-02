@@ -23,6 +23,7 @@ from services.invesco_us_service import fetch_invesco_us_holdings
 from services.ishares_au_service import fetch_ishares_au_holdings
 from services.ishares_us_service import fetch_ishares_us_holdings
 from services.marketdesk_us_service import fetch_marketdesk_us_holdings
+from services.proshares_us_service import fetch_proshares_us_holdings
 from services.roundhill_us_service import fetch_roundhill_us_holdings
 from services.schwab_us_service import fetch_schwab_us_holdings
 from services.spdr_au_service import fetch_spdr_au_holdings
@@ -729,6 +730,7 @@ _US_OFFICIAL_FETCHERS: dict[str, Callable[[str], dict[str, Any] | None]] = {
     "marketdesk_us_csv": fetch_marketdesk_us_holdings,
     "wisdomtree_us_api": fetch_wisdomtree_us_holdings,
     "schwab_us_html": fetch_schwab_us_holdings,
+    "proshares_us_html": fetch_proshares_us_holdings,
 }
 if set(_AU_OFFICIAL_FETCHERS) != set(AU_OFFICIAL_SOURCES.values()) or set(_US_OFFICIAL_FETCHERS) != set(
     US_OFFICIAL_SOURCES.values()

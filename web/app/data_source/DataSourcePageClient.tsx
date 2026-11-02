@@ -66,6 +66,7 @@ const SOURCE_TONE: Record<string, { bg: string; fg: string }> = {
   marketdesk_us_csv: { bg: "#dcfce7", fg: "#166534" },
   wisdomtree_us_api: { bg: "#dcfce7", fg: "#166534" },
   schwab_us_html: { bg: "#dcfce7", fg: "#166534" },
+  proshares_us_html: { bg: "#dcfce7", fg: "#166534" },
   yfinance_holdings: { bg: "#fef3c7", fg: "#92400e" },
   naver_etf_component: { bg: "#dbeafe", fg: "#1e40af" },
 };
