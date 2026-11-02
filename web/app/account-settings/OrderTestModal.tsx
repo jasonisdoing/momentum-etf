@@ -2,14 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { formatSignedPct, signColor } from "@/lib/grid-cells";
 import { formatPrice } from "@/lib/price-format";
 import { formatKrw } from "../assets/assets-helpers";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
 import type { StrategyView } from "../strategy-trade/StrategyTradeClient";
 
-/** 증권사 모의투자 서버 주소 — 이 모달은 여기로만 주문한다(운영 계좌는 고를 수 없다). */
+/** 증권사 서버 주소 — 서버가 계좌 구분(운영·모의)으로 정한다. 화면은 안내 문구로만 쓴다. */
 const MOCK_DOMAIN = "moapi.nhplug.com:8443";
+const LIVE_DOMAIN = "api.nhplug.com:8443";
 
 type Side = "buy" | "sell";
 
@@ -22,6 +24,12 @@ type MockHolding = {
   value: number | null;
 };
 /** 증권사 잔고 — 계좌 설정의 잔고 동기화와 같은 값(현금은 D+2 예수금). */
+/** 평단 대비 현재가 수익률(%) — 평단이나 현재가가 없으면 null. */
+function holdingReturnPct(row: MockHolding): number | null {
+  if (row.current_price === null || row.average_buy_price <= 0) return null;
+  return (row.current_price / row.average_buy_price - 1) * 100;
+}
+
 type MockBalance = { cash: number; total_asset: number; holdings: MockHolding[] };
 
 /** 주문 상태 — 증권사 체결 조회의 체결·미체결·취소 수량으로 판정한다. */
@@ -92,12 +100,15 @@ function StatusChip({ status }: { status: OrderStatus }) {
   return <span className={chip.className}>{chip.label}</span>;
 }
 
-/** 모의 계좌 한 곳으로 사고팔기 전략 종목의 현재가 지정가 주문·취소·상태 확인을 시험하는 모달 — 슬랙 버튼 주문의 서버 쪽 주문 경로를 검증한다. */
-export function MockOrderModal({
+/** 계좌 한 곳으로 사고팔기 전략 종목의 현재가 지정가 주문·취소·상태 확인을 시험하는 모달(운영은 실제 주문) — 슬랙 버튼 주문의 서버 쪽 주문 경로를 검증한다. */
+export function OrderTestModal({
+  isLive,
   accountName,
   accountNo,
   onClose,
 }: {
+  /** 운영 계좌 — 실제 주문이 나간다. 모의 계좌는 모의투자 서버로만 간다. */
+  isLive: boolean;
   accountName: string;
   accountNo: string;
   onClose: () => void;
@@ -226,8 +237,14 @@ export function MockOrderModal({
   return (
     <AppModal
       open
-      title="모의 주문 테스트"
-      subtitle={`모의투자 서버(${MOCK_DOMAIN})로만 보냅니다. 운영 계좌로는 주문되지 않습니다.`}
+      title="주문 테스트"
+      tone={isLive ? "danger" : "success"}
+      badge={isLive ? "운영 · 실제 주문" : "모의"}
+      subtitle={
+        isLive
+          ? `운영 서버(${LIVE_DOMAIN})로 실제 주문이 나갑니다. 체결되면 실제 돈이 오갑니다.`
+          : `모의투자 서버(${MOCK_DOMAIN})로만 보냅니다.`
+      }
       onClose={onClose}
       size="xl"
       footer={
@@ -239,7 +256,7 @@ export function MockOrderModal({
       }
     >
       <div style={fieldStyle}>
-        <span style={labelStyle}>모의 계좌</span>
+        <span style={labelStyle}>{isLive ? "운영 계좌" : "모의 계좌"}</span>
         <strong>{accountName}</strong>
         <span style={mutedStyle}>
           {accountNo.slice(0, 4)}***{accountNo.slice(-2)}
@@ -271,6 +288,7 @@ export function MockOrderModal({
                 <th style={{ width: 110, ...rightCell }}>평단</th>
                 <th style={{ width: 110, ...rightCell }}>현재가</th>
                 <th style={{ width: 130, ...rightCell }}>평가금액</th>
+                <th style={{ width: 90, ...rightCell }}>수익률</th>
               </tr>
             </thead>
             <tbody>
@@ -282,6 +300,9 @@ export function MockOrderModal({
                   <td style={rightCell}>{formatPrice(row.average_buy_price, "KRW")}</td>
                   <td style={rightCell}>{formatPrice(row.current_price, "KRW")}</td>
                   <td style={rightCell}>{formatPrice(row.value, "KRW")}</td>
+                  <td style={{ ...rightCell, color: signColor(holdingReturnPct(row)) }}>
+                    {formatSignedPct(holdingReturnPct(row))}
+                  </td>
                 </tr>
               ))}
             </tbody>

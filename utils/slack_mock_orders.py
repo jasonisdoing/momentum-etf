@@ -1,4 +1,4 @@
-"""모의 주문의 슬랙 왕복 — 주문 메시지(버튼) → 확인 모달 → 웹훅 수신 → 주문·취소 → 결과 알림.
+"""주문의 슬랙 왕복 — 주문 메시지(버튼) → 확인 모달 → 웹훅 수신 → 주문·취소 → 결과 알림.
 
 모든 액션(주문·취소)은 확인 모달을 거친다. 메시지는 상태에 따라 버튼이 바뀐다: 주문하기 → 처리 중 → 취소하기 →
 결과 문구(체결·취소·거부). 끝난 메시지에는 버튼이 없어 같은 메시지로 다시 주문할 수 없다.
@@ -22,7 +22,8 @@ from slack_sdk import WebClient
 from slack_sdk.signature import SignatureVerifier
 
 from services.broker_api_service import BrokerApiError
-from services.broker_order_service import require_mock_account
+from services.broker_order_service import account_env
+from utils.account_settings_store import ACCOUNT_ENV_MOCK
 from utils.notification import send_slack_message_v2
 from utils.strategy_trade_orders import (
     FINISHED_STATUSES,
@@ -43,6 +44,11 @@ CANCEL_ACTION_ID = "mock_order_cancel"
 ORDER_CALLBACK_ID = "mock_order_confirm"
 CANCEL_CALLBACK_ID = "mock_order_cancel_confirm"
 _SIDE_LABELS = {"buy": "매수", "sell": "매도"}
+
+
+def _env_word(env: str) -> str:
+    """메시지에 쓰는 계좌 구분 — 운영은 실제 주문이라 눈에 띄게 적는다."""
+    return "모의" if env == ACCOUNT_ENV_MOCK else "🔴 운영"
 
 
 def _require_env(name: str) -> str:
@@ -66,7 +72,7 @@ def _section(request: dict[str, Any]) -> dict[str, Any]:
         "text": {
             "type": "mrkdwn",
             "text": (
-                f"*[모의투자] {_SIDE_LABELS[request['side']]} 주문*\n{_order_text(request)}\n"
+                f"*[{_env_word(request['env'])}] {_SIDE_LABELS[request['side']]} 주문*\n{_order_text(request)}\n"
                 f"현재가 {request['price']:,}원 ({request['ticker']})"
             ),
         },
@@ -115,16 +121,17 @@ def _update_message(target: dict[str, Any], blocks: list[dict[str, Any]]) -> Non
     WebClient(token=_require_env("SLACK_BOT_TOKEN")).chat_update(
         channel=target["channel"],
         ts=target["message_ts"],
-        text=f"[모의투자] {_order_text(target['request'])}",
+        text=f"[{_env_word(target['request']['env'])}] {_order_text(target['request'])}",
         blocks=blocks,
     )
 
 
 def send_order_message(account_no: str, pool: str, strategy_id: str, side: str) -> None:
-    """모의 주문 메시지를 슬랙으로 보낸다 — 주문은 슬랙에서 버튼과 모달 확인을 거쳐야 나간다."""
-    require_mock_account(account_no)
+    """주문 메시지를 슬랙으로 보낸다 — 주문은 슬랙에서 버튼과 모달 확인을 거쳐야 나간다."""
+    env = account_env(account_no)
     order = resolve_order(pool, strategy_id, side)
     request = {
+        "env": env,
         "account_no": account_no,
         "pool": pool,
         "strategy_id": strategy_id,
@@ -134,7 +141,7 @@ def send_order_message(account_no: str, pool: str, strategy_id: str, side: str) 
         "quantity": order["quantity"],
         "price": order["price"],
     }
-    if not send_slack_message_v2(f"[모의투자] {_order_text(request)}", _open_blocks(request)):
+    if not send_slack_message_v2(f"[{_env_word(env)}] {_order_text(request)}", _open_blocks(request)):
         raise BrokerApiError("슬랙으로 주문 메시지를 보내지 못했습니다.")
 
 
@@ -157,15 +164,17 @@ def _order_view(request: dict[str, Any], target: dict[str, Any]) -> dict[str, An
     side = _SIDE_LABELS[request["side"]]
     body = (
         f"*{_order_text(request)}*\n"
-        f"메시지 시점 현재가 {request['price']:,}원 — 주문을 누르는 시점의 현재가(호가 단위)로 다시 정해 모의투자 계좌에 보냅니다."
+        f"메시지 시점 현재가 {request['price']:,}원 — 주문을 누르는 시점의 현재가(호가 단위)로 다시 정해 {_env_word(request['env'])} 계좌에 보냅니다."
     )
-    return _modal_view(ORDER_CALLBACK_ID, f"모의 {side} 주문 확인", f"{side} 주문", body, target)
+    return _modal_view(ORDER_CALLBACK_ID, f"{_env_word(request['env'])} {side} 주문 확인", f"{side} 주문", body, target)
 
 
 def _cancel_view(request: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
     side = _SIDE_LABELS[request["side"]]
-    body = f"*{_order_text(request)}*\n접수된 모의 {side} 주문을 취소합니다(일부 체결됐다면 남은 수량만 취소됩니다)."
-    return _modal_view(CANCEL_CALLBACK_ID, f"모의 {side} 주문 취소 확인", "주문 취소", body, target)
+    body = f"*{_order_text(request)}*\n접수된 {_env_word(request['env'])} {side} 주문을 취소합니다(일부 체결됐다면 남은 수량만 취소됩니다)."
+    return _modal_view(
+        CANCEL_CALLBACK_ID, f"{_env_word(request['env'])} {side} 주문 취소 확인", "주문 취소", body, target
+    )
 
 
 def verify_signature(raw_body: str, timestamp: str, signature: str) -> None:
@@ -186,8 +195,7 @@ def open_confirm_modal(payload: dict[str, Any]) -> None:
     """버튼을 누른 사용자에게 확인 모달을 연다 — trigger_id 는 3초 안에 써야 한다."""
     action = payload["actions"][0]
     value = json.loads(action["value"])
-    request = value["request"]
-    require_mock_account(request["account_no"])
+    request = {**value["request"], "env": account_env(value["request"]["account_no"])}
     target = {"request": request, "channel": payload["channel"]["id"], "message_ts": payload["message"]["ts"]}
     if action["action_id"] == OPEN_ACTION_ID:
         view = _order_view(request, target)
@@ -211,15 +219,15 @@ def submitted_request(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _final_text(order: dict[str, Any]) -> str:
-    side = _SIDE_LABELS[order["side"]]
+    side = f"{_env_word(order['env'])} {_SIDE_LABELS[order['side']]}"
     head = f"{order['strategy_label']} {side} {order['quantity']:,}주 × {order['price']:,}원"
     if order["status"] == "filled":
-        return f"✅ 모의 {side} 체결 완료: {head}"
+        return f"✅ {side} 체결 완료: {head}"
     if order["status"] == "canceled":
-        return f"🚫 모의 {side} 주문 취소됨: {head} (체결 {order['filled_quantity']:,}주)"
+        return f"🚫 {side} 주문 취소됨: {head} (체결 {order['filled_quantity']:,}주)"
     if order["status"] == "expired":
-        return f"⌛ 모의 {side} 주문 만료됨: {head} (체결 {order['filled_quantity']:,}주)"
-    return f"❌ 모의 {side} 주문 거부됨: {head}" + (f" — {order['message']}" if order["message"] else "")
+        return f"⌛ {side} 주문 만료됨: {head} (체결 {order['filled_quantity']:,}주)"
+    return f"❌ {side} 주문 거부됨: {head}" + (f" — {order['message']}" if order["message"] else "")
 
 
 def _finish(target: dict[str, Any], order: dict[str, Any]) -> None:
@@ -231,7 +239,7 @@ def _finish(target: dict[str, Any], order: dict[str, Any]) -> None:
 
 def _place(target: dict[str, Any]) -> None:
     request = target["request"]
-    side = _SIDE_LABELS[request["side"]]
+    side = f"{_env_word(request['env'])} {_SIDE_LABELS[request['side']]}"
     # 처리하는 동안 같은 메시지로 또 주문하지 못하게 버튼부터 걷어낸다.
     _update_message(target, _note_blocks(request, "⏳ 주문 처리 중…"))
     try:
@@ -244,11 +252,11 @@ def _place(target: dict[str, Any]) -> None:
         )
     except Exception as exc:  # 슬랙 요청은 이미 응답했으므로 실패도 스레드로 알린다.
         logger.exception("슬랙 모의 주문 처리 실패")
-        send_slack_message_v2(f"❌ 모의 {side} 주문 실패: {exc}", thread_ts=target["message_ts"])
+        send_slack_message_v2(f"❌ {side} 주문 실패: {exc}", thread_ts=target["message_ts"])
         _update_message(target, _open_blocks(request))
         return
     send_slack_message_v2(
-        f"✅ 모의 {side} 주문 접수: {order['strategy_label']} {order['quantity']:,}주 × {order['price']:,}원 (지정가)",
+        f"✅ {side} 주문 접수: {order['strategy_label']} {order['quantity']:,}주 × {order['price']:,}원 (지정가)",
         thread_ts=target["message_ts"],
     )
     _update_message(target, _cancel_blocks(request, order["id"]))
@@ -256,13 +264,13 @@ def _place(target: dict[str, Any]) -> None:
 
 def _cancel(target: dict[str, Any]) -> None:
     request = target["request"]
-    side = _SIDE_LABELS[request["side"]]
+    side = f"{_env_word(request['env'])} {_SIDE_LABELS[request['side']]}"
     _update_message(target, _note_blocks(request, "⏳ 취소 처리 중…"))
     try:
         cancel_record(target["order_id"])
     except Exception as exc:
         logger.exception("슬랙 모의 주문 취소 실패")
-        send_slack_message_v2(f"❌ 모의 {side} 주문 취소 실패: {exc}", thread_ts=target["message_ts"])
+        send_slack_message_v2(f"❌ {side} 주문 취소 실패: {exc}", thread_ts=target["message_ts"])
         # 그 사이 주문이 끝났을 수 있다 — 끝났으면 결과 알림은 배치가 하고, 아니면 취소 버튼을 되살린다.
         order = refreshed_order(request["account_no"], target["order_id"])
         if order["status"] in FINISHED_STATUSES:
@@ -270,7 +278,7 @@ def _cancel(target: dict[str, Any]) -> None:
         else:
             _update_message(target, _cancel_blocks(request, target["order_id"]))
         return
-    send_slack_message_v2(f"🚫 모의 {side} 주문 취소를 요청했습니다.", thread_ts=target["message_ts"])
+    send_slack_message_v2(f"🚫 {side} 주문 취소를 요청했습니다.", thread_ts=target["message_ts"])
     # 취소 결과(체결 수량 포함)로 메시지를 마무리하는 일은 배치(`notify_finished_orders`)가 한다.
 
 
@@ -289,6 +297,7 @@ def run_submission(target: dict[str, Any]) -> None:
 def _request_of(record: dict[str, Any]) -> dict[str, Any]:
     """주문 기록으로 메시지에 그릴 주문 내용을 만든다."""
     return {
+        "env": record["env"],
         "account_no": record["account_no"],
         "pool": record["pool"],
         "strategy_id": record["strategy_id"],

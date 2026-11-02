@@ -5633,3 +5633,37 @@ a {
 .ag-row.settingsDirtyRow:hover {
   background: rgba(250, 204, 21, 0.32);
 }
+
+/* 톤 모달 — 운영(빨강)·모의(초록) 주문 창처럼 환경을 색으로 가르는 창. */
+.appModalTone {
+  border-width: 3px;
+  border-style: solid;
+}
+
+.appModalTone-danger {
+  border-color: var(--tblr-red, #d63939);
+}
+
+.appModalTone-success {
+  border-color: var(--tblr-green, #2fb344);
+}
+
+.appModalBadge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.appModalBadge-danger {
+  background: var(--tblr-red, #d63939);
+  color: #fff;
+}
+
+.appModalBadge-success {
+  background: var(--tblr-green, #2fb344);
+  color: #fff;
+}

@@ -1,12 +1,12 @@
-"""나무증권 모의투자 주문 — 모의투자 서버로 **직접 요청**하는 주문·취소·조회.
+"""나무증권 주문 — 계좌 설정의 증권사 연동 계좌로 **직접 요청**하는 주문·취소·조회.
 
 SDK(`nhplug`)는 호출 대상 서버를 프로세스 전역 환경변수(`NHPLUG_BASE_URL`)로 읽는다. 요청 처리 중에 그 값을 바꾸면
-같은 프로세스에서 도는 운영 조회(잔고 동기화 등)가 모의투자 서버로 새므로, 이 모듈은 SDK 를 거치지 않고
-`requests` 로 모의투자 서버(`MOCK_BASE_URL`)에 직접 보낸다. 접근토큰은 SDK 호출과 같은 DB 공유 토큰이다
+같은 프로세스에서 도는 운영 조회(잔고 동기화 등)가 다른 서버로 새므로, 이 모듈은 SDK 를 거치지 않고 `requests` 로
+계좌의 서버(모의 `MOCK_BASE_URL`·운영 `LIVE_BASE_URL`)에 직접 보낸다. 접근토큰은 SDK 호출과 같은 DB 공유 토큰이다
 (`broker_api_service.namu_access_token`) — 키당 유효 토큰이 1개라 따로 발급하면 서로 죽인다.
 
-안전 장치: 주문·취소·조회는 계좌구분 `03`(모의투자) 계좌만 받는다(`require_mock_account`). 운영 계좌에는
-이 서버 주소로 보내도 실패하지만, 실수로 운영 주문이 나가는 경로를 코드에서 아예 만들지 않는다.
+안전 장치: 모든 호출은 `account_env` 를 먼저 통과한다 — 계좌 설정에 연동된 증권사 계좌이고, 그 계좌의 구분(운영·모의)이
+증권사의 계좌구분(`03` 모의투자)과 맞아야 한다. 서버는 이 구분으로만 정한다(요청이 서버를 고르지 못한다).
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from utils.ttl_cache import TtlCache
 logger = get_app_logger()
 
 MOCK_BASE_URL = "https://moapi.nhplug.com:8443"
+LIVE_BASE_URL = "https://api.nhplug.com:8443"
 #: 주문을 보내는 시장 — KRX 로 고정한다. SOR 는 KRX·NXT 로 쪼개져 주문번호가 둘이 되고, 사고팔기는 KRX 정규장 규칙이다.
 ORDER_MARKET = "KRX"
 _PRICE_TYPE_LIMIT = "01"  # 호가유형 — 보통가(지정가)
@@ -59,15 +60,30 @@ class OrderUncertainError(BrokerApiError):
     """요청이 서버에 닿았는지 알 수 없는 네트워크 오류 — 주문이 들어갔을 수도 있어 실패로 단정하면 안 된다."""
 
 
-def require_mock_account(account_no: str) -> None:
-    """모의투자(03) 계좌가 아니면 막는다 — 이 모듈의 모든 호출이 가장 먼저 통과해야 하는 관문이다."""
+def account_env(account_no: str) -> str:
+    """증권사 계좌가 연동된 계좌 설정의 구분(live·mock) — 이 모듈의 모든 호출이 가장 먼저 통과하는 관문이다.
+
+    계좌 설정에 연동되지 않은 증권사 계좌이거나, 구분이 증권사 계좌구분과 어긋나면 막는다.
+    """
+    from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
+
+    doc = next((d for d in load_account_docs() if (d.get("broker_api") or {}).get("account_no") == account_no), None)
+    if doc is None:
+        raise BrokerApiError("계좌 설정에 연동된 증권사 계좌가 아닙니다.")
     key = _ACCOUNT_TYPE_CACHE.make_key("types")
     types = _ACCOUNT_TYPE_CACHE.get(key)
     if types is None:
         types = account_types()
         _ACCOUNT_TYPE_CACHE.set(key, types)
-    if types.get(account_no) != MOCK_ACCOUNT_TYPE:
-        raise BrokerApiError("모의투자(03) 계좌가 아니면 이 기능을 쓸 수 없습니다.")
+    if (doc["env"] == ACCOUNT_ENV_MOCK) != (types.get(account_no) == MOCK_ACCOUNT_TYPE):
+        raise BrokerApiError("계좌 설정의 구분과 증권사 계좌구분(03=모의투자)이 맞지 않습니다.")
+    return str(doc["env"])
+
+
+def _base_url(account_no: str) -> str:
+    from utils.account_settings_store import ACCOUNT_ENV_MOCK
+
+    return MOCK_BASE_URL if account_env(account_no) == ACCOUNT_ENV_MOCK else LIVE_BASE_URL
 
 
 def _message_of(data: dict[str, Any]) -> str:
@@ -81,8 +97,8 @@ def _message_of(data: dict[str, Any]) -> str:
     return ""
 
 
-def _post(path: str, payload: dict[str, Any], *, cts: str | None = None, cts_flag: str | None = None):
-    """모의투자 서버로 한 건 보낸다 → (본문, 응답 헤더). HTTP 오류는 BrokerApiError 로 올린다."""
+def _post(base_url: str, path: str, payload: dict[str, Any], *, cts: str | None = None, cts_flag: str | None = None):
+    """계좌의 서버로 한 건 보낸다 → (본문, 응답 헤더). HTTP 오류는 BrokerApiError 로 올린다."""
     global _last_call_at
     app_key, app_secret = namu_app_credentials()
     token = namu_access_token()
@@ -105,10 +121,10 @@ def _post(path: str, payload: dict[str, Any], *, cts: str | None = None, cts_fla
                 time.sleep(wait)
             try:
                 response = requests.post(
-                    f"{MOCK_BASE_URL}{path}", headers=headers, data=body, timeout=_REQUEST_TIMEOUT_SECONDS
+                    f"{base_url}{path}", headers=headers, data=body, timeout=_REQUEST_TIMEOUT_SECONDS
                 )
             except requests.RequestException as exc:
-                raise OrderUncertainError(f"모의투자 서버 응답을 받지 못했습니다: {exc}") from exc
+                raise OrderUncertainError(f"증권사 서버 응답을 받지 못했습니다: {exc}") from exc
             finally:
                 _last_call_at = time.monotonic()
             # 토큰이 무효(401)면 새로 받아 한 번만 다시 보낸다 — 다른 오류에는 재발급하지 않는다.
@@ -121,26 +137,24 @@ def _post(path: str, payload: dict[str, Any], *, cts: str | None = None, cts_fla
     except ValueError:
         data = {}
     if not response.ok:
-        raise BrokerApiError(f"나무증권 모의투자 API 오류: {_message_of(data) or f'HTTP {response.status_code}'}")
+        raise BrokerApiError(f"나무증권 API 오류: {_message_of(data) or f'HTTP {response.status_code}'}")
     return data, response.headers
 
 
-def _post_paged(path: str, payload: dict[str, Any], list_key: str) -> dict[str, Any]:
+def _post_paged(base_url: str, path: str, payload: dict[str, Any], list_key: str) -> dict[str, Any]:
     """연속조회 — 목록(list_key)을 전 페이지 이어 붙인다. 마지막 페이지만 업무 성공을 판정한다."""
     merged: dict[str, Any] = {}
     items: list[Any] = []
     cts = cts_flag = None
     seen: set[str] = set()
     for page in range(1, _MAX_PAGES + 1):
-        data, headers = _post(path, payload, cts=cts, cts_flag=cts_flag)
+        data, headers = _post(base_url, path, payload, cts=cts, cts_flag=cts_flag)
         next_cts = (headers.get("cts") or "").strip()
         has_next = (headers.get("cts_flag") or "").strip() == "Y" and bool(next_cts) and next_cts not in seen
         if not has_next and not is_business_success(
             str(data["rsp_cd"]) if data.get("rsp_cd") is not None else None, data.get("rsp_msg")
         ):
-            raise BrokerApiError(
-                f"나무증권 모의투자 API 오류: {_message_of(data) or '업무 오류'} (코드 {data.get('rsp_cd')})"
-            )
+            raise BrokerApiError(f"나무증권 API 오류: {_message_of(data) or '업무 오류'} (코드 {data.get('rsp_cd')})")
         if not merged:
             merged = {key: value for key, value in data.items() if key != list_key}
         items.extend(data.get(list_key) or [])
@@ -149,13 +163,12 @@ def _post_paged(path: str, payload: dict[str, Any], list_key: str) -> dict[str, 
             return merged
         seen.add(next_cts)
         cts, cts_flag = next_cts, "Y"
-    raise BrokerApiError(f"나무증권 모의투자 API 연속조회가 {_MAX_PAGES}페이지를 넘었습니다 — 응답을 확인하세요.")
+    raise BrokerApiError(f"나무증권 API 연속조회가 {_MAX_PAGES}페이지를 넘었습니다 — 응답을 확인하세요.")
 
 
-def fetch_mock_balance(account_no: str) -> dict[str, Any]:
-    """모의투자 계좌 잔고 — 운영 조회와 같은 표준형(예수금 D+2·총자산·보유)이다."""
-    require_mock_account(account_no)
-    return parse_balance(_post_paged(BALANCE_PATH, balance_request(account_no), "Output_1"))
+def fetch_order_balance(account_no: str) -> dict[str, Any]:
+    """계좌 잔고 — 계좌 설정의 잔고 동기화와 같은 표준형(예수금 D+2·총자산·보유)이다."""
+    return parse_balance(_post_paged(_base_url(account_no), BALANCE_PATH, balance_request(account_no), "Output_1"))
 
 
 def _accepted_order_no(data: dict[str, Any], what: str) -> str:
@@ -176,12 +189,13 @@ def _accepted_order_no(data: dict[str, Any], what: str) -> str:
 
 def place_limit_order(account_no: str, side: str, ticker: str, quantity: int, price: int) -> dict[str, str]:
     """지정가 주문 한 건 — 접수되면 시장주문번호를 돌려준다. side 는 buy·sell."""
-    require_mock_account(account_no)
+    base_url = _base_url(account_no)
     if side not in ORDER_PATH:
         raise BrokerApiError(f"알 수 없는 주문 구분입니다: {side}")
     if quantity <= 0 or price <= 0:
         raise BrokerApiError("수량과 가격은 0보다 커야 합니다.")
     data, _ = _post(
+        base_url,
         ORDER_PATH[side],
         {
             "act_no": account_no,
@@ -201,8 +215,8 @@ def place_limit_order(account_no: str, side: str, ticker: str, quantity: int, pr
 
 def cancel_order(account_no: str, order_no: str, ticker: str) -> dict[str, str]:
     """원주문을 전량 취소한다 — 돌려주는 번호는 취소 요청 자체의 주문번호다."""
-    require_mock_account(account_no)
     data, _ = _post(
+        _base_url(account_no),
         CANCEL_PATH,
         {"act_no": account_no, "org_mkt_orr_no": int(order_no), "all_pat_dit_cd": "1", "iem_cd": ticker},
     )
@@ -231,8 +245,8 @@ def list_day_orders(account_no: str, yyyymmdd: str) -> list[dict[str, Any]]:
     정정·취소 요청도 자기 번호를 가진 행으로 나오지만(원주문번호 `org_itg_orr_no` 가 0 이 아님), 그 결과는 원주문의
     취소수량에 이미 반영되므로 목록에서 뺀다.
     """
-    require_mock_account(account_no)
     data = _post_paged(
+        _base_url(account_no),
         DAY_ORDERS_PATH,
         {"orr_dt": yyyymmdd, "act_no": account_no, "orr_mkt_cd": "00", "ost_cns_dit": "0"},
         "Output_0",

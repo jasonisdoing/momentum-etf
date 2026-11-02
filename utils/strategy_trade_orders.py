@@ -1,4 +1,4 @@
-"""사고팔기 주문 기록 — 우리가 증권사에 보낸 주문과 그 상태(모의투자 시험용).
+"""사고팔기 주문 기록 — 우리가 증권사에 보낸 주문과 그 상태(운영·모의 주문 시험용).
 
 시험 주문은 회차 사다리와 무관하다. 전략의 종목을 **지금 현재가를 지정가로** 사고판다 — 거래 경로만 시험한다.
 기록은 **무엇을 보냈는지**(전략·방향·가격·수량)를 남기고, 상태(대기중·부분체결·완료·취소·거부)는
@@ -23,17 +23,16 @@ from core.strategy.trade.rules import round_to_tick
 from services.broker_api_service import BrokerApiError
 from services.broker_order_service import (
     OrderUncertainError,
+    account_env,
     cancel_order,
     list_day_orders,
     place_limit_order,
-    require_mock_account,
 )
 from utils.db_manager import get_db_connection
 from utils.strategy_trade_service import load_views_for_pools
 
 KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_orders"
-ENV_MOCK = "mock"
 
 #: 아직 끝나지 않은 상태 — 이 동안 체결 조회로 상태를 갱신한다.
 ACTIVE_STATUSES = ("submitting", "pending", "partial")
@@ -84,15 +83,15 @@ def resolve_order(pool: str, strategy_id: str, side: str) -> dict[str, Any]:
 def place_order(
     account_no: str, pool: str, strategy_id: str, side: str, slack: dict[str, str] | None
 ) -> dict[str, Any]:
-    """전략 종목을 현재가 지정가로 모의투자 계좌에 주문하고 기록한다.
+    """전략 종목을 현재가 지정가로 계좌에 주문하고 기록한다.
 
     `slack`(채널·메시지 ts)은 슬랙 메시지로 낸 주문만 넘긴다 — 있으면 끝난 뒤 그 스레드로 알린다.
     """
-    require_mock_account(account_no)
+    env = account_env(account_no)
     order = resolve_order(pool, strategy_id, side)
     now = _now()
     doc = {
-        "env": ENV_MOCK,
+        "env": env,
         "account_no": account_no,
         "pool": pool,
         "strategy_id": strategy_id,
@@ -168,7 +167,7 @@ def _broker_status(record: dict[str, Any], broker_status: str) -> str:
 def refresh_account_orders(account_no: str) -> None:
     """진행 중인 기록의 상태를 증권사 체결 조회로 갱신한다 — 조회는 주문일자마다 한 번이다."""
     orders = _orders()
-    active = list(orders.find({"env": ENV_MOCK, "account_no": account_no, "status": {"$in": list(ACTIVE_STATUSES)}}))
+    active = list(orders.find({"account_no": account_no, "status": {"$in": list(ACTIVE_STATUSES)}}))
     if not active:
         return
     broker_rows: dict[tuple[str, str], dict[str, Any]] = {}
@@ -205,6 +204,7 @@ def serialize_order(record: dict[str, Any]) -> dict[str, Any]:
     same_day = created.date() == _now().date()
     return {
         "id": str(record["_id"]),
+        "env": record["env"],
         "at": created.strftime("%H:%M:%S" if same_day else "%m-%d %H:%M"),
         "strategy_label": record["strategy_label"],
         "side": record["side"],
@@ -229,9 +229,7 @@ def refreshed_order(account_no: str, order_id: str) -> dict[str, Any]:
 
 def refresh_slack_order_accounts() -> int:
     """진행 중인 슬랙 주문이 있는 계좌의 상태를 증권사 체결 조회로 갱신하고, 갱신한 계좌 수를 돌려준다."""
-    accounts = _orders().distinct(
-        "account_no", {"env": ENV_MOCK, "slack": {"$ne": None}, "status": {"$in": list(ACTIVE_STATUSES)}}
-    )
+    accounts = _orders().distinct("account_no", {"slack": {"$ne": None}, "status": {"$in": list(ACTIVE_STATUSES)}})
     for account_no in accounts:
         refresh_account_orders(account_no)
     return len(accounts)
@@ -245,7 +243,6 @@ def finished_slack_orders() -> list[dict[str, Any]]:
     return list(
         _orders().find(
             {
-                "env": ENV_MOCK,
                 "slack": {"$ne": None},
                 "slack_notified": False,
                 "order_no": {"$ne": None},
@@ -261,14 +258,13 @@ def mark_slack_notified(order_id: Any) -> None:
 
 def list_orders(account_no: str) -> list[dict[str, Any]]:
     """증권사 상태를 반영한 주문 기록 — 오늘 낸 주문과 아직 끝나지 않은 주문, 최신순."""
-    require_mock_account(account_no)
+    account_env(account_no)
     refresh_account_orders(account_no)
     today = _now().strftime("%Y-%m-%d")
     cursor = (
         _orders()
         .find(
             {
-                "env": ENV_MOCK,
                 "account_no": account_no,
                 "$or": [{"created_at": {"$gte": today}}, {"status": {"$in": list(ACTIVE_STATUSES)}}],
             }

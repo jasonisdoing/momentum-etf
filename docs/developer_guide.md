@@ -41,7 +41,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | `/strategy-mix` | 고정 KRW 기준금액 합성 — 회수·채우기·백테스트 | `utils/strategy_mix_service.py` |
 | `/strategy-trade` | 사고팔기를 켠 한국 ETF 종목풀(종목풀 설정 토글, `utils/pool_strategy_use.py`) 단위로 ETF 1개씩 매매 간격마다 분할 매수·매도하는 전략의 설정·현황·백테스트·알림(설정은 `system_config.strategy_trade_settings`). 운용 계좌와 매수 한도는 합성의 `사고팔기` 슬리브가 정한다(`strategy_trade_service.sleeve_for_pool`) | `utils/strategy_trade_service.py`, `strategy_trade_backtest.py`, `strategy_trade_notify.py`, `core/strategy/trade/` |
 | `/leverage-settings` | 레버리지 이동평균 크로스 설정·튜닝 | `leverage/` |
-| `/account-settings` | 계좌 메타·증권사 연동·합성 슬리브별 종목풀·보유종목 알림 On/Off. 「모의 주문 테스트」 모달은 나무증권 모의투자(03) 계좌로 사고팔기 지정가 주문·취소·상태 확인을 시험한다 — 모의투자 서버로 **직접 요청**(SDK 는 서버를 전역 환경변수로 읽어 운영 조회와 섞이므로 쓰지 않는다), 주문 기록은 `strategy_trade_orders` 컬렉션. 슬랙 버튼→모달→웹훅(`/api/slack/interactions`, 로그인 제외·서명 검증은 FastAPI) 왕복도 같은 모의 주문 경로를 타며, 모든 액션(주문·취소)은 확인 모달을 거치고 메시지 버튼이 상태에 따라 바뀐다. 접수 뒤 체결·취소·거부·만료(접수일이 지난 미체결은 당일 주문이라 만료로 본다)는 `slack_mock_order_notify` 배치(1분)가 스레드로 알리고 메시지 버튼을 걷어낸다 | `utils/account_settings_store.py`, `utils/holdings_alarm_service.py`, `services/broker_order_service.py`, `utils/strategy_trade_orders.py`, `utils/slack_mock_orders.py` |
+| `/account-settings` | 계좌 메타·증권사 연동·합성 슬리브별 종목풀·보유종목 알림 On/Off. 계좌에는 구분(`env`: 운영 `live`·모의 `mock`, 만든 뒤 변경 불가)이 있고 **모의 계좌는 이 화면에만 나온다** — 계좌 목록을 쓰는 곳은 `load_live_account_docs`·`settings_loader`(운영만)를 거치며, 모의 계좌에는 합성·사고팔기·알림을 켤 수 없고, 모의 계좌는 증권사 `03` 계좌만·운영 계좌는 그 밖만 연동된다. 계좌 행의 「주문 테스트」 모달은 연동된 나무증권 계좌로 사고팔기 지정가 주문·취소·상태 확인을 시험한다 — **운영 계좌는 실제 주문이 나가며**(빨강 테두리·배지), 모의 계좌는 모의투자 서버로만 간다(초록). 서버는 요청이 아니라 계좌 구분(`account_env`: 계좌 설정에 연동돼 있고 구분이 증권사 계좌구분 03 과 맞아야 통과)으로 정하며, SDK 는 서버를 전역 환경변수로 읽어 조회와 섞이므로 쓰지 않고 **직접 요청**한다, 주문 기록은 `strategy_trade_orders` 컬렉션. 슬랙 버튼→모달→웹훅(`/api/slack/interactions`, 로그인 제외·서명 검증은 FastAPI) 왕복도 같은 모의 주문 경로를 타며, 모든 액션(주문·취소)은 확인 모달을 거치고 메시지 버튼이 상태에 따라 바뀐다. 접수 뒤 체결·취소·거부·만료(접수일이 지난 미체결은 당일 주문이라 만료로 본다)는 `slack_mock_order_notify` 배치(1분)가 스레드로 알리고 메시지 버튼을 걷어낸다 | `utils/account_settings_store.py`, `utils/holdings_alarm_service.py`, `services/broker_order_service.py`, `utils/strategy_trade_orders.py`, `utils/slack_mock_orders.py` |
 | `/assets`, `/holdings*` | 자산·보유 | `utils/holdings_detail_service.py`, `portfolio_master` |
 | `/daily`, `/weekly`, `/monthly`, `/yearly`, `/dashboard`, `/snapshots` | 일별 원장과 집계 | `utils/daily_fund_service.py` 등 |
 | `/market-trend`, `/market-calendar`, `/market`, `/live-24h` | 시장 지수 추세·캘린더·지표 | `utils/market_trend_service.py`, `utils/market_calendar_service.py`, `services/toss_market_service.py` 등 |
@@ -62,7 +62,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | --- | --- |
 | `fx_quote_cache` | `services/price_service.py`의 통화별 환율 공유 캐시. 서버·배치가 유효기간 내 Yahoo 조회 결과를 재사용 |
 | `pool_settings` | 종목풀 정의(국가·통화·벤치마크·풀 성격 stock/etf·보유 종목 수·이평 종류와 기간). 화면 `/pools-settings` |
-| `account_settings` | 계좌 정의·합성 배분. 추가/삭제는 DB 직접 |
+| `account_settings` | 계좌 정의(운영/모의 구분 `env` 포함)·합성 배분 |
 | `stock_meta` | 종목 관리 원본(버킷·종목명). 삭제는 즉시 하드 딜리트 |
 | `stock_cache_meta` | 저빈도 메타(`meta_cache`)·ETF 구성종목(`holdings_cache`). 구성종목 갱신은 저장된 계산 캐시를 제거하며, 상세·비교 화면은 `services/stock_cache_service.py`의 원본 식별값으로 메모리 캐시도 검증한다 |
 | `pool_strategy_backtest` | 종목풀별 저장된 전략 백테스트 결과. 풀 삭제 시 함께 제거 |

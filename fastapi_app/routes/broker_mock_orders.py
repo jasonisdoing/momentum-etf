@@ -1,6 +1,6 @@
-"""모의투자 계좌 주문 시험 — 잔고·사고팔기 주문·취소·주문 기록·증권사 주문내역.
+"""계좌 주문 시험(운영·모의) — 잔고·사고팔기 주문·취소·주문 기록·증권사 주문내역.
 
-모의투자(03) 계좌만 받는다(`services.broker_order_service.require_mock_account`). 가격·수량은 요청에 없다 —
+계좌 설정에 연동된 증권사 계좌만 받는다(`services.broker_order_service.account_env`). 가격·수량은 요청에 없다 —
 서버가 전략의 현재가·회차당 수량을 읽는다(`utils.strategy_trade_orders`).
 """
 
@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
 from services.broker_api_service import BrokerApiError
-from services.broker_order_service import fetch_mock_balance
+from services.broker_order_service import fetch_order_balance
 from utils.slack_mock_orders import send_order_message
 from utils.strategy_trade_orders import (
     broker_orders_today,
@@ -30,7 +30,7 @@ def _bad_request(exc: BrokerApiError) -> HTTPException:
 @router.get("/balance")
 def get_balance(account_no: str = Query(...), _: None = Depends(require_internal_token)) -> dict:
     try:
-        return fetch_mock_balance(account_no)
+        return fetch_order_balance(account_no)
     except BrokerApiError as exc:
         raise _bad_request(exc) from exc
 

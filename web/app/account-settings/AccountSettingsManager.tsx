@@ -11,7 +11,7 @@ import { LastSavedCell } from "../components/LastSavedCell";
 import { ensureAsxPrefix } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
-import { MockOrderModal } from "./MockOrderModal";
+import { OrderTestModal } from "./OrderTestModal";
 
 type Benchmark = { ticker?: string; name?: string };
 type MarketIndexOption = { ticker: string; name: string };
@@ -982,15 +982,15 @@ export function AccountSettingsManager() {
       width: 104,
       sortable: false,
       headerClass: "settingsCenterHeader",
-      headerTooltip: "모의 계좌의 증권사 모의투자 서버로 지정가 주문·취소·체결 조회를 시험합니다.",
+      headerTooltip: "증권사 연동 계좌로 지정가 주문·취소·체결 조회를 시험합니다. 운영 계좌는 실제 주문이 나갑니다.",
       cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
       cellRenderer: (params: ICellRendererParams<AccountGridRow>) => {
         const row = params.data;
-        if (!row || row.env !== ENV_MOCK) return null;
+        if (!row) return null;
         return (
           <button
             type="button"
-            className="btn btn-sm btn-outline-secondary"
+            className={`btn btn-sm ${row.env === ENV_LIVE ? "btn-outline-danger" : "btn-outline-success"}`}
             style={{ padding: "0 8px", lineHeight: 1.4 }}
             disabled={!row.__brokerLinked}
             title={row.__brokerLinked ? undefined : "증권사 API 연동 계좌를 먼저 저장하세요."}
@@ -1161,7 +1161,8 @@ export function AccountSettingsManager() {
       ) : null}
 
       {mockOrderId ? (
-        <MockOrderModal
+        <OrderTestModal
+          isLive={accounts.find((account) => account.account_id === mockOrderId)?.env === ENV_LIVE}
           accountName={accounts.find((account) => account.account_id === mockOrderId)?.name ?? mockOrderId}
           accountNo={accounts.find((account) => account.account_id === mockOrderId)?.broker_api?.account_no ?? ""}
           onClose={() => setMockOrderId(null)}
