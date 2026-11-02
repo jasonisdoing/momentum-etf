@@ -360,6 +360,7 @@ def notify_strategy_trade() -> dict[str, Any]:
         ``{"sent": bool, "reason": str, "triggers": [...]}``
     """
     from utils.notification import send_slack_message_v2
+    from utils.strategy_trade_orders import in_flight_order_keys
 
     enabled = [
         pool
@@ -392,6 +393,12 @@ def notify_strategy_trade() -> dict[str, Any]:
         and _round_filled(pending, held_counts[str(pending.get("strategy_id"))]),
     )
 
+    # 주문이 이미 진행 중이거나 오늘 체결된 회차는 재알림하지 않는다 — 사람이 이미 처리 중이다.
+    in_flight = (
+        in_flight_order_keys([strategy_view["strategy_id"] for strategy_view in view["strategies"]])
+        if triggers
+        else set()
+    )
     sent_count = failed_count = order_failed = 0
     fresh_all: list[dict[str, Any]] = []
     repeats_all: list[dict[str, Any]] = []
@@ -404,7 +411,11 @@ def notify_strategy_trade() -> dict[str, Any]:
             last = _parse_sent_at((sent_log.get(_trigger_key(trigger)) or {}).get("at"))
             if last is None or last.strftime("%Y-%m-%d") != today:
                 fresh.append(trigger)
-            elif (now - last).total_seconds() >= _REPEAT_INTERVAL_SECONDS:
+            elif (now - last).total_seconds() >= _REPEAT_INTERVAL_SECONDS and (
+                trigger["strategy_id"],
+                trigger["round"],
+                trigger["action"],
+            ) not in in_flight:
                 repeats.append(trigger)
 
         own_confirmed = [pending for pending in confirmed if str(pending.get("strategy_id")) == sid]
