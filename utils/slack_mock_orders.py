@@ -221,12 +221,13 @@ def submitted_request(payload: dict[str, Any]) -> dict[str, Any]:
 def _final_text(order: dict[str, Any]) -> str:
     side = f"{_env_word(order['env'])} {_SIDE_LABELS[order['side']]}"
     head = f"{order['strategy_label']} {order['quantity']:,}주 × {order['price']:,}원"
+    fill = f"체결 {order['filled_quantity']:,}주 · 체결가 {order['average_fill_price']:,.0f}원"
     if order["status"] == "filled":
-        return f"✅ {side} 체결 완료: {head}"
+        return f"✅ {side} 체결 완료: {head} ({fill})"
     if order["status"] == "canceled":
-        return f"🚫 {side} 주문 취소됨: {head} (체결 {order['filled_quantity']:,}주)"
+        return f"🚫 {side} 주문 취소됨: {head} ({fill})"
     if order["status"] == "expired":
-        return f"⌛ {side} 주문 만료됨: {head} (체결 {order['filled_quantity']:,}주)"
+        return f"⌛ {side} 주문 만료됨: {head} ({fill})"
     return f"❌ {side} 주문 거부됨: {head}" + (f" — {order['message']}" if order["message"] else "")
 
 

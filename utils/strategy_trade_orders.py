@@ -99,6 +99,7 @@ def place_order(
         **order,
         "order_no": None,
         "filled_quantity": 0,
+        "average_fill_price": 0.0,
         "status": "submitting",
         "message": "",
         "created_at": now.isoformat(),
@@ -193,6 +194,7 @@ def refresh_account_orders(account_no: str) -> None:
                 update = {
                     "status": _broker_status(record, row["status"]),
                     "filled_quantity": row["filled_quantity"],
+                    "average_fill_price": row["average_fill_price"],
                     "message": "",
                 }
         if update:
@@ -212,6 +214,7 @@ def serialize_order(record: dict[str, Any]) -> dict[str, Any]:
         "quantity": record["quantity"],
         "price": record["price"],
         "filled_quantity": record["filled_quantity"],
+        "average_fill_price": record["average_fill_price"],
         # 전송 중에는 대기중으로 보인다 — 결과를 모르는 채 오래 남으면 refresh 가 거부로 정리한다.
         "status": "pending" if record["status"] == "submitting" else record["status"],
         "message": record.get("message") or "",
