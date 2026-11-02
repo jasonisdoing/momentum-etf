@@ -36,6 +36,9 @@ from utils.strategy_trade_service import load_views_for_pools
 
 KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_orders"
+# 신호 스레드 기록은 사고팔기 설정 문서의 `signal_threads` 목록에 둔다(오늘 것만 남긴다).
+_CONFIG_COLLECTION = "system_config"
+_SETTINGS_KEY = "strategy_trade_settings"
 #: 이 시각부터 정규장 마감(15:30)까지 아직 체결되지 않은 슬랙 주문을 한 번 경고한다.
 CLOSE_WARNING_FROM = time(15, 20)
 
@@ -362,6 +365,51 @@ def finished_slack_orders() -> list[dict[str, Any]]:
 
 def mark_slack_notified(order_id: Any) -> None:
     _orders().update_one({"_id": order_id}, {"$set": {"slack_notified": True}})
+
+
+def _config():
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결에 실패했습니다.")
+    return db[_CONFIG_COLLECTION]
+
+
+def register_signal_thread(channel: str, thread_ts: str, message_count: int) -> None:
+    """신호 메시지 스레드와 그 안의 주문 메시지 수를 기록한다 — 메시지가 모두 체결되면 스레드를 완료로 본다."""
+    today = _now().strftime("%Y-%m-%d")
+    config = _config()
+    config.update_one({"_id": _SETTINGS_KEY}, {"$pull": {"signal_threads": {"date": {"$lt": today}}}}, upsert=True)
+    thread = {
+        "channel": channel,
+        "thread_ts": thread_ts,
+        "message_count": message_count,
+        "date": today,
+        "completed": False,
+    }
+    config.update_one({"_id": _SETTINGS_KEY}, {"$push": {"signal_threads": thread}}, upsert=True)
+
+
+def filled_signal_threads() -> list[dict[str, Any]]:
+    """주문 메시지가 모두 체결된(메시지마다 체결된 주문이 있는) 아직 완료 처리 안 된 신호 스레드."""
+    doc = _config().find_one({"_id": _SETTINGS_KEY}, {"signal_threads": 1}) or {}
+    result = []
+    for thread in doc.get("signal_threads") or []:
+        if thread["completed"]:
+            continue
+        filled_messages = _orders().distinct(
+            "slack.message_ts",
+            {"slack.channel": thread["channel"], "slack.thread_ts": thread["thread_ts"], "status": "filled"},
+        )
+        if len(filled_messages) >= thread["message_count"]:
+            result.append(thread)
+    return result
+
+
+def mark_signal_thread_completed(thread_ts: str) -> None:
+    _config().update_one(
+        {"_id": _SETTINGS_KEY, "signal_threads.thread_ts": thread_ts},
+        {"$set": {"signal_threads.$.completed": True}},
+    )
 
 
 def close_warning_slack_orders() -> list[dict[str, Any]]:

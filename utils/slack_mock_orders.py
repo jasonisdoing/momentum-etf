@@ -19,23 +19,28 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 from slack_sdk.signature import SignatureVerifier
 
 from services.broker_api_service import BrokerApiError
 from services.broker_order_service import account_env
 from utils.account_settings_store import ACCOUNT_ENV_MOCK
 from utils.notification import send_slack_message_v2
+from utils.settings_loader import get_slack_channel
 from utils.strategy_trade_orders import (
     FINISHED_STATUSES,
     cancel_record,
     close_warning_slack_orders,
+    filled_signal_threads,
     find_duplicate_order,
     finished_slack_orders,
+    mark_signal_thread_completed,
     mark_slack_close_warned,
     mark_slack_notified,
     place_order,
     refresh_slack_order_accounts,
     refreshed_order,
+    register_signal_thread,
     resolve_order,
     serialize_order,
 )
@@ -50,6 +55,10 @@ CANCEL_CALLBACK_ID = "mock_order_cancel_confirm"
 _SIDE_LABELS = {"buy": "매수", "sell": "매도"}
 #: 주문 기록(`slack`)에 남기는 슬랙 위치 — 버튼이 있는 메시지(`message_ts`)와 결과를 달 스레드 뿌리(`thread_ts`).
 SLACK_TARGET_KEYS = ("channel", "message_ts", "thread_ts")
+# 신호 메시지 반응 — 주문 메시지를 달아 둔 동안은 모래시계, 전부 체결되면 완료 표시.
+REACTION_PENDING = "hourglass_flowing_sand"
+REACTION_DONE = "white_check_mark"
+_REACTION_NOOP_ERRORS = ("already_reacted", "no_reaction")
 
 
 def _env_word(env: str) -> str:
@@ -377,8 +386,29 @@ def notify_close_approaching() -> int:
     return len(records)
 
 
+def _react(method: str, channel: str, ts: str, name: str) -> None:
+    """메시지 반응을 달거나 뗀다 — 반응은 부가 표시라 실패해도 로그만 남기고 흐름을 막지 않는다(권한: reactions:write)."""
+    client = WebClient(token=_require_env("SLACK_BOT_TOKEN"))
+    try:
+        getattr(client, method)(channel=channel, timestamp=ts, name=name)
+    except SlackApiError as exc:
+        error = exc.response.get("error")
+        if error not in _REACTION_NOOP_ERRORS:
+            logger.error("슬랙 반응 %s(%s) 실패: %s", method, name, error)
+
+
+def notify_completed_threads() -> int:
+    """주문 메시지가 모두 체결된 신호 스레드의 신호 메시지에서 모래시계를 떼고 완료(✅)를 단다 — 완료한 스레드 수."""
+    threads = filled_signal_threads()
+    for thread in threads:
+        _react("reactions_remove", thread["channel"], thread["thread_ts"], REACTION_PENDING)
+        _react("reactions_add", thread["channel"], thread["thread_ts"], REACTION_DONE)
+        mark_signal_thread_completed(thread["thread_ts"])
+    return len(threads)
+
+
 def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dict[str, Any]], signal_ts: str) -> int:
-    """신호가 난 회차마다 주문 메시지(버튼)를 신호 메시지의 스레드로 보낸다 — 보낸 건수.
+    """신호가 난 회차마다 주문 메시지(버튼)를 신호 메시지의 스레드로 보내고 신호 메시지에 모래시계를 단다 — 보낸 건수.
 
     이미 주문이 진행 중이거나 오늘 체결된 회차는 건너뛴다(매시간 재알림에서 주문이 아직 없는 회차에만 다시 띄우려는 것).
     주문은 슬랙의 버튼과 모달 확인을 거쳐야 나간다.
@@ -389,8 +419,22 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
         for trigger in triggers
         if find_duplicate_order(account_no, trigger["strategy_id"], trigger["action"], trigger["round"]) is None
     ]
-    for trigger in pending:
-        send_order_message(
-            account_no, strategy_view["pool"], trigger["strategy_id"], trigger["action"], trigger["round"], signal_ts
-        )
-    return len(pending)
+    sent = 0
+    try:
+        for trigger in pending:
+            send_order_message(
+                account_no,
+                strategy_view["pool"],
+                trigger["strategy_id"],
+                trigger["action"],
+                trigger["round"],
+                signal_ts,
+            )
+            sent += 1
+    finally:
+        # 중간에 실패해도 이미 보낸 메시지는 스레드로 추적한다.
+        if sent:
+            channel = get_slack_channel()
+            register_signal_thread(channel, signal_ts, sent)
+            _react("reactions_add", channel, signal_ts, REACTION_PENDING)
+    return sent
