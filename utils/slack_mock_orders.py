@@ -55,7 +55,7 @@ CANCEL_CALLBACK_ID = "mock_order_cancel_confirm"
 _SIDE_LABELS = {"buy": "매수", "sell": "매도"}
 #: 주문 기록(`slack`)에 남기는 슬랙 위치 — 버튼이 있는 메시지(`message_ts`)와 결과를 달 스레드 뿌리(`thread_ts`).
 SLACK_TARGET_KEYS = ("channel", "message_ts", "thread_ts")
-# 신호 메시지 반응 — 주문 메시지를 달아 둔 동안은 모래시계, 전부 체결되면 완료 표시.
+# 신호 메시지 반응 — 스레드에서 첫 주문이 접수되면 모래시계, 주문 메시지가 전부 체결되면 완료 표시.
 REACTION_PENDING = "hourglass_flowing_sand"
 REACTION_DONE = "white_check_mark"
 _REACTION_NOOP_ERRORS = ("already_reacted", "no_reaction")
@@ -297,6 +297,9 @@ def _place(target: dict[str, Any]) -> None:
         thread_ts=target["thread_ts"],
     )
     _update_message(target, _cancel_blocks(request, order["id"]))
+    # 신호 스레드의 첫 주문이 접수되면 신호 메시지에 모래시계를 단다(이미 달려 있으면 무시된다).
+    if target["thread_ts"] != target["message_ts"]:
+        _react("reactions_add", target["channel"], target["thread_ts"], REACTION_PENDING)
 
 
 def _cancel(target: dict[str, Any]) -> None:
@@ -408,7 +411,7 @@ def notify_completed_threads() -> int:
 
 
 def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dict[str, Any]], signal_ts: str) -> int:
-    """신호가 난 회차마다 주문 메시지(버튼)를 신호 메시지의 스레드로 보내고 신호 메시지에 모래시계를 단다 — 보낸 건수.
+    """신호가 난 회차마다 주문 메시지(버튼)를 신호 메시지의 스레드로 보내고 그 스레드를 추적 대상으로 기록한다 — 보낸 건수.
 
     이미 주문이 진행 중이거나 오늘 체결된 회차는 건너뛴다(매시간 재알림에서 주문이 아직 없는 회차에만 다시 띄우려는 것).
     주문은 슬랙의 버튼과 모달 확인을 거쳐야 나간다.
@@ -434,7 +437,5 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
     finally:
         # 중간에 실패해도 이미 보낸 메시지는 스레드로 추적한다.
         if sent:
-            channel = get_slack_channel()
-            register_signal_thread(channel, signal_ts, sent)
-            _react("reactions_add", channel, signal_ts, REACTION_PENDING)
+            register_signal_thread(get_slack_channel(), signal_ts, sent)
     return sent
