@@ -316,14 +316,14 @@ def send_test(account_id: str) -> dict[str, Any]:
     }
 
 
-def _send_order_messages(strategy_view: dict[str, Any], fresh: list[dict[str, Any]], signal_ts: str) -> int:
-    """새 신호의 회차별 주문 메시지를 신호 메시지(signal_ts)의 스레드로 보낸다 — 신호 메시지는 이미 나갔으므로 실패해도 신호는 유지하고 실패 건수를 돌려준다."""
+def _send_order_messages(strategy_view: dict[str, Any], triggers: list[dict[str, Any]], signal_ts: str) -> int:
+    """신호 메시지(signal_ts)에 실린 신호의 회차별 주문 메시지를 그 스레드로 보낸다(주문이 이미 있는 회차는 제외) — 신호 메시지는 이미 나갔으므로 실패해도 신호는 유지하고 실패 건수를 돌려준다."""
     from utils.slack_mock_orders import send_signal_order_messages
 
-    if not fresh:
+    if not triggers:
         return 0
     try:
-        send_signal_order_messages(strategy_view, fresh, signal_ts)
+        send_signal_order_messages(strategy_view, triggers, signal_ts)
     except Exception:
         logger.exception("사고팔기 주문 메시지 발송 실패: %s", strategy_view["strategy_id"])
         return 1
@@ -400,7 +400,8 @@ def notify_strategy_trade() -> dict[str, Any]:
             sent_log.update({_trigger_key(pending): pending for pending in own_confirmed})
             continue
         sent_count += 1
-        order_failed += _send_order_messages(strategy_view, fresh, signal_ts)
+        # 메시지에 실린 신호(새 신호가 있으면 그것, 없으면 재알림)만 주문 메시지로 잇는다.
+        order_failed += _send_order_messages(strategy_view, fresh or repeats, signal_ts)
         fresh_all.extend(fresh)
         repeats_all.extend(repeats)
         stamp = now.isoformat()

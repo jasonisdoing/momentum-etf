@@ -76,10 +76,10 @@ def _require_signal(strategy: dict[str, Any], side: str, round_no: int) -> None:
         raise BrokerApiError(f"{strategy['label']} {round_no}호 {word} 신호가 더 이상 유효하지 않습니다.")
 
 
-def _require_no_duplicate(account_no: str, strategy_id: str, side: str, round_no: int) -> None:
-    """같은 회차·구분의 주문이 진행 중이거나 오늘 체결됐으면 막는다 — 체결이 보유에 반영되기 전 같은 신호로 또 나가지 않게."""
+def find_duplicate_order(account_no: str, strategy_id: str, side: str, round_no: int) -> dict[str, Any] | None:
+    """같은 회차·구분의 주문이 진행 중이거나 오늘 체결된 기록 — 체결이 보유에 반영되기 전 같은 신호로 또 나가지 않게 본다."""
     today = _now().strftime("%Y-%m-%d")
-    found = _orders().find_one(
+    return _orders().find_one(
         {
             "account_no": account_no,
             "strategy_id": strategy_id,
@@ -91,6 +91,10 @@ def _require_no_duplicate(account_no: str, strategy_id: str, side: str, round_no
             ],
         }
     )
+
+
+def _require_no_duplicate(account_no: str, strategy_id: str, side: str, round_no: int) -> None:
+    found = find_duplicate_order(account_no, strategy_id, side, round_no)
     if found is not None:
         raise BrokerApiError(
             f"{round_no}호 {'매도' if side == 'sell' else '매수'} 주문이 이미 있습니다({found['status']})."

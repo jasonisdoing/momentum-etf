@@ -29,6 +29,7 @@ from utils.strategy_trade_orders import (
     FINISHED_STATUSES,
     cancel_record,
     close_warning_slack_orders,
+    find_duplicate_order,
     finished_slack_orders,
     mark_slack_close_warned,
     mark_slack_notified,
@@ -377,10 +378,19 @@ def notify_close_approaching() -> int:
 
 
 def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dict[str, Any]], signal_ts: str) -> int:
-    """신호가 난 회차마다 주문 메시지(버튼)를 신호 메시지의 스레드로 보낸다 — 보낸 건수. 주문은 슬랙의 버튼과 모달 확인을 거쳐야 나간다."""
+    """신호가 난 회차마다 주문 메시지(버튼)를 신호 메시지의 스레드로 보낸다 — 보낸 건수.
+
+    이미 주문이 진행 중이거나 오늘 체결된 회차는 건너뛴다(매시간 재알림에서 주문이 아직 없는 회차에만 다시 띄우려는 것).
+    주문은 슬랙의 버튼과 모달 확인을 거쳐야 나간다.
+    """
     account_no = broker_account_no_for_pool(strategy_view["pool"])
-    for trigger in triggers:
+    pending = [
+        trigger
+        for trigger in triggers
+        if find_duplicate_order(account_no, trigger["strategy_id"], trigger["action"], trigger["round"]) is None
+    ]
+    for trigger in pending:
         send_order_message(
             account_no, strategy_view["pool"], trigger["strategy_id"], trigger["action"], trigger["round"], signal_ts
         )
-    return len(triggers)
+    return len(pending)
