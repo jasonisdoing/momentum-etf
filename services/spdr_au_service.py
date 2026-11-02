@@ -14,7 +14,7 @@ from config import CACHE_TTL_SLOW
 from services.component_price_service import infer_yahoo_symbol_currency
 from services.spdr_holdings_service import parse_spdr_holdings_xlsx
 from utils.asx_ticker import ensure_asx_prefix, strip_asx_prefix
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 from utils.normalization import resolve_bloomberg_listing
 from utils.ttl_cache import TtlCache
 from utils.us_etf_market_service import load_us_security_exchange_map
@@ -24,7 +24,8 @@ _PRODUCT_MAP_CACHE = TtlCache(CACHE_TTL_SLOW, name="spdr_au_products", max_entri
 
 
 def _fetch_product_map() -> dict[str, str]:
-    response = shared_session.get(
+    response = request_with_retry(
+        "GET",
         f"{_BASE_URL}/bin/v1/ssmp/fund/fundfinder",
         params={"country": "au", "language": "en_gb", "role": "individual", "product": "", "ui": "fund-finder"},
         timeout=25,
@@ -108,10 +109,10 @@ def fetch_spdr_au_holdings(ticker: str) -> dict[str, Any] | None:
     url = _PRODUCT_MAP_CACHE.get_or_compute("products", _fetch_product_map).get(ticker_norm)
     if url is None:
         return None
-    response = shared_session.get(url, timeout=25)
+    response = request_with_retry("GET", url, timeout=25)
     response.raise_for_status()
     holdings_url = _find_holdings_url(response.text, ticker_norm)
-    response = shared_session.get(holdings_url, timeout=25)
+    response = request_with_retry("GET", holdings_url, timeout=25)
     response.raise_for_status()
     reference_date, rows = parse_spdr_holdings_xlsx(
         response.content,

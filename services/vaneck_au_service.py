@@ -14,7 +14,7 @@ from config import CACHE_TTL_SLOW
 from services.component_price_service import infer_yahoo_symbol_currency
 from services.xlsx_holdings_service import parse_xlsx_table_rows, read_xlsx_rows
 from utils.asx_ticker import ensure_asx_prefix, strip_asx_prefix
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 from utils.normalization import resolve_bloomberg_listing
 from utils.ttl_cache import TtlCache
 from utils.us_etf_market_service import load_us_security_exchange_map
@@ -28,7 +28,7 @@ _COLUMNS = {"Security name", "Ticker", "Shares", "Market Value", "% of Net Asset
 
 def _fetch_product_map() -> dict[str, str]:
     """티커 → 상품 페이지 주소. 공식 ETF 목록 페이지(`/etf/`)의 상품 링크에서 읽는다."""
-    response = shared_session.get(f"{_BASE_URL}/etf/", timeout=25)
+    response = request_with_retry("GET", f"{_BASE_URL}/etf/", timeout=25)
     response.raise_for_status()
     products: dict[str, str] = {}
     for anchor in BeautifulSoup(response.text, "html.parser").select("a.fund-link[href]"):
@@ -83,7 +83,7 @@ def fetch_vaneck_au_holdings(ticker: str) -> dict[str, Any] | None:
     path = _PRODUCT_MAP_CACHE.get_or_compute("products", _fetch_product_map).get(ticker_norm)
     if path is None:
         return None
-    response = shared_session.get(urljoin(_BASE_URL, f"{path}downloads/holdings/"), timeout=25)
+    response = request_with_retry("GET", urljoin(_BASE_URL, f"{path}downloads/holdings/"), timeout=25)
     response.raise_for_status()
     # 파일 이름이 상품과 기준일을 알려 준다 — 'QUAL_asat_20261021.xlsx'.
     disposition = response.headers.get("content-disposition") or ""

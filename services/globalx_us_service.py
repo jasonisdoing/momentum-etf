@@ -16,7 +16,7 @@ from config import CACHE_TTL_SLOW
 from services.component_price_service import infer_yahoo_symbol_currency
 from services.globalx_page_service import iter_globalx_page_props, read_globalx_page_records
 from utils.asx_ticker import ensure_asx_prefix
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 from utils.normalization import resolve_bloomberg_listing
 from utils.ttl_cache import TtlCache
 from utils.us_etf_market_service import load_us_security_exchange_map
@@ -29,7 +29,7 @@ _FOOTER = (
 
 
 def _fetch_product_map() -> dict[str, str]:
-    response = shared_session.get(f"{_BASE_URL}/explore", timeout=25)
+    response = request_with_retry("GET", f"{_BASE_URL}/explore", timeout=25)
     response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")
     tables = [
@@ -79,7 +79,8 @@ def _find_holdings_download(html: str, ticker: str) -> tuple[str, str]:
 
 def _download_csv(url: str, ticker: str, action_id: str) -> str:
     """공식 CSV 버튼과 같은 공개 요청을 보내고 길이 지정 문자열을 읽는다."""
-    response = shared_session.post(
+    response = request_with_retry(
+        "POST",
         url,
         headers={"Next-Action": action_id, "Content-Type": "text/plain;charset=UTF-8", "Accept": "text/x-component"},
         data=json.dumps([ticker]),
@@ -177,7 +178,7 @@ def fetch_globalx_us_holdings(ticker: str) -> dict[str, Any] | None:
     url = _PRODUCT_MAP_CACHE.get_or_compute("products", _fetch_product_map).get(ticker_norm)
     if url is None:
         return None
-    response = shared_session.get(url, timeout=25)
+    response = request_with_retry("GET", url, timeout=25)
     response.raise_for_status()
     action_id, reference_date = _find_holdings_download(response.text, ticker_norm)
     rows = _parse_holdings(_download_csv(url, ticker_norm, action_id), ticker_norm)

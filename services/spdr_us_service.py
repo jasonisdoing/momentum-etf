@@ -9,7 +9,7 @@ from typing import Any
 from config import CACHE_TTL_SLOW
 from services.spdr_holdings_service import parse_spdr_holdings_xlsx
 from services.xlsx_holdings_service import parse_xlsx_table_rows, read_xlsx_rows
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 from utils.normalization import normalize_exchange_symbol
 from utils.ttl_cache import TtlCache
 from utils.us_etf_market_service import load_us_security_exchange_map
@@ -19,7 +19,7 @@ _PRODUCT_MAP_CACHE = TtlCache(CACHE_TTL_SLOW, name="spdr_us_products", max_entri
 
 
 def _fetch_product_map() -> dict[str, str]:
-    response = shared_session.get(f"{_DATA_URL}/spdr-product-data-us-en.xlsx", timeout=25)
+    response = request_with_retry("GET", f"{_DATA_URL}/spdr-product-data-us-en.xlsx", timeout=25)
     response.raise_for_status()
     products = parse_xlsx_table_rows(read_xlsx_rows(response.content), {"Ticker", "Name", "CUSIP", "Asset Class"})
     result = {}
@@ -68,7 +68,7 @@ def fetch_spdr_us_holdings(ticker: str) -> dict[str, Any] | None:
         raise ValueError("SPDR 구성종목 조회에 티커가 필요합니다.")
     if ticker_norm not in _PRODUCT_MAP_CACHE.get_or_compute("products", _fetch_product_map):
         return None
-    response = shared_session.get(f"{_DATA_URL}/holdings-daily-us-en-{ticker_norm.lower()}.xlsx", timeout=25)
+    response = request_with_retry("GET", f"{_DATA_URL}/holdings-daily-us-en-{ticker_norm.lower()}.xlsx", timeout=25)
     response.raise_for_status()
     reference_date, raw_items = parse_spdr_holdings_xlsx(
         response.content, ticker_norm, {"Name", "Ticker", "Identifier", "Weight", "Local Currency"}

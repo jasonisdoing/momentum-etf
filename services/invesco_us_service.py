@@ -9,7 +9,7 @@ from time import sleep
 from typing import Any
 
 from config import CACHE_TTL_SLOW
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 from utils.logger import get_app_logger
 from utils.ttl_cache import TtlCache
 
@@ -27,7 +27,7 @@ def _get_json(path: str, params: dict[str, Any]) -> dict[str, Any]:
     for attempt in range(3):
         if attempt:
             sleep(attempt)
-        response = shared_session.get(f"{_API_BASE}{path}", params=params, headers=_HEADERS, timeout=25)
+        response = request_with_retry("GET", f"{_API_BASE}{path}", params=params, headers=_HEADERS, timeout=25)
         if response.status_code not in {502, 503} or attempt == 2:
             break
         get_app_logger().warning(

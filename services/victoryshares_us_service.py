@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup
 from config import CACHE_TTL_SLOW
 from services.component_price_service import infer_yahoo_symbol_currency
 from utils.asx_ticker import ensure_asx_prefix
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 from utils.normalization import resolve_bloomberg_listing
 from utils.ttl_cache import TtlCache
 from utils.us_etf_market_service import load_us_security_exchange_map
@@ -26,7 +26,7 @@ _LISTED_SECURITY_TYPES = {"COMMON STOCK", "COMMON STOCK LIKE", "FOREIGN STOCK", 
 
 
 def _fetch_product_map() -> dict[str, str]:
-    response = shared_session.get(f"{_BASE_URL}/products-fa/victoryshares-etfs", timeout=25)
+    response = request_with_retry("GET", f"{_BASE_URL}/products-fa/victoryshares-etfs", timeout=25)
     response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")
     products = {}
@@ -122,10 +122,10 @@ def fetch_victoryshares_us_holdings(ticker: str) -> dict[str, Any] | None:
     url = _PRODUCT_MAP_CACHE.get_or_compute("products", _fetch_product_map).get(ticker_norm)
     if url is None:
         return None
-    response = shared_session.get(url, timeout=25)
+    response = request_with_retry("GET", url, timeout=25)
     response.raise_for_status()
     api_url, public_key = _read_request_config(response.text, ticker_norm)
-    response = shared_session.get(api_url, headers={"x-api-key": public_key}, timeout=25)
+    response = request_with_retry("GET", api_url, headers={"x-api-key": public_key}, timeout=25)
     response.raise_for_status()
     reference_date, rows = _parse_holdings(response.json(), ticker_norm)
     us_listings = load_us_security_exchange_map()

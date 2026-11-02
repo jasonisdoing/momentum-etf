@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from utils.asx_ticker import ensure_asx_prefix
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 from utils.normalization import normalize_exchange_symbol
 
 _US_EXCHANGES = {
@@ -36,7 +36,8 @@ _EXCHANGE_SUFFIXES = {
 
 
 def fetch_ishares_product_map(*, base_url: str, region: str, config_path: str) -> dict[str, str]:
-    response = shared_session.get(
+    response = request_with_retry(
+        "GET",
         f"{base_url}/{region}/product-screener/product-screener-v3.1.jsn",
         params={
             "dcrPath": config_path,

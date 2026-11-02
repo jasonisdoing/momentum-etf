@@ -5,7 +5,7 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 
 # 공식 상품 구조와 실물 보유 목록을 확인한 상품만 등록한다.
 _PRODUCTS = {
@@ -30,7 +30,7 @@ def fetch_us_physical_etf_holdings(ticker: str) -> dict[str, Any] | None:
     product = _PRODUCTS.get(ticker_norm)
     if product is None:
         return None
-    response = shared_session.get(product["page_url"], timeout=25)
+    response = request_with_retry("GET", product["page_url"], timeout=25)
     response.raise_for_status()
     links = {link.get("href") for link in BeautifulSoup(response.text, "html.parser").select("a[href]")}
     if product["url"] not in links:

@@ -7,7 +7,7 @@ from typing import Any
 
 from config import CACHE_TTL_SLOW
 from services.ishares_holdings_service import fetch_ishares_product_map, parse_ishares_holdings
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 from utils.ttl_cache import TtlCache
 
 _BASE_URL = "https://www.ishares.com"
@@ -30,7 +30,7 @@ def fetch_ishares_us_holdings(ticker: str) -> dict[str, Any] | None:
     path = _PRODUCT_MAP_CACHE.get_or_compute("products", _fetch_product_map).get(ticker_norm)
     if path is None:
         return None
-    response = shared_session.get(f"{_BASE_URL}{path}/latest-holdings.csv", timeout=25)
+    response = request_with_retry("GET", f"{_BASE_URL}{path}/latest-holdings.csv", timeout=25)
     response.raise_for_status()
     reference_date, items = parse_ishares_holdings(response.text, date_format="%b %d, %Y")
     return {

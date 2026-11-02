@@ -10,7 +10,7 @@ from typing import Any
 
 from services.component_price_service import infer_yahoo_symbol_currency
 from utils.asx_ticker import ensure_asx_prefix
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 from utils.normalization import resolve_bloomberg_listing
 from utils.us_etf_market_service import load_us_security_exchange_map
 
@@ -86,7 +86,7 @@ def fetch_ark_us_holdings(ticker: str) -> dict[str, Any] | None:
     filename = _CSV_FILES.get(ticker_norm)
     if filename is None:
         return None
-    response = shared_session.get(f"{_BASE_URL}/{filename}", timeout=25)
+    response = request_with_retry("GET", f"{_BASE_URL}/{filename}", timeout=25)
     response.raise_for_status()
     reference_date, rows = _parse_holdings(response.content.decode("utf-8-sig"), ticker_norm)
     us_listings = load_us_security_exchange_map()

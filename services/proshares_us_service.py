@@ -9,7 +9,7 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 from utils.normalization import resolve_bloomberg_listing
 from utils.us_etf_market_service import load_us_security_exchange_map
 
@@ -89,7 +89,7 @@ def fetch_proshares_us_holdings(ticker: str) -> dict[str, Any] | None:
     url = _PRODUCTS.get(ticker_norm)
     if url is None:
         return None
-    response = shared_session.get(url, timeout=25)
+    response = request_with_retry("GET", url, timeout=25)
     response.raise_for_status()
     reference_date, rows = _parse_holdings(response.text, ticker_norm)
     us_listings = load_us_security_exchange_map()

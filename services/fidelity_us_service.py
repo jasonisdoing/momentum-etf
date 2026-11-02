@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import xlrd
 from bs4 import BeautifulSoup
 
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 from utils.normalization import resolve_bloomberg_listing
 from utils.us_etf_market_service import load_us_security_exchange_map
 
@@ -21,7 +21,8 @@ _PRODUCT_CUSIPS = {"FTEC": "316092808"}
 
 
 def _fetch_report(ticker: str, cusip: str) -> bytes:
-    response = shared_session.get(
+    response = request_with_retry(
+        "GET",
         "https://fundresearch.fidelity.com/prospectus/eproredirect",
         params={
             "clientId": "Fidelity",
@@ -44,7 +45,7 @@ def _fetch_report(ticker: str, cusip: str) -> bytes:
         or parsed.query == "_fax=error"
     ):
         raise ValueError(f"Fidelity {ticker} 공식 보고서 목록 주소가 잘못됐습니다.")
-    response = shared_session.get(match[1], timeout=25)
+    response = request_with_retry("GET", match[1], timeout=25)
     response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")
     daily = soup.select_one("#DALYTab")
@@ -54,7 +55,7 @@ def _fetch_report(ticker: str, cusip: str) -> bytes:
     matches = re.findall(pattern, action)
     if len(matches) != 1:
         raise ValueError(f"Fidelity {ticker} 공식 일별 전체 보유종목 XLS 주소가 없습니다.")
-    response = shared_session.get(f"{_REPORT_HOST}/ShowDocument/documentExcel.htm?{matches[0]}", timeout=25)
+    response = request_with_retry("GET", f"{_REPORT_HOST}/ShowDocument/documentExcel.htm?{matches[0]}", timeout=25)
     response.raise_for_status()
     return response.content
 

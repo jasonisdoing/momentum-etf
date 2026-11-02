@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 
 from config import CACHE_TTL_SLOW
 from services.filepoint_holdings_service import fetch_filepoint_csv, normalize_filepoint_holding
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 from utils.ttl_cache import TtlCache
 from utils.us_etf_market_service import load_us_security_exchange_map
 
@@ -22,7 +22,7 @@ _HOLDINGS_CACHE = TtlCache(CACHE_TTL_SLOW, name="marketdesk_us_holdings", max_en
 
 
 def _fetch_product_map() -> set[str]:
-    response = shared_session.get(f"{_BASE_URL}/", timeout=25)
+    response = request_with_retry("GET", f"{_BASE_URL}/", timeout=25)
     response.raise_for_status()
     products = set()
     for anchor in BeautifulSoup(response.content, "html.parser").select("a[href]"):

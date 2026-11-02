@@ -9,12 +9,12 @@ from typing import Any
 
 from services.component_price_service import infer_yahoo_symbol_currency
 from utils.asx_ticker import ensure_asx_prefix
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 from utils.normalization import resolve_bloomberg_listing
 
 
 def fetch_filepoint_csv(url: str, required: set[str], *, provider: str) -> list[dict[str, str]]:
-    response = shared_session.get(url, timeout=25)
+    response = request_with_retry("GET", url, timeout=25)
     response.raise_for_status()
     reader = csv.DictReader(io.StringIO(response.content.decode("utf-8-sig")))
     headers = reader.fieldnames or []

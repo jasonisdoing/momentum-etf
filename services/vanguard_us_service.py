@@ -10,7 +10,7 @@ from typing import Any
 from config import CACHE_TTL_SLOW
 from services.component_price_service import infer_yahoo_symbol_currency
 from services.etf_holdings_service import DEFAULT_USER_AGENT
-from utils.http_session import shared_session
+from utils.http_session import request_with_retry
 from utils.normalization import resolve_bloomberg_listing
 from utils.ttl_cache import TtlCache
 from utils.us_etf_market_service import load_us_security_exchange_map
@@ -23,7 +23,7 @@ _LISTED_SECURITY_TYPES = {"EQ.STOCK", "EQ.REIT", "EQ.DRCPT", "EQ.PREF", "EQ.FSH"
 
 
 def _fetch_product_map() -> dict[str, dict[str, Any]]:
-    response = shared_session.get(_PRODUCTS_URL, headers=_HEADERS, timeout=30)
+    response = request_with_retry("GET", _PRODUCTS_URL, headers=_HEADERS, timeout=30)
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, dict) or not payload:
@@ -117,7 +117,7 @@ def fetch_vanguard_us_holdings(ticker: str) -> dict[str, Any] | None:
     product = _PRODUCT_MAP_CACHE.get_or_compute("products", _fetch_product_map).get(ticker_norm)
     if product is None:
         return None
-    response = shared_session.get(_HOLDINGS_URL.format(ticker=ticker_norm), headers=_HEADERS, timeout=30)
+    response = request_with_retry("GET", _HOLDINGS_URL.format(ticker=ticker_norm), headers=_HEADERS, timeout=30)
     response.raise_for_status()
     reference_date, rows = _parse_holdings(response.json(), ticker_norm)
     us_listings = load_us_security_exchange_map()
