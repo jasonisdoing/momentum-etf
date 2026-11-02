@@ -28,7 +28,9 @@ from utils.notification import send_slack_message_v2
 from utils.strategy_trade_orders import (
     FINISHED_STATUSES,
     cancel_record,
+    close_warning_slack_orders,
     finished_slack_orders,
+    mark_slack_close_warned,
     mark_slack_notified,
     place_order,
     refresh_slack_order_accounts,
@@ -330,6 +332,29 @@ def notify_finished_orders() -> int:
         }
         _finish(target, serialize_order(record))
         mark_slack_notified(record["_id"])
+    return len(records)
+
+
+def notify_close_approaching() -> int:
+    """장 마감이 가까운데 체결되지 않은 슬랙 주문을 스레드로 경고하고 메시지에 취소 버튼을 다시 띄운다 — 경고한 건수.
+
+    주문 상태는 직전의 `notify_finished_orders` 가 갱신해 둔 것을 쓴다.
+    """
+    records = close_warning_slack_orders()
+    for record in records:
+        order = serialize_order(record)
+        request = _request_of(record)
+        target = {
+            "request": request,
+            "channel": record["slack"]["channel"],
+            "message_ts": record["slack"]["message_ts"],
+        }
+        side = f"{_env_word(order['env'])} {_SIDE_LABELS[order['side']]}"
+        remaining = order["quantity"] - order["filled_quantity"]
+        text = f"⏰ {side} 주문이 아직 체결되지 않았습니다(미체결 {remaining:,}주). 15:30 장 마감 전에 취소하지 않으면 오늘 주문은 만료됩니다."
+        send_slack_message_v2(text, thread_ts=target["message_ts"])
+        _update_message(target, [*_cancel_blocks(request, order["id"]), _note(text)])
+        mark_slack_close_warned(record["_id"])
     return len(records)
 
 

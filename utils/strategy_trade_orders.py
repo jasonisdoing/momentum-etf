@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -36,6 +36,8 @@ from utils.strategy_trade_service import load_views_for_pools
 
 KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_orders"
+#: 이 시각부터 정규장 마감(15:30)까지 아직 체결되지 않은 슬랙 주문을 한 번 경고한다.
+CLOSE_WARNING_FROM = time(15, 20)
 
 #: 아직 끝나지 않은 상태 — 이 동안 체결 조회로 상태를 갱신한다.
 ACTIVE_STATUSES = ("submitting", "pending", "partial")
@@ -340,6 +342,26 @@ def finished_slack_orders() -> list[dict[str, Any]]:
 
 def mark_slack_notified(order_id: Any) -> None:
     _orders().update_one({"_id": order_id}, {"$set": {"slack_notified": True}})
+
+
+def close_warning_slack_orders() -> list[dict[str, Any]]:
+    """장 마감이 가까운데 아직 끝나지 않은 슬랙 주문 — 마감 경고를 아직 보내지 않은 것만(증권사가 접수한 주문만)."""
+    if _now().time() < CLOSE_WARNING_FROM or market_session("kor")["session"] != REGULAR:
+        return []
+    return list(
+        _orders().find(
+            {
+                "slack": {"$ne": None},
+                "slack_close_warned": {"$ne": True},
+                "order_no": {"$ne": None},
+                "status": {"$in": list(ACTIVE_STATUSES)},
+            }
+        )
+    )
+
+
+def mark_slack_close_warned(order_id: Any) -> None:
+    _orders().update_one({"_id": order_id}, {"$set": {"slack_close_warned": True}})
 
 
 def list_orders(account_no: str) -> list[dict[str, Any]]:
