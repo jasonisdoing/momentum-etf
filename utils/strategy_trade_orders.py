@@ -60,7 +60,7 @@ def _now() -> datetime:
     return datetime.now(KST)
 
 
-def _require_signal(strategy: dict[str, Any], side: str, round_no: int) -> None:
+def _require_signal(strategy: dict[str, Any], side: str, round_no: int) -> dict[str, Any]:
     """그 회차의 신호가 지금도 유효해야 한다 — 매도는 보유 중이고 매도선에 닿았을 때, 매수는 다음 회차가 매수선에 닿았을 때."""
     row = next((item for item in strategy["rounds"] if item["round"] == round_no), None)
     if row is None:
@@ -69,6 +69,7 @@ def _require_signal(strategy: dict[str, Any], side: str, round_no: int) -> None:
     if not reached:
         word = "매도" if side == "sell" else "매수"
         raise BrokerApiError(f"{strategy['label']} {round_no}호 {word} 신호가 더 이상 유효하지 않습니다.")
+    return row
 
 
 def _require_no_duplicate(account_no: str, strategy_id: str, side: str, round_no: int) -> None:
@@ -93,9 +94,12 @@ def _require_no_duplicate(account_no: str, strategy_id: str, side: str, round_no
 
 
 def resolve_order(pool: str, strategy_id: str, side: str, round_no: int | None) -> dict[str, Any]:
-    """주문 내용 — 전략 종목의 현재가를 호가 단위로 반올림한 지정가, 수량은 회차당 수량이다.
+    """주문 내용 — 수량은 회차당 수량이다.
 
-    `round_no` 가 있으면(신호 주문) 그 회차의 신호가 지금도 유효한지 확인한다.
+    가격: 직접 낸 주문은 현재가를 호가 단위로 반올림한 지정가(`price_kind` current). 신호 주문(`round_no`)은
+    그 회차의 신호가 지금도 유효한지 확인하고, 전략이 정한 사다리 지정가(`limit`)로 낸다 — 백테스트와 같은
+    체결 원칙이다(현재가가 지정가를 넘어선 쪽이면 호가에 바로 체결된다). 보유 0 인 1호의 장 마감 매수는
+    사다리 가격에 닿지 않으므로 현재가 지정가다.
     """
     if side not in ("buy", "sell"):
         raise BrokerApiError(f"알 수 없는 주문 구분입니다: {side}")
@@ -104,23 +108,29 @@ def resolve_order(pool: str, strategy_id: str, side: str, round_no: int | None) 
     )
     if strategy is None:
         raise BrokerApiError(f"{pool} 종목풀에 '{strategy_id}' 전략이 없습니다.")
-    if round_no is not None:
-        _require_signal(strategy, side, round_no)
+    row = _require_signal(strategy, side, round_no) if round_no is not None else None
     current = float(strategy["index"]["close"] or 0)
     if current <= 0:
         raise BrokerApiError(f"{strategy['label']} 의 현재가를 알 수 없습니다.")
+    current_price = int(round_to_tick(current))
+    if row is None or (side == "buy" and row["close_entry"]):
+        price, price_kind = current_price, "current"
+    else:
+        price, price_kind = int(row["sell_limit"] if side == "sell" else row["buy_limit"]), "limit"
     return {
         "strategy_label": strategy["label"],
         "ticker": strategy["ticker"],
         "quantity": int(strategy["config"]["round_quantity"]),
-        "price": int(round_to_tick(current)),
+        "price": price,
+        "price_kind": price_kind,
+        "current_price": current_price,
     }
 
 
 def place_order(
     account_no: str, pool: str, strategy_id: str, side: str, round_no: int | None, slack: dict[str, str] | None
 ) -> dict[str, Any]:
-    """전략 종목을 현재가 지정가로 계좌에 주문하고 기록한다.
+    """전략 종목을 지정가로 계좌에 주문하고 기록한다 — 가격은 `resolve_order` 가 정한다.
 
     `round_no` 는 신호 주문(신호 메시지의 회차 버튼)만 넘긴다 — 신호 유효성과 중복을 확인하고 기록에 남긴다.
     `slack`(채널·메시지 ts)은 슬랙 메시지로 낸 주문만 넘긴다 — 있으면 끝난 뒤 그 스레드로 알린다.
@@ -137,7 +147,7 @@ def place_order(
         "strategy_id": strategy_id,
         "side": side,
         "round": round_no,
-        **order,
+        **{key: order[key] for key in ("strategy_label", "ticker", "quantity", "price", "price_kind", "current_price")},
         "order_no": None,
         "filled_quantity": 0,
         "average_fill_price": 0.0,
