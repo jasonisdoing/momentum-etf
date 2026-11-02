@@ -45,4 +45,4 @@ def invalidate_strategy_caches() -> None:
 
     momentum_backtest._POSITIONS_CACHE.invalidate()
     new_high_backtest._POSITIONS_CACHE.invalidate()
-    # 합성은 자체 캐시가 없다 — 고정 기준금액 재생이 위 슬리브 결과를 그때그때 읽는다.
+    # 합성은 자체 캐시가 없다 — 평가액 기준 재생이 위 슬리브 결과를 그때그때 읽는다.

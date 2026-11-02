@@ -216,7 +216,7 @@ def sleeve_for_pool(pool: str) -> dict[str, Any] | None:
     """그 종목풀의 사고팔기 합성 슬리브가 붙은 계좌와 한도 — 없으면 None.
 
     사고팔기는 계좌를 따로 고르지 않는다. 합성에서 `사고팔기 + 종목풀` 슬리브를 붙인 계좌가
-    운용 계좌이고, 슬리브 비중 × 합성 기준금액이 그 종목풀 전략 전체의 매수 한도다.
+    운용 계좌이고, 슬리브 비중 × 합성 운용 기준금액(계좌 평가액)이 그 종목풀 전략 전체의 매수 한도다.
     """
     from utils.account_settings_store import load_live_account_docs, mix_sleeves_of
     from utils.pool_strategy_use import STRATEGY_TRADE
@@ -232,9 +232,10 @@ def sleeve_for_pool(pool: str) -> dict[str, Any] | None:
     if len(found) > 1:
         raise RuntimeError(f"{pool} 종목풀의 사고팔기 슬리브가 여러 계좌에 붙어 있습니다.")
     doc, sleeve = found[0]
-    capital = float(doc.get("mix_capital_krw") or 0)
-    if capital <= 0:
-        raise RuntimeError(f"'{doc['account_id']}' 계좌의 합성 운용 기준금액(KRW)이 설정돼 있지 않습니다.")
+    from utils.cash_model import currency_for_country
+    from utils.strategy_mix_service import operating_capital_krw
+
+    capital = operating_capital_krw(doc["account_id"], currency_for_country(doc["country_code"]))
     return {
         "account_id": doc["account_id"],
         "account_name": str(doc.get("name") or doc["account_id"]),

@@ -376,44 +376,45 @@ class PortfolioMixStateTest(unittest.TestCase):
 
 
 class MixCapitalScreenMatchesBacktest(unittest.TestCase):
-    def test_harvest_proceeds_are_withdrawn_and_never_refilled(self):
+    def test_harvest_proceeds_stay_in_cash_and_fund_refill(self):
         from core.strategy.mix.capital_replay import replay_capital
 
-        index = pd.date_range("2026-09-01", periods=5)
+        index = pd.date_range("2026-09-01", periods=3)
         replay = replay_capital(
-            close=pd.DataFrame({"X": [100, 120, 120, 120, 120], "Y": [100] * 5}, index=index),
-            opened=pd.DataFrame({"X": [100, 120, 120, 120, 120], "Y": [100] * 5}, index=index),
-            fx=pd.Series([1.0, 1.0, 1.1, 1.2, 1.3], index=index),
-            targets={
-                str(day.date()): {"X": 0 if i == 4 else 1000, "Y": 200 if i >= 3 else 0} for i, day in enumerate(index)
-            },
+            close=pd.DataFrame({"X": [100, 150, 150], "Y": [100] * 3}, index=index),
+            opened=pd.DataFrame({"X": [100, 150, 150], "Y": [100] * 3}, index=index),
+            fx=pd.Series(1.0, index=index),
+            targets={str(day.date()): {"X": 500, "Y": 500} for day in index},
             capital_krw=1000,
             harvest_pct=20,
             refill_pct=20,
             costs={"X": (0, 0), "Y": (0, 0)},
         )
-        self.assertEqual(replay["withdrawn_curve"].tolist(), [0, 0, 0.264, 0.264, 0.264])
-        self.assertEqual(replay["curve"].iloc[2], 1.32)
-        self.assertAlmostEqual(replay["curve"].iloc[3], 1.44)
-        self.assertFalse(any(row["ticker"] == "Y" and row["date"] == "2026-09-04" for row in replay["executions"]))
-        self.assertTrue(any(row["ticker"] == "Y" and row["date"] == "2026-09-05" for row in replay["executions"]))
+        # 평가액이 1250 으로 늘어 목표가 각 625 로 커진다 — X 는 회수 경계에 닿아 1주 팔고, 그 대금이 Y 채우기에 쓰인다.
+        self.assertNotIn("withdrawn_curve", replay)
+        self.assertEqual(
+            [(row["date"], row["ticker"], row["side"], row["quantity"]) for row in replay["executions"][2:]],
+            [("2026-09-03", "X", "sell", 1), ("2026-09-03", "Y", "buy", 1)],
+        )
+        self.assertEqual(replay["cash"], 50)
+        self.assertAlmostEqual(replay["curve"].iloc[-1], 1.25)
 
-    def test_delayed_harvest_keeps_withdrawal_reason(self):
+    def test_delayed_harvest_sells_on_first_open_day(self):
         from core.strategy.mix.capital_replay import replay_capital
 
         index = pd.date_range("2026-09-01", periods=4)
         replay = replay_capital(
-            close=pd.DataFrame({"X": [100, 120, 120, 120]}, index=index),
-            opened=pd.DataFrame({"X": [100, 120, float("nan"), 120]}, index=index),
+            close=pd.DataFrame({"X": [100, 150, 150, 150], "Y": [100] * 4}, index=index),
+            opened=pd.DataFrame({"X": [100, 150, float("nan"), 150], "Y": [100] * 4}, index=index),
             fx=pd.Series(1.0, index=index),
-            targets={str(day.date()): {"X": 1000} for day in index},
+            targets={str(day.date()): {"X": 500, "Y": 500} for day in index},
             capital_krw=1000,
             harvest_pct=20,
             refill_pct=20,
-            costs={"X": (0, 0)},
+            costs={"X": (0, 0), "Y": (0, 0)},
         )
-        self.assertEqual(replay["withdrawn_curve"].tolist(), [0, 0, 0, 0.24])
-        self.assertEqual(replay["cash"], 0)
+        sells = [(row["date"], row["quantity"]) for row in replay["executions"] if row["side"] == "sell"]
+        self.assertEqual(sells, [("2026-09-04", 1)])
 
     def test_higher_rank_candidate_does_not_replace_held_position(self):
         from core.strategy.slot_backtest import run_slot_backtest
@@ -526,7 +527,9 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                     date = str(day.date())
                     rate = float(fx.iloc[max(i - 1, 0)])
                     price = float(close.iloc[i - 1]["A"]) if i else 100.0
-                    target = int(1000 / rate / price)
+                    # 목표 금액은 전일 종가 평가액 비율만큼 움직인다 — 화면은 그날의 계좌 평가액으로 같은 값을 얻는다.
+                    amount = 1000 * (float(replay["curve"].iloc[i - 1]) if i else 1.0)
+                    target = int(amount / rate / price)
                     groups = build_action_groups(
                         [{"ticker": "A", "price": price, "held_quantity": held, "target_quantity": target}],
                         {"slots": {}},
@@ -538,8 +541,8 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                             date: {
                                 "quantities": {"A": target},
                                 "weights": {"A": 10},
-                                "amounts": {"A": 1000 / rate},
-                                "previous_amounts": {"A": 1000 / rate},
+                                "amounts": {"A": amount / rate},
+                                "previous_amounts": {"A": amount / rate},
                             }
                         },
                     )
@@ -622,7 +625,7 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
         from core.strategy.mix.targets import dated_target_shares
 
         index = pd.to_datetime(["2026-09-01", "2026-09-02"])
-        for after, expected in [(0, -12), (500, -7), (1000, 0), (1500, 3)]:
+        for after, expected in [(0, -12), (500, -7), (1000, 0), (1500, 4)]:
             with self.subTest(after=after):
                 targets = {
                     "a": [
@@ -646,7 +649,21 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                         }
                     ],
                 }
-                schedule = dated_target_shares(targets, {"a": 1000, "b": after}, 1, 3000, "2026-09-02")
+                replay = replay_capital(
+                    close=pd.DataFrame({"X": [100, 100]}, index=index),
+                    opened=pd.DataFrame({"X": [80, 100]}, index=index),
+                    fx=pd.Series(1.0, index=index),
+                    targets={"2026-09-01": {"X": 1000}, "2026-09-02": {"X": after}},
+                    capital_krw=3000,
+                    harvest_pct=50,
+                    refill_pct=0,
+                    costs={"X": (0, 0)},
+                )
+                # 둘째 날 목표는 첫날 종가 평가액 비율만큼 커진다 — 화면은 그날의 계좌 평가액으로 같은 값을 얻는다.
+                scale = float(replay["curve"].iloc[0])
+                schedule = dated_target_shares(
+                    targets, {"a": 1000 * scale, "b": after * scale}, 1, 3000 * scale, "2026-09-02"
+                )
                 actions = {
                     "slots": {
                         "a": {
@@ -666,7 +683,7 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                     }
                 }
                 groups = build_action_groups(
-                    [{"ticker": "X", "price": 100, "held_quantity": 12, "target_quantity": after // 100}],
+                    [{"ticker": "X", "price": 100, "held_quantity": 12, "target_quantity": int(after * scale) // 100}],
                     actions,
                     "2026-09-02",
                     harvest_pct=50,
@@ -678,16 +695,6 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                     item["quantity"] * (1 if item["side"] == "buy" else -1)
                     for group in groups
                     for item in group["items"]
-                )
-                replay = replay_capital(
-                    close=pd.DataFrame({"X": [100, 100]}, index=index),
-                    opened=pd.DataFrame({"X": [80, 100]}, index=index),
-                    fx=pd.Series(1.0, index=index),
-                    targets={"2026-09-01": {"X": 1000}, "2026-09-02": {"X": after}},
-                    capital_krw=3000,
-                    harvest_pct=50,
-                    refill_pct=0,
-                    costs={"X": (0, 0)},
                 )
                 executed = sum(
                     row["quantity"] * (1 if row["side"] == "buy" else -1)
@@ -704,26 +711,28 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
         index = pd.date_range("2026-09-01", periods=3)
         cases = [
             # 늦게 상장한 종목은 첫날 시가에 매수하고 채우기 100이면 매수하지 않는다.
-            ([float("nan"), 100, 110], [float("nan"), 100, 110], 1000, 20, "2026-09-02", 0, 100, 10),
-            ([float("nan"), 100, 110], [float("nan"), 100, 110], 1000, 100, "2026-09-02", 0, 100, 0),
-            # 회수 경계 도달과 직전 값을 구별한다.
-            ([10, 11, 11], [10, 10, 11], 100, 20, "2026-09-03", 10, 11, -1),
-            ([10, 10.999, 10.999], [10, 10, 10.999], 100, 20, "2026-09-03", 10, 10.999, 0),
+            ([float("nan"), 100, 110], [float("nan"), 100, 110], 2000, 1000, 20, "2026-09-02", 0, 100, 10),
+            ([float("nan"), 100, 110], [float("nan"), 100, 110], 2000, 1000, 100, "2026-09-02", 0, 100, 0),
+            # 회수 경계에 닿은 값과 못 미친 값을 구별한다 — 목표는 전일 종가 평가액 비율만큼 커진다.
+            ([10, 12.2, 12.2], [10, 10, 12.2], 210, 100, 20, "2026-09-03", 10, 12.2, -1),
+            ([10, 12.0, 12.0], [10, 10, 12.0], 210, 100, 20, "2026-09-03", 10, 12.0, 0),
         ]
-        for closes, opens, amount, refill, day, held, price, expected in cases:
+        for closes, opens, capital, amount, refill, day, held, price, expected in cases:
             with self.subTest(amount=amount, refill=refill, price=price):
                 replay = replay_capital(
                     close=pd.DataFrame({"X": closes}, index=index),
                     opened=pd.DataFrame({"X": opens}, index=index),
                     fx=pd.Series(1.0, index=index),
                     targets={str(d.date()): {"X": amount} for d in index},
-                    capital_krw=2000,
+                    capital_krw=capital,
                     harvest_pct=10,
                     refill_pct=refill,
                     costs={"X": (0, 0)},
                 )
+                position = list(index.strftime("%Y-%m-%d")).index(day)
+                scaled = amount * (float(replay["curve"].iloc[position - 1]) if position else 1.0)
                 groups = build_action_groups(
-                    [{"ticker": "X", "price": price, "held_quantity": held, "target_quantity": int(amount / price)}],
+                    [{"ticker": "X", "price": price, "held_quantity": held, "target_quantity": int(scaled / price)}],
                     {"slots": {}},
                     day,
                     harvest_pct=10,
@@ -731,10 +740,10 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                     cash_balance=2000,
                     target_schedule={
                         day: {
-                            "quantities": {"X": int(amount / price)},
+                            "quantities": {"X": int(scaled / price)},
                             "weights": {"X": 50},
-                            "amounts": {"X": amount},
-                            "previous_amounts": {"X": amount},
+                            "amounts": {"X": scaled},
+                            "previous_amounts": {"X": scaled},
                         }
                     },
                 )

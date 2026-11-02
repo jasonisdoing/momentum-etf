@@ -1,4 +1,4 @@
-"""엔진의 날짜별 편입 상태에 고정 기준금액 운용을 적용하는 합성 재생."""
+"""엔진의 날짜별 편입 상태에 평가액 기준 운용을 적용하는 합성 재생."""
 
 from __future__ import annotations
 
@@ -20,25 +20,25 @@ def replay_capital(
 ) -> dict:
     """전일 종가로 수량을 정하고 당일 시가에 체결한다. 현금 부족 시 차입하지 않는다.
 
-    목표는 KRW, 가격·매수 가능 현금은 계좌 통화다. 회수 매도 대금은 KRW 인출 누계로
-    격리해 이후 매수에 쓰지 않는다. 수익률은 인출을 외부 현금 흐름으로 제외한다.
-    첫날에는 이전 봉이 없으므로 당일 시가로 초기 배정하며, 이후 회수 판단에는 미래 가격을 쓰지 않는다.
+    ``capital_krw`` 는 시작 자본이고, ``targets`` 의 금액은 이 시작 자본 기준이다. 매일 전일 종가 기준
+    평가액(현금 포함)을 시작 자본으로 나눈 배율을 목표 금액에 곱한다 — 평가액이 늘면 목표도 같이 는다.
+    목표는 KRW, 가격·매수 가능 현금은 계좌 통화다. 회수 매도 대금도 현금으로 남아 이후 매수에 쓴다.
+    첫날에는 이전 봉이 없으므로 당일 시가로 초기 배정하며, 이후 판단에는 미래 가격을 쓰지 않는다.
     """
     held = {ticker: 0 for ticker in close.columns}
     cash = capital_krw / float(fx.iloc[0])
-    withdrawn_krw = 0.0
     previous_equity_krw = capital_krw
-    previous_withdrawn_krw = 0.0
     growth = 1.0
     curve = {}
-    withdrawn_curve = {}
     trades = []
     previous_targets: dict[str, float] = {}
     pending_sells: dict[str, CapitalTradeDecision] = {}
     first_price_days = {ticker: close[ticker].first_valid_index() for ticker in close.columns}
     for i, day in enumerate(close.index):
         date = str(day.date())
-        amounts = targets[date]
+        # 전일 종가 평가액 비율 — 첫날은 시작 자본이라 1 이다.
+        scale = previous_equity_krw / capital_krw
+        amounts = {ticker: amount * scale for ticker, amount in targets[date].items()}
         decision_prices = close.iloc[i - 1] if i else opened.iloc[0]
         decision_fx = float(fx.iloc[i - 1] if i else fx.iloc[0])
         priced_amounts = {}
@@ -51,7 +51,7 @@ def replay_capital(
                 priced_amounts[ticker] = amount
                 priced_units[ticker] = float(price) * decision_fx
         target_quantities = allocate_target_shares(
-            priced_amounts, priced_units, min(capital_krw, sum(priced_amounts.values()))
+            priced_amounts, priced_units, min(previous_equity_krw, sum(priced_amounts.values()))
         )
         orders = {}
         for ticker in held:
@@ -71,7 +71,7 @@ def replay_capital(
                 target_amount=amount / decision_fx,
                 harvest_pct=harvest_pct,
                 refill_pct=refill_pct,
-                previous_target_amount=previous_targets.get(ticker, 0.0) / decision_fx,
+                previous_target_amount=previous_targets.get(ticker, 0.0) * scale / decision_fx,
                 target_quantity=target_quantities.get(ticker, 0),
             )
             if decision.quantity:
@@ -93,10 +93,7 @@ def replay_capital(
                 pending_sells[ticker] = decision
                 continue
             proceeds = -trade * float(price) * (1 - costs[ticker][1])
-            if decision.reason == "harvest":
-                withdrawn_krw += proceeds * float(fx.iloc[i])
-            else:
-                cash += proceeds
+            cash += proceeds
             held[ticker] += trade
             pending_sells.pop(ticker, None)
             trades.append({"date": date, "ticker": ticker, "side": "sell", "quantity": -trade, "price": float(price)})
@@ -133,16 +130,12 @@ def replay_capital(
         equity_krw = value * float(fx.iloc[i])
         if previous_equity_krw <= 0:
             raise ValueError(f"합성 기간 수익률의 전일 운용자산이 없습니다: {date}")
-        # 인출 당일만 그 금액을 돌려놓아 수익률을 구하고, 다음 날 분모는 남은 운용자산이다.
-        growth *= (equity_krw + withdrawn_krw - previous_withdrawn_krw) / previous_equity_krw
+        growth *= equity_krw / previous_equity_krw
         curve[date] = growth
-        withdrawn_curve[date] = withdrawn_krw / capital_krw
         previous_equity_krw = equity_krw
-        previous_withdrawn_krw = withdrawn_krw
-        previous_targets = amounts
+        previous_targets = targets[date]
     return {
         "curve": pd.Series(curve),
-        "withdrawn_curve": pd.Series(withdrawn_curve),
         "cash": cash,
         "holdings": held,
         "executions": trades,

@@ -57,7 +57,7 @@ const gridTheme = createAppGridTheme();
 
 /** 접이식 전략 설명 — 운용 현황·백테스트 섹션 상단(기본 접힘). */
 const CURRENT_NOTES = [
-  { title: "기준금액", body: "계좌 평가액(현금 포함, IS 고정 자산 제외)을 운용 기준금액으로 삼아 슬리브 비중대로 배정합니다. 평가액이 바뀌면 기준금액도 함께 바뀝니다. 해외 종목은 현재 환율로 환산하므로 환율 변동도 반영됩니다." },
+  { title: "기준금액", body: "계좌 평가액(현금 포함)이 기준금액입니다. IS 고정 자산은 현재 비중대로 두고 나머지를 슬리브 비중대로 배정하며, 평가액이 바뀌면 목표 금액도 함께 바뀝니다. 해외 종목은 현재 환율로 환산하므로 환율 변동도 반영됩니다." },
   { title: "종목 배정", body: "개별 전략 엔진이 종목과 진입·청산 시점을 정합니다. 포트폴리오는 설정 비중, 모멘텀·신고가는 슬롯당 1/N로 배정합니다. 빈 슬롯은 현금이며 중복 종목 기준금액은 합산합니다." },
   { title: "회수·채우기", body: "종목 목표 금액 대비 초과율·부족률이 각각 설정값에 도달하면 목표 금액까지 정수 수량으로 조정합니다. 채우기 100%는 미보유도 매수 안내하지 않습니다. 전략 청산은 유지합니다." },
   { title: "현금", body: "월초 자동 재배분은 하지 않습니다. 매수 자금이 부족하면 부족액을 표시하며 다른 종목을 임의로 매도하지 않습니다. 회수 매도 대금은 현금으로 남습니다." },
@@ -91,7 +91,6 @@ type AccountOption = AccountOptionBase & {
   country_code: string;
   /** 오늘의 액션 슬랙 알람 — 새 지시·수량 증가 시 발송. */
   mix_slack_enabled?: boolean;
-  mix_capital_krw: number | null;
   mix_harvest_pct: number | null;
   mix_refill_pct: number | null;
   /** 비워 두는 현금 몫(%) — 슬리브 배분과 합이 100 이다. */
@@ -1000,7 +999,7 @@ export function StrategyMixClient() {
       {
         field: "actual_weight_pct",
         headerName: "목표비중",
-        headerTooltip: "목표 주수 × 기준 가격(KRW) ÷ 운용 기준금액(계좌 평가액 − IS 고정 자산). 현재 계좌 비중과 분모가 다릅니다.",
+        headerTooltip: "목표 주수 × 기준 가격(KRW) ÷ 계좌 평가액. 목표 주수가 단주로 떨어져 현재 계좌 비중과 다릅니다.",
         width: 88,
         type: "numericColumn",
         valueFormatter: (p) =>
@@ -1378,7 +1377,6 @@ export function StrategyMixClient() {
           account_id: selectedAccount.account_id,
           values: {
             mix_slack_enabled: slackEnabled,
-            mix_capital_krw: selectedAccount.mix_capital_krw,
             mix_harvest_pct: Number(harvestPct),
             mix_refill_pct: Number(refillPct),
             // 순서가 곧 슬롯이라 키는 보내지 않는다 — 서버가 순서대로 다시 붙인다.
@@ -1401,7 +1399,6 @@ export function StrategyMixClient() {
             ? {
                 ...option,
                 mix_slack_enabled: slackEnabled,
-            mix_capital_krw: selectedAccount.mix_capital_krw,
             mix_harvest_pct: Number(harvestPct),
             mix_refill_pct: Number(refillPct),
                 // 라벨도 즉시 반영 — 이름을 지우면 전략 이름으로 돌아간다.
@@ -1490,12 +1487,12 @@ export function StrategyMixClient() {
                   {selectedAccount ? (
                     <>
 
-                      {/* 운용 기준금액은 입력하지 않는다 — 계좌 평가액에서 자동으로 정해진다. */}
+                      {/* 기준금액은 입력하지 않는다 — 계좌 평가액에서 자동으로 정해진다. */}
                       <label className="appLabeledField" style={{ marginBottom: 0 }}>
-                        <span className="appLabeledFieldLabel">운용 기준금액 (자동)</span>
+                        <span className="appLabeledFieldLabel">계좌 평가액 (자동)</span>
                         <span
                           style={{ ...hintStyle, display: "inline-block", minWidth: 120 }}
-                          title="계좌 평가액(현금 포함)에서 IS 고정 자산을 뺀 금액. 슬리브 비중대로 목표 금액이 정해진다."
+                          title="현금 포함 계좌 평가액이 운용 기준금액이다. IS 고정 자산을 뺀 나머지를 슬리브 비중대로 배정한다."
                         >
                           {positions ? `${formatAmount(positions.capital_krw)}원` : "-"}
                         </span>
