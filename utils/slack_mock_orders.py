@@ -36,6 +36,7 @@ from utils.strategy_trade_orders import (
     resolve_order,
     serialize_order,
 )
+from utils.strategy_trade_service import broker_account_no_for_pool
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +59,14 @@ def _require_env(name: str) -> str:
     return value
 
 
+def _round_text(round_no: int | None) -> str:
+    """신호 주문의 회차 표기 — 직접 낸 주문(회차 없음)은 비운다."""
+    return f"{round_no}호 " if round_no is not None else ""
+
+
 def _order_text(request: dict[str, Any]) -> str:
     side = _SIDE_LABELS[request["side"]]
-    return f"{request['label']} · {request['quantity']:,}주 × 현재가 지정가 {side}"
+    return f"{_round_text(request['round'])}{request['label']} · {request['quantity']:,}주 × 현재가 지정가 {side}"
 
 
 # --- 메시지 ---------------------------------------------------------------------------------------------
@@ -126,12 +132,13 @@ def _update_message(target: dict[str, Any], blocks: list[dict[str, Any]]) -> Non
     )
 
 
-def send_order_message(account_no: str, pool: str, strategy_id: str, side: str) -> None:
+def send_order_message(account_no: str, pool: str, strategy_id: str, side: str, round_no: int | None) -> None:
     """주문 메시지를 슬랙으로 보낸다 — 주문은 슬랙에서 버튼과 모달 확인을 거쳐야 나간다."""
     env = account_env(account_no)
-    order = resolve_order(pool, strategy_id, side)
+    order = resolve_order(pool, strategy_id, side, round_no)
     request = {
         "env": env,
+        "round": round_no,
         "account_no": account_no,
         "pool": pool,
         "strategy_id": strategy_id,
@@ -220,7 +227,7 @@ def submitted_request(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _final_text(order: dict[str, Any]) -> str:
     side = f"{_env_word(order['env'])} {_SIDE_LABELS[order['side']]}"
-    head = f"{order['strategy_label']} {order['quantity']:,}주 × {order['price']:,}원"
+    head = f"{_round_text(order['round'])}{order['strategy_label']} {order['quantity']:,}주 × {order['price']:,}원"
     fill = f"체결 {order['filled_quantity']:,}주 · 체결가 {order['average_fill_price']:,.0f}원"
     if order["status"] == "filled":
         return f"✅ {side} 체결 완료: {head} ({fill})"
@@ -249,6 +256,7 @@ def _place(target: dict[str, Any]) -> None:
             request["pool"],
             request["strategy_id"],
             request["side"],
+            request["round"],
             {"channel": target["channel"], "message_ts": target["message_ts"]},
         )
     except Exception as exc:  # 슬랙 요청은 이미 응답했으므로 실패도 스레드로 알린다.
@@ -299,6 +307,7 @@ def _request_of(record: dict[str, Any]) -> dict[str, Any]:
     """주문 기록으로 메시지에 그릴 주문 내용을 만든다."""
     return {
         "env": record["env"],
+        "round": record["round"],
         "account_no": record["account_no"],
         "pool": record["pool"],
         "strategy_id": record["strategy_id"],
@@ -323,3 +332,13 @@ def notify_finished_orders() -> int:
         _finish(target, serialize_order(record))
         mark_slack_notified(record["_id"])
     return len(records)
+
+
+def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dict[str, Any]]) -> int:
+    """신호가 난 회차마다 주문 메시지(버튼)를 보낸다 — 보낸 건수. 주문은 슬랙의 버튼과 모달 확인을 거쳐야 나간다."""
+    account_no = broker_account_no_for_pool(strategy_view["pool"])
+    for trigger in triggers:
+        send_order_message(
+            account_no, strategy_view["pool"], trigger["strategy_id"], trigger["action"], trigger["round"]
+        )
+    return len(triggers)

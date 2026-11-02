@@ -60,8 +60,43 @@ def _now() -> datetime:
     return datetime.now(KST)
 
 
-def resolve_order(pool: str, strategy_id: str, side: str) -> dict[str, Any]:
-    """주문 내용 — 전략 종목의 현재가를 호가 단위로 반올림한 지정가, 수량은 회차당 수량이다."""
+def _require_signal(strategy: dict[str, Any], side: str, round_no: int) -> None:
+    """그 회차의 신호가 지금도 유효해야 한다 — 매도는 보유 중이고 매도선에 닿았을 때, 매수는 다음 회차가 매수선에 닿았을 때."""
+    row = next((item for item in strategy["rounds"] if item["round"] == round_no), None)
+    if row is None:
+        raise BrokerApiError(f"{strategy['label']} 에 {round_no}호 회차가 없습니다.")
+    reached = (row["held"] and row["sell_reached"]) if side == "sell" else (row["is_next"] and row["buy_reached"])
+    if not reached:
+        word = "매도" if side == "sell" else "매수"
+        raise BrokerApiError(f"{strategy['label']} {round_no}호 {word} 신호가 더 이상 유효하지 않습니다.")
+
+
+def _require_no_duplicate(account_no: str, strategy_id: str, side: str, round_no: int) -> None:
+    """같은 회차·구분의 주문이 진행 중이거나 오늘 체결됐으면 막는다 — 체결이 보유에 반영되기 전 같은 신호로 또 나가지 않게."""
+    today = _now().strftime("%Y-%m-%d")
+    found = _orders().find_one(
+        {
+            "account_no": account_no,
+            "strategy_id": strategy_id,
+            "side": side,
+            "round": round_no,
+            "$or": [
+                {"status": {"$in": list(ACTIVE_STATUSES)}},
+                {"status": "filled", "created_at": {"$gte": today}},
+            ],
+        }
+    )
+    if found is not None:
+        raise BrokerApiError(
+            f"{round_no}호 {'매도' if side == 'sell' else '매수'} 주문이 이미 있습니다({found['status']})."
+        )
+
+
+def resolve_order(pool: str, strategy_id: str, side: str, round_no: int | None) -> dict[str, Any]:
+    """주문 내용 — 전략 종목의 현재가를 호가 단위로 반올림한 지정가, 수량은 회차당 수량이다.
+
+    `round_no` 가 있으면(신호 주문) 그 회차의 신호가 지금도 유효한지 확인한다.
+    """
     if side not in ("buy", "sell"):
         raise BrokerApiError(f"알 수 없는 주문 구분입니다: {side}")
     strategy = next(
@@ -69,6 +104,8 @@ def resolve_order(pool: str, strategy_id: str, side: str) -> dict[str, Any]:
     )
     if strategy is None:
         raise BrokerApiError(f"{pool} 종목풀에 '{strategy_id}' 전략이 없습니다.")
+    if round_no is not None:
+        _require_signal(strategy, side, round_no)
     current = float(strategy["index"]["close"] or 0)
     if current <= 0:
         raise BrokerApiError(f"{strategy['label']} 의 현재가를 알 수 없습니다.")
@@ -81,14 +118,17 @@ def resolve_order(pool: str, strategy_id: str, side: str) -> dict[str, Any]:
 
 
 def place_order(
-    account_no: str, pool: str, strategy_id: str, side: str, slack: dict[str, str] | None
+    account_no: str, pool: str, strategy_id: str, side: str, round_no: int | None, slack: dict[str, str] | None
 ) -> dict[str, Any]:
     """전략 종목을 현재가 지정가로 계좌에 주문하고 기록한다.
 
+    `round_no` 는 신호 주문(신호 메시지의 회차 버튼)만 넘긴다 — 신호 유효성과 중복을 확인하고 기록에 남긴다.
     `slack`(채널·메시지 ts)은 슬랙 메시지로 낸 주문만 넘긴다 — 있으면 끝난 뒤 그 스레드로 알린다.
     """
     env = account_env(account_no)
-    order = resolve_order(pool, strategy_id, side)
+    order = resolve_order(pool, strategy_id, side, round_no)
+    if round_no is not None:
+        _require_no_duplicate(account_no, strategy_id, side, round_no)
     now = _now()
     doc = {
         "env": env,
@@ -96,6 +136,7 @@ def place_order(
         "pool": pool,
         "strategy_id": strategy_id,
         "side": side,
+        "round": round_no,
         **order,
         "order_no": None,
         "filled_quantity": 0,
@@ -207,6 +248,7 @@ def serialize_order(record: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(record["_id"]),
         "env": record["env"],
+        "round": record["round"],
         "at": created.strftime("%H:%M:%S" if same_day else "%m-%d %H:%M"),
         "strategy_label": record["strategy_label"],
         "side": record["side"],

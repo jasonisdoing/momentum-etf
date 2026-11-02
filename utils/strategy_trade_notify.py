@@ -29,10 +29,12 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from utils.logger import get_app_logger
 from utils.order_confirm import build_confirm_line, pop_filled
 from utils.strategy_trade_service import load_settings, load_views_for_pools, sleeve_for_pool
 
 KST = ZoneInfo("Asia/Seoul")
+logger = get_app_logger()
 _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "strategy_trade_settings"
 
@@ -314,6 +316,20 @@ def send_test(account_id: str) -> dict[str, Any]:
     }
 
 
+def _send_order_messages(strategy_view: dict[str, Any], fresh: list[dict[str, Any]]) -> int:
+    """새 신호의 회차별 주문 메시지를 보낸다 — 신호 메시지는 이미 나갔으므로 실패해도 신호는 유지하고 실패 건수를 돌려준다."""
+    from utils.slack_mock_orders import send_signal_order_messages
+
+    if not fresh:
+        return 0
+    try:
+        send_signal_order_messages(strategy_view, fresh)
+    except Exception:
+        logger.exception("사고팔기 주문 메시지 발송 실패: %s", strategy_view["strategy_id"])
+        return 1
+    return 0
+
+
 def notify_strategy_trade() -> dict[str, Any]:
     """트리거를 판정해 필요할 때만 슬랙을 보낸다 — 슬리브가 붙은 계좌의 합성 슬랙이 켜진 종목풀만.
 
@@ -353,7 +369,7 @@ def notify_strategy_trade() -> dict[str, Any]:
         and _round_filled(pending, held_counts[str(pending.get("strategy_id"))]),
     )
 
-    sent_count = failed_count = 0
+    sent_count = failed_count = order_failed = 0
     fresh_all: list[dict[str, Any]] = []
     repeats_all: list[dict[str, Any]] = []
     for strategy_view in view["strategies"]:
@@ -383,6 +399,7 @@ def notify_strategy_trade() -> dict[str, Any]:
             sent_log.update({_trigger_key(pending): pending for pending in own_confirmed})
             continue
         sent_count += 1
+        order_failed += _send_order_messages(strategy_view, fresh)
         fresh_all.extend(fresh)
         repeats_all.extend(repeats)
         stamp = now.isoformat()
@@ -419,4 +436,6 @@ def notify_strategy_trade() -> dict[str, Any]:
         parts.append(f"재알림 {len(repeats_all)}건")
     if failed_count:
         parts.append(f"슬랙 전송 실패 {failed_count}건")
+    if order_failed:
+        parts.append(f"주문 메시지 실패 {order_failed}건")
     return {"sent": sent_count > 0, "reason": " · ".join(parts), "triggers": fresh_all or repeats_all or triggers}
