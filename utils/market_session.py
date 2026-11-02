@@ -123,6 +123,23 @@ def regular_session_started(country: str, now: datetime | None = None) -> bool:
     return _is_trading_day(country, today) and now_local >= _at(zone, today, schedule["open"])
 
 
+def regular_session_elapsed_minutes(country: str, now: datetime | None = None) -> float | None:
+    """정규장이 열린 지 몇 분 지났는지 — 정규장이 아니면(장전·마감·휴장일) None.
+
+    개장 직후를 건너뛰는 배치가 시간표(서머타임 포함)를 따라가도록 KST 고정 시각 대신 쓴다.
+    """
+    schedule = _schedule(country)
+    zone = ZoneInfo(str(schedule["timezone"]))
+    now_local = (now or datetime.now(zone)).astimezone(zone)
+    today = now_local.date()
+    if not _is_trading_day(country, today):
+        return None
+    open_at = _at(zone, today, schedule["open"])
+    if not open_at <= now_local < _at(zone, today, schedule["close"]):
+        return None
+    return (now_local - open_at).total_seconds() / 60
+
+
 def pre_open_trading_day(country: str, now: datetime | None = None) -> date | None:
     """프리장·데이장이 진행 중이면 그 세션이 속한 **다음 거래일**, 아니면 None.
 

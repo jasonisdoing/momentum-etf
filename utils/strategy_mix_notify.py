@@ -23,12 +23,24 @@ from datetime import datetime
 from typing import Any
 
 from utils.logger import get_app_logger
+from utils.market_session import regular_session_elapsed_minutes
 from utils.mix_sleeve import STRATEGY_TRADE
 from utils.order_confirm import build_confirm_line, pop_filled
 
 logger = get_app_logger()
 
 _STATE_KEY = "strategy_mix_notify_state"
+
+# 미국은 정규장이 열린 뒤 이 시간(분)이 지나야 감시한다(개장 직후 제외 — 한국의 09:10 시작과 같다).
+_US_SKIP_OPEN_MINUTES = 10
+
+
+def in_watch_window(country: str | None) -> bool:
+    """지금 감시할 시간대인지 — 미국만 현지 시간표(서머타임 포함)로 판단하고, 한국은 스케줄이 정한다."""
+    if country != "us":
+        return True
+    elapsed = regular_session_elapsed_minutes("us")
+    return elapsed is not None and elapsed >= _US_SKIP_OPEN_MINUTES
 
 
 def _db():
