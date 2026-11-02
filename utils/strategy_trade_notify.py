@@ -447,7 +447,7 @@ def notify_strategy_trade() -> dict[str, Any]:
                 "ticker": trigger["ticker"],
                 "name": trigger["name"],
                 "round": trigger["round"],
-                "index_text": f"{trigger['index_name']} {_index_text(trigger['index'])}",
+                "index_text": _index_text(trigger["index"]),
                 # 발송 시점의 보유 회차 수 — 체결 확인은 회차 수 증감으로 판정한다(참고 기록).
                 "held_count": held_counts.get(trigger["strategy_id"], 0),
             }
