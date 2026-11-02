@@ -5,15 +5,13 @@
  *  -16.62% / -9.20% 로 어긋난 적이 있어 한 곳으로 모았다).
  */
 
-/** 일별 누적 행 — 백엔드가 시작일 대비 누적(%)을 내려준다. 합성만 인출·슬리브 값을 함께 준다. */
+/** 일별 누적 행 — 백엔드가 시작일 대비 누적(%)을 내려준다. 합성만 슬리브 값을 함께 준다. */
 export type BacktestCumulativeRow = {
   date: string;
   strategy_pct: number;
   benchmark_pct: number;
   /** 그날의 시장 ADR — 모멘텀 ADR 게이트 이해용(넣는 화면만 채운다). */
   adr?: number | null;
-  /** 합성: 인출 누계(최초 기준금액 대비 %). */
-  withdrawn_to_initial_pct?: number;
   /** 합성: 각 슬리브를 혼자 굴렸을 때 누적(%). 그날 값이 없으면 null. */
   slots?: Record<string, number | null>;
 };
@@ -26,8 +24,6 @@ export type PeriodRow = {
   adr: number | null;
   /** 구간 최저 시장 ADR — 월간·연간 컬럼이 쓴다. */
   adr_min: number | null;
-  /** 합성: 구간 중 인출한 금액(최초 기준금액 대비 %p). */
-  withdrawal_pct?: number;
   /** 합성: 슬리브를 혼자 굴렸을 때의 구간 수익률. 어느 한쪽 값이 없으면 null. */
   slots?: Record<string, number | null>;
 };
@@ -54,10 +50,8 @@ export function toPeriodRows(
     lastDate: string;
     adr: number | null;
     adrMin: number | null;
-    withdrawn: number;
     slots: Record<string, number | null>;
   };
-  const hasWithdrawn = daily[0].withdrawn_to_initial_pct !== undefined;
   const slotKeys = Object.keys(daily[0].slots ?? {});
   const lastByPeriod = new Map<string, Snapshot>();
   const order: string[] = [];
@@ -72,7 +66,6 @@ export function toPeriodRows(
       lastDate: point.date,
       adr,
       adrMin: adr == null ? knownMin : knownMin == null ? adr : Math.min(knownMin, adr),
-      withdrawn: point.withdrawn_to_initial_pct ?? 0,
       slots: point.slots ?? {},
     });
   }
@@ -83,7 +76,6 @@ export function toPeriodRows(
     lastDate: "",
     adr: null,
     adrMin: null,
-    withdrawn: 0,
     slots: Object.fromEntries(slotKeys.map((key) => [key, 0])),
   };
   // 누적(%) 두 점 사이의 구간 수익률. 슬리브는 어느 한쪽이라도 값이 없으면 null — 0 으로 채우면
@@ -100,7 +92,6 @@ export function toPeriodRows(
       benchmark_pct: step(current.benchmark, prev.benchmark),
       adr: current.adr,
       adr_min: current.adrMin,
-      ...(hasWithdrawn ? { withdrawal_pct: current.withdrawn - prev.withdrawn } : {}),
       ...(slotKeys.length > 0
         ? {
             slots: Object.fromEntries(

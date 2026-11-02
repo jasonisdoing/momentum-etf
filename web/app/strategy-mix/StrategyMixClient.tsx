@@ -57,10 +57,10 @@ const gridTheme = createAppGridTheme();
 
 /** 접이식 전략 설명 — 운용 현황·백테스트 섹션 상단(기본 접힘). */
 const CURRENT_NOTES = [
-  { title: "기준금액", body: "저장한 원화 운용 기준금액을 슬리브에 배정합니다. 인출이나 계좌 평가액 변화로 기준금액을 바꾸지 않습니다. 해외 종목은 현재 환율로 환산하므로 환율 변동도 반영됩니다." },
+  { title: "기준금액", body: "계좌 평가액(현금 포함, IS 고정 자산 제외)을 운용 기준금액으로 삼아 슬리브 비중대로 배정합니다. 평가액이 바뀌면 기준금액도 함께 바뀝니다. 해외 종목은 현재 환율로 환산하므로 환율 변동도 반영됩니다." },
   { title: "종목 배정", body: "개별 전략 엔진이 종목과 진입·청산 시점을 정합니다. 포트폴리오는 설정 비중, 모멘텀·신고가는 슬롯당 1/N로 배정합니다. 빈 슬롯은 현금이며 중복 종목 기준금액은 합산합니다." },
-  { title: "회수·채우기", body: "종목 기준금액 대비 초과율·부족률이 각각 설정값에 도달하면 기준금액까지 정수 수량으로 조정합니다. 채우기 100%는 미보유도 매수 안내하지 않습니다. 전략 청산은 유지합니다." },
-  { title: "현금", body: "월초 자동 재배분은 하지 않습니다. 매수 자금이 부족하면 부족액을 표시하며 다른 종목을 임의로 매도하지 않습니다. 수익 인출은 현금 잔액에 반영합니다." },
+  { title: "회수·채우기", body: "종목 목표 금액 대비 초과율·부족률이 각각 설정값에 도달하면 목표 금액까지 정수 수량으로 조정합니다. 채우기 100%는 미보유도 매수 안내하지 않습니다. 전략 청산은 유지합니다." },
+  { title: "현금", body: "월초 자동 재배분은 하지 않습니다. 매수 자금이 부족하면 부족액을 표시하며 다른 종목을 임의로 매도하지 않습니다. 회수 매도 대금은 현금으로 남습니다." },
 ];
 
 const hintStyle: React.CSSProperties = {
@@ -145,7 +145,6 @@ type View = {
   daily: {
     date: string;
     strategy_pct: number;
-    withdrawn_to_initial_pct: number;
     /** 슬리브 단독 누적(%) — 슬롯 키로 담긴다. 그 날짜 데이터가 없으면 null. */
     slots: Record<string, number | null>;
     benchmark_pct: number;
@@ -1001,7 +1000,7 @@ export function StrategyMixClient() {
       {
         field: "actual_weight_pct",
         headerName: "목표비중",
-        headerTooltip: "목표 주수 × 기준 가격(KRW) ÷ 고정 운용 기준금액. 현재 계좌 비중과 분모가 다릅니다.",
+        headerTooltip: "목표 주수 × 기준 가격(KRW) ÷ 운용 기준금액(계좌 평가액 − IS 고정 자산). 현재 계좌 비중과 분모가 다릅니다.",
         width: 88,
         type: "numericColumn",
         valueFormatter: (p) =>
@@ -1235,7 +1234,7 @@ export function StrategyMixClient() {
     [formatPrice, sleeves],
   );
 
-  // 합성만의 기간 표 열 — 인출 현금과 각 슬리브를 혼자 굴렸을 때(합성이 단독보다 나은지 같은 줄에서 비교).
+  // 합성만의 기간 표 열 — 각 슬리브를 혼자 굴렸을 때(합성이 단독보다 나은지 같은 줄에서 비교).
   // 합성 곡선은 각 슬리브를 단독 운용한 수익률의 단순 평균과 일치하지 않는다.
   const periodMiddleColumns = useCallback((): ColDef<PeriodRow>[] => {
     const slotColumn = (slot: string): ColDef<PeriodRow> => ({
@@ -1250,26 +1249,6 @@ export function StrategyMixClient() {
       cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
     });
     return [
-      {
-        colId: "withdrawal_pct",
-        headerName: "인출현금",
-        headerTooltip:
-          "해당 연·월·주·일에 회수 기준으로 매도해 인출한 금액(KRW) ÷ 백테스트 최초 운용 기준금액(KRW). 청산·교체 대금은 포함하지 않습니다.",
-        valueGetter: (p) => p.data?.withdrawal_pct ?? null,
-        flex: 1,
-        minWidth: 108,
-        type: "numericColumn",
-        valueFormatter: (p) => (p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`),
-        cellStyle: (p) => ({
-          color:
-            p.value == null
-              ? "inherit"
-              : (p.value as number) > 0
-                ? "var(--up-color, #d64545)"
-                : "var(--down-color, #2f6fd0)",
-          fontWeight: 600,
-        }),
-      },
       ...slotKeys.map(slotColumn),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
@@ -1286,7 +1265,6 @@ export function StrategyMixClient() {
   const actions = positions?.actions ?? null;
 
   // 헤더 설정 — 합성 배분(%) 3칸과 슬랙 알람을 한 버튼으로 저장한다(계좌 설정에 보관).
-  const [capitalKrw, setCapitalKrw] = useState("");
   const [harvestPct, setHarvestPct] = useState("");
   const [refillPct, setRefillPct] = useState("");
   const [slackEnabled, setSlackEnabled] = useState(false);
@@ -1300,7 +1278,6 @@ export function StrategyMixClient() {
   const maxSleeves = meta?.max_sleeves ?? SLOT_KEY_ORDER.length;
   useEffect(() => {
     setSlackEnabled(Boolean(selectedAccount?.mix_slack_enabled));
-    setCapitalKrw(String(selectedAccount?.mix_capital_krw ?? ""));
     setHarvestPct(String(selectedAccount?.mix_harvest_pct ?? ""));
     setRefillPct(String(selectedAccount?.mix_refill_pct ?? ""));
     setDraftSleeves(sleeves.map((row) => ({ ...row })));
@@ -1370,7 +1347,6 @@ export function StrategyMixClient() {
       (!selectedAccount.sleeves?.length ||
         slackEnabled !== Boolean(selectedAccount.mix_slack_enabled) ||
         Number(cashPct) !== selectedAccount.mix_cash_pct ||
-        Number(capitalKrw) !== selectedAccount.mix_capital_krw ||
         Number(harvestPct) !== selectedAccount.mix_harvest_pct ||
         Number(refillPct) !== selectedAccount.mix_refill_pct ||
         draftSleeves.length !== sleeves.length ||
@@ -1389,8 +1365,8 @@ export function StrategyMixClient() {
 
   const saveHeaderSettings = async () => {
     if (!selectedAccount || !weightOk) return;
-    if ([capitalKrw, harvestPct, refillPct].some((value) => !value.trim() || !Number.isFinite(Number(value))) || Number(capitalKrw) <= 0 || Number(harvestPct) < 0 || Number(refillPct) < 0 || Number(refillPct) > 100) {
-      toast.error("기준금액은 양수(KRW), 회수 기준은 0% 이상, 채우기 기준은 0~100%로 입력하세요.");
+    if ([harvestPct, refillPct].some((value) => !value.trim() || !Number.isFinite(Number(value))) || Number(harvestPct) < 0 || Number(refillPct) < 0 || Number(refillPct) > 100) {
+      toast.error("회수 기준은 0% 이상, 채우기 기준은 0~100%로 입력하세요.");
       return;
     }
     try {
@@ -1402,7 +1378,7 @@ export function StrategyMixClient() {
           account_id: selectedAccount.account_id,
           values: {
             mix_slack_enabled: slackEnabled,
-            mix_capital_krw: Number(capitalKrw),
+            mix_capital_krw: selectedAccount.mix_capital_krw,
             mix_harvest_pct: Number(harvestPct),
             mix_refill_pct: Number(refillPct),
             // 순서가 곧 슬롯이라 키는 보내지 않는다 — 서버가 순서대로 다시 붙인다.
@@ -1425,7 +1401,7 @@ export function StrategyMixClient() {
             ? {
                 ...option,
                 mix_slack_enabled: slackEnabled,
-            mix_capital_krw: Number(capitalKrw),
+            mix_capital_krw: selectedAccount.mix_capital_krw,
             mix_harvest_pct: Number(harvestPct),
             mix_refill_pct: Number(refillPct),
                 // 라벨도 즉시 반영 — 이름을 지우면 전략 이름으로 돌아간다.
@@ -1514,8 +1490,17 @@ export function StrategyMixClient() {
                   {selectedAccount ? (
                     <>
 
+                      {/* 운용 기준금액은 입력하지 않는다 — 계좌 평가액에서 자동으로 정해진다. */}
+                      <label className="appLabeledField" style={{ marginBottom: 0 }}>
+                        <span className="appLabeledFieldLabel">운용 기준금액 (자동)</span>
+                        <span
+                          style={{ ...hintStyle, display: "inline-block", minWidth: 120 }}
+                          title="계좌 평가액(현금 포함)에서 IS 고정 자산을 뺀 금액. 슬리브 비중대로 목표 금액이 정해진다."
+                        >
+                          {positions ? `${formatAmount(positions.capital_krw)}원` : "-"}
+                        </span>
+                      </label>
                       {[
-                        { label: "운용 기준금액 (KRW)", value: capitalKrw, set: setCapitalKrw, max: undefined, hint: "인출 후에도 유지하는 고정 원화 기준금액" },
                         { label: "+ 회수 기준 (%)", value: harvestPct, set: setHarvestPct, max: undefined, hint: "종목 기준금액 대비 초과율에 도달하면 기준금액까지 매도" },
                         { label: "− 채우기 기준 (%)", value: refillPct, set: setRefillPct, max: 100, hint: "부족률에 도달하면 기준금액까지 매수. 100%는 미보유를 포함해 채우기 끔" },
                       ].map((field) => (
@@ -1880,8 +1865,8 @@ export function StrategyMixClient() {
                     <div style={{ fontWeight: 700, marginBottom: 6 }}>
                       오늘의 액션
                       <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
-                        고정 원화 기준금액과 실제 보유를 비교한 매매 지시 —
-                        고정 KRW 기준금액의 회수·채우기 조건 적용 · 채우기 100%는 매수 안내 끔
+                        계좌 평가액 기준 목표와 실제 보유를 비교한 매매 지시 —
+                        회수·채우기 조건 적용 · 채우기 100%는 매수 안내 끔
                       </span>
                     </div>
                     {todayActionGroups.length === 0 ? (
@@ -1973,7 +1958,7 @@ export function StrategyMixClient() {
                   <BacktestPeriodTables
                     daily={view.daily}
                     strategyLabel="합성"
-                    strategyTooltip="슬리브들을 한 계좌에서 함께 굴린 기간 수익률. 인출은 외부 현금 흐름으로 처리해 수익률에서 제외합니다."
+                    strategyTooltip="슬리브들을 한 계좌에서 함께 굴린 기간 수익률."
                     benchmarkLabel={view.benchmark_name}
                     benchmarkTooltip="계좌의 벤치마크."
                     defaultView="monthly"
