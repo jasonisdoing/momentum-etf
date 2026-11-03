@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from fastapi_app.dependencies import require_internal_token
+from utils.index_pool_alert import KOR_ALERT_BASIS
 from utils.kor_stock_market_service import load_kor_stock_market
 
 router = APIRouter(prefix="/internal/kor-market-stocks", tags=["kor-market-stocks"])
@@ -21,3 +22,9 @@ def get_kor_market_stocks(
     except LookupError as exc:
         # 지수 구성종목 배치가 아직 안 돌았다는 뜻 — 서버 오류가 아니라 준비 안 됨이다.
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/alert-basis")
+def get_kor_alert_basis(_: None = Depends(require_internal_token)) -> dict[str, str]:
+    """슬랙 미등록 알림의 대상 명단 설명 — 고정 문구라 종목 데이터 로딩과 따로 준다."""
+    return {"alert_basis": KOR_ALERT_BASIS}

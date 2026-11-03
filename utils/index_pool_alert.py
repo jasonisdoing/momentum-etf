@@ -18,8 +18,9 @@ _LIST_LABELS: dict[str, str] = {
     "KOSPI": f"코스피 시총 상위 {KOR_MARKET_TOP_COUNTS['KOSPI']}",
     "KOSDAQ": f"코스닥 시총 상위 {KOR_MARKET_TOP_COUNTS['KOSDAQ']}",
 }
-# 미국 미등록 알림의 대상 명단 설명 — /us-market-stock 헤더 「슬랙 기준」이 그대로 보여준다.
+# 미등록 알림의 대상 명단 설명 — /us-market-stock·/kor-market-stock 헤더 「슬랙 기준」이 그대로 보여준다.
 US_ALERT_BASIS = _LIST_LABELS["US_COMBINED"]
+KOR_ALERT_BASIS = f"{_LIST_LABELS['KOSPI']} · {_LIST_LABELS['KOSDAQ']}"
 
 
 def notify_unregistered_market_stocks(country: str, list_items: dict[str, list[dict[str, Any]]]) -> int:

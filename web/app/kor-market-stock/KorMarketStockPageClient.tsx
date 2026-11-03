@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 
 import { PageFrame } from "../components/PageFrame";
+import { SlackAlertBasisMetric } from "../components/SlackAlertBasisMetric";
 import { KorMarketStockManager } from "./KorMarketStockManager";
 
 type StockSummary = {
@@ -34,6 +35,7 @@ export function KorMarketStockPageClient() {
           <span>{MARKET_TOTAL_LABELS[summary.market] ?? `${summary.market} 전체`}:</span>
           <span className="appHeaderMetricValue">{new Intl.NumberFormat("ko-KR").format(summary.totalCount)}개</span>
         </div>
+        <SlackAlertBasisMetric apiPath="/api/kor-market-stocks/alert-basis" />
       </div>
     ),
     [summary],
