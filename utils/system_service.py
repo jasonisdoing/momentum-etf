@@ -170,7 +170,7 @@ SCHEDULE_ROWS = [
         "job": "미국 합성 액션 알림",
         "target": "합성 알람 켠 미국 풀 계좌 (오늘의 액션 신규·증가)",
         # 서머타임·겨울 정규장을 모두 덮는 슬롯 — 장 밖·개장 10분 이내는 스크립트가 건너뛴다.
-        "cadence": "평일 22:40~05:50 KST 10분 간격(미국 정규장 중 개장 10분 후부터)",
+        "cadence": "평일 22:40~05:50 KST 10분 간격",
         "command": "python scripts/strategy_mix_notify.py us",
         "schedule": {"slots": _US_INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_SAT},
     },
