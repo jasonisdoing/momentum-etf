@@ -50,8 +50,8 @@ FINISHED_STATUSES = ("filled", "canceled", "rejected", "expired")
 _SUBMIT_TIMEOUT_SECONDS = 120
 
 
-class SignalExpiredError(BrokerApiError):
-    """주문하려던 회차의 신호가 이미 사라졌다 — 다시 눌러도 같은 결과라 슬랙 버튼을 되살리지 않는다."""
+class RoundNotOrderableError(BrokerApiError):
+    """주문하려던 회차가 이미 주문 대상이 아니다(보유 상태가 바뀜) — 다시 눌러도 같은 결과라 슬랙 버튼을 되살리지 않는다."""
 
 
 _index_ready = False
@@ -73,15 +73,19 @@ def _now() -> datetime:
     return datetime.now(KST)
 
 
-def _require_signal(strategy: dict[str, Any], side: str, round_no: int) -> None:
-    """그 회차의 신호가 지금도 유효해야 한다 — 매도는 보유 중이고 매도선에 닿았을 때, 매수는 다음 회차가 매수선에 닿았을 때."""
+def _require_round_state(strategy: dict[str, Any], side: str, round_no: int) -> dict[str, Any]:
+    """그 회차가 지금도 주문 대상인지 보유 상태로만 확인한다 — 매도는 보유 중, 매수는 다음 회차이고 한도 안.
+
+    가격은 보지 않는다: 신호 가격과의 차이는 슬랙 확인 모달이 보여 주고 사람이 승인한다.
+    """
     row = next((item for item in strategy["rounds"] if item["round"] == round_no), None)
     if row is None:
         raise BrokerApiError(f"{strategy['label']} 에 {round_no}호 회차가 없습니다.")
-    reached = (row["held"] and row["sell_reached"]) if side == "sell" else (row["is_next"] and row["buy_reached"])
-    if not reached:
+    orderable = row["held"] if side == "sell" else (row["is_next"] and not row["over_limit"])
+    if not orderable:
         word = "매도" if side == "sell" else "매수"
-        raise SignalExpiredError(f"{strategy['label']} {round_no}호 {word} 신호가 더 이상 유효하지 않습니다.")
+        raise RoundNotOrderableError(f"{strategy['label']} {round_no}호는 지금 {word}할 수 있는 회차가 아닙니다.")
+    return row
 
 
 def _in_flight_filter() -> dict[str, Any]:
@@ -171,7 +175,8 @@ def resolve_order(pool: str, strategy_id: str, side: str, round_no: int | None) 
     """주문 내용 — 가격은 **그 순간의 현재가를 호가 단위로 반올림한 지정가**, 수량은 회차당 수량이다.
 
     사다리 지정가를 미리 걸지 않는다 — 사람이 버튼을 누르는 순간의 시장 가격으로만 낸다.
-    `round_no` 가 있으면(신호 주문) 그 회차의 신호가 지금도 유효한지 확인한다.
+    `round_no` 가 있으면(신호 주문) 그 회차가 지금도 주문 대상인지 확인하고, 비교용 `signal_price`(매도 목표·매수선,
+    장 마감 매수는 None)를 함께 준다.
     """
     if side not in ("buy", "sell"):
         raise BrokerApiError(f"알 수 없는 주문 구분입니다: {side}")
@@ -180,8 +185,10 @@ def resolve_order(pool: str, strategy_id: str, side: str, round_no: int | None) 
     )
     if strategy is None:
         raise BrokerApiError(f"{pool} 종목풀에 '{strategy_id}' 전략이 없습니다.")
+    signal_price = None
     if round_no is not None:
-        _require_signal(strategy, side, round_no)
+        row = _require_round_state(strategy, side, round_no)
+        signal_price = row["sell_limit"] if side == "sell" else (None if row["close_entry"] else row["buy_limit"])
     current = float(strategy["index"]["close"] or 0)
     if current <= 0:
         raise BrokerApiError(f"{strategy['label']} 의 현재가를 알 수 없습니다.")
@@ -190,6 +197,7 @@ def resolve_order(pool: str, strategy_id: str, side: str, round_no: int | None) 
         "ticker": strategy["ticker"],
         "quantity": int(strategy["config"]["round_quantity"]),
         "price": int(round_to_tick(current)),
+        "signal_price": signal_price,
     }
 
 
@@ -198,7 +206,7 @@ def place_order(
 ) -> dict[str, Any]:
     """전략 종목을 현재가 지정가로 계좌에 주문하고 기록한다.
 
-    `round_no` 는 신호 주문(신호 메시지의 회차 버튼)만 넘긴다 — 신호 유효성과 중복을 확인하고 기록에 남긴다.
+    `round_no` 는 신호 주문(신호 메시지의 회차 버튼)만 넘긴다 — 회차 보유 상태와 중복을 확인하고 기록에 남긴다.
     `slack`(채널·메시지 ts)은 슬랙 메시지로 낸 주문만 넘긴다 — 있으면 끝난 뒤 그 스레드로 알린다. 없으면(모달의
     직접 주문) 매도만 받는다: 매수는 슬랙의 사람 리뷰를 거치게 한다.
     """
@@ -255,7 +263,7 @@ def place_order(
             }
         },
     )
-    return serialize_order(orders.find_one({"_id": inserted.inserted_id}))
+    return {**serialize_order(orders.find_one({"_id": inserted.inserted_id})), "signal_price": order["signal_price"]}
 
 
 def cancel_record(order_id: str) -> dict[str, Any]:

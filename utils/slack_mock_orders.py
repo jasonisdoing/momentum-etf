@@ -29,7 +29,7 @@ from utils.notification import send_slack_message_v2
 from utils.settings_loader import get_slack_channel
 from utils.strategy_trade_orders import (
     FINISHED_STATUSES,
-    SignalExpiredError,
+    RoundNotOrderableError,
     cancel_record,
     close_warning_slack_orders,
     filled_signal_threads,
@@ -57,7 +57,7 @@ _SIDE_LABELS = {"buy": "매수", "sell": "매도"}
 #: 주문 기록(`slack`)에 남기는 슬랙 위치 — 버튼이 있는 메시지(`message_ts`)와 결과를 달 스레드 뿌리(`thread_ts`).
 SLACK_TARGET_KEYS = ("channel", "message_ts", "thread_ts")
 # 신호 메시지 반응 — 스레드에서 첫 주문이 접수되면 모래시계, 주문 메시지가 전부 체결되면 완료 표시,
-# 주문하려는 순간 신호가 이미 사라졌으면 ❌.
+# 주문하려는 순간 그 회차가 이미 주문 대상이 아니면(보유 상태 변경) ❌.
 REACTION_PENDING = "hourglass_flowing_sand"
 REACTION_DONE = "white_check_mark"
 REACTION_EXPIRED = "x"
@@ -185,13 +185,34 @@ def _modal_view(callback_id: str, title: str, submit: str, body: str, metadata: 
     }
 
 
-def _order_view(request: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+def _signal_gap_pct(order: dict[str, Any]) -> float | None:
+    """신호 가격(매도 목표·매수선) 대비 현재가 차이 % — 신호 가격이 없는 주문(장 마감 매수)은 None."""
+    if order["signal_price"] is None:
+        return None
+    return (order["price"] / order["signal_price"] - 1.0) * 100.0
+
+
+def _gap_label(side: str, gap_pct: float) -> str:
+    """신호 대비 차이를 사람이 바로 판단하게 적는다 — 매도는 낮을수록, 매수는 높을수록 신호보다 불리하다."""
+    unfavorable = gap_pct < 0 if side == "sell" else gap_pct > 0
+    return "⚠️ 신호보다 불리" if unfavorable else "신호보다 유리"
+
+
+def _order_view(request: dict[str, Any], order: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
     side = _SIDE_LABELS[request["side"]]
+    gap_pct = _signal_gap_pct(order)
+    if gap_pct is None:
+        gap = f"현재가 {order['price']:,}원 (신호 가격 비교 없음)"
+    else:
+        gap = (
+            f"*신호 대비 {gap_pct:+.2f}%* — {_gap_label(request['side'], gap_pct)}\n"
+            f"신호 {order['signal_price']:,.0f}원 · 현재가 {order['price']:,}원"
+        )
     guide = (
         f"주문을 확정하는 순간의 현재가(호가 단위)로 {_env_word(request['env'])} 계좌에 보냅니다. "
         "현재가 지정가라 호가에 따라 체결되지 않을 수 있습니다."
     )
-    body = f"*{_order_text(request)}*\n{guide}"
+    body = f"*{_order_text(request)}*\n{gap}\n{guide}"
     return _modal_view(ORDER_CALLBACK_ID, f"{_env_word(request['env'])} {side} 주문 확인", f"{side} 주문", body, target)
 
 
@@ -231,7 +252,12 @@ def open_confirm_modal(payload: dict[str, Any]) -> None:
         "thread_ts": message.get("thread_ts") or message["ts"],
     }
     if action["action_id"] == OPEN_ACTION_ID:
-        view = _order_view(request, target)
+        try:
+            order = resolve_order(request["pool"], request["strategy_id"], request["side"], request["round"])
+        except RoundNotOrderableError as exc:
+            _expire(target, exc)
+            return
+        view = _order_view(request, order, target)
     elif action["action_id"] == CANCEL_ACTION_ID:
         view = _cancel_view(request, {**target, "order_id": value["order_id"]})
     else:
@@ -270,10 +296,20 @@ def _finish(target: dict[str, Any], order: dict[str, Any]) -> None:
     send_slack_message_v2(text, thread_ts=target["thread_ts"])
     request = target["request"]
     if order["status"] == "canceled" and order["filled_quantity"] == 0:
-        # 다시 주문해도 서버가 신호 유효성·중복·안전 장치를 처음 주문과 똑같이 검사한다.
+        # 다시 주문해도 서버가 회차 보유 상태·중복·안전 장치를 처음 주문과 똑같이 검사한다.
         _update_message(target, [*_open_blocks(request, "다시 주문하기"), _note(text)])
     else:
         _update_message(target, _note_blocks(request, text))
+
+
+def _expire(target: dict[str, Any], exc: Exception) -> None:
+    """회차가 더는 주문 대상이 아니면 다시 눌러도 같은 결과이므로 버튼을 되살리지 않고 신호 메시지에 ❌ 를 단다."""
+    request = target["request"]
+    side = f"{_env_word(request['env'])} {_SIDE_LABELS[request['side']]}"
+    send_slack_message_v2(f"❌ {side} 주문 실패: {exc}", thread_ts=target["thread_ts"])
+    _update_message(target, _note_blocks(request, "⌛ 보유 상태가 바뀌어 주문 불가"))
+    if target["thread_ts"] != target["message_ts"]:
+        _react("reactions_add", target["channel"], target["thread_ts"], REACTION_EXPIRED)
 
 
 def _place(target: dict[str, Any]) -> None:
@@ -290,20 +326,18 @@ def _place(target: dict[str, Any]) -> None:
             request["round"],
             {key: target[key] for key in SLACK_TARGET_KEYS},
         )
-    except SignalExpiredError as exc:
-        # 신호가 사라졌으면 다시 눌러도 같은 결과이므로 버튼을 되살리지 않고 신호 메시지에 ❌ 를 단다.
-        send_slack_message_v2(f"❌ {side} 주문 실패: {exc}", thread_ts=target["thread_ts"])
-        _update_message(target, _note_blocks(request, "⌛ 신호 소멸 — 주문 불가"))
-        if target["thread_ts"] != target["message_ts"]:
-            _react("reactions_add", target["channel"], target["thread_ts"], REACTION_EXPIRED)
+    except RoundNotOrderableError as exc:
+        _expire(target, exc)
         return
     except Exception as exc:  # 슬랙 요청은 이미 응답했으므로 실패도 스레드로 알린다.
         logger.exception("슬랙 모의 주문 처리 실패")
         send_slack_message_v2(f"❌ {side} 주문 실패: {exc}", thread_ts=target["thread_ts"])
         _update_message(target, _open_blocks(request))
         return
+    gap_pct = _signal_gap_pct(order)
+    gap = f" · 신호 대비 {gap_pct:+.2f}%" if gap_pct is not None else ""
     send_slack_message_v2(
-        f"✅ {side} 주문 접수: {order['strategy_label']} {order['quantity']:,}주 × {order['price']:,}원 (지정가)",
+        f"✅ {side} 주문 접수: {order['strategy_label']} {order['quantity']:,}주 × {order['price']:,}원 (지정가){gap}",
         thread_ts=target["thread_ts"],
     )
     _update_message(target, _cancel_blocks(request, order["id"]))
