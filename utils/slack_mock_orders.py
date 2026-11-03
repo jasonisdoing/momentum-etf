@@ -29,6 +29,7 @@ from utils.notification import send_slack_message_v2
 from utils.settings_loader import get_slack_channel
 from utils.strategy_trade_orders import (
     FINISHED_STATUSES,
+    SignalExpiredError,
     cancel_record,
     close_warning_slack_orders,
     filled_signal_threads,
@@ -55,9 +56,11 @@ CANCEL_CALLBACK_ID = "mock_order_cancel_confirm"
 _SIDE_LABELS = {"buy": "매수", "sell": "매도"}
 #: 주문 기록(`slack`)에 남기는 슬랙 위치 — 버튼이 있는 메시지(`message_ts`)와 결과를 달 스레드 뿌리(`thread_ts`).
 SLACK_TARGET_KEYS = ("channel", "message_ts", "thread_ts")
-# 신호 메시지 반응 — 스레드에서 첫 주문이 접수되면 모래시계, 주문 메시지가 전부 체결되면 완료 표시.
+# 신호 메시지 반응 — 스레드에서 첫 주문이 접수되면 모래시계, 주문 메시지가 전부 체결되면 완료 표시,
+# 주문하려는 순간 신호가 이미 사라졌으면 ❌.
 REACTION_PENDING = "hourglass_flowing_sand"
 REACTION_DONE = "white_check_mark"
+REACTION_EXPIRED = "x"
 _REACTION_NOOP_ERRORS = ("already_reacted", "no_reaction")
 
 
@@ -287,6 +290,13 @@ def _place(target: dict[str, Any]) -> None:
             request["round"],
             {key: target[key] for key in SLACK_TARGET_KEYS},
         )
+    except SignalExpiredError as exc:
+        # 신호가 사라졌으면 다시 눌러도 같은 결과이므로 버튼을 되살리지 않고 신호 메시지에 ❌ 를 단다.
+        send_slack_message_v2(f"❌ {side} 주문 실패: {exc}", thread_ts=target["thread_ts"])
+        _update_message(target, _note_blocks(request, "⌛ 신호 소멸 — 주문 불가"))
+        if target["thread_ts"] != target["message_ts"]:
+            _react("reactions_add", target["channel"], target["thread_ts"], REACTION_EXPIRED)
+        return
     except Exception as exc:  # 슬랙 요청은 이미 응답했으므로 실패도 스레드로 알린다.
         logger.exception("슬랙 모의 주문 처리 실패")
         send_slack_message_v2(f"❌ {side} 주문 실패: {exc}", thread_ts=target["thread_ts"])

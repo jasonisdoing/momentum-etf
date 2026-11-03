@@ -49,6 +49,11 @@ FINISHED_STATUSES = ("filled", "canceled", "rejected", "expired")
 #: 전송 결과를 모른 채 이 시간이 지난 기록은 거부로 정리한다.
 _SUBMIT_TIMEOUT_SECONDS = 120
 
+
+class SignalExpiredError(BrokerApiError):
+    """주문하려던 회차의 신호가 이미 사라졌다 — 다시 눌러도 같은 결과라 슬랙 버튼을 되살리지 않는다."""
+
+
 _index_ready = False
 
 
@@ -76,7 +81,7 @@ def _require_signal(strategy: dict[str, Any], side: str, round_no: int) -> None:
     reached = (row["held"] and row["sell_reached"]) if side == "sell" else (row["is_next"] and row["buy_reached"])
     if not reached:
         word = "매도" if side == "sell" else "매수"
-        raise BrokerApiError(f"{strategy['label']} {round_no}호 {word} 신호가 더 이상 유효하지 않습니다.")
+        raise SignalExpiredError(f"{strategy['label']} {round_no}호 {word} 신호가 더 이상 유효하지 않습니다.")
 
 
 def _in_flight_filter() -> dict[str, Any]:
