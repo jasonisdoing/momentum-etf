@@ -75,6 +75,8 @@ export type RoundRow = {
   // 오늘 슬랙 신호가 나간 방향, 아직 끝나지 않은 주문의 방향.
   slack_sides: Array<"buy" | "sell">;
   order_sides: Array<"buy" | "sell">;
+  // 오늘 체결된 주문의 방향 — 표시 기록일 뿐이다.
+  filled_sides: Array<"buy" | "sell">;
   is_next: boolean;
 };
 
@@ -201,7 +203,8 @@ function StatusBadge({ color, children }: { color: string; children: React.React
 
 const SIDE_WORDS = { buy: "매수", sell: "매도" } as const;
 
-/** 상태 칸 — 지정가에 닿았으면 도달(빨강), 슬랙 신호·주문이 나갔으면 방향을 붙여 매도슬랙·매수주문처럼(녹색). */
+/** 상태 칸 — 지정가에 닿았으면 도달(빨강), 슬랙 신호·주문이 나갔으면 방향을 붙여 매도슬랙·매수주문처럼(녹색),
+ *  오늘 체결된 주문은 매도체결·매수체결(회색)로 남긴다. */
 function RoundStatus({ row }: { row: RoundRow }) {
   return (
     <span style={{ display: "inline-flex", gap: 4 }}>
@@ -214,6 +217,11 @@ function RoundStatus({ row }: { row: RoundRow }) {
       {row.order_sides.map((side) => (
         <StatusBadge key={`order-${side}`} color="var(--tblr-green, #2fb344)">
           {SIDE_WORDS[side]}주문
+        </StatusBadge>
+      ))}
+      {row.filled_sides.map((side) => (
+        <StatusBadge key={`filled-${side}`} color="var(--text-muted)">
+          {SIDE_WORDS[side]}체결
         </StatusBadge>
       ))}
     </span>
