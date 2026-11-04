@@ -222,6 +222,9 @@ function RoundStatus({ row }: { row: RoundRow }) {
   );
 }
 
+// 매수는 파랑, 매도는 빨강 — 이 화면의 "더 내리면 매수"·"더 오르면 매도" 안내와 같은 색이다.
+const FILL_COLORS = { buy: "var(--down-color, #2f6fd0)", sell: "var(--up-color, #d64545)" } as const;
+
 /** 거래 히스토리 칸 — 오늘 체결된 주문을 방향별로 남긴다. 한 번이면 매도체결, 반복되면 매도체결 2처럼 건수를 붙인다. */
 function FillBadges({ counts }: { counts: RoundRow["fill_counts"] }) {
   const sides = (["buy", "sell"] as const).filter((side) => counts[side] > 0);
@@ -229,7 +232,7 @@ function FillBadges({ counts }: { counts: RoundRow["fill_counts"] }) {
   return (
     <span style={{ display: "inline-flex", gap: 4 }}>
       {sides.map((side) => (
-        <StatusBadge key={side} color="var(--text-muted)">
+        <StatusBadge key={side} color={FILL_COLORS[side]}>
           {SIDE_WORDS[side]}체결{counts[side] > 1 ? ` ${counts[side]}` : ""}
         </StatusBadge>
       ))}
