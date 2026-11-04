@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -105,17 +106,21 @@ def find_duplicate_order(account_no: str, strategy_id: str, side: str, round_no:
     )
 
 
-def _order_keys(strategy_ids: list[str], status_filter: dict[str, Any]) -> set[tuple[str, int, str]]:
+def _order_counts(strategy_ids: list[str], status_filter: dict[str, Any]) -> Counter[tuple[str, int, str]]:
     records = _orders().find(
         {"strategy_id": {"$in": strategy_ids}, "round": {"$ne": None}, **status_filter},
         {"strategy_id": 1, "round": 1, "side": 1},
     )
-    return {(record["strategy_id"], record["round"], record["side"]) for record in records}
+    return Counter((record["strategy_id"], record["round"], record["side"]) for record in records)
 
 
-def filled_today_order_keys(strategy_ids: list[str]) -> set[tuple[str, int, str]]:
-    """이 전략들의 오늘 체결된 신호 주문 — (전략, 회차, 구분) 집합(화면 표시용 기록)."""
-    return _order_keys(strategy_ids, _filled_today_filter())
+def _order_keys(strategy_ids: list[str], status_filter: dict[str, Any]) -> set[tuple[str, int, str]]:
+    return set(_order_counts(strategy_ids, status_filter))
+
+
+def filled_today_order_counts(strategy_ids: list[str]) -> Counter[tuple[str, int, str]]:
+    """이 전략들의 오늘 체결된 신호 주문 건수 — (전략, 회차, 구분)별(화면 표시용 기록)."""
+    return _order_counts(strategy_ids, _filled_today_filter())
 
 
 def active_order_keys(strategy_ids: list[str]) -> set[tuple[str, int, str]]:

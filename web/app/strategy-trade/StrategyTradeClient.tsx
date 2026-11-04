@@ -75,8 +75,8 @@ export type RoundRow = {
   // 오늘 슬랙 신호가 나간 방향, 아직 끝나지 않은 주문의 방향.
   slack_sides: Array<"buy" | "sell">;
   order_sides: Array<"buy" | "sell">;
-  // 오늘 체결된 주문의 방향 — 표시 기록일 뿐이다.
-  filled_sides: Array<"buy" | "sell">;
+  // 오늘 체결된 주문의 방향별 건수 — 표시 기록일 뿐이다.
+  fill_counts: Record<"buy" | "sell", number>;
   is_next: boolean;
 };
 
@@ -203,8 +203,7 @@ function StatusBadge({ color, children }: { color: string; children: React.React
 
 const SIDE_WORDS = { buy: "매수", sell: "매도" } as const;
 
-/** 상태 칸 — 지정가에 닿았으면 도달(빨강), 슬랙 신호·주문이 나갔으면 방향을 붙여 매도슬랙·매수주문처럼(녹색),
- *  오늘 체결된 주문은 매도체결·매수체결(회색)로 남긴다. */
+/** 상태 칸 — 지정가에 닿았으면 도달(빨강), 슬랙 신호·주문이 나갔으면 방향을 붙여 매도슬랙·매수주문처럼(녹색). */
 function RoundStatus({ row }: { row: RoundRow }) {
   return (
     <span style={{ display: "inline-flex", gap: 4 }}>
@@ -219,9 +218,19 @@ function RoundStatus({ row }: { row: RoundRow }) {
           {SIDE_WORDS[side]}주문
         </StatusBadge>
       ))}
-      {row.filled_sides.map((side) => (
-        <StatusBadge key={`filled-${side}`} color="var(--text-muted)">
-          {SIDE_WORDS[side]}체결
+    </span>
+  );
+}
+
+/** 거래 히스토리 칸 — 오늘 체결된 주문을 방향별로 남긴다. 한 번이면 매도체결, 반복되면 매도체결 2처럼 건수를 붙인다. */
+function FillBadges({ counts }: { counts: RoundRow["fill_counts"] }) {
+  const sides = (["buy", "sell"] as const).filter((side) => counts[side] > 0);
+  if (sides.length === 0) return null;
+  return (
+    <span style={{ display: "inline-flex", gap: 4 }}>
+      {sides.map((side) => (
+        <StatusBadge key={side} color="var(--text-muted)">
+          {SIDE_WORDS[side]}체결{counts[side] > 1 ? ` ${counts[side]}` : ""}
         </StatusBadge>
       ))}
     </span>
@@ -233,7 +242,7 @@ function RoundStatus({ row }: { row: RoundRow }) {
 function BelowLastGapRow({ gap }: { gap: { round: number; pct: number } }) {
   return (
     <tr>
-      <td colSpan={8} style={{ padding: "22px 8px", textAlign: "center" }}>
+      <td colSpan={9} style={{ padding: "22px 8px", textAlign: "center" }}>
         <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
           {gap.round}호에서 <b style={{ color: "var(--up-color, #d64545)" }}>{formatSigned(gap.pct)}</b> 더 내려가야
           기준선
@@ -252,7 +261,7 @@ function BelowLastGapRow({ gap }: { gap: { round: number; pct: number } }) {
 function RecentLowRow({ index }: { index: IndexStatus }) {
   return (
     <tr>
-      <td colSpan={8} style={{ padding: "2px 8px" }}>
+      <td colSpan={9} style={{ padding: "2px 8px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--up-color, #d64545)", fontSize: "var(--fs-sm)", fontWeight: 700 }}>
           <span style={{ flex: 1, borderTop: "2px dashed var(--up-color, #d64545)", opacity: 0.55 }} />
           <span>
@@ -697,6 +706,7 @@ function StrategySection({ view }: { view: StrategyView }) {
               <th style={thStyle}>손익</th>
               <th style={thStyle}>매수 지정가</th>
               <th style={thStyle}>매도 지정가</th>
+              <th style={{ ...thStyle, textAlign: "left" }}>거래 히스토리</th>
             </tr>
           </thead>
           <tbody>
@@ -740,6 +750,9 @@ function StrategySection({ view }: { view: StrategyView }) {
                 </td>
                 <td style={{ ...tdStyle, fontWeight: row.sell_limit != null ? 700 : undefined }}>
                   {formatNumber(row.sell_limit)}
+                </td>
+                <td style={{ ...tdStyle, textAlign: "left" }}>
+                  <FillBadges counts={row.fill_counts} />
                 </td>
               </tr>
               </React.Fragment>
