@@ -92,20 +92,15 @@ def _filled_today_filter() -> dict[str, Any]:
     return {"status": "filled", "created_at": {"$gte": _now().strftime("%Y-%m-%d")}}
 
 
-def _in_flight_filter() -> dict[str, Any]:
-    """진행 중이거나 오늘 체결된 주문 — 체결이 보유에 반영되기 전이라 같은 신호로 또 나가면 안 되는 주문."""
-    return {"$or": [{"status": {"$in": list(ACTIVE_STATUSES)}}, _filled_today_filter()]}
-
-
 def find_duplicate_order(account_no: str, strategy_id: str, side: str, round_no: int) -> dict[str, Any] | None:
-    """같은 회차·구분의 주문이 진행 중이거나 오늘 체결된 기록."""
+    """같은 회차·구분의 주문이 진행 중인 기록 — 체결된 주문은 막지 않는다(체결 뒤 같은 회차에 다시 닿으면 다시 주문한다)."""
     return _orders().find_one(
         {
             "account_no": account_no,
             "strategy_id": strategy_id,
             "side": side,
             "round": round_no,
-            **_in_flight_filter(),
+            "status": {"$in": list(ACTIVE_STATUSES)},
         }
     )
 
@@ -116,11 +111,6 @@ def _order_keys(strategy_ids: list[str], status_filter: dict[str, Any]) -> set[t
         {"strategy_id": 1, "round": 1, "side": 1},
     )
     return {(record["strategy_id"], record["round"], record["side"]) for record in records}
-
-
-def in_flight_order_keys(strategy_ids: list[str]) -> set[tuple[str, int, str]]:
-    """이 전략들의 진행 중이거나 오늘 체결된 신호 주문 — (전략, 회차, 구분) 집합."""
-    return _order_keys(strategy_ids, _in_flight_filter())
 
 
 def filled_today_order_keys(strategy_ids: list[str]) -> set[tuple[str, int, str]]:

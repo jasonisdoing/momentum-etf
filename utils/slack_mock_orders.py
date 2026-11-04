@@ -457,7 +457,7 @@ def notify_completed_threads() -> int:
 def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dict[str, Any]], signal_ts: str) -> int:
     """신호가 난 회차마다 주문 메시지(버튼)를 신호 메시지의 스레드로 보내고 그 스레드를 추적 대상으로 기록한다 — 보낸 건수.
 
-    이미 주문이 진행 중이거나 오늘 체결된 회차는 건너뛴다(매시간 재알림에서 주문이 아직 없는 회차에만 다시 띄우려는 것).
+    이미 주문이 진행 중인 회차는 건너뛴다(매시간 재알림에서 주문이 아직 없는 회차에만 다시 띄우려는 것).
     주문은 슬랙의 버튼과 모달 확인을 거쳐야 나간다.
     """
     account_no = broker_account_no_for_pool(strategy_view["pool"])

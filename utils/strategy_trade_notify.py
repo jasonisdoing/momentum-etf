@@ -439,7 +439,7 @@ def notify_strategy_trade() -> dict[str, Any]:
         ``{"sent": bool, "reason": str, "triggers": [...]}``
     """
     from utils.notification import send_slack_message_v2
-    from utils.strategy_trade_orders import in_flight_order_keys
+    from utils.strategy_trade_orders import active_order_keys
 
     enabled = [
         pool
@@ -472,11 +472,9 @@ def notify_strategy_trade() -> dict[str, Any]:
         and _round_filled(pending, held_counts[str(pending.get("strategy_id"))]),
     )
 
-    # 주문이 이미 진행 중이거나 오늘 체결된 회차는 재알림하지 않는다 — 사람이 이미 처리 중이다.
+    # 주문이 이미 진행 중인 회차는 재알림하지 않는다 — 사람이 이미 처리 중이다.
     in_flight = (
-        in_flight_order_keys([strategy_view["strategy_id"] for strategy_view in view["strategies"]])
-        if triggers
-        else set()
+        active_order_keys([strategy_view["strategy_id"] for strategy_view in view["strategies"]]) if triggers else set()
     )
     sent_count = failed_count = order_failed = 0
     fresh_all: list[dict[str, Any]] = []
