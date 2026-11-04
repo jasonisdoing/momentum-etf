@@ -194,15 +194,21 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
     """화면용 — 회차마다 오늘 슬랙 신호가 나간 방향(`slack_sides`)과 아직 끝나지 않은 주문의 방향(`order_sides`)을 행에 적는다.
 
     지정가에 닿아 있는지와 무관하다 — 신호·주문이 나간 뒤 가격이 물러나도 표시가 남아야 한다.
-    체결된 주문과 슬랙 기록(체결이 확인되면 지워진다)은 더 표시하지 않는다.
+    체결된 주문과 이미 체결된 신호의 슬랙 기록은 더 표시하지 않는다 — 기록은 배치가 체결을 확인해 지우기까지
+    최대 한 배치 주기 남으므로, 화면도 배치와 같은 판정(`_round_filled`)으로 먼저 걸러낸다.
     """
     from utils.strategy_trade_orders import active_order_keys
 
     today = datetime.now(KST).strftime("%Y-%m-%d")
+    held_counts = _held_counts(view)
     slack_keys = {
         (entry.get("strategy_id"), entry.get("round"), entry.get("action"))
         for entry in _load_sent_log().values()
-        if (sent_at := _parse_sent_at(entry.get("at"))) is not None and sent_at.strftime("%Y-%m-%d") == today
+        # 이 화면에 없는 전략의 기록은 어차피 행에 닿지 않는다 — 보유 수를 모르니 판정 없이 뺀다.
+        if entry.get("strategy_id") in held_counts
+        and (sent_at := _parse_sent_at(entry.get("at"))) is not None
+        and sent_at.strftime("%Y-%m-%d") == today
+        and not _round_filled(entry, held_counts[entry["strategy_id"]])
     }
     order_keys = active_order_keys([strategy_view["strategy_id"] for strategy_view in view["strategies"]])
     for strategy_view in view["strategies"]:
