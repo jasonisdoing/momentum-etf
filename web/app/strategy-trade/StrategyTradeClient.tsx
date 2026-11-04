@@ -222,8 +222,8 @@ function RoundStatus({ row }: { row: RoundRow }) {
   );
 }
 
-// 매수는 파랑, 매도는 빨강 — 이 화면의 "더 내리면 매수"·"더 오르면 매도" 안내와 같은 색이다.
-const FILL_COLORS = { buy: "var(--down-color, #2f6fd0)", sell: "var(--up-color, #d64545)" } as const;
+// 매수는 보라, 매도는 주황 — 빨강·파랑은 상승·하락 손익색이라 헷갈리고 초록은 슬랙·주문 표시가 쓴다.
+const FILL_COLORS = { buy: "var(--tblr-purple, #ae3ec9)", sell: "var(--tblr-orange, #f76707)" } as const;
 
 /** 거래 히스토리 칸 — 오늘 체결된 주문을 방향별로 남긴다. 한 번이면 매도체결, 반복되면 매도체결 2처럼 건수를 붙인다. */
 function FillBadges({ counts }: { counts: RoundRow["fill_counts"] }) {
