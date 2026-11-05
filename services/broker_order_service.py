@@ -247,35 +247,65 @@ def order_status(row: dict[str, Any]) -> str:
     return "pending"
 
 
-def list_day_orders(account_no: str, yyyymmdd: str) -> list[dict[str, Any]]:
-    """그날의 주문 목록(체결 조회) — 원주문만이다.
+def _day_order_row(item: dict[str, Any]) -> dict[str, Any]:
+    """체결 조회 한 줄 → 주문 행. `origin_order_no` 는 정정·취소 요청일 때만 0 이 아니다."""
+    return {
+        "order_no": str(int(item.get("itg_orr_no") or 0)),
+        "origin_order_no": str(int(item.get("org_itg_orr_no") or 0)),
+        "ticker": str(item.get("iem_cd") or "").strip(),
+        "name": str(item.get("iem_nm") or "").strip(),
+        "side_label": str(item.get("sby_dit_cd_nm") or "").strip(),
+        "quantity": int(float(item.get("orr_qty") or 0)),
+        "price": float(item.get("orr_pr") or 0),
+        "filled_quantity": int(float(item.get("tot_cns_qty") or 0)),
+        "unfilled_quantity": int(float(item.get("ny_cns_qty") or 0)),
+        "canceled_quantity": int(float(item.get("can_qty") or 0)),
+        "average_fill_price": float(item.get("cns_avg_uit_pr") or 0),
+        "status": order_status(item),
+    }
 
-    정정·취소 요청도 자기 번호를 가진 행으로 나오지만(원주문번호 `org_itg_orr_no` 가 0 이 아님), 그 결과는 원주문의
-    취소수량에 이미 반영되므로 목록에서 뺀다.
+
+def _root_order_no(row: dict[str, Any], by_no: dict[str, dict[str, Any]]) -> str | None:
+    """정정이 이어진 주문의 맨 처음 원주문번호 — 원주문이 목록에 없으면 None."""
+    current = row
+    while current["origin_order_no"] != "0":
+        current = by_no.get(current["origin_order_no"])
+        if current is None:
+            return None
+    return current["order_no"]
+
+
+def _merge_amendments(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """정정 요청 행의 결과(가격·체결·상태)를 원주문 행에 합친다.
+
+    증권사 앱에서 가격을 정정하면 새 주문번호의 행이 생겨 거기서 체결되고, 원주문 행은 취소수량도 체결도 없이
+    미체결로 남는다. 원주문에 취소수량이 있으면 취소 요청이 이미 반영된 것이라 합치지 않는다.
     """
+    by_no = {row["order_no"]: row for row in rows}
+    latest: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        root = _root_order_no(row, by_no)
+        if root is None or root == row["order_no"]:
+            continue
+        if root not in latest or int(row["order_no"]) > int(latest[root]["order_no"]):
+            latest[root] = row
+    merged: list[dict[str, Any]] = []
+    for row in rows:
+        if row["origin_order_no"] != "0":
+            continue
+        amended = latest.get(row["order_no"])
+        if amended is not None and row["canceled_quantity"] == 0:
+            row = {**amended, "order_no": row["order_no"], "origin_order_no": "0"}
+        merged.append(row)
+    return merged
+
+
+def list_day_orders(account_no: str, yyyymmdd: str) -> list[dict[str, Any]]:
+    """그날의 주문 목록(체결 조회) — 원주문만이고, 정정은 최신 정정 행의 결과가 원주문번호로 합쳐져 나온다."""
     data = _post_paged(
         _base_url(account_no),
         DAY_ORDERS_PATH,
         {"orr_dt": yyyymmdd, "act_no": account_no, "orr_mkt_cd": "00", "ost_cns_dit": "0"},
         "Output_0",
     )
-    rows: list[dict[str, Any]] = []
-    for item in data.get("Output_0") or []:
-        if int(item.get("org_itg_orr_no") or 0) != 0:
-            continue
-        rows.append(
-            {
-                "order_no": str(int(item.get("itg_orr_no") or 0)),
-                "ticker": str(item.get("iem_cd") or "").strip(),
-                "name": str(item.get("iem_nm") or "").strip(),
-                "side_label": str(item.get("sby_dit_cd_nm") or "").strip(),
-                "quantity": int(float(item.get("orr_qty") or 0)),
-                "price": float(item.get("orr_pr") or 0),
-                "filled_quantity": int(float(item.get("tot_cns_qty") or 0)),
-                "unfilled_quantity": int(float(item.get("ny_cns_qty") or 0)),
-                "canceled_quantity": int(float(item.get("can_qty") or 0)),
-                "average_fill_price": float(item.get("cns_avg_uit_pr") or 0),
-                "status": order_status(item),
-            }
-        )
-    return rows
+    return _merge_amendments([_day_order_row(item) for item in data.get("Output_0") or []])
