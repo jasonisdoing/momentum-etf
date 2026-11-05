@@ -26,13 +26,19 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from utils.logger import get_app_logger
 from utils.order_confirm import build_confirm_line, pop_filled
-from utils.strategy_trade_service import load_settings, load_views_for_pools, sleeve_for_pool
+from utils.strategy_trade_service import (
+    linked_broker_account_no,
+    load_settings,
+    load_views_for_pools,
+    sleeve_for_pool,
+)
 
 KST = ZoneInfo("Asia/Seoul")
 logger = get_app_logger()
@@ -190,9 +196,26 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
     return triggers
 
 
+def _external_history(strategy_view: dict[str, Any]) -> tuple[Counter[tuple[int, str]], str | None]:
+    """증권사 앱(HTS·MTS)에서 직접 낸 오늘 체결과 오류 문구 — 증권사 API 연동이 없는 계좌는 비운다(오류 아님).
+
+    증권사 조회가 실패하면 화면 전체를 막지 않고 오류 문구를 돌려 화면이 표시하게 한다.
+    """
+    from services.broker_api_service import BrokerApiError
+    from utils.strategy_trade_orders import external_fill_counts
+
+    account_no = linked_broker_account_no(strategy_view["pool"])
+    if account_no is None:
+        return Counter(), None
+    try:
+        return external_fill_counts(strategy_view, account_no), None
+    except BrokerApiError as exc:
+        return Counter(), str(exc)
+
+
 def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
     """화면용 — 회차마다 오늘 슬랙 신호가 나간 방향(`slack_sides`)과 아직 끝나지 않은 주문의 방향(`order_sides`),
-    오늘 체결된 주문의 방향별 건수(`fill_counts`, 표시 기록일 뿐 전략·주문 판정과 무관하다)를 행에 적는다.
+    오늘 체결된 매매를 출처(슬랙 신호 주문·수동)와 방향별 건수(`fills`, 표시 기록일 뿐 전략·주문 판정과 무관하다)로 행에 적는다.
 
     지정가에 닿아 있는지와 무관하다 — 신호·주문이 나간 뒤 가격이 물러나도 표시가 남아야 한다.
     체결된 주문과 이미 체결된 신호의 슬랙 기록은 더 표시하지 않는다 — 기록은 배치가 체결을 확인해 지우기까지
@@ -215,11 +238,21 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
     order_keys = active_order_keys(strategy_ids)
     filled_counts = filled_today_order_counts(strategy_ids)
     for strategy_view in view["strategies"]:
+        external, strategy_view["history_error"] = _external_history(strategy_view)
         for row in strategy_view["rounds"]:
             key = (strategy_view["strategy_id"], row["round"])
             row["slack_sides"] = [side for side in ("buy", "sell") if (*key, side) in slack_keys]
             row["order_sides"] = [side for side in ("buy", "sell") if (*key, side) in order_keys]
-            row["fill_counts"] = {side: filled_counts[(*key, side)] for side in ("buy", "sell")}
+            counts = {
+                "slack": {side: filled_counts[(*key, side)] for side in ("buy", "sell")},
+                "manual": {side: external[(row["round"], side)] for side in ("buy", "sell")},
+            }
+            row["fills"] = [
+                {"source": source, "side": side, "count": counts[source][side]}
+                for source in ("slack", "manual")
+                for side in ("buy", "sell")
+                if counts[source][side] > 0
+            ]
     return view
 
 

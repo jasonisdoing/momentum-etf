@@ -34,6 +34,7 @@ from utils.account_settings_store import ACCOUNT_ENV_MOCK
 from utils.db_manager import get_db_connection
 from utils.market_session import REGULAR, market_session
 from utils.strategy_trade_service import load_views_for_pools
+from utils.ttl_cache import TtlCache
 
 KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_orders"
@@ -493,3 +494,59 @@ def list_orders(account_no: str) -> list[dict[str, Any]]:
 def broker_orders_today(account_no: str) -> list[dict[str, Any]]:
     """증권사에 오늘 들어간 주문 전체 — 우리 기록과 대조하는 용도(우리가 안 보낸 주문도 보인다)."""
     return list_day_orders(account_no, _now().strftime("%Y%m%d"))
+
+
+# 화면을 열 때마다 증권사를 부르지 않도록 짧게 보관한다 — 호출은 1초 간격으로 직렬화돼 느리다.
+_BROKER_TODAY_CACHE = TtlCache(30, name="strategy_trade_broker_orders_today")
+
+
+def _external_fill_quantities(account_no: str, ticker: str) -> tuple[int, int]:
+    """슬랙 신호 주문이 아닌 오늘의 체결 수량 — (매도, 매수). 증권사 앱(HTS·MTS)과 화면 직접 매도가 여기 든다.
+
+    슬랙 신호 주문(회차가 있는 기록)은 주문번호로 뺀다 — 그쪽은 기록의 회차로 따로 센다.
+    """
+    today = _now().strftime("%Y-%m-%d")
+    own = {
+        str(int(record["order_no"]))
+        for record in _orders().find(
+            {
+                "account_no": account_no,
+                "created_at": {"$gte": today},
+                "round": {"$ne": None},
+                "order_no": {"$ne": None},
+            },
+            {"order_no": 1},
+        )
+    }
+    yyyymmdd = _now().strftime("%Y%m%d")
+    rows = _BROKER_TODAY_CACHE.get_or_compute((account_no, yyyymmdd), lambda: list_day_orders(account_no, yyyymmdd))
+    sold = bought = 0
+    for row in rows:
+        if row["ticker"] != ticker or row["filled_quantity"] <= 0 or str(int(row["order_no"])) in own:
+            continue
+        if "매도" in row["side_label"]:
+            sold += row["filled_quantity"]
+        elif "매수" in row["side_label"]:
+            bought += row["filled_quantity"]
+        else:
+            raise BrokerApiError(f"알 수 없는 주문 구분입니다: {row['side_label']}")
+    return sold, bought
+
+
+def external_fill_counts(strategy_view: dict[str, Any], account_no: str) -> Counter[tuple[int, str]]:
+    """증권사 앱(HTS·MTS)에서 직접 체결한 오늘의 매매를 회차별 건수로 바꾼다 — (회차, 구분)별.
+
+    주문에는 회차가 없으므로 체결 수량을 회차당 수량으로 나눠 회차 수로 환산하고, 마지막 회차부터 팔리는 규칙으로
+    붙인다: 매도는 지금 보유 회차 바로 위부터, 매수는 지금 보유 회차 맨 위부터 아래로. 같은 날 사고판 순서까지는
+    복원하지 못하는 추정이다.
+    """
+    sold, bought = _external_fill_quantities(account_no, strategy_view["ticker"])
+    per_round = int(strategy_view["config"]["round_quantity"])
+    held = int(strategy_view["status"]["held_count"])
+    last_round = len(strategy_view["rounds"])
+    counts: Counter[tuple[int, str]] = Counter()
+    for round_no in range(held + 1, min(last_round, held + sold // per_round) + 1):
+        counts[(round_no, "sell")] += 1
+    for round_no in range(max(1, held - bought // per_round + 1), held + 1):
+        counts[(round_no, "buy")] += 1
+    return counts

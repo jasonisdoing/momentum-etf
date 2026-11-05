@@ -246,17 +246,22 @@ def sleeve_for_pool(pool: str) -> dict[str, Any] | None:
     }
 
 
-def broker_account_no_for_pool(pool: str) -> str:
-    """그 종목풀의 사고팔기 운용 계좌에 연동된 증권사 계좌번호 — 슬리브나 연동이 없으면 에러."""
+def linked_broker_account_no(pool: str) -> str | None:
+    """그 종목풀의 사고팔기 운용 계좌에 연동된 증권사 계좌번호 — 연동이 저장돼 있지 않으면 None, 슬리브가 없으면 에러."""
     from utils.account_settings_store import load_live_account_docs
 
     sleeve = sleeve_for_pool(pool)
     if sleeve is None:
         raise ValueError(f"{pool} 종목풀에 사고팔기 슬리브가 붙은 계좌가 없습니다.")
     doc = next(doc for doc in load_live_account_docs() if doc["account_id"] == sleeve["account_id"])
-    account_no = str((doc.get("broker_api") or {}).get("account_no") or "").strip()
-    if not account_no:
-        raise ValueError(f"'{sleeve['account_id']}' 계좌에 증권사 API 연동이 저장돼 있지 않습니다.")
+    return str((doc.get("broker_api") or {}).get("account_no") or "").strip() or None
+
+
+def broker_account_no_for_pool(pool: str) -> str:
+    """그 종목풀의 사고팔기 운용 계좌에 연동된 증권사 계좌번호 — 슬리브나 연동이 없으면 에러."""
+    account_no = linked_broker_account_no(pool)
+    if account_no is None:
+        raise ValueError(f"{pool} 종목풀의 운용 계좌에 증권사 API 연동이 저장돼 있지 않습니다.")
     return account_no
 
 

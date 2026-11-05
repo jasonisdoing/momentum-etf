@@ -75,8 +75,8 @@ export type RoundRow = {
   // 오늘 슬랙 신호가 나간 방향, 아직 끝나지 않은 주문의 방향.
   slack_sides: Array<"buy" | "sell">;
   order_sides: Array<"buy" | "sell">;
-  // 오늘 체결된 주문의 방향별 건수 — 표시 기록일 뿐이다.
-  fill_counts: Record<"buy" | "sell", number>;
+  // 오늘 체결된 매매 — 출처(슬랙 신호 주문·수동)와 방향별 건수. 표시 기록일 뿐이다.
+  fills: Array<{ source: "slack" | "manual"; side: "buy" | "sell"; count: number }>;
   is_next: boolean;
 };
 
@@ -90,6 +90,8 @@ export type StrategyView = {
   index: IndexStatus;
   status: Status;
   rounds: RoundRow[];
+  /** 증권사 앱(HTS·MTS) 체결 조회 실패 문구 — 거래 히스토리만 비고 화면은 그대로 쓴다. */
+  history_error: string | null;
 };
 
 /** 저장된 전략 설정 한 줄 — 편집 표의 행. */
@@ -225,15 +227,17 @@ function RoundStatus({ row }: { row: RoundRow }) {
 // 매수는 보라, 매도는 주황 — 빨강·파랑은 상승·하락 손익색이라 헷갈리고 초록은 슬랙·주문 표시가 쓴다.
 const FILL_COLORS = { buy: "var(--tblr-purple, #ae3ec9)", sell: "var(--tblr-orange, #f76707)" } as const;
 
-/** 거래 히스토리 칸 — 오늘 체결된 주문을 방향별로 남긴다. 한 번이면 매도체결, 반복되면 매도체결 2처럼 건수를 붙인다. */
-function FillBadges({ counts }: { counts: RoundRow["fill_counts"] }) {
-  const sides = (["buy", "sell"] as const).filter((side) => counts[side] > 0);
-  if (sides.length === 0) return null;
+const FILL_SOURCE_WORDS = { slack: "슬랙", manual: "수동" } as const;
+
+/** 거래 히스토리 칸 — 오늘 체결된 매매를 출처·방향별로 남긴다. 한 번이면 슬랙매수체결, 반복되면 수동매도체결 2처럼 건수를 붙인다. */
+function FillBadges({ fills }: { fills: RoundRow["fills"] }) {
+  if (fills.length === 0) return null;
   return (
     <span style={{ display: "inline-flex", gap: 4 }}>
-      {sides.map((side) => (
-        <StatusBadge key={side} color={FILL_COLORS[side]}>
-          {SIDE_WORDS[side]}체결{counts[side] > 1 ? ` ${counts[side]}` : ""}
+      {fills.map(({ source, side, count }) => (
+        <StatusBadge key={`${source}-${side}`} color={FILL_COLORS[side]}>
+          {FILL_SOURCE_WORDS[source]}
+          {SIDE_WORDS[side]}체결{count > 1 ? ` ${count}` : ""}
         </StatusBadge>
       ))}
     </span>
@@ -696,6 +700,12 @@ function StrategySection({ view }: { view: StrategyView }) {
         ) : null}
       </div>
 
+      {view.history_error ? (
+        <div style={{ color: "var(--up-color, #d64545)", fontSize: "var(--fs-sm)", marginBottom: 6 }}>
+          증권사 앱 체결 내역을 불러오지 못해 거래 히스토리에서 빠졌습니다: {view.history_error}
+        </div>
+      ) : null}
+
       {/* 회차 표 */}
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", minWidth: 600, borderCollapse: "collapse", fontSize: "var(--fs-sm)" }}>
@@ -755,7 +765,7 @@ function StrategySection({ view }: { view: StrategyView }) {
                   {formatNumber(row.sell_limit)}
                 </td>
                 <td style={{ ...tdStyle, textAlign: "left" }}>
-                  <FillBadges counts={row.fill_counts} />
+                  <FillBadges fills={row.fills} />
                 </td>
               </tr>
               </React.Fragment>

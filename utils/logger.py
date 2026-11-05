@@ -16,7 +16,7 @@ except ImportError:
 
 load_dotenv()
 
-APP_VERSION = "2026-11-04-10"
+APP_VERSION = "2026-11-05-11"
 APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_VERSION}")
 
 # 로그 레벨 — 상수 고정(APP_LOG_LEVEL 환경변수 override 폐기, 2026-09 미사용 정리).
