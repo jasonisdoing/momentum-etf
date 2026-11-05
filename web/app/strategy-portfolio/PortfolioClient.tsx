@@ -140,8 +140,14 @@ type Settings = {
 };
 
 type View = {
-  positions: { as_of: string; open_positions: { ticker: string; sleeve_weight_pct: number }[]; sleeve_cash_weight_pct: number } | null;
-  positions_error: string | null;
+  /** 운용 비중 — 슬리브를 쓰는 계좌가 하나일 때만 값이 있다(아니면 hidden_reason 에 이유). */
+  actual: {
+    account_name: string | null;
+    hidden_reason: string | null;
+    weight_by_ticker: Record<string, number> | null;
+    cash_weight_pct: number | null;
+  } | null;
+  actual_error: string | null;
   settings: Settings;
   /** 종목풀에 없는 종목 — 표에 남겨 두고 경고로 칠한다. 지워야 저장된다. */
   unknown_tickers?: string[];
@@ -340,6 +346,9 @@ export function PortfolioClient() {
     [view?.universe],
   );
 
+  // 운용 비중 칸은 슬리브를 쓰는 계좌가 하나일 때만 보인다 — 값 유무가 아니라 백엔드의 계좌 구조 판정이다.
+  const showActual = view?.actual?.weight_by_ticker != null;
+
   const stockSum = useMemo(
     () => Math.round((draft?.weights ?? []).reduce((sum, row) => sum + (row.weight_pct || 0), 0) * 100) / 100,
     [draft?.weights],
@@ -414,7 +423,7 @@ export function PortfolioClient() {
   });
 
   /** 현금 고정행 — **표 맨 위**(`/asset-helper` 와 같은 순서). 비중은 직접 편집한다. */
-  const cashRow: WeightRow = { ticker: CASH_TICKER, name: "현금", fixed_weight_pct: cashPct, strategy_weight_pct: view?.positions?.sleeve_cash_weight_pct ?? null, ...emptyMetrics };
+  const cashRow: WeightRow = { ticker: CASH_TICKER, name: "현금", fixed_weight_pct: cashPct, strategy_weight_pct: view?.actual?.cash_weight_pct ?? null, ...emptyMetrics };
   const addingRow: WeightRow | null = add.addingRow
     ? { ticker: add.addingRow.ticker, name: add.addingRow.name, fixed_weight_pct: 0, is_adding: true, ...emptyMetrics }
     : null;
@@ -453,7 +462,7 @@ export function PortfolioClient() {
         name: metrics?.name ?? row.ticker,
         is_unknown: !metrics,
         fixed_weight_pct: row.weight_pct,
-        strategy_weight_pct: view?.positions?.open_positions.find((position) => position.ticker === row.ticker)?.sleeve_weight_pct ?? null,
+        strategy_weight_pct: view?.actual?.weight_by_ticker?.[row.ticker] ?? null,
       };
     }),
   ];
@@ -613,8 +622,9 @@ export function PortfolioClient() {
       {
         field: "strategy_weight_pct",
         headerName: "운용 비중",
-        headerTooltip: "저장된 시작일·조건으로 계산한 백테스트 현재 비중. 합성이 같은 값을 사용합니다.",
+        headerTooltip: "이 풀의 포트폴리오 슬리브를 쓰는 계좌의 실제 보유 평가액 ÷ 슬리브 한도금액(운용 자본 × 슬리브 비중).",
         width: 105,
+        hide: !showActual,
         type: "rightAligned",
         valueFormatter: (p) => p.value == null ? "-" : Number(p.value).toFixed(2),
       },
@@ -642,7 +652,7 @@ export function PortfolioClient() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [draft?.weights, nameByTicker, universeByTicker, add, saveMemo],
+    [draft?.weights, nameByTicker, universeByTicker, add, saveMemo, showActual],
   );
 
   const hintStyle = { fontSize: "var(--fs-sm)", color: "var(--text-muted)" } as const;
@@ -716,8 +726,7 @@ export function PortfolioClient() {
           </div>
         </div>
 
-        {view.positions_error ? <div className="alert alert-danger">운용 비중 계산 실패: {view.positions_error}</div> : null}
-        {view.positions ? <div className="text-muted">운용 비중 기준일: {view.positions.as_of} · 저장된 전략 조건 기준</div> : null}
+        {view.actual_error ? <div className="alert alert-danger">운용 비중 계산 실패: {view.actual_error}</div> : null}
         {/* ② 목표 비중 — 컬럼·버튼은 `/asset-helper` 표준을 따른다. */}
         <div className="card appCard">
           <div className="card-body">
@@ -738,6 +747,11 @@ export function PortfolioClient() {
                   합계 {totalSum.toFixed(2)}%{weightOk ? "" : " — 100% 여야 저장됩니다"}
                   {hasUnknown ? " · 종목풀에 없는 종목이 있습니다 (지우고 비중을 다시 나눠주세요)" : ""}
                 </span>
+                {view.actual ? (
+                  <span style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: "var(--tblr-blue, #206bc4)" }}>
+                    {view.actual.hidden_reason ?? `운용 비중 기준: ${view.actual.account_name}`}
+                  </span>
+                ) : null}
               </div>
               <div className="appMainHeaderRight">
                 <GridToolbarButton

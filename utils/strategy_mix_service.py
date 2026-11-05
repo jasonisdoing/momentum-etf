@@ -1207,11 +1207,8 @@ def _value_account(
     account["fixed_asset_pct"] = round(fixed_value / total_assets * 100.0, 4) if total_assets > 0 else 0.0
 
 
-def operating_capital_krw(account_id: str, currency: str) -> float:
-    """합성이 슬리브에 배정하는 운용 자본(원) — 계좌 평가액(현금 포함)에서 IS 고정 자산을 뺀 금액.
-
-    백테스트의 시작 자본과 사고팔기 슬리브 한도가 쓴다. 운용 현황은 같은 평가를 확정일 가격으로 직접 한다.
-    """
+def _valued_account(account_id: str, currency: str) -> tuple[dict[str, Any], float]:
+    """계좌 보유를 원화로 평가한 상태와 운용 자본(원) — 계좌 평가액(현금 포함)에서 IS 고정 자산을 뺀 금액."""
     krw_rate = _krw_rate(currency)
     if krw_rate <= 0:
         raise RuntimeError(f"{currency} 환율을 읽을 수 없습니다.")
@@ -1220,7 +1217,60 @@ def operating_capital_krw(account_id: str, currency: str) -> float:
     capital = account["total_assets"] - account["fixed_asset_value"]
     if capital <= 0:
         raise RuntimeError(f"'{account_id}' 계좌 평가액이 없어 운용 기준금액을 정할 수 없습니다.")
-    return capital
+    return account, capital
+
+
+def operating_capital_krw(account_id: str, currency: str) -> float:
+    """합성이 슬리브에 배정하는 운용 자본(원) — 계좌 평가액(현금 포함)에서 IS 고정 자산을 뺀 금액.
+
+    백테스트의 시작 자본과 사고팔기 슬리브 한도가 쓴다. 운용 현황은 같은 평가를 확정일 가격으로 직접 한다.
+    """
+    return _valued_account(account_id, currency)[1]
+
+
+def sleeve_actual_weights(strategy: str, pool: str, tickers: Sequence[str]) -> dict[str, Any]:
+    """그 (전략, 종목풀) 슬리브를 쓰는 계좌의 **실제 보유 비중** — 보유 평가액 ÷ 슬리브 한도금액(%).
+
+    슬리브 한도금액은 계좌 운용 자본 × 슬리브 비중이다. 계좌 보유는 슬리브별로 나눠 적히지 않으므로 계좌가 정확히
+    하나이고 같은 종목풀에 다른 전략 슬리브가 없을 때만 구한다 — 아니면 `hidden_reason` 에 이유를 담고 비중은 비운다.
+    `tickers` 만 센다(그 풀의 종목 — 계좌의 다른 보유는 제외).
+    """
+    users = [
+        (account, [row for row in account["sleeves"] if row["strategy"] == strategy and row["pool"] == pool])
+        for account in mix_accounts()
+    ]
+    users = [(account, mine) for account, mine in users if mine]
+    hidden = {"account_name": None, "weight_by_ticker": None, "cash_weight_pct": None}
+    if not users:
+        return {
+            **hidden,
+            "hidden_reason": "이 풀의 포트폴리오 슬리브를 쓰는 계좌가 없어 운용 비중을 표시하지 않습니다.",
+        }
+    if len(users) > 1:
+        return {**hidden, "hidden_reason": f"이 풀을 쓰는 계좌가 {len(users)}개라 운용 비중을 표시하지 않습니다."}
+    account, mine = users[0]
+    if any(row["pool"] == pool and row["strategy"] != strategy for row in account["sleeves"]):
+        reason = (
+            f"'{account['name']}' 은 같은 풀에 다른 슬리브가 있어 보유를 나눌 수 없어 운용 비중을 표시하지 않습니다."
+        )
+        return {**hidden, "hidden_reason": reason}
+    state, capital = _valued_account(account["account_id"], account["currency"])
+    budget = capital * sum(float(row["weight_pct"]) for row in mine) / 100.0
+    wanted = {str(ticker).strip().upper() for ticker in tickers}
+    # 보유하지 않은 풀 종목은 0% 다 — 모르는 값이 아니다.
+    weight_by_ticker = {ticker: 0.0 for ticker in wanted}
+    for ticker, item in state["holdings"].items():
+        if ticker not in wanted:
+            continue
+        if item["value"] is None:
+            raise RuntimeError(f"{ticker} 가격을 알 수 없어 '{account['name']}' 보유를 평가할 수 없습니다.")
+        weight_by_ticker[ticker] = item["value"] / budget * 100.0
+    return {
+        "account_name": account["name"],
+        "hidden_reason": None,
+        "weight_by_ticker": weight_by_ticker,
+        "cash_weight_pct": 100.0 - sum(weight_by_ticker.values()),
+    }
 
 
 def run_mix_backtest(account_id: str | None = None, months: int | None = None) -> dict[str, Any]:

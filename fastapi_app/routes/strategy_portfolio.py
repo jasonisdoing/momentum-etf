@@ -30,18 +30,18 @@ def _constraints() -> dict:
 
 
 def _view(settings: dict, unknown: list[str] | None = None) -> dict:
-    from utils.portfolio_backtest import current_positions
+    from utils.strategy_mix_service import sleeve_actual_weights
 
-    positions, positions_error = None, None
-    if settings.get("start_date") and settings.get("weights"):
-        try:
-            positions = current_positions(settings)
-        except (ValueError, RuntimeError) as error:
-            # 설정 편집은 열어두되 운용 계산 실패를 명시한다.
-            positions_error = str(error)
+    universe = universe_metrics(settings["pool"])
+    actual, actual_error = None, None
+    try:
+        actual = sleeve_actual_weights("portfolio", settings["pool"], [row["ticker"] for row in universe])
+    except (ValueError, RuntimeError) as error:
+        # 설정 편집은 열어두되 운용 비중 계산 실패를 명시한다.
+        actual_error = str(error)
     return {
-        "positions": positions,
-        "positions_error": positions_error,
+        "actual": actual,
+        "actual_error": actual_error,
         "settings": settings,
         # 종목풀에 없는 종목 티커 — 화면이 그 행을 경고로 칠하고 저장을 막는다.
         "unknown_tickers": list(unknown or []),
@@ -51,7 +51,7 @@ def _view(settings: dict, unknown: list[str] | None = None) -> dict:
         "pool_options": pool_options(),
         # 이 풀에서 담을 수 있는 종목 + 표시 지표(일간·현재가·기간수익률·MDD·소르티노).
         # 화면의 티커 입력이 이 목록으로 검증하고, 표의 지표 컬럼도 여기서 채운다.
-        "universe": universe_metrics(settings["pool"]),
+        "universe": universe,
         "constraints": _constraints(),
     }
 
