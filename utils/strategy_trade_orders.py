@@ -13,7 +13,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from datetime import datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -90,10 +89,6 @@ def _require_round_state(strategy: dict[str, Any], side: str, round_no: int) -> 
     return row
 
 
-def _filled_today_filter() -> dict[str, Any]:
-    return {"status": "filled", "created_at": {"$gte": _now().strftime("%Y-%m-%d")}}
-
-
 def find_duplicate_order(account_no: str, strategy_id: str, side: str, round_no: int) -> dict[str, Any] | None:
     """같은 회차·구분의 주문이 진행 중인 기록 — 체결된 주문은 막지 않는다(체결 뒤 같은 회차에 다시 닿으면 다시 주문한다)."""
     return _orders().find_one(
@@ -107,26 +102,13 @@ def find_duplicate_order(account_no: str, strategy_id: str, side: str, round_no:
     )
 
 
-def _order_counts(strategy_ids: list[str], status_filter: dict[str, Any]) -> Counter[tuple[str, int, str]]:
-    records = _orders().find(
-        {"strategy_id": {"$in": strategy_ids}, "round": {"$ne": None}, **status_filter},
-        {"strategy_id": 1, "round": 1, "side": 1},
-    )
-    return Counter((record["strategy_id"], record["round"], record["side"]) for record in records)
-
-
-def _order_keys(strategy_ids: list[str], status_filter: dict[str, Any]) -> set[tuple[str, int, str]]:
-    return set(_order_counts(strategy_ids, status_filter))
-
-
-def filled_today_order_counts(strategy_ids: list[str]) -> Counter[tuple[str, int, str]]:
-    """이 전략들의 오늘 체결된 신호 주문 건수 — (전략, 회차, 구분)별(화면 표시용 기록)."""
-    return _order_counts(strategy_ids, _filled_today_filter())
-
-
 def active_order_keys(strategy_ids: list[str]) -> set[tuple[str, int, str]]:
     """이 전략들의 아직 끝나지 않은 신호 주문 — (전략, 회차, 구분) 집합(화면 표시용)."""
-    return _order_keys(strategy_ids, {"status": {"$in": list(ACTIVE_STATUSES)}})
+    records = _orders().find(
+        {"strategy_id": {"$in": strategy_ids}, "round": {"$ne": None}, "status": {"$in": list(ACTIVE_STATUSES)}},
+        {"strategy_id": 1, "round": 1, "side": 1},
+    )
+    return {(record["strategy_id"], record["round"], record["side"]) for record in records}
 
 
 def _require_no_duplicate(account_no: str, strategy_id: str, side: str, round_no: int) -> None:
@@ -508,53 +490,57 @@ def broker_orders_today(account_no: str) -> list[dict[str, Any]]:
 _BROKER_TODAY_CACHE = TtlCache(30, name="strategy_trade_broker_orders_today")
 
 
-def _external_fill_quantities(account_no: str, ticker: str) -> tuple[int, int]:
-    """슬랙 신호 주문이 아닌 오늘의 체결 수량 — (매도, 매수). 증권사 앱(HTS·MTS)과 화면 직접 매도가 여기 든다.
-
-    슬랙 신호 주문(회차가 있는 기록)은 주문번호로 뺀다 — 그쪽은 기록의 회차로 따로 센다.
-    """
+def _slack_rounds_today(account_no: str) -> dict[str, int]:
+    """오늘 슬랙 신호로 낸 주문의 주문번호 → 회차 — 주문할 때 기록한 회차라 정확하다."""
     today = _now().strftime("%Y-%m-%d")
-    own = {
-        str(int(record["order_no"]))
-        for record in _orders().find(
-            {
-                "account_no": account_no,
-                "created_at": {"$gte": today},
-                "round": {"$ne": None},
-                "order_no": {"$ne": None},
-            },
-            {"order_no": 1},
-        )
-    }
-    yyyymmdd = _now().strftime("%Y%m%d")
-    rows = _BROKER_TODAY_CACHE.get_or_compute((account_no, yyyymmdd), lambda: list_day_orders(account_no, yyyymmdd))
-    sold = bought = 0
-    for row in rows:
-        if row["ticker"] != ticker or row["filled_quantity"] <= 0 or str(int(row["order_no"])) in own:
-            continue
-        if "매도" in row["side_label"]:
-            sold += row["filled_quantity"]
-        elif "매수" in row["side_label"]:
-            bought += row["filled_quantity"]
-        else:
-            raise BrokerApiError(f"알 수 없는 주문 구분입니다: {row['side_label']}")
-    return sold, bought
+    records = _orders().find(
+        {"account_no": account_no, "created_at": {"$gte": today}, "round": {"$ne": None}, "order_no": {"$ne": None}},
+        {"order_no": 1, "round": 1},
+    )
+    return {str(int(record["order_no"])): record["round"] for record in records}
 
 
-def external_fill_counts(strategy_view: dict[str, Any], account_no: str) -> Counter[tuple[int, str]]:
-    """증권사 앱(HTS·MTS)에서 직접 체결한 오늘의 매매를 회차별 건수로 바꾼다 — (회차, 구분)별.
+def _is_buy(row: dict[str, Any]) -> bool:
+    if "매수" in row["side_label"]:
+        return True
+    if "매도" in row["side_label"]:
+        return False
+    raise BrokerApiError(f"알 수 없는 주문 구분입니다: {row['side_label']}")
 
-    주문에는 회차가 없으므로 체결 수량을 회차당 수량으로 나눠 회차 수로 환산하고, 마지막 회차부터 팔리는 규칙으로
-    붙인다: 매도는 지금 보유 회차 바로 위부터, 매수는 지금 보유 회차 맨 위부터 아래로. 같은 날 사고판 순서까지는
-    복원하지 못하는 추정이다.
+
+def fill_history(strategy_view: dict[str, Any], account_no: str) -> list[dict[str, Any]]:
+    """오늘 이 종목의 체결을 주문번호(시간) 순서로 돌려준다 — 회차·출처·구분·평균 체결가·수량(회차 단위, 화면 표시용 기록).
+
+    슬랙 신호 주문의 회차는 주문 기록 그대로 쓰고, 증권사 앱(HTS·MTS)·화면 직접 매도의 회차는 체결 순서를 재생해 구한다:
+    하루 시작 보유(지금 보유 − 오늘 순매수)에서 출발해 매수는 보유 다음 회차, 매도는 보유 맨 위 회차(마지막 회차부터 팔림)다.
+    회차당 수량에 못 미치는 체결은 회차로 환산할 수 없어 보이지 않는다.
     """
-    sold, bought = _external_fill_quantities(account_no, strategy_view["ticker"])
     per_round = int(strategy_view["config"]["round_quantity"])
-    held = int(strategy_view["status"]["held_count"])
-    last_round = len(strategy_view["rounds"])
-    counts: Counter[tuple[int, str]] = Counter()
-    for round_no in range(held + 1, min(last_round, held + sold // per_round) + 1):
-        counts[(round_no, "sell")] += 1
-    for round_no in range(max(1, held - bought // per_round + 1), held + 1):
-        counts[(round_no, "buy")] += 1
-    return counts
+    yyyymmdd = _now().strftime("%Y%m%d")
+    all_rows = _BROKER_TODAY_CACHE.get_or_compute((account_no, yyyymmdd), lambda: list_day_orders(account_no, yyyymmdd))
+    rows = sorted(
+        (row for row in all_rows if row["ticker"] == strategy_view["ticker"] and row["filled_quantity"] > 0),
+        key=lambda row: int(row["order_no"]),
+    )
+    sides = [_is_buy(row) for row in rows]
+    net = sum(row["filled_quantity"] if buy else -row["filled_quantity"] for row, buy in zip(rows, sides))
+    shares = int(strategy_view["status"]["held_count"]) * per_round - net
+    slack_rounds = _slack_rounds_today(account_no)
+    events: list[dict[str, Any]] = []
+    for row, buy in zip(rows, sides):
+        count = row["filled_quantity"] // per_round
+        first = shares // per_round + 1 if buy else shares // per_round
+        replayed = range(first, first + count) if buy else range(first, first - count, -1)
+        shares += row["filled_quantity"] if buy else -row["filled_quantity"]
+        slack_round = slack_rounds.get(row["order_no"])
+        for round_no in [slack_round] * count if slack_round is not None else replayed:
+            events.append(
+                {
+                    "round": round_no,
+                    "source": "manual" if slack_round is None else "slack",
+                    "side": "buy" if buy else "sell",
+                    "price": row["average_fill_price"],
+                    "quantity": per_round,
+                }
+            )
+    return events

@@ -26,7 +26,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -196,32 +195,32 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
     return triggers
 
 
-def _external_history(strategy_view: dict[str, Any]) -> tuple[Counter[tuple[int, str]], str | None]:
-    """증권사 앱(HTS·MTS)에서 직접 낸 오늘 체결과 오류 문구 — 증권사 API 연동이 없는 계좌는 비운다(오류 아님).
+def _fill_history(strategy_view: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
+    """오늘 체결 이력과 오류 문구 — 증권사 API 연동이 없는 계좌는 비운다(오류 아님).
 
     증권사 조회가 실패하면 화면 전체를 막지 않고 오류 문구를 돌려 화면이 표시하게 한다.
     """
     from services.broker_api_service import BrokerApiError
-    from utils.strategy_trade_orders import external_fill_counts
+    from utils.strategy_trade_orders import fill_history
 
     account_no = linked_broker_account_no(strategy_view["pool"])
     if account_no is None:
-        return Counter(), None
+        return [], None
     try:
-        return external_fill_counts(strategy_view, account_no), None
+        return fill_history(strategy_view, account_no), None
     except BrokerApiError as exc:
-        return Counter(), str(exc)
+        return [], str(exc)
 
 
 def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
     """화면용 — 회차마다 오늘 슬랙 신호가 나간 방향(`slack_sides`)과 아직 끝나지 않은 주문의 방향(`order_sides`),
-    오늘 체결된 매매를 출처(슬랙 신호 주문·수동)와 방향별 건수(`fills`, 표시 기록일 뿐 전략·주문 판정과 무관하다)로 행에 적는다.
+    오늘 체결된 매매를 체결 순서대로(`fills`: 출처 슬랙·수동, 방향, 가격, 수량 — 표시 기록일 뿐 전략·주문 판정과 무관하다) 행에 적는다.
 
     지정가에 닿아 있는지와 무관하다 — 신호·주문이 나간 뒤 가격이 물러나도 표시가 남아야 한다.
     체결된 주문과 이미 체결된 신호의 슬랙 기록은 더 표시하지 않는다 — 기록은 배치가 체결을 확인해 지우기까지
     최대 한 배치 주기 남으므로, 화면도 배치와 같은 판정(`_round_filled`)으로 먼저 걸러낸다.
     """
-    from utils.strategy_trade_orders import active_order_keys, filled_today_order_counts
+    from utils.strategy_trade_orders import active_order_keys
 
     today = datetime.now(KST).strftime("%Y-%m-%d")
     held_counts = _held_counts(view)
@@ -236,22 +235,16 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
     }
     strategy_ids = [strategy_view["strategy_id"] for strategy_view in view["strategies"]]
     order_keys = active_order_keys(strategy_ids)
-    filled_counts = filled_today_order_counts(strategy_ids)
     for strategy_view in view["strategies"]:
-        external, strategy_view["history_error"] = _external_history(strategy_view)
+        history, strategy_view["history_error"] = _fill_history(strategy_view)
         for row in strategy_view["rounds"]:
             key = (strategy_view["strategy_id"], row["round"])
             row["slack_sides"] = [side for side in ("buy", "sell") if (*key, side) in slack_keys]
             row["order_sides"] = [side for side in ("buy", "sell") if (*key, side) in order_keys]
-            counts = {
-                "slack": {side: filled_counts[(*key, side)] for side in ("buy", "sell")},
-                "manual": {side: external[(row["round"], side)] for side in ("buy", "sell")},
-            }
             row["fills"] = [
-                {"source": source, "side": side, "count": counts[source][side]}
-                for source in ("slack", "manual")
-                for side in ("buy", "sell")
-                if counts[source][side] > 0
+                {field: event[field] for field in ("source", "side", "price", "quantity")}
+                for event in history
+                if event["round"] == row["round"]
             ]
     return view
 
