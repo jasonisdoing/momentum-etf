@@ -265,6 +265,14 @@ def place_order(
     return {**serialize_order(orders.find_one({"_id": inserted.inserted_id})), "signal_price": order["signal_price"]}
 
 
+def _current_order_no(record: dict[str, Any]) -> str:
+    """취소 요청을 보낼 주문번호 — 증권사 앱에서 정정했으면 정정으로 새로 생긴 번호다."""
+    for row in list_day_orders(record["account_no"], _order_date(record)):
+        if row["order_no"] == record["order_no"]:
+            return row["current_order_no"]
+    raise BrokerApiError("증권사 주문내역에서 이 주문번호를 찾지 못했습니다.")
+
+
 def cancel_record(order_id: str) -> dict[str, Any]:
     """대기중·부분체결 주문을 전량 취소하고 상태를 다시 읽는다."""
     orders = _orders()
@@ -273,7 +281,7 @@ def cancel_record(order_id: str) -> dict[str, Any]:
         raise BrokerApiError("주문 기록을 찾을 수 없습니다.")
     if record["status"] not in ("pending", "partial") or not record.get("order_no"):
         raise BrokerApiError("대기중이거나 부분체결인 주문만 취소할 수 있습니다.")
-    cancelled = cancel_order(record["account_no"], record["order_no"], record["ticker"])
+    cancelled = cancel_order(record["account_no"], _current_order_no(record), record["ticker"])
     orders.update_one(
         {"_id": record["_id"]},
         {"$set": {"message": cancelled["message"], "updated_at": _now().isoformat()}},
