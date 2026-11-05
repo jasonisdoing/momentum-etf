@@ -231,19 +231,18 @@ const FILL_SOURCE_WORDS = { slack: "슬랙", manual: "수동" } as const;
 
 type Fill = RoundRow["fills"][number];
 
-/** 체결 순서대로 이어진 같은 출처·방향의 체결은 한 뱃지로 묶는다 — 번갈아 나오면 따로 둬서 순서가 보인다. */
+/** 같은 출처·방향의 체결은 순서와 상관없이 한 뱃지로 묶는다 — 뱃지 순서는 처음 체결된 순서다. */
 function groupFills(fills: Fill[]): Fill[][] {
-  const groups: Fill[][] = [];
+  const groups = new Map<string, Fill[]>();
   for (const fill of fills) {
-    const last = groups[groups.length - 1];
-    if (last && last[0].source === fill.source && last[0].side === fill.side) last.push(fill);
-    else groups.push([fill]);
+    const key = `${fill.source}-${fill.side}`;
+    groups.set(key, [...(groups.get(key) ?? []), fill]);
   }
-  return groups;
+  return [...groups.values()];
 }
 
-/** 거래 히스토리 칸 — 오늘 체결된 매매를 체결 순서대로 출처·방향별 뱃지로 남긴다. 연속 반복은 수동매도체결 2처럼 건수를 붙이고,
- *  마우스를 올리면 체결가·수량이 보인다. */
+/** 거래 히스토리 칸 — 오늘 체결된 매매를 출처·방향별 뱃지로 남긴다. 반복되면 슬랙매수체결 2번처럼 횟수를 붙이고,
+ *  마우스를 올리면 체결 순서대로 체결가·수량이 보인다. */
 function FillBadges({ fills }: { fills: Fill[] }) {
   if (fills.length === 0) return null;
   return (
@@ -254,7 +253,7 @@ function FillBadges({ fills }: { fills: Fill[] }) {
           <span key={index} title={group.map((fill) => `${fill.price.toLocaleString()}원 · ${fill.quantity.toLocaleString()}주`).join("\n")}>
             <StatusBadge color={FILL_COLORS[side]}>
               {FILL_SOURCE_WORDS[source]}
-              {SIDE_WORDS[side]}체결{group.length > 1 ? ` ${group.length}` : ""}
+              {SIDE_WORDS[side]}체결{group.length > 1 ? ` ${group.length}번` : ""}
             </StatusBadge>
           </span>
         );
