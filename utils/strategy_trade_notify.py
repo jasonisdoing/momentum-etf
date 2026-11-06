@@ -224,9 +224,12 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
 
     today = datetime.now(KST).strftime("%Y-%m-%d")
     held_counts = _held_counts(view)
+    sent_log = _load_sent_log()
+    for strategy_id in held_counts:
+        _keep_latest_buy(sent_log, strategy_id)
     slack_keys = {
         (entry.get("strategy_id"), entry.get("round"), entry.get("action"))
-        for entry in _load_sent_log().values()
+        for entry in sent_log.values()
         # 이 화면에 없는 전략의 기록은 어차피 행에 닿지 않는다 — 보유 수를 모르니 판정 없이 뺀다.
         if entry.get("strategy_id") in held_counts
         and (sent_at := _parse_sent_at(entry.get("at"))) is not None
@@ -247,6 +250,25 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
                 if event["round"] == row["round"]
             ]
     return view
+
+
+def _keep_latest_buy(sent_log: dict[str, dict[str, Any]], strategy_id: str) -> None:
+    """한 종목의 매수 신호 기록은 가장 최근 하나만 남긴다.
+
+    매수 신호는 다음 회차 하나뿐이라, 기록이 둘 이상이면 이전 것은 신호 뒤에 보유가 바뀌어 무효가 된 신호다.
+    매도는 지정가에 닿은 보유 회차마다 신호가 나가므로 여러 개가 정상이다.
+    """
+    buys = {
+        key: entry
+        for key, entry in sent_log.items()
+        if entry.get("strategy_id") == strategy_id and entry.get("action") == "buy"
+    }
+    if len(buys) <= 1:
+        return
+    newest = max(buys, key=lambda key: str(buys[key].get("at")))
+    for key in buys:
+        if key != newest:
+            del sent_log[key]
 
 
 def _already_sent_note(round_no: int, action: str, fresh: set[tuple[int, str]]) -> str:
@@ -549,6 +571,7 @@ def notify_strategy_trade() -> dict[str, Any]:
         failed_count += failed
         order_failed += order_failed_here
         repeats_all.extend(delivered)
+        _keep_latest_buy(sent_log, sid)
 
     if not sent_count and not failed_count:
         if not triggers and not confirmed:
