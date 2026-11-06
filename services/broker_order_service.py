@@ -44,6 +44,8 @@ _NO_CONDITION = "00"  # 주문조건 없음 / 공매도 구분 정상
 
 ORDER_PATH = {"buy": "/krstock/order/v1/cashBuy", "sell": "/krstock/order/v1/cashSell"}
 CANCEL_PATH = "/krstock/order/v1/cancel"
+# 체결 조회에 그날 주문이 하나도 없을 때 오는 응답 코드(데이터가 존재하지 않습니다) — 오류가 아니라 빈 목록이다.
+NO_DATA_CODE = "11512"
 DAY_ORDERS_PATH = "/krstock/inquiry/v1/dailyOrderExecution"
 
 # 모든 호출을 최소 1초 간격으로 직렬화한다 — 운영 쪽(`_CALLS_PER_SECOND`)과 같은 보수적 간격이다.
@@ -149,8 +151,13 @@ def _post(base_url: str, path: str, payload: dict[str, Any], *, cts: str | None 
     return data, response.headers
 
 
-def _post_paged(base_url: str, path: str, payload: dict[str, Any], list_key: str) -> dict[str, Any]:
-    """연속조회 — 목록(list_key)을 전 페이지 이어 붙인다. 마지막 페이지만 업무 성공을 판정한다."""
+def _post_paged(
+    base_url: str, path: str, payload: dict[str, Any], list_key: str, *, no_data_code: str | None
+) -> dict[str, Any]:
+    """연속조회 — 목록(list_key)을 전 페이지 이어 붙인다. 마지막 페이지만 업무 성공을 판정한다.
+
+    `no_data_code` 는 "조회할 데이터가 없다"는 응답 코드다 — 오류가 아니라 빈 목록으로 본다(없으면 None).
+    """
     merged: dict[str, Any] = {}
     items: list[Any] = []
     cts = cts_flag = None
@@ -159,9 +166,9 @@ def _post_paged(base_url: str, path: str, payload: dict[str, Any], list_key: str
         data, headers = _post(base_url, path, payload, cts=cts, cts_flag=cts_flag)
         next_cts = (headers.get("cts") or "").strip()
         has_next = (headers.get("cts_flag") or "").strip() == "Y" and bool(next_cts) and next_cts not in seen
-        if not has_next and not is_business_success(
-            str(data["rsp_cd"]) if data.get("rsp_cd") is not None else None, data.get("rsp_msg")
-        ):
+        code = str(data["rsp_cd"]) if data.get("rsp_cd") is not None else None
+        no_data = no_data_code is not None and code == no_data_code
+        if not has_next and not no_data and not is_business_success(code, data.get("rsp_msg")):
             raise BrokerApiError(f"나무증권 API 오류: {_message_of(data) or '업무 오류'} (코드 {data.get('rsp_cd')})")
         if not merged:
             merged = {key: value for key, value in data.items() if key != list_key}
@@ -176,7 +183,9 @@ def _post_paged(base_url: str, path: str, payload: dict[str, Any], list_key: str
 
 def fetch_order_balance(account_no: str) -> dict[str, Any]:
     """계좌 잔고 — 계좌 설정의 잔고 동기화와 같은 표준형(예수금 D+2·총자산·보유)이다."""
-    return parse_balance(_post_paged(_base_url(account_no), BALANCE_PATH, balance_request(account_no), "Output_1"))
+    return parse_balance(
+        _post_paged(_base_url(account_no), BALANCE_PATH, balance_request(account_no), "Output_1", no_data_code=None)
+    )
 
 
 def _accepted_order_no(data: dict[str, Any], what: str) -> str:
@@ -312,5 +321,6 @@ def list_day_orders(account_no: str, yyyymmdd: str) -> list[dict[str, Any]]:
         DAY_ORDERS_PATH,
         {"orr_dt": yyyymmdd, "act_no": account_no, "orr_mkt_cd": "00", "ost_cns_dit": "0"},
         "Output_0",
+        no_data_code=NO_DATA_CODE,
     )
     return _merge_amendments([_day_order_row(item) for item in data.get("Output_0") or []])
