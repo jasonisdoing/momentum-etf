@@ -265,10 +265,10 @@ def compute_ledgers(account_no: str, tickers: list[str]) -> dict[str, Ledger | L
     from utils.strategy_trade_orders import order_sources
 
     computed_at = datetime.now(KST).isoformat()
-    sources = order_sources(account_no)
     balance = {row["ticker"]: int(row["quantity"]) for row in fetch_order_balance(account_no)["holdings"]}
     today = datetime.now(KST).date()
     today_rows = list_day_orders(account_no, f"{today:%Y%m%d}") if today.weekday() < 5 else []
+    sources = order_sources(account_no, today_rows)
     held = {ticker: balance.get(ticker, 0) for ticker in tickers}
     trades, unresolved = _window_trades(account_no, today, _filled(today_rows), held, sources)
     manual = _manual_orders(today_rows, tickers, sources, today)

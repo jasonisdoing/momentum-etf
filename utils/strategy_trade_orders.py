@@ -32,6 +32,7 @@ from services.broker_order_service import (
 from utils.account_settings_store import ACCOUNT_ENV_MOCK
 from utils.db_manager import get_db_connection
 from utils.market_session import REGULAR, market_session
+from utils.strategy_trade_ledger import is_buy
 from utils.strategy_trade_service import load_views_for_pools
 
 KST = ZoneInfo("Asia/Seoul")
@@ -502,12 +503,43 @@ def broker_orders_today(account_no: str) -> list[dict[str, Any]]:
     return list_day_orders(account_no, _now().strftime("%Y%m%d"))
 
 
-def order_sources(account_no: str) -> dict[tuple[str, str], bool]:
-    """우리가 증권사에 낸 주문의 (날짜 YYYYMMDD, 주문번호) → 슬랙 신호 주문 여부 — 회차 원장이 체결의 출처를 가릴 때 쓴다."""
+def order_sources(account_no: str, today_rows: list[dict[str, Any]]) -> dict[tuple[str, str], bool]:
+    """우리가 증권사에 낸 주문의 (날짜 YYYYMMDD, 주문번호) → 슬랙 신호 주문 여부 — 회차 원장이 체결의 출처를 가릴 때 쓴다.
+
+    증권사가 주문을 받은 뒤 우리 기록에 주문번호가 적히기 전(`submitting`)에 원장이 계산되면 우리 주문이 수동으로 잡힌다 —
+    그 틈에는 오늘 증권사 주문(``today_rows``) 중 종목·구분·수량·가격이 같은 것을 그 기록의 주문으로 본다.
+    """
     records = _orders().find(
         {"account_no": account_no, "order_no": {"$ne": None}}, {"order_no": 1, "round": 1, "created_at": 1}
     )
-    return {
+    sources = {
         (record["created_at"][:10].replace("-", ""), str(int(record["order_no"]))): record["round"] is not None
         for record in records
     }
+    today = _now()
+    today_key = f"{today:%Y%m%d}"
+    submitting = _orders().find(
+        {
+            "account_no": account_no,
+            "order_no": None,
+            "status": "submitting",
+            "created_at": {"$gte": f"{today:%Y-%m-%d}"},
+        },
+        {"ticker": 1, "side": 1, "quantity": 1, "price": 1, "round": 1},
+    )
+    for record in submitting:
+        match = next(
+            (
+                row
+                for row in today_rows
+                if (today_key, row["order_no"]) not in sources
+                and row["ticker"] == record["ticker"]
+                and is_buy(row) == (record["side"] == "buy")
+                and row["quantity"] == record["quantity"]
+                and row["price"] == record["price"]
+            ),
+            None,
+        )
+        if match is not None:
+            sources[(today_key, match["order_no"])] = record["round"] is not None
+    return sources
