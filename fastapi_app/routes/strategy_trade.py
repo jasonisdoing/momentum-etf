@@ -10,6 +10,7 @@ from utils.strategy_trade_service import (
     resolve_etf,
     save_pool_strategies,
 )
+from utils.strategy_trade_threads import delete_signal_thread
 
 router = APIRouter(prefix="/internal/strategy-trade", tags=["strategy-trade"])
 
@@ -62,3 +63,18 @@ def put_strategy_trade_settings(
         raise ValueError("pool·strategies 가 모두 필요합니다.")
     save_pool_strategies(pool, payload["strategies"])
     return mark_sent_rounds(load_strategy_trade_view(pool))
+
+
+@router.post("/delete-signal")
+def post_strategy_trade_delete_signal(
+    payload: dict = Body(...),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """슬랙으로 나간 신호 한 건을 지운다 — 주문이 없을 때만.
+
+    body: ``{"key": 화면이 준 발송 기록 키}``. 슬랙 스레드 전체와 우리 쪽 기록을 함께 지운다.
+    """
+    key = str(payload.get("key") or "").strip()
+    if not key:
+        raise ValueError("key 가 필요합니다.")
+    return delete_signal_thread(key)

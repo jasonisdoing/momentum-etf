@@ -25,7 +25,6 @@ from slack_sdk.signature import SignatureVerifier
 from services.broker_api_service import BrokerApiError
 from services.broker_order_service import account_env
 from utils.account_settings_store import ACCOUNT_ENV_MOCK
-from utils.notification import send_slack_message_v2
 from utils.settings_loader import get_slack_channel
 from utils.strategy_trade_orders import (
     FINISHED_STATUSES,
@@ -46,6 +45,7 @@ from utils.strategy_trade_orders import (
     serialize_order,
 )
 from utils.strategy_trade_service import broker_account_no_for_pool
+from utils.strategy_trade_threads import send_thread_message
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +166,7 @@ def send_order_message(
         "ticker": order["ticker"],
         "quantity": order["quantity"],
     }
-    if not send_slack_message_v2(f"[{_env_word(env)}] {_order_text(request)}", _open_blocks(request), thread_ts):
+    if not send_thread_message(f"[{_env_word(env)}] {_order_text(request)}", _open_blocks(request), thread_ts):
         raise BrokerApiError("슬랙으로 주문 메시지를 보내지 못했습니다.")
 
 
@@ -293,7 +293,7 @@ def _final_text(order: dict[str, Any]) -> str:
 def _finish(target: dict[str, Any], order: dict[str, Any]) -> None:
     """끝난 주문의 결과를 스레드로 알리고 메시지에서 버튼을 걷어낸다 — 하나도 체결 안 된 취소만 다시 주문하기 버튼을 남긴다."""
     text = _final_text(order)
-    send_slack_message_v2(text, thread_ts=target["thread_ts"])
+    send_thread_message(text, thread_ts=target["thread_ts"])
     request = target["request"]
     if order["status"] == "canceled" and order["filled_quantity"] == 0:
         # 다시 주문해도 서버가 회차 보유 상태·중복·안전 장치를 처음 주문과 똑같이 검사한다.
@@ -306,7 +306,7 @@ def _expire(target: dict[str, Any], exc: Exception) -> None:
     """회차가 더는 주문 대상이 아니면 다시 눌러도 같은 결과이므로 버튼을 되살리지 않고 신호 메시지에 ❌ 를 단다."""
     request = target["request"]
     side = f"{_env_word(request['env'])} {_SIDE_LABELS[request['side']]}"
-    send_slack_message_v2(f"❌ {side} 주문 실패: {exc}", thread_ts=target["thread_ts"])
+    send_thread_message(f"❌ {side} 주문 실패: {exc}", thread_ts=target["thread_ts"])
     _update_message(target, _note_blocks(request, "⌛ 보유 상태가 바뀌어 주문 불가"))
     if target["thread_ts"] != target["message_ts"]:
         _react("reactions_add", target["channel"], target["thread_ts"], REACTION_EXPIRED)
@@ -331,12 +331,12 @@ def _place(target: dict[str, Any]) -> None:
         return
     except Exception as exc:  # 슬랙 요청은 이미 응답했으므로 실패도 스레드로 알린다.
         logger.exception("슬랙 모의 주문 처리 실패")
-        send_slack_message_v2(f"❌ {side} 주문 실패: {exc}", thread_ts=target["thread_ts"])
+        send_thread_message(f"❌ {side} 주문 실패: {exc}", thread_ts=target["thread_ts"])
         _update_message(target, _open_blocks(request))
         return
     gap_pct = _signal_gap_pct(order)
     gap = f" · 신호 대비 {gap_pct:+.2f}%" if gap_pct is not None else ""
-    send_slack_message_v2(
+    send_thread_message(
         f"✅ {side} 주문 접수: {order['strategy_label']} {order['quantity']:,}주 × {order['price']:,}원 (지정가){gap}",
         thread_ts=target["thread_ts"],
     )
@@ -354,7 +354,7 @@ def _cancel(target: dict[str, Any]) -> None:
         cancel_record(target["order_id"])
     except Exception as exc:
         logger.exception("슬랙 모의 주문 취소 실패")
-        send_slack_message_v2(f"❌ {side} 주문 취소 실패: {exc}", thread_ts=target["thread_ts"])
+        send_thread_message(f"❌ {side} 주문 취소 실패: {exc}", thread_ts=target["thread_ts"])
         # 그 사이 주문이 끝났을 수 있다 — 끝났으면 결과 알림은 배치가 하고, 아니면 취소 버튼을 되살린다.
         order = refreshed_order(request["account_no"], target["order_id"])
         if order["status"] in FINISHED_STATUSES:
@@ -362,7 +362,7 @@ def _cancel(target: dict[str, Any]) -> None:
         else:
             _update_message(target, _cancel_blocks(request, target["order_id"]))
         return
-    send_slack_message_v2(f"🚫 {side} 주문 취소를 요청했습니다.", thread_ts=target["thread_ts"])
+    send_thread_message(f"🚫 {side} 주문 취소를 요청했습니다.", thread_ts=target["thread_ts"])
     # 취소 결과(체결 수량 포함)로 메시지를 마무리하는 일은 배치(`notify_finished_orders`)가 한다.
 
 
@@ -375,7 +375,7 @@ def run_submission(target: dict[str, Any]) -> None:
             _cancel(target)
     except Exception as exc:
         logger.exception("슬랙 모의 주문 후속 처리 실패")
-        send_slack_message_v2(f"⚠️ 처리 중 오류로 멈춥니다: {exc}", thread_ts=target["thread_ts"])
+        send_thread_message(f"⚠️ 처리 중 오류로 멈춥니다: {exc}", thread_ts=target["thread_ts"])
 
 
 def _request_of(record: dict[str, Any]) -> dict[str, Any]:
@@ -427,7 +427,7 @@ def notify_close_approaching() -> int:
         side = f"{_env_word(order['env'])} {_SIDE_LABELS[order['side']]}"
         remaining = order["quantity"] - order["filled_quantity"]
         text = f"⏰ {side} 주문이 아직 체결되지 않았습니다(미체결 {remaining:,}주). 15:30 장 마감 전에 취소하지 않으면 오늘 주문은 만료됩니다."
-        send_slack_message_v2(text, thread_ts=target["thread_ts"])
+        send_thread_message(text, thread_ts=target["thread_ts"])
         _update_message(target, [*_cancel_blocks(request, order["id"]), _note(text)])
         mark_slack_close_warned(record["_id"])
     return len(records)

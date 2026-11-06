@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
+import { AppModal } from "../components/AppModal";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
@@ -72,13 +73,15 @@ export type RoundRow = {
   // 다음 회차가 매수 한도를 넘는다 — 이 회차부터는 사지 않는다.
   over_limit: boolean;
   sell_reached: boolean;
-  // 오늘 슬랙 신호가 나간 방향, 아직 끝나지 않은 주문의 방향.
-  slack_sides: Array<"buy" | "sell">;
+  // 오늘 슬랙 신호가 나간 방향(key: 지울 때 쓰는 발송 기록 키, has_ts: 슬랙 메시지 기록이 있어 지울 수 있음), 아직 끝나지 않은 주문의 방향.
+  slack_signals: SlackSignal[];
   order_sides: Array<"buy" | "sell">;
   // 오늘 체결된 매매 — 출처(슬랙 신호 주문·수동)와 방향별 건수. 표시 기록일 뿐이다.
   fills: Array<{ source: "slack" | "manual"; side: "buy" | "sell"; price: number; quantity: number }>;
   is_next: boolean;
 };
+
+export type SlackSignal = { side: "buy" | "sell"; key: string; has_ts: boolean };
 
 export type StrategyView = {
   strategy_id: string;
@@ -205,16 +208,29 @@ function StatusBadge({ color, children }: { color: string; children: React.React
 
 const SIDE_WORDS = { buy: "매수", sell: "매도" } as const;
 
-/** 상태 칸 — 지정가에 닿았으면 도달(빨강), 슬랙 신호·주문이 나갔으면 방향을 붙여 매도슬랙·매수주문처럼(녹색). */
-function RoundStatus({ row }: { row: RoundRow }) {
+/** 상태 칸 — 지정가에 닿았으면 도달(빨강), 슬랙 신호·주문이 나갔으면 방향을 붙여 매도슬랙·매수주문처럼(녹색).
+ *  슬랙 뱃지는 슬랙 메시지 기록이 있으면 눌러서 지울 수 있다(주문이 있으면 서버가 막는다). */
+function RoundStatus({ row, onDeleteSignal }: { row: RoundRow; onDeleteSignal: (signal: SlackSignal, label: string) => void }) {
   return (
     <span style={{ display: "inline-flex", gap: 4 }}>
       {row.buy_reached || row.sell_reached ? <StatusBadge color="var(--up-color, #d64545)">도달</StatusBadge> : null}
-      {row.slack_sides.map((side) => (
-        <StatusBadge key={`slack-${side}`} color="var(--tblr-green, #2fb344)">
-          {SIDE_WORDS[side]}슬랙
-        </StatusBadge>
-      ))}
+      {row.slack_signals.map((signal) => {
+        const label = `${SIDE_WORDS[signal.side]}슬랙`;
+        const badge = <StatusBadge color="var(--tblr-green, #2fb344)">{label}</StatusBadge>;
+        return signal.has_ts ? (
+          <button
+            key={`slack-${signal.side}`}
+            type="button"
+            title="눌러서 이 슬랙 신호 지우기"
+            onClick={() => onDeleteSignal(signal, label)}
+            style={{ all: "unset", cursor: "pointer" }}
+          >
+            {badge}
+          </button>
+        ) : (
+          <span key={`slack-${signal.side}`}>{badge}</span>
+        );
+      })}
       {row.order_sides.map((side) => (
         <StatusBadge key={`order-${side}`} color="var(--tblr-green, #2fb344)">
           {SIDE_WORDS[side]}주문
@@ -639,7 +655,13 @@ function PoolSettingsCard({
 }
 
 /** 전략 하나의 운용 현황(현재 판단 + 회차 표) — 설정은 상단 카드에서 편집한다. */
-function StrategySection({ view }: { view: StrategyView }) {
+function StrategySection({
+  view,
+  onDeleteSignal,
+}: {
+  view: StrategyView;
+  onDeleteSignal: (signal: SlackSignal, label: string) => void;
+}) {
   const { config, status, index } = view;
   // 기준선이 회차 사이에 못 들어가는 경우 — 마지막 회차의 지수 환산에서 저점까지 남은 하락률.
   const lastLeveledRound = [...view.rounds].reverse().find((row) => row.buy_index != null) ?? null;
@@ -763,7 +785,7 @@ function StrategySection({ view }: { view: StrategyView }) {
                   ) : null}
                 </td>
                 <td style={{ ...tdStyle, textAlign: "left" }}>
-                  <RoundStatus row={row} />
+                  <RoundStatus row={row} onDeleteSignal={onDeleteSignal} />
                 </td>
                 <td style={{ ...tdStyle, textAlign: "left" }}>
                   {row.ticker} {row.name}
@@ -808,6 +830,8 @@ export function StrategyTradeClient() {
   const [view, setView] = useState<View | null>(null);
   const [loading, setLoading] = useState(true);
   const [dirty, setDirty] = useState(false);
+  const [deleting, setDeleting] = useState<{ key: string; label: string } | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const load = useCallback(
     async (pool: string | null) => {
@@ -827,6 +851,31 @@ export function StrategyTradeClient() {
     },
     [toast],
   );
+
+  const askDeleteSignal = useCallback((signal: SlackSignal, label: string) => {
+    setDeleting({ key: signal.key, label });
+  }, []);
+
+  const confirmDeleteSignal = useCallback(async () => {
+    if (!deleting) return;
+    setDeleteBusy(true);
+    try {
+      const resp = await fetch("/api/strategy-trade/delete-signal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: deleting.key }),
+      });
+      const payload = await resp.json();
+      if (!resp.ok) throw new Error(payload?.error ?? "슬랙 신호를 지우지 못했습니다.");
+      toast.success("슬랙 신호를 지웠습니다.");
+      setDeleting(null);
+      await load(view?.pool ?? null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "슬랙 신호를 지우지 못했습니다.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [deleting, load, toast, view?.pool]);
 
   useEffect(() => {
     // 마지막으로 고른 풀은 브라우저에 기억한다(다른 전략 화면들과 같은 공용 키 방식).
@@ -872,7 +921,7 @@ export function StrategyTradeClient() {
         <section className="appSection">
           <div className="strategyTradeGrid">
             {view.strategies.map((strategy) => (
-              <StrategySection key={strategy.strategy_id} view={strategy} />
+              <StrategySection key={strategy.strategy_id} view={strategy} onDeleteSignal={askDeleteSignal} />
             ))}
           </div>
         </section>
@@ -893,6 +942,27 @@ export function StrategyTradeClient() {
           }
         />
       </div>
+
+      <AppModal
+        open={deleting !== null}
+        title="슬랙 신호 지우기"
+        onClose={() => setDeleting(null)}
+        footer={
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, width: "100%" }}>
+            <button type="button" className="btn" onClick={() => setDeleting(null)} disabled={deleteBusy}>
+              취소
+            </button>
+            <button type="button" className="btn btn-danger" onClick={() => void confirmDeleteSignal()} disabled={deleteBusy}>
+              {deleteBusy ? "지우는 중…" : "지우기"}
+            </button>
+          </div>
+        }
+      >
+        <p style={{ margin: 0 }}>
+          {deleting?.label} 메시지와 그 스레드(주문·체결 알림)를 슬랙에서 지우고 발송 기록도 지웁니다.
+          같은 메시지로 나간 다른 신호도 함께 지워지며, 이 신호로 낸 주문이 있으면 지우지 않습니다.
+        </p>
+      </AppModal>
     </PageFrame>
   );
 }

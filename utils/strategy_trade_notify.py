@@ -213,7 +213,7 @@ def _fill_history(strategy_view: dict[str, Any]) -> tuple[list[dict[str, Any]], 
 
 
 def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
-    """화면용 — 회차마다 오늘 슬랙 신호가 나간 방향(`slack_sides`)과 아직 끝나지 않은 주문의 방향(`order_sides`),
+    """화면용 — 회차마다 오늘 슬랙 신호가 나간 방향·발송 기록 키·슬랙 메시지 기록 유무(`slack_signals`)와 아직 끝나지 않은 주문의 방향(`order_sides`),
     오늘 체결된 매매를 체결 순서대로(`fills`: 출처 슬랙·수동, 방향, 가격, 수량 — 표시 기록일 뿐 전략·주문 판정과 무관하다) 행에 적는다.
 
     지정가에 닿아 있는지와 무관하다 — 신호·주문이 나간 뒤 가격이 물러나도 표시가 남아야 한다.
@@ -227,9 +227,13 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
     sent_log = _load_sent_log()
     for strategy_id in held_counts:
         _keep_latest_buy(sent_log, strategy_id)
+    # (전략, 회차, 구분) → 발송 기록 — 화면이 기록 키로 신호를 지운다.
     slack_keys = {
-        (entry.get("strategy_id"), entry.get("round"), entry.get("action"))
-        for entry in sent_log.values()
+        (entry.get("strategy_id"), entry.get("round"), entry.get("action")): {
+            "key": key,
+            "has_ts": bool(entry.get("signal_ts")),
+        }
+        for key, entry in sent_log.items()
         # 이 화면에 없는 전략의 기록은 어차피 행에 닿지 않는다 — 보유 수를 모르니 판정 없이 뺀다.
         if entry.get("strategy_id") in held_counts
         and (sent_at := _parse_sent_at(entry.get("at"))) is not None
@@ -242,7 +246,9 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
         history, strategy_view["history_error"] = _fill_history(strategy_view)
         for row in strategy_view["rounds"]:
             key = (strategy_view["strategy_id"], row["round"])
-            row["slack_sides"] = [side for side in ("buy", "sell") if (*key, side) in slack_keys]
+            row["slack_signals"] = [
+                {"side": side, **slack_keys[(*key, side)]} for side in ("buy", "sell") if (*key, side) in slack_keys
+            ]
             row["order_sides"] = [side for side in ("buy", "sell") if (*key, side) in order_keys]
             row["fills"] = [
                 {field: event[field] for field in ("source", "side", "price", "quantity")}
@@ -375,7 +381,7 @@ def send_test(account_id: str) -> dict[str, Any]:
 
     스위치·중복 방지와 무관하고 상태는 건드리지 않는다. 신호가 없으면 현황만 보낸다.
     """
-    from utils.notification import send_slack_message_v2
+    from utils.strategy_trade_threads import send_thread_message
 
     pools = [
         pool
@@ -390,7 +396,7 @@ def send_test(account_id: str) -> dict[str, Any]:
     for strategy_view in view["strategies"]:
         strategy_triggers = collect_triggers(strategy_view)
         triggers.extend(strategy_triggers)
-        sent = bool(send_slack_message_v2(build_message(strategy_view, strategy_triggers))) and sent
+        sent = bool(send_thread_message(build_message(strategy_view, strategy_triggers))) and sent
     return {
         "sent": sent,
         "reason": "테스트 발송" if sent else "슬랙 전송에 실패했습니다.",
@@ -432,7 +438,7 @@ def _send_confirms(
     strategy_view: dict[str, Any], pendings: list[dict[str, Any]], sent_log: dict[str, dict[str, Any]]
 ) -> tuple[int, int]:
     """체결 확인을 신호를 알린 메시지의 스레드로 보낸다 — (보낸 메시지 수, 실패 수). 못 보낸 확인은 기록에 되돌린다."""
-    from utils.notification import send_slack_message_v2
+    from utils.strategy_trade_threads import send_thread_message
 
     groups: dict[str, list[dict[str, Any]]] = {}
     for pending in pendings:
@@ -440,7 +446,7 @@ def _send_confirms(
     sent = failed = 0
     for root, group in groups.items():
         text = "\n".join(_confirm_line(pending, strategy_view["index"]) for pending in group)
-        if send_slack_message_v2(text, thread_ts=root):
+        if send_thread_message(text, thread_ts=root):
             sent += 1
         else:
             failed += 1
@@ -459,7 +465,7 @@ def _send_repeats(
 
     뿌리 메시지가 기록에 없는 옛 이력은 채널에 새로 올리고 그 메시지를 뿌리로 삼는다.
     """
-    from utils.notification import send_slack_message_v2
+    from utils.strategy_trade_threads import send_thread_message
 
     groups: dict[str | None, list[dict[str, Any]]] = {}
     for trigger in repeats:
@@ -467,7 +473,7 @@ def _send_repeats(
     sent = failed = order_failed = 0
     delivered: list[dict[str, Any]] = []
     for root, group in groups.items():
-        ts = send_slack_message_v2("\n".join(build_repeat_line(trigger) for trigger in group), thread_ts=root)
+        ts = send_thread_message("\n".join(build_repeat_line(trigger) for trigger in group), thread_ts=root)
         if not ts:
             failed += 1
             continue
@@ -486,8 +492,8 @@ def notify_strategy_trade() -> dict[str, Any]:
     Returns:
         ``{"sent": bool, "reason": str, "triggers": [...]}``
     """
-    from utils.notification import send_slack_message_v2
     from utils.strategy_trade_orders import active_order_keys
+    from utils.strategy_trade_threads import send_thread_message
 
     enabled = [
         pool
@@ -555,7 +561,7 @@ def notify_strategy_trade() -> dict[str, Any]:
         if fresh:
             lines.append(build_message(strategy_view, fresh))
         if lines:
-            signal_ts = send_slack_message_v2("\n".join(lines))
+            signal_ts = send_thread_message("\n".join(lines))
             if not signal_ts:
                 failed_count += 1
                 # 못 보낸 확인은 기록에 되돌려 다음 배치에서 다시 보낸다.
