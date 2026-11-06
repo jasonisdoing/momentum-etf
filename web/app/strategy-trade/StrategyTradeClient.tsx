@@ -21,7 +21,6 @@ type StrategyConfig = {
 
 type IndexStatus = {
   name: string;
-  as_of: string;
   close: number;
   buy_trigger: number;
   // 최근 지수 저점(라벨은 서버가 정한다) — 회차 지정가가 어느 층에 걸리는지 가늠하는 기준선.
@@ -300,7 +299,7 @@ function FillBadges({ fills }: { fills: Fill[] }) {
 function BelowLastGapRow({ gap }: { gap: { round: number; pct: number } }) {
   return (
     <tr>
-      <td colSpan={9} style={{ padding: "22px 8px", textAlign: "center" }}>
+      <td colSpan={8} style={{ padding: "22px 8px", textAlign: "center" }}>
         <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
           {gap.round}호에서 <b style={{ color: "var(--up-color, #d64545)" }}>{formatSigned(gap.pct)}</b> 더 내려가야
           기준선
@@ -319,7 +318,7 @@ function BelowLastGapRow({ gap }: { gap: { round: number; pct: number } }) {
 function RecentLowRow({ index }: { index: IndexStatus }) {
   return (
     <tr>
-      <td colSpan={9} style={{ padding: "2px 8px" }}>
+      <td colSpan={8} style={{ padding: "2px 8px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--up-color, #d64545)", fontSize: "var(--fs-sm)", fontWeight: 700 }}>
           <span style={{ flex: 1, borderTop: "2px dashed var(--up-color, #d64545)", opacity: 0.55 }} />
           <span>
@@ -708,8 +707,8 @@ function StrategySection({
       {/* 현재 판단 요약 */}
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: "var(--fs-sm)" }}>
         <span>
-          {index.name} <b>{formatNumber(index.close)}</b>
-          <span style={{ color: "var(--text-muted)" }}> ({index.as_of})</span>
+          현재가{" "}
+          <b style={{ fontSize: "var(--fs-xl)", fontWeight: 800 }}>{formatNumber(index.close)}</b>
         </span>
         <span>
           {index.recent_low_label} <b>{formatNumber(index.recent_low)}</b>
@@ -770,7 +769,6 @@ function StrategySection({
               <th style={{ ...thStyle, textAlign: "left" }}>상태</th>
               <th style={{ ...thStyle, textAlign: "left" }}>종목</th>
               <th style={thStyle}>체결가</th>
-              <th style={thStyle}>현재가</th>
               <th style={thStyle}>손익</th>
               <th style={thStyle}>매수 지정가</th>
               <th style={thStyle}>매도 지정가</th>
@@ -813,7 +811,6 @@ function StrategySection({
                     </div>
                   ) : null}
                 </td>
-                <td style={tdStyle}>{formatNumber(row.close)}</td>
                 <td style={{ ...tdStyle, color: signColor(row.profit_pct), fontWeight: 700 }}>
                   {formatSigned(row.profit_pct)}
                 </td>
