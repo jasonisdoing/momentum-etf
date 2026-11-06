@@ -620,7 +620,6 @@ def load_strategy_trade_view(pool: str | None) -> dict[str, Any]:
     ``pool`` 이 None 이면 켜진 풀 중 첫 번째를 보여준다(다른 전략 화면과 같다). 켜진 풀이 없으면
     ``pool`` 은 None 이다. 슬리브가 안 붙은 풀은 설정(``configs``)만 주고 운용 현황은 비운다.
     """
-    from utils.pool_signal_backtest_service import get_month_options
     from utils.pool_strategy_use import STRATEGY_TRADE, pool_options, pools_using
 
     settings = load_settings()
@@ -633,7 +632,6 @@ def load_strategy_trade_view(pool: str | None) -> dict[str, Any]:
     return {
         "pool_options": pool_options(enabled),
         "pool": selected,
-        "month_options": get_month_options(),
         # 합성 슬리브 — 운용 계좌와 매수 한도의 출처. 없으면 None(화면이 붙이라고 안내한다).
         "sleeve": (
             {**sleeve, "per_strategy_limit_krw": strategy_budget(sleeve, len(in_pool))}

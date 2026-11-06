@@ -9,7 +9,6 @@ import { AppModal } from "../components/AppModal";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
-import { TradeBacktestSection } from "./TradeBacktestSection";
 
 type StrategyConfig = {
   // 매매 간격(%) 하나로 진입·추가·매도를 모두 관리한다.
@@ -125,8 +124,6 @@ type View = {
   configs: StrategyConfigRow[];
   /** 사고팔기를 켠 종목풀 — 종목풀 설정의 토글이 단일 소스다. */
   pool_options: PoolLabelSource[];
-  /** 백테스트 기간 선택지 — 백엔드가 단일 소스다. */
-  month_options: number[];
   /** 지금 보는 종목풀. 켜진 풀이 없으면 null. */
   pool: string | null;
   strategies: StrategyView[];
@@ -437,14 +434,11 @@ function PoolSettingsCard({
   pool,
   onPoolChange,
   onSaved,
-  onDirtyChange,
 }: {
   view: View;
   pool: string;
   onPoolChange: (pool: string) => void;
   onSaved: (next: View) => void;
-  /** 저장 안 한 변경이 생기거나 사라질 때 알린다 — 백테스트는 저장된 설정으로 돌기 때문이다. */
-  onDirtyChange: (dirty: boolean) => void;
 }) {
   const toast = useToast();
   const [rows, setRows] = useState<DraftRow[]>(() => rowsFromConfigs(view.configs));
@@ -457,9 +451,6 @@ function PoolSettingsCard({
 
   const isDirty =
     JSON.stringify(rows.map(comparableRow)) !== JSON.stringify(rowsFromConfigs(view.configs).map(comparableRow));
-  useEffect(() => {
-    onDirtyChange(isDirty);
-  }, [isDirty, onDirtyChange]);
 
   const updateRow = useCallback((key: string, patch: Partial<DraftRow>) => {
     setRows((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)));
@@ -829,7 +820,6 @@ export function StrategyTradeClient() {
   const toast = useToast();
   const [view, setView] = useState<View | null>(null);
   const [loading, setLoading] = useState(true);
-  const [dirty, setDirty] = useState(false);
   const [deleting, setDeleting] = useState<{ key: string; label: string } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
@@ -914,7 +904,6 @@ export function StrategyTradeClient() {
           pool={view.pool}
           onPoolChange={(next) => void load(next)}
           onSaved={setView}
-          onDirtyChange={setDirty}
         />
 
         {/* 운용 현황 — DB 에 저장된 순서, 좌우 2열(좁은 화면은 1열) */}
@@ -925,22 +914,6 @@ export function StrategyTradeClient() {
             ))}
           </div>
         </section>
-
-        {/* 백테스트 — 설정이나 풀이 바뀌면 결과가 어긋나므로 다시 마운트해 비운다. */}
-        <TradeBacktestSection
-          key={`${view.pool}:${view.configs.map((c) => `${c.strategy_id}/${c.ticker}/${c.trigger_pct}/${c.round_quantity}/${c.rounds}`).join(",")}:${view.sleeve?.limit_krw ?? ""}`}
-          pool={view.pool}
-          monthOptions={view.month_options}
-          blockedReason={
-            dirty
-              ? "저장하지 않은 변경이 있습니다 — 저장한 뒤 실행하세요."
-              : view.configs.length === 0
-                ? "이 종목풀에 전략이 없습니다."
-                : view.sleeve === null
-                  ? "사고팔기 슬리브가 계좌에 붙어 있지 않습니다."
-                  : null
-          }
-        />
       </div>
 
       <AppModal
