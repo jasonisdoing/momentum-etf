@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Body, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
+from utils.strategy_trade_backtest import run_strategy_trade_backtest
 from utils.strategy_trade_notify import mark_sent_rounds
 from utils.strategy_trade_service import (
     load_strategy_trade_view,
@@ -34,6 +35,16 @@ def get_strategy_trade_resolve(
 ) -> dict:
     """티커 확인 — 그 종목풀에 있는 ETF 면 {ticker, name}, 없으면 에러."""
     return resolve_etf(pool, ticker)
+
+
+@router.get("/backtest")
+def get_strategy_trade_backtest(
+    pool: str = Query(...),
+    months: int = Query(...),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """종목풀 하나의 사고팔기 전략 전체를 저장된 설정으로 최근 ``months`` 개월 백테스트한다."""
+    return run_strategy_trade_backtest(pool, months)
 
 
 @router.put("/settings")
