@@ -154,7 +154,7 @@ def send_order_message(
 ) -> None:
     """주문 메시지를 슬랙으로 보낸다(thread_ts 가 있으면 그 스레드에) — 주문은 슬랙에서 버튼과 모달 확인을 거쳐야 나간다."""
     env = account_env(account_no)
-    order = resolve_order(pool, strategy_id, side, round_no)
+    order = resolve_order(pool, strategy_id, side, round_no, fresh=False)
     request = {
         "env": env,
         "round": round_no,
@@ -253,7 +253,10 @@ def open_confirm_modal(payload: dict[str, Any]) -> None:
     }
     if action["action_id"] == OPEN_ACTION_ID:
         try:
-            order = resolve_order(request["pool"], request["strategy_id"], request["side"], request["round"])
+            # 슬랙 trigger_id 는 3초 안에 써야 해서 저장된 원장으로 연다 — 실제 주문 직전 검증은 `place_order` 가 새로 계산한다.
+            order = resolve_order(
+                request["pool"], request["strategy_id"], request["side"], request["round"], fresh=False
+            )
         except RoundNotOrderableError as exc:
             _expire(target, exc)
             return

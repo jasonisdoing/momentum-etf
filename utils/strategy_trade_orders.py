@@ -162,17 +162,19 @@ def _require_order_allowed(account_no: str, env: str, amount: int) -> None:
         )
 
 
-def resolve_order(pool: str, strategy_id: str, side: str, round_no: int | None) -> dict[str, Any]:
+def resolve_order(pool: str, strategy_id: str, side: str, round_no: int | None, *, fresh: bool) -> dict[str, Any]:
     """주문 내용 — 가격은 **그 순간의 현재가를 호가 단위로 반올림한 지정가**, 수량은 회차당 수량이다.
 
     사다리 지정가를 미리 걸지 않는다 — 사람이 버튼을 누르는 순간의 시장 가격으로만 낸다.
     `round_no` 가 있으면(신호 주문) 그 회차가 지금도 주문 대상인지 확인하고, 비교용 `signal_price`(매도 목표·매수선,
     장 마감 매수는 None)를 함께 준다.
+
+    ``fresh`` 가 참이면 보유 회차를 증권사에서 새로 계산한다(수 초) — 실제 주문 직전 검증용이다. 거짓이면 배치가
+    저장해 둔 것을 읽는다(1초 안팎) — 슬랙 모달은 3초 안에 열어야 해서 이쪽을 쓴다.
     """
     if side not in ("buy", "sell"):
         raise BrokerApiError(f"알 수 없는 주문 구분입니다: {side}")
-    # 주문 직전이라 저장된 원장이 아니라 지금 증권사 기준으로 다시 계산한다.
-    views = load_views_for_pools([pool], fresh=True)
+    views = load_views_for_pools([pool], fresh=fresh)
     if strategy_id in views["errors"]:
         raise BrokerApiError(f"'{strategy_id}' 전략의 보유 회차를 확인할 수 없습니다: {views['errors'][strategy_id]}")
     strategy = next((row for row in views["strategies"] if row["strategy_id"] == strategy_id), None)
@@ -207,7 +209,8 @@ def place_order(
     if slack is None and side != "sell":
         raise BrokerApiError("모달에서 직접 내는 주문은 매도만 됩니다 — 매수는 슬랙 주문 메시지로 내세요.")
     env = account_env(account_no)
-    order = resolve_order(pool, strategy_id, side, round_no)
+    # 주문 직전이라 저장된 원장이 아니라 지금 증권사 기준으로 다시 계산한다.
+    order = resolve_order(pool, strategy_id, side, round_no, fresh=True)
     if round_no is not None:
         _require_no_duplicate(account_no, strategy_id, side, round_no)
     _require_order_allowed(account_no, env, order["price"] * order["quantity"])
