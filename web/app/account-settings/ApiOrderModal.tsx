@@ -7,7 +7,7 @@ import { formatPrice } from "@/lib/price-format";
 import { formatKrw } from "../assets/assets-helpers";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
-import type { StrategyView } from "../strategy-trade/StrategyTradeClient";
+import type { FailedStrategy, StrategyView } from "../strategy-trade/StrategyTradeClient";
 
 /** 증권사 서버 주소 — 서버가 계좌 구분(운영·모의)으로 정한다. 화면은 안내 문구로만 쓴다. */
 const MOCK_DOMAIN = "moapi.nhplug.com:8443";
@@ -130,9 +130,14 @@ export function ApiOrderModal({
     setLoadingStrategies(true);
     try {
       const resp = await fetch("/api/strategy-trade", { cache: "no-store" });
-      const data = (await resp.json()) as { strategies?: StrategyView[]; pool?: string | null; error?: string };
+      const data = (await resp.json()) as {
+        strategies?: Array<StrategyView | FailedStrategy>;
+        pool?: string | null;
+        error?: string;
+      };
       if (!resp.ok || data.error) throw new Error(data.error ?? "사고팔기 전략을 불러오지 못했습니다.");
-      const list = data.strategies ?? [];
+      // 보유 회차를 맞추지 못한 전략은 주문 대상에서 뺀다 — 그 이유는 /strategy-trade 화면이 보여 준다.
+      const list = (data.strategies ?? []).filter((row): row is StrategyView => !("error" in row));
       setStrategies(list);
       setPool(data.pool ?? "");
       setStrategyId((current) => (list.some((row) => row.strategy_id === current) ? current : (list[0]?.strategy_id ?? "")));

@@ -33,9 +33,9 @@ from zoneinfo import ZoneInfo
 from utils.logger import get_app_logger
 from utils.order_confirm import build_confirm_line, pop_filled
 from utils.strategy_trade_service import (
-    linked_broker_account_no,
     load_settings,
     load_views_for_pools,
+    refresh_all_ledgers,
     sleeve_for_pool,
 )
 
@@ -106,7 +106,11 @@ def _index_text(index: dict[str, Any]) -> str:
 
 def _held_counts(view: dict[str, Any]) -> dict[str, int]:
     """전략별 보유 회차 수 — 전략마다 종목이 하나라 체결 확인은 회차 수 증감으로 본다."""
-    return {strategy["strategy_id"]: int(strategy["status"]["held_count"]) for strategy in view["strategies"]}
+    return {
+        strategy["strategy_id"]: int(strategy["status"]["held_count"])
+        for strategy in view["strategies"]
+        if "error" not in strategy
+    }
 
 
 def _round_filled(pending: dict[str, Any], held_count: int) -> bool:
@@ -195,26 +199,9 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
     return triggers
 
 
-def _fill_history(strategy_view: dict[str, Any]) -> tuple[list[dict[str, Any]], str | None]:
-    """오늘 체결 이력과 오류 문구 — 증권사 API 연동이 없는 계좌는 비운다(오류 아님).
-
-    증권사 조회가 실패하면 화면 전체를 막지 않고 오류 문구를 돌려 화면이 표시하게 한다.
-    """
-    from services.broker_api_service import BrokerApiError
-    from utils.strategy_trade_orders import fill_history
-
-    account_no = linked_broker_account_no(strategy_view["pool"])
-    if account_no is None:
-        return [], None
-    try:
-        return fill_history(strategy_view, account_no), None
-    except BrokerApiError as exc:
-        return [], str(exc)
-
-
 def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
-    """화면용 — 회차마다 오늘 슬랙 신호가 나간 방향·발송 기록 키·슬랙 메시지 기록 유무(`slack_signals`)와 아직 끝나지 않은 주문의 방향(`order_sides`),
-    오늘 체결된 매매를 체결 순서대로(`fills`: 출처 슬랙·수동, 방향, 가격, 수량 — 표시 기록일 뿐 전략·주문 판정과 무관하다) 행에 적는다.
+    """화면용 — 회차마다 오늘 슬랙 신호가 나간 방향·발송 기록 키·슬랙 메시지 기록 유무(`slack_signals`)와
+    아직 끝나지 않은 주문의 방향(`order_sides`)을 행에 적는다. 회차 원장을 못 만든 전략(`error`)은 건너뛴다.
 
     지정가에 닿아 있는지와 무관하다 — 신호·주문이 나간 뒤 가격이 물러나도 표시가 남아야 한다.
     체결된 주문과 이미 체결된 신호의 슬랙 기록은 더 표시하지 않는다 — 기록은 배치가 체결을 확인해 지우기까지
@@ -243,18 +230,12 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
     strategy_ids = [strategy_view["strategy_id"] for strategy_view in view["strategies"]]
     order_keys = active_order_keys(strategy_ids)
     for strategy_view in view["strategies"]:
-        history, strategy_view["history_error"] = _fill_history(strategy_view)
         for row in strategy_view["rounds"]:
             key = (strategy_view["strategy_id"], row["round"])
             row["slack_signals"] = [
                 {"side": side, **slack_keys[(*key, side)]} for side in ("buy", "sell") if (*key, side) in slack_keys
             ]
             row["order_sides"] = [side for side in ("buy", "sell") if (*key, side) in order_keys]
-            row["fills"] = [
-                {field: event[field] for field in ("source", "side", "price", "quantity")}
-                for event in history
-                if event["round"] == row["round"]
-            ]
     return view
 
 
@@ -390,7 +371,7 @@ def send_test(account_id: str) -> dict[str, Any]:
     ]
     if not pools:
         return {"sent": False, "reason": "이 계좌에 사고팔기 슬리브가 없습니다.", "triggers": []}
-    view = load_views_for_pools(pools)
+    view = load_views_for_pools(pools, fresh=False)
     triggers: list[dict[str, Any]] = []
     sent = bool(view["strategies"])
     for strategy_view in view["strategies"]:
@@ -495,6 +476,10 @@ def notify_strategy_trade() -> dict[str, Any]:
     from utils.strategy_trade_orders import active_order_keys
     from utils.strategy_trade_threads import send_thread_message
 
+    # 화면이 읽는 회차 원장을 슬랙 스위치와 무관하게 먼저 새로 계산해 저장한다 — 아래 판정도 이 저장본을 쓴다.
+    for ticker, message in refresh_all_ledgers().items():
+        logger.error("사고팔기 회차 원장 실패(%s) — 이 종목은 건너뜁니다: %s", ticker, message)
+
     enabled = [
         pool
         for pool in _pools_with_strategies()
@@ -503,7 +488,7 @@ def notify_strategy_trade() -> dict[str, Any]:
     if not enabled:
         return {"sent": False, "reason": "슬랙이 켜진 사고팔기 슬리브가 없습니다.", "triggers": []}
 
-    view = load_views_for_pools(enabled)
+    view = load_views_for_pools(enabled, fresh=False)
     triggers = [t for s in view["strategies"] for t in collect_triggers(s)]
 
     now = datetime.now(KST)

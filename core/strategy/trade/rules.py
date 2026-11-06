@@ -8,9 +8,6 @@
 - 지정가는 ETF 호가 단위(5원)로 반올림한다.
 - 전략마다 매수 한도(원)가 있다. 이미 산 회차의 매수금액에 다음 회차 금액을 더해 한도를 넘으면
   그 회차부터는 사지 않는다(`within_budget`).
-
-계좌 보유에서 회차를 거꾸로 맞추는 계산(`first_entry_from_average`)도 여기 둔다 — 평균단가는
-회차가 1호부터 연속으로 찬 사다리의 평균이라는 전제에서만 1호가로 되돌려진다.
 """
 
 from __future__ import annotations
@@ -29,13 +26,6 @@ def down_ratio(trigger_pct: float) -> float:
 
 def up_ratio(trigger_pct: float) -> float:
     return 1.0 + float(trigger_pct) / 100.0
-
-
-def first_entry_from_average(avg_price: float, held_rounds: int, trigger_pct: float) -> float:
-    """보유 평균단가와 보유 회차 수에서 1호 진입가를 되돌린다 (m 회차 평균 = P1 × Σ r^i ÷ m)."""
-    ratio = down_ratio(trigger_pct)
-    ladder_sum = sum(ratio**i for i in range(held_rounds))
-    return avg_price * held_rounds / ladder_sum
 
 
 def entry_price(first_entry: float, round_no: int, trigger_pct: float) -> float:

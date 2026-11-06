@@ -33,7 +33,6 @@ from utils.account_settings_store import ACCOUNT_ENV_MOCK
 from utils.db_manager import get_db_connection
 from utils.market_session import REGULAR, market_session
 from utils.strategy_trade_service import load_views_for_pools
-from utils.ttl_cache import TtlCache
 
 KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_orders"
@@ -119,6 +118,17 @@ def _require_no_duplicate(account_no: str, strategy_id: str, side: str, round_no
         )
 
 
+def _require_no_manual_order(strategy: dict[str, Any], side: str) -> None:
+    """증권사 앱(MTS)에 같은 종목·같은 구분의 미체결 수동 주문이 걸려 있으면 막는다 — 중복 주문을 피하려면 그 주문부터 정리해야 한다."""
+    found = [order for order in strategy["manual_orders"] if order["side"] == side]
+    if found:
+        word = "매도" if side == "sell" else "매수"
+        detail = ", ".join(f"{order['price']:,.0f}원 {order['quantity']:,}주" for order in found)
+        raise BrokerApiError(
+            f"{strategy['label']} 에 증권사 앱에서 낸 미체결 {word} 주문이 있어 주문할 수 없습니다({detail}) — 먼저 정리하세요."
+        )
+
+
 def _require_order_allowed(account_no: str, env: str, amount: int) -> None:
     """운영 계좌의 주문 안전 장치 — 계좌의 API 주문 스위치, 정규장, 하루 주문 건수·금액 한도. 모의 계좌는 막지 않는다."""
     if env == ACCOUNT_ENV_MOCK:
@@ -161,11 +171,14 @@ def resolve_order(pool: str, strategy_id: str, side: str, round_no: int | None) 
     """
     if side not in ("buy", "sell"):
         raise BrokerApiError(f"알 수 없는 주문 구분입니다: {side}")
-    strategy = next(
-        (row for row in load_views_for_pools([pool])["strategies"] if row["strategy_id"] == strategy_id), None
-    )
+    # 주문 직전이라 저장된 원장이 아니라 지금 증권사 기준으로 다시 계산한다.
+    views = load_views_for_pools([pool], fresh=True)
+    if strategy_id in views["errors"]:
+        raise BrokerApiError(f"'{strategy_id}' 전략의 보유 회차를 확인할 수 없습니다: {views['errors'][strategy_id]}")
+    strategy = next((row for row in views["strategies"] if row["strategy_id"] == strategy_id), None)
     if strategy is None:
         raise BrokerApiError(f"{pool} 종목풀에 '{strategy_id}' 전략이 없습니다.")
+    _require_no_manual_order(strategy, side)
     signal_price = None
     if round_no is not None:
         row = _require_round_state(strategy, side, round_no)
@@ -486,61 +499,12 @@ def broker_orders_today(account_no: str) -> list[dict[str, Any]]:
     return list_day_orders(account_no, _now().strftime("%Y%m%d"))
 
 
-# 화면을 열 때마다 증권사를 부르지 않도록 짧게 보관한다 — 호출은 1초 간격으로 직렬화돼 느리다.
-_BROKER_TODAY_CACHE = TtlCache(30, name="strategy_trade_broker_orders_today")
-
-
-def _slack_rounds_today(account_no: str) -> dict[str, int]:
-    """오늘 슬랙 신호로 낸 주문의 주문번호 → 회차 — 주문할 때 기록한 회차라 정확하다."""
-    today = _now().strftime("%Y-%m-%d")
+def order_sources(account_no: str) -> dict[tuple[str, str], bool]:
+    """우리가 증권사에 낸 주문의 (날짜 YYYYMMDD, 주문번호) → 슬랙 신호 주문 여부 — 회차 원장이 체결의 출처를 가릴 때 쓴다."""
     records = _orders().find(
-        {"account_no": account_no, "created_at": {"$gte": today}, "round": {"$ne": None}, "order_no": {"$ne": None}},
-        {"order_no": 1, "round": 1},
+        {"account_no": account_no, "order_no": {"$ne": None}}, {"order_no": 1, "round": 1, "created_at": 1}
     )
-    return {str(int(record["order_no"])): record["round"] for record in records}
-
-
-def _is_buy(row: dict[str, Any]) -> bool:
-    if "매수" in row["side_label"]:
-        return True
-    if "매도" in row["side_label"]:
-        return False
-    raise BrokerApiError(f"알 수 없는 주문 구분입니다: {row['side_label']}")
-
-
-def fill_history(strategy_view: dict[str, Any], account_no: str) -> list[dict[str, Any]]:
-    """오늘 이 종목의 체결을 주문번호(시간) 순서로 돌려준다 — 회차·출처·구분·평균 체결가·수량(회차 단위, 화면 표시용 기록).
-
-    슬랙 신호 주문의 회차는 주문 기록 그대로 쓰고, 증권사 앱(HTS·MTS)·화면 직접 매도의 회차는 체결 순서를 재생해 구한다:
-    하루 시작 보유(지금 보유 − 오늘 순매수)에서 출발해 매수는 보유 다음 회차, 매도는 보유 맨 위 회차(마지막 회차부터 팔림)다.
-    회차당 수량에 못 미치는 체결은 회차로 환산할 수 없어 보이지 않는다.
-    """
-    per_round = int(strategy_view["config"]["round_quantity"])
-    yyyymmdd = _now().strftime("%Y%m%d")
-    all_rows = _BROKER_TODAY_CACHE.get_or_compute((account_no, yyyymmdd), lambda: list_day_orders(account_no, yyyymmdd))
-    rows = sorted(
-        (row for row in all_rows if row["ticker"] == strategy_view["ticker"] and row["filled_quantity"] > 0),
-        key=lambda row: int(row["order_no"]),
-    )
-    sides = [_is_buy(row) for row in rows]
-    net = sum(row["filled_quantity"] if buy else -row["filled_quantity"] for row, buy in zip(rows, sides))
-    shares = int(strategy_view["status"]["held_count"]) * per_round - net
-    slack_rounds = _slack_rounds_today(account_no)
-    events: list[dict[str, Any]] = []
-    for row, buy in zip(rows, sides):
-        count = row["filled_quantity"] // per_round
-        first = shares // per_round + 1 if buy else shares // per_round
-        replayed = range(first, first + count) if buy else range(first, first - count, -1)
-        shares += row["filled_quantity"] if buy else -row["filled_quantity"]
-        slack_round = slack_rounds.get(row["order_no"])
-        for round_no in [slack_round] * count if slack_round is not None else replayed:
-            events.append(
-                {
-                    "round": round_no,
-                    "source": "manual" if slack_round is None else "slack",
-                    "side": "buy" if buy else "sell",
-                    "price": row["average_fill_price"],
-                    "quantity": per_round,
-                }
-            )
-    return events
+    return {
+        (record["created_at"][:10].replace("-", ""), str(int(record["order_no"]))): record["round"] is not None
+        for record in records
+    }

@@ -6,14 +6,14 @@
 DB(``system_config.strategy_trade_settings.strategies``)가 단일 소스이며 화면에서
 편집한다. 슬랙 알람은 그 종목풀 슬리브가 붙은 계좌의 합성 슬랙 스위치를 따른다.
 
-보유 현황은 백테스트가 아니라 그 종목풀의 사고팔기 **합성 슬리브가 붙은 계좌**의 **실제 보유 수량·평균단가**를
-읽어 계산한다. 배치·원장은 없다 — 화면을 열 때마다 즉시 역산한다.
+보유 현황은 백테스트가 아니라 그 종목풀의 사고팔기 **합성 슬리브가 붙은 계좌**의 **증권사 체결 이력**에서 만든다.
+화면을 열 때마다 `strategy_trade_ledger` 가 체결을 재생해 회차별 실제 체결가를 구한다(슬랙 신호 주문·수동 주문 모두).
 
-회차 역산 규칙 (자세한 근거는 strategy_trade_config 모듈 설명 참고)
+사다리 규칙 (자세한 근거는 strategy_trade_config 모듈 설명 참고)
 ---------------------------------------------------------------
 - 진입 회차 수 m = 보유 수량 ÷ 회차당 수량 (반올림, 1~회차 수로 제한).
-- 1호가 P1 = 평균단가 × m ÷ (1 + r + … + r^(m-1)),  r = 1 − 간격%.
-- k호 진입가 = P1 × r^(k-1) · 매도 지정가 = 진입가 × (1 + 간격%).
+- 1호가 P1 = 1호를 실제로 산 체결가,  r = 1 − 간격%.
+- k호 진입가 = P1 × r^(k-1) · 매도 지정가 = 진입가 × (1 + 간격%). 갭으로 싸게 산 회차도 선은 그대로다.
 - 다음 매수 = 마지막 매수가 × r. 보유가 없으면 1호 진입 = 전일 종가 × r,
   장중에 못 닿았으면 15:00(``FIRST_ENTRY_CLOSE_TIME``)부터 마감 전까지 현재가로 1호 매수.
 """
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from core.strategy.trade import rules as ladder
 from utils.strategy_trade_config import (
@@ -29,7 +30,9 @@ from utils.strategy_trade_config import (
     FIRST_ENTRY_CLOSE_TIME,
     validate_strategy_trade_config,
 )
+from utils.strategy_trade_ledger import Ledger, LedgerError, forget_ledgers, read_ledgers, refresh_ledgers
 
+KST = ZoneInfo("Asia/Seoul")
 _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "strategy_trade_settings"
 
@@ -272,11 +275,11 @@ def strategy_budget(sleeve: dict[str, Any], strategy_count: int) -> float:
     return float(sleeve["limit_krw"]) / strategy_count
 
 
-def _load_account_rows(account_id: str) -> dict[str, dict[str, float]]:
-    """계좌에서 보유 종목의 수량·평균단가·현재가를 읽는다 (전 전략 공용, 1회 조회).
+def _load_account_closes(account_id: str) -> dict[str, float]:
+    """계좌 보유 종목의 현재가 (전 전략 공용, 1회 조회).
 
-    ``load_real_holdings_table`` 은 실시간 시세를 반영한 현재가까지 채워준다. 보유가 하나도 없는
-    계좌는 빈 결과다 — 모든 전략이 1호 진입 대기로 나온다.
+    ``load_real_holdings_table`` 은 실시간 시세를 반영한 현재가까지 채워준다. 수량·평균단가는 쓰지 않는다 —
+    보유는 증권사 체결 이력(회차 원장)이 정한다.
     """
     from utils.portfolio_io import load_real_holdings_table
 
@@ -285,22 +288,16 @@ def _load_account_rows(account_id: str) -> dict[str, dict[str, float]]:
         return {}
 
     ticker_column = "ticker" if "ticker" in frame.columns else "티커"
-    required = {ticker_column, "수량", "평균 매입가", "현재가"}
+    required = {ticker_column, "현재가"}
     missing = required - set(frame.columns)
     if missing:
         raise RuntimeError(f"보유 테이블에 필요한 컬럼이 없습니다: {', '.join(sorted(missing))}")
 
-    rows: dict[str, dict[str, float]] = {}
-    for _, row in frame.iterrows():
-        ticker = str(row[ticker_column]).strip()
-        if not ticker:
-            continue
-        rows[ticker] = {
-            "quantity": float(row["수량"] or 0),
-            "avg_price": float(row["평균 매입가"] or 0),
-            "close": float(row["현재가"] or 0),
-        }
-    return rows
+    return {
+        str(row[ticker_column]).strip(): float(row["현재가"] or 0)
+        for _, row in frame.iterrows()
+        if str(row[ticker_column]).strip()
+    }
 
 
 def _load_unheld_closes(tickers: list[str], pool: str) -> dict[str, float]:
@@ -411,13 +408,34 @@ def _first_entry_close_window(now: datetime | None = None) -> bool:
     return FIRST_ENTRY_CLOSE_TIME <= now_local.time() < schedule["close"]
 
 
+def _attach_today(rows: list[dict[str, Any]], ledger: Ledger, round_quantity: int, held_rounds: int) -> None:
+    """회차 행에 오늘 체결(`fills`)과 걸려 있는 수동 주문(`manual_orders`)을 붙인다 — 표시용 기록이다.
+
+    수동 매수는 다음 진입 회차에, 수동 매도는 가장 먼저 팔릴 맨 위 보유 회차에 붙는다.
+    """
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    events = [event for event in ledger.round_events(round_quantity) if event["day"] == today]
+    for row in rows:
+        row["fills"] = [
+            {field: event[field] for field in ("source", "side", "price", "quantity")}
+            for event in events
+            if event["round"] == row["round"]
+        ]
+        row["manual_orders"] = [
+            order
+            for order in ledger.manual_orders
+            if (order["side"] == "buy" and row["is_next"]) or (order["side"] == "sell" and row["round"] == held_rounds)
+        ]
+
+
 def _build_strategy_view(
     strategy_id: str,
     strategy_settings: dict[str, Any],
-    account_rows: dict[str, dict[str, float]],
+    account_closes: dict[str, float],
+    ledger: Ledger,
     budget: float,
 ) -> dict[str, Any]:
-    """전략 하나의 운용 현황(회차 표·상태)을 계좌 보유에서 역산한다. ``budget`` 은 이 전략의 매수 한도(원)."""
+    """전략 하나의 운용 현황(회차 표·상태)을 회차 원장에서 만든다. ``budget`` 은 이 전략의 매수 한도(원)."""
     pool = str(strategy_settings["pool"])
     ticker = str(strategy_settings["ticker"])
     name = str(strategy_settings["name"])
@@ -425,23 +443,23 @@ def _build_strategy_view(
     round_quantity = int(strategy_settings["round_quantity"])
     max_rounds = int(strategy_settings["rounds"])
 
-    account = account_rows.get(ticker) or {}
-    quantity = int(account.get("quantity") or 0)
-    avg_price = float(account.get("avg_price") or 0)
-    live_close = float(account.get("close") or 0) or _load_unheld_closes([ticker], pool).get(ticker)
+    quantity = ledger.quantity
+    live_close = account_closes.get(ticker) or _load_unheld_closes([ticker], pool).get(ticker)
     index_status = _load_ticker_status(pool, ticker, name, trigger_pct, live_close)
     close = float(index_status["close"])
     # 보유 0 인데 장중 1호 진입선에 못 닿은 채 장 마감이 다가오면 현재가로 1호를 산다.
     close_entry = False
 
-    # ── 회차 역산 — 수량으로 진입 회차 수, 평균단가로 1호가 ──
+    # ── 회차 — 수량으로 진입 회차 수, 1호 체결가로 사다리 ──
     held_rounds = 0
     first_entry: float | None = None
     quantity_mismatch = False
-    if quantity > 0 and avg_price > 0:
+    round_fills: list[dict[str, Any]] = []
+    if quantity > 0:
         held_rounds = max(1, min(max_rounds, round(quantity / round_quantity)))
         quantity_mismatch = quantity != held_rounds * round_quantity
-        first_entry = ladder.first_entry_from_average(avg_price, held_rounds, trigger_pct)
+        round_fills = ledger.round_fills(round_quantity)
+        first_entry = round_fills[0]["price"]
     else:
         close_entry = _first_entry_close_window()
 
@@ -450,8 +468,8 @@ def _build_strategy_view(
             return None
         return ladder.entry_price(first_entry, round_no, trigger_pct)
 
-    # 이미 산 금액 — 계좌의 실제 매입 원가(수량 × 평균단가). 다음 회차가 한도를 넘는지 이걸로 본다.
-    invested = quantity * avg_price if held_rounds else 0.0
+    # 이미 산 금액 — 보유 로트의 실제 매입 원가. 다음 회차가 한도를 넘는지 이걸로 본다.
+    invested = ledger.cost if held_rounds else 0.0
 
     rows: list[dict[str, Any]] = []
     for round_no in range(1, max_rounds + 1):
@@ -459,6 +477,7 @@ def _build_strategy_view(
         is_next = round_no == held_rounds + 1
         entry = entry_price(round_no)
         if held and entry is not None:
+            fill = round_fills[round_no - 1]
             sell_limit = ladder.sell_limit(entry, trigger_pct)
             rows.append(
                 {
@@ -467,11 +486,14 @@ def _build_strategy_view(
                     "ticker": ticker,
                     "name": name,
                     "held": True,
-                    "avg_price": round(entry),
+                    # 실제 체결가·산 날짜·출처(슬랙/수동) — 사다리 선(buy_index)과 별개다.
+                    "fill_price": round(fill["price"]),
+                    "bought_on": fill["day"],
+                    "source": fill["source"],
                     "close": round(close) if close > 0 else None,
-                    "profit_pct": round((close / entry - 1.0) * 100.0, 2) if close > 0 else None,
+                    "profit_pct": round((close / fill["price"] - 1.0) * 100.0, 2) if close > 0 else None,
                     "buy_limit": None,
-                    "buy_index": round(entry),  # 이미 산 회차 — 진입가 자리를 참고로 남긴다
+                    "buy_index": round(entry),  # 이미 산 회차 — 사다리 선을 참고로 남긴다
                     "sell_limit": sell_limit,
                     "sell_index": sell_limit,
                     "sell_reached": bool(close > 0 and close >= sell_limit),
@@ -500,7 +522,9 @@ def _build_strategy_view(
                 "ticker": ticker,
                 "name": name,
                 "held": False,
-                "avg_price": None,
+                "fill_price": None,
+                "bought_on": None,
+                "source": None,
                 "close": round(close) if close > 0 else None,
                 "profit_pct": None,
                 "buy_limit": buy_limit,
@@ -517,6 +541,8 @@ def _build_strategy_view(
             }
         )
 
+    _attach_today(rows, ledger, round_quantity, held_rounds)
+
     # 다음 회차 매수까지 남은 하락률(%) — 도달했으면 0 이상(+). 회차 소진이면 None.
     next_buy_drop_pct = None
     next_row = next((r for r in rows if r["is_next"]), None)
@@ -532,7 +558,7 @@ def _build_strategy_view(
         next_sell_round = deepest["round"]
         next_sell_rise_pct = round((deepest["sell_limit"] / close - 1.0) * 100.0, 2)
 
-    last_entry = entry_price(held_rounds) if held_rounds else None
+    last_buy_price = round(round_fills[held_rounds - 1]["price"]) if held_rounds else None
     return {
         "strategy_id": strategy_id,
         "label": name,
@@ -552,11 +578,11 @@ def _build_strategy_view(
             "next_round": (held_rounds + 1) if held_rounds < max_rounds else None,
             "next_ticker": ticker if held_rounds < max_rounds else None,
             "next_name": name if held_rounds < max_rounds else None,
-            "last_buy_price": round(last_entry) if last_entry is not None else None,
+            "last_buy_price": last_buy_price,
             "next_buy_drop_pct": next_buy_drop_pct,
             "next_sell_round": next_sell_round,
             "next_sell_rise_pct": next_sell_rise_pct,
-            # 보유 수량이 회차×수량과 다르면 역산이 근사가 된다 — 화면이 경고를 띄운다.
+            # 보유 수량이 회차×수량과 다르면 마지막 회차가 부분 보유다 — 화면이 경고를 띄운다.
             "quantity_mismatch": quantity_mismatch,
             "held_quantity": quantity,
             # 매수 한도(원) · 이미 산 금액 · 다음 회차가 한도에 막혔는지.
@@ -564,14 +590,59 @@ def _build_strategy_view(
             "invested": round(invested),
             "limit_blocked": bool(next_row is not None and next_row["over_limit"]),
         },
+        # 증권사에 걸린 우리 기록에 없는(수동) 미체결 주문 — 슬랙 주문을 막는 근거다.
+        "manual_orders": list(ledger.manual_orders),
+        # 이 현황의 체결 이력을 계산한 시각 — 화면이 기준 시점을 보여 준다.
+        "ledger_at": ledger.computed_at,
         "rounds": rows,
     }
 
 
-def _build_views(strategies: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    """전략들의 운용 현황 — 풀마다 슬리브가 붙은 계좌의 보유를 읽고, 계좌 조회는 계좌당 1회다.
+def _tickers_by_account(strategies: dict[str, dict[str, Any]]) -> dict[str, list[str]]:
+    """전략 종목을 운용 계좌(증권사 계좌번호)별로 모은다 — 증권사 조회는 계좌당 한 벌이다."""
+    grouped: dict[str, set[str]] = {}
+    for entry in strategies.values():
+        grouped.setdefault(broker_account_no_for_pool(entry["pool"]), set()).add(entry["ticker"])
+    return {account_no: sorted(tickers) for account_no, tickers in grouped.items()}
 
-    슬리브가 없는 풀의 전략은 계좌를 알 수 없어 만들 수 없다 — 명시적 오류로 알린다.
+
+def refresh_all_ledgers() -> dict[str, str]:
+    """모든 전략의 회차 원장을 증권사에서 새로 계산해 저장한다 — 사고팔기 알림 배치가 돈다. 실패한 종목은 (티커 → 이유)다."""
+    strategies = load_settings()["strategies"]
+    failed: dict[str, str] = {}
+    for account_no, tickers in _tickers_by_account(strategies).items():
+        for ticker, ledger in refresh_ledgers(account_no, tickers).items():
+            if isinstance(ledger, LedgerError):
+                failed[ticker] = str(ledger)
+        forget_ledgers(account_no, tickers)
+    return failed
+
+
+def _failed_view(strategy_id: str, entry: dict[str, Any], error: LedgerError) -> dict[str, Any]:
+    """회차 원장을 만들 수 없는 전략 — 회차 표 없이 이유만 담는다(다른 전략은 그대로 본다)."""
+    return {
+        "strategy_id": strategy_id,
+        "label": str(entry["name"]),
+        "pool": str(entry["pool"]),
+        "ticker": str(entry["ticker"]),
+        "config": {
+            "trigger_pct": entry["trigger_pct"],
+            "round_quantity": entry["round_quantity"],
+            "rounds": entry["rounds"],
+            "index_name": str(entry["name"]),
+        },
+        "error": str(error),
+        "rounds": [],
+    }
+
+
+def _build_views(strategies: dict[str, dict[str, Any]], *, fresh: bool) -> list[dict[str, Any]]:
+    """전략들의 운용 현황 — 풀마다 슬리브가 붙은 계좌의 회차 원장으로 만든다.
+
+    ``fresh`` 가 참이면 원장을 증권사에서 새로 계산해 저장하고(느리다), 아니면 배치가 저장해 둔 것을 읽는다.
+
+    슬리브가 없는 풀의 전략은 계좌를 알 수 없어 만들 수 없다 — 명시적 오류로 알린다. 회차 원장을 못 만든
+    전략은 `error` 만 담은 항목으로 돌려준다(`_failed_view`).
     """
     count_by_pool: dict[str, int] = {}
     for entry in strategies.values():
@@ -582,35 +653,52 @@ def _build_views(strategies: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         if sleeve is None:
             raise ValueError(f"{pool} 종목풀의 사고팔기 슬리브가 어느 계좌에도 붙어 있지 않습니다 — 합성에서 붙이세요.")
         sleeves[pool] = sleeve
-    rows_by_account = {
-        account_id: _load_account_rows(account_id) for account_id in {s["account_id"] for s in sleeves.values()}
-    }
-    return [
-        _build_strategy_view(
-            sid,
-            entry,
-            rows_by_account[sleeves[entry["pool"]]["account_id"]],
-            strategy_budget(sleeves[entry["pool"]], count_by_pool[entry["pool"]]),
+    account_ids = {s["account_id"] for s in sleeves.values()}
+    closes_by_account = {account_id: _load_account_closes(account_id) for account_id in account_ids}
+    load = refresh_ledgers if fresh else read_ledgers
+    ledgers = {account_no: load(account_no, tickers) for account_no, tickers in _tickers_by_account(strategies).items()}
+    views: list[dict[str, Any]] = []
+    for sid, entry in strategies.items():
+        ledger = ledgers[broker_account_no_for_pool(entry["pool"])][entry["ticker"]]
+        if isinstance(ledger, LedgerError):
+            views.append(_failed_view(sid, entry, ledger))
+            continue
+        views.append(
+            _build_strategy_view(
+                sid,
+                entry,
+                closes_by_account[sleeves[entry["pool"]]["account_id"]],
+                ledger,
+                strategy_budget(sleeves[entry["pool"]], count_by_pool[entry["pool"]]),
+            )
         )
-        for sid, entry in strategies.items()
-    ]
+    return views
 
 
 def load_pool_views(pool: str) -> list[dict[str, Any]]:
-    """한 종목풀의 전략 운용 현황 — 합성 슬리브가 보유 표시에 쓴다."""
+    """한 종목풀의 전략 운용 현황 — 합성 슬리브가 보유 표시에 쓴다. 회차 원장을 못 만든 전략이 있으면 오류다."""
     in_pool = {sid: entry for sid, entry in load_settings()["strategies"].items() if entry["pool"] == pool}
     if not in_pool:
         raise ValueError(f"{pool} 종목풀에 사고팔기 전략이 없습니다.")
-    return _build_views(in_pool)
+    views = _build_views(in_pool, fresh=False)
+    failed = [view for view in views if "error" in view]
+    if failed:
+        raise ValueError(f"{failed[0]['label']}: {failed[0]['error']}")
+    return views
 
 
-def load_views_for_pools(pools: list[str]) -> dict[str, Any]:
-    """주어진 종목풀들의 전략 운용 현황 — 알림용(화면은 풀 하나씩 본다)."""
+def load_views_for_pools(pools: list[str], *, fresh: bool) -> dict[str, Any]:
+    """주어진 종목풀들의 전략 운용 현황 — 알림·주문용(화면은 풀 하나씩 본다). ``fresh`` 는 `_build_views` 와 같다.
+
+    회차 원장을 못 만든 전략은 `strategies` 에서 빼고 `errors`(전략 id → 이유)에 담는다 — 그 전략만 건너뛴다.
+    """
     wanted = set(pools)
+    views = _build_views(
+        {sid: entry for sid, entry in load_settings()["strategies"].items() if entry["pool"] in wanted}
+    )
     return {
-        "strategies": _build_views(
-            {sid: entry for sid, entry in load_settings()["strategies"].items() if entry["pool"] in wanted}
-        )
+        "strategies": [view for view in views if "error" not in view],
+        "errors": {view["strategy_id"]: view["error"] for view in views if "error" in view},
     }
 
 
@@ -650,5 +738,5 @@ def load_strategy_trade_view(pool: str | None) -> dict[str, Any]:
             }
             for sid, entry in in_pool.items()
         ],
-        "strategies": _build_views(in_pool) if sleeve is not None else [],
+        "strategies": _build_views(in_pool, fresh=False) if sleeve is not None else [],
     }

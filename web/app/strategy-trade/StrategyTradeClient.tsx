@@ -13,7 +13,7 @@ import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 type StrategyConfig = {
   // 매매 간격(%) 하나로 진입·추가·매도를 모두 관리한다.
   trigger_pct: number;
-  // 회차당 매수 수량(주) — 수량이 고정이어야 계좌에서 회차 상태를 역산할 수 있다.
+  // 회차당 매수 수량(주) — 수량이 고정이어야 보유 수량으로 진입 회차 수를 알 수 있다.
   round_quantity: number;
   rounds: number;
   index_name: string;
@@ -35,7 +35,7 @@ type Status = {
   waiting_first_entry: boolean;
   // 보유 0 인데 장중 1호 진입선에 못 닿았을 때 1호를 사는 시각(KST, "HH:MM").
   first_entry_close_time: string;
-  // 보유 수량이 회차×회차수량과 다르면 역산이 근사가 된다 — 경고 표시용.
+  // 보유 수량이 회차×회차수량과 다르면 마지막 회차는 일부만 보유 중이다 — 경고 표시용.
   quantity_mismatch: boolean;
   held_quantity: number;
   // 이 전략의 매수 한도(원) · 이미 산 금액(원) · 다음 회차가 한도에 막혔는지.
@@ -59,7 +59,10 @@ export type RoundRow = {
   ticker: string;
   name: string;
   held: boolean;
-  avg_price: number | null;
+  // 실제 체결가·산 날짜·출처 — 사다리 선(buy_index)과 별개다. 안 산 회차는 null.
+  fill_price: number | null;
+  bought_on: string | null;
+  source: "slack" | "manual" | "mixed" | null;
   close: number | null;
   profit_pct: number | null;
   buy_limit: number | null;
@@ -75,6 +78,8 @@ export type RoundRow = {
   // 오늘 슬랙 신호가 나간 방향(key: 지울 때 쓰는 발송 기록 키, has_ts: 슬랙 메시지 기록이 있어 지울 수 있음), 아직 끝나지 않은 주문의 방향.
   slack_signals: SlackSignal[];
   order_sides: Array<"buy" | "sell">;
+  // 증권사 앱(MTS)에 걸려 있는 미체결 수동 주문 — 슬랙 주문을 막는다.
+  manual_orders: Array<{ side: "buy" | "sell"; price: number; quantity: number }>;
   // 오늘 체결된 매매 — 출처(슬랙 신호 주문·수동)와 방향별 건수. 표시 기록일 뿐이다.
   fills: Array<{ source: "slack" | "manual"; side: "buy" | "sell"; price: number; quantity: number }>;
   is_next: boolean;
@@ -91,9 +96,18 @@ export type StrategyView = {
   config: StrategyConfig;
   index: IndexStatus;
   status: Status;
+  // 체결 이력(회차 원장)을 계산한 시각 — 사고팔기 알림 배치가 갱신한다(KST ISO).
+  ledger_at: string;
   rounds: RoundRow[];
-  /** 증권사 앱(HTS·MTS) 체결 조회 실패 문구 — 거래 히스토리만 비고 화면은 그대로 쓴다. */
-  history_error: string | null;
+};
+
+/** 증권사 체결 이력으로 회차를 맞출 수 없는 전략 — 이유만 보여 준다(평균단가로 짐작하지 않는다). */
+export type FailedStrategy = {
+  strategy_id: string;
+  label: string;
+  pool: string;
+  ticker: string;
+  error: string;
 };
 
 /** 저장된 전략 설정 한 줄 — 편집 표의 행. */
@@ -126,7 +140,7 @@ type View = {
   pool_options: PoolLabelSource[];
   /** 지금 보는 종목풀. 켜진 풀이 없으면 null. */
   pool: string | null;
-  strategies: StrategyView[];
+  strategies: Array<StrategyView | FailedStrategy>;
 };
 
 // 편집 파라미터는 매매 간격(trigger_pct) 하나 — 백엔드 EDITABLE_PCT_KEYS 와 동일.
@@ -233,6 +247,11 @@ function RoundStatus({ row, onDeleteSignal }: { row: RoundRow; onDeleteSignal: (
           {SIDE_WORDS[side]}주문
         </StatusBadge>
       ))}
+      {row.manual_orders.map((order, index) => (
+        <span key={`manual-${index}`} title={`${order.price.toLocaleString()}원 · ${order.quantity.toLocaleString()}주`}>
+          <StatusBadge color="var(--tblr-green, #2fb344)">수동{SIDE_WORDS[order.side]}주문</StatusBadge>
+        </span>
+      ))}
     </span>
   );
 }
@@ -241,6 +260,7 @@ function RoundStatus({ row, onDeleteSignal }: { row: RoundRow; onDeleteSignal: (
 const FILL_COLORS = { buy: "var(--tblr-purple, #ae3ec9)", sell: "var(--tblr-orange, #f76707)" } as const;
 
 const FILL_SOURCE_WORDS = { slack: "슬랙", manual: "수동" } as const;
+const BOUGHT_SOURCE_WORDS = { ...FILL_SOURCE_WORDS, mixed: "혼합" } as const;
 
 type Fill = RoundRow["fills"][number];
 
@@ -650,9 +670,19 @@ function StrategySection({
   view,
   onDeleteSignal,
 }: {
-  view: StrategyView;
+  view: StrategyView | FailedStrategy;
   onDeleteSignal: (signal: SlackSignal, label: string) => void;
 }) {
+  if ("error" in view) {
+    return (
+      <div className="card appCard" style={cardStyle}>
+        <span style={{ fontWeight: 800, fontSize: "var(--fs-base)" }}>{view.label}</span>
+        <div style={{ color: "var(--up-color, #d64545)", fontSize: "var(--fs-sm)" }}>
+          {view.ticker} 보유 회차를 맞출 수 없습니다: {view.error}
+        </div>
+      </div>
+    );
+  }
   const { config, status, index } = view;
   // 기준선이 회차 사이에 못 들어가는 경우 — 마지막 회차의 지수 환산에서 저점까지 남은 하락률.
   const lastLeveledRound = [...view.rounds].reverse().find((row) => row.buy_index != null) ?? null;
@@ -671,7 +701,7 @@ function StrategySection({
         <span style={{ fontWeight: 800, fontSize: "var(--fs-base)" }}>{view.label}</span>
         <span style={{ color: "var(--text-muted)" }}>
           {view.ticker} · 간격 {config.trigger_pct}% · 회차당 {formatNumber(config.round_quantity)}주 · {config.rounds}회
-          · 한도 {formatKrwMan(status.budget)} 중 {formatKrwMan(status.invested)} 사용
+          · 한도 {formatKrwMan(status.budget)} 중 {formatKrwMan(status.invested)} 사용 · 체결 이력 {view.ledger_at.slice(5, 16).replace("T", " ")} 기준
         </span>
       </div>
 
@@ -690,8 +720,8 @@ function StrategySection({
         </span>
         {status.quantity_mismatch ? (
           <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}>
-            ⚠️ 보유 {formatNumber(status.held_quantity)}주가 회차당 수량의 배수가 아님 — 회차
-            역산이 근사값입니다
+            ⚠️ 보유 {formatNumber(status.held_quantity)}주가 회차당 수량의 배수가 아님 — 마지막 회차는
+            일부만 보유 중입니다
           </span>
         ) : null}
         {status.last_buy_price != null ? (
@@ -731,12 +761,6 @@ function StrategySection({
         ) : null}
       </div>
 
-      {view.history_error ? (
-        <div style={{ color: "var(--up-color, #d64545)", fontSize: "var(--fs-sm)", marginBottom: 6 }}>
-          증권사 앱 체결 내역을 불러오지 못해 거래 히스토리에서 빠졌습니다: {view.history_error}
-        </div>
-      ) : null}
-
       {/* 회차 표 */}
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", minWidth: 600, borderCollapse: "collapse", fontSize: "var(--fs-sm)" }}>
@@ -745,7 +769,7 @@ function StrategySection({
               <th style={{ ...thStyle, textAlign: "left" }}>회차</th>
               <th style={{ ...thStyle, textAlign: "left" }}>상태</th>
               <th style={{ ...thStyle, textAlign: "left" }}>종목</th>
-              <th style={thStyle}>진입가</th>
+              <th style={thStyle}>체결가</th>
               <th style={thStyle}>현재가</th>
               <th style={thStyle}>손익</th>
               <th style={thStyle}>매수 지정가</th>
@@ -781,7 +805,14 @@ function StrategySection({
                 <td style={{ ...tdStyle, textAlign: "left" }}>
                   {row.ticker} {row.name}
                 </td>
-                <td style={tdStyle}>{formatNumber(row.avg_price)}</td>
+                <td style={tdStyle}>
+                  {formatNumber(row.fill_price)}
+                  {row.bought_on != null && row.source != null ? (
+                    <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-xs, 11px)" }}>
+                      {row.bought_on.slice(5)} · {BOUGHT_SOURCE_WORDS[row.source]}
+                    </div>
+                  ) : null}
+                </td>
                 <td style={tdStyle}>{formatNumber(row.close)}</td>
                 <td style={{ ...tdStyle, color: signColor(row.profit_pct), fontWeight: 700 }}>
                   {formatSigned(row.profit_pct)}
