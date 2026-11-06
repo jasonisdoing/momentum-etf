@@ -450,23 +450,24 @@ def _build_strategy_view(
     # 보유 0 인데 장중 1호 진입선에 못 닿은 채 장 마감이 다가오면 현재가로 1호를 산다.
     close_entry = False
 
-    # ── 회차 — 수량으로 진입 회차 수, 1호 체결가로 사다리 ──
+    # ── 회차 — 수량으로 진입 회차 수, 마지막 보유 회차의 체결가로 다음 매수가 ──
     held_rounds = 0
-    first_entry: float | None = None
+    last_fill: float | None = None
     quantity_mismatch = False
     round_fills: list[dict[str, Any]] = []
     if quantity > 0:
         held_rounds = max(1, min(max_rounds, round(quantity / round_quantity)))
         quantity_mismatch = quantity != held_rounds * round_quantity
         round_fills = ledger.round_fills(round_quantity)
-        first_entry = round_fills[0]["price"]
+        last_fill = round_fills[held_rounds - 1]["price"]
     else:
         close_entry = _first_entry_close_window()
 
-    def entry_price(round_no: int) -> float | None:
-        if first_entry is None:
-            return None
-        return ladder.entry_price(first_entry, round_no, trigger_pct)
+    # 팔 수 있는 회차는 맨 뒤(가장 깊은) 보유 회차 하나뿐이고, 신호는 한 번에 하나라
+    # 그 매도가 닿아 있으면 매수는 매도가 체결될 때까지 미룬다.
+    sell_pending = bool(
+        held_rounds and close > 0 and close >= ladder.sell_limit(round_fills[held_rounds - 1]["price"], trigger_pct)
+    )
 
     # 이미 산 금액 — 보유 로트의 실제 매입 원가. 다음 회차가 한도를 넘는지 이걸로 본다.
     invested = ledger.cost if held_rounds else 0.0
@@ -475,10 +476,9 @@ def _build_strategy_view(
     for round_no in range(1, max_rounds + 1):
         held = round_no <= held_rounds
         is_next = round_no == held_rounds + 1
-        entry = entry_price(round_no)
-        if held and entry is not None:
+        if held:
             fill = round_fills[round_no - 1]
-            sell_limit = ladder.sell_limit(entry, trigger_pct)
+            sell_limit = ladder.sell_limit(fill["price"], trigger_pct)
             rows.append(
                 {
                     "round": round_no,
@@ -486,17 +486,18 @@ def _build_strategy_view(
                     "ticker": ticker,
                     "name": name,
                     "held": True,
-                    # 실제 체결가·산 날짜·출처(슬랙/수동) — 사다리 선(buy_index)과 별개다.
+                    # 실제 체결가·산 날짜·출처(슬랙/수동).
                     "fill_price": round(fill["price"]),
                     "bought_on": fill["day"],
                     "source": fill["source"],
                     "close": round(close) if close > 0 else None,
                     "profit_pct": round((close / fill["price"] - 1.0) * 100.0, 2) if close > 0 else None,
                     "buy_limit": None,
-                    "buy_index": round(entry),  # 이미 산 회차 — 사다리 선을 참고로 남긴다
+                    "buy_index": round(fill["price"]),  # 이미 산 회차 — 체결가가 그 회차의 기준선이다
                     "sell_limit": sell_limit,
                     "sell_index": sell_limit,
-                    "sell_reached": bool(close > 0 and close >= sell_limit),
+                    # 팔 수 있는 건 마지막 보유 회차뿐이다(앞 회차는 체결가가 더 높아 먼저 닿지도 않는다).
+                    "sell_reached": bool(round_no == held_rounds and sell_pending),
                     "buy_reached": False,
                     "close_entry": False,
                     "over_limit": False,
@@ -504,10 +505,10 @@ def _build_strategy_view(
                 }
             )
             continue
-        # 미보유 회차 — 사다리 자리(보유가 있으면 1호가 기준, 없으면 전일 종가 기준).
-        # 지정가로 바로 쓸 수 있게 호가 단위로 반올림한다.
-        if first_entry is not None:
-            buy_limit = ladder.buy_limit(first_entry, round_no, trigger_pct)
+        # 미보유 회차 — 보유가 있으면 마지막 보유 체결가에서 내려간 자리(다음 회차 이후는 예상값),
+        # 없으면 전일 종가 기준. 지정가로 바로 쓸 수 있게 호가 단위로 반올림한다.
+        if last_fill is not None:
+            buy_limit = ladder.projected_buy_limit(last_fill, round_no - held_rounds, trigger_pct)
         else:
             buy_limit = ladder.preview_buy_limit(float(index_status["prev_close"]), round_no, trigger_pct)
         # 15:00 시장가 매수는 현재가로 사므로 한도 검사도 그 가격으로 한다.
@@ -532,7 +533,9 @@ def _build_strategy_view(
                 "sell_limit": None,
                 "sell_index": None,
                 "sell_reached": False,
-                "buy_reached": bool(is_next and within_budget and close > 0 and (close <= buy_limit or close_entry)),
+                "buy_reached": bool(
+                    is_next and not sell_pending and within_budget and close > 0 and (close <= buy_limit or close_entry)
+                ),
                 # 진입선이 아니라 장 마감 매수로 닿은 1호 — 지정가 대신 현재가로 산다.
                 "close_entry": bool(market_entry and within_budget),
                 # 다음 회차가 매수 한도를 넘는다 — 이 회차부터는 사지 않는다.
@@ -549,7 +552,7 @@ def _build_strategy_view(
     if next_row is not None and next_row["buy_limit"] is not None and close > 0:
         next_buy_drop_pct = round((next_row["buy_limit"] / close - 1.0) * 100.0, 2)
 
-    # 가장 가까운 매도 = 마지막(가장 싼) 회차 — 사다리 구조상 항상 먼저 도달한다.
+    # 가장 가까운 매도 = 마지막(가장 싼) 회차 — 체결가가 가장 낮아 목표도 가장 먼저 닿는다.
     next_sell_round = None
     next_sell_rise_pct = None
     held_rows = [r for r in rows if r["held"] and r["sell_limit"] is not None and close > 0]
@@ -582,6 +585,8 @@ def _build_strategy_view(
             "next_buy_drop_pct": next_buy_drop_pct,
             "next_sell_round": next_sell_round,
             "next_sell_rise_pct": next_sell_rise_pct,
+            # 매도가 먼저 닿아 있어 다음 회차 매수는 그 매도가 체결될 때까지 미룬다(신호는 한 번에 하나).
+            "sell_pending": sell_pending,
             # 보유 수량이 회차×수량과 다르면 마지막 회차가 부분 보유다 — 화면이 경고를 띄운다.
             "quantity_mismatch": quantity_mismatch,
             "held_quantity": quantity,
@@ -694,7 +699,8 @@ def load_views_for_pools(pools: list[str], *, fresh: bool) -> dict[str, Any]:
     """
     wanted = set(pools)
     views = _build_views(
-        {sid: entry for sid, entry in load_settings()["strategies"].items() if entry["pool"] in wanted}
+        {sid: entry for sid, entry in load_settings()["strategies"].items() if entry["pool"] in wanted},
+        fresh=fresh,
     )
     return {
         "strategies": [view for view in views if "error" not in view],

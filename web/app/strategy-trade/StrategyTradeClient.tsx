@@ -50,6 +50,8 @@ type Status = {
   // 가장 가까운 매도 회차와 목표까지 남은 상승률(%, 양수). 0 이하면 도달. 보유 없으면 null.
   next_sell_round: number | null;
   next_sell_rise_pct: number | null;
+  // 매도가 먼저 닿아 있어 다음 회차 매수를 그 매도가 체결될 때까지 미루는 중 — 신호는 한 번에 하나다.
+  sell_pending: boolean;
 };
 
 export type RoundRow = {
@@ -747,7 +749,9 @@ function StrategySection({
             {nextRow?.close_entry
               ? `📉 ${status.next_round}호 장 마감 매수!`
               : status.next_buy_drop_pct >= 0
-              ? `📉 ${status.next_round}호 매수가 도달!`
+              ? status.sell_pending
+                ? `📉 ${status.next_round}호 매수가 도달 — ${status.next_sell_round}호 매도 체결 뒤 매수`
+                : `📉 ${status.next_round}호 매수가 도달!`
               : `📉 ${index.name} ${Math.abs(status.next_buy_drop_pct).toFixed(2)}% 더 내리면 ${status.next_round}호 매수`}
           </span>
         ) : null}

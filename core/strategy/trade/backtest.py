@@ -6,6 +6,8 @@
   지정가가 아니라 **시가에 체결**한다.
 - 보유가 없는데 장중 1호 진입가에 닿지 못하면 15:00 매수 규칙에 따라 **그날 종가**에 산다
   (일봉으로는 15:00 가격을 알 수 없어 종가로 근사한다). 이 시장가 매수에만 슬리피지를 적용한다.
+- 다음 회차 매수는 마지막 보유 회차 체결가 −간격%, 매도는 가장 깊은 보유 회차 체결가 +간격%다.
+  한 봉에 사거나 파는 회차는 하나뿐이다(실제 신호도 한 번에 하나).
 - 매도는 봉이 시작될 때 이미 보유한 회차만 판다 — 그날 산 회차는 다음 봉부터 판다.
 - 매도가 있었던 날은 다시 사지 않는다(같은 봉 안의 순서를 알 수 없어 왕복 매매를 만들지 않는다).
   전량 매도 뒤 1호 진입은 다음 봉에서 그날 직전 종가 기준으로 다시 시작한다.
@@ -76,8 +78,8 @@ def simulate_ladder(bars: pd.DataFrame, spec: LadderSpec, *, market_buy_slippage
     if len(bars) < 2:
         raise ValueError(f"{spec.name}({spec.ticker}) 가격 데이터가 부족합니다.")
 
-    held: dict[int, tuple[pd.Timestamp, float]] = {}  # 회차 → (체결일, 체결가)
-    first_entry: float | None = None
+    # 보유 회차 — 사는 순서대로 쌓이고(1호가 맨 앞) 팔 때는 맨 뒤(가장 깊은 회차)부터 나간다.
+    held: list[tuple[pd.Timestamp, float]] = []  # (체결일, 체결가)
     realized = 0.0
     trades: list[dict[str, Any]] = []
     pnl: dict[pd.Timestamp, float] = {}
@@ -90,25 +92,24 @@ def simulate_ladder(bars: pd.DataFrame, spec: LadderSpec, *, market_buy_slippage
         open_, high, low, close = (float(bars[column].iloc[position]) for column in ("Open", "High", "Low", "Close"))
         prev_close = float(closes[position - 1])
 
-        # 1) 매도 — 봉이 시작될 때 이미 가진 회차만. 깊은(싼) 회차의 목표가가 가장 낮아 먼저 닿는다.
+        # 1) 매도 — 봉이 시작될 때 이미 가진 맨 뒤 회차 하나만, 그 회차 체결가 +간격% 에 닿으면 판다.
+        #    한 봉에 한 회차씩만 거래한다(실제 신호도 한 번에 하나).
         sold_today = False
-        for round_no in sorted(held, reverse=True):
-            entry_date, entry_fill = held[round_no]
-            limit = rules.sell_limit(rules.entry_price(first_entry, round_no, pct), pct)
+        if held:
+            entry_date, entry_fill = held[-1]
+            limit = rules.sell_limit(entry_fill, pct)
             if high >= limit:
                 exit_price = max(open_, limit)
                 realized += spec.quantity * (exit_price - entry_fill)
                 trades.append(
-                    _trade_row(spec, round_no, entry_date, entry_fill, date, exit_price, SELL_REASON, last_date)
+                    _trade_row(spec, len(held), entry_date, entry_fill, date, exit_price, SELL_REASON, last_date)
                 )
-                del held[round_no]
+                held.pop()
                 sold_today = True
-        if not held:
-            first_entry = None
 
-        # 2) 매수 — 매도가 있었던 날은 쉰다. 한도를 넘는 회차부터는 사지 않는다.
+        # 2) 매수 — 매도가 있었던 날은 쉰다. 한 봉에 한 회차만 사고, 한도를 넘으면 사지 않는다.
         if not sold_today:
-            limit_filled = True
+            invested = sum(spec.quantity * fill for _, fill in held)
             if not held:
                 limit = rules.first_buy_limit(prev_close, pct)
                 if low <= limit:
@@ -116,28 +117,18 @@ def simulate_ladder(bars: pd.DataFrame, spec: LadderSpec, *, market_buy_slippage
                 else:
                     # 장중에 못 닿았으면 15:00 에 사는 규칙 — 일봉에서는 종가에 시장가로 산다.
                     fill = close * (1.0 + market_buy_slippage_pct / 100.0)
-                    limit_filled = False
-                if rules.within_budget(0.0, fill, spec.quantity, spec.budget):
-                    first_entry = fill
-                    held[1] = (date, fill)
-                else:
-                    limit_filled = False
-            if held and limit_filled:
-                invested = sum(spec.quantity * fill for _, fill in held.values())
-                round_no = max(held) + 1
-                while round_no <= spec.rounds:
-                    limit = rules.buy_limit(first_entry, round_no, pct)
-                    fill = min(open_, limit)
-                    if low > limit or not rules.within_budget(invested, fill, spec.quantity, spec.budget):
-                        break
-                    held[round_no] = (date, fill)
-                    invested += spec.quantity * fill
-                    round_no += 1
+                if rules.within_budget(invested, fill, spec.quantity, spec.budget):
+                    held.append((date, fill))
+            elif len(held) < spec.rounds:
+                limit = rules.next_buy_limit(held[-1][1], pct)
+                fill = min(open_, limit)
+                if low <= limit and rules.within_budget(invested, fill, spec.quantity, spec.budget):
+                    held.append((date, fill))
 
-        unrealized = sum(spec.quantity * (close - fill) for _, fill in held.values())
+        unrealized = sum(spec.quantity * (close - fill) for _, fill in held)
         pnl[date] = realized + unrealized
 
     last_close = float(closes[-1])
-    for round_no, (entry_date, entry_fill) in sorted(held.items()):
+    for round_no, (entry_date, entry_fill) in enumerate(held, start=1):
         trades.append(_trade_row(spec, round_no, entry_date, entry_fill, None, last_close, OPEN_REASON, last_date))
     return {"trades": trades, "pnl": pd.Series(pnl, dtype="float64")}

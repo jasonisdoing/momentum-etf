@@ -299,6 +299,8 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
         parts.append(f"⏸ {status['next_round']}호 한도 도달 — 추가 매수 중단")
     elif next_row is not None and next_row["close_entry"]:
         parts.append(f"📉 *{status['next_round']}호 장 마감 매수!*")
+    elif drop >= 0 and status["sell_pending"]:
+        parts.append(f"📉 {status['next_round']}호 매수가 도달 — {status['next_sell_round']}호 매도 체결 뒤 매수")
     elif drop >= 0:
         parts.append(f"📉 *{status['next_round']}호 매수가 도달!*")
     else:
