@@ -57,18 +57,18 @@ def send_thread_message(
     return ts
 
 
-def _require_no_orders(entries: list[dict[str, Any]]) -> None:
-    """지울 신호들 가운데 주문을 낸 것이 있으면 지우지 않는다 — 접수·체결 추적과 스레드 완료 표시가 끊긴다. 접수 전 거부는 주문이 아니다."""
+def _require_no_orders(signal_ts: str) -> None:
+    """이 신호의 스레드로 낸 주문이 있으면 지우지 않는다 — 접수·체결 추적과 스레드 완료 표시가 끊긴다.
+
+    같은 날 같은 전략·회차·구분의 다른 신호로 낸 주문은 상관없다(회차는 하루에도 여러 번 되풀이된다).
+    접수 전 거부는 주문이 아니다.
+    """
     from utils.strategy_trade_orders import _orders
 
-    same_signal: list[dict[str, Any]] = [
-        {"strategy_id": entry["strategy_id"], "round": entry["round"], "side": entry["action"]} for entry in entries
-    ]
-    signal_ts = {entry["signal_ts"] for entry in entries if entry.get("signal_ts")}
-    if signal_ts:
-        same_signal.append({"slack.thread_ts": {"$in": sorted(signal_ts)}})
     today = datetime.now().strftime("%Y-%m-%d")
-    found = _orders().find_one({"created_at": {"$gte": today}, "status": {"$ne": "rejected"}, "$or": same_signal})
+    found = _orders().find_one(
+        {"created_at": {"$gte": today}, "status": {"$ne": "rejected"}, "slack.thread_ts": signal_ts}
+    )
     if found is not None:
         raise ValueError("이 신호로 낸 주문이 있어 삭제할 수 없습니다.")
 
@@ -113,7 +113,7 @@ def delete_signal_thread(key: str) -> dict[str, Any]:
     if not signal_ts:
         raise ValueError("슬랙 메시지 기록이 없는 신호는 지울 수 없습니다.")
     doomed = [k for k, value in sent_log.items() if value.get("signal_ts") == signal_ts]
-    _require_no_orders([sent_log[k] for k in doomed])
+    _require_no_orders(signal_ts)
     _delete_slack_thread(signal_ts)
     _forget_thread(signal_ts)
     for doomed_key in doomed:
