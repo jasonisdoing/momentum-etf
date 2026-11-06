@@ -310,6 +310,7 @@ def _merge_amendments(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     증권사 앱에서 가격을 정정하면 새 주문번호의 행이 생겨 거기서 체결되고, 원주문 행은 취소수량도 체결도 없이
     미체결로 남는다. 원주문에 취소수량이 있으면 취소 요청이 이미 반영된 것이라 합치지 않는다.
+    체결 수량·평균 체결가는 원주문과 정정 행 전체의 합계다 — 원주문이 정정 전에 일부 체결했을 수 있다.
     합친 행의 `order_no` 는 원주문번호 그대로이고, 정정·취소 요청을 보낼 번호는 `current_order_no`(가장 늦은 행)다.
     """
     by_no = {row["order_no"]: row for row in rows}
@@ -329,8 +330,18 @@ def _merge_amendments(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         tip = max(chain, key=lambda item: int(item["order_no"]))
         # 정정한 주문을 취소하면 취소수량은 정정 행에 남는다 — 그 결과를 우선한다.
         result = next((item for item in chain if item["canceled_quantity"] > 0), tip)
+        members = [row, *chain]
+        filled = sum(item["filled_quantity"] for item in members)
+        cost = sum(item["filled_quantity"] * item["average_fill_price"] for item in members)
         merged.append(
-            {**result, "order_no": row["order_no"], "origin_order_no": "0", "current_order_no": tip["order_no"]}
+            {
+                **result,
+                "order_no": row["order_no"],
+                "origin_order_no": "0",
+                "current_order_no": tip["order_no"],
+                "filled_quantity": filled,
+                "average_fill_price": cost / filled if filled else 0.0,
+            }
         )
     return merged
 
