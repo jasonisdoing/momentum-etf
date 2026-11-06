@@ -14,7 +14,9 @@ from __future__ import annotations
 import json
 import threading
 import time
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -47,6 +49,10 @@ CANCEL_PATH = "/krstock/order/v1/cancel"
 # 체결 조회에 그날 주문이 하나도 없을 때 오는 응답 코드(데이터가 존재하지 않습니다) — 오류가 아니라 빈 목록이다.
 NO_DATA_CODE = "11512"
 DAY_ORDERS_PATH = "/krstock/inquiry/v1/dailyOrderExecution"
+# 서킷브레이커(CB) 발동 중 주문 거부 코드 — 거래소 제도상 매매가 20분 중단된 뒤 10분 단일가 매매로 재개된다.
+CIRCUIT_BREAKER_CODE = "21824"
+_CIRCUIT_BREAKER_RESUME = timedelta(minutes=30)
+_KST = ZoneInfo("Asia/Seoul")
 
 # 모든 호출을 최소 1초 간격으로 직렬화한다 — 운영 쪽(`_CALLS_PER_SECOND`)과 같은 보수적 간격이다.
 _MIN_INTERVAL_SECONDS = 1.0
@@ -188,6 +194,19 @@ def fetch_order_balance(account_no: str) -> dict[str, Any]:
     )
 
 
+def _circuit_breaker_message(what: str, data: dict[str, Any]) -> str:
+    """CB 발동 중 거부 안내 — 발동 시각을 모르므로 지금(주문 시도 시각)부터 중단 20분 + 단일가 10분을 더한 시각을 준다.
+
+    발동은 시도보다 앞서므로 실제 재개는 이 시각보다 빠르거나 같다.
+    """
+    resume = (datetime.now(_KST) + _CIRCUIT_BREAKER_RESUME).strftime("%H:%M")
+    return (
+        f"{what}이 접수되지 않았습니다: 서킷브레이커(CB) 발동 중이라 주문할 수 없습니다. "
+        f"매매 중단 20분 뒤 10분 단일가 매매로 재개되니 대략 {resume} 이후에 다시 시도하세요 "
+        f"(증권사 응답: {_message_of(data)}, 코드 {data.get('rsp_cd')})"
+    )
+
+
 def _accepted_order_no(data: dict[str, Any], what: str) -> str:
     """주문·취소 응답에서 시장주문번호를 꺼낸다 — **번호가 있어야 접수된 것이다**.
 
@@ -198,6 +217,8 @@ def _accepted_order_no(data: dict[str, Any], what: str) -> str:
     output = data.get("Output_0") or {}
     order_no = output.get("mkt_orr_no") if isinstance(output, dict) else None
     if not isinstance(order_no, (int, float)) or int(order_no) <= 0:
+        if str(data.get("rsp_cd")) == CIRCUIT_BREAKER_CODE:
+            raise BrokerApiError(_circuit_breaker_message(what, data))
         raise BrokerApiError(
             f"{what}이 접수되지 않았습니다: {_message_of(data) or '응답에 주문번호가 없습니다'} (코드 {data.get('rsp_cd')})"
         )
