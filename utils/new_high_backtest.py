@@ -215,7 +215,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     disparity_short = disparity_long = None
     if ma_short and ma_long:
         disparity = momentum_signals.compute_signals(
-            {"close": close_df}, int(ma_short), int(ma_long), pool_moving_average_type(pool)
+            {"close": close_df}, int(ma_short), int(ma_long), pool_moving_average_type(pool), excluded=frozenset()
         )
         disparity_short = disparity["short"].loc[last]
         disparity_long = disparity["long"].loc[last]
@@ -478,7 +478,11 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         # 추세 이탈 이격도 잠정 봉 기준으로 갱신 — 합성 화면과 같은 실시간 기준(strategy_logic.md 「장중 잠정 실행」).
         if ma_short and ma_long:
             eff_disparity = momentum_signals.compute_signals(
-                {"close": eff_close}, int(ma_short), int(ma_long), pool_moving_average_type(pool)
+                {"close": eff_close},
+                int(ma_short),
+                int(ma_long),
+                pool_moving_average_type(pool),
+                excluded=frozenset(),
             )
             eff_disp_short = eff_disparity["short"].loc[session_ts]
             eff_disp_long = eff_disparity["long"].loc[session_ts]

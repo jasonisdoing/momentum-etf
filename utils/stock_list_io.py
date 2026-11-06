@@ -151,10 +151,11 @@ from utils.settings_loader import (  # noqa: E402
 
 
 @lru_cache(maxsize=1)
-def load_pool_universe(pool: str) -> list[dict[str, str]]:
-    """종목풀 1개의 투자 후보 목록 — 전략 화면·백테스트가 함께 쓰는 단일 정의.
+def load_pool_universe(pool: str, *, include_excluded: bool) -> list[dict[str, Any]]:
+    """종목풀 1개의 종목 목록 — 전략 화면·백테스트가 함께 쓰는 단일 정의.
 
-    제외 종목(exclude_from_ranking)은 후보가 아니므로 뺀다(순위·종목풀 백테스트와 같은 규칙).
+    거래 제외 종목(exclude_from_ranking)은 ``include_excluded`` 가 거짓이면 뺀다(매매 후보 정의).
+    참이면 `excluded` 표시를 달아 함께 준다 — 순위 번호를 순위 화면과 같게 매기려는 쪽이 쓴다.
     업종은 공용 맵이 단일 소스다 — 미국은 종목 문서의 yfinance 분류를 쓴다.
 
     예전에는 모멘텀·신고가가 각자 이 함수를 갖고 있었고 신고가 것만 업종을 담아, 두 엔진을
@@ -163,11 +164,12 @@ def load_pool_universe(pool: str) -> list[dict[str, str]]:
     from utils.industry_map import industry_map
 
     industry_by = industry_map(pool)
-    universe: list[dict[str, str]] = []
+    universe: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in _load_ticker_type_stocks_raw(pool):
         ticker = str(item.get("ticker") or "").strip()
-        if not ticker or ticker in seen or bool(item.get("exclude_from_ranking")):
+        excluded = bool(item.get("exclude_from_ranking"))
+        if not ticker or ticker in seen or (excluded and not include_excluded):
             continue
         seen.add(ticker)
         universe.append(
@@ -175,6 +177,7 @@ def load_pool_universe(pool: str) -> list[dict[str, str]]:
                 "ticker": ticker,
                 "name": str(item.get("name") or ticker),
                 "pool": pool,
+                "excluded": excluded,
                 # 한국 통합 풀(코스피+코스닥)에서 마켓 구분 표시용 — 없으면 빈 값.
                 "market": str(item.get("market") or "").strip(),
                 "industry": industry_by.get(ticker, ""),

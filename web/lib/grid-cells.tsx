@@ -425,7 +425,7 @@ export function prevDayChangeColumn<T>(field: ColDefField<T>): ColDef<T> {
 }
 
 /** 종목풀 순위 — 순위·모멘텀·자산 관리 공용. 폭·굵기·빈 값 표기가 한 곳에서 정해진다.
- *  `badge` 는 순위 화면처럼 번호 앞에 표시를 붙일 때만 준다(랭킹 제외 📌). */
+ *  `badge` 는 순위 화면처럼 번호 앞에 표시를 붙일 때만 준다(거래 제외 📌). */
 export function rankColumn<T>(
   getRank: (row: T | undefined) => number | null | undefined,
   options: { badge?: (row: T | undefined) => "excluded" | null } = {},
@@ -441,7 +441,7 @@ export function rankColumn<T>(
     cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
     cellRenderer: (params: { data?: T; value?: number | null }) => {
       const badge = options.badge?.(params.data) ?? null;
-      const title = badge === "excluded" ? "랭킹 제외 종목" : undefined;
+      const title = badge === "excluded" ? "거래 제외 종목" : undefined;
       return (
         <span style={{ fontWeight: 700, whiteSpace: "nowrap" }} title={title}>
           {badge === "excluded" ? "📌 " : ""}

@@ -2,7 +2,7 @@
 
 전략 규칙
 --------
-1. 유니버스: 설정에서 고른 종목풀 1개. 제외(exclude_from_ranking)는 제외.
+1. 유니버스: 설정에서 고른 종목풀 1개. 거래 제외(exclude_from_ranking)는 순위 번호만 받고 매매에서 뺀다.
 2. 진입: 그날 종가로 **장기 이격 > 0 그리고 단기 이격 >= 0**. 다음 거래일 **시가** 체결.
    자리가 모자라면 **장기 이격률**이 큰 순으로 담는다(순위 화면과 같은 `rank_score`).
 3. 청산: 둘 중 하나라도 깨진 날. 판정은 종가, 체결은 다음 거래일 시가.
@@ -33,6 +33,7 @@ from utils.effective_prices import apply_realtime_closes, previous_day_change_pc
 from utils.logger import get_app_logger
 from utils.momentum_service import (
     adr_market_of_pool,
+    excluded_tickers,
     load_price_frames,
     load_settings,
     load_universe,
@@ -70,9 +71,12 @@ def load_context(settings: dict[str, Any]) -> dict[str, Any]:
     pool = settings["pool"]
     universe = load_universe(pool)
     panel = build_price_panel(universe, load_price_frames(universe))
+    excluded = excluded_tickers(universe)
     return {
         "pool": pool,
         "universe": universe,
+        # 거래 제외 — 순위 번호는 받지만 진입하지 못한다(장중 잠정 신호도 같은 집합을 쓴다).
+        "excluded": excluded,
         "name_by": {row["ticker"]: row["name"] for row in universe},
         "industry_by": {row["ticker"]: row.get("industry", "") for row in universe},
         "panel": panel,
@@ -81,6 +85,7 @@ def load_context(settings: dict[str, Any]) -> dict[str, Any]:
             int(settings["short_ma_days"]),
             int(settings["long_ma_days"]),
             pool_moving_average_type(pool),
+            excluded=excluded,
         ),
     }
 
@@ -318,6 +323,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             int(settings["short_ma_days"]),
             int(settings["long_ma_days"]),
             pool_moving_average_type(pool),
+            excluded=context["excluded"],
         )
         eff_entry = momentum_signals.entry_signal(eff_close, eff, settings["entry_vol_mult"])
         live_result = run_slot_backtest(
@@ -465,7 +471,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         "exited_today": exited_today,
         "candidates": candidates,
         "adr_gate": adr_gate,
-        "universe_count": len(rows),
+        "universe_count": sum(1 for row in rows if row["ticker"] not in context["excluded"]),
         "refreshed_at": _cache_refreshed_at(pool),
         "live": quotes["live"],
         "pre_market": quotes["pre_market"],

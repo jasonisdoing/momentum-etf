@@ -115,6 +115,7 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
     months, base, short, long, entry_mults, adr_floors = task
     from core.strategy.momentum.signals import compute_signals
     from utils.momentum_backtest import run_backtest
+    from utils.momentum_service import excluded_tickers
 
     # 신호는 이평선 쌍에만 의존한다 — 나머지 조합이 하나를 나눠 쓴다.
     # 진입 문턱은 run_backtest 안에서 같은 신호에 얹으므로 여기서 조합별로 만들지 않는다.
@@ -125,7 +126,13 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
         "industry_by": _PRELOAD["industry_by"],
         "panel": _PRELOAD["panel"],
         # spawn 워커라 전역 설정에 기대면 안 된다 — 풀 값을 명시적으로 읽어 넘긴다.
-        "signals": compute_signals(_PRELOAD["panel"], short, long, pool_moving_average_type(base["pool"])),
+        "signals": compute_signals(
+            _PRELOAD["panel"],
+            short,
+            long,
+            pool_moving_average_type(base["pool"]),
+            excluded=excluded_tickers(_PRELOAD["universe"]),
+        ),
     }
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []

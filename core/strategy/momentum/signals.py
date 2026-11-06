@@ -52,7 +52,12 @@ def entry_gap_ok(long_disparity_pct, short_disparity_pct, volatility_pct, entry_
 
 
 def compute_signals(
-    panel: dict[str, pd.DataFrame], short_ma_days: int, long_ma_days: int, ma_type: str
+    panel: dict[str, pd.DataFrame],
+    short_ma_days: int,
+    long_ma_days: int,
+    ma_type: str,
+    *,
+    excluded: frozenset[str],
 ) -> dict[str, pd.DataFrame]:
     """이평선 두 개로 만드는 신호 표(행 = 거래일, 열 = 종목) — 백테스트·화면이 같은 값을 본다.
 
@@ -61,6 +66,9 @@ def compute_signals(
     누적 `MIN_TRADING_DAYS` 거래일(`compute_eligibility_mask`)이다. 예전에는 이평선
     기간을 다 채워야(`min_periods=기간`) 자격을 줬는데, 순위 화면은 신규 상장도 부분
     평균으로 ✅를 주는데 엔진만 못 사는 불일치가 있었다(2026-09 통일).
+
+    ``excluded`` 는 거래 제외 종목 — 이격·우선순위(순위 번호)는 다른 종목과 똑같이 계산하되
+    보유 자격만 막아 진입하지 못하게 한다. 제외가 없으면 빈 집합을 넘긴다.
     """
     close_df = panel["close"]
     short_frame = compute_trend_frame(close_df, short_ma_days, ma_type)
@@ -68,6 +76,7 @@ def compute_signals(
     known = close_df.notna() & compute_eligibility_mask(close_df)
     # 보유 자격은 순위 화면·종목풀 백테스트와 **같은 공용 규칙**(`hold_eligible`)이다.
     eligible = known & hold_eligible(long_frame, short_frame)
+    eligible[[ticker for ticker in eligible.columns if ticker in excluded]] = False
     return {
         "short": short_frame,
         "long": long_frame,

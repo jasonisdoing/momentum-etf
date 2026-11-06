@@ -109,11 +109,11 @@ def pool_options() -> list[dict[str, Any]]:
     return build_pool_options(available_pools())
 
 
-def load_universe(pool: str) -> list[dict[str, str]]:
-    """선택한 종목풀의 투자 후보 목록 — 정의는 `utils.stock_list_io` 한 곳이다."""
+def load_universe(pool: str) -> list[dict[str, Any]]:
+    """선택한 종목풀의 투자 후보 목록(거래 제외 종목 뺌) — 정의는 `utils.stock_list_io` 한 곳이다."""
     from utils.stock_list_io import load_pool_universe
 
-    return load_pool_universe(pool)
+    return load_pool_universe(pool, include_excluded=False)
 
 
 def load_price_frames(universe: list[dict[str, str]]) -> dict[str, pd.DataFrame]:

@@ -3,7 +3,7 @@
 전략 규칙
 --------
 1. 유니버스: 설정에서 고른 종목풀 1개(전체 활성 풀 중 선택 — 한국·미국·호주 등).
-   제외 종목(exclude_from_ranking)은 제외. 코스피+코스닥 통합 같은 혼합
+   거래 제외 종목(exclude_from_ranking)은 순위 번호만 받고 매매에서 뺀다. 코스피+코스닥 통합 같은 혼합
    유니버스는 종목풀 자체를 합쳐 만든다(풀 관리 화면).
 2. 점수: **장기 이평선 이격(%)** — 계산식은 순위 화면과 같되, 이평선 일수는
    **전략 전용 값**(풀별 설정의 short/long_ma_days)을 쓴다.
@@ -295,11 +295,20 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
 # ── 유니버스 · 가격 ────────────────────────────────────────────────────────
 
 
-def load_universe(pool: str) -> list[dict[str, str]]:
-    """선택한 종목풀의 투자 후보 목록 — 정의는 `utils.stock_list_io` 한 곳이다."""
+def load_universe(pool: str) -> list[dict[str, Any]]:
+    """선택한 종목풀의 전체 종목 — 거래 제외 종목은 `excluded` 표시와 함께 들어 있다.
+
+    순위 번호를 순위 화면과 같게 매기려고 제외 종목도 싣는다. 이들은 `compute_signals` 의
+    ``excluded`` 로 진입 자격이 막혀 매매에는 쓰이지 않는다. 정의는 `utils.stock_list_io` 한 곳이다.
+    """
     from utils.stock_list_io import load_pool_universe
 
-    return load_pool_universe(pool)
+    return load_pool_universe(pool, include_excluded=True)
+
+
+def excluded_tickers(universe: list[dict[str, Any]]) -> frozenset[str]:
+    """유니버스에서 거래 제외인 종목 — `compute_signals` 의 ``excluded`` 로 넘긴다."""
+    return frozenset(row["ticker"] for row in universe if row["excluded"])
 
 
 def load_price_frames(universe: list[dict[str, str]]) -> dict[str, pd.DataFrame]:

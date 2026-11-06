@@ -967,12 +967,11 @@ def build_ticker_type_rankings(
             "_ticker_sort",
         ]
     )
-    # 순위 번호 — 모멘텀 전략과 같은 공용 규칙(`rank_numbers`). 반올림 전 점수로 매기고,
-    # 순위 제외 종목은 후보가 아니라 번호를 주지 않는다. 벤치마크도 풀 종목이라 똑같이 번호를 받는다.
+    # 순위 번호 — 모멘텀 전략과 같은 공용 규칙(`rank_numbers`). 반올림 전 점수로 매긴다.
+    # 거래 제외 종목도 번호를 받는다(제외는 매매에서만 빠진다). 벤치마크도 풀 종목이라 똑같이 받는다.
     if not df.empty:
-        numbered = ~df["exclude_from_ranking"].astype(bool)
-        number_by_ticker = rank_numbers(dict(zip(df.loc[numbered, "티커"], df.loc[numbered, "점수"])))
-        df["순위"] = df["티커"].map(number_by_ticker).astype("object").where(numbered, None)
+        number_by_ticker = rank_numbers(dict(zip(df["티커"], df["점수"])))
+        df["순위"] = df["티커"].map(number_by_ticker).astype("object")
 
     df = _normalize_ranking_values(df, country_code, monthly_labels=monthly_labels)
     df.attrs["realtime_active"] = realtime_active

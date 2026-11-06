@@ -829,7 +829,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
     const leadingColumns: ColDef<RankGridRow>[] = [
-      // 순위 — 공용 컬럼(자산 관리·모멘텀과 같은 폭·굵기). 랭킹 제외 📌 만 이 화면이 붙인다.
+      // 순위 — 공용 컬럼(자산 관리·모멘텀과 같은 폭·굵기). 거래 제외 📌 만 이 화면이 붙인다.
       rankColumn<RankGridRow>((row) => row?.순위, {
         badge: (row) => (pageMode === "rank" && row?.exclude_from_ranking ? "excluded" : null),
       }),
@@ -895,7 +895,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         ? [
           {
             field: "exclude_from_ranking",
-            headerName: "제외 종목",
+            headerName: "거래 제외",
             pinned: "left",
             minWidth: 84,
             width: 84,

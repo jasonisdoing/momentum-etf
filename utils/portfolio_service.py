@@ -158,7 +158,7 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
         from utils.moving_averages import pool_moving_average_type
 
         disparity = momentum_compute(
-            {"close": close_frame}, int(ma_short), int(ma_long), pool_moving_average_type(pool)
+            {"close": close_frame}, int(ma_short), int(ma_long), pool_moving_average_type(pool), excluded=frozenset()
         )
         short_row = disparity["short"].iloc[-1]
         long_row = disparity["long"].iloc[-1]
