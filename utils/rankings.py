@@ -899,7 +899,7 @@ def build_ticker_type_rankings(
             "상장일": etf.get("listing_date", "-"),
             # 보유: 이 종목을 실제로 들고 있는 계좌명 목록(쉼표 구분). 없으면 빈 문자열.
             "보유": ", ".join(holding_accounts.get(ensure_asx_prefix(ticker) if country_code == "au" else ticker, [])),
-            "exclude_from_ranking": bool(etf.get("exclude_from_ranking")),
+            "exclude_from_trading": bool(etf.get("exclude_from_trading")),
             **ma_rule_scores,
             **price_metrics,
             "거래량": float(etf.get("volume", 0)) if etf.get("volume") is not None else None,

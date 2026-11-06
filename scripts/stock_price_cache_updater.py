@@ -519,7 +519,7 @@ def _update_pool_rank_summary(target_id: str) -> None:
         for row in rows:
             try:
                 trend = row.get("추세")
-                is_excl = bool(row.get("exclude_from_ranking"))
+                is_excl = bool(row.get("exclude_from_trading"))
                 if trend is not None and float(trend) > 0 and not is_excl:
                     up_count += 1
             except (TypeError, ValueError):

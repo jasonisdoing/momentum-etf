@@ -431,7 +431,7 @@ def _build_missing_ticker_rows(
                 "점수": None,
                 "보유": "",
                 "현재가": None,
-                "exclude_from_ranking": False,
+                "exclude_from_trading": False,
                 "cache_missing": True,
             }
         )

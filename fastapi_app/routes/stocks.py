@@ -13,7 +13,7 @@ from utils.stocks_service import (
     move_active_stock,
     refresh_single_stock,
     restore_deleted_stocks,
-    toggle_exclude_from_ranking,
+    toggle_exclude_from_trading,
     update_stock_bucket,
     validate_stock_candidate,
 )
@@ -99,7 +99,7 @@ def patch_stock_memo(payload: StockMemoPayload, _: None = Depends(require_intern
 
 @router.patch("/exclude")
 def patch_exclude_stock(payload: StockExcludePayload, _: None = Depends(require_internal_token)) -> dict[str, bool]:
-    toggle_exclude_from_ranking(payload.ticker_type, payload.ticker, payload.exclude)
+    toggle_exclude_from_trading(payload.ticker_type, payload.ticker, payload.exclude)
     return {"ok": True}
 
 

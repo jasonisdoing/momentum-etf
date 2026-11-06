@@ -134,7 +134,7 @@ type RankRow = {
   보수: number | null;
   순자산총액: number | null;
   "전일 거래량(주)": number | null;
-  exclude_from_ranking?: boolean;
+  exclude_from_trading?: boolean;
 };
 
 type RankResponse = {
@@ -814,7 +814,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         보수: null,
         순자산총액: null,
         "전일 거래량(주)": null,
-        exclude_from_ranking: false,
+        exclude_from_trading: false,
       }
     ));
     return [...addingGridRows, ...rows];
@@ -831,7 +831,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     const leadingColumns: ColDef<RankGridRow>[] = [
       // 순위 — 공용 컬럼(자산 관리·모멘텀과 같은 폭·굵기). 거래 제외 📌 만 이 화면이 붙인다.
       rankColumn<RankGridRow>((row) => row?.순위, {
-        badge: (row) => (pageMode === "rank" && row?.exclude_from_ranking ? "excluded" : null),
+        badge: (row) => (pageMode === "rank" && row?.exclude_from_trading ? "excluded" : null),
       }),
       rankChangeColumn("전거래일변동", "전거래일", "직전 거래일 순위 대비 상승분", "이전순위"),
       rankChangeColumn("1주순위변동", "1주변동", "5거래일 전 순위 대비 상승분", "1주순위"),
@@ -894,7 +894,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ...(pageMode === "manage"
         ? [
           {
-            field: "exclude_from_ranking",
+            field: "exclude_from_trading",
             headerName: "거래 제외",
             pinned: "left",
             minWidth: 84,
@@ -1466,7 +1466,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     }
     setRows((prev) =>
       prev.map((currentRow) =>
-        getRowId(currentRow) === row.id ? { ...currentRow, exclude_from_ranking: excluded } : currentRow,
+        getRowId(currentRow) === row.id ? { ...currentRow, exclude_from_trading: excluded } : currentRow,
       ),
     );
     setDirtyRowIds((prev) => (prev.includes(row.id) ? prev : [...prev, row.id]));
@@ -1563,7 +1563,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         await updateStockBucket(selectedTickerType, ticker, Number(row.bucket ?? 1));
       }
       if (dirtyCellKeys.includes(buildDirtyCellKey(rowId, "제외"))) {
-        await updateStockExclude(selectedTickerType, ticker, Boolean(row.exclude_from_ranking));
+        await updateStockExclude(selectedTickerType, ticker, Boolean(row.exclude_from_trading));
       }
     }
   }
@@ -1730,7 +1730,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [blockedMessage, toast]);
 
   const headerSummary = useMemo<RankHeaderSummary>(() => {
-    const candidateRows = gridRows.filter((r) => !r.exclude_from_ranking);
+    const candidateRows = gridRows.filter((r) => !r.exclude_from_trading);
     const totalCount = candidateRows.length;
     // 진입 가능 — 미보유 행 회색 판정과 같은 기준(0선 + 진입 문턱). 옛 '매수 후보'(장기>0)를 대체.
     const mult = entryVolMult === "" ? null : Number(entryVolMult);
@@ -2006,7 +2006,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                     } else if (!entryGapOk(params.data?.이격, params.data?.단기이격, params.data?.변동성, mult)) {
                       classes.push("appEntryBlockedRow");
                     }
-                    if (params.data?.exclude_from_ranking) {
+                    if (params.data?.exclude_from_trading) {
                       classes.push("rankFixedRow");
                     }
                     // 실제 보유 중인 종목 — 공통 규칙으로 티커·종목명 칸만 녹색으로 표시한다.

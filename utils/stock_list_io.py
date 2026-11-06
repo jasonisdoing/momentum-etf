@@ -154,7 +154,7 @@ from utils.settings_loader import (  # noqa: E402
 def load_pool_universe(pool: str, *, include_excluded: bool) -> list[dict[str, Any]]:
     """종목풀 1개의 종목 목록 — 전략 화면·백테스트가 함께 쓰는 단일 정의.
 
-    거래 제외 종목(exclude_from_ranking)은 ``include_excluded`` 가 거짓이면 뺀다(매매 후보 정의).
+    거래 제외 종목(exclude_from_trading)은 ``include_excluded`` 가 거짓이면 뺀다(매매 후보 정의).
     참이면 `excluded` 표시를 달아 함께 준다 — 순위 번호를 순위 화면과 같게 매기려는 쪽이 쓴다.
     업종은 공용 맵이 단일 소스다 — 미국은 종목 문서의 yfinance 분류를 쓴다.
 
@@ -168,7 +168,7 @@ def load_pool_universe(pool: str, *, include_excluded: bool) -> list[dict[str, A
     seen: set[str] = set()
     for item in _load_ticker_type_stocks_raw(pool):
         ticker = str(item.get("ticker") or "").strip()
-        excluded = bool(item.get("exclude_from_ranking"))
+        excluded = bool(item.get("exclude_from_trading"))
         if not ticker or ticker in seen or (excluded and not include_excluded):
             continue
         seen.add(ticker)

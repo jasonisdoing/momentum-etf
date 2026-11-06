@@ -75,7 +75,7 @@ def pool_options() -> list[dict[str, Any]]:
 def load_universe(pool: str) -> list[dict[str, Any]]:
     """그 종목풀에 담긴 종목 — 비중을 매길 수 있는 후보다.
 
-    제외 종목(`exclude_from_ranking`)도 후보에 넣는다. 이 전략은 순위를 매기지 않으므로
+    제외 종목(`exclude_from_trading`)도 후보에 넣는다. 이 전략은 순위를 매기지 않으므로
     '순위에서 빼는' 표시와 무관하다 — 사용자가 직접 고르는 목록이기 때문이다.
     """
     from utils.stock_list_io import get_etfs

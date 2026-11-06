@@ -169,7 +169,7 @@ def load_active_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
                 "3_month_earn_rate": 1,
                 "6_month_earn_rate": 1,
                 "12_month_earn_rate": 1,
-                "exclude_from_ranking": 1,
+                "exclude_from_trading": 1,
             },
         )
     )
@@ -204,7 +204,7 @@ def load_active_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
                 "return_3m": normalize_nullable_number(doc.get("3_month_earn_rate")),
                 "return_6m": normalize_nullable_number(doc.get("6_month_earn_rate")),
                 "return_12m": normalize_nullable_number(doc.get("12_month_earn_rate")),
-                "exclude_from_ranking": bool(doc.get("exclude_from_ranking")),
+                "exclude_from_trading": bool(doc.get("exclude_from_trading")),
             }
             for doc in docs
         ],
@@ -776,7 +776,7 @@ def hard_delete_stocks(ticker_type: str, tickers: list[str]) -> int:
     return int(result.deleted_count)
 
 
-def toggle_exclude_from_ranking(ticker_type: str, ticker: str, exclude: bool) -> None:
+def toggle_exclude_from_trading(ticker_type: str, ticker: str, exclude: bool) -> None:
     db = get_db_connection()
     if db is None:
         raise RuntimeError("MongoDB 연결에 실패했습니다.")
@@ -792,7 +792,7 @@ def toggle_exclude_from_ranking(ticker_type: str, ticker: str, exclude: bool) ->
         },
         {
             "$set": {
-                "exclude_from_ranking": bool(exclude),
+                "exclude_from_trading": bool(exclude),
                 "updated_at": datetime.now(),
             }
         },
