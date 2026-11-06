@@ -96,7 +96,7 @@ def resolve_leverage_ticker(
     ticker: str = Query(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """종목풀(db.stock_meta) 내에서 티커를 조회하여 종목명을 반환합니다."""
-    from utils.leverage_service import resolve_pool_ticker
+    """티커를 확인해 이름을 반환한다 — 시장 지수 또는 종목풀(db.stock_meta) 종목."""
+    from utils.leverage_service import resolve_leverage_asset
 
-    return resolve_pool_ticker(ticker)
+    return resolve_leverage_asset(ticker)

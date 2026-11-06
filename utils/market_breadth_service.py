@@ -75,7 +75,16 @@ MARKETS: dict[str, dict[str, Any]] = {
 
 # 그날 판정에 쓰인 종목이 대상의 이 비율에 못 미치면 기록하지 않는다.
 # 표본이 적은 날은 상승/하락 비가 크게 흔들려 ADR 을 통째로 왜곡한다.
+#
+# 시장 4개는 지수 구성종목이라 그날 전부 존재한다 — 표본이 모자라면 상장 문제가 아니라
+# **조회가 실패한 것**이므로 그날은 버린다.
 _MIN_COUNTED_RATIO = 0.9
+
+# 종목풀은 기준이 다르다. 과거로 갈수록 아직 상장 전인 종목이 많아 미달이 정상이고,
+# 그날 존재하던 종목들의 폭이 그 시점의 진짜 ADR 이다. 지금 구성의 90% 를 요구하면
+# 멀쩡한 과거를 통째로 버린다(kor_kr 은 1882일 중 115일만 남았다).
+# 50% 로 두면 실제로 세는 종목이 가장 적은 풀도 41종목이라 비율이 흔들리지 않는다.
+_POOL_MIN_COUNTED_RATIO = 0.5
 
 # 지수 티커 → 시장. 화면(`/market-trend`)의 지수 행과 ADR 을 잇는다.
 MARKET_BY_INDEX_TICKER = {"^KS11": "KOSPI", "^KQ11": "KOSDAQ", "^GSPC": "SP500", "^NDX": "NDX100"}
@@ -298,6 +307,179 @@ def _daily_counts_backfill(
     return tickers, by_date
 
 
+# 종목풀 ADR — 시장 지수 대신 **그 풀의 종목들** 로 폭을 잰다.
+#
+# 지수 ADR 은 매매하는 종목과 구성이 다르다(us_stock 은 S&P100+나스닥100 조합이라
+# SP500 과도 NDX100 과도 다르다). 풀 자신의 폭을 보는 편이 그 전략에 더 맞다.
+#
+# 시장 4개와 달리 **외부 조회가 없다** — 가격 캐시가 이미 매일 갱신되므로 그것만 센다.
+# 그래서 활성 풀 전부를 매일 돌려도 비용이 거의 없고, 골라 둔 풀만 계산하지 않는다
+# (레짐을 바꾼 순간 과거가 비어 백테스트가 그 구간을 못 쓰기 때문).
+POOL_MARKET_PREFIX = "pool:"
+
+# 종목풀 레짐을 고른 상태를 나타내는 예약 티커. 지수와 같은 `{ticker, name}` 자리에
+# 들어가 저장 스키마를 바꾸지 않는다 — 어느 풀인지는 설정을 읽는 그 풀 자신이다.
+SELF_POOL_REGIME_TICKER = "pool:self"
+
+
+def pool_market_key(pool: str) -> str:
+    """종목풀 ADR 의 시장 키 — 시장 4개와 같은 컬렉션에 섞여 들어간다."""
+    return f"{POOL_MARKET_PREFIX}{str(pool or '').strip().lower()}"
+
+
+def pool_of_market_key(market: str) -> str | None:
+    """시장 키가 종목풀이면 그 풀 id, 지수면 None."""
+    text = str(market or "")
+    return text[len(POOL_MARKET_PREFIX) :] if text.startswith(POOL_MARKET_PREFIX) else None
+
+
+def _pool_display_name(pool: str) -> str:
+    """풀 표시 이름 — 종목풀 설정의 name. 없으면 풀 id 그대로(지어내지 않는다)."""
+    from utils.settings_loader import get_ticker_type_settings
+
+    try:
+        settings = get_ticker_type_settings(pool) or {}
+    except Exception:
+        settings = {}
+    return str(settings.get("name") or "").strip() or pool
+
+
+def _pool_daily_counts(pool: str) -> tuple[int, dict[str, dict[str, Any]]]:
+    """가격 캐시에서 그 풀의 **전 이력** 일별 상승/하락 종목수를 센다.
+
+    전일 종가 대비로 판정한다 — 시장 4개(등락률·일봉)와 같은 기준이다.
+    보합(0%)은 어느 쪽에도 넣지 않는다. `counted` 는 그날 판정에 쓰인 종목 수다.
+    """
+    from utils.cache_utils import load_cached_frames_bulk_from_ticker_types
+    from utils.stock_list_io import get_etfs
+
+    tickers = [str(row["ticker"]).strip() for row in get_etfs(pool) if row.get("ticker")]
+    if not tickers:
+        return 0, {}
+    frames = load_cached_frames_bulk_from_ticker_types([pool], tickers)
+
+    closes: dict[str, pd.Series] = {}
+    for ticker, frame in frames.items():
+        if frame is None or frame.empty or "Close" not in frame:
+            continue
+        series = pd.to_numeric(frame["Close"], errors="coerce")
+        series = series[series > 0].dropna()
+        if len(series) >= 2:
+            closes[ticker] = series
+    if not closes:
+        return len(tickers), {}
+
+    close_df = pd.DataFrame(closes).sort_index()
+    change = close_df.pct_change()
+    counts: dict[str, dict[str, Any]] = {}
+    for day, row in change.iterrows():
+        valid = row.dropna()
+        if valid.empty:
+            continue
+        counts[str(pd.Timestamp(day).date())] = {
+            "advance": int((valid > 0).sum()),
+            "decline": int((valid < 0).sum()),
+            "counted": int(len(valid)),
+            # 동일가중 평균 등락률(%) — 풀 합성 지수(/market-trend)가 이 값을 누적해
+            # 지수 레벨을 만든다. 시총가중을 쓰지 않는 이유: 전략 배분이 동일가중이고
+            # 과거 시총 이력이 없어 재현이 안 된다.
+            "avg_move_pct": round(float(valid.mean()) * 100.0, 6),
+        }
+    return len(tickers), counts
+
+
+def refresh_pool_breadth() -> dict[str, Any]:
+    """활성 종목풀의 상승/하락 종목수를 채운다 — 가격 캐시만 읽는다(외부 조회 없음).
+
+    시장 4개(`refresh_market_breadth`)와 같은 컬렉션·스키마를 쓰고, 시장 키만
+    `pool:<풀id>` 다. 그래서 읽기(`load_adr_series`)·판정·화면은 손댈 것이 없다.
+
+    **매번 전 이력을 지금 풀 구성으로 다시 계산해 통째로 교체한다.** 시장 4개는 그날의
+    대상 종목이 그날 기준이라 과거를 덮지 않지만, 종목풀은 구성이 바뀌면 과거도 바뀐
+    구성으로 봐야 한다 — 백테스트도 지금 풀 구성으로 과거를 돌리므로(strategy_logic.md
+    「공통」 생존 편향 항목) ADR 하한 게이트가 같은 종목 집합을 봐야 한다. 예전처럼 새 날짜만 더하면
+    과거 행이 저장 당시 구성으로 굳는다 — 실측: kor_etf_portfolio 는 지금 구성으로 795일이
+    나오는데 옛 구성 행까지 975일이 남아 있었다.
+
+    지금 구성에서 표본 가드에 걸리는 날(옛 행)은 지운다. 7개 풀 전 이력 계산은 약 20초다.
+    """
+    from pymongo import ReplaceOne
+
+    from utils.settings_loader import list_available_ticker_types
+
+    db = _require_db()
+    collection = db[COLLECTION_NAME]
+    collection.create_index([("market", 1), ("date", 1)], unique=True, name="market_date_unique")
+
+    summary: dict[str, Any] = {"pools": {}}
+    for pool in list_available_ticker_types():
+        market = pool_market_key(pool)
+        try:
+            universe_size, counts_by_date = _pool_daily_counts(pool)
+        except Exception as exc:
+            logger.warning("[pool_breadth] %s 집계 실패: %s", pool, exc)
+            summary["pools"][pool] = {"error": str(exc)}
+            continue
+        if not counts_by_date:
+            # 키 이름을 `skipped` 로 쓰지 않는다 — 정상 형태의 `skipped_days` 처럼 '건너뛴
+            # 날짜 수'와 뜻이 겹치면 요약을 찍는 쪽이 둘을 구분 못해 죽는다(markets 와 같은 규칙).
+            summary["pools"][pool] = {"pool_skipped": True, "reason": "가격 캐시에 종가가 없습니다."}
+            continue
+
+        # 표본 가드 — 종목풀은 시장 4개보다 느슨하다(위 상수 주석 참고).
+        min_counted = universe_size * _POOL_MIN_COUNTED_RATIO
+        kept = {date: counts for date, counts in counts_by_date.items() if counts["counted"] >= min_counted}
+        if kept:
+            collection.bulk_write(
+                [
+                    ReplaceOne(
+                        {"market": market, "date": date},
+                        {"market": market, "date": date, **counts, "universe_size": universe_size},
+                        upsert=True,
+                    )
+                    for date, counts in kept.items()
+                ],
+                ordered=False,
+            )
+        removed = collection.delete_many({"market": market, "date": {"$nin": list(kept)}}).deleted_count
+        summary["pools"][pool] = {
+            "market": market,
+            "universe_size": universe_size,
+            "written": len(kept),
+            "removed": removed,
+            "skipped_days": len(counts_by_date) - len(kept),
+            "latest_date": max(counts_by_date),
+        }
+    return summary
+
+
+def load_pool_index_series(pool: str) -> pd.Series:
+    """풀 동일가중 합성 지수 레벨(시작 100) — 적립된 일별 평균 등락률을 누적한다.
+
+    `/market-trend` 가 풀을 지수처럼 보여줄 때 쓴다. 지수 레벨을 따로 저장하지 않는
+    이유는 ADR 과 같다 — 하루치(평균 등락률)만 남기면 과거를 다시 받을 일이 없다.
+    ``avg_move_pct`` 가 없는 날(필드 추가 전 미백필 문서)은 건너뛴다 — 그날 포인트가
+    없는 것으로 두지, 0% 로 지어내지 않는다.
+    """
+    db = _require_db()
+    docs = list(
+        db[COLLECTION_NAME]
+        .find({"market": pool_market_key(pool)}, {"_id": 0, "date": 1, "avg_move_pct": 1})
+        .sort("date", 1)
+    )
+    level = 100.0
+    dates: list[pd.Timestamp] = []
+    levels: list[float] = []
+    for doc in docs:
+        move = doc.get("avg_move_pct")
+        if move is None:
+            continue
+        level *= 1.0 + float(move) / 100.0
+        dates.append(pd.Timestamp(str(doc["date"])))
+        levels.append(level)
+    return pd.Series(levels, index=dates, dtype=float)
+
+
 def refresh_market_breadth() -> dict[str, Any]:
     """시장별로 빠진 날의 상승/하락 종목수를 채운다.
 
@@ -462,10 +644,19 @@ def _count_level_streak(points: list[dict[str, Any]]) -> tuple[str | None, int]:
 
 
 def load_adr_for_index(yf_ticker: str, limit_days: int | None = None) -> dict[str, Any] | None:
-    """지수 티커에 대응하는 ADR. 집계 대상이 아닌 지수(다우·필라델피아 등)는 None."""
-    market = MARKET_BY_INDEX_TICKER.get(yf_ticker)
-    if not market:
-        return None
+    """지수 티커에 대응하는 ADR. 집계 대상이 아닌 지수(다우·필라델피아 등)는 None.
+
+    풀 합성 지수(`pool:<풀>`)는 티커가 곧 시장 키다 — 풀 ADR 이 이미 같은 키로 쌓인다.
+    """
+    pool = pool_of_market_key(yf_ticker)
+    if pool is not None:
+        market = yf_ticker
+        market_name = _pool_display_name(pool)
+    else:
+        market = MARKET_BY_INDEX_TICKER.get(yf_ticker)
+        if not market:
+            return None
+        market_name = MARKETS[market]["name"]
 
     points = load_adr_series(market, limit_days)
     if not points:
@@ -481,7 +672,7 @@ def load_adr_for_index(yf_ticker: str, limit_days: int | None = None) -> dict[st
     level, level_days = _count_level_streak(points)
     return {
         "market": market,
-        "market_name": MARKETS[market]["name"],
+        "market_name": market_name,
         "universe_size": int(latest_doc.get("universe_size") or 0),
         "window_days": MARKET_ADR_WINDOW_DAYS,
         "overheated": MARKET_ADR_OVERHEATED,

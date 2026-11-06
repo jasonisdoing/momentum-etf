@@ -3,19 +3,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { ColDef, ColumnState, GridApi, GridOptions, RowClassParams } from "ag-grid-community";
+
+// 사용자가 건 임시 컬럼 정렬 — 계좌별로 페이지 수명 동안 보존한다(새로고침하면 사라짐).
+// 컴포넌트 상태로 두면 안 된다: 부모 요약이 갱신될 때 패널·그리드가 통째로 다시 만들어져
+// 정렬이 초기화됐다(수량 저장 → 리로드 → 저장 순서로 복귀 증상).
+const SORT_STATE_BY_ACCOUNT = new Map<string, ColumnState[]>();
+// 사용자 그룹(표시 구분선) — 저장 반영 전 리마운트에도 편집본을 유지한다(계좌별).
+const GROUPS_BY_ACCOUNT = new Map<string, HoldingsGroup[]>();
 import { IconLoader2 } from "@tabler/icons-react";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { AccountMemoSection } from "./AccountMemoSection";
 import { GridToolbarButton } from "../components/GridToolbarButton";
 import { StableInlineInput } from "../components/StableInlineInput";
 import { AppLoadingState } from "../components/AppLoadingState";
 import { AppModal } from "../components/AppModal";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { renderStockNameCell } from "@/lib/name-highlight";
-import { stockMemoColumn } from "@/lib/grid-cells";
+import { highDrawdownColumn, rankColumn, signColor, stockMemoColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
-import { reorderHoldings } from "@/lib/holdings-store";
-import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
+import { reorderHoldings, saveHoldingsGroups, type HoldingsGroup } from "@/lib/holdings-store";
+import { fetchAlertBadges, normalizeBadgeTicker, peekAlertBadges, type AlertBadges } from "@/lib/alert-badges";
+import { loadPoolRanks, peekPoolRanks, type PoolRankRow } from "@/lib/pool-ranks";
 import { formatKstDateTime } from "@/lib/datetime";
 import {
   FIXED_ASSET_NAME,
@@ -48,12 +57,19 @@ import {
   getPreviewWeightPct,
   getSignedClass,
   parseEditableQuantity,
+  parseNumericCell,
   parseRawPrice,
   reorderRowsByTickers,
   safeParseFloat,
   stopActionButtonClick,
   stopActionButtonMouseDown,
 } from "./assets-helpers";
+
+type PoolRank = { rank: number | null };
+
+function poolRankKey(pool: string | undefined, ticker: string): string {
+  return `${String(pool ?? "").trim().toLowerCase()}:${normalizeBadgeTicker(ticker)}`;
+}
 
 export function AccountHoldingsDetailPanel({
   summary,
@@ -62,6 +78,7 @@ export function AccountHoldingsDetailPanel({
   onCashSync,
   onSortStateChange,
   onReload,
+  onBusyChange,
   showAmounts,
 }: {
   summary: AccountSummary;
@@ -70,6 +87,8 @@ export function AccountHoldingsDetailPanel({
   onCashSync: (accountId: string, balance: number, targetRatio: number, saved?: SavedCashAccount) => void;
   onSortStateChange: (accountId: string, sortState: ColumnState[]) => void;
   onReload: (options?: { silent?: boolean }) => Promise<void>;
+  /** 수정·선택·저장 중 여부 — 부모의 주기 갱신이 입력을 덮어쓰지 않게 알린다. */
+  onBusyChange: (busy: boolean) => void;
   showAmounts: boolean;
 }) {
   const toast = useToast();
@@ -91,16 +110,72 @@ export function AccountHoldingsDetailPanel({
   // 입력 중인 티커 초안 — 타이핑마다 setState 하면 그리드 셀이 리마운트돼 포커스가 튄다(1글자만 입력됨).
   // draft 는 ref 에만 쌓고, 검증 시점에만 읽는다.
   const addingTickerDraftRef = useRef("");
-  // 종목명 알람 배지(이동선 이탈·손절 아이콘) — 계좌 설정의 알람 On/Off·판정 그대로. 보조 정보라 실패 시 빈 맵.
-  const [alertBadges, setAlertBadges] = useState<AlertBadges>({});
+  // 손절 배지(🚫)·이동선 이탈(회색 행) — 슬랙 알람과 같은 판정, 알람 On/Off 와 무관한 표준 표시. 보조 정보라 실패 시 빈 맵.
+  // 화면이 미리 받아 둔 값(`AssetsManager`)이 있으면 모달이 열리자마자 보인다 — 없을 때만 늦게 채워진다.
+  const prefetchedBadges = useMemo(() => peekAlertBadges(summary.account_id), [summary.account_id]);
+  const [alertBadges, setAlertBadges] = useState<AlertBadges>(prefetchedBadges?.badgeByTicker ?? {});
   // 이동선 이탈 종목 — 배지와 같은 조건으로 행을 회색 처리한다.
-  const [maBrokenTickers, setMaBrokenTickers] = useState<Set<string>>(new Set());
+  const [maBrokenTickers, setMaBrokenTickers] = useState<Set<string>>(new Set(prefetchedBadges?.maTickers ?? []));
+  const [newListingMonths, setNewListingMonths] = useState<Record<string, number | null>>(prefetchedBadges?.newMonthsByTicker ?? {});
+  // 고점 대비(%) — 순위 화면 「고점」 컬럼과 같은 공용 판정(배지 응답에 함께 온다).
+  const [highDrawdownByTicker, setHighDrawdownByTicker] = useState<Record<string, number>>(prefetchedBadges?.highDrawdownByTicker ?? {});
+  const [poolRanks, setPoolRanks] = useState<Record<string, PoolRank>>({});
+  const [poolRankError, setPoolRankError] = useState<string | null>(null);
+  const rankPoolKey = Array.from(new Set(initialRows
+    .filter((row) => row.ticker !== "IS" && row.ticker !== CASH_ROW_TICKER)
+    .map((row) => String(row.ticker_type ?? "").trim().toLowerCase())
+    .filter(Boolean))).sort().join("|");
+  const missingRankPoolTickers = initialRows
+    .filter((row) => row.ticker !== "IS" && row.ticker !== CASH_ROW_TICKER && !String(row.ticker_type ?? "").trim())
+    .map((row) => row.ticker).join(", ");
+
+  useEffect(() => {
+    let alive = true;
+    const missingPoolError = missingRankPoolTickers ? `종목풀 정보 없음 — ${missingRankPoolTickers}` : null;
+    setPoolRankError(missingPoolError);
+    const pools = rankPoolKey ? rankPoolKey.split("|") : [];
+    const toRanks = (loaded: { pool: string; rows: PoolRankRow[] }[]) => {
+      const ranks: Record<string, PoolRank> = {};
+      for (const { pool, rows } of loaded) {
+        for (const row of rows) ranks[poolRankKey(pool, row.티커)] = { rank: row.순위 ?? null };
+      }
+      return ranks;
+    };
+    // 미리 받아 둔 순위가 전부 있으면(오래됐어도) 먼저 바로 채우고, 새 값은 뒤에서 받아 바꾼다.
+    const cached = pools.map((pool) => ({ pool, rows: peekPoolRanks(pool) }));
+    setPoolRanks(
+      cached.every((item) => item.rows !== null)
+        ? toRanks(cached as { pool: string; rows: PoolRankRow[] }[])
+        : {},
+    );
+    void Promise.allSettled(pools.map(async (pool) => ({ pool, rows: await loadPoolRanks(pool) }))).then((results) => {
+      if (!alive) return;
+      const errors: string[] = [];
+      const loaded: { pool: string; rows: PoolRankRow[] }[] = [];
+      results.forEach((result, index) => {
+        if (result.status === "rejected") {
+          errors.push(result.reason instanceof Error ? result.reason.message : `${pools[index]}: 순위 조회 실패`);
+          return;
+        }
+        loaded.push(result.value);
+      });
+      setPoolRanks(toRanks(loaded));
+      setPoolRankError([missingPoolError, errors.length ? `순위 조회 실패 — ${errors.join(" / ")}` : null]
+        .filter(Boolean).join(" / ") || null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [missingRankPoolTickers, rankPoolKey]);
+
   useEffect(() => {
     let alive = true;
     void fetchAlertBadges(summary.account_id).then((info) => {
       if (!alive) return;
       setAlertBadges(info.badgeByTicker);
       setMaBrokenTickers(new Set(info.maTickers));
+      setNewListingMonths(info.newMonthsByTicker);
+      setHighDrawdownByTicker(info.highDrawdownByTicker);
     });
     return () => {
       alive = false;
@@ -112,6 +187,8 @@ export function AccountHoldingsDetailPanel({
   const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  // 삭제 진행 안내 — 확인 모달 안에서 보여준다(삭제 요청이 끝나고 목록을 다시 받을 때까지 이어진다).
+  const [deleteStatus, setDeleteStatus] = useState<string | null>(null);
   const [isReorderDirty, setIsReorderDirty] = useState(false);
   const qtyRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
@@ -120,6 +197,9 @@ export function AccountHoldingsDetailPanel({
   const dirtyRowIdsRef = useRef<string[]>([]);
   const isReorderDirtyRef = useRef(false);
   const gridApiRef = useRef<GridApi<GridRow> | null>(null);
+  useEffect(() => {
+    gridApiRef.current?.refreshCells({ force: true });
+  }, [poolRanks]);
   const lastSavedSnapshotsRef = useRef<Map<string, HoldingEditableSnapshot>>(new Map());
   const childSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const childSavingRowIdsRef = useRef<Set<string>>(new Set());
@@ -127,10 +207,6 @@ export function AccountHoldingsDetailPanel({
   const reorderSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reorderSavingRef = useRef(false);
   const reorderQueuedRef = useRef(false);
-  const cashDraftRef = useRef({
-    cashBalanceKrw: Number(summary.cash_balance_krw ?? 0),
-    cashTargetRatio: Number(summary.cash_target_ratio ?? 0),
-  });
   const isAusAccount = String(summary.currency || "KRW").toUpperCase() === "AUD";
   const intlDraftRef = useRef({
     intlSharesValue: Number(summary.intl_shares_value ?? 0),
@@ -162,15 +238,10 @@ export function AccountHoldingsDetailPanel({
     setEditingRowId(null);
     setAddingRow(null);
     setIsReorderDirty(false);
-    queueMicrotask(() => {
-      if (!gridApiRef.current) {
-        return;
-      }
-      gridApiRef.current.applyColumnState({
-        state: [],
-        applyOrder: false,
-      });
-    });
+    // 컬럼 정렬 상태는 여기서 건드리지 않는다 — 예전에는 리로드마다 정렬을 초기화해서,
+    // 티커로 임시 정렬해 쓰다가 수량을 저장하면 저장 순서로 되돌아갔다. 사용자가 건
+    // 정렬은 화면을 새로고침할 때까지 유지한다(정렬 중에는 행 드래그가 잠기는 것은
+    // AG Grid 표준 동작 — 헤더를 한 번 더 눌러 정렬을 풀면 된다).
   }, [hydrateRows, initialRows]);
 
   useEffect(() => {
@@ -179,10 +250,6 @@ export function AccountHoldingsDetailPanel({
 
   useEffect(() => {
     summaryRef.current = summary;
-    cashDraftRef.current = {
-      cashBalanceKrw: Number(summary.cash_balance_krw ?? 0),
-      cashTargetRatio: Number(summary.cash_target_ratio ?? 0),
-    };
     cashMapDraftRef.current = { ...(summary.cash ?? {}) };
     setCashMapDirty(false);
   }, [summary]);
@@ -197,8 +264,79 @@ export function AccountHoldingsDetailPanel({
 
   const isEditableHoldingRow = useCallback(
     (row: GridRow | undefined | null) =>
-      Boolean(row && row.id !== "__adding__" && row.ticker !== "IS" && row.ticker !== CASH_ROW_TICKER),
+      Boolean(row && !row.is_group && row.id !== "__adding__" && row.ticker !== "IS" && row.ticker !== CASH_ROW_TICKER),
     [],
+  );
+  // 사용자 그룹(표시 구분선) — 서버 저장값으로 시작, 편집본은 모듈 맵으로 리마운트에도 유지.
+  const [groups, setGroups] = useState<HoldingsGroup[]>(
+    () => GROUPS_BY_ACCOUNT.get(summary.account_id) ?? summary.holdings_groups ?? [],
+  );
+  // 정렬이 걸려 있으면 순서가 무의미해 그룹 행을 잠시 숨긴다.
+  const [sortActive, setSortActive] = useState(() =>
+    Boolean(SORT_STATE_BY_ACCOUNT.get(summary.account_id)?.length),
+  );
+  const [groupModal, setGroupModal] = useState<{ id: string | null; name: string } | null>(null);
+  // 메모 패널 폭 — null 이면 자동(남는 폭, 최소 300px). 경계선 드래그로 수동 조절하고,
+  // 더블클릭하면 자동으로 되돌린다. 선호는 브라우저에 저장(표시 전용).
+  // v2 — 옛 드래그 구현이 남긴 저장값(자동 배분 도입 전)을 무시하기 위해 키를 올렸다.
+  const MEMO_WIDTH_KEY = "momentum-etf:assets:memo-width:v2";
+  const [memoWidth, setMemoWidth] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = Number(window.localStorage.getItem(MEMO_WIDTH_KEY));
+      return Number.isFinite(raw) && raw >= 300 ? Math.min(raw, 1200) : null;
+    } catch {
+      return null;
+    }
+  });
+  const memoDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const handleMemoDividerMouseDown = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const pane = (event.currentTarget.nextElementSibling as HTMLElement | null)?.getBoundingClientRect();
+      memoDragRef.current = { startX: event.clientX, startWidth: memoWidth ?? Math.round(pane?.width ?? 300) };
+      const onMove = (move: MouseEvent) => {
+        const drag = memoDragRef.current;
+        if (!drag) return;
+        // 메모가 오른쪽에 있으므로 왼쪽으로 끌면 넓어진다.
+        setMemoWidth(Math.max(300, Math.min(1200, drag.startWidth + (drag.startX - move.clientX))));
+      };
+      const onUp = () => {
+        memoDragRef.current = null;
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        setMemoWidth((current) => {
+          try {
+            if (current === null) window.localStorage.removeItem(MEMO_WIDTH_KEY);
+            else window.localStorage.setItem(MEMO_WIDTH_KEY, String(current));
+          } catch {
+            /* 저장 실패 무시 — 표시 선호일 뿐 */
+          }
+          return current;
+        });
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [memoWidth],
+  );
+  const resetMemoWidth = useCallback(() => {
+    setMemoWidth(null);
+    try {
+      window.localStorage.removeItem(MEMO_WIDTH_KEY);
+    } catch {
+      /* 무시 */
+    }
+  }, []);
+  const persistGroups = useCallback(
+    (next: HoldingsGroup[]) => {
+      GROUPS_BY_ACCOUNT.set(summary.account_id, next);
+      setGroups(next);
+      void saveHoldingsGroups(summary.account_id, next).catch(() => {
+        toast.error("그룹 저장에 실패했습니다.");
+      });
+    },
+    [summary.account_id, toast],
   );
   const isCashGridRow = useCallback(
     (row: GridRow | undefined | null) => Boolean(row && row.ticker === CASH_ROW_TICKER),
@@ -212,12 +350,52 @@ export function AccountHoldingsDetailPanel({
         id: buildGridRowId(row),
         quantity: typeof row.quantity === "number" ? row.quantity : parseInt(String(row.quantity), 10) || 0,
         average_buy_price: safeParseFloat(row.average_buy_price),
-        target_ratio: row.target_ratio ?? 0,
         memo: row.memo ?? "",
       }));
 
+    // 그룹 헤더 행 주입 — 앵커(before_ticker) 앞에 끼운다. 앵커가 없거나 못 찾으면 맨 끝.
+    const withGroups = (stockRows: GridRow[]): GridRow[] => {
+      if (sortActive || !groups.length) return stockRows;
+      const groupRow = (group: HoldingsGroup): GridRow =>
+        ({
+          id: group.id,
+          account_id: summary.account_id,
+          account_name: summary.name,
+          currency: summary.currency,
+          bucket: "",
+          bucket_id: 0,
+          ticker: "__GROUP__",
+          name: group.name,
+          quantity: 0,
+          average_buy_price: 0,
+          current_price: "",
+          pnl_krw: 0,
+          return_pct: 0,
+          weight_pct: 0,
+          buy_amount_krw: 0,
+          valuation_krw: 0,
+          is_group: true,
+        }) as GridRow;
+      const result: GridRow[] = [];
+      const used = new Set<string>();
+      for (const row of stockRows) {
+        const anchor = String(row.ticker || "").trim().toUpperCase();
+        for (const group of groups) {
+          if (!used.has(group.id) && group.before_ticker === anchor) {
+            used.add(group.id);
+            result.push(groupRow(group));
+          }
+        }
+        result.push(row);
+      }
+      for (const group of groups) {
+        if (!used.has(group.id)) result.push(groupRow(group));
+      }
+      return result;
+    };
+
     if (!addingRow) {
-      return [cashRow, ...baseRows];
+      return [cashRow, ...withGroups(baseRows)];
     }
 
     return [
@@ -239,16 +417,20 @@ export function AccountHoldingsDetailPanel({
         weight_pct: 0,
         buy_amount_krw: 0,
         valuation_krw: 0,
-        target_ratio: 0,
         memo: "",
       } as GridRow,
-      ...baseRows,
+      ...withGroups(baseRows),
     ];
-  }, [addingRow, rows, summary]);
+  }, [addingRow, rows, summary, groups, sortActive]);
 
   const hasPendingAdd = Boolean(addingRow);
   const hasSelectedRows = selectedRowIds.length > 0;
   const hasPendingSave = hasPendingAdd || dirtyRowIds.length > 0 || isReorderDirty;
+  const isBusy = hasPendingSave || hasSelectedRows || editingRowId !== null || processingId !== null;
+  useEffect(() => {
+    onBusyChange(isBusy);
+  }, [isBusy, onBusyChange]);
+  useEffect(() => () => onBusyChange(false), [onBusyChange]);
   const selectedDeletableRows = useMemo(
     () => gridRows.filter((row) => selectedRowIds.includes(row.id) && row.id !== "__adding__"),
     [gridRows, selectedRowIds],
@@ -398,34 +580,6 @@ export function AccountHoldingsDetailPanel({
       throw new Error(payload.error || "종목 수정에 실패했습니다.");
     }
   }, [summary.account_id]);
-
-  const processCashUpdate = useCallback(async (cashBalanceKrw: number, cashTargetRatio: number) => {
-    const isAud = String(summary.currency || "KRW").toUpperCase() === "AUD";
-    const currentCashKrw = Number(summary.cash_balance_krw ?? 0);
-    const currentCashNative = Number(summary.cash_balance_native ?? 0);
-    const nextCashNative =
-      isAud && currentCashKrw > 0 && currentCashNative > 0
-        ? (cashBalanceKrw / currentCashKrw) * currentCashNative
-        : (isAud ? currentCashNative : cashBalanceKrw);
-    const response = await fetch("/api/assets", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        account_id: summary.account_id,
-        total_principal: summary.total_principal,
-        cash_balance_krw: cashBalanceKrw,
-        cash_balance_native: nextCashNative,
-        cash_currency: summary.cash_currency,
-        cash_target_ratio: cashTargetRatio,
-        intl_shares_value: summary.account_id === "aus_account" ? summary.intl_shares_value : null,
-        intl_shares_change: summary.account_id === "aus_account" ? summary.intl_shares_change : null,
-      }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error || "현금 저장에 실패했습니다.");
-    }
-  }, [summary]);
 
   // Intl Value/Change 만 저장한다. 현금 키를 함께 보내면 백엔드가 통화별 `cash` 맵을
   // 레거시 필드로 재합성해 잔액이 0 으로 덮이므로, 현금 관련 필드는 보내지 않는다.
@@ -599,14 +753,6 @@ export function AccountHoldingsDetailPanel({
       reorderSaveTimerRef.current = null;
     }
 
-    const cashRowId = `${summary.account_id}-${CASH_ROW_TICKER}`;
-    if (dirtyRowIdsRef.current.includes(cashRowId)) {
-      void processCashUpdate(
-        cashDraftRef.current.cashBalanceKrw,
-        cashDraftRef.current.cashTargetRatio,
-      ).catch(() => undefined);
-    }
-
     const dirtyRows = rowsRef.current
       .map((row) => ({ ...row, id: buildGridRowId(row) }))
       .filter((row) => dirtyRowIdsRef.current.includes(row.id));
@@ -619,7 +765,7 @@ export function AccountHoldingsDetailPanel({
       void processReorderUpdate(rowsRef.current).catch(() => undefined);
     }
 
-  }, [processCashUpdate, processReorderUpdate, processRowUpdate, summary.account_id]);
+  }, [processReorderUpdate, processRowUpdate]);
 
   useEffect(() => {
     return () => {
@@ -636,23 +782,13 @@ export function AccountHoldingsDetailPanel({
     flushPendingSaves();
 
     try {
-      const cashRowId = `${summary.account_id}-${CASH_ROW_TICKER}`;
-      if (dirtyRowIds.includes(cashRowId)) {
-        await processCashUpdate(
-          cashDraftRef.current.cashBalanceKrw,
-          cashDraftRef.current.cashTargetRatio,
-        );
-        clearDirtyRowState(cashRowId);
-      }
-
       const dirtyRows = rowsRef.current
         .map((row) => ({
           ...row,
           id: buildGridRowId(row),
           quantity: typeof row.quantity === "number" ? row.quantity : parseInt(String(row.quantity), 10) || 0,
           average_buy_price: safeParseFloat(row.average_buy_price),
-          target_ratio: row.target_ratio ?? 0,
-          memo: String(row.memo ?? "").trim(),
+            memo: String(row.memo ?? "").trim(),
         }))
         .filter((row) => dirtyRowIds.includes(row.id));
 
@@ -686,7 +822,6 @@ export function AccountHoldingsDetailPanel({
     onReload,
     persistRowOrder,
     processAddingRow,
-    processCashUpdate,
     processRowUpdate,
     processingId,
     summary,
@@ -715,69 +850,37 @@ export function AccountHoldingsDetailPanel({
 
     setProcessingId("__deleting__");
     try {
-      for (const row of selectedDeletableRows) {
-        const params = new URLSearchParams({
-          account: summary.account_id,
-          ticker: row.ticker,
-        });
-        const response = await fetch(`/api/assets?${params.toString()}`, { method: "DELETE" });
-        const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(payload.error || "삭제 실패");
-        }
+      // 한 요청으로 함께 지운다 — 서버가 계좌를 읽고 저장하는 일이 종목 수와 무관하게 1회다.
+      setDeleteStatus(`삭제 중… (${selectedDeletableRows.length}개)`);
+      const params = new URLSearchParams({ account: summary.account_id });
+      for (const row of selectedDeletableRows) params.append("ticker", row.ticker);
+      const response = await fetch(`/api/assets?${params.toString()}`, { method: "DELETE" });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "삭제 실패");
       }
-      setDeleteConfirmOpen(false);
+      // 지운 행을 곧바로 표에서 빼고 창을 닫는다. 합계·일간 같은 계산값은 뒤에서 조용히 다시 받는다.
+      const deletedIds = new Set(selectedDeletableRows.map((row) => row.id));
+      const remaining = rowsRef.current.filter((row) => !deletedIds.has(buildGridRowId(row)));
+      onRowsSync(summary.account_id, buildSyncedHoldingRows(remaining, summary));
       setSelectedRowIds([]);
-      await onReload();
+      setDeleteConfirmOpen(false);
       toast.success("삭제 완료");
+      void onReload({ silent: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "삭제 실패");
     } finally {
       setProcessingId(null);
+      setDeleteStatus(null);
     }
-  }, [onReload, selectedDeletableRows, summary.account_id, toast]);
+  }, [onReload, onRowsSync, selectedDeletableRows, summary, toast]);
 
   const handleCellValueChanged = useCallback((row: GridRow | undefined, field: string | undefined) => {
     if (!row) {
       return;
     }
-    if (isCashGridRow(row)) {
-      const nextCashBalance = Math.max(0, Number(row.valuation_krw ?? 0));
-      const nextCashTargetRatio = Number(row.target_ratio ?? 0);
-      cashDraftRef.current = {
-        cashBalanceKrw: nextCashBalance,
-        cashTargetRatio: nextCashTargetRatio,
-      };
-      setDirtyRowIds((previous) => {
-        const next = previous.includes(row.id) ? previous : [...previous, row.id];
-        dirtyRowIdsRef.current = next;
-        return next;
-      });
-      if (field) {
-        const dirtyCellKey = buildDirtyCellKey(row.id, field);
-        setDirtyCellKeys((previous) => (previous.includes(dirtyCellKey) ? previous : [...previous, dirtyCellKey]));
-      }
-      onCashSync(summary.account_id, nextCashBalance, nextCashTargetRatio);
-      const timerKey = row.id;
-      const currentTimer = childSaveTimersRef.current.get(timerKey);
-      if (currentTimer) {
-        clearTimeout(currentTimer);
-      }
-      const nextTimer = setTimeout(async () => {
-        childSaveTimersRef.current.delete(timerKey);
-        try {
-          await processCashUpdate(nextCashBalance, nextCashTargetRatio);
-          clearDirtyRowState(timerKey);
-          toast.success("현금 저장 완료");
-        } catch (error) {
-          await onReload();
-          toast.error(error instanceof Error ? error.message : "현금 저장에 실패했습니다.");
-        }
-      }, 700);
-      childSaveTimersRef.current.set(timerKey, nextTimer);
-      return;
-    }
-    if (!isEditableHoldingRow(row)) {
+    // 현금 행은 그리드에서 편집할 수 없다 — 현금은 상단 통화별 입력(cash 맵)만이 진실이다.
+    if (isCashGridRow(row) || !isEditableHoldingRow(row)) {
       return;
     }
 
@@ -805,7 +908,7 @@ export function AccountHoldingsDetailPanel({
       setDirtyCellKeys((previous) => (previous.includes(dirtyCellKey) ? previous : [...previous, dirtyCellKey]));
     }
     scheduleSilentRowSave(row.id);
-  }, [clearDirtyRowState, isCashGridRow, isEditableHoldingRow, onCashSync, onReload, onRowsSync, processCashUpdate, scheduleSilentRowSave, summary, toast]);
+  }, [isCashGridRow, isEditableHoldingRow, onRowsSync, scheduleSilentRowSave, summary]);
 
   const columns = useMemo<ColDef<GridRow>[]>(() => [
     {
@@ -819,20 +922,33 @@ export function AccountHoldingsDetailPanel({
       suppressMovable: true,
       rowDrag: (params) =>
         Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== CASH_ROW_TICKER),
+      // 그룹 헤더 행도 같은 손잡이로 옮긴다 — 아래 첫 종목이 새 앵커가 된다.
       cellClass: "assetsDragCell",
       valueGetter: () => "",
+    },
+    rankColumn<GridRow>((row) => row ? poolRanks[poolRankKey(row.ticker_type, row.ticker)]?.rank : null),
+    // 고점 대비 — 순위 화면과 같은 공용 컬럼(같은 판정·같은 표기).
+    {
+      ...highDrawdownColumn<GridRow>("high_drawdown_pct" as never),
+      valueGetter: (params: { data?: GridRow }) => {
+        const row = params.data;
+        if (!row || row.is_group || row.id === "__adding__" || row.ticker === CASH_ROW_TICKER || row.ticker === "IS") {
+          return null;
+        }
+        return highDrawdownByTicker[normalizeBadgeTicker(row.ticker)] ?? null;
+      },
     },
     {
       field: "bucket",
       headerName: "버킷",
+      pinned: "left",
       width: 96,
       cellClass: (params) => getBucketCellClass(params.data?.bucket_id ?? 0),
     },
-    {
-      field: "ticker",
-      headerName: "티커",
+    // 티커·종목명 — 공용 컬럼(col-id 표준). 추가 행 입력칸·현금·고정 자산만 화면 고유 표기다.
+    tickerColumn<GridRow>({
       width: 98,
-      cellRenderer: (params: { data?: GridRow; value?: string }) => {
+      cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
         const row = params.data;
         if (!row) {
           return null;
@@ -851,6 +967,7 @@ export function AccountHoldingsDetailPanel({
             />
           );
         }
+        if (row.is_group) return null;
         if (row.ticker === CASH_ROW_TICKER) return <span>-</span>;
         // 고정 자산(IS) — 실제 상장 종목이 아니라 상세로 연결하지 않는다. 표기는 전 화면 공용.
         if (isFixedAssetTicker(row.ticker)) {
@@ -864,12 +981,8 @@ export function AccountHoldingsDetailPanel({
           />
         );
       },
-    },
-    {
-      field: "name",
-      headerName: "종목명",
-      minWidth: 248,
-      flex: 1.35,
+    }),
+    stockNameColumn<GridRow>({
       cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
         if (params.data?.id === "__adding__") {
           return (
@@ -916,15 +1029,47 @@ export function AccountHoldingsDetailPanel({
           );
         }
 
+        if (params.data?.is_group) {
+          const group = params.data;
+          return (
+            <span className="assetsGroupName">
+              <span
+                role="button"
+                title="이름 수정"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setGroupModal({ id: group.id, name: String(group.name || "") });
+                }}
+              >
+                {String(group.name || "그룹")}
+              </span>
+              <button
+                type="button"
+                className="btn btn-sm btn-link p-0 assetsGroupDelete"
+                title="그룹 삭제"
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  persistGroups((GROUPS_BY_ACCOUNT.get(summary.account_id) ?? groups).filter((g) => g.id !== group.id));
+                }}
+              >
+                ✕
+              </button>
+            </span>
+          );
+        }
         if (isFixedAssetTicker(params.data?.ticker)) {
           return <span>{FIXED_ASSET_NAME}</span>;
         }
         // 종목명 표기 규칙은 전 화면 공통(`@/lib/name-highlight`).
         return renderStockNameCell(params.value, {
+          isHeld: Number(params.data?.quantity ?? 0) > 0,
+          isNew: normalizeBadgeTicker(params.data?.ticker ?? "") in newListingMonths,
+          newMonths: newListingMonths[normalizeBadgeTicker(params.data?.ticker ?? "")] ?? null,
           badge: alertBadges[normalizeBadgeTicker(params.data?.ticker ?? "")] ?? "",
         });
       },
-    },
+    }),
     // 메모 — 종목명 옆의 수기 칸. 값은 계좌가 아니라 **종목**에 붙는다(전 화면 공용 컬럼).
     // 저장 경로만 이 화면 고유다: `onSave` 없이 그리드 값만 바꾸고, 수량·매입단가와 같은
     // 흐름(셀을 벗어나면 0.7초 뒤 자동 저장 + 상단 저장 버튼)을 탄다.
@@ -980,49 +1125,6 @@ export function AccountHoldingsDetailPanel({
       },
     },
     {
-      colId: "target_weight_pct",
-      headerName: "목표비중",
-      width: 84,
-      type: "rightAligned",
-      sortable: false,
-      cellStyle: { backgroundColor: "#f1f3f5" },
-      cellRenderer: (params: { data?: GridRow }) => {
-        const row = params.data;
-        if (!row || row.id === "__adding__") return <span style={{ color: "var(--text-muted)" }}>-</span>;
-        // 현금 행: 자산 헬퍼에서 저장한 현금 목표 비중만 표시한다(미저장 = '-', 파생·기본값 없음).
-        if (row.ticker === CASH_ROW_TICKER) {
-          const saved = summary.helper_cash_weight_pct;
-          if (saved == null || !Number.isFinite(Number(saved))) {
-            return <span style={{ color: "var(--text-muted)" }}>-</span>;
-          }
-          return <span style={{ color: "#000000", fontWeight: 700 }}>{Number(saved).toFixed(2)}%</span>;
-        }
-        // IS 행: 자동값(현재 비중)이 곧 목표 비중. 나머지는 저장된 target_ratio 그대로.
-        const w = row.ticker === "IS" ? row.weight_pct : row.target_ratio;
-        return <span style={{ color: w == null ? "var(--text-muted)" : "#000000", fontWeight: 700 }}>{w == null ? "-" : `${Number(w).toFixed(2)}%`}</span>;
-      },
-    },
-    {
-      colId: "target_quantity",
-      headerName: "목표수량",
-      width: 84,
-      type: "rightAligned",
-      sortable: false,
-      cellStyle: { backgroundColor: "#f1f3f5" },
-      headerTooltip: "목표비중 × 총자산 ÷ 현재가 (단주거래 전제, 정수 반올림)",
-      cellRenderer: (params: { data?: GridRow }) => {
-        const row = params.data;
-        if (!row || row.id === "__adding__" || row.ticker === CASH_ROW_TICKER || row.ticker === "IS") {
-          return <span style={{ color: "var(--text-muted)" }}>-</span>;
-        }
-        const quantity = row.target_quantity;
-        if (quantity == null || !Number.isFinite(Number(quantity))) {
-          return <span style={{ color: "var(--text-muted)" }}>-</span>;
-        }
-        return <span style={{ fontWeight: 700 }}>{Math.round(Number(quantity)).toLocaleString()}</span>;
-      },
-    },
-    {
       field: "quantity",
       // 다섯 자리 + 천 단위 쉼표("12,345")까지 안 잘리게. 헤더보다 값이 넓다.
       headerName: "수량",
@@ -1037,13 +1139,12 @@ export function AccountHoldingsDetailPanel({
           ? "assetsEditableCell assetsDirtyCell"
           : "assetsEditableCell";
       },
-      valueParser: (params) => {
-        const parsed = parseInt(parseRawPrice(params.newValue), 10);
-        if (Number.isNaN(parsed) || parsed < 0) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
+      valueParser: (params) =>
+        parseNumericCell(params.newValue, params.oldValue, {
+          label: "수량",
+          integer: true,
+          onReject: (message) => toast.error(message),
+        }),
       cellRenderer: (params: { data?: GridRow; value?: number }) => {
         const row = params.data;
         if (!row) {
@@ -1081,13 +1182,11 @@ export function AccountHoldingsDetailPanel({
           ? "assetsEditableCell assetsDirtyCell"
           : "assetsEditableCell";
       },
-      valueParser: (params) => {
-        const parsed = parseFloat(parseRawPrice(params.newValue));
-        if (Number.isNaN(parsed) || parsed < 0) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
+      valueParser: (params) =>
+        parseNumericCell(params.newValue, params.oldValue, {
+          label: "매입 단가",
+          onReject: (message) => toast.error(message),
+        }),
       cellRenderer: (params: { data?: GridRow; value?: string | number }) => {
         const row = params.data;
         if (!row) {
@@ -1142,18 +1241,11 @@ export function AccountHoldingsDetailPanel({
       valueGetter: (params) => (params.data ? getPreviewValuationKrw(params.data) : null),
       // 현금 입력은 상단 통화별 박스로 이전됨 — 그리드 현금 셀 편집은 막고 편집 스타일도 제거한다.
       editable: false,
-      valueParser: (params) => {
-        const parsed = parseFloat(parseRawPrice(params.newValue));
-        if (Number.isNaN(parsed) || parsed < 0) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
       cellRenderer: (params: { data?: GridRow }) => (
         <span className="appGridNumericValue">{params.data ? formatHiddenAmount(showAmounts, formatKrw(getPreviewValuationKrw(params.data))) : "-"}</span>
       ),
     },
-  ], [addingRow, alertBadges, handleValidateTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, processingId, showAmounts]);
+  ], [addingRow, alertBadges, handleValidateTicker, highDrawdownByTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, poolRanks, processingId, showAmounts]);
 
   return (
     <div className="assetsDetailPanel">
@@ -1270,6 +1362,18 @@ export function AccountHoldingsDetailPanel({
             ) : null}
           </div>
           <div className="d-flex align-items-center gap-2 ms-auto">
+            <button
+              type="button"
+              className="btn btn-outline-secondary btn-sm"
+              title="표시용 그룹 구분선 추가 — 드래그로 위치를 옮기고, 이름을 클릭해 수정합니다."
+              onMouseDown={stopActionButtonMouseDown}
+              onClick={(event) => {
+                stopActionButtonClick(event);
+                setGroupModal({ id: null, name: "" });
+              }}
+            >
+              그룹
+            </button>
             <GridToolbarButton
               variant="add"
               onMouseDown={stopActionButtonMouseDown}
@@ -1303,6 +1407,53 @@ export function AccountHoldingsDetailPanel({
         </div>
       </div>
       <AppModal
+        open={groupModal !== null}
+        title={groupModal?.id ? "그룹 이름 수정" : "그룹 추가"}
+        subtitle="표시용 구분선입니다 — 계산·백테스트에는 영향이 없습니다."
+        onClose={() => setGroupModal(null)}
+        footer={(
+          <>
+            <button type="button" className="btn btn-outline-secondary" onClick={() => setGroupModal(null)}>
+              취소
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!groupModal?.name.trim()}
+              onClick={() => {
+                if (!groupModal || !groupModal.name.trim()) return;
+                const current = GROUPS_BY_ACCOUNT.get(summary.account_id) ?? groups;
+                if (groupModal.id) {
+                  persistGroups(current.map((g) => (g.id === groupModal.id ? { ...g, name: groupModal.name.trim() } : g)));
+                } else {
+                  const firstTicker =
+                    rowsRef.current.map((row) => String(row.ticker || "").trim().toUpperCase()).find((t) => t && t !== "IS") ?? null;
+                  persistGroups([...current, { id: `group-${Date.now()}`, name: groupModal.name.trim(), before_ticker: firstTicker }]);
+                }
+                setGroupModal(null);
+              }}
+            >
+              저장
+            </button>
+          </>
+        )}
+      >
+        <input
+          className="form-control"
+          autoFocus
+          placeholder="그룹 이름"
+          value={groupModal?.name ?? ""}
+          onChange={(event) => setGroupModal((prev) => (prev ? { ...prev, name: event.target.value } : prev))}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && groupModal?.name.trim()) {
+              (event.currentTarget.closest(".modal") ?? document)
+                .querySelectorAll("button.btn-primary")
+                .forEach((b) => (b as HTMLButtonElement).click());
+            }
+          }}
+        />
+      </AppModal>
+      <AppModal
         open={deleteConfirmOpen}
         title="종목 삭제 확인"
         subtitle="선택 종목은 즉시 영구 삭제됩니다."
@@ -1323,12 +1474,20 @@ export function AccountHoldingsDetailPanel({
               onClick={() => void handleConfirmDeleteSelected()}
               disabled={processingId === "__deleting__"}
             >
-              삭제
+              {processingId === "__deleting__" ? (
+                <>
+                  <IconLoader2 size={14} className="me-1" style={{ animation: "spin 1s linear infinite" }} />
+                  삭제 중…
+                </>
+              ) : (
+                "삭제"
+              )}
             </button>
           </>
         )}
       >
         <div className="d-flex flex-column gap-2">
+          {deleteStatus ? <AppLoadingState compact label={deleteStatus} /> : null}
           <div className="fw-semibold">
             {selectedDeletableRows.length === 1
               ? `${selectedDeletableRows[0].name}(${selectedDeletableRows[0].ticker}) 종목을 삭제합니다.`
@@ -1337,6 +1496,9 @@ export function AccountHoldingsDetailPanel({
           <div className="text-secondary small">삭제된 종목은 복구되지 않으며 즉시 제거됩니다.</div>
         </div>
       </AppModal>
+      {/* 본문 — 왼쪽 그리드(고정 폭) + 오른쪽 메모 패널. 좁은 창에서는 그리드가 줄고 가로 스크롤. */}
+      {poolRankError && <div className="alert alert-warning py-1 px-2 mb-0" role="alert">{poolRankError}</div>}
+      <div className="assetsDetailBody">
       <div className="assetsDetailGridWrap">
         <AppAgGrid
           rowData={gridRows}
@@ -1369,7 +1531,7 @@ export function AccountHoldingsDetailPanel({
             rowSelection: {
               mode: "multiRow",
               checkboxes: (params) =>
-                Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS" && params.data.ticker !== CASH_ROW_TICKER),
+                Boolean(params.data && !params.data.is_group && params.data.id !== "__adding__" && params.data.ticker !== "IS" && params.data.ticker !== CASH_ROW_TICKER),
               headerCheckbox: true,
               hideDisabledCheckboxes: true,
               enableClickSelection: false,
@@ -1411,13 +1573,36 @@ export function AccountHoldingsDetailPanel({
             },
             onRowDragEnd: (params) => {
               const orderedTickers: string[] = [];
+              // 그룹 행의 새 앵커 = 그 아래 첫 종목. 맨 끝이면 null.
+              const pendingGroupIds: string[] = [];
+              const nextAnchorById = new Map<string, string | null>();
               params.api.forEachNode((node) => {
+                if (node.data?.is_group) {
+                  pendingGroupIds.push(String(node.data.id));
+                  return;
+                }
                 const ticker = String(node.data?.ticker || "").trim().toUpperCase();
                 if (!ticker || ticker === "IS" || ticker === CASH_ROW_TICKER) {
                   return;
                 }
+                while (pendingGroupIds.length) {
+                  nextAnchorById.set(pendingGroupIds.shift()!, ticker);
+                }
                 orderedTickers.push(ticker);
               });
+              while (pendingGroupIds.length) {
+                nextAnchorById.set(pendingGroupIds.shift()!, null);
+              }
+              if (nextAnchorById.size) {
+                const currentGroups = GROUPS_BY_ACCOUNT.get(summary.account_id) ?? groups;
+                persistGroups(
+                  currentGroups.map((group) =>
+                    nextAnchorById.has(group.id)
+                      ? { ...group, before_ticker: nextAnchorById.get(group.id) ?? null }
+                      : group,
+                  ),
+                );
+              }
               if (!orderedTickers.length) {
                 return;
               }
@@ -1434,17 +1619,41 @@ export function AccountHoldingsDetailPanel({
             },
             onGridReady: (params) => {
               gridApiRef.current = params.api;
+              const savedSort = SORT_STATE_BY_ACCOUNT.get(summary.account_id);
+              if (savedSort?.length) {
+                params.api.applyColumnState({ state: savedSort, defaultState: { sort: null } });
+              }
+            },
+            onSortChanged: (params) => {
+              const sorted = params.api.getColumnState().filter((column) => column.sort != null);
+              SORT_STATE_BY_ACCOUNT.set(summary.account_id, sorted);
+              // 정렬 중에는 그룹 행을 숨긴다(순서 기반 표시라 정렬과 공존 불가).
+              setSortActive(sorted.length > 0);
             },
             getRowId: (params) => String(params.data.id),
             rowClassRules: {
               assetsAddingRow: (params) => params.data?.id === "__adding__",
               assetsEditingRow: (params) => Boolean(params.data?.id && params.data.id === editingRowId),
+              assetsGroupRow: (params) => Boolean(params.data?.is_group),
             },
           }}
         />
       </div>
 
+      {/* 경계선 — 드래그로 메모 폭 수동 조절, 더블클릭이면 자동(남는 폭)으로 복귀. */}
+      <div
+        className="assetsDetailSplitter"
+        role="separator"
+        aria-label="메모 폭 조절 (더블클릭: 자동)"
+        title="드래그: 메모 폭 조절 · 더블클릭: 자동"
+        onMouseDown={handleMemoDividerMouseDown}
+        onDoubleClick={resetMemoWidth}
+      />
+      {/* 계좌 메모 — 오른쪽 세로 패널(같은 /api/note, 데이터 공유). 남는 폭 자동, 최소 300px. */}
+      <div className="assetsDetailMemoPane" style={memoWidth !== null ? { flex: `0 0 ${memoWidth}px`, width: memoWidth } : undefined}>
+        <AccountMemoSection accountId={summary.account_id} variant="side" />
+      </div>
+      </div>
     </div>
   );
 }
-

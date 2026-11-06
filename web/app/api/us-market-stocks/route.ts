@@ -34,6 +34,7 @@ type UsMarketStocksResponse = {
     return_12m_base_price: number | null;
     return_12m_pct: number | null;
     mdd_12m_pct: number | null;
+    sortino_12m: number | null;
   }>;
 };
 

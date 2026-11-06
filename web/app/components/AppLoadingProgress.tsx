@@ -61,15 +61,25 @@ const barStyle: React.CSSProperties = {
 
 export function AppLoadingProgress({ title, progress, fallbackMessage }: AppLoadingProgressProps) {
   // 표시는 항상 정수 % — 램프가 소수로 올라와도(튜닝처럼 느린 램프) 화면은 같은 형식을 쓴다.
-  const percent = Math.round(progress?.percent ?? 0);
+  const percent = Math.max(0, Math.min(100, Math.round(progress?.percent ?? 0)));
+  const message = progress?.message ?? fallbackMessage ?? "";
   return (
     <div style={boxStyle}>
       <div style={textRowStyle}>
         <span>{title}</span>
         <strong style={{ color: "var(--text-strong, #0f172a)", fontSize: "var(--fs-base)" }}>{percent}%</strong>
       </div>
-      <div style={barStyle} aria-hidden="true">
+      <div
+        style={barStyle}
+        role="progressbar"
+        aria-label={title}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent}
+        aria-valuetext={message || `${percent}%`}
+      >
         <div
+          aria-hidden="true"
           style={{
             height: "100%",
             borderRadius: "inherit",
@@ -79,7 +89,7 @@ export function AppLoadingProgress({ title, progress, fallbackMessage }: AppLoad
           }}
         />
       </div>
-      <small style={{ color: "#64748b", fontWeight: 600 }}>{progress?.message ?? fallbackMessage ?? ""}</small>
+      <small style={{ color: "#64748b", fontWeight: 600 }}>{message}</small>
     </div>
   );
 }

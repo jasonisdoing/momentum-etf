@@ -94,6 +94,7 @@ def calculate_signed_percentile_score(data: pd.Series | pd.DataFrame) -> pd.Seri
 def compute_trend_frame(
     close_frame: pd.DataFrame,
     ma_days: int,
+    ma_type: str,
 ) -> pd.DataFrame:
     """[일자 × 티커] 구조의 종가 프레임으로부터 MA 대비 트렌드(%) 프레임을 계산한다.
 
@@ -108,7 +109,7 @@ def compute_trend_frame(
         if series.empty:
             ma_cols[ticker] = pd.Series(np.nan, index=close_frame.index, dtype=float)
             continue
-        ma_series = calculate_moving_average(series, days)
+        ma_series = calculate_moving_average(series, days, ma_type=ma_type)
         ma_cols[ticker] = ma_series.reindex(close_frame.index)
     ma_frame = pd.DataFrame(ma_cols, index=close_frame.index)
     trend = pd.DataFrame(
@@ -118,7 +119,7 @@ def compute_trend_frame(
     return trend
 
 
-def compute_ma_disparity(close_series: pd.Series, ma_days: int) -> float | None:
+def compute_ma_disparity(close_series: pd.Series, ma_days: int, ma_type: str) -> float | None:
     """종목 하나의 **최신 이격률(%)** — 종가가 이동평균보다 몇 % 위/아래인가.
 
     `compute_trend_frame` 의 1종목 버전이다. 순위 화면(프레임 단위)과 보유종목 알림(종목
@@ -131,17 +132,24 @@ def compute_ma_disparity(close_series: pd.Series, ma_days: int) -> float | None:
     series = close_series.dropna()
     if series.empty:
         return None
-    ma_series = calculate_moving_average(series, int(ma_days))
+    ma_series = calculate_moving_average(series, int(ma_days), ma_type=ma_type)
     score = calculate_maps_score(series, ma_series)
     if score.empty or pd.isna(score.iloc[-1]):
         return None
     return float(score.iloc[-1])
 
 
+def _numeric(values: Any) -> Any:
+    """Series·DataFrame 을 숫자로 — 표(날짜 × 종목) 단위 판정에서 열마다 변환한다."""
+    if isinstance(values, pd.DataFrame):
+        return values.apply(pd.to_numeric, errors="coerce")
+    return pd.to_numeric(values, errors="coerce")
+
+
 def rank_score(long_disparity_pct: Any, short_disparity_pct: Any = None) -> Any:
     """**순위 점수** — 종목을 줄 세우는 단일 기준. 정의는 **장기 이격률**이다.
 
-    순위 화면(`/pools-rank`)의 정렬·추천(✅)과 모멘텀 전략(`/strategy-momentum`)의 선정이
+    순위 화면(`/pools-rank`)의 정렬과 모멘텀 전략(`/strategy-momentum`)의 선정이
     이 함수 하나만 쓴다. 예전에는 두 곳이 각자 계산해서, 정의를 바꾸려면 양쪽을 따로
     고쳐야 했고 한쪽만 고치면 두 화면의 순서가 조용히 갈렸다.
 
@@ -156,15 +164,62 @@ def rank_score(long_disparity_pct: Any, short_disparity_pct: Any = None) -> Any:
     값이 없으면 None/NaN 을 그대로 돌려준다(임의 값으로 채우지 않는다).
     """
     del short_disparity_pct  # 순위는 장기만 본다 (이탈 판정은 hold_eligible 이 따로 한다)
-    if isinstance(long_disparity_pct, pd.Series):
-        return pd.to_numeric(long_disparity_pct, errors="coerce")
+    if isinstance(long_disparity_pct, (pd.Series, pd.DataFrame)):
+        return _numeric(long_disparity_pct)
     if long_disparity_pct is None or pd.isna(long_disparity_pct):
         return None
     return float(long_disparity_pct)
 
 
+def rank_numbers(scores: Mapping[str, Any]) -> dict[str, int]:
+    """**순위 번호** {티커: 번호} — 순위 점수 큰 순, 동점은 티커 순. 점수가 없으면 번호도 없다.
+
+    순위 화면(`/pools-rank`)과 모멘텀 전략(`/strategy-momentum`)이 같은 번호를 쓰도록 여기서만
+    매긴다. 예전에는 순위 화면은 표의 모든 행에, 모멘텀은 진입 자격 종목에만 번호를 줘서 같은
+    종목이 한쪽은 7위, 한쪽은 3위로 보이고 보유 종목은 번호가 비었다.
+
+    번호는 **종목풀의 후보 종목 전부**(진입 자격과 무관)에 준다. 호출부는 순위 제외 종목
+    (`exclude_from_ranking`)을 넘기지 않는다 — 후보가 아니고 모멘텀에는 없는 행이다. 벤치마크는 풀 종목이라 포함한다.
+    점수는 반올림 전 값을 넘긴다(반올림 값으로 줄 세우면 동점 처리가 화면마다 갈린다).
+    """
+    valid = [
+        (str(ticker), float(score)) for ticker, score in scores.items() if score is not None and not pd.isna(score)
+    ]
+    valid.sort(key=lambda item: (-item[1], item[0]))
+    return {ticker: number for number, (ticker, _) in enumerate(valid, start=1)}
+
+
+def is_new_listing(close_series: pd.Series, *, window_months: int = METRIC_WINDOW_MONTHS) -> bool:
+    """신규상장(🆕) — 첫 봉이 기준 창(기본 12개월) 시작보다 뒤(상장 기간 < 창).
+
+    순위 화면의 `is_partial`(perf_metrics.single_stock_backtest_stats)과 **같은 수식**이다.
+    모든 화면의 🆕 배지가 이 판정 하나를 쓴다 — 화면마다 기준이 갈리면 같은 종목에
+    다른 배지가 붙는다. 시리즈가 비면 판정 불가로 False(배지를 추정해 붙이지 않는다).
+    """
+    series = pd.to_numeric(close_series, errors="coerce").dropna()
+    if series.empty:
+        return False
+    return bool(series.index[0] > series.index[-1] - pd.DateOffset(months=int(window_months)))
+
+
+def listing_months(close_series: pd.Series) -> int | None:
+    """상장 후 경과 개월 수(내림) — 🆕 배지의 「🆕(N개월)」 표기용. 시리즈가 비면 None.
+
+    첫 봉과 마지막 봉 사이의 만(滿) 개월 수다. `is_new_listing` 과 같은 시리즈로 계산해야
+    배지 유무와 개월 수가 어긋나지 않는다.
+    """
+    series = pd.to_numeric(close_series, errors="coerce").dropna()
+    if series.empty:
+        return None
+    first, last = series.index[0], series.index[-1]
+    months = (last.year - first.year) * 12 + (last.month - first.month)
+    if last.day < first.day:
+        months -= 1
+    return max(0, int(months))
+
+
 def drawdown_from_high_pct(
-    close_series: pd.Series,
+    close_series: pd.Series | None,
     current_price: float | None = None,
     *,
     window_months: int = METRIC_WINDOW_MONTHS,
@@ -176,7 +231,10 @@ def drawdown_from_high_pct(
     창 길이가 갈려 같은 종목에 화면마다 다른 값이 붙는다.
 
     ``current_price`` 를 주면 그 값으로 비교한다(실시간 반영가). 없으면 마지막 종가.
+    확정 종가가 없는 종목(상장 첫날 장중)은 비교할 고점이 없어 None 이다.
     """
+    if close_series is None:
+        return None
     series = pd.to_numeric(close_series, errors="coerce").dropna()
     if series.empty:
         return None
@@ -195,17 +253,18 @@ def hold_eligible(long_disparity_pct: Any, short_disparity_pct: Any) -> Any:
 
     장기 이평선은 종목 선택, 단기 이평선은 손절/익절을 담당한다. **둘 중 하나라도
     이탈하면 이탈**이다 — 장기 추세가 죽었거나 단기 추세가 꺾이면 보유하지 않는다.
-    순위 화면의 추천(✅)·모멘텀 선정·백테스트가 같은 규칙을 쓰도록 여기서만 정의한다.
+    모멘텀 선정·백테스트가 같은 규칙을 쓰도록 여기서만 정의한다.
 
     순위(`rank_score`)는 장기만 본다 — 이 함수와 역할이 다르다.
 
     스칼라와 Series 둘 다 받는다 — `rank_score` 와 같다. 종목풀 조건(제외 종목)은
     호출부에서 따로 건다.
     """
-    if isinstance(long_disparity_pct, pd.Series) or isinstance(short_disparity_pct, pd.Series):
-        long_series = pd.to_numeric(long_disparity_pct, errors="coerce")
-        short_series = pd.to_numeric(short_disparity_pct, errors="coerce")
-        return long_series.notna() & (long_series > 0) & short_series.notna() & (short_series >= 0)
+    frames = (pd.Series, pd.DataFrame)
+    if isinstance(long_disparity_pct, frames) or isinstance(short_disparity_pct, frames):
+        long_values = _numeric(long_disparity_pct)
+        short_values = _numeric(short_disparity_pct)
+        return long_values.notna() & (long_values > 0) & short_values.notna() & (short_values >= 0)
     if long_disparity_pct is None or short_disparity_pct is None:
         return False
     if pd.isna(long_disparity_pct) or pd.isna(short_disparity_pct):
@@ -247,9 +306,10 @@ def select_holdings(
 def compute_rule_percentile_frame(
     close_frame: pd.DataFrame,
     ma_days: int,
+    ma_type: str,
 ) -> pd.DataFrame:
     """단일 MA 규칙에 대한 signed-percentile 점수 프레임을 계산한다."""
-    trend = compute_trend_frame(close_frame, ma_days)
+    trend = compute_trend_frame(close_frame, ma_days, ma_type)
     return calculate_signed_percentile_score(trend)
 
 
@@ -290,6 +350,7 @@ def combine_rule_percentiles(
 def build_composite_rank_scores(
     close_frame: pd.DataFrame,
     ma_rules: list[dict[str, Any]],
+    ma_type: str,
 ) -> tuple[pd.DataFrame, dict[int, pd.DataFrame], dict[int, pd.DataFrame]]:
     """랭킹/백테스트 공통: MA 규칙들을 받아 ``(composite, trend_by_order, percentile_by_order)`` 반환.
 
@@ -301,7 +362,7 @@ def build_composite_rank_scores(
     percentile_by_order: dict[int, pd.DataFrame] = {}
     for rule in ma_rules:
         order = int(rule["order"])
-        trend = compute_trend_frame(close_frame, _resolve_rule_ma_days(rule))
+        trend = compute_trend_frame(close_frame, _resolve_rule_ma_days(rule), ma_type)
         trend_by_order[order] = trend
         percentile_by_order[order] = calculate_signed_percentile_score(trend)
 
@@ -314,6 +375,7 @@ def build_composite_rank_scores(
 
 
 __all__ = [
+    "rank_numbers",
     "calculate_maps_score",
     "calculate_signed_percentile_score",
     "compute_trend_frame",

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ColDef } from "ag-grid-community";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { formatKstDateTime } from "@/lib/datetime";
 import { formatSignedPct, signColor } from "@/lib/grid-cells";
@@ -35,8 +35,9 @@ const compactLabelStyle: React.CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-// 슬리피지 편도(%). 종목풀 설정과 동일한 0.05~0.5 (0.05 단위).
-const SLIPPAGE_OPTIONS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5] as const;
+// 표준 슬리피지 선택지(config.SLIPPAGE_PCT_OPTIONS) — 서버 constraints 가 단일 소스,
+// 아래는 응답을 아직 못 받았을 때의 표시용 폴백이다(종목풀 설정과 같은 방식).
+const DEFAULT_SLIPPAGE_PCT_OPTIONS = [0.2, 0.3, 0.4, 0.5, 1.0];
 const leverageTuneGridTheme = createAppGridTheme();
 
 type Market = "kor" | "us";
@@ -60,7 +61,16 @@ type MaConfig = {
     peak_min: number;
     peak_max: number;
     peak_step: number;
+    /** 튜닝 결과 표의 정렬 기준 — 저장돼 다음에도 유지된다. */
+    sort_by?: TuneSortBy;
   };
+};
+
+type TuneSortBy = "sortino" | "cagr";
+
+/** 서버가 내려주는 표준 선택지(config.py) — 슬리피지는 종목풀 설정과 같은 목록 하나만 쓴다. */
+type LeverageConstraints = {
+  slippage_pct_options?: number[];
 };
 
 type TuneRow = {
@@ -88,7 +98,7 @@ type TuneBenchmarkRow = {
 };
 
 // 튜닝 후보(TuneRow)와 벤치마크(지수/레버리지 보유)를 한 그리드에서 렌더하기 위한 통합 행.
-// 벤치마크 행은 label 을 채우고 이동선/고점대비/보유일은 비운다(고정행으로 상단에 표시).
+// 벤치마크 행은 label 을 채우고 이평선/고점대비/보유일은 비운다(고정행으로 상단에 표시).
 type LeverageTuneGridRow = {
   label?: string;
   isBenchmark?: boolean;
@@ -105,6 +115,8 @@ type LeverageTuneGridRow = {
 
 type MaView = {
   market: Market;
+  /** 저장된 설정의 지수·레버리지·방어 — 판정 문구는 편집 중인 초안이 아니라 이 값을 쓴다. */
+  assets: Record<"index" | "leverage" | "defense", AssetRef>;
   ma_days: number;
   ma_type: string;
   peak_drawdown_pct: number;
@@ -156,22 +168,16 @@ type TuneResult = {
 
 const MARKET_LABEL: Record<Market, string> = { kor: "🇰🇷 한국", us: "🇺🇸 미국" };
 
-// 지수는 시장별로 고정: 한국=코스피(^KS11), 미국=나스닥100(^NDX). 사용자가 편집하지 않는다.
-const FIXED_INDEX: Record<Market, AssetRef> = {
-  kor: { ticker: "^KS11", name: "코스피" },
-  us: { ticker: "^NDX", name: "나스닥 100" },
-};
-
 function blankConfig(market: Market): MaConfig {
   return {
     strategy: "ma_cross",
     market,
-    index: FIXED_INDEX[market],
+    index: { ticker: "", name: "" },
     leverage: { ticker: "", name: "" },
     defense: { ticker: "CASH", name: "현금" },
     ma_days: 120,
     peak_drawdown_pct: 7,
-    slippage: 0.1,
+    slippage: DEFAULT_SLIPPAGE_PCT_OPTIONS[0],
   };
 }
 
@@ -185,16 +191,10 @@ function fmtWholePct(v: number | string | null | undefined): string {
   return Number.isFinite(n) ? `${Math.round(n)}%` : "";
 }
 
-function fmtIndexPoint(v: number | null | undefined): string {
+/** 지수 수준 — 지수(포인트)든 추종 ETF(가격)든 단위 없이 숫자만 쓴다. */
+function fmtIndexLevel(v: number | null | undefined): string {
   if (v == null) return "-";
-  return `${v.toLocaleString("ko-KR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}pt`;
-}
-
-function indexPointLabel(market: Market): string {
-  return market === "us" ? "나스닥 100" : "코스피";
+  return v.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
 }
 
 function buildNumberRange(min: number, max: number, step: number, decimals = 0): number[] {
@@ -223,7 +223,7 @@ export function LeverageSettingsClient() {
   const [saving, setSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  // 튜닝(온디맨드): 사용자가 기간·이동선 범위를 지정하고 버튼으로 실행.
+  // 튜닝(온디맨드): 사용자가 기간·이평선 범위를 지정하고 버튼으로 실행.
   const [tuneMonths, setTuneMonths] = useState(36);
   const [tuneMin, setTuneMin] = useState(20);
   const [tuneMax, setTuneMax] = useState(120);
@@ -231,6 +231,8 @@ export function LeverageSettingsClient() {
   const [peakMin, setPeakMin] = useState(1);
   const [peakMax, setPeakMax] = useState(10);
   const [peakStep, setPeakStep] = useState(1);
+  const [tuneSortBy, setTuneSortBy] = useState<TuneSortBy>("sortino");
+  const [constraints, setConstraints] = useState<LeverageConstraints | null>(null);
   const [tuneResult, setTuneResult] = useState<TuneResult | null>(null);
   const [tuning, setTuning] = useState(false);
   const [tuneError, setTuneError] = useState<string | null>(null);
@@ -241,30 +243,38 @@ export function LeverageSettingsClient() {
   const profile = `ma_cross_${market}`;
   const maOptions = useMemo(() => buildNumberRange(tuneMin, tuneMax, tuneStep), [tuneMin, tuneMax, tuneStep]);
   const peakDrawdownOptions = useMemo(() => buildNumberRange(peakMin, peakMax, peakStep, 1), [peakMin, peakMax, peakStep]);
+  const slippageOptions = constraints?.slippage_pct_options?.length
+    ? constraints.slippage_pct_options
+    : DEFAULT_SLIPPAGE_PCT_OPTIONS;
 
   const loadConfig = useCallback(async (m: Market) => {
     setLoadingConfig(true);
     setConfigMissing(false);
     try {
       const resp = await fetch(`/api/leverage-config?profile=ma_cross_${m}`, { cache: "no-store" });
-      const payload = (await resp.json()) as { config?: Partial<MaConfig>; error?: string };
-      if (!resp.ok || payload.error || !payload.config?.index) {
+      const payload = (await resp.json()) as {
+        config?: Partial<MaConfig>;
+        constraints?: LeverageConstraints;
+        error?: string;
+      };
+      if (payload.constraints) setConstraints(payload.constraints);
+      const c = payload.config;
+      if (!resp.ok || payload.error || !c?.index) {
         // 아직 설정이 없는 시장 — 빈 폼으로 새로 작성 (임의 계산 기본값 아님, 사용자 입력 대기)
         setConfig(blankConfig(m));
         setConfigMissing(true);
         return;
       }
-      const c = payload.config;
       const tuning = c.tuning;
       setConfig({
         strategy: "ma_cross",
         market: m,
-        index: FIXED_INDEX[m],
+        index: c.index,
         leverage: c.leverage ?? { ticker: "", name: "" },
         defense: c.defense ?? { ticker: "CASH", name: "현금" },
         ma_days: c.ma_days ?? 120,
         peak_drawdown_pct: Number(c.peak_drawdown_pct ?? tuning?.peak_min ?? 7),
-        slippage: c.slippage ?? 0.1,
+        slippage: c.slippage ?? DEFAULT_SLIPPAGE_PCT_OPTIONS[0],
         slack_enabled: Boolean(c.slack_enabled),
         tuning: tuning && typeof tuning === "object" ? {
           months: Number(tuning.months),
@@ -274,6 +284,7 @@ export function LeverageSettingsClient() {
           peak_min: Number(tuning.peak_min ?? 1),
           peak_max: Number(tuning.peak_max ?? 10),
           peak_step: Number(tuning.peak_step ?? 1),
+          sort_by: tuning.sort_by === "cagr" ? "cagr" : "sortino",
         } : undefined,
       });
       setTuneMonths(Number(tuning?.months ?? 36));
@@ -283,6 +294,7 @@ export function LeverageSettingsClient() {
       setPeakMin(Number(tuning?.peak_min ?? 1));
       setPeakMax(Number(tuning?.peak_max ?? 10));
       setPeakStep(Number(tuning?.peak_step ?? 1));
+      setTuneSortBy(tuning?.sort_by === "cagr" ? "cagr" : "sortino");
       setSlackEnabled(Boolean(c.slack_enabled));
     } catch {
       setConfig(blankConfig(m));
@@ -311,7 +323,7 @@ export function LeverageSettingsClient() {
 
   const runTune = useCallback(async () => {
     if (tuneMin < 2 || tuneStep < 1 || tuneMax < tuneMin) {
-      const msg = "이동선 범위를 확인하세요 (min≥2, step≥1, max≥min).";
+      const msg = "이평선 범위를 확인하세요 (min≥2, step≥1, max≥min).";
       setTuneError(msg);
       toast.error(msg);
       return;
@@ -327,18 +339,18 @@ export function LeverageSettingsClient() {
     setTuneProgress({ percent: 15, message: "시세 데이터 조회 중" });
     // 단일 요청이라 실제 진행률은 없지만, 반응이 없어 보이지 않게 완만히 채운다(compare 방식).
     const timer = window.setInterval(() => {
-      setTuneProgress((prev) => (prev ? { ...prev, percent: Math.min(90, prev.percent + 7), message: "이동선별 백테스트 계산 중" } : prev));
+      setTuneProgress((prev) => (prev ? { ...prev, percent: Math.min(90, prev.percent + 7), message: "이평선별 백테스트 계산 중" } : prev));
     }, 400);
     try {
       const qs = `market=${market}&months=${tuneMonths}&ma_min=${tuneMin}&ma_max=${tuneMax}&ma_step=${tuneStep}&peak_min=${peakMin}&peak_max=${peakMax}&peak_step=${peakStep}`;
       const resp = await fetch(`/api/leverage-ma/tune?${qs}`, { cache: "no-store" });
       const payload = (await resp.json()) as TuneResult;
-      if (!resp.ok || payload.error) throw new Error(payload.error ?? "이동선 튜닝에 실패했습니다.");
+      if (!resp.ok || payload.error) throw new Error(payload.error ?? "이평선 튜닝에 실패했습니다.");
       setTuneProgress({ percent: 100, message: "결과 반영 중" });
       setTuneResult(payload);
       if (!payload.rows?.length) setTuneError("결과가 없습니다. 설정을 저장했는지, 기간/범위가 데이터에 맞는지 확인하세요.");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "이동선 튜닝에 실패했습니다.";
+      const msg = err instanceof Error ? err.message : "이평선 튜닝에 실패했습니다.";
       setTuneError(msg);
       toast.error(msg);
     } finally {
@@ -359,6 +371,19 @@ export function LeverageSettingsClient() {
     setTuneError(null);
   }, [market, loadConfig, loadView]);
 
+  // 화면 진입·시장 전환 시 저장된 범위로 튜닝을 자동 실행한다(버튼을 누른 것과 같다).
+  // 설정이 아직 없는 시장(configMissing)은 돌릴 범위가 없으므로 건너뛴다.
+  const autoTunedMarket = useRef<Market | null>(null);
+  useEffect(() => {
+    if (loadingConfig || !config || configMissing) return;
+    // 시장 전환 직후에는 이전 시장의 설정·기간이 아직 상태에 남아 있다 —
+    // 로드가 끝나 config 가 현재 탭의 것일 때만 그 값으로 튜닝을 돌린다.
+    if (config.market !== market) return;
+    if (autoTunedMarket.current === market) return;
+    autoTunedMarket.current = market;
+    void runTune();
+  }, [loadingConfig, config, configMissing, market, runTune]);
+
   const setAsset = (key: "index" | "leverage" | "defense", field: "ticker" | "name", value: string) =>
     setConfig((c) => (c ? { ...c, [key]: { ...c[key], [field]: value } } : c));
 
@@ -372,13 +397,15 @@ export function LeverageSettingsClient() {
     }
     try {
       const resp = await fetch(`/api/leverage-config/resolve?ticker=${encodeURIComponent(ticker)}`);
-      const data = (await resp.json()) as { name?: string; error?: string };
-      if (!resp.ok || data.error || !data.name) {
+      const data = (await resp.json()) as { ticker?: string; name?: string; error?: string };
+      if (!resp.ok || data.error || !data.name || !data.ticker) {
         toast.error(data.error ?? "존재하지 않는 티커입니다.");
         return;
       }
+      // 서버가 정규화한 티커로 저장한다(^ks11 → ^KS11).
+      setAsset(key, "ticker", data.ticker);
       setAsset(key, "name", data.name);
-      toast.success(`${data.name}(${ticker}) 확인 완료`);
+      toast.success(`${data.name}(${data.ticker}) 확인 완료`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "티커 조회 중 오류가 발생했습니다.");
     }
@@ -402,7 +429,7 @@ export function LeverageSettingsClient() {
       return;
     }
     if (!maOptions.includes(config.ma_days)) {
-      toast.error("이동선은 튜닝 설정의 이동선 범위 안에서 선택하세요.");
+      toast.error("이평선은 튜닝 설정의 이평선 범위 안에서 선택하세요.");
       return;
     }
     if (!Number.isFinite(config.peak_drawdown_pct) || config.peak_drawdown_pct < 0) {
@@ -426,6 +453,7 @@ export function LeverageSettingsClient() {
           peak_min: peakMin,
           peak_max: peakMax,
           peak_step: peakStep,
+          sort_by: tuneSortBy,
         },
       };
       const resp = await fetch(`/api/leverage-config?profile=${profile}`, {
@@ -489,16 +517,17 @@ export function LeverageSettingsClient() {
   };
 
   const columnDefs = useMemo<ColDef<LeverageTuneGridRow>[]>(() => [
-    { headerName: "이동선", field: "ma_days", width: 120, valueGetter: (p) => p.data?.label ?? p.data?.ma_days },
+    { headerName: "이평선", field: "ma_days", width: 120, valueGetter: (p) => p.data?.label ?? p.data?.ma_days },
     { headerName: "고점대비", field: "peak_drawdown_pct", width: 100, valueFormatter: (p) => fmtWholePct(p.value) },
     { headerName: "누적수익", field: "cumulative_pct", width: 104, valueFormatter: (p) => fmtPct(p.value) },
-    { headerName: "CAGR", field: "cagr_pct", width: 150, sort: "desc", sortIndex: 1, valueFormatter: (p) => fmtPct(p.value) },
+    // 정렬 기준(저장값) — 고른 지표가 1순위, 다른 지표가 2순위(둘 다 내림차순).
+    { headerName: "CAGR", field: "cagr_pct", width: 150, sort: "desc", sortIndex: tuneSortBy === "cagr" ? 0 : 1, valueFormatter: (p) => fmtPct(p.value) },
     { headerName: "MDD", field: "mdd_pct", width: 82, valueFormatter: (p) => fmtPct(p.value) },
-    { headerName: "소르티노", field: "sortino", width: 150, sort: "desc", sortIndex: 0, valueFormatter: (p) => (p.value == null ? "-" : p.value.toFixed(2)) },
+    { headerName: "소르티노", field: "sortino", width: 150, sort: "desc", sortIndex: tuneSortBy === "sortino" ? 0 : 1, valueFormatter: (p) => (p.value == null ? "-" : p.value.toFixed(2)) },
     { headerName: "전환수", field: "switches", width: 76 },
     { headerName: "거래일", field: "days", width: 76 },
     { headerName: "보유일", field: "leverage_days", width: 76, valueFormatter: (p) => (p.value == null ? "" : String(p.value)) },
-  ], []);
+  ], [tuneSortBy]);
 
   // 벤치마크(지수/레버리지 보유)를 후보 행과 함께 섞어 현재 정렬 기준에 맞는 위치에 넣는다.
   const gridRows = useMemo<LeverageTuneGridRow[]>(() => {
@@ -613,29 +642,21 @@ export function LeverageSettingsClient() {
               <div className="card-body">
                 <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 800, marginBottom: 4 }}>전략 설정</h2>
                 <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", lineHeight: 1.45, marginBottom: 8 }}>
-                  지수 종가가 이동선 위면 <b>레버리지</b>, 아래면 <b>방어(현금/종목)</b>를 보유합니다. {MARKET_LABEL[market]} 시장.
+                  지수 종가가 이평선 위면 <b>레버리지</b>, 아래면 <b>방어(현금/종목)</b>를 보유합니다. {MARKET_LABEL[market]} 시장.
                 </p>
                 {configMissing && <div className="alert alert-warning py-2" style={{ fontSize: "var(--fs-sm)" }}>이 시장의 설정이 아직 없습니다. 값을 채우고 저장하세요.</div>}
                 {loadingConfig || !config ? (
                   <div style={{ color: "var(--text-muted)", padding: 12 }}>불러오는 중…</div>
                 ) : (
                   <>
-                    <div style={compactRowStyle}>
-                      <span style={compactLabelStyle}>지수</span>
-                      <input
-                        style={{ ...inputStyle, flex: "1 1 0", minWidth: 0, backgroundColor: "#f8fafc", color: "var(--text-muted)", cursor: "not-allowed" }}
-                        value={config.index?.name ? `${config.index.name}(${config.index.ticker})` : ""}
-                        readOnly
-                      />
-                      <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", whiteSpace: "nowrap" }}>고정</span>
-                    </div>
+                    {assetRow("index", "지수", false)}
                     {assetRow("leverage", "레버리지", false)}
                     {assetRow("defense", "방어", true)}
                     <div style={compactRowStyle}>
-                      <span style={compactLabelStyle}>이동선</span>
+                      <span style={compactLabelStyle}>이평선</span>
                       <select style={{ ...inputStyle, width: 96 }} value={config.ma_days} onChange={(e) => setConfig((c) => c && { ...c, ma_days: Number(e.target.value) })}>
-                        {!maOptions.includes(config.ma_days) && <option value={config.ma_days}>{view?.ma_type ?? ""} {config.ma_days}일</option>}
-                        {maOptions.map((n) => <option key={n} value={n}>{view?.ma_type ?? ""} {n}일</option>)}
+                        {!maOptions.includes(config.ma_days) && <option value={config.ma_days}>{config.ma_days}일</option>}
+                        {maOptions.map((n) => <option key={n} value={n}>{n}일</option>)}
                       </select>
                       <span style={{ ...compactLabelStyle, width: "auto", marginLeft: 14 }}>고점대비</span>
                       <select
@@ -650,7 +671,10 @@ export function LeverageSettingsClient() {
                     <div style={compactRowStyle}>
                       <span style={compactLabelStyle}>슬리피지</span>
                       <select style={{ ...inputStyle, width: 88 }} value={config.slippage} onChange={(e) => setConfig((c) => c && { ...c, slippage: Number(e.target.value) })}>
-                        {SLIPPAGE_OPTIONS.map((s) => <option key={s} value={s}>{s.toFixed(2)}%</option>)}
+                        {!slippageOptions.includes(config.slippage) && (
+                          <option value={config.slippage}>{config.slippage.toFixed(2)}%</option>
+                        )}
+                        {slippageOptions.map((s) => <option key={s} value={s}>{s.toFixed(2)}%</option>)}
                       </select>
                     </div>
                   </>
@@ -669,8 +693,19 @@ export function LeverageSettingsClient() {
                     <span className="appLabeledFieldLabel">기간(개월)</span>
                     <MonthsSelect value={tuneMonths} options={MONTH_OPTIONS} onChange={setTuneMonths} />
                   </label>
+                  <label className="appLabeledField" style={{ minWidth: 110, flex: "0 0 auto" }}>
+                    <span className="appLabeledFieldLabel">정렬 기준</span>
+                    <select
+                      className="form-select form-select-sm"
+                      value={tuneSortBy}
+                      onChange={(e) => setTuneSortBy(e.target.value === "cagr" ? "cagr" : "sortino")}
+                    >
+                      <option value="sortino">소르티노</option>
+                      <option value="cagr">CAGR</option>
+                    </select>
+                  </label>
                   <div style={{ display: "flex", gap: 7, alignItems: "flex-end", flexWrap: "wrap" }}>
-                    <span style={{ color: "var(--text-muted)", fontWeight: 700, paddingBottom: 7, fontSize: "var(--fs-sm)" }}>이동선</span>
+                    <span style={{ color: "var(--text-muted)", fontWeight: 700, paddingBottom: 7, fontSize: "var(--fs-sm)" }}>이평선</span>
                     {([["min", tuneMin, setTuneMin], ["max", tuneMax, setTuneMax], ["step", tuneStep, setTuneStep]] as const).map(([lbl, val, setter]) => (
                       <label key={lbl} className="appInlineField" style={{ flex: "0 0 auto" }}>
                         <span className="appInlineFieldLabel">{lbl}</span>
@@ -739,7 +774,7 @@ export function LeverageSettingsClient() {
                       <span style={{ color: "var(--text-muted)", fontWeight: 700 }}>· {rec.target_name}({rec.target_ticker})</span>
                     </div>
                     <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginBottom: 10 }}>
-                      기준일 {view.judgment.as_of} · {view.ma_type} {view.ma_days}일 / 고점대비 한도 {view.judgment.peak_drawdown_limit_pct.toFixed(0)}%
+                      기준일 {view.judgment.as_of} · {view.ma_days}일 / 고점대비 한도 {view.judgment.peak_drawdown_limit_pct.toFixed(0)}%
                     </div>
                     {(() => {
                       const j = view.judgment;
@@ -754,9 +789,9 @@ export function LeverageSettingsClient() {
                             marginBottom: 10,
                           }}
                         >
-                          {isLeverage ? "방어 전환 기준 지수" : "전환 필요 지수"}: {indexPointLabel(view.market)}{" "}
+                          {isLeverage ? "방어 전환 기준 지수" : "전환 필요 지수"}: {view.assets.index.name}{" "}
                           <span style={{ color: isLeverage ? "#2563eb" : "#dc2626" }}>
-                            {fmtIndexPoint(j.required_index_close)} {isLeverage ? "이하" : "이상"} ({fmtPct(requiredMovePct)})
+                            {fmtIndexLevel(j.required_index_close)} {isLeverage ? "이하" : "이상"} ({fmtPct(requiredMovePct)})
                           </span>
                         </div>
                       );
@@ -777,7 +812,7 @@ export function LeverageSettingsClient() {
                         ? `전고점 대비 -${j.peak_drawdown_limit_pct.toFixed(0)}% 아래로 ${fmtPct(peakRecoveryPct)} 하락하기 전까지 레버리지 보유`
                         : `전고점 대비 -${j.peak_drawdown_limit_pct.toFixed(0)}% 이내로 ${fmtPct(peakRecoveryPct)} 회복 필요`;
                       const rows = [
-                        { name: `이격 (${view.ma_days}일 이동평균선)`, needValue: maRecoveryPct, need: fmtPct(maRecoveryPct), base: `${view.ma_days}일 이평선`, ok: gapOk, margin: gapMargin },
+                        { name: `이격 (${view.ma_days}일 이평선)`, needValue: maRecoveryPct, need: fmtPct(maRecoveryPct), base: `${view.ma_days}일 이평선`, ok: gapOk, margin: gapMargin },
                         { name: "고점대비", needValue: peakRecoveryPct, need: fmtPct(peakRecoveryPct), base: `≥ -${j.peak_drawdown_limit_pct.toFixed(0)}%`, ok: peakOk, margin: peakMargin },
                       ];
                       const signedColor = (value: number) => (value > 0 ? "#dc2626" : value < 0 ? "#2563eb" : "var(--text-primary)");
@@ -853,13 +888,13 @@ export function LeverageSettingsClient() {
             <div className="card-body appTableCardBodyFill">
               <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 800, marginBottom: 4 }}>튜닝</h2>
               <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginBottom: 12 }}>
-                기간과 이동선 범위를 지정해 실행하면, 후보 이동선별 성과를 소르티노·CAGR 내림차순으로 보여줍니다.
+                기간과 이평선 범위를 지정해 실행하면, 후보 이평선별 성과를 소르티노·CAGR 내림차순으로 보여줍니다.
                 특정 값만 튀지 않고 넓게 완만하면 강건한 규칙입니다.
               </p>
               {tuning ? (
                 <div className="compareLoading" style={{ marginBottom: 12 }}>
                   <div className="compareLoadingText">
-                    <span>이동선 튜닝 계산 중…</span>
+                    <span>이평선 튜닝 계산 중…</span>
                     <strong>{tuneProgress?.percent ?? 0}%</strong>
                   </div>
                   <div className="compareLoadingBar" aria-hidden="true">
@@ -871,13 +906,15 @@ export function LeverageSettingsClient() {
               {tuneError ? <div className="alert alert-warning py-2" style={{ fontSize: "var(--fs-sm)" }}>{tuneError}</div> : null}
               {tuneResult && !tuneError ? (
                 <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginBottom: 6 }}>
-                  최근 {tuneResult.months}개월 · 이동선 {tuneResult.ma_range.min}~{tuneResult.ma_range.max} (step {tuneResult.ma_range.step})
+                  최근 {tuneResult.months}개월 · 이평선 {tuneResult.ma_range.min}~{tuneResult.ma_range.max} (step {tuneResult.ma_range.step})
                   {" · "}고점대비 {tuneResult.peak_drawdown_range.min}~{tuneResult.peak_drawdown_range.max}% (step {tuneResult.peak_drawdown_range.step}) · 후보 {tuneResult.rows.length}개
                 </div>
               ) : null}
               <AppAgGrid<LeverageTuneGridRow>
+                key={tuneSortBy}
                 rowData={gridRows}
                 columnDefs={columnDefs}
+                rowClassDeps={[config?.ma_days, config?.peak_drawdown_pct, view?.ma_days, view?.peak_drawdown_pct]}
                 loading={tuning}
                 theme={leverageTuneGridTheme}
                 minHeight={0}
@@ -891,7 +928,7 @@ export function LeverageSettingsClient() {
                     currentPeakDrawdownPct != null &&
                     p.data.peak_drawdown_pct != null &&
                     Math.abs(p.data.peak_drawdown_pct - currentPeakDrawdownPct) < 0.0001
-                    ? "appHeldRow"
+                    ? "appCurrentSettingRow"
                     : "";
                 }}
                 getRowId={(p) => (p.data.isBenchmark ? `bm:${p.data.label}` : `${p.data.ma_days}:${p.data.peak_drawdown_pct}`)}

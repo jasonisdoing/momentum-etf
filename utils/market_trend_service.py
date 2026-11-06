@@ -3,9 +3,9 @@
 코스피/코스닥/S&P500/나스닥/나스닥100 의 현재가, 변동률, MA 대비 추세% 를 계산한다.
 가격 소스:
     - 한국 인덱스(KOSPI/KOSDAQ): 네이버 차트 API (yfinance 가 1거래일 지연되는 이슈 회피)
-    - 미국 인덱스(S&P500/나스닥/나스닥100): yfinance
-    - 나스닥 100 선물: 이력은 yfinance(NQ=F), 직전 종가·현재가는 토스(RFU.NQc1, REAL_TIME)
-      — 상단 헤더(/internal/live-24h/nq-future)와 같은 소스라 변동률이 일치한다
+    - 미국 인덱스·선물(S&P500/나스닥/나스닥100/NQ=F): yfinance
+      — 상단 헤더(/internal/live-24h/nq-future)·/live-24h 지표 카드와 같은 야후 소스다.
+        daily 마지막 봉이 지연 누락되면 intraday 1분봉 마감가로 보강한다(_apply_intraday_boost).
 MA 계산은 utils.moving_averages 사용.
 """
 
@@ -13,9 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
@@ -25,11 +23,12 @@ from config import (
     MARKET_TREND_SCORE_ANCHOR_PERCENTILE,
     MARKET_TREND_SCORE_MA_DAYS,
     MARKET_TREND_SUPERTREND_MULTIPLIER,
+    MARKET_TREND_SUPERTREND_MULTIPLIER_POOL,
     MARKET_TREND_SUPERTREND_PERIOD,
     METRIC_WINDOW_MONTHS,
     TRADING_DAYS_PER_MONTH,
 )
-from utils.market_breadth_service import load_adr_for_index
+from utils.market_breadth_service import load_adr_for_index, load_pool_index_series, pool_of_market_key
 from utils.moving_averages import calculate_moving_average
 from utils.yfinance_guard import yfinance_lock
 
@@ -44,12 +43,53 @@ INDICES: list[dict[str, str]] = [
     {"name": "다우존스", "yf_ticker": "^DJI"},
     {"name": "S&P 500", "yf_ticker": "^GSPC"},
     {"name": "나스닥 100", "yf_ticker": "^NDX"},
-    {"name": "나스닥 100 선물", "yf_ticker": "NQ=F"},  # 이력=yfinance, 최신 봉=토스(RFU.NQc1) 보강
     # 원/달러 환율. 지수는 아니지만 같은 추세 판정을 쓴다 — 달러 투자 계좌에서는
     # 환율 상승이 곧 유리한 방향이라 '강세'가 그 계좌 기준으로 맞는 해석이 된다.
     # (원화 자산 기준으로 읽으면 강세 = 원화 약세다.)
     {"name": "미국달러", "yf_ticker": "KRW=X"},
+    {"name": "나스닥 100 선물", "yf_ticker": "NQ=F"},
 ]
+
+
+def pool_index_entries() -> list[dict[str, str]]:
+    """풀 동일가중 합성 지수 목록 — INDICES 뒤에 붙는 동적 항목.
+
+    티커는 시장 폭과 같은 `pool:<풀>` 키를 그대로 쓴다(ADR 이 이미 그 키로 쌓여 있어
+    지수·ADR·차트가 키 하나로 이어진다). 표시 순서는 종목풀 order 순.
+    """
+    from utils.market_breadth_service import pool_market_key
+    from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
+
+    entries: list[dict[str, Any]] = []
+    for pool in list_available_ticker_types():
+        try:
+            settings = get_ticker_type_settings(pool) or {}
+        except Exception:
+            settings = {}
+        entries.append(
+            {
+                "name": str(settings.get("name") or "").strip() or pool,
+                "yf_ticker": pool_market_key(pool),
+                "order": settings.get("order"),
+            }
+        )
+    entries.sort(key=lambda item: (item["order"] is None, item["order"]))
+    return [{"name": item["name"], "yf_ticker": item["yf_ticker"]} for item in entries]
+
+
+def _pool_index_ohlc(pool: str) -> pd.DataFrame | None:
+    """풀 합성 지수의 OHLC 표 — 적립된 동일가중 지수 레벨(종가)뿐이라 O/H/L 도 종가로 둔다.
+
+    시가·고저를 지어내지 않는 대신 슈퍼트렌드의 ATR 이 종가 간 변동만 보게 된다 —
+    합성 지수라 실제 호가가 없으니 이것이 정직한 표현이다.
+    """
+    level = load_pool_index_series(pool)
+    if level.empty:
+        return None
+    return pd.DataFrame(
+        {"Open": level, "High": level, "Low": level, "Close": level, "Volume": float("nan")}, index=level.index
+    )
+
 
 # 네이버 차트 (legacy XML) — 일봉 OHLCV 조회는 공통 헬퍼(utils/naver_chart.py)를 쓴다.
 
@@ -111,63 +151,41 @@ def _fetch_yf_intraday_last_close(yf_ticker: str) -> tuple[pd.Timestamp, float] 
     return pd.Timestamp(close.index[-1]), float(close.iloc[-1])
 
 
-# 토스 실시간 일봉으로 최신 종가를 보강할 심볼 (yfinance 지연 회피 — REAL_TIME 피드)
-_TOSS_DAILY_OVERLAY = {"NQ=F": "RFU.NQc1"}
+def _merge_boosted_close(frame: pd.DataFrame, close_series: pd.Series) -> pd.DataFrame:
+    """보강된 종가를 OHLC 프레임에 반영한다 — 표(`_build_item`)와 차트가 같은 입력을 쓴다.
 
+    예전에는 `reindex(...).ffill()` 이었다. 보강으로 **새로 생긴 날짜**는 고가·저가·시가가
+    비어 있어서, ffill 이 **전일 값을 그 행에 복사**했다. 그 행이 SuperTrend 의 ATR 로
+    들어가 실제로 일어나지 않은 변동폭을 읽었고(전일 고가~저가), 레짐 판정이 그 위에서
+    계산됐다.
 
-def _apply_toss_latest_overlay(close_series: pd.Series, toss_code: str) -> pd.Series | None:
-    """토스 지표 시세로 마지막 두 점(직전 확정 종가 · 현재가)을 맞춘다. 실패 시 None.
-
-    상단 헤더(`/internal/live-24h/nq-future`)와 **같은 소스·같은 기준가**를 쓰기 위한 것이다.
-    토스 mini-chart 는 ``basePrice`` = 직전 확정 세션 종가, ``latestPrice`` = 진행 중 세션의
-    현재가로 준다. 예전에는 토스 '최신 일봉'만 뒤에 붙였는데, 그 일봉이 실제로는 이미 끝난
-    세션이라 그것을 현재가로 오인해 한 세션 건너뛴 변동률(예: +1.7% vs 실제 +0.2%)이 나왔다.
+    새로 생긴 날짜에 우리가 아는 값은 **그 종가 하나**뿐이다. 그래서 고가·저가·시가를
+    그 종가로 둔다 — 없는 범위를 만들지 않고, 그날의 실질 변동폭은
+    `|종가 - 전일 종가|`(ATR 의 tr2·tr3)로 잡힌다. 기존 날짜의 값은 건드리지 않는다.
     """
-    try:
-        from services.toss_market_service import fetch_toss_indicator_prices, fetch_toss_latest_daily_close
-
-        info = fetch_toss_indicator_prices().get(toss_code) or {}
-        latest_price = info.get("latest")
-        base_price = info.get("base")
-        if latest_price is None or base_price is None:
-            return None
-        # 확정 세션의 날짜는 일봉에서 받는다 (mini-chart 는 가격만 준다).
-        base_date = pd.Timestamp(fetch_toss_latest_daily_close(toss_code)[0]).normalize()
-
-        series = close_series.copy()
-        idx = pd.to_datetime(series.index)
-        if idx.tz is not None:
-            idx = idx.tz_localize(None)
-        series.index = idx.normalize()
-
-        # 확정 세션 이후 구간(yfinance 가 진행 중 봉으로 붙여 둔 것)은 토스 값으로 대체한다.
-        series = series[series.index <= base_date]
-        series.loc[base_date] = float(base_price)
-
-        # 진행 중 세션은 KST 오늘로 붙인다 (아직 날짜가 안 넘어갔으면 확정일 다음 날).
-        today_kst = pd.Timestamp(datetime.now(ZoneInfo("Asia/Seoul")).date())
-        series.loc[max(today_kst, base_date + pd.Timedelta(days=1))] = float(latest_price)
-        return series.sort_index()
-    except Exception as exc:
-        logger.warning("토스 최신 시세 보강 실패 (%s): %s", toss_code, exc)
-        return None
+    merged = frame.reindex(close_series.index)
+    merged["Close"] = close_series
+    added = close_series.index.difference(frame.index)
+    for column in ("Open", "High", "Low"):
+        if column in merged.columns and len(added) > 0:
+            merged.loc[added, column] = close_series.loc[added]
+    if "Volume" in merged.columns and len(added) > 0:
+        # 거래량은 알 수 없다 — 0 으로 두고 지어내지 않는다.
+        merged.loc[added, "Volume"] = 0.0
+    return merged
 
 
 def _apply_intraday_boost(close_series: pd.Series | None, yf_ticker: str) -> pd.Series | None:
     """미국 인덱스 daily 마지막 종가가 Yahoo 갱신 지연으로 누락된 경우 최신 종가를 보강한다.
 
-    나스닥 100 선물 등 토스 REAL_TIME 심볼은 토스 기준가·현재가로 마지막 두 점을 맞춰
-    상단 헤더와 변동률이 일치하게 하고, 그 외/토스 실패 시엔 기존 Yahoo intraday 1분봉
-    마감가를 덧붙인다. 표(_build_item)와 차트(compute_index_history)가 동일한 최신 종가를
-    쓰도록 공통 사용한다.
+    Yahoo intraday 1분봉 마감가를 덧붙인다. 표(_build_item)와 차트(compute_index_history)가
+    동일한 최신 종가를 쓰도록 공통 사용한다.
     """
     if close_series is None or close_series.empty:
         return close_series
-    toss_code = _TOSS_DAILY_OVERLAY.get(yf_ticker)
-    if toss_code:
-        boosted = _apply_toss_latest_overlay(close_series, toss_code)
-        if boosted is not None:
-            return boosted
+    # 풀 합성 지수는 외부 시세가 없다 — 적립된 레벨이 전부라 보강할 것이 없다.
+    if pool_of_market_key(yf_ticker) is not None:
+        return close_series
     intraday = _fetch_yf_intraday_last_close(yf_ticker)
     if intraday is None:
         return close_series
@@ -235,10 +253,18 @@ def compute_market_trend() -> dict[str, Any]:
             kor_ohlc_by_ticker[idx["yf_ticker"]] = ohlc
 
     items: list[dict[str, Any]] = []
-    for idx in INDICES:
+    # 풀 합성 지수 — 적립된 지수 레벨(DB)만 읽으므로 외부 조회가 없다. 지수들 뒤에 붙인다.
+    pool_entries = pool_index_entries()
+    for entry in pool_entries:
+        pool = pool_of_market_key(entry["yf_ticker"])
+        ohlc = _pool_index_ohlc(pool) if pool else None
+        if ohlc is not None and not ohlc.empty:
+            kor_ohlc_by_ticker[entry["yf_ticker"]] = ohlc
+
+    for idx in [*INDICES, *pool_entries]:
         kor_ohlc = kor_ohlc_by_ticker.get(idx["yf_ticker"])
         item = _build_item(df, idx["yf_ticker"], idx["name"], ma_days, kor_ohlc)
-        # ADR 단계·지속일수 — 구성종목 데이터가 있는 한국 지수만 값이 붙는다.
+        # ADR 단계·지속일수 — 구성종목 데이터가 있는 한국 지수와 풀 합성 지수만 값이 붙는다.
         adr = load_adr_for_index(idx["yf_ticker"])
         item["adr"] = adr["latest_adr"] if adr else None
         item["adr_level"] = adr["level"] if adr else None
@@ -284,9 +310,8 @@ def _build_item(
         "days_since_last_up": None,
         # 현재 레짐이 하락일 때: 마지막 중립 구간 종료 후 경과 거래일 (12개월 내 중립 없으면 None)
         "days_since_last_neutral": None,
-        # 현재 레짐 2일차 시가 대비 등락률 — 표의 "상승 9일째(+16.3%)".
-        # 1일차는 신호 확정 전이라 뺀다. 구간이 하루뿐이면 아직 잡을 구간이 없어 None.
-        "regime_change_pct": None,
+        # 추세가 바뀌는 SuperTrend 가격선까지 남은 등락률 — 종가가 이만큼 움직이면 다음 전환이다.
+        "switch_pct": None,
     }
     # 한국 인덱스는 네이버에서 받은 OHLC 의 종가를 우선 사용한다.
     full_df = None
@@ -313,10 +338,8 @@ def _build_item(
         # 미국 인덱스 daily 마지막 종가가 지연 누락되면 intraday 마감가로 보강 (한국=네이버 제외).
         close_series = _apply_intraday_boost(close_series, yf_ticker)
 
-        # 보정된 close_series 를 df 에 다시 반영 (인덱스가 확장되었을 경우 대비 reindex 적용)
-        full_df = full_df.reindex(close_series.index)
-        full_df["Close"] = close_series
-        full_df = full_df.ffill()
+        # 보정된 close_series 를 df 에 다시 반영 — 새로 생긴 날짜의 OHLC 처리는 공용 함수가 한다.
+        full_df = _merge_boosted_close(full_df, close_series)
 
     if close_series is None or close_series.empty or len(close_series) < 2:
         return base
@@ -354,7 +377,10 @@ def _build_item(
         st_df = _calculate_supertrend(full_df, period=st_period, multiplier=st_multiplier)
         st_dir = st_df["direction"]
     except Exception:
+        st_df = None
         st_dir = pd.Series(1, index=full_df.index)
+    if st_df is not None:
+        base["switch_pct"] = _switch_pct(_to_float(st_df["supertrend"].iloc[-1]), latest_price)
 
     regime_series = pd.Series("accel_up", index=full_df.index, dtype=object)
     regime_series[st_dir == -1] = "accel_down"
@@ -384,18 +410,6 @@ def _build_item(
             base["days_since_last_up"] = _days_since_last("accel_up")
         else:
             base["days_since_last_neutral"] = _days_since_last("accel_down")
-
-        # 현재 구간 **2일차 시가** 대비 등락률 — 사람이 실제로 잡을 수 있었던 구간이다.
-        # 추세 전환은 1일차 종가로 확정되므로 그날 장중 등락은 신호가 나오기 전이고,
-        # 빨라야 다음 날 시가에 들어간다 (전략 백테스트의 '판정 L−1 종가 / 체결 L 시가'와 같은 기준).
-        # "N일째"의 N 번째 뒤가 1일차이므로 2일차는 N−1 번째 뒤다.
-        # 상승·하락 모두 같은 기준이다 — 레짐이 2상태뿐이라 하락 구간에서는
-        # days_since_last_up 도 현재 구간 일수와 같은 값이다.
-        regime_days = int(ranges[-1]["days"])
-        if regime_days >= 2 and "Open" in full_df.columns and regime_days - 1 <= len(full_df):
-            entry_open = _to_float(full_df["Open"].iloc[-(regime_days - 1)])
-            if entry_open is not None and entry_open > 0 and latest_price is not None:
-                base["regime_change_pct"] = (latest_price / entry_open - 1.0) * 100.0
 
     # MA 괴리율 0%를 0점으로 두고, 12개월 상위 5%(95퍼센타일)/하위 5%(5퍼센타일) 괴리율로
     # 점수 정규화한다. 단발 극단치(최대/최소)는 천장을 한 순간만 만들어 +100 이 거의 안 찍히므로,
@@ -473,6 +487,9 @@ def _trend_pct_at(
 
 def _resolve_supertrend_params(yf_ticker: str) -> tuple[int, float]:
     """차트 표시용 SuperTrend 기간/곱수를 반환한다."""
+    # 풀 합성 지수는 동적이라 개별 등록 대신 공통 곱수(config)를 쓴다.
+    if pool_of_market_key(yf_ticker) is not None:
+        return MARKET_TREND_SUPERTREND_PERIOD, MARKET_TREND_SUPERTREND_MULTIPLIER_POOL
     if yf_ticker not in MARKET_TREND_SUPERTREND_MULTIPLIER:
         raise ValueError(
             f"MARKET_TREND_SUPERTREND_MULTIPLIER 에 지수 '{yf_ticker}' 의 곱수가 등록되지 않았습니다. "
@@ -579,6 +596,11 @@ def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
 
     compute_index_history 와 시장 레짐 계산이 공유하는 단일 소스.
     """
+    # 풀 합성 지수 — 적립된 동일가중 지수 레벨(DB)이 소스다.
+    pool = pool_of_market_key(yf_ticker)
+    if pool is not None:
+        return _pool_index_ohlc(pool)
+
     index_meta = next((idx for idx in INDICES if idx["yf_ticker"] == yf_ticker), None)
     naver_symbol = (index_meta or {}).get("kor_naver_symbol")
 
@@ -627,13 +649,20 @@ def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
     return frame.copy()
 
 
+def _switch_pct(st_val: float | None, close: float | None) -> float | None:
+    """종가 대비 SuperTrend 가격선까지의 등락률 — 종가가 그 선을 넘으면 추세가 바뀐다."""
+    if not st_val or not close:
+        return None
+    return (st_val / close - 1.0) * 100.0
+
+
 def compute_index_history(yf_ticker: str) -> dict[str, Any]:
     """단일 지수의 가격/이동평균/레짐 히스토리를 반환한다.
 
     레짐은 SuperTrend 방향(2단계: 상승 accel_up / 하락 accel_down)이다. SuperTrend 는 즉시
     전환이라 지연 없이 전환 가격선(up_price/dn_price)만 함께 준다.
     """
-    index_meta = next((idx for idx in INDICES if idx["yf_ticker"] == yf_ticker), None)
+    index_meta = next((idx for idx in [*INDICES, *pool_index_entries()] if idx["yf_ticker"] == yf_ticker), None)
     name = index_meta["name"] if index_meta else yf_ticker
 
     ma_short_days = MARKET_TREND_SCORE_MA_DAYS
@@ -656,10 +685,8 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
     # 표(_build_item)와 동일하게 intraday 보정 — 마지막 점/레짐이 일치하도록.
     close_series = _apply_intraday_boost(close_series, yf_ticker)
 
-    # 보정된 close_series 를 df 에 다시 반영 (인덱스가 확장되었을 경우 대비 reindex 적용)
-    df = df.reindex(close_series.index)
-    df["Close"] = close_series
-    df = df.ffill()
+    # 보정된 close_series 를 df 에 다시 반영 — 표(_build_item)와 같은 공용 함수를 쓴다.
+    df = _merge_boosted_close(df, close_series)
 
     if len(close_series) < 2:
         return empty_payload
@@ -726,9 +753,9 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
         point_forecast = {
             "raw_regime": regime,
             "up_price": st_val if regime == "accel_down" else None,
-            "up_pct": ((st_val / close - 1.0) * 100.0) if regime == "accel_down" and st_val and close else None,
+            "up_pct": _switch_pct(st_val, close) if regime == "accel_down" else None,
             "dn_price": st_val if regime == "accel_up" else None,
-            "dn_pct": ((st_val / close - 1.0) * 100.0) if regime == "accel_up" and st_val and close else None,
+            "dn_pct": _switch_pct(st_val, close) if regime == "accel_up" else None,
         }
 
         history.append(

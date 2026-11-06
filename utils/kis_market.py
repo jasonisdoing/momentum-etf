@@ -451,40 +451,67 @@ def load_kis_domestic_etf_master() -> pd.DataFrame:
     return etf_df
 
 
+# 마켓 화면의 기간 수익률 컬럼 — (필드 접미사, 기준일 오프셋).
+# 일봉 한 번으로 전부 뽑으므로 기간을 늘려도 조회 비용은 그대로다.
+BASE_CLOSE_OFFSETS: tuple[tuple[str, pd.DateOffset], ...] = (
+    ("1w", pd.DateOffset(weeks=1)),
+    ("2w", pd.DateOffset(weeks=2)),
+    ("1m", pd.DateOffset(months=1)),
+    ("2m", pd.DateOffset(months=2)),
+    ("1y", pd.DateOffset(years=1)),
+    ("2y", pd.DateOffset(years=2)),
+    ("3y", pd.DateOffset(years=3)),
+)
+# 기준일 중 가장 먼 3년 전을 덮는 일봉 개수(3년 ≈ 756거래일 + 여유).
+BASE_CLOSE_DAILY_COUNT = 800
+
+
+# 화면·서비스가 같은 기간 목록을 쓰도록 접미사만 따로 노출한다.
+BASE_CLOSE_SUFFIXES: tuple[str, ...] = tuple(suffix for suffix, _ in BASE_CLOSE_OFFSETS)
+
+
 def _enrich_rows_with_base_closes(rows: list[dict]) -> None:
-    """각 ETF 에 1/2개월 전 기준종가를 붙인다 (네이버 fchart 일봉, 병렬 조회).
+    """각 ETF 에 기간별 기준종가를 붙인다 (네이버 fchart 일봉, 병렬 조회).
 
     기준일이 휴장일이면 직전 거래일 종가를 쓴다(asof). 조회 실패 시 None —
-    마켓 화면의 1달/2달(%) 컬럼이 '-' 로 표시된다.
+    마켓 화면의 해당 기간(%) 컬럼이 '-' 로 표시된다.
     """
     from concurrent.futures import ThreadPoolExecutor
 
     from utils.naver_chart import fetch_naver_daily_ohlc
+    from utils.trade_value import latest_trade_value_fields
 
     today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
-    base_1m = today - pd.DateOffset(months=1)
-    base_2m = today - pd.DateOffset(months=2)
+    base_dates = {suffix: today - offset for suffix, offset in BASE_CLOSE_OFFSETS}
 
     def _one(row: dict) -> None:
-        row["기준종가_1m"] = None
-        row["기준종가_2m"] = None
+        for suffix in base_dates:
+            row[f"기준종가_{suffix}"] = None
+        row["거래대금배수"] = None
+        row["거래대금배수_1주"] = None
         ticker = str(row.get("티커") or "").strip()
         if not ticker:
             return
-        df = fetch_naver_daily_ohlc(ticker, count=50)  # 2개월 ≈ 42거래일 + 여유
+        df = fetch_naver_daily_ohlc(ticker, count=BASE_CLOSE_DAILY_COUNT)
         if df is None or df.empty:
             return
         closes = df["Close"]
-        v1 = closes.asof(base_1m)
-        v2 = closes.asof(base_2m)
-        row["기준종가_1m"] = float(v1) if pd.notna(v1) else None
-        row["기준종가_2m"] = float(v2) if pd.notna(v2) else None
+        for suffix, base_date in base_dates.items():
+            value = closes.asof(base_date)
+            row[f"기준종가_{suffix}"] = float(value) if pd.notna(value) else None
+        # 거래대금 배수 — 순위·신고가 화면과 같은 공용 계산(20일 평균 대비). 이력 부족이면 None.
+        if "Volume" in df.columns:
+            fields = latest_trade_value_fields(closes, df["Volume"])
+            if fields:
+                row["거래대금배수"] = fields["trade_value_mult"]
+                row["거래대금배수_1주"] = fields["trade_value_mult_week"]
 
     with ThreadPoolExecutor(max_workers=8) as executor:
         list(executor.map(_one, rows))
 
     filled = sum(1 for r in rows if r.get("기준종가_1m") is not None)
-    logger.info("ETF 기준종가(1/2개월 전) 수집 완료: %d/%d건", filled, len(rows))
+    periods = "/".join(suffix for suffix, _ in BASE_CLOSE_OFFSETS)
+    logger.info("ETF 기준종가(%s 전) 수집 완료: %d/%d건", periods, filled, len(rows))
 
 
 def refresh_kis_domestic_etf_master_cache() -> int:

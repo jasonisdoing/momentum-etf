@@ -19,7 +19,6 @@ type HoldingsRow = {
   return_pct: number;
   buy_amount_krw: number;
   valuation_krw: number;
-  target_ratio?: number | null;
   memo?: string | null;
   sort_order: number;
   ticker_type?: string;
@@ -46,11 +45,13 @@ export async function GET(request: Request) {
 export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url);
   const account = searchParams.get("account") ?? "";
-  const ticker = searchParams.get("ticker") ?? "";
+  // 종목을 여러 개 지우면 ticker 를 반복해서 보낸다(한 번에 삭제).
+  const tickers = searchParams.getAll("ticker");
+  const tickerQuery = tickers.map((ticker) => `ticker=${encodeURIComponent(ticker)}`).join("&");
 
   try {
-    const payload = await fetchFastApiJson<{ deleted?: string; error?: string }>(
-      `/internal/holdings?account=${encodeURIComponent(account)}&ticker=${encodeURIComponent(ticker)}`,
+    const payload = await fetchFastApiJson<{ deleted?: string[]; error?: string }>(
+      `/internal/holdings?account=${encodeURIComponent(account)}&${tickerQuery}`,
       { method: "DELETE" },
     );
     return jsonNoStore(payload);
@@ -86,7 +87,12 @@ export async function PUT(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json();
-    const endpoint = body.action === "reorder" ? "/internal/holdings/order" : "/internal/holdings";
+    const endpoint =
+      body.action === "reorder"
+        ? "/internal/holdings/order"
+        : body.action === "groups"
+          ? "/internal/holdings/groups"
+          : "/internal/holdings";
     const payload = await fetchFastApiJson<{ updated?: string; reordered?: number; error?: string }>(
       endpoint,
       {
@@ -134,7 +140,6 @@ export async function POST(request: Request) {
           ticker: body.ticker,
           quantity: body.quantity,
           average_buy_price: body.average_buy_price,
-          target_ratio: body.target_ratio,
         }),
       },
     );

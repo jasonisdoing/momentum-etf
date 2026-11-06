@@ -4,18 +4,19 @@
 data_loader 가 re-export 로 유지한다. TTL 캐시는 모듈 전역이라 프로세스 내 공유된다.
 """
 
+import re
 from collections.abc import Sequence
 from datetime import datetime, timedelta
+from math import isfinite
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 try:
     import requests
-    from bs4 import BeautifulSoup
 except ImportError:  # pragma: no cover
     requests = None  # type: ignore
-    BeautifulSoup = None  # type: ignore
 
 try:
     import yfinance as yf
@@ -28,13 +29,14 @@ from config import (
     AU_QUOTEAPI_URL,
     CACHE_TTL_COMPUTE,
     CACHE_TTL_LIVE,
+    MARKET_SCHEDULES,
     NAVER_FINANCE_ETF_API_URL,
     NAVER_FINANCE_HEADERS,
     TOSS_INVEST_API_BASE_URL,
-    TOSS_INVEST_HEADERS,
 )
 from utils.asx_ticker import strip_asx_prefix, to_yahoo_symbol
 from utils.logger import get_app_logger
+from utils.toss_session import toss_request
 
 logger = get_app_logger()
 
@@ -44,35 +46,6 @@ def _safe_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def fetch_naver_realtime_price(ticker: str) -> float | None:
-    """
-    네이버 금융 웹 스크레이핑을 통해 종목의 실시간 현재가를 조회합니다.
-    주의: 이 방법은 웹페이지 구조 변경에 취약하며, 비공식적인 방법입니다.
-    """
-    if not requests or not BeautifulSoup:
-        return None
-
-    try:
-        url = f"https://finance.naver.com/item/sise.naver?code={ticker}"
-        # 네이버의 차단을 피하기 위해 브라우저처럼 보이는 User-Agent를 설정합니다.
-        headers = {  # noqa: F841
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-        }
-        response = requests.get(url, headers=headers, timeout=5)
-        response.raise_for_status()  # HTTP 오류 발생 시 예외 발생
-
-        soup = BeautifulSoup(response.text, "html.parser")
-        # 현재가를 담고 있는 HTML 요소를 id를 통해 찾습니다.
-        price_element = soup.select_one("#_nowVal")
-
-        if price_element:
-            price_str = price_element.get_text().replace(",", "")
-            return float(price_str)
-    except Exception as e:
-        logger.warning("%s의 실시간 가격 조회 중 오류 발생: %s", ticker, e)
-    return None
 
 
 # ─── ETF iNAV 글로벌 캐시 ───
@@ -139,6 +112,7 @@ def _fetch_etf_inav_all() -> dict[str, dict[str, float]]:
         entry: dict[str, Any] = {
             "nav": nav_value,
             "nowVal": price_value,
+            "regularClose": price_value,
             "deviation": deviation,
         }
 
@@ -177,12 +151,20 @@ def _fetch_etf_inav_all() -> dict[str, dict[str, float]]:
 def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
     """네이버 API에서 한국 ETF의 실시간 NAV 정보를 조회합니다. 글로벌 캐시를 사용합니다."""
 
+    from utils.market_session import PREMARKET, market_session
+
     normalized_codes = {str(t).strip().upper() for t in tickers if str(t or "").strip()}
     if not normalized_codes:
         return {}
 
     all_data = _fetch_etf_inav_all()
-    return {code: all_data[code] for code in normalized_codes if code in all_data}
+    snapshot = {code: dict(all_data[code]) for code in normalized_codes if code in all_data}
+    # 한국 ETF 는 프리장 거래가 없다 — 프리장에 이 API 의 등락률은 전 거래일 것이라 비운다.
+    # 정규장 이후(애프터·마감)에는 그날 등락률 그대로다(애프터 거래가 없어 값이 변하지 않는다).
+    if market_session("kor")["session"] == PREMARKET:
+        for entry in snapshot.values():
+            entry.pop("changeRate", None)
+    return snapshot
 
 
 # 해외 ETF NAV 캐시 — 종목별로 조회하므로 티커 단위로 담는다(한국은 전체 목록 1회 조회).
@@ -263,26 +245,44 @@ def _parse_naver_signed_change_rate(item: dict[str, Any]) -> float | None:
     return change_rate
 
 
-def _get_naver_pre_market_price_info(item: dict[str, Any]) -> dict[str, Any] | None:
-    """네이버 국내주식 응답에서 열린 장전 거래 가격 정보를 반환한다."""
+def _naver_session_base(source: dict[str, Any], price: float) -> float | None:
+    """네이버 시세 블록의 등락 기준가 — 가격에서 부호 붙은 대비를 뺀 값. 없으면 None."""
+    diff = _parse_comma_number(source.get("compareToPreviousClosePrice"))
+    if diff is None:
+        return None
+    compare_code = (source.get("compareToPreviousPrice") or {}).get("code", "")
+    signed_diff = -diff if compare_code == "5" and diff > 0 else diff
+    base = price - signed_diff
+    return base if base > 0 else None
+
+
+def _get_naver_over_market_price_info(item: dict[str, Any]) -> tuple[dict[str, Any], str] | None:
+    """네이버 국내주식 응답에서 **열려 있는** 시간외 가격 정보와 그 구간을 반환한다.
+
+    장전(``PRE_MARKET``)·장후(``AFTER_MARKET``) 모두 대상이다. 닫힌 뒤에도 `overPrice`
+    값은 응답에 남아 있으므로 ``overMarketStatus == "OPEN"`` 일 때만 쓴다 — 시간외가
+    끝나면 정규장 종가(`closePrice`)로 돌아온다.
+    """
     over_market_info = item.get("overMarketPriceInfo")
     if not isinstance(over_market_info, dict):
         return None
 
     trading_session_type = str(over_market_info.get("tradingSessionType") or "").strip().upper()
     over_market_status = str(over_market_info.get("overMarketStatus") or "").strip().upper()
-    if trading_session_type != "PRE_MARKET" or over_market_status != "OPEN":
+    if trading_session_type not in ("PRE_MARKET", "AFTER_MARKET") or over_market_status != "OPEN":
         return None
 
     over_price = _parse_comma_number(over_market_info.get("overPrice"))
     if over_price is None:
         return None
 
-    return over_market_info
+    return over_market_info, trading_session_type
 
 
 def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, Any]]:
     """stock.naver.com 폴링 API에서 한국 개별 종목의 실시간 가격 정보를 조회합니다."""
+
+    from utils.market_session import PREMARKET, REGULAR, market_session
 
     normalized_codes = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
     if not normalized_codes:
@@ -291,6 +291,10 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
     if not requests:
         logger.debug("requests 라이브러리가 없어 네이버 주식 조회를 건너뜁니다.")
         return {}
+
+    # 한 번만 본다 — 한 응답 안에서 종목마다 세션 판정이 갈리면 안 된다.
+    session = market_session("kor")["session"]
+    regular_running = session == REGULAR
 
     naver_stock_polling_url = "https://stock.naver.com/api/polling/domestic/stock"
     naver_stock_polling_headers = {
@@ -322,22 +326,62 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
             if not code:
                 continue
 
-            pre_market_info = _get_naver_pre_market_price_info(item)
-            price_source = pre_market_info or item
-            price_field = "overPrice" if price_source is not item else "closePrice"
+            # `closePrice` 의 뜻은 장 상태에 따라 다르다(실측).
+            #   장후 시간외·마감: 그날 **KRX 정규장 종가**를 유지한다
+            #     (SK하이닉스 closePrice 1,879,000 = 일봉 종가, 같은 응답 overPrice 1,878,000).
+            #   장 시작 전(`PREOPEN`, 프리장): **통합 전일가**로 바뀐다 — 넥스트레이드 애프터까지
+            #     포함한 전일 마지막 가격이다(2026-09-30 SK하이닉스 1,765,000 = 네이버 「전일」,
+            #     KRX 09-29 종가는 1,790,000). 네이버·토스의 프리장 등락률 기준이 이 값이다.
+            regular_close = _parse_comma_number(item.get("closePrice"))
+            preopen = item.get("marketStatus") == "PREOPEN"
+            over_market = _get_naver_over_market_price_info(item)
+            price_source = over_market[0] if over_market else item
+            price_field = "overPrice" if over_market else "closePrice"
             price_value = _parse_comma_number(price_source.get(price_field))
             if price_value is None:
                 continue
 
             entry: dict[str, Any] = {"nowVal": price_value}
-            # 일봉 스냅샷(fetch_naver_daily_ohlcv_snapshot)이 날짜 정합 검증에 쓴다.
+            if (
+                session == PREMARKET
+                and over_market is None
+                and preopen
+                and _parse_comma_number(item.get("accumulatedTradingVolumeRaw")) is None
+            ):
+                entry["hasSessionTrade"] = False
+                entry["is_pre_market"] = True
+            # 등락률 기준가 — 네이버가 이 시세의 대비를 계산한 **통합 전일가**(넥스트레이드 애프터까지
+            # 포함한 전일 마지막 가격)다. 네이버·토스 표시와 같다(2026-09-30 프리장 SK하이닉스
+            # 1,780,000 vs 1,765,000 → +0.85%, 2026-10-01 애프터 삼성전자 272,000 vs 268,500 → +1.30%).
+            # 시간외 블록이 없는 종목(넥스트레이드 미거래, 예: 엑시콘 092870)도 기본 블록에 같은
+            # 대비가 있어 그대로 쓴다 — 없다고 비우면 장후에 오늘 종가와 비교돼 0% 가 됐다.
+            session_base = _naver_session_base(price_source, price_value)
+            if session_base is not None:
+                entry["prevClose"] = session_base
+            # 장 시작 전 `closePrice` 는 정규장 종가가 아니라 통합 전일가다(위 주석) — 정규장
+            # 종가로 넘기지 않는다. 그때 정규장 종가는 공통 경로가 확정 일봉에서 채운다.
+            if not preopen and regular_close is not None:
+                # 표시·판정용 `nowVal` 은 시간외가 닫히면 이 값으로 돌아온다(위 분기).
+                entry["regularClose"] = regular_close
+                # 장중 값은 잠정값이므로 마지막 확정 종가로 넘기지 않는다.
+                if not regular_running:
+                    entry["lastRegularClose"] = regular_close
             local_traded_at = str(item.get("localTradedAt") or "").strip()
             if local_traded_at:
                 entry["localTradedAt"] = local_traded_at
-            if pre_market_info is not None:
-                entry["is_pre_market"] = True
+            if over_market is not None:
+                entry["session"] = over_market[1]
+                if over_market[1] == "PRE_MARKET":
+                    entry["is_pre_market"] = True
 
-            change_rate = _parse_naver_signed_change_rate(price_source)
+            # 등락률은 **정규장이 진행 중일 때만** 이 응답 값을 쓴다. 장이 닫힌 뒤에는 폴링
+            # API 의 기준가가 실제 전일 종가와 다르다 — 실측(2026-09-24 휴장, 60종목 중 43종목):
+            # 가온전선 closePrice 318,000 은 맞는데 compareToPreviousClosePrice 가 -3,500
+            # (기준가 321,500)이라 -1.09% 로 나온다. 네이버 **일별 시세** API·KRX·가격 캐시는
+            # 모두 09-22 종가를 324,000 으로 준다(실제 -1.85%).
+            # 비우면 `price_service._fill_missing_change_rate` 가 채운다 — 프리장은 위의 통합
+            # 전일가(`prevClose`), 그 밖에는 확정 종가 기준이다.
+            change_rate = _parse_naver_signed_change_rate(price_source) if regular_running else None
             if change_rate is not None:
                 entry["changeRate"] = change_rate
 
@@ -366,44 +410,6 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
         snapshot.update(_fetch_chunk(chunk))
 
     return snapshot
-
-
-def fetch_naver_daily_ohlcv_snapshot(tickers: Sequence[str], target_day: pd.Timestamp) -> dict[str, dict[str, float]]:
-    """한국 종목들의 **확정 당일 일봉(OHLCV)** 을 폴링 API 로 일괄 조회한다.
-
-    가격 캐시 증분 갱신용 — 종목당 pykrx 호출 대신 50종목 단위 배치 호출로
-    `target_day`(마감된 최신 거래일)의 일봉 행을 만든다. 값의 날짜(localTradedAt)가
-    target_day 와 다르거나(거래정지·이월 표시), 장 전 예상가 상태(is_pre_market)거나,
-    OHLC 중 하나라도 없는 종목은 **제외**한다 — 잘못된 일봉을 저장하느니 빼고
-    종목별 pykrx 경로에 맡기는 쪽이 안전하다.
-    """
-    target = pd.Timestamp(target_day).normalize()
-    snapshot = fetch_naver_stock_realtime_snapshot(tickers)
-    result: dict[str, dict[str, float]] = {}
-    for code, entry in snapshot.items():
-        if entry.get("is_pre_market"):
-            continue
-        traded_at = str(entry.get("localTradedAt") or "")[:10]
-        traded_ts = pd.to_datetime(traded_at, errors="coerce")
-        if traded_ts is pd.NaT or pd.Timestamp(traded_ts).normalize() != target:
-            continue
-        open_val = entry.get("open")
-        high_val = entry.get("high")
-        low_val = entry.get("low")
-        close_val = entry.get("nowVal")
-        volume_val = entry.get("volume")
-        if any(v is None for v in (open_val, high_val, low_val, close_val, volume_val)):
-            continue
-        if min(float(open_val), float(high_val), float(low_val), float(close_val)) <= 0:
-            continue
-        result[code] = {
-            "Open": float(open_val),
-            "High": float(high_val),
-            "Low": float(low_val),
-            "Close": float(close_val),
-            "Volume": float(volume_val),
-        }
-    return result
 
 
 def fetch_naver_worldstock_snapshot(reuters_codes: Sequence[str]) -> dict[str, dict[str, float | str]]:
@@ -450,6 +456,7 @@ def fetch_naver_worldstock_snapshot(reuters_codes: Sequence[str]) -> dict[str, d
             if price_value is None:
                 continue
 
+            # worldstock 은 정규장 종가만 주는 지연 시세다 — 시간외 값이 따로 없다.
             entry: dict[str, float | str] = {"nowVal": price_value}
 
             prev_close = _parse_comma_number(item.get("compareToPreviousClosePrice"))
@@ -540,6 +547,7 @@ def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
 
             entry: dict[str, float] = {
                 "nowVal": float(price),
+                "regularClose": float(price),
             }
 
             prev_close = quote.get("prevClose")
@@ -636,14 +644,52 @@ def get_cached_au_etf_snapshot_entry(ticker: str) -> dict[str, float] | None:
 # 토스증권 API — 미국 주식 실시간 가격
 # ────────────────────────────────────────────
 
-# symbol → productCode 영구 매핑 캐시 (프로세스 수명 동안 유효)
+# symbol → productCode 매핑. 메모리가 1차, MongoDB `toss_symbol_codes` 가 2차(영구)다.
+# 메모리에만 두면 서버가 재시작될 때마다(코드 수정 시 자동 리로드 포함) 처음 보는 심볼을
+# 전부 다시 검색한다 — 실측: 미국 ETF 1,000종목 첫 로드 14~18초 → 이후 약 2초.
+# 코드는 상장 기준이라 바뀌지 않으므로 만료를 두지 않는다.
 _TOSS_SYMBOL_CODE_CACHE: dict[str, str] = {}
+_TOSS_SYMBOL_CODE_COLLECTION = "toss_symbol_codes"
+
+
+def _toss_code_collection():
+    from utils.db_manager import get_db_connection
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결에 실패했습니다 — 토스 상품코드를 읽을 수 없습니다.")
+    return db[_TOSS_SYMBOL_CODE_COLLECTION]
+
+
+def _load_persisted_toss_codes(symbols: Sequence[str]) -> dict[str, str]:
+    """DB 에 저장된 상품코드를 한 번에 읽는다."""
+    if not symbols:
+        return {}
+    cursor = _toss_code_collection().find({"_id": {"$in": list(symbols)}}, {"code": 1})
+    return {str(doc["_id"]): str(doc["code"]) for doc in cursor if doc.get("code")}
+
+
+def _persist_toss_codes(codes: dict[str, str]) -> None:
+    """새로 찾은 상품코드를 DB 에 저장한다(다음 프로세스가 검색 없이 쓴다)."""
+    if not codes:
+        return
+    from pymongo import UpdateOne
+
+    now = datetime.now()
+    _toss_code_collection().bulk_write(
+        [
+            UpdateOne({"_id": sym}, {"$set": {"code": code, "updated_at": now}}, upsert=True)
+            for sym, code in codes.items()
+        ],
+        ordered=False,
+    )
 
 
 def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
     """미국 티커 심볼을 토스 productCode로 변환한다.
 
-    캐시에 없는 심볼만 검색 API를 호출하고, 결과를 영구 캐시에 저장한다.
+    메모리 → DB(`toss_symbol_codes`) 순으로 찾고, 둘 다 없는 심볼만 검색 API 를 호출한다.
+    새로 찾은 코드는 메모리와 DB 에 함께 저장한다.
     Returns:
         {symbol: productCode} 매핑 (매핑 실패 심볼은 제외)
     """
@@ -656,15 +702,24 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
 
     blacklist = get_active_blacklist()
 
+    not_in_memory: list[str] = []
     for sym in symbols:
         cached_code = _TOSS_SYMBOL_CODE_CACHE.get(sym)
         if cached_code:
             result[sym] = cached_code
-        elif sym in blacklist:
-            # 24시간 내 실패한 심볼은 재시도하지 않음
-            continue
         else:
-            uncached.append(sym)
+            not_in_memory.append(sym)
+
+    persisted = _load_persisted_toss_codes(not_in_memory)
+    _TOSS_SYMBOL_CODE_CACHE.update(persisted)
+    result.update(persisted)
+    for sym in not_in_memory:
+        if sym in persisted:
+            continue
+        if sym in blacklist:
+            # 최근 실패한 심볼은 재시도하지 않음
+            continue
+        uncached.append(sym)
 
     if not uncached:
         return result
@@ -680,9 +735,9 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
         try:
             # 토스는 BRK-A 등 하이픈(-)이 들어간 경우 BRK.A로 검색해야 결과가 나옵니다.
             search_query = sym.replace("-", ".")
-            resp = requests.post(
+            resp = toss_request(
+                "POST",
                 search_url,
-                headers=TOSS_INVEST_HEADERS,
                 json={"query": search_query},
                 timeout=5,
             )
@@ -690,8 +745,9 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
             data = resp.json()
             stocks = (data.get("result") or {}).get("stocks") or []
 
-            # 한국 종목(stockCode가 'A'로 시작)을 제외하고 미국 주식만 필터링
-            us_stocks = [s for s in stocks if not str(s.get("stockCode") or "").startswith("A")]
+            # 한국 종목(stockCode가 'A' + 숫자 6자리)만 제외한다 — 단순 'A' 시작 판정은
+            # AMEX 상장 종목(AMX… 코드, 예: DRAM)까지 한국 종목으로 오인해 버린다.
+            us_stocks = [s for s in stocks if not re.fullmatch(r"A\d{6}", str(s.get("stockCode") or ""))]
 
             # matchType이 EXACT인 첫 번째 미국 종목 사용
             for stock in us_stocks:
@@ -713,11 +769,14 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
 
     # 심볼당 1회 요청이라 순차로 돌면 수백 개일 때 수십 초가 걸린다(응답 자체는 ~80ms).
     # 실시간 시세 병렬 조회와 동일하게 10 스레드로 제한해 동시에 요청한다.
+    found: dict[str, str] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         for sym, product_code in executor.map(_search_one, uncached):
             if product_code:
-                _TOSS_SYMBOL_CODE_CACHE[sym] = product_code
-                result[sym] = product_code
+                found[sym] = product_code
+    _TOSS_SYMBOL_CODE_CACHE.update(found)
+    result.update(found)
+    _persist_toss_codes(found)
 
     return result
 
@@ -728,7 +787,77 @@ def resolve_toss_us_product_codes(symbols: Sequence[str]) -> dict[str, str]:
     return _resolve_toss_product_codes(normalized_symbols)
 
 
-def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
+def _toss_closed_regular_close_field(local_stamp: pd.Timestamp | None, closed_day: str, in_daymarket_gap: bool) -> str:
+    """토스의 마감 응답에서 마지막 정규장 종가 필드를 식별한다."""
+    if local_stamp is not None:
+        return "close" if local_stamp.date().isoformat() == closed_day else "base"
+    return "base" if in_daymarket_gap else "close"
+
+
+def _toss_us_price_entry(item: dict[str, Any], session: str, closed_day: str, in_daymarket_gap: bool) -> dict[str, Any]:
+    """토스 응답을 현재 세션 가격과 정규장 종가로 변환한다."""
+    from utils.market_session import AFTERMARKET, CLOSED, PREMARKET
+
+    raw_stamp = item.get("tradeDateTime")
+    local_stamp = None
+    if raw_stamp is not None:
+        stamp = pd.Timestamp(raw_stamp)
+        if not pd.isna(stamp) and stamp.tzinfo is not None:
+            local_stamp = stamp.tz_convert(ZoneInfo("America/New_York"))
+    regular_field = (
+        _toss_closed_regular_close_field(local_stamp, closed_day, in_daymarket_gap)
+        if session == CLOSED
+        else "close"
+        if session == AFTERMARKET
+        else "base"
+    )
+    price_field = regular_field if session == CLOSED else ("afterMarketClose" if session == AFTERMARKET else "close")
+    price = _safe_float(item.get(price_field))
+    if price is None or not isfinite(price) or price <= 0:
+        raise ValueError(f"토스 미국 {session} 시세의 {price_field}가 유효하지 않습니다.")
+
+    regular_close = price if session == CLOSED else _safe_float(item.get(regular_field))
+    if regular_close is not None and (not isfinite(regular_close) or regular_close <= 0):
+        regular_close = None
+    if session == CLOSED and regular_close is None:
+        raise ValueError(f"토스 미국 정규장 종가의 {regular_field}가 유효하지 않습니다.")
+
+    entry: dict[str, Any] = {
+        "nowVal": price,
+        "session": session,
+        "priceSource": f"toss_invest.{price_field}",
+        "is_pre_market": session == PREMARKET,
+    }
+    if local_stamp is not None:
+        entry["localTradedAt"] = local_stamp.isoformat()
+        entry["tradeDateTime"] = local_stamp.tz_convert("UTC").isoformat()
+    if regular_close is not None:
+        entry["regularClose"] = regular_close
+    if session != CLOSED and regular_close is not None:
+        entry["lastRegularClose"] = regular_close
+        # 장외 가격의 등락률은 마지막 정규장 종가부터 계산한다.
+        # 정규장의 전날 대비 등락률은 확정 봉을 읽는 화면이 별도로 계산한다.
+        entry["prevClose"] = regular_close
+        entry["changeRate"] = (price / regular_close - 1.0) * 100.0
+    if (session == CLOSED and regular_field == "close") or session == AFTERMARKET:
+        # 마감·애프터 응답이 마지막 정규장 날짜의 것이면 `base` 는 그 전 거래일 종가다 — 종목풀 밖 종목도
+        # 가격 캐시 없이 전일 종가 대비 등락률을 낸다(애프터는 정규장 상승분 + 시간외, 토스 표기).
+        # 응답이 이미 다음 날로 넘어간 마감 구간(`regular_field == "base"`)은 전일 종가를 알 수 없어 비워 둔다.
+        base = _safe_float(item.get("base"))
+        if base is not None and isfinite(base) and base > 0:
+            entry["prevClose"] = base
+            entry["changeRate"] = (price / base - 1.0) * 100.0
+        elif session == AFTERMARKET:
+            raise ValueError("토스 미국 애프터마켓 시세의 base(전일 종가)가 유효하지 않습니다.")
+    # 거래량·거래대금은 API의 누적값을 전달한다. 세션별 값으로 임의 분리하지 않는다.
+    for key, field in (("tradeValue", "value"), ("tradeVolume", "volume"), ("volume", "volume")):
+        parsed = _safe_float(item.get(field))
+        if parsed is not None and isfinite(parsed) and parsed > 0:
+            entry[key] = parsed
+    return entry
+
+
+def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, Any]]:
     """토스증권 API에서 미국 주식의 실시간 가격 정보를 조회합니다.
 
     Args:
@@ -749,6 +878,20 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
         logger.debug("requests 라이브러리가 없어 토스 가격 조회를 건너뜁니다.")
         return {}
 
+    from utils.market_session import CLOSED, last_closed_session_date, market_session
+    from utils.trading_calendar import get_trading_days
+
+    session = market_session("us")["session"]
+    closed_day = last_closed_session_date("us") if session == CLOSED else ""
+    now_local = datetime.now(ZoneInfo("America/New_York"))
+    day = now_local.date().isoformat()
+    schedule = MARKET_SCHEDULES["us"]
+    in_daymarket_gap = (
+        session == CLOSED
+        and schedule["daymarket_close"] <= now_local.time() < schedule["premarket_open"]
+        and bool(get_trading_days(day, day, "us"))
+    )
+
     # 1단계: symbol → productCode 매핑
     symbol_to_code = _resolve_toss_product_codes(normalized_symbols)
     if not symbol_to_code:
@@ -760,7 +903,7 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
     # 2단계: productCode로 벌크 가격 조회 (50개씩 청크)
     price_url = f"{TOSS_INVEST_API_BASE_URL}/api/v3/stock-prices/details"
     all_codes = list(symbol_to_code.values())
-    snapshot: dict[str, dict[str, float]] = {}
+    snapshot: dict[str, dict[str, Any]] = {}
 
     chunk_size = 50
     for i in range(0, len(all_codes), chunk_size):
@@ -768,10 +911,10 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
         codes_param = ",".join(chunk)
 
         try:
-            resp = requests.get(
+            resp = toss_request(
+                "GET",
                 price_url,
                 params={"productCodes": codes_param},
-                headers=TOSS_INVEST_HEADERS,
                 timeout=5,
             )
             resp.raise_for_status()
@@ -789,32 +932,10 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
             if not sym:
                 continue
 
-            close_price = item.get("close")
-            if close_price is None:
-                continue
-
             try:
-                close_val = float(close_price)
-            except (TypeError, ValueError):
-                continue
-
-            # 토스 필드 의미: close = 현재 세션의 최신 체결가(프리/정규/야간 모두),
-            # base = 그 세션의 기준가(정규장 중엔 전일 종가, 야간엔 당일 정규장 종가).
-            # 세션별로 분기하지 않고 그대로 쓴다 — 예전에는 야간에 afterMarketClose 를
-            # 현재가로 보고 close 를 전일 종가로 뒤집어 써서 등락 부호가 반대로 나왔다.
-            now_val = close_val
-            prev_val = _safe_float(item.get("base"))
-
-            entry: dict[str, float] = {"nowVal": now_val}
-            if prev_val is not None and prev_val > 0:
-                entry["prevClose"] = prev_val
-                entry["changeRate"] = ((now_val - prev_val) / prev_val) * 100.0
-
-            volume = _safe_float(item.get("volume"))
-            if volume is not None:
-                entry["volume"] = volume
-
-            snapshot[sym] = entry
+                snapshot[sym] = _toss_us_price_entry(item, session, closed_day, in_daymarket_gap)
+            except (ValueError, TypeError) as exc:
+                logger.warning("토스 미국 시세 제외 (%s): %s", sym, exc)
 
     if snapshot:
         logger.info("[US] 토스증권 API에서 %d개 종목의 실시간 가격을 조회했습니다.", len(snapshot))
@@ -828,13 +949,8 @@ _TOSS_KR_SNAPSHOT_TTL_SECONDS = CACHE_TTL_LIVE
 _TOSS_KR_SNAPSHOT_CACHE: dict[str, tuple[datetime, dict[str, float]]] = {}
 
 
-def fetch_toss_kr_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
-    """토스증권 API에서 한국 주식의 실시간 시세를 조회한다.
-
-    같은 응답에 **당일 누적 거래대금(`value`)·거래량(`volume`)** 도 들어 있어 함께 담는다.
-    가격 캐시의 거래대금은 `종가 × 거래량` 추정이고 그나마 마감된 날 것뿐이라,
-    장중 거래대금을 보여주려면 이 값이 필요하다. 50개씩 묶어 부르므로 358종목이 8회다.
-    """
+def fetch_toss_kr_trade_value_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
+    """한국 주식의 당일 누적 거래대금·거래량만 조회한다."""
     normalized_tickers = [str(ticker).strip().upper() for ticker in tickers if str(ticker or "").strip()]
     if not normalized_tickers or not requests:
         return {}
@@ -860,10 +976,10 @@ def fetch_toss_kr_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
     for start in range(0, len(all_codes), 50):
         codes = all_codes[start : start + 50]
         try:
-            resp = requests.get(
+            resp = toss_request(
+                "GET",
                 price_url,
                 params={"productCodes": ",".join(codes)},
-                headers=TOSS_INVEST_HEADERS,
                 timeout=5,
             )
             resp.raise_for_status()
@@ -877,20 +993,16 @@ def fetch_toss_kr_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
             if not isinstance(item, dict):
                 continue
             ticker = code_to_ticker.get(str(item.get("code") or ""))
-            close_val = _safe_float(item.get("close"))
-            if not ticker or close_val is None or close_val <= 0:
+            if not ticker:
                 continue
-            base_val = _safe_float(item.get("base"))
-            entry: dict[str, float] = {"nowVal": close_val}
-            if base_val is not None and base_val > 0:
-                entry["prevClose"] = base_val
-                entry["changeRate"] = ((close_val - base_val) / base_val) * 100.0
+            entry: dict[str, float] = {}
             for key, field in (("tradeValue", "value"), ("tradeVolume", "volume")):
                 parsed = _safe_float(item.get(field))
                 if parsed is not None and parsed > 0:
                     entry[key] = parsed
-            snapshot[ticker] = entry
-            _TOSS_KR_SNAPSHOT_CACHE[ticker] = (now, entry)
+            if entry:
+                snapshot[ticker] = entry
+                _TOSS_KR_SNAPSHOT_CACHE[ticker] = (now, entry)
 
     return snapshot
 

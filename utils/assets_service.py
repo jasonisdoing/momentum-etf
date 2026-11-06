@@ -103,8 +103,6 @@ def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, Any]:
         row = {
             "account_id": account_id,
             "total_principal": float(update.get("total_principal") or 0),
-            "cash_balance": float(update.get("cash_balance_krw") or 0),
-            "cash_balance_native": normalize_nullable_number(update.get("cash_balance_native")),
             "cash_currency": str(update.get("cash_currency") or "").strip().upper(),
             "cash_target_ratio": float(update.get("cash_target_ratio") or 0),
             "intl_shares_value": normalize_nullable_number(update.get("intl_shares_value")),
@@ -113,17 +111,13 @@ def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, Any]:
             "updated_by": "user",
         }
 
-        # 통화별 native 현금 맵 동기화 (신 형식 우선, 없으면 레거시 필드에서 합성).
-        # 단, 현금 관련 키가 아예 없는 요청(예: Intl Value 만 저장)에서는 현금을 건드리지
-        # 않는다. 레거시 필드로 재합성하면 신 형식 `cash` 맵이 0 으로 덮여 잔액이 사라진다.
+        # 현금의 진실은 통화별 `cash` 맵 하나다. 원화 합(cash_balance)·계좌 통화 잔액
+        # (cash_balance_native)은 맵에서 **파생**해 캐시로만 갱신한다(레거시 읽기 호환).
+        # 레거시 단일 금액으로 현금을 바꾸는 저장은 폐기(2026-09) — 원금만 저장하는 요청이
+        # 현금 필드를 같이 보내면 백엔드가 맵을 재합성해, USD 잔액이 통째로 KRW 로 바뀌는
+        # 사고가 났다. 현금 키가 아예 없는 요청(원금·비율·Intl 저장)은 현금을 건드리지 않는다.
         cash_input = update.get("cash")
-        has_cash_intent = isinstance(cash_input, dict) or any(
-            key in update for key in ("cash_balance_krw", "cash_balance_native")
-        )
-        if not has_cash_intent:
-            for key in ("cash", "cash_balance", "cash_balance_native"):
-                row.pop(key, None)
-        elif isinstance(cash_input, dict) and cash_input:
+        if isinstance(cash_input, dict) and cash_input:
             cash_map: dict[str, float] = {}
             for key, value in cash_input.items():
                 code = str(key or "").strip().upper()
@@ -133,13 +127,15 @@ def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, Any]:
                     except (TypeError, ValueError):
                         cash_map[code] = 0.0
             row["cash"] = cash_map
-            # 레거시 cash_balance = 통화별 native 를 원화로 환산한 합계(대시보드·자산헬퍼 호환).
             from services.price_service import get_exchange_rates
             from utils.cash_model import cash_total_krw
 
             row["cash_balance"] = round(cash_total_krw(cash_map, get_exchange_rates()), 2)
-        else:
-            row["cash"] = resolve_cash_native_map(row, row["cash_currency"])
+            row["cash_balance_native"] = cash_map.get(row["cash_currency"]) if row["cash_currency"] else None
+        elif any(key in update for key in ("cash_balance_krw", "cash_balance_native")):
+            raise ValueError(
+                "현금 금액은 통화별 금액(cash 맵)으로만 저장합니다 — 단일 환산 금액 저장은 통화별 잔액을 덮어써 폐기했습니다."
+            )
 
         index = next((i for i, item in enumerate(accounts) if str(item.get("account_id") or "") == account_id), -1)
         if index >= 0:

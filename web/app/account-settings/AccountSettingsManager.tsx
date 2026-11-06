@@ -11,6 +11,7 @@ import { LastSavedCell } from "../components/LastSavedCell";
 import { ensureAsxPrefix } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
+import { ApiOrderModal } from "./ApiOrderModal";
 
 type Benchmark = { ticker?: string; name?: string };
 type MarketIndexOption = { ticker: string; name: string };
@@ -20,6 +21,8 @@ type AccountEntry = {
   name?: string;
   icon?: string;
   order?: number;
+  /** 계좌 구분 — 만든 뒤에는 바꿀 수 없다. */
+  env: string;
   country_code?: string;
   currency?: string;
   cash_currencies?: string[];
@@ -36,6 +39,10 @@ type AccountEntry = {
   ma_alarm_enabled?: boolean;
   /** 보유종목 알림 — 손절도 On/Off 만(기준 %는 종목의 종목풀 손절 기준). */
   stoploss_alarm_enabled?: boolean;
+  /** API 주문 안전 장치(운영 계좌) — 켜져 있어야 주문이 나가고, 하루 건수·금액 한도를 넘으면 막힌다. */
+  api_order_enabled?: boolean;
+  api_order_max_count?: number | null;
+  api_order_max_amount_krw?: number | null;
   updated_at?: string | null;
   save_method?: string | null;
 };
@@ -45,6 +52,8 @@ type BrokerAccountRow = {
   account_no: string;
   masked: string;
   acct_type: string;
+  /** 모의투자(03) 계좌 — 모의 계좌에는 이것만, 운영 계좌에는 이것만 빼고 연동한다. */
+  mock: boolean;
   ok: boolean;
   cash?: number;
   net_asset?: number;
@@ -70,6 +79,10 @@ const DEFAULT_REGIME_TICKER = "^GSPC";
 // 현금 잔액(보유 현금 통화) 선택 옵션. 주 통화는 항상 포함되며 해제 불가.
 const CASH_CURRENCY_OPTIONS = ["KRW", "USD", "AUD"] as const;
 const COUNTRY_OPTIONS = ["kor", "au", "us"] as const;
+/** 계좌 구분 — 백엔드 `ACCOUNT_ENVS` 와 같다. 모의 계좌는 API 주문 시험용이라 합성·알림 설정과 사고팔기를 쓰지 않는다. */
+const ENV_LIVE = "live";
+const ENV_MOCK = "mock";
+const ENV_LABELS: Record<string, string> = { [ENV_LIVE]: "운영", [ENV_MOCK]: "모의" };
 const CURRENCY_OPTIONS = ["KRW", "USD", "AUD"] as const;
 
 const inputStyle: React.CSSProperties = {
@@ -79,6 +92,7 @@ const inputStyle: React.CSSProperties = {
   fontSize: "var(--fs-base)",
 };
 const labelStyle: React.CSSProperties = { color: "var(--text-muted)", fontWeight: 600, fontSize: "var(--fs-sm)", flexShrink: 0 };
+const mutedStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--fs-sm)" };
 
 /** 편집 중인 계좌 한 건. 그리드 셀이 그대로 읽고 쓰는 평평한 형태로 든다. */
 type AccountDraft = {
@@ -86,6 +100,7 @@ type AccountDraft = {
   name: string;
   icon: string;
   order: string;
+  env: string;
   country_code: string;
   currency: string;
   cash_currencies: string[];
@@ -98,10 +113,13 @@ type AccountDraft = {
   URL: string;
   ma_alarm_enabled: boolean;
   stoploss_alarm_enabled: boolean;
+  api_order_enabled: boolean;
+  api_order_max_count: string;
+  api_order_max_amount_krw: string;
 };
 
 /** 그리드 행 — 편집 중인 초안 그대로에 표시용 필드를 얹는다. */
-type AccountGridRow = AccountDraft & { __dirty: boolean; __updatedAt?: string | null; __saveMethod?: string | null };
+type AccountGridRow = AccountDraft & { __dirty: boolean; __brokerLinked: boolean; __updatedAt?: string | null; __saveMethod?: string | null };
 
 // 셀렉트·체크박스 에디터가 들어가는 행이라 기본(34px)보다 조금 높인다.
 const accountGridTheme = createAppGridTheme({ rowHeight: 38 });
@@ -113,6 +131,7 @@ function toDraft(account: AccountEntry): AccountDraft {
     name: account.name ?? "",
     icon: account.icon ?? "",
     order: String(account.order ?? 0),
+    env: account.env,
     country_code: account.country_code ?? "kor",
     currency,
     cash_currencies:
@@ -129,6 +148,9 @@ function toDraft(account: AccountEntry): AccountDraft {
     URL: account.URL ?? "",
     ma_alarm_enabled: Boolean(account.ma_alarm_enabled),
     stoploss_alarm_enabled: Boolean(account.stoploss_alarm_enabled),
+    api_order_enabled: Boolean(account.api_order_enabled),
+    api_order_max_count: account.api_order_max_count == null ? "" : String(account.api_order_max_count),
+    api_order_max_amount_krw: account.api_order_max_amount_krw == null ? "" : String(account.api_order_max_amount_krw),
   };
 }
 
@@ -160,6 +182,9 @@ function draftToValues(draft: AccountDraft, marketIndices: MarketIndexOption[]):
     URL: draft.URL.trim(),
     ma_alarm_enabled: draft.ma_alarm_enabled,
     stoploss_alarm_enabled: draft.stoploss_alarm_enabled,
+    api_order_enabled: draft.api_order_enabled,
+    api_order_max_count: draft.api_order_max_count === "" ? null : Number(draft.api_order_max_count),
+    api_order_max_amount_krw: draft.api_order_max_amount_krw === "" ? null : Number(draft.api_order_max_amount_krw),
   };
   // 벤치마크는 선택 — 둘 다 채워졌을 때만 저장(빈 값이면 백엔드 검증에 걸리므로 생략).
   if (draft.benchmarkTicker.trim() && draft.benchmarkName.trim()) {
@@ -445,21 +470,25 @@ function AccountDetailModal({
             onChange={(e) => onChange({ brokerAccountNo: e.target.value })}
           >
             <option value="">계좌 선택</option>
-            {brokerAccounts.map((row) => (
-              <option key={row.account_no} value={row.account_no} disabled={!row.ok}>
-                {row.masked}
-                {row.ok
-                  ? ` — 순자산 ${(row.net_asset ?? 0).toLocaleString("ko-KR")} · 예수금 ${(row.cash ?? 0).toLocaleString("ko-KR")} · ${row.holdings_count}종목`
-                  : " — 조회 불가"}
-              </option>
-            ))}
+            {brokerAccounts
+              .filter((row) => row.mock === (draft.env === ENV_MOCK))
+              .map((row) => (
+                <option key={row.account_no} value={row.account_no} disabled={!row.mock && !row.ok}>
+                  {row.masked}
+                  {row.mock
+                    ? " — 모의투자"
+                    : row.ok
+                      ? ` — 순자산 ${(row.net_asset ?? 0).toLocaleString("ko-KR")} · 예수금 ${(row.cash ?? 0).toLocaleString("ko-KR")} · ${row.holdings_count}종목`
+                      : " — 조회 불가"}
+                </option>
+              ))}
           </select>
         ) : draft.brokerAccountNo ? (
           <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)" }}>
-            저장된 계좌: {draft.brokerAccountNo.slice(0, 3)}***{draft.brokerAccountNo.slice(-2)}
+            저장된 계좌: {draft.brokerAccountNo.slice(0, 4)}***{draft.brokerAccountNo.slice(-2)}
           </span>
         ) : null}
-        {savedBrokerAccountNo ? (
+        {savedBrokerAccountNo && draft.env !== ENV_MOCK ? (
           <button type="button" className="btn btn-sm btn-outline-primary" disabled={balanceLoading} onClick={() => void fetchBalance()}>
             {balanceLoading ? "동기화 중…" : "잔고 동기화"}
           </button>
@@ -555,6 +584,7 @@ function AddAccountModal({ onClose, onCreated }: { onClose: () => void; onCreate
   const [name, setName] = useState("");
   const [icon, setIcon] = useState("");
   const [order, setOrder] = useState("0");
+  const [env, setEnv] = useState("");
   const [countryCode, setCountryCode] = useState("kor");
   const [currency, setCurrency] = useState("KRW");
   const [saving, setSaving] = useState(false);
@@ -570,6 +600,7 @@ function AddAccountModal({ onClose, onCreated }: { onClose: () => void; onCreate
           name: name.trim(),
           icon: icon.trim(),
           order: Math.trunc(Number(order) || 0),
+          env,
           country_code: countryCode,
           currency: currency.trim().toUpperCase(),
         }),
@@ -600,7 +631,7 @@ function AddAccountModal({ onClose, onCreated }: { onClose: () => void; onCreate
           <button
             type="button"
             className="btn btn-primary"
-            disabled={saving || !accountId.trim() || !name.trim()}
+            disabled={saving || !accountId.trim() || !name.trim() || !env}
             onClick={() => void create()}
           >
             {saving ? "추가 중…" : "추가"}
@@ -620,6 +651,16 @@ function AddAccountModal({ onClose, onCreated }: { onClose: () => void; onCreate
             {row.el}
           </label>
         ))}
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ ...labelStyle, width: 64 }}>구분</span>
+          <select className="form-select form-select-sm" style={{ flex: 1 }} value={env} onChange={(e) => setEnv(e.target.value)}>
+            <option value="">선택</option>
+            {Object.entries(ENV_LABELS).map(([code, label]) => (
+              <option key={code} value={code}>{label}</option>
+            ))}
+          </select>
+          <span style={mutedStyle}>만든 뒤에는 바꿀 수 없습니다</span>
+        </label>
         <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ ...labelStyle, width: 64 }}>국가</span>
           <select className="form-select form-select-sm" style={{ flex: 1 }} value={countryCode} onChange={(e) => setCountryCode(e.target.value)}>
@@ -646,6 +687,7 @@ export function AccountSettingsManager() {
   const [drafts, setDrafts] = useState<Record<string, AccountDraft>>({});
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
+  const [mockOrderId, setMockOrderId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [sendingAlarm, setSendingAlarm] = useState(false);
@@ -687,7 +729,12 @@ export function AccountSettingsManager() {
     () =>
       rows.map((account) => {
         const draft = drafts[account.account_id] ?? toDraft(account);
-        return { ...draft, __dirty: isDirty(draft, account), __updatedAt: account.updated_at, __saveMethod: account.save_method };
+        return {
+          ...draft,
+          __dirty: isDirty(draft, account),
+          // 저장된 증권사 연동 — API 주문은 저장된 계좌번호로 연다.
+          __brokerLinked: Boolean(account.broker_api?.account_no),
+          __updatedAt: account.updated_at, __saveMethod: account.save_method };
       }),
     [drafts, rows],
   );
@@ -818,16 +865,22 @@ export function AccountSettingsManager() {
    * 이 컬럼을 건너뛴다 — 저장은 valueSetter 가 이미 했다.)
    */
   const numberCol = (
-    field: "order",
+    field: "order" | "api_order_max_count" | "api_order_max_amount_krw",
     headerName: string,
     width: number,
+    liveOnly = false,
+    headerTooltip?: string,
   ): ColDef<AccountGridRow> => ({
     colId: field,
     headerName,
+    headerTooltip,
     width,
-    editable: true,
+    // 운영 계좌 전용 컬럼은 모의 계좌에서 편집하지 못하고 "—" 로 보인다.
+    editable: (params) => !liveOnly || params.data?.env === ENV_LIVE,
     cellDataType: "number",
     type: "numericColumn",
+    valueFormatter: (params) =>
+      liveOnly && params.data?.env === ENV_MOCK ? "—" : params.value == null ? "" : Number(params.value).toLocaleString("ko-KR"),
     valueGetter: (params) => {
       const raw = params.data?.[field];
       return raw === "" || raw === undefined ? null : Number(raw);
@@ -848,7 +901,7 @@ export function AccountSettingsManager() {
    *  않았다(값은 바뀌어 저장은 됐다). 초안 값을 그대로 그리고 onChange 로만 바꾸면
    *  화면과 값이 항상 같다. */
   const booleanCol = (
-    field: "mix_enabled" | "ma_alarm_enabled" | "stoploss_alarm_enabled",
+    field: "mix_enabled" | "ma_alarm_enabled" | "stoploss_alarm_enabled" | "api_order_enabled",
     headerName: string,
     width: number,
     headerTooltip: string,
@@ -862,6 +915,8 @@ export function AccountSettingsManager() {
     cellRenderer: (params: { data?: AccountGridRow }) => {
       const row = params.data;
       if (!row) return null;
+      // 모의 계좌는 합성·알림 대상이 아니다 — 체크박스 대신 막힌 표시.
+      if (row.env === ENV_MOCK) return <span style={mutedStyle}>—</span>;
       return (
         <input
           type="checkbox"
@@ -877,6 +932,12 @@ export function AccountSettingsManager() {
   const columnDefs: ColDef<AccountGridRow>[] = [
     { field: "account_id", headerName: "ID", width: 130 },
     { field: "name", headerName: "이름", width: 150, editable: true },
+    {
+      field: "env",
+      headerName: "구분",
+      width: 70,
+      valueFormatter: (params) => ENV_LABELS[String(params.value)] ?? String(params.value),
+    },
     { field: "icon", headerName: "아이콘", width: 62, editable: true },
     numberCol("order", "순서", 64),
     selectCol("country_code", "국가", 82, () => [...COUNTRY_OPTIONS]),
@@ -919,7 +980,7 @@ export function AccountSettingsManager() {
         const row = params.data;
         if (!row?.brokerProvider) return "없음";
         return row.brokerAccountNo
-          ? `${row.brokerProvider} · ${row.brokerAccountNo.slice(0, 3)}***${row.brokerAccountNo.slice(-2)}`
+          ? `${row.brokerProvider} · ${row.brokerAccountNo.slice(0, 4)}***${row.brokerAccountNo.slice(-2)}`
           : `${row.brokerProvider} (계좌 미선택)`;
       },
     },
@@ -935,6 +996,38 @@ export function AccountSettingsManager() {
       88,
       "보유 종목의 수익률이 그 종목이 속한 종목풀의 손절 기준 이하면 알립니다.",
     ),
+    booleanCol(
+      "api_order_enabled",
+      "주문허용",
+      88,
+      "운영 계좌의 API 주문 스위치 — 꺼져 있으면 주문이 나가지 않습니다. 켜려면 아래 하루 한도를 먼저 입력하세요.",
+    ),
+    numberCol("api_order_max_count", "일 건수", 78, true, "하루 API 주문 건수 한도(운영 계좌). 비우면 주문이 막힙니다."),
+    numberCol("api_order_max_amount_krw", "일 금액(원)", 120, true, "하루 API 주문 금액 한도(원, 운영 계좌). 비우면 주문이 막힙니다."),
+    {
+      headerName: "API 주문",
+      width: 104,
+      sortable: false,
+      headerClass: "settingsCenterHeader",
+      headerTooltip: "증권사 연동 계좌로 지정가 주문·취소·체결 조회를 합니다. 운영 계좌는 실제 주문이 나갑니다.",
+      cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+      cellRenderer: (params: ICellRendererParams<AccountGridRow>) => {
+        const row = params.data;
+        if (!row) return null;
+        return (
+          <button
+            type="button"
+            className={`btn btn-sm ${row.env === ENV_LIVE ? "btn-outline-danger" : "btn-outline-success"}`}
+            style={{ padding: "0 8px", lineHeight: 1.4 }}
+            disabled={!row.__brokerLinked}
+            title={row.__brokerLinked ? undefined : "증권사 API 연동 계좌를 먼저 저장하세요."}
+            onClick={() => setMockOrderId(row.account_id)}
+          >
+            열기
+          </button>
+        );
+      },
+    },
     {
       headerName: "상세",
       width: 64,
@@ -1091,6 +1184,15 @@ export function AccountSettingsManager() {
           savedBrokerAccountNo={detailAccount?.broker_api?.account_no ?? ""}
           onChange={(patch) => updateDraft(detailId, patch)}
           onClose={() => setDetailId(null)}
+        />
+      ) : null}
+
+      {mockOrderId ? (
+        <ApiOrderModal
+          isLive={accounts.find((account) => account.account_id === mockOrderId)?.env === ENV_LIVE}
+          accountName={accounts.find((account) => account.account_id === mockOrderId)?.name ?? mockOrderId}
+          accountNo={accounts.find((account) => account.account_id === mockOrderId)?.broker_api?.account_no ?? ""}
+          onClose={() => setMockOrderId(null)}
         />
       ) : null}
 

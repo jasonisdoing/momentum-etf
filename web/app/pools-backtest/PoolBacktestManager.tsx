@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef, GridOptions } from "ag-grid-community";
 
 import { formatPoolLabel } from "@/lib/pool-label";
@@ -63,7 +63,7 @@ type PoolOption = {
   name: string;
   order: number;
   icon: string;
-  settings?: Partial<Record<"SHORT_MA_DAYS" | "LONG_MA_DAYS", PoolSettingField>>;
+  settings?: Partial<Record<"SHORT_MA_DAYS" | "LONG_MA_DAYS" | "MOVING_AVERAGE_TYPE", PoolSettingField>>;
 };
 type PoolSettingsResponse = {
   pools?: PoolOption[];
@@ -107,6 +107,9 @@ export function PoolBacktestManager() {
   const toast = useToast();
   const [pools, setPools] = useState<PoolOption[]>([]);
   const [poolId, setPoolId] = useState("");
+  const maType = String(pools.find((pool) => pool.ticker_type === poolId)?.settings?.MOVING_AVERAGE_TYPE?.value ?? "");
+  /** 마지막 실행 요청 번호 — 풀·조건을 바꿔 다시 실행했을 때 이전 실행의 늦은 응답을 버린다. */
+  const runSequenceRef = useRef(0);
   const [forwardDays, setForwardDays] = useState(5);
   const [months, setMonths] = useState(12);
   const [monthOptions, setMonthOptions] = useState(MONTH_OPTIONS);
@@ -183,7 +186,7 @@ export function PoolBacktestManager() {
             );
           }
           if (list.length > 0) {
-            const rem = readRememberedTickerType();
+            const rem = readRememberedTickerType("pools-backtest");
             const defaultPool = rem && list.some((p) => p.ticker_type === rem) ? rem : list[0].ticker_type;
             setPoolId(defaultPool);
           }
@@ -201,7 +204,7 @@ export function PoolBacktestManager() {
   useEffect(() => {
     const pool = pools.find((p) => p.ticker_type === poolId);
     if (!pool?.settings) return;
-    setTopN(null); // 비우면 시스템 공통 보유 종목 수(config.TOP_N_HOLD) — 실험용 덮어쓰기만 입력
+    setTopN(null); // 비우면 선택한 풀의 보유종목 수 — 값이 있으면 이번 실험에서만 덮어쓴다.
     setShortMa(fieldToInt(pool.settings.SHORT_MA_DAYS));
     setLongMa(fieldToInt(pool.settings.LONG_MA_DAYS));
   }, [poolId, pools]);
@@ -213,6 +216,7 @@ export function PoolBacktestManager() {
     }
     setLoading(true);
     setError(null);
+    const requestSequence = ++runSequenceRef.current;
     try {
       const params = new URLSearchParams({ pool_id: poolId, forward_days: String(forwardDays), months: String(months) });
       if (topN != null) params.set("top_n", String(topN));
@@ -221,13 +225,15 @@ export function PoolBacktestManager() {
       if (holdK != null) params.set("hold_threshold_k", String(holdK));
       const resp = await fetch(`/api/pool-backtest?${params.toString()}`, { cache: "no-store" });
       const payload = (await resp.json()) as BacktestResult & { detail?: string };
+      if (requestSequence !== runSequenceRef.current) return; // 조건을 바꿔 다시 실행한 뒤 도착한 이전 응답
       if (!resp.ok || payload.error) throw new Error(payload.error ?? payload.detail ?? "백테스트에 실패했습니다.");
       setResult(payload);
     } catch (e) {
+      if (requestSequence !== runSequenceRef.current) return;
       setError(e instanceof Error ? e.message : "백테스트에 실패했습니다.");
       setResult(null);
     } finally {
-      setLoading(false);
+      if (requestSequence === runSequenceRef.current) setLoading(false);
     }
   }, [forwardDays, months, poolId, topN, shortMa, longMa, holdK, toast]);
 
@@ -246,7 +252,7 @@ export function PoolBacktestManager() {
                     onChange={(e) => {
                       const val = e.target.value;
                       setPoolId(val);
-                      writeRememberedTickerType(val);
+                      writeRememberedTickerType("pools-backtest", val);
                     }}
                   >
                     {pools.length === 0 ? <option value="">불러오는 중…</option> : null}
@@ -288,11 +294,11 @@ export function PoolBacktestManager() {
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 104, flex: "0 0 auto" }}>
                   <span className="appLabeledFieldLabel">단기 이평선</span>
-                  <MaDaysSelect value={shortMa} options={maOptions.short_ma_options} onChange={setShortMa} />
+                  <MaDaysSelect maType={maType} value={shortMa} options={maOptions.short_ma_options} onChange={setShortMa} />
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 104, flex: "0 0 auto" }}>
                   <span className="appLabeledFieldLabel">장기 이평선</span>
-                  <MaDaysSelect value={longMa} options={maOptions.long_ma_options} onChange={setLongMa} />
+                  <MaDaysSelect maType={maType} value={longMa} options={maOptions.long_ma_options} onChange={setLongMa} />
                 </label>
                 <label className="appLabeledField" style={{ minWidth: 120, flex: "0 0 auto" }}>
                   <span
@@ -341,7 +347,7 @@ export function PoolBacktestManager() {
 
       {result ? (
         <>
-          {/* 현재 설정 그대로 돌렸을 때의 기간 실적 — 순위 화면의 추천(✅) 규칙과 동일 */}
+          {/* 현재 설정 그대로 돌렸을 때의 기간 실적 — 공통 순위·진입 자격 규칙을 쓴다. */}
           {result.performance ? (
             <div className="card appCard">
               <div className="card-body">
@@ -354,7 +360,7 @@ export function PoolBacktestManager() {
                   </span>
                 </div>
                 <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", margin: "0 0 10px" }}>
-                  순위 화면의 추천(✅)과 같은 규칙: 이격 상위 {result.performance.top_n_hold}종목, 단기이격이 음수면 제외.
+                  순위·진입 자격 규칙: 이격 상위 {result.performance.top_n_hold}종목, 단기이격이 음수면 제외.
                   {result.forward_days}일마다 리밸런싱({result.performance.rounds}회
                   {result.performance.cash_rounds > 0 ? `, 전부 현금 ${result.performance.cash_rounds}회` : ""}
                   {result.performance.partial_rounds > 0 ? `, 일부 현금 ${result.performance.partial_rounds}회` : ""}).

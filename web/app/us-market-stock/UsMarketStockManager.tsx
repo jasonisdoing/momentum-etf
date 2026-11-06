@@ -5,7 +5,7 @@ import { IconPlus } from "@tabler/icons-react";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
-import { INDUSTRY_COLUMN_MIN_WIDTH, INDUSTRY_COLUMN_WIDTH, renderIndustryCell } from "@/lib/grid-cells";
+import { industryColumn, sectorColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { useLatestRequest } from "@/lib/use-latest-request";
 import { loadStocksTable } from "@/lib/stocks-store";
@@ -14,9 +14,15 @@ import type { PoolAddProgress } from "@/lib/pool-add";
 import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
+import {
+  TopCountSelect,
+  readRememberedTopCount,
+  stepTopOptions,
+  withCurrentTopOption,
+  writeRememberedTopCount,
+} from "../components/TopCountSelect";
 import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
-import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import {
@@ -50,6 +56,9 @@ type UsMarketStockRow = {
   return_12m_base_price: number | null;
   return_12m_pct: number | null;
   mdd_12m_pct: number | null;
+  sortino_12m: number | null;
+  /** 같은 회사의 클래스 중복(GOOGL/GOOG 등) — 배치가 거래량 큰 클래스만 대표로 남긴다. */
+  duplicate_class?: boolean;
 };
 
 type UsMarketStockGridRow = UsMarketStockRow & {
@@ -66,11 +75,11 @@ type UsMarketStocksResponse = {
 };
 
 const usMarketStockGridTheme = createAppGridTheme();
-// 화면에서 고르는 보기 — `통합` 은 두 지수를 합쳐 중복 종목을 한 번만 센다.
+// 화면에서 고르는 보기 — `통합` 은 두 지수(S&P500·나스닥100)를 합쳐 중복 종목을 한 번만 센다.
 const VIEW_OPTIONS = [
   { key: "COMBINED", label: "통합", indices: ["SP500", "NDX100"] },
-  { key: "SP500", label: "S&P", indices: ["SP500"] },
-  { key: "NDX100", label: "나스닥", indices: ["NDX100"] },
+  { key: "SP500", label: "S&P500", indices: ["SP500"] },
+  { key: "NDX100", label: "나스닥100", indices: ["NDX100"] },
 ] as const;
 type ViewOption = (typeof VIEW_OPTIONS)[number]["key"];
 
@@ -79,57 +88,17 @@ function viewIndices(view: ViewOption): readonly string[] {
 }
 
 // 시총 상위 몇 개까지 볼지 — 응답이 시총 순 정렬이라 상위 N 절단으로 처리한다.
-// null 이면 전체(절단 없음).
-// 통합은 두 지수를 합쳐 600 종목에 가까워 100 단위로는 구간이 너무 성기다 → 50 단위.
-// 단일 지수는 종목 수가 적어 100 단위 그대로 둔다.
-// 마지막으로 고른 상위 N — 다음 방문에도 같은 범위로 열리게 기억한다.
-// 키 형식은 시스템 공통(`momentum-etf:<화면>:<항목>`)을 따른다.
+// null 이면 전체(절단 없음). 셀렉트·저장·선택지 생성은 한국 개별주와 공용(TopCountSelect).
 const US_MARKET_TOP_COUNT_KEY = "momentum-etf:us-market-stock:top-count";
 
-/** 저장된 상위 N. `"all"`(전체)이거나 값이 없으면 null. */
-function readRememberedTopCount(): number | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  const raw = window.localStorage.getItem(US_MARKET_TOP_COUNT_KEY);
-  if (!raw || raw === "all") {
-    return null;
-  }
-  const parsed = Number(raw);
-  // 못 읽는 값은 전체로 둔다 — 임의의 숫자로 잘라 보여주면 무엇이 적용됐는지 알 수 없다.
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function writeRememberedTopCount(value: number | null): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(US_MARKET_TOP_COUNT_KEY, value === null ? "all" : String(value));
-}
-
+// 통합은 두 지수를 합쳐 600 종목에 가까워 100 단위로는 구간이 너무 성기다 → 50 단위. 지수 탭은 고정 선택지.
 const COMBINED_TOP_STEP = 50;
 const SINGLE_TOP_OPTIONS: readonly (number | null)[] = [null, 100, 200, 300, 400, 500];
 
-/**
- * 보기별 상위 N 선택지. 통합은 실제 종목 수까지만 50 단위로 채운다
- * (전체 개수 이상은 `전체` 와 같은 결과라 만들지 않는다).
- *
- * 지금 고른 값이 목록에 없으면 함께 노출한다 — 빼면 셀렉트가 빈칸이 되어
- * 무엇이 적용 중인지 알 수 없다.
- */
 function topOptions(view: ViewOption, rowCount: number, current: number | null): (number | null)[] {
-  const options: (number | null)[] =
-    view === "COMBINED"
-      ? [null, ...Array.from(
-          { length: Math.max(0, Math.ceil(rowCount / COMBINED_TOP_STEP) - 1) },
-          (_, i) => (i + 1) * COMBINED_TOP_STEP,
-        )]
-      : [...SINGLE_TOP_OPTIONS];
-  if (current !== null && !options.includes(current)) {
-    options.push(current);
-    options.sort((a, b) => (a ?? -1) - (b ?? -1));
-  }
-  return options;
+  return view === "COMBINED"
+    ? stepTopOptions(COMBINED_TOP_STEP, rowCount, current)
+    : withCurrentTopOption([...SINGLE_TOP_OPTIONS], current);
 }
 
 function formatUsd(value: number | null): string {
@@ -174,7 +143,7 @@ function isUsTickerPool(pool: StocksAccountItem): boolean {
 export function UsMarketStockManager({
   onSummaryChange,
 }: {
-  onSummaryChange?: (summary: { index: string; count: number; totalCount: number }) => void;
+  onSummaryChange?: (summary: { count: number; totalCount: number }) => void;
 }) {
   const [view, setView] = useState<ViewOption>("COMBINED");
   const [topCount, setTopCount] = useState<number | null>(null);
@@ -182,6 +151,9 @@ export function UsMarketStockManager({
   const [rows, setRows] = useState<UsMarketStockRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [tickerPools, setTickerPools] = useState<StocksAccountItem[]>([]);
+  const [tickerSearch, setTickerSearch] = useState("");
+  // 같은 회사의 클래스 중복(GOOGL/GOOG 등)은 기본으로 숨긴다 — 켜면 전부 보인다.
+  const [showDuplicateClasses, setShowDuplicateClasses] = useState(false);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
   const [registeredTickers, setRegisteredTickers] = useState<Set<string>>(new Set());
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -196,7 +168,7 @@ export function UsMarketStockManager({
   // 마지막으로 고른 상위 N 복원 — 서버 렌더에는 localStorage 가 없어 초기값으로 못 쓴다.
   // 상위 N 은 이미 받아둔 행을 자르기만 해서(재조회 없음) 늦게 반영돼도 값싸다.
   useEffect(() => {
-    setTopCount(readRememberedTopCount());
+    setTopCount(readRememberedTopCount(US_MARKET_TOP_COUNT_KEY));
   }, []);
 
   const toast = useToast();
@@ -265,17 +237,27 @@ export function UsMarketStockManager({
     void load(view, minMarketCapUkm);
   }, [view, minMarketCapUkm, load]);
 
-  // 시총 상위 N 만 표시 (전체면 절단 없음). rows 는 이미 시총 내림차순이다.
-  const visibleRows = useMemo(
-    () => (topCount === null ? rows : rows.slice(0, topCount)),
-    [rows, topCount],
+  // 중복 클래스 필터는 절단 전에 적용한다 — 숨긴 만큼 다음 순위가 올라온다.
+  const dedupedRows = useMemo(
+    () => (showDuplicateClasses ? rows : rows.filter((row) => !row.duplicate_class)),
+    [rows, showDuplicateClasses],
   );
 
-  const topChoices = useMemo(() => topOptions(view, rows.length, topCount), [view, rows.length, topCount]);
+
+  // 시총 상위 N 만 표시 (전체면 절단 없음). rows 는 이미 시총 내림차순이다.
+  const visibleRows = useMemo(
+    () => (topCount === null ? dedupedRows : dedupedRows.slice(0, topCount)),
+    [dedupedRows, topCount],
+  );
+
+  const topChoices = useMemo(
+    () => topOptions(view, dedupedRows.length, topCount),
+    [view, dedupedRows.length, topCount],
+  );
 
   useEffect(() => {
-    onSummaryChange?.({ index: view, count: visibleRows.length, totalCount });
-  }, [view, visibleRows.length, totalCount, onSummaryChange]);
+    onSummaryChange?.({ count: visibleRows.length, totalCount });
+  }, [visibleRows.length, totalCount, onSummaryChange]);
 
   // `#` 은 지금 보고 있는 목록에서의 위치다. 백엔드가 준 rank 는 지수 안에서의 순위라
   // 통합 보기에서는 두 지수의 번호가 섞여 중복·누락이 생긴다(상위 150 인데 144 까지만 보이는 등).
@@ -285,9 +267,21 @@ export function UsMarketStockManager({
     [visibleRows],
   );
 
+  // 검색 — 순위 화면과 같은 방식(티커·종목명 부분 일치). `#` 번호는 전체 목록 기준을 유지한다.
+  const searchedGridRows = useMemo(() => {
+    const query = tickerSearch.trim().toLocaleLowerCase();
+    if (!query) return gridRows;
+    return gridRows.filter((row) => {
+      const ticker = String(row.ticker ?? "").toLocaleLowerCase();
+      const name = String(row.name ?? "").toLocaleLowerCase();
+      const englishName = String(row.english_name ?? "").toLocaleLowerCase();
+      return ticker.includes(query) || name.includes(query) || englishName.includes(query);
+    });
+  }, [gridRows, tickerSearch]);
+
   const allVisibleSelected = useMemo(() => {
-    return gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker));
-  }, [gridRows, selectedTickers]);
+    return searchedGridRows.length > 0 && searchedGridRows.every((row) => selectedTickers.includes(row.ticker));
+  }, [searchedGridRows, selectedTickers]);
 
   const toggleTickerSelection = useCallback((ticker: string) => {
     setSelectedTickers((current) =>
@@ -296,7 +290,7 @@ export function UsMarketStockManager({
   }, []);
 
   const toggleSelectAllVisible = useCallback(() => {
-    const selectableTickers = gridRows
+    const selectableTickers = searchedGridRows
       .map((row) => row.ticker);
     setSelectedTickers((current) => {
       if (selectableTickers.length === 0) return current;
@@ -306,13 +300,13 @@ export function UsMarketStockManager({
       }
       return [...new Set([...current, ...selectableTickers])];
     });
-  }, [gridRows, registeredTickers]);
+  }, [searchedGridRows, registeredTickers]);
 
   const handleOpenAddModal = useCallback(() => {
     if (selectedTickers.length === 0) return;
 
     const stockPools = tickerPools.filter(isUsTickerPool);
-    const remembered = readRememberedTickerType();
+    const remembered = readRememberedTickerType("market-stock-us");
 
     if (remembered && stockPools.some((p) => p.ticker_type === remembered)) {
       setSelectedTickerPool(remembered);
@@ -390,6 +384,7 @@ export function UsMarketStockManager({
       {
         headerName: "#",
         field: "rank",
+        pinned: "left",
         width: 64,
         minWidth: 56,
         maxWidth: 76,
@@ -400,49 +395,18 @@ export function UsMarketStockManager({
       {
         headerName: "종목풀",
         field: "ticker_pools",
+        pinned: "left",
         width: 108,
         maxWidth: 160,
         cellClass: "usMarketStockTextCell",
         cellRenderer: (params: { value: string }) => renderTruncatedText(params.value),
       },
-      {
-        headerName: "티커",
-        field: "ticker",
-        width: 104,
-        minWidth: 88,
-        cellStyle: {
-          fontFamily: "var(--font-mono, monospace)",
-          fontSize: "var(--fs-sm)",
-        } as CellStyle,
-        cellRenderer: (params: { value?: string }) => {
-          const raw = String(params.value ?? "").trim();
-          return <TickerDetailLink ticker={raw} displayTicker={raw} />;
-        },
-      },
-      {
-        headerName: "종목명",
-        field: "name",
-        flex: 1,
-        minWidth: 180,
-        cellClass: "usMarketStockTextCell",
-        cellRenderer: (params: { value?: string }) => renderTruncatedText(params.value),
-      },
-      {
-        headerName: "섹터",
-        field: "sector",
-        width: 160,
-        minWidth: 120,
-        cellClass: "usMarketStockTextCell",
-        cellRenderer: (params: { value?: string }) => renderTruncatedText(params.value),
-      },
-      {
-        headerName: "업종",
-        field: "industry",
-        width: INDUSTRY_COLUMN_WIDTH,
-        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
-        cellClass: "usMarketStockTextCell",
-        cellRenderer: (params: { value?: string }) => renderIndustryCell(params.value),
-      },
+      // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
+      // 종목명 표기도 공용(2줄 말줄임·레버리지 💣) — 화면 고유 1줄 말줄임을 대체한다.
+      tickerColumn<UsMarketStockGridRow>({ width: 104, minWidth: 88, mono: true }),
+      stockNameColumn<UsMarketStockGridRow>({ nameOptions: (row) => ({ isHeld: row?.is_held }) }),
+      sectorColumn<UsMarketStockGridRow>({ cellClass: "usMarketStockTextCell", width: 160, minWidth: 120 }),
+      industryColumn<UsMarketStockGridRow>({ cellClass: "usMarketStockTextCell" }),
       {
         headerName: "일간(%)",
         field: "change_pct",
@@ -506,6 +470,18 @@ export function UsMarketStockManager({
         minWidth: 122,
         type: "rightAligned",
         valueFormatter: (p) => formatPercent(p.value),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
+      },
+      {
+        headerName: "소르티노(12개월)",
+        field: "sortino_12m",
+        width: 132,
+        minWidth: 122,
+        type: "rightAligned",
+        valueFormatter: (p) => (p.value == null ? "-" : Number(p.value).toFixed(2)),
         cellClassRules: {
           metricPositive: (p) => p.value != null && p.value > 0,
           metricNegative: (p) => p.value != null && p.value < 0,
@@ -582,33 +558,21 @@ export function UsMarketStockManager({
                             ? "btn appSegmentedToggleButton is-active"
                             : "btn appSegmentedToggleButton"
                         }
-                        title={option.key === "COMBINED" ? "S&P 500 과 나스닥 100 의 합집합" : undefined}
+                        title={option.key === "COMBINED" ? "S&P500·나스닥100의 합집합" : undefined}
                         onClick={() => setView(option.key)}
                       >
                         {option.label}
                       </button>
                     ))}
-                    <select
-                      value={topCount === null ? "all" : String(topCount)}
-                      onChange={(event) => {
-                        const next = event.target.value === "all" ? null : Number(event.target.value);
+                    <TopCountSelect
+                      value={topCount}
+                      options={topChoices}
+                      totalCount={dedupedRows.length}
+                      onChange={(next) => {
                         setTopCount(next);
-                        writeRememberedTopCount(next);
+                        writeRememberedTopCount(US_MARKET_TOP_COUNT_KEY, next);
                       }}
-                      style={{
-                        border: "1px solid rgba(148,163,184,0.4)",
-                        borderRadius: 6,
-                        padding: "3px 6px",
-                        fontSize: "var(--fs-sm)",
-                        marginLeft: 6,
-                      }}
-                    >
-                      {topChoices.map((count) => (
-                        <option key={count ?? "all"} value={count === null ? "all" : String(count)}>
-                          {count === null ? "전체" : `상위 ${count}`}
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </div>
                 </label>
 
@@ -620,6 +584,32 @@ export function UsMarketStockManager({
                     value={minMarketCapUkm}
                     onChange={(e) => setMinMarketCapUkm(e.target.value.replace(/[^\d]/g, ""))}
                     placeholder="최소 시가총액(억 달러)"
+                  />
+                </label>
+
+                <label className="appLabeledField" title="같은 회사의 클래스 중복 티커(GOOGL/GOOG 등)를 표시할지 — 기본은 거래량 큰 클래스만 남깁니다.">
+                  <span className="appLabeledFieldLabel">중복 티커 보이기</span>
+                  <div className="form-check form-switch" style={{ paddingLeft: "2.6em", marginTop: 6 }}>
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      role="switch"
+                      checked={showDuplicateClasses}
+                      aria-label="중복 티커 보이기"
+                      onChange={(event) => setShowDuplicateClasses(event.target.checked)}
+                    />
+                  </div>
+                </label>
+
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">검색</span>
+                  <input
+                    className="form-control"
+                    type="search"
+                    value={tickerSearch}
+                    placeholder="티커 또는 종목명"
+                    aria-label="티커 또는 종목명 검색"
+                    onChange={(event) => setTickerSearch(event.target.value)}
                   />
                 </label>
               </div>
@@ -648,7 +638,7 @@ export function UsMarketStockManager({
           <div className="appGridFillWrap">
             <AppAgGrid<UsMarketStockGridRow>
               className="usMarketStockGrid"
-              rowData={gridRows}
+              rowData={searchedGridRows}
               columnDefs={columnDefs}
               loading={loading}
               theme={usMarketStockGridTheme}
@@ -693,7 +683,7 @@ export function UsMarketStockManager({
               onChange={(event) => {
                 const nextType = event.target.value;
                 setSelectedTickerPool(nextType);
-                if (nextType) writeRememberedTickerType(nextType);
+                if (nextType) writeRememberedTickerType("market-stock-us", nextType);
               }}
             >
               <option value="">종목풀 선택</option>

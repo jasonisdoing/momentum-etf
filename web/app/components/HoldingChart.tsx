@@ -7,6 +7,8 @@
  *  신고가는 이탈 이평선 1줄, 모멘텀은 단기·장기 2줄. 색은 여기 팔레트 순서로 정한다.
  */
 
+import { formatMaLabel } from "./MaDaysSelect";
+
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -21,6 +23,7 @@ import type { IChartApi, Time } from "lightweight-charts";
 
 import { formatMonthDayWithWeekday } from "@/lib/datetime";
 import { getSignedNullableClass } from "../assets/assets-helpers";
+import { PRICE_SCALE_BOTTOM_WITH_VOLUME, addVolumeHistogram } from "@/lib/chart-volume";
 import { formatCurrencyPrice, priceDecimals } from "@/lib/price-format";
 
 export type HoldingChartData = {
@@ -28,10 +31,13 @@ export type HoldingChartData = {
   name: string;
   /** 전략명(모멘텀·신고가·포트폴리오) — 합성처럼 카드마다 다른 화면은 백엔드가 내려준다. */
   strategy_label?: string;
-  candles: { time: string; open: number; high: number; low: number; close: number }[];
-  ma_lines: { ma_days: number; points: { time: string; value: number }[] }[];
+  /** `volume` 은 가격 캐시에 거래량이 없는 봉이면 null — 그 봉은 막대를 그리지 않는다. */
+  candles: { time: string; open: number; high: number; low: number; close: number; volume?: number | null }[];
+  ma_lines: { ma_days: number; ma_type: string; points: { time: string; value: number }[] }[];
   /** 내 평균 매입가 — 실제로 들고 있는 종목에만 온다(`/ticker` 상세와 같은 값). */
   avg_buy_price?: number | null;
+  /** 차트에 평단 점선·배지를 그릴지(config.HOLDING_CHART_SHOW_AVG_BUY_PRICE). 수익률 배지는 이 값과 무관하다. */
+  show_avg_line?: boolean;
   /** 통화(KRW·USD·AUD) — 가격에 기호를 붙이는 데 쓴다. 풀마다 다르다. */
   currency?: string | null;
   /** 이 요청의 차트들이 공유하는 날짜 축 — 전체 거래일 수와, 창 시작부터 첫 캔들까지의 빈 칸 수.
@@ -39,6 +45,13 @@ export type HoldingChartData = {
   window_bars?: number | null;
   leading_bars?: number | null;
 };
+
+function actualReturnPct(chart: HoldingChartData): number | null {
+  const buyPrice = chart.avg_buy_price;
+  const lastClose = chart.candles[chart.candles.length - 1]?.close;
+  if (buyPrice == null || !Number.isFinite(buyPrice) || buyPrice <= 0 || lastClose == null || !Number.isFinite(lastClose) || lastClose <= 0) return null;
+  return (lastClose / buyPrice - 1) * 100;
+}
 
 /** 카드 오른쪽 배지 하나. 색은 화면이 정한다(전략 배지와 같은 모양을 쓴다). */
 export type ChartBadge = {
@@ -68,6 +81,7 @@ type Props = {
    *  순위 화면처럼 보유 개념이 없고 순위·고점 같은 다른 값을 보여줄 때 쓴다. */
   badges?: ChartBadge[];
   height?: number;
+  stackedHeader?: boolean;
 };
 
 // 한국 관례 — 상승 빨강, 하락 파랑. 다른 화면(티커 상세)과 같은 색을 쓴다.
@@ -87,7 +101,7 @@ const badgeStyle: React.CSSProperties = {
   fontWeight: 700,
 };
 
-export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, daysUnit = "일", daysLabel, strategyLabel, badges, height = 320 }: Props) {
+export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, daysUnit = "일", daysLabel, strategyLabel, badges, height = 320, stackedHeader = false }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   // 내 평균 배지 — 평단 선 높이에 맞춰 왼쪽에 띄운다(`/ticker` 상세와 같은 표기).
@@ -105,7 +119,8 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
       height,
       layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#5b6778", fontSize: 12 },
       grid: { vertLines: { color: "#f0f2f5" }, horzLines: { color: "#f0f2f5" } },
-      rightPriceScale: { borderColor: "#e6e8ec", scaleMargins: { top: 0.1, bottom: 0.08 } },
+      // 아래는 거래량 영역이라 캔들 축이 비워 둔다(`/ticker` 상세와 같은 비율).
+      rightPriceScale: { borderColor: "#e6e8ec", scaleMargins: { top: 0.1, bottom: PRICE_SCALE_BOTTOM_WITH_VOLUME } },
       timeScale: { borderColor: "#e6e8ec", timeVisible: false },
       handleScroll: false,
       handleScale: false,
@@ -124,7 +139,10 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
         formatter: (price: number) => formatCurrencyPrice(price, currency),
       },
     });
-    candles.setData(chart.candles.map((row) => ({ ...row, time: row.time as Time })));
+    candles.setData(
+      chart.candles.map((row) => ({ time: row.time as Time, open: row.open, high: row.high, low: row.low, close: row.close })),
+    );
+    addVolumeHistogram(api, chart.candles.map((row) => ({ time: row.time, close: row.close, volume: row.volume ?? null })));
 
     chart.ma_lines.forEach((line, index) => {
       api.addSeries(LineSeries, {
@@ -144,7 +162,7 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
     }
     // 내 평균 매입가 — 실제로 들고 있으면 점선으로 긋는다(`/ticker` 상세와 같은 표기).
     // 전략의 진입가(Buy 마커)와 다르다: 이건 여러 계좌를 합친 내 실제 평단이다.
-    const avgBuyPrice = chart.avg_buy_price;
+    const avgBuyPrice = chart.show_avg_line ? chart.avg_buy_price : null;
     if (avgBuyPrice != null && Number.isFinite(avgBuyPrice) && avgBuyPrice > 0) {
       candles.createPriceLine({
         price: avgBuyPrice,
@@ -179,10 +197,9 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
         setAverageBadge(null);
         return;
       }
-      const lastClose = chart.candles[chart.candles.length - 1]?.close ?? null;
       setAverageBadge({
         top: Math.max(4, Math.min(y - 14, el.clientHeight - 30)),
-        returnPct: lastClose != null && lastClose > 0 ? (lastClose / avgBuyPrice - 1) * 100 : null,
+        returnPct: actualReturnPct(chart),
       });
     }
     updateAverageBadge(container);
@@ -202,13 +219,11 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
   }, [chart, entryDate, entryPrice, height]);
 
   const returnColor = returnPct == null || returnPct === 0 ? "inherit" : returnPct > 0 ? UP : DOWN;
+  const actualReturn = stackedHeader ? actualReturnPct(chart) : null;
 
   return (
     <div className="card appCard" style={{ padding: "12px 14px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        {/* [전략명] 티커 종목명 — 세 화면 공통 표기. */}
-        {/* 이름이 길어도 카드 높이가 늘지 않게 한 줄로 자른다 — 카드가 2열이라 한 장만 높아지면
-            옆 카드까지 같이 늘어난다. minWidth:0 이 없으면 flex 자식이 줄지 않아 말줄임이 안 걸린다. */}
+      <div style={{ display: "flex", flexDirection: stackedHeader ? "column" : "row", alignItems: stackedHeader ? "stretch" : "center", gap: 8, marginBottom: 8 }}>
         <strong
           style={{
             fontSize: "var(--fs-base)",
@@ -217,16 +232,16 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
           }}
-          title={`${chart.ticker} ${chart.name}`}
+          title={stackedHeader ? `${chart.name} - ${chart.ticker}` : `${chart.ticker} ${chart.name}`}
         >
-          {(() => {
+          {stackedHeader ? `${chart.name} - ${chart.ticker}` : (() => {
             const label = strategyLabel ?? chart.strategy_label;
             return `${label ? `[${label}] ` : ""}${chart.ticker} ${chart.name}`;
           })()}
         </strong>
         {/* 오른쪽 배지 — 산 날 → 들고 있는 기간 → 수익률 순. 왼쪽부터 시간 순으로 읽힌다.
             `badges` 를 주면 화면이 정한 배지로 통째로 갈아 끼운다(순위 화면). */}
-        <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+        <span style={{ marginLeft: stackedHeader ? 0 : "auto", display: "flex", alignItems: "center", gap: 6, flexShrink: 0, flexWrap: stackedHeader ? "wrap" : "nowrap" }}>
           {badges ? (
             badges.map((badge) => (
               <span
@@ -255,11 +270,20 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
           ) : null}
           {returnPct != null ? (
             <span style={{ ...badgeStyle, border: "1px solid rgba(148,163,184,0.45)" }}>
-              수익률 <span style={{ color: returnColor }}>{`${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(2)}%`}</span>
+              {stackedHeader ? "전략수익률 " : "수익률 "}<span style={{ color: returnColor }}>{`${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(2)}%`}</span>
             </span>
           ) : (
             <span style={{ ...badgeStyle, background: "#fff0f0", color: UP }}>진입 예정</span>
           )}
+          {stackedHeader ? (
+            <span style={{ ...badgeStyle, border: "1px solid rgba(148,163,184,0.45)" }}>
+              수익률: {actualReturn == null ? "N/A" : (
+                <span style={{ color: actualReturn > 0 ? UP : actualReturn < 0 ? DOWN : "inherit" }}>
+                  {`${actualReturn >= 0 ? "+" : ""}${actualReturn.toFixed(2)}%`}
+                </span>
+              )}
+            </span>
+          ) : null}
             </>
           )}
         </span>
@@ -281,7 +305,7 @@ export function HoldingChart({ chart, entryDate, entryPrice, returnPct, days, da
         >
           {chart.ma_lines.map((line, index) => (
             <span key={line.ma_days} style={{ color: MA_COLORS[index % MA_COLORS.length] }}>
-              MA{line.ma_days}
+              {formatMaLabel(line.ma_days, line.ma_type)}
             </span>
           ))}
         </span>

@@ -1,52 +1,56 @@
 """모멘텀 전략 튜닝 — 설정 항목들의 범위 조합을 한 번에 백테스트해 비교한다.
 
-화면 '튜닝' 섹션용. 축(화면 순서): 선정 이평(단기·장기) · ADR 하한 · 주중 손절선.
-종목 수는 시스템 공통(config.TOP_N_HOLD) 고정, 업종 상한은 폐기 — 튜닝은 "그 시장이 어떤
-이동평균에 반응하는가"와 손절 기준을 재는 용도로만 쓴다(종목 수까지 돌리면 과적합 탐색이 된다).
+화면 '튜닝' 섹션용. 축(화면 순서): 선정 이평(단기·장기) · 진입 문턱 · ADR 하한.
+종목 수는 풀 설정(`pool_settings.TOP_N_HOLD`)으로 고정한다.
 (단기, 장기) 쌍을 작업 단위로 별도 프로세스에서 병렬로 돌린다 — 각 프로세스는 가격·판정일별
 후보를 한 번 읽어 그 쌍의 전 조합에 공유(run_backtest 의 context)하므로 조합당 0.5초 수준이고,
 병렬 수(코어 수 − 1)만큼 전체 시간이 줄어든다.
-
-주중 손절선 축의 값
-  "off"  → 주중 이탈 미사용
-  "none" → 주중 이탈 사용, 손절선 없음(이평선 이탈만)
-  숫자   → 주중 이탈 사용 + 그 손절선(%)
 """
 
 from __future__ import annotations
 
-from itertools import product
+from collections.abc import Iterator
 from typing import Any
 
 import pandas as pd
 
 from config import ADR_FLOOR_OPTIONS
+from utils.entry_vol_options import entry_vol_mult_options
 from utils.momentum_service import (
-    INTRAWEEK_STOP_OPTIONS,
     LONG_MA_OPTIONS,
     SHORT_MA_OPTIONS,
     load_settings,
+    pool_info,
     validate_settings,
 )
-from utils.strategy_tuning import finalize, run_groups, seed_worker_caches, summarize_combo
+from utils.moving_averages import pool_moving_average_type
+from utils.strategy_tuning import (
+    TuningRun,
+    begin_tuning,
+    cumulative_to_returns,
+    finalize,
+    iter_groups,
+    managed_tuning_events,
+    seed_worker_caches,
+    summarize_combo,
+    tuning_cancelled,
+)
 
-TUNING_AXES = ("short_ma_days", "long_ma_days", "adr_floor", "intraweek")
-
-
-def _intraweek_settings(value: Any) -> dict[str, Any]:
-    if value == "off":
-        return {"intraweek_exit": False, "intraweek_stop_pct": None}
-    if value == "none" or value is None:
-        return {"intraweek_exit": True, "intraweek_stop_pct": None}
-    stop = float(value)
-    if stop not in INTRAWEEK_STOP_OPTIONS:
-        raise ValueError(f"주중 손절선 값이 올바르지 않습니다: {value}")
-    return {"intraweek_exit": True, "intraweek_stop_pct": stop}
+TUNING_AXES = ("short_ma_days", "long_ma_days", "entry_vol_mult", "adr_floor")
 
 
 def _checked_optional_ints(values: list[Any], options: tuple, label: str) -> list[Any]:
     """None(없음)이 섞인 정수 선택지 축 검증."""
     cleaned = list(dict.fromkeys(None if v in (None, "", "none") else int(v) for v in values))
+    bad = [v for v in cleaned if v not in options]
+    if not cleaned or bad:
+        raise ValueError(f"'{label}' 범위가 올바르지 않습니다: {bad or cleaned}")
+    return cleaned
+
+
+def _checked_optional_floats(values: list[Any], options: tuple, label: str) -> list[Any]:
+    """None(없음)이 섞인 실수 선택지 축 검증."""
+    cleaned = list(dict.fromkeys(None if v in (None, "", "none") else float(v) for v in values))
     bad = [v for v in cleaned if v not in options]
     if not cleaned or bad:
         raise ValueError(f"'{label}' 범위가 올바르지 않습니다: {bad or cleaned}")
@@ -65,7 +69,6 @@ def _checked(values: list[Any], options: tuple, label: str) -> list[Any]:
 # 워커 프로세스 안에서만 쓰는 상태 — 부모가 넘긴 가격·종목·설정(프리로드)과, 작업 사이에
 # 재사용하는 백테스트 컨텍스트(후보 캐시 포함). 워커는 DB 를 건드리지 않는다.
 _PRELOAD: dict[str, Any] = {}
-_WORKER_CONTEXT: dict[str, Any] = {}
 
 
 def _init_worker(bundle: dict[str, Any]) -> None:
@@ -79,6 +82,7 @@ def _init_worker(bundle: dict[str, Any]) -> None:
 
 def _preload(pool: str) -> dict[str, Any]:
     """부모가 한 번 읽는 공유 데이터 — 워커 초기화 때 통째로 넘긴다."""
+    from core.strategy.price_panel import build_price_panel
     from utils.momentum_service import (
         adr_market_of_pool,
         load_adr_series,
@@ -96,7 +100,10 @@ def _preload(pool: str) -> dict[str, Any]:
         "pool_configs": _load_pool_configs(),
         "stocks_by_pool": {pool: _load_ticker_type_stocks_raw(pool)},
         "universe": universe,
-        "frames": load_price_frames(universe),
+        # 가격 패널 — 이평선 조합이 달라도 같은 값이라 부모가 한 번만 만든다.
+        "panel": build_price_panel(universe, load_price_frames(universe)),
+        "name_by": {row["ticker"]: row["name"] for row in universe},
+        "industry_by": {row["ticker"]: row.get("industry", "") for row in universe},
         "benchmark_close": load_benchmark_close(pool),
         "adr_market": adr_market,
         "adr_series": load_adr_series(adr_market) if adr_market else None,
@@ -105,71 +112,133 @@ def _preload(pool: str) -> dict[str, Any]:
 
 def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
     """(단기, 장기) 쌍 하나의 조합 — 별도 프로세스에서 돈다."""
-    months, base, short, long, adr_floors, intraweeks = task
+    months, base, short, long, entry_mults, adr_floors = task
+    from core.strategy.momentum.signals import compute_signals
     from utils.momentum_backtest import run_backtest
 
-    context = _WORKER_CONTEXT
-    if not context:
-        context.update({k: _PRELOAD[k] for k in ("universe", "frames", "benchmark_close")})
+    # 신호는 이평선 쌍에만 의존한다 — 나머지 조합이 하나를 나눠 쓴다.
+    # 진입 문턱은 run_backtest 안에서 같은 신호에 얹으므로 여기서 조합별로 만들지 않는다.
+    context = {
+        "pool": base["pool"],
+        "universe": _PRELOAD["universe"],
+        "name_by": _PRELOAD["name_by"],
+        "industry_by": _PRELOAD["industry_by"],
+        "panel": _PRELOAD["panel"],
+        # spawn 워커라 전역 설정에 기대면 안 된다 — 풀 값을 명시적으로 읽어 넘긴다.
+        "signals": compute_signals(_PRELOAD["panel"], short, long, pool_moving_average_type(base["pool"])),
+    }
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
-    for adr_floor, value in product(adr_floors, intraweeks):
+    for entry_vol_mult, adr_floor in ((m, f) for m in entry_mults for f in adr_floors):
+        if tuning_cancelled():
+            break
         combo = dict(
             base,
             short_ma_days=short,
             long_ma_days=long,
+            entry_vol_mult=entry_vol_mult,
             adr_floor=adr_floor,
-            **_intraweek_settings(value),
         )
         try:
-            result = run_backtest(months, combo, include_daily=True, context=context)
+            result = run_backtest(months, combo, context)
         except ValueError as error:  # 장기 이평이 길어 기간이 모자라는 조합 — 그 이평 쌍은 통째로 건너뛴다
             skipped.append(f"단기 {short}/장기 {long}: {error}")
             break
-        daily = pd.DataFrame(sorted(result["daily"], key=lambda r: r["date"]))
+        daily = pd.DataFrame(result["daily"])
         daily["date"] = pd.to_datetime(daily["date"])
-        returns = daily.set_index("date")["strategy_pct"].dropna()
+        # 엔진은 누적(%)을 준다 — 지표는 일별 수익률로 재므로 신고가와 같은 공용 변환을 쓴다.
+        returns = cumulative_to_returns(daily.set_index("date")["strategy_pct"])
         rows.append(
             summarize_combo(
                 {
                     "short_ma_days": short,
                     "long_ma_days": long,
+                    "entry_vol_mult": entry_vol_mult,
                     "adr_floor": adr_floor,
-                    "intraweek": value,
                 },
                 returns,
-                {"trade_count": result["trade_count"], "win_rate_pct": result["win_rate_pct"]},
+                {
+                    "trade_count": result["trade_count"],
+                    "win_rate_pct": result["win_rate_pct"],
+                    # 평균이익·평균손실 — 승률만 보면 '자주 이기지만 크게 잃는' 조합을 못 가른다.
+                    "avg_win_pct": result["avg_win_pct"],
+                    "avg_loss_pct": result["avg_loss_pct"],
+                },
             )
         )
     return rows, skipped
 
 
 def run_tuning(months: int, settings: dict[str, Any] | None, ranges: dict[str, list[Any]]) -> dict[str, Any]:
+    """전 조합을 돌려 결과 페이로드를 만든다(진행 없이 한 번에)."""
+    run = begin_tuning(f"모멘텀 직접 실행 {months}개월")
+    for event in stream_tuning(months, settings, ranges, run):
+        if event["type"] == "result":
+            return event["payload"]
+    raise RuntimeError("튜닝이 결과를 내지 못했습니다.")
+
+
+def stream_tuning(
+    months: int,
+    settings: dict[str, Any] | None,
+    ranges: dict[str, list[Any]],
+    run: TuningRun,
+) -> Iterator[dict[str, Any]]:
+    yield from managed_tuning_events(run, _stream_tuning(months, settings, ranges, run))
+
+
+def _stream_tuning(
+    months: int,
+    settings: dict[str, Any] | None,
+    ranges: dict[str, list[Any]],
+    run: TuningRun,
+) -> Iterator[dict[str, Any]]:
+    """묶음이 끝날 때마다 진행을, 마지막에 결과를 내보낸다.
+
+    화면이 이 흐름을 그대로 진행 바에 쓴다 — 다 끝난 뒤 한 번에 응답하면 10분 넘게
+    아무 소식이 없어 화면이 죽은 것처럼 보인다.
+    """
     base = validate_settings(settings or load_settings())
     shorts = _checked(ranges.get("short_ma_days", []), SHORT_MA_OPTIONS, "단기 이평")
     adr_floors = _checked_optional_ints(ranges.get("adr_floor", []), ADR_FLOOR_OPTIONS, "ADR 하한")
+    entry_mults = _checked_optional_floats(
+        ranges.get("entry_vol_mult", []), entry_vol_mult_options(pool_info(base["pool"])["country"]), "진입 문턱"
+    )
     longs = _checked(ranges.get("long_ma_days", []), LONG_MA_OPTIONS, "장기 이평")
-    intraweeks = list(dict.fromkeys(ranges.get("intraweek", [])))
-    if not intraweeks:
-        raise ValueError("'주중 손절선' 범위가 비어 있습니다.")
-    for value in intraweeks:
-        _intraweek_settings(value)  # 검증
-    ma_pairs = [(short, long) for short in shorts for long in longs if short < long]
+    # 단기=장기 허용(단일 이평선 전략과 동일) — 설정 검증(momentum_service)과 같은 기준.
+    ma_pairs = [(short, long) for short in shorts for long in longs if short <= long]
     if not ma_pairs:
         raise ValueError("단기 이평이 장기 이평보다 작은 조합이 없습니다.")
 
-    tasks = [(months, base, short, long, adr_floors, intraweeks) for short, long in ma_pairs]
+    tasks = [(months, base, short, long, entry_mults, adr_floors) for short, long in ma_pairs]
+    combos_per_group = len(entry_mults) * len(adr_floors)
+    total_combos = len(tasks) * combos_per_group
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
+    yield {"type": "progress", "phase": "prepare", "done": 0, "total": total_combos}
     bundle = _preload(str(base["pool"]))
-    for group_rows, group_skipped in run_groups(_run_ma_group, tasks, initializer=_init_worker, initargs=(bundle,)):
+    yield {"type": "progress", "phase": "backtest", "done": 0, "total": total_combos}
+    for done, total, (group_rows, group_skipped) in iter_groups(
+        _run_ma_group,
+        tasks,
+        run=run,
+        initializer=_init_worker,
+        initargs=(bundle,),
+    ):
         rows.extend(group_rows)
         skipped.extend(group_skipped)
+        yield {
+            "type": "progress",
+            "phase": "backtest",
+            "done": min(total_combos, done * combos_per_group),
+            "total": total * combos_per_group,
+        }
 
     if not rows:
         raise ValueError("돌릴 수 있는 조합이 없습니다. " + (skipped[0] if skipped else ""))
+    yield {"type": "progress", "phase": "finalize", "done": total_combos, "total": total_combos}
     payload = finalize(rows, list(TUNING_AXES))
     payload["months"] = int(months)
     payload["fixed"] = {}
     payload["skipped"] = list(dict.fromkeys(skipped))
-    return payload
+    yield {"type": "result", "payload": payload}

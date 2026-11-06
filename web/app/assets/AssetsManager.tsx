@@ -14,6 +14,8 @@ import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { reorderHoldings } from "@/lib/holdings-store";
 import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
+import { loadAccountNote } from "@/lib/account-notes";
+import { loadPoolRanks } from "@/lib/pool-ranks";
 
 import { AccountHoldingsDetailPanel } from "./AccountHoldingsDetailPanel";
 import {
@@ -31,8 +33,11 @@ import {
   getSignedClass,
   isDetailRow,
   isTotalRow,
-  parseRawPrice,
+  parseNumericCell,
 } from "./assets-helpers";
+
+/** 시세 갱신 주기(ms) — 서버 시세 캐시(60초)와 같은 간격. */
+const LIVE_REFRESH_MS = 60_000;
 
 export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: AssetsHeaderSummary) => void }) {
   const toast = useToast();
@@ -50,6 +55,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [parentDirtyCellKeys, setParentDirtyCellKeys] = useState<string[]>([]);
   const [editingParentId, setEditingParentId] = useState<string | null>(null);
   const summariesRef = useRef<AccountSummary[]>([]);
+  const detailBusyRef = useRef(false);
   const parentSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const parentSavingAccountIdsRef = useRef<Set<string>>(new Set());
   const parentQueuedAccountIdsRef = useRef<Set<string>>(new Set());
@@ -114,6 +120,44 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     void load();
   }, [load]);
 
+  // 계좌 상세 모달의 순위·고점·메모가 열릴 때 늦게 깜박이며 나타나지 않도록, 화면이 열리면 미리 받아 둔다.
+  // 값이 갱신될 때마다(60초) 같이 새로 받아 둔다. 보조 정보라 실패해도 조용히 넘기고, 모달이 열릴 때 다시 요청한다.
+  const prefetchKey = useMemo(() => {
+    const pools = new Set(
+      allRows
+        .filter((row) => row.ticker !== "IS" && row.ticker !== CASH_ROW_TICKER)
+        .map((row) => String(row.ticker_type ?? "").trim().toLowerCase())
+        .filter(Boolean),
+    );
+    const accounts = summaries.map((summary) => summary.account_id);
+    return JSON.stringify({ pools: [...pools].sort(), accounts });
+  }, [allRows, summaries]);
+  useEffect(() => {
+    const { pools, accounts } = JSON.parse(prefetchKey) as { pools: string[]; accounts: string[] };
+    for (const pool of pools) void loadPoolRanks(pool).catch(() => undefined);
+    for (const account of accounts) {
+      void fetchAlertBadges(account);
+      void loadAccountNote(account).catch(() => undefined);
+    }
+  }, [prefetchKey, allRows]);
+
+  const handleDetailBusyChange = useCallback((busy: boolean) => {
+    detailBusyRef.current = busy;
+  }, []);
+
+  // 시세가 바뀌므로 60초마다 값만 다시 받는다. 계좌 표나 상세 모달에서 수정·선택·저장 중이면
+  // 입력이 덮어써지지 않게 그 주기는 건너뛴다.
+  const parentBusy = loading || editingParentId !== null || parentDirtyCellKeys.length > 0;
+  useEffect(() => {
+    if (parentBusy) return;
+    const timer = window.setInterval(() => {
+      if (document.hidden || detailBusyRef.current) return;
+      if (parentSavingAccountIdsRef.current.size > 0 || parentSaveTimersRef.current.size > 0) return;
+      void load({ silent: true });
+    }, LIVE_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [load, parentBusy]);
+
   useEffect(() => {
     summariesRef.current = summaries;
   }, [summaries]);
@@ -167,7 +211,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       valuation_krw: totalValuation,
       total_principal: totalPrincipal,
       cash_krw: totalCash,
-      target_ratio_total: null,
       holdings_count: totalHoldingsCount,
       cash_ratio: totalAssets > 0 ? (totalCash / totalAssets) * 100 : 0,
       net_profit: totalAssets - totalPrincipal,
@@ -189,25 +232,10 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cash_krw: Number(summary.cash_balance_krw ?? 0),
       };
 
-      if (expandedId !== summary.account_id) {
-        return [mainRow];
-      }
-
-      const detailRow: ParentGridRow = {
-        id: `${summary.account_id}__detail`,
-        rowType: "detail",
-        parentId: summary.account_id,
-        summary,
-        rows: groupedRows.get(summary.account_id) ?? [],
-      };
-
-      return [
-        mainRow,
-        detailRow,
-      ];
+      return [mainRow];
     });
     return [totalRow, ...detailRows];
-  }, [expandedId, groupedRows, summaries, totalAssets, totalCash, totalHoldingsCount, totalPrincipal, totalValuation]);
+  }, [groupedRows, summaries, totalAssets, totalCash, totalHoldingsCount, totalPrincipal, totalValuation]);
 
   useEffect(() => {
     onHeaderSummaryChange?.({
@@ -241,15 +269,14 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
     parentSavingAccountIdsRef.current.add(accountId);
     try {
-      const isAud = String(summary.currency || "KRW").toUpperCase() === "AUD";
+      // 현금 키는 보내지 않는다 — 이 그리드는 총 원금만 편집한다. 예전에는 현금 환산액을
+      // 같이 보내 백엔드가 통화별 잔액을 KRW 하나로 덮어썼다(USD 현금 증발 버그).
       const response = await fetch("/api/assets", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           account_id: summary.account_id,
           total_principal: summary.total_principal,
-          cash_balance_krw: isAud ? 0 : summary.cash_balance_krw,
-          cash_balance_native: isAud ? summary.cash_balance_native : summary.cash_balance_krw,
           cash_currency: summary.cash_currency,
           intl_shares_value: summary.account_id === "aus_account" ? summary.intl_shares_value : null,
           intl_shares_change: summary.account_id === "aus_account" ? summary.intl_shares_change : null,
@@ -320,14 +347,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     ]);
 
     const nextValuation = nextRows.reduce((sum, row) => sum + Number(row.valuation_krw ?? 0), 0);
-    // 자식 행의 목표 비중 변경이 부모 '목표비중합'에 즉시 반영되도록 합산 (현금/IS 행 제외).
-    const nextTargetRatioTotal = nextRows.reduce((sum, row) => {
-      const ticker = String(row.ticker || "").trim().toUpperCase();
-      if (ticker === CASH_ROW_TICKER || ticker === "IS") {
-        return sum;
-      }
-      return sum + Number(row.target_ratio ?? 0);
-    }, 0);
     setSummaries((previous) =>
       previous.map((summary) => {
         if (summary.account_id !== accountId) {
@@ -338,7 +357,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           valuation_krw: nextValuation,
           total_assets_krw: nextValuation + Number(summary.cash_balance_krw ?? 0),
           holdings_count: nextRows.length,
-          target_ratio_total: nextTargetRatioTotal,
         };
       }),
     );
@@ -400,11 +418,12 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           }}
           onSortStateChange={handleChildSortStateChange}
           onReload={load}
+          onBusyChange={handleDetailBusyChange}
           showAmounts={showAmounts}
         />
       );
     },
-    [handleChildRowsSync, handleChildSortStateChange, load, showAmounts],
+    [handleChildRowsSync, handleChildSortStateChange, handleDetailBusyChange, load, showAmounts],
   );
 
   const parentColumns = useMemo<ColDef<ParentGridRow>[]>(() => [
@@ -545,13 +564,11 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ? "assetsEditableCell assetsDirtyCell"
           : "assetsEditableCell";
       },
-      valueParser: (params) => {
-        const parsed = parseFloat(parseRawPrice(params.newValue));
-        if (Number.isNaN(parsed) || parsed < 0) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
+      valueParser: (params) =>
+        parseNumericCell(params.newValue, params.oldValue, {
+          label: "총 원금",
+          onReject: (message) => toast.error(message),
+        }),
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
         params.data && !isDetailRow(params.data) ? formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0)) : "",
     },
@@ -645,17 +662,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       suppressMovableColumns: true,
       ensureDomOrder: true,
       stopEditingWhenCellsLoseFocus: true,
-      isFullWidthRow: (params) => isDetailRow(params.rowNode.data),
-      fullWidthCellRenderer: DetailRenderer,
-      getRowHeight: (params) => {
-        if (!isDetailRow(params.data)) {
-          return 38;
-        }
-        // 기본적으로 현금(1) + 추가 가능 공간(1)을 고려하여 최소 +2행 공간을 확보합니다.
-        const rowCount = (params.data.rows?.length ?? 0) + 2;
-        // 툴바(50) + 그리드 헤더(36) + 행(실제 rowHeight 34) + 가로 스크롤바/테두리 안전 마진(5 + 30).
-        return 50 + 36 + rowCount * 34 + 5 + 30;
-      },
+      getRowHeight: () => 38,
       onCellClicked: (params) => {
         if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {
           return;
@@ -689,6 +696,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     }),
     [DetailRenderer, editingParentId, expandedId, handleParentCellValueChanged],
   );
+
 
   if (loading && !summaries.length) {
     return (
@@ -738,6 +746,29 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           </div>
         </div>
       </section>
+      {/* 계좌 상세 — 최대창 모달. 행 높이 공식 없이 모달 안에서 자체 스크롤한다. */}
+      {(() => {
+        const expandedSummary = expandedId ? summaries.find((item) => item.account_id === expandedId) : undefined;
+        if (!expandedId || !expandedSummary) return null;
+        return (
+          <AppModal
+            open
+            size="full"
+            title={`${expandedSummary.icon ?? ""} ${expandedSummary.name}`.trim()}
+            onClose={() => setExpandedId(null)}
+          >
+            <DetailRenderer
+              data={{
+                id: `${expandedSummary.account_id}__detail`,
+                rowType: "detail",
+                parentId: expandedSummary.account_id,
+                summary: expandedSummary,
+                rows: groupedRows.get(expandedSummary.account_id) ?? [],
+              }}
+            />
+          </AppModal>
+        );
+      })()}
     </div>
   );
 }

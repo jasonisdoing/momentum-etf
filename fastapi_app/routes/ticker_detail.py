@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import threading
 import time as _time
 from datetime import datetime, timezone
@@ -12,6 +11,7 @@ from fastapi import APIRouter, Body, Depends, Query
 
 from config import CACHE_TTL_LIVE, HOLDING_CHART_SHOW_AVG_BUY_PRICE, MARKET_SCHEDULES
 from fastapi_app.dependencies import require_internal_token
+from fastapi_app.streaming import sse_stream
 from services.component_price_service import build_component_price_snapshot, enrich_component_prices
 from services.portfolio_change_service import (
     build_daily_fx_rates as _build_daily_fx_rates_for_holdings,
@@ -24,7 +24,8 @@ from services.price_service import (
     get_realtime_snapshot,
     get_realtime_snapshot_meta,
 )
-from services.stock_cache_service import get_stock_cache_meta
+from services.stock_cache_service import get_stock_cache_meta, get_stock_cache_meta_map, stock_holdings_revision
+from utils.asx_ticker import ensure_asx_prefix
 from utils.cache_utils import (
     get_cache_refresh_completed_at,
     load_cached_close_series_bulk_before_or_at_with_fallback,
@@ -37,22 +38,23 @@ from utils.data_loader import (
     fetch_naver_etf_inav_snapshot,
     fetch_ohlcv,
     fetch_overseas_etf_nav_snapshot,
-    get_latest_trading_day,
-    get_trading_days,
 )
+from utils.effective_prices import bar_anchor, effective_bar_date, last_regular_close
 from utils.kis_market import load_cached_kis_domestic_etf_master
+from utils.market_session import pre_open_trading_day, regular_session_started, trading_day_today
+from utils.normalization import to_timestamp_iso
 from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import list_available_accounts, load_common_settings
-from utils.stock_cache_meta_io import get_previous_stock_cache_meta
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs
 from utils.ticker_resolver import resolve_ticker_meta
 
 router = APIRouter(prefix="/internal/ticker-detail", tags=["ticker-detail"])
 
-# 비교(/compare) 결과 캐시 — 같은 ETF 세트의 반복 로드/갱신이 매번 재계산·외부 API 호출을
-# 하지 않도록 짧은 TTL 로 캐시한다(타임아웃 후 재시도도 즉시 응답).
-_COMPARE_CACHE: dict[str, tuple[dict[str, object], float]] = {}
+# 비교(/compare) 결과 캐시 — **종목 단위** 짧은 TTL. 세트 단위로 캐시하면 8종목 중 7개가
+# 끝나고 하나에서 실패했을 때 아무것도 남지 않아 새로고침이 전부 재계산이 됐다. 종목마다
+# 끝나는 즉시 저장하므로, 실패 후 재시도는 성공분을 캐시에서 읽고 실패분만 다시 계산한다.
+_COMPARE_CACHE: dict[tuple[str, str, str, bool], tuple[dict[str, object], float]] = {}
 _COMPARE_CACHE_LOCK = threading.Lock()
 _COMPARE_CACHE_TTL = CACHE_TTL_LIVE
 
@@ -81,6 +83,8 @@ def _load_domestic_etf_ticker_set() -> set[str]:
 
 
 def _is_us_pool_candidate(item: dict[str, object]) -> bool:
+    if item.get("price_lookup_supported") is False:
+        return False
     component_ticker = str(item.get("ticker") or "").strip().upper()
     raw_code = str(item.get("raw_code") or "").strip().upper()
     yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
@@ -99,6 +103,8 @@ def _is_us_pool_candidate(item: dict[str, object]) -> bool:
 
 
 def _is_kor_pool_candidate(item: dict[str, object], domestic_etf_tickers: set[str]) -> bool:
+    if item.get("price_lookup_supported") is False:
+        return False
     component_ticker = str(item.get("ticker") or "").strip().upper()
     raw_code = str(item.get("raw_code") or "").strip().upper()
     yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
@@ -140,9 +146,11 @@ def _infer_yahoo_symbol_currency(symbol: str) -> str | None:
     return None
 
 
-def _build_fx_rates_for_holdings(
-    holdings: list[dict[str, object]], rates: dict[str, object]
-) -> list[dict[str, object]]:
+def _holdings_currencies(holdings: list[dict[str, object]]) -> set[str]:
+    """구성종목이 쓰는 통화 집합 — 환율을 **얼마나** 조회할지 정하는 단일 기준.
+
+    현금성 항목(KRD 코드·이름에 '현금')은 뺀다. 통화가 비어 있으면 야후 심볼에서 추론한다.
+    """
     currencies: set[str] = set()
     for item in holdings:
         ticker = str(item.get("ticker") or "").strip().upper()
@@ -155,8 +163,15 @@ def _build_fx_rates_for_holdings(
         if not currency:
             inferred_currency = _infer_yahoo_symbol_currency(str(item.get("yahoo_symbol") or ""))
             currency = str(inferred_currency or "").strip().upper()
-        if currency:
+        if currency and currency != "KRW":
             currencies.add(currency)
+    return currencies
+
+
+def _build_fx_rates_for_holdings(
+    holdings: list[dict[str, object]], rates: dict[str, object]
+) -> list[dict[str, object]]:
+    currencies = _holdings_currencies(holdings)
 
     result: list[dict[str, object]] = []
     for currency in sorted(currencies):
@@ -302,34 +317,20 @@ def _build_korean_etf_info_payload(
         except (TypeError, ValueError):
             market_cap_krw = None
 
-    # 비교는 (현재 값 vs 직전 영업일 값) 한 쌍 — 조회 1회.
-    # 직전값의 date 는 저장 시점에 이미 거래일이라 휴장일 보정이 필요 없다.
-    previous_meta = get_previous_stock_cache_meta(ticker_type, ticker)
-    prev_nav = None
-    portfolio_change_base_date = None
-    if previous_meta and "meta_cache" in previous_meta:
-        prev_nav = previous_meta["meta_cache"].get("nav")
-        portfolio_change_base_date = str(previous_meta.get("date") or "").strip() or None
+    # 포트폴리오 변동 기준일 — 계산과 같은 공용 함수(마지막 확정 국내 종가일).
+    from services.portfolio_change_service import determine_portfolio_change_base_date
 
-    nav_change = None
-    nav_change_pct = None
-    if nav_value is not None and prev_nav is not None and prev_nav > 0:
-        nav_change = float(nav_value) - float(prev_nav)
-        nav_change_pct = round((nav_change / float(prev_nav)) * 100, 2)
+    portfolio_change_base_date = determine_portfolio_change_base_date()
 
-    # 환율 정보 (무조건 제공)
-    rates = get_exchange_rates()
-    usd_info = rates.get("USD", {})
-    fx_rate = usd_info.get("rate")
-    fx_change_pct = usd_info.get("change_pct")
-    fx_rates = _build_fx_rates_for_holdings(holdings, rates)
+    # 환율은 **구성종목에 원화 아닌 통화가 있을 때만** 조회한다. 예전에는 조건 없이
+    # 8개 통화를 전부 받았는데(실측 3.7초, 전체 응답의 67%), 국내 구성종목뿐인 ETF 는
+    # 그 결과를 하나도 쓰지 않았다(`fx_rates` 빈 배열). 필요한 통화만 넘긴다.
+    fx_currencies = _holdings_currencies(holdings)
+    rates = get_exchange_rates(fx_currencies) if fx_currencies else {}
+    fx_rates = _build_fx_rates_for_holdings(holdings, rates) if rates else []
 
     return {
         "nav": float(nav_value) if nav_value is not None else None,
-        "nav_change": nav_change,
-        "nav_change_pct": nav_change_pct,
-        "fx_rate": fx_rate,
-        "fx_change_pct": fx_change_pct,
         "fx_rates": fx_rates,
         "portfolio_change_base_date": portfolio_change_base_date,
         "deviation": float(deviation_value) if deviation_value is not None else None,
@@ -406,12 +407,61 @@ def _build_price_snapshot(close_series: pd.Series | None) -> tuple[float | None,
     return current_price, change_pct
 
 
+def _settle_last_bar(df: pd.DataFrame, realtime_entry: dict[str, object], country: str) -> pd.DataFrame:
+    """정규장 전: 마지막으로 마감된 거래일 봉의 종가를 시세가 알려 주는 정규장 종가로 확정한다.
+
+    캐시의 그 봉이 마감 전에 저장된 장중값일 수 있다(재현: MPC 10-01 봉이 413.15·거래량 57만으로
+    남아 실제 종가 420.15 와 달랐다). 시세는 현재가가 아니라 마감된 정규장 종가만 넣는다.
+    """
+    settled = last_regular_close(realtime_entry)
+    if settled is None or df.empty or df.index.max().normalize() != bar_anchor(country):
+        return df
+    close_col = "Close" if "Close" in df.columns else "close"
+    high_col = "High" if "High" in df.columns else "high"
+    low_col = "Low" if "Low" in df.columns else "low"
+    adjusted = df.copy()
+    last = adjusted.index.max()
+    adjusted.at[last, close_col] = settled
+    if high_col in adjusted.columns:
+        adjusted.at[last, high_col] = max(float(adjusted.at[last, high_col]), settled)
+    if low_col in adjusted.columns:
+        adjusted.at[last, low_col] = min(float(adjusted.at[last, low_col]), settled)
+    return adjusted
+
+
+def _sorted_by_weight(holdings: list[dict[str, object]]) -> list[dict[str, object]]:
+    """구성종목을 비중 큰 순으로 — 수집 소스마다 순서가 달라(VFLO 는 이름순) 표시 때 한 번 정렬한다.
+
+    비중이 없는 항목은 맨 뒤에 두고, 같은 비중은 원래 순서를 지킨다(안정 정렬). 비중이 전혀 없는
+    ETF(한국 일부)는 순서가 그대로다.
+    """
+
+    def _weight(item: dict[str, object]) -> float | None:
+        value = item.get("weight")
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+    return sorted(holdings, key=lambda item: (_weight(item) is None, -(_weight(item) or 0.0)))
+
+
 def _apply_realtime_snapshot_to_dataframe(
     df: pd.DataFrame,
     *,
     ticker: str,
     country_code: str,
-) -> tuple[pd.DataFrame, float | None]:
+) -> tuple[pd.DataFrame, dict[str, object] | None]:
+    """상세 차트 일봉에 실시간 마지막 봉을 반영한다 — 붙일 봉은 공통 규칙이 정한다.
+
+    돌려주는 `live` 는 현재가·등락률 `{"price", "change_pct", "is_bar"}` 다.
+      · 정규장이 시작된 뒤(`is_bar=True`): 현재가가 오늘 봉 자체라 봉에 반영한다.
+      · 정규장 전(프리장·데이장·휴장일, `is_bar=False`): 마지막 봉은 **어제의 확정 종가**로 두고,
+        현재가는 봉에 넣지 않고 따로 돌려준다. 어제 봉에 덮어쓰면 표의 어제 행이 프리장 등락률
+        (+0.08%)로 바뀌어 실제 어제 등락(+6%)이 사라졌다.
+
+    예전에는 여기서 대상일을 따로 계산했다(미국은 프리마켓 04:00 ET 부터 오늘 봉을 새로
+    만들었다). 그러면 순위·전략이 쓰는 `utils.effective_prices` 와 규칙이 갈려, 같은 종목의
+    차트와 이평선이 프리장 구간에만 다른 봉 위에서 계산됐다. 날짜는 공통 함수에 맡기고
+    여기서는 그 봉의 OHLC 갱신(고가·저가 확장)만 한다 — 공통 함수는 종가만 다룬다.
+    """
     country = str(country_code or "").strip().lower()
     if country not in {"kor", "au", "us"}:
         return df, None
@@ -435,20 +485,30 @@ def _apply_realtime_snapshot_to_dataframe(
         return df, None
 
     realtime_change_pct: float | None = None
-    if country == "us" and realtime_entry.get("changeRate") is not None:
+    if realtime_entry.get("changeRate") is not None:
         try:
             realtime_change_pct = round(float(realtime_entry["changeRate"]), 2)
         except (TypeError, ValueError):
             realtime_change_pct = None
 
-    target_trading_day = _resolve_realtime_target_trading_day(country)
-    if country == "kor" and realtime_entry.get("is_pre_market") is True:
-        target_trading_day = pd.Timestamp(datetime.now(ZoneInfo("Asia/Seoul")).date()).normalize()
-    latest_trading_day = (target_trading_day or get_latest_trading_day(country)).normalize()
+    pre_open_day = pre_open_trading_day(country)
+    if pre_open_day is not None or not regular_session_started(country):
+        session_day = pre_open_day or trading_day_today(country)
+        return _settle_last_bar(df, realtime_entry, country), {
+            "price": realtime_price,
+            "change_pct": realtime_change_pct,
+            "is_bar": False,
+            "date": session_day.isoformat() if session_day else None,
+            "volume": realtime_entry.get("volume"),
+        }
+
+    live = {"price": realtime_price, "change_pct": realtime_change_pct, "is_bar": True}
     adjusted = df.copy()
 
     if adjusted.empty:
-        return adjusted, realtime_change_pct
+        return adjusted, live
+
+    latest_trading_day = effective_bar_date(adjusted.index.max(), country)
 
     close_col = "Close" if "Close" in adjusted.columns else "close"
     open_col = "Open" if "Open" in adjusted.columns else "open"
@@ -486,38 +546,7 @@ def _apply_realtime_snapshot_to_dataframe(
         adjusted.loc[latest_trading_day] = new_row
 
     adjusted.sort_index(inplace=True)
-    return adjusted, realtime_change_pct
-
-
-def _resolve_realtime_target_trading_day(country_code: str) -> pd.Timestamp | None:
-    country = str(country_code or "").strip().lower()
-    schedule = MARKET_SCHEDULES.get(country)
-    if not isinstance(schedule, dict):
-        return None
-
-    timezone_name = str(schedule.get("timezone") or "").strip() or "UTC"
-    market_open = schedule.get("open")
-    if market_open is None:
-        return None
-
-    now_local = datetime.now(ZoneInfo(timezone_name))
-    # 미국은 프리마켓(4:00 ET)부터 토스 API로 가격 제공, 한국/호주는 장 시작 기준
-    from datetime import time as dt_time
-
-    earliest_time = dt_time(4, 0) if country == "us" else market_open
-    if now_local.time() < earliest_time:
-        return None
-
-    today_local = pd.Timestamp(now_local.date()).normalize()
-    trading_days = get_trading_days(
-        today_local.strftime("%Y-%m-%d"),
-        today_local.strftime("%Y-%m-%d"),
-        country,
-    )
-    if not trading_days:
-        return None
-
-    return pd.Timestamp(trading_days[-1]).normalize()
+    return adjusted, live
 
 
 @router.get("/tickers")
@@ -720,6 +749,8 @@ def build_ticker_detail_payload(
             "rows": [],
             "holdings": [],
             "holdings_as_of_date": None,
+            "holdings_updated_at": None,
+            "holdings_disclosure": None,
             "holdings_price_as_of_date": None,
             "holdings_error": None,
             "my_average_buy_price": _calculate_consolidated_average_buy_price(
@@ -729,7 +760,7 @@ def build_ticker_detail_payload(
         }
 
     df = df.sort_index()
-    df, realtime_change_pct = _apply_realtime_snapshot_to_dataframe(
+    df, live = _apply_realtime_snapshot_to_dataframe(
         df,
         ticker=db_ticker,
         country_code=country_code,
@@ -769,14 +800,18 @@ def build_ticker_detail_payload(
         if close is not None:
             prev_close = close
 
-    # 미국 프리·애프터마켓은 토스가 세션에 맞는 기준가로 계산한 등락률을 사용한다.
-    if rows and realtime_change_pct is not None:
-        rows[-1]["change_pct"] = realtime_change_pct
+    # 오늘 봉이 실시간 봉일 때(정규장 이후 애프터마켓 포함)만 시세 소스가 세션에 맞는 기준가로
+    # 계산한 등락률을 쓴다. 정규장 전 시세는 봉이 아니라 `live` 로 따로 내려간다.
+    if rows and live is not None and live["is_bar"] and live["change_pct"] is not None:
+        rows[-1]["change_pct"] = live["change_pct"]
 
     holdings: list[dict[str, object]] = []
     holdings_as_of_date: str | None = None
+    holdings_updated_at: str | None = None
+    holdings_disclosure: dict[str, str] | None = None
     holdings_price_as_of_date: str | None = None
     holdings_error: str | None = None
+    holdings_revision: str | None = None
     etf_info: dict[str, object] | None = None
     us_pool_tickers: set[str] = set()
     kor_pool_tickers: set[str] = set()
@@ -784,9 +819,14 @@ def build_ticker_detail_payload(
     country_clean = str(country_code or "").strip().lower()
     if country_clean in ("kor", "au", "us"):
         db_ticker = ticker.split(":")[-1] if ":" in ticker else ticker
-        cache_document = get_stock_cache_meta(ticker_type, db_ticker)
+        # 메타 캐시(구성종목 포함)는 호주를 `ASX:` 접두사 키로 저장한다 — 접두사를 뗀 채 조회하면
+        # 못 찾아 호주 ETF 전체가 「구성종목 캐시 없음」으로 보였다.
+        meta_ticker = ensure_asx_prefix(db_ticker) if country_clean == "au" else db_ticker
+        cache_document = get_stock_cache_meta(ticker_type, meta_ticker)
         holdings_cache = dict(cache_document.get("holdings_cache") or {}) if isinstance(cache_document, dict) else {}
+        holdings_revision = stock_holdings_revision(holdings_cache)
         holdings = list(holdings_cache.get("items") or [])
+        holdings_disclosure = holdings_cache.get("disclosure")
         if country_clean == "kor":
             etf_info = _build_korean_etf_info_payload(
                 ticker=db_ticker,
@@ -806,8 +846,13 @@ def build_ticker_detail_payload(
                 country_code=country_clean,
             )
         holdings_as_of_date = str(holdings_cache.get("reference_date") or "").strip() or None
+        # 기존 수집 시각 문자열은 한국 시간이며 새 캐시에는 원본 시간대가 명시된다.
+        holdings_updated_at = to_timestamp_iso(holdings_cache.get("updated_at"), naive_timezone=ZoneInfo("Asia/Seoul"))
         if not include_holdings:
             # 가격 시계열만 필요한 호출(성과분석 탭) — 구성종목 시세 평가·포트폴리오 변동 계산을 건너뛴다.
+            holdings = []
+        elif holdings_disclosure is not None:
+            # 실물 보유 상품은 주식 구성종목과 그 시세 평가의 대상이 아니다.
             holdings = []
         elif not holdings:
             holdings_error = (
@@ -823,7 +868,7 @@ def build_ticker_detail_payload(
             # /holdings 엔드포인트와 동일한 캐시 결과를 공유한다.
             # 공유 스냅샷이 주어지면(비교 화면) 캐시를 우회해 동일 시세로 재계산한다.
             bundle = compute_portfolio_change_bundle(
-                db_ticker,
+                meta_ticker,
                 ticker_type,
                 use_cache=use_bundle_cache,
                 component_price_snapshot=component_price_snapshot,
@@ -834,15 +879,29 @@ def build_ticker_detail_payload(
                 bundle_fx_rates = bundle.get("fx_rates") or []
                 if etf_info is not None:
                     etf_info["portfolio_change_base_date"] = bundle.get("base_date")
-                    etf_info["portfolio_change_base_is_open"] = bool(bundle.get("base_is_open"))
+                    # 화면의 포트폴리오 변동 계산용 — 기준일 이후 누적 환율(백엔드 합계와 같은 값).
+                    etf_info["portfolio_change_fx_rates"] = bundle.get("cumulative_fx_rates") or []
             else:
+                fallback_base_date = str(etf_info.get("portfolio_change_base_date") or "") if etf_info else None
                 priced_holdings, holdings_price_as_of_date = enrich_component_prices(
                     holdings,
                     price_fetch_limit=100,
-                    cumulative_base_date=str(etf_info.get("portfolio_change_base_date") or "") if etf_info else None,
+                    cumulative_base_date=fallback_base_date,
                     component_price_snapshot=component_price_snapshot,
                 )
                 bundle_fx_rates = None
+                if etf_info is not None:
+                    from services.portfolio_change_service import build_cumulative_fx_rates
+
+                    # 평가된 구성종목의 통화만 — 없으면 조회 자체가 일어나지 않는다.
+                    cumulative_currencies = _holdings_currencies(priced_holdings)
+                    etf_info["portfolio_change_fx_rates"] = (
+                        build_cumulative_fx_rates(
+                            priced_holdings, get_exchange_rates(cumulative_currencies), fallback_base_date
+                        )
+                        if cumulative_currencies
+                        else []
+                    )
 
             enriched_holdings: list[dict[str, object]] = []
             for source_item in priced_holdings:
@@ -859,24 +918,67 @@ def build_ticker_detail_payload(
                 enriched_item["in_kor_pool"] = component_ticker in kor_pool_tickers
 
                 enriched_holdings.append(enriched_item)
-            holdings = enriched_holdings
+            holdings = _sorted_by_weight(enriched_holdings)
             if etf_info is not None:
                 if bundle_fx_rates is not None:
                     etf_info["fx_rates"] = bundle_fx_rates
                 else:
-                    etf_info["fx_rates"] = _build_daily_fx_rates_for_holdings(
-                        holdings,
-                        get_exchange_rates(),
+                    daily_currencies = _holdings_currencies(holdings)
+                    etf_info["fx_rates"] = (
+                        _build_daily_fx_rates_for_holdings(holdings, get_exchange_rates(daily_currencies))
+                        if daily_currencies
+                        else []
                     )
+
+    # 차트 이평선 — 그 종목풀의 단기·장기 이평선을 **엔진과 같은 공용 함수**로 계산해 내려준다
+    # (모멘텀 보유 차트와 같은 형태·같은 수식). 풀에 이평선이 없으면 빈 목록(선 없음).
+    from utils.moving_averages import calculate_moving_average, pool_moving_average_type
+    from utils.settings_loader import get_ticker_type_settings
+
+    pool_config = get_ticker_type_settings(ticker_type) or {}
+    ma_lines: list[dict[str, object]] = []
+    short_ma, long_ma = pool_config.get("SHORT_MA_DAYS"), pool_config.get("LONG_MA_DAYS")
+    if short_ma and long_ma:
+        # 이평 종류도 **그 풀의 설정**이다 — 차트 선이 순위·전략 판정과 같아야 한다.
+        chart_ma_type = pool_moving_average_type(ticker_type)
+        close_series = pd.to_numeric(df[close_col], errors="coerce").dropna()
+        for days in (int(short_ma), int(long_ma)):
+            ma_series = calculate_moving_average(close_series, days, ma_type=chart_ma_type).dropna()
+            ma_lines.append(
+                {
+                    "ma_days": days,
+                    # 화면이 "SMA 20일" 처럼 표기할 수 있게 종류를 함께 내려준다.
+                    "ma_type": chart_ma_type,
+                    "points": [
+                        {"time": pd.Timestamp(idx).strftime("%Y-%m-%d"), "value": round(float(value), 4)}
+                        for idx, value in ma_series.items()
+                    ],
+                }
+            )
 
     return {
         "ticker": ticker,
         "rows": rows,
+        # 정규장 전 현재가·등락률 — 헤더와 일별 표의 임시 행이 쓴다(date: 오늘이 거래일일 때만). 정규장 중에는 마지막 봉이 곧 현재가라 None.
+        "live": (
+            {
+                "price": live["price"],
+                "change_pct": live["change_pct"],
+                "date": live["date"],
+                "volume": live["volume"],
+            }
+            if live and not live["is_bar"]
+            else None
+        ),
         "etf_info": etf_info,
+        "ma_lines": ma_lines,
         "holdings": holdings,
         "holdings_as_of_date": holdings_as_of_date,
+        "holdings_updated_at": holdings_updated_at,
+        "holdings_disclosure": holdings_disclosure,
         "holdings_price_as_of_date": holdings_price_as_of_date,
         "holdings_error": holdings_error,
+        "holdings_revision": holdings_revision,
         "my_average_buy_price": _calculate_consolidated_average_buy_price(
             db_ticker, currency_for_country(country_code)
         ),
@@ -897,7 +999,7 @@ def get_ticker_detail(
 def get_ticker_detail_compare(
     payload: dict[str, object] = Body(...),
     _: None = Depends(require_internal_token),
-) -> dict[str, object]:
+):
     """여러 ETF 상세를 한 번에 계산한다 — 구성종목 합집합을 1회만 조회해 공유한다.
 
     같은 구성종목(예: SK스퀘어)이 여러 ETF에 등장해도 **동일한 시세/변동률**로 보이고,
@@ -906,97 +1008,137 @@ def get_ticker_detail_compare(
 
     ``include_holdings=False`` (성과분석 탭 초기 로딩)면 구성종목 시세 평가·포트폴리오 변동
     계산을 생략해 응답이 크게 빨라진다. 구성종목/기본정보 탭을 열 때 true 로 다시 요청한다.
+
+    응답은 **SSE**(튜닝과 같은 형식)다 — 8종목 × 구성종목 시세 조회가 한 요청에 몰리면
+    일반 JSON 응답은 프록시 타임아웃(90초)에 걸렸고, 화면 진행 바도 추정으로만 움직였다.
+    단계마다 진행 이벤트를 흘리고, 실패하면 어느 종목·단계인지 에러 이벤트로 알린다.
     """
+    return sse_stream(lambda: _compare_events(payload))
+
+
+def _compare_events(payload: dict[str, object]):
+    """compare 계산 본체 — 진행(progress)·결과(result) 이벤트를 흘리는 제너레이터."""
     raw_items = payload.get("items") if isinstance(payload, dict) else None
     items = [it for it in raw_items if isinstance(it, dict)] if isinstance(raw_items, list) else []
     include_holdings = bool(payload.get("include_holdings", True)) if isinstance(payload, dict) else True
 
-    # 0) 결과 캐시 — 같은 ETF 세트면 TTL 내 재계산 없이 즉시 반환.
-    #    (구성종목 포함 여부가 다르면 페이로드가 달라 캐시 키를 분리한다.)
-    cache_key = json.dumps(
+    def item_cache_key(item: dict[str, object]) -> tuple[str, str, str, bool]:
+        return (
+            str(item.get("ticker") or ""),
+            str(item.get("ticker_type") or ""),
+            str(item.get("country_code") or "kor"),
+            include_holdings,
+        )
+
+    def meta_ticker(item: dict[str, object]) -> str:
+        ticker = str(item.get("ticker") or "").split(":")[-1].strip().upper()
+        country = str(item.get("country_code") or "kor").strip().lower()
+        return ensure_asx_prefix(ticker) if country == "au" else ticker
+
+    meta_by_pool: dict[str, dict[str, dict[str, Any]]] = {}
+    if include_holdings:
+        for pool in {str(item.get("ticker_type") or "") for item in items}:
+            meta_by_pool[pool] = get_stock_cache_meta_map(
+                pool, [meta_ticker(item) for item in items if str(item.get("ticker_type") or "") == pool]
+            )
+    revisions = (
         {
-            "include_holdings": include_holdings,
-            "items": sorted(
-                (
-                    str(it.get("ticker") or ""),
-                    str(it.get("ticker_type") or ""),
-                    str(it.get("country_code") or "kor"),
-                )
-                for it in items
-            ),
+            item_cache_key(item): stock_holdings_revision(
+                (meta_by_pool[str(item.get("ticker_type") or "")].get(meta_ticker(item), {})).get("holdings_cache")
+                or {}
+            )
+            for item in items
         }
+        if include_holdings
+        else {}
     )
+
+    # 0) 종목 단위 캐시 — TTL과 구성종목 원본이 같으면 재사용한다. 부분 실패 후 재시도가
+    #    성공분을 여기서 읽고 실패분만 다시 계산한다(진행 바도 그만큼 건너뛴다).
     now_ts = _time.time()
+    detail_by_key: dict[tuple[str, str, str, bool], dict[str, object]] = {}
     with _COMPARE_CACHE_LOCK:
-        cached = _COMPARE_CACHE.get(cache_key)
-        if cached and now_ts - cached[1] < _COMPARE_CACHE_TTL:
-            # 캐시 키는 종목 집합(정렬)이라 **순서가 달라도 같은 키**다. 화면이 카드 순서를
-            # 바꿔 다시 요청하면 옛 순서 결과가 그대로 나가므로, 여기서 요청 순서로 맞춘다.
-            # (맞추지 않으면 화면이 이름과 시세를 다른 종목끼리 짝지어 보여준다.)
-            return {"results": _order_compare_results(cached[0].get("results") or [], items)}
+        for item in items:
+            cached = _COMPARE_CACHE.get(item_cache_key(item))
+            if (
+                cached
+                and now_ts - cached[1] < _COMPARE_CACHE_TTL
+                and (not include_holdings or cached[0].get("holdings_revision") == revisions[item_cache_key(item)])
+            ):
+                detail_by_key[item_cache_key(item)] = cached[0]
+    pending = [item for item in items if item_cache_key(item) not in detail_by_key]
 
     # 1) 한국 ETF 구성종목 합집합 → 공유 가격 스냅샷 1회 구성 (build_component_price_snapshot 가 중복 제거)
+    #    캐시된 종목은 뺀다 — 새로 계산할 종목의 구성종목만 필요하다.
     #    구성종목이 필요 없는 호출이면 이 조회 자체를 건너뛴다(성과분석 탭 초기 로딩 단축).
     shared_snapshot: dict[str, dict[str, Any]] = {}
-    if include_holdings:
+    if include_holdings and pending:
         union_holdings: list[dict[str, object]] = []
-        for item in items:
+        for item in pending:
             if str(item.get("country_code") or "kor").strip().lower() != "kor":
                 continue
-            cache_doc = get_stock_cache_meta(str(item.get("ticker_type") or ""), str(item.get("ticker") or ""))
+            cache_doc = meta_by_pool[str(item.get("ticker_type") or "")].get(meta_ticker(item))
             if not isinstance(cache_doc, dict):
                 continue
             holdings_cache = dict(cache_doc.get("holdings_cache") or {})
             union_holdings.extend(list(holdings_cache.get("items") or []))
 
-        shared_snapshot = build_component_price_snapshot(union_holdings) if union_holdings else {}
+        if union_holdings:
+            yield {
+                "type": "progress",
+                "percent": 5,
+                "message": f"구성종목 합집합 {len(union_holdings):,}건 가격 스냅샷 조회 중"
+                + (f" (캐시 재사용 {len(items) - len(pending)}종목 제외)" if len(pending) < len(items) else ""),
+            }
+            try:
+                shared_snapshot = build_component_price_snapshot(union_holdings)
+            except Exception as exc:
+                raise RuntimeError(f"구성종목 가격 스냅샷 조회 실패: {exc}") from exc
 
-    # 2) ETF 별 detail 을 공유 스냅샷으로 계산 (캐시 우회 → 종목당 동일 값 보장)
-    results: list[dict[str, object]] = []
-    for item in items:
-        detail = build_ticker_detail_payload(
-            str(item.get("ticker") or ""),
-            str(item.get("ticker_type") or ""),
-            str(item.get("country_code") or "kor"),
-            component_price_snapshot=shared_snapshot,
-            use_bundle_cache=False,
-            include_holdings=include_holdings,
-        )
+    # 진행·에러 메시지용 종목명 — 풀 목록에서 읽는다(티커만으로는 어떤 종목인지 알기 어렵다).
+    name_by_ticker: dict[tuple[str, str], str] = {}
+    for pool in {str(item.get("ticker_type") or "") for item in pending if item.get("ticker_type")}:
+        try:
+            for row in get_etfs(pool):
+                name_by_ticker[(pool, str(row.get("ticker") or "").strip().upper())] = str(row.get("name") or "")
+        except Exception:  # noqa: BLE001 - 이름은 표시용이라 못 읽으면 티커만 쓴다
+            continue
+
+    # 2) ETF 별 detail 을 공유 스냅샷으로 계산 (번들 캐시 우회 → 종목당 동일 값 보장).
+    #    **끝나는 즉시 종목 캐시에 저장한다** — 뒤 종목에서 실패해도 앞의 성공분은 남는다.
+    total = max(len(pending), 1)
+    for index, item in enumerate(pending):
+        ticker = str(item.get("ticker") or "")
+        name = name_by_ticker.get((str(item.get("ticker_type") or ""), ticker.strip().upper()), "")
+        label = f"{name}({ticker})" if name else ticker
+        yield {
+            "type": "progress",
+            "percent": round(30 + 65 * index / total),
+            "message": f"{index + 1}/{total} {label} 상세 계산 중",
+        }
+        try:
+            detail = build_ticker_detail_payload(
+                ticker,
+                str(item.get("ticker_type") or ""),
+                str(item.get("country_code") or "kor"),
+                component_price_snapshot=shared_snapshot,
+                use_bundle_cache=False,
+                include_holdings=include_holdings,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"「{label}」 상세 계산 실패 ({index + 1}/{total}) — 계산이 끝난 종목은 캐시에 남아 "
+                f"재시도 시 이 종목부터 이어집니다: {exc}"
+            ) from exc
         # 어느 요청 항목의 결과인지 응답에 실어 둔다 — 화면이 순서(인덱스)가 아니라
         # 이 값으로 짝을 지어야 순서가 바뀌어도 이름과 시세가 어긋나지 않는다.
         detail["ticker_type"] = str(item.get("ticker_type") or "")
         detail["country_code"] = str(item.get("country_code") or "kor")
-        results.append(detail)
-    result = {"results": results}
-    with _COMPARE_CACHE_LOCK:
-        _COMPARE_CACHE[cache_key] = (result, now_ts)
-    return result
+        detail_by_key[item_cache_key(item)] = detail
+        with _COMPARE_CACHE_LOCK:
+            _COMPARE_CACHE[item_cache_key(item)] = (detail, now_ts)
 
-
-def _compare_result_key(ticker: object, ticker_type: object, country_code: object) -> tuple[str, str, str]:
-    """비교 결과를 요청 항목과 이어 붙일 때 쓰는 키."""
-    return (
-        str(ticker or "").strip().upper(),
-        str(ticker_type or "").strip().lower(),
-        str(country_code or "kor").strip().lower(),
-    )
-
-
-def _order_compare_results(results: list[dict[str, object]], items: list[dict[str, object]]) -> list[dict[str, object]]:
-    """캐시된 결과를 이번 요청의 종목 순서로 다시 세운다.
-
-    짝을 못 찾은 항목이 하나라도 있으면 순서를 못 맞춘다는 뜻이므로 원본을 그대로 둔다 —
-    임의로 채워 넣으면 다른 종목의 값이 붙는다.
-    """
-    by_key = {
-        _compare_result_key(row.get("ticker"), row.get("ticker_type"), row.get("country_code")): row
-        for row in results
-        if isinstance(row, dict)
-    }
-    ordered: list[dict[str, object]] = []
-    for item in items:
-        row = by_key.get(_compare_result_key(item.get("ticker"), item.get("ticker_type"), item.get("country_code")))
-        if row is None:
-            return results
-        ordered.append(row)
-    return ordered
+    # 요청 순서대로 조립 — 캐시·신규 계산이 섞여도 화면 카드 순서와 일치한다.
+    results = [detail_by_key[item_cache_key(item)] for item in items]
+    yield {"type": "progress", "percent": 100, "message": "비교 데이터 반영 중"}
+    yield {"type": "result", "results": results}

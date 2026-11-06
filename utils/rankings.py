@@ -18,8 +18,8 @@ from core.strategy.scoring import (
     compute_trend_frame,
     drawdown_from_high_pct,
     hold_eligible,
+    rank_numbers,
     rank_score,
-    select_holdings,
 )
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
 from utils.asx_ticker import ensure_asx_prefix
@@ -28,12 +28,19 @@ from utils.cache_utils import (
     load_cached_updated_at_bulk_with_fallback,
 )
 from utils.data_loader import get_latest_trading_day, get_trading_days
+from utils.effective_prices import (
+    apply_realtime_close,
+    bar_anchor,
+    previous_day_change_pct,
+    prior_day_shown,
+    realtime_missing,
+)
 from utils.logger import get_app_logger
-from utils.moving_averages import get_moving_average_type
+from utils.moving_averages import pool_moving_average_type
 from utils.perf_metrics import single_stock_backtest_stats
-from utils.pool_settings_store import get_pool_benchmark_ticker
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
+from utils.trading_calendar import listed_after
 
 logger = get_app_logger()
 MONTHLY_RETURN_LABEL_COUNT = 13
@@ -73,7 +80,8 @@ def _normalize_ma_rule(ticker_type: str, ma_rule_raw: Any) -> dict[str, Any]:
         "short_ma_days": short_days,
         "long_ma_days": long_days,
         "score_column": _build_ma_rule_score_column(),
-        "ma_type": get_moving_average_type(),
+        # 이평 종류도 일수와 같이 **그 풀의 설정**이다(화면 표기·계산이 같은 값을 본다).
+        "ma_type": pool_moving_average_type(ticker_type),
     }
 
 
@@ -336,6 +344,11 @@ def _extract_price_metrics_from_close_series(
     reference_date: pd.Timestamp | None = None,
     monthly_labels: list[str] | None = None,
 ) -> dict[str, Any]:
+    """표시용 가격 지표.
+
+    `close_series` 는 실시간을 반영한 시리즈다. 전거래일(%)은 확정 시리즈가 필요해 여기서
+    채우지 않는다 — 호출부가 `effective_prices.previous_day_change_pct` 로 넣는다.
+    """
     monthly_return_metrics = _build_monthly_return_metrics(
         close_series,
         reference_date=reference_date,
@@ -343,8 +356,10 @@ def _extract_price_metrics_from_close_series(
     )
     empty_result = {
         "현재가": None,
+        "변동성": None,
         "괴리율": None,
         "일간(%)": None,
+        "전거래일(%)": None,
         "1주(%)": None,
         "2주(%)": None,
         "3주(%)": None,
@@ -385,9 +400,17 @@ def _extract_price_metrics_from_close_series(
     # 고점 대비(%) — 모멘텀 전략과 **같은 함수**(core.strategy.scoring.drawdown_from_high_pct).
     drawdown = drawdown_from_high_pct(series, current_price)
 
+    from core.strategy.momentum.signals import daily_volatility_pct
+
+    volatility = daily_volatility_pct(series)
+    latest_volatility = float(volatility.iloc[-1]) if len(volatility) and pd.notna(volatility.iloc[-1]) else None
+
     return {
         "현재가": current_price,
+        # 20일 일간 수익률 표준편차(%) — 모멘텀 진입 문턱 판정과 같은 정의(화면 공용 컬럼).
+        "변동성": round(latest_volatility, 2) if latest_volatility is not None else None,
         "일간(%)": daily_pct,
+        "전거래일(%)": None,
         "1주(%)": _calc_period_return(series, 5),
         "2주(%)": _calc_period_return(series, 10),
         "3주(%)": _calc_period_return(series, 15),
@@ -411,6 +434,27 @@ def _extract_price_metrics_from_close_series(
         "RSI": _calculate_rsi(series, RSI_PERIOD),
         **monthly_return_metrics,
     }
+
+
+def _touched_new_high_today(confirmed_close_series: pd.Series | None, realtime_entry: dict[str, float] | None) -> bool:
+    """장중 최고 종가 돌파 후 현재가도 그 기준 이상일 때만 ⭐신고점 표시.
+
+    오늘 처음 돌파한 종목도 포함한다. 고가에서 내려왔더라도 이전 최고 종가 위에
+    머무르면 표시하고, 그 아래로 밀리면 표시하지 않는다.
+    비교 기준은 고점 컬럼과 같은 공용 창(`drawdown_from_high_pct`, 12개월 최고 종가)이다.
+    """
+    if not isinstance(realtime_entry, dict):
+        return False
+    high = realtime_entry.get("high")
+    now = realtime_entry.get("nowVal")
+    if high is None or now is None:
+        return False
+    try:
+        high_gap = drawdown_from_high_pct(confirmed_close_series, float(high))
+        now_gap = drawdown_from_high_pct(confirmed_close_series, float(now))
+    except (TypeError, ValueError):
+        return False
+    return high_gap is not None and high_gap > 0 and now_gap is not None and now_gap >= 0
 
 
 def _load_realtime_snapshot(country_code: str, tickers: list[str]) -> dict[str, dict[str, float]]:
@@ -462,34 +506,12 @@ def _apply_realtime_overlay(
 def build_effective_close_series(
     cached_close_series: pd.Series | None,
     realtime_entry: dict[str, float] | None,
+    country_code: str,
+    *,
+    last_bar: pd.Timestamp,
 ) -> pd.Series | None:
-    """실시간 가격을 반영한 종가 시리즈를 생성합니다."""
-    if cached_close_series is None or cached_close_series.empty:
-        return None
-    if not isinstance(realtime_entry, dict) or not realtime_entry:
-        return cached_close_series
-
-    now_val = realtime_entry.get("nowVal")
-    if now_val is None:
-        return cached_close_series
-
-    try:
-        realtime_price = float(now_val)
-    except (TypeError, ValueError):
-        return cached_close_series
-
-    adjusted = cached_close_series.copy()
-    today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
-    last_index = pd.Timestamp(adjusted.index[-1])
-    if last_index.tzinfo is not None:
-        last_index = last_index.tz_localize(None)
-    last_index = last_index.normalize()
-
-    if last_index < today:
-        adjusted.loc[today] = realtime_price
-    else:
-        adjusted.iloc[-1] = realtime_price
-    return adjusted.sort_index()
+    """실시간 가격을 반영한 종가 시리즈 — 규칙은 `utils.effective_prices` 한 곳에 있다."""
+    return apply_realtime_close(cached_close_series, realtime_entry, country_code, last_bar=last_bar)
 
 
 def _normalize_ranking_values(
@@ -505,6 +527,7 @@ def _normalize_ranking_values(
     percent_columns = [
         "괴리율",
         "일간(%)",
+        "전거래일(%)",
         "1주(%)",
         "2주(%)",
         "3주(%)",
@@ -559,38 +582,6 @@ def hold_eligible_mask(disparity: pd.Series, short_disparity: pd.Series) -> pd.S
     return hold_eligible(disparity, short_disparity)
 
 
-def _mark_hold_targets(
-    df: pd.DataFrame,
-    top_n: int,
-) -> pd.DataFrame:
-    """규칙상 보유 대상인 종목에 ``보유대상`` 을 표시한다. 화면의 추천(✅) 기준.
-
-    선정 자체는 **모멘텀 전략과 같은 공용 함수**(`core.strategy.scoring.select_holdings`)가
-    한다 — 자격(장기 이격 > 0, 단기 이격 >= 0) → 순위 점수 순이다.
-
-    여기서 따로 거는 건 **제외**(`exclude_from_ranking`)뿐이다 — 투자 후보가 아니다.
-    벤치마크는 빼지 않는다(종목풀에 있으면 매수 후보다. 모멘텀·신고가도 같다).
-    조건을 만족하는 종목이 ``top_n`` 보다 적으면 그만큼만 표시한다(억지로 채우지 않는다).
-    """
-    df["보유대상"] = False
-    if "이격" not in df.columns or "단기이격" not in df.columns:
-        return df
-
-    candidates = [
-        {
-            "ticker": str(row.get("티커") or "").strip().upper(),
-            "long_disparity_pct": row.get("이격"),
-            "short_disparity_pct": row.get("단기이격"),
-        }
-        for _, row in df.iterrows()
-        if not bool(row.get("exclude_from_ranking"))
-    ]
-    picked = set(select_holdings(candidates, top_n=int(top_n)))
-    if picked:
-        df.loc[df["티커"].astype(str).str.strip().str.upper().isin(picked), "보유대상"] = True
-    return df
-
-
 def _apply_common_rank_scores(
     df: pd.DataFrame,
     effective_close_series_map: dict[str, pd.Series],
@@ -643,7 +634,8 @@ def _apply_common_rank_scores(
         index=pd.DatetimeIndex(union_index),
     )
 
-    composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
+    ma_type = str(ma_rules[0]["ma_type"])
+    composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules, ma_type)
     eval_date = close_frame.index.max()
 
     # 티커별 값 매핑. composite 는 signed-percentile 이지만 여기서는 자격 마스크 용도로만 쓴다.
@@ -693,7 +685,7 @@ def _apply_common_rank_scores(
     # 단기이격 = 종가와 단기 이평선의 이격률(%). 이격(장기 기준)과 같은 함수를 써서
     # 두 값이 항상 동일한 지표의 기간만 다른 버전이 되도록 한다.
     # 종목 선택은 이격(장기), 손절/익절 판단은 단기이격이 담당한다.
-    short_trend_frame = compute_trend_frame(close_frame, short_days)
+    short_trend_frame = compute_trend_frame(close_frame, short_days, ma_type)
     short_trend_row = short_trend_frame.loc[eval_date]
     df["단기이격"] = tickers_col.map(
         {
@@ -703,7 +695,7 @@ def _apply_common_rank_scores(
     ).astype("object")
     df.loc[composite_missing, "단기이격"] = None
 
-    # 순위 점수 — 정렬과 추천(✅)이 쓰는 단일 기준. 모멘텀 전략과 **같은 함수**다.
+    # 순위 점수 — 화면 정렬과 모멘텀 전략이 쓰는 단일 기준.
     # 정의는 장기 이격률이라 「장기」와 같은 값이고, 화면에는 컬럼으로 내보내지 않는다.
     # 그래도 따로 두는 이유: 줄 세우는 기준을 정의 한 곳(rank_score)에만 두기 위해서다 —
     # 정렬이 「이격」 컬럼을 직접 읽으면 정의를 바꿀 때 이 파일까지 고쳐야 한다.
@@ -733,7 +725,6 @@ def build_ticker_type_rankings(
         status_callback("최신 거래일 기준 캐시 상태 확인")
     started_at = perf_counter()
     settings = get_ticker_type_settings(ticker_type)
-    benchmark_ticker = get_pool_benchmark_ticker(settings)
     country_code = str(settings.get("country_code") or "").strip().lower()
 
     etfs = get_etfs(ticker_type)
@@ -746,7 +737,17 @@ def build_ticker_type_rankings(
     cache_updated_map_raw = load_cached_updated_at_bulk_with_fallback(ticker_type, tickers)
     latest_trading_day = _get_latest_trading_day_for_reference(country_code, selected_as_of_date)
     monthly_labels = get_recent_monthly_return_labels(MONTHLY_RETURN_LABEL_COUNT, reference_date=selected_as_of_date)
-    missing_tickers = sorted({ticker for ticker in tickers if ticker not in cache_updated_map_raw})
+    # 상장일이 아직 완료된 거래일에 닿지 않은 종목(상장 첫날 장중)은 확정 봉이 없는 게 정상이다 —
+    # 캐시 누락으로 표 전체를 막지 않고, 실시간 봉 하나로 행을 만든다(`apply_realtime_close`).
+    # 판정은 데이터 유무가 아니라 종목 메타의 상장일로 한다.
+    unlisted_until_today = {
+        str(item.get("ticker") or "").strip().upper()
+        for item in etfs
+        if listed_after(item.get("listing_date"), latest_trading_day)
+    }
+    missing_tickers = sorted(
+        {ticker for ticker in tickers if ticker not in cache_updated_map_raw and ticker not in unlisted_until_today}
+    )
     normalized_cache_updated = {
         ticker: normalized
         for ticker, updated_at in cache_updated_map_raw.items()
@@ -782,9 +783,32 @@ def build_ticker_type_rankings(
     if callable(status_callback):
         status_callback("기준 종가 캐시 로드")
     cached_close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, tickers)
+    # 확정 종가 결손 차단 — 위에서 캐시 문서 존재·신선도를 이미 통과했으므로, 여기서 시리즈가
+    # 없거나 비면 조회·역직렬화 결함이다. 그대로 진행하면 실시간 한 점으로 이평선을 계산해
+    # 이탈 0.0% 같은 그럴듯한 오답이 표가 되므로, 표 대신 차단 결과(에러 표시)를 내보낸다.
+    series_missing_tickers = sorted(
+        ticker
+        for ticker in tickers
+        if ticker not in unlisted_until_today
+        and ((series := cached_close_series_map.get(ticker)) is None or series.empty)
+    )
+    if series_missing_tickers:
+        logger.warning(
+            "[rankings] type=%s blocked 확정 종가 시리즈 결손 tickers=%s",
+            ticker_type,
+            series_missing_tickers[:20],
+        )
+        return _build_blocked_rankings_result(
+            latest_trading_day=latest_trading_day,
+            cache_updated_at=latest_cache_updated_at,
+            missing_tickers=series_missing_tickers,
+            stale_tickers=[],
+        )
     if callable(status_callback):
         status_callback("실시간 가격 조회")
     today_korea = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
+    # 전거래일이 앵커 봉보다 한 거래일 앞을 보일지 — 규칙은 공용(`prior_day_shown`).
+    prior_day_column = prior_day_shown(country_code, as_of_is_today=selected_as_of_date == today_korea)
     realtime_allowed = selected_as_of_date == today_korea
     realtime_snapshot = (
         realtime_snapshot_override
@@ -815,6 +839,11 @@ def build_ticker_type_rankings(
     if callable(status_callback):
         status_callback("순위 계산")
 
+    # 붙일 봉의 기준 — 합성·보유 알림과 **같은 공용 앵커**를 쓴다(정의가 한 곳뿐이라
+    # 경로마다 갈리지 않는다).
+    pool_last_bar = bar_anchor(country_code)
+    realtime_missing_tickers: list[str] = []
+
     for etf in etfs:
         ticker = str(etf.get("ticker") or "").strip().upper()
         if not ticker:
@@ -824,7 +853,9 @@ def build_ticker_type_rankings(
         realtime_entry = realtime_snapshot.get(ticker)
         preprocess_started_at = perf_counter()
         base_close_series = _slice_close_series_to_date(cached_close_series, latest_trading_day)
-        effective_close_series = build_effective_close_series(base_close_series, realtime_entry)
+        effective_close_series = build_effective_close_series(
+            base_close_series, realtime_entry, country_code, last_bar=pool_last_bar
+        )
         if effective_close_series is not None and not effective_close_series.empty:
             effective_close_series_map[ticker] = effective_close_series
         preprocess_elapsed += perf_counter() - preprocess_started_at
@@ -839,7 +870,16 @@ def build_ticker_type_rankings(
                 reference_date=selected_as_of_date,
                 monthly_labels=monthly_labels,
             )
+            price_metrics["전거래일(%)"] = previous_day_change_pct(
+                base_close_series, realtime_entry, country_code, prior_shown=prior_day_column
+            )
             price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
+            if realtime_allowed and realtime_missing(realtime_entry):
+                # 시세를 못 받은 종목 — 마지막 봉 변동을 오늘 일간처럼 보이지 않게 비운다.
+                price_metrics["일간(%)"] = None
+                realtime_missing_tickers.append(ticker)
+            # 장중 신고 터치 — 오늘 고가 기준(위 헬퍼 주석 참조). 당일에만 참이 될 수 있다.
+            price_metrics["고점터치"] = _touched_new_high_today(base_close_series, realtime_entry)
         metric_elapsed += perf_counter() - metric_started_at
 
         # 추세(%)는 아래 공통 엔진에서 한 번에 주입된다.
@@ -856,7 +896,6 @@ def build_ticker_type_rankings(
             "country_code": country_code,
             "currency": str(settings.get("currency") or ""),
             "source_ticker_type": ticker_type,
-            "is_benchmark": ticker == benchmark_ticker,
             "상장일": etf.get("listing_date", "-"),
             # 보유: 이 종목을 실제로 들고 있는 계좌명 목록(쉼표 구분). 없으면 빈 문자열.
             "보유": ", ".join(holding_accounts.get(ensure_asx_prefix(ticker) if country_code == "au" else ticker, [])),
@@ -896,7 +935,7 @@ def build_ticker_type_rankings(
         return float(value)
 
     def _sort_key(row: pd.Series) -> tuple[int, float, str]:
-        # 순위 점수(장기·단기 이격률 평균) 내림차순. 값이 없는 종목은 뒤로.
+        # 순위 점수(장기 이격률) 내림차순. 값이 없는 종목은 뒤로.
         score = row.get("점수")
         return (
             1 if score is None or pd.isna(score) else 0,
@@ -928,13 +967,16 @@ def build_ticker_type_rankings(
             "_ticker_sort",
         ]
     )
-    # 업종 상한 — 화면에서 바꿔 보는 값이 있으면 그것, 없으면 종목풀 저장값(모멘텀과 같은 값).
-    from config import TOP_N_HOLD
+    # 순위 번호 — 모멘텀 전략과 같은 공용 규칙(`rank_numbers`). 반올림 전 점수로 매기고,
+    # 순위 제외 종목은 후보가 아니라 번호를 주지 않는다. 벤치마크도 풀 종목이라 똑같이 번호를 받는다.
+    if not df.empty:
+        numbered = ~df["exclude_from_ranking"].astype(bool)
+        number_by_ticker = rank_numbers(dict(zip(df.loc[numbered, "티커"], df.loc[numbered, "점수"])))
+        df["순위"] = df["티커"].map(number_by_ticker).astype("object").where(numbered, None)
 
-    # 보유 종목 수는 풀별 설정이 아니라 시스템 공통(config) — 순위 추천 ✅ 개수의 기준.
-    df = _mark_hold_targets(df, TOP_N_HOLD)
     df = _normalize_ranking_values(df, country_code, monthly_labels=monthly_labels)
     df.attrs["realtime_active"] = realtime_active
+    df.attrs["realtime_missing_tickers"] = realtime_missing_tickers
     df.attrs["ranking_computed_at"] = ranking_computed_at
     if realtime_meta:
         df.attrs["realtime_fetched_at"] = realtime_meta.get("fetched_at")

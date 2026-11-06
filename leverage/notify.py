@@ -25,12 +25,17 @@ def _required_number(source: dict[str, Any], key: str) -> float:
     return float(value)
 
 
-def _index_point_label(market: str) -> str:
-    return "나스닥 100" if market == "us" else "코스피"
+def _index_label(assets: dict[str, Any]) -> str:
+    """판정 기준 지수의 이름 — 설정에 저장된 값(지수 또는 지수추종 ETF)."""
+    name = str((assets.get("index") or {}).get("name") or "").strip()
+    if not name:
+        raise ValueError("레버리지 슬랙 메시지에 지수 이름이 없습니다.")
+    return name
 
 
-def _format_index_point(value: float) -> str:
-    return f"{value:,.2f}pt"
+def _format_index_level(value: float) -> str:
+    """지수 수준 — 지수(포인트)든 추종 ETF(가격)든 단위 없이 숫자만 쓴다."""
+    return f"{value:,.2f}".rstrip("0").rstrip(".")
 
 
 def _post(text: str, blocks: list[dict], label: str) -> bool:
@@ -52,7 +57,7 @@ def send_slack_ma_cross(
     """이동평균선 크로스(+고점대비) 전략 추천을 Slack 으로 전송한다.
 
     ``view`` 는 ``utils.leverage_ma_service.compute_ma_cross_view`` 의 반환값.
-    기존 스위칭(드로다운 컷) 메시지와 형식은 맞추되, 기준이 이동선/고점대비로 바뀐 내용을 반영한다.
+    기존 스위칭(드로다운 컷) 메시지와 형식은 맞추되, 기준이 이평선/고점대비로 바뀐 내용을 반영한다.
     """
     market = str(view.get("market") or "kor")
     market_name = "🇺🇸 미국" if market == "us" else "🇰🇷 한국"
@@ -88,13 +93,12 @@ def send_slack_ma_cross(
     ]
 
     # 전략 설정(파라미터)
-    ma_type = get_moving_average_type()
     param_text = (
         "*🏆 전략 설정 (이동평균선 크로스 + 고점대비)*\n"
         f"• 지수(신호): {index_display}\n"
         f"• 레버리지 자산: {leverage_display}\n"
         f"• 방어 자산: {defense_display}\n"
-        f"• 이동선: {ma_type} {ma_days}일\n"
+        f"• 이평선: {ma_days}일\n"
         f"• 고점대비 한도: {peak_limit:.0f}%"
     )
     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": param_text}})
@@ -109,7 +113,7 @@ def send_slack_ma_cross(
         peak_ok = peak_dd >= -limit
         judge_text = (
             "*=== 판정 근거 ===*\n"
-            f"• 이격({ma_type} {ma_days}일): {gap_pct:+.2f}% / 기준 ≥ 0% {'✅' if gap_ok else '❌'}\n"
+            f"• 이격({ma_days}일): {gap_pct:+.2f}% / 기준 ≥ 0% {'✅' if gap_ok else '❌'}\n"
             f"• 고점대비: {peak_dd:+.2f}% / 한도 ≥ -{limit:.0f}% {'✅' if peak_ok else '❌'}\n"
             f"• 결과: {'🟢 레버리지 보유' if want_leverage else '🔵 방어 보유'} → *{target_display}*"
         )
@@ -145,8 +149,8 @@ def send_slack_ma_cross(
 
         if want_leverage:
             threshold_line = (
-                f"  • 방어 전환 기준 지수: {_index_point_label(market)} "
-                f"*{_format_index_point(required_index_close)} 이하 ({required_move_pct:+.2f}%)*"
+                f"  • 방어 전환 기준 지수: {_index_label(assets)} "
+                f"*{_format_index_level(required_index_close)} 이하 ({required_move_pct:+.2f}%)*"
             )
             needs = [
                 f"① {ma_days}일 이동평균선 아래로 *{ma_recovery_pct:+.2f}%* 하락하기 전까지 레버리지 보유",
@@ -160,8 +164,8 @@ def send_slack_ma_cross(
             )
         else:
             threshold_line = (
-                f"  • 전환 필요 지수: {_index_point_label(market)} "
-                f"*{_format_index_point(required_index_close)} 이상 ({required_move_pct:+.2f}%)*"
+                f"  • 전환 필요 지수: {_index_label(assets)} "
+                f"*{_format_index_level(required_index_close)} 이상 ({required_move_pct:+.2f}%)*"
             )
             needs = []
             if not gap_ok:

@@ -15,12 +15,18 @@
      12/14/16/18/20/24 를 쓴다 — 널리 쓰여 눈에 익고 rem 값도 딱 떨어진다.
      크기를 바꿀 일이 생기면 --fs-base 만 고치지 말고 여섯 줄을 같이 조정한다.
      (단계 간격이 무너지면 토큰을 나눠 둔 의미가 없어진다) */
-  --fs-xs: 0.75rem; /* 12px — 본문 아님. 접기 화살표 같은 글리프, 첨자(sub/sup) */
-  --fs-sm: 0.875rem; /* 14px — 보조 라벨, 캡션, 표(그리드) 전체 */
-  --fs-base: 1rem; /* 16px — 본문, 입력, 버튼, 카드 (기준) */
-  --fs-lg: 1.125rem; /* 18px — 카드·섹션 제목 */
-  --fs-xl: 1.25rem; /* 20px — 화면 제목 */
-  --fs-2xl: 1.5rem; /* 24px — 대시보드 큰 숫자 */
+  --fs-xs: 0.75rem;
+  /* 12px — 본문 아님. 접기 화살표 같은 글리프, 첨자(sub/sup) */
+  --fs-sm: 0.875rem;
+  /* 14px — 보조 라벨, 캡션, 표(그리드) 전체 */
+  --fs-base: 1rem;
+  /* 16px — 본문, 입력, 버튼, 카드 (기준) */
+  --fs-lg: 1.125rem;
+  /* 18px — 카드·섹션 제목 */
+  --fs-xl: 1.25rem;
+  /* 20px — 화면 제목 */
+  --fs-2xl: 1.5rem;
+  /* 24px — 대시보드 큰 숫자 */
 
   --app-content-max-width: 1680px;
   --app-page-inset: 0.875rem;
@@ -582,10 +588,12 @@ a {
   padding: 0 12px 1rem;
   align-items: flex-start;
 }
+
 .appHomeMainCol {
   flex: 1 1 auto;
   min-width: 0;
 }
+
 .appHomeRail {
   flex: 0 0 200px;
   width: 200px;
@@ -598,15 +606,18 @@ a {
   max-height: calc(100vh - 64px);
   overflow-y: auto;
 }
+
 .appHomeRail .hubMenuCard {
   position: static;
 }
+
 .appHomeRailFooter {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 0 2px;
 }
+
 /* 레일 기간 수익률(금일/금주/금월/금년) — CNN 아래 4줄 */
 .appRailPeriod {
   display: flex;
@@ -617,6 +628,7 @@ a {
   border-radius: 8px;
   background: #fff;
 }
+
 .appRailPeriodRow {
   display: flex;
   align-items: baseline;
@@ -624,18 +636,22 @@ a {
   gap: 10px;
   font-size: var(--fs-sm);
 }
+
 .appRailPeriodLabel {
   color: var(--text-muted, #64748b);
   font-weight: 600;
 }
+
 .appRailPeriodRow strong {
   font-size: var(--fs-sm);
   font-weight: 700;
 }
+
 @media (max-width: 900px) {
   .appContentHome {
     flex-direction: column;
   }
+
   .appHomeRail {
     flex: none;
     width: 100%;
@@ -734,6 +750,18 @@ a {
 
 .tickerDetailLinkText {
   user-select: text;
+}
+
+.appLeverageTickerCell .tickerDetailLinkText,
+.appLeverageTickerCell .appCodeText,
+.appLeverageTickerCell {
+  color: #d63939;
+  font-weight: 700;
+}
+
+.appLeverageName {
+  color: #d63939;
+  font-weight: 700;
 }
 
 .tickerDetailLinkButton {
@@ -1956,6 +1984,7 @@ a {
 
 .tickerDetailTableHeader {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
   padding: 0.15rem 0 0.35rem;
@@ -2682,10 +2711,10 @@ a {
   /* .comparePage 가 flex column 이라, 본문 행이 많은 탭(월간 분석)에서 헤더 섹션이 눌려
      overflow:hidden 에 잘렸다. 섹션은 축소하지 않고 내용 높이를 유지한다. */
   flex: 0 0 auto;
-  /* 비교 상품 최대 8개(ComparePageClient MAX_PRODUCTS) — 컬럼 수를 그에 맞춘다.
+  /* 상품 컬럼 수는 `--compare-products`(ComparePageClient 가 담긴 종목 수를 넣는다)를 따른다.
      앞 2열은 지표 라벨 영역(대부분 span 2 로 합쳐 씀). 합계 7.2rem 은 라벨 폰트(0.86rem)에서
      가장 긴 문구('포트폴리오 변동')가 한 줄로 들어가는 최소 폭이다. */
-  grid-template-columns: 2.9rem 4.3rem repeat(8, minmax(8.5rem, 1fr));
+  grid-template-columns: 2.9rem 4.3rem repeat(var(--compare-products), minmax(6.8rem, 1fr));
   overflow: hidden;
   border: 1px solid #d6deea;
   border-radius: 0.5rem;
@@ -2693,7 +2722,7 @@ a {
 }
 
 .compareMatrixWithTotal {
-  grid-template-columns: 2.9rem 4.3rem repeat(8, minmax(8rem, 1fr)) minmax(9rem, 0.7fr);
+  grid-template-columns: 2.9rem 4.3rem repeat(var(--compare-products), minmax(6.4rem, 1fr)) minmax(9rem, 0.7fr);
 }
 
 .compareMatrixBody {
@@ -2837,7 +2866,7 @@ a {
    같은 선에 놓이게 하고, 그만큼 라벨 열 폭(합 9rem)을 준다.
    헤더/본문 모두 스크롤바 자리를 확보해 두 섹션의 컬럼이 어긋나지 않게 한다. */
 .compareMatrixMonthly {
-  grid-template-columns: 3.6rem 5.4rem repeat(8, minmax(8.5rem, 1fr));
+  grid-template-columns: 3.6rem 5.4rem repeat(var(--compare-products), minmax(6.8rem, 1fr));
   scrollbar-gutter: stable;
 }
 
@@ -2847,7 +2876,7 @@ a {
 
 /* 일간 분석은 라벨이 8자리(20260724)라 라벨 열을 조금 더 넓게 쓴다. */
 .compareMatrixDaily {
-  grid-template-columns: 4.2rem 6.3rem repeat(8, minmax(8.5rem, 1fr));
+  grid-template-columns: 4.2rem 6.3rem repeat(var(--compare-products), minmax(6.8rem, 1fr));
 }
 
 .compareMatrixMonthlyScroll {
@@ -2866,7 +2895,7 @@ a {
   grid-auto-rows: min-content;
 }
 
-.compareMatrixPerformance > .compareMatrixWide {
+.compareMatrixPerformance>.compareMatrixWide {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2883,7 +2912,8 @@ a {
      flex 아이템으로 늘려야 년월(왼쪽)·평균(오른쪽) 끝이 셀 양끝에 정확히 맞는다. */
   flex: 1 1 auto;
   min-width: 0;
-  font-size: var(--fs-base); /* 값 셀이 .appContent 에서 상속받는 크기와 동일 */
+  font-size: var(--fs-base);
+  /* 값 셀이 .appContent 에서 상속받는 크기와 동일 */
   /* 자릿수가 달라도(-1.90 / +10.52) 숫자 폭이 같아야 끝이 가지런히 맞는다.
      폰트가 font-variant-numeric 을 무시하는 경우까지 대비해 feature-settings 도 함께 준다. */
   font-variant-numeric: tabular-nums;
@@ -2893,14 +2923,14 @@ a {
 
 /* 기간 라벨(2026 / 202607 / 20260724)은 폭을 고정한다 — 등폭 폰트라 자릿수만큼 늘어난다.
    '1' 이 '0' 보다 좁은 비례폭 폰트로 폴백돼도 201911/201910 폭이 같아진다. */
-.compareMonthlyLabelRow > span:first-child {
+.compareMonthlyLabelRow>span:first-child {
   flex: 0 0 auto;
   min-width: 4ch;
   text-align: left;
 }
 
 /* 평균값은 항상 오른쪽 끝에 붙인다(년월 길이와 무관하게). */
-.compareMonthlyLabelRow > span:last-child {
+.compareMonthlyLabelRow>span:last-child {
   margin-left: auto;
   text-align: right;
 }
@@ -3054,8 +3084,8 @@ a {
 }
 
 .compareMatrixWide {
-  /* 상품 컬럼 전체를 차지하는 셀(차트 등) — MAX_PRODUCTS(8) 와 같아야 이후 행이 밀리지 않는다. */
-  grid-column: span 8;
+  /* 상품 컬럼 전체를 차지하는 셀(차트 등) — 상품 컬럼 수와 같아야 이후 행이 밀리지 않는다. */
+  grid-column: span var(--compare-products);
   min-width: 0;
   padding: 1rem;
   border-bottom: 1px solid #d6deea;
@@ -3235,31 +3265,9 @@ a {
   flex-wrap: wrap;
 }
 
-.tickerDetailChartMaLegend {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  flex-wrap: wrap;
-}
 
-.tickerDetailChartMaLabel {
-  font-size: var(--fs-sm);
-  color: #5b6778;
-  font-weight: 600;
-}
 
-.tickerDetailChartMaItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--fs-sm);
-}
 
-.tickerDetailChartMaSwatch {
-  width: 14px;
-  height: 2px;
-  display: inline-block;
-}
 
 .tickerDetailHoldingsPanel {
   grid-area: holdings;
@@ -3299,26 +3307,6 @@ a {
   display: block;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* 자산 헬퍼 종목명: 종목풀 순위와 동일하게 최대 2줄까지 표시한다. */
-.assetHelperPreviewGrid .ag-cell.assetHelperNameCell,
-.assetHelperPreviewGrid .ag-cell.assetHelperNameCell .ag-cell-value {
-  min-width: 0;
-  overflow: hidden;
-}
-
-.assetHelperPreviewGrid .assetHelperNameCellText {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: normal;
-  word-break: break-word;
-  line-height: 1.1;
 }
 
 .tickerDetailCodeContent {
@@ -3416,6 +3404,10 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* 캔들·이평선 위에 얹혀도 읽히게 반투명 배경을 깐다(차트는 항상 밝은 배경). */
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: 4px;
+  padding: 0 4px;
 }
 
 .tickerDetailChartBadgeArrow {
@@ -3606,33 +3598,77 @@ a {
   font-feature-settings: "tnum" 1;
 }
 
-.appAgGridTheme .ag-row.appHeldRow {
+/* 빈 슬롯 행 — 아직 채우지 못한 자리를 표에 그려 둔다(신고가 운용 현황).
+   칸 자체는 남겨 격자가 어긋나지 않게 하고, 종목명의 "(빈 슬롯)" 만 남기고 값을 비운다.
+   행마다 조건부로 컬럼을 갈아 끼우는 것보다 이쪽이 컬럼 정의를 건드리지 않는다. */
+.appAgGridTheme .ag-row.appEmptySlotRow .ag-cell,
+.appAgGridThemeLegacy .ag-row.appEmptySlotRow .ag-cell {
+  visibility: hidden;
+}
+
+.appAgGridTheme .ag-row.appEmptySlotRow .ag-cell[col-id="name"],
+.appAgGridThemeLegacy .ag-row.appEmptySlotRow .ag-cell[col-id="name"] {
+  visibility: visible;
+  color: var(--text-muted);
+}
+
+/* 실계좌 보유 종목 — 모든 표에서 티커·종목명 칸만 녹색으로 칠한다.
+   col-id 는 공용 티커·종목명 컬럼(lib/grid-cells.tsx tickerColumn/stockNameColumn)이 고정한다. */
+.appAgGridTheme .ag-row.appHeldRow .ag-cell[col-id="ticker"],
+.appAgGridTheme .ag-row.appHeldRow .ag-cell[col-id="name"],
+.appAgGridThemeLegacy .ag-row.appHeldRow .ag-cell[col-id="ticker"],
+.appAgGridThemeLegacy .ag-row.appHeldRow .ag-cell[col-id="name"] {
   background: rgba(102, 204, 102, 0.35);
 }
 
-.appAgGridTheme .ag-row.appHeldRow:hover {
+.appAgGridTheme .ag-row.appHeldRow:hover .ag-cell[col-id="ticker"],
+.appAgGridTheme .ag-row.appHeldRow:hover .ag-cell[col-id="name"],
+.appAgGridThemeLegacy .ag-row.appHeldRow:hover .ag-cell[col-id="ticker"],
+.appAgGridThemeLegacy .ag-row.appHeldRow:hover .ag-cell[col-id="name"] {
   background: rgba(102, 204, 102, 0.42);
 }
 
-
-.appAgGridThemeLegacy .ag-row.appHeldRow {
+/* 튜닝 표의 '현재 설정' 행 — 종목 행이 아니라 예전처럼 **행 전체**를 칠한다
+   (모멘텀·신고가 튜닝 StrategyTuning, 레버리지 튜닝). */
+.appAgGridTheme .ag-row.appCurrentSettingRow,
+.appAgGridThemeLegacy .ag-row.appCurrentSettingRow {
   background: rgba(102, 204, 102, 0.35);
 }
 
-.appAgGridThemeLegacy .ag-row.appHeldRow:hover {
+.appAgGridTheme .ag-row.appCurrentSettingRow:hover,
+.appAgGridThemeLegacy .ag-row.appCurrentSettingRow:hover {
   background: rgba(102, 204, 102, 0.42);
 }
 
-/* 추세 이탈 행 — 종목명 뒤 ❗ 와 같은 조건에서 행 전체를 연한 회색으로 눌러 둔다.
-   판정 기준은 화면마다 각자다(종목풀은 화면 이평선, 계좌는 계좌별 알람 설정).
-   보유 강조(녹색)보다 약해야 하므로 아래에 두지 않고, 보유 행에는 덧칠하지 않는다. */
+/* 호버 행 테두리 — "지금 커서가 있는 줄" 표시(전 그리드 공용). 상태 배경색(이탈 회색·
+   문턱 남색·보유 녹색 등)을 안 건드리려고 배경 대신 위·아래 얇은 선으로 잡아준다.
+   border 는 행 높이를 밀어 흔들리므로 inset box-shadow 를 쓴다(레이아웃 불변). */
+.ag-row.ag-row-hover {
+  box-shadow: inset 0 1px 0 rgba(32, 107, 196, 0.55), inset 0 -1px 0 rgba(32, 107, 196, 0.55);
+}
+
+/* 추세 이탈 행 — 행 전체를 연한 회색으로 눌러 둔다. 추세 이탈 표시는 **이것 하나**다
+   (예전의 종목명 ❗ 배지는 제거). 이격 기준은 종목이 속한 풀의 이평선 — 계좌·화면과 무관하게 같다.
+   보유 강조(녹색)는 티커·종목명 칸에만 칠해지므로 회색 행 위에 그대로 얹힌다. */
 .ag-row.appTrendBrokenRow {
-  background: rgba(148, 163, 184, 0.26);
+  background: rgba(148, 163, 184, 0.8);
   color: var(--text-muted, #64748b);
 }
 
 .ag-row.appTrendBrokenRow:hover {
-  background: rgba(148, 163, 184, 0.36);
+  background: rgba(148, 163, 184, 0.5);
+}
+
+/* 진입 문턱 미달 행(순위 화면) — 0선(이평선) 위인데 이 풀의 진입 문턱만 못 넘은 상태.
+   이탈(회색)과 색상 자체가 다르게 **연한 남색** — 문턱 안 값의 파랑 표시와 의미가 이어지고,
+   화면에 한 종류만 있어도 회색과 즉시 구분된다. 문턱이 '없음'인 풀에는 안 나온다. */
+.ag-row.appEntryBlockedRow {
+  background: rgba(59, 100, 184, 0.3);
+  color: var(--text-muted, #64748b);
+}
+
+.ag-row.appEntryBlockedRow:hover {
+  background: rgba(59, 100, 184, 0.3);
 }
 
 /* 고정 자산(IS) 행 — 사고팔 수 없는 항목이라 **줄 전체**를 노란 배경으로 구분한다.
@@ -3652,13 +3688,7 @@ a {
   font-weight: 700;
 }
 
-/* 모멘텀 전략 차순위 후보 행 — 선정과 구분되게 흐리게 */
-.ag-row.momentumReserveRow {
-  background: rgba(148, 163, 184, 0.08);
-  opacity: 0.75;
-}
-
-/* 모멘텀 전략 백테스트 예정 행 — 판정만 끝나고 체결 전인 달 */
+/* 보유중(청산 전) 체결 행 — 합성 화면의 체결 목록이 쓴다 */
 .ag-row.momentumPendingRow {
   background: rgba(11, 123, 220, 0.07);
   font-style: italic;
@@ -3814,11 +3844,10 @@ a {
   background: #ffffff;
 }
 
-/* 추세 이탈 회색은 보유 행(흰 배경)보다 뒤에 와야 보인다 — 자산 화면은 보유가 곧 기본 상태라
-   위 흰색 규칙이 모든 행을 덮는다. 편집 중인 행은 편집 색이 계속 우선한다(아래에 정의). */
+/* 추세 이탈·고정 자산·편집 상태는 행 배경으로 구분하고, 실제 보유는 두 칸에 표시한다. */
 .assetsAgGrid .ag-row.appTrendBrokenRow,
 .assetsAgGrid .ag-row.appTrendBrokenRow.appHeldRow {
-  background: rgba(148, 163, 184, 0.26);
+  background: rgba(148, 163, 184, 0.4);
 }
 
 .assetsAgGrid .ag-row.appFixedAssetRow,
@@ -3855,10 +3884,98 @@ a {
   overflow: hidden;
 }
 
-.assetsDetailGridWrap {
+/* 최대창 모달 — 화면을 거의 채우고, 본문이 세로 flex 로 내부 스크롤을 갖는다. */
+.appModalFull {
+  max-width: calc(100vw - 48px);
+  width: calc(100vw - 48px);
+  height: calc(100vh - 48px);
+  margin: 24px auto;
+}
+
+.appModalFull .modal-content {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.appModalFull .modal-body {
   flex: 1 1 auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+  padding: 0.5rem 0.75rem 0.75rem;
+}
+
+.appModalFull .assetsDetailPanel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.tickerDetailModalContent {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.assetsAgGrid .ag-row.assetsGroupRow {
+  background: rgba(148, 163, 184, 0.22);
+  font-weight: 800;
+  border-top: 2px solid rgba(100, 116, 139, 0.55);
+}
+
+.assetsAgGrid .ag-row.assetsGroupRow:hover {
+  background: rgba(148, 163, 184, 0.3);
+}
+
+.assetsGroupName {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.assetsGroupDelete {
+  color: var(--text-muted);
+  text-decoration: none;
+  line-height: 1;
+}
+
+.assetsDetailBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.assetsDetailGridWrap {
+  /* 그리드는 컬럼 합 크기까지만(기본 1580px) — 남는 폭은 오른쪽 메모가 가져간다.
+     창이 좁으면 그리드가 줄며 내부 가로 스크롤. */
+  flex: 0 1 1580px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.assetsDetailSplitter {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  border-radius: 3px;
+  background: rgba(148, 163, 184, 0.25);
+}
+
+.assetsDetailSplitter:hover {
+  background: rgba(148, 163, 184, 0.5);
+}
+
+.assetsDetailMemoPane {
+  /* 남는 폭 자동 — 최소 300px 은 항상 확보한다. */
+  flex: 1 1 300px;
+  min-width: 300px;
+  min-height: 0;
 }
 
 .assetsNoteSection {
@@ -3919,33 +4036,34 @@ a {
   text-decoration: none;
 }
 
-.rankAgGrid .ag-cell.rankBucketCell {
+/* 버킷 셀 — 그리드를 가리지 않는 공용 색(grid-cells `bucketColumn` 등이 이 클래스를 단다). */
+.ag-cell.rankBucketCell {
   justify-content: center;
   font-weight: 600;
   white-space: nowrap;
 }
 
-.rankAgGrid .ag-cell.rankBucketCell1 {
+.ag-cell.rankBucketCell1 {
   background: var(--bucket-1);
   color: #fff;
 }
 
-.rankAgGrid .ag-cell.rankBucketCell2 {
+.ag-cell.rankBucketCell2 {
   background: var(--bucket-2);
   color: #fff;
 }
 
-.rankAgGrid .ag-cell.rankBucketCell3 {
+.ag-cell.rankBucketCell3 {
   background: var(--bucket-3);
   color: #fff;
 }
 
-.rankAgGrid .ag-cell.rankBucketCell4 {
+.ag-cell.rankBucketCell4 {
   background: var(--bucket-4);
   color: #fff;
 }
 
-.rankAgGrid .ag-cell.rankBucketCell5 {
+.ag-cell.rankBucketCell5 {
   background: var(--bucket-5);
   color: #fff;
 }
@@ -3973,17 +4091,6 @@ a {
   background: rgba(199, 210, 254, 0.62);
 }
 
-/* 실제 보유 중인 종목 — 배경 녹색(보유 컬럼 대체). 고정 행보다 우선. */
-.rankAgGrid .ag-row.rankHeldRow,
-.rankAgGrid .ag-row.rankHeldRow.rankFixedRow {
-  background: rgba(34, 197, 94, 0.28);
-}
-
-.rankAgGrid .ag-row.rankHeldRow:hover,
-.rankAgGrid .ag-row.rankHeldRow.rankFixedRow:hover {
-  background: rgba(34, 197, 94, 0.38);
-}
-
 .rankAgGrid .ag-cell-value,
 .rankAgGrid .ag-group-value {
   width: 100%;
@@ -3996,6 +4103,7 @@ a {
 .appNameCellText {
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   width: 100%;
   min-width: 0;
@@ -4006,7 +4114,7 @@ a {
   line-height: 1.1;
 }
 
-.rankAgGrid .ag-cell[col-id="종목명"],
+.rankAgGrid .ag-cell[col-id="name"],
 .assetsAgGrid .ag-cell[col-id="name"] {
   overflow: hidden;
 }
@@ -4326,7 +4434,7 @@ a {
 /* Tabler 의 card-header-tabs 는 카드 헤더 패딩이 기본값(1rem/1.25rem)이라고 보고 음수 마진을
    준다. 이 앱은 헤더를 더 좁게 쓰므로(.appCard>.card-header = 0.375rem 1rem) 그대로 두면
    탭 띠가 헤더 밖으로 밀려 옆에 놓인 문구와 높이가 어긋난다. 실제 패딩에 맞춰 다시 잡는다. */
-.appCard > .card-header > .card-header-tabs {
+.appCard>.card-header>.card-header-tabs {
   /* flex:1 을 풀어 탭 너비만 차지하게 한다 — 오른쪽 문구가 제자리(우측 끝)에 놓인다. */
   flex: 0 1 auto;
   margin: -0.375rem 0 -0.375rem -1rem;
@@ -4385,32 +4493,69 @@ a {
 
 /* 합성 슬리브 줄 — 메인 헤더 아래 전용 영역. 슬롯 하나가 한 줄이라
    전략·종목풀·이름·배분이 짝지어 읽힌다(헤더에 늘어놓으면 짝이 안 보인다). */
+/* 슬리브 표 — 현금 행과 A·B·C 가 **같은 열**에 맞아야 비중 칸이 세로로 정렬된다.
+   flex 로 두면 종목풀 이름 길이에 따라 행마다 칸이 밀렸다(긴 이름 행만 어긋났다).
+   열: 슬롯기호 · 전략 · 종목풀 · 이름 · 비중 · 삭제 · 저장 설정 */
 .mixSleeveRows {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: auto auto auto auto auto auto minmax(0, 1fr);
+  align-items: center;
   gap: 0.375rem;
   margin-top: 0.5rem;
   padding-top: 0.5rem;
   border-top: 1px solid var(--app-border, rgba(148, 163, 184, 0.35));
 }
 
+/* 행 자체는 상자를 만들지 않는다 — 자식이 바로 위 격자의 칸이 되게 한다. */
 .mixSleeveRow {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  flex-wrap: wrap;
+  display: contents;
 }
 
-/* 슬롯 기호(A·B·C) — 줄 맨 앞에서 폭을 고정해 아래 줄과 세로가 맞는다. */
+/* 슬리브 추가 버튼 — 열에 끼우지 않고 한 줄을 다 쓴다. */
+.mixSleeveAddRow {
+  grid-column: 1 / -1;
+}
+
+/* 슬롯 기호(A·B·C·현금) — 넓은 쪽에 맞추고 가운데 정렬한다. */
 .mixSleeveMark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
+  min-width: 22px;
   flex-shrink: 0;
   color: #5b6778;
   font-size: var(--fs-sm);
   font-weight: 800;
+}
+
+/* 슬리브 오른쪽의 저장 설정(읽기 전용) — 삭제 버튼 뒤에서 남는 폭을 채운다.
+   좁아지면 줄바꿈으로 흘러가고, 입력 칸들을 밀어내지 않는다. */
+.mixSleeveSettings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  min-width: 0;
+  padding-left: 0.25rem;
+  color: #5b6778;
+  font-size: var(--fs-sm);
+}
+
+.mixSleeveSettingItem {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
+.mixSleeveSettingItem>b {
+  color: #1f2d3d;
+  font-weight: 600;
+}
+
+/* 설정을 읽지 못한 조합 — 빈칸으로 두면 설정이 없는 것과 구분이 안 된다. */
+.mixSleeveSettings.mixSleeveSettingsError {
+  color: #d9480f;
 }
 
 .mixSleeveWeight {
@@ -4675,15 +4820,6 @@ a {
   gap: 0.5rem;
 }
 
-/* 이평선 일수 셀렉트(MaDaysSelect) — 모든 화면이 이 폭 하나를 쓴다. 화면에서 폭을 따로 주지 않는다.
-   Tabler 기본은 화살표 자리로 오른쪽에 3rem 을 비워 두는데 값이 짧아 그만큼 필요 없으므로 줄인다. */
-.appMaDaysSelect {
-  width: 6.5rem;
-  min-width: 6.5rem;
-  padding-right: 1.75rem;
-  background-position: right 0.5rem center;
-}
-
 .rankSwitchField {
   display: inline-flex;
   align-items: center;
@@ -4729,12 +4865,32 @@ a {
   padding: 1rem;
 }
 
+/* 전략 사고팔기 — 종목별 전략 카드를 좌우 2열로 놓고, 좁아지면 1열로 쌓는다. */
+.strategyTradeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 1280px) {
+  .strategyTradeGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* 전략·순위 화면의 보유 종목 차트 격자 — 최대 2열이고 좁아지면 1열이다.
    auto-fit 로 두면 넓은 모니터에서 3열 이상으로 벌어져 캔들이 작아진다. */
 .appChartGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px 20px;
+}
+
+.strategyChartModalBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 /* 카드 하나가 420px 아래로 눌리면 캔들이 뭉개진다 — 그 전에 1열로 떨어뜨린다. */
@@ -5476,4 +5632,38 @@ a {
 
 .ag-row.settingsDirtyRow:hover {
   background: rgba(250, 204, 21, 0.32);
+}
+
+/* 톤 모달 — 운영(빨강)·모의(초록) 주문 창처럼 환경을 색으로 가르는 창. */
+.appModalTone {
+  border-width: 3px;
+  border-style: solid;
+}
+
+.appModalTone-danger {
+  border-color: var(--tblr-red, #d63939);
+}
+
+.appModalTone-success {
+  border-color: var(--tblr-green, #2fb344);
+}
+
+.appModalBadge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.appModalBadge-danger {
+  background: var(--tblr-red, #d63939);
+  color: #fff;
+}
+
+.appModalBadge-success {
+  background: var(--tblr-green, #2fb344);
+  color: #fff;
 }

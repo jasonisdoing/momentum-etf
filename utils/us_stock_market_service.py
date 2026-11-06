@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
@@ -10,6 +11,7 @@ import requests
 
 from config import NAVER_FINANCE_HEADERS, NAVER_US_STOCK_MARKET_VALUE_URL
 from utils.index_constituents_loader import load_index_constituents, load_index_meta
+from utils.industry_map import us_display_industry, us_display_sector, us_sector_label
 from utils.market_service import load_ticker_pool_map, load_ticker_pool_type_map
 from utils.portfolio_io import load_all_holding_tickers
 
@@ -72,6 +74,118 @@ def _fetch_us_market_value_page(
         return payload
 
     raise RuntimeError("네이버 미국 주식 리스트 조회에 실패했습니다.")  # 도달 불가, 안전망
+
+
+# 페이지를 쪼갤 때 쓰는 크기 사다리 — 앞 크기가 다음 크기의 정수배라 `startIdx`(쪽 번호)가 정확히 이어진다.
+_SPLIT_PAGE_SIZES = (200, 100, 50, 25, 5, 1)
+# 한 번의 시총 수집에서 건너뛸 수 있는 항목 수 — 이보다 많으면 항목 문제가 아니라 장애로 보고 실패시킨다.
+_MAX_SKIPPED_ITEMS = 3
+
+
+def _fetch_page_skipping_bad_items(
+    market: str, page_index: int, page_size: int, skipped: list[int]
+) -> list[dict[str, Any]]:
+    """한 쪽을 받되, 특정 항목 때문에 쪽 전체가 500 이면 쪽을 쪼개 그 항목만 건너뛴다.
+
+    네이버 시총 목록에는 응답을 만들다 죽는 항목이 가끔 있다(NSQ 3874번째: 그 항목이 든 구간은
+    어떤 크기로 요청해도 500). 그대로 두면 미국 시총 순위 전체가 실패한다. 건너뛴 항목의
+    개수를 `skipped` 에 쌓고, 한도를 넘으면 장애로 보고 예외를 낸다.
+    """
+    try:
+        return _fetch_us_market_value_page(market, start_idx=page_index, page_size=page_size, max_attempts=2)
+    except RuntimeError as exc:
+        if page_size == 1:
+            skipped.append(page_index)
+            logger.warning(
+                "네이버 미국 시총 목록의 읽을 수 없는 항목을 건너뜁니다 (market=%s, 위치=%d): %s",
+                market,
+                page_index,
+                exc,
+            )
+            if len(skipped) > _MAX_SKIPPED_ITEMS:
+                raise RuntimeError(
+                    f"네이버 미국 시총 목록에서 읽을 수 없는 항목이 {len(skipped)}개를 넘었습니다: {market}"
+                ) from exc
+            return []
+        smaller = _SPLIT_PAGE_SIZES[_SPLIT_PAGE_SIZES.index(page_size) + 1]
+        factor = page_size // smaller
+        items: list[dict[str, Any]] = []
+        for part in range(factor):
+            items.extend(_fetch_page_skipping_bad_items(market, page_index * factor + part, smaller, skipped))
+        return items
+
+
+# 네이버 미국 상장 회사 명단에 넣는 시장 — NASDAQ·NYSE 와 그 밖의 거래소 묶음(AMX: NYSE American·Cboe 등).
+# AMX 를 빼면 Cboe 상장인 CBOE 같은 S&P500 종목이 명단에서 빠진다.
+_US_MARKET_CAP_MARKETS = ("NSQ", "NYS", "AMX")
+# 순위에서 빼는 업종 — 로이터 업종 코드 5550(집합투자: 폐쇄형 펀드·뮤추얼 펀드·투자 신탁·ETF).
+# 시총 순위는 「미국 상장 회사」 순위라 PHYS·CEF 같은 펀드가 끼어 회사들이 밀리면 안 된다.
+_FUND_INDUSTRY_CODE_PREFIX = "5550"
+# 우선주 시리즈 — 네이버 심볼 'TFIN PR'·'BAC PRL' 처럼 보통주 뒤에 PR(+시리즈 문자)이 붙는다.
+# 회사가 아니라 같은 회사의 다른 증권이고, 시총 칸에 엉뚱한 값이 오기도 한다(TFIN PR 380억 달러,
+# 2026-10-26). 클래스 주식(BRK B·HEI A)은 남긴다.
+_PREFERRED_SYMBOL = re.compile(r"\S+ PR[A-Z]?")
+# 심볼에 PR 이 없는 우선주(GOOGM·GOOGN 「Alphabet … Mandatory Conv Prf Shs」, STRC)는 이름으로 거른다.
+# 단 ADR 은 남긴다 — 해외 회사의 미국 상장이 우선주 ADR 하나뿐인 경우가 있다(BBD 브라데스코).
+_PREFERRED_NAME = re.compile(r"\b(?:Prf|Pref|Preferred)\b", re.IGNORECASE)
+_ADR_NAME = re.compile(r"\bADRs?\b", re.IGNORECASE)
+# 거래정지 종목 — 네이버 `tradeStopType.code` 2(정지.Halted). 상장폐지·합병 진행 중이라 시세가 없다(CTRA).
+_HALTED_TRADE_STOP_CODE = "2"
+
+
+def _iter_us_market_companies():
+    """네이버 미국 시총 명단의 회사 항목(펀드 업종·우선주·거래정지 제외)을 `(티커, 항목)` 으로 낸다 — 시장별 시총 내림차순."""
+    skipped: list[int] = []
+    for market in _US_MARKET_CAP_MARKETS:
+        page_index = 0
+        market_tickers: set[str] = set()
+        while True:
+            skipped_before = len(skipped)
+            items = _fetch_page_skipping_bad_items(market, page_index, _NAVER_US_PAGE_SIZE_MAX, skipped)
+            page_skipped = len(skipped) - skipped_before
+            if not items and not page_skipped:
+                if page_index == 0:
+                    raise RuntimeError(f"네이버 미국 시총 명단이 비어 있습니다: {market}")
+                break
+
+            page_tickers: set[str] = set()
+            for item in items:
+                ticker = str(item.get("symbolCode") or "").strip().upper().replace(".", "-").replace(" ", "-")
+                if not ticker:
+                    raise RuntimeError(f"네이버 미국 시총 명단에 티커가 없습니다: {market} {page_index}페이지")
+                if ticker in market_tickers or ticker in page_tickers:
+                    raise RuntimeError(f"네이버 미국 시총 명단의 페이지가 중복되었습니다: {market} {ticker}")
+                page_tickers.add(ticker)
+                if str(item.get("reutersIndustryCode") or "").startswith(_FUND_INDUSTRY_CODE_PREFIX):
+                    continue
+                if _PREFERRED_SYMBOL.fullmatch(str(item.get("symbolCode") or "").strip()):
+                    continue
+                name = str(item.get("englishCodeName") or "")
+                if _PREFERRED_NAME.search(name) and not _ADR_NAME.search(name):
+                    continue
+                if str((item.get("tradeStopType") or {}).get("code") or "") == _HALTED_TRADE_STOP_CODE:
+                    continue
+                yield ticker, item
+
+            market_tickers.update(page_tickers)
+            # 건너뛴 항목도 쪽을 채우던 자리라 개수에 더해야 마지막 쪽 판정이 어긋나지 않는다.
+            if len(items) + page_skipped < _NAVER_US_PAGE_SIZE_MAX:
+                break
+            page_index += 1
+
+
+def load_us_market_companies() -> list[dict[str, Any]]:
+    """미국 상장 회사 전체 `{ticker, name, market_cap}` — 시총 내림차순(네이버, 펀드·우선주·거래정지 제외)."""
+    by_ticker: dict[str, tuple[float, str]] = {}
+    for ticker, item in _iter_us_market_companies():
+        cap = _parse_float(item.get("marketValue"))
+        if cap is None or cap <= 0:
+            continue
+        name = str(item.get("englishCodeName") or item.get("koreanCodeName") or ticker).strip()
+        if cap > by_ticker.get(ticker, (0.0, ""))[0]:
+            by_ticker[ticker] = (cap, name)
+    ranked = sorted(by_ticker.items(), key=lambda pair: (-pair[1][0], pair[0]))
+    return [{"ticker": ticker, "name": name, "market_cap": cap} for ticker, (cap, name) in ranked]
 
 
 def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -> dict[str, Any]:
@@ -139,6 +253,7 @@ def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -
                     "return_12m_base_price": None,
                     "return_12m_pct": None,
                     "mdd_12m_pct": None,
+                    "sortino_12m": None,
                 }
             )
             if len(rows) >= target_count:
@@ -160,8 +275,7 @@ def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -
 
 
 def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str, Any]:
-    """S&P500 또는 NASDAQ100 구성종목을 JSON에서 읽어 실시간 가격을 더해 반환한다.
-    시가총액은 JSON에 저장된 값(yfinance 기준)을 사용한다."""
+    """저장된 지수 구성종목(S&P500·나스닥100)에 실시간 시세를 붙인다."""
     constituents = load_index_constituents(index)
     meta = load_index_meta(index)
 
@@ -177,6 +291,8 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
         ticker = str(item.get("ticker") or "").strip().upper()
         if not ticker:
             continue
+        sector = str(item.get("sector") or "").strip()
+        industry = str(item.get("industry") or "").strip()
         market_cap = item.get("market_cap")
         if min_market_cap_usd > 0 and (market_cap is None or market_cap < min_market_cap_usd):
             continue
@@ -186,8 +302,8 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
                 "ticker": ticker,
                 "name": item.get("name") or ticker,
                 "english_name": item.get("name") or "",
-                "industry": item.get("industry") or item.get("sector") or "",
-                "sector": item.get("sector") or "",
+                "industry": us_display_industry(sector, industry) if industry else us_sector_label(sector),
+                "sector": us_display_sector(sector, industry),
                 "market": "",
                 "ticker_pools": ", ".join(ticker_pool_map.get(ticker, [])),
                 "ticker_pool_types": ticker_pool_type_map.get(ticker, []),
@@ -206,11 +322,14 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
                 "return_12m_base_price": item.get("return_12m_base_price"),
                 "return_12m_pct": item.get("return_12m_pct"),
                 "mdd_12m_pct": item.get("mdd_12m_pct"),
+                "sortino_12m": item.get("sortino_12m"),
+                # 같은 회사의 클래스 중복(GOOGL/GOOG 등) — 배치가 거래량 큰 클래스만 대표로 남긴다.
+                "duplicate_class": bool(item.get("duplicate_class")),
             }
         )
 
-    _apply_us_realtime_overlay(rows)
     rows.sort(key=lambda r: (-(r["market_cap"] or 0), r["ticker"]))
+    _apply_us_realtime_overlay(rows)
 
     for idx, row in enumerate(rows, start=1):
         row["rank"] = idx

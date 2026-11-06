@@ -5,7 +5,7 @@
     python infra/cron/run_batch.py <job_name> <command...>
 
 예시:
-    python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py
+    python infra/cron/run_batch.py cache_refresh_kor python scripts/stock_price_cache_updater.py --country kor
 
 동작:
     1) subprocess 로 <command> 를 실행
@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -30,16 +31,16 @@ from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
 
-# 배치 실행 절대 상한 (초). 외부 API hang / 무한 루프로 인한 무한 대기 방지.
-# 정상 배치(가격 캐시 / 메타 등)는 가장 큰 것도 최대 10분 안에 끝남.
-# 20분(1200s) = 정상의 ~2배 — 진짜 hang 만 잡고 정상 작업은 영향 없는 마진.
-# 변경하려면 환경변수 BATCH_TIMEOUT_SECONDS 로 override.
-BATCH_TIMEOUT_SECONDS = int(os.environ.get("BATCH_TIMEOUT_SECONDS") or 1200)
+# 배치 실행 절대 상한 — 외부 API hang / 무한 루프로 인한 무한 대기 방지.
+# 정상 배치(가격 캐시 / 메타 등)는 가장 큰 것도 최대 10분 안에 끝난다 — 진짜 hang 만
+# 잡고 정상 작업은 영향 없는 마진. 작업별 예외는 아래 JOB_TIMEOUT_OVERRIDES 로 등록한다.
+BATCH_TIMEOUT_MINUTES = 30
+BATCH_TIMEOUT_SECONDS = BATCH_TIMEOUT_MINUTES * 60
 
-# 작업별 타임아웃 override — **정상 소요가 전역 기본(20분)에 근접·초과하는 배치**만 등록한다.
+# 작업별 타임아웃 override — **정상 소요가 전역 기본에 근접·초과하는 배치**만 등록한다.
 # 전역을 늘리면 1~2분짜리 배치의 hang 감지가 함께 무뎌지므로 작업 단위로만 푼다.
 JOB_TIMEOUT_OVERRIDES: dict[str, int] = {
-    # 전체 히스토리 재수집(--full)은 정상 소요가 ~20분이라 기본 한도에 걸린다. 60분 허용.
+    # 전체 히스토리 재수집(--full)은 정상 소요가 ~20분이라 전역 한도에 근접한다. 60분 허용.
     "cache_refresh_full": 3600,
 }
 
@@ -72,7 +73,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 MAX_TAIL_LINES = 15
-MAX_TAIL_CHARS = 1500
+MAX_TAIL_CHARS = 3000
 
 LOCK_DIR = PROJECT_ROOT / "logs" / "cron"
 EXIT_ALREADY_NOTIFIED = 66
@@ -200,7 +201,16 @@ def _slept_during_run(started_wall: datetime, elapsed: float) -> bool:
     return wall - elapsed >= _SLEEP_GAP_SECONDS
 
 
+def _exit_on_sigterm(signum: int, _frame: object) -> None:
+    """SIGTERM(화면의 중단 버튼)을 예외로 바꿔 자식 종료와 락 해제가 돌게 한다.
+
+    기본 처리는 finally 없이 즉사해 batch_locks 기록이 남고 화면이 계속 실행 중으로 보인다.
+    """
+    raise SystemExit(128 + signum)
+
+
 def main(argv: list[str]) -> int:
+    signal.signal(signal.SIGTERM, _exit_on_sigterm)
     if len(argv) < 3:
         print(
             "usage: run_batch.py <job_name> <command...>",

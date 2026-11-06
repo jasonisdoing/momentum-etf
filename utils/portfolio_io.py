@@ -100,9 +100,7 @@ def load_holding_accounts_by_ticker(country_code: str | None = None) -> dict[str
     return accounts_by_ticker
 
 
-def average_buy_price_by_ticker(
-    tickers: Iterable[str] | None = None, currency: str | None = None
-) -> dict[str, float]:
+def average_buy_price_by_ticker(tickers: Iterable[str] | None = None, currency: str | None = None) -> dict[str, float]:
     """티커 → 전 계좌 통합 평균매입가. 보유가 없는 티커는 결과에서 빠진다.
 
     같은 티커가 여러 계좌에 있으면 수량 가중으로 하나로 합친다. 차트의 '내 평균' 선과
@@ -370,27 +368,48 @@ def load_real_holdings_table(
             cached_frames.setdefault(str(ticker_key).strip().upper(), frame)
 
     missing_price_tickers: set[str] = set()
+    country_by_currency = {"KRW": "kor", "USD": "us", "AUD": "au"}
+
+    def _listing_day_pending(row) -> bool:
+        """상장 첫날 장중 종목 — 캐시가 없는 게 정상이고 아래 실시간 오버레이가 현재가를 채운다.
+
+        실시간마저 못 받으면 평가금액이 0 으로 남아 일별 집계의 0 평가 가드가 막는다.
+        """
+        from services.reference_data_service import get_listing_date
+        from utils.trading_calendar import get_latest_trading_day, listed_after
+
+        country = country_by_currency.get(str(row.get("currency") or "").strip().upper())
+        if not country:
+            return False
+        ticker = str(row["ticker"]).strip().upper()
+        return listed_after(get_listing_date(country, ticker), get_latest_trading_day(country))
 
     def _get_current_price(row):
         ticker = str(row["ticker"]).strip().upper()
         df_cached = cached_frames.get(ticker)
         if df_cached is None or df_cached.empty:
+            if _listing_day_pending(row):
+                return 0.0
             msg = f"가격 캐시에 '{ticker}'가 없습니다. 캐시 업데이트를 실행하세요."
             logger.warning(msg)
             missing_price_tickers.add(ticker)
             return 0.0
         return float(df_cached["Close"].iloc[-1])
 
-    rates = preloaded_exchange_rates if preloaded_exchange_rates is not None else get_exchange_rates()
-    usd_krw = float((rates.get("USD") or {}).get("rate"))
-    aud_krw = float((rates.get("AUD") or {}).get("rate"))
+    required_currencies = sorted(
+        (set(df_holdings["currency"]) & {"USD", "AUD"}) | ({"AUD"} if account_id == "aus_account" else set())
+    )
+    rates = (
+        preloaded_exchange_rates if preloaded_exchange_rates is not None else get_exchange_rates(required_currencies)
+    )
 
     def _get_multiplier(currency):
-        if currency == "USD":
-            return usd_krw
-        elif currency == "AUD":
-            return aud_krw
-        return 1.0
+        if currency not in {"USD", "AUD"}:
+            return 1.0
+        rate = float((rates.get(currency) or {}).get("rate") or 0)
+        if rate <= 0:
+            raise RuntimeError(f"{currency} 평가 환율이 없거나 유효하지 않습니다.")
+        return rate
 
     def _calc_period_return(close_series: pd.Series, days: int) -> float | None:
         try:
@@ -504,7 +523,6 @@ def load_real_holdings_table(
 
     # 실시간 오버레이 — 계좌 국가가 아니라 "보유 종목의 통화" 기준으로 시장별 API 를 나눠 호출한다.
     # kor 계좌가 미국 종목을 담아도 토스 실시간(프리장·애프터 포함)이 적용된다.
-    country_by_currency = {"KRW": "kor", "USD": "us", "AUD": "au"}
     tickers_by_market: dict[str, set[str]] = {}
     for _, holding_row in df_holdings.iterrows():
         market = country_by_currency.get(str(holding_row.get("currency") or "").strip().upper())
@@ -535,6 +553,7 @@ def load_real_holdings_table(
     if account_id == "aus_account":
         intl_princi = intl_val - intl_change
 
+        aud_krw = _get_multiplier("AUD")
         intl_princi_krw = intl_princi * aud_krw
         intl_val_krw = intl_val * aud_krw
 
@@ -687,6 +706,35 @@ def load_real_holdings_table(
     return df_holdings
 
 
+def save_account_holdings_groups(account_id: str, groups: list[dict[str, Any]]) -> None:
+    """자산 화면 자식 표의 사용자 그룹(표시 구분선)을 계좌에 저장한다.
+
+    [{"id", "name", "before_ticker"|None}] — before_ticker 앞에 그룹 행을 그린다(None=맨 끝).
+    보유 원장(holdings)과 무관한 순수 표시 정보라 백테스트·알람에 영향이 없다.
+    """
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결 실패 — portfolio_master 를 저장할 수 없습니다.")
+    doc = db.portfolio_master.find_one({"master_id": "GLOBAL"})
+    if not doc:
+        raise RuntimeError("portfolio_master 문서가 없습니다.")
+    accounts = doc.get("accounts", [])
+    account = next((a for a in accounts if str(a.get("account_id")) == str(account_id)), None)
+    if account is None:
+        raise RuntimeError(f"portfolio_master 에 계좌가 없습니다: {account_id}")
+    cleaned = [
+        {
+            "id": str(g.get("id") or "").strip(),
+            "name": str(g.get("name") or "").strip(),
+            "before_ticker": (str(g["before_ticker"]).strip().upper() if g.get("before_ticker") else None),
+        }
+        for g in groups
+        if str(g.get("name") or "").strip()
+    ]
+    account["holdings_groups"] = cleaned
+    db.portfolio_master.update_one({"master_id": "GLOBAL"}, {"$set": {"accounts": accounts}})
+
+
 def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
     """Load the current live balance (master) for a specific account from the consolidated document."""
     db = get_db_connection()
@@ -728,7 +776,7 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
                 "intl_shares_value": intl_val,
                 "intl_shares_change": intl_change,
                 "holdings": acc.get("holdings", []),
-                "asset_helper": acc.get("asset_helper"),
+                "holdings_groups": acc.get("holdings_groups", []),
                 "intl_shares_sort_order": acc.get("intl_shares_sort_order"),
                 "updated_at": acc.get("updated_at"),
                 "updated_by": acc.get("updated_by"),
@@ -837,55 +885,6 @@ def save_portfolio_master(
     except Exception as e:
         logger.error(f"Error saving portfolio master: {e}")
         return False
-
-
-def update_account_asset_helper(
-    account_id: str,
-    *,
-    target_ratio_by_ticker: dict[str, float],
-    helper_settings: dict[str, Any],
-) -> None:
-    """자산 헬퍼 데이터를 portfolio_master 에 저장한다 (단일 컬렉션 원칙).
-
-    - 종목별 목표비중: 해당 계좌 보유 항목의 ``target_ratio`` 필드로 저장.
-      맵에 없는 보유 항목은 필드를 제거한다(미설정 명시 — 임의 0 보정 금지).
-    - 계좌 단위 설정(백테스트 등): 계좌 객체의 ``asset_helper`` 필드로 저장.
-
-    맵의 티커가 보유 목록에 없으면 에러를 낸다(fail loud — 종목 목록의 소스는 보유 목록이다).
-    """
-    from utils.asx_ticker import strip_asx_prefix
-
-    db = get_db_connection()
-    if db is None:
-        raise RuntimeError("MongoDB 연결 실패 — portfolio_master 를 저장할 수 없습니다.")
-
-    doc = db.portfolio_master.find_one({"master_id": "GLOBAL"})
-    if not doc:
-        raise RuntimeError("portfolio_master 문서가 없습니다.")
-
-    accounts = doc.get("accounts", [])
-    account = next((a for a in accounts if str(a.get("account_id")) == str(account_id)), None)
-    if account is None:
-        raise RuntimeError(f"portfolio_master 에 계좌가 없습니다: {account_id}")
-
-    # 비교 키는 ASX: 접두사를 벗겨 통일한다(저장 표기는 보유 항목 원본을 유지).
-    normalized_ratios = {strip_asx_prefix(t): float(r) for t, r in target_ratio_by_ticker.items()}
-    holdings = account.get("holdings", [])
-    holding_keys = {strip_asx_prefix(str(h.get("ticker") or "")) for h in holdings}
-    unmatched = sorted(set(normalized_ratios) - holding_keys)
-    if unmatched:
-        raise RuntimeError(f"보유 목록에 없는 종목의 비중은 저장할 수 없습니다: {', '.join(unmatched)}")
-
-    for holding in holdings:
-        key = strip_asx_prefix(str(holding.get("ticker") or ""))
-        if key in normalized_ratios:
-            holding["target_ratio"] = normalized_ratios[key]
-        else:
-            holding.pop("target_ratio", None)
-
-    account["asset_helper"] = dict(helper_settings)
-    account["updated_at"] = _now_kst()
-    db.portfolio_master.update_one({"master_id": "GLOBAL"}, {"$set": {"accounts": accounts}}, upsert=True)
 
 
 def save_daily_snapshot(

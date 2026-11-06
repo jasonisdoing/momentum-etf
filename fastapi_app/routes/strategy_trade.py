@@ -1,0 +1,80 @@
+"""전략 사고팔기(분할 매수/매도) 운용 현황 API — 종목풀 단위로 종목 1개씩 운용하는 전략."""
+
+from fastapi import APIRouter, Body, Depends, Query
+
+from fastapi_app.dependencies import require_internal_token
+from utils.strategy_trade_backtest import run_strategy_trade_backtest
+from utils.strategy_trade_notify import mark_sent_rounds
+from utils.strategy_trade_service import (
+    load_strategy_trade_view,
+    resolve_etf,
+    save_pool_strategies,
+)
+from utils.strategy_trade_threads import delete_signal_thread
+
+router = APIRouter(prefix="/internal/strategy-trade", tags=["strategy-trade"])
+
+
+@router.get("")
+def get_strategy_trade(
+    pool: str | None = Query(None),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """사고팔기를 켠 종목풀 목록과, 고른 풀의 전략별 회차 현황·매수/매도 지정가를 반환한다.
+
+    ``pool`` 을 안 주면 켜진 풀 중 첫 번째다.
+    """
+    return mark_sent_rounds(load_strategy_trade_view(pool))
+
+
+@router.get("/resolve")
+def get_strategy_trade_resolve(
+    pool: str = Query(...),
+    ticker: str = Query(...),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """티커 확인 — 그 종목풀에 있는 ETF 면 {ticker, name}, 없으면 에러."""
+    return resolve_etf(pool, ticker)
+
+
+@router.get("/backtest")
+def get_strategy_trade_backtest(
+    pool: str = Query(...),
+    months: int = Query(...),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """종목풀 하나의 사고팔기 전략 전체를 저장된 설정으로 최근 ``months`` 개월 백테스트한다."""
+    return run_strategy_trade_backtest(pool, months)
+
+
+@router.put("/settings")
+def put_strategy_trade_settings(
+    payload: dict = Body(...),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """한 종목풀의 전략 목록을 저장하고 갱신된 화면 데이터를 반환한다.
+
+    body: ``{"pool": "…", "strategies": [{strategy_id?·ticker + pct 3종}, …]}``
+    strategy_id 가 없는 행은 추가, 목록에서 빠진 전략은 삭제다 (검증은 `strategy_trade_service`).
+    슬랙 알람은 여기서 정하지 않는다 — 그 풀 슬리브가 붙은 계좌의 합성 슬랙 스위치를 따른다.
+    """
+    pool = str(payload.get("pool") or "").strip()
+    if not pool or payload.get("strategies") is None:
+        raise ValueError("pool·strategies 가 모두 필요합니다.")
+    save_pool_strategies(pool, payload["strategies"])
+    return mark_sent_rounds(load_strategy_trade_view(pool))
+
+
+@router.post("/delete-signal")
+def post_strategy_trade_delete_signal(
+    payload: dict = Body(...),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """슬랙으로 나간 신호 한 건을 지운다 — 주문이 없을 때만.
+
+    body: ``{"key": 화면이 준 발송 기록 키}``. 슬랙 스레드 전체와 우리 쪽 기록을 함께 지운다.
+    """
+    key = str(payload.get("key") or "").strip()
+    if not key:
+        raise ValueError("key 가 필요합니다.")
+    return delete_signal_thread(key)

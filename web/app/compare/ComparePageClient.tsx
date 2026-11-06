@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { createChart, ColorType, CrosshairMode, LineSeries } from "lightweight-charts";
 import type { IChartApi, LineData, Time } from "lightweight-charts";
 
@@ -10,14 +11,15 @@ import { PortfolioChangeBreakdown } from "../components/PortfolioChangeBreakdown
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { calcPortfolioChange } from "@/lib/portfolio-change";
+import { currentQuote } from "@/lib/ticker-quote";
 import type { PortfolioChangeResult } from "@/lib/portfolio-change";
 
-type CompareTab = "performance" | "basic" | "holdings" | "yearly" | "monthly" | "daily";
+type CompareTab = "performance" | "basic" | "holdings" | "yearly" | "monthly" | "weekly" | "daily";
 
 // 가격 시계열만 쓰는 탭(구성종목 계산 불필요) — 초기 로딩을 가볍게 하고 라벨 열 스타일을 공유한다.
-const PRICE_ONLY_TABS: CompareTab[] = ["performance", "yearly", "monthly", "daily"];
+const PRICE_ONLY_TABS: CompareTab[] = ["performance", "yearly", "monthly", "weekly", "daily"];
 // 기간 라벨(연/월/일 + 동일가중 평균)을 쓰는 탭 — 라벨 열 폭·스크롤 스타일이 같다.
-const PERIOD_TABS: CompareTab[] = ["yearly", "monthly", "daily"];
+const PERIOD_TABS: CompareTab[] = ["yearly", "monthly", "weekly", "daily"];
 
 // 탭 표시 순서 — 화면에 이 순서 그대로 노출된다.
 const COMPARE_TABS: { key: CompareTab; label: string }[] = [
@@ -26,6 +28,7 @@ const COMPARE_TABS: { key: CompareTab; label: string }[] = [
   { key: "holdings", label: "구성 종목" },
   { key: "yearly", label: "연간 분석" },
   { key: "monthly", label: "월간 분석" },
+  { key: "weekly", label: "주간 분석" },
   { key: "daily", label: "일간 분석" },
 ];
 type PerformanceRange = "1m" | "3m" | "6m" | "ytd" | "1y" | "3y";
@@ -70,16 +73,15 @@ type TickerFxRate = {
 
 type TickerEtfInfo = {
   nav?: number | null;
-  nav_change?: number | null;
-  nav_change_pct?: number | null;
   deviation?: number | null;
   expense_ratio?: number | null;
   dividend_yield_ttm?: number | null;
   market_cap_krw?: number | null;
   volume?: number | null;
   fx_rates?: TickerFxRate[];
+  /** 포트폴리오 변동 계산용 — 기준일 이후 누적 환율(백엔드 합계와 같은 값). */
+  portfolio_change_fx_rates?: TickerFxRate[];
   portfolio_change_base_date?: string | null;
-  portfolio_change_base_is_open?: boolean | null;
 };
 
 type TickerHoldingRow = {
@@ -99,6 +101,8 @@ type TickerDetailResponse = {
   ticker_type?: string;
   country_code?: string;
   rows: PriceRow[];
+  /** 정규장 전(프리장·데이장) 현재 시세 — 있으면 현재가·등락은 이 값이다(`currentQuote`). */
+  live?: { price: number; change_pct: number | null } | null;
   etf_info?: TickerEtfInfo | null;
   holdings: TickerHoldingRow[];
   error?: string;
@@ -129,11 +133,30 @@ type PerformanceMetricRange =
   | { key: string; label: string; kind: "period"; days: number }
   | { key: string; label: string; kind: "ytd" };
 
-const MAX_PRODUCTS = 8;
+const MAX_PRODUCTS = 10;
+// 구성종목 정렬 선택지 — 버튼 순서 그대로 보인다.
+const HOLDINGS_SORT_OPTIONS = [
+  { key: "weight", label: "비중" },
+  { key: "rise", label: "상승률" },
+  { key: "fall", label: "하락률" },
+] as const;
+type HoldingsSortBy = (typeof HOLDINGS_SORT_OPTIONS)[number]["key"];
 const COMPARE_GROUPS_KEY = "momentum-etf:compare:groups";
 const COMPARE_ACTIVE_GROUP_KEY = "momentum-etf:compare:active-group";
 const COMPARE_TEMP_SELECTION_KEY = "momentum-etf:compare:temp-selection";
-const CHART_COLORS = ["#ef4444", "#2563eb", "#16a34a", "#f59e0b", "#7c3aed", "#db2777"];
+// 상품별 선 색 — 최대 상품 수(MAX_PRODUCTS)만큼 서로 다른 색을 둔다(같은 색이 두 번 나오지 않게).
+const CHART_COLORS = [
+  "#ef4444",
+  "#2563eb",
+  "#16a34a",
+  "#f59e0b",
+  "#7c3aed",
+  "#db2777",
+  "#0891b2",
+  "#65a30d",
+  "#475569",
+  "#a16207",
+];
 const CHART_TINTS = [
   "rgba(239, 68, 68, 0.08)",
   "rgba(37, 99, 235, 0.08)",
@@ -141,6 +164,10 @@ const CHART_TINTS = [
   "rgba(245, 158, 11, 0.08)",
   "rgba(124, 58, 237, 0.08)",
   "rgba(219, 39, 119, 0.08)",
+  "rgba(8, 145, 178, 0.08)",
+  "rgba(101, 163, 13, 0.08)",
+  "rgba(71, 85, 105, 0.08)",
+  "rgba(161, 98, 7, 0.08)",
 ];
 // 옅은 파스텔 (셀 배경 매칭용). 진한 텍스트 버전과 1:1 대응되도록 유지한다.
 const HOLDING_MATCH_COLORS = [
@@ -354,25 +381,6 @@ function formatKoreanDateLabel(value: string | null): string {
   return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일`;
 }
 
-function getLatestClose(detail: TickerDetailResponse): number | null {
-  for (let index = detail.rows.length - 1; index >= 0; index -= 1) {
-    const close = detail.rows[index]?.close;
-    if (close !== null && close !== undefined && !Number.isNaN(close)) return close;
-  }
-  return null;
-}
-
-function getPreviousClose(detail: TickerDetailResponse): number | null {
-  let foundLatest = false;
-  for (let index = detail.rows.length - 1; index >= 0; index -= 1) {
-    const close = detail.rows[index]?.close;
-    if (close === null || close === undefined || Number.isNaN(close)) continue;
-    if (foundLatest) return close;
-    foundLatest = true;
-  }
-  return null;
-}
-
 function getLatestRow(detail: TickerDetailResponse): PriceRow | null {
   for (let index = detail.rows.length - 1; index >= 0; index -= 1) {
     const row = detail.rows[index];
@@ -381,21 +389,11 @@ function getLatestRow(detail: TickerDetailResponse): PriceRow | null {
   return null;
 }
 
-function getLatestChangeAmount(detail: TickerDetailResponse): number | null {
-  const latestClose = getLatestClose(detail);
-  const latestChangePct = getLatestRow(detail)?.change_pct ?? null;
-  const previousClose = getPreviousClose(detail);
-  if (latestClose === null || latestChangePct === null) return null;
-  if (previousClose !== null) return latestClose - previousClose;
-  const calculatedPreviousClose = latestClose / (1 + latestChangePct / 100);
-  if (!Number.isFinite(calculatedPreviousClose)) return null;
-  return latestClose - calculatedPreviousClose;
-}
-
 function getPortfolioChange(detail: TickerDetailResponse): PortfolioChangeResult {
+  // 환율은 기준일 이후 누적(백엔드 합계와 같은 값) — 일간 환율로 환산하면 종목(누적)과 어긋난다.
   return calcPortfolioChange(
     detail.holdings ?? [],
-    detail.etf_info?.fx_rates ?? [],
+    detail.etf_info?.portfolio_change_fx_rates ?? [],
   );
 }
 
@@ -552,12 +550,23 @@ function getMaxDrawdown(rows: PriceRow[], dateRange: ChartDateRange | null): Max
  */
 type PeriodReturn = { pct: number; partial: boolean };
 
-function getPeriodReturnMap(rows: PriceRow[], periodKeyLength: 4 | 7 | 10): Record<string, PeriodReturn> {
+/** 날짜("YYYY-MM-DD") → 기간 키. 연 "YYYY" · 월 "YYYY-MM" · 일 "YYYY-MM-DD" · 주 = 그 주 월요일 날짜. */
+type PeriodKeyOf = (date: string) => string | null;
+const periodKeyByLength = (length: 4 | 7 | 10): PeriodKeyOf => (date) => (date.length >= length ? date.slice(0, length) : null);
+/** 주 키 — 그 주의 월요일 날짜(정렬하면 시간순). 시간대 영향을 피하려고 UTC 로 계산한다. */
+const weekKeyOf: PeriodKeyOf = (date) => {
+  const day = new Date(`${date.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(day.getTime())) return null;
+  day.setUTCDate(day.getUTCDate() - ((day.getUTCDay() + 6) % 7));
+  return day.toISOString().slice(0, 10);
+};
+
+function getPeriodReturnMap(rows: PriceRow[], keyOf: PeriodKeyOf): Record<string, PeriodReturn> {
   const firstCloseByPeriod = new Map<string, number>();
   const lastCloseByPeriod = new Map<string, number>();
   for (const row of getPricedRows(rows)) {
-    const key = String(row.date).slice(0, periodKeyLength);
-    if (key.length !== periodKeyLength) continue;
+    const key = keyOf(String(row.date));
+    if (!key) continue;
     if (!firstCloseByPeriod.has(key)) firstCloseByPeriod.set(key, row.close as number);
     lastCloseByPeriod.set(key, row.close as number); // rows 는 날짜 오름차순 → 마지막 값이 기간말 종가
   }
@@ -579,32 +588,6 @@ function getPeriodReturnMap(rows: PriceRow[], periodKeyLength: 4 | 7 | 10): Reco
 /** 라벨 열 폭을 아끼기 위한 압축 표기 — "2026-07-24"→"20260724", "2026-07"→"202607", "2026"→"2026". */
 function formatPeriodLabel(period: string): string {
   return period.replaceAll("-", "");
-}
-
-/**
- * 샤프지수 = (일간 수익률 평균 / 표준편차) × √252.
- * 무위험 수익률 = 0 으로 단순화 (편차로만 위험 측정).
- */
-function getSharpeRatio(rows: PriceRow[], dateRange: ChartDateRange | null): number | null {
-  if (!dateRange) return null;
-  const seriesRows = getPricedRows(rows).filter(
-    (row) => row.date >= dateRange.startDate && row.date <= dateRange.endDate,
-  );
-  if (seriesRows.length < 3) return null;
-  const dailyReturns: number[] = [];
-  for (let i = 1; i < seriesRows.length; i++) {
-    const prev = seriesRows[i - 1].close ?? 0;
-    const curr = seriesRows[i].close ?? 0;
-    if (prev <= 0 || curr <= 0) continue;
-    dailyReturns.push(curr / prev - 1);
-  }
-  if (dailyReturns.length < 2) return null;
-  const mean = dailyReturns.reduce((acc, v) => acc + v, 0) / dailyReturns.length;
-  const variance =
-    dailyReturns.reduce((acc, v) => acc + (v - mean) ** 2, 0) / (dailyReturns.length - 1);
-  const std = Math.sqrt(variance);
-  if (std === 0) return null;
-  return (mean / std) * Math.sqrt(252);
 }
 
 /**
@@ -636,6 +619,28 @@ function getSortinoRatio(rows: PriceRow[], dateRange: ChartDateRange | null): nu
   const downsideStd = Math.sqrt(downsideSquareSum / (dailyReturns.length - 1));
   if (downsideStd === 0) return null;
   return (mean / downsideStd) * Math.sqrt(252);
+}
+
+/**
+ * 칼마 지수 = CAGR ÷ |MDD| — 순위 화면의 칼마 컬럼과 같은 정의(백엔드 `perf_metrics.calmar_ratio`).
+ * CAGR 은 기간의 첫·마지막 종가를 달력 일수로 연환산하고, MDD 는 위 `getMaxDrawdown` 과 같은 값이다.
+ * 낙폭이 없거나(MDD 0) 연환산할 수 없으면 null.
+ */
+function getCalmarRatio(rows: PriceRow[], dateRange: ChartDateRange | null): number | null {
+  if (!dateRange) return null;
+  const seriesRows = getPricedRows(rows).filter(
+    (row) => row.date >= dateRange.startDate && row.date <= dateRange.endDate,
+  );
+  const mdd = getMaxDrawdown(rows, dateRange);
+  if (seriesRows.length < 2 || !mdd || mdd.pct === 0) return null;
+  const first = seriesRows[0];
+  const last = seriesRows[seriesRows.length - 1];
+  const start = first.close ?? 0;
+  const end = last.close ?? 0;
+  const days = (new Date(`${last.date}T00:00:00`).getTime() - new Date(`${first.date}T00:00:00`).getTime()) / 86_400_000;
+  if (start <= 0 || end <= 0 || days <= 0) return null;
+  const cagrPct = ((end / start) ** (365 / days) - 1) * 100;
+  return cagrPct / Math.abs(mdd.pct);
 }
 
 /**
@@ -707,9 +712,13 @@ function buildHoldingExposureRows(products: SelectedProduct[]): CompareHoldingEx
 
 // 여러 ETF를 한 번에 — 서버에서 구성종목 합집합을 1회 조회해 공유한다.
 // 같은 종목(예: SK스퀘어)이 여러 ETF에 나와도 동일 시세/변동률로 나오고, 중복 조회가 사라진다.
+// 응답은 SSE 스트림(튜닝과 같은 형식) — 서버가 단계마다 진행을 흘려 진행 바가 실제
+// 진행을 보여주고, 실패하면 어느 종목·단계에서 왜 실패했는지 에러 이벤트로 온다.
+// (JSON 일괄 응답은 8종목 × 구성종목 조회에서 프록시 타임아웃에 걸려 폐기했다.)
 async function loadTickerDetailsBatch(
   items: TickerItem[],
-  includeHoldings: boolean = true,
+  includeHoldings: boolean,
+  onProgress: (progress: CompareLoadingProgress) => void,
 ): Promise<TickerDetailResponse[]> {
   const response = await fetch(`/api/ticker-detail-compare`, {
     method: "POST",
@@ -725,11 +734,48 @@ async function loadTickerDetailsBatch(
       include_holdings: includeHoldings,
     }),
   });
-  const payload = (await response.json()) as { results?: TickerDetailResponse[]; error?: string };
-  if (!response.ok || payload.error) {
-    throw new Error(payload.error ?? "비교 데이터를 불러오지 못했습니다.");
+  if (!response.ok || !response.body) {
+    const message = await response.text().catch(() => "");
+    throw new Error(message.trim() || `비교 데이터를 불러오지 못했습니다. (${response.status})`);
   }
-  return payload.results ?? [];
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let results: TickerDetailResponse[] | null = null;
+
+  // SSE — 이벤트 하나가 `data: {...}` 한 줄이다. 주석(`:` 시작)은 연결 확인용이라 버린다.
+  const handleLine = (line: string) => {
+    const text = line.trim();
+    if (!text || text.startsWith(":") || !text.startsWith("data:")) return;
+    const event = JSON.parse(text.slice("data:".length).trim()) as
+      | { type: "progress"; percent: number; message: string }
+      | { type: "result"; results: TickerDetailResponse[] }
+      | { type: "error"; message: string };
+    if (event.type === "progress") {
+      onProgress({ percent: event.percent, message: event.message });
+    } else if (event.type === "result") {
+      results = event.results;
+    } else {
+      throw new Error(event.message);
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let cut = buffer.indexOf("\n");
+    while (cut >= 0) {
+      handleLine(buffer.slice(0, cut));
+      buffer = buffer.slice(cut + 1);
+      cut = buffer.indexOf("\n");
+    }
+  }
+  handleLine(buffer);
+
+  if (!results) throw new Error("비교 결과를 받지 못했습니다 — 서버 연결이 중간에 끊겼습니다.");
+  return results;
 }
 
 function ProductSearchField({
@@ -798,9 +844,11 @@ function ProductSearchField({
 
 function BasicInfoValue({ product, metric }: { product: SelectedProduct; metric: string }) {
   const latestRow = getLatestRow(product.detail);
-  const latestClose = getLatestClose(product.detail);
-  const latestChangePct = latestRow?.change_pct ?? null;
-  const latestChangeAmount = getLatestChangeAmount(product.detail);
+  const {
+    price: latestClose,
+    changePct: latestChangePct,
+    changeAmount: latestChangeAmount,
+  } = currentQuote(product.detail.rows, product.detail.live);
   const etfInfo = product.detail.etf_info ?? null;
   const portfolioChange = getPortfolioChange(product.detail);
 
@@ -821,12 +869,6 @@ function BasicInfoValue({ product, metric }: { product: SelectedProduct; metric:
     return (
       <div className="compareBasicValue">
         <strong>{formatPrice(etfInfo?.nav ?? null, product.item.country_code)}</strong>
-        <span className={getSignedClass(etfInfo?.nav_change ?? null)}>
-          {formatSignedPriceDelta(etfInfo?.nav_change ?? null, product.item.country_code)}
-        </span>
-        <span className={getSignedClass(etfInfo?.nav_change_pct ?? null)}>
-          {formatSignedPercent(etfInfo?.nav_change_pct ?? null)}
-        </span>
       </div>
     );
   }
@@ -871,7 +913,6 @@ function BasicInfoValue({ product, metric }: { product: SelectedProduct; metric:
       <div className="compareBasicValue">
         <PortfolioChangeBreakdown
           items={portfolioChange.breakdown}
-          fxRates={etfInfo?.fx_rates ?? []}
           variant="compact"
           emptyText="-"
         />
@@ -937,8 +978,8 @@ export function ComparePageClient() {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [products, setProducts] = useState<SelectedProduct[]>([]);
   const [activeTab, setActiveTab] = useState<CompareTab>("performance");
-  // 구성 종목 탭에서 종목 정렬 기준: weight(비중, 기본) / change(상승률 내림차순)
-  const [holdingsSortBy, setHoldingsSortBy] = useState<"weight" | "change">("weight");
+  // 구성 종목 탭에서 종목 정렬 기준(HOLDINGS_SORT_OPTIONS) — 기본은 비중순.
+  const [holdingsSortBy, setHoldingsSortBy] = useState<HoldingsSortBy>("weight");
   const [performanceRange, setPerformanceRange] = useState<string>("1y"); // 성과분석 기본 기간
   const [searchText, setSearchText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -985,37 +1026,13 @@ export function ComparePageClient() {
       return;
     }
     setLoading(true);
-    setLoadingProgress({ percent: 10, message: `${items.length}개 ETF 비교 요청 준비 중` });
+    setLoadingProgress({ percent: 0, message: `${items.length}개 ETF 비교 요청 준비 중` });
     setError(null);
-    const progressTimers: number[] = [];
-    let progressInterval: number | null = null;
     try {
-      progressTimers.push(
-        window.setTimeout(() => {
-          setLoadingProgress({ percent: 35, message: "구성종목 합집합과 가격 스냅샷 조회 중" });
-        }, 400),
-      );
-      progressTimers.push(
-        window.setTimeout(() => {
-          setLoadingProgress((previous) => ({
-            percent: Math.max(previous?.percent ?? 0, 55),
-            message: "ETF별 비교 데이터 계산 중",
-          }));
-          progressInterval = window.setInterval(() => {
-            setLoadingProgress((previous) => {
-              if (!previous) return previous;
-              return {
-                ...previous,
-                percent: Math.min(90, previous.percent + 5),
-              };
-            });
-          }, 1200);
-        }, 1400),
-      );
       // 한 번의 일괄 호출 — 서버가 구성종목 합집합을 1회 조회해 공유하므로
       // 같은 종목은 ETF 간 동일 값이 되고, 중복 조회/전역 lock 직렬화 문제도 사라진다.
-      const details = await loadTickerDetailsBatch(items, includeHoldings);
-      setLoadingProgress({ percent: 100, message: "비교 데이터 반영 중" });
+      // 진행 바는 서버가 흘리는 실제 단계(스냅샷 조회 → i/N 종목 계산)를 그대로 보여준다.
+      const details = await loadTickerDetailsBatch(items, includeHoldings, setLoadingProgress);
       // 인덱스가 아니라 티커로 짝을 짓는다 — 서버 캐시가 순서를 다르게 돌려줘도
       // 이름과 시세가 다른 종목끼리 붙지 않는다(카드 순서를 바꿀 때 실제로 겪은 문제).
       const detailByKey = new Map(details.map((detail) => [detailKey(detail), detail] as const));
@@ -1032,8 +1049,6 @@ export function ComparePageClient() {
       setError(loadError instanceof Error ? loadError.message : "비교 데이터를 불러오지 못했습니다.");
       loadedSignatureRef.current = null; // 실패한 요청은 '로드됨'으로 두지 않는다(재시도 가능하게).
     } finally {
-      progressTimers.forEach((timer) => window.clearTimeout(timer));
-      if (progressInterval !== null) window.clearInterval(progressInterval);
       setLoading(false);
       setLoadingProgress(null);
     }
@@ -1239,6 +1254,10 @@ export function ComparePageClient() {
       })
       .map(({ product }) => product);
   }, [products, selectedKeys]);
+  // 표의 상품 컬럼은 **담긴 종목 수만큼**만 둔다(빈 칸을 남기지 않는다). 아무것도 없을 때만
+  // 「비교 상품을 추가해 주세요」 안내 칸 하나를 둔다.
+  const emptySlotCount = sortedProducts.length === 0 ? 1 : 0;
+  const productColumnCount = sortedProducts.length + emptySlotCount;
 
   // 카드 드래그로 순서 변경 — selectedKeys 를 재배열하면 저장(useEffect)까지 자동 반영된다.
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
@@ -1259,21 +1278,28 @@ export function ComparePageClient() {
   const monthlyReturnMaps = useMemo(() => {
     const map = new Map<string, Record<string, PeriodReturn>>();
     for (const product of sortedProducts) {
-      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, 7));
+      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, periodKeyByLength(7)));
     }
     return map;
   }, [sortedProducts]);
   const yearlyReturnMaps = useMemo(() => {
     const map = new Map<string, Record<string, PeriodReturn>>();
     for (const product of sortedProducts) {
-      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, 4));
+      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, periodKeyByLength(4)));
     }
     return map;
   }, [sortedProducts]);
   const dailyReturnMaps = useMemo(() => {
     const map = new Map<string, Record<string, PeriodReturn>>();
     for (const product of sortedProducts) {
-      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, 10));
+      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, periodKeyByLength(10)));
+    }
+    return map;
+  }, [sortedProducts]);
+  const weeklyReturnMaps = useMemo(() => {
+    const map = new Map<string, Record<string, PeriodReturn>>();
+    for (const product of sortedProducts) {
+      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, weekKeyOf));
     }
     return map;
   }, [sortedProducts]);
@@ -1287,21 +1313,22 @@ export function ComparePageClient() {
   const monthlyRows = useMemo(() => collectPeriods(monthlyReturnMaps), [collectPeriods, monthlyReturnMaps]);
   const yearlyRows = useMemo(() => collectPeriods(yearlyReturnMaps), [collectPeriods, yearlyReturnMaps]);
   const dailyRows = useMemo(() => collectPeriods(dailyReturnMaps), [collectPeriods, dailyReturnMaps]);
+  const weeklyRows = useMemo(() => collectPeriods(weeklyReturnMaps), [collectPeriods, weeklyReturnMaps]);
 
   // 기간 분석 탭의 그리드 컬럼 클래스 — 헤더/본문이 같은 컬럼 폭을 써야 정렬이 맞는다.
   const periodMatrixClass = !PERIOD_TABS.includes(activeTab)
     ? ""
-    : activeTab === "daily"
+    : activeTab === "daily" || activeTab === "weekly"
       ? "compareMatrixMonthly compareMatrixDaily"
       : "compareMatrixMonthly";
 
   // 일간·월간·연간 분석 본문 공용 렌더 — 라벨(기간 + 동일가중 평균) + 종목별 값 행.
   // 상위 단위가 바뀌는 행에 굵은 구분선을 넣는다(월간=해, 일간=월. 연간은 매 행이 새 해라 불필요).
-  const PERIOD_KIND_LABEL = { daily: "일간", monthly: "월간", yearly: "연간" } as const;
+  const PERIOD_KIND_LABEL = { daily: "일간", weekly: "주간", monthly: "월간", yearly: "연간" } as const;
   const renderPeriodRows = (
     periods: string[],
     maps: Map<string, Record<string, PeriodReturn>>,
-    options: { kind: "daily" | "monthly" | "yearly" },
+    options: { kind: "daily" | "weekly" | "monthly" | "yearly" },
   ) => {
     if (periods.length === 0) {
       return (
@@ -1310,8 +1337,9 @@ export function ComparePageClient() {
         </div>
       );
     }
-    // 구분선 기준 자릿수: 월간이면 연(4), 일간이면 연월(7).
-    const boundaryLength = options.kind === "monthly" ? 4 : options.kind === "daily" ? 7 : 0;
+    // 구분선 기준 자릿수: 월간이면 연(4), 주간·일간이면 연월(7). 주간 키는 그 주 월요일 날짜다.
+    const boundaryLength =
+      options.kind === "monthly" ? 4 : options.kind === "daily" || options.kind === "weekly" ? 7 : 0;
     return periods.map((period, index) => {
       const prevPeriod = index > 0 ? periods[index - 1] : null;
       const isYearBoundary =
@@ -1331,7 +1359,12 @@ export function ComparePageClient() {
           <div className={`compareMatrixLabel compareMatrixLabelWide compareBasicCompactLabel${boundaryClass}`}>
             <div className="compareMonthlyLabelRow">
               {/* 기간은 등폭 폰트(appCodeText)로 렌더해 201911/201910 처럼 폭이 달라지지 않게 한다. */}
-              <span className="compareMatrixLabelText appCodeText">{formatPeriodLabel(period)}</span>
+              <span
+                className="compareMatrixLabelText appCodeText"
+                title={options.kind === "weekly" ? `${period} 주(월요일 시작) — 직전 주 마지막 종가 대비` : undefined}
+              >
+                {formatPeriodLabel(period)}
+              </span>
               <span
                 className={getSignedClass(equalWeighted)}
                 title={`선택 종목 ${entries.length}개 동일가중 평균${hasPartialAvg ? " (*: 부분 기간 포함)" : ""}`}
@@ -1354,7 +1387,7 @@ export function ComparePageClient() {
               </div>
             );
           })}
-          {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, emptyIndex) => (
+          {Array.from({ length: emptySlotCount }).map((_, emptyIndex) => (
             <div key={`empty-${options.kind}-${period}-${emptyIndex}`} className={`compareMetricCell${boundaryClass}`}>
               -
             </div>
@@ -1442,16 +1475,6 @@ export function ComparePageClient() {
     return null;
   }, [sortedProducts]);
 
-  // base_date 를 뽑은 것과 동일한 상품 기준 — 당일 시초가 baseline 이면 라벨을 "시초가 이후"로.
-  const portfolioChangeBaseIsOpen = useMemo(() => {
-    for (const p of sortedProducts) {
-      if (p.detail.etf_info?.portfolio_change_base_date) {
-        return !!p.detail.etf_info.portfolio_change_base_is_open;
-      }
-    }
-    return false;
-  }, [sortedProducts]);
-
   // 매칭 색상 계산용: 전체 종목 (이전엔 상위 10개만이었지만 컬럼 스크롤로 전부 노출되므로 전부 대상).
   const holdingExposureRows = useMemo(() => buildHoldingExposureRows(sortedProducts), [sortedProducts]);
   const holdingColorByCode = useMemo(() => {
@@ -1492,7 +1515,11 @@ export function ComparePageClient() {
 
   return (
     <PageFrame title="종목 비교" fullHeight fullWidth titleRight={titleRight}>
-      <div className="appPageStack appPageStackFill comparePage">
+      <div
+        className="appPageStack appPageStackFill comparePage"
+        // 비교 표의 상품 컬럼 수 — CSS 그리드가 이 값 하나를 쓴다(담긴 종목 수).
+        style={{ "--compare-products": productColumnCount } as CSSProperties}
+      >
         {error ? <div className="alert alert-danger mb-0">{error}</div> : null}
 
         <section className="appSection">
@@ -1577,28 +1604,20 @@ export function ComparePageClient() {
                       <label className="appLabeledField" style={{ marginLeft: "0.75rem", minWidth: 0, width: "auto" }}>
                         <span className="appLabeledFieldLabel">구성종목 정렬</span>
                         <div className="appSegmentedToggle" role="group" aria-label="구성종목 정렬 기준">
-                          <button
-                            type="button"
-                            className={
-                              holdingsSortBy === "weight"
-                                ? "btn appSegmentedToggleButton is-active"
-                                : "btn appSegmentedToggleButton"
-                            }
-                            onClick={() => setHoldingsSortBy("weight")}
-                          >
-                            비중
-                          </button>
-                          <button
-                            type="button"
-                            className={
-                              holdingsSortBy === "change"
-                                ? "btn appSegmentedToggleButton is-active"
-                                : "btn appSegmentedToggleButton"
-                            }
-                            onClick={() => setHoldingsSortBy("change")}
-                          >
-                            상승률
-                          </button>
+                          {HOLDINGS_SORT_OPTIONS.map((option) => (
+                            <button
+                              key={option.key}
+                              type="button"
+                              className={
+                                holdingsSortBy === option.key
+                                  ? "btn appSegmentedToggleButton is-active"
+                                  : "btn appSegmentedToggleButton"
+                              }
+                              onClick={() => setHoldingsSortBy(option.key)}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
                         </div>
                       </label>
                     ) : null}
@@ -1666,14 +1685,14 @@ export function ComparePageClient() {
               </div>
               <div className="compareProductName">{product.item.name}</div>
               <div className="compareProductPrice">
-                {formatPrice(getLatestClose(product.detail), product.item.country_code)}
-                <span className={getSignedClass(getLatestRow(product.detail)?.change_pct ?? null)}>
-                  {formatSignedPercent(getLatestRow(product.detail)?.change_pct ?? null)}
+                {formatPrice(currentQuote(product.detail.rows, product.detail.live).price, product.item.country_code)}
+                <span className={getSignedClass(currentQuote(product.detail.rows, product.detail.live).changePct)}>
+                  {formatSignedPercent(currentQuote(product.detail.rows, product.detail.live).changePct)}
                 </span>
               </div>
             </div>
           ))}
-          {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+          {Array.from({ length: emptySlotCount }).map((_, index) => (
             <div key={`empty-${index}`} className="compareProductEmpty compareProductHeaderEmpty">비교 상품을 추가해 주세요.</div>
           ))}
         </section>
@@ -1732,7 +1751,7 @@ export function ComparePageClient() {
                       </div>
                     );
                   })}
-                  {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+                  {Array.from({ length: emptySlotCount }).map((_, index) => (
                     <div
                       key={`empty-metric-${period.label}-${index}`}
                       className={`compareMetricCell ${isActiveMetricRow ? "is-active-range" : ""}`}
@@ -1775,7 +1794,7 @@ export function ComparePageClient() {
                 );
               });
             })()}
-            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+            {Array.from({ length: emptySlotCount }).map((_, index) => (
               <div key={`empty-mdd-${index}`} className="compareMetricCell">-</div>
             ))}
 
@@ -1800,12 +1819,12 @@ export function ComparePageClient() {
                 );
               });
             })()}
-            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+            {Array.from({ length: emptySlotCount }).map((_, index) => (
               <div key={`empty-sortino-${index}`} className="compareMetricCell">-</div>
             ))}
 
             <div className="compareMatrixLabel compareMetricsGroupLabel compareMetricsGroupLabelSingle">
-              샤프 지수
+              칼마 지수
               <div className="compareMatrixLabelHint">
                 {chartDateRange?.shortened
                   ? `${formatDateKey(chartDateRange.startDate)} ~ ${formatDateKey(chartDateRange.endDate)}`
@@ -1813,20 +1832,20 @@ export function ComparePageClient() {
               </div>
             </div>
             {(() => {
-              const values = sortedProducts.map((product) => getSharpeRatio(product.detail.rows, chartDateRange));
+              const values = sortedProducts.map((product) => getCalmarRatio(product.detail.rows, chartDateRange));
               const bestIndex = getBestValueIndex(values);
               return sortedProducts.map((product, index) => {
                 const value = values[index];
                 return (
-                  <div key={`sharpe-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
+                  <div key={`calmar-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
                     {bestIndex === index ? "⭐ " : ""}
                     {value === null || Number.isNaN(value) ? "-" : value.toFixed(2)}
                   </div>
                 );
               });
             })()}
-            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
-              <div key={`empty-sharpe-${index}`} className="compareMetricCell">-</div>
+            {Array.from({ length: emptySlotCount }).map((_, index) => (
+              <div key={`empty-calmar-${index}`} className="compareMetricCell">-</div>
             ))}
           </section>
         ) : PERIOD_TABS.includes(activeTab) ? (
@@ -1836,7 +1855,9 @@ export function ComparePageClient() {
                 ? { rows: yearlyRows, maps: yearlyReturnMaps, kind: "yearly" as const }
                 : activeTab === "monthly"
                   ? { rows: monthlyRows, maps: monthlyReturnMaps, kind: "monthly" as const }
-                  : { rows: dailyRows, maps: dailyReturnMaps, kind: "daily" as const };
+                  : activeTab === "weekly"
+                    ? { rows: weeklyRows, maps: weeklyReturnMaps, kind: "weekly" as const }
+                    : { rows: dailyRows, maps: dailyReturnMaps, kind: "daily" as const };
             // 부분 기간(*)이 실제로 있을 때만 범례를 보인다 — 일간은 첫 거래일이 제외돼 보통 없다.
             const hasPartial = rows.some((period) =>
               [...maps.values()].some((map) => map[period]?.partial),
@@ -1866,8 +1887,7 @@ export function ComparePageClient() {
                   <div className="compareMatrixLabelText">{metric.label}</div>
                   {metric.label === "포트폴리오 변동" && portfolioChangeBaseDate && (
                     <div className="compareMatrixLabelHint" style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)", fontWeight: "normal", marginTop: "4px" }}>
-                      ({formatKoreanDateLabel(portfolioChangeBaseDate)}
-                      {portfolioChangeBaseIsOpen ? " 시초가" : ""} 이후)
+                      ({formatKoreanDateLabel(portfolioChangeBaseDate)} 이후)
                     </div>
                   )}
                 </div>
@@ -1885,7 +1905,7 @@ export function ComparePageClient() {
                     <BasicInfoValue product={product} metric={metric.label} />
                   </div>
                 ))}
-                {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+                {Array.from({ length: emptySlotCount }).map((_, index) => (
                   <div key={`empty-basic-${metric.label}-${index}`} className={metric.multiline ? "compareProductEmpty" : "compareProductEmpty compareBasicCompactCell"}>-</div>
                 ))}
               </Fragment>
@@ -1906,18 +1926,20 @@ export function ComparePageClient() {
                 <BasicInfoValue product={product} metric="포트폴리오 변동" />
               </div>
             ))}
-            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+            {Array.from({ length: emptySlotCount }).map((_, index) => (
               <div key={`empty-holding-portfolio-change-${index}`} className="compareProductEmpty">-</div>
             ))}
             <div className="compareMatrixLabel compareMatrixLabelWide compareHoldingsGroupLabel">구성종목</div>
             {sortedProducts.map((product) => {
               // 정렬 기준에 따라 표시용 holdings 를 만든다. 원본은 변형하지 않는다.
               const sortedHoldings = (() => {
-                if (holdingsSortBy === "change") {
+                if (holdingsSortBy === "rise" || holdingsSortBy === "fall") {
+                  // 상승률은 큰 순, 하락률은 작은 순(많이 떨어진 종목부터). 등락률이 없는 종목은 어느 쪽이든 맨 뒤.
                   return [...product.detail.holdings].sort((a, b) => {
-                    const av = a.change_pct ?? Number.NEGATIVE_INFINITY;
-                    const bv = b.change_pct ?? Number.NEGATIVE_INFINITY;
-                    return bv - av; // 상승률 내림차순
+                    if (a.change_pct == null || b.change_pct == null) {
+                      return Number(a.change_pct == null) - Number(b.change_pct == null);
+                    }
+                    return holdingsSortBy === "rise" ? b.change_pct - a.change_pct : a.change_pct - b.change_pct;
                   });
                 }
                 // 기본: 백엔드가 이미 비중순으로 내려준다고 가정. 안정성 위해 명시적 정렬.
@@ -1999,7 +2021,7 @@ export function ComparePageClient() {
                 </div>
               );
             })}
-            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+            {Array.from({ length: emptySlotCount }).map((_, index) => (
               <div key={`empty-holding-scroll-${index}`} className="compareHoldingCell">-</div>
             ))}
           </section>

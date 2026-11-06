@@ -20,14 +20,14 @@ def get_live_24h(_: None = Depends(require_internal_token)) -> dict[str, object]
 
 @router.get("/nq-future")
 def get_nq_future(_: None = Depends(require_internal_token)) -> dict[str, object]:
-    """헤더 표시용 나스닥 100 선물 현재가 + 전일 기준 변동률 (토스, 5초 TTL)."""
-    try:
-        from services.toss_market_service import fetch_toss_indicator_prices
+    """헤더 표시용 나스닥 100 선물 현재가 + 전일 종가 대비 변동률.
 
-        info = fetch_toss_indicator_prices().get("RFU.NQc1") or {}
-        latest = info.get("latest")
-        base = info.get("base")
-        change_pct = ((float(latest) / float(base) - 1.0) * 100.0) if (latest and base) else None
-        return {"price": latest, "change_pct": change_pct}
+    소스는 야후(NQ=F, CME 시세라 약 10~15분 지연) — /live-24h 지표 카드와 같은 소스다.
+    """
+    try:
+        from services.price_service import get_yahoo_symbol_snapshot
+
+        info = get_yahoo_symbol_snapshot(["NQ=F"]).get("NQ=F") or {}
+        return {"price": info.get("nowVal"), "change_pct": info.get("changeRate")}
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

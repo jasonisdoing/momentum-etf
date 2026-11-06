@@ -13,6 +13,7 @@ from typing import Any
 COLLECTION = "index_constituents"
 SUPPORTED_INDICES = {"SP500", "NDX100", "ASX200", "KOSPI200", "KOSDAQ150"}
 
+
 # 한국 지수는 공식 구성종목 API 가 없어 **추종 ETF 의 보유종목**을 명단으로 쓴다.
 # 배치가 하루 한 번 여기 목록대로 적재하고, 화면(`/kor-market-stock`·`/kor-dividend`)은
 # 저장된 명단만 읽는다. 다른 ETF 로 대체하지 않는다 — 조회가 깨지면 배치가 죽어야 한다.

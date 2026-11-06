@@ -16,14 +16,15 @@ logger = get_app_logger()
 
 
 def _load_account_configs() -> list[dict[str, Any]]:
-    """계좌 설정을 DB(account_settings) 단일 소스에서 읽는다 (store 가 TTL 캐시 담당).
+    """운영 계좌 설정을 DB(account_settings) 단일 소스에서 읽는다 (store 가 TTL 캐시 담당).
 
+    모의 계좌는 여기서 제외된다 — 자산·대시보드 등 계좌 목록을 쓰는 모든 곳에서 보이지 않는다.
     문서가 없으면 명시적 에러.
     """
-    from utils.account_settings_store import AccountSettingsStoreError, load_account_docs
+    from utils.account_settings_store import AccountSettingsStoreError, load_live_account_docs
 
     try:
-        return load_account_docs()
+        return load_live_account_docs()
     except AccountSettingsStoreError as exc:
         raise AccountSettingsError(str(exc)) from exc
 

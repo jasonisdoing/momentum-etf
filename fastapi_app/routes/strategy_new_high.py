@@ -1,14 +1,14 @@
 """신고가 전략 설정·선정 API."""
 
 from fastapi import APIRouter, Body, Depends, Query
+from fastapi.responses import StreamingResponse
 
 from config import HOLDING_CHART_MONTHS
+from core.strategy.new_high.signals import HIGH_WINDOW_WEEKS
 from fastapi_app.dependencies import require_internal_token
+from fastapi_app.streaming import sse_stream
 from utils.new_high_service import (
     DEFAULT_SETTINGS,
-    HIGH_WINDOW_WEEKS,
-    MIN_VALUE_MULT_OPTIONS,
-    STOP_LOSS_OPTIONS,
     load_settings,
     load_settings_for_view,
     load_settings_map,
@@ -36,7 +36,7 @@ def _adr_clipped_months(pool: str, months: list[int]) -> list[int]:
 def _constraints(pool: str, adr_floor: int | None = None) -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다)."""
     from utils.ma_options import short_ma_options
-    from utils.new_high_service import pool_country
+    from utils.new_high_service import min_value_mult_options, pool_country
 
     country = pool_country(pool)
     from config import ADR_FLOOR_OPTIONS
@@ -44,13 +44,15 @@ def _constraints(pool: str, adr_floor: int | None = None) -> dict:
     return {
         # ADR 하한 — 전일 시장 ADR 이 미만이면 그날 신규 진입 차단. None = 없음(기본).
         "adr_floor_options": list(ADR_FLOOR_OPTIONS),
-        "stop_loss_options": list(STOP_LOSS_OPTIONS),
         # 이탈 이평선 = 그 풀 국가의 단기 이평 선택지
         "exit_ma_options": list(short_ma_options(country)),
-        "min_value_mult_options": list(MIN_VALUE_MULT_OPTIONS),
+        # 거래대금 하한 — 이탈 이평선과 같이 그 풀 국가의 목록.
+        "min_value_mult_options": list(min_value_mult_options(country)),
         # 기간 선택지 — 종목풀 백테스트와 같은 목록이 단일 소스(전략별로 따로 두지 않는다).
         # ADR 하한이 저장돼 있으면 게이트가 전 구간에 적용되는 기간만 남긴다(모멘텀과 같은 규칙).
-        "month_options": _adr_clipped_months(pool, get_month_options()) if adr_floor is not None else get_month_options(),
+        "month_options": _adr_clipped_months(pool, get_month_options())
+        if adr_floor is not None
+        else get_month_options(),
         # 튜닝은 축에 ADR 하한이 항상 포함되므로 저장값과 무관하게 이력 범위로 제한한다.
         "tuning_month_options": _adr_clipped_months(pool, get_month_options()),
         # 신고가 창 — 화면 문구("52주 신고가")를 이 값에서 만든다.
@@ -160,14 +162,15 @@ def post_strategy_new_high_backtest(
 def post_strategy_new_high_tuning(
     payload: dict = Body(...),
     _: None = Depends(require_internal_token),
-) -> dict:
+) -> StreamingResponse:
     """튜닝 — 설정 항목 범위의 모든 조합을 백테스트한다.
 
-    body: ``{"months": 12, "settings": {...현재 화면 값}, "ranges": {"top_n": [...],
-    "stop_loss_pct": [...], "exit_ma_days": [...], "min_value_mult": [...]}}``
+    body: ``{"months": 12, "settings": {...현재 화면 값}, "ranges": {
+    "exit_ma_days": [...], "min_value_mult": [...], "adr_floor": [...]}}``
     축 밖의 설정은 ``settings`` 값으로 고정한다.
     """
-    from utils.new_high_tuning import run_tuning
+    from utils.new_high_tuning import stream_tuning
+    from utils.strategy_tuning import begin_tuning
 
     if not isinstance(payload, dict):
         raise ValueError("요청 형식이 올바르지 않습니다.")
@@ -178,4 +181,16 @@ def post_strategy_new_high_tuning(
     ranges = payload.get("ranges")
     if not isinstance(ranges, dict) or not all(isinstance(v, list) for v in ranges.values()):
         raise ValueError("'ranges' 는 축별 값 목록이어야 합니다.")
-    return run_tuning(months, settings if isinstance(settings, dict) else None, ranges)
+    checked = settings if isinstance(settings, dict) else None
+    pool = str((checked or {}).get("pool") or "미지정 풀")
+    run = begin_tuning(f"신고가 {pool} {months}개월")
+    # 진행을 함께 흘린다 — 형식은 모멘텀 튜닝과 같다(SSE, progress/result/error).
+    return sse_stream(lambda: stream_tuning(months, checked, ranges, run))
+
+
+@router.delete("/tuning")
+def delete_strategy_new_high_tuning(_: None = Depends(require_internal_token)) -> dict:
+    """현재 실행 중인 전략 튜닝과 워커 프로세스를 즉시 종료한다."""
+    from utils.strategy_tuning import cancel_active_tuning
+
+    return cancel_active_tuning()

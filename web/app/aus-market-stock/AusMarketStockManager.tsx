@@ -5,6 +5,7 @@ import { IconPlus } from "@tabler/icons-react";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { useLatestRequest } from "@/lib/use-latest-request";
 import { loadStocksTable } from "@/lib/stocks-store";
@@ -210,7 +211,7 @@ export function AusMarketStockManager({
     if (selectedTickers.length === 0) return;
 
     const stockPools = tickerPools.filter(isAusTickerPool);
-    const remembered = readRememberedTickerType();
+    const remembered = readRememberedTickerType("market-stock-aus");
 
     if (remembered && stockPools.some((p) => p.ticker_type === remembered)) {
       setSelectedTickerPool(remembered);
@@ -280,6 +281,7 @@ export function AusMarketStockManager({
       {
         headerName: "#",
         field: "rank",
+        pinned: "left",
         width: 64,
         minWidth: 56,
         maxWidth: 76,
@@ -290,33 +292,24 @@ export function AusMarketStockManager({
       {
         headerName: "종목풀",
         field: "ticker_pools",
+        pinned: "left",
         width: 108,
         maxWidth: 160,
         cellClass: "usMarketStockTextCell",
         cellRenderer: (params: { value: string }) => renderTruncatedText(params.value),
       },
-      {
-        headerName: "티커",
-        field: "ticker",
+      // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
+      // 티커는 호주 접두사(ASX:)만 화면 고유, 종목명 표기는 공용(2줄 말줄임·레버리지 💣).
+      tickerColumn<AusMarketStockGridRow>({
         width: 116,
         minWidth: 96,
-        cellStyle: {
-          fontFamily: "var(--font-mono, monospace)",
-          fontSize: "var(--fs-sm)",
-        } as CellStyle,
-        cellRenderer: (params: { value?: string }) => {
+        mono: true,
+        cellRenderer: (params) => {
           const raw = normalizeAsxTicker(String(params.value ?? ""));
           return <TickerDetailLink ticker={raw} />;
         },
-      },
-      {
-        headerName: "종목명",
-        field: "name",
-        flex: 1,
-        minWidth: 220,
-        cellClass: "usMarketStockTextCell",
-        cellRenderer: (params: { value?: string }) => renderTruncatedText(params.value),
-      },
+      }),
+      stockNameColumn<AusMarketStockGridRow>({ nameOptions: (row) => ({ isHeld: row?.is_held }) }),
       {
         headerName: "섹터",
         field: "sector",
@@ -539,7 +532,7 @@ export function AusMarketStockManager({
               onChange={(event) => {
                 const nextType = event.target.value;
                 setSelectedTickerPool(nextType);
-                if (nextType) writeRememberedTickerType(nextType);
+                if (nextType) writeRememberedTickerType("market-stock-aus", nextType);
               }}
             >
               <option value="">종목풀 선택</option>

@@ -3,24 +3,16 @@
 import { useCallback, useMemo, useState } from "react";
 
 import { PageFrame } from "../components/PageFrame";
+import { SlackAlertBasisMetric } from "../components/SlackAlertBasisMetric";
 import { UsMarketStockManager } from "./UsMarketStockManager";
 
 type StockSummary = {
-  index: string;
   count: number;
   totalCount: number;
 };
 
-function formatIndexLabel(index: string): string {
-  if (index === "COMBINED") return "통합";
-  if (index === "SP500") return "S&P500";
-  if (index === "NDX100") return "NASDAQ100";
-  return index;
-}
-
 export function UsMarketStockPageClient() {
-  const [summary, setSummary] = useState<StockSummary>({ index: "COMBINED", count: 0, totalCount: 0 });
-
+  const [summary, setSummary] = useState<StockSummary>({ count: 0, totalCount: 0 });
   const handleSummaryChange = useCallback((s: StockSummary) => setSummary(s), []);
 
   const titleRight = useMemo(
@@ -30,10 +22,7 @@ export function UsMarketStockPageClient() {
           <span>표시:</span>
           <span className="appHeaderMetricValue">{summary.count}개</span>
         </div>
-        <div className="appHeaderMetric">
-          <span>인덱스:</span>
-          <span className="appHeaderMetricValue">{formatIndexLabel(summary.index)}</span>
-        </div>
+        <SlackAlertBasisMetric apiPath="/api/us-market-stocks/alert-basis" />
       </div>
     ),
     [summary],

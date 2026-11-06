@@ -5,6 +5,25 @@
 
 import type { ColDef, ColDefField } from "ag-grid-community";
 import type React from "react";
+import type { ReactNode } from "react";
+
+import { TickerDetailLink } from "@/app/components/TickerDetailLink";
+import { BUCKET_THEME } from "@/lib/bucket-theme";
+import { formatSlashDateWithWeekday } from "@/lib/datetime";
+import { isLeverageName, renderStockNameCell, type StockNameOptions } from "@/lib/name-highlight";
+
+/** 자산 도우미·포트폴리오가 공유하는 읽기 전용 버킷 컬럼. */
+export function bucketColumn<T extends { bucket?: number | null }>(): ColDef<T> {
+  return {
+    colId: "bucket",
+    headerName: "버킷",
+    minWidth: 108,
+    width: 108,
+    pinned: "left",
+    valueGetter: ({ data }) => data?.bucket ? BUCKET_THEME[String(data.bucket)]?.name ?? "-" : "-",
+    cellClass: ({ data }) => data?.bucket ? `rankBucketCell rankBucketCell${data.bucket}` : "rankBucketCell",
+  };
+}
 
 /** 부호를 붙인 퍼센트 표기: +1.23% / -4.56% / "-"(값 없음). */
 export function formatSignedPct(value: number | null | undefined, digits = 2): string {
@@ -27,16 +46,124 @@ export function marketBadgeCellStyle(value: unknown): React.CSSProperties | null
   return { textAlign: "center" };
 }
 
-/** 종목명 컬럼 폭 — 종목명 컬럼이 있는 모든 화면이 같은 값을 쓴다.
- *  남는 폭은 종목명이 가져가되(flex), 좁아져도 이 폭 아래로는 줄지 않는다.
- *  긴 이름은 2줄까지 보이고 넘치면 말줄임 (renderStockNameCell). */
-export const STOCK_NAME_COLUMN_MIN_WIDTH = 220;
+/** 종목명 컬럼 폭 — 티커·종목명이 있는 **모든 화면이 이 고정 폭 하나**를 쓴다.
+ *
+ *  남는 폭을 종목명이 흡수(flex)하지 않는다 — 표는 왼쪽부터 채우고 남는 폭은 빈 공간으로
+ *  둔다. flex 는 표마다 종목명 폭이 달라져 화면 간·표 간(보유/후보) 칸이 어긋났다.
+ *  긴 이름은 2줄 말줄임 + 전체 이름 툴팁(renderStockNameCell). 한국 긴 ETF 명이 2줄에
+ *  거의 다 들어오는 최소선이 240px 이다. */
+export const STOCK_NAME_COLUMN_WIDTH = 240;
 
-/** 업종 컬럼 폭 — 종목풀 순위 화면 기준. 업종 컬럼이 있는 모든 화면이 같은 값을 쓴다.
- *  한글 최장은 `섬유,의류,신발,호화품`(12자). 영문은 25자 안팎이 흔하고
- *  40자짜리(`Drug Manufacturers - Specialty & Generic`)는 2줄까지 보이고 넘치면 말줄임. */
-export const INDUSTRY_COLUMN_WIDTH = 200;
-export const INDUSTRY_COLUMN_MIN_WIDTH = 150;
+/** 티커 컬럼 표준 폭 — 한국 6자리·미국 4~5자·호주 `ASX:XXX` 가 한 줄에 들어간다. */
+export const TICKER_COLUMN_WIDTH = 108;
+
+/** 티커·종목명 연속 컬럼의 col-id 표준.
+ *
+ *  보유 강조(globals.css `.appHeldRow` — 티커·종목명 칸만 녹색)와 빈 슬롯 행
+ *  (`.appEmptySlotRow` — 종목명만 남김)이 이 col-id 로 칸을 찾는다. 화면 데이터 키가
+ *  한국어(순위 화면 `티커`/`종목명`)여도 col-id 는 항상 이 값이다. */
+export const TICKER_COL_ID = "ticker";
+export const STOCK_NAME_COL_ID = "name";
+
+/** 종목 행 공통 클래스 — 상태 표시는 이 두 가지뿐이고 전 화면이 같은 규칙을 쓴다.
+ *
+ *  · 보유(`appHeldRow`): 티커·종목명 칸만 녹색.
+ *  · 추세 이탈(`appTrendBrokenRow`): 행 전체 연한 회색 — 배지(❗) 대신 이것 하나다.
+ *  빈 슬롯 행은 다른 표시가 무의미해 빈 슬롯 클래스만 남긴다.
+ *  이격 데이터가 없는 표(과거 체결 등)는 `trendBroken` 을 넘기지 말 것 —
+ *  `isTrendBroken` 은 값이 없으면 이탈 취급이라 전 행이 회색이 된다. */
+export function stockRowClass(options: {
+  held?: boolean;
+  trendBroken?: boolean;
+  emptySlot?: boolean;
+}): string {
+  if (options.emptySlot) return "appEmptySlotRow";
+  const classes: string[] = [];
+  if (options.held) classes.push("appHeldRow");
+  if (options.trendBroken) classes.push("appTrendBrokenRow");
+  return classes.join(" ");
+}
+
+/** 티커 컬럼 — 티커·종목명 쌍이 있는 모든 화면이 이걸 쓴다(`stockNameColumn` 과 세트).
+ *
+ *  화면마다 폭·col-id·렌더러가 제각각이면 보유 강조·배지 같은 공통 변경이 한 번에 안 된다.
+ *  기본 렌더러는 종목 상세 링크, `mono` 는 링크 없는 코드 표기(시장 전광판 화면),
+ *  `cellRenderer` 는 화면 고유 칸(추가 행 입력칸·현금 행 등)용이다. */
+export function tickerColumn<T>(options?: {
+  field?: string;
+  /** 종목명 데이터 키. 기본은 name이며 순위 화면은 종목명을 쓴다. */
+  nameField?: string;
+  width?: number;
+  minWidth?: number;
+  sortable?: boolean;
+  cellClass?: string;
+  cellStyle?: ColDef<T>["cellStyle"];
+  /** true = 모노스페이스 코드 표기(시장 전광판 화면). 렌더러(상세 링크)는 그대로다. */
+  mono?: boolean;
+  cellRenderer?: (p: { value?: string | null; data?: T }) => ReactNode;
+}): ColDef<T> {
+  return {
+    colId: TICKER_COL_ID,
+    field: (options?.field ?? "ticker") as ColDefField<T>,
+    headerName: "티커",
+    width: options?.width ?? TICKER_COLUMN_WIDTH,
+    minWidth: options?.minWidth,
+    // 티커·종목명(과 그 앞 컬럼들)은 왼쪽 고정 — 가로 스크롤에도 어떤 종목의 행인지 보인다.
+    pinned: "left",
+    sortable: options?.sortable,
+    cellClass: ({ data }) => {
+      const name = (data as Record<string, unknown> | undefined)?.[options?.nameField ?? "name"];
+      return [options?.cellClass, isLeverageName(typeof name === "string" ? name : null) ? "appLeverageTickerCell" : null]
+        .filter(Boolean).join(" ");
+    },
+    cellStyle: options?.mono
+      ? { fontFamily: "var(--font-mono, monospace)", fontSize: "var(--fs-sm)" }
+      : options?.cellStyle,
+    cellRenderer:
+      options?.cellRenderer ?? ((p: { value?: string | null }) => <TickerDetailLink ticker={p.value} />),
+  };
+}
+
+/** 종목명 컬럼 — `tickerColumn` 과 세트. 렌더러는 항상 `renderStockNameCell` 기반이라
+ *  배지(🆕·💣·🚫)·2줄 말줄임 같은 공통 표기는 `lib/name-highlight.tsx` 한 곳만 고치면 된다.
+ *
+ *  폭은 전 화면 공통 고정(STOCK_NAME_COLUMN_WIDTH) — 화면별 flex/폭 지정을 두지 않는다.
+ *  `nameOptions` 로 행별 배지(신규상장 등)를, `cellRenderer` 로 화면 고유 칸(추가 행
+ *  안내문·현금 행 등)을 넘긴다. */
+export function stockNameColumn<T>(options?: {
+  field?: string;
+  sortable?: boolean;
+  cellClass?: ColDef<T>["cellClass"];
+  cellStyle?: ColDef<T>["cellStyle"];
+  valueGetter?: ColDef<T>["valueGetter"];
+  tooltipValueGetter?: ColDef<T>["tooltipValueGetter"];
+  /** 행별 배지·강조 — `renderStockNameCell` 에 그대로 전달된다. */
+  nameOptions?: (row: T | undefined) => (StockNameOptions & { badge?: string }) | undefined;
+  cellRenderer?: (p: { value?: string | null; data?: T }) => ReactNode;
+}): ColDef<T> {
+  return {
+    colId: STOCK_NAME_COL_ID,
+    field: (options?.field ?? "name") as ColDefField<T>,
+    headerName: "종목명",
+    width: STOCK_NAME_COLUMN_WIDTH,
+    pinned: "left",
+    sortable: options?.sortable,
+    cellClass: options?.cellClass,
+    cellStyle: options?.cellStyle,
+    valueGetter: options?.valueGetter,
+    tooltipValueGetter: options?.tooltipValueGetter,
+    cellRenderer:
+      options?.cellRenderer ??
+      ((p: { value?: string | null; data?: T }) => renderStockNameCell(p.value, options?.nameOptions?.(p.data))),
+  };
+}
+
+/** 업종 컬럼은 14px 한글 10자와 셀 좌우 여백이 한 줄에 들어가는 폭을 쓴다. */
+export const INDUSTRY_COLUMN_WIDTH = 135;
+export const INDUSTRY_COLUMN_MIN_WIDTH = 114;
+
+const SECTOR_COLUMN_WIDTH = 124;
+const SECTOR_COLUMN_MIN_WIDTH = 104;
 
 /** 업종 셀 — 종목풀 화면의 종목명과 같이 2줄까지 보이고 넘치면 말줄임(전체 값은 툴팁). */
 export function renderIndustryCell(value: string | null | undefined) {
@@ -49,11 +176,106 @@ export function renderIndustryCell(value: string | null | undefined) {
   );
 }
 
-/** 고점 대비(%) 셀 — 정확히 0 이면 ⭐신고점(빨강 볼드), 그 외 퍼센트 표기. */
-export function renderHighDrawdownCell(value: number | null | undefined, digits = 1) {
+/** 업종 컬럼 — 순위·전략·마켓 화면 공용.
+ *
+ *  폭·셀 표기만 공용이고 정의는 화면마다 복사돼 있어서, 툴팁이 제각각이거나 아예 없고
+ *  빈 컬럼을 숨기는 기준도 갈라져 있었다. 여기 하나로 모은다.
+ *
+ *  `field` 는 화면의 데이터 키(순위 화면만 한글 `"업종"`), `hide` 는 업종이 아예 없는
+ *  풀(ETF 모음 등)에서 빈 컬럼을 숨길 때 쓴다. */
+export function industryColumn<T>(options?: {
+  field?: string;
+  hide?: boolean;
+  cellClass?: string;
+}): ColDef<T> {
+  return {
+    colId: "industry",
+    field: (options?.field ?? "industry") as ColDefField<T>,
+    headerName: "업종",
+    hide: options?.hide,
+    width: INDUSTRY_COLUMN_WIDTH,
+    minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
+    headerTooltip: "한국은 네이버 분류, 미국·호주는 지수 구성종목의 yfinance 분류",
+    cellClass: options?.cellClass,
+    cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
+  };
+}
+
+/** 미국 개별주 섹터 컬럼 — 업종과 같은 폭·말줄임 표시를 쓴다. */
+export function sectorColumn<T>(options?: {
+  field?: string;
+  cellClass?: string;
+  width?: number;
+  minWidth?: number;
+}): ColDef<T> {
+  return {
+    colId: "sector",
+    field: (options?.field ?? "sector") as ColDefField<T>,
+    headerName: "섹터",
+    width: options?.width ?? SECTOR_COLUMN_WIDTH,
+    minWidth: options?.minWidth ?? SECTOR_COLUMN_MIN_WIDTH,
+    cellClass: options?.cellClass,
+    cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
+  };
+}
+
+/** 고점 대비(%) 셀 — 정확히 0 이면 ⭐신고점(빨강 볼드), 그 외 소수 2자리 퍼센트. */
+function renderHighDrawdownCell(value: number | null | undefined) {
   if (value === 0) return <span style={{ color: "#d93025", fontWeight: 700 }}>⭐신고점</span>;
   if (value == null || Number.isNaN(value)) return <span>-</span>;
-  return <span>{`${value.toFixed(digits)}%`}</span>;
+  return <span>{`${value.toFixed(2)}%`}</span>;
+}
+
+/** 이탈 이평선 컬럼 폭 — 헤더가 가장 긴 `MA200 이탈` 이 안 잘리는 값이다.
+ *  96px 이었을 때 세 자리 이평선(MA120·MA200)에서 `MA120 ...` 으로 말줄임됐다. */
+export const MA_EXIT_COLUMN_WIDTH = 112;
+
+/** 이탈 이평선까지 남은 이격 컬럼 — 순위·신고가·모멘텀 공용.
+ *
+ *  색은 단기·장기 이격 컬럼과 같은 부호 관례(굵기 없음)를 따른다:
+ *  · 파랑(부정) = 이탈(음수), `entry` 를 넘긴 화면에서는 진입 문턱 안(값 < 배수×변동성)까지.
+ *  · 빨강 = 그 외(여유 있음). 문턱 판정은 회색 행과 같은 기준(`entry_gap_ok`)이다. */
+export function maExitGapColumn<T>(options: {
+  field: ColDefField<T>;
+  maDays: number | null | undefined;
+  /** 이평 종류(SMA/EMA) — 종목풀별 설정이라 화면마다 그 풀 값을 넘긴다. 없으면 "MA" 로 쓴다. */
+  maType?: string | null;
+  getMaValue?: (row: T | undefined) => number | null | undefined;
+  formatMaValue?: (value: number, row: T | undefined) => string;
+  /** 진입 문턱 — 모멘텀 계열 화면만 넘긴다. mult 가 null(없음)이면 음수만 파랑. */
+  entry?: { mult: number | null; getVolatility: (row: T | undefined) => number | null | undefined };
+}): ColDef<T> {
+  // 종류를 아는 화면은 "SMA50", 모르면 예전처럼 "MA50" — 같은 선을 두 이름으로 부르지 않는다.
+  const label = `${String(options.maType ?? "").trim().toUpperCase() || "MA"}${options.maDays ?? ""}`;
+  const colorNote = options.entry
+    ? "파랑 = 이탈(음수), 검정 = 진입 문턱(배수×변동성) 미달, 빨강 = 문턱까지 통과."
+    : "파랑 = 이탈(음수), 빨강 = 0선 위.";
+  return {
+    field: options.field,
+    headerName: `${label} 이탈`,
+    width: MA_EXIT_COLUMN_WIDTH,
+    type: "numericColumn",
+    headerTooltip:
+      `현재가가 이탈 이평선(${label})보다 몇 % 위인지. 0에 가까울수록 매도가 가깝다. ${colorNote} ` +
+      "장중에는 실시간 가격을 마지막 봉으로 쓴 잠정 값이고, 종가가 확정되면 백테스트와 같은 값이 된다.",
+    tooltipValueGetter: (p) => {
+      const value = options.getMaValue?.(p.data);
+      if (value == null) return "";
+      return `이탈선 ${options.formatMaValue?.(value, p.data) ?? String(value)}`;
+    },
+    valueFormatter: (p) => (p.value == null ? "-" : `${Number(p.value).toFixed(1)}%`),
+    cellStyle: (p): { color: string } | null => {
+      const value = p.value as number | null;
+      if (value == null) return null;
+      // 파랑 = 이탈(음수) · 검정(기본색) = 0선 위지만 문턱 미달 · 빨강 = 문턱까지 통과.
+      if (value < 0) return { color: "var(--down-color, #2f6fd0)" };
+      const mult = options.entry?.mult ?? null;
+      const volatility = options.entry?.getVolatility(p.data);
+      const floor = mult != null && volatility != null ? mult * volatility : 0;
+      if (value < floor) return null;
+      return { color: "var(--up-color, #d64545)" };
+    },
+  };
 }
 
 /** 거래대금 배수(20일 평균 대비) 셀 색 — 클수록 진해진다. 종목풀 순위·신고가 공용.
@@ -72,6 +294,14 @@ export function renderHighDrawdownCell(value: number | null | undefined, digits 
  *  **시간 환산 배수**(누적 ÷ 장 경과율 — 지금 페이스대로면 하루 기준 몇 배인지)다.
  *  둘이 다를 때 `3.0배 (19.5)` 처럼 나란히 보여준다(장중이 아니면 괄호가 안 붙는다).
  */
+/** 거래대금(배수) 컬럼 폭 — 이 컬럼을 쓰는 모든 화면이 같은 값을 쓴다.
+ *
+ *  값은 대개 `3.9배`(실측 99%가 3.9 이하, 최대 14.7)라 짧고, 한국 장중에만 환산 배수가
+ *  괄호로 붙어 `3.9배 (19.5)` 로 가장 길어진다. 13px 기준 약 90px 이고, 우측 정렬 헤더
+ *  `거래대금`(4자 + 정렬 화살표)도 비슷해서 둘 다 100px 안에 들어간다. */
+export const TRADE_VALUE_COLUMN_WIDTH = 100;
+export const TRADE_VALUE_COLUMN_MIN_WIDTH = 88;
+
 export function formatTradeValueMult(
   value: number | null | undefined,
   live?: number | null,
@@ -88,12 +318,16 @@ export function tradeValueMultStyle(
   value: number | null | undefined,
   bold?: boolean,
 ): { color: string; fontWeight?: number } {
+  // 단계는 **불투명 색**으로 만든다. 예전에는 알파(0.5~0.85)로 강도를 표현했는데,
+  // 편집 칸처럼 배경색이 깔린 셀에서 옅은 단계가 배경에 묻혀 회색(--text-muted, #5b6675)
+  // 보다 흐려졌다 — 신호가 있는 1.9배가 신호가 없는 0.6배보다 약해 보였다.
+  // 아래로 갈수록 채도만 낮아지고 명도는 회색 이상을 유지한다.
   const weight = bold ? { fontWeight: 700 } : {};
   if (value == null || Number.isNaN(value)) return { color: "var(--text-muted)", ...weight };
-  if (value >= 5) return { color: "rgb(214, 40, 40)", fontWeight: 700 };
-  if (value >= 3) return { color: "rgba(214, 40, 40, 0.85)", fontWeight: 700 };
-  if (value >= 2) return { color: "rgba(214, 40, 40, 0.7)", ...weight };
-  if (value >= 1.5) return { color: "rgba(214, 40, 40, 0.5)", ...weight };
+  if (value >= 5) return { color: "#a11010", fontWeight: 700 };
+  if (value >= 3) return { color: "#c62828", fontWeight: 700 };
+  if (value >= 2) return { color: "#d13a3a", ...weight };
+  if (value >= 1.5) return { color: "#b8514a", ...weight };
   return { color: "var(--text-muted)", ...weight };
 }
 
@@ -105,6 +339,7 @@ export function tradeValueMultColumn<T>(options?: {
   liveField?: string;
   qualifies?: (row: T | undefined) => boolean | undefined;
   hide?: boolean;
+  headerName?: string;
   headerTooltip?: string;
 }): ColDef<T> {
   const field = options?.field ?? "value_mult";
@@ -112,9 +347,9 @@ export function tradeValueMultColumn<T>(options?: {
   return {
     colId: field,
     valueGetter: (p) => ((p.data as Record<string, unknown> | undefined)?.[field] as number | null | undefined) ?? null,
-    headerName: "거래대금",
-    width: 124,
-    minWidth: 112,
+    headerName: options?.headerName ?? "거래대금",
+    width: TRADE_VALUE_COLUMN_WIDTH,
+    minWidth: TRADE_VALUE_COLUMN_MIN_WIDTH,
     hide: options?.hide,
     type: "numericColumn",
     headerTooltip:
@@ -128,6 +363,26 @@ export function tradeValueMultColumn<T>(options?: {
       ),
     cellStyle: (p: { value?: unknown; data?: T }) =>
       tradeValueMultStyle(p.value as number | null, options?.qualifies?.(p.data)),
+  };
+}
+
+/** 변동성 컬럼 — 순위·모멘텀·신고가 공용. 최근 20일 일간 수익률 표준편차(%).
+ *  모멘텀 진입 문턱(배수 × 이 값)의 기준값과 **같은 계산**이다.
+ *  표준 배치는 「현재가 → 변동성 → 거래대금」 — 현재가 바로 뒤에 둔다. */
+export function volatilityColumn<T>(options?: { field?: string }): ColDef<T> {
+  const field = options?.field ?? "volatility_pct";
+  return {
+    colId: field,
+    valueGetter: (p) => ((p.data as Record<string, unknown> | undefined)?.[field] as number | null | undefined) ?? null,
+    headerName: "변동성",
+    width: 84,
+    minWidth: 72,
+    type: "numericColumn",
+    headerTooltip:
+      "최근 20일 일간 수익률 표준편차(%) — 하루에 보통 이만큼 출렁인다는 뜻. " +
+      "모멘텀 진입 문턱(배수 × 이 값)의 기준값과 같은 계산입니다.",
+    valueFormatter: (p) => (p.value == null ? "-" : `${Number(p.value).toFixed(2)}%`),
+    cellStyle: { color: "var(--text-muted)" },
   };
 }
 
@@ -151,6 +406,52 @@ export function adrColumn<T>(options: {
   };
 }
 
+/** 전거래일(%) — 일간(%)이 나타내는 구간 바로 앞 거래일의 확정 등락률. 순위·모멘텀 공용(현재가 오른쪽).
+ *  값은 백엔드 공용 함수(`utils.effective_prices.previous_day_change_pct`)가 같은 규칙으로 낸다. */
+export function prevDayChangeColumn<T>(field: ColDefField<T>): ColDef<T> {
+  return {
+    field,
+    headerName: "전거래일",
+    headerTooltip: "일간(%)이 나타내는 구간 바로 앞 거래일의 확정 등락률.",
+    width: 96,
+    minWidth: 96,
+    type: "rightAligned",
+    cellRenderer: (params: { value?: number | null }) => {
+      const value = params.value;
+      if (value == null || Number.isNaN(value)) return <span>-</span>;
+      return <span className={value === 0 ? "" : value > 0 ? "metricPositive" : "metricNegative"}>{value.toFixed(2)}%</span>;
+    },
+  };
+}
+
+/** 종목풀 순위 — 순위·모멘텀·자산 관리 공용. 폭·굵기·빈 값 표기가 한 곳에서 정해진다.
+ *  `badge` 는 순위 화면처럼 번호 앞에 표시를 붙일 때만 준다(랭킹 제외 📌). */
+export function rankColumn<T>(
+  getRank: (row: T | undefined) => number | null | undefined,
+  options: { badge?: (row: T | undefined) => "excluded" | null } = {},
+): ColDef<T> {
+  return {
+    colId: "rank",
+    valueGetter: (params) => getRank(params.data) ?? null,
+    headerName: "순위",
+    pinned: "left",
+    width: 52,
+    minWidth: 52,
+    headerTooltip: "종목풀의 장기 이격률 순위",
+    cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+    cellRenderer: (params: { data?: T; value?: number | null }) => {
+      const badge = options.badge?.(params.data) ?? null;
+      const title = badge === "excluded" ? "랭킹 제외 종목" : undefined;
+      return (
+        <span style={{ fontWeight: 700, whiteSpace: "nowrap" }} title={title}>
+          {badge === "excluded" ? "📌 " : ""}
+          {params.value == null ? "-" : String(params.value)}
+        </span>
+      );
+    },
+  };
+}
+
 /** 시총 순위 컬럼 — 순위·모멘텀·신고가 화면 공용. 배치 B 가 메타 캐시에 적어 둔 국가별 시장 전체
  *  시총 순위(한국=KOSPI+KOSDAQ, 미국=S&P500∪NDX100, 호주=ASX200)다. 개별주 풀에서만 보이고
  *  (`hide`), 값이 없으면 "-". 티커 컬럼 바로 앞에 둔다. */
@@ -158,6 +459,8 @@ export function marketCapRankColumn<T>(field: ColDefField<T>, hide: boolean): Co
   return {
     headerName: "시총",
     field,
+    // 티커 앞에 서는 컬럼 — 티커·종목명과 함께 왼쪽 고정(순서 유지).
+    pinned: "left",
     width: 72,
     type: "numericColumn",
     hide,
@@ -184,15 +487,16 @@ export function stockMemoColumn<T>(options: {
   editable?: (row: T | undefined) => boolean;
   cellClass?: (row: T | undefined) => string | undefined;
   onSave?: (row: T, memo: string) => void;
+  /** 특정 행에서 메모 칸 대신 다른 내용을 그릴 때(예: 순위 화면의 추가 행 버튼). null 이면 기본 표시. */
+  renderRow?: (row: T) => ReactNode | null;
 }): ColDef<T> {
-  const { field, width = 150, editable, cellClass, onSave } = options;
+  const { field, width = 150, editable, cellClass, onSave, renderRow } = options;
   const canEdit = (row: T | undefined) => (editable ? editable(row) : true);
   const column: ColDef<T> = {
     field,
     headerName: "메모",
     headerTooltip: "종목에 붙는 메모 — 자산 관리·순위·전략 화면이 같은 값을 본다",
     width,
-    sortable: false,
     // 빈 문자열이 많아 자동 추론이 흔들린다 — 문자열 에디터를 명시한다.
     cellDataType: "text",
     editable: (params) => canEdit(params.data),
@@ -204,6 +508,8 @@ export function stockMemoColumn<T>(options: {
     },
     valueParser: (params) => String(params.newValue ?? "").trim(),
     cellRenderer: (params: { data?: T; value?: string | null }) => {
+      const custom = params.data ? renderRow?.(params.data) : null;
+      if (custom) return custom;
       const text = String(params.value ?? "").trim();
       if (text) return <span>{text}</span>;
       if (!canEdit(params.data)) return <span>-</span>;
@@ -224,4 +530,190 @@ export function stockMemoColumn<T>(options: {
       return true;
     },
   };
+}
+
+/** 고점 대비(%) 컬럼 — **최근 12개월** 최고가 대비 현재가. 0 이면 ⭐신고점.
+ *  순위·모멘텀·신고가·포트폴리오·배당주 화면 공용이다. 화면마다 따로 만들면 소수 자리·
+ *  ⭐ 규칙이 갈린다(순위 2자리·전략 1자리로 같은 종목이 다르게 보였다).
+ *  `isTouched` 를 주면 장중 신고점 터치(오늘 고가가 이전 최고 종가를 넘고 현재가도 그 이상)도
+ *  ⭐신고점으로 표시한다 — 그 판정값을 주는 화면(순위)만 넘긴다. */
+export function highDrawdownColumn<T>(
+  field: ColDefField<T>,
+  options: { isTouched?: (row: T | undefined) => boolean } = {},
+): ColDef<T> {
+  return {
+    field,
+    headerName: "고점",
+    headerTooltip: "최근 12개월 최고가 대비 현재가(%) — 0 이면 신고점",
+    // 티커 앞에 서는 컬럼 — 티커·종목명과 함께 왼쪽 고정(순서 유지).
+    pinned: "left",
+    width: 72,
+    minWidth: 72,
+    type: "rightAligned",
+    cellRenderer: (p: { data?: T; value?: number | null }) =>
+      renderHighDrawdownCell(options.isTouched?.(p.data) ? 0 : p.value),
+  };
+}
+
+/**
+ * 슬롯 전략의 **상태** 컬럼 — 신고가·모멘텀이 같은 폭·같은 문구를 쓴다.
+ *
+ * 두 표(보유·후보)가 나란히 있어 폭이 다르면 어긋나 보인다. 장중에는 실시간 가격을
+ * 마지막 봉으로 쓴 같은 판정이다(strategy_logic.md 「장중 잠정 실행」) — 종가 확정 전까지 바뀔 수 있고,
+ * 체결은 항상 다음 거래일 시가라 별도 꼬리표 없이 판정 그대로 보여준다.
+ */
+export const STATUS_COLUMN_WIDTH = 156;
+export const STATUS_COLUMN_MIN_WIDTH = 140;
+
+export type SlotPlan = "hold" | "sell" | "buy" | "exited" | "empty";
+
+/** 상태 한 칸의 값 — 컬럼과 합성 화면이 같은 이 함수로 그린다. */
+export type SlotStatusRow = {
+  plan: SlotPlan;
+  days: number | null;
+  is_new: boolean;
+  exit_reason: string | null;
+  entry_date?: string | null;
+  exit_date?: string | null;
+  /** 행별 체결일 — 어제 확정 판정(오늘 체결)과 오늘 잠정 판정(내일 체결)을 가른다. 없으면 공통 체결일. */
+  fill_date?: string | null;
+};
+
+/** 진입·매도 문구는 상태 컬럼과 합성 설명이 같은 체결일·확정 여부로 만든다. */
+export function formatSlotTradeStatus(
+  row: Pick<SlotStatusRow, "plan" | "fill_date">,
+  fillDay: string | null | undefined,
+  includeOpen: boolean,
+): string {
+  const day = row.fill_date ?? fillDay;
+  const date = day ? `${formatSlashDateWithWeekday(day)} ` : "";
+  const action = row.plan === "buy" ? "진입" : "매도";
+  return `${date}${includeOpen ? "시가 " : ""}${action}${row.fill_date ? "" : " 예정"}`;
+}
+
+/** 슬롯 상태 문구 — **여기 한 곳**에서만 만든다.
+ *
+ *  모멘텀·신고가는 컬럼(`slotStatusColumn`)으로, 합성은 슬리브마다 이 함수로 그린다.
+ *  화면마다 문구를 따로 만들면 같은 상태가 다르게 보인다(실제로 합성만 「3일째」로 달랐다). */
+export function renderSlotStatus(
+  row: SlotStatusRow,
+  options: { fillDay?: string | null },
+): React.ReactNode {
+  if (row.plan === "empty") return null;
+  // 언제 벌어지는(벌어진) 일인지를 상태와 같이 읽어야 주문을 낼 수 있다.
+  // 행에 체결일이 있으면 그것이 우선 — 어제 확정 판정은 오늘, 오늘 잠정 판정은 내일 체결이다.
+  // 확정 판정(fill_date 있음)은 체결 시각(오늘 시가)이 이미 지났으므로 '예정'을 떼고 쓴다.
+  const reason = row.exit_reason ? ` (${row.exit_reason})` : "";
+
+  if (row.plan === "buy") {
+    const label = formatSlotTradeStatus(row, options.fillDay, false);
+    return (
+      <strong style={{ color: "#d62828", whiteSpace: "nowrap" }} title={label}>
+        {label}
+      </strong>
+    );
+  }
+  if (row.plan === "sell") {
+    const label = formatSlotTradeStatus(row, options.fillDay, false);
+    return (
+      <strong style={{ color: "#1971c2", whiteSpace: "nowrap" }} title={`${label}${reason}`}>
+        {label}
+      </strong>
+    );
+  }
+  if (row.plan === "exited") {
+    // 이미 체결된 매도 — 날짜는 예정 체결일이 아니라 행의 체결일. 매도 예정과 같은 파랑으로
+    // 「매도」 묶음으로 읽히게 하고, 판이 끝난 것은 행 전체 회색이 말해 준다.
+    const day = row.exit_date ? `${formatSlashDateWithWeekday(row.exit_date)} ` : "";
+    const label = `${day}매도`;
+    return (
+      <strong style={{ color: "#1971c2", whiteSpace: "nowrap" }} title={`${label}${reason}`}>
+        {label}
+      </strong>
+    );
+  }
+  // 보유는 「편입일 보유일」로 쓴다 — 언제 담아 며칠째인지가 한 칸에서 읽힌다.
+  // 다른 상태(예정·이탈)도 앞에 날짜가 붙어 있어 표가 같은 방식으로 읽힌다.
+  const since = row.entry_date ? `${formatSlashDateWithWeekday(row.entry_date)} ` : "";
+  return <span style={{ whiteSpace: "nowrap" }}>{`${since}${row.days}일`}</span>;
+}
+
+/** 운용 현황 헤더의 체결일별 건수 문구 — 「 · 2026-09-21 매수 1 · 2026-09-22 매수 2」.
+ *
+ * 같은 '예정'이라도 체결일이 갈린다 — 어제 확정 판정분은 오늘 시가(행의 `fill_date`),
+ * 오늘 잠정 판정분은 다음 거래일(`fillDay`) 시가다. 한 날짜로 묶으면 표의 행별 날짜와
+ * 헤더 숫자가 어긋난다(모멘텀·신고가 화면이 같은 문구를 쓴다).
+ */
+export function fillDaySummary(
+  rows: { fill_date?: string | null }[],
+  label: string,
+  fillDay: string,
+): string {
+  const countByDay = new Map<string, number>();
+  for (const row of rows) {
+    const day = row.fill_date ?? fillDay;
+    countByDay.set(day, (countByDay.get(day) ?? 0) + 1);
+  }
+  return [...countByDay.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([day, count]) => ` · ${day} ${label} ${count}`)
+    .join("");
+}
+
+export function slotStatusColumn<T extends SlotStatusRow>(options: {
+  /** 매수·매도 예정이 체결되는 날 — 상태 문구 앞에 붙인다. */
+  fillDay?: string | null;
+}): ColDef<T> {
+  return {
+    headerName: "상태",
+    // 티커 앞에 서는 컬럼 — 티커·종목명과 함께 왼쪽 고정(순서 유지).
+    pinned: "left",
+    width: STATUS_COLUMN_WIDTH,
+    minWidth: STATUS_COLUMN_MIN_WIDTH,
+    cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+    valueGetter: (p) => p.data?.plan ?? "",
+    cellRenderer: (p: { data?: T }) => (p.data ? renderSlotStatus(p.data, options) : null),
+  };
+}
+
+/** 편입일·매수가·청산가·수익률 — 보유 표의 공통 꼬리 컬럼(두 전략이 같다). */
+export function slotTradeColumns<T>(options: { fillDay: string }): ColDef<T>[] {
+  const price = (value: unknown) =>
+    value == null || !Number.isFinite(Number(value))
+      ? "-"
+      : Number(value).toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+  return [
+    {
+      field: "entry_date" as ColDefField<T>,
+      headerName: "편입일",
+      width: 116,
+      // 아직 안 산 종목은 편입일이 없다 — 다음 시가에 정해진다.
+      valueFormatter: (p) => (p.value ? String(p.value) : "-"),
+    },
+    {
+      field: "entry_price" as ColDefField<T>,
+      headerName: "매수가",
+      width: 110,
+      type: "numericColumn",
+      headerTooltip: `진입 예정 종목은 ${options.fillDay} 시가에 체결되므로 아직 값이 없다.`,
+      valueFormatter: (p) => price(p.value),
+    },
+    {
+      field: "exit_price" as ColDefField<T>,
+      headerName: "청산가",
+      width: 110,
+      type: "numericColumn",
+      headerTooltip: "오늘 이탈한 종목의 체결가. 아직 들고 있는 종목은 값이 없다.",
+      valueFormatter: (p) => price(p.value),
+    },
+    {
+      field: "return_pct" as ColDefField<T>,
+      headerName: "수익률",
+      width: 108,
+      type: "numericColumn",
+      headerTooltip: "아직 청산 전이라 매도 슬리피지는 빠져 있다.",
+      valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
+      cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
+    },
+  ];
 }

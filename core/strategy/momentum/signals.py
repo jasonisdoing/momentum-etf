@@ -1,0 +1,80 @@
+"""모멘텀 신호 계산 — 백테스트·운용 현황·튜닝이 공유한다."""
+
+from __future__ import annotations
+
+import pandas as pd
+
+from core.strategy.scoring import compute_eligibility_mask, compute_trend_frame, hold_eligible, rank_score
+
+# 진입 문턱의 변동성 창(거래일) — 일간 수익률 표준편차(%). 문턱 = 배수 × 이 값.
+ENTRY_VOL_WINDOW = 20
+
+
+def daily_volatility_pct(close):
+    """최근 20일 일간 수익률 표준편차(%) — "하루에 보통 이만큼 출렁인다".
+
+    진입 문턱 판정(`entry_signal`)과 화면 변동성 컬럼(순위·모멘텀·신고가)이 **같은 이 값**을
+    쓴다 — 화면 숫자와 판정 기준이 갈리면 안 된다. Series·DataFrame 모두 받는다.
+    """
+    return close.pct_change().rolling(ENTRY_VOL_WINDOW).std() * 100
+
+
+def entry_signal(
+    close_df: pd.DataFrame, signals: dict[str, pd.DataFrame], entry_vol_mult: float | None
+) -> pd.DataFrame:
+    """진입 자격 — 보유 자격(`eligible`)에 변동성 문턱을 얹는다. **청산 판정은 불변.**
+
+    문턱 = ``entry_vol_mult`` × 그 종목의 20일 일간 변동성(%). 단기·장기 이격이 모두
+    문턱 이상이어야 진입한다 — 청산선(0선) 바로 위의 종목을 사서 하루 만에 되파는 왕복을
+    막는다. 진입·청산 기준선이 달라지는 히스테리시스라, 보유 유지는 기존 0선 그대로다.
+    None 이면 문턱 없음(진입 = 보유 자격). 변동성을 못 잰 종목(워밍업)은 진입 불가 —
+    값을 추정하지 않는다.
+    """
+    if entry_vol_mult is None:
+        return signals["eligible"]
+    volatility = daily_volatility_pct(close_df)
+    floor = float(entry_vol_mult) * volatility
+    return signals["eligible"] & (signals["long"] > floor) & (signals["short"] >= floor) & volatility.notna()
+
+
+def entry_gap_ok(long_disparity_pct, short_disparity_pct, volatility_pct, entry_vol_mult: float | None) -> bool:
+    """진입 문턱 판정(행 단위) — `entry_signal`(프레임)과 **같은 수식**. 순위 화면이 쓴다.
+
+    문턱 없음(None)이면 항상 참(진입 = 보유 자격). 변동성이나 이격을 모르면 거짓 —
+    값을 추정하지 않는다(프레임 버전의 `volatility.notna()` 가드와 같다).
+    """
+    if entry_vol_mult is None:
+        return True
+    if volatility_pct is None or long_disparity_pct is None or short_disparity_pct is None:
+        return False
+    floor = float(entry_vol_mult) * float(volatility_pct)
+    return float(long_disparity_pct) > floor and float(short_disparity_pct) >= floor
+
+
+def compute_signals(
+    panel: dict[str, pd.DataFrame], short_ma_days: int, long_ma_days: int, ma_type: str
+) -> dict[str, pd.DataFrame]:
+    """이평선 두 개로 만드는 신호 표(행 = 거래일, 열 = 종목) — 백테스트·화면이 같은 값을 본다.
+
+    ``short``/``long`` 은 이격률(%)이다. 계산은 순위 화면과 **같은 공용 함수**를 쓴다 —
+    이평선은 부분 평균(`compute_trend_frame`, min_periods=1)이고, 판정 포함 여부는
+    누적 `MIN_TRADING_DAYS` 거래일(`compute_eligibility_mask`)이다. 예전에는 이평선
+    기간을 다 채워야(`min_periods=기간`) 자격을 줬는데, 순위 화면은 신규 상장도 부분
+    평균으로 ✅를 주는데 엔진만 못 사는 불일치가 있었다(2026-09 통일).
+    """
+    close_df = panel["close"]
+    short_frame = compute_trend_frame(close_df, short_ma_days, ma_type)
+    long_frame = compute_trend_frame(close_df, long_ma_days, ma_type)
+    known = close_df.notna() & compute_eligibility_mask(close_df)
+    # 보유 자격은 순위 화면·종목풀 백테스트와 **같은 공용 규칙**(`hold_eligible`)이다.
+    eligible = known & hold_eligible(long_frame, short_frame)
+    return {
+        "short": short_frame,
+        "long": long_frame,
+        "known": known,
+        "eligible": eligible,
+        # 청산은 '자격을 잃었다고 판정할 수 있는 날'만 — 데이터가 없으면 유지한다.
+        "exit": known & ~eligible,
+        # 진입 우선순위 — 순위 화면과 같은 단일 기준(`rank_score`, 정의는 장기 이격률).
+        "priority": rank_score(long_frame, short_frame),
+    }

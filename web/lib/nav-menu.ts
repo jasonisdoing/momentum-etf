@@ -8,6 +8,8 @@ import type { ComponentType } from "react";
 import {
   IconActivity,
   IconCash,
+  IconCalendarStats,
+  IconChartDots,
   IconChartHistogram,
   IconChartInfographic,
   IconChartPie,
@@ -63,7 +65,6 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     icon: IconCash,
     items: [
       { href: "/assets", label: "자산 관리", icon: IconList },
-      { href: "/asset-helper", label: "자산 헬퍼", icon: IconListDetails },
       { href: "/asset-status", label: "자산 현황", icon: IconTrendingUp },
       { href: "/daily", label: "기간별", icon: IconReceipt2 },
       { href: "/snapshots", label: "스냅샷", icon: IconReceipt2 },
@@ -76,6 +77,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     icon: IconTrendingUp,
     items: [
       { href: "/market-trend", label: "시장지수 추세", icon: IconChartLine },
+      { href: "/market-calendar", label: "시장 캘린더", icon: IconCalendarStats },
       { href: "/compare", label: "ETF 비교", icon: IconListDetails },
       { href: "/kor-market-stock", label: "한국 개별주", icon: "🇰🇷" },
       { href: "/us-market-stock", label: "미국 개별주", icon: "🇺🇸" },
@@ -92,6 +94,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     icon: IconTrendingUp,
     items: [
       { href: "/pools-rank", label: "순위", icon: IconMedal2 },
+      { href: "/pools-risk-return", label: "위험·수익", icon: IconChartDots },
       { href: "/pools-settings", label: "설정", icon: IconSettings },
       { href: "/pools-backtest", label: "백테스트", icon: IconChartHistogram },
     ],
@@ -106,6 +109,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { href: "/strategy-momentum", label: "모멘텀 전략", icon: IconTrendingUp },
       { href: "/strategy-new-high", label: "신고가 전략", icon: IconTrendingUp },
       { href: "/strategy-portfolio", label: "포트폴리오 전략", icon: IconChartPie },
+      { href: "/strategy-trade", label: "사고팔기", icon: IconChartLine },
     ],
   },
   {
@@ -134,8 +138,8 @@ export function isNavItemActive(itemHref: string, currentPathname: string | null
 // 전체폭(사이드바 자동 숨김) 라우트 — 큰 그리드 중심 화면. 화면별로 점진 조정한다.
 export const FULL_WIDTH_ROUTES: readonly string[] = [
   "/assets",
-  "/asset-helper",
   "/pools-rank",
+  "/pools-risk-return",
   "/pools-backtest",
   "/kor-market-stock",
   "/us-market-stock",

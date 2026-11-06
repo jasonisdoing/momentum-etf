@@ -2,10 +2,10 @@
 
 시장마다 분류 체계가 다르고 수집 경로도 다르다.
 - 한국: 종목 문서(`stock_meta.industry`). 네이버 분류(한국어 원본)를 메타 배치가 채운다.
-- 호주: 종목 문서(`stock_meta.industry`). 메타 배치가 yfinance `.info` 로 채운다 —
-  미국과 **같은 분류 체계**라 계열 묶음(`group_yf_industry`)도 같이 쓴다.
-- 미국: 지수 구성종목(SP500/NDX100)의 yfinance 분류. 미국 종목 문서에는 이 필드를
-  채우지 않으므로 구성종목에서 가져와야 한다.
+- 호주: 종목 문서(`stock_meta.industry`). 메타 배치가 yfinance `.info` 로 채우고
+  `group_yf_industry`로 계열을 묶는다.
+- 미국: 종목 문서(`stock_meta.sector/industry`). 메타 배치가 종목별 yfinance 분류를
+  저장하므로 지수 구성 여부와 무관하다. 표시명은 config.py 설정을 쓴다.
 
 종목풀이 국가별로 나뉘어 있어 한 풀 안에서는 항상 한 체계다.
 순위(`/pools-rank`)·전략 SM(`/strategy-momentum`)·신고점(`/strategy-new-high`)이 같은 값을
@@ -16,17 +16,12 @@ from __future__ import annotations
 
 import warnings
 
+from config import INDUSTRY_DISPLAY_CONFIG
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
 
-# 미국 업종을 가져올 지수 구성종목. 앞선 지수의 값을 우선한다(중복 종목은 먼저 만난 값 유지).
-_US_INDEX_SOURCES = ("SP500", "NDX100")
-
-# yfinance 업종 묶음 — 분류(111개)는 한 계열을 잘게 쪼개서(`Oil & Gas E&P`·`Midstream`·
-# `Refining & Marketing` …) 업종 상한 1 을 걸어도 같은 계열 3~5 종목이 통과한다. 접미어를 떼어
-# 계열 단위로 묶는다(111 → 87). 섹터(11개)까지 올리면 반도체와 소프트웨어가 한 묶음이 되어
-# 상한이 과하게 걸리므로 그 중간을 쓴다. 미국·호주가 같은 체계라 함께 쓴다.
+# 호주의 yfinance 세부 업종을 화면에서 같은 계열로 묶어 표시한다.
 _YF_INDUSTRY_FAMILIES = (
     "Oil & Gas",
     "Real Estate",
@@ -41,12 +36,48 @@ _YF_INDUSTRY_FAMILIES = (
 
 
 def group_yf_industry(industry: str) -> str:
-    """yfinance 업종 → 계열 묶음. `Oil & Gas Midstream` → `Oil & Gas`. (미국·호주 공용)"""
+    """호주 yfinance 업종 → 계열 묶음. `Oil & Gas Midstream` → `Oil & Gas`."""
     base = str(industry or "").split(" - ")[0].strip()
     for family in _YF_INDUSTRY_FAMILIES:
         if base.startswith(family):
             return family
     return base
+
+
+def us_sector_label(sector: str) -> str:
+    """미국 Yahoo 섹터의 화면 표시명."""
+    setting = INDUSTRY_DISPLAY_CONFIG.get(sector)
+    return setting["label"] if setting is not None else sector
+
+
+def _industry_entry(sector: str, industry: str) -> tuple[str | None, str]:
+    """설정의 업종 항목 → (섹터 묶음, 업종 표시명). 묶음이 없으면 None.
+
+    설정 값은 `"표시명"` 또는 `("묶음", "표시명")` 이다(config.INDUSTRY_DISPLAY_CONFIG).
+    """
+    setting = INDUSTRY_DISPLAY_CONFIG.get(sector)
+    if setting is None:
+        return None, industry
+    entry = setting["industries"].get(industry, industry)
+    if isinstance(entry, tuple):
+        group, name = entry
+        return group, name
+    return None, entry
+
+
+def us_display_industry(sector: str, industry: str) -> str:
+    """미국 Yahoo 원본 분류를 설정에 따라 화면 표시명으로 바꾼다."""
+    setting = INDUSTRY_DISPLAY_CONFIG.get(sector)
+    if setting is not None and setting["display"] == "sector":
+        return us_sector_label(sector)
+    return _industry_entry(sector, industry)[1]
+
+
+def us_display_sector(sector: str, industry: str) -> str:
+    """섹터 칸 표시명 — 업종에 묶음이 있으면 `섹터/묶음`, 없으면 섹터 label 그대로."""
+    label = us_sector_label(sector)
+    group, _ = _industry_entry(sector, industry)
+    return f"{label}/{group}" if group else label
 
 
 def _pool_industry_map(pool: str, *, group: bool = False) -> dict[str, str]:
@@ -120,24 +151,35 @@ def industry_map_for_country(country_code: str) -> dict[str, str]:
 
 
 def us_industry_map() -> dict[str, str]:
-    """미국 티커 → 업종 계열 (지수 구성종목의 yfinance 분류를 묶은 값). 풀과 무관하게 같다.
+    """미국 티커 → 설정에 따른 섹터·업종 표시명. 풀과 무관하게 같다."""
+    industry_by, _ = us_classification_maps()
+    return industry_by
 
-    업종 상한 그룹핑과 화면 표시가 **같은 값**을 써야 "상한 1인데 왜 같은 계열이 3개냐"
-    같은 어긋남이 생기지 않는다(`group_yf_industry`).
-    """
-    from utils.index_constituents_loader import load_index_constituents
 
-    result: dict[str, str] = {}
-    for index_name in _US_INDEX_SOURCES:
-        try:
-            constituents = load_index_constituents(index_name)
-        except (FileNotFoundError, LookupError) as error:
-            warnings.warn(f"{index_name} 구성종목이 없어 업종을 채우지 못했습니다: {error}", stacklevel=2)
-            logger.warning("%s 구성종목이 없어 업종을 채우지 못했습니다: %s", index_name, error)
+def us_classification_maps() -> tuple[dict[str, str], dict[str, str]]:
+    """미국 종목풀의 개별주 메타에서 업종·섹터 표시명을 한 번에 읽는다."""
+    from utils.settings_loader import _load_pool_configs
+    from utils.stock_list_io import _load_ticker_type_stocks_raw
+
+    industry_by: dict[str, str] = {}
+    sector_by: dict[str, str] = {}
+    for config in _load_pool_configs():
+        if (
+            str(config.get("country_code") or "").strip().lower() != "us"
+            or str(config.get("pool_kind") or "").strip().lower() != "stock"
+        ):
             continue
-        for item in constituents:
+        pool = str(config.get("ticker_type") or "").strip().lower()
+        for item in _load_ticker_type_stocks_raw(pool):
+            if item.get("is_etf"):
+                continue
             ticker = str(item.get("ticker") or "").strip().upper()
+            sector = str(item.get("sector") or "").strip()
             industry = str(item.get("industry") or "").strip()
-            if ticker and industry and ticker not in result:
-                result[ticker] = group_yf_industry(industry)
-    return result
+            if not ticker:
+                continue
+            if sector:
+                sector_by.setdefault(ticker, us_display_sector(sector, industry))
+            if industry:
+                industry_by.setdefault(ticker, us_display_industry(sector, industry))
+    return industry_by, sector_by

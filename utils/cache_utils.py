@@ -13,6 +13,7 @@ from bson.binary import Binary
 from pymongo.errors import PyMongoError
 
 from config import CACHE_TTL_LIVE
+from utils.cache_owner_lock import cache_owner_lock
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.ttl_cache import TtlCache
@@ -154,29 +155,40 @@ def _resolve_collection_name(account_id: str) -> str:
     return f"cache_{token}_stocks"
 
 
-def _get_collection(account_id: str):
+def _get_collection(account_id: str, *, ensure_index: bool = False):
     db = get_db_connection()
     if db is None:
         return None
     collection_name = _resolve_collection_name(account_id)
     collection = db[collection_name]
-    # 보조 인덱스 생성 (존재 시 무시)
-    try:
+    # 조회 중에는 컬렉션을 만들지 않는다. 인덱스는 실제 저장 시에만 준비한다.
+    if ensure_index:
         collection.create_index("ticker", unique=True, name="ticker_unique", background=True)
-    except Exception:
-        pass
     return collection
 
 
-def _get_refresh_status_collection():
+def _require_cache_owner(account_id: str) -> None:
+    """참조 캐시가 아닌 가격 캐시는 살아있는 종목풀·계좌에만 저장한다."""
+    token = str(account_id).strip().lower().split("_tmp_", 1)[0]
+    if token in _REFERENCE_COLLECTIONS:
+        return
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("가격 캐시 소유자 확인을 위한 DB 연결에 실패했습니다.")
+    if db["pool_settings"].find_one({"_id": token}, {"_id": 1}):
+        return
+    if db["account_settings"].find_one({"_id": token}, {"_id": 1}):
+        return
+    raise RuntimeError(f"가격 캐시 소유자가 존재하지 않습니다: {token}")
+
+
+def _get_refresh_status_collection(*, ensure_index: bool = False):
     db = get_db_connection()
     if db is None:
         return None
     collection = db[_REFRESH_STATUS_COLLECTION]
-    try:
+    if ensure_index:
         collection.create_index("target_id", unique=True, name="target_id_unique", background=True)
-    except Exception:
-        pass
     return collection
 
 
@@ -399,10 +411,9 @@ def _load_cached_frames_bulk_uncached(account_id: str, tickers: Iterable[str]) -
         return {}
 
     frames: dict[str, pd.DataFrame] = {}
-    try:
-        cursor = collection.find({"ticker": {"$in": list(set(normalized))}})
-    except Exception:
-        return {}
+    # DB 조회 실패는 그대로 예외로 올린다 — 빈 결과로 삼키면 "데이터 없음"과 구분이 안 되고,
+    # 그 빈 결과가 프레임 캐시에 저장돼 이격 0.0% 같은 그럴듯한 오답이 화면에 남는다.
+    cursor = collection.find({"ticker": {"$in": list(set(normalized))}})
 
     for doc in cursor:
         ticker = (doc.get("ticker") or "").strip().upper()
@@ -433,12 +444,11 @@ def load_cached_close_series_bulk(account_id: str, tickers: Iterable[str]) -> di
     series_map: dict[str, pd.Series] = {}
     collection_name = collection.name
 
-    try:
-        metadata_cursor = collection.find(
-            {"ticker": {"$in": list(set(normalized))}}, {"_id": 0, "ticker": 1, "updated_at": 1}
-        )
-    except Exception:
-        return {}
+    # DB 조회 실패는 그대로 예외로 올린다 — 빈/부분 결과로 삼키면 호출부가 "종가 없음"으로
+    # 오인해 실시간 한 점짜리 시리즈(이격 0.0%)를 만든다. silent default 금지.
+    metadata_cursor = collection.find(
+        {"ticker": {"$in": list(set(normalized))}}, {"_id": 0, "ticker": 1, "updated_at": 1}
+    )
 
     pending_tickers: list[str] = []
     for doc in metadata_cursor:
@@ -456,13 +466,10 @@ def load_cached_close_series_bulk(account_id: str, tickers: Iterable[str]) -> di
     if not pending_tickers:
         return series_map
 
-    try:
-        cursor = collection.find(
-            {"ticker": {"$in": pending_tickers}},
-            {"_id": 0, "ticker": 1, "updated_at": 1, "close_data": 1, "close_column": 1},
-        )
-    except Exception:
-        return series_map
+    cursor = collection.find(
+        {"ticker": {"$in": pending_tickers}},
+        {"_id": 0, "ticker": 1, "updated_at": 1, "close_data": 1, "close_column": 1},
+    )
 
     fallback_tickers: list[str] = []
     for doc in cursor:
@@ -480,13 +487,10 @@ def load_cached_close_series_bulk(account_id: str, tickers: Iterable[str]) -> di
     if not fallback_tickers:
         return series_map
 
-    try:
-        fallback_cursor = collection.find(
-            {"ticker": {"$in": fallback_tickers}},
-            {"_id": 0, "ticker": 1, "updated_at": 1, "data": 1, "columns": 1},
-        )
-    except Exception:
-        return series_map
+    fallback_cursor = collection.find(
+        {"ticker": {"$in": fallback_tickers}},
+        {"_id": 0, "ticker": 1, "updated_at": 1, "data": 1, "columns": 1},
+    )
 
     for doc in fallback_cursor:
         ticker = (doc.get("ticker") or "").strip().upper()
@@ -527,16 +531,14 @@ def load_cached_close_series_bulk_before_or_at(
     series_map: dict[str, pd.Series] = {}
     collection_name = collection.name
 
-    try:
-        metadata_cursor = collection.find(
-            {
-                "ticker": {"$in": list(set(normalized))},
-                "updated_at": {"$lte": completed_at},
-            },
-            {"_id": 0, "ticker": 1, "updated_at": 1},
-        )
-    except Exception:
-        return {}
+    # DB 조회 실패는 그대로 예외로 올린다 — 부분 결과로 삼키면 결손이 데이터 없음으로 보인다.
+    metadata_cursor = collection.find(
+        {
+            "ticker": {"$in": list(set(normalized))},
+            "updated_at": {"$lte": completed_at},
+        },
+        {"_id": 0, "ticker": 1, "updated_at": 1},
+    )
 
     pending_tickers: list[str] = []
     for doc in metadata_cursor:
@@ -554,16 +556,13 @@ def load_cached_close_series_bulk_before_or_at(
     if not pending_tickers:
         return series_map
 
-    try:
-        cursor = collection.find(
-            {
-                "ticker": {"$in": pending_tickers},
-                "updated_at": {"$lte": completed_at},
-            },
-            {"_id": 0, "ticker": 1, "updated_at": 1, "close_data": 1, "close_column": 1},
-        )
-    except Exception:
-        return series_map
+    cursor = collection.find(
+        {
+            "ticker": {"$in": pending_tickers},
+            "updated_at": {"$lte": completed_at},
+        },
+        {"_id": 0, "ticker": 1, "updated_at": 1, "close_data": 1, "close_column": 1},
+    )
 
     fallback_tickers: list[str] = []
     for doc in cursor:
@@ -581,16 +580,13 @@ def load_cached_close_series_bulk_before_or_at(
     if not fallback_tickers:
         return series_map
 
-    try:
-        fallback_cursor = collection.find(
-            {
-                "ticker": {"$in": fallback_tickers},
-                "updated_at": {"$lte": completed_at},
-            },
-            {"_id": 0, "ticker": 1, "updated_at": 1, "data": 1, "columns": 1},
-        )
-    except Exception:
-        return series_map
+    fallback_cursor = collection.find(
+        {
+            "ticker": {"$in": fallback_tickers},
+            "updated_at": {"$lte": completed_at},
+        },
+        {"_id": 0, "ticker": 1, "updated_at": 1, "data": 1, "columns": 1},
+    )
 
     for doc in fallback_cursor:
         ticker = (doc.get("ticker") or "").strip().upper()
@@ -836,7 +832,17 @@ def set_cache_refresh_completed_at(target_id: str, completed_at: datetime) -> No
     if not target_norm:
         raise ValueError("target_id가 필요합니다.")
 
-    collection = _get_refresh_status_collection()
+    with cache_owner_lock(target_norm):
+        db = get_db_connection()
+        if db is None:
+            raise RuntimeError("캐시 완료 시각의 소유자 확인을 위한 DB 연결에 실패했습니다.")
+        if db["pool_settings"].find_one({"_id": target_norm}, {"_id": 1}) is None:
+            raise RuntimeError(f"삭제됐거나 존재하지 않는 종목풀의 캐시 완료 시각을 저장할 수 없습니다: {target_norm}")
+        _set_cache_refresh_completed_at_unlocked(target_norm, completed_at)
+
+
+def _set_cache_refresh_completed_at_unlocked(target_norm: str, completed_at: datetime) -> None:
+    collection = _get_refresh_status_collection(ensure_index=True)
     if collection is None:
         raise RuntimeError("캐시 완료 시각 컬렉션을 열 수 없습니다.")
 
@@ -910,7 +916,10 @@ def _alert_price_anomalies(cache_owner: str, ticker: str, df: pd.DataFrame) -> N
         recent = close.iloc[-_ANOMALY_ALERT_WINDOW_DAYS:]
         # 부호를 살려 둔다 — 하락 사고를 (+60%) 로 보여주면 오독한다.
         change = recent.pct_change() * 100
-        jumps = change[change.abs() > _ANOMALY_ALERT_PCT]
+        # 한도 **초과**만 걸러낸다. 경계값(정확히 ±60%)은 이론상 최대라 정상인데, 부동소수점
+        # 때문에 초과로 잡혔다 — 200,000 → 320,000 이 `60.00000000000001` 이 되어 2배
+        # 레버리지 ETF 의 정상 상승에 알림이 갔다(2026-07-31 TIGER 200IT레버리지).
+        jumps = change[change.abs().round(6) > _ANOMALY_ALERT_PCT]
         if jumps.empty:
             return
 
@@ -942,7 +951,7 @@ def _alert_price_anomalies(cache_owner: str, ticker: str, df: pd.DataFrame) -> N
         from utils.notification import send_slack_message_v2
 
         name = _lookup_ticker_name(cache_owner, key["ticker"])
-        title = f"{key['cache_owner'].upper()}/{key['ticker']}" + (f" {name}" if name else "")
+        title = f"{key['cache_owner'].upper()}/*{key['ticker']}*" + (f" {name}" if name else "")
         send_slack_message_v2(
             f":rotating_light: 가격 캐시 이상치 감지 — {title}\n"
             + "\n".join(lines)
@@ -957,10 +966,16 @@ def _alert_price_anomalies(cache_owner: str, ticker: str, df: pd.DataFrame) -> N
 
 def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
     """캐시 DataFrame을 저장합니다. CACHE_START_DATE 이전 데이터는 제외합니다."""
+    with cache_owner_lock(account_id):
+        _require_cache_owner(account_id)
+        _save_cached_frame_unlocked(account_id, ticker, df)
+
+
+def _save_cached_frame_unlocked(account_id: str, ticker: str, df: pd.DataFrame) -> None:
     if df is None or df.empty:
         raise ValueError("저장할 캐시 데이터가 비어 있습니다.")
 
-    collection = _get_collection(account_id)
+    collection = _get_collection(account_id, ensure_index=True)
     if collection is None:
         raise RuntimeError(f"캐시 컬렉션을 열 수 없습니다: {account_id}")
 
@@ -1043,19 +1058,21 @@ def move_cached_frame(from_owner: str, to_owner: str, ticker: str) -> bool:
     종목풀 이동에 쓴다 — 원천에서 다시 받으면 종목당 1~2초가 드는데, 같은 시세를 옮기는
     것뿐이라 받을 이유가 없다. 대상에 이미 있으면 덮어쓴다.
     """
-    db = get_db_connection()
-    if db is None:
-        return False
-    ticker_norm = str(ticker or "").strip().upper()
-    source = db[_resolve_collection_name(from_owner)]
-    doc = source.find_one({"ticker": ticker_norm})
-    if not doc:
-        return False
-    doc.pop("_id", None)
-    db[_resolve_collection_name(to_owner)].replace_one({"ticker": ticker_norm}, doc, upsert=True)
-    source.delete_one({"ticker": ticker_norm})
-    invalidate_frames_cache()
-    return True
+    with cache_owner_lock(to_owner):
+        _require_cache_owner(to_owner)
+        db = get_db_connection()
+        if db is None:
+            raise RuntimeError("가격 캐시 이동을 위한 DB 연결에 실패했습니다.")
+        ticker_norm = str(ticker or "").strip().upper()
+        source = db[_resolve_collection_name(from_owner)]
+        doc = source.find_one({"ticker": ticker_norm})
+        if not doc:
+            return False
+        doc.pop("_id", None)
+        db[_resolve_collection_name(to_owner)].replace_one({"ticker": ticker_norm}, doc, upsert=True)
+        source.delete_one({"ticker": ticker_norm})
+        invalidate_frames_cache()
+        return True
 
 
 def delete_cached_frame(account_id: str, ticker: str) -> None:
@@ -1170,7 +1187,7 @@ def swap_cache_collection(account_id: str, temp_token: str) -> None:
             }
         )
         # rename 후 새 컬렉션 핸들을 초기화하여 (재)인덱스 보장
-        _get_collection(account_id)
+        _get_collection(account_id, ensure_index=True)
     except PyMongoError as exc:
         logger.error("캐시 컬렉션 교체 실패 (%s <- %s): %s", main_collection_name, temp_collection_name, exc)
         raise

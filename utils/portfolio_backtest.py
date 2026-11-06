@@ -1,7 +1,7 @@
 """포트폴리오 전략 백테스트 — 정한 비중으로 시작해 주기마다 그 비중으로 되돌린다.
 
-모멘텀·신고가와 달리 **종목을 고르지 않으므로 체결 내역이 종목 교체가 아니다.** 리밸런싱
-때 리밸런싱 기준을 넘긴 종목만 사고팔며, 그 매매만 비용(슬리피지)을 문다. 그 사이에는 시세대로
+모멘텀·신고가와 달리 **종목을 고르지 않으므로 체결 내역이 종목 교체가 아니다.** 시작일에
+정한 비중대로 사고(슬리피지 부담), 이후에는 시세대로
 흘러가게 둔다 — 그게 이 전략의 전부다.
 
 결과 형태는 신고가·모멘텀과 같다(`start_date`·`strategy_total_pct`·`daily` …). 화면과
@@ -14,38 +14,34 @@ from typing import Any
 
 import pandas as pd
 
+from config import CACHE_TTL_COMPUTE
+from core.strategy.portfolio.backtest import simulate_portfolio
+from utils.effective_prices import apply_realtime_closes
 from utils.logger import get_app_logger
+from utils.perf_metrics import max_drawdown_window
 from utils.pool_settings_store import get_pool_slippage
+from utils.pool_signal_backtest_service import validate_backtest_months
 from utils.portfolio_service import (
     DEFAULT_BACKTEST_MONTHS,
     benchmark_info,
     load_settings,
     validate_settings,
 )
+from utils.slot_positions import _next_session
+from utils.ttl_cache import TtlCache
 
 logger = get_app_logger()
-
-MAX_BACKTEST_MONTHS = 60
-
-# 리밸런싱 주기 → pandas 기간 라벨. 'none' 은 되돌리지 않는다(최초 매수 후 그대로).
-_PERIOD_FREQ: dict[str, str] = {"monthly": "%Y-%m", "quarterly": "%Y-Q", "yearly": "%Y"}
-
-
-def _period_key(day: pd.Timestamp, rebalance: str) -> str | None:
-    """그 날짜가 속한 리밸런싱 구간의 키. 'none' 이면 None(되돌리지 않음)."""
-    if rebalance == "monthly":
-        return day.strftime("%Y-%m")
-    if rebalance == "quarterly":
-        return f"{day.year}-Q{(day.month - 1) // 3 + 1}"
-    if rebalance == "yearly":
-        return str(day.year)
-    return None
 
 
 def _load_close_frame(pool: str, tickers: list[str]) -> pd.DataFrame:
     """[일자 × 티커] 종가 프레임. 가격이 없는 종목은 명시적으로 에러 — 조용히 빼지 않는다."""
     from utils.cache_utils import load_cached_frames_bulk_from_ticker_types
+    from utils.effective_prices import confirmed_bars
+    from utils.settings_loader import get_ticker_type_settings
 
+    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+    if not country:
+        raise RuntimeError(f"종목풀({pool}) 설정에 country_code 가 없습니다.")
     frames = load_cached_frames_bulk_from_ticker_types([pool], tickers)
     series: dict[str, pd.Series] = {}
     missing: list[str] = []
@@ -54,7 +50,8 @@ def _load_close_frame(pool: str, tickers: list[str]) -> pd.DataFrame:
         if frame is None or frame.empty or "Close" not in frame.columns:
             missing.append(ticker)
             continue
-        close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+        # 마지막으로 마감된 거래일까지만 — 장중 봉이 캐시에 섞여도 판정이 흔들리지 않게(`confirmed_bars`).
+        close = pd.to_numeric(confirmed_bars(frame, country)["Close"], errors="coerce").dropna()
         if close.empty:
             missing.append(ticker)
             continue
@@ -70,10 +67,6 @@ def _cagr_pct(total_pct: float, months: int) -> float:
     return ((1 + total_pct / 100) ** (12 / months) - 1) * 100
 
 
-def _drawdown_pct(curve: pd.Series) -> float:
-    return float(((curve / curve.cummax()) - 1).min() * 100)
-
-
 def _sortino(returns: pd.Series) -> float | None:
     downside = returns[returns < 0]
     deviation = float((downside**2).mean() ** 0.5) if not downside.empty else 0.0
@@ -82,29 +75,56 @@ def _sortino(returns: pd.Series) -> float | None:
     return round(float(returns.mean()) / deviation * (252**0.5), 2)
 
 
+def _overlay_live_last_bar(
+    pool: str, close_df: pd.DataFrame, benchmark_close: pd.Series
+) -> tuple[pd.DataFrame, pd.Series, bool]:
+    """장중이면 실시간 가격을 **마지막 봉**으로 얹는다(strategy_logic.md 「장중 잠정 실행」) — 운용 현황 전용.
+
+    규칙·수식은 그대로고 입력만 잠정이라, 종가가 확정되면 확정 계산과 일치한다.
+    전 종목의 실시간 시세가 있어야 얹는다 — 일부만 잠정이면 비중 판정이 뒤섞인다.
+    벤치마크는 오늘 값이 없어 마지막 확정값을 이월한다 — 현황(보유·지시)만 읽는 경로라
+    성과 숫자에는 쓰이지 않는다.
+    """
+    from utils.slot_positions import _live_quotes
+
+    tickers = list(close_df.columns)
+    quotes = _live_quotes(pool, tickers)
+    if not quotes["live"]:
+        return close_df, benchmark_close, False
+    prices = {t: (quotes["by_ticker"].get(t) or {}).get("bar_price") for t in tickers}
+    if any(p is None for p in prices.values()):
+        return close_df, benchmark_close, False
+    session_ts = quotes["session_ts"]
+    close_df = apply_realtime_closes(close_df, prices, session_ts)
+    benchmark_close = benchmark_close.copy()
+    benchmark_close.loc[session_ts] = float(benchmark_close.iloc[-1])
+    return close_df, benchmark_close, True
+
+
 def run_backtest(
     months: int | None = None,
     settings: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
+    *,
+    start_date: str | None = None,
+    with_live_last_bar: bool = False,
 ) -> dict[str, Any]:
-    """고정 비중 리밸런싱 백테스트. 일별 자산곡선과 리밸런싱 내역을 함께 돌려준다.
+    """고정 비중 바이앤홀드 백테스트. 일별 자산곡선과 체결 내역을 함께 돌려준다.
 
     `context` 는 어댑터 계약을 맞추기 위한 자리다 — 이 전략은 무거운 준비물이 없어 쓰지 않는다.
+    ``with_live_last_bar`` 는 운용 현황 전용이다 — 성과 비교 백테스트는 확정 데이터만 쓴다.
     """
     del context  # 이 전략은 사전 준비물이 없다(계약만 맞춘다)
 
     settings = validate_settings(settings or load_settings())
     months = int(months or DEFAULT_BACKTEST_MONTHS)
-    if not 1 <= months <= MAX_BACKTEST_MONTHS:
-        raise ValueError(f"'months' 는 1~{MAX_BACKTEST_MONTHS} 사이여야 합니다.")
+    validate_backtest_months(months)
 
     pool = settings["pool"]
     weights = settings["weights"]
     if not weights:
         raise ValueError("담긴 종목이 없습니다 — 화면에서 종목과 비중을 먼저 저장하세요.")
 
-    rebalance = settings["rebalance"]
-    band_pct = float(settings["band_pct"])
     buy_slippage, sell_slippage = get_pool_slippage(pool)
 
     target_by_ticker = {row["ticker"]: float(row["weight_pct"]) / 100.0 for row in weights}
@@ -117,75 +137,54 @@ def run_backtest(
     benchmark_frame = load_benchmark_frame(pool)
     benchmark_close = pd.to_numeric(benchmark_frame["Close"], errors="coerce").dropna()
 
-    # 구간 — 종목·벤치마크가 모두 있는 날만 쓴다.
-    index = close_df.dropna().index.intersection(benchmark_close.index)
+    live_last_bar = False
+    confirmed_close_df = close_df
+    if with_live_last_bar:
+        close_df, benchmark_close, live_last_bar = _overlay_live_last_bar(pool, close_df, benchmark_close)
+
+    # 상장 전 종목의 빈 가격 때문에 다른 종목의 운용 기간을 줄이지 않는다.
+    index = benchmark_close.index
     if len(index) < 2:
         raise RuntimeError("종목과 벤치마크의 공통 가격 구간이 부족합니다.")
-    start = index[-1] - pd.DateOffset(months=months)
+    start = pd.Timestamp(start_date) if start_date is not None else index[-1] - pd.DateOffset(months=months)
     index = index[index >= start]
     if len(index) < 2:
         raise RuntimeError(f"{months}개월치 가격이 부족합니다.")
-    close_df = close_df.loc[index, tickers]
+    close_df = close_df.reindex(index=index, columns=tickers).ffill()
+    confirmed_close_df = confirmed_close_df.reindex(index=index, columns=tickers).ffill()
     benchmark_close = benchmark_close.loc[index]
 
-    # ── 시뮬레이션 ──────────────────────────────────────────────────────────
+    # ── 시뮬레이션 — 핵심 계산은 core 로 분리했다(외부 조회 없는 순수 함수) ──
     # 자산 1.0 에서 시작해 목표 비중대로 산다. 매수는 슬리피지만큼 비싸게 체결된다.
     # 현금은 사용자가 정한 값이다(종목합 + 현금 = 100% 는 저장 때 검증했다).
     cash_target = float(settings["cash_weight_pct"]) / 100.0
-    shares: dict[str, float] = {}
-    cash = 1.0
-    trades: list[dict[str, Any]] = []
-
-    def rebalance_to_target(day: pd.Timestamp, reason: str) -> None:
-        """목표 비중으로 되돌린다 — 리밸런싱 기준을 넘긴 종목만 사고판다."""
-        nonlocal cash
-        prices = close_df.loc[day]
-        total = cash + sum(shares.get(t, 0.0) * float(prices[t]) for t in tickers)
-        if total <= 0:
-            return
-        for ticker in tickers:
-            price = float(prices[ticker])
-            if price <= 0:
-                continue
-            held_value = shares.get(ticker, 0.0) * price
-            current_pct = held_value / total * 100.0
-            target_pct = target_by_ticker[ticker] * 100.0
-            gap = target_pct - current_pct
-            # 기준 안이면 두고 본다 — 가격 드리프트로 매매하지 않는 것이 이 전략의 규칙이다.
-            if abs(gap) < band_pct:
-                continue
-            target_value = total * target_by_ticker[ticker]
-            diff_value = target_value - held_value
-            # 체결가 — 사면 비싸게, 팔면 싸게(편도 슬리피지).
-            fill = price * (1 + buy_slippage / 100.0) if diff_value > 0 else price * (1 - sell_slippage / 100.0)
-            delta_shares = diff_value / fill
-            shares[ticker] = shares.get(ticker, 0.0) + delta_shares
-            cash -= delta_shares * fill
-            trades.append(
-                {
-                    "date": str(day.date()),
-                    "ticker": ticker,
-                    "side": "buy" if diff_value > 0 else "sell",
-                    "reason": reason,
-                    "price": round(fill, 4),
-                    "weight_before_pct": round(current_pct, 2),
-                    "weight_after_pct": round(target_pct, 2),
-                }
-            )
-
-    rebalance_to_target(index[0], "최초 매수")
-    current_period = _period_key(index[0], rebalance)
-
-    curve: list[float] = []
-    for day in index:
-        period = _period_key(day, rebalance)
-        if period is not None and period != current_period:
-            rebalance_to_target(day, "리밸런싱")
-            current_period = period
-        prices = close_df.loc[day]
-        curve.append(cash + sum(shares.get(t, 0.0) * float(prices[t]) for t in tickers))
-
-    strategy = pd.Series(curve, index=index)
+    simulated = simulate_portfolio(
+        close_df=close_df,
+        target_by_ticker=target_by_ticker,
+        cash_target=cash_target,
+        buy_slippage=buy_slippage,
+        sell_slippage=sell_slippage,
+    )
+    # 기준일 목표 — 합성이 읽는 **확정 스냅샷**이다. 모멘텀·신고가는 `target_holdings` 로
+    # 같은 것을 주는데(장중 가격으로 목표 주수가 내림 경계에서 ±1 왕복하는 것을 막는다),
+    # 포트폴리오만 실시간 반영 가격을 그대로 넘겨 한 계좌 안에서 기준이 갈렸다.
+    # 데이터 적재는 위에서 이미 했으므로 여기서는 순수 계산만 한 번 더 돈다.
+    confirmed = (
+        simulate_portfolio(
+            close_df=confirmed_close_df,
+            target_by_ticker=target_by_ticker,
+            cash_target=float(settings["cash_weight_pct"]) / 100.0,
+            buy_slippage=buy_slippage,
+            sell_slippage=sell_slippage,
+        )
+        if live_last_bar
+        else simulated
+    )
+    strategy = simulated["curve"]
+    cash_curve = simulated["cash_curve"]
+    trades = simulated["trades"]
+    shares = simulated["shares"]
+    cash = simulated["cash"]
     # 벤치마크는 **시작일 시가**를 1 로 둔다 — 전략도 그날 시가에 사기 때문이다(공용 함수).
     from utils.benchmark_curve import benchmark_growth
 
@@ -194,29 +193,105 @@ def run_backtest(
     benchmark_total = float((benchmark.iloc[-1] - 1) * 100)
     strategy_norm = strategy / float(strategy.iloc[0])
 
+    strategy_mdd, benchmark_mdd = max_drawdown_window(strategy_norm), max_drawdown_window(benchmark)
     return {
         "start_date": str(index[0].date()),
+        # 합성은 저장 비중 대신 이 최종 상태를 읽는다(시작일 이후 바이앤홀드 보유).
+        "as_of": str(index[-1].date()),
+        # 실시간을 마지막 봉으로 얹었는지 — 합성 화면이 세션 표기에 쓴다(`utils.mix_sleeve`).
+        "live": live_last_bar,
+        # 기준일 목표 — **확정 종가로만** 계산한 상태. 합성의 목표 수량이 이것을 읽는다.
+        "target_positions": [
+            {
+                "ticker": ticker,
+                "shares": confirmed["shares"].get(ticker, 0.0),
+                "price": float(confirmed_close_df.at[index[-1], ticker]),
+                "sleeve_weight_pct": confirmed["shares"].get(ticker, 0.0)
+                * float(confirmed_close_df.at[index[-1], ticker])
+                / float(confirmed["curve"].iloc[-1])
+                * 100.0,
+            }
+            for ticker in tickers
+            if confirmed["shares"].get(ticker, 0.0) > 0
+        ],
+        "open_positions": [
+            {
+                "ticker": ticker,
+                "shares": shares.get(ticker, 0.0),
+                "price": float(close_df.at[index[-1], ticker]),
+                "sleeve_weight_pct": shares.get(ticker, 0.0)
+                * float(close_df.at[index[-1], ticker])
+                / float(strategy.iloc[-1])
+                * 100.0,
+            }
+            for ticker in tickers
+            if shares.get(ticker, 0.0) > 0
+        ],
+        "sleeve_cash_weight_pct": cash / float(strategy.iloc[-1]) * 100.0,
         "end_date": str(index[-1].date()),
         "months": months,
         "strategy_total_pct": round(strategy_total, 2),
         "strategy_cagr_pct": round(_cagr_pct(strategy_total, months), 2),
-        "strategy_mdd_pct": round(_drawdown_pct(strategy_norm), 2),
+        "strategy_mdd_pct": round(strategy_mdd["mdd_pct"], 2),
+        "strategy_mdd_from": strategy_mdd["from"],
+        "strategy_mdd_to": strategy_mdd["to"],
         "strategy_sortino": _sortino(strategy_norm.pct_change().dropna()),
         "benchmark_total_pct": round(benchmark_total, 2),
         "benchmark_cagr_pct": round(_cagr_pct(benchmark_total, months), 2),
-        "benchmark_mdd_pct": round(_drawdown_pct(benchmark), 2),
+        "benchmark_mdd_pct": round(benchmark_mdd["mdd_pct"], 2),
+        "benchmark_mdd_from": benchmark_mdd["from"],
+        "benchmark_mdd_to": benchmark_mdd["to"],
         "benchmark_sortino": _sortino(benchmark.pct_change().dropna()),
         "benchmark_name": benchmark_info(pool)["name"],
-        # 이 전략의 '체결'은 종목 교체가 아니라 비중 되돌리기다 — 승률·평균손익 개념이 없다.
+        # 이 전략의 '체결'은 최초 매수(및 늦게 상장한 종목의 첫 매수)뿐이다.
         "trades": list(reversed(trades)),
-        "rebalance_count": sum(1 for trade in trades if trade["reason"] == "리밸런싱"),
         "cash_weight_pct": round(cash_target * 100, 2),
         "daily": [
             {
                 "date": str(day.date()),
+                "cash_weight_pct": cash_curve[day],
                 "strategy_pct": round((float(strategy_norm.loc[day]) - 1) * 100, 2),
                 "benchmark_pct": round((float(benchmark.loc[day]) - 1) * 100, 2),
             }
             for day in index
         ],
     }
+
+
+# 설정이 같으면 결과도 같으므로 짧게 재사용한다 — 개별 화면과 합성(목표·슬리브 몫)이
+# 같은 실행 결과를 읽고, 같은 요청 흐름에서 엔진을 여러 번 돌리지 않는다.
+_POSITIONS_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="portfolio_positions")
+
+
+def current_positions(settings: dict[str, Any]) -> dict[str, Any]:
+    """개별 운용 현황과 합성이 공유하는 고정 시작일 기준 포트폴리오 상태.
+
+    장중이면 실시간 가격을 마지막 봉으로 쓴 같은 엔진의 상태다(strategy_logic.md 「장중 잠정 실행」) —
+    보유 비중이 실시간 기준으로 움직이고, 종가 확정 후 백테스트와 일치한다.
+    ``daily`` 는 이 상태를 만든 실행의 일별 곡선 — 합성 슬리브 몫이 같은 실행 결과를 읽는다.
+    """
+    from utils.strategy_settings import require_start_date
+
+    start_date = require_start_date(settings)
+
+    def compute() -> dict[str, Any]:
+        result = run_backtest(DEFAULT_BACKTEST_MONTHS, settings, start_date=start_date, with_live_last_bar=True)
+        state = {
+            key: result[key]
+            for key in (
+                "as_of",
+                "live",
+                "open_positions",
+                "target_positions",
+                "sleeve_cash_weight_pct",
+                "trades",
+                "daily",
+            )
+        }
+        # 다음 시가 체결일 — 판정에 쓴 마지막 봉(`as_of`)의 다음 거래일. 전략 화면·합성 공용 규칙(`_next_session`).
+        state["next_session"] = _next_session(settings["pool"], pd.Timestamp(state["as_of"]))
+        return state
+
+    # 키에 슬리피지까지 넣는다 — 풀 설정을 바꾸면 즉시 새 값으로 계산돼야 한다.
+    key = _POSITIONS_CACHE.make_key(settings, start_date, get_pool_slippage(settings["pool"]))
+    return _POSITIONS_CACHE.get_or_compute(key, compute)

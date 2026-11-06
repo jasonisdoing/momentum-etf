@@ -1,6 +1,7 @@
 /** 계좌 알람 배지(종목명 옆 이모지) 클라이언트 store.
  *
- * 계좌 설정(`/account-settings`)의 알람 On/Off·판정(이동선 이탈·손절)을 그대로 재사용해,
+ * 슬랙 알람과 같은 판정(이동선 이탈·손절)을 재사용하되 계좌의 알람 On/Off 는 무시한다
+ * (그 스위치는 슬랙 발송만 제어 — 화면 표시는 모든 계좌 공통 표준). 이 결과로
  * 자산 관리·자산 헬퍼 종목명에 붙일 티커→아이콘 맵을 가져온다.
  * 화면마다 fetch 를 복붙하지 말고 이 함수를 공유한다.
  */
@@ -14,9 +15,13 @@ export type AlertBadgeInfo = {
   badgeByTicker: AlertBadges;
   /** 이동선 이탈로 배지가 붙은 티커(정규화된 형태). */
   maTickers: string[];
+  /** 신규상장(🆕) 티커 → 상장 후 경과 개월(내림) — 전 화면 공용 판정(순위 is_partial 과 같은 기준). */
+  newMonthsByTicker: Record<string, number | null>;
+  /** 티커 → 최근 고점 대비(%) — 순위 화면 「고점」 컬럼과 같은 공용 판정. */
+  highDrawdownByTicker: Record<string, number>;
 };
 
-const EMPTY_BADGE_INFO: AlertBadgeInfo = { badgeByTicker: {}, maTickers: [] };
+const EMPTY_BADGE_INFO: AlertBadgeInfo = { badgeByTicker: {}, maTickers: [], newMonthsByTicker: {}, highDrawdownByTicker: {} };
 
 // 서버 배지 계산이 수 초 걸려, 화면 재방문 시 세션 캐시로 즉시 표시한다(서버에도 별도 TTL 캐시 있음).
 const BADGES_SESSION_CACHE_TTL_MS = 60_000;
@@ -29,25 +34,51 @@ export function normalizeBadgeTicker(ticker: string): string {
   return parts[parts.length - 1] ?? "";
 }
 
-/** 계좌의 배지 정보 조회(세션 TTL 캐시 우선). 보조 정보라 실패 시 빈 값(화면은 그대로). */
-export async function fetchAlertBadges(accountId: string): Promise<AlertBadgeInfo> {
+/** 마지막으로 받은 배지 정보 — 세션 캐시(60초)가 만료돼도 먼저 보여주려고 따로 둔다. */
+const lastBadgeInfo = new Map<string, AlertBadgeInfo>();
+
+/** 받아 둔 배지 정보 — 오래됐어도 돌려준다(없으면 null). 모달이 열리자마자 값을 보이려고 미리 받아 둔 것을 읽는다. */
+export function peekAlertBadges(accountId: string): AlertBadgeInfo | null {
+  return lastBadgeInfo.get(accountId) ?? null;
+}
+
+const inflightBadges = new Map<string, Promise<AlertBadgeInfo>>();
+
+/** 계좌의 배지 정보 조회 — 같은 계좌를 이미 요청 중이면(미리 받기) 그 요청을 같이 기다린다. */
+export function fetchAlertBadges(accountId: string): Promise<AlertBadgeInfo> {
+  const pending = inflightBadges.get(accountId);
+  if (pending) return pending;
+  const request = requestAlertBadges(accountId).finally(() => inflightBadges.delete(accountId));
+  inflightBadges.set(accountId, request);
+  return request;
+}
+
+async function requestAlertBadges(accountId: string): Promise<AlertBadgeInfo> {
   const cacheKey = `${BADGES_SESSION_CACHE_PREFIX}${accountId}`;
   const cached = readSessionTtlCache<AlertBadgeInfo>(cacheKey, BADGES_SESSION_CACHE_TTL_MS);
   // 예전 버전이 남긴 캐시(티커→아이콘 맵)는 형태가 달라 그대로 쓰면 화면이 깨진다. 모양을 확인한다.
-  if (cached !== null && cached.badgeByTicker) return cached;
+  if (cached !== null && cached.badgeByTicker && cached.newMonthsByTicker && cached.highDrawdownByTicker) {
+    lastBadgeInfo.set(accountId, cached);
+    return cached;
+  }
   try {
     const resp = await fetch(`/api/alarms/badges?account=${encodeURIComponent(accountId)}`, { cache: "no-store" });
     const payload = (await resp.json()) as {
       badge_by_ticker?: Record<string, string>;
       ma_tickers?: string[];
+      new_months_by_ticker?: Record<string, number | null>;
+      high_drawdown_by_ticker?: Record<string, number>;
       error?: string;
     };
     if (!resp.ok || payload.error) return EMPTY_BADGE_INFO;
     const info: AlertBadgeInfo = {
       badgeByTicker: payload.badge_by_ticker ?? {},
       maTickers: payload.ma_tickers ?? [],
+      newMonthsByTicker: payload.new_months_by_ticker ?? {},
+      highDrawdownByTicker: payload.high_drawdown_by_ticker ?? {},
     };
     writeSessionTtlCache(cacheKey, info);
+    lastBadgeInfo.set(accountId, info);
     return info;
   } catch {
     return EMPTY_BADGE_INFO;

@@ -14,6 +14,7 @@ from services.price_service import get_realtime_snapshot
 from utils.industry_map import industry_map_for_country
 from utils.market_service import load_ticker_pool_map, load_ticker_pool_type_map
 from utils.naver_chart import fetch_naver_daily_ohlc
+from utils.perf_metrics import period_sortino
 from utils.portfolio_io import load_all_holding_tickers
 
 logger = logging.getLogger(__name__)
@@ -152,24 +153,56 @@ def _load_index_constituents_market(index_key: str, min_market_cap_eok: int) -> 
     return {"market": index_key, "total_count": len(wanted), "count": len(rows), "rows": rows}
 
 
-def load_kor_stock_market(
-    market: str,
-    limit: int,
-    min_market_cap_jo: int,
-) -> dict[str, Any]:
+# 「통합」 보기의 시장별 시총 상위 개수 — 화면(`/kor-market-stock`)과 종목풀 미등록 알림
+# (`update_kor_market_stocks.py`)이 같은 명단을 보도록 여기 한 곳에 둔다.
+KOR_MARKET_TOP_COUNTS: dict[str, int] = {"KOSPI": 200, "KOSDAQ": 150}
+
+
+def _fetch_market_top_items(market: str, min_market_cap_eok: int) -> tuple[list[dict[str, Any]], int]:
+    """네이버 시총표에서 **개별주** 시총 상위 `KOR_MARKET_TOP_COUNTS[market]` 개 원본 항목과
+    시장 전체 종목 수를 돌려준다. 최소 시총(억) 미만은 건너뛴다."""
+    target_count = KOR_MARKET_TOP_COUNTS[market]
+    page_size = 100
+    payload = _fetch_market_value_page(market, page=1, page_size=page_size)
+    total_count = int(payload.get("totalCount") or 0)
+    total_pages = max(1, math.ceil(total_count / page_size)) if total_count > 0 else 1
+
+    items: list[dict[str, Any]] = []
+    for page in range(1, total_pages + 1):
+        for item in payload.get("stocks") or []:
+            # 개별주만 — ETF·ETN 제외(시총 순위와 같은 기준).
+            if not is_individual_stock_item(item):
+                continue
+            market_cap = _parse_number(item.get("marketValue"))
+            if market_cap is None or market_cap < min_market_cap_eok:
+                continue
+            items.append(item)
+            if len(items) >= target_count:
+                return items, total_count
+        if page >= total_pages:
+            break
+        payload = _fetch_market_value_page(market, page=page + 1, page_size=page_size)
+    return items, total_count
+
+
+def kor_market_top_tickers(market: str) -> list[str]:
+    """「통합」 보기에 들어가는 그 시장의 종목 티커(최소 시총 조건 없음) — 미등록 알림용."""
+    items, _ = _fetch_market_top_items(market, 0)
+    return [str(item.get("itemCode") or "").strip().upper() for item in items if item.get("itemCode")]
+
+
+def load_kor_stock_market(market: str, min_market_cap_jo: int) -> dict[str, Any]:
     """네이버 API에서 시가총액 상위 종목 리스트를 가져온다.
 
     Args:
-        market: "KOSPI" · "KOSDAQ" 은 시총 상위 N, "KOSPI200" · "KOSDAQ150" 은 지수 구성종목 전체
-        limit: 가져올 종목 수 (최대 200). 지수 구성종목은 명단이 정해져 있어 무시한다.
+        market: "KOSPI" · "KOSDAQ" 은 시총 상위(`KOR_MARKET_TOP_COUNTS`), "KOSPI200" · "KOSDAQ150" 은
+            지수 구성종목 전체
         min_market_cap_jo: 최소 시가총액(조)
     """
     from utils.index_constituents_loader import KOR_INDEX_SOURCES
 
-    if market not in ("KOSPI", "KOSDAQ", *KOR_INDEX_SOURCES):
+    if market not in (*KOR_MARKET_TOP_COUNTS, *KOR_INDEX_SOURCES):
         raise ValueError(f"지원하지 않는 마켓입니다: {market}")
-    if limit <= 0:
-        raise ValueError(f"가져올 종목 수는 1 이상이어야 합니다: {limit}")
     if min_market_cap_jo < 0:
         raise ValueError(f"최소 시가총액은 음수일 수 없습니다: {min_market_cap_jo}")
 
@@ -177,35 +210,9 @@ def load_kor_stock_market(
     if market in KOR_INDEX_SOURCES:
         return _load_index_constituents_market(market, min_market_cap_eok)
 
-    page_size = 100
-    first_payload = _fetch_market_value_page(market, page=1, page_size=page_size)
-    total_count = int(first_payload.get("totalCount") or 0)
-    total_pages = max(1, math.ceil(total_count / page_size)) if total_count > 0 else 1
-
+    items, total_count = _fetch_market_top_items(market, min_market_cap_eok)
     context = _lookup_context()
-
-    target_count = min(limit, 200)
-    rows: list[dict[str, Any]] = []
-    payload = first_payload
-    for page in range(1, total_pages + 1):
-        stocks = payload.get("stocks") or []
-        for item in stocks:
-            # 개별주만 — ETF·ETN 제외(시총 순위와 같은 기준).
-            if not is_individual_stock_item(item):
-                continue
-            row = _build_row(item, context)
-            if row["market_cap"] is None or row["market_cap"] < min_market_cap_eok:
-                continue
-            rows.append(row)
-            if len(rows) >= target_count:
-                break
-        if len(rows) >= target_count:
-            break
-        if page >= total_pages:
-            break
-        payload = _fetch_market_value_page(market, page=page + 1, page_size=page_size)
-
-    rows = rows[:target_count]
+    rows = [_build_row(item, context) for item in items]
     _apply_kor_realtime_overlay(rows)
     _apply_kor_history_metrics(rows)
     for idx, row in enumerate(rows, start=1):
@@ -220,7 +227,7 @@ def load_kor_stock_market(
 
 
 def _apply_kor_realtime_overlay(rows: list[dict[str, Any]]) -> None:
-    """한국 개별주 리스트에 네이버 실시간/장전 가격을 반영한다."""
+    """한국 개별주 리스트에 네이버 실시간 가격을 반영한다(시간외 구간이면 시간외가)."""
     tickers = [str(row.get("ticker") or "").strip().upper() for row in rows if str(row.get("ticker") or "").strip()]
     if not tickers:
         return
@@ -281,18 +288,35 @@ def _apply_kor_history_metrics(rows: list[dict[str, Any]]) -> None:
             continue
         history = fetch_naver_daily_ohlc(ticker, count=280)
         if history is None or history.empty or "Close" not in history.columns:
-            row.update({"return_1m_pct": None, "return_3m_pct": None, "return_12m_pct": None, "mdd_12m_pct": None})
+            row.update(
+                {
+                    "return_1m_pct": None,
+                    "return_3m_pct": None,
+                    "return_12m_pct": None,
+                    "mdd_12m_pct": None,
+                    "sortino_12m": None,
+                }
+            )
             continue
         close = pd.to_numeric(history["Close"], errors="coerce").dropna()
         close = close[close > 0]
         if close.empty:
-            row.update({"return_1m_pct": None, "return_3m_pct": None, "return_12m_pct": None, "mdd_12m_pct": None})
+            row.update(
+                {
+                    "return_1m_pct": None,
+                    "return_3m_pct": None,
+                    "return_12m_pct": None,
+                    "mdd_12m_pct": None,
+                    "sortino_12m": None,
+                }
+            )
             continue
         latest_price = float(row.get("current_price") or close.iloc[-1])
         row["return_1m_pct"] = _calculate_period_return(close, latest_price, 1)
         row["return_3m_pct"] = _calculate_period_return(close, latest_price, 3)
         row["return_12m_pct"] = _calculate_period_return(close, latest_price, 12)
         row["mdd_12m_pct"] = _calculate_mdd(close, 12)
+        row["sortino_12m"] = period_sortino(close, 12)
 
 
 # 티커→시가총액 맵은 화면 재방문마다 페이지 순회를 반복하지 않게 짧은 TTL 로 캐시한다.

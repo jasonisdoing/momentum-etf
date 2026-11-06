@@ -37,8 +37,8 @@ type MarketTrendItem = {
   } | null;
   days_since_last_up: number | null;
   days_since_last_neutral: number | null;
-  // 현재 추세 구간 1일차 종가 대비 등락률. 상승 구간이어도 눌려 있으면 음수다.
-  regime_change_pct: number | null;
+  // 추세가 바뀌는 SuperTrend 가격선까지 남은 등락률(현재가 대비).
+  switch_pct: number | null;
   // ADR(등락비율) — 구성종목 데이터가 있는 한국 지수만 값이 있다.
   adr: number | null;
   adr_level: AdrLevel | null;
@@ -236,8 +236,8 @@ export function MarketTrendPanel({
           textAlign: "center",
         },
         headerTooltip:
-          "SuperTrend 방향과 그 방향이 이어진 거래일 수. 괄호는 그 구간 1일차 종가 대비 등락률이다. " +
-          "상승 구간이어도 1일차보다 눌려 있으면 음수가 나온다.",
+          "SuperTrend 방향과 그 방향이 이어진 거래일 수. 괄호는 추세가 바뀌는 SuperTrend 가격선까지 " +
+          "남은 등락률이다(현재가 대비, 가격선은 매일 다시 계산된다).",
         // ADR 컬럼과 같은 표기 — 색을 입힌 상태 + 지속일수.
         cellRenderer: (params: { data?: GridRow }) => {
           const data = params.data;
@@ -248,14 +248,13 @@ export function MarketTrendPanel({
           // 상승은 현재 구간 일수, 하락은 마지막 상승 이후 경과일을 센다(원래 기간 컬럼과 같은 규칙).
           const days = regime === "accel_up" ? data.current_regime_days : data.days_since_last_up;
           const daysText = days != null ? `${days}일째` : regime === "accel_up" ? "" : "1년 내 상승 없음";
-          const movePct = data.regime_change_pct;
+          const switchPct = data.switch_pct;
           return (
-            <span style={{ color: "var(--text-strong)" }} title={`${REGIME_LABEL[regime]} — 구간 1일차 종가 대비`}>
+            <span style={{ color: "var(--text-strong)" }} title={`${REGIME_LABEL[regime]} — 전환 가격선까지 남은 등락률`}>
               <strong style={{ color: REGIME_COLORS[regime] }}>{REGIME_LABEL[regime]}</strong>
               {daysText ? ` ${daysText}` : ""}
-              {movePct != null ? (
-                // 추세 방향과 실제 등락이 어긋날 수 있어(상승 구간인데 눌림) 부호 색을 따로 준다.
-                <span className={getSignedClass(movePct)}>{`(${formatPct(movePct)})`}</span>
+              {switchPct != null ? (
+                <span className={getSignedClass(switchPct)}>{`(전환까지 ${formatPct(switchPct)})`}</span>
               ) : null}
             </span>
           );

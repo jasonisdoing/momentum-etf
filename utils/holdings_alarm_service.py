@@ -26,11 +26,12 @@ import pandas as pd
 
 from config import CACHE_TTL_COMPUTE
 from core.strategy.scoring import compute_ma_disparity
-from utils.account_settings_store import load_account_docs
+from utils.account_settings_store import load_live_account_docs
 from utils.cache_utils import load_cached_close_series_bulk_with_fallback
+from utils.effective_prices import bar_anchor
 from utils.holdings_detail_service import load_all_holdings_detail
 from utils.logger import get_app_logger
-from utils.moving_averages import get_moving_average_type
+from utils.moving_averages import pool_moving_average_type
 from utils.notification import send_slack_message_v2
 from utils.rankings import build_effective_close_series
 from utils.stock_list_io import pools_by_ticker
@@ -38,7 +39,7 @@ from utils.stock_list_io import pools_by_ticker
 logger = get_app_logger()
 
 # 자산 화면 종목명 배지 아이콘. 계좌마다 다르게 둘 이유가 없어 코드에 고정한다.
-_MA_ICON = "❗"  # 이동선 이탈(단기·장기 공용)
+# 이동선 이탈은 배지가 아니라 행 전체 회색(ma_tickers → appTrendBrokenRow)으로만 표시한다.
 _STOPLOSS_ICON = "🚫"
 
 
@@ -94,7 +95,10 @@ def _safe_realtime_snapshot(country: str, tickers: list[str]) -> dict[str, dict[
 def _ma_status(
     close_series: pd.Series | None,
     ma_days: tuple[int, int],
+    country: str,
     realtime_entry: dict[str, float] | None = None,
+    *,
+    ma_type: str,
 ) -> dict[str, Any] | None:
     """종가와 단기·장기 이평선을 계산해 이탈 여부를 반환한다. 데이터 부족/실패 시 None.
 
@@ -102,7 +106,7 @@ def _ma_status(
     `max(단기, 장기) + 40` 영업일만 잘라 왔는데, 이 시스템의 이동평균은 EMA 라 전체 이력에
     지수적으로 의존해서 값이 어긋났다 — 잘린 창의 시작값 영향이 남는다.
     (TIGER 지주회사 MA90: 전체 이력 21,686 vs 130봉 22,044 → 이격 -0.22% vs -1.83%.
-    순위 화면은 이탈이 아닌데 알림만 ❗ 가 붙었다.)
+    순위 화면은 이탈이 아닌데 알림만 붙었다.)
 
     실시간 현재가(스냅샷)를 종가 시리즈에 덮어씌우는 것도 순위 화면과 같다
     (``build_effective_close_series``). **하나라도 아래면 이탈**로 본다 — 순위 화면의
@@ -119,16 +123,18 @@ def _ma_status(
         return None
     close = close_series.astype(float).dropna()
     close.index = pd.to_datetime(close.index)
-    effective = build_effective_close_series(close, realtime_entry)
+    # 붙일 봉의 기준은 순위 화면과 같은 공용 앵커다 — 종목별 마지막 봉으로 정하면 캐시가
+    # 종목마다 다른 날짜에서 끝날 때 순위는 회색이 아닌데 알림만 붙는다.
+    effective = build_effective_close_series(close, realtime_entry, country, last_bar=bar_anchor(country))
     if effective is not None and not effective.empty:
         close = effective
     if close.empty:
         return None
 
     last = float(close.iloc[-1])
-    result: dict[str, Any] = {"last": last}
+    result: dict[str, Any] = {"last": last, "ma_type": ma_type}
     for label, days in (("short", short_days), ("long", long_days)):
-        disparity = compute_ma_disparity(close, days)
+        disparity = compute_ma_disparity(close, days, ma_type)
         if disparity is None:
             return None
         result[f"{label}_days"] = days
@@ -223,7 +229,13 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
         for row, cache_ticker, quote_ticker, pool, country, ma_days in candidates:
             entry = snapshots.get(country, {}).get(quote_ticker)
             try:
-                status = _ma_status(close_by_ticker.get(cache_ticker), ma_days, entry)
+                status = _ma_status(
+                    close_by_ticker.get(cache_ticker),
+                    ma_days,
+                    country,
+                    entry,
+                    ma_type=pool_moving_average_type(pool),
+                )
             except Exception as exc:  # 한 종목 실패가 전체를 막지 않게
                 _unknown(row, f"판정 실패 ({exc})")
                 continue
@@ -246,10 +258,11 @@ def _invalidate_badges_cache() -> None:
 
 
 def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
-    """자산 화면(종목명 배지)용: 계좌의 알람 트리거를 티커→아이콘 문자열 맵으로 반환한다.
+    """자산 화면 표시용: 손절 배지(🚫) 맵과 이동선 이탈 목록(회색 행)을 반환한다.
 
-    슬랙 알람(compute_account_alerts)과 **같은 설정·같은 판정**을 쓴다. 꺼진 알람 종류의
-    배지는 붙지 않는다. 티커는 접두사 없는 형태로 정규화한다.
+    판정은 슬랙 알람(compute_account_alerts)과 **같은 수식·같은 풀 기준**이지만, 계좌의
+    알람 On/Off 는 **무시한다** — 그 스위치는 슬랙 발송 여부만 제어하고, 화면 표시
+    (회색 행·🚫)는 모든 계좌 공통 표준이다. 티커는 접두사 없는 형태로 정규화한다.
     """
     norm_id = str(account_id or "").strip().lower()
     import time as _time
@@ -257,23 +270,23 @@ def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
     cached = _badges_cache.get(norm_id)
     if cached is not None and _time.monotonic() - cached[0] < _BADGES_CACHE_TTL_SECONDS:
         return dict(cached[1])
-    account_doc = next((doc for doc in load_account_docs() if doc["account_id"] == norm_id), None)
+    account_doc = next((doc for doc in load_live_account_docs() if doc["account_id"] == norm_id), None)
     if account_doc is None:
         raise ValueError(f"알 수 없는 계좌입니다: {account_id}")
 
-    alerts, _errors = compute_account_alerts(account_doc)
+    # 화면 표시는 알람 On/Off 와 무관하게 항상 판정한다 — 스위치를 켠 것처럼 넘긴다.
+    alerts, _errors = compute_account_alerts({**account_doc, "ma_alarm_enabled": True, "stoploss_alarm_enabled": True})
 
     badge_by_ticker: dict[str, str] = {}
 
     def _norm_ticker(value: str) -> str:
         return str(value or "").strip().upper().split(":")[-1]
 
-    # 이동선 이탈 종목 — 배지와 별개로 화면이 행 전체를 회색 처리하는 데 쓴다.
+    # 이동선 이탈 종목 — 화면이 행 전체를 회색 처리하는 데 쓴다(배지는 붙이지 않는다).
     ma_tickers: list[str] = []
     for hit in alerts["ma"]:
         key = _norm_ticker(hit["ticker"])
         if key:
-            badge_by_ticker[key] = badge_by_ticker.get(key, "") + _MA_ICON
             ma_tickers.append(key)
     for hit in alerts["stoploss"]:
         key = _norm_ticker(hit["ticker"])
@@ -284,9 +297,55 @@ def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
         "account_id": norm_id,
         "badge_by_ticker": badge_by_ticker,
         "ma_tickers": sorted(set(ma_tickers)),
+        # 신규상장(🆕)·고점 대비 — 전 화면 공용 판정(순위 화면과 같은 기준). 보조 표시라 실패는 빈 맵.
+        **_holding_series_metrics(norm_id),
     }
     _badges_cache[norm_id] = (_time.monotonic(), dict(result))
     return result
+
+
+def _holding_series_metrics(account_id: str) -> dict[str, dict[str, Any]]:
+    """계좌 보유 종목의 종가 시리즈 파생 표시값 — 자산 화면 보조 컬럼·배지용.
+
+    - ``new_months_by_ticker``: 신규상장 종목의 {티커: 상장 후 경과 개월(내림)} — 🆕(N개월) 배지.
+    - ``high_drawdown_by_ticker``: {티커: 최근 고점 대비 %} — 순위 화면 「고점」 컬럼과 같은 공용 판정.
+
+    판정은 `core.strategy.scoring`(순위 화면과 같은 수식) 하나다.
+    가격 시리즈는 이동선 판정과 같은 소스(종목풀 캐시)를 풀별로 묶어 읽는다.
+    """
+    from core.strategy.scoring import drawdown_from_high_pct, is_new_listing, listing_months
+
+    try:
+        detail = load_all_holdings_detail(account_id)
+        rows = [
+            r
+            for r in detail.get("rows", [])
+            if str(r.get("ticker") or "").strip() and str(r.get("ticker")).strip() != "IS"
+        ]
+        pool_by_ticker = pools_by_ticker(str(r.get("ticker") or "") for r in rows)
+        tickers_by_pool: dict[str, list[str]] = {}
+        for row in rows:
+            ticker = str(row["ticker"]).strip().upper()
+            pool = pool_by_ticker.get(ticker)
+            if pool:
+                tickers_by_pool.setdefault(pool, []).append(ticker)
+        new_months: dict[str, int | None] = {}
+        drawdown: dict[str, float] = {}
+        for pool, pool_tickers in tickers_by_pool.items():
+            for ticker, series in load_cached_close_series_bulk_with_fallback(pool, pool_tickers).items():
+                if series is None:
+                    continue
+                # 배지 맵과 같은 정규화(접두사 없는 형태) — 화면이 같은 키로 찾는다.
+                key = ticker.split(":")[-1]
+                if is_new_listing(series):
+                    new_months[key] = listing_months(series)
+                value = drawdown_from_high_pct(series)
+                if value is not None:
+                    drawdown[key] = round(value, 2)
+        return {"new_months_by_ticker": new_months, "high_drawdown_by_ticker": drawdown}
+    except Exception:
+        logger.warning("[HOLDINGS ALARM] 보유 시리즈 표시값 계산 실패 — 배지·고점을 비운다", exc_info=True)
+        return {"new_months_by_ticker": {}, "high_drawdown_by_ticker": {}}
 
 
 def _post_slack(sections: list[dict[str, Any]], *, manual: bool) -> bool:
@@ -297,8 +356,9 @@ def _post_slack(sections: list[dict[str, Any]], *, manual: bool) -> bool:
     for s in sections:
         parts: list[str] = [f"*{s['account']}*"]
         if s["ma"]:
-            # 기준(이평선 일수)이 종목의 종목풀마다 달라 계좌 헤더에 못 쓴다 — 종목 줄 끝에 붙인다.
-            parts.append(f"📉 *이동선 이탈* ({get_moving_average_type()})")
+            # 기준(이평선 종류·일수)이 종목의 종목풀마다 달라 계좌 헤더에 못 쓴다 —
+            # 종목 줄 끝에 `[SMA 20/120]` 형태로 붙인다.
+            parts.append("📉 *이동선 이탈*")
             for b in s["ma"]:
                 # 어느 쪽이 꺾였는지 보이게 이탈한 선만 표시한다.
                 broken = [
@@ -307,7 +367,8 @@ def _post_slack(sections: list[dict[str, Any]], *, manual: bool) -> bool:
                     if b[f"{key}_below"]
                 ]
                 parts.append(
-                    f"  • {b['name']}({b['ticker']}): {' / '.join(broken)}  `[{b['short_days']}/{b['long_days']}]`"
+                    f"  • {b['name']}({b['ticker']}): {' / '.join(broken)}  "
+                    f"`[{b['ma_type']} {b['short_days']}/{b['long_days']}]`"
                 )
         if s["stoploss"]:
             # 기준(%)이 종목풀마다 달라 계좌 헤더에 못 쓴다 — 종목 줄 끝에 붙인다.
@@ -340,7 +401,7 @@ def send_holdings_alarms(*, manual: bool = False) -> dict[str, Any]:
     """
     sections: list[dict[str, Any]] = []
     all_errors: list[str] = []
-    for doc in load_account_docs():
+    for doc in load_live_account_docs():
         if not (doc.get("ma_alarm_enabled") or doc.get("stoploss_alarm_enabled")):
             continue
         alerts, errors = compute_account_alerts(doc)

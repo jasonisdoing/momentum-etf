@@ -35,6 +35,7 @@ class AccountCreatePayload(BaseModel):
     name: str
     icon: str = ""
     order: int = 0
+    env: str
     country_code: str = "kor"
     currency: str = "KRW"
 
@@ -84,6 +85,7 @@ def post_account(payload: AccountCreatePayload, _: None = Depends(require_intern
             payload.name,
             icon=payload.icon,
             order=payload.order,
+            env=payload.env,
             country_code=payload.country_code,
             currency=payload.currency,
         )

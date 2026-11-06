@@ -1,43 +1,49 @@
 "use client";
 
+import { StrategyStartDate } from "../components/StrategyStartDate";
+
 import type { ColDef } from "ag-grid-community";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconCheck } from "@tabler/icons-react";
 
 import { formatMarketCapWon } from "@/lib/market-cap-format";
 import { type HoldingChartData } from "../components/HoldingChart";
-import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
+import { StrategyChartModal } from "../components/StrategyChartModal";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { MonthsSelect } from "../components/MonthsSelect";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
+import { RealtimeMissingNotice } from "../components/RealtimeMissingNotice";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
 import { StrategyNotes } from "../components/StrategyNotes";
-import { StrategyTuning, type TuningResult } from "../components/StrategyTuning";
-import { NavTabs } from "../components/NavTabs";
+import { StrategyTuning } from "../components/StrategyTuning";
+import { BacktestPeriodTables } from "../components/BacktestPeriodTables";
 import { PageFrame } from "../components/PageFrame";
-import { TickerDetailLink } from "../components/TickerDetailLink";
-import { MaDaysSelect } from "../components/MaDaysSelect";
+import { formatMaLabel, MaDaysSelect } from "../components/MaDaysSelect";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import {
-  INDUSTRY_COLUMN_MIN_WIDTH,
-  INDUSTRY_COLUMN_WIDTH,
-  STOCK_NAME_COLUMN_MIN_WIDTH,
-  adrColumn,
+  industryColumn,
+  slotStatusColumn,
+  fillDaySummary,
   formatSignedPct,
-  renderIndustryCell,
+  maExitGapColumn,
   signColor,
+  stockNameColumn,
+  stockRowClass,
+  tickerColumn,
   tradeValueMultColumn,
+  volatilityColumn,
   marketCapRankColumn,
   stockMemoColumn,
+  highDrawdownColumn,
 } from "@/lib/grid-cells";
 import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
 import { poolHasIndustry, poolHasMarketCap } from "@/lib/pool-industry";
-import { renderStockNameCell } from "@/lib/name-highlight";
-import { updateStockMemo } from "@/lib/stocks-store";
+import { isTrendBroken } from "@/lib/name-highlight";
+import { useStockMemoSave, withTickerMemo } from "../components/useStockMemoSave";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
@@ -45,10 +51,10 @@ const gridTheme = createAppGridTheme();
 const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--fs-sm)" };
 
 type Settings = {
+  start_date?: string | null;
   pool: string;
-  /** 서버가 config.TOP_N_HOLD 로 채워 주는 공통값 — 화면에 입력은 없고 표시·계산에만 쓴다. */
+  /** 종목풀 설정의 보유종목 수 — 이 화면에서는 표시·계산에만 쓴다. */
   top_n: number;
-  stop_loss_pct: number | null;
   exit_ma_days: number;
   /** 진입 자격 — 거래대금 배수 하한(20일 평균 대비). null 이면 조건 없음. */
   min_value_mult: number | null;
@@ -61,7 +67,6 @@ type PoolOption = PoolLabelSource & { country_code?: string; currency?: string; 
 
 type Constraints = {
   adr_floor_options?: (number | null)[];
-  stop_loss_options: (number | null)[];
   exit_ma_options: number[];
   min_value_mult_options: (number | null)[];
   month_options: number[];
@@ -86,6 +91,16 @@ type PositionRow = {
   ticker: string;
   name: string;
   industry: string;
+  /** 20일 일간 수익률 표준편차(%) — 화면 공용 변동성 컬럼. */
+  volatility_pct?: number | null;
+  /** 신규상장(🆕) — 전 화면 공용 판정. */
+  new_listing?: boolean | null;
+  listing_months?: number | null;
+  /** 추세 이탈(행 전체 회색)용 — 풀 이평선 기준 단기·장기 이격(%). 순위·합성과 같은 공용 규칙. */
+  short_gap_pct?: number | null;
+  long_gap_pct?: number | null;
+  /** 행별 체결일 — 어제 확정된 진입 예정(오늘 체결)에만 있다. */
+  fill_date?: string | null;
   /** 지금 계좌에 실제로 들고 있는지 — 전략상 보유(is_held)와 뜻이 다르다. */
   account_held?: boolean;
   /** 직전 거래일 종가 대비 등락률 — 다른 화면과 같은 기준. */
@@ -93,7 +108,6 @@ type PositionRow = {
   /** 오늘 기준 시가총액(순위 화면과 같은 소스). 과거 이력이 없어 백테스트에는 쓰지 않는다. */
   market_cap: number | null;
   market_cap_rank: number | null;
-  trade_value: number | null;
   /** 돌파했더라도 거짓이면 사지 않는다(배수 하한 미달). */
   qualifies: boolean;
   price: number;
@@ -113,12 +127,22 @@ type PositionRow = {
   value_mult: number | null;
   /** 장중 시간 환산 배수(누적 ÷ 장 경과율). 장중에만 값이 있고 괄호로 보여준다. */
   value_mult_live?: number | null;
+  /** 고점 대비(%) — 0 이면 신고점. 보유 표와 같은 공용 값. */
+  high_drawdown_pct?: number | null;
   /** 종목에 붙는 메모 — 순위·모멘텀·자산 관리 화면과 같은 값. */
   memo?: string;
 };
 
 type Holding = {
   ticker: string;
+  /** 20일 일간 수익률 표준편차(%) — 화면 공용 변동성 컬럼. */
+  volatility_pct?: number | null;
+  /** 신규상장(🆕) — 전 화면 공용 판정. */
+  new_listing?: boolean | null;
+  listing_months?: number | null;
+  short_gap_pct?: number | null;
+  long_gap_pct?: number | null;
+  high_drawdown_pct?: number | null;
   name: string;
   industry: string;
   /** 시장 전체 시총 순위 — 진입 후보 표와 같은 값(배치 B 가 메타 캐시에 적어 둔다). */
@@ -138,8 +162,12 @@ type Holding = {
   /** hold = 계속 보유, sell = 내일 시가에 청산 */
   status: "hold" | "sell";
   exit_reason: string | null;
+  /** 행별 체결일 — 어제 확정된 매도(오늘 체결)에만 있다. */
+  fill_date?: string | null;
   /** 종목에 붙는 메모 — 순위·모멘텀·자산 관리 화면과 같은 값. */
   memo?: string;
+  /** 실계좌 보유 여부 — 티커·종목명 칸을 녹색으로 표시한다(전략 보유와 뜻이 다르다). */
+  account_held?: boolean;
   exit_ma_gap_pct?: number | null;
   exit_ma?: number | null;
 };
@@ -149,16 +177,28 @@ type PlanRow = {
   ticker: string;
   name: string;
   industry: string;
+  /** 20일 일간 수익률 표준편차(%) — 화면 공용 변동성 컬럼. */
+  volatility_pct?: number | null;
+  /** 신규상장(🆕) — 전 화면 공용 판정. */
+  new_listing?: boolean | null;
+  listing_months?: number | null;
+  /** 추세 이탈(행 전체 회색)용 — 풀 이평선 기준 단기·장기 이격(%). 순위·합성과 같은 공용 규칙. */
+  short_gap_pct?: number | null;
+  long_gap_pct?: number | null;
   market_cap_rank?: number | null;
   change_pct: number | null;
   /** 현재 시세 — 이탈 행도 지금 값이다(청산가는 exit_price). */
   price: number | null;
   /** 청산가 — 오늘 이탈한 행에만 있다. */
   exit_price: number | null;
+  /** 청산일 — 이탈 행에만 있다. 상태 문구에 붙인다. */
+  exit_date?: string | null;
+  /** 행별 체결일 — 어제 확정 판정(오늘 체결)과 오늘 잠정 판정(내일 체결)을 가른다. */
+  fill_date?: string | null;
   entry_date: string | null;
   entry_price: number | null;
   return_pct: number | null;
-  plan: "hold" | "sell" | "buy" | "exited";
+  plan: "hold" | "sell" | "buy" | "exited" | "empty";
   value_mult?: number | null;
   value_mult_live?: number | null;
   days: number | null;
@@ -170,10 +210,20 @@ type PlanRow = {
   exit_ma_gap_pct?: number | null;
   /** 이탈 이평선 값 — 여유율 툴팁에 함께 보여준다. */
   exit_ma?: number | null;
+  /** 고점 대비(%) — 0 이면 신고점. 모멘텀 운용 현황과 같은 값. */
+  high_drawdown_pct?: number | null;
+  /** 실계좌 보유 여부 — 전략 보유와 뜻이 다르다. 티커·종목명 칸을 녹색으로 표시한다. */
+  account_held?: boolean;
 };
 
 type Positions = {
+  /** 서버 계산 때 실시간 시세를 못 받은 종목 — 일간(%)이 비어 있다. */
+  realtime_missing_tickers?: string[];
+  /** 그 종목풀의 이평 종류(SMA/EMA) — 표기·컬럼 헤더가 쓴다. */
+  ma_type?: string | null;
   as_of: string;
+  /** 동시 보유 상한 — 빈 슬롯 행 수를 세는 데 쓴다. */
+  top_n: number;
   /** 표시용 시세 갱신에 쓰는 국가 코드(시세 소스가 국가별로 다르다). */
   country: string;
   /** 진입·청산이 체결되는 거래일. 캘린더가 답하지 못하면 null. */
@@ -189,11 +239,11 @@ type Positions = {
   min_value_mult: number | null;
   /** 가격 캐시가 마지막으로 갱신된 시각(ISO). 배치가 안 돌았으면 null. */
   refreshed_at: string | null;
-  /** 진행 중인 세션의 실시간 시세를 얹었는지. 참이면 종가가 아직 확정 전이다. */
+  /** 실시간 시세를 마지막 봉으로 얹었는지. 세션이 닫힌 뒤에도 참이다(그때 값은 정규장 종가). */
   live: boolean;
-  /** 장전(동시호가) 구간 — 판정에는 안 쓰고 현재가·등락률만 얹었다. */
+  /** 장전(동시호가) 구간 — 종가(현재가)는 판정에 쓰고 고가·시가만 뺐다. */
   pre_market: boolean;
-  /** 주기 갱신을 걸 시점인지(장중이거나 개장이 가까운 장전). 개장 시각은 시장마다 달라 백엔드가 판단한다. */
+  /** 주기 갱신을 걸 시점인지 — 거래가 일어나는 세션이 열려 있는가. 개장 시각은 시장마다 달라 백엔드가 판단한다. */
   auto_refresh: boolean;
   quote_at: string | null;
   breakouts: PositionRow[];
@@ -202,6 +252,13 @@ type Positions = {
 
 type Trade = {
   ticker: string;
+  /** 20일 일간 수익률 표준편차(%) — 화면 공용 변동성 컬럼. */
+  volatility_pct?: number | null;
+  /** 신규상장(🆕) — 전 화면 공용 판정. */
+  new_listing?: boolean | null;
+  listing_months?: number | null;
+  short_gap_pct?: number | null;
+  long_gap_pct?: number | null;
   name: string;
   industry: string;
   /** 시장 전체 시총 순위 — 운용 현황 표에서만 쓴다(백테스트 체결 목록에는 없다). */
@@ -214,6 +271,12 @@ type Trade = {
   value_mult_live?: number | null;
   /** 종목 메모 — 운용 현황 표에서만 쓴다(백테스트 체결 목록에는 없다). */
   memo?: string;
+  /** 실계좌 보유 여부 — 운용 현황 표에서만 쓴다. */
+  account_held?: boolean;
+  /** 표시용 — 운용 현황 표가 보유 행과 같은 칸을 채운다. */
+  high_drawdown_pct?: number | null;
+  exit_ma_gap_pct?: number | null;
+  exit_ma?: number | null;
   entry_date: string;
   entry_price: number;
   exit_date: string;
@@ -230,10 +293,14 @@ type Backtest = {
   strategy_total_pct: number;
   strategy_cagr_pct: number;
   strategy_mdd_pct: number;
+  strategy_mdd_from?: string | null;
+  strategy_mdd_to?: string | null;
   strategy_sortino: number | null;
   benchmark_total_pct: number;
   benchmark_cagr_pct: number;
   benchmark_mdd_pct: number;
+  benchmark_mdd_from?: string | null;
+  benchmark_mdd_to?: string | null;
   benchmark_sortino: number | null;
   benchmark_name: string;
   trade_count: number;
@@ -250,80 +317,6 @@ type Backtest = {
 // 장중 자동 갱신 주기. 계산이 수 초 걸려 더 짧게 잡으면 요청이 겹친다.
 const LIVE_REFRESH_MS = 5 * 60 * 1000;
 
-/** 운용 현황 안쪽 탭. 차트는 보유 종목 수만큼 그리므로 열 때만 그린다. */
-const CURRENT_TABS = [
-  { key: "list", label: "종목" },
-  { key: "chart", label: "차트" },
-] as const;
-type CurrentTab = (typeof CURRENT_TABS)[number]["key"];
-
-const VIEW_MODES = [
-  { key: "yearly", label: "연간" },
-  { key: "monthly", label: "월간" },
-  { key: "weekly", label: "주간" },
-  { key: "daily", label: "일간" },
-  { key: "trades", label: "체결" },
-] as const;
-type ViewMode = (typeof VIEW_MODES)[number]["key"];
-
-type PeriodRow = {
-  period: string;
-  strategy_pct: number;
-  benchmark_pct: number;
-  /** 구간 마지막 날의 시장 ADR — 일간·주간(판정일) 컬럼이 쓴다. */
-  adr: number | null;
-  /** 구간 최저 시장 ADR — 월간·연간 컬럼이 쓴다. */
-  adr_min: number | null;
-};
-
-/** 그 날짜가 속한 주의 월요일 — 주간 묶음 키. 로컬 기준으로 조립한다(UTC 파싱은 하루 밀린다). */
-function weekKeyOf(date: string): string {
-  const parsed = new Date(`${date}T00:00:00`);
-  parsed.setDate(parsed.getDate() - ((parsed.getDay() + 6) % 7));
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
-}
-
-/** 누적(%) 시계열을 기간별 수익률로 자른다. 구간 양끝의 누적값 비로 계산한다.
- *  주간은 묶음 키(월요일)와 표시 라벨(그 주 마지막 거래일)이 달라 따로 담는다. */
-function toPeriodRows(daily: Backtest["daily"], keyOf: (date: string) => string, labelByLastDate = false): PeriodRow[] {
-  if (daily.length === 0) return [];
-  const lastByPeriod = new Map<
-    string,
-    { strategy: number; benchmark: number; lastDate: string; adr: number | null; adrMin: number | null }
-  >();
-  const order: string[] = [];
-  for (const point of daily) {
-    const key = keyOf(point.date);
-    if (!lastByPeriod.has(key)) order.push(key);
-    const knownMin = lastByPeriod.get(key)?.adrMin ?? null;
-    const adr = point.adr ?? null;
-    lastByPeriod.set(key, {
-      strategy: point.strategy_pct,
-      benchmark: point.benchmark_pct,
-      lastDate: point.date,
-      adr,
-      adrMin: adr == null ? knownMin : knownMin == null ? adr : Math.min(knownMin, adr),
-    });
-  }
-  // 첫 구간의 기준은 시작 시점(누적 0%)이다.
-  let prev = { strategy: 0, benchmark: 0 };
-  const rows: PeriodRow[] = [];
-  for (const key of order) {
-    const current = lastByPeriod.get(key)!;
-    const step = (now: number, before: number) => ((1 + now / 100) / (1 + before / 100) - 1) * 100;
-    rows.push({
-      period: labelByLastDate ? current.lastDate : key,
-      strategy_pct: step(current.strategy, prev.strategy),
-      benchmark_pct: step(current.benchmark, prev.benchmark),
-      adr: current.adr,
-      adr_min: current.adrMin,
-    });
-    prev = current;
-  }
-  return rows.reverse();
-}
-
 /** 상태 단계 — 색·설명을 여기 한 곳에서만 정한다.
  *
  * 거리 척도(근접 → 임박 → 돌파)는 초록·주황·빨강으로 온도가 올라가고,
@@ -338,6 +331,15 @@ const STAGE_STYLE = {
   near: { color: "#2f9e44", text: "최고 종가까지 3% 초과 7% 이내로 남은 종목입니다." },
   held: { color: "#495057", text: "전략이 이미 들고 있는 종목이 신고가를 다시 넘은 상태입니다. 돌파 신호는 매일 나오지만 재매수하지 않아 목록에만 남습니다." },
 } as const;
+
+/**
+ * 시세가 어느 구간의 값인지 — `live` 로는 가를 수 없다(세션이 닫혀도 참이다).
+ * 거래가 일어나는 세션이 열려 있는지는 백엔드가 `auto_refresh` 로 내려준다.
+ */
+function sessionLabel(positions: { pre_market: boolean; auto_refresh: boolean }): string {
+  if (positions.pre_market) return "장전";
+  return positions.auto_refresh ? "장중" : "마감";
+}
 
 function describeStage(row: PositionRow): { label: string; color: string } {
   // 전략이 이미 들고 있으면 상태보다 '못 산다'는 사실이 먼저다.
@@ -382,7 +384,7 @@ const CURRENT_NOTES = [
   {
     title: "청산",
     body:
-      "종가가 손절선(진입가 대비) 아래거나 이탈 이동평균을 하회하면 다음 거래일 시가에 전량 매도합니다. " +
+      "종가가 이탈 이동평균을 하회하면 다음 거래일 시가에 전량 매도합니다. " +
       "부분 매도와 목표가(익절)는 없습니다.",
   },
   {
@@ -437,34 +439,38 @@ function formatPrice(value: number | null | undefined): string {
 
 export function NewHighClient() {
   const toast = useToast();
-  /** 종목 메모 저장 — 계좌가 아니라 종목에 붙는다(순위·모멘텀·자산 관리 화면과 같은 값·같은 API). */
-  const saveMemo = useCallback(
-    async (ticker: string, memo: string) => {
-      try {
-        await updateStockMemo(ticker, memo);
-        toast.success("메모 저장 완료");
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "메모 저장에 실패했습니다.");
-      }
-    },
-    [toast],
-  );
   const [view, setView] = useState<View | null>(null);
   const [positions, setPositions] = useState<Positions | null>(null);
+  /** 종목 메모 저장 — 계좌가 아니라 종목에 붙는다(순위·모멘텀·자산 관리 화면과 같은 값·같은 API). */
+  const saveMemo = useStockMemoSave(
+    useCallback((ticker: string, memo: string) => {
+      setPositions((prev) =>
+        prev
+          ? {
+              ...prev,
+              holdings: withTickerMemo(prev.holdings, ticker, memo),
+              planned_entries: withTickerMemo(prev.planned_entries, ticker, memo),
+              exited_today: withTickerMemo(prev.exited_today, ticker, memo),
+              breakouts: withTickerMemo(prev.breakouts, ticker, memo),
+              candidates: withTickerMemo(prev.candidates, ticker, memo),
+            }
+          : prev,
+      );
+    }, []),
+  );
   const [backtest, setBacktest] = useState<Backtest | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [backtesting, setBacktesting] = useState(false);
   // 백테스트 기간 — 저장하지 않고 실행할 때 고른다.
-  const [backtestMonths, setBacktestMonths] = useState<number>(12);
+  const [backtestMonths, setBacktestMonths] = useState<number>(60);
   const [backtestProgress, setBacktestProgress] = useState<LoadingProgress | null>(null);
   const [positionsProgress, setPositionsProgress] = useState<LoadingProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [backtestError, setBacktestError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("monthly");
-  const [currentTab, setCurrentTab] = useState<CurrentTab>("list");
+  const [chartsOpen, setChartsOpen] = useState(false);
   // 기준일 — 빈 값이면 최신 거래일. 과거 날짜를 고르면 그 시점 상태를 재현한다.
   const [candidatesOpen, setCandidatesOpen] = useState(false);
   const [charts, setCharts] = useState<HoldingChartData[] | null>(null);
@@ -479,22 +485,37 @@ export function NewHighClient() {
   // 진입·청산 체결일 — 장 시작 전에는 '오늘', 마감 뒤 캐시가 갱신되면 '내일' 이 된다.
   const fillDay = formatFillDay(positions?.next_session);
 
+  /** 지금 화면이 보고 있는 풀 — 풀 전환 중 도착한 **이전 풀의 늦은 응답**을 버리는 기준.
+   *  로딩 중에 풀을 바꾸면 이전 요청의 응답이 나중에 도착해 다른 풀의 보유가 표에 남는다. */
+  const currentPoolRef = useRef<string>("");
+
+  /** 서버 응답(GET)을 화면에 반영한다 — 초기 로드와 풀 전환이 같은 경로를 쓴다.
+   *  선택지 밖 저장값은 서버가 보정(coerce)해 보내므로 여기서 경고만 띄운다. */
+  const applyViewPayload = useCallback(
+    (payload: View) => {
+      if (currentPoolRef.current && payload.settings.pool !== currentPoolRef.current) return;
+      currentPoolRef.current = payload.settings.pool;
+      setView(payload);
+      setDraft(payload.settings);
+      if (payload.coerced?.length) {
+        toast.warning(`저장값이 선택지에 없어 보정했습니다: ${payload.coerced.join(", ")} — 확인 후 저장하세요.`);
+      }
+    },
+    [toast],
+  );
+
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         // 마지막으로 고른 풀은 브라우저에 기억한다(다른 화면들과 같은 공용 키).
-        const remembered = readRememberedTickerType();
+        const remembered = readRememberedTickerType("strategy-new-high");
         const query = remembered ? `?pool=${encodeURIComponent(remembered)}` : "";
         const response = await fetch(`/api/strategy-new-high${query}`, { cache: "no-store" });
         const payload = (await response.json()) as View & { error?: string };
         if (!response.ok) throw new Error(payload.error ?? "설정을 불러오지 못했습니다.");
         if (!alive) return;
-        setView(payload);
-        setDraft(payload.settings);
-        if (payload.coerced?.length) {
-          toast.warning(`저장값이 선택지에 없어 보정했습니다: ${payload.coerced.join(", ")} — 확인 후 저장하세요.`);
-        }
+        applyViewPayload(payload);
       } catch (loadError) {
         if (alive) setError(loadError instanceof Error ? loadError.message : "설정을 불러오지 못했습니다.");
       } finally {
@@ -504,6 +525,7 @@ export function NewHighClient() {
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const runPositions = useCallback(async (settings: Settings) => {
@@ -518,6 +540,8 @@ export function NewHighClient() {
       });
       const payload = (await response.json()) as Positions & { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "돌파 종목을 불러오지 못했습니다.");
+      // 풀 전환 중 도착한 이전 풀의 응답은 버린다 — 셀렉트와 표가 다른 풀로 어긋난다.
+      if (payload.pool && payload.pool !== currentPoolRef.current) return;
       setPositions(payload);
     } catch (runError) {
       toast.error(runError instanceof Error ? runError.message : "돌파 종목을 불러오지 못했습니다.");
@@ -530,7 +554,7 @@ export function NewHighClient() {
 
   // 설정을 받으면 곧바로 오늘 상태를 채운다 — 빈 화면을 먼저 보여주지 않는다.
   useEffect(() => {
-    if (view?.settings && !positions && !running) void runPositions(view.settings);
+    if (view?.settings.start_date && !positions && !running) void runPositions(view.settings);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
@@ -551,7 +575,7 @@ export function NewHighClient() {
         setBacktest(null);
         setBacktestError(null);
         toast.success(message);
-        void runPositions(payload.settings);
+        if (payload.settings.start_date) void runPositions(payload.settings);
       } catch (saveError) {
         toast.error(saveError instanceof Error ? saveError.message : "설정을 저장하지 못했습니다.");
       } finally {
@@ -565,7 +589,7 @@ export function NewHighClient() {
   // 저장 응답을 그대로 초안에 넣으므로 두 객체의 키 구성은 항상 같다.
   // 업종 컬럼 노출 여부 — 표시 중인 결과의 풀 성격(pool_kind)이 1순위(개별주=표시, ETF=숨김),
   // 미설정 풀은 행 값 유무로 추정 (pools-rank·strategy-momentum 과 같은 기준).
-  // 업종 컬럼·업종 상한 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
+  // 업종 컬럼 노출 — 판정은 전 화면 공용(`@/lib/pool-industry`).
   const selectedPoolOption = useMemo(() => {
     const pool = positions?.pool ?? view?.settings.pool ?? "";
     return view?.pool_options?.find((option) => option.ticker_type === pool);
@@ -583,19 +607,32 @@ export function NewHighClient() {
     return (Object.keys(effectiveDraft) as (keyof Settings)[]).some((key) => effectiveDraft[key] !== saved[key]);
   }, [effectiveDraft, view?.settings, view?.coerced]);
 
-  /** 풀을 바꾸면 그 풀에 저장된 설정으로 전환한다. 저장 이력이 없으면 **기본값**으로 채운다 —
-   *  직전 풀의 값을 물려받으면 다른 풀의 설정이 섞여 풀별로 보관하는 의미가 없어진다. */
+  /** 풀을 바꾸면 서버에서 그 풀의 설정을 **다시 읽는다**(새로고침과 같은 GET 경로).
+   *  저장 문서를 화면에서 합쳐 PUT 으로 전환하면, 선택지 밖 저장값이 있는 풀은 검증에
+   *  막혀 전환 자체가 실패한다 — GET 은 서버가 보정(coerce)해 주므로 항상 전환된다.
+   *  저장 이력이 없는 풀은 서버가 기본값을 돌려준다(start_date 없음 → 저장 요구). */
   const handlePoolChange = useCallback(
     (pool: string) => {
       if (!view) return;
-      writeRememberedTickerType(pool);
-      const saved = view.settings_by_pool?.[pool];
-      void persistSettings(
-        { ...view.default_settings, ...(saved ?? {}), pool },
-        saved ? "종목풀을 전환했습니다." : "저장 이력이 없어 기본값으로 시작합니다.",
-      );
+      writeRememberedTickerType("strategy-new-high", pool);
+      // 전환 즉시 기준 풀을 바꾼다 — 진행 중이던 이전 풀 요청의 늦은 응답이 여기서 걸러진다.
+      currentPoolRef.current = pool;
+      setPositions(null);
+      setBacktest(null);
+      void (async () => {
+        try {
+          const response = await fetch(`/api/strategy-new-high?pool=${encodeURIComponent(pool)}`, {
+            cache: "no-store",
+          });
+          const payload = (await response.json()) as View & { error?: string };
+          if (!response.ok) throw new Error(payload.error ?? "설정을 불러오지 못했습니다.");
+          applyViewPayload(payload);
+        } catch (switchError) {
+          toast.error(switchError instanceof Error ? switchError.message : "설정을 불러오지 못했습니다.");
+        }
+      })();
     },
-    [persistSettings, view],
+    [applyViewPayload, toast, view],
   );
 
   const handleBacktest = useCallback(async () => {
@@ -641,28 +678,21 @@ export function NewHighClient() {
         minWidth: STATUS_COLUMN_MIN_WIDTH,
         cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
         valueGetter: (p) => p.data?.gap_pct ?? null,
+        pinned: "left",
         cellRenderer: (p: { data?: PositionRow }) => {
           if (!p.data) return null;
           const stage = describeStage(p.data);
           return <strong style={{ color: stage.color }}>{stage.label}</strong>;
         },
       },
-      // 실계좌 보유는 컬럼 대신 행 배경(appHeldRow, 녹색)으로 표시한다 — 시장 화면과 같은 표준.
+      // 실계좌 보유는 컬럼 대신 티커·종목명 칸 녹색(appHeldRow)으로 표시한다 — 시장 화면과 같은 표준.
       // 시총은 개별주에만 있는 값이라 업종과 판정이 다르다(`@/lib/pool-industry`).
       marketCapRankColumn<PositionRow>("market_cap_rank", !hasMarketCap),
-      {
-        field: "ticker",
-        headerName: "티커",
-        width: 108,
-        cellRenderer: (p: { value?: string }) => <TickerDetailLink ticker={p.value} />,
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        flex: 1,
-        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
-        cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
-      },
+      highDrawdownColumn<PositionRow>("high_drawdown_pct"),
+      // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
+      // 고정 폭 — 보유 표와 후보 표의 앞쪽 칸(상태~거래대금)을 맞춘다.
+      tickerColumn<PositionRow>({}),
+      stockNameColumn<PositionRow>({ nameOptions: (row) => ({ isHeld: row?.account_held, isNew: Boolean(row?.new_listing), newMonths: row?.listing_months ?? null }) }),
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
       stockMemoColumn<PositionRow>({
         field: "memo",
@@ -670,15 +700,7 @@ export function NewHighClient() {
       }),
       // 업종 컬럼 노출 여부 — 종목풀 설정의 풀 성격(pool_kind)이 1순위(개별주=표시, ETF=숨김),
       // 미설정 풀은 행 값 유무로 추정 (pools-rank·strategy-momentum 과 같은 기준).
-      {
-        field: "industry",
-        headerName: "업종",
-        hide: !hasIndustryData,
-        width: INDUSTRY_COLUMN_WIDTH,
-        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
-        headerTooltip: "한국은 네이버 분류, 미국은 지수 구성종목의 yfinance 분류",
-        cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
-      },
+      industryColumn<PositionRow>({ hide: !hasIndustryData }),
       dailyChangeColumn<PositionRow>(),
       {
         field: "price",
@@ -687,6 +709,7 @@ export function NewHighClient() {
         type: "numericColumn",
         valueFormatter: (p) => formatPrice(p.value as number),
       },
+      volatilityColumn<PositionRow>(),
       tradeValueMultColumn<PositionRow>({
         qualifies: (row) => row?.qualifies,
         headerTooltip:
@@ -731,65 +754,6 @@ export function NewHighClient() {
     [windowLabel, hasIndustryData],
   );
 
-  // ADR 값이 하나도 없으면(레짐 시장 없는 풀) 컬럼을 숨긴다 — 모멘텀 화면과 같은 규칙.
-  const hasAdr = useMemo(() => (backtest?.daily ?? []).some((row) => row.adr != null), [backtest]);
-
-  const periodColumns = useMemo<ColDef<PeriodRow>[]>(
-    () => [
-      {
-        field: "period",
-        headerName:
-          viewMode === "yearly" ? "연도" : viewMode === "monthly" ? "월" : viewMode === "weekly" ? "주" : "일자",
-        width: 148,
-        valueFormatter: (p) =>
-          viewMode === "weekly" || viewMode === "daily"
-            ? formatDateWithWeekday(String(p.value ?? ""))
-            : String(p.value ?? ""),
-      },
-      {
-        field: "strategy_pct",
-        headerName: "전략",
-        flex: 1,
-        minWidth: 110,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSignedPct(p.value as number, 2),
-        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
-      },
-      {
-        field: "benchmark_pct",
-        headerName: backtest?.benchmark_name ?? "벤치마크",
-        flex: 1,
-        minWidth: 110,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSignedPct(p.value as number, 2),
-        cellStyle: (p) => ({ color: signColor(p.value as number) }),
-      },
-      {
-        headerName: "초과",
-        flex: 1,
-        minWidth: 100,
-        type: "numericColumn",
-        valueGetter: (p) => (p.data ? p.data.strategy_pct - p.data.benchmark_pct : null),
-        valueFormatter: (p) => (p.value == null ? "-" : `${formatSignedPct(p.value as number, 2)}p`),
-        cellStyle: (p) => ({ color: signColor(p.value as number) }),
-      },
-      // ADR — 일간=당일, 주간=판정일(주 마지막 거래일), 월간·연간=기간 최저. 모멘텀 표와 같은 구성.
-      viewMode === "daily"
-        ? adrColumn<PeriodRow>({ headerName: "ADR", headerTooltip: "그날의 시장 ADR(20일 등락비율)", hide: !hasAdr, getter: (row) => row.adr })
-        : viewMode === "weekly"
-          ? adrColumn<PeriodRow>({ headerName: "판정일 ADR", headerTooltip: "그 주 마지막 거래일의 시장 ADR — 다음 거래일 진입 게이트를 결정한 값", hide: !hasAdr, getter: (row) => row.adr })
-          : adrColumn<PeriodRow>({ headerName: "최저 ADR", headerTooltip: `${viewMode === "yearly" ? "그 해" : "그 달"}의 시장 ADR 최저값`, hide: !hasAdr, getter: (row) => row.adr_min }),
-    ],
-    [viewMode, backtest?.benchmark_name, hasAdr],
-  );
-
-  const periodRows = useMemo<PeriodRow[]>(() => {
-    if (!backtest) return [];
-    if (viewMode === "weekly") return toPeriodRows(backtest.daily, weekKeyOf, true);
-    const keyLength = viewMode === "yearly" ? 4 : viewMode === "monthly" ? 7 : viewMode === "daily" ? 10 : 0;
-    return keyLength ? toPeriodRows(backtest.daily, (date) => date.slice(0, keyLength)) : [];
-  }, [backtest, viewMode]);
-
   // 보유 + 내일 매도 + 내일 매수를 한 표로 합친다 — 이 표만 보고 주문을 낼 수 있게.
   // 표시용 현재가·일간(%)만 60초마다 갱신한다 — 돌파 판정은 종가 기준이라 다시 계산하지 않는다.
   const quoteTickers = useMemo(
@@ -802,14 +766,19 @@ export function NewHighClient() {
       ].filter((ticker, index, all) => all.indexOf(ticker) === index),
     [positions],
   );
-  const quotes = useRealtimeQuotes(positions?.country ?? "", quoteTickers);
-  /** 시세가 들어온 종목만 현재가·등락률을 덮어쓴다(나머지 값은 판정 결과 그대로). */
+  const { quotes, missing: quoteMissing } = useRealtimeQuotes(positions?.country ?? "", quoteTickers);
+  /** 시세가 들어온 종목은 현재가·등락률을 덮어쓰고, 못 받은 종목은 일간(%)을 비운다(지난 값이 오늘처럼 보이지 않게). */
   const withQuote = useCallback(
     <T extends { ticker: string; price: number | null; change_pct: number | null }>(row: T): T => {
       const quote = quotes[row.ticker];
-      return quote ? { ...row, price: quote.price, change_pct: quote.change_pct } : row;
+      if (quote) return { ...row, price: quote.price, change_pct: quote.change_pct };
+      return quoteMissing.includes(row.ticker) ? { ...row, change_pct: null } : row;
     },
-    [quotes],
+    [quotes, quoteMissing],
+  );
+  const realtimeMissing = useMemo(
+    () => [...new Set([...(positions?.realtime_missing_tickers ?? []), ...quoteMissing])],
+    [positions, quoteMissing],
   );
 
   const planRows = useMemo<PlanRow[]>(() => {
@@ -820,9 +789,12 @@ export function NewHighClient() {
       value_mult: h.value_mult ?? null, value_mult_live: h.value_mult_live ?? null,
       exit_price: null,
       entry_date: h.entry_date, entry_price: h.entry_price, return_pct: h.return_pct,
+      fill_date: h.fill_date ?? null,
       plan: h.status, days: h.days, is_new: h.is_new, exit_reason: h.exit_reason,
-      memo: h.memo,
+      memo: h.memo, account_held: h.account_held,
       exit_ma_gap_pct: h.exit_ma_gap_pct, exit_ma: h.exit_ma,
+      volatility_pct: h.volatility_pct, high_drawdown_pct: h.high_drawdown_pct, new_listing: h.new_listing, listing_months: h.listing_months,
+      short_gap_pct: h.short_gap_pct, long_gap_pct: h.long_gap_pct,
     }));
     const buys: PlanRow[] = positions.planned_entries.map((row) => ({
       ticker: row.ticker, name: row.name, industry: row.industry, market_cap_rank: row.market_cap_rank ?? null,
@@ -830,30 +802,52 @@ export function NewHighClient() {
       value_mult: row.value_mult ?? null, value_mult_live: row.value_mult_live ?? null,
       exit_price: null,
       entry_date: null, entry_price: null, return_pct: null,
+      fill_date: row.fill_date ?? null,
       // 아직 안 샀다 — null 로 두면 보유일 칸과 차트 배지가 통째로 비어 진입 전인지 알 수 없다.
       plan: "buy", days: 0, is_new: false, exit_reason: null,
-      memo: row.memo,
+      memo: row.memo, account_held: row.account_held,
+      volatility_pct: row.volatility_pct, high_drawdown_pct: row.high_drawdown_pct, new_listing: row.new_listing, listing_months: row.listing_months,
+      short_gap_pct: row.short_gap_pct, long_gap_pct: row.long_gap_pct,
     }));
     // 오늘 이미 청산된 종목 — 현재가는 지금 시세, 청산가는 따로 담는다.
     const exited: PlanRow[] = positions.exited_today.map((t) => ({
       ticker: t.ticker, name: t.name, industry: t.industry, market_cap_rank: t.market_cap_rank ?? null,
       change_pct: t.change_pct ?? null,
-      price: t.price ?? null, exit_price: t.exit_price,
+      price: t.price ?? null, exit_price: t.exit_price, exit_date: t.exit_date,
       value_mult: t.value_mult ?? null, value_mult_live: t.value_mult_live ?? null,
       entry_date: t.entry_date, entry_price: t.entry_price, return_pct: t.return_pct,
       plan: "exited", days: t.days, is_new: false, exit_reason: t.reason,
-      memo: t.memo,
+      memo: t.memo, account_held: t.account_held,
+      // 이탈 행도 표의 모든 칸이 채워져야 한다 — 판 뒤의 상태를 같은 기준으로 본다.
+      high_drawdown_pct: t.high_drawdown_pct, volatility_pct: t.volatility_pct, new_listing: t.new_listing, listing_months: t.listing_months,
+      short_gap_pct: t.short_gap_pct, long_gap_pct: t.long_gap_pct,
+      exit_ma_gap_pct: t.exit_ma_gap_pct, exit_ma: t.exit_ma,
     }));
-    // 보유(매도 예정 포함)가 위, 아직 안 산 것, 이미 끝난 것 순.
+    // 빈 슬롯 — 상한에서 '다음 시가 이후에 실제로 차 있을 자리' 를 뺀 만큼. 매도 예정은
+    // 곧 비고, 진입 예정은 곧 찬다. 자리가 남았다는 것은 자격을 갖춘 돌파가 없었다는 뜻이라,
+    // 표에 자리를 그려 두면 "왜 안 샀지" 를 표만 보고 알 수 있다.
+    const filled = held.filter((row) => row.plan !== "sell").length + buys.length;
+    const empty: PlanRow[] = Array.from({ length: Math.max(positions.top_n - filled, 0) }, (_, index) => ({
+      ticker: `__EMPTY_${index}__`, name: "(빈 슬롯)", industry: "", market_cap_rank: null,
+      change_pct: null, price: null, exit_price: null,
+      value_mult: null, value_mult_live: null,
+      entry_date: null, entry_price: null, return_pct: null,
+      plan: "empty", days: null, is_new: false, exit_reason: null,
+    }));
+    // 계속 들고 갈 것 → 매도(오늘 체결) → 매도 예정 → 살 것 → 빈 자리 순.
+    // 매도가 한 묶음으로 날짜순(체결된 것 → 내일 예정)으로 읽힌다(모멘텀과 같다).
     // 같은 묶음 안에서는 **오래 들고 있는 것이 위** — 편입일이 이른 순이다.
-    const rank = { hold: 0, sell: 0, buy: 1, exited: 2 } as const;
-    return [...held, ...buys, ...exited].sort(
+    const rank = { hold: 0, exited: 1, sell: 2, buy: 3, empty: 4 } as const;
+    return [...held, ...buys, ...empty, ...exited].sort(
       (a, b) => rank[a.plan] - rank[b.plan] || (a.entry_date ?? "").localeCompare(b.entry_date ?? ""),
     );
   }, [positions]);
 
   // 차트를 그릴 대상 — 이미 나간 종목은 뺀다. 표와 같은 순서로 그린다.
-  const chartRows = useMemo(() => planRows.filter((row) => row.plan !== "exited"), [planRows]);
+  const chartRows = useMemo(
+    () => planRows.filter((row) => row.plan !== "exited" && row.plan !== "empty"),
+    [planRows],
+  );
   // 풀·기준일·구성이 바뀌면 이전 차트는 버린다.
   // 사용자가 고른 풀(draft.pool)을 앞에 둔다 — `positions` 는 새 결과가 와야 바뀌므로,
   // 그것만 보면 풀을 바꾼 뒤 결과가 오기까지 **이전 풀의 차트가 그대로 남는다**.
@@ -867,9 +861,8 @@ export function NewHighClient() {
     setChartsError(null);
   }, [chartKey]);
 
-  // 차트 탭을 열 때만 받는다 — 보유 종목 수만큼 일봉을 실어 오므로 목록 탭에서는 낭비다.
   useEffect(() => {
-    if (currentTab !== "chart" || !draft || !positions || charts || chartsLoading || chartsError) return;
+    if (!chartsOpen || !draft || !positions || charts || chartsLoading || chartsError) return;
     // 재계산 중이면 목록이 옛 풀 것이거나 비어 있다 — 여기서 확정하지 않는다.
     if (running || saving) return;
     if (chartRows.length === 0) {
@@ -899,63 +892,24 @@ export function NewHighClient() {
         setChartsLoading(false);
       }
     })();
-  }, [currentTab, draft, positions, charts, chartsLoading, chartsError, chartRows, toast]);
+  }, [chartsOpen, draft, positions, charts, chartsLoading, chartsError, chartRows, running, saving, toast]);
 
   const holdingColumns = useMemo<ColDef<PlanRow>[]>(
     () => [
-      {
-        headerName: "상태",
-        // 진입 후보 표의 상태와 같은 폭 — 두 표가 나란히 있어 폭이 다르면 어긋나 보인다.
-        // "매도 예정(예상) (손절)" 같은 긴 문구는 잘릴 수 있어 전체를 툴팁으로 둔다.
-        width: STATUS_COLUMN_WIDTH,
-        minWidth: STATUS_COLUMN_MIN_WIDTH,
-        cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
-        valueGetter: (p) => p.data?.plan ?? "",
-        cellRenderer: (p: { data?: PlanRow }) => {
-          if (!p.data) return null;
-          // 장중 판정은 오늘 종가로 확정되기 전이라 (예상) — 종가 확정 후에는 꼬리표가 빠진다.
-          const tag = positions?.live ? "(예상)" : "";
-          const reason = p.data.exit_reason ? ` (${p.data.exit_reason})` : "";
-          if (p.data.plan === "buy") return <strong style={{ color: "#d62828" }}>진입 예정{tag}</strong>;
-          if (p.data.plan === "sell") {
-            const label = `매도 예정${tag}${reason}`;
-            return <strong style={{ color: "#1971c2", whiteSpace: "nowrap" }} title={label}>{label}</strong>;
-          }
-          if (p.data.plan === "exited") {
-            const label = `이탈${reason}`;
-            return <span style={{ color: "var(--text-muted)", whiteSpace: "nowrap" }} title={label}>{label}</span>;
-          }
-          return <span>{p.data.is_new ? "진입" : `${p.data.days}일`}</span>;
-        },
-      },
+      slotStatusColumn<PlanRow>({ fillDay: positions?.next_session }),
       marketCapRankColumn<PlanRow>("market_cap_rank", !hasMarketCap),
-      {
-        field: "ticker",
-        headerName: "티커",
-        width: 108,
-        cellRenderer: (p: { value?: string }) => <TickerDetailLink ticker={p.value} />,
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        flex: 1,
-        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
-        cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
-      },
+      // 고점 대비 — 모멘텀 운용 현황과 같은 공용 컬럼(두 화면이 같은 값을 본다).
+      highDrawdownColumn<PlanRow>("high_drawdown_pct"),
+      // 티커·종목명 — 공용 컬럼. 고정 폭 — 보유 표와 후보 표의 앞쪽 칸을 맞춘다.
+      tickerColumn<PlanRow>({}),
+      stockNameColumn<PlanRow>({ nameOptions: (row) => ({ isHeld: row?.account_held, isNew: Boolean(row?.new_listing), newMonths: row?.listing_months ?? null }) }),
       // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
       stockMemoColumn<PlanRow>({
         field: "memo",
+        editable: (row) => row?.plan !== "empty",
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
       }),
-      {
-        field: "industry",
-        headerName: "업종",
-        hide: !hasIndustryData,
-        width: INDUSTRY_COLUMN_WIDTH,
-        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
-        headerTooltip: "한국은 네이버 분류, 미국은 지수 구성종목의 yfinance 분류",
-        cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
-      },
+      industryColumn<PlanRow>({ hide: !hasIndustryData }),
       dailyChangeColumn<PlanRow>(),
       {
         field: "price",
@@ -965,7 +919,24 @@ export function NewHighClient() {
         headerTooltip: "이탈한 종목도 지금 시세다 — 판 뒤의 흐름을 청산가와 견줘 볼 수 있다.",
         valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number)),
       },
-      // 표준 배치(일간(%) → 현재가 → 거래대금) — 순위·진입 후보 표와 같은 공용 컬럼.
+      volatilityColumn<PlanRow>(),
+      // 수익률과 이탈 여유는 매일 보는 판단 칸이라 거래대금 앞에 모은다(모멘텀 보유 표와 같은 취지).
+      {
+        field: "return_pct",
+        headerName: "수익률",
+        width: 108,
+        type: "numericColumn",
+        headerTooltip: "아직 청산 전이라 매도 슬리피지는 빠져 있다.",
+        valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
+        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
+      },
+      maExitGapColumn<PlanRow>({
+        field: "exit_ma_gap_pct",
+        maDays: draft?.exit_ma_days,
+        maType: positions?.ma_type,
+        getMaValue: (row) => row?.exit_ma,
+        formatMaValue: (value) => formatPrice(value),
+      }),
       tradeValueMultColumn<PlanRow>(),
       {
         field: "entry_date",
@@ -990,63 +961,17 @@ export function NewHighClient() {
         headerTooltip: "오늘 이탈한 종목의 체결가. 아직 들고 있는 종목은 값이 없다.",
         valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number)),
       },
-      {
-        field: "return_pct",
-        headerName: "수익률",
-        width: 108,
-        type: "numericColumn",
-        headerTooltip: "아직 청산 전이라 매도 슬리피지는 빠져 있다.",
-        valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
-        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
-      },
-      {
-        // 이탈까지 얼마나 남았나 — 현재가가 이탈 이평선보다 몇 % 위인지.
-        // 판정에 쓰는 바로 그 선이라 이 숫자가 0 이하가 되면 매도 판정이 선다.
-        field: "exit_ma_gap_pct",
-        // 이름에 이평선 일수를 넣는다 — 설정을 바꾸면 헤더도 따라 바뀐다.
-        headerName: `MA${draft?.exit_ma_days ?? ""} 이탈`,
-        width: 96,
-        type: "numericColumn",
-        headerTooltip: `현재가가 이탈 이평선(MA${draft?.exit_ma_days ?? ""})보다 몇 % 위인지. 0 에 가까울수록 매도가 가깝다.`,
-        tooltipValueGetter: (p) =>
-          p.data?.exit_ma != null ? `이탈선 ${formatPrice(p.data.exit_ma)}` : "",
-        valueFormatter: (p) => (p.value == null ? "-" : `${(p.value as number).toFixed(1)}%`),
-        // 5% 안으로 들어오면 붉게 — 그 밖은 평범한 숫자다(눈이 임박한 것만 잡게).
-        cellStyle: (p): { color: string; fontWeight: number } | null => {
-          const value = p.value as number | null;
-          if (value != null && value <= 5) return { color: "var(--up-color, #d64545)", fontWeight: 700 };
-          return null;
-        },
-      },
     ],
-    [hasIndustryData, fillDay, positions?.live, draft?.exit_ma_days],
+    [hasIndustryData, fillDay, positions?.live, positions?.ma_type, draft?.exit_ma_days],
   );
 
   const tradeColumns = useMemo<ColDef<Trade>[]>(
     () => [
-      { field: "exit_date", headerName: "청산일", width: 116 },
-      {
-        field: "ticker",
-        headerName: "티커",
-        width: 108,
-        cellRenderer: (p: { value?: string }) => <TickerDetailLink ticker={p.value} />,
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        flex: 1,
-        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
-        cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
-      },
-      {
-        field: "industry",
-        headerName: "업종",
-        hide: !hasIndustryData,
-        width: INDUSTRY_COLUMN_WIDTH,
-        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
-        headerTooltip: "한국은 네이버 분류, 미국은 지수 구성종목의 yfinance 분류",
-        cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
-      },
+      { field: "exit_date", headerName: "청산일", width: 116, pinned: "left" },
+      // 티커·종목명 — 공용 컬럼. 과거 체결이라 배지(이격 데이터) 없이 기본 표기.
+      tickerColumn<Trade>({}),
+      stockNameColumn<Trade>({}),
+      industryColumn<Trade>({ hide: !hasIndustryData }),
       { field: "entry_date", headerName: "진입일", width: 116 },
       {
         field: "entry_price",
@@ -1095,11 +1020,15 @@ export function NewHighClient() {
   return (
     <PageFrame title="신고가 전략" fullWidth>
       <div className="appPageStack">
+        <RealtimeMissingNotice tickers={realtimeMissing} />
         <section className="appSection">
           <div className="card appCard">
             <div className="card-body appCardBodyTight">
               {/* 메인 헤더 — 주 제어(셀렉터·토글). CRUD 버튼은 아래 보조 액션 헤더로 뺀다. */}
-              <div className="appMainHeader">
+              {!view.settings.start_date ? (
+              <div className="alert alert-info">전략 시작일을 선택하고 저장하면 이용할 수 있습니다.</div>
+            ) : null}
+            <div className="appMainHeader">
                 <div className="appMainHeaderLeft">
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">종목풀</span>
@@ -1115,9 +1044,11 @@ export function NewHighClient() {
                       ))}
                     </select>
                   </label>
+                <StrategyStartDate value={draft.start_date} disabled={saving} onChange={(start_date) => setDraft({ ...draft, start_date })} />
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">이탈 이평선</span>
                     <MaDaysSelect
+                      maType={positions?.ma_type}
                       value={draft.exit_ma_days}
                       options={constraints.exit_ma_options}
                       onChange={(days) => setDraft({ ...draft, exit_ma_days: days })}
@@ -1150,29 +1081,11 @@ export function NewHighClient() {
                         ...draft,
                         adr_floor: event.target.value === "" ? null : Number(event.target.value),
                       })}
-                      title="전일 시장 ADR(20일 등락비율)이 이 값 미만이면 그날은 신규 진입을 하지 않는다. 보유 종목은 손절선·이탈 이평선이 그대로 관리한다. 시장은 종목풀 설정의 시장 레짐 지수를 따른다."
+                      title="전일 시장 ADR(20일 등락비율)이 이 값 미만이면 그날은 신규 진입을 하지 않는다. 보유 종목은 이탈 이평선이 그대로 관리한다. 시장은 종목풀 설정의 시장 레짐 지수를 따른다."
                     >
                       {(constraints.adr_floor_options ?? []).map((value) => (
                         <option key={String(value)} value={value == null ? "" : String(value)}>
                           {value == null ? "없음" : String(value)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">손절선</span>
-                    <select
-                      className="form-select form-select-sm"
-                      value={draft.stop_loss_pct == null ? "" : String(draft.stop_loss_pct)}
-                      onChange={(event) => setDraft({
-                        ...draft,
-                        stop_loss_pct: event.target.value === "" ? null : Number(event.target.value),
-                      })}
-                      title="진입가 대비 이 낙폭에 닿으면 다음 시가에 판다. '없음'이면 손절 없이 이탈 이평선만으로 청산한다."
-                    >
-                      {constraints.stop_loss_options.map((value) => (
-                        <option key={String(value)} value={value == null ? "" : String(value)}>
-                          {value == null ? "없음" : `${value}%`}
                         </option>
                       ))}
                     </select>
@@ -1185,7 +1098,7 @@ export function NewHighClient() {
                     type="button"
                     className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                     onClick={() => void persistSettings(effectiveDraft ?? draft, "설정을 저장했습니다.")}
-                    disabled={saving || !isDirty}
+                    disabled={saving || !isDirty || !draft.start_date}
                   >
                     <IconCheck size={16} />
                     <span>{saving ? "저장 중…" : "저장"}</span>
@@ -1204,42 +1117,34 @@ export function NewHighClient() {
                 {positions ? (
                   <span style={hintStyle}>
                     {positions.live || positions.pre_market
-                      ? `${formatKstDateTime(positions.quote_at)} 시세 · ${positions.live ? "장중" : "장전"}`
+                      ? `${formatKstDateTime(positions.quote_at)} 시세 · ${sessionLabel(positions)}`
                       : `${formatKstDateTime(positions.refreshed_at)} 갱신`}
                   </span>
                 ) : null}
-                {/* 기준일 셀렉트를 없앤 뒤에도 "언제 기준인지"는 남긴다 — 장중이면 자동 갱신 중이라는 표시. */}
+                {/* 기준일 셀렉트를 없앤 뒤에도 "언제 기준인지"는 남긴다 — 세션이 열려 있으면 자동 갱신 중이라는 표시. */}
                 {positions ? (
                   <span style={hintStyle}>
                     {positions.auto_refresh
-                      ? `오늘 (${positions.live ? "장중" : "장전"} 자동 갱신)`
+                      ? `오늘 (${sessionLabel(positions)} 자동 갱신)`
                       : `오늘 (${formatDateWithWeekday(positions.as_of)})`}
                   </span>
                 ) : null}
                 <span style={hintStyle}>{running ? "계산 중…" : ""}</span>
+                <button type="button" className="btn btn-outline-primary btn-sm" onClick={() => setChartsOpen(true)} disabled={!positions || running || saving}>
+                  차트 전체 보기
+                </button>
               </span>
             </div>
             <div className="card-body appCardBodyTight">
               <StrategyNotes items={CURRENT_NOTES} />
-              <NavTabs
-                items={CURRENT_TABS}
-                value={currentTab}
-                onChange={setCurrentTab}
-                label="운용 현황 보기"
-                style={{ marginBottom: 12 }}
-              />
               {running && !positions ? (
                 <AppLoadingProgress title="운용 현황 계산 중..." progress={positionsProgress} />
-              ) : currentTab === "list" ? (
+              ) : (
                 <>
                   <div style={{ ...hintStyle, fontWeight: 700, margin: "4px 0 6px" }}>
                     보유 종목 ({positions?.holdings.length ?? 0}개)
-                    {positions?.holdings.some((h) => h.status === "sell")
-                      ? ` · ${fillDay} 매도 ${positions.holdings.filter((h) => h.status === "sell").length}`
-                      : ""}
-                    {positions?.planned_entries.length
-                      ? ` · ${fillDay} 매수 ${positions.planned_entries.length}`
-                      : ""}
+                    {fillDaySummary(positions?.holdings.filter((h) => h.status === "sell") ?? [], "매도", fillDay)}
+                    {fillDaySummary(positions?.planned_entries ?? [], "매수", fillDay)}
                     {positions?.exited_today.length ? ` · 오늘 이탈 ${positions.exited_today.length}` : ""}
                     {positions?.adr_gate ? (
                       positions.adr_gate.blocked ? (
@@ -1261,6 +1166,14 @@ export function NewHighClient() {
                     theme={gridTheme}
                     minHeight={0}
                     height="auto"
+                    // 공통 행 표시 — 보유는 티커·종목명 칸 녹색, 추세 이탈은 행 전체 회색(전 화면 동일).
+                    getRowClass={(params) =>
+                      stockRowClass({
+                        emptySlot: params.data?.plan === "empty",
+                        held: params.data?.account_held,
+                        trendBroken: isTrendBroken(params.data?.short_gap_pct, params.data?.long_gap_pct),
+                      })
+                    }
                     gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
                   />
                   {/* 진입 후보 표 — 항상 펼쳐 둔다. 상태 설명만 표 아래에서 접고 펼친다. */}
@@ -1274,8 +1187,13 @@ export function NewHighClient() {
                     theme={gridTheme}
                     minHeight={0}
                     height="auto"
-                    // 실계좌 보유 종목은 행 배경 녹색 — 시장 화면과 같은 표준(보유 컬럼 대체).
-                    getRowClass={(params) => (params.data?.account_held ? "appHeldRow" : "")}
+                    // 공통 행 표시 — 보유는 티커·종목명 칸 녹색, 추세 이탈은 행 전체 회색(전 화면 동일).
+                    getRowClass={(params) =>
+                      stockRowClass({
+                        held: params.data?.account_held,
+                        trendBroken: isTrendBroken(params.data?.short_gap_pct, params.data?.long_gap_pct),
+                      })
+                    }
                     gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
                   />
                   <button
@@ -1311,8 +1229,11 @@ export function NewHighClient() {
                     </div>
                   ) : null}
                 </>
-              ) : (
-                <StrategyHoldingCharts
+              )}
+              <StrategyChartModal
+                  open={chartsOpen}
+                  onClose={() => setChartsOpen(false)}
+                  title="신고가 차트"
                   charts={charts}
                   loading={chartsLoading || running || saving}
                   error={chartsError}
@@ -1321,7 +1242,7 @@ export function NewHighClient() {
                   hint={
                     <>
                       종가가 직전 최고 종가를 넘으면 진입,{" "}
-                      <strong style={{ color: "#12b886" }}>MA{draft.exit_ma_days}</strong>를 하회하면 청산합니다.
+                      <strong style={{ color: "#12b886" }}>{formatMaLabel(draft.exit_ma_days, positions?.ma_type)}</strong>를 하회하면 청산합니다.
                       진입한 종목은 매수가와 함께 Buy 화살표가 표시됩니다.
                     </>
                   }
@@ -1336,7 +1257,6 @@ export function NewHighClient() {
                     };
                   }}
                 />
-              )}
             </div>
           </div>
         </section>
@@ -1350,14 +1270,14 @@ export function NewHighClient() {
                 <MonthsSelect
                   value={backtestMonths}
                   options={constraints.month_options}
-                  disabled={backtesting}
+                  disabled={backtesting || !view.settings.start_date}
                   onChange={setBacktestMonths}
                 />
                 <button
                   type="button"
                   className="btn btn-sm btn-dark"
                   onClick={() => void handleBacktest()}
-                  disabled={backtesting}
+                  disabled={backtesting || !view.settings.start_date}
                 >
                   {backtesting ? "실행 중…" : "실행"}
                 </button>
@@ -1381,6 +1301,8 @@ export function NewHighClient() {
                       totalPct: backtest.strategy_total_pct,
                       cagrPct: backtest.strategy_cagr_pct,
                       mddPct: backtest.strategy_mdd_pct,
+                      mddFrom: backtest.strategy_mdd_from,
+                      mddTo: backtest.strategy_mdd_to,
                       sortino: backtest.strategy_sortino,
                     }}
                     benchmark={{
@@ -1388,37 +1310,32 @@ export function NewHighClient() {
                       totalPct: backtest.benchmark_total_pct,
                       cagrPct: backtest.benchmark_cagr_pct,
                       mddPct: backtest.benchmark_mdd_pct,
+                      mddFrom: backtest.benchmark_mdd_from,
+                      mddTo: backtest.benchmark_mdd_to,
                       sortino: backtest.benchmark_sortino,
                     }}
                   />
                   <BacktestTradeStats stats={backtest} style={{ marginBottom: 12 }} />
-                  <NavTabs
-                    items={VIEW_MODES}
-                    value={viewMode}
-                    onChange={setViewMode}
-                    label="백테스트 보기 단위"
-                    style={{ marginBottom: 10 }}
+                  <BacktestPeriodTables
+                    daily={backtest.daily}
+                    strategyLabel="전략"
+                    benchmarkLabel={backtest.benchmark_name}
+                    defaultView="monthly"
+                    extraTab={{
+                      label: "체결",
+                      content: (
+                        // autoHeight — 카드 안에서 스크롤하지 않고 브라우저 스크롤로 본다.
+                        <AppAgGrid<Trade>
+                          rowData={backtest.trades}
+                          columnDefs={tradeColumns}
+                          theme={gridTheme}
+                          minHeight={0}
+                          height="auto"
+                          gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                        />
+                      ),
+                    }}
                   />
-                  {viewMode === "trades" ? (
-                    // autoHeight — 카드 안에서 스크롤하지 않고 브라우저 스크롤로 본다.
-                    <AppAgGrid<Trade>
-                      rowData={backtest.trades}
-                      columnDefs={tradeColumns}
-                      theme={gridTheme}
-                      minHeight={0}
-                      height="auto"
-                      gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
-                    />
-                  ) : (
-                    <AppAgGrid<PeriodRow>
-                      rowData={periodRows}
-                      columnDefs={periodColumns}
-                      theme={gridTheme}
-                      minHeight={0}
-                      height="auto"
-                      gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
-                    />
-                  )}
                 </>
               )}
             </div>
@@ -1432,20 +1349,17 @@ export function NewHighClient() {
           monthOptions={constraints.tuning_month_options ?? constraints.month_options}
           defaultMonths={backtestMonths}
           // 튜닝도 백테스트와 같이 **화면 초안** 기준이라(fixedLabel 참고) 실행 조건을 같게 둔다.
-          disabled={backtesting}
-          secondsPerCombo={0.04}
-          extraSeconds={50}
+          disabled={backtesting || !view.settings.start_date}
           fixedLabel={`현재 화면 값 기준 (종목 수 ${draft.top_n} 공통 고정)`}
           current={{
-            stop_loss_pct: draft.stop_loss_pct,
             exit_ma_days: draft.exit_ma_days,
             min_value_mult: draft.min_value_mult ?? null,
             adr_floor: draft.adr_floor ?? null,
           }}
           axes={[
             // 축 값 = 상단 셀렉트 선택지(서버 상수) — 순서·이름도 상단 설정과 같다.
-            // 종목 수(공통 고정)·업종 상한(폐기)은 축이 아니다 — 튜닝은 시장의 반응 속도와 급증·손절 기준만 잰다.
-            { key: "exit_ma_days", label: "이탈 이평선", values: constraints.exit_ma_options.map((n) => ({ value: n, label: `${n}일` })) },
+            // 종목 수(공통 고정)·업종 상한(폐기)은 축이 아니다 — 튜닝은 시장의 반응 속도와 급증 기준만 잰다.
+            { key: "exit_ma_days", label: "이탈 이평선", values: constraints.exit_ma_options.map((n) => ({ value: n, label: formatMaLabel(n, positions?.ma_type) })) },
             {
               key: "min_value_mult",
               label: "거래대금 하한",
@@ -1456,18 +1370,12 @@ export function NewHighClient() {
               label: "ADR 하한",
               values: (constraints.adr_floor_options ?? []).map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: String(n) })),
             },
-            {
-              key: "stop_loss_pct",
-              label: "손절선",
-              values: constraints.stop_loss_options.map((n) => ({ value: n, label: n == null ? "없음" : `${n}%` })),
-            },
           ]}
           onApply={async (params) => {
             // 조합을 상단 폼에 넣고 그대로 저장한다 (저장 응답이 폼·운용 현황을 갱신한다).
             await persistSettings(
               {
                 ...draft,
-                stop_loss_pct: params.stop_loss_pct == null ? null : Number(params.stop_loss_pct),
                 exit_ma_days: Number(params.exit_ma_days),
                 min_value_mult: params.min_value_mult == null ? null : Number(params.min_value_mult),
                 adr_floor: params.adr_floor == null ? null : Number(params.adr_floor),
@@ -1475,16 +1383,16 @@ export function NewHighClient() {
               "튜닝 조합을 적용해 저장했습니다.",
             );
           }}
-          run={async (months, ranges) => {
-            const response = await fetch("/api/strategy-new-high/tuning", {
+          // 응답은 SSE 스트림(진행 이벤트 + 결과 이벤트) — 파싱은 StrategyTuning 이 한다.
+          run={async (months, ranges, signal) =>
+            fetch("/api/strategy-new-high/tuning", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ months, settings: effectiveDraft ?? draft, ranges }),
-            });
-            const payload = await response.json();
-            if (!response.ok) throw new Error(payload.error ?? "튜닝에 실패했습니다.");
-            return payload as TuningResult;
-          }}
+              signal,
+            })
+          }
+          cancelRun={() => fetch("/api/strategy-new-high/tuning", { method: "DELETE" })}
         />
       </div>
     </PageFrame>

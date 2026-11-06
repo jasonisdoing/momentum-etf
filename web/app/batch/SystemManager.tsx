@@ -68,7 +68,15 @@ type SystemResponse = {
   last_run_by_job?: Record<string, SystemLastRunInfo>;
   running_job_details?: Record<string, SystemRunningJobDetail>;
   next_run_by_job?: Record<string, SystemNextRunInfo>;
-  estimated_by_job?: Record<string, { seconds: number | null; display: string | null }>;
+  estimated_by_job?: Record<string, {
+    seconds: number | null;
+    display: string | null;
+    /** 큐에 들어간 뒤 실행이 시작되기까지의 평균. 앞선 배치가 돌면 그만큼 늘어난다. */
+    wait_display?: string | null;
+    /** 서버·로컬 각각의 평균 실행 시간 — 두 환경의 성능 차이를 본다. */
+    server_display?: string | null;
+    local_display?: string | null;
+  }>;
   batch_queue?: BatchQueueItem[];
   error?: string;
 };
@@ -86,7 +94,9 @@ type SystemScheduleGridRow = SystemScheduleRow & {
   lastRunClickable: boolean;          // 현재 인스턴스에서 다운로드 가능?
   lastRunStartedAt: string | null;    // ISO — 로그 다운로드 파라미터
   lastRunEndedAt: string | null;
-  estimatedDisplay: string; // "4분 7초" 또는 "-" (이력 없음)
+  waitDisplay: string;
+  serverDisplay: string;
+  localDisplay: string;
   runningCommandPrefix: string;
   runningCancellable: boolean; // 같은 인스턴스의 worker 가 처리 중이라 중단 가능
   runningCancelRequested: boolean; // 이미 중단 요청 보냈는지
@@ -269,11 +279,28 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
     },
   },
   {
-    field: "estimatedDisplay",
-    headerName: "예상시간",
+    field: "serverDisplay",
+    headerName: "예상시간(서버)",
+    minWidth: 110,
+    width: 118,
+    tooltipValueGetter: () => "서버에서 성공한 최근 5건의 평균 실행 시간. 출처: batch_queue",
+    cellRenderer: (params: { value: string }) => params.value || "-",
+  },
+  {
+    field: "localDisplay",
+    headerName: "예상시간(로컬)",
+    minWidth: 110,
+    width: 118,
+    tooltipValueGetter: () => "로컬에서 성공한 최근 5건의 평균 실행 시간. 출처: batch_queue",
+    cellRenderer: (params: { value: string }) => params.value || "-",
+  },
+  {
+    field: "waitDisplay",
+    headerName: "대기시간",
     minWidth: 85,
     width: 95,
-    tooltipValueGetter: () => "최근 성공한 5건의 평균 소요시간 (성공 이력 없으면 실패 포함). 출처: logs/cron/{job}.log",
+    tooltipValueGetter: () =>
+      "크론이 걸거나 사람이 누른 뒤 실제 실행이 시작되기까지의 평균 (최근 5건). 앞선 배치가 돌고 있으면 그만큼 늘어난다. 출처: batch_queue",
     cellRenderer: (params: { value: string }) => params.value || "-",
   },
   {
@@ -393,7 +420,15 @@ export function SystemManager({
   const [lastRunByJob, setLastRunByJob] = useState<Record<string, SystemLastRunInfo>>({});
   const [runningJobDetails, setRunningJobDetails] = useState<Record<string, SystemRunningJobDetail>>({});
   const [nextRunByJob, setNextRunByJob] = useState<Record<string, SystemNextRunInfo>>({});
-  const [estimatedByJob, setEstimatedByJob] = useState<Record<string, { seconds: number | null; display: string | null }>>({});
+  const [estimatedByJob, setEstimatedByJob] = useState<Record<string, {
+    seconds: number | null;
+    display: string | null;
+    /** 큐에 들어간 뒤 실행이 시작되기까지의 평균. 앞선 배치가 돌면 그만큼 늘어난다. */
+    wait_display?: string | null;
+    /** 서버·로컬 각각의 평균 실행 시간 — 두 환경의 성능 차이를 본다. */
+    server_display?: string | null;
+    local_display?: string | null;
+  }>>({});
   const [batchQueue, setBatchQueue] = useState<BatchQueueItem[]>([]);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [, startTransition] = useTransition();
@@ -467,7 +502,9 @@ export function SystemManager({
       lastRunClickable: Boolean(lastRunByJob[row.key]?.is_clickable),
       lastRunStartedAt: lastRunByJob[row.key]?.started_at ?? null,
       lastRunEndedAt: lastRunByJob[row.key]?.ended_at ?? null,
-      estimatedDisplay: String(estimatedByJob[row.key]?.display ?? "-"),
+      waitDisplay: String(estimatedByJob[row.key]?.wait_display ?? "-"),
+      serverDisplay: String(estimatedByJob[row.key]?.server_display ?? "-"),
+      localDisplay: String(estimatedByJob[row.key]?.local_display ?? "-"),
       runningCommandPrefix,
       runningCancellable:
         isRunning && Boolean(runningJobDetails[runningDetailKey]?.is_mine),
@@ -622,29 +659,29 @@ export function SystemManager({
               }}
             />
             {(() => {
-              // 백엔드 schedule_note 한 문장 + 20분 timeout 안내 한 문장.
-              // 모두 한국어 문장이라 "다. " 단위로 split 하여 한 문장 한 줄로 표시.
-              const timeoutLine = "배치 실행이 20분을 초과하면 hang 으로 간주하여 자동 종료(SIGKILL)되고 Slack 알림이 전송됩니다.";
-              const combined = scheduleNote ? `${scheduleNote} ${timeoutLine}` : timeoutLine;
-              // "다. " 뒤에서 split 후 종결 마침표 복원.
-              const sentences = combined
-                .split(/(?<=다\.) +/)
-                .map((s) => s.trim())
-                .filter((s) => s.length > 0);
+              // 백엔드 schedule_note(타임아웃 안내 포함)는 한 줄이 한 항목이다.
+              const sentences = (scheduleNote ?? "")
+                .split("\n")
+                .map((sentence) => sentence.trim())
+                .filter((sentence) => sentence.length > 0);
+              if (sentences.length === 0) return null;
               return (
-                <div
-                  className="tableFooterMeta"
-                  style={{
-                    color: "#000",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 4,
-                    lineHeight: 1.6,
-                  }}
-                >
-                  {sentences.map((line, idx) => (
-                    <div key={idx}>{line}</div>
-                  ))}
+                // 표 하단 메타(.tableFooterMeta)는 우측 정렬이라 긴 안내문에는 쓰지 않는다 — 안내 박스로 왼쪽 정렬한다.
+                <div className="alert alert-info mb-0 mt-2">
+                  <ul className="mb-0 ps-3" style={{ lineHeight: 1.7 }}>
+                    {sentences.map((line, idx) => (
+                      <li key={idx}>
+                        {/* 백틱으로 감싼 부분은 코드 표기로 보여준다. */}
+                        {line.split(/(`[^`]+`)/).map((part, partIdx) =>
+                          part.startsWith("`") && part.endsWith("`") ? (
+                            <code key={partIdx}>{part.slice(1, -1)}</code>
+                          ) : (
+                            <span key={partIdx}>{part}</span>
+                          ),
+                        )}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               );
             })()}

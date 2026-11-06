@@ -3,7 +3,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getAuthCookieName, verifySessionToken } from "./lib/auth";
 
 function isPublicPath(pathname: string): boolean {
-  return pathname === "/login" || pathname === "/api/live" || pathname.startsWith("/api/auth/");
+  return (
+    pathname === "/login" ||
+    pathname === "/api/live" ||
+    pathname.startsWith("/api/auth/") ||
+    // 슬랙 인터랙션 웹훅 — 로그인 없이 오며, 서명 검증은 FastAPI 가 한다.
+    pathname === "/api/slack/interactions"
+  );
 }
 
 function isStaticPath(pathname: string): boolean {
@@ -21,10 +27,27 @@ function isStaticPath(pathname: string): boolean {
   );
 }
 
+/** 로컬 개발 접속이면 로그인을 건너뛴다.
+ *
+ *  `NODE_ENV` 는 `next build` 가 production 으로 고정하므로 운영 빌드에서는 이 분기가
+ *  아예 남지 않는다. `Host` 는 클라이언트가 보내는 값이라 단독으로는 못 믿어 함께 건다.
+ */
+function isLocalDevRequest(request: NextRequest): boolean {
+  if (process.env.NODE_ENV === "production") {
+    return false;
+  }
+  const host = request.nextUrl.hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (isStaticPath(pathname)) {
+    return NextResponse.next();
+  }
+
+  if (isLocalDevRequest(request)) {
     return NextResponse.next();
   }
 

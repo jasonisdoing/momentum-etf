@@ -7,13 +7,15 @@ import { formatKstDateTime } from "@/lib/datetime";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { LastSavedCell } from "../components/LastSavedCell";
-import { MaDaysSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
+import { MaDaysSelect, MaTypeSelect, type MaOptionsPayload } from "../components/MaDaysSelect";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { AppModal } from "../components/AppModal";
+import { ensureAsxPrefix } from "../components/TickerDetailLink";
 
 /** 숫자 셀렉트/입력으로 편집하는 키. */
 const NUMERIC_KEYS = [
+  "TOP_N_HOLD",
   "SHORT_MA_DAYS",
   "LONG_MA_DAYS",
   "BUY_SLIPPAGE_PCT",
@@ -21,20 +23,34 @@ const NUMERIC_KEYS = [
   "STOPLOSS_THRESHOLD_PCT",
 ] as const;
 
+/** '없음'(null)을 허용하는 모멘텀 전략 키 — 전략 화면과 같은 저장소(풀 문서). */
+const OPTIONAL_NUMERIC_KEYS = ["ENTRY_VOL_MULT", "ADR_FLOOR"] as const;
+
 /** 화면 표시 순서 = 헤더 순서. 셀도 반드시 이 순서로 그려야 한다. */
-const EDITABLE_KEYS = [...NUMERIC_KEYS, "BENCHMARK", "MARKET_REGIME_INDEX"] as const;
+const EDITABLE_KEYS = [
+  ...NUMERIC_KEYS,
+  ...OPTIONAL_NUMERIC_KEYS,
+  "MOVING_AVERAGE_TYPE",
+  "BENCHMARK",
+  "MARKET_REGIME_INDEX",
+] as const;
 
 type NumericKey = (typeof NUMERIC_KEYS)[number];
+type OptionalNumericKey = (typeof OPTIONAL_NUMERIC_KEYS)[number];
 type EditableKey = (typeof EDITABLE_KEYS)[number];
 
 const KEY_LABELS: Record<EditableKey, string> = {
+  TOP_N_HOLD: "보유종목 수",
   SHORT_MA_DAYS: "단기 이평선",
   LONG_MA_DAYS: "장기 이평선",
+  MOVING_AVERAGE_TYPE: "이평 종류",
   BUY_SLIPPAGE_PCT: "매수 슬리피지(%)",
   SELL_SLIPPAGE_PCT: "매도 슬리피지(%)",
   STOPLOSS_THRESHOLD_PCT: "손절 기준(%)",
+  ENTRY_VOL_MULT: "진입 문턱",
+  ADR_FLOOR: "ADR 하한",
   BENCHMARK: "벤치마크",
-  MARKET_REGIME_INDEX: "시장 레짐",
+  MARKET_REGIME_INDEX: "ADR 기준",
 };
 
 const DEFAULT_SLIPPAGE_PCT_OPTIONS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5];
@@ -67,16 +83,62 @@ type PoolEntry = {
   save_method?: string;
 };
 
+/** 전략 하나의 12개월 백테스트 요약 — 버튼을 눌러야 채워진다. */
+type StrategyBacktest = {
+  cagr_pct: number | null;
+  mdd_pct: number | null;
+  sortino: number | null;
+  /** 그 전략의 저장 설정이 없어 돌릴 수 없었던 경우. */
+  no_settings?: boolean;
+  /** 백테스트 실행이 실패한 경우 — 셀에 "실패"와 사유(툴팁)를 보여준다. */
+  error?: string;
+  /** 계산해 저장한 시각. 설정이 바뀌면 서버가 지운다. */
+  updated_at?: string | null;
+};
+
+/** 종목풀 → 전략 → 결과. 값이 없으면 아직 안 돌린 것이다. */
+type BacktestByPool = Record<string, Partial<Record<StrategyKey, StrategyBacktest>>>;
+
+/** 소수 자리 맞춘 숫자 — 값이 없으면 빈칸(설정이 없거나 못 돌린 전략). */
+function fmt(value: number | null, digits: number): string {
+  return value == null ? "-" : value.toFixed(digits);
+}
+
+const STRATEGY_COLUMNS: { key: StrategyKey; label: string }[] = [
+  { key: "momentum", label: "모멘텀" },
+  { key: "new_high", label: "신고가" },
+  { key: "portfolio", label: "포트폴리오" },
+];
+
+type StrategyKey = "momentum" | "new_high" | "portfolio";
+
+/** 사고팔기 — 백테스트가 없고 국장 ETF 풀에서만 켠다. 그래서 전략 컬럼 목록과 따로 둔다. */
+const TRADE_KEY = "strategy_trade";
+type UseKey = StrategyKey | typeof TRADE_KEY;
+
 type PoolSettingsResponse = {
   pools: PoolEntry[];
   constraints: {
     /** 이평선 선택지 — 국가별(풀의 country_code 로 고른다). 백엔드 utils/ma_options 가 단일 소스. */
     ma_options_by_country: Record<string, MaOptionsPayload>;
+    /** 이평 **종류** 선택지(SMA/EMA) — 일수와 같은 자리의 풀별 설정. config 가 단일 소스. */
+    moving_average_type_options?: string[];
+    top_n_hold_options: number[];
     slippage_pct_options?: number[];
     stoploss_pct_options?: number[];
+    /** 진입 문턱 선택지 — 국가별(이평선 선택지와 같은 방식). */
+    entry_vol_mult_options_by_country?: Record<string, (number | null)[]>;
+    adr_floor_options?: (number | null)[];
     market_indices?: MarketIndexOption[];
     editable_keys: string[];
   };
+  /** 전략별 12개월 백테스트 — 저장된 값. 설정이 바뀌면 서버가 지운다. */
+  backtests?: BacktestByPool;
+  /** 전략 사용 여부 — {종목풀: {전략: 사용}}. 그 풀에 설정이 저장돼 있으면 사용 중이다. */
+  strategy_use?: Record<string, Partial<Record<UseKey, boolean>>>;
+  /** 사고팔기 토글을 보여줄 종목풀 — 서버가 정한다(저장 검증과 같은 목록). */
+  strategy_trade_pools?: string[];
+  mix_usage: Record<string, Partial<Record<StrategyKey, string[]>>>;
   error?: string;
 };
 
@@ -94,7 +156,9 @@ type PoolDraft = {
   benchmarkName: string;
   marketRegimeTicker: string;
   marketRegimeName: string;
-} & Record<NumericKey, string>;
+  // 이평 **종류**(SMA/EMA) — 숫자가 아니라 문자열 선택지라 NumericKey 와 따로 둔다.
+  MOVING_AVERAGE_TYPE: string;
+} & Record<NumericKey, string> & Record<OptionalNumericKey, string>;
 
 const EMPTY_DRAFT: PoolDraft = {
   ticker_type: "",
@@ -104,16 +168,46 @@ const EMPTY_DRAFT: PoolDraft = {
   country_code: "kor",
   currency: "KRW",
   pool_kind: "etf",
-  SHORT_MA_DAYS: "10",
-  LONG_MA_DAYS: "20",
-  BUY_SLIPPAGE_PCT: "0.25",
-  SELL_SLIPPAGE_PCT: "0.25",
+  TOP_N_HOLD: "5",
+  // 이평선은 국가마다 선택지가 달라 여기서 못 정한다 — `withDefaultMaDays` 가 채운다.
+  SHORT_MA_DAYS: "",
+  LONG_MA_DAYS: "",
+  // 이평 **종류** — 일수와 같은 풀별 판정 기준. 기본은 단순(SMA).
+  MOVING_AVERAGE_TYPE: "SMA",
+  // 슬리피지는 보수적으로 — 낙관적인 값으로 열면 백테스트가 실제보다 좋게 나온다.
+  BUY_SLIPPAGE_PCT: "0.5",
+  SELL_SLIPPAGE_PCT: "0.5",
   STOPLOSS_THRESHOLD_PCT: "-10",
+  // 모멘텀 전략 설정 — 기본은 '없음'(빈 값). 값은 전략 화면·튜닝에서도 저장된다.
+  ENTRY_VOL_MULT: "",
+  ADR_FLOOR: "",
   benchmarkTicker: "",
   benchmarkName: "",
   marketRegimeTicker: "",
   marketRegimeName: "",
 };
+
+/** 이평선 기본값을 그 국가 선택지 중 **가장 작은 값**으로 채운다.
+ *
+ *  선택지에 없는 값(예전 기본값 10/20)을 초안에 두면 셀렉트가 빈 채로 열리고, 사용자가
+ *  건드리지 않으면 저장할 수 없는 값이 그대로 남는다. 목록은 국가마다 달라 상수로 못 둔다. */
+function withDefaultMaDays(
+  draft: PoolDraft,
+  optionsByCountry: Record<string, { short_ma_options: number[]; long_ma_options: number[] }>,
+): PoolDraft {
+  const options = optionsByCountry[draft.country_code];
+  if (!options) return draft;
+  const smallest = (days: number[]) => (days.length ? String(Math.min(...days)) : "");
+  return {
+    ...draft,
+    SHORT_MA_DAYS: options.short_ma_options.includes(Number(draft.SHORT_MA_DAYS))
+      ? draft.SHORT_MA_DAYS
+      : smallest(options.short_ma_options),
+    LONG_MA_DAYS: options.long_ma_options.includes(Number(draft.LONG_MA_DAYS))
+      ? draft.LONG_MA_DAYS
+      : smallest(options.long_ma_options),
+  };
+}
 
 /** 그리드 행 — 편집 중인 초안 그대로에 표시용 필드를 얹는다. */
 type PoolGridRow = PoolDraft & {
@@ -157,11 +251,15 @@ function toDraft(pool: PoolEntry): PoolDraft {
     country_code: pool.country_code ?? "kor",
     currency: pool.currency ?? "KRW",
     pool_kind: pool.pool_kind ?? "",
+    TOP_N_HOLD: String(pool.settings.TOP_N_HOLD?.value ?? ""),
     SHORT_MA_DAYS: String(pool.settings.SHORT_MA_DAYS?.value ?? ""),
     LONG_MA_DAYS: String(pool.settings.LONG_MA_DAYS?.value ?? ""),
+    MOVING_AVERAGE_TYPE: String(pool.settings.MOVING_AVERAGE_TYPE?.value ?? ""),
     BUY_SLIPPAGE_PCT: String(pool.settings.BUY_SLIPPAGE_PCT?.value ?? ""),
     SELL_SLIPPAGE_PCT: String(pool.settings.SELL_SLIPPAGE_PCT?.value ?? ""),
     STOPLOSS_THRESHOLD_PCT: String(pool.settings.STOPLOSS_THRESHOLD_PCT?.value ?? ""),
+    ENTRY_VOL_MULT: pool.settings.ENTRY_VOL_MULT?.value == null ? "" : String(pool.settings.ENTRY_VOL_MULT.value),
+    ADR_FLOOR: pool.settings.ADR_FLOOR?.value == null ? "" : String(pool.settings.ADR_FLOOR.value),
     benchmarkTicker: toBenchmark(pool.settings.BENCHMARK).ticker ?? "",
     benchmarkName: toBenchmark(pool.settings.BENCHMARK).name ?? "",
     marketRegimeTicker: toMarketRegimeIndex(pool.settings.MARKET_REGIME_INDEX)?.ticker ?? "",
@@ -170,6 +268,10 @@ function toDraft(pool: PoolEntry): PoolDraft {
 }
 
 function draftToValues(draft: PoolDraft) {
+  const benchmarkTicker =
+    draft.country_code === "au"
+      ? ensureAsxPrefix(draft.benchmarkTicker)
+      : draft.benchmarkTicker.trim().toUpperCase();
   return {
     ticker_type: draft.ticker_type.trim().toLowerCase(),
     name: draft.name.trim(),
@@ -179,14 +281,19 @@ function draftToValues(draft: PoolDraft) {
     currency: draft.currency,
     // 빈 값(미설정)은 보내지 않아 기존 상태를 유지한다 — 토글은 항상 stock/etf 를 보낸다.
     ...(draft.pool_kind ? { pool_kind: draft.pool_kind } : {}),
+    TOP_N_HOLD: Number(draft.TOP_N_HOLD),
     SHORT_MA_DAYS: Number(draft.SHORT_MA_DAYS),
     LONG_MA_DAYS: Number(draft.LONG_MA_DAYS),
+    MOVING_AVERAGE_TYPE: draft.MOVING_AVERAGE_TYPE,
     BUY_SLIPPAGE_PCT: Number(draft.BUY_SLIPPAGE_PCT),
     SELL_SLIPPAGE_PCT: Number(draft.SELL_SLIPPAGE_PCT),
     STOPLOSS_THRESHOLD_PCT: Number(draft.STOPLOSS_THRESHOLD_PCT),
+    // '없음'(빈 값)은 null 로 보낸다 — 미설정이 아니라 명시적 '문턱/게이트 없음'이다.
+    ENTRY_VOL_MULT: draft.ENTRY_VOL_MULT === "" ? null : Number(draft.ENTRY_VOL_MULT),
+    ADR_FLOOR: draft.ADR_FLOOR === "" ? null : Number(draft.ADR_FLOOR),
     // 티커/이름이 모두 비면 미설정(null). 하나만 있으면 백엔드가 거부한다.
-    BENCHMARK: draft.benchmarkTicker.trim()
-      ? { ticker: draft.benchmarkTicker.trim().toUpperCase(), name: draft.benchmarkName.trim() }
+    BENCHMARK: benchmarkTicker
+      ? { ticker: benchmarkTicker, name: draft.benchmarkName.trim() }
       : null,
     MARKET_REGIME_INDEX: draft.marketRegimeTicker.trim()
       ? { ticker: draft.marketRegimeTicker.trim(), name: draft.marketRegimeName.trim() }
@@ -229,10 +336,14 @@ function SelectField({
 function BenchmarkField({
   ticker,
   name,
+  countryCode,
+  tickerTypes,
   onChange,
 }: {
   ticker: string;
   name: string;
+  countryCode: string;
+  tickerTypes: string[];
   onChange: (key: keyof PoolDraft, value: string) => void;
 }) {
   const toast = useToast();
@@ -240,22 +351,39 @@ function BenchmarkField({
   const [resolving, setResolving] = useState(false);
 
   const resolve = async () => {
-    const target = ticker.trim();
+    const country = countryCode.trim().toLowerCase();
+    const target = country === "au" ? ensureAsxPrefix(ticker) : ticker.trim().toUpperCase();
     if (!target) {
       toast.error("티커를 입력해주세요.");
       return;
     }
+    if (tickerTypes.length === 0) {
+      toast.error(`국가(${country})에 등록된 종목풀이 없습니다.`);
+      return;
+    }
     try {
       setResolving(true);
-      const resp = await fetch(`/api/leverage-config/resolve?ticker=${encodeURIComponent(target)}`);
-      const payload = (await resp.json()) as { name?: string; error?: string };
-      if (!resp.ok || payload.error || !payload.name) {
+      const resp = await fetch(
+        `/api/ticker-resolve?ticker=${encodeURIComponent(target)}&ticker_types=${encodeURIComponent(tickerTypes.join(","))}`,
+      );
+      const payload = (await resp.json()) as {
+        ticker?: string;
+        name?: string;
+        country_code?: string;
+        error?: string;
+      };
+      if (!resp.ok || payload.error || !payload.ticker || !payload.name) {
         toast.error(payload.error ?? "종목명을 찾을 수 없습니다.");
         return;
       }
+      if (String(payload.country_code ?? "").toLowerCase() !== country) {
+        toast.error(`국가(${country}) 종목만 벤치마크로 등록할 수 있습니다.`);
+        return;
+      }
+      onChange("benchmarkTicker", payload.ticker);
       onChange("benchmarkName", payload.name);
       setEditing(false);
-      toast.success(`${payload.name}(${target}) 확인 완료`);
+      toast.success(`${payload.name}(${payload.ticker}) 확인 완료`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "티커 조회 중 오류가 발생했습니다.");
     } finally {
@@ -307,6 +435,19 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
   const [loading, setLoading] = useState(true);
 
   const [error, setError] = useState<string | null>(null);
+  // 전략별 12개월 백테스트 — 버튼을 눌렀을 때만 계산한다(풀×전략이라 한 번에 다 돌리면 느리다).
+  const [backtests, setBacktests] = useState<BacktestByPool>({});
+  const [backtestRunning, setBacktestRunning] = useState<string | null>(null);
+  // 진행 상황 — {끝난 수, 전체}. 버튼에 「12/33 백테스트 진행중」으로 보여준다.
+  const [backtestProgress, setBacktestProgress] = useState<{ done: number; total: number } | null>(null);
+  // 전략 컬럼은 평소에 숨긴다 — 값이 길어(「565.6% · -32.1% · 3.95」) 늘 펼쳐 두면
+  // 설정 컬럼들이 밀린다. 「백테스트」를 누르면 그때 펼친다.
+  const [showBacktests, setShowBacktests] = useState(false);
+  // 전략 사용 여부 — {종목풀: {전략: 사용}}. 그 풀에 그 전략 설정이 저장돼 있는지다.
+  // 저장 전까지는 화면 상태로만 들고 있다(저장하면 설정 생성·삭제까지 반영된다).
+  const [strategyUse, setStrategyUse] = useState<Record<string, Partial<Record<UseKey, boolean>>>>({});
+  // 이평선 선택지 — 백엔드가 단일 소스다. 새 풀 초안의 기본값도 여기서 고른다.
+  const maOptionsByCountry = useMemo(() => data?.constraints.ma_options_by_country ?? {}, [data]);
   const [drafts, setDrafts] = useState<Record<string, PoolDraft>>({});
   const [newDraft, setNewDraft] = useState<PoolDraft>(EMPTY_DRAFT);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -340,6 +481,13 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     [drafts, rows],
   );
   const dirtyCount = gridRows.filter((row) => row.__dirty).length;
+  const tickerTypesForCountry = useCallback(
+    (countryCode: string) =>
+      rows
+        .filter((pool) => String(pool.country_code ?? "").toLowerCase() === countryCode.trim().toLowerCase())
+        .map((pool) => pool.ticker_type),
+    [rows],
+  );
 
   useEffect(() => {
     onSummaryChange?.(rows.length);
@@ -355,6 +503,8 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         throw new Error(payload.error ?? "설정을 불러오지 못했습니다.");
       }
       setData(payload);
+      setBacktests(payload.backtests ?? {});
+      setStrategyUse(payload.strategy_use ?? {});
       const nextDrafts: Record<string, PoolDraft> = {};
       payload.pools.forEach((pool) => {
         nextDrafts[pool.ticker_type] = toDraft(pool);
@@ -375,9 +525,92 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     setDrafts((prev) => ({ ...prev, [id]: { ...prev[id], [key]: value } }));
   }, []);
 
-  const updateNewDraft = useCallback((key: keyof PoolDraft, value: string) => {
-    setNewDraft((prev) => ({ ...prev, [key]: value }));
-  }, []);
+  /** 모든 종목풀 × 전략을 **한 건씩 순서대로** 돌린다.
+   *
+   *  한꺼번에 보내면 서버가 백테스트 수십 개를 동시에 돌려 느려지고, 어디까지 됐는지도
+   *  안 보인다. 한 건이 끝날 때마다 화면에 채워 진행 상황이 그대로 드러나게 한다.
+   *  설정이 없는 조합은 서버가 빈 결과를 돌려주므로 칸이 비어 있는다. */
+  /** 사용 토글 — 즉시 저장한다. 끄면 그 전략의 설정과 백테스트 결과가 함께 지워진다. */
+  const toggleStrategyUse = useCallback(
+    (pool: string, strategy: UseKey, next: boolean) => {
+      // 사고팔기를 끄면 전략마다 입력해 둔 계좌·종목·회차 수량이 지워져 한 번 더 묻는다.
+      if (strategy === TRADE_KEY && !next && !window.confirm("사고팔기를 끄면 이 종목풀의 사고팔기 전략(계좌·종목·회차 수량)이 모두 삭제됩니다. 끌까요?")) {
+        return;
+      }
+      setStrategyUse((prev) => ({ ...prev, [pool]: { ...prev[pool], [strategy]: next } }));
+      void (async () => {
+        try {
+          const resp = await fetch("/api/pool-settings/strategy-use", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pool, strategy, used: next }),
+          });
+          const payload = await resp.json();
+          if (!resp.ok || payload.error) {
+            throw new Error(payload.error ?? "사용 여부를 저장하지 못했습니다.");
+          }
+          if (!next && strategy !== TRADE_KEY) {
+            // 그 전략 결과만 비운다 — 같은 풀의 다른 전략 결과는 그대로다.
+            setBacktests((prev) => ({ ...prev, [pool]: { ...prev[pool], [strategy]: undefined } }));
+          }
+        } catch (err) {
+          // 저장에 실패하면 토글을 되돌린다 — 화면만 켜진 채로 두면 실제와 어긋난다.
+          setStrategyUse((prev) => ({ ...prev, [pool]: { ...prev[pool], [strategy]: !next } }));
+          toast.error(err instanceof Error ? err.message : "사용 여부를 저장하지 못했습니다.");
+        }
+      })();
+    },
+    [toast],
+  );
+
+  const tradePools = useMemo(() => new Set(data?.strategy_trade_pools ?? []), [data]);
+
+  const runAllBacktests = useCallback(async () => {
+    setShowBacktests(true);
+    const pools = rows.map((row) => row.ticker_type).filter(Boolean);
+    const total = pools.length * STRATEGY_COLUMNS.length;
+    let done = 0;
+    setBacktestProgress({ done: 0, total });
+    let failed = 0;
+    for (const pool of pools) {
+      for (const { key } of STRATEGY_COLUMNS) {
+        setBacktestRunning(`${pool}:${key}`);
+        try {
+          const resp = await fetch(`/api/pool-settings/backtest?pool=${encodeURIComponent(pool)}&strategy=${key}`);
+          const payload = await resp.json();
+          if (!resp.ok || payload.error) {
+            throw new Error(payload.error ?? "백테스트에 실패했습니다.");
+          }
+          setBacktests((prev) => ({ ...prev, [pool]: { ...prev[pool], [key]: payload.result } }));
+        } catch (err) {
+          failed += 1;
+          // 실패한 칸에 사유를 남긴다 — 토스트 합계만으로는 어느 조합이 왜 죽었는지 알 수 없다.
+          const message = err instanceof Error ? err.message : "백테스트에 실패했습니다.";
+          setBacktests((prev) => ({
+            ...prev,
+            [pool]: { ...prev[pool], [key]: { cagr_pct: null, mdd_pct: null, sortino: null, error: message } },
+          }));
+        }
+        done += 1;
+        setBacktestProgress({ done, total });
+      }
+    }
+    setBacktestRunning(null);
+    setBacktestProgress(null);
+    if (failed > 0) {
+      toast.error(`백테스트 ${failed}건이 실패했습니다.`);
+    } else {
+      toast.success("백테스트를 마쳤습니다.");
+    }
+  }, [rows, toast]);
+
+  const updateNewDraft = useCallback(
+    (key: keyof PoolDraft, value: string) => {
+      // 국가를 바꾸면 이평선 선택지가 통째로 바뀐다 — 목록 밖 값이 남지 않게 다시 채운다.
+      setNewDraft((prev) => withDefaultMaDays({ ...prev, [key]: value }, maOptionsByCountry));
+    },
+    [maOptionsByCountry],
+  );
 
   const handleCreate = useCallback(async () => {
     setCreating(true);
@@ -392,7 +625,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         throw new Error(payload.error ?? payload.detail ?? "종목풀 생성에 실패했습니다.");
       }
       toast.success("종목풀을 추가했습니다.");
-      setNewDraft(EMPTY_DRAFT);
+      setNewDraft(withDefaultMaDays(EMPTY_DRAFT, maOptionsByCountry));
       setIsCreatingNew(false);
       await load();
     } catch (err) {
@@ -400,7 +633,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     } finally {
       setCreating(false);
     }
-  }, [load, newDraft, toast]);
+  }, [load, maOptionsByCountry, newDraft, toast]);
 
   /** 변경된 행만 모아 한 번에 저장한다 — 상단 저장 버튼 1개가 전부를 처리한다. */
   const handleSaveAll = useCallback(async () => {
@@ -500,6 +733,12 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     ? data.constraints.stoploss_pct_options
     : DEFAULT_STOPLOSS_PCT_OPTIONS;
   const marketIndices = data.constraints.market_indices ?? [];
+  // '없음'을 첫 선택지로 — 모멘텀 화면 셀렉트와 같은 목록(백엔드 상수가 단일 소스).
+  const entryVolMultOptionsFor = (country: string) => [
+    "",
+    ...(data.constraints.entry_vol_mult_options_by_country?.[country] ?? []).filter((v): v is number => v != null).map(String),
+  ];
+  const adrFloorOptions = ["", ...(data.constraints.adr_floor_options ?? []).filter((v): v is number => v != null).map(String)];
   /** 셀렉트 편집 컬럼 — 목록 밖 저장값도 후보에 남겨 빈 셀렉트가 되지 않게 한다. */
   const selectCol = (
     field: keyof PoolDraft & ColDef<PoolGridRow>["field"],
@@ -554,15 +793,118 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     },
   });
 
+  // 사고팔기 — 한국 ETF 풀에서만 켠다. 백테스트가 없어 「사용」 토글 하나만 둔다.
+  const tradeUseColumn: ColDef<PoolGridRow> = {
+    colId: `use_${TRADE_KEY}`,
+    headerName: "사고팔기",
+    width: 96,
+    sortable: false,
+    headerTooltip:
+      "이 종목풀에서 사고팔기 전략을 쓸지(국장 ETF 풀만). 끄면 이 풀의 사고팔기 전략 설정이 지워집니다.",
+    cellRenderer: (params: ICellRendererParams<PoolGridRow>) => {
+      const pool = params.data?.ticker_type;
+      if (!pool || !tradePools.has(pool)) return null;
+      return (
+        <div className="form-check form-switch" style={{ marginBottom: 0 }}>
+          <input
+            className="form-check-input"
+            type="checkbox"
+            role="switch"
+            checked={strategyUse[pool]?.[TRADE_KEY] ?? false}
+            onChange={(event) => toggleStrategyUse(pool, TRADE_KEY, event.target.checked)}
+          />
+        </div>
+      );
+    },
+  };
+
   const columnDefs: ColDef<PoolGridRow>[] = [
-    { field: "ticker_type", headerName: "ID", width: 112 },
-    { field: "name", headerName: "이름", width: 176, editable: true },
+    // 컬럼이 많아 가로로 스크롤한다 — 어느 풀의 행인지 잃지 않게 ID·이름은 왼쪽에 고정한다.
+    { field: "ticker_type", headerName: "ID", width: 112, pinned: "left" },
+    { field: "name", headerName: "이름", width: 176, editable: true, pinned: "left" },
+    // 전략별 2단 헤더 — 「모멘텀」 아래 백테스트 결과와 사용 토글을 나란히 둔다.
+    // 「사용」은 그 종목풀에 그 전략 설정이 저장돼 있는지다 — 끄고 저장하면 설정을 지운다.
+    ...(showBacktests ? STRATEGY_COLUMNS : []).map<ColDef<PoolGridRow>>(({ key, label }) => ({
+      headerName: label,
+      marryChildren: true,
+      children: [
+        {
+          colId: `backtest_${key}`,
+          headerName: "백테스트",
+          width: 168,
+          sortable: false,
+          cellStyle: (params: { data?: PoolGridRow }) => ({
+            backgroundColor: params.data && data.mix_usage[params.data.ticker_type]?.[key]?.length
+              ? "color-mix(in srgb, var(--bs-orange, #fd7e14) 22%, transparent)"
+              : "transparent",
+          }),
+          tooltipValueGetter: (params: { data?: PoolGridRow }) => {
+            const accounts = params.data ? data.mix_usage[params.data.ticker_type]?.[key] : undefined;
+            return accounts?.length ? `합성 전략 슬리브로 사용 중: ${accounts.join(" · ")}` : "";
+          },
+          headerTooltip: `${label} 전략의 저장 설정으로 돌린 12개월 백테스트 — CAGR / MDD / 소르티노.`,
+          cellRenderer: (params: ICellRendererParams<PoolGridRow>) => {
+            const pool = params.data?.ticker_type;
+            if (!pool) return null;
+            const result = backtests[pool]?.[key];
+            if (backtestRunning === `${pool}:${key}`) {
+              return <span style={{ color: "var(--text-muted)" }}>계산 중…</span>;
+            }
+            if (result?.no_settings) {
+              return <span style={{ color: "var(--text-muted)" }}>설정없음</span>;
+            }
+            if (result?.error) {
+              return (
+                <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }} title={result.error}>
+                  실패
+                </span>
+              );
+            }
+            if (!result || result.cagr_pct == null) {
+              return null;
+            }
+            return (
+              <span title={result.updated_at ? `계산 ${formatKstDateTime(result.updated_at)}` : undefined}>
+                {`${fmt(result.cagr_pct, 1)}% / ${fmt(result.mdd_pct, 1)}% / ${fmt(result.sortino, 2)}`}
+              </span>
+            );
+          },
+        },
+        {
+          colId: `use_${key}`,
+          headerName: "사용",
+          width: 72,
+          sortable: false,
+          headerTooltip: `이 종목풀에서 ${label} 전략을 쓸지. 끄고 저장하면 그 설정과 백테스트 결과가 지워지고, ${label} 화면의 종목풀 목록에서도 빠집니다.`,
+          cellRenderer: (params: ICellRendererParams<PoolGridRow>) => {
+            const pool = params.data?.ticker_type;
+            if (!pool) return null;
+            const checked = strategyUse[pool]?.[key] ?? false;
+            return (
+              <div className="form-check form-switch" style={{ marginBottom: 0 }}>
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  role="switch"
+                  checked={checked}
+                  onChange={(event) => toggleStrategyUse(pool, key, event.target.checked)}
+                />
+              </div>
+            );
+          },
+        },
+      ],
+    })),
+    ...(showBacktests ? [tradeUseColumn] : []),
     selectCol("icon", "아이콘", 72, () => ["🇰🇷", "🇦🇺", "🇺🇸"]),
     numberCol("order", "순서", 64),
     selectCol("country_code", "국가", 76, () => [...COUNTRY_OPTIONS]),
     selectCol("currency", "통화", 76, () => [...CURRENCY_OPTIONS]),
     selectCol("pool_kind", "구분", 80, () => ["stock", "etf"], {
       valueFormatter: (params) => ({ stock: "개별주", etf: "ETF" })[String(params.value)] ?? "미설정",
+    }),
+    selectCol("TOP_N_HOLD", "보유종목 수", 100, () => data.constraints.top_n_hold_options, {
+      valueFormatter: (params) => (params.value ? `${params.value}개` : "미설정"),
     }),
     {
       // 그 풀에 담긴 종목 수 — 설정이 아니라 현황이라 편집할 수 없다.
@@ -574,6 +916,13 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       valueGetter: (params) => params.data?.__stockCount ?? null,
       valueFormatter: (params) => (params.value == null ? "-" : Number(params.value).toLocaleString("ko-KR")),
     },
+    selectCol("MOVING_AVERAGE_TYPE", "이평 종류", 96, () => data.constraints.moving_average_type_options ?? [], {
+      valueFormatter: (params) => (params.value ? String(params.value) : "미설정"),
+      headerTooltip:
+        "이동평균 종류(SMA/EMA) — 단기·장기 이평선과 신고가 이탈선 판정에 쓴다. " +
+        "이평선 일수와 같은 종목풀별 설정이다. 시장지수 추세·레버리지는 종목풀에 속하지 않아 " +
+        "공통값(config.MOVING_AVERAGE_TYPE)을 쓴다.",
+    }),
     selectCol(
       "SHORT_MA_DAYS",
       "단기",
@@ -588,6 +937,18 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       (row) => data.constraints.ma_options_by_country[row.country_code]?.long_ma_options ?? [],
       { valueFormatter: (params) => (params.value ? `${params.value}일` : "미설정") },
     ),
+    selectCol("ENTRY_VOL_MULT", "진입 문턱", 92, (row) => entryVolMultOptionsFor(row.country_code), {
+      valueFormatter: (params) => (params.value === "" || params.value == null ? "없음" : `${params.value}×`),
+      headerTooltip:
+        "모멘텀 진입 문턱 — 이격이 '배수 × 20일 변동성' 이상인 종목만 진입 자격(청산은 불변). " +
+        "모멘텀 전략 화면·튜닝 적용과 같은 저장값이다.",
+    }),
+    selectCol("ADR_FLOOR", "ADR 하한", 88, () => adrFloorOptions, {
+      valueFormatter: (params) => (params.value === "" || params.value == null ? "없음" : String(params.value)),
+      headerTooltip:
+        "모멘텀 ADR 하한 — 그날 시장 ADR(20일 등락비율)이 이 값 미만이면 신규 진입만 건너뛴다. " +
+        "ADR 기준(레짐 지수)이 있어야 쓸 수 있다. 모멘텀 전략 화면과 같은 저장값이다.",
+    }),
     selectCol("BUY_SLIPPAGE_PCT", "매수", 72, () => slippageOptions, {
       valueFormatter: (params) => (params.value === "" ? "미설정" : `${params.value}%`),
     }),
@@ -635,7 +996,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         );
       },
     },
-    selectCol("marketRegimeTicker", "시장 레짐", 104, () => marketIndices.map((item) => item.ticker), {
+    selectCol("marketRegimeTicker", "ADR 기준", 104, () => marketIndices.map((item) => item.ticker), {
       valueFormatter: (params) =>
         marketIndices.find((item) => item.ticker === params.value)?.name ?? (params.value ? String(params.value) : "미설정"),
     }),
@@ -719,7 +1080,16 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       <div style={rowStyle}>
         {renderField(
           "국가",
-          <SelectField value={draft.country_code} options={COUNTRY_OPTIONS} width={82} onChange={(value) => onChange("country_code", value)} />,
+          <SelectField
+            value={draft.country_code}
+            options={COUNTRY_OPTIONS}
+            width={82}
+            onChange={(value) => {
+              onChange("country_code", value);
+              onChange("benchmarkTicker", "");
+              onChange("benchmarkName", "");
+            }}
+          />,
           { minWidth: 144, labelWidth: 44 },
         )}
         {renderField(
@@ -743,14 +1113,47 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
           { minWidth: 158, labelWidth: 44 },
         )}
         {renderField(
+          "보유종목 수",
+          <SelectField
+            value={draft.TOP_N_HOLD}
+            options={data.constraints.top_n_hold_options}
+            width={82}
+            onChange={(value) => onChange("TOP_N_HOLD", value)}
+          />,
+          { minWidth: 190, labelWidth: 92 },
+        )}
+        {renderField(
           "단기",
-          <MaDaysSelect value={Number(draft.SHORT_MA_DAYS) || null} options={data.constraints.ma_options_by_country[draft.country_code]?.short_ma_options} onChange={(days) => onChange("SHORT_MA_DAYS", String(days))} />,
+          <MaDaysSelect maType={draft.MOVING_AVERAGE_TYPE} value={Number(draft.SHORT_MA_DAYS) || null} options={data.constraints.ma_options_by_country[draft.country_code]?.short_ma_options} onChange={(days) => onChange("SHORT_MA_DAYS", String(days))} />,
           { minWidth: 160, labelWidth: 44 },
         )}
         {renderField(
           "장기",
-          <MaDaysSelect value={Number(draft.LONG_MA_DAYS) || null} options={data.constraints.ma_options_by_country[draft.country_code]?.long_ma_options} onChange={(days) => onChange("LONG_MA_DAYS", String(days))} />,
+          <MaDaysSelect maType={draft.MOVING_AVERAGE_TYPE} value={Number(draft.LONG_MA_DAYS) || null} options={data.constraints.ma_options_by_country[draft.country_code]?.long_ma_options} onChange={(days) => onChange("LONG_MA_DAYS", String(days))} />,
           { minWidth: 160, labelWidth: 44 },
+        )}
+        {renderField(
+          "종류",
+          <MaTypeSelect value={draft.MOVING_AVERAGE_TYPE} options={data.constraints.moving_average_type_options} onChange={(maType) => onChange("MOVING_AVERAGE_TYPE", maType)} />,
+          { minWidth: 150, labelWidth: 44 },
+        )}
+        {renderField(
+          "진입 문턱",
+          <select className="form-select form-select-sm" style={{ width: 84 }} value={draft.ENTRY_VOL_MULT} onChange={(e) => onChange("ENTRY_VOL_MULT", e.target.value)}>
+            {entryVolMultOptionsFor(draft.country_code).map((value) => (
+              <option key={value || "none"} value={value}>{value === "" ? "없음" : `${value}×`}</option>
+            ))}
+          </select>,
+          { minWidth: 170, labelWidth: 68 },
+        )}
+        {renderField(
+          "ADR 하한",
+          <select className="form-select form-select-sm" style={{ width: 84 }} value={draft.ADR_FLOOR} onChange={(e) => onChange("ADR_FLOOR", e.target.value)}>
+            {adrFloorOptions.map((value) => (
+              <option key={value || "none"} value={value}>{value === "" ? "없음" : value}</option>
+            ))}
+          </select>,
+          { minWidth: 170, labelWidth: 68 },
         )}
       </div>
 
@@ -775,9 +1178,15 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
 
       <div style={{ ...rowStyle, marginBottom: 0 }}>
         <span style={{ ...labelStyle, width: 72 }}>벤치마크</span>
-        <BenchmarkField ticker={draft.benchmarkTicker} name={draft.benchmarkName} onChange={onChange} />
+        <BenchmarkField
+          ticker={draft.benchmarkTicker}
+          name={draft.benchmarkName}
+          countryCode={draft.country_code}
+          tickerTypes={tickerTypesForCountry(draft.country_code)}
+          onChange={onChange}
+        />
         {renderField(
-          "시장 레짐",
+          "ADR 기준",
           <select
             className="form-select form-select-sm"
             style={{ width: 170 }}
@@ -825,6 +1234,17 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
                   onClick={() => void handleDeleteSelected()}
                 >
                   {deletingId ? "삭제 중…" : `삭제${selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}`}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-secondary"
+                  disabled={backtestRunning !== null || loading}
+                  title="모든 종목풀의 모멘텀·신고가·포트폴리오를 12개월 백테스트합니다. 한 건씩 순서대로 돌며 결과가 채워집니다."
+                  onClick={() => void runAllBacktests()}
+                >
+                  {backtestProgress
+                    ? `${backtestProgress.done}/${backtestProgress.total} 백테스트 진행중`
+                    : "전략"}
                 </button>
                 <button type="button" className="btn btn-sm btn-primary" onClick={() => setIsCreatingNew(!isCreatingNew)}>
                   등록
@@ -897,6 +1317,9 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
                     }
                     // 국가를 바꾸면 이평선 선택지가 통째로 바뀐다 — 목록 밖 값이 남지 않게 비운다.
                     if (key === "country_code") {
+                      // 기존 국가의 벤치마크가 새 국가 설정에 남지 않게 다시 선택하도록 비운다.
+                      updateDraft(params.data.ticker_type, "benchmarkTicker", "");
+                      updateDraft(params.data.ticker_type, "benchmarkName", "");
                       const options = data.constraints.ma_options_by_country[String(params.newValue ?? "")];
                       const short = Number(params.data.SHORT_MA_DAYS);
                       const long = Number(params.data.LONG_MA_DAYS);
@@ -933,6 +1356,8 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
           <BenchmarkField
             ticker={drafts[benchmarkTargetId].benchmarkTicker}
             name={drafts[benchmarkTargetId].benchmarkName}
+            countryCode={drafts[benchmarkTargetId].country_code}
+            tickerTypes={tickerTypesForCountry(drafts[benchmarkTargetId].country_code)}
             onChange={(key, value) => updateDraft(benchmarkTargetId, key, value)}
           />
         ) : null}
@@ -943,7 +1368,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         title="신규 종목풀"
         subtitle="ticker_type 은 생성 후 변경할 수 없습니다."
         onClose={() => {
-          setNewDraft(EMPTY_DRAFT);
+          setNewDraft(withDefaultMaDays(EMPTY_DRAFT, maOptionsByCountry));
           setIsCreatingNew(false);
         }}
         size="xl"
@@ -953,7 +1378,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
               type="button"
               className="btn btn-outline-secondary"
               onClick={() => {
-                setNewDraft(EMPTY_DRAFT);
+                setNewDraft(withDefaultMaDays(EMPTY_DRAFT, maOptionsByCountry));
                 setIsCreatingNew(false);
               }}
             >

@@ -3,8 +3,8 @@
 MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 보관한다.
 
     구조: ticker_type, name, icon, order, country_code, currency, pool_kind
-    편집: SHORT_MA_DAYS, LONG_MA_DAYS,                         ← 모멘텀 전략 설정이기도 하다
-          INTRAWEEK_EXIT, INTRAWEEK_STOP_PCT,                   ← 모멘텀 전용
+    편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, MOVING_AVERAGE_TYPE,  ← 전략 공용 설정
+          ADR_FLOOR, ENTRY_VOL_MULT,                             ← 모멘텀 전용
           BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, STOPLOSS_THRESHOLD_PCT,
           BENCHMARK, MARKET_REGIME_INDEX (선택 — 비우면 미설정)
 
@@ -20,7 +20,7 @@ MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 
 컬렉션 문서 형태:
     {
       _id: <ticker_type>, name, icon, order, country_code, currency,
-      SHORT_MA_DAYS, LONG_MA_DAYS,
+      SHORT_MA_DAYS, LONG_MA_DAYS, MOVING_AVERAGE_TYPE,
       BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, BENCHMARK, MARKET_REGIME_INDEX, updated_at
     }
 """
@@ -32,11 +32,13 @@ from typing import Any
 
 from config import (
     ADR_FLOOR_OPTIONS,
+    MOVING_AVERAGE_TYPE_OPTIONS,
     POOL_KIND_OPTIONS,
     SLIPPAGE_PCT_OPTIONS,
-    STOP_LOSS_PCT_OPTIONS,
+    TOP_N_HOLD_OPTIONS,
 )
 from config import STOP_LOSS_PCT_OPTIONS as STOPLOSS_PCT_OPTIONS
+from utils.entry_vol_options import ENTRY_VOL_MULT_ANY_COUNTRY
 from utils.logger import get_app_logger
 from utils.ma_options import LONG_MA_OPTIONS, SHORT_MA_OPTIONS
 
@@ -48,20 +50,26 @@ COLLECTION = "pool_settings"
 INTERNAL_POOL_ID_PREFIX = "__"
 
 # DB 오버라이드 대상 키 — 전부 필수이며 비어 있으면 로딩 자체가 실패한다.
-# 이 셋은 **모멘텀 전략 설정이기도 하다** — 이 프로젝트에서 모멘텀은 그 풀의 기본 판정
+# 이 항목들은 **모멘텀 전략 설정이기도 하다** — 이 프로젝트에서 모멘텀은 그 풀의 기본 판정
 # 기준이라, 전략 설정을 따로 두지 않고 풀 문서 하나에 모은다(순위 화면·보유종목 알림·
 # 종목풀 백테스트가 같은 값을 본다). 신고가는 자기 설정 문서를 따로 쓴다.
 OVERRIDABLE_KEYS: tuple[str, ...] = (
+    "TOP_N_HOLD",
     "SHORT_MA_DAYS",
     "LONG_MA_DAYS",
+    # 이동평균 **종류** — 일수와 같은 성격의 판정 기준이라 같은 자리에 둔다. 실측에서
+    # 최적이 풀마다 갈렸다(us_stock 60개월 SMA +828.6% vs EMA +608.1%, kor_stock
+    # SMA +1393.4% vs EMA +1958.5%). 풀에 속하지 않는 계산(시장지수 추세·레버리지)은
+    # 계속 `config.MOVING_AVERAGE_TYPE` 를 쓴다.
+    "MOVING_AVERAGE_TYPE",
 )
 
-# 모멘텀 전략 전용 값 — 위 셋과 함께 한 풀의 전략 설정을 이룬다. 기존 문서에 없을 수 있어
+# 모멘텀 전략 전용 값 — 위 항목과 함께 한 풀의 전략 설정을 이룬다. 기존 문서에 없을 수 있어
 # 로딩 필수값은 아니다(미설정이면 전략 화면에서 저장해야 한다).
 MOMENTUM_KEYS: tuple[str, ...] = (
+    "MOMENTUM_START_DATE",
     "ADR_FLOOR",  # None = 게이트 없음 (모멘텀 ADR 하한 — 시장은 MARKET_REGIME_INDEX 를 따름)
-    "INTRAWEEK_EXIT",
-    "INTRAWEEK_STOP_PCT",  # None = 손절 없음
+    "ENTRY_VOL_MULT",  # None = 문턱 없음 (진입 이격 ≥ 배수 × 20일 변동성 — 청산은 불변)
 )
 
 # 보유종목 손절 알림 기준(%). 이평선과 같은 성격의 **종목 판정 기준**이라 계좌가 아니라
@@ -100,7 +108,7 @@ STRUCTURAL_KEYS: tuple[str, ...] = (
 )
 
 
-_INT_KEYS = ("SHORT_MA_DAYS", "LONG_MA_DAYS")
+_INT_KEYS = ("TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS")
 _FLOAT_KEYS = ("BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT", "STOPLOSS_THRESHOLD_PCT")
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 _ALLOWED_CURRENCIES = {"KRW", "AUD", "USD"}
@@ -305,7 +313,7 @@ def get_overrides() -> dict[str, dict[str, Any]]:
 def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> dict[str, Any]:
     """입력값을 검증/정규화한다. 잘못된 값은 PoolSettingsError.
 
-    ``check_options`` — 선택지(이평선·업종상한·손절·슬리피지) 포함 여부 검사. **저장할 때만** 켠다.
+    ``check_options`` — 선택지(이평선·손절·슬리피지) 포함 여부 검사. **저장할 때만** 켠다.
     DB 에서 읽을 때는 끈다: 선택지가 바뀐 뒤 옛 값이 남아 있거나(또는 서버가 옛 코드를 돌리거나)
     하면, 읽기에서 막는 순간 그 풀을 쓰지 않는 배치·화면까지 전부 죽는다. 선택지 밖 값은
     화면이 "(선택지 밖)"으로 보여주고 사용자가 고쳐 저장한다.
@@ -327,9 +335,26 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
             if num not in allowed:
                 options = ", ".join(str(day) for day in allowed)
                 raise PoolSettingsError(f"{key} 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
+        if key == "TOP_N_HOLD" and check_options and num not in TOP_N_HOLD_OPTIONS:
+            options = ", ".join(str(value) for value in TOP_N_HOLD_OPTIONS)
+            raise PoolSettingsError(f"{key} 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
         cleaned[key] = num
 
+    # 이동평균 종류 — 이평선 일수와 같은 성격의 판정 기준. 선택지 밖 값은 막는다.
+    if "MOVING_AVERAGE_TYPE" in values:
+        raw = str(values["MOVING_AVERAGE_TYPE"] or "").strip().upper()
+        if check_options and raw not in MOVING_AVERAGE_TYPE_OPTIONS:
+            options = ", ".join(MOVING_AVERAGE_TYPE_OPTIONS)
+            raise PoolSettingsError(
+                f"MOVING_AVERAGE_TYPE 는 다음 값 중 하나여야 합니다: {options}. 입력값: {values['MOVING_AVERAGE_TYPE']}"
+            )
+        cleaned["MOVING_AVERAGE_TYPE"] = raw
+
     # 모멘텀 전용 — 숫자/불리언이 섞여 있고 None 이 '없음' 을 뜻한다(임의 보정하지 않는다).
+    if "MOMENTUM_START_DATE" in values:
+        from utils.strategy_settings import validate_start_date
+
+        cleaned["MOMENTUM_START_DATE"] = validate_start_date(values["MOMENTUM_START_DATE"])
     if "ADR_FLOOR" in values:
         raw = values["ADR_FLOOR"]
         floor = None if raw in (None, "", "none") else int(raw)
@@ -337,16 +362,13 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
             allowed = ", ".join("없음" if v is None else str(v) for v in ADR_FLOOR_OPTIONS)
             raise PoolSettingsError(f"ADR_FLOOR 는 {allowed} 중 하나여야 합니다: {raw}")
         cleaned["ADR_FLOOR"] = floor
-    if "INTRAWEEK_EXIT" in values:
-        cleaned["INTRAWEEK_EXIT"] = bool(values["INTRAWEEK_EXIT"])
-    if "INTRAWEEK_STOP_PCT" in values:
-        raw = values["INTRAWEEK_STOP_PCT"]
-        stop = None if raw in (None, "", "none") else round(float(raw), 2)
-        allowed_stops = {None, *(round(v, 2) for v in STOP_LOSS_PCT_OPTIONS)}
-        if check_options and stop not in allowed_stops:
-            allowed = ", ".join("없음" if v is None else f"{v:g}" for v in (None, *STOP_LOSS_PCT_OPTIONS))
-            raise PoolSettingsError(f"INTRAWEEK_STOP_PCT 는 {allowed} 중 하나여야 합니다: {raw}")
-        cleaned["INTRAWEEK_STOP_PCT"] = stop
+    if "ENTRY_VOL_MULT" in values:
+        raw = values["ENTRY_VOL_MULT"]
+        mult = None if raw in (None, "", "none") else float(raw)
+        if check_options and mult not in ENTRY_VOL_MULT_ANY_COUNTRY:
+            allowed = ", ".join("없음" if v is None else f"{v:g}" for v in ENTRY_VOL_MULT_ANY_COUNTRY)
+            raise PoolSettingsError(f"ENTRY_VOL_MULT 는 {allowed} 중 하나여야 합니다: {raw}")
+        cleaned["ENTRY_VOL_MULT"] = mult
 
     for key in _FLOAT_KEYS:
         if key not in values:
@@ -394,8 +416,9 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
             elif not ticker or not name:
                 raise PoolSettingsError("MARKET_REGIME_INDEX 에는 ticker/name 이 모두 필요합니다.")
             else:
-                # ADR(시장 폭)이 있는 4개 시장만 허용 — 단일 소스는 market_breadth 의 매핑이다.
-                from utils.market_breadth_service import MARKET_BY_INDEX_TICKER
+                # ADR(시장 폭)이 있는 4개 시장 + **그 풀 자신**만 허용.
+                # 단일 소스는 market_breadth 의 매핑과 예약 티커다.
+                from utils.market_breadth_service import MARKET_BY_INDEX_TICKER, SELF_POOL_REGIME_TICKER
                 from utils.market_trend_service import INDICES
 
                 allowed = {
@@ -403,10 +426,11 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
                     for item in INDICES
                     if str(item["yf_ticker"]) in MARKET_BY_INDEX_TICKER
                 }
+                allowed[SELF_POOL_REGIME_TICKER] = "종목풀"
                 if ticker not in allowed:
                     options = ", ".join(f"{label}({code})" for code, label in allowed.items())
                     raise PoolSettingsError(
-                        f"MARKET_REGIME_INDEX 는 ADR 이 있는 시장 지수여야 합니다: {options}. 입력값: {ticker}"
+                        f"MARKET_REGIME_INDEX 는 ADR 기준 중 하나여야 합니다: {options}. 입력값: {ticker}"
                     )
                 cleaned["MARKET_REGIME_INDEX"] = {"ticker": ticker, "name": allowed[ticker]}
 
@@ -415,43 +439,70 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
     return cleaned
 
 
+def _canonical_benchmark_for_country(
+    benchmark: dict[str, Any], country_code: str, candidates: list[dict[str, Any]]
+) -> dict[str, str]:
+    """벤치마크를 해당 국가 종목의 표준 티커·이름으로 확정한다."""
+    country = str(country_code or "").strip().lower()
+    ticker = str(benchmark.get("ticker") or "").strip().upper()
+    if country == "au":
+        from utils.asx_ticker import ensure_asx_prefix
+
+        ticker = ensure_asx_prefix(ticker)
+
+    candidate_by_ticker = {
+        str(item.get("ticker") or "").strip().upper(): str(item.get("name") or "").strip()
+        for item in candidates
+        if item.get("ticker")
+    }
+    name = candidate_by_ticker.get(ticker)
+    if name is None:
+        raise PoolSettingsError(f"벤치마크 '{ticker}' 는 국가({country})에 등록된 종목이 아닙니다.")
+    return {"ticker": ticker, "name": name or ticker}
+
+
+def _normalize_benchmark_for_country(cleaned: dict[str, Any], country_code: str) -> None:
+    """정리된 설정의 벤치마크를 같은 국가 종목 목록으로 검증하고 제자리에서 표준화한다."""
+    benchmark = cleaned.get("BENCHMARK")
+    if not isinstance(benchmark, dict) or not benchmark.get("ticker"):
+        return
+
+    from utils.stock_list_io import get_etfs
+
+    country = str(country_code or "").strip().lower()
+    pool_ids = [
+        str(definition["ticker_type"])
+        for definition in load_pool_definitions()
+        if str(definition.get("country_code") or "").strip().lower() == country
+    ]
+    candidates = [item for pool_id in pool_ids for item in get_etfs(pool_id)]
+    cleaned["BENCHMARK"] = _canonical_benchmark_for_country(benchmark, country, candidates)
+
+
 def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = "사용자") -> dict[str, Any]:
     """편집한 값을 pool_settings 에 upsert 하고 캐시를 무효화한다.
 
     pool_id 는 유효한 ticker_type.
     반환: 저장된(정규화된) 값.
     """
-    from utils.settings_loader import list_available_ticker_types
+    from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
 
     norm_id = str(pool_id or "").strip().lower()
     if norm_id not in list_available_ticker_types():
         raise PoolSettingsError(f"알 수 없는 종목풀입니다: {pool_id}")
 
     cleaned = _validate_values(values)
+    existing = get_ticker_type_settings(norm_id) or {}
+    country_code = str(existing.get("country_code") or "").strip().lower()
+    _normalize_benchmark_for_country(cleaned, country_code)
 
-    # 벤치마크는 이 종목풀에 실제로 등록된 종목이어야 한다(순위/백테스트에서 매수 후보에서
-    # 제외하고 종가를 이 풀 캐시에서 읽기 때문). 없는 종목이면 저장을 거부한다.
-    benchmark = cleaned.get("BENCHMARK")
-    if isinstance(benchmark, dict) and benchmark.get("ticker"):
-        from utils.stock_list_io import get_etfs
-
-        def _norm_ticker(value: Any) -> str:
-            return str(value or "").strip().upper().removeprefix("ASX:")
-
-        # 접두사를 뗀 형태로 대조하되, **저장은 풀에 등록된 표기 그대로** 한다.
-        # 호주는 시스템 내부에서 `ASX:` 접두사를 쓰는데(utils/asx_ticker), 사용자가
-        # `IVV` 로 입력하면 대조는 통과하고 저장만 접두사 없이 남아 캐시 조회가 빗나갔다.
-        canonical_by_norm = {
-            _norm_ticker(item.get("ticker")): str(item.get("ticker") or "").strip().upper()
-            for item in get_etfs(norm_id)
-        }
-        canonical = canonical_by_norm.get(_norm_ticker(benchmark["ticker"]))
-        if canonical is None:
-            raise PoolSettingsError(
-                f"벤치마크 '{benchmark['ticker']}' 는 이 종목풀에 등록된 종목이 아닙니다. "
-                "종목풀에 있는 종목만 벤치마크로 지정할 수 있습니다."
-            )
-        benchmark["ticker"] = canonical
+    # ADR 하한은 레짐 지수(ADR 기준)가 있어야 판정할 시장이 정해진다 — 저장 후 병합 기준으로 검사.
+    merged_floor = cleaned["ADR_FLOOR"] if "ADR_FLOOR" in cleaned else existing.get("ADR_FLOOR")
+    merged_regime = (
+        cleaned["MARKET_REGIME_INDEX"] if "MARKET_REGIME_INDEX" in cleaned else existing.get("MARKET_REGIME_INDEX")
+    )
+    if merged_floor is not None and not merged_regime:
+        raise PoolSettingsError("ADR 하한을 쓰려면 ADR 기준(시장 레짐 지수)을 먼저 설정하세요.")
 
     db = _db()
     db[COLLECTION].update_one(
@@ -462,6 +513,11 @@ def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = 
         },
         upsert=True,
     )
+
+    # 설정이 바뀌었으니 그 풀의 전략 백테스트 결과는 옛 값이다 — 지운다.
+    from utils.pool_backtest_store import clear_pool
+
+    clear_pool(norm_id)
 
     # 오버라이드 캐시 + 이 값에 의존하는 랭킹 캐시 무효화
     invalidate_overlay_cache()
@@ -483,6 +539,7 @@ def create_pool(values: dict[str, Any], save_method: str = "사용자") -> dict[
         raise PoolSettingsError(f"신규 종목풀에 필수 값이 없습니다: {', '.join(missing)}")
     cleaned = _normalize_pool_values(values, require_ticker_type=True)
     pool_id = cleaned.pop("ticker_type")
+    _normalize_benchmark_for_country(cleaned, str(cleaned.get("country_code") or ""))
 
     db = _db()
     if db[COLLECTION].find_one({"_id": pool_id}, {"_id": 1}) is not None:
@@ -505,12 +562,15 @@ def update_pool(pool_id: str, values: dict[str, Any], save_method: str = "사용
     norm_id = _normalize_ticker_type(pool_id)
     if "ticker_type" in values and _normalize_ticker_type(values["ticker_type"]) != norm_id:
         raise PoolSettingsError("ticker_type 은 변경할 수 없습니다.")
+    db = _db()
+    existing = db[COLLECTION].find_one({"_id": norm_id})
+    if existing is None:
+        raise PoolSettingsError(f"알 수 없는 종목풀입니다: {pool_id}")
     cleaned = _normalize_pool_values({k: v for k, v in values.items() if k != "ticker_type"}, require_ticker_type=False)
     if not cleaned:
         raise PoolSettingsError("저장할 값이 없습니다.")
-    db = _db()
-    if db[COLLECTION].find_one({"_id": norm_id}, {"_id": 1}) is None:
-        raise PoolSettingsError(f"알 수 없는 종목풀입니다: {pool_id}")
+    country_code = str(cleaned.get("country_code") or existing.get("country_code") or "").strip().lower()
+    _normalize_benchmark_for_country(cleaned, country_code)
     db[COLLECTION].update_one(
         {"_id": norm_id},
         {
@@ -539,6 +599,24 @@ def get_pool_slippage(pool: str) -> tuple[float, float]:
     return float(settings["BUY_SLIPPAGE_PCT"]), float(settings["SELL_SLIPPAGE_PCT"])
 
 
+def get_pool_top_n_hold(pool: str) -> int:
+    """종목풀의 보유 종목 수를 반환한다. 누락·선택지 밖 값은 명시적으로 실패한다."""
+    from utils.settings_loader import get_ticker_type_settings
+
+    settings = get_ticker_type_settings(pool) or {}
+    raw = settings.get("TOP_N_HOLD")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise PoolSettingsError(
+            f"종목풀({pool}) 설정에 TOP_N_HOLD 가 없습니다 — `/pools-settings` 에서 먼저 저장하세요."
+        ) from exc
+    if value not in TOP_N_HOLD_OPTIONS:
+        options = ", ".join(str(item) for item in TOP_N_HOLD_OPTIONS)
+        raise PoolSettingsError(f"종목풀({pool}) TOP_N_HOLD 는 {options} 중 하나여야 합니다: {value}")
+    return value
+
+
 def get_pool_delete_impact(pool_id: str) -> dict[str, Any]:
     """종목풀 삭제 전 영향도를 반환한다."""
     norm_id = _normalize_ticker_type(pool_id)
@@ -564,13 +642,17 @@ def delete_pool(pool_id: str) -> dict[str, Any]:
     # 딸림 데이터는 카탈로그(`utils/data_table_catalog`)가 단일 소스다 — 종목·메타 캐시·
     # 가격 캐시 컬렉션·전략 설정의 풀별 항목·이 풀을 가리키던 계좌 참조까지 한 번에 지운다.
     # 예전에는 지울 자리를 이 함수가 직접 들고 있어서, 컬렉션이 늘 때마다 조용히 빠졌다.
+    from utils.cache_owner_lock import cache_owner_lock
     from utils.data_table_catalog import purge_owner
 
-    cleanup = purge_owner("pool", norm_id)
+    with cache_owner_lock(norm_id):
+        try:
+            cleanup = purge_owner("pool", norm_id)
+        except RuntimeError as exc:
+            raise PoolSettingsError(f"종목풀 딸림 데이터 정리에 실패해 삭제를 중단했습니다: {exc}") from exc
 
-    # 종목풀 문서 자체는 딸림 데이터를 다 지운 뒤에 없앤다(순서가 뒤집히면 소유자를 잃은
-    # 데이터가 중간 상태로 남는다).
-    deleted_pool = db[COLLECTION].delete_one({"_id": norm_id}).deleted_count
+        # 삭제 중 캐시를 다시 쓰지 못하게 소유자 문서 삭제까지 같은 잠금으로 묶는다.
+        deleted_pool = db[COLLECTION].delete_one({"_id": norm_id}).deleted_count
     deleted_stocks = int(cleanup.get("stock_meta", 0))
 
     invalidate_overlay_cache()

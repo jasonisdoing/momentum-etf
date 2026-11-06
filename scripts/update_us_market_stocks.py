@@ -2,7 +2,7 @@
 
 출처
 ----
-- S&P500: 위키피디아 구성종목 표
+- S&P500: SPY(SPDR) 공식 전체 구성종목의 주식 — 매일 공시, 지수 변경이 하루 안에 반영된다
 - NASDAQ100: 나스닥 공식 API (지수 산출 주체가 직접 제공)
 - 섹터·업종: yfinance
 
@@ -21,7 +21,8 @@
 from __future__ import annotations
 
 import argparse
-import io
+import functools
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -35,11 +36,15 @@ import yfinance as yf
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from services.spdr_us_service import fetch_spdr_us_holdings  # noqa: E402
 from utils.index_constituents_loader import (  # noqa: E402
     load_index_constituents,
     load_index_meta,
     save_index_constituents,
 )
+from utils.index_pool_alert import US_ALERT_COMBINED_TOP, notify_unregistered_market_stocks  # noqa: E402
+from utils.perf_metrics import period_sortino  # noqa: E402
+from utils.us_stock_market_service import load_us_market_companies  # noqa: E402
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -49,13 +54,16 @@ _YFINANCE_BATCH_SIZE = 50
 _YFINANCE_BATCH_DELAY = 1.0  # 초
 _CLASSIFICATION_WORKERS = 8  # 섹터·업종 개별 조회 동시 실행 수
 
-_SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+_SP500_SOURCE = "SPY 공식 전체 구성종목(SPDR, services/spdr_us_service.py) — 주식만"
 _NDX100_API_URL = "https://api.nasdaq.com/api/quote/list-type/nasdaq100"
 _API_HEADERS = {**_HEADERS, "Accept": "application/json, */*"}
 
 # 구성종목 수가 이 범위를 벗어나면 원본이 깨진 것으로 보고 저장하지 않는다.
 # (위키 문서가 옮겨졌을 때처럼 조용히 실패하는 것을 막기 위한 장치)
-_EXPECTED_COUNTS = {"S&P500": (490, 510), "NASDAQ100": (95, 110)}
+_EXPECTED_COUNTS = {
+    "S&P500": (490, 510),
+    "NASDAQ100": (95, 110),
+}
 
 
 def _check_count(label: str, items: list[dict[str, Any]]) -> None:
@@ -65,6 +73,17 @@ def _check_count(label: str, items: list[dict[str, Any]]) -> None:
             f"{label} 구성종목 수가 비정상입니다: {len(items)}개 (기대 {low}~{high}). "
             "원본 페이지·API 구조가 바뀌었을 수 있어 저장하지 않습니다."
         )
+
+
+_US_INDICES = ("SP500", "NDX100")
+
+
+def _load_saved_classification_all() -> dict[str, dict[str, str]]:
+    """두 명단(S&P500·나스닥100)에 저장된 섹터·업종을 합친다 — 같은 종목은 한 번만 조회한다."""
+    saved: dict[str, dict[str, str]] = {}
+    for index in _US_INDICES:
+        saved.update(_load_saved_classification(index))
+    return saved
 
 
 def _load_saved_classification(index: str) -> dict[str, dict[str, str]]:
@@ -107,25 +126,29 @@ def _fetch_classification(tickers: list[str]) -> dict[str, dict[str, str]]:
         return dict(pool.map(one, tickers))
 
 
-def _read_html(url: str) -> list[pd.DataFrame]:
-    resp = requests.get(url, headers=_HEADERS, timeout=30)
-    resp.raise_for_status()
-    return pd.read_html(io.StringIO(resp.text))
+@functools.lru_cache(maxsize=1)
+def _us_companies() -> tuple[dict[str, Any], ...]:
+    """네이버 미국 상장 회사 명단 — S&P500 종목명(같은 회사 판정용 표기)에 쓴다. 한 실행에서 한 번만 받는다."""
+    return tuple(load_us_market_companies())
 
 
 def _fetch_sp500() -> list[dict[str, Any]]:
-    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    tables = _read_html(url)
-    df = tables[0]
-    result: list[dict[str, Any]] = []
-    for _, row in df.iterrows():
-        ticker = str(row.get("Symbol") or "").strip().upper().replace(".", "-")
-        name = str(row.get("Security") or "").strip()
+    """S&P500 구성종목 — SPY(SPDR) 공식 전체 구성종목 중 **주식**(시세 조회 가능)만.
 
-        if not ticker:
-            continue
-        result.append({"ticker": ticker, "name": name})
-    return result
+    위키피디아 표를 쓰다가 옮겼다 — 문서 구조가 바뀌면 조용히 깨지고(나스닥100 이 그랬다), SPY 는
+    매일 공시돼 지수 변경이 하루 안에 반영된다. 현금·정리 중 증권(코드형 티커)은 시세 조회 대상이
+    아니라 빠진다. 이름은 네이버 미국 상장 회사 명단의 표기를 쓰고(같은 회사 판정이 이름 기준이다),
+    네이버 명단에 없을 때만 SPDR 표기를 쓴다.
+    """
+    holdings = fetch_spdr_us_holdings("SPY")
+    if holdings is None:
+        raise RuntimeError("SPY 가 SPDR 공식 상품 명단에 없습니다.")
+    names = {row["ticker"]: row["name"] for row in _us_companies()}
+    return [
+        {"ticker": item["ticker"], "name": names.get(item["ticker"]) or item["name"]}
+        for item in holdings["holdings"]
+        if item["price_lookup_supported"]
+    ]
 
 
 def _fetch_ndx100() -> list[dict[str, Any]]:
@@ -225,6 +248,7 @@ def _calculate_return_metrics(series: pd.Series) -> dict[str, Any]:
             "return_12m_latest_price": None,
             "return_12m_pct": None,
             "mdd_12m_pct": None,
+            "sortino_12m": None,
         }
 
     latest_date = clean.index.max()
@@ -234,6 +258,7 @@ def _calculate_return_metrics(series: pd.Series) -> dict[str, Any]:
         **_calculate_period_return(clean, latest_price, 3),
         **_calculate_period_return(clean, latest_price, 12),
         **_calculate_mdd(clean, 12),
+        "sortino_12m": period_sortino(clean, 12),
     }
 
 
@@ -307,12 +332,12 @@ def _save(index: str, tickers: list[dict[str, Any]], source_url: str) -> None:
     print(f"저장 완료: {index} ({len(tickers)}개)")
 
 
-def _enrich_constituents(items: list[dict[str, Any]], index: str, refresh_classification: bool) -> list[dict[str, Any]]:
+def _enrich_constituents(items: list[dict[str, Any]], refresh_classification: bool) -> list[dict[str, Any]]:
     ticker_list = [str(item["ticker"]) for item in items]
 
     # 섹터·업종 — 저장된 값이 있으면 재사용한다. 종목별 호출이라 전체를 매번 받으면
     # 배치가 몇 분씩 길어지는데, 분류는 거의 바뀌지 않아 그럴 이유가 없다.
-    saved = {} if refresh_classification else _load_saved_classification(index)
+    saved = {} if refresh_classification else _load_saved_classification_all()
     todo = [t for t in ticker_list if t not in saved]
     if todo:
         print(f"  섹터·업종 조회 {len(todo)}종목 (재사용 {len(saved)}종목)...")
@@ -334,11 +359,60 @@ def _enrich_constituents(items: list[dict[str, Any]], index: str, refresh_classi
             item[f"return_{months}m_latest_price"] = meta.get(f"return_{months}m_latest_price")
             item[f"return_{months}m_pct"] = meta.get(f"return_{months}m_pct")
         item["mdd_12m_pct"] = meta.get("mdd_12m_pct")
+        item["sortino_12m"] = meta.get("sortino_12m")
+
+    _mark_duplicate_classes(items)
 
     missing = [item["ticker"] for item in items if not item["industry"]]
     if missing:
         print(f"  업종 조회 실패 {len(missing)}종목: {', '.join(missing[:10])}{' 외' if len(missing) > 10 else ''}")
     return items
+
+
+def _company_key(name: str) -> str:
+    """클래스 표기를 뗀 회사명 정규화 키 — 같은 회사의 이중 상장(GOOGL/GOOG 등)을 묶는다.
+
+    관측된 표기: "Alphabet Inc. (Class A)" · "Alphabet Inc. Class C Capital Stock" ·
+    "Fox Corporation (Class B)" · 보통주/우선주 ADR "Petroleo Brasileiro ADR Reptg 2" /
+    "… ADR Reptg 2 Pref Shs"(PBR·PBR-A). 클래스·우선주 문구를 제거하고 영숫자만 남겨 비교한다.
+    """
+    text = re.sub(r"\(class [a-z]\)|class [a-z]( capital| common)?( stock)?", "", str(name or "").lower())
+    text = re.sub(r"\b(pref|prf|preferred)( shs| shares| stock)?\b", "", text)
+    return re.sub(r"[^a-z0-9]", "", text)
+
+
+def _mark_duplicate_classes(items: list[dict[str, Any]]) -> None:
+    """같은 회사의 클래스 중복 티커에 duplicate_class=True 를 표시한다.
+
+    거래량이 가장 큰 클래스 하나만 대표로 남긴다(유동성 기준 — GOOGL > GOOG).
+    화면이 기본으로 중복 클래스를 숨기되, 데이터는 남겨 표시 전환이 가능하게 한다.
+    """
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        key = _company_key(item.get("name") or "")
+        if key:
+            groups.setdefault(key, []).append(item)
+    for members in groups.values():
+        keep = max(members, key=lambda m: float(m.get("volume") or 0))
+        for member in members:
+            member["duplicate_class"] = member is not keep
+    marked = [item["ticker"] for item in items if item.get("duplicate_class")]
+    if marked:
+        print(f"  중복 클래스 표시: {', '.join(sorted(marked))}")
+
+
+def _combined_alert_top(by_index: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """알림 대상 — 화면 「통합」(S&P500·나스닥100 합집합)에서 상위 `US_ALERT_COMBINED_TOP` 을 골랐을 때 보이는 종목과 같다.
+
+    화면처럼 시총 내림차순(같으면 티커순)으로 세우고, 같은 회사의 다른 주식 종류(`duplicate_class`)를
+    **먼저** 숨긴 뒤 자른다 — 숨긴 만큼 다음 순위가 올라온다.
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    for items in by_index.values():
+        for item in items:
+            merged.setdefault(str(item["ticker"]), item)
+    ranked = sorted(merged.values(), key=lambda item: (-(item.get("market_cap") or 0), str(item["ticker"])))
+    return [item for item in ranked if not item.get("duplicate_class")][:US_ALERT_COMBINED_TOP]
 
 
 def main() -> None:
@@ -351,9 +425,10 @@ def main() -> None:
     args = parser.parse_args()
 
     failed: list[str] = []
+    alert_items: dict[str, list[dict[str, Any]]] = {}
 
     for label, index, fetch, source in (
-        ("S&P500", "SP500", _fetch_sp500, _SP500_URL),
+        ("S&P500", "SP500", _fetch_sp500, _SP500_SOURCE),
         ("NASDAQ100", "NDX100", _fetch_ndx100, _NDX100_API_URL),
     ):
         print(f"{label} 구성종목 조회 중...")
@@ -361,8 +436,9 @@ def main() -> None:
             items = fetch()
             _check_count(label, items)
             print(f"  {len(items)}개 종목 확인. 시가총액/기간 수익률 조회 시작...")
-            items = _enrich_constituents(items, index, args.refresh_classification)
+            items = _enrich_constituents(items, args.refresh_classification)
             _save(index, items, source)
+            alert_items[index] = items
         except Exception as exc:
             print(f"{label} 조회 실패: {exc}", file=sys.stderr)
             failed.append(label)
@@ -371,6 +447,9 @@ def main() -> None:
         # 종료 코드를 남겨야 cron 래퍼가 실패로 보고 슬랙 알림을 보낸다.
         print(f"실패한 인덱스: {', '.join(failed)}", file=sys.stderr)
         sys.exit(1)
+
+    count = notify_unregistered_market_stocks("us", {"US_COMBINED": _combined_alert_top(alert_items)})
+    print(f"미국 시장 통합 종목 종목풀 미등록: {count}개")
 
 
 if __name__ == "__main__":

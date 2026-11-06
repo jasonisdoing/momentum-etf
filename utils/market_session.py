@@ -57,6 +57,108 @@ def _next_trading_day(country: str, after: date) -> date:
     return day
 
 
+def _previous_trading_day(country: str, before: date) -> date:
+    """`before` **이전**의 거래일. 달력을 못 읽으면 직전 평일로 둔다."""
+    try:
+        from utils.trading_calendar import get_trading_days
+
+        days = get_trading_days(
+            (before - timedelta(days=14)).strftime("%Y-%m-%d"),
+            (before - timedelta(days=1)).strftime("%Y-%m-%d"),
+            country,
+        )
+        for day in reversed(days):
+            if day.date() < before:
+                return day.date()
+    except Exception:
+        pass
+    day = before - timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
+
+
+def last_closed_session_date(country: str, now: datetime | None = None) -> str:
+    """그 시장에서 마지막으로 **정규장이 마감된** 거래일(YYYY-MM-DD).
+
+    오늘이 거래일이고 정규장 마감 시각을 지났으면 오늘, 아니면(장전·장중·휴장) 직전 거래일.
+    「마지막 확정 종가」를 기준으로 삼는 계산(예: ETF 포트폴리오 변동)의 앵커다.
+    """
+    schedule = _schedule(country)
+    zone = ZoneInfo(str(schedule["timezone"]))
+    now_local = (now or datetime.now(zone)).astimezone(zone)
+    today = now_local.date()
+    if _is_trading_day(country, today) and now_local >= _at(zone, today, schedule["close"]):
+        return today.strftime("%Y-%m-%d")
+    return _previous_trading_day(country, today).strftime("%Y-%m-%d")
+
+
+def market_today(country: str, now: datetime | None = None) -> date:
+    """그 시장의 **현지 오늘 날짜**. 한국 날짜로 미국 봉을 세면 하루가 어긋난다."""
+    zone = ZoneInfo(str(_schedule(country)["timezone"]))
+    return (now or datetime.now(zone)).astimezone(zone).date()
+
+
+def trading_day_today(country: str, now: datetime | None = None) -> date | None:
+    """그 시장의 현지 오늘이 거래일이면 그 날짜, 휴장일이면 None."""
+    today = market_today(country, now=now)
+    return today if _is_trading_day(country, today) else None
+
+
+def aftermarket_in_daily_change(country: str) -> bool:
+    """애프터마켓 가격의 일간(%)이 그날 전체 변동인 시장인지 — 시간표의 `aftermarket_in_daily_change`."""
+    return bool(_schedule(country).get("aftermarket_in_daily_change"))
+
+
+def regular_session_started(country: str, now: datetime | None = None) -> bool:
+    """오늘 **정규장이 이미 시작**됐는지 — 장중·마감 후 모두 참, 장 전·휴장일은 거짓.
+
+    「오늘 봉이 존재할 수 있는가」를 묻는 자리에 쓴다. 프리장·데이장은 정규장 전이라
+    그날 봉이 아직 없고, 여기서 봉을 만들면 가짜 봉이 된다.
+    """
+    schedule = _schedule(country)
+    zone = ZoneInfo(str(schedule["timezone"]))
+    now_local = (now or datetime.now(zone)).astimezone(zone)
+    today = now_local.date()
+    return _is_trading_day(country, today) and now_local >= _at(zone, today, schedule["open"])
+
+
+def regular_session_elapsed_minutes(country: str, now: datetime | None = None) -> float | None:
+    """정규장이 열린 지 몇 분 지났는지 — 정규장이 아니면(장전·마감·휴장일) None.
+
+    개장 직후를 건너뛰는 배치가 시간표(서머타임 포함)를 따라가도록 KST 고정 시각 대신 쓴다.
+    """
+    schedule = _schedule(country)
+    zone = ZoneInfo(str(schedule["timezone"]))
+    now_local = (now or datetime.now(zone)).astimezone(zone)
+    today = now_local.date()
+    if not _is_trading_day(country, today):
+        return None
+    open_at = _at(zone, today, schedule["open"])
+    if not open_at <= now_local < _at(zone, today, schedule["close"]):
+        return None
+    return (now_local - open_at).total_seconds() / 60
+
+
+def pre_open_trading_day(country: str, now: datetime | None = None) -> date | None:
+    """프리장·데이장이 진행 중이면 그 세션이 속한 **다음 거래일**, 아니면 None.
+
+    데이장은 N일 저녁(20:00 ET)에 시작하지만 N+1 거래일의 세션이다 — 프리장과 함께
+    N+1 봉의 시작 구간이다. 그래서 N일 저녁 데이장은 내일 날짜를, 자정 이후 데이장·프리장은
+    오늘 날짜를 돌려준다. 정규장·애프터·마감·휴장이면 None.
+    """
+    if market_session(country, now=now)["session"] not in (PREMARKET, DAYMARKET):
+        return None
+    schedule = _schedule(country)
+    zone = ZoneInfo(str(schedule["timezone"]))
+    now_local = (now or datetime.now(zone)).astimezone(zone)
+    today = now_local.date()
+    day_open = schedule.get("daymarket_open")
+    if day_open is not None and now_local >= _at(zone, today, day_open):
+        return today + timedelta(days=1)
+    return today
+
+
 def _is_trading_day(country: str, day: date) -> bool:
     """그 날짜가 거래일인지. 달력을 못 읽으면 평일 여부로 본다."""
     try:

@@ -1,11 +1,12 @@
 """모멘텀 전략(전략-ST) 설정·선정 API."""
 
 from fastapi import APIRouter, Body, Depends, Query
+from fastapi.responses import StreamingResponse
 
 from config import HOLDING_CHART_MONTHS
 from fastapi_app.dependencies import require_internal_token
+from fastapi_app.streaming import sse_stream
 from utils.momentum_service import (
-    compute_picks,
     load_settings,
     load_settings_map,
     pool_options,
@@ -13,6 +14,30 @@ from utils.momentum_service import (
 )
 
 router = APIRouter(prefix="/internal/strategy-momentum", tags=["strategy-momentum"])
+
+
+def _with_us_stock_sectors(result: dict, pool: str, row_keys: tuple[str, ...]) -> dict:
+    """미국 개별주 화면 행에만 표시용 섹터를 붙인다. 엔진 결과는 변경하지 않는다."""
+    from utils.industry_map import us_classification_maps
+    from utils.settings_loader import get_ticker_type_settings
+
+    settings = get_ticker_type_settings(pool) or {}
+    if str(settings.get("country_code") or "").strip().lower() != "us":
+        return result
+    if str(settings.get("pool_kind") or "").strip().lower() != "stock":
+        return result
+
+    _, sectors = us_classification_maps()
+    return {
+        **result,
+        **{
+            key: [
+                {**row, "sector": sectors.get(str(row.get("ticker") or "").strip().upper(), "")}
+                for row in result.get(key, [])
+            ]
+            for key in row_keys
+        },
+    }
 
 
 def _month_options(settings: dict) -> list[int]:
@@ -24,7 +49,7 @@ def _month_options(settings: dict) -> list[int]:
     from utils.momentum_service import available_backtest_months, load_benchmark_close
     from utils.pool_signal_backtest_service import get_month_options
 
-    limit = available_backtest_months(load_benchmark_close(settings["pool"]), int(settings["long_ma_days"]))
+    limit = available_backtest_months(load_benchmark_close(settings["pool"]))
     months = [month for month in get_month_options() if month <= limit]
 
     # ADR 하한이 켜진 풀은 게이트가 전 구간에 적용되는 기간만 고른다 — ADR 이력 이전이 섞인
@@ -54,7 +79,7 @@ def _tuning_month_options(settings: dict) -> list[int]:
     from utils.momentum_service import available_backtest_months, load_benchmark_close
     from utils.pool_signal_backtest_service import get_month_options
 
-    limit = available_backtest_months(load_benchmark_close(settings["pool"]), int(settings["long_ma_days"]))
+    limit = available_backtest_months(load_benchmark_close(settings["pool"]))
     months = [month for month in get_month_options() if month <= limit]
     return _clip_months_to_adr(months, settings["pool"], limit)
 
@@ -74,13 +99,13 @@ def _ma_rule_payload(settings: dict) -> dict:
 def _constraints_payload() -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트 복사본 제거)."""
     from config import ADR_FLOOR_OPTIONS
-    from utils.momentum_service import INTRAWEEK_STOP_OPTIONS
+    from utils.entry_vol_options import entry_vol_mult_options_by_country
 
     return {
-        # ADR 하한 — 판정일의 시장 ADR 이 미만이면 그 주 전량 현금. None = 게이트 없음(기본).
+        # ADR 하한 — 그날 시장 ADR 이 미만이면 신규 진입만 건너뛴다. None = 게이트 없음(기본).
         "adr_floor_options": list(ADR_FLOOR_OPTIONS),
-        # 주중 손절선(%) — 주중 이탈이 켜진 풀에서만 화면에 노출한다. None = 손절 없음.
-        "intraweek_stop_options": list(INTRAWEEK_STOP_OPTIONS),
+        # 진입 문턱 — 이격 ≥ 배수 × 20일 변동성일 때만 진입 자격. None = 없음(기본). 풀 국가별 목록.
+        "entry_vol_mult_options_by_country": entry_vol_mult_options_by_country(),
     }
 
 
@@ -117,7 +142,7 @@ def get_strategy_momentum(
         "tuning_month_options": _tuning_month_options(settings),
         "ma_rule": _ma_rule_payload(settings),
         "constraints": _constraints_payload(),
-        "picks": None,
+        "positions": None,
     }
 
 
@@ -144,12 +169,12 @@ def put_strategy_momentum_settings(
         "tuning_month_options": _tuning_month_options(saved),
         "ma_rule": _ma_rule_payload(saved),
         "constraints": _constraints_payload(),
-        "picks": None,
+        "positions": None,
     }
 
 
-@router.post("/picks")
-def post_strategy_momentum_picks(
+@router.post("/positions")
+def post_strategy_momentum_positions(
     pool: str | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict:
@@ -157,7 +182,12 @@ def post_strategy_momentum_picks(
 
     ``pool`` 은 화면이 고른 종목풀이다 — 없으면 저장분이 있는 첫 풀.
     """
-    return compute_picks(load_settings(pool))
+    from utils.momentum_backtest import current_positions
+
+    settings = load_settings(pool)
+    return _with_us_stock_sectors(
+        current_positions(settings), settings["pool"], ("holdings", "planned_entries", "exited_today", "candidates")
+    )
 
 
 @router.post("/backtest")
@@ -166,21 +196,17 @@ def post_strategy_momentum_backtest(
     pool: str | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """주간 리밸런싱 백테스트.
+    """일간 슬롯 백테스트.
 
-    body: ``{"months": 12, "include_daily": false}``.
-    ``include_daily`` 는 일간 탭을 볼 때만 참으로 보낸다 — 일별 계산은 응답이
-    수천 행으로 커지므로 필요할 때만 만든다.
+    body: ``{"months": 12}``. 연간·월간·주간·일간 표는 화면이 일별 곡선에서 잘라 만든다.
     """
     from utils.momentum_backtest import run_backtest
 
     months = payload.get("months") if isinstance(payload, dict) else None
     if not isinstance(months, int) or isinstance(months, bool):
         raise ValueError("'months' 는 정수여야 합니다.")
-    include_daily = payload.get("include_daily") if isinstance(payload, dict) else None
-    if not isinstance(include_daily, bool):
-        raise ValueError("'include_daily' 는 참/거짓이어야 합니다.")
-    return run_backtest(months, settings=load_settings(pool), include_daily=include_daily)
+    settings = load_settings(pool)
+    return _with_us_stock_sectors(run_backtest(months, settings), settings["pool"], ("trades",))
 
 
 @router.post("/tuning")
@@ -188,13 +214,22 @@ def post_strategy_momentum_tuning(
     payload: dict = Body(...),
     pool: str | None = Query(default=None),
     _: None = Depends(require_internal_token),
-) -> dict:
+) -> StreamingResponse:
     """튜닝 — 설정 항목 범위의 모든 조합을 백테스트한다 (저장된 설정 기준).
 
     body: ``{"months": 12, "ranges": {
-    "short_ma_days": [...], "long_ma_days": [...], "intraweek": ["off", "none", -5, ...]}}``
+    "short_ma_days": [...], "long_ma_days": [...], "adr_floor": [...]}}``
+
+    응답은 **SSE 스트림**이다 — 준비·조합 완료·집계 진행 이벤트와 마지막 결과 이벤트.
+    다 끝난 뒤 한 번에 응답하면 10분 넘게 소식이 없어 화면이 죽은 것처럼 보이고,
+    응답 헤더가 늦어 프록시(undici)의 헤더 대기 한도에도 걸린다.
+
+        data: {"type": "progress", "phase": "backtest", "done": 72, "total": 216}
+        data: {"type": "result", "payload": {...}}
+        data: {"type": "error", "message": "..."}     계산 도중 실패
     """
-    from utils.momentum_tuning import run_tuning
+    from utils.momentum_tuning import stream_tuning
+    from utils.strategy_tuning import begin_tuning
 
     if not isinstance(payload, dict):
         raise ValueError("요청 형식이 올바르지 않습니다.")
@@ -204,7 +239,17 @@ def post_strategy_momentum_tuning(
     ranges = payload.get("ranges")
     if not isinstance(ranges, dict) or not all(isinstance(v, list) for v in ranges.values()):
         raise ValueError("'ranges' 는 축별 값 목록이어야 합니다.")
-    return run_tuning(months, load_settings(pool), ranges)
+    settings = load_settings(pool)
+    run = begin_tuning(f"모멘텀 {settings['pool']} {months}개월")
+    return sse_stream(lambda: stream_tuning(months, settings, ranges, run))
+
+
+@router.delete("/tuning")
+def delete_strategy_momentum_tuning(_: None = Depends(require_internal_token)) -> dict:
+    """현재 실행 중인 전략 튜닝과 워커 프로세스를 즉시 종료한다."""
+    from utils.strategy_tuning import cancel_active_tuning
+
+    return cancel_active_tuning()
 
 
 @router.post("/charts")

@@ -1,0 +1,476 @@
+"""슬롯 백테스트 — 신고가·모멘텀이 함께 쓰는 **일간 슬롯** 엔진.
+
+두 전략은 판정 내용만 다르고 굴리는 방식이 같다.
+
+    매일 종가로 판정 → **다음 거래일 시가**에 체결
+    동시 보유 상한 ``slots``, 균등 배분(정수 주수)
+    자리가 차 있을 때는 순위만으로 보유 종목을 교체하지 않는다
+    ADR 하한에 걸린 날은 **신규 진입만** 건너뛴다(보유 청산은 그대로 돈다)
+
+기본적으로 교체하지 않는 이유: 2026-08-14 kor(24개월)·us(60개월) 백테스트에서 최저수익/손실만/최장보유
+교체 전부가 현행보다 나빴다(kor +1912% vs 교체 시 +142~779%, us +240% vs -76~+95%).
+보유 중이라는 것 자체가 청산에 안 걸린 살아있는 추세라, 교체는 청산 규칙을 앞질러 이익
+종목을 자르고 슬리피지 왕복 비용만 쌓는다.
+
+전략이 채워 넣는 것은 세 장의 표뿐이다(행 = 거래일, 열 = 종목).
+
+    entry     그날 종가로 **살 자격**을 갖췄는가
+    exit      그날 종가로 **팔 신호**인가
+    priority  자리가 모자랄 때 큰 값부터 담는다
+
+신고가는 (52주 돌파 + 거래대금 하한 / 이탈 이평선 하회 / 거래대금 배수),
+모멘텀은 (장기 이격 > 0 그리고 단기 이격 >= 0 / 둘 중 하나라도 깨짐 / 장기 이격률)이다.
+
+이 엔진이 **유일한 판정자**다. 화면·슬랙·합성은 ``planned_exits``·``planned_entries``·
+``open_positions`` 를 읽기만 한다. 바꿀 규칙이 생기면 여기를 고쳐야 백테스트·화면·튜닝이
+같이 따라온다 (AGENTS.md 10).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
+
+import pandas as pd
+
+from utils.perf_metrics import max_drawdown_window
+from utils.trade_stats import OPEN_REASON, summarize_trades
+
+
+def _entry_quantities(
+    picks: list[str],
+    prices: dict[str, float],
+    free: int,
+    slot_amount: float,
+    cash: float,
+    *,
+    pending_ok: bool = False,
+) -> tuple[dict[str, int], list[str]]:
+    """체결과 다음 진입 예상이 같은 슬롯·잔여 현금 제한을 사용한다.
+
+    ``prices`` 에 없는 종목은 체결가를 모른다는 뜻이다. ``pending_ok`` 면(잠정 마지막 봉의
+    체결일) 그 종목을 **체결 예정**으로 돌려주고 자리도 차지시킨다 — 가격을 지어내 사지도,
+    후순위 종목에 자리를 빼앗기지도 않는다. 아니면(확정 구간) 호출자가 미리 걸렀으므로
+    그런 종목이 없다.
+    """
+    quantities: dict[str, int] = {}
+    pending: list[str] = []
+    reserved = 0.0
+    for ticker in picks:
+        if len(quantities) + len(pending) >= free:
+            break
+        price = prices.get(ticker)
+        if price is None:
+            if pending_ok:
+                pending.append(ticker)
+                # 확정 주문의 몫을 후순위 시가 체결이 먼저 쓰지 않게 예약한다.
+                remaining = cash - sum(quantities[t] * prices[t] for t in quantities) - reserved
+                reserved += min(slot_amount, max(remaining, 0.0))
+            continue
+        if not pd.notna(price) or price <= 0:
+            continue
+        remaining = max(cash - sum(quantities[t] * prices[t] for t in quantities) - reserved, 0.0)
+        shares = int(min(slot_amount, remaining) // price)
+        if shares > 0:
+            quantities[ticker] = shares
+    return quantities, pending
+
+
+def _cagr_pct(total_pct: float, months: int) -> float | None:
+    """연평균 성장률(%)."""
+    if months <= 0:
+        return None
+    return ((1 + total_pct / 100) ** (12 / months) - 1) * 100
+
+
+def _sortino(returns: pd.Series) -> float | None:
+    """하방 변동성 대비 수익(연율). 하락일이 없으면 나눌 수 없어 None."""
+    downside = returns[returns < 0]
+    if downside.empty or len(returns) < 2:
+        return None
+    dd = float((downside**2).mean() ** 0.5)
+    if dd <= 0:
+        return None
+    return float(returns.mean() / dd * (252**0.5))
+
+
+def run_slot_backtest(
+    *,
+    months: int,
+    panel: dict[str, pd.DataFrame],
+    entry: pd.DataFrame,
+    exit_signal: pd.DataFrame,
+    priority: pd.DataFrame,
+    slots: int,
+    name_by: dict[str, str],
+    industry_by: dict[str, str],
+    exit_reason: str,
+    buy_slippage: float,
+    sell_slippage: float,
+    initial_capital: float,
+    entry_blocked: Callable[[pd.Timestamp], bool],
+    adr_at: Callable[[pd.Timestamp], Any],
+    benchmark_growth: Callable[[pd.Index], pd.Series],
+    benchmark_name: str,
+    start_date: str | None = None,
+    provisional_last_bar: bool = False,
+) -> dict[str, Any]:
+    """일간 슬롯 시뮬레이션. 자산곡선·지표·체결 내역·현재 보유를 한 형태로 돌려준다.
+
+    ``entry``/``exit_signal``/``priority`` 는 ``panel["close"]`` 와 같은 인덱스·컬럼이어야
+    한다. 응답 형태는 두 전략이 같다 — 화면·합성·튜닝이 같은 키를 읽는다.
+
+    외부 조회는 하지 않는다 — 슬리피지·시작 자본·ADR 게이트·벤치마크는 호출자가 수집해
+    넘긴다(`utils/slot_positions.load_slot_market`). 조회가 엔진 안에 있으면 운용 현황
+    캐시 키에 그 값들을 넣을 수 없어, 풀 설정 변경이 캐시 수명 동안 가려진다.
+
+    ``provisional_last_bar`` 는 장중 운용 현황 전용이다(strategy_logic.md 「장중 잠정 실행」) — 패널의 마지막
+    행이 실시간 값으로 만든 **오늘의 잠정 봉**이라는 뜻이다. 규칙·수식은 그대로고 입력만
+    잠정이라, 종가가 확정되면 확정 실행과 같은 결과가 된다. 확정 구간과 다르게 다루는 것은
+    **체결가를 모르는 주문**뿐이다: 어제 확정된 판정이 오늘 시가에 체결되는 날, 시가를 안
+    주는 종목(국내 ETF 등)은 거래정지 폴백(전일 종가 체결)으로 가격을 지어내지 않고
+    **오늘 체결 예정**으로 남긴다 — 매도는 보유 유지(`fill_date`)·현금 불변, 매수는
+    자리만 차지(`pending_entries`). 잠정일의 마지막 판정은 체결 예정 행을 재판정하지 않는다.
+    """
+    close_df, open_df = panel["close"], panel["open"]
+
+    dates = close_df.index
+    # 합성 운용은 고정 시작일을 쓰고, 기간 비교 백테스트만 이동 구간을 쓴다.
+    start = pd.Timestamp(start_date) if start_date is not None else dates[-1] - pd.DateOffset(months=months)
+    span = [d for d in dates if d >= start]
+    # 1거래일(시작일 = 마지막 봉)도 허용한다 — 오늘 시작하는 새 전략은 체결 이력 없이
+    # 그날 판정(다음 시가에 살 종목)만 내면 된다. 곡선은 한 점(0%)이고 루프는 돌지 않는다.
+    if not span:
+        # 시작일이 마지막 봉보다 뒤 — 첫 거래일 봉(장중엔 잠정 봉)이 생기면 그때부터 표시된다.
+        raise RuntimeError(
+            f"전략 시작일({start.date()}) 이후의 가격 데이터가 아직 없습니다"
+            f" (마지막 봉 {dates[-1].date()}) — 첫 거래일 봉이 생기면 표시됩니다."
+        )
+
+    # 자산은 현금 + 보유 주수로 들고 간다. 포지션 손익을 자산에 곱하면 동시에 들고 있던
+    # 종목의 손익이 합산이 아니라 곱으로 쌓여 수익이 부풀려진다.
+    #
+    # 시작 자본은 통화별 상수(config.BACKTEST_INITIAL_CAPITAL)다. 상대곡선(1.0)으로 두면
+    # 주수가 소수로 나오는데, 실제로는 정수 주수만 살 수 있어 운용 현황과 결과가 어긋난다.
+    # 곡선은 마지막에 시작 자본으로 나눠 배수로 돌려준다.
+    #
+    # 자본을 계좌 금액으로 바꿔 돌리는 건 **하지 않는다.** 자본이 작아지면 비싼 종목을 1주도
+    # 못 사서 그 진입을 건너뛰고, 빈 슬롯에 다른 종목이 들어와 경로가 통째로 갈라진다
+    # (실측: $15,000 은 2026-01-05 ASML 진입, $1,976 은 그걸 못 사고 다음 날 SLB 진입 →
+    # 7월에 APD 까지 이어져 보유 종목이 달라졌다). 그러면 전략 화면과 합성 화면이 서로 다른
+    # 종목을 보게 된다. 계좌가 작아서 못 사는 것은 **화면이 「1주 못 삼」으로 드러낸다**.
+    cash = float(initial_capital)
+    holdings: dict[str, dict[str, Any]] = {}
+    trades: list[dict[str, Any]] = []
+    curve: list[float] = []
+    cash_curve: dict[pd.Timestamp, float] = {}
+    last_day = span[-1]
+    # 잠정 마지막 봉 모드에서만 채워진다 — 오늘 시가를 몰라 체결하지 못한 확정 주문.
+    pending_exits: dict[str, str] = {}
+    blocked_exits: dict[str, str] = {}
+    pending_entry_tickers: list[str] = []
+
+    # 평가 전용 종가 — 그날 값이 없으면 **직전 유효 종가**로 본다.
+    # 판정에는 쓰지 않는다. 없는 날을 0 으로 치면 그 종목이 사라진 것처럼 계산돼 곡선이
+    # 한 번에 무너진다(us_etf 가 마지막 하루로 -100% 가 됐다).
+    valuation_close = close_df.ffill()
+
+    def priority_of(ticker: str, day: pd.Timestamp) -> float:
+        """자리가 모자랄 때의 줄 세우기 값 — 모르는 종목은 맨 뒤."""
+        score = priority.at[day, ticker]
+        return float(score) if pd.notna(score) else 0.0
+
+    def _value_at(day: pd.Timestamp) -> float:
+        """그날 종가로 평가한 총자산 — 현금 + 보유 평가액."""
+        total = cash
+        for ticker, position in holdings.items():
+            price = valuation_close.at[day, ticker]
+            if pd.notna(price):
+                total += position["shares"] * float(price)
+        return total
+
+    for index, day in enumerate(span[:-1]):
+        nxt = span[index + 1]
+        # 체결일이 잠정 봉인 날 — 시가를 모르는 주문은 체결 대신 '오늘 체결 예정'이 된다.
+        provisional_fill = provisional_last_bar and nxt == last_day
+        # 자산 평가는 **그날의 판정보다 먼저** 한다. 아래 매매는 전부 `nxt` 시가 체결이라,
+        # 판정 뒤에 재면 아직 사지도 않은 주식이 오늘 종가로 평가되고 그 대금은 이미 현금에서
+        # 빠져 곡선 첫날이 어긋난다(총수익과 일별 합성이 4%p 갈렸다).
+        curve.append(_value_at(day))
+        cash_curve[day] = cash / curve[-1] * 100.0
+
+        # 1) 청산 판정 (오늘 종가) → 내일 시가 체결
+        for ticker in list(holdings):
+            position = holdings[ticker]
+            price = close_df.at[day, ticker]
+            if ticker not in blocked_exits and (pd.isna(price) or not bool(exit_signal.at[day, ticker])):
+                continue
+            reason = blocked_exits.get(ticker) or exit_reason
+            exit_price = open_df.at[nxt, ticker]
+            if pd.isna(exit_price):
+                if provisional_fill:
+                    # 오늘 시가를 안 주는 종목(국내 ETF 등) — 체결가를 지어내지 않고
+                    # 보유를 유지한 채 '오늘 체결 예정'으로 남긴다. 현금도 움직이지 않는다.
+                    pending_exits[ticker] = reason
+                    continue
+                # 거래정지에는 가상의 종가 체결을 만들지 않고 다음 시가까지 보유한다.
+                blocked_exits[ticker] = reason
+                continue
+            blocked_exits.pop(ticker, None)
+            ret = (float(exit_price) * (1 - sell_slippage / 100)) / position["entry"] - 1
+            cash += position["shares"] * float(exit_price) * (1 - sell_slippage / 100)
+            trades.append(
+                {
+                    "ticker": ticker,
+                    "name": name_by.get(ticker, ticker),
+                    "industry": industry_by.get(ticker, ""),
+                    "entry_date": str(position["date"].date()),
+                    # 표시는 **실제 체결 시가**다. 슬리피지는 가격이 아니라 비용이라
+                    # 손익률에만 반영한다 — 가격에 섞으면 시장에 없는 호가가 찍힌다.
+                    "entry_price": round(position["open"], 2),
+                    "exit_date": str(nxt.date()),
+                    "exit_price": round(float(exit_price), 2),
+                    "return_pct": round(ret * 100, 2),
+                    # 보유일 — **들고 있던 거래일 수**(체결일 포함). 시가에 사서 그날 종가까지
+                    # 들고 있었으면 1일이다. 예전에는 경과일(-1)로 세서 하루 만에 판 거래가
+                    # 「보유일 0」 으로, 오늘 산 종목이 「0일」 로 나왔다.
+                    "days": len(close_df.loc[position["date"] : day]),
+                    "reason": reason,
+                }
+            )
+            del holdings[ticker]
+
+        # 2) 진입 — 빈 자리만큼, 우선순위가 큰 순 (ADR 게이트에 걸린 날은 건너뜀)
+        # 체결 예정 매도의 자리는 이미 판 것으로 센다 — 체결가만 모를 뿐 오늘 나가는 주문이다.
+        free = slots - (len(holdings) - len(pending_exits))
+        if free > 0 and not entry_blocked(day):
+            # 배정 기준은 **체결 시점(다음 거래일 시가)의 자산**이다. 청산 대금이 이미
+            # 현금에 들어와 있으므로 파는 쪽과 사는 쪽이 같은 시점으로 맞는다.
+            fill_value = cash
+            for held_ticker, held_position in holdings.items():
+                held_price = open_df.at[nxt, held_ticker]
+                if pd.isna(held_price):
+                    held_price = close_df.at[day, held_ticker]
+                if pd.notna(held_price):
+                    fill_value += held_position["shares"] * float(held_price)
+            row = entry.loc[day]
+            # 잠정 체결일에는 시가 미상 종목도 후보로 남긴다 — 체결 예정으로 자리를 차지해야
+            # 후순위 종목이 확정 진입의 자리를 빼앗지 못한다.
+            picks = [
+                t for t in row[row].index if t not in holdings and (provisional_fill or not pd.isna(open_df.at[nxt, t]))
+            ]
+            picks.sort(key=lambda ticker: priority_of(ticker, day), reverse=True)
+            # 슬롯 하나에 슬롯 몫만큼만 쓴다 — **내림**이라 자기 몫을 넘겨 사지 않는다.
+            # 예전에는 예산을 `슬롯 몫 × 후보 수` 로 한 덩어리로 넘겨 배분 함수에 맡겼는데,
+            # 당시 그 함수(최대잉여법, 2026-09 폐기)는 예산이 남는 한 한 주씩 더 줬으므로 비싼 종목이 자기 몫을
+            # 넘겨 사고 그만큼 다른 슬롯이 못 채웠다(슬롯 1,000 에서 ASML 이 1주 1,400 을
+            # 사서 140% 가 되고, 그 바람에 BMY 가 목표 14.93주에 8주만 샀다).
+            #
+            # 남는 돈을 **다시 나눠 주지 않는다**. 합성은 계좌의 고정 예산에서 최소 1주를
+            # 먼저 확보하므로 백테스트 슬롯 배분과 별개다.
+            # 슬롯은 종목마다 몫이 정해져 있어, 한 주를 더 주면 그 돈이 다른 슬롯 몫에서 나온다.
+            # 잔여는 현금으로 두고 다음 진입 때 `fill_value` 에 포함돼 다시 쓰인다.
+            #
+            # **최소 1주 원칙** — 슬롯 몫으로 1주도 못 사는 후보는 자리를 차지하지 않고
+            # 다음 순위가 그 슬롯을 채운다. 예전에는 후보를 `[:free]` 로 먼저 자른 뒤
+            # 0주가 나오면 그 슬롯을 빈 채로 뒀다(다음 순위는 쳐다보지도 않았다).
+            slot_amount = fill_value / slots if slots else 0.0
+            fill_price_by_ticker = {
+                ticker: float(open_df.at[nxt, ticker]) * (1 + buy_slippage / 100)
+                for ticker in picks
+                if not pd.isna(open_df.at[nxt, ticker])
+            }
+            # 잠정 체결일의 현금은 실제 현금뿐이다 — 체결 예정 매도 대금은 아직 안 들어왔고,
+            # 모르는 체결가로 현금을 지어내지 않는다(종가 확정 실행이 최종 수량을 정한다).
+            quantities, pending_today = _entry_quantities(
+                picks, fill_price_by_ticker, free, slot_amount, cash, pending_ok=provisional_fill
+            )
+            pending_entry_tickers.extend(pending_today)
+            for ticker in quantities:
+                shares = quantities[ticker]
+                fill_price = fill_price_by_ticker[ticker]
+                holdings[ticker] = {
+                    "open": float(open_df.at[nxt, ticker]),
+                    "entry": fill_price,
+                    "date": nxt,
+                    "shares": shares,
+                }
+                cash -= shares * fill_price
+
+    # 마지막 날은 판정·체결이 없다(체결할 다음 거래일이 없어서). 다만 그날 종가로
+    # **평가**는 해야 곡선이 하루 짧아지지 않는다.
+    curve.append(_value_at(last_day))
+    cash_curve[last_day] = cash / curve[-1] * 100.0
+
+    # 아직 청산하지 않은 종목 — 성과에는 평가손익으로 이미 반영돼 있지만 체결 내역에는 없다.
+    # 슬리브 안에서의 현재 비중도 함께 담는다. 진입할 때 1/slots 였다가 시세대로 흘러간
+    # 값이라, 합성 화면이 '지금 이 종목이 몇 % 여야 하는지' 를 이 값으로 잡는다.
+    sleeve_value = _value_at(last_day)
+    open_positions = []
+    for ticker, position in holdings.items():
+        price = close_df.at[last_day, ticker]
+        if pd.isna(price):
+            if not provisional_last_bar:
+                continue
+            # 잠정 봉에 값이 없는 것은 실시간 시세가 없다는 뜻이다 — 보유가 표에서
+            # 사라지면 안 되므로 표시는 마지막 확정 종가로 한다(판정은 하지 않는다).
+            price = valuation_close.at[last_day, ticker]
+            if pd.isna(price):
+                continue
+        value = position["shares"] * float(price)
+        position_row = {
+            "ticker": ticker,
+            "name": name_by.get(ticker, ticker),
+            "industry": industry_by.get(ticker, ""),
+            "entry_date": str(position["date"].date()),
+            "entry_price": round(position["open"], 2),
+            "price": float(price),
+            # 표시용 평가손익 — 아직 안 팔았으니 매도 슬리피지는 빼지 않는다.
+            "return_pct": round((float(price) / position["open"] - 1) * 100, 2),
+            "days": len(close_df.loc[position["date"] : last_day]),
+            # 오늘 편입된 종목은 목록에서 따로 표시한다.
+            "is_new": position["date"] == last_day,
+            # 이 슬리브 안에서의 비중(%) — 슬리브 전체를 100 으로 본다.
+            # 반올림하지 않는다 — 합성이 이 값으로 목표 금액을 계산한다. 표시는 화면이 포맷한다.
+            "sleeve_weight_pct": value / sleeve_value * 100 if sleeve_value > 0 else 0.0,
+        }
+        if ticker in pending_exits:
+            # 어제 확정된 매도가 오늘 체결 예정 — 보유일은 청산 신호가 난 어제까지다.
+            position_row["fill_date"] = str(last_day.date())
+            position_row["days"] = len(close_df.loc[position["date"] : span[-2]])
+        open_positions.append(position_row)
+    # 오래 들고 있는 것이 위 — 화면이 보여주는 순서다. 여기서 맞춰 두면 이 목록을 그대로
+    # 쓰는 합성 슬리브도 같은 순서가 된다.
+    open_positions.sort(key=lambda row: row["entry_date"])
+
+    # ── 마지막 날 판정 — **다음 거래일 시가에 할 일** ─────────────────────────
+    # 위 루프는 마지막 날을 판정하지 않는다(체결할 다음 날이 없어서). 그래서 여기서 한 번 더
+    # 본다. 이걸 엔진이 안 내주면 화면이 같은 판정을 **다시 구현**하게 되고, 한쪽만 고치는
+    # 순간 "화면은 사라는데 백테스트는 안 샀다"가 된다 — 그러면 성과 숫자를 믿을 수 없다.
+    # 체결 예정(fill_date) 주문은 잠정으로 다시 판정하지 않는다 — 이미 확정된 판정이다.
+    planned_exits = [
+        ticker
+        for ticker in holdings
+        if ticker not in pending_exits
+        and pd.notna(close_df.at[last_day, ticker])
+        and bool(exit_signal.at[last_day, ticker])
+    ]
+    planned_exit_reasons = {ticker: exit_reason for ticker in planned_exits}
+    planned_entries: list[str] = []
+    planned_entry_weights: dict[str, float] = {}
+    pending_entry_set = set(pending_entry_tickers)
+    # 오늘 확정 미체결 매수는 오늘 현금·확정 미체결 매도 예상대금에서 우선 예약한다.
+    # 내일 잠정 청산 대금을 오늘 주문의 자금으로 앞당겨 쓰지 않는다.
+    pending_proceeds = sum(
+        holdings[t]["shares"] * float(valuation_close.at[last_day, t])
+        for t in pending_exits
+        if pd.notna(valuation_close.at[last_day, t])
+    )
+    available = cash + pending_proceeds * (1 - sell_slippage / 100)
+    pending_slot_amount = (sleeve_value - pending_proceeds * sell_slippage / 100) / slots if slots else 0.0
+    pending_entry_weights: dict[str, float] = {}
+    pending_buy_cost = 0.0
+    for ticker in pending_entry_tickers:
+        spend = min(pending_slot_amount, max(available, 0.0))
+        # 시가·체결 주수는 만들지 않는다. 미체결 목표는 비용을 포함한 예약액으로 제한한다.
+        stock_value = spend / (1 + buy_slippage / 100)
+        pending_entry_weights[ticker] = stock_value / sleeve_value * 100 if sleeve_value > 0 else 0.0
+        pending_buy_cost += spend - stock_value
+        available -= spend
+    free = slots - (len(holdings) - len(planned_exits) - len(pending_exits)) - len(pending_entry_tickers)
+    if free > 0 and not entry_blocked(last_day):
+        row = entry.loc[last_day]
+        picks = [ticker for ticker in row[row].index if ticker not in holdings and ticker not in pending_entry_set]
+        picks.sort(key=lambda ticker: priority_of(ticker, last_day), reverse=True)
+        # 다음 시가가 없으므로 최종 종가로 예상한다. 청산 비용과 정수 수량도 체결 규칙과 같다.
+        proceeds = sum(holdings[t]["shares"] * float(close_df.at[last_day, t]) for t in planned_exits)
+        available += proceeds * (1 - sell_slippage / 100)
+        fill_value = sleeve_value - (pending_proceeds + proceeds) * sell_slippage / 100 - pending_buy_cost
+        prices = {t: float(close_df.at[last_day, t]) * (1 + buy_slippage / 100) for t in picks}
+        quantities, _ = _entry_quantities(picks, prices, free, fill_value / slots, available)
+        planned_entries = list(quantities)
+        planned_entry_weights = {
+            t: quantity * float(close_df.at[last_day, t]) / sleeve_value * 100 for t, quantity in quantities.items()
+        }
+
+    # 곡선은 시작 1.0 배수로 되돌린다 — 시작 자본은 정수 주수를 세기 위한 것이고,
+    # 성과 지표(수익률·MDD·벤치마크 대비)는 배수 기준으로 읽는다.
+    strategy = pd.Series(curve, index=span) / initial_capital
+    # 벤치마크는 **시작일 시가**를 1 로 둔다 — 전략도 그날 시가에 사기 때문이다(공용 함수).
+    benchmark = benchmark_growth(strategy.index)
+    strategy_total = float((strategy.iloc[-1] - 1) * 100)
+    benchmark_total = float((benchmark.iloc[-1] - 1) * 100)
+
+    # 체결 목록·거래 통계에 **보유중 행도 포함**한다(2026-09) — 청산분만 보여주면 장기
+    # 이평 설정에서 승자(계속 보유)는 표·통계에서 빠지고 먼저 꺾인 패자만 잡혀, 총수익은
+    # 큰데 승률·평균이익이 초라해 보이는 착시가 났다. 보유중 행은 청산일 없음·청산가
+    # 자리에 현재가(마지막 봉)·수익률은 평가 기준이다. 합성 체결 목록과 같은 형태다.
+    open_trade_rows = [
+        {
+            "ticker": row["ticker"],
+            "name": row["name"],
+            "industry": row["industry"],
+            "entry_date": row["entry_date"],
+            "entry_price": row["entry_price"],
+            "exit_date": None,
+            "exit_price": round(float(row["price"]), 2),
+            "return_pct": row["return_pct"],
+            "days": row["days"],
+            "reason": OPEN_REASON,
+        }
+        for row in open_positions
+    ]
+    all_trades = open_trade_rows + sorted(trades, key=lambda t: t["exit_date"], reverse=True)
+
+    strategy_mdd, benchmark_mdd = max_drawdown_window(strategy), max_drawdown_window(benchmark)
+    return {
+        "start_date": str(strategy.index[0].date()),
+        "end_date": str(strategy.index[-1].date()),
+        "months": months,
+        "strategy_total_pct": round(strategy_total, 2),
+        "strategy_cagr_pct": round(_cagr_pct(strategy_total, months) or 0.0, 2),
+        "strategy_mdd_pct": round(strategy_mdd["mdd_pct"], 2),
+        "strategy_mdd_from": strategy_mdd["from"],
+        "strategy_mdd_to": strategy_mdd["to"],
+        "strategy_sortino": _sortino(strategy.pct_change().dropna()),
+        "benchmark_total_pct": round(benchmark_total, 2),
+        "benchmark_cagr_pct": round(_cagr_pct(benchmark_total, months) or 0.0, 2),
+        "benchmark_mdd_pct": round(benchmark_mdd["mdd_pct"], 2),
+        "benchmark_mdd_from": benchmark_mdd["from"],
+        "benchmark_mdd_to": benchmark_mdd["to"],
+        "benchmark_sortino": _sortino(benchmark.pct_change().dropna()),
+        "benchmark_name": benchmark_name,
+        **summarize_trades(all_trades),
+        "trades": all_trades,
+        "as_of": str(last_day.date()),
+        "open_positions": open_positions,
+        # 다음 거래일 시가에 할 일 — 화면은 이걸 읽기만 한다(판정을 다시 하지 않는다).
+        "planned_exits": planned_exits,
+        "planned_exit_reasons": planned_exit_reasons,
+        "planned_entries": planned_entries,
+        "planned_entry_weights": planned_entry_weights,
+        # 잠정 마지막 봉 모드에서만 채워진다 — 오늘 시가를 몰라 체결하지 못한 확정 주문.
+        # 매도는 open_positions 행의 fill_date 로도 표시된다. 진입 비중은 우선 예약한
+        # 예산 범위이며 체결가·체결 주수를 지어내지 않는다.
+        "pending_exits": sorted(pending_exits),
+        "pending_exit_reasons": pending_exits,
+        "pending_entries": [
+            {"ticker": ticker, "sleeve_weight_pct": pending_entry_weights[ticker]} for ticker in pending_entry_tickers
+        ],
+        # 빈 슬롯·잔여 현금 비중 — 종목 비중과 합쳐 100 이 된다. 반올림 없음(계산 소비자용).
+        "sleeve_cash_weight_pct": cash / sleeve_value * 100 if sleeve_value > 0 else 100.0,
+        "exited_today": [t for t in trades if t["exit_date"] == str(last_day.date())],
+        # 소수 6자리 — 화면은 2자리로 보여주지만, 연간·월간·주간 표와 튜닝 지표는 이 값을
+        # **복리로 합성**한다. 2자리로 잘라 보내면 하루치 오차가 250일 쌓여 합계가 총수익과
+        # 어긋난다(12개월 기준 4%p 차이가 났다).
+        "daily": [
+            {
+                "date": str(d.date()),
+                "strategy_pct": round((v - 1) * 100, 6),
+                "benchmark_pct": round((float(benchmark.loc[d]) - 1) * 100, 6),
+                "adr": adr_at(d),
+                "cash_weight_pct": cash_curve[d],
+            }
+            for d, v in strategy.items()
+        ],
+    }

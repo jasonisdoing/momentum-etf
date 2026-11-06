@@ -18,6 +18,63 @@ function getFastApiToken(): string {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+/**
+ * 오래 걸리는 호출용 디스패처.
+ *
+ * undici 는 `AbortSignal` 과 **별개로** 자체 타임아웃을 건다 — 응답 헤더가 5분(기본
+ * `headersTimeout`) 안에 안 오면 `UND_ERR_HEADERS_TIMEOUT` 으로 연결을 끊는다. 튜닝처럼
+ * 계산이 다 끝나야 응답이 시작되는 호출은 우리가 1시간을 줘도 5분에 잘렸다.
+ * 그래서 호출자가 정한 `timeoutMs` 를 undici 쪽에도 그대로 맞춘다.
+ *
+ * 기본 타임아웃(30초) 이하면 undici 기본값이 이미 넉넉하므로 만들지 않는다.
+ * 같은 값의 Agent 는 재사용한다 — 요청마다 새로 만들면 연결 풀이 쌓인다.
+ */
+const AGENTS_BY_TIMEOUT = new Map<number, unknown>();
+
+type FetchLike = (input: string, init: RequestInit & { dispatcher?: unknown }) => Promise<Response>;
+
+/**
+ * 이 호출에 쓸 fetch 와 디스패처.
+ *
+ * 짧은 호출은 Node 내장 fetch 를 그대로 쓴다. 긴 호출만 설치본 undici 의 `Agent` 를
+ * 붙이는데, 그때는 **fetch 도 같은 설치본** 것을 써야 한다 — Node 내장 undici 와
+ * 설치본은 버전이 달라, 내장 fetch 에 설치본 Agent 를 넘기면 핸들러 규약이 어긋나
+ * `UND_ERR_INVALID_ARG (invalid onRequestStart method)` 로 터진다.
+ *
+ * undici 를 파일 맨 위에서 import 하면 안 된다 — 이 모듈은 여러 store 가 거쳐 가고,
+ * 그 store 에서 타입·상수만 가져다 쓰는 **클라이언트 컴포넌트**의 번들에도 딸려 들어가
+ * `node:net` 을 못 풀고 터진다. 서버에서 실제로 긴 호출을 할 때만 읽는다.
+ */
+async function requesterFor(timeoutMs: number): Promise<{ fetchFn: FetchLike; dispatcher?: unknown }> {
+  if (timeoutMs <= DEFAULT_TIMEOUT_MS) return { fetchFn: fetch as FetchLike };
+  const undici = await import("undici");
+  const known = AGENTS_BY_TIMEOUT.get(timeoutMs);
+  if (known) return { fetchFn: undici.fetch as unknown as FetchLike, dispatcher: known };
+  // bodyTimeout 은 청크 사이 간격 기준이라 헤더와 같은 값이면 충분하다.
+  const agent = new undici.Agent({ headersTimeout: timeoutMs, bodyTimeout: timeoutMs });
+  AGENTS_BY_TIMEOUT.set(timeoutMs, agent);
+  return { fetchFn: undici.fetch as unknown as FetchLike, dispatcher: agent };
+}
+
+/**
+ * fetch 실패의 진짜 원인을 한 줄로 푼다.
+ *
+ * undici 는 연결 계열 실패를 전부 `TypeError: fetch failed` 로 감싸고, 실제 사유
+ * (ECONNREFUSED·ECONNRESET·소켓 종료 등)는 `cause` 체인에 넣는다. 껍데기만 던지면
+ * 화면에 "fetch failed" 한 줄이 떠서 서버가 죽은 건지, 끊긴 건지, 주소가 틀린 건지
+ * 구분할 수가 없다. 체인을 훑어 메시지와 errno 코드를 함께 남긴다.
+ */
+function describeFetchFailure(error: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; current instanceof Error && depth < 5; depth += 1) {
+    const code = (current as NodeJS.ErrnoException).code;
+    parts.push(code ? `${current.message} [${code}]` : current.message);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return parts.join(" ← ") || String(error);
+}
+
 export async function fetchFastApiJson<T>(
   path: string,
   init?: RequestInit,
@@ -35,11 +92,13 @@ export async function fetchFastApiJson<T>(
 
   let response: Response;
   try {
-    response = await fetch(`${getFastApiBaseUrl()}${path}`, {
+    const { fetchFn, dispatcher } = await requesterFor(timeoutMs);
+    response = await fetchFn(`${getFastApiBaseUrl()}${path}`, {
       ...init,
       headers,
       signal: controller.signal,
       cache: "no-store",
+      dispatcher,
     });
   } catch (error) {
     clearTimeout(timeoutId);
@@ -57,7 +116,7 @@ export async function fetchFastApiJson<T>(
       } catch (e) { }
       throw new Error(`FastAPI 요청이 ${timeoutMs / 1_000}초 내에 응답하지 않았습니다. (${path})`);
     }
-    throw error;
+    throw new Error(`FastAPI 요청에 실패했습니다: ${describeFetchFailure(error)} (${path})`, { cause: error });
   } finally {
     clearTimeout(timeoutId);
   }

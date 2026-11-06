@@ -8,6 +8,7 @@ import functools
 import json
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -193,17 +194,16 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> list[pd.Ti
             f"file_start={file_start_ts.strftime('%Y-%m-%d')}, file_end={file_end_ts.strftime('%Y-%m-%d')}"
         )
 
-    trading_days_ts: list[pd.Timestamp] = []
-    for raw_day in raw_days:
-        normalized_day = str(raw_day or "").strip()
-        if not normalized_day:
-            continue
-        trading_days_ts.append(pd.to_datetime(normalized_day).normalize())
+    # 날짜를 **한 번에** 변환한다. 예전에는 한 건씩 `pd.to_datetime(문자열)` 을 불렀는데,
+    # 포맷을 안 주면 pandas 가 문자열마다 형식을 추론한다 — 한국 달력 2,211일 기준
+    # `_guess_datetime_format` 만 6,666회 0.81초였고 이 함수 전체가 1.27초였다.
+    cleaned = [text for text in (str(raw_day or "").strip() for raw_day in raw_days) if text]
+    parsed = pd.to_datetime(pd.Index(cleaned), format="%Y-%m-%d", errors="coerce").normalize()
+    parsed = parsed[parsed.notna()]
 
     # 최종적으로 start_date와 end_date 사이의 날짜만 반환하고, 중복 제거 및 정렬합니다.
-    final_list = [d for d in trading_days_ts if start_date_ts <= d <= end_date_ts]
-
-    return sorted(list(set(final_list)))
+    in_range = parsed[(parsed >= start_date_ts) & (parsed <= end_date_ts)]
+    return sorted(set(in_range))
 
 
 def get_trading_days_any(start_date: str, end_date: str, countries: list[str]) -> list[pd.Timestamp]:
@@ -326,12 +326,14 @@ def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp
 
         if trading_days:
             normalized_days = sorted(pd.Timestamp(day).normalize() for day in trading_days)
-            latest_trading_day = normalized_days[-1]
-            if is_market_day_completed(country_code, latest_trading_day):
-                return latest_trading_day
-            if len(normalized_days) >= 2:
-                return normalized_days[-2]
-            return latest_trading_day
+            # **정규장이 끝난** 가장 최근 거래일 — 거슬러 올라가며 완료 여부를 끝까지 확인한다.
+            # 한국 날짜 기준이라 한국 자정 이후엔 미국의 '내일'이 달력 끝에 오는데, 그 바로 앞날(미국 오늘)도
+            # 아직 장중일 수 있다. 예전에는 끝날만 확인하고 앞날을 무조건 돌려줘, 장중 봉이 확정 봉처럼
+            # 캐시에 저장됐다(2026-10-27 00:02 KST 미국 10/26 장중 봉 — 모멘텀 판정이 깨졌다).
+            for day in reversed(normalized_days):
+                if is_market_day_completed(country_code, day):
+                    return day
+            return normalized_days[0]
     except Exception as e:
         logger.warning("거래일 일괄 조회 중 오류 발생: %s", e)
 
@@ -341,6 +343,19 @@ def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp
         end_dt.strftime("%Y-%m-%d"),
     )
     return end_dt.normalize()
+
+
+def listed_after(listing_date: Any, day: pd.Timestamp) -> bool:
+    """상장일이 `day`(완료된 최신 거래일)보다 뒤인지 — 상장 첫날 장중처럼 확정 봉이 없는 게 정상인 종목.
+
+    가격 캐시는 완료된 거래일까지만 받으므로 이런 종목은 캐시가 없다. 순위·계좌 평가가 이 판정으로
+    「캐시 누락」과 구분하고 실시간 가격을 쓴다. 상장일을 모르면 거짓(누락으로 취급)이다.
+    """
+    try:
+        listed = pd.Timestamp(str(listing_date)).normalize()
+    except (TypeError, ValueError):
+        return False
+    return not pd.isna(listed) and listed > pd.Timestamp(day).normalize()
 
 
 def get_latest_trading_day(country: str) -> pd.Timestamp:

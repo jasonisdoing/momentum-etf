@@ -1,0 +1,142 @@
+"""엔진의 날짜별 편입 상태에 평가액 기준 운용을 적용하는 합성 재생."""
+
+from __future__ import annotations
+
+import pandas as pd
+
+from core.strategy.mix.capital_policy import CapitalTradeDecision, allocate_target_shares, capital_trade_decision
+
+
+def replay_capital(
+    *,
+    close: pd.DataFrame,
+    opened: pd.DataFrame,
+    fx: pd.Series,
+    targets: dict[str, dict[str, float]],
+    capital_krw: float,
+    harvest_pct: float,
+    refill_pct: float,
+    costs: dict[str, tuple[float, float]],
+) -> dict:
+    """전일 종가로 수량을 정하고 당일 시가에 체결한다. 현금 부족 시 차입하지 않는다.
+
+    ``capital_krw`` 는 시작 자본이고, ``targets`` 의 금액은 이 시작 자본 기준이다. 매일 전일 종가 기준
+    평가액(현금 포함)을 시작 자본으로 나눈 배율을 목표 금액에 곱한다 — 평가액이 늘면 목표도 같이 는다.
+    목표는 KRW, 가격·매수 가능 현금은 계좌 통화다. 회수 매도 대금도 현금으로 남아 이후 매수에 쓴다.
+    첫날에는 이전 봉이 없으므로 당일 시가로 초기 배정하며, 이후 판단에는 미래 가격을 쓰지 않는다.
+    """
+    held = {ticker: 0 for ticker in close.columns}
+    cash = capital_krw / float(fx.iloc[0])
+    previous_equity_krw = capital_krw
+    growth = 1.0
+    curve = {}
+    trades = []
+    previous_targets: dict[str, float] = {}
+    pending_sells: dict[str, CapitalTradeDecision] = {}
+    first_price_days = {ticker: close[ticker].first_valid_index() for ticker in close.columns}
+    for i, day in enumerate(close.index):
+        date = str(day.date())
+        # 전일 종가 평가액 비율 — 첫날은 시작 자본이라 1 이다.
+        scale = previous_equity_krw / capital_krw
+        amounts = {ticker: amount * scale for ticker, amount in targets[date].items()}
+        decision_prices = close.iloc[i - 1] if i else opened.iloc[0]
+        decision_fx = float(fx.iloc[i - 1] if i else fx.iloc[0])
+        priced_amounts = {}
+        priced_units = {}
+        for ticker, amount in amounts.items():
+            price = decision_prices[ticker]
+            if pd.isna(price) and day == first_price_days[ticker] and amount > 0:
+                price = opened.at[day, ticker]
+            if pd.notna(price) and price > 0:
+                priced_amounts[ticker] = amount
+                priced_units[ticker] = float(price) * decision_fx
+        target_quantities = allocate_target_shares(
+            priced_amounts, priced_units, min(previous_equity_krw, sum(priced_amounts.values()))
+        )
+        orders = {}
+        for ticker in held:
+            amount = amounts.get(ticker, 0.0)
+            price = decision_prices[ticker]
+            if pd.isna(price):
+                # 엔진이 최초 가격일에 편입한 종목만 그날 시가로 초기 배정한다.
+                # 이후의 데이터 누락을 현재가로 메우거나 상장 전으로 가격을 역채우지 않는다.
+                if day != first_price_days[ticker] or amount <= 0:
+                    continue
+                price = opened.at[day, ticker]
+                if pd.isna(price) or price <= 0:
+                    raise ValueError(f"합성 최초 진입 시가가 없습니다: {date} {ticker}")
+            decision = capital_trade_decision(
+                held=held[ticker],
+                price=float(price),
+                target_amount=amount / decision_fx,
+                harvest_pct=harvest_pct,
+                refill_pct=refill_pct,
+                previous_target_amount=previous_targets.get(ticker, 0.0) * scale / decision_fx,
+                target_quantity=target_quantities.get(ticker, 0),
+            )
+            if decision.quantity:
+                orders[ticker] = decision
+        for ticker, pending in pending_sells.items():
+            # 거래정지 중 확정된 매도는 이후 목표가 달라져도 첫 체결 가능일에 실행한다.
+            current = orders.get(ticker)
+            if current is None or -pending.quantity >= -current.quantity:
+                orders[ticker] = CapitalTradeDecision(-min(held[ticker], -pending.quantity), pending.reason)
+            else:
+                orders[ticker] = CapitalTradeDecision(-min(held[ticker], -current.quantity), current.reason)
+        # 매도 대금으로 당일 매수를 충당하되 가용 현금을 넘기는 체결은 만들지 않는다.
+        for ticker, decision in orders.items():
+            trade = decision.quantity
+            if trade >= 0:
+                continue
+            price = opened.at[day, ticker]
+            if pd.isna(price) or price <= 0:
+                pending_sells[ticker] = decision
+                continue
+            proceeds = -trade * float(price) * (1 - costs[ticker][1])
+            cash += proceeds
+            held[ticker] += trade
+            pending_sells.pop(ticker, None)
+            trades.append({"date": date, "ticker": ticker, "side": "sell", "quantity": -trade, "price": float(price)})
+        requests = {}
+        for ticker, decision in orders.items():
+            trade = decision.quantity
+            if trade <= 0:
+                continue
+            price = opened.at[day, ticker]
+            if pd.isna(price) or price <= 0:
+                # 시가 없는 날의 신규 진입은 슬롯 엔진처럼 체결하지 않는다.
+                continue
+            requests[ticker] = trade * float(price) * (1 + costs[ticker][0])
+        affordable = allocate_target_shares(
+            requests,
+            {ticker: float(opened.at[day, ticker]) * (1 + costs[ticker][0]) for ticker in requests},
+            min(max(cash, 0.0), sum(requests.values())),
+        )
+        for ticker in requests:
+            quantity = affordable[ticker]
+            if not quantity:
+                continue
+            price = float(opened.at[day, ticker])
+            cash -= quantity * price * (1 + costs[ticker][0])
+            held[ticker] += quantity
+            trades.append({"date": date, "ticker": ticker, "side": "buy", "quantity": quantity, "price": price})
+        value = cash
+        for ticker, quantity in held.items():
+            if quantity:
+                price = close.at[day, ticker]
+                if pd.isna(price):
+                    raise ValueError(f"합성 평가 종가가 없습니다: {date} {ticker}")
+                value += quantity * float(price)
+        equity_krw = value * float(fx.iloc[i])
+        if previous_equity_krw <= 0:
+            raise ValueError(f"합성 기간 수익률의 전일 운용자산이 없습니다: {date}")
+        growth *= equity_krw / previous_equity_krw
+        curve[date] = growth
+        previous_equity_krw = equity_krw
+        previous_targets = targets[date]
+    return {
+        "curve": pd.Series(curve),
+        "cash": cash,
+        "holdings": held,
+        "executions": trades,
+    }

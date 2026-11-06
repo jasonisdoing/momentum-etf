@@ -1,12 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CellStyle, ColDef, ColGroupDef } from "ag-grid-community";
+import type { ColDef, ColGroupDef } from "ag-grid-community";
 
-import { marketCapRankColumn, renderHighDrawdownCell } from "@/lib/grid-cells";
+import { highDrawdownColumn, marketCapRankColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
-import { TickerDetailLink } from "../components/TickerDetailLink";
 import { TrendSparkline, type TrendPoint } from "../components/TrendSparkline";
 import { useToast } from "../components/ToastProvider";
 import {
@@ -235,40 +234,17 @@ export function KorDividendManager({ onSummaryChange }: { onSummaryChange?: (cou
       {
         headerName: "순위",
         colId: "rank",
+        pinned: "left",
         width: 68,
         valueGetter: (params) => (params.node?.rowIndex ?? 0) + 1,
         type: "numericColumn",
       },
       // 시총 순위·고점 대비 — 종목풀 순위(/pools-rank) 화면과 같은 공용 컬럼·같은 정의.
       marketCapRankColumn<DividendRow>("market_cap_rank", false),
-      {
-        field: "high_drawdown",
-        headerName: "고점",
-        width: 80,
-        minWidth: 80,
-        type: "rightAligned",
-        headerTooltip: "최근 12개월 최고가 대비(%) — 0 이면 신고점",
-        cellRenderer: (params: { value: number | null | undefined }) => renderHighDrawdownCell(params.value, 2),
-      },
-      {
-        // 티커·종목명 표기는 다른 시장 화면(/kor-market-stock 등)과 같은 방식을 쓴다.
-        field: "ticker",
-        headerName: "티커",
-        width: 100,
-        minWidth: 84,
-        cellStyle: {
-          fontFamily: "var(--font-mono, monospace)",
-          fontSize: "var(--fs-sm)",
-        } as CellStyle,
-        cellRenderer: (params: { value?: string }) => <TickerDetailLink ticker={String(params.value ?? "")} />,
-      },
-      {
-        // 남는 가로는 종목명이 가져간다 — 이름이 길어 잘리는 게 숫자 컬럼이 넓어지는 것보다 아깝다.
-        field: "name",
-        headerName: "종목명",
-        flex: 1,
-        minWidth: 180,
-      },
+      highDrawdownColumn<DividendRow>("high_drawdown"),
+      // 티커·종목명 — 공용 컬럼(다른 시장 화면과 같은 표기·col-id 표준).
+      tickerColumn<DividendRow>({ width: 100, minWidth: 84, mono: true }),
+      stockNameColumn<DividendRow>({}),
       {
         field: "current_price",
         headerName: "현재가",

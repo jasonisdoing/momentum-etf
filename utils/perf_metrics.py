@@ -3,6 +3,39 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
+
+
+def daily_return_metrics(returns_pct: pd.Series) -> dict[str, float | None]:
+    """날짜 인덱스의 일별 수익률(%)에서 총수익·CAGR·MDD·소르티노를 계산한다."""
+    if returns_pct.empty:
+        return {"total_pct": 0.0, "cagr_pct": None, "mdd_pct": 0.0, "sortino": None}
+    if not isinstance(returns_pct.index, pd.DatetimeIndex):
+        raise ValueError("일별 성과 계산에는 DatetimeIndex가 필요합니다.")
+    if returns_pct.isna().any():
+        raise ValueError("일별 성과 계산에는 빈 수익률이 없어야 합니다.")
+
+    ordered = returns_pct.sort_index().astype(float)
+    returns = ordered / 100.0
+    growth = (1.0 + returns).cumprod()
+    total_pct = float((growth.iloc[-1] - 1.0) * 100.0)
+    # 첫 거래일 손실도 시작 자산 1.0 대비 낙폭으로 잡혀야 한다.
+    curve = pd.concat([pd.Series([1.0]), growth.reset_index(drop=True)], ignore_index=True)
+    mdd_pct = float((((curve / curve.cummax()) - 1.0) * 100.0).min())
+
+    downside = returns[returns < 0]
+    downside_deviation = float((downside**2).mean() ** 0.5) if not downside.empty else 0.0
+    sortino_value = float(returns.mean()) / downside_deviation * float(252**0.5) if downside_deviation > 0 else None
+
+    days = int((ordered.index[-1] - ordered.index[0]).days)
+    final_growth = float(growth.iloc[-1])
+    cagr_value = (final_growth ** (365.0 / days) - 1.0) * 100.0 if final_growth > 0 and days > 0 else None
+    return {
+        "total_pct": total_pct,
+        "cagr_pct": cagr_value,
+        "mdd_pct": mdd_pct,
+        "sortino": sortino_value,
+    }
 
 
 def sharpe_from_curve(start_val: float, values: np.ndarray, cagr_pct: float = 0.0) -> float:
@@ -40,6 +73,20 @@ def sortino_from_curve(start_val: float, values: np.ndarray) -> float:
     if downside_std <= 0:
         return 0.0
     return ann_ret / downside_std
+
+
+def period_sortino(close: pd.Series, months: int) -> float | None:
+    """최근 N개월 종가의 단순 보유 소르티노 — 마켓 화면(미국·한국 개별주)의 12개월 컬럼 공용.
+
+    가용 기간이 N개월에 못 미치면 전체 기간으로 계산한다(같은 화면의 MDD와 같은 창 규칙).
+    """
+    target_date = pd.Timestamp.today().normalize() - pd.DateOffset(months=months)
+    period = close[close.index >= target_date]
+    if period.empty:
+        period = close
+    if len(period) < 2:
+        return None
+    return round(sortino_from_curve(float(period.iloc[0]), period.iloc[1:].to_numpy()), 4)
 
 
 def mdd_span(values: np.ndarray) -> tuple[int, int, float]:
@@ -83,6 +130,39 @@ def curve_metrics(start_val: float, values: np.ndarray) -> dict[str, float]:
     }
 
 
+def max_drawdown_window(curve: pd.Series) -> dict[str, float | str]:
+    """최대 낙폭(MDD)과 그 구간 — 고점 날짜에서 저점 날짜까지. 곡선 인덱스는 날짜여야 한다.
+
+    백테스트 요약(모멘텀·신고가·포트폴리오·합성)이 같은 수식을 쓰도록 한 곳에 둔다.
+    반환: ``{"mdd_pct", "from", "to"}`` — ``mdd_pct`` 는 반올림 전 값(음수 %), 날짜는 ``YYYY-MM-DD``.
+    """
+    drawdown = curve / curve.cummax() - 1
+    trough = drawdown.idxmin()
+    peak = curve.loc[:trough].idxmax()
+    return {
+        "mdd_pct": float(drawdown.min() * 100),
+        "from": str(pd.Timestamp(peak).date()),
+        "to": str(pd.Timestamp(trough).date()),
+    }
+
+
+def annualized_return_pct(start_value: float, end_value: float, days: int) -> float | None:
+    """시작·끝 값과 달력 일수로 연환산 수익률(CAGR, %). 계산할 수 없으면 None.
+
+    순위 화면(`single_stock_backtest_stats`)과 위험·수익 화면이 같은 수식을 쓰도록 한 곳에 둔다.
+    """
+    if start_value <= 0 or end_value <= 0 or days <= 0:
+        return None
+    return ((end_value / start_value) ** (365.0 / days) - 1.0) * 100.0
+
+
+def calmar_ratio(cagr_pct: float | None, mdd_pct: float | None) -> float | None:
+    """칼마 비율 = CAGR ÷ |MDD| — 낙폭 한 단위당 연 수익. 낙폭이 없거나 값이 없으면 None."""
+    if cagr_pct is None or mdd_pct is None or mdd_pct == 0:
+        return None
+    return cagr_pct / abs(mdd_pct)
+
+
 def single_stock_backtest_stats(close_prices, lookback_months: int) -> dict:
     """단일 종목 종가 시계열(pd.Series)의 최근 N개월 단순 보유 성과(수익률·MDD·소르티노)를 구한다.
 
@@ -92,7 +172,7 @@ def single_stock_backtest_stats(close_prices, lookback_months: int) -> dict:
     """
     import pandas as pd
 
-    empty = {"cagr": 0.0, "mdd": 0.0, "sortino": 0.0, "is_partial": False}
+    empty = {"cagr": 0.0, "mdd": 0.0, "sortino": 0.0, "calmar": None, "is_partial": False, "listing_months": None}
     if close_prices is None or len(close_prices) == 0:
         return empty
 
@@ -100,22 +180,34 @@ def single_stock_backtest_stats(close_prices, lookback_months: int) -> dict:
         last_date = close_prices.index[-1]
         start_date = last_date - pd.DateOffset(months=int(lookback_months))
 
-        # 상장일이 시작일보다 나중인지 여부 판정
-        is_partial = close_prices.index[0] > start_date
+        # 상장일이 시작일보다 나중인지 — 전 화면 🆕 배지와 같은 공용 판정.
+        from core.strategy.scoring import is_new_listing, listing_months
+
+        is_partial = is_new_listing(close_prices, window_months=int(lookback_months))
+        months_listed = listing_months(close_prices)
 
         target_series = close_prices.loc[start_date:]
         if len(target_series) < 2:
-            return {**empty, "is_partial": is_partial}
+            return {**empty, "is_partial": is_partial, "listing_months": months_listed}
 
         start_val = float(target_series.iloc[0])
         values = target_series.iloc[1:].to_numpy()
 
         metrics = curve_metrics(start_val, values)
+        mdd_pct = float(metrics.get("mdd_pct", 0.0))
+        calmar = calmar_ratio(
+            annualized_return_pct(
+                start_val, float(values[-1]), int((target_series.index[-1] - target_series.index[0]).days)
+            ),
+            mdd_pct,
+        )
         return {
             "cagr": round(float(metrics.get("total_return_pct", 0.0)), 2),  # CAGR 대신 단순 누적 수익률(%) 저장
-            "mdd": round(float(metrics.get("mdd_pct", 0.0)), 2),
+            "mdd": round(mdd_pct, 2),
             "sortino": round(float(metrics.get("sortino", 0.0)), 2),
+            "calmar": None if calmar is None else round(calmar, 2),
             "is_partial": is_partial,
+            "listing_months": months_listed,
         }
     except Exception:
         return empty

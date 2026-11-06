@@ -24,9 +24,7 @@ def get_strategy_mix_positions(
     account_id: str | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """오늘 기준 합성 운영 상태 — 보유 목록(목표 비중)·현금 비중·오늘의 액션.
-
-    """
+    """오늘 기준 합성 운영 상태 — 보유 목록(목표 비중)·현금 비중·오늘의 액션."""
     from utils.strategy_mix_service import mix_positions
 
     return mix_positions(account_id)

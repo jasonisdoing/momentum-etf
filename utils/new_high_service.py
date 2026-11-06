@@ -6,16 +6,14 @@
 2. 진입: 종가가 **직전 52주 최고가**를 넘어선 날(돌파). 다음 거래일 **시가** 체결.
    창은 거래일 수가 아니라 **달력 52주**다(`HIGH_WINDOW_WEEKS`). 화면 문구도 이
    값에서 만들어, 창을 바꾸면 문구가 따라온다.
-3. 청산: 아래 둘 중 **먼저 걸리는 쪽**. 판정은 종가, 체결은 다음 거래일 시가.
-     ① 진입가 대비 손절선(−7% 또는 −10%)
-     ② 이탈 이동평균(기본 20일) 종가 하회
+3. 청산: **이탈 이동평균(기본 20일) 종가 하회**. 판정은 종가, 체결은 다음 거래일 시가.
    목표가(익절)는 두지 않는다 — 오르는 종목은 계속 들고 간다.
 4. 자리 배분: 동시 보유 상한 top_n, 균등 배분. 신호가 자리보다 많으면
    **거래대금 급증 배수**가 큰 순으로 담는다(돌파에 자금이 실린 쪽 우선).
    자리가 꽉 차 있으면 새 돌파가 와도 **교체하지 않는다** — 2026-08-14 kor(24개월)·
    us(60개월) 백테스트에서 최저수익/손실만/최장보유 교체 전부가 현행보다 나빴다
    (kor +1912% vs 교체 시 +142~779%, us +240% vs -76~+95%). 보유 중이라는 것 자체가
-   손절·이탈에 안 걸린 살아있는 추세라는 뜻이라, 교체는 청산 규칙을 앞질러 이익
+   이탈에 안 걸린 살아있는 추세라는 뜻이라, 교체는 청산 규칙을 앞질러 이익
    종목을 자르고 슬리피지 왕복 비용만 쌓는다.
 
 설정은 MongoDB `system_config.new_high_settings` 에 풀별로 저장한다(`settings_by_pool`).
@@ -28,25 +26,11 @@ from typing import Any
 
 import pandas as pd
 
-from config import ADR_FLOOR_OPTIONS, MIN_VALUE_MULT_OPTIONS, TOP_N_HOLD
-
-# 손절선 — 시스템 공용 목록 앞에 '없음'(None)을 붙인다. 이탈 이평선이 있어 손절이
-# 없어도 청산 경로가 있다(모멘텀의 주중 손절과 같은 규칙 — `config` 주석 참고).
-from config import STOP_LOSS_PCT_OPTIONS as _STOP_LOSS_PCT_OPTIONS
-
-STOP_LOSS_OPTIONS: tuple[float | None, ...] = (None, *_STOP_LOSS_PCT_OPTIONS)
+from config import ADR_FLOOR_OPTIONS, MIN_VALUE_MULT_OPTIONS_BY_COUNTRY
 from utils.ma_options import SHORT_MA_OPTIONS
+from utils.momentum_service import default_adr_floor
 from utils.price_series import positive_prices as _positive
-from utils.strategy_settings import coerce_to_options
-
-# 신고가 판정 창 — 거래일 수가 아니라 달력 기간으로 자른다. 거래일로 고정하면
-# 공휴일 수에 따라 실제 기간이 흔들려 이름과 어긋난다(12개월 × 20거래일 = 240거래일은
-# 실제 52주보다 짧아서, 1년 전 고점이 창 밖으로 일찍 밀려난다).
-HIGH_WINDOW_WEEKS = 52
-HIGH_WINDOW = f"{HIGH_WINDOW_WEEKS * 7}D"
-# 창 안에 이만큼 거래일이 있어야 판정한다. 364일 창의 거래일 수는 국내 238~249일,
-# 미국 249~253일이라 정상 종목은 통과하고, 상장 1년 미만·장기 거래정지만 걸러진다.
-HIGH_WINDOW_MIN_DAYS = 230
+from utils.strategy_settings import coerce_to_options, require_start_date, validate_start_date
 
 # 화면 셀렉트 선택지 — 백엔드가 단일 소스이고 화면은 응답으로 받는다.
 EXIT_MA_OPTIONS = SHORT_MA_OPTIONS  # 이탈 이평선 = 시스템 공용 단기 이평 선택지
@@ -69,20 +53,19 @@ _SETTINGS_KEY = "new_high_settings"
 # 슬리피지는 종목풀 설정(BUY/SELL_SLIPPAGE_PCT)을 쓰고, 백테스트 기간은 실행할 때
 # 화면에서 고른다 — 둘 다 여기 저장하지 않는다.
 PER_POOL_SETTING_KEYS = (
-    "stop_loss_pct",
+    "start_date",
     "exit_ma_days",
     "min_value_mult",
     "adr_floor",
 )
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "stop_loss_pct": -7.0,
     "exit_ma_days": 20,
     # 기본은 조건 없음 — 풀마다 적정값이 달라 사용자가 시험해 보고 저장한다.
     "min_value_mult": None,
-    # ADR 하한 — 전일 시장 ADR 이 미만이면 그날 **신규 진입만** 차단(보유는 손절·이탈이 관리).
+    # ADR 하한 — 전일 시장 ADR 이 미만이면 그날 **신규 진입만** 차단(보유는 이탈이 관리).
     # 기본 없음. 시장은 풀 설정의 시장 레짐 지수를 따른다(모멘텀과 같은 공용 판정).
-    "adr_floor": None,
+    "adr_floor": default_adr_floor(),
 }
 
 
@@ -97,9 +80,10 @@ def _db():
 
 # ── 종목풀 ─────────────────────────────────────────────────────────────────
 def available_pools() -> list[str]:
-    from utils.settings_loader import list_available_ticker_types
+    """이 전략을 쓰기로 켠 종목풀만(order 순) — 종목풀 설정의 「사용」 토글이 단일 소스다."""
+    from utils.pool_strategy_use import pools_using
 
-    return list(list_available_ticker_types())
+    return pools_using("new_high")
 
 
 def pool_country(pool: str) -> str:
@@ -109,122 +93,27 @@ def pool_country(pool: str) -> str:
     return str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
 
 
-def kor_session_elapsed_fraction() -> float:
-    """한국 거래 시간 경과 비율 — 장중 거래대금 하한·환산 배수의 분모.
-
-    창은 정규장이 아니라 **프리마켓 08:00 ~ 애프터 20:00** 이다. 분자(토스 실시간 누적
-    거래대금)가 NXT 프리·애프터 거래분까지 합산된 값이라, 같은 창으로 재야 환산이 맞는다.
-    시작 전이면 0, 끝난 뒤면 1. **한국 전용** — 미국 풀은 장중에 볼 일이 거의 없고
-    서머타임 처리만 얹게 되어 하루 기준 하한을 그대로 쓴다.
-    """
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
-    from config import MARKET_SCHEDULES
-
-    schedule = MARKET_SCHEDULES["kor"]
-    now = datetime.now(ZoneInfo(schedule["timezone"]))
-    start = schedule["premarket_open"]
-    end = schedule["aftermarket_close"]
-    open_at = now.replace(hour=start.hour, minute=start.minute, second=0, microsecond=0)
-    close_at = now.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
-    elapsed = (now - open_at).total_seconds()
-    return min(max(elapsed / (close_at - open_at).total_seconds(), 0.0), 1.0)
-
-
-def kor_session_live_fraction() -> float | None:
-    """한국 거래 시간(프리마켓 08:00~애프터 20:00)이 **진행 중일 때만** 경과 비율(0<f<1)을,
-    아니면 None 을 돌려준다.
-
-    휴장일·시작 전·20시 이후에는 None — 시간 비례 계산(본값 실시간 전환·환산 배수·판정
-    하한)을 하지 않는다.
-    """
-    fraction = kor_session_elapsed_fraction()
-    if not 0.0 < fraction < 1.0:
-        return None
-    from utils.trading_calendar import is_trading_day
-
-    return fraction if is_trading_day("kor") else None
-
-
-def pace_value_mult(mult: float | None) -> float | None:
-    """장중 누적 거래대금 배수를 하루 기준으로 환산한 값(누적 ÷ 장 경과율).
-
-    10시에 누적 3배면 환산 약 19배 — 지금 페이스대로면 하루 기준 몇 배인지다.
-    화면 거래대금 컬럼이 괄호로 보여준다. 장중이 아니면 None(괄호 없음).
-    """
-    if mult is None:
-        return None
-    fraction = kor_session_live_fraction()
-    if fraction is None:
-        return None
-    return round(float(mult) / fraction, 1)
-
-
-def live_min_value_mult(min_value_mult: float | None) -> float | None:
-    """장중 판정용 거래대금 하한 — 하루 기준 하한을 장 경과 비율만큼 낮춘 값 (한국 전용).
-
-    거래대금은 장이 끝나야 다 쌓이므로, 하루 기준 그대로 비교하면 오전에는 돌파해도
-    거의 전부 (미달)이 된다. 화면(장중 qualifies)과 신고가 알람이 같은 식을 쓴다.
-    """
-    if min_value_mult is None:
-        return None
-    return float(min_value_mult) * kor_session_elapsed_fraction()
+def min_value_mult_options(country_code: str | None) -> tuple[float | None, ...]:
+    """그 국가의 거래대금 하한 선택지 — 목록은 `config.MIN_VALUE_MULT_OPTIONS_BY_COUNTRY`
+    가 단일 소스다(이평 선택지의 `utils/ma_options` 와 같은 방식). 모르는 국가면 에러."""
+    country = str(country_code or "").strip().lower()
+    if country not in MIN_VALUE_MULT_OPTIONS_BY_COUNTRY:
+        raise ValueError(f"거래대금 하한 선택지를 지원하지 않는 국가입니다: {country_code!r}")
+    return MIN_VALUE_MULT_OPTIONS_BY_COUNTRY[country]
 
 
 def pool_options() -> list[dict[str, Any]]:
-    """풀 셀렉트 옵션 — 종목풀 설정(DB)의 이름·아이콘·순서를 단일 소스로 쓴다.
+    """풀 셀렉트 옵션 — 이 전략을 켠 종목풀(종목풀 설정 DB 의 이름·아이콘·순서)."""
+    from utils.pool_strategy_use import pool_options as build_pool_options
 
-    화면은 이 목록을 공용 `formatPoolLabel`(다른 화면과 같은 표준 표기)에 그대로 넣는다.
-    `order` 를 빼면 표기에서 번호가 조용히 사라지므로 반드시 함께 담는다.
-    """
-    from utils.settings_loader import get_ticker_type_settings
-
-    options: list[dict[str, Any]] = []
-    for pool in available_pools():
-        try:
-            settings = get_ticker_type_settings(pool) or {}
-        except Exception:
-            settings = {}
-        options.append(
-            {
-                "ticker_type": pool,
-                "name": str(settings.get("name") or "").strip() or pool,
-                "icon": str(settings.get("icon") or "").strip(),
-                "order": settings.get("order"),
-                "country_code": str(settings.get("country_code") or "").strip().lower(),
-                "currency": str(settings.get("currency") or "").strip().upper(),
-                "pool_kind": str(settings.get("pool_kind") or "").strip(),
-            }
-        )
-    return options
+    return build_pool_options(available_pools())
 
 
 def load_universe(pool: str) -> list[dict[str, str]]:
-    """선택한 종목풀의 종목 목록. 제외 종목은 투자 후보가 아니라 제외한다."""
-    from utils.industry_map import industry_map
-    from utils.stock_list_io import _load_ticker_type_stocks_raw
+    """선택한 종목풀의 투자 후보 목록 — 정의는 `utils.stock_list_io` 한 곳이다."""
+    from utils.stock_list_io import load_pool_universe
 
-    # 업종은 공용 맵이 단일 소스 — 미국은 종목 문서에 없고 지수 구성종목(yfinance)에 있다.
-    industry_by = industry_map(pool)
-
-    universe: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for item in _load_ticker_type_stocks_raw(pool):
-        ticker = str(item.get("ticker") or "").strip()
-        if not ticker or ticker in seen or bool(item.get("exclude_from_ranking")):
-            continue
-        seen.add(ticker)
-        universe.append(
-            {
-                "ticker": ticker,
-                "name": str(item.get("name") or ticker),
-                "pool": pool,
-                "market": str(item.get("market") or "").strip(),
-                "industry": industry_by.get(ticker, ""),
-            }
-        )
-    return universe
+    return load_pool_universe(pool)
 
 
 def load_price_frames(universe: list[dict[str, str]]) -> dict[str, pd.DataFrame]:
@@ -265,68 +154,6 @@ def load_benchmark_close(pool: str) -> pd.Series:
 
 
 # ── 가격 ───────────────────────────────────────────────────────────────────
-def build_price_panel(universe: list[dict[str, str]], frames: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
-    """(날짜 × 티커) 종가·시가·고가·거래대금 표. 백테스트와 선정이 같은 값을 쓴다."""
-    closes, opens, highs, values = {}, {}, {}, {}
-    for row in universe:
-        ticker = row["ticker"]
-        frame = frames.get(ticker)
-        if frame is None or frame.empty or "Close" not in frame or "Open" not in frame or "High" not in frame:
-            continue
-        close = _positive(frame["Close"])
-        volume = pd.to_numeric(frame["Volume"], errors="coerce") if "Volume" in frame else None
-        closes[ticker] = close
-        opens[ticker] = _positive(frame["Open"])
-        highs[ticker] = _positive(frame["High"])
-        values[ticker] = close * volume if volume is not None else pd.Series(index=frame.index, dtype=float)
-
-    if not closes:
-        raise RuntimeError("가격 캐시를 불러오지 못해 신고가를 판정할 수 없습니다.")
-
-    close_df = pd.DataFrame(closes).sort_index()
-    # 종가가 **한 종목도 없는 날**은 거래일로 치지 않는다. 가격 캐시가 거래량만 채우고
-    # OHLC 는 비운 행을 만들 때가 있는데(us_etf 2026-08-28), 그걸 마지막 거래일로 삼으면
-    # 백테스트가 그날 보유 평가액을 0 으로 매겨 하루 만에 -100% 로 무너진다.
-    close_df = close_df.dropna(axis=0, how="all")
-    if close_df.empty:
-        raise RuntimeError("가격 캐시에 종가가 있는 거래일이 없습니다.")
-    return {
-        "close": close_df,
-        "open": pd.DataFrame(opens).reindex(close_df.index),
-        "high": pd.DataFrame(highs).reindex(close_df.index),
-        "value": pd.DataFrame(values).reindex(close_df.index),
-    }
-
-
-def compute_signals(panel: dict[str, pd.DataFrame], exit_ma_days: int) -> dict[str, pd.DataFrame]:
-    """돌파·이탈 신호와 거래대금 급증 배수(진입 정렬 기준)를 한 번에 만든다."""
-    close_df = panel["close"]
-    # 진입 판정은 **직전 최고 종가** 기준이다. 종가끼리 비교하므로 종가가 오르는 동안
-    # 신호가 끊기지 않는다. 장중 고가와 비교하면 전날 꼬리를 못 넘는 날 신호가 끊겨
-    # 상승 중에도 진입 기회를 놓친다(한국 개별주 60개월 기준 그런 날이 34%).
-    # 오늘은 창에서 뺀다 — 오늘 종가가 '직전' 최고를 넘었는지를 본다.
-    prior_high = close_df.rolling(HIGH_WINDOW, min_periods=HIGH_WINDOW_MIN_DAYS).max().shift(1)
-    # 관례상의 '52주 신고가'(장중 고가)는 화면 표시용으로만 쓴다 — 판정에는 쓰지 않는다.
-    prior_high_intraday = panel["high"].rolling(HIGH_WINDOW, min_periods=HIGH_WINDOW_MIN_DAYS).max().shift(1)
-    exit_ma = close_df.rolling(exit_ma_days, min_periods=exit_ma_days).mean()
-    value_df = panel["value"]
-    return {
-        # 돌파 판정은 **종가** 기준이다 — 장중에 잠깐 찍고 밀린 것은 돌파로 보지 않는다.
-        "breakout": close_df > prior_high,
-        "below_ma": close_df < exit_ma,
-        # 이탈선 값 자체 — 화면이 "이탈까지 얼마 남았는지"를 보여주는 데 쓴다(판정과 같은 선).
-        "exit_ma": exit_ma,
-        "prior_high": prior_high,
-        "prior_high_intraday": prior_high_intraday,
-        # 20일 평균 거래대금 대비 배수 — 돌파에 자금이 실렸는지 본다.
-        # **당일을 분모에 포함**한다. 급증한 당일이 스스로 평균을 끌어올려 배수가 눌리고
-        # (실제 20배가 10.3배로 표기) 표기값 상한이 20배가 되지만, 참고하는 외부 시스템이
-        # 같은 정의를 쓴다(NHN 777억→5.3배, 855억→5.7배 — 분모가 당일 값을 따라 움직인다).
-        # 하한 최적값(kor 5배 등)도 이 정의 위에서 찾은 것이라 바꾸면 다시 잡아야 한다.
-        "value_mult": value_df / value_df.rolling(20, min_periods=20).mean(),
-    }
-
-
 # ── 설정 ───────────────────────────────────────────────────────────────────
 def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """화면·API 가 넘긴 설정을 검증한다. 선택지 밖의 값은 받지 않는다."""
@@ -341,16 +168,12 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"{key} 는 {list(options)} 중 하나여야 합니다 (받은 값: {value})")
         return value
 
+    # 거래대금 하한 — 선택지가 국가별이라 풀의 국가로 목록을 고른다.
+    mult_options = min_value_mult_options(pool_country(pool))
     raw_min = settings.get("min_value_mult", DEFAULT_SETTINGS["min_value_mult"])
     min_value_mult = None if raw_min in (None, "", "none") else float(raw_min)
-    if min_value_mult not in MIN_VALUE_MULT_OPTIONS:
-        raise ValueError(f"min_value_mult 는 {list(MIN_VALUE_MULT_OPTIONS)} 중 하나여야 합니다 (받은 값: {raw_min})")
-
-    raw_stop = settings.get("stop_loss_pct", DEFAULT_SETTINGS["stop_loss_pct"])
-    stop_loss_pct = None if raw_stop in (None, "", "none") else float(raw_stop)
-    if stop_loss_pct not in STOP_LOSS_OPTIONS:
-        allowed = ", ".join("없음" if v is None else f"{v:g}" for v in STOP_LOSS_OPTIONS)
-        raise ValueError(f"stop_loss_pct 는 {allowed} 중 하나여야 합니다 (받은 값: {raw_stop})")
+    if min_value_mult not in mult_options:
+        raise ValueError(f"min_value_mult 는 {list(mult_options)} 중 하나여야 합니다 (받은 값: {raw_min})")
 
     raw_adr = settings.get("adr_floor", DEFAULT_SETTINGS["adr_floor"])
     adr_floor = None if raw_adr in (None, "", "none") else int(raw_adr)
@@ -365,14 +188,19 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "pool": pool,
+        "start_date": validate_start_date(settings.get("start_date")),
         "min_value_mult": min_value_mult,
         "adr_floor": adr_floor,
-        # 종목 수(슬롯)는 풀별 설정이 아니라 시스템 공통(config.TOP_N_HOLD) — 업종 상한은
-        # 개념째 폐기했다(집중 완화는 합성 배분 몫).
-        "top_n": TOP_N_HOLD,
-        "stop_loss_pct": stop_loss_pct,
+        # 종목 수(슬롯)는 순위·모멘텀·종목풀 백테스트와 같은 풀 설정을 쓴다.
+        "top_n": _pool_top_n_hold(pool),
         "exit_ma_days": pick("exit_ma_days", EXIT_MA_OPTIONS, int),
     }
+
+
+def _pool_top_n_hold(pool: str) -> int:
+    from utils.pool_settings_store import get_pool_top_n_hold
+
+    return get_pool_top_n_hold(pool)
 
 
 def _load_doc() -> dict[str, Any]:
@@ -408,13 +236,14 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
     return validate_settings({"pool": selected, **DEFAULT_SETTINGS, **stored})
 
 
-# 화면 로드 때 선택지 밖 저장값을 보정할 항목 — (키, 라벨, 선택지)
-_OPTION_FIELDS: tuple[tuple[str, str, tuple], ...] = (
-    ("adr_floor", "ADR 하한", ADR_FLOOR_OPTIONS),
-    ("exit_ma_days", "이탈 이평선", EXIT_MA_OPTIONS),
-    ("min_value_mult", "거래대금 하한", MIN_VALUE_MULT_OPTIONS),
-    ("stop_loss_pct", "손절선", STOP_LOSS_OPTIONS),
-)
+# 화면 로드 때 선택지 밖 저장값을 보정할 항목 — (키, 라벨, 선택지).
+# 거래대금 하한 선택지가 국가별이라 풀을 알아야 목록이 정해진다.
+def _option_fields(pool: str) -> tuple[tuple[str, str, tuple], ...]:
+    return (
+        ("adr_floor", "ADR 하한", ADR_FLOOR_OPTIONS),
+        ("exit_ma_days", "이탈 이평선", EXIT_MA_OPTIONS),
+        ("min_value_mult", "거래대금 하한", min_value_mult_options(pool_country(pool))),
+    )
 
 
 def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], list[str]]:
@@ -424,13 +253,17 @@ def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], lis
     pools = available_pools()
     selected = str(pool or default_pool()).strip()
     if selected not in pools:
-        raise ValueError(f"지원하지 않는 종목풀입니다: {pool}")
+        # 그 화면이 기억한 풀이 이 전략에서 꺼졌을 수 있다 — 막지 말고 기본 풀로 연다.
+        selected = default_pool()
+        if not selected:
+            raise ValueError("이 전략을 쓰는 종목풀이 없습니다 — 종목풀 설정에서 「사용」을 켜세요.")
     merged = {"pool": selected, **DEFAULT_SETTINGS, **dict((doc.get("settings_by_pool") or {}).get(selected) or {})}
-    return coerce_to_options(merged, _OPTION_FIELDS, validate_settings)
+    return coerce_to_options(merged, _option_fields(selected), validate_settings)
 
 
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
     normalized = validate_settings(settings)
+    require_start_date(normalized)
     pool = normalized["pool"]
     per_pool = {key: normalized[key] for key in PER_POOL_SETTING_KEYS}
     _db()[_CONFIG_COLLECTION].update_one(
@@ -449,13 +282,9 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
 __all__ = [
     "DEFAULT_SETTINGS",
     "DEFAULT_BACKTEST_MONTHS",
-    "MIN_VALUE_MULT_OPTIONS",
+    "min_value_mult_options",
     "EXIT_MA_OPTIONS",
-    "HIGH_WINDOW_WEEKS",
-    "STOP_LOSS_OPTIONS",
     "benchmark_info",
-    "build_price_panel",
-    "compute_signals",
     "load_benchmark_close",
     "load_price_frames",
     "load_settings",
@@ -465,3 +294,11 @@ __all__ = [
     "save_settings",
     "validate_settings",
 ]
+
+
+def delete_settings(pool: str) -> None:
+    """그 풀의 신고가 설정을 지운다 — 종목풀 설정 화면에서 「사용」을 끄면 부른다."""
+    _db()[_CONFIG_COLLECTION].update_one(
+        {"_id": _SETTINGS_KEY},
+        {"$unset": {f"settings_by_pool.{str(pool).strip()}": ""}},
+    )

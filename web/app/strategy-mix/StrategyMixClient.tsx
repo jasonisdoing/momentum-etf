@@ -1,7 +1,8 @@
 "use client";
 
-import type { ColDef } from "ag-grid-community";
+import type { CellStyle, ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { formatCurrencyPrice } from "@/lib/price-format";
 import { IconCheck } from "@tabler/icons-react";
 
 import {
@@ -23,11 +24,14 @@ import {
 } from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { BacktestTradeStats } from "../components/BacktestTradeStats";
+import { RealtimeMissingNotice } from "../components/RealtimeMissingNotice";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
 import { StrategyNotes } from "../components/StrategyNotes";
 import { type HoldingChartData } from "../components/HoldingChart";
 import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
 import { NavTabs } from "../components/NavTabs";
+import { BacktestPeriodTables } from "../components/BacktestPeriodTables";
+import { type PeriodRow } from "@/lib/backtest-periods";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { PageFrame } from "../components/PageFrame";
@@ -36,10 +40,16 @@ import { createAppGridTheme } from "../components/app-grid-theme";
 import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
 import { FIXED_ASSET_NAME, FIXED_ASSET_ROW_CLASS, FIXED_ASSET_TICKER } from "@/lib/fixed-asset";
 import {
-  STOCK_NAME_COLUMN_MIN_WIDTH,
+  industryColumn,
   stockMemoColumn,
+  stockNameColumn,
+  stockRowClass,
+  tickerColumn,
   formatSignedPct,
   signColor,
+  renderSlotStatus,
+  formatSlotTradeStatus,
+  type SlotPlan,
 } from "@/lib/grid-cells";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
@@ -47,32 +57,10 @@ const gridTheme = createAppGridTheme();
 
 /** 접이식 전략 설명 — 운용 현황·백테스트 섹션 상단(기본 접힘). */
 const CURRENT_NOTES = [
-  {
-    title: "구성",
-    body:
-      "A·B 두 슬리브(전략 + 종목풀)의 저장 설정을 그대로 합쳐 한 계좌로 운용합니다. " +
-      "슬리브 몫은 월초 배분(위 입력칸)에서 각자 흘러간 비율을 백테스트 곡선에서 역산합니다. " +
-      "현금 몫은 두 전략에 주지 않고 늘 비워 두는 부분입니다.",
-  },
-  {
-    title: "목표 비중",
-    body:
-      "종목 목표 = 슬리브 몫 × 슬리브 안 실제 비중입니다. 진입할 때 1/N을 배정하고 이후 시세대로 흘러간 값이라 " +
-      "고정 비율이 아니며, 두 전략이 같은 종목을 담으면 합산합니다. 입출금이 없으면 지시가 거의 나오지 않습니다.",
-  },
-  {
-    title: "액션",
-    body:
-      "목표와 보유의 차이가 0.5%p 이상이면 매일 지시로 나옵니다. 목표가 흘러간 비중을 따라가므로 " +
-      "평소에는 차이가 없고, 지시가 나오는 건 입출금·교체·진입·이탈·월초 이관 같은 실변화뿐입니다. " +
-      "교체 확정분은 그 슬리브의 교체일 시가 그룹으로 묶입니다.",
-  },
-  {
-    title: "월초 배분 복구",
-    body:
-      "슬리브 재조정은 현금 우선으로 이관합니다 — 종목은 그대로 두고 장부상 현금만 옮깁니다. " +
-      "한 슬리브의 주식만으로 그 슬리브 몫을 넘을 때만 초과분 매도 지시가 나옵니다.",
-  },
+  { title: "기준금액", body: "계좌 평가액(현금 포함)이 기준금액입니다. IS 고정 자산은 현재 비중대로 두고 나머지를 슬리브 비중대로 배정하며, 평가액이 바뀌면 목표 금액도 함께 바뀝니다. 해외 종목은 현재 환율로 환산하므로 환율 변동도 반영됩니다." },
+  { title: "종목 배정", body: "개별 전략 엔진이 종목과 진입·청산 시점을 정합니다. 포트폴리오는 설정 비중, 모멘텀·신고가는 슬롯당 1/N로 배정합니다. 빈 슬롯은 현금이며 중복 종목 기준금액은 합산합니다." },
+  { title: "회수·채우기", body: "종목 목표 금액 대비 초과율·부족률이 각각 설정값에 도달하면 목표 금액까지 정수 수량으로 조정합니다. 채우기 100%는 미보유도 매수 안내하지 않습니다. 전략 청산은 유지합니다." },
+  { title: "현금", body: "월초 자동 재배분은 하지 않습니다. 매수 자금이 부족하면 부족액을 표시하며 다른 종목을 임의로 매도하지 않습니다. 회수 매도 대금은 현금으로 남습니다." },
 ];
 
 const hintStyle: React.CSSProperties = {
@@ -103,6 +91,8 @@ type AccountOption = AccountOptionBase & {
   country_code: string;
   /** 오늘의 액션 슬랙 알람 — 새 지시·수량 증가 시 발송. */
   mix_slack_enabled?: boolean;
+  mix_harvest_pct: number | null;
+  mix_refill_pct: number | null;
   /** 비워 두는 현금 몫(%) — 슬리브 배분과 합이 100 이다. */
   mix_cash_pct: number;
 };
@@ -120,6 +110,11 @@ type Meta = {
   max_sleeves: number;
   /** 조합이 아직 없는 계좌에서 채울 입력 초안(전략·종목풀은 비어 있다). */
   default_sleeves: MixSleeve[];
+  /**
+   * `"전략:풀"` → 그 전략 화면에 저장된 설정 요약(읽기 전용 표시용).
+   * 계좌가 아니라 조합에 매달려 있어 셀렉트를 바꾸면 즉시 그 조합의 설정이 보인다.
+   */
+  settings_summaries?: Record<string, { label: string; value: string }[]>;
   /** 기본 선택 계좌 — 목록의 첫 계좌. */
   account_id: string;
 };
@@ -135,10 +130,14 @@ type View = {
   strategy_total_pct: number;
   strategy_cagr_pct: number | null;
   strategy_mdd_pct: number | null;
+  strategy_mdd_from?: string | null;
+  strategy_mdd_to?: string | null;
   strategy_sortino: number | null;
   benchmark_total_pct: number;
   benchmark_cagr_pct: number | null;
   benchmark_mdd_pct: number | null;
+  benchmark_mdd_from?: string | null;
+  benchmark_mdd_to?: string | null;
   benchmark_sortino: number | null;
   /** 일별 누적(%) — 연간·월간·주간·일간 표를 이 시계열에서 만든다 (신고가 화면과 동일 방식). */
   /** 일별 누적(%) — 합성·슬리브별 단독·벤치마크. 슬리브 값은 그 날짜 데이터가 없으면 null. */
@@ -177,6 +176,11 @@ type HoldingSlot = {
   /** 슬리브별 몫(%) — 슬롯 합이 목표비중이다. */
   weight?: number | null;
   status?: string | null;
+  /** 각 전략 화면과 같은 상태 컬럼(`renderSlotStatus`)이 쓰는 값. */
+  plan?: SlotPlan | null;
+  days?: number | null;
+  is_new?: boolean | null;
+  exit_reason?: string | null;
   /** 전략 수익률(이론값) — 모멘텀: 연속 시작 교체일 시가 대비 · 신고가: 진입가 대비. */
   return_pct?: number | null;
   /** 보유 기간 — 전략마다 단위가 달라 백엔드가 완성된 문자열로 내려준다("3주"·"12일"·"신규"). */
@@ -184,6 +188,8 @@ type HoldingSlot = {
   /** 차트의 진입 화살표 — 슬리브마다 편입 시점이 다르다. 모멘텀은 매수가를 들지 않아 날짜만 온다. */
   entry_date?: string | null;
   entry_price?: number | null;
+  /** 행별 체결일 — 어제 확정 판정(오늘 체결)과 오늘 잠정 판정(내일 체결)을 가른다. */
+  fill_date?: string | null;
 };
 
 type Holding = {
@@ -198,6 +204,12 @@ type Holding = {
   /** 적용 계좌가 있을 때만 온다 — 계좌 총자산 기준 목표 금액·주수와 현재 보유. */
   target_amount?: number | null;
   target_quantity?: number | null;
+  /** 1주도 못 사는 종목 — 계좌가 백테스트 자본보다 작아 도달할 수 없는 목표다.
+   *  종목·비중은 백테스트 것 그대로 두고 경고만 붙인다(목록에서 지우지 않는다). */
+  unaffordable?: boolean;
+  /** 계좌 금액·단주를 감안해 실제로 도달할 수 있는 비중 — 목표 주수 × 1주 값 ÷ 총자산.
+   *  목표비중(백테스트 값)과의 차이가 단주로 못 채워 현금으로 남는 몫이다. */
+  actual_weight_pct?: number | null;
   held_quantity?: number | null;
   /** 계좌 매입 평단 — 현재가를 실시간으로 덮어쓸 때 수익률을 다시 계산하는 데 쓴다. */
   average_buy_price?: number | null;
@@ -206,12 +218,17 @@ type Holding = {
   held_value?: number | null;
   current_weight_pct?: number;
   trade_quantity?: number | null;
-  /** 주중 이탈 예상(오늘 종가 확정 시) — 매매수량·상태에 예상으로 겹쳐 보여준다. */
+  /** 장중 이탈 예상(오늘 종가 확정 시) — 매매수량·상태에 예상으로 겹쳐 보여준다. */
   is_exit_forecast?: boolean;
   forecast_trade_quantity?: number | null;
   /** 이탈 후 남을 목표수량 — 목표수량 칸에 (예상)으로 겹쳐 쓴다. */
   forecast_target_quantity?: number | null;
-  /** 종목풀 설정 이평선 기준 이격(%) — 종목명 옆 추세 이탈 배지(❗)에 쓴다. */
+  /** 업종 — 순위·모멘텀·신고가 화면과 같은 공용 맵(계좌 국가 전체). 없으면 빈 값. */
+  industry?: string;
+  /** 신규상장(🆕) — 전 화면 공용 판정. */
+  new_listing?: boolean | null;
+  listing_months?: number | null;
+  /** 종목풀 설정 이평선 기준 이격(%) — 추세 이탈(행 전체 회색) 판정에 쓴다. */
   current_short_pct?: number | null;
   current_long_pct?: number | null;
   /** 목표 포트폴리오에 없는 보유 종목 — 목표 비중 0% 행으로 표 하단에 온다. */
@@ -239,6 +256,10 @@ type AccountState = {
 };
 
 type Positions = {
+  capital_krw: number;
+  currency: string;
+  /** 금액 필드는 원화 계산값이며 표시할 때 이 환율로 나눈다. */
+  krw_rate: number;
   computed_at: string;
   account_id: string;
   /** 표시용 시세 갱신에 쓰는 국가 코드(시세 소스가 국가별로 다르다). */
@@ -253,6 +274,9 @@ type Positions = {
   summary: {
     stock_pct: number;
     cash_pct: number;
+    /** 계좌 금액·단주를 감안해 실제로 도달할 수 있는 비중(%). 목표와의 차이가 현금으로 남는다. */
+    actual_stock_pct: number;
+    actual_cash_pct: number;
     /** 총 현금 중 두 전략에 주지 않고 비워 둔 몫(%). 나머지는 빈 슬롯에서 생긴다. */
     reserved_cash_pct: number;
     /** 월초에 되돌릴 배분(%) — 화면 헤더에서 저장한 값. `{슬롯키}_pct` 와 `cash_pct`. */
@@ -275,17 +299,8 @@ type Positions = {
   actions: {
     /** 슬리브별 액션 — 슬롯 키(a/b)로 담긴다. 그 전략에 없는 항목은 빈 목록/null 이다. */
     slots: Record<string, SlotActions>;
-    sleeve_rebalance_today: boolean;
     /** 오늘의 액션 — 서버가 조립한 체결일 묶음(화면·슬랙 알람 공용 단일 소스). */
     groups: ActionGroup[];
-    /** 지시 밴드 — 설명 문구용(config 단일 소스). */
-    band?: { ratio_pct: number; min_pct: number };
-    /** 다음주 교체 가정 미리보기 — 오늘의 액션과 같은 조립을 다음주 가정 목표로 돌린 결과.
-     *  종목 교체가 없으면 오늘의 액션과 똑같다. 과거 조회면 null. */
-    next_week_preview: {
-      fill_date: string | null;
-      groups: ActionGroup[];
-    } | null;
   };
 };
 
@@ -293,7 +308,7 @@ type Positions = {
 type SlotActions = {
   label: string;
   live: boolean;
-  /** 다음 거래일 시가 매도(확정) — 자격 상실·이탈·손절. */
+  /** 다음 거래일 시가 매도(확정) — 자격 상실·이탈. */
   sells: { ticker: string; name: string; reason: string; return_pct: number | null }[];
   /** 장중 판정 기준 이탈 예상 — 오늘 종가로 확정된다. 화면 전용(알람 제외). */
   exit_forecast: { ticker: string; name: string; reason: string }[];
@@ -305,114 +320,10 @@ type SlotActions = {
     change_pct: number | null;
     value_mult: number | null;
   }[];
-  /** 주기적 교체가 있는 전략만 — 판정은 끝났고 체결만 남았다. 없으면 null. */
-  rebalance: {
-    is_filled: boolean;
-    fill_date: string | null;
-    signal_date: string | null;
-    portfolio_week: string | null;
-    buys: { ticker: string; name: string; price: number | null }[];
-    sells: { ticker: string; name: string }[];
-  } | null;
 };
-
-const VIEW_MODES = [
-  { key: "yearly", label: "연간" },
-  { key: "monthly", label: "월간" },
-  { key: "weekly", label: "주간" },
-  { key: "daily", label: "일간" },
-  { key: "trades", label: "체결" },
-] as const;
-type ViewMode = (typeof VIEW_MODES)[number]["key"];
-
-type PeriodRow = {
-  period: string;
-  /** 합성(슬리브들을 한 계좌에서 굴린 결과). */
-  strategy_pct: number;
-  /** 각 전략을 **혼자** 굴렸을 때 — 합성이 단독보다 나은지 바로 읽으라고 함께 둔다. */
-  slots: Record<string, number | null>;
-  benchmark_pct: number;
-  /** 합성 − 벤치마크. */
-  excess_pp: number;
-};
-
-/** 그 날짜가 속한 주의 월요일 — 주간 묶음 키. 로컬 기준으로 조립한다(UTC 파싱은 하루 밀린다). */
-function weekKeyOf(date: string): string {
-  const parsed = new Date(`${date}T00:00:00`);
-  parsed.setDate(parsed.getDate() - ((parsed.getDay() + 6) % 7));
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
-}
-
-/** 누적(%) 시계열을 기간별 수익률로 자른다 — 신고가 화면과 같은 계산.
- *  주간은 묶음 키(월요일)와 표시 라벨(그 주 마지막 거래일)이 달라 따로 담는다. */
-function toPeriodRows(
-  daily: View["daily"],
-  keyOf: (date: string) => string,
-  labelByLastDate = false,
-): PeriodRow[] {
-  if (daily.length === 0) return [];
-  type Snapshot = {
-    strategy: number;
-    slots: Record<string, number | null>;
-    benchmark: number;
-    lastDate: string;
-  };
-  const lastByPeriod = new Map<string, Snapshot>();
-  const order: string[] = [];
-  for (const point of daily) {
-    const key = keyOf(point.date);
-    if (!lastByPeriod.has(key)) order.push(key);
-    lastByPeriod.set(key, {
-      strategy: point.strategy_pct,
-      slots: point.slots,
-      benchmark: point.benchmark_pct,
-      lastDate: point.date,
-    });
-  }
-  // 첫 구간의 기준은 시작 시점(누적 0%)이다 — 슬롯도 모두 0 에서 시작한다.
-  const slotKeys = Object.keys(daily[0].slots ?? {});
-  let prev: Snapshot = {
-    strategy: 0,
-    slots: Object.fromEntries(slotKeys.map((key) => [key, 0])),
-    benchmark: 0,
-    lastDate: "",
-  };
-  const rows: PeriodRow[] = [];
-  // 누적(%) 두 점 사이의 구간 수익률. 어느 한쪽이라도 값이 없으면 null — 0 으로 채우면
-  // 데이터가 없는 구간이 '보합' 으로 보인다.
-  const step = (now: number | null, before: number | null): number | null =>
-    now == null || before == null ? null : ((1 + now / 100) / (1 + before / 100) - 1) * 100;
-  for (const key of order) {
-    const current = lastByPeriod.get(key)!;
-    const strategy = step(current.strategy, prev.strategy) ?? 0;
-    const benchmark = step(current.benchmark, prev.benchmark) ?? 0;
-    rows.push({
-      period: labelByLastDate ? current.lastDate : key,
-      strategy_pct: strategy,
-      slots: Object.fromEntries(
-        slotKeys.map((slot) => [slot, step(current.slots?.[slot] ?? null, prev.slots?.[slot] ?? null)]),
-      ),
-      benchmark_pct: benchmark,
-      excess_pp: strategy - benchmark,
-    });
-    prev = current;
-  }
-  return rows.reverse();
-}
-
-function formatPrice(value: number | null | undefined): string {
-  if (value == null) return "-";
-  return value.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
-}
-
-function formatAmount(value: number | null | undefined): string {
-  if (value == null) return "-";
-  return value.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
-}
 
 /** 슬롯 키는 순서가 정한다 — 백엔드 `MIX_SLEEVE_KEYS` 와 같은 순서여야 한다. */
-const SLOT_KEY_ORDER = ["a", "b", "c"] as const;
+const SLOT_KEY_ORDER = ["a", "b", "c", "d"] as const;
 
 
 /** 보유 표 행 — 현금 행도 같은 표에 넣는다 (비중 합이 100%임을 한눈에 보이게). */
@@ -429,13 +340,23 @@ type PositionRow = Holding & {
   memo?: string;
   amount: number | null;
   shares: number | null;
+  /** 행 고유 키 — 같은 종목이 여러 슬리브에 분리 표시되므로 티커만으로는 겹친다. */
+  row_key?: string;
+  /** 맨 위 전체 합계 행. */
+  is_total?: boolean;
+  /** 슬리브 그룹 헤더 행 — 그 슬리브의 합계·요약을 담는다. */
+  is_group?: boolean;
+  /** 이 행이 속한 슬리브(분리 표시). 현금·전량 매도·고정 자산 행은 없다. */
+  group_slot?: string;
+  /** 그룹·합계 행의 상태 칸 문구(슬롯 n/n · 현금 % 등). */
+  group_note?: string;
+  /** 여러 슬리브에 걸친 종목의 이 슬리브 몫 비율(0~1) — 금액 분할에 쓴 값. */
+  split_factor?: number;
+  /** 그룹·합계 행의 전략수익률(몫 가중 평균) — 종목 행은 slots 에서 계산한다. */
+  strategy_return_pct?: number | null;
 };
 
-/** 리밸런싱 밴드(%p) — 목표 비중과 이만큼 미만으로 벌어진 종목은 오늘의 액션에서 뺀다.
- *  장중 가격이 조금만 움직여도 목표수량이 ±1주씩 흔들려 목록이 계속 바뀌기 때문이다.
- *  표에는 정확한 목표수량이 그대로 남는다(표는 대조용, 액션은 실행용). */
-
-/** 오늘의 액션 한 줄. 같은 체결 시점끼리 묶고 묶음 안에서는 매도 → 매수 순서다. */
+/** 오늘의 액션 한 줄. 같은 체결 시점끼리 묶고 묶음 안에서는 보유 표와 같은 종목 순서다. */
 type ActionItem = {
   key: string;
   side: "sell" | "buy";
@@ -444,7 +365,48 @@ type ActionItem = {
   /** 정렬용 — 표(티커 순)와 같은 기준으로 세운다. */
   ticker: string;
 };
-type ActionGroup = { key: string; title: string; items: ActionItem[] };
+type ActionGroup = {
+  key: string;
+  title: string;
+  items: ActionItem[];
+  funding_warning?: string;
+  // "today" = 실행일이 그 시장의 현지 오늘(오늘의 액션), "later" = 다음 거래일(내일의 액션).
+  section?: "today" | "later";
+};
+
+/** 액션 그룹 목록 — 오늘·내일 두 섹션이 같은 모양으로 그린다. */
+function ActionGroupList({ groups }: { groups: ActionGroup[] }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {groups.map((group, groupIndex) => (
+        <div key={group.key}>
+          {group.funding_warning ? <div role="alert">{group.funding_warning}</div> : null}
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>
+            {groupIndex + 1}. {group.title}
+            <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
+              매도 {group.items.filter((item) => item.side === "sell").length}건 · 매수{" "}
+              {group.items.filter((item) => item.side === "buy").length}건
+            </span>
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
+            {group.items.map((item) => (
+              <li key={item.key}>
+                <strong
+                  style={{
+                    color: item.side === "sell" ? "var(--down-color, #2f6fd0)" : "var(--up-color, #d64545)",
+                  }}
+                >
+                  {item.title}
+                </strong>{" "}
+                — {item.text}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** 합성 전략 — SM·신고가를 저장된 배분으로 함께 운용하는 화면.
  *  운용 현황 탭은 오늘 보유해야 할 종목과 현금 비중·오늘의 액션을,
@@ -469,7 +431,7 @@ export function StrategyMixClient() {
   const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
   // 조합 셀렉트 선택지(전략·종목풀) — 계좌 목록과 같은 응답으로 온다.
   const [meta, setMeta] = useState<Meta | null>(null);
-  const [months, setMonths] = useState<number>(12);
+  const [months, setMonths] = useState<number>(60);
   const [monthOptions, setMonthOptions] = useState<number[]>([]);
 
   // 계산 기준은 계좌다 — 슬리브별 풀은 서버가 계좌 설정에서 꺼낸다(계좌 설정이 단일 소스).
@@ -499,12 +461,8 @@ export function StrategyMixClient() {
     useState<LoadingProgress | null>(null);
   /** 계좌를 저장하면 목표 금액이 달라지므로 운용 현황를 다시 계산한다. */
   const [positionsReloadKey, setPositionsReloadKey] = useState(0);
-  /** 다음주 교체 가정 — 기본 접힘 (참고 정보). */
-  const [nextWeekOpen, setNextWeekOpen] = useState(false);
-
   // 백테스트 탭.
   const [view, setView] = useState<View | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("monthly");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [backtestProgress, setBacktestProgress] =
@@ -638,9 +596,19 @@ export function StrategyMixClient() {
 
   // 목표 금액의 기준 = 적용 계좌의 총자산(주식 평가액 + 현금). 계좌가 없으면 비중만 보여준다.
   const totalAsset = positions?.account?.total_assets ?? null;
+  const displayCurrency = selectedAccount?.currency;
+  const displayRate = positions?.krw_rate;
+  const formatPrice = useCallback((value: number | null | undefined): string => {
+    if (value == null || !displayCurrency) return "-";
+    return formatCurrencyPrice(value, displayCurrency);
+  }, [displayCurrency]);
+  const formatAmount = useCallback((value: number | null | undefined): string => {
+    if (value == null || !displayCurrency || !displayRate || displayRate <= 0) return "-";
+    return formatCurrencyPrice(value / displayRate, displayCurrency);
+  }, [displayCurrency, displayRate]);
 
   // 표시용 현재가·일간(%)만 60초마다 갱신한다 — 목표·매매수량은 5분 캐시된 판정 결과다.
-  const quotes = useRealtimeQuotes(
+  const { quotes, missing: quoteMissing } = useRealtimeQuotes(
     positions?.country ?? "",
     (positions?.holdings ?? []).map((row) => row.ticker),
   );
@@ -653,6 +621,9 @@ export function StrategyMixClient() {
       name: "현금",
       sources: [],
       weight_pct: positions.summary.cash_pct,
+      // 실제목표 현금 — 단주로 못 채운 몫까지 포함한다. 이 값이 있어야 실제목표 컬럼의
+      // 합이 100% 가 된다(종목 실제목표 합 + 현금).
+      actual_weight_pct: positions.summary.actual_cash_pct,
       // 현금도 슬리브별로 나눠 보여준다 — 합이 목표비중(현금 전체)이다.
       slots: Object.fromEntries(
         Object.entries(positions.summary.slots).map(([key, slot]) => [key, { weight: slot.cash_pct }]),
@@ -668,37 +639,158 @@ export function StrategyMixClient() {
       amount:
         totalAsset == null
           ? null
-          : (totalAsset * positions.summary.cash_pct) / 100,
+          : (positions.capital_krw * positions.summary.actual_cash_pct) / 100,
       shares: null,
     };
-    // 목표 종목 행은 백엔드가 종목 단위로 합쳐 계산한 값을 그대로 쓴다.
-    // 현금만 맨 위에 두고, 나머지는 **백엔드가 준 순서 그대로** 둔다 — A 슬리브의 선정 순위,
-    // 그 다음 B 슬리브, 마지막이 목표에 없는 보유(전량 매도)다. 각 전략 화면과 같은 순서라
-    // 두 화면을 나란히 놓고 대조할 수 있다. 티커 순으로 다시 세우면 그 순위가 사라진다.
-    return [
-      cashRow,
-      ...positions.holdings
-        .map((holding) => {
-          // 표시용 가격만 실시간으로 덮어쓴다 — 목표·매매수량은 판정 결과 그대로.
-          const quote = quotes[holding.ticker];
-          const price = quote ? quote.price : holding.price;
-          // 수익률은 **화면에 보이는 현재가**로 다시 낸다. 백엔드 값은 판정 시점(전날 종가)
-          // 기준이라, 가격만 실시간으로 바꾸면 한 행에서 현재가와 수익률의 기준이 갈린다
-          // (장중 +7.77% 인 종목이 수익률 칸에서는 -6.19% 로 보였다).
-          const avg = holding.average_buy_price;
-          const returnPct =
-            price != null && price > 0 && avg != null && avg > 0 ? (price / avg - 1) * 100 : holding.return_pct ?? null;
-          return {
-            ...holding,
-            price,
-            change_pct: quote ? quote.change_pct : holding.change_pct,
-            return_pct: returnPct,
-            amount: holding.target_amount ?? null,
-            shares: holding.target_quantity ?? null,
-          };
-        }),
-    ];
-  }, [positions, quotes, totalAsset]);
+    // 목표 종목 행은 백엔드가 종목 단위로 합쳐 계산한 값에서 출발한다(표시용 가격만 실시간).
+    const toRow = (holding: Holding): PositionRow => {
+      const quote = quotes[holding.ticker];
+      const price = quote ? quote.price : holding.price;
+      // 수익률은 **화면에 보이는 현재가**로 다시 낸다. 백엔드 값은 판정 시점(전날 종가)
+      // 기준이라, 가격만 실시간으로 바꾸면 한 행에서 현재가와 수익률의 기준이 갈린다
+      // (장중 +7.77% 인 종목이 수익률 칸에서는 -6.19% 로 보였다).
+      const avg = holding.average_buy_price;
+      const returnPct =
+        price != null && price > 0 && avg != null && avg > 0 ? (price / avg - 1) * 100 : holding.return_pct ?? null;
+      return {
+        ...holding,
+        row_key: holding.ticker,
+        price,
+        // 시세를 못 받은 종목은 일간(%)을 비운다 — 지난 값이 오늘처럼 보이지 않게(공용 규칙).
+        change_pct: quote ? quote.change_pct : quoteMissing.includes(holding.ticker) ? null : holding.change_pct,
+        return_pct: returnPct,
+        amount: holding.target_amount ?? null,
+        shares: holding.target_quantity ?? null,
+        unaffordable: holding.unaffordable ?? false,
+        actual_weight_pct: holding.actual_weight_pct ?? null,
+      };
+    };
+
+    // 슬리브별 그룹으로 나눈다 — 종목 순서는 슬리브 안에서 백엔드 순서(전략 선정 순위) 그대로.
+    // 여러 슬리브에 걸친 종목은 **분리 표시**한다: 각 그룹에 그 슬리브 몫만큼 나눠 담아
+    // 그룹 합계가 정확해진다(비중·금액은 몫 비율로 분할, 계좌 수량은 종목 단위라 그대로 둔다).
+    const slotSummaries = positions.summary.slots;
+    const groupedRows: PositionRow[] = [];
+    const sums = { amount: 0, held: 0, actual: 0, current: 0 };
+    // 가중 평균 — 평가 금액이 하나도 없으면(첫날 등) 목표 금액으로 가중하고, 둘 다 없으면 null.
+    const weightedAvg = (
+      rows: PositionRow[],
+      value: (row: PositionRow) => number | null | undefined,
+      weight: (row: PositionRow) => number,
+    ): number | null => {
+      const pairs = rows
+        .map((row) => ({ v: value(row), w: weight(row) }))
+        .filter((pair): pair is { v: number; w: number } => pair.v != null && pair.w > 0);
+      const total = pairs.reduce((acc, pair) => acc + pair.w, 0);
+      if (total <= 0) return null;
+      return pairs.reduce((acc, pair) => acc + (pair.v * pair.w) / total, 0);
+    };
+    const valueWeight = (row: PositionRow) => row.held_value ?? row.amount ?? 0;
+    const memberStrategyReturn = (row: PositionRow): number | null =>
+      row.group_slot ? (row.slots?.[row.group_slot]?.return_pct ?? null) : null;
+    const allMembers: PositionRow[] = [];
+    for (const slot of Object.keys(slotSummaries)) {
+      const members: PositionRow[] = [];
+      for (const holding of positions.holdings) {
+        if (holding.is_sell_all || holding.is_fixed_asset) continue;
+        if (!(holding.sources ?? []).includes(slot)) continue;
+        const base = toRow(holding);
+        const slotWeight = holding.slots?.[slot]?.weight ?? 0;
+        const factor =
+          holding.weight_pct > 0
+            ? slotWeight / holding.weight_pct
+            : 1 / Math.max(holding.sources.length, 1);
+        members.push({
+          ...base,
+          row_key: `${slot}:${holding.ticker}`,
+          group_slot: slot,
+          sources: [slot],
+          slots: { [slot]: holding.slots?.[slot] ?? {} },
+          weight_pct: slotWeight,
+          split_factor: factor,
+          amount: base.amount == null ? null : base.amount * factor,
+          held_value: base.held_value == null ? null : base.held_value * factor,
+          actual_weight_pct: base.actual_weight_pct == null ? null : base.actual_weight_pct * factor,
+          current_weight_pct:
+            base.current_weight_pct == null ? undefined : base.current_weight_pct * factor,
+        });
+      }
+      const summary = slotSummaries[slot];
+      const groupAmount = totalAsset == null ? null : (positions.capital_krw * summary.alloc_pct) / 100;
+      const groupHeld = members.reduce((acc, row) => acc + (row.held_value ?? 0), 0);
+      const groupActual = members.reduce((acc, row) => acc + (row.actual_weight_pct ?? 0), 0);
+      const groupCurrent = members.reduce((acc, row) => acc + (row.current_weight_pct ?? 0), 0);
+      sums.amount += groupAmount ?? 0;
+      sums.held += groupHeld;
+      sums.actual += groupActual;
+      sums.current += groupCurrent;
+      allMembers.push(...members);
+      groupedRows.push(
+        {
+          ticker: `__group_${slot}__`,
+          row_key: `__group_${slot}__`,
+          name: slotLabel(slot),
+          is_group: true,
+          group_slot: slot,
+          sources: [],
+          slots: {},
+          weight_pct: summary.alloc_pct,
+          price: null,
+          // 일간·수익률 = 평가 금액 가중 평균, 전략수익률 = 슬리브 몫 가중 평균.
+          change_pct: weightedAvg(members, (row) => row.change_pct, valueWeight),
+          return_pct: weightedAvg(members, (row) => row.return_pct, (row) => row.held_value ?? 0),
+          strategy_return_pct: weightedAvg(members, memberStrategyReturn, (row) => row.weight_pct),
+          amount: groupAmount,
+          shares: null,
+          held_value: groupHeld > 0 ? groupHeld : null,
+          actual_weight_pct: groupActual > 0 ? groupActual : null,
+          current_weight_pct: groupCurrent > 0 ? groupCurrent : undefined,
+          group_note:
+            `슬롯 ${summary.slots_used}/${summary.top_n} · 슬리브 현금 ${summary.cash_pct.toFixed(1)}%` +
+            (totalAsset == null ? "" : ` ${formatAmount((positions.capital_krw * summary.cash_pct) / 100)}`),
+        },
+        ...members,
+      );
+    }
+
+    // 전량 매도·고정 자산·소속 슬리브 없는 행 — 어느 그룹에도 안 들어가 맨 아래에 둔다.
+    const leftoverRows = positions.holdings
+      .filter(
+        (holding) =>
+          holding.is_sell_all || holding.is_fixed_asset || (holding.sources ?? []).length === 0,
+      )
+      .map(toRow);
+
+    // 전체 합계 — 계좌 총자산 기준. 수량 컬럼은 종목 단위 값이라 합계를 내지 않는다.
+    const totalRow: PositionRow = {
+      ticker: "__total__",
+      row_key: "__total__",
+      name: "합계",
+      is_total: true,
+      sources: [],
+      slots: {},
+      weight_pct: 100,
+      price: null,
+      // 합계 일간(%) — 현금(변동 0%)을 포함한 계좌 전체의 오늘 움직임.
+      change_pct: weightedAvg(
+        [...allMembers, { change_pct: 0, held_value: positions.account?.cash_balance ?? 0 } as PositionRow],
+        (row) => row.change_pct,
+        valueWeight,
+      ),
+      return_pct: weightedAvg(allMembers, (row) => row.return_pct, (row) => row.held_value ?? 0),
+      // 전략수익률은 슬리브마다 기준(편입가)이 달라 전체 평균은 두지 않는다 — 그룹 행에만 표시.
+      strategy_return_pct: null,
+      amount: totalAsset,
+      shares: null,
+      held_value: totalAsset,
+      actual_weight_pct: positions.summary.actual_stock_pct + positions.summary.actual_cash_pct,
+      current_weight_pct: totalAsset != null ? 100 : undefined,
+      group_note: `주식 ${positions.summary.stock_pct.toFixed(1)}% · 현금 ${positions.summary.cash_pct.toFixed(1)}%`,
+    };
+
+    return [totalRow, cashRow, ...groupedRows, ...leftoverRows];
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
+  }, [positions, quotes, quoteMissing, totalAsset, sleeves, formatAmount]);
 
   // ── 차트 탭 (공용 HoldingChart — 슬리브별 기준선은 백엔드가 내려준다) ──
   const [holdingsTab, setHoldingsTab] = useState<HoldingsTab>("list");
@@ -707,11 +799,17 @@ export function StrategyMixClient() {
   const [chartsError, setChartsError] = useState<string | null>(null);
   // 차트 기간(개월) — 백엔드 config.HOLDING_CHART_MONTHS 가 단일 소스. 응답에서 받아 문구에 쓴다.
   const [chartMonths, setChartMonths] = useState<number | null>(null);
-  // 차트 대상 — 현금·고정 자산 제외. 전량 매도 대상은 아직 보유 중이라 포함한다.
-  const chartRows = useMemo(
-    () => positionRows.filter((row) => !row.is_cash && !row.is_fixed_asset),
-    [positionRows],
-  );
+  // 차트 대상 — 현금·고정 자산·합계·그룹 행 제외. 전량 매도 대상은 아직 보유 중이라 포함한다.
+  // 분리 표시로 같은 종목이 두 그룹에 있으면 차트는 한 번만 그린다.
+  const chartRows = useMemo(() => {
+    const seen = new Set<string>();
+    return positionRows.filter((row) => {
+      if (row.is_cash || row.is_fixed_asset || row.is_group || row.is_total) return false;
+      if (seen.has(row.ticker)) return false;
+      seen.add(row.ticker);
+      return true;
+    });
+  }, [positionRows]);
   const chartKey = useMemo(
     () => `${accountId}|${chartRows.map((row) => row.ticker).join(",")}`,
     [accountId, chartRows],
@@ -751,64 +849,93 @@ export function StrategyMixClient() {
     })();
   }, [holdingsTab, positions, charts, chartsLoading, chartsError, chartRows, accountId, positionsLoading]);
 
+  // 업종 컬럼 노출 — 값이 하나도 없으면(ETF 만 담은 계좌) 빈 컬럼을 숨긴다.
+  // 전략 화면은 풀 성격으로 가르는데, 합성은 여러 풀이 섞여 행 값으로 본다.
+  const hasIndustryData = useMemo(
+    () => positionRows.some((row) => String(row.industry ?? "").trim() !== ""),
+    [positionRows],
+  );
+
   const positionColumns = useMemo<ColDef<PositionRow>[]>(() => {
     const columns: ColDef<PositionRow>[] = [
+      // 상태 — 행이 속한 슬리브 하나의 상태만 보여주면 되므로(분리 표시) 컬럼 1개로 충분하다.
+      // 예전에는 슬리브 수만큼 옆으로 늘어놔 빈 칸이 대부분이었다.
       {
-        field: "ticker",
-        headerName: "티커",
-        width: 108,
-        cellRenderer: (p: { value?: string; data?: PositionRow }) => {
-          // 현금·고정 자산은 종목이 아니라 상세 링크를 걸지 않는다.
-          if (p.data?.is_cash) return <span>-</span>;
-          if (p.data?.is_fixed_asset) return <span>{FIXED_ASSET_TICKER}</span>;
-          return <TickerDetailLink ticker={p.value} />;
+        colId: "slot_status",
+        headerName: "상태",
+        pinned: "left",
+        width: 132,
+        sortable: false,
+        cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+        valueGetter: (p: { data?: PositionRow }) => {
+          const slot = p.data?.group_slot;
+          return slot ? (p.data?.slots?.[slot]?.plan ?? "") : "";
         },
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        flex: 1.4,
-        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
-        // 굵기는 주지 않는다 — 다른 화면의 종목명과 같은 무게로 보여야 표가 한 벌로 읽힌다.
-        cellStyle: (p) => (p.data?.is_cash ? { color: "var(--text-muted)" } : null),
-        // 종목명 표기는 순위·전략 화면과 같은 공용 렌더러를 쓴다 — 레버리지 강조(💣)와
-        // 긴 이름 2줄 줄임이 여기서만 빠져 있었다. 현금 행은 종목이 아니라 그대로 둔다.
-        cellRenderer: (p: { value?: string | null; data?: PositionRow }) =>
-          p.data?.is_fixed_asset ? (
-            <span>{FIXED_ASSET_NAME}</span>
-          ) : p.data?.is_cash ? (
-            <span>{p.value ?? "-"}</span>
-          ) : (
-            renderStockNameCell(p.value, {
-              trendBroken: isTrendBroken(p.data?.current_short_pct, p.data?.current_long_pct),
-            })
-          ),
-      },
-      // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다).
-      // 현금 행은 종목이 아니라 편집 대상이 아니다.
-      stockMemoColumn<PositionRow>({
-        field: "memo",
-        editable: (row) => !row?.is_cash && !row?.is_fixed_asset,
-        onSave: (row, memo) => void saveMemo(row.ticker, memo),
-      }),
-      {
-        field: "sources",
-        headerName: "전략",
-        width: 110,
-        cellClass: "appWrapCell",
-        // 슬리브 이름은 사용자가 붙이는 값이라 길어질 수 있다. 종목명과 같은 공용 클래스로
-        // 최대 2줄까지 보여주고 넘치면 말줄임한다(칸 폭을 늘리면 표가 옆으로 밀린다).
-        cellRenderer: (p: { value?: string[] | null; data?: PositionRow }) => {
-          const sources = p.value ?? [];
-          // 여러 슬리브가 같은 종목을 담으면 한 행에 모두 표시된다 (비중은 합산).
-          const text = sources.length === 0 ? "-" : sources.map((source) => slotLabel(source)).join("·");
-          return (
-            <span className="appNameCellText" title={text}>
-              {text}
-            </span>
+        // 문구는 각 전략 화면과 **같은 함수**로 그린다 — 여기서 만들면 표현이 갈린다.
+        // 포트폴리오·사고팔기는 진입·이탈 판정이 없어 저장 비중·보유 회차 문구를 그대로 보여준다.
+        cellRenderer: (p: { data?: PositionRow }) => {
+          const slot = p.data?.group_slot;
+          if (!slot || p.data?.is_group) return null;
+          const cell = p.data?.slots?.[slot];
+          if (!cell?.plan) return null;
+          const slotStrategy = sleeves.find((sleeve) => sleeve.key === slot)?.strategy;
+          if (slotStrategy === "portfolio" || slotStrategy === "strategy_trade") {
+            return <span style={{ color: "var(--text-muted)" }}>{cell.status}</span>;
+          }
+          return renderSlotStatus(
+            {
+              plan: cell.plan,
+              days: cell.days ?? null,
+              is_new: Boolean(cell.is_new),
+              exit_reason: cell.exit_reason ?? null,
+              entry_date: cell.entry_date ?? null,
+              fill_date: cell.fill_date ?? null,
+            },
+            { fillDay: positions?.next_trading_day },
           );
         },
       },
+      // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
+      // 현금·고정 자산 행만 화면 고유 표기다(종목이 아니라 링크·배지를 걸지 않는다).
+      tickerColumn<PositionRow>({
+        cellRenderer: (p) => {
+          if (p.data?.is_cash || p.data?.is_group || p.data?.is_total) return <span>-</span>;
+          if (p.data?.is_fixed_asset) return <span>{FIXED_ASSET_TICKER}</span>;
+          return <TickerDetailLink ticker={p.value} />;
+        },
+      }),
+      stockNameColumn<PositionRow>({
+        // 굵기는 주지 않는다 — 다른 화면의 종목명과 같은 무게로 보여야 표가 한 벌로 읽힌다.
+        // (합계·그룹 행만 굵게 — 종목이 아니라 구분선이다.)
+        cellStyle: (p): CellStyle | null => {
+          if (p.data?.is_group || p.data?.is_total) return { fontWeight: 700 };
+          if (p.data?.is_cash) return { color: "var(--text-muted)" };
+          return null;
+        },
+        cellRenderer: (p) =>
+          p.data?.is_fixed_asset ? (
+            <span>{FIXED_ASSET_NAME}</span>
+          ) : p.data?.is_cash || p.data?.is_group || p.data?.is_total ? (
+            <span>{p.value ?? "-"}</span>
+          ) : (
+            renderStockNameCell(p.value, {
+              isHeld: Number(p.data?.held_quantity ?? 0) > 0,
+              isNew: Boolean(p.data?.new_listing),
+              newMonths: p.data?.listing_months ?? null,
+            })
+          ),
+      }),
+      // 종목 메모 — 순위·모멘텀·자산 관리 화면과 같은 값(종목에 붙는다).
+      // 현금·합계·그룹 행은 종목이 아니라 편집 대상이 아니다.
+      stockMemoColumn<PositionRow>({
+        field: "memo",
+        editable: (row) => !row?.is_cash && !row?.is_fixed_asset && !row?.is_group && !row?.is_total,
+        onSave: (row, memo) => void saveMemo(row.ticker, memo),
+      }),
+      // 업종 — 전략 화면과 같은 공용 컬럼. ETF 만 담은 계좌는 값이 없어 통째로 숨긴다.
+      industryColumn<PositionRow>({ hide: !hasIndustryData }),
+      // (예전 「전략」 컬럼은 제거 — 슬리브 그룹 행이 소속을 보여준다. 여러 슬리브에 걸친
+      //  종목은 각 그룹에 분리 표시된다.)
       // 아래 순서·명칭은 /assets 계좌 보유 표와 맞춘다
       // (일간→현재가→비중→목표비중→목표수량→수량→수익률→평가 금액).
       {
@@ -870,9 +997,9 @@ export function StrategyMixClient() {
         ] as ColDef<PositionRow>[])
         : []),
       {
-        field: "weight_pct",
+        field: "actual_weight_pct",
         headerName: "목표비중",
-        headerTooltip: `${slotKeys.map(slotLabel).join(" + ")} 슬리브 몫의 합`,
+        headerTooltip: "목표 주수 × 기준 가격(KRW) ÷ 계좌 평가액. 목표 주수가 단주로 떨어져 현재 계좌 비중과 다릅니다.",
         width: 88,
         type: "numericColumn",
         valueFormatter: (p) =>
@@ -883,6 +1010,14 @@ export function StrategyMixClient() {
     // 계좌 총자산을 알 때만 매매 지시 컬럼을 붙인다 — 목표와 실제 보유의 차이가 주문 수량이다.
     if (totalAsset != null) {
       columns.push(
+        {
+          field: "amount",
+          headerName: "목표 금액",
+          headerTooltip: "목표 주수 × 1주 값 — 실제로 주문할 금액이다.",
+          width: 120,
+          type: "numericColumn",
+          valueFormatter: (p) => formatAmount(p.value as number),
+        },
         {
           field: "held_quantity",
           headerName: "수량",
@@ -895,11 +1030,14 @@ export function StrategyMixClient() {
           field: "shares",
           headerName: "목표수량",
           headerTooltip:
-            "목표비중 × 총자산 ÷ 현재가. 주중 이탈·손절이 예상되는 종목은 이탈 후 남을 목표를 (예상)으로 보여준다.",
+            "고정 운용 예산에서 비싼 종목부터 최소 1주를 확보하고, 남은 금액으로 추가 주수를 배정합니다. 예산이 부족해 1주도 못 사면 「1주 못 삼」. 장중 이탈이 예상되는 종목은 이탈 후 남을 목표를 (예상)으로 보여줍니다.",
           width: 88,
           type: "numericColumn",
           valueFormatter: (p) => {
-            // 예상 이벤트(주중 이탈·손절)가 있는 행만 예상 목표로 겹쳐 쓴다.
+            // 1주도 못 사는 종목 — 수량 대신 경고를 쓴다. 계좌가 작아 도달할 수 없는 목표라,
+            // 0 으로만 두면 "안 사도 되는 종목" 으로 읽힌다.
+            if (p.data?.unaffordable) return "1주 못 삼";
+            // 예상 이벤트(장중 이탈)가 있는 행만 예상 목표로 겹쳐 쓴다.
             // 가격 변동으로 목표와 조금 어긋나는 것은 예상이 아니라 그대로 둔다.
             const forecast = p.data?.forecast_target_quantity;
             if (p.data?.is_exit_forecast && forecast != null) {
@@ -907,10 +1045,14 @@ export function StrategyMixClient() {
             }
             return p.value == null ? "-" : (p.value as number).toLocaleString("ko-KR");
           },
-          cellStyle: (p) =>
-            p.data?.is_exit_forecast && p.data?.forecast_target_quantity != null
+          cellStyle: (p): CellStyle | null => {
+            if (p.data?.unaffordable) {
+              return { color: "var(--up-color, #d64545)", fontWeight: 700 };
+            }
+            return p.data?.is_exit_forecast && p.data?.forecast_target_quantity != null
               ? { color: "var(--down-color, #2f6fd0)", fontWeight: 600, opacity: 0.65 }
-              : null,
+              : null;
+          },
         },
         {
           field: "trade_quantity",
@@ -929,7 +1071,7 @@ export function StrategyMixClient() {
             return `${value > 0 ? "+" : ""}${value.toLocaleString("ko-KR")}`;
           },
           // 매수(+)·매도(−) 색은 사이트 공용 기준을 따른다 — 한국 관례로 매수 빨강·매도 파랑.
-          // 주중 이탈 예상은 확정이 아니므로 흐리게 구분한다.
+          // 장중 이탈 예상은 확정이 아니므로 흐리게 구분한다.
           cellStyle: (p) => {
             if (p.data?.is_exit_forecast && p.data?.forecast_trade_quantity != null) {
               return { color: "var(--down-color, #2f6fd0)", fontWeight: 600, opacity: 0.65 };
@@ -937,16 +1079,17 @@ export function StrategyMixClient() {
             return { color: signColor(p.value as number), fontWeight: 700, opacity: 1 };
           },
         },
-        ...slotKeys.map<ColDef<PositionRow>>((slot) => ({
-          colId: `slot_weight_${slot}`,
-          headerName: slotLabel(slot),
-          width: 104,
+        {
+          colId: "slot_weight",
+          headerName: "몫(%)",
+          headerTooltip: "이 슬리브 안에서 이 종목이 차지하는 몫 — 그룹 행은 슬리브의 저장된 배정 비율.",
+          width: 84,
           type: "numericColumn",
-          valueGetter: (p) => p.data?.slots?.[slot]?.weight ?? null,
+          valueGetter: (p) => (p.data?.is_cash ? null : p.data?.weight_pct ?? null),
           valueFormatter: (p) =>
             p.value == null || (p.value as number) === 0 ? "-" : `${(p.value as number).toFixed(2)}%`,
           cellStyle: { color: "var(--text-muted)" },
-        })),
+        },
         {
           colId: "held_for",
           headerName: "보유일",
@@ -970,6 +1113,8 @@ export function StrategyMixClient() {
             "전략 이론값(계좌 실손익 아님) — 각 전략이 잡은 편입가 대비. 여러 슬리브에 걸치면 몫 가중 평균.",
           valueGetter: (p) => {
             if (!p.data) return null;
+            // 그룹·합계 행 — 행 구성 단계에서 몫 가중 평균으로 계산해 둔 값.
+            if (p.data.is_group || p.data.is_total) return p.data.strategy_return_pct ?? null;
             const slots = slotKeys.map((slot) => p.data?.slots?.[slot]).filter(Boolean);
             const parts = slots
               .filter((slot) => slot?.return_pct != null && (slot?.weight ?? 0) > 0)
@@ -994,29 +1139,27 @@ export function StrategyMixClient() {
             return bits.join(" · ");
           },
         },
-        {
-          field: "amount",
-          headerName: "목표 금액",
-          width: 120,
-          type: "numericColumn",
-          valueFormatter: (p) => formatAmount(p.value as number),
-        },
       );
     }
     columns.push({
       colId: "status",
       headerName: "상태",
-      flex: 1.6,
+      width: 260,
       minWidth: 260,
       valueGetter: (p) => {
         if (!p.data) return "";
+        if (p.data.is_total || p.data.is_group) return p.data.group_note ?? "";
         if (p.data.is_cash) return "미배분 현금";
         if (p.data.is_fixed_asset) return "고정 자산 (합성이 매매하지 않음)";
         if (p.data.is_sell_all) return "전량 매도 (목표에 없음)";
         const parts = slotKeys
           .map((slot) => {
-            const status = p.data?.slots?.[slot]?.status;
-            return status ? `${slotLabel(slot)} ${status}` : null;
+            const cell = p.data?.slots?.[slot];
+            if (!cell) return null;
+            const status = cell.plan === "buy" || cell.plan === "sell"
+              ? formatSlotTradeStatus({ plan: cell.plan, fill_date: cell.fill_date }, positions?.next_trading_day, true)
+              : cell.status;
+            return status ? `${slotLabel(slot)} · ${status}` : null;
           })
           .filter((text): text is string => Boolean(text));
         if (p.data.is_exit_forecast) parts.push("매도 예정(예상)");
@@ -1024,24 +1167,16 @@ export function StrategyMixClient() {
       },
       cellStyle: (p) => {
         const text = String(p.value ?? "");
-        if (text.includes("매도 예정"))
+        if (text.includes("매도"))
           return { color: "var(--down-color, #2f6fd0)", fontWeight: 600 };
-        if (text.includes("진입 예정") || text.includes("매수 예정"))
+        if (text.includes("진입") || text.includes("매수 예정"))
           return { color: "var(--up-color, #d64545)", fontWeight: 600 };
         return null;
       },
     });
     return columns;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
-  }, [totalAsset, slotKeys, sleeves, saveMemo]);
-
-  const periodRows = useMemo<PeriodRow[]>(() => {
-    if (!view || viewMode === "trades") return [];
-    if (viewMode === "weekly") return toPeriodRows(view.daily, weekKeyOf, true);
-    const keyLength =
-      viewMode === "yearly" ? 4 : viewMode === "monthly" ? 7 : 10;
-    return toPeriodRows(view.daily, (date) => date.slice(0, keyLength));
-  }, [view, viewMode]);
+  }, [totalAsset, slotKeys, sleeves, saveMemo, hasIndustryData, formatAmount, formatPrice, positions?.next_trading_day]);
 
   const tradeColumns = useMemo<ColDef<MixTradeRow>[]>(
     () => [
@@ -1049,20 +1184,16 @@ export function StrategyMixClient() {
         headerName: "전략",
         field: "strategy",
         width: 110,
+        pinned: "left",
         valueFormatter: (p) => slotLabel(String(p.value ?? "")),
         cellStyle: (p) => ({
           fontWeight: 700,
           color: p.value === "a" ? "#1c7ed6" : "#e8590c",
         }),
       },
-      { headerName: "티커", field: "ticker", width: 96 },
-      {
-        headerName: "종목명",
-        field: "name",
-        flex: 1,
-        minWidth: STOCK_NAME_COLUMN_MIN_WIDTH,
-        cellRenderer: (p: { value?: string | null }) => renderStockNameCell(p.value),
-      },
+      // 티커·종목명 — 공용 컬럼. 과거 체결이라 배지 없이 기본 표기.
+      tickerColumn<MixTradeRow>({ width: 96 }),
+      stockNameColumn<MixTradeRow>({}),
       { headerName: "편입일", field: "entry_date", width: 116 },
       {
         headerName: "매수가",
@@ -1099,75 +1230,28 @@ export function StrategyMixClient() {
       { headerName: "보유일", field: "days", width: 84, type: "numericColumn" },
       { headerName: "사유", field: "reason", width: 110 },
     ],
-    [],
+    [formatPrice, sleeves],
   );
 
-  const periodColumns = useMemo<ColDef<PeriodRow>[]>(() => {
-    /** 수익률 컬럼 — 값을 꺼내는 방법만 다르고 표시는 같다(슬리브 값은 slots 안에 있다). */
-    const pctColumn = (
-      colId: string,
-      headerName: string,
-      getValue: (row: PeriodRow) => number | null,
-      suffix = "%",
-      headerTooltip?: string,
-    ): ColDef<PeriodRow> => ({
-      colId,
-      valueGetter: (p) => (p.data ? getValue(p.data) : null),
-      headerName,
-      headerTooltip,
+  // 합성만의 기간 표 열 — 각 슬리브를 혼자 굴렸을 때(합성이 단독보다 나은지 같은 줄에서 비교).
+  // 합성 곡선은 각 슬리브를 단독 운용한 수익률의 단순 평균과 일치하지 않는다.
+  const periodMiddleColumns = useCallback((): ColDef<PeriodRow>[] => {
+    const slotColumn = (slot: string): ColDef<PeriodRow> => ({
+      colId: `slot_${slot}`,
+      headerName: slotLabel(slot),
+      headerTooltip: `${slotLabel(slot)} 슬리브만 혼자 굴렸을 때 — 그 전략 화면의 백테스트와 같은 값.`,
+      valueGetter: (p) => p.data?.slots?.[slot] ?? null,
       flex: 1,
       minWidth: 108,
       type: "numericColumn",
-      valueFormatter: (p) =>
-        p.value == null
-          ? "-"
-          : `${(p.value as number) >= 0 ? "+" : ""}${(p.value as number).toFixed(2)}${suffix}`,
-      cellStyle: (p) => ({
-        color: signColor(p.value as number),
-        fontWeight: 600,
-      }),
+      valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
+      cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
     });
     return [
-      {
-        field: "period",
-        headerName:
-          viewMode === "yearly"
-            ? "연도"
-            : viewMode === "monthly"
-              ? "월"
-              : viewMode === "weekly"
-                ? "주"
-                : "일자",
-        width: 148,
-        valueFormatter: (p) =>
-          viewMode === "weekly" || viewMode === "daily"
-            ? formatDateWithWeekday(String(p.value ?? ""))
-            : String(p.value ?? ""),
-        cellStyle: { fontWeight: 700 },
-      },
-      pctColumn(
-        "strategy_pct",
-        "전략통합",
-        (row) => row.strategy_pct,
-        "%",
-        "슬리브들을 한 계좌에서 함께 굴린 결과 — 매월 첫 거래일에 배분을 되돌린다(현금 우선 이관).",
-      ),
-      // 각 전략을 혼자 굴렸을 때 — 합성이 단독보다 나은지 같은 줄에서 비교한다.
-      // 이관이 없는 곡선이라 전략통합은 슬리브 값들의 단순 평균과 일치하지 않는다.
-      ...slotKeys.map((slot) =>
-        pctColumn(
-          `slot_${slot}`,
-          slotLabel(slot),
-          (row) => row.slots?.[slot] ?? null,
-          "%",
-          `${slotLabel(slot)} 슬리브만 혼자 굴렸을 때 — 그 전략 화면의 백테스트와 같은 값.`,
-        ),
-      ),
-      pctColumn("benchmark_pct", view?.benchmark_name ?? "벤치마크", (row) => row.benchmark_pct, "%", "계좌의 벤치마크."),
-      pctColumn("excess_pp", "초과", (row) => row.excess_pp, "%p", "전략통합 − 벤치마크."),
+      ...slotKeys.map(slotColumn),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
-  }, [viewMode, view?.benchmark_name, slotKeys, sleeves]);
+  }, [slotKeys, sleeves]);
 
   // 요약 바에 쓰는 계좌 표기 — 셀렉터와 같은 형식.
   const accountLabel = useMemo(() => {
@@ -1180,6 +1264,8 @@ export function StrategyMixClient() {
   const actions = positions?.actions ?? null;
 
   // 헤더 설정 — 합성 배분(%) 3칸과 슬랙 알람을 한 버튼으로 저장한다(계좌 설정에 보관).
+  const [harvestPct, setHarvestPct] = useState("");
+  const [refillPct, setRefillPct] = useState("");
   const [slackEnabled, setSlackEnabled] = useState(false);
   // 슬리브 초안 — 저장된 배열 그대로 편집한다. 순서가 곧 슬롯(A·B·C)이라 인덱스로 고친다.
   const [draftSleeves, setDraftSleeves] = useState<MixSleeve[]>([]);
@@ -1187,10 +1273,12 @@ export function StrategyMixClient() {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [slackTesting, setSlackTesting] = useState(false);
   // 슬롯 개수 제한 — 백엔드 상수가 단일 소스(응답으로 받는다).
-  const minSleeves = meta?.min_sleeves ?? 2;
+  const minSleeves = meta?.min_sleeves ?? 1;
   const maxSleeves = meta?.max_sleeves ?? SLOT_KEY_ORDER.length;
   useEffect(() => {
     setSlackEnabled(Boolean(selectedAccount?.mix_slack_enabled));
+    setHarvestPct(String(selectedAccount?.mix_harvest_pct ?? ""));
+    setRefillPct(String(selectedAccount?.mix_refill_pct ?? ""));
     setDraftSleeves(sleeves.map((row) => ({ ...row })));
     setCashPct(selectedAccount ? String(selectedAccount.mix_cash_pct) : "0");
   }, [selectedAccount, sleeves]);
@@ -1220,6 +1308,29 @@ export function StrategyMixClient() {
   const strategyLabelOf = (value: string) =>
     meta?.strategy_options.find((option) => option.value === value)?.label ?? value;
 
+  /** 슬리브 오른쪽의 읽기 전용 설정 — 그 전략 화면에 저장된 값을 그대로 보여준다. */
+  const settingsOf = (strategy: string, pool: string) => {
+    // 행은 `display: contents` 라 칸 수가 맞아야 한다 — 아직 안 고른 슬리브도 빈 칸을 채운다.
+    // null 을 돌려주면 그 칸이 비어 다음 행이 통째로 밀린다.
+    if (!strategy || !pool) return <span className="mixSleeveSettings" />;
+    const summaries = meta?.settings_summaries ?? {};
+    // 전략 전체를 못 읽은 경우는 `전략:*` 로 들어온다.
+    const items = summaries[`${strategy}:${pool}`] ?? summaries[`${strategy}:*`];
+    if (!items?.length) {
+      return <span className="mixSleeveSettings mixSleeveSettingsError">저장된 설정 없음</span>;
+    }
+    const failed = items.some((item) => item.label.includes("오류"));
+    return (
+      <span className={`mixSleeveSettings${failed ? " mixSleeveSettingsError" : ""}`}>
+        {items.map((item) => (
+          <span key={item.label} className="mixSleeveSettingItem">
+            {item.label} <b>{item.value}</b>
+          </span>
+        ))}
+      </span>
+    );
+  };
+
   // 합계 — 100 이 아니면 저장을 막는다. 모자란 만큼을 현금으로 채우면 사용자가 의도한
   // 배분이 조용히 바뀌므로 보정하지 않고 그대로 알린다.
   const weightSum = useMemo(() => {
@@ -1235,6 +1346,8 @@ export function StrategyMixClient() {
       (!selectedAccount.sleeves?.length ||
         slackEnabled !== Boolean(selectedAccount.mix_slack_enabled) ||
         Number(cashPct) !== selectedAccount.mix_cash_pct ||
+        Number(harvestPct) !== selectedAccount.mix_harvest_pct ||
+        Number(refillPct) !== selectedAccount.mix_refill_pct ||
         draftSleeves.length !== sleeves.length ||
         draftSleeves.some((row, index) => {
           const saved = sleeves[index];
@@ -1251,6 +1364,10 @@ export function StrategyMixClient() {
 
   const saveHeaderSettings = async () => {
     if (!selectedAccount || !weightOk) return;
+    if ([harvestPct, refillPct].some((value) => !value.trim() || !Number.isFinite(Number(value))) || Number(harvestPct) < 0 || Number(refillPct) < 0 || Number(refillPct) > 100) {
+      toast.error("회수 기준은 0% 이상, 채우기 기준은 0~100%로 입력하세요.");
+      return;
+    }
     try {
       setSettingsSaving(true);
       const resp = await fetch("/api/account-settings", {
@@ -1260,6 +1377,8 @@ export function StrategyMixClient() {
           account_id: selectedAccount.account_id,
           values: {
             mix_slack_enabled: slackEnabled,
+            mix_harvest_pct: Number(harvestPct),
+            mix_refill_pct: Number(refillPct),
             // 순서가 곧 슬롯이라 키는 보내지 않는다 — 서버가 순서대로 다시 붙인다.
             mix_sleeves: draftSleeves.map((row) => ({
               strategy: row.strategy,
@@ -1280,6 +1399,8 @@ export function StrategyMixClient() {
             ? {
                 ...option,
                 mix_slack_enabled: slackEnabled,
+            mix_harvest_pct: Number(harvestPct),
+            mix_refill_pct: Number(refillPct),
                 // 라벨도 즉시 반영 — 이름을 지우면 전략 이름으로 돌아간다.
                 sleeves: draftSleeves.map((row) => ({
                   ...row,
@@ -1324,14 +1445,15 @@ export function StrategyMixClient() {
   // 오늘의 액션 — 조립은 서버(`_build_action_groups`)가 한다. 슬랙 알람과 같은 결과를
   // 쓰기 위한 단일 소스라, 화면은 받은 그대로 그리기만 한다.
   const actionGroups = actions?.groups ?? [];
-  const nextWeekPreview = actions?.next_week_preview ?? null;
-
-  const hasActions =
-    actionGroups.length > 0 || Boolean(actions?.sleeve_rebalance_today);
+  // 오늘의 액션 = 실행일이 그 시장의 현지 오늘(개장 전 시가 체결·장중 지금 주문),
+  // 내일의 액션 = 다음 거래일(연휴면 실제로는 며칠 뒤 — 세부 날짜는 그룹 제목에).
+  const todayActionGroups = actionGroups.filter((group) => group.section === "today");
+  const laterActionGroups = actionGroups.filter((group) => group.section !== "today");
 
   return (
     <PageFrame title="합성 전략" fullWidth>
       <div className="appPageStack">
+        <RealtimeMissingNotice tickers={quoteMissing} />
         <section className="appSection">
           <div className="card appCard">
             <div className="card-body appCardBodyTight">
@@ -1364,29 +1486,30 @@ export function StrategyMixClient() {
                   </label>
                   {selectedAccount ? (
                     <>
-                      {/* 슬리브 배분(%)은 아래 슬리브 영역의 각 줄에 있다 — 여기는 현금만. */}
+
+                      {/* 기준금액은 입력하지 않는다 — 계좌 평가액에서 자동으로 정해진다. */}
                       <label className="appLabeledField" style={{ marginBottom: 0 }}>
-                        <span className="appLabeledFieldLabel">현금</span>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                          <input
-                            className="form-control form-control-sm"
-                            style={{ width: 72, textAlign: "right" }}
-                            type="number"
-                            min={0}
-                            max={100}
-                            step={1}
-                            value={cashPct}
-                            disabled={settingsSaving}
-                            onChange={(event) => setCashPct(event.target.value)}
-                            title="어느 슬리브에도 주지 않고 늘 비워 두는 몫(%). 빈 슬롯에서 생기는 현금은 여기에 더해진다."
-                          />
-                          <span style={hintStyle}>%</span>
+                        <span className="appLabeledFieldLabel">계좌 평가액 (자동)</span>
+                        <span
+                          style={{ ...hintStyle, display: "inline-block", minWidth: 120 }}
+                          title="현금 포함 계좌 평가액이 운용 기준금액이다. IS 고정 자산을 뺀 나머지를 슬리브 비중대로 배정한다."
+                        >
+                          {positions ? `${formatAmount(positions.capital_krw)}원` : "-"}
                         </span>
                       </label>
-                      <span style={{ ...hintStyle, color: weightOk ? "var(--text-muted)" : "#d62828", fontWeight: weightOk ? 400 : 700 }}>
-                        합계 {weightSum === null ? "-" : `${weightSum}%`}
-                        {weightOk ? " ✓" : " (100% 필요)"}
-                      </span>
+                      {[
+                        { label: "+ 회수 기준 (%)", value: harvestPct, set: setHarvestPct, max: undefined, hint: "종목 기준금액 대비 초과율에 도달하면 기준금액까지 매도" },
+                        { label: "− 채우기 기준 (%)", value: refillPct, set: setRefillPct, max: 100, hint: "부족률에 도달하면 기준금액까지 매수. 100%는 미보유를 포함해 채우기 끔" },
+                      ].map((field) => (
+                        <label key={field.label} className="appLabeledField" style={{ marginBottom: 0 }}>
+                          <span className="appLabeledFieldLabel">{field.label}</span>
+                          <input className="form-control form-control-sm" type="number" min="0" max={field.max}
+                            step="any" style={{ width: field.max === 100 ? 150 : 180 }} value={field.value}
+                            onChange={(event) => field.set(event.target.value)} disabled={settingsSaving} title={field.hint}
+                            placeholder="설정 필요" />
+                        </label>
+                      ))}
+                      {/* 배분(%)은 전부 아래 슬리브 표에 있다 — 현금도 같은 줄 형태로 둔다. */}
                       <label className="appLabeledField" style={{ marginBottom: 0 }}>
                         <span className="appLabeledFieldLabel">슬랙 알람</span>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
@@ -1424,7 +1547,7 @@ export function StrategyMixClient() {
                       className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                       disabled={settingsSaving || !weightOk || !settingsDirty}
                       onClick={() => void saveHeaderSettings()}
-                      title={weightOk ? "배분과 슬랙 알람을 함께 저장한다." : "배분 합계가 100%가 아니면 저장할 수 없다."}
+                      title={weightOk ? "배분·슬랙 알람을 함께 저장한다." : "배분 합계가 100%가 아니면 저장할 수 없다."}
                     >
                       <IconCheck size={16} />
                       <span>{settingsSaving ? "저장 중…" : "저장"}</span>
@@ -1436,6 +1559,37 @@ export function StrategyMixClient() {
                   "이 조합에 몇 %" 가 한눈에 읽힌다(헤더에 늘어놓으면 짝이 안 보인다). */}
               {selectedAccount ? (
                 <div className="mixSleeveRows">
+                  {/* 현금 — 슬리브가 아니라 '비워 두는 몫' 이지만, 배분을 한눈에 맞추려면
+                      같은 열에 있어야 한다. 앞쪽 세 칸(전략·종목풀·이름)은 비운다. */}
+                  <div className="mixSleeveRow">
+                    <span className="mixSleeveMark">현금</span>
+                    <span />
+                    <span />
+                    <span />
+                    <span className="mixSleeveWeight">
+                      <input
+                        className="form-control form-control-sm"
+                        style={{ width: 72, textAlign: "right" }}
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.1}
+                        value={cashPct}
+                        disabled={settingsSaving}
+                        title="어느 슬리브에도 주지 않고 늘 비워 두는 몫(%). 빈 슬롯에서 생기는 현금은 여기에 더해진다."
+                        onChange={(event) => setCashPct(event.target.value)}
+                      />
+                      <span style={hintStyle}>%</span>
+                    </span>
+                    <span />
+                    <span
+                      className="mixSleeveSettings"
+                      style={{ color: weightOk ? undefined : "#d62828", fontWeight: weightOk ? 400 : 700 }}
+                    >
+                      합계 {weightSum === null ? "-" : `${weightSum}%`}
+                      {weightOk ? " ✓" : " (100% 필요)"}
+                    </span>
+                  </div>
                   {draftSleeves.map((sleeve, index) => {
                     const { strategy, pool, name } = sleeve;
                     // 계좌와 국가가 같은 풀만 — 거래 달력·통화가 갈리면 합성이 성립하지 않는다.
@@ -1493,7 +1647,7 @@ export function StrategyMixClient() {
                             type="number"
                             min={0}
                             max={100}
-                            step={1}
+                            step={0.1}
                             value={String(sleeve.weight_pct)}
                             disabled={settingsSaving}
                             title={`${sleeve.key.toUpperCase()} 슬리브에 배분할 몫(%).`}
@@ -1516,11 +1670,15 @@ export function StrategyMixClient() {
                         >
                           −
                         </button>
+                        {/* 그 전략 화면에 저장된 설정 — 읽기 전용. 여기서 고치지 않는다.
+                            합성은 각 전략의 저장 설정을 그대로 돌리므로, 무엇으로 도는지
+                            이 화면에서 바로 보여야 한다. */}
+                        {settingsOf(strategy, pool)}
                       </div>
                     );
                   })}
                   {draftSleeves.length < maxSleeves ? (
-                    <div className="mixSleeveRow">
+                    <div className="mixSleeveRow mixSleeveAddRow">
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-dark"
@@ -1577,8 +1735,8 @@ export function StrategyMixClient() {
                     }}
                   >
                     <span style={{ fontSize: "var(--fs-lg)", fontWeight: 800 }}>
-                      목표 주식 {positions.summary.stock_pct.toFixed(1)}% · 현금{" "}
-                      {positions.summary.cash_pct.toFixed(1)}%
+                      기준금액 대비 목표 주식 {positions.summary.actual_stock_pct.toFixed(1)}% · 현금{" "}
+                      {positions.summary.actual_cash_pct.toFixed(1)}%
                       {positions.account && totalAsset
                         ? // 고정 자산(IS)도 주식으로 센다 — 목표 주식%에 그 몫이 들어 있어
                           // 빼면 목표와 현재가 짝이 안 맞는다.
@@ -1588,6 +1746,11 @@ export function StrategyMixClient() {
                             100
                           ).toFixed(1)}% · ${((positions.account.cash_balance / totalAsset) * 100).toFixed(1)}%)`
                         : ""}
+                    </span>
+                    {/* 백테스트가 정한 목표 — 단주로 못 채운 만큼 위의 '실제목표'와 벌어진다. */}
+                    <span style={{ ...hintStyle }}>
+                      기준금액 배정은 주식 {positions.summary.stock_pct.toFixed(1)}% · 현금{" "}
+                      {positions.summary.cash_pct.toFixed(1)}% — 차이는 1주 값을 못 채워 남는 몫입니다
                     </span>
                     {/* 적용 계좌 — 목표 금액의 기준이 되는 실제 잔고. */}
                     {positions.account ? (
@@ -1623,32 +1786,6 @@ export function StrategyMixClient() {
                         .filter(Boolean)
                         .join(" · ")}
                     </span>
-                    {/* 미체결 교체 안내 — 교체가 있는 슬리브마다 한 줄. 계좌에 여럿일 수 있다. */}
-                    {slotKeys.map((slot) => {
-                      const rebalance = actions?.slots?.[slot]?.rebalance;
-                      if (!rebalance || rebalance.is_filled || !rebalance.fill_date) return null;
-                      return (
-                        <span key={slot} style={hintStyle}>
-                          {slotLabel(slot)} {rebalance.portfolio_week} 포트폴리오 · 체결{" "}
-                          {rebalance.fill_date} (판정 {rebalance.signal_date})
-                        </span>
-                      );
-                    })}
-                    {actions?.sleeve_rebalance_today ? (
-                      <span
-                        style={{
-                          fontSize: "var(--fs-sm)",
-                          fontWeight: 700,
-                          color: "#d9480f",
-                          background: "rgba(247, 103, 7, 0.12)",
-                          padding: "4px 10px",
-                          borderRadius: 999,
-                        }}
-                      >
-                        오늘은 매월 첫 거래일 — 슬리브 배분 복구는 현금으로 이관
-                        (주식 매도 지시는 현금이 모자랄 때만 나옵니다)
-                      </span>
-                    ) : null}
                   </div>
 
                   {/* ② 보유 목록 — 현금까지 한 표로, 비중 합 100%. */}
@@ -1688,17 +1825,27 @@ export function StrategyMixClient() {
                     columnDefs={positionColumns}
                     theme={gridTheme}
                     minHeight="auto"
-                    getRowId={(p) => p.data.ticker}
+                    getRowId={(p) => p.data.row_key ?? p.data.ticker}
                     // 아직 체결 전인 행(진입 예정)과 곧 나갈 행(매도 예정)은 확정 보유와
                     // 구분되게 회색으로 눌러 둔다 — 추세 이탈 행과 같은 공용 클래스.
                     getRowClass={(params) => {
+                      // 합계·슬리브 그룹 행 — 자산 화면 그룹 구분선과 같은 공용 클래스.
+                      if (params.data?.is_total || params.data?.is_group) return "assetsGroupRow";
                       // 고정 자산은 사고팔 수 없는 줄이라 전체를 노랗게 구분한다.
                       if (params.data?.is_fixed_asset) return FIXED_ASSET_ROW_CLASS;
-                      if (params.data?.is_sell_all) return "appTrendBrokenRow";
+                      const held = Number(params.data?.held_quantity ?? 0) > 0;
+                      if (params.data?.is_sell_all) return stockRowClass({ held, trendBroken: true });
                       const status = slotKeys
                         .map((slot) => params.data?.slots?.[slot]?.status ?? "")
                         .join(" ");
-                      return status.includes("예정") ? "appTrendBrokenRow" : "";
+                      // 들어오는 줄과 빠지는 줄을 색으로 가른다 — 회색은 「빠짐」으로 읽힌다.
+                      if (status.includes("진입 예정")) return `${stockRowClass({ held })} momentumPendingRow`.trim();
+                      if (status.includes("예정")) return stockRowClass({ held, trendBroken: true });
+                      // 추세 이탈 — 전 화면 공통 표시(행 전체 회색, ❗ 배지 대체). 현금 행은 종목이 아니라 제외.
+                      if (!params.data?.is_cash && isTrendBroken(params.data?.current_short_pct, params.data?.current_long_pct)) {
+                        return stockRowClass({ held, trendBroken: true });
+                      }
+                      return stockRowClass({ held });
                     }}
                     gridOptions={{
                       domLayout: "autoHeight",
@@ -1707,211 +1854,40 @@ export function StrategyMixClient() {
                   />
                   )}
 
-                  {/* ③ 배분 — 합계 · 모멘텀 · 신고가 세 줄. 각 줄에 배정 금액과 주식·현금. */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {(() => {
-                      const amount = (pct: number) => (totalAsset == null ? null : (totalAsset * pct) / 100);
-                      // 슬리브 몫은 월초 배분에서 각자 흘러간 비율(alloc_pct)이다.
-                      // 그 안에서 채운 슬롯이 주식·빈 슬롯이 현금이다.
-                      const rows = slotKeys.flatMap((slot) => {
-                        const summary = positions.summary.slots[slot];
-                        if (!summary) return [];
-                        return [
-                          {
-                            key: slot,
-                            label: slotLabel(slot),
-                            allocPct: summary.alloc_pct,
-                            stockPct: summary.alloc_pct - summary.cash_pct,
-                            cashPct: summary.cash_pct,
-                            slots: `${summary.slots_used}/${summary.top_n}`,
-                          },
-                        ];
-                      });
-                      return rows.map((row) => (
-                        <div key={row.key} style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                          <strong style={{ minWidth: 52 }}>{row.label}</strong>
-                          <span style={hintStyle}>
-                            {totalAsset != null ? `${formatAmount(amount(row.allocPct))} · ` : ""}
-                            주식 {row.stockPct.toFixed(1)}%
-                            {totalAsset != null ? ` ${formatAmount(amount(row.stockPct))}` : ""} · 현금{" "}
-                            {row.cashPct.toFixed(1)}%
-                            {totalAsset != null ? ` ${formatAmount(amount(row.cashPct))}` : ""} · 슬롯 {row.slots}
-                          </span>
-                        </div>
-                      ));
-                    })()}
-                  </div>
+                  {/* (예전 ③ 슬리브별 배분 요약 줄은 제거 — 같은 정보가 보유 표의
+                      슬리브 그룹 헤더 행(금액·몫·슬롯·슬리브 현금)에 들어갔다.) */}
 
-                  {/* ④ 오늘의 액션 — 체결 시점별 묶음, 각 묶음은 매도 → 매수 순서. */}
+                  {/* ④ 오늘의 액션 — 실행일이 그 시장의 현지 오늘인 묶음(보유 표와 같은 종목 순서). */}
                   <div>
                     <div style={{ fontWeight: 700, marginBottom: 6 }}>
                       오늘의 액션
                       <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
-                        목표 비중과 슬롯 크기의 {actions?.band?.ratio_pct ?? "-"}%(최소{" "}
-                        {actions?.band?.min_pct ?? "-"}%p) 이상 차이만 지시로 표시 — 가격
-                        변동(드리프트)으로는 지시가 없고, 큰 단위 입출금·교체·진입·이탈·월초 이관 때
-                        나옵니다 · 모멘텀 교체 확정분은 교체일 그룹
+                        계좌 평가액 기준 목표와 실제 보유를 비교한 매매 지시 —
+                        회수·채우기 조건 적용 · 채우기 100%는 매수 안내 끔
                       </span>
                     </div>
-                    {!hasActions ? (
+                    {todayActionGroups.length === 0 ? (
                       <div style={hintStyle}>
                         오늘은 할 일이 없습니다 — 보유 목록을 그대로 유지하세요.
                       </div>
                     ) : (
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 10,
-                        }}
-                      >
-                        {actionGroups.map((group, groupIndex) => (
-                          <div key={group.key}>
-                            <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                              {groupIndex + 1}. {group.title}
-                              <span
-                                style={{
-                                  ...hintStyle,
-                                  marginLeft: 8,
-                                  fontWeight: 500,
-                                }}
-                              >
-                                매도{" "}
-                                {
-                                  group.items.filter(
-                                    (item) => item.side === "sell",
-                                  ).length
-                                }
-                                건 · 매수{" "}
-                                {
-                                  group.items.filter(
-                                    (item) => item.side === "buy",
-                                  ).length
-                                }
-                                건
-                              </span>
-                            </div>
-                            <ul
-                              style={{
-                                margin: 0,
-                                paddingLeft: 18,
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: 4,
-                              }}
-                            >
-                              {group.items.map((item) => (
-                                <li key={item.key}>
-                                  <strong
-                                    style={{
-                                      color:
-                                        item.side === "sell"
-                                          ? "var(--down-color, #2f6fd0)"
-                                          : "var(--up-color, #d64545)",
-                                    }}
-                                  >
-                                    {item.title}
-                                  </strong>{" "}
-                                  — {item.text}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        ))}
-                        {/* 월초 슬리브 리밸런싱 안내문은 제거했다 — 실제 할 일은 위 지시 목록에
-                            이미 나오는데 "다시 맞추세요" 명령문이 별도 수동 작업처럼 읽혔다. */}
-                      </div>
+                      <ActionGroupList groups={todayActionGroups} />
                     )}
+                    {/* 월초 슬리브 리밸런싱 안내문은 제거했다 — 실제 할 일은 위 지시 목록에
+                        이미 나오는데 "다시 맞추세요" 명령문이 별도 수동 작업처럼 읽혔다. */}
                   </div>
 
-                  {/* ⑤ 다음주 교체 가정 — 지금 순위 그대로 확정될 때의 예상 (주기적 교체가 있는 슬리브만).
-                      기본 접힘 — 금요일쯤 궁금할 때 열어 보는 참고 정보라 평소에는 줄만 차지한다. */}
-                  {nextWeekPreview ? (
+                  {/* ⑤ 내일의 액션 — 다음 거래일 주문. 장중에는 잠정 판정이라 마감까지 바뀔 수
+                      있고, 슬랙 알림은 실행일이 오늘이 되는 아침에 발송된다. */}
+                  {laterActionGroups.length > 0 ? (
                     <div>
-                      <button
-                        type="button"
-                        onClick={() => setNextWeekOpen((value) => !value)}
-                        style={{
-                          fontWeight: 700,
-                          margin: 0,
-                          padding: 0,
-                          background: "none",
-                          border: "none",
-                          cursor: "pointer",
-                          color: "inherit",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                        }}
-                      >
-                        <span>{nextWeekOpen ? "▾" : "▸"}</span>
-                        다음주 교체 가정
-                        <span style={{ ...hintStyle, fontWeight: 500 }}>
-                          매도{" "}
-                          {nextWeekPreview.groups.reduce(
-                            (n, g) =>
-                              n + g.items.filter((i) => i.side === "sell").length,
-                            0,
-                          )}
-                          건 · 매수{" "}
-                          {nextWeekPreview.groups.reduce(
-                            (n, g) =>
-                              n + g.items.filter((i) => i.side === "buy").length,
-                            0,
-                          )}
-                          건 (예상)
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                        내일의 액션
+                        <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
+                          다음 거래일 주문 — 장중에는 잠정 판정이라 마감까지 바뀔 수 있습니다 · 슬랙 알림은 실행일 아침에 발송
                         </span>
-                      </button>
-                      {nextWeekOpen ? (
-                        <div style={{ marginTop: 6 }}>
-                          <div style={{ ...hintStyle, marginBottom: 6 }}>
-                            지금 순위가 그대로 다음주 교체로 확정된다고 가정하고,
-                            오늘의 액션과 같은 방식으로 조립한 월요일 예상입니다 —
-                            종목 교체가 없으면 오늘의 액션과 똑같습니다. 판정은
-                            이번주 마지막 거래일 종가로 확정되므로 그때까지 바뀔 수
-                            있고, 수량은 현재가·현재 총자산 기준 추정치입니다.
-                          </div>
-                          {nextWeekPreview.groups.length === 0 ? (
-                            <div style={hintStyle}>
-                              예상되는 매매가 없습니다 — 보유 목록이 그대로
-                              유지됩니다.
-                            </div>
-                          ) : (
-                            nextWeekPreview.groups.map((group) => (
-                              <div key={`nw-${group.key}`}>
-                                <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                                  {group.title} (예상)
-                                </div>
-                                <ul
-                                  style={{
-                                    margin: 0,
-                                    paddingLeft: 18,
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: 4,
-                                  }}
-                                >
-                                  {group.items.map((item) => (
-                                    <li key={`nw-${item.key}`}>
-                                      <strong
-                                        style={{
-                                          color:
-                                            item.side === "sell"
-                                              ? "var(--down-color, #2f6fd0)"
-                                              : "var(--up-color, #d64545)",
-                                        }}
-                                      >
-                                        {item.title}
-                                      </strong>{" "}
-                                      — {item.text}
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      ) : null}
+                      </div>
+                      <ActionGroupList groups={laterActionGroups} />
                     </div>
                   ) : null}
                 </div>
@@ -1959,6 +1935,8 @@ export function StrategyMixClient() {
                       totalPct: view.strategy_total_pct,
                       cagrPct: view.strategy_cagr_pct,
                       mddPct: view.strategy_mdd_pct,
+                      mddFrom: view.strategy_mdd_from,
+                      mddTo: view.strategy_mdd_to,
                       sortino: view.strategy_sortino,
                     }}
                     benchmark={{
@@ -1968,44 +1946,39 @@ export function StrategyMixClient() {
                       totalPct: view.benchmark_total_pct,
                       cagrPct: view.benchmark_cagr_pct,
                       mddPct: view.benchmark_mdd_pct,
+                      mddFrom: view.benchmark_mdd_from,
+                      mddTo: view.benchmark_mdd_to,
                       sortino: view.benchmark_sortino,
                     }}
                   />
                   <BacktestTradeStats stats={view} style={{ marginBottom: 12 }} />
-                  <NavTabs
-                    items={VIEW_MODES}
-                    value={viewMode}
-                    onChange={setViewMode}
-                    label="합성 백테스트 보기 단위"
-                    style={{ marginBottom: 10 }}
+                  <BacktestPeriodTables
+                    daily={view.daily}
+                    strategyLabel="합성"
+                    strategyTooltip="슬리브들을 한 계좌에서 함께 굴린 기간 수익률."
+                    benchmarkLabel={view.benchmark_name}
+                    benchmarkTooltip="계좌의 벤치마크."
+                    defaultView="monthly"
+                    middleColumns={periodMiddleColumns}
+                    extraTab={{
+                      label: "체결",
+                      content: (
+                        <AppAgGrid<MixTradeRow>
+                          rowData={view.trades}
+                          columnDefs={tradeColumns}
+                          theme={gridTheme}
+                          minHeight="auto"
+                          gridOptions={{
+                            domLayout: "autoHeight",
+                            suppressMovableColumns: true,
+                          }}
+                          getRowClass={(p) =>
+                            p.data?.exit_date ? "" : "momentumPendingRow"
+                          }
+                        />
+                      ),
+                    }}
                   />
-                  {viewMode === "trades" ? (
-                    <AppAgGrid<MixTradeRow>
-                      rowData={view.trades}
-                      columnDefs={tradeColumns}
-                      theme={gridTheme}
-                      minHeight="auto"
-                      gridOptions={{
-                        domLayout: "autoHeight",
-                        suppressMovableColumns: true,
-                      }}
-                      getRowClass={(p) =>
-                        p.data?.exit_date ? "" : "momentumPendingRow"
-                      }
-                    />
-                  ) : (
-                    <AppAgGrid<PeriodRow>
-                      rowData={periodRows}
-                      columnDefs={periodColumns}
-                      theme={gridTheme}
-                      minHeight="auto"
-                      getRowId={(p) => p.data.period}
-                      gridOptions={{
-                        domLayout: "autoHeight",
-                        suppressMovableColumns: true,
-                      }}
-                    />
-                  )}
                 </>
               ) : (
                 <div

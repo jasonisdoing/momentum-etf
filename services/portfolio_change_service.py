@@ -17,15 +17,17 @@ import pandas as pd
 from config import CACHE_TTL_COMPUTE
 from services.component_price_service import enrich_component_prices
 from services.price_service import get_exchange_rate_series, get_exchange_rates
-from services.stock_cache_service import get_stock_cache_meta, refresh_stock_portfolio_change_cache
-from utils.data_loader import fetch_naver_etf_inav_snapshot
-from utils.stock_cache_meta_io import get_previous_stock_cache_meta
+from services.stock_cache_service import (
+    get_stock_cache_meta,
+    refresh_stock_portfolio_change_cache,
+    stock_holdings_revision,
+)
 
 logger = logging.getLogger(__name__)
 
 _HOLDINGS_PRICE_FETCH_LIMIT = 100
 _TTL_SECONDS = CACHE_TTL_COMPUTE
-_PORTFOLIO_CHANGE_CALC_VERSION = 4  # 합계 계산을 base_date 누적(cumulative_change_pct)로 전환
+_PORTFOLIO_CHANGE_CALC_VERSION = 6  # 기준일을 마지막 확정 국내 종가일로 전환 + 누적 환율 동봉
 
 _PORTFOLIO_CHANGE_CACHE: dict[str, dict[str, Any]] = {}
 _PORTFOLIO_CHANGE_LOCK = threading.Lock()
@@ -99,13 +101,10 @@ def _is_persisted_cache_alive(cache_doc: dict[str, Any], now: datetime) -> bool:
 def _is_portfolio_change_cache_usable(
     cache_data: Any,
     holdings_reference_date: str | None,
-    expected_base_date: str | None = None,
+    holdings_revision: str,
+    expected_base_date: str | None,
 ) -> bool:
-    """계산 실패로 저장된 포트폴리오 변동 캐시는 재계산 대상이다.
-
-    expected_base_date 가 주어지면 캐시의 base_date 와 일치할 때만 재사용한다.
-    (휴장일 캘린더 수정 등으로 base_date 가 변경됐을 때 stale 캐시 회피)
-    """
+    """구성종목 원본·기준일이 같고 계산에 성공한 캐시만 재사용한다."""
     if not isinstance(cache_data, dict):
         return False
     if cache_data.get("calc_version") != _PORTFOLIO_CHANGE_CALC_VERSION:
@@ -116,6 +115,8 @@ def _is_portfolio_change_cache_usable(
     if expected_base_date is not None and cached_base_date != expected_base_date:
         return False
     if cache_data.get("holdings_reference_date") != holdings_reference_date:
+        return False
+    if cache_data.get("holdings_revision") != holdings_revision:
         return False
     if cache_data.get("total_pct") is None:
         return False
@@ -190,16 +191,18 @@ def _is_trading_day_kor(date_str: str) -> bool:
         return True
 
 
-def determine_portfolio_change_base_date(ticker_type: str, ticker: str) -> str | None:
-    """비교 기준일 — 직전 스냅샷의 날짜. 직전값이 없으면 None.
+def determine_portfolio_change_base_date() -> str:
+    """비교 기준일 = 마지막으로 **정규장이 마감된 국내 거래일**(마지막 확정 종가일).
 
-    저장 시점에 이미 거래일로 정해 넣으므로 휴장일 보정이 필요 없다
-    (예전에는 날짜별 히스토리를 최대 7번 거슬러 올라가며 보정했다).
+    이 값이 「어제 종가 이후 구성종목이 얼마나 움직였나」의 앵커다 — 국내 상장 해외 ETF 의
+    다음 세션 가격을 가늠하는 용도라, ETF 가격에 이미 반영된 과거 세션이 섞이면 안 된다.
+    예전에는 직전 메타 스냅샷의 날짜를 썼는데, 배치 주기에 묶여 한두 세션씩 뒤처졌고
+    그 사이 변동(이미 ETF 가격에 반영된 몫)까지 '변동'으로 집계됐다(2026-09).
+    거래일 캘린더로 직접 정한다. 대상 화면이 전부 국내 상장 ETF 라 국내 달력 고정이다.
     """
-    previous = get_previous_stock_cache_meta(ticker_type, ticker)
-    if not previous:
-        return None
-    return str(previous.get("date") or "").strip() or None
+    from utils.market_session import last_closed_session_date
+
+    return last_closed_session_date("kor")
 
 
 def _build_fx_rates_for_currencies(currencies: set[str], rates: dict[str, Any]) -> list[dict[str, Any]]:
@@ -434,30 +437,6 @@ def _calc_realtime_portfolio_change(
     return gross_pct, breakdown, coverage, gross_pct
 
 
-def _resolve_nav_change_pct(ticker_type: str, ticker: str, current_nav: Any) -> float | None:
-    """네이버 현재 iNAV와 메타 히스토리로 공식 iNAV 장중 변동률을 계산한다."""
-    try:
-        nav_value = float(current_nav)
-    except (TypeError, ValueError):
-        return None
-    if nav_value <= 0:
-        return None
-
-    # 비교는 늘 (현재 값 vs 직전 영업일 값) 한 쌍이다 — 조회 1회로 끝난다.
-    previous = get_previous_stock_cache_meta(ticker_type, ticker)
-    if not previous or "meta_cache" not in previous:
-        return None
-
-    try:
-        prev_nav_value = float(previous["meta_cache"].get("nav"))
-    except (TypeError, ValueError):
-        return None
-    if prev_nav_value <= 0:
-        return None
-
-    return ((nav_value / prev_nav_value) - 1.0) * 100.0
-
-
 def compute_portfolio_change_bundle(
     ticker: str,
     ticker_type: str,
@@ -487,25 +466,26 @@ def compute_portfolio_change_bundle(
     if not holdings:
         return None
     holdings_reference_date = str(holdings_cache.get("reference_date") or "").strip() or None
+    holdings_revision = stock_holdings_revision(holdings_cache)
 
     # 캐시 검증 단계에서 base_date 변경 여부를 확인하기 위해 먼저 결정한다.
-    # 휴장일 캘린더 수정 등으로 base_date 가 바뀐 경우 stale 캐시를 회피한다.
-    base_date = determine_portfolio_change_base_date(norm_type, norm_ticker)
-    if not base_date:
-        return None
+    # 날짜가 넘어가 base_date 가 바뀌면 stale 캐시를 회피한다.
+    base_date = determine_portfolio_change_base_date()
 
     if use_cache:
         with _PORTFOLIO_CHANGE_LOCK:
             cached = _PORTFOLIO_CHANGE_CACHE.get(key)
             if cached and _is_cache_alive(cached, now):
                 cached_data = cached.get("data")
-                if _is_portfolio_change_cache_usable(cached_data, holdings_reference_date, base_date):
+                if _is_portfolio_change_cache_usable(
+                    cached_data, holdings_reference_date, holdings_revision, base_date
+                ):
                     return cached_data
                 _PORTFOLIO_CHANGE_CACHE.pop(key, None)
 
         persisted = cache_doc.get("portfolio_change_cache")
         if _is_portfolio_change_cache_usable(
-            persisted, holdings_reference_date, base_date
+            persisted, holdings_reference_date, holdings_revision, base_date
         ) and _is_persisted_cache_alive(cache_doc, now):
             with _PORTFOLIO_CHANGE_LOCK:
                 _PORTFOLIO_CHANGE_CACHE[key] = {
@@ -514,17 +494,11 @@ def compute_portfolio_change_bundle(
                 }
             return persisted
 
-    # base_date 가 국내 당일이면 국내 구성종목 baseline 을 '당일 시초가'로 써서 장중 변동을 보여준다.
-    # (미국·호주 등 해외 구성종목은 시차상 base_date 당일 시초가가 없어 종가 baseline 을 유지한다.)
-    today_kst = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
-    use_open_baseline = norm_type.startswith("kor") and base_date == today_kst
-
     priced_holdings, _ = enrich_component_prices(
         holdings,
         price_fetch_limit=_HOLDINGS_PRICE_FETCH_LIMIT,
         cumulative_base_date=base_date,
         component_price_snapshot=component_price_snapshot,
-        use_open_baseline=use_open_baseline,
     )
     rates = get_exchange_rates()
     # 합계 계산은 base_date 이후 누적 변동을 사용하므로 환율도 누적률을 적용한다.
@@ -532,8 +506,6 @@ def compute_portfolio_change_bundle(
     cumulative_fx = build_cumulative_fx_rates(priced_holdings, rates, base_date)
     daily_fx = build_daily_fx_rates(priced_holdings, rates)
     fx_rates_for_calc = cumulative_fx if cumulative_fx else daily_fx
-    inav_snapshot = fetch_naver_etf_inav_snapshot([norm_ticker]).get(norm_ticker, {})
-    nav_change_pct = _resolve_nav_change_pct(norm_type, norm_ticker, inav_snapshot.get("nav"))
     total_pct, breakdown, coverage, gross_portfolio_pct = _calc_realtime_portfolio_change(
         priced_holdings,
         fx_rates_for_calc,
@@ -543,16 +515,18 @@ def compute_portfolio_change_bundle(
 
     result = {
         "calc_version": _PORTFOLIO_CHANGE_CALC_VERSION,
+        # 화면의 포트폴리오 변동 계산이 백엔드와 같은 환율(기준일 이후 누적)을 쓰도록 내려보낸다 —
+        # 일간 환율로 환산하면 종목은 누적인데 환율만 오늘 몫이 되어 내역이 어긋난다(홍콩 +0.87% 사례).
+        "cumulative_fx_rates": fx_rates_for_calc,
         "base_date": base_date,
-        "base_is_open": use_open_baseline,
         "priced_holdings": priced_holdings,
         "fx_rates": fx_rates,
         "total_pct": total_pct,
         "gross_portfolio_pct": gross_portfolio_pct,
-        "inav_change_pct": nav_change_pct,
         "breakdown": breakdown,
         "coverage_weight": coverage,
         "holdings_reference_date": holdings_reference_date,
+        "holdings_revision": holdings_revision,
     }
 
     if use_cache:

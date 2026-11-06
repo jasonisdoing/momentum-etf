@@ -478,24 +478,43 @@ def movable_pools(ticker_type: str) -> list[dict[str, Any]]:
     """그 종목풀에서 종목을 옮길 수 있는 대상 풀 목록.
 
     **같은 국가 + 같은 구분(`pool_kind`)** 만 허용한다. 국가가 다르면 거래 달력·통화가 갈리고,
-    구분이 다르면(개별주 ↔ ETF) 업종 상한 같은 설정의 의미가 달라진다. 자기 자신은 뺀다.
+    구분이 다르면(개별주 ↔ ETF) 종목 메타데이터의 의미가 달라진다. 자기 자신은 뺀다.
     구분이 미설정인 풀은 무엇과도 같다고 볼 수 없어 대상에서 제외한다(추정하지 않는다).
-    """
-    from utils.momentum_service import pool_options
-    from utils.settings_loader import get_ticker_type_settings
 
-    source = get_ticker_type_settings(str(ticker_type or "").strip().lower()) or {}
+    목록은 **전체 종목풀**이다 — 이동은 전략 사용 여부와 무관하다. 예전에는 모멘텀을 켠
+    풀만 주는 `pool_options()` 를 써서, 모멘텀 미사용 풀(us_div_etf 등)로 옮길 수 없었다.
+    """
+    from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
+
+    norm_type = str(ticker_type or "").strip().lower()
+    source = get_ticker_type_settings(norm_type) or {}
     country = str(source.get("country_code") or "").strip().lower()
     kind = str(source.get("pool_kind") or "").strip().lower()
     if not country or not kind:
         return []
-    return [
-        option
-        for option in pool_options()
-        if option["ticker_type"] != str(ticker_type or "").strip().lower()
-        and option.get("country_code") == country
-        and option.get("pool_kind") == kind
-    ]
+    options: list[dict[str, Any]] = []
+    for pool in list_available_ticker_types():
+        if pool == norm_type:
+            continue
+        settings = get_ticker_type_settings(pool) or {}
+        if str(settings.get("country_code") or "").strip().lower() != country:
+            continue
+        if str(settings.get("pool_kind") or "").strip().lower() != kind:
+            continue
+        options.append(
+            {
+                "ticker_type": pool,
+                "name": str(settings.get("name") or "").strip() or pool,
+                "icon": str(settings.get("icon") or "").strip(),
+                "order": settings.get("order"),
+                "country_code": country,
+                "currency": str(settings.get("currency") or "").strip().upper(),
+                "pool_kind": kind,
+            }
+        )
+    # 화면 셀렉트가 종목풀 order 순으로 읽히게 정렬한다. order 미설정은 맨 뒤.
+    options.sort(key=lambda option: option["order"] if isinstance(option["order"], (int, float)) else float("inf"))
+    return options
 
 
 def move_active_stock(from_pool: str, to_pool: str, ticker: str) -> dict[str, Any]:
@@ -555,35 +574,44 @@ def move_active_stock(from_pool: str, to_pool: str, ticker: str) -> dict[str, An
     from utils.cache_utils import move_cached_frame
     from utils.stock_list_io import add_stock
 
-    # 옛 풀에서 먼저 뺀다 — 남겨 두면 '이미 다른 종목풀에 있습니다' 로 막힌다.
+    # **대상에 먼저 담고, 성공한 뒤에 출발 풀에서 뺀다.** 순서가 중요하다 — 예전에는 먼저
+    # 뺐는데, 담기나 되돌리기가 실패하면 종목이 어느 풀에도 없이 사라졌다(2026-08-26 AOA,
+    # 2026-09-05 kor_kr 70종목). 이 순서면 어느 단계에서 실패해도 종목이 없어지지 않고,
+    # 최악이라도 양쪽에 남아 눈에 보인다. `add_stock` 은 **같은 풀**에 있을 때만 막으므로
+    # 출발 풀에 남아 있어도 담기가 걸리지 않는다(다른 풀 중복은 위에서 이미 검사했다).
     # 가격 캐시·배치 계산값은 지우지 않고 새 풀로 옮긴다(같은 시세라 다시 받을 이유가 없다).
-    if not hard_remove_stock(source, ticker_norm):
-        raise RuntimeError(f"'{_pool_label(source)}' 에서 빼지 못했습니다: {ticker_norm}")
+    if not add_stock(target, ticker_norm, name=carried_name, **carried):
+        raise RuntimeError(f"'{_pool_label(target)}' 에 담지 못했습니다: {ticker_norm}")
     try:
-        if not add_stock(target, ticker_norm, name=carried_name, **carried):
-            raise RuntimeError("대상 종목풀에 담지 못했습니다.")
+        if not hard_remove_stock(source, ticker_norm):
+            raise RuntimeError(f"'{_pool_label(source)}' 에서 빼지 못했습니다.")
         move_cached_frame(source, target, ticker_norm)
-        for meta_coll in ("stock_cache_meta", "previous_stock_cache_meta"):
-            # 대상 풀에 남아 있던 옛 계산값은 먼저 지운다 — (ticker_type, ticker) 유일 인덱스가
-            # 걸려 있어 그대로 두면 이동이 중복 키로 실패한다. 옮겨오는 쪽이 실제 종목의 값이다.
-            db[meta_coll].delete_many({"ticker_type": target, "ticker": ticker_norm})
-            db[meta_coll].update_many({"ticker_type": source, "ticker": ticker_norm}, {"$set": {"ticker_type": target}})
+        # 대상 풀에 남아 있던 옛 계산값은 먼저 지운다 — (ticker_type, ticker) 유일 인덱스가
+        # 걸려 있어 그대로 두면 이동이 중복 키로 실패한다. 옮겨오는 쪽이 실제 종목의 값이다.
+        db.stock_cache_meta.delete_many({"ticker_type": target, "ticker": ticker_norm})
+        db.stock_cache_meta.update_many(
+            {"ticker_type": source, "ticker": ticker_norm}, {"$set": {"ticker_type": target}}
+        )
     except Exception as exc:
-        # 새 풀에 담지 못했으면 옛 풀로 되돌린다 — 이미 뺀 뒤라 되돌리지 않으면 종목이 사라진다.
-        # 대상 풀 문서도 이동 전 상태로 돌린다. add_stock 이 성공한 뒤 그 다음 단계에서
-        # 실패하면 종목이 출발·대상 양쪽에 활성으로 남는다(실제로 그렇게 됐다).
-        try:
-            if target_before is None:
-                hard_remove_stock(target, ticker_norm)
-            else:
-                db.stock_meta.replace_one({"_id": target_before["_id"]}, target_before, upsert=True)
-        except Exception as revert_error:
-            get_app_logger().error("[이동] %s 대상 풀 되돌리기 실패: %s", ticker_norm, revert_error)
-        try:
-            restored = add_stock(source, ticker_norm, name=carried_name, **carried)
-        except Exception as restore_error:
-            restored = False
-            get_app_logger().error("[이동] %s 복구 중 오류: %s", ticker_norm, restore_error)
+        # 되돌리기도 **되살리기 먼저, 지우기 나중**이다. 반대로 하면 두 단계 사이에 프로세스가
+        # 죽었을 때 종목이 어느 풀에도 없게 된다 — 이동 순서를 뒤집은 것과 같은 이유다.
+        # 이 순서면 중간에 죽어도 양쪽에 남을 뿐이라 화면에서 보이고 손으로 고칠 수 있다.
+        restored = True
+        if db.stock_meta.find_one({"ticker_type": source, "ticker": ticker_norm, "is_deleted": {"$ne": True}}) is None:
+            try:
+                restored = add_stock(source, ticker_norm, name=carried_name, **carried)
+            except Exception as restore_error:
+                restored = False
+                get_app_logger().error("[이동] %s 복구 중 오류: %s", ticker_norm, restore_error)
+        if restored:
+            # 출발 풀이 확실해진 뒤에야 대상 풀을 이동 전 상태로 돌린다.
+            try:
+                if target_before is None:
+                    hard_remove_stock(target, ticker_norm)
+                else:
+                    db.stock_meta.replace_one({"_id": target_before["_id"]}, target_before, upsert=True)
+            except Exception as revert_error:
+                get_app_logger().error("[이동] %s 대상 풀 되돌리기 실패: %s", ticker_norm, revert_error)
         if not restored:
             # 조용히 넘기면 안 된다 — 종목이 어느 풀에도 없는 상태로 남는다.
             get_app_logger().error(

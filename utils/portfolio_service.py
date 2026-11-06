@@ -1,8 +1,9 @@
 """포트폴리오 전략 — 종목별 목표 비중을 정해 그대로 들고 가는 전략.
 
 모멘텀·신고가와 달리 **종목을 고르지 않는다.** 순위·이평선 판정이 없으므로 교체·이탈·
-손절도 없다. 사용자가 종목풀에서 종목을 골라 비중(%)을 직접 정하고, 정한 주기마다 그
-비중으로 되돌린다. 종목 비중 합의 나머지는 현금이다.
+손절도 없다. 사용자가 종목풀에서 종목을 골라 비중(%)을 직접 정하고, 시작일에 그 비중으로
+산 뒤 그대로 들고 간다(바이앤홀드 — 주기 리밸런싱은 쓰인 적이 없어 2026-09 폐기,
+비중을 다시 맞추려면 시작일을 바꾼다). 종목 비중 합의 나머지는 현금이다.
 
 설정은 MongoDB `system_config.portfolio_settings` 에 **풀별로** 저장한다
 (`{settings_by_pool: {풀: {...}}}`) — 신고가와 같은 구조다. 모멘텀은 이 프로젝트의
@@ -16,10 +17,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
-from config import REBALANCE_BAND_PCT_OPTIONS, REBALANCE_LABELS, REBALANCE_OPTIONS
+from core.strategy.scoring import is_new_listing, listing_months
 from utils.logger import get_app_logger
+from utils.strategy_settings import require_start_date, validate_start_date
 
 logger = get_app_logger()
 
@@ -33,7 +36,7 @@ DEFAULT_BACKTEST_MONTHS = 12
 MAX_HOLDINGS = 30
 
 # 풀을 바꾸면 그 풀의 값으로 전환되는 항목. 여기 빠진 키는 저장을 눌러도 버려진다.
-PER_POOL_SETTING_KEYS = ("weights", "cash_weight_pct", "rebalance", "band_pct")
+PER_POOL_SETTING_KEYS = ("start_date", "weights", "cash_weight_pct")
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     # [{ticker, weight_pct}] — 순서가 화면 표 순서다(사용자가 드래그로 바꾼다).
@@ -42,8 +45,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # 종목합의 나머지로 자동 계산하지 않는다: 자동이면 종목 하나를 줄일 때 그만큼이
     # 조용히 현금으로 흘러가, 사용자가 어디를 조정할지 정할 기회를 잃는다.
     "cash_weight_pct": 100.0,
-    "rebalance": "quarterly",
-    "band_pct": 3.0,
 }
 
 
@@ -58,36 +59,20 @@ def _db():
 
 # ── 종목풀 ─────────────────────────────────────────────────────────────────
 def available_pools() -> list[str]:
-    from utils.settings_loader import list_available_ticker_types
+    """이 전략을 쓰기로 켠 종목풀만(order 순) — 종목풀 설정의 「사용」 토글이 단일 소스다."""
+    from utils.pool_strategy_use import pools_using
 
-    return list_available_ticker_types()
+    return pools_using("portfolio")
 
 
 def pool_options() -> list[dict[str, Any]]:
-    """화면 셀렉트용 종목풀 목록 — 다른 전략 화면과 같은 형태(`formatPoolLabel` 이 쓴다)."""
-    from utils.settings_loader import get_ticker_type_settings
+    """화면 셀렉트용 종목풀 목록 — 이 전략을 켠 종목풀(`formatPoolLabel` 이 쓴다)."""
+    from utils.pool_strategy_use import pool_options as build_pool_options
 
-    options: list[dict[str, Any]] = []
-    for pool in available_pools():
-        try:
-            settings = get_ticker_type_settings(pool) or {}
-        except Exception:
-            continue
-        options.append(
-            {
-                "ticker_type": pool,
-                "name": str(settings.get("name") or pool),
-                "icon": str(settings.get("icon") or ""),
-                "order": settings.get("order"),
-                "country_code": str(settings.get("country_code") or "").strip().lower(),
-                "currency": str(settings.get("currency") or "").strip().upper(),
-                "pool_kind": str(settings.get("pool_kind") or "").strip().lower(),
-            }
-        )
-    return sorted(options, key=lambda item: (item["order"] is None, item["order"]))
+    return build_pool_options(available_pools())
 
 
-def load_universe(pool: str) -> list[dict[str, str]]:
+def load_universe(pool: str) -> list[dict[str, Any]]:
     """그 종목풀에 담긴 종목 — 비중을 매길 수 있는 후보다.
 
     제외 종목(`exclude_from_ranking`)도 후보에 넣는다. 이 전략은 순위를 매기지 않으므로
@@ -95,33 +80,63 @@ def load_universe(pool: str) -> list[dict[str, str]]:
     """
     from utils.stock_list_io import get_etfs
 
-    universe: list[dict[str, str]] = []
+    universe: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in get_etfs(pool) or []:
         ticker = str(item.get("ticker") or "").strip().upper()
         if not ticker or ticker in seen:
             continue
         seen.add(ticker)
-        universe.append({"ticker": ticker, "name": str(item.get("name") or ticker), "pool": pool})
+        universe.append(
+            {"ticker": ticker, "name": str(item.get("name") or ticker), "pool": pool, "bucket": item.get("bucket")}
+        )
     return universe
+
+
+def display_quotes(pool: str, tickers: Sequence[str]) -> dict[str, dict[str, Any]]:
+    """표에 필요한 **최소 집합**만 — `{티커: {name, daily_change_pct}}`.
+
+    합성 표(`utils/mix_sleeve._portfolio_slot_state`)는 종목명과 일간 등락률 둘만 쓰는데,
+    예전에는 `universe_metrics(pool)` 을 불러 풀 **전체**의 기간수익률·MDD·소르티노·이격까지
+    만들었다. us_etf(180종목) 실측으로 그 호출이 5.8초였고 그중 합성이 쓰는 부분은 8ms 였다
+    (종가 프레임 1,616ms + 현재가 맵 2,871ms + 소르티노 1,049ms + 수익률 140ms …).
+
+    여기서는 **넘겨받은 종목만** 계산한다. 포트폴리오 슬리브는 보유 4~20종목이라 프레임도
+    스냅샷도 그만큼만 만든다. 계산 자체는 `universe_metrics` 와 같은 공용 시장 데이터 층을
+    쓰므로 값이 갈리지 않는다.
+    """
+    from utils.portfolio_market_data import _build_daily_change_map, _load_close_frame
+    from utils.settings_loader import get_ticker_type_settings
+
+    wanted = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
+    if not wanted:
+        return {}
+
+    name_by = {row["ticker"]: row.get("name") for row in load_universe(pool)}
+    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+    items = [{"ticker": t, "ticker_type": pool, "country_code": country} for t in wanted]
+
+    close_frame, _ = _load_close_frame(items)
+    change_by = _build_daily_change_map(items, close_frame)
+    return {t: {"name": name_by.get(t) or t, "daily_change_pct": change_by.get(t)} for t in wanted}
 
 
 def universe_metrics(pool: str) -> list[dict[str, Any]]:
     """그 풀 종목의 표시 지표 — 일간·현재가·기간수익률·MDD·소르티노.
 
-    계산은 `/asset-helper` 와 **같은 공용 함수**를 쓴다(`utils/asset_helper_market_data`).
-    화면 표가 같은 컬럼을 같은 기준으로 보여줘야 두 화면을 나란히 비교할 수 있다.
+    계산은 공용 시장 데이터 층(`utils/portfolio_market_data`)을 쓴다.
     지표를 못 구한 종목은 그 값만 None 이다 — 목록에서 빼지 않는다(비중은 정할 수 있다).
     """
     from config import METRIC_WINDOW_MONTHS
-    from utils.asset_helper_market_data import (
+    from core.strategy.scoring import drawdown_from_high_pct
+    from utils.portfolio_market_data import (
         _build_current_price_map,
         _build_daily_change_map,
         _build_mdd_map,
         _build_return_map,
+        _compute_sortino_raw_frame,
         _load_close_frame,
     )
-    from utils.asset_helper_service import _compute_sortino_raw_frame
     from utils.settings_loader import get_ticker_type_settings
 
     universe = load_universe(pool)
@@ -131,12 +146,41 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
     items = [{"ticker": row["ticker"], "ticker_type": pool, "country_code": country} for row in universe]
 
     close_frame, _ = _load_close_frame(items)
+    # 추세 이탈(행 전체 회색)용 이격 — 그 풀의 이평선 기준(순위·합성·보유 알림과 같은 공용 규칙).
+    # 이 화면 지표들과 같은 확정 종가 기준이다. 풀에 이평선이 없으면 값 없음(배지 없음).
+    gap_by: dict[str, tuple[float | None, float | None]] = {}
+    pool_config = get_ticker_type_settings(pool) or {}
+    ma_short, ma_long = pool_config.get("SHORT_MA_DAYS"), pool_config.get("LONG_MA_DAYS")
+    if ma_short and ma_long and not close_frame.empty:
+        import pandas as pd
+
+        from core.strategy.momentum.signals import compute_signals as momentum_compute
+        from utils.moving_averages import pool_moving_average_type
+
+        disparity = momentum_compute(
+            {"close": close_frame}, int(ma_short), int(ma_long), pool_moving_average_type(pool)
+        )
+        short_row = disparity["short"].iloc[-1]
+        long_row = disparity["long"].iloc[-1]
+        gap_by = {
+            ticker: (
+                round(float(short_row[ticker]), 2) if pd.notna(short_row.get(ticker)) else None,
+                round(float(long_row[ticker]), 2) if pd.notna(long_row.get(ticker)) else None,
+            )
+            for ticker in close_frame.columns
+        }
     price_by = _build_current_price_map(items, close_frame)
     change_by = _build_daily_change_map(items, close_frame)
     return_by = _build_return_map(close_frame)
     mdd_by = _build_mdd_map(close_frame, METRIC_WINDOW_MONTHS)
     sortino_frame = _compute_sortino_raw_frame(close_frame, METRIC_WINDOW_MONTHS)
     sortino_row = sortino_frame.iloc[-1] if not sortino_frame.empty else None
+
+    def _high_drawdown(ticker: str) -> float | None:
+        if ticker not in close_frame.columns:
+            return None
+        value = drawdown_from_high_pct(close_frame[ticker].dropna(), price_by.get(ticker))
+        return None if value is None else round(value, 2)
 
     def _sortino(ticker: str) -> float | None:
         if sortino_row is None or ticker not in sortino_row.index:
@@ -149,6 +193,14 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
 
     memo_by = get_stock_memos([row["ticker"] for row in universe])
 
+    # 순위 번호 — 순위 화면(`/pools-rank`)이 내려주는 번호를 그대로 쓴다(같은 캐시·같은 값).
+    from utils.rank_service import load_rank_data
+
+    rank_by = {
+        str(item.get("티커") or "").strip().upper(): item.get("순위")
+        for item in load_rank_data(ticker_type=pool)["rows"]
+    }
+
     rows: list[dict[str, Any]] = []
     for row in universe:
         ticker = row["ticker"]
@@ -157,14 +209,29 @@ def universe_metrics(pool: str) -> list[dict[str, Any]]:
             {
                 **row,
                 "memo": memo_by.get(ticker, ""),
+                "rank": rank_by.get(ticker),
                 "current_price": price_by.get(ticker),
                 "daily_change_pct": change_by.get(ticker),
                 "return_1m_pct": returns.get("return_1m_pct"),
                 "return_3m_pct": returns.get("return_3m_pct"),
                 "return_6m_pct": returns.get("return_6m_pct"),
                 "return_12m_pct": returns.get("return_12m_pct"),
+                "return_24m_pct": returns.get("return_24m_pct"),
+                "return_36m_pct": returns.get("return_36m_pct"),
                 "mdd_pct": mdd_by.get(ticker),
                 "sortino": _sortino(ticker),
+                # 고점 대비(%) — 순위·모멘텀·신고가와 같은 공용 함수·창(12개월), 현재가 기준.
+                "high_drawdown_pct": _high_drawdown(ticker),
+                # 추세 이탈 표시용 — 풀 이평선 이격(단기·장기).
+                "short_gap_pct": gap_by.get(ticker, (None, None))[0],
+                "long_gap_pct": gap_by.get(ticker, (None, None))[1],
+                # 신규상장(🆕) — 전 화면 공용 판정(core.strategy.scoring.is_new_listing).
+                "new_listing": (
+                    is_new_listing(close_frame[ticker].dropna()) if ticker in close_frame.columns else False
+                ),
+                "listing_months": (
+                    listing_months(close_frame[ticker].dropna()) if ticker in close_frame.columns else None
+                ),
             }
         )
     return rows
@@ -191,19 +258,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     pool = str(settings.get("pool") or "").strip().lower()
     if pool not in available_pools():
         raise ValueError(f"지원하지 않는 종목풀입니다: {settings.get('pool')}")
-
-    rebalance = str(settings.get("rebalance") or "").strip().lower()
-    if rebalance not in REBALANCE_OPTIONS:
-        allowed = ", ".join(REBALANCE_LABELS[key] for key in REBALANCE_OPTIONS)
-        raise ValueError(f"'rebalance' 는 {allowed} 중 하나여야 합니다 (받은 값: {settings.get('rebalance')}).")
-
-    try:
-        band_pct = round(float(settings.get("band_pct")), 2)
-    except (TypeError, ValueError) as error:
-        raise ValueError(f"'band_pct' 는 숫자여야 합니다: {settings.get('band_pct')}") from error
-    if band_pct not in {round(option, 2) for option in REBALANCE_BAND_PCT_OPTIONS}:
-        allowed = ", ".join(f"{option:g}" for option in REBALANCE_BAND_PCT_OPTIONS)
-        raise ValueError(f"'band_pct' 는 {allowed} 중 하나여야 합니다 (받은 값: {band_pct}).")
 
     raw_weights = settings.get("weights")
     if not isinstance(raw_weights, (list, tuple)):
@@ -246,10 +300,9 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "pool": pool,
+        "start_date": validate_start_date(settings.get("start_date")),
         "weights": weights,
         "cash_weight_pct": cash,
-        "rebalance": rebalance,
-        "band_pct": band_pct,
     }
 
 
@@ -289,9 +342,57 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
     return validate_settings({"pool": selected, **DEFAULT_SETTINGS, **stored})
 
 
+def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], list[str]]:
+    """화면용 로드 — **종목풀에서 빠진 종목은 걷어내고** 그 내역을 함께 돌려준다.
+
+    종목을 다른 풀로 옮기면 저장된 비중에 없는 티커가 남는다. `load_settings` 는 그걸
+    에러로 막아서 화면이 열리지도 않고 고칠 수도 없었다. 화면에서는 빠진 종목을 빼고 열어
+    사용자가 비중을 다시 맞출 수 있게 한다. 배치·백테스트는 그대로 `load_settings` 를 쓴다.
+
+    빠진 종목은 **비중을 그대로 둔 채** 설정에 남겨 화면 표에 보이게 하고, 티커 목록만
+    함께 돌려준다. 화면이 그 행을 「종목풀에 없음」으로 칠하고 저장을 막는다 —
+    사용자가 지우고 비중을 다시 나눠야 저장된다.
+
+    반환: (설정, ["ASX:GGUS", ...])
+    """
+    doc = _load_doc()
+    pools = available_pools()
+    selected = str(pool or default_pool()).strip()
+    if selected not in pools:
+        # 그 화면이 기억한 풀이 이 전략에서 꺼졌을 수 있다 — 막지 말고 기본 풀로 연다.
+        selected = default_pool()
+        if not selected:
+            raise ValueError("이 전략을 쓰는 종목풀이 없습니다 — 종목풀 설정에서 「사용」을 켜세요.")
+    stored = dict((doc.get("settings_by_pool") or {}).get(selected) or {})
+    settings = {"pool": selected, **DEFAULT_SETTINGS, **stored}
+    try:
+        return validate_settings(settings), []
+    except ValueError:
+        pass
+
+    universe = {row["ticker"] for row in load_universe(selected)}
+    weights: list[dict[str, Any]] = []
+    unknown: list[str] = []
+    for item in settings.get("weights") or []:
+        ticker = str((item or {}).get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        try:
+            weight = round(float((item or {}).get("weight_pct") or 0), 2)
+        except (TypeError, ValueError):
+            weight = 0.0
+        weights.append({"ticker": ticker, "weight_pct": weight})
+        if ticker not in universe:
+            unknown.append(ticker)
+
+    # 검증을 통과시키지 않고 그대로 돌려준다 — 화면이 고칠 수 있게 보여 주는 것이 목적이다.
+    return {**settings, "weights": weights}, unknown
+
+
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """검증 후 그 풀의 설정으로 저장한다. 다른 풀의 저장분은 건드리지 않는다."""
     normalized = validate_settings(settings)
+    require_start_date(normalized)
     pool = normalized["pool"]
     per_pool = {key: normalized[key] for key in PER_POOL_SETTING_KEYS}
     _db()[_CONFIG_COLLECTION].update_one(
@@ -312,8 +413,6 @@ __all__ = [
     "DEFAULT_SETTINGS",
     "MAX_HOLDINGS",
     "PER_POOL_SETTING_KEYS",
-    "REBALANCE_LABELS",
-    "REBALANCE_OPTIONS",
     "available_pools",
     "benchmark_info",
     "default_pool",
@@ -325,3 +424,11 @@ __all__ = [
     "save_settings",
     "validate_settings",
 ]
+
+
+def delete_settings(pool: str) -> None:
+    """그 풀의 포트폴리오 설정을 지운다 — 종목풀 설정 화면에서 「사용」을 끄면 부른다."""
+    _db()[_CONFIG_COLLECTION].update_one(
+        {"_id": _SETTINGS_KEY},
+        {"$unset": {f"settings_by_pool.{str(pool).strip()}": ""}},
+    )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time as _time_module
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
@@ -8,10 +9,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from services.price_service import get_realtime_snapshot, get_worldstock_snapshot, get_yahoo_symbol_snapshot
-from utils.cache_utils import (
-    load_cached_close_series_bulk_with_fallback,
-    load_cached_frames_bulk_with_fallback,
-)
+from utils.cache_utils import load_cached_close_series_bulk_with_fallback
 from utils.formatters import clean_holding_display_name
 from utils.logger import get_app_logger
 from utils.yfinance_guard import yfinance_lock
@@ -35,6 +33,8 @@ def infer_yahoo_symbol_currency(symbol: str) -> str:
         return "CNY"
     if normalized.endswith(".AX"):
         return "AUD"
+    if normalized.endswith(".TO"):
+        return "CAD"
     return "USD"
 
 
@@ -45,7 +45,6 @@ def enrich_component_prices(
     preserve_existing: bool = False,
     cumulative_base_date: str | None = None,
     component_price_snapshot: dict[str, dict[str, Any]] | None = None,
-    use_open_baseline: bool = False,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """ETF 구성종목에 현재가/등락률/통화 정보를 붙인다."""
     holdings_list = [dict(item) for item in holdings]
@@ -63,9 +62,9 @@ def enrich_component_prices(
     worldstock_codes: list[str] = []
     yahoo_exchange_symbols: list[str] = []
     baseline_yahoo_symbols: list[str] = []
-    # 한국 ETF 마감(15:30 KST) 시점에 미국장은 아직 열리지 않았으므로(US 22:30 KST 개장),
-    # 한국 base_date 마감 시점에 반영된 미국 가격은 전 미국 거래일 종가다.
-    # 따라서 미국 종목 baseline 은 base_date 미만(< base_ts)으로 한 번 더 소급해야 한다.
+    # 한국 ETF 마감(15:30 KST) 시점에 아직 개장 전인 시장(미국·유럽·미주)의 base_date 종가는
+    # 한국 base_date 종가에 반영돼 있지 않다 — 반영된 것은 전 거래일 종가다.
+    # 따라서 그런 시장의 종목 baseline 은 base_date 미만(< base_ts)으로 한 번 더 소급한다.
     previous_trading_day_baseline_symbols: set[str] = set()
 
     for item in holdings_for_pricing:
@@ -92,7 +91,7 @@ def enrich_component_prices(
             continue
         if cumulative_base_date:
             baseline_yahoo_symbols.append(yahoo_symbol)
-            if _is_us_yahoo_symbol(yahoo_symbol):
+            if _market_opens_after_kst_close(yahoo_symbol):
                 previous_trading_day_baseline_symbols.add(yahoo_symbol)
         if yahoo_symbol.endswith(".AX"):
             if _component_price_key(item) not in component_price_snapshot:
@@ -112,9 +111,7 @@ def enrich_component_prices(
     au_price_map = _safe_fetch_snapshot("au", sorted(set(au_tickers)))
     worldstock_price_map = _safe_fetch_worldstock(sorted(set(worldstock_codes)))
     yahoo_exchange_price_map = _safe_fetch_yahoo(sorted(set(yahoo_exchange_symbols)))
-    korean_baseline_price_map = _safe_fetch_cached_baseline_prices(
-        "kor", korean_baseline_tickers, cumulative_base_date, use_open=use_open_baseline
-    )
+    korean_baseline_price_map = _safe_fetch_cached_baseline_prices("kor", korean_baseline_tickers, cumulative_base_date)
     baseline_price_map = _safe_fetch_yahoo_baseline_prices(
         baseline_yahoo_symbols,
         cumulative_base_date,
@@ -232,7 +229,7 @@ def select_component_holdings_for_pricing(
     price_fetch_limit=None 이면 전체 holdings 를 가격 조회 대상으로 사용한다
     (보유 상세 화면처럼 전 종목 가격이 필요한 케이스).
     """
-    holdings_list = list(holdings)
+    holdings_list = [item for item in holdings if item.get("price_lookup_supported") is not False]
     if price_fetch_limit is None:
         return holdings_list
     if price_fetch_limit <= 0:
@@ -256,6 +253,8 @@ def build_component_price_snapshot(
 
     for item in holdings_list:
         if _is_cash_like_holding(item):
+            continue
+        if item.get("price_lookup_supported") is False:
             continue
         component_ticker = _normalize_upper(item.get("ticker"))
         yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or component_ticker
@@ -354,15 +353,51 @@ def _is_worldstock_symbol(symbol: str) -> bool:
 
 
 def _is_yahoo_exchange_symbol(symbol: str) -> bool:
-    return _normalize_upper(symbol).endswith((".TW", ".L", ".SZ", ".SS"))
+    return _normalize_upper(symbol).endswith((".TW", ".L", ".SZ", ".SS", ".TO"))
 
 
-def _is_us_yahoo_symbol(symbol: str) -> bool:
+# 한국 정규장 마감(15:30 KST) 이후에 개장하는 시장의 야후 심볼 접미사 — 유럽·미주.
+# 이 시장들의 base_date 종가는 한국 base_date 종가보다 늦게 생기므로 baseline 을 하루 소급한다.
+# 아시아(일본 .T, 홍콩 .HK, 중국 .SS/.SZ, 대만 .TW 등)는 세션이 한국장과 겹쳐 소급하지 않는다.
+_AFTER_KST_CLOSE_SUFFIXES = frozenset(
+    {
+        "L",
+        "PA",
+        "AS",
+        "DE",
+        "F",
+        "MI",
+        "MC",
+        "SW",
+        "ST",
+        "CO",
+        "OL",
+        "BR",
+        "VI",
+        "LS",
+        "IR",
+        "TO",
+        "V",
+        "SA",
+        "MX",
+        "BA",
+    }
+)
+
+
+def _market_opens_after_kst_close(symbol: str) -> bool:
+    """이 종목의 시장이 한국 마감(15:30 KST) 이후에 여는지 — 접미사 없으면 미국."""
     normalized = _normalize_upper(symbol)
-    return bool(normalized) and "." not in normalized
+    if not normalized:
+        return False
+    if "." not in normalized:
+        return True  # 미국
+    return normalized.rsplit(".", 1)[-1] in _AFTER_KST_CLOSE_SUFFIXES
 
 
 def _component_price_key(item: dict[str, Any]) -> str | None:
+    if item.get("price_lookup_supported") is False:
+        return None
     if _is_cash_like_holding(item):
         return None
     component_ticker = _normalize_upper(item.get("ticker"))
@@ -441,62 +476,26 @@ def _safe_fetch_cached_baseline_prices(
     ticker_type: str,
     tickers: list[str],
     base_date: str | None,
-    use_open: bool = False,
 ) -> dict[str, dict[str, Any]]:
     if not tickers or not base_date:
         return {}
     try:
-        return _fetch_cached_baseline_prices(ticker_type, tickers, base_date, use_open=use_open)
+        return _fetch_cached_baseline_prices(ticker_type, tickers, base_date)
     except Exception as exc:
         logger.warning("구성종목 국내 기준일 가격 조회 실패(base_date=%s): %s", base_date, exc)
         return {}
-
-
-def _fetch_cached_baseline_open_prices(
-    ticker_type: str,
-    normalized_tickers: list[str],
-    base_ts: pd.Timestamp,
-) -> dict[str, dict[str, Any]]:
-    """base_date 당일 시초가(Open)를 baseline 으로 반환한다(당일 장중 변동용)."""
-    frames = load_cached_frames_bulk_with_fallback(ticker_type, normalized_tickers)
-    result: dict[str, dict[str, Any]] = {}
-    for ticker, frame in frames.items():
-        if frame is None or frame.empty:
-            continue
-        open_col = "시가" if "시가" in frame.columns else "Open" if "Open" in frame.columns else None
-        if open_col is None:
-            continue
-        idx = pd.to_datetime(frame.index)
-        if idx.tz is not None:
-            idx = idx.tz_localize(None)
-        idx = idx.normalize()
-        open_series = pd.to_numeric(frame[open_col], errors="coerce")
-        open_at_base = open_series[idx == base_ts].dropna()
-        open_at_base = open_at_base[open_at_base > 0]
-        if open_at_base.empty:
-            continue
-        result[str(ticker).strip().upper()] = {
-            "price": float(open_at_base.iloc[-1]),
-            "date": base_ts.strftime("%Y-%m-%d"),
-        }
-    return result
 
 
 def _fetch_cached_baseline_prices(
     ticker_type: str,
     tickers: list[str],
     base_date: str,
-    use_open: bool = False,
 ) -> dict[str, dict[str, Any]]:
     normalized_tickers = sorted({str(ticker or "").strip().upper() for ticker in tickers if str(ticker or "").strip()})
     if not normalized_tickers:
         return {}
 
     base_ts = pd.Timestamp(base_date).normalize()
-    # base_date 가 당일이면 시초가 baseline 을 써서 장중 변동을 보여준다(국내 한정).
-    if use_open:
-        return _fetch_cached_baseline_open_prices(ticker_type, normalized_tickers, base_ts)
-
     close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, normalized_tickers)
     result: dict[str, dict[str, Any]] = {}
     for ticker, series in close_series_map.items():
@@ -518,18 +517,39 @@ def _fetch_cached_baseline_prices(
             "date": pd.Timestamp(baseline_date).strftime("%Y-%m-%d"),
         }
 
-    missing = [t for t in normalized_tickers if t not in result]
-    if missing:
-        pykrx_result = _fetch_pykrx_baseline_prices(missing, base_date)
-        result.update(pykrx_result)
+    # 캐시에 없거나, 있어도 base_date 봉이 아직 안 들어온 종목(저녁 캐시 배치 전)은 KRX 로 보강한다.
+    # base_date 는 이미 마감된 거래일이라 종가가 존재한다 — 옛 종가를 그대로 쓰면
+    # 당일 변동(이미 ETF 종가에 반영된 몫)이 '변동'으로 잡힌다. 거래정지 등으로 KRX 에도
+    # base_date 봉이 없으면 캐시의 마지막 종가가 유지된다(그 값이 반영가다).
+    base_str = base_ts.strftime("%Y-%m-%d")
+    stale = [t for t in normalized_tickers if t not in result or str(result[t].get("date") or "") < base_str]
+    if stale:
+        for ticker, entry in _fetch_pykrx_baseline_prices(stale, base_date).items():
+            existing = result.get(ticker)
+            if existing is None or str(entry.get("date") or "") > str(existing.get("date") or ""):
+                result[ticker] = entry
 
     return result
+
+
+# 콜드 조회 시 종목 간 간격(초) — 가격 캐시 배치(KOR_FETCH_TARGET_SECONDS)와 같은 이유다.
+# KRX 는 무지연 연속 자동 호출을 차단(연결 리셋)한다. 기준일 종가는 아래 영속 캐시로
+# 한 번만 받으면 되므로, 이 간격은 처음 보는 종목에만 든다.
+_PYKRX_BASELINE_INTERVAL_SECONDS = 1.0
 
 
 def _fetch_pykrx_baseline_prices(
     tickers: list[str],
     base_date: str,
 ) -> dict[str, dict[str, Any]]:
+    """가격 캐시에 없는 구성종목의 기준일 종가 — pykrx(KRX) 폴백.
+
+    기준일 종가는 불변이라 **영속 캐시**(야후 baseline 과 같은 컬렉션, "KRX:" 접두)를
+    먼저 본다. 예전에는 비교 화면을 열 때마다 같은 누락 종목을 KRX 에 무지연 연속
+    조회해서, KRX 가 연결을 리셋하면 종목마다 타임아웃을 기다리며 화면이 몇 분씩
+    멈췄다(2026-09-11). 연결 오류가 나면 남은 종목 조회도 중단한다 — 리셋 상태에서는
+    다음 종목도 똑같이 실패하며 대기만 쌓인다.
+    """
     try:
         from pykrx import stock as _stock
     except ImportError:
@@ -540,8 +560,18 @@ def _fetch_pykrx_baseline_prices(
     start_str = start_ts.strftime("%Y%m%d")
     end_str = base_ts.strftime("%Y%m%d")
 
-    result: dict[str, dict[str, Any]] = {}
-    for ticker in tickers:
+    # 0) 영속 캐시 조회 — (symbol, base_date) 별 불변 값.
+    cache_keys = [(f"KRX:{ticker}", base_date, False) for ticker in tickers]
+    persisted = _load_persisted_yahoo_baselines(cache_keys)
+    result: dict[str, dict[str, Any]] = {
+        ticker: data for (symbol, _bd, _ip), data in persisted.items() for ticker in [symbol[len("KRX:") :]]
+    }
+
+    fetched: dict[tuple[str, str, bool], dict[str, Any]] = {}
+    remaining = [ticker for ticker in tickers if ticker not in result]
+    for index, ticker in enumerate(remaining):
+        if index:
+            _time_module.sleep(_PYKRX_BASELINE_INTERVAL_SECONDS)
         try:
             df = _stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
             if df is None or df.empty:
@@ -553,12 +583,21 @@ def _fetch_pykrx_baseline_prices(
             close_series = close_series[close_series > 0]
             if close_series.empty:
                 continue
-            result[ticker] = {
+            entry = {
                 "price": float(close_series.iloc[-1]),
                 "date": pd.Timestamp(close_series.index[-1]).strftime("%Y-%m-%d"),
             }
+            result[ticker] = entry
+            fetched[(f"KRX:{ticker}", base_date, False)] = entry
         except Exception as exc:
             logger.warning("pykrx 기준일 가격 조회 실패(ticker=%s): %s", ticker, exc)
+            if isinstance(exc, OSError) or "Connection" in str(exc):
+                logger.warning(
+                    "KRX 연결 오류 — 남은 %d개 종목의 기준일 조회를 중단합니다(다음 요청에서 재시도).",
+                    len(remaining) - index - 1,
+                )
+                break
+    _persist_yahoo_baselines(fetched)
     return result
 
 

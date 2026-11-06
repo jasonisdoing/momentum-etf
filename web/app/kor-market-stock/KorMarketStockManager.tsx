@@ -6,9 +6,9 @@ import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import {
-  INDUSTRY_COLUMN_MIN_WIDTH,
-  INDUSTRY_COLUMN_WIDTH,
-  renderIndustryCell,
+  industryColumn,
+  stockNameColumn,
+  tickerColumn,
 } from "@/lib/grid-cells";
 import { formatKorMarketCap } from "@/lib/market-cap-format";
 import { useLatestRequest } from "@/lib/use-latest-request";
@@ -19,9 +19,14 @@ import type { PoolAddProgress } from "@/lib/pool-add";
 import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
+import {
+  TopCountSelect,
+  readRememberedTopCount,
+  stepTopOptions,
+  writeRememberedTopCount,
+} from "../components/TopCountSelect";
 import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
-import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import {
@@ -46,6 +51,7 @@ type KorMarketStockRow = {
   return_3m_pct: number | null;
   return_12m_pct: number | null;
   mdd_12m_pct: number | null;
+  sortino_12m: number | null;
 };
 
 type KorMarketStockGridRow = KorMarketStockRow & {
@@ -78,30 +84,39 @@ function formatVolume(value: number | null): string {
 }
 
 
+// 화면에서 고르는 보기 — `통합` 은 코스피·코스닥을 합쳐 시총 내림차순으로 다시 세운다(미국 화면과 같은 방식).
 // 지수 구성종목(KOSPI200·KOSDAQ150)은 시총 순위가 아니라 **명단 전체**라 상위 N 을 고르지 않는다.
 // 명단 소스(추종 ETF)는 백엔드 `index_constituents_loader.KOR_INDEX_SOURCES` 가 단일 소스다.
-const MARKET_OPTIONS = ["KOSPI", "KOSDAQ", "KOSPI200", "KOSDAQ150"] as const;
-type MarketOption = (typeof MARKET_OPTIONS)[number];
-const MARKET_LABELS: Record<MarketOption, string> = {
-  KOSPI: "코스피",
-  KOSDAQ: "코스닥",
-  KOSPI200: "KODEX 200(069500)",
-  KOSDAQ150: "KODEX 코스닥150(229200)",
-};
+const VIEW_OPTIONS = [
+  { key: "COMBINED", label: "통합", markets: ["KOSPI", "KOSDAQ"] },
+  { key: "KOSPI", label: "코스피", markets: ["KOSPI"] },
+  { key: "KOSDAQ", label: "코스닥", markets: ["KOSDAQ"] },
+  { key: "KOSPI200", label: "KODEX 200(069500)", markets: ["KOSPI200"] },
+  { key: "KOSDAQ150", label: "KODEX 코스닥150(229200)", markets: ["KOSDAQ150"] },
+] as const;
+type ViewOption = (typeof VIEW_OPTIONS)[number]["key"];
+
+function viewMarkets(view: ViewOption): readonly string[] {
+  return VIEW_OPTIONS.find((option) => option.key === view)?.markets ?? [];
+}
+
 /** 지수 구성종목 마켓 — 명단이 정해져 있어 상위 N 을 자를 이유가 없다. */
-const INDEX_MARKETS: readonly MarketOption[] = ["KOSPI200", "KOSDAQ150"];
-const usesTopLimit = (market: MarketOption): boolean => !INDEX_MARKETS.includes(market);
-const KOSPI_LIMIT_OPTIONS = [200, 150, 100, 50] as const;
-const KOSDAQ_LIMIT_OPTIONS = [150, 100, 50] as const;
+const INDEX_MARKETS: readonly ViewOption[] = ["KOSPI200", "KOSDAQ150"];
+const usesTopLimit = (view: ViewOption): boolean => !INDEX_MARKETS.includes(view);
+
+// 마지막으로 고른 상위 N — 셀렉트·저장·선택지 생성은 미국 개별주와 공용(TopCountSelect).
+const KOR_MARKET_TOP_COUNT_KEY = "momentum-etf:kor-market-stock:top-count";
+const KOR_TOP_STEP = 50;
 
 export function KorMarketStockManager({
   onSummaryChange,
 }: {
   onSummaryChange?: (summary: { market: string; count: number; totalCount: number }) => void;
 }) {
-  const [market, setMarket] = useState<MarketOption>("KOSPI");
-  const [limit, setLimit] = useState<number>(200);
+  const [view, setView] = useState<ViewOption>("COMBINED");
+  const [topCount, setTopCount] = useState<number | null>(null);
   const [minMarketCapJo, setMinMarketCapJo] = useState("");
+  const [tickerSearch, setTickerSearch] = useState("");
   const [rows, setRows] = useState<KorMarketStockRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [tickerPools, setTickerPools] = useState<StocksAccountItem[]>([]);
@@ -116,10 +131,16 @@ export function KorMarketStockManager({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // 마지막으로 고른 상위 N 복원 — 서버 렌더에는 localStorage 가 없어 초기값으로 못 쓴다.
+  // 상위 N 은 이미 받아둔 행을 자르기만 해서(재조회 없음) 늦게 반영돼도 값싸다.
+  useEffect(() => {
+    setTopCount(readRememberedTopCount(KOR_MARKET_TOP_COUNT_KEY));
+  }, []);
+
   const toast = useToast();
   const { begin, isLatest } = useLatestRequest();
 
-  const load = useCallback(async (m: string, l: number, minCapJoText: string) => {
+  const load = useCallback(async (currentView: ViewOption, minCapJoText: string) => {
     // 코스피(200종목)가 코스닥(150종목)보다 느려서, 시장을 바꾸면 늦게 온 코스피 응답이
     // 먼저 그려진 코스닥 화면을 덮었다. 마지막 요청의 응답만 반영한다.
     const token = begin();
@@ -127,18 +148,37 @@ export function KorMarketStockManager({
     setError(null);
     try {
       const minCapJo = String(minCapJoText || "").trim() || "0";
-      const [resp, allStocksPayload, korStocksPayload] = await Promise.all([
-        fetch(`/api/kor-market-stocks?market=${m}&limit=${l}&min_market_cap_jo=${encodeURIComponent(minCapJo)}`, { cache: "no-store" }),
+      const markets = viewMarkets(currentView);
+      const [responses, allStocksPayload, korStocksPayload] = await Promise.all([
+        Promise.all(
+          markets.map((m) =>
+            fetch(
+              `/api/kor-market-stocks?market=${m}&min_market_cap_jo=${encodeURIComponent(minCapJo)}`,
+              { cache: "no-store" },
+            ),
+          ),
+        ),
         loadStocksTable().catch(() => ({ ticker_types: [], rows: [], ticker_type: "" })),
         loadStocksTable("kor").catch(() => ({ ticker_types: [], rows: [], ticker_type: "" })),
       ]);
-      const data = (await resp.json()) as KorMarketStocksResponse;
-      if (!isLatest(token)) return;
-      if (!resp.ok) {
-        throw new Error(data.error ?? "데이터를 불러오지 못했습니다.");
+      const payloads: KorMarketStocksResponse[] = [];
+      for (const resp of responses) {
+        const data = (await resp.json()) as KorMarketStocksResponse;
+        if (!resp.ok) throw new Error(data.error ?? "데이터를 불러오지 못했습니다.");
+        payloads.push(data);
       }
-      setRows(data.rows ?? []);
-      setTotalCount(data.total_count ?? 0);
+      if (!isLatest(token)) return;
+      // 통합은 두 마켓을 합친다(코스피·코스닥은 겹치지 않지만 미국 화면과 같은 합집합 코드로 둔다).
+      // 정렬·번호는 아래 gridRows 에서 시총 내림차순으로 다시 세운다.
+      const merged = new Map<string, KorMarketStockRow>();
+      for (const data of payloads) {
+        for (const row of data.rows ?? []) {
+          if (!merged.has(row.ticker)) merged.set(row.ticker, row);
+        }
+      }
+      setRows([...merged.values()]);
+      // 전체 개수는 마켓별 시장 전체 종목 수의 합이다(통합이면 코스피+코스닥).
+      setTotalCount(payloads.reduce((sum, data) => sum + (data.total_count ?? 0), 0));
       setTickerPools(allStocksPayload.ticker_types ?? []);
 
       const registered = new Set<string>();
@@ -157,40 +197,52 @@ export function KorMarketStockManager({
   }, [begin, isLatest]);
 
   useEffect(() => {
-    load(market, limit, minMarketCapJo);
-  }, [market, limit, minMarketCapJo, load]);
+    load(view, minMarketCapJo);
+  }, [view, minMarketCapJo, load]);
 
-  const limitOptions = useMemo<number[]>(
-    () => (market === "KOSDAQ" ? [...KOSDAQ_LIMIT_OPTIONS] : [...KOSPI_LIMIT_OPTIONS]),
-    [market],
+  // 시총 내림차순으로 세운 뒤 상위 N 만 남긴다(지수 구성종목 보기는 명단 전체라 절단 없음).
+  const visibleRows = useMemo(() => {
+    const sorted = [...rows].sort((left, right) => {
+      const leftMarketCap = left.market_cap ?? Number.NEGATIVE_INFINITY;
+      const rightMarketCap = right.market_cap ?? Number.NEGATIVE_INFINITY;
+      if (leftMarketCap !== rightMarketCap) {
+        return rightMarketCap - leftMarketCap;
+      }
+      return left.ticker.localeCompare(right.ticker);
+    });
+    return usesTopLimit(view) && topCount !== null ? sorted.slice(0, topCount) : sorted;
+  }, [rows, topCount, view]);
+
+  const topChoices = useMemo(
+    () => stepTopOptions(KOR_TOP_STEP, rows.length, topCount),
+    [rows.length, topCount],
   );
 
   useEffect(() => {
-    if (usesTopLimit(market) && !limitOptions.includes(limit)) {
-      setLimit(limitOptions[0]);
-    }
-  }, [limit, limitOptions, market]);
+    onSummaryChange?.({ market: view, count: visibleRows.length, totalCount });
+  }, [view, visibleRows.length, totalCount, onSummaryChange]);
 
-  useEffect(() => {
-    onSummaryChange?.({ market, count: rows.length, totalCount });
-  }, [market, rows.length, totalCount, onSummaryChange]);
-
+  // `#` 은 지금 보고 있는 목록에서의 위치다. 서버는 마켓 안에서 번호를 매기므로
+  // 통합 보기에서는 두 마켓의 번호가 섞인다 — 합쳐 자른 뒤 여기서 1 번부터 다시 매긴다.
   const gridRows = useMemo(
-    () =>
-      [...rows].sort((left, right) => {
-        const leftMarketCap = left.market_cap ?? Number.NEGATIVE_INFINITY;
-        const rightMarketCap = right.market_cap ?? Number.NEGATIVE_INFINITY;
-        if (leftMarketCap !== rightMarketCap) {
-          return rightMarketCap - leftMarketCap;
-        }
-        return left.ticker.localeCompare(right.ticker);
-      }),
-    [rows],
+    () => visibleRows.map((row, index) => ({ ...row, rank: index + 1 })),
+    [visibleRows],
   );
+
+  // 검색 — 순위 화면과 같은 방식(티커·종목명 부분 일치).
+  const searchedGridRows = useMemo(() => {
+    const query = tickerSearch.trim().toLocaleLowerCase();
+    if (!query) return gridRows;
+    return gridRows.filter((row) => {
+      const ticker = String(row.ticker ?? "").toLocaleLowerCase();
+      const name = String(row.name ?? "").toLocaleLowerCase();
+      return ticker.includes(query) || name.includes(query);
+    });
+  }, [gridRows, tickerSearch]);
 
   const allVisibleSelected = useMemo(() => {
-    return gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker));
-  }, [gridRows, selectedTickers]);
+    return searchedGridRows.length > 0 && searchedGridRows.every((row) => selectedTickers.includes(row.ticker));
+  }, [searchedGridRows, selectedTickers]);
 
   const toggleTickerSelection = useCallback((ticker: string) => {
     setSelectedTickers((current) =>
@@ -199,7 +251,7 @@ export function KorMarketStockManager({
   }, []);
 
   const toggleSelectAllVisible = useCallback(() => {
-    const selectableTickers = gridRows
+    const selectableTickers = searchedGridRows
       .map((row) => row.ticker);
     setSelectedTickers((current) => {
       if (selectableTickers.length === 0) return current;
@@ -209,13 +261,13 @@ export function KorMarketStockManager({
       }
       return [...new Set([...current, ...selectableTickers])];
     });
-  }, [gridRows, registeredTickers]);
+  }, [searchedGridRows, registeredTickers]);
 
   const handleOpenAddModal = useCallback(() => {
     if (selectedTickers.length === 0) return;
 
     const stockPools = tickerPools.filter((p) => p.country_code === "kor");
-    const remembered = readRememberedTickerType();
+    const remembered = readRememberedTickerType("market-stock-kor");
 
     if (remembered && stockPools.some(p => p.ticker_type === remembered)) {
       setSelectedTickerPool(remembered);
@@ -284,15 +336,16 @@ export function KorMarketStockManager({
 
     if (added > 0) {
       setSelectedTickers([]);
-      await load(market, limit, minMarketCapJo);
+      await load(view, minMarketCapJo);
     }
-  }, [load, market, limit, minMarketCapJo, rows, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
+  }, [load, view, minMarketCapJo, rows, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
 
   const columnDefs = useMemo<ColDef<KorMarketStockGridRow>[]>(
     () => [
       {
         headerName: "#",
         field: "rank",
+        pinned: "left",
         width: 64,
         minWidth: 56,
         maxWidth: 76,
@@ -303,36 +356,20 @@ export function KorMarketStockManager({
       {
         headerName: "종목풀",
         field: "ticker_pools",
+        pinned: "left",
         width: 180,
         maxWidth: 320,
         cellRenderer: (params: { value: string }) => String(params.value ?? "").trim() || "-",
       },
-      {
-        headerName: "티커",
-        field: "ticker",
+      // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
+      tickerColumn<KorMarketStockGridRow>({
         width: 100,
         minWidth: 84,
-        cellStyle: {
-          fontFamily: "var(--font-mono, monospace)",
-          fontSize: "var(--fs-sm)",
-        } as CellStyle,
+        mono: true,
         cellClass: "korMarketStockTickerCell",
-        cellRenderer: (params: { value?: string }) => <TickerDetailLink ticker={String(params.value ?? "")} />,
-      },
-      {
-        headerName: "종목명",
-        field: "name",
-        flex: 1,
-        minWidth: 180,
-      },
-      {
-        headerName: "업종",
-        field: "industry",
-        width: INDUSTRY_COLUMN_WIDTH,
-        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
-        headerTooltip: "네이버 업종 분류 — 신고가·종목풀 순위 화면과 같은 값.",
-        cellRenderer: (params: { value?: string }) => renderIndustryCell(params.value),
-      },
+      }),
+      stockNameColumn<KorMarketStockGridRow>({ nameOptions: (row) => ({ isHeld: row?.is_held }) }),
+      industryColumn<KorMarketStockGridRow>(),
       {
         headerName: "일간(%)",
         field: "change_pct",
@@ -402,6 +439,18 @@ export function KorMarketStockManager({
         },
       },
       {
+        headerName: "소르티노(12개월)",
+        field: "sortino_12m",
+        width: 132,
+        minWidth: 122,
+        type: "rightAligned",
+        valueFormatter: (p) => (p.value == null ? "-" : Number(p.value).toFixed(2)),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
+      },
+      {
         headerName: "거래량",
         field: "volume",
         width: 140,
@@ -464,39 +513,35 @@ export function KorMarketStockManager({
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">마켓</span>
                   <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="마켓 선택">
-                    {MARKET_OPTIONS.map((opt) => (
+                    {VIEW_OPTIONS.map((option) => (
                       <button
-                        key={opt}
+                        key={option.key}
                         type="button"
-                        className={market === opt ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => {
-                          setMarket(opt);
-                          setLimit(opt === "KOSDAQ" ? 150 : 200);
-                        }}
+                        className={
+                          view === option.key
+                            ? "btn appSegmentedToggleButton is-active"
+                            : "btn appSegmentedToggleButton"
+                        }
+                        title={option.key === "COMBINED" ? "코스피와 코스닥의 합집합(시총 내림차순)" : undefined}
+                        onClick={() => setView(option.key)}
                       >
-                        {MARKET_LABELS[opt]}
+                        {option.label}
                       </button>
                     ))}
+                    {/* 지수 구성종목 마켓은 명단 전체를 보여주므로 상위 N 셀렉트를 두지 않는다. */}
+                    {usesTopLimit(view) ? (
+                      <TopCountSelect
+                        value={topCount}
+                        options={topChoices}
+                        totalCount={rows.length}
+                        onChange={(next) => {
+                          setTopCount(next);
+                          writeRememberedTopCount(KOR_MARKET_TOP_COUNT_KEY, next);
+                        }}
+                      />
+                    ) : null}
                   </div>
                 </label>
-
-                {/* 지수 구성종목 마켓은 명단 전체를 보여주므로 상위 N 셀렉트를 두지 않는다. */}
-                {usesTopLimit(market) ? (
-                  <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">시가총액 상위</span>
-                    <select
-                      className="form-select"
-                      value={limit}
-                      onChange={(e) => setLimit(Number(e.target.value))}
-                    >
-                      {limitOptions.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {market} {opt}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
 
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">최소 시가총액(조)</span>
@@ -506,6 +551,18 @@ export function KorMarketStockManager({
                     value={minMarketCapJo}
                     onChange={(e) => setMinMarketCapJo(e.target.value.replace(/[^\d]/g, ""))}
                     placeholder="최소 시가총액(조)"
+                  />
+                </label>
+
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">검색</span>
+                  <input
+                    className="form-control"
+                    type="search"
+                    value={tickerSearch}
+                    placeholder="티커 또는 종목명"
+                    aria-label="티커 또는 종목명 검색"
+                    onChange={(event) => setTickerSearch(event.target.value)}
                   />
                 </label>
               </div>
@@ -533,7 +590,7 @@ export function KorMarketStockManager({
 
           <div className="appGridFillWrap">
             <AppAgGrid<KorMarketStockGridRow>
-              rowData={gridRows}
+              rowData={searchedGridRows}
               columnDefs={columnDefs}
               loading={loading}
               theme={korMarketStockGridTheme}
@@ -578,7 +635,7 @@ export function KorMarketStockManager({
               onChange={(event) => {
                 const nextType = event.target.value;
                 setSelectedTickerPool(nextType);
-                if (nextType) writeRememberedTickerType(nextType);
+                if (nextType) writeRememberedTickerType("market-stock-kor", nextType);
               }}
             >
               <option value="">종목풀 선택</option>

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
+from utils.market_cap_rank import META_FIELD as MARKET_CAP_RANK_FIELD
+from utils.normalization import to_timestamp_iso
 
 logger = get_app_logger()
 
@@ -21,7 +22,6 @@ _COLLECTION_NAME = "stock_cache_meta"
 #
 # 지금은 **현재 값은 stock_cache_meta, 직전 값은 여기** 로 역할을 나눈다.
 # 비교가 늘 (현재 vs 직전) 한 쌍이라 조회 1회면 되고, 크기도 티커 수로 고정된다.
-_PREVIOUS_COLLECTION_NAME = "previous_stock_cache_meta"
 _INDEX_ENSURED = False
 
 
@@ -103,40 +103,6 @@ def get_stock_cache_meta_docs(ticker_type: str, tickers: list[str]) -> dict[str,
     return result
 
 
-def get_previous_stock_cache_meta(ticker_type: str, ticker: str) -> dict[str, Any] | None:
-    """직전 영업일 스냅샷 1건. 없으면 None(비교 기준이 없다는 뜻).
-
-    ``date`` 는 저장 시점에 이미 거래일로 정해져 있어 호출자가 휴장일 보정을 할 필요가 없다.
-    """
-    type_norm = (ticker_type or "").strip().lower()
-    ticker_norm = str(ticker or "").strip().upper()
-
-    db = get_db_connection()
-    if db is None:
-        return None
-
-    doc = db[_PREVIOUS_COLLECTION_NAME].find_one(
-        {"ticker_type": type_norm, "ticker": ticker_norm},
-        projection={"_id": 0},
-    )
-    return dict(doc) if isinstance(doc, dict) else None
-
-
-def _resolve_snapshot_date() -> str:
-    """스냅샷 귀속 거래일 — 9시 이후이고 오늘이 거래일이면 오늘, 아니면 직전 거래일."""
-    from utils.data_loader import get_trading_days
-
-    now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
-    today_str = now_kst.strftime("%Y-%m-%d")
-    trading_days = get_trading_days((now_kst - timedelta(days=14)).strftime("%Y-%m-%d"), today_str, "kor")
-    trading_days_str = [d.strftime("%Y-%m-%d") for d in trading_days]
-
-    if now_kst.hour >= 9 and today_str in trading_days_str:
-        return today_str
-    past_days = [d for d in trading_days_str if d < today_str]
-    return past_days[-1] if past_days else today_str
-
-
 def upsert_stock_cache_meta_doc(
     ticker_type: str,
     ticker: str,
@@ -172,35 +138,33 @@ def upsert_stock_cache_meta_doc(
         "name": name_norm,
         "updated_at": now,
     }
-    if meta_cache is not None:
-        payload["meta_cache"] = meta_cache
     if holdings_cache is not None:
-        payload["holdings_cache"] = holdings_cache
+        payload["holdings_cache"] = {
+            **holdings_cache,
+            "updated_at": to_timestamp_iso(
+                holdings_cache.get("updated_at"), naive_timezone=datetime.now().astimezone().tzinfo
+            ),
+        }
 
-    snapshot_date = _resolve_snapshot_date()
-    payload["snapshot_date"] = snapshot_date
-
-    db = get_db_connection()
-    # 오늘 값을 덮기 전에, 저장돼 있던 값이 **다른 날짜의 것**이면 직전값으로 옮긴다.
-    # 같은 날 여러 번 돌아도 직전값은 그대로다(귀속 날짜가 같으므로).
-    if db is not None:
-        current = coll.find_one(
-            {"ticker_type": type_norm, "ticker": ticker_norm},
-            projection={"_id": 0, "created_at": 0},
-        )
-        if current and str(current.get("snapshot_date") or "") not in ("", snapshot_date):
-            db[_PREVIOUS_COLLECTION_NAME].update_one(
-                {"ticker_type": type_norm, "ticker": ticker_norm},
-                {"$set": {**current, "date": current["snapshot_date"]}},
-                upsert=True,
-            )
+    # 집계 파이프라인 업데이트 — 값은 $literal 로 감싸 `$` 로 시작하는 문자열이 식으로 읽히지 않게 한다.
+    stage: dict[str, Any] = {key: {"$literal": value} for key, value in payload.items()}
+    stage["created_at"] = {"$ifNull": ["$created_at", now]}
+    if meta_cache is not None:
+        # 메타 갱신은 meta_cache 를 통째로 바꾼다. 그 뒤 따로 적히는 시총 순위는 그 단계가 실패해도
+        # 지워지지 않게 기존 값을 이어 붙인다(없으면 키 자체가 생기지 않는다).
+        stage["meta_cache"] = {
+            "$mergeObjects": [
+                {MARKET_CAP_RANK_FIELD: f"$meta_cache.{MARKET_CAP_RANK_FIELD}"},
+                {"$literal": meta_cache},
+            ]
+        }
+    pipeline: list[dict[str, Any]] = [{"$set": stage}]
+    if holdings_cache is not None:
+        pipeline.append({"$unset": ["portfolio_change_cache", "portfolio_change_cache_updated_at"]})
 
     coll.update_one(
         {"ticker_type": type_norm, "ticker": ticker_norm},
-        {
-            "$set": payload,
-            "$setOnInsert": {"created_at": now},
-        },
+        pipeline,
         upsert=True,
     )
 

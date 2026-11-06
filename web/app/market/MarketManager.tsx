@@ -5,6 +5,7 @@ import { IconPlus } from "@tabler/icons-react";
 import type { ColDef, RowClassParams } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { stockNameColumn, tickerColumn, tradeValueMultColumn } from "@/lib/grid-cells";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { addTickersToPool, buildPoolAddSkipNotice, splitByPoolMembership } from "@/lib/pool-add";
 import type { PoolAddProgress } from "@/lib/pool-add";
@@ -13,7 +14,6 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { PoolAddProgressBar } from "../components/PoolAddProgressBar";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { AppModal } from "../components/AppModal";
-import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import {
@@ -31,10 +31,20 @@ type MarketRowItem = {
   current_price: number | null;
   nav: number | null;
   deviation: number | null;
+  return_1w_pct: number | null;
+  return_2w_pct: number | null;
   return_1m_pct: number | null;
   return_2m_pct: number | null;
   return_3m_pct: number | null;
+  /** 1~3년 전 기준종가 대비 — 상장 기간이 모자라면 null. */
+  return_1y_pct: number | null;
+  return_2y_pct: number | null;
+  return_3y_pct: number | null;
   prev_volume: number;
+  /** 거래대금 배수(20일 평균 대비) — 순위 화면과 같은 공용 계산, 일일 배치 저장값. 한국 전용. */
+  value_mult?: number | null;
+  /** 1주 배수 — 최근 5거래일 평균 ÷ 20일 평균(같은 배치 저장값). 한국 전용. */
+  value_mult_week?: number | null;
   market_cap: number;
   is_held: boolean;
   /** PTP(Publicly Traded Partnership) — 국내 매도 시 총액 10% 원천징수라 사실상 거래 대상이 아니다.
@@ -73,6 +83,8 @@ type MarketVariantConfig = {
   /** 이름으로 못 가르는 제외 그룹 — 배치가 판정해 둔 불리언 필드를 본다.
    *  키워드 그룹과 같은 칩으로 보이고 같은 방식으로 켜고 끈다. */
   flagExclusions?: Record<string, keyof MarketRowItem>;
+  /** 필터 칩 순서 — 없으면 키워드 그룹 다음에 플래그 그룹. 플래그 그룹 뒤에 키워드 그룹을 둘 때 쓴다. */
+  exclusionOrder?: string[];
   /** 과세 구분 토글(모두/과세/비과세)을 보일지 — 국내 ETF 만 이 구분이 있다. */
   showTaxFilter?: boolean;
   defaultExcluded: string[];
@@ -82,6 +94,19 @@ type MarketVariantConfig = {
   capFilterDefault: string; // 규모 최소값 필터 초기값 ("" = 없음)
   volumeFilterDefault: string; // 거래량 최소값 필터 초기값 ("" = 없음)
 };
+
+/** 기간 수익률 컬럼 — 짧은 기간부터. 기준종가는 배치가 넣고(`utils/kis_market`),
+ *  한국의 3달만 실시간 스냅샷이 직접 준다. 기간을 늘리려면 배치의 기준일 목록도 함께 늘린다. */
+const RETURN_PERIODS = [
+  { field: "return_1w_pct", header: "1주(%)" },
+  { field: "return_2w_pct", header: "2주(%)" },
+  { field: "return_1m_pct", header: "1달(%)" },
+  { field: "return_2m_pct", header: "2달(%)" },
+  { field: "return_3m_pct", header: "3달(%)" },
+  { field: "return_1y_pct", header: "1년(%)" },
+  { field: "return_2y_pct", header: "2년(%)" },
+  { field: "return_3y_pct", header: "3년(%)" },
+] as const;
 
 // 과세 구분 선택지 — 분류를 못 받은 종목은 '모두'에서만 보인다(어느 쪽으로도 넘겨짚지 않는다).
 const TAX_FILTER_OPTIONS = [
@@ -100,17 +125,18 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
       리츠: ["리츠"],
       인버스: ["인버스"],
       "2X": ["2X"],
+      커버드콜: ["커버드콜"],
       레버리지: ["레버리지"],
       합성: ["합성"],
-      커버드콜: ["커버드콜"],
       선물: ["선물"],
     },
-    defaultExcluded: ["채권(모든종류)", "혼합", "리츠", "인버스", "2X", "레버리지"],
+    defaultExcluded: ["채권(모든종류)", "혼합", "리츠", "인버스", "2X", "커버드콜"],
     showNavColumns: true,
     showListing: true,
     capHeader: "시가총액(억)",
+    // 기본 필터 — 소형·저유동 ETF 를 걸러 보는 것이 기본 사용 패턴이라 초기값을 둔다.
     capFilterDefault: "",
-    volumeFilterDefault: "",
+    volumeFilterDefault: "20000",
     // 국내 주식형 ETF 는 매매차익이 비과세고 그 밖(해외·파생·원자재·채권)은 과세다.
     showTaxFilter: true,
   },
@@ -140,15 +166,18 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
         "HYPERLIQUID", "DOGECOIN", "LITECOIN", "AVALANCHE", "CHAINLINK", "CARDANO", "DIGITAL ASSET",
         "비트코인", "이더리움",
       ],
+      // 금·은 — 현물 신탁(GLD·SLV)·광산주(GDX·SIL)·레버리지까지. 단어 단위라 GOLDMAN 은 안 걸린다.
+      "금/은": [" GOLD ", " SILVER "],
     },
     // PTP — 원자재·선물형 상품(BWET·DBA·USO 등)이 여기 속한다. 짧은 이름에는 법적 구조가
     // 안 드러나 키워드로는 못 거른다(배치가 긴 이름으로 판정해 `is_ptp` 로 내려준다).
     flagExclusions: { PTP: "is_ptp" },
-    defaultExcluded: ["채권", "인버스/숏", "레버리지", "커버드콜/인컴", "리츠", "가상자산", "PTP"],
+    exclusionOrder: ["채권", "인버스/숏", "레버리지", "커버드콜/인컴", "리츠", "가상자산", "PTP", "금/은"],
+    defaultExcluded: ["채권", "인버스/숏", "레버리지", "커버드콜/인컴", "리츠", "가상자산", "PTP", "금/은"],
     showNavColumns: false,
     showListing: false,
     capHeader: "거래대금($M)",
-    capFilterDefault: "50",
+    capFilterDefault: "100",
     volumeFilterDefault: "500000",
   },
 };
@@ -392,7 +421,7 @@ export function MarketManager({
     if (!hasSelectedRows) {
       return;
     }
-    setSelectedTickerPool(readRememberedTickerType() || "");
+    setSelectedTickerPool(readRememberedTickerType("market") || "");
     setSelectedBucketId("");
     setAddModalOpen(true);
   }, [hasSelectedRows]);
@@ -459,38 +488,19 @@ export function MarketManager({
 
   const columns = useMemo<ColDef<MarketGridRow>[]>(
     () => [
-      { field: "row_number", headerName: "#", width: 72, maxWidth: 80 },
+      { field: "row_number", headerName: "#", width: 72, maxWidth: 80, pinned: "left" },
       {
         field: "ticker_pools",
         headerName: "종목풀",
+        pinned: "left",
         width: 108,
         maxWidth: 116,
         cellRenderer: (params: { value: string }) => String(params.value ?? "").trim() || "-",
       },
-      {
-        field: "ticker",
-        headerName: "티커",
-        width: 104,
-        cellRenderer: (params: { value: string }) => {
-          const value = String(params.value ?? "-");
-          return <TickerDetailLink ticker={value} />;
-        },
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        minWidth: 220,
-        flex: 1,
-        cellClass: "marketNameCell",
-        cellRenderer: (params: { value: string | null | undefined }) => {
-          const value = String(params.value ?? "-");
-          return (
-            <span className="marketNameMain" title={value}>
-              {value}
-            </span>
-          );
-        },
-      },
+      // 티커·종목명 — 공용 컬럼(col-id 표준 → 보유 강조는 이 두 칸만 녹색).
+      // (예전 marketNameCell/marketNameMain 클래스는 CSS 정의가 없는 죽은 이름이라 지웠다.)
+      tickerColumn<MarketGridRow>({ width: 104 }),
+      stockNameColumn<MarketGridRow>({ nameOptions: (row) => ({ isHeld: row?.is_held }) }),
       {
         field: "daily_change_pct",
         headerName: "일간(%)",
@@ -511,53 +521,36 @@ export function MarketManager({
       },
       ...(variant.showNavColumns
         ? ([
-            {
-              field: "nav",
-              headerName: "Nav",
-              width: 110,
-              type: "rightAligned",
-              cellRenderer: (params: { value: number | null }) => formatNullableNumber(params.value),
-            },
-            {
-              field: "deviation",
-              headerName: "괴리율",
-              width: 96,
-              type: "rightAligned",
-              cellRenderer: (params: { value: number | null }) => (
-                <span className={getDeviationClass(params.value)}>{formatPercent(params.value)}</span>
-              ),
-            },
-          ] as ColDef<MarketGridRow>[])
+          {
+            field: "nav",
+            headerName: "Nav",
+            width: 110,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null }) => formatNullableNumber(params.value),
+          },
+          {
+            field: "deviation",
+            headerName: "괴리율",
+            width: 96,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null }) => (
+              <span className={getDeviationClass(params.value)}>{formatPercent(params.value)}</span>
+            ),
+          },
+        ] as ColDef<MarketGridRow>[])
         : []),
-      {
-        field: "return_1m_pct",
-        headerName: "1달(%)",
+      // 기간 수익률 — 짧은 기간부터. 값 없음이 맨 아래로 가도록 정렬 비교자를 같이 준다.
+      ...RETURN_PERIODS.map(({ field, header }) => ({
+        field,
+        headerName: header,
         width: 96,
         type: "rightAligned",
-        comparator: (a, b) => (a ?? Number.NEGATIVE_INFINITY) - (b ?? Number.NEGATIVE_INFINITY),
+        comparator: (a: number | null, b: number | null) =>
+          (a ?? Number.NEGATIVE_INFINITY) - (b ?? Number.NEGATIVE_INFINITY),
         cellRenderer: (params: { value: number | null }) => (
           <span className={getSignedMetricClass(params.value)}>{formatPercent(params.value)}</span>
         ),
-      },
-      {
-        field: "return_2m_pct",
-        headerName: "2달(%)",
-        width: 96,
-        type: "rightAligned",
-        comparator: (a, b) => (a ?? Number.NEGATIVE_INFINITY) - (b ?? Number.NEGATIVE_INFINITY),
-        cellRenderer: (params: { value: number | null }) => (
-          <span className={getSignedMetricClass(params.value)}>{formatPercent(params.value)}</span>
-        ),
-      },
-      {
-        field: "return_3m_pct",
-        headerName: "3달(%)",
-        width: 96,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => (
-          <span className={getSignedMetricClass(params.value)}>{formatPercent(params.value)}</span>
-        ),
-      },
+      })),
       ...(variant.showListing ? ([{ field: "listed_at", headerName: "상장일", width: 112 }] as ColDef<MarketGridRow>[]) : []),
       {
         field: "prev_volume",
@@ -566,6 +559,20 @@ export function MarketManager({
         type: "rightAligned",
         cellRenderer: (params: { value: number }) => formatCount(params.value),
       },
+      // 거래대금 배수 — 순위 화면과 같은 공용 컬럼(일일 배치 값이라 장중 환산 괄호는 없다). 한국 전용.
+      ...(market === "kor"
+        ? [
+          tradeValueMultColumn<MarketGridRow>({
+            headerTooltip: "20일 평균 거래대금 대비 배수 — 순위·신고가 화면과 같은 계산(일일 배치 저장값).",
+          }),
+          tradeValueMultColumn<MarketGridRow>({
+            field: "value_mult_week",
+            liveField: "__none__",
+            headerName: "1주일거래",
+            headerTooltip: "최근 5거래일 평균 거래대금 ÷ 20일 평균 — 한 주 단위의 수급 변화(일일 배치 저장값).",
+          }),
+        ]
+        : []),
       {
         field: "market_cap",
         headerName: variant.capHeader,
@@ -665,16 +672,6 @@ export function MarketManager({
               <div className="appMainHeader marketMainHeader">
                 <div className="appMainHeaderLeft marketMainHeaderLeft">
                   <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">티커/종목명</span>
-                    <input
-                      className="field compactField"
-                      type="text"
-                      placeholder="티커 또는 종목명을 입력"
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                    />
-                  </label>
-                  <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">{variant.capHeader}</span>
                     <input
                       className="field compactField"
@@ -716,8 +713,9 @@ export function MarketManager({
                       </div>
                     </label>
                   ) : null}
-                  {/* 신규 — 누르면 일수 입력과 안내가 옆으로 늘어난다. 그래서 왼쪽 묶음의
-                      **맨 끝**에 둔다(가운데 있으면 펼칠 때마다 뒤 칸이 밀린다). */}
+                  {/* 신규 — 누르면 일수 입력과 안내가 옆으로 늘어난다. 그래서 필터들 뒤에
+                      둔다(가운데 있으면 펼칠 때마다 뒤 칸이 밀린다). 검색은 다른 화면과
+                      통일해 가장 오른쪽이다. */}
                   {variant.showListing ? (
                     <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">신규 상장</span>
@@ -749,6 +747,17 @@ export function MarketManager({
                       </div>
                     </label>
                   ) : null}
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">검색</span>
+                    <input
+                      className="field compactField"
+                      type="search"
+                      placeholder="티커 또는 종목명"
+                      aria-label="티커 또는 종목명 검색"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                    />
+                  </label>
                 </div>
                 <div className="appMainHeaderRight">
                   <button
@@ -766,7 +775,12 @@ export function MarketManager({
           </div>
           <div className="card-body appCardBodyTight appTableCardBodyFill">
             <div className="pillRow">
-              {[...Object.keys(variant.exclusionGroups), ...Object.keys(variant.flagExclusions ?? {})].map((group) => {
+              {(
+                variant.exclusionOrder ?? [
+                  ...Object.keys(variant.exclusionGroups),
+                  ...Object.keys(variant.flagExclusions ?? {}),
+                ]
+              ).map((group) => {
                 const isActive = excludedGroups.includes(group);
                 return (
                   <button
@@ -889,7 +903,7 @@ export function MarketManager({
               onChange={(event) => {
                 const nextType = event.target.value;
                 setSelectedTickerPool(nextType);
-                if (nextType) writeRememberedTickerType(nextType);
+                if (nextType) writeRememberedTickerType("market", nextType);
               }}
             >
               <option value="">종목풀 선택</option>

@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { StrategyStartDate } from "../components/StrategyStartDate";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -10,6 +12,7 @@ import { IconCheck } from "@tabler/icons-react";
 import { GridToolbarButton } from "../components/GridToolbarButton";
 import { useAddingTickerRow } from "../components/useAddingTickerRow";
 import { MonthsSelect } from "../components/MonthsSelect";
+import { BacktestPeriodTables } from "../components/BacktestPeriodTables";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
 import { StableInlineInput } from "../components/StableInlineInput";
@@ -21,10 +24,10 @@ import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { createAppGridTheme } from "../components/app-grid-theme";
-import { formatSignedPct, signColor, stockMemoColumn } from "@/lib/grid-cells";
-import { renderStockNameCell } from "@/lib/name-highlight";
+import { bucketColumn, formatSignedPct, highDrawdownColumn, rankColumn, signColor, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
+import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { formatPoolLabel } from "@/lib/pool-label";
-import { updateStockMemo } from "@/lib/stocks-store";
+import { useStockMemoSave, withTickerMemo } from "../components/useStockMemoSave";
 
 const gridTheme = createAppGridTheme();
 
@@ -44,13 +47,13 @@ const STRATEGY_NOTES = [
     title: "구성",
     body:
       "종목풀에서 고른 종목에 목표 비중(%)을 직접 정해 그대로 들고 갑니다. 순위·이평선으로 " +
-      "종목을 고르지 않으므로 교체·이탈·손절이 없습니다. 현금 비중도 직접 정합니다.",
+      "종목을 고르지 않으므로 교체·이탈이 없습니다. 현금 비중도 직접 정합니다.",
   },
   {
-    title: "리밸런싱",
+    title: "보유 방식",
     body:
-      "정한 주기마다 목표 비중으로 되돌립니다. 그 사이에는 시세대로 흘러가게 두고, " +
-      "리밸런싱 기준을 넘긴 종목만 매매 지시가 나옵니다.",
+      "전략 시작일에 목표 비중대로 사고, 이후에는 시세대로 흘러가게 둡니다(바이앤홀드). " +
+      "비중을 다시 맞추고 싶으면 전략 시작일을 원하는 날로 바꾸면 됩니다.",
   },
   {
     title: "합성 전략",
@@ -61,73 +64,99 @@ const STRATEGY_NOTES = [
 ];
 
 /** 백테스트 기간 기본값 — 서버 응답(`constraints.default_backtest_months`)이 오기 전 초기 상태용. */
-const DEFAULT_BACKTEST_MONTHS = 12;
-
-/** 백테스트 보기 단위 — 모멘텀·신고가 화면과 같은 목록. */
-const VIEW_MODES = [
-  { key: "yearly", label: "연간" },
-  { key: "monthly", label: "월간" },
-  { key: "daily", label: "일간" },
-];
+const DEFAULT_BACKTEST_MONTHS = 60;
 
 type WeightRow = {
+  bucket?: number | null;
   ticker: string;
   name: string;
   memo?: string;
+  /** 종목풀 순위 번호 — 순위 화면과 같은 값. */
+  rank?: number | null;
   /** 목표 비중(%) — 사용자가 직접 정한다. 현금 행도 같은 컬럼을 쓴다. */
   fixed_weight_pct: number | null;
+  strategy_weight_pct?: number | null;
+  /** 종목풀에 없는 종목 — 옮겼거나 지운 것. 지워야 저장된다. */
+  is_unknown?: boolean;
   daily_change_pct: number | null;
   current_price: number | null;
   return_1m_pct: number | null;
   return_3m_pct: number | null;
   return_6m_pct: number | null;
   return_12m_pct: number | null;
+  return_24m_pct: number | null;
+  return_36m_pct: number | null;
   mdd_pct: number | null;
   sortino: number | null;
+  /** 고점 대비(%) — 순위·모멘텀·신고가와 같은 공용 계산(12개월 최고가 대비 현재가). */
+  high_drawdown_pct?: number | null;
+  /** 추세 이탈(행 전체 회색)용 — 풀 이평선 기준 단기·장기 이격(%). 순위·합성과 같은 공용 규칙. */
+  short_gap_pct?: number | null;
+  long_gap_pct?: number | null;
+  /** 신규상장(🆕) — 전 화면 공용 판정. */
+  new_listing?: boolean | null;
+  listing_months?: number | null;
   /** 티커를 입력받는 중인 행 — 확인을 눌러야 확정된다(`/asset-helper` 와 같은 흐름). */
   is_adding?: boolean;
 };
 
 /** 종목풀 종목 + 표시 지표 — 백엔드 `universe_metrics()` 가 채운다. */
 type UniverseRow = {
+  bucket: number | null;
   ticker: string;
   name: string;
   /** 종목 메모 — 계좌가 아니라 종목에 붙는다(순위·자산 관리 화면과 같은 값). */
   memo: string;
+  /** 종목풀 순위 번호 — 순위 화면과 같은 값. */
+  rank: number | null;
   current_price: number | null;
   daily_change_pct: number | null;
   return_1m_pct: number | null;
   return_3m_pct: number | null;
   return_6m_pct: number | null;
   return_12m_pct: number | null;
+  return_24m_pct: number | null;
+  return_36m_pct: number | null;
   mdd_pct: number | null;
   sortino: number | null;
+  high_drawdown_pct: number | null;
+  short_gap_pct?: number | null;
+  long_gap_pct?: number | null;
+  /** 신규상장(🆕) — 전 화면 공용 판정. */
+  new_listing?: boolean | null;
+  listing_months?: number | null;
 };
 
-type PeriodRow = { period: string; strategy_pct: number; benchmark_pct: number };
 
 /** 백엔드 응답 — `GET/PUT /api/strategy-portfolio`. */
 type PoolOption = { ticker_type: string; name: string; icon?: string; order?: number | null };
 
 type Settings = {
+  start_date?: string | null;
   pool: string;
   weights: { ticker: string; weight_pct: number }[];
   /** 현금 비중(%) — 사용자가 직접 정한다(`/asset-helper` 와 같은 규칙, 자동 흡수 없음). */
   cash_weight_pct: number;
-  rebalance: string;
-  band_pct: number;
 };
 
 type View = {
+  /** 운용 비중 — 슬리브를 쓰는 계좌가 하나일 때만 값이 있다(아니면 hidden_reason 에 이유). */
+  actual: {
+    account_name: string | null;
+    hidden_reason: string | null;
+    weight_by_ticker: Record<string, number> | null;
+    cash_weight_pct: number | null;
+  } | null;
+  actual_error: string | null;
   settings: Settings;
+  /** 종목풀에 없는 종목 — 표에 남겨 두고 경고로 칠한다. 지워야 저장된다. */
+  unknown_tickers?: string[];
   default_settings: Settings;
   settings_by_pool: Record<string, Partial<Settings>>;
   pool_options: PoolOption[];
   /** 이 풀에서 담을 수 있는 종목 + 표시 지표 — 티커 검증·이름·지표 컬럼이 여기서 온다. */
   universe: UniverseRow[];
   constraints: {
-    rebalance_options: { value: string; label: string }[];
-    band_pct_options: number[];
     month_options: number[];
     default_backtest_months: number;
     max_holdings: number;
@@ -141,13 +170,16 @@ type Backtest = {
   strategy_total_pct: number;
   strategy_cagr_pct: number;
   strategy_mdd_pct: number;
+  strategy_mdd_from?: string | null;
+  strategy_mdd_to?: string | null;
   strategy_sortino: number | null;
   benchmark_total_pct: number;
   benchmark_cagr_pct: number;
   benchmark_mdd_pct: number;
+  benchmark_mdd_from?: string | null;
+  benchmark_mdd_to?: string | null;
   benchmark_sortino: number | null;
   benchmark_name: string;
-  rebalance_count: number;
   cash_weight_pct: number;
   trades: {
     date: string;
@@ -176,6 +208,8 @@ function fmtNum(value: number | null | undefined, digits = 2): string {
 export function PortfolioClient() {
   const toast = useToast();
   const [view, setView] = useState<View | null>(null);
+  /** 지금 화면이 보고 있는 풀 — 풀 전환 중 도착한 이전 풀의 늦은 응답을 버리는 기준. */
+  const currentPoolRef = useRef<string>("");
   const [draft, setDraft] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -191,9 +225,8 @@ export function PortfolioClient() {
   const [chartMonths, setChartMonths] = useState<number | null>(null);
 
 
-  // 백테스트 — 기본 12개월(모멘텀·신고가 화면과 같다).
+  // 백테스트 — 서버가 종목풀과 관계없이 화면 기본 기간을 내려준다.
   const [backtestMonths, setBacktestMonths] = useState(DEFAULT_BACKTEST_MONTHS);
-  const [viewMode, setViewMode] = useState("yearly");
   const [backtest, setBacktest] = useState<Backtest | null>(null);
   const [backtestError, setBacktestError] = useState<string | null>(null);
   const [backtesting, setBacktesting] = useState(false);
@@ -204,12 +237,14 @@ export function PortfolioClient() {
     (async () => {
       try {
         // 마지막으로 고른 풀은 브라우저에 기억한다(다른 화면들과 같은 공용 키).
-        const remembered = readRememberedTickerType();
+        const remembered = readRememberedTickerType("strategy-portfolio");
         const query = remembered ? `?pool=${encodeURIComponent(remembered)}` : "";
         const response = await fetch(`/api/strategy-portfolio${query}`, { cache: "no-store" });
         const payload = (await response.json()) as View;
         if (!response.ok) throw new Error(payload.error ?? "설정을 불러오지 못했습니다.");
         if (!alive) return;
+        if (currentPoolRef.current && payload.settings.pool !== currentPoolRef.current) return;
+        currentPoolRef.current = payload.settings.pool;
         setView(payload);
         setDraft(payload.settings);
         setBacktestMonths(payload.constraints.default_backtest_months);
@@ -227,35 +262,34 @@ export function PortfolioClient() {
   const loadPool = useCallback(async (nextPool: string) => {
     setLoading(true);
     setError(null);
+    // 전환 즉시 기준 풀을 바꾼다 — 진행 중이던 이전 풀 요청의 늦은 응답이 화면을 덮지 못한다.
+    currentPoolRef.current = nextPool;
     try {
       const response = await fetch(`/api/strategy-portfolio?pool=${encodeURIComponent(nextPool)}`, { cache: "no-store" });
       const payload = (await response.json()) as View;
       if (!response.ok) throw new Error(payload.error ?? "설정을 불러오지 못했습니다.");
+      if (payload.settings.pool !== currentPoolRef.current) return;
       setView(payload);
       setDraft(payload.settings);
       // 풀이 바뀌면 전 풀의 백테스트 결과는 의미가 없다.
       setBacktest(null);
       setBacktestError(null);
       setSelected([]);
-      writeRememberedTickerType(nextPool);
+      writeRememberedTickerType("strategy-portfolio", nextPool);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "설정을 불러오지 못했습니다.");
+      if (currentPoolRef.current === nextPool) {
+        setError(loadError instanceof Error ? loadError.message : "설정을 불러오지 못했습니다.");
+      }
     } finally {
-      setLoading(false);
+      if (currentPoolRef.current === nextPool) setLoading(false);
     }
   }, []);
 
   /** 종목 메모 저장 — 계좌가 아니라 종목에 붙는다(순위·자산 관리 화면과 같은 API). */
-  const saveMemo = useCallback(
-    async (ticker: string, memo: string) => {
-      try {
-        await updateStockMemo(ticker, memo);
-        toast.success("메모 저장 완료");
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "메모 저장에 실패했습니다.");
-      }
-    },
-    [toast],
+  const saveMemo = useStockMemoSave(
+    useCallback((ticker: string, memo: string) => {
+      setView((prev) => (prev ? { ...prev, universe: withTickerMemo(prev.universe, ticker, memo) } : prev));
+    }, []),
   );
 
   const saveSettings = useCallback(async () => {
@@ -312,6 +346,9 @@ export function PortfolioClient() {
     [view?.universe],
   );
 
+  // 운용 비중 칸은 슬리브를 쓰는 계좌가 하나일 때만 보인다 — 값 유무가 아니라 백엔드의 계좌 구조 판정이다.
+  const showActual = view?.actual?.weight_by_ticker != null;
+
   const stockSum = useMemo(
     () => Math.round((draft?.weights ?? []).reduce((sum, row) => sum + (row.weight_pct || 0), 0) * 100) / 100,
     [draft?.weights],
@@ -321,22 +358,34 @@ export function PortfolioClient() {
   const cashPct = draft?.cash_weight_pct ?? 0;
   const totalSum = Math.round((stockSum + cashPct) * 100) / 100;
   const weightOk = Math.abs(totalSum - 100) <= 0.01;
+  // 종목풀에 없는 종목이 남아 있으면 저장할 수 없다 — 서버 검증에서 막힌다.
+  const unknownTickers = view?.unknown_tickers ?? [];
+  const hasUnknown = (draft?.weights ?? []).some((row) => unknownTickers.includes(row.ticker));
   const isDirty = useMemo(
-    () => Boolean(view && draft) && JSON.stringify(view!.settings) !== JSON.stringify(draft),
+    () =>
+      Boolean(view && draft) && JSON.stringify(view!.settings) !== JSON.stringify(draft),
     [view, draft],
   );
 
   const setWeights = (next: Settings["weights"]) => setDraft((previous) => (previous ? { ...previous, weights: next } : previous));
 
   const emptyMetrics = {
+    rank: null,
     daily_change_pct: null,
     current_price: null,
     return_1m_pct: null,
     return_3m_pct: null,
     return_6m_pct: null,
     return_12m_pct: null,
+    return_24m_pct: null,
+    return_36m_pct: null,
     mdd_pct: null,
     sortino: null,
+    high_drawdown_pct: null,
+    short_gap_pct: null,
+    long_gap_pct: null,
+    new_listing: null,
+    listing_months: null,
   };
 
   /** 종목 추가 — `/assets`·`/asset-helper` 와 **같은 훅·같은 조회 API** 를 쓴다.
@@ -374,7 +423,7 @@ export function PortfolioClient() {
   });
 
   /** 현금 고정행 — **표 맨 위**(`/asset-helper` 와 같은 순서). 비중은 직접 편집한다. */
-  const cashRow: WeightRow = { ticker: CASH_TICKER, name: "현금", fixed_weight_pct: cashPct, ...emptyMetrics };
+  const cashRow: WeightRow = { ticker: CASH_TICKER, name: "현금", fixed_weight_pct: cashPct, strategy_weight_pct: view?.actual?.cash_weight_pct ?? null, ...emptyMetrics };
   const addingRow: WeightRow | null = add.addingRow
     ? { ticker: add.addingRow.ticker, name: add.addingRow.name, fixed_weight_pct: 0, is_adding: true, ...emptyMetrics }
     : null;
@@ -388,20 +437,32 @@ export function PortfolioClient() {
         // 지표는 종목풀 목록에서 온다 — 저장 설정에는 비중만 들어 있다.
         ...(metrics
           ? {
+              bucket: metrics.bucket,
+              rank: metrics.rank,
               current_price: metrics.current_price,
               daily_change_pct: metrics.daily_change_pct,
               return_1m_pct: metrics.return_1m_pct,
               return_3m_pct: metrics.return_3m_pct,
               return_6m_pct: metrics.return_6m_pct,
               return_12m_pct: metrics.return_12m_pct,
+              return_24m_pct: metrics.return_24m_pct,
+              return_36m_pct: metrics.return_36m_pct,
               mdd_pct: metrics.mdd_pct,
               sortino: metrics.sortino,
+              high_drawdown_pct: metrics.high_drawdown_pct,
               memo: metrics.memo,
+              // 회색 행(추세 이탈)·🆕 판정값 — 빠뜨리면 '값 없음 = 이탈 취급'으로 전 행이 회색이 된다.
+              short_gap_pct: metrics.short_gap_pct,
+              long_gap_pct: metrics.long_gap_pct,
+              new_listing: metrics.new_listing,
+              listing_months: metrics.listing_months,
             }
           : {}),
         ticker: row.ticker,
         name: metrics?.name ?? row.ticker,
+        is_unknown: !metrics,
         fixed_weight_pct: row.weight_pct,
+        strategy_weight_pct: view?.actual?.weight_by_ticker?.[row.ticker] ?? null,
       };
     }),
   ];
@@ -467,12 +528,14 @@ export function PortfolioClient() {
         cellClass: "assetsDragCell",
         valueGetter: () => "",
       },
-      {
-        field: "ticker",
-        headerName: "티커",
+      // 티커·종목명 — 공용 컬럼(col-id 표준). 추가 행 입력칸·현금 행만 화면 고유 표기다.
+      // 순위·고점 — 순위·모멘텀·신고가와 같은 공용 컬럼(고점 0 이면 ⭐신고점). 순위 화면처럼 버킷 왼쪽.
+      rankColumn<WeightRow>((row) => row?.rank),
+      highDrawdownColumn<WeightRow>("high_drawdown_pct"),
+      bucketColumn<WeightRow>(),
+      tickerColumn<WeightRow>({
         minWidth: 110,
         width: 110,
-        pinned: "left",
         cellRenderer: (params: { data?: WeightRow }) => {
           const row = params.data;
           if (!row) return "-";
@@ -491,15 +554,18 @@ export function PortfolioClient() {
           }
           return <TickerDetailLink ticker={row.ticker} displayTicker={row.ticker} />;
         },
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        minWidth: 220,
-        flex: 1,
-        cellRenderer: (params: { data?: WeightRow; value?: string }) => {
+      }),
+      stockNameColumn<WeightRow>({
+        cellRenderer: (params: { data?: WeightRow; value?: string | null }) => {
           const row = params.data;
           if (!row) return null;
+          if (row.is_unknown) {
+            return (
+              <span style={{ color: "var(--up-color, #d64545)", fontWeight: 600 }}>
+                {row.ticker} — 종목풀에 없음
+              </span>
+            );
+          }
           if (row.is_adding) {
             return (
               <div className="assetsNameLookup">
@@ -518,9 +584,9 @@ export function PortfolioClient() {
             );
           }
           if (row.ticker === CASH_TICKER) return <span style={{ color: "var(--text-muted)" }}>현금</span>;
-          return renderStockNameCell(params.value);
+          return renderStockNameCell(params.value, { isNew: Boolean(row.new_listing), newMonths: row.listing_months ?? null });
         },
-      },
+      }),
       // 종목 메모 — 전 화면 공용 컬럼(`@/lib/grid-cells`). 순위·자산 관리 화면과 같은 값이고
       // 저장 경로도 같다(셀을 벗어나면 바로 저장). 현금 행·추가행은 종목이 아니라 편집 불가.
       stockMemoColumn<WeightRow>({
@@ -541,6 +607,9 @@ export function PortfolioClient() {
       { field: "return_3m_pct", headerName: "3달", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
       { field: "return_6m_pct", headerName: "6달", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
       { field: "return_12m_pct", headerName: "1년", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
+      // 캐시 이력이 그 기간보다 짧은 종목은 "-" (백엔드가 None 을 준다 — 값을 추정하지 않는다).
+      { field: "return_24m_pct", headerName: "2년", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
+      { field: "return_36m_pct", headerName: "3년", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
       { field: "mdd_pct", headerName: "MDD", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
       {
         field: "sortino",
@@ -551,8 +620,17 @@ export function PortfolioClient() {
         valueFormatter: (p) => fmtNum(p.value as number | null),
       },
       {
+        field: "strategy_weight_pct",
+        headerName: "운용 비중",
+        headerTooltip: "이 풀의 포트폴리오 슬리브를 쓰는 계좌의 실제 보유 평가액 ÷ 슬리브 한도금액(운용 자본 × 슬리브 비중).",
+        width: 105,
+        hide: !showActual,
+        type: "rightAligned",
+        valueFormatter: (p) => p.value == null ? "-" : Number(p.value).toFixed(2),
+      },
+      {
         field: "fixed_weight_pct",
-        headerName: "비중",
+        headerName: "설정 비중",
         minWidth: 92,
         width: 92,
         type: "rightAligned",
@@ -574,63 +652,17 @@ export function PortfolioClient() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [draft?.weights, nameByTicker, universeByTicker, add, saveMemo],
-  );
-
-  const periodRows = useMemo<PeriodRow[]>(() => {
-    if (!backtest) return [];
-    const keyLength = viewMode === "yearly" ? 4 : viewMode === "monthly" ? 7 : 10;
-    // 일별 누적(%)을 구간별 수익률로 자른다 — 다른 전략 화면과 같은 방식.
-    const byKey = new Map<string, { first: number; last: number }>();
-    let previous: number | null = null;
-    for (const row of backtest.daily) {
-      const key = row.date.slice(0, keyLength);
-      const base = previous ?? row.strategy_pct;
-      const entry = byKey.get(key);
-      if (!entry) byKey.set(key, { first: base, last: row.strategy_pct });
-      else entry.last = row.strategy_pct;
-      previous = row.strategy_pct;
-    }
-    const benchByKey = new Map<string, { first: number; last: number }>();
-    let previousBench: number | null = null;
-    for (const row of backtest.daily) {
-      const key = row.date.slice(0, keyLength);
-      const base = previousBench ?? row.benchmark_pct;
-      const entry = benchByKey.get(key);
-      if (!entry) benchByKey.set(key, { first: base, last: row.benchmark_pct });
-      else entry.last = row.benchmark_pct;
-      previousBench = row.benchmark_pct;
-    }
-    const step = (entry: { first: number; last: number }) =>
-      Math.round(((1 + entry.last / 100) / (1 + entry.first / 100) - 1) * 10000) / 100;
-    return [...byKey.entries()]
-      .map(([period, entry]) => ({
-        period,
-        strategy_pct: step(entry),
-        benchmark_pct: benchByKey.has(period) ? step(benchByKey.get(period)!) : 0,
-      }))
-      .reverse();
-  }, [backtest, viewMode]);
-
-  const periodColumns = useMemo<ColDef<PeriodRow>[]>(
-    () => [
-      {
-        field: "period",
-        headerName: viewMode === "yearly" ? "연도" : viewMode === "monthly" ? "월" : "일자",
-        width: 140,
-      },
-      { field: "strategy_pct", headerName: "전략(%)", flex: 1, minWidth: 108, type: "rightAligned", cellRenderer: renderPctCell },
-      { field: "benchmark_pct", headerName: "벤치마크(%)", flex: 1, minWidth: 108, type: "rightAligned", cellRenderer: renderPctCell },
-    ],
-    [viewMode],
+    [draft?.weights, nameByTicker, universeByTicker, add, saveMemo, showActual],
   );
 
   const hintStyle = { fontSize: "var(--fs-sm)", color: "var(--text-muted)" } as const;
 
-  if (loading && !view) {
+  if (loading) {
     return (
       <PageFrame title="포트폴리오 전략" fullWidth>
-        <div className="appPageStack">불러오는 중…</div>
+        <div className="appPageStack" role="status" aria-live="polite">
+          {view ? "종목풀을 바꾸는 중…" : "불러오는 중…"}
+        </div>
       </PageFrame>
     );
   }
@@ -645,9 +677,13 @@ export function PortfolioClient() {
   return (
     <PageFrame title="포트폴리오 전략" fullWidth>
       <div className="appPageStack">
-        {/* ① 설정 — 종목풀 · 리밸런싱 주기 · 리밸런싱 기준. 모멘텀·신고가 화면과 같은 자리. */}
+        {error ? <div className="alert alert-danger">{error}</div> : null}
+        {/* ① 설정 — 종목풀 · 전략 시작일. 모멘텀·신고가 화면과 같은 자리. */}
         <div className="card appCard">
           <div className="card-body">
+            {!view.settings.start_date ? (
+              <div className="alert alert-info">전략 시작일을 선택하고 저장하면 이용할 수 있습니다.</div>
+            ) : null}
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
                 <label className="appLabeledField">
@@ -665,37 +701,7 @@ export function PortfolioClient() {
                     ))}
                   </select>
                 </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">리밸런싱</span>
-                  <select
-                    className="form-select form-select-sm"
-                    style={{ width: "auto" }}
-                    value={draft.rebalance}
-                    onChange={(event) => setDraft({ ...draft, rebalance: event.target.value })}
-                  >
-                    {view.constraints.rebalance_options.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">리밸런싱 기준</span>
-                  <select
-                    className="form-select form-select-sm"
-                    style={{ width: "auto" }}
-                    value={String(draft.band_pct)}
-                    title="목표 비중과 이만큼(%) 벌어져야 되돌립니다"
-                    onChange={(event) => setDraft({ ...draft, band_pct: Number(event.target.value) })}
-                  >
-                    {view.constraints.band_pct_options.map((option) => (
-                      <option key={option} value={String(option)}>
-                        {option}%
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <StrategyStartDate value={draft.start_date} disabled={saving} onChange={(start_date) => setDraft({ ...draft, start_date })} />
               </div>
               <div className="appMainHeaderRight">
                 <UnsavedChangesBadge show={isDirty} />
@@ -703,8 +709,14 @@ export function PortfolioClient() {
                   type="button"
                   className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                   onClick={() => void saveSettings()}
-                  disabled={saving || !isDirty || !weightOk}
-                  title={weightOk ? undefined : "종목 비중 합이 100%를 넘습니다"}
+                  disabled={saving || !isDirty || !weightOk || hasUnknown || !draft.start_date}
+                  title={
+                    hasUnknown
+                      ? "종목풀에 없는 종목이 있습니다 — 그 행을 지우고 비중을 다시 나눠주세요."
+                      : weightOk
+                        ? undefined
+                        : "종목 비중 합이 100%를 넘습니다"
+                  }
                 >
                   <IconCheck size={16} />
                   <span>{saving ? "저장 중…" : "저장"}</span>
@@ -714,6 +726,7 @@ export function PortfolioClient() {
           </div>
         </div>
 
+        {view.actual_error ? <div className="alert alert-danger">운용 비중 계산 실패: {view.actual_error}</div> : null}
         {/* ② 목표 비중 — 컬럼·버튼은 `/asset-helper` 표준을 따른다. */}
         <div className="card appCard">
           <div className="card-body">
@@ -732,7 +745,13 @@ export function PortfolioClient() {
                   title="종목 + 현금 = 100% 여야 저장됩니다"
                 >
                   합계 {totalSum.toFixed(2)}%{weightOk ? "" : " — 100% 여야 저장됩니다"}
+                  {hasUnknown ? " · 종목풀에 없는 종목이 있습니다 (지우고 비중을 다시 나눠주세요)" : ""}
                 </span>
+                {view.actual ? (
+                  <span style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: "var(--tblr-blue, #206bc4)" }}>
+                    {view.actual.hidden_reason ?? `운용 비중 기준: ${view.actual.account_name}`}
+                  </span>
+                ) : null}
               </div>
               <div className="appMainHeaderRight">
                 <GridToolbarButton
@@ -777,6 +796,15 @@ export function PortfolioClient() {
               theme={gridTheme}
               minHeight={0}
               height="auto"
+              // 공통 행 표시 — 추세 이탈은 행 전체 회색(전 화면 동일, ❗ 배지 대체).
+              // 현금·추가 행은 종목이 아니라 제외한다.
+              getRowClass={(p) =>
+                stockRowClass({
+                  trendBroken:
+                    Boolean(p.data && !p.data.is_adding && p.data.ticker !== CASH_TICKER && !p.data.is_unknown) &&
+                    isTrendBroken(p.data?.short_gap_pct, p.data?.long_gap_pct),
+                })
+              }
               gridOptions={{
                 domLayout: "autoHeight",
                 suppressMovableColumns: true,
@@ -850,7 +878,7 @@ export function PortfolioClient() {
                   type="button"
                   className="btn btn-sm btn-dark"
                   onClick={() => void runBacktest()}
-                  disabled={backtesting || isDirty || draft.weights.length === 0}
+                  disabled={backtesting || isDirty || !view.settings.start_date || draft.weights.length === 0}
                 >
                   {backtesting ? "실행 중…" : "실행"}
                 </button>
@@ -871,6 +899,8 @@ export function PortfolioClient() {
                     totalPct: backtest.strategy_total_pct,
                     cagrPct: backtest.strategy_cagr_pct,
                     mddPct: backtest.strategy_mdd_pct,
+                    mddFrom: backtest.strategy_mdd_from,
+                    mddTo: backtest.strategy_mdd_to,
                     sortino: backtest.strategy_sortino,
                   }}
                   benchmark={{
@@ -878,26 +908,19 @@ export function PortfolioClient() {
                     totalPct: backtest.benchmark_total_pct,
                     cagrPct: backtest.benchmark_cagr_pct,
                     mddPct: backtest.benchmark_mdd_pct,
+                    mddFrom: backtest.benchmark_mdd_from,
+                    mddTo: backtest.benchmark_mdd_to,
                     sortino: backtest.benchmark_sortino,
                   }}
                 />
                 <div style={{ ...hintStyle, marginBottom: 10 }}>
-                  리밸런싱 매매 {backtest.rebalance_count}건 · 현금 {backtest.cash_weight_pct}%
+                  현금 {backtest.cash_weight_pct}%
                 </div>
-                <NavTabs
-                  items={VIEW_MODES}
-                  value={viewMode}
-                  onChange={setViewMode}
-                  label="백테스트 보기 단위"
-                  style={{ marginBottom: 10 }}
-                />
-                <AppAgGrid<PeriodRow>
-                  rowData={periodRows}
-                  columnDefs={periodColumns}
-                  theme={gridTheme}
-                  minHeight={0}
-                  height="auto"
-                  gridOptions={{ domLayout: "autoHeight", suppressMovableColumns: true }}
+                <BacktestPeriodTables
+                  daily={backtest.daily}
+                  strategyLabel="전략"
+                  benchmarkLabel={backtest.benchmark_name}
+                  defaultView="yearly"
                 />
               </>
             )}

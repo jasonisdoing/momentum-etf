@@ -1,4 +1,4 @@
-"""보유 종목 차트 데이터 — 전략 화면(신고가·모멘텀·합성)의 「차트」 탭 공용.
+"""보유 종목 차트 데이터 — 전략 화면(신고가·모멘텀·합성) 공용.
 
 일봉 캔들과 이동평균선(들)을 만들어 준다. 어떤 선을 그릴지는 전략이 정한다 —
 신고가는 이탈 이평선 1개, 모멘텀은 단기·장기 2개를 넘긴다. 판정은 하지 않는다.
@@ -15,6 +15,7 @@ from typing import Any
 import pandas as pd
 
 from config import HOLDING_CHART_MONTHS, HOLDING_CHART_SHOW_AVG_BUY_PRICE
+from utils.moving_averages import calculate_moving_average, pool_moving_average_type
 from utils.price_series import positive_prices as _positive
 
 _CANDLE_KEYS = ("Open", "High", "Low", "Close")
@@ -40,19 +41,16 @@ def holding_charts(
     ma_days_list = sorted({int(days) for days in ma_days_list if int(days) > 0})
     if not wanted or not ma_days_list:
         return []
+    ma_type = pool_moving_average_type(pool)
     name_by = {
         str(item.get("ticker") or "").strip(): str(item.get("name") or "").strip()
         for item in _load_ticker_type_stocks_raw(pool)
     }
     frames = load_cached_frames_bulk_from_ticker_types([pool], wanted)
     # 내 평균 매입가 — 전 계좌 합산. 같은 티커가 다른 시장에도 있으면(IOO) 이 풀의 통화만 센다.
-    # 끄면(config.HOLDING_CHART_SHOW_AVG_BUY_PRICE) 계좌를 아예 읽지 않는다.
+    # 「수익률」 배지가 이 값을 쓰므로 스위치와 무관하게 항상 읽는다(스위치는 선 표시만 정한다).
     pool_currency = str((get_ticker_type_settings(pool) or {}).get("currency") or "").strip()
-    avg_buy_by = (
-        average_buy_price_by_ticker(wanted, currency=pool_currency or None)
-        if HOLDING_CHART_SHOW_AVG_BUY_PRICE
-        else {}
-    )
+    avg_buy_by = average_buy_price_by_ticker(wanted, currency=pool_currency or None)
 
     # 한 요청의 차트들이 **같은 날짜 축**을 쓰도록, 이 풀의 거래일을 먼저 모은다.
     # 이게 없으면 상장한 지 얼마 안 된 종목이 캔들 열몇 개로 가로 폭을 다 채워, 다른 종목과
@@ -75,9 +73,12 @@ def holding_charts(
         if frame is None or frame.empty or any(key not in frame for key in _CANDLE_KEYS):
             continue
         cols = {key: _positive(frame[key]) for key in _CANDLE_KEYS}
+        volumes = pd.to_numeric(frame["Volume"], errors="coerce") if "Volume" in frame else None
         close = cols["Close"]
         # 화면이 보는 구간만 잘라 보내되, 이평선은 잘린 앞부분까지 써서 계산한다.
-        ma_by_days = {days: close.rolling(days, min_periods=days).mean() for days in ma_days_list}
+        ma_by_days = {
+            days: calculate_moving_average(close, days, min_periods=days, ma_type=ma_type) for days in ma_days_list
+        }
         span = frame.index[frame.index >= frame.index[-1] - pd.DateOffset(months=months)]
         if window_dates:
             # 공용 창 밖(이 종목만 더 과거를 들고 있는 경우)은 잘라 축을 맞춘다.
@@ -91,7 +92,12 @@ def holding_charts(
             if any(pd.isna(value) for value in values):
                 continue
             date = str(day.date())
-            candles.append(dict(zip(("open", "high", "low", "close"), (float(v) for v in values)), time=date))
+            candle = dict(zip(("open", "high", "low", "close"), (float(v) for v in values)), time=date)
+            # 거래량 — 화면이 캔들 아래 막대로 그린다(`/ticker` 상세와 같은 모양). 캐시에 없는
+            # 봉은 None 으로 두고 막대를 그리지 않는다(0 으로 채우지 않는다).
+            volume = volumes.get(day) if volumes is not None else None
+            candle["volume"] = None if volume is None or pd.isna(volume) else float(volume)
+            candles.append(candle)
             candle_dates.append(day)
             for days, ma in ma_by_days.items():
                 if pd.notna(ma.get(day)):
@@ -103,9 +109,13 @@ def holding_charts(
                 "ticker": ticker,
                 "name": name_by.get(ticker) or ticker,
                 "candles": candles,
-                "ma_lines": [{"ma_days": days, "points": points_by_days[days]} for days in ma_days_list],
+                "ma_lines": [
+                    {"ma_days": days, "ma_type": ma_type, "points": points_by_days[days]} for days in ma_days_list
+                ],
                 # 내 평균 매입가 — 실제로 들고 있는 종목에만 붙는다(`/ticker` 상세와 같은 값).
                 "avg_buy_price": avg_buy_by.get(ticker),
+                # 차트에 평단 점선·배지를 그릴지(config 스위치). 수익률 배지는 이 값과 무관하게 항상 보인다.
+                "show_avg_line": HOLDING_CHART_SHOW_AVG_BUY_PRICE,
                 # 통화 — 화면이 가격에 기호를 붙인다(원 · $ · A$). 풀마다 다르므로 함께 보낸다.
                 "currency": pool_currency,
                 # 공용 날짜 축 — 화면이 보이는 구간을 이 값으로 잡는다.

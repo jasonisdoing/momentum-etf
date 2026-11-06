@@ -9,7 +9,7 @@ from fastapi_app.dependencies import require_internal_token
 from services.portfolio_change_service import compute_portfolio_change_bundle
 from utils.holdings_detail_service import (
     add_holding,
-    delete_holding,
+    delete_holdings,
     load_all_holdings_detail,
     reorder_holdings,
     update_holding,
@@ -28,12 +28,13 @@ def get_all_holdings(
 
 
 @router.delete("")
-def delete_one_holding(
+def delete_selected_holdings(
     account: str = Query(...),
-    ticker: str = Query(...),
+    ticker: list[str] = Query(...),
     _: None = Depends(require_internal_token),
 ) -> dict[str, Any]:
-    return delete_holding(account_id=account, ticker=ticker)
+    """``ticker`` 를 여러 번 주면 한 요청으로 함께 삭제한다."""
+    return delete_holdings(account_id=account, tickers=ticker)
 
 
 @router.patch("")
@@ -47,7 +48,6 @@ def patch_one_holding(
         quantity=body.get("quantity"),
         average_buy_price=body.get("average_buy_price"),
         memo=body.get("memo"),
-        target_ratio=body.get("target_ratio"),
     )
 
 
@@ -62,6 +62,18 @@ def patch_holdings_order(
     )
 
 
+@router.patch("/groups")
+def patch_holdings_groups(
+    body: dict[str, Any] = Body(...),
+    _: None = Depends(require_internal_token),
+) -> dict[str, Any]:
+    """자식 표 사용자 그룹(표시 구분선) 저장 — 보유 원장과 무관한 표시 정보."""
+    from utils.portfolio_io import save_account_holdings_groups
+
+    save_account_holdings_groups(str(body.get("account_id") or ""), list(body.get("groups") or []))
+    return {"ok": True}
+
+
 @router.post("")
 def post_one_holding(
     body: dict[str, Any] = Body(...),
@@ -73,7 +85,6 @@ def post_one_holding(
         quantity=body.get("quantity", 0),
         average_buy_price=body.get("average_buy_price", 0),
         memo=body.get("memo"),
-        target_ratio=body.get("target_ratio"),
     )
 
 

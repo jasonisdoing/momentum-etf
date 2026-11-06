@@ -16,20 +16,26 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
 from utils.env import load_env_if_present
-from utils.strategy_mix_notify import notify_all
+from utils.strategy_mix_notify import in_watch_window, notify_all
 
 
 def main() -> int:
     load_env_if_present()
     country = (sys.argv[1].strip().lower() if len(sys.argv) > 1 else None) or None
+    if not in_watch_window(country):
+        print(f"[strategy_mix_notify] {country} 감시 시간이 아닙니다(정규장 개장 10분 후부터)")
+        return 0
     result = notify_all(country)
     for row in result["targets"]:
         # 감시 단위는 계좌다 — 합성 A·B 종목풀은 계좌 설정에 딸려 있다.
         label = row.get("name") or row["account_id"]
         if "error" in row:
             print(f"[strategy_mix_notify] {label} 실패 — {row['error']}")
-        elif row.get("changed"):
-            print(f"[strategy_mix_notify] {label} 발송 — 신규·증가 {row['new_or_grown']}건 (전체 {row['items']}건)")
+        elif row.get("changed") or row.get("confirmed"):
+            print(
+                f"[strategy_mix_notify] {label} 발송 — 신규·증가 {row['new_or_grown']}건 · "
+                f"체결확인 {row['confirmed']}건 (전체 {row['items']}건)"
+            )
         else:
             print(f"[strategy_mix_notify] {label} 변화 없음 ({row['items']}건 유지)")
     if not result["targets"]:

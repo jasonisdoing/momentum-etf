@@ -24,6 +24,7 @@ export type HoldingsRow = {
   bucket: string;
   bucket_id: number;
   ticker: string;
+  ticker_type?: string;
   name: string;
   quantity: number;
   average_buy_price: string | number;
@@ -36,10 +37,10 @@ export type HoldingsRow = {
   daily_change_pct?: number | null;
   buy_amount_krw: number;
   valuation_krw: number;
-  target_ratio?: number | null;
-  target_quantity?: number | null;
   memo?: string | null;
   sort_order?: number | null;
+  /** 사용자 그룹 헤더 행(표시 구분선) — 데이터가 아니라 표시 전용 행이다. */
+  is_group?: boolean;
   original_quantity?: number;
   original_average_buy_price?: number;
   original_buy_amount_krw?: number;
@@ -76,8 +77,8 @@ export type AccountSummary = {
   cash_display_native?: number;
   cash_display_currency?: string;
   cash_target_ratio: number;
-  // 자산 헬퍼에서 저장한 현금 목표 비중(%) — 미저장이면 null ('-' 표시, 파생·기본값 없음)
-  helper_cash_weight_pct?: number | null;
+  /** 자식 표 사용자 그룹(표시 구분선) — [{id, name, before_ticker}]. */
+  holdings_groups?: { id: string; name: string; before_ticker: string | null }[];
   intl_shares_value: number | null;
   intl_shares_change: number | null;
   updated_at: string | null;
@@ -86,7 +87,6 @@ export type AccountSummary = {
   valuation_krw: number;
   total_assets_krw: number;
   holdings_count: number;
-  target_ratio_total: number;
   cash_ratio: number;
   net_profit: number;
   net_profit_pct: number;
@@ -112,7 +112,6 @@ export type ParentGridRow =
     total_principal: number;
     /** 표시용 현금(원화 환산). 이 그리드에서는 편집하지 않는다. */
     cash_krw: number;
-    target_ratio_total: number | null;
     holdings_count: number;
     cash_ratio: number;
     net_profit: number;
@@ -217,6 +216,54 @@ export function getBucketCellClass(bucketId: number): string {
 export function parseRawPrice(formatted: unknown): string {
   if (formatted === null || formatted === undefined) return "0";
   return String(formatted).replace(/A\$|\$|₩|원|,|\s/g, "");
+}
+
+/**
+ * 같은 거절 메시지가 잇달아 뜨는 것을 막는다.
+ *
+ * AG Grid 는 편집 확정 한 번에 `valueParser` 를 여러 번 부른다. 그대로 두면 토스트가
+ * 같은 문구로 두세 개씩 쌓인다.
+ */
+const REJECT_DEDUPE_MS = 800;
+let lastRejection: { message: string; at: number } | null = null;
+
+/**
+ * 숫자 입력 칸의 공용 파서.
+ *
+ * **빈 값은 0 으로 본다.** 값을 다 지우고 확정하는 건 "0 으로 만들겠다"는 뜻이고,
+ * 세 칸(수량·매입 단가·총 원금) 모두 0 이 유효한 값이다.
+ *
+ * 숫자가 아니거나 음수면 원래 값으로 되돌리고 **그 이유를 알린다**. 예전에는 조용히
+ * 되돌렸는데, 그러면 그리드가 `newValue === oldValue` 로 보고 저장 요청조차 하지 않아
+ * 화면에는 "수정이 안 된다"로만 보였다.
+ */
+export function parseNumericCell(
+  newValue: unknown,
+  oldValue: unknown,
+  options: { label: string; integer?: boolean; onReject: (message: string) => void },
+): unknown {
+  const reject = (message: string) => {
+    const now = Date.now();
+    if (lastRejection && lastRejection.message === message && now - lastRejection.at < REJECT_DEDUPE_MS) {
+      return oldValue;
+    }
+    lastRejection = { message, at: now };
+    options.onReject(message);
+    return oldValue;
+  };
+
+  const raw = parseRawPrice(newValue).trim();
+  if (raw === "") {
+    return 0;
+  }
+  const parsed = options.integer ? parseInt(raw, 10) : parseFloat(raw);
+  if (Number.isNaN(parsed)) {
+    return reject(`${options.label}에 숫자를 입력하세요 (받은 값: ${String(newValue)}).`);
+  }
+  if (parsed < 0) {
+    return reject(`${options.label}은(는) 0 보다 작을 수 없습니다 (받은 값: ${parsed}).`);
+  }
+  return parsed;
 }
 
 export function safeParseFloat(value: unknown): number {
@@ -435,7 +482,6 @@ export function buildCashGridRow(summary: AccountSummary): GridRow {
     daily_change_pct: null,
     buy_amount_krw: cashValue,
     valuation_krw: cashValue,
-    target_ratio: Number(summary.cash_target_ratio ?? 0),
     sort_order: -1,
     original_quantity: 0,
     original_average_buy_price: 0,

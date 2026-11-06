@@ -1,18 +1,43 @@
 """계좌 종목 메타데이터를 업데이트합니다."""
 
+import os
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests  # noqa: F401  # 타입 힌트/하위 호환을 위해 유지
 import yfinance as yf
 
-from config import CACHE_TTL_META
+from services.alps_us_service import fetch_alps_us_holdings
+from services.ark_us_service import fetch_ark_us_holdings
+from services.direxion_us_service import fetch_direxion_us_holdings
 from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
 from services.etf_meta_service import fetch_korean_etf_info_from_naver
+from services.fidelity_us_service import fetch_fidelity_us_holdings
+from services.firsttrust_us_service import fetch_firsttrust_us_holdings
+from services.globalx_au_service import fetch_globalx_au_holdings
+from services.globalx_us_service import fetch_globalx_us_holdings
+from services.invesco_us_service import fetch_invesco_us_holdings
+from services.ishares_au_service import fetch_ishares_au_holdings
+from services.ishares_us_service import fetch_ishares_us_holdings
+from services.marketdesk_us_service import fetch_marketdesk_us_holdings
+from services.proshares_us_service import fetch_proshares_us_holdings
+from services.roundhill_us_service import fetch_roundhill_us_holdings
+from services.schwab_us_service import fetch_schwab_us_holdings
+from services.spdr_au_service import fetch_spdr_au_holdings
+from services.spdr_us_service import fetch_spdr_us_holdings
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
+from services.tortoise_us_service import fetch_tortoise_us_holdings
+from services.us_physical_etf_service import fetch_us_physical_etf_holdings
+from services.vaneck_au_service import fetch_vaneck_au_holdings
+from services.vaneck_us_service import fetch_vaneck_us_holdings
 from services.vanguard_au_service import fetch_vanguard_au_expense_ratio_pct, fetch_vanguard_au_holdings
+from services.vanguard_us_service import fetch_vanguard_us_holdings
+from services.victoryshares_us_service import fetch_victoryshares_us_holdings
+from services.vistashares_us_service import fetch_vistashares_us_holdings
+from services.wisdomtree_us_service import fetch_wisdomtree_us_holdings
 from utils.asx_ticker import (
     ensure_asx_prefix,
     from_yahoo_symbol,
@@ -26,6 +51,14 @@ from utils.data_loader import (
     fetch_naver_kor_stock_map,
     fetch_ohlcv,
     fetch_pykrx_name,
+)
+from utils.data_source_catalog import (
+    AU_ISSUER_KEYWORDS,
+    AU_OFFICIAL_SOURCES,
+    LOCAL_ONLY_HOLDINGS_SOURCES,
+    US_ISSUER_KEYWORDS,
+    US_OFFICIAL_SOURCES,
+    resolve_issuer,
 )
 from utils.http_session import shared_session
 from utils.kis_market import refresh_kis_domestic_etf_master_cache
@@ -205,26 +238,30 @@ from collections.abc import Callable
 
 from utils.stock_list_io import bulk_update_stocks, get_all_etfs_including_deleted
 
-# ETF 메타(info) 캐시 TTL — 이 시간 안에 갱신된 메타가 있으면 네이버 info 호출을 스킵.
-# 사용자 정책: info 는 변경 빈도가 낮으므로 1일 TTL, holdings 는 항상 갱신.
-_ETF_INFO_CACHE_TTL = timedelta(seconds=CACHE_TTL_META)
 
-
+# ETF 메타(info) 갱신 주기 — 하루에 한 번(한국 날짜 기준). 같은 날 다시 돌면 네이버 info 호출을 스킵하고,
+# holdings 는 항상 갱신한다.
 def _is_meta_cache_fresh(existing_doc: dict[str, Any] | None) -> bool:
-    """기존 메타 캐시 문서의 updated_at 이 TTL 이내인지 판정."""
+    """info 를 **오늘(KST)** 이미 받았는지 판정한다.
+
+    판정은 info 를 받은 시각(`meta_cache.info_updated_at`)으로만 한다. 문서의 `updated_at` 은 holdings
+    갱신·포트폴리오 변동 캐시 저장 때마다 바뀌어서, 이걸 쓰면 info 가 영영 낡아도 매일 「방금 갱신됨」으로
+    보여 갱신이 멈춘다(2026-09-28 이후 NAV·보수·배당이 갱신되지 않았다). 주기를 24시간 경과가 아니라
+    날짜로 잡는 것은 매일 같은 시각에 도는 배치가 24시간 직전에 걸려 건너뛰는 일을 막기 위해서다.
+    """
     if not isinstance(existing_doc, dict):
         return False
     meta = existing_doc.get("meta_cache")
     if not isinstance(meta, dict) or not meta:
         return False
-    updated_at = existing_doc.get("updated_at")
-    if not isinstance(updated_at, datetime):
+    fetched_at = meta.get("info_updated_at")
+    if not isinstance(fetched_at, datetime):
         return False
-    # MongoDB datetime 은 naive(UTC) 일 수 있어 tz-aware 화
-    if updated_at.tzinfo is None:
-        updated_at = updated_at.replace(tzinfo=timezone.utc)
-    now = datetime.now(timezone.utc)
-    return (now - updated_at) < _ETF_INFO_CACHE_TTL
+    # MongoDB datetime 은 naive(UTC) 로 돌아오므로 tz-aware 화
+    if fetched_at.tzinfo is None:
+        fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+    kst = ZoneInfo("Asia/Seoul")
+    return fetched_at.astimezone(kst).date() == datetime.now(kst).date()
 
 
 def _refresh_korean_etf_meta_cache(
@@ -259,6 +296,8 @@ def _refresh_korean_etf_meta_cache(
         meta_cache = {
             "source": str(etf_info.get("source") or "naver_etf_meta"),
             "updated_at": str(etf_info.get("fetched_at") or ""),
+            # info 를 받은 시각 — 갱신 주기 판정(`_is_meta_cache_fresh`)이 이 값만 본다.
+            "info_updated_at": datetime.now(timezone.utc),
             "nav": inav_snapshot.get("nav"),
             "deviation": inav_snapshot.get("deviation"),
             "reference_date": etf_info.get("reference_date"),
@@ -342,6 +381,22 @@ def _yf_expense_ratio_pct(info: dict[str, Any]) -> float | None:
     return None
 
 
+def _holdings_cache_from(holdings_info: dict[str, Any]) -> dict[str, Any]:
+    """수집 결과 → 메타 캐시의 holdings_cache 문서. 재간접을 펼쳤으면 `nested_etfs` 도 남긴다."""
+    cache = {
+        "source": holdings_info["source"],
+        "updated_at": holdings_info["fetched_at"],
+        "reference_date": holdings_info["as_of_date"],
+        "holdings_count": holdings_info["holdings_count"],
+        "items": holdings_info["holdings"],
+    }
+    if holdings_info.get("nested_etfs"):
+        cache["nested_etfs"] = holdings_info["nested_etfs"]
+    if "disclosure" in holdings_info:
+        cache["disclosure"] = holdings_info["disclosure"]
+    return cache
+
+
 def _refresh_us_stock_meta_cache(
     ticker_type: str,
     ticker: str,
@@ -353,7 +408,7 @@ def _refresh_us_stock_meta_cache(
     """미국 종목 메타 캐시를 갱신한다. 네이버 미국 개별주 API 를 기본으로 하되, 네이버에 없는 종목
     (예: 미국 ETF ENFR 등)은 yfinance .info 로 배당수익률·순자산(시가총액)을 보완한다.
 
-    ``is_etf`` 이면 구성종목(holdings)도 yfinance 로 수집해 저장한다(개별주는 구성종목이 없다).
+    ``is_etf`` 이면 공통 미국 ETF 수집 경로로 구성종목도 저장한다.
     """
     ticker_type_norm = str(ticker_type or "").strip().lower()
     ticker_norm = str(ticker or "").strip().upper()
@@ -412,16 +467,19 @@ def _refresh_us_stock_meta_cache(
     # 미국 ETF 는 구성종목도 함께 저장한다(개별주는 holdings 개념이 없어 건너뜀).
     holdings_cache: dict[str, Any] | None = None
     if is_etf:
-        holdings_info = fetch_yfinance_holdings(ticker_norm, is_australian=False)
-        if holdings_info:
-            holdings_cache = {
-                "source": holdings_info["source"],
-                "updated_at": holdings_info["fetched_at"],
-                "reference_date": holdings_info["as_of_date"],
-                "holdings_count": holdings_info["holdings_count"],
-                "items": holdings_info["holdings"],
-            }
+        try:
+            holdings_info = fetch_us_etf_holdings(ticker_norm, name_norm)
+        except LocalOnlyHoldingsSkipError as skipped:
+            get_app_logger().info(
+                f"[{ticker_type_norm.upper()}/{ticker_norm}] 구성종목 갱신 건너뜀(기존 유지) — {skipped}"
+            )
+            holdings_info = None
+            skipped_local_only = True
         else:
+            skipped_local_only = False
+        if holdings_info:
+            holdings_cache = _holdings_cache_from(expand_nested_etf_holdings(holdings_info, ticker_norm))
+        elif not skipped_local_only:
             get_app_logger().warning(
                 f"[{ticker_type_norm.upper()}/{ticker_norm}] 미국 ETF holdings 수집 실패 (메타만 저장)"
             )
@@ -619,6 +677,202 @@ def fetch_yfinance_holdings(ticker: str, is_australian: bool = False) -> dict[st
         return None
 
 
+# 구성종목 하나가 이 비중 이상이면 재간접(feeder) 구조로 보고 ETF 인지 야후에 물어본다.
+# 그보다 작은 구성종목은 우리 DB 에 구성종목이 있는 ETF 일 때만 펼친다(네트워크 호출 없음).
+_NESTED_FEEDER_MIN_WEIGHT = 50.0
+
+
+def _registered_etf_holdings(tickers: list[str]) -> dict[str, list[dict[str, Any]]]:
+    """DB 에 구성종목이 저장된 티커 → 그 구성종목. 개별주는 구성종목이 없어 자연히 빠진다."""
+    from utils.db_manager import get_db_connection
+
+    db = get_db_connection()
+    if db is None or not tickers:
+        return {}
+    found: dict[str, list[dict[str, Any]]] = {}
+    for doc in db["stock_cache_meta"].find(
+        {"ticker": {"$in": tickers}, "holdings_cache.items.0": {"$exists": True}},
+        {"ticker": 1, "holdings_cache.items": 1},
+    ):
+        items = list((doc.get("holdings_cache") or {}).get("items") or [])
+        ticker = str(doc.get("ticker") or "")
+        # 같은 티커가 여러 풀에 있으면 구성종목이 더 많은 쪽을 쓴다.
+        if len(items) > len(found.get(ticker, [])):
+            found[ticker] = items
+    return found
+
+
+# 공식 수집 소스 → 수집 함수. 발행사 → 소스는 카탈로그(`AU/US_OFFICIAL_SOURCES`)가 단일 소스다.
+_AU_OFFICIAL_FETCHERS: dict[str, Callable[[str], dict[str, Any] | None]] = {
+    "betashares_csv": fetch_betashares_holdings,
+    "vanguard_au_api": fetch_vanguard_au_holdings,
+    "spdr_au_xlsx": fetch_spdr_au_holdings,
+    "ishares_au_csv": fetch_ishares_au_holdings,
+    "globalx_au_xlsx": fetch_globalx_au_holdings,
+    "vaneck_au_xlsx": fetch_vaneck_au_holdings,
+}
+_US_OFFICIAL_FETCHERS: dict[str, Callable[[str], dict[str, Any] | None]] = {
+    "invesco_us_api": fetch_invesco_us_holdings,
+    "ishares_us_csv": fetch_ishares_us_holdings,
+    "spdr_us_xlsx": fetch_spdr_us_holdings,
+    "vaneck_us_api": fetch_vaneck_us_holdings,
+    "vistashares_us_csv": fetch_vistashares_us_holdings,
+    "ark_us_csv": fetch_ark_us_holdings,
+    "firsttrust_us_html": fetch_firsttrust_us_holdings,
+    "fidelity_us_xls": fetch_fidelity_us_holdings,
+    "tortoise_us_html": fetch_tortoise_us_holdings,
+    "globalx_us_csv": fetch_globalx_us_holdings,
+    "victoryshares_us_api": fetch_victoryshares_us_holdings,
+    "vanguard_us_api": fetch_vanguard_us_holdings,
+    "direxion_us_api": fetch_direxion_us_holdings,
+    "roundhill_us_csv": fetch_roundhill_us_holdings,
+    "alps_us_api": fetch_alps_us_holdings,
+    "marketdesk_us_csv": fetch_marketdesk_us_holdings,
+    "wisdomtree_us_api": fetch_wisdomtree_us_holdings,
+    "schwab_us_html": fetch_schwab_us_holdings,
+    "proshares_us_html": fetch_proshares_us_holdings,
+}
+if set(_AU_OFFICIAL_FETCHERS) != set(AU_OFFICIAL_SOURCES.values()) or set(_US_OFFICIAL_FETCHERS) != set(
+    US_OFFICIAL_SOURCES.values()
+):
+    raise RuntimeError("공식 구성종목 수집 함수 목록이 카탈로그의 공식 소스와 다릅니다.")
+
+
+class LocalOnlyHoldingsSkipError(Exception):
+    """서버에서 로컬 전용 소스(`LOCAL_ONLY_HOLDINGS_SOURCES`)를 만났다 — 구성종목을 갱신하지 않고 기존 값을 둔다."""
+
+
+def _fetch_issuer_holdings(
+    ticker: str,
+    name: str,
+    *,
+    table: list[tuple[str, tuple[str, ...]]],
+    official: dict[str, str],
+    fetchers: dict[str, Callable[[str], dict[str, Any] | None]],
+    is_australian: bool,
+) -> dict[str, Any] | None:
+    """ETF 이름으로 발행사를 정하고 **그 발행사의 공식 연동만** 부른다. 연동이 없으면 Yahoo 상위 목록.
+
+    예전에는 모든 운용사 연동을 차례로 불러 「우리 상품인가」를 물었다. 한 운용사 사이트가 막히면
+    (2026-10-22 WisdomTree Cloudflare 403) 그 뒤 순서의 다른 발행사 ETF 57개까지 전부 실패했다.
+    발행사 판정은 /data_source 와 같은 규칙(`resolve_issuer`)이다.
+    """
+    source = official.get(resolve_issuer(name, table))
+    if source in LOCAL_ONLY_HOLDINGS_SOURCES and os.environ.get("APP_TYPE") == "Server":
+        raise LocalOnlyHoldingsSkipError(f"{ticker}: {LOCAL_ONLY_HOLDINGS_SOURCES[source]}")
+    if source is not None:
+        holdings = fetchers[source](ticker)
+        if holdings is not None:
+            return holdings
+    return fetch_yfinance_holdings(ticker, is_australian=is_australian)
+
+
+def fetch_au_etf_holdings(ticker: str, name: str) -> dict[str, Any] | None:
+    """호주 ETF 구성종목 — 발행사 공식 연동, 없으면 Yahoo 상위 목록."""
+    return _fetch_issuer_holdings(
+        ticker,
+        name,
+        table=AU_ISSUER_KEYWORDS,
+        official=AU_OFFICIAL_SOURCES,
+        fetchers=_AU_OFFICIAL_FETCHERS,
+        is_australian=True,
+    )
+
+
+def fetch_us_etf_holdings(ticker: str, name: str) -> dict[str, Any] | None:
+    """미국 ETF 구성종목 — 실물 상품은 공식 공시, 그 밖은 발행사 공식 연동, 없으면 Yahoo 상위 목록."""
+    physical = fetch_us_physical_etf_holdings(ticker)
+    if physical is not None:
+        return physical
+    return _fetch_issuer_holdings(
+        ticker,
+        name,
+        table=US_ISSUER_KEYWORDS,
+        official=US_OFFICIAL_SOURCES,
+        fetchers=_US_OFFICIAL_FETCHERS,
+        is_australian=False,
+    )
+
+
+def _feeder_etf_holdings(ticker: str) -> list[dict[str, Any]] | None:
+    """DB에 없는 큰 구성종목이 ETF면 공통 수집 경로로 조회한다. ETF가 아니면 None."""
+    is_australian = ticker.startswith("ASX:")
+    symbol = to_yahoo_symbol(ticker) if is_australian else normalize_ticker(ticker)
+    try:
+        info = getattr(yf.Ticker(symbol), "info", {}) or {}
+    except Exception as exc:
+        get_app_logger().debug(f"[yfinance] {symbol} 종류 확인 실패: {exc}")
+        return None
+    if str(info.get("quoteType") or "").upper() != "ETF":
+        return None
+    # 발행사 판정용 이름 — DB 에 없는 종목이라 Yahoo 이름을 쓴다.
+    name = str(info.get("longName") or info.get("shortName") or "")
+    try:
+        inner = fetch_au_etf_holdings(ticker, name) if is_australian else fetch_us_etf_holdings(ticker, name)
+    except LocalOnlyHoldingsSkipError:
+        # 서버에서 못 받는 재간접 대상은 펼치지 않고 그 ETF 한 줄로 둔다.
+        return None
+    return list(inner["holdings"]) if inner else None
+
+
+def expand_nested_etf_holdings(holdings_info: dict[str, Any] | None, own_ticker: str) -> dict[str, Any] | None:
+    """구성종목 중 ETF 를 그 ETF 의 구성종목으로 펼친다(재간접 ETF) — 한 단계만.
+
+    비중은 `바깥 비중 × 안쪽 비중 / 100` 이고, 같은 종목이 여러 갈래로 나오면 합친다.
+    안쪽 ETF 의 구성종목이 일부(예: 야후 상위 10개)뿐이면 펼친 결과의 비중 합이 100 보다 작다 —
+    모르는 몫을 지어내지 않는다. 어떤 ETF 를 얼마나 덮었는지는 `nested_etfs` 에 남겨 화면이 알린다.
+    펼칠 게 없으면 입력을 그대로 돌려준다.
+    """
+    if not holdings_info or not holdings_info.get("holdings"):
+        return holdings_info
+    outer = list(holdings_info["holdings"])
+    registered = _registered_etf_holdings(
+        [str(item.get("ticker") or "") for item in outer if item.get("ticker") and item["ticker"] != own_ticker]
+    )
+
+    merged: dict[str, dict[str, Any]] = {}
+    nested: list[dict[str, Any]] = []
+
+    def add(item: dict[str, Any], weight: float | None) -> None:
+        # 상장 시장이 다른 같은 티커와 시세 심볼 없는 채권·파생상품을 합치지 않는다.
+        key = (
+            f"unpriced:{len(merged)}"
+            if item.get("price_lookup_supported") is False
+            else str(item.get("yahoo_symbol") or item.get("ticker") or "")
+        )
+        if key in merged:
+            existing_weight = merged[key]["weight"]
+            merged[key]["weight"] = (
+                existing_weight + weight if existing_weight is not None and weight is not None else None
+            )
+        else:
+            merged[key] = {**item, "weight": weight}
+
+    for item in outer:
+        ticker = str(item.get("ticker") or "")
+        weight = float(item["weight"]) if item.get("weight") is not None else None
+        inner = None
+        if weight is not None and ticker and ticker != own_ticker and item.get("price_lookup_supported") is not False:
+            inner = registered.get(ticker)
+            if not inner and weight >= _NESTED_FEEDER_MIN_WEIGHT:
+                inner = _feeder_etf_holdings(ticker)
+        if not inner:
+            add(item, weight)
+            continue
+        covered = 0.0
+        for sub in inner:
+            sub_weight = weight * float(sub["weight"]) / 100.0 if sub.get("weight") is not None else None
+            add(sub, sub_weight)
+            if sub_weight is not None:
+                covered += sub_weight
+        nested.append({"ticker": ticker, "weight": round(weight, 2), "covered_weight": round(covered, 2)})
+
+    if not nested:
+        return holdings_info
+    items = sorted(merged.values(), key=lambda x: x.get("weight") or 0.0, reverse=True)
+    return {**holdings_info, "holdings": items, "holdings_count": len(items), "nested_etfs": nested}
+
+
 def _refresh_overseas_etf_meta_cache(
     ticker_type: str,
     ticker: str,
@@ -634,31 +888,25 @@ def _refresh_overseas_etf_meta_cache(
     name_norm = str(name or "").strip() or ticker_norm
     country_norm = str(country_code or "").strip().lower()
 
-    holdings_info = None
-
-    # 호주 ETF는 발행사 공식 소스(BetaShares CSV → Vanguard API)를 먼저 쓰고
-    # 둘 다 없을 때만 yfinance 로 폴백한다. 공식 소스가 구성종목 국가까지 알려준다.
-    if country_norm == "au":
-        holdings_info = fetch_betashares_holdings(ticker_norm)
-        if not holdings_info:
-            holdings_info = fetch_vanguard_au_holdings(ticker_norm)
-        if not holdings_info:
-            holdings_info = fetch_yfinance_holdings(ticker_norm, is_australian=True)
-    else:
-        holdings_info = fetch_yfinance_holdings(ticker_norm, is_australian=False)
+    skipped_local_only = False
+    try:
+        holdings_info = (
+            fetch_au_etf_holdings(ticker_norm, name_norm)
+            if country_norm == "au"
+            else fetch_us_etf_holdings(ticker_norm, name_norm)
+        )
+    except LocalOnlyHoldingsSkipError as skipped:
+        logger.info(f"[{ticker_type_norm.upper()}/{ticker_norm}] 구성종목 갱신 건너뜀(기존 유지) — {skipped}")
+        holdings_info = None
+        skipped_local_only = True
 
     # 구성종목 수집이 실패해도 배당·상장일·순자산 등 나머지 메타는 저장한다.
     # (여기서 return 하면 캐시 문서 자체가 만들어지지 않아 화면이 통째로 빈다.)
     holdings_cache = None
     if holdings_info:
-        holdings_cache = {
-            "source": holdings_info["source"],
-            "updated_at": holdings_info["fetched_at"],
-            "reference_date": holdings_info["as_of_date"],
-            "holdings_count": holdings_info["holdings_count"],
-            "items": holdings_info["holdings"],
-        }
-    else:
+        holdings_info = expand_nested_etf_holdings(holdings_info, ticker_norm)
+        holdings_cache = _holdings_cache_from(holdings_info)
+    elif not skipped_local_only:
         logger.warning(f"[{ticker_type_norm.upper()}/{ticker_norm}] 해외 ETF holdings 수집 실패 (메타만 저장)")
 
     meta_cache = {
@@ -766,7 +1014,7 @@ def _update_reference_meta_for_type(
 
             kor_etf_industry_map = fetch_etf_industry_map()
         except Exception as exc:
-            # 업종은 표시·업종 상한용이라 없으면 그만큼 상한이 안 걸릴 뿐, 배치는 계속한다.
+            # 업종 표시 데이터 수집 실패를 기록하고 나머지 배치는 계속한다.
             logger.warning(f"[{type_norm.upper()}] 국내 ETF 업종 맵 수집 실패 — 업종 없이 진행: {exc}")
 
     # 한국 종목풀: 기존 메타 캐시 문서를 1회 일괄 로드해 ETF 상세 TTL 판정에 사용한다.
@@ -793,9 +1041,9 @@ def _update_reference_meta_for_type(
             for stock in ticker_entries
             if str(stock.get("ticker") or "").strip()
         }
-        logger.info(f"[{type_norm.upper()}] 네이버 미국 종목 업종 맵을 구성합니다...")
+        logger.info(f"[{type_norm.upper()}] 네이버 미국 종목 기초 정보 맵을 구성합니다...")
         naver_us_stock_map = fetch_naver_us_stock_info_map(us_tickers)
-        logger.info(f"[{type_norm.upper()}] 네이버 미국 종목 업종 {len(naver_us_stock_map)}건 수집")
+        logger.info(f"[{type_norm.upper()}] 네이버 미국 종목 기초 정보 {len(naver_us_stock_map)}건 수집")
 
     def _process_one_stock(stock: dict[str, Any]) -> tuple[str, str, dict[str, Any] | None, list[str]]:
         """단일 종목 처리 (워커 스레드). 반환: (ticker, name, update_doc|None, 실패목록).
@@ -997,7 +1245,7 @@ def update_stock_reference_metadata(ticker_type: str | None = None):
             failures_by_pool[type_norm] = pool_failures
     logger.info("[배치 B] 식별·상세 메타 업데이트 완료.")
 
-    # 시총 순위 — 종목별 갱신이 meta_cache 를 통째로 덮으므로 반드시 그 뒤에 적는다.
+    # 시총 순위·금액 — 종목별 갱신이 meta_cache 를 통째로 덮으므로 그 뒤에 적는다(순위는 덮어도 이어 붙는다).
     try:
         from utils.market_cap_rank import update_market_cap_ranks
 
@@ -1143,7 +1391,15 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
     naver_etf_map: dict[str, str] = {}
     naver_us_stock_map: dict[str, dict[str, Any]] = {}
     if country_code == "kor":
-        naver_etf_map = dict(_get_cached_naver_etf_names_map())
+        # 배치용 캐시 맵(`_get_cached_naver_etf_names_map`)을 쓰지 않고 **새로 받는다** — 이 함수는 계속
+        # 떠 있는 API 프로세스에서 불리는데, 캐시 맵은 배치 시작 때만 비워져 신규 상장 ETF 가 빠진 옛 목록이
+        # 남는다. 그 목록으로 판정해 0254S0 이 ETF 아님으로 저장됐다(2026-10-20).
+        naver_etf_map = fetch_naver_etf_names_map()
+        if not naver_etf_map:
+            # 빈 목록으로 판정하면 모든 ETF 가 「ETF 아님」으로 덮인다 — 판정하지 않고 멈춘다.
+            raise RuntimeError(
+                f"[{type_norm.upper()}/{ticker_norm}] 네이버 ETF 목록을 받지 못해 ETF 여부를 판정할 수 없습니다."
+            )
     if country_code == "us":
         from utils.us_stock_market_service import fetch_naver_us_stock_info_map
 
@@ -1296,9 +1552,9 @@ def update_single_stock_metadata(
                 logger.warning(f"[{account_norm.upper()}/{ticker}] 마켓 정보 조회 실패: {e}")
 
         # 4. 업종 — 국내 개별주는 네이버에서 받는다(한국어 원본, 번역 불필요).
-        # yfinance 는 국내 종목 셋 중 하나에 분류가 없어서 그만큼 업종 상한에서 빠졌다.
+        # yfinance 는 국내 종목 셋 중 하나에 분류가 없어 업종을 표시할 수 없었다.
         # 값이 이미 있으면 건너뛴다 — 최초 1회만 무겁고 이후엔 신규 종목만 조회한다.
-        # 빈 문자열은 '미설정'이라 그대로 둔다(임의 값으로 메우면 업종 상한이 엉뚱하게 묶인다).
+        # 빈 문자열은 '미설정'이라 그대로 둔다(임의 분류로 채우지 않는다).
         if not stock.get("is_etf") and not stock.get("industry"):
             from services.naver_industry_service import fetch_industry
 
@@ -1310,7 +1566,7 @@ def update_single_stock_metadata(
 
         # 5. ETF 업종 — 네이버 「(주식)섹터」 중분류(소재·IT·헬스케어 …). 배치 앞에서 만든
         # 맵에서 꺼낸다. 개별주 업종과 달리 **매번 덮어쓴다** — 분류가 바뀌면 따라가야 하고,
-        # 맵에 없으면(섹터형이 아닌 ETF) 비운다. 임의 값으로 채우면 업종 상한이 엉뚱하게 묶인다.
+        # 맵에 없으면(섹터형이 아닌 ETF) 비운다. 임의 분류로 채우지 않는다.
         if stock.get("is_etf"):
             stock["industry"] = (kor_etf_industry_map or {}).get(str(ticker).strip(), "")
 
@@ -1345,7 +1601,14 @@ def update_single_stock_metadata(
             # 종목 자체 속성으로 ETF 판정(quoteType == "ETF"). 이름 보완·시총·업종도 같은 .info 로
             # 처리한다 — 한 종목당 .info 는 한 번만 부른다.
             need_name = not stock.get("name") or stock.get("name") == ticker
-            if country_code in ("us", "au") or need_name:
+            # 미국은 바뀌지 않는 값(ETF 여부·섹터·업종·이름)만 받으므로 **비어 있을 때만** 부른다.
+            # 매일 전 종목을 부르면 Yahoo 가 IP 를 막아(2026-10-20 07:49, 156건) 뒤이은 배치의
+            # 환율·지수 조회까지 실패했다. 호주는 시총을 매일 받아야 해서 매번 부른다.
+            need_us_info = country_code == "us" and (
+                stock.get("is_etf") is None
+                or (not stock.get("is_etf") and (not stock.get("sector") or not stock.get("industry")))
+            )
+            if country_code == "au" or need_us_info or need_name:
                 try:
                     info = t.info
                     if country_code in ("us", "au"):
@@ -1364,18 +1627,27 @@ def update_single_stock_metadata(
                                     f"종목명({yahoo_name})이 ETF 로 끝나 ETF 로 판정합니다."
                                 )
                         stock["is_etf"] = is_etf
-                    # 호주 개별주의 시총·업종 — 미국은 네이버 맵에서 받으므로 여기서 채우지 않는다.
-                    # 통화는 그 시장 통화 그대로다(호주=AUD). 국가를 섞어 비교하면 안 된다.
+                    # 호주 시총은 현지 통화 그대로 저장한다. 미국 시총은 네이버 맵에서 받는다.
                     if country_code == "au":
                         cap = info.get("marketCap")
                         if isinstance(cap, (int, float)) and not isinstance(cap, bool) and cap > 0:
                             stock["market_cap"] = int(cap)
+                    # 미국 개별주와 호주 종목은 종목별 Yahoo 분류를 저장한다.
+                    if country_code == "au" or (country_code == "us" and not is_etf):
                         sector = str(info.get("sector") or "").strip()
                         if sector:
                             stock["sector"] = sector
                         industry = str(info.get("industry") or "").strip()
                         if industry:
                             stock["industry"] = industry
+                        if country_code == "us" and (not sector or not industry):
+                            logger.warning(
+                                "[%s/%s] 미국 개별주 섹터·업종 조회 누락 (sector=%r, industry=%r)",
+                                account_norm.upper(),
+                                ticker,
+                                sector,
+                                industry,
+                            )
                     if need_name:
                         fetched_name = info.get("longName") or info.get("shortName")
                         if fetched_name:

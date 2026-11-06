@@ -3,11 +3,6 @@
 import json
 from pathlib import Path
 
-FIXED_INDEX_BY_MARKET = {
-    "kor": {"ticker": "^KS11", "name": "코스피"},
-    "us": {"ticker": "^NDX", "name": "나스닥 100"},
-}
-
 # switch 새 형식: signal, offense, defense는 {ticker, name} 객체
 # switch 기존 형식: signal_ticker, offense_ticker, defense_ticker는 문자열
 REQUIRED_KEYS_NEW: list[str] = [
@@ -65,8 +60,10 @@ def _normalize_ma_cross_settings(settings: dict) -> dict:
         settings[f"{key}_ticker"] = ticker
         settings[f"{key}_name"] = str(value.get("name") or ticker).strip()
 
-    if str(settings["leverage_ticker"]).upper() == "CASH":
-        raise ValueError("레버리지 티커는 현금(CASH)일 수 없습니다.")
+    # 지수는 시장 지수(^KS11 등) 또는 지수추종 ETF 를 사용자가 고른다 — 판정 기준이라 현금일 수 없다.
+    for key, label in (("index", "지수"), ("leverage", "레버리지")):
+        if str(settings[f"{key}_ticker"]).upper() == "CASH":
+            raise ValueError(f"{label} 티커는 현금(CASH)일 수 없습니다.")
 
     ma_days = settings.get("ma_days")
     if not isinstance(ma_days, int) or ma_days < 2:
@@ -85,12 +82,6 @@ def _normalize_ma_cross_settings(settings: dict) -> dict:
     if market not in {"kor", "us"}:
         raise ValueError(f"market 은 kor/us 중 하나여야 합니다: {settings.get('market')}")
     settings["market"] = market
-
-    # 이동평균선 크로스 전략의 지수는 시장별 고정값이다. DB에 과거 값이 남아도 계산 기준은 여기서 통일한다.
-    fixed_index = FIXED_INDEX_BY_MARKET[market]
-    settings["index"] = dict(fixed_index)
-    settings["index_ticker"] = fixed_index["ticker"]
-    settings["index_name"] = fixed_index["name"]
 
     # 슬랙 알람 On/Off (기본 꺼짐). 켜져 있으면 추천 배치가 장 마감 직후 알림을 보낸다.
     settings["slack_enabled"] = bool(settings.get("slack_enabled", False))

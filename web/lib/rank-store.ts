@@ -7,7 +7,7 @@ type RankTickerType = {
   icon: string;
   country_code: string;
   top_n_hold?: number;
-  /** 업종 상한 — 종목풀 저장값. null/미설정 = 제한 없음. */
+  /** 종목풀 통화. */
   currency?: string;
   include?: string[];
 };
@@ -24,6 +24,7 @@ type RankRow = {
   순위: number | null;
   이전순위: number | null;
   "1주순위": number | null;
+  "2주순위": number | null;
   버킷: string;
   bucket: number;
   티커: string;
@@ -34,6 +35,8 @@ type RankRow = {
   현재가: number | null;
   "괴리율": number | null;
   "일간(%)": number | null;
+  /** 직전 거래일 종가의 그 전날 대비 변동률 — 일간(%)이 장중 값일 때 마지막으로 확정된 하루. */
+  "전거래일(%)": number | null;
   "1주(%)": number | null;
   "2주(%)": number | null;
   "3주(%)": number | null;
@@ -82,7 +85,6 @@ type RankToolbarData = {
   ma_rules: RankMaRule[];
   short_ma_options: number[];
   long_ma_options: number[];
-  /** 종목 수·업종 상한 선택지 — 백엔드 `config` 가 단일 소스(-1 = 제한 없음). */
 };
 
 export async function loadRankToolbarData(params?: {
@@ -106,10 +108,15 @@ type RankMaRuleOverride = {
 export async function loadRankData(params?: {
   ticker_type?: string;
   ma_rule_override?: RankMaRuleOverride;
+  /** 진입 문턱 미리보기 — "none" = 문턱 없음. 안 주면 풀 저장값. */
+  entry_vol_mult_override?: string;
 }, signal?: AbortSignal): Promise<RankData> {
   const search = new URLSearchParams();
   if (params?.ticker_type) {
     search.set("ticker_type", params.ticker_type);
+  }
+  if (params?.entry_vol_mult_override != null) {
+    search.set("entry_vol_mult", params.entry_vol_mult_override);
   }
   const override = params?.ma_rule_override;
   if (override) {

@@ -7,9 +7,15 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from config import (
+    ADR_FLOOR_OPTIONS,
+    MOVING_AVERAGE_TYPE_OPTIONS,
+    TOP_N_HOLD_OPTIONS,
+)
 from fastapi_app.dependencies import require_internal_token
+from utils.entry_vol_options import entry_vol_mult_options_by_country
 from utils.ma_options import ma_options_by_country
-from utils.market_breadth_service import MARKET_BY_INDEX_TICKER
+from utils.market_breadth_service import MARKET_BY_INDEX_TICKER, SELF_POOL_REGIME_TICKER
 from utils.market_trend_service import INDICES
 from utils.pool_settings_store import (
     POOL_EDITABLE_KEYS,
@@ -77,18 +83,50 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
     except PoolSettingsError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    from utils.pool_backtest_store import load_results
+    from utils.pool_strategy_use import load_usage, trade_eligible_pools
+    from utils.strategy_mix_service import mix_accounts
+
+    # 활성 합성 계좌의 종목풀·전략 조합만 표시한다. 백테스트 결과 유무와 무관하다.
+    mix_usage: dict[str, dict[str, list[str]]] = {}
+    for account in mix_accounts():
+        for sleeve in account["sleeves"]:
+            if not sleeve["pool"] or not sleeve["strategy"]:
+                continue
+            names = mix_usage.setdefault(sleeve["pool"], {}).setdefault(sleeve["strategy"], [])
+            if account["name"] not in names:
+                names.append(account["name"])
+
     return {
         "pools": pools,
+        # 전략별 사용 여부 — 전략 화면의 종목풀 목록이 이 값으로 걸러진다.
+        "strategy_use": load_usage(),
+        # 사고팔기 토글을 보여줄 종목풀 — 저장 검증과 같은 목록.
+        "strategy_trade_pools": trade_eligible_pools(),
+        # 전략별 12개월 백테스트 — 「백테스트」로 계산해 저장해 둔 값. 설정이 바뀌면 지워진다.
+        "backtests": load_results(),
+        "mix_usage": mix_usage,
         "constraints": {
             "ma_options_by_country": ma_options_by_country(),
+            # 이평 **종류** — 일수와 같은 자리의 풀별 설정이다(시장지수·레버리지는 공통값).
+            "moving_average_type_options": list(MOVING_AVERAGE_TYPE_OPTIONS),
+            "top_n_hold_options": list(TOP_N_HOLD_OPTIONS),
             "slippage_pct_options": list(SLIPPAGE_PCT_OPTIONS),
             "stoploss_pct_options": list(STOPLOSS_PCT_OPTIONS),
+            # 모멘텀 전략 설정(진입 문턱·ADR 하한) — 전략 화면과 같은 저장소(풀 문서)라 여기서도 편집한다.
+            "entry_vol_mult_options_by_country": entry_vol_mult_options_by_country(),
+            "adr_floor_options": list(ADR_FLOOR_OPTIONS),
             "editable_keys": list(POOL_EDITABLE_KEYS),
-            # 시장 레짐 후보 — ADR(시장 폭)이 있는 4개 시장만(코스피·코스닥·S&P500·나스닥100).
+            # ADR 기준 후보 — 지수 4개(코스피·코스닥·S&P500·나스닥100) + 그 종목풀 자신.
+            # 종목풀은 지수와 구성이 달라(us_stock 은 S&P100+나스닥100 조합) 매매하는
+            # 종목의 폭을 그대로 본다. 값은 예약 티커라 저장 스키마는 그대로다.
             "market_indices": [
-                {"ticker": item["yf_ticker"], "name": item["name"]}
-                for item in INDICES
-                if item["yf_ticker"] in MARKET_BY_INDEX_TICKER
+                *(
+                    {"ticker": item["yf_ticker"], "name": item["name"]}
+                    for item in INDICES
+                    if item["yf_ticker"] in MARKET_BY_INDEX_TICKER
+                ),
+                {"ticker": SELF_POOL_REGIME_TICKER, "name": "종목풀"},
             ],
         },
     }
@@ -147,3 +185,86 @@ def delete_pool_definition(pool_id: str, _: None = Depends(require_internal_toke
     except PoolSettingsError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "deleted": deleted}
+
+
+@router.get("/backtest")
+def get_pool_strategy_backtest(
+    pool: str,
+    strategy: str,
+    _: None = Depends(require_internal_token),
+) -> dict[str, Any]:
+    """그 종목풀·전략의 저장 설정으로 12개월 백테스트를 돌려 요약만 돌려준다.
+
+    종목풀 설정 화면이 전략별 성과를 나란히 보기 위해 쓴다. 풀×전략을 한꺼번에 돌리면
+    수십 초가 걸려서, 화면이 버튼을 눌렀을 때 하나씩만 부른다.
+    설정이 없는 전략은 값을 만들어 내지 않고 빈 결과(None)를 돌려준다.
+    """
+    from utils.mix_sleeve import MOMENTUM, NEW_HIGH, PORTFOLIO, STRATEGY_TRADE, normalize_strategy, settings_map
+
+    months = 12
+    name = normalize_strategy(strategy)
+    if name == STRATEGY_TRADE:
+        raise HTTPException(status_code=400, detail="사고팔기 백테스트는 전략 사고팔기 화면에서 돌립니다.")
+    stored = settings_map(name).get(pool)
+    if not stored:
+        from utils.pool_backtest_store import save_result
+
+        # 설정이 없어 못 돌린 것과 「아직 안 돌린 것」은 화면에서 구분돼야 한다 — 그 사실을 저장한다.
+        empty = {"cagr_pct": None, "mdd_pct": None, "sortino": None, "no_settings": True}
+        return {"pool": pool, "strategy": name, "result": save_result(pool, name, empty)}
+
+    settings = {**stored, "pool": pool}
+    try:
+        if name == MOMENTUM:
+            from utils.momentum_backtest import run_backtest
+
+            result = run_backtest(months, settings)
+        elif name == NEW_HIGH:
+            from utils.new_high_backtest import run_backtest as nh_backtest
+
+            result = nh_backtest(months, settings)
+        else:
+            from utils.portfolio_backtest import run_backtest as portfolio_backtest
+
+            assert name == PORTFOLIO
+            result = portfolio_backtest(months, settings)
+    except Exception as error:  # noqa: BLE001 - 한 전략 실패가 화면을 막지 않게 한다
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    from utils.pool_backtest_store import save_result
+
+    saved = save_result(
+        pool,
+        name,
+        {
+            "cagr_pct": result.get("strategy_cagr_pct"),
+            "mdd_pct": result.get("strategy_mdd_pct"),
+            "sortino": result.get("strategy_sortino"),
+        },
+    )
+    return {"pool": pool, "strategy": name, "result": saved}
+
+
+class StrategyUsePayload(BaseModel):
+    pool: str
+    strategy: str
+    used: bool
+
+
+@router.put("/strategy-use")
+def put_pool_strategy_use(
+    payload: StrategyUsePayload,
+    _: None = Depends(require_internal_token),
+) -> dict[str, Any]:
+    """종목풀에서 그 전략을 쓸지 저장한다.
+
+    끄면 그 전략의 저장 설정과 백테스트 결과를 함께 지운다 — 다시 켰을 때 옛 설정이
+    되살아나면 혼란스럽다. 켤 때는 설정을 만들지 않는다(그 전략 화면에서 채운다).
+    """
+    from utils.pool_strategy_use import set_usage
+
+    try:
+        set_usage(payload.pool, payload.strategy, payload.used)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"pool": payload.pool, "strategy": payload.strategy, "used": payload.used}

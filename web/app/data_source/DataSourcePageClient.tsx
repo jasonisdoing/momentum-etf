@@ -19,6 +19,10 @@ type DataSourceRow = {
   source_label?: string;
   missing_count?: number;
   missing_tickers?: string[];
+  /** 로컬 워커에서만 수집하는 소스의 이유 — 서버 배치는 이 발행사 구성종목을 갱신하지 않는다. */
+  local_only_reason?: string | null;
+  // 「기타」 행에만 붙는다 — 발행사를 판별하지 못한 ETF.
+  unclassified_tickers?: string[];
 };
 
 type DataSourcePayload = {
@@ -40,6 +44,29 @@ const COUNTRY_LABEL: Record<string, string> = {
 const SOURCE_TONE: Record<string, { bg: string; fg: string }> = {
   betashares_csv: { bg: "#dbeafe", fg: "#1e40af" },
   vanguard_au_api: { bg: "#dcfce7", fg: "#166534" },
+  spdr_au_xlsx: { bg: "#dcfce7", fg: "#166534" },
+  invesco_us_api: { bg: "#dcfce7", fg: "#166534" },
+  ishares_us_csv: { bg: "#dcfce7", fg: "#166534" },
+  ishares_au_csv: { bg: "#dcfce7", fg: "#166534" },
+  spdr_us_xlsx: { bg: "#dcfce7", fg: "#166534" },
+  vaneck_us_api: { bg: "#dcfce7", fg: "#166534" },
+  vistashares_us_csv: { bg: "#dcfce7", fg: "#166534" },
+  ark_us_csv: { bg: "#dcfce7", fg: "#166534" },
+  firsttrust_us_html: { bg: "#dcfce7", fg: "#166534" },
+  fidelity_us_xls: { bg: "#dcfce7", fg: "#166534" },
+  tortoise_us_html: { bg: "#dcfce7", fg: "#166534" },
+  globalx_us_csv: { bg: "#dcfce7", fg: "#166534" },
+  globalx_au_xlsx: { bg: "#dcfce7", fg: "#166534" },
+  vaneck_au_xlsx: { bg: "#dcfce7", fg: "#166534" },
+  victoryshares_us_api: { bg: "#dcfce7", fg: "#166534" },
+  vanguard_us_api: { bg: "#dcfce7", fg: "#166534" },
+  direxion_us_api: { bg: "#dcfce7", fg: "#166534" },
+  roundhill_us_csv: { bg: "#dcfce7", fg: "#166534" },
+  alps_us_api: { bg: "#dcfce7", fg: "#166534" },
+  marketdesk_us_csv: { bg: "#dcfce7", fg: "#166534" },
+  wisdomtree_us_api: { bg: "#dcfce7", fg: "#166534" },
+  schwab_us_html: { bg: "#dcfce7", fg: "#166534" },
+  proshares_us_html: { bg: "#dcfce7", fg: "#166534" },
   yfinance_holdings: { bg: "#fef3c7", fg: "#92400e" },
   naver_etf_component: { bg: "#dbeafe", fg: "#1e40af" },
 };
@@ -172,6 +199,14 @@ export function DataSourcePageClient() {
                               >
                                 <SourceBadge source={row.source ?? null} label={row.source_label} />
                                 <span style={{ color: "var(--text-muted)" }}>ETF {row.etf_count}종</span>
+                                {row.local_only_reason ? (
+                                  <span
+                                    style={{ color: "#92400e", fontWeight: 700 }}
+                                    title={row.local_only_reason}
+                                  >
+                                    로컬 전용
+                                  </span>
+                                ) : null}
                                 {row.missing_count ? (
                                   <span
                                     style={{ color: "#991b1b", fontWeight: 700 }}
@@ -187,6 +222,16 @@ export function DataSourcePageClient() {
                             {row.note ? (
                               <div style={{ marginTop: "0.2rem", color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
                                 {row.note}
+                              </div>
+                            ) : null}
+                            {row.local_only_reason ? (
+                              <div style={{ marginTop: "0.2rem", color: "#92400e", fontSize: "var(--fs-sm)" }}>
+                                로컬 전용: {row.local_only_reason}
+                              </div>
+                            ) : null}
+                            {row.unclassified_tickers?.length ? (
+                              <div style={{ marginTop: "0.2rem", color: "#92400e", fontSize: "var(--fs-sm)" }}>
+                                발행사 미분류: <span className="appCodeText">{row.unclassified_tickers.join(", ")}</span>
                               </div>
                             ) : null}
                             {row.missing_tickers?.length ? (

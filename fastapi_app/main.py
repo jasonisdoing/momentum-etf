@@ -7,10 +7,10 @@ from utils.env import load_env_if_present
 
 from .routes.account_settings import router as account_settings_router
 from .routes.alarms import router as alarms_router
-from .routes.asset_helper import router as asset_helper_router
 from .routes.assets import router as assets_router
 from .routes.aus_market_stocks import router as aus_market_stocks_router
 from .routes.broker_api import router as broker_api_router
+from .routes.broker_mock_orders import router as broker_mock_orders_router
 from .routes.daily import router as daily_router
 from .routes.dashboard import router as dashboard_router
 from .routes.data_sources import router as data_sources_router
@@ -27,15 +27,18 @@ from .routes.memos import router as memos_router
 from .routes.monthly import router as monthly_router
 from .routes.note import router as note_router
 from .routes.pool_backtest import router as pool_backtest_router
+from .routes.pool_risk_return import router as pool_risk_return_router
 from .routes.pool_settings import router as pool_settings_router
 from .routes.quotes import router as quotes_router
 from .routes.rank import router as rank_router
+from .routes.slack_interactions import router as slack_interactions_router
 from .routes.snapshots import router as snapshots_router
 from .routes.stocks import router as stocks_router
 from .routes.strategy_mix import router as strategy_mix_router
 from .routes.strategy_momentum import router as strategy_momentum_router
 from .routes.strategy_new_high import router as strategy_new_high_router
 from .routes.strategy_portfolio import router as strategy_portfolio_router
+from .routes.strategy_trade import router as strategy_trade_router
 from .routes.system import router as system_router
 from .routes.ticker_detail import router as ticker_detail_router
 from .routes.us_market_stocks import router as us_market_stocks_router
@@ -95,17 +98,20 @@ app.include_router(market_trend_router)
 app.include_router(note_router)
 app.include_router(pool_settings_router)
 app.include_router(pool_backtest_router)
+app.include_router(pool_risk_return_router)
 app.include_router(account_settings_router)
 app.include_router(broker_api_router)
+app.include_router(broker_mock_orders_router)
 app.include_router(quotes_router)
 app.include_router(rank_router)
+app.include_router(slack_interactions_router)
 app.include_router(snapshots_router)
 app.include_router(stocks_router)
-app.include_router(asset_helper_router)
 app.include_router(strategy_mix_router)
 app.include_router(strategy_new_high_router)
 app.include_router(strategy_portfolio_router)
 app.include_router(strategy_momentum_router)
+app.include_router(strategy_trade_router)
 from fastapi import Request
 from pymongo.errors import NetworkTimeout, PyMongoError
 from starlette.responses import JSONResponse

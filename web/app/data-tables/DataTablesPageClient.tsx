@@ -332,6 +332,32 @@ export function DataTablesPageClient() {
   return (
     <PageFrame title="테이블" fullHeight fullWidth titleRight={titleRight}>
       <div className="appPageStack appPageStackFill">
+        <div className="appBannerStack">
+          <div className="alert alert-info mb-0">
+            {/* .alert 는 flex 라 자식이 좌우로 놓인다 — 한 블록으로 감싸 위아래로 쌓는다. */}
+            <div>
+              <div>
+                <b>목적:</b> 종목풀·계좌 삭제 후 남은 고아 데이터와 등록되지 않은 옛·임시 컬렉션을 찾아 정리 누락을
+                점검합니다.
+              </div>
+              <div>
+                <b>사용법:</b>
+              </div>
+              <ul className="mb-0 ps-3">
+                <li>경고에 나온 항목의 생성·삭제 경로를 확인해 코드를 고칩니다.</li>
+                <li>
+                  사용 중인 컬렉션은 <code>utils/data_table_catalog.py</code>에 등록합니다. 종목풀·계좌 소유
+                  데이터는 소유 관계도 등록해 삭제 시 함께 정리되게 합니다.
+                </li>
+                <li>사용하지 않는 데이터나 컬렉션만 삭제합니다.</li>
+                <li>보존 목적이 등록되지 않은 임시 백업 컬렉션도 제거합니다.</li>
+                <li>
+                  원인을 찾을 수 없으면 지우기 전에 다음에 다시 생겼을 때 찾을 수 있도록 코드를 먼저 개선합니다.
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
         {error ? (
           <div className="appBannerStack">
             <div className="bannerError alert alert-danger mb-0">{error}</div>
@@ -359,10 +385,6 @@ export function DataTablesPageClient() {
             <div className="alert alert-warning mb-0">
               카탈로그에 없는 컬렉션 {data.unclassified.length}개:{" "}
               <b>{data.unclassified.map((row) => row.name).join(", ")}</b>
-              <div style={{ fontSize: "var(--fs-sm)", marginTop: 4 }}>
-                새로 만든 컬렉션이면 <code>utils/data_table_catalog.py</code> 에 등록하고, 쓰지 않는 것이면
-                지웁니다. 등록하지 않으면 종목풀·계좌를 지울 때 함께 정리되지 않습니다.
-              </div>
             </div>
           </div>
         ) : null}
