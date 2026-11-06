@@ -100,7 +100,7 @@ function StatusChip({ status }: { status: OrderStatus }) {
   return <span className={chip.className}>{chip.label}</span>;
 }
 
-/** 계좌 한 곳으로 사고팔기 전략 종목의 현재가 지정가 주문·취소·상태 확인을 시험하는 모달(운영은 실제 주문) — 슬랙 버튼 주문의 서버 쪽 주문 경로를 검증한다. */
+/** 계좌 한 곳으로 사고팔기 전략 종목의 상대 1호가 지정가 주문·취소·상태 확인을 시험하는 모달(운영은 실제 주문) — 슬랙 버튼 주문의 서버 쪽 주문 경로를 검증한다. */
 export function ApiOrderModal({
   isLive,
   accountName,
@@ -155,7 +155,6 @@ export function ApiOrderModal({
   }, []);
 
   const strategy = useMemo(() => (strategies ?? []).find((row) => row.strategy_id === strategyId), [strategies, strategyId]);
-  const currentPrice = strategy?.index.close ?? null;
   const quantity = strategy?.config.round_quantity ?? null;
 
   const run = useCallback(
@@ -237,7 +236,7 @@ export function ApiOrderModal({
       setBalance(await requestJson<MockBalance>(`/api/broker-api/mock/balance?${query}`));
     });
 
-  const canOrder = Boolean(accountNo && pool && strategy && currentPrice && quantity && busy === null && !loadingStrategies);
+  const canOrder = Boolean(accountNo && pool && strategy && quantity && busy === null && !loadingStrategies);
 
   return (
     <AppModal
@@ -357,16 +356,16 @@ export function ApiOrderModal({
         <div style={fieldStyle}>
           <span style={labelStyle}>주문 내용</span>
           <span style={{ fontSize: "var(--fs-base)" }}>
-            {strategy && currentPrice && quantity
-              ? `${strategy.label} · ${quantity.toLocaleString("ko-KR")}주 × 현재가 ${formatPrice(currentPrice, "KRW")}원 지정가 ${side === "buy" ? "매수" : "매도"}`
+            {strategy && quantity
+              ? `${strategy.label} · ${quantity.toLocaleString("ko-KR")}주 × ${side === "buy" ? "매도" : "매수"} 1호가 지정가 ${side === "buy" ? "매수" : "매도"}`
               : "-"}
           </span>
           <button type="button" className="btn btn-sm btn-outline-secondary" disabled={loadingStrategies || busy !== null} onClick={() => void loadStrategies()}>
-            {loadingStrategies ? "불러오는 중…" : "현재가 새로고침"}
+            {loadingStrategies ? "불러오는 중…" : "새로고침"}
           </button>
         </div>
         <div style={{ ...mutedStyle, marginBottom: 10 }}>
-          수량은 전략의 회차당 수량이고, 가격은 주문 순간의 현재가를 호가 단위로 반올림해 서버가 정합니다(직접 입력 없음). 모달의 직접 주문은 매도만 되고, 매수는 슬랙 주문 메시지로 냅니다.
+          수량은 전략의 회차당 수량이고, 가격은 주문 순간의 상대 1호가(매수는 매도 1호가, 매도는 매수 1호가)로 서버가 정합니다(직접 입력 없음). 모달의 직접 주문은 매도만 되고, 매수는 슬랙 주문 메시지로 냅니다.
         </div>
         {/* 모달의 직접 주문은 매도만 — 매수는 슬랙 주문 메시지의 사람 리뷰를 거친다. */}
         {side === "sell" ? (

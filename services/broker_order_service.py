@@ -49,6 +49,7 @@ CANCEL_PATH = "/krstock/order/v1/cancel"
 # 체결 조회에 그날 주문이 하나도 없을 때 오는 응답 코드(데이터가 존재하지 않습니다) — 오류가 아니라 빈 목록이다.
 NO_DATA_CODE = "11512"
 DAY_ORDERS_PATH = "/krstock/inquiry/v1/dailyOrderExecution"
+QUOTE_PATH = "/krstock/quote/v1/currentPrice"
 # 서킷브레이커(CB) 발동 중 주문 거부 코드 — 거래소 제도상 매매가 20분 중단된 뒤 10분 단일가 매매로 재개된다.
 CIRCUIT_BREAKER_CODE = "21824"
 _CIRCUIT_BREAKER_RESUME = timedelta(minutes=30)
@@ -192,6 +193,29 @@ def fetch_order_balance(account_no: str) -> dict[str, Any]:
     return parse_balance(
         _post_paged(_base_url(account_no), BALANCE_PATH, balance_request(account_no), "Output_1", no_data_code=None)
     )
+
+
+def fetch_best_quote(account_no: str, ticker: str) -> dict[str, Any]:
+    """종목의 1호가 — 매도·매수 1호가와 그 잔량, 호가 시각. 호가가 비어 있으면(단일가 구간 등) 주문 가격을 못 정해 오류다."""
+    data, _ = _post(_base_url(account_no), QUOTE_PATH, {"iem_cd": ticker, "market_cd": ORDER_MARKET})
+    code = str(data["rsp_cd"]) if data.get("rsp_cd") is not None else None
+    if not is_business_success(code, data.get("rsp_msg")):
+        raise BrokerApiError(
+            f"호가를 조회하지 못했습니다: {_message_of(data) or '업무 오류'} (코드 {data.get('rsp_cd')})"
+        )
+    quote = data["Output_0"]
+    result = {
+        "ask": int(quote["askp1"]),
+        "bid": int(quote["bidp1"]),
+        "ask_quantity": int(quote["askp_rsqn1"]),
+        "bid_quantity": int(quote["bidp_rsqn1"]),
+        "at": str(quote["hoga_bsop_hour"]),
+    }
+    if result["ask"] <= 0 or result["bid"] <= 0:
+        raise BrokerApiError(
+            f"{ticker} 의 매도·매수 1호가가 없어 주문 가격을 정할 수 없습니다 (매도 {result['ask']}, 매수 {result['bid']})."
+        )
+    return result
 
 
 def _circuit_breaker_message(what: str, data: dict[str, Any]) -> str:

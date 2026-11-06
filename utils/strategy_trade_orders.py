@@ -1,11 +1,12 @@
 """사고팔기 주문 기록 — 우리가 증권사에 보낸 주문과 그 상태(API 주문).
 
-시험 주문은 회차 사다리와 무관하다. 전략의 종목을 **지금 현재가를 지정가로** 사고판다 — 거래 경로만 시험한다.
+시험 주문은 회차 사다리와 무관하다. 전략의 종목을 **지금 상대 1호가를 지정가로** 사고판다(매수는 매도 1호가, 매도는
+매수 1호가 — 마지막 체결가로 내면 체결이 안 되는 일이 잦다) — 거래 경로만 시험한다.
 기록은 **무엇을 보냈는지**(전략·방향·가격·수량)를 남기고, 상태(대기중·부분체결·완료·취소·거부)는
 **증권사 체결 조회가 진실**이라 조회할 때마다 거기서 갱신한다. 우리가 상태를 추측하지 않는다.
 
-- 가격·수량은 클라이언트가 보내지 않는다. 서버가 전략 운용 현황(`strategy_trade_service`)에서 현재가(호가 단위로
-  반올림)와 회차당 수량을 읽는다 — 화면과 주문이 갈리지 않게 단일 소스를 지킨다.
+- 가격·수량은 클라이언트가 보내지 않는다. 서버가 증권사 1호가와 전략 운용 현황(`strategy_trade_service`)의
+  회차당 수량을 읽는다 — 화면과 주문이 갈리지 않게 단일 소스를 지킨다.
 - 주문번호 대응: 주문 응답의 시장주문번호(`mkt_orr_no`)를 체결 조회의 통합주문번호(`itg_orr_no`)와 같은
   번호로 본다(공식 예시가 같은 번호 공간을 쓴다). 조회 결과에서 못 찾으면 상태를 바꾸지 않고 그 사실을
   메시지로 남긴다 — 속성으로 짐작해 맞추지 않는다.
@@ -19,12 +20,12 @@ from zoneinfo import ZoneInfo
 
 from bson import ObjectId
 
-from core.strategy.trade.rules import round_to_tick
 from services.broker_api_service import BrokerApiError
 from services.broker_order_service import (
     OrderUncertainError,
     account_env,
     cancel_order,
+    fetch_best_quote,
     linked_account_doc,
     list_day_orders,
     place_limit_order,
@@ -33,7 +34,7 @@ from utils.account_settings_store import ACCOUNT_ENV_MOCK
 from utils.db_manager import get_db_connection
 from utils.market_session import REGULAR, market_session
 from utils.strategy_trade_ledger import is_buy
-from utils.strategy_trade_service import load_views_for_pools
+from utils.strategy_trade_service import broker_account_no_for_pool, load_views_for_pools
 
 KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_orders"
@@ -164,11 +165,12 @@ def _require_order_allowed(account_no: str, env: str, amount: int) -> None:
 
 
 def resolve_order(pool: str, strategy_id: str, side: str, round_no: int | None, *, fresh: bool) -> dict[str, Any]:
-    """주문 내용 — 가격은 **그 순간의 현재가를 호가 단위로 반올림한 지정가**, 수량은 회차당 수량이다.
+    """주문 내용 — 가격은 **그 순간의 상대 1호가 지정가**(매수는 매도 1호가, 매도는 매수 1호가), 수량은 회차당 수량이다.
 
-    사다리 지정가를 미리 걸지 않는다 — 사람이 버튼을 누르는 순간의 시장 가격으로만 낸다.
+    마지막 체결가로 내면 호가에 닿지 않아 체결이 안 되는 일이 잦다 — 상대 1호가는 바로 체결되는 가장 좋은 가격이다.
+    사다리 지정가를 미리 걸지 않는다 — 사람이 버튼을 누르는 순간의 시장 호가로만 낸다.
     `round_no` 가 있으면(신호 주문) 그 회차가 지금도 주문 대상인지 확인하고, 비교용 `signal_price`(매도 목표·매수선,
-    장 마감 매수는 None)를 함께 준다.
+    장 마감 매수는 None)를 함께 준다. `quote_label`·`quote_quantity` 는 가격으로 쓴 호가의 이름과 그 잔량이다.
 
     ``fresh`` 가 참이면 보유 회차를 증권사에서 새로 계산한다(수 초) — 실제 주문 직전 검증용이다. 거짓이면 배치가
     저장해 둔 것을 읽는다(1초 안팎) — 슬랙 모달은 3초 안에 열어야 해서 이쪽을 쓴다.
@@ -186,22 +188,27 @@ def resolve_order(pool: str, strategy_id: str, side: str, round_no: int | None, 
     if round_no is not None:
         row = _require_round_state(strategy, side, round_no)
         signal_price = row["sell_limit"] if side == "sell" else (None if row["close_entry"] else row["buy_limit"])
-    current = float(strategy["index"]["close"] or 0)
-    if current <= 0:
-        raise BrokerApiError(f"{strategy['label']} 의 현재가를 알 수 없습니다.")
+    quote = fetch_best_quote(broker_account_no_for_pool(pool), strategy["ticker"])
+    label, price, quantity = (
+        ("매도 1호가", quote["ask"], quote["ask_quantity"])
+        if side == "buy"
+        else ("매수 1호가", quote["bid"], quote["bid_quantity"])
+    )
     return {
         "strategy_label": strategy["label"],
         "ticker": strategy["ticker"],
         "quantity": int(strategy["config"]["round_quantity"]),
-        "price": int(round_to_tick(current)),
+        "price": price,
         "signal_price": signal_price,
+        "quote_label": label,
+        "quote_quantity": quantity,
     }
 
 
 def place_order(
     account_no: str, pool: str, strategy_id: str, side: str, round_no: int | None, slack: dict[str, str] | None
 ) -> dict[str, Any]:
-    """전략 종목을 현재가 지정가로 계좌에 주문하고 기록한다.
+    """전략 종목을 상대 1호가 지정가로 계좌에 주문하고 기록한다.
 
     `round_no` 는 신호 주문(신호 메시지의 회차 버튼)만 넘긴다 — 회차 보유 상태와 중복을 확인하고 기록에 남긴다.
     `slack`(채널·메시지 ts)은 슬랙 메시지로 낸 주문만 넘긴다 — 있으면 끝난 뒤 그 스레드로 알린다. 없으면(모달의

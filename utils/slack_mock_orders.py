@@ -6,7 +6,7 @@
 끝난 주문의 알림은 배치(`notify_finished_orders`, 1분 간격)가 맡는다 — 서버 프로세스가 재시작돼도 끊기지 않는다.
 
 주문 요청은 슬랙 버튼의 value 에 담아 보내고, 서버는 따로 저장하지 않는다. 가격·수량은 모달 표시용 사본일 뿐이고,
-실제 주문은 제출 시점에 `strategy_trade_orders.place_order` 가 현재가로 다시 정한다.
+실제 주문은 제출 시점에 `strategy_trade_orders.place_order` 가 상대 1호가(매수는 매도 1호가, 매도는 매수 1호가)로 다시 정한다.
 슬랙은 응답을 3초 안에 받아야 하므로 모달 열기까지만 요청 안에서 하고, 주문·취소는 응답 뒤에 처리해 결과를 스레드로 알린다.
 """
 
@@ -54,6 +54,8 @@ CANCEL_ACTION_ID = "mock_order_cancel"
 ORDER_CALLBACK_ID = "mock_order_confirm"
 CANCEL_CALLBACK_ID = "mock_order_cancel_confirm"
 _SIDE_LABELS = {"buy": "매수", "sell": "매도"}
+#: 주문 가격으로 쓰는 상대 1호가 — 매수는 파는 쪽(매도 1호가)에, 매도는 사는 쪽(매수 1호가)에 맞춘다.
+_QUOTE_LABELS = {"buy": "매도 1호가", "sell": "매수 1호가"}
 #: 주문 기록(`slack`)에 남기는 슬랙 위치 — 버튼이 있는 메시지(`message_ts`)와 결과를 달 스레드 뿌리(`thread_ts`).
 SLACK_TARGET_KEYS = ("channel", "message_ts", "thread_ts")
 # 신호 메시지 반응 — 스레드에서 첫 주문이 접수되면 모래시계, 주문 메시지가 전부 체결되면 완료 표시,
@@ -83,7 +85,7 @@ def _round_text(round_no: int | None) -> str:
 
 def _order_text(request: dict[str, Any]) -> str:
     side = _SIDE_LABELS[request["side"]]
-    return f"{_round_text(request['round'])}{request['label']} · {request['quantity']:,}주 × 현재가 지정가 {side}"
+    return f"{_round_text(request['round'])}{request['label']} · {request['quantity']:,}주 × {_QUOTE_LABELS[request['side']]} 지정가 {side}"
 
 
 # --- 메시지 ---------------------------------------------------------------------------------------------
@@ -96,7 +98,7 @@ def _section(request: dict[str, Any]) -> dict[str, Any]:
             "type": "mrkdwn",
             "text": (
                 f"*[{_env_word(request['env'])}] {_SIDE_LABELS[request['side']]} 주문*\n{_order_text(request)}\n"
-                f"버튼을 확정하는 순간의 현재가(호가 단위)로 냅니다 ({request['ticker']})"
+                f"버튼을 확정하는 순간의 {_QUOTE_LABELS[request['side']]}로 냅니다 ({request['ticker']})"
             ),
         },
     }
@@ -185,8 +187,18 @@ def _modal_view(callback_id: str, title: str, submit: str, body: str, metadata: 
     }
 
 
+def _quote_warning(order: dict[str, Any]) -> str:
+    """가격으로 쓴 1호가 잔량이 주문 수량보다 적으면 일부만 체결될 수 있다고 알린다 — 막지는 않는다."""
+    if order["quote_quantity"] >= order["quantity"]:
+        return ""
+    return (
+        f"\n⚠️ {order['quote_label']} 잔량이 {order['quote_quantity']:,}주라 주문 수량 {order['quantity']:,}주보다 적습니다 — "
+        "일부만 체결되고 나머지는 대기할 수 있습니다."
+    )
+
+
 def _signal_gap_pct(order: dict[str, Any]) -> float | None:
-    """신호 가격(매도 목표·매수선) 대비 현재가 차이 % — 신호 가격이 없는 주문(장 마감 매수)은 None."""
+    """신호 가격(매도 목표·매수선) 대비 주문 가격 차이 % — 신호 가격이 없는 주문(장 마감 매수)은 None."""
     if order["signal_price"] is None:
         return None
     return (order["price"] / order["signal_price"] - 1.0) * 100.0
@@ -202,17 +214,17 @@ def _order_view(request: dict[str, Any], order: dict[str, Any], target: dict[str
     side = _SIDE_LABELS[request["side"]]
     gap_pct = _signal_gap_pct(order)
     if gap_pct is None:
-        gap = f"현재가 {order['price']:,}원 (신호 가격 비교 없음)"
+        gap = f"{order['quote_label']} {order['price']:,}원 (신호 가격 비교 없음)"
     else:
         gap = (
             f"*신호 대비 {gap_pct:+.2f}%* — {_gap_label(request['side'], gap_pct)}\n"
-            f"신호 {order['signal_price']:,.0f}원 · 현재가 {order['price']:,}원"
+            f"신호 {order['signal_price']:,.0f}원 · {order['quote_label']} {order['price']:,}원"
         )
     guide = (
-        f"주문을 확정하는 순간의 현재가(호가 단위)로 {_env_word(request['env'])} 계좌에 보냅니다. "
-        "현재가 지정가라 호가에 따라 체결되지 않을 수 있습니다."
+        f"주문을 확정하는 순간의 {order['quote_label']}로 {_env_word(request['env'])} 계좌에 보냅니다. "
+        "그 사이 호가가 움직이면 위 가격과 달라질 수 있습니다."
     )
-    body = f"*{_order_text(request)}*\n{gap}\n{guide}"
+    body = f"*{_order_text(request)}*\n{gap}{_quote_warning(order)}\n{guide}"
     return _modal_view(ORDER_CALLBACK_ID, f"{_env_word(request['env'])} {side} 주문 확인", f"{side} 주문", body, target)
 
 
