@@ -731,15 +731,19 @@ def _fetch_exchange_rates(currencies: Sequence[str] | None = None) -> dict[str, 
     if not mapping:
         return {"updated_at": datetime.now()}
 
-    def _put(currency: str, current_rate: float, previous_close: float) -> None:
-        change_pct = ((current_rate - previous_close) / previous_close * 100.0) if previous_close > 0 else 0.0
+    def _put(currency: str, quote: dict[str, Any]) -> None:
+        current_rate = float(quote.get("regularMarketPrice") or 0)
+        previous_close = float(quote.get("regularMarketPreviousClose") or 0)
+        if current_rate <= 0 or previous_close <= 0:
+            # 값이 빠진 응답은 실패로 본다 — 재시도 후에도 없으면 호출부가 직전 캐시를 쓴다.
+            raise ValueError(f"시세 필드 없음 (현재가={current_rate}, 전일 종가={previous_close})")
+        change_pct = (current_rate - previous_close) / previous_close * 100.0
         rates[currency] = {"rate": current_rate, "change_pct": change_pct}
 
     rates: dict[str, Any] = {}
-    # 통화별 quote 요약(fast_info)으로 (현재가, 전일 종가)를 받는다. 예전엔 일봉 일괄
-    # 조회(_fetch_bulk_fx_closes)로 요청 수를 줄였는데, 야후 일봉의 직전 봉 종가가 실제
-    # 공식 전일 종가보다 하루 이상 뒤처져 변동률이 크게 부풀었다(관측: USD +1.65% vs
-    # 실제 +0.27%, 2026-09-16). 레이트리밋은 아래 재시도 + TTL 캐시로 감당한다.
+    # 통화별 시세(`info` 의 regularMarketPrice·regularMarketPreviousClose)로 현재가·전일 종가를 받는다.
+    # 일봉에서 뽑는 값(fast_info·일봉 일괄 조회)은 야후 환율 일봉이 장중에 멈춰 현재가가 뒤처졌다
+    # (관측: USD 1,356.34 vs 시세 1,363.65, 2026-11-07). 레이트리밋은 아래 재시도 + TTL 캐시로 감당한다.
     pending = dict(mapping)
     errors: dict[str, str] = {}
     for attempt in range(1, _FX_FETCH_MAX_ATTEMPTS + 1):
@@ -747,8 +751,7 @@ def _fetch_exchange_rates(currencies: Sequence[str] | None = None) -> dict[str, 
         for currency, symbol in pending.items():
             try:
                 with yfinance_lock():
-                    ticker = yf.Ticker(symbol)
-                    _put(currency, float(ticker.fast_info.last_price), float(ticker.fast_info.previous_close))
+                    _put(currency, yf.Ticker(symbol).info)
             except Exception as exc:
                 errors[currency] = f"{type(exc).__name__}: {str(exc)[:240]}"
                 if attempt >= _FX_FETCH_MAX_ATTEMPTS:
