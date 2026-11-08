@@ -33,8 +33,8 @@ type AccountEntry = {
   /** 합성 전략 사용 여부 — 실제 조합(전략·종목풀·배분)은 `/strategy-mix` 에서 정한다. */
   mix_enabled?: boolean;
   /** 증권사 API 연동 — 잔고 수동 불러오기·배치 동기화가 이 값으로 동작한다. */
-  /** 계좌별 키 커넥터(메리츠)는 `account_no` 없이 provider 만 저장한다. */
-  broker_api?: { provider: string; account_no?: string } | null;
+  /** 계좌별 키 커넥터(메리츠)는 `account_no` 대신 사용자가 입력한 표시용 마스킹 번호(`account_mask`)를 저장한다. */
+  broker_api?: { provider: string; account_no?: string; account_mask?: string } | null;
   URL?: string;
   /** 보유종목 알림 — 이동선 이탈은 On/Off 만(기준은 종목의 종목풀 이평선). */
   ma_alarm_enabled?: boolean;
@@ -112,6 +112,8 @@ type AccountDraft = {
   mix_enabled: boolean;
   brokerProvider: string;
   brokerAccountNo: string;
+  /** 메리츠 계좌번호(표시용 수기 입력) — 증권사 API 로 대조할 수 없는 값이다. */
+  brokerAccountMask: string;
   URL: string;
   ma_alarm_enabled: boolean;
   stoploss_alarm_enabled: boolean;
@@ -147,6 +149,7 @@ function toDraft(account: AccountEntry): AccountDraft {
     mix_enabled: Boolean(account.mix_enabled),
     brokerProvider: account.broker_api?.provider ?? "",
     brokerAccountNo: account.broker_api?.account_no ?? "",
+    brokerAccountMask: account.broker_api?.account_mask ?? "",
     URL: account.URL ?? "",
     ma_alarm_enabled: Boolean(account.ma_alarm_enabled),
     stoploss_alarm_enabled: Boolean(account.stoploss_alarm_enabled),
@@ -178,7 +181,9 @@ function draftToValues(draft: AccountDraft, marketIndices: MarketIndexOption[]):
     mix_enabled: draft.mix_enabled,
     // 증권사 API 연동 — 커넥터를 고르면 그대로 보낸다. 계좌번호가 필요한지(나무)·없어야 하는지(메리츠)는
     // 백엔드가 커넥터별로 검증해 저장을 막는다(빠진 값을 조용히 해제하지 않는다).
-    broker_api: draft.brokerProvider ? { provider: draft.brokerProvider, account_no: draft.brokerAccountNo } : null,
+    broker_api: draft.brokerProvider
+      ? { provider: draft.brokerProvider, account_no: draft.brokerAccountNo, account_mask: draft.brokerAccountMask.trim() }
+      : null,
     URL: draft.URL.trim(),
     ma_alarm_enabled: draft.ma_alarm_enabled,
     stoploss_alarm_enabled: draft.stoploss_alarm_enabled,
@@ -445,7 +450,7 @@ function AccountDetailModal({
           style={{ width: 200 }}
           value={draft.brokerProvider}
           onChange={(e) => {
-            onChange({ brokerProvider: e.target.value, brokerAccountNo: "" });
+            onChange({ brokerProvider: e.target.value, brokerAccountNo: "", brokerAccountMask: "" });
             setBrokerAccounts(null);
           }}
           title="증권사 API 연동 — 잔고 불러오기·배치 동기화가 이 연동으로 동작한다."
@@ -460,9 +465,19 @@ function AccountDetailModal({
         </select>
         {/* 계좌별 키 커넥터(메리츠) — 키가 이 계좌에 묶여 있어 증권사 계좌를 고르지 않는다. 키 이름만 보여 준다. */}
         {selectedProvider?.per_account_keys ? (
-          <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)" }}>
-            키 {selectedProvider.env_key_name} {selectedProvider.env_ok ? "등록됨" : "없음"}
-          </span>
+          <>
+            <input
+              className="form-control form-control-sm"
+              style={{ width: 140 }}
+              value={draft.brokerAccountMask}
+              placeholder="예: 3082****01"
+              onChange={(e) => onChange({ brokerAccountMask: e.target.value })}
+              title="표시용 계좌번호 — 증권사 API 가 계좌번호를 주지 않아 대조할 수 없는 수기 값입니다."
+            />
+            <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)" }}>
+              키 {selectedProvider.env_key_name} {selectedProvider.env_ok ? "등록됨" : "없음"}
+            </span>
+          </>
         ) : draft.brokerProvider ? (
           <button type="button" className="btn btn-sm btn-outline-secondary" disabled={brokerChecking} onClick={() => void checkBroker()}>
             {brokerChecking ? "확인 중…" : "확인"}
@@ -940,6 +955,25 @@ export function AccountSettingsManager() {
     { field: "account_id", headerName: "ID", width: 130 },
     { field: "name", headerName: "이름", width: 150, editable: true },
     {
+      headerName: "상세",
+      width: 64,
+      sortable: false,
+      headerClass: "settingsCenterHeader",
+      cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+      // 셀 한 칸에 담기지 않는 설정(현금·벤치마크·증권사 API·잔고 동기화)을 여기서 연다.
+      cellRenderer: (params: ICellRendererParams<AccountGridRow>) =>
+        params.data ? (
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            style={{ padding: "0 8px", lineHeight: 1.4 }}
+            onClick={() => setDetailId(params.data!.account_id)}
+          >
+            열기
+          </button>
+        ) : null,
+    },
+    {
       field: "env",
       headerName: "구분",
       width: 70,
@@ -986,7 +1020,8 @@ export function AccountSettingsManager() {
       valueFormatter: (params) => {
         const row = params.data;
         if (!row?.brokerProvider) return "없음";
-        // 계좌별 키 커넥터(메리츠)는 계좌번호 없이 저장된다.
+        // 계좌별 키 커넥터(메리츠)는 계좌번호 대신 수기 입력한 마스킹 번호를 그대로 보여 준다.
+        if (row.brokerAccountMask) return `${row.brokerProvider} · ${row.brokerAccountMask}`;
         return row.brokerAccountNo
           ? `${row.brokerProvider} · ${row.brokerAccountNo.slice(0, 4)}***${row.brokerAccountNo.slice(-2)}`
           : row.brokerProvider;
@@ -1035,25 +1070,6 @@ export function AccountSettingsManager() {
           </button>
         );
       },
-    },
-    {
-      headerName: "상세",
-      width: 64,
-      sortable: false,
-      headerClass: "settingsCenterHeader",
-      cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
-      // 셀 한 칸에 담기지 않는 설정(현금·벤치마크·증권사 API·잔고 동기화)을 여기서 연다.
-      cellRenderer: (params: ICellRendererParams<AccountGridRow>) =>
-        params.data ? (
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-secondary"
-            style={{ padding: "0 8px", lineHeight: 1.4 }}
-            onClick={() => setDetailId(params.data!.account_id)}
-          >
-            열기
-          </button>
-        ) : null,
     },
     {
       // 마지막 컬럼이 남는 가로를 채운다 — 오른쪽에 빈 공간이 남지 않게.

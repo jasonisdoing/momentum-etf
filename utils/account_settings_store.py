@@ -323,13 +323,15 @@ def _validate_broker_api(account_id: str, existing_doc: dict[str, Any], raw: dic
 
     - 키 하나로 여러 계좌를 보는 커넥터(나무): {provider, account_no}. 계좌번호는 화면의 '확인' 이
       나열한 목록에서 고른 값이고, 계좌 구분(운영·모의)이 맞는지 본다.
-    - 키가 계좌에 묶인 커넥터(메리츠): {provider} 만. 키 `{계좌ID}_API_KEY/SECRET` 가 있어야 하고,
-      모의투자 서버가 없어 운영 계좌만 연동한다.
+    - 키가 계좌에 묶인 커넥터(메리츠): {provider, account_mask}. 키 `{계좌ID}_API_KEY/SECRET` 가 있어야 하고,
+      모의투자 서버가 없어 운영 계좌만 연동한다. API 가 계좌번호를 주지 않아 `account_mask` 는 사용자가
+      입력한 표시용 마스킹 번호(예: 3082****01)다 — 증권사와 대조하지 않는다.
     """
     from services.broker_api_service import PROVIDERS, BrokerApiError, provider_spec, require_env_keys
 
     provider = str(raw.get("provider") or "").strip().upper()
     account_no = str(raw.get("account_no") or "").strip()
+    account_mask = str(raw.get("account_mask") or "").strip()
     try:
         spec = provider_spec(provider)
     except BrokerApiError as error:
@@ -340,13 +342,19 @@ def _validate_broker_api(account_id: str, existing_doc: dict[str, Any], raw: dic
     if spec["per_account_keys"]:
         if account_no:
             raise AccountSettingsStoreError(f"'{account_id}' 의 {spec['name']} 연동은 계좌번호를 저장하지 않습니다.")
+        if not account_mask:
+            raise AccountSettingsStoreError(
+                f"'{account_id}' 의 {spec['name']} 표시용 계좌번호를 입력하세요(예: 3082****01)."
+            )
         if existing_doc["env"] == ACCOUNT_ENV_MOCK:
             raise AccountSettingsStoreError(f"{spec['name']}는 모의투자 서버가 없어 운영 계좌만 연동할 수 있습니다.")
         try:
             require_env_keys(provider, account_id)
         except BrokerApiError as error:
             raise AccountSettingsStoreError(f"'{account_id}' {spec['name']} 연동: {error}") from error
-        return {"provider": provider}
+        return {"provider": provider, "account_mask": account_mask}
+    if account_mask:
+        raise AccountSettingsStoreError(f"'{account_id}' 의 {spec['name']} 연동은 표시용 계좌번호를 쓰지 않습니다.")
     if not account_no:
         raise AccountSettingsStoreError(
             f"'{account_id}' 의 broker_api.account_no 가 비어 있습니다 — 계좌를 선택하세요."
