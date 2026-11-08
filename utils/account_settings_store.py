@@ -318,6 +318,43 @@ def mix_sleeves_of(account_settings: dict[str, Any]) -> list[dict[str, Any]]:
     return sleeves
 
 
+def _validate_broker_api(account_id: str, existing_doc: dict[str, Any], raw: dict[str, Any]) -> dict[str, str]:
+    """증권사 API 연동 값 검증 — 커넥터마다 저장하는 모양이 다르다.
+
+    - 키 하나로 여러 계좌를 보는 커넥터(나무): {provider, account_no}. 계좌번호는 화면의 '확인' 이
+      나열한 목록에서 고른 값이고, 계좌 구분(운영·모의)이 맞는지 본다.
+    - 키가 계좌에 묶인 커넥터(메리츠): {provider} 만. 키 `{계좌ID}_API_KEY/SECRET` 가 있어야 하고,
+      모의투자 서버가 없어 운영 계좌만 연동한다.
+    """
+    from services.broker_api_service import PROVIDERS, BrokerApiError, provider_spec, require_env_keys
+
+    provider = str(raw.get("provider") or "").strip().upper()
+    account_no = str(raw.get("account_no") or "").strip()
+    try:
+        spec = provider_spec(provider)
+    except BrokerApiError as error:
+        allowed = ", ".join(sorted(p["id"] for p in PROVIDERS))
+        raise AccountSettingsStoreError(
+            f"'{account_id}' 의 broker_api.provider 는 {allowed} 중 하나여야 합니다: {raw}"
+        ) from error
+    if spec["per_account_keys"]:
+        if account_no:
+            raise AccountSettingsStoreError(f"'{account_id}' 의 {spec['name']} 연동은 계좌번호를 저장하지 않습니다.")
+        if existing_doc["env"] == ACCOUNT_ENV_MOCK:
+            raise AccountSettingsStoreError(f"{spec['name']}는 모의투자 서버가 없어 운영 계좌만 연동할 수 있습니다.")
+        try:
+            require_env_keys(provider, account_id)
+        except BrokerApiError as error:
+            raise AccountSettingsStoreError(f"'{account_id}' {spec['name']} 연동: {error}") from error
+        return {"provider": provider}
+    if not account_no:
+        raise AccountSettingsStoreError(
+            f"'{account_id}' 의 broker_api.account_no 가 비어 있습니다 — 계좌를 선택하세요."
+        )
+    _validate_broker_account_type(account_id, existing_doc, provider, account_no)
+    return {"provider": provider, "account_no": account_no}
+
+
 def _validate_broker_account_type(
     account_id: str, existing_doc: dict[str, Any], provider: str, account_no: str
 ) -> None:
@@ -451,27 +488,13 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             # 합성에서 비워 두는 현금 몫(%). 슬리브 배분과의 합이 100 인지는 아래에서 본다.
             cleaned[key] = _validate_pct(account_id, key, raw)
         elif key == "broker_api":
-            # 증권사 API 연동 — {provider, account_no}. 없음이면 null.
-            # provider 는 커넥터 레지스트리에 있어야 하고, 계좌번호는 화면의 '확인' 이
-            # API 로 나열한 목록에서 고른 값이다(형식 검증만 하고 실조회는 하지 않는다).
+            # 증권사 API 연동. 없음이면 null.
             if raw in (None, "", {}):
                 cleaned[key] = None
                 continue
             if not isinstance(raw, dict):
                 raise AccountSettingsStoreError(f"'{account_id}' 의 broker_api 는 객체여야 합니다.")
-            provider = str(raw.get("provider") or "").strip().upper()
-            account_no = str(raw.get("account_no") or "").strip()
-            from services.broker_api_service import PROVIDERS
-
-            allowed_providers = {p["id"] for p in PROVIDERS}
-            if provider not in allowed_providers:
-                raise AccountSettingsStoreError(
-                    f"'{account_id}' 의 broker_api.provider 는 {', '.join(sorted(allowed_providers))} 중 하나여야 합니다: {raw}"
-                )
-            if not account_no:
-                raise AccountSettingsStoreError(f"'{account_id}' 의 broker_api.account_no 가 비어 있습니다.")
-            _validate_broker_account_type(account_id, existing_doc, provider, account_no)
-            cleaned[key] = {"provider": provider, "account_no": account_no}
+            cleaned[key] = _validate_broker_api(account_id, existing_doc, raw)
         elif key == "market_regime_index":
             # 계좌별 시장 레짐 판정 지수 — 시장추세 지수(INDICES) 중 하나(필수, {ticker, name}).
             if not isinstance(raw, dict):

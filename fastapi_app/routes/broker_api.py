@@ -22,8 +22,9 @@ router = APIRouter(prefix="/internal/broker-api", tags=["broker-api"])
 
 
 @router.get("/providers")
-def get_providers(_: None = Depends(require_internal_token)) -> dict:
-    return {"providers": list_providers()}
+def get_providers(account_id: str = Query(...), _: None = Depends(require_internal_token)) -> dict:
+    """커넥터 목록 — 키 등록 여부는 계좌마다 다르다(계좌별 키 커넥터)."""
+    return {"providers": list_providers(account_id.strip())}
 
 
 @router.get("/accounts")

@@ -33,7 +33,8 @@ type AccountEntry = {
   /** 합성 전략 사용 여부 — 실제 조합(전략·종목풀·배분)은 `/strategy-mix` 에서 정한다. */
   mix_enabled?: boolean;
   /** 증권사 API 연동 — 잔고 수동 불러오기·배치 동기화가 이 값으로 동작한다. */
-  broker_api?: { provider: string; account_no: string } | null;
+  /** 계좌별 키 커넥터(메리츠)는 `account_no` 없이 provider 만 저장한다. */
+  broker_api?: { provider: string; account_no?: string } | null;
   URL?: string;
   /** 보유종목 알림 — 이동선 이탈은 On/Off 만(기준은 종목의 종목풀 이평선). */
   ma_alarm_enabled?: boolean;
@@ -47,7 +48,8 @@ type AccountEntry = {
   save_method?: string | null;
 };
 
-type BrokerProvider = { id: string; name: string; env_ok: boolean };
+/** 커넥터 — `per_account_keys` 면 키가 이 계좌에 묶여(`{계좌ID}_API_KEY`) 증권사 계좌를 고르지 않는다. */
+type BrokerProvider = { id: string; name: string; env_ok: boolean; per_account_keys: boolean; env_key_name: string };
 type BrokerAccountRow = {
   account_no: string;
   masked: string;
@@ -174,11 +176,9 @@ function draftToValues(draft: AccountDraft, marketIndices: MarketIndexOption[]):
     },
     // 합성 전략 종목풀 — 없음이면 null 로 저장한다(그 계좌는 합성 화면에 안 뜬다).
     mix_enabled: draft.mix_enabled,
-    // 증권사 API 연동 — provider·계좌 둘 다 있어야 저장, 아니면 해제(null).
-    broker_api:
-      draft.brokerProvider && draft.brokerAccountNo
-        ? { provider: draft.brokerProvider, account_no: draft.brokerAccountNo }
-        : null,
+    // 증권사 API 연동 — 커넥터를 고르면 그대로 보낸다. 계좌번호가 필요한지(나무)·없어야 하는지(메리츠)는
+    // 백엔드가 커넥터별로 검증해 저장을 막는다(빠진 값을 조용히 해제하지 않는다).
+    broker_api: draft.brokerProvider ? { provider: draft.brokerProvider, account_no: draft.brokerAccountNo } : null,
     URL: draft.URL.trim(),
     ma_alarm_enabled: draft.ma_alarm_enabled,
     stoploss_alarm_enabled: draft.stoploss_alarm_enabled,
@@ -204,13 +204,13 @@ function isDirty(draft: AccountDraft, account: AccountEntry): boolean {
  */
 function AccountDetailModal({
   draft,
-  savedBrokerAccountNo,
+  savedBrokerProvider,
   onChange,
   onClose,
 }: {
   draft: AccountDraft;
   /** 저장된 연동이 있어야 잔고를 불러올 수 있다 — 셀렉트만 바꾼 상태에서는 먼저 저장. */
-  savedBrokerAccountNo: string;
+  savedBrokerProvider: string;
   onChange: (patch: Partial<AccountDraft>) => void;
   onClose: () => void;
 }) {
@@ -228,11 +228,13 @@ function AccountDetailModal({
 
   useEffect(() => {
     // 커넥터 목록 — 등록된 것만 셀렉트에 올려 오타를 원천 차단한다.
-    fetch("/api/broker-api/providers", { cache: "no-store" })
+    // 키 등록 여부는 계좌마다 다르다(메리츠는 `{계좌ID}_API_KEY`) — 이 계좌 기준으로 받는다.
+    fetch(`/api/broker-api/providers?account_id=${encodeURIComponent(draft.account_id)}`, { cache: "no-store" })
       .then((resp) => resp.json())
       .then((data: { providers?: BrokerProvider[] }) => setBrokerProviders(data.providers ?? []))
       .catch(() => setBrokerProviders([]));
-  }, []);
+  }, [draft.account_id]);
+  const selectedProvider = brokerProviders.find((provider) => provider.id === draft.brokerProvider) ?? null;
 
   // 현금 잔액 토글. 주 통화는 항상 포함(해제 불가).
   const toggleCashCurrency = (code: string) => {
@@ -452,11 +454,16 @@ function AccountDetailModal({
           {brokerProviders.map((provider) => (
             <option key={provider.id} value={provider.id} disabled={!provider.env_ok}>
               {provider.name}
-              {provider.env_ok ? "" : " (.env 키 없음)"}
+              {provider.env_ok ? "" : ` (.env ${provider.env_key_name} 없음)`}
             </option>
           ))}
         </select>
-        {draft.brokerProvider ? (
+        {/* 계좌별 키 커넥터(메리츠) — 키가 이 계좌에 묶여 있어 증권사 계좌를 고르지 않는다. 키 이름만 보여 준다. */}
+        {selectedProvider?.per_account_keys ? (
+          <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)" }}>
+            키 {selectedProvider.env_key_name} {selectedProvider.env_ok ? "등록됨" : "없음"}
+          </span>
+        ) : draft.brokerProvider ? (
           <button type="button" className="btn btn-sm btn-outline-secondary" disabled={brokerChecking} onClick={() => void checkBroker()}>
             {brokerChecking ? "확인 중…" : "확인"}
           </button>
@@ -488,7 +495,7 @@ function AccountDetailModal({
             저장된 계좌: {draft.brokerAccountNo.slice(0, 4)}***{draft.brokerAccountNo.slice(-2)}
           </span>
         ) : null}
-        {savedBrokerAccountNo && draft.env !== ENV_MOCK ? (
+        {savedBrokerProvider && draft.env !== ENV_MOCK ? (
           <button type="button" className="btn btn-sm btn-outline-primary" disabled={balanceLoading} onClick={() => void fetchBalance()}>
             {balanceLoading ? "동기화 중…" : "잔고 동기화"}
           </button>
@@ -979,9 +986,10 @@ export function AccountSettingsManager() {
       valueFormatter: (params) => {
         const row = params.data;
         if (!row?.brokerProvider) return "없음";
+        // 계좌별 키 커넥터(메리츠)는 계좌번호 없이 저장된다.
         return row.brokerAccountNo
           ? `${row.brokerProvider} · ${row.brokerAccountNo.slice(0, 4)}***${row.brokerAccountNo.slice(-2)}`
-          : `${row.brokerProvider} (계좌 미선택)`;
+          : row.brokerProvider;
       },
     },
     booleanCol(
@@ -1181,7 +1189,7 @@ export function AccountSettingsManager() {
       {detailId && detailDraft ? (
         <AccountDetailModal
           draft={detailDraft}
-          savedBrokerAccountNo={detailAccount?.broker_api?.account_no ?? ""}
+          savedBrokerProvider={detailAccount?.broker_api?.provider ?? ""}
           onChange={(patch) => updateDraft(detailId, patch)}
           onClose={() => setDetailId(null)}
         />

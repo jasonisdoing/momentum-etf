@@ -43,7 +43,15 @@ MOCK_ACCOUNT_TYPE = "03"
 _MAX_PAGES = 20
 
 # 등록된 커넥터 — 화면 셀렉트가 이 목록을 그대로 쓴다.
-PROVIDERS: tuple[dict[str, str], ...] = ({"id": "NAMU_PLUG", "name": "나무증권 (NH PLUG)"},)
+# `per_account_keys` — 키가 증권사 계좌 하나에 묶이는 커넥터(메리츠). 키 이름이 우리 계좌 ID 를 따르고
+# (`{계좌ID}_API_KEY`), 요청에 계좌번호가 없어 연동에 증권사 계좌번호를 저장하지 않는다.
+# 나무증권은 키 하나로 여러 계좌를 보므로 `{커넥터}_API_KEY` 한 쌍 + 계좌번호로 고른다.
+NAMU_PROVIDER = "NAMU_PLUG"
+MERITZ_PROVIDER = "MERITZ"
+PROVIDERS: tuple[dict[str, Any], ...] = (
+    {"id": NAMU_PROVIDER, "name": "나무증권 (NH PLUG)", "per_account_keys": False},
+    {"id": MERITZ_PROVIDER, "name": "메리츠증권", "per_account_keys": True},
+)
 
 
 def is_business_success(rsp_cd: str | None, rsp_msg: str | None) -> bool:
@@ -66,12 +74,40 @@ def _env_keys(provider: str) -> tuple[str, str]:
     return f"{provider}_API_KEY", f"{provider}_API_SECRET"
 
 
-def list_providers() -> list[dict[str, Any]]:
-    """커넥터 목록 + 환경변수 존재 여부 (값은 내려보내지 않는다)."""
+def provider_spec(provider: str) -> dict[str, Any]:
+    """등록된 커넥터 한 건 — 없으면 오류."""
+    spec = next((item for item in PROVIDERS if item["id"] == provider), None)
+    if spec is None:
+        raise BrokerApiError(f"등록되지 않은 커넥터입니다: {provider}")
+    return spec
+
+
+def env_key_names(provider: str, account_id: str) -> tuple[str, str]:
+    """이 계좌가 쓸 키·시크릿 환경변수 이름 — 계좌별 키 커넥터는 계좌 ID, 아니면 커넥터 ID 를 따른다."""
+    return _env_keys(account_id if provider_spec(provider)["per_account_keys"] else provider)
+
+
+def require_env_keys(provider: str, account_id: str) -> tuple[str, str]:
+    """이 계좌의 키·시크릿 값 — 하나라도 없으면 어느 이름이 필요한지 알려 주는 오류."""
+    key_name, secret_name = env_key_names(provider, account_id)
+    key, secret = os.environ.get(key_name), os.environ.get(secret_name)
+    if not key or not secret:
+        raise BrokerApiError(f".env 에 {key_name} / {secret_name} 가 필요합니다.")
+    return key, secret
+
+
+def list_providers(account_id: str) -> list[dict[str, Any]]:
+    """커넥터 목록 + 이 계좌가 쓸 환경변수의 존재 여부·이름 (값은 내려보내지 않는다)."""
     rows = []
     for provider in PROVIDERS:
-        key_name, secret_name = _env_keys(provider["id"])
-        rows.append({**provider, "env_ok": bool(os.environ.get(key_name)) and bool(os.environ.get(secret_name))})
+        key_name, secret_name = env_key_names(provider["id"], account_id)
+        rows.append(
+            {
+                **provider,
+                "env_ok": bool(os.environ.get(key_name)) and bool(os.environ.get(secret_name)),
+                "env_key_name": key_name,
+            }
+        )
     return rows
 
 

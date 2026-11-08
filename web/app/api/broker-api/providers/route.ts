@@ -7,6 +7,7 @@ const proxy = createFastApiProxy({
   GET: {
     path: "/internal/broker-api/providers",
     error: "커넥터 목록을 불러오지 못했습니다.",
+    forwardQuery: ["account_id"],
   },
 });
 
