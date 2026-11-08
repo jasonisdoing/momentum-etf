@@ -455,6 +455,26 @@ def _account_cash_map(
     return {code: float(broker_cash.get(code, 0.0)) for code in currencies}
 
 
+def _require_pool_holdings(account_id: str, holdings: list[dict[str, Any]]) -> None:
+    """증권사 보유 종목이 모두 종목풀에 있어야 한다 — 화면에서 종목을 담을 때와 같은 해석(`resolve_ticker_meta`).
+
+    종목풀에 없는 종목은 이름·가격 캐시·버킷이 없어 평가가 비고 자산 요약이 깨진다. 저장하지 않고 알린다.
+    """
+    from utils.ticker_resolver import resolve_ticker_meta
+
+    missing = []
+    for row in holdings:
+        try:
+            resolve_ticker_meta(row["ticker"], account_id=account_id)
+        except (RuntimeError, ValueError):
+            missing.append(f"{row['name']}({row['ticker']})")
+    if missing:
+        raise BrokerApiError(
+            f"'{account_id}' 의 증권사 보유 중 종목풀에 없는 종목이 있습니다: {', '.join(missing)} — "
+            "'종목 순위' 화면에서 먼저 종목풀에 추가하세요."
+        )
+
+
 def fetch_broker_balance(account_id: str) -> dict[str, Any]:
     """계좌 설정의 연동으로 잔고를 불러와 표준형으로 돌려주고, '적용' 용으로 잠시 캐시한다.
 
@@ -465,6 +485,7 @@ def fetch_broker_balance(account_id: str) -> dict[str, Any]:
     account_settings = get_account_settings(account_id)
     provider = linked_provider(account_settings)
     balance = _provider_balance(account_id, account_settings, provider)
+    _require_pool_holdings(account_id, balance["holdings"])
     cash_map = _account_cash_map(account_id, account_settings, balance["cash_map"])
     currency = str(account_settings["currency"]).strip().upper()
     result = {
