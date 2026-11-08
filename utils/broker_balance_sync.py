@@ -109,14 +109,13 @@ def sync_all() -> dict[str, Any]:
 
     results: list[dict[str, Any]] = []
     for doc in load_live_account_docs():
-        linked = doc.get("broker_api") or {}
-        provider = str(linked.get("provider") or "").strip().upper()
-        account_no = str(linked.get("account_no") or "").strip()
-        if not provider or not account_no:
+        # 연동 여부는 커넥터로만 본다 — 계좌번호는 나무증권만 있다(메리츠는 키가 계좌에 묶여 없다).
+        provider = str((doc.get("broker_api") or {}).get("provider") or "").strip().upper()
+        if not provider:
             continue
         account_id = doc["account_id"]
         try:
-            fetched = fetch_broker_balance(provider, account_no)
+            fetched = fetch_broker_balance(account_id)
             diff = _diff_lines(load_portfolio_master(account_id), fetched)
             if not diff:
                 results.append({"account_id": account_id, "ok": True, "changed": False})

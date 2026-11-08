@@ -74,6 +74,9 @@ Cloudflare 프록시(주황 구름)는 쓰지 않는다 — HTTP-01 검증이 �
 | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` | 알림 |
 | `SLACK_SIGNING_SECRET` | 슬랙 인터랙션 웹훅(`/api/slack/interactions`) 서명 검증. 슬랙 앱의 Interactivity Request URL 이 `{APP_BASE_URL}/api/slack/interactions` |
 | `DART_API_KEY` | OpenDART 재무 조회 |
+| `NAMU_PLUG_API_KEY`, `NAMU_PLUG_API_SECRET` | 나무증권 API — 키 하나로 여러 계좌(연동에 계좌번호 저장) |
+| `{계좌ID}_API_KEY`, `{계좌ID}_API_SECRET` | 메리츠증권 API — 키가 증권사 계좌 하나에 묶여 우리 계좌 ID 를 이름으로 쓴다(예: `m_1_API_KEY`, 대소문자 그대로) |
+| `MERITZ_MAC_ADDRESS` | 메리츠 요청 필수 헤더 `mac_address`(대문자 16진수 12자리). 프로세스가 읽는 MAC 은 실행마다 달라 고정값으로 둔다 |
 | `KRX_DATA_ID`, `KRX_DATA_PW` | KRX 로그인 헬퍼(보관용, 자동 수집은 약관 금지) |
 | MongoDB 접속 | `utils/db_manager.py` 참조 |
 

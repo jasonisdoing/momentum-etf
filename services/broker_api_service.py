@@ -323,8 +323,8 @@ def list_broker_accounts(provider: str) -> list[dict[str, Any]]:
 
     화면의 '확인' 버튼이 부른다 — 토큰 발급까지 실제로 수행해 키가 유효한지 검증된다.
     """
-    if provider != "NAMU_PLUG":
-        raise BrokerApiError(f"등록되지 않은 커넥터입니다: {provider}")
+    if provider != NAMU_PROVIDER:
+        raise BrokerApiError(f"계좌 나열은 나무증권만 합니다(계좌별 키 커넥터는 고를 계좌가 없습니다): {provider}")
 
     accounts = _namu_call("/n2/acctinfo", {}).get("Output_0", [])
     rows: list[dict[str, Any]] = []
@@ -406,25 +406,51 @@ def parse_balance(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def fetch_broker_balance(provider: str, account_no: str) -> dict[str, Any]:
-    """잔고를 표준형으로 정규화해 돌려주고, '적용' 용으로 잠시 캐시한다.
+def linked_provider(account_settings: dict[str, Any]) -> str:
+    """계좌 설정에 저장된 증권사 API 연동의 커넥터 id — 연동이 없으면 오류."""
+    provider = str((account_settings.get("broker_api") or {}).get("provider") or "").strip().upper()
+    if not provider:
+        raise BrokerApiError(f"'{account_settings.get('account_id')}' 에 증권사 API 연동이 저장돼 있지 않습니다.")
+    return provider
 
-    필드 근거 (공식 openapi.json — /krstock/inquiry/v1/balance):
-      - 현금 = `nxt2_dd_dca` (D+2 예수금) — 미결제 매수·매도가 반영된 실질 현금.
-        `dca`(예수금)는 결제 전 금액이라 매수 직후에는 실제보다 크게 나온다.
-      - 수량 = `rsdl_qty` (잔량수량) — 미결제 포함 현재 잔량.
-      - 평단 = `phs_pr` (매입가격).
-    """
-    if provider != "NAMU_PLUG":
-        raise BrokerApiError(f"등록되지 않은 커넥터입니다: {provider}")
-    result = {"provider": provider, "account_no": account_no, **parse_balance(_namu_balance(account_no))}
-    _FETCH_CACHE.set(_FETCH_CACHE.make_key(provider, account_no), result)
+
+def _provider_balance(account_id: str, account_settings: dict[str, Any], provider: str) -> dict[str, Any]:
+    """커넥터별 잔고 조회 → 표준형(현금 D+2·D+0·총자산·보유)."""
+    if provider == NAMU_PROVIDER:
+        # 필드 근거 (공식 openapi.json — /krstock/inquiry/v1/balance):
+        #   현금 = `nxt2_dd_dca`(D+2 예수금, 미결제 반영) · 수량 = `rsdl_qty` · 평단 = `phs_pr`.
+        account_no = str((account_settings.get("broker_api") or {}).get("account_no") or "").strip()
+        if not account_no:
+            raise BrokerApiError(f"'{account_id}' 의 나무증권 연동에 계좌번호가 없습니다.")
+        return parse_balance(_namu_balance(account_no))
+    if provider == MERITZ_PROVIDER:
+        from services.meritz_api_service import fetch_domestic_balance
+
+        # 미국 계좌(외화 현금·해외 잔고)는 아직 동기화하지 않는다 — 국내 계좌만 받는다.
+        if str(account_settings.get("country_code") or "") != "kor":
+            raise BrokerApiError(f"'{account_id}' — 메리츠증권 잔고 동기화는 아직 국내(kor) 계좌만 지원합니다.")
+        return fetch_domestic_balance(account_id)
+    raise BrokerApiError(f"등록되지 않은 커넥터입니다: {provider}")
+
+
+def fetch_broker_balance(account_id: str) -> dict[str, Any]:
+    """계좌 설정의 연동으로 잔고를 불러와 표준형으로 돌려주고, '적용' 용으로 잠시 캐시한다."""
+    from utils.settings_loader import get_account_settings
+
+    account_settings = get_account_settings(account_id)
+    provider = linked_provider(account_settings)
+    result = {
+        "provider": provider,
+        "account_id": account_id,
+        **_provider_balance(account_id, account_settings, provider),
+    }
+    _FETCH_CACHE.set(_FETCH_CACHE.make_key(account_id), result)
     return result
 
 
-def cached_broker_balance(provider: str, account_no: str) -> dict[str, Any] | None:
+def cached_broker_balance(account_id: str) -> dict[str, Any] | None:
     """가장 최근 불러오기 결과 — '적용' 이 재호출 없이 쓴다. 없으면 None."""
-    return _FETCH_CACHE.get(_FETCH_CACHE.make_key(provider, account_no))
+    return _FETCH_CACHE.get(_FETCH_CACHE.make_key(account_id))
 
 
 def apply_fetched_balance(account_id: str, provider: str, fetched: dict[str, Any]) -> dict[str, Any]:
