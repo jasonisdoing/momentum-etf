@@ -45,22 +45,19 @@ def get_balance(
     _: None = Depends(require_internal_token),
 ) -> dict:
     """연동 계좌의 잔고를 불러와 현재 저장값과 나란히 돌려준다 — 화면이 차이를 보여준다."""
+    from utils.broker_balance_sync import stored_cash_map
     from utils.portfolio_io import load_portfolio_master
-    from utils.settings_loader import get_account_settings
 
     try:
         fetched = fetch_broker_balance(account_id)
     except BrokerApiError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     current = load_portfolio_master(account_id) or {"cash_balance": 0.0, "holdings": []}
-    # 현금은 자산 화면과 같은 기준 — 다통화 맵의 계좌 통화 값 우선, 없으면 레거시.
-    currency = str((get_account_settings(account_id) or {}).get("currency") or "KRW").strip().upper()
-    cash_map = current.get("cash") or {}
-    current_cash = float(cash_map.get(currency, current.get("cash_balance") or 0))
     return {
         "fetched": fetched,
         "current": {
-            "cash": current_cash,
+            # 증권사 값과 같은 통화들의 저장 현금 — 동기화 배치의 비교와 같은 기준.
+            "cash_map": stored_cash_map(current, list(fetched["cash_map"])),
             "holdings": [
                 {
                     "ticker": str(row.get("ticker") or ""),

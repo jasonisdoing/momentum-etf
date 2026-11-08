@@ -56,19 +56,34 @@ def _notify(text: str) -> None:
         logger.warning("[BROKER-SYNC] 슬랙 발송 실패: %s", exc)
 
 
+def stored_cash_map(current: dict[str, Any], currencies: list[str]) -> dict[str, float]:
+    """저장된 통화별 현금 — 자산 화면과 같은 기준(다통화 맵이 단일 소스).
+
+    맵이 없던 옛 계좌는 원화만 레거시 `cash_balance` 를 본다. 외화의 레거시 값은 원화 환산액이라 쓰지 않는다.
+    """
+    cash_map = current.get("cash") or {}
+    stored: dict[str, float] = {}
+    for code in currencies:
+        legacy = current.get("cash_balance") if code == "KRW" else 0
+        stored[code] = float(cash_map.get(code, legacy or 0))
+    return stored
+
+
 def _diff_lines(current: dict[str, Any] | None, fetched: dict[str, Any]) -> list[str]:
     """저장값 대비 증권사 값의 차이 — 슬랙 본문 줄 목록. 차이가 없으면 빈 목록.
 
-    비교 기준은 화면의 대조 표와 같다 — 현금·수량은 원/주 단위, 평단은 원 단위 반올림.
+    비교 기준은 화면의 대조 표와 같다 — 현금은 통화별(원화는 원 단위, 외화는 센트 단위), 수량은 주 단위,
+    평단은 반올림한 정수.
     """
     lines: list[str] = []
     current = current or {"cash_balance": 0.0, "holdings": []}
-    # 자산 화면과 같은 기준 — 다통화 맵의 KRW 값 우선(맵이 화면 표시의 단일 소스다).
-    cash_map = current.get("cash") or {}
-    cash_before = round(float(cash_map.get("KRW", current.get("cash_balance") or 0)))
-    cash_after = round(float(fetched["cash"]))
-    if cash_before != cash_after:
-        lines.append(f"현금: {cash_before:,} → {cash_after:,}")
+    before_cash = stored_cash_map(current, list(fetched["cash_map"]))
+    for code, amount in fetched["cash_map"].items():
+        digits = 0 if code == "KRW" else 2
+        cash_before = round(before_cash[code], digits)
+        cash_after = round(float(amount), digits)
+        if cash_before != cash_after:
+            lines.append(f"현금 {code}: {cash_before:,} → {cash_after:,}")
 
     before_by = {str(row.get("ticker") or ""): row for row in current.get("holdings") or []}
     after_by = {row["ticker"]: row for row in fetched["holdings"]}

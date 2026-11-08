@@ -1,4 +1,4 @@
-"""메리츠증권 Open API — 계좌 잔고 조회(읽기 전용).
+"""메리츠증권 Open API — 계좌 잔고 조회(읽기 전용, 국내·미국 계좌).
 
 키는 증권사 계좌 하나에 묶여 있다. 그래서 키 이름이 우리 계좌 ID 를 따르고(`{계좌ID}_API_KEY/SECRET`,
 `broker_api_service.require_env_keys`), 요청에 계좌번호를 넣지 않는다. 모의투자 서버는 없다(운영만).
@@ -30,6 +30,8 @@ BASE_URL = "https://openapi.imeritz.com:9443"
 TOKEN_PATH = "/oauth2/token"
 VALUATION_PATH = "/accounts/v1/me/valuation"
 HOLDINGS_PATH = "/accounts/v1/me/holdings"
+OVERSEAS_HOLDINGS_PATH = "/accounts/v1/me/overseas/holdings"
+CURRENCIES_PATH = "/accounts/v1/me/overseas/currencies"
 
 # 조회 완료·자료 없음 — 이 밖의 rsp_cd 는 전부 오류다(API 계열마다 성공 코드가 다르다, 잔고·평가는 5766).
 _SUCCESS_CODE = "5766"
@@ -38,6 +40,8 @@ _NO_DATA_CODE = "5820"
 _TOKEN_ERROR_CODES = frozenset({"EGW00121", "EGW00123"})
 # 잔고 행의 처리대상구분 — 국내주식("1")·해외주식("J")이 한 목록에 섞여 온다.
 _DOMESTIC_ROW = "1"
+# 해외 잔고구분 — "1" 일반, "2" 소수, "3" 대출.
+_US_GENERAL_ROW = "1"
 
 _MIN_INTERVAL_SECONDS = 1.0
 _REQUEST_TIMEOUT_SECONDS = 10
@@ -181,8 +185,15 @@ def _domestic_ticker(iscd: str) -> str:
     return iscd[1:]
 
 
+def _require_unique(ticker: str, name: Any, seen: set[str]) -> None:
+    """같은 종목이 여러 행(일반·신용·소수 등)이면 평단을 합쳐야 한다 — 임의로 합치지 않고 알린다."""
+    if ticker in seen:
+        raise BrokerApiError(f"같은 종목의 잔고가 여러 행입니다(일반·신용 등): {name}({ticker})")
+    seen.add(ticker)
+
+
 def _domestic_holdings(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """잔고 행 → 표준 보유 목록. 해외 행이 섞여 있으면 막는다(국내 계좌에 미국 종목은 다루지 않는다)."""
+    """국내 잔고 행(통합 잔고 목록) → 표준 보유 목록. 해외 행이 섞여 있으면 막는다(계좌 국가 하나)."""
     holdings: list[dict[str, Any]] = []
     seen: set[str] = set()
     for row in rows:
@@ -195,10 +206,7 @@ def _domestic_holdings(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if quantity <= 0:
             continue
         ticker = _domestic_ticker(iscd)
-        # 같은 종목이 일반·신용 두 행으로 오면 평단을 합쳐야 한다 — 임의로 합치지 않고 알린다.
-        if ticker in seen:
-            raise BrokerApiError(f"같은 종목의 잔고가 여러 행입니다(일반·신용 등): {row.get('isnm')}({ticker})")
-        seen.add(ticker)
+        _require_unique(ticker, row.get("isnm"), seen)
         holdings.append(
             {
                 "ticker": ticker,
@@ -212,23 +220,88 @@ def _domestic_holdings(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return holdings
 
 
-def fetch_domestic_balance(account_id: str) -> dict[str, Any]:
-    """국내 계좌 잔고 → 나무증권과 같은 표준형(현금 D+2·D+0·총자산·보유).
+def _us_holdings(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """해외 잔고 행 → 표준 보유 목록(단가는 USD). 일반 잔고·USD·정수 수량만 받는다.
 
-    현금은 D+2 예수금(`d2_aft_tfam`) — 미결제 매수·매도가 반영된 실질 현금이다(나무 `nxt2_dd_dca` 와 같은 기준).
-    외화 예수금이 있으면 원화 계좌 현금에 담을 곳이 없어 막는다.
+    티커는 거래소 접미사를 뗀 심볼(`ovrs_stck_symb_iscd`, "BRK.B")을 공통 시세 심볼("BRK-B")로 바꾼다.
+    소수점 잔고는 자산 계산이 수량을 정수로 내려 평가가 빠지므로 막는다.
+    """
+    from utils.normalization import normalize_exchange_symbol
+
+    holdings: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        symbol = str(row.get("ovrs_stck_symb_iscd") or "").strip()
+        name = str(row.get("isnm") or "").strip()
+        if str(row.get("rmnd_clcd") or "") != _US_GENERAL_ROW:
+            raise BrokerApiError(f"일반 잔고가 아닌 해외 잔고({row.get('prod_cls_name')})가 있습니다: {name}({symbol})")
+        if str(row.get("crcd") or "") != "USD":
+            raise BrokerApiError(f"USD 가 아닌 해외 잔고({row.get('crcd')})가 있습니다: {name}({symbol})")
+        quantity = float(row.get("rmnd_dqty") or 0)
+        if quantity != int(quantity):
+            raise BrokerApiError(f"소수점 수량 잔고({quantity})는 동기화하지 않습니다: {name}({symbol})")
+        if quantity <= 0:
+            continue
+        if not symbol:
+            raise BrokerApiError(f"해외 잔고의 심볼이 비어 있습니다: {name}({row.get('iscd')})")
+        ticker = normalize_exchange_symbol(symbol, suffix="")
+        _require_unique(ticker, name, seen)
+        holdings.append(
+            {
+                "ticker": ticker,
+                "name": name,
+                "quantity": int(quantity),
+                "average_buy_price": float(row.get("avrg_unpr") or 0),
+                "current_price": float(row.get("psnt_prc") or 0) or None,
+                "value": float(row.get("frcr_vltn_amt") or 0) or None,
+            }
+        )
+    return holdings
+
+
+def _foreign_cash(account_id: str) -> dict[str, float]:
+    """통화별 외화 예수금 — 추정 외화 예수금(`estm_frcr_amt`, 미결제 반영)이다. 원화 D+2 와 같은 기준."""
+    rows = _get(account_id, CURRENCIES_PATH, {}).get("data") or []
+    cash: dict[str, float] = {}
+    for row in rows:
+        code = str(row.get("crcd") or "").strip().upper()
+        if not code or code in cash:
+            raise BrokerApiError(f"메리츠증권 외화 잔고의 통화가 비었거나 겹칩니다: {code!r}")
+        cash[code] = float(row.get("estm_frcr_amt") or 0)
+    return cash
+
+
+def fetch_balance(account_id: str, country_code: str) -> dict[str, Any]:
+    """계좌 잔고 → 표준형(통화별 현금·총자산·보유). 계좌 국가(kor·us)의 잔고만 받는다.
+
+    - 원화 현금은 D+2 예수금(`d2_aft_tfam`, 미결제 반영 — 나무 `nxt2_dd_dca` 와 같은 기준),
+      외화는 추정 외화 예수금(`estm_frcr_amt`). 외화 예수금이 있을 때만 외화 잔고를 조회한다.
+    - 잔고 목록은 국내·해외가 한 목록에 섞여 오므로, 계좌 국가와 다른 행이 있으면 막는다.
+      미국 계좌의 종목 상세(평균단가 USD 등)는 해외주식 잔고 조회에서 받는다.
     """
     valuation = _get(account_id, VALUATION_PATH, {}).get("data") or {}
     if not valuation:
         raise BrokerApiError("메리츠증권 자산평가 응답이 비어 있습니다.")
+    cash_map = {"KRW": float(valuation["d2_aft_tfam"])}
     if float(valuation.get("frcr_tfam") or 0) != 0:
-        raise BrokerApiError(
-            f"국내 계좌에 외화 예수금(원화 환산 {float(valuation['frcr_tfam']):,.0f}원)이 있습니다 — 계좌 설정을 확인하세요."
-        )
-    rows = _get_paged(account_id, HOLDINGS_PATH, {"nthn_rmnd_incu_yn": "N"})
+        foreign = _foreign_cash(account_id)
+        if "KRW" in foreign:
+            raise BrokerApiError("메리츠증권 외화 잔고에 KRW 가 있습니다 — 응답을 확인하세요.")
+        cash_map.update(foreign)
+
+    combined = _get_paged(account_id, HOLDINGS_PATH, {"nthn_rmnd_incu_yn": "N"})
+    if country_code == "kor":
+        holdings = _domestic_holdings(combined)
+    elif country_code == "us":
+        domestic = [row for row in combined if str(row.get("pros_trgt_cls_code") or "") == _DOMESTIC_ROW]
+        if domestic:
+            names = ", ".join(f"{row.get('isnm')}({row.get('iscd')})" for row in domestic)
+            raise BrokerApiError(f"미국 계좌에 국내 잔고가 있습니다: {names} — 계좌 국가 설정을 확인하세요.")
+        holdings = _us_holdings(_get_paged(account_id, OVERSEAS_HOLDINGS_PATH, {}))
+    else:
+        raise BrokerApiError(f"메리츠증권 잔고 동기화는 국내(kor)·미국(us) 계좌만 지원합니다: {country_code}")
     return {
-        "cash": float(valuation["d2_aft_tfam"]),
-        "cash_d0": float(valuation["tfam"]),
+        "cash_map": cash_map,
         "total_asset": float(valuation["aset_vltn_amt"]),
-        "holdings": _domestic_holdings(rows),
+        "holdings": holdings,
     }

@@ -415,34 +415,66 @@ def linked_provider(account_settings: dict[str, Any]) -> str:
 
 
 def _provider_balance(account_id: str, account_settings: dict[str, Any], provider: str) -> dict[str, Any]:
-    """커넥터별 잔고 조회 → 표준형(현금 D+2·D+0·총자산·보유)."""
+    """커넥터별 잔고 조회 → 표준형(통화별 현금 `cash_map`·총자산·보유)."""
     if provider == NAMU_PROVIDER:
         # 필드 근거 (공식 openapi.json — /krstock/inquiry/v1/balance):
         #   현금 = `nxt2_dd_dca`(D+2 예수금, 미결제 반영) · 수량 = `rsdl_qty` · 평단 = `phs_pr`.
         account_no = str((account_settings.get("broker_api") or {}).get("account_no") or "").strip()
         if not account_no:
             raise BrokerApiError(f"'{account_id}' 의 나무증권 연동에 계좌번호가 없습니다.")
-        return parse_balance(_namu_balance(account_no))
+        parsed = parse_balance(_namu_balance(account_no))
+        return {
+            "cash_map": {"KRW": parsed["cash"]},
+            "total_asset": parsed["total_asset"],
+            "holdings": parsed["holdings"],
+        }
     if provider == MERITZ_PROVIDER:
-        from services.meritz_api_service import fetch_domestic_balance
+        from services.meritz_api_service import fetch_balance
 
-        # 미국 계좌(외화 현금·해외 잔고)는 아직 동기화하지 않는다 — 국내 계좌만 받는다.
-        if str(account_settings.get("country_code") or "") != "kor":
-            raise BrokerApiError(f"'{account_id}' — 메리츠증권 잔고 동기화는 아직 국내(kor) 계좌만 지원합니다.")
-        return fetch_domestic_balance(account_id)
+        return fetch_balance(account_id, str(account_settings.get("country_code") or ""))
     raise BrokerApiError(f"등록되지 않은 커넥터입니다: {provider}")
 
 
+def _account_cash_map(
+    account_id: str, account_settings: dict[str, Any], broker_cash: dict[str, float]
+) -> dict[str, float]:
+    """증권사 통화별 현금 → 이 계좌가 담는 통화(`cash_currencies`)의 현금 맵.
+
+    계좌에 없는 통화에 돈이 있으면 버리지 않고 막는다 — 현금 통화에 추가하라고 알린다.
+    증권사가 주지 않은 계좌 통화는 0 이다(그 통화 예수금이 없다는 응답).
+    """
+    from utils.cash_model import resolve_cash_currencies
+
+    currencies = resolve_cash_currencies(account_settings)
+    stray = {code: amount for code, amount in broker_cash.items() if code not in currencies and amount != 0}
+    if stray:
+        listed = ", ".join(f"{code} {amount:,.2f}" for code, amount in stray.items())
+        raise BrokerApiError(
+            f"'{account_id}' 의 현금 통화({', '.join(currencies)})에 없는 예수금이 있습니다: {listed} — 계좌 설정의 현금 통화에 추가하세요."
+        )
+    return {code: float(broker_cash.get(code, 0.0)) for code in currencies}
+
+
 def fetch_broker_balance(account_id: str) -> dict[str, Any]:
-    """계좌 설정의 연동으로 잔고를 불러와 표준형으로 돌려주고, '적용' 용으로 잠시 캐시한다."""
+    """계좌 설정의 연동으로 잔고를 불러와 표준형으로 돌려주고, '적용' 용으로 잠시 캐시한다.
+
+    `cash_map` 은 계좌 현금 통화별 금액, `cash` 는 그중 계좌 통화(주 통화) 금액이다.
+    """
     from utils.settings_loader import get_account_settings
 
     account_settings = get_account_settings(account_id)
     provider = linked_provider(account_settings)
+    balance = _provider_balance(account_id, account_settings, provider)
+    cash_map = _account_cash_map(account_id, account_settings, balance["cash_map"])
+    currency = str(account_settings["currency"]).strip().upper()
     result = {
         "provider": provider,
         "account_id": account_id,
-        **_provider_balance(account_id, account_settings, provider),
+        "currency": currency,
+        "cash": cash_map[currency],
+        "cash_map": cash_map,
+        "total_asset": balance["total_asset"],
+        "holdings": balance["holdings"],
     }
     _FETCH_CACHE.set(_FETCH_CACHE.make_key(account_id), result)
     return result
@@ -457,14 +489,17 @@ def apply_fetched_balance(account_id: str, provider: str, fetched: dict[str, Any
     """불러온 잔고를 portfolio_master 에 반영한다 — 수동 '덮어쓰기' 와 배치가 공용.
 
     기존 보유의 메모·매수일·정렬은 보존하고 수량·평단·현금만 증권사 값으로 바꾼다.
-    변경 주체(updated_by)는 커넥터 id 로 남는다.
+    현금은 통화별 맵 전체를 바꾸고, 레거시 원화 합계(`cash_balance`)는 자산 화면 수기 저장과 같이
+    맵을 현재 환율로 환산한 값이다. 변경 주체(updated_by)는 커넥터 id 로 남는다.
     """
+    from services.price_service import get_exchange_rates
+    from utils.cash_model import cash_total_krw
     from utils.portfolio_io import load_portfolio_master, save_portfolio_master
-    from utils.settings_loader import get_account_settings
 
     current = load_portfolio_master(account_id) or {"holdings": []}
     existing_by_ticker = {str(row.get("ticker") or ""): row for row in current.get("holdings") or []}
-    currency = str((get_account_settings(account_id) or {}).get("currency") or "KRW").strip().upper()
+    currency = fetched["currency"]
+    cash_map = fetched["cash_map"]
 
     holdings = []
     for index, row in enumerate(fetched["holdings"]):
@@ -483,12 +518,14 @@ def apply_fetched_balance(account_id: str, provider: str, fetched: dict[str, Any
             }
         )
 
+    foreign = [code for code in cash_map if code != "KRW"]
+    rates = get_exchange_rates(foreign) if foreign else {}
     ok = save_portfolio_master(
         account_id,
         holdings,
-        cash_balance=fetched["cash"],
-        # 자산 화면이 우선하는 다통화 맵도 함께 — 계좌 통화만 갱신(다른 통화 잔액 보존).
-        cash_map={currency: fetched["cash"]},
+        cash_balance=round(cash_total_krw(cash_map, rates), 2),
+        cash_balance_native=fetched["cash"],
+        cash_map=cash_map,
         updated_by=provider,
     )
     if not ok:

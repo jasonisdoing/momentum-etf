@@ -65,8 +65,9 @@ type BrokerAccountRow = {
 
 type BrokerHolding = { ticker: string; name: string; quantity: number; average_buy_price: number };
 type BrokerBalanceDiff = {
-  fetched: { cash: number; cash_d0: number; holdings: BrokerHolding[] };
-  current: { cash: number; holdings: BrokerHolding[] };
+  /** 현금은 통화별(계좌 현금 통화) — 미국 계좌는 USD·KRW 를 함께 담을 수 있다. */
+  fetched: { cash_map: Record<string, number>; holdings: BrokerHolding[] };
+  current: { cash_map: Record<string, number>; holdings: BrokerHolding[] };
 };
 
 type ApiResponse = {
@@ -533,7 +534,13 @@ function AccountDetailModal({
               return "일치";
             };
             const diffCount = tickers.filter((tk) => stateOf(tk) !== "일치").length;
-            const cashChanged = Math.round(balanceDiff.fetched.cash) !== Math.round(balanceDiff.current.cash);
+            // 통화별 현금 비교 — 원화는 원, 외화는 센트 단위(동기화 배치의 비교와 같은 기준).
+            const cashDigits = (code: string) => (code === "KRW" ? 0 : 2);
+            const cashCodes = Object.keys(balanceDiff.fetched.cash_map);
+            const cashDiffers = (code: string) =>
+              balanceDiff.fetched.cash_map[code].toFixed(cashDigits(code)) !==
+              (balanceDiff.current.cash_map[code] ?? 0).toFixed(cashDigits(code));
+            const cashChanged = cashCodes.some(cashDiffers);
             const number = (v: number | undefined) => (v == null ? "-" : v.toLocaleString("ko-KR"));
             const cellStyle: React.CSSProperties = { padding: "2px 10px 2px 0", textAlign: "right" };
             const diffColor = "var(--bs-danger, #dc3545)";
@@ -545,9 +552,11 @@ function AccountDetailModal({
                     (현금은 D+2 예수금 기준 · 종목 차이 {diffCount}건{cashChanged ? " · 현금 차이" : ""})
                   </span>
                 </div>
-                <div style={{ marginBottom: 6, color: cashChanged ? diffColor : "var(--text-muted)" }}>
-                  현금 — 시스템 {number(balanceDiff.current.cash)} · API {number(balanceDiff.fetched.cash)}
-                </div>
+                {cashCodes.map((code) => (
+                  <div key={code} style={{ marginBottom: 6, color: cashDiffers(code) ? diffColor : "var(--text-muted)" }}>
+                    현금 {code} — 시스템 {number(balanceDiff.current.cash_map[code])} · API {number(balanceDiff.fetched.cash_map[code])}
+                  </div>
+                ))}
                 <div style={{ overflowX: "auto" }}>
                   <table style={{ borderCollapse: "collapse", whiteSpace: "nowrap" }}>
                     <thead>
@@ -974,6 +983,21 @@ export function AccountSettingsManager() {
         ) : null,
     },
     {
+      field: "brokerProvider",
+      headerName: "증권사 API",
+      width: 190,
+      sortable: false,
+      valueFormatter: (params) => {
+        const row = params.data;
+        if (!row?.brokerProvider) return "없음";
+        // 계좌별 키 커넥터(메리츠)는 계좌번호 대신 수기 입력한 마스킹 번호를 그대로 보여 준다.
+        if (row.brokerAccountMask) return `${row.brokerProvider} · ${row.brokerAccountMask}`;
+        return row.brokerAccountNo
+          ? `${row.brokerProvider} · ${row.brokerAccountNo.slice(0, 4)}***${row.brokerAccountNo.slice(-2)}`
+          : row.brokerProvider;
+      },
+    },
+    {
       field: "env",
       headerName: "구분",
       width: 70,
@@ -1012,21 +1036,6 @@ export function AccountSettingsManager() {
       76,
       "합성 전략을 운용할 계좌입니다. 전략·종목풀·배분은 /strategy-mix 에서 정합니다.",
     ),
-    {
-      field: "brokerProvider",
-      headerName: "증권사 API",
-      width: 190,
-      sortable: false,
-      valueFormatter: (params) => {
-        const row = params.data;
-        if (!row?.brokerProvider) return "없음";
-        // 계좌별 키 커넥터(메리츠)는 계좌번호 대신 수기 입력한 마스킹 번호를 그대로 보여 준다.
-        if (row.brokerAccountMask) return `${row.brokerProvider} · ${row.brokerAccountMask}`;
-        return row.brokerAccountNo
-          ? `${row.brokerProvider} · ${row.brokerAccountNo.slice(0, 4)}***${row.brokerAccountNo.slice(-2)}`
-          : row.brokerProvider;
-      },
-    },
     booleanCol(
       "ma_alarm_enabled",
       "이평선🔔",
