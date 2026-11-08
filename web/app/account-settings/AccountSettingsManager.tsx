@@ -524,13 +524,16 @@ function AccountDetailModal({
             const fetchedBy = new Map(balanceDiff.fetched.holdings.map((h) => [h.ticker, h]));
             const currentBy = new Map(balanceDiff.current.holdings.map((h) => [h.ticker, h]));
             const tickers = [...new Set([...fetchedBy.keys(), ...currentBy.keys()])].sort();
+            // 평단 비교는 소수 4자리 — 동기화 배치의 슬랙 비교(`broker_balance_sync._AVG_DIGITS`)와 같은 기준.
+            const avgDiffers = (f: BrokerHolding, c: BrokerHolding) =>
+              f.average_buy_price.toFixed(4) !== c.average_buy_price.toFixed(4);
             const stateOf = (tk: string): string => {
               const f = fetchedBy.get(tk);
               const c = currentBy.get(tk);
               if (!c) return "추가";
               if (!f) return "삭제";
               if (f.quantity !== c.quantity) return "수량 차이";
-              if (Math.round(f.average_buy_price) !== Math.round(c.average_buy_price)) return "평단 차이";
+              if (avgDiffers(f, c)) return "평단 차이";
               return "일치";
             };
             const diffCount = tickers.filter((tk) => stateOf(tk) !== "일치").length;
@@ -576,7 +579,7 @@ function AccountDetailModal({
                         const state = stateOf(tk);
                         const changed = state !== "일치";
                         const qtyDiff = f && c && f.quantity !== c.quantity;
-                        const avgDiff = f && c && Math.round(f.average_buy_price) !== Math.round(c.average_buy_price);
+                        const avgDiff = f && c && avgDiffers(f, c);
                         return (
                           <tr key={tk} style={changed ? { fontWeight: 600 } : undefined}>
                             <td style={{ ...cellStyle, textAlign: "left" }}>{(f?.name || c?.name || tk)}({tk})</td>

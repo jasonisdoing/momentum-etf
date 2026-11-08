@@ -11,7 +11,6 @@ from pydantic import BaseModel
 from fastapi_app.dependencies import require_internal_token
 from services.broker_api_service import (
     BrokerApiError,
-    apply_fetched_balance,
     cached_broker_balance,
     fetch_broker_balance,
     list_broker_accounts,
@@ -88,8 +87,11 @@ def apply_balance(payload: ApplyPayload, _: None = Depends(require_internal_toke
     if fetched is None:
         raise HTTPException(status_code=409, detail="불러온 잔고가 만료됐습니다 — '잔고 불러오기'를 다시 눌러주세요.")
 
+    from utils.broker_balance_sync import apply_broker_balance
+
     try:
-        result = apply_fetched_balance(payload.account_id, fetched["provider"], fetched)
+        # 사람이 누른 덮어쓰기도 배치와 같이 — 바뀐 게 있으면 슬랙으로 알린다.
+        result = apply_broker_balance(payload.account_id, fetched, trigger="수동 덮어쓰기")
     except BrokerApiError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {"ok": True, **result}
