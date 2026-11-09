@@ -4872,7 +4872,7 @@ a {
   gap: 12px;
 }
 
-.appEqualSplit > * {
+.appEqualSplit>* {
   flex: 1 1 340px;
   min-width: 0;
 }

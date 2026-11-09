@@ -211,8 +211,8 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
   {
     field: "cadence",
     headerName: "자동 주기",
-    minWidth: 220,
-    width: 240,
+    minWidth: 360,
+    width: 380,
     cellRenderer: (params: { value?: string }) => {
       const text = params.value ?? "";
       return text || "-";
@@ -306,7 +306,7 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
   {
     field: "command",
     headerName: "실행 명령 (클릭하여 백그라운드 실행)",
-    minWidth: 320,
+    minWidth: 540,
     flex: 2.6,
     // 실행 중인 행은 prefix(▶ [SERVER] 실행 중...) + ✕ 버튼이 길어서 명령어가 잘림.
     // autoHeight + wrapText 로 실행 중인 행만 2줄이 되도록 한다 (다른 행은 콘텐츠가 짧아 1줄 유지).
@@ -614,7 +614,7 @@ export function SystemManager({
   }
 
   return (
-    <div className="appPageStack">
+    <div className="appPageStack batchPage">
       {error ? (
         <div className="appBannerStack">
           <div className="bannerError">{error}</div>
@@ -631,7 +631,7 @@ export function SystemManager({
               </div>
             </div>
           </div>
-          <div className="card-body appCardBodyTight">
+          <div className="card-body appCardBodyTight px-0">
             <AppAgGrid
               rowData={scheduleRowsWithGroups}
               columnDefs={scheduleColumns}
