@@ -128,22 +128,11 @@ SCHEDULE_ROWS = [
         "command": "python scripts/stock_price_cache_updater.py --country au",
         "schedule": {"minutes": [35], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
-    # ② 슬랙 주문 연동 — 슬랙으로 낸 모의 주문의 결과 처리.
+    # ② 증권사 연동 — 잔고 동기화 → 사고팔기 신호·주문 버튼 → 슬랙 주문 결과 순서로 이어진다.
     {
         "no": 5,
-        "key": "slack_mock_order_notify",
-        "group": "슬랙 주문 연동",
-        "job": "슬랙 주문 결과 알림",
-        "target": "슬랙 메시지로 낸 주문 — 운영·모의 (진행 중인 것이 없으면 조회 없이 종료)",
-        "cadence": "평일 09:00~15:59 KST 1분 간격",
-        "command": "python scripts/slack_mock_order_notify.py",
-        "schedule": {"minutes": list(range(60)), "hours": list(range(9, 16)), "weekdays": _WEEKDAYS_MON_FRI},
-    },
-    # ③ 장중 실행 — 장중에 도는 것들. 알림과 데이터 동기화가 섞여 있다.
-    {
-        "no": 6,
         "key": "broker_balance_sync",
-        "group": "장중 실행",
+        "group": "증권사 연동",
         "job": "증권사 잔고 동기화",
         "target": "API 연동(broker_api) 저장된 계좌",
         "cadence": "평일 09:00~15:40 KST 5분 간격",
@@ -152,7 +141,30 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _BROKER_SYNC_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "no": 6,
+        "key": "strategy_trade_notify",
+        "group": "증권사 연동",
+        "job": "전략 사고팔기 알림",
+        "target": "계좌에 붙인 종목풀의 사고팔기 전략 (슬랙 켠 계좌만 발송, 원장은 전 계좌 계산)",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 09:10~15:20 KST 10분 간격",
+        "command": "python scripts/strategy_trade_notify.py",
+        # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
+        "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
         "no": 7,
+        "key": "slack_mock_order_notify",
+        "group": "증권사 연동",
+        "job": "슬랙 주문 결과 알림",
+        "target": "슬랙 메시지로 낸 주문 — 운영·모의 (진행 중인 것이 없으면 조회 없이 종료)",
+        "cadence": "평일 09:00~15:59 KST 1분 간격",
+        "command": "python scripts/slack_mock_order_notify.py",
+        "schedule": {"minutes": list(range(60)), "hours": list(range(9, 16)), "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    # ③ 장중 실행 — 장중에 도는 알림들.
+    {
+        "no": 8,
         "key": "strategy_mix_notify_kor",
         "group": "장중 실행",
         "job": "한국 합성 액션 알림",
@@ -164,7 +176,7 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 8,
+        "no": 9,
         "key": "strategy_mix_notify_us",
         "group": "장중 실행",
         "job": "미국 합성 액션 알림",
@@ -173,18 +185,6 @@ SCHEDULE_ROWS = [
         "cadence": "평일 22:40~05:50 KST 10분 간격",
         "command": "python scripts/strategy_mix_notify.py us",
         "schedule": {"slots": _US_INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_SAT},
-    },
-    {
-        "no": 9,
-        "key": "strategy_trade_notify",
-        "group": "장중 실행",
-        "job": "전략 사고팔기 알림",
-        "target": "화면에서 정한 전략별 ETF 1종 (운용 계좌도 전략별)",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:10~15:20 KST 10분 간격",
-        "command": "python scripts/strategy_trade_notify.py",
-        # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
-        "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "no": 10,
