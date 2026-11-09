@@ -79,9 +79,16 @@ def ladder_positions(fills: list[float], trigger_pct: float) -> list[int]:
     """
     if not fills:
         return []
-    ratio = log(down_ratio(trigger_pct))
     positions: list[int] = []
     for fill in fills:
-        position = round(log(fill / fills[0]) / ratio) + 1
+        position = ladder_position(fill, fills[0], trigger_pct)
         positions.append(max(position, positions[-1] + 1) if positions else 1)
     return positions
+
+
+def ladder_position(price: float, first_fill: float, trigger_pct: float) -> int:
+    """가격의 사다리 위치(표시용) — 1호 체결가를 위치 1로, 1호 × (1 − 간격%)^(k−1) 중 가장 가까운 k.
+
+    1호보다 비싸면 0 이하가 된다(그 위 칸).
+    """
+    return round(log(price / first_fill) / log(down_ratio(trigger_pct))) + 1

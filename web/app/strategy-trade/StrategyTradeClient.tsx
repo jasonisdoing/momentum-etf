@@ -92,8 +92,6 @@ export type RoundRow = {
   order_sides: Array<"buy" | "sell">;
   // 증권사 앱(MTS)에 걸려 있는 미체결 수동 주문 — 슬랙 주문을 막는다.
   manual_orders: Array<{ side: "buy" | "sell"; price: number; quantity: number }>;
-  /** 날짜별 매수·매도 — 체결 순서대로. 지금 사이클(1호를 마지막으로 판 뒤)의 것만이다. */
-  trades_by_day: Record<string, TradeSide[]>;
   is_next: boolean;
 };
 
@@ -111,6 +109,8 @@ export type StrategyView = {
   config: StrategyConfig;
   index: IndexStatus;
   status: Status;
+  /** 사다리 위치별 · 날짜별 매수·매도(체결 순서) — 체결가에 가장 가까운 위치. 지금 사이클의 것만이다. */
+  trades_by_position: Record<string, Record<string, TradeSide[]>>;
   // 체결 이력(회차 원장)을 계산한 시각 — 사고팔기 알림 배치가 갱신한다(KST ISO).
   ledger_at: string;
   rounds: RoundRow[];
@@ -716,13 +716,18 @@ function StrategySection({
     );
   }
   const { status, index } = view;
-  const tradeDays = [...new Set(view.rounds.flatMap((row) => Object.keys(row.trades_by_day)))].sort();
+  const tradeDays = [
+    ...new Set(Object.values(view.trades_by_position).flatMap((byDay) => Object.keys(byDay))),
+  ].sort();
   const columnCount = 7 + tradeDays.length;
-  // 사다리 위치마다 한 행 — 회차가 없는 위치(건너뛴 칸)는 빈 행으로 둬 간격을 그대로 보여 준다.
-  const lastPosition = Math.max(0, ...view.rounds.map((row) => row.position));
-  const slots = Array.from({ length: lastPosition }, (_, idx) => ({
-    position: idx + 1,
-    row: view.rounds.find((item) => item.position === idx + 1) ?? null,
+  // 사다리 위치마다 한 행 — 회차가 없는 위치(건너뛴 칸)도 그 가격대의 매매와 함께 행으로 둬 간격을 보여 준다.
+  const positions = [...view.rounds.map((row) => row.position), ...Object.keys(view.trades_by_position).map(Number)];
+  const firstPosition = Math.min(...positions);
+  const lastPosition = Math.max(...positions);
+  const slots = Array.from({ length: lastPosition - firstPosition + 1 }, (_, idx) => ({
+    position: firstPosition + idx,
+    row: view.rounds.find((item) => item.position === firstPosition + idx) ?? null,
+    trades: view.trades_by_position[String(firstPosition + idx)] ?? {},
   }));
   // 기준선이 회차 사이에 못 들어가는 경우 — 마지막 회차의 지수 환산에서 저점까지 남은 하락률.
   const lastLeveledRound = [...view.rounds].reverse().find((row) => row.buy_index != null) ?? null;
@@ -804,12 +809,18 @@ function StrategySection({
             </tr>
           </thead>
           <tbody>
-            {slots.map(({ position, row }, rowIdx) => {
+            {slots.map(({ position, row, trades }, rowIdx) => {
+              const tradeCells = tradeDays.map((day) => (
+                <td key={day} style={{ ...tdStyle, textAlign: "center" }}>
+                  {trades[day] ? <DailyTradeBadges sides={trades[day]} /> : null}
+                </td>
+              ));
               if (row === null) {
                 return (
                   <tr key={`empty-${position}`} style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
                     <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)" }}>{position}</td>
-                    <td colSpan={columnCount - 1} style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)" }} />
+                    <td colSpan={6} style={tdStyle} />
+                    {tradeCells}
                   </tr>
                 );
               }
@@ -860,11 +871,7 @@ function StrategySection({
                 <td style={{ ...tdStyle, fontWeight: row.sell_limit != null ? 700 : undefined }}>
                   {formatNumber(row.sell_limit)}
                 </td>
-                {tradeDays.map((day) => (
-                  <td key={day} style={{ ...tdStyle, textAlign: "center" }}>
-                    {row.trades_by_day[day] ? <DailyTradeBadges sides={row.trades_by_day[day]} /> : null}
-                  </td>
-                ))}
+                {tradeCells}
               </tr>
               </React.Fragment>
               );
