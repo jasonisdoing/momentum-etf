@@ -301,6 +301,30 @@ def _manual_orders(
     return orders
 
 
+#: 잔고·체결 조회 사이에 체결이 끼어들면 다시 읽는 최대 횟수.
+_SNAPSHOT_ATTEMPTS = 3
+
+
+def _balance(account_id: str) -> dict[str, int]:
+    return {row["ticker"]: int(row["quantity"]) for row in fetch_order_balance(account_id)["holdings"]}
+
+
+def _consistent_snapshot(account_id: str, today: date) -> tuple[dict[str, int], list[dict[str, Any]]]:
+    """같은 시점의 잔고와 오늘 주문 목록 — 잔고 → 주문 목록 → 잔고 순으로 읽어 앞뒤 잔고가 같을 때만 쓴다.
+
+    두 조회 사이에 체결이 끼어들면(주문 직후 배치 등) 잔고와 체결이 어긋나 회차를 잘못 센다. 앞뒤 잔고가 다르면
+    그 사이에 체결이 있었던 것이므로 다시 읽는다. 끝내 안정되지 않으면 계산하지 않고 오류로 알린다.
+    """
+    before = _balance(account_id)
+    for _ in range(_SNAPSHOT_ATTEMPTS):
+        rows = list_day_orders(account_id, f"{today:%Y%m%d}") if today.weekday() < 5 else []
+        after = _balance(account_id)
+        if after == before:
+            return after, rows
+        before = after
+    raise BrokerApiError(f"'{account_id}' 잔고가 조회 중에 계속 바뀌어(체결 진행 중) 회차 원장을 계산하지 못했습니다.")
+
+
 def compute_ledgers(account_id: str, tickers: list[str]) -> dict[str, tuple[Ledger | LedgerError, dict | None]]:
     """계좌의 종목들(`tickers`)마다 회차 원장과 새 기준점(전 거래일 마감 로트, 못 정하면 None)을 만든다.
 
@@ -310,9 +334,8 @@ def compute_ledgers(account_id: str, tickers: list[str]) -> dict[str, tuple[Ledg
     from utils.strategy_trade_orders import order_sources
 
     computed_at = datetime.now(KST).isoformat()
-    balance = {row["ticker"]: int(row["quantity"]) for row in fetch_order_balance(account_id)["holdings"]}
     today = datetime.now(KST).date()
-    today_rows = list_day_orders(account_id, f"{today:%Y%m%d}") if today.weekday() < 5 else []
+    balance, today_rows = _consistent_snapshot(account_id, today)
     sources = order_sources(account_id, today_rows)
     history = _History(account_id, today, _filled(today_rows), sources)
     manual = _manual_orders(today_rows, tickers, sources, today)
