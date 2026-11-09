@@ -1,12 +1,15 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import type { ColDef } from "ag-grid-community";
 
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
 import AccountSelect, { type AccountOptionBase } from "../components/AccountSelect";
 import { SlackAlarmField } from "../components/SlackAlarmField";
 import { readRememberedTradeAccountId, writeRememberedTradeAccountId } from "../components/account-selection";
+import { AppAgGrid } from "../components/AppAgGrid";
+import { createAppGridTheme } from "../components/app-grid-theme";
 import { AppModal } from "../components/AppModal";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
@@ -149,15 +152,6 @@ type View = {
 // 편집 파라미터는 매매 간격(trigger_pct) 하나 — 백엔드 EDITABLE_PCT_KEYS 와 동일.
 const PCT_MIN = 0.1;
 const PCT_MAX = 50;
-
-const pctInputStyle: React.CSSProperties = {
-  width: 74,
-  border: "1px solid rgba(148,163,184,0.4)",
-  borderRadius: 6,
-  padding: "3px 6px",
-  fontSize: "var(--fs-sm)",
-  textAlign: "right",
-};
 
 const cardStyle: React.CSSProperties = {
   padding: 14,
@@ -372,21 +366,33 @@ function comparableDrafts(rows: DraftRow[]) {
   ]);
 }
 
+type TradeListRow = DraftRow & { heldRounds: string };
+const tradeGridTheme = createAppGridTheme();
+
+const tradeSettingColumns = [
+  { field: "pct", headerName: "간격(%)", headerTooltip: "매매 간격 (%)", width: 78 },
+  { field: "qty", headerName: "수량(주)", headerTooltip: "회차당 수량 (주)", width: 78 },
+  { field: "rounds", headerName: "회차 수", width: 76 },
+] as const;
+
 function AccountSettingsCard({
   view,
   accountId,
   onAccountChange,
   onSaved,
+  onDeleteSignal,
 }: {
   view: View;
   accountId: string;
   onAccountChange: (accountId: string) => void;
   onSaved: (next: View) => void;
+  onDeleteSignal: (signal: SlackSignal, label: string) => void;
 }) {
   const toast = useToast();
   const [drafts, setDrafts] = useState<DraftRow[]>(() => view.configs.map(rowFromConfig));
   const [picker, setPicker] = useState<{ rowKey: string | null } | null>(null);
   const [search, setSearch] = useState("");
+  const [selection, setSelection] = useState<{ accountId: string; ticker: string } | null>(null);
   const [slack, setSlack] = useState(view.slack_enabled);
   const [slackTesting, setSlackTesting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -426,6 +432,64 @@ function AccountSettingsCard({
           (option.ticker.toLowerCase().includes(query) || option.name.toLowerCase().includes(query)),
       )
     : [];
+  const selectedRow =
+    (selection?.accountId === accountId ? drafts.find((row) => row.ticker === selection.ticker) : undefined) ??
+    drafts[0];
+  const strategiesById = useMemo(
+    () => new Map(view.strategies.map((strategy) => [strategy.strategy_id, strategy])),
+    [view.strategies],
+  );
+  const selectedStrategy = selectedRow?.strategy_id ? strategiesById.get(selectedRow.strategy_id) : undefined;
+  const details = selectedStrategy?.ticker === selectedRow?.ticker ? selectedStrategy : undefined;
+  const gridRows = useMemo<TradeListRow[]>(() => drafts.map((row) => {
+    const strategy = row.strategy_id ? strategiesById.get(row.strategy_id) : undefined;
+    return {
+      ...row,
+      heldRounds: !strategy || strategy.ticker !== row.ticker
+        ? "미저장"
+        : "error" in strategy ? "오류" : `${strategy.status.held_count}/${strategy.config.rounds}`,
+    };
+  }), [drafts, strategiesById]);
+
+  const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
+    { field: "tickerName", headerName: "종목명", flex: 1, minWidth: 106, tooltipField: "tickerName" },
+    { field: "ticker", headerName: "티커", width: 82 },
+    { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
+    ...tradeSettingColumns.map((column): ColDef<TradeListRow> => ({
+      ...column,
+      type: "rightAligned",
+      editable: !saving,
+      cellClass: saving ? undefined : "appEditableCell",
+    })),
+    {
+      colId: "actions",
+      headerName: "관리",
+      width: 111,
+      sortable: false,
+      cellRenderer: ({ data }: { data?: TradeListRow }) => {
+        if (!data) return null;
+        const pool = data.pool;
+        const missingPool = pool && !data.reselectSource && !view.ticker_options.some(
+          (option) => option.ticker === data.ticker && option.pools.includes(pool),
+        );
+        return (
+          <div className="d-flex align-items-center gap-1 h-100">
+            <button type="button" className={`btn btn-sm px-1 py-0 ${missingPool ? "btn-outline-danger" : "btn-outline-secondary"}`}
+              aria-label={`${data.tickerName} 종목 변경`}
+              title={missingPool ? "가격 출처를 다시 선택하세요" : data.pool ? poolLabel(data.pool) : "종목 변경"}
+              disabled={saving} onClick={() => {
+                setSearch("");
+                setPicker({ rowKey: data.key });
+              }}>변경</button>
+            <button type="button" className="btn btn-sm btn-outline-danger px-1 py-0"
+              aria-label={`${data.tickerName} 삭제`} disabled={saving}
+              onClick={() => setDrafts((rows) => rows.filter((row) => row.key !== data.key))}>삭제</button>
+          </div>
+        );
+      },
+    },
+  ], [poolLabel, saving, view.ticker_options]);
+
   const selectTicker = (option: TickerOption) => {
     if (!picker || usedTickers.has(option.ticker)) return;
     const row = drafts.find((item) => item.key === picker.rowKey);
@@ -438,12 +502,14 @@ function AccountSettingsCard({
         reselectSource: previous?.ticker === option.ticker && !option.pools.includes(previous.pool),
       });
     } else {
+      const key = nextDraftKey();
       setDrafts((prev) => [
         ...prev,
-        { key: nextDraftKey(), strategy_id: null, ticker: option.ticker, tickerName: option.name,
+        { key, strategy_id: null, ticker: option.ticker, tickerName: option.name,
           pool: null, reselectSource: false, pct: "5", qty: "", rounds: "4" },
       ]);
     }
+    setSelection({ accountId, ticker: option.ticker });
     setPicker(null);
   };
 
@@ -515,164 +581,146 @@ function AccountSettingsCard({
   }, [accountId, toast]);
 
   return (
-    <section className="appSection">
-      <div className="card appCard">
-        <div className="card-body appCardBodyTight">
-          <div className="appMainHeader">
-            <div className="appMainHeaderLeft">
-              <AccountSelect
-                accounts={view.account_options}
-                value={accountId}
-                onChange={handleAccountChange}
-                disabled={saving}
-              />
-              <SlackAlarmField
-                checked={slack}
-                onChange={setSlack}
-                disabled={saving}
-                title="이 계좌 전략의 매수·매도 신호를 슬랙으로 보낸다 (장중 10분 간격 감시). 저장 버튼을 눌러야 반영된다."
-                testing={slackTesting}
-                onTest={() => void sendSlackTest()}
-              />
-              {view.cash ? (
-                <label className="appLabeledField" style={{ marginBottom: 0 }}>
-                  <span className="appLabeledFieldLabel">현금</span>
-                  <span style={{ fontWeight: 700 }}>
-                    {formatNumber(view.cash.cash_krw)}원
-                    {view.cash.pct != null ? (
-                      <span style={{ color: "var(--text-muted)", fontWeight: 400 }}> ({view.cash.pct.toFixed(1)}%)</span>
-                    ) : null}
-                  </span>
-                </label>
-              ) : null}
-            </div>
-            <div className="appMainHeaderRight">
-              <UnsavedChangesBadge show={isDirty} />
-              <button
-                type="button"
-                className="btn btn-sm btn-outline-secondary"
-                disabled={saving || view.ticker_options.length === 0}
-                onClick={() => openPicker(null)}
-              >
-                + 종목 추가
-              </button>
-              <button
-                type="button"
-                className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
-                disabled={saving || !isDirty}
-                onClick={() => void save()}
-              >
-                <span>{saving ? "저장 중…" : "저장"}</span>
-              </button>
-            </div>
-          </div>
-
-          {drafts.length === 0 ? (
-            <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginTop: 10 }}>
-              이 계좌에 등록된 전략이 없습니다. 「+ 종목 추가」에서 한국 개별주 또는 ETF를 검색하세요.
-            </div>
-          ) : null}
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-            {drafts.map((row) => (
-              <div key={row.key} style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", fontSize: "var(--fs-sm)" }}>
-                <span>
-                  <strong>{row.tickerName} ({row.ticker})</strong>
-                  {row.pool && !row.reselectSource ? (
-                    view.ticker_options.some((item) => item.ticker === row.ticker && item.pools.some((pool) => pool === row.pool))
-                      ? <span className="tableMuted"> · {poolLabel(row.pool)}</span>
-                      : <span className="text-danger"> · 가격 출처를 다시 선택하세요</span>
-                  ) : null}
-                </span>
-                <button type="button" className="btn btn-sm btn-outline-secondary" disabled={saving} onClick={() => openPicker(row.key)}>
-                  종목 선택
-                </button>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  매매 간격
-                  <input
-                    type="number"
-                    step="0.1"
-                    min={PCT_MIN}
-                    max={PCT_MAX}
-                    style={pctInputStyle}
-                    value={row.pct}
-                    disabled={saving}
-                    onChange={(event) => updateRow(row.key, { pct: event.target.value })}
-                  />
-                  %
-                </span>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  회차당 수량
-                  <input
-                    type="number"
-                    step="1"
-                    min={1}
-                    style={pctInputStyle}
-                    value={row.qty}
-                    disabled={saving}
-                    onChange={(event) => updateRow(row.key, { qty: event.target.value })}
-                  />
-                  주
-                </span>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  회차 수
-                  <input
-                    type="number"
-                    step="1"
-                    min={1}
-                    max={12}
-                    style={pctInputStyle}
-                    value={row.rounds}
-                    disabled={saving}
-                    onChange={(event) => updateRow(row.key, { rounds: event.target.value })}
-                  />
-                  회
-                </span>
+    <>
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-body appCardBodyTight">
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft">
+                <AccountSelect
+                  accounts={view.account_options}
+                  value={accountId}
+                  onChange={handleAccountChange}
+                  disabled={saving}
+                />
+                <SlackAlarmField
+                  checked={slack}
+                  onChange={setSlack}
+                  disabled={saving}
+                  title="이 계좌 전략의 매수·매도 신호를 슬랙으로 보낸다 (장중 10분 간격 감시). 저장 버튼을 눌러야 반영된다."
+                  testing={slackTesting}
+                  onTest={() => void sendSlackTest()}
+                />
+                <div className="appLabeledField" style={{ marginBottom: 0 }}>
+                  <span className="appLabeledFieldLabel">현금 비율</span>
+                  <span style={{ fontWeight: 700 }}>{view.cash?.pct != null ? `${view.cash.pct.toFixed(1)}%` : "—"}</span>
+                </div>
+              </div>
+              <div className="appMainHeaderRight">
+                <UnsavedChangesBadge show={isDirty} />
                 <button
                   type="button"
-                  className="btn btn-sm btn-outline-danger"
-                  disabled={saving}
-                  onClick={() => setDrafts((rows) => rows.filter((item) => item.key !== row.key))}
+                  className="btn btn-sm btn-outline-secondary"
+                  disabled={saving || view.ticker_options.length === 0}
+                  onClick={() => openPicker(null)}
                 >
-                  삭제
+                  + 종목 추가
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                  disabled={saving || !isDirty}
+                  onClick={() => void save()}
+                >
+                  <span>{saving ? "저장 중…" : "저장"}</span>
                 </button>
               </div>
-            ))}
-          </div>
-          <AppModal open={picker !== null} title="한국 종목 선택" onClose={() => setPicker(null)}>
-            <input
-              className="form-control mb-2"
-              aria-label="종목명 또는 티커"
-              placeholder="종목명 또는 티커 검색"
-              value={search}
-              autoFocus
-              onChange={(event) => setSearch(event.target.value)}
-            />
-            <div className="list-group" style={{ maxHeight: "50vh", overflowY: "auto" }}>
-              {candidates.slice(0, 50).map((option) => (
-                <button key={option.ticker} type="button" className="list-group-item list-group-item-action" onClick={() => selectTicker(option)}>
-                  <strong>{option.ticker}</strong> {option.name}
-                  <div className="tableMuted">{option.kind === "stock" ? "개별주" : "ETF"} · {option.pools.map(poolLabel).join(" · ")}</div>
-                </button>
-              ))}
             </div>
-            {candidates.length === 0 ? <p className="tableMuted mb-0">선택할 종목이 없습니다.</p> : null}
-            {candidates.length > 50 ? <p className="tableMuted mb-0 mt-2">검색어를 입력하면 나머지 종목을 찾을 수 있습니다.</p> : null}
-          </AppModal>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+
+      <section className="appSection strategyTradeGrid">
+        <aside className="card appCard" aria-label="종목 목록">
+          <div className="card-body appCardBodyTight">
+            <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+              <strong>종목</strong>
+              <span className="tableMuted">행을 선택해 상세 보기 · 값을 더블 클릭해 수정</span>
+            </div>
+            {gridRows.length > 0 ? (
+              <AppAgGrid
+                rowData={gridRows}
+                columnDefs={tradeListColumns}
+                theme={tradeGridTheme}
+                height={Math.min(420, 54 + gridRows.length * 36)}
+                minHeight={76}
+                getRowId={({ data }) => data.key}
+                getRowClass={({ data }) => data?.key === selectedRow?.key ? "strategyTradeSelectedRow" : ""}
+                rowClassDeps={[selectedRow?.key]}
+                gridOptions={{
+                  rowHeight: 36,
+                  headerHeight: 34,
+                  suppressMovableColumns: true,
+                  suppressCellFocus: false,
+                  stopEditingWhenCellsLoseFocus: true,
+                  readOnlyEdit: true,
+                  onCellEditRequest: ({ data, colDef, newValue }) => {
+                    const field = colDef.field;
+                    if (field === "pct" || field === "qty" || field === "rounds") {
+                      updateRow(data.key, { [field]: String(newValue ?? "").trim() });
+                    }
+                  },
+                  onRowClicked: ({ data }) => {
+                    if (data) setSelection({ accountId, ticker: data.ticker });
+                  },
+                  onCellKeyDown: ({ data, event }) => {
+                    if (data && event instanceof KeyboardEvent && event.key === "Enter") {
+                      setSelection({ accountId, ticker: data.ticker });
+                    }
+                  },
+                }}
+              />
+            ) : <div className="tableMuted">등록된 종목이 없습니다.</div>}
+          </div>
+        </aside>
+        <div aria-label="선택 종목 상세">
+          {details ? (
+            <StrategySection
+              key={details.strategy_id}
+              view={details}
+              poolLabel={poolLabel(details.pool)}
+              onDeleteSignal={onDeleteSignal}
+            />
+          ) : (
+            <div className="card appCard"><div className="card-body appCardBodyTight tableMuted">
+              {selectedRow ? "전략을 저장하면 운용 상세가 표시됩니다." : "헤더에서 종목을 추가하세요."}
+            </div></div>
+          )}
+        </div>
+      </section>
+
+      <AppModal open={picker !== null} title="한국 종목 선택" onClose={() => setPicker(null)}>
+        <input
+          className="form-control mb-2"
+          aria-label="종목명 또는 티커"
+          placeholder="종목명 또는 티커 검색"
+          value={search}
+          autoFocus
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        <div className="list-group" style={{ maxHeight: "50vh", overflowY: "auto" }}>
+          {candidates.slice(0, 50).map((option) => (
+            <button key={option.ticker} type="button" className="list-group-item list-group-item-action" onClick={() => selectTicker(option)}>
+              <strong>{option.ticker}</strong> {option.name}
+              <div className="tableMuted">{option.kind === "stock" ? "개별주" : "ETF"} · {option.pools.map(poolLabel).join(" · ")}</div>
+            </button>
+          ))}
+        </div>
+        {candidates.length === 0 ? <p className="tableMuted mb-0">선택할 종목이 없습니다.</p> : null}
+        {candidates.length > 50 ? <p className="tableMuted mb-0 mt-2">검색어를 입력하면 나머지 종목을 찾을 수 있습니다.</p> : null}
+      </AppModal>
+    </>
   );
 }
 
-/** 전략 하나의 운용 현황(현재 판단 + 회차 표) — 설정은 상단 카드에서 편집한다. */
+/** 선택한 전략의 운용 현황과 회차 표. */
 function StrategySection({
   view,
   poolLabel,
   onDeleteSignal,
 }: {
   view: StrategyView | FailedStrategy;
-  /** 이 전략이 속한 종목풀 표기 — 한 계좌에 여러 풀을 붙일 수 있어 카드마다 보여 준다. */
+  /** 전략의 가격 출처 표기. */
   poolLabel: string;
   onDeleteSignal: (signal: SlackSignal, label: string) => void;
 }) {
@@ -933,11 +981,6 @@ export function StrategyTradeClient() {
     );
   }
 
-  const poolLabel = (pool: string) => {
-    const option = view.pool_options.find((item) => item.ticker_type === pool);
-    return option ? formatPoolLabel(option) : pool;
-  };
-
   return (
     <PageFrame title="전략 사고팔기" fullWidth>
       <div className="appPageStack">
@@ -946,21 +989,8 @@ export function StrategyTradeClient() {
           accountId={view.account_id}
           onAccountChange={(next) => void load(next)}
           onSaved={setView}
+          onDeleteSignal={askDeleteSignal}
         />
-
-        {/* 운용 현황 — 이 계좌의 전략, 좌우 2열(좁은 화면은 1열) */}
-        <section className="appSection">
-          <div className="strategyTradeGrid">
-            {view.strategies.map((strategy) => (
-              <StrategySection
-                key={strategy.strategy_id}
-                view={strategy}
-                poolLabel={poolLabel(strategy.pool)}
-                onDeleteSignal={askDeleteSignal}
-              />
-            ))}
-          </div>
-        </section>
       </div>
 
       <AppModal
