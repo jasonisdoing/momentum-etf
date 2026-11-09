@@ -276,6 +276,10 @@ def open_confirm_modal(payload: dict[str, Any]) -> None:
         except RoundNotOrderableError as exc:
             _expire(target, exc)
             return
+        except BrokerApiError as exc:
+            # 다시 누르면 될 수 있는 실패(수동 미체결 주문·호가 없음·연동 오류 등) — 버튼은 두고 이유만 스레드에 남긴다.
+            _report_open_failure(target, exc)
+            return
         view = _order_view(request, order, target)
     elif action["action_id"] == CANCEL_ACTION_ID:
         view = _cancel_view(request, {**target, "order_id": value["order_id"]})
@@ -319,6 +323,13 @@ def _finish(target: dict[str, Any], order: dict[str, Any]) -> None:
         _update_message(target, [*_open_blocks(request, "다시 주문하기"), _note(text)])
     else:
         _update_message(target, _note_blocks(request, text))
+
+
+def _report_open_failure(target: dict[str, Any], exc: Exception) -> None:
+    """버튼을 눌렀는데 확인 모달을 열 수 없을 때 — 이유를 스레드에 남긴다(응답 없이 끝나지 않게)."""
+    request = target["request"]
+    side = f"{_env_word(request['env'])} {_SIDE_LABELS[request['side']]}"
+    send_thread_message(f"❌ {side} 주문 확인을 열 수 없습니다: {exc}", thread_ts=target["thread_ts"])
 
 
 def _expire(target: dict[str, Any], exc: Exception) -> None:
