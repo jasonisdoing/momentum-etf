@@ -32,12 +32,7 @@ from zoneinfo import ZoneInfo
 
 from utils.logger import get_app_logger
 from utils.order_confirm import build_confirm_line, pop_filled
-from utils.strategy_trade_service import (
-    load_settings,
-    load_views_for_pools,
-    refresh_all_ledgers,
-    sleeve_for_pool,
-)
+from utils.strategy_trade_service import load_views_where, refresh_all_ledgers
 
 KST = ZoneInfo("Asia/Seoul")
 logger = get_app_logger()
@@ -275,9 +270,12 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     # 실제 신호와 테스트 발송을 상단에서 바로 구분한다.
     # 실제 신호는 주문이 필요하므로 <!channel> 로 채널 전체에 알린다(테스트는 제외).
     if triggers:
-        lines = [f"<!channel> *⚡ 전략 사고팔기 — 실제 신호* ({now})"]
+        lines = [f"<!channel> *⚡ 전략 사고팔기 — 실제 신호* ({now}) · {strategy_view['account_name']}"]
     else:
-        lines = [f"*🧪 전략 사고팔기 테스트* ({now})", "현재 매수·매도 신호는 없습니다."]
+        lines = [
+            f"*🧪 전략 사고팔기 테스트* ({now}) · {strategy_view['account_name']}",
+            "현재 매수·매도 신호는 없습니다.",
+        ]
 
     index = strategy_view["index"]
     status = strategy_view["status"]
@@ -355,8 +353,11 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     return "\n".join(lines)
 
 
-def _pools_with_strategies() -> list[str]:
-    return sorted({entry["pool"] for entry in load_settings()["strategies"].values()})
+def _slack_enabled_accounts() -> set[str]:
+    """합성 슬랙이 켜진 운영 계좌 — 사고팔기 알람은 전략의 운용 계좌의 이 스위치를 따른다."""
+    from utils.account_settings_store import load_live_account_docs
+
+    return {doc["account_id"] for doc in load_live_account_docs() if doc.get("mix_slack_enabled")}
 
 
 def send_test(account_id: str) -> dict[str, Any]:
@@ -366,14 +367,9 @@ def send_test(account_id: str) -> dict[str, Any]:
     """
     from utils.strategy_trade_threads import send_thread_message
 
-    pools = [
-        pool
-        for pool in _pools_with_strategies()
-        if (sleeve := sleeve_for_pool(pool)) is not None and sleeve["account_id"] == account_id
-    ]
-    if not pools:
-        return {"sent": False, "reason": "이 계좌에 사고팔기 슬리브가 없습니다.", "triggers": []}
-    view = load_views_for_pools(pools, fresh=False)
+    view = load_views_where(lambda entry: entry["account_id"] == account_id, fresh=False)
+    if not view["strategies"] and not view["errors"]:
+        return {"sent": False, "reason": "이 계좌를 고른 사고팔기 전략이 없습니다.", "triggers": []}
     triggers: list[dict[str, Any]] = []
     sent = bool(view["strategies"])
     for strategy_view in view["strategies"]:
@@ -479,18 +475,15 @@ def notify_strategy_trade() -> dict[str, Any]:
     from utils.strategy_trade_threads import send_thread_message
 
     # 화면이 읽는 회차 원장을 슬랙 스위치와 무관하게 먼저 새로 계산해 저장한다 — 아래 판정도 이 저장본을 쓴다.
-    for ticker, message in refresh_all_ledgers().items():
-        logger.error("사고팔기 회차 원장 실패(%s) — 이 종목은 건너뜁니다: %s", ticker, message)
+    for key, message in refresh_all_ledgers().items():
+        logger.error("사고팔기 회차 원장 실패(%s) — 이 종목은 건너뜁니다: %s", key, message)
 
-    enabled = [
-        pool
-        for pool in _pools_with_strategies()
-        if (sleeve := sleeve_for_pool(pool)) is not None and sleeve["slack_enabled"]
-    ]
-    if not enabled:
-        return {"sent": False, "reason": "슬랙이 켜진 사고팔기 슬리브가 없습니다.", "triggers": []}
-
-    view = load_views_for_pools(enabled, fresh=False)
+    enabled = _slack_enabled_accounts()
+    view = load_views_where(lambda entry: entry["account_id"] in enabled, fresh=False)
+    if not view["strategies"] and not view["errors"]:
+        return {"sent": False, "reason": "슬랙이 켜진 계좌를 고른 사고팔기 전략이 없습니다.", "triggers": []}
+    for sid, message in view["errors"].items():
+        logger.error("사고팔기 운용 현황 실패(%s) — 이 전략은 건너뜁니다: %s", sid, message)
     triggers = [t for s in view["strategies"] for t in collect_triggers(s)]
 
     now = datetime.now(KST)

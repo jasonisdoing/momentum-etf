@@ -6,7 +6,9 @@
 DB(``system_config.strategy_trade_settings.strategies``)가 단일 소스이며 화면에서
 편집한다. 슬랙 알람은 그 종목풀 슬리브가 붙은 계좌의 합성 슬랙 스위치를 따른다.
 
-보유 현황은 백테스트가 아니라 그 종목풀의 사고팔기 **합성 슬리브가 붙은 계좌**의 **증권사 체결 이력**에서 만든다.
+운용 계좌는 전략마다 고른다 — 그 풀의 사고팔기 **합성 슬리브가 붙은 계좌** 중 하나다. 같은 풀을 여러 계좌가
+쓸 수 있고, 매수 한도는 (풀, 계좌) 슬리브 한도를 그 계좌의 전략 수로 나눈다.
+보유 현황은 백테스트가 아니라 전략의 운용 계좌의 **증권사 체결 이력**에서 만든다.
 화면을 열 때마다 `strategy_trade_ledger` 가 체결을 재생해 회차별 실제 체결가를 구한다(슬랙 신호 주문·수동 주문 모두).
 
 사다리 규칙 (자세한 근거는 strategy_trade_config 모듈 설명 참고)
@@ -20,6 +22,7 @@ DB(``system_config.strategy_trade_settings.strategies``)가 단일 소스이며 
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -43,7 +46,7 @@ def load_settings() -> dict[str, Any]:
     전략 항목이 없거나 깨졌으면 시드값으로 슬쩍 넘어가지 않고 에러를 낸다 —
     그럴듯한 값이 화면에 떴다가 그대로 저장돼 실제 설정이 덮어써지는 것을 막는다.
 
-    반환: ``{"strategies": {sid: {"pool", "ticker", "name", "trigger_pct",
+    반환: ``{"strategies": {sid: {"pool", "account_id", "ticker", "name", "trigger_pct",
     "round_quantity", "rounds"}}}`` — 풀·종목·운용 계좌는 전략마다 따로이고, 전략 목록은 DB 가 정한다.
     """
     from utils.db_manager import get_db_connection
@@ -66,11 +69,14 @@ def load_settings() -> dict[str, Any]:
         pool = str(entry.get("pool") or "").strip()
         ticker = str(entry.get("ticker") or "").strip()
         name = str(entry.get("name") or "").strip()
-        if not pool or not ticker or not name:
-            raise RuntimeError(f"'{sid}' 전략의 종목풀·종목이 없습니다 — 화면에서 골라 저장하세요.")
+        account_id = str(entry.get("account_id") or "").strip()
+        if not pool or not ticker or not name or not account_id:
+            raise RuntimeError(f"'{sid}' 전략의 종목풀·운용 계좌·종목이 없습니다 — 화면에서 골라 저장하세요.")
         try:
             strategies[sid] = {
                 "pool": pool,
+                # 운용 계좌 — 전략마다 고른다. 그 계좌의 체결로 회차를 세고 그 계좌로 주문한다.
+                "account_id": account_id,
                 "ticker": ticker,
                 "name": name,
                 **validate_strategy_trade_config({key: entry.get(key) for key in EDITABLE_CONFIG_KEYS}),
@@ -112,13 +118,23 @@ def resolve_etf(pool: str, ticker: str) -> dict[str, str]:
     raise ValueError(f"{pool} 종목풀에 없는 종목입니다: {ticker} — 종목풀에 먼저 추가하세요.")
 
 
-def _validated_target(pool: str, config: dict[str, Any]) -> dict[str, Any]:
-    """편집 입력에서 종목·파라미터를 검증해 저장 값으로 돌려준다. 실패 시 ValueError."""
+def _validated_target(pool: str, config: dict[str, Any], account_ids: set[str]) -> dict[str, Any]:
+    """편집 입력에서 운용 계좌·종목·파라미터를 검증해 저장 값으로 돌려준다. 실패 시 ValueError.
+
+    ``account_ids`` 는 이 풀에 사고팔기 슬리브가 붙은 계좌 — 운용 계좌는 그중에서만 고른다.
+    """
     if not isinstance(config, dict):
         raise ValueError("설정 형식이 올바르지 않습니다.")
     etf = resolve_etf(pool, str(config.get("ticker") or ""))
+    account_id = str(config.get("account_id") or "").strip()
+    if account_id not in account_ids:
+        raise ValueError(
+            f"{etf['name']}({etf['ticker']}): 운용 계좌는 이 종목풀의 사고팔기 슬리브가 붙은 계좌에서 고르세요 "
+            f"({account_id or '미선택'})."
+        )
     return {
         "pool": pool,
+        "account_id": account_id,
         "ticker": etf["ticker"],
         "name": etf["name"],
         **validate_strategy_trade_config(config),
@@ -137,9 +153,11 @@ def _save_strategy(strategy_id: str, target: dict[str, Any], *, previous: dict[s
             **{f"strategies.{strategy_id}.{k}": v for k, v in target.items()},
         }
     }
-    # 종목이 바뀌면 그 전략의 알림 중복 방지 기록을 비운다 — 이전 보유 상태로 새 신호를
+    # 종목이나 운용 계좌가 바뀌면 그 전략의 알림 중복 방지 기록을 비운다 — 이전 보유 상태로 새 신호를
     # 판정하면 엉뚱한 확인·재알림이 나간다.
-    if previous is not None and previous["ticker"] != target["ticker"]:
+    if previous is not None and (
+        previous["ticker"] != target["ticker"] or previous["account_id"] != target["account_id"]
+    ):
         update["$unset"] = _sent_log_unset(db, strategy_id)
         if not update["$unset"]:
             del update["$unset"]
@@ -176,18 +194,23 @@ def save_pool_strategies(pool: str, rows: list[dict[str, Any]]) -> None:
         raise ValueError("전략 목록 형식이 올바르지 않습니다.")
     stored = load_settings()["strategies"]
     current = {sid: entry for sid, entry in stored.items() if entry["pool"] == pool}
-    # 다른 풀의 전략이 쓰는 종목 — 같은 보유로 회차를 두 번 세지 않게 풀 밖과도 겹치면 안 된다.
-    taken = {entry["ticker"] for sid, entry in stored.items() if sid not in current}
+    account_ids = {sleeve["account_id"] for sleeve in sleeves_for_pool(pool)}
+    # 같은 계좌의 (계좌, 종목)은 하나뿐이다 — 회차를 그 계좌의 종목 체결로 세므로 겹치면 두 번 센다.
+    # 다른 풀의 전략과도 겹치면 안 된다. 계좌가 다르면 같은 종목도 된다.
+    taken = {(entry["account_id"], entry["ticker"]) for sid, entry in stored.items() if sid not in current}
 
     planned: list[tuple[str | None, dict[str, Any]]] = []
     for row in rows:
         sid = str(row.get("strategy_id") or "").strip() or None
         if sid is not None and sid not in current:
             raise ValueError(f"이 종목풀의 전략이 아닙니다: {sid}")
-        target = _validated_target(pool, row)
-        if target["ticker"] in taken:
-            raise ValueError(f"{target['name']}({target['ticker']}) 전략이 이미 있습니다.")
-        taken.add(target["ticker"])
+        target = _validated_target(pool, row, account_ids)
+        key = (target["account_id"], target["ticker"])
+        if key in taken:
+            raise ValueError(
+                f"{target['account_id']} 계좌에 {target['name']}({target['ticker']}) 전략이 이미 있습니다."
+            )
+        taken.add(key)
         planned.append((sid, target))
 
     kept = {sid for sid, _ in planned if sid is not None}
@@ -215,56 +238,55 @@ def delete_pool_strategies(pool: str) -> int:
     return len(doomed)
 
 
-def sleeve_for_pool(pool: str) -> dict[str, Any] | None:
-    """그 종목풀의 사고팔기 합성 슬리브가 붙은 계좌와 한도 — 없으면 None.
+def sleeves_for_pool(pool: str) -> list[dict[str, Any]]:
+    """그 종목풀의 사고팔기 합성 슬리브가 붙은 계좌들과 한도 — 전략이 고를 수 있는 운용 계좌 목록(계좌 순서).
 
-    사고팔기는 계좌를 따로 고르지 않는다. 합성에서 `사고팔기 + 종목풀` 슬리브를 붙인 계좌가
-    운용 계좌이고, 슬리브 비중 × 합성 운용 기준금액(계좌 평가액)이 그 종목풀 전략 전체의 매수 한도다.
+    슬리브 비중 × 합성 운용 기준금액(계좌 평가액)이 그 계좌에서 이 풀 전략들의 매수 한도다.
     """
     from utils.account_settings_store import load_live_account_docs, mix_sleeves_of
-    from utils.pool_strategy_use import STRATEGY_TRADE
-
-    found = [
-        (doc, sleeve)
-        for doc in load_live_account_docs()
-        for sleeve in mix_sleeves_of(doc)
-        if sleeve["strategy"] == STRATEGY_TRADE and sleeve["pool"] == pool
-    ]
-    if not found:
-        return None
-    if len(found) > 1:
-        raise RuntimeError(f"{pool} 종목풀의 사고팔기 슬리브가 여러 계좌에 붙어 있습니다.")
-    doc, sleeve = found[0]
     from utils.cash_model import currency_for_country
+    from utils.pool_strategy_use import STRATEGY_TRADE
     from utils.strategy_mix_service import operating_capital_krw
 
-    capital = operating_capital_krw(doc["account_id"], currency_for_country(doc["country_code"]))
-    return {
-        "account_id": doc["account_id"],
-        "account_name": str(doc.get("name") or doc["account_id"]),
-        "weight_pct": float(sleeve["weight_pct"]),
-        "limit_krw": capital * float(sleeve["weight_pct"]) / 100.0,
-        # 슬랙 알람은 합성의 계좌 단위 스위치를 따른다 — 사고팔기에 따로 두지 않는다.
-        "slack_enabled": bool(doc.get("mix_slack_enabled")),
-    }
+    found: list[dict[str, Any]] = []
+    for doc in load_live_account_docs():
+        for sleeve in mix_sleeves_of(doc):
+            if sleeve["strategy"] != STRATEGY_TRADE or sleeve["pool"] != pool:
+                continue
+            capital = operating_capital_krw(doc["account_id"], currency_for_country(doc["country_code"]))
+            found.append(
+                {
+                    "account_id": doc["account_id"],
+                    "account_name": str(doc.get("name") or doc["account_id"]),
+                    "weight_pct": float(sleeve["weight_pct"]),
+                    "limit_krw": capital * float(sleeve["weight_pct"]) / 100.0,
+                    # 슬랙 알람은 합성의 계좌 단위 스위치를 따른다 — 사고팔기에 따로 두지 않는다.
+                    "slack_enabled": bool(doc.get("mix_slack_enabled")),
+                }
+            )
+    return found
 
 
-def linked_broker_account_no(pool: str) -> str | None:
-    """그 종목풀의 사고팔기 운용 계좌에 연동된 증권사 계좌번호 — 연동이 저장돼 있지 않으면 None, 슬리브가 없으면 에러."""
+def sleeve_of(pool: str, account_id: str) -> dict[str, Any]:
+    """그 계좌에 붙은 그 풀의 사고팔기 슬리브 — 없으면 에러(합성에서 슬리브를 뗐는데 전략이 남은 경우)."""
+    found = next((sleeve for sleeve in sleeves_for_pool(pool) if sleeve["account_id"] == account_id), None)
+    if found is None:
+        raise ValueError(
+            f"'{account_id}' 계좌에 {pool} 종목풀의 사고팔기 슬리브가 없습니다 — 합성에서 붙이거나 전략의 계좌를 바꾸세요."
+        )
+    return found
+
+
+def broker_account_no_for_account(account_id: str) -> str:
+    """사고팔기 운용 계좌에 연동된 증권사 계좌번호 — 연동이 없으면 에러."""
     from utils.account_settings_store import load_live_account_docs
 
-    sleeve = sleeve_for_pool(pool)
-    if sleeve is None:
-        raise ValueError(f"{pool} 종목풀에 사고팔기 슬리브가 붙은 계좌가 없습니다.")
-    doc = next(doc for doc in load_live_account_docs() if doc["account_id"] == sleeve["account_id"])
-    return str((doc.get("broker_api") or {}).get("account_no") or "").strip() or None
-
-
-def broker_account_no_for_pool(pool: str) -> str:
-    """그 종목풀의 사고팔기 운용 계좌에 연동된 증권사 계좌번호 — 슬리브나 연동이 없으면 에러."""
-    account_no = linked_broker_account_no(pool)
-    if account_no is None:
-        raise ValueError(f"{pool} 종목풀의 운용 계좌에 증권사 API 연동이 저장돼 있지 않습니다.")
+    doc = next((doc for doc in load_live_account_docs() if doc["account_id"] == account_id), None)
+    if doc is None:
+        raise ValueError(f"'{account_id}' 계좌가 없거나 운영 계좌가 아닙니다.")
+    account_no = str((doc.get("broker_api") or {}).get("account_no") or "").strip()
+    if not account_no:
+        raise ValueError(f"'{account_id}' 계좌에 사고팔기 주문용 증권사 API(나무증권) 연동이 저장돼 있지 않습니다.")
     return account_no
 
 
@@ -604,27 +626,35 @@ def _build_strategy_view(
 
 
 def _tickers_by_account(strategies: dict[str, dict[str, Any]]) -> dict[str, list[str]]:
-    """전략 종목을 운용 계좌(증권사 계좌번호)별로 모은다 — 증권사 조회는 계좌당 한 벌이다."""
+    """전략 종목을 운용 계좌(계좌 ID)별로 모은다 — 증권사 조회는 계좌당 한 벌이다."""
     grouped: dict[str, set[str]] = {}
     for entry in strategies.values():
-        grouped.setdefault(broker_account_no_for_pool(entry["pool"]), set()).add(entry["ticker"])
-    return {account_no: sorted(tickers) for account_no, tickers in grouped.items()}
+        grouped.setdefault(entry["account_id"], set()).add(entry["ticker"])
+    return {account_id: sorted(tickers) for account_id, tickers in grouped.items()}
 
 
 def refresh_all_ledgers() -> dict[str, str]:
-    """모든 전략의 회차 원장을 증권사에서 새로 계산해 저장한다 — 사고팔기 알림 배치가 돈다. 실패한 종목은 (티커 → 이유)다."""
+    """모든 전략의 회차 원장을 증권사에서 새로 계산해 저장한다 — 사고팔기 알림 배치가 돈다.
+
+    실패한 것은 (``계좌ID:티커`` → 이유)다. 계좌 하나의 연동 오류가 다른 계좌를 막지 않는다.
+    """
     strategies = load_settings()["strategies"]
     failed: dict[str, str] = {}
-    for account_no, tickers in _tickers_by_account(strategies).items():
+    for account_id, tickers in _tickers_by_account(strategies).items():
+        try:
+            account_no = broker_account_no_for_account(account_id)
+        except ValueError as error:
+            failed.update({f"{account_id}:{ticker}": str(error) for ticker in tickers})
+            continue
         for ticker, ledger in refresh_ledgers(account_no, tickers).items():
             if isinstance(ledger, LedgerError):
-                failed[ticker] = str(ledger)
+                failed[f"{account_id}:{ticker}"] = str(ledger)
         forget_ledgers(account_no, tickers)
     return failed
 
 
-def _failed_view(strategy_id: str, entry: dict[str, Any], error: LedgerError) -> dict[str, Any]:
-    """회차 원장을 만들 수 없는 전략 — 회차 표 없이 이유만 담는다(다른 전략은 그대로 본다)."""
+def _failed_view(strategy_id: str, entry: dict[str, Any], error: LedgerError | str) -> dict[str, Any]:
+    """운용 현황을 만들 수 없는 전략 — 회차 표 없이 이유만 담는다(다른 전략은 그대로 본다)."""
     return {
         "strategy_id": strategy_id,
         "label": str(entry["name"]),
@@ -641,71 +671,116 @@ def _failed_view(strategy_id: str, entry: dict[str, Any], error: LedgerError) ->
     }
 
 
+def _account_ledgers(
+    tickers_by_account: dict[str, list[str]], *, fresh: bool
+) -> dict[str, dict[str, Ledger | LedgerError] | str]:
+    """계좌별 회차 원장 — 증권사 연동이 없는 계좌는 원장 대신 이유(문자열)다(그 계좌 전략만 실패로 본다)."""
+    load = refresh_ledgers if fresh else read_ledgers
+    ledgers: dict[str, dict[str, Ledger | LedgerError] | str] = {}
+    for account_id, tickers in tickers_by_account.items():
+        try:
+            account_no = broker_account_no_for_account(account_id)
+        except ValueError as error:
+            ledgers[account_id] = str(error)
+            continue
+        ledgers[account_id] = load(account_no, tickers)
+    return ledgers
+
+
 def _build_views(strategies: dict[str, dict[str, Any]], *, fresh: bool) -> list[dict[str, Any]]:
-    """전략들의 운용 현황 — 풀마다 슬리브가 붙은 계좌의 회차 원장으로 만든다.
+    """전략들의 운용 현황 — 전략마다 고른 운용 계좌의 회차 원장으로 만든다.
 
     ``fresh`` 가 참이면 원장을 증권사에서 새로 계산해 저장하고(느리다), 아니면 배치가 저장해 둔 것을 읽는다.
 
-    슬리브가 없는 풀의 전략은 계좌를 알 수 없어 만들 수 없다 — 명시적 오류로 알린다. 회차 원장을 못 만든
-    전략은 `error` 만 담은 항목으로 돌려준다(`_failed_view`).
+    매수 한도는 (풀, 계좌) 슬리브 한도를 그 계좌에서 그 풀을 쓰는 전략 수로 균등 분할한다.
+    계좌에 그 풀 슬리브가 없거나(합성에서 뗐는데 전략이 남음) 증권사 연동이 없거나 회차 원장을 못 만든 전략은
+    `error` 만 담은 항목으로 돌려준다(`_failed_view`) — 한 전략의 문제가 다른 전략을 막지 않는다.
     """
-    count_by_pool: dict[str, int] = {}
+    by_pool = {
+        pool: {sleeve["account_id"]: sleeve for sleeve in sleeves_for_pool(pool)}
+        for pool in {entry["pool"] for entry in strategies.values()}
+    }
+    count_by_key: dict[tuple[str, str], int] = {}
     for entry in strategies.values():
-        count_by_pool[entry["pool"]] = count_by_pool.get(entry["pool"], 0) + 1
-    sleeves: dict[str, dict[str, Any]] = {}
-    for pool in count_by_pool:
-        sleeve = sleeve_for_pool(pool)
-        if sleeve is None:
-            raise ValueError(f"{pool} 종목풀의 사고팔기 슬리브가 어느 계좌에도 붙어 있지 않습니다 — 합성에서 붙이세요.")
-        sleeves[pool] = sleeve
-    account_ids = {s["account_id"] for s in sleeves.values()}
-    closes_by_account = {account_id: _load_account_closes(account_id) for account_id in account_ids}
-    load = refresh_ledgers if fresh else read_ledgers
-    ledgers = {account_no: load(account_no, tickers) for account_no, tickers in _tickers_by_account(strategies).items()}
+        key = (entry["pool"], entry["account_id"])
+        count_by_key[key] = count_by_key.get(key, 0) + 1
+    tickers_by_account = _tickers_by_account(strategies)
+    ledgers = _account_ledgers(tickers_by_account, fresh=fresh)
+    closes_by_account = {
+        account_id: _load_account_closes(account_id)
+        for account_id, account_ledgers in ledgers.items()
+        if not isinstance(account_ledgers, str)
+    }
+    from utils.account_settings_store import load_account_docs
+
+    names = {doc["account_id"]: str(doc.get("name") or doc["account_id"]) for doc in load_account_docs()}
     views: list[dict[str, Any]] = []
     for sid, entry in strategies.items():
-        ledger = ledgers[broker_account_no_for_pool(entry["pool"])][entry["ticker"]]
-        if isinstance(ledger, LedgerError):
-            views.append(_failed_view(sid, entry, ledger))
-            continue
-        views.append(
-            _build_strategy_view(
+        account_id = entry["account_id"]
+        sleeve = by_pool[entry["pool"]].get(account_id)
+        account_ledgers = ledgers[account_id]
+        if sleeve is None:
+            view = _failed_view(
                 sid,
                 entry,
-                closes_by_account[sleeves[entry["pool"]]["account_id"]],
-                ledger,
-                strategy_budget(sleeves[entry["pool"]], count_by_pool[entry["pool"]]),
+                f"'{account_id}' 계좌에 이 종목풀의 사고팔기 슬리브가 없습니다 — 합성에서 붙이거나 전략의 계좌를 바꾸세요.",
             )
-        )
+        elif isinstance(account_ledgers, str):
+            view = _failed_view(sid, entry, account_ledgers)
+        elif isinstance(ledger := account_ledgers[entry["ticker"]], LedgerError):
+            view = _failed_view(sid, entry, ledger)
+        else:
+            view = _build_strategy_view(
+                sid,
+                entry,
+                closes_by_account[account_id],
+                ledger,
+                strategy_budget(sleeve, count_by_key[(entry["pool"], account_id)]),
+            )
+        # 운용 계좌 — 화면 카드 머리·슬랙 문구·주문 계좌가 이것을 쓴다.
+        views.append({**view, "account_id": account_id, "account_name": names.get(account_id, account_id)})
     return views
 
 
-def load_pool_views(pool: str) -> list[dict[str, Any]]:
-    """한 종목풀의 전략 운용 현황 — 합성 슬리브가 보유 표시에 쓴다. 회차 원장을 못 만든 전략이 있으면 오류다."""
-    in_pool = {sid: entry for sid, entry in load_settings()["strategies"].items() if entry["pool"] == pool}
-    if not in_pool:
-        raise ValueError(f"{pool} 종목풀에 사고팔기 전략이 없습니다.")
-    views = _build_views(in_pool, fresh=False)
+def load_account_pool_views(pool: str, account_id: str) -> list[dict[str, Any]]:
+    """한 계좌의 한 종목풀 전략 운용 현황 — 합성 슬리브가 보유 표시에 쓴다. 회차 원장을 못 만든 전략이 있으면 오류다."""
+    selected = {
+        sid: entry
+        for sid, entry in load_settings()["strategies"].items()
+        if entry["pool"] == pool and entry["account_id"] == account_id
+    }
+    if not selected:
+        raise ValueError(
+            f"'{account_id}' 계좌에 {pool} 종목풀의 사고팔기 전략이 없습니다 — 사고팔기 화면에서 계좌를 고르세요."
+        )
+    views = _build_views(selected, fresh=False)
     failed = [view for view in views if "error" in view]
     if failed:
         raise ValueError(f"{failed[0]['label']}: {failed[0]['error']}")
     return views
 
 
-def load_views_for_pools(pools: list[str], *, fresh: bool) -> dict[str, Any]:
-    """주어진 종목풀들의 전략 운용 현황 — 알림·주문용(화면은 풀 하나씩 본다). ``fresh`` 는 `_build_views` 와 같다.
+def load_views_where(keep: Callable[[dict[str, Any]], bool], *, fresh: bool) -> dict[str, Any]:
+    """``keep(전략 설정)`` 이 참인 전략들의 운용 현황 — 알림·주문용. ``fresh`` 는 `_build_views` 와 같다.
 
     회차 원장을 못 만든 전략은 `strategies` 에서 빼고 `errors`(전략 id → 이유)에 담는다 — 그 전략만 건너뛴다.
     """
-    wanted = set(pools)
     views = _build_views(
-        {sid: entry for sid, entry in load_settings()["strategies"].items() if entry["pool"] in wanted},
+        {sid: entry for sid, entry in load_settings()["strategies"].items() if keep(entry)},
         fresh=fresh,
     )
     return {
         "strategies": [view for view in views if "error" not in view],
         "errors": {view["strategy_id"]: view["error"] for view in views if "error" in view},
     }
+
+
+def strategy_entry(strategy_id: str) -> dict[str, Any]:
+    """저장된 전략 설정 하나 — 없으면 에러."""
+    entry = load_settings()["strategies"].get(strategy_id)
+    if entry is None:
+        raise ValueError(f"'{strategy_id}' 사고팔기 전략이 없습니다.")
+    return entry
 
 
 def load_strategy_trade_view(pool: str | None) -> dict[str, Any]:
@@ -723,21 +798,18 @@ def load_strategy_trade_view(pool: str | None) -> dict[str, Any]:
         raise ValueError(f"{pool} 종목풀에서 사고팔기가 꺼져 있습니다 — 종목풀 설정에서 먼저 켜세요.")
     selected = pool if pool is not None else (enabled[0] if enabled else None)
     in_pool = {sid: entry for sid, entry in settings["strategies"].items() if entry["pool"] == selected}
-    sleeve = sleeve_for_pool(selected) if selected is not None else None
+    sleeves = sleeves_for_pool(selected) if selected is not None else []
     return {
         "pool_options": pool_options(enabled),
         "pool": selected,
         "month_options": get_month_options(),
-        # 합성 슬리브 — 운용 계좌와 매수 한도의 출처. 없으면 None(화면이 붙이라고 안내한다).
-        "sleeve": (
-            {**sleeve, "per_strategy_limit_krw": strategy_budget(sleeve, len(in_pool))}
-            if sleeve is not None and in_pool
-            else sleeve
-        ),
+        # 합성 슬리브 — 전략이 고를 수 있는 운용 계좌와 계좌별 매수 한도의 출처. 비면 화면이 붙이라고 안내한다.
+        "sleeves": [_sleeve_with_split(sleeve, in_pool) for sleeve in sleeves],
         # 편집 표의 행 — 슬리브 유무와 무관하게 저장된 전략 설정 그대로.
         "configs": [
             {
                 "strategy_id": sid,
+                "account_id": entry["account_id"],
                 "ticker": entry["ticker"],
                 "name": entry["name"],
                 "trigger_pct": entry["trigger_pct"],
@@ -746,5 +818,15 @@ def load_strategy_trade_view(pool: str | None) -> dict[str, Any]:
             }
             for sid, entry in in_pool.items()
         ],
-        "strategies": _build_views(in_pool, fresh=False) if sleeve is not None else [],
+        "strategies": _build_views(in_pool, fresh=False),
+    }
+
+
+def _sleeve_with_split(sleeve: dict[str, Any], in_pool: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """계좌 슬리브에 전략당 한도를 붙인다 — 그 계좌를 고른 전략 수로 균등 분할. 고른 전략이 없으면 None."""
+    count = sum(1 for entry in in_pool.values() if entry["account_id"] == sleeve["account_id"])
+    return {
+        **sleeve,
+        "strategy_count": count,
+        "per_strategy_limit_krw": strategy_budget(sleeve, count) if count else None,
     }

@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from "react";
 
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
+import AccountSelect from "../components/AccountSelect";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { AppModal } from "../components/AppModal";
 import { PageFrame } from "../components/PageFrame";
@@ -94,6 +95,9 @@ export type StrategyView = {
   label: string;
   /** 이 전략이 속한 종목풀. */
   pool: string;
+  /** 운용 계좌 — 전략마다 고른다. */
+  account_id: string;
+  account_name: string;
   ticker: string;
   config: StrategyConfig;
   index: IndexStatus;
@@ -108,6 +112,8 @@ export type FailedStrategy = {
   strategy_id: string;
   label: string;
   pool: string;
+  account_id: string;
+  account_name: string;
   ticker: string;
   error: string;
 };
@@ -115,6 +121,8 @@ export type FailedStrategy = {
 /** 저장된 전략 설정 한 줄 — 편집 표의 행. */
 type StrategyConfigRow = {
   strategy_id: string;
+  /** 운용 계좌. 아직 고르지 않았으면 null. */
+  account_id: string | null;
   ticker: string;
   name: string;
   trigger_pct: number;
@@ -122,20 +130,22 @@ type StrategyConfigRow = {
   rounds: number;
 };
 
-/** 이 종목풀의 사고팔기 합성 슬리브 — 운용 계좌와 매수 한도의 출처. */
+/** 이 종목풀의 사고팔기 합성 슬리브(계좌 하나) — 전략이 고를 수 있는 운용 계좌와 그 계좌의 매수 한도. */
 type Sleeve = {
   account_id: string;
   account_name: string;
   weight_pct: number;
   limit_krw: number;
-  per_strategy_limit_krw?: number;
+  /** 이 계좌를 고른 저장된 전략 수와 전략당 한도(고른 전략이 없으면 null). */
+  strategy_count: number;
+  per_strategy_limit_krw: number | null;
   /** 슬랙 알람 — 그 계좌의 합성 슬랙 스위치를 따른다(여기서 정하지 않는다). */
   slack_enabled: boolean;
 };
 
 type View = {
-  /** 합성에서 이 종목풀에 붙인 사고팔기 슬리브. 없으면 null — 운용 현황을 만들 수 없다. */
-  sleeve: Sleeve | null;
+  /** 합성에서 이 종목풀에 사고팔기 슬리브를 붙인 계좌들. 비면 운용 현황을 만들 수 없다. */
+  sleeves: Sleeve[];
   /** 저장된 전략 설정 — 슬리브 유무와 무관하게 편집할 수 있다. */
   configs: StrategyConfigRow[];
   /** 사고팔기를 켠 종목풀 — 종목풀 설정의 토글이 단일 소스다. */
@@ -422,6 +432,8 @@ function EtfTickerInput({
 type DraftRow = {
   key: string;
   strategy_id: string | null;
+  /** 운용 계좌 — 빈 문자열이면 아직 고르지 않았다. */
+  accountId: string;
   ticker: string | null;
   tickerName: string;
   pct: string;
@@ -439,6 +451,7 @@ function rowsFromConfigs(configs: StrategyConfigRow[]): DraftRow[] {
   return configs.map((config) => ({
     key: config.strategy_id,
     strategy_id: config.strategy_id,
+    accountId: config.account_id ?? "",
     ticker: config.ticker,
     tickerName: config.name,
     pct: String(config.trigger_pct),
@@ -449,7 +462,7 @@ function rowsFromConfigs(configs: StrategyConfigRow[]): DraftRow[] {
 
 /** 변경 비교용 — 입력 중 문자열을 저장 값 모양으로 맞춘다. */
 function comparableRow(row: DraftRow) {
-  return [row.strategy_id, row.ticker, Number(row.pct), Number(row.qty), Number(row.rounds)];
+  return [row.strategy_id, row.accountId, row.ticker, Number(row.pct), Number(row.qty), Number(row.rounds)];
 }
 
 /** 상단 설정 카드 — 종목풀 셀렉트, 전략 설정 표, 저장 버튼 하나. */
@@ -492,6 +505,7 @@ function PoolSettingsCard({
       {
         key: nextDraftKey(),
         strategy_id: null,
+        accountId: "",
         ticker: null,
         tickerName: "",
         pct: "5",
@@ -516,6 +530,7 @@ function PoolSettingsCard({
       const pct = Number(row.pct);
       const qty = Number(row.qty);
       const rounds = Number(row.rounds);
+      if (!row.accountId) return void toast.error(`${label}: 운용 계좌를 고르세요.`);
       if (!row.ticker) return void toast.error(`${label}: 종목 티커를 입력하고 확인하세요.`);
       if (!Number.isFinite(pct) || pct < PCT_MIN || pct > PCT_MAX) {
         return void toast.error(`${label}: 매매 간격은 ${PCT_MIN}~${PCT_MAX} 사이 숫자여야 합니다.`);
@@ -526,6 +541,7 @@ function PoolSettingsCard({
       }
       strategies.push({
         ...(row.strategy_id ? { strategy_id: row.strategy_id } : {}),
+        account_id: row.accountId,
         ticker: row.ticker,
         trigger_pct: pct,
         round_quantity: qty,
@@ -588,14 +604,18 @@ function PoolSettingsCard({
             </div>
           </div>
 
-          {view.sleeve ? (
+          {view.sleeves.length > 0 ? (
             <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginTop: 8 }}>
-              운용 계좌 {view.sleeve.account_name}({view.sleeve.account_id}) · 합성 슬리브 {view.sleeve.weight_pct}% · 매수
-              한도 {formatKrwMan(view.sleeve.limit_krw)}
-              {view.sleeve.per_strategy_limit_krw != null
-                ? ` (전략당 ${formatKrwMan(view.sleeve.per_strategy_limit_krw)})`
-                : ""}
-              {` · 슬랙 알람 ${view.sleeve.slack_enabled ? "켜짐" : "꺼짐"}(합성 화면에서 설정)`}
+              {view.sleeves.map((sleeve) => (
+                <div key={sleeve.account_id}>
+                  운용 계좌 {sleeve.account_name}({sleeve.account_id}) · 합성 슬리브 {sleeve.weight_pct}% · 매수 한도{" "}
+                  {formatKrwMan(sleeve.limit_krw)}
+                  {sleeve.per_strategy_limit_krw != null
+                    ? ` (전략 ${sleeve.strategy_count}개 · 전략당 ${formatKrwMan(sleeve.per_strategy_limit_krw)})`
+                    : " (고른 전략 없음)"}
+                  {` · 슬랙 알람 ${sleeve.slack_enabled ? "켜짐" : "꺼짐"}(합성 화면에서 설정)`}
+                </div>
+              ))}
             </div>
           ) : (
             <div className="alert alert-warning" style={{ marginTop: 10, marginBottom: 0 }}>
@@ -610,6 +630,13 @@ function PoolSettingsCard({
                 key={row.key}
                 style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", fontSize: "var(--fs-sm)" }}
               >
+                <AccountSelect
+                  accounts={view.sleeves.map((sleeve) => ({ account_id: sleeve.account_id, name: sleeve.account_name }))}
+                  value={row.accountId}
+                  onChange={(accountId) => updateRow(row.key, { accountId })}
+                  emptyLabel="계좌 선택"
+                  disabled={saving}
+                />
                 <EtfTickerInput
                   pool={pool}
                   confirmedTicker={row.ticker ?? ""}
@@ -687,6 +714,9 @@ function StrategySection({
     return (
       <div className="card appCard" style={cardStyle}>
         <span style={{ fontWeight: 800, fontSize: "var(--fs-base)" }}>{view.label}</span>
+        <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
+          {view.account_name}({view.account_id})
+        </span>
         <div style={{ color: "var(--up-color, #d64545)", fontSize: "var(--fs-sm)" }}>
           {view.ticker} 보유 회차를 맞출 수 없습니다: {view.error}
         </div>
@@ -710,7 +740,7 @@ function StrategySection({
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline", fontSize: "var(--fs-sm)" }}>
         <span style={{ fontWeight: 800, fontSize: "var(--fs-base)" }}>{view.label}</span>
         <span style={{ color: "var(--text-muted)" }}>
-          {view.ticker} · 간격 {config.trigger_pct}% · 회차당 {formatNumber(config.round_quantity)}주 · {config.rounds}회
+          {view.account_name}({view.account_id}) · {view.ticker} · 간격 {config.trigger_pct}% · 회차당 {formatNumber(config.round_quantity)}주 · {config.rounds}회
           · 한도 {formatKrwMan(status.budget)} 중 {formatKrwMan(status.invested)} 사용 · 체결 이력 {view.ledger_at.slice(5, 16).replace("T", " ")} 기준
         </span>
       </div>
@@ -960,7 +990,7 @@ export function StrategyTradeClient() {
 
         {/* 백테스트 — 설정이나 풀이 바뀌면 결과가 어긋나므로 다시 마운트해 비운다. */}
         <TradeBacktestSection
-          key={`${view.pool}:${view.configs.map((c) => `${c.strategy_id}/${c.ticker}/${c.trigger_pct}/${c.round_quantity}/${c.rounds}`).join(",")}:${view.sleeve?.limit_krw ?? ""}`}
+          key={`${view.pool}:${view.configs.map((c) => `${c.strategy_id}/${c.account_id}/${c.ticker}/${c.trigger_pct}/${c.round_quantity}/${c.rounds}`).join(",")}:${view.sleeves.map((s) => `${s.account_id}/${s.limit_krw}`).join(",")}`}
           pool={view.pool}
           monthOptions={view.month_options}
           blockedReason={
@@ -968,7 +998,7 @@ export function StrategyTradeClient() {
               ? "저장하지 않은 변경이 있습니다 — 저장한 뒤 실행하세요."
               : view.configs.length === 0
                 ? "이 종목풀에 전략이 없습니다."
-                : view.sleeve === null
+                : view.sleeves.length === 0
                   ? "사고팔기 슬리브가 계좌에 붙어 있지 않습니다."
                   : null
           }

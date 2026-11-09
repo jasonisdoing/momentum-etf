@@ -34,7 +34,7 @@ from utils.account_settings_store import ACCOUNT_ENV_MOCK
 from utils.db_manager import get_db_connection
 from utils.market_session import REGULAR, market_session
 from utils.strategy_trade_ledger import is_buy
-from utils.strategy_trade_service import broker_account_no_for_pool, load_views_for_pools
+from utils.strategy_trade_service import broker_account_no_for_account, load_views_where
 
 KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_orders"
@@ -164,7 +164,9 @@ def _require_order_allowed(account_no: str, env: str, amount: int) -> None:
         )
 
 
-def resolve_order(pool: str, strategy_id: str, side: str, round_no: int | None, *, fresh: bool) -> dict[str, Any]:
+def resolve_order(
+    account_no: str, pool: str, strategy_id: str, side: str, round_no: int | None, *, fresh: bool
+) -> dict[str, Any]:
     """주문 내용 — 가격은 **그 순간의 상대 1호가 지정가**(매수는 매도 1호가, 매도는 매수 1호가), 수량은 회차당 수량이다.
 
     마지막 체결가로 내면 호가에 닿지 않아 체결이 안 되는 일이 잦다 — 상대 1호가는 바로 체결되는 가장 좋은 가격이다.
@@ -174,21 +176,29 @@ def resolve_order(pool: str, strategy_id: str, side: str, round_no: int | None, 
 
     ``fresh`` 가 참이면 보유 회차를 증권사에서 새로 계산한다(수 초) — 실제 주문 직전 검증용이다. 거짓이면 배치가
     저장해 둔 것을 읽는다(1초 안팎) — 슬랙 모달은 3초 안에 열어야 해서 이쪽을 쓴다.
+
+    운영 계좌는 전략의 운용 계좌로만 주문한다 — 다른 계좌의 체결로 회차를 세는 전략이라 엉뚱한 계좌에 사면
+    회차가 어긋난다. 모의 계좌는 주문 경로 시험용이라 어느 전략 종목이든 받는다.
     """
     if side not in ("buy", "sell"):
         raise BrokerApiError(f"알 수 없는 주문 구분입니다: {side}")
-    views = load_views_for_pools([pool], fresh=fresh)
+    views = load_views_where(lambda entry: entry["pool"] == pool, fresh=fresh)
     if strategy_id in views["errors"]:
         raise BrokerApiError(f"'{strategy_id}' 전략의 보유 회차를 확인할 수 없습니다: {views['errors'][strategy_id]}")
     strategy = next((row for row in views["strategies"] if row["strategy_id"] == strategy_id), None)
     if strategy is None:
         raise BrokerApiError(f"{pool} 종목풀에 '{strategy_id}' 전략이 없습니다.")
+    strategy_account_no = broker_account_no_for_account(strategy["account_id"])
+    if account_env(account_no) != ACCOUNT_ENV_MOCK and account_no != strategy_account_no:
+        raise BrokerApiError(
+            f"{strategy['label']} 전략의 운용 계좌는 '{strategy['account_id']}' 입니다 — 다른 운영 계좌로는 주문하지 않습니다."
+        )
     _require_no_manual_order(strategy, side)
     signal_price = None
     if round_no is not None:
         row = _require_round_state(strategy, side, round_no)
         signal_price = row["sell_limit"] if side == "sell" else (None if row["close_entry"] else row["buy_limit"])
-    quote = fetch_best_quote(broker_account_no_for_pool(pool), strategy["ticker"])
+    quote = fetch_best_quote(strategy_account_no, strategy["ticker"])
     label, price, quantity = (
         ("매도 1호가", quote["ask"], quote["ask_quantity"])
         if side == "buy"
@@ -218,7 +228,7 @@ def place_order(
         raise BrokerApiError("모달에서 직접 내는 주문은 매도만 됩니다 — 매수는 슬랙 주문 메시지로 내세요.")
     env = account_env(account_no)
     # 주문 직전이라 저장된 원장이 아니라 지금 증권사 기준으로 다시 계산한다.
-    order = resolve_order(pool, strategy_id, side, round_no, fresh=True)
+    order = resolve_order(account_no, pool, strategy_id, side, round_no, fresh=True)
     if round_no is not None:
         _require_no_duplicate(account_no, strategy_id, side, round_no)
     _require_order_allowed(account_no, env, order["price"] * order["quantity"])

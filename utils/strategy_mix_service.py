@@ -737,7 +737,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         # 사고팔기는 시작일 개념이 없다(지정가 사다리를 계좌 보유에서 읽는다).
         if spec.strategy != STRATEGY_TRADE:
             require_start_date(spec.settings)
-    states = {spec.key: slot_state(spec) for spec in slots}
+    states = {spec.key: slot_state(spec, ctx["account_id"]) for spec in slots}
     # 합성이 주문을 만들지 않는 슬리브(사고팔기) — 목표 수량 배분과 체결일 비교에서 뺀다.
     managed_keys = {key for key, state in states.items() if state.self_managed}
     managed_tickers = {str(target["ticker"]).strip() for key in managed_keys for target in states[key].targets}

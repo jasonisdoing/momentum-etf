@@ -44,7 +44,7 @@ from utils.strategy_trade_orders import (
     resolve_order,
     serialize_order,
 )
-from utils.strategy_trade_service import broker_account_no_for_pool
+from utils.strategy_trade_service import broker_account_no_for_account
 from utils.strategy_trade_threads import send_thread_message
 
 logger = logging.getLogger(__name__)
@@ -156,7 +156,7 @@ def send_order_message(
 ) -> None:
     """주문 메시지를 슬랙으로 보낸다(thread_ts 가 있으면 그 스레드에) — 주문은 슬랙에서 버튼과 모달 확인을 거쳐야 나간다."""
     env = account_env(account_no)
-    order = resolve_order(pool, strategy_id, side, round_no, fresh=False)
+    order = resolve_order(account_no, pool, strategy_id, side, round_no, fresh=False)
     request = {
         "env": env,
         "round": round_no,
@@ -267,7 +267,12 @@ def open_confirm_modal(payload: dict[str, Any]) -> None:
         try:
             # 슬랙 trigger_id 는 3초 안에 써야 해서 저장된 원장으로 연다 — 실제 주문 직전 검증은 `place_order` 가 새로 계산한다.
             order = resolve_order(
-                request["pool"], request["strategy_id"], request["side"], request["round"], fresh=False
+                request["account_no"],
+                request["pool"],
+                request["strategy_id"],
+                request["side"],
+                request["round"],
+                fresh=False,
             )
         except RoundNotOrderableError as exc:
             _expire(target, exc)
@@ -475,7 +480,7 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
     이미 주문이 진행 중인 회차는 건너뛴다(매시간 재알림에서 주문이 아직 없는 회차에만 다시 띄우려는 것).
     주문은 슬랙의 버튼과 모달 확인을 거쳐야 나간다.
     """
-    account_no = broker_account_no_for_pool(strategy_view["pool"])
+    account_no = broker_account_no_for_account(strategy_view["account_id"])
     pending = [
         trigger
         for trigger in triggers

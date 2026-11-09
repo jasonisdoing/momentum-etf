@@ -242,10 +242,13 @@ class SlotState:
     self_managed: bool = False
 
 
-def slot_state(spec: SleeveSpec) -> SlotState:
-    """엔진 원본 상태를 `SlotState` 로 정규화한다 — 합성이 전략을 가리지 않게."""
+def slot_state(spec: SleeveSpec, account_id: str) -> SlotState:
+    """엔진 원본 상태를 `SlotState` 로 정규화한다 — 합성이 전략을 가리지 않게.
+
+    ``account_id`` 는 합성 계좌 — 사고팔기는 그 계좌를 고른 전략만 이 슬리브에 담는다.
+    """
     if spec.strategy == STRATEGY_TRADE:
-        return _trade_slot_state(spec)
+        return _trade_slot_state(spec, account_id)
     raw = current_state(spec)
     # 포트폴리오는 슬롯 개수 개념이 없다 — 담은 종목 수가 곧 슬롯 수다.
     top_n = len(spec.settings.get("weights") or []) if spec.strategy == PORTFOLIO else int(spec.settings["top_n"])
@@ -255,7 +258,7 @@ def slot_state(spec: SleeveSpec) -> SlotState:
     return _slot_state_from_positions(spec, raw, top_n)
 
 
-def _trade_slot_state(spec: SleeveSpec) -> SlotState:
+def _trade_slot_state(spec: SleeveSpec, account_id: str) -> SlotState:
     """사고팔기 운용 현황을 슬롯 상태로 — 보유 회차를 보여주기만 하고 주문은 만들지 않는다.
 
     목표 수량은 합성이 정하지 않는다(`self_managed`). 합성은 이 종목들의 현재 보유를 목표로 두고,
@@ -265,9 +268,9 @@ def _trade_slot_state(spec: SleeveSpec) -> SlotState:
 
     from utils.settings_loader import get_ticker_type_settings
     from utils.slot_positions import next_fill_session
-    from utils.strategy_trade_service import load_pool_views
+    from utils.strategy_trade_service import load_account_pool_views
 
-    views = load_pool_views(spec.pool)
+    views = load_account_pool_views(spec.pool, account_id)
     targets = []
     for view in views:
         status = view["status"]

@@ -103,19 +103,21 @@ function StatusChip({ status }: { status: OrderStatus }) {
 /** 계좌 한 곳으로 사고팔기 전략 종목의 상대 1호가 지정가 주문·취소·상태 확인을 시험하는 모달(운영은 실제 주문) — 슬랙 버튼 주문의 서버 쪽 주문 경로를 검증한다. */
 export function ApiOrderModal({
   isLive,
+  accountId,
   accountName,
   accountNo,
   onClose,
 }: {
   /** 운영 계좌 — 실제 주문이 나간다. 모의 계좌는 모의투자 서버로만 간다. */
   isLive: boolean;
+  /** 운영 계좌는 이 계좌를 운용 계좌로 고른 전략만 주문할 수 있다(서버도 같은 규칙으로 막는다). */
+  accountId: string;
   accountName: string;
   accountNo: string;
   onClose: () => void;
 }) {
   const toast = useToast();
   const [strategies, setStrategies] = useState<StrategyView[] | null>(null);
-  const [pool, setPool] = useState("");
   const [strategyId, setStrategyId] = useState("");
   const [side, setSide] = useState<Side>("buy");
   const [balance, setBalance] = useState<MockBalance | null>(null);
@@ -132,14 +134,15 @@ export function ApiOrderModal({
       const resp = await fetch("/api/strategy-trade", { cache: "no-store" });
       const data = (await resp.json()) as {
         strategies?: Array<StrategyView | FailedStrategy>;
-        pool?: string | null;
         error?: string;
       };
       if (!resp.ok || data.error) throw new Error(data.error ?? "사고팔기 전략을 불러오지 못했습니다.");
       // 보유 회차를 맞추지 못한 전략은 주문 대상에서 뺀다 — 그 이유는 /strategy-trade 화면이 보여 준다.
-      const list = (data.strategies ?? []).filter((row): row is StrategyView => !("error" in row));
+      // 운영 계좌는 이 계좌를 고른 전략만 — 모의 계좌는 주문 경로 시험용이라 전부.
+      const list = (data.strategies ?? []).filter(
+        (row): row is StrategyView => !("error" in row) && (!isLive || row.account_id === accountId),
+      );
       setStrategies(list);
-      setPool(data.pool ?? "");
       setStrategyId((current) => (list.some((row) => row.strategy_id === current) ? current : (list[0]?.strategy_id ?? "")));
     } catch (err) {
       setStrategies((current) => current ?? []);
@@ -147,7 +150,7 @@ export function ApiOrderModal({
     } finally {
       setLoadingStrategies(false);
     }
-  }, [toast]);
+  }, [accountId, isLive, toast]);
 
   useEffect(() => {
     void loadStrategies();
@@ -206,7 +209,7 @@ export function ApiOrderModal({
       const data = await requestJson<{ order: OrderRecord }>("/api/broker-api/mock/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_no: accountNo, pool, strategy_id: strategyId, side }),
+        body: JSON.stringify({ account_no: accountNo, pool: strategy?.pool, strategy_id: strategyId, side }),
       });
       toast.success(`${data.order.strategy_label} ${side === "buy" ? "매수" : "매도"} 주문을 접수했습니다.`);
       setOrders((await requestJson<{ orders: OrderRecord[] }>(`/api/broker-api/mock/orders?${query}`)).orders);
@@ -219,7 +222,7 @@ export function ApiOrderModal({
       await requestJson("/api/broker-api/mock/slack-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_no: accountNo, pool, strategy_id: strategyId, side }),
+        body: JSON.stringify({ account_no: accountNo, pool: strategy?.pool, strategy_id: strategyId, side }),
       });
       toast.success(`${strategy?.label ?? ""} ${side === "buy" ? "매수" : "매도"} 주문 메시지를 슬랙으로 보냈습니다.`);
     });
@@ -236,7 +239,7 @@ export function ApiOrderModal({
       setBalance(await requestJson<MockBalance>(`/api/broker-api/mock/balance?${query}`));
     });
 
-  const canOrder = Boolean(accountNo && pool && strategy && quantity && busy === null && !loadingStrategies);
+  const canOrder = Boolean(accountNo && strategy && quantity && busy === null && !loadingStrategies);
 
   return (
     <AppModal
@@ -329,7 +332,7 @@ export function ApiOrderModal({
             {strategies !== null && strategies.length === 0 ? <option value="">사고팔기 전략 없음</option> : null}
             {(strategies ?? []).map((row) => (
               <option key={row.strategy_id} value={row.strategy_id}>
-                {row.label} ({row.ticker})
+                {row.label} ({row.ticker}) · {row.account_name}
               </option>
             ))}
           </select>

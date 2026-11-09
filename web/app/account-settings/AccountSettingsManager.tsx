@@ -1226,6 +1226,7 @@ export function AccountSettingsManager() {
       {mockOrderId ? (
         <ApiOrderModal
           isLive={accounts.find((account) => account.account_id === mockOrderId)?.env === ENV_LIVE}
+          accountId={mockOrderId}
           accountName={accounts.find((account) => account.account_id === mockOrderId)?.name ?? mockOrderId}
           accountNo={accounts.find((account) => account.account_id === mockOrderId)?.broker_api?.account_no ?? ""}
           onClose={() => setMockOrderId(null)}

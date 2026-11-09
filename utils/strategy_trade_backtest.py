@@ -21,7 +21,7 @@ from utils.perf_metrics import daily_return_metrics, max_drawdown_window
 from utils.pool_settings_store import get_pool_benchmark_ticker
 from utils.pool_signal_backtest_service import validate_backtest_months
 from utils.settings_loader import get_ticker_type_settings
-from utils.strategy_trade_service import load_settings, sleeve_for_pool, strategy_budget
+from utils.strategy_trade_service import load_settings, sleeve_of, strategy_budget
 from utils.trade_stats import summarize_trades
 
 COUNTRY = "kor"
@@ -72,10 +72,12 @@ def _simulate_pool(pool: str, months: int) -> dict[str, Any]:
     strategies = [entry for entry in load_settings()["strategies"].values() if entry["pool"] == pool]
     if not strategies:
         raise ValueError(f"{pool} 종목풀에 사고팔기 전략이 없습니다.")
-    sleeve = sleeve_for_pool(pool)
-    if sleeve is None:
-        raise ValueError(f"{pool} 종목풀의 사고팔기 슬리브가 어느 계좌에도 붙어 있지 않습니다 — 합성에서 붙이세요.")
-    budget = strategy_budget(sleeve, len(strategies))
+    # 한도는 실제 운용과 같다 — (풀, 계좌) 슬리브 한도를 그 계좌에서 이 풀을 쓰는 전략 수로 나눈다.
+    account_ids = sorted({entry["account_id"] for entry in strategies})
+    sleeves = {account_id: sleeve_of(pool, account_id) for account_id in account_ids}
+    counts = {
+        account_id: sum(1 for entry in strategies if entry["account_id"] == account_id) for account_id in account_ids
+    }
 
     pool_settings = get_ticker_type_settings(pool) or {}
     benchmark_ticker = get_pool_benchmark_ticker(pool_settings)
@@ -94,7 +96,12 @@ def _simulate_pool(pool: str, months: int) -> dict[str, Any]:
     for entry in strategies:
         data = _simulation_input(bars[entry["ticker"]], start)
         spec = LadderSpec(
-            entry["ticker"], entry["name"], entry["trigger_pct"], entry["round_quantity"], entry["rounds"], budget
+            entry["ticker"],
+            entry["name"],
+            entry["trigger_pct"],
+            entry["round_quantity"],
+            entry["rounds"],
+            strategy_budget(sleeves[entry["account_id"]], counts[entry["account_id"]]),
         )
         results.append(simulate_ladder(data, spec, market_buy_slippage_pct=float(slippage)))
 
@@ -110,7 +117,8 @@ def _simulate_pool(pool: str, months: int) -> dict[str, Any]:
         "bars": bars,
         "calendar": calendar,
         "pnl": total_pnl,
-        "base_capital": float(sleeve["limit_krw"]),
+        # 기준 자본 — 이 풀 전략들이 쓰는 계좌 슬리브 한도의 합.
+        "base_capital": sum(float(sleeve["limit_krw"]) for sleeve in sleeves.values()),
         "trades": trades,
     }
 

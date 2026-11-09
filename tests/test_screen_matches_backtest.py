@@ -363,7 +363,7 @@ class PortfolioMixStateTest(unittest.TestCase):
             patch("utils.portfolio_service.universe_metrics", return_value=[]),
             patch("utils.settings_loader.get_ticker_type_settings", return_value={"currency": "USD"}),
         ):
-            state = slot_state(spec)
+            state = slot_state(spec, "test_account")
         for source, target in zip(result["open_positions"], state.targets, strict=True):
             self.assertEqual(source["sleeve_weight_pct"], target["drift_pct"])
             self.assertEqual(source["price"], target["price"])
