@@ -596,7 +596,7 @@ function AccountSettingsCard({
         </div>
       </section>
 
-      <section className="appSection appEqualSplit strategyTradeGrid">
+      <section className="appSection appPageStack strategyTradeGrid">
         <aside className="card appCard" aria-label="종목 목록">
           <div className="card-body appCardBodyTight">
             <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
