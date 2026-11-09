@@ -374,14 +374,27 @@ def _first_entry_close_window(now: datetime | None = None) -> bool:
     return FIRST_ENTRY_CLOSE_TIME <= now_local.time() < schedule["close"]
 
 
-def _attach_trade_counts(view: dict[str, Any], ledger: Ledger, cached_days: dict[date, list[dict[str, Any]]]) -> None:
+def _attach_trade_history(view: dict[str, Any], ledger: Ledger, cached_days: dict[date, list[dict[str, Any]]]) -> None:
+    """회차 행에 날짜별 매수·매도를 체결 순서대로 붙인다(`trades_by_day` = {날짜: ["buy", "sell", …]}).
+
+    지금 사이클의 체결만 담는다 — 1호를 마지막으로 판 체결(그때 보유가 모두 비었다) 뒤부터다.
+    그 전 사이클의 매매는 지금 보유와 무관해 보여 주지 않는다.
+    """
     rows = {row["round"]: row for row in view["rounds"]}
     for row in rows.values():
-        row["trade_counts"] = {}
-    for event in round_history(ledger, view["ticker"], view["config"]["round_quantity"], cached_days):
+        row["trades_by_day"] = {}
+    events = round_history(ledger, view["ticker"], view["config"]["round_quantity"], cached_days)
+    start = next(
+        (
+            idx + 1
+            for idx in range(len(events) - 1, -1, -1)
+            if events[idx]["round"] == 1 and events[idx]["side"] == "sell"
+        ),
+        0,
+    )
+    for event in events[start:]:
         if (row := rows.get(event["round"])) is not None:
-            counts = row["trade_counts"].setdefault(event["day"], {"buy": 0, "sell": 0})
-            counts[event["side"]] += 1
+            row["trades_by_day"].setdefault(event["day"], []).append(event["side"])
 
 
 def _build_strategy_view(
@@ -693,7 +706,7 @@ def _build_views(
                     cache_key = (account_id, ledger.as_of)
                     if cache_key not in cached_days_by_account:
                         cached_days_by_account[cache_key] = read_cached_trade_days(*cache_key)
-                    _attach_trade_counts(view, ledger, cached_days_by_account[cache_key])
+                    _attach_trade_history(view, ledger, cached_days_by_account[cache_key])
             except (RuntimeError, ValueError) as error:
                 view = _failed_view(sid, entry, str(error))
         # 운용 계좌 — 화면 카드 머리·슬랙 문구·주문 계좌가 이것을 쓴다.

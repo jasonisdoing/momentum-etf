@@ -61,7 +61,7 @@ type Status = {
   sell_pending: boolean;
 };
 
-type DailyTradeCount = { buy: number; sell: number };
+type TradeSide = "buy" | "sell";
 
 export type RoundRow = {
   /** 사다리 위치(표시용) — 1호 체결가 기준 간격 칸. 건너뛴 칸은 회차 없이 빈 행으로 보인다. */
@@ -92,7 +92,8 @@ export type RoundRow = {
   order_sides: Array<"buy" | "sell">;
   // 증권사 앱(MTS)에 걸려 있는 미체결 수동 주문 — 슬랙 주문을 막는다.
   manual_orders: Array<{ side: "buy" | "sell"; price: number; quantity: number }>;
-  trade_counts: Record<string, DailyTradeCount>;
+  /** 날짜별 매수·매도 — 체결 순서대로. 지금 사이클(1호를 마지막으로 판 뒤)의 것만이다. */
+  trades_by_day: Record<string, TradeSide[]>;
   is_next: boolean;
 };
 
@@ -259,11 +260,14 @@ const FILL_COLORS = { buy: "var(--tblr-purple, #ae3ec9)", sell: "var(--tblr-oran
 const FILL_SOURCE_WORDS = { slack: "슬랙", manual: "수동" } as const;
 const BOUGHT_SOURCE_WORDS = { ...FILL_SOURCE_WORDS, mixed: "혼합" } as const;
 
-function DailyTradeBadges({ counts }: { counts: DailyTradeCount }) {
+function DailyTradeBadges({ sides }: { sides: TradeSide[] }) {
   return (
     <span style={{ display: "inline-flex", gap: 4, whiteSpace: "nowrap" }}>
-      {counts.buy > 0 ? <StatusBadge color={FILL_COLORS.buy}>매수 {counts.buy}</StatusBadge> : null}
-      {counts.sell > 0 ? <StatusBadge color={FILL_COLORS.sell}>매도 {counts.sell}</StatusBadge> : null}
+      {sides.map((side, idx) => (
+        <StatusBadge key={idx} color={FILL_COLORS[side]}>
+          {side === "buy" ? "매수" : "매도"}
+        </StatusBadge>
+      ))}
     </span>
   );
 }
@@ -712,7 +716,7 @@ function StrategySection({
     );
   }
   const { status, index } = view;
-  const tradeDays = [...new Set(view.rounds.flatMap((row) => Object.keys(row.trade_counts)))].sort();
+  const tradeDays = [...new Set(view.rounds.flatMap((row) => Object.keys(row.trades_by_day)))].sort();
   const columnCount = 7 + tradeDays.length;
   // 사다리 위치마다 한 행 — 회차가 없는 위치(건너뛴 칸)는 빈 행으로 둬 간격을 그대로 보여 준다.
   const lastPosition = Math.max(0, ...view.rounds.map((row) => row.position));
@@ -858,7 +862,7 @@ function StrategySection({
                 </td>
                 {tradeDays.map((day) => (
                   <td key={day} style={{ ...tdStyle, textAlign: "center" }}>
-                    {row.trade_counts[day] ? <DailyTradeBadges counts={row.trade_counts[day]} /> : null}
+                    {row.trades_by_day[day] ? <DailyTradeBadges sides={row.trades_by_day[day]} /> : null}
                   </td>
                 ))}
               </tr>
