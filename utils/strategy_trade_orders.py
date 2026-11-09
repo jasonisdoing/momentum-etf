@@ -7,9 +7,9 @@
 
 - 가격·수량은 클라이언트가 보내지 않는다. 서버가 증권사 1호가와 전략 운용 현황(`strategy_trade_service`)의
   회차당 수량을 읽는다 — 화면과 주문이 갈리지 않게 단일 소스를 지킨다.
-- 주문번호 대응: 주문 응답의 시장주문번호(`mkt_orr_no`)를 체결 조회의 통합주문번호(`itg_orr_no`)와 같은
-  번호로 본다(공식 예시가 같은 번호 공간을 쓴다). 조회 결과에서 못 찾으면 상태를 바꾸지 않고 그 사실을
-  메시지로 남긴다 — 속성으로 짐작해 맞추지 않는다.
+- 증권사는 계좌 설정의 연동으로 정한다(`services.broker_trade_service`, 나무·메리츠). 기록은 계좌 ID 로 묶는다.
+- 주문번호 대응: 주문 응답의 주문번호를 그날 주문내역의 주문번호와 같은 번호로 본다(나무는 시장주문번호·통합주문번호가
+  같은 번호 공간). 조회 결과에서 못 찾으면 상태를 바꾸지 않고 그 사실을 메시지로 남긴다 — 속성으로 짐작해 맞추지 않는다.
 """
 
 from __future__ import annotations
@@ -20,21 +20,19 @@ from zoneinfo import ZoneInfo
 
 from bson import ObjectId
 
-from services.broker_api_service import BrokerApiError
-from services.broker_order_service import (
-    OrderUncertainError,
+from services.broker_api_service import BrokerApiError, OrderUncertainError
+from services.broker_trade_service import (
     account_env,
     cancel_order,
     fetch_best_quote,
-    linked_account_doc,
     list_day_orders,
     place_limit_order,
 )
-from utils.account_settings_store import ACCOUNT_ENV_MOCK
+from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
 from utils.db_manager import get_db_connection
 from utils.market_session import REGULAR, market_session
 from utils.strategy_trade_ledger import is_buy
-from utils.strategy_trade_service import broker_account_no_for_account, load_views_where
+from utils.strategy_trade_service import load_views_where
 
 KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_orders"
@@ -66,7 +64,7 @@ def _orders():
         raise RuntimeError("MongoDB 연결에 실패했습니다.")
     collection = db[COLLECTION]
     if not _index_ready:
-        collection.create_index([("account_no", 1), ("created_at", -1)])
+        collection.create_index([("account_id", 1), ("created_at", -1)])
         _index_ready = True
     return collection
 
@@ -90,11 +88,11 @@ def _require_round_state(strategy: dict[str, Any], side: str, round_no: int) -> 
     return row
 
 
-def find_duplicate_order(account_no: str, strategy_id: str, side: str, round_no: int) -> dict[str, Any] | None:
+def find_duplicate_order(account_id: str, strategy_id: str, side: str, round_no: int) -> dict[str, Any] | None:
     """같은 회차·구분의 주문이 진행 중인 기록 — 체결된 주문은 막지 않는다(체결 뒤 같은 회차에 다시 닿으면 다시 주문한다)."""
     return _orders().find_one(
         {
-            "account_no": account_no,
+            "account_id": account_id,
             "strategy_id": strategy_id,
             "side": side,
             "round": round_no,
@@ -112,8 +110,8 @@ def active_order_keys(strategy_ids: list[str]) -> set[tuple[str, int, str]]:
     return {(record["strategy_id"], record["round"], record["side"]) for record in records}
 
 
-def _require_no_duplicate(account_no: str, strategy_id: str, side: str, round_no: int) -> None:
-    found = find_duplicate_order(account_no, strategy_id, side, round_no)
+def _require_no_duplicate(account_id: str, strategy_id: str, side: str, round_no: int) -> None:
+    found = find_duplicate_order(account_id, strategy_id, side, round_no)
     if found is not None:
         raise BrokerApiError(
             f"{round_no}호 {'매도' if side == 'sell' else '매수'} 주문이 이미 있습니다({found['status']})."
@@ -131,11 +129,11 @@ def _require_no_manual_order(strategy: dict[str, Any], side: str) -> None:
         )
 
 
-def _require_order_allowed(account_no: str, env: str, amount: int) -> None:
+def _require_order_allowed(account_id: str, env: str, amount: int) -> None:
     """운영 계좌의 주문 안전 장치 — 계좌의 API 주문 스위치, 정규장, 하루 주문 건수·금액 한도. 모의 계좌는 막지 않는다."""
     if env == ACCOUNT_ENV_MOCK:
         return
-    doc = linked_account_doc(account_no)
+    doc = next(doc for doc in load_account_docs() if doc["account_id"] == account_id)
     if not doc.get("api_order_enabled"):
         raise BrokerApiError(
             f"'{doc['account_id']}' 계좌는 API 주문이 꺼져 있습니다 — 계좌 설정에서 주문 허용을 켜세요."
@@ -149,7 +147,7 @@ def _require_order_allowed(account_no: str, env: str, amount: int) -> None:
     used = list(
         _orders().find(
             {
-                "account_no": account_no,
+                "account_id": account_id,
                 "created_at": {"$gte": today},
                 "status": {"$in": [*ACTIVE_STATUSES, "filled"]},
             }
@@ -165,7 +163,7 @@ def _require_order_allowed(account_no: str, env: str, amount: int) -> None:
 
 
 def resolve_order(
-    account_no: str, pool: str, strategy_id: str, side: str, round_no: int | None, *, fresh: bool
+    account_id: str, pool: str, strategy_id: str, side: str, round_no: int | None, *, fresh: bool
 ) -> dict[str, Any]:
     """주문 내용 — 가격은 **그 순간의 상대 1호가 지정가**(매수는 매도 1호가, 매도는 매수 1호가), 수량은 회차당 수량이다.
 
@@ -188,8 +186,7 @@ def resolve_order(
     strategy = next((row for row in views["strategies"] if row["strategy_id"] == strategy_id), None)
     if strategy is None:
         raise BrokerApiError(f"{pool} 종목풀에 '{strategy_id}' 전략이 없습니다.")
-    strategy_account_no = broker_account_no_for_account(strategy["account_id"])
-    if account_env(account_no) != ACCOUNT_ENV_MOCK and account_no != strategy_account_no:
+    if account_env(account_id) != ACCOUNT_ENV_MOCK and account_id != strategy["account_id"]:
         raise BrokerApiError(
             f"{strategy['label']} 전략의 운용 계좌는 '{strategy['account_id']}' 입니다 — 다른 운영 계좌로는 주문하지 않습니다."
         )
@@ -198,7 +195,7 @@ def resolve_order(
     if round_no is not None:
         row = _require_round_state(strategy, side, round_no)
         signal_price = row["sell_limit"] if side == "sell" else (None if row["close_entry"] else row["buy_limit"])
-    quote = fetch_best_quote(strategy_account_no, strategy["ticker"])
+    quote = fetch_best_quote(strategy["account_id"], strategy["ticker"])
     label, price, quantity = (
         ("매도 1호가", quote["ask"], quote["ask_quantity"])
         if side == "buy"
@@ -216,7 +213,7 @@ def resolve_order(
 
 
 def place_order(
-    account_no: str, pool: str, strategy_id: str, side: str, round_no: int | None, slack: dict[str, str] | None
+    account_id: str, pool: str, strategy_id: str, side: str, round_no: int | None, slack: dict[str, str] | None
 ) -> dict[str, Any]:
     """전략 종목을 상대 1호가 지정가로 계좌에 주문하고 기록한다.
 
@@ -226,16 +223,16 @@ def place_order(
     """
     if slack is None and side != "sell":
         raise BrokerApiError("모달에서 직접 내는 주문은 매도만 됩니다 — 매수는 슬랙 주문 메시지로 내세요.")
-    env = account_env(account_no)
+    env = account_env(account_id)
     # 주문 직전이라 저장된 원장이 아니라 지금 증권사 기준으로 다시 계산한다.
-    order = resolve_order(account_no, pool, strategy_id, side, round_no, fresh=True)
+    order = resolve_order(account_id, pool, strategy_id, side, round_no, fresh=True)
     if round_no is not None:
-        _require_no_duplicate(account_no, strategy_id, side, round_no)
-    _require_order_allowed(account_no, env, order["price"] * order["quantity"])
+        _require_no_duplicate(account_id, strategy_id, side, round_no)
+    _require_order_allowed(account_id, env, order["price"] * order["quantity"])
     now = _now()
     doc = {
         "env": env,
-        "account_no": account_no,
+        "account_id": account_id,
         "pool": pool,
         "strategy_id": strategy_id,
         "side": side,
@@ -254,7 +251,7 @@ def place_order(
     orders = _orders()
     inserted = orders.insert_one(doc)
     try:
-        placed = place_limit_order(account_no, side, order["ticker"], order["quantity"], order["price"])
+        placed = place_limit_order(account_id, side, order["ticker"], order["quantity"], order["price"])
     except OrderUncertainError as exc:
         # 주문이 들어갔는지 모른다 — 실패로 단정하지 않고 남겨 둔다(`refresh` 가 정리).
         orders.update_one(
@@ -283,7 +280,7 @@ def place_order(
 
 def _current_order_no(record: dict[str, Any]) -> str:
     """취소 요청을 보낼 주문번호 — 증권사 앱에서 정정했으면 정정으로 새로 생긴 번호다."""
-    for row in list_day_orders(record["account_no"], _order_date(record)):
+    for row in list_day_orders(record["account_id"], _order_date(record)):
         if row["order_no"] == record["order_no"]:
             return row["current_order_no"]
     raise BrokerApiError("증권사 주문내역에서 이 주문번호를 찾지 못했습니다.")
@@ -297,12 +294,12 @@ def cancel_record(order_id: str) -> dict[str, Any]:
         raise BrokerApiError("주문 기록을 찾을 수 없습니다.")
     if record["status"] not in ("pending", "partial") or not record.get("order_no"):
         raise BrokerApiError("대기중이거나 부분체결인 주문만 취소할 수 있습니다.")
-    cancelled = cancel_order(record["account_no"], _current_order_no(record), record["ticker"])
+    cancelled = cancel_order(record["account_id"], _current_order_no(record), record["ticker"])
     orders.update_one(
         {"_id": record["_id"]},
         {"$set": {"message": cancelled["message"], "updated_at": _now().isoformat()}},
     )
-    refresh_account_orders(record["account_no"])
+    refresh_account_orders(record["account_id"])
     return serialize_order(orders.find_one({"_id": record["_id"]}))
 
 
@@ -322,15 +319,15 @@ def _broker_status(record: dict[str, Any], broker_status: str) -> str:
     return broker_status
 
 
-def refresh_account_orders(account_no: str) -> None:
+def refresh_account_orders(account_id: str) -> None:
     """진행 중인 기록의 상태를 증권사 체결 조회로 갱신한다 — 조회는 주문일자마다 한 번이다."""
     orders = _orders()
-    active = list(orders.find({"account_no": account_no, "status": {"$in": list(ACTIVE_STATUSES)}}))
+    active = list(orders.find({"account_id": account_id, "status": {"$in": list(ACTIVE_STATUSES)}}))
     if not active:
         return
     broker_rows: dict[tuple[str, str], dict[str, Any]] = {}
     for date in sorted({_order_date(record) for record in active}):
-        for row in list_day_orders(account_no, date):
+        for row in list_day_orders(account_id, date):
             broker_rows[(date, row["order_no"])] = row
 
     now = _now()
@@ -379,9 +376,9 @@ def serialize_order(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def refreshed_order(account_no: str, order_id: str) -> dict[str, Any]:
+def refreshed_order(account_id: str, order_id: str) -> dict[str, Any]:
     """증권사 체결 조회로 이 계좌의 진행 중 기록을 갱신한 뒤 주문 한 건의 현재 상태를 돌려준다."""
-    refresh_account_orders(account_no)
+    refresh_account_orders(account_id)
     record = _orders().find_one({"_id": ObjectId(order_id)})
     if record is None:
         raise BrokerApiError("주문 기록을 찾을 수 없습니다.")
@@ -390,9 +387,9 @@ def refreshed_order(account_no: str, order_id: str) -> dict[str, Any]:
 
 def refresh_slack_order_accounts() -> int:
     """진행 중인 슬랙 주문이 있는 계좌의 상태를 증권사 체결 조회로 갱신하고, 갱신한 계좌 수를 돌려준다."""
-    accounts = _orders().distinct("account_no", {"slack": {"$ne": None}, "status": {"$in": list(ACTIVE_STATUSES)}})
-    for account_no in accounts:
-        refresh_account_orders(account_no)
+    accounts = _orders().distinct("account_id", {"slack": {"$ne": None}, "status": {"$in": list(ACTIVE_STATUSES)}})
+    for account_id in accounts:
+        refresh_account_orders(account_id)
     return len(accounts)
 
 
@@ -497,16 +494,16 @@ def mark_slack_close_warned(order_id: Any) -> None:
     _orders().update_one({"_id": order_id}, {"$set": {"slack_close_warned": True}})
 
 
-def list_orders(account_no: str) -> list[dict[str, Any]]:
+def list_orders(account_id: str) -> list[dict[str, Any]]:
     """증권사 상태를 반영한 주문 기록 — 오늘 낸 주문과 아직 끝나지 않은 주문, 최신순."""
-    account_env(account_no)
-    refresh_account_orders(account_no)
+    account_env(account_id)
+    refresh_account_orders(account_id)
     today = _now().strftime("%Y-%m-%d")
     cursor = (
         _orders()
         .find(
             {
-                "account_no": account_no,
+                "account_id": account_id,
                 "$or": [{"created_at": {"$gte": today}}, {"status": {"$in": list(ACTIVE_STATUSES)}}],
             }
         )
@@ -515,19 +512,19 @@ def list_orders(account_no: str) -> list[dict[str, Any]]:
     return [serialize_order(record) for record in cursor]
 
 
-def broker_orders_today(account_no: str) -> list[dict[str, Any]]:
+def broker_orders_today(account_id: str) -> list[dict[str, Any]]:
     """증권사에 오늘 들어간 주문 전체 — 우리 기록과 대조하는 용도(우리가 안 보낸 주문도 보인다)."""
-    return list_day_orders(account_no, _now().strftime("%Y%m%d"))
+    return list_day_orders(account_id, _now().strftime("%Y%m%d"))
 
 
-def order_sources(account_no: str, today_rows: list[dict[str, Any]]) -> dict[tuple[str, str], bool]:
+def order_sources(account_id: str, today_rows: list[dict[str, Any]]) -> dict[tuple[str, str], bool]:
     """우리가 증권사에 낸 주문의 (날짜 YYYYMMDD, 주문번호) → 슬랙 신호 주문 여부 — 회차 원장이 체결의 출처를 가릴 때 쓴다.
 
     증권사가 주문을 받은 뒤 우리 기록에 주문번호가 적히기 전(`submitting`)에 원장이 계산되면 우리 주문이 수동으로 잡힌다 —
     그 틈에는 오늘 증권사 주문(``today_rows``) 중 종목·구분·수량·가격이 같은 것을 그 기록의 주문으로 본다.
     """
     records = _orders().find(
-        {"account_no": account_no, "order_no": {"$ne": None}}, {"order_no": 1, "round": 1, "created_at": 1}
+        {"account_id": account_id, "order_no": {"$ne": None}}, {"order_no": 1, "round": 1, "created_at": 1}
     )
     sources = {
         (record["created_at"][:10].replace("-", ""), str(int(record["order_no"]))): record["round"] is not None
@@ -537,7 +534,7 @@ def order_sources(account_no: str, today_rows: list[dict[str, Any]]) -> dict[tup
     today_key = f"{today:%Y%m%d}"
     submitting = _orders().find(
         {
-            "account_no": account_no,
+            "account_id": account_id,
             "order_no": None,
             "status": "submitting",
             "created_at": {"$gte": f"{today:%Y-%m-%d}"},

@@ -11,7 +11,6 @@ import type { FailedStrategy, StrategyView } from "../strategy-trade/StrategyTra
 
 /** 증권사 서버 주소 — 서버가 계좌 구분(운영·모의)으로 정한다. 화면은 안내 문구로만 쓴다. */
 const MOCK_DOMAIN = "moapi.nhplug.com:8443";
-const LIVE_DOMAIN = "api.nhplug.com:8443";
 
 type Side = "buy" | "sell";
 
@@ -105,7 +104,7 @@ export function ApiOrderModal({
   isLive,
   accountId,
   accountName,
-  accountNo,
+  accountLabel,
   onClose,
 }: {
   /** 운영 계좌 — 실제 주문이 나간다. 모의 계좌는 모의투자 서버로만 간다. */
@@ -113,7 +112,8 @@ export function ApiOrderModal({
   /** 운영 계좌는 이 계좌를 운용 계좌로 고른 전략만 주문할 수 있다(서버도 같은 규칙으로 막는다). */
   accountId: string;
   accountName: string;
-  accountNo: string;
+  /** 증권사와 표시용 계좌번호 — 예: `MERITZ · 3082****01`. */
+  accountLabel: string;
   onClose: () => void;
 }) {
   const toast = useToast();
@@ -174,7 +174,7 @@ export function ApiOrderModal({
     [toast],
   );
 
-  const query = `account_no=${encodeURIComponent(accountNo)}`;
+  const query = `account_id=${encodeURIComponent(accountId)}`;
   const loadBalance = () =>
     run("balance", async () => {
       setBalance(await requestJson<MockBalance>(`/api/broker-api/mock/balance?${query}`));
@@ -190,26 +190,20 @@ export function ApiOrderModal({
 
   // 계좌를 고르면 잔고와 주문 기록을 함께 읽는다.
   useEffect(() => {
-    if (!accountNo) {
-      setBalance(null);
-      setOrders([]);
-      setBrokerOrders(null);
-      return;
-    }
     // 모의투자 서버는 호출 간격을 두고 직렬로 받으므로 순서대로 읽는다.
     void (async () => {
       await loadBalance();
       await loadOrders();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountNo]);
+  }, [accountId]);
 
   const placeOrder = () =>
     run("order", async () => {
       const data = await requestJson<{ order: OrderRecord }>("/api/broker-api/mock/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_no: accountNo, pool: strategy?.pool, strategy_id: strategyId, side }),
+        body: JSON.stringify({ account_id: accountId, pool: strategy?.pool, strategy_id: strategyId, side }),
       });
       toast.success(`${data.order.strategy_label} ${side === "buy" ? "매수" : "매도"} 주문을 접수했습니다.`);
       setOrders((await requestJson<{ orders: OrderRecord[] }>(`/api/broker-api/mock/orders?${query}`)).orders);
@@ -222,7 +216,7 @@ export function ApiOrderModal({
       await requestJson("/api/broker-api/mock/slack-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_no: accountNo, pool: strategy?.pool, strategy_id: strategyId, side }),
+        body: JSON.stringify({ account_id: accountId, pool: strategy?.pool, strategy_id: strategyId, side }),
       });
       toast.success(`${strategy?.label ?? ""} ${side === "buy" ? "매수" : "매도"} 주문 메시지를 슬랙으로 보냈습니다.`);
     });
@@ -239,7 +233,7 @@ export function ApiOrderModal({
       setBalance(await requestJson<MockBalance>(`/api/broker-api/mock/balance?${query}`));
     });
 
-  const canOrder = Boolean(accountNo && strategy && quantity && busy === null && !loadingStrategies);
+  const canOrder = Boolean(strategy && quantity && busy === null && !loadingStrategies);
 
   return (
     <AppModal
@@ -249,7 +243,7 @@ export function ApiOrderModal({
       badge={isLive ? "운영 · 실제 주문" : "모의"}
       subtitle={
         isLive
-          ? `운영 서버(${LIVE_DOMAIN})로 실제 주문이 나갑니다. 체결되면 실제 돈이 오갑니다.`
+          ? "증권사 운영 서버로 실제 주문이 나갑니다. 체결되면 실제 돈이 오갑니다."
           : `모의투자 서버(${MOCK_DOMAIN})로만 보냅니다.`
       }
       onClose={onClose}
@@ -265,15 +259,13 @@ export function ApiOrderModal({
       <div style={fieldStyle}>
         <span style={labelStyle}>{isLive ? "운영 계좌" : "모의 계좌"}</span>
         <strong>{accountName}</strong>
-        <span style={mutedStyle}>
-          {accountNo.slice(0, 4)}***{accountNo.slice(-2)}
-        </span>
+        <span style={mutedStyle}>{accountLabel}</span>
       </div>
 
       <div style={{ ...sectionStyle, marginTop: 4 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
           <span style={{ fontWeight: 700 }}>잔고</span>
-          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={!accountNo || busy !== null} onClick={() => void loadBalance()}>
+          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={busy !== null} onClick={() => void loadBalance()}>
             {busy === "balance" ? "불러오는 중…" : "잔고 새로고침"}
           </button>
           <span style={{ marginLeft: "auto", ...mutedStyle }}>
@@ -390,7 +382,7 @@ export function ApiOrderModal({
       <div style={sectionStyle}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
           <span style={{ fontWeight: 700 }}>주문 기록</span>
-          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={!accountNo || busy !== null} onClick={() => void loadOrders()}>
+          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={busy !== null} onClick={() => void loadOrders()}>
             {busy === "orders" ? "불러오는 중…" : "상태 새로고침"}
           </button>
           <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
@@ -454,7 +446,7 @@ export function ApiOrderModal({
       <details style={sectionStyle}>
         <summary style={{ fontWeight: 700, cursor: "pointer" }}>증권사 주문내역 (오늘)</summary>
         <div style={{ marginTop: 10 }}>
-          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={!accountNo || busy !== null} onClick={() => void loadBrokerOrders()}>
+          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={busy !== null} onClick={() => void loadBrokerOrders()}>
             {busy === "broker" ? "불러오는 중…" : "증권사 내역 불러오기"}
           </button>
           <span style={{ ...mutedStyle, marginLeft: 10 }}>우리 기록과 대조합니다 — 보내지 않은 주문이나 상태가 다른 주문을 찾는 용도입니다.</span>

@@ -24,6 +24,7 @@ from services.broker_api_service import (
     BALANCE_PATH,
     MOCK_ACCOUNT_TYPE,
     BrokerApiError,
+    OrderUncertainError,
     account_types,
     balance_request,
     is_business_success,
@@ -63,10 +64,6 @@ _REQUEST_TIMEOUT_SECONDS = 10
 _call_lock = threading.Lock()
 _last_call_at = 0.0
 _ACCOUNT_TYPE_CACHE = TtlCache(300, name="broker-account-types")
-
-
-class OrderUncertainError(BrokerApiError):
-    """요청이 서버에 닿았는지 알 수 없는 네트워크 오류 — 주문이 들어갔을 수도 있어 실패로 단정하면 안 된다."""
 
 
 def linked_account_doc(account_no: str) -> dict[str, Any]:
@@ -319,59 +316,8 @@ def _day_order_row(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _root_order_no(row: dict[str, Any], by_no: dict[str, dict[str, Any]]) -> str | None:
-    """정정이 이어진 주문의 맨 처음 원주문번호 — 원주문이 목록에 없으면 None."""
-    current = row
-    while current["origin_order_no"] != "0":
-        current = by_no.get(current["origin_order_no"])
-        if current is None:
-            return None
-    return current["order_no"]
-
-
-def _merge_amendments(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """정정 요청 행의 결과(가격·체결·상태)를 원주문 행에 합친다.
-
-    증권사 앱에서 가격을 정정하면 새 주문번호의 행이 생겨 거기서 체결되고, 원주문 행은 취소수량도 체결도 없이
-    미체결로 남는다. 원주문에 취소수량이 있으면 취소 요청이 이미 반영된 것이라 합치지 않는다.
-    체결 수량·평균 체결가는 원주문과 정정 행 전체의 합계다 — 원주문이 정정 전에 일부 체결했을 수 있다.
-    합친 행의 `order_no` 는 원주문번호 그대로이고, 정정·취소 요청을 보낼 번호는 `current_order_no`(가장 늦은 행)다.
-    """
-    by_no = {row["order_no"]: row for row in rows}
-    chains: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        root = _root_order_no(row, by_no)
-        if root is not None and root != row["order_no"]:
-            chains.setdefault(root, []).append(row)
-    merged: list[dict[str, Any]] = []
-    for row in rows:
-        if row["origin_order_no"] != "0":
-            continue
-        chain = chains.get(row["order_no"])
-        if chain is None or row["canceled_quantity"] > 0:
-            merged.append({**row, "current_order_no": row["order_no"]})
-            continue
-        tip = max(chain, key=lambda item: int(item["order_no"]))
-        # 정정한 주문을 취소하면 취소수량은 정정 행에 남는다 — 그 결과를 우선한다.
-        result = next((item for item in chain if item["canceled_quantity"] > 0), tip)
-        members = [row, *chain]
-        filled = sum(item["filled_quantity"] for item in members)
-        cost = sum(item["filled_quantity"] * item["average_fill_price"] for item in members)
-        merged.append(
-            {
-                **result,
-                "order_no": row["order_no"],
-                "origin_order_no": "0",
-                "current_order_no": tip["order_no"],
-                "filled_quantity": filled,
-                "average_fill_price": cost / filled if filled else 0.0,
-            }
-        )
-    return merged
-
-
-def list_day_orders(account_no: str, yyyymmdd: str) -> list[dict[str, Any]]:
-    """그날의 주문 목록(체결 조회) — 원주문만이고, 정정은 최신 정정 행의 결과가 원주문번호로 합쳐져 나온다."""
+def day_order_rows(account_no: str, yyyymmdd: str) -> list[dict[str, Any]]:
+    """그날의 주문 행(체결 조회) — 표준 주문 행이고 정정 행은 합치지 않았다(`broker_trade_service.merge_amendments`)."""
     data = _post_paged(
         _base_url(account_no),
         DAY_ORDERS_PATH,
@@ -379,4 +325,4 @@ def list_day_orders(account_no: str, yyyymmdd: str) -> list[dict[str, Any]]:
         "Output_0",
         no_data_code=NO_DATA_CODE,
     )
-    return _merge_amendments([_day_order_row(item) for item in data.get("Output_0") or []])
+    return [_day_order_row(item) for item in data.get("Output_0") or []]

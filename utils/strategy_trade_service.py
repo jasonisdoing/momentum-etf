@@ -277,19 +277,6 @@ def sleeve_of(pool: str, account_id: str) -> dict[str, Any]:
     return found
 
 
-def broker_account_no_for_account(account_id: str) -> str:
-    """사고팔기 운용 계좌에 연동된 증권사 계좌번호 — 연동이 없으면 에러."""
-    from utils.account_settings_store import load_live_account_docs
-
-    doc = next((doc for doc in load_live_account_docs() if doc["account_id"] == account_id), None)
-    if doc is None:
-        raise ValueError(f"'{account_id}' 계좌가 없거나 운영 계좌가 아닙니다.")
-    account_no = str((doc.get("broker_api") or {}).get("account_no") or "").strip()
-    if not account_no:
-        raise ValueError(f"'{account_id}' 계좌에 사고팔기 주문용 증권사 API(나무증권) 연동이 저장돼 있지 않습니다.")
-    return account_no
-
-
 def strategy_budget(sleeve: dict[str, Any], strategy_count: int) -> float:
     """전략 하나의 매수 한도(원) — 슬리브 한도를 전략 수로 균등 분할한다."""
     if strategy_count <= 0:
@@ -638,18 +625,20 @@ def refresh_all_ledgers() -> dict[str, str]:
 
     실패한 것은 (``계좌ID:티커`` → 이유)다. 계좌 하나의 연동 오류가 다른 계좌를 막지 않는다.
     """
+    from services.broker_api_service import BrokerApiError
+
     strategies = load_settings()["strategies"]
     failed: dict[str, str] = {}
     for account_id, tickers in _tickers_by_account(strategies).items():
         try:
-            account_no = broker_account_no_for_account(account_id)
-        except ValueError as error:
+            ledgers = refresh_ledgers(account_id, tickers)
+        except BrokerApiError as error:
             failed.update({f"{account_id}:{ticker}": str(error) for ticker in tickers})
             continue
-        for ticker, ledger in refresh_ledgers(account_no, tickers).items():
+        for ticker, ledger in ledgers.items():
             if isinstance(ledger, LedgerError):
                 failed[f"{account_id}:{ticker}"] = str(ledger)
-        forget_ledgers(account_no, tickers)
+        forget_ledgers(account_id, tickers)
     return failed
 
 
@@ -674,16 +663,21 @@ def _failed_view(strategy_id: str, entry: dict[str, Any], error: LedgerError | s
 def _account_ledgers(
     tickers_by_account: dict[str, list[str]], *, fresh: bool
 ) -> dict[str, dict[str, Ledger | LedgerError] | str]:
-    """계좌별 회차 원장 — 증권사 연동이 없는 계좌는 원장 대신 이유(문자열)다(그 계좌 전략만 실패로 본다)."""
+    """계좌별 회차 원장 — 증권사 연동이 없거나 조회에 실패한 계좌는 원장 대신 이유(문자열)다(그 계좌 전략만 실패로 본다).
+
+    저장본 읽기(``fresh`` 거짓)는 증권사를 부르지 않지만, 연동이 없는 계좌는 같은 이유로 실패로 보여 준다.
+    """
+    from services.broker_api_service import BrokerApiError
+    from services.broker_trade_service import require_trade_account
+
     load = refresh_ledgers if fresh else read_ledgers
     ledgers: dict[str, dict[str, Ledger | LedgerError] | str] = {}
     for account_id, tickers in tickers_by_account.items():
         try:
-            account_no = broker_account_no_for_account(account_id)
-        except ValueError as error:
+            require_trade_account(account_id)
+            ledgers[account_id] = load(account_id, tickers)
+        except BrokerApiError as error:
             ledgers[account_id] = str(error)
-            continue
-        ledgers[account_id] = load(account_no, tickers)
     return ledgers
 
 

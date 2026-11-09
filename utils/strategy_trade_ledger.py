@@ -22,7 +22,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from services.broker_api_service import BrokerApiError
-from services.broker_order_service import fetch_order_balance, list_day_orders
+from services.broker_trade_service import fetch_order_balance, list_day_orders
 from utils.db_manager import get_db_connection
 
 KST = ZoneInfo("Asia/Seoul")
@@ -171,22 +171,22 @@ def _filled(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{field: row[field] for field in _FILL_FIELDS} for row in rows if row["filled_quantity"] > 0]
 
 
-def _past_fills(account_no: str, day: date) -> list[dict[str, Any]]:
+def _past_fills(account_id: str, day: date) -> list[dict[str, Any]]:
     """지난 날짜의 체결 행 — 한 번 받으면 DB 에 두고 다시 부르지 않는다(주말은 주문이 없다)."""
     if day.weekday() >= 5:
         return []
-    key = f"{account_no}:{day:%Y%m%d}"
+    key = f"{account_id}:{day:%Y%m%d}"
     cache = _cache()
     stored = cache.find_one({"_id": key})
     if stored is not None:
         return stored["rows"]
-    rows = _filled(list_day_orders(account_no, f"{day:%Y%m%d}"))
+    rows = _filled(list_day_orders(account_id, f"{day:%Y%m%d}"))
     cache.replace_one({"_id": key}, {"_id": key, "rows": rows}, upsert=True)
     return rows
 
 
 def _window_trades(
-    account_no: str,
+    account_id: str,
     today: date,
     today_fills: list[dict[str, Any]],
     held: dict[str, int],
@@ -200,7 +200,7 @@ def _window_trades(
         if not unresolved:
             break
         day = today - timedelta(days=offset)
-        rows = today_fills if offset == 0 else _past_fills(account_no, day)
+        rows = today_fills if offset == 0 else _past_fills(account_id, day)
         for ticker in sorted(unresolved):
             for row in (item for item in rows if item["ticker"] == ticker):
                 net[ticker] += _signed(row)
@@ -257,20 +257,20 @@ def _manual_orders(
     return orders
 
 
-def compute_ledgers(account_no: str, tickers: list[str]) -> dict[str, Ledger | LedgerError]:
-    """증권사 계좌의 종목들(`tickers`)마다 회차 원장을 만든다 — 체결 조회는 날짜당 한 번이라 종목 수와 무관하다.
+def compute_ledgers(account_id: str, tickers: list[str]) -> dict[str, Ledger | LedgerError]:
+    """계좌의 종목들(`tickers`)마다 회차 원장을 만든다 — 체결 조회는 날짜당 한 번이라 종목 수와 무관하다.
 
     체결 이력이 잔고와 맞지 않아 만들 수 없는 종목은 원장 대신 `LedgerError` 를 값으로 돌려준다(다른 종목은 그대로 쓴다).
     """
     from utils.strategy_trade_orders import order_sources
 
     computed_at = datetime.now(KST).isoformat()
-    balance = {row["ticker"]: int(row["quantity"]) for row in fetch_order_balance(account_no)["holdings"]}
+    balance = {row["ticker"]: int(row["quantity"]) for row in fetch_order_balance(account_id)["holdings"]}
     today = datetime.now(KST).date()
-    today_rows = list_day_orders(account_no, f"{today:%Y%m%d}") if today.weekday() < 5 else []
-    sources = order_sources(account_no, today_rows)
+    today_rows = list_day_orders(account_id, f"{today:%Y%m%d}") if today.weekday() < 5 else []
+    sources = order_sources(account_id, today_rows)
     held = {ticker: balance.get(ticker, 0) for ticker in tickers}
-    trades, unresolved = _window_trades(account_no, today, _filled(today_rows), held, sources)
+    trades, unresolved = _window_trades(account_id, today, _filled(today_rows), held, sources)
     manual = _manual_orders(today_rows, tickers, sources, today)
     ledgers: dict[str, Ledger | LedgerError] = {}
     for ticker in tickers:
@@ -295,8 +295,8 @@ def _snapshots():
     return db[SNAPSHOT_COLLECTION]
 
 
-def _to_doc(account_no: str, ticker: str, ledger: Ledger | LedgerError) -> dict[str, Any]:
-    base = {"_id": f"{account_no}:{ticker}", "account_no": account_no, "ticker": ticker}
+def _to_doc(account_id: str, ticker: str, ledger: Ledger | LedgerError) -> dict[str, Any]:
+    base = {"_id": f"{account_id}:{ticker}", "account_id": account_id, "ticker": ticker}
     if isinstance(ledger, LedgerError):
         return {**base, "error": str(ledger)}
     return {
@@ -322,24 +322,24 @@ def _from_doc(doc: dict[str, Any]) -> Ledger | LedgerError:
     )
 
 
-def refresh_ledgers(account_no: str, tickers: list[str]) -> dict[str, Ledger | LedgerError]:
+def refresh_ledgers(account_id: str, tickers: list[str]) -> dict[str, Ledger | LedgerError]:
     """원장을 새로 계산해 저장한다."""
-    ledgers = compute_ledgers(account_no, tickers)
+    ledgers = compute_ledgers(account_id, tickers)
     snapshots = _snapshots()
     for ticker, ledger in ledgers.items():
-        doc = _to_doc(account_no, ticker, ledger)
+        doc = _to_doc(account_id, ticker, ledger)
         snapshots.replace_one({"_id": doc["_id"]}, doc, upsert=True)
     return ledgers
 
 
-def forget_ledgers(account_no: str, keep: list[str]) -> None:
+def forget_ledgers(account_id: str, keep: list[str]) -> None:
     """더 이상 전략이 없는 종목의 저장된 원장을 지운다."""
-    _snapshots().delete_many({"account_no": account_no, "ticker": {"$nin": keep}})
+    _snapshots().delete_many({"account_id": account_id, "ticker": {"$nin": keep}})
 
 
-def read_ledgers(account_no: str, tickers: list[str]) -> dict[str, Ledger | LedgerError]:
+def read_ledgers(account_id: str, tickers: list[str]) -> dict[str, Ledger | LedgerError]:
     """배치가 저장해 둔 원장을 읽는다 — 아직 계산된 적이 없는 종목은 `LedgerError` 로 알린다."""
-    stored = {doc["ticker"]: doc for doc in _snapshots().find({"account_no": account_no, "ticker": {"$in": tickers}})}
+    stored = {doc["ticker"]: doc for doc in _snapshots().find({"account_id": account_id, "ticker": {"$in": tickers}})}
     return {
         ticker: _from_doc(stored[ticker])
         if ticker in stored

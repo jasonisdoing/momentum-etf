@@ -23,7 +23,7 @@ from slack_sdk.errors import SlackApiError
 from slack_sdk.signature import SignatureVerifier
 
 from services.broker_api_service import BrokerApiError
-from services.broker_order_service import account_env
+from services.broker_trade_service import account_env
 from utils.account_settings_store import ACCOUNT_ENV_MOCK
 from utils.settings_loader import get_slack_channel
 from utils.strategy_trade_orders import (
@@ -44,7 +44,6 @@ from utils.strategy_trade_orders import (
     resolve_order,
     serialize_order,
 )
-from utils.strategy_trade_service import broker_account_no_for_account
 from utils.strategy_trade_threads import send_thread_message
 
 logger = logging.getLogger(__name__)
@@ -152,15 +151,15 @@ def _update_message(target: dict[str, Any], blocks: list[dict[str, Any]]) -> Non
 
 
 def send_order_message(
-    account_no: str, pool: str, strategy_id: str, side: str, round_no: int | None, thread_ts: str | None
+    account_id: str, pool: str, strategy_id: str, side: str, round_no: int | None, thread_ts: str | None
 ) -> None:
     """주문 메시지를 슬랙으로 보낸다(thread_ts 가 있으면 그 스레드에) — 주문은 슬랙에서 버튼과 모달 확인을 거쳐야 나간다."""
-    env = account_env(account_no)
-    order = resolve_order(account_no, pool, strategy_id, side, round_no, fresh=False)
+    env = account_env(account_id)
+    order = resolve_order(account_id, pool, strategy_id, side, round_no, fresh=False)
     request = {
         "env": env,
         "round": round_no,
-        "account_no": account_no,
+        "account_id": account_id,
         "pool": pool,
         "strategy_id": strategy_id,
         "side": side,
@@ -254,7 +253,7 @@ def open_confirm_modal(payload: dict[str, Any]) -> None:
     """버튼을 누른 사용자에게 확인 모달을 연다 — trigger_id 는 3초 안에 써야 한다."""
     action = payload["actions"][0]
     value = json.loads(action["value"])
-    request = {**value["request"], "env": account_env(value["request"]["account_no"])}
+    request = {**value["request"], "env": account_env(value["request"]["account_id"])}
     message = payload["message"]
     target = {
         "request": request,
@@ -267,7 +266,7 @@ def open_confirm_modal(payload: dict[str, Any]) -> None:
         try:
             # 슬랙 trigger_id 는 3초 안에 써야 해서 저장된 원장으로 연다 — 실제 주문 직전 검증은 `place_order` 가 새로 계산한다.
             order = resolve_order(
-                request["account_no"],
+                request["account_id"],
                 request["pool"],
                 request["strategy_id"],
                 request["side"],
@@ -339,7 +338,7 @@ def _place(target: dict[str, Any]) -> None:
     _update_message(target, _note_blocks(request, "⏳ 주문 처리 중…"))
     try:
         order = place_order(
-            request["account_no"],
+            request["account_id"],
             request["pool"],
             request["strategy_id"],
             request["side"],
@@ -376,7 +375,7 @@ def _cancel(target: dict[str, Any]) -> None:
         logger.exception("슬랙 모의 주문 취소 실패")
         send_thread_message(f"❌ {side} 주문 취소 실패: {exc}", thread_ts=target["thread_ts"])
         # 그 사이 주문이 끝났을 수 있다 — 끝났으면 결과 알림은 배치가 하고, 아니면 취소 버튼을 되살린다.
-        order = refreshed_order(request["account_no"], target["order_id"])
+        order = refreshed_order(request["account_id"], target["order_id"])
         if order["status"] in FINISHED_STATUSES:
             _update_message(target, _note_blocks(request, "⏳ 결과 확인 중…"))
         else:
@@ -403,7 +402,7 @@ def _request_of(record: dict[str, Any]) -> dict[str, Any]:
     return {
         "env": record["env"],
         "round": record["round"],
-        "account_no": record["account_no"],
+        "account_id": record["account_id"],
         "pool": record["pool"],
         "strategy_id": record["strategy_id"],
         "side": record["side"],
@@ -480,17 +479,17 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
     이미 주문이 진행 중인 회차는 건너뛴다(매시간 재알림에서 주문이 아직 없는 회차에만 다시 띄우려는 것).
     주문은 슬랙의 버튼과 모달 확인을 거쳐야 나간다.
     """
-    account_no = broker_account_no_for_account(strategy_view["account_id"])
+    account_id = strategy_view["account_id"]
     pending = [
         trigger
         for trigger in triggers
-        if find_duplicate_order(account_no, trigger["strategy_id"], trigger["action"], trigger["round"]) is None
+        if find_duplicate_order(account_id, trigger["strategy_id"], trigger["action"], trigger["round"]) is None
     ]
     sent = 0
     try:
         for trigger in pending:
             send_order_message(
-                account_no,
+                account_id,
                 strategy_view["pool"],
                 trigger["strategy_id"],
                 trigger["action"],

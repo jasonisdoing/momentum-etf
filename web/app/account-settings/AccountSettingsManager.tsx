@@ -12,6 +12,7 @@ import { ensureAsxPrefix } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { ApiOrderModal } from "./ApiOrderModal";
+import { maskedBrokerAccount } from "./broker-label";
 
 type Benchmark = { ticker?: string; name?: string };
 type MarketIndexOption = { ticker: string; name: string };
@@ -508,7 +509,7 @@ function AccountDetailModal({
           </select>
         ) : draft.brokerAccountNo ? (
           <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)" }}>
-            저장된 계좌: {draft.brokerAccountNo.slice(0, 4)}***{draft.brokerAccountNo.slice(-2)}
+            저장된 계좌: {maskedBrokerAccount(draft.brokerAccountNo, null)}
           </span>
         ) : null}
         {savedBrokerProvider && draft.env !== ENV_MOCK ? (
@@ -766,8 +767,8 @@ export function AccountSettingsManager() {
         return {
           ...draft,
           __dirty: isDirty(draft, account),
-          // 저장된 증권사 연동 — API 주문은 저장된 계좌번호로 연다.
-          __brokerLinked: Boolean(account.broker_api?.account_no),
+          // 저장된 증권사 연동(나무·메리츠) — API 주문은 저장된 연동으로 연다.
+          __brokerLinked: Boolean(account.broker_api?.provider),
           __updatedAt: account.updated_at, __saveMethod: account.save_method };
       }),
     [drafts, rows],
@@ -993,11 +994,8 @@ export function AccountSettingsManager() {
       valueFormatter: (params) => {
         const row = params.data;
         if (!row?.brokerProvider) return "없음";
-        // 계좌별 키 커넥터(메리츠)는 계좌번호 대신 수기 입력한 마스킹 번호를 그대로 보여 준다.
-        if (row.brokerAccountMask) return `${row.brokerProvider} · ${row.brokerAccountMask}`;
-        return row.brokerAccountNo
-          ? `${row.brokerProvider} · ${row.brokerAccountNo.slice(0, 4)}***${row.brokerAccountNo.slice(-2)}`
-          : row.brokerProvider;
+        const masked = maskedBrokerAccount(row.brokerAccountNo, row.brokerAccountMask);
+        return masked ? `${row.brokerProvider} · ${masked}` : row.brokerProvider;
       },
     },
     {
@@ -1228,7 +1226,10 @@ export function AccountSettingsManager() {
           isLive={accounts.find((account) => account.account_id === mockOrderId)?.env === ENV_LIVE}
           accountId={mockOrderId}
           accountName={accounts.find((account) => account.account_id === mockOrderId)?.name ?? mockOrderId}
-          accountNo={accounts.find((account) => account.account_id === mockOrderId)?.broker_api?.account_no ?? ""}
+          accountLabel={(() => {
+            const broker = accounts.find((account) => account.account_id === mockOrderId)?.broker_api;
+            return `${broker?.provider ?? ""} · ${maskedBrokerAccount(broker?.account_no, broker?.account_mask)}`;
+          })()}
           onClose={() => setMockOrderId(null)}
         />
       ) : null}

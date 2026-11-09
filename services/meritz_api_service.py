@@ -1,9 +1,10 @@
-"""메리츠증권 Open API — 계좌 잔고 조회(읽기 전용, 국내·미국 계좌).
+"""메리츠증권 Open API — 계좌 잔고 조회(국내·미국 계좌)와 국내주식 호가·지정가 주문·취소·주문내역(사고팔기).
 
 키는 증권사 계좌 하나에 묶여 있다. 그래서 키 이름이 우리 계좌 ID 를 따르고(`{계좌ID}_API_KEY/SECRET`,
 `broker_api_service.require_env_keys`), 요청에 계좌번호를 넣지 않는다. 모의투자 서버는 없다(운영만).
 
-- 오류는 종류와 무관하게 HTTP 500 으로 온다 — 성공·실패는 본문 `rsp_cd` 로만 판정한다.
+- 오류는 종류와 무관하게 HTTP 500 으로 온다 — 성공·실패는 본문 `rsp_cd` 로만 판정한다. 성공 코드는 API 계열마다
+  다르다(잔고·주문내역 5766, 호가 0000, 주문·취소 0001).
 - 접근토큰(유효 12시간)은 계좌별로 DB(`system_config`) 문서 하나에 공유한다 — 로컬·서버 워커가
   각자 발급하지 않게 한다(나무증권과 같은 이유).
 - 모든 요청에 `mac_address`(호출 단말 MAC, 12자리) 헤더가 필수다. 환경변수 `MERITZ_MAC_ADDRESS` 로 정한다 —
@@ -21,7 +22,7 @@ from typing import Any
 
 import requests
 
-from services.broker_api_service import MERITZ_PROVIDER, BrokerApiError, require_env_keys
+from services.broker_api_service import MERITZ_PROVIDER, BrokerApiError, OrderUncertainError, require_env_keys
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -32,16 +33,34 @@ VALUATION_PATH = "/accounts/v1/me/valuation"
 HOLDINGS_PATH = "/accounts/v1/me/holdings"
 OVERSEAS_HOLDINGS_PATH = "/accounts/v1/me/overseas/holdings"
 CURRENCIES_PATH = "/accounts/v1/me/overseas/currencies"
+ORDERBOOK_PATH = "/market/v1/orderbook"
+ORDER_PATH = {"buy": "/trading/v1/orders/buy", "sell": "/trading/v1/orders/sell"}
+CANCEL_PATH = "/trading/v1/orders/cancel"
+ORDER_HISTORY_PATH = "/trading/v1/orders/history"
 
-# 조회 완료·자료 없음 — 이 밖의 rsp_cd 는 전부 오류다(API 계열마다 성공 코드가 다르다, 잔고·평가는 5766).
-_SUCCESS_CODE = "5766"
-_NO_DATA_CODE = "5820"
+# 조회 계열 성공 — 완료·연속조회 더 있음·자료 없음. 이 밖의 rsp_cd 는 전부 오류다.
+_INQUIRY_CODES = frozenset({"5766", "5762", "5820"})
+_QUOTE_CODES = frozenset({"0000"})
+_ORDER_CODES = frozenset({"0001"})
 # 토큰 만료·무효 — 받으면 한 번만 새로 발급해 다시 보낸다.
 _TOKEN_ERROR_CODES = frozenset({"EGW00121", "EGW00123"})
 # 잔고 행의 처리대상구분 — 국내주식("1")·해외주식("J")이 한 목록에 섞여 온다.
 _DOMESTIC_ROW = "1"
 # 해외 잔고구분 — "1" 일반, "2" 소수, "3" 대출.
 _US_GENERAL_ROW = "1"
+
+# 주문은 KRX 정규장 지정가만 낸다 — 사고팔기는 KRX 정규장 규칙이다(나무 `ORDER_MARKET` 과 같다).
+_EXCHANGE_KRX = "01"
+_ORDERBOOK_KRX = "J"
+_LIMIT_ORDER = "01"
+_NO_CONDITION = "0"
+# 주문 응답의 경고구분 — "0" 정상 접수, 아래 '보류'는 접수 여부를 단정할 수 없다. 그 밖은 경고(미접수, 사람이 확인).
+_WARN_OK = "0"
+_WARN_HOLD = frozenset({"2", "5", "8", "b", "e", "h"})
+# 주문내역 행 — 정정취소구분(1 신규·2 정정·3 취소), 매매구분(1 매도·2 매수), 처리상태(3 거부).
+_ROW_CANCEL = "3"
+_SIDE_LABELS = {"1": "매도", "2": "매수"}
+_STATE_REJECTED = "3"
 
 _MIN_INTERVAL_SECONDS = 1.0
 _REQUEST_TIMEOUT_SECONDS = 10
@@ -127,8 +146,19 @@ def _message_of(data: dict[str, Any], response: requests.Response) -> str:
     return " · ".join(parts) or f"HTTP {response.status_code}"
 
 
-def _get(account_id: str, path: str, params: dict[str, str]) -> dict[str, Any]:
-    """GET 한 건 → 본문. 토큰 오류면 한 번만 재발급해 다시 보낸다. 실패 rsp_cd 는 BrokerApiError."""
+def _request(
+    account_id: str,
+    method: str,
+    path: str,
+    *,
+    success: frozenset[str],
+    params: dict[str, str] | None = None,
+    body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """요청 한 건 → 본문. 토큰 오류면 한 번만 재발급해 다시 보낸다. ``success`` 밖의 rsp_cd 는 BrokerApiError.
+
+    주문(POST)이 서버에 닿았는지 모르는 네트워크 오류는 `OrderUncertainError` 다 — 들어갔을 수도 있다.
+    """
     global _last_call_at
     token = _access_token(account_id)
     mac = _mac_address()
@@ -137,15 +167,22 @@ def _get(account_id: str, path: str, params: dict[str, str]) -> dict[str, Any]:
             wait = _MIN_INTERVAL_SECONDS - (time.monotonic() - _last_call_at)
             if wait > 0:
                 time.sleep(wait)
+            headers = {"authorization": f"Bearer {token}", "mac_address": mac}
             try:
-                response = requests.get(
-                    f"{BASE_URL}{path}",
-                    headers={"authorization": f"Bearer {token}", "mac_address": mac},
-                    params=params,
-                    timeout=_REQUEST_TIMEOUT_SECONDS,
-                )
+                if method == "GET":
+                    response = requests.get(
+                        f"{BASE_URL}{path}", headers=headers, params=params, timeout=_REQUEST_TIMEOUT_SECONDS
+                    )
+                else:
+                    response = requests.post(
+                        f"{BASE_URL}{path}",
+                        headers={**headers, "content-type": "application/json; charset=utf-8"},
+                        json=body,
+                        timeout=_REQUEST_TIMEOUT_SECONDS,
+                    )
             except requests.RequestException as exc:
-                raise BrokerApiError(f"메리츠증권 서버 응답을 받지 못했습니다: {exc}") from exc
+                error = OrderUncertainError if method == "POST" else BrokerApiError
+                raise error(f"메리츠증권 서버 응답을 받지 못했습니다: {exc}") from exc
             finally:
                 _last_call_at = time.monotonic()
             data = _json_of(response)
@@ -153,10 +190,15 @@ def _get(account_id: str, path: str, params: dict[str, str]) -> dict[str, Any]:
             if (response.status_code == 401 or code in _TOKEN_ERROR_CODES) and attempt == 0:
                 token = _issue_token(account_id)
                 continue
-            if code in (_SUCCESS_CODE, _NO_DATA_CODE):
+            if code in success:
                 return data
             raise BrokerApiError(f"메리츠증권 API 오류: {_message_of(data, response)} (코드 {code or '-'})")
     raise AssertionError("unreachable")
+
+
+def _get(account_id: str, path: str, params: dict[str, str]) -> dict[str, Any]:
+    """조회 계열 GET 한 건 → 본문(완료·연속·자료 없음)."""
+    return _request(account_id, "GET", path, success=_INQUIRY_CODES, params=params)
 
 
 def _get_paged(account_id: str, path: str, params: dict[str, str]) -> list[dict[str, Any]]:
@@ -305,3 +347,148 @@ def fetch_balance(account_id: str, country_code: str) -> dict[str, Any]:
         "total_asset": float(valuation["aset_vltn_amt"]),
         "holdings": holdings,
     }
+
+
+# ── 국내주식 주문(사고팔기) ─────────────────────────────────────────────────
+
+
+def fetch_best_quote(account_id: str, ticker: str) -> dict[str, Any]:
+    """KRX 1호가 — 매도·매수 1호가와 그 잔량, 호가 시각. 호가가 비어 있으면 주문 가격을 못 정해 오류다(나무와 같은 표준형)."""
+    data = (
+        _request(
+            account_id,
+            "GET",
+            ORDERBOOK_PATH,
+            success=_QUOTE_CODES,
+            params={"mrkt_div_code": _ORDERBOOK_KRX, "iscd": ticker},
+        ).get("data")
+        or {}
+    )
+    # 없는 종목코드도 정상 코드로 온다 — 응답의 단축종목코드로 확인한다.
+    if str(data.get("shrn_iscd") or "").strip() != ticker:
+        raise BrokerApiError(f"메리츠증권 호가 응답의 종목이 다릅니다: {ticker} → {data.get('shrn_iscd')!r}")
+    result = {
+        "ask": int(data["askp"]),
+        "bid": int(data["bidp"]),
+        "ask_quantity": int(data["askp_rsqn1"]),
+        "bid_quantity": int(data["bidp_rsqn1"]),
+        "at": str(data["prpr_hour"]),
+    }
+    if result["ask"] <= 0 or result["bid"] <= 0:
+        raise BrokerApiError(
+            f"{ticker} 의 매도·매수 1호가가 없어 주문 가격을 정할 수 없습니다 (매도 {result['ask']}, 매수 {result['bid']})."
+        )
+    return result
+
+
+def _accepted_order_no(data: dict[str, Any], what: str) -> str:
+    """주문·취소 응답에서 주문번호를 꺼낸다 — 정상 접수(경고구분 "0")이고 번호가 있어야 접수된 것이다.
+
+    경고는 증권사가 사람의 확인을 요구한 것이라 자동으로 재전송하지 않는다(미접수). 보류는 접수 여부를 모른다.
+    """
+    output = data.get("data") or {}
+    warn = str(output.get("warn_cls_code") or "")
+    message = str(output.get("warn_msg") or data.get("rsp_msg") or "").strip()
+    if warn in _WARN_HOLD:
+        raise OrderUncertainError(
+            f"{what}이 보류됐습니다 — 증권사 주문내역에서 확인하세요: {message} (경고구분 {warn})"
+        )
+    if warn != _WARN_OK:
+        raise BrokerApiError(f"{what}이 접수되지 않았습니다(증권사 경고): {message} (경고구분 {warn or '-'})")
+    order_no = output.get("oder_no")
+    if not isinstance(order_no, (int, float)) or int(order_no) <= 0:
+        raise OrderUncertainError(f"{what} 응답에 주문번호가 없습니다 — 증권사 주문내역에서 확인하세요: {message}")
+    return str(int(order_no))
+
+
+def place_limit_order(account_id: str, side: str, ticker: str, quantity: int, price: int) -> dict[str, str]:
+    """KRX 지정가 주문 한 건 — 접수되면 주문번호를 돌려준다. side 는 buy·sell."""
+    if side not in ORDER_PATH:
+        raise BrokerApiError(f"알 수 없는 주문 구분입니다: {side}")
+    if quantity <= 0 or price <= 0:
+        raise BrokerApiError("수량과 가격은 0보다 커야 합니다.")
+    data = _request(
+        account_id,
+        "POST",
+        ORDER_PATH[side],
+        success=_ORDER_CODES,
+        body={
+            "iscd": f"A{ticker}",
+            "oder_unpr": price,
+            "odqt": quantity,
+            "oder_cls_code": _LIMIT_ORDER,
+            "oder_cond_cls_code": _NO_CONDITION,
+            "orgl_oder_no": 0,
+            "whol_rctf_cncl_yn": "N",
+            "warn_cnfr_yn": "N",
+            "exch_kind_code": _EXCHANGE_KRX,
+        },
+    )
+    return {"order_no": _accepted_order_no(data, "주문"), "message": str(data.get("rsp_msg") or "")}
+
+
+def cancel_order(account_id: str, order_no: str, ticker: str) -> dict[str, str]:
+    """주문을 전량 취소한다 — 돌려주는 번호는 취소 요청 자체의 주문번호다."""
+    data = _request(
+        account_id,
+        "POST",
+        CANCEL_PATH,
+        success=_ORDER_CODES,
+        body={
+            "iscd": f"A{ticker}",
+            "orgl_oder_no": int(order_no),
+            "whol_rctf_cncl_yn": "Y",
+            "warn_cnfr_yn": "N",
+            "exch_kind_code": _EXCHANGE_KRX,
+        },
+    )
+    return {"cancel_order_no": _accepted_order_no(data, "취소"), "message": str(data.get("rsp_msg") or "")}
+
+
+def _order_status(row: dict[str, Any]) -> str:
+    """주문내역 한 줄 → 주문 상태(pending·partial·filled·canceled·rejected) — 나무 `order_status` 와 같은 판정."""
+    quantity = float(row.get("odqt") or 0)
+    filled = float(row.get("total_cntg_qty") or 0)
+    if str(row.get("oder_pros_stat_cls_code") or "") == _STATE_REJECTED:
+        return "rejected"
+    if quantity > 0 and filled >= quantity:
+        return "filled"
+    if float(row.get("cncl_qty") or 0) > 0:
+        return "canceled"
+    if filled > 0:
+        return "partial"
+    return "pending"
+
+
+def _day_order_row(row: dict[str, Any]) -> dict[str, Any]:
+    """주문내역 한 줄 → 표준 주문 행(나무 `_day_order_row` 와 같은 모양). `origin_order_no` 는 정정 행만 0 이 아니다."""
+    side = str(row.get("deal_cls_code") or "")
+    if side not in _SIDE_LABELS:
+        raise BrokerApiError(f"메리츠증권 주문내역의 매매구분을 알 수 없습니다: {side!r}")
+    return {
+        "order_no": str(int(row.get("oder_no") or 0)),
+        "origin_order_no": str(int(row.get("orgl_oder_no") or 0)),
+        "ticker": _domestic_ticker(str(row.get("iscd") or "").strip()),
+        "name": str(row.get("kor_issu_abwr_name") or "").strip(),
+        "side_label": _SIDE_LABELS[side],
+        "quantity": int(float(row.get("odqt") or 0)),
+        "price": float(row.get("oder_unpr") or 0),
+        "filled_quantity": int(float(row.get("total_cntg_qty") or 0)),
+        "unfilled_quantity": int(float(row.get("ncnt_qty") or 0)),
+        "canceled_quantity": int(float(row.get("cncl_qty") or 0)),
+        "average_fill_price": float(row.get("cntg_unpr") or 0),
+        "status": _order_status(row),
+    }
+
+
+def day_order_rows(account_id: str, yyyymmdd: str) -> list[dict[str, Any]]:
+    """그날의 주문 행(주문내역 조회) — 표준 주문 행이고 정정 행은 합치지 않았다(`broker_trade_service.merge_amendments`).
+
+    취소 요청 행은 뺀다 — 취소 결과(취소수량)는 취소된 주문 행 자신에 남는다.
+    """
+    rows = _get_paged(
+        account_id,
+        ORDER_HISTORY_PATH,
+        {"oder_date": yyyymmdd, "deal_cls_code": "0", "cntg_cls_code": "0", "sort_stnd_code": "2"},
+    )
+    return [_day_order_row(row) for row in rows if str(row.get("rctf_cncl_cls_code") or "") != _ROW_CANCEL]

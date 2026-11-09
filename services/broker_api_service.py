@@ -4,7 +4,7 @@
 `<PROVIDER>_API_SECRET` 규칙을 따른다 (예: NAMU_PLUG_API_KEY).
 
 지금은 나무증권(NH PLUG, `nhplug` SDK) 하나다. 여기 조회는 전부 읽기 전용이고 운영 도메인으로 간다 —
-주문은 `services/broker_order_service.py`(모의투자 서버 직접 요청)가 따로 다루고, 이체 API 는 다루지 않는다.
+사고팔기 주문은 `services/broker_trade_service.py`(계좌 ID 로 나무 `broker_order_service`·메리츠 `meritz_api_service` 선택)가 따로 다루고, 이체 API 는 다루지 않는다.
 """
 
 from __future__ import annotations
@@ -68,6 +68,10 @@ def is_business_success(rsp_cd: str | None, rsp_msg: str | None) -> bool:
 
 class BrokerApiError(RuntimeError):
     """커넥터 검증/조회 오류 — 화면에 그대로 보여줄 한국어 메시지를 담는다."""
+
+
+class OrderUncertainError(BrokerApiError):
+    """주문 요청이 접수됐는지 알 수 없다(네트워크 오류·보류 응답) — 주문이 들어갔을 수도 있어 실패로 단정하면 안 된다."""
 
 
 def _env_keys(provider: str) -> tuple[str, str]:
