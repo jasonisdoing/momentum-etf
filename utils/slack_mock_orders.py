@@ -66,8 +66,8 @@ _REACTION_NOOP_ERRORS = ("already_reacted", "no_reaction")
 
 
 def _env_word(env: str) -> str:
-    """메시지에 쓰는 계좌 구분 — 운영은 실제 주문이라 눈에 띄게 적는다."""
-    return "모의" if env == ACCOUNT_ENV_MOCK else "🔴 운영"
+    """메시지에 쓰는 계좌 구분."""
+    return "모의" if env == ACCOUNT_ENV_MOCK else "운영"
 
 
 def _require_env(name: str) -> str:
