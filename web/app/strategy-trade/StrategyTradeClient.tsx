@@ -6,6 +6,8 @@ import type { ColDef } from "ag-grid-community";
 import { gridSelectionColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
+import type { HoldingsResponse, HoldingsRow } from "../assets/assets-helpers";
+import { holdingMetricColumns } from "../assets/holding-metric-columns";
 import AccountSelect, { type AccountOptionBase } from "../components/AccountSelect";
 import { SlackAlarmField } from "../components/SlackAlarmField";
 import { readRememberedTradeAccountId, writeRememberedTradeAccountId } from "../components/account-selection";
@@ -362,8 +364,9 @@ function comparableDrafts(rows: DraftRow[]) {
   ]);
 }
 
-type TradeListRow = DraftRow & { held: boolean; heldRounds: string };
+type TradeListRow = DraftRow & { held: boolean; heldRounds: string } & Partial<HoldingsRow>;
 const tradeGridTheme = createAppGridTheme();
+const tradeHoldingColumns = Object.values(holdingMetricColumns<TradeListRow>(true));
 
 const tradeSettingColumns = [
   { field: "pct", headerName: "간격(%)", headerTooltip: "매매 간격 (%)", width: 78 },
@@ -393,6 +396,7 @@ function AccountSettingsCard({
   const [slack, setSlack] = useState(view.slack_enabled);
   const [slackTesting, setSlackTesting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [holdings, setHoldings] = useState<Map<string, HoldingsRow>>(() => new Map());
 
   // 서버가 최신 값을 돌려주면(저장·계좌 전환) 초안도 그 값으로 맞춘다.
   useEffect(() => {
@@ -400,6 +404,31 @@ function AccountSettingsCard({
     setPickerOpen(false);
     setSlack(view.slack_enabled);
   }, [view]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const errorMessage = "계좌 보유 지표를 불러오지 못했습니다.";
+    async function loadHoldings() {
+      try {
+        const response = await fetch(`/api/assets?account=${encodeURIComponent(accountId)}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const payload = (await response.json()) as HoldingsResponse;
+        if (!response.ok || !payload.rows || !payload.account_summaries?.some((row) => row.account_id === accountId)) {
+          throw new Error(payload.error ?? errorMessage);
+        }
+        if (controller.signal.aborted) return;
+        setHoldings(new Map(payload.rows.map((row) => [row.ticker, row])));
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setHoldings(new Map());
+        toast.error(error instanceof Error ? error.message : errorMessage);
+      }
+    }
+    void loadHoldings();
+    return () => controller.abort();
+  }, [accountId, view, toast]);
 
   const isDirty =
     slack !== view.slack_enabled ||
@@ -437,13 +466,14 @@ function AccountSettingsCard({
   const gridRows = useMemo<TradeListRow[]>(() => drafts.map((row) => {
     const strategy = row.strategy_id ? strategiesById.get(row.strategy_id) : undefined;
     return {
+      ...holdings.get(row.ticker),
       ...row,
       held: Boolean(strategy && strategy.ticker === row.ticker && !("error" in strategy) && strategy.status.held_quantity > 0),
       heldRounds: !strategy || strategy.ticker !== row.ticker
         ? "미저장"
         : "error" in strategy ? "오류" : `${strategy.status.held_count}/${strategy.config.rounds}`,
     };
-  }), [drafts, strategiesById]);
+  }), [drafts, holdings, strategiesById]);
 
   const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
     tickerColumn<TradeListRow>(),
@@ -455,6 +485,7 @@ function AccountSettingsCard({
       editable: !saving,
       cellClass: saving ? undefined : "appEditableCell",
     })),
+    ...tradeHoldingColumns,
   ], [saving]);
 
   const selectTicker = (option: TickerOption) => {

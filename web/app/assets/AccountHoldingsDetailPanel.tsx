@@ -49,8 +49,6 @@ import {
   buildGridRowId,
   buildHoldingEditableSnapshot,
   buildSyncedHoldingRows,
-  formatHiddenAmount,
-  formatKrw,
   formatPrice,
   getBucketCellClass,
   getPreviewValuationKrw,
@@ -64,6 +62,7 @@ import {
   stopActionButtonClick,
   stopActionButtonMouseDown,
 } from "./assets-helpers";
+import { holdingMetricColumns, renderHoldingWeight } from "./holding-metric-columns";
 
 type PoolRank = { rank: number | null };
 
@@ -910,6 +909,7 @@ export function AccountHoldingsDetailPanel({
     scheduleSilentRowSave(row.id);
   }, [isCashGridRow, isEditableHoldingRow, onRowsSync, scheduleSilentRowSave, summary]);
 
+  const metrics = useMemo(() => holdingMetricColumns<GridRow>(showAmounts), [showAmounts]);
   const columns = useMemo<ColDef<GridRow>[]>(() => [
     {
       colId: "drag",
@@ -1106,30 +1106,14 @@ export function AccountHoldingsDetailPanel({
       ),
     },
     {
-      field: "weight_pct",
-      // 값("100.00%")이 헤더보다 넓다 — 폭은 값 기준으로 잡는다.
-      headerName: "비중",
-      width: 82,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow }) => {
-        if (!params.data) {
-          return "-";
-        }
-
-        const weightPct = getPreviewWeightPct(params.data, rowsRef.current, summaryRef.current);
-        return (
-          <span style={{ color: "#000000", fontWeight: 700 }}>
-            {weightPct.toFixed(2)}%
-          </span>
-        );
-      },
+      ...metrics.weight,
+      cellRenderer: ({ data }: { data?: GridRow }) =>
+        data ? renderHoldingWeight(getPreviewWeightPct(data, rowsRef.current, summaryRef.current)) : "-",
     },
     {
+      ...metrics.quantity,
       field: "quantity",
-      // 다섯 자리 + 천 단위 쉼표("12,345")까지 안 잘리게. 헤더보다 값이 넓다.
-      headerName: "수량",
-      width: 72,
-      type: "rightAligned",
+      valueGetter: undefined,
       editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
       cellClass: (params) => {
         if (!isEditableHoldingRow(params.data)) {
@@ -1145,7 +1129,7 @@ export function AccountHoldingsDetailPanel({
           integer: true,
           onReject: (message) => toast.error(message),
         }),
-      cellRenderer: (params: { data?: GridRow; value?: number }) => {
+      cellRenderer: (params: { data?: GridRow; valueFormatted?: string }) => {
         const row = params.data;
         if (!row) {
           return null;
@@ -1165,7 +1149,7 @@ export function AccountHoldingsDetailPanel({
             />
           );
         }
-        return <span>{new Intl.NumberFormat("ko-KR").format(params.value ?? 0)}</span>;
+        return <span>{params.valueFormatted}</span>;
       },
     },
     {
@@ -1210,42 +1194,15 @@ export function AccountHoldingsDetailPanel({
         return <span>{formatPrice(safeParseFloat(params.value), row.currency || "KRW")}</span>;
       },
     },
+    metrics.returnPct,
+    metrics.pnl,
     {
-      field: "return_pct",
-      headerName: "수익률",
-      width: 88,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow; value?: number }) => (
-        params.data?.ticker === CASH_ROW_TICKER ? <span>-</span> :
-          <span className={getSignedClass(params.value ?? 0)}>
-            {(params.value ?? 0).toFixed(2)}%
-          </span>
-      ),
-    },
-    {
-      field: "pnl_krw",
-      headerName: "평가손익",
-      width: 120,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow; value?: number }) => (
-        params.data?.ticker === CASH_ROW_TICKER ? <span>-</span> :
-          <span className={getSignedClass(params.value ?? 0)}>{formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0))}</span>
-      ),
-    },
-    {
-      field: "valuation_krw",
-      headerName: "평가 금액",
-      width: 124,
-      type: "rightAligned",
-      // 수량/평균매입가 변경 시 평가금액 셀이 즉시 재렌더되도록 valueGetter 로 라이브 계산.
-      valueGetter: (params) => (params.data ? getPreviewValuationKrw(params.data) : null),
-      // 현금 입력은 상단 통화별 박스로 이전됨 — 그리드 현금 셀 편집은 막고 편집 스타일도 제거한다.
+      ...metrics.valuation,
+      // 수량·평균매입가를 편집하는 동안에도 평가금액을 즉시 갱신한다.
+      valueGetter: ({ data }) => data ? getPreviewValuationKrw(data) : null,
       editable: false,
-      cellRenderer: (params: { data?: GridRow }) => (
-        <span className="appGridNumericValue">{params.data ? formatHiddenAmount(showAmounts, formatKrw(getPreviewValuationKrw(params.data))) : "-"}</span>
-      ),
     },
-  ], [addingRow, alertBadges, handleValidateTicker, highDrawdownByTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, poolRanks, processingId, showAmounts]);
+  ], [addingRow, alertBadges, metrics, handleValidateTicker, highDrawdownByTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, poolRanks, processingId]);
 
   return (
     <div className="assetsDetailPanel">
