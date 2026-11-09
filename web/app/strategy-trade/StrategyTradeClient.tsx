@@ -61,6 +61,8 @@ type Status = {
   sell_pending: boolean;
 };
 
+type DailyTradeCount = { buy: number; sell: number };
+
 export type RoundRow = {
   round: number;
   fixed_round: number;
@@ -88,8 +90,7 @@ export type RoundRow = {
   order_sides: Array<"buy" | "sell">;
   // 증권사 앱(MTS)에 걸려 있는 미체결 수동 주문 — 슬랙 주문을 막는다.
   manual_orders: Array<{ side: "buy" | "sell"; price: number; quantity: number }>;
-  // 오늘 체결된 매매 — 출처(슬랙 신호 주문·수동)와 방향별 건수. 표시 기록일 뿐이다.
-  fills: Array<{ source: "slack" | "manual"; side: "buy" | "sell"; price: number; quantity: number }>;
+  trade_counts: Record<string, DailyTradeCount>;
   is_next: boolean;
 };
 
@@ -256,45 +257,21 @@ const FILL_COLORS = { buy: "var(--tblr-purple, #ae3ec9)", sell: "var(--tblr-oran
 const FILL_SOURCE_WORDS = { slack: "슬랙", manual: "수동" } as const;
 const BOUGHT_SOURCE_WORDS = { ...FILL_SOURCE_WORDS, mixed: "혼합" } as const;
 
-type Fill = RoundRow["fills"][number];
-
-/** 같은 출처·방향의 체결은 순서와 상관없이 한 뱃지로 묶는다 — 뱃지 순서는 처음 체결된 순서다. */
-function groupFills(fills: Fill[]): Fill[][] {
-  const groups = new Map<string, Fill[]>();
-  for (const fill of fills) {
-    const key = `${fill.source}-${fill.side}`;
-    groups.set(key, [...(groups.get(key) ?? []), fill]);
-  }
-  return [...groups.values()];
-}
-
-/** 거래 히스토리 칸 — 오늘 체결된 매매를 출처·방향별 뱃지로 남긴다. 반복되면 슬랙매수체결 2번처럼 횟수를 붙이고,
- *  마우스를 올리면 체결 순서대로 체결가·수량이 보인다. */
-function FillBadges({ fills }: { fills: Fill[] }) {
-  if (fills.length === 0) return null;
+function DailyTradeBadges({ counts }: { counts: DailyTradeCount }) {
   return (
-    <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
-      {groupFills(fills).map((group, index) => {
-        const { source, side } = group[0];
-        return (
-          <span key={index} title={group.map((fill) => `${fill.price.toLocaleString()}원 · ${fill.quantity.toLocaleString()}주`).join("\n")}>
-            <StatusBadge color={FILL_COLORS[side]}>
-              {FILL_SOURCE_WORDS[source]}
-              {SIDE_WORDS[side]}체결{group.length > 1 ? ` ${group.length}번` : ""}
-            </StatusBadge>
-          </span>
-        );
-      })}
+    <span style={{ display: "inline-flex", gap: 4, whiteSpace: "nowrap" }}>
+      {counts.buy > 0 ? <StatusBadge color={FILL_COLORS.buy}>매수 {counts.buy}</StatusBadge> : null}
+      {counts.sell > 0 ? <StatusBadge color={FILL_COLORS.sell}>매도 {counts.sell}</StatusBadge> : null}
     </span>
   );
 }
 
 /** 마지막 회차와 기준선 사이의 빈 구간 — 저점까지 얼마나 더 내려가야 하는지 적는다.
  *  선만 있으면 "표 밖 어딘가 아래"라는 것만 보이고 거리가 안 보인다. */
-function BelowLastGapRow({ gap }: { gap: { round: number; pct: number } }) {
+function BelowLastGapRow({ gap, columnCount }: { gap: { round: number; pct: number }; columnCount: number }) {
   return (
     <tr>
-      <td colSpan={8} style={{ padding: "22px 8px", textAlign: "center" }}>
+      <td colSpan={columnCount} style={{ padding: "22px 8px", textAlign: "center" }}>
         <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
           {gap.round}호에서 <b style={{ color: "var(--up-color, #d64545)" }}>{formatSigned(gap.pct)}</b> 더 내려가야
           기준선
@@ -310,10 +287,10 @@ function BelowLastGapRow({ gap }: { gap: { round: number; pct: number } }) {
  *  마지막 회차에서 얼마나 더 내려가야 저점인지 `belowLast` 로 함께 적는다 —
  *  선만 보고는 "얼마나 남았나"를 알 수 없다.
  */
-function RecentLowRow({ index }: { index: IndexStatus }) {
+function RecentLowRow({ index, columnCount }: { index: IndexStatus; columnCount: number }) {
   return (
     <tr>
-      <td colSpan={8} style={{ padding: "2px 8px" }}>
+      <td colSpan={columnCount} style={{ padding: "2px 8px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--up-color, #d64545)", fontSize: "var(--fs-sm)", fontWeight: 700 }}>
           <span style={{ flex: 1, borderTop: "2px dashed var(--up-color, #d64545)", opacity: 0.55 }} />
           <span>
@@ -732,7 +709,9 @@ function StrategySection({
       </div>
     );
   }
-  const { config, status, index } = view;
+  const { status, index } = view;
+  const tradeDays = [...new Set(view.rounds.flatMap((row) => Object.keys(row.trade_counts)))].sort();
+  const columnCount = 6 + tradeDays.length;
   // 기준선이 회차 사이에 못 들어가는 경우 — 마지막 회차의 지수 환산에서 저점까지 남은 하락률.
   const lastLeveledRound = [...view.rounds].reverse().find((row) => row.buy_index != null) ?? null;
   const nextRow = view.rounds.find((row) => row.is_next) ?? null;
@@ -748,34 +727,19 @@ function StrategySection({
     <div className="card appCard" style={cardStyle}>
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline", fontSize: "var(--fs-sm)" }}>
         <span style={{ fontWeight: 800, fontSize: "var(--fs-base)" }}>{view.label}</span>
+        <span>
+          현재가 <b style={{ fontSize: "var(--fs-xl)", fontWeight: 800 }}>{formatNumber(index.close)}</b>
+        </span>
         <span style={{ color: "var(--text-muted)" }}>
-          {poolLabel} · {view.ticker} · 간격 {config.trigger_pct}% · 회차당 {formatNumber(config.round_quantity)}주 · {config.rounds}회
-          · 체결 이력 {view.ledger_at.slice(5, 16).replace("T", " ")} 기준
+          체결 이력 {view.ledger_at.slice(5, 16).replace("T", " ")} 기준
         </span>
       </div>
 
-      {/* 현재 판단 요약 */}
-      <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: "var(--fs-sm)" }}>
-        <span>
-          현재가{" "}
-          <b style={{ fontSize: "var(--fs-xl)", fontWeight: 800 }}>{formatNumber(index.close)}</b>
-        </span>
-        <span>
-          {index.recent_low_label} <b>{formatNumber(index.recent_low)}</b>
-          <span style={{ color: "var(--text-muted)" }}> ({index.recent_low_date})</span>
-        </span>
-        <span>
-          보유 <b>{status.held_count}</b>/{config.rounds}회차
-        </span>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: "var(--fs-sm)" }}>
         {status.quantity_mismatch ? (
           <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}>
             ⚠️ 보유 {formatNumber(status.held_quantity)}주가 회차당 수량의 배수가 아님 — 마지막 회차는
             일부만 보유 중입니다
-          </span>
-        ) : null}
-        {status.last_buy_price != null ? (
-          <span>
-            마지막 매수가 <b>{formatNumber(status.last_buy_price)}</b>
           </span>
         ) : null}
         {status.waiting_first_entry ? (
@@ -783,13 +747,9 @@ function StrategySection({
             1호 진입 대기 — {index.name} {formatNumber(index.buy_trigger)} 이하 · 미도달 시{" "}
             {status.first_entry_close_time} 매수
           </span>
-        ) : status.next_round != null ? (
-          <span style={{ fontWeight: 700 }}>
-            다음 진입: {status.next_round}호 {status.next_ticker} {status.next_name}
-          </span>
-        ) : (
+        ) : status.next_round == null ? (
           <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>회차 소진 — 매도 대기</span>
-        )}
+        ) : null}
         {status.cash_short ? (
           <span style={actionBadgeStyle("var(--text-muted)")}>⏸ {status.next_round}호 한도 소진 — 현금 부족</span>
         ) : status.next_buy_drop_pct != null ? (
@@ -800,14 +760,14 @@ function StrategySection({
               ? status.sell_pending
                 ? `📉 ${status.next_round}호 매수가 도달 — ${status.next_sell_round}호 매도 체결 뒤 매수`
                 : `📉 ${status.next_round}호 매수가 도달!`
-              : `📉 ${index.name} ${Math.abs(status.next_buy_drop_pct).toFixed(2)}% 더 내리면 ${status.next_round}호 매수`}
+              : `📉 ${status.next_round}호 매수까지 ${Math.abs(status.next_buy_drop_pct).toFixed(2)}% 하락`}
           </span>
         ) : null}
         {status.next_sell_rise_pct != null ? (
           <span style={actionBadgeStyle(SELL_BADGE_COLOR)}>
             {status.next_sell_rise_pct <= 0
               ? `📈 ${status.next_sell_round}호 매도가 도달!`
-              : `📈 ${index.name} ${status.next_sell_rise_pct.toFixed(2)}% 더 오르면 ${status.next_sell_round}호 매도`}
+              : `📈 ${status.next_sell_round}호 매도까지 ${status.next_sell_rise_pct.toFixed(2)}% 상승`}
           </span>
         ) : null}
       </div>
@@ -819,12 +779,15 @@ function StrategySection({
             <tr style={{ color: "var(--text-muted)" }}>
               <th style={{ ...thStyle, textAlign: "left" }}>회차</th>
               <th style={{ ...thStyle, textAlign: "left" }}>상태</th>
-              <th style={{ ...thStyle, textAlign: "left" }}>종목</th>
               <th style={thStyle}>체결가</th>
               <th style={thStyle}>손익</th>
               <th style={thStyle}>매수 지정가</th>
               <th style={thStyle}>매도 지정가</th>
-              <th style={{ ...thStyle, textAlign: "left" }}>거래 히스토리</th>
+              {tradeDays.map((day) => (
+                <th key={day} title={day} style={{ ...thStyle, textAlign: "center", whiteSpace: "nowrap" }}>
+                  {Number(day.slice(5, 7))}월 {Number(day.slice(8, 10))}일
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -839,7 +802,7 @@ function StrategySection({
                 (prevLevels.length === 0 || prevLevels[prevLevels.length - 1] >= index.recent_low);
               return (
               <React.Fragment key={row.round}>
-              {lowLineHere ? <RecentLowRow index={index} /> : null}
+              {lowLineHere ? <RecentLowRow index={index} columnCount={columnCount} /> : null}
               <tr style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
                 <td style={{ ...tdStyle, textAlign: "left", fontWeight: 700 }}>
                   {row.round}호
@@ -851,9 +814,6 @@ function StrategySection({
                 </td>
                 <td style={{ ...tdStyle, textAlign: "left" }}>
                   <RoundStatus row={row} onDeleteSignal={onDeleteSignal} />
-                </td>
-                <td style={{ ...tdStyle, textAlign: "left" }}>
-                  {row.ticker} {row.name}
                 </td>
                 <td style={tdStyle}>
                   {formatNumber(row.fill_price)}
@@ -875,9 +835,11 @@ function StrategySection({
                 <td style={{ ...tdStyle, fontWeight: row.sell_limit != null ? 700 : undefined }}>
                   {formatNumber(row.sell_limit)}
                 </td>
-                <td style={{ ...tdStyle, textAlign: "left" }}>
-                  <FillBadges fills={row.fills} />
-                </td>
+                {tradeDays.map((day) => (
+                  <td key={day} style={{ ...tdStyle, textAlign: "center" }}>
+                    {row.trade_counts[day] ? <DailyTradeBadges counts={row.trade_counts[day]} /> : null}
+                  </td>
+                ))}
               </tr>
               </React.Fragment>
               );
@@ -885,8 +847,8 @@ function StrategySection({
             {view.rounds.length > 0 &&
             view.rounds.every((r) => r.buy_index == null || r.buy_index >= index.recent_low) ? (
               <>
-                {belowLastRound ? <BelowLastGapRow gap={belowLastRound} /> : null}
-                <RecentLowRow index={index} />
+                {belowLastRound ? <BelowLastGapRow gap={belowLastRound} columnCount={columnCount} /> : null}
+                <RecentLowRow index={index} columnCount={columnCount} />
               </>
             ) : null}
           </tbody>

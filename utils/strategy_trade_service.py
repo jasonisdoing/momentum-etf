@@ -22,7 +22,7 @@ DB(``system_config.strategy_trade_settings.strategies``)가 단일 소스이며 
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -32,7 +32,15 @@ from utils.strategy_trade_config import (
     FIRST_ENTRY_CLOSE_TIME,
     validate_strategy_trade_config,
 )
-from utils.strategy_trade_ledger import Ledger, LedgerError, forget_ledgers, read_ledgers, refresh_ledgers
+from utils.strategy_trade_ledger import (
+    Ledger,
+    LedgerError,
+    forget_ledgers,
+    read_cached_trade_days,
+    read_ledgers,
+    refresh_ledgers,
+    round_history,
+)
 
 KST = ZoneInfo("Asia/Seoul")
 _CONFIG_COLLECTION = "system_config"
@@ -366,24 +374,14 @@ def _first_entry_close_window(now: datetime | None = None) -> bool:
     return FIRST_ENTRY_CLOSE_TIME <= now_local.time() < schedule["close"]
 
 
-def _attach_today(rows: list[dict[str, Any]], ledger: Ledger, round_quantity: int, held_rounds: int) -> None:
-    """회차 행에 오늘 체결(`fills`)과 걸려 있는 수동 주문(`manual_orders`)을 붙인다 — 표시용 기록이다.
-
-    수동 매수는 다음 진입 회차에, 수동 매도는 가장 먼저 팔릴 맨 위 보유 회차에 붙는다.
-    """
-    today = datetime.now(KST).strftime("%Y-%m-%d")
-    events = [event for event in ledger.round_events(round_quantity) if event["day"] == today]
-    for row in rows:
-        row["fills"] = [
-            {field: event[field] for field in ("source", "side", "price", "quantity")}
-            for event in events
-            if event["round"] == row["round"]
-        ]
-        row["manual_orders"] = [
-            order
-            for order in ledger.manual_orders
-            if (order["side"] == "buy" and row["is_next"]) or (order["side"] == "sell" and row["round"] == held_rounds)
-        ]
+def _attach_trade_counts(view: dict[str, Any], ledger: Ledger, cached_days: dict[date, list[dict[str, Any]]]) -> None:
+    rows = {row["round"]: row for row in view["rounds"]}
+    for row in rows.values():
+        row["trade_counts"] = {}
+    for event in round_history(ledger, view["ticker"], view["config"]["round_quantity"], cached_days):
+        if (row := rows.get(event["round"])) is not None:
+            counts = row["trade_counts"].setdefault(event["day"], {"buy": 0, "sell": 0})
+            counts[event["side"]] += 1
 
 
 def _build_strategy_view(
@@ -508,7 +506,12 @@ def _build_strategy_view(
             }
         )
 
-    _attach_today(rows, ledger, round_quantity, held_rounds)
+    for row in rows:
+        row["manual_orders"] = [
+            order
+            for order in ledger.manual_orders
+            if (order["side"] == "buy" and row["is_next"]) or (order["side"] == "sell" and row["round"] == held_rounds)
+        ]
 
     # 다음 회차 매수까지 남은 하락률(%) — 도달했으면 0 이상(+). 회차 소진이면 None.
     next_buy_drop_pct = None
@@ -635,7 +638,9 @@ def _account_ledgers(
     return ledgers
 
 
-def _build_views(strategies: dict[str, dict[str, Any]], *, fresh: bool) -> list[dict[str, Any]]:
+def _build_views(
+    strategies: dict[str, dict[str, Any]], *, fresh: bool, include_trade_history: bool
+) -> list[dict[str, Any]]:
     """전략들의 운용 현황 — 전략마다 고른 운용 계좌의 회차 원장으로 만든다.
 
     ``fresh`` 가 참이면 원장을 증권사에서 새로 계산해 저장하고(느리다), 아니면 배치가 저장해 둔 것을 읽는다.
@@ -659,6 +664,7 @@ def _build_views(strategies: dict[str, dict[str, Any]], *, fresh: bool) -> list[
         for pool in {entry["pool"] for entry in strategies.values()} & active_pools.keys()
     }
     views: list[dict[str, Any]] = []
+    cached_days_by_account: dict[tuple[str, date], dict[date, list[dict[str, Any]]]] = {}
     for sid, entry in strategies.items():
         account_id = entry["account_id"]
         account_ledgers = ledgers[account_id]
@@ -674,6 +680,11 @@ def _build_views(strategies: dict[str, dict[str, Any]], *, fresh: bool) -> list[
                 view = _build_strategy_view(
                     sid, entry, state["closes"], ledger, state["cash_krw"], kind=active_pools[entry["pool"]]
                 )
+                if include_trade_history:
+                    cache_key = (account_id, ledger.as_of)
+                    if cache_key not in cached_days_by_account:
+                        cached_days_by_account[cache_key] = read_cached_trade_days(*cache_key)
+                    _attach_trade_counts(view, ledger, cached_days_by_account[cache_key])
             except (RuntimeError, ValueError) as error:
                 view = _failed_view(sid, entry, str(error))
         # 운용 계좌 — 화면 카드 머리·슬랙 문구·주문 계좌가 이것을 쓴다.
@@ -689,6 +700,7 @@ def load_views_where(keep: Callable[[dict[str, Any]], bool], *, fresh: bool) -> 
     views = _build_views(
         {sid: entry for sid, entry in load_settings()["strategies"].items() if keep(entry)},
         fresh=fresh,
+        include_trade_history=False,
     )
     return {
         "strategies": [view for view in views if "error" not in view],
@@ -760,7 +772,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
             }
             for sid, entry in mine.items()
         ],
-        "strategies": _build_views(mine, fresh=False),
+        "strategies": _build_views(mine, fresh=False, include_trade_history=True),
     }
 
 

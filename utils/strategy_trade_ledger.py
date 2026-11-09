@@ -80,6 +80,10 @@ class Ledger:
     computed_at: str
 
     @property
+    def as_of(self) -> date:
+        return datetime.fromisoformat(self.computed_at).astimezone(KST).date()
+
+    @property
     def opening(self) -> int:
         """재생한 체결 직전의 보유 수량 — 지금 보유에서 그 체결의 순매수를 뺀 값(회차 이벤트 위치의 출발점)."""
         return self.quantity - sum(trade.shares if trade.buy else -trade.shares for trade in self.trades)
@@ -204,6 +208,42 @@ def _day_trades(
         trade = Trade(f"{day:%Y-%m-%d}", is_buy(row), row["filled_quantity"], row["average_fill_price"], source)
         trades.append((int(row["order_no"]), trade))
     return [trade for _, trade in sorted(trades, key=lambda item: item[0])]
+
+
+def read_cached_trade_days(account_id: str, as_of: date) -> dict[date, list[dict[str, Any]]]:
+    """화면 이력에 쓸 최근 일별 체결 캐시만 읽는다."""
+    start = as_of - timedelta(days=LOOKBACK_DAYS)
+    prefix = f"{account_id}:"
+    days = _cache().find({"_id": {"$gte": f"{prefix}{start:%Y%m%d}", "$lt": f"{prefix}{as_of:%Y%m%d}"}})
+    return {date.fromisoformat(doc["_id"].removeprefix(prefix)): doc["rows"] for doc in days}
+
+
+def round_history(
+    ledger: Ledger, ticker: str, per_round: int, cached_days: dict[date, list[dict[str, Any]]]
+) -> list[dict[str, Any]]:
+    """원장에 이어지는 과거 체결을 붙여 회차를 재생한다. 캐시가 비면 그 이전으로 넘어가지 않는다."""
+    start = ledger.as_of - timedelta(days=LOOKBACK_DAYS)
+    start_iso = start.isoformat()
+    trades = tuple(trade for trade in ledger.trades if trade.day >= start_iso)
+    day = (date.fromisoformat(trades[0].day) if trades else ledger.as_of) - timedelta(days=1)
+    opening = ledger.quantity - sum(trade.shares if trade.buy else -trade.shares for trade in trades)
+    past: list[Trade] = []
+    while day >= start:
+        if day.weekday() < 5:
+            rows = cached_days.get(day)
+            if rows is None:
+                break
+            day_trades = _day_trades(rows, ticker, day, {})
+            reversed_trades = list(reversed(day_trades))
+            for trade in reversed_trades:
+                opening += -trade.shares if trade.buy else trade.shares
+                if opening < 0:
+                    break
+            if opening < 0:
+                break
+            past.extend(reversed_trades)
+        day -= timedelta(days=1)
+    return replace(ledger, trades=(*reversed(past), *trades)).round_events(per_round)
 
 
 def _replay(lots: list[Lot], trades: list[Trade]) -> list[Lot]:
