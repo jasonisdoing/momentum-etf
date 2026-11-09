@@ -432,9 +432,16 @@ def _build_strategy_view(
         and close >= ladder.sell_limit(round_fills[held_rounds - 1]["price"], trigger_pct, kind=kind)
     )
 
+    # 사다리 위치(표시용) — 보유 회차는 1호 체결가 기준 칸, 그 뒤 회차는 마지막 보유 칸부터 한 칸씩.
+    held_positions = ladder.ladder_positions([fill["price"] for fill in round_fills[:held_rounds]], trigger_pct)
     rows: list[dict[str, Any]] = []
     for round_no in range(1, max_rounds + 1):
         held = round_no <= held_rounds
+        position = (
+            held_positions[round_no - 1]
+            if held
+            else (held_positions[-1] if held_positions else 0) + round_no - held_rounds
+        )
         is_next = round_no == held_rounds + 1
         if held:
             fill = round_fills[round_no - 1]
@@ -443,6 +450,7 @@ def _build_strategy_view(
                 {
                     "round": round_no,
                     "fixed_round": round_no,
+                    "position": position,
                     "ticker": ticker,
                     "name": name,
                     "held": True,
@@ -478,6 +486,7 @@ def _build_strategy_view(
             {
                 "round": round_no,
                 "fixed_round": round_no,
+                "position": position,
                 "ticker": ticker,
                 "name": name,
                 "held": False,

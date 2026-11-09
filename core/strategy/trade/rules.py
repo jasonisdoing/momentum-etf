@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from math import isfinite
+from math import isfinite, log
 from typing import Literal
 
 InstrumentKind = Literal["stock", "etf"]
@@ -69,3 +69,19 @@ def preview_buy_limit(prev_close: float, round_no: int, trigger_pct: float, *, k
 def sell_limit(fill: float, trigger_pct: float, *, kind: InstrumentKind) -> int:
     """회차 체결가에서 간격%만큼 오른 매도 지정가."""
     return round_to_tick(fill * up_ratio(trigger_pct), kind=kind)
+
+
+def ladder_positions(fills: list[float], trigger_pct: float) -> list[int]:
+    """보유 회차들의 사다리 위치(표시용) — 1호 체결가를 위치 1로, 위치 k = 1호 × (1 − 간격%)^(k−1) 중 가장 가까운 칸.
+
+    회차 사이에 건너뛴 칸이 있으면 위치가 벌어진다. 위치는 앞 회차보다 항상 깊다(같거나 얕으면 바로 다음 칸).
+    매매 판정(다음 매수·매도·회차 수)에는 쓰지 않는다 — 화면이 간격을 보여 주는 데만 쓴다.
+    """
+    if not fills:
+        return []
+    ratio = log(down_ratio(trigger_pct))
+    positions: list[int] = []
+    for fill in fills:
+        position = round(log(fill / fills[0]) / ratio) + 1
+        positions.append(max(position, positions[-1] + 1) if positions else 1)
+    return positions

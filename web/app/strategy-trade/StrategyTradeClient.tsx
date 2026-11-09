@@ -64,6 +64,8 @@ type Status = {
 type DailyTradeCount = { buy: number; sell: number };
 
 export type RoundRow = {
+  /** 사다리 위치(표시용) — 1호 체결가 기준 간격 칸. 건너뛴 칸은 회차 없이 빈 행으로 보인다. */
+  position: number;
   round: number;
   fixed_round: number;
   ticker: string;
@@ -711,7 +713,13 @@ function StrategySection({
   }
   const { status, index } = view;
   const tradeDays = [...new Set(view.rounds.flatMap((row) => Object.keys(row.trade_counts)))].sort();
-  const columnCount = 6 + tradeDays.length;
+  const columnCount = 7 + tradeDays.length;
+  // 사다리 위치마다 한 행 — 회차가 없는 위치(건너뛴 칸)는 빈 행으로 둬 간격을 그대로 보여 준다.
+  const lastPosition = Math.max(0, ...view.rounds.map((row) => row.position));
+  const slots = Array.from({ length: lastPosition }, (_, idx) => ({
+    position: idx + 1,
+    row: view.rounds.find((item) => item.position === idx + 1) ?? null,
+  }));
   // 기준선이 회차 사이에 못 들어가는 경우 — 마지막 회차의 지수 환산에서 저점까지 남은 하락률.
   const lastLeveledRound = [...view.rounds].reverse().find((row) => row.buy_index != null) ?? null;
   const nextRow = view.rounds.find((row) => row.is_next) ?? null;
@@ -777,6 +785,7 @@ function StrategySection({
         <table style={{ width: "100%", minWidth: 600, borderCollapse: "collapse", fontSize: "var(--fs-sm)" }}>
           <thead>
             <tr style={{ color: "var(--text-muted)" }}>
+              <th style={{ ...thStyle, textAlign: "left" }}>위치</th>
               <th style={{ ...thStyle, textAlign: "left" }}>회차</th>
               <th style={{ ...thStyle, textAlign: "left" }}>상태</th>
               <th style={thStyle}>체결가</th>
@@ -791,10 +800,21 @@ function StrategySection({
             </tr>
           </thead>
           <tbody>
-            {view.rounds.map((row, rowIdx) => {
+            {slots.map(({ position, row }, rowIdx) => {
+              if (row === null) {
+                return (
+                  <tr key={`empty-${position}`} style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
+                    <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)" }}>{position}</td>
+                    <td colSpan={columnCount - 1} style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)" }} />
+                  </tr>
+                );
+              }
               // 최근 저점 라인: 이 행의 지수 환산이 저점 아래로 처음 내려가는 지점 앞에 긋는다.
               // (마지막 행까지 저점 위면 맨 아래에) — 값이 없는 행은 판정에서 건너뛴다.
-              const prevLevels = view.rounds.slice(0, rowIdx).map((r) => r.buy_index).filter((v): v is number => v != null);
+              const prevLevels = slots
+                .slice(0, rowIdx)
+                .map((slot) => slot.row?.buy_index)
+                .filter((v): v is number => v != null);
               const ownLevel = row.buy_index;
               const lowLineHere =
                 ownLevel != null &&
@@ -804,6 +824,7 @@ function StrategySection({
               <React.Fragment key={row.round}>
               {lowLineHere ? <RecentLowRow index={index} columnCount={columnCount} /> : null}
               <tr style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
+                <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)" }}>{position}</td>
                 <td style={{ ...tdStyle, textAlign: "left", fontWeight: 700 }}>
                   {row.round}호
                   {row.is_next ? (
