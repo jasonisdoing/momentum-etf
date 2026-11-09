@@ -145,7 +145,7 @@ SCHEDULE_ROWS = [
         "key": "strategy_trade_notify",
         "group": "증권사 연동",
         "job": "전략 사고팔기 알림",
-        "target": "계좌에 붙인 종목풀의 사고팔기 전략 (슬랙 켠 계좌만 발송, 원장은 전 계좌 계산)",
+        "target": "계좌에 등록한 종목별 사고팔기 전략 (슬랙 켠 계좌만 발송, 원장은 전 계좌 계산)",
         "run_location": "SERVER/LOCAL",
         "cadence": "평일 09:10~15:20 KST 10분 간격",
         "command": "python scripts/strategy_trade_notify.py",

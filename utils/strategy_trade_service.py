@@ -1,14 +1,12 @@
 """전략 사고팔기 운용 현황 조회 서비스 (UI/API 용).
 
 전략 여러 개를 독립 운용한다. 각 전략은 **자기 종목 하나만** 설정된 회차 수까지 분할 매수한다.
-전략은 종목풀(``pool``) 단위로 묶이고, 사고팔기를 켠 풀(종목풀 설정의 토글)에서만 만든다.
+여러 한국 ETF 종목풀에서 전략 종목을 고르며, 전략별 종목풀은 가격 출처다.
 파라미터(매매 간격 %·회차당 수량·회차 수)는
 DB(``system_config.strategy_trade_settings.strategies``)가 단일 소스이며 화면에서
 편집한다. 슬랙 알람은 계좌별 사고팔기 스위치(``accounts.{계좌}.slack_enabled``)를 따른다 — 합성과 별개다.
 
-사고팔기는 합성과 따로 **계좌 단위로** 단독 운영한다. 증권사 API 가 연동된 운영 계좌에 종목풀(같은 국가의
-한국 ETF 풀)을 붙이고(``accounts.{계좌}.pools``) 그 아래에 전략을 둔다. 같은 풀을 여러 계좌에 붙일 수 있고
-설정은 계좌마다 따로다. 다음 회차를 계좌 원화 예수금(잔고 동기화 값)으로 살 수 없으면 한도 소진으로 사지 않는다.
+사고팔기는 합성과 별개로 증권사 API가 연동된 한국 운영 계좌에 전략을 직접 등록한다. 다음 회차를 계좌 원화 예수금(잔고 동기화 값)으로 살 수 없으면 한도 소진으로 사지 않는다.
 보유 현황은 전략의 운용 계좌의 **증권사 체결 이력**에서 만든다(백테스트는 없다).
 화면을 열 때마다 `strategy_trade_ledger` 가 체결을 재생해 회차별 실제 체결가를 구한다(슬랙 신호 주문·수동 주문 모두).
 
@@ -51,15 +49,7 @@ def _settings_collection():
 
 
 def load_settings() -> dict[str, Any]:
-    """저장된 계좌별 사고팔기 설정(붙인 종목풀·슬랙)과 전략별 파라미터를 반환한다.
-
-    전략 항목이 없거나 깨졌으면 시드값으로 슬쩍 넘어가지 않고 에러를 낸다 —
-    그럴듯한 값이 화면에 떴다가 그대로 저장돼 실제 설정이 덮어써지는 것을 막는다.
-
-    반환: ``{"accounts": {계좌 ID: {"pools": [...], "slack_enabled"}},
-    "strategies": {sid: {"pool", "account_id", "ticker", "name", "trigger_pct", "round_quantity", "rounds"}}}``.
-    계좌 기록이 없으면 그 계좌는 붙인 종목풀이 없고 슬랙이 꺼진 것이다. 전략은 그 계좌에 붙인 종목풀에만 있다.
-    """
+    """계좌별 슬랙 설정과 전략별 가격 출처·파라미터를 반환한다."""
     doc = _settings_collection().find_one({"_id": _SETTINGS_KEY}) or {}
     stored = doc.get("strategies")
     if not isinstance(stored, dict):
@@ -70,10 +60,9 @@ def load_settings() -> dict[str, Any]:
 
     accounts: dict[str, dict[str, Any]] = {}
     for account_id, entry in (doc.get("accounts") or {}).items():
-        pools = entry.get("pools") if isinstance(entry, dict) else None
-        if not isinstance(pools, list) or not isinstance(entry.get("slack_enabled"), bool):
+        if not isinstance(entry, dict) or not isinstance(entry.get("slack_enabled"), bool):
             raise RuntimeError(f"'{account_id}' 계좌의 사고팔기 설정이 올바르지 않습니다 — 화면에서 다시 저장하세요.")
-        accounts[str(account_id)] = {"pools": [str(pool) for pool in pools], "slack_enabled": entry["slack_enabled"]}
+        accounts[str(account_id)] = {"slack_enabled": entry["slack_enabled"]}
 
     strategies: dict[str, dict[str, Any]] = {}
     for sid, entry in stored.items():
@@ -85,8 +74,6 @@ def load_settings() -> dict[str, Any]:
         account_id = str(entry.get("account_id") or "").strip()
         if not pool or not ticker or not name or not account_id:
             raise RuntimeError(f"'{sid}' 전략의 종목풀·운용 계좌·종목이 없습니다 — 화면에서 골라 저장하세요.")
-        if pool not in accounts.get(account_id, {}).get("pools", []):
-            raise RuntimeError(f"'{sid}' 전략의 종목풀 {pool} 이 '{account_id}' 계좌에 붙어 있지 않습니다.")
         try:
             strategies[sid] = {
                 "pool": pool,
@@ -110,44 +97,52 @@ def eligible_pools() -> list[str]:
     return [str(config["ticker_type"]) for config in _load_pool_configs() if is_eligible_pool(config)]
 
 
-def _require_eligible_pool(pool: str) -> None:
-    if pool not in eligible_pools():
-        raise ValueError(f"{pool} 종목풀은 사고팔기에 쓸 수 없습니다(한국 ETF 종목풀만 가능).")
-
-
-def etf_options(pool: str) -> list[dict[str, str]]:
-    """전략에 쓸 수 있는 종목 — 그 종목풀의 ETF(티커·이름)."""
+def _pool_etfs(pool: str) -> dict[str, str]:
     from utils.stock_list_io import get_etfs
 
-    _require_eligible_pool(pool)
-    options = [
-        {"ticker": str(item.get("ticker") or "").strip(), "name": str(item.get("name") or "").strip()}
-        for item in get_etfs(pool) or []
-    ]
-    return [option for option in options if option["ticker"] and option["name"]]
+    return {
+        ticker: name
+        for item in get_etfs(pool)
+        if (ticker := str(item.get("ticker") or "").strip().upper()) and (name := str(item.get("name") or "").strip())
+    }
 
 
-def resolve_etf(pool: str, ticker: str) -> dict[str, str]:
-    """티커로 전략에 쓸 ETF 를 찾는다 — 그 종목풀에 있는 것만. 없으면 ValueError."""
-    wanted = str(ticker or "").strip().upper()
-    if not wanted:
-        raise ValueError("티커를 입력하세요.")
-    for option in etf_options(pool):
-        if option["ticker"].upper() == wanted:
-            return option
-    raise ValueError(f"{pool} 종목풀에 없는 종목입니다: {ticker} — 종목풀에 먼저 추가하세요.")
+def _etf_options(pools: list[str]) -> dict[str, dict[str, Any]]:
+    """활성 한국 ETF를 티커로 합치고, 중복 종목의 가격 출처 후보를 고정 순서로 반환한다."""
+    options: dict[str, dict[str, Any]] = {}
+    for pool in sorted(pools):
+        for ticker, name in _pool_etfs(pool).items():
+            option = options.setdefault(ticker, {"ticker": ticker, "name": name, "pools": []})
+            option["pools"].append(pool)
+    return options
 
 
-def _validated_target(account_id: str, pool: str, config: dict[str, Any]) -> dict[str, Any]:
-    """편집 입력에서 종목·파라미터를 검증해 저장 값으로 돌려준다. 실패 시 ValueError."""
-    if not isinstance(config, dict):
-        raise ValueError("설정 형식이 올바르지 않습니다.")
-    etf = resolve_etf(pool, str(config.get("ticker") or ""))
+def _validated_target(
+    account_id: str, config: dict[str, Any], current: dict[str, Any] | None, options: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    ticker = str(config.get("ticker") or "").strip().upper()
+    reselect = config.get("reselect_source", False)
+    if not isinstance(reselect, bool):
+        raise ValueError("reselect_source는 참·거짓이어야 합니다.")
+    if current is not None and ticker == current["ticker"] and not reselect:
+        pool, name = current["pool"], current["name"]
+    else:
+        option = options.get(ticker)
+        if option is None:
+            raise ValueError(f"사고팔기에 등록할 수 있는 한국 ETF가 아닙니다: {ticker}")
+        candidates = option["pools"]
+        # 기존 출처가 여전히 유효하면 같은 종목의 기준가를 바꾸지 않는다.
+        pool = (
+            current["pool"]
+            if current and ticker == current["ticker"] and current["pool"] in candidates
+            else candidates[0]
+        )
+        name = option["name"]
     return {
         "pool": pool,
         "account_id": account_id,
-        "ticker": etf["ticker"],
-        "name": etf["name"],
+        "ticker": ticker,
+        "name": name,
         **validate_strategy_trade_config(config),
     }
 
@@ -157,61 +152,56 @@ def _sent_log_unset(sent_log: dict[str, Any], strategy_id: str) -> dict[str, str
     return {f"sent_log.{key}": "" for key in sent_log if str(key).startswith(f"{strategy_id}:")}
 
 
-def save_account_trade(account_id: str, slack_enabled: Any, pools: Any) -> None:
-    """한 계좌의 사고팔기 설정을 통째로 저장한다 — 슬랙 스위치, 붙인 종목풀과 풀별 전략 목록.
-
-    전략 id 가 있는 행은 갱신, 없는 행은 추가, 빠진 전략(뗀 종목풀의 전략 포함)은 알림 기록과 함께 삭제한다.
-    검증은 저장 전에 전부 끝내고 한 번에 쓴다 — 한 행이라도 틀리면 아무것도 바꾸지 않는다.
-    """
+def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any) -> None:
+    """계좌의 슬랙 설정과 전략 목록을 검증한 뒤 한 번에 저장한다."""
     from uuid import uuid4
 
-    doc = next((item for item in _trade_account_docs() if item["account_id"] == account_id), None)
-    if doc is None:
+    if not any(item["account_id"] == account_id for item in _trade_account_docs()):
         raise ValueError(f"'{account_id}' 는 사고팔기를 운영할 수 있는 계좌가 아닙니다(증권사 API 연동 필요).")
     if not isinstance(slack_enabled, bool):
         raise ValueError("slack_enabled 는 참·거짓이어야 합니다.")
-    if not isinstance(pools, list):
-        raise ValueError("pools 형식이 올바르지 않습니다.")
-    attachable = {option["ticker_type"] for option in _attachable_pools(doc)}
+    if not isinstance(strategies, list):
+        raise ValueError("strategies 형식이 올바르지 않습니다.")
+    options = _etf_options(eligible_pools())
     current = {sid: entry for sid, entry in load_settings()["strategies"].items() if entry["account_id"] == account_id}
-
-    pool_names: list[str] = []
-    # 한 계좌의 종목은 하나뿐이다 — 회차를 그 계좌의 종목 체결로 세므로 풀이 달라도 겹치면 두 번 센다.
     taken: set[str] = set()
+    seen_ids: set[str] = set()
     planned: dict[str, dict[str, Any]] = {}
-    for item in pools:
-        pool = str((item or {}).get("pool") or "").strip()
-        rows = (item or {}).get("strategies")
-        if pool not in attachable:
-            raise ValueError(f"{pool} 종목풀은 '{account_id}' 계좌에 붙일 수 없습니다(같은 국가의 한국 ETF 풀만).")
-        if pool in pool_names:
-            raise ValueError(f"{pool} 종목풀이 두 번 있습니다.")
-        if not isinstance(rows, list):
-            raise ValueError(f"{pool} 종목풀의 전략 목록 형식이 올바르지 않습니다.")
-        pool_names.append(pool)
-        for row in rows:
-            sid = str(row.get("strategy_id") or "").strip() or None
-            if sid is not None and (sid not in current or current[sid]["pool"] != pool):
-                raise ValueError(f"이 계좌·종목풀의 전략이 아닙니다: {sid}")
-            target = _validated_target(account_id, pool, row)
-            if target["ticker"] in taken:
-                raise ValueError(f"{target['name']}({target['ticker']}) 전략이 이 계좌에 이미 있습니다.")
-            taken.add(target["ticker"])
-            planned[sid or f"s{uuid4().hex[:8]}"] = target
+    for row in strategies:
+        if not isinstance(row, dict):
+            raise ValueError("전략 행의 형식이 올바르지 않습니다.")
+        sid = str(row.get("strategy_id") or "").strip()
+        if sid and (sid not in current or sid in seen_ids):
+            raise ValueError(f"이 계좌의 전략이 아니거나 중복된 전략입니다: {sid}")
+        if sid:
+            seen_ids.add(sid)
+        previous = current.get(sid)
+        target = _validated_target(account_id, row, previous, options)
+        if target["ticker"] in taken:
+            raise ValueError(f"{target['name']}({target['ticker']}) 전략이 이 계좌에 이미 있습니다.")
+        taken.add(target["ticker"])
+        # 종목이 바뀌면 이전 주문 버튼이 새 종목을 가리키지 않도록 별도 전략으로 저장한다.
+        target_id = sid if previous and previous["ticker"] == target["ticker"] else f"s{uuid4().hex[:8]}"
+        planned[target_id] = target
 
     collection = _settings_collection()
-    sent_log = (collection.find_one({"_id": _SETTINGS_KEY}, {"sent_log": 1}) or {}).get("sent_log") or {}
+    stored = collection.find_one({"_id": _SETTINGS_KEY}, {"sent_log": 1, "accounts": 1}) or {}
+    sent_log = stored.get("sent_log") or {}
+    account_settings: dict[str, Any] = {"slack_enabled": slack_enabled}
+    # 공유 DB에서 구버전 배치가 읽는 동안만 기존 계좌 형식을 유지한다.
+    if any("pools" in account for account in (stored.get("accounts") or {}).values()):
+        account_settings["pools"] = sorted({entry["pool"] for entry in planned.values()})
     unset: dict[str, str] = {}
     for sid, entry in current.items():
         if sid not in planned:
             unset.update({f"strategies.{sid}": "", **_sent_log_unset(sent_log, sid)})
-        elif planned[sid]["ticker"] != entry["ticker"]:
-            # 종목이 바뀌면 이전 보유 상태로 새 신호를 판정하지 않게 알림 기록을 비운다.
+        elif planned[sid]["pool"] != entry["pool"]:
+            # 이전 가격 출처의 알림 중복 방지 기록은 새 출처에 적용하지 않는다.
             unset.update(_sent_log_unset(sent_log, sid))
     update: dict[str, Any] = {
         "$set": {
             "updated_at": datetime.now().isoformat(),
-            f"accounts.{account_id}": {"pools": pool_names, "slack_enabled": slack_enabled},
+            f"accounts.{account_id}": account_settings,
             **{f"strategies.{sid}": target for sid, target in planned.items()},
         }
     }
@@ -643,17 +633,26 @@ def _build_views(strategies: dict[str, dict[str, Any]], *, fresh: bool) -> list[
     from utils.account_settings_store import load_account_docs
 
     names = {doc["account_id"]: str(doc.get("name") or doc["account_id"]) for doc in load_account_docs()}
+    active_pools = set(eligible_pools()) if strategies else set()
+    source_tickers = {
+        pool: _pool_etfs(pool) for pool in {entry["pool"] for entry in strategies.values()} & active_pools
+    }
     views: list[dict[str, Any]] = []
     for sid, entry in strategies.items():
         account_id = entry["account_id"]
         account_ledgers = ledgers[account_id]
-        if isinstance(account_ledgers, str):
+        if entry["ticker"] not in source_tickers.get(entry["pool"], {}):
+            view = _failed_view(sid, entry, f"가격 출처 '{entry['pool']}'에 종목이 없습니다. 종목을 다시 선택하세요.")
+        elif isinstance(account_ledgers, str):
             view = _failed_view(sid, entry, account_ledgers)
         elif isinstance(ledger := account_ledgers[entry["ticker"]], LedgerError):
             view = _failed_view(sid, entry, ledger)
         else:
             state = states[account_id]
-            view = _build_strategy_view(sid, entry, state["closes"], ledger, state["cash_krw"])
+            try:
+                view = _build_strategy_view(sid, entry, state["closes"], ledger, state["cash_krw"])
+            except RuntimeError as error:
+                view = _failed_view(sid, entry, str(error))
         # 운용 계좌 — 화면 카드 머리·슬랙 문구·주문 계좌가 이것을 쓴다.
         views.append({**view, "account_id": account_id, "account_name": names.get(account_id, account_id)})
     return views
@@ -683,29 +682,18 @@ def strategy_entry(strategy_id: str) -> dict[str, Any]:
 
 
 def _trade_account_docs() -> list[dict[str, Any]]:
-    """사고팔기를 운영할 수 있는 계좌 — 증권사 API 연동(나무·메리츠)이 저장된 운영 계좌 중 붙일 수 있는 종목풀이 있는 국가."""
+    """증권사 API가 연동된 한국 운영 계좌."""
     from utils.account_settings_store import load_live_account_docs
-    from utils.pool_strategy_use import pool_options
 
-    countries = {option["country_code"] for option in pool_options(eligible_pools())}
     return [
         doc
         for doc in load_live_account_docs()
-        if (doc.get("broker_api") or {}).get("provider")
-        and str(doc.get("country_code") or "").strip().lower() in countries
+        if (doc.get("broker_api") or {}).get("provider") and str(doc.get("country_code") or "").strip().lower() == "kor"
     ]
 
 
-def _attachable_pools(doc: dict[str, Any]) -> list[dict[str, Any]]:
-    """그 계좌에 붙일 수 있는 종목풀 — 사고팔기 대상 풀(한국 ETF) 중 계좌와 같은 국가(화면 셀렉트 정보)."""
-    from utils.pool_strategy_use import pool_options
-
-    country = str(doc.get("country_code") or "").strip().lower()
-    return [option for option in pool_options(eligible_pools()) if option["country_code"] == country]
-
-
 def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
-    """화면용 — 사고팔기 계좌 목록과, 고른 계좌의 슬랙 스위치·붙인 종목풀·전략 설정·운용 현황.
+    """화면용 — 사고팔기 계좌 목록과, 고른 계좌의 슬랙 스위치·전략 설정·운용 현황.
 
     ``account_id`` 가 None 이면 첫 계좌를 보여준다. 운영할 수 있는 계좌가 없으면 ``account_id`` 는 None 이다.
     """
@@ -713,10 +701,13 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
     if account_id is not None and account_id not in {doc["account_id"] for doc in docs}:
         raise ValueError(f"'{account_id}' 는 사고팔기를 운영할 수 있는 계좌가 아닙니다(증권사 API 연동 필요).")
     selected = account_id if account_id is not None else (docs[0]["account_id"] if docs else None)
-    doc = next((doc for doc in docs if doc["account_id"] == selected), None)
     settings = load_settings()
-    account = settings["accounts"].get(selected or "", {"pools": [], "slack_enabled": False})
+    account = settings["accounts"].get(selected or "", {"slack_enabled": False})
     mine = {sid: entry for sid, entry in settings["strategies"].items() if entry["account_id"] == selected}
+    from utils.pool_strategy_use import pool_options
+
+    pools = eligible_pools() if selected is not None else []
+    options = _etf_options(pools)
     return {
         "account_options": [
             {
@@ -731,9 +722,8 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
         "slack_enabled": account["slack_enabled"],
         # 계좌 현금(잔고 동기화 값)과 계좌 평가액 대비 비율 — 다음 회차를 살 수 없으면 한도 소진이다.
         "cash": _cash_summary(selected) if selected is not None else None,
-        "pool_options": _attachable_pools(doc) if doc is not None else [],
-        # 이 계좌에 붙인 종목풀 — 붙인 순서.
-        "pools": account["pools"],
+        "pool_options": pool_options(pools),
+        "etf_options": [options[ticker] for ticker in sorted(options)],
         # 편집 표의 행 — 저장된 전략 설정 그대로.
         "configs": [
             {
