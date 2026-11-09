@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from utils.batch_queue import LOCAL_ONLY_JOBS
+from utils.batch_queue import KOREAN_TRADING_DAY_JOBS, LOCAL_ONLY_JOBS
 from utils.db_manager import get_db_connection
 from utils.env import load_env_if_present
 from utils.ticker_registry import load_ticker_type_configs
@@ -50,12 +50,15 @@ _WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
 _WEEKDAYS_TUE_SAT = [1, 2, 3, 4, 5]
 _WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6]
 
-# 증권사 잔고 동기화 — 평일 09:00~15:40 5분 간격. 마지막 회는 장 마감 후다.
+# 증권사 잔고 동기화 — 마지막 회는 시간외장 마감 후다.
 _BROKER_SYNC_SLOTS = [
     {"hour": hour, "minute": minute}
-    for hour in range(9, 16)
+    for hour in range(9, 21)
     for minute in range(0, 60, 5)
-    if (hour, minute) <= (15, 40)
+    if (hour, minute) <= (20, 10)
+]
+_SLACK_ORDER_RESULT_SLOTS = [
+    {"hour": hour, "minute": minute} for hour in range(9, 21) for minute in range(60) if (hour, minute) <= (20, 20)
 ]
 
 # 미국 장중 10분 슬롯 — 22:40~23:50 + 00:00~05:50 KST. 서머타임(22:30~05:00)과 겨울(23:30~06:00) 정규장을
@@ -73,6 +76,12 @@ _INTRADAY_10MIN_SLOTS = [
     for hour in range(9, 16)
     for minute in range(0, 60, 10)
     if (hour, minute) >= (9, 10) and (hour, minute) <= (15, 20)
+]
+_STRATEGY_TRADE_SLOTS = [
+    *_INTRADAY_10MIN_SLOTS,
+    {"hour": 15, "minute": 40},
+    {"hour": 15, "minute": 50},
+    *({"hour": hour, "minute": minute} for hour in range(16, 20) for minute in range(0, 60, 10)),
 ]
 
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
@@ -135,9 +144,8 @@ SCHEDULE_ROWS = [
         "group": "증권사 연동",
         "job": "증권사 잔고 동기화",
         "target": "API 연동(broker_api) 저장된 계좌",
-        "cadence": "평일 09:00~15:40 KST 5분 간격",
+        "cadence": "한국 거래일 09:00~20:10 KST 5분 간격",
         "command": "python scripts/broker_balance_sync.py",
-        # 15:40 마지막 회가 마감(15:30) 후 확정 상태를 담는다. 실패 슬랙은 시작·복구 1회씩.
         "schedule": {"slots": _BROKER_SYNC_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
@@ -147,10 +155,9 @@ SCHEDULE_ROWS = [
         "job": "전략 사고팔기 알림",
         "target": "계좌에 등록한 종목별 사고팔기 전략 (슬랙 켠 계좌만 발송, 원장은 전 계좌 계산)",
         "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:10~15:20 KST 10분 간격",
+        "cadence": "한국 거래일 09:10~19:50 KST 10분 간격 (15:30 제외)",
         "command": "python scripts/strategy_trade_notify.py",
-        # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
-        "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+        "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "no": 7,
@@ -158,9 +165,9 @@ SCHEDULE_ROWS = [
         "group": "증권사 연동",
         "job": "슬랙 주문 결과 알림",
         "target": "슬랙 메시지로 낸 주문 — 운영·모의 (진행 중인 것이 없으면 조회 없이 종료)",
-        "cadence": "평일 09:00~15:59 KST 1분 간격",
+        "cadence": "한국 거래일 09:00~20:20 KST 1분 간격",
         "command": "python scripts/slack_mock_order_notify.py",
-        "schedule": {"minutes": list(range(60)), "hours": list(range(9, 16)), "weekdays": _WEEKDAYS_MON_FRI},
+        "schedule": {"slots": _SLACK_ORDER_RESULT_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     # ③ 장중 실행 — 장중에 도는 알림들.
     {
@@ -535,7 +542,7 @@ def _parse_kst_datetime(value: str) -> datetime | None:
         return None
 
 
-def _compute_next_run(schedule: dict | None) -> datetime | None:
+def _compute_next_run(schedule: dict | None, *, job_name: str) -> datetime | None:
     """주어진 스케줄에 맞는 가장 가까운 다음 실행 시각(KST)을 반환한다.
 
     minutes×hours 교차곱으로 표현 못 하는 시각(예: 09:20·15:35)은 ``slots``
@@ -546,6 +553,9 @@ def _compute_next_run(schedule: dict | None) -> datetime | None:
     """
     if not schedule:
         return None
+    from utils.trading_calendar import is_trading_day
+
+    korean_trading_day_only = job_name in KOREAN_TRADING_DAY_JOBS
     weekdays = sorted(set(int(w) for w in schedule.get("weekdays", [])))
     if not weekdays:
         return None
@@ -562,7 +572,11 @@ def _compute_next_run(schedule: dict | None) -> datetime | None:
         end = candidate + timedelta(days=8)
         while candidate < end:
             slot_weekdays = slot_rules.get((candidate.hour, candidate.minute))
-            if slot_weekdays is not None and candidate.weekday() in slot_weekdays:
+            if (
+                slot_weekdays is not None
+                and candidate.weekday() in slot_weekdays
+                and (not korean_trading_day_only or is_trading_day("kor", candidate))
+            ):
                 return candidate
             candidate += timedelta(minutes=1)
         return None
@@ -577,7 +591,7 @@ def _compute_next_run(schedule: dict | None) -> datetime | None:
     # 최대 8일까지 탐색 (어떤 weekday/hour/minute 조합이라도 이 범위 내에 반드시 매치)
     end = candidate + timedelta(days=8)
     while candidate < end:
-        if candidate.weekday() in weekdays:
+        if candidate.weekday() in weekdays and (not korean_trading_day_only or is_trading_day("kor", candidate)):
             if candidate.hour in hours:
                 if candidate.minute in minutes:
                     return candidate
@@ -1335,13 +1349,15 @@ def load_system_data() -> dict[str, object]:
         "batch_queue": serialized_queue,
         "is_deploying": is_deploying(),
         "last_run_by_job": {row["key"]: _read_last_job_run(str(row["key"])) for row in SCHEDULE_ROWS},
-        "next_run_by_job": {row["key"]: _build_next_run_payload(row.get("schedule")) for row in SCHEDULE_ROWS},
+        "next_run_by_job": {
+            row["key"]: _build_next_run_payload(row.get("schedule"), job_name=row["key"]) for row in SCHEDULE_ROWS
+        },
         "estimated_by_job": estimated_by_job,
     }
 
 
-def _build_next_run_payload(schedule: dict | None) -> dict[str, str | None]:
-    next_run = _compute_next_run(schedule)
+def _build_next_run_payload(schedule: dict | None, *, job_name: str) -> dict[str, str | None]:
+    next_run = _compute_next_run(schedule, job_name=job_name)
     if next_run is None:
         return {"at": None, "display": "-"}
     return {

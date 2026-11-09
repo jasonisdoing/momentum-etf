@@ -31,6 +31,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from utils.logger import get_app_logger
+from utils.market_session import REGULAR, is_instrument_trading_time, market_session
 from utils.order_confirm import build_confirm_line, pop_filled
 from utils.strategy_trade_service import load_views_where, refresh_all_ledgers
 
@@ -387,7 +388,7 @@ def _send_order_messages(strategy_view: dict[str, Any], triggers: list[dict[str,
     """신호 메시지(signal_ts)에 실린 신호의 회차별 주문 메시지를 그 스레드로 보낸다(주문이 이미 있는 회차는 제외) — 신호 메시지는 이미 나갔으므로 실패해도 신호는 유지하고 실패 건수를 돌려준다."""
     from utils.slack_mock_orders import send_signal_order_messages
 
-    if not triggers:
+    if not triggers or market_session("kor", now=datetime.now(KST))["session"] != REGULAR:
         return 0
     try:
         send_signal_order_messages(strategy_view, triggers, signal_ts)
@@ -413,19 +414,29 @@ def _log_entry(trigger: dict[str, Any], held_counts: dict[str, int], stamp: str,
     }
 
 
+def _can_notify(strategy_view: dict[str, Any], now: datetime) -> bool:
+    return is_instrument_trading_time("kor", strategy_view["instrument_kind"], now=now)
+
+
+def _send_live_message(strategy_view: dict[str, Any], text: str, *, thread_ts: str | None = None) -> str | None:
+    from utils.strategy_trade_threads import send_thread_message
+
+    if not _can_notify(strategy_view, datetime.now(KST)):
+        return None
+    return send_thread_message(text, thread_ts=thread_ts)
+
+
 def _send_confirms(
     strategy_view: dict[str, Any], pendings: list[dict[str, Any]], sent_log: dict[str, dict[str, Any]]
 ) -> tuple[int, int]:
     """체결 확인을 신호를 알린 메시지의 스레드로 보낸다 — (보낸 메시지 수, 실패 수). 못 보낸 확인은 기록에 되돌린다."""
-    from utils.strategy_trade_threads import send_thread_message
-
     groups: dict[str, list[dict[str, Any]]] = {}
     for pending in pendings:
         groups.setdefault(pending["signal_ts"], []).append(pending)
     sent = failed = 0
     for root, group in groups.items():
         text = "\n".join(_confirm_line(pending, strategy_view["index"]) for pending in group)
-        if send_thread_message(text, thread_ts=root):
+        if _send_live_message(strategy_view, text, thread_ts=root):
             sent += 1
         else:
             failed += 1
@@ -444,15 +455,15 @@ def _send_repeats(
 
     뿌리 메시지가 기록에 없는 옛 이력은 채널에 새로 올리고 그 메시지를 뿌리로 삼는다.
     """
-    from utils.strategy_trade_threads import send_thread_message
-
     groups: dict[str | None, list[dict[str, Any]]] = {}
     for trigger in repeats:
         groups.setdefault(sent_log[_trigger_key(trigger)].get("signal_ts"), []).append(trigger)
     sent = failed = order_failed = 0
     delivered: list[dict[str, Any]] = []
     for root, group in groups.items():
-        ts = send_thread_message("\n".join(build_repeat_line(trigger) for trigger in group), thread_ts=root)
+        ts = _send_live_message(
+            strategy_view, "\n".join(build_repeat_line(trigger) for trigger in group), thread_ts=root
+        )
         if not ts:
             failed += 1
             continue
@@ -472,7 +483,6 @@ def notify_strategy_trade() -> dict[str, Any]:
         ``{"sent": bool, "reason": str, "triggers": [...]}``
     """
     from utils.strategy_trade_orders import active_order_keys
-    from utils.strategy_trade_threads import send_thread_message
 
     # 화면이 읽는 회차 원장을 슬랙 스위치와 무관하게 먼저 새로 계산해 저장한다 — 아래 판정도 이 저장본을 쓴다.
     for key, message in refresh_all_ledgers().items():
@@ -484,9 +494,18 @@ def notify_strategy_trade() -> dict[str, Any]:
         return {"sent": False, "reason": "슬랙이 켜진 계좌를 고른 사고팔기 전략이 없습니다.", "triggers": []}
     for sid, message in view["errors"].items():
         logger.error("사고팔기 운용 현황 실패(%s) — 이 전략은 건너뜁니다: %s", sid, message)
-    triggers = [t for s in view["strategies"] for t in collect_triggers(s)]
 
     now = datetime.now(KST)
+    open_strategies = [strategy for strategy in view["strategies"] if _can_notify(strategy, now)]
+    if not open_strategies:
+        reason = (
+            "거래 가능 시간인 사고팔기 종목이 없습니다." if view["strategies"] else "운용 현황을 확인할 수 없습니다."
+        )
+        return {"sent": False, "reason": reason, "triggers": []}
+    deferred_ids = {strategy["strategy_id"] for strategy in view["strategies"]} - {
+        strategy["strategy_id"] for strategy in open_strategies
+    }
+    triggers = [trigger for strategy in open_strategies for trigger in collect_triggers(strategy)]
     today = now.strftime("%Y-%m-%d")
     sent_log = _load_sent_log()
 
@@ -499,7 +518,7 @@ def notify_strategy_trade() -> dict[str, Any]:
     #    이 검사는 트리거 유무와 무관하게 돌아야 한다: 주문을 넣는 순간 그 회차가 보유로 바뀌어
     #    바로 그 트리거가 사라지므로, 신호가 있을 때만 검사하면 확인은 영영 나가지 못한다.
     #    지금 전략 목록에 없는 전략의 기록은 체결 여부를 알 수 없어 건드리지 않는다.
-    held_counts = _held_counts(view)
+    held_counts = _held_counts({"strategies": open_strategies})
     confirmed = pop_filled(
         sent_log,
         lambda pending: str(pending.get("strategy_id")) in held_counts
@@ -507,14 +526,12 @@ def notify_strategy_trade() -> dict[str, Any]:
     )
 
     # 주문이 이미 진행 중인 회차는 재알림하지 않는다 — 사람이 이미 처리 중이다.
-    in_flight = (
-        active_order_keys([strategy_view["strategy_id"] for strategy_view in view["strategies"]]) if triggers else set()
-    )
+    in_flight = active_order_keys([strategy["strategy_id"] for strategy in open_strategies]) if triggers else set()
     sent_count = failed_count = order_failed = 0
     fresh_all: list[dict[str, Any]] = []
     repeats_all: list[dict[str, Any]] = []
     stamp = now.isoformat()
-    for strategy_view in view["strategies"]:
+    for strategy_view in open_strategies:
         sid = strategy_view["strategy_id"]
         # ② 남은 신호 — 처음이면 전체 메시지, 이미 보냈으면 한 시간 간격으로 재알림.
         fresh: list[dict[str, Any]] = []
@@ -541,7 +558,7 @@ def notify_strategy_trade() -> dict[str, Any]:
         if fresh:
             lines.append(build_message(strategy_view, fresh))
         if lines:
-            signal_ts = send_thread_message("\n".join(lines))
+            signal_ts = _send_live_message(strategy_view, "\n".join(lines))
             if not signal_ts:
                 failed_count += 1
                 # 못 보낸 확인은 기록에 되돌려 다음 배치에서 다시 보낸다.
@@ -566,8 +583,13 @@ def notify_strategy_trade() -> dict[str, Any]:
         _save_sent_log(sent_log)
         return {"sent": False, "reason": "오늘 이미 발송한 신호입니다.", "triggers": triggers}
 
-    # 지난 날짜 이력은 정리해 문서가 커지지 않게 한다.
-    sent_log = {k: v for k, v in sent_log.items() if str(v.get("at", "")).startswith(today)}
+    # 장이 닫힌 종목과 발송에 실패한 체결 확인은 다음 배치에서 다시 처리한다.
+    retry_keys = {_trigger_key(pending) for pending in confirmed}
+    sent_log = {
+        key: entry
+        for key, entry in sent_log.items()
+        if str(entry.get("at", "")).startswith(today) or entry.get("strategy_id") in deferred_ids or key in retry_keys
+    }
     _save_sent_log(sent_log)
 
     parts = [f"메시지 {sent_count}건 발송"]

@@ -52,6 +52,9 @@ _HEARTBEAT_STALE_MINUTES = 5
 # (broker_balance_sync 는 나무증권 토큰을 DB 로 공유하므로 어느 워커든 잡아도 된다 — broker_api_service 참고)
 LOCAL_ONLY_JOBS: set[str] = {"db_backup"}
 
+# 자동 실행을 한국 증시 거래일로 제한하는 증권사 배치.
+KOREAN_TRADING_DAY_JOBS = frozenset({"broker_balance_sync", "strategy_trade_notify", "slack_mock_order_notify"})
+
 # 잡 → 레인. 레인당 running 1건(서버·로컬 합산), 레인끼리는 병렬.
 #   data  — 시세·수집 헤비(KRX·네이버·야후 외부 조회 + 가격 캐시·지표 쓰기). 가격 캐시 →
 #           지표처럼 순서 의존이 있고, 같은 소스를 동시에 치면 차단(연결 리셋)당한다.

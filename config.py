@@ -197,6 +197,28 @@ MARKET_SCHEDULES = {
     },
 }
 
+# 종목 종류별 매매 가능 구간(시장 현지 시각, 종료 시각 미포함).
+# 한국 개별주의 시간외 구간은 NXT 체결 시간, 한국 ETF는 사고팔기 정책상 KRX 정규장만 사용한다.
+_KOR_REGULAR_WINDOW = (MARKET_SCHEDULES["kor"]["open"], MARKET_SCHEDULES["kor"]["close"])
+_US_EQUITY_WINDOWS = (
+    (MARKET_SCHEDULES["us"]["premarket_open"], MARKET_SCHEDULES["us"]["open"]),
+    (MARKET_SCHEDULES["us"]["open"], MARKET_SCHEDULES["us"]["close"]),
+    (MARKET_SCHEDULES["us"]["close"], MARKET_SCHEDULES["us"]["aftermarket_close"]),
+)
+_AU_EQUITY_WINDOWS = ((MARKET_SCHEDULES["au"]["open"], MARKET_SCHEDULES["au"]["close"]),)
+INSTRUMENT_TRADING_WINDOWS = {
+    "kor": {
+        "etf": (_KOR_REGULAR_WINDOW,),
+        "stock": (
+            (MARKET_SCHEDULES["kor"]["premarket_open"], time(8, 50)),
+            _KOR_REGULAR_WINDOW,
+            (time(15, 40), MARKET_SCHEDULES["kor"]["aftermarket_close"]),
+        ),
+    },
+    "us": {"etf": _US_EQUITY_WINDOWS, "stock": _US_EQUITY_WINDOWS},
+    "au": {"etf": _AU_EQUITY_WINDOWS, "stock": _AU_EQUITY_WINDOWS},
+}
+
 # 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
 TRADING_DAYS_PER_MONTH = 20
 

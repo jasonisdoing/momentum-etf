@@ -15,7 +15,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from config import MARKET_SCHEDULES
+from config import INSTRUMENT_TRADING_WINDOWS, MARKET_SCHEDULES
 
 # 세션 코드 — 화면 문구는 프론트가 정한다(여기서는 상태만 준다).
 PREMARKET = "premarket"
@@ -103,6 +103,23 @@ def trading_day_today(country: str, now: datetime | None = None) -> date | None:
     """그 시장의 현지 오늘이 거래일이면 그 날짜, 휴장일이면 None."""
     today = market_today(country, now=now)
     return today if _is_trading_day(country, today) else None
+
+
+def is_instrument_trading_time(country: str, instrument_kind: str, *, now: datetime) -> bool:
+    """현지 거래일의 종목 종류별 매매 구간에 들어 있는지 확인한다."""
+    from utils.trading_calendar import get_trading_days
+
+    schedule = _schedule(country)
+    market = country.strip().lower()
+    try:
+        windows = INSTRUMENT_TRADING_WINDOWS[market][instrument_kind]
+    except KeyError as error:
+        raise ValueError(f"종목 종류별 거래 시간표가 없습니다: {market}/{instrument_kind}") from error
+    local = now.astimezone(ZoneInfo(schedule["timezone"]))
+    if not any(start <= local.time() < end for start, end in windows):
+        return False
+    day = local.date().isoformat()
+    return bool(get_trading_days(day, day, market))
 
 
 def aftermarket_in_daily_change(country: str) -> bool:
