@@ -50,13 +50,6 @@ _WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
 _WEEKDAYS_TUE_SAT = [1, 2, 3, 4, 5]
 _WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6]
 
-# 증권사 잔고 동기화 — 마지막 회는 시간외장 마감 후다.
-_BROKER_SYNC_SLOTS = [
-    {"hour": hour, "minute": minute}
-    for hour in range(9, 21)
-    for minute in range(0, 60, 5)
-    if (hour, minute) <= (20, 10)
-]
 _SLACK_ORDER_RESULT_SLOTS = [
     {"hour": hour, "minute": minute} for hour in range(9, 21) for minute in range(60) if (hour, minute) <= (20, 20)
 ]
@@ -144,9 +137,11 @@ SCHEDULE_ROWS = [
         "group": "증권사 연동",
         "job": "증권사 잔고 동기화",
         "target": "API 연동(broker_api) 저장된 계좌",
-        "cadence": "한국 거래일 09:00~20:10 KST 5분 간격",
+        "cadence": "월~토 24시간 10분 간격 KST (08·18·…·58분)",
         "command": "python scripts/broker_balance_sync.py",
-        "schedule": {"slots": _BROKER_SYNC_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+        # 데이터 집계(00·10·…분) 2분 전에 돌아 집계가 막 동기화된 잔고를 쓴다. 증권사 점검 시간의 실패는
+        # 실패 시작·복구 슬랙 1회씩으로 남는다.
+        "schedule": {"minutes": list(range(8, 60, 10)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
         "no": 6,
