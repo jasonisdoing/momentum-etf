@@ -63,7 +63,9 @@ def post_order(payload: PlaceOrderPayload, _: None = Depends(require_internal_to
 def post_slack_order(payload: PlaceOrderPayload, _: None = Depends(require_internal_token)) -> dict:
     """주문 메시지(버튼)를 슬랙으로 보낸다 — 주문은 슬랙의 모달 확인 뒤에 나간다."""
     try:
-        send_order_message(payload.account_id, payload.pool, payload.strategy_id, payload.side, None, None)
+        send_order_message(
+            payload.account_id, payload.pool, payload.strategy_id, payload.side, None, None, rebuy=False
+        )
     except BrokerApiError as exc:
         raise _bad_request(exc) from exc
     return {"ok": True}

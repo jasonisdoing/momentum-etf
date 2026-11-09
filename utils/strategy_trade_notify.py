@@ -109,17 +109,29 @@ def _held_counts(view: dict[str, Any]) -> dict[str, int]:
     }
 
 
-def _round_filled(pending: dict[str, Any], held_count: int) -> bool:
+def _held_fills(view: dict[str, Any]) -> dict[str, dict[int, int]]:
+    """전략별 보유 회차의 체결가 {회차: 체결가} — 매도 후 재매수의 체결 확인에 쓴다."""
+    return {
+        strategy["strategy_id"]: {row["round"]: row["fill_price"] for row in strategy["rounds"] if row["held"]}
+        for strategy in view["strategies"]
+        if "error" not in strategy
+    }
+
+
+def _round_filled(pending: dict[str, Any], held_count: int, fills: dict[int, int]) -> bool:
     """대기 중인 주문이 체결됐는지 판정한다.
 
     매수 N호는 **보유 회차 수가 N 에 닿았는지**, 매도 N호는 **N 미만으로 줄었는지**로
     본다 — 같은 종목을 회차로 나눠 담으므로(마지막 회차부터 팔림) 회차 수가 곧 상태다.
+    매도 후 재매수(``rebuy``)는 둘 다 체결되면 회차 수가 그대로라, 그 회차의 체결가가 신호 때와 달라졌는지로 본다.
     """
     round_no = pending.get("round")
     if not isinstance(round_no, int):
         return False
     if pending.get("action") != "buy":
-        return held_count < round_no
+        if held_count < round_no:
+            return True
+        return bool(pending.get("rebuy")) and fills.get(round_no) != pending.get("fill_price")
     return held_count >= round_no
 
 
@@ -139,7 +151,7 @@ def _reach_text(trigger: dict[str, Any]) -> str:
 def build_repeat_line(trigger: dict[str, Any]) -> str:
     """재알림 한 줄 — 무엇을 얼마에 사고팔지만 담는다. 본문은 첫 발송에서 이미 보냈다."""
     emoji = "🔴" if trigger["action"] == "sell" else "🔵"
-    word = "지금 매도!" if trigger["action"] == "sell" else "지금 매수!"
+    word = "지금 매도 후 재매수!" if trigger["rebuy"] else "지금 매도!" if trigger["action"] == "sell" else "지금 매수!"
     return (
         f"<!channel> {emoji} *{trigger['round']}호 {trigger['name']} {trigger['quantity']:,}주 {word}* "
         f"{_reach_text(trigger)} "
@@ -170,6 +182,9 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
                     "index_name": index["name"],
                     "index": index,
                     "profit_pct": row["profit_pct"],
+                    # 팔면 바로 다시 사게 되는 회차 — 매도 후 재매수 한 짝으로 낸다.
+                    "rebuy": row["rebuy_after_sell"],
+                    "fill_price": row["fill_price"],
                 }
             )
         # 매수는 '다음 진입 대상' 회차만 의미가 있다(회차는 순차 진행).
@@ -190,6 +205,8 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
                     "index": index,
                     "profit_pct": None,
                     "close_entry": row["close_entry"],
+                    "rebuy": False,
+                    "fill_price": None,
                 }
             )
     return triggers
@@ -207,6 +224,7 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
 
     today = datetime.now(KST).strftime("%Y-%m-%d")
     held_counts = _held_counts(view)
+    held_fills = _held_fills(view)
     sent_log = _load_sent_log()
     for strategy_id in held_counts:
         _keep_latest_buy(sent_log, strategy_id)
@@ -221,7 +239,7 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
         if entry.get("strategy_id") in held_counts
         and (sent_at := _parse_sent_at(entry.get("at"))) is not None
         and sent_at.strftime("%Y-%m-%d") == today
-        and not _round_filled(entry, held_counts[entry["strategy_id"]])
+        and not _round_filled(entry, held_counts[entry["strategy_id"]], held_fills[entry["strategy_id"]])
     }
     strategy_ids = [strategy_view["strategy_id"] for strategy_view in view["strategies"]]
     order_keys = active_order_keys(strategy_ids)
@@ -285,7 +303,8 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
 
     triggered = {(t["round"], t["action"]) for t in triggers}
     buy_count = sum(1 for t in triggers if t["action"] == "buy")
-    sell_count = sum(1 for t in triggers if t["action"] == "sell")
+    # 매도 후 재매수는 같은 수량을 다시 사므로 회차 수가 줄지 않는다.
+    sell_count = sum(1 for t in triggers if t["action"] == "sell" and not t["rebuy"])
     after_held = status["held_count"] + buy_count - sell_count
 
     # 가장 중요한 정보 — 몇 % 움직이면 사고/파는지 헤더에 바로 보여준다.
@@ -321,8 +340,9 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
         if row["held"]:
             profit_text = f"{row['profit_pct']:+.2f}%" if row["profit_pct"] is not None else "-"
             if row["sell_reached"]:
+                word = "지금 매도 후 재매수!" if row["rebuy_after_sell"] else "지금 매도!"
                 lines.append(
-                    f"🔴 {row['round']}호 {quantity} *지금 매도!* {_level(row['sell_index'])} 도달 ({profit_text})"
+                    f"🔴 {row['round']}호 {quantity} *{word}* {_level(row['sell_index'])} 도달 ({profit_text})"
                     f"{_already_sent_note(row['round'], 'sell', triggered)}"
                 )
             else:
@@ -411,6 +431,9 @@ def _log_entry(trigger: dict[str, Any], held_counts: dict[str, int], stamp: str,
         "signal_ts": signal_ts,
         # 발송 시점의 보유 회차 수 — 체결 확인은 회차 수 증감으로 판정한다(참고 기록).
         "held_count": held_counts.get(trigger["strategy_id"], 0),
+        # 매도 후 재매수 — 체결 확인은 그 회차의 체결가가 이 값에서 바뀌었는지로 본다.
+        "rebuy": trigger["rebuy"],
+        "fill_price": trigger["fill_price"],
     }
 
 
@@ -519,10 +542,13 @@ def notify_strategy_trade() -> dict[str, Any]:
     #    바로 그 트리거가 사라지므로, 신호가 있을 때만 검사하면 확인은 영영 나가지 못한다.
     #    지금 전략 목록에 없는 전략의 기록은 체결 여부를 알 수 없어 건드리지 않는다.
     held_counts = _held_counts({"strategies": open_strategies})
+    held_fills = _held_fills({"strategies": open_strategies})
     confirmed = pop_filled(
         sent_log,
         lambda pending: str(pending.get("strategy_id")) in held_counts
-        and _round_filled(pending, held_counts[str(pending.get("strategy_id"))]),
+        and _round_filled(
+            pending, held_counts[str(pending.get("strategy_id"))], held_fills[str(pending.get("strategy_id"))]
+        ),
     )
 
     # 주문이 이미 진행 중인 회차는 재알림하지 않는다 — 사람이 이미 처리 중이다.

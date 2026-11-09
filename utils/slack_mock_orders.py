@@ -37,11 +37,14 @@ from utils.strategy_trade_orders import (
     mark_signal_thread_completed,
     mark_slack_close_warned,
     mark_slack_notified,
+    pair_records,
     place_order,
+    place_swap,
     refresh_slack_order_accounts,
     refreshed_order,
     register_signal_thread,
     resolve_order,
+    resolve_swap,
     serialize_order,
 )
 from utils.strategy_trade_threads import send_thread_message
@@ -82,9 +85,24 @@ def _round_text(round_no: int | None) -> str:
     return f"{round_no}호 " if round_no is not None else ""
 
 
+def _is_swap(request: dict[str, Any]) -> bool:
+    """매도 후 재매수 한 짝의 요청인지 — 이 기능 전에 보낸 메시지의 요청에는 키가 없고, 그건 단독 주문이다."""
+    return bool(request.get("rebuy"))
+
+
 def _order_text(request: dict[str, Any]) -> str:
+    if _is_swap(request):
+        return (
+            f"{_round_text(request['round'])}{request['label']} · {request['quantity']:,}주 매도 후 재매수 "
+            "(매도 1호가에 매도 · 매수 1호가에 매수)"
+        )
     side = _SIDE_LABELS[request["side"]]
     return f"{_round_text(request['round'])}{request['label']} · {request['quantity']:,}주 × {_QUOTE_LABELS[request['side']]} 지정가 {side}"
+
+
+def _action_word(request: dict[str, Any]) -> str:
+    """메시지·모달 제목의 주문 구분 — 매수·매도, 또는 매도 후 재매수."""
+    return "매도 후 재매수" if _is_swap(request) else _SIDE_LABELS[request["side"]]
 
 
 # --- 메시지 ---------------------------------------------------------------------------------------------
@@ -96,8 +114,12 @@ def _section(request: dict[str, Any]) -> dict[str, Any]:
         "text": {
             "type": "mrkdwn",
             "text": (
-                f"*[{_env_word(request['env'])}] {_SIDE_LABELS[request['side']]} 주문*\n{_order_text(request)}\n"
-                f"버튼을 확정하는 순간의 {_QUOTE_LABELS[request['side']]}로 냅니다 ({request['ticker']})"
+                f"*[{_env_word(request['env'])}] {_action_word(request)} 주문*\n{_order_text(request)}\n"
+                + (
+                    f"팔면 바로 다시 사게 되는 회차라 같은 수량을 양쪽 호가에 함께 겁니다 ({request['ticker']})"
+                    if _is_swap(request)
+                    else f"버튼을 확정하는 순간의 {_QUOTE_LABELS[request['side']]}로 냅니다 ({request['ticker']})"
+                )
             ),
         },
     }
@@ -123,9 +145,8 @@ def _note(text: str) -> dict[str, Any]:
 
 
 def _open_blocks(request: dict[str, Any], label: str = "주문하기") -> list[dict[str, Any]]:
-    side = _SIDE_LABELS[request["side"]]
-    style = "primary" if request["side"] == "buy" else "danger"
-    return [_section(request), _button(OPEN_ACTION_ID, f"{side} {label}", style, {"request": request})]
+    style = "primary" if request["side"] == "buy" and not _is_swap(request) else "danger"
+    return [_section(request), _button(OPEN_ACTION_ID, f"{_action_word(request)} {label}", style, {"request": request})]
 
 
 def _cancel_blocks(request: dict[str, Any], order_id: str) -> list[dict[str, Any]]:
@@ -140,6 +161,27 @@ def _note_blocks(request: dict[str, Any], note: str) -> list[dict[str, Any]]:
     return [_section(request), _note(note)]
 
 
+def _pair_blocks(request: dict[str, Any], pair_id: str, note: str | None) -> list[dict[str, Any]]:
+    """매도 후 재매수 메시지 — 아직 끝나지 않은 쪽마다 취소 버튼을 단다(한쪽이 끝나도 다른 쪽 버튼은 남는다)."""
+    blocks = [_section(request)]
+    for record in pair_records(pair_id):
+        order = serialize_order(record)
+        if order["status"] in FINISHED_STATUSES:
+            continue
+        single = {**request, "side": order["side"], "rebuy": False}
+        blocks.append(
+            _button(
+                CANCEL_ACTION_ID,
+                f"{_SIDE_LABELS[order['side']]} 주문 취소하기",
+                "danger",
+                {"request": single, "order_id": order["id"]},
+            )
+        )
+    if note:
+        blocks.append(_note(note))
+    return blocks
+
+
 def _update_message(target: dict[str, Any], blocks: list[dict[str, Any]]) -> None:
     """원 메시지의 버튼·상태 줄을 교체한다."""
     WebClient(token=_require_env("SLACK_BOT_TOKEN")).chat_update(
@@ -151,11 +193,26 @@ def _update_message(target: dict[str, Any], blocks: list[dict[str, Any]]) -> Non
 
 
 def send_order_message(
-    account_id: str, pool: str, strategy_id: str, side: str, round_no: int | None, thread_ts: str | None
+    account_id: str,
+    pool: str,
+    strategy_id: str,
+    side: str,
+    round_no: int | None,
+    thread_ts: str | None,
+    *,
+    rebuy: bool,
 ) -> None:
-    """주문 메시지를 슬랙으로 보낸다(thread_ts 가 있으면 그 스레드에) — 주문은 슬랙에서 버튼과 모달 확인을 거쳐야 나간다."""
+    """주문 메시지를 슬랙으로 보낸다(thread_ts 가 있으면 그 스레드에) — 주문은 슬랙에서 버튼과 모달 확인을 거쳐야 나간다.
+
+    ``rebuy`` 는 매도 후 재매수 한 짝의 메시지다(회차 매도 신호 중 팔자마자 다시 사게 되는 경우).
+    """
     env = account_env(account_id)
-    order = resolve_order(account_id, pool, strategy_id, side, round_no, fresh=False)
+    if rebuy:
+        if side != "sell" or round_no is None:
+            raise BrokerApiError("매도 후 재매수는 회차 매도 신호에만 보냅니다.")
+        order = resolve_swap(account_id, pool, strategy_id, round_no, fresh=False)
+    else:
+        order = resolve_order(account_id, pool, strategy_id, side, round_no, fresh=False)
     request = {
         "env": env,
         "round": round_no,
@@ -166,6 +223,7 @@ def send_order_message(
         "label": order["strategy_label"],
         "ticker": order["ticker"],
         "quantity": order["quantity"],
+        "rebuy": rebuy,
     }
     if not send_thread_message(f"[{_env_word(env)}] {_order_text(request)}", _open_blocks(request), thread_ts):
         raise BrokerApiError("슬랙으로 주문 메시지를 보내지 못했습니다.")
@@ -227,6 +285,21 @@ def _order_view(request: dict[str, Any], order: dict[str, Any], target: dict[str
     return _modal_view(ORDER_CALLBACK_ID, f"{_env_word(request['env'])} {side} 주문 확인", f"{side} 주문", body, target)
 
 
+def _swap_view(request: dict[str, Any], order: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+    signal_gap = (order["sell_price"] / order["signal_price"] - 1.0) * 100.0
+    body = (
+        f"*{_order_text(request)}*\n{_account_line(request)}\n"
+        f"매도 {order['sell_price']:,}원(매도 1호가) · 매수 {order['buy_price']:,}원(매수 1호가) — "
+        f"둘 다 체결되면 1주당 {order['sell_price'] - order['buy_price']:,}원 이득\n"
+        f"매도 신호 {order['signal_price']:,.0f}원 대비 {signal_gap:+.2f}%\n"
+        f"확정하는 순간의 호가로 {_env_word(request['env'])} 계좌에 매도·매수 지정가를 함께 겁니다. "
+        "한쪽만 체결되면 오른 쪽은 판 것, 내린 쪽은 싸게 더 산 것이고 나머지는 걸린 채 기다립니다."
+    )
+    return _modal_view(
+        ORDER_CALLBACK_ID, f"{_env_word(request['env'])} 매도 후 재매수 확인", "매도·매수 주문", body, target
+    )
+
+
 def _cancel_view(request: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
     side = _SIDE_LABELS[request["side"]]
     body = f"*{_order_text(request)}*\n{_account_line(request)}\n접수된 {_env_word(request['env'])} {side} 주문을 취소합니다(일부 체결됐다면 남은 수량만 취소됩니다)."
@@ -265,14 +338,19 @@ def open_confirm_modal(payload: dict[str, Any]) -> None:
     if action["action_id"] == OPEN_ACTION_ID:
         try:
             # 슬랙 trigger_id 는 3초 안에 써야 해서 저장된 원장으로 연다 — 실제 주문 직전 검증은 `place_order` 가 새로 계산한다.
-            order = resolve_order(
-                request["account_id"],
-                request["pool"],
-                request["strategy_id"],
-                request["side"],
-                request["round"],
-                fresh=False,
-            )
+            if _is_swap(request):
+                order = resolve_swap(
+                    request["account_id"], request["pool"], request["strategy_id"], request["round"], fresh=False
+                )
+            else:
+                order = resolve_order(
+                    request["account_id"],
+                    request["pool"],
+                    request["strategy_id"],
+                    request["side"],
+                    request["round"],
+                    fresh=False,
+                )
         except RoundNotOrderableError as exc:
             _expire(target, exc)
             return
@@ -280,7 +358,7 @@ def open_confirm_modal(payload: dict[str, Any]) -> None:
             # 다시 누르면 될 수 있는 실패(수동 미체결 주문·호가 없음·연동 오류 등) — 버튼은 두고 이유만 스레드에 남긴다.
             _report_open_failure(target, exc)
             return
-        view = _order_view(request, order, target)
+        view = _swap_view(request, order, target) if _is_swap(request) else _order_view(request, order, target)
     elif action["action_id"] == CANCEL_ACTION_ID:
         view = _cancel_view(request, {**target, "order_id": value["order_id"]})
     else:
@@ -318,6 +396,9 @@ def _finish(target: dict[str, Any], order: dict[str, Any]) -> None:
     text = _final_text(order)
     send_thread_message(text, thread_ts=target["thread_ts"])
     request = target["request"]
+    if order["pair_id"] is not None:
+        _update_message(target, _pair_blocks(request, order["pair_id"], text))
+        return
     if order["status"] == "canceled" and order["filled_quantity"] == 0:
         # 다시 주문해도 서버가 회차 보유 상태·중복·안전 장치를 처음 주문과 똑같이 검사한다.
         _update_message(target, [*_open_blocks(request, "다시 주문하기"), _note(text)])
@@ -328,22 +409,58 @@ def _finish(target: dict[str, Any], order: dict[str, Any]) -> None:
 def _report_open_failure(target: dict[str, Any], exc: Exception) -> None:
     """버튼을 눌렀는데 확인 모달을 열 수 없을 때 — 이유를 스레드에 남긴다(응답 없이 끝나지 않게)."""
     request = target["request"]
-    side = f"{_env_word(request['env'])} {_SIDE_LABELS[request['side']]}"
+    side = f"{_env_word(request['env'])} {_action_word(request)}"
     send_thread_message(f"❌ {side} 주문 확인을 열 수 없습니다: {exc}", thread_ts=target["thread_ts"])
 
 
 def _expire(target: dict[str, Any], exc: Exception) -> None:
     """회차가 더는 주문 대상이 아니면 다시 눌러도 같은 결과이므로 버튼을 되살리지 않고 신호 메시지에 ❌ 를 단다."""
     request = target["request"]
-    side = f"{_env_word(request['env'])} {_SIDE_LABELS[request['side']]}"
+    side = f"{_env_word(request['env'])} {_action_word(request)}"
     send_thread_message(f"❌ {side} 주문 실패: {exc}", thread_ts=target["thread_ts"])
     _update_message(target, _note_blocks(request, "⌛ 보유 상태가 바뀌어 주문 불가"))
     if target["thread_ts"] != target["message_ts"]:
         _react("reactions_add", target["channel"], target["thread_ts"], REACTION_EXPIRED)
 
 
+def _place_swap(target: dict[str, Any]) -> None:
+    """매도 후 재매수 한 짝을 낸다 — 결과를 스레드로 알리고 메시지에 양쪽 취소 버튼을 단다."""
+    request = target["request"]
+    word = f"{_env_word(request['env'])} 매도 후 재매수"
+    _update_message(target, _note_blocks(request, "⏳ 주문 처리 중…"))
+    try:
+        result = place_swap(
+            request["account_id"],
+            request["pool"],
+            request["strategy_id"],
+            request["round"],
+            {key: target[key] for key in SLACK_TARGET_KEYS},
+        )
+    except RoundNotOrderableError as exc:
+        _expire(target, exc)
+        return
+    except Exception as exc:  # 슬랙 요청은 이미 응답했으므로 실패도 스레드로 알린다.
+        logger.exception("슬랙 매도 후 재매수 처리 실패")
+        send_thread_message(f"❌ {word} 주문 실패: {exc}", thread_ts=target["thread_ts"])
+        _update_message(target, _open_blocks(request))
+        return
+    sell, buy = result["sell"], result["buy"]
+    text = f"✅ {word} 접수: {sell['strategy_label']} {sell['quantity']:,}주 — 매도 {sell['price']:,}원"
+    if buy is not None:
+        text += f" · 매수 {buy['price']:,}원 (둘 다 체결되면 1주당 {sell['price'] - buy['price']:,}원 이득)"
+    else:
+        text += f"\n⚠️ 매수 주문은 실패했습니다(매도만 걸림): {result['buy_error']}"
+    send_thread_message(text, thread_ts=target["thread_ts"])
+    _update_message(target, _pair_blocks(request, sell["pair_id"], None))
+    if target["thread_ts"] != target["message_ts"]:
+        _react("reactions_add", target["channel"], target["thread_ts"], REACTION_PENDING)
+
+
 def _place(target: dict[str, Any]) -> None:
     request = target["request"]
+    if _is_swap(request):
+        _place_swap(target)
+        return
     side = f"{_env_word(request['env'])} {_SIDE_LABELS[request['side']]}"
     # 처리하는 동안 같은 메시지로 또 주문하지 못하게 버튼부터 걷어낸다.
     _update_message(target, _note_blocks(request, "⏳ 주문 처리 중…"))
@@ -387,7 +504,11 @@ def _cancel(target: dict[str, Any]) -> None:
         send_thread_message(f"❌ {side} 주문 취소 실패: {exc}", thread_ts=target["thread_ts"])
         # 그 사이 주문이 끝났을 수 있다 — 끝났으면 결과 알림은 배치가 하고, 아니면 취소 버튼을 되살린다.
         order = refreshed_order(request["account_id"], target["order_id"])
-        if order["status"] in FINISHED_STATUSES:
+        if order["pair_id"] is not None:
+            # 매도 후 재매수 메시지 — 다른 쪽 취소 버튼까지 다시 그린다.
+            swap = {**request, "side": "sell", "rebuy": True}
+            _update_message({**target, "request": swap}, _pair_blocks(swap, order["pair_id"], None))
+        elif order["status"] in FINISHED_STATUSES:
             _update_message(target, _note_blocks(request, "⏳ 결과 확인 중…"))
         else:
             _update_message(target, _cancel_blocks(request, target["order_id"]))
@@ -409,17 +530,19 @@ def run_submission(target: dict[str, Any]) -> None:
 
 
 def _request_of(record: dict[str, Any]) -> dict[str, Any]:
-    """주문 기록으로 메시지에 그릴 주문 내용을 만든다."""
+    """주문 기록으로 메시지에 그릴 주문 내용을 만든다 — 매도 후 재매수 한 짝이면 그 메시지(매도·재매수)의 내용이다."""
+    swap = record.get("pair_id") is not None
     return {
         "env": record["env"],
         "round": record["round"],
         "account_id": record["account_id"],
         "pool": record["pool"],
         "strategy_id": record["strategy_id"],
-        "side": record["side"],
+        "side": "sell" if swap else record["side"],
         "label": record["strategy_label"],
         "ticker": record["ticker"],
         "quantity": record["quantity"],
+        "rebuy": swap,
     }
 
 
@@ -458,7 +581,10 @@ def notify_close_approaching() -> int:
         remaining = order["quantity"] - order["filled_quantity"]
         text = f"⏰ {side} 주문이 아직 체결되지 않았습니다(미체결 {remaining:,}주). 15:30 장 마감 전에 취소하지 않으면 오늘 주문은 만료됩니다."
         send_thread_message(text, thread_ts=target["thread_ts"])
-        _update_message(target, [*_cancel_blocks(request, order["id"]), _note(text)])
+        if order["pair_id"] is not None:
+            _update_message(target, _pair_blocks(request, order["pair_id"], text))
+        else:
+            _update_message(target, [*_cancel_blocks(request, order["id"]), _note(text)])
         mark_slack_close_warned(record["_id"])
     return len(records)
 
@@ -495,6 +621,11 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
         trigger
         for trigger in triggers
         if find_duplicate_order(account_id, trigger["strategy_id"], trigger["action"], trigger["round"]) is None
+        # 매도 후 재매수는 같은 회차의 매수 주문도 걸리므로 그쪽 중복도 본다.
+        and not (
+            trigger["rebuy"]
+            and find_duplicate_order(account_id, trigger["strategy_id"], "buy", trigger["round"]) is not None
+        )
     ]
     sent = 0
     try:
@@ -506,6 +637,7 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
                 trigger["action"],
                 trigger["round"],
                 signal_ts,
+                rebuy=trigger["rebuy"],
             )
             sent += 1
     finally:

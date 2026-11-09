@@ -86,6 +86,8 @@ export type RoundRow = {
   close_entry: boolean;
   // 다음 회차를 살 계좌 현금이 없다 — 한도 소진, 이 회차는 사지 않는다.
   cash_short: boolean;
+  // 이 회차를 팔면 다음 매수선이 매도가 이상이라 바로 다시 사게 된다 — 신호를 '매도 후 재매수'로 낸다.
+  rebuy_after_sell: boolean;
   sell_reached: boolean;
   // 오늘 슬랙 신호가 나간 방향(key: 지울 때 쓰는 발송 기록 키, has_ts: 슬랙 메시지 기록이 있어 지울 수 있음), 아직 끝나지 않은 주문의 방향.
   slack_signals: SlackSignal[];
@@ -884,6 +886,7 @@ function StrategySection({
                       {row.round === status.held_count && row.sell_limit != null ? (
                         <div style={{ color: SELL_BADGE_COLOR, fontSize: "var(--fs-xs, 11px)", fontWeight: 700 }}>
                           매도 {formatNumber(row.sell_limit)}
+                          {row.rebuy_after_sell ? " 후 재매수" : ""}
                         </div>
                       ) : null}
                     </>

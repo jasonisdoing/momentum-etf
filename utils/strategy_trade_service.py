@@ -473,6 +473,14 @@ def _build_strategy_view(
         if held:
             fill = round_fills[round_no - 1]
             sell_limit = ladder.sell_limit(fill["price"], trigger_pct, kind=kind)
+            # 이 회차를 팔면 다음 매수선은 앞 회차 체결가 −간격%다. 그게 매도가 이상이면 팔자마자 다시 사게 된다 —
+            # 신호를 '매도 후 재매수' 한 짝으로 낸다(같은 수량이라 보유는 그대로, 회차 기준가만 바뀐다).
+            rebuy_after_sell = bool(
+                round_no == held_rounds
+                and round_no >= 2
+                and ladder.projected_buy_limit(round_fills[round_no - 2]["price"], 1, trigger_pct, kind=kind)
+                >= sell_limit
+            )
             rows.append(
                 {
                     "round": round_no,
@@ -493,6 +501,7 @@ def _build_strategy_view(
                     "sell_index": sell_limit,
                     # 팔 수 있는 건 마지막 보유 회차뿐이다(앞 회차는 체결가가 더 높아 먼저 닿지도 않는다).
                     "sell_reached": bool(round_no == held_rounds and sell_pending),
+                    "rebuy_after_sell": rebuy_after_sell,
                     "buy_reached": False,
                     "close_entry": False,
                     "cash_short": False,
@@ -527,6 +536,7 @@ def _build_strategy_view(
                 "sell_limit": None,
                 "sell_index": None,
                 "sell_reached": False,
+                "rebuy_after_sell": False,
                 "buy_reached": bool(
                     is_next
                     and not sell_pending
