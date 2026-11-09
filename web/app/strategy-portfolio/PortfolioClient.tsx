@@ -24,7 +24,7 @@ import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { createAppGridTheme } from "../components/app-grid-theme";
-import { bucketColumn, formatSignedPct, highDrawdownColumn, rankColumn, signColor, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
+import { bucketColumn, formatSignedPct, gridSelectionColumn, highDrawdownColumn, rankColumn, signColor, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { useStockMemoSave, withTickerMemo } from "../components/useStockMemoSave";
@@ -819,16 +819,7 @@ export function PortfolioClient() {
                   enableClickSelection: false,
                 },
                 rowDragManaged: true,
-                selectionColumnDef: {
-                  width: 52,
-                  minWidth: 52,
-                  maxWidth: 52,
-                  pinned: "left",
-                  sortable: false,
-                  resizable: false,
-                  headerName: "",
-                  cellClass: "assetsSelectCell",
-                },
+                selectionColumnDef: gridSelectionColumn,
                 onSelectionChanged: (event) =>
                   setSelected(
                     event.api

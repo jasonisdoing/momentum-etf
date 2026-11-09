@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { ColDef } from "ag-grid-community";
 
+import { gridSelectionColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
 import AccountSelect, { type AccountOptionBase } from "../components/AccountSelect";
@@ -10,6 +11,7 @@ import { SlackAlarmField } from "../components/SlackAlarmField";
 import { readRememberedTradeAccountId, writeRememberedTradeAccountId } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
+import { GridToolbarButton } from "../components/GridToolbarButton";
 import { AppModal } from "../components/AppModal";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
@@ -122,8 +124,6 @@ export type FailedStrategy = {
 /** 저장된 전략 설정 한 줄 — 편집 표의 행. */
 type StrategyConfigRow = {
   strategy_id: string;
-  /** 전략의 가격 출처. */
-  pool: string;
   ticker: string;
   name: string;
   trigger_pct: number;
@@ -331,9 +331,7 @@ type DraftRow = {
   key: string;
   strategy_id: string | null;
   ticker: string;
-  tickerName: string;
-  pool: string | null;
-  reselectSource: boolean;
+  name: string;
   pct: string;
   qty: string;
   rounds: string;
@@ -350,9 +348,7 @@ function rowFromConfig(config: StrategyConfigRow): DraftRow {
     key: config.strategy_id,
     strategy_id: config.strategy_id,
     ticker: config.ticker,
-    tickerName: config.name,
-    pool: config.pool,
-    reselectSource: false,
+    name: config.name,
     pct: String(config.trigger_pct),
     qty: String(config.round_quantity),
     rounds: String(config.rounds),
@@ -362,11 +358,11 @@ function rowFromConfig(config: StrategyConfigRow): DraftRow {
 /** 변경 비교용 — 입력 중 문자열을 저장 값 모양으로 맞춘다. */
 function comparableDrafts(rows: DraftRow[]) {
   return rows.map((row) => [
-    row.strategy_id, row.ticker, row.reselectSource, Number(row.pct), Number(row.qty), Number(row.rounds),
+    row.strategy_id, row.ticker, Number(row.pct), Number(row.qty), Number(row.rounds),
   ]);
 }
 
-type TradeListRow = DraftRow & { heldRounds: string };
+type TradeListRow = DraftRow & { held: boolean; heldRounds: string };
 const tradeGridTheme = createAppGridTheme();
 
 const tradeSettingColumns = [
@@ -390,7 +386,8 @@ function AccountSettingsCard({
 }) {
   const toast = useToast();
   const [drafts, setDrafts] = useState<DraftRow[]>(() => view.configs.map(rowFromConfig));
-  const [picker, setPicker] = useState<{ rowKey: string | null } | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<{ accountId: string; ticker: string } | null>(null);
   const [slack, setSlack] = useState(view.slack_enabled);
@@ -400,7 +397,7 @@ function AccountSettingsCard({
   // 서버가 최신 값을 돌려주면(저장·계좌 전환) 초안도 그 값으로 맞춘다.
   useEffect(() => {
     setDrafts(view.configs.map(rowFromConfig));
-    setPicker(null);
+    setPickerOpen(false);
     setSlack(view.slack_enabled);
   }, [view]);
 
@@ -419,13 +416,9 @@ function AccountSettingsCard({
     setDrafts((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)));
   }, []);
 
-  const openPicker = (rowKey: string | null) => {
-    setSearch("");
-    setPicker({ rowKey });
-  };
   const query = search.trim().toLowerCase();
-  const usedTickers = new Set(drafts.filter((row) => row.key !== picker?.rowKey).map((row) => row.ticker));
-  const candidates = picker
+  const usedTickers = new Set(drafts.map((row) => row.ticker));
+  const candidates = pickerOpen
     ? view.ticker_options.filter(
         (option) =>
           !usedTickers.has(option.ticker) &&
@@ -445,6 +438,7 @@ function AccountSettingsCard({
     const strategy = row.strategy_id ? strategiesById.get(row.strategy_id) : undefined;
     return {
       ...row,
+      held: Boolean(strategy && strategy.ticker === row.ticker && !("error" in strategy) && strategy.status.held_quantity > 0),
       heldRounds: !strategy || strategy.ticker !== row.ticker
         ? "미저장"
         : "error" in strategy ? "오류" : `${strategy.status.held_count}/${strategy.config.rounds}`,
@@ -452,8 +446,8 @@ function AccountSettingsCard({
   }), [drafts, strategiesById]);
 
   const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
-    { field: "tickerName", headerName: "종목명", flex: 1, minWidth: 106, tooltipField: "tickerName" },
-    { field: "ticker", headerName: "티커", width: 82 },
+    tickerColumn<TradeListRow>(),
+    stockNameColumn<TradeListRow>({ nameOptions: (row) => ({ isHeld: row?.held }) }),
     { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
     ...tradeSettingColumns.map((column): ColDef<TradeListRow> => ({
       ...column,
@@ -461,56 +455,23 @@ function AccountSettingsCard({
       editable: !saving,
       cellClass: saving ? undefined : "appEditableCell",
     })),
-    {
-      colId: "actions",
-      headerName: "관리",
-      width: 111,
-      sortable: false,
-      cellRenderer: ({ data }: { data?: TradeListRow }) => {
-        if (!data) return null;
-        const pool = data.pool;
-        const missingPool = pool && !data.reselectSource && !view.ticker_options.some(
-          (option) => option.ticker === data.ticker && option.pools.includes(pool),
-        );
-        return (
-          <div className="d-flex align-items-center gap-1 h-100">
-            <button type="button" className={`btn btn-sm px-1 py-0 ${missingPool ? "btn-outline-danger" : "btn-outline-secondary"}`}
-              aria-label={`${data.tickerName} 종목 변경`}
-              title={missingPool ? "가격 출처를 다시 선택하세요" : data.pool ? poolLabel(data.pool) : "종목 변경"}
-              disabled={saving} onClick={() => {
-                setSearch("");
-                setPicker({ rowKey: data.key });
-              }}>변경</button>
-            <button type="button" className="btn btn-sm btn-outline-danger px-1 py-0"
-              aria-label={`${data.tickerName} 삭제`} disabled={saving}
-              onClick={() => setDrafts((rows) => rows.filter((row) => row.key !== data.key))}>삭제</button>
-          </div>
-        );
-      },
-    },
-  ], [poolLabel, saving, view.ticker_options]);
+  ], [saving]);
 
   const selectTicker = (option: TickerOption) => {
-    if (!picker || usedTickers.has(option.ticker)) return;
-    const row = drafts.find((item) => item.key === picker.rowKey);
-    if (row) {
-      const previous = view.configs.find((config) => config.strategy_id === row.strategy_id);
-      updateRow(row.key, {
-        ticker: option.ticker,
-        tickerName: option.name,
-        pool: previous?.ticker === option.ticker ? previous.pool : null,
-        reselectSource: previous?.ticker === option.ticker && !option.pools.includes(previous.pool),
-      });
-    } else {
-      const key = nextDraftKey();
-      setDrafts((prev) => [
-        ...prev,
-        { key, strategy_id: null, ticker: option.ticker, tickerName: option.name,
-          pool: null, reselectSource: false, pct: "5", qty: "", rounds: "4" },
-      ]);
-    }
+    if (!pickerOpen || usedTickers.has(option.ticker)) return;
+    const key = nextDraftKey();
+    setDrafts((prev) => [
+      ...prev,
+      { key, strategy_id: null, ticker: option.ticker, name: option.name, pct: "5", qty: "", rounds: "4" },
+    ]);
     setSelection({ accountId, ticker: option.ticker });
-    setPicker(null);
+    setPickerOpen(false);
+  };
+
+  const deleteChecked = () => {
+    const checked = new Set(checkedKeys);
+    setDrafts((rows) => rows.filter((row) => !checked.has(row.key)));
+    setCheckedKeys([]);
   };
 
   const handleAccountChange = useCallback(
@@ -524,7 +485,7 @@ function AccountSettingsCard({
   const save = useCallback(async () => {
     const strategies = [];
     for (const row of drafts) {
-      const label = row.tickerName || row.ticker || "새 전략";
+      const label = row.name || row.ticker || "새 전략";
       const pct = Number(row.pct);
       const qty = Number(row.qty);
       const rounds = Number(row.rounds);
@@ -538,7 +499,6 @@ function AccountSettingsCard({
       strategies.push({
         ...(row.strategy_id ? { strategy_id: row.strategy_id } : {}),
         ticker: row.ticker,
-        ...(row.reselectSource ? { reselect_source: true } : {}),
         trigger_pct: pct,
         round_quantity: qty,
         rounds,
@@ -608,29 +568,27 @@ function AccountSettingsCard({
               </div>
               <div className="appMainHeaderRight">
                 <UnsavedChangesBadge show={isDirty} />
-                <button
-                  type="button"
-                  className="btn btn-sm btn-outline-secondary"
+                <GridToolbarButton
+                  variant="add"
                   disabled={saving || view.ticker_options.length === 0}
-                  onClick={() => openPicker(null)}
+                  onClick={() => {
+                    setSearch("");
+                    setPickerOpen(true);
+                  }}
                 >
-                  + 종목 추가
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
-                  disabled={saving || !isDirty}
-                  onClick={() => void save()}
-                >
-                  <span>{saving ? "저장 중…" : "저장"}</span>
-                </button>
+                  종목 추가
+                </GridToolbarButton>
+                <GridToolbarButton variant="save" disabled={saving || !isDirty} onClick={() => void save()}>
+                  {saving ? "저장 중…" : "저장"}
+                </GridToolbarButton>
+                <GridToolbarButton variant="delete" disabled={saving || checkedKeys.length === 0} onClick={deleteChecked} />
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="appSection strategyTradeGrid">
+      <section className="appSection appEqualSplit strategyTradeGrid">
         <aside className="card appCard" aria-label="종목 목록">
           <div className="card-body appCardBodyTight">
             <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
@@ -645,7 +603,10 @@ function AccountSettingsCard({
                 height={Math.min(420, 54 + gridRows.length * 36)}
                 minHeight={76}
                 getRowId={({ data }) => data.key}
-                getRowClass={({ data }) => data?.key === selectedRow?.key ? "strategyTradeSelectedRow" : ""}
+                getRowClass={({ data }) => [
+                  stockRowClass({ held: data?.held }),
+                  data?.key === selectedRow?.key ? "strategyTradeSelectedRow" : "",
+                ].filter(Boolean).join(" ")}
                 rowClassDeps={[selectedRow?.key]}
                 gridOptions={{
                   rowHeight: 36,
@@ -654,6 +615,9 @@ function AccountSettingsCard({
                   suppressCellFocus: false,
                   stopEditingWhenCellsLoseFocus: true,
                   readOnlyEdit: true,
+                  rowSelection: { mode: "multiRow", checkboxes: true, headerCheckbox: true, enableClickSelection: false },
+                  selectionColumnDef: gridSelectionColumn,
+                  onSelectionChanged: ({ api }) => setCheckedKeys(api.getSelectedRows().map((row) => row.key)),
                   onCellEditRequest: ({ data, colDef, newValue }) => {
                     const field = colDef.field;
                     if (field === "pct" || field === "qty" || field === "rounds") {
@@ -689,7 +653,7 @@ function AccountSettingsCard({
         </div>
       </section>
 
-      <AppModal open={picker !== null} title="한국 종목 선택" onClose={() => setPicker(null)}>
+      <AppModal open={pickerOpen} title="한국 종목 선택" onClose={() => setPickerOpen(false)}>
         <input
           className="form-control mb-2"
           aria-label="종목명 또는 티커"
@@ -985,6 +949,7 @@ export function StrategyTradeClient() {
     <PageFrame title="전략 사고팔기" fullWidth>
       <div className="appPageStack">
         <AccountSettingsCard
+          key={view.account_id}
           view={view}
           accountId={view.account_id}
           onAccountChange={(next) => void load(next)}

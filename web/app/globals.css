@@ -4865,12 +4865,16 @@ a {
   padding: 1rem;
 }
 
-/* 전략 사고팔기 — 왼쪽 종목 그리드, 오른쪽 선택 종목 상세. */
-.strategyTradeGrid {
-  display: grid;
-  grid-template-columns: minmax(0, min(42rem, 49%)) minmax(0, 1fr);
+.appEqualSplit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 12px;
-  align-items: start;
+}
+
+.appEqualSplit > * {
+  flex: 1 1 340px;
+  min-width: 0;
 }
 
 .strategyTradeGrid .ag-row {
@@ -4879,12 +4883,6 @@ a {
 
 .strategyTradeGrid .ag-row.strategyTradeSelectedRow {
   background: color-mix(in srgb, var(--tblr-primary, #206bc4) 12%, transparent);
-}
-
-@media (max-width: 900px) {
-  .strategyTradeGrid {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 /* 전략·순위 화면의 보유 종목 차트 격자 — 최대 2열이고 좁아지면 1열이다.

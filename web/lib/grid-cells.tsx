@@ -3,7 +3,7 @@
  * 셀의 단일 소스. 화면별 고유 스타일(클래스 기반 색 등)은 각 화면에 남긴다.
  */
 
-import type { ColDef, ColDefField } from "ag-grid-community";
+import type { ColDef, ColDefField, SelectionColumnDef } from "ag-grid-community";
 import type React from "react";
 import type { ReactNode } from "react";
 
@@ -83,6 +83,18 @@ export function stockRowClass(options: {
   if (options.trendBroken) classes.push("appTrendBrokenRow");
   return classes.join(" ");
 }
+
+/** 그리드 왼쪽에 고정하는 선택 체크박스 열. */
+export const gridSelectionColumn: SelectionColumnDef = {
+  width: 52,
+  minWidth: 52,
+  maxWidth: 52,
+  pinned: "left",
+  sortable: false,
+  resizable: false,
+  suppressMovable: true,
+  headerName: "",
+};
 
 /** 티커 컬럼 — 티커·종목명 쌍이 있는 모든 화면이 이걸 쓴다(`stockNameColumn` 과 세트).
  *
