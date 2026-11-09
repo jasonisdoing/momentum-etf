@@ -173,7 +173,7 @@ def resolve_order(
     마지막 체결가로 내면 호가에 닿지 않아 체결이 안 되는 일이 잦다 — 상대 1호가는 바로 체결되는 가장 좋은 가격이다.
     사다리 지정가를 미리 걸지 않는다 — 사람이 버튼을 누르는 순간의 시장 호가로만 낸다.
     `round_no` 가 있으면(신호 주문) 그 회차가 지금도 주문 대상인지 확인하고, 비교용 `signal_price`(매도 목표·매수선,
-    장 마감 매수는 None)를 함께 준다. `quote_label`·`quote_quantity` 는 가격으로 쓴 호가의 이름과 그 잔량이다.
+    장 마감 매수는 None)를 함께 준다. `quote_label` 은 가격으로 쓴 호가의 이름이다.
 
     ``fresh`` 가 참이면 보유 회차를 증권사에서 새로 계산한다(수 초) — 실제 주문 직전 검증용이다. 거짓이면 배치가
     저장해 둔 것을 읽는다(1초 안팎) — 슬랙 모달은 3초 안에 열어야 해서 이쪽을 쓴다.
@@ -199,11 +199,7 @@ def resolve_order(
         row = _require_round_state(strategy, side, round_no)
         signal_price = row["sell_limit"] if side == "sell" else (None if row["close_entry"] else row["buy_limit"])
     quote = fetch_best_quote(strategy["account_id"], strategy["ticker"])
-    label, price, quantity = (
-        ("매도 1호가", quote["ask"], quote["ask_quantity"])
-        if side == "buy"
-        else ("매수 1호가", quote["bid"], quote["bid_quantity"])
-    )
+    label, price = ("매도 1호가", quote["ask"]) if side == "buy" else ("매수 1호가", quote["bid"])
     return {
         "strategy_label": strategy["label"],
         "ticker": strategy["ticker"],
@@ -211,7 +207,6 @@ def resolve_order(
         "price": price,
         "signal_price": signal_price,
         "quote_label": label,
-        "quote_quantity": quantity,
     }
 
 

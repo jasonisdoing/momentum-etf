@@ -193,7 +193,7 @@ def fetch_order_balance(account_no: str) -> dict[str, Any]:
 
 
 def fetch_best_quote(account_no: str, ticker: str) -> dict[str, Any]:
-    """종목의 1호가 — 매도·매수 1호가와 그 잔량, 호가 시각. 호가가 비어 있으면(단일가 구간 등) 주문 가격을 못 정해 오류다."""
+    """종목의 1호가 — 매도·매수 1호가와 호가 시각. 호가가 비어 있으면(단일가 구간 등) 주문 가격을 못 정해 오류다."""
     data, _ = _post(_base_url(account_no), QUOTE_PATH, {"iem_cd": ticker, "market_cd": ORDER_MARKET})
     code = str(data["rsp_cd"]) if data.get("rsp_cd") is not None else None
     if not is_business_success(code, data.get("rsp_msg")):
@@ -204,8 +204,6 @@ def fetch_best_quote(account_no: str, ticker: str) -> dict[str, Any]:
     result = {
         "ask": int(quote["askp1"]),
         "bid": int(quote["bidp1"]),
-        "ask_quantity": int(quote["askp_rsqn1"]),
-        "bid_quantity": int(quote["bidp_rsqn1"]),
         "at": str(quote["hoga_bsop_hour"]),
     }
     if result["ask"] <= 0 or result["bid"] <= 0:

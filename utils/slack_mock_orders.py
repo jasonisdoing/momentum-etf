@@ -186,14 +186,14 @@ def _modal_view(callback_id: str, title: str, submit: str, body: str, metadata: 
     }
 
 
-def _quote_warning(order: dict[str, Any]) -> str:
-    """가격으로 쓴 1호가 잔량이 주문 수량보다 적으면 일부만 체결될 수 있다고 알린다 — 막지는 않는다."""
-    if order["quote_quantity"] >= order["quantity"]:
-        return ""
-    return (
-        f"\n⚠️ {order['quote_label']} 잔량이 {order['quote_quantity']:,}주라 주문 수량 {order['quantity']:,}주보다 적습니다 — "
-        "일부만 체결되고 나머지는 대기할 수 있습니다."
-    )
+def _account_line(request: dict[str, Any]) -> str:
+    """모달에 보일 주문 계좌 — 계좌 설정의 이름과 ID."""
+    from utils.account_settings_store import load_account_docs
+
+    doc = next((doc for doc in load_account_docs() if doc["account_id"] == request["account_id"]), None)
+    if doc is None:
+        raise BrokerApiError(f"'{request['account_id']}' 계좌가 계좌 설정에 없습니다.")
+    return f"계좌: {doc.get('name') or doc['account_id']}({doc['account_id']})"
 
 
 def _signal_gap_pct(order: dict[str, Any]) -> float | None:
@@ -223,13 +223,13 @@ def _order_view(request: dict[str, Any], order: dict[str, Any], target: dict[str
         f"주문을 확정하는 순간의 {order['quote_label']}로 {_env_word(request['env'])} 계좌에 보냅니다. "
         "그 사이 호가가 움직이면 위 가격과 달라질 수 있습니다."
     )
-    body = f"*{_order_text(request)}*\n{gap}{_quote_warning(order)}\n{guide}"
+    body = f"*{_order_text(request)}*\n{_account_line(request)}\n{gap}\n{guide}"
     return _modal_view(ORDER_CALLBACK_ID, f"{_env_word(request['env'])} {side} 주문 확인", f"{side} 주문", body, target)
 
 
 def _cancel_view(request: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
     side = _SIDE_LABELS[request["side"]]
-    body = f"*{_order_text(request)}*\n접수된 {_env_word(request['env'])} {side} 주문을 취소합니다(일부 체결됐다면 남은 수량만 취소됩니다)."
+    body = f"*{_order_text(request)}*\n{_account_line(request)}\n접수된 {_env_word(request['env'])} {side} 주문을 취소합니다(일부 체결됐다면 남은 수량만 취소됩니다)."
     return _modal_view(
         CANCEL_CALLBACK_ID, f"{_env_word(request['env'])} {side} 주문 취소 확인", "주문 취소", body, target
     )

@@ -353,7 +353,7 @@ def fetch_balance(account_id: str, country_code: str) -> dict[str, Any]:
 
 
 def fetch_best_quote(account_id: str, ticker: str) -> dict[str, Any]:
-    """KRX 1호가 — 매도·매수 1호가와 그 잔량, 호가 시각. 호가가 비어 있으면 주문 가격을 못 정해 오류다(나무와 같은 표준형)."""
+    """KRX 1호가 — 매도·매수 1호가와 호가 시각. 호가가 비어 있으면 주문 가격을 못 정해 오류다(나무와 같은 표준형)."""
     data = (
         _request(
             account_id,
@@ -370,8 +370,6 @@ def fetch_best_quote(account_id: str, ticker: str) -> dict[str, Any]:
     result = {
         "ask": int(data["askp"]),
         "bid": int(data["bidp"]),
-        "ask_quantity": int(data["askp_rsqn1"]),
-        "bid_quantity": int(data["bidp_rsqn1"]),
         "at": str(data["prpr_hour"]),
     }
     if result["ask"] <= 0 or result["bid"] <= 0:

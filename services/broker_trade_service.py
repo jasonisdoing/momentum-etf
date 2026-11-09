@@ -1,7 +1,7 @@
 """사고팔기 주문 경로 — 계좌 ID 로 증권사(나무·메리츠)를 골라 잔고·호가·지정가 주문·취소·주문내역을 부른다.
 
 사고팔기·슬랙 주문·API 주문 모달은 이 모듈만 부른다. 증권사별 모듈은 같은 표준형을 돌려준다:
-잔고 `{"holdings": [{ticker, quantity, ...}]}`, 호가 `{ask, bid, ask_quantity, bid_quantity, at}`,
+잔고 `{"holdings": [{ticker, quantity, ...}]}`, 호가 `{ask, bid, at}`,
 주문 `{order_no, message}`, 주문 행(`broker_order_service._day_order_row` 모양).
 
 모든 호출은 `account_env` 를 먼저 통과한다 — 계좌 설정에 증권사 연동이 저장된 계좌만 받는다.
