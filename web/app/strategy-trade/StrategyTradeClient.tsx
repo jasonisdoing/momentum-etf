@@ -39,6 +39,8 @@ type Status = {
   // 보유 수량이 회차×회차수량과 다르면 마지막 회차는 일부만 보유 중이다 — 경고 표시용.
   quantity_mismatch: boolean;
   held_quantity: number;
+  // 다음 회차를 살 계좌 현금이 없어 매수를 멈췄다(한도 소진).
+  cash_short: boolean;
   next_round: number | null;
   next_ticker: string | null;
   next_name: string | null;
@@ -71,6 +73,8 @@ export type RoundRow = {
   buy_reached: boolean;
   // 진입선이 아니라 장 마감 매수로 닿은 1호 — 현재가로 산다.
   close_entry: boolean;
+  // 다음 회차를 살 계좌 현금이 없다 — 한도 소진, 이 회차는 사지 않는다.
+  cash_short: boolean;
   sell_reached: boolean;
   // 오늘 슬랙 신호가 나간 방향(key: 지울 때 쓰는 발송 기록 키, has_ts: 슬랙 메시지 기록이 있어 지울 수 있음), 아직 끝나지 않은 주문의 방향.
   slack_signals: SlackSignal[];
@@ -131,6 +135,8 @@ type View = {
   account_id: string | null;
   /** 이 계좌의 사고팔기 슬랙 스위치(합성 슬랙과 별개). */
   slack_enabled: boolean;
+  /** 계좌 원화 예수금(잔고 동기화 값)과 계좌 평가액 대비 비율(%) — 다음 회차를 살 수 없으면 한도 소진. */
+  cash: { cash_krw: number; pct: number | null } | null;
   /** 이 계좌에 붙일 수 있는 종목풀(계좌와 같은 국가의 한국 ETF 풀). */
   pool_options: PoolLabelSource[];
   /** 이 계좌에 붙인 종목풀 — 붙인 순서. */
@@ -601,6 +607,17 @@ function AccountSettingsCard({
                 testing={slackTesting}
                 onTest={() => void sendSlackTest()}
               />
+              {view.cash ? (
+                <label className="appLabeledField" style={{ marginBottom: 0 }}>
+                  <span className="appLabeledFieldLabel">현금</span>
+                  <span style={{ fontWeight: 700 }}>
+                    {formatNumber(view.cash.cash_krw)}원
+                    {view.cash.pct != null ? (
+                      <span style={{ color: "var(--text-muted)", fontWeight: 400 }}> ({view.cash.pct.toFixed(1)}%)</span>
+                    ) : null}
+                  </span>
+                </label>
+              ) : null}
             </div>
             <div className="appMainHeaderRight">
               <UnsavedChangesBadge show={isDirty} />
@@ -814,7 +831,9 @@ function StrategySection({
         ) : (
           <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>회차 소진 — 매도 대기</span>
         )}
-        {status.next_buy_drop_pct != null ? (
+        {status.cash_short ? (
+          <span style={actionBadgeStyle("var(--text-muted)")}>⏸ {status.next_round}호 한도 소진 — 현금 부족</span>
+        ) : status.next_buy_drop_pct != null ? (
           <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>
             {nextRow?.close_entry
               ? `📉 ${status.next_round}호 장 마감 매수!`
@@ -890,6 +909,9 @@ function StrategySection({
                 </td>
                 <td style={{ ...tdStyle, fontWeight: row.is_next ? 700 : undefined }}>
                   {formatNumber(row.buy_limit)}
+                  {row.cash_short ? (
+                    <span style={{ marginLeft: 6, color: "var(--text-muted)", fontWeight: 400 }}>한도 소진</span>
+                  ) : null}
                 </td>
                 <td style={{ ...tdStyle, fontWeight: row.sell_limit != null ? 700 : undefined }}>
                   {formatNumber(row.sell_limit)}

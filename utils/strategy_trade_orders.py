@@ -85,6 +85,9 @@ def _require_round_state(strategy: dict[str, Any], side: str, round_no: int) -> 
     if not orderable:
         word = "매도" if side == "sell" else "매수"
         raise RoundNotOrderableError(f"{strategy['label']} {round_no}호는 지금 {word}할 수 있는 회차가 아닙니다.")
+    if side == "buy" and row["cash_short"]:
+        # 현금은 잔고 동기화로 다시 늘 수 있어 회차를 만료시키지 않는다(다시 누르면 될 수 있다).
+        raise BrokerApiError(f"{strategy['label']} {round_no}호 한도 소진 — 계좌 현금으로 이 회차를 살 수 없습니다.")
     return row
 
 

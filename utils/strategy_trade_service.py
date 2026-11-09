@@ -8,7 +8,7 @@ DB(``system_config.strategy_trade_settings.strategies``)가 단일 소스이며 
 
 사고팔기는 합성과 따로 **계좌 단위로** 단독 운영한다. 증권사 API 가 연동된 운영 계좌에 종목풀(같은 국가의
 한국 ETF 풀)을 붙이고(``accounts.{계좌}.pools``) 그 아래에 전략을 둔다. 같은 풀을 여러 계좌에 붙일 수 있고
-설정은 계좌마다 따로다. 매수 한도는 없다 — 회차 수 × 회차당 수량이 전부다.
+설정은 계좌마다 따로다. 다음 회차를 계좌 원화 예수금(잔고 동기화 값)으로 살 수 없으면 한도 소진으로 사지 않는다.
 보유 현황은 전략의 운용 계좌의 **증권사 체결 이력**에서 만든다(백테스트는 없다).
 화면을 열 때마다 `strategy_trade_ledger` 가 체결을 재생해 회차별 실제 체결가를 구한다(슬랙 신호 주문·수동 주문 모두).
 
@@ -220,28 +220,36 @@ def save_account_trade(account_id: str, slack_enabled: Any, pools: Any) -> None:
     collection.update_one({"_id": _SETTINGS_KEY}, update, upsert=True)
 
 
-def _load_account_closes(account_id: str) -> dict[str, float]:
-    """계좌 보유 종목의 현재가 (전 전략 공용, 1회 조회).
+def _load_account_state(account_id: str) -> dict[str, Any]:
+    """계좌 보유 종목의 현재가와 현금 (전 전략 공용, 1회 조회).
 
-    ``load_real_holdings_table`` 은 실시간 시세를 반영한 현재가까지 채워준다. 수량·평균단가는 쓰지 않는다 —
-    보유는 증권사 체결 이력(회차 원장)이 정한다.
+    현재가는 ``load_real_holdings_table`` 이 실시간 시세로 채운 값이다. 수량·평균단가는 쓰지 않는다 —
+    보유는 증권사 체결 이력(회차 원장)이 정한다. 현금은 잔고 동기화가 저장한 값(자산 화면과 같은 값)이다 —
+    ``cash_krw`` 는 매수에 쓰는 원화 예수금, ``total_krw`` 는 보유 평가액 + 현금(원화 환산) 계좌 평가액이다.
     """
-    from utils.portfolio_io import load_real_holdings_table
+    from utils.broker_balance_sync import stored_cash_map
+    from utils.portfolio_io import load_portfolio_master, load_real_holdings_table
 
+    master = load_portfolio_master(account_id)
+    if master is None:
+        raise ValueError(f"'{account_id}' 계좌의 잔고가 저장돼 있지 않습니다 — 잔고 동기화를 먼저 돌리세요.")
+    cash_krw = stored_cash_map(master, ["KRW"])["KRW"]
     frame = load_real_holdings_table(account_id)
-    if frame is None or frame.empty:
-        return {}
-
-    ticker_column = "ticker" if "ticker" in frame.columns else "티커"
-    required = {ticker_column, "현재가"}
-    missing = required - set(frame.columns)
-    if missing:
-        raise RuntimeError(f"보유 테이블에 필요한 컬럼이 없습니다: {', '.join(sorted(missing))}")
-
+    closes: dict[str, float] = {}
+    holdings_value = 0.0
+    if frame is not None and not frame.empty:
+        missing = {"티커", "현재가", "평가금액(KRW)"} - set(frame.columns)
+        if missing:
+            raise RuntimeError(f"보유 테이블에 필요한 컬럼이 없습니다: {', '.join(sorted(missing))}")
+        for _, row in frame.iterrows():
+            ticker = str(row["티커"]).strip()
+            if ticker:
+                closes[ticker] = float(row["현재가"] or 0)
+                holdings_value += float(row["평가금액(KRW)"] or 0)
     return {
-        str(row[ticker_column]).strip(): float(row["현재가"] or 0)
-        for _, row in frame.iterrows()
-        if str(row[ticker_column]).strip()
+        "closes": closes,
+        "cash_krw": cash_krw,
+        "total_krw": holdings_value + float(master.get("cash_balance") or 0),
     }
 
 
@@ -378,8 +386,12 @@ def _build_strategy_view(
     strategy_settings: dict[str, Any],
     account_closes: dict[str, float],
     ledger: Ledger,
+    cash_krw: float,
 ) -> dict[str, Any]:
-    """전략 하나의 운용 현황(회차 표·상태)을 회차 원장에서 만든다."""
+    """전략 하나의 운용 현황(회차 표·상태)을 회차 원장에서 만든다.
+
+    ``cash_krw`` 는 계좌의 원화 예수금 — 다음 회차 금액(회차당 수량 × 매수가)을 살 수 없으면 한도 소진으로 사지 않는다.
+    """
     pool = str(strategy_settings["pool"])
     ticker = str(strategy_settings["ticker"])
     name = str(strategy_settings["name"])
@@ -441,6 +453,7 @@ def _build_strategy_view(
                     "sell_reached": bool(round_no == held_rounds and sell_pending),
                     "buy_reached": False,
                     "close_entry": False,
+                    "cash_short": False,
                     "is_next": False,
                 }
             )
@@ -452,6 +465,8 @@ def _build_strategy_view(
         else:
             buy_limit = ladder.preview_buy_limit(float(index_status["prev_close"]), round_no, trigger_pct)
         market_entry = is_next and close_entry and close > buy_limit
+        # 15:00 시장가 매수는 현재가로 사므로 그 가격으로 산 금액을 본다.
+        cash_short = bool(is_next and round_quantity * (close if market_entry else buy_limit) > cash_krw)
         rows.append(
             {
                 "round": round_no,
@@ -469,9 +484,17 @@ def _build_strategy_view(
                 "sell_limit": None,
                 "sell_index": None,
                 "sell_reached": False,
-                "buy_reached": bool(is_next and not sell_pending and close > 0 and (close <= buy_limit or close_entry)),
+                "buy_reached": bool(
+                    is_next
+                    and not sell_pending
+                    and not cash_short
+                    and close > 0
+                    and (close <= buy_limit or close_entry)
+                ),
                 # 진입선이 아니라 장 마감 매수로 닿은 1호 — 지정가 대신 현재가로 산다.
-                "close_entry": bool(market_entry),
+                "close_entry": bool(market_entry and not cash_short),
+                # 다음 회차를 살 현금이 없다 — 한도 소진, 이 회차는 사지 않는다.
+                "cash_short": cash_short,
                 "is_next": is_next,
             }
         )
@@ -522,6 +545,8 @@ def _build_strategy_view(
             # 보유 수량이 회차×수량과 다르면 마지막 회차가 부분 보유다 — 화면이 경고를 띄운다.
             "quantity_mismatch": quantity_mismatch,
             "held_quantity": quantity,
+            # 다음 회차를 살 현금이 없어 매수를 멈췄는지(한도 소진).
+            "cash_short": bool(next_row is not None and next_row["cash_short"]),
         },
         # 증권사에 걸린 우리 기록에 없는(수동) 미체결 주문 — 슬랙 주문을 막는 근거다.
         "manual_orders": list(ledger.manual_orders),
@@ -610,8 +635,8 @@ def _build_views(strategies: dict[str, dict[str, Any]], *, fresh: bool) -> list[
     """
     tickers_by_account = _tickers_by_account(strategies)
     ledgers = _account_ledgers(tickers_by_account, fresh=fresh)
-    closes_by_account = {
-        account_id: _load_account_closes(account_id)
+    states = {
+        account_id: _load_account_state(account_id)
         for account_id, account_ledgers in ledgers.items()
         if not isinstance(account_ledgers, str)
     }
@@ -627,7 +652,8 @@ def _build_views(strategies: dict[str, dict[str, Any]], *, fresh: bool) -> list[
         elif isinstance(ledger := account_ledgers[entry["ticker"]], LedgerError):
             view = _failed_view(sid, entry, ledger)
         else:
-            view = _build_strategy_view(sid, entry, closes_by_account[account_id], ledger)
+            state = states[account_id]
+            view = _build_strategy_view(sid, entry, state["closes"], ledger, state["cash_krw"])
         # 운용 계좌 — 화면 카드 머리·슬랙 문구·주문 계좌가 이것을 쓴다.
         views.append({**view, "account_id": account_id, "account_name": names.get(account_id, account_id)})
     return views
@@ -703,6 +729,8 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
         ],
         "account_id": selected,
         "slack_enabled": account["slack_enabled"],
+        # 계좌 현금(잔고 동기화 값)과 계좌 평가액 대비 비율 — 다음 회차를 살 수 없으면 한도 소진이다.
+        "cash": _cash_summary(selected) if selected is not None else None,
         "pool_options": _attachable_pools(doc) if doc is not None else [],
         # 이 계좌에 붙인 종목풀 — 붙인 순서.
         "pools": account["pools"],
@@ -720,4 +748,14 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
             for sid, entry in mine.items()
         ],
         "strategies": _build_views(mine, fresh=False),
+    }
+
+
+def _cash_summary(account_id: str) -> dict[str, Any]:
+    """화면 상단의 현금 표시 — 원화 예수금과 계좌 평가액 대비 비율(%)."""
+    state = _load_account_state(account_id)
+    total = state["total_krw"]
+    return {
+        "cash_krw": state["cash_krw"],
+        "pct": round(state["cash_krw"] / total * 100.0, 2) if total > 0 else None,
     }
