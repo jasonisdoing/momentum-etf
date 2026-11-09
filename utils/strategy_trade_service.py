@@ -375,7 +375,7 @@ def _first_entry_close_window(now: datetime | None = None) -> bool:
 
 
 def _attach_trade_history(view: dict[str, Any], ledger: Ledger, cached_days: dict[date, list[dict[str, Any]]]) -> None:
-    """날짜별 매수·매도를 체결가의 사다리 위치마다 체결 순서대로 붙인다.
+    """사다리 위치별 가격(`position_prices`)과 날짜별 매수·매도를 체결가의 위치마다 체결 순서대로 붙인다.
 
     ``trades_by_position`` = {위치: {날짜: ["buy", "sell", …]}}. 위치는 지금 1호 체결가 기준으로 체결가에 가장 가까운
     칸이다 — 매도는 판 가격 기준이라 산 칸보다 위에 찍혀 오른 만큼이 위아래로 보인다.
@@ -385,6 +385,8 @@ def _attach_trade_history(view: dict[str, Any], ledger: Ledger, cached_days: dic
     view["trades_by_position"] = trades
     first = next((row for row in view["rounds"] if row["round"] == 1 and row["held"]), None)
     if first is None:
+        # 보유가 없으면 사다리 기준(1호 체결가)이 없다 — 위치 가격은 회차의 1호 진입 미리보기 지정가다.
+        view["position_prices"] = {row["position"]: row["buy_limit"] for row in view["rounds"]}
         return
     events = round_history(ledger, view["ticker"], view["config"]["round_quantity"], cached_days)
     start = next(
@@ -399,6 +401,14 @@ def _attach_trade_history(view: dict[str, Any], ledger: Ledger, cached_days: dic
     for event in events[start:]:
         position = ladder.ladder_position(event["price"], first["fill_price"], trigger_pct)
         trades.setdefault(position, {}).setdefault(event["day"], []).append(event["side"])
+    # 위치 가격 — 회차·매매가 있는 위치 범위 전체(빈 칸 포함). 1호 체결가 × (1 − 간격%)^(k−1) 를 호가로 맞춘 값.
+    positions = [row["position"] for row in view["rounds"]] + list(trades)
+    view["position_prices"] = {
+        position: ladder.round_to_tick(
+            first["fill_price"] * ladder.down_ratio(trigger_pct) ** (position - 1), kind=view["instrument_kind"]
+        )
+        for position in range(min(positions), max(positions) + 1)
+    }
 
 
 def _build_strategy_view(

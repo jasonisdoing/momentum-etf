@@ -111,6 +111,8 @@ export type StrategyView = {
   status: Status;
   /** 사다리 위치별 · 날짜별 매수·매도(체결 순서) — 체결가에 가장 가까운 위치. 지금 사이클의 것만이다. */
   trades_by_position: Record<string, Record<string, TradeSide[]>>;
+  /** 사다리 위치별 가격 — 1호 체결가 × (1 − 간격%)^(위치−1)을 호가로 맞춘 값(보유가 없으면 회차의 1호 진입 미리보기 지정가). */
+  position_prices: Record<string, number>;
   // 체결 이력(회차 원장)을 계산한 시각 — 사고팔기 알림 배치가 갱신한다(KST ISO).
   ledger_at: string;
   rounds: RoundRow[];
@@ -719,7 +721,7 @@ function StrategySection({
   const tradeDays = [
     ...new Set(Object.values(view.trades_by_position).flatMap((byDay) => Object.keys(byDay))),
   ].sort();
-  const columnCount = 7 + tradeDays.length;
+  const columnCount = 6 + tradeDays.length;
   // 사다리 위치마다 한 행 — 회차가 없는 위치(건너뛴 칸)도 그 가격대의 매매와 함께 행으로 둬 간격을 보여 준다.
   const positions = [...view.rounds.map((row) => row.position), ...Object.keys(view.trades_by_position).map(Number)];
   const firstPosition = Math.min(...positions);
@@ -797,10 +799,9 @@ function StrategySection({
               <th style={{ ...thStyle, textAlign: "left" }}>위치</th>
               <th style={{ ...thStyle, textAlign: "left" }}>회차</th>
               <th style={{ ...thStyle, textAlign: "left" }}>상태</th>
+              <th style={thStyle}>위치 가격</th>
               <th style={thStyle}>체결가</th>
               <th style={thStyle}>손익</th>
-              <th style={thStyle}>매수 지정가</th>
-              <th style={thStyle}>매도 지정가</th>
               {tradeDays.map((day) => (
                 <th key={day} title={day} style={{ ...thStyle, textAlign: "center", whiteSpace: "nowrap" }}>
                   {Number(day.slice(5, 7))}월 {Number(day.slice(8, 10))}일
@@ -819,7 +820,9 @@ function StrategySection({
                 return (
                   <tr key={`empty-${position}`} style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
                     <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)" }}>{position}</td>
-                    <td colSpan={6} style={tdStyle} />
+                    <td colSpan={2} style={tdStyle} />
+                    <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatNumber(view.position_prices[String(position)])}</td>
+                    <td colSpan={2} style={tdStyle} />
                     {tradeCells}
                   </tr>
                 );
@@ -851,25 +854,35 @@ function StrategySection({
                 <td style={{ ...tdStyle, textAlign: "left" }}>
                   <RoundStatus row={row} onDeleteSignal={onDeleteSignal} />
                 </td>
+                <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatNumber(view.position_prices[String(position)])}</td>
                 <td style={tdStyle}>
-                  {formatNumber(row.fill_price)}
-                  {row.bought_on != null && row.source != null ? (
-                    <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-xs, 11px)" }}>
-                      {row.bought_on.slice(5)} · {BOUGHT_SOURCE_WORDS[row.source]}
-                    </div>
+                  {row.held ? (
+                    <>
+                      <span style={{ fontWeight: 700 }}>{formatNumber(row.fill_price)}</span>
+                      {row.bought_on != null && row.source != null ? (
+                        <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-xs, 11px)" }}>
+                          {row.bought_on.slice(5)} · {BOUGHT_SOURCE_WORDS[row.source]}
+                        </div>
+                      ) : null}
+                      {/* 팔 수 있는 회차(가장 깊은 보유)만 실제 매도 지정가 — 체결가 +간격%. */}
+                      {row.round === status.held_count && row.sell_limit != null ? (
+                        <div style={{ color: SELL_BADGE_COLOR, fontSize: "var(--fs-xs, 11px)", fontWeight: 700 }}>
+                          매도 {formatNumber(row.sell_limit)}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : row.is_next ? (
+                    // 다음 회차의 실제 매수 지정가 — 마지막 체결가 −간격%(위치 가격과 조금 다를 수 있다).
+                    <span style={{ color: BUY_BADGE_COLOR, fontWeight: 700 }}>
+                      다음 매수 {formatNumber(row.buy_limit)}
+                      {row.cash_short ? (
+                        <span style={{ marginLeft: 6, color: "var(--text-muted)", fontWeight: 400 }}>한도 소진</span>
+                      ) : null}
+                    </span>
                   ) : null}
                 </td>
                 <td style={{ ...tdStyle, color: signColor(row.profit_pct), fontWeight: 700 }}>
                   {formatSigned(row.profit_pct)}
-                </td>
-                <td style={{ ...tdStyle, fontWeight: row.is_next ? 700 : undefined }}>
-                  {formatNumber(row.buy_limit)}
-                  {row.cash_short ? (
-                    <span style={{ marginLeft: 6, color: "var(--text-muted)", fontWeight: 400 }}>한도 소진</span>
-                  ) : null}
-                </td>
-                <td style={{ ...tdStyle, fontWeight: row.sell_limit != null ? 700 : undefined }}>
-                  {formatNumber(row.sell_limit)}
                 </td>
                 {tradeCells}
               </tr>
