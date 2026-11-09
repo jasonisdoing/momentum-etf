@@ -11,6 +11,7 @@ import requests  # noqa: F401  # 타입 힌트/하위 호환을 위해 유지
 import yfinance as yf
 
 from services.alps_us_service import fetch_alps_us_holdings
+from services.amplify_us_service import fetch_amplify_us_holdings
 from services.ark_us_service import fetch_ark_us_holdings
 from services.direxion_us_service import fetch_direxion_us_holdings
 from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
@@ -731,6 +732,7 @@ _US_OFFICIAL_FETCHERS: dict[str, Callable[[str], dict[str, Any] | None]] = {
     "wisdomtree_us_api": fetch_wisdomtree_us_holdings,
     "schwab_us_html": fetch_schwab_us_holdings,
     "proshares_us_html": fetch_proshares_us_holdings,
+    "amplify_us_api": fetch_amplify_us_holdings,
 }
 if set(_AU_OFFICIAL_FETCHERS) != set(AU_OFFICIAL_SOURCES.values()) or set(_US_OFFICIAL_FETCHERS) != set(
     US_OFFICIAL_SOURCES.values()

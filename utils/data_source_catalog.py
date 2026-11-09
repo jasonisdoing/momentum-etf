@@ -42,6 +42,7 @@ HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "wisdomtree_us_api": "WisdomTree 미국 공식 API",
     "schwab_us_html": "Schwab 미국 공식 전체 보유",
     "proshares_us_html": "ProShares 미국 공식 전체 보유",
+    "amplify_us_api": "Amplify 미국 공식 전체 보유",
     "yfinance_holdings": "yfinance (상위 10종목)",
     "naver_etf_component": "네이버 ETF 구성종목",
 }
@@ -273,6 +274,7 @@ US_HOLDINGS_FALLBACK_ORDER: list[str] = [
     "wisdomtree_us_api",
     "schwab_us_html",
     "proshares_us_html",
+    "amplify_us_api",
     "yfinance_holdings",
 ]
 
@@ -358,6 +360,7 @@ US_OFFICIAL_SOURCES: dict[str, str] = {
     "WisdomTree": "wisdomtree_us_api",
     "Schwab": "schwab_us_html",
     "ProShares": "proshares_us_html",
+    "Amplify": "amplify_us_api",
 }
 
 
@@ -408,6 +411,10 @@ def _load_etf_rows(ticker_type: str) -> list[dict[str, Any]]:
 
 # 발행사별 행에 붙일 호출 대상·코드 위치 (수집 소스 기준).
 _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
+    "amplify_us_api": (
+        "firestore.googleapis.com → amplify-etfs-data-feed/funds/DIVO/holdings",
+        "services/amplify_us_service.py",
+    ),
     "proshares_us_html": (
         "www.proshares.com/our-etfs/strategic/nobl (공식 전체 보유 표)",
         "services/proshares_us_service.py",
@@ -512,6 +519,7 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
     ),
 }
 _SOURCE_NOTES: dict[str, str] = {
+    "amplify_us_api": "DIVO 공식 전체 보유내역을 읽고 옵션·현금과 공시 비중을 보존한다. 미연동 Amplify ETF는 Yahoo 경로를 사용한다.",
     "proshares_us_html": "NOBL 공식 전체 보유 표의 종목·기타 순자산과 공시 비중을 받는다. 미공시 비중은 그대로 유지한다. 미등록 ProShares ETF는 기존 Yahoo 경로를 사용하며, 공식 수집 실패 시 기존 데이터를 유지한다.",
     "schwab_us_html": "사이트맵의 공식 상품 페이지로 ETF를 확인하고 전체 보유 페이지를 끝까지 넘겨 주식·현금 전체를 받는다(브라우저 흉내 요청). 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "wisdomtree_us_api": "공식 ETF 목록에서 상품 ID를 확인하고 전체 주식·현금·선물 목록을 받는다(Cloudflare 때문에 브라우저 흉내 요청). 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
