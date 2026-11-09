@@ -1,4 +1,4 @@
-"""사고팔기(분할 매수·매도) 규칙 — 운용 현황 화면과 백테스트가 함께 쓰는 단일 소스.
+"""사고팔기(분할 매수·매도) 규칙 — 운용 현황 화면·슬랙 신호·주문이 함께 쓰는 단일 소스.
 
 한 종목을 매매 간격(%) 하나로 사다리처럼 나눠 산다.
 
@@ -25,11 +25,6 @@ def down_ratio(trigger_pct: float) -> float:
 
 def up_ratio(trigger_pct: float) -> float:
     return 1.0 + float(trigger_pct) / 100.0
-
-
-def next_buy_limit(last_fill: float, trigger_pct: float) -> float:
-    """다음 회차 매수 지정가 — 마지막 보유 회차 체결가에서 간격%만큼 내린 가격."""
-    return round_to_tick(last_fill * down_ratio(trigger_pct))
 
 
 def projected_buy_limit(last_fill: float, steps: int, trigger_pct: float) -> float:

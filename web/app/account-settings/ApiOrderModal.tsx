@@ -131,17 +131,16 @@ export function ApiOrderModal({
   const loadStrategies = useCallback(async () => {
     setLoadingStrategies(true);
     try {
-      const resp = await fetch("/api/strategy-trade", { cache: "no-store" });
+      // 운영 계좌는 그 계좌의 사고팔기 전략, 모의 계좌는 주문 경로 시험용이라 첫 사고팔기 계좌의 전략을 쓴다.
+      const query = isLive ? `?account_id=${encodeURIComponent(accountId)}` : "";
+      const resp = await fetch(`/api/strategy-trade${query}`, { cache: "no-store" });
       const data = (await resp.json()) as {
         strategies?: Array<StrategyView | FailedStrategy>;
         error?: string;
       };
       if (!resp.ok || data.error) throw new Error(data.error ?? "사고팔기 전략을 불러오지 못했습니다.");
       // 보유 회차를 맞추지 못한 전략은 주문 대상에서 뺀다 — 그 이유는 /strategy-trade 화면이 보여 준다.
-      // 운영 계좌는 이 계좌를 고른 전략만 — 모의 계좌는 주문 경로 시험용이라 전부.
-      const list = (data.strategies ?? []).filter(
-        (row): row is StrategyView => !("error" in row) && (!isLive || row.account_id === accountId),
-      );
+      const list = (data.strategies ?? []).filter((row): row is StrategyView => !("error" in row));
       setStrategies(list);
       setStrategyId((current) => (list.some((row) => row.strategy_id === current) ? current : (list[0]?.strategy_id ?? "")));
     } catch (err) {

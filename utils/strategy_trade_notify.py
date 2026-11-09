@@ -351,9 +351,9 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
 
 def _slack_enabled_accounts() -> set[str]:
     """사고팔기 슬랙이 켜진 계좌 — 사고팔기 화면의 계좌별 스위치(합성 슬랙과 별개)."""
-    from utils.strategy_trade_service import load_slack_accounts
+    from utils.strategy_trade_service import load_settings
 
-    return {account_id for account_id, enabled in load_slack_accounts().items() if enabled}
+    return {account_id for account_id, entry in load_settings()["accounts"].items() if entry["slack_enabled"]}
 
 
 def send_test(account_id: str) -> dict[str, Any]:
@@ -462,7 +462,7 @@ def _send_repeats(
 
 
 def notify_strategy_trade() -> dict[str, Any]:
-    """트리거를 판정해 필요할 때만 슬랙을 보낸다 — 슬리브가 붙은 계좌의 합성 슬랙이 켜진 종목풀만.
+    """트리거를 판정해 필요할 때만 슬랙을 보낸다 — 사고팔기 슬랙이 켜진 계좌의 전략만.
 
     Returns:
         ``{"sent": bool, "reason": str, "triggers": [...]}``

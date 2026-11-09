@@ -23,6 +23,28 @@ export function writeRememberedMomentumEtfAccountId(accountId: string | null | u
   window.localStorage.setItem(MOMENTUM_ETF_ACCOUNT_KEY, accountId.trim());
 }
 
+/** 사고팔기 화면의 계좌 선택 — 사고팔기 계좌(증권사 연동)만 고를 수 있어 합성 화면의 계좌 기억과 따로 둔다. */
+const TRADE_ACCOUNT_KEY = `${MOMENTUM_ETF_ACCOUNT_KEY}:strategy-trade`;
+
+export function readRememberedTradeAccountId(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const value = window.localStorage.getItem(TRADE_ACCOUNT_KEY);
+  return value && value.trim() ? value : null;
+}
+
+export function writeRememberedTradeAccountId(accountId: string | null | undefined) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (!accountId || !accountId.trim()) {
+    window.localStorage.removeItem(TRADE_ACCOUNT_KEY);
+    return;
+  }
+  window.localStorage.setItem(TRADE_ACCOUNT_KEY, accountId.trim());
+}
+
 /** 화면 이름 — 종목풀 선택은 **화면마다 따로** 기억한다.
  *
  *  예전에는 한 키를 모든 화면이 같이 썼다. 순위에서 고른 풀이 전략 화면에도 따라와 편했지만,
@@ -42,8 +64,7 @@ export type PoolScreen =
   | "market-stock-aus"
   | "strategy-momentum"
   | "strategy-new-high"
-  | "strategy-portfolio"
-  | "strategy-trade";
+  | "strategy-portfolio";
 
 function tickerTypeKey(screen: PoolScreen): string {
   return `${MOMENTUM_ETF_TICKER_TYPE_KEY}:${screen}`;
