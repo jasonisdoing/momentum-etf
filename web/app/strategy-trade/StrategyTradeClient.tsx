@@ -183,6 +183,10 @@ const BUY_BADGE_COLOR = "var(--down-color, #2f6fd0)";
 const SELL_BADGE_COLOR = "var(--up-color, #d64545)";
 
 const thStyle: React.CSSProperties = { padding: "6px 8px", textAlign: "right" };
+// 회차 표 고정 열(위치~손익)의 폭 — 날짜 열이 몇 개든 같은 폭이고, 날짜가 적으면 오른쪽이 비어 보인다.
+const ROUND_TABLE_FIXED_WIDTHS = [56, 80, 140, 100, 130, 84] as const;
+// 날짜 열의 최소 폭 — 그날 매매가 많으면 배지만큼 넓어진다.
+const ROUND_TABLE_DAY_MIN_WIDTH = 96;
 const tdStyle: React.CSSProperties = { padding: "6px 8px", textAlign: "right" };
 
 function formatNumber(value: number | null | undefined, digits = 0): string {
@@ -793,7 +797,15 @@ function StrategySection({
 
       {/* 회차 표 */}
       <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", minWidth: 600, borderCollapse: "collapse", fontSize: "var(--fs-sm)" }}>
+        <table style={{ width: "auto", borderCollapse: "collapse", fontSize: "var(--fs-sm)" }}>
+          <colgroup>
+            {ROUND_TABLE_FIXED_WIDTHS.map((width, idx) => (
+              <col key={idx} style={{ width, minWidth: width }} />
+            ))}
+            {tradeDays.map((day) => (
+              <col key={day} style={{ minWidth: ROUND_TABLE_DAY_MIN_WIDTH }} />
+            ))}
+          </colgroup>
           <thead>
             <tr style={{ color: "var(--text-muted)" }}>
               <th style={{ ...thStyle, textAlign: "left" }}>위치</th>
@@ -803,7 +815,11 @@ function StrategySection({
               <th style={thStyle}>체결가</th>
               <th style={thStyle}>손익</th>
               {tradeDays.map((day) => (
-                <th key={day} title={day} style={{ ...thStyle, textAlign: "center", whiteSpace: "nowrap" }}>
+                <th
+                  key={day}
+                  title={day}
+                  style={{ ...thStyle, textAlign: "center", whiteSpace: "nowrap", minWidth: ROUND_TABLE_DAY_MIN_WIDTH }}
+                >
                   {Number(day.slice(5, 7))}월 {Number(day.slice(8, 10))}일
                 </th>
               ))}
