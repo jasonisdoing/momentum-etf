@@ -2,8 +2,8 @@
 
 종목별 사다리 시뮬레이션(`core.strategy.trade.backtest`)을 전략마다 돌려 손익을 합친다.
 
-- 기준 자본 = 합성 슬리브 한도(슬리브 비중 × 합성 운용 기준금액)다. 전략마다 한도를 균등 분할해
-  그 한도를 넘는 회차부터는 사지 않고, 일별 수익률은 기준 자본 대비 손익으로 낸다.
+- 기준 자본 = 전략마다 `회차당 수량 × 회차 수 × 기준 종가`의 합 — 회차를 전부 채웠다고 볼 때의 총
+  매수금액이다. 기준 종가는 기간 시작 직전 봉의 종가다. 매수 한도는 없고, 일별 수익률은 기준 자본 대비 손익으로 낸다.
 - 벤치마크는 종목풀 설정의 벤치마크를 기간 내내 그냥 보유한 것이다.
 """
 
@@ -21,7 +21,7 @@ from utils.perf_metrics import daily_return_metrics, max_drawdown_window
 from utils.pool_settings_store import get_pool_benchmark_ticker
 from utils.pool_signal_backtest_service import validate_backtest_months
 from utils.settings_loader import get_ticker_type_settings
-from utils.strategy_trade_service import load_settings, sleeve_of, strategy_budget
+from utils.strategy_trade_service import load_settings
 from utils.trade_stats import summarize_trades
 
 COUNTRY = "kor"
@@ -72,12 +72,6 @@ def _simulate_pool(pool: str, months: int) -> dict[str, Any]:
     strategies = [entry for entry in load_settings()["strategies"].values() if entry["pool"] == pool]
     if not strategies:
         raise ValueError(f"{pool} 종목풀에 사고팔기 전략이 없습니다.")
-    # 한도는 실제 운용과 같다 — (풀, 계좌) 슬리브 한도를 그 계좌에서 이 풀을 쓰는 전략 수로 나눈다.
-    account_ids = sorted({entry["account_id"] for entry in strategies})
-    sleeves = {account_id: sleeve_of(pool, account_id) for account_id in account_ids}
-    counts = {
-        account_id: sum(1 for entry in strategies if entry["account_id"] == account_id) for account_id in account_ids
-    }
 
     pool_settings = get_ticker_type_settings(pool) or {}
     benchmark_ticker = get_pool_benchmark_ticker(pool_settings)
@@ -93,17 +87,14 @@ def _simulate_pool(pool: str, months: int) -> dict[str, Any]:
     start = end - pd.DateOffset(months=months)
 
     results = []
+    base_capital = 0.0
     for entry in strategies:
         data = _simulation_input(bars[entry["ticker"]], start)
         spec = LadderSpec(
-            entry["ticker"],
-            entry["name"],
-            entry["trigger_pct"],
-            entry["round_quantity"],
-            entry["rounds"],
-            strategy_budget(sleeves[entry["account_id"]], counts[entry["account_id"]]),
+            entry["ticker"], entry["name"], entry["trigger_pct"], entry["round_quantity"], entry["rounds"]
         )
         results.append(simulate_ladder(data, spec, market_buy_slippage_pct=float(slippage)))
+        base_capital += float(spec.quantity * spec.rounds * data["Close"].iloc[0])
 
     calendar = pd.DatetimeIndex(sorted(set().union(*(result["pnl"].index for result in results))))
     total_pnl = pd.Series(0.0, index=calendar)
@@ -117,8 +108,7 @@ def _simulate_pool(pool: str, months: int) -> dict[str, Any]:
         "bars": bars,
         "calendar": calendar,
         "pnl": total_pnl,
-        # 기준 자본 — 이 풀 전략들이 쓰는 계좌 슬리브 한도의 합.
-        "base_capital": sum(float(sleeve["limit_krw"]) for sleeve in sleeves.values()),
+        "base_capital": base_capital,
         "trades": trades,
     }
 
@@ -176,22 +166,4 @@ def run_strategy_trade_backtest(pool: str, months: int) -> dict[str, Any]:
         "daily": daily,
         "trades": trades,
         **summarize_trades(trades),
-    }
-
-
-def run_for_mix(pool: str, months: int) -> dict[str, Any]:
-    """합성 슬리브용 결과 — 슬리브 한도 대비 누적 수익률(%)의 일별 곡선, 체결, 원화 손익.
-
-    합성은 이 손익을 자기 곡선에 더한다(슬리브 몫은 합성 재생에서 현금으로 남아 있다).
-    """
-    simulated = _simulate_pool(pool, months)
-    base_capital = simulated["base_capital"]
-    pnl = simulated["pnl"]
-    return {
-        "daily": [
-            {"date": str(day.date()), "strategy_pct": round(float(value) / base_capital * 100.0, 4)}
-            for day, value in pnl.items()
-        ],
-        "pnl_krw": {str(day.date()): float(value) for day, value in pnl.items()},
-        "trades": _order_trades(simulated["trades"]),
     }

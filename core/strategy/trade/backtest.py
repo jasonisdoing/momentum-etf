@@ -13,8 +13,6 @@
   전량 매도 뒤 1호 진입은 다음 봉에서 그날 직전 종가 기준으로 다시 시작한다.
   이건 일봉 백테스트의 한계일 뿐 전략 규칙이 아니다 — 실제 운용(운용 현황 화면·슬랙 신호)은 같은 날에도
   지정가에 닿으면 사고팔고 다시 살 수 있고, 그렇게 동작하는 것이 맞다. 두 쪽이 다른 건 의도된 차이다.
-- 전략마다 매수 한도(`LadderSpec.budget`, 원)가 있어, 사고 나면 이미 산 금액이 한도를 넘는 회차는
-  사지 않는다(1호 포함). 매도는 한도와 무관하다.
 - 수수료·세금은 반영하지 않는다(ETF 는 매도세가 없고 수수료는 미미하다).
 """
 
@@ -39,8 +37,6 @@ class LadderSpec:
     trigger_pct: float
     quantity: int
     rounds: int
-    # 이 전략이 쓸 수 있는 매수 한도(원) — 합성 슬리브 비중에서 온다.
-    budget: float
 
 
 def _trade_row(
@@ -107,9 +103,8 @@ def simulate_ladder(bars: pd.DataFrame, spec: LadderSpec, *, market_buy_slippage
                 held.pop()
                 sold_today = True
 
-        # 2) 매수 — 매도가 있었던 날은 쉰다. 한 봉에 한 회차만 사고, 한도를 넘으면 사지 않는다.
+        # 2) 매수 — 매도가 있었던 날은 쉰다. 한 봉에 한 회차만 산다.
         if not sold_today:
-            invested = sum(spec.quantity * fill for _, fill in held)
             if not held:
                 limit = rules.first_buy_limit(prev_close, pct)
                 if low <= limit:
@@ -117,12 +112,11 @@ def simulate_ladder(bars: pd.DataFrame, spec: LadderSpec, *, market_buy_slippage
                 else:
                     # 장중에 못 닿았으면 15:00 에 사는 규칙 — 일봉에서는 종가에 시장가로 산다.
                     fill = close * (1.0 + market_buy_slippage_pct / 100.0)
-                if rules.within_budget(invested, fill, spec.quantity, spec.budget):
-                    held.append((date, fill))
+                held.append((date, fill))
             elif len(held) < spec.rounds:
                 limit = rules.next_buy_limit(held[-1][1], pct)
                 fill = min(open_, limit)
-                if low <= limit and rules.within_budget(invested, fill, spec.quantity, spec.budget):
+                if low <= limit:
                     held.append((date, fill))
 
         unrealized = sum(spec.quantity * (close - fill) for _, fill in held)

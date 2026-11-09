@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
 import AccountSelect from "../components/AccountSelect";
+import { SlackAlarmField } from "../components/SlackAlarmField";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { AppModal } from "../components/AppModal";
 import { PageFrame } from "../components/PageFrame";
@@ -39,10 +40,6 @@ type Status = {
   // 보유 수량이 회차×회차수량과 다르면 마지막 회차는 일부만 보유 중이다 — 경고 표시용.
   quantity_mismatch: boolean;
   held_quantity: number;
-  // 이 전략의 매수 한도(원) · 이미 산 금액(원) · 다음 회차가 한도에 막혔는지.
-  budget: number;
-  invested: number;
-  limit_blocked: boolean;
   next_round: number | null;
   next_ticker: string | null;
   next_name: string | null;
@@ -75,8 +72,6 @@ export type RoundRow = {
   buy_reached: boolean;
   // 진입선이 아니라 장 마감 매수로 닿은 1호 — 현재가로 산다.
   close_entry: boolean;
-  // 다음 회차가 매수 한도를 넘는다 — 이 회차부터는 사지 않는다.
-  over_limit: boolean;
   sell_reached: boolean;
   // 오늘 슬랙 신호가 나간 방향(key: 지울 때 쓰는 발송 기록 키, has_ts: 슬랙 메시지 기록이 있어 지울 수 있음), 아직 끝나지 않은 주문의 방향.
   slack_signals: SlackSignal[];
@@ -130,22 +125,16 @@ type StrategyConfigRow = {
   rounds: number;
 };
 
-/** 이 종목풀의 사고팔기 합성 슬리브(계좌 하나) — 전략이 고를 수 있는 운용 계좌와 그 계좌의 매수 한도. */
-type Sleeve = {
+/** 전략이 고를 수 있는 운용 계좌(증권사 API 연동된 같은 국가의 운영 계좌)와 그 계좌의 사고팔기 슬랙 스위치. */
+type TradeAccount = {
   account_id: string;
   account_name: string;
-  weight_pct: number;
-  limit_krw: number;
-  /** 이 계좌를 고른 저장된 전략 수와 전략당 한도(고른 전략이 없으면 null). */
-  strategy_count: number;
-  per_strategy_limit_krw: number | null;
-  /** 슬랙 알람 — 그 계좌의 합성 슬랙 스위치를 따른다(여기서 정하지 않는다). */
   slack_enabled: boolean;
 };
 
 type View = {
-  /** 합성에서 이 종목풀에 사고팔기 슬리브를 붙인 계좌들. 비면 운용 현황을 만들 수 없다. */
-  sleeves: Sleeve[];
+  /** 전략이 고를 수 있는 계좌 — 계좌별 슬랙 스위치도 여기서 정한다(합성 슬랙과 별개). */
+  accounts: TradeAccount[];
   /** 저장된 전략 설정 — 슬리브 유무와 무관하게 편집할 수 있다. */
   configs: StrategyConfigRow[];
   /** 사고팔기를 켠 종목풀 — 종목풀 설정의 토글이 단일 소스다. */
@@ -197,11 +186,6 @@ const tdStyle: React.CSSProperties = { padding: "6px 8px", textAlign: "right" };
 function formatNumber(value: number | null | undefined, digits = 0): string {
   if (value == null || !Number.isFinite(value)) return "-";
   return value.toLocaleString("ko-KR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
-}
-
-/** 원 금액을 만원 단위로 — 한도·투입금처럼 큰 금액용. */
-function formatKrwMan(value: number): string {
-  return `${Math.round(value / 10_000).toLocaleString("ko-KR")}만원`;
 }
 
 function formatSigned(value: number | null | undefined, digits = 2): string {
@@ -460,6 +444,11 @@ function rowsFromConfigs(configs: StrategyConfigRow[]): DraftRow[] {
   }));
 }
 
+/** 계좌별 슬랙 스위치 초안 — 저장된 값 그대로. */
+function slackFromAccounts(accounts: TradeAccount[]): Record<string, boolean> {
+  return Object.fromEntries(accounts.map((account) => [account.account_id, account.slack_enabled]));
+}
+
 /** 변경 비교용 — 입력 중 문자열을 저장 값 모양으로 맞춘다. */
 function comparableRow(row: DraftRow) {
   return [row.strategy_id, row.accountId, row.ticker, Number(row.pct), Number(row.qty), Number(row.rounds)];
@@ -482,15 +471,21 @@ function PoolSettingsCard({
 }) {
   const toast = useToast();
   const [rows, setRows] = useState<DraftRow[]>(() => rowsFromConfigs(view.configs));
+  const [slack, setSlack] = useState<Record<string, boolean>>(() => slackFromAccounts(view.accounts));
+  const [slackTesting, setSlackTesting] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   // 서버가 최신 값을 돌려주면(저장·풀 전환) 초안도 그 값으로 맞춘다.
   useEffect(() => {
     setRows(rowsFromConfigs(view.configs));
   }, [view.configs]);
+  useEffect(() => {
+    setSlack(slackFromAccounts(view.accounts));
+  }, [view.accounts]);
 
   const isDirty =
-    JSON.stringify(rows.map(comparableRow)) !== JSON.stringify(rowsFromConfigs(view.configs).map(comparableRow));
+    JSON.stringify(rows.map(comparableRow)) !== JSON.stringify(rowsFromConfigs(view.configs).map(comparableRow)) ||
+    view.accounts.some((account) => slack[account.account_id] !== account.slack_enabled);
   useEffect(() => {
     onDirtyChange(isDirty);
   }, [isDirty, onDirtyChange]);
@@ -553,7 +548,7 @@ function PoolSettingsCard({
       const resp = await fetch("/api/strategy-trade", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pool, strategies }),
+        body: JSON.stringify({ pool, strategies, slack_accounts: slack }),
       });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
@@ -564,7 +559,28 @@ function PoolSettingsCard({
     } finally {
       setSaving(false);
     }
-  }, [onSaved, pool, rows, toast]);
+  }, [onSaved, pool, rows, slack, toast]);
+
+  const sendSlackTest = useCallback(
+    async (accountId: string) => {
+      setSlackTesting(accountId);
+      try {
+        const resp = await fetch("/api/strategy-trade/slack-test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account_id: accountId }),
+        });
+        const data = (await resp.json()) as { sent?: boolean; count?: number; error?: string };
+        if (!resp.ok || data.error || !data.sent) throw new Error(data.error ?? "발송에 실패했습니다.");
+        toast.success(`슬랙 발송 완료 (신호 ${data.count ?? 0}건)`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "슬랙 테스트 발송에 실패했습니다.");
+      } finally {
+        setSlackTesting(null);
+      }
+    },
+    [toast],
+  );
 
   return (
     <section className="appSection">
@@ -604,23 +620,24 @@ function PoolSettingsCard({
             </div>
           </div>
 
-          {view.sleeves.length > 0 ? (
-            <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginTop: 8 }}>
-              {view.sleeves.map((sleeve) => (
-                <div key={sleeve.account_id}>
-                  운용 계좌 {sleeve.account_name}({sleeve.account_id}) · 합성 슬리브 {sleeve.weight_pct}% · 매수 한도{" "}
-                  {formatKrwMan(sleeve.limit_krw)}
-                  {sleeve.per_strategy_limit_krw != null
-                    ? ` (전략 ${sleeve.strategy_count}개 · 전략당 ${formatKrwMan(sleeve.per_strategy_limit_krw)})`
-                    : " (고른 전략 없음)"}
-                  {` · 슬랙 알람 ${sleeve.slack_enabled ? "켜짐" : "꺼짐"}(합성 화면에서 설정)`}
-                </div>
+          {view.accounts.length > 0 ? (
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 8 }}>
+              {view.accounts.map((account) => (
+                <SlackAlarmField
+                  key={account.account_id}
+                  label={`슬랙 알람 · ${account.account_name}(${account.account_id})`}
+                  checked={Boolean(slack[account.account_id])}
+                  onChange={(checked) => setSlack((prev) => ({ ...prev, [account.account_id]: checked }))}
+                  disabled={saving}
+                  title="이 계좌를 고른 전략의 매수·매도 신호를 슬랙으로 보낸다 (장중 10분 간격 감시). 저장 버튼을 눌러야 반영된다."
+                  testing={slackTesting === account.account_id}
+                  onTest={() => void sendSlackTest(account.account_id)}
+                />
               ))}
             </div>
           ) : (
             <div className="alert alert-warning" style={{ marginTop: 10, marginBottom: 0 }}>
-              이 종목풀의 사고팔기 슬리브가 어느 계좌에도 붙어 있지 않습니다 — 합성 화면에서 「사고팔기」 슬리브를 붙이면
-              운용 현황이 나옵니다.
+              이 종목풀과 같은 국가의 운영 계좌 중 증권사 API 가 연동된 계좌가 없습니다 — 계좌 설정에서 연동하세요.
             </div>
           )}
 
@@ -631,7 +648,7 @@ function PoolSettingsCard({
                 style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", fontSize: "var(--fs-sm)" }}
               >
                 <AccountSelect
-                  accounts={view.sleeves.map((sleeve) => ({ account_id: sleeve.account_id, name: sleeve.account_name }))}
+                  accounts={view.accounts.map((account) => ({ account_id: account.account_id, name: account.account_name }))}
                   value={row.accountId}
                   onChange={(accountId) => updateRow(row.key, { accountId })}
                   emptyLabel="계좌 선택"
@@ -741,7 +758,7 @@ function StrategySection({
         <span style={{ fontWeight: 800, fontSize: "var(--fs-base)" }}>{view.label}</span>
         <span style={{ color: "var(--text-muted)" }}>
           {view.account_name}({view.account_id}) · {view.ticker} · 간격 {config.trigger_pct}% · 회차당 {formatNumber(config.round_quantity)}주 · {config.rounds}회
-          · 한도 {formatKrwMan(status.budget)} 중 {formatKrwMan(status.invested)} 사용 · 체결 이력 {view.ledger_at.slice(5, 16).replace("T", " ")} 기준
+          · 체결 이력 {view.ledger_at.slice(5, 16).replace("T", " ")} 기준
         </span>
       </div>
 
@@ -781,9 +798,7 @@ function StrategySection({
         ) : (
           <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>회차 소진 — 매도 대기</span>
         )}
-        {status.limit_blocked ? (
-          <span style={actionBadgeStyle("var(--text-muted)")}>⏸ {status.next_round}호 한도 도달 — 추가 매수 중단</span>
-        ) : status.next_buy_drop_pct != null ? (
+        {status.next_buy_drop_pct != null ? (
           <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>
             {nextRow?.close_entry
               ? `📉 ${status.next_round}호 장 마감 매수!`
@@ -859,9 +874,6 @@ function StrategySection({
                 </td>
                 <td style={{ ...tdStyle, fontWeight: row.is_next ? 700 : undefined }}>
                   {formatNumber(row.buy_limit)}
-                  {row.over_limit ? (
-                    <span style={{ marginLeft: 6, color: "var(--text-muted)", fontWeight: 400 }}>한도 도달</span>
-                  ) : null}
                 </td>
                 <td style={{ ...tdStyle, fontWeight: row.sell_limit != null ? 700 : undefined }}>
                   {formatNumber(row.sell_limit)}
@@ -990,7 +1002,7 @@ export function StrategyTradeClient() {
 
         {/* 백테스트 — 설정이나 풀이 바뀌면 결과가 어긋나므로 다시 마운트해 비운다. */}
         <TradeBacktestSection
-          key={`${view.pool}:${view.configs.map((c) => `${c.strategy_id}/${c.account_id}/${c.ticker}/${c.trigger_pct}/${c.round_quantity}/${c.rounds}`).join(",")}:${view.sleeves.map((s) => `${s.account_id}/${s.limit_krw}`).join(",")}`}
+          key={`${view.pool}:${view.configs.map((c) => `${c.strategy_id}/${c.account_id}/${c.ticker}/${c.trigger_pct}/${c.round_quantity}/${c.rounds}`).join(",")}`}
           pool={view.pool}
           monthOptions={view.month_options}
           blockedReason={
@@ -998,9 +1010,7 @@ export function StrategyTradeClient() {
               ? "저장하지 않은 변경이 있습니다 — 저장한 뒤 실행하세요."
               : view.configs.length === 0
                 ? "이 종목풀에 전략이 없습니다."
-                : view.sleeves.length === 0
-                  ? "사고팔기 슬리브가 계좌에 붙어 있지 않습니다."
-                  : null
+                : null
           }
         />
       </div>

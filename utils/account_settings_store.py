@@ -212,17 +212,6 @@ def _validate_mix_pool(
     return pool
 
 
-def _validate_trade_sleeve(account_id: str, label: str, pool: str) -> None:
-    """사고팔기 슬리브 — 사고팔기를 켠 풀이어야 한다. 같은 풀을 여러 계좌에 붙일 수 있다(운용 계좌는 전략마다 고른다)."""
-    from utils.mix_sleeve import STRATEGY_TRADE
-    from utils.pool_strategy_use import pools_using
-
-    if pool not in pools_using(STRATEGY_TRADE):
-        raise AccountSettingsStoreError(
-            f"'{account_id}' 의 {label} 사고팔기는 종목풀 설정에서 사고팔기를 켠 풀만 고를 수 있습니다: {pool}"
-        )
-
-
 def _validate_mix_sleeves(
     account_id: str, raw: Any, values: dict[str, Any], existing_doc: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -231,7 +220,7 @@ def _validate_mix_sleeves(
     순서가 곧 슬롯 순서다(첫째 A, 둘째 B, 셋째 C). 키는 저장하지 않고 읽을 때 순서로
     붙인다(`mix_sleeves_of`) — 저장된 키와 순서가 어긋날 여지를 아예 없앤다.
     """
-    from utils.mix_sleeve import STRATEGY_OPTIONS, STRATEGY_TRADE
+    from utils.mix_sleeve import STRATEGY_OPTIONS
 
     if not isinstance(raw, list):
         raise AccountSettingsStoreError(f"'{account_id}' 의 mix_sleeves 는 목록이어야 합니다.")
@@ -262,8 +251,6 @@ def _validate_mix_sleeves(
                 f"{strategy}({pool})"
             )
         seen.add((strategy, pool))
-        if strategy == STRATEGY_TRADE:
-            _validate_trade_sleeve(account_id, label, pool)
 
         name = str(item.get("name") or "").strip()
         if len(name) > MIX_SLEEVE_NAME_MAX_LEN:

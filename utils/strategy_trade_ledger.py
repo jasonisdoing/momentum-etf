@@ -72,11 +72,6 @@ class Ledger:
     #: 이 원장을 계산한 시각(KST ISO) — 화면이 어느 시점 기준인지 보여 준다.
     computed_at: str
 
-    @property
-    def cost(self) -> float:
-        """지금 보유의 매입 원가(원)."""
-        return sum(lot.shares * lot.price for lot in self.lots)
-
     def round_fills(self, per_round: int) -> list[dict[str, Any]]:
         """보유 로트를 앞에서부터 회차당 수량씩 끊은 회차별 체결가(가중평균)·산 날짜(마지막 체결일)·출처.
 

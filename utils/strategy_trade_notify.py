@@ -293,8 +293,6 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     next_row = next((row for row in strategy_view["rounds"] if row["is_next"]), None)
     if drop is None:
         parts.append("매수 없음(회차 소진)")
-    elif status["limit_blocked"]:
-        parts.append(f"⏸ {status['next_round']}호 한도 도달 — 추가 매수 중단")
     elif next_row is not None and next_row["close_entry"]:
         parts.append(f"📉 *{status['next_round']}호 장 마감 매수!*")
     elif drop >= 0 and status["sell_pending"]:
@@ -328,8 +326,6 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
                 lines.append(
                     f"🟢 {row['round']}호 {quantity} 보유 중 ({profit_text}) · 매도 목표 {_level(row['sell_index'])}"
                 )
-        elif row["is_next"] and row["over_limit"]:
-            lines.append(f"⏸ {row['round']}호 {quantity} 한도 도달 — 추가 매수 중단")
         elif row["is_next"]:
             if row["buy_reached"]:
                 reach = (
@@ -354,14 +350,14 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
 
 
 def _slack_enabled_accounts() -> set[str]:
-    """합성 슬랙이 켜진 운영 계좌 — 사고팔기 알람은 전략의 운용 계좌의 이 스위치를 따른다."""
-    from utils.account_settings_store import load_live_account_docs
+    """사고팔기 슬랙이 켜진 계좌 — 사고팔기 화면의 계좌별 스위치(합성 슬랙과 별개)."""
+    from utils.strategy_trade_service import load_slack_accounts
 
-    return {doc["account_id"] for doc in load_live_account_docs() if doc.get("mix_slack_enabled")}
+    return {account_id for account_id, enabled in load_slack_accounts().items() if enabled}
 
 
 def send_test(account_id: str) -> dict[str, Any]:
-    """그 계좌에 붙은 사고팔기 슬리브의 현재 상태를 즉시 보낸다(합성 화면의 슬랙 테스트에서 부른다).
+    """그 계좌를 고른 사고팔기 전략의 현재 상태를 즉시 보낸다(사고팔기 화면의 슬랙 테스트 버튼).
 
     스위치·중복 방지와 무관하고 상태는 건드리지 않는다. 신호가 없으면 현황만 보낸다.
     """

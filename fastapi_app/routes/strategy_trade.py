@@ -4,11 +4,12 @@ from fastapi import APIRouter, Body, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
 from utils.strategy_trade_backtest import run_strategy_trade_backtest
-from utils.strategy_trade_notify import mark_sent_rounds
+from utils.strategy_trade_notify import mark_sent_rounds, send_test
 from utils.strategy_trade_service import (
     load_strategy_trade_view,
     resolve_etf,
     save_pool_strategies,
+    save_slack_accounts,
 )
 from utils.strategy_trade_threads import delete_signal_thread
 
@@ -54,14 +55,15 @@ def put_strategy_trade_settings(
 ) -> dict:
     """한 종목풀의 전략 목록을 저장하고 갱신된 화면 데이터를 반환한다.
 
-    body: ``{"pool": "…", "strategies": [{strategy_id?·ticker + pct 3종}, …]}``
-    strategy_id 가 없는 행은 추가, 목록에서 빠진 전략은 삭제다 (검증은 `strategy_trade_service`).
-    슬랙 알람은 여기서 정하지 않는다 — 그 풀 슬리브가 붙은 계좌의 합성 슬랙 스위치를 따른다.
+    body: ``{"pool": "…", "strategies": [{strategy_id?·account_id·ticker + 파라미터}, …],
+    "slack_accounts": {계좌 ID: 켜짐}}`` — strategy_id 가 없는 행은 추가, 목록에서 빠진 전략은 삭제다
+    (검증은 `strategy_trade_service`). 슬랙은 계좌별 사고팔기 스위치다(합성 슬랙과 별개).
     """
     pool = str(payload.get("pool") or "").strip()
-    if not pool or payload.get("strategies") is None:
-        raise ValueError("pool·strategies 가 모두 필요합니다.")
+    if not pool or payload.get("strategies") is None or payload.get("slack_accounts") is None:
+        raise ValueError("pool·strategies·slack_accounts 가 모두 필요합니다.")
     save_pool_strategies(pool, payload["strategies"])
+    save_slack_accounts(pool, payload["slack_accounts"])
     return mark_sent_rounds(load_strategy_trade_view(pool))
 
 
@@ -78,3 +80,21 @@ def post_strategy_trade_delete_signal(
     if not key:
         raise ValueError("key 가 필요합니다.")
     return delete_signal_thread(key)
+
+
+@router.post("/slack-test")
+def post_strategy_trade_slack_test(
+    payload: dict = Body(...),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """그 계좌를 고른 사고팔기 전략의 현재 상태를 슬랙으로 바로 보낸다(스위치와 무관한 테스트).
+
+    body: ``{"account_id": "…"}``.
+    """
+    account_id = str(payload.get("account_id") or "").strip()
+    if not account_id:
+        raise ValueError("account_id 가 필요합니다.")
+    result = send_test(account_id)
+    if not result["sent"]:
+        raise ValueError(result["reason"])
+    return {"sent": True, "count": len(result["triggers"])}

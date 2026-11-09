@@ -74,14 +74,14 @@ def _now() -> datetime:
 
 
 def _require_round_state(strategy: dict[str, Any], side: str, round_no: int) -> dict[str, Any]:
-    """그 회차가 지금도 주문 대상인지 보유 상태로만 확인한다 — 매도는 보유 중, 매수는 다음 회차이고 한도 안.
+    """그 회차가 지금도 주문 대상인지 보유 상태로만 확인한다 — 매도는 보유 중, 매수는 다음 회차.
 
     가격은 보지 않는다: 신호 가격과의 차이는 슬랙 확인 모달이 보여 주고 사람이 승인한다.
     """
     row = next((item for item in strategy["rounds"] if item["round"] == round_no), None)
     if row is None:
         raise BrokerApiError(f"{strategy['label']} 에 {round_no}호 회차가 없습니다.")
-    orderable = row["held"] if side == "sell" else (row["is_next"] and not row["over_limit"])
+    orderable = row["held"] if side == "sell" else row["is_next"]
     if not orderable:
         word = "매도" if side == "sell" else "매수"
         raise RoundNotOrderableError(f"{strategy['label']} {round_no}호는 지금 {word}할 수 있는 회차가 아닙니다.")

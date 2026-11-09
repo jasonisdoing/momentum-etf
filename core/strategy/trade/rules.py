@@ -7,8 +7,6 @@
 - 회차 매도가 = 그 회차의 체결가 × (1 + 간격%). 팔 수 있는 회차는 가장 깊은(마지막) 보유 회차 하나뿐이다.
 - 신호는 한 번에 하나만 낸다 — 팔 회차가 있으면 매도가 먼저이고, 매수는 그 매도가 체결된 뒤에 본다.
 - 지정가는 ETF 호가 단위(5원)로 반올림한다.
-- 전략마다 매수 한도(원)가 있다. 이미 산 회차의 매수금액에 다음 회차 금액을 더해 한도를 넘으면
-  그 회차부터는 사지 않는다(`within_budget`).
 """
 
 from __future__ import annotations
@@ -50,11 +48,6 @@ def first_buy_limit(prev_close: float, trigger_pct: float) -> float:
 def preview_buy_limit(prev_close: float, round_no: int, trigger_pct: float) -> float:
     """보유가 없을 때 화면에 미리 보여주는 k호 매수 지정가 — 전일 종가에서 k번 내린 가격."""
     return round_to_tick(prev_close * down_ratio(trigger_pct) ** round_no)
-
-
-def within_budget(invested_cost: float, price: float, quantity: int, budget: float) -> bool:
-    """다음 회차를 사도 한도(원)를 넘지 않는지 — 넘으면 그 회차부터 사지 않는다. 매도는 한도와 무관하다."""
-    return invested_cost + price * quantity <= budget + 1e-9
 
 
 def sell_limit(fill: float, trigger_pct: float) -> float:
