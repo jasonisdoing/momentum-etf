@@ -1,7 +1,7 @@
 """전략 사고팔기 운용 현황 조회 서비스 (UI/API 용).
 
 전략 여러 개를 독립 운용한다. 각 전략은 **자기 종목 하나만** 설정된 회차 수까지 분할 매수한다.
-여러 한국 ETF 종목풀에서 전략 종목을 고르며, 전략별 종목풀은 가격 출처다.
+여러 한국 개별주·ETF 종목풀에서 전략 종목을 고르며, 전략별 종목풀은 가격 출처다.
 파라미터(매매 간격 %·회차당 수량·회차 수)는
 DB(``system_config.strategy_trade_settings.strategies``)가 단일 소스이며 화면에서
 편집한다. 슬랙 알람은 계좌별 사고팔기 스위치(``accounts.{계좌}.slack_enabled``)를 따른다 — 합성과 별개다.
@@ -89,32 +89,47 @@ def load_settings() -> dict[str, Any]:
     return {"accounts": accounts, "strategies": strategies}
 
 
-def eligible_pools() -> list[str]:
-    """사고팔기에 쓸 수 있는 활성 종목풀 — 국장 ETF 풀(`strategy_trade_config.is_eligible_pool`)."""
+def _eligible_pool_kinds() -> dict[str, ladder.InstrumentKind]:
+    """활성 국내 개별주·ETF 풀과 호가 계산에 사용할 종목 유형."""
     from utils.settings_loader import _load_pool_configs
     from utils.strategy_trade_config import is_eligible_pool
 
-    return [str(config["ticker_type"]) for config in _load_pool_configs() if is_eligible_pool(config)]
-
-
-def _pool_etfs(pool: str) -> dict[str, str]:
-    from utils.stock_list_io import get_etfs
-
     return {
-        ticker: name
-        for item in get_etfs(pool)
-        if (ticker := str(item.get("ticker") or "").strip().upper()) and (name := str(item.get("name") or "").strip())
+        str(config["ticker_type"]): "stock" if str(config["pool_kind"]).strip().lower() == "stock" else "etf"
+        for config in _load_pool_configs()
+        if is_eligible_pool(config)
     }
 
 
-def _etf_options(pools: list[str]) -> dict[str, dict[str, Any]]:
-    """활성 한국 ETF를 티커로 합치고, 중복 종목의 가격 출처 후보를 고정 순서로 반환한다."""
+def _pool_tickers(pool: str, kind: ladder.InstrumentKind) -> dict[str, str]:
+    from utils.stock_list_io import get_etfs
+
+    tickers: dict[str, str] = {}
+    for item in get_etfs(pool):
+        if kind == "stock" and (
+            item.get("is_etf") is not False or str(item.get("market") or "").strip().upper() not in {"KOSPI", "KOSDAQ"}
+        ):
+            continue
+        if kind == "etf" and item.get("is_etf") is False:
+            continue
+        ticker = str(item.get("ticker") or "").strip().upper()
+        name = str(item.get("name") or "").strip()
+        if ticker and name:
+            tickers[ticker] = name
+    return tickers
+
+
+def _ticker_options(pools: dict[str, ladder.InstrumentKind]) -> dict[str, dict[str, Any]]:
+    """종목을 티커로 합치되, 풀마다 종목 유형이 충돌하면 등록 대상에서 뺀다."""
     options: dict[str, dict[str, Any]] = {}
-    for pool in sorted(pools):
-        for ticker, name in _pool_etfs(pool).items():
-            option = options.setdefault(ticker, {"ticker": ticker, "name": name, "pools": []})
+    conflicts: set[str] = set()
+    for pool, kind in sorted(pools.items()):
+        for ticker, name in _pool_tickers(pool, kind).items():
+            option = options.setdefault(ticker, {"ticker": ticker, "name": name, "pools": [], "kind": kind})
+            if option["kind"] != kind:
+                conflicts.add(ticker)
             option["pools"].append(pool)
-    return options
+    return {ticker: option for ticker, option in options.items() if ticker not in conflicts}
 
 
 def _validated_target(
@@ -129,7 +144,7 @@ def _validated_target(
     else:
         option = options.get(ticker)
         if option is None:
-            raise ValueError(f"사고팔기에 등록할 수 있는 한국 ETF가 아닙니다: {ticker}")
+            raise ValueError(f"사고팔기에 등록할 수 있는 한국 개별주·ETF가 아닙니다: {ticker}")
         candidates = option["pools"]
         # 기존 출처가 여전히 유효하면 같은 종목의 기준가를 바꾸지 않는다.
         pool = (
@@ -162,7 +177,7 @@ def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any) -> 
         raise ValueError("slack_enabled 는 참·거짓이어야 합니다.")
     if not isinstance(strategies, list):
         raise ValueError("strategies 형식이 올바르지 않습니다.")
-    options = _etf_options(eligible_pools())
+    options = _ticker_options(_eligible_pool_kinds())
     current = {sid: entry for sid, entry in load_settings()["strategies"].items() if entry["account_id"] == account_id}
     taken: set[str] = set()
     seen_ids: set[str] = set()
@@ -287,7 +302,7 @@ RECENT_LOW_MONTHS = 12
 
 
 def _load_ticker_status(
-    pool: str, ticker: str, name: str, trigger_pct: float, live_close: float | None
+    pool: str, ticker: str, name: str, trigger_pct: float, live_close: float | None, *, kind: ladder.InstrumentKind
 ) -> dict[str, Any]:
     """판정 기준 시세 — 이 전략 종목 자신의 현재가·전일 종가·1호 진입선·최근 저점.
 
@@ -330,7 +345,7 @@ def _load_ticker_status(
         "prev_close": round(prev_close),
         "change_pct": round(change_pct, 2),
         # 1호 진입선 — 전일 종가 대비 -간격%, 호가 단위 반올림.
-        "buy_trigger": ladder.first_buy_limit(prev_close, float(trigger_pct)),
+        "buy_trigger": ladder.first_buy_limit(prev_close, float(trigger_pct), kind=kind),
         "recent_low": round(low_value),
         "recent_low_date": low_date.strftime("%Y-%m-%d"),
         "recent_low_label": f"{RECENT_LOW_MONTHS}개월 저점",
@@ -377,6 +392,8 @@ def _build_strategy_view(
     account_closes: dict[str, float],
     ledger: Ledger,
     cash_krw: float,
+    *,
+    kind: ladder.InstrumentKind,
 ) -> dict[str, Any]:
     """전략 하나의 운용 현황(회차 표·상태)을 회차 원장에서 만든다.
 
@@ -391,7 +408,7 @@ def _build_strategy_view(
 
     quantity = ledger.quantity
     live_close = account_closes.get(ticker) or _load_unheld_closes([ticker], pool).get(ticker)
-    index_status = _load_ticker_status(pool, ticker, name, trigger_pct, live_close)
+    index_status = _load_ticker_status(pool, ticker, name, trigger_pct, live_close, kind=kind)
     close = float(index_status["close"])
     # 보유 0 인데 장중 1호 진입선에 못 닿은 채 장 마감이 다가오면 현재가로 1호를 산다.
     close_entry = False
@@ -412,7 +429,9 @@ def _build_strategy_view(
     # 팔 수 있는 회차는 맨 뒤(가장 깊은) 보유 회차 하나뿐이고, 신호는 한 번에 하나라
     # 그 매도가 닿아 있으면 매수는 매도가 체결될 때까지 미룬다.
     sell_pending = bool(
-        held_rounds and close > 0 and close >= ladder.sell_limit(round_fills[held_rounds - 1]["price"], trigger_pct)
+        held_rounds
+        and close > 0
+        and close >= ladder.sell_limit(round_fills[held_rounds - 1]["price"], trigger_pct, kind=kind)
     )
 
     rows: list[dict[str, Any]] = []
@@ -421,7 +440,7 @@ def _build_strategy_view(
         is_next = round_no == held_rounds + 1
         if held:
             fill = round_fills[round_no - 1]
-            sell_limit = ladder.sell_limit(fill["price"], trigger_pct)
+            sell_limit = ladder.sell_limit(fill["price"], trigger_pct, kind=kind)
             rows.append(
                 {
                     "round": round_no,
@@ -451,9 +470,9 @@ def _build_strategy_view(
         # 미보유 회차 — 보유가 있으면 마지막 보유 체결가에서 내려간 자리(다음 회차 이후는 예상값),
         # 없으면 전일 종가 기준. 지정가로 바로 쓸 수 있게 호가 단위로 반올림한다.
         if last_fill is not None:
-            buy_limit = ladder.projected_buy_limit(last_fill, round_no - held_rounds, trigger_pct)
+            buy_limit = ladder.projected_buy_limit(last_fill, round_no - held_rounds, trigger_pct, kind=kind)
         else:
-            buy_limit = ladder.preview_buy_limit(float(index_status["prev_close"]), round_no, trigger_pct)
+            buy_limit = ladder.preview_buy_limit(float(index_status["prev_close"]), round_no, trigger_pct, kind=kind)
         market_entry = is_next and close_entry and close > buy_limit
         # 15:00 시장가 매수는 현재가로 사므로 그 가격으로 산 금액을 본다.
         cash_short = bool(is_next and round_quantity * (close if market_entry else buy_limit) > cash_krw)
@@ -511,6 +530,7 @@ def _build_strategy_view(
         "strategy_id": strategy_id,
         "label": name,
         "pool": pool,
+        "instrument_kind": kind,
         "ticker": ticker,
         "config": {
             "trigger_pct": trigger_pct,
@@ -633,9 +653,10 @@ def _build_views(strategies: dict[str, dict[str, Any]], *, fresh: bool) -> list[
     from utils.account_settings_store import load_account_docs
 
     names = {doc["account_id"]: str(doc.get("name") or doc["account_id"]) for doc in load_account_docs()}
-    active_pools = set(eligible_pools()) if strategies else set()
+    active_pools = _eligible_pool_kinds() if strategies else {}
     source_tickers = {
-        pool: _pool_etfs(pool) for pool in {entry["pool"] for entry in strategies.values()} & active_pools
+        pool: _pool_tickers(pool, active_pools[pool])
+        for pool in {entry["pool"] for entry in strategies.values()} & active_pools.keys()
     }
     views: list[dict[str, Any]] = []
     for sid, entry in strategies.items():
@@ -650,8 +671,10 @@ def _build_views(strategies: dict[str, dict[str, Any]], *, fresh: bool) -> list[
         else:
             state = states[account_id]
             try:
-                view = _build_strategy_view(sid, entry, state["closes"], ledger, state["cash_krw"])
-            except RuntimeError as error:
+                view = _build_strategy_view(
+                    sid, entry, state["closes"], ledger, state["cash_krw"], kind=active_pools[entry["pool"]]
+                )
+            except (RuntimeError, ValueError) as error:
                 view = _failed_view(sid, entry, str(error))
         # 운용 계좌 — 화면 카드 머리·슬랙 문구·주문 계좌가 이것을 쓴다.
         views.append({**view, "account_id": account_id, "account_name": names.get(account_id, account_id)})
@@ -706,8 +729,8 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
     mine = {sid: entry for sid, entry in settings["strategies"].items() if entry["account_id"] == selected}
     from utils.pool_strategy_use import pool_options
 
-    pools = eligible_pools() if selected is not None else []
-    options = _etf_options(pools)
+    pools = _eligible_pool_kinds() if selected is not None else {}
+    options = _ticker_options(pools)
     return {
         "account_options": [
             {
@@ -722,8 +745,8 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
         "slack_enabled": account["slack_enabled"],
         # 계좌 현금(잔고 동기화 값)과 계좌 평가액 대비 비율 — 다음 회차를 살 수 없으면 한도 소진이다.
         "cash": _cash_summary(selected) if selected is not None else None,
-        "pool_options": pool_options(pools),
-        "etf_options": [options[ticker] for ticker in sorted(options)],
+        "pool_options": pool_options(list(pools)),
+        "ticker_options": [options[ticker] for ticker in sorted(options)],
         # 편집 표의 행 — 저장된 전략 설정 그대로.
         "configs": [
             {

@@ -2,7 +2,7 @@
 
 전략 규칙
 ---------
-**전략 여러 개를 독립 운용**한다. 여러 한국 ETF 종목풀에서 종목을 고르고, 각 전략은
+**전략 여러 개를 독립 운용**한다. 여러 한국 개별주·ETF 종목풀에서 종목을 고르고, 각 전략은
 자기 종목 **하나만** 설정된 회차 수까지 분할 매수한다. 합성과 별개로 계좌 단위로 운영한다.
 
 - 자금 배분: 회차마다 같은 **수량**(``round_quantity``, 전략별 편집)을 산다.
@@ -39,15 +39,14 @@ from datetime import time
 from typing import Any
 
 # 전략 정의(풀·종목·계좌·파라미터)는 DB(`system_config.strategy_trade_settings.strategies`)가 단일 소스다 —
-# 전략의 종목풀은 가격 출처이며, 대상은 한국 ETF다.
+# 전략의 종목풀은 가격 출처이며, 대상은 한국 개별주·ETF다.
 
 
 def is_eligible_pool(pool_config: dict[str, Any]) -> bool:
-    """사고팔기를 켤 수 있는 종목풀인지 — 국장 전용이라 한국 ETF 풀만 된다(원 단위 호가·한국 장 시간)."""
-    return (
-        str(pool_config.get("country_code") or "").strip().lower() == "kor"
-        and str(pool_config.get("pool_kind") or "").strip().lower() == "etf"
-    )
+    """사고팔기를 켤 수 있는 국내 개별주·ETF 종목풀인지 확인한다."""
+    return str(pool_config.get("country_code") or "").strip().lower() == "kor" and str(
+        pool_config.get("pool_kind") or ""
+    ).strip().lower() in {"stock", "etf"}
 
 
 # 1호 장 마감 매수 시각(KST) — 보유 0인데 장중 1호 진입선에 못 닿았으면 이 시각부터 정규장 마감 전까지

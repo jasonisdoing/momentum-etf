@@ -128,7 +128,7 @@ type StrategyConfigRow = {
   rounds: number;
 };
 
-type EtfOption = { ticker: string; name: string; pools: string[] };
+type TickerOption = { ticker: string; name: string; pools: string[]; kind: "stock" | "etf" };
 
 type View = {
   /** 사고팔기를 운영할 수 있는 계좌 — 증권사 API 가 연동된 운영 계좌. */
@@ -140,7 +140,7 @@ type View = {
   /** 계좌 원화 예수금(잔고 동기화 값)과 계좌 평가액 대비 비율(%) — 다음 회차를 살 수 없으면 한도 소진. */
   cash: { cash_krw: number; pct: number | null } | null;
   pool_options: PoolLabelSource[];
-  etf_options: EtfOption[];
+  ticker_options: TickerOption[];
   /** 저장된 전략 설정 — 이 계좌의 전략 전부. */
   configs: StrategyConfigRow[];
   strategies: Array<StrategyView | FailedStrategy>;
@@ -420,13 +420,13 @@ function AccountSettingsCard({
   const query = search.trim().toLowerCase();
   const usedTickers = new Set(drafts.filter((row) => row.key !== picker?.rowKey).map((row) => row.ticker));
   const candidates = picker
-    ? view.etf_options.filter(
+    ? view.ticker_options.filter(
         (option) =>
           !usedTickers.has(option.ticker) &&
           (option.ticker.toLowerCase().includes(query) || option.name.toLowerCase().includes(query)),
       )
     : [];
-  const selectTicker = (option: EtfOption) => {
+  const selectTicker = (option: TickerOption) => {
     if (!picker || usedTickers.has(option.ticker)) return;
     const row = drafts.find((item) => item.key === picker.rowKey);
     if (row) {
@@ -551,7 +551,7 @@ function AccountSettingsCard({
               <button
                 type="button"
                 className="btn btn-sm btn-outline-secondary"
-                disabled={saving || view.etf_options.length === 0}
+                disabled={saving || view.ticker_options.length === 0}
                 onClick={() => openPicker(null)}
               >
                 + 종목 추가
@@ -569,7 +569,7 @@ function AccountSettingsCard({
 
           {drafts.length === 0 ? (
             <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginTop: 10 }}>
-              이 계좌에 등록된 전략이 없습니다. 「+ 종목 추가」에서 한국 ETF를 검색하세요.
+              이 계좌에 등록된 전략이 없습니다. 「+ 종목 추가」에서 한국 개별주 또는 ETF를 검색하세요.
             </div>
           ) : null}
 
@@ -579,7 +579,7 @@ function AccountSettingsCard({
                 <span>
                   <strong>{row.tickerName} ({row.ticker})</strong>
                   {row.pool && !row.reselectSource ? (
-                    view.etf_options.some((item) => item.ticker === row.ticker && item.pools.some((pool) => pool === row.pool))
+                    view.ticker_options.some((item) => item.ticker === row.ticker && item.pools.some((pool) => pool === row.pool))
                       ? <span className="tableMuted"> · {poolLabel(row.pool)}</span>
                       : <span className="text-danger"> · 가격 출처를 다시 선택하세요</span>
                   ) : null}
@@ -639,7 +639,7 @@ function AccountSettingsCard({
               </div>
             ))}
           </div>
-          <AppModal open={picker !== null} title="한국 ETF 선택" onClose={() => setPicker(null)}>
+          <AppModal open={picker !== null} title="한국 종목 선택" onClose={() => setPicker(null)}>
             <input
               className="form-control mb-2"
               aria-label="종목명 또는 티커"
@@ -652,7 +652,7 @@ function AccountSettingsCard({
               {candidates.slice(0, 50).map((option) => (
                 <button key={option.ticker} type="button" className="list-group-item list-group-item-action" onClick={() => selectTicker(option)}>
                   <strong>{option.ticker}</strong> {option.name}
-                  <div className="tableMuted">{option.pools.map(poolLabel).join(" · ")}</div>
+                  <div className="tableMuted">{option.kind === "stock" ? "개별주" : "ETF"} · {option.pools.map(poolLabel).join(" · ")}</div>
                 </button>
               ))}
             </div>

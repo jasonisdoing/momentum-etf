@@ -22,7 +22,7 @@ COLLECTION = "pool_settings"
 FIELD = "STRATEGY_USE"
 
 # 종목풀에서 켜고 끄는 전략 — 합성 슬리브 전략 목록(`utils.mix_sleeve.STRATEGY_OPTIONS`)과 같다.
-# 사고팔기는 종목풀 토글 없이 한국 ETF를 계좌에 직접 등록한다.
+# 사고팔기는 종목풀 토글 없이 한국 개별주·ETF를 계좌에 직접 등록한다.
 STRATEGIES: tuple[str, ...] = STRATEGY_OPTIONS
 
 

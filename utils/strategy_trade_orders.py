@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 
 from bson import ObjectId
 
+from core.strategy.trade.rules import is_valid_quote
 from services.broker_api_service import BrokerApiError, OrderUncertainError
 from services.broker_trade_service import (
     account_env,
@@ -200,6 +201,8 @@ def resolve_order(
         signal_price = row["sell_limit"] if side == "sell" else (None if row["close_entry"] else row["buy_limit"])
     quote = fetch_best_quote(strategy["account_id"], strategy["ticker"])
     label, price = ("매도 1호가", quote["ask"]) if side == "buy" else ("매수 1호가", quote["bid"])
+    if not is_valid_quote(price, kind=strategy["instrument_kind"]):
+        raise BrokerApiError(f"{strategy['ticker']} {label} {price}원이 KRX 호가 단위와 맞지 않습니다.")
     return {
         "strategy_label": strategy["label"],
         "ticker": strategy["ticker"],
