@@ -11,8 +11,8 @@
 - 파라미터는 전략당 ``trigger_pct``(매매 간격 %) · ``round_quantity``(회차당 주수) ·
   ``rounds``(회차 수)다.
 - 1호 진입(보유 0일 때): 종목이 **전일 종가 대비** ``trigger_pct`` 이상 하락하면 매수.
-  장중에 닿지 못했으면 ``FIRST_ENTRY_CLOSE_TIME`` 부터 정규장 마감 전까지 현재가로 매수한다
-  (보유 0인 날을 그대로 넘기지 않는다).
+  장중에 닿지 못했으면 ``FIRST_ENTRY_CLOSE_TIMES`` 의 종목 종류별 시각부터 그 종류의 마지막 거래 시간이 끝나기
+  전까지 현재가로 매수한다(보유 0인 날을 그대로 넘기지 않는다).
 - 2호 이후 진입: **마지막 매수가 대비** ``trigger_pct`` 이상 하락하면 같은 종목을 추가 매수.
   → 진입가 사다리는 1호가 P 에서 P·(1-x%)^(k-1) 로 결정적이다.
 - 매도: 각 회차가 **자기 진입가 대비** ``trigger_pct`` 이상 오르면 그 회차 수량만 매도.
@@ -49,9 +49,10 @@ def is_eligible_pool(pool_config: dict[str, Any]) -> bool:
     ).strip().lower() in {"stock", "etf"}
 
 
-# 1호 장 마감 매수 시각(KST) — 보유 0인데 장중 1호 진입선에 못 닿았으면 이 시각부터 정규장 마감 전까지
-# 현재가로 1호를 산다. 국장 전용 전략이라 한국 시간표의 마감과 짝을 이룬다.
-FIRST_ENTRY_CLOSE_TIME = time(15, 0)
+# 1호 장 마감 매수 시각(KST, 종목 종류별) — 보유 0인데 장중 1호 진입선에 못 닿았으면 이 시각부터 그 종류의
+# 마지막 거래 시간이 끝나기 전까지 현재가로 1호를 산다. ETF 는 KRX 정규장 마감(15:30) 전,
+# 개별주는 NXT 애프터마켓 마감(20:00) 전이다(`config.INSTRUMENT_TRADING_WINDOWS`).
+FIRST_ENTRY_CLOSE_TIMES = {"etf": time(15, 0), "stock": time(19, 30)}
 
 # 화면에서 편집하는 파라미터 키 — DB 문서에 이 키로 저장된다.
 EDITABLE_CONFIG_KEYS: tuple[str, ...] = ("trigger_pct", "round_quantity", "rounds")

@@ -16,7 +16,7 @@ DB(``system_config.strategy_trade_settings.strategies``)가 단일 소스이며 
 - 1호가 P1 = 1호를 실제로 산 체결가,  r = 1 − 간격%.
 - k호 진입가 = P1 × r^(k-1) · 매도 지정가 = 진입가 × (1 + 간격%). 갭으로 싸게 산 회차도 선은 그대로다.
 - 다음 매수 = 마지막 매수가 × r. 보유가 없으면 1호 진입 = 전일 종가 × r,
-  장중에 못 닿았으면 15:00(``FIRST_ENTRY_CLOSE_TIME``)부터 마감 전까지 현재가로 1호 매수.
+  장중에 못 닿았으면 종목 종류별 시각(``FIRST_ENTRY_CLOSE_TIMES``, ETF 15:00·개별주 19:30)부터 마감 전까지 현재가로 1호 매수.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from zoneinfo import ZoneInfo
 from core.strategy.trade import rules as ladder
 from utils.strategy_trade_config import (
     EDITABLE_CONFIG_KEYS,
-    FIRST_ENTRY_CLOSE_TIME,
+    FIRST_ENTRY_CLOSE_TIMES,
     validate_strategy_trade_config,
 )
 from utils.strategy_trade_ledger import (
@@ -360,18 +360,20 @@ def _load_ticker_status(
     }
 
 
-def _first_entry_close_window(now: datetime | None = None) -> bool:
-    """지금이 1호 장 마감 매수 시간인지 — 한국 거래일의 ``FIRST_ENTRY_CLOSE_TIME`` ~ 정규장 마감 전."""
+def _first_entry_close_window(kind: ladder.InstrumentKind, now: datetime | None = None) -> bool:
+    """지금이 1호 장 마감 매수 시간인지 — 그 종목 종류의 ``FIRST_ENTRY_CLOSE_TIMES`` 시각 이후이고 아직 거래 중일 때.
+
+    ETF 는 15:00~15:30(정규장), 개별주는 19:30~20:00(NXT 애프터마켓)이다. 거래일·거래 시간 판정은 종목 종류별 시간표가 한다.
+    """
     from zoneinfo import ZoneInfo
 
     from config import MARKET_SCHEDULES
-    from utils.market_session import trading_day_today
+    from utils.market_session import is_instrument_trading_time
 
-    schedule = MARKET_SCHEDULES["kor"]
-    now_local = (now or datetime.now(ZoneInfo(schedule["timezone"]))).astimezone(ZoneInfo(schedule["timezone"]))
-    if trading_day_today("kor", now_local) is None:
-        return False
-    return FIRST_ENTRY_CLOSE_TIME <= now_local.time() < schedule["close"]
+    now_local = (now or datetime.now(ZoneInfo(MARKET_SCHEDULES["kor"]["timezone"]))).astimezone(
+        ZoneInfo(MARKET_SCHEDULES["kor"]["timezone"])
+    )
+    return now_local.time() >= FIRST_ENTRY_CLOSE_TIMES[kind] and is_instrument_trading_time("kor", kind, now=now_local)
 
 
 def _attach_trade_history(view: dict[str, Any], ledger: Ledger, cached_days: dict[date, list[dict[str, Any]]]) -> None:
@@ -449,7 +451,7 @@ def _build_strategy_view(
         round_fills = ledger.round_fills(round_quantity)
         last_fill = round_fills[held_rounds - 1]["price"]
     else:
-        close_entry = _first_entry_close_window()
+        close_entry = _first_entry_close_window(kind)
 
     # 팔 수 있는 회차는 맨 뒤(가장 깊은) 보유 회차 하나뿐이고, 신호는 한 번에 하나라
     # 그 매도가 닿아 있으면 매수는 매도가 체결될 때까지 미룬다.
@@ -516,7 +518,7 @@ def _build_strategy_view(
         else:
             buy_limit = ladder.preview_buy_limit(float(index_status["prev_close"]), round_no, trigger_pct, kind=kind)
         market_entry = is_next and close_entry and close > buy_limit
-        # 15:00 시장가 매수는 현재가로 사므로 그 가격으로 산 금액을 본다.
+        # 장 마감 매수는 현재가로 사므로 그 가격으로 산 금액을 본다.
         cash_short = bool(is_next and round_quantity * (close if market_entry else buy_limit) > cash_krw)
         rows.append(
             {
@@ -591,7 +593,7 @@ def _build_strategy_view(
         "status": {
             "held_count": held_rounds,
             "waiting_first_entry": held_rounds == 0,
-            "first_entry_close_time": FIRST_ENTRY_CLOSE_TIME.strftime("%H:%M"),
+            "first_entry_close_time": FIRST_ENTRY_CLOSE_TIMES[kind].strftime("%H:%M"),
             "next_round": (held_rounds + 1) if held_rounds < max_rounds else None,
             "next_ticker": ticker if held_rounds < max_rounds else None,
             "next_name": name if held_rounds < max_rounds else None,
