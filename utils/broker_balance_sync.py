@@ -79,6 +79,40 @@ def _price(value: float) -> str:
     return f"{value:,.{_AVG_DIGITS}f}".rstrip("0").rstrip(".")
 
 
+def _account_valuation_label(account_id: str) -> str:
+    """반영된 계좌의 원화 총자산과 전 거래일 대비 수익률을 표시한다."""
+    from utils.daily_fund_service import calculate_period_return_pct
+    from utils.dashboard_service import account_period_profit_and_base
+    from utils.normalization import normalize_number
+    from utils.portfolio_io import get_latest_daily_snapshot, load_portfolio_master, load_real_holdings_table
+
+    try:
+        account = load_portfolio_master(account_id)
+        if account is None:
+            raise RuntimeError("반영된 계좌를 찾지 못했습니다.")
+        holdings = load_real_holdings_table(account_id)
+        if holdings is None and account["holdings"]:
+            raise RuntimeError("보유 종목 평가를 불러오지 못했습니다.")
+        if holdings is not None and (holdings["수량"].gt(0) & ~holdings["현재가"].gt(0)).any():
+            raise RuntimeError("현재가가 없는 보유 종목이 있습니다.")
+        valuation = float(holdings["평가금액(KRW)"].sum()) if holdings is not None else 0.0
+        total_assets = valuation + normalize_number(account["cash_balance"])
+    except Exception as exc:
+        logger.warning("[BROKER-SYNC] %s 원화 평가액 조회 실패: %s", account_id, exc)
+        return "평가액 조회 불가"
+
+    try:
+        previous = get_latest_daily_snapshot(account_id, before_today=True)
+        if previous and normalize_number(previous.get("total_assets")) > 0:
+            profit, base = account_period_profit_and_base(
+                total_assets, normalize_number(account["total_principal"]), previous
+            )
+            return f"{total_assets:,.0f}원({calculate_period_return_pct(profit, base):+.2f}%)"
+    except Exception as exc:
+        logger.warning("[BROKER-SYNC] %s 전 거래일 대비 수익률 조회 실패: %s", account_id, exc)
+    return f"{total_assets:,.0f}원(비교 불가)"
+
+
 def apply_broker_balance(account_id: str, fetched: dict[str, Any], *, trigger: str) -> dict[str, Any]:
     """불러온 잔고를 저장하고, 저장값과 달랐으면 슬랙으로 알린다 — 배치와 사람의 덮어쓰기가 공용.
 
@@ -90,9 +124,11 @@ def apply_broker_balance(account_id: str, fetched: dict[str, Any], *, trigger: s
     diff = _diff_lines(load_portfolio_master(account_id), fetched)
     applied = apply_fetched_balance(account_id, fetched["provider"], fetched)
     if diff:
+        valuation = _account_valuation_label(account_id)
+        changes = "\n".join(f"{index}. {line}" for index, line in enumerate(diff, start=1))
         _notify(
-            f"🔄 증권사 잔고 반영({trigger}) — {account_id} ({fetched['provider']}) · 변경 {len(diff)}건\n"
-            + "\n".join(diff)
+            f"🔄 증권사 잔고 반영({trigger}) — {account_id} ({fetched['provider']}) {valuation}\n"
+            f"변경 {len(diff)}건\n{changes}"
         )
     return {**applied, "changed": bool(diff)}
 
