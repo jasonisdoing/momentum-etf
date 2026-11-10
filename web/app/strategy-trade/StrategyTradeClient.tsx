@@ -355,7 +355,7 @@ function comparableDrafts(rows: DraftRow[]) {
   ]);
 }
 
-type TradeListRow = DraftRow & { held: boolean; heldRounds: string } & Partial<HoldingsRow>;
+type TradeListRow = DraftRow & { held: boolean; heldRounds: string; roundAmount: number | null } & Partial<HoldingsRow>;
 const tradeGridTheme = createAppGridTheme();
 const tradeHoldingColumns = Object.values(holdingMetricColumns<TradeListRow>(true));
 
@@ -456,9 +456,14 @@ function AccountSettingsCard({
   const details = selectedStrategy?.ticker === selectedRow?.ticker ? selectedStrategy : undefined;
   const gridRows = useMemo<TradeListRow[]>(() => drafts.map((row) => {
     const strategy = row.strategy_id ? strategiesById.get(row.strategy_id) : undefined;
+    const price = strategy?.ticker === row.ticker && !("error" in strategy) ? strategy.index.close : null;
+    const quantity = Number(row.qty);
     return {
       ...holdings.get(row.ticker),
       ...row,
+      roundAmount: price != null && Number.isFinite(price) && price > 0 && Number.isInteger(quantity) && quantity > 0
+        ? price * quantity
+        : null,
       held: Boolean(strategy && strategy.ticker === row.ticker && !("error" in strategy) && strategy.status.held_quantity > 0),
       heldRounds: !strategy || strategy.ticker !== row.ticker
         ? "미저장"
@@ -477,6 +482,11 @@ function AccountSettingsCard({
       editable: !saving,
       cellClass: saving ? undefined : "appEditableCell",
     })),
+    {
+      field: "roundAmount", headerName: "회차 금액", headerTooltip: "현재가 × 회차당 수량 (만원 단위 반올림)",
+      width: 100, type: "rightAligned",
+      valueFormatter: ({ value }) => value == null ? "-" : `${formatNumber(value / 10_000)}만원`,
+    },
     ...tradeHoldingColumns,
   ], [saving]);
 
