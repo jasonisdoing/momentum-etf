@@ -3921,13 +3921,13 @@ a {
   overflow: auto;
 }
 
-.assetsAgGrid .ag-row.assetsGroupRow {
+:is(.assetsAgGrid, .strategyTradeGrid) .ag-row.assetsGroupRow {
   background: rgba(148, 163, 184, 0.22);
   font-weight: 800;
   border-top: 2px solid rgba(100, 116, 139, 0.55);
 }
 
-.assetsAgGrid .ag-row.assetsGroupRow:hover {
+:is(.assetsAgGrid, .strategyTradeGrid) .ag-row.assetsGroupRow:hover {
   background: rgba(148, 163, 184, 0.3);
 }
 

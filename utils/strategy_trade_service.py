@@ -70,7 +70,7 @@ def load_settings() -> dict[str, Any]:
     for account_id, entry in (doc.get("accounts") or {}).items():
         if not isinstance(entry, dict) or not isinstance(entry.get("slack_enabled"), bool):
             raise RuntimeError(f"'{account_id}' 계좌의 사고팔기 설정이 올바르지 않습니다 — 화면에서 다시 저장하세요.")
-        accounts[str(account_id)] = {"slack_enabled": entry["slack_enabled"]}
+        accounts[str(account_id)] = {"slack_enabled": entry["slack_enabled"], "groups": entry.get("groups", [])}
 
     strategies: dict[str, dict[str, Any]] = {}
     for sid, entry in stored.items():
@@ -176,7 +176,29 @@ def _sent_log_unset(sent_log: dict[str, Any], strategy_id: str) -> dict[str, str
     return {f"sent_log.{key}": "" for key in sent_log if str(key).startswith(f"{strategy_id}:")}
 
 
-def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any) -> None:
+def _normalize_trade_groups(groups: Any) -> list[dict[str, str | None]]:
+    if not isinstance(groups, list):
+        raise ValueError("그룹 목록 형식이 올바르지 않습니다.")
+    result: list[dict[str, str | None]] = []
+    seen: set[str] = set()
+    for row in groups:
+        if not isinstance(row, dict):
+            raise ValueError("그룹 행의 형식이 올바르지 않습니다.")
+        group_id, name, anchor = row.get("id"), row.get("name"), row.get("before_ticker")
+        if not isinstance(group_id, str) or not group_id.strip() or group_id.strip() in seen:
+            raise ValueError("그룹 식별자가 비어 있거나 중복됐습니다.")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("그룹 이름을 입력하세요.")
+        if anchor is not None and (not isinstance(anchor, str) or not anchor.strip()):
+            raise ValueError("그룹 위치의 종목코드가 올바르지 않습니다.")
+        seen.add(group_id.strip())
+        result.append(
+            {"id": group_id.strip(), "name": name.strip(), "before_ticker": anchor.strip().upper() if anchor else None}
+        )
+    return result
+
+
+def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any, groups: Any = None) -> None:
     """계좌의 슬랙 설정과 전략 목록을 검증한 뒤 한 번에 저장한다."""
     from uuid import uuid4
 
@@ -212,6 +234,9 @@ def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any) -> 
     stored = collection.find_one({"_id": _SETTINGS_KEY}, {"sent_log": 1, "accounts": 1}) or {}
     sent_log = stored.get("sent_log") or {}
     account_settings: dict[str, Any] = {"slack_enabled": slack_enabled}
+    if groups is None:
+        groups = ((stored.get("accounts") or {}).get(account_id) or {}).get("groups", [])
+    account_settings["groups"] = _normalize_trade_groups(groups)
     # 공유 DB에서 구버전 배치가 읽는 동안만 기존 계좌 형식을 유지한다.
     if any("pools" in account for account in (stored.get("accounts") or {}).values()):
         account_settings["pools"] = sorted({entry["pool"] for entry in planned.values()})
@@ -239,7 +264,7 @@ def _load_account_state(account_id: str) -> dict[str, Any]:
 
     현재가는 ``load_real_holdings_table`` 이 실시간 시세로 채운 값이다. 수량·평균단가는 쓰지 않는다 —
     보유는 증권사 체결 이력(회차 원장)이 정한다. 현금은 잔고 동기화가 저장한 값(자산 화면과 같은 값)이다 —
-    ``cash_krw`` 는 매수에 쓰는 원화 예수금, ``total_krw`` 는 보유 평가액 + 현금(원화 환산) 계좌 평가액이다.
+    ``cash_krw`` 는 매수에 쓰는 원화 예수금이다.
     """
     from utils.broker_balance_sync import stored_cash_map
     from utils.portfolio_io import load_portfolio_master, load_real_holdings_table
@@ -250,20 +275,17 @@ def _load_account_state(account_id: str) -> dict[str, Any]:
     cash_krw = stored_cash_map(master, ["KRW"])["KRW"]
     frame = load_real_holdings_table(account_id)
     closes: dict[str, float] = {}
-    holdings_value = 0.0
     if frame is not None and not frame.empty:
-        missing = {"티커", "현재가", "평가금액(KRW)"} - set(frame.columns)
+        missing = {"티커", "현재가"} - set(frame.columns)
         if missing:
             raise RuntimeError(f"보유 테이블에 필요한 컬럼이 없습니다: {', '.join(sorted(missing))}")
         for _, row in frame.iterrows():
             ticker = str(row["티커"]).strip()
             if ticker:
                 closes[ticker] = float(row["현재가"] or 0)
-                holdings_value += float(row["평가금액(KRW)"] or 0)
     return {
         "closes": closes,
         "cash_krw": cash_krw,
-        "total_krw": holdings_value + float(master.get("cash_balance") or 0),
     }
 
 
@@ -806,8 +828,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
         ],
         "account_id": selected,
         "slack_enabled": account["slack_enabled"],
-        # 계좌 현금(잔고 동기화 값)과 계좌 평가액 대비 비율 — 다음 회차를 살 수 없으면 한도 소진이다.
-        "cash": _cash_summary(selected) if selected is not None else None,
+        "groups": _normalize_trade_groups(account.get("groups", [])),
         "pool_options": pool_options(list(pools)),
         "ticker_options": [options[ticker] for ticker in sorted(options)],
         # 편집 표의 행 — 저장된 전략 설정 그대로.
@@ -824,14 +845,4 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
             for sid, entry in configs
         ],
         "strategies": _build_views(mine, fresh=False, include_trade_history=True),
-    }
-
-
-def _cash_summary(account_id: str) -> dict[str, Any]:
-    """화면 상단의 현금 표시 — 원화 예수금과 계좌 평가액 대비 비율(%)."""
-    state = _load_account_state(account_id)
-    total = state["total_krw"]
-    return {
-        "cash_krw": state["cash_krw"],
-        "pct": round(state["cash_krw"] / total * 100.0, 2) if total > 0 else None,
     }

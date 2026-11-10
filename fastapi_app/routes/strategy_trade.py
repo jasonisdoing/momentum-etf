@@ -34,7 +34,7 @@ def put_strategy_trade_settings(
     account_id = str(payload.get("account_id") or "").strip()
     if not account_id or payload.get("strategies") is None or "slack_enabled" not in payload:
         raise ValueError("account_id·slack_enabled·strategies 가 모두 필요합니다.")
-    save_account_trade(account_id, payload["slack_enabled"], payload["strategies"])
+    save_account_trade(account_id, payload["slack_enabled"], payload["strategies"], payload.get("groups"))
     return mark_sent_rounds(load_strategy_trade_view(account_id))
 
 

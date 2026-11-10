@@ -1,12 +1,14 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import type { ColDef } from "ag-grid-community";
+import type { ColDef, RowDragEndEvent } from "ag-grid-community";
 
 import { gridRowDragColumn, gridSelectionColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
+import type { HoldingsGroup } from "@/lib/holdings-store";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
+import { renderStockNameCell } from "@/lib/name-highlight";
 
-import type { HoldingsResponse, HoldingsRow } from "../assets/assets-helpers";
+import { CASH_ROW_TICKER, type AccountSummary, type HoldingsResponse, type HoldingsRow } from "../assets/assets-helpers";
 import { holdingMetricColumns } from "../assets/holding-metric-columns";
 import AccountSelect, { type AccountOptionBase } from "../components/AccountSelect";
 import { SlackAlarmField } from "../components/SlackAlarmField";
@@ -14,6 +16,7 @@ import { readRememberedTradeAccountId, writeRememberedTradeAccountId } from "../
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { GridToolbarButton } from "../components/GridToolbarButton";
+import { HoldingsGroupButton, HoldingsGroupDialog, HoldingsGroupName, type HoldingsGroupDraft } from "../components/HoldingsGroupControls";
 import { AppModal } from "../components/AppModal";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
@@ -150,8 +153,7 @@ type View = {
   account_id: string | null;
   /** 이 계좌의 사고팔기 슬랙 스위치(합성 슬랙과 별개). */
   slack_enabled: boolean;
-  /** 계좌 원화 예수금(잔고 동기화 값)과 계좌 평가액 대비 비율(%) — 다음 회차를 살 수 없으면 한도 소진. */
-  cash: { cash_krw: number; pct: number | null } | null;
+  groups: HoldingsGroup[];
   pool_options: PoolLabelSource[];
   ticker_options: TickerOption[];
   /** 저장된 전략 설정 — 이 계좌의 전략 전부. */
@@ -357,7 +359,26 @@ function comparableDrafts(rows: DraftRow[]) {
 
 type TradeListRow = DraftRow & { held: boolean; heldRounds: string; roundAmount: number | null } & Partial<HoldingsRow>;
 const tradeGridTheme = createAppGridTheme();
-const tradeHoldingColumns = Object.values(holdingMetricColumns<TradeListRow>(true));
+const { weight: tradeWeightColumn, ...tradeHoldingColumns } = holdingMetricColumns<TradeListRow>(true);
+const OTHER_HOLDINGS_TICKER = "__OTHER_HOLDINGS__";
+const EMPTY_GROUPS: HoldingsGroup[] = [];
+
+function displayWeights(values: number[], total: number): number[] {
+  // 소수점 둘째 자리에서 생기는 반올림 차이는 나머지가 큰 행부터 배분한다.
+  const parts = values.map((value, index) => {
+    const exact = (value / total) * 10_000;
+    const floor = Math.floor(exact);
+    return { index, floor, remainder: exact - floor };
+  });
+  const weights = parts.map(({ floor }) => floor);
+  const remaining = 10_000 - weights.reduce((sum, weight) => sum + weight, 0);
+  parts.sort((a, b) => b.remainder - a.remainder).slice(0, remaining).forEach(({ index }) => { weights[index] += 1; });
+  return weights.map((weight) => weight / 100);
+}
+
+function tradeListLabel(key: string, name: string): TradeListRow {
+  return { key, ticker: "", name, strategy_id: null, pct: "", qty: "", rounds: "", held: false, heldRounds: "", roundAmount: null };
+}
 
 const tradeSettingColumns = [
   { field: "pct", headerName: "간격(%)", headerTooltip: "매매 간격 (%)", width: 78 },
@@ -380,6 +401,9 @@ function AccountSettingsCard({
 }) {
   const toast = useToast();
   const [drafts, setDrafts] = useState<DraftRow[]>(() => view.configs.map(rowFromConfig));
+  const [groups, setGroups] = useState<HoldingsGroup[]>(view.groups ?? EMPTY_GROUPS);
+  const [groupDraft, setGroupDraft] = useState<HoldingsGroupDraft | null>(null);
+  const [sortActive, setSortActive] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
   const [search, setSearch] = useState("");
@@ -387,11 +411,12 @@ function AccountSettingsCard({
   const [slack, setSlack] = useState(view.slack_enabled);
   const [slackTesting, setSlackTesting] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [holdings, setHoldings] = useState<Map<string, HoldingsRow>>(() => new Map());
+  const [accountAssets, setAccountAssets] = useState<{ summary: AccountSummary; holdings: Map<string, HoldingsRow> } | null>(null);
 
   // 서버가 최신 값을 돌려주면(저장·계좌 전환) 초안도 그 값으로 맞춘다.
   useEffect(() => {
     setDrafts(view.configs.map(rowFromConfig));
+    setGroups(view.groups ?? EMPTY_GROUPS);
     setPickerOpen(false);
     setSlack(view.slack_enabled);
   }, [view]);
@@ -406,14 +431,16 @@ function AccountSettingsCard({
           signal: controller.signal,
         });
         const payload = (await response.json()) as HoldingsResponse;
-        if (!response.ok || !payload.rows || !payload.account_summaries?.some((row) => row.account_id === accountId)) {
+        const summary = payload.account_summaries?.find((row) => row.account_id === accountId);
+        if (!response.ok || !payload.rows || !summary) {
           throw new Error(payload.error ?? errorMessage);
         }
         if (controller.signal.aborted) return;
-        setHoldings(new Map(payload.rows.map((row) => [row.ticker, row])));
+        const rows = payload.rows.filter((row) => row.account_id === accountId);
+        setAccountAssets({ summary, holdings: new Map(rows.map((row) => [row.ticker, row])) });
       } catch (error) {
         if (controller.signal.aborted) return;
-        setHoldings(new Map());
+        setAccountAssets(null);
         toast.error(error instanceof Error ? error.message : errorMessage);
       }
     }
@@ -423,6 +450,7 @@ function AccountSettingsCard({
 
   const isDirty =
     slack !== view.slack_enabled ||
+    JSON.stringify(groups) !== JSON.stringify(view.groups ?? EMPTY_GROUPS) ||
     JSON.stringify(comparableDrafts(drafts)) !== JSON.stringify(comparableDrafts(view.configs.map(rowFromConfig)));
 
   const poolLabel = useCallback(
@@ -454,41 +482,115 @@ function AccountSettingsCard({
   );
   const selectedStrategy = selectedRow?.strategy_id ? strategiesById.get(selectedRow.strategy_id) : undefined;
   const details = selectedStrategy?.ticker === selectedRow?.ticker ? selectedStrategy : undefined;
-  const gridRows = useMemo<TradeListRow[]>(() => drafts.map((row) => {
-    const strategy = row.strategy_id ? strategiesById.get(row.strategy_id) : undefined;
-    const price = strategy?.ticker === row.ticker && !("error" in strategy) ? strategy.index.close : null;
-    const quantity = Number(row.qty);
+  const { gridRows, pinnedRows } = useMemo(() => {
+    const stockRows = drafts.map((row): TradeListRow => {
+      const strategy = row.strategy_id ? strategiesById.get(row.strategy_id) : undefined;
+      const price = strategy?.ticker === row.ticker && !("error" in strategy) ? strategy.index.close : null;
+      const quantity = Number(row.qty);
+      return {
+        ...accountAssets?.holdings.get(row.ticker),
+        ...row,
+        roundAmount: price != null && Number.isFinite(price) && price > 0 && Number.isInteger(quantity) && quantity > 0
+          ? price * quantity
+          : null,
+        held: Boolean(strategy && strategy.ticker === row.ticker && !("error" in strategy) && strategy.status.held_quantity > 0),
+        heldRounds: !strategy || strategy.ticker !== row.ticker
+          ? "미저장"
+          : "error" in strategy ? "오류" : `${strategy.status.held_count}/${strategy.config.rounds}`,
+      };
+    });
+    const summary = accountAssets?.summary;
+    const stockValues = stockRows.map((row) => row.valuation_krw ?? 0);
+    const strategyTickers = new Set(drafts.map((row) => row.ticker));
+    const otherValue = accountAssets == null ? undefined : [...accountAssets.holdings.values()]
+      .filter((row) => !strategyTickers.has(row.ticker))
+      .reduce((sum, row) => sum + row.valuation_krw, 0);
+    const weights = summary && summary.total_assets_krw > 0 && otherValue != null
+      ? displayWeights([summary.cash_balance_krw, otherValue, ...stockValues], summary.total_assets_krw)
+      : [];
+    const pinnedRows: TradeListRow[] = [
+      { ...tradeListLabel(CASH_ROW_TICKER, "현금"), ticker: CASH_ROW_TICKER, valuation_krw: summary?.cash_balance_krw, weight_pct: weights[0] },
+      { ...tradeListLabel(OTHER_HOLDINGS_TICKER, "기타 종목"), valuation_krw: otherValue, weight_pct: weights[1] },
+    ];
+    const weightedRows = stockRows.map((row, index) => ({ ...row, weight_pct: weights[index + 2] }));
+    if (sortActive || !groups.length) return { gridRows: weightedRows, pinnedRows };
+
+    const tickers = new Set(weightedRows.map((row) => row.ticker));
+    const byAnchor = new Map<string | null, TradeListRow[]>();
+    for (const group of groups) {
+      const anchor = group.before_ticker && tickers.has(group.before_ticker) ? group.before_ticker : null;
+      const groupRows = byAnchor.get(anchor) ?? [];
+      groupRows.push({ ...tradeListLabel(group.id, group.name), is_group: true });
+      byAnchor.set(anchor, groupRows);
+    }
     return {
-      ...holdings.get(row.ticker),
-      ...row,
-      roundAmount: price != null && Number.isFinite(price) && price > 0 && Number.isInteger(quantity) && quantity > 0
-        ? price * quantity
-        : null,
-      held: Boolean(strategy && strategy.ticker === row.ticker && !("error" in strategy) && strategy.status.held_quantity > 0),
-      heldRounds: !strategy || strategy.ticker !== row.ticker
-        ? "미저장"
-        : "error" in strategy ? "오류" : `${strategy.status.held_count}/${strategy.config.rounds}`,
+      gridRows: [...weightedRows.flatMap((row) => [...(byAnchor.get(row.ticker) ?? []), row]), ...(byAnchor.get(null) ?? [])],
+      pinnedRows,
     };
-  }), [drafts, holdings, strategiesById]);
+  }, [accountAssets, drafts, groups, sortActive, strategiesById]);
 
   const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
-    gridRowDragColumn<TradeListRow>(true, 36),
+    gridRowDragColumn<TradeListRow>(({ node }) => !node.rowPinned, 36),
     tickerColumn<TradeListRow>(),
-    stockNameColumn<TradeListRow>({ nameOptions: (row) => ({ isHeld: row?.held }) }),
+    stockNameColumn<TradeListRow>({
+      cellRenderer: ({ data, value }) => data?.is_group ? (
+        <HoldingsGroupName
+          name={data.name}
+          disabled={saving}
+          onEdit={() => setGroupDraft({ id: data.key, name: data.name })}
+          onDelete={() => setGroups((current) => current.filter((group) => group.id !== data.key))}
+        />
+      ) : renderStockNameCell(value, { isHeld: data?.held }),
+    }),
+    tradeWeightColumn,
     { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
     ...tradeSettingColumns.map((column): ColDef<TradeListRow> => ({
       ...column,
       type: "rightAligned",
-      editable: !saving,
-      cellClass: saving ? undefined : "appEditableCell",
+      editable: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group,
+      cellClass: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group ? "appEditableCell" : undefined,
     })),
     {
       field: "roundAmount", headerName: "회차 금액", headerTooltip: "현재가 × 회차당 수량 (만원 단위 반올림)",
       width: 100, type: "rightAligned",
       valueFormatter: ({ value }) => value == null ? "-" : `${formatNumber(value / 10_000)}만원`,
     },
-    ...tradeHoldingColumns,
+    ...Object.values(tradeHoldingColumns),
   ], [saving]);
+
+  const handleRowDragEnd = ({ api }: RowDragEndEvent<TradeListRow>) => {
+    // 그리드가 드롭을 반영한 다음 종목 순서와 그룹 위치를 함께 읽는다.
+    queueMicrotask(() => {
+      if (api.isDestroyed()) return;
+      const orderedRows: TradeListRow[] = [];
+      api.forEachNodeAfterFilterAndSort(({ data, rowPinned }) => {
+        if (data && !rowPinned) orderedRows.push(data);
+      });
+      setDrafts((rows) => {
+        const byKey = new Map(rows.map((row) => [row.key, row]));
+        const ordered = orderedRows.flatMap(({ key }) => {
+          const row = byKey.get(key);
+          return row ? [row] : [];
+        });
+        return ordered.length === rows.length ? ordered : rows;
+      });
+      setGroups((current) => {
+        const byId = new Map(current.map((group) => [group.id, group]));
+        let nextTicker: string | null = null;
+        const ordered: HoldingsGroup[] = [];
+        for (let index = orderedRows.length - 1; index >= 0; index -= 1) {
+          const row = orderedRows[index];
+          if (!row.is_group) {
+            nextTicker = row.ticker;
+            continue;
+          }
+          const group = byId.get(row.key);
+          if (group) ordered.push({ ...group, before_ticker: nextTicker });
+        }
+        return ordered.length === current.length ? ordered.reverse() : current;
+      });
+    });
+  };
 
   const selectTicker = (option: TickerOption) => {
     if (!pickerOpen || usedTickers.has(option.ticker)) return;
@@ -503,6 +605,13 @@ function AccountSettingsCard({
 
   const deleteChecked = () => {
     const checked = new Set(checkedKeys);
+    const deletedTickers = new Set(drafts.filter((row) => checked.has(row.key)).map((row) => row.ticker));
+    setGroups((current) => current.map((group) => {
+      if (!group.before_ticker || !deletedTickers.has(group.before_ticker)) return group;
+      const anchor = drafts.findIndex((row) => row.ticker === group.before_ticker);
+      const nextTicker = drafts.slice(anchor + 1).find((row) => !checked.has(row.key))?.ticker ?? null;
+      return { ...group, before_ticker: nextTicker };
+    }));
     setDrafts((rows) => rows.filter((row) => !checked.has(row.key)));
     setCheckedKeys([]);
   };
@@ -542,7 +651,7 @@ function AccountSettingsCard({
       const resp = await fetch("/api/strategy-trade", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_id: accountId, slack_enabled: slack, strategies }),
+        body: JSON.stringify({ account_id: accountId, slack_enabled: slack, strategies, groups }),
       });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
@@ -553,7 +662,7 @@ function AccountSettingsCard({
     } finally {
       setSaving(false);
     }
-  }, [accountId, drafts, onSaved, slack, toast]);
+  }, [accountId, drafts, groups, onSaved, slack, toast]);
 
   const sendSlackTest = useCallback(async () => {
     setSlackTesting(true);
@@ -594,13 +703,10 @@ function AccountSettingsCard({
                   testing={slackTesting}
                   onTest={() => void sendSlackTest()}
                 />
-                <div className="appLabeledField" style={{ marginBottom: 0 }}>
-                  <span className="appLabeledFieldLabel">현금 비율</span>
-                  <span style={{ fontWeight: 700 }}>{view.cash?.pct != null ? `${view.cash.pct.toFixed(1)}%` : "—"}</span>
-                </div>
               </div>
               <div className="appMainHeaderRight">
                 <UnsavedChangesBadge show={isDirty} />
+                <HoldingsGroupButton disabled={saving} onAdd={() => setGroupDraft({ id: null, name: "" })} />
                 <GridToolbarButton
                   variant="add"
                   disabled={saving || view.ticker_options.length === 0}
@@ -608,9 +714,7 @@ function AccountSettingsCard({
                     setSearch("");
                     setPickerOpen(true);
                   }}
-                >
-                  종목 추가
-                </GridToolbarButton>
+                />
                 <GridToolbarButton variant="save" disabled={saving || !isDirty} onClick={() => void save()}>
                   {saving ? "저장 중…" : "저장"}
                 </GridToolbarButton>
@@ -628,63 +732,55 @@ function AccountSettingsCard({
               <strong>종목</strong>
               <span className="tableMuted">행을 선택해 상세 보기 · 값을 더블 클릭해 수정 · 손잡이로 순서 변경</span>
             </div>
-            {gridRows.length > 0 ? (
-              <AppAgGrid
-                rowData={gridRows}
-                columnDefs={tradeListColumns}
-                theme={tradeGridTheme}
-                height={Math.min(420, 54 + gridRows.length * 36)}
-                minHeight={76}
-                getRowId={({ data }) => data.key}
-                getRowClass={({ data }) => [
-                  stockRowClass({ held: data?.held }),
-                  data?.key === selectedRow?.key ? "strategyTradeSelectedRow" : "",
-                ].filter(Boolean).join(" ")}
-                rowClassDeps={[selectedRow?.key]}
-                gridOptions={{
-                  rowHeight: 36,
-                  headerHeight: 34,
-                  suppressMovableColumns: true,
-                  suppressCellFocus: false,
-                  stopEditingWhenCellsLoseFocus: true,
-                  readOnlyEdit: true,
-                  rowSelection: { mode: "multiRow", checkboxes: true, headerCheckbox: true, enableClickSelection: false },
-                  selectionColumnDef: gridSelectionColumn,
-                  rowDragManaged: true,
-                  suppressMoveWhenRowDragging: true,
-                  suppressRowDrag: saving,
-                  onRowDragEnd: ({ api }) => {
-                    const keys: string[] = [];
-                    api.forEachNodeAfterFilterAndSort(({ data }) => {
-                      if (data) keys.push(data.key);
-                    });
-                    setDrafts((rows) => {
-                      const byKey = new Map(rows.map((row) => [row.key, row]));
-                      const ordered = keys.flatMap((key) => {
-                        const row = byKey.get(key);
-                        return row ? [row] : [];
-                      });
-                      return ordered.length === rows.length ? ordered : rows;
-                    });
-                  },
-                  onSelectionChanged: ({ api }) => setCheckedKeys(api.getSelectedRows().map((row) => row.key)),
-                  onCellEditRequest: ({ data, colDef, newValue }) => {
-                    const field = colDef.field;
-                    if (field === "pct" || field === "qty" || field === "rounds") {
-                      updateRow(data.key, { [field]: String(newValue ?? "").trim() });
-                    }
-                  },
-                  onRowClicked: ({ data }) => {
-                    if (data) setSelection({ accountId, ticker: data.ticker });
-                  },
-                  onCellKeyDown: ({ data, event }) => {
-                    if (data && event instanceof KeyboardEvent && event.key === "Enter") {
-                      setSelection({ accountId, ticker: data.ticker });
-                    }
-                  },
-                }}
-              />
-            ) : <div className="tableMuted">등록된 종목이 없습니다.</div>}
+            <AppAgGrid
+              rowData={gridRows}
+              columnDefs={tradeListColumns}
+              theme={tradeGridTheme}
+              height={Math.min(420, 54 + (gridRows.length + pinnedRows.length) * 36)}
+              minHeight={76}
+              getRowId={({ data }) => data.key}
+              getRowClass={({ data }) => [
+                data?.is_group ? "assetsGroupRow" : "",
+                stockRowClass({ held: data?.held }),
+                data?.key === selectedRow?.key ? "strategyTradeSelectedRow" : "",
+              ].filter(Boolean).join(" ")}
+              rowClassDeps={[selectedRow?.key]}
+              gridOptions={{
+                rowHeight: 36,
+                headerHeight: 34,
+                suppressMovableColumns: true,
+                suppressCellFocus: false,
+                stopEditingWhenCellsLoseFocus: true,
+                readOnlyEdit: true,
+                pinnedTopRowData: pinnedRows,
+                suppressOverlays: ["noRows"],
+                rowSelection: {
+                  mode: "multiRow", headerCheckbox: true, enableClickSelection: false, hideDisabledCheckboxes: true,
+                  isRowSelectable: (node) => Boolean(node.data && !node.rowPinned && !node.data.is_group),
+                },
+                selectionColumnDef: gridSelectionColumn,
+                rowDragManaged: true,
+                suppressMoveWhenRowDragging: true,
+                suppressRowDrag: saving || sortActive,
+                onSortChanged: ({ api }) => setSortActive(api.getColumnState().some((column) => column.sort != null)),
+                onRowDragEnd: handleRowDragEnd,
+                onSelectionChanged: ({ api }) => setCheckedKeys(api.getSelectedRows().map((row) => row.key)),
+                onCellEditRequest: ({ data, colDef, newValue }) => {
+                  const field = colDef.field;
+                  if (field === "pct" || field === "qty" || field === "rounds") {
+                    updateRow(data.key, { [field]: String(newValue ?? "").trim() });
+                  }
+                },
+                onRowClicked: ({ data, node }) => {
+                  if (data && !node.rowPinned && !data.is_group) setSelection({ accountId, ticker: data.ticker });
+                },
+                onCellKeyDown: ({ data, event, node }) => {
+                  if (data && !node.rowPinned && !data.is_group && event instanceof KeyboardEvent && event.key === "Enter") {
+                    setSelection({ accountId, ticker: data.ticker });
+                  }
+                },
+              }}
+            />
           </div>
         </aside>
         <div aria-label="선택 종목 상세">
@@ -703,6 +799,18 @@ function AccountSettingsCard({
         </div>
       </section>
 
+      <HoldingsGroupDialog
+        draft={groupDraft}
+        onChange={setGroupDraft}
+        onSave={({ id, name }) => {
+          if (id) {
+            setGroups((current) => current.map((group) => group.id === id ? { ...group, name } : group));
+          } else {
+            const group = { id: `group-${Date.now()}`, name, before_ticker: drafts[0]?.ticker ?? null };
+            setGroups((current) => [...current, group]);
+          }
+        }}
+      />
       <AppModal open={pickerOpen} title="한국 종목 선택" onClose={() => setPickerOpen(false)}>
         <input
           className="form-control mb-2"

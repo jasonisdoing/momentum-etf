@@ -53,6 +53,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 
 사고팔기의 구버전 화면·배치가 공유 DB를 더 이상 읽지 않으면 `strategy_trade_settings.accounts.*.pools`를 일괄 제거한다. `strategies.*.pool`은 가격 출처와 기존 주문 연결에 사용한다.
 `strategy_trade_settings.strategies.*.sort_order`는 계좌별 사고팔기 목록의 표시 순서다.
+`strategy_trade_settings.accounts.*.groups`는 사고팔기 표의 계좌별 표시 그룹이며 자산 표의 그룹과 별도로 저장한다.
 
 전략 공용 모듈:
 - 전략 시작일은 모멘텀의 `pool_settings.MOMENTUM_START_DATE`, 신고가·포트폴리오의 풀별 `start_date`에 저장한다. 검증은 `utils/strategy_settings.py`, 개별 운용 현황과 합성은 같은 저장일로 계산한다.
