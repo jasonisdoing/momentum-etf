@@ -31,7 +31,7 @@ from services.broker_trade_service import (
 )
 from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
 from utils.db_manager import get_db_connection
-from utils.market_session import REGULAR, market_session
+from utils.market_session import is_instrument_trading_time, kor_order_venue
 from utils.strategy_trade_ledger import is_buy
 from utils.strategy_trade_service import load_views_where
 
@@ -40,8 +40,11 @@ COLLECTION = "strategy_trade_orders"
 # 신호 스레드 기록은 사고팔기 설정 문서의 `signal_threads` 목록에 둔다(오늘 것만 남긴다).
 _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "strategy_trade_settings"
-#: 이 시각부터 정규장 마감(15:30)까지 아직 체결되지 않은 슬랙 주문을 한 번 경고한다.
-CLOSE_WARNING_FROM = time(15, 20)
+#: 거래소별 마감 경고 구간 — 이 시각부터 그 거래소 마감까지 아직 체결되지 않은 슬랙 주문을 한 번 경고한다.
+#: KRX 는 정규장 마감 15:30, NXT 는 애프터마켓 마감 20:00(개별주의 정규장 밖 주문).
+CLOSE_WARNING_WINDOWS = {"KRX": (time(15, 20), time(15, 30)), "NXT": (time(19, 50), time(20, 0))}
+#: 거래소별로 주문이 살아 있는 거래 시간표의 종목 종류 — KRX 는 정규장(ETF 시간표), NXT 는 개별주 시간표(프리·정규·애프터).
+_VENUE_WINDOW_KIND = {"KRX": "etf", "NXT": "stock"}
 
 #: 아직 끝나지 않은 상태 — 이 동안 체결 조회로 상태를 갱신한다.
 ACTIVE_STATUSES = ("submitting", "pending", "partial")
@@ -145,8 +148,6 @@ def _require_order_allowed(account_id: str, env: str, amount: int, count: int) -
         raise BrokerApiError(
             f"'{doc['account_id']}' 계좌는 API 주문이 꺼져 있습니다 — 계좌 설정에서 주문 허용을 켜세요."
         )
-    if market_session("kor")["session"] != REGULAR:
-        raise BrokerApiError("정규장(거래일 09:00~15:30)에만 주문할 수 있습니다.")
     max_count, max_amount = doc.get("api_order_max_count"), doc.get("api_order_max_amount_krw")
     if not max_count or not max_amount:
         raise BrokerApiError(f"'{doc['account_id']}' 계좌의 하루 주문 건수·금액 한도가 설정돼 있지 않습니다.")
@@ -193,7 +194,8 @@ def resolve_order(
     if round_no is not None:
         row = _require_round_state(strategy, side, round_no)
         signal_price = row["sell_limit"] if side == "sell" else (None if row["close_entry"] else row["buy_limit"])
-    quote = fetch_best_quote(strategy["account_id"], strategy["ticker"])
+    venue = _order_venue(strategy)
+    quote = fetch_best_quote(strategy["account_id"], strategy["ticker"], venue)
     label, price = ("매도 1호가", quote["ask"]) if side == "buy" else ("매수 1호가", quote["bid"])
     _require_valid_quote(strategy, label, price)
     return {
@@ -203,7 +205,16 @@ def resolve_order(
         "price": price,
         "signal_price": signal_price,
         "quote_label": label,
+        "venue": venue,
     }
+
+
+def _order_venue(strategy: dict[str, Any]) -> str:
+    """지금 이 전략 종목에 주문을 낼 거래소(KRX·NXT) — 거래 시간 밖이면 주문할 수 없어 막는다."""
+    try:
+        return kor_order_venue(strategy["instrument_kind"], now=_now())
+    except ValueError as exc:
+        raise BrokerApiError(f"{strategy['label']}: {exc}") from exc
 
 
 def _require_valid_quote(strategy: dict[str, Any], label: str, price: int) -> None:
@@ -239,7 +250,8 @@ def resolve_swap(account_id: str, pool: str, strategy_id: str, round_no: int, *,
     row = _require_round_state(strategy, "sell", round_no)
     if not row["rebuy_after_sell"]:
         raise RoundNotOrderableError(f"{strategy['label']} {round_no}호는 매도 후 재매수 대상이 아닙니다.")
-    quote = fetch_best_quote(strategy["account_id"], strategy["ticker"])
+    venue = _order_venue(strategy)
+    quote = fetch_best_quote(strategy["account_id"], strategy["ticker"], venue)
     _require_valid_quote(strategy, "매도 1호가", quote["ask"])
     _require_valid_quote(strategy, "매수 1호가", quote["bid"])
     return {
@@ -249,6 +261,7 @@ def resolve_swap(account_id: str, pool: str, strategy_id: str, round_no: int, *,
         "sell_price": quote["ask"],
         "buy_price": quote["bid"],
         "signal_price": row["sell_limit"],
+        "venue": venue,
     }
 
 
@@ -315,6 +328,8 @@ def _record_base(
         "strategy_label": order["strategy_label"],
         "ticker": order["ticker"],
         "quantity": order["quantity"],
+        # 주문을 낸 거래소 — 취소·만료·마감 경고가 이 거래소 기준이다.
+        "venue": order["venue"],
         "slack": slack,
     }
 
@@ -338,7 +353,7 @@ def _submit(base: dict[str, Any], side: str, price: int) -> dict[str, Any]:
     orders = _orders()
     inserted = orders.insert_one(doc)
     try:
-        placed = place_limit_order(base["account_id"], side, base["ticker"], base["quantity"], price)
+        placed = place_limit_order(base["account_id"], side, base["ticker"], base["quantity"], price, base["venue"])
     except OrderUncertainError as exc:
         # 주문이 들어갔는지 모른다 — 실패로 단정하지 않고 남겨 둔다(`refresh` 가 정리).
         orders.update_one(
@@ -386,7 +401,7 @@ def cancel_record(order_id: str) -> dict[str, Any]:
         raise BrokerApiError("주문 기록을 찾을 수 없습니다.")
     if record["status"] not in ("pending", "partial") or not record.get("order_no"):
         raise BrokerApiError("대기중이거나 부분체결인 주문만 취소할 수 있습니다.")
-    cancelled = cancel_order(record["account_id"], _current_order_no(record), record["ticker"])
+    cancelled = cancel_order(record["account_id"], _current_order_no(record), record["ticker"], record["venue"])
     orders.update_one(
         {"_id": record["_id"]},
         {"$set": {"message": cancelled["message"], "updated_at": _now().isoformat()}},
@@ -400,13 +415,10 @@ def _order_date(record: dict[str, Any]) -> str:
 
 
 def _broker_status(record: dict[str, Any], broker_status: str) -> str:
-    """증권사 상태를 기록 상태로 옮긴다 — 미체결 주문은 당일 주문이므로 접수일이 지났거나 정규장이 끝났으면 만료로 본다.
-
-    주문은 정규장에서만 나가므로 접수일이 오늘인데 정규장이 아니면 마감된 뒤다.
-    """
-    if broker_status in ("pending", "partial") and (
-        _order_date(record) < _now().strftime("%Y%m%d") or market_session("kor")["session"] != REGULAR
-    ):
+    """증권사 상태를 기록 상태로 옮긴다 — 미체결 주문은 당일 주문이므로 접수일이 지났거나 그 거래소의 거래 시간이
+    끝났으면 만료로 본다(KRX 는 정규장, NXT 는 애프터마켓 마감까지)."""
+    venue_open = is_instrument_trading_time("kor", _VENUE_WINDOW_KIND[record["venue"]], now=_now())
+    if broker_status in ("pending", "partial") and (_order_date(record) < _now().strftime("%Y%m%d") or not venue_open):
         return "expired"
     return broker_status
 
@@ -569,8 +581,14 @@ def mark_signal_thread_completed(thread_ts: str) -> None:
 
 
 def close_warning_slack_orders() -> list[dict[str, Any]]:
-    """장 마감이 가까운데 아직 끝나지 않은 슬랙 주문 — 마감 경고를 아직 보내지 않은 것만(증권사가 접수한 주문만)."""
-    if _now().time() < CLOSE_WARNING_FROM or market_session("kor")["session"] != REGULAR:
+    """그 거래소 마감이 가까운데 아직 끝나지 않은 슬랙 주문 — 마감 경고를 아직 보내지 않은 것만(증권사가 접수한 주문만)."""
+    now = _now()
+    closing = [
+        venue
+        for venue, (start, end) in CLOSE_WARNING_WINDOWS.items()
+        if start <= now.time() < end and is_instrument_trading_time("kor", _VENUE_WINDOW_KIND[venue], now=now)
+    ]
+    if not closing:
         return []
     return list(
         _orders().find(
@@ -579,9 +597,15 @@ def close_warning_slack_orders() -> list[dict[str, Any]]:
                 "slack_close_warned": {"$ne": True},
                 "order_no": {"$ne": None},
                 "status": {"$in": list(ACTIVE_STATUSES)},
+                "venue": {"$in": closing},
             }
         )
     )
+
+
+def venue_close_time(venue: str) -> str:
+    """그 거래소의 주문 마감 시각("HH:MM") — 마감 경고 문구용."""
+    return CLOSE_WARNING_WINDOWS[venue][1].strftime("%H:%M")
 
 
 def mark_slack_close_warned(order_id: Any) -> None:

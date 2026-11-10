@@ -61,29 +61,29 @@ def fetch_order_balance(account_id: str) -> dict[str, Any]:
     return meritz_api_service.fetch_balance(account_id, str(doc["country_code"]))
 
 
-def fetch_best_quote(account_id: str, ticker: str) -> dict[str, Any]:
+def fetch_best_quote(account_id: str, ticker: str, venue: str) -> dict[str, Any]:
     """종목의 1호가."""
     from services import broker_order_service, meritz_api_service
 
     doc = _account_doc(account_id)
     account_env(account_id)
     if _provider(doc) == NAMU_PROVIDER:
-        return broker_order_service.fetch_best_quote(_namu_account_no(doc), ticker)
-    return meritz_api_service.fetch_best_quote(account_id, ticker)
+        return broker_order_service.fetch_best_quote(_namu_account_no(doc), ticker, venue)
+    return meritz_api_service.fetch_best_quote(account_id, ticker, venue)
 
 
-def place_limit_order(account_id: str, side: str, ticker: str, quantity: int, price: int) -> dict[str, str]:
+def place_limit_order(account_id: str, side: str, ticker: str, quantity: int, price: int, venue: str) -> dict[str, str]:
     """지정가 주문 한 건 — 접수되면 주문번호를 돌려준다."""
     from services import broker_order_service, meritz_api_service
 
     doc = _account_doc(account_id)
     account_env(account_id)
     if _provider(doc) == NAMU_PROVIDER:
-        return broker_order_service.place_limit_order(_namu_account_no(doc), side, ticker, quantity, price)
-    return meritz_api_service.place_limit_order(account_id, side, ticker, quantity, price)
+        return broker_order_service.place_limit_order(_namu_account_no(doc), side, ticker, quantity, price, venue)
+    return meritz_api_service.place_limit_order(account_id, side, ticker, quantity, price, venue)
 
 
-def cancel_order(account_id: str, order_no: str, ticker: str) -> dict[str, str]:
+def cancel_order(account_id: str, order_no: str, ticker: str, venue: str) -> dict[str, str]:
     """주문을 전량 취소한다."""
     from services import broker_order_service, meritz_api_service
 
@@ -91,7 +91,8 @@ def cancel_order(account_id: str, order_no: str, ticker: str) -> dict[str, str]:
     account_env(account_id)
     if _provider(doc) == NAMU_PROVIDER:
         return broker_order_service.cancel_order(_namu_account_no(doc), order_no, ticker)
-    return meritz_api_service.cancel_order(account_id, order_no, ticker)
+    # 나무 취소는 원주문번호로만 찾아 거래소를 받지 않는다. 메리츠는 원주문의 거래소가 필요하다.
+    return meritz_api_service.cancel_order(account_id, order_no, ticker, venue)
 
 
 def list_day_orders(account_id: str, yyyymmdd: str) -> list[dict[str, Any]]:

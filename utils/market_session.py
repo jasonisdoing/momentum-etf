@@ -122,6 +122,23 @@ def is_instrument_trading_time(country: str, instrument_kind: str, *, now: datet
     return bool(get_trading_days(day, day, market))
 
 
+#: 국장 주문 거래소 — 정규장은 KRX, 개별주의 정규장 밖(프리·애프터) 거래는 대체거래소(NXT)다. ETF 는 KRX 에만 있다.
+VENUE_KRX = "KRX"
+VENUE_NXT = "NXT"
+
+
+def kor_order_venue(instrument_kind: str, *, now: datetime) -> str:
+    """지금 국장 종목에 주문을 낼 거래소 — 정규장이면 KRX, 개별주의 프리·애프터마켓이면 NXT.
+
+    그 종목 종류의 거래 시간 밖이면 낼 곳이 없어 ValueError 다(ETF 는 정규장만).
+    """
+    if not is_instrument_trading_time("kor", instrument_kind, now=now):
+        raise ValueError("지금은 이 종목의 거래 시간이 아닙니다.")
+    start, end = INSTRUMENT_TRADING_WINDOWS["kor"]["etf"][0]
+    local = now.astimezone(ZoneInfo(_schedule("kor")["timezone"])).time()
+    return VENUE_KRX if start <= local < end else VENUE_NXT
+
+
 def aftermarket_in_daily_change(country: str) -> bool:
     """애프터마켓 가격의 일간(%)이 그날 전체 변동인 시장인지 — 시간표의 `aftermarket_in_daily_change`."""
     return bool(_schedule(country).get("aftermarket_in_daily_change"))

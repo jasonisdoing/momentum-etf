@@ -40,8 +40,8 @@ logger = get_app_logger()
 
 MOCK_BASE_URL = "https://moapi.nhplug.com:8443"
 LIVE_BASE_URL = "https://api.nhplug.com:8443"
-#: 주문을 보내는 시장 — KRX 로 고정한다. SOR 는 KRX·NXT 로 쪼개져 주문번호가 둘이 되고, 사고팔기는 KRX 정규장 규칙이다.
-ORDER_MARKET = "KRX"
+#: 주문·호가 시장(`rmt_mkt_cd`·`market_cd`)은 호출하는 쪽이 정한다 — 정규장 KRX, 개별주의 프리·애프터 NXT
+#: (`utils.market_session.kor_order_venue`). SOR 는 KRX·NXT 로 쪼개져 주문번호가 둘이 되므로 쓰지 않는다.
 _PRICE_TYPE_LIMIT = "01"  # 호가유형 — 보통가(지정가)
 _NO_CONDITION = "00"  # 주문조건 없음 / 공매도 구분 정상
 
@@ -192,9 +192,9 @@ def fetch_order_balance(account_no: str) -> dict[str, Any]:
     )
 
 
-def fetch_best_quote(account_no: str, ticker: str) -> dict[str, Any]:
+def fetch_best_quote(account_no: str, ticker: str, venue: str) -> dict[str, Any]:
     """종목의 1호가 — 매도·매수 1호가와 호가 시각. 호가가 비어 있으면(단일가 구간 등) 주문 가격을 못 정해 오류다."""
-    data, _ = _post(_base_url(account_no), QUOTE_PATH, {"iem_cd": ticker, "market_cd": ORDER_MARKET})
+    data, _ = _post(_base_url(account_no), QUOTE_PATH, {"iem_cd": ticker, "market_cd": venue})
     code = str(data["rsp_cd"]) if data.get("rsp_cd") is not None else None
     if not is_business_success(code, data.get("rsp_msg")):
         raise BrokerApiError(
@@ -244,8 +244,10 @@ def _accepted_order_no(data: dict[str, Any], what: str) -> str:
     return str(int(order_no))
 
 
-def place_limit_order(account_no: str, side: str, ticker: str, quantity: int, price: int) -> dict[str, str]:
-    """지정가 주문 한 건 — 접수되면 시장주문번호를 돌려준다. side 는 buy·sell."""
+def place_limit_order(
+    account_no: str, side: str, ticker: str, quantity: int, price: int, venue: str
+) -> dict[str, str]:
+    """지정가 주문 한 건(``venue`` 거래소) — 접수되면 시장주문번호를 돌려준다. side 는 buy·sell."""
     base_url = _base_url(account_no)
     if side not in ORDER_PATH:
         raise BrokerApiError(f"알 수 없는 주문 구분입니다: {side}")
@@ -263,7 +265,7 @@ def place_limit_order(account_no: str, side: str, ticker: str, quantity: int, pr
             "nmn_pr_tp_cd": _PRICE_TYPE_LIMIT,
             "orr_cnd_dit_cd": _NO_CONDITION,
             "ssl_nmn_pr_dit_cd": _NO_CONDITION,
-            "rmt_mkt_cd": ORDER_MARKET,
+            "rmt_mkt_cd": venue,
             "sor_mkt_sli_yn": "N",
         },
     )

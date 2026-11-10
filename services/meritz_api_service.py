@@ -49,9 +49,9 @@ _DOMESTIC_ROW = "1"
 # 해외 잔고구분 — "1" 일반, "2" 소수, "3" 대출.
 _US_GENERAL_ROW = "1"
 
-# 주문은 KRX 정규장 지정가만 낸다 — 사고팔기는 KRX 정규장 규칙이다(나무 `ORDER_MARKET` 과 같다).
-_EXCHANGE_KRX = "01"
-_ORDERBOOK_KRX = "J"
+# 거래소(KRX·NXT)는 호출하는 쪽이 정한다(`utils.market_session.kor_order_venue`) — 주문 코드와 호가 시장 코드.
+_EXCHANGE_CODES = {"KRX": "01", "NXT": "02"}
+_ORDERBOOK_CODES = {"KRX": "J", "NXT": "NJ"}
 _LIMIT_ORDER = "01"
 _NO_CONDITION = "0"
 # 주문 응답의 경고구분 — "0" 정상 접수, 아래 '보류'는 접수 여부를 단정할 수 없다. 그 밖은 경고(미접수, 사람이 확인).
@@ -352,7 +352,7 @@ def fetch_balance(account_id: str, country_code: str) -> dict[str, Any]:
 # ── 국내주식 주문(사고팔기) ─────────────────────────────────────────────────
 
 
-def fetch_best_quote(account_id: str, ticker: str) -> dict[str, Any]:
+def fetch_best_quote(account_id: str, ticker: str, venue: str) -> dict[str, Any]:
     """KRX 1호가 — 매도·매수 1호가와 호가 시각. 호가가 비어 있으면 주문 가격을 못 정해 오류다(나무와 같은 표준형)."""
     data = (
         _request(
@@ -360,7 +360,7 @@ def fetch_best_quote(account_id: str, ticker: str) -> dict[str, Any]:
             "GET",
             ORDERBOOK_PATH,
             success=_QUOTE_CODES,
-            params={"mrkt_div_code": _ORDERBOOK_KRX, "iscd": ticker},
+            params={"mrkt_div_code": _ORDERBOOK_CODES[venue], "iscd": ticker},
         ).get("data")
         or {}
     )
@@ -399,7 +399,7 @@ def _accepted_order_no(data: dict[str, Any], what: str) -> str:
     return str(int(order_no))
 
 
-def place_limit_order(account_id: str, side: str, ticker: str, quantity: int, price: int) -> dict[str, str]:
+def place_limit_order(account_id: str, side: str, ticker: str, quantity: int, price: int, venue: str) -> dict[str, str]:
     """KRX 지정가 주문 한 건 — 접수되면 주문번호를 돌려준다. side 는 buy·sell."""
     if side not in ORDER_PATH:
         raise BrokerApiError(f"알 수 없는 주문 구분입니다: {side}")
@@ -419,14 +419,14 @@ def place_limit_order(account_id: str, side: str, ticker: str, quantity: int, pr
             "orgl_oder_no": 0,
             "whol_rctf_cncl_yn": "N",
             "warn_cnfr_yn": "N",
-            "exch_kind_code": _EXCHANGE_KRX,
+            "exch_kind_code": _EXCHANGE_CODES[venue],
         },
     )
     return {"order_no": _accepted_order_no(data, "주문"), "message": str(data.get("rsp_msg") or "")}
 
 
-def cancel_order(account_id: str, order_no: str, ticker: str) -> dict[str, str]:
-    """주문을 전량 취소한다 — 돌려주는 번호는 취소 요청 자체의 주문번호다."""
+def cancel_order(account_id: str, order_no: str, ticker: str, venue: str) -> dict[str, str]:
+    """주문을 전량 취소한다 — 돌려주는 번호는 취소 요청 자체의 주문번호다. ``venue`` 는 원주문의 거래소다(필수)."""
     data = _request(
         account_id,
         "POST",
@@ -437,7 +437,7 @@ def cancel_order(account_id: str, order_no: str, ticker: str) -> dict[str, str]:
             "orgl_oder_no": int(order_no),
             "whol_rctf_cncl_yn": "Y",
             "warn_cnfr_yn": "N",
-            "exch_kind_code": _EXCHANGE_KRX,
+            "exch_kind_code": _EXCHANGE_CODES[venue],
         },
     )
     return {"cancel_order_no": _accepted_order_no(data, "취소"), "message": str(data.get("rsp_msg") or "")}

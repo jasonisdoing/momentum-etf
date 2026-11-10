@@ -46,6 +46,7 @@ from utils.strategy_trade_orders import (
     resolve_order,
     resolve_swap,
     serialize_order,
+    venue_close_time,
 )
 from utils.strategy_trade_threads import send_thread_message
 
@@ -579,7 +580,8 @@ def notify_close_approaching() -> int:
         target = _target_of(record)
         side = f"{_env_word(order['env'])} {_SIDE_LABELS[order['side']]}"
         remaining = order["quantity"] - order["filled_quantity"]
-        text = f"⏰ {side} 주문이 아직 체결되지 않았습니다(미체결 {remaining:,}주). 15:30 장 마감 전에 취소하지 않으면 오늘 주문은 만료됩니다."
+        close_at = venue_close_time(record["venue"])
+        text = f"⏰ {side} 주문이 아직 체결되지 않았습니다(미체결 {remaining:,}주). {close_at} {record['venue']} 마감 전에 취소하지 않으면 오늘 주문은 만료됩니다."
         send_thread_message(text, thread_ts=target["thread_ts"])
         if order["pair_id"] is not None:
             _update_message(target, _pair_blocks(request, order["pair_id"], text))
