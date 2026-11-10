@@ -12,10 +12,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+from slack_sdk.errors import SlackApiError
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from config import SLACK_ASSET_SUMMARY_CHANNEL
 from utils.account_registry import load_account_configs
 from utils.daily_fund_service import load_daily_docs_for_aggregation
 from utils.db_manager import get_db_connection
@@ -26,7 +28,7 @@ from utils.monthly_service import (
 from utils.monthly_service import (
     _apply_running_total_principal as _apply_monthly_running,
 )
-from utils.notification import send_slack_message_v2
+from utils.notification import send_slack_message_v2, update_slack_message
 from utils.portfolio_io import (
     MissingPriceCacheError,
     get_latest_daily_snapshot,
@@ -54,6 +56,7 @@ format_korean_currency = format_kr_money_man
 _ = format_kr_money
 WEEKLY_COLLECTION = "weekly_fund_data"
 KST = ZoneInfo("Asia/Seoul")
+_SLACK_STATE_KEY = "asset_summary_slack"
 
 
 def get_trend_emoji(val):
@@ -212,6 +215,40 @@ def collect_global_totals() -> dict[str, object]:
     }
 
 
+def _publish_daily_summary(report_date: str, main_text: str, replies: dict[str, str]) -> None:
+    """같은 날짜에는 본문과 답글을 수정하고, 새 메시지의 ts는 발송 직후 기록한다."""
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("자산 요약 슬랙 발송 기록을 읽을 수 없습니다.")
+    collection = db.system_config
+    query = {"_id": _SLACK_STATE_KEY}
+    channel = SLACK_ASSET_SUMMARY_CHANNEL
+    state = collection.find_one(query) or {}
+    timestamps = (
+        dict(state["timestamps"]) if state.get("date") == report_date and state.get("channel") == channel else {}
+    )
+
+    for key, text in {"main": main_text, **replies}.items():
+        message_ts = timestamps.get(key)
+        if message_ts:
+            try:
+                update_slack_message(text, channel=channel, message_ts=message_ts)
+                continue
+            except SlackApiError as exc:
+                # 직접 삭제된 메시지만 다시 올린다. 일시적인 오류로 새 글을 만들지 않는다.
+                if exc.response.get("error") != "message_not_found":
+                    raise
+        if key == "main":
+            timestamps.clear()
+        message_ts = send_slack_message_v2(text, thread_ts=timestamps.get("main"), channel=channel)
+        if not message_ts:
+            raise RuntimeError(f"자산 요약 슬랙 발송 실패: {key}")
+        timestamps[key] = message_ts
+        collection.update_one(
+            query, {"$set": {"date": report_date, "channel": channel, "timestamps": timestamps}}, upsert=True
+        )
+
+
 def main():
     load_env_if_present()
 
@@ -305,7 +342,8 @@ def main():
     cash_pct = (global_cash / total_assets * 100) if total_assets > 0 else 0.0
 
     # 1. Compose Main Message (Total Summary)
-    now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
+    now = datetime.now(KST)
+    now_str = now.strftime("%Y-%m-%d %H:%M")
 
     main_text = (
         f"*📊 총 자산 요약 ({now_str})*\n"
@@ -313,11 +351,6 @@ def main():
         f"📆 *금일 손익*: {format_korean_currency(daily_metrics['daily_profit'])} "
         f"({daily_metrics['daily_return_pct']:+.2f}%) {get_trend_emoji(daily_metrics['daily_profit'])}\n"
     )
-
-    main_ts = send_slack_message_v2(main_text)
-    if not main_ts:
-        logger.error("Failed to send main Slack message.")
-        return
 
     # 2. Compose Profit & Loss Summary (Thread) — 금일/금주/금월/금년/누적 + 현금 잔고
     pnl_text = (
@@ -328,8 +361,6 @@ def main():
         f"🏁 *누적 손익*: *{format_korean_currency(weekly_metrics['cumulative_profit'])} ({weekly_metrics['cumulative_return_pct']:+.2f}%)* {get_trend_emoji(weekly_metrics['cumulative_profit'])}\n"
         f"💵 *현금 잔고*: {format_korean_currency(global_cash)} ({cash_pct:.1f}%)"
     )
-    send_slack_message_v2(pnl_text, thread_ts=main_ts)
-
     # 3. Compose Account Details (Thread)
     acc_details = ["*📂 계좌별 상세 현황*"]
     for acc in account_summaries:
@@ -355,13 +386,11 @@ def main():
         )
         acc_details.append(line)
 
-    send_slack_message_v2("\n\n".join(acc_details), thread_ts=main_ts)
-
     # 3. Compose Portfolio Composition (Thread)
+    comp_details = ["*🏗️ 포트폴리오 구성 비중*"]
     if all_holdings_dict:
         combined_df = pd.concat(all_holdings_dict.values(), ignore_index=True)
         bucket_cols = ["1. 모멘텀", "2. 시장지수", "3. 배당방어", "4. 대체헷지"]
-        comp_details = ["*🏗️ 포트폴리오 구성 비중*"]
 
         for b in bucket_cols:
             b_val = combined_df.loc[combined_df["버킷"] == b, "평가금액(KRW)"].sum()
@@ -379,7 +408,8 @@ def main():
             lev_pct = (lev_val / total_assets * 100) if total_assets > 0 else 0.0
             comp_details.append(f"• ⚡ 레버리지: {lev_pct:.1f}%")
 
-        send_slack_message_v2("\n".join(comp_details), thread_ts=main_ts)
+    else:
+        comp_details.append("보유 종목 없음")
 
     # 4. Compose Account Cash Ratio (Thread)
     cash_ratio_details = ["*💵 계좌별 현금 비율*"]
@@ -387,7 +417,16 @@ def main():
         acc_cash_pct = (acc["cash"] / acc["total_assets"] * 100) if acc["total_assets"] > 0 else 0.0
         cash_ratio_details.append(f"• {acc['name']}: {acc_cash_pct:.1f}%")
 
-    send_slack_message_v2("\n".join(cash_ratio_details), thread_ts=main_ts)
+    _publish_daily_summary(
+        now.date().isoformat(),
+        main_text,
+        {
+            "pnl": pnl_text,
+            "accounts": "\n\n".join(acc_details),
+            "composition": "\n".join(comp_details),
+            "cash_ratios": "\n".join(cash_ratio_details),
+        },
+    )
 
     # 5. Save Snapshots for next time (Consolidated)
     # Save individual accounts first, then TOTAL (which updates the same document for today)

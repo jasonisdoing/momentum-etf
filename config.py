@@ -3,7 +3,13 @@
 import json
 from pathlib import Path
 
-SLACK_CHANNEL = "C0A0X2LTS3X"
+# 슬랙 채널 이름과 발송·수정 API에 전달할 채널 ID.
+SLACK_CHANNEL_IDS = {
+    "#momentum-etf": "C0A0X2LTS3X",
+    "#momentum-etf-summary": "C0CGCUETNKT",
+}
+SLACK_CHANNEL = SLACK_CHANNEL_IDS["#momentum-etf"]
+SLACK_ASSET_SUMMARY_CHANNEL = SLACK_CHANNEL_IDS["#momentum-etf-summary"]
 
 # python scripts/update_market_calendars.py CACHE_START_DATE 변경시 실행
 CACHE_START_DATE = "2018-12-31"

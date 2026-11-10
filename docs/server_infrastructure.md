@@ -10,11 +10,11 @@
 | 컨테이너 | `momentum-etf-app-1`(Node, 80) · `momentum-etf-fastapi_app-1`(FastAPI, 8000, 내부) · MongoDB · `nginx-proxy` · `nginx-proxy-acme` |
 | 서버 `data/` | 읽기 전용 마운트 — 서버에서 갱신돼야 하는 데이터는 파일이 아니라 DB(`index_constituents` 등) |
 
-VM 의 역할은 컨테이너 가동뿐이다. 자동 배치는 돌지 않는다.
+VM 호스트의 시스템 cron은 사용하지 않는다.
 
 ## 배치
 
-- **모든 자동 배치는 로컬(Mac)** 의 `infra/server_scheduler.py` 가 `infra/cron/crontab` 을 파싱해 APScheduler 로 실행한다. VM cron 은 CPU 100% 다운이 반복돼 제거했다(`infra/cron/install.sh --uninstall`).
+- 자동 배치는 서버의 `scheduler` 컨테이너가 `infra/cron/crontab`을 읽어 큐에 등록한다. 로컬 스케줄러는 큐의 작업만 처리한다.
 - `crontab` 이 배치 정의의 단일 소스. 잡 이름 = action 키. 비활성화는 주석이 아니라 **라인 삭제**(과거 파서가 주석 라인을 등록한 적 있음). 스크립트 뒤 인자는 전달되지만 `-m` 은 안 된다.
 - 락: Mongo `batch_locks`(`_id=<job>`). 로컬 자동 실행과 `/batch` 수동 실행이 같은 락을 쓴다. 소유자는 `APP_TYPE`(`Local` / 미설정=PROD). 꺼져 있던 시간의 누락분은 따라잡지 않는다.
 - 큐(`batch_queue`)는 대기·실행 중 항목을 24시간 TTL로, 끝난 항목은 30일(`RUN_HISTORY_DAYS`) 보관한다. 이 이력 전체의 평균이 `/batch`의 대기·예상시간의 원천이다.
@@ -33,7 +33,7 @@ VM 의 역할은 컨테이너 가동뿐이다. 자동 배치는 돌지 않는다
 | `reference_meta_updater` | `stock_reference_meta_updater.py` | 배치 B: 식별·상세 메타, ETF 구성종목·배당 |
 | `price_metrics_updater` | `stock_price_metrics_updater.py` | 배치 A: 거래량·기간수익률 등 가격 파생 |
 | `data_aggregate` | `collect_data.py` | 일별 원장 → 주/월 재집계 |
-| `asset_summary` | `slack_asset_summary.py` | 자산 요약 슬랙 |
+| `asset_summary` | `slack_asset_summary.py` | 전용 슬랙 채널의 한국시간 날짜별 자산 요약 본문과 스레드 갱신. 메시지 ID는 `system_config.asset_summary_slack`에 저장 |
 | `market_hours_analysis` | `analyze_market_hours.py` | |
 | `us_market_stocks` / `aus_market_stocks` | `update_us_market_stocks.py` / `update_aus_market_stocks.py` | `index_constituents` 갱신. 구성종목 수가 범위 밖이면 저장 안 하고 실패. 미국 배치는 S&P500(SPY 공식 구성종목)·나스닥100(나스닥 공식 API)을 적재하고, 두 명단 중 종목풀 미등록 종목을 슬랙으로 알림 |
 | `kor_market_stocks` | `update_kor_market_stocks.py` | 한국 지수 명단 갱신 후 시장 화면 「통합」 명단(코스피·코스닥 시총 상위) 중 종목풀 미등록 종목을 슬랙으로 알림 |

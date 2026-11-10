@@ -220,18 +220,9 @@ SCHEDULE_ROWS = [
         "group": "장중 실행",
         "job": "전체 자산 요약 알림",
         "target": "전체 계좌",
-        "cadence": "평일 09:40 · 16:10 / 토 09:40 KST",
+        "cadence": "월~토 24시간 매시 40분 KST",
         "command": "python scripts/slack_asset_summary.py",
-        # 토요일 09:40 은 금요일 미국 장 마감(한국시간 토 05~06시)을 반영하기 위한 것이다.
-        # 그 시각이면 `가격 캐시 업데이트`·`데이터 집계`(둘 다 월~토 매시)가 이미 여러 번
-        # 돈 뒤다. 토요일 16:10 은 양쪽 장이 모두 닫혀 09:40 과 같은 값이라 두지 않는다.
-        "schedule": {
-            "slots": [
-                {"hour": 9, "minute": 40, "weekdays": _WEEKDAYS_MON_SAT},
-                {"hour": 16, "minute": 10, "weekdays": _WEEKDAYS_MON_FRI},
-            ],
-            "weekdays": _WEEKDAYS_MON_SAT,
-        },
+        "schedule": {"minutes": [40], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     # ④ 마감 후 지표 — 하루 1~2회.
     {
