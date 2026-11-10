@@ -107,10 +107,13 @@ def _account_valuation_label(account_id: str) -> str:
             profit, base = account_period_profit_and_base(
                 total_assets, normalize_number(account["total_principal"]), previous
             )
-            return f"{total_assets:,.0f}원({calculate_period_return_pct(profit, base):+.2f}%)"
+            change_pct = round(calculate_period_return_pct(profit, base), 2)
+            trend = " 📈" if change_pct > 0 else " 📉" if change_pct < 0 else ""
+            change_label = f"{change_pct:+.2f}%" if change_pct else "0.00%"
+            return f"*{total_assets:,.0f}원({change_label})*{trend}"
     except Exception as exc:
         logger.warning("[BROKER-SYNC] %s 전 거래일 대비 수익률 조회 실패: %s", account_id, exc)
-    return f"{total_assets:,.0f}원(비교 불가)"
+    return f"*{total_assets:,.0f}원*(비교 불가)"
 
 
 def apply_broker_balance(account_id: str, fetched: dict[str, Any], *, trigger: str) -> dict[str, Any]:
