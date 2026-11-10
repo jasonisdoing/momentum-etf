@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from time import sleep
 from typing import Any
 
 from utils.logger import get_app_logger
@@ -16,6 +17,7 @@ from utils.logger import get_app_logger
 logger = get_app_logger()
 
 _STATE_KEY = "broker_balance_sync_state"
+_MERITZ_RETRY_DELAY_SECONDS = 30
 
 
 def _db():
@@ -48,13 +50,14 @@ def _save_failing(account_id: str, failing: bool, message: str = "") -> None:
     )
 
 
-def _notify(text: str) -> None:
+def _notify(text: str) -> bool:
     from utils.notification import send_slack_message_v2
 
     try:
-        send_slack_message_v2(text)
+        return bool(send_slack_message_v2(text))
     except Exception as exc:  # 알림 실패가 동기화 자체를 막으면 안 된다
         logger.warning("[BROKER-SYNC] 슬랙 발송 실패: %s", exc)
+        return False
 
 
 def stored_cash_map(current: dict[str, Any], currencies: list[str]) -> dict[str, float]:
@@ -179,39 +182,61 @@ def _diff_lines(current: dict[str, Any] | None, fetched: dict[str, Any]) -> list
     return lines
 
 
-def sync_all() -> dict[str, Any]:
-    """연동된 전 계좌 동기화. 계좌별 결과 목록을 돌려준다 (스크립트가 로그로 남긴다).
-
-    저장값과 차이가 없으면 저장도 슬랙도 건너뛴다 — 주기마다 updated_at 만 바뀌면
-    '최종 변경' 표시가 의미를 잃고, 변화 없는 알림은 소음이다.
-    """
-    from services.broker_api_service import BrokerApiError, fetch_broker_balance
-    from utils.account_settings_store import load_live_account_docs
+def _sync_account(account_id: str, provider: str) -> dict[str, Any]:
+    from services.broker_api_service import fetch_broker_balance
     from utils.portfolio_io import load_portfolio_master
 
-    results: list[dict[str, Any]] = []
+    fetched = fetch_broker_balance(account_id)
+    result = {"account_id": account_id, "ok": True, "changed": False}
+    if _diff_lines(load_portfolio_master(account_id), fetched):
+        result.update(apply_broker_balance(account_id, fetched, trigger="배치"))
+    if _load_failing(account_id):
+        _save_failing(account_id, False)
+        _notify(f"✅ 증권사 잔고 동기화 복구 — {account_id} ({provider})")
+    return result
+
+
+def sync_all() -> dict[str, Any]:
+    """연동 계좌를 동기화하고 메리츠 재발급 후 만료 오류만 한 번 더 조회한다."""
+    from services.meritz_api_service import MeritzTokenExpiredError
+    from utils.account_settings_store import load_live_account_docs
+
+    accounts: list[tuple[str, str]] = []
     for doc in load_live_account_docs():
-        # 연동 여부는 커넥터로만 본다 — 계좌번호는 나무증권만 있다(메리츠는 키가 계좌에 묶여 없다).
         provider = str((doc.get("broker_api") or {}).get("provider") or "").strip().upper()
-        if not provider:
-            continue
-        account_id = doc["account_id"]
-        try:
-            fetched = fetch_broker_balance(account_id)
-            diff = _diff_lines(load_portfolio_master(account_id), fetched)
-            if not diff:
-                results.append({"account_id": account_id, "ok": True, "changed": False})
-            else:
-                applied = apply_broker_balance(account_id, fetched, trigger="배치")
-                results.append({"account_id": account_id, "ok": True, **applied})
-            if _load_failing(account_id):
-                _save_failing(account_id, False)
-                _notify(f"✅ 증권사 잔고 동기화 복구 — {account_id} ({provider})")
-        except (BrokerApiError, Exception) as exc:  # noqa: BLE001 — 계좌 하나의 실패가 다음 계좌를 막으면 안 된다
-            message = str(exc)
-            results.append({"account_id": account_id, "ok": False, "error": message})
-            logger.warning("[BROKER-SYNC] %s 동기화 실패: %s", account_id, message)
-            if not _load_failing(account_id):
+        if provider:
+            accounts.append((doc["account_id"], provider))
+
+    results: dict[str, dict[str, Any]] = {}
+    pending: list[tuple[str, str]] = []
+    new_failures: list[tuple[str, str, str]] = []
+    for retry in (False, True):
+        if retry:
+            if not pending:
+                break
+            sleep(_MERITZ_RETRY_DELAY_SECONDS)
+        for account_id, provider in pending if retry else accounts:
+            try:
+                results[account_id] = _sync_account(account_id, provider)
+            except Exception as exc:  # noqa: BLE001 — 계좌별로 실패를 격리한다.
+                if not retry and isinstance(exc, MeritzTokenExpiredError):
+                    logger.warning("[BROKER-SYNC] %s 재조회 대기: %s", account_id, exc)
+                    pending.append((account_id, provider))
+                    continue
+                message = str(exc)
+                results[account_id] = {"account_id": account_id, "ok": False, "error": message}
+                logger.warning("[BROKER-SYNC] %s 동기화 실패: %s", account_id, message)
+                if not _load_failing(account_id):
+                    new_failures.append((account_id, provider, message))
+
+    notification_handled = True
+    if new_failures:
+        lines = "\n".join(f"• {account_id} ({provider}): {message}" for account_id, provider, message in new_failures)
+        notification_handled = _notify(f"<!channel> 🚨 *증권사 잔고 동기화 실패 — {len(new_failures)}개 계좌*\n{lines}")
+        if notification_handled:
+            for account_id, _, message in new_failures:
                 _save_failing(account_id, True, message)
-                _notify(f"🚨 증권사 잔고 동기화 실패 — {account_id} ({provider})\n{message}")
-    return {"accounts": results}
+    return {
+        "accounts": [results[account_id] for account_id, _ in accounts],
+        "notification_handled": notification_handled,
+    }

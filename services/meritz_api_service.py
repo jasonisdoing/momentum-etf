@@ -43,7 +43,14 @@ _INQUIRY_CODES = frozenset({"5766", "5762", "5820"})
 _QUOTE_CODES = frozenset({"0000"})
 _ORDER_CODES = frozenset({"0001"})
 # 토큰 만료·무효 — 받으면 한 번만 새로 발급해 다시 보낸다.
-_TOKEN_ERROR_CODES = frozenset({"EGW00121", "EGW00123"})
+_TOKEN_EXPIRED_CODE = "EGW00123"
+_TOKEN_ERROR_CODES = frozenset({"EGW00121", _TOKEN_EXPIRED_CODE})
+
+
+class MeritzTokenExpiredError(BrokerApiError):
+    """조회 토큰을 다시 발급한 뒤에도 메리츠가 만료로 거부했다."""
+
+
 # 잔고 행의 처리대상구분 — 국내주식("1")·해외주식("J")이 한 목록에 섞여 온다.
 _DOMESTIC_ROW = "1"
 # 해외 잔고구분 — "1" 일반, "2" 소수, "3" 대출.
@@ -192,7 +199,8 @@ def _request(
                 continue
             if code in success:
                 return data
-            raise BrokerApiError(f"메리츠증권 API 오류: {_message_of(data, response)} (코드 {code or '-'})")
+            error = MeritzTokenExpiredError if method == "GET" and code == _TOKEN_EXPIRED_CODE else BrokerApiError
+            raise error(f"메리츠증권 API 오류: {_message_of(data, response)} (코드 {code or '-'})")
     raise AssertionError("unreachable")
 
 

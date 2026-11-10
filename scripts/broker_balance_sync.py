@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from utils.broker_balance_sync import sync_all
 from utils.env import load_env_if_present
+from utils.notification import EXIT_ALREADY_NOTIFIED
 
 
 def main() -> int:
@@ -32,7 +33,9 @@ def main() -> int:
             )
         else:
             print(f"[broker_balance_sync] {row['account_id']} 실패 — {row['error']}")
-    return 0 if all(row["ok"] for row in rows) else 1
+    if all(row["ok"] for row in rows):
+        return 0
+    return EXIT_ALREADY_NOTIFIED if result["notification_handled"] else 1
 
 
 if __name__ == "__main__":
