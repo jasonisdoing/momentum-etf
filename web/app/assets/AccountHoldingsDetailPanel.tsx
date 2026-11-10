@@ -19,7 +19,7 @@ import { AppLoadingState } from "../components/AppLoadingState";
 import { AppModal } from "../components/AppModal";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { renderStockNameCell } from "@/lib/name-highlight";
-import { highDrawdownColumn, rankColumn, signColor, stockMemoColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
+import { gridRowDragColumn, highDrawdownColumn, rankColumn, signColor, stockMemoColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { reorderHoldings, saveHoldingsGroups, type HoldingsGroup } from "@/lib/holdings-store";
@@ -911,21 +911,11 @@ export function AccountHoldingsDetailPanel({
 
   const metrics = useMemo(() => holdingMetricColumns<GridRow>(showAmounts), [showAmounts]);
   const columns = useMemo<ColDef<GridRow>[]>(() => [
-    {
-      colId: "drag",
-      headerName: "",
-      width: 42,
-      maxWidth: 42,
-      pinned: "left",
-      sortable: false,
-      resizable: false,
-      suppressMovable: true,
-      rowDrag: (params) =>
-        Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== CASH_ROW_TICKER),
-      // 그룹 헤더 행도 같은 손잡이로 옮긴다 — 아래 첫 종목이 새 앵커가 된다.
-      cellClass: "assetsDragCell",
-      valueGetter: () => "",
-    },
+    // 그룹 헤더 행도 같은 손잡이로 옮긴다 — 아래 첫 종목이 새 앵커가 된다.
+    gridRowDragColumn<GridRow>(
+      ({ data }) => Boolean(data && data.id !== "__adding__" && data.ticker !== CASH_ROW_TICKER),
+      42,
+    ),
     rankColumn<GridRow>((row) => row ? poolRanks[poolRankKey(row.ticker_type, row.ticker)]?.rank : null),
     // 고점 대비 — 순위 화면과 같은 공용 컬럼(같은 판정·같은 표기).
     {

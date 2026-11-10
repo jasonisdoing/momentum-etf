@@ -89,6 +89,7 @@ def load_settings() -> dict[str, Any]:
                 "account_id": account_id,
                 "ticker": ticker,
                 "name": name,
+                "sort_order": entry.get("sort_order"),
                 **validate_strategy_trade_config({key: entry.get(key) for key in EDITABLE_CONFIG_KEYS}),
             }
         except ValueError as error:
@@ -190,7 +191,7 @@ def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any) -> 
     taken: set[str] = set()
     seen_ids: set[str] = set()
     planned: dict[str, dict[str, Any]] = {}
-    for row in strategies:
+    for sort_order, row in enumerate(strategies):
         if not isinstance(row, dict):
             raise ValueError("전략 행의 형식이 올바르지 않습니다.")
         sid = str(row.get("strategy_id") or "").strip()
@@ -205,7 +206,7 @@ def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any) -> 
         taken.add(target["ticker"])
         # 종목이 바뀌면 이전 주문 버튼이 새 종목을 가리키지 않도록 별도 전략으로 저장한다.
         target_id = sid if previous and previous["ticker"] == target["ticker"] else f"s{uuid4().hex[:8]}"
-        planned[target_id] = target
+        planned[target_id] = {**target, "sort_order": sort_order}
 
     collection = _settings_collection()
     stored = collection.find_one({"_id": _SETTINGS_KEY}, {"sent_log": 1, "accounts": 1}) or {}
@@ -787,6 +788,8 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
     settings = load_settings()
     account = settings["accounts"].get(selected or "", {"slack_enabled": False})
     mine = {sid: entry for sid, entry in settings["strategies"].items() if entry["account_id"] == selected}
+    # 순서를 저장한 적 없는 전략끼리는 기존 문서 순서를 유지한다.
+    configs = sorted(mine.items(), key=lambda item: (item[1]["sort_order"] is None, item[1]["sort_order"]))
     from utils.pool_strategy_use import pool_options
 
     pools = _eligible_pool_kinds() if selected is not None else {}
@@ -818,7 +821,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
                 "round_quantity": entry["round_quantity"],
                 "rounds": entry["rounds"],
             }
-            for sid, entry in mine.items()
+            for sid, entry in configs
         ],
         "strategies": _build_views(mine, fresh=False, include_trade_history=True),
     }

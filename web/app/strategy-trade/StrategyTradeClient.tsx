@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { ColDef } from "ag-grid-community";
 
-import { gridSelectionColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
+import { gridRowDragColumn, gridSelectionColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
 import type { HoldingsResponse, HoldingsRow } from "../assets/assets-helpers";
@@ -467,6 +467,7 @@ function AccountSettingsCard({
   }), [drafts, holdings, strategiesById]);
 
   const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
+    gridRowDragColumn<TradeListRow>(true, 36),
     tickerColumn<TradeListRow>(),
     stockNameColumn<TradeListRow>({ nameOptions: (row) => ({ isHeld: row?.held }) }),
     { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
@@ -615,7 +616,7 @@ function AccountSettingsCard({
           <div className="card-body appCardBodyTight">
             <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
               <strong>종목</strong>
-              <span className="tableMuted">행을 선택해 상세 보기 · 값을 더블 클릭해 수정</span>
+              <span className="tableMuted">행을 선택해 상세 보기 · 값을 더블 클릭해 수정 · 손잡이로 순서 변경</span>
             </div>
             {gridRows.length > 0 ? (
               <AppAgGrid
@@ -639,6 +640,23 @@ function AccountSettingsCard({
                   readOnlyEdit: true,
                   rowSelection: { mode: "multiRow", checkboxes: true, headerCheckbox: true, enableClickSelection: false },
                   selectionColumnDef: gridSelectionColumn,
+                  rowDragManaged: true,
+                  suppressMoveWhenRowDragging: true,
+                  suppressRowDrag: saving,
+                  onRowDragEnd: ({ api }) => {
+                    const keys: string[] = [];
+                    api.forEachNodeAfterFilterAndSort(({ data }) => {
+                      if (data) keys.push(data.key);
+                    });
+                    setDrafts((rows) => {
+                      const byKey = new Map(rows.map((row) => [row.key, row]));
+                      const ordered = keys.flatMap((key) => {
+                        const row = byKey.get(key);
+                        return row ? [row] : [];
+                      });
+                      return ordered.length === rows.length ? ordered : rows;
+                    });
+                  },
                   onSelectionChanged: ({ api }) => setCheckedKeys(api.getSelectedRows().map((row) => row.key)),
                   onCellEditRequest: ({ data, colDef, newValue }) => {
                     const field = colDef.field;

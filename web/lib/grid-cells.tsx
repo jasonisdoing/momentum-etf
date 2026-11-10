@@ -96,6 +96,23 @@ export const gridSelectionColumn: SelectionColumnDef = {
   headerName: "",
 };
 
+/** 사용자 지정 행 순서를 바꾸는 왼쪽 고정 손잡이. */
+export function gridRowDragColumn<T>(rowDrag: NonNullable<ColDef<T>["rowDrag"]>, width: number): ColDef<T> {
+  return {
+    colId: "drag",
+    headerName: "",
+    width,
+    maxWidth: width,
+    pinned: "left",
+    sortable: false,
+    resizable: false,
+    suppressMovable: true,
+    rowDrag,
+    cellClass: "assetsDragCell",
+    valueGetter: () => "",
+  };
+}
+
 /** 티커 컬럼 — 티커·종목명 쌍이 있는 모든 화면이 이걸 쓴다(`stockNameColumn` 과 세트).
  *
  *  화면마다 폭·col-id·렌더러가 제각각이면 보유 강조·배지 같은 공통 변경이 한 번에 안 된다.
