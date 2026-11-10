@@ -116,7 +116,7 @@ def _past_fills(account_id: str, day: date) -> list[dict[str, Any]]:
     if stored is not None:
         return stored["rows"]
     rows = _filled(list_day_orders(account_id, f"{day:%Y%m%d}"))
-    cache.replace_one({"_id": key}, {"_id": key, "rows": rows}, upsert=True)
+    cache.replace_one({"_id": key}, {"_id": key, "account_id": account_id, "rows": rows}, upsert=True)
     return rows
 
 

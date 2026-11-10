@@ -94,6 +94,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 - **제외 종목(`exclude_from_trading`)** 은 **거래 제외**다 — 순위 번호는 받고(순위·모멘텀 화면 번호가 같아야 한다), 모든 선정·백테스트 매매에서는 뺀다. 모멘텀은 `compute_signals(excluded=…)` 로 진입만 막는다.
 - **배치 추가·삭제는 7곳을 함께 고친다**: `utils/system_service.py` 의 `SystemAction`·`SCHEDULE_ROWS`·`_SCRIPT_BY_ACTION`, `web/app/api/system/route.ts` 의 `allowed`, `web/lib/system-store.ts`, `web/app/batch/SystemManager.tsx`, `infra/cron/crontab`. 한 곳이 빠지면 `/batch` 에서 400.
 - **새 컬렉션은 `utils/data_table_catalog.py` 에 등록한다.** 종목풀·계좌 삭제(`purge_owner`)와 고아 점검(`scan_orphans`)이 이 카탈로그 하나만 본다. 등록하지 않으면 `/data-tables` 에 **미분류**로 뜨고, 소유자를 지울 때 함께 정리되지 않는다.
+- 사고팔기 체결 조회 캐시와 회차 원장·기준점은 `account_id`로 계좌 삭제에 연동한다. 증권사 주문 이력은 계좌 삭제 후에도 보존한다.
 - **종목풀·계좌 삭제는 `purge_owner()` 를 쓴다.** 지울 자리를 삭제 함수가 직접 들고 있으면 컬렉션이 늘 때마다 한쪽만 갱신돼 찌꺼기가 남는다(§6).
 - **소유자 삭제와 가격 캐시·저장 백테스트 쓰기는 같은 소유자 잠금으로 직렬화한다.** 정리 실패 시 소유자 문서를 지우지 않는다.
 - **폐기는 코드·DB·crontab·문서까지 전부 제거.**

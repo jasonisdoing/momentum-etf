@@ -97,6 +97,9 @@ _POOL_TABLES: tuple[TableSpec, ...] = (
 # ── 계좌가 소유하는 것 ──────────────────────────────────────────────────────
 _ACCOUNT_TABLES: tuple[TableSpec, ...] = (
     TableSpec("account_notes", "account", "계좌별 메모", owner_field="account_id"),
+    TableSpec("strategy_trade_day_fills", "account", "사고팔기 증권사 일별 체결 조회 캐시", owner_field="account_id"),
+    TableSpec("strategy_trade_ledger_anchors", "account", "사고팔기 보유 회차 복원 기준점", owner_field="account_id"),
+    TableSpec("strategy_trade_ledgers", "account", "사고팔기 화면과 알림이 읽는 계산 원장", owner_field="account_id"),
     TableSpec(
         "cache_<계좌>_stocks",
         "account",
@@ -109,6 +112,7 @@ _ACCOUNT_TABLES: tuple[TableSpec, ...] = (
 # 계좌를 지웠다고 과거 총자산 기록을 고쳐 쓰면 지난 수익률 그래프가 바뀐다.
 # 이 분류에 있는 것은 삭제 로직이 **절대 건드리지 않는다**.
 _AGGREGATE_TABLES: tuple[TableSpec, ...] = (
+    TableSpec("strategy_trade_orders", "aggregate", "사고팔기 운영·모의 주문 및 체결 이력"),
     TableSpec("daily_snapshots", "aggregate", "일자별 계좌 자산 스냅샷 — 사라진 계좌 기록도 그대로 둔다"),
     TableSpec("daily_fund_data", "aggregate", "일별 자금 집계(입출금·환율·비중)"),
     TableSpec("weekly_fund_data", "aggregate", "주별 자금 집계"),
@@ -155,6 +159,7 @@ _REFERENCE_TABLES: tuple[TableSpec, ...] = (
 
 # ── 실행 상태 — 큐·락·진행 기록 ────────────────────────────────────────────
 _RUNTIME_TABLES: tuple[TableSpec, ...] = (
+    TableSpec("strategy_trade_slack_messages", "runtime", "사고팔기 슬랙 스레드 추적 기록(7일 TTL)"),
     TableSpec("batch_queue", "runtime", "배치 실행 큐(24시간 TTL)"),
     TableSpec("batch_locks", "runtime", "배치 중복 실행 방지 락 · 배포 플래그"),
     TableSpec("leverage_state", "runtime", "레버리지 알림 발송 상태"),
