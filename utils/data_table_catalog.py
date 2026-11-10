@@ -364,23 +364,17 @@ def _dig(doc: dict[str, Any], path: str) -> dict[str, Any]:
     return node
 
 
-def scan_orphans() -> dict[str, Any]:
+def scan_orphans(db, existing: set[str], owners: dict[str, set[str]]) -> dict[str, Any]:
     """살아있는 종목풀·계좌와 대조해 **주인 없는 데이터**를 찾는다.
 
     삭제와 같은 카탈로그를 쓰므로, 카탈로그에 한 줄을 더하면 점검도 함께 커진다.
     반환은 자리별 목록 — 화면이 그대로 보여주고, 정리도 이 목록을 기준으로 한다.
     """
-    from utils.settings_loader import list_available_accounts, list_available_ticker_types
-
-    db = _db()
-    live = {"pool": set(list_available_ticker_types()), "account": set(list_available_accounts())}
-    existing = {n for n in db.list_collection_names() if "_tmp_" not in n}
-
     docs: list[dict[str, Any]] = []
     for spec in TABLE_SPECS:
         if spec.category not in ("pool", "account") or spec.name_pattern:
             continue
-        dead = sorted(v for v in _owner_values(db, spec) if v not in live[spec.category])
+        dead = sorted(v for v in _owner_values(db, spec) if v not in owners[spec.category])
         if not dead:
             continue
         field_name = "_id" if spec.owner_is_id else spec.owner_field
@@ -401,7 +395,7 @@ def scan_orphans() -> dict[str, Any]:
         if not spec.name_pattern or spec.category != "pool":
             continue  # 같은 형식을 풀·계좌가 공유하므로 한 번만 훑는다
         for match in _pattern_instances(existing, spec):
-            if match.owner in live["pool"] or match.owner in live["account"]:
+            if match.owner in owners["pool"] or match.owner in owners["account"]:
                 continue
             stats = _collection_stats(db, match.name)
             collections.append(
@@ -418,7 +412,7 @@ def scan_orphans() -> dict[str, Any]:
     keys: list[dict[str, Any]] = []
     for key_spec in OWNED_KEY_SPECS:
         doc = db["system_config"].find_one({"_id": key_spec.doc_id}) or {}
-        dead = sorted(k for k in _dig(doc, key_spec.path) if k not in live[key_spec.owner])
+        dead = sorted(k for k in _dig(doc, key_spec.path) if k not in owners[key_spec.owner])
         if dead:
             keys.append(
                 {
@@ -438,7 +432,7 @@ def scan_orphans() -> dict[str, Any]:
             {
                 str(item.get(array_spec.match_field) or "").strip()
                 for item in (doc.get(array_spec.array_field) or [])
-                if str(item.get(array_spec.match_field) or "").strip() not in live[array_spec.owner]
+                if str(item.get(array_spec.match_field) or "").strip() not in owners[array_spec.owner]
                 and str(item.get(array_spec.match_field) or "").strip()
             }
         )
@@ -458,7 +452,7 @@ def scan_orphans() -> dict[str, Any]:
         dead_docs = [
             str(d["_id"])
             for d in db[ref.collection].find({ref.query_path: {"$nin": [None, ""]}}, {ref.query_path: 1})
-            if any(owner_id not in live[ref.owner] for owner_id in ref.owner_ids(d))
+            if any(owner_id not in owners[ref.owner] for owner_id in ref.owner_ids(d))
         ]
         if dead_docs:
             refs.append(
@@ -574,12 +568,15 @@ def build_data_table_payload() -> dict[str, Any]:
 
     카탈로그에 없는 컬렉션은 `unclassified` 로 따로 담는다(등록 누락을 드러내기 위해).
     """
-    from utils.settings_loader import list_available_accounts, list_available_ticker_types
+    from utils.account_settings_store import COLLECTION as ACCOUNT_SETTINGS_COLLECTION
+    from utils.pool_settings_store import load_pool_definitions
 
     db = _db()
     existing = {n for n in db.list_collection_names() if "_tmp_" not in n}
-    pools = set(list_available_ticker_types())
-    accounts = set(list_available_accounts())
+    pools = {str(pool["ticker_type"]) for pool in load_pool_definitions()}
+    # 소유권은 운영 여부와 무관하다. 모의 계좌도 실제 설정 문서가 있으면 소유자다.
+    accounts = {str(account_id) for account_id in db[ACCOUNT_SETTINGS_COLLECTION].distinct("_id")}
+    owners = {"pool": pools, "account": accounts}
 
     known: set[str] = set()
     rows: list[dict[str, Any]] = []
@@ -602,12 +599,10 @@ def build_data_table_payload() -> dict[str, Any]:
         }
         if spec.name_pattern:
             # 소유자별 컬렉션 — 실제로 있는 것만 펼쳐서 각각 한 행으로 보여준다.
-            owners = pools if spec.category == "pool" else accounts
+            category_owners = owners[spec.category]
             for match in _pattern_instances(existing, spec):
                 # 같은 형식을 풀·계좌가 나눠 쓰므로, 이 분류의 소유자 목록에 있는 것만 가져간다.
-                if match.owner not in owners and match.name in known:
-                    continue
-                if match.owner not in owners:
+                if match.owner not in category_owners:
                     continue
                 known.add(match.name)
                 rows.append(
@@ -705,7 +700,7 @@ def build_data_table_payload() -> dict[str, Any]:
         "rows": rows,
         "unclassified": unclassified,
         # 주인 없는 데이터 — 같은 카탈로그로 찾는다(삭제와 점검이 갈리지 않게).
-        "orphans": scan_orphans(),
+        "orphans": scan_orphans(db, existing, owners),
         "category_order": list(CATEGORY_ORDER),
         "deleted_with_labels": dict(DELETED_WITH_LABELS),
         "category_labels": dict(CATEGORY_LABELS),
