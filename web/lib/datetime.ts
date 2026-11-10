@@ -38,19 +38,6 @@ export function formatKstDateTime(input?: string | null): string {
   return `${parts.year}. ${parts.month}. ${parts.day}(${parts.weekday}) ${parts.dayPeriod} ${parts.hour}:${parts.minute}`;
 }
 
-/** 시세 수신·체결 시각을 초 단위 한국시간으로 표시한다. */
-export function formatKstClock(input: string): string {
-  const date = parseKst(input);
-  if (!date) return input;
-  return new Intl.DateTimeFormat("ko-KR", {
-    timeZone: "Asia/Seoul",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).format(date);
-}
-
 /** 갱신 시각을 `2026년 10월 5일 오후 8시 23분` 형식으로 표시한다. */
 export function formatKstDateTimeKorean(input?: string | null): string {
   const parts = kstDateTimeParts(input);

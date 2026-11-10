@@ -1,7 +1,7 @@
 """데이터 소스 카탈로그 — 어떤 데이터를 어디서 가져오는지 한곳에 정리한다.
 
 화면(`/data_source`)이 읽는 단일 소스다. 새 외부 소스를 붙이거나 기존 소스를
-교체하면 여기도 함께 고친다. 목록은 사람이 관리하는 정적 정의이고, 호주 ETF
+교체하면 여기도 함께 고친다. 목록은 사람이 관리하는 정적 정의이고, 미국·호주 ETF
 구성종목 수집 현황만 실제 캐시에서 집계해 붙인다(발행사마다 성공/실패가 갈리므로).
 """
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+from config import AU_QUOTEAPI_URL, NAVER_FINANCE_CHART_API_URL, NAVER_FINANCE_ETF_API_URL, TOSS_INVEST_API_BASE_URL
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -57,34 +58,34 @@ DATA_SOURCES: list[dict[str, Any]] = [
         "provider": "네이버 증권",
         "endpoint": "stock.naver.com/api/polling/domestic/stock",
         "usage": "한국 개별주 실시간 가격·등락률",
-        "code_ref": "utils/data_loader.py",
-        "note": "ETF 는 iNAV API 를 먼저 쓰고, 없으면 이 API 로 보완한다.",
+        "code_ref": "utils/realtime_quotes.py",
+        "note": "ETF 목록에서 시세를 받지 못한 종목도 이 경로에서 조회한다.",
     },
     {
         "category": "실시간 시세",
         "country": "kor",
         "provider": "네이버 증권",
-        "endpoint": "stock.naver.com/api/domestic/detail/{ticker}/ETFBase",
-        "usage": "한국 ETF iNAV·괴리율",
-        "code_ref": "services/etf_meta_service.py",
-        "note": None,
+        "endpoint": NAVER_FINANCE_ETF_API_URL,
+        "usage": "한국 ETF 현재가·등락률·iNAV",
+        "code_ref": "utils/realtime_quotes.py",
+        "note": "전체 ETF 목록을 한 번에 조회한다. 실시간 괴리율은 현재가와 iNAV로 계산한다.",
     },
     {
         "category": "실시간 시세",
         "country": "us",
         "provider": "토스증권",
-        "endpoint": "wts-info-api.tossinvest.com",
+        "endpoint": f"{TOSS_INVEST_API_BASE_URL}/api/v3/stock-prices/details",
         "usage": "미국 주식·ETF 실시간 가격",
-        "code_ref": "utils/data_loader.py",
+        "code_ref": "utils/realtime_quotes.py",
         "note": "심볼→상품코드 매핑을 먼저 조회한 뒤 50개씩 묶어 시세를 받는다.",
     },
     {
         "category": "실시간 시세",
         "country": "au",
         "provider": "Market Index (QuoteAPI)",
-        "endpoint": "quoteapi.com/api/v5/symbols",
+        "endpoint": AU_QUOTEAPI_URL,
         "usage": "호주 주식·ETF 실시간 가격",
-        "code_ref": "utils/data_loader.py",
+        "code_ref": "utils/realtime_quotes.py",
         "note": "티커는 ASX: 접두사를 벗기고 소문자 + .asx 형식으로 보낸다.",
     },
     {
@@ -93,26 +94,35 @@ DATA_SOURCES: list[dict[str, Any]] = [
         "provider": "네이버 증권",
         "endpoint": "stock.naver.com/api/polling/worldstock/stock",
         "usage": "해외 상장 종목(미국 외) 가격 보완",
-        "code_ref": "utils/data_loader.py",
+        "code_ref": "utils/realtime_quotes.py",
         "note": "ETF 구성종목 중 유럽·일본 등 미국 외 종목에 쓴다.",
     },
     # ── 시세 (과거) ──────────────────────────────────────────────────
     {
         "category": "과거 시세",
+        "country": "kor",
+        "provider": "pykrx (KRX)",
+        "endpoint": "pykrx 국내 주식·ETF·ETN 일봉 조회",
+        "usage": "한국 종목 정규장 일봉 — 순위·백테스트·비교용 캐시",
+        "code_ref": "utils/data_loader.py",
+        "note": None,
+    },
+    {
+        "category": "과거 시세",
         "country": "all",
         "provider": "yfinance (Yahoo Finance)",
         "endpoint": "yfinance 라이브러리",
-        "usage": "일별 OHLCV 캐시 — 순위·백테스트·비교 화면의 기반 데이터",
+        "usage": "미국·호주 종목과 지수의 일봉 — 순위·백테스트·비교용 캐시",
         "code_ref": "utils/data_loader.py",
-        "note": "호주는 ASX:NAB → NAB.AX, 한국은 069500.KS 형태로 변환해 조회한다.",
+        "note": "호주 종목은 Yahoo 티커 형식(예: NAB.AX)으로 조회한다.",
     },
     {
         "category": "과거 시세",
         "country": "kor",
         "provider": "네이버 금융",
-        "endpoint": "fchart.stock.naver.com/sise.nhn",
-        "usage": "한국 종목 차트 데이터 보완",
-        "code_ref": "config.py",
+        "endpoint": NAVER_FINANCE_CHART_API_URL,
+        "usage": "한국 종목 일봉 — 차트·확정 정규장 종가 조회",
+        "code_ref": "utils/naver_chart.py",
         "note": None,
     },
     {
@@ -194,6 +204,15 @@ DATA_SOURCES: list[dict[str, Any]] = [
         "note": "영문 원본을 그대로 쓴다(번역하지 않는다).",
     },
     # ── ETF 상세 (구성종목·배당·보수) ────────────────────────────────
+    {
+        "category": "ETF 상세 - 한국",
+        "country": "kor",
+        "provider": "네이버 증권",
+        "endpoint": "stock.naver.com/api/domestic/detail/{ticker}/ETFBase",
+        "usage": "한국 ETF 운용보수·순자산·상장일 등 기본정보",
+        "code_ref": "services/etf_meta_service.py",
+        "note": None,
+    },
     {
         "category": "ETF 상세 - 한국",
         "country": "kor",
@@ -635,9 +654,6 @@ def _build_issuer_sources(
 
 def build_data_source_payload() -> dict[str, Any]:
     """화면이 쓰는 데이터 소스 카탈로그. 미국·호주 ETF 상세는 실제 캐시를 보고 발행사별로 만든다."""
-    from services.meritz_quote_pilot import WS_URL, load_quote_pilot
-
-    quote_pilot = load_quote_pilot()
     au_rows = _load_etf_rows("aus_etf")
     us_rows = _load_etf_rows("us_etf")
     au_entries = _build_issuer_sources(
@@ -667,19 +683,6 @@ def build_data_source_payload() -> dict[str, Any]:
         default=len(sources) - 1,
     )
     sources[last_detail_index + 1 : last_detail_index + 1] = official_us + static_us + other_us + au_entries
-    sources[:0] = [
-        {
-            "category": "실시간 시세",
-            "country": country,
-            "provider": "메리츠증권",
-            "endpoint": f"{WS_URL} · REST 현재가",
-            "usage": "대표 종목 시세 병행 검증",
-            "code_ref": "services/meritz_quote_pilot.py",
-            "note": "검증용으로 수집하며 운영 시세에는 적용하지 않습니다.",
-            "quote_pilot": state,
-        }
-        for country, state in quote_pilot.items()
-    ]
 
     return {
         "sources": sources,

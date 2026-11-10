@@ -373,7 +373,7 @@ def get_realtime_snapshot_meta(country_code: str, tickers: Sequence[str]) -> dic
     # 종목별 캐시에서 가장 최근 fetched_at을 찾는다
     latest_fetched_at: datetime | None = None
     latest_expires_at: datetime | None = None
-    sources: dict[str, str] = {}
+    sources: set[str] = set()
     is_any_stale = False
     count = 0
 
@@ -384,7 +384,7 @@ def get_realtime_snapshot_meta(country_code: str, tickers: Sequence[str]) -> dic
         count += 1
         source = entry.get("source")
         if source:
-            sources[ticker] = source
+            sources.add(source)
         fetched_at = entry.get("fetched_at")
         if isinstance(fetched_at, datetime):
             if latest_fetched_at is None or fetched_at > latest_fetched_at:
@@ -396,14 +396,12 @@ def get_realtime_snapshot_meta(country_code: str, tickers: Sequence[str]) -> dic
     if count == 0:
         return None
 
-    distinct_sources = set(sources.values())
-    source = next(iter(distinct_sources)) if len(distinct_sources) == 1 else "mixed" if distinct_sources else None
+    source = next(iter(sources)) if len(sources) == 1 else "mixed" if sources else None
     return {
         "fetched_at": latest_fetched_at,
         "expires_at": latest_expires_at,
         "is_stale": is_any_stale,
         "source": source,
-        "sources": sources,
         "size": count,
     }
 
