@@ -53,6 +53,16 @@ def _number(value: Any) -> float | None:
     return result if isfinite(result) else None
 
 
+def _comparison_reference(price: Any, delta: Any, sign: Any) -> float | None:
+    """검증용으로 메리츠가 보고한 가격과 전일 대비 금액에서 비교 기준을 역산한다."""
+    current, change = _number(price), _number(delta)
+    direction = {"1": 1, "2": 1, "3": 0, "4": -1, "5": -1}.get(str(sign))
+    if current is None or change is None or direction is None or (direction == 0 and change != 0):
+        return None
+    reference = current - direction * abs(change)
+    return reference if reference > 0 else None
+
+
 def _quote(price: Any, *, traded_at: str | None, reference: Any, change: Any) -> dict[str, Any] | None:
     number = _number(price)
     if number is None or number <= 0:
@@ -86,6 +96,11 @@ def _rest_quotes(account_id: str, country: str, session: str, targets: list[str]
         try:
             data = _request(account_id, "GET", path, success=frozenset({"0000"}), params=params)["data"]
             price, reference, change = (data.get(field) if field else None for field in fields)
+            if country == "us" and session in (DAYMARKET, AFTERMARKET):
+                prefix = "dytm" if session == DAYMARKET else "mkt_aft"
+                reference = _comparison_reference(
+                    price, data.get(f"{prefix}_prdy_vrss"), data.get(f"{prefix}_prdy_vrss_sign")
+                )
             quote = _quote(price, traded_at=None, reference=reference, change=change)
             if quote:
                 rows[ticker] = quote
@@ -158,10 +173,11 @@ def _stream_quotes(token: str, country: str, session: str, tickers: list[str], s
                     traded = _trade_time(country, body, now)
                     delayed = {"0": False, "1": True}.get(body.get("dely_yn"))
                     change_field = "prdy_ctrt" if country == "kor" else "rsfl_rt"
+                    sign_field = "prdy_vrss_sign" if country == "kor" else "vrss_sign"
                     quote = _quote(
                         body.get("prpr"),
                         traded_at=traded.isoformat() if traded else None,
-                        reference=None,
+                        reference=_comparison_reference(body.get("prpr"), body.get("prdy_vrss"), body.get(sign_field)),
                         change=body.get(change_field),
                     )
                     if not quote:
@@ -191,10 +207,13 @@ def _stream_quotes(token: str, country: str, session: str, tickers: list[str], s
 
 
 def _baseline_quotes(country: str, targets: list[str]) -> tuple[dict, list[str]]:
-    from services.price_service import get_realtime_snapshot
+    from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
 
+    snapshot = get_realtime_snapshot(country, targets)
+    meta = get_realtime_snapshot_meta(country, targets) or {}
+    sources = meta.get("sources", {})
     rows = {}
-    for ticker, data in get_realtime_snapshot(country, targets).items():
+    for ticker, data in snapshot.items():
         traded = data.get("localTradedAt") or data.get("tradeDateTime")
         quote = _quote(
             data.get("nowVal"),
@@ -203,6 +222,7 @@ def _baseline_quotes(country: str, targets: list[str]) -> tuple[dict, list[str]]
             change=data.get("changeRate"),
         )
         if quote:
+            quote["source"] = sources.get(ticker)
             quote["last_regular_close"] = _number(data.get("lastRegularClose"))
             rows[ticker] = quote
     return rows, []

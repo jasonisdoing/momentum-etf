@@ -33,6 +33,7 @@ type PilotQuote = {
   received_at: string;
   reference_price: number | null;
   change_pct: number | null;
+  source?: string | null;
   delayed?: boolean | null;
   verified?: boolean;
 };
@@ -56,6 +57,12 @@ const SESSION_LABEL: Record<string, string> = {
   daymarket: "주간거래",
 };
 
+const PILOT_SOURCE_LABEL: Record<string, string> = {
+  naver_etf: "네이버 ETF",
+  naver_stock: "네이버 개별주",
+  toss_invest: "토스증권",
+};
+
 function QuotePilotDetails({ pilot }: { pilot: QuotePilot }) {
   const { latest, verified } = pilot;
   const sessions = Object.entries(verified).map(
@@ -76,10 +83,12 @@ function QuotePilotDetails({ pilot }: { pilot: QuotePilot }) {
       <div>검증 중 · {SESSION_LABEL[latest.session] ?? latest.session} · 확인 {formatKstDateTime(latest.checked_at)}</div>
       {latest.targets.map((ticker) => {
         const tick = latest.websocket[ticker];
+        const baseline = latest.baseline[ticker];
+        const source = baseline?.source;
         return (
           <div key={ticker}>
             {ticker} · 웹소켓 {quoteLabel(tick)}{tick?.delayed ? " (지연)" : tick && !tick.verified ? " (체결 시각 미확인)" : ""}
-            {" · "}REST {quoteLabel(latest.rest[ticker])} · 기존 {quoteLabel(latest.baseline[ticker])}
+            {" · "}REST {quoteLabel(latest.rest[ticker])} · {source ? PILOT_SOURCE_LABEL[source] ?? source : "기존"} {quoteLabel(baseline)}
           </div>
         );
       })}

@@ -85,7 +85,7 @@ def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str
 
     # 만료 종목만 벌크 조회
     try:
-        fetched_data, source = _fetch_realtime_snapshot(country, expired_tickers)
+        fetched_data, sources = _fetch_realtime_snapshot(country, expired_tickers)
     except Exception as exc:
         # 조회 실패 시 stale 캐시 재사용
         stale_result = _reuse_stale_ticker_cache(country, expired_tickers, exc)
@@ -99,7 +99,7 @@ def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str
             "data": data,
             "fetched_at": fetched_at,
             "expires_at": expires_at,
-            "source": source,
+            "source": sources[ticker],
             "session": session,
             "is_stale": False,
         }
@@ -110,6 +110,7 @@ def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str
         cache_key = f"{country}:{ticker}"
         entry = _TICKER_PRICE_CACHE.get(cache_key)
         if entry and entry.get("session") == session and "data" in entry:
+            entry["is_stale"] = True
             cached_result[ticker] = entry["data"]
 
     # 캐시 히트 + 새로 조회한 데이터 병합
@@ -372,7 +373,7 @@ def get_realtime_snapshot_meta(country_code: str, tickers: Sequence[str]) -> dic
     # 종목별 캐시에서 가장 최근 fetched_at을 찾는다
     latest_fetched_at: datetime | None = None
     latest_expires_at: datetime | None = None
-    latest_source: str | None = None
+    sources: dict[str, str] = {}
     is_any_stale = False
     count = 0
 
@@ -381,23 +382,28 @@ def get_realtime_snapshot_meta(country_code: str, tickers: Sequence[str]) -> dic
         if not entry:
             continue
         count += 1
+        source = entry.get("source")
+        if source:
+            sources[ticker] = source
         fetched_at = entry.get("fetched_at")
         if isinstance(fetched_at, datetime):
             if latest_fetched_at is None or fetched_at > latest_fetched_at:
                 latest_fetched_at = fetched_at
                 latest_expires_at = entry.get("expires_at")
-                latest_source = entry.get("source")
         if entry.get("is_stale"):
             is_any_stale = True
 
     if count == 0:
         return None
 
+    distinct_sources = set(sources.values())
+    source = next(iter(distinct_sources)) if len(distinct_sources) == 1 else "mixed" if distinct_sources else None
     return {
         "fetched_at": latest_fetched_at,
         "expires_at": latest_expires_at,
         "is_stale": is_any_stale,
-        "source": latest_source,
+        "source": source,
+        "sources": sources,
         "size": count,
     }
 
@@ -584,11 +590,13 @@ def get_confirmed_regular_close(country: str, ticker: str) -> tuple[float | None
     return result
 
 
-def _fetch_realtime_snapshot(country: str, tickers: Sequence[str]) -> tuple[dict[str, dict[str, float]], str]:
-    snapshot, source = _fetch_quotes_by_country(country, tickers)
+def _fetch_realtime_snapshot(
+    country: str, tickers: Sequence[str]
+) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
+    snapshot, sources = _fetch_quotes_by_country(country, tickers)
     _normalize_closed_prices(country, snapshot)
     _fill_missing_change_rate(country, snapshot)
-    return snapshot, source
+    return snapshot, sources
 
 
 def _normalize_closed_prices(country: str, snapshot: dict[str, dict[str, Any]]) -> None:
@@ -621,25 +629,26 @@ def _normalize_closed_prices(country: str, snapshot: dict[str, dict[str, Any]]) 
         # 소스가 주지 못한 종목만 `_fill_missing_change_rate` 가 확정 봉으로 채운다.
 
 
-def _fetch_quotes_by_country(country: str, tickers: Sequence[str]) -> tuple[dict[str, dict[str, float]], str]:
+def _fetch_quotes_by_country(
+    country: str, tickers: Sequence[str]
+) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
     if country == "kor":
         etf_snapshot = fetch_naver_etf_inav_snapshot(tickers)
         missing_tickers = [ticker for ticker in tickers if ticker not in etf_snapshot]
-        if not missing_tickers:
-            return etf_snapshot, "naver_etf"
-
-        stock_snapshot = fetch_naver_stock_realtime_snapshot(missing_tickers)
-        merged_snapshot = dict(etf_snapshot)
-        merged_snapshot.update(stock_snapshot)
-        return merged_snapshot, "mixed"
-
+        stock_snapshot = fetch_naver_stock_realtime_snapshot(missing_tickers) if missing_tickers else {}
+        return {**etf_snapshot, **stock_snapshot}, {
+            **dict.fromkeys(etf_snapshot, "naver_etf"),
+            **dict.fromkeys(stock_snapshot, "naver_stock"),
+        }
     if country == "au":
-        return fetch_au_quoteapi_snapshot(tickers), "au_quoteapi"
-
-    if country == "us":
-        return fetch_toss_us_stock_snapshot(tickers), "toss_invest"
-
-    raise ValueError(f"지원하지 않는 country_code입니다: {country}")
+        snapshot = fetch_au_quoteapi_snapshot(tickers)
+        source = "au_quoteapi"
+    elif country == "us":
+        snapshot = fetch_toss_us_stock_snapshot(tickers)
+        source = "toss_invest"
+    else:
+        raise ValueError(f"지원하지 않는 country_code입니다: {country}")
+    return snapshot, dict.fromkeys(snapshot, source)
 
 
 def _reuse_stale_ticker_cache(
