@@ -529,6 +529,15 @@ def notify_strategy_trade() -> dict[str, Any]:
         strategy["strategy_id"] for strategy in open_strategies
     }
     triggers = [trigger for strategy in open_strategies for trigger in collect_triggers(strategy)]
+    if triggers:
+        # 주문이 진행 중이면 최초 신호와 재알림 모두 생략한다. 매도 후 재매수는 양쪽을 확인한다.
+        in_flight = active_order_keys([strategy["strategy_id"] for strategy in open_strategies])
+        triggers = [
+            trigger
+            for trigger in triggers
+            if (trigger["strategy_id"], trigger["round"], trigger["action"]) not in in_flight
+            and not (trigger["rebuy"] and (trigger["strategy_id"], trigger["round"], "buy") in in_flight)
+        ]
     today = now.strftime("%Y-%m-%d")
     sent_log = _load_sent_log()
 
@@ -551,8 +560,6 @@ def notify_strategy_trade() -> dict[str, Any]:
         ),
     )
 
-    # 주문이 이미 진행 중인 회차는 재알림하지 않는다 — 사람이 이미 처리 중이다.
-    in_flight = active_order_keys([strategy["strategy_id"] for strategy in open_strategies]) if triggers else set()
     sent_count = failed_count = order_failed = 0
     fresh_all: list[dict[str, Any]] = []
     repeats_all: list[dict[str, Any]] = []
@@ -566,11 +573,7 @@ def notify_strategy_trade() -> dict[str, Any]:
             last = _parse_sent_at((sent_log.get(_trigger_key(trigger)) or {}).get("at"))
             if last is None or last.strftime("%Y-%m-%d") != today:
                 fresh.append(trigger)
-            elif (now - last).total_seconds() >= _REPEAT_INTERVAL_SECONDS and (
-                trigger["strategy_id"],
-                trigger["round"],
-                trigger["action"],
-            ) not in in_flight:
+            elif (now - last).total_seconds() >= _REPEAT_INTERVAL_SECONDS:
                 repeats.append(trigger)
 
         own_confirmed = [pending for pending in confirmed if str(pending.get("strategy_id")) == sid]

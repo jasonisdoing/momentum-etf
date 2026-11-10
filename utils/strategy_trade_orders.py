@@ -558,17 +558,33 @@ def register_signal_thread(channel: str, thread_ts: str, message_count: int) -> 
 
 
 def filled_signal_threads() -> list[dict[str, Any]]:
-    """주문 메시지가 모두 체결된(메시지마다 체결된 주문이 있는) 아직 완료 처리 안 된 신호 스레드."""
+    """모든 주문 메시지가 체결된 신호 스레드. 매도 후 재매수는 같은 짝의 양쪽이 체결되어야 한다."""
     doc = _config().find_one({"_id": _SETTINGS_KEY}, {"signal_threads": 1}) or {}
     result = []
     for thread in doc.get("signal_threads") or []:
         if thread["completed"]:
             continue
-        filled_messages = _orders().distinct(
-            "slack.message_ts",
-            {"slack.channel": thread["channel"], "slack.thread_ts": thread["thread_ts"], "status": "filled"},
+        orders = _orders().find(
+            {
+                "slack.channel": thread["channel"],
+                "slack.thread_ts": thread["thread_ts"],
+                "status": {"$in": ["filled", *ACTIVE_STATUSES]},
+            },
+            {"slack.message_ts": 1, "status": 1, "side": 1, "pair_id": 1},
         )
-        if len(filled_messages) >= thread["message_count"]:
+        filled_messages: set[str] = set()
+        active_messages: set[str] = set()
+        filled_pair_sides: dict[tuple[str, str], set[str]] = {}
+        for order in orders:
+            message_ts = order["slack"]["message_ts"]
+            if order["status"] != "filled":
+                active_messages.add(message_ts)
+            elif (pair_id := order.get("pair_id")) is None:
+                filled_messages.add(message_ts)
+            else:
+                filled_pair_sides.setdefault((message_ts, pair_id), set()).add(order["side"])
+        filled_messages.update(ts for (ts, _), sides in filled_pair_sides.items() if sides == {"buy", "sell"})
+        if not active_messages and len(filled_messages) >= thread["message_count"]:
             result.append(thread)
     return result
 
