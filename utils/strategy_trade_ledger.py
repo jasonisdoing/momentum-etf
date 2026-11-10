@@ -11,7 +11,7 @@
      기초분이 모두 팔려 남은 보유가 전부 기간 안 매수로 설명되면 확정이고, 기초분이 남으면 체결가를 알 수 없어 오류다.
   재생 결과가 잔고와 다르면 평균단가로 대신하지 않고 `LedgerError` 로 알린다.
 - 재생은 주식 단위다: 매수는 로트를 쌓고, 매도는 맨 위(마지막 산) 로트부터 뺀다 — 마지막 회차부터 팔리는 사다리 규칙이다.
-  회차는 로트를 회차당 수량씩 앞에서부터 끊은 것이다.
+  회차는 원주문(정정 포함) 단위 매수 로트 하나다.
 - 지난 날짜의 조회 결과는 바뀌지 않아 DB(`strategy_trade_day_fills`)에 한 번만 받아 둔다. 오늘은 매번 조회한다.
 - 계산은 증권사를 여러 번 불러 느리다(약 8초). 사고팔기 알림 배치가 `refresh_ledgers` 로 계산해 DB(`strategy_trade_ledgers`)에
   저장하고, 화면은 `read_ledgers` 로 저장된 값만 읽는다. 주문 직전 확인만 그 순간 다시 계산한다.
@@ -39,7 +39,6 @@ _SOURCE_UNKNOWN = "unknown"
 
 SOURCE_SLACK = "slack"
 SOURCE_MANUAL = "manual"
-SOURCE_MIXED = "mixed"
 
 #: 캐시·재생에 필요한 체결 행의 필드.
 _FILL_FIELDS = ("order_no", "ticker", "side_label", "filled_quantity", "average_fill_price")
@@ -82,81 +81,6 @@ class Ledger:
     @property
     def as_of(self) -> date:
         return datetime.fromisoformat(self.computed_at).astimezone(KST).date()
-
-    @property
-    def opening(self) -> int:
-        """재생한 체결 직전의 보유 수량 — 지금 보유에서 그 체결의 순매수를 뺀 값(회차 이벤트 위치의 출발점)."""
-        return self.quantity - sum(trade.shares if trade.buy else -trade.shares for trade in self.trades)
-
-    def round_fills(self, per_round: int) -> list[dict[str, Any]]:
-        """보유 로트를 앞에서부터 회차당 수량씩 끊은 회차별 체결가(가중평균)·산 날짜(마지막 체결일)·출처.
-
-        마지막 회차가 회차당 수량에 못 미치면 그 수량만 담은 부분 회차다(`shares`).
-        """
-        chunks: list[dict[str, Any]] = []
-        current: list[Lot] = []
-        filled = 0
-        for lot in self.lots:
-            remaining = lot.shares
-            while remaining > 0:
-                take = min(remaining, per_round - filled)
-                current.append(replace(lot, shares=take))
-                filled += take
-                remaining -= take
-                if filled == per_round:
-                    chunks.append(_chunk(len(chunks) + 1, current))
-                    current, filled = [], 0
-        if current:
-            chunks.append(_chunk(len(chunks) + 1, current))
-        return chunks
-
-    def round_events(self, per_round: int) -> list[dict[str, Any]]:
-        """체결을 시간순으로, 회차 단위 이벤트로 쪼갠 것 — 매수는 보유 위에 쌓이는 회차, 매도는 맨 위 회차부터다."""
-        events: list[dict[str, Any]] = []
-        size = self.opening
-        for trade in self.trades:
-            if trade.buy:
-                start, end = size, size + trade.shares
-            else:
-                start, end = size - trade.shares, size
-            size = end if trade.buy else start
-            overlaps = _round_overlaps(start, end, per_round)
-            for round_no, shares in overlaps if trade.buy else reversed(overlaps):
-                events.append(
-                    {
-                        "round": round_no,
-                        "day": trade.day,
-                        "source": trade.source,
-                        "side": "buy" if trade.buy else "sell",
-                        "price": trade.price,
-                        "quantity": shares,
-                    }
-                )
-        return events
-
-
-def _chunk(round_no: int, lots: list[Lot]) -> dict[str, Any]:
-    shares = sum(lot.shares for lot in lots)
-    sources = {lot.source for lot in lots}
-    return {
-        "round": round_no,
-        "shares": shares,
-        "price": sum(lot.shares * lot.price for lot in lots) / shares,
-        "day": max(lot.day for lot in lots),
-        "source": sources.pop() if len(sources) == 1 else SOURCE_MIXED,
-    }
-
-
-def _round_overlaps(start: int, end: int, per_round: int) -> list[tuple[int, int]]:
-    """주식 위치 [start, end) 가 걸치는 회차와 각 회차에서 차지하는 수량."""
-    overlaps: list[tuple[int, int]] = []
-    position = start
-    while position < end:
-        round_no = position // per_round + 1
-        upto = min(end, round_no * per_round)
-        overlaps.append((round_no, upto - position))
-        position = upto
-    return overlaps
 
 
 def is_buy(row: dict[str, Any]) -> bool:
@@ -218,9 +142,7 @@ def read_cached_trade_days(account_id: str, as_of: date) -> dict[date, list[dict
     return {date.fromisoformat(doc["_id"].removeprefix(prefix)): doc["rows"] for doc in days}
 
 
-def round_history(
-    ledger: Ledger, ticker: str, per_round: int, cached_days: dict[date, list[dict[str, Any]]]
-) -> list[dict[str, Any]]:
+def round_history(ledger: Ledger, ticker: str, cached_days: dict[date, list[dict[str, Any]]]) -> list[Trade]:
     """원장에 이어지는 과거 체결을 붙여 회차를 재생한다. 캐시가 비면 그 이전으로 넘어가지 않는다."""
     start = ledger.as_of - timedelta(days=LOOKBACK_DAYS)
     start_iso = start.isoformat()
@@ -239,11 +161,19 @@ def round_history(
                 opening += -trade.shares if trade.buy else trade.shares
                 if opening < 0:
                     break
+                past.append(trade)
             if opening < 0:
                 break
-            past.extend(reversed_trades)
         day -= timedelta(days=1)
-    return replace(ledger, trades=(*reversed(past), *trades)).round_events(per_round)
+
+    cycle: list[Trade] = []
+    quantity = ledger.quantity
+    for trade in (*reversed(trades), *past):
+        if quantity == 0:
+            break
+        cycle.append(trade)
+        quantity += -trade.shares if trade.buy else trade.shares
+    return list(reversed(cycle))
 
 
 def _replay(lots: list[Lot], trades: list[Trade]) -> list[Lot]:

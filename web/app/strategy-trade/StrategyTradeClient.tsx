@@ -25,8 +25,7 @@ import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 type StrategyConfig = {
   // 매매 간격(%) 하나로 진입·추가·매도를 모두 관리한다.
   trigger_pct: number;
-  // 회차당 매수 수량(주) — 수량이 고정이어야 보유 수량으로 진입 회차 수를 알 수 있다.
-  round_quantity: number;
+  round_amount_manwon: number;
   rounds: number;
   index_name: string;
 };
@@ -46,11 +45,10 @@ type Status = {
   waiting_first_entry: boolean;
   // 보유 0 인데 장중 1호 진입선에 못 닿았을 때 1호를 사는 시각(KST, "HH:MM").
   first_entry_close_time: string;
-  // 보유 수량이 회차×회차수량과 다르면 마지막 회차는 일부만 보유 중이다 — 경고 표시용.
-  quantity_mismatch: boolean;
   held_quantity: number;
   // 다음 회차를 살 계좌 현금이 없어 매수를 멈췄다(한도 소진).
   cash_short: boolean;
+  budget_short: boolean;
   next_round: number | null;
   next_ticker: string | null;
   next_name: string | null;
@@ -74,6 +72,7 @@ export type RoundRow = {
   ticker: string;
   name: string;
   held: boolean;
+  quantity: number;
   // 실제 체결가·산 날짜·출처 — 사다리 선(buy_index)과 별개다. 안 산 회차는 null.
   fill_price: number | null;
   bought_on: string | null;
@@ -89,6 +88,7 @@ export type RoundRow = {
   close_entry: boolean;
   // 다음 회차를 살 계좌 현금이 없다 — 한도 소진, 이 회차는 사지 않는다.
   cash_short: boolean;
+  budget_short: boolean;
   // 이 회차를 팔면 다음 매수선이 매도가 이상이라 바로 다시 사게 된다 — 신호를 '매도 후 재매수'로 낸다.
   rebuy_after_sell: boolean;
   sell_reached: boolean;
@@ -140,7 +140,7 @@ type StrategyConfigRow = {
   ticker: string;
   name: string;
   trigger_pct: number;
-  round_quantity: number;
+  round_amount_manwon: number;
   rounds: number;
 };
 
@@ -155,6 +155,7 @@ type View = {
   slack_enabled: boolean;
   groups: HoldingsGroup[];
   pool_options: PoolLabelSource[];
+  default_round_amount_manwon: number;
   ticker_options: TickerOption[];
   /** 저장된 전략 설정 — 이 계좌의 전략 전부. */
   configs: StrategyConfigRow[];
@@ -328,7 +329,7 @@ type DraftRow = {
   ticker: string;
   name: string;
   pct: string;
-  qty: string;
+  amount: string;
   rounds: string;
 };
 
@@ -345,7 +346,7 @@ function rowFromConfig(config: StrategyConfigRow): DraftRow {
     ticker: config.ticker,
     name: config.name,
     pct: String(config.trigger_pct),
-    qty: String(config.round_quantity),
+    amount: String(config.round_amount_manwon),
     rounds: String(config.rounds),
   };
 }
@@ -353,13 +354,13 @@ function rowFromConfig(config: StrategyConfigRow): DraftRow {
 /** 변경 비교용 — 입력 중 문자열을 저장 값 모양으로 맞춘다. */
 function comparableDrafts(rows: DraftRow[]) {
   return rows.map((row) => [
-    row.strategy_id, row.ticker, Number(row.pct), Number(row.qty), Number(row.rounds),
+    row.strategy_id, row.ticker, Number(row.pct), Number(row.amount), Number(row.rounds),
   ]);
 }
 
-type TradeListRow = DraftRow & { held: boolean; heldRounds: string; roundAmount: number | null } & Partial<HoldingsRow>;
+type TradeListRow = DraftRow & { held: boolean; heldRounds: string } & Partial<HoldingsRow>;
 const tradeGridTheme = createAppGridTheme();
-const { weight: tradeWeightColumn, ...tradeHoldingColumns } = holdingMetricColumns<TradeListRow>(true);
+const { weight: tradeWeightColumn, returnPct, pnl, valuation } = holdingMetricColumns<TradeListRow>(true);
 const OTHER_HOLDINGS_TICKER = "__OTHER_HOLDINGS__";
 const EMPTY_GROUPS: HoldingsGroup[] = [];
 
@@ -377,13 +378,13 @@ function displayWeights(values: number[], total: number): number[] {
 }
 
 function tradeListLabel(key: string, name: string): TradeListRow {
-  return { key, ticker: "", name, strategy_id: null, pct: "", qty: "", rounds: "", held: false, heldRounds: "", roundAmount: null };
+  return { key, ticker: "", name, strategy_id: null, pct: "", amount: "", rounds: "", held: false, heldRounds: "" };
 }
 
 const tradeSettingColumns = [
   { field: "pct", headerName: "간격(%)", headerTooltip: "매매 간격 (%)", width: 78 },
-  { field: "qty", headerName: "수량(주)", headerTooltip: "회차당 수량 (주)", width: 78 },
   { field: "rounds", headerName: "회차 수", width: 76 },
+  { field: "amount", headerName: "회차 금액(만원)", width: 130 },
 ] as const;
 
 function AccountSettingsCard({
@@ -485,14 +486,9 @@ function AccountSettingsCard({
   const { gridRows, pinnedRows } = useMemo(() => {
     const stockRows = drafts.map((row): TradeListRow => {
       const strategy = row.strategy_id ? strategiesById.get(row.strategy_id) : undefined;
-      const price = strategy?.ticker === row.ticker && !("error" in strategy) ? strategy.index.close : null;
-      const quantity = Number(row.qty);
       return {
         ...accountAssets?.holdings.get(row.ticker),
         ...row,
-        roundAmount: price != null && Number.isFinite(price) && price > 0 && Number.isInteger(quantity) && quantity > 0
-          ? price * quantity
-          : null,
         held: Boolean(strategy && strategy.ticker === row.ticker && !("error" in strategy) && strategy.status.held_quantity > 0),
         heldRounds: !strategy || strategy.ticker !== row.ticker
           ? "미저장"
@@ -564,12 +560,7 @@ function AccountSettingsCard({
       editable: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group,
       cellClass: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group ? "appEditableCell" : undefined,
     })),
-    {
-      field: "roundAmount", headerName: "회차 금액", headerTooltip: "현재가 × 회차당 수량 (만원 단위 반올림)",
-      width: 100, type: "rightAligned",
-      valueFormatter: ({ value }) => value == null ? "-" : `${formatNumber(value / 10_000)}만원`,
-    },
-    ...Object.values(tradeHoldingColumns),
+    returnPct, pnl, valuation,
   ], [saving]);
 
   const handleRowDragEnd = ({ api }: RowDragEndEvent<TradeListRow>) => {
@@ -611,7 +602,7 @@ function AccountSettingsCard({
     const key = nextDraftKey();
     setDrafts((prev) => [
       ...prev,
-      { key, strategy_id: null, ticker: option.ticker, name: option.name, pct: "5", qty: "", rounds: "4" },
+      { key, strategy_id: null, ticker: option.ticker, name: option.name, pct: "5", amount: String(view.default_round_amount_manwon), rounds: "4" },
     ]);
     setSelection({ accountId, ticker: option.ticker });
     setPickerOpen(false);
@@ -643,12 +634,12 @@ function AccountSettingsCard({
     for (const row of drafts) {
       const label = row.name || row.ticker || "새 전략";
       const pct = Number(row.pct);
-      const qty = Number(row.qty);
+      const amount = Number(row.amount);
       const rounds = Number(row.rounds);
       if (!Number.isFinite(pct) || pct < PCT_MIN || pct > PCT_MAX) {
         return void toast.error(`${label}: 매매 간격은 ${PCT_MIN}~${PCT_MAX} 사이 숫자여야 합니다.`);
       }
-      if (!Number.isInteger(qty) || qty < 1) return void toast.error(`${label}: 회차당 수량은 1 이상의 정수여야 합니다.`);
+      if (!Number.isSafeInteger(amount) || !Number.isSafeInteger(amount * 10_000) || amount < 1) return void toast.error(`${label}: 회차 금액(만원)은 1 이상의 정수여야 합니다.`);
       if (!Number.isInteger(rounds) || rounds < 1 || rounds > 12) {
         return void toast.error(`${label}: 회차 수는 1~12 사이 정수여야 합니다.`);
       }
@@ -656,7 +647,7 @@ function AccountSettingsCard({
         ...(row.strategy_id ? { strategy_id: row.strategy_id } : {}),
         ticker: row.ticker,
         trigger_pct: pct,
-        round_quantity: qty,
+        round_amount_manwon: amount,
         rounds,
       });
     }
@@ -778,7 +769,7 @@ function AccountSettingsCard({
                 onSelectionChanged: ({ api }) => setCheckedKeys(api.getSelectedRows().map((row) => row.key)),
                 onCellEditRequest: ({ data, colDef, newValue }) => {
                   const field = colDef.field;
-                  if (field === "pct" || field === "qty" || field === "rounds") {
+                  if (field === "pct" || field === "amount" || field === "rounds") {
                     updateRow(data.key, { [field]: String(newValue ?? "").trim() });
                   }
                 },
@@ -908,12 +899,6 @@ function StrategySection({
       </div>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: "var(--fs-sm)" }}>
-        {status.quantity_mismatch ? (
-          <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}>
-            ⚠️ 보유 {formatNumber(status.held_quantity)}주가 회차당 수량의 배수가 아님 — 마지막 회차는
-            일부만 보유 중입니다
-          </span>
-        ) : null}
         {status.waiting_first_entry ? (
           <span style={{ fontWeight: 700 }}>
             1호 진입 대기 — {index.name} {formatNumber(index.buy_trigger)} 이하 · 미도달 시{" "}
@@ -922,7 +907,9 @@ function StrategySection({
         ) : status.next_round == null ? (
           <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>회차 소진 — 매도 대기</span>
         ) : null}
-        {status.cash_short ? (
+        {status.budget_short ? (
+          <span style={actionBadgeStyle("var(--text-muted)")}>⏸ {status.next_round}호 회차 금액으로 1주 매수 불가</span>
+        ) : status.cash_short ? (
           <span style={actionBadgeStyle("var(--text-muted)")}>⏸ {status.next_round}호 한도 소진 — 현금 부족</span>
         ) : status.next_buy_drop_pct != null ? (
           <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>

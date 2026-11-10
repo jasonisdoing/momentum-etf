@@ -93,10 +93,11 @@ def _is_swap(request: dict[str, Any]) -> bool:
 
 def _order_text(request: dict[str, Any]) -> str:
     if _is_swap(request):
-        return (
-            f"{_round_text(request['round'])}{request['label']} · {request['quantity']:,}주 매도 후 재매수 "
-            "(매도 1호가에 매도 · 매수 1호가에 매수)"
-        )
+        sell_quantity = request.get("sell_quantity")
+        buy_quantity = request.get("buy_quantity")
+        sell = f"{sell_quantity:,}주 매도" if sell_quantity is not None else "매도"
+        buy = f"{buy_quantity:,}주 재매수" if buy_quantity is not None else "재매수"
+        return f"{_round_text(request['round'])}{request['label']} · {sell} 후 {buy}"
     side = _SIDE_LABELS[request["side"]]
     return f"{_round_text(request['round'])}{request['label']} · {request['quantity']:,}주 × {_QUOTE_LABELS[request['side']]} 지정가 {side}"
 
@@ -117,7 +118,7 @@ def _section(request: dict[str, Any]) -> dict[str, Any]:
             "text": (
                 f"*[{_env_word(request['env'])}] {_action_word(request)} 주문*\n{_order_text(request)}\n"
                 + (
-                    f"팔면 바로 다시 사게 되는 회차라 같은 수량을 양쪽 호가에 함께 겁니다 ({request['ticker']})"
+                    f"매도 1호가에 매도, 매수 1호가에 재매수 주문을 함께 겁니다 ({request['ticker']})"
                     if _is_swap(request)
                     else f"버튼을 확정하는 순간의 {_QUOTE_LABELS[request['side']]}로 냅니다 ({request['ticker']})"
                 )
@@ -164,12 +165,14 @@ def _note_blocks(request: dict[str, Any], note: str) -> list[dict[str, Any]]:
 
 def _pair_blocks(request: dict[str, Any], pair_id: str, note: str | None) -> list[dict[str, Any]]:
     """매도 후 재매수 메시지 — 아직 끝나지 않은 쪽마다 취소 버튼을 단다(한쪽이 끝나도 다른 쪽 버튼은 남는다)."""
+    records = list(pair_records(pair_id))
+    request = {**request, **{f"{record['side']}_quantity": record["quantity"] for record in records}}
     blocks = [_section(request)]
-    for record in pair_records(pair_id):
+    for record in records:
         order = serialize_order(record)
         if order["status"] in FINISHED_STATUSES:
             continue
-        single = {**request, "side": order["side"], "rebuy": False}
+        single = {**request, "side": order["side"], "quantity": order["quantity"], "rebuy": False}
         blocks.append(
             _button(
                 CANCEL_ACTION_ID,
@@ -223,7 +226,9 @@ def send_order_message(
         "side": side,
         "label": order["strategy_label"],
         "ticker": order["ticker"],
-        "quantity": order["quantity"],
+        **(
+            {key: order[key] for key in ("sell_quantity", "buy_quantity")} if rebuy else {"quantity": order["quantity"]}
+        ),
         "rebuy": rebuy,
     }
     if not send_thread_message(f"[{_env_word(env)}] {_order_text(request)}", _open_blocks(request), thread_ts):
@@ -280,21 +285,20 @@ def _order_view(request: dict[str, Any], order: dict[str, Any], target: dict[str
         )
     guide = (
         f"주문을 확정하는 순간의 {order['quote_label']}로 {_env_word(request['env'])} 계좌에 보냅니다. "
-        "그 사이 호가가 움직이면 위 가격과 달라질 수 있습니다."
+        "호가가 움직이면 가격과 매수 수량이 달라질 수 있습니다."
     )
-    body = f"*{_order_text(request)}*\n{_account_line(request)}\n{gap}\n{guide}"
+    body = f"*{_order_text({**request, 'quantity': order['quantity']})}*\n{_account_line(request)}\n{gap}\n{guide}"
     return _modal_view(ORDER_CALLBACK_ID, f"{_env_word(request['env'])} {side} 주문 확인", f"{side} 주문", body, target)
 
 
 def _swap_view(request: dict[str, Any], order: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
     signal_gap = (order["sell_price"] / order["signal_price"] - 1.0) * 100.0
     body = (
-        f"*{_order_text(request)}*\n{_account_line(request)}\n"
-        f"매도 {order['sell_price']:,}원(매도 1호가) · 매수 {order['buy_price']:,}원(매수 1호가) — "
-        f"둘 다 체결되면 1주당 {order['sell_price'] - order['buy_price']:,}원 이득\n"
+        f"*{_order_text({**request, **order})}*\n{_account_line(request)}\n"
+        f"매도 {order['sell_price']:,}원(매도 1호가) · 매수 {order['buy_price']:,}원(매수 1호가)\n"
         f"매도 신호 {order['signal_price']:,.0f}원 대비 {signal_gap:+.2f}%\n"
         f"확정하는 순간의 호가로 {_env_word(request['env'])} 계좌에 매도·매수 지정가를 함께 겁니다. "
-        "한쪽만 체결되면 오른 쪽은 판 것, 내린 쪽은 싸게 더 산 것이고 나머지는 걸린 채 기다립니다."
+        "호가가 움직이면 가격과 재매수 수량이 달라질 수 있습니다."
     )
     return _modal_view(
         ORDER_CALLBACK_ID, f"{_env_word(request['env'])} 매도 후 재매수 확인", "매도·매수 주문", body, target
@@ -446,9 +450,9 @@ def _place_swap(target: dict[str, Any]) -> None:
         _update_message(target, _open_blocks(request))
         return
     sell, buy = result["sell"], result["buy"]
-    text = f"✅ {word} 접수: {sell['strategy_label']} {sell['quantity']:,}주 — 매도 {sell['price']:,}원"
+    text = f"✅ {word} 접수: {sell['strategy_label']} — 매도 {sell['quantity']:,}주 × {sell['price']:,}원"
     if buy is not None:
-        text += f" · 매수 {buy['price']:,}원 (둘 다 체결되면 1주당 {sell['price'] - buy['price']:,}원 이득)"
+        text += f" · 매수 {buy['quantity']:,}주 × {buy['price']:,}원"
     else:
         text += f"\n⚠️ 매수 주문은 실패했습니다(매도만 걸림): {result['buy_error']}"
     send_thread_message(text, thread_ts=target["thread_ts"])
@@ -622,12 +626,9 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
     pending = [
         trigger
         for trigger in triggers
-        if find_duplicate_order(account_id, trigger["strategy_id"], trigger["action"], trigger["round"]) is None
+        if find_duplicate_order(account_id, trigger["strategy_id"], trigger["action"]) is None
         # 매도 후 재매수는 같은 회차의 매수 주문도 걸리므로 그쪽 중복도 본다.
-        and not (
-            trigger["rebuy"]
-            and find_duplicate_order(account_id, trigger["strategy_id"], "buy", trigger["round"]) is not None
-        )
+        and not (trigger["rebuy"] and find_duplicate_order(account_id, trigger["strategy_id"], "buy") is not None)
     ]
     sent = 0
     try:

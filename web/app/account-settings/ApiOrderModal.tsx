@@ -157,7 +157,7 @@ export function ApiOrderModal({
   }, []);
 
   const strategy = useMemo(() => (strategies ?? []).find((row) => row.strategy_id === strategyId), [strategies, strategyId]);
-  const quantity = strategy?.config.round_quantity ?? null;
+  const sellQuantity = strategy?.rounds.find((row) => row.round === strategy.status.held_count)?.quantity;
 
   const run = useCallback(
     async (key: string, work: () => Promise<void>) => {
@@ -232,7 +232,7 @@ export function ApiOrderModal({
       setBalance(await requestJson<MockBalance>(`/api/broker-api/mock/balance?${query}`));
     });
 
-  const canOrder = Boolean(strategy && quantity && busy === null && !loadingStrategies);
+  const canOrder = Boolean(strategy && (side === "buy" || sellQuantity) && busy === null && !loadingStrategies);
 
   return (
     <AppModal
@@ -350,16 +350,18 @@ export function ApiOrderModal({
         <div style={fieldStyle}>
           <span style={labelStyle}>주문 내용</span>
           <span style={{ fontSize: "var(--fs-base)" }}>
-            {strategy && quantity
-              ? `${strategy.label} · ${quantity.toLocaleString("ko-KR")}주 × ${side === "buy" ? "매도" : "매수"} 1호가 지정가 ${side === "buy" ? "매수" : "매도"}`
-              : "-"}
+            {strategy && side === "buy"
+              ? `${strategy.label} · 회차 금액 ${strategy.config.round_amount_manwon.toLocaleString("ko-KR")}만원 · 매도 1호가 지정가 매수`
+              : strategy && sellQuantity
+                ? `${strategy.label} · ${sellQuantity.toLocaleString("ko-KR")}주 × 매수 1호가 지정가 매도`
+                : "-"}
           </span>
           <button type="button" className="btn btn-sm btn-outline-secondary" disabled={loadingStrategies || busy !== null} onClick={() => void loadStrategies()}>
             {loadingStrategies ? "불러오는 중…" : "새로고침"}
           </button>
         </div>
         <div style={{ ...mutedStyle, marginBottom: 10 }}>
-          수량은 전략의 회차당 수량이고, 가격은 주문 순간의 상대 1호가(매수는 매도 1호가, 매도는 매수 1호가)로 서버가 정합니다(직접 입력 없음). 모달의 직접 주문은 매도만 되고, 매수는 슬랙 주문 메시지로 냅니다.
+          직접 주문은 마지막 보유 회차의 남은 수량을 주문 순간의 매수 1호가로 매도합니다. 매수는 슬랙 주문 메시지에서 진행합니다.
         </div>
         {/* 모달의 직접 주문은 매도만 — 매수는 슬랙 주문 메시지의 사람 리뷰를 거친다. */}
         {side === "sell" ? (

@@ -177,7 +177,7 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
                     "name": row["name"],
                     "limit_price": row["sell_limit"],
                     "close": row["close"],
-                    "quantity": strategy_view["config"]["round_quantity"],
+                    "quantity": row["quantity"],
                     "index_level": row["sell_index"],
                     "index_name": index["name"],
                     "index": index,
@@ -199,7 +199,7 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
                     "name": row["name"],
                     "limit_price": row["buy_limit"],
                     "close": row["close"],
-                    "quantity": strategy_view["config"]["round_quantity"],
+                    "quantity": row["quantity"],
                     "index_level": row["buy_index"],
                     "index_name": index["name"],
                     "index": index,
@@ -299,11 +299,10 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     index = strategy_view["index"]
     status = strategy_view["status"]
     rounds_total = strategy_view["config"]["rounds"]
-    quantity = f"{strategy_view['config']['round_quantity']:,}주"
 
     triggered = {(t["round"], t["action"]) for t in triggers}
     buy_count = sum(1 for t in triggers if t["action"] == "buy")
-    # 매도 후 재매수는 같은 수량을 다시 사므로 회차 수가 줄지 않는다.
+    # 매도 후 재매수는 한 회차를 다시 채운다.
     sell_count = sum(1 for t in triggers if t["action"] == "sell" and not t["rebuy"])
     after_held = status["held_count"] + buy_count - sell_count
 
@@ -313,6 +312,8 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     next_row = next((row for row in strategy_view["rounds"] if row["is_next"]), None)
     if drop is None:
         parts.append("매수 없음(회차 소진)")
+    elif status["budget_short"]:
+        parts.append(f"⏸ {status['next_round']}호 회차 금액으로 1주 매수 불가")
     elif status["cash_short"]:
         parts.append(f"⏸ {status['next_round']}호 한도 소진 — 현금 부족")
     elif next_row is not None and next_row["close_entry"]:
@@ -337,6 +338,7 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     # 회차별 줄 — 종목 가격이 아니라 **지수 환산값**으로 적는다. ETF 단가는 종목마다
     # 달라 서로 비교가 안 되고, 판단은 결국 지수가 어디까지 왔느냐로 하기 때문이다.
     for row in strategy_view["rounds"]:
+        quantity = f"{row['quantity']:,}주"
         if row["held"]:
             profit_text = f"{row['profit_pct']:+.2f}%" if row["profit_pct"] is not None else "-"
             if row["sell_reached"]:
@@ -349,6 +351,8 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
                 lines.append(
                     f"🟢 {row['round']}호 {quantity} 보유 중 ({profit_text}) · 매도 목표 {_level(row['sell_index'])}"
                 )
+        elif row["budget_short"]:
+            lines.append(f"⏸ {row['round']}호 회차 금액으로 1주 매수 불가 · 매수 예정 {_level(row['buy_index'])}")
         elif row["is_next"] and row["cash_short"]:
             lines.append(f"⏸ {row['round']}호 {quantity} 한도 소진 — 현금 부족 · 매수 예정 {_level(row['buy_index'])}")
         elif row["is_next"]:

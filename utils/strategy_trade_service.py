@@ -1,23 +1,4 @@
-"""전략 사고팔기 운용 현황 조회 서비스 (UI/API 용).
-
-전략 여러 개를 독립 운용한다. 각 전략은 **자기 종목 하나만** 설정된 회차 수까지 분할 매수한다.
-여러 한국 개별주·ETF 종목풀에서 전략 종목을 고르며, 전략별 종목풀은 가격 출처다.
-파라미터(매매 간격 %·회차당 수량·회차 수)는
-DB(``system_config.strategy_trade_settings.strategies``)가 단일 소스이며 화면에서
-편집한다. 슬랙 알람은 계좌별 사고팔기 스위치(``accounts.{계좌}.slack_enabled``)를 따른다 — 합성과 별개다.
-
-사고팔기는 합성과 별개로 증권사 API가 연동된 한국 운영 계좌에 전략을 직접 등록한다. 다음 회차를 계좌 원화 예수금(잔고 동기화 값)으로 살 수 없으면 한도 소진으로 사지 않는다.
-보유 현황은 전략의 운용 계좌의 **증권사 체결 이력**에서 만든다(백테스트는 없다).
-화면을 열 때마다 `strategy_trade_ledger` 가 체결을 재생해 회차별 실제 체결가를 구한다(슬랙 신호 주문·수동 주문 모두).
-
-사다리 규칙 (자세한 근거는 strategy_trade_config 모듈 설명 참고)
----------------------------------------------------------------
-- 진입 회차 수 m = 보유 수량 ÷ 회차당 수량 (반올림, 1~회차 수로 제한).
-- 1호가 P1 = 1호를 실제로 산 체결가,  r = 1 − 간격%.
-- k호 진입가 = P1 × r^(k-1) · 매도 지정가 = 진입가 × (1 + 간격%). 갭으로 싸게 산 회차도 선은 그대로다.
-- 다음 매수 = 마지막 매수가 × r. 보유가 없으면 1호 진입 = 전일 종가 × r,
-  장중에 못 닿았으면 종목 종류별 시각(``FIRST_ENTRY_CLOSE_TIMES``, ETF 15:00·개별주 19:30)부터 마감 전까지 현재가로 1호 매수.
-"""
+"""전략 사고팔기 설정과 증권사 체결 원장을 연결해 운용 현황을 만든다."""
 
 from __future__ import annotations
 
@@ -28,8 +9,10 @@ from zoneinfo import ZoneInfo
 
 from core.strategy.trade import rules as ladder
 from utils.strategy_trade_config import (
+    DEFAULT_ROUND_AMOUNT_MANWON,
     EDITABLE_CONFIG_KEYS,
     FIRST_ENTRY_CLOSE_TIMES,
+    round_buy_quantity,
     validate_strategy_trade_config,
 )
 from utils.strategy_trade_ledger import (
@@ -56,9 +39,32 @@ def _settings_collection():
     return db[_CONFIG_COLLECTION]
 
 
+def _load_settings_document() -> dict[str, Any]:
+    """기존 고정 주수 설정을 전략당 100만원으로 한 번만 이전한다."""
+    collection = _settings_collection()
+    while True:
+        doc = collection.find_one({"_id": _SETTINGS_KEY}) or {}
+        stored = doc.get("strategies")
+        if not isinstance(stored, dict):
+            return doc
+        legacy = {sid: entry for sid, entry in stored.items() if isinstance(entry, dict) and "round_quantity" in entry}
+        if not legacy:
+            return doc
+        amounts = {
+            f"strategies.{sid}.round_amount_manwon": DEFAULT_ROUND_AMOUNT_MANWON
+            for sid, entry in legacy.items()
+            if "round_amount_manwon" not in entry
+        }
+        update = {"$unset": {f"strategies.{sid}.round_quantity": "" for sid in legacy}}
+        if amounts:
+            update["$set"] = amounts
+        # 읽은 설정과 같을 때만 바꿔 다른 프로세스가 방금 저장한 값을 덮지 않는다.
+        collection.update_one({"_id": _SETTINGS_KEY, "strategies": stored}, update)
+
+
 def load_settings() -> dict[str, Any]:
     """계좌별 슬랙 설정과 전략별 가격 출처·파라미터를 반환한다."""
-    doc = _settings_collection().find_one({"_id": _SETTINGS_KEY}) or {}
+    doc = _load_settings_document()
     stored = doc.get("strategies")
     if not isinstance(stored, dict):
         raise RuntimeError(
@@ -413,19 +419,10 @@ def _attach_trade_history(view: dict[str, Any], ledger: Ledger, cached_days: dic
         # 보유가 없으면 사다리 기준(1호 체결가)이 없다 — 위치 가격은 회차의 1호 진입 미리보기 지정가다.
         view["position_prices"] = {row["position"]: row["buy_limit"] for row in view["rounds"]}
         return
-    events = round_history(ledger, view["ticker"], view["config"]["round_quantity"], cached_days)
-    start = next(
-        (
-            idx + 1
-            for idx in range(len(events) - 1, -1, -1)
-            if events[idx]["round"] == 1 and events[idx]["side"] == "sell"
-        ),
-        0,
-    )
     trigger_pct = float(view["config"]["trigger_pct"])
-    for event in events[start:]:
-        position = ladder.ladder_position(event["price"], first["fill_price"], trigger_pct)
-        trades.setdefault(position, {}).setdefault(event["day"], []).append(event["side"])
+    for trade in round_history(ledger, view["ticker"], cached_days):
+        position = ladder.ladder_position(trade.price, first["fill_price"], trigger_pct)
+        trades.setdefault(position, {}).setdefault(trade.day, []).append("buy" if trade.buy else "sell")
     # 위치 가격 — 회차·매매가 있는 위치 범위 전체(빈 칸 포함). 1호 체결가 × (1 − 간격%)^(k−1) 를 호가로 맞춘 값.
     positions = [row["position"] for row in view["rounds"]] + list(trades)
     view["position_prices"] = {
@@ -445,49 +442,33 @@ def _build_strategy_view(
     *,
     kind: ladder.InstrumentKind,
 ) -> dict[str, Any]:
-    """전략 하나의 운용 현황(회차 표·상태)을 회차 원장에서 만든다.
-
-    ``cash_krw`` 는 계좌의 원화 예수금 — 다음 회차 금액(회차당 수량 × 매수가)을 살 수 없으면 한도 소진으로 사지 않는다.
-    """
+    """전략 하나의 운용 현황(회차 표·상태)을 회차 원장에서 만든다."""
     pool = str(strategy_settings["pool"])
     ticker = str(strategy_settings["ticker"])
     name = str(strategy_settings["name"])
     trigger_pct = float(strategy_settings["trigger_pct"])
-    round_quantity = int(strategy_settings["round_quantity"])
+    round_amount_manwon = int(strategy_settings["round_amount_manwon"])
     max_rounds = int(strategy_settings["rounds"])
 
     quantity = ledger.quantity
     live_close = account_closes.get(ticker) or _load_unheld_closes([ticker], pool).get(ticker)
     index_status = _load_ticker_status(pool, ticker, name, trigger_pct, live_close, kind=kind)
     close = float(index_status["close"])
-    # 보유 0 인데 장중 1호 진입선에 못 닿은 채 장 마감이 다가오면 현재가로 1호를 산다.
-    close_entry = False
-
-    # ── 회차 — 수량으로 진입 회차 수, 마지막 보유 회차의 체결가로 다음 매수가 ──
-    held_rounds = 0
-    last_fill: float | None = None
-    quantity_mismatch = False
-    round_fills: list[dict[str, Any]] = []
-    if quantity > 0:
-        held_rounds = max(1, min(max_rounds, round(quantity / round_quantity)))
-        quantity_mismatch = quantity != held_rounds * round_quantity
-        round_fills = ledger.round_fills(round_quantity)
-        last_fill = round_fills[held_rounds - 1]["price"]
-    else:
-        close_entry = _first_entry_close_window(kind)
+    # 정정을 합친 원주문별 매수 로트가 한 회차다. 설정 회차 수를 넘긴 수동 체결도 모두 표시한다.
+    held_rounds = len(ledger.lots)
+    last_fill = ledger.lots[-1].price if ledger.lots else None
+    close_entry = held_rounds == 0 and _first_entry_close_window(kind)
 
     # 팔 수 있는 회차는 맨 뒤(가장 깊은) 보유 회차 하나뿐이고, 신호는 한 번에 하나라
     # 그 매도가 닿아 있으면 매수는 매도가 체결될 때까지 미룬다.
     sell_pending = bool(
-        held_rounds
-        and close > 0
-        and close >= ladder.sell_limit(round_fills[held_rounds - 1]["price"], trigger_pct, kind=kind)
+        held_rounds and close > 0 and close >= ladder.sell_limit(ledger.lots[-1].price, trigger_pct, kind=kind)
     )
 
     # 사다리 위치(표시용) — 보유 회차는 1호 체결가 기준 칸, 그 뒤 회차는 마지막 보유 칸부터 한 칸씩.
-    held_positions = ladder.ladder_positions([fill["price"] for fill in round_fills[:held_rounds]], trigger_pct)
+    held_positions = ladder.ladder_positions([lot.price for lot in ledger.lots], trigger_pct)
     rows: list[dict[str, Any]] = []
-    for round_no in range(1, max_rounds + 1):
+    for round_no in range(1, max(held_rounds, max_rounds) + 1):
         held = round_no <= held_rounds
         position = (
             held_positions[round_no - 1]
@@ -496,15 +477,16 @@ def _build_strategy_view(
         )
         is_next = round_no == held_rounds + 1
         if held:
-            fill = round_fills[round_no - 1]
-            sell_limit = ladder.sell_limit(fill["price"], trigger_pct, kind=kind)
+            fill = ledger.lots[round_no - 1]
+            sell_limit = ladder.sell_limit(fill.price, trigger_pct, kind=kind)
             # 이 회차를 팔면 다음 매수선은 앞 회차 체결가 −간격%다. 그게 매도가 이상이면 팔자마자 다시 사게 된다 —
-            # 신호를 '매도 후 재매수' 한 짝으로 낸다(같은 수량이라 보유는 그대로, 회차 기준가만 바뀐다).
+            # 신호를 '매도 후 재매수' 한 짝으로 낸다.
             rebuy_after_sell = bool(
                 round_no == held_rounds
                 and round_no >= 2
-                and ladder.projected_buy_limit(round_fills[round_no - 2]["price"], 1, trigger_pct, kind=kind)
-                >= sell_limit
+                and ladder.projected_buy_limit(ledger.lots[round_no - 2].price, 1, trigger_pct, kind=kind) >= sell_limit
+                and 0 < (rebuy_quantity := round_buy_quantity(round_amount_manwon, sell_limit))
+                and rebuy_quantity * sell_limit <= cash_krw
             )
             rows.append(
                 {
@@ -514,14 +496,15 @@ def _build_strategy_view(
                     "ticker": ticker,
                     "name": name,
                     "held": True,
+                    "quantity": fill.shares,
                     # 실제 체결가·산 날짜·출처(슬랙/수동).
-                    "fill_price": round(fill["price"]),
-                    "bought_on": fill["day"],
-                    "source": fill["source"],
+                    "fill_price": round(fill.price),
+                    "bought_on": fill.day,
+                    "source": fill.source,
                     "close": round(close) if close > 0 else None,
-                    "profit_pct": round((close / fill["price"] - 1.0) * 100.0, 2) if close > 0 else None,
+                    "profit_pct": round((close / fill.price - 1.0) * 100.0, 2) if close > 0 else None,
                     "buy_limit": None,
-                    "buy_index": round(fill["price"]),  # 이미 산 회차 — 체결가가 그 회차의 기준선이다
+                    "buy_index": round(fill.price),  # 이미 산 회차 — 체결가가 그 회차의 기준선이다
                     "sell_limit": sell_limit,
                     "sell_index": sell_limit,
                     # 팔 수 있는 건 마지막 보유 회차뿐이다(앞 회차는 체결가가 더 높아 먼저 닿지도 않는다).
@@ -530,6 +513,7 @@ def _build_strategy_view(
                     "buy_reached": False,
                     "close_entry": False,
                     "cash_short": False,
+                    "budget_short": False,
                     "is_next": False,
                 }
             )
@@ -542,7 +526,13 @@ def _build_strategy_view(
             buy_limit = ladder.preview_buy_limit(float(index_status["prev_close"]), round_no, trigger_pct, kind=kind)
         market_entry = is_next and close_entry and close > buy_limit
         # 장 마감 매수는 현재가로 사므로 그 가격으로 산 금액을 본다.
-        cash_short = bool(is_next and round_quantity * (close if market_entry else buy_limit) > cash_krw)
+        # 신호에 도달했다면 실제 시세로 예상하고, 대기 중에는 목표 지정가로 예상한다.
+        buy_price = min(close, buy_limit) if is_next and 0 < close <= buy_limit else buy_limit
+        if market_entry:
+            buy_price = close
+        buy_quantity = round_buy_quantity(round_amount_manwon, buy_price)
+        budget_short = is_next and buy_quantity == 0
+        cash_short = is_next and buy_quantity * buy_price > cash_krw
         rows.append(
             {
                 "round": round_no,
@@ -551,6 +541,7 @@ def _build_strategy_view(
                 "ticker": ticker,
                 "name": name,
                 "held": False,
+                "quantity": buy_quantity,
                 "fill_price": None,
                 "bought_on": None,
                 "source": None,
@@ -566,13 +557,15 @@ def _build_strategy_view(
                     is_next
                     and not sell_pending
                     and not cash_short
+                    and not budget_short
                     and close > 0
                     and (close <= buy_limit or close_entry)
                 ),
                 # 진입선이 아니라 장 마감 매수로 닿은 1호 — 지정가 대신 현재가로 산다.
-                "close_entry": bool(market_entry and not cash_short),
+                "close_entry": bool(market_entry and not cash_short and not budget_short),
                 # 다음 회차를 살 현금이 없다 — 한도 소진, 이 회차는 사지 않는다.
                 "cash_short": cash_short,
+                "budget_short": budget_short,
                 "is_next": is_next,
             }
         )
@@ -599,7 +592,6 @@ def _build_strategy_view(
         next_sell_round = deepest["round"]
         next_sell_rise_pct = round((deepest["sell_limit"] / close - 1.0) * 100.0, 2)
 
-    last_buy_price = round(round_fills[held_rounds - 1]["price"]) if held_rounds else None
     return {
         "strategy_id": strategy_id,
         "label": name,
@@ -608,11 +600,12 @@ def _build_strategy_view(
         "ticker": ticker,
         "config": {
             "trigger_pct": trigger_pct,
-            "round_quantity": round_quantity,
+            "round_amount_manwon": round_amount_manwon,
             "rounds": max_rounds,
             "index_name": name,
         },
         "index": index_status,
+        "cash_krw": cash_krw,
         "status": {
             "held_count": held_rounds,
             "waiting_first_entry": held_rounds == 0,
@@ -620,17 +613,16 @@ def _build_strategy_view(
             "next_round": (held_rounds + 1) if held_rounds < max_rounds else None,
             "next_ticker": ticker if held_rounds < max_rounds else None,
             "next_name": name if held_rounds < max_rounds else None,
-            "last_buy_price": last_buy_price,
+            "last_buy_price": round(last_fill) if last_fill is not None else None,
             "next_buy_drop_pct": next_buy_drop_pct,
             "next_sell_round": next_sell_round,
             "next_sell_rise_pct": next_sell_rise_pct,
             # 매도가 먼저 닿아 있어 다음 회차 매수는 그 매도가 체결될 때까지 미룬다(신호는 한 번에 하나).
             "sell_pending": sell_pending,
-            # 보유 수량이 회차×수량과 다르면 마지막 회차가 부분 보유다 — 화면이 경고를 띄운다.
-            "quantity_mismatch": quantity_mismatch,
             "held_quantity": quantity,
             # 다음 회차를 살 현금이 없어 매수를 멈췄는지(한도 소진).
             "cash_short": bool(next_row is not None and next_row["cash_short"]),
+            "budget_short": bool(next_row is not None and next_row["budget_short"]),
         },
         # 증권사에 걸린 우리 기록에 없는(수동) 미체결 주문 — 슬랙 주문을 막는 근거다.
         "manual_orders": list(ledger.manual_orders),
@@ -679,7 +671,7 @@ def _failed_view(strategy_id: str, entry: dict[str, Any], error: LedgerError | s
         "ticker": str(entry["ticker"]),
         "config": {
             "trigger_pct": entry["trigger_pct"],
-            "round_quantity": entry["round_quantity"],
+            "round_amount_manwon": entry["round_amount_manwon"],
             "rounds": entry["rounds"],
             "index_name": str(entry["name"]),
         },
@@ -831,6 +823,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
         "groups": _normalize_trade_groups(account.get("groups", [])),
         "pool_options": pool_options(list(pools)),
         "ticker_options": [options[ticker] for ticker in sorted(options)],
+        "default_round_amount_manwon": DEFAULT_ROUND_AMOUNT_MANWON,
         # 편집 표의 행 — 저장된 전략 설정 그대로.
         "configs": [
             {
@@ -839,7 +832,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
                 "ticker": entry["ticker"],
                 "name": entry["name"],
                 "trigger_pct": entry["trigger_pct"],
-                "round_quantity": entry["round_quantity"],
+                "round_amount_manwon": entry["round_amount_manwon"],
                 "rounds": entry["rounds"],
             }
             for sid, entry in configs

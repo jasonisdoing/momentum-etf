@@ -1,7 +1,7 @@
 """계좌 API 주문(운영·모의) — 잔고·사고팔기 주문·취소·주문 기록·증권사 주문내역.
 
 계좌 설정에 증권사 연동(나무·메리츠)이 저장된 계좌만 받는다(`services.broker_trade_service.account_env`). 가격·수량은 요청에 없다 —
-서버가 전략의 현재가·회차당 수량을 읽는다(`utils.strategy_trade_orders`).
+서버가 지정가와 회차 금액 또는 보유 회차의 잔여 주수로 주문을 정한다(`utils.strategy_trade_orders`).
 """
 
 from __future__ import annotations
@@ -63,9 +63,7 @@ def post_order(payload: PlaceOrderPayload, _: None = Depends(require_internal_to
 def post_slack_order(payload: PlaceOrderPayload, _: None = Depends(require_internal_token)) -> dict:
     """주문 메시지(버튼)를 슬랙으로 보낸다 — 주문은 슬랙의 모달 확인 뒤에 나간다."""
     try:
-        send_order_message(
-            payload.account_id, payload.pool, payload.strategy_id, payload.side, None, None, rebuy=False
-        )
+        send_order_message(payload.account_id, payload.pool, payload.strategy_id, payload.side, None, None, rebuy=False)
     except BrokerApiError as exc:
         raise _bad_request(exc) from exc
     return {"ok": True}

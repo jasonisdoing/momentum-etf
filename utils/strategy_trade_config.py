@@ -1,41 +1,9 @@
-"""전략 사고팔기(분할 매수/매도) 설정 정의 — 단일 소스.
-
-전략 규칙
----------
-**전략 여러 개를 독립 운용**한다. 여러 한국 개별주·ETF 종목풀에서 종목을 고르고, 각 전략은
-자기 종목 **하나만** 설정된 회차 수까지 분할 매수한다. 합성과 별개로 계좌 단위로 운영한다.
-
-- 자금 배분: 회차마다 같은 **수량**(``round_quantity``, 전략별 편집)을 산다.
-  수량이 같아야 보유 수량만으로 진입한 회차 수를 알 수 있다.
-- 한도 소진: 다음 회차 금액(회차당 수량 × 매수가)을 계좌 원화 예수금으로 살 수 없으면 그 회차를 사지 않는다.
-- 파라미터는 전략당 ``trigger_pct``(매매 간격 %) · ``round_quantity``(회차당 주수) ·
-  ``rounds``(회차 수)다.
-- 1호 진입(보유 0일 때): 종목이 **전일 종가 대비** ``trigger_pct`` 이상 하락하면 매수.
-  장중에 닿지 못했으면 ``FIRST_ENTRY_CLOSE_TIMES`` 의 종목 종류별 시각부터 그 종류의 마지막 거래 시간이 끝나기
-  전까지 현재가로 매수한다(보유 0인 날을 그대로 넘기지 않는다).
-- 2호 이후 진입: **마지막 매수가 대비** ``trigger_pct`` 이상 하락하면 같은 종목을 추가 매수.
-  → 진입가 사다리는 1호가 P 에서 P·(1-x%)^(k-1) 로 결정적이다.
-- 매도: 각 회차가 **자기 진입가 대비** ``trigger_pct`` 이상 오르면 그 회차 수량만 매도.
-  사다리 구조상 항상 마지막(가장 싼) 회차부터 팔린다.
-- 리셋: 전량 매도되면 1호 진입 대기로 돌아간다(기준은 다시 전일 종가).
-
-회차 상태 복원 (증권사 체결 재생)
-------------------------------
-회차당 수량이 고정이므로 보유 수량 ÷ 회차 수량 = 진입한 회차 수(m)이고, 1호가는 1호를 실제로 산 체결가다.
-증권사 일별 체결 조회를 마지막 보유 0 이후부터 재생해 회차별 체결가를 구한다(`strategy_trade_ledger`) —
-슬랙 신호 주문이든 증권사 앱 주문이든 같은 조회에 나온다. 매도가 마지막 회차부터 일어나고 재진입도 같은
-사다리 자리에 걸리므로 열린 회차는 항상 1호부터 연속 구간이다.
-전제: 회차당 수량 고정 + 지정가 체결. (수량이 회차 수량의 배수가 아니면 화면에 경고,
-체결 이력이 증권사 잔고와 맞지 않으면 그 전략은 오류로 표시)
-
-``trigger_pct``·``round_quantity``·``rounds`` 는 화면에서 편집하며
-DB(``system_config.strategy_trade_settings.strategies``)가 단일 소스다.
-검증은 ``validate_strategy_trade_config`` 한 곳에서만 한다.
-"""
+"""사고팔기 전략의 편집 설정과 회차 매수 수량 계산."""
 
 from __future__ import annotations
 
 from datetime import time
+from math import isfinite
 from typing import Any
 
 # 전략 정의(풀·종목·계좌·파라미터)는 DB(`system_config.strategy_trade_settings.strategies`)가 단일 소스다 —
@@ -55,11 +23,13 @@ def is_eligible_pool(pool_config: dict[str, Any]) -> bool:
 FIRST_ENTRY_CLOSE_TIMES = {"etf": time(15, 0), "stock": time(19, 30)}
 
 # 화면에서 편집하는 파라미터 키 — DB 문서에 이 키로 저장된다.
-EDITABLE_CONFIG_KEYS: tuple[str, ...] = ("trigger_pct", "round_quantity", "rounds")
+EDITABLE_CONFIG_KEYS: tuple[str, ...] = ("trigger_pct", "round_amount_manwon", "rounds")
 
 # 편집 가능 범위 — 화면 입력과 API 가 같은 한계를 쓴다.
 PCT_MIN, PCT_MAX = 0.1, 50.0
-QTY_MIN, QTY_MAX = 1, 1_000_000
+DEFAULT_ROUND_AMOUNT_MANWON = 100
+WON_PER_MANWON = 10_000
+AMOUNT_MAX_MANWON = (2**53 - 1) // WON_PER_MANWON
 ROUNDS_MIN, ROUNDS_MAX = 1, 12
 
 
@@ -78,13 +48,10 @@ def validate_strategy_trade_config(values: dict[str, Any]) -> dict[str, float | 
         raise ValueError(f"'매매 간격' 은 {PCT_MIN}~{PCT_MAX}(%) 사이여야 합니다.")
     cleaned["trigger_pct"] = pct
 
-    raw_qty = values.get("round_quantity")
-    if not isinstance(raw_qty, (int, float)) or isinstance(raw_qty, bool) or float(raw_qty) != int(raw_qty):
-        raise ValueError("'회차당 수량' 은 정수여야 합니다.")
-    qty = int(raw_qty)
-    if not QTY_MIN <= qty <= QTY_MAX:
-        raise ValueError(f"'회차당 수량' 은 {QTY_MIN}~{QTY_MAX:,}(주) 사이여야 합니다.")
-    cleaned["round_quantity"] = qty
+    amount = values.get("round_amount_manwon")
+    if type(amount) is not int or not 1 <= amount <= AMOUNT_MAX_MANWON:
+        raise ValueError("'회차 금액(만원)'은 유효한 양의 정수여야 합니다.")
+    cleaned["round_amount_manwon"] = amount
 
     raw_rounds = values.get("rounds")
     if not isinstance(raw_rounds, (int, float)) or isinstance(raw_rounds, bool) or float(raw_rounds) != int(raw_rounds):
@@ -95,3 +62,10 @@ def validate_strategy_trade_config(values: dict[str, Any]) -> dict[str, float | 
     cleaned["rounds"] = rounds
 
     return cleaned
+
+
+def round_buy_quantity(amount_manwon: int, price: float) -> int:
+    """회차 금액으로 지정가에서 살 수 있는 최대 정수 주수."""
+    if not isfinite(price) or price <= 0:
+        raise ValueError("회차 매수가는 양수여야 합니다.")
+    return int((amount_manwon * WON_PER_MANWON) // price)

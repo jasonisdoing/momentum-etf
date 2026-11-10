@@ -6,7 +6,7 @@
 **증권사 체결 조회가 진실**이라 조회할 때마다 거기서 갱신한다. 우리가 상태를 추측하지 않는다.
 
 - 가격·수량은 클라이언트가 보내지 않는다. 서버가 증권사 1호가와 전략 운용 현황(`strategy_trade_service`)의
-  회차당 수량을 읽는다 — 화면과 주문이 갈리지 않게 단일 소스를 지킨다.
+  매수는 회차 금액과 주문가로 수량을 계산하고 매도는 해당 회차의 남은 수량을 읽는다.
 - 증권사는 계좌 설정의 연동으로 정한다(`services.broker_trade_service`, 나무·메리츠). 기록은 계좌 ID 로 묶는다.
 - 주문번호 대응: 주문 응답의 주문번호를 그날 주문내역의 주문번호와 같은 번호로 본다(나무는 시장주문번호·통합주문번호가
   같은 번호 공간). 조회 결과에서 못 찾으면 상태를 바꾸지 않고 그 사실을 메시지로 남긴다 — 속성으로 짐작해 맞추지 않는다.
@@ -32,6 +32,7 @@ from services.broker_trade_service import (
 from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
 from utils.db_manager import get_db_connection
 from utils.market_session import is_instrument_trading_time, kor_order_venue
+from utils.strategy_trade_config import round_buy_quantity
 from utils.strategy_trade_ledger import is_buy
 from utils.strategy_trade_service import load_views_where
 
@@ -85,26 +86,17 @@ def _require_round_state(strategy: dict[str, Any], side: str, round_no: int) -> 
     row = next((item for item in strategy["rounds"] if item["round"] == round_no), None)
     if row is None:
         raise BrokerApiError(f"{strategy['label']} 에 {round_no}호 회차가 없습니다.")
-    orderable = row["held"] if side == "sell" else row["is_next"]
+    orderable = row["held"] and round_no == strategy["status"]["held_count"] if side == "sell" else row["is_next"]
     if not orderable:
         word = "매도" if side == "sell" else "매수"
         raise RoundNotOrderableError(f"{strategy['label']} {round_no}호는 지금 {word}할 수 있는 회차가 아닙니다.")
-    if side == "buy" and row["cash_short"]:
-        # 현금은 잔고 동기화로 다시 늘 수 있어 회차를 만료시키지 않는다(다시 누르면 될 수 있다).
-        raise BrokerApiError(f"{strategy['label']} {round_no}호 한도 소진 — 계좌 현금으로 이 회차를 살 수 없습니다.")
     return row
 
 
-def find_duplicate_order(account_id: str, strategy_id: str, side: str, round_no: int) -> dict[str, Any] | None:
-    """같은 회차·구분의 주문이 진행 중인 기록 — 체결된 주문은 막지 않는다(체결 뒤 같은 회차에 다시 닿으면 다시 주문한다)."""
+def find_duplicate_order(account_id: str, strategy_id: str, side: str) -> dict[str, Any] | None:
+    """일부 체결로 보유 회차 번호가 바뀌어도 같은 방향의 진행 중인 주문을 찾는다."""
     return _orders().find_one(
-        {
-            "account_id": account_id,
-            "strategy_id": strategy_id,
-            "side": side,
-            "round": round_no,
-            "status": {"$in": list(ACTIVE_STATUSES)},
-        }
+        {"account_id": account_id, "strategy_id": strategy_id, "side": side, "status": {"$in": list(ACTIVE_STATUSES)}}
     )
 
 
@@ -117,12 +109,10 @@ def active_order_keys(strategy_ids: list[str]) -> set[tuple[str, int, str]]:
     return {(record["strategy_id"], record["round"], record["side"]) for record in records}
 
 
-def _require_no_duplicate(account_id: str, strategy_id: str, side: str, round_no: int) -> None:
-    found = find_duplicate_order(account_id, strategy_id, side, round_no)
+def _require_no_duplicate(account_id: str, strategy_id: str, side: str) -> None:
+    found = find_duplicate_order(account_id, strategy_id, side)
     if found is not None:
-        raise BrokerApiError(
-            f"{round_no}호 {'매도' if side == 'sell' else '매수'} 주문이 이미 있습니다({found['status']})."
-        )
+        raise BrokerApiError(f"{'매도' if side == 'sell' else '매수'} 주문이 이미 있습니다({found['status']}).")
 
 
 def _require_no_manual_order(strategy: dict[str, Any], side: str) -> None:
@@ -173,7 +163,7 @@ def _require_order_allowed(account_id: str, env: str, amount: int, count: int) -
 def resolve_order(
     account_id: str, pool: str, strategy_id: str, side: str, round_no: int | None, *, fresh: bool
 ) -> dict[str, Any]:
-    """주문 내용 — 가격은 **그 순간의 상대 1호가 지정가**(매수는 매도 1호가, 매도는 매수 1호가), 수량은 회차당 수량이다.
+    """주문 내용 — 가격은 **그 순간의 상대 1호가 지정가**(매수는 매도 1호가, 매도는 매수 1호가), 매수 수량은 회차 금액과 지정가로, 매도 수량은 해당 회차의 실제 잔여 주수로 정한다.
 
     마지막 체결가로 내면 호가에 닿지 않아 체결이 안 되는 일이 잦다 — 상대 1호가는 바로 체결되는 가장 좋은 가격이다.
     사다리 지정가를 미리 걸지 않는다 — 사람이 버튼을 누르는 순간의 시장 호가로만 낸다.
@@ -191,22 +181,41 @@ def resolve_order(
     strategy = _order_strategy(account_id, pool, strategy_id, fresh=fresh)
     _require_no_manual_order(strategy, side)
     signal_price = None
+    target_round = round_no
+    if side == "sell" and target_round is None:
+        target_round = strategy["status"]["held_count"]
+        if not target_round:
+            raise RoundNotOrderableError(f"{strategy['label']}에 매도할 보유 회차가 없습니다.")
+    row = _require_round_state(strategy, side, target_round) if target_round is not None else None
     if round_no is not None:
-        row = _require_round_state(strategy, side, round_no)
         signal_price = row["sell_limit"] if side == "sell" else (None if row["close_entry"] else row["buy_limit"])
     venue = _order_venue(strategy)
     quote = fetch_best_quote(strategy["account_id"], strategy["ticker"], venue)
     label, price = ("매도 1호가", quote["ask"]) if side == "buy" else ("매수 1호가", quote["bid"])
     _require_valid_quote(strategy, label, price)
+    if side == "buy":
+        quantity = _buy_quantity(strategy, price, account_id)
+    else:
+        quantity = row["quantity"]
     return {
         "strategy_label": strategy["label"],
         "ticker": strategy["ticker"],
-        "quantity": int(strategy["config"]["round_quantity"]),
+        "quantity": quantity,
         "price": price,
         "signal_price": signal_price,
         "quote_label": label,
         "venue": venue,
     }
+
+
+def _buy_quantity(strategy: dict[str, Any], price: int, account_id: str) -> int:
+    amount = strategy["config"]["round_amount_manwon"]
+    quantity = round_buy_quantity(amount, price)
+    if quantity == 0:
+        raise BrokerApiError(f"{strategy['label']}: 회차 금액 {amount:,}만원으로 {price:,}원에 1주도 살 수 없습니다.")
+    if account_id == strategy["account_id"] and quantity * price > strategy["cash_krw"]:
+        raise BrokerApiError(f"{strategy['label']}: 계좌 현금으로 {quantity:,}주를 살 수 없습니다.")
+    return quantity
 
 
 def _order_venue(strategy: dict[str, Any]) -> str:
@@ -238,11 +247,10 @@ def _order_strategy(account_id: str, pool: str, strategy_id: str, *, fresh: bool
 
 
 def resolve_swap(account_id: str, pool: str, strategy_id: str, round_no: int, *, fresh: bool) -> dict[str, Any]:
-    """매도 후 재매수 주문 내용 — 같은 수량을 **같은 쪽 1호가**로 판다(매도 1호가)·산다(매수 1호가).
+    """매도 후 재매수 주문 내용 — **같은 쪽 1호가**로 판다(매도 1호가)·산다(매수 1호가).
 
     그 회차를 팔면 다음 매수선(앞 회차 체결가 −간격%)이 매도가 이상이라 팔자마자 다시 사게 되는 경우에만 낸다
-    (`rebuy_after_sell`). 보유 수량은 그대로이고 회차 기준가만 바뀌므로, 상대 호가로 바로 체결시키는 대신 양쪽을
-    걸어 호가 차이를 번다 — 한쪽만 체결돼도 오르면 판 것, 내리면 싸게 더 산 것이라 사다리 규칙과 어긋나지 않는다.
+    (`rebuy_after_sell`). 매도는 회차의 남은 수량, 재매수는 회차 금액과 매수 1호가로 계산한다.
     """
     strategy = _order_strategy(account_id, pool, strategy_id, fresh=fresh)
     _require_no_manual_order(strategy, "sell")
@@ -257,7 +265,8 @@ def resolve_swap(account_id: str, pool: str, strategy_id: str, round_no: int, *,
     return {
         "strategy_label": strategy["label"],
         "ticker": strategy["ticker"],
-        "quantity": int(strategy["config"]["round_quantity"]),
+        "sell_quantity": row["quantity"],
+        "buy_quantity": _buy_quantity(strategy, quote["bid"], account_id),
         "sell_price": quote["ask"],
         "buy_price": quote["bid"],
         "signal_price": row["sell_limit"],
@@ -279,15 +288,14 @@ def place_order(
     env = account_env(account_id)
     # 주문 직전이라 저장된 원장이 아니라 지금 증권사 기준으로 다시 계산한다.
     order = resolve_order(account_id, pool, strategy_id, side, round_no, fresh=True)
-    if round_no is not None:
-        _require_no_duplicate(account_id, strategy_id, side, round_no)
+    _require_no_duplicate(account_id, strategy_id, side)
     _require_order_allowed(account_id, env, order["price"] * order["quantity"], 1)
     base = _record_base(env, account_id, pool, strategy_id, round_no, order, slack)
     return {**_submit(base, side, order["price"]), "signal_price": order["signal_price"]}
 
 
 def place_swap(account_id: str, pool: str, strategy_id: str, round_no: int, slack: dict[str, str]) -> dict[str, Any]:
-    """매도 후 재매수 — 같은 수량의 매도(매도 1호가)와 매수(매수 1호가) 지정가를 한 짝(`pair_id`)으로 낸다.
+    """매도 후 재매수 — 매도(매도 1호가)와 매수(매수 1호가) 지정가를 한 짝(`pair_id`)으로 낸다.
 
     매도가 접수되지 않으면 매수도 내지 않는다(오류). 매도는 접수됐는데 매수가 실패하면 매수 기록을 거부로 남기고
     `buy_error` 로 알린다 — 매도만 걸린 것은 보통의 매도 신호 주문과 같다.
@@ -296,14 +304,17 @@ def place_swap(account_id: str, pool: str, strategy_id: str, round_no: int, slac
 
     env = account_env(account_id)
     order = resolve_swap(account_id, pool, strategy_id, round_no, fresh=True)
-    _require_no_duplicate(account_id, strategy_id, "sell", round_no)
-    _require_no_duplicate(account_id, strategy_id, "buy", round_no)
-    amount = (order["sell_price"] + order["buy_price"]) * order["quantity"]
+    _require_no_duplicate(account_id, strategy_id, "sell")
+    _require_no_duplicate(account_id, strategy_id, "buy")
+    amount = order["sell_price"] * order["sell_quantity"] + order["buy_price"] * order["buy_quantity"]
     _require_order_allowed(account_id, env, amount, 2)
-    base = {**_record_base(env, account_id, pool, strategy_id, round_no, order, slack), "pair_id": uuid4().hex}
+    base = _record_base(
+        env, account_id, pool, strategy_id, round_no, {**order, "quantity": order["sell_quantity"]}, slack
+    )
+    base["pair_id"] = uuid4().hex
     sell = _submit(base, "sell", order["sell_price"])
     try:
-        buy = _submit(base, "buy", order["buy_price"])
+        buy = _submit({**base, "quantity": order["buy_quantity"]}, "buy", order["buy_price"])
     except BrokerApiError as exc:
         return {"sell": sell, "buy": None, "buy_error": str(exc), "signal_price": order["signal_price"]}
     return {"sell": sell, "buy": buy, "buy_error": None, "signal_price": order["signal_price"]}
