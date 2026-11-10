@@ -502,15 +502,29 @@ function AccountSettingsCard({
     const summary = accountAssets?.summary;
     const stockValues = stockRows.map((row) => row.valuation_krw ?? 0);
     const strategyTickers = new Set(drafts.map((row) => row.ticker));
-    const otherValue = accountAssets == null ? undefined : [...accountAssets.holdings.values()]
+    const otherHoldings = accountAssets == null ? undefined : [...accountAssets.holdings.values()]
       .filter((row) => !strategyTickers.has(row.ticker))
-      .reduce((sum, row) => sum + row.valuation_krw, 0);
+      .reduce((totals, row) => {
+        totals.valuation += row.valuation_krw;
+        totals.buyAmount += row.buy_amount_krw;
+        totals.pnl += row.pnl_krw;
+        return totals;
+      }, { valuation: 0, buyAmount: 0, pnl: 0 });
+    const otherValue = otherHoldings?.valuation;
     const weights = summary && summary.total_assets_krw > 0 && otherValue != null
       ? displayWeights([summary.cash_balance_krw, otherValue, ...stockValues], summary.total_assets_krw)
       : [];
     const pinnedRows: TradeListRow[] = [
       { ...tradeListLabel(CASH_ROW_TICKER, "현금"), ticker: CASH_ROW_TICKER, valuation_krw: summary?.cash_balance_krw, weight_pct: weights[0] },
-      { ...tradeListLabel(OTHER_HOLDINGS_TICKER, "기타 종목"), valuation_krw: otherValue, weight_pct: weights[1] },
+      {
+        ...tradeListLabel(OTHER_HOLDINGS_TICKER, "기타 종목"),
+        valuation_krw: otherValue,
+        weight_pct: weights[1],
+        pnl_krw: otherHoldings?.pnl,
+        return_pct: otherHoldings && otherHoldings.buyAmount > 0
+          ? (otherHoldings.pnl / otherHoldings.buyAmount) * 100
+          : undefined,
+      },
     ];
     const weightedRows = stockRows.map((row, index) => ({ ...row, weight_pct: weights[index + 2] }));
     if (sortActive || !groups.length) return { gridRows: weightedRows, pinnedRows };
@@ -728,16 +742,12 @@ function AccountSettingsCard({
       <section className="appSection appPageStack strategyTradeGrid">
         <aside className="card appCard" aria-label="종목 목록">
           <div className="card-body appCardBodyTight">
-            <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
-              <strong>종목</strong>
-              <span className="tableMuted">행을 선택해 상세 보기 · 값을 더블 클릭해 수정 · 손잡이로 순서 변경</span>
-            </div>
             <AppAgGrid
               rowData={gridRows}
               columnDefs={tradeListColumns}
               theme={tradeGridTheme}
-              height={Math.min(420, 54 + (gridRows.length + pinnedRows.length) * 36)}
-              minHeight={76}
+              height="auto"
+              minHeight={0}
               getRowId={({ data }) => data.key}
               getRowClass={({ data }) => [
                 data?.is_group ? "assetsGroupRow" : "",
@@ -746,6 +756,7 @@ function AccountSettingsCard({
               ].filter(Boolean).join(" ")}
               rowClassDeps={[selectedRow?.key]}
               gridOptions={{
+                domLayout: "autoHeight",
                 rowHeight: 36,
                 headerHeight: 34,
                 suppressMovableColumns: true,
