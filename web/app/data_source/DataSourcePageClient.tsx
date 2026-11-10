@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { formatKstClock, formatKstDateTime } from "@/lib/datetime";
 
 import { PageFrame } from "../components/PageFrame";
 
@@ -13,6 +14,7 @@ type DataSourceRow = {
   usage: string;
   code_ref: string;
   note: string | null;
+  quote_pilot?: QuotePilot;
   // 호주 ETF 발행사별 행에만 붙는다(실제 캐시 집계).
   etf_count?: number;
   source?: string | null;
@@ -24,6 +26,68 @@ type DataSourceRow = {
   // 「기타」 행에만 붙는다 — 발행사를 판별하지 못한 ETF.
   unclassified_tickers?: string[];
 };
+
+type PilotQuote = {
+  price: number;
+  traded_at: string | null;
+  received_at: string;
+  reference_price: number | null;
+  change_pct: number | null;
+  delayed?: boolean | null;
+  verified?: boolean;
+};
+type QuotePilot = {
+  latest: {
+    session: string;
+    checked_at: string;
+    websocket: Record<string, PilotQuote>;
+    rest: Record<string, PilotQuote>;
+    baseline: Record<string, PilotQuote>;
+    targets: string[];
+    issues: string[];
+  } | null;
+  verified: Record<string, Record<string, string>>;
+};
+
+const SESSION_LABEL: Record<string, string> = {
+  premarket: "프리마켓",
+  regular: "정규장",
+  aftermarket: "애프터마켓",
+  daymarket: "주간거래",
+};
+
+function QuotePilotDetails({ pilot }: { pilot: QuotePilot }) {
+  const { latest, verified } = pilot;
+  const sessions = Object.entries(verified).map(
+    ([session, tickers]) => `${SESSION_LABEL[session] ?? session} ${Object.keys(tickers).join(", ")}`,
+  );
+  if (!latest) return <div>검증 중 · 수집 기록 없음</div>;
+
+  const quoteLabel = (quote?: PilotQuote) => {
+    if (!quote) return "미수신";
+    const price = quote.price.toLocaleString("ko-KR");
+    const change = quote.change_pct !== null ? ` ${quote.change_pct.toLocaleString("ko-KR", { signDisplay: "exceptZero" })}%` : "";
+    const reference = quote.reference_price !== null ? ` (기준 ${quote.reference_price.toLocaleString("ko-KR")})` : "";
+    const clock = formatKstClock(quote.traded_at ?? quote.received_at);
+    return `${price}${change}${reference} · ${clock} ${quote.traded_at ? "체결" : "수신"}`;
+  };
+  return (
+    <div style={{ marginTop: "0.2rem", color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
+      <div>검증 중 · {SESSION_LABEL[latest.session] ?? latest.session} · 확인 {formatKstDateTime(latest.checked_at)}</div>
+      {latest.targets.map((ticker) => {
+        const tick = latest.websocket[ticker];
+        return (
+          <div key={ticker}>
+            {ticker} · 웹소켓 {quoteLabel(tick)}{tick?.delayed ? " (지연)" : tick && !tick.verified ? " (체결 시각 미확인)" : ""}
+            {" · "}REST {quoteLabel(latest.rest[ticker])} · 기존 {quoteLabel(latest.baseline[ticker])}
+          </div>
+        );
+      })}
+      <div>체결 확인 세션 · {sessions.join(" / ") || "없음"}</div>
+      {latest.issues.length ? <div>수집 참고 · {latest.issues.join(" / ")}</div> : null}
+    </div>
+  );
+}
 
 type DataSourcePayload = {
   sources: DataSourceRow[];
@@ -225,6 +289,7 @@ export function DataSourcePageClient() {
                                 {row.note}
                               </div>
                             ) : null}
+                            {row.quote_pilot ? <QuotePilotDetails pilot={row.quote_pilot} /> : null}
                             {row.local_only_reason ? (
                               <div style={{ marginTop: "0.2rem", color: "#92400e", fontSize: "var(--fs-sm)" }}>
                                 로컬 전용: {row.local_only_reason}

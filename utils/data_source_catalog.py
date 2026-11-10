@@ -635,6 +635,9 @@ def _build_issuer_sources(
 
 def build_data_source_payload() -> dict[str, Any]:
     """화면이 쓰는 데이터 소스 카탈로그. 미국·호주 ETF 상세는 실제 캐시를 보고 발행사별로 만든다."""
+    from services.meritz_quote_pilot import WS_URL, load_quote_pilot
+
+    quote_pilot = load_quote_pilot()
     au_rows = _load_etf_rows("aus_etf")
     us_rows = _load_etf_rows("us_etf")
     au_entries = _build_issuer_sources(
@@ -664,6 +667,19 @@ def build_data_source_payload() -> dict[str, Any]:
         default=len(sources) - 1,
     )
     sources[last_detail_index + 1 : last_detail_index + 1] = official_us + static_us + other_us + au_entries
+    sources[:0] = [
+        {
+            "category": "실시간 시세",
+            "country": country,
+            "provider": "메리츠증권",
+            "endpoint": f"{WS_URL} · REST 현재가",
+            "usage": "대표 종목 시세 병행 검증",
+            "code_ref": "services/meritz_quote_pilot.py",
+            "note": "검증용으로 수집하며 운영 시세에는 적용하지 않습니다.",
+            "quote_pilot": state,
+        }
+        for country, state in quote_pilot.items()
+    ]
 
     return {
         "sources": sources,
