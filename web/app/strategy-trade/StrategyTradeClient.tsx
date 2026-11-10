@@ -362,6 +362,7 @@ type TradeListRow = DraftRow & { held: boolean; heldRounds: string } & Partial<H
 const tradeGridTheme = createAppGridTheme();
 const { weight: tradeWeightColumn, returnPct, pnl, valuation } = holdingMetricColumns<TradeListRow>(true);
 const TOTAL_ROW_KEY = "__total__";
+const TRADE_TOTAL_ROW_KEY = "__trade_total__";
 const OTHER_HOLDINGS_TICKER = "__OTHER_HOLDINGS__";
 const EMPTY_GROUPS: HoldingsGroup[] = [];
 
@@ -516,6 +517,7 @@ function AccountSettingsCard({
     const holdings = accountAssets && [...accountAssets.holdings.values()];
     const totalHoldings = holdings ? sumTradeHoldings(holdings) : undefined;
     const otherHoldings = holdings ? sumTradeHoldings(holdings.filter((row) => !strategyTickers.has(row.ticker))) : undefined;
+    const tradeHoldings = holdings ? sumTradeHoldings(holdings.filter((row) => strategyTickers.has(row.ticker))) : undefined;
     const otherValue = otherHoldings?.valuation_krw;
     const weights = summary && summary.total_assets_krw > 0 && otherValue != null
       ? displayWeights([summary.cash_balance_krw, otherValue, ...stockValues], summary.total_assets_krw)
@@ -533,6 +535,11 @@ function AccountSettingsCard({
         ...tradeListLabel(OTHER_HOLDINGS_TICKER, "기타 종목"),
         ...otherHoldings,
         weight_pct: weights[1],
+      },
+      {
+        ...tradeListLabel(TRADE_TOTAL_ROW_KEY, "사고팔기 합계"),
+        ...tradeHoldings,
+        weight_pct: weights.length ? weights.slice(2).reduce((sum, weight) => sum + weight, 0) : undefined,
       },
     ];
     const weightedRows = stockRows.map((row, index) => ({ ...row, weight_pct: weights[index + 2] }));
@@ -754,7 +761,7 @@ function AccountSettingsCard({
               minHeight={0}
               getRowId={({ data }) => data.key}
               getRowClass={({ data }) => [
-                data?.is_group || data?.key === TOTAL_ROW_KEY ? "assetsGroupRow" : "",
+                data?.is_group || data?.key === TOTAL_ROW_KEY || data?.key === TRADE_TOTAL_ROW_KEY ? "assetsGroupRow" : "",
                 stockRowClass({ held: data?.held }),
                 data?.key === selectedRow?.key ? "strategyTradeSelectedRow" : "",
               ].filter(Boolean).join(" ")}
