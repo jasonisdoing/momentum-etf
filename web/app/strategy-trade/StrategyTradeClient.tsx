@@ -361,8 +361,23 @@ function comparableDrafts(rows: DraftRow[]) {
 type TradeListRow = DraftRow & { held: boolean; heldRounds: string } & Partial<HoldingsRow>;
 const tradeGridTheme = createAppGridTheme();
 const { weight: tradeWeightColumn, returnPct, pnl, valuation } = holdingMetricColumns<TradeListRow>(true);
+const TOTAL_ROW_KEY = "__total__";
 const OTHER_HOLDINGS_TICKER = "__OTHER_HOLDINGS__";
 const EMPTY_GROUPS: HoldingsGroup[] = [];
+
+function sumTradeHoldings(rows: HoldingsRow[]) {
+  const totals = rows.reduce((sum, row) => {
+    sum.valuation_krw += row.valuation_krw;
+    sum.buyAmount += row.buy_amount_krw;
+    sum.pnl_krw += row.pnl_krw;
+    return sum;
+  }, { valuation_krw: 0, buyAmount: 0, pnl_krw: 0 });
+  return {
+    valuation_krw: totals.valuation_krw,
+    pnl_krw: totals.pnl_krw,
+    return_pct: totals.buyAmount > 0 ? (totals.pnl_krw / totals.buyAmount) * 100 : undefined,
+  };
+}
 
 function displayWeights(values: number[], total: number): number[] {
   // 소수점 둘째 자리에서 생기는 반올림 차이는 나머지가 큰 행부터 배분한다.
@@ -498,28 +513,26 @@ function AccountSettingsCard({
     const summary = accountAssets?.summary;
     const stockValues = stockRows.map((row) => row.valuation_krw ?? 0);
     const strategyTickers = new Set(drafts.map((row) => row.ticker));
-    const otherHoldings = accountAssets == null ? undefined : [...accountAssets.holdings.values()]
-      .filter((row) => !strategyTickers.has(row.ticker))
-      .reduce((totals, row) => {
-        totals.valuation += row.valuation_krw;
-        totals.buyAmount += row.buy_amount_krw;
-        totals.pnl += row.pnl_krw;
-        return totals;
-      }, { valuation: 0, buyAmount: 0, pnl: 0 });
-    const otherValue = otherHoldings?.valuation;
+    const holdings = accountAssets && [...accountAssets.holdings.values()];
+    const totalHoldings = holdings ? sumTradeHoldings(holdings) : undefined;
+    const otherHoldings = holdings ? sumTradeHoldings(holdings.filter((row) => !strategyTickers.has(row.ticker))) : undefined;
+    const otherValue = otherHoldings?.valuation_krw;
     const weights = summary && summary.total_assets_krw > 0 && otherValue != null
       ? displayWeights([summary.cash_balance_krw, otherValue, ...stockValues], summary.total_assets_krw)
       : [];
     const pinnedRows: TradeListRow[] = [
+      {
+        ...tradeListLabel(TOTAL_ROW_KEY, "합계"),
+        pnl_krw: totalHoldings?.pnl_krw,
+        return_pct: totalHoldings?.return_pct,
+        valuation_krw: summary?.total_assets_krw,
+        weight_pct: weights.length ? 100 : undefined,
+      },
       { ...tradeListLabel(CASH_ROW_TICKER, "현금"), ticker: CASH_ROW_TICKER, valuation_krw: summary?.cash_balance_krw, weight_pct: weights[0] },
       {
         ...tradeListLabel(OTHER_HOLDINGS_TICKER, "기타 종목"),
-        valuation_krw: otherValue,
+        ...otherHoldings,
         weight_pct: weights[1],
-        pnl_krw: otherHoldings?.pnl,
-        return_pct: otherHoldings && otherHoldings.buyAmount > 0
-          ? (otherHoldings.pnl / otherHoldings.buyAmount) * 100
-          : undefined,
       },
     ];
     const weightedRows = stockRows.map((row, index) => ({ ...row, weight_pct: weights[index + 2] }));
@@ -741,7 +754,7 @@ function AccountSettingsCard({
               minHeight={0}
               getRowId={({ data }) => data.key}
               getRowClass={({ data }) => [
-                data?.is_group ? "assetsGroupRow" : "",
+                data?.is_group || data?.key === TOTAL_ROW_KEY ? "assetsGroupRow" : "",
                 stockRowClass({ held: data?.held }),
                 data?.key === selectedRow?.key ? "strategyTradeSelectedRow" : "",
               ].filter(Boolean).join(" ")}
