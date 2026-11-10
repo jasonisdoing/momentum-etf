@@ -120,7 +120,7 @@ const MARKET_VARIANTS: Record<MarketCode, MarketVariantConfig> = {
     apiPath: "/api/market",
     errorLabel: "ETF 마켓 데이터를 불러오지 못했습니다.",
     exclusionGroups: {
-      "채권(모든종류)": ["채권", "미국채", "국채", "회사채", "단기채", "장기채"],
+      "채권(모든종류)": ["채권", "미국채", "국채", "회사채", "단기채", "장기채", "국고채"],
       혼합: ["혼합"],
       리츠: ["리츠"],
       인버스: ["인버스"],
