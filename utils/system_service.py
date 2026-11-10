@@ -220,9 +220,9 @@ SCHEDULE_ROWS = [
         "group": "장중 실행",
         "job": "전체 자산 요약 알림",
         "target": "전체 계좌",
-        "cadence": "월~토 24시간 매시 40분 KST",
+        "cadence": "월~토 24시간 10분 간격 KST (02·12·…·52분)",
         "command": "python scripts/slack_asset_summary.py",
-        "schedule": {"minutes": [40], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
+        "schedule": {"minutes": list(range(2, 60, 10)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     # ④ 마감 후 지표 — 하루 1~2회.
     {
