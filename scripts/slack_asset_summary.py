@@ -343,7 +343,9 @@ def main():
 
     # 1. Compose Main Message (Total Summary)
     now = datetime.now(KST)
-    now_str = now.strftime("%Y-%m-%d %H:%M")
+    weekday = "월화수목금토일"[now.weekday()]
+    period = "오전" if now.hour < 12 else "오후"
+    now_str = f"{now:%Y-%m-%d}({weekday}) {period} {now.hour % 12 or 12}시 {now.minute:02d}분"
 
     main_text = (
         f"*📊 총 자산 요약 ({now_str})*\n"
