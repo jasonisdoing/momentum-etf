@@ -435,7 +435,7 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
         "services/amplify_us_service.py",
     ),
     "proshares_us_html": (
-        "www.proshares.com/our-etfs/strategic/nobl (공식 전체 보유 표)",
+        "www.proshares.com/our-etfs/ → strategic/nobl · leveraged-and-inverse/rom",
         "services/proshares_us_service.py",
     ),
     "vaneck_au_xlsx": (
@@ -539,7 +539,7 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
 }
 _SOURCE_NOTES: dict[str, str] = {
     "amplify_us_api": "DIVO 공식 전체 보유내역을 읽고 옵션·현금과 공시 비중을 보존한다. 미연동 Amplify ETF는 Yahoo 경로를 사용한다.",
-    "proshares_us_html": "NOBL 공식 전체 보유 표의 종목·기타 순자산과 공시 비중을 받는다. 미공시 비중은 그대로 유지한다. 미등록 ProShares ETF는 기존 Yahoo 경로를 사용하며, 공식 수집 실패 시 기존 데이터를 유지한다.",
+    "proshares_us_html": "NOBL·ROM의 공식 전체 보유 표를 읽고 주식·스왑·국채 등과 공시 비중을 그대로 저장한다. 미등록 상품은 Yahoo 경로를 사용하며, 공식 수집 실패 시 기존 데이터를 유지한다.",
     "schwab_us_html": "사이트맵의 공식 상품 페이지로 ETF를 확인하고 전체 보유 페이지를 끝까지 넘겨 주식·현금 전체를 받는다(브라우저 흉내 요청). 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "wisdomtree_us_api": "공식 ETF 목록에서 상품 ID를 확인하고 전체 주식·현금·선물 목록을 받는다(Cloudflare 때문에 브라우저 흉내 요청). 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "vaneck_au_xlsx": "공식 ETF 목록에서 상품을 확인하고 전체 보유 XLSX(파일명·제목 기준일 일치 확인)로 주식·현금 전체를 받는다. 공시 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",

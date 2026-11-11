@@ -14,7 +14,10 @@ from utils.normalization import resolve_bloomberg_listing
 from utils.us_etf_market_service import load_us_security_exchange_map
 
 # 공식 전체 표와 미국 주식 상장 식별을 확인한 상품만 연동한다.
-_PRODUCTS = {"NOBL": "https://www.proshares.com/our-etfs/strategic/nobl"}
+_PRODUCTS = {
+    "NOBL": "https://www.proshares.com/our-etfs/strategic/nobl",
+    "ROM": "https://www.proshares.com/our-etfs/leveraged-and-inverse/rom",
+}
 _HEADERS = [
     "Weight",
     "Ticker",
@@ -40,7 +43,10 @@ def _parse_holdings(html: str, ticker: str) -> tuple[str, list[dict[str, str]]]:
     if match is None:
         raise ValueError(f"ProShares {ticker} 구성종목 기준일이 없습니다.")
     tables = section.select("table#holdings")
-    if len(tables) != 1 or [cell.get_text(" ", strip=True) for cell in tables[0].select("th")] != _HEADERS:
+    if len(tables) != 1:
+        raise ValueError(f"ProShares {ticker} 구성종목 표 구조가 잘못됐습니다.")
+    headers = [cell.get_text(" ", strip=True) for cell in tables[0].select("th")]
+    if headers not in (_HEADERS, ["Exposure Weight", *_HEADERS[1:]]):
         raise ValueError(f"ProShares {ticker} 구성종목 표 구조가 잘못됐습니다.")
     rows = []
     for row in tables[0].select("tbody tr"):
