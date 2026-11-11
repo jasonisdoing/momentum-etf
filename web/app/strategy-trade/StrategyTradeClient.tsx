@@ -294,15 +294,19 @@ function DailyTradeBadges({ sides }: { sides: TradeSide[] }) {
   );
 }
 
-/** 마지막 회차와 기준선 사이의 빈 구간 — 저점까지 얼마나 더 내려가야 하는지 적는다.
- *  선만 있으면 "표 밖 어딘가 아래"라는 것만 보이고 거리가 안 보인다. */
-function BelowLastGapRow({ gap, columnCount }: { gap: { round: number; pct: number }; columnCount: number }) {
+function PriceGapRow({ gap, columnCount }: { gap: { round: number; pct: number }; columnCount: number }) {
   return (
     <tr>
       <td colSpan={columnCount} style={{ padding: "22px 8px", textAlign: "center" }}>
         <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
-          {gap.round}호에서 <b style={{ color: BUY_BADGE_COLOR }}>{formatSigned(gap.pct)}</b> 더 내려가야
-          기준선
+          {gap.pct === 0 ? (
+            <>{gap.round}호가 기준선에 있습니다</>
+          ) : (
+            <>
+              {gap.round}호에서 <b style={{ color: signColor(gap.pct) }}>{formatSigned(gap.pct)}</b> 더{" "}
+              {gap.pct > 0 ? "올라가야" : "내려가야"} 기준선
+            </>
+          )}
         </span>
       </td>
     </tr>
@@ -904,7 +908,11 @@ function StrategySection({
     row: view.rounds.find((item) => item.position === firstPosition + idx) ?? null,
     trades: view.trades_by_position[String(firstPosition + idx)] ?? {},
   }));
-  // 기준선이 회차 사이에 못 들어가는 경우 — 마지막 회차의 지수 환산에서 저점까지 남은 하락률.
+  const firstRoundPrice = view.rounds.find((row) => row.round === 1)?.buy_index;
+  const aboveFirstRound = firstRoundPrice != null && firstRoundPrice > 0 && index.recent_high > 0
+    ? { round: 1, pct: Number(((index.recent_high / firstRoundPrice - 1) * 100).toFixed(2)) }
+    : null;
+  // 저점이 회차 범위 아래에 있으면 마지막 회차에서 저점까지의 하락률을 표시한다.
   const lastLeveledRound = [...view.rounds].reverse().find((row) => row.buy_index != null) ?? null;
   const nextRow = view.rounds.find((row) => row.is_next) ?? null;
   const belowLastRound =
@@ -980,6 +988,7 @@ function StrategySection({
             ))}
           </colgroup>
           <thead>
+            <RecentPriceRow index={index} columnCount={columnCount} kind="high" />
             <tr style={{ color: "var(--text-muted)" }}>
               <th style={{ ...thStyle, textAlign: "left" }}>위치</th>
               <th style={{ ...thStyle, textAlign: "left" }}>회차</th>
@@ -999,7 +1008,6 @@ function StrategySection({
             </tr>
           </thead>
           <tbody>
-            <RecentPriceRow index={index} columnCount={columnCount} kind="high" />
             {slots.map(({ position, row, trades }, rowIdx) => {
               const tradeCells = tradeDays.map((day) => (
                 <td key={day} style={{ ...tdStyle, textAlign: "center" }}>
@@ -1030,6 +1038,7 @@ function StrategySection({
                 (prevLevels.length === 0 || prevLevels[prevLevels.length - 1] >= index.recent_low);
               return (
               <React.Fragment key={row.round}>
+              {row.round === 1 && aboveFirstRound ? <PriceGapRow gap={aboveFirstRound} columnCount={columnCount} /> : null}
               {lowLineHere ? <RecentPriceRow index={index} columnCount={columnCount} kind="low" /> : null}
               <tr style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
                 <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)" }}>{position}</td>
@@ -1083,7 +1092,7 @@ function StrategySection({
             {view.rounds.length > 0 &&
             view.rounds.every((r) => r.buy_index == null || r.buy_index >= index.recent_low) ? (
               <>
-                {belowLastRound ? <BelowLastGapRow gap={belowLastRound} columnCount={columnCount} /> : null}
+                {belowLastRound ? <PriceGapRow gap={belowLastRound} columnCount={columnCount} /> : null}
                 <RecentPriceRow index={index} columnCount={columnCount} kind="low" />
               </>
             ) : null}
