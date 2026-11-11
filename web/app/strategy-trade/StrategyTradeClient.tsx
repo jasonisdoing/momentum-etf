@@ -360,7 +360,7 @@ function comparableDrafts(rows: DraftRow[]) {
 
 type TradeListRow = DraftRow & { held: boolean; heldRounds: string } & Partial<HoldingsRow>;
 const tradeGridTheme = createAppGridTheme();
-const { weight: tradeWeightColumn, returnPct, pnl, valuation } = holdingMetricColumns<TradeListRow>(true);
+const { weight: tradeWeightColumn, quantity, returnPct, pnl, valuation } = holdingMetricColumns<TradeListRow>(true);
 const TOTAL_ROW_KEY = "__total__";
 const TRADE_TOTAL_ROW_KEY = "__trade_total__";
 const OTHER_HOLDINGS_TICKER = "__OTHER_HOLDINGS__";
@@ -400,7 +400,7 @@ function tradeListLabel(key: string, name: string): TradeListRow {
 const tradeSettingColumns = [
   { field: "pct", headerName: "간격(%)", headerTooltip: "매매 간격 (%)", width: 78 },
   { field: "rounds", headerName: "회차 수", width: 76 },
-  { field: "amount", headerName: "회차 금액(만원)", width: 130 },
+  { field: "amount", headerName: "회차금액(만원)", width: 120 },
 ] as const;
 
 function AccountSettingsCard({
@@ -580,6 +580,7 @@ function AccountSettingsCard({
       editable: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group,
       cellClass: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group ? "appEditableCell" : undefined,
     })),
+    { ...quantity, headerName: "보유수량", width: 88 },
     returnPct, pnl, valuation,
   ], [saving]);
 
