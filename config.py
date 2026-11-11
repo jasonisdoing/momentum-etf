@@ -1,6 +1,7 @@
 """프로젝트 전역에서 사용하는 설정 값 정의."""
 
 import json
+import re
 from pathlib import Path
 
 # 슬랙 채널 이름과 발송·수정 API에 전달할 채널 ID.
@@ -10,6 +11,12 @@ SLACK_CHANNEL_IDS = {
 }
 SLACK_CHANNEL = SLACK_CHANNEL_IDS["#momentum-etf"]
 SLACK_ASSET_SUMMARY_CHANNEL = SLACK_CHANNEL_IDS["#momentum-etf-summary"]
+
+# 화면과 슬랙 자산 요약이 같은 종목명 규칙을 사용한다.
+with (Path(__file__).resolve().parent / "web" / "lib" / "leverage_name.json").open(
+    encoding="utf-8"
+) as leverage_name_file:
+    LEVERAGE_NAME_RE = re.compile(json.load(leverage_name_file)["pattern"], re.IGNORECASE)
 
 # python scripts/update_market_calendars.py CACHE_START_DATE 변경시 실행
 CACHE_START_DATE = "2018-12-31"

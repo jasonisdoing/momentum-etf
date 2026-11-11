@@ -6,8 +6,9 @@
  */
 
 import type { ReactNode } from "react";
+import leverageName from "./leverage_name.json";
 
-const LEVERAGE_NAME_RE = /인버스|레버리지|Geared|3X|2X|Ultra|Short/i;
+const LEVERAGE_NAME_RE = new RegExp(leverageName.pattern, "i");
 
 const NEW_LISTING_BADGE = "🆕";
 
