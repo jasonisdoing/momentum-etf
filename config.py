@@ -12,11 +12,13 @@ SLACK_CHANNEL_IDS = {
 SLACK_CHANNEL = SLACK_CHANNEL_IDS["#momentum-etf"]
 SLACK_ASSET_SUMMARY_CHANNEL = SLACK_CHANNEL_IDS["#momentum-etf-summary"]
 
-# 화면과 슬랙 자산 요약이 같은 종목명 규칙을 사용한다.
+# 화면과 슬랙 자산 요약이 같은 종목명·티커 규칙을 사용한다.
 with (Path(__file__).resolve().parent / "web" / "lib" / "leverage_name.json").open(
     encoding="utf-8"
 ) as leverage_name_file:
-    LEVERAGE_NAME_RE = re.compile(json.load(leverage_name_file)["pattern"], re.IGNORECASE)
+    _LEVERAGE_RULES = json.load(leverage_name_file)
+LEVERAGE_NAME_RE = re.compile(_LEVERAGE_RULES["pattern"], re.IGNORECASE)
+LEVERAGE_TICKERS = frozenset(_LEVERAGE_RULES["tickers"])
 
 # python scripts/update_market_calendars.py CACHE_START_DATE 변경시 실행
 CACHE_START_DATE = "2018-12-31"

@@ -575,7 +575,11 @@ export function PortfolioClient() {
             );
           }
           if (row.ticker === CASH_TICKER) return <span style={{ color: "var(--text-muted)" }}>현금</span>;
-          return renderStockNameCell(params.value, { isNew: Boolean(row.new_listing), newMonths: row.listing_months ?? null });
+          return renderStockNameCell(params.value, {
+            ticker: row.ticker,
+            isNew: Boolean(row.new_listing),
+            newMonths: row.listing_months ?? null,
+          });
         },
       }),
       // 종목 메모 — 전 화면 공용 컬럼(`@/lib/grid-cells`). 순위·자산 관리 화면과 같은 값이고

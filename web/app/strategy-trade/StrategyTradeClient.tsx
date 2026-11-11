@@ -570,7 +570,7 @@ function AccountSettingsCard({
           onEdit={() => setGroupDraft({ id: data.key, name: data.name })}
           onDelete={() => setGroups((current) => current.filter((group) => group.id !== data.key))}
         />
-      ) : renderStockNameCell(value, { isHeld: data?.held }),
+      ) : renderStockNameCell(value, { ticker: data?.ticker, isHeld: data?.held }),
     }),
     tradeWeightColumn,
     { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },

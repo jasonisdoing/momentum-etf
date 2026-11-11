@@ -17,7 +17,7 @@ from slack_sdk.errors import SlackApiError
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import LEVERAGE_NAME_RE, SLACK_ASSET_SUMMARY_CHANNEL
+from config import LEVERAGE_NAME_RE, LEVERAGE_TICKERS, SLACK_ASSET_SUMMARY_CHANNEL
 from utils.account_registry import load_account_configs
 from utils.daily_fund_service import load_daily_docs_for_aggregation
 from utils.db_manager import get_db_connection
@@ -404,7 +404,8 @@ def main():
 
         if "종목명" in combined_df.columns:
             names = combined_df["종목명"].astype("string")
-            lev_mask = names.str.contains(LEVERAGE_NAME_RE, na=False)
+            tickers = combined_df["티커"].astype("string").str.strip().str.upper()
+            lev_mask = names.str.contains(LEVERAGE_NAME_RE, na=False) | tickers.isin(LEVERAGE_TICKERS)
             lev_val = combined_df.loc[lev_mask, "평가금액(KRW)"].sum()
             lev_pct = (lev_val / total_assets * 100) if total_assets > 0 else 0.0
             comp_details.append(f"• ⚡ 레버리지: {lev_pct:.1f}%")

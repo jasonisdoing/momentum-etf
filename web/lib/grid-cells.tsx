@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 import { TickerDetailLink } from "@/app/components/TickerDetailLink";
 import { BUCKET_THEME } from "@/lib/bucket-theme";
 import { formatSlashDateWithWeekday } from "@/lib/datetime";
-import { isLeverageName, renderStockNameCell, type StockNameOptions } from "@/lib/name-highlight";
+import { isLeveragedSecurity, renderStockNameCell, type StockNameOptions } from "@/lib/name-highlight";
 
 /** 자산 도우미·포트폴리오가 공유하는 읽기 전용 버킷 컬럼. */
 export function bucketColumn<T extends { bucket?: number | null }>(): ColDef<T> {
@@ -140,9 +140,13 @@ export function tickerColumn<T>(options?: {
     // 티커·종목명(과 그 앞 컬럼들)은 왼쪽 고정 — 가로 스크롤에도 어떤 종목의 행인지 보인다.
     pinned: "left",
     sortable: options?.sortable,
-    cellClass: ({ data }) => {
+    cellClass: ({ data, value }) => {
       const name = (data as Record<string, unknown> | undefined)?.[options?.nameField ?? "name"];
-      return [options?.cellClass, isLeverageName(typeof name === "string" ? name : null) ? "appLeverageTickerCell" : null]
+      const leveraged = isLeveragedSecurity(
+        typeof name === "string" ? name : null,
+        typeof value === "string" ? value : null,
+      );
+      return [options?.cellClass, leveraged ? "appLeverageTickerCell" : null]
         .filter(Boolean).join(" ");
     },
     cellStyle: options?.mono
@@ -183,7 +187,13 @@ export function stockNameColumn<T>(options?: {
     tooltipValueGetter: options?.tooltipValueGetter,
     cellRenderer:
       options?.cellRenderer ??
-      ((p: { value?: string | null; data?: T }) => renderStockNameCell(p.value, options?.nameOptions?.(p.data))),
+      ((p: { value?: string | null; data?: T }) => {
+        const ticker = (p.data as Record<string, unknown> | undefined)?.ticker;
+        return renderStockNameCell(p.value, {
+          ticker: typeof ticker === "string" ? ticker : null,
+          ...options?.nameOptions?.(p.data),
+        });
+      }),
   };
 }
 

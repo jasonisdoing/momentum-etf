@@ -1032,6 +1032,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             return <span className="text-muted">티커 확인 후 종목명이 표시됩니다.</span>;
           }
           return renderStockNameCell(params.value, {
+            ticker: params.data?.티커,
             isHeld: Boolean(String(params.data?.보유 ?? "").trim()),
             // MDD·소르티노 노란색과 같은 기준 — 상장 기간이 백테스트 기준 창(METRIC_WINDOW_MONTHS)보다 짧은 종목.
             isNew: params.data?.backtest_stats?.is_partial === true,

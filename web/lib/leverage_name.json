@@ -1,3 +1,4 @@
 {
-  "pattern": "인버스|레버리지|Geared|3X|2X|Ultra|Short"
+  "pattern": "인버스|레버리지|Geared|3X|2X|Ultra|Short",
+  "tickers": ["GDE"]
 }

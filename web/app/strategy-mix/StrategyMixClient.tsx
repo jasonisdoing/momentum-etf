@@ -919,6 +919,7 @@ export function StrategyMixClient() {
             <span>{p.value ?? "-"}</span>
           ) : (
             renderStockNameCell(p.value, {
+              ticker: p.data?.ticker,
               isHeld: Number(p.data?.held_quantity ?? 0) > 0,
               isNew: Boolean(p.data?.new_listing),
               newMonths: p.data?.listing_months ?? null,
