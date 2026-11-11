@@ -57,6 +57,7 @@ class Trade:
     shares: int
     price: float
     source: str
+    order_no: str | None
 
 
 @dataclass(frozen=True)
@@ -129,7 +130,9 @@ def _day_trades(
         if row["ticker"] != ticker:
             continue
         source = SOURCE_SLACK if sources.get((f"{day:%Y%m%d}", row["order_no"])) else SOURCE_MANUAL
-        trade = Trade(f"{day:%Y-%m-%d}", is_buy(row), row["filled_quantity"], row["average_fill_price"], source)
+        trade = Trade(
+            f"{day:%Y-%m-%d}", is_buy(row), row["filled_quantity"], row["average_fill_price"], source, row["order_no"]
+        )
         trades.append((int(row["order_no"]), trade))
     return [trade for _, trade in sorted(trades, key=lambda item: item[0])]
 
@@ -375,7 +378,7 @@ def _from_doc(doc: dict[str, Any]) -> Ledger | LedgerError:
     return Ledger(
         quantity=doc["quantity"],
         lots=tuple(Lot(**lot) for lot in doc["lots"]),
-        trades=tuple(Trade(**trade) for trade in doc["trades"]),
+        trades=tuple(Trade(**{"order_no": None, **trade}) for trade in doc["trades"]),
         manual_orders=tuple(doc["manual_orders"]),
         computed_at=doc["computed_at"],
     )

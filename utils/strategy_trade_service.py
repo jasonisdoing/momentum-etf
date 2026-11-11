@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter, defaultdict
 from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any
@@ -18,6 +19,7 @@ from utils.strategy_trade_config import (
 from utils.strategy_trade_ledger import (
     Ledger,
     LedgerError,
+    Trade,
     forget_ledgers,
     read_cached_trade_days,
     read_ledgers,
@@ -405,11 +407,44 @@ def _first_entry_close_window(kind: ladder.InstrumentKind, now: datetime | None 
     return now_local.time() >= FIRST_ENTRY_CLOSE_TIMES[kind] and is_instrument_trading_time("kor", kind, now=now_local)
 
 
-def _attach_trade_history(view: dict[str, Any], ledger: Ledger, cached_days: dict[date, list[dict[str, Any]]]) -> None:
+def _paired_trade_rounds(trades: list[Trade], orders: list[dict[str, Any]]) -> dict[int, int]:
+    """같은 날 매도·재매수가 모두 확인된 주문 쌍의 체결 인덱스를 회차에 연결한다."""
+    by_order = {}
+    by_fill = defaultdict(list)
+    for order in orders:
+        day = order["created_at"][:10]
+        buy = order["side"] == "buy"
+        by_order[(day, str(int(order["order_no"])), buy)] = order
+        by_fill[(day, buy, order.get("filled_quantity"), order.get("average_fill_price"))].append(order)
+
+    fill_counts = Counter((trade.day, trade.buy, trade.shares, trade.price) for trade in trades)
+    paired = defaultdict(list)
+    for index, trade in enumerate(trades):
+        if trade.order_no is not None:
+            order = by_order.get((trade.day, str(int(trade.order_no)), trade.buy))
+        else:
+            # 기존 원장에는 주문번호가 없다. 양쪽 기록에서 유일한 슬랙 체결만 연결한다.
+            signature = (trade.day, trade.buy, trade.shares, trade.price)
+            matches = by_fill.get(signature, [])
+            order = matches[0] if trade.source == "slack" and fill_counts[signature] == len(matches) == 1 else None
+        if order is not None and (pair_id := order.get("pair_id")):
+            paired[(trade.day, pair_id, order["round"])].append(index)
+
+    return {
+        index: round_no
+        for (_, _, round_no), indices in paired.items()
+        if len(indices) == 2 and {trades[index].buy for index in indices} == {True, False}
+        for index in indices
+    }
+
+
+def _attach_trade_history(
+    view: dict[str, Any], ledger: Ledger, cached_days: dict[date, list[dict[str, Any]]], orders: list[dict[str, Any]]
+) -> None:
     """사다리 위치별 가격(`position_prices`)과 날짜별 매수·매도를 체결가의 위치마다 체결 순서대로 붙인다.
 
     ``trades_by_position`` = {위치: {날짜: ["buy", "sell", …]}}. 위치는 지금 1호 체결가 기준으로 체결가에 가장 가까운
-    칸이다 — 매도는 판 가격 기준이라 산 칸보다 위에 찍혀 오른 만큼이 위아래로 보인다.
+    칸이다. 같은 날 체결된 매도·재매수 주문 쌍은 해당 회차의 칸에 함께 표시한다.
     지금 사이클의 체결만 담는다 — 1호를 마지막으로 판 체결(그때 보유가 모두 비었다) 뒤부터다. 보유가 없으면 비어 있다.
     """
     trades: dict[int, dict[str, list[str]]] = {}
@@ -420,8 +455,13 @@ def _attach_trade_history(view: dict[str, Any], ledger: Ledger, cached_days: dic
         view["position_prices"] = {row["position"]: row["buy_limit"] for row in view["rounds"]}
         return
     trigger_pct = float(view["config"]["trigger_pct"])
-    for trade in round_history(ledger, view["ticker"], cached_days):
-        position = ladder.ladder_position(trade.price, first["fill_price"], trigger_pct)
+    history = round_history(ledger, view["ticker"], cached_days)
+    paired_rounds = _paired_trade_rounds(history, orders)
+    round_positions = {row["round"]: row["position"] for row in view["rounds"]}
+    for index, trade in enumerate(history):
+        position = round_positions.get(paired_rounds.get(index))
+        if position is None:
+            position = ladder.ladder_position(trade.price, first["fill_price"], trigger_pct)
         trades.setdefault(position, {}).setdefault(trade.day, []).append("buy" if trade.buy else "sell")
     # 위치 가격 — 회차·매매가 있는 위치 범위 전체(빈 칸 포함). 1호 체결가 × (1 − 간격%)^(k−1) 를 호가로 맞춘 값.
     positions = [row["position"] for row in view["rounds"]] + list(trades)
@@ -431,6 +471,16 @@ def _attach_trade_history(view: dict[str, Any], ledger: Ledger, cached_days: dic
         )
         for position in range(min(positions), max(positions) + 1)
     }
+
+
+def _round_price_warning(ledger: Ledger) -> str | None:
+    for round_no, (previous, current) in enumerate(zip(ledger.lots, ledger.lots[1:]), start=2):
+        if current.price >= previous.price:
+            return (
+                f"회차 가격 불일치 — {round_no - 1}호 {round(previous.price):,}원, "
+                f"{round_no}호 {round(current.price):,}원. 새 전략 신호와 주문을 보류합니다."
+            )
+    return None
 
 
 def _build_strategy_view(
@@ -451,6 +501,7 @@ def _build_strategy_view(
     max_rounds = int(strategy_settings["rounds"])
 
     quantity = ledger.quantity
+    round_price_warning = _round_price_warning(ledger)
     live_close = account_closes.get(ticker) or _load_unheld_closes([ticker], pool).get(ticker)
     index_status = _load_ticker_status(pool, ticker, name, trigger_pct, live_close, kind=kind)
     close = float(index_status["close"])
@@ -462,7 +513,10 @@ def _build_strategy_view(
     # 팔 수 있는 회차는 맨 뒤(가장 깊은) 보유 회차 하나뿐이고, 신호는 한 번에 하나라
     # 그 매도가 닿아 있으면 매수는 매도가 체결될 때까지 미룬다.
     sell_pending = bool(
-        held_rounds and close > 0 and close >= ladder.sell_limit(ledger.lots[-1].price, trigger_pct, kind=kind)
+        not round_price_warning
+        and held_rounds
+        and close > 0
+        and close >= ladder.sell_limit(ledger.lots[-1].price, trigger_pct, kind=kind)
     )
 
     # 사다리 위치(표시용) — 보유 회차는 1호 체결가 기준 칸, 그 뒤 회차는 마지막 보유 칸부터 한 칸씩.
@@ -554,7 +608,8 @@ def _build_strategy_view(
                 "sell_reached": False,
                 "rebuy_after_sell": False,
                 "buy_reached": bool(
-                    is_next
+                    not round_price_warning
+                    and is_next
                     and not sell_pending
                     and not cash_short
                     and not budget_short
@@ -628,6 +683,7 @@ def _build_strategy_view(
         "manual_orders": list(ledger.manual_orders),
         # 이 현황의 체결 이력을 계산한 시각 — 화면이 기준 시점을 보여 준다.
         "ledger_at": ledger.computed_at,
+        "round_price_warning": round_price_warning,
         "rounds": rows,
     }
 
@@ -719,6 +775,7 @@ def _build_views(
         if not isinstance(account_ledgers, str)
     }
     from utils.account_settings_store import load_account_docs
+    from utils.strategy_trade_orders import read_trade_history_orders
 
     names = {doc["account_id"]: str(doc.get("name") or doc["account_id"]) for doc in load_account_docs()}
     active_pools = _eligible_pool_kinds() if strategies else {}
@@ -728,6 +785,7 @@ def _build_views(
     }
     views: list[dict[str, Any]] = []
     cached_days_by_account: dict[tuple[str, date], dict[date, list[dict[str, Any]]]] = {}
+    history_orders_by_account: dict[tuple[str, date], list[dict[str, Any]]] = {}
     for sid, entry in strategies.items():
         account_id = entry["account_id"]
         account_ledgers = ledgers[account_id]
@@ -747,7 +805,11 @@ def _build_views(
                     cache_key = (account_id, ledger.as_of)
                     if cache_key not in cached_days_by_account:
                         cached_days_by_account[cache_key] = read_cached_trade_days(*cache_key)
-                    _attach_trade_history(view, ledger, cached_days_by_account[cache_key])
+                        history_orders_by_account[cache_key] = read_trade_history_orders(*cache_key)
+                    orders = [
+                        order for order in history_orders_by_account[cache_key] if order["ticker"] == view["ticker"]
+                    ]
+                    _attach_trade_history(view, ledger, cached_days_by_account[cache_key], orders)
             except (RuntimeError, ValueError) as error:
                 view = _failed_view(sid, entry, str(error))
         # 운용 계좌 — 화면 카드 머리·슬랙 문구·주문 계좌가 이것을 쓴다.

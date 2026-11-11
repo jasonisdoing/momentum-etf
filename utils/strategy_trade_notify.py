@@ -293,7 +293,7 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     else:
         lines = [
             f"*🧪 전략 사고팔기 테스트* ({now}) · {strategy_view['account_name']}",
-            "현재 매수·매도 신호는 없습니다.",
+            strategy_view["round_price_warning"] or "현재 매수·매도 신호는 없습니다.",
         ]
 
     index = strategy_view["index"]

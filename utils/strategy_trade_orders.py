@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -33,7 +33,7 @@ from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
 from utils.db_manager import get_db_connection
 from utils.market_session import is_instrument_trading_time, kor_order_venue
 from utils.strategy_trade_config import round_buy_quantity
-from utils.strategy_trade_ledger import is_buy
+from utils.strategy_trade_ledger import LOOKBACK_DAYS, is_buy
 from utils.strategy_trade_service import load_views_where
 
 KST = ZoneInfo("Asia/Seoul")
@@ -239,6 +239,8 @@ def _order_strategy(account_id: str, pool: str, strategy_id: str, *, fresh: bool
     strategy = next((row for row in views["strategies"] if row["strategy_id"] == strategy_id), None)
     if strategy is None:
         raise BrokerApiError(f"{pool} 종목풀에 '{strategy_id}' 전략이 없습니다.")
+    if warning := strategy["round_price_warning"]:
+        raise RoundNotOrderableError(f"{strategy['label']} {warning}")
     if account_env(account_id) != ACCOUNT_ENV_MOCK and account_id != strategy["account_id"]:
         raise BrokerApiError(
             f"{strategy['label']} 전략의 운용 계좌는 '{strategy['account_id']}' 입니다 — 다른 운영 계좌로는 주문하지 않습니다."
@@ -396,6 +398,33 @@ def pair_records(pair_id: str) -> list[dict[str, Any]]:
     return sorted(_orders().find({"pair_id": pair_id}), key=lambda record: record["side"] != "sell")
 
 
+def read_trade_history_orders(account_id: str, as_of: date) -> list[dict[str, Any]]:
+    """회차 체결 이력과 대조할 기간 내 전략 주문을 읽는다."""
+    return list(
+        _orders().find(
+            {
+                "account_id": account_id,
+                "created_at": {
+                    "$gte": (as_of - timedelta(days=LOOKBACK_DAYS)).isoformat(),
+                    "$lt": (as_of + timedelta(days=1)).isoformat(),
+                },
+                "round": {"$ne": None},
+                "order_no": {"$ne": None},
+            },
+            {
+                "created_at": 1,
+                "ticker": 1,
+                "order_no": 1,
+                "round": 1,
+                "side": 1,
+                "pair_id": 1,
+                "filled_quantity": 1,
+                "average_fill_price": 1,
+            },
+        )
+    )
+
+
 def _current_order_no(record: dict[str, Any]) -> str:
     """취소 요청을 보낼 주문번호 — 증권사 앱에서 정정했으면 정정으로 새로 생긴 번호다."""
     for row in list_day_orders(record["account_id"], _order_date(record)):
@@ -441,9 +470,9 @@ def refresh_account_orders(account_id: str) -> None:
     if not active:
         return
     broker_rows: dict[tuple[str, str], dict[str, Any]] = {}
-    for date in sorted({_order_date(record) for record in active}):
-        for row in list_day_orders(account_id, date):
-            broker_rows[(date, row["order_no"])] = row
+    for order_day in sorted({_order_date(record) for record in active}):
+        for row in list_day_orders(account_id, order_day):
+            broker_rows[(order_day, row["order_no"])] = row
 
     now = _now()
     for record in active:
