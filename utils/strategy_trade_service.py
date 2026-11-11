@@ -462,7 +462,12 @@ def _attach_trade_history(
         position = round_positions.get(paired_rounds.get(index))
         if position is None:
             position = ladder.ladder_position(trade.price, first["fill_price"], trigger_pct)
-        trades.setdefault(position, {}).setdefault(trade.day, []).append("buy" if trade.buy else "sell")
+        badges = trades.setdefault(position, {}).setdefault(trade.day, [])
+        side = "buy" if trade.buy else "sell"
+        if trade.shares > trade.arbitrary_shares:
+            badges.append(side)
+        if trade.arbitrary_shares:
+            badges.append(f"arbitrary_{side}")
     # 위치 가격 — 회차·매매가 있는 위치 범위 전체(빈 칸 포함). 1호 체결가 × (1 − 간격%)^(k−1) 를 호가로 맞춘 값.
     positions = [row["position"] for row in view["rounds"]] + list(trades)
     view["position_prices"] = {
@@ -471,16 +476,6 @@ def _attach_trade_history(
         )
         for position in range(min(positions), max(positions) + 1)
     }
-
-
-def _round_price_warning(ledger: Ledger) -> str | None:
-    for round_no, (previous, current) in enumerate(zip(ledger.lots, ledger.lots[1:]), start=2):
-        if current.price >= previous.price:
-            return (
-                f"회차 가격 불일치 — {round_no - 1}호 {round(previous.price):,}원, "
-                f"{round_no}호 {round(current.price):,}원. 새 전략 신호와 주문을 보류합니다."
-            )
-    return None
 
 
 def _build_strategy_view(
@@ -501,26 +496,23 @@ def _build_strategy_view(
     max_rounds = int(strategy_settings["rounds"])
 
     quantity = ledger.quantity
-    round_price_warning = _round_price_warning(ledger)
+    regular_lots = [lot for lot in ledger.lots if lot.arbitrary_id is None]
     live_close = account_closes.get(ticker) or _load_unheld_closes([ticker], pool).get(ticker)
     index_status = _load_ticker_status(pool, ticker, name, trigger_pct, live_close, kind=kind)
     close = float(index_status["close"])
     # 정정을 합친 원주문별 매수 로트가 한 회차다. 설정 회차 수를 넘긴 수동 체결도 모두 표시한다.
-    held_rounds = len(ledger.lots)
-    last_fill = ledger.lots[-1].price if ledger.lots else None
+    held_rounds = len(regular_lots)
+    last_fill = regular_lots[-1].price if regular_lots else None
     close_entry = held_rounds == 0 and _first_entry_close_window(kind)
 
     # 팔 수 있는 회차는 맨 뒤(가장 깊은) 보유 회차 하나뿐이고, 신호는 한 번에 하나라
     # 그 매도가 닿아 있으면 매수는 매도가 체결될 때까지 미룬다.
     sell_pending = bool(
-        not round_price_warning
-        and held_rounds
-        and close > 0
-        and close >= ladder.sell_limit(ledger.lots[-1].price, trigger_pct, kind=kind)
+        held_rounds and close > 0 and close >= ladder.sell_limit(regular_lots[-1].price, trigger_pct, kind=kind)
     )
 
     # 사다리 위치(표시용) — 보유 회차는 1호 체결가 기준 칸, 그 뒤 회차는 마지막 보유 칸부터 한 칸씩.
-    held_positions = ladder.ladder_positions([lot.price for lot in ledger.lots], trigger_pct)
+    held_positions = ladder.ladder_positions([lot.price for lot in regular_lots], trigger_pct)
     rows: list[dict[str, Any]] = []
     for round_no in range(1, max(held_rounds, max_rounds) + 1):
         held = round_no <= held_rounds
@@ -531,14 +523,15 @@ def _build_strategy_view(
         )
         is_next = round_no == held_rounds + 1
         if held:
-            fill = ledger.lots[round_no - 1]
+            fill = regular_lots[round_no - 1]
             sell_limit = ladder.sell_limit(fill.price, trigger_pct, kind=kind)
             # 이 회차를 팔면 다음 매수선은 앞 회차 체결가 −간격%다. 그게 매도가 이상이면 팔자마자 다시 사게 된다 —
             # 신호를 '매도 후 재매수' 한 짝으로 낸다.
             rebuy_after_sell = bool(
                 round_no == held_rounds
                 and round_no >= 2
-                and ladder.projected_buy_limit(ledger.lots[round_no - 2].price, 1, trigger_pct, kind=kind) >= sell_limit
+                and ladder.projected_buy_limit(regular_lots[round_no - 2].price, 1, trigger_pct, kind=kind)
+                >= sell_limit
                 and 0 < (rebuy_quantity := round_buy_quantity(round_amount_manwon, sell_limit))
                 and rebuy_quantity * sell_limit <= cash_krw
             )
@@ -608,8 +601,7 @@ def _build_strategy_view(
                 "sell_reached": False,
                 "rebuy_after_sell": False,
                 "buy_reached": bool(
-                    not round_price_warning
-                    and is_next
+                    is_next
                     and not sell_pending
                     and not cash_short
                     and not budget_short
@@ -683,7 +675,17 @@ def _build_strategy_view(
         "manual_orders": list(ledger.manual_orders),
         # 이 현황의 체결 이력을 계산한 시각 — 화면이 기준 시점을 보여 준다.
         "ledger_at": ledger.computed_at,
-        "round_price_warning": round_price_warning,
+        "arbitrary_lots": [
+            {
+                "id": lot.arbitrary_id,
+                "quantity": lot.shares,
+                "fill_price": lot.price,
+                "bought_on": lot.day,
+                "sell_limit": ladder.sell_limit(lot.price, trigger_pct, kind=kind),
+            }
+            for lot in ledger.lots
+            if lot.arbitrary_id is not None
+        ],
         "rounds": rows,
     }
 

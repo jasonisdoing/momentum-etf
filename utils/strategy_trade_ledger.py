@@ -10,7 +10,7 @@
   2. **최근 `LOOKBACK_DAYS` 일** — 그 전의 보유(`잔고 − 기간 순매수`)를 체결가를 모르는 기초분으로 맨 아래에 두고 재생한다.
      기초분이 모두 팔려 남은 보유가 전부 기간 안 매수로 설명되면 확정이고, 기초분이 남으면 체결가를 알 수 없어 오류다.
   재생 결과가 잔고와 다르면 평균단가로 대신하지 않고 `LedgerError` 로 알린다.
-- 재생은 주식 단위다: 매수는 로트를 쌓고, 매도는 맨 위(마지막 산) 로트부터 뺀다 — 마지막 회차부터 팔리는 사다리 규칙이다.
+- 재생은 주식 단위다. 가격 순서가 역전되는 매수는 임의 매수로 보관하고, 전략 주문은 기록된 매도 대상에서 뺀다.
   회차는 원주문(정정 포함) 단위 매수 로트 하나다.
 - 지난 날짜의 조회 결과는 바뀌지 않아 DB(`strategy_trade_day_fills`)에 한 번만 받아 둔다. 오늘은 매번 조회한다.
 - 계산은 증권사를 여러 번 불러 느리다(약 8초). 사고팔기 알림 배치가 `refresh_ledgers` 로 계산해 DB(`strategy_trade_ledgers`)에
@@ -58,6 +58,8 @@ class Trade:
     price: float
     source: str
     order_no: str | None
+    sell_target: str | None = None
+    arbitrary_shares: int = 0
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,7 @@ class Lot:
     price: float
     day: str
     source: str
+    arbitrary_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -122,16 +125,23 @@ def _past_fills(account_id: str, day: date) -> list[dict[str, Any]]:
 
 
 def _day_trades(
-    rows: list[dict[str, Any]], ticker: str, day: date, sources: dict[tuple[str, str], bool]
+    rows: list[dict[str, Any]], ticker: str, day: date, sources: dict[tuple[str, str], tuple[bool, str | None]]
 ) -> list[Trade]:
     """그날 그 종목의 체결 — 주문번호 순(같은 날 안의 순서)."""
     trades: list[tuple[int, Trade]] = []
     for row in rows:
         if row["ticker"] != ticker:
             continue
-        source = SOURCE_SLACK if sources.get((f"{day:%Y%m%d}", row["order_no"])) else SOURCE_MANUAL
+        order = sources.get((f"{day:%Y%m%d}", row["order_no"]))
+        source = SOURCE_SLACK if order and order[0] else SOURCE_MANUAL
         trade = Trade(
-            f"{day:%Y-%m-%d}", is_buy(row), row["filled_quantity"], row["average_fill_price"], source, row["order_no"]
+            day.isoformat(),
+            is_buy(row),
+            row["filled_quantity"],
+            row["average_fill_price"],
+            source,
+            row["order_no"],
+            order[1] if order else None,
         )
         trades.append((int(row["order_no"]), trade))
     return [trade for _, trade in sorted(trades, key=lambda item: item[0])]
@@ -179,24 +189,56 @@ def round_history(ledger: Ledger, ticker: str, cached_days: dict[date, list[dict
     return list(reversed(cycle))
 
 
-def _replay(lots: list[Lot], trades: list[Trade]) -> list[Lot]:
-    """체결을 재생해 보유 로트를 만든다 — 매수는 위에 쌓고, 매도는 맨 위(마지막) 로트부터 뺀다."""
+REGULAR_SELL = "regular"
+
+
+def _replay(lots: list[Lot], trades: list[Trade], recorded: list[Trade] | None = None) -> list[Lot]:
+    """실제 체결을 순서대로 반영한다. 수동 매도는 가장 최근 임의 매수부터 차감한다."""
     lots = list(lots)
-    for trade in trades:
+    for index, trade in enumerate(trades):
+        arbitrary_shares = 0
         if trade.buy:
-            lots.append(Lot(trade.shares, trade.price, trade.day, trade.source))
-            continue
-        remaining = trade.shares
+            last = next((lot for lot in reversed(lots) if lot.arbitrary_id is None), None)
+            arbitrary_id = None
+            if last is not None and last.price > 0 and trade.price >= last.price:
+                order = trade.order_no if trade.order_no is not None else f"legacy-{index}"
+                arbitrary_id = f"{trade.day}:{order}"
+                arbitrary_shares = trade.shares
+            lots.append(Lot(trade.shares, trade.price, trade.day, trade.source, arbitrary_id))
+        remaining = 0 if trade.buy else trade.shares
         while remaining > 0:
-            if not lots:
-                raise LedgerError(f"{trade.day} 매도가 보유 수량을 넘습니다 — 체결 이력이 맞지 않습니다.")
-            top = lots[-1]
-            take = min(remaining, top.shares)
-            if take == top.shares:
-                lots.pop()
+            indices = range(len(lots) - 1, -1, -1)
+            if trade.sell_target is None:
+                target = next((i for i in indices if lots[i].arbitrary_id is not None), len(lots) - 1)
             else:
-                lots[-1] = replace(top, shares=top.shares - take)
+                lot_id = None if trade.sell_target == REGULAR_SELL else trade.sell_target
+                target = next((i for i in indices if lots[i].arbitrary_id == lot_id), -1)
+            if target < 0:
+                raise LedgerError(f"{trade.day} 매도가 대상 보유 수량을 넘습니다 — 체결 이력을 확인하세요.")
+            top = lots[target]
+            take = min(remaining, top.shares)
+            if top.arbitrary_id is not None:
+                arbitrary_shares += take
+            if take == top.shares:
+                lots.pop(target)
+            else:
+                lots[target] = replace(top, shares=top.shares - take)
             remaining -= take
+        if recorded is not None:
+            recorded.append(replace(trade, arbitrary_shares=arbitrary_shares))
+    return lots
+
+
+def _anchor_lots(rows: list[dict[str, Any]]) -> list[Lot]:
+    lots = []
+    last_regular = 0.0
+    for index, row in enumerate(rows):
+        lot = Lot(**row)
+        if "arbitrary_id" not in row and 0 < last_regular <= lot.price:
+            lot = replace(lot, arbitrary_id=f"{lot.day}:anchor-{index}")
+        if lot.arbitrary_id is None:
+            last_regular = lot.price
+        lots.append(lot)
     return lots
 
 
@@ -227,9 +269,10 @@ def _from_anchor(
 ) -> tuple[list[Trade], list[Lot]]:
     """기준점(전 거래일 마감 로트)에서 이어 재생한다 → (체결, 어제 마감 로트). 잔고와 다르면 LedgerError."""
     past, today = history.trades(ticker, date.fromisoformat(anchor["as_of"]) + timedelta(days=1))
-    closing = _replay([Lot(**lot) for lot in anchor["lots"]], past)
+    recorded: list[Trade] = []
+    closing = _replay(_anchor_lots(anchor["lots"]), past, recorded)
     _require_held(_replay(closing, today), quantity)
-    return past + today, closing
+    return recorded + today, closing
 
 
 def _from_window(history: _History, ticker: str, quantity: int) -> tuple[list[Trade], list[Lot]]:
@@ -243,7 +286,8 @@ def _from_window(history: _History, ticker: str, quantity: int) -> tuple[list[Tr
         raise LedgerError(
             f"최근 {LOOKBACK_DAYS}일 순매수가 증권사 잔고 {quantity:,}주보다 많습니다 — 체결 이력이 맞지 않습니다."
         )
-    closing = _replay([Lot(base, 0.0, "", _SOURCE_UNKNOWN)] if base else [], past)
+    recorded: list[Trade] = []
+    closing = _replay([Lot(base, 0.0, "", _SOURCE_UNKNOWN)] if base else [], past, recorded)
     lots = _replay(closing, today)
     _require_held(lots, quantity)
     unknown = sum(lot.shares for lot in lots if lot.source == _SOURCE_UNKNOWN)
@@ -252,11 +296,14 @@ def _from_window(history: _History, ticker: str, quantity: int) -> tuple[list[Tr
             f"최근 {LOOKBACK_DAYS}일보다 먼저 산 {unknown:,}주가 남아 있어 그 회차의 체결가를 알 수 없습니다 — "
             "그 주식이 팔리거나 전량 매도한 뒤부터 회차를 셉니다."
         )
-    return past + today, closing
+    return recorded + today, closing
 
 
 def _manual_orders(
-    today_rows: list[dict[str, Any]], tickers: list[str], sources: dict[tuple[str, str], bool], today: date
+    today_rows: list[dict[str, Any]],
+    tickers: list[str],
+    sources: dict[tuple[str, str], tuple[bool, str | None]],
+    today: date,
 ) -> dict[str, list[dict[str, Any]]]:
     orders: dict[str, list[dict[str, Any]]] = {ticker: [] for ticker in tickers}
     for row in today_rows:
@@ -313,6 +360,8 @@ def compute_ledgers(account_id: str, tickers: list[str]) -> dict[str, tuple[Ledg
     history = _History(account_id, today, _filled(today_rows), sources)
     manual = _manual_orders(today_rows, tickers, sources, today)
     anchors = {doc["ticker"]: doc for doc in _anchors().find({"account_id": account_id, "ticker": {"$in": tickers}})}
+    stored = {doc["ticker"]: doc for doc in _snapshots().find({"account_id": account_id, "ticker": {"$in": tickers}})}
+    cutoff = (today - timedelta(days=LOOKBACK_DAYS)).isoformat()
     results: dict[str, tuple[Ledger | LedgerError, dict | None]] = {}
     for ticker in tickers:
         quantity = balance.get(ticker, 0)
@@ -327,11 +376,16 @@ def compute_ledgers(account_id: str, tickers: list[str]) -> dict[str, tuple[Ledg
         except LedgerError as exc:
             results[ticker] = (exc, None)
             continue
-        lots = _replay(closing, [trade for trade in trades if trade.day == f"{today:%Y-%m-%d}"])
+        today_iso = today.isoformat()
+        replay_start = trades[0].day if trades else today_iso
+        prior = [trade for trade in stored.get(ticker, {}).get("trades", []) if cutoff <= trade["day"] < replay_start]
+        recorded = [Trade(**{"order_no": None, **trade}) for trade in prior]
+        recorded.extend(trade for trade in trades if trade.day < today_iso)
+        lots = _replay(closing, [trade for trade in trades if trade.day == today_iso], recorded)
         ledger = Ledger(
             quantity,
             tuple(lots),
-            tuple(trades),
+            tuple(recorded),
             tuple(manual[ticker]),
             computed_at,
         )
@@ -377,7 +431,7 @@ def _from_doc(doc: dict[str, Any]) -> Ledger | LedgerError:
         return LedgerError(doc["error"])
     return Ledger(
         quantity=doc["quantity"],
-        lots=tuple(Lot(**lot) for lot in doc["lots"]),
+        lots=tuple(_anchor_lots(doc["lots"])),
         trades=tuple(Trade(**{"order_no": None, **trade}) for trade in doc["trades"]),
         manual_orders=tuple(doc["manual_orders"]),
         computed_at=doc["computed_at"],
@@ -409,9 +463,33 @@ def forget_ledgers(account_id: str, keep: list[str]) -> None:
 def read_ledgers(account_id: str, tickers: list[str]) -> dict[str, Ledger | LedgerError]:
     """배치가 저장해 둔 원장을 읽는다 — 아직 계산된 적이 없는 종목은 `LedgerError` 로 알린다."""
     stored = {doc["ticker"]: doc for doc in _snapshots().find({"account_id": account_id, "ticker": {"$in": tickers}})}
-    return {
+    result = {
         ticker: _from_doc(stored[ticker])
         if ticker in stored
         else LedgerError("아직 계산되지 않았습니다 — 사고팔기 알림 배치가 한 번 돈 뒤에 표시됩니다.")
         for ticker in tickers
     }
+    for ticker, ledger in result.items():
+        if isinstance(ledger, LedgerError) or all("arbitrary_shares" in trade for trade in stored[ticker]["trades"]):
+            continue
+        # 갱신 전 저장본도 직전 마감 기준점이 있으면 당일 임의 체결을 확인할 수 있다.
+        anchor = _anchors().find_one(
+            {"_id": stored[ticker]["_id"], "as_of": (ledger.as_of - timedelta(days=1)).isoformat()}
+        )
+        if anchor is None:
+            continue
+        day = ledger.as_of.isoformat()
+        recorded = [trade for trade in ledger.trades if trade.day < day]
+        today = [
+            replace(trade, sell_target=REGULAR_SELL) if not trade.buy and trade.source == SOURCE_SLACK else trade
+            for trade in ledger.trades
+            if trade.day == day
+        ]
+        try:
+            lots = _replay(_anchor_lots(anchor["lots"]), today, recorded)
+            _require_held(lots, ledger.quantity)
+        except LedgerError as error:
+            result[ticker] = error
+        else:
+            result[ticker] = replace(ledger, lots=tuple(lots), trades=tuple(recorded))
+    return result

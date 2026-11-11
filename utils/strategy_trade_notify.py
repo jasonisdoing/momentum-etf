@@ -74,7 +74,8 @@ _REPEAT_INTERVAL_SECONDS = 60 * 60
 
 
 def _trigger_key(trigger: dict[str, Any]) -> str:
-    return f"{trigger['strategy_id']}:{trigger['round']}-{trigger['action']}"
+    target = trigger.get("arbitrary_id") or trigger["round"]
+    return f"{trigger['strategy_id']}:{target}-{trigger['action']}"
 
 
 def _parse_sent_at(value: str | None) -> datetime | None:
@@ -140,6 +141,8 @@ def _confirm_line(pending: dict[str, Any], index: dict[str, Any] | None) -> str:
     now_text = _index_text(index) if index else "-"
     asked = pending.get("index_text")
     detail = f"요청 시 {asked} → 지금 {now_text}" if asked else now_text
+    if pending.get("arbitrary_id"):
+        return f"✅ {pending['name']} 임의 매도 확인 · {detail}"
     return build_confirm_line(f"{pending['round']}호 {pending['name']}", pending["action"], detail)
 
 
@@ -150,6 +153,11 @@ def _reach_text(trigger: dict[str, Any]) -> str:
 
 def build_repeat_line(trigger: dict[str, Any]) -> str:
     """재알림 한 줄 — 무엇을 얼마에 사고팔지만 담는다. 본문은 첫 발송에서 이미 보냈다."""
+    if trigger.get("arbitrary_id"):
+        return (
+            f"<!channel> 🔴 *{trigger['name']} 임의 매도 · {trigger['quantity']:,}주* "
+            f"{_reach_text(trigger)} (매수 {_level(trigger['fill_price'])})"
+        )
     emoji = "🔴" if trigger["action"] == "sell" else "🔵"
     word = "지금 매도 후 재매수!" if trigger["rebuy"] else "지금 매도!" if trigger["action"] == "sell" else "지금 매수!"
     return (
@@ -209,6 +217,28 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
                     "fill_price": None,
                 }
             )
+    triggers.extend(
+        {
+            "strategy_id": sid,
+            "strategy_label": label,
+            "ticker": strategy_view["ticker"],
+            "name": label,
+            "action": "sell",
+            "round": None,
+            "arbitrary_id": lot["id"],
+            "quantity": lot["quantity"],
+            "limit_price": lot["sell_limit"],
+            "index_level": lot["sell_limit"],
+            "close": index["close"],
+            "index": index,
+            "index_name": index["name"],
+            "profit_pct": (index["close"] / lot["fill_price"] - 1) * 100,
+            "rebuy": False,
+            "fill_price": lot["fill_price"],
+        }
+        for lot in strategy_view["arbitrary_lots"]
+        if index["close"] >= lot["sell_limit"]
+    )
     return triggers
 
 
@@ -293,7 +323,7 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     else:
         lines = [
             f"*🧪 전략 사고팔기 테스트* ({now}) · {strategy_view['account_name']}",
-            strategy_view["round_price_warning"] or "현재 매수·매도 신호는 없습니다.",
+            "현재 매수·매도 신호는 없습니다.",
         ]
 
     index = strategy_view["index"]
@@ -303,7 +333,7 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     triggered = {(t["round"], t["action"]) for t in triggers}
     buy_count = sum(1 for t in triggers if t["action"] == "buy")
     # 매도 후 재매수는 한 회차를 다시 채운다.
-    sell_count = sum(1 for t in triggers if t["action"] == "sell" and not t["rebuy"])
+    sell_count = sum(1 for t in triggers if t["action"] == "sell" and not t["rebuy"] and t["round"] is not None)
     after_held = status["held_count"] + buy_count - sell_count
 
     # 가장 중요한 정보 — 몇 % 움직이면 사고/파는지 헤더에 바로 보여준다.
@@ -333,6 +363,11 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     lines.append(
         f"*[{strategy_view['label']}]* {_index_text(index)} · {after_held}/{rounds_total}회차 · " + " · ".join(parts)
     )
+    for lot in strategy_view["arbitrary_lots"]:
+        word = "*임의 매도*" if any(t.get("arbitrary_id") == lot["id"] for t in triggers) else "임의 매수"
+        lines.append(
+            f"• {word} · {lot['quantity']:,}주 · 매수 {_level(lot['fill_price'])} · 매도 목표 {_level(lot['sell_limit'])}"
+        )
     # 1~6호 전부 나열 — 상태를 이모지로 즉시 구분한다.
     #   🔴 지금 팔 것 / 🔵 지금 살 것 / 🟢 보유 중 / ⏳ 다음 매수 대기 / ⚪ 이후 회차
     # 회차별 줄 — 종목 가격이 아니라 **지수 환산값**으로 적는다. ETF 단가는 종목마다
@@ -431,6 +466,7 @@ def _log_entry(trigger: dict[str, Any], held_counts: dict[str, int], stamp: str,
         "ticker": trigger["ticker"],
         "name": trigger["name"],
         "round": trigger["round"],
+        "arbitrary_id": trigger.get("arbitrary_id"),
         "index_text": _index_text(trigger["index"]),
         "signal_ts": signal_ts,
         # 발송 시점의 보유 회차 수 — 체결 확인은 회차 수 증감으로 판정한다(참고 기록).
@@ -539,7 +575,8 @@ def notify_strategy_trade() -> dict[str, Any]:
         triggers = [
             trigger
             for trigger in triggers
-            if (trigger["strategy_id"], trigger["round"], trigger["action"]) not in in_flight
+            if (trigger["strategy_id"], trigger.get("arbitrary_id") or trigger["round"], trigger["action"])
+            not in in_flight
             and not (trigger["rebuy"] and (trigger["strategy_id"], trigger["round"], "buy") in in_flight)
         ]
     today = now.strftime("%Y-%m-%d")
@@ -556,11 +593,16 @@ def notify_strategy_trade() -> dict[str, Any]:
     #    지금 전략 목록에 없는 전략의 기록은 체결 여부를 알 수 없어 건드리지 않는다.
     held_counts = _held_counts({"strategies": open_strategies})
     held_fills = _held_fills({"strategies": open_strategies})
+    arbitrary_ids = {
+        strategy["strategy_id"]: {lot["id"] for lot in strategy["arbitrary_lots"]} for strategy in open_strategies
+    }
     confirmed = pop_filled(
         sent_log,
         lambda pending: str(pending.get("strategy_id")) in held_counts
-        and _round_filled(
-            pending, held_counts[str(pending.get("strategy_id"))], held_fills[str(pending.get("strategy_id"))]
+        and (
+            pending["arbitrary_id"] not in arbitrary_ids[pending["strategy_id"]]
+            if pending.get("arbitrary_id")
+            else _round_filled(pending, held_counts[pending["strategy_id"]], held_fills[pending["strategy_id"]])
         ),
     )
 

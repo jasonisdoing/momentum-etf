@@ -33,7 +33,7 @@ from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
 from utils.db_manager import get_db_connection
 from utils.market_session import is_instrument_trading_time, kor_order_venue
 from utils.strategy_trade_config import round_buy_quantity
-from utils.strategy_trade_ledger import LOOKBACK_DAYS, is_buy
+from utils.strategy_trade_ledger import LOOKBACK_DAYS, REGULAR_SELL, is_buy
 from utils.strategy_trade_service import load_views_where
 
 KST = ZoneInfo("Asia/Seoul")
@@ -100,13 +100,19 @@ def find_duplicate_order(account_id: str, strategy_id: str, side: str) -> dict[s
     )
 
 
-def active_order_keys(strategy_ids: list[str]) -> set[tuple[str, int, str]]:
+def active_order_keys(strategy_ids: list[str]) -> set[tuple[str, int | str, str]]:
     """이 전략들의 아직 끝나지 않은 신호 주문 — (전략, 회차, 구분) 집합(화면 표시용)."""
     records = _orders().find(
-        {"strategy_id": {"$in": strategy_ids}, "round": {"$ne": None}, "status": {"$in": list(ACTIVE_STATUSES)}},
-        {"strategy_id": 1, "round": 1, "side": 1},
+        {
+            "strategy_id": {"$in": strategy_ids},
+            "status": {"$in": list(ACTIVE_STATUSES)},
+            "$or": [{"round": {"$ne": None}}, {"arbitrary_id": {"$ne": None}}],
+        },
+        {"strategy_id": 1, "round": 1, "side": 1, "arbitrary_id": 1},
     )
-    return {(record["strategy_id"], record["round"], record["side"]) for record in records}
+    return {
+        (record["strategy_id"], record.get("arbitrary_id") or record["round"], record["side"]) for record in records
+    }
 
 
 def _require_no_duplicate(account_id: str, strategy_id: str, side: str) -> None:
@@ -161,7 +167,14 @@ def _require_order_allowed(account_id: str, env: str, amount: int, count: int) -
 
 
 def resolve_order(
-    account_id: str, pool: str, strategy_id: str, side: str, round_no: int | None, *, fresh: bool
+    account_id: str,
+    pool: str,
+    strategy_id: str,
+    side: str,
+    round_no: int | None,
+    *,
+    fresh: bool,
+    arbitrary_id: str | None = None,
 ) -> dict[str, Any]:
     """주문 내용 — 가격은 **그 순간의 상대 1호가 지정가**(매수는 매도 1호가, 매도는 매수 1호가), 매수 수량은 회차 금액과 지정가로, 매도 수량은 해당 회차의 실제 잔여 주수로 정한다.
 
@@ -182,11 +195,19 @@ def resolve_order(
     _require_no_manual_order(strategy, side)
     signal_price = None
     target_round = round_no
-    if side == "sell" and target_round is None:
+    if arbitrary_id is not None:
+        if side != "sell" or round_no is not None:
+            raise BrokerApiError("임의 매도는 임의 매수 건만 지정할 수 있습니다.")
+        row = next((lot for lot in strategy["arbitrary_lots"] if lot["id"] == arbitrary_id), None)
+        if row is None:
+            raise RoundNotOrderableError(f"{strategy['label']} 임의 매수 건의 잔여 수량이 없습니다.")
+        signal_price = row["sell_limit"]
+    elif side == "sell" and target_round is None:
         target_round = strategy["status"]["held_count"]
         if not target_round:
             raise RoundNotOrderableError(f"{strategy['label']}에 매도할 보유 회차가 없습니다.")
-    row = _require_round_state(strategy, side, target_round) if target_round is not None else None
+    if arbitrary_id is None:
+        row = _require_round_state(strategy, side, target_round) if target_round is not None else None
     if round_no is not None:
         signal_price = row["sell_limit"] if side == "sell" else (None if row["close_entry"] else row["buy_limit"])
     venue = _order_venue(strategy)
@@ -205,6 +226,7 @@ def resolve_order(
         "signal_price": signal_price,
         "quote_label": label,
         "venue": venue,
+        "arbitrary_id": arbitrary_id,
     }
 
 
@@ -239,8 +261,6 @@ def _order_strategy(account_id: str, pool: str, strategy_id: str, *, fresh: bool
     strategy = next((row for row in views["strategies"] if row["strategy_id"] == strategy_id), None)
     if strategy is None:
         raise BrokerApiError(f"{pool} 종목풀에 '{strategy_id}' 전략이 없습니다.")
-    if warning := strategy["round_price_warning"]:
-        raise RoundNotOrderableError(f"{strategy['label']} {warning}")
     if account_env(account_id) != ACCOUNT_ENV_MOCK and account_id != strategy["account_id"]:
         raise BrokerApiError(
             f"{strategy['label']} 전략의 운용 계좌는 '{strategy['account_id']}' 입니다 — 다른 운영 계좌로는 주문하지 않습니다."
@@ -277,7 +297,14 @@ def resolve_swap(account_id: str, pool: str, strategy_id: str, round_no: int, *,
 
 
 def place_order(
-    account_id: str, pool: str, strategy_id: str, side: str, round_no: int | None, slack: dict[str, str] | None
+    account_id: str,
+    pool: str,
+    strategy_id: str,
+    side: str,
+    round_no: int | None,
+    slack: dict[str, str] | None,
+    *,
+    arbitrary_id: str | None = None,
 ) -> dict[str, Any]:
     """전략 종목을 상대 1호가 지정가로 계좌에 주문하고 기록한다.
 
@@ -289,7 +316,7 @@ def place_order(
         raise BrokerApiError("모달에서 직접 내는 주문은 매도만 됩니다 — 매수는 슬랙 주문 메시지로 내세요.")
     env = account_env(account_id)
     # 주문 직전이라 저장된 원장이 아니라 지금 증권사 기준으로 다시 계산한다.
-    order = resolve_order(account_id, pool, strategy_id, side, round_no, fresh=True)
+    order = resolve_order(account_id, pool, strategy_id, side, round_no, fresh=True, arbitrary_id=arbitrary_id)
     _require_no_duplicate(account_id, strategy_id, side)
     _require_order_allowed(account_id, env, order["price"] * order["quantity"], 1)
     base = _record_base(env, account_id, pool, strategy_id, round_no, order, slack)
@@ -338,6 +365,7 @@ def _record_base(
         "pool": pool,
         "strategy_id": strategy_id,
         "round": round_no,
+        "arbitrary_id": order.get("arbitrary_id"),
         "strategy_label": order["strategy_label"],
         "ticker": order["ticker"],
         "quantity": order["quantity"],
@@ -519,6 +547,7 @@ def serialize_order(record: dict[str, Any]) -> dict[str, Any]:
         "message": record.get("message") or "",
         # 매도 후 재매수 한 짝이면 그 짝의 id — 단독 주문은 None.
         "pair_id": record.get("pair_id"),
+        "arbitrary_id": record.get("arbitrary_id"),
     }
 
 
@@ -691,17 +720,21 @@ def broker_orders_today(account_id: str) -> list[dict[str, Any]]:
     return list_day_orders(account_id, _now().strftime("%Y%m%d"))
 
 
-def order_sources(account_id: str, today_rows: list[dict[str, Any]]) -> dict[tuple[str, str], bool]:
+def order_sources(account_id: str, today_rows: list[dict[str, Any]]) -> dict[tuple[str, str], tuple[bool, str]]:
     """우리가 증권사에 낸 주문의 (날짜 YYYYMMDD, 주문번호) → 슬랙 신호 주문 여부 — 회차 원장이 체결의 출처를 가릴 때 쓴다.
 
     증권사가 주문을 받은 뒤 우리 기록에 주문번호가 적히기 전(`submitting`)에 원장이 계산되면 우리 주문이 수동으로 잡힌다 —
     그 틈에는 오늘 증권사 주문(``today_rows``) 중 종목·구분·수량·가격이 같은 것을 그 기록의 주문으로 본다.
     """
     records = _orders().find(
-        {"account_id": account_id, "order_no": {"$ne": None}}, {"order_no": 1, "round": 1, "created_at": 1}
+        {"account_id": account_id, "order_no": {"$ne": None}},
+        {"order_no": 1, "round": 1, "created_at": 1, "arbitrary_id": 1},
     )
     sources = {
-        (record["created_at"][:10].replace("-", ""), str(int(record["order_no"]))): record["round"] is not None
+        (record["created_at"][:10].replace("-", ""), str(int(record["order_no"]))): (
+            record["round"] is not None or bool(record.get("arbitrary_id")),
+            record.get("arbitrary_id") or REGULAR_SELL,
+        )
         for record in records
     }
     today = _now()
@@ -713,7 +746,7 @@ def order_sources(account_id: str, today_rows: list[dict[str, Any]]) -> dict[tup
             "status": "submitting",
             "created_at": {"$gte": f"{today:%Y-%m-%d}"},
         },
-        {"ticker": 1, "side": 1, "quantity": 1, "price": 1, "round": 1},
+        {"ticker": 1, "side": 1, "quantity": 1, "price": 1, "round": 1, "arbitrary_id": 1},
     )
     for record in submitting:
         match = next(
@@ -729,5 +762,9 @@ def order_sources(account_id: str, today_rows: list[dict[str, Any]]) -> dict[tup
             None,
         )
         if match is not None:
-            sources[(today_key, match["order_no"])] = record["round"] is not None
+            target = record.get("arbitrary_id")
+            sources[(today_key, match["order_no"])] = (
+                record["round"] is not None or bool(target),
+                target or REGULAR_SELL,
+            )
     return sources

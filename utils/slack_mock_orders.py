@@ -98,12 +98,14 @@ def _order_text(request: dict[str, Any]) -> str:
         sell = f"{sell_quantity:,}주 매도" if sell_quantity is not None else "매도"
         buy = f"{buy_quantity:,}주 재매수" if buy_quantity is not None else "재매수"
         return f"{_round_text(request['round'])}{request['label']} · {sell} 후 {buy}"
-    side = _SIDE_LABELS[request["side"]]
+    side = _action_word(request)
     return f"{_round_text(request['round'])}{request['label']} · {request['quantity']:,}주 × {_QUOTE_LABELS[request['side']]} 지정가 {side}"
 
 
 def _action_word(request: dict[str, Any]) -> str:
     """메시지·모달 제목의 주문 구분 — 매수·매도, 또는 매도 후 재매수."""
+    if request.get("arbitrary_id"):
+        return "임의 매도"
     return "매도 후 재매수" if _is_swap(request) else _SIDE_LABELS[request["side"]]
 
 
@@ -205,6 +207,7 @@ def send_order_message(
     thread_ts: str | None,
     *,
     rebuy: bool,
+    arbitrary_id: str | None = None,
 ) -> None:
     """주문 메시지를 슬랙으로 보낸다(thread_ts 가 있으면 그 스레드에) — 주문은 슬랙에서 버튼과 모달 확인을 거쳐야 나간다.
 
@@ -216,7 +219,7 @@ def send_order_message(
             raise BrokerApiError("매도 후 재매수는 회차 매도 신호에만 보냅니다.")
         order = resolve_swap(account_id, pool, strategy_id, round_no, fresh=False)
     else:
-        order = resolve_order(account_id, pool, strategy_id, side, round_no, fresh=False)
+        order = resolve_order(account_id, pool, strategy_id, side, round_no, fresh=False, arbitrary_id=arbitrary_id)
     request = {
         "env": env,
         "round": round_no,
@@ -230,6 +233,7 @@ def send_order_message(
             {key: order[key] for key in ("sell_quantity", "buy_quantity")} if rebuy else {"quantity": order["quantity"]}
         ),
         "rebuy": rebuy,
+        "arbitrary_id": arbitrary_id,
     }
     if not send_thread_message(f"[{_env_word(env)}] {_order_text(request)}", _open_blocks(request), thread_ts):
         raise BrokerApiError("슬랙으로 주문 메시지를 보내지 못했습니다.")
@@ -274,7 +278,7 @@ def _gap_label(side: str, gap_pct: float) -> str:
 
 
 def _order_view(request: dict[str, Any], order: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
-    side = _SIDE_LABELS[request["side"]]
+    side = _action_word(request)
     gap_pct = _signal_gap_pct(order)
     if gap_pct is None:
         gap = f"{order['quote_label']} {order['price']:,}원 (신호 가격 비교 없음)"
@@ -355,6 +359,7 @@ def open_confirm_modal(payload: dict[str, Any]) -> None:
                     request["side"],
                     request["round"],
                     fresh=False,
+                    arbitrary_id=request.get("arbitrary_id"),
                 )
         except RoundNotOrderableError as exc:
             _expire(target, exc)
@@ -384,7 +389,7 @@ def submitted_request(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _final_text(order: dict[str, Any]) -> str:
-    side = f"{_env_word(order['env'])} {_SIDE_LABELS[order['side']]}"
+    side = f"{_env_word(order['env'])} {_action_word(order)}"
     head = f"{_round_text(order['round'])}{order['strategy_label']} {order['quantity']:,}주 × {order['price']:,}원"
     fill = f"체결 {order['filled_quantity']:,}주 · 체결가 {order['average_fill_price']:,.0f}원"
     if order["status"] == "filled":
@@ -466,7 +471,7 @@ def _place(target: dict[str, Any]) -> None:
     if _is_swap(request):
         _place_swap(target)
         return
-    side = f"{_env_word(request['env'])} {_SIDE_LABELS[request['side']]}"
+    side = f"{_env_word(request['env'])} {_action_word(request)}"
     # 처리하는 동안 같은 메시지로 또 주문하지 못하게 버튼부터 걷어낸다.
     _update_message(target, _note_blocks(request, "⏳ 주문 처리 중…"))
     try:
@@ -477,6 +482,7 @@ def _place(target: dict[str, Any]) -> None:
             request["side"],
             request["round"],
             {key: target[key] for key in SLACK_TARGET_KEYS},
+            arbitrary_id=request.get("arbitrary_id"),
         )
     except RoundNotOrderableError as exc:
         _expire(target, exc)
@@ -548,6 +554,7 @@ def _request_of(record: dict[str, Any]) -> dict[str, Any]:
         "ticker": record["ticker"],
         "quantity": record["quantity"],
         "rebuy": swap,
+        "arbitrary_id": record.get("arbitrary_id"),
     }
 
 
@@ -641,6 +648,7 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
                 trigger["round"],
                 signal_ts,
                 rebuy=trigger["rebuy"],
+                arbitrary_id=trigger.get("arbitrary_id"),
             )
             sent += 1
     finally:

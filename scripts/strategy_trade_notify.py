@@ -21,7 +21,10 @@ def main() -> int:
     load_env_if_present()
     result = notify_strategy_trade()
     signals = ", ".join(
-        f"{t['round']}호 {t['ticker']} {'매도' if t['action'] == 'sell' else '매수'}" for t in result["triggers"]
+        f"{t['ticker']} 임의 매도"
+        if t.get("arbitrary_id")
+        else f"{t['round']}호 {t['ticker']} {'매도' if t['action'] == 'sell' else '매수'}"
+        for t in result["triggers"]
     )
     print(
         f"[strategy_trade_notify] sent={result['sent']} "

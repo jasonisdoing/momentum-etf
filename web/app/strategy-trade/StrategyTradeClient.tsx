@@ -62,7 +62,14 @@ type Status = {
   sell_pending: boolean;
 };
 
-type TradeSide = "buy" | "sell";
+type TradeSide = "buy" | "sell" | "arbitrary_buy" | "arbitrary_sell";
+
+const FILL_LABELS = {
+  buy: "매수",
+  sell: "매도",
+  arbitrary_buy: "임의 매수",
+  arbitrary_sell: "임의 매도",
+} as const;
 
 export type RoundRow = {
   /** 사다리 위치(표시용) — 1호 체결가 기준 간격 칸. 건너뛴 칸은 회차 없이 빈 행으로 보인다. */
@@ -114,7 +121,7 @@ export type StrategyView = {
   config: StrategyConfig;
   index: IndexStatus;
   status: Status;
-  round_price_warning: string | null;
+  arbitrary_lots: Array<{ id: string; quantity: number; fill_price: number; bought_on: string; sell_limit: number }>;
   /** 사다리 위치별 · 날짜별 매수·매도(체결 순서). 같은 날 체결된 매도·재매수 쌍은 회차별로 묶는다. */
   trades_by_position: Record<string, Record<string, TradeSide[]>>;
   /** 사다리 위치별 가격 — 1호 체결가 × (1 − 간격%)^(위치−1)을 호가로 맞춘 값(보유가 없으면 회차의 1호 진입 미리보기 지정가). */
@@ -276,8 +283,8 @@ function DailyTradeBadges({ sides }: { sides: TradeSide[] }) {
   return (
     <span style={{ display: "inline-flex", gap: 4, whiteSpace: "nowrap" }}>
       {sides.map((side, idx) => (
-        <StatusBadge key={idx} color={FILL_COLORS[side]}>
-          {side === "buy" ? "매수" : "매도"}
+        <StatusBadge key={idx} color={FILL_COLORS[side.endsWith("buy") ? "buy" : "sell"]}>
+          {FILL_LABELS[side]}
         </StatusBadge>
       ))}
     </span>
@@ -883,7 +890,7 @@ function StrategySection({
       </div>
     );
   }
-  const { status, index, round_price_warning: roundPriceWarning } = view;
+  const { status, index } = view;
   const tradeDays = [
     ...new Set(Object.values(view.trades_by_position).flatMap((byDay) => Object.keys(byDay))),
   ].sort();
@@ -920,42 +927,46 @@ function StrategySection({
         </span>
       </div>
 
-      {roundPriceWarning ? (
-        <div role="status" className="alert alert-warning mb-0">{roundPriceWarning}</div>
-      ) : (
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: "var(--fs-sm)" }}>
-          {status.waiting_first_entry ? (
-            <span style={{ fontWeight: 700 }}>
-              1호 진입 대기 — {index.name} {formatNumber(index.buy_trigger)} 이하 · 미도달 시{" "}
-              {status.first_entry_close_time} 매수
-            </span>
-          ) : status.next_round == null ? (
-            <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>회차 소진 — 매도 대기</span>
-          ) : null}
-          {status.budget_short ? (
-            <span style={actionBadgeStyle("var(--text-muted)")}>⏸ {status.next_round}호 회차 금액으로 1주 매수 불가</span>
-          ) : status.cash_short ? (
-            <span style={actionBadgeStyle("var(--text-muted)")}>⏸ {status.next_round}호 한도 소진 — 현금 부족</span>
-          ) : status.next_buy_drop_pct != null ? (
-            <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>
-              {nextRow?.close_entry
-                ? `📉 ${status.next_round}호 장 마감 매수!`
-                : status.next_buy_drop_pct >= 0
-                ? status.sell_pending
-                  ? `📉 ${status.next_round}호 매수가 도달 — ${status.next_sell_round}호 매도 체결 뒤 매수`
-                  : `📉 ${status.next_round}호 매수가 도달!`
-                : `📉 ${status.next_round}호 매수까지 ${Math.abs(status.next_buy_drop_pct).toFixed(2)}% 하락`}
-            </span>
-          ) : null}
-          {status.next_sell_rise_pct != null ? (
-            <span style={actionBadgeStyle(SELL_BADGE_COLOR)}>
-              {status.next_sell_rise_pct <= 0
-                ? `📈 ${status.next_sell_round}호 매도가 도달!`
-                : `📈 ${status.next_sell_round}호 매도까지 ${status.next_sell_rise_pct.toFixed(2)}% 상승`}
-            </span>
-          ) : null}
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: "var(--fs-sm)" }}>
+        {status.waiting_first_entry ? (
+          <span style={{ fontWeight: 700 }}>
+            1호 진입 대기 — {index.name} {formatNumber(index.buy_trigger)} 이하 · 미도달 시{" "}
+            {status.first_entry_close_time} 매수
+          </span>
+        ) : status.next_round == null ? (
+          <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>회차 소진 — 매도 대기</span>
+        ) : null}
+        {status.budget_short ? (
+          <span style={actionBadgeStyle("var(--text-muted)")}>⏸ {status.next_round}호 회차 금액으로 1주 매수 불가</span>
+        ) : status.cash_short ? (
+          <span style={actionBadgeStyle("var(--text-muted)")}>⏸ {status.next_round}호 한도 소진 — 현금 부족</span>
+        ) : status.next_buy_drop_pct != null ? (
+          <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>
+            {nextRow?.close_entry
+              ? `📉 ${status.next_round}호 장 마감 매수!`
+              : status.next_buy_drop_pct >= 0
+              ? status.sell_pending
+                ? `📉 ${status.next_round}호 매수가 도달 — ${status.next_sell_round}호 매도 체결 뒤 매수`
+                : `📉 ${status.next_round}호 매수가 도달!`
+              : `📉 ${status.next_round}호 매수까지 ${Math.abs(status.next_buy_drop_pct).toFixed(2)}% 하락`}
+          </span>
+        ) : null}
+        {status.next_sell_rise_pct != null ? (
+          <span style={actionBadgeStyle(SELL_BADGE_COLOR)}>
+            {status.next_sell_rise_pct <= 0
+              ? `📈 ${status.next_sell_round}호 매도가 도달!`
+              : `📈 ${status.next_sell_round}호 매도까지 ${status.next_sell_rise_pct.toFixed(2)}% 상승`}
+          </span>
+        ) : null}
+      </div>
+
+      {view.arbitrary_lots.map((lot) => (
+        <div key={lot.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: "var(--fs-sm)" }}>
+          <StatusBadge color={FILL_COLORS.buy}>임의 매수</StatusBadge>
+          <span>{lot.bought_on} · {formatNumber(lot.fill_price)}원 · {formatNumber(lot.quantity)}주</span>
+          <span style={{ color: SELL_BADGE_COLOR }}>임의 매도 목표 {formatNumber(lot.sell_limit)}원</span>
         </div>
-      )}
+      ))}
 
       {/* 회차 표 */}
       <div style={{ overflowX: "auto" }}>
@@ -1023,7 +1034,7 @@ function StrategySection({
                 <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)" }}>{position}</td>
                 <td style={{ ...tdStyle, textAlign: "left", fontWeight: 700 }}>
                   {row.round}호
-                  {row.is_next && !roundPriceWarning ? (
+                  {row.is_next ? (
                     <span style={{ marginLeft: 5, color: "var(--text-muted)", fontSize: "var(--fs-sm)", fontWeight: 400 }}>
                       다음
                     </span>
@@ -1043,14 +1054,14 @@ function StrategySection({
                         </div>
                       ) : null}
                       {/* 팔 수 있는 회차(가장 깊은 보유)만 실제 매도 지정가 — 체결가 +간격%. */}
-                      {!roundPriceWarning && row.round === status.held_count && row.sell_limit != null ? (
+                      {row.round === status.held_count && row.sell_limit != null ? (
                         <div style={{ color: SELL_BADGE_COLOR, fontSize: "var(--fs-xs, 11px)", fontWeight: 700 }}>
                           매도 {formatNumber(row.sell_limit)}
                           {row.rebuy_after_sell ? " 후 재매수" : ""}
                         </div>
                       ) : null}
                     </>
-                  ) : row.is_next && !roundPriceWarning ? (
+                  ) : row.is_next ? (
                     // 다음 회차의 실제 매수 지정가 — 마지막 체결가 −간격%(위치 가격과 조금 다를 수 있다).
                     <span style={{ color: BUY_BADGE_COLOR, fontWeight: 700 }}>
                       다음 매수 {formatNumber(row.buy_limit)}
