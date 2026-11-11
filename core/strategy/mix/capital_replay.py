@@ -14,7 +14,7 @@ def replay_capital(
     fx: pd.Series,
     targets: dict[str, dict[str, float]],
     capital_krw: float,
-    harvest_pct: float,
+    harvest_pct: float | None,
     refill_pct: float,
     costs: dict[str, tuple[float, float]],
 ) -> dict:

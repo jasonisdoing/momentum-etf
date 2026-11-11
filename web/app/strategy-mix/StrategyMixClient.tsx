@@ -60,7 +60,7 @@ const gridTheme = createAppGridTheme();
 const CURRENT_NOTES = [
   { title: "기준금액", body: "계좌 평가액(현금 포함)이 기준금액입니다. IS 고정 자산은 현재 비중대로 두고 나머지를 슬리브 비중대로 배정하며, 평가액이 바뀌면 목표 금액도 함께 바뀝니다. 해외 종목은 현재 환율로 환산하므로 환율 변동도 반영됩니다." },
   { title: "종목 배정", body: "개별 전략 엔진이 종목과 진입·청산 시점을 정합니다. 포트폴리오는 설정 비중, 모멘텀·신고가는 슬롯당 1/N로 배정합니다. 빈 슬롯은 현금이며 중복 종목 기준금액은 합산합니다." },
-  { title: "회수·채우기", body: "종목 목표 금액 대비 초과율·부족률이 각각 설정값에 도달하면 목표 금액까지 정수 수량으로 조정합니다. 채우기 100%는 미보유도 매수 안내하지 않습니다. 전략 청산은 유지합니다." },
+  { title: "매매 조정", body: "가격 변동에 따른 초과 비중 매도와 보유 종목 추가 매수를 각각 설정합니다. 신규 편입 매수와 전략 청산·목표 배정 축소는 별도로 적용합니다." },
   { title: "현금", body: "월초 자동 재배분은 하지 않습니다. 매수 자금이 부족하면 부족액을 표시하며 다른 종목을 임의로 매도하지 않습니다. 회수 매도 대금은 현금으로 남습니다." },
 ];
 
@@ -68,6 +68,14 @@ const hintStyle: React.CSSProperties = {
   color: "var(--text-muted)",
   fontSize: "var(--fs-sm)",
 };
+
+type AdjustmentMode = "" | "immediate" | "threshold" | "off";
+
+function savedAdjustmentMode(value: number | "off" | null | undefined, offValue: number | "off"): AdjustmentMode {
+  if (value == null) return "";
+  if (value === offValue) return "off";
+  return value === 0 ? "immediate" : "threshold";
+}
 
 /** 합성 슬리브 하나 — 슬롯 키(a·b·c)는 저장 순서대로 백엔드가 붙인다. */
 type MixSleeve = {
@@ -92,7 +100,7 @@ type AccountOption = AccountOptionBase & {
   country_code: string;
   /** 오늘의 액션 슬랙 알람 — 새 지시·수량 증가 시 발송. */
   mix_slack_enabled?: boolean;
-  mix_harvest_pct: number | null;
+  mix_harvest_pct: number | "off" | null;
   mix_refill_pct: number | null;
   /** 비워 두는 현금 몫(%) — 슬리브 배분과 합이 100 이다. */
   mix_cash_pct: number;
@@ -1267,6 +1275,8 @@ export function StrategyMixClient() {
   // 헤더 설정 — 합성 배분(%) 3칸과 슬랙 알람을 한 버튼으로 저장한다(계좌 설정에 보관).
   const [harvestPct, setHarvestPct] = useState("");
   const [refillPct, setRefillPct] = useState("");
+  const [harvestMode, setHarvestMode] = useState<AdjustmentMode>("");
+  const [refillMode, setRefillMode] = useState<AdjustmentMode>("");
   const [slackEnabled, setSlackEnabled] = useState(false);
   // 슬리브 초안 — 저장된 배열 그대로 편집한다. 순서가 곧 슬롯(A·B·C)이라 인덱스로 고친다.
   const [draftSleeves, setDraftSleeves] = useState<MixSleeve[]>([]);
@@ -1278,8 +1288,12 @@ export function StrategyMixClient() {
   const maxSleeves = meta?.max_sleeves ?? SLOT_KEY_ORDER.length;
   useEffect(() => {
     setSlackEnabled(Boolean(selectedAccount?.mix_slack_enabled));
-    setHarvestPct(String(selectedAccount?.mix_harvest_pct ?? ""));
-    setRefillPct(String(selectedAccount?.mix_refill_pct ?? ""));
+    const harvest = selectedAccount?.mix_harvest_pct;
+    const refill = selectedAccount?.mix_refill_pct;
+    setHarvestPct(typeof harvest === "number" && harvest > 0 ? String(harvest) : "");
+    setRefillPct(typeof refill === "number" && refill > 0 && refill < 100 ? String(refill) : "");
+    setHarvestMode(savedAdjustmentMode(harvest, "off"));
+    setRefillMode(savedAdjustmentMode(selectedAccount?.mix_refill_pct, 100));
     setDraftSleeves(sleeves.map((row) => ({ ...row })));
     setCashPct(selectedAccount ? String(selectedAccount.mix_cash_pct) : "0");
   }, [selectedAccount, sleeves]);
@@ -1341,14 +1355,18 @@ export function StrategyMixClient() {
       : Math.round(parts.reduce((a, b) => a + b, 0) * 100) / 100;
   }, [draftSleeves, cashPct]);
   const weightOk = weightSum !== null && Math.abs(weightSum - 100) <= 0.01;
+  const harvestValue = harvestMode === "immediate" ? 0 : harvestMode === "threshold" ? Number(harvestPct) : harvestMode === "off" ? "off" : null;
+  const refillValue = refillMode === "immediate" ? 0 : refillMode === "threshold" ? Number(refillPct) : refillMode === "off" ? 100 : null;
   const settingsDirty = Boolean(
     selectedAccount &&
       // 저장 이력이 없으면(초안 표시 중) 고르는 순간부터 '변경됨' 이다.
       (!selectedAccount.sleeves?.length ||
         slackEnabled !== Boolean(selectedAccount.mix_slack_enabled) ||
         Number(cashPct) !== selectedAccount.mix_cash_pct ||
-        Number(harvestPct) !== selectedAccount.mix_harvest_pct ||
-        Number(refillPct) !== selectedAccount.mix_refill_pct ||
+        harvestValue !== selectedAccount.mix_harvest_pct ||
+        refillValue !== selectedAccount.mix_refill_pct ||
+        harvestMode !== savedAdjustmentMode(selectedAccount.mix_harvest_pct, "off") ||
+        refillMode !== savedAdjustmentMode(selectedAccount.mix_refill_pct, 100) ||
         draftSleeves.length !== sleeves.length ||
         draftSleeves.some((row, index) => {
           const saved = sleeves[index];
@@ -1365,8 +1383,15 @@ export function StrategyMixClient() {
 
   const saveHeaderSettings = async () => {
     if (!selectedAccount || !weightOk) return;
-    if ([harvestPct, refillPct].some((value) => !value.trim() || !Number.isFinite(Number(value))) || Number(harvestPct) < 0 || Number(refillPct) < 0 || Number(refillPct) > 100) {
-      toast.error("회수 기준은 0% 이상, 채우기 기준은 0~100%로 입력하세요.");
+    if (harvestValue === null || refillValue === null) {
+      toast.error("초과 비중 매도와 보유 종목 추가 매수 방식을 선택하세요.");
+      return;
+    }
+    if (
+      (harvestMode === "threshold" && (!Number.isFinite(Number(harvestPct)) || Number(harvestPct) <= 0)) ||
+      (refillMode === "threshold" && (!Number.isFinite(refillValue) || refillValue <= 0 || refillValue >= 100))
+    ) {
+      toast.error("초과율은 0%보다 크게, 부족률은 0% 초과 100% 미만으로 입력하세요.");
       return;
     }
     try {
@@ -1378,8 +1403,8 @@ export function StrategyMixClient() {
           account_id: selectedAccount.account_id,
           values: {
             mix_slack_enabled: slackEnabled,
-            mix_harvest_pct: Number(harvestPct),
-            mix_refill_pct: Number(refillPct),
+            mix_harvest_pct: harvestValue,
+            mix_refill_pct: refillValue,
             // 순서가 곧 슬롯이라 키는 보내지 않는다 — 서버가 순서대로 다시 붙인다.
             mix_sleeves: draftSleeves.map((row) => ({
               strategy: row.strategy,
@@ -1400,8 +1425,8 @@ export function StrategyMixClient() {
             ? {
                 ...option,
                 mix_slack_enabled: slackEnabled,
-            mix_harvest_pct: Number(harvestPct),
-            mix_refill_pct: Number(refillPct),
+                mix_harvest_pct: harvestValue,
+                mix_refill_pct: refillValue,
                 // 라벨도 즉시 반영 — 이름을 지우면 전략 이름으로 돌아간다.
                 sleeves: draftSleeves.map((row) => ({
                   ...row,
@@ -1415,6 +1440,7 @@ export function StrategyMixClient() {
         ),
       );
       toast.success("합성 설정 저장 완료");
+      setView(null);
       // 배분이 바뀌면 목표 비중·오늘의 액션이 달라진다 — 운용 현황을 다시 계산한다.
       setPositionsReloadKey((k) => k + 1);
     } catch (err) {
@@ -1499,16 +1525,39 @@ export function StrategyMixClient() {
                         </span>
                       </label>
                       {[
-                        { label: "+ 회수 기준 (%)", value: harvestPct, set: setHarvestPct, max: undefined, hint: "종목 기준금액 대비 초과율에 도달하면 기준금액까지 매도" },
-                        { label: "− 채우기 기준 (%)", value: refillPct, set: setRefillPct, max: 100, hint: "부족률에 도달하면 기준금액까지 매수. 100%는 미보유를 포함해 채우기 끔" },
+                        { label: "초과 비중 매도", mode: harvestMode, setMode: setHarvestMode, value: harvestPct, setValue: setHarvestPct, threshold: "초과율", max: undefined },
+                        { label: "보유 종목 추가 매수", mode: refillMode, setMode: setRefillMode, value: refillPct, setValue: setRefillPct, threshold: "부족률", max: 100 },
                       ].map((field) => (
-                        <label key={field.label} className="appLabeledField" style={{ marginBottom: 0 }}>
+                        <div key={field.label} className="appLabeledField" role="group" aria-label={field.label}>
                           <span className="appLabeledFieldLabel">{field.label}</span>
-                          <input className="form-control form-control-sm" type="number" min="0" max={field.max}
-                            step="any" style={{ width: field.max === 100 ? 150 : 180 }} value={field.value}
-                            onChange={(event) => field.set(event.target.value)} disabled={settingsSaving} title={field.hint}
-                            placeholder="설정 필요" />
-                        </label>
+                          <div className="d-flex align-items-center gap-2">
+                            <select
+                              className="form-select form-select-sm"
+                              aria-label={field.label}
+                              value={field.mode}
+                              onChange={(event) => field.setMode(event.target.value as AdjustmentMode)}
+                              disabled={settingsSaving}
+                            >
+                              <option value="" disabled>선택</option>
+                              <option value="immediate">즉시 조정</option>
+                              <option value="threshold">{field.threshold} 지정</option>
+                              <option value="off">끄기</option>
+                            </select>
+                            {field.mode === "threshold" && (
+                              <>
+                                <input
+                                  className="form-control form-control-sm"
+                                  aria-label={`${field.threshold} (%)`}
+                                  type="number" min="0" max={field.max} step="any"
+                                  style={{ width: "5rem" }}
+                                  value={field.value} onChange={(event) => field.setValue(event.target.value)}
+                                  disabled={settingsSaving}
+                                />
+                                <span style={hintStyle} aria-hidden="true">%</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
                       ))}
                       {/* 배분(%)은 전부 아래 슬리브 표에 있다 — 현금도 같은 줄 형태로 둔다. */}
                       <SlackAlarmField
@@ -1529,7 +1578,7 @@ export function StrategyMixClient() {
                     <button
                       type="button"
                       className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
-                      disabled={settingsSaving || !weightOk || !settingsDirty}
+                      disabled={settingsSaving || loading || !weightOk || !settingsDirty}
                       onClick={() => void saveHeaderSettings()}
                       title={weightOk ? "배분·슬랙 알람을 함께 저장한다." : "배분 합계가 100%가 아니면 저장할 수 없다."}
                     >
@@ -1847,7 +1896,7 @@ export function StrategyMixClient() {
                       오늘의 액션
                       <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
                         계좌 평가액 기준 목표와 실제 보유를 비교한 매매 지시 —
-                        회수·채우기 조건 적용 · 채우기 100%는 매수 안내 끔
+                        초과 비중 매도·보유 종목 추가 매수 설정 적용
                       </span>
                     </div>
                     {todayActionGroups.length === 0 ? (
@@ -1892,7 +1941,7 @@ export function StrategyMixClient() {
                 <button
                   className="btn btn-sm btn-dark"
                   type="button"
-                  disabled={loading || !accountId}
+                  disabled={loading || settingsSaving || !accountId}
                   onClick={() => void runBacktest()}
                 >
                   {loading ? "실행 중…" : "실행"}

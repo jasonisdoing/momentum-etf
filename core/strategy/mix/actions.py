@@ -54,7 +54,7 @@ def build_action_groups(
     actions: dict[str, Any],
     next_trading_day: str | None,
     *,
-    harvest_pct: float,
+    harvest_pct: float | None,
     refill_pct: float,
     cash_balance: float,
     target_schedule: dict[str, dict[str, Any]],
@@ -164,7 +164,7 @@ def build_action_groups(
 def _apply_tolerance(
     rows: list[dict[str, Any]],
     *,
-    harvest_pct: float,
+    harvest_pct: float | None,
     refill_pct: float,
     cash_balance: float,
 ) -> float:

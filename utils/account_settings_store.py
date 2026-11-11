@@ -21,6 +21,7 @@ from time import monotonic
 from typing import Any
 
 from config import CACHE_TTL_LIVE
+from core.strategy.mix.capital_policy import HARVEST_OFF
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -459,6 +460,9 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             # 합성 오늘의 액션 슬랙 알람 — 새 지시·수량 증가가 생기면 발송한다.
             cleaned[key] = bool(raw)
         elif key in {"mix_harvest_pct", "mix_refill_pct"}:
+            if key == "mix_harvest_pct" and raw == HARVEST_OFF:
+                cleaned[key] = HARVEST_OFF
+                continue
             try:
                 amount = float(raw)
             except (TypeError, ValueError) as error:
@@ -466,7 +470,7 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             if isinstance(raw, bool) or not math.isfinite(amount) or amount < 0:
                 raise AccountSettingsStoreError(f"{key}: 유한한 0 이상의 숫자가 필요합니다.")
             if key == "mix_refill_pct" and amount > 100:
-                raise AccountSettingsStoreError("채우기 기준은 0~100%입니다. 100%는 채우기 끔입니다.")
+                raise AccountSettingsStoreError("추가 매수 부족률은 0~100%입니다.")
             cleaned[key] = amount
         elif key == "mix_cash_pct":
             # 합성에서 비워 두는 현금 몫(%). 슬리브 배분과의 합이 100 인지는 아래에서 본다.
@@ -511,7 +515,7 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             cleaned[key] = bool(raw)
     capital_keys = {"mix_harvest_pct", "mix_refill_pct"}
     if capital_keys.intersection(cleaned) and not capital_keys.issubset(cleaned):
-        raise AccountSettingsStoreError("회수 기준·채우기 기준을 함께 저장하세요.")
+        raise AccountSettingsStoreError("초과 비중 매도와 보유 종목 추가 매수 방식을 함께 저장하세요.")
     # 슬리브 배분과 현금은 한 묶음이다 — 하나만 바꾸면 나머지와 합이 어긋난 채로 저장된다.
     # 슬리브별 (전략, 종목풀) 중복 검사는 `_validate_mix_sleeves` 가 이미 했다.
     if ("mix_sleeves" in cleaned) != ("mix_cash_pct" in cleaned):

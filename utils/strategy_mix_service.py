@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from core.strategy.mix.actions import build_action_groups
+from core.strategy.mix.capital_policy import HARVEST_OFF
 from core.strategy.mix.targets import dated_target_shares
 from utils.cash_model import currency_for_country
 from utils.logger import get_app_logger
@@ -258,8 +259,10 @@ def _resolve_mix_account(account_id: str | None) -> dict[str, Any]:
     from utils.settings_loader import get_account_settings
 
     account_settings = get_account_settings(account["account_id"]) or {}
-    if any(account_settings.get(key) is None for key in ("mix_harvest_pct", "mix_refill_pct")):
-        raise RuntimeError("회수 기준·채우기 기준을 먼저 저장하세요. 새 방식의 주문은 아직 생성하지 않습니다.")
+    harvest = account_settings.get("mix_harvest_pct")
+    refill = account_settings.get("mix_refill_pct")
+    if harvest is None or refill is None:
+        raise RuntimeError("초과 비중 매도와 보유 종목 추가 매수 방식을 먼저 저장하세요.")
     benchmark = account_settings.get("benchmark") or {}
     benchmark_ticker = str(benchmark.get("ticker") or "").strip().upper()
     if not benchmark_ticker:
@@ -296,7 +299,8 @@ def _resolve_mix_account(account_id: str | None) -> dict[str, Any]:
         # 국가·통화 — 거래 달력(월초 리밸런싱 판정)과 원화 환산에 쓴다.
         "country": country,
         "currency": currency,
-        **{key: float(account_settings[key]) for key in ("mix_harvest_pct", "mix_refill_pct")},
+        "mix_harvest_pct": None if harvest == HARVEST_OFF else float(harvest),
+        "mix_refill_pct": float(refill),
         "benchmark_ticker": benchmark_ticker,
         "benchmark_name": str(benchmark.get("name") or benchmark_ticker).strip(),
     }

@@ -501,15 +501,15 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
         opened = pd.DataFrame({"A": [100, 100, 120, 90, 70]}, index=index)
         fx = pd.Series([1.0, 1.1, 1.1, 1.0, 1.0], index=index)
         amounts = {str(day.date()): {"A": 1000.0} for day in index}
-        for refill in (0, 20, 100):
-            with self.subTest(refill=refill):
+        for harvest, refill in ((10, 0), (10, 20), (10, 100), (None, 100)):
+            with self.subTest(harvest=harvest, refill=refill):
                 replay = replay_capital(
                     close=close,
                     opened=opened,
                     fx=fx,
                     targets=amounts,
                     capital_krw=10000,
-                    harvest_pct=10,
+                    harvest_pct=harvest,
                     refill_pct=refill,
                     costs={"A": (0, 0)},
                 )
@@ -526,7 +526,7 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                         [{"ticker": "A", "price": price, "held_quantity": held, "target_quantity": target}],
                         {"slots": {}},
                         date,
-                        harvest_pct=10,
+                        harvest_pct=harvest,
                         refill_pct=refill,
                         cash_balance=10000,
                         target_schedule={
@@ -534,7 +534,7 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                                 "quantities": {"A": target},
                                 "weights": {"A": 10},
                                 "amounts": {"A": amount / rate},
-                                "previous_amounts": {"A": amount / rate},
+                                "previous_amounts": {"A": amount / rate} if i else {},
                             }
                         },
                     )
@@ -543,8 +543,10 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                             expected.append((date, item["side"], item["quantity"]))
                             held += item["quantity"] * (1 if item["side"] == "buy" else -1)
                 self.assertEqual(expected, [(r["date"], r["side"], r["quantity"]) for r in replay["executions"]])
-                if refill == 100:
-                    self.assertEqual(expected, [])
+                if harvest is None:
+                    self.assertEqual(expected, [("2026-09-01", "buy", 10)])
+                elif refill == 100:
+                    self.assertEqual([order for order in expected if order[1] == "buy"], [("2026-09-01", "buy", 10)])
 
     def test_minimum_one_share_screen_orders_match_capital_replay(self):
         from core.strategy.mix.actions import build_action_groups
@@ -647,7 +649,7 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                     fx=pd.Series(1.0, index=index),
                     targets={"2026-09-01": {"X": 1000}, "2026-09-02": {"X": after}},
                     capital_krw=3000,
-                    harvest_pct=50,
+                    harvest_pct=None,
                     refill_pct=0,
                     costs={"X": (0, 0)},
                 )
@@ -678,7 +680,7 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                     [{"ticker": "X", "price": 100, "held_quantity": 12, "target_quantity": int(after * scale) // 100}],
                     actions,
                     "2026-09-02",
-                    harvest_pct=50,
+                    harvest_pct=None,
                     refill_pct=0,
                     cash_balance=2040,
                     target_schedule=schedule,
@@ -702,9 +704,9 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
 
         index = pd.date_range("2026-09-01", periods=3)
         cases = [
-            # 늦게 상장한 종목은 첫날 시가에 매수하고 채우기 100이면 매수하지 않는다.
+            # 상장 후 신규 편입은 기존 종목 추가 매수를 꺼도 첫날 시가에 매수한다.
             ([float("nan"), 100, 110], [float("nan"), 100, 110], 2000, 1000, 20, "2026-09-02", 0, 100, 10),
-            ([float("nan"), 100, 110], [float("nan"), 100, 110], 2000, 1000, 100, "2026-09-02", 0, 100, 0),
+            ([float("nan"), 100, 110], [float("nan"), 100, 110], 2000, 1000, 100, "2026-09-02", 0, 100, 10),
             # 회수 경계에 닿은 값과 못 미친 값을 구별한다 — 목표는 전일 종가 평가액 비율만큼 커진다.
             ([10, 12.2, 12.2], [10, 10, 12.2], 210, 100, 20, "2026-09-03", 10, 12.2, -1),
             ([10, 12.0, 12.0], [10, 10, 12.0], 210, 100, 20, "2026-09-03", 10, 12.0, 0),
@@ -715,7 +717,7 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                     close=pd.DataFrame({"X": closes}, index=index),
                     opened=pd.DataFrame({"X": opens}, index=index),
                     fx=pd.Series(1.0, index=index),
-                    targets={str(d.date()): {"X": amount} for d in index},
+                    targets={str(d.date()): {"X": amount} if pd.notna(c) else {} for d, c in zip(index, closes)},
                     capital_krw=capital,
                     harvest_pct=10,
                     refill_pct=refill,
@@ -735,7 +737,7 @@ class MixCapitalScreenMatchesBacktest(unittest.TestCase):
                             "quantities": {"X": int(scaled / price)},
                             "weights": {"X": 50},
                             "amounts": {"X": scaled},
-                            "previous_amounts": {"X": scaled},
+                            "previous_amounts": {"X": scaled} if held else {},
                         }
                     },
                 )

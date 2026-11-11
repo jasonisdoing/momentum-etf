@@ -6,10 +6,12 @@ import math
 from decimal import Decimal
 from typing import Literal, NamedTuple
 
+HARVEST_OFF = "off"
+
 
 class CapitalTradeDecision(NamedTuple):
     quantity: int
-    reason: Literal["none", "exit", "target_reduction", "harvest", "refill"]
+    reason: Literal["none", "exit", "target_reduction", "harvest", "entry", "refill"]
 
 
 def allocate_target_shares(amounts: dict[str, float], prices: dict[str, float], budget: float) -> dict[str, int]:
@@ -69,7 +71,7 @@ def capital_trade_quantity(
     held: int,
     price: float,
     target_amount: float,
-    harvest_pct: float,
+    harvest_pct: float | None,
     refill_pct: float,
     previous_target_amount: float,
     target_quantity: int,
@@ -91,20 +93,20 @@ def capital_trade_decision(
     held: int,
     price: float,
     target_amount: float,
-    harvest_pct: float,
+    harvest_pct: float | None,
     refill_pct: float,
     previous_target_amount: float,
     target_quantity: int,
 ) -> CapitalTradeDecision:
     """목표 금액은 가격과 같은 통화. 문턱은 원래 금액, 주문은 공통 배분 수량을 쓴다."""
-    if not all(math.isfinite(v) for v in (held, price, target_amount, previous_target_amount, harvest_pct, refill_pct)):
+    if not all(math.isfinite(v) for v in (held, price, target_amount, previous_target_amount, refill_pct)):
         raise ValueError("회수·채우기 입력은 유한한 숫자여야 합니다.")
     if (
         held < 0
         or price <= 0
         or target_amount < 0
         or previous_target_amount < 0
-        or harvest_pct < 0
+        or (harvest_pct is not None and (not math.isfinite(harvest_pct) or harvest_pct < 0))
         or not 0 <= refill_pct <= 100
         or target_quantity < 0
     ):
@@ -113,14 +115,19 @@ def capital_trade_decision(
         return CapitalTradeDecision(-held, "exit")
     difference = target_quantity - held
     # 청산 여부는 개별 슬리브 신호가 아니라 동일 종목의 합산 기준금액 감소로 판단한다.
-    if difference < 0 and (target_amount < previous_target_amount or target_quantity == 0):
+    if difference < 0 and target_amount < previous_target_amount:
         return CapitalTradeDecision(difference, "target_reduction")
+    if difference > 0 and held == 0 and previous_target_amount == 0:
+        return CapitalTradeDecision(difference, "entry")
     # 금액과 비율을 십진수로 비교해 100 × 1.1 같은 경계의 이진 부동소수점 오차를 없앤다.
     value = Decimal(held) * Decimal(str(price))
     basis = Decimal(str(target_amount))
-    if difference < 0 and value >= basis * (1 + Decimal(str(harvest_pct)) / 100):
-        return CapitalTradeDecision(difference, "harvest")
-    # 100은 미보유를 포함해 모든 채우기를 끈다. 0은 작은 부족분도 표시한다.
+    if difference < 0 and harvest_pct is not None:
+        if target_quantity == 0:
+            return CapitalTradeDecision(difference, "target_reduction")
+        if value >= basis * (1 + Decimal(str(harvest_pct)) / 100):
+            return CapitalTradeDecision(difference, "harvest")
+    # 채우기 100은 기존 목표에 대한 추가 매수만 끈다.
     if difference > 0 and refill_pct < 100 and value <= basis * (1 - Decimal(str(refill_pct)) / 100):
         return CapitalTradeDecision(difference, "refill")
     return CapitalTradeDecision(0, "none")
