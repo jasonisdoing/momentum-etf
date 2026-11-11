@@ -178,10 +178,10 @@ const PCT_MIN = 0.1;
 const PCT_MAX = 50;
 
 const cardStyle: React.CSSProperties = {
-  padding: 14,
+  padding: 10,
   display: "flex",
   flexDirection: "column",
-  gap: 10,
+  gap: 6,
 };
 
 // 매수·매도 행동 배지 — 이 화면에서 가장 중요한 정보라 테두리로 강조한다.
@@ -189,7 +189,7 @@ const cardStyle: React.CSSProperties = {
 function actionBadgeStyle(color: string): React.CSSProperties {
   return {
     fontWeight: 800,
-    padding: "2px 10px",
+    padding: "1px 8px",
     borderRadius: 6,
     border: `1.5px solid ${color}`,
     color,
@@ -198,12 +198,12 @@ function actionBadgeStyle(color: string): React.CSSProperties {
 const BUY_BADGE_COLOR = "var(--down-color, #2f6fd0)";
 const SELL_BADGE_COLOR = "var(--up-color, #d64545)";
 
-const thStyle: React.CSSProperties = { padding: "6px 8px", textAlign: "right" };
+const thStyle: React.CSSProperties = { padding: "4px 8px", textAlign: "right" };
 // 회차 표 고정 열(위치~손익)의 폭 — 날짜 열이 몇 개든 같은 폭이고, 날짜가 적으면 오른쪽이 비어 보인다.
-const ROUND_TABLE_FIXED_WIDTHS = [56, 80, 140, 100, 130, 84] as const;
+const ROUND_TABLE_FIXED_WIDTHS = [56, 80, 140, 100, 150, 84] as const;
 // 날짜 열의 최소 폭 — 그날 매매가 많으면 배지만큼 넓어진다.
 const ROUND_TABLE_DAY_MIN_WIDTH = 96;
-const tdStyle: React.CSSProperties = { padding: "6px 8px", textAlign: "right" };
+const tdStyle: React.CSSProperties = { padding: "clamp(3px, calc(1dvh - 6px), 7px) 8px", textAlign: "right" };
 
 function formatNumber(value: number | null | undefined, digits = 0): string {
   if (value == null || !Number.isFinite(value)) return "-";
@@ -297,7 +297,7 @@ function DailyTradeBadges({ sides }: { sides: TradeSide[] }) {
 function PriceGapRow({ gap, columnCount }: { gap: { round: number; pct: number }; columnCount: number }) {
   return (
     <tr>
-      <td colSpan={columnCount} style={{ padding: "22px 8px", textAlign: "center" }}>
+      <td colSpan={columnCount} style={{ padding: "clamp(5px, calc(1dvh - 4px), 9px) 8px", textAlign: "center" }}>
         <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
           {gap.pct === 0 ? (
             <>{gap.round}호가 기준선에 있습니다</>
@@ -925,17 +925,14 @@ function StrategySection({
 
   return (
     <div className="card appCard" style={cardStyle}>
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline", fontSize: "var(--fs-sm)" }}>
+      <div style={{ display: "flex", gap: "4px 10px", flexWrap: "wrap", alignItems: "baseline", fontSize: "var(--fs-sm)" }}>
         <span style={{ fontWeight: 800, fontSize: "var(--fs-base)" }}>{view.label}</span>
         <span>
-          현재가 <b style={{ fontSize: "var(--fs-xl)", fontWeight: 800 }}>{formatNumber(index.close)}</b>
+          현재가 <b style={{ fontSize: "var(--fs-lg)", fontWeight: 800 }}>{formatNumber(index.close)}</b>
         </span>
         <span style={{ color: "var(--text-muted)" }}>
           체결 이력 {view.ledger_at.slice(5, 16).replace("T", " ")} 기준
         </span>
-      </div>
-
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: "var(--fs-sm)" }}>
         {status.waiting_first_entry ? (
           <span style={{ fontWeight: 700 }}>
             1호 진입 대기 — {index.name} {formatNumber(index.buy_trigger)} 이하 · 미도달 시{" "}
@@ -978,7 +975,7 @@ function StrategySection({
 
       {/* 회차 표 */}
       <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "auto", borderCollapse: "collapse", fontSize: "var(--fs-sm)" }}>
+        <table style={{ width: "auto", borderCollapse: "collapse", fontSize: "var(--fs-sm)", lineHeight: 1.25 }}>
           <colgroup>
             {ROUND_TABLE_FIXED_WIDTHS.map((width, idx) => (
               <col key={idx} style={{ width, minWidth: width }} />
@@ -988,7 +985,6 @@ function StrategySection({
             ))}
           </colgroup>
           <thead>
-            <RecentPriceRow index={index} columnCount={columnCount} kind="high" />
             <tr style={{ color: "var(--text-muted)" }}>
               <th style={{ ...thStyle, textAlign: "left" }}>위치</th>
               <th style={{ ...thStyle, textAlign: "left" }}>회차</th>
@@ -1008,6 +1004,7 @@ function StrategySection({
             </tr>
           </thead>
           <tbody>
+            <RecentPriceRow index={index} columnCount={columnCount} kind="high" />
             {slots.map(({ position, row, trades }, rowIdx) => {
               const tradeCells = tradeDays.map((day) => (
                 <td key={day} style={{ ...tdStyle, textAlign: "center" }}>
@@ -1057,12 +1054,14 @@ function StrategySection({
                 <td style={tdStyle}>
                   {row.held ? (
                     <>
-                      <span style={{ fontWeight: 700 }}>{formatNumber(row.fill_price)}</span>
-                      {row.bought_on != null && row.source != null ? (
-                        <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-xs, 11px)" }}>
-                          {row.bought_on.slice(5)} · {BOUGHT_SOURCE_WORDS[row.source]}
-                        </div>
-                      ) : null}
+                      <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
+                        <b>{formatNumber(row.fill_price)}</b>
+                        {row.bought_on != null && row.source != null ? (
+                          <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-xs, 11px)" }}>
+                            {row.bought_on.slice(5)} · {BOUGHT_SOURCE_WORDS[row.source]}
+                          </span>
+                        ) : null}
+                      </span>
                       {/* 팔 수 있는 회차(가장 깊은 보유)만 실제 매도 지정가 — 체결가 +간격%. */}
                       {row.round === status.held_count && row.sell_limit != null ? (
                         <div style={{ color: SELL_BADGE_COLOR, fontSize: "var(--fs-xs, 11px)", fontWeight: 700 }}>
