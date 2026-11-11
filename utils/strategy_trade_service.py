@@ -337,13 +337,13 @@ def _load_unheld_closes(tickers: list[str], pool: str) -> dict[str, float]:
 
 
 # 회차 표의 저점 기준선 기간(개월).
-RECENT_LOW_MONTHS = 12
+RECENT_PRICE_MONTHS = 12
 
 
 def _load_ticker_status(
     pool: str, ticker: str, name: str, trigger_pct: float, live_close: float | None, *, kind: ladder.InstrumentKind
 ) -> dict[str, Any]:
-    """판정 기준 시세 — 이 전략 종목 자신의 현재가·전일 종가·1호 진입선·최근 저점.
+    """판정 기준 시세 — 이 전략 종목 자신의 현재가·전일 종가·1호 진입선·최근 고점과 저점.
 
     (이전에는 코스피/코스닥 지수를 썼지만, 이제 판정·표시 모두 자기 종목 가격이다)
     """
@@ -369,13 +369,14 @@ def _load_ticker_status(
     current = float(live_close) if live_close else float(close.iloc[-1])
     change_pct = (current / prev_close - 1.0) * 100.0
 
-    # 최근 RECENT_LOW_MONTHS 개월 저점 — 회차 지정가가 어느 층에 걸리는지 가늠하는 기준선.
-    # 가격 캐시는 확정 종가라 오늘 장중 현재가가 새 저점이어도 빠져 있다 — 현재가가 더 낮으면
-    # 오늘이 저점이다(그대로 두면 현재가가 기간 저점보다 낮은 값으로 표시됐다).
-    low_window = close[close.index >= close.index[-1] - pd.DateOffset(months=RECENT_LOW_MONTHS)]
-    low_value, low_date = float(low_window.min()), low_window.idxmin()
+    # 확정 종가의 같은 기간에서 고점·저점을 구하고 현재가가 범위를 벗어나면 오늘 날짜를 쓴다.
+    recent = close[close.index >= close.index[-1] - pd.DateOffset(months=RECENT_PRICE_MONTHS)]
+    low_value, low_date = float(recent.min()), recent.idxmin()
+    high_value, high_date = float(recent.max()), recent.idxmax()
     if current < low_value:
         low_value, low_date = current, today
+    if current > high_value:
+        high_value, high_date = current, today
 
     return {
         "name": name,
@@ -387,7 +388,10 @@ def _load_ticker_status(
         "buy_trigger": ladder.first_buy_limit(prev_close, float(trigger_pct), kind=kind),
         "recent_low": round(low_value),
         "recent_low_date": low_date.strftime("%Y-%m-%d"),
-        "recent_low_label": f"{RECENT_LOW_MONTHS}개월 저점",
+        "recent_low_label": f"{RECENT_PRICE_MONTHS}개월 저점",
+        "recent_high": round(high_value),
+        "recent_high_date": high_date.strftime("%Y-%m-%d"),
+        "recent_high_label": f"{RECENT_PRICE_MONTHS}개월 고점",
     }
 
 

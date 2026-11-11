@@ -38,6 +38,9 @@ type IndexStatus = {
   recent_low: number;
   recent_low_date: string;
   recent_low_label: string;
+  recent_high: number;
+  recent_high_date: string;
+  recent_high_label: string;
 };
 
 type Status = {
@@ -298,7 +301,7 @@ function BelowLastGapRow({ gap, columnCount }: { gap: { round: number; pct: numb
     <tr>
       <td colSpan={columnCount} style={{ padding: "22px 8px", textAlign: "center" }}>
         <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
-          {gap.round}호에서 <b style={{ color: "var(--up-color, #d64545)" }}>{formatSigned(gap.pct)}</b> 더 내려가야
+          {gap.round}호에서 <b style={{ color: BUY_BADGE_COLOR }}>{formatSigned(gap.pct)}</b> 더 내려가야
           기준선
         </span>
       </td>
@@ -306,22 +309,19 @@ function BelowLastGapRow({ gap, columnCount }: { gap: { round: number; pct: numb
   );
 }
 
-/** 최근 저점 기준선 행 — 회차 지정가의 지수 환산이 이 아래로 내려가는 경계에 긋는다.
- *
- *  회차 사이에 들어가지 못하면(= 저점이 마지막 회차보다도 아래) 표 맨 아래에 긋고,
- *  마지막 회차에서 얼마나 더 내려가야 저점인지 `belowLast` 로 함께 적는다 —
- *  선만 보고는 "얼마나 남았나"를 알 수 없다.
- */
-function RecentLowRow({ index, columnCount }: { index: IndexStatus; columnCount: number }) {
+function RecentPriceRow({ index, columnCount, kind }: { index: IndexStatus; columnCount: number; kind: "high" | "low" }) {
+  const [label, price, date, color] = kind === "high"
+    ? [index.recent_high_label, index.recent_high, index.recent_high_date, SELL_BADGE_COLOR] as const
+    : [index.recent_low_label, index.recent_low, index.recent_low_date, BUY_BADGE_COLOR] as const;
   return (
     <tr>
       <td colSpan={columnCount} style={{ padding: "2px 8px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--up-color, #d64545)", fontSize: "var(--fs-sm)", fontWeight: 700 }}>
-          <span style={{ flex: 1, borderTop: "2px dashed var(--up-color, #d64545)", opacity: 0.55 }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color, fontSize: "var(--fs-sm)", fontWeight: 700 }}>
+          <span style={{ flex: 1, borderTop: "2px dashed currentColor", opacity: 0.55 }} />
           <span>
-            {index.name} {index.recent_low_label} {formatNumber(index.recent_low)} ({index.recent_low_date})
+            {index.name} {label} {formatNumber(price)} ({date})
           </span>
-          <span style={{ flex: 1, borderTop: "2px dashed var(--up-color, #d64545)", opacity: 0.55 }} />
+          <span style={{ flex: 1, borderTop: "2px dashed currentColor", opacity: 0.55 }} />
         </div>
       </td>
     </tr>
@@ -999,6 +999,7 @@ function StrategySection({
             </tr>
           </thead>
           <tbody>
+            <RecentPriceRow index={index} columnCount={columnCount} kind="high" />
             {slots.map(({ position, row, trades }, rowIdx) => {
               const tradeCells = tradeDays.map((day) => (
                 <td key={day} style={{ ...tdStyle, textAlign: "center" }}>
@@ -1029,7 +1030,7 @@ function StrategySection({
                 (prevLevels.length === 0 || prevLevels[prevLevels.length - 1] >= index.recent_low);
               return (
               <React.Fragment key={row.round}>
-              {lowLineHere ? <RecentLowRow index={index} columnCount={columnCount} /> : null}
+              {lowLineHere ? <RecentPriceRow index={index} columnCount={columnCount} kind="low" /> : null}
               <tr style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
                 <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)" }}>{position}</td>
                 <td style={{ ...tdStyle, textAlign: "left", fontWeight: 700 }}>
@@ -1083,7 +1084,7 @@ function StrategySection({
             view.rounds.every((r) => r.buy_index == null || r.buy_index >= index.recent_low) ? (
               <>
                 {belowLastRound ? <BelowLastGapRow gap={belowLastRound} columnCount={columnCount} /> : null}
-                <RecentLowRow index={index} columnCount={columnCount} />
+                <RecentPriceRow index={index} columnCount={columnCount} kind="low" />
               </>
             ) : null}
           </tbody>
