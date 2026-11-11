@@ -42,6 +42,8 @@ VM 호스트의 시스템 cron은 사용하지 않는다.
 | `db_backup` | `backup_mongo_full.py` | 로컬 폴더라 LOCAL 전용 |
 | `holdings_alarm`, `strategy_mix_notify`, `strategy_trade_notify`, `slack_mock_order_notify`, `live_24h_slack`, `leverage_ma_cross`, `broker_balance_sync` 등 | 동명 스크립트 | 알림·동기화 |
 
+- `strategy_trade_notify`는 종목의 마지막 거래 구간이 끝나면 주문·체결에 사용되지 않은 슬랙 신호 스레드를 정리한다. 시간은 `config.INSTRUMENT_TRADING_WINDOWS`를 사용한다.
+
 ## 배포
 
 - Node 앱이 내부 네트워크로 FastAPI 호출. nginx-proxy 가 도메인 요청을 Node 컨테이너로 프록시, acme-companion 이 Let's Encrypt 인증서 자동 갱신.

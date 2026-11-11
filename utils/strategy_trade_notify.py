@@ -30,6 +30,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from config import INSTRUMENT_TRADING_WINDOWS
 from utils.logger import get_app_logger
 from utils.market_session import REGULAR, is_instrument_trading_time, market_session
 from utils.order_confirm import build_confirm_line, pop_filled
@@ -467,6 +468,7 @@ def _log_entry(trigger: dict[str, Any], held_counts: dict[str, int], stamp: str,
         "name": trigger["name"],
         "round": trigger["round"],
         "arbitrary_id": trigger.get("arbitrary_id"),
+        "quantity": trigger["quantity"],
         "index_text": _index_text(trigger["index"]),
         "signal_ts": signal_ts,
         # 발송 시점의 보유 회차 수 — 체결 확인은 회차 수 증감으로 판정한다(참고 기록).
@@ -493,11 +495,14 @@ def _send_confirms(
     strategy_view: dict[str, Any], pendings: list[dict[str, Any]], sent_log: dict[str, dict[str, Any]]
 ) -> tuple[int, int]:
     """체결 확인을 신호를 알린 메시지의 스레드로 보낸다 — (보낸 메시지 수, 실패 수). 못 보낸 확인은 기록에 되돌린다."""
+    from utils.strategy_trade_threads import mark_signal_thread_used
+
     groups: dict[str, list[dict[str, Any]]] = {}
     for pending in pendings:
         groups.setdefault(pending["signal_ts"], []).append(pending)
     sent = failed = 0
     for root, group in groups.items():
+        mark_signal_thread_used(root)
         text = "\n".join(_confirm_line(pending, strategy_view["index"]) for pending in group)
         if _send_live_message(strategy_view, text, thread_ts=root):
             sent += 1
@@ -518,6 +523,8 @@ def _send_repeats(
 
     뿌리 메시지가 기록에 없는 옛 이력은 채널에 새로 올리고 그 메시지를 뿌리로 삼는다.
     """
+    from utils.strategy_trade_threads import record_signal_thread
+
     groups: dict[str | None, list[dict[str, Any]]] = {}
     for trigger in repeats:
         groups.setdefault(sent_log[_trigger_key(trigger)].get("signal_ts"), []).append(trigger)
@@ -532,11 +539,61 @@ def _send_repeats(
             continue
         sent += 1
         thread_ts = root or ts
+        entries = [_log_entry(trigger, held_counts, stamp, thread_ts) for trigger in group]
+        if root is None:
+            record_signal_thread(thread_ts, entries)
         order_failed += _send_order_messages(strategy_view, group, thread_ts)
-        for trigger in group:
-            sent_log[_trigger_key(trigger)] = _log_entry(trigger, held_counts, stamp, thread_ts)
+        for entry in entries:
+            sent_log[_trigger_key(entry)] = entry
         delivered.extend(group)
     return sent, failed, order_failed, delivered
+
+
+def _expire_unused_signals(strategies: list[dict[str, Any]], sent_log: dict[str, dict[str, Any]], now: datetime) -> int:
+    """종목의 마지막 거래 구간이 끝난 뒤, 주문·체결에 쓰이지 않은 신호만 지운다."""
+    from utils.strategy_trade_threads import expire_signal_thread, mark_signal_thread_used, open_signal_threads
+
+    by_strategy = {strategy["strategy_id"]: strategy for strategy in strategies}
+    candidates = {thread["thread_ts"]: thread["signal_entries"] for thread in open_signal_threads()}
+    # 기존 스레드는 발송 기록에 남아 있는 신호로만 마감 여부를 확인한다.
+    legacy: dict[str, list[dict[str, Any]]] = {}
+    for entry in sent_log.values():
+        if (root := entry.get("signal_ts")) and root not in candidates:
+            legacy.setdefault(root, []).append(entry)
+    candidates.update(legacy)
+
+    expired = set()
+    for root, entries in candidates.items():
+        strategy = by_strategy.get(entries[0]["strategy_id"])
+        if strategy is None:
+            continue
+        close = max(end for _, end in INSTRUMENT_TRADING_WINDOWS["kor"][strategy["instrument_kind"]])
+        if now.time() < close:
+            continue
+        held = strategy["status"]["held_count"]
+        fills = {row["round"]: row["fill_price"] for row in strategy["rounds"] if row["held"]}
+        held_quantities = {row["round"]: row["quantity"] for row in strategy["rounds"] if row["held"]}
+        held_quantities.update({lot["id"]: lot["quantity"] for lot in strategy["arbitrary_lots"]})
+        if any(
+            _round_filled(entry, held, fills)
+            or (entry.get("arbitrary_id") is not None and entry["arbitrary_id"] not in held_quantities)
+            or (
+                entry["action"] == "sell"
+                and entry.get("quantity") is not None
+                and held_quantities.get(entry.get("arbitrary_id") or entry["round"], 0) < entry["quantity"]
+            )
+            for entry in entries
+        ):
+            mark_signal_thread_used(root)
+            continue
+        try:
+            if expire_signal_thread(root):
+                expired.add(root)
+        except ValueError:
+            logger.exception("장 마감 사고팔기 신호 정리 실패: %s", root)
+    for key in [key for key, entry in sent_log.items() if entry.get("signal_ts") in expired]:
+        del sent_log[key]
+    return len(expired)
 
 
 def notify_strategy_trade() -> dict[str, Any]:
@@ -546,26 +603,36 @@ def notify_strategy_trade() -> dict[str, Any]:
         ``{"sent": bool, "reason": str, "triggers": [...]}``
     """
     from utils.strategy_trade_orders import active_order_keys
+    from utils.strategy_trade_threads import mark_signal_thread_used, record_signal_thread
 
     # 화면이 읽는 회차 원장을 슬랙 스위치와 무관하게 먼저 새로 계산해 저장한다 — 아래 판정도 이 저장본을 쓴다.
     for key, message in refresh_all_ledgers().items():
         logger.error("사고팔기 회차 원장 실패(%s) — 이 종목은 건너뜁니다: %s", key, message)
 
     enabled = _slack_enabled_accounts()
-    view = load_views_where(lambda entry: entry["account_id"] in enabled, fresh=False)
+    now = datetime.now(KST)
+    first_close = min(max(end for _, end in windows) for windows in INSTRUMENT_TRADING_WINDOWS["kor"].values())
+    after_close = now.time() >= first_close
+    view = load_views_where(lambda entry: after_close or entry["account_id"] in enabled, fresh=False)
+    sent_log = _load_sent_log()
+    expired = _expire_unused_signals(view["strategies"], sent_log, now) if after_close else 0
+    if expired:
+        _save_sent_log(sent_log)
+        logger.info("장 마감 미사용 사고팔기 신호 %s건 정리", expired)
     if not view["strategies"] and not view["errors"]:
         return {"sent": False, "reason": "슬랙이 켜진 계좌를 고른 사고팔기 전략이 없습니다.", "triggers": []}
     for sid, message in view["errors"].items():
         logger.error("사고팔기 운용 현황 실패(%s) — 이 전략은 건너뜁니다: %s", sid, message)
 
-    now = datetime.now(KST)
-    open_strategies = [strategy for strategy in view["strategies"] if _can_notify(strategy, now)]
+    open_strategies = [
+        strategy for strategy in view["strategies"] if strategy["account_id"] in enabled and _can_notify(strategy, now)
+    ]
     if not open_strategies:
         reason = (
             "거래 가능 시간인 사고팔기 종목이 없습니다." if view["strategies"] else "운용 현황을 확인할 수 없습니다."
         )
         return {"sent": False, "reason": reason, "triggers": []}
-    deferred_ids = {strategy["strategy_id"] for strategy in view["strategies"]} - {
+    deferred_ids = {strategy["strategy_id"] for strategy in view["strategies"] if strategy["account_id"] in enabled} - {
         strategy["strategy_id"] for strategy in open_strategies
     }
     triggers = [trigger for strategy in open_strategies for trigger in collect_triggers(strategy)]
@@ -580,7 +647,6 @@ def notify_strategy_trade() -> dict[str, Any]:
             and not (trigger["rebuy"] and (trigger["strategy_id"], trigger["round"], "buy") in in_flight)
         ]
     today = now.strftime("%Y-%m-%d")
-    sent_log = _load_sent_log()
 
     # 처음 보는 신호는 전 회차 현황이 담긴 본문으로, 이미 보낸 신호는 아직 살아 있는 동안
     # 한 시간마다 한 줄 리마인더로 보낸다. 지정가에 닿아 있는데 주문을 안 넣은 채로
@@ -640,10 +706,15 @@ def notify_strategy_trade() -> dict[str, Any]:
                 sent_log.update({_trigger_key(pending): pending for pending in own_confirmed})
                 continue
             sent_count += 1
+            entries = [_log_entry(trigger, held_counts, stamp, signal_ts) for trigger in fresh]
+            if entries:
+                record_signal_thread(signal_ts, entries)
+                if own_confirmed:
+                    mark_signal_thread_used(signal_ts)
             order_failed += _send_order_messages(strategy_view, fresh, signal_ts)
             fresh_all.extend(fresh)
-            for trigger in fresh:
-                sent_log[_trigger_key(trigger)] = _log_entry(trigger, held_counts, stamp, signal_ts)
+            for entry in entries:
+                sent_log[_trigger_key(entry)] = entry
         sent, failed, order_failed_here, delivered = _send_repeats(strategy_view, repeats, sent_log, held_counts, stamp)
         sent_count += sent
         failed_count += failed

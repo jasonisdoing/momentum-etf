@@ -198,7 +198,7 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
   {
     field: "run_location",
     headerName: "실행 위치",
-    width: 104,
+    width: 80,
     headerTooltip: "이 잡을 잡을 수 있는 워커 — LOCAL 전용은 큐의 LOCAL_ONLY_JOBS(백엔드)가 단일 소스",
     cellStyle: { textAlign: "center" },
     cellRenderer: (p: { value?: string }) =>
@@ -211,8 +211,8 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
   {
     field: "cadence",
     headerName: "자동 주기",
-    minWidth: 360,
-    width: 380,
+    minWidth: 320,
+    width: 340,
     cellRenderer: (params: { value?: string }) => {
       const text = params.value ?? "";
       return text || "-";
@@ -460,9 +460,9 @@ export function SystemManager({
     const matchedPendings = batchQueue
       .filter((q) => q.status === "pending" && (q.job_name === jobKey || q.job_name.startsWith(`${jobKey}:`)))
       .sort((a, b) => String(a.triggered_at ?? "").localeCompare(String(b.triggered_at ?? "")));
-    
+
     if (matchedPendings.length === 0) return "";
-    
+
     const parts = matchedPendings.map((q, idx) => {
       const suffix = q.job_name.includes(":") ? q.job_name.split(":")[1] : "";
       const label = POOL_NAME_MAP[suffix] || suffix;

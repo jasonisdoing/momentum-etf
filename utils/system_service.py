@@ -75,6 +75,8 @@ _STRATEGY_TRADE_SLOTS = [
     {"hour": 15, "minute": 40},
     {"hour": 15, "minute": 50},
     *({"hour": hour, "minute": minute} for hour in range(16, 20) for minute in range(0, 60, 10)),
+    {"hour": 20, "minute": 0},
+    {"hour": 20, "minute": 10},
 ]
 
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
@@ -150,7 +152,7 @@ SCHEDULE_ROWS = [
         "job": "전략 사고팔기 알림",
         "target": "계좌에 등록한 종목별 사고팔기 전략 (슬랙 켠 계좌만 발송, 원장은 전 계좌 계산)",
         "run_location": "SERVER/LOCAL",
-        "cadence": "한국 거래일 09:10~19:50 KST 10분 간격 (15:30 제외)",
+        "cadence": "한국 거래일 09:10~20:10 KST 10분 간격 (15:30 제외)",
         "command": "python scripts/strategy_trade_notify.py",
         "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },

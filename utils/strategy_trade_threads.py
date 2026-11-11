@@ -57,6 +57,42 @@ def send_thread_message(
     return ts
 
 
+def record_signal_thread(signal_ts: str, entries: list[dict[str, Any]]) -> None:
+    """새 신호를 스레드에 연결한다. 같은 회차에서 다음 신호가 나가도 이 기록은 남는다."""
+    _messages().update_one(
+        {"thread_ts": signal_ts, "ts": signal_ts},
+        {"$set": {"signal_entries": entries}},
+    )
+
+
+def mark_signal_thread_used(signal_ts: str) -> None:
+    _messages().update_one({"thread_ts": signal_ts, "ts": signal_ts}, {"$set": {"signal_used": True}})
+
+
+def open_signal_threads() -> list[dict[str, Any]]:
+    return list(
+        _messages().find(
+            {"signal_entries": {"$exists": True}, "signal_used": {"$ne": True}},
+            {"_id": 0, "thread_ts": 1, "signal_entries": 1},
+        )
+    )
+
+
+def expire_signal_thread(signal_ts: str) -> bool:
+    """주문 이력이 없는 미사용 신호 스레드를 지운다."""
+    from utils.strategy_trade_orders import _orders
+
+    if _orders().find_one({"slack.thread_ts": signal_ts}, {"_id": 1}) is not None:
+        mark_signal_thread_used(signal_ts)
+        return False
+    root = {"thread_ts": signal_ts, "ts": signal_ts}
+    if _messages().find_one({**root, "signal_used": True}, {"_id": 1}):
+        return False
+    _delete_slack_thread(signal_ts)
+    _forget_thread(signal_ts)
+    return True
+
+
 def _require_no_orders(signal_ts: str) -> None:
     """이 신호의 스레드로 낸 주문이 있으면 지우지 않는다 — 접수·체결 추적과 스레드 완료 표시가 끊긴다.
 
@@ -83,6 +119,8 @@ def _delete_slack_thread(signal_ts: str) -> None:
     client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
     failed: list[str] = []
     for ts, channel in ordered:
+        if ts == signal_ts and failed:
+            break
         try:
             client.chat_delete(channel=channel, ts=ts)
         except SlackApiError as exc:
