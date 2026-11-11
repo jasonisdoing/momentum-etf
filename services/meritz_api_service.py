@@ -123,10 +123,18 @@ def _issue_token(account_id: str) -> str:
         raise BrokerApiError(f"메리츠증권 토큰 발급 실패 ({account_id}): {_message_of(data, response)}")
     exp = time.time() + float(expires_in)
     _token_collection().update_one(
-        {"_id": _token_doc_id(account_id)}, {"$set": {"token": token, "exp": exp}}, upsert=True
+        {"_id": _token_doc_id(account_id)},
+        {"$set": {"token": token, "exp": exp, "issued_at": time.time()}},
+        upsert=True,
     )
     logger.info("[MERITZ] %s 토큰 발급 (만료 %s)", account_id, time.strftime("%m-%d %H:%M", time.localtime(exp)))
     return str(token)
+
+
+def token_age_seconds(account_id: str) -> int | None:
+    """공유 토큰을 발급한 지 몇 초인지 — 발급 시각이 기록되기 전의 토큰이면 None. 만료 실험 기록용이다."""
+    issued_at = _token_collection().find_one({"_id": _token_doc_id(account_id)}, {"issued_at": 1}) or {}
+    return int(time.time() - float(issued_at["issued_at"])) if issued_at.get("issued_at") else None
 
 
 def _access_token(account_id: str) -> str:
