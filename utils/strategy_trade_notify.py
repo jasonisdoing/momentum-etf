@@ -72,6 +72,12 @@ def _save_sent_log(sent_log: dict[str, dict[str, Any]]) -> None:
 # 같은 신호가 계속 살아 있을 때 다시 알리는 주기. 10분마다 도는 배치가 매번 보내면
 # 소음이라 첫 발송 뒤에는 이 간격으로만 한 줄 리마인더를 보낸다.
 _REPEAT_INTERVAL_SECONDS = 60 * 60
+_WITHDRAWAL_GAP_FRACTION = 0.20
+
+
+def _withdrawal_price(base: float, gap_pct: float, *, buy: bool) -> float:
+    distance = base * gap_pct / 100 * (1 - _WITHDRAWAL_GAP_FRACTION)
+    return round(base - distance if buy else base + distance, 6)
 
 
 def _trigger_key(trigger: dict[str, Any]) -> str:
@@ -173,6 +179,8 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
     sid = strategy_view["strategy_id"]
     label = strategy_view["label"]
     index = strategy_view["index"]
+    gap_pct = strategy_view["config"]["trigger_pct"]
+    buy_base = strategy_view["status"]["last_buy_price"] or index["prev_close"]
     triggers: list[dict[str, Any]] = []
     for row in strategy_view["rounds"]:
         if row["held"] and row["sell_reached"]:
@@ -185,6 +193,7 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
                     "ticker": row["ticker"],
                     "name": row["name"],
                     "limit_price": row["sell_limit"],
+                    "withdrawal_price": _withdrawal_price(row["fill_price"], gap_pct, buy=False),
                     "close": row["close"],
                     "quantity": row["quantity"],
                     "index_level": row["sell_index"],
@@ -207,6 +216,7 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
                     "ticker": row["ticker"],
                     "name": row["name"],
                     "limit_price": row["buy_limit"],
+                    "withdrawal_price": None if row["close_entry"] else _withdrawal_price(buy_base, gap_pct, buy=True),
                     "close": row["close"],
                     "quantity": row["quantity"],
                     "index_level": row["buy_index"],
@@ -229,6 +239,7 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
             "arbitrary_id": lot["id"],
             "quantity": lot["quantity"],
             "limit_price": lot["sell_limit"],
+            "withdrawal_price": _withdrawal_price(lot["fill_price"], gap_pct, buy=False),
             "index_level": lot["sell_limit"],
             "close": index["close"],
             "index": index,
@@ -469,6 +480,8 @@ def _log_entry(trigger: dict[str, Any], held_counts: dict[str, int], stamp: str,
         "round": trigger["round"],
         "arbitrary_id": trigger.get("arbitrary_id"),
         "quantity": trigger["quantity"],
+        "limit_price": trigger["limit_price"],
+        "withdrawal_price": trigger["withdrawal_price"],
         "index_text": _index_text(trigger["index"]),
         "signal_ts": signal_ts,
         # 발송 시점의 보유 회차 수 — 체결 확인은 회차 수 증감으로 판정한다(참고 기록).
@@ -549,26 +562,71 @@ def _send_repeats(
     return sent, failed, order_failed, delivered
 
 
-def _expire_unused_signals(strategies: list[dict[str, Any]], sent_log: dict[str, dict[str, Any]], now: datetime) -> int:
-    """종목의 마지막 거래 구간이 끝난 뒤, 주문·체결에 쓰이지 않은 신호만 지운다."""
-    from utils.strategy_trade_threads import expire_signal_thread, mark_signal_thread_used, open_signal_threads
+def _withdrawal_note(entries: list[dict[str, Any]], strategy: dict[str, Any], now: datetime) -> str | None:
+    current = strategy["index"]["close"]
+    if current <= 0:
+        return None
+    details = []
+    for entry in entries:
+        sent_at = _parse_sent_at(entry.get("at"))
+        threshold = entry.get("withdrawal_price")
+        target = entry.get("limit_price")
+        if sent_at is None or sent_at.date() != now.date() or threshold is None or target is None:
+            return None
+        buy = entry["action"] == "buy"
+        if buy and not (current >= threshold and current > target):
+            return None
+        if not buy and not (current <= threshold and current < target):
+            return None
+        label = "임의 매도" if entry.get("arbitrary_id") else f"{entry['round']}호 {'매수' if buy else '매도'}"
+        details.append(f"• {label} · 발송 기준 {target:,}원")
+    return (
+        f"↩️ *{strategy['label']} 사고팔기 신호 회수* · {strategy['account_name']}\n"
+        f"가격이 회수 기준까지 되돌아왔습니다. · {now:%Y-%m-%d %H:%M} KST · 현재가 {current:,}원\n" + "\n".join(details)
+    )
+
+
+def _settle_unused_signals(
+    strategies: list[dict[str, Any]], sent_log: dict[str, dict[str, Any]], now: datetime
+) -> tuple[int, int]:
+    """장중에 가격이 되돌아온 신호는 회수하고, 마감 후 미사용 신호는 지운다."""
+    from utils.strategy_trade_threads import (
+        claim_signal_withdrawal,
+        expire_signal_thread,
+        finish_signal_withdrawal,
+        mark_signal_thread_used,
+        open_signal_threads,
+    )
 
     by_strategy = {strategy["strategy_id"]: strategy for strategy in strategies}
-    candidates = {thread["thread_ts"]: thread["signal_entries"] for thread in open_signal_threads()}
+    active_roots = {entry["signal_ts"] for entry in sent_log.values() if entry.get("signal_ts")}
+    candidates = {thread["thread_ts"]: thread for thread in open_signal_threads(active_roots)}
     # 기존 스레드는 발송 기록에 남아 있는 신호로만 마감 여부를 확인한다.
     legacy: dict[str, list[dict[str, Any]]] = {}
     for entry in sent_log.values():
         if (root := entry.get("signal_ts")) and root not in candidates:
             legacy.setdefault(root, []).append(entry)
-    candidates.update(legacy)
+    candidates.update({root: {"signal_entries": entries} for root, entries in legacy.items()})
 
     expired = set()
-    for root, entries in candidates.items():
+    withdrawn = set()
+    for root, thread in candidates.items():
+        if note := thread.get("withdrawal_text"):
+            withdrawn.add(root)
+            if not thread.get("withdrawal_done"):
+                try:
+                    finish_signal_withdrawal(root, note)
+                except ValueError:
+                    logger.exception("사고팔기 신호 회수 답글 정리 실패: %s", root)
+            continue
+        entries = thread["signal_entries"]
         strategy = by_strategy.get(entries[0]["strategy_id"])
         if strategy is None:
             continue
         close = max(end for _, end in INSTRUMENT_TRADING_WINDOWS["kor"][strategy["instrument_kind"]])
-        if now.time() < close:
+        after_close = now.time() >= close
+        note = None if after_close else _withdrawal_note(entries, strategy, now)
+        if not after_close and (note is None or not _can_notify(strategy, now)):
             continue
         held = strategy["status"]["held_count"]
         fills = {row["round"]: row["fill_price"] for row in strategy["rounds"] if row["held"]}
@@ -587,13 +645,18 @@ def _expire_unused_signals(strategies: list[dict[str, Any]], sent_log: dict[str,
             mark_signal_thread_used(root)
             continue
         try:
-            if expire_signal_thread(root):
+            if note is not None:
+                if claim_signal_withdrawal(root, note):
+                    withdrawn.add(root)
+                    finish_signal_withdrawal(root, note)
+            elif expire_signal_thread(root):
                 expired.add(root)
         except ValueError:
-            logger.exception("장 마감 사고팔기 신호 정리 실패: %s", root)
-    for key in [key for key, entry in sent_log.items() if entry.get("signal_ts") in expired]:
+            logger.exception("사고팔기 신호 정리 실패: %s", root)
+    inactive = expired | withdrawn
+    for key in [key for key, entry in sent_log.items() if entry.get("signal_ts") in inactive]:
         del sent_log[key]
-    return len(expired)
+    return len(expired), len(withdrawn)
 
 
 def notify_strategy_trade() -> dict[str, Any]:
@@ -615,10 +678,10 @@ def notify_strategy_trade() -> dict[str, Any]:
     after_close = now.time() >= first_close
     view = load_views_where(lambda entry: after_close or entry["account_id"] in enabled, fresh=False)
     sent_log = _load_sent_log()
-    expired = _expire_unused_signals(view["strategies"], sent_log, now) if after_close else 0
-    if expired:
+    expired, withdrawn = _settle_unused_signals(view["strategies"], sent_log, now)
+    if expired or withdrawn:
         _save_sent_log(sent_log)
-        logger.info("장 마감 미사용 사고팔기 신호 %s건 정리", expired)
+        logger.info("사고팔기 장중 신호 %s건 회수, 장 마감 미사용 신호 %s건 정리", withdrawn, expired)
     if not view["strategies"] and not view["errors"]:
         return {"sent": False, "reason": "슬랙이 켜진 계좌를 고른 사고팔기 전략이 없습니다.", "triggers": []}
     for sid, message in view["errors"].items():

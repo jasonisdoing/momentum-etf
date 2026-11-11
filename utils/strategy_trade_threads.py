@@ -15,7 +15,7 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 from utils.db_manager import get_db_connection
-from utils.notification import send_slack_message_v2
+from utils.notification import send_slack_message_v2, update_slack_message
 from utils.settings_loader import get_slack_channel
 
 COLLECTION = "strategy_trade_slack_messages"
@@ -69,24 +69,80 @@ def mark_signal_thread_used(signal_ts: str) -> None:
     _messages().update_one({"thread_ts": signal_ts, "ts": signal_ts}, {"$set": {"signal_used": True}})
 
 
-def open_signal_threads() -> list[dict[str, Any]]:
+def reserve_signal_for_order(signal_ts: str) -> bool:
+    """주문 요청과 신호 회수 중 먼저 기록된 쪽이 진행한다."""
+    root = {"thread_ts": signal_ts, "ts": signal_ts}
+    updated = _messages().update_one({**root, "withdrawal_text": {"$exists": False}}, {"$set": {"signal_used": True}})
+    return (
+        bool(updated.matched_count)
+        or _messages().find_one({**root, "withdrawal_text": {"$exists": True}}, {"_id": 1}) is None
+    )
+
+
+def open_signal_threads(active_roots: set[str]) -> list[dict[str, Any]]:
     return list(
         _messages().find(
-            {"signal_entries": {"$exists": True}, "signal_used": {"$ne": True}},
-            {"_id": 0, "thread_ts": 1, "signal_entries": 1},
+            {
+                "signal_entries": {"$exists": True},
+                "signal_used": {"$ne": True},
+                "$or": [{"withdrawal_done": {"$ne": True}}, {"thread_ts": {"$in": list(active_roots)}}],
+            },
+            {"_id": 0, "thread_ts": 1, "signal_entries": 1, "withdrawal_text": 1, "withdrawal_done": 1},
         )
     )
 
 
-def expire_signal_thread(signal_ts: str) -> bool:
-    """주문 이력이 없는 미사용 신호 스레드를 지운다."""
+def _signal_thread_has_orders(signal_ts: str) -> bool:
     from utils.strategy_trade_orders import _orders
 
     if _orders().find_one({"slack.thread_ts": signal_ts}, {"_id": 1}) is not None:
         mark_signal_thread_used(signal_ts)
+        return True
+    return False
+
+
+def claim_signal_withdrawal(signal_ts: str, note: str) -> bool:
+    if _signal_thread_has_orders(signal_ts):
+        return False
+    return bool(
+        _messages()
+        .update_one(
+            {
+                "thread_ts": signal_ts,
+                "ts": signal_ts,
+                "signal_used": {"$ne": True},
+                "withdrawal_text": {"$exists": False},
+            },
+            {"$set": {"withdrawal_text": note}},
+        )
+        .matched_count
+    )
+
+
+def finish_signal_withdrawal(signal_ts: str, note: str) -> None:
+    """본문에 회수를 기록하고 앱이 보낸 답글만 제거한다."""
+    root = {"thread_ts": signal_ts, "ts": signal_ts}
+    record = _messages().find_one(root, {"channel": 1})
+    if record is None:
+        raise ValueError("회수할 슬랙 메시지 기록을 찾을 수 없습니다.")
+    try:
+        update_slack_message(note, channel=record["channel"], message_ts=signal_ts, blocks=[])
+    except SlackApiError as exc:
+        if exc.response.get("error") != _ALREADY_GONE:
+            raise ValueError("회수한 슬랙 본문을 수정하지 못했습니다.") from exc
+    _delete_slack_thread(signal_ts, keep_root=True)
+    _forget_thread(signal_ts, keep_root=True)
+    _messages().update_one(root, {"$set": {"withdrawal_done": True}})
+
+
+def expire_signal_thread(signal_ts: str) -> bool:
+    """주문 이력이 없는 미사용 신호 스레드를 지운다."""
+    if _signal_thread_has_orders(signal_ts):
         return False
     root = {"thread_ts": signal_ts, "ts": signal_ts}
-    if _messages().find_one({**root, "signal_used": True}, {"_id": 1}):
+    if _messages().find_one(
+        {**root, "$or": [{"signal_used": True}, {"withdrawal_text": {"$exists": True}}]}, {"_id": 1}
+    ):
         return False
     _delete_slack_thread(signal_ts)
     _forget_thread(signal_ts)
@@ -109,13 +165,14 @@ def _require_no_orders(signal_ts: str) -> None:
         raise ValueError("이 신호로 낸 주문이 있어 삭제할 수 없습니다.")
 
 
-def _delete_slack_thread(signal_ts: str) -> None:
+def _delete_slack_thread(signal_ts: str, *, keep_root: bool = False) -> None:
     """스레드의 기록된 메시지를 답글부터 지우고 뿌리를 마지막에 지운다 — 실패한 것이 있으면 에러로 알린다."""
     records = list(_messages().find({"thread_ts": signal_ts}))
     targets = {record["ts"]: record["channel"] for record in records if record["ts"] != signal_ts}
     # 답글은 최신 것부터, 뿌리는 마지막.
     ordered = [(ts, targets[ts]) for ts in sorted(targets, reverse=True)]
-    ordered.append((signal_ts, next((r["channel"] for r in records if r["ts"] == signal_ts), get_slack_channel())))
+    if not keep_root:
+        ordered.append((signal_ts, next((r["channel"] for r in records if r["ts"] == signal_ts), get_slack_channel())))
     client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
     failed: list[str] = []
     for ts, channel in ordered:
@@ -131,11 +188,14 @@ def _delete_slack_thread(signal_ts: str) -> None:
         raise ValueError(f"슬랙 메시지를 모두 지우지 못했습니다: {', '.join(sorted(set(failed)))}")
 
 
-def _forget_thread(signal_ts: str) -> None:
+def _forget_thread(signal_ts: str, *, keep_root: bool = False) -> None:
     """스레드의 메시지 기록과 스레드 추적 기록을 지운다."""
     from utils.strategy_trade_orders import _SETTINGS_KEY, _config
 
-    _messages().delete_many({"thread_ts": signal_ts})
+    query: dict[str, Any] = {"thread_ts": signal_ts}
+    if keep_root:
+        query["ts"] = {"$ne": signal_ts}
+    _messages().delete_many(query)
     _config().update_one({"_id": _SETTINGS_KEY}, {"$pull": {"signal_threads": {"thread_ts": signal_ts}}})
 
 
@@ -150,6 +210,10 @@ def delete_signal_thread(key: str) -> dict[str, Any]:
     signal_ts = entry.get("signal_ts")
     if not signal_ts:
         raise ValueError("슬랙 메시지 기록이 없는 신호는 지울 수 없습니다.")
+    if _messages().find_one(
+        {"ts": signal_ts, "thread_ts": signal_ts, "withdrawal_text": {"$exists": True}}, {"_id": 1}
+    ):
+        raise ValueError("이미 회수된 신호입니다.")
     doomed = [k for k, value in sent_log.items() if value.get("signal_ts") == signal_ts]
     _require_no_orders(signal_ts)
     _delete_slack_thread(signal_ts)

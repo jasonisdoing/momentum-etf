@@ -532,6 +532,10 @@ def run_submission(target: dict[str, Any]) -> None:
     """확인된 주문·취소를 처리한다 — 응답 뒤 백그라운드에서 돈다."""
     try:
         if target["kind"] == "order":
+            from utils.strategy_trade_threads import reserve_signal_for_order
+
+            if not reserve_signal_for_order(target["thread_ts"]):
+                return
             _place(target)
         else:
             _cancel(target)
