@@ -136,6 +136,8 @@ type PlanRow = {
   entry_date: string | null;
   entry_price: number | null;
   return_pct: number | null;
+  /** 전 계좌 통합 평균 매입가 — 실제 수익률(현재가 대비) 계산용. 보유 행에만 있다. */
+  average_buy_price?: number | null;
   plan: SlotPlan;
   value_mult?: number | null;
   value_mult_live?: number | null;
@@ -816,9 +818,7 @@ export function MomentumClient() {
         valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number, positions?.currency)),
       },
       prevDayChangeColumn<PlanRow>("prev_day_change_pct"),
-      volatilityColumn<PlanRow>(),
-      tradeValueMultColumn<PlanRow>(),
-      // 이탈 여유와 수익률은 매일 보는 판단 칸이라 거래대금 바로 오른쪽에 모은다 —
+      // 이탈 여유와 수익률은 매일 보는 판단 칸이라 전일 등락 바로 오른쪽에 모은다 —
       // 공용 꼬리 컬럼(slotTradeColumns)에서 수익률만 앞으로 빼고 나머지는 뒤에 둔다.
       // 이탈까지 남은 여유 — 둘 중 하나라도 0 이하가 되면 다음 거래일 시가에 판다.
       maExitGapColumn<PlanRow>({
@@ -833,7 +833,26 @@ export function MomentumClient() {
         maType: positions?.ma_type,
         entry: { mult: view?.settings.entry_vol_mult ?? null, getVolatility: (row) => row?.volatility_pct },
       }),
-      ...slotTradeColumns<PlanRow>({ fillDay }).filter((col) => col.field === "return_pct"),
+      volatilityColumn<PlanRow>(),
+      tradeValueMultColumn<PlanRow>(),
+      // 실제 수익률 — 계좌 평단 대비(합성 화면과 같은 계산). 전략 수익률은 이론 편입가 대비라 따로 둔다.
+      {
+        colId: "actual_return_pct",
+        headerName: "수익률",
+        width: 96,
+        type: "numericColumn",
+        headerTooltip: "전 계좌 통합 평균 매입가 대비 실제 수익률. 보유하지 않은 종목은 평단이 없어 비어 있다.",
+        valueGetter: (p) => {
+          const average = Number(p.data?.average_buy_price ?? 0);
+          const price = Number(p.data?.price ?? 0);
+          return average > 0 && price > 0 ? (price / average - 1) * 100 : null;
+        },
+        valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
+        cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 700 }),
+      },
+      ...slotTradeColumns<PlanRow>({ fillDay })
+        .filter((col) => col.field === "return_pct")
+        .map((col) => ({ ...col, headerName: "전략 수익률", width: 116, headerTooltip: "전략이 잡은 편입가 대비 이론 수익률. 아직 청산 전이라 매도 슬리피지는 빠져 있다." })),
       ...slotTradeColumns<PlanRow>({ fillDay }).filter((col) => col.field !== "return_pct"),
     ],
     [
@@ -890,8 +909,6 @@ export function MomentumClient() {
         valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number, positions?.currency)),
       },
       prevDayChangeColumn<CandidateRow>("prev_day_change_pct"),
-      volatilityColumn<CandidateRow>(),
-      tradeValueMultColumn<CandidateRow>(),
       maExitGapColumn<CandidateRow>({
         field: "short_gap_pct",
         maDays: view?.settings.short_ma_days,
@@ -904,6 +921,8 @@ export function MomentumClient() {
         maType: positions?.ma_type,
         entry: { mult: view?.settings.entry_vol_mult ?? null, getVolatility: (row) => row?.volatility_pct },
       }),
+      volatilityColumn<CandidateRow>(),
+      tradeValueMultColumn<CandidateRow>(),
     ],
     [
       hasIndustryData,

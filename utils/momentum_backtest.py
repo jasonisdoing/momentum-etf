@@ -436,6 +436,12 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     # 반영되지 않는다. 실계좌에 있으면 어떤 행이든 보유 표시(녹색)가 붙어야 한다.
     for item in [*rows, *holdings, *exited_today, *entries]:
         item["account_held"] = str(item.get("ticker") or "").strip().upper() in account_held
+    # 실제 수익률용 평단 — 전 계좌 수량 가중 통합 평균(그 풀 통화 보유분만). 화면이 실시간 현재가로 다시 계산한다.
+    from utils.portfolio_io import average_buy_price_by_ticker
+
+    average_by_ticker = average_buy_price_by_ticker([h["ticker"] for h in holdings], info["currency"])
+    for item in holdings:
+        item["average_buy_price"] = average_by_ticker.get(str(item["ticker"]).strip().upper())
 
     held_tickers = {h["ticker"] for h in holdings}
     entry_tickers = {row["ticker"] for row in entries}
