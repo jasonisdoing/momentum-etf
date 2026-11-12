@@ -266,7 +266,7 @@ def _account_line(request: dict[str, Any]) -> str:
 
 
 def _signal_gap_pct(order: dict[str, Any]) -> float | None:
-    """신호 가격(매도 목표·매수선) 대비 주문 가격 차이 % — 신호 가격이 없는 주문(장 마감 매수)은 None."""
+    """신호 가격(매도 목표·매수선) 대비 주문 가격 차이 % — 신호 가격이 없는 주문(정해진 시각에 사는 1호)은 None."""
     if order["signal_price"] is None:
         return None
     return (order["price"] / order["signal_price"] - 1.0) * 100.0

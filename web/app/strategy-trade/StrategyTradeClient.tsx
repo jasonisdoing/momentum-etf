@@ -1002,7 +1002,7 @@ function StrategySection({
         ) : status.cash_short ? (
           <span style={actionBadgeStyle("var(--text-muted)")}>⏸ {status.next_round}호 한도 소진 — 현금 부족</span>
         ) : nextRow?.close_entry ? (
-          <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>📉 {status.next_round}호 장 마감 매수!</span>
+          <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>📉 {status.next_round}호 {status.first_entry_time} 매수!</span>
         ) : status.next_buy_drop_pct != null ? (
           <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>
             {status.next_buy_drop_pct >= 0

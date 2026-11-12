@@ -155,9 +155,11 @@ def _confirm_line(pending: dict[str, Any], index: dict[str, Any] | None, country
 
 
 def _reach_text(trigger: dict[str, Any]) -> str:
-    """신호가 난 까닭 — 지정가 도달, 또는 정해진 구간의 1호 매수."""
+    """신호가 난 까닭 — 지정가 도달, 또는 정해진 시각(한국시간)의 1호 매수."""
     return (
-        "장 마감 매수" if trigger.get("close_entry") else f"{_level(trigger['index_level'], trigger['country'])} 도달"
+        f"{trigger['entry_time']} 매수"
+        if trigger.get("close_entry")
+        else f"{_level(trigger['index_level'], trigger['country'])} 도달"
     )
 
 
@@ -230,6 +232,8 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
                     "index": index,
                     "profit_pct": None,
                     "close_entry": row["close_entry"],
+                    # 정해진 시각에 사는 1호의 그 시각(한국시간) — 신호 문구에 쓴다.
+                    "entry_time": strategy_view["status"]["first_entry_time"],
                     "rebuy": False,
                     "fill_price": None,
                 }
@@ -367,7 +371,7 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     elif status["cash_short"]:
         parts.append(f"⏸ {status['next_round']}호 한도 소진 — 현금 부족")
     elif next_row is not None and next_row["close_entry"]:
-        parts.append(f"📉 *{status['next_round']}호 장 마감 매수!*")
+        parts.append(f"📉 *{status['next_round']}호 {status['first_entry_time']} 매수!*")
     elif status["waiting_first_entry"]:
         parts.append(f"⏳ 1호 {status['first_entry_time']} 매수 예정")
     elif drop >= 0 and status["sell_pending"]:
@@ -423,7 +427,7 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
         elif row["is_next"]:
             if row["buy_reached"]:
                 reach = (
-                    f"장 마감 매수 · 현재가 {_level(row['close'], country)}"
+                    f"{status['first_entry_time']} 매수 · 현재가 {_level(row['close'], country)}"
                     if row["close_entry"]
                     else f"{_level(row['buy_index'], country)} 도달"
                 )
