@@ -216,11 +216,10 @@ def collect_global_totals() -> dict[str, object]:
     }
 
 
-def _trade_summary_lines(name: str, item: dict, total_assets: float | None) -> list[str]:
+def _trade_summary_lines(name: str, item: dict) -> list[str]:
     """사고팔기 요약 한 덩어리(계좌 하나 또는 전체) — 평가수익·실현손익·투입·체결·주문."""
     invested = item["invested"]
     unrealized_pct = (item["unrealized"] / invested * 100) if invested > 0 else 0.0
-    weight = f" · 총자산 대비 {invested / total_assets * 100:.1f}%" if total_assets else ""
     unknown = f" (체결가 모르는 매도 {item['realized_unknown_sells']}건 제외)" if item["realized_unknown_sells"] else ""
     orders = item["signal_orders"] + item["manual_orders"]
     return [
@@ -230,25 +229,24 @@ def _trade_summary_lines(name: str, item: dict, total_assets: float | None) -> l
         f"  - 금일 실현손익: {get_trend_emoji(item['realized_today'])} {format_korean_currency(item['realized_today'])}",
         f"  - 최근 30일 실현손익: {get_trend_emoji(item['realized_recent'])} "
         f"{format_korean_currency(item['realized_recent'])}{unknown}",
-        f"  - 투입 원금: {format_korean_currency(invested)}{weight}",
+        f"  - 투입 원금: {format_korean_currency(invested)}",
         f"  - 금일 체결: 매수 {item['today_buys']}건 · 매도 {item['today_sells']}건",
         f"  - 미체결 주문: {orders}건",
     ]
 
 
-def _trade_summary_text(account_summaries: list[dict]) -> str:
+def _trade_summary_text() -> str:
     """사고팔기 전략 요약 — 계좌별과 전체 합계. 현황을 못 만든 전략은 숨기지 않고 알린다."""
     summaries, errors = load_trade_summaries()
-    assets = {acc["account_id"]: acc["total_assets"] for acc in account_summaries}
     lines = ["*🔁 사고팔기 전략*"]
     total: dict = {}
-    for account_id, item in summaries.items():
-        lines.extend(_trade_summary_lines(item["account_name"], item, assets.get(account_id)))
+    for item in summaries.values():
+        lines.extend(_trade_summary_lines(item["account_name"], item))
         for key, value in item.items():
             if isinstance(value, (int, float)):
                 total[key] = total.get(key, 0) + value
     if len(summaries) > 1:
-        lines.extend(_trade_summary_lines("전체", total, sum(assets.get(account_id, 0.0) for account_id in summaries)))
+        lines.extend(_trade_summary_lines("전체", total))
     if not summaries:
         lines.append("운용 중인 전략 없음")
     if errors:
@@ -468,7 +466,7 @@ def main():
             "accounts": "\n\n".join(acc_details),
             "composition": "\n".join(comp_details),
             "cash_ratios": "\n".join(cash_ratio_details),
-            "strategy_trade": _trade_summary_text(account_summaries),
+            "strategy_trade": _trade_summary_text(),
         },
     )
 
