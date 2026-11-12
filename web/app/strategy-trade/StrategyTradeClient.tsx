@@ -34,7 +34,6 @@ type StrategyConfig = {
 type IndexStatus = {
   name: string;
   close: number;
-  buy_trigger: number;
   // 최근 지수 저점(라벨은 서버가 정한다) — 회차 지정가가 어느 층에 걸리는지 가늠하는 기준선.
   recent_low: number;
   recent_low_date: string;
@@ -47,7 +46,7 @@ type IndexStatus = {
 type Status = {
   held_count: number;
   waiting_first_entry: boolean;
-  // 보유 0 인데 장중 1호 진입선에 못 닿았을 때 1호를 사는 시각들(그 시장 현지, "HH:MM·HH:MM").
+  // 보유 0 일 때 1호를 사는 구간의 시작 시각들(그 시장 현지, "HH:MM·HH:MM").
   first_entry_close_time: string;
   held_quantity: number;
   // 증권사 계좌 평균단가(이동평균)와 현재가 대비 수익률(%) — 보유가 없으면 null.
@@ -98,7 +97,7 @@ export type RoundRow = {
   sell_limit: number | null;
   sell_index: number | null;
   buy_reached: boolean;
-  // 진입선이 아니라 장 마감 매수로 닿은 1호 — 현재가로 산다.
+  // 정해진 구간에 사는 1호 — 현재가로 산다.
   close_entry: boolean;
   // 다음 회차를 살 계좌 현금이 없다 — 한도 소진, 이 회차는 사지 않는다.
   cash_short: boolean;
@@ -993,8 +992,7 @@ function StrategySection({
         </span>
         {status.waiting_first_entry ? (
           <span style={{ fontWeight: 700 }}>
-            1호 진입 대기 — {index.name} {formatPrice(index.buy_trigger, currency)} 이하 · 미도달 시{" "}
-            {status.first_entry_close_time} 매수
+            1호 진입 대기 — {status.first_entry_close_time} 매수
           </span>
         ) : status.next_round == null ? (
           <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>회차 소진 — 매도 대기</span>
@@ -1003,11 +1001,11 @@ function StrategySection({
           <span style={actionBadgeStyle("var(--text-muted)")}>⏸ {status.next_round}호 회차 금액으로 1주 매수 불가</span>
         ) : status.cash_short ? (
           <span style={actionBadgeStyle("var(--text-muted)")}>⏸ {status.next_round}호 한도 소진 — 현금 부족</span>
+        ) : nextRow?.close_entry ? (
+          <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>📉 {status.next_round}호 장 마감 매수!</span>
         ) : status.next_buy_drop_pct != null ? (
           <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>
-            {nextRow?.close_entry
-              ? `📉 ${status.next_round}호 장 마감 매수!`
-              : status.next_buy_drop_pct >= 0
+            {status.next_buy_drop_pct >= 0
               ? status.sell_pending
                 ? `📉 ${status.next_round}호 매수가 도달 — ${status.next_sell_round}호 매도 체결 뒤 매수`
                 : `📉 ${status.next_round}호 매수가 도달!`

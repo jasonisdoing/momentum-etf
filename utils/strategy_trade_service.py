@@ -417,7 +417,7 @@ def _load_ticker_status(
     kind: ladder.InstrumentKind,
     country: ladder.Country,
 ) -> dict[str, Any]:
-    """판정 기준 시세 — 이 전략 종목 자신의 현재가·전일 종가·1호 진입선·최근 고점과 저점.
+    """판정 기준 시세 — 이 전략 종목 자신의 현재가·전일 종가·최근 고점과 저점.
 
     (이전에는 코스피/코스닥 지수를 썼지만, 이제 판정·표시 모두 자기 종목 가격이다)
     """
@@ -458,8 +458,6 @@ def _load_ticker_status(
         "close": ladder.round_price(current, country),
         "prev_close": ladder.round_price(prev_close, country),
         "change_pct": round(change_pct, 2),
-        # 1호 진입선 — 전일 종가 대비 -간격%, 호가 단위 반올림.
-        "buy_trigger": ladder.first_buy_limit(prev_close, float(trigger_pct), kind=kind, country=country),
         "recent_low": ladder.round_price(low_value, country),
         "recent_low_date": low_date.strftime("%Y-%m-%d"),
         "recent_low_label": f"{RECENT_PRICE_MONTHS}개월 저점",
@@ -696,12 +694,18 @@ def _build_strategy_view(
             buy_limit = ladder.preview_buy_limit(
                 float(index_status["prev_close"]), round_no, trigger_pct, kind=kind, country=country
             )
-        market_entry = is_next and close_entry and close > buy_limit
-        # 장 마감 매수는 현재가로 사므로 그 가격으로 산 금액을 본다.
-        # 신호에 도달했다면 실제 시세로 예상하고, 대기 중에는 목표 지정가로 예상한다.
-        buy_price = min(close, buy_limit) if is_next and 0 < close <= buy_limit else buy_limit
-        if market_entry:
-            buy_price = close
+        # 1호(보유 없음)는 가격 기준 없이 정해진 구간에서 현재가로 산다 — 전일 종가와 비교하지 않는다.
+        market_entry = is_next and close_entry
+        # 1호는 현재가로 사므로 그 가격으로 산 금액을 본다. 다음 회차부터는 신호에 도달했다면 실제 시세로,
+        # 대기 중에는 목표 지정가로 예상한다.
+        first_round = is_next and last_fill is None
+        buy_price = (
+            close
+            if first_round and close > 0
+            else min(close, buy_limit)
+            if is_next and 0 < close <= buy_limit
+            else buy_limit
+        )
         buy_quantity = round_buy_quantity(round_size, buy_price, rate)
         budget_short = is_next and buy_quantity == 0
         cash_short = is_next and buy_quantity * buy_price > cash
@@ -731,9 +735,9 @@ def _build_strategy_view(
                     and not cash_short
                     and not budget_short
                     and close > 0
-                    and (close <= buy_limit or close_entry)
+                    and (close_entry if last_fill is None else close <= buy_limit)
                 ),
-                # 진입선이 아니라 장 마감 매수로 닿은 1호 — 지정가 대신 현재가로 산다.
+                # 정해진 구간에 사는 1호 — 지정가 대신 현재가로 산다.
                 "close_entry": bool(market_entry and not cash_short and not budget_short),
                 # 다음 회차를 살 현금이 없다 — 한도 소진, 이 회차는 사지 않는다.
                 "cash_short": cash_short,
@@ -749,10 +753,11 @@ def _build_strategy_view(
             if (order["side"] == "buy" and row["is_next"]) or (order["side"] == "sell" and row["round"] == held_rounds)
         ]
 
-    # 다음 회차 매수까지 남은 하락률(%) — 도달했으면 0 이상(+). 회차 소진이면 None.
+    # 다음 회차 매수까지 남은 하락률(%) — 도달했으면 0 이상(+). 회차 소진이거나 1호(가격 기준 없이 정해진 구간에
+    # 산다)면 None.
     next_buy_drop_pct = None
     next_row = next((r for r in rows if r["is_next"]), None)
-    if next_row is not None and next_row["buy_limit"] is not None and close > 0:
+    if next_row is not None and last_fill is not None and next_row["buy_limit"] is not None and close > 0:
         next_buy_drop_pct = round((next_row["buy_limit"] / close - 1.0) * 100.0, 2)
 
     # 가장 가까운 매도 = 마지막(가장 싼) 회차 — 체결가가 가장 낮아 목표도 가장 먼저 닿는다.

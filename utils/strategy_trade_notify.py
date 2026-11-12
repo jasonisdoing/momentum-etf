@@ -2,8 +2,8 @@
 
 거래시간 중 10분마다 실행돼, **매수·매도 지정가에 현재가가 닿은 회차가 있을 때만**
 슬랙을 보낸다. 트리거가 없으면 아무것도 보내지 않는다. 메시지는 **전략(종목)마다 따로**
-보내고, 보낼 것(신호·재알림·체결 확인)이 있는 전략에만 보낸다. 보유 0 인 전략은 장중에 1호
-진입선에 못 닿았어도 장 마감 매수 시각(ETF 15:00·개별주 19:30) 이후 배치에서 1호 장 마감 매수 신호가 난다(서비스가 판정).
+보내고, 보낼 것(신호·재알림·체결 확인)이 있는 전략에만 보낸다. 보유 0 인 전략은 가격과 상관없이
+정해진 1호 매수 구간 안의 배치에서 1호 매수 신호가 난다(서비스가 판정).
 
 중복 방지 · 체결 확인
 --------------------
@@ -155,7 +155,7 @@ def _confirm_line(pending: dict[str, Any], index: dict[str, Any] | None, country
 
 
 def _reach_text(trigger: dict[str, Any]) -> str:
-    """신호가 난 까닭 — 지정가 도달, 또는 장중 미도달 1호의 장 마감 매수."""
+    """신호가 난 까닭 — 지정가 도달, 또는 정해진 구간의 1호 매수."""
     return (
         "장 마감 매수" if trigger.get("close_entry") else f"{_level(trigger['index_level'], trigger['country'])} 도달"
     )
@@ -360,7 +360,7 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     parts = []
     drop = status.get("next_buy_drop_pct")
     next_row = next((row for row in strategy_view["rounds"] if row["is_next"]), None)
-    if drop is None:
+    if status["next_round"] is None:
         parts.append("매수 없음(회차 소진)")
     elif status["budget_short"]:
         parts.append(f"⏸ {status['next_round']}호 회차 금액으로 1주 매수 불가")
@@ -368,6 +368,8 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
         parts.append(f"⏸ {status['next_round']}호 한도 소진 — 현금 부족")
     elif next_row is not None and next_row["close_entry"]:
         parts.append(f"📉 *{status['next_round']}호 장 마감 매수!*")
+    elif status["waiting_first_entry"]:
+        parts.append(f"⏳ 1호 {status['first_entry_close_time']} 매수 대기")
     elif drop >= 0 and status["sell_pending"]:
         parts.append(f"📉 {status['next_round']}호 매수가 도달 — {status['next_sell_round']}호 매도 체결 뒤 매수")
     elif drop >= 0:
@@ -427,13 +429,13 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
                     f"{_already_sent_note(row['round'], 'buy', triggered)}"
                 )
             else:
-                # 보유 0 이면 장중에 못 닿아도 장 마감 매수가 있다.
-                close_note = (
-                    f" · 미도달 시 {status['first_entry_close_time']} 매수" if status["waiting_first_entry"] else ""
+                # 1호는 가격 기준 없이 정해진 구간에 산다 — 회차 가격 대신 매수 시각을 적는다.
+                wait_text = (
+                    f"{status['first_entry_close_time']} 매수"
+                    if status["waiting_first_entry"]
+                    else _level(row["buy_index"], country)
                 )
-                lines.append(
-                    f"⏳ {row['round']}호 {quantity} 다음 매수 대기 · {_level(row['buy_index'], country)}{close_note}"
-                )
+                lines.append(f"⏳ {row['round']}호 {quantity} 다음 매수 대기 · {wait_text}")
         else:
             lines.append(f"⚪ {row['round']}호 {quantity} 이후 회차 · 매수 예정 {_level(row['buy_index'], country)}")
 
