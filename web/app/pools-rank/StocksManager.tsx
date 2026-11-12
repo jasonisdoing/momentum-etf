@@ -316,7 +316,9 @@ function getBucketName(bucketId: number): string {
 }
 
 function getBucketIdByName(bucketName: string): number {
-  return BUCKET_OPTIONS.find((option) => option.name === bucketName)?.id ?? BUCKET_OPTIONS[0]?.id ?? 1;
+  const option = BUCKET_OPTIONS.find((item) => item.name === bucketName);
+  if (!option) throw new Error(`알 수 없는 버킷 이름: ${bucketName}`);
+  return option.id;
 }
 
 function buildDirtyCellKey(rowId: string, field: string): string {
@@ -2065,10 +2067,15 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       );
                     },
                     onCellValueChanged: (params: {
+                      colDef?: { field?: string };
                       data?: RankGridRow;
                       newValue?: unknown;
                       oldValue?: unknown;
                     }) => {
+                      // 버킷 컬럼 편집만 버킷 변경이다 — 메모 등 다른 컬럼 편집에 반응하면 안 된다.
+                      if (params.colDef?.field !== "버킷") {
+                        return;
+                      }
                       if (pageMode !== "manage" || !params.data || params.data.__isAddingRow || params.newValue === params.oldValue) {
                         return;
                       }
