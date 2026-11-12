@@ -43,6 +43,18 @@ def format_money(value: float | None, country: str) -> str:
     return f"{value:,.0f}원" if country == "kor" else f"${value:,.2f}"
 
 
+def krw_rate(country: str) -> float:
+    """종목 통화→원 환율 — 국장 1.0, 미장은 달러 환율. 못 받으면 예외(임의 환율을 쓰지 않는다)."""
+    if country == "kor":
+        return 1.0
+    from services.price_service import get_exchange_rates
+
+    rate = float(((get_exchange_rates(["USD"]) or {}).get("USD") or {}).get("rate") or 0.0)
+    if rate <= 0:
+        raise ValueError("달러 환율을 받을 수 없어 회차 수량을 계산할 수 없습니다.")
+    return rate
+
+
 def broker_order_date(country: str, created: datetime) -> str:
     """증권사 주문내역이 쓰는 주문일자(YYYYMMDD) — 그 시장의 현지 달력 날짜다(미국 애프터 주문은 한국 날짜로 전날)."""
     return created.astimezone(_zone(country)).strftime("%Y%m%d")

@@ -37,11 +37,10 @@ EDITABLE_CONFIG_KEYS: tuple[str, ...] = ("trigger_pct", "round_size", "rounds")
 
 # 편집 가능 범위 — 화면 입력과 API 가 같은 한계를 쓴다.
 PCT_MIN, PCT_MAX = 0.1, 50.0
-# 회차 크기(`round_size`) — 국장은 회차 금액(만원), 미장은 회차 수량(주)이다. 정수로 저장한다.
-ROUND_SIZE_UNIT_VALUES = {"kor": 10_000, "us": 1}
-ROUND_SIZE_UNITS = {"kor": "만원", "us": "주"}
-DEFAULT_ROUND_SIZES = {"kor": 100, "us": 1}
-ROUND_SIZE_MAX = (2**53 - 1) // max(ROUND_SIZE_UNIT_VALUES.values())
+# 회차 크기(`round_size`) — 국가와 무관하게 원화 금액(만원) 정수로 저장한다. 미장은 환율로 달러 수량을 환산한다.
+ROUND_SIZE_UNIT_KRW = 10_000
+DEFAULT_ROUND_SIZE = 100
+ROUND_SIZE_MAX = (2**53 - 1) // ROUND_SIZE_UNIT_KRW
 ROUNDS_MIN, ROUNDS_MAX = 1, 12
 
 
@@ -76,10 +75,8 @@ def validate_strategy_trade_config(values: dict[str, Any]) -> dict[str, float | 
     return cleaned
 
 
-def round_buy_quantity(size: int, price: float, country: str) -> int:
-    """회차 매수 수량 — 국장은 회차 금액(만원)으로 지정가에서 살 수 있는 최대 정수 주수, 미장은 회차 수량 그대로."""
-    if not isfinite(price) or price <= 0:
-        raise ValueError("회차 매수가는 양수여야 합니다.")
-    if country == "us":
-        return size
-    return int((size * ROUND_SIZE_UNIT_VALUES[country]) // price)
+def round_buy_quantity(size: int, price: float, krw_rate: float) -> int:
+    """회차 매수 수량 — 회차 금액(만원)으로 지정가에서 살 수 있는 최대 정수 주수. `krw_rate` 는 종목 통화→원 환율(원화 1.0)."""
+    if not isfinite(price) or price <= 0 or not isfinite(krw_rate) or krw_rate <= 0:
+        raise ValueError("회차 매수가와 환율은 양수여야 합니다.")
+    return int((size * ROUND_SIZE_UNIT_KRW) // (price * krw_rate))

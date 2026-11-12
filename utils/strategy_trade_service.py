@@ -12,7 +12,7 @@ from core.strategy.trade import rules as ladder
 from services.broker_trade_service import resolve_us_exchange
 from utils.logger import get_app_logger
 from utils.strategy_trade_config import (
-    DEFAULT_ROUND_SIZES,
+    DEFAULT_ROUND_SIZE,
     EDITABLE_CONFIG_KEYS,
     FIRST_ENTRY_CLOSE_TIMES,
     TRADE_COUNTRIES,
@@ -30,6 +30,7 @@ from utils.strategy_trade_ledger import (
     refresh_ledgers,
     round_history,
 )
+from utils.strategy_trade_market import krw_rate
 
 KST = ZoneInfo("Asia/Seoul")
 _CONFIG_COLLECTION = "system_config"
@@ -524,6 +525,7 @@ def _build_strategy_view(
     name = str(strategy_settings["name"])
     trigger_pct = float(strategy_settings["trigger_pct"])
     round_size = int(strategy_settings["round_size"])
+    rate = krw_rate(country)
     max_rounds = int(strategy_settings["rounds"])
     exchange = strategy_settings["exchange"]
     if country == "us" and not exchange:
@@ -570,7 +572,7 @@ def _build_strategy_view(
                     regular_lots[round_no - 2].price, 1, trigger_pct, kind=kind, country=country
                 )
                 >= sell_limit
-                and 0 < (rebuy_quantity := round_buy_quantity(round_size, sell_limit, country))
+                and 0 < (rebuy_quantity := round_buy_quantity(round_size, sell_limit, rate))
                 and rebuy_quantity * sell_limit <= cash
             )
             rows.append(
@@ -621,7 +623,7 @@ def _build_strategy_view(
         buy_price = min(close, buy_limit) if is_next and 0 < close <= buy_limit else buy_limit
         if market_entry:
             buy_price = close
-        buy_quantity = round_buy_quantity(round_size, buy_price, country)
+        buy_quantity = round_buy_quantity(round_size, buy_price, rate)
         budget_short = is_next and buy_quantity == 0
         cash_short = is_next and buy_quantity * buy_price > cash
         rows.append(
@@ -927,17 +929,6 @@ def _config_quotes(mine: dict[str, dict[str, Any]], country: str | None) -> dict
     }
 
 
-def _usd_krw() -> float | None:
-    """미장 화면의 원화금액 컬럼용 달러→원 환율 — 못 받으면 None 으로 두어 컬럼을 빈 값으로 보인다."""
-    from services.price_service import get_exchange_rates
-
-    try:
-        return float(get_exchange_rates(["USD"])["USD"]["rate"])
-    except Exception:
-        logger.warning("사고팔기 달러 환율 조회 실패 — 원화금액을 표시하지 않습니다", exc_info=True)
-        return None
-
-
 def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
     """화면용 — 사고팔기 계좌 목록과, 고른 계좌의 슬랙 스위치·전략 설정·운용 현황.
 
@@ -975,8 +966,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
         "groups": _normalize_trade_groups(account.get("groups", [])),
         "pool_options": pool_options(list(pools)),
         "ticker_options": [options[ticker] for ticker in sorted(options)],
-        "default_round_size": DEFAULT_ROUND_SIZES[country] if country else None,
-        "usd_krw": _usd_krw() if country == "us" else None,
+        "default_round_size": DEFAULT_ROUND_SIZE,
         # 편집 표의 행 — 저장된 전략 설정 그대로.
         "configs": [
             {

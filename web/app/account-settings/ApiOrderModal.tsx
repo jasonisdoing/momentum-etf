@@ -7,7 +7,7 @@ import { formatPrice } from "@/lib/price-format";
 import { formatKrw } from "../assets/assets-helpers";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
-import { CURRENCY_BY_COUNTRY, ROUND_SIZE_LABELS, type FailedStrategy, type StrategyView } from "../strategy-trade/StrategyTradeClient";
+import { CURRENCY_BY_COUNTRY, type FailedStrategy, type StrategyView } from "../strategy-trade/StrategyTradeClient";
 
 /** 증권사 서버 주소 — 서버가 계좌 구분(운영·모의)으로 정한다. 화면은 안내 문구로만 쓴다. */
 const MOCK_DOMAIN = "moapi.nhplug.com:8443";
@@ -351,7 +351,7 @@ export function ApiOrderModal({
           <span style={labelStyle}>주문 내용</span>
           <span style={{ fontSize: "var(--fs-base)" }}>
             {strategy && side === "buy"
-              ? `${strategy.label} · ${ROUND_SIZE_LABELS[CURRENCY_BY_COUNTRY[strategy.country]].title.replace("회차", "회차 ")} ${strategy.config.round_size.toLocaleString("ko-KR")}${ROUND_SIZE_LABELS[CURRENCY_BY_COUNTRY[strategy.country]].unit} · 매도 1호가 지정가 매수`
+              ? `${strategy.label} · 회차 금액 ${strategy.config.round_size.toLocaleString("ko-KR")}만원 · 매도 1호가 지정가 매수`
               : strategy && sellQuantity
                 ? `${strategy.label} · ${sellQuantity.toLocaleString("ko-KR")}주 × 매수 1호가 지정가 매도`
                 : "-"}

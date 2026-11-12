@@ -31,7 +31,7 @@ from services.broker_trade_service import (
 )
 from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
 from utils.db_manager import get_db_connection
-from utils.strategy_trade_config import ROUND_SIZE_UNITS, round_buy_quantity
+from utils.strategy_trade_config import round_buy_quantity
 from utils.strategy_trade_ledger import LOOKBACK_DAYS, REGULAR_SELL, is_buy
 from utils.strategy_trade_market import (
     broker_order_date,
@@ -39,6 +39,7 @@ from utils.strategy_trade_market import (
     closing_windows,
     format_money,
     is_order_open,
+    krw_rate,
     order_venue,
     session_trade_date,
 )
@@ -236,10 +237,10 @@ def resolve_order(
 
 def _buy_quantity(strategy: dict[str, Any], price: int, account_id: str) -> int:
     size = strategy["config"]["round_size"]
-    quantity = round_buy_quantity(size, price, strategy["country"])
+    quantity = round_buy_quantity(size, price, krw_rate(strategy["country"]))
     if quantity == 0:
         raise BrokerApiError(
-            f"{strategy['label']}: 회차 금액 {size:,}{ROUND_SIZE_UNITS[strategy['country']]}으로 "
+            f"{strategy['label']}: 회차 금액 {size:,}만원으로 "
             f"{format_money(price, strategy['country'])}에 1주도 살 수 없습니다."
         )
     if account_id == strategy["account_id"] and quantity * price > strategy["cash"]:
