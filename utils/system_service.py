@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from utils.batch_queue import LOCAL_ONLY_JOBS
+from utils.batch_queue import LOCAL_ONLY_JOBS, lane_of
 from utils.db_manager import get_db_connection
 from utils.env import load_env_if_present
 from utils.ticker_registry import load_ticker_type_configs
@@ -148,9 +148,9 @@ SCHEDULE_ROWS = [
         "job": "전략 사고팔기 알림",
         "target": "계좌에 등록한 종목별 사고팔기 전략 (슬랙 켠 계좌만 발송, 원장은 전 계좌 계산)",
         "run_location": "SERVER/LOCAL",
-        "cadence": "월~토 24시간 10분 간격 KST (00·10·…·50분)",
+        "cadence": "월~토 24시간 2분 간격 KST (01·03·…·59분)",
         "command": "python scripts/strategy_trade_notify.py",
-        "schedule": {"minutes": list(range(0, 60, 10)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
+        "schedule": {"minutes": list(range(1, 60, 2)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
         "no": 7,
@@ -1304,9 +1304,13 @@ def load_system_data() -> dict[str, object]:
 
     return {
         "pool_rows": _build_pool_summary_rows(),
-        # 실행 위치는 큐의 LOCAL_ONLY_JOBS 가 단일 소스 — 로컬 전용이 아니면 서버·로컬 둘 다 잡는다.
+        # 실행 위치는 큐의 LOCAL_ONLY_JOBS, 레인은 큐의 `lane_of` 가 단일 소스 — 로컬 전용이 아니면 서버·로컬 둘 다 잡는다.
         "schedule_rows": [
-            {**row, "run_location": "LOCAL" if row["key"] in LOCAL_ONLY_JOBS else "SERVER/LOCAL"}
+            {
+                **row,
+                "run_location": "LOCAL" if row["key"] in LOCAL_ONLY_JOBS else "SERVER/LOCAL",
+                "lane": lane_of(row["key"]),
+            }
             for row in SCHEDULE_ROWS
         ],
         # 한 줄이 한 항목이다(화면이 줄바꿈으로 나눠 글머리 목록으로 보여 준다). 화면 폭이 좁아도 한 줄에 들어가게 짧게 쓴다.

@@ -14,6 +14,8 @@ type SystemScheduleRow = {
   group?: string;
   target: string;
   run_location?: string;
+  // 큐 레인(data·light·local) — 레인마다 동시에 1건만 돈다. 백엔드 batch_queue.lane_of 가 단일 소스.
+  lane: string;
   cadence: string;
   command: string;
 };
@@ -230,6 +232,14 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
           <CopyCommandButton command={params.data.command} />
         </span>
       ),
+  },
+  {
+    field: "lane",
+    headerName: "레인",
+    width: 72,
+    headerTooltip: "큐 레인 — 같은 레인은 동시에 1건만 돌고(서버·로컬 합산), 다른 레인끼리는 동시에 돈다.",
+    cellStyle: { textAlign: "center" },
+    valueGetter: (params) => (isGroupRow(params.data) ? "" : (params.data?.lane ?? "")),
   },
   {
     field: "run_location",
