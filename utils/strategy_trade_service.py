@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -16,7 +16,6 @@ from utils.strategy_trade_config import (
     DEFAULT_ROUND_SIZE,
     EDITABLE_CONFIG_KEYS,
     FIRST_ENTRY_WINDOWS,
-    FIRST_ENTRY_ZONE,
     TRADE_COUNTRIES,
     TRADE_CURRENCIES,
     round_buy_quantity,
@@ -471,23 +470,36 @@ def _load_ticker_status(
 def _first_entry_close_window(
     kind: ladder.InstrumentKind, country: ladder.Country, now: datetime | None = None
 ) -> bool:
-    """지금이 1호 매수 시간인지 — 그 시장·종목 종류의 ``FIRST_ENTRY_WINDOWS`` 구간(한국시간) 안이고 거래 중일 때.
+    """지금이 1호 매수 시간인지 — 그 시장·종목 종류의 ``FIRST_ENTRY_WINDOWS`` 구간(현지 시각) 안이고 거래 중일 때.
 
     거래일·거래 시간 판정은 시장·종목 종류별 시간표가 한다.
     """
     from utils.market_session import is_instrument_trading_time
 
-    now_kst = (now or datetime.now(ZoneInfo(FIRST_ENTRY_ZONE))).astimezone(ZoneInfo(FIRST_ENTRY_ZONE))
-    in_window = any(start <= now_kst.time() < end for start, end in FIRST_ENTRY_WINDOWS[country][kind])
-    return in_window and is_instrument_trading_time(country, kind, now=now_kst)
+    now_local = _market_now(country, now)
+    in_window = any(start <= now_local.time() < end for start, end in FIRST_ENTRY_WINDOWS[country][kind])
+    return in_window and is_instrument_trading_time(country, kind, now=now_local)
 
 
 def _next_first_entry_time(kind: ladder.InstrumentKind, country: ladder.Country, now: datetime | None = None) -> str:
-    """다음 1호 매수 시각(한국시간 ``HH:MM``) — 지금 들어 있거나 아직 안 온 첫 구간의 시작, 다 지났으면 다음 날 첫 구간."""
-    now_time = (now or datetime.now(ZoneInfo(FIRST_ENTRY_ZONE))).astimezone(ZoneInfo(FIRST_ENTRY_ZONE)).time()
+    """다음 1호 매수 시각(**한국시간** ``HH:MM``) — 지금 들어 있거나 아직 안 온 첫 구간의 시작, 다 지났으면 다음 날 첫 구간.
+
+    구간은 현지 시각이라 그날의 서머타임을 반영해 한국시간으로 바꾼다.
+    """
+    now_local = _market_now(country, now)
     windows = FIRST_ENTRY_WINDOWS[country][kind]
-    start = next((start for start, end in windows if now_time < end), windows[0][0])
-    return f"{start:%H:%M}"
+    upcoming = next((start for start, end in windows if now_local.time() < end), None)
+    day = now_local.date() if upcoming is not None else now_local.date() + timedelta(days=1)
+    start = datetime.combine(day, upcoming or windows[0][0], tzinfo=now_local.tzinfo)
+    return f"{start.astimezone(ZoneInfo('Asia/Seoul')):%H:%M}"
+
+
+def _market_now(country: ladder.Country, now: datetime | None) -> datetime:
+    """그 시장 현지 시각의 지금."""
+    from config import MARKET_SCHEDULES
+
+    zone = ZoneInfo(MARKET_SCHEDULES[country]["timezone"])
+    return (now or datetime.now(zone)).astimezone(zone)
 
 
 def _paired_trade_rounds(trades: list[Trade], orders: list[dict[str, Any]]) -> dict[int, int]:
