@@ -25,8 +25,9 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from services.broker_api_service import BrokerApiError
-from services.broker_trade_service import fetch_order_balance, list_day_orders
+from services.broker_trade_service import account_country, fetch_order_balance, list_day_orders
 from utils.db_manager import get_db_connection
+from utils.market_session import market_today
 
 KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_day_fills"
@@ -81,10 +82,18 @@ class Ledger:
     manual_orders: tuple[dict[str, Any], ...]
     #: 이 원장을 계산한 시각(KST ISO) — 화면이 어느 시점 기준인지 보여 준다.
     computed_at: str
+    #: 계좌 국가(kor·us)와 그 시장의 계산일(YYYY-MM-DD) — 체결 조회의 날짜가 시장 현지 날짜라서 따로 둔다.
+    country: str
+    market_date: str
 
     @property
     def as_of(self) -> date:
-        return datetime.fromisoformat(self.computed_at).astimezone(KST).date()
+        return date.fromisoformat(self.market_date)
+
+
+def _skips_weekend(country: str, day: date) -> bool:
+    """주말에 주문이 없는 시장인지 — 국장만 주말 조회를 건너뛴다(미장은 일요일 저녁 데이장이 있어 날짜로 거르지 않는다)."""
+    return country == "kor" and day.weekday() >= 5
 
 
 def is_buy(row: dict[str, Any]) -> bool:
@@ -112,7 +121,7 @@ def _filled(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _past_fills(account_id: str, day: date) -> list[dict[str, Any]]:
     """지난 날짜의 체결 행 — 한 번 받으면 DB 에 두고 다시 부르지 않는다(주말은 주문이 없다)."""
-    if day.weekday() >= 5:
+    if _skips_weekend(account_country(account_id), day):
         return []
     key = f"{account_id}:{day:%Y%m%d}"
     cache = _cache()
@@ -164,7 +173,7 @@ def round_history(ledger: Ledger, ticker: str, cached_days: dict[date, list[dict
     opening = ledger.quantity - sum(trade.shares if trade.buy else -trade.shares for trade in trades)
     past: list[Trade] = []
     while day >= start:
-        if day.weekday() < 5:
+        if not _skips_weekend(ledger.country, day):
             rows = cached_days.get(day)
             if rows is None:
                 break
@@ -337,7 +346,9 @@ def _consistent_snapshot(account_id: str, today: date) -> tuple[dict[str, int], 
     """
     before = _balance(account_id)
     for _ in range(_SNAPSHOT_ATTEMPTS):
-        rows = list_day_orders(account_id, f"{today:%Y%m%d}") if today.weekday() < 5 else []
+        rows = (
+            [] if _skips_weekend(account_country(account_id), today) else list_day_orders(account_id, f"{today:%Y%m%d}")
+        )
         after = _balance(account_id)
         if after == before:
             return after, rows
@@ -354,7 +365,8 @@ def compute_ledgers(account_id: str, tickers: list[str]) -> dict[str, tuple[Ledg
     from utils.strategy_trade_orders import order_sources
 
     computed_at = datetime.now(KST).isoformat()
-    today = datetime.now(KST).date()
+    country = account_country(account_id)
+    today = market_today(country)
     balance, today_rows = _consistent_snapshot(account_id, today)
     sources = order_sources(account_id, today_rows)
     history = _History(account_id, today, _filled(today_rows), sources)
@@ -388,6 +400,8 @@ def compute_ledgers(account_id: str, tickers: list[str]) -> dict[str, tuple[Ledg
             tuple(recorded),
             tuple(manual[ticker]),
             computed_at,
+            country,
+            today.isoformat(),
         )
         # 어제 마감 로트에 체결가를 모르는 기초분이 남아 있으면 기준점으로 쓰지 않는다(오늘 팔려 확정된 경우).
         anchor = None
@@ -423,6 +437,8 @@ def _to_doc(account_id: str, ticker: str, ledger: Ledger | LedgerError) -> dict[
         "trades": [trade.__dict__ for trade in ledger.trades],
         "manual_orders": list(ledger.manual_orders),
         "computed_at": ledger.computed_at,
+        "country": ledger.country,
+        "market_date": ledger.market_date,
     }
 
 
@@ -435,6 +451,8 @@ def _from_doc(doc: dict[str, Any]) -> Ledger | LedgerError:
         trades=tuple(Trade(**{"order_no": None, **trade}) for trade in doc["trades"]),
         manual_orders=tuple(doc["manual_orders"]),
         computed_at=doc["computed_at"],
+        country=doc["country"],
+        market_date=doc["market_date"],
     )
 
 

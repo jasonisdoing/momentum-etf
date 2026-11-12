@@ -9,6 +9,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from core.strategy.trade import rules as ladder
+from services.broker_trade_service import resolve_us_exchange
+from utils.logger import get_app_logger
 from utils.strategy_trade_config import (
     DEFAULT_ROUND_SIZES,
     EDITABLE_CONFIG_KEYS,
@@ -32,6 +34,8 @@ from utils.strategy_trade_ledger import (
 KST = ZoneInfo("Asia/Seoul")
 _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "strategy_trade_settings"
+
+logger = get_app_logger()
 
 
 def _settings_collection():
@@ -80,6 +84,8 @@ def load_settings() -> dict[str, Any]:
                 "account_id": account_id,
                 "ticker": ticker,
                 "name": name,
+                # 미국 종목의 시세·주문 거래소 코드(OQ·NY·AX) — 국장 전략은 없다.
+                "exchange": entry.get("exchange"),
                 "sort_order": entry.get("sort_order"),
                 **validate_strategy_trade_config({key: entry.get(key) for key in EDITABLE_CONFIG_KEYS}),
             }
@@ -145,7 +151,11 @@ def _ticker_options(pools: dict[str, ladder.InstrumentKind]) -> dict[str, dict[s
 
 
 def _validated_target(
-    account_id: str, config: dict[str, Any], current: dict[str, Any] | None, options: dict[str, dict[str, Any]]
+    account_id: str,
+    config: dict[str, Any],
+    current: dict[str, Any] | None,
+    options: dict[str, dict[str, Any]],
+    country: str,
 ) -> dict[str, Any]:
     ticker = str(config.get("ticker") or "").strip().upper()
     reselect = config.get("reselect_source", False)
@@ -165,13 +175,18 @@ def _validated_target(
             else candidates[0]
         )
         name = option["name"]
-    return {
+    target = {
         "pool": pool,
         "account_id": account_id,
         "ticker": ticker,
         "name": name,
         **validate_strategy_trade_config(config),
     }
+    if country == "us":
+        # 거래소는 종목을 고를 때 메리츠 시세로 한 번 판정해 저장한다(같은 종목이면 저장된 값을 쓴다).
+        same = current is not None and ticker == current["ticker"] and current.get("exchange")
+        target["exchange"] = current["exchange"] if same else resolve_us_exchange(account_id, ticker)
+    return target
 
 
 def _sent_log_unset(sent_log: dict[str, Any], strategy_id: str) -> dict[str, str]:
@@ -209,9 +224,6 @@ def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any, gro
     if account is None:
         raise ValueError(f"'{account_id}' 는 사고팔기를 운영할 수 있는 계좌가 아닙니다(증권사 API 연동 필요).")
     country = str(account["country_code"]).strip().lower()
-    if country != "kor":
-        # 미국 사고팔기의 금액 단위(달러)·호가·주문은 백엔드 연동 전이라 저장할 수 없다.
-        raise ValueError(f"'{account_id}' ({country}) 계좌의 사고팔기 저장은 아직 지원하지 않습니다.")
     if not isinstance(slack_enabled, bool):
         raise ValueError("slack_enabled 는 참·거짓이어야 합니다.")
     if not isinstance(strategies, list):
@@ -230,7 +242,7 @@ def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any, gro
         if sid:
             seen_ids.add(sid)
         previous = current.get(sid)
-        target = _validated_target(account_id, row, previous, options)
+        target = _validated_target(account_id, row, previous, options, country)
         if target["ticker"] in taken:
             raise ValueError(f"{target['name']}({target['ticker']}) 전략이 이 계좌에 이미 있습니다.")
         taken.add(target["ticker"])
@@ -513,6 +525,9 @@ def _build_strategy_view(
     trigger_pct = float(strategy_settings["trigger_pct"])
     round_size = int(strategy_settings["round_size"])
     max_rounds = int(strategy_settings["rounds"])
+    exchange = strategy_settings["exchange"]
+    if country == "us" and not exchange:
+        raise ValueError("이 종목의 거래소가 저장돼 있지 않습니다 — 전략을 다시 저장하세요.")
 
     quantity = ledger.quantity
     regular_lots = [lot for lot in ledger.lots if lot.arbitrary_id is None]
@@ -674,6 +689,7 @@ def _build_strategy_view(
         "pool": pool,
         "instrument_kind": kind,
         "country": country,
+        "exchange": exchange,
         "ticker": ticker,
         "config": {
             "trigger_pct": trigger_pct,
@@ -897,6 +913,17 @@ def _trade_account_docs() -> list[dict[str, Any]]:
     ]
 
 
+def _usd_krw() -> float | None:
+    """미장 화면의 원화금액 컬럼용 달러→원 환율 — 못 받으면 None 으로 두어 컬럼을 빈 값으로 보인다."""
+    from services.price_service import get_exchange_rates
+
+    try:
+        return float(get_exchange_rates(["USD"])["USD"]["rate"])
+    except Exception:
+        logger.warning("사고팔기 달러 환율 조회 실패 — 원화금액을 표시하지 않습니다", exc_info=True)
+        return None
+
+
 def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
     """화면용 — 사고팔기 계좌 목록과, 고른 계좌의 슬랙 스위치·전략 설정·운용 현황.
 
@@ -934,6 +961,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
         "pool_options": pool_options(list(pools)),
         "ticker_options": [options[ticker] for ticker in sorted(options)],
         "default_round_size": DEFAULT_ROUND_SIZES[country] if country else None,
+        "usd_krw": _usd_krw() if country == "us" else None,
         # 편집 표의 행 — 저장된 전략 설정 그대로.
         "configs": [
             {

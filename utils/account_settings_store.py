@@ -66,7 +66,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
     # API 주문 안전 장치 — 운영 계좌만. 켜려면 하루 주문 건수·금액 한도가 먼저 있어야 한다(없으면 주문이 막힌다).
     "api_order_enabled",
     "api_order_max_count",
-    "api_order_max_amount_krw",
+    "api_order_max_amount",
 )
 
 # 합성 슬롯 — 최소 하나(전략 하나만 계좌에서 굴리는 용도도 허용, 2026-09), 최대 넷.
@@ -507,7 +507,7 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             cleaned[key] = str(raw or "").strip()
         elif key == "api_order_enabled":
             cleaned[key] = bool(raw)
-        elif key in {"api_order_max_count", "api_order_max_amount_krw"}:
+        elif key in {"api_order_max_count", "api_order_max_amount"}:
             cleaned[key] = _validate_order_limit(account_id, key, raw)
         elif key == "ma_alarm_enabled":
             cleaned[key] = bool(raw)
@@ -537,7 +537,7 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
         _validate_mock_limits(account_id, cleaned)
     merged = {**existing_doc, **cleaned}
     if merged.get("api_order_enabled") and not (
-        merged.get("api_order_max_count") and merged.get("api_order_max_amount_krw")
+        merged.get("api_order_max_count") and merged.get("api_order_max_amount")
     ):
         raise AccountSettingsStoreError(
             f"'{account_id}' 의 API 주문을 켜려면 하루 주문 건수·금액 한도를 먼저 입력해야 합니다."

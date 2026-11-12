@@ -44,7 +44,7 @@ type AccountEntry = {
   /** API 주문 안전 장치(운영 계좌) — 켜져 있어야 주문이 나가고, 하루 건수·금액 한도를 넘으면 막힌다. */
   api_order_enabled?: boolean;
   api_order_max_count?: number | null;
-  api_order_max_amount_krw?: number | null;
+  api_order_max_amount?: number | null;
   updated_at?: string | null;
   save_method?: string | null;
 };
@@ -121,7 +121,7 @@ type AccountDraft = {
   stoploss_alarm_enabled: boolean;
   api_order_enabled: boolean;
   api_order_max_count: string;
-  api_order_max_amount_krw: string;
+  api_order_max_amount: string;
 };
 
 /** 그리드 행 — 편집 중인 초안 그대로에 표시용 필드를 얹는다. */
@@ -157,7 +157,7 @@ function toDraft(account: AccountEntry): AccountDraft {
     stoploss_alarm_enabled: Boolean(account.stoploss_alarm_enabled),
     api_order_enabled: Boolean(account.api_order_enabled),
     api_order_max_count: account.api_order_max_count == null ? "" : String(account.api_order_max_count),
-    api_order_max_amount_krw: account.api_order_max_amount_krw == null ? "" : String(account.api_order_max_amount_krw),
+    api_order_max_amount: account.api_order_max_amount == null ? "" : String(account.api_order_max_amount),
   };
 }
 
@@ -191,7 +191,7 @@ function draftToValues(draft: AccountDraft, marketIndices: MarketIndexOption[]):
     stoploss_alarm_enabled: draft.stoploss_alarm_enabled,
     api_order_enabled: draft.api_order_enabled,
     api_order_max_count: draft.api_order_max_count === "" ? null : Number(draft.api_order_max_count),
-    api_order_max_amount_krw: draft.api_order_max_amount_krw === "" ? null : Number(draft.api_order_max_amount_krw),
+    api_order_max_amount: draft.api_order_max_amount === "" ? null : Number(draft.api_order_max_amount),
   };
   // 벤치마크는 선택 — 둘 다 채워졌을 때만 저장(빈 값이면 백엔드 검증에 걸리므로 생략).
   if (draft.benchmarkTicker.trim() && draft.benchmarkName.trim()) {
@@ -900,7 +900,7 @@ export function AccountSettingsManager() {
    * 이 컬럼을 건너뛴다 — 저장은 valueSetter 가 이미 했다.)
    */
   const numberCol = (
-    field: "order" | "api_order_max_count" | "api_order_max_amount_krw",
+    field: "order" | "api_order_max_count" | "api_order_max_amount",
     headerName: string,
     width: number,
     liveOnly = false,
@@ -1056,7 +1056,7 @@ export function AccountSettingsManager() {
       "운영 계좌의 API 주문 스위치 — 꺼져 있으면 주문이 나가지 않습니다. 켜려면 아래 하루 한도를 먼저 입력하세요.",
     ),
     numberCol("api_order_max_count", "일 건수", 78, true, "하루 API 주문 건수 한도(운영 계좌). 비우면 주문이 막힙니다."),
-    numberCol("api_order_max_amount_krw", "일 금액(원)", 120, true, "하루 API 주문 금액 한도(원, 운영 계좌). 비우면 주문이 막힙니다."),
+    numberCol("api_order_max_amount", "일 금액(원·$)", 120, true, "하루 API 주문 금액 한도(운영 계좌) — 국장 계좌는 원, 미장 계좌는 달러. 비우면 주문이 막힙니다."),
     {
       headerName: "API 주문",
       width: 104,

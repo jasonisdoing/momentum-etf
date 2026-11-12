@@ -105,8 +105,22 @@ def trading_day_today(country: str, now: datetime | None = None) -> date | None:
     return today if _is_trading_day(country, today) else None
 
 
+def _in_us_daymarket(local: datetime) -> date | None:
+    """미국 데이장(오버나이트) 안이면 그 구간이 속한 **다음 거래일**, 아니면 None.
+
+    20:00 ET 부터 다음 날 03:50 ET 까지라 자정을 넘긴다. 일요일 저녁~금요일 새벽이 한국의 월~금 낮이므로
+    거래일 판정은 구간이 끝나는 날(다음 날) 기준이다 — 금요일 저녁 구간은 토요일이라 거래일이 아니다.
+    """
+    schedule = _schedule("us")
+    if local.time() >= schedule["daymarket_open"]:
+        return local.date() + timedelta(days=1)
+    if local.time() < schedule["daymarket_close"]:
+        return local.date()
+    return None
+
+
 def is_instrument_trading_time(country: str, instrument_kind: str, *, now: datetime) -> bool:
-    """현지 거래일의 종목 종류별 매매 구간에 들어 있는지 확인한다."""
+    """현지 거래일의 종목 종류별 매매 구간에 들어 있는지 확인한다. 미국은 데이장(자정을 넘는 구간)도 매매 구간이다."""
     from utils.trading_calendar import get_trading_days
 
     schedule = _schedule(country)
@@ -116,6 +130,9 @@ def is_instrument_trading_time(country: str, instrument_kind: str, *, now: datet
     except KeyError as error:
         raise ValueError(f"종목 종류별 거래 시간표가 없습니다: {market}/{instrument_kind}") from error
     local = now.astimezone(ZoneInfo(schedule["timezone"]))
+    if market == "us" and (daymarket_day := _in_us_daymarket(local)) is not None:
+        day = daymarket_day.isoformat()
+        return bool(get_trading_days(day, day, market))
     if not any(start <= local.time() < end for start, end in windows):
         return False
     day = local.date().isoformat()

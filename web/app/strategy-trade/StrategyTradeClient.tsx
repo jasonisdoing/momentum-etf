@@ -172,6 +172,8 @@ type View = {
   groups: HoldingsGroup[];
   pool_options: PoolLabelSource[];
   default_round_size: number;
+  /** 미장 계좌의 달러→원 환율(원화금액 컬럼용). 환율을 못 받았거나 국장이면 null. */
+  usd_krw: number | null;
   ticker_options: TickerOption[];
   /** 저장된 전략 설정 — 이 계좌의 전략 전부. */
   configs: StrategyConfigRow[];
@@ -388,7 +390,7 @@ function comparableDrafts(rows: DraftRow[]) {
   ]);
 }
 
-type TradeListRow = DraftRow & { held: boolean; heldRounds: string } & Partial<HoldingsRow>;
+type TradeListRow = DraftRow & { held: boolean; heldRounds: string; roundKrw?: number | null } & Partial<HoldingsRow>;
 const tradeGridTheme = createAppGridTheme();
 const { weight: tradeWeightColumn, quantity, returnPct, pnl, valuation } = holdingMetricColumns<TradeListRow>(true);
 const TOTAL_ROW_KEY = "__total__";
@@ -447,7 +449,8 @@ function AccountSettingsCard({
   onDeleteSignal: (signal: SlackSignal, label: string) => void;
 }) {
   const toast = useToast();
-  const sizeLabel = ROUND_SIZE_LABELS[useTradeCurrency()];
+  const currency = useTradeCurrency();
+  const sizeLabel = ROUND_SIZE_LABELS[currency];
   const [drafts, setDrafts] = useState<DraftRow[]>(() => view.configs.map(rowFromConfig));
   const [groups, setGroups] = useState<HoldingsGroup[]>(view.groups ?? EMPTY_GROUPS);
   const [groupDraft, setGroupDraft] = useState<HoldingsGroupDraft | null>(null);
@@ -533,9 +536,13 @@ function AccountSettingsCard({
   const { gridRows, pinnedRows } = useMemo(() => {
     const stockRows = drafts.map((row): TradeListRow => {
       const strategy = row.strategy_id ? strategiesById.get(row.strategy_id) : undefined;
+      const roundQuantity = Number(row.amount);
+      const price = strategy && !("error" in strategy) ? strategy.index.close : null;
       return {
         ...accountAssets?.holdings.get(row.ticker),
         ...row,
+        // 미장 회차수량으로 산 금액을 원화로 — 현재가 × 회차수량 × 환율. 하나라도 없으면 빈 값.
+        roundKrw: price != null && view.usd_krw != null && Number.isFinite(roundQuantity) ? Math.round(roundQuantity * price * view.usd_krw) : null,
         held: Boolean(strategy && strategy.ticker === row.ticker && !("error" in strategy) && strategy.status.held_quantity > 0),
         heldRounds: !strategy || strategy.ticker !== row.ticker
           ? "미저장"
@@ -588,7 +595,7 @@ function AccountSettingsCard({
       gridRows: [...weightedRows.flatMap((row) => [...(byAnchor.get(row.ticker) ?? []), row]), ...(byAnchor.get(null) ?? [])],
       pinnedRows,
     };
-  }, [accountAssets, drafts, groups, sortActive, strategiesById]);
+  }, [accountAssets, drafts, groups, sortActive, strategiesById, view.usd_krw]);
 
   const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
     gridRowDragColumn<TradeListRow>(({ node }) => !node.rowPinned, 36),
@@ -605,16 +612,29 @@ function AccountSettingsCard({
     }),
     tradeWeightColumn,
     { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
-    ...tradeSettingColumns.map((column): ColDef<TradeListRow> => ({
-      ...column,
-      headerName: column.field === "amount" ? `${sizeLabel.title}(${sizeLabel.unit})` : column.headerName,
-      type: "rightAligned",
-      editable: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group,
-      cellClass: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group ? "appEditableCell" : undefined,
-    })),
+    ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => [
+      {
+        ...column,
+        headerName: column.field === "amount" ? `${sizeLabel.title}(${sizeLabel.unit})` : column.headerName,
+        type: "rightAligned",
+        editable: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group,
+        cellClass: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group ? "appEditableCell" : undefined,
+      },
+      // 미장은 회차 크기가 주수라 그 수량의 원화 금액을 바로 옆에 보여 준다.
+      ...(column.field === "amount" && currency === "USD"
+        ? [{
+            field: "roundKrw",
+            headerName: "원화금액",
+            headerTooltip: "회차수량 × 현재가 × 환율",
+            width: 120,
+            type: "rightAligned",
+            valueFormatter: ({ value, node }) => (node?.rowPinned || value == null ? "" : `${formatNumber(value)}원`),
+          } satisfies ColDef<TradeListRow>]
+        : []),
+    ]),
     { ...quantity, headerName: "보유수량", width: 88 },
     returnPct, pnl, valuation,
-  ], [saving]);
+  ], [saving, currency]);
 
   const handleRowDragEnd = ({ api }: RowDragEndEvent<TradeListRow>) => {
     // 그리드가 드롭을 반영한 다음 종목 순서와 그룹 위치를 함께 읽는다.
@@ -1131,12 +1151,14 @@ export function StrategyTradeClient() {
   const [deleteBusy, setDeleteBusy] = useState(false);
 
   const load = useCallback(
-    async (accountId: string | null) => {
+    async (accountId: string | null, remembered = false) => {
       setLoading(true);
       try {
         const query = accountId ? `?account_id=${encodeURIComponent(accountId)}` : "";
         const resp = await fetch(`/api/strategy-trade${query}`, { cache: "no-store" });
         const payload = await resp.json();
+        // 기억해 둔 계좌가 더는 운영 가능한 계좌가 아니면 첫 계좌로 연다(다른 화면과 같은 방식).
+        if (!resp.ok && remembered) return await load(null);
         if (!resp.ok) throw new Error(payload?.error ?? "운용 현황을 불러오지 못했습니다.");
         setView(payload as View);
         writeRememberedTradeAccountId((payload as View).account_id);
@@ -1176,7 +1198,7 @@ export function StrategyTradeClient() {
 
   useEffect(() => {
     // 마지막으로 고른 계좌는 브라우저에 기억한다(사고팔기 화면 전용 키).
-    void load(readRememberedTradeAccountId());
+    void load(readRememberedTradeAccountId(), true);
   }, [load]);
 
   if (loading && !view) {

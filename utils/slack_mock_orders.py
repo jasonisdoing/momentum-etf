@@ -26,11 +26,13 @@ from services.broker_api_service import BrokerApiError
 from services.broker_trade_service import account_env
 from utils.account_settings_store import ACCOUNT_ENV_MOCK
 from utils.settings_loader import get_slack_channel
+from utils.strategy_trade_market import format_money
 from utils.strategy_trade_orders import (
     FINISHED_STATUSES,
     RoundNotOrderableError,
     cancel_record,
     close_warning_slack_orders,
+    close_warning_text,
     filled_signal_threads,
     find_duplicate_order,
     finished_slack_orders,
@@ -46,7 +48,6 @@ from utils.strategy_trade_orders import (
     resolve_order,
     resolve_swap,
     serialize_order,
-    venue_close_time,
 )
 from utils.strategy_trade_threads import send_thread_message
 
@@ -281,11 +282,11 @@ def _order_view(request: dict[str, Any], order: dict[str, Any], target: dict[str
     side = _action_word(request)
     gap_pct = _signal_gap_pct(order)
     if gap_pct is None:
-        gap = f"{order['quote_label']} {order['price']:,}원 (신호 가격 비교 없음)"
+        gap = f"{order['quote_label']} {format_money(order['price'], order['country'])} (신호 가격 비교 없음)"
     else:
         gap = (
             f"*신호 대비 {gap_pct:+.2f}%* — {_gap_label(request['side'], gap_pct)}\n"
-            f"신호 {order['signal_price']:,.0f}원 · {order['quote_label']} {order['price']:,}원"
+            f"신호 {format_money(order['signal_price'], order['country'])} · {order['quote_label']} {format_money(order['price'], order['country'])}"
         )
     guide = (
         f"주문을 확정하는 순간의 {order['quote_label']}로 {_env_word(request['env'])} 계좌에 보냅니다. "
@@ -299,8 +300,8 @@ def _swap_view(request: dict[str, Any], order: dict[str, Any], target: dict[str,
     signal_gap = (order["sell_price"] / order["signal_price"] - 1.0) * 100.0
     body = (
         f"*{_order_text({**request, **order})}*\n{_account_line(request)}\n"
-        f"매도 {order['sell_price']:,}원(매도 1호가) · 매수 {order['buy_price']:,}원(매수 1호가)\n"
-        f"매도 신호 {order['signal_price']:,.0f}원 대비 {signal_gap:+.2f}%\n"
+        f"매도 {format_money(order['sell_price'], order['country'])}(매도 1호가) · 매수 {format_money(order['buy_price'], order['country'])}(매수 1호가)\n"
+        f"매도 신호 {format_money(order['signal_price'], order['country'])} 대비 {signal_gap:+.2f}%\n"
         f"확정하는 순간의 호가로 {_env_word(request['env'])} 계좌에 매도·매수 지정가를 함께 겁니다. "
         "호가가 움직이면 가격과 재매수 수량이 달라질 수 있습니다."
     )
@@ -390,8 +391,8 @@ def submitted_request(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _final_text(order: dict[str, Any]) -> str:
     side = f"{_env_word(order['env'])} {_action_word(order)}"
-    head = f"{_round_text(order['round'])}{order['strategy_label']} {order['quantity']:,}주 × {order['price']:,}원"
-    fill = f"체결 {order['filled_quantity']:,}주 · 체결가 {order['average_fill_price']:,.0f}원"
+    head = f"{_round_text(order['round'])}{order['strategy_label']} {order['quantity']:,}주 × {format_money(order['price'], order['country'])}"
+    fill = f"체결 {order['filled_quantity']:,}주 · 체결가 {format_money(order['average_fill_price'], order['country'])}"
     if order["status"] == "filled":
         return f"✅ {side} 체결 완료: {head} ({fill})"
     if order["status"] == "canceled":
@@ -455,9 +456,9 @@ def _place_swap(target: dict[str, Any]) -> None:
         _update_message(target, _open_blocks(request))
         return
     sell, buy = result["sell"], result["buy"]
-    text = f"✅ {word} 접수: {sell['strategy_label']} — 매도 {sell['quantity']:,}주 × {sell['price']:,}원"
+    text = f"✅ {word} 접수: {sell['strategy_label']} — 매도 {sell['quantity']:,}주 × {format_money(sell['price'], sell['country'])}"
     if buy is not None:
-        text += f" · 매수 {buy['quantity']:,}주 × {buy['price']:,}원"
+        text += f" · 매수 {buy['quantity']:,}주 × {format_money(buy['price'], buy['country'])}"
     else:
         text += f"\n⚠️ 매수 주문은 실패했습니다(매도만 걸림): {result['buy_error']}"
     send_thread_message(text, thread_ts=target["thread_ts"])
@@ -495,7 +496,7 @@ def _place(target: dict[str, Any]) -> None:
     gap_pct = _signal_gap_pct(order)
     gap = f" · 신호 대비 {gap_pct:+.2f}%" if gap_pct is not None else ""
     send_thread_message(
-        f"✅ {side} 주문 접수: {order['strategy_label']} {order['quantity']:,}주 × {order['price']:,}원 (지정가){gap}",
+        f"✅ {side} 주문 접수: {order['strategy_label']} {order['quantity']:,}주 × {format_money(order['price'], order['country'])} (지정가){gap}",
         thread_ts=target["thread_ts"],
     )
     _update_message(target, _cancel_blocks(request, order["id"]))
@@ -595,8 +596,7 @@ def notify_close_approaching() -> int:
         target = _target_of(record)
         side = f"{_env_word(order['env'])} {_SIDE_LABELS[order['side']]}"
         remaining = order["quantity"] - order["filled_quantity"]
-        close_at = venue_close_time(record["venue"])
-        text = f"⏰ {side} 주문이 아직 체결되지 않았습니다(미체결 {remaining:,}주). {close_at} {record['venue']} 마감 전에 취소하지 않으면 오늘 주문은 만료됩니다."
+        text = f"⏰ {side} 주문이 아직 체결되지 않았습니다(미체결 {remaining:,}주). {close_warning_text(record)} 마감 전에 취소하지 않으면 오늘 주문은 만료됩니다."
         send_thread_message(text, thread_ts=target["thread_ts"])
         if order["pair_id"] is not None:
             _update_message(target, _pair_blocks(request, order["pair_id"], text))

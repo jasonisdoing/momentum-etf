@@ -18,7 +18,9 @@ import os
 import re
 import threading
 import time
+from datetime import date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -506,3 +508,251 @@ def day_order_rows(account_id: str, yyyymmdd: str) -> list[dict[str, Any]]:
         {"oder_date": yyyymmdd, "deal_cls_code": "0", "cntg_cls_code": "0", "sort_stnd_code": "2"},
     )
     return [_day_order_row(row) for row in rows if str(row.get("rctf_cncl_cls_code") or "") != _ROW_CANCEL]
+
+
+# ── 해외주식(미국) 주문(사고팔기) ───────────────────────────────────────────
+#
+# 국내 주문과 코드 체계가 달라(메리츠 명세: "코드를 공용으로 쓰지 마십시오") 함수를 따로 둔다. 표준형은 국내와 같다.
+# 거래소는 시세용 코드(OQ 나스닥·NY 뉴욕·AX 아멕스)로 전략에 저장하고, 주문에는 벤더 번호로 바꿔 보낸다.
+# 세션(프리·정규·애프터·데이장)은 주문 요청에 구분이 없다 — 같은 지정가 주문이 세션에 맞게 접수된다.
+
+OVERSEAS_ORDER_PATH = {"buy": "/trading/v1/overseas/orders/buy", "sell": "/trading/v1/overseas/orders/sell"}
+OVERSEAS_CANCEL_PATH = "/trading/v1/overseas/orders/cancel"
+OVERSEAS_ORDERBOOK_PATH = "/market/v1/overseas/orderbook"
+OVERSEAS_PRICE_PATH = "/market/v1/overseas/prices"
+OVERSEAS_TODAY_ORDERS_PATH = "/trading/v1/overseas/orders/today"
+OVERSEAS_ORDER_HISTORY_PATH = "/trading/v1/overseas/orders/history"
+#: 시세 거래소 코드 → 주문 거래소 벤더 번호.
+US_EXCHANGE_VENDORS = {"OQ": "0537", "NY": "0321", "AX": "0066"}
+_OVERSEAS_MARKET = "OV"
+_REALTIME_QUOTE = "0"
+_OVERSEAS_LIMIT_ORDER = "01"
+# 주문내역 행 — 정정취소구분(0 원주문·1 정정·2 취소), 매매구분(1 매도·2 매수), 처리상태(1 거부·2 자동거부·4 미접수).
+_OVERSEAS_ROW_MODIFY, _OVERSEAS_ROW_CANCEL = "1", "2"
+_OVERSEAS_REJECTED_STATES = frozenset({"1", "2", "4"})
+_US_MARKET_TIMEZONE = "America/New_York"
+_US_PRICE_ORDER_DIGITS = 4
+
+
+def _require_us_exchange(exchange: str) -> str:
+    if exchange not in US_EXCHANGE_VENDORS:
+        raise BrokerApiError(f"지원하지 않는 미국 거래소 코드입니다: {exchange!r}")
+    return exchange
+
+
+def resolve_us_exchange(account_id: str, ticker: str) -> str:
+    """미국 종목이 상장된 시세 거래소 코드 — 현재가 조회에 종목코드가 채워지는 거래소가 맞는 곳이다.
+
+    같은 심볼이 여러 거래소에 있으면(조회가 되는 곳이 둘 이상) 어느 쪽인지 알 수 없어 오류다.
+    """
+    found = []
+    for exchange in US_EXCHANGE_VENDORS:
+        data = (
+            _request(
+                account_id,
+                "GET",
+                OVERSEAS_PRICE_PATH,
+                success=frozenset({"0000", "5766"}),
+                params={
+                    "mrkt_div_code": _OVERSEAS_MARKET,
+                    "mrkt_cls_code": exchange,
+                    "iscd": ticker,
+                    "dely_rltm_cls_code": _REALTIME_QUOTE,
+                },
+            ).get("data")
+            or {}
+        )
+        if str(data.get("iscd") or "").strip() == ticker:
+            found.append(exchange)
+    if not found:
+        raise BrokerApiError(f"메리츠증권에서 {ticker} 를 찾을 수 없습니다(나스닥·뉴욕·아멕스).")
+    if len(found) > 1:
+        raise BrokerApiError(f"{ticker} 가 여러 거래소({', '.join(found)})에서 조회돼 거래소를 정할 수 없습니다.")
+    return found[0]
+
+
+def fetch_us_best_quote(account_id: str, ticker: str, exchange: str) -> dict[str, Any]:
+    """미국 종목 1호가 — 매도·매수 1호가(달러)와 호가 시각(한국시간 HHMMSS). 호가가 비어 있으면 주문 가격을 못 정해 오류다."""
+    data = (
+        _request(
+            account_id,
+            "GET",
+            OVERSEAS_ORDERBOOK_PATH,
+            success=_QUOTE_CODES,
+            params={
+                "mrkt_div_code": _OVERSEAS_MARKET,
+                "mrkt_cls_code": _require_us_exchange(exchange),
+                "iscd": ticker,
+                "dely_rltm_cls_code": _REALTIME_QUOTE,
+            },
+        ).get("data")
+        or {}
+    )
+    result = {"ask": float(data["askp1"]), "bid": float(data["bidp1"]), "at": str(data["korea_hour"])}
+    if result["ask"] <= 0 or result["bid"] <= 0:
+        raise BrokerApiError(
+            f"{ticker} 의 매도·매수 1호가가 없어 주문 가격을 정할 수 없습니다 (매도 {result['ask']}, 매수 {result['bid']})."
+        )
+    return result
+
+
+def place_us_limit_order(
+    account_id: str, side: str, ticker: str, quantity: int, price: float, exchange: str
+) -> dict[str, str]:
+    """미국 지정가 주문 한 건 — 접수되면 주문번호를 돌려준다. side 는 buy·sell, 가격은 달러(소수 4자리까지)."""
+    if side not in OVERSEAS_ORDER_PATH:
+        raise BrokerApiError(f"알 수 없는 주문 구분입니다: {side}")
+    if quantity <= 0 or price <= 0:
+        raise BrokerApiError("수량과 가격은 0보다 커야 합니다.")
+    data = _request(
+        account_id,
+        "POST",
+        OVERSEAS_ORDER_PATH[side],
+        success=_ORDER_CODES,
+        body={
+            "ovrs_stck_symb_iscd": ticker,
+            "ovrs_exch_vndr_idno": US_EXCHANGE_VENDORS[_require_us_exchange(exchange)],
+            "oder_cls_code": _OVERSEAS_LIMIT_ORDER,
+            "oder_cond_cls_code": _NO_CONDITION,
+            "odqt": quantity,
+            "ovrs_stck_oder_prc": f"{price:.{_US_PRICE_ORDER_DIGITS}f}",
+            "warn_cnfr_yn": "N",
+        },
+    )
+    return {"order_no": _accepted_order_no(data, "주문"), "message": str(data.get("rsp_msg") or "")}
+
+
+def _us_order_date(today: date) -> str:
+    return f"{today:%Y%m%d}"
+
+
+def _us_today() -> date:
+    """미국 시장의 오늘 — 메리츠의 주문일자는 미국 현지 날짜다(한국 아침의 애프터 주문이 전날 날짜)."""
+    return datetime.now(ZoneInfo(_US_MARKET_TIMEZONE)).date()
+
+
+def _us_row_from_today(row: dict[str, Any]) -> dict[str, Any]:
+    """당일 주문체결내역 행 → 공통 중간형."""
+    return {
+        "date": str(row["oder_date"]),
+        "order_no": int(row["oder_no"]),
+        "origin_no": int(row["orgl_oder_no"]),
+        "symbol": str(row["ovrs_stck_symb_iscd"]).strip(),
+        "name": str(row.get("iscd_name") or "").strip(),
+        "side": str(row["seln_byov_clcd"]),
+        "quantity": float(row["odqt"]),
+        "price": float(row["ovrs_stck_oder_prc"]),
+        "filled": float(row["cntg_qty"]),
+        "fill_price": float(row["cntg_crnc_prc"]),
+        "canceled": float(row["cncl_cnfr_qty"]),
+        "state": str(row["ovrs_stck_oder_stat_cls_code"]),
+        "kind": str(row["oder_rctf_cncl_cls_code"]),
+        "order_class": str(row["aspr_type_code"]),
+    }
+
+
+def _us_row_from_history(row: dict[str, Any]) -> dict[str, Any]:
+    """기간 주문체결내역 행 → 공통 중간형. 이 조회에는 취소 확인 수량이 없어 취소 행의 수량으로 대신한다(아래 `_us_order_rows`)."""
+    return {
+        "date": str(row["oder_date"]),
+        "order_no": int(row["oder_no"]),
+        "origin_no": int(row["orgl_oder_no"]),
+        "symbol": str(row["iscd"]).split(".")[0].strip(),
+        "name": str(row.get("kor_isnm") or "").strip(),
+        "side": str(row["seln_byov_clcd"]),
+        "quantity": float(row["oder_dqty"]),
+        "price": float(row["ovrs_stck_oder_prc"]),
+        "filled": float(row["cntg_dqty"]),
+        "fill_price": float(row["cntg_crnc_prc"]),
+        "canceled": 0.0,
+        "state": str(row["ovrs_stck_oder_stat_cls_code"]),
+        "kind": str(row["oder_rctf_cncl_cls_code"]),
+        "order_class": str(row["aspr_type_code"]),
+    }
+
+
+def _us_order_rows(account_id: str, day: date) -> list[dict[str, Any]]:
+    """그날의 주문 행(공통 중간형) — 오늘은 당일 조회, 지난 날은 기간 조회. 미국 현지 날짜 기준이다."""
+    if day == _us_today():
+        raw = _get_paged(account_id, OVERSEAS_TODAY_ORDERS_PATH, {"cntg_cls_code": "0", "seln_byov_clcd": "0"})
+        rows = [_us_row_from_today(row) for row in raw]
+    else:
+        day_text = _us_order_date(day)
+        raw = _get_paged(
+            account_id,
+            OVERSEAS_ORDER_HISTORY_PATH,
+            {"oder_sta_date": day_text, "oder_fin_date": day_text, "cntg_cls_code": "0"},
+        )
+        rows = [_us_row_from_history(row) for row in raw]
+    return [row for row in rows if row["date"] == _us_order_date(day)]
+
+
+def _us_status(row: dict[str, Any], canceled: float) -> str:
+    """주문 상태(pending·partial·filled·canceled·rejected) — 국내 `_order_status` 와 같은 판정."""
+    if row["state"] in _OVERSEAS_REJECTED_STATES:
+        return "rejected"
+    if row["quantity"] > 0 and row["filled"] >= row["quantity"]:
+        return "filled"
+    if canceled > 0:
+        return "canceled"
+    if row["filled"] > 0:
+        return "partial"
+    return "pending"
+
+
+def us_day_order_rows(account_id: str, yyyymmdd: str) -> list[dict[str, Any]]:
+    """그날(미국 현지 날짜)의 주문 행 — 국내 `day_order_rows` 와 같은 표준 주문 행이고 정정 행은 합치지 않았다.
+
+    취소 요청 행은 뺀다. 이 증권사는 취소 결과(취소수량)를 취소 행에 남기므로 원주문 행의 취소수량으로 옮긴다.
+    """
+    rows = _us_order_rows(account_id, date(int(yyyymmdd[:4]), int(yyyymmdd[4:6]), int(yyyymmdd[6:])))
+    canceled: dict[int, float] = {}
+    for row in rows:
+        if row["kind"] == _OVERSEAS_ROW_CANCEL:
+            canceled[row["origin_no"]] = canceled.get(row["origin_no"], 0.0) + (row["canceled"] or row["quantity"])
+    result = []
+    for row in rows:
+        if row["kind"] == _OVERSEAS_ROW_CANCEL:
+            continue
+        if row["side"] not in _SIDE_LABELS:
+            raise BrokerApiError(f"메리츠증권 해외 주문내역의 매매구분을 알 수 없습니다: {row['side']!r}")
+        cancel_qty = canceled.get(row["order_no"], 0.0)
+        result.append(
+            {
+                "order_no": str(row["order_no"]),
+                "origin_order_no": str(row["origin_no"]),
+                "ticker": row["symbol"],
+                "name": row["name"],
+                "side_label": _SIDE_LABELS[row["side"]],
+                "quantity": int(row["quantity"]),
+                "price": row["price"],
+                "filled_quantity": int(row["filled"]),
+                "unfilled_quantity": int(row["quantity"] - row["filled"] - cancel_qty),
+                "canceled_quantity": int(cancel_qty),
+                "average_fill_price": row["fill_price"],
+                "status": _us_status(row, cancel_qty),
+            }
+        )
+    return result
+
+
+def cancel_us_order(account_id: str, order_no: str, ticker: str) -> dict[str, str]:
+    """미국 주문을 전량 취소한다 — 취소 요청에 필요한 주문일자·수량·주문 구분은 당일 주문내역에서 찾는다."""
+    rows = _us_order_rows(account_id, _us_today())
+    target = next((row for row in rows if str(row["order_no"]) == order_no and row["symbol"] == ticker), None)
+    if target is None:
+        raise BrokerApiError(f"오늘 주문내역에서 {ticker} 주문 {order_no} 을 찾을 수 없습니다 — 취소하지 않았습니다.")
+    data = _request(
+        account_id,
+        "POST",
+        OVERSEAS_CANCEL_PATH,
+        success=_ORDER_CODES,
+        body={
+            "oder_date": target["date"],
+            "orgl_oder_no": int(order_no),
+            "oder_cls_code": _OVERSEAS_LIMIT_ORDER,
+            "odqt": int(target["quantity"]),
+            "warn_cnfr_yn": "N",
+        },
+    )
+    return {"cancel_order_no": _accepted_order_no(data, "취소"), "message": str(data.get("rsp_msg") or "")}

@@ -27,6 +27,11 @@ def _account_doc(account_id: str) -> dict[str, Any]:
     return doc
 
 
+def account_country(account_id: str) -> str:
+    """계좌의 국가(kor·us) — 주문·체결 조회의 날짜와 통화가 이 값으로 갈린다."""
+    return str(_account_doc(account_id)["country_code"]).strip().lower()
+
+
 def require_trade_account(account_id: str) -> None:
     """증권사 연동이 저장된 계좌인지만 확인한다(증권사를 부르지 않는다) — 없으면 BrokerApiError."""
     _account_doc(account_id)
@@ -34,6 +39,11 @@ def require_trade_account(account_id: str) -> None:
 
 def _provider(doc: dict[str, Any]) -> str:
     return str(doc["broker_api"]["provider"]).strip().upper()
+
+
+def _is_us(doc: dict[str, Any]) -> bool:
+    """미국 계좌인지 — 계좌 국가가 증권사 주문 함수(국내·해외)를 가른다. 나무는 국내 전용이다."""
+    return str(doc["country_code"]).strip().lower() == "us"
 
 
 def _namu_account_no(doc: dict[str, Any]) -> str:
@@ -62,17 +72,21 @@ def fetch_order_balance(account_id: str) -> dict[str, Any]:
 
 
 def fetch_best_quote(account_id: str, ticker: str, venue: str) -> dict[str, Any]:
-    """종목의 1호가."""
+    """종목의 1호가 — ``venue`` 는 국내는 거래소(KRX·NXT), 미국은 시세 거래소 코드(OQ·NY·AX)다."""
     from services import broker_order_service, meritz_api_service
 
     doc = _account_doc(account_id)
     account_env(account_id)
     if _provider(doc) == NAMU_PROVIDER:
         return broker_order_service.fetch_best_quote(_namu_account_no(doc), ticker, venue)
+    if _is_us(doc):
+        return meritz_api_service.fetch_us_best_quote(account_id, ticker, venue)
     return meritz_api_service.fetch_best_quote(account_id, ticker, venue)
 
 
-def place_limit_order(account_id: str, side: str, ticker: str, quantity: int, price: int, venue: str) -> dict[str, str]:
+def place_limit_order(
+    account_id: str, side: str, ticker: str, quantity: int, price: int | float, venue: str
+) -> dict[str, str]:
     """지정가 주문 한 건 — 접수되면 주문번호를 돌려준다."""
     from services import broker_order_service, meritz_api_service
 
@@ -80,7 +94,11 @@ def place_limit_order(account_id: str, side: str, ticker: str, quantity: int, pr
     account_env(account_id)
     if _provider(doc) == NAMU_PROVIDER:
         return broker_order_service.place_limit_order(_namu_account_no(doc), side, ticker, quantity, price, venue)
-    return meritz_api_service.place_limit_order(account_id, side, ticker, quantity, price, venue)
+    if _is_us(doc):
+        return meritz_api_service.place_us_limit_order(account_id, side, ticker, quantity, price, venue)
+    if int(price) != price:
+        raise BrokerApiError(f"국내 주문 가격은 정수여야 합니다: {price}")
+    return meritz_api_service.place_limit_order(account_id, side, ticker, quantity, int(price), venue)
 
 
 def cancel_order(account_id: str, order_no: str, ticker: str, venue: str) -> dict[str, str]:
@@ -91,7 +109,9 @@ def cancel_order(account_id: str, order_no: str, ticker: str, venue: str) -> dic
     account_env(account_id)
     if _provider(doc) == NAMU_PROVIDER:
         return broker_order_service.cancel_order(_namu_account_no(doc), order_no, ticker)
-    # 나무 취소는 원주문번호로만 찾아 거래소를 받지 않는다. 메리츠는 원주문의 거래소가 필요하다.
+    # 나무 취소는 원주문번호로만 찾아 거래소를 받지 않는다. 메리츠 국내는 원주문의 거래소가 필요하고, 미국은 필요 없다.
+    if _is_us(doc):
+        return meritz_api_service.cancel_us_order(account_id, order_no, ticker)
     return meritz_api_service.cancel_order(account_id, order_no, ticker, venue)
 
 
@@ -103,6 +123,8 @@ def list_day_orders(account_id: str, yyyymmdd: str) -> list[dict[str, Any]]:
     account_env(account_id)
     if _provider(doc) == NAMU_PROVIDER:
         rows = broker_order_service.day_order_rows(_namu_account_no(doc), yyyymmdd)
+    elif _is_us(doc):
+        rows = meritz_api_service.us_day_order_rows(account_id, yyyymmdd)
     else:
         rows = meritz_api_service.day_order_rows(account_id, yyyymmdd)
     return merge_amendments(rows)
@@ -157,3 +179,15 @@ def merge_amendments(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return merged
+
+
+def resolve_us_exchange(account_id: str, ticker: str) -> str:
+    """미국 종목의 시세·주문 거래소 코드(OQ·NY·AX) — 증권사 시세 조회로 판정한다. 메리츠 미국 계좌만 된다."""
+    from services import meritz_api_service
+
+    doc = _account_doc(account_id)
+    if _provider(doc) != MERITZ_PROVIDER or not _is_us(doc):
+        raise BrokerApiError(
+            f"'{account_id}' 는 미국 종목 거래소를 조회할 수 있는 계좌가 아닙니다(메리츠 미국 계좌 필요)."
+        )
+    return meritz_api_service.resolve_us_exchange(account_id, ticker)
