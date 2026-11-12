@@ -144,8 +144,9 @@ def _require_no_manual_order(strategy: dict[str, Any], side: str) -> None:
 def _require_order_allowed(account_id: str, env: str, amount: int, count: int) -> None:
     """운영 계좌의 주문 안전 장치 — 계좌의 API 주문 스위치, 정규장, 하루 주문 건수·금액 한도. 모의 계좌는 막지 않는다.
 
-    ``count`` 는 이번에 낼 주문 건수(매도 후 재매수는 2건), ``amount`` 는 이번 주문의 순금액이다 — 매수는 +, 매도는 −.
-    금액 한도는 오늘 API 로 낸 주문의 순매수(매수 − 매도, 0 미만은 0)에 걸린다. 매도는 한도를 쓰지 않고 오히려 되돌려 준다.
+    ``count`` 는 이번에 낼 주문 건수(매도 후 재매수는 2건), ``amount`` 는 이번 주문의 순금액(종목 통화)이다 — 매수는 +, 매도는 −.
+    금액 한도는 원화로 입력하며, 오늘 API 로 낸 주문의 순매수(매수 − 매도, 0 미만은 0)를 원화로 환산해 비교한다.
+    매도는 한도를 쓰지 않고 오히려 되돌려 준다.
     """
     if env == ACCOUNT_ENV_MOCK:
         return
@@ -169,12 +170,16 @@ def _require_order_allowed(account_id: str, env: str, amount: int, count: int) -
     )
     if len(used) + count > max_count:
         raise BrokerApiError(f"오늘 주문 건수 한도({max_count}건)를 넘습니다 — 이미 {len(used)}건입니다.")
+    # 순매도 주문은 금액 한도를 넘길 수 없다 — 한도를 낮춘 뒤에도 매도는 나가야 한다(환율도 필요 없다).
+    if amount <= 0:
+        return
+    rate = krw_rate(account_country(account_id))
     signed = sum(record["price"] * record["quantity"] * (1 if record["side"] == "buy" else -1) for record in used)
-    used_amount = max(0, signed)
-    # 순매도 주문은 금액 한도를 넘길 수 없다 — 한도를 낮춘 뒤에도 매도는 나가야 한다.
-    if amount > 0 and used_amount + amount > max_amount:
+    used_krw = round(max(0, signed) * rate)
+    amount_krw = round(amount * rate)
+    if used_krw + amount_krw > max_amount:
         raise BrokerApiError(
-            f"오늘 주문 금액 한도({max_amount:,}원)를 넘습니다 — 순매수 이미 {used_amount:,}원, 이번 {amount:,}원입니다."
+            f"오늘 주문 금액 한도({max_amount:,}원)를 넘습니다 — 순매수 이미 {used_krw:,}원, 이번 {amount_krw:,}원입니다."
         )
 
 
