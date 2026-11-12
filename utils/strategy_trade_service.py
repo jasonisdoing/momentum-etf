@@ -10,9 +10,11 @@ from zoneinfo import ZoneInfo
 
 from core.strategy.trade import rules as ladder
 from utils.strategy_trade_config import (
-    DEFAULT_ROUND_AMOUNT_MANWON,
+    DEFAULT_ROUND_SIZES,
     EDITABLE_CONFIG_KEYS,
     FIRST_ENTRY_CLOSE_TIMES,
+    TRADE_COUNTRIES,
+    TRADE_CURRENCIES,
     round_buy_quantity,
     validate_strategy_trade_config,
 )
@@ -42,26 +44,7 @@ def _settings_collection():
 
 
 def _load_settings_document() -> dict[str, Any]:
-    """기존 고정 주수 설정을 전략당 100만원으로 한 번만 이전한다."""
-    collection = _settings_collection()
-    while True:
-        doc = collection.find_one({"_id": _SETTINGS_KEY}) or {}
-        stored = doc.get("strategies")
-        if not isinstance(stored, dict):
-            return doc
-        legacy = {sid: entry for sid, entry in stored.items() if isinstance(entry, dict) and "round_quantity" in entry}
-        if not legacy:
-            return doc
-        amounts = {
-            f"strategies.{sid}.round_amount_manwon": DEFAULT_ROUND_AMOUNT_MANWON
-            for sid, entry in legacy.items()
-            if "round_amount_manwon" not in entry
-        }
-        update = {"$unset": {f"strategies.{sid}.round_quantity": "" for sid in legacy}}
-        if amounts:
-            update["$set"] = amounts
-        # 읽은 설정과 같을 때만 바꿔 다른 프로세스가 방금 저장한 값을 덮지 않는다.
-        collection.update_one({"_id": _SETTINGS_KEY, "strategies": stored}, update)
+    return _settings_collection().find_one({"_id": _SETTINGS_KEY}) or {}
 
 
 def load_settings() -> dict[str, Any]:
@@ -106,15 +89,27 @@ def load_settings() -> dict[str, Any]:
     return {"accounts": accounts, "strategies": strategies}
 
 
-def _eligible_pool_kinds() -> dict[str, ladder.InstrumentKind]:
-    """활성 국내 개별주·ETF 풀과 호가 계산에 사용할 종목 유형."""
+def _eligible_pool_kinds(countries: tuple[str, ...]) -> dict[str, ladder.InstrumentKind]:
+    """``countries`` 의 활성 개별주·ETF 풀과 호가 계산에 사용할 종목 유형."""
     from utils.settings_loader import _load_pool_configs
     from utils.strategy_trade_config import is_eligible_pool
 
     return {
         str(config["ticker_type"]): "stock" if str(config["pool_kind"]).strip().lower() == "stock" else "etf"
         for config in _load_pool_configs()
-        if is_eligible_pool(config)
+        if is_eligible_pool(config, countries)
+    }
+
+
+def _pool_countries(countries: tuple[str, ...]) -> dict[str, ladder.Country]:
+    """활성 개별주·ETF 풀의 국가 — 전략의 국가(호가 단위·통화·시간표)는 가격 출처 풀이 정한다."""
+    from utils.settings_loader import _load_pool_configs
+    from utils.strategy_trade_config import is_eligible_pool
+
+    return {
+        str(config["ticker_type"]): str(config["country_code"]).strip().lower()
+        for config in _load_pool_configs()
+        if is_eligible_pool(config, countries)
     }
 
 
@@ -161,7 +156,7 @@ def _validated_target(
     else:
         option = options.get(ticker)
         if option is None:
-            raise ValueError(f"사고팔기에 등록할 수 있는 한국 개별주·ETF가 아닙니다: {ticker}")
+            raise ValueError(f"이 계좌 국가에서 사고팔기에 등록할 수 있는 개별주·ETF가 아닙니다: {ticker}")
         candidates = option["pools"]
         # 기존 출처가 여전히 유효하면 같은 종목의 기준가를 바꾸지 않는다.
         pool = (
@@ -210,13 +205,18 @@ def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any, gro
     """계좌의 슬랙 설정과 전략 목록을 검증한 뒤 한 번에 저장한다."""
     from uuid import uuid4
 
-    if not any(item["account_id"] == account_id for item in _trade_account_docs()):
+    account = next((item for item in _trade_account_docs() if item["account_id"] == account_id), None)
+    if account is None:
         raise ValueError(f"'{account_id}' 는 사고팔기를 운영할 수 있는 계좌가 아닙니다(증권사 API 연동 필요).")
+    country = str(account["country_code"]).strip().lower()
+    if country != "kor":
+        # 미국 사고팔기의 금액 단위(달러)·호가·주문은 백엔드 연동 전이라 저장할 수 없다.
+        raise ValueError(f"'{account_id}' ({country}) 계좌의 사고팔기 저장은 아직 지원하지 않습니다.")
     if not isinstance(slack_enabled, bool):
         raise ValueError("slack_enabled 는 참·거짓이어야 합니다.")
     if not isinstance(strategies, list):
         raise ValueError("strategies 형식이 올바르지 않습니다.")
-    options = _ticker_options(_eligible_pool_kinds())
+    options = _ticker_options(_eligible_pool_kinds((country,)))
     current = {sid: entry for sid, entry in load_settings()["strategies"].items() if entry["account_id"] == account_id}
     taken: set[str] = set()
     seen_ids: set[str] = set()
@@ -267,12 +267,12 @@ def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any, gro
     collection.update_one({"_id": _SETTINGS_KEY}, update, upsert=True)
 
 
-def _load_account_state(account_id: str) -> dict[str, Any]:
+def _load_account_state(account_id: str, country: ladder.Country) -> dict[str, Any]:
     """계좌 보유 종목의 현재가와 현금 (전 전략 공용, 1회 조회).
 
     현재가는 ``load_real_holdings_table`` 이 실시간 시세로 채운 값이다. 수량·평균단가는 쓰지 않는다 —
     보유는 증권사 체결 이력(회차 원장)이 정한다. 현금은 잔고 동기화가 저장한 값(자산 화면과 같은 값)이다 —
-    ``cash_krw`` 는 매수에 쓰는 원화 예수금이다.
+    ``cash`` 는 매수에 쓰는 계좌 통화(국장 원화·미장 달러) 예수금이다.
     """
     from utils.broker_balance_sync import stored_cash_map
     from utils.portfolio_io import load_portfolio_master, load_real_holdings_table
@@ -280,7 +280,8 @@ def _load_account_state(account_id: str) -> dict[str, Any]:
     master = load_portfolio_master(account_id)
     if master is None:
         raise ValueError(f"'{account_id}' 계좌의 잔고가 저장돼 있지 않습니다 — 잔고 동기화를 먼저 돌리세요.")
-    cash_krw = stored_cash_map(master, ["KRW"])["KRW"]
+    currency = TRADE_CURRENCIES[country]
+    cash = stored_cash_map(master, [currency])[currency]
     frame = load_real_holdings_table(account_id)
     closes: dict[str, float] = {}
     if frame is not None and not frame.empty:
@@ -293,11 +294,11 @@ def _load_account_state(account_id: str) -> dict[str, Any]:
                 closes[ticker] = float(row["현재가"] or 0)
     return {
         "closes": closes,
-        "cash_krw": cash_krw,
+        "cash": cash,
     }
 
 
-def _load_unheld_closes(tickers: list[str], pool: str) -> dict[str, float]:
+def _load_unheld_closes(tickers: list[str], pool: str, country: ladder.Country) -> dict[str, float]:
     """미보유 종목의 현재가 — 실시간 시세 우선, 실패분은 가격 캐시 폴백.
 
     1호 진입 판정에는 아직 안 산 종목의 현재가가 필요하다(없으면 매수 신호가
@@ -311,7 +312,7 @@ def _load_unheld_closes(tickers: list[str], pool: str) -> dict[str, float]:
     try:
         from services.price_service import get_realtime_snapshot
 
-        snapshot = get_realtime_snapshot("kor", tickers)
+        snapshot = get_realtime_snapshot(country, tickers)
         for ticker in tickers:
             value = (snapshot.get(ticker) or {}).get("nowVal")
             if isinstance(value, (int, float)) and float(value) > 0:
@@ -341,7 +342,14 @@ RECENT_PRICE_MONTHS = 12
 
 
 def _load_ticker_status(
-    pool: str, ticker: str, name: str, trigger_pct: float, live_close: float | None, *, kind: ladder.InstrumentKind
+    pool: str,
+    ticker: str,
+    name: str,
+    trigger_pct: float,
+    live_close: float | None,
+    *,
+    kind: ladder.InstrumentKind,
+    country: ladder.Country,
 ) -> dict[str, Any]:
     """판정 기준 시세 — 이 전략 종목 자신의 현재가·전일 종가·1호 진입선·최근 고점과 저점.
 
@@ -381,34 +389,38 @@ def _load_ticker_status(
     return {
         "name": name,
         "as_of": close.index[-1].strftime("%Y-%m-%d"),
-        "close": round(current),
-        "prev_close": round(prev_close),
+        "close": ladder.round_price(current, country),
+        "prev_close": ladder.round_price(prev_close, country),
         "change_pct": round(change_pct, 2),
         # 1호 진입선 — 전일 종가 대비 -간격%, 호가 단위 반올림.
-        "buy_trigger": ladder.first_buy_limit(prev_close, float(trigger_pct), kind=kind),
-        "recent_low": round(low_value),
+        "buy_trigger": ladder.first_buy_limit(prev_close, float(trigger_pct), kind=kind, country=country),
+        "recent_low": ladder.round_price(low_value, country),
         "recent_low_date": low_date.strftime("%Y-%m-%d"),
         "recent_low_label": f"{RECENT_PRICE_MONTHS}개월 저점",
-        "recent_high": round(high_value),
+        "recent_high": ladder.round_price(high_value, country),
         "recent_high_date": high_date.strftime("%Y-%m-%d"),
         "recent_high_label": f"{RECENT_PRICE_MONTHS}개월 고점",
     }
 
 
-def _first_entry_close_window(kind: ladder.InstrumentKind, now: datetime | None = None) -> bool:
-    """지금이 1호 장 마감 매수 시간인지 — 그 종목 종류의 ``FIRST_ENTRY_CLOSE_TIMES`` 시각 이후이고 아직 거래 중일 때.
+def _first_entry_close_window(
+    kind: ladder.InstrumentKind, country: ladder.Country, now: datetime | None = None
+) -> bool:
+    """지금이 1호 장 마감 매수 시간인지 — 그 시장·종목 종류의 ``FIRST_ENTRY_CLOSE_TIMES`` 시각 이후이고 아직 거래 중일 때.
 
-    ETF 는 15:00~15:30(정규장), 개별주는 19:30~20:00(NXT 애프터마켓)이다. 거래일·거래 시간 판정은 종목 종류별 시간표가 한다.
+    국장 ETF 는 15:00~15:30(정규장), 개별주는 19:30~20:00(NXT 애프터마켓), 미장은 19:30~20:00 ET(애프터마켓)이다.
+    거래일·거래 시간 판정은 시장·종목 종류별 시간표가 한다.
     """
     from zoneinfo import ZoneInfo
 
     from config import MARKET_SCHEDULES
     from utils.market_session import is_instrument_trading_time
 
-    now_local = (now or datetime.now(ZoneInfo(MARKET_SCHEDULES["kor"]["timezone"]))).astimezone(
-        ZoneInfo(MARKET_SCHEDULES["kor"]["timezone"])
+    zone = ZoneInfo(MARKET_SCHEDULES[country]["timezone"])
+    now_local = (now or datetime.now(zone)).astimezone(zone)
+    return now_local.time() >= FIRST_ENTRY_CLOSE_TIMES[country][kind] and is_instrument_trading_time(
+        country, kind, now=now_local
     )
-    return now_local.time() >= FIRST_ENTRY_CLOSE_TIMES[kind] and is_instrument_trading_time("kor", kind, now=now_local)
 
 
 def _paired_trade_rounds(trades: list[Trade], orders: list[dict[str, Any]]) -> dict[int, int]:
@@ -476,7 +488,9 @@ def _attach_trade_history(
     positions = [row["position"] for row in view["rounds"]] + list(trades)
     view["position_prices"] = {
         position: ladder.round_to_tick(
-            first["fill_price"] * ladder.down_ratio(trigger_pct) ** (position - 1), kind=view["instrument_kind"]
+            first["fill_price"] * ladder.down_ratio(trigger_pct) ** (position - 1),
+            kind=view["instrument_kind"],
+            country=view["country"],
         )
         for position in range(min(positions), max(positions) + 1)
     }
@@ -487,32 +501,35 @@ def _build_strategy_view(
     strategy_settings: dict[str, Any],
     account_closes: dict[str, float],
     ledger: Ledger,
-    cash_krw: float,
+    cash: float,
     *,
     kind: ladder.InstrumentKind,
+    country: ladder.Country,
 ) -> dict[str, Any]:
     """전략 하나의 운용 현황(회차 표·상태)을 회차 원장에서 만든다."""
     pool = str(strategy_settings["pool"])
     ticker = str(strategy_settings["ticker"])
     name = str(strategy_settings["name"])
     trigger_pct = float(strategy_settings["trigger_pct"])
-    round_amount_manwon = int(strategy_settings["round_amount_manwon"])
+    round_size = int(strategy_settings["round_size"])
     max_rounds = int(strategy_settings["rounds"])
 
     quantity = ledger.quantity
     regular_lots = [lot for lot in ledger.lots if lot.arbitrary_id is None]
-    live_close = account_closes.get(ticker) or _load_unheld_closes([ticker], pool).get(ticker)
-    index_status = _load_ticker_status(pool, ticker, name, trigger_pct, live_close, kind=kind)
+    live_close = account_closes.get(ticker) or _load_unheld_closes([ticker], pool, country).get(ticker)
+    index_status = _load_ticker_status(pool, ticker, name, trigger_pct, live_close, kind=kind, country=country)
     close = float(index_status["close"])
     # 정정을 합친 원주문별 매수 로트가 한 회차다. 설정 회차 수를 넘긴 수동 체결도 모두 표시한다.
     held_rounds = len(regular_lots)
     last_fill = regular_lots[-1].price if regular_lots else None
-    close_entry = held_rounds == 0 and _first_entry_close_window(kind)
+    close_entry = held_rounds == 0 and _first_entry_close_window(kind, country)
 
     # 팔 수 있는 회차는 맨 뒤(가장 깊은) 보유 회차 하나뿐이고, 신호는 한 번에 하나라
     # 그 매도가 닿아 있으면 매수는 매도가 체결될 때까지 미룬다.
     sell_pending = bool(
-        held_rounds and close > 0 and close >= ladder.sell_limit(regular_lots[-1].price, trigger_pct, kind=kind)
+        held_rounds
+        and close > 0
+        and close >= ladder.sell_limit(regular_lots[-1].price, trigger_pct, kind=kind, country=country)
     )
 
     # 사다리 위치(표시용) — 보유 회차는 1호 체결가 기준 칸, 그 뒤 회차는 마지막 보유 칸부터 한 칸씩.
@@ -528,16 +545,18 @@ def _build_strategy_view(
         is_next = round_no == held_rounds + 1
         if held:
             fill = regular_lots[round_no - 1]
-            sell_limit = ladder.sell_limit(fill.price, trigger_pct, kind=kind)
+            sell_limit = ladder.sell_limit(fill.price, trigger_pct, kind=kind, country=country)
             # 이 회차를 팔면 다음 매수선은 앞 회차 체결가 −간격%다. 그게 매도가 이상이면 팔자마자 다시 사게 된다 —
             # 신호를 '매도 후 재매수' 한 짝으로 낸다.
             rebuy_after_sell = bool(
                 round_no == held_rounds
                 and round_no >= 2
-                and ladder.projected_buy_limit(regular_lots[round_no - 2].price, 1, trigger_pct, kind=kind)
+                and ladder.projected_buy_limit(
+                    regular_lots[round_no - 2].price, 1, trigger_pct, kind=kind, country=country
+                )
                 >= sell_limit
-                and 0 < (rebuy_quantity := round_buy_quantity(round_amount_manwon, sell_limit))
-                and rebuy_quantity * sell_limit <= cash_krw
+                and 0 < (rebuy_quantity := round_buy_quantity(round_size, sell_limit, country))
+                and rebuy_quantity * sell_limit <= cash
             )
             rows.append(
                 {
@@ -549,13 +568,15 @@ def _build_strategy_view(
                     "held": True,
                     "quantity": fill.shares,
                     # 실제 체결가·산 날짜·출처(슬랙/수동).
-                    "fill_price": round(fill.price),
+                    "fill_price": ladder.round_price(fill.price, country),
                     "bought_on": fill.day,
                     "source": fill.source,
-                    "close": round(close) if close > 0 else None,
+                    "close": ladder.round_price(close, country) if close > 0 else None,
                     "profit_pct": round((close / fill.price - 1.0) * 100.0, 2) if close > 0 else None,
                     "buy_limit": None,
-                    "buy_index": round(fill.price),  # 이미 산 회차 — 체결가가 그 회차의 기준선이다
+                    "buy_index": ladder.round_price(
+                        fill.price, country
+                    ),  # 이미 산 회차 — 체결가가 그 회차의 기준선이다
                     "sell_limit": sell_limit,
                     "sell_index": sell_limit,
                     # 팔 수 있는 건 마지막 보유 회차뿐이다(앞 회차는 체결가가 더 높아 먼저 닿지도 않는다).
@@ -572,18 +593,22 @@ def _build_strategy_view(
         # 미보유 회차 — 보유가 있으면 마지막 보유 체결가에서 내려간 자리(다음 회차 이후는 예상값),
         # 없으면 전일 종가 기준. 지정가로 바로 쓸 수 있게 호가 단위로 반올림한다.
         if last_fill is not None:
-            buy_limit = ladder.projected_buy_limit(last_fill, round_no - held_rounds, trigger_pct, kind=kind)
+            buy_limit = ladder.projected_buy_limit(
+                last_fill, round_no - held_rounds, trigger_pct, kind=kind, country=country
+            )
         else:
-            buy_limit = ladder.preview_buy_limit(float(index_status["prev_close"]), round_no, trigger_pct, kind=kind)
+            buy_limit = ladder.preview_buy_limit(
+                float(index_status["prev_close"]), round_no, trigger_pct, kind=kind, country=country
+            )
         market_entry = is_next and close_entry and close > buy_limit
         # 장 마감 매수는 현재가로 사므로 그 가격으로 산 금액을 본다.
         # 신호에 도달했다면 실제 시세로 예상하고, 대기 중에는 목표 지정가로 예상한다.
         buy_price = min(close, buy_limit) if is_next and 0 < close <= buy_limit else buy_limit
         if market_entry:
             buy_price = close
-        buy_quantity = round_buy_quantity(round_amount_manwon, buy_price)
+        buy_quantity = round_buy_quantity(round_size, buy_price, country)
         budget_short = is_next and buy_quantity == 0
-        cash_short = is_next and buy_quantity * buy_price > cash_krw
+        cash_short = is_next and buy_quantity * buy_price > cash
         rows.append(
             {
                 "round": round_no,
@@ -596,7 +621,7 @@ def _build_strategy_view(
                 "fill_price": None,
                 "bought_on": None,
                 "source": None,
-                "close": round(close) if close > 0 else None,
+                "close": ladder.round_price(close, country) if close > 0 else None,
                 "profit_pct": None,
                 "buy_limit": buy_limit,
                 "buy_index": buy_limit,
@@ -648,23 +673,24 @@ def _build_strategy_view(
         "label": name,
         "pool": pool,
         "instrument_kind": kind,
+        "country": country,
         "ticker": ticker,
         "config": {
             "trigger_pct": trigger_pct,
-            "round_amount_manwon": round_amount_manwon,
+            "round_size": round_size,
             "rounds": max_rounds,
             "index_name": name,
         },
         "index": index_status,
-        "cash_krw": cash_krw,
+        "cash": cash,
         "status": {
             "held_count": held_rounds,
             "waiting_first_entry": held_rounds == 0,
-            "first_entry_close_time": FIRST_ENTRY_CLOSE_TIMES[kind].strftime("%H:%M"),
+            "first_entry_close_time": FIRST_ENTRY_CLOSE_TIMES[country][kind].strftime("%H:%M"),
             "next_round": (held_rounds + 1) if held_rounds < max_rounds else None,
             "next_ticker": ticker if held_rounds < max_rounds else None,
             "next_name": name if held_rounds < max_rounds else None,
-            "last_buy_price": round(last_fill) if last_fill is not None else None,
+            "last_buy_price": ladder.round_price(last_fill, country) if last_fill is not None else None,
             "next_buy_drop_pct": next_buy_drop_pct,
             "next_sell_round": next_sell_round,
             "next_sell_rise_pct": next_sell_rise_pct,
@@ -685,7 +711,7 @@ def _build_strategy_view(
                 "quantity": lot.shares,
                 "fill_price": lot.price,
                 "bought_on": lot.day,
-                "sell_limit": ladder.sell_limit(lot.price, trigger_pct, kind=kind),
+                "sell_limit": ladder.sell_limit(lot.price, trigger_pct, kind=kind, country=country),
             }
             for lot in ledger.lots
             if lot.arbitrary_id is not None
@@ -733,7 +759,7 @@ def _failed_view(strategy_id: str, entry: dict[str, Any], error: LedgerError | s
         "ticker": str(entry["ticker"]),
         "config": {
             "trigger_pct": entry["trigger_pct"],
-            "round_amount_manwon": entry["round_amount_manwon"],
+            "round_size": entry["round_size"],
             "rounds": entry["rounds"],
             "index_name": str(entry["name"]),
         },
@@ -775,16 +801,22 @@ def _build_views(
     """
     tickers_by_account = _tickers_by_account(strategies)
     ledgers = _account_ledgers(tickers_by_account, fresh=fresh)
+    pool_countries = _pool_countries(TRADE_COUNTRIES)
+    account_countries = {
+        entry["account_id"]: pool_countries[entry["pool"]]
+        for entry in strategies.values()
+        if entry["pool"] in pool_countries
+    }
     states = {
-        account_id: _load_account_state(account_id)
+        account_id: _load_account_state(account_id, account_countries[account_id])
         for account_id, account_ledgers in ledgers.items()
-        if not isinstance(account_ledgers, str)
+        if not isinstance(account_ledgers, str) and account_id in account_countries
     }
     from utils.account_settings_store import load_account_docs
     from utils.strategy_trade_orders import read_trade_history_orders
 
     names = {doc["account_id"]: str(doc.get("name") or doc["account_id"]) for doc in load_account_docs()}
-    active_pools = _eligible_pool_kinds() if strategies else {}
+    active_pools = _eligible_pool_kinds(TRADE_COUNTRIES) if strategies else {}
     source_tickers = {
         pool: _pool_tickers(pool, active_pools[pool])
         for pool in {entry["pool"] for entry in strategies.values()} & active_pools.keys()
@@ -805,7 +837,13 @@ def _build_views(
             state = states[account_id]
             try:
                 view = _build_strategy_view(
-                    sid, entry, state["closes"], ledger, state["cash_krw"], kind=active_pools[entry["pool"]]
+                    sid,
+                    entry,
+                    state["closes"],
+                    ledger,
+                    state["cash"],
+                    kind=active_pools[entry["pool"]],
+                    country=pool_countries[entry["pool"]],
                 )
                 if include_trade_history:
                     cache_key = (account_id, ledger.as_of)
@@ -848,13 +886,14 @@ def strategy_entry(strategy_id: str) -> dict[str, Any]:
 
 
 def _trade_account_docs() -> list[dict[str, Any]]:
-    """증권사 API가 연동된 한국 운영 계좌."""
+    """증권사 API가 연동된 운영 계좌(국가는 `TRADE_COUNTRIES`)."""
     from utils.account_settings_store import load_live_account_docs
 
     return [
         doc
         for doc in load_live_account_docs()
-        if (doc.get("broker_api") or {}).get("provider") and str(doc.get("country_code") or "").strip().lower() == "kor"
+        if (doc.get("broker_api") or {}).get("provider")
+        and str(doc.get("country_code") or "").strip().lower() in TRADE_COUNTRIES
     ]
 
 
@@ -867,6 +906,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
     if account_id is not None and account_id not in {doc["account_id"] for doc in docs}:
         raise ValueError(f"'{account_id}' 는 사고팔기를 운영할 수 있는 계좌가 아닙니다(증권사 API 연동 필요).")
     selected = account_id if account_id is not None else (docs[0]["account_id"] if docs else None)
+    country = next((str(doc["country_code"]).strip().lower() for doc in docs if doc["account_id"] == selected), None)
     settings = load_settings()
     account = settings["accounts"].get(selected or "", {"slack_enabled": False})
     mine = {sid: entry for sid, entry in settings["strategies"].items() if entry["account_id"] == selected}
@@ -874,7 +914,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
     configs = sorted(mine.items(), key=lambda item: (item[1]["sort_order"] is None, item[1]["sort_order"]))
     from utils.pool_strategy_use import pool_options
 
-    pools = _eligible_pool_kinds() if selected is not None else {}
+    pools = _eligible_pool_kinds((country,)) if selected is not None else {}
     options = _ticker_options(pools)
     return {
         "account_options": [
@@ -883,15 +923,17 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
                 "name": item.get("name"),
                 "icon": item.get("icon"),
                 "order": item.get("order"),
+                "country_code": str(item["country_code"]).strip().lower(),
             }
             for item in docs
         ],
         "account_id": selected,
+        "country_code": country,
         "slack_enabled": account["slack_enabled"],
         "groups": _normalize_trade_groups(account.get("groups", [])),
         "pool_options": pool_options(list(pools)),
         "ticker_options": [options[ticker] for ticker in sorted(options)],
-        "default_round_amount_manwon": DEFAULT_ROUND_AMOUNT_MANWON,
+        "default_round_size": DEFAULT_ROUND_SIZES[country] if country else None,
         # 편집 표의 행 — 저장된 전략 설정 그대로.
         "configs": [
             {
@@ -900,7 +942,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
                 "ticker": entry["ticker"],
                 "name": entry["name"],
                 "trigger_pct": entry["trigger_pct"],
-                "round_amount_manwon": entry["round_amount_manwon"],
+                "round_size": entry["round_size"],
                 "rounds": entry["rounds"],
             }
             for sid, entry in configs

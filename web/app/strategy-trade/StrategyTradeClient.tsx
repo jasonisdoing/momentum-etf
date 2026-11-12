@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ColDef, RowDragEndEvent } from "ag-grid-community";
 
 import { gridRowDragColumn, gridSelectionColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
 import type { HoldingsGroup } from "@/lib/holdings-store";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
+import { formatCurrencyPrice, formatPrice } from "@/lib/price-format";
 import { renderStockNameCell } from "@/lib/name-highlight";
 
 import { CASH_ROW_TICKER, type AccountSummary, type HoldingsResponse, type HoldingsRow } from "../assets/assets-helpers";
@@ -25,7 +26,7 @@ import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 type StrategyConfig = {
   // 매매 간격(%) 하나로 진입·추가·매도를 모두 관리한다.
   trigger_pct: number;
-  round_amount_manwon: number;
+  round_size: number;
   rounds: number;
   index_name: string;
 };
@@ -120,6 +121,8 @@ export type StrategyView = {
   /** 운용 계좌 — 전략마다 고른다. */
   account_id: string;
   account_name: string;
+  /** 전략의 국가(kor·us) — 호가 단위·통화·시간표가 이 값으로 정해진다. */
+  country: string;
   ticker: string;
   config: StrategyConfig;
   index: IndexStatus;
@@ -151,7 +154,7 @@ type StrategyConfigRow = {
   ticker: string;
   name: string;
   trigger_pct: number;
-  round_amount_manwon: number;
+  round_size: number;
   rounds: number;
 };
 
@@ -159,14 +162,16 @@ type TickerOption = { ticker: string; name: string; pools: string[]; kind: "stoc
 
 type View = {
   /** 사고팔기를 운영할 수 있는 계좌 — 증권사 API 가 연동된 운영 계좌. */
-  account_options: AccountOptionBase[];
+  account_options: Array<AccountOptionBase & { country_code: string }>;
   /** 지금 보는 계좌. 운영할 수 있는 계좌가 없으면 null. */
   account_id: string | null;
+  /** 지금 보는 계좌의 국가(kor·us) — 통화·금액 단위·가격 표기가 이 값으로 정해진다. */
+  country_code: string | null;
   /** 이 계좌의 사고팔기 슬랙 스위치(합성 슬랙과 별개). */
   slack_enabled: boolean;
   groups: HoldingsGroup[];
   pool_options: PoolLabelSource[];
-  default_round_amount_manwon: number;
+  default_round_size: number;
   ticker_options: TickerOption[];
   /** 저장된 전략 설정 — 이 계좌의 전략 전부. */
   configs: StrategyConfigRow[];
@@ -205,6 +210,17 @@ const ROUND_TABLE_FIXED_WIDTHS = [56, 80, 140, 100, 150, 84] as const;
 const ROUND_TABLE_DAY_MIN_WIDTH = 96;
 const tdStyle: React.CSSProperties = { padding: "clamp(3px, calc(1dvh - 6px), 7px) 8px", textAlign: "right" };
 
+/** 계좌 국가별 거래 통화 — 가격 표기(원 0자리·달러 2자리)와 금액 단위를 한 곳에서 정한다. */
+export const CURRENCY_BY_COUNTRY: Record<string, string> = { kor: "KRW", us: "USD" };
+const TradeCurrencyContext = createContext<string>("KRW");
+const useTradeCurrency = () => useContext(TradeCurrencyContext);
+
+/** 통화별 회차 크기 — 국장은 회차 금액(만원), 미장은 회차 수량(주). */
+export const ROUND_SIZE_LABELS: Record<string, { title: string; unit: string }> = {
+  KRW: { title: "회차금액", unit: "만원" },
+  USD: { title: "회차수량", unit: "주" },
+};
+
 function formatNumber(value: number | null | undefined, digits = 0): string {
   if (value == null || !Number.isFinite(value)) return "-";
   return value.toLocaleString("ko-KR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -242,6 +258,7 @@ const SIDE_WORDS = { buy: "매수", sell: "매도" } as const;
 /** 상태 칸 — 지정가에 닿았으면 도달(빨강), 슬랙 신호·주문이 나갔으면 방향을 붙여 매도슬랙·매수주문처럼(녹색).
  *  슬랙 뱃지는 슬랙 메시지 기록이 있으면 눌러서 지울 수 있다(주문이 있으면 서버가 막는다). */
 function RoundStatus({ row, onDeleteSignal }: { row: RoundRow; onDeleteSignal: (signal: SlackSignal, label: string) => void }) {
+  const currency = useTradeCurrency();
   return (
     <span style={{ display: "inline-flex", gap: 4 }}>
       {row.buy_reached || row.sell_reached ? <StatusBadge color="var(--up-color, #d64545)">도달</StatusBadge> : null}
@@ -268,7 +285,7 @@ function RoundStatus({ row, onDeleteSignal }: { row: RoundRow; onDeleteSignal: (
         </StatusBadge>
       ))}
       {row.manual_orders.map((order, index) => (
-        <span key={`manual-${index}`} title={`${order.price.toLocaleString()}원 · ${order.quantity.toLocaleString()}주`}>
+        <span key={`manual-${index}`} title={`${formatCurrencyPrice(order.price, currency)} · ${order.quantity.toLocaleString()}주`}>
           <StatusBadge color="var(--tblr-green, #2fb344)">수동{SIDE_WORDS[order.side]}주문</StatusBadge>
         </span>
       ))}
@@ -314,6 +331,7 @@ function PriceGapRow({ gap, columnCount }: { gap: { round: number; pct: number }
 }
 
 function RecentPriceRow({ index, columnCount, kind }: { index: IndexStatus; columnCount: number; kind: "high" | "low" }) {
+  const currency = useTradeCurrency();
   const [label, price, date, color] = kind === "high"
     ? [index.recent_high_label, index.recent_high, index.recent_high_date, SELL_BADGE_COLOR] as const
     : [index.recent_low_label, index.recent_low, index.recent_low_date, BUY_BADGE_COLOR] as const;
@@ -323,7 +341,7 @@ function RecentPriceRow({ index, columnCount, kind }: { index: IndexStatus; colu
         <div style={{ display: "flex", alignItems: "center", gap: 8, color, fontSize: "var(--fs-sm)", fontWeight: 700 }}>
           <span style={{ flex: 1, borderTop: "2px dashed currentColor", opacity: 0.55 }} />
           <span>
-            {index.name} {label} {formatNumber(price)} ({date})
+            {index.name} {label} {formatPrice(price, currency)} ({date})
           </span>
           <span style={{ flex: 1, borderTop: "2px dashed currentColor", opacity: 0.55 }} />
         </div>
@@ -358,7 +376,7 @@ function rowFromConfig(config: StrategyConfigRow): DraftRow {
     ticker: config.ticker,
     name: config.name,
     pct: String(config.trigger_pct),
-    amount: String(config.round_amount_manwon),
+    amount: String(config.round_size),
     rounds: String(config.rounds),
   };
 }
@@ -429,6 +447,7 @@ function AccountSettingsCard({
   onDeleteSignal: (signal: SlackSignal, label: string) => void;
 }) {
   const toast = useToast();
+  const sizeLabel = ROUND_SIZE_LABELS[useTradeCurrency()];
   const [drafts, setDrafts] = useState<DraftRow[]>(() => view.configs.map(rowFromConfig));
   const [groups, setGroups] = useState<HoldingsGroup[]>(view.groups ?? EMPTY_GROUPS);
   const [groupDraft, setGroupDraft] = useState<HoldingsGroupDraft | null>(null);
@@ -588,6 +607,7 @@ function AccountSettingsCard({
     { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
     ...tradeSettingColumns.map((column): ColDef<TradeListRow> => ({
       ...column,
+      headerName: column.field === "amount" ? `${sizeLabel.title}(${sizeLabel.unit})` : column.headerName,
       type: "rightAligned",
       editable: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group,
       cellClass: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group ? "appEditableCell" : undefined,
@@ -635,7 +655,7 @@ function AccountSettingsCard({
     const key = nextDraftKey();
     setDrafts((prev) => [
       ...prev,
-      { key, strategy_id: null, ticker: option.ticker, name: option.name, pct: "5", amount: String(view.default_round_amount_manwon), rounds: "4" },
+      { key, strategy_id: null, ticker: option.ticker, name: option.name, pct: "5", amount: String(view.default_round_size), rounds: "4" },
     ]);
     setSelection({ accountId, ticker: option.ticker });
     setPickerOpen(false);
@@ -672,7 +692,7 @@ function AccountSettingsCard({
       if (!Number.isFinite(pct) || pct < PCT_MIN || pct > PCT_MAX) {
         return void toast.error(`${label}: 매매 간격은 ${PCT_MIN}~${PCT_MAX} 사이 숫자여야 합니다.`);
       }
-      if (!Number.isSafeInteger(amount) || !Number.isSafeInteger(amount * 10_000) || amount < 1) return void toast.error(`${label}: 회차 금액(만원)은 1 이상의 정수여야 합니다.`);
+      if (!Number.isSafeInteger(amount) || !Number.isSafeInteger(amount * 10_000) || amount < 1) return void toast.error(`${label}: ${sizeLabel.title}(${sizeLabel.unit})은 1 이상의 정수여야 합니다.`);
       if (!Number.isInteger(rounds) || rounds < 1 || rounds > 12) {
         return void toast.error(`${label}: 회차 수는 1~12 사이 정수여야 합니다.`);
       }
@@ -680,7 +700,7 @@ function AccountSettingsCard({
         ...(row.strategy_id ? { strategy_id: row.strategy_id } : {}),
         ticker: row.ticker,
         trigger_pct: pct,
-        round_amount_manwon: amount,
+        round_size: amount,
         rounds,
       });
     }
@@ -881,6 +901,7 @@ function StrategySection({
   poolLabel: string;
   onDeleteSignal: (signal: SlackSignal, label: string) => void;
 }) {
+  const currency = useTradeCurrency();
   if ("error" in view) {
     return (
       <div className="card appCard" style={cardStyle}>
@@ -928,14 +949,14 @@ function StrategySection({
       <div style={{ display: "flex", gap: "4px 10px", flexWrap: "wrap", alignItems: "baseline", fontSize: "var(--fs-sm)" }}>
         <span style={{ fontWeight: 800, fontSize: "var(--fs-base)" }}>{view.label}</span>
         <span>
-          현재가 <b style={{ fontSize: "var(--fs-lg)", fontWeight: 800 }}>{formatNumber(index.close)}</b>
+          현재가 <b style={{ fontSize: "var(--fs-lg)", fontWeight: 800 }}>{formatPrice(index.close, currency)}</b>
         </span>
         <span style={{ color: "var(--text-muted)" }}>
           체결 이력 {view.ledger_at.slice(5, 16).replace("T", " ")} 기준
         </span>
         {status.waiting_first_entry ? (
           <span style={{ fontWeight: 700 }}>
-            1호 진입 대기 — {index.name} {formatNumber(index.buy_trigger)} 이하 · 미도달 시{" "}
+            1호 진입 대기 — {index.name} {formatPrice(index.buy_trigger, currency)} 이하 · 미도달 시{" "}
             {status.first_entry_close_time} 매수
           </span>
         ) : status.next_round == null ? (
@@ -968,8 +989,8 @@ function StrategySection({
       {view.arbitrary_lots.map((lot) => (
         <div key={lot.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: "var(--fs-sm)" }}>
           <StatusBadge color={FILL_COLORS.buy}>임의 매수</StatusBadge>
-          <span>{lot.bought_on} · {formatNumber(lot.fill_price)}원 · {formatNumber(lot.quantity)}주</span>
-          <span style={{ color: SELL_BADGE_COLOR }}>임의 매도 목표 {formatNumber(lot.sell_limit)}원</span>
+          <span>{lot.bought_on} · {formatCurrencyPrice(lot.fill_price, currency)} · {formatNumber(lot.quantity)}주</span>
+          <span style={{ color: SELL_BADGE_COLOR }}>임의 매도 목표 {formatCurrencyPrice(lot.sell_limit, currency)}</span>
         </div>
       ))}
 
@@ -1016,7 +1037,7 @@ function StrategySection({
                   <tr key={`empty-${position}`} style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
                     <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)" }}>{position}</td>
                     <td colSpan={2} style={tdStyle} />
-                    <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatNumber(view.position_prices[String(position)])}</td>
+                    <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatPrice(view.position_prices[String(position)], currency)}</td>
                     <td colSpan={2} style={tdStyle} />
                     {tradeCells}
                   </tr>
@@ -1050,12 +1071,12 @@ function StrategySection({
                 <td style={{ ...tdStyle, textAlign: "left" }}>
                   <RoundStatus row={row} onDeleteSignal={onDeleteSignal} />
                 </td>
-                <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatNumber(view.position_prices[String(position)])}</td>
+                <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatPrice(view.position_prices[String(position)], currency)}</td>
                 <td style={tdStyle}>
                   {row.held ? (
                     <>
                       <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
-                        <b>{formatNumber(row.fill_price)}</b>
+                        <b>{formatPrice(row.fill_price, currency)}</b>
                         {row.bought_on != null && row.source != null ? (
                           <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-xs, 11px)" }}>
                             {row.bought_on.slice(5)} · {BOUGHT_SOURCE_WORDS[row.source]}
@@ -1065,7 +1086,7 @@ function StrategySection({
                       {/* 팔 수 있는 회차(가장 깊은 보유)만 실제 매도 지정가 — 체결가 +간격%. */}
                       {row.round === status.held_count && row.sell_limit != null ? (
                         <div style={{ color: SELL_BADGE_COLOR, fontSize: "var(--fs-xs, 11px)", fontWeight: 700 }}>
-                          매도 {formatNumber(row.sell_limit)}
+                          매도 {formatPrice(row.sell_limit, currency)}
                           {row.rebuy_after_sell ? " 후 재매수" : ""}
                         </div>
                       ) : null}
@@ -1073,7 +1094,7 @@ function StrategySection({
                   ) : row.is_next ? (
                     // 다음 회차의 실제 매수 지정가 — 마지막 체결가 −간격%(위치 가격과 조금 다를 수 있다).
                     <span style={{ color: BUY_BADGE_COLOR, fontWeight: 700 }}>
-                      다음 매수 {formatNumber(row.buy_limit)}
+                      다음 매수 {formatPrice(row.buy_limit, currency)}
                       {row.cash_short ? (
                         <span style={{ marginLeft: 6, color: "var(--text-muted)", fontWeight: 400 }}>한도 소진</span>
                       ) : null}
@@ -1182,8 +1203,18 @@ export function StrategyTradeClient() {
     );
   }
 
+  const currency = view.country_code ? CURRENCY_BY_COUNTRY[view.country_code] : undefined;
+  if (!currency) {
+    return (
+      <PageFrame title="전략 사고팔기" fullWidth>
+        <div style={{ color: "var(--text-muted)", padding: 20 }}>지원하지 않는 계좌 국가입니다: {view.country_code ?? "-"}</div>
+      </PageFrame>
+    );
+  }
+
   return (
     <PageFrame title="전략 사고팔기" fullWidth>
+     <TradeCurrencyContext.Provider value={currency}>
       <div className="appPageStack">
         <AccountSettingsCard
           key={view.account_id}
@@ -1215,6 +1246,7 @@ export function StrategyTradeClient() {
           같은 메시지로 나간 다른 신호도 함께 지워지며, 이 신호로 낸 주문이 있으면 지우지 않습니다.
         </p>
       </AppModal>
+     </TradeCurrencyContext.Provider>
     </PageFrame>
   );
 }

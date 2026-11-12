@@ -32,7 +32,7 @@ from services.broker_trade_service import (
 from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
 from utils.db_manager import get_db_connection
 from utils.market_session import is_instrument_trading_time, kor_order_venue
-from utils.strategy_trade_config import round_buy_quantity
+from utils.strategy_trade_config import ROUND_SIZE_UNITS, round_buy_quantity
 from utils.strategy_trade_ledger import LOOKBACK_DAYS, REGULAR_SELL, is_buy
 from utils.strategy_trade_service import load_views_where
 
@@ -230,12 +230,20 @@ def resolve_order(
     }
 
 
+def _money(value: float, country: str) -> str:
+    """주문 오류 문구용 금액 — 국장은 `1,234원`, 미장은 `$12.34`."""
+    return f"{value:,.0f}원" if country == "kor" else f"${value:,.2f}"
+
+
 def _buy_quantity(strategy: dict[str, Any], price: int, account_id: str) -> int:
-    amount = strategy["config"]["round_amount_manwon"]
-    quantity = round_buy_quantity(amount, price)
+    size = strategy["config"]["round_size"]
+    quantity = round_buy_quantity(size, price, strategy["country"])
     if quantity == 0:
-        raise BrokerApiError(f"{strategy['label']}: 회차 금액 {amount:,}만원으로 {price:,}원에 1주도 살 수 없습니다.")
-    if account_id == strategy["account_id"] and quantity * price > strategy["cash_krw"]:
+        raise BrokerApiError(
+            f"{strategy['label']}: 회차 금액 {size:,}{ROUND_SIZE_UNITS[strategy['country']]}으로 "
+            f"{_money(price, strategy['country'])}에 1주도 살 수 없습니다."
+        )
+    if account_id == strategy["account_id"] and quantity * price > strategy["cash"]:
         raise BrokerApiError(f"{strategy['label']}: 계좌 현금으로 {quantity:,}주를 살 수 없습니다.")
     return quantity
 
@@ -249,8 +257,10 @@ def _order_venue(strategy: dict[str, Any]) -> str:
 
 
 def _require_valid_quote(strategy: dict[str, Any], label: str, price: int) -> None:
-    if not is_valid_quote(price, kind=strategy["instrument_kind"]):
-        raise BrokerApiError(f"{strategy['ticker']} {label} {price}원이 KRX 호가 단위와 맞지 않습니다.")
+    if not is_valid_quote(price, kind=strategy["instrument_kind"], country=strategy["country"]):
+        raise BrokerApiError(
+            f"{strategy['ticker']} {label} {_money(price, strategy['country'])}이 호가 단위와 맞지 않습니다."
+        )
 
 
 def _order_strategy(account_id: str, pool: str, strategy_id: str, *, fresh: bool) -> dict[str, Any]:
