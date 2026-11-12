@@ -640,8 +640,10 @@ def _us_order_date(today: date) -> str:
 
 
 def _us_today() -> date:
-    """미국 시장의 오늘 — 메리츠의 주문일자는 미국 현지 날짜다(한국 아침의 애프터 주문이 전날 날짜)."""
-    return datetime.now(ZoneInfo(_US_MARKET_TIMEZONE)).date()
+    """메리츠 주문내역의 오늘 주문일자 — 거래 세션의 날짜다(한국 아침의 애프터 주문은 전날, 20:00 ET 이후 데이장 주문은 다음 날)."""
+    from utils.strategy_trade_market import session_trade_date
+
+    return session_trade_date("us", datetime.now(ZoneInfo(_US_MARKET_TIMEZONE)))
 
 
 def _us_row_from_history(row: dict[str, Any]) -> dict[str, Any]:

@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo
 from services.broker_api_service import BrokerApiError
 from services.broker_trade_service import account_country, fetch_order_balance, list_day_orders
 from utils.db_manager import get_db_connection
-from utils.market_session import market_today
+from utils.strategy_trade_market import session_trade_date
 
 KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_day_fills"
@@ -370,7 +370,7 @@ def compute_ledgers(account_id: str, tickers: list[str]) -> dict[str, tuple[Ledg
 
     computed_at = datetime.now(KST).isoformat()
     country = account_country(account_id)
-    today = market_today(country)
+    today = session_trade_date(country, datetime.now(KST))
     balance, today_rows = _consistent_snapshot(account_id, today)
     sources = order_sources(account_id, today_rows)
     history = _History(account_id, today, _filled(today_rows), sources)

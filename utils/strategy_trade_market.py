@@ -56,8 +56,8 @@ def krw_rate(country: str) -> float:
 
 
 def broker_order_date(country: str, created: datetime) -> str:
-    """증권사 주문내역이 쓰는 주문일자(YYYYMMDD) — 그 시장의 현지 달력 날짜다(미국 애프터 주문은 한국 날짜로 전날)."""
-    return created.astimezone(_zone(country)).strftime("%Y%m%d")
+    """증권사 주문내역이 쓰는 주문일자(YYYYMMDD) — 거래 세션의 날짜다(미국 애프터 주문은 한국 날짜로 전날, 20:00 ET 이후 데이장 주문은 다음 날)."""
+    return f"{session_trade_date(country, created):%Y%m%d}"
 
 
 def session_trade_date(country: str, at: datetime) -> date:

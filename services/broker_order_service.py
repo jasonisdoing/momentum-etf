@@ -244,9 +244,7 @@ def _accepted_order_no(data: dict[str, Any], what: str) -> str:
     return str(int(order_no))
 
 
-def place_limit_order(
-    account_no: str, side: str, ticker: str, quantity: int, price: int, venue: str
-) -> dict[str, str]:
+def place_limit_order(account_no: str, side: str, ticker: str, quantity: int, price: int, venue: str) -> dict[str, str]:
     """지정가 주문 한 건(``venue`` 거래소) — 접수되면 시장주문번호를 돌려준다. side 는 buy·sell."""
     base_url = _base_url(account_no)
     if side not in ORDER_PATH:

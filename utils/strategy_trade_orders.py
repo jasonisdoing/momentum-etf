@@ -23,6 +23,7 @@ from bson import ObjectId
 from core.strategy.trade.rules import is_valid_quote
 from services.broker_api_service import BrokerApiError, OrderUncertainError
 from services.broker_trade_service import (
+    account_country,
     account_env,
     cancel_order,
     fetch_best_quote,
@@ -741,17 +742,17 @@ def order_sources(account_id: str, today_rows: list[dict[str, Any]]) -> dict[tup
     """
     records = _orders().find(
         {"account_id": account_id, "order_no": {"$ne": None}},
-        {"order_no": 1, "round": 1, "created_at": 1, "arbitrary_id": 1},
+        {"order_no": 1, "round": 1, "created_at": 1, "arbitrary_id": 1, "country": 1},
     )
     sources = {
-        (record["created_at"][:10].replace("-", ""), str(int(record["order_no"]))): (
+        (_order_date(record), str(int(record["order_no"]))): (
             record["round"] is not None or bool(record.get("arbitrary_id")),
             record.get("arbitrary_id") or REGULAR_SELL,
         )
         for record in records
     }
     today = _now()
-    today_key = f"{today:%Y%m%d}"
+    today_key = broker_order_date(account_country(account_id), today)
     submitting = _orders().find(
         {
             "account_id": account_id,
