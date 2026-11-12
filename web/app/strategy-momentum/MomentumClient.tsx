@@ -833,8 +833,6 @@ export function MomentumClient() {
         maType: positions?.ma_type,
         entry: { mult: view?.settings.entry_vol_mult ?? null, getVolatility: (row) => row?.volatility_pct },
       }),
-      volatilityColumn<PlanRow>(),
-      tradeValueMultColumn<PlanRow>(),
       // 실제 수익률 — 계좌 평단 대비(합성 화면과 같은 계산). 전략 수익률은 이론 편입가 대비라 따로 둔다.
       {
         colId: "actual_return_pct",
@@ -854,6 +852,8 @@ export function MomentumClient() {
         .filter((col) => col.field === "return_pct")
         .map((col) => ({ ...col, headerName: "전략 수익률", width: 116, headerTooltip: "전략이 잡은 편입가 대비 이론 수익률. 아직 청산 전이라 매도 슬리피지는 빠져 있다." })),
       ...slotTradeColumns<PlanRow>({ fillDay }).filter((col) => col.field !== "return_pct"),
+      volatilityColumn<PlanRow>(),
+      tradeValueMultColumn<PlanRow>(),
     ],
     [
       fillDay,
