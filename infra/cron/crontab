@@ -73,23 +73,11 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 # 개시 직후라 판정은 직전(어제) 확정 종가/수익률 기준 — 오늘 매매 전 아침 알림.
 10 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py holdings_alarm python scripts/holdings_alarm.py >> logs/cron/holdings_alarm.log 2>&1
 
-# ── 전략 사고팔기 알림 (평일 09:10~23:50, 화~토 00:00~08:50, 10분 간격) ──────────────────
-# 한국 휴장일에도 돈다 — 종목마다 그 시장의 거래일·거래 시간을 배치 안에서 판정한다.
-10,20,30,40,50 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
-0,10,20,30,40,50 10-14,16-19 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
-0,10,20,40,50 15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
-0,10 20 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
-# 미장(프리·정규·애프터·데이장) 종목 — 한국 시각 20:20 이후와 새벽·15:30은 국장 구간 밖이라 따로 돈다(거래 시간이 아니면 배치가 바로 끝난다)
-30 15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
-20,30,40,50 20 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
-*/10 21-23 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
-*/10 0-8 * * 2-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
+# ── 전략 사고팔기 알림 (월~토 24시간, 10분 간격) ──────────────────
+# 국장·미장을 함께 다뤄 월~토 24시간 돈다 — 종목마다 그 시장의 거래일·거래 시간을 배치 안에서 판정하고 아니면 바로 끝난다.
+*/10 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py strategy_trade_notify python scripts/strategy_trade_notify.py >> logs/cron/strategy_trade_notify.log 2>&1
 # 슬랙 모의 주문 결과 알림 — 슬랙으로 낸 주문이 끝났는지 1분마다 확인한다(진행 중인 주문이 없으면 바로 종료).
-* 9-19 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py slack_mock_order_notify python scripts/slack_mock_order_notify.py >> logs/cron/slack_mock_order_notify.log 2>&1
-0-20 20 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py slack_mock_order_notify python scripts/slack_mock_order_notify.py >> logs/cron/slack_mock_order_notify.log 2>&1
-21-59 20 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py slack_mock_order_notify python scripts/slack_mock_order_notify.py >> logs/cron/slack_mock_order_notify.log 2>&1
-* 21-23 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py slack_mock_order_notify python scripts/slack_mock_order_notify.py >> logs/cron/slack_mock_order_notify.log 2>&1
-* 0-8 * * 2-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py slack_mock_order_notify python scripts/slack_mock_order_notify.py >> logs/cron/slack_mock_order_notify.log 2>&1
+* * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py slack_mock_order_notify python scripts/slack_mock_order_notify.py >> logs/cron/slack_mock_order_notify.log 2>&1
 
 # ── 합성 액션 알림 (평일 09:10~15:20, 10분 간격) ──────────────────────────
 # 합성 알람(mix_slack_enabled) 켠 계좌의 오늘의 액션을 감시해, 새 지시·수량 증가가

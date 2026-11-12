@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from utils.batch_queue import KOREAN_TRADING_DAY_JOBS, LOCAL_ONLY_JOBS
+from utils.batch_queue import LOCAL_ONLY_JOBS
 from utils.db_manager import get_db_connection
 from utils.env import load_env_if_present
 from utils.ticker_registry import load_ticker_type_configs
@@ -50,19 +50,21 @@ _WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
 _WEEKDAYS_TUE_SAT = [1, 2, 3, 4, 5]
 _WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6]
 
-# 슬랙 주문 결과 알림 — 크론과 같다: 평일 09:00~23:59, 화~토 00:00~08:59(미장 데이·정규장) 1분 간격.
-_SLACK_ORDER_RESULT_SLOTS = [
-    *({"hour": hour, "minute": minute, "weekdays": _WEEKDAYS_MON_FRI} for hour in range(9, 24) for minute in range(60)),
-    *({"hour": hour, "minute": minute, "weekdays": _WEEKDAYS_TUE_SAT} for hour in range(9) for minute in range(60)),
-]
 
-# 미국 장중 10분 슬롯 — 22:40~23:50 + 00:00~05:50 KST. 서머타임(22:30~05:00)과 겨울(23:30~06:00) 정규장을
-# 모두 덮는다 — 장 밖·개장 직후는 스크립트가 현지 시간표로 건너뛴다. 자정을 넘는 구간이라 요일은 월~토로 잡는다.
+# 미국 장중 10분 슬롯 — 평일 22:40~23:50 + 화~토 00:00~05:50 KST(크론과 같다). 서머타임(22:30~05:00)과
+# 겨울(23:30~06:00) 정규장을 모두 덮는다 — 장 밖·개장 직후는 스크립트가 현지 시간표로 건너뛴다.
 _US_INTRADAY_10MIN_SLOTS = [
-    {"hour": hour, "minute": minute}
-    for hour in (22, 23, 0, 1, 2, 3, 4, 5)
-    for minute in range(0, 60, 10)
-    if (hour, minute) >= (22, 40) or hour < 6
+    *(
+        {"hour": hour, "minute": minute, "weekdays": _WEEKDAYS_MON_FRI}
+        for hour in (22, 23)
+        for minute in range(0, 60, 10)
+        if (hour, minute) >= (22, 40)
+    ),
+    *(
+        {"hour": hour, "minute": minute, "weekdays": _WEEKDAYS_TUE_SAT}
+        for hour in range(6)
+        for minute in range(0, 60, 10)
+    ),
 ]
 
 # 장중 10분 슬롯 — 평일 09:10~15:20. 한국 장중(09:00~15:30)에서 개시 직후·마감 직전을 뺀 구간.
@@ -71,20 +73,6 @@ _INTRADAY_10MIN_SLOTS = [
     for hour in range(9, 16)
     for minute in range(0, 60, 10)
     if (hour, minute) >= (9, 10) and (hour, minute) <= (15, 20)
-]
-# 사고팔기 알림 — 크론과 같다: 평일 09:10~23:50, 화~토 00:00~08:50(미장 데이·정규장) 10분 간격.
-_STRATEGY_TRADE_SLOTS = [
-    *(
-        {"hour": hour, "minute": minute, "weekdays": _WEEKDAYS_MON_FRI}
-        for hour in range(9, 24)
-        for minute in range(0, 60, 10)
-        if (hour, minute) >= (9, 10)
-    ),
-    *(
-        {"hour": hour, "minute": minute, "weekdays": _WEEKDAYS_TUE_SAT}
-        for hour in range(9)
-        for minute in range(0, 60, 10)
-    ),
 ]
 
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
@@ -160,9 +148,9 @@ SCHEDULE_ROWS = [
         "job": "전략 사고팔기 알림",
         "target": "계좌에 등록한 종목별 사고팔기 전략 (슬랙 켠 계좌만 발송, 원장은 전 계좌 계산)",
         "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:10~23:50 · 화~토 00:00~08:50 KST 10분 간격 (종목마다 그 시장 거래 시간만 판정)",
+        "cadence": "월~토 24시간 10분 간격 KST (00·10·…·50분)",
         "command": "python scripts/strategy_trade_notify.py",
-        "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_SAT},
+        "schedule": {"minutes": list(range(0, 60, 10)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
         "no": 7,
@@ -170,9 +158,9 @@ SCHEDULE_ROWS = [
         "group": "증권사 연동",
         "job": "슬랙 주문 결과 알림",
         "target": "슬랙 메시지로 낸 주문 — 운영·모의 (진행 중인 것이 없으면 조회 없이 종료)",
-        "cadence": "평일 09:00~23:59 · 화~토 00:00~08:59 KST 1분 간격",
+        "cadence": "월~토 24시간 1분 간격 KST",
         "command": "python scripts/slack_mock_order_notify.py",
-        "schedule": {"slots": _SLACK_ORDER_RESULT_SLOTS, "weekdays": _WEEKDAYS_MON_SAT},
+        "schedule": {"minutes": list(range(60)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     # ③ 장중 실행 — 장중에 도는 알림들.
     {
@@ -538,7 +526,7 @@ def _parse_kst_datetime(value: str) -> datetime | None:
         return None
 
 
-def _compute_next_run(schedule: dict | None, *, job_name: str) -> datetime | None:
+def _compute_next_run(schedule: dict | None) -> datetime | None:
     """주어진 스케줄에 맞는 가장 가까운 다음 실행 시각(KST)을 반환한다.
 
     minutes×hours 교차곱으로 표현 못 하는 시각(예: 09:20·15:35)은 ``slots``
@@ -549,9 +537,6 @@ def _compute_next_run(schedule: dict | None, *, job_name: str) -> datetime | Non
     """
     if not schedule:
         return None
-    from utils.trading_calendar import is_trading_day
-
-    korean_trading_day_only = job_name in KOREAN_TRADING_DAY_JOBS
     weekdays = sorted(set(int(w) for w in schedule.get("weekdays", [])))
     if not weekdays:
         return None
@@ -568,11 +553,7 @@ def _compute_next_run(schedule: dict | None, *, job_name: str) -> datetime | Non
         end = candidate + timedelta(days=8)
         while candidate < end:
             slot_weekdays = slot_rules.get((candidate.hour, candidate.minute))
-            if (
-                slot_weekdays is not None
-                and candidate.weekday() in slot_weekdays
-                and (not korean_trading_day_only or is_trading_day("kor", candidate))
-            ):
+            if slot_weekdays is not None and candidate.weekday() in slot_weekdays:
                 return candidate
             candidate += timedelta(minutes=1)
         return None
@@ -587,7 +568,7 @@ def _compute_next_run(schedule: dict | None, *, job_name: str) -> datetime | Non
     # 최대 8일까지 탐색 (어떤 weekday/hour/minute 조합이라도 이 범위 내에 반드시 매치)
     end = candidate + timedelta(days=8)
     while candidate < end:
-        if candidate.weekday() in weekdays and (not korean_trading_day_only or is_trading_day("kor", candidate)):
+        if candidate.weekday() in weekdays:
             if candidate.hour in hours:
                 if candidate.minute in minutes:
                     return candidate
@@ -1345,15 +1326,13 @@ def load_system_data() -> dict[str, object]:
         "batch_queue": serialized_queue,
         "is_deploying": is_deploying(),
         "last_run_by_job": {row["key"]: _read_last_job_run(str(row["key"])) for row in SCHEDULE_ROWS},
-        "next_run_by_job": {
-            row["key"]: _build_next_run_payload(row.get("schedule"), job_name=row["key"]) for row in SCHEDULE_ROWS
-        },
+        "next_run_by_job": {row["key"]: _build_next_run_payload(row.get("schedule")) for row in SCHEDULE_ROWS},
         "estimated_by_job": estimated_by_job,
     }
 
 
-def _build_next_run_payload(schedule: dict | None, *, job_name: str) -> dict[str, str | None]:
-    next_run = _compute_next_run(schedule, job_name=job_name)
+def _build_next_run_payload(schedule: dict | None) -> dict[str, str | None]:
+    next_run = _compute_next_run(schedule)
     if next_run is None:
         return {"at": None, "display": "-"}
     return {

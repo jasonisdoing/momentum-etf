@@ -40,7 +40,6 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -141,12 +140,9 @@ def _parse_crontab(path: Path) -> list[tuple[str, str, str]]:
 def _enqueue_from_schedule(job_name: str, script_path: str, arguments: list[str] | None = None) -> None:
     """APScheduler 가 호출 — 직접 실행하지 않고 batch_queue 에 enqueue 만."""
     sys.path.insert(0, str(ROOT_DIR))
-    from utils.batch_queue import KOREAN_TRADING_DAY_JOBS, enqueue
-    from utils.trading_calendar import is_trading_day
+    from utils.batch_queue import enqueue
 
     try:
-        if job_name in KOREAN_TRADING_DAY_JOBS and not is_trading_day("kor", datetime.now(KST)):
-            return
         result = enqueue(job_name, script_path, triggered_by="schedule", arguments=arguments)
         if result.get("enqueued"):
             log.info("스케줄 → 큐 추가: %s", job_name)
