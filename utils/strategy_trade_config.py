@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import time
+from datetime import datetime, time, timedelta
 from math import isfinite
 from typing import Any
 
@@ -24,20 +24,33 @@ def is_eligible_pool(pool_config: dict[str, Any], countries: tuple[str, ...]) ->
     ).strip().lower() in {"stock", "etf"}
 
 
-# 1호 매수 구간(**그 시장 현지 시각**, 종목 종류별 (시작, 끝) 목록) — 보유 0인데 이 구간 안이면 가격과 상관없이 현재가로
-# 1호를 산다. 국장 ETF 는 본장 시작 30분 뒤(09:30~10:00)와 KRX 정규장 마감 전 30분(15:00~15:30), 개별주는 NXT 프리마켓 개시
-# 30분 뒤(08:30~09:00)와 NXT 애프터마켓 마감 전 30분(19:30~20:00)이다. 미장은 본장 시작 30분 뒤와 마감 전 30분이다(한국시간
-# 겨울 00:00·05:30, 서머타임 23:00·04:30). 미장 본장은 서머타임에 따라 한국시간이 바뀌어 현지 시각으로 두고, 화면·슬랙에는
-# 한국시간으로 바꿔 보인다. 그 시각에 실제로 거래 중인지는 `config.INSTRUMENT_TRADING_WINDOWS` 가 판정한다.
-FIRST_ENTRY_WINDOWS: dict[str, dict[str, tuple[tuple[time, time], ...]]] = {
-    "kor": {
-        "etf": ((time(9, 30), time(10, 0)), (time(15, 0), time(15, 30))),
-        "stock": ((time(8, 30), time(9, 0)), (time(19, 30), time(20, 0))),
-    },
-    "us": {
-        "etf": ((time(10, 0), time(10, 30)), (time(15, 30), time(16, 0))),
-        "stock": ((time(10, 0), time(10, 30)), (time(15, 30), time(16, 0))),
-    },
+#: 1호 매수 시각 — 본장 개장 뒤·마감 전 이 시간(분). 국장·미장, 개별주·ETF 모두 같다.
+FIRST_ENTRY_OFFSET_MINUTES = 20
+
+
+def _first_entry_windows(country: str) -> tuple[tuple[time, time], ...]:
+    """그 시장 본장 기준 1호 매수 구간(현지 시각) — 개장 20분 뒤부터 20분, 마감 20분 전부터 마감까지.
+
+    미장 본장은 서머타임에 따라 한국시간이 바뀌어 현지 시각으로 두고, 화면·슬랙에는 한국시간으로 바꿔 보인다
+    (미장은 한국시간 겨울 23:50·05:40, 서머타임 22:50·04:40). 그 시각에 실제로 거래 중인지는
+    `config.INSTRUMENT_TRADING_WINDOWS` 가 판정한다.
+    """
+    from config import MARKET_SCHEDULES
+
+    day = datetime(2000, 1, 1)
+    offset = timedelta(minutes=FIRST_ENTRY_OFFSET_MINUTES)
+    session_open = datetime.combine(day, MARKET_SCHEDULES[country]["open"])
+    session_close = datetime.combine(day, MARKET_SCHEDULES[country]["close"])
+    return (
+        ((session_open + offset).time(), (session_open + 2 * offset).time()),
+        ((session_close - offset).time(), session_close.time()),
+    )
+
+
+#: 1호 매수 구간(그 시장 현지 시각, (시작, 끝) 목록) — 보유 0인데 이 구간 안이면 가격과 상관없이 현재가로 1호를 산다.
+#: 구간마다 보유가 없을 때만이라 앞 구간에서 샀으면 다음 구간은 건너뛴다.
+FIRST_ENTRY_WINDOWS: dict[str, tuple[tuple[time, time], ...]] = {
+    country: _first_entry_windows(country) for country in TRADE_COUNTRIES
 }
 
 # 화면에서 편집하는 파라미터 키 — DB 문서에 이 키로 저장된다.

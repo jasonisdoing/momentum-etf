@@ -470,24 +470,24 @@ def _load_ticker_status(
 def _first_entry_close_window(
     kind: ladder.InstrumentKind, country: ladder.Country, now: datetime | None = None
 ) -> bool:
-    """지금이 1호 매수 시간인지 — 그 시장·종목 종류의 ``FIRST_ENTRY_WINDOWS`` 구간(현지 시각) 안이고 거래 중일 때.
+    """지금이 1호 매수 시간인지 — 그 시장의 ``FIRST_ENTRY_WINDOWS`` 구간(현지 시각) 안이고 그 종목 종류가 거래 중일 때.
 
     거래일·거래 시간 판정은 시장·종목 종류별 시간표가 한다.
     """
     from utils.market_session import is_instrument_trading_time
 
     now_local = _market_now(country, now)
-    in_window = any(start <= now_local.time() < end for start, end in FIRST_ENTRY_WINDOWS[country][kind])
+    in_window = any(start <= now_local.time() < end for start, end in FIRST_ENTRY_WINDOWS[country])
     return in_window and is_instrument_trading_time(country, kind, now=now_local)
 
 
-def _next_first_entry_time(kind: ladder.InstrumentKind, country: ladder.Country, now: datetime | None = None) -> str:
+def _next_first_entry_time(country: ladder.Country, now: datetime | None = None) -> str:
     """다음 1호 매수 시각(**한국시간** ``HH:MM``) — 지금 들어 있거나 아직 안 온 첫 구간의 시작, 다 지났으면 다음 날 첫 구간.
 
     구간은 현지 시각이라 그날의 서머타임을 반영해 한국시간으로 바꾼다.
     """
     now_local = _market_now(country, now)
-    windows = FIRST_ENTRY_WINDOWS[country][kind]
+    windows = FIRST_ENTRY_WINDOWS[country]
     upcoming = next((start for start, end in windows if now_local.time() < end), None)
     day = now_local.date() if upcoming is not None else now_local.date() + timedelta(days=1)
     start = datetime.combine(day, upcoming or windows[0][0], tzinfo=now_local.tzinfo)
@@ -795,7 +795,7 @@ def _build_strategy_view(
             "held_count": held_rounds,
             "waiting_first_entry": held_rounds == 0,
             # 보유가 없을 때 다음 1호 매수 시각(한국시간).
-            "first_entry_time": _next_first_entry_time(kind, country),
+            "first_entry_time": _next_first_entry_time(country),
             "next_round": (held_rounds + 1) if held_rounds < max_rounds else None,
             "next_ticker": ticker if held_rounds < max_rounds else None,
             "next_name": name if held_rounds < max_rounds else None,
