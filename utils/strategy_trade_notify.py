@@ -369,7 +369,7 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     elif next_row is not None and next_row["close_entry"]:
         parts.append(f"📉 *{status['next_round']}호 장 마감 매수!*")
     elif status["waiting_first_entry"]:
-        parts.append(f"⏳ 1호 {status['first_entry_close_time']} 매수 대기")
+        parts.append(f"⏳ 1호 {status['first_entry_time']} 매수 예정")
     elif drop >= 0 and status["sell_pending"]:
         parts.append(f"📉 {status['next_round']}호 매수가 도달 — {status['next_sell_round']}호 매도 체결 뒤 매수")
     elif drop >= 0:
@@ -391,10 +391,17 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
         lines.append(
             f"• {word} · {lot['quantity']:,}주 · 매수 {_level(lot['fill_price'], country)} · 매도 목표 {_level(lot['sell_limit'], country)}"
         )
+
     # 1~6호 전부 나열 — 상태를 이모지로 즉시 구분한다.
     #   🔴 지금 팔 것 / 🔵 지금 살 것 / 🟢 보유 중 / ⏳ 다음 매수 대기 / ⚪ 이후 회차
     # 회차별 줄 — 종목 가격이 아니라 **지수 환산값**으로 적는다. ETF 단가는 종목마다
     # 달라 서로 비교가 안 되고, 판단은 결국 지수가 어디까지 왔느냐로 하기 때문이다.
+    def plan_text(row: dict[str, Any]) -> str:
+        """매수 예정 — 보유가 없으면 회차 가격이 없어 다음 1호 매수 시각(한국시간)을 적는다."""
+        if row["buy_index"] is None:
+            return f"{status['first_entry_time']} 매수 예정"
+        return f"매수 예정 {_level(row['buy_index'], country)}"
+
     for row in strategy_view["rounds"]:
         quantity = f"{row['quantity']:,}주"
         if row["held"]:
@@ -410,13 +417,9 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
                     f"🟢 {row['round']}호 {quantity} 보유 중 ({profit_text}) · 매도 목표 {_level(row['sell_index'], country)}"
                 )
         elif row["budget_short"]:
-            lines.append(
-                f"⏸ {row['round']}호 회차 금액으로 1주 매수 불가 · 매수 예정 {_level(row['buy_index'], country)}"
-            )
+            lines.append(f"⏸ {row['round']}호 회차 금액으로 1주 매수 불가 · {plan_text(row)}")
         elif row["is_next"] and row["cash_short"]:
-            lines.append(
-                f"⏸ {row['round']}호 {quantity} 한도 소진 — 현금 부족 · 매수 예정 {_level(row['buy_index'], country)}"
-            )
+            lines.append(f"⏸ {row['round']}호 {quantity} 한도 소진 — 현금 부족 · {plan_text(row)}")
         elif row["is_next"]:
             if row["buy_reached"]:
                 reach = (
@@ -429,15 +432,10 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
                     f"{_already_sent_note(row['round'], 'buy', triggered)}"
                 )
             else:
-                # 1호는 가격 기준 없이 정해진 구간에 산다 — 회차 가격 대신 매수 시각을 적는다.
-                wait_text = (
-                    f"{status['first_entry_close_time']} 매수"
-                    if status["waiting_first_entry"]
-                    else _level(row["buy_index"], country)
-                )
-                lines.append(f"⏳ {row['round']}호 {quantity} 다음 매수 대기 · {wait_text}")
+                lines.append(f"⏳ {row['round']}호 {quantity} 다음 매수 대기 · {plan_text(row)}")
         else:
-            lines.append(f"⚪ {row['round']}호 {quantity} 이후 회차 · 매수 예정 {_level(row['buy_index'], country)}")
+            after = f" · {plan_text(row)}" if row["buy_index"] is not None else ""
+            lines.append(f"⚪ {row['round']}호 {quantity} 이후 회차{after}")
 
     return "\n".join(lines)
 

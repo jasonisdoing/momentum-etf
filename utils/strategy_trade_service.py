@@ -16,6 +16,7 @@ from utils.strategy_trade_config import (
     DEFAULT_ROUND_SIZE,
     EDITABLE_CONFIG_KEYS,
     FIRST_ENTRY_WINDOWS,
+    FIRST_ENTRY_ZONE,
     TRADE_COUNTRIES,
     TRADE_CURRENCIES,
     round_buy_quantity,
@@ -470,23 +471,23 @@ def _load_ticker_status(
 def _first_entry_close_window(
     kind: ladder.InstrumentKind, country: ladder.Country, now: datetime | None = None
 ) -> bool:
-    """지금이 1호 장 마감 매수 시간인지 — 그 시장·종목 종류의 ``FIRST_ENTRY_WINDOWS`` 구간 안이고 거래 중일 때.
+    """지금이 1호 매수 시간인지 — 그 시장·종목 종류의 ``FIRST_ENTRY_WINDOWS`` 구간(한국시간) 안이고 거래 중일 때.
 
-    구간의 끝이 시작보다 이르면 자정을 넘긴다(미장 데이장). 거래일·거래 시간 판정은 시장·종목 종류별 시간표가 한다.
+    거래일·거래 시간 판정은 시장·종목 종류별 시간표가 한다.
     """
-    from zoneinfo import ZoneInfo
-
-    from config import MARKET_SCHEDULES
     from utils.market_session import is_instrument_trading_time
 
-    zone = ZoneInfo(MARKET_SCHEDULES[country]["timezone"])
-    now_local = (now or datetime.now(zone)).astimezone(zone)
-    local_time = now_local.time()
-    in_window = any(
-        start <= local_time < end if start < end else local_time >= start or local_time < end
-        for start, end in FIRST_ENTRY_WINDOWS[country][kind]
-    )
-    return in_window and is_instrument_trading_time(country, kind, now=now_local)
+    now_kst = (now or datetime.now(ZoneInfo(FIRST_ENTRY_ZONE))).astimezone(ZoneInfo(FIRST_ENTRY_ZONE))
+    in_window = any(start <= now_kst.time() < end for start, end in FIRST_ENTRY_WINDOWS[country][kind])
+    return in_window and is_instrument_trading_time(country, kind, now=now_kst)
+
+
+def _next_first_entry_time(kind: ladder.InstrumentKind, country: ladder.Country, now: datetime | None = None) -> str:
+    """다음 1호 매수 시각(한국시간 ``HH:MM``) — 지금 들어 있거나 아직 안 온 첫 구간의 시작, 다 지났으면 다음 날 첫 구간."""
+    now_time = (now or datetime.now(ZoneInfo(FIRST_ENTRY_ZONE))).astimezone(ZoneInfo(FIRST_ENTRY_ZONE)).time()
+    windows = FIRST_ENTRY_WINDOWS[country][kind]
+    start = next((start for start, end in windows if now_time < end), windows[0][0])
+    return f"{start:%H:%M}"
 
 
 def _paired_trade_rounds(trades: list[Trade], orders: list[dict[str, Any]]) -> dict[int, int]:
@@ -533,8 +534,8 @@ def _attach_trade_history(
     view["trades_by_position"] = trades
     first = next((row for row in view["rounds"] if row["round"] == 1 and row["held"]), None)
     if first is None:
-        # 보유가 없으면 사다리 기준(1호 체결가)이 없다 — 위치 가격은 회차의 1호 진입 미리보기 지정가다.
-        view["position_prices"] = {row["position"]: row["buy_limit"] for row in view["rounds"]}
+        # 보유가 없으면 사다리 기준(1호 체결가)이 없어 위치 가격도 없다.
+        view["position_prices"] = {}
         return
     trigger_pct = float(view["config"]["trigger_pct"])
     history = round_history(ledger, view["ticker"], cached_days)
@@ -684,28 +685,21 @@ def _build_strategy_view(
                 }
             )
             continue
-        # 미보유 회차 — 보유가 있으면 마지막 보유 체결가에서 내려간 자리(다음 회차 이후는 예상값),
-        # 없으면 전일 종가 기준. 지정가로 바로 쓸 수 있게 호가 단위로 반올림한다.
-        if last_fill is not None:
-            buy_limit = ladder.projected_buy_limit(
-                last_fill, round_no - held_rounds, trigger_pct, kind=kind, country=country
-            )
-        else:
-            buy_limit = ladder.preview_buy_limit(
-                float(index_status["prev_close"]), round_no, trigger_pct, kind=kind, country=country
-            )
+        # 미보유 회차 — 마지막 보유 체결가에서 내려간 자리(다음 회차 이후는 예상값). 지정가로 바로 쓸 수 있게
+        # 호가 단위로 반올림한다. 보유가 없으면 기준(1호 체결가)이 없어 가격도 없다 — 1호는 정해진 시각에 산다.
+        buy_limit = (
+            ladder.projected_buy_limit(last_fill, round_no - held_rounds, trigger_pct, kind=kind, country=country)
+            if last_fill is not None
+            else None
+        )
         # 1호(보유 없음)는 가격 기준 없이 정해진 구간에서 현재가로 산다 — 전일 종가와 비교하지 않는다.
         market_entry = is_next and close_entry
-        # 1호는 현재가로 사므로 그 가격으로 산 금액을 본다. 다음 회차부터는 신호에 도달했다면 실제 시세로,
+        # 보유가 없으면 현재가로 산다고 보고 수량을 낸다. 보유가 있으면 신호에 도달했을 때 실제 시세로,
         # 대기 중에는 목표 지정가로 예상한다.
-        first_round = is_next and last_fill is None
-        buy_price = (
-            close
-            if first_round and close > 0
-            else min(close, buy_limit)
-            if is_next and 0 < close <= buy_limit
-            else buy_limit
-        )
+        if buy_limit is None:
+            buy_price = close
+        else:
+            buy_price = min(close, buy_limit) if is_next and 0 < close <= buy_limit else buy_limit
         buy_quantity = round_buy_quantity(round_size, buy_price, rate)
         budget_short = is_next and buy_quantity == 0
         cash_short = is_next and buy_quantity * buy_price > cash
@@ -788,7 +782,8 @@ def _build_strategy_view(
         "status": {
             "held_count": held_rounds,
             "waiting_first_entry": held_rounds == 0,
-            "first_entry_close_time": "·".join(f"{start:%H:%M}" for start, _ in FIRST_ENTRY_WINDOWS[country][kind]),
+            # 보유가 없을 때 다음 1호 매수 시각(한국시간).
+            "first_entry_time": _next_first_entry_time(kind, country),
             "next_round": (held_rounds + 1) if held_rounds < max_rounds else None,
             "next_ticker": ticker if held_rounds < max_rounds else None,
             "next_name": name if held_rounds < max_rounds else None,

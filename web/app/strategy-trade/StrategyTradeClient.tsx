@@ -46,8 +46,8 @@ type IndexStatus = {
 type Status = {
   held_count: number;
   waiting_first_entry: boolean;
-  // 보유 0 일 때 1호를 사는 구간의 시작 시각들(그 시장 현지, "HH:MM·HH:MM").
-  first_entry_close_time: string;
+  // 보유 0 일 때 다음 1호 매수 시각(한국시간 "HH:MM").
+  first_entry_time: string;
   held_quantity: number;
   // 증권사 계좌 평균단가(이동평균)와 현재가 대비 수익률(%) — 보유가 없으면 null.
   average_price: number | null;
@@ -992,7 +992,7 @@ function StrategySection({
         </span>
         {status.waiting_first_entry ? (
           <span style={{ fontWeight: 700 }}>
-            1호 진입 대기 — {status.first_entry_close_time} 매수
+            1호 진입 대기 — {status.first_entry_time} 매수 예정
           </span>
         ) : status.next_round == null ? (
           <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>회차 소진 — 매도 대기</span>
@@ -1134,8 +1134,11 @@ function StrategySection({
                     </>
                   ) : row.is_next ? (
                     // 다음 회차의 실제 매수 지정가 — 마지막 체결가 −간격%(위치 가격과 조금 다를 수 있다).
+                    // 보유가 없으면 가격이 없고 다음 1호 매수 시각(한국시간)을 적는다.
                     <span style={{ color: BUY_BADGE_COLOR, fontWeight: 700 }}>
-                      다음 매수 {formatPrice(row.buy_limit, currency)}
+                      {row.buy_limit != null
+                        ? `다음 매수 ${formatPrice(row.buy_limit, currency)}`
+                        : `${status.first_entry_time} 매수 예정`}
                       {row.cash_short ? (
                         <span style={{ marginLeft: 6, color: "var(--text-muted)", fontWeight: 400 }}>한도 소진</span>
                       ) : null}

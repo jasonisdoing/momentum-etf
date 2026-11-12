@@ -24,18 +24,19 @@ def is_eligible_pool(pool_config: dict[str, Any], countries: tuple[str, ...]) ->
     ).strip().lower() in {"stock", "etf"}
 
 
-# 1호 장 마감 매수 구간(그 시장 현지 시각, 종목 종류별 (시작, 끝) 목록) — 보유 0인데 이 구간 안이면 가격과 상관없이
-# 현재가로 1호를 산다. 국장 ETF 는 본장 시작 30분 뒤(09:30~10:00)와 KRX 정규장 마감 전 30분(15:00~15:30), 개별주는
-# NXT 프리마켓 개시 30분 뒤(08:30~09:00)와 NXT 애프터마켓 마감 전 30분(19:30~20:00)이다. 미장은 데이장 시작(20:00 ET) 30분 뒤(한국
-# 개장 직후)부터 데이장 마감(03:50 ET) 전까지이고 자정을 넘긴다(`config.INSTRUMENT_TRADING_WINDOWS`).
+# 1호 매수 구간(**한국시간**, 종목 종류별 (시작, 끝) 목록) — 보유 0인데 이 구간 안이면 가격과 상관없이 현재가로 1호를 산다.
+# 국장 ETF 는 본장 시작 30분 뒤(09:30~10:00)와 KRX 정규장 마감 전 30분(15:00~15:30), 개별주는 NXT 프리마켓 개시 30분 뒤
+# (08:30~09:00)와 NXT 애프터마켓 마감 전 30분(19:30~20:00)이다. 미장은 서머타임과 무관하게 한국시간 10:30~11:00(데이장)이다.
+# 그 시각에 실제로 거래 중인지는 `config.INSTRUMENT_TRADING_WINDOWS` 가 판정한다.
+FIRST_ENTRY_ZONE = "Asia/Seoul"
 FIRST_ENTRY_WINDOWS: dict[str, dict[str, tuple[tuple[time, time], ...]]] = {
     "kor": {
         "etf": ((time(9, 30), time(10, 0)), (time(15, 0), time(15, 30))),
         "stock": ((time(8, 30), time(9, 0)), (time(19, 30), time(20, 0))),
     },
     "us": {
-        "etf": ((time(20, 30), time(3, 50)),),
-        "stock": ((time(20, 30), time(3, 50)),),
+        "etf": ((time(10, 30), time(11, 0)),),
+        "stock": ((time(10, 30), time(11, 0)),),
     },
 }
 
