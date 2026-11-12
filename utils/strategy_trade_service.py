@@ -22,6 +22,7 @@ from utils.strategy_trade_config import (
     validate_strategy_trade_config,
 )
 from utils.strategy_trade_ledger import (
+    REALIZED_RECORDED_SINCE,
     Ledger,
     LedgerError,
     Trade,
@@ -566,10 +567,10 @@ def _attach_trade_history(
 def _realized_summary(ledger: Ledger) -> dict[str, Any]:
     """원장이 가진 체결에서 실현손익(종목 통화)과 오늘 매수·매도 건수를 모은다.
 
-    실현손익은 보관 기간(`LOOKBACK_DAYS`)의 매도만 더한다. 팔린 로트의 체결가를 모르는 매도는 합계에 넣지 않고
-    건수(`realized_unknown_sells`)로 알린다.
+    실현손익은 기록을 시작한 날(`REALIZED_RECORDED_SINCE`) 이후 보관 기간 안의 매도만 더한다. 그 뒤인데도 팔린 로트의
+    체결가를 몰라 값이 없는 매도는 합계에 넣지 않고 건수(`realized_unknown_sells`)로 알린다.
     """
-    sells = [trade for trade in ledger.trades if not trade.buy]
+    sells = [trade for trade in ledger.trades if not trade.buy and trade.day >= REALIZED_RECORDED_SINCE]
     today_trades = [trade for trade in ledger.trades if trade.day == ledger.market_date]
     return {
         "realized_today": sum(t.realized for t in sells if t.day == ledger.market_date and t.realized is not None),

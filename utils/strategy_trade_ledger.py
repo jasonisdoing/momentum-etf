@@ -35,6 +35,8 @@ SNAPSHOT_COLLECTION = "strategy_trade_ledgers"
 ANCHOR_COLLECTION = "strategy_trade_ledger_anchors"
 #: 기준점이 없을 때 재생하는 기간(달력일) — 그 전에 산 보유가 남아 있으면 체결가를 알 수 없어 오류다.
 LOOKBACK_DAYS = 30
+#: 매도 체결에 실현손익(`Trade.realized`)을 기록하기 시작한 날(YYYY-MM-DD) — 이 날 이전 체결은 값이 없어 집계하지 않는다.
+REALIZED_RECORDED_SINCE = "2026-11-12"
 #: 기간 전 보유(체결가 모름)를 담는 로트의 출처 — 재생 뒤 남아 있으면 확정할 수 없다.
 _SOURCE_UNKNOWN = "unknown"
 

@@ -8,7 +8,7 @@ with detailed accounts and portfolio composition in a threaded reply.
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -37,6 +37,7 @@ from utils.portfolio_io import (
     save_daily_snapshot,
 )
 from utils.report import format_kr_money, format_kr_money_man
+from utils.strategy_trade_ledger import LOOKBACK_DAYS, REALIZED_RECORDED_SINCE
 from utils.strategy_trade_summary import load_trade_summaries
 from utils.weekly_service import _apply_running_total_principal as _apply_weekly_running
 from utils.yearly_service import (
@@ -222,6 +223,9 @@ def _trade_summary_lines(name: str, item: dict) -> list[str]:
     used_pct = (invested / maximum * 100) if maximum > 0 else 0.0
     net_invest = item["today_buy_amount"] - item["today_sold_cost"]
     today_unknown = f" (체결가 모르는 매도 {item['today_unknown_sells']}건 제외)" if item["today_unknown_sells"] else ""
+    # 실현손익 기록은 시작일부터 있다 — 시작일이 30일 안이면 그날부터, 지났으면 최근 30일이다.
+    since = max(date.fromisoformat(REALIZED_RECORDED_SINCE), datetime.now(KST).date() - timedelta(days=LOOKBACK_DAYS))
+    since_text = f"{since:%Y년 %m월 %d일}({'월화수목금토일'[since.weekday()]})".replace(" 0", " ")
     unknown = f" (체결가 모르는 매도 {item['realized_unknown_sells']}건 제외)" if item["realized_unknown_sells"] else ""
     orders = item["signal_orders"] + item["manual_orders"]
     return [
@@ -229,7 +233,7 @@ def _trade_summary_lines(name: str, item: dict) -> list[str]:
         f"  - 평가수익: {get_trend_emoji(item['unrealized'])} {format_korean_currency(item['unrealized'])} "
         f"({unrealized_pct:+.2f}%)",
         f"  - 금일 실현손익: {get_trend_emoji(item['realized_today'])} {format_korean_currency(item['realized_today'])}",
-        f"  - 최근 30일 실현손익: {get_trend_emoji(item['realized_recent'])} "
+        f"  - 최근 30일 실현손익({since_text} 이후): {get_trend_emoji(item['realized_recent'])} "
         f"{format_korean_currency(item['realized_recent'])}{unknown}",
         f"  - 투입 원금: {format_korean_currency(invested)} / 전 회차 매수 시 {format_korean_currency(maximum)} "
         f"({used_pct:.1f}% 사용)",
