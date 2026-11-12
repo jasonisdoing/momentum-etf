@@ -15,7 +15,7 @@ from utils.portfolio_io import return_pct_from_avg_price
 from utils.strategy_trade_config import (
     DEFAULT_ROUND_SIZE,
     EDITABLE_CONFIG_KEYS,
-    FIRST_ENTRY_CLOSE_TIMES,
+    FIRST_ENTRY_WINDOWS,
     TRADE_COUNTRIES,
     TRADE_CURRENCIES,
     round_buy_quantity,
@@ -471,11 +471,9 @@ def _load_ticker_status(
 def _first_entry_close_window(
     kind: ladder.InstrumentKind, country: ladder.Country, now: datetime | None = None
 ) -> bool:
-    """지금이 1호 장 마감 매수 시간인지 — 그 시장·종목 종류의 ``FIRST_ENTRY_CLOSE_TIMES`` 시각 이후이고 아직 거래 중일 때.
+    """지금이 1호 장 마감 매수 시간인지 — 그 시장·종목 종류의 ``FIRST_ENTRY_WINDOWS`` 구간 안이고 거래 중일 때.
 
-    국장 ETF 는 15:00~15:30(정규장), 개별주는 19:30~20:00(NXT 애프터마켓), 미장은 20:30 ET~다음 날 03:50 ET(데이장)이다.
-    미장 데이장은 자정을 넘기므로 시작 시각 이후이거나 데이장 마감 전이면 창 안이다.
-    거래일·거래 시간 판정은 시장·종목 종류별 시간표가 한다.
+    구간의 끝이 시작보다 이르면 자정을 넘긴다(미장 데이장). 거래일·거래 시간 판정은 시장·종목 종류별 시간표가 한다.
     """
     from zoneinfo import ZoneInfo
 
@@ -485,10 +483,11 @@ def _first_entry_close_window(
     zone = ZoneInfo(MARKET_SCHEDULES[country]["timezone"])
     now_local = (now or datetime.now(zone)).astimezone(zone)
     local_time = now_local.time()
-    started = local_time >= FIRST_ENTRY_CLOSE_TIMES[country][kind]
-    if country == "us":
-        started = started or local_time < MARKET_SCHEDULES["us"]["daymarket_close"]
-    return started and is_instrument_trading_time(country, kind, now=now_local)
+    in_window = any(
+        start <= local_time < end if start < end else local_time >= start or local_time < end
+        for start, end in FIRST_ENTRY_WINDOWS[country][kind]
+    )
+    return in_window and is_instrument_trading_time(country, kind, now=now_local)
 
 
 def _paired_trade_rounds(trades: list[Trade], orders: list[dict[str, Any]]) -> dict[int, int]:
@@ -759,7 +758,7 @@ def _build_strategy_view(
         "status": {
             "held_count": held_rounds,
             "waiting_first_entry": held_rounds == 0,
-            "first_entry_close_time": FIRST_ENTRY_CLOSE_TIMES[country][kind].strftime("%H:%M"),
+            "first_entry_close_time": "·".join(f"{start:%H:%M}" for start, _ in FIRST_ENTRY_WINDOWS[country][kind]),
             "next_round": (held_rounds + 1) if held_rounds < max_rounds else None,
             "next_ticker": ticker if held_rounds < max_rounds else None,
             "next_name": name if held_rounds < max_rounds else None,

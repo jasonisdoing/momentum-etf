@@ -47,7 +47,7 @@ type IndexStatus = {
 type Status = {
   held_count: number;
   waiting_first_entry: boolean;
-  // 보유 0 인데 장중 1호 진입선에 못 닿았을 때 1호를 사는 시각(KST, "HH:MM").
+  // 보유 0 인데 장중 1호 진입선에 못 닿았을 때 1호를 사는 시각들(그 시장 현지, "HH:MM·HH:MM").
   first_entry_close_time: string;
   held_quantity: number;
   // 증권사 계좌 평균단가(이동평균)와 현재가 대비 수익률(%) — 보유가 없으면 null.
