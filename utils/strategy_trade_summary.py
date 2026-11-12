@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from utils.strategy_trade_config import ROUND_SIZE_UNIT_KRW
 from utils.strategy_trade_market import krw_rate
 from utils.strategy_trade_orders import active_order_count
 from utils.strategy_trade_service import load_views_where
@@ -26,6 +27,8 @@ def _add_view(summary: dict[str, Any], view: dict[str, Any]) -> None:
     for quantity, fill_price in _lots(view):
         summary["invested"] += quantity * fill_price * rate
         summary["unrealized"] += quantity * (close - fill_price) * rate
+    config = view["config"]
+    summary["max_capital"] += config["round_size"] * ROUND_SIZE_UNIT_KRW * config["rounds"]
     summary["held_tickers"] += 1 if status["held_quantity"] > 0 else 0
     summary["held_rounds"] += status["held_count"]
     summary["realized_today"] += status["realized_today"] * rate
@@ -47,6 +50,7 @@ def load_trade_summaries() -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
                 "account_name": view["account_name"],
                 "strategies": 0,
                 "invested": 0.0,
+                "max_capital": 0.0,
                 "unrealized": 0.0,
                 "held_tickers": 0,
                 "held_rounds": 0,

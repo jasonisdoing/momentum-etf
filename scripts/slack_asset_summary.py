@@ -220,6 +220,8 @@ def _trade_summary_lines(name: str, item: dict) -> list[str]:
     """사고팔기 요약 한 덩어리(계좌 하나 또는 전체) — 평가수익·실현손익·투입·체결·주문."""
     invested = item["invested"]
     unrealized_pct = (item["unrealized"] / invested * 100) if invested > 0 else 0.0
+    maximum = item["max_capital"]
+    used_pct = (invested / maximum * 100) if maximum > 0 else 0.0
     unknown = f" (체결가 모르는 매도 {item['realized_unknown_sells']}건 제외)" if item["realized_unknown_sells"] else ""
     orders = item["signal_orders"] + item["manual_orders"]
     return [
@@ -229,7 +231,8 @@ def _trade_summary_lines(name: str, item: dict) -> list[str]:
         f"  - 금일 실현손익: {get_trend_emoji(item['realized_today'])} {format_korean_currency(item['realized_today'])}",
         f"  - 최근 30일 실현손익: {get_trend_emoji(item['realized_recent'])} "
         f"{format_korean_currency(item['realized_recent'])}{unknown}",
-        f"  - 투입 원금: {format_korean_currency(invested)}",
+        f"  - 투입 원금: {format_korean_currency(invested)} / 전 회차 매수 시 {format_korean_currency(maximum)} "
+        f"({used_pct:.1f}% 사용)",
         f"  - 금일 체결: 매수 {item['today_buys']}건 · 매도 {item['today_sells']}건",
         f"  - 미체결 주문: {orders}건",
     ]
