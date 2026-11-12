@@ -181,6 +181,27 @@ function isGroupRow(row: ScheduleGridRow | undefined): row is ScheduleGroupRow {
   return Boolean(row && (row as ScheduleGroupRow).isGroup);
 }
 
+/** 실행 명령 복사 버튼 — 작업 이름 오른쪽에 둔다(명령 칸 클릭은 배치 실행이라 복사는 따로 둔다). */
+function CopyCommandButton({ command }: { command: string }) {
+  const toast = useToast();
+  return (
+    <button
+      type="button"
+      className="btn btn-outline-secondary btn-sm py-0 px-1"
+      title="실행 명령 복사"
+      onClick={(event) => {
+        event.stopPropagation();
+        navigator.clipboard.writeText(command).then(
+          () => toast.success("실행 명령을 복사했습니다."),
+          (error: unknown) => toast.error(`복사에 실패했습니다: ${error instanceof Error ? error.message : String(error)}`),
+        );
+      }}
+    >
+      📋
+    </button>
+  );
+}
+
 const scheduleColumns: ColDef<ScheduleGridRow>[] = [
   {
     headerName: "#",
@@ -193,8 +214,23 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
     // 구분줄에는 번호가 없다. 배치 번호는 백엔드 정의의 `no` 를 그대로 쓴다.
     valueGetter: (params) => (isGroupRow(params.data) ? "" : (params.data?.no ?? "")),
   },
-  // 가장 긴 작업명이 "종목 가격지표 업데이트"(11자)라 고정 폭으로 두고, 남는 폭은 실행 명령이 가져간다.
-  { field: "job", headerName: "작업", minWidth: 150, width: 170, maxWidth: 190 },
+  // 가장 긴 작업명이 "종목 가격지표 업데이트"(11자)에 복사 버튼까지 들어가게 고정 폭으로 두고, 남는 폭은 실행 명령이 가져간다.
+  {
+    field: "job",
+    headerName: "작업",
+    minWidth: 180,
+    width: 200,
+    maxWidth: 220,
+    cellRenderer: (params: { value: string; data?: ScheduleGridRow }) =>
+      isGroupRow(params.data) || !params.data ? (
+        params.value
+      ) : (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          {params.value}
+          <CopyCommandButton command={params.data.command} />
+        </span>
+      ),
+  },
   {
     field: "run_location",
     headerName: "실행 위치",

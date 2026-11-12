@@ -50,8 +50,10 @@ _WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
 _WEEKDAYS_TUE_SAT = [1, 2, 3, 4, 5]
 _WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6]
 
+# 슬랙 주문 결과 알림 — 크론과 같다: 평일 09:00~23:59, 화~토 00:00~08:59(미장 데이·정규장) 1분 간격.
 _SLACK_ORDER_RESULT_SLOTS = [
-    {"hour": hour, "minute": minute} for hour in range(9, 21) for minute in range(60) if (hour, minute) <= (20, 20)
+    *({"hour": hour, "minute": minute, "weekdays": _WEEKDAYS_MON_FRI} for hour in range(9, 24) for minute in range(60)),
+    *({"hour": hour, "minute": minute, "weekdays": _WEEKDAYS_TUE_SAT} for hour in range(9) for minute in range(60)),
 ]
 
 # 미국 장중 10분 슬롯 — 22:40~23:50 + 00:00~05:50 KST. 서머타임(22:30~05:00)과 겨울(23:30~06:00) 정규장을
@@ -70,13 +72,19 @@ _INTRADAY_10MIN_SLOTS = [
     for minute in range(0, 60, 10)
     if (hour, minute) >= (9, 10) and (hour, minute) <= (15, 20)
 ]
+# 사고팔기 알림 — 크론과 같다: 평일 09:10~23:50, 화~토 00:00~08:50(미장 데이·정규장) 10분 간격.
 _STRATEGY_TRADE_SLOTS = [
-    *_INTRADAY_10MIN_SLOTS,
-    {"hour": 15, "minute": 40},
-    {"hour": 15, "minute": 50},
-    *({"hour": hour, "minute": minute} for hour in range(16, 20) for minute in range(0, 60, 10)),
-    {"hour": 20, "minute": 0},
-    {"hour": 20, "minute": 10},
+    *(
+        {"hour": hour, "minute": minute, "weekdays": _WEEKDAYS_MON_FRI}
+        for hour in range(9, 24)
+        for minute in range(0, 60, 10)
+        if (hour, minute) >= (9, 10)
+    ),
+    *(
+        {"hour": hour, "minute": minute, "weekdays": _WEEKDAYS_TUE_SAT}
+        for hour in range(9)
+        for minute in range(0, 60, 10)
+    ),
 ]
 
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
@@ -152,9 +160,9 @@ SCHEDULE_ROWS = [
         "job": "전략 사고팔기 알림",
         "target": "계좌에 등록한 종목별 사고팔기 전략 (슬랙 켠 계좌만 발송, 원장은 전 계좌 계산)",
         "run_location": "SERVER/LOCAL",
-        "cadence": "한국 거래일 09:10~20:10 KST 10분 간격 (15:30 제외)",
+        "cadence": "평일 09:10~23:50 · 화~토 00:00~08:50 KST 10분 간격 (종목마다 그 시장 거래 시간만 판정)",
         "command": "python scripts/strategy_trade_notify.py",
-        "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+        "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
         "no": 7,
@@ -162,9 +170,9 @@ SCHEDULE_ROWS = [
         "group": "증권사 연동",
         "job": "슬랙 주문 결과 알림",
         "target": "슬랙 메시지로 낸 주문 — 운영·모의 (진행 중인 것이 없으면 조회 없이 종료)",
-        "cadence": "한국 거래일 09:00~20:20 KST 1분 간격",
+        "cadence": "평일 09:00~23:59 · 화~토 00:00~08:59 KST 1분 간격",
         "command": "python scripts/slack_mock_order_notify.py",
-        "schedule": {"slots": _SLACK_ORDER_RESULT_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+        "schedule": {"slots": _SLACK_ORDER_RESULT_SLOTS, "weekdays": _WEEKDAYS_MON_SAT},
     },
     # ③ 장중 실행 — 장중에 도는 알림들.
     {
