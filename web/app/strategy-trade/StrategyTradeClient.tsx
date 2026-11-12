@@ -212,7 +212,10 @@ const thStyle: React.CSSProperties = { padding: "4px 8px", textAlign: "right" };
 // 회차 표 고정 열(위치~손익)의 폭 — 날짜 열이 몇 개든 같은 폭이고, 날짜가 적으면 오른쪽이 비어 보인다.
 const ROUND_TABLE_FIXED_WIDTHS = [56, 80, 140, 100, 150, 84] as const;
 // 날짜 열의 최소 폭 — 그날 매매가 많으면 배지만큼 넓어진다.
-const ROUND_TABLE_DAY_MIN_WIDTH = 96;
+const ROUND_TABLE_DAY_MIN_WIDTH = 108;
+const WEEKDAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"] as const;
+// 오늘 날짜 열 강조색 — 날짜는 한국 시각 기준이다.
+const TODAY_COLOR = "var(--tblr-green, #16a34a)";
 const tdStyle: React.CSSProperties = { padding: "clamp(3px, calc(1dvh - 6px), 7px) 8px", textAlign: "right" };
 
 /** 계좌 국가별 거래 통화 — 가격 표기(원 0자리·달러 2자리)와 금액 단위를 한 곳에서 정한다. */
@@ -613,6 +616,8 @@ function AccountSettingsCard({
         />
       ) : renderStockNameCell(value, { ticker: data?.ticker, isHeld: data?.held }),
     }),
+    dailyChange,
+    currentPrice,
     tradeWeightColumn,
     { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
     ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => [
@@ -634,8 +639,6 @@ function AccountSettingsCard({
           } satisfies ColDef<TradeListRow>]
         : []),
     ]),
-    dailyChange,
-    currentPrice,
     { ...quantity, headerName: "보유수량", width: 88 },
     returnPct, pnl, valuation,
   ], [saving]);
@@ -944,6 +947,7 @@ function StrategySection({
     ...new Set(Object.values(view.trades_by_position).flatMap((byDay) => Object.keys(byDay))),
   ].sort();
   const columnCount = 6 + tradeDays.length;
+  const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
   // 사다리 위치마다 한 행 — 회차가 없는 위치(건너뛴 칸)도 그 가격대의 매매와 함께 행으로 둬 간격을 보여 준다.
   const positions = [...view.rounds.map((row) => row.position), ...Object.keys(view.trades_by_position).map(Number)];
   const firstPosition = Math.min(...positions);
@@ -1041,9 +1045,15 @@ function StrategySection({
                 <th
                   key={day}
                   title={day}
-                  style={{ ...thStyle, textAlign: "center", whiteSpace: "nowrap", minWidth: ROUND_TABLE_DAY_MIN_WIDTH }}
+                  style={{
+                    ...thStyle,
+                    textAlign: "center",
+                    whiteSpace: "nowrap",
+                    minWidth: ROUND_TABLE_DAY_MIN_WIDTH,
+                    ...(day === today ? { color: TODAY_COLOR, fontWeight: 800 } : null),
+                  }}
                 >
-                  {Number(day.slice(5, 7))}월 {Number(day.slice(8, 10))}일
+                  {Number(day.slice(5, 7))}월 {Number(day.slice(8, 10))}일({WEEKDAY_NAMES[new Date(`${day}T00:00:00Z`).getUTCDay()]})
                 </th>
               ))}
             </tr>
