@@ -520,7 +520,6 @@ OVERSEAS_ORDER_PATH = {"buy": "/trading/v1/overseas/orders/buy", "sell": "/tradi
 OVERSEAS_CANCEL_PATH = "/trading/v1/overseas/orders/cancel"
 OVERSEAS_ORDERBOOK_PATH = "/market/v1/overseas/orderbook"
 OVERSEAS_PRICE_PATH = "/market/v1/overseas/prices"
-OVERSEAS_TODAY_ORDERS_PATH = "/trading/v1/overseas/orders/today"
 OVERSEAS_ORDER_HISTORY_PATH = "/trading/v1/overseas/orders/history"
 #: 시세 거래소 코드 → 주문 거래소 벤더 번호.
 US_EXCHANGE_VENDORS = {"OQ": "0537", "NY": "0321", "AX": "0066"}
@@ -631,26 +630,6 @@ def _us_today() -> date:
     return datetime.now(ZoneInfo(_US_MARKET_TIMEZONE)).date()
 
 
-def _us_row_from_today(row: dict[str, Any]) -> dict[str, Any]:
-    """당일 주문체결내역 행 → 공통 중간형."""
-    return {
-        "date": str(row["oder_date"]),
-        "order_no": int(row["oder_no"]),
-        "origin_no": int(row["orgl_oder_no"]),
-        "symbol": str(row["ovrs_stck_symb_iscd"]).strip(),
-        "name": str(row.get("iscd_name") or "").strip(),
-        "side": str(row["seln_byov_clcd"]),
-        "quantity": float(row["odqt"]),
-        "price": float(row["ovrs_stck_oder_prc"]),
-        "filled": float(row["cntg_qty"]),
-        "fill_price": float(row["cntg_crnc_prc"]),
-        "canceled": float(row["cncl_cnfr_qty"]),
-        "state": str(row["ovrs_stck_oder_stat_cls_code"]),
-        "kind": str(row["oder_rctf_cncl_cls_code"]),
-        "order_class": str(row["aspr_type_code"]),
-    }
-
-
 def _us_row_from_history(row: dict[str, Any]) -> dict[str, Any]:
     """기간 주문체결내역 행 → 공통 중간형. 이 조회에는 취소 확인 수량이 없어 취소 행의 수량으로 대신한다(아래 `_us_order_rows`)."""
     return {
@@ -672,19 +651,17 @@ def _us_row_from_history(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _us_order_rows(account_id: str, day: date) -> list[dict[str, Any]]:
-    """그날의 주문 행(공통 중간형) — 오늘은 당일 조회, 지난 날은 기간 조회. 미국 현지 날짜 기준이다."""
-    if day == _us_today():
-        raw = _get_paged(account_id, OVERSEAS_TODAY_ORDERS_PATH, {"cntg_cls_code": "0", "seln_byov_clcd": "0"})
-        rows = [_us_row_from_today(row) for row in raw]
-    else:
-        day_text = _us_order_date(day)
-        raw = _get_paged(
-            account_id,
-            OVERSEAS_ORDER_HISTORY_PATH,
-            {"oder_sta_date": day_text, "oder_fin_date": day_text, "cntg_cls_code": "0"},
-        )
-        rows = [_us_row_from_history(row) for row in raw]
-    return [row for row in rows if row["date"] == _us_order_date(day)]
+    """그날의 주문 행(공통 중간형) — 미국 현지 날짜 기준이고 오늘도 기간 조회로 읽는다.
+
+    당일 조회(`/overseas/orders/today`)는 데이장 주문이 빠져 0건으로 나오는 때가 있어 쓰지 않는다.
+    """
+    day_text = _us_order_date(day)
+    raw = _get_paged(
+        account_id,
+        OVERSEAS_ORDER_HISTORY_PATH,
+        {"oder_sta_date": day_text, "oder_fin_date": day_text, "cntg_cls_code": "0"},
+    )
+    return [row for row in map(_us_row_from_history, raw) if row["date"] == day_text]
 
 
 def _us_status(row: dict[str, Any], canceled: float) -> str:
