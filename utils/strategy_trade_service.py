@@ -913,6 +913,20 @@ def _trade_account_docs() -> list[dict[str, Any]]:
     ]
 
 
+def _config_quotes(mine: dict[str, dict[str, Any]], country: str | None) -> dict[str, dict[str, float | None]]:
+    """편집 표의 현재가·일간 — 원장 계산 여부와 무관하게 설정 행마다 공통 시세 경로에서 읽는다. 못 받은 종목은 빠진다."""
+    if country is None or not mine:
+        return {}
+    from services.price_service import get_realtime_snapshot
+
+    snapshot = get_realtime_snapshot(country, sorted({entry["ticker"] for entry in mine.values()}))
+    return {
+        ticker: {"price": entry.get("nowVal"), "change_pct": entry.get("changeRate")}
+        for ticker, entry in snapshot.items()
+        if isinstance(entry, dict)
+    }
+
+
 def _usd_krw() -> float | None:
     """미장 화면의 원화금액 컬럼용 달러→원 환율 — 못 받으면 None 으로 두어 컬럼을 빈 값으로 보인다."""
     from services.price_service import get_exchange_rates
@@ -943,6 +957,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
 
     pools = _eligible_pool_kinds((country,)) if selected is not None else {}
     options = _ticker_options(pools)
+    quotes = _config_quotes(mine, country)
     return {
         "account_options": [
             {
@@ -972,6 +987,8 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
                 "trigger_pct": entry["trigger_pct"],
                 "round_size": entry["round_size"],
                 "rounds": entry["rounds"],
+                "price": quotes.get(entry["ticker"], {}).get("price"),
+                "change_pct": quotes.get(entry["ticker"], {}).get("change_pct"),
             }
             for sid, entry in configs
         ],

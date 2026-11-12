@@ -1056,28 +1056,8 @@ export function AccountHoldingsDetailPanel({
         return isDirtyEditableCell(row?.id, "memo") ? "appEditableCell appDirtyCell" : "appEditableCell";
       },
     }),
-    {
-      field: "daily_change_pct",
-      headerName: "일간(%)",
-      width: 88,
-      type: "rightAligned",
-      cellRenderer: (params: { value?: number | null }) => (
-        <span className={getSignedClass(params.value ?? 0)}>
-          {params.value === null || params.value === undefined
-            ? "-"
-            : `${params.value.toFixed(2)}%`}
-        </span>
-      ),
-    },
-    {
-      field: "current_price",
-      headerName: "현재가",
-      width: 96,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow; value?: string }) => (
-        <span>{formatPrice(safeParseFloat(params.value), params.data?.currency || "KRW")}</span>
-      ),
-    },
+    metrics.dailyChange,
+    metrics.currentPrice,
     {
       ...metrics.weight,
       cellRenderer: ({ data }: { data?: GridRow }) =>

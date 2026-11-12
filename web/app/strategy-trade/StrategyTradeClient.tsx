@@ -156,6 +156,9 @@ type StrategyConfigRow = {
   trigger_pct: number;
   round_size: number;
   rounds: number;
+  /** 현재가·일간(%) — 공통 시세 경로 값. 못 받으면 null. */
+  price: number | null;
+  change_pct: number | null;
 };
 
 type TickerOption = { ticker: string; name: string; pools: string[]; kind: "stock" | "etf" };
@@ -392,7 +395,7 @@ function comparableDrafts(rows: DraftRow[]) {
 
 type TradeListRow = DraftRow & { held: boolean; heldRounds: string; roundKrw?: number | null } & Partial<HoldingsRow>;
 const tradeGridTheme = createAppGridTheme();
-const { weight: tradeWeightColumn, quantity, returnPct, pnl, valuation } = holdingMetricColumns<TradeListRow>(true);
+const { weight: tradeWeightColumn, dailyChange, currentPrice, quantity, returnPct, pnl, valuation } = holdingMetricColumns<TradeListRow>(true);
 const TOTAL_ROW_KEY = "__total__";
 const TRADE_TOTAL_ROW_KEY = "__trade_total__";
 const OTHER_HOLDINGS_TICKER = "__OTHER_HOLDINGS__";
@@ -533,15 +536,20 @@ function AccountSettingsCard({
   );
   const selectedStrategy = selectedRow?.strategy_id ? strategiesById.get(selectedRow.strategy_id) : undefined;
   const details = selectedStrategy?.ticker === selectedRow?.ticker ? selectedStrategy : undefined;
+  const quotesByTicker = useMemo(() => new Map(view.configs.map((config) => [config.ticker, config])), [view.configs]);
   const { gridRows, pinnedRows } = useMemo(() => {
     const stockRows = drafts.map((row): TradeListRow => {
       const strategy = row.strategy_id ? strategiesById.get(row.strategy_id) : undefined;
       const roundQuantity = Number(row.amount);
-      const price = strategy && !("error" in strategy) ? strategy.index.close : null;
+      const quote = quotesByTicker.get(row.ticker);
+      const price = quote?.price ?? null;
       return {
         ...accountAssets?.holdings.get(row.ticker),
         ...row,
         // 미장 회차수량으로 산 금액을 원화로 — 현재가 × 회차수량 × 환율. 하나라도 없으면 빈 값.
+        current_price: price == null ? undefined : String(price),
+        daily_change_pct: quote?.change_pct,
+        currency,
         roundKrw: price != null && view.usd_krw != null && Number.isFinite(roundQuantity) ? Math.round(roundQuantity * price * view.usd_krw) : null,
         held: Boolean(strategy && strategy.ticker === row.ticker && !("error" in strategy) && strategy.status.held_quantity > 0),
         heldRounds: !strategy || strategy.ticker !== row.ticker
@@ -595,7 +603,7 @@ function AccountSettingsCard({
       gridRows: [...weightedRows.flatMap((row) => [...(byAnchor.get(row.ticker) ?? []), row]), ...(byAnchor.get(null) ?? [])],
       pinnedRows,
     };
-  }, [accountAssets, drafts, groups, sortActive, strategiesById, view.usd_krw]);
+  }, [accountAssets, drafts, groups, sortActive, strategiesById, view.usd_krw, quotesByTicker, currency]);
 
   const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
     gridRowDragColumn<TradeListRow>(({ node }) => !node.rowPinned, 36),
@@ -632,6 +640,8 @@ function AccountSettingsCard({
           } satisfies ColDef<TradeListRow>]
         : []),
     ]),
+    dailyChange,
+    currentPrice,
     { ...quantity, headerName: "보유수량", width: 88 },
     returnPct, pnl, valuation,
   ], [saving, currency]);

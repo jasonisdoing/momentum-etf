@@ -1,8 +1,13 @@
 import type { ColDef } from "ag-grid-community";
 
+import { formatPrice } from "@/lib/price-format";
+
 import { CASH_ROW_TICKER, formatHiddenAmount, formatKrw, getSignedClass, type HoldingsRow } from "./assets-helpers";
 
-type HoldingMetrics = Pick<HoldingsRow, "weight_pct" | "quantity" | "return_pct" | "pnl_krw" | "valuation_krw">;
+type HoldingMetrics = Pick<
+  HoldingsRow,
+  "weight_pct" | "quantity" | "return_pct" | "pnl_krw" | "valuation_krw" | "daily_change_pct" | "current_price" | "currency"
+>;
 type HoldingMetricRow = { ticker: string } & Partial<HoldingMetrics>;
 
 const quantityFormat = new Intl.NumberFormat("ko-KR");
@@ -18,6 +23,18 @@ export function holdingMetricColumns<T extends HoldingMetricRow>(showAmounts: bo
       colId: "weight_pct", headerName: "비중", width: 82, type: "rightAligned",
       valueGetter: ({ data }) => data?.weight_pct,
       cellRenderer: ({ value }: { value?: number }) => value == null ? "-" : renderHoldingWeight(value),
+    },
+    dailyChange: {
+      colId: "daily_change_pct", headerName: "일간(%)", width: 88, type: "rightAligned",
+      valueGetter: ({ data }) => data?.daily_change_pct ?? undefined,
+      cellRenderer: ({ value, data }: { value?: number; data?: T }) =>
+        value == null || data?.ticker === CASH_ROW_TICKER ? "-" : <span className={getSignedClass(value)}>{value.toFixed(2)}%</span>,
+    },
+    currentPrice: {
+      colId: "current_price", headerName: "현재가", width: 96, type: "rightAligned",
+      valueGetter: ({ data }) => (data?.current_price == null ? undefined : Number(data.current_price)),
+      cellRenderer: ({ value, data }: { value?: number; data?: T }) =>
+        value == null || Number.isNaN(value) || data?.ticker === CASH_ROW_TICKER ? "-" : formatPrice(value, data?.currency || "KRW"),
     },
     quantity: {
       colId: "quantity", headerName: "수량", width: 72, type: "rightAligned",
