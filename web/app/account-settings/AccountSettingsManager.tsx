@@ -1067,7 +1067,7 @@ export function AccountSettingsManager() {
       "운영 계좌의 API 주문 스위치 — 꺼져 있으면 주문이 나가지 않습니다. 켜려면 아래 하루 한도를 먼저 입력하세요.",
     ),
     numberCol("api_order_max_count", "일 건수", 78, true, "하루 API 주문 건수 한도(운영 계좌). 비우면 주문이 막힙니다."),
-    numberCol("api_order_max_amount", "일 금액(원·$)", 120, true, "하루 API 주문 금액 한도(운영 계좌) — 국장 계좌는 원, 미장 계좌는 달러. 비우면 주문이 막힙니다."),
+    numberCol("api_order_max_amount", "일매수한도(원)", 120, true, "하루 API 주문 순매수 금액 한도(운영 계좌, 매수 − 매도) — 국장 계좌는 원, 미장 계좌는 달러. 비우면 주문이 막힙니다."),
     {
       headerName: "API 주문",
       width: 104,
