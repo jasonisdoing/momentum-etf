@@ -472,7 +472,8 @@ def _first_entry_close_window(
 ) -> bool:
     """지금이 1호 장 마감 매수 시간인지 — 그 시장·종목 종류의 ``FIRST_ENTRY_CLOSE_TIMES`` 시각 이후이고 아직 거래 중일 때.
 
-    국장 ETF 는 15:00~15:30(정규장), 개별주는 19:30~20:00(NXT 애프터마켓), 미장은 19:30~20:00 ET(애프터마켓)이다.
+    국장 ETF 는 15:00~15:30(정규장), 개별주는 19:30~20:00(NXT 애프터마켓), 미장은 20:30 ET~다음 날 03:50 ET(데이장)이다.
+    미장 데이장은 자정을 넘기므로 시작 시각 이후이거나 데이장 마감 전이면 창 안이다.
     거래일·거래 시간 판정은 시장·종목 종류별 시간표가 한다.
     """
     from zoneinfo import ZoneInfo
@@ -482,9 +483,11 @@ def _first_entry_close_window(
 
     zone = ZoneInfo(MARKET_SCHEDULES[country]["timezone"])
     now_local = (now or datetime.now(zone)).astimezone(zone)
-    return now_local.time() >= FIRST_ENTRY_CLOSE_TIMES[country][kind] and is_instrument_trading_time(
-        country, kind, now=now_local
-    )
+    local_time = now_local.time()
+    started = local_time >= FIRST_ENTRY_CLOSE_TIMES[country][kind]
+    if country == "us":
+        started = started or local_time < MARKET_SCHEDULES["us"]["daymarket_close"]
+    return started and is_instrument_trading_time(country, kind, now=now_local)
 
 
 def _paired_trade_rounds(trades: list[Trade], orders: list[dict[str, Any]]) -> dict[int, int]:
