@@ -929,6 +929,17 @@ def _config_quotes(mine: dict[str, dict[str, Any]], country: str | None) -> dict
     }
 
 
+def _view_krw_rate(country: str | None) -> float | None:
+    """편집 표의 회차수량 컬럼용 종목 통화→원 환율 — 못 받으면 None 으로 두어 컬럼을 빈 값으로 보인다."""
+    if country is None:
+        return None
+    try:
+        return krw_rate(country)
+    except Exception:
+        logger.warning("사고팔기 환율 조회 실패 — 회차수량을 표시하지 않습니다", exc_info=True)
+        return None
+
+
 def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
     """화면용 — 사고팔기 계좌 목록과, 고른 계좌의 슬랙 스위치·전략 설정·운용 현황.
 
@@ -967,6 +978,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
         "pool_options": pool_options(list(pools)),
         "ticker_options": [options[ticker] for ticker in sorted(options)],
         "default_round_size": DEFAULT_ROUND_SIZE,
+        "krw_rate": _view_krw_rate(country),
         # 편집 표의 행 — 저장된 전략 설정 그대로.
         "configs": [
             {

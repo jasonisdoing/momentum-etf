@@ -175,6 +175,8 @@ type View = {
   groups: HoldingsGroup[];
   pool_options: PoolLabelSource[];
   default_round_size: number;
+  /** 종목 통화→원 환율(국장 1) — 회차수량 컬럼용. 못 받았으면 null. */
+  krw_rate: number | null;
   ticker_options: TickerOption[];
   /** 저장된 전략 설정 — 이 계좌의 전략 전부. */
   configs: StrategyConfigRow[];
@@ -385,7 +387,7 @@ function comparableDrafts(rows: DraftRow[]) {
   ]);
 }
 
-type TradeListRow = DraftRow & { held: boolean; heldRounds: string } & Partial<HoldingsRow>;
+type TradeListRow = DraftRow & { held: boolean; heldRounds: string; roundQuantity?: number | null } & Partial<HoldingsRow>;
 const tradeGridTheme = createAppGridTheme();
 const { weight: tradeWeightColumn, dailyChange, currentPrice, quantity, returnPct, pnl, valuation } = holdingMetricColumns<TradeListRow>(true);
 const TOTAL_ROW_KEY = "__total__";
@@ -539,6 +541,11 @@ function AccountSettingsCard({
         current_price: price == null ? undefined : String(price),
         daily_change_pct: quote?.change_pct,
         currency,
+        // 현재가 기준 회차 수량 — 서버 `round_buy_quantity` 와 같은 식(회차 금액 ÷ (현재가 × 환율), 내림).
+        roundQuantity:
+          price != null && view.krw_rate != null && Number.isSafeInteger(Number(row.amount))
+            ? Math.floor((Number(row.amount) * 10_000) / (price * view.krw_rate))
+            : null,
         held: Boolean(strategy && strategy.ticker === row.ticker && !("error" in strategy) && strategy.status.held_quantity > 0),
         heldRounds: !strategy || strategy.ticker !== row.ticker
           ? "미저장"
@@ -591,7 +598,7 @@ function AccountSettingsCard({
       gridRows: [...weightedRows.flatMap((row) => [...(byAnchor.get(row.ticker) ?? []), row]), ...(byAnchor.get(null) ?? [])],
       pinnedRows,
     };
-  }, [accountAssets, drafts, groups, sortActive, strategiesById, quotesByTicker, currency]);
+  }, [accountAssets, drafts, groups, sortActive, strategiesById, quotesByTicker, currency, view.krw_rate]);
 
   const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
     gridRowDragColumn<TradeListRow>(({ node }) => !node.rowPinned, 36),
@@ -608,12 +615,25 @@ function AccountSettingsCard({
     }),
     tradeWeightColumn,
     { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
-    ...tradeSettingColumns.map((column): ColDef<TradeListRow> => ({
-      ...column,
-      type: "rightAligned",
-      editable: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group,
-      cellClass: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group ? "appEditableCell" : undefined,
-    })),
+    ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => [
+      {
+        ...column,
+        type: "rightAligned",
+        editable: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group,
+        cellClass: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group ? "appEditableCell" : undefined,
+      },
+      // 회차금액 옆 읽기 전용 — 지금 현재가로 그 금액이 몇 주인지.
+      ...(column.field === "amount"
+        ? [{
+            field: "roundQuantity",
+            headerName: "회차수량",
+            headerTooltip: "회차금액 ÷ (현재가 × 환율), 내림 — 현재가 기준 참고값",
+            width: 88,
+            type: "rightAligned",
+            valueFormatter: ({ value, node }) => (node?.rowPinned || value == null ? "" : `${formatNumber(value)}주`),
+          } satisfies ColDef<TradeListRow>]
+        : []),
+    ]),
     dailyChange,
     currentPrice,
     { ...quantity, headerName: "보유수량", width: 88 },
