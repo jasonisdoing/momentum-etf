@@ -124,12 +124,26 @@ def _issue_token(account_id: str) -> str:
     if not response.ok or not token or not expires_in:
         raise BrokerApiError(f"메리츠증권 토큰 발급 실패 ({account_id}): {_message_of(data, response)}")
     exp = time.time() + float(expires_in)
-    _token_collection().update_one(
+    collection = _token_collection()
+    previous = (collection.find_one({"_id": _token_doc_id(account_id)}) or {}).get("token")
+    collection.update_one(
         {"_id": _token_doc_id(account_id)},
         {"$set": {"token": token, "exp": exp, "issued_at": time.time()}},
         upsert=True,
     )
     logger.info("[MERITZ] %s 토큰 발급 (만료 %s)", account_id, time.strftime("%m-%d %H:%M", time.localtime(exp)))
+    # 발급 직후 만료 오류(EGW00123) 원인 조사용 — 새 토큰이 직전 토큰과 같은지, 응답의 토큰 외 필드(값 포함)를 남긴다.
+    extra = {
+        key: ("(생략)" if "token" in key and key != "token_type" else value)
+        for key, value in data.items()
+        if key != "access_token"
+    }
+    logger.info(
+        "[MERITZ] %s 발급 응답 — 직전 토큰과 %s, 그 밖의 필드 %s",
+        account_id,
+        "같음" if token == previous else "다름",
+        extra,
+    )
     return str(token)
 
 
