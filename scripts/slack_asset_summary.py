@@ -222,6 +222,8 @@ def _trade_summary_lines(name: str, item: dict) -> list[str]:
     unrealized_pct = (item["unrealized"] / invested * 100) if invested > 0 else 0.0
     maximum = item["max_capital"]
     used_pct = (invested / maximum * 100) if maximum > 0 else 0.0
+    net_invest = item["today_buy_amount"] - item["today_sold_cost"]
+    today_unknown = f" (체결가 모르는 매도 {item['today_unknown_sells']}건 제외)" if item["today_unknown_sells"] else ""
     unknown = f" (체결가 모르는 매도 {item['realized_unknown_sells']}건 제외)" if item["realized_unknown_sells"] else ""
     orders = item["signal_orders"] + item["manual_orders"]
     return [
@@ -233,7 +235,9 @@ def _trade_summary_lines(name: str, item: dict) -> list[str]:
         f"{format_korean_currency(item['realized_recent'])}{unknown}",
         f"  - 투입 원금: {format_korean_currency(invested)} / 전 회차 매수 시 {format_korean_currency(maximum)} "
         f"({used_pct:.1f}% 사용)",
-        f"  - 금일 체결: 매수 {item['today_buys']}건 · 매도 {item['today_sells']}건",
+        f"  - 금일 순투입(거래 기준): {format_korean_currency(net_invest)}{today_unknown}",
+        f"  - 금일 체결: 매수 {item['today_buys']}건 {format_korean_currency(item['today_buy_amount'])} · "
+        f"매도 {item['today_sells']}건 {format_korean_currency(item['today_sell_amount'])}",
         f"  - 미체결 주문: {orders}건",
     ]
 

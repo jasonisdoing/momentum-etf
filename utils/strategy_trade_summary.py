@@ -34,6 +34,10 @@ def _add_view(summary: dict[str, Any], view: dict[str, Any]) -> None:
     summary["realized_today"] += status["realized_today"] * rate
     summary["realized_recent"] += status["realized_recent"] * rate
     summary["realized_unknown_sells"] += status["realized_unknown_sells"]
+    summary["today_buy_amount"] += status["today_buy_amount"] * rate
+    summary["today_sell_amount"] += status["today_sell_amount"] * rate
+    summary["today_sold_cost"] += status["today_sold_cost"] * rate
+    summary["today_unknown_sells"] += status["today_unknown_sells"]
     summary["today_buys"] += status["today_buy_count"]
     summary["today_sells"] += status["today_sell_count"]
     summary["manual_orders"] += len(view["manual_orders"])
@@ -57,6 +61,10 @@ def load_trade_summaries() -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
                 "realized_today": 0.0,
                 "realized_recent": 0.0,
                 "realized_unknown_sells": 0,
+                "today_buy_amount": 0.0,
+                "today_sell_amount": 0.0,
+                "today_sold_cost": 0.0,
+                "today_unknown_sells": 0,
                 "today_buys": 0,
                 "today_sells": 0,
                 "manual_orders": 0,
