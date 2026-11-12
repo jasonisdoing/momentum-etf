@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from core.strategy.trade import rules as ladder
 from services.broker_trade_service import resolve_us_exchange
 from utils.logger import get_app_logger
+from utils.portfolio_io import return_pct_from_avg_price
 from utils.strategy_trade_config import (
     DEFAULT_ROUND_SIZE,
     EDITABLE_CONFIG_KEYS,
@@ -769,6 +770,9 @@ def _build_strategy_view(
             # 매도가 먼저 닿아 있어 다음 회차 매수는 그 매도가 체결될 때까지 미룬다(신호는 한 번에 하나).
             "sell_pending": sell_pending,
             "held_quantity": quantity,
+            # 증권사 계좌 평균단가(이동평균)와 현재가 대비 수익률 — 회차 체결가 기준 손익과 다를 수 있어 참고로 보여 준다.
+            "average_price": ledger.average_price if quantity > 0 else None,
+            "average_profit_pct": return_pct_from_avg_price(close, ledger.average_price) if quantity > 0 else None,
             # 다음 회차를 살 현금이 없어 매수를 멈췄는지(한도 소진).
             "cash_short": bool(next_row is not None and next_row["cash_short"]),
             "budget_short": bool(next_row is not None and next_row["budget_short"]),

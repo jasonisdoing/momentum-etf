@@ -50,6 +50,9 @@ type Status = {
   // 보유 0 인데 장중 1호 진입선에 못 닿았을 때 1호를 사는 시각(KST, "HH:MM").
   first_entry_close_time: string;
   held_quantity: number;
+  // 증권사 계좌 평균단가(이동평균)와 현재가 대비 수익률(%) — 보유가 없으면 null.
+  average_price: number | null;
+  average_profit_pct: number | null;
   // 다음 회차를 살 계좌 현금이 없어 매수를 멈췄다(한도 소진).
   cash_short: boolean;
   budget_short: boolean;
@@ -979,6 +982,12 @@ function StrategySection({
         <span>
           현재가 <b style={{ fontSize: "var(--fs-lg)", fontWeight: 800 }}>{formatPrice(index.close, currency)}</b>
         </span>
+        {status.held_quantity > 0 ? (
+          <span>
+            평균단가 <b>{formatPrice(status.average_price, currency)}</b>{" "}
+            <b style={{ color: signColor(status.average_profit_pct) }}>{formatSigned(status.average_profit_pct)}</b>
+          </span>
+        ) : null}
         <span style={{ color: "var(--text-muted)" }}>
           체결 이력 {view.ledger_at.slice(5, 16).replace("T", " ")} 기준
         </span>

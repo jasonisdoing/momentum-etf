@@ -85,6 +85,8 @@ class Ledger:
     #: 계좌 국가(kor·us)와 그 시장의 계산일(YYYY-MM-DD) — 체결 조회의 날짜가 시장 현지 날짜라서 따로 둔다.
     country: str
     market_date: str
+    #: 증권사 계좌의 평균단가(이동평균) — 회차별 체결가와 달리 보유 전체의 평균이라 화면이 참고로 나란히 보여 준다.
+    average_price: float
 
     @property
     def as_of(self) -> date:
@@ -334,11 +336,13 @@ def _manual_orders(
 _SNAPSHOT_ATTEMPTS = 3
 
 
-def _balance(account_id: str) -> dict[str, int]:
-    return {row["ticker"]: int(row["quantity"]) for row in fetch_order_balance(account_id)["holdings"]}
+def _balance(account_id: str) -> dict[str, tuple[int, float]]:
+    """종목별 (보유 수량, 증권사 평균단가)."""
+    holdings = fetch_order_balance(account_id)["holdings"]
+    return {row["ticker"]: (int(row["quantity"]), float(row["average_buy_price"])) for row in holdings}
 
 
-def _consistent_snapshot(account_id: str, today: date) -> tuple[dict[str, int], list[dict[str, Any]]]:
+def _consistent_snapshot(account_id: str, today: date) -> tuple[dict[str, tuple[int, float]], list[dict[str, Any]]]:
     """같은 시점의 잔고와 오늘 주문 목록 — 잔고 → 주문 목록 → 잔고 순으로 읽어 앞뒤 잔고가 같을 때만 쓴다.
 
     두 조회 사이에 체결이 끼어들면(주문 직후 배치 등) 잔고와 체결이 어긋나 회차를 잘못 센다. 앞뒤 잔고가 다르면
@@ -376,7 +380,7 @@ def compute_ledgers(account_id: str, tickers: list[str]) -> dict[str, tuple[Ledg
     cutoff = (today - timedelta(days=LOOKBACK_DAYS)).isoformat()
     results: dict[str, tuple[Ledger | LedgerError, dict | None]] = {}
     for ticker in tickers:
-        quantity = balance.get(ticker, 0)
+        quantity, average_price = balance.get(ticker, (0, 0.0))
         try:
             try:
                 if ticker not in anchors:
@@ -402,6 +406,7 @@ def compute_ledgers(account_id: str, tickers: list[str]) -> dict[str, tuple[Ledg
             computed_at,
             country,
             today.isoformat(),
+            average_price,
         )
         # 어제 마감 로트에 체결가를 모르는 기초분이 남아 있으면 기준점으로 쓰지 않는다(오늘 팔려 확정된 경우).
         anchor = None
@@ -439,6 +444,7 @@ def _to_doc(account_id: str, ticker: str, ledger: Ledger | LedgerError) -> dict[
         "computed_at": ledger.computed_at,
         "country": ledger.country,
         "market_date": ledger.market_date,
+        "average_price": ledger.average_price,
     }
 
 
@@ -453,6 +459,7 @@ def _from_doc(doc: dict[str, Any]) -> Ledger | LedgerError:
         computed_at=doc["computed_at"],
         country=doc["country"],
         market_date=doc["market_date"],
+        average_price=doc["average_price"],
     )
 
 
