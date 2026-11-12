@@ -272,9 +272,6 @@ def _collect_live_daily_summary() -> dict[str, Any]:
     all_zero_valuation_tickers: list[str] = []
 
     for account in load_account_configs():
-        if not account.get("settings", {}).get("show_hold", True):
-            continue
-
         account_id = account["account_id"]
         master_data = load_portfolio_master(account_id)
         cash_balance = float(master_data.get("cash_balance", 0.0) if master_data else 0.0)

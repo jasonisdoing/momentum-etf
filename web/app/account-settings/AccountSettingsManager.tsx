@@ -33,6 +33,8 @@ type AccountEntry = {
   /** 합성 슬리브별 종목풀 — 모멘텀·신고가가 서로 다른 풀을 볼 수 있다(계좌와 같은 국가). */
   /** 합성 전략 사용 여부 — 실제 조합(전략·종목풀·배분)은 `/strategy-mix` 에서 정한다. */
   mix_enabled?: boolean;
+  /** 자산 화면·계좌 선택·집계에서 숨김 — 현금·보유·원금이 모두 0인 계좌만 켤 수 있다. */
+  hidden?: boolean;
   /** 증권사 API 연동 — 잔고 수동 불러오기·배치 동기화가 이 값으로 동작한다. */
   /** 계좌별 키 커넥터(메리츠)는 `account_no` 대신 사용자가 입력한 표시용 마스킹 번호(`account_mask`)를 저장한다. */
   broker_api?: { provider: string; account_no?: string; account_mask?: string } | null;
@@ -112,6 +114,7 @@ type AccountDraft = {
   benchmarkName: string;
   regimeTicker: string;
   mix_enabled: boolean;
+  hidden: boolean;
   brokerProvider: string;
   brokerAccountNo: string;
   /** 메리츠 계좌번호(표시용 수기 입력) — 증권사 API 로 대조할 수 없는 값이다. */
@@ -149,6 +152,7 @@ function toDraft(account: AccountEntry): AccountDraft {
     // 시장 레짐 지수(필수) — 미설정 계좌는 S&P 500 기본값으로 시작.
     regimeTicker: account.market_regime_index?.ticker || DEFAULT_REGIME_TICKER,
     mix_enabled: Boolean(account.mix_enabled),
+    hidden: Boolean(account.hidden),
     brokerProvider: account.broker_api?.provider ?? "",
     brokerAccountNo: account.broker_api?.account_no ?? "",
     brokerAccountMask: account.broker_api?.account_mask ?? "",
@@ -181,6 +185,7 @@ function draftToValues(draft: AccountDraft, marketIndices: MarketIndexOption[]):
     },
     // 합성 전략 종목풀 — 없음이면 null 로 저장한다(그 계좌는 합성 화면에 안 뜬다).
     mix_enabled: draft.mix_enabled,
+    hidden: draft.hidden,
     // 증권사 API 연동 — 커넥터를 고르면 그대로 보낸다. 계좌번호가 필요한지(나무)·없어야 하는지(메리츠)는
     // 백엔드가 커넥터별로 검증해 저장을 막는다(빠진 값을 조용히 해제하지 않는다).
     broker_api: draft.brokerProvider
@@ -936,7 +941,7 @@ export function AccountSettingsManager() {
    *  않았다(값은 바뀌어 저장은 됐다). 초안 값을 그대로 그리고 onChange 로만 바꾸면
    *  화면과 값이 항상 같다. */
   const booleanCol = (
-    field: "mix_enabled" | "ma_alarm_enabled" | "stoploss_alarm_enabled" | "api_order_enabled",
+    field: "mix_enabled" | "hidden" | "ma_alarm_enabled" | "stoploss_alarm_enabled" | "api_order_enabled",
     headerName: string,
     width: number,
     headerTooltip: string,
@@ -1036,6 +1041,12 @@ export function AccountSettingsManager() {
       "합성",
       76,
       "합성 전략을 운용할 계좌입니다. 전략·종목풀·배분은 /strategy-mix 에서 정합니다.",
+    ),
+    booleanCol(
+      "hidden",
+      "숨김",
+      70,
+      "자산 화면·계좌 선택·집계에서 이 계좌를 숨깁니다. 현금·보유 종목·원금이 모두 0일 때만 켤 수 있습니다.",
     ),
     booleanCol(
       "ma_alarm_enabled",

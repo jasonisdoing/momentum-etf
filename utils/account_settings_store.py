@@ -49,6 +49,8 @@ EDITABLE_KEYS: tuple[str, ...] = (
     # 합성 전략 사용 여부 — 계좌 설정에서는 이 체크만 하고, 실제 조합(전략·종목풀·배분)은
     # `/strategy-mix` 화면에서 정한다. 조합과 배분은 함께 보며 맞추는 값이라 한 화면에 둔다.
     "mix_enabled",
+    # 자산 화면·계좌 선택·집계·배치에서 숨김 — 현금·보유·원금이 모두 0인 운영 계좌만 켠다.
+    "hidden",
     # 합성 슬리브 목록 — 슬롯마다 (전략, 종목풀, 표시 이름, 배분%). 슬롯 수가 늘어도
     # 필드를 추가하지 않도록 배열 하나로 둔다. 순서가 곧 슬롯 순서(A·B·C)다.
     "mix_sleeves",
@@ -142,11 +144,12 @@ def load_account_docs() -> list[dict[str, Any]]:
 
 
 def load_live_account_docs() -> list[dict[str, Any]]:
-    """운영 계좌 문서만 order 순으로 반환한다 — 집계·알림·배치·사고팔기는 모두 이쪽을 쓴다.
+    """보이는 운영 계좌 문서만 order 순으로 반환한다 — 자산·계좌 선택·집계·알림·배치·사고팔기는 모두 이쪽을 쓴다.
 
-    모의 계좌는 API 주문 시험용이라 계좌 설정 편집 화면(`load_account_docs`)에만 나온다.
+    모의 계좌는 API 주문 시험용이고 숨김 계좌(`hidden`)는 쓰지 않는 계좌라, 둘 다 계좌 설정 편집 화면
+    (`load_account_docs`)에만 나온다.
     """
-    return [doc for doc in load_account_docs() if doc["env"] == ACCOUNT_ENV_LIVE]
+    return [doc for doc in load_account_docs() if doc["env"] == ACCOUNT_ENV_LIVE and not doc["hidden"]]
 
 
 def _validate_order_limit(account_id: str, key: str, raw: Any) -> int | None:
@@ -365,6 +368,7 @@ def _validate_broker_account_type(
 #: 모의 계좌에는 켤 수 없는 설정 — 합성·사고팔기·보유종목 알림은 운영 계좌 전용이다.
 _LIVE_ONLY_KEYS = (
     "mix_enabled",
+    "hidden",
     "mix_slack_enabled",
     "ma_alarm_enabled",
     "stoploss_alarm_enabled",
@@ -456,6 +460,10 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
         elif key == "mix_enabled":
             # 켜면 `/strategy-mix` 목록에 오른다. 조합이 아직 없으면 그 화면에서 고르게 한다.
             cleaned[key] = bool(raw)
+        elif key == "hidden":
+            cleaned[key] = bool(raw)
+            if cleaned[key]:
+                _require_empty_account(account_id)
         elif key == "mix_slack_enabled":
             # 합성 오늘의 액션 슬랙 알람 — 새 지시·수량 증가가 생기면 발송한다.
             cleaned[key] = bool(raw)
@@ -616,6 +624,7 @@ def create_account(
         "env": env,
         "country_code": ccode,
         "currency": curr,
+        "hidden": False,
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
         "save_method": "계좌 추가",
@@ -633,6 +642,28 @@ def create_account(
         get_app_logger().warning("[계좌 추가] portfolio_master 시드 실패 (%s): %s", norm_id, exc)
 
     return {"account_id": norm_id, "name": name_norm}
+
+
+def _require_empty_account(account_id: str) -> None:
+    """숨기려는 계좌의 현금(전 통화)·보유 종목·원금·해외주식 평가금이 모두 0인지 확인한다 — 남은 항목을 알려 준다."""
+    doc = _db()["portfolio_master"].find_one({"master_id": "GLOBAL"}, {"accounts": 1}) or {}
+    account = next(
+        (acc for acc in doc.get("accounts") or [] if str(acc.get("account_id") or "").strip().lower() == account_id),
+        {},
+    )
+    cash = account.get("cash") or {}
+    holdings = [h for h in account.get("holdings") or [] if str((h or {}).get("ticker") or "").strip()]
+    remaining = {
+        "현금": bool(float(account.get("cash_balance") or 0)) or any(float(value or 0) for value in cash.values()),
+        "보유 종목": bool(holdings),
+        "원금": bool(float(account.get("total_principal") or 0)),
+        "해외주식 평가금": bool(float(account.get("intl_shares_value") or 0)),
+    }
+    left = [label for label, present in remaining.items() if present]
+    if left:
+        raise AccountSettingsStoreError(
+            f"'{account_id}' 은(는) {', '.join(left)}이(가) 0이 아니라 숨길 수 없습니다. 모두 0이 된 뒤에 숨기세요."
+        )
 
 
 def _account_holding_count(account_id: str) -> int:

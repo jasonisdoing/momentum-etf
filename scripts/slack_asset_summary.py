@@ -179,8 +179,6 @@ def collect_global_totals() -> dict[str, object]:
     total_assets = 0.0
     for account in accounts:
         account_id = account["account_id"]
-        if not account.get("settings", {}).get("show_hold", True):
-            continue
         m_data = load_portfolio_master(account_id) or {}
         principal = float(m_data.get("total_principal") or 0.0)
         cash = float(m_data.get("cash_balance") or 0.0)
@@ -313,9 +311,6 @@ def main():
 
     for account in accounts:
         account_id = account["account_id"]
-        if not account.get("settings", {}).get("show_hold", True):
-            continue
-
         account_name = account.get("name") or account_id.upper()
 
         # Load principal and cash
