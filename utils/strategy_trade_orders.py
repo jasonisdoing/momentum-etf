@@ -119,6 +119,11 @@ def active_order_keys(strategy_ids: list[str]) -> set[tuple[str, int | str, str]
     }
 
 
+def active_order_count(account_id: str) -> int:
+    """이 계좌의 아직 끝나지 않은 신호 주문 수(요약 알림용)."""
+    return _orders().count_documents({"account_id": account_id, "status": {"$in": list(ACTIVE_STATUSES)}})
+
+
 def _require_no_duplicate(account_id: str, strategy_id: str, side: str) -> None:
     found = find_duplicate_order(account_id, strategy_id, side)
     if found is not None:

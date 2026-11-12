@@ -61,6 +61,9 @@ class Trade:
     order_no: str | None
     sell_target: str | None = None
     arbitrary_shares: int = 0
+    #: 매도 체결의 실현손익(종목 통화, 수수료·세금 제외) — 팔린 로트의 체결가와 비교한다. 매수이거나
+    #: 체결가를 모르는 기초분을 판 경우, 이 필드가 생기기 전에 저장된 체결은 None(모름)이다.
+    realized: float | None = None
 
 
 @dataclass(frozen=True)
@@ -217,6 +220,7 @@ def _replay(lots: list[Lot], trades: list[Trade], recorded: list[Trade] | None =
                 arbitrary_shares = trade.shares
             lots.append(Lot(trade.shares, trade.price, trade.day, trade.source, arbitrary_id))
         remaining = 0 if trade.buy else trade.shares
+        realized: float | None = None if trade.buy else 0.0
         while remaining > 0:
             indices = range(len(lots) - 1, -1, -1)
             if trade.sell_target is None:
@@ -228,6 +232,10 @@ def _replay(lots: list[Lot], trades: list[Trade], recorded: list[Trade] | None =
                 raise LedgerError(f"{trade.day} 매도가 대상 보유 수량을 넘습니다 — 체결 이력을 확인하세요.")
             top = lots[target]
             take = min(remaining, top.shares)
+            if top.source == _SOURCE_UNKNOWN:
+                realized = None
+            elif realized is not None:
+                realized += take * (trade.price - top.price)
             if top.arbitrary_id is not None:
                 arbitrary_shares += take
             if take == top.shares:
@@ -236,7 +244,7 @@ def _replay(lots: list[Lot], trades: list[Trade], recorded: list[Trade] | None =
                 lots[target] = replace(top, shares=top.shares - take)
             remaining -= take
         if recorded is not None:
-            recorded.append(replace(trade, arbitrary_shares=arbitrary_shares))
+            recorded.append(replace(trade, arbitrary_shares=arbitrary_shares, realized=realized))
     return lots
 
 

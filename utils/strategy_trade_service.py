@@ -563,6 +563,23 @@ def _attach_trade_history(
     }
 
 
+def _realized_summary(ledger: Ledger) -> dict[str, Any]:
+    """원장이 가진 체결에서 실현손익(종목 통화)과 오늘 매수·매도 건수를 모은다.
+
+    실현손익은 보관 기간(`LOOKBACK_DAYS`)의 매도만 더한다. 팔린 로트의 체결가를 모르는 매도는 합계에 넣지 않고
+    건수(`realized_unknown_sells`)로 알린다.
+    """
+    sells = [trade for trade in ledger.trades if not trade.buy]
+    today_trades = [trade for trade in ledger.trades if trade.day == ledger.market_date]
+    return {
+        "realized_today": sum(t.realized for t in sells if t.day == ledger.market_date and t.realized is not None),
+        "realized_recent": sum(t.realized for t in sells if t.realized is not None),
+        "realized_unknown_sells": sum(1 for t in sells if t.realized is None),
+        "today_buy_count": sum(1 for t in today_trades if t.buy),
+        "today_sell_count": sum(1 for t in today_trades if not t.buy),
+    }
+
+
 def _build_strategy_view(
     strategy_id: str,
     strategy_settings: dict[str, Any],
@@ -772,6 +789,7 @@ def _build_strategy_view(
             # 증권사 계좌 평균단가(이동평균)와 현재가 대비 수익률 — 회차 체결가 기준 손익과 다를 수 있어 참고로 보여 준다.
             "average_price": ledger.average_price if quantity > 0 else None,
             "average_profit_pct": return_pct_from_avg_price(close, ledger.average_price) if quantity > 0 else None,
+            **_realized_summary(ledger),
             # 다음 회차를 살 현금이 없어 매수를 멈췄는지(한도 소진).
             "cash_short": bool(next_row is not None and next_row["cash_short"]),
             "budget_short": bool(next_row is not None and next_row["budget_short"]),
