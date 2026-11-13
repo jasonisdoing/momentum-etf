@@ -625,25 +625,22 @@ def _history_summary(
 ) -> dict[str, Any]:
     """회차 표 범위(최근 체결 전부)의 손익 요약(종목 통화) — 평가 금액·실현손익·평가손익·합계.
 
-    실현손익은 범위 안 매도를 짝 매수(`trade_pairs`) 체결가와 비교한다. 조회 기간 이전에 산 몫은 체결가를 몰라
-    빼고 그 수량을 ``excluded_shares`` 로 알린다. 평가는 지금 보유 로트(임의 매수 포함) 전체다.
+    실현손익은 범위 안에서 사고판 몫만 — 매도를 짝 매수(`trade_pairs`) 체결가와 비교한다. 범위 이전에 산 몫은 넣지
+    않는다. 평가는 지금 보유 로트(임의 매수 포함) 전체다.
     """
     close = float(view["index"]["close"])
-    realized = 0.0
-    excluded = 0
-    for sell, taken in zip(history, sold_lots, strict=True):
-        for origin, _, shares in taken:
-            if origin is None:
-                excluded += shares
-            else:
-                realized += shares * (sell.price - history[origin].price)
+    realized = sum(
+        shares * (sell.price - history[origin].price)
+        for sell, taken in zip(history, sold_lots, strict=True)
+        for origin, _, shares in taken
+        if origin is not None
+    )
     unrealized = sum(lot.shares * (close - lot.price) for lot in ledger.lots)
     return {
         "market_value": ledger.quantity * close,
         "realized": realized,
         "unrealized": unrealized,
         "total": realized + unrealized,
-        "excluded_shares": excluded,
     }
 
 
@@ -653,7 +650,7 @@ def _trade_badges(
     sold_lots: list[tuple[int | None, bool, int]],
     pair_numbers: dict[int, int],
 ) -> list[dict[str, Any]]:
-    """체결 한 건의 회차 표 뱃지 — 방향(`side`)·짝 번호(`pairs`)·조회 기간 이전 매수를 판 몫이 있는지(`outside`).
+    """체결 한 건의 회차 표 뱃지 — 방향(`side`)·짝 번호(`pairs`). 범위 이전에 산 매수를 판 몫은 번호가 없다.
 
     매수는 자기 번호, 매도는 차감한 매수의 번호다. 일반 몫과 임의 몫은 뱃지를 나눈다.
     """
@@ -663,12 +660,11 @@ def _trade_badges(
         if not shares:
             continue
         if trade.buy:
-            pairs, outside = ([number] if number is not None else []), False
+            pairs = [number] if number is not None else []
         else:
             origins = [origin for origin, lot_arbitrary, _ in sold_lots if lot_arbitrary == arbitrary]
             pairs = list(dict.fromkeys(pair_numbers[o] for o in origins if o is not None))
-            outside = None in origins
-        badges.append({"side": f"arbitrary_{side}" if arbitrary else side, "pairs": pairs, "outside": outside})
+        badges.append({"side": f"arbitrary_{side}" if arbitrary else side, "pairs": pairs})
     return badges
 
 

@@ -63,9 +63,8 @@ type Status = {
 };
 
 type TradeSide = "buy" | "sell" | "arbitrary_buy" | "arbitrary_sell";
-/** 회차 표의 체결 뱃지 — 짝 번호(`pairs`)는 매수는 자기 번호, 매도는 판 매수의 번호다.
- *  `outside` 는 조회 기간 이전에 산 매수를 판 몫이 있다는 뜻이다(번호 대신 `·`). */
-type TradeBadge = { side: TradeSide; pairs: number[]; outside: boolean };
+/** 회차 표의 체결 뱃지 — 짝 번호(`pairs`)는 매수는 자기 번호, 매도는 판 매수의 번호다(최근 30일 안 매수만). */
+type TradeBadge = { side: TradeSide; pairs: number[] };
 
 const FILL_LABELS = {
   buy: "매수",
@@ -131,8 +130,8 @@ export type StrategyView = {
   trades_by_position: Record<string, Record<string, TradeBadge[]>>;
   /** 사다리 위치별 가격 — 지금 1호 체결가 × (1 − 간격%)^(위치−1)을 호가로 맞춘 값. 보유가 없으면 비어 있다. */
   position_prices: Record<string, number>;
-  /** 회차 표 범위(최근 30일)의 손익 요약(종목 통화). `excluded_shares` 는 조회 기간 이전에 사서 실현손익에서 뺀 매도 수량. */
-  history_summary: { market_value: number; realized: number; unrealized: number; total: number; excluded_shares: number };
+  /** 회차 표 범위(최근 30일)의 손익 요약(종목 통화) — 실현손익은 30일 안에서 사고판 몫만. */
+  history_summary: { market_value: number; realized: number; unrealized: number; total: number };
   /** 보유가 모두 빈 날짜(사이클 종료) — 표의 날짜 칸 오른쪽에 경계선을 긋는다. */
   cycle_end_days: string[];
   // 체결 이력(회차 원장)을 계산한 시각 — 사고팔기 알림 배치가 갱신한다(KST ISO).
@@ -351,13 +350,10 @@ function DailyTradeBadges({ badges }: { badges: TradeBadge[] }) {
   return (
     <span style={{ display: "inline-flex", gap: 4, whiteSpace: "nowrap" }}>
       {badges.map((badge, idx) => (
-        <span key={idx} title={badge.outside ? "조회 기간 이전에 산 매수를 판 몫이 있다" : undefined}>
-          <StatusBadge color={FILL_COLORS[badge.side.endsWith("buy") ? "buy" : "sell"]}>
-            {FILL_LABELS[badge.side]}
-            {badge.pairs.join("·")}
-            {badge.outside ? "·" : ""}
-          </StatusBadge>
-        </span>
+        <StatusBadge key={idx} color={FILL_COLORS[badge.side.endsWith("buy") ? "buy" : "sell"]}>
+          {FILL_LABELS[badge.side]}
+          {badge.pairs.join("·")}
+        </StatusBadge>
       ))}
     </span>
   );
@@ -379,11 +375,8 @@ function HistorySummary({ summary }: { summary: StrategyView["history_summary"] 
       {signed(
         "실현손익",
         summary.realized,
-        "최근 30일 매도 − 짝 매수 체결가(수수료·세금 제외)",
+        "최근 30일 안에서 사고판 몫 — 매도 − 짝 매수 체결가(수수료·세금 제외)",
       )}
-      {summary.excluded_shares > 0 ? (
-        <span style={{ color: "var(--text-muted)" }}>(조회 기간 이전 매수 {formatNumber(summary.excluded_shares)}주 제외)</span>
-      ) : null}
       {signed("평가손익", summary.unrealized)}
       {signed("합계 손익", summary.total)}
     </span>
