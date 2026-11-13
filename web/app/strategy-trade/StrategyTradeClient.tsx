@@ -217,7 +217,8 @@ const SELL_BADGE_COLOR = "var(--up-color, #d64545)";
 
 const thStyle: React.CSSProperties = { padding: "4px 8px", textAlign: "right" };
 // 회차 표 고정 열(위치~손익)의 폭 — 날짜 열이 몇 개든 같은 폭이고, 날짜가 적으면 오른쪽이 비어 보인다.
-const ROUND_TABLE_FIXED_WIDTHS = [56, 80, 140, 100, 150, 84] as const;
+// 상태 열은 `도달 매수슬랙 매수주문` 세 뱃지가 한 줄에 들어가는 폭이다(뱃지는 줄바꿈하지 않는다).
+const ROUND_TABLE_FIXED_WIDTHS = [56, 80, 210, 100, 150, 84] as const;
 // 날짜 열의 최소 폭 — 그날 매매가 많으면 배지만큼 넓어진다.
 const ROUND_TABLE_DAY_MIN_WIDTH = 108;
 const WEEKDAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"] as const;
