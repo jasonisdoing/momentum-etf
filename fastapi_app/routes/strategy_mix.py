@@ -1,4 +1,4 @@
-"""합성 전략(SM + 신고가 + 비워 두는 현금) 백테스트 API — `/strategy-mix` 화면."""
+"""합성 전략 운용 API — `/strategy-mix` 화면(계좌 목록·운용 현황·차트·슬랙 테스트)."""
 
 from __future__ import annotations
 
@@ -28,21 +28,6 @@ def get_strategy_mix_positions(
     from utils.strategy_mix_service import mix_positions
 
     return mix_positions(account_id)
-
-
-@router.get("/backtest")
-def get_strategy_mix_backtest(
-    account_id: str | None = Query(default=None),
-    months: int | None = Query(default=None),
-    _: None = Depends(require_internal_token),
-) -> dict:
-    """선택한 계좌의 슬리브별 풀 저장 설정·배분으로 두 전략을 백테스트해 합성 결과를 돌려준다.
-
-    캐시는 없다 — 각 전략 화면의 백테스트와 같은 요청 시 계산이라 수 분 걸릴 수 있다.
-    """
-    from utils.strategy_mix_service import run_mix_backtest
-
-    return run_mix_backtest(account_id, months)
 
 
 class SlackTestPayload(BaseModel):

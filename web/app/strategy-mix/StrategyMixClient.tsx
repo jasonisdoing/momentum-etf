@@ -14,7 +14,6 @@ import {
   writeRememberedMomentumEtfAccountId,
 } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
-import { MonthsSelect } from "../components/MonthsSelect";
 import { SlackAlarmField } from "../components/SlackAlarmField";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { updateStockMemo } from "@/lib/stocks-store";
@@ -23,22 +22,18 @@ import {
   startProgressRamp,
   type LoadingProgress,
 } from "../components/AppLoadingProgress";
-import { BacktestSummary } from "../components/BacktestSummary";
-import { BacktestTradeStats } from "../components/BacktestTradeStats";
 import { RealtimeMissingNotice } from "../components/RealtimeMissingNotice";
 import { useRealtimeQuotes } from "../components/useRealtimeQuotes";
 import { StrategyNotes } from "../components/StrategyNotes";
 import { type HoldingChartData } from "../components/HoldingChart";
 import { StrategyHoldingCharts } from "../components/StrategyHoldingCharts";
 import { NavTabs } from "../components/NavTabs";
-import { BacktestPeriodTables } from "../components/BacktestPeriodTables";
-import { type PeriodRow } from "@/lib/backtest-periods";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
-import { formatDateWithWeekday, formatKstDateTime } from "@/lib/datetime";
+import { formatDateWithWeekday } from "@/lib/datetime";
 import { FIXED_ASSET_NAME, FIXED_ASSET_ROW_CLASS, FIXED_ASSET_TICKER } from "@/lib/fixed-asset";
 import {
   industryColumn,
@@ -56,7 +51,7 @@ import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 
 const gridTheme = createAppGridTheme();
 
-/** 접이식 전략 설명 — 운용 현황·백테스트 섹션 상단(기본 접힘). */
+/** 접이식 전략 설명 — 운용 현황 섹션 상단(기본 접힘). */
 const CURRENT_NOTES = [
   { title: "기준금액", body: "계좌 평가액(현금 포함)이 기준금액입니다. IS 고정 자산은 현재 비중대로 두고 나머지를 슬리브 비중대로 배정하며, 평가액이 바뀌면 목표 금액도 함께 바뀝니다. 해외 종목은 현재 환율로 환산하므로 환율 변동도 반영됩니다." },
   { title: "종목 배정", body: "개별 전략 엔진이 종목과 진입·청산 시점을 정합니다. 포트폴리오는 설정 비중, 모멘텀·신고가는 슬롯당 1/N로 배정합니다. 빈 슬롯은 현금이며 중복 종목 기준금액은 합산합니다." },
@@ -115,7 +110,6 @@ type MixPoolOption = PoolLabelSource & { country_code?: string | null };
 type Meta = {
   /** 합성을 운용하는 계좌 — 계좌 설정에서 '합성' 을 켠 계좌가 온다. */
   accounts: AccountOption[];
-  month_options: number[];
   strategy_options: StrategyOption[];
   pool_options: MixPoolOption[];
   /** 슬리브 개수 제한 — 백엔드 상수가 단일 소스. */
@@ -130,58 +124,6 @@ type Meta = {
   settings_summaries?: Record<string, { label: string; value: string }[]>;
   /** 기본 선택 계좌 — 목록의 첫 계좌. */
   account_id: string;
-};
-
-type View = {
-  computed_at: string;
-  account_id: string;
-  months: number;
-  start_date: string;
-  end_date: string;
-  benchmark_name: string;
-  benchmark_ticker: string;
-  strategy_total_pct: number;
-  strategy_cagr_pct: number | null;
-  strategy_mdd_pct: number | null;
-  strategy_mdd_from?: string | null;
-  strategy_mdd_to?: string | null;
-  strategy_sortino: number | null;
-  benchmark_total_pct: number;
-  benchmark_cagr_pct: number | null;
-  benchmark_mdd_pct: number | null;
-  benchmark_mdd_from?: string | null;
-  benchmark_mdd_to?: string | null;
-  benchmark_sortino: number | null;
-  /** 일별 누적(%) — 연간·월간·주간·일간 표를 이 시계열에서 만든다 (신고가 화면과 동일 방식). */
-  /** 일별 누적(%) — 합성·슬리브별 단독·벤치마크. 슬리브 값은 그 날짜 데이터가 없으면 null. */
-  daily: {
-    date: string;
-    strategy_pct: number;
-    /** 슬리브 단독 누적(%) — 슬롯 키로 담긴다. 그 날짜 데이터가 없으면 null. */
-    slots: Record<string, number | null>;
-    benchmark_pct: number;
-  }[];
-  /** 체결 목록 — 두 전략 합본. exit_date 가 없으면 보유중. */
-  trades: MixTradeRow[];
-  /** 체결 통계 — 백엔드 공용 계산(utils/trade_stats.py). 청산분만 센다. */
-  trade_count: number;
-  win_rate_pct: number | null;
-  avg_win_pct: number | null;
-  avg_loss_pct: number | null;
-  reason_counts?: Record<string, number>;
-};
-
-type MixTradeRow = {
-  strategy: string;
-  ticker: string;
-  name: string;
-  entry_date: string;
-  entry_price: number | null;
-  exit_date: string | null;
-  exit_price: number | null;
-  return_pct: number | null;
-  days: number | null;
-  reason: string;
 };
 
 /** 한 행에서 슬리브 하나가 차지하는 값. 그 슬리브에 안 걸린 행은 전부 비어 있다. */
@@ -422,10 +364,9 @@ function ActionGroupList({ groups }: { groups: ActionGroup[] }) {
   );
 }
 
-/** 합성 전략 — SM·신고가를 저장된 배분으로 함께 운용하는 화면.
- *  운용 현황 탭은 오늘 보유해야 할 종목과 현금 비중·오늘의 액션을,
- *  백테스트 탭은 매월 배분 복구 리밸런싱 합성 성과를 보여준다. 전략 설정은 각 전략 화면의 저장값을 쓰고,
- *  배분은 이 화면 헤더에서 정한다. */
+/** 합성 전략 — 계좌의 슬리브를 저장된 배분으로 함께 운용하는 화면.
+ *  오늘 보유해야 할 종목과 현금 비중·오늘의 액션을 보여준다. 전략 설정은 각 전략 화면의 저장값을 쓰고,
+ *  배분은 이 화면 헤더에서 정한다. 합성 자체의 백테스트는 두지 않는다(각 전략 화면의 백테스트만 쓴다). */
 export function StrategyMixClient() {
   const toast = useToast();
   /** 종목 메모 저장 — 순위·모멘텀 화면과 같은 API(종목에 붙는다). */
@@ -445,8 +386,6 @@ export function StrategyMixClient() {
   const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
   // 조합 셀렉트 선택지(전략·종목풀) — 계좌 목록과 같은 응답으로 온다.
   const [meta, setMeta] = useState<Meta | null>(null);
-  const [months, setMonths] = useState<number>(60);
-  const [monthOptions, setMonthOptions] = useState<number[]>([]);
 
   // 계산 기준은 계좌다 — 슬리브별 풀은 서버가 계좌 설정에서 꺼낸다(계좌 설정이 단일 소스).
   const selectedAccount = accountOptions.find((option) => option.account_id === accountId) ?? null;
@@ -477,12 +416,8 @@ export function StrategyMixClient() {
     useState<LoadingProgress | null>(null);
   /** 계좌를 저장하면 목표 금액이 달라지므로 운용 현황를 다시 계산한다. */
   const [positionsReloadKey, setPositionsReloadKey] = useState(0);
-  // 백테스트 탭.
-  const [view, setView] = useState<View | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [backtestProgress, setBacktestProgress] =
-    useState<LoadingProgress | null>(null);
+  // 계좌 목록(메타)을 못 받으면 운용 현황 자리에 오류를 보여준다.
+  const [metaError, setMetaError] = useState<string | null>(null);
 
   // 진입 시에는 계좌 목록만 받는다 — 계산은 탭·버튼이 시작한다.
   useEffect(() => {
@@ -501,7 +436,6 @@ export function StrategyMixClient() {
         const accounts = payload.accounts ?? [];
         setMeta(payload);
         setAccountOptions(accounts);
-        setMonthOptions(payload.month_options);
         // 마지막으로 고른 계좌는 브라우저에 기억한다(다른 화면의 계좌 셀렉터와 같은 공용 키).
         const remembered = readRememberedMomentumEtfAccountId();
         const initial =
@@ -509,11 +443,11 @@ export function StrategyMixClient() {
             ? remembered
             : payload.account_id;
         setAccountId(initial);
-      } catch (metaError) {
+      } catch (loadError) {
         if (alive)
-          setError(
-            metaError instanceof Error
-              ? metaError.message
+          setMetaError(
+            loadError instanceof Error
+              ? loadError.message
               : "합성 운용 계좌 목록을 불러오지 못했습니다.",
           );
       }
@@ -572,43 +506,6 @@ export function StrategyMixClient() {
     };
   }, [accountId, positionsReloadKey]);
 
-
-  const runBacktest = useCallback(async () => {
-    if (!accountId) return;
-    setLoading(true);
-    setError(null);
-    setBacktestProgress({
-      percent: 10,
-      message: "두 전략의 백테스트를 계산하는 중",
-    });
-    const stopRamp = startProgressRamp(setBacktestProgress);
-    try {
-      const response = await fetch(
-        `/api/strategy-mix?account_id=${encodeURIComponent(accountId)}&months=${months}`,
-        {
-          cache: "no-store",
-        },
-      );
-      const payload = (await response.json()) as View & { error?: string };
-      if (!response.ok || payload.error)
-        throw new Error(
-          payload.error ?? "합성 백테스트를 불러오지 못했습니다.",
-        );
-      setBacktestProgress({ percent: 100, message: "결과 반영 중" });
-      setView(payload);
-    } catch (runError) {
-      const message =
-        runError instanceof Error
-          ? runError.message
-          : "합성 백테스트를 불러오지 못했습니다.";
-      setError(message);
-      toast.error(message);
-    } finally {
-      stopRamp();
-      setLoading(false);
-      setBacktestProgress(null);
-    }
-  }, [accountId, months, toast]);
 
   // 목표 금액의 기준 = 적용 계좌의 총자산(주식 평가액 + 현금). 계좌가 없으면 비중만 보여준다.
   const totalAsset = positions?.account?.total_assets ?? null;
@@ -1256,81 +1153,6 @@ export function StrategyMixClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
   }, [totalAsset, slotKeys, sleeves, saveMemo, hasIndustryData, formatAmount, formatPrice, positions?.next_trading_day]);
 
-  const tradeColumns = useMemo<ColDef<MixTradeRow>[]>(
-    () => [
-      {
-        headerName: "전략",
-        field: "strategy",
-        width: 110,
-        pinned: "left",
-        valueFormatter: (p) => slotLabel(String(p.value ?? "")),
-        cellStyle: (p) => ({
-          fontWeight: 700,
-          color: p.value === "a" ? "#1c7ed6" : "#e8590c",
-        }),
-      },
-      // 티커·종목명 — 공용 컬럼. 과거 체결이라 배지 없이 기본 표기.
-      tickerColumn<MixTradeRow>({ width: 96 }),
-      stockNameColumn<MixTradeRow>({}),
-      { headerName: "편입일", field: "entry_date", width: 116 },
-      {
-        headerName: "매수가",
-        field: "entry_price",
-        width: 110,
-        type: "numericColumn",
-        valueFormatter: (p) => formatPrice(p.value as number),
-      },
-      {
-        headerName: "청산일",
-        field: "exit_date",
-        width: 116,
-        valueFormatter: (p) => (p.value ? String(p.value) : "-"),
-      },
-      {
-        headerName: "청산가",
-        field: "exit_price",
-        headerTooltip: "보유중 행은 현재가",
-        width: 110,
-        type: "numericColumn",
-        valueFormatter: (p) => formatPrice(p.value as number),
-      },
-      {
-        headerName: "수익률(%)",
-        field: "return_pct",
-        width: 110,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSignedPct(p.value as number),
-        cellStyle: (p) => ({
-          color: signColor(p.value as number),
-          fontWeight: 700,
-        }),
-      },
-      { headerName: "보유일", field: "days", width: 84, type: "numericColumn" },
-      { headerName: "사유", field: "reason", width: 110 },
-    ],
-    [formatPrice, sleeves],
-  );
-
-  // 합성만의 기간 표 열 — 각 슬리브를 혼자 굴렸을 때(합성이 단독보다 나은지 같은 줄에서 비교).
-  // 합성 곡선은 각 슬리브를 단독 운용한 수익률의 단순 평균과 일치하지 않는다.
-  const periodMiddleColumns = useCallback((): ColDef<PeriodRow>[] => {
-    const slotColumn = (slot: string): ColDef<PeriodRow> => ({
-      colId: `slot_${slot}`,
-      headerName: slotLabel(slot),
-      headerTooltip: `${slotLabel(slot)} 슬리브만 혼자 굴렸을 때 — 그 전략 화면의 백테스트와 같은 값.`,
-      valueGetter: (p) => p.data?.slots?.[slot] ?? null,
-      flex: 1,
-      minWidth: 108,
-      type: "numericColumn",
-      valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
-      cellStyle: (p) => ({ color: signColor(p.value as number), fontWeight: 600 }),
-    });
-    return [
-      ...slotKeys.map(slotColumn),
-    ];
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
-  }, [slotKeys, sleeves]);
-
   // 요약 바에 쓰는 계좌 표기 — 셀렉터와 같은 형식.
   const accountLabel = useMemo(() => {
     const id = positions?.account?.account_id ?? "";
@@ -1509,7 +1331,6 @@ export function StrategyMixClient() {
         ),
       );
       toast.success("합성 설정 저장 완료");
-      setView(null);
       // 배분이 바뀌면 목표 비중·오늘의 액션이 달라진다 — 운용 현황을 다시 계산한다.
       setPositionsReloadKey((k) => k + 1);
     } catch (err) {
@@ -1564,13 +1385,12 @@ export function StrategyMixClient() {
                       className="form-select form-select-sm"
                       style={{ width: "auto" }}
                       value={accountId}
-                      disabled={loading || positionsLoading || accountOptions.length === 0}
+                      disabled={positionsLoading || accountOptions.length === 0}
                       onChange={(event) => {
                         const next = event.target.value;
                         setAccountId(next);
                         writeRememberedMomentumEtfAccountId(next);
                         setPositions(null);
-                        setView(null);
                       }}
                     >
                       {accountOptions.map((option) => (
@@ -1647,7 +1467,7 @@ export function StrategyMixClient() {
                     <button
                       type="button"
                       className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
-                      disabled={settingsSaving || loading || !weightOk || !settingsDirty}
+                      disabled={settingsSaving || !weightOk || !settingsDirty}
                       onClick={() => void saveHeaderSettings()}
                       title={weightOk ? "배분·슬랙 알람을 함께 저장한다." : "배분 합계가 100%가 아니면 저장할 수 없다."}
                     >
@@ -1840,9 +1660,9 @@ export function StrategyMixClient() {
             </div>
             <div className="card-body appCardBodyTight">
               <StrategyNotes items={CURRENT_NOTES} />
-              {positionsError ? (
+              {metaError || positionsError ? (
                 <div className="alert alert-danger" style={{ marginBottom: 0 }}>
-                  {positionsError}
+                  {metaError ?? positionsError}
                 </div>
               ) : positionsLoading || !positions ? (
                 <AppLoadingProgress
@@ -2026,104 +1846,6 @@ export function StrategyMixClient() {
           </div>
         </section>
 
-        {/* 백테스트 — 운용 현황 아래에 나란히 둔다. */}
-        <section className="appSection">
-          <div className="card appCard">
-            <div className="card-header appCardHeader">
-              <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>
-                백테스트
-              </span>
-              <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <MonthsSelect value={months} options={monthOptions} disabled={loading} onChange={setMonths} />
-                <button
-                  className="btn btn-sm btn-dark"
-                  type="button"
-                  disabled={loading || settingsSaving || !accountId}
-                  onClick={() => void runBacktest()}
-                >
-                  {loading ? "실행 중…" : "실행"}
-                </button>
-              </span>
-            </div>
-            <div className="card-body appCardBodyTight">
-              {error ? (
-                <div className="alert alert-danger" style={{ marginBottom: 0 }}>
-                  {error}
-                </div>
-              ) : loading ? (
-                <AppLoadingProgress
-                  title="백테스트 실행 중..."
-                  progress={backtestProgress}
-                />
-              ) : view ? (
-                <>
-                  <BacktestSummary
-                    startDate={view.start_date}
-                    endDate={view.end_date}
-                    strategy={{
-                      label: "전략",
-                      totalPct: view.strategy_total_pct,
-                      cagrPct: view.strategy_cagr_pct,
-                      mddPct: view.strategy_mdd_pct,
-                      mddFrom: view.strategy_mdd_from,
-                      mddTo: view.strategy_mdd_to,
-                      sortino: view.strategy_sortino,
-                    }}
-                    benchmark={{
-                      label: view.benchmark_ticker
-                        ? `${view.benchmark_name}(${view.benchmark_ticker})`
-                        : view.benchmark_name,
-                      totalPct: view.benchmark_total_pct,
-                      cagrPct: view.benchmark_cagr_pct,
-                      mddPct: view.benchmark_mdd_pct,
-                      mddFrom: view.benchmark_mdd_from,
-                      mddTo: view.benchmark_mdd_to,
-                      sortino: view.benchmark_sortino,
-                    }}
-                  />
-                  <BacktestTradeStats stats={view} style={{ marginBottom: 12 }} />
-                  <BacktestPeriodTables
-                    daily={view.daily}
-                    strategyLabel="합성"
-                    strategyTooltip="슬리브들을 한 계좌에서 함께 굴린 기간 수익률."
-                    benchmarkLabel={view.benchmark_name}
-                    benchmarkTooltip="계좌의 벤치마크."
-                    defaultView="monthly"
-                    middleColumns={periodMiddleColumns}
-                    extraTab={{
-                      label: "체결",
-                      content: (
-                        <AppAgGrid<MixTradeRow>
-                          rowData={view.trades}
-                          columnDefs={tradeColumns}
-                          theme={gridTheme}
-                          minHeight="auto"
-                          gridOptions={{
-                            domLayout: "autoHeight",
-                            suppressMovableColumns: true,
-                          }}
-                          getRowClass={(p) =>
-                            p.data?.exit_date ? "" : "momentumPendingRow"
-                          }
-                        />
-                      ),
-                    }}
-                  />
-                </>
-              ) : (
-                <div
-                  style={{
-                    ...hintStyle,
-                    padding: "32px 0",
-                    textAlign: "center",
-                  }}
-                >
-                  실행을 누르면 결과가 표시됩니다.
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
       </div>
     </PageFrame>
   );

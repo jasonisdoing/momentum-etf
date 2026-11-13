@@ -1,14 +1,7 @@
-"""합성 슬리브 어댑터 — 모멘텀·신고가 엔진을 **같은 얼굴**로 감싼다.
+"""합성 슬리브 어댑터 — 모멘텀·신고가·포트폴리오 엔진의 현재 상태를 **같은 얼굴**로 감싼다.
 
-합성(`utils/strategy_mix_service`)은 예전에 슬리브 둘을 `sm`/`nh` 로 하드코딩했다. 그래서
-"모멘텀 2개" 나 "신고가 2개" 같은 조합을 만들 수 없었다. 여기서 두 엔진의 차이를 흡수해,
-합성은 **슬롯 목록**만 알고 어느 전략인지는 신경 쓰지 않게 한다.
-
-전략마다 다른 점(이 모듈이 흡수하는 것):
-  - 상태·백테스트 함수의 인자와 반환 형태 (포트폴리오는 슬롯·보유 기간 개념이 없다)
-  - 사전 준비 — 모멘텀·신고가만 가격 패널(`load_context`)이 필요하다
-
-일별 곡선은 **누적 배수**(시작 1.0)로 통일해서 돌려준다 — 합성이 형태를 다시 따질 일이 없다.
+엔진마다 다른 상태 함수의 인자와 반환 형태(포트폴리오는 슬롯·보유 기간 개념이 없다)를 여기서 흡수해,
+합성(`utils/strategy_mix_service`)은 **슬롯 목록**만 알고 어느 전략인지는 신경 쓰지 않게 한다.
 """
 
 from __future__ import annotations
@@ -124,23 +117,6 @@ def validate_settings(strategy: str, settings: dict[str, Any]) -> dict[str, Any]
     from utils.new_high_service import validate_settings as validate
 
     return validate(settings)
-
-
-def load_context(spec: SleeveSpec) -> dict[str, Any] | None:
-    """백테스트·현재 상태가 함께 쓰는 무거운 준비물(가격 패널). 필요 없는 전략은 None.
-
-    패널 생성이 이 계산에서 가장 비싼 부분이라, 한 번 만들어 재사용해야 한다. 모멘텀·신고가는
-    같은 슬롯 엔진을 쓰므로 둘 다 필요하고, 포트폴리오는 백테스트가 직접 가격을 읽는다.
-    """
-    if spec.strategy == MOMENTUM:
-        from utils.momentum_backtest import load_context as sm_load_context
-
-        return sm_load_context(spec.settings)
-    if spec.strategy == NEW_HIGH:
-        from utils.new_high_backtest import load_context as nh_load_context
-
-        return nh_load_context(spec.settings)
-    return None
 
 
 def current_state(spec: SleeveSpec) -> dict[str, Any]:
@@ -394,69 +370,3 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
         live=bool(raw.get("live")),
         next_session=raw.get("next_session"),
     )
-
-
-def run_backtest(
-    spec: SleeveSpec, months: int, context: dict[str, Any] | None = None, *, start_date: str | None = None
-) -> dict[str, Any]:
-    """이 슬리브를 **혼자** 굴린 백테스트 — 엔진 원본 형태 그대로."""
-    if spec.strategy == PORTFOLIO:
-        from utils.portfolio_backtest import run_backtest as portfolio_backtest
-
-        return portfolio_backtest(months, spec.settings, start_date=start_date)
-    if spec.strategy == MOMENTUM:
-        from utils.momentum_backtest import run_backtest as sm_backtest
-
-        return sm_backtest(months, spec.settings, context, start_date=start_date)
-    from utils.new_high_backtest import run_backtest as nh_backtest
-
-    return nh_backtest(months, spec.settings, context, start_date=start_date)
-
-
-def trade_rows(spec: SleeveSpec, result: dict[str, Any]) -> list[dict[str, Any]]:
-    """백테스트 결과의 체결을 **한 형태로** 맞춘다 — 합성 화면의 체결 목록이 이걸 쓴다.
-
-    모멘텀·신고가는 같은 슬롯 엔진이라 형태가 같다(`trades` 에 보유중·청산 행이 함께 온다).
-    포트폴리오만 '보유 기간' 개념이 없다 — 체결이 종목 교체가 아니라 **비중 되돌리기**라
-    진입·청산일이 같은 한 줄로 만든다(매매 기록으로 읽힌다).
-
-    공통 키: ticker · name · entry_date · entry_price · exit_date · exit_price ·
-             return_pct · days · reason
-    """
-    if spec.strategy == PORTFOLIO:
-        rows: list[dict[str, Any]] = []
-        for row in result.get("trades") or []:
-            side = "매수" if row.get("side") == "buy" else "매도"
-            rows.append(
-                {
-                    "ticker": row["ticker"],
-                    "name": row.get("name") or row["ticker"],
-                    "entry_date": row["date"],
-                    "entry_price": row.get("price"),
-                    "exit_date": row["date"],
-                    "exit_price": row.get("price"),
-                    "return_pct": None,
-                    "days": None,
-                    "reason": f"{row.get('reason') or '리밸런싱'} {side} "
-                    f"({row.get('weight_before_pct')}% → {row.get('weight_after_pct')}%)",
-                }
-            )
-        return rows
-
-    # 슬롯 엔진(모멘텀·신고가)은 보유중 행을 `trades` 에 이미 포함한다(엔진 단일 소스,
-    # 2026-09) — 여기서 open_positions 를 다시 합치면 보유 행이 이중으로 나온다.
-    return [dict(row) for row in result.get("trades") or []]
-
-
-def daily_curve(spec: SleeveSpec, result: dict[str, Any]) -> dict[str, float]:
-    """백테스트 결과의 일별을 **누적 배수(시작 1.0)** 로 통일한다.
-
-    세 엔진 모두 구간 시작 대비 누적(%)을 주므로 그대로 배수로 바꾼다.
-    """
-    del spec
-    rows = sorted(result.get("daily") or [], key=lambda row: row["date"])
-    curve: dict[str, float] = {}
-    for row in rows:
-        if row.get("strategy_pct") is not None:
-            curve[row["date"]] = 1 + row["strategy_pct"] / 100
-    return curve
