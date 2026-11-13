@@ -652,8 +652,10 @@ function AccountSettingsCard({
       colId: "roundStatus",
       headerName: "상태",
       headerTooltip: "아래 회차 표의 상태 — 상태가 있는 회차만 회차 번호와 함께 보인다",
-      width: 140,
+      // 도달·슬랙·주문 뱃지가 한 회차에 같이 붙는 경우까지 들어가는 폭 — 넘치면 옆 칸을 덮지 않고 잘라낸다.
+      width: 240,
       sortable: false,
+      cellStyle: { overflow: "hidden" },
       cellRenderer: ({ data }: { data?: TradeListRow }) => (
         <span style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap" }}>
           {(data?.statusRounds ?? []).map((row) => (
