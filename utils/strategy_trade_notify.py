@@ -35,7 +35,7 @@ from utils.logger import get_app_logger
 from utils.market_session import REGULAR, is_instrument_trading_time, market_session
 from utils.order_confirm import build_confirm_line, pop_filled
 from utils.strategy_trade_market import format_level, format_money
-from utils.strategy_trade_service import load_views_where, refresh_all_ledgers
+from utils.strategy_trade_service import load_settings, load_views_where, refresh_all_ledgers
 
 KST = ZoneInfo("Asia/Seoul")
 logger = get_app_logger()
@@ -624,10 +624,21 @@ def _withdrawal_note(entries: list[dict[str, Any]], strategy: dict[str, Any], no
     )
 
 
+def _removed_note(entries: list[dict[str, Any]], now: datetime) -> str:
+    """사고팔기 목록에서 빠진(삭제·종목 교체·계좌 사고팔기 끔) 전략의 신호 회수 문구."""
+    return (
+        f"↩️ *{entries[0]['name']} 사고팔기 신호 회수*\n"
+        f"사고팔기 목록에서 빠져 신호를 회수했습니다. · {now:%Y-%m-%d %H:%M} KST"
+    )
+
+
 def _settle_unused_signals(
-    strategies: list[dict[str, Any]], sent_log: dict[str, dict[str, Any]], now: datetime
+    strategies: list[dict[str, Any]], sent_log: dict[str, dict[str, Any]], now: datetime, configured: set[str]
 ) -> tuple[int, int]:
-    """장중에 가격이 되돌아온 신호는 회수하고, 마감 후 미사용 신호는 지운다."""
+    """장중에 가격이 되돌아온 신호는 회수하고, 마감 후 미사용 신호는 지운다.
+
+    ``configured`` 는 지금 사고팔기 설정에 있는 전략 id 다 — 여기 없는 전략의 신호는 사고팔기에서 빠진 것이라 바로 회수한다.
+    """
     from utils.strategy_trade_threads import (
         claim_signal_withdrawal,
         expire_signal_thread,
@@ -658,6 +669,15 @@ def _settle_unused_signals(
                     logger.exception("사고팔기 신호 회수 답글 정리 실패: %s", root)
             continue
         entries = thread["signal_entries"]
+        if all(entry["strategy_id"] not in configured for entry in entries):
+            try:
+                note = _removed_note(entries, now)
+                if claim_signal_withdrawal(root, note):
+                    withdrawn.add(root)
+                    finish_signal_withdrawal(root, note)
+            except ValueError:
+                logger.exception("사고팔기에서 빠진 전략의 신호 회수 실패: %s", root)
+            continue
         strategy = by_strategy.get(entries[0]["strategy_id"])
         if strategy is None:
             continue
@@ -716,7 +736,7 @@ def notify_strategy_trade() -> dict[str, Any]:
     after_close = now.time() >= first_close or not is_instrument_trading_time("us", "etf", now=now)
     view = load_views_where(lambda entry: after_close or entry["account_id"] in enabled, fresh=False)
     sent_log = _load_sent_log()
-    expired, withdrawn = _settle_unused_signals(view["strategies"], sent_log, now)
+    expired, withdrawn = _settle_unused_signals(view["strategies"], sent_log, now, set(load_settings()["strategies"]))
     if expired or withdrawn:
         _save_sent_log(sent_log)
         logger.info("사고팔기 장중 신호 %s건 회수, 장 마감 미사용 신호 %s건 정리", withdrawn, expired)
