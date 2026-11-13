@@ -50,7 +50,7 @@ import {
   type SlotPlan,
 } from "@/lib/grid-cells";
 import { isTrendBroken } from "@/lib/name-highlight";
-import { poolHasIndustry, poolHasMarketCap, poolHasUsStockSector } from "@/lib/pool-industry";
+import { industryCapLabel, poolHasIndustry, poolHasMarketCap, poolHasUsStockSector } from "@/lib/pool-industry";
 import { formatMaLabel, MaDaysSelect } from "../components/MaDaysSelect";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { formatPrice } from "../../lib/price-format";
@@ -105,6 +105,8 @@ type PoolSettings = {
   adr_floor?: number | null;
   /** 진입 문턱 — 이격 ≥ 배수 × 20일 변동성일 때만 진입 자격(청산은 불변). null = 없음. */
   entry_vol_mult?: number | null;
+  /** 업종(한국)·섹터(미국) 상한(%) — 같은 분류가 차지할 슬롯 상한. 100 = 없음. 개별주 풀만 값이 있다. */
+  industry_cap_pct?: number | null;
 };
 
 type Settings = PoolSettings & { pool: string };
@@ -329,6 +331,8 @@ type View = {
   // 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다).
   constraints?: {
     adr_floor_options?: (number | null)[];
+    /** 업종·섹터 상한(%) 선택지 — 개별주 풀 전용. */
+    industry_cap_pct_options?: number[];
     /** 진입 문턱 선택지 — 국가별. 선택한 풀의 국가로 고른다. */
     entry_vol_mult_options_by_country?: Record<string, (number | null)[]>;
   };
@@ -390,6 +394,8 @@ export function MomentumClient() {
   const [draftStartDate, setDraftStartDate] = useState("");
   const [draftAdrFloor, setDraftAdrFloor] = useState<string>("");
   const [draftEntryVolMult, setDraftEntryVolMult] = useState<string>("");
+  // 업종·섹터 상한(%) — "" 은 값 없음(ETF 풀).
+  const [draftIndustryCap, setDraftIndustryCap] = useState<string>("");
 
   // 풀별 설정을 폼 초안에 채운다 — 풀 셀렉트 전환과 응답 반영이 같은 경로를 쓴다.
   const fillDrafts = useCallback((values: PoolSettings) => {
@@ -398,6 +404,7 @@ export function MomentumClient() {
     setDraftMaRule({ short: values.short_ma_days, long: values.long_ma_days });
     setDraftAdrFloor(values.adr_floor == null ? "" : String(values.adr_floor));
     setDraftEntryVolMult(values.entry_vol_mult == null ? "" : String(values.entry_vol_mult));
+    setDraftIndustryCap(values.industry_cap_pct == null ? "" : String(values.industry_cap_pct));
   }, []);
 
   /** 지금 화면이 보고 있는 풀 — 풀 전환 중 도착한 **이전 풀의 늦은 응답**을 버리는 기준. */
@@ -539,17 +546,18 @@ export function MomentumClient() {
       {
         pool: draftPool,
         start_date: draftStartDate,
-        // 종목 수(공통 config)·업종 상한(폐기)은 더 이상 보내지 않는다.
+        // 종목 수는 공통 config 값을 그대로 보낸다(이 화면에서 바꾸지 않는다).
         top_n: view?.settings.top_n ?? 0,
         // 이평선은 전략 전용 값 — 설정의 일부로 풀별 저장한다(종목풀 설정과 무관).
         short_ma_days: draftMaRule.short,
         long_ma_days: draftMaRule.long,
         adr_floor: draftAdrFloor === "" ? null : Number(draftAdrFloor),
         entry_vol_mult: draftEntryVolMult === "" ? null : Number(draftEntryVolMult),
+        industry_cap_pct: draftIndustryCap === "" ? null : Number(draftIndustryCap),
       },
       "설정을 저장했습니다.",
     );
-  }, [draftStartDate, draftAdrFloor, draftEntryVolMult, draftMaRule, draftPool, persistSettings, toast, view?.settings.top_n]);
+  }, [draftStartDate, draftAdrFloor, draftEntryVolMult, draftIndustryCap, draftMaRule, draftPool, persistSettings, toast, view?.settings.top_n]);
 
   // 풀 셀렉트 변경 — 그 풀의 저장 설정이 있으면 **즉시 전환·저장·재선정**한다
   // (전환은 초안이 아니라 컨텍스트 스위치다). 저장분이 없는 풀(첫 설정)만 초안으로
@@ -762,12 +770,13 @@ export function MomentumClient() {
       draftStartDate !== (saved.start_date ?? "") ||
       (draftAdrFloor === "" ? null : Number(draftAdrFloor)) !== (saved.adr_floor ?? null) ||
       (draftEntryVolMult === "" ? null : Number(draftEntryVolMult)) !== (saved.entry_vol_mult ?? null) ||
+      (draftIndustryCap === "" ? null : Number(draftIndustryCap)) !== (saved.industry_cap_pct ?? null) ||
       (draftMaRule != null &&
         view.ma_rule != null &&
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
           draftMaRule.long !== view.ma_rule.long_ma_days))
     );
-  }, [draftStartDate, draftAdrFloor, draftEntryVolMult, draftMaRule, draftPool, view]);
+  }, [draftStartDate, draftAdrFloor, draftEntryVolMult, draftIndustryCap, draftMaRule, draftPool, view]);
 
   const fillDay = positions?.next_session ?? "다음 거래일";
   const country = positions?.country ?? "";
@@ -1069,6 +1078,26 @@ export function MomentumClient() {
                         ))}
                       </select>
                     </label>
+                    {/* 업종(한국)·섹터(미국) 상한 — 개별주 풀만(ETF 는 분류를 두지 않는다). */}
+                    {hasIndustryData ? (
+                      <label className="appLabeledField">
+                        <span className="appLabeledFieldLabel">{industryCapLabel(selectedPoolOption)}</span>
+                        <select
+                          className="form-select form-select-sm"
+                          style={{ width: 88 }}
+                          value={draftIndustryCap}
+                          onChange={(e) => setDraftIndustryCap(e.target.value)}
+                          title="같은 업종(미국은 섹터)이 차지할 수 있는 슬롯 = 내림(종목 수 × %), 최소 1. 진입할 때 상한에 걸린 후보는 건너뛰고 다음 순위로 채운다. 100% = 상한 없음. 분류가 빈 종목은 상한을 적용하지 않는다."
+                        >
+                          {draftIndustryCap === "" ? <option value="" disabled>선택</option> : null}
+                          {(view.constraints?.industry_cap_pct_options ?? []).map((value) => (
+                            <option key={value} value={String(value)}>
+                              {value === 100 ? "없음(100%)" : `${value}%`}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
                   </>
                 ) : null}
               </div>
@@ -1299,6 +1328,8 @@ export function MomentumClient() {
             long_ma_days: view.settings.long_ma_days,
             entry_vol_mult: view.settings.entry_vol_mult ?? null,
             adr_floor: view.settings.adr_floor ?? null,
+            // 업종·섹터 상한 — 개별주 풀만 축이 있다.
+            ...(hasIndustryData ? { industry_cap_pct: view.settings.industry_cap_pct ?? null } : {}),
           }}
           axes={[
             // 축 값 = 상단 셀렉트 선택지(서버 상수) — 여기서 따로 정하지 않는다.
@@ -1315,6 +1346,18 @@ export function MomentumClient() {
               label: "ADR 하한",
               values: (view.constraints?.adr_floor_options ?? []).map((n) => (n == null ? { value: null, label: "없음" } : { value: n, label: String(n) })),
             },
+            ...(hasIndustryData
+              ? [
+                  {
+                    key: "industry_cap_pct",
+                    label: industryCapLabel(selectedPoolOption),
+                    values: (view.constraints?.industry_cap_pct_options ?? []).map((n) => ({
+                      value: n,
+                      label: n === 100 ? "없음(100%)" : `${n}%`,
+                    })),
+                  },
+                ]
+              : []),
           ]}
           onApply={async (params) => {
             // 조합을 상단 폼에 넣고 그대로 저장한다 (저장 응답이 폼·선정을 갱신한다).
@@ -1325,6 +1368,7 @@ export function MomentumClient() {
               long_ma_days: Number(params.long_ma_days),
               entry_vol_mult: params.entry_vol_mult == null ? null : Number(params.entry_vol_mult),
               adr_floor: params.adr_floor == null ? null : Number(params.adr_floor),
+              ...(hasIndustryData ? { industry_cap_pct: Number(params.industry_cap_pct) } : {}),
             };
             fillDrafts(next);
             await persistSettings(next, "튜닝 조합을 적용해 저장했습니다.");

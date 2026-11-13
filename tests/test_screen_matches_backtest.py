@@ -418,6 +418,8 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
             adr_at=lambda day: None,
             benchmark_growth=lambda index: pd.Series(1.0, index=index),
             benchmark_name="BM",
+            group_of={},
+            group_cap_pct=None,
             start_date="2026-09-01",
             provisional_last_bar=True,
         )
@@ -755,6 +757,8 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
             adr_at=lambda day: None,
             benchmark_growth=lambda days: pd.Series(1.0, index=days),
             benchmark_name="기준",
+            group_of={},
+            group_cap_pct=None,
         )
         self.assertEqual([row["ticker"] for row in result["open_positions"]], ["A"])
         self.assertEqual(result["planned_exits"], [])
@@ -785,6 +789,8 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
             adr_at=lambda day: None,
             benchmark_growth=lambda days: pd.Series(1.0, index=days),
             benchmark_name="기준",
+            group_of={},
+            group_cap_pct=None,
         )
         exits = [row for row in result["trades"] if row["exit_date"] is not None]
         self.assertEqual([(row["exit_date"], row["exit_price"]) for row in exits], [("2026-09-05", 110)])

@@ -1,6 +1,6 @@
 """모멘텀 전략 튜닝 — 설정 항목들의 범위 조합을 한 번에 백테스트해 비교한다.
 
-화면 '튜닝' 섹션용. 축(화면 순서): 선정 이평(단기·장기) · 진입 문턱 · ADR 하한.
+화면 '튜닝' 섹션용. 축(화면 순서): 선정 이평(단기·장기) · 진입 문턱 · ADR 하한 · 업종·섹터 상한(개별주 풀만).
 종목 수는 풀 설정(`pool_settings.TOP_N_HOLD`)으로 고정한다.
 (단기, 장기) 쌍을 작업 단위로 별도 프로세스에서 병렬로 돌린다 — 각 프로세스는 가격·판정일별
 후보를 한 번 읽어 그 쌍의 전 조합에 공유(run_backtest 의 context)하므로 조합당 0.5초 수준이고,
@@ -14,12 +14,13 @@ from typing import Any
 
 import pandas as pd
 
-from config import ADR_FLOOR_OPTIONS
+from config import ADR_FLOOR_OPTIONS, INDUSTRY_CAP_PCT_OPTIONS
 from utils.entry_vol_options import entry_vol_mult_options
 from utils.momentum_service import (
     LONG_MA_OPTIONS,
     SHORT_MA_OPTIONS,
     load_settings,
+    pool_has_industry_cap,
     pool_info,
     validate_settings,
 )
@@ -37,6 +38,8 @@ from utils.strategy_tuning import (
 )
 
 TUNING_AXES = ("short_ma_days", "long_ma_days", "entry_vol_mult", "adr_floor")
+# 업종·섹터 상한 축 — 개별주 풀에만 붙는다(ETF 풀은 분류가 없어 축이 없다).
+INDUSTRY_CAP_AXIS = "industry_cap_pct"
 
 
 def _checked_optional_ints(values: list[Any], options: tuple, label: str) -> list[Any]:
@@ -83,6 +86,7 @@ def _init_worker(bundle: dict[str, Any]) -> None:
 def _preload(pool: str) -> dict[str, Any]:
     """부모가 한 번 읽는 공유 데이터 — 워커 초기화 때 통째로 넘긴다."""
     from core.strategy.price_panel import build_price_panel
+    from utils.industry_map import cap_group_map
     from utils.momentum_service import (
         adr_market_of_pool,
         load_adr_series,
@@ -104,6 +108,8 @@ def _preload(pool: str) -> dict[str, Any]:
         "panel": build_price_panel(universe, load_price_frames(universe)),
         "name_by": {row["ticker"]: row["name"] for row in universe},
         "industry_by": {row["ticker"]: row.get("industry", "") for row in universe},
+        # 업종·섹터 상한의 분류 — 워커는 DB 를 안 건드리므로 부모가 읽어 넘긴다.
+        "group_by": cap_group_map(pool),
         "benchmark_close": load_benchmark_close(pool),
         "adr_market": adr_market,
         "adr_series": load_adr_series(adr_market) if adr_market else None,
@@ -112,7 +118,7 @@ def _preload(pool: str) -> dict[str, Any]:
 
 def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
     """(단기, 장기) 쌍 하나의 조합 — 별도 프로세스에서 돈다."""
-    months, base, short, long, entry_mults, adr_floors = task
+    months, base, short, long, entry_mults, adr_floors, industry_caps = task
     from core.strategy.momentum.signals import compute_signals
     from utils.momentum_backtest import run_backtest
     from utils.momentum_service import excluded_tickers
@@ -124,6 +130,7 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
         "universe": _PRELOAD["universe"],
         "name_by": _PRELOAD["name_by"],
         "industry_by": _PRELOAD["industry_by"],
+        "group_by": _PRELOAD["group_by"],
         "panel": _PRELOAD["panel"],
         # spawn 워커라 전역 설정에 기대면 안 된다 — 풀 값을 명시적으로 읽어 넘긴다.
         "signals": compute_signals(
@@ -136,7 +143,9 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
     }
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
-    for entry_vol_mult, adr_floor in ((m, f) for m in entry_mults for f in adr_floors):
+    for entry_vol_mult, adr_floor, industry_cap_pct in (
+        (m, f, c) for m in entry_mults for f in adr_floors for c in industry_caps
+    ):
         if tuning_cancelled():
             break
         combo = dict(
@@ -145,6 +154,7 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
             long_ma_days=long,
             entry_vol_mult=entry_vol_mult,
             adr_floor=adr_floor,
+            industry_cap_pct=industry_cap_pct,
         )
         try:
             result = run_backtest(months, combo, context)
@@ -162,6 +172,7 @@ def _run_ma_group(task: tuple) -> tuple[list[dict[str, Any]], list[str]]:
                     "long_ma_days": long,
                     "entry_vol_mult": entry_vol_mult,
                     "adr_floor": adr_floor,
+                    **({INDUSTRY_CAP_AXIS: industry_cap_pct} if industry_cap_pct is not None else {}),
                 },
                 returns,
                 {
@@ -212,13 +223,23 @@ def _stream_tuning(
         ranges.get("entry_vol_mult", []), entry_vol_mult_options(pool_info(base["pool"])["country"]), "진입 문턱"
     )
     longs = _checked(ranges.get("long_ma_days", []), LONG_MA_OPTIONS, "장기 이평")
+    # 업종·섹터 상한 — 개별주 풀은 축이 필수, ETF 풀은 보내면 안 된다(설정 검증과 같은 기준).
+    has_cap = pool_has_industry_cap(base["pool"])
+    if has_cap:
+        industry_caps: list[Any] = _checked(
+            ranges.get(INDUSTRY_CAP_AXIS, []), INDUSTRY_CAP_PCT_OPTIONS, "업종·섹터 상한"
+        )
+    elif ranges.get(INDUSTRY_CAP_AXIS):
+        raise ValueError("업종·섹터 상한은 개별주 풀에만 쓸 수 있습니다.")
+    else:
+        industry_caps = [None]
     # 단기=장기 허용(단일 이평선 전략과 동일) — 설정 검증(momentum_service)과 같은 기준.
     ma_pairs = [(short, long) for short in shorts for long in longs if short <= long]
     if not ma_pairs:
         raise ValueError("단기 이평이 장기 이평보다 작은 조합이 없습니다.")
 
-    tasks = [(months, base, short, long, entry_mults, adr_floors) for short, long in ma_pairs]
-    combos_per_group = len(entry_mults) * len(adr_floors)
+    tasks = [(months, base, short, long, entry_mults, adr_floors, industry_caps) for short, long in ma_pairs]
+    combos_per_group = len(entry_mults) * len(adr_floors) * len(industry_caps)
     total_combos = len(tasks) * combos_per_group
     rows: list[dict[str, Any]] = []
     skipped: list[str] = []
@@ -244,7 +265,7 @@ def _stream_tuning(
     if not rows:
         raise ValueError("돌릴 수 있는 조합이 없습니다. " + (skipped[0] if skipped else ""))
     yield {"type": "progress", "phase": "finalize", "done": total_combos, "total": total_combos}
-    payload = finalize(rows, list(TUNING_AXES))
+    payload = finalize(rows, [*TUNING_AXES, *([INDUSTRY_CAP_AXIS] if has_cap else [])])
     payload["months"] = int(months)
     payload["fixed"] = {}
     payload["skipped"] = list(dict.fromkeys(skipped))

@@ -65,7 +65,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | 컬렉션 / 문서 | 내용 |
 | --- | --- |
 | `fx_quote_cache` | `services/price_service.py`의 통화별 환율 공유 캐시. 서버·배치가 유효기간 내 Yahoo 조회 결과를 재사용 |
-| `pool_settings` | 종목풀 정의(국가·통화·벤치마크·풀 성격 stock/etf·보유 종목 수·이평 종류와 기간). 화면 `/pools-settings` |
+| `pool_settings` | 종목풀 정의(국가·통화·벤치마크·풀 성격 stock/etf·보유 종목 수·이평 종류와 기간)와 모멘텀 설정(`MOMENTUM_START_DATE`·`ADR_FLOOR`·`ENTRY_VOL_MULT`·`INDUSTRY_CAP_PCT` — 상한은 개별주 풀만). 화면 `/pools-settings` |
 | `account_settings` | 계좌 정의(운영/모의 구분 `env` 포함)·합성 배분 |
 | `stock_meta` | 종목 관리 원본(버킷·종목명). 삭제는 즉시 하드 딜리트 |
 | `stock_cache_meta` | 저빈도 메타(`meta_cache`)·ETF 구성종목(`holdings_cache`). 구성종목 갱신은 저장된 계산 캐시를 제거하며, 상세·비교 화면은 `services/stock_cache_service.py`의 원본 식별값으로 메모리 캐시도 검증한다 |

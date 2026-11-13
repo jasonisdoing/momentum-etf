@@ -31,6 +31,11 @@ export function poolHasMarketCap(pool: PoolIndustrySource | null | undefined): b
   return String(pool?.pool_kind ?? "").trim().toLowerCase() === "stock";
 }
 
+/** 모멘텀 분류 상한의 이름 — 미국 개별주는 섹터, 그 밖의 개별주는 업종으로 묶는다. */
+export function industryCapLabel(pool: PoolIndustrySource | null | undefined): string {
+  return poolHasUsStockSector(pool) ? "섹터 상한" : "업종 상한";
+}
+
 /** 미국 개별주만 Yahoo 섹터 분류를 별도 컬럼으로 표시한다. */
 export function poolHasUsStockSector(pool: PoolIndustrySource | null | undefined): boolean {
   return String(pool?.country_code ?? "").trim().toLowerCase() === "us"

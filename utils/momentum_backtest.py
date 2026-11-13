@@ -30,6 +30,7 @@ from core.strategy.price_panel import build_price_panel
 from core.strategy.scoring import drawdown_from_high_pct, is_new_listing, listing_months, rank_numbers
 from core.strategy.slot_backtest import run_slot_backtest
 from utils.effective_prices import apply_realtime_closes, previous_day_change_pct, prior_day_shown
+from utils.industry_map import cap_group_map
 from utils.logger import get_app_logger
 from utils.momentum_service import (
     adr_market_of_pool,
@@ -79,6 +80,8 @@ def load_context(settings: dict[str, Any]) -> dict[str, Any]:
         "excluded": excluded,
         "name_by": {row["ticker"]: row["name"] for row in universe},
         "industry_by": {row["ticker"]: row.get("industry", "") for row in universe},
+        # 업종(한국)·섹터(미국) 상한의 분류 — 화면 업종·섹터 칸과 같은 표시명.
+        "group_by": cap_group_map(pool),
         "panel": panel,
         "signals": momentum_signals.compute_signals(
             panel,
@@ -123,6 +126,8 @@ def run_backtest(
         name_by=context["name_by"],
         industry_by=context["industry_by"],
         exit_reason="이탈",
+        group_of=context["group_by"],
+        group_cap_pct=settings["industry_cap_pct"],
         **market,
     )
 
@@ -333,6 +338,8 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             name_by=name_by,
             industry_by=industry_by,
             exit_reason="이탈",
+            group_of=context["group_by"],
+            group_cap_pct=settings["industry_cap_pct"],
             provisional_last_bar=True,
             **market,
         )

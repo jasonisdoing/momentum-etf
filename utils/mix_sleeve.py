@@ -80,6 +80,8 @@ def settings_summary(strategy: str, settings: dict[str, Any]) -> list[dict[str, 
     """
     strategy = normalize_strategy(strategy)
 
+    from utils.momentum_service import pool_has_industry_cap
+
     def optional(value: Any, suffix: str = "", *, empty: str = "없음") -> str:
         return empty if value is None else f"{value:g}{suffix}" if isinstance(value, (int, float)) else str(value)
 
@@ -89,6 +91,12 @@ def settings_summary(strategy: str, settings: dict[str, Any]) -> list[dict[str, 
             {"label": "이평선", "value": f"{settings.get('short_ma_days')}/{settings.get('long_ma_days')}일"},
             {"label": "진입 문턱", "value": optional(settings.get("entry_vol_mult"), "×")},
             {"label": "ADR 하한", "value": optional(settings.get("adr_floor"))},
+            # 업종·섹터 상한 — 개별주 풀에만 있는 설정이다(ETF 풀은 항목 자체가 없다).
+            *(
+                [{"label": "업종·섹터 상한", "value": optional(settings["industry_cap_pct"], "%")}]
+                if pool_has_industry_cap(settings["pool"])
+                else []
+            ),
         ]
     if strategy == NEW_HIGH:
         return [

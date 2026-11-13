@@ -6,6 +6,7 @@
     동시 보유 상한 ``slots``, 균등 배분(정수 주수)
     자리가 차 있을 때는 순위만으로 보유 종목을 교체하지 않는다
     ADR 하한에 걸린 날은 **신규 진입만** 건너뛴다(보유 청산은 그대로 돈다)
+    분류 상한(`group_limit`)이 있으면 같은 분류가 그 수를 넘게 진입하지 못한다(빈 분류는 제외)
 
 기본적으로 교체하지 않는 이유: 2026-08-14 kor(24개월)·us(60개월) 백테스트에서 최저수익/손실만/최장보유
 교체 전부가 현행보다 나빴다(kor +1912% vs 교체 시 +142~779%, us +240% vs -76~+95%).
@@ -37,6 +38,13 @@ from utils.perf_metrics import max_drawdown_window
 from utils.trade_stats import OPEN_REASON, summarize_trades
 
 
+def group_limit_of(slots: int, cap_pct: int | None) -> int | None:
+    """분류 상한 슬롯 수 — 내림(슬롯 수 × %), 최소 1. 상한이 없거나 100% 면 None."""
+    if cap_pct is None or cap_pct >= 100:
+        return None
+    return max(1, slots * cap_pct // 100)
+
+
 def _entry_quantities(
     picks: list[str],
     prices: dict[str, float],
@@ -44,6 +52,9 @@ def _entry_quantities(
     slot_amount: float,
     cash: float,
     *,
+    group_of: dict[str, str],
+    group_limit: int | None,
+    group_counts: dict[str, int],
     pending_ok: bool = False,
 ) -> tuple[dict[str, int], list[str]]:
     """체결과 다음 진입 예상이 같은 슬롯·잔여 현금 제한을 사용한다.
@@ -52,17 +63,34 @@ def _entry_quantities(
     체결일) 그 종목을 **체결 예정**으로 돌려주고 자리도 차지시킨다 — 가격을 지어내 사지도,
     후순위 종목에 자리를 빼앗기지도 않는다. 아니면(확정 구간) 호출자가 미리 걸렀으므로
     그런 종목이 없다.
+
+    분류 상한 — ``group_counts`` 는 이미 자리를 차지한 분류별 종목 수다(보유·체결 예정 포함).
+    상한에 닿은 분류의 후보는 건너뛰고 다음 순위가 그 자리를 채운다. 빈 분류는 세지 않는다.
     """
     quantities: dict[str, int] = {}
     pending: list[str] = []
     reserved = 0.0
+    counts = dict(group_counts)
+
+    def group_full(ticker: str) -> bool:
+        group = group_of.get(ticker, "")
+        return bool(group_limit is not None and group and counts.get(group, 0) >= group_limit)
+
+    def take(ticker: str) -> None:
+        group = group_of.get(ticker, "")
+        if group:
+            counts[group] = counts.get(group, 0) + 1
+
     for ticker in picks:
         if len(quantities) + len(pending) >= free:
             break
+        if group_full(ticker):
+            continue
         price = prices.get(ticker)
         if price is None:
             if pending_ok:
                 pending.append(ticker)
+                take(ticker)
                 # 확정 주문의 몫을 후순위 시가 체결이 먼저 쓰지 않게 예약한다.
                 remaining = cash - sum(quantities[t] * prices[t] for t in quantities) - reserved
                 reserved += min(slot_amount, max(remaining, 0.0))
@@ -73,6 +101,7 @@ def _entry_quantities(
         shares = int(min(slot_amount, remaining) // price)
         if shares > 0:
             quantities[ticker] = shares
+            take(ticker)
     return quantities, pending
 
 
@@ -112,6 +141,8 @@ def run_slot_backtest(
     adr_at: Callable[[pd.Timestamp], Any],
     benchmark_growth: Callable[[pd.Index], pd.Series],
     benchmark_name: str,
+    group_of: dict[str, str],
+    group_cap_pct: int | None,
     start_date: str | None = None,
     provisional_last_bar: bool = False,
 ) -> dict[str, Any]:
@@ -174,6 +205,18 @@ def run_slot_backtest(
     # 판정에는 쓰지 않는다. 없는 날을 0 으로 치면 그 종목이 사라진 것처럼 계산돼 곡선이
     # 한 번에 무너진다(us_etf 가 마지막 하루로 -100% 가 됐다).
     valuation_close = close_df.ffill()
+
+    # 분류 상한 — 같은 분류가 차지할 수 있는 슬롯 수(None = 없음). 분류는 호출자가 정한다
+    # (모멘텀: 한국 업종·미국 섹터, 신고가: 상한 없음).
+    group_limit = group_limit_of(slots, group_cap_pct)
+
+    def group_counts_of(tickers: Any) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for ticker in tickers:
+            group = group_of.get(ticker, "")
+            if group:
+                counts[group] = counts.get(group, 0) + 1
+        return counts
 
     def priority_of(ticker: str, day: pd.Timestamp) -> float:
         """자리가 모자랄 때의 줄 세우기 값 — 모르는 종목은 맨 뒤."""
@@ -283,7 +326,16 @@ def run_slot_backtest(
             # 잠정 체결일의 현금은 실제 현금뿐이다 — 체결 예정 매도 대금은 아직 안 들어왔고,
             # 모르는 체결가로 현금을 지어내지 않는다(종가 확정 실행이 최종 수량을 정한다).
             quantities, pending_today = _entry_quantities(
-                picks, fill_price_by_ticker, free, slot_amount, cash, pending_ok=provisional_fill
+                picks,
+                fill_price_by_ticker,
+                free,
+                slot_amount,
+                cash,
+                group_of=group_of,
+                group_limit=group_limit,
+                # 체결 예정 매도는 이미 판 것으로 센다(자리 계산과 같은 기준).
+                group_counts=group_counts_of(t for t in holdings if t not in pending_exits),
+                pending_ok=provisional_fill,
             )
             pending_entry_tickers.extend(pending_today)
             for ticker in quantities:
@@ -387,7 +439,18 @@ def run_slot_backtest(
         available += proceeds * (1 - sell_slippage / 100)
         fill_value = sleeve_value - (pending_proceeds + proceeds) * sell_slippage / 100 - pending_buy_cost
         prices = {t: float(close_df.at[last_day, t]) * (1 + buy_slippage / 100) for t in picks}
-        quantities, _ = _entry_quantities(picks, prices, free, fill_value / slots, available)
+        quantities, _ = _entry_quantities(
+            picks,
+            prices,
+            free,
+            fill_value / slots,
+            available,
+            group_of=group_of,
+            group_limit=group_limit,
+            group_counts=group_counts_of(
+                [t for t in holdings if t not in planned_exits and t not in pending_exits] + pending_entry_tickers
+            ),
+        )
         planned_entries = list(quantities)
         planned_entry_weights = {
             t: quantity * float(close_df.at[last_day, t]) / sleeve_value * 100 for t, quantity in quantities.items()

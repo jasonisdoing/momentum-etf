@@ -30,7 +30,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import ADR_FLOOR_OPTIONS
+from config import ADR_FLOOR_OPTIONS, INDUSTRY_CAP_PCT_OPTIONS
 from core.strategy.scoring import (
     compute_ma_disparity,
     rank_score,
@@ -64,6 +64,13 @@ def available_pools() -> list[str]:
     from utils.pool_strategy_use import pools_using
 
     return pools_using("momentum")
+
+
+def pool_has_industry_cap(pool: str) -> bool:
+    """업종·섹터 상한을 쓰는 풀인지 — 개별주 풀만(ETF 는 분류를 두지 않는다, 화면 `poolHasIndustry` 와 같은 기준)."""
+    from utils.settings_loader import get_ticker_type_settings
+
+    return str((get_ticker_type_settings(pool) or {}).get("pool_kind") or "").strip().lower() == "stock"
 
 
 def pool_info(pool: str) -> dict[str, str]:
@@ -135,6 +142,16 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         allowed = ", ".join("없음" if v is None else f"{v:g}" for v in mult_options)
         raise ValueError(f"'entry_vol_mult' 는 {allowed} 중 하나여야 합니다 (받은 값: {raw_mult}).")
 
+    # 업종(한국)·섹터(미국) 상한(%) — 개별주 풀은 필수(100 = 상한 없음), ETF 풀은 값이 없어야 한다.
+    raw_cap = settings.get("industry_cap_pct")
+    industry_cap_pct = None if raw_cap in (None, "", "none") else int(raw_cap)
+    if pool_has_industry_cap(pool):
+        if industry_cap_pct not in INDUSTRY_CAP_PCT_OPTIONS:
+            allowed = ", ".join(str(v) for v in INDUSTRY_CAP_PCT_OPTIONS)
+            raise ValueError(f"'industry_cap_pct' 는 {allowed} 중 하나여야 합니다 (받은 값: {raw_cap}).")
+    elif industry_cap_pct is not None:
+        raise ValueError("업종·섹터 상한은 개별주 풀에만 쓸 수 있습니다.")
+
     return {
         "pool": pool,
         "start_date": validate_start_date(settings.get("start_date")),
@@ -144,6 +161,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "long_ma_days": long_ma_days,
         "adr_floor": adr_floor,
         "entry_vol_mult": entry_vol_mult,
+        "industry_cap_pct": industry_cap_pct,
     }
 
 
@@ -168,6 +186,7 @@ _POOL_KEY_BY_SETTING: dict[str, str] = {
     "long_ma_days": "LONG_MA_DAYS",
     "adr_floor": "ADR_FLOOR",
     "entry_vol_mult": "ENTRY_VOL_MULT",
+    "industry_cap_pct": "INDUSTRY_CAP_PCT",
 }
 
 
@@ -177,7 +196,7 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
     for setting_key, pool_key in _POOL_KEY_BY_SETTING.items():
         if pool_key not in config:
             # None 을 값으로 갖는 항목(ADR 하한·진입 문턱 등)은 키 자체는 있어야 한다.
-            if setting_key in ("adr_floor", "start_date", "entry_vol_mult"):
+            if setting_key in ("adr_floor", "start_date", "entry_vol_mult", "industry_cap_pct"):
                 continue
             return None
         result[setting_key] = config[pool_key]
@@ -185,6 +204,8 @@ def _settings_from_pool_doc(config: dict[str, Any]) -> dict[str, Any] | None:
     result.setdefault("start_date", None)
     result.setdefault("adr_floor", default_adr_floor())
     result.setdefault("entry_vol_mult", None)
+    # 상한 미설정 — 개별주 풀이면 검증이 '저장 필요' 에러를 낸다(ETF 풀은 None 이 정상값).
+    result.setdefault("industry_cap_pct", None)
     return result
 
 
@@ -247,13 +268,19 @@ def load_settings(pool: str | None = None) -> dict[str, Any]:
 
 
 def _option_fields(pool: str) -> tuple[tuple[str, str, tuple], ...]:
-    """화면 로드 때 선택지 밖 저장값을 보정할 항목 — (키, 라벨, 선택지). 진입 문턱은 풀 국가의 목록이다."""
-    return (
+    """화면 로드 때 선택지 밖 저장값을 보정할 항목 — (키, 라벨, 선택지). 진입 문턱은 풀 국가의 목록이다.
+
+    업종·섹터 상한은 개별주 풀에만 있다(ETF 풀은 값이 None 이 정상이라 보정 대상이 아니다).
+    """
+    fields: tuple[tuple[str, str, tuple], ...] = (
         ("short_ma_days", "단기 이평", SHORT_MA_OPTIONS),
         ("adr_floor", "ADR 하한", ADR_FLOOR_OPTIONS),
         ("long_ma_days", "장기 이평", LONG_MA_OPTIONS),
         ("entry_vol_mult", "진입 문턱", entry_vol_mult_options(pool_info(pool)["country"])),
     )
+    if pool_has_industry_cap(pool):
+        fields += (("industry_cap_pct", "업종·섹터 상한", INDUSTRY_CAP_PCT_OPTIONS),)
+    return fields
 
 
 def load_settings_for_view(pool: str | None = None) -> tuple[dict[str, Any], list[str]]:

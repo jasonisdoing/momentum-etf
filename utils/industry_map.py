@@ -156,6 +156,18 @@ def industry_map_for_country(country_code: str) -> dict[str, str]:
     return result
 
 
+def cap_group_map(pool: str) -> dict[str, str]:
+    """모멘텀 분류 상한의 분류 — 미국 개별주는 섹터 칸, 그 밖은 업종 칸과 같은 표시명. 빈 분류는 빠진다.
+
+    화면에 보이는 섹터·업종 값으로 묶어야 사용자가 표에서 센 것과 엔진이 센 것이 같다.
+    """
+    from utils.settings_loader import get_ticker_type_settings
+
+    if str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower() == "us":
+        return us_classification_maps()[1]
+    return industry_map(pool)
+
+
 def us_industry_map() -> dict[str, str]:
     """미국 티커 → 설정에 따른 섹터·업종 표시명. 풀과 무관하게 같다."""
     industry_by, _ = us_classification_maps()

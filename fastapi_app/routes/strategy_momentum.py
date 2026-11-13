@@ -98,12 +98,14 @@ def _ma_rule_payload(settings: dict) -> dict:
 
 def _constraints_payload() -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트 복사본 제거)."""
-    from config import ADR_FLOOR_OPTIONS
+    from config import ADR_FLOOR_OPTIONS, INDUSTRY_CAP_PCT_OPTIONS
     from utils.entry_vol_options import entry_vol_mult_options_by_country
 
     return {
         # ADR 하한 — 그날 시장 ADR 이 미만이면 신규 진입만 건너뛴다. None = 게이트 없음(기본).
         "adr_floor_options": list(ADR_FLOOR_OPTIONS),
+        # 업종(한국)·섹터(미국) 상한(%) — 개별주 풀 전용. 100 = 상한 없음.
+        "industry_cap_pct_options": list(INDUSTRY_CAP_PCT_OPTIONS),
         # 진입 문턱 — 이격 ≥ 배수 × 20일 변동성일 때만 진입 자격. None = 없음(기본). 풀 국가별 목록.
         "entry_vol_mult_options_by_country": entry_vol_mult_options_by_country(),
     }
@@ -218,7 +220,7 @@ def post_strategy_momentum_tuning(
     """튜닝 — 설정 항목 범위의 모든 조합을 백테스트한다 (저장된 설정 기준).
 
     body: ``{"months": 12, "ranges": {
-    "short_ma_days": [...], "long_ma_days": [...], "adr_floor": [...]}}``
+    "short_ma_days": [...], "long_ma_days": [...], "adr_floor": [...], "industry_cap_pct": [...](개별주 풀만)}}``
 
     응답은 **SSE 스트림**이다 — 준비·조합 완료·집계 진행 이벤트와 마지막 결과 이벤트.
     다 끝난 뒤 한 번에 응답하면 10분 넘게 소식이 없어 화면이 죽은 것처럼 보이고,

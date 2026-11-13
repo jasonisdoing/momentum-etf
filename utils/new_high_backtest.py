@@ -107,6 +107,9 @@ def run_backtest(
         name_by=context["name_by"],
         industry_by=context["industry_by"],
         exit_reason="이탈",
+        # 신고가는 분류 상한을 쓰지 않는다.
+        group_of={},
+        group_cap_pct=None,
         **market,
     )
 
@@ -433,6 +436,8 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             name_by=name_by,
             industry_by=industry_by,
             exit_reason="이탈",
+            group_of={},
+            group_cap_pct=None,
             provisional_last_bar=True,
             **market,
         )
