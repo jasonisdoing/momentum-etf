@@ -31,7 +31,7 @@ def _mix_account() -> str:
     검증 대상은 '합성 = 슬리브 백테스트' 관계지 특정 계좌가 아니다. 계좌 설정 토글에
     테스트가 좌우되면 안 된다. 켜진 계좌가 없으면 건너뛴다.
     """
-    from utils.strategy_mix_service import _resolve_mix_account
+    from utils.strategy_mix_service import resolve_mix_account
 
     candidates = [MIX_ACCOUNT]
     try:
@@ -42,7 +42,7 @@ def _mix_account() -> str:
         pass
     for account_id in candidates:
         try:
-            _resolve_mix_account(account_id)
+            resolve_mix_account(account_id)
         except Exception:  # noqa: BLE001 - 조합 미완성 계좌는 다음 후보로
             continue
         return account_id
@@ -185,11 +185,12 @@ class MixScreenMatchesSleeveBacktests(unittest.TestCase):
 
     def test_target_tickers_come_from_sleeve_backtests(self) -> None:
         _load_env()
-        from utils.strategy_mix_service import _resolve_mix_account, mix_positions
+        from utils.strategy_mix_positions import mix_positions
+        from utils.strategy_mix_service import resolve_mix_account
 
         try:
             account_id = _mix_account()
-            ctx = _resolve_mix_account(account_id)
+            ctx = resolve_mix_account(account_id)
             screen = mix_positions(account_id)
             expected = _expected_mix_targets(ctx)
         except Exception as error:  # noqa: BLE001
@@ -220,7 +221,8 @@ class IntradayScreenMixConsistencyTest(unittest.TestCase):
         _load_env()
         import utils.momentum_backtest as momentum_backtest
         import utils.new_high_backtest as new_high_backtest
-        from utils.strategy_mix_service import _resolve_mix_account, mix_positions
+        from utils.strategy_mix_positions import mix_positions
+        from utils.strategy_mix_service import resolve_mix_account
 
         def fake_quotes(pool: str, tickers: list[str]) -> dict[str, Any]:
             # 모의 세션은 내일로 고정해 오늘 시작한 전략도 잠정 실행에 포함한다.
@@ -265,7 +267,7 @@ class IntradayScreenMixConsistencyTest(unittest.TestCase):
                 from utils.mix_sleeve import PORTFOLIO, current_state
 
                 account_id = _mix_account()
-                ctx = _resolve_mix_account(account_id)
+                ctx = resolve_mix_account(account_id)
                 mix = mix_positions(account_id)
                 expected = _expected_mix_targets(ctx)
                 slot_positions = {spec.key: current_state(spec) for spec in ctx["slots"] if spec.strategy != PORTFOLIO}

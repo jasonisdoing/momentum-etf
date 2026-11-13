@@ -1,7 +1,7 @@
 /** 고정 자산(IS, International Shares) 표기 — 화면 공용.
  *
  *  호주 계좌에서 수동으로 관리하는 항목이라 실제 상장 종목이 아니다. 사고팔 수 없고
- *  평가액만 계좌에 반영된다(백엔드 `utils/strategy_mix_service.FIXED_ASSET_TICKER`).
+ *  평가액만 계좌에 반영된다(백엔드 `utils/strategy_mix_positions.FIXED_ASSET_TICKER`).
  *
  *  화면들(`/assets` · `/strategy-mix`)이 각자 다른 티커·이름으로
  *  보여주던 것을 여기 하나로 모았다 — 같은 행이 화면마다 `ASX:VGS` · `ASX:IS` · `IS` 로

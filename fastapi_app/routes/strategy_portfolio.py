@@ -30,7 +30,7 @@ def _constraints() -> dict:
 
 
 def _view(settings: dict, unknown: list[str] | None = None) -> dict:
-    from utils.strategy_mix_service import sleeve_actual_weights
+    from utils.strategy_mix_positions import sleeve_actual_weights
 
     universe = universe_metrics(settings["pool"])
     actual, actual_error = None, None
@@ -105,7 +105,7 @@ def post_strategy_portfolio_charts(
     """보유 종목 일봉 + 이평선. body: ``{"pool": "...", "tickers": [...]}``.
 
     포트폴리오에는 판정선이 없어 **풀 설정 이평선**(추세 배지 기준)을 참고로 그린다 —
-    합성 화면의 포트폴리오 슬리브와 같은 규칙이다(`strategy_mix_service.holding_charts_for_account`).
+    합성 화면의 포트폴리오 슬리브와 같은 규칙이다(`strategy_mix_positions.holding_charts_for_account`).
     """
     from utils.holding_chart_service import holding_charts
     from utils.settings_loader import get_ticker_type_settings

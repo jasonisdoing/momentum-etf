@@ -25,7 +25,7 @@ def get_strategy_mix_positions(
     _: None = Depends(require_internal_token),
 ) -> dict:
     """오늘 기준 합성 운영 상태 — 보유 목록(목표 비중)·현금 비중·오늘의 액션."""
-    from utils.strategy_mix_service import mix_positions
+    from utils.strategy_mix_positions import mix_positions
 
     return mix_positions(account_id)
 
@@ -40,7 +40,7 @@ def post_strategy_mix_charts(
     _: None = Depends(require_internal_token),
 ) -> dict:
     """보유 종목 일봉 + 슬리브별 기준 이평선. body: ``{"account_id": "...", "tickers": [...]}``."""
-    from utils.strategy_mix_service import holding_charts_for_account
+    from utils.strategy_mix_positions import holding_charts_for_account
 
     account_id = payload.get("account_id") if isinstance(payload, dict) else None
     tickers = payload.get("tickers") if isinstance(payload, dict) else None

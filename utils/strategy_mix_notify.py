@@ -153,7 +153,7 @@ def _watch_targets(country: str | None = None) -> list[dict[str, Any]]:
 def notify_all(country: str | None = None) -> dict[str, Any]:
     """감시 계좌 순회 — 새 지시·수량 증가, 또는 보낸 지시의 체결 확인이 있을 때만 슬랙 1건 발송."""
     from utils.notification import send_slack_message_v2
-    from utils.strategy_mix_service import mix_positions
+    from utils.strategy_mix_positions import mix_positions
 
     results = []
     sent = 0
@@ -204,7 +204,7 @@ def send_test(account_id: str) -> dict[str, Any]:
     from utils.account_settings_store import mix_sleeves_of
     from utils.notification import send_slack_message_v2
     from utils.settings_loader import get_account_settings
-    from utils.strategy_mix_service import mix_positions
+    from utils.strategy_mix_positions import mix_positions
 
     settings = get_account_settings(account_id)
     sleeves = mix_sleeves_of(settings.get("settings") or settings)
