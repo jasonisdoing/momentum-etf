@@ -541,17 +541,19 @@ def _paired_trade_rounds(trades: list[Trade], orders: list[dict[str, Any]]) -> d
     }
 
 
-#: 오늘 리셋된 전략에서 지난 사이클 체결을 함께 보여 주는 범위 — 오늘을 포함한 달력 일수(공휴일이 없으면 5거래일).
+#: 오늘 다 판 전략에서 지난 사이클 체결을 함께 보여 주는 범위 — 오늘을 포함한 달력 일수(공휴일이 없으면 5거래일).
 EMPTIED_HISTORY_DAYS = 7
 
 
-def _trade_cycles(history: list[Trade], quantity_now: int) -> tuple[int, list[str]]:
-    """체결 목록의 사이클 — (지금 사이클의 첫 체결 위치, 보유가 모두 빈 날짜들).
+def _trade_cycles(history: list[Trade], quantity_now: int) -> tuple[int | None, list[str]]:
+    """체결 목록의 사이클 — (마지막 사이클의 1호 매수 위치, 보유가 모두 빈 날짜들).
 
-    사이클은 보유 0에서 산 1호부터 보유가 다시 0이 될 때까지다.
+    사이클은 보유 0에서 산 1호부터 보유가 다시 0이 될 때까지다. 마지막 사이클이 체결 목록 이전부터 이어졌으면
+    1호 매수가 목록에 없어 None 이다.
     """
     quantity = quantity_now - sum(trade.shares if trade.buy else -trade.shares for trade in history)
-    start, ended = 0, []
+    start: int | None = 0 if quantity == 0 else None
+    ended: list[str] = []
     for index, trade in enumerate(history):
         if trade.buy and quantity == 0:
             start = index
@@ -564,36 +566,47 @@ def _trade_cycles(history: list[Trade], quantity_now: int) -> tuple[int, list[st
 def _attach_trade_history(
     view: dict[str, Any], ledger: Ledger, cached_days: dict[date, list[dict[str, Any]]], orders: list[dict[str, Any]]
 ) -> None:
-    """보유 중인 전략의 체결을 사다리 위치별·날짜별로 붙인다.
+    """체결을 사다리 위치별·날짜별로 붙인다.
 
-    보여 주는 범위: 지금 사이클(1호 매수부터, 최대 30일). 오늘 다 팔고 1호를 다시 샀으면(오늘 리셋) 오늘을 포함한
-    달력 7일(`EMPTIED_HISTORY_DAYS`)을 보여 준다.
-    ``trades_by_position`` = {위치: {날짜: ["buy", "sell", …]}}. 위치 기준(`position_prices`)은 지금 1호 체결가다.
-    지난 사이클의 체결은 회차가 아니라 체결가에 가장 가까운 칸에 놓인다. 같은 날 체결된 매도·재매수 주문 쌍은 지금
-    사이클 안에서만 해당 회차의 칸에 함께 표시한다. ``cycle_end_days`` 는 보여 주는 범위 안에서 보유가 모두 빈 날짜다.
-    보유가 없으면(1호 매수 구간에 바로 다시 사므로 잠깐뿐이다) 기준이 없어 비운다.
+    보여 주는 범위: 보유 중이면 지금 사이클(1호 매수부터, 최대 30일). 오늘 다 팔았으면(다시 1호를 샀든 아직이든)
+    오늘을 포함한 달력 7일(`EMPTIED_HISTORY_DAYS`)을 보여 주고, 그 안에서 보유가 모두 빈 날짜(``cycle_end_days``)에
+    경계선을 긋는다. ``trades_by_position`` = {위치: {날짜: ["buy", "sell", …]}}. 위치 기준(`position_prices`)은 지금
+    1호 체결가, 오늘 다 판 뒤 아직 안 샀으면 방금 끝난 사이클의 1호 체결가다. 지난 사이클의 체결은 회차가 아니라
+    체결가에 가장 가까운 칸에 놓인다. 같은 날 체결된 매도·재매수 주문 쌍은 지금 사이클 안에서만 해당 회차의 칸에
+    함께 표시한다. 그 밖에 보유가 없으면 기준이 없어 비운다.
     """
     trades: dict[int, dict[str, list[str]]] = {}
     view["trades_by_position"] = trades
     view["cycle_end_days"] = []
+    view["position_prices"] = {}
     first = next((row for row in view["rounds"] if row["round"] == 1 and row["held"]), None)
-    if first is None:
-        view["position_prices"] = {}
-        return
     history = recent_trades(ledger, view["ticker"], cached_days)
     cycle_start, cycle_end_days = _trade_cycles(history, ledger.quantity)
-    # 범위 시작 — 지금 사이클 시작. 오늘 다 팔고 1호를 다시 샀으면(오늘 리셋) 오늘 포함 7일 전부터.
-    # 경계선도 오늘 리셋됐을 때만 긋는다 — 아니면 앞 사이클을 판 체결이 표에 없다.
-    shown_from = cycle_start
-    if cycle_end_days and cycle_end_days[-1] == ledger.market_date:
+    emptied_today = bool(cycle_end_days) and cycle_end_days[-1] == ledger.market_date
+    if first is not None:
+        base_price = first["fill_price"]
+    elif emptied_today and cycle_start is not None:
+        # 오늘 다 판 뒤 1호 매수 구간 전 — 방금 끝난 사이클의 1호 체결가를 기준으로 쓴다.
+        base_price = history[cycle_start].price
+    else:
+        return
+    # 지금 사이클 시작 — 보유가 없으면 없고(목록 끝), 목록 이전부터 이어졌으면 목록 처음이다.
+    if first is None:
+        current_start = len(history)
+    else:
+        current_start = cycle_start if cycle_start is not None else 0
+    # 범위 시작 — 지금 사이클 시작. 오늘 다 팔았으면 오늘 포함 7일 전부터이고, 경계선도 그때만 긋는다
+    # (아니면 앞 사이클을 판 체결이 표에 없다).
+    shown_from = current_start
+    if emptied_today:
         since = (ledger.as_of - timedelta(days=EMPTIED_HISTORY_DAYS - 1)).isoformat()
         shown_from = min(shown_from, next(index for index, trade in enumerate(history) if trade.day >= since))
         view["cycle_end_days"] = [day for day in cycle_end_days if day >= since]
-    base_price = first["fill_price"]
     trigger_pct = float(view["config"]["trigger_pct"])
     # 회차 쌍 연결은 지금 사이클에만 쓴다 — 지난 사이클의 회차 번호는 지금 회차 위치와 다르다.
     paired_rounds = {
-        cycle_start + index: round_no for index, round_no in _paired_trade_rounds(history[cycle_start:], orders).items()
+        current_start + index: round_no
+        for index, round_no in _paired_trade_rounds(history[current_start:], orders).items()
     }
     round_positions = {row["round"]: row["position"] for row in view["rounds"]}
     for index in range(shown_from, len(history)):
