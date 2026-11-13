@@ -96,8 +96,8 @@ def build_action_groups(
                 continue
             quantity = target["quantities"].get(ticker, 0)
             held = previous.get(ticker, 0)
-            # 사고팔기 전략 종목은 합성이 팔지 않는다(화면·슬랙 액션 모두 제외).
-            if source.get("is_trade_strategy") and quantity < held:
+            # 사고팔기 전략 종목은 합성이 사고팔지 않는다(화면·슬랙 액션 모두 제외).
+            if source.get("is_trade_strategy"):
                 continue
             if baseline_day is not None and day < baseline_day and quantity != held:
                 event_name = "entries" if quantity > held else "sells"

@@ -687,7 +687,7 @@ def _attach_account_targets(
 
 
 def _block_trade_strategy_sells(holdings: list[dict[str, Any]], account_id: str) -> None:
-    """사고팔기 전략에 등록된 종목은 합성이 팔지 않는다 — 행에 표시하고 표의 매도 수량을 0 으로 둔다.
+    """사고팔기 전략에 등록된 종목은 합성이 사고팔지 않는다 — 행에 표시하고 표의 매매 수량을 0 으로 둔다.
 
     사고팔기가 그 종목의 회차를 계좌 체결로 세므로, 합성이 팔면 사고팔기 원장이 깨진다.
     액션(화면·슬랙)에서의 제외는 `build_action_groups` 가 이 표시를 보고 한다.
@@ -700,7 +700,7 @@ def _block_trade_strategy_sells(holdings: list[dict[str, Any]], account_id: str)
             continue
         row["is_trade_strategy"] = True
         for key in ("trade_quantity", "forecast_trade_quantity"):
-            if (row.get(key) or 0) < 0:
+            if row.get(key):
                 row[key] = 0
 
 
