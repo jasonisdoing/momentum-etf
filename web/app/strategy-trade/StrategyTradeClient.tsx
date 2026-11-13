@@ -245,13 +245,15 @@ function signColor(value: number | null | undefined): string {
   return value > 0 ? "var(--up-color, #d64545)" : "var(--down-color, #2f6fd0)";
 }
 
-function StatusBadge({ color, children }: { color: string; children: React.ReactNode }) {
+/** 상태 뱃지 — `compact` 는 설정 표의 상태 요약처럼 좁은 그리드 칸에 넣을 때 쓴다. */
+function StatusBadge({ color, compact, children }: { color: string; compact?: boolean; children: React.ReactNode }) {
   return (
     <span
       style={{
-        padding: "1px 5px",
-        borderRadius: 4,
-        fontSize: "var(--fs-sm)",
+        padding: compact ? "0 3px" : "1px 5px",
+        borderRadius: compact ? 3 : 4,
+        fontSize: compact ? 11 : "var(--fs-sm)",
+        lineHeight: compact ? 1.4 : undefined,
         fontWeight: 700,
         color,
         border: `1px solid ${color}`,
@@ -271,14 +273,27 @@ function hasRoundStatus(row: RoundRow): boolean {
 
 /** 상태 칸 — 지정가에 닿았으면 도달(빨강), 슬랙 신호·주문이 나갔으면 방향을 붙여 매도슬랙·매수주문처럼(녹색).
  *  슬랙 뱃지는 슬랙 메시지 기록이 있으면 눌러서 회수할 수 있다(주문이 있으면 서버가 막는다). */
-function RoundStatus({ row, onWithdrawSignal }: { row: RoundRow; onWithdrawSignal: (signal: SlackSignal, label: string) => void }) {
+function RoundStatus({
+  row,
+  compact,
+  onWithdrawSignal,
+}: {
+  row: RoundRow;
+  compact: boolean;
+  onWithdrawSignal: (signal: SlackSignal, label: string) => void;
+}) {
   const currency = useTradeCurrency();
   return (
     <span style={{ display: "inline-flex", gap: 4 }}>
-      {row.buy_reached || row.sell_reached ? <StatusBadge color="var(--up-color, #d64545)">도달</StatusBadge> : null}
+      {/* 좁은 칸(compact)은 회차 번호를 도달 뱃지에 합쳐 `2호도달`로, 도달 전이면 번호만 글자로 앞에 둔다. */}
+      {row.buy_reached || row.sell_reached ? (
+        <StatusBadge color="var(--up-color, #d64545)" compact={compact}>{compact ? `${row.round}호도달` : "도달"}</StatusBadge>
+      ) : compact ? (
+        <span>{row.round}호</span>
+      ) : null}
       {row.slack_signals.map((signal) => {
         const label = `${SIDE_WORDS[signal.side]}슬랙`;
-        const badge = <StatusBadge color="var(--tblr-green, #2fb344)">{label}</StatusBadge>;
+        const badge = <StatusBadge color="var(--tblr-green, #2fb344)" compact={compact}>{label}</StatusBadge>;
         return signal.has_ts ? (
           <button
             key={`slack-${signal.side}`}
@@ -294,13 +309,13 @@ function RoundStatus({ row, onWithdrawSignal }: { row: RoundRow; onWithdrawSigna
         );
       })}
       {row.order_sides.map((side) => (
-        <StatusBadge key={`order-${side}`} color="var(--tblr-green, #2fb344)">
+        <StatusBadge key={`order-${side}`} color="var(--tblr-green, #2fb344)" compact={compact}>
           {SIDE_WORDS[side]}주문
         </StatusBadge>
       ))}
       {row.manual_orders.map((order, index) => (
         <span key={`manual-${index}`} title={`${formatCurrencyPrice(order.price, currency)} · ${order.quantity.toLocaleString()}주`}>
-          <StatusBadge color="var(--tblr-green, #2fb344)">수동{SIDE_WORDS[order.side]}주문</StatusBadge>
+          <StatusBadge color="var(--tblr-green, #2fb344)" compact={compact}>수동{SIDE_WORDS[order.side]}주문</StatusBadge>
         </span>
       ))}
     </span>
@@ -652,17 +667,14 @@ function AccountSettingsCard({
       colId: "roundStatus",
       headerName: "상태",
       headerTooltip: "아래 회차 표의 상태 — 상태가 있는 회차만 회차 번호와 함께 보인다",
-      // 도달·슬랙·주문 뱃지가 한 회차에 같이 붙는 경우까지 들어가는 폭 — 넘치면 옆 칸을 덮지 않고 잘라낸다.
-      width: 240,
+      // 작은 뱃지로 도달·슬랙·주문이 한 회차에 같이 붙어도 들어가는 폭 — 넘치면 옆 칸을 덮지 않고 잘라낸다.
+      width: 170,
       sortable: false,
       cellStyle: { overflow: "hidden" },
       cellRenderer: ({ data }: { data?: TradeListRow }) => (
-        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap" }}>
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap", fontSize: 11 }}>
           {(data?.statusRounds ?? []).map((row) => (
-            <span key={row.round} style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
-              {row.round}호
-              <RoundStatus row={row} onWithdrawSignal={onWithdrawSignal} />
-            </span>
+            <RoundStatus key={row.round} row={row} compact onWithdrawSignal={onWithdrawSignal} />
           ))}
         </span>
       ),
@@ -1164,7 +1176,7 @@ function StrategySection({
                   ) : null}
                 </td>
                 <td style={{ ...tdStyle, textAlign: "left" }}>
-                  <RoundStatus row={row} onWithdrawSignal={onWithdrawSignal} />
+                  <RoundStatus row={row} compact={false} onWithdrawSignal={onWithdrawSignal} />
                 </td>
                 <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatPrice(view.position_prices[String(position)], currency)}</td>
                 <td style={tdStyle}>
