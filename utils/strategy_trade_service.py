@@ -1102,6 +1102,8 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
     pools = _eligible_pool_kinds((country,)) if selected is not None else {}
     options = _ticker_options(pools)
     quotes = _config_quotes(mine, country)
+    from utils.stock_memo_store import get_stock_memos
+
     return {
         "account_options": [
             {
@@ -1137,4 +1139,6 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
             for sid, entry in configs
         ],
         "strategies": _build_views(mine, fresh=False, include_trade_history=True),
+        # 종목 메모(티커 → 메모) — 저장된 전략과 새로 고를 수 있는 종목 모두. 메모가 없는 종목은 빠진다.
+        "memos": get_stock_memos([*options, *(entry["ticker"] for entry in mine.values())]),
     }

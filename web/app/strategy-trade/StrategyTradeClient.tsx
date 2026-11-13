@@ -3,7 +3,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ColDef, RowDragEndEvent } from "ag-grid-community";
 
-import { gridRowDragColumn, gridSelectionColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
+import { gridRowDragColumn, gridSelectionColumn, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
 import type { HoldingsGroup } from "@/lib/holdings-store";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 import { formatCurrencyPrice, formatPrice } from "@/lib/price-format";
@@ -21,6 +21,7 @@ import { HoldingsGroupButton, HoldingsGroupDialog, HoldingsGroupName, type Holdi
 import { AppModal } from "../components/AppModal";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
+import { useStockMemoSave } from "../components/useStockMemoSave";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 
 type StrategyConfig = {
@@ -185,6 +186,8 @@ type View = {
   /** 저장된 전략 설정 — 이 계좌의 전략 전부. */
   configs: StrategyConfigRow[];
   strategies: Array<StrategyView | FailedStrategy>;
+  /** 종목 메모(티커 → 메모) — 메모가 없는 종목은 빠진다. */
+  memos: Record<string, string>;
 };
 
 // 편집 파라미터는 매매 간격(trigger_pct) 하나 — 백엔드 EDITABLE_PCT_KEYS 와 동일.
@@ -394,7 +397,7 @@ function comparableDrafts(rows: DraftRow[]) {
   ]);
 }
 
-type TradeListRow = DraftRow & { held: boolean; heldRounds: string; roundQuantity?: number | null } & Partial<HoldingsRow>;
+type TradeListRow = DraftRow & { held: boolean; heldRounds: string; roundQuantity?: number | null; is_label?: boolean } & Partial<HoldingsRow>;
 const tradeGridTheme = createAppGridTheme();
 const { weight: tradeWeightColumn, dailyChange, currentPrice, quantity, returnPct, pnl, valuation } = holdingMetricColumns<TradeListRow>(true);
 const TOTAL_ROW_KEY = "__total__";
@@ -430,7 +433,7 @@ function displayWeights(values: number[], total: number): number[] {
 }
 
 function tradeListLabel(key: string, name: string): TradeListRow {
-  return { key, ticker: "", name, strategy_id: null, pct: "", amount: "", rounds: "", held: false, heldRounds: "" };
+  return { key, ticker: "", name, strategy_id: null, pct: "", amount: "", rounds: "", held: false, heldRounds: "", is_label: true };
 }
 
 const tradeSettingColumns = [
@@ -466,6 +469,10 @@ function AccountSettingsCard({
   const [slackTesting, setSlackTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [accountAssets, setAccountAssets] = useState<{ summary: AccountSummary; holdings: Map<string, HoldingsRow> } | null>(null);
+  const [memos, setMemos] = useState(view.memos);
+  const saveMemo = useStockMemoSave(
+    useCallback((ticker: string, memo: string) => setMemos((prev) => ({ ...prev, [ticker]: memo })), []),
+  );
 
   // 서버가 최신 값을 돌려주면(저장·계좌 전환) 초안도 그 값으로 맞춘다.
   useEffect(() => {
@@ -473,6 +480,7 @@ function AccountSettingsCard({
     setGroups(view.groups ?? EMPTY_GROUPS);
     setPickerOpen(false);
     setSlack(view.slack_enabled);
+    setMemos(view.memos);
   }, [view]);
 
   useEffect(() => {
@@ -545,6 +553,7 @@ function AccountSettingsCard({
       return {
         ...accountAssets?.holdings.get(row.ticker),
         ...row,
+        memo: memos[row.ticker] ?? "",
         current_price: price == null ? undefined : String(price),
         daily_change_pct: quote?.change_pct,
         currency,
@@ -605,7 +614,7 @@ function AccountSettingsCard({
       gridRows: [...weightedRows.flatMap((row) => [...(byAnchor.get(row.ticker) ?? []), row]), ...(byAnchor.get(null) ?? [])],
       pinnedRows,
     };
-  }, [accountAssets, drafts, groups, sortActive, strategiesById, quotesByTicker, currency, view.krw_rate]);
+  }, [accountAssets, drafts, groups, sortActive, strategiesById, quotesByTicker, currency, view.krw_rate, memos]);
 
   const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
     gridRowDragColumn<TradeListRow>(({ node }) => !node.rowPinned, 36),
@@ -619,6 +628,12 @@ function AccountSettingsCard({
           onDelete={() => setGroups((current) => current.filter((group) => group.id !== data.key))}
         />
       ) : renderStockNameCell(value, { ticker: data?.ticker, isHeld: data?.held }),
+    }),
+    // 종목 메모 — 순위·전략·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
+    stockMemoColumn<TradeListRow>({
+      field: "memo",
+      editable: (row) => Boolean(row && !row.is_label),
+      onSave: (row, memo) => void saveMemo(row.ticker, memo),
     }),
     dailyChange,
     currentPrice,
@@ -645,7 +660,7 @@ function AccountSettingsCard({
     ]),
     { ...quantity, headerName: "보유수량", width: 88 },
     returnPct, pnl, valuation,
-  ], [saving]);
+  ], [saving, saveMemo]);
 
   const handleRowDragEnd = ({ api }: RowDragEndEvent<TradeListRow>) => {
     // 그리드가 드롭을 반영한 다음 종목 순서와 그룹 위치를 함께 읽는다.
