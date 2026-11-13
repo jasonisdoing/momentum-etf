@@ -48,6 +48,7 @@ import {
   type SlotPlan,
 } from "@/lib/grid-cells";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
+import { poolHasIndustry } from "@/lib/pool-industry";
 
 const gridTheme = createAppGridTheme();
 
@@ -105,7 +106,7 @@ type AccountOption = AccountOptionBase & {
   mix_cash_pct: number;
 };
 type StrategyOption = { value: string; label: string };
-type MixPoolOption = PoolLabelSource & { country_code?: string | null };
+type MixPoolOption = PoolLabelSource & { country_code?: string | null; pool_kind?: string | null };
 
 type Meta = {
   /** 합성을 운용하는 계좌 — 계좌 설정에서 '합성' 을 켠 계좌가 온다. */
@@ -814,11 +815,14 @@ export function StrategyMixClient() {
     })();
   }, [holdingsTab, positions, charts, chartsLoading, chartsError, chartRows, accountId, positionsLoading]);
 
-  // 업종 컬럼 노출 — 값이 하나도 없으면(ETF 만 담은 계좌) 빈 컬럼을 숨긴다.
-  // 전략 화면은 풀 성격으로 가르는데, 합성은 여러 풀이 섞여 행 값으로 본다.
+  // 업종 컬럼 노출 — 값 유무가 아니라 슬리브 종목풀 성격으로 정한다(전 화면 공용 `poolHasIndustry`).
+  // 개별주 풀 슬리브가 하나라도 있으면 보이고, ETF 풀만이면 숨긴다. ETF 행은 업종이 없어 빈 칸이다.
   const hasIndustryData = useMemo(
-    () => positionRows.some((row) => String(row.industry ?? "").trim() !== ""),
-    [positionRows],
+    () =>
+      sleeves.some((sleeve) =>
+        poolHasIndustry((meta?.pool_options ?? []).find((option) => option.ticker_type === sleeve.pool)),
+      ),
+    [sleeves, meta?.pool_options],
   );
 
   const positionColumns = useMemo<ColDef<PositionRow>[]>(() => {
@@ -898,7 +902,7 @@ export function StrategyMixClient() {
         editable: (row) => !row?.is_cash && !row?.is_fixed_asset && !row?.is_group && !row?.is_total,
         onSave: (row, memo) => void saveMemo(row.ticker, memo),
       }),
-      // 업종 — 전략 화면과 같은 공용 컬럼. ETF 만 담은 계좌는 값이 없어 통째로 숨긴다.
+      // 업종 — 전략 화면과 같은 공용 컬럼. ETF 풀만 담은 계좌는 통째로 숨긴다.
       industryColumn<PositionRow>({ hide: !hasIndustryData }),
       // (예전 「전략」 컬럼은 제거 — 슬리브 그룹 행이 소속을 보여준다. 여러 슬리브에 걸친
       //  종목은 각 그룹에 분리 표시된다.)

@@ -459,8 +459,6 @@ def _refresh_us_stock_meta_cache(
                     )
             if not meta_cache.get("market"):
                 meta_cache["market"] = str(info.get("exchange") or "").strip().upper() or None
-            if not meta_cache.get("industry"):
-                meta_cache["industry"] = str(info.get("category") or info.get("industry") or "").strip() or None
             meta_cache["source"] = "naver_us_market_stock+yfinance"
         except Exception as exc:
             get_app_logger().debug(f"[{ticker_type_norm.upper()}/{ticker_norm}] yfinance 메타 보완 건너뜀: {exc}")
@@ -940,8 +938,6 @@ def _refresh_overseas_etf_meta_cache(
                 meta_cache["listed_date"] = _format_iso_date(t_info.get("startDate"))
             if not meta_cache.get("market"):
                 meta_cache["market"] = str(t_info.get("exchange") or "").strip().upper() or None
-            if not meta_cache.get("industry"):
-                meta_cache["industry"] = str(t_info.get("category") or "").strip() or None
     except Exception as e:
         logger.debug(f"yfinance 추가 메타데이터 수집 건너뜀: {e}")
 
@@ -1003,21 +999,10 @@ def _update_reference_meta_for_type(
 
     # [KOR] 전체 종목(일반주/ETF) 맵 구성하여 루프 내 호출 최소화
     naver_etf_map: dict[str, str] = {}
-    # 국내 ETF 업종 — 네이버 「(주식)섹터」 중분류 11종을 한 번에 받아 티커 → 업종명 맵을 만든다.
-    # 개별주는 종목마다 조회하지만(fetch_industry) ETF 는 분류별 목록이라 배치 앞에서 한 번이면 된다.
-    # 섹터형이 아닌 ETF(대표지수·레버리지·인버스 등)는 맵에 없다 — 업종이 없는 게 맞다.
-    kor_etf_industry_map: dict[str, str] = {}
     if country_code == "kor":
         logger.info("네이버 API에서 한국 ETF/종목 정보를 수집합니다 (배치 캐시)...")
         naver_etf_map = dict(_get_cached_naver_etf_names_map())
         fetch_naver_kor_stock_map()  # 캐시 워밍 (일반주/ETN 이름·시장 조회 대비)
-        try:
-            from services.naver_etf_category_service import fetch_etf_industry_map
-
-            kor_etf_industry_map = fetch_etf_industry_map()
-        except Exception as exc:
-            # 업종 표시 데이터 수집 실패를 기록하고 나머지 배치는 계속한다.
-            logger.warning(f"[{type_norm.upper()}] 국내 ETF 업종 맵 수집 실패 — 업종 없이 진행: {exc}")
 
     # 한국 종목풀: 기존 메타 캐시 문서를 1회 일괄 로드해 ETF 상세 TTL 판정에 사용한다.
     existing_meta_cache_map: dict[str, dict[str, Any]] = {}
@@ -1062,7 +1047,6 @@ def _update_reference_meta_for_type(
                 naver_etf_map,
                 type_norm,
                 naver_us_stock_map=naver_us_stock_map,
-                kor_etf_industry_map=kor_etf_industry_map,
             )
         except Exception as e:
             failures.append(f"식별 메타: {str(e)[:80]}")
@@ -1496,7 +1480,6 @@ def update_single_stock_metadata(
     account_norm: str = "",
     *,
     naver_us_stock_map: dict[str, Any] | None = None,
-    kor_etf_industry_map: dict[str, str] | None = None,
 ):
     """단일 종목의 메타데이터를 업데이트합니다."""
     logger = get_app_logger()
@@ -1566,12 +1549,6 @@ def update_single_stock_metadata(
                 if account_norm:
                     logger.debug(f"[{account_norm.upper()}/{ticker}] 업종 획득: {industry}")
 
-        # 5. ETF 업종 — 네이버 「(주식)섹터」 중분류(소재·IT·헬스케어 …). 배치 앞에서 만든
-        # 맵에서 꺼낸다. 개별주 업종과 달리 **매번 덮어쓴다** — 분류가 바뀌면 따라가야 하고,
-        # 맵에 없으면(섹터형이 아닌 ETF) 비운다. 임의 분류로 채우지 않는다.
-        if stock.get("is_etf"):
-            stock["industry"] = (kor_etf_industry_map or {}).get(str(ticker).strip(), "")
-
     elif country_code in ("us", "au"):
         # 미국·호주 모두 종목 자체 속성(yfinance quoteType)으로 ETF 를 판정한다 — 아래 .info 블록에서 설정.
         # (어느 풀에 넣었는지로 추정하면 같은 종목이 풀마다 다른 값을 갖게 되므로 쓰지 않는다.
@@ -1634,8 +1611,8 @@ def update_single_stock_metadata(
                         cap = info.get("marketCap")
                         if isinstance(cap, (int, float)) and not isinstance(cap, bool) and cap > 0:
                             stock["market_cap"] = int(cap)
-                    # 미국 개별주와 호주 종목은 종목별 Yahoo 분류를 저장한다.
-                    if country_code == "au" or (country_code == "us" and not is_etf):
+                    # 개별주만 종목별 Yahoo 분류를 저장한다 — ETF 는 섹터·업종을 두지 않는다.
+                    if not is_etf:
                         sector = str(info.get("sector") or "").strip()
                         if sector:
                             stock["sector"] = sector
