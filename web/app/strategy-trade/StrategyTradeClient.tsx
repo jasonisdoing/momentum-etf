@@ -1,7 +1,7 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import type { ColDef, RowDragEndEvent } from "ag-grid-community";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import type { ColDef, GridApi, GridOptions, RowClassParams, RowDragEndEvent } from "ag-grid-community";
 
 import { gridRowDragColumn, gridSelectionColumn, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
 import type { HoldingsGroup } from "@/lib/holdings-store";
@@ -239,10 +239,16 @@ function formatSigned(value: number | null | undefined, digits = 2): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}%`;
 }
 
-/** 부호 붙은 금액 — 가격과 같은 소수 자리(원 0자리·달러 2자리). */
+/** 금액 — 통화 표기(원은 `1,234원`, 달러는 `$1,234.56`). 값이 없으면 `-`. */
+function formatAmount(value: number | null, currency: string): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return formatCurrencyPrice(value, currency);
+}
+
+/** 부호 붙은 금액 — 부호를 통화 기호 앞에 둔다(`-$3.84`, `+1,234원`). */
 function formatSignedAmount(value: number | null, currency: string): string {
   if (value == null || !Number.isFinite(value)) return "-";
-  return `${value > 0 ? "+" : ""}${formatPrice(value, currency)}`;
+  return `${value > 0 ? "+" : value < 0 ? "-" : ""}${formatCurrencyPrice(Math.abs(value), currency)}`;
 }
 
 /** 보유 회차의 금액(체결가 × 수량)·평가손익((현재가 − 체결가) × 수량) — 안 산 회차는 null. */
@@ -370,7 +376,7 @@ function HistorySummary({ summary }: { summary: StrategyView["history_summary"] 
   return (
     <span style={{ display: "inline-flex", gap: 10, flexWrap: "wrap", alignItems: "baseline" }}>
       <span>
-        평가 금액 <b>{formatPrice(summary.market_value, currency)}</b>
+        평가 금액 <b>{formatAmount(summary.market_value, currency)}</b>
       </span>
       {signed(
         "실현손익",
@@ -467,13 +473,32 @@ type TradeListRow = DraftRow & {
   is_label?: boolean;
   /** 상태(도달·슬랙·주문)가 있는 회차 — 아래 회차 표의 상태 칸과 같은 값. */
   statusRounds?: RoundRow[];
+  /** 회차 기준 실현손익·합계 손익(원) — 아래 손익 요약(`history_summary`)과 같은 값. */
+  realized_krw?: number;
+  total_krw?: number;
 } & Partial<HoldingsRow>;
 const tradeGridTheme = createAppGridTheme();
+const EMPTY_TRADE_ROWS: TradeListRow[] = [];
+/** 두 그리드(계좌 행·사고팔기 행) 공통 옵션. */
+const tradeGridBaseOptions = {
+  domLayout: "autoHeight",
+  rowHeight: 36,
+  headerHeight: 34,
+  suppressMovableColumns: true,
+  suppressCellFocus: false,
+  suppressOverlays: ["noRows"],
+  selectionColumnDef: gridSelectionColumn,
+} satisfies GridOptions<TradeListRow>;
 const { weight: tradeWeightColumn, dailyChange, currentPrice, quantity, returnPct, pnl, valuation } = holdingMetricColumns<TradeListRow>(true);
 const TOTAL_ROW_KEY = "__total__";
 const TRADE_TOTAL_ROW_KEY = "__trade_total__";
 const OTHER_HOLDINGS_TICKER = "__OTHER_HOLDINGS__";
 const EMPTY_GROUPS: HoldingsGroup[] = [];
+
+/** 모두 있을 때만 합 — 하나라도 비면 합계도 비운다(빠진 값을 0 으로 치지 않는다). */
+function sumAll(values: Array<number | undefined>): number | undefined {
+  return values.every((value): value is number => value != null) ? values.reduce((sum, value) => sum + value, 0) : undefined;
+}
 
 function sumTradeHoldings(rows: HoldingsRow[]) {
   const totals = rows.reduce((sum, row) => {
@@ -540,6 +565,9 @@ function AccountSettingsCard({
   const [saving, setSaving] = useState(false);
   const [accountAssets, setAccountAssets] = useState<{ summary: AccountSummary; holdings: Map<string, HoldingsRow> } | null>(null);
   const [memos, setMemos] = useState(view.memos);
+  // 두 그리드(계좌 행·사고팔기 행)를 서로 맞추는 참조 — `alignedGrids` 가 읽는다.
+  const accountGridRef = useRef<{ api: GridApi<TradeListRow> | null }>({ api: null });
+  const tradeGridRef = useRef<{ api: GridApi<TradeListRow> | null }>({ api: null });
   const saveMemo = useStockMemoSave(
     useCallback((ticker: string, memo: string) => setMemos((prev) => ({ ...prev, [ticker]: memo })), []),
   );
@@ -620,9 +648,17 @@ function AccountSettingsCard({
       const strategy = row.strategy_id ? strategiesById.get(row.strategy_id) : undefined;
       const quote = quotesByTicker.get(row.ticker);
       const price = quote?.price ?? null;
+      // 손익은 회차 기준(아래 손익 요약과 같은 값) — 증권사 평균단가(이동평균) 기준 평가손익을 덮는다.
+      const rate = view.krw_rate;
+      const pnl = strategy && strategy.ticker === row.ticker && !("error" in strategy) && rate != null
+        ? strategy.history_summary
+        : undefined;
       return {
         ...accountAssets?.holdings.get(row.ticker),
         ...row,
+        pnl_krw: pnl && rate != null ? pnl.unrealized * rate : undefined,
+        realized_krw: pnl && rate != null ? pnl.realized * rate : undefined,
+        total_krw: pnl && rate != null ? pnl.total * rate : undefined,
         memo: memos[row.ticker] ?? "",
         statusRounds: strategy && strategy.ticker === row.ticker && !("error" in strategy) ? strategy.rounds.filter(hasRoundStatus) : [],
         current_price: price == null ? undefined : String(price),
@@ -647,13 +683,18 @@ function AccountSettingsCard({
     const otherHoldings = holdings ? sumTradeHoldings(holdings.filter((row) => !strategyTickers.has(row.ticker))) : undefined;
     const tradeHoldings = holdings ? sumTradeHoldings(holdings.filter((row) => strategyTickers.has(row.ticker))) : undefined;
     const otherValue = otherHoldings?.valuation_krw;
+    // 사고팔기 합계의 손익은 종목 행(회차 기준)의 합이다.
+    const tradePnl = sumAll(stockRows.map((row) => row.pnl_krw));
+    const tradeRealized = sumAll(stockRows.map((row) => row.realized_krw));
+    const tradeTotal = sumAll(stockRows.map((row) => row.total_krw));
     const weights = summary && summary.total_assets_krw > 0 && otherValue != null
       ? displayWeights([summary.cash_balance_krw, otherValue, ...stockValues], summary.total_assets_krw)
       : [];
     const pinnedRows: TradeListRow[] = [
       {
         ...tradeListLabel(TOTAL_ROW_KEY, "합계"),
-        pnl_krw: totalHoldings?.pnl_krw,
+        // 기타 종목(증권사 기준) + 사고팔기 종목(회차 기준).
+        pnl_krw: sumAll([otherHoldings?.pnl_krw, tradePnl]),
         return_pct: totalHoldings?.return_pct,
         valuation_krw: summary?.total_assets_krw,
         weight_pct: weights.length ? 100 : undefined,
@@ -667,6 +708,9 @@ function AccountSettingsCard({
       {
         ...tradeListLabel(TRADE_TOTAL_ROW_KEY, "사고팔기 합계"),
         ...tradeHoldings,
+        pnl_krw: tradePnl,
+        realized_krw: tradeRealized,
+        total_krw: tradeTotal,
         weight_pct: weights.length ? weights.slice(2).reduce((sum, weight) => sum + weight, 0) : undefined,
       },
     ];
@@ -700,11 +744,11 @@ function AccountSettingsCard({
         />
       ) : renderStockNameCell(value, { ticker: data?.ticker, isHeld: data?.held }),
     }),
-    // 종목 메모 — 순위·전략·자산 관리 화면과 같은 값(종목에 붙는다). 셀을 벗어나면 저장.
+    // 종목 메모 — 순위·전략·자산 관리 화면과 같은 값(종목에 붙는다). 그리드가 readOnlyEdit 라
+    // 저장은 onCellEditRequest 가 한다(셀을 벗어나면 저장).
     stockMemoColumn<TradeListRow>({
       field: "memo",
       editable: (row) => Boolean(row && !row.is_label),
-      onSave: (row, memo) => void saveMemo(row.ticker, memo),
     }),
     {
       colId: "roundStatus",
@@ -747,8 +791,18 @@ function AccountSettingsCard({
         : []),
     ]),
     { ...quantity, headerName: "보유수량", width: 88 },
-    returnPct, pnl, valuation,
-  ], [saving, saveMemo, onWithdrawSignal]);
+    returnPct, valuation, pnl,
+    { ...pnl, colId: "realized_krw", headerName: "실현손익", headerTooltip: "회차 기준 — 아래 손익 요약과 같은 값", valueGetter: ({ data }) => data?.realized_krw },
+    { ...pnl, colId: "total_krw", headerName: "합계 손익", headerTooltip: "평가손익 + 실현손익", valueGetter: ({ data }) => data?.total_krw },
+  ], [saving, onWithdrawSignal]);
+
+  const tradeRowClass = ({ data }: RowClassParams<TradeListRow>) => [
+    data?.is_group || data?.key === TOTAL_ROW_KEY || data?.key === TRADE_TOTAL_ROW_KEY ? "assetsGroupRow" : "",
+    stockRowClass({ held: data?.held }),
+    data?.key === selectedRow?.key ? "strategyTradeSelectedRow" : "",
+  ].filter(Boolean).join(" ");
+  const accountRows = pinnedRows.filter((row) => row.key !== TRADE_TOTAL_ROW_KEY);
+  const tradeTotalRows = pinnedRows.filter((row) => row.key === TRADE_TOTAL_ROW_KEY);
 
   const handleRowDragEnd = ({ api }: RowDragEndEvent<TradeListRow>) => {
     // 그리드가 드롭을 반영한 다음 종목 순서와 그룹 위치를 함께 읽는다.
@@ -920,6 +974,28 @@ function AccountSettingsCard({
       <section className="appSection appPageStack strategyTradeGrid">
         <aside className="card appCard" aria-label="종목 목록">
           <div className="card-body appCardBodyTight">
+            {/* 계좌 행(합계·현금·기타 종목)과 사고팔기 행을 헤더가 따로 보이는 두 그리드로 나눈다.
+                두 그리드는 같은 컬럼을 쓰고 `alignedGrids` 로 칸 폭·가로 스크롤을 함께 움직인다. */}
+            <AppAgGrid
+              className="strategyTradeAccountGrid"
+              rowData={EMPTY_TRADE_ROWS}
+              columnDefs={tradeListColumns}
+              theme={tradeGridTheme}
+              height="auto"
+              minHeight={0}
+              getRowId={({ data }) => data.key}
+              getRowClass={tradeRowClass}
+              gridOptions={{
+                ...tradeGridBaseOptions,
+                defaultColDef: { sortable: false, resizable: true },
+                pinnedTopRowData: accountRows,
+                rowSelection: { mode: "multiRow", headerCheckbox: false, hideDisabledCheckboxes: true, isRowSelectable: () => false },
+                alignedGrids: () => [tradeGridRef.current],
+                onGridReady: ({ api }) => {
+                  accountGridRef.current.api = api;
+                },
+              }}
+            />
             <AppAgGrid
               rowData={gridRows}
               columnDefs={tradeListColumns}
@@ -927,30 +1003,24 @@ function AccountSettingsCard({
               height="auto"
               minHeight={0}
               getRowId={({ data }) => data.key}
-              getRowClass={({ data }) => [
-                data?.is_group || data?.key === TOTAL_ROW_KEY || data?.key === TRADE_TOTAL_ROW_KEY ? "assetsGroupRow" : "",
-                stockRowClass({ held: data?.held }),
-                data?.key === selectedRow?.key ? "strategyTradeSelectedRow" : "",
-              ].filter(Boolean).join(" ")}
+              getRowClass={tradeRowClass}
               rowClassDeps={[selectedRow?.key]}
               gridOptions={{
-                domLayout: "autoHeight",
-                rowHeight: 36,
-                headerHeight: 34,
-                suppressMovableColumns: true,
-                suppressCellFocus: false,
+                ...tradeGridBaseOptions,
                 stopEditingWhenCellsLoseFocus: true,
                 readOnlyEdit: true,
-                pinnedTopRowData: pinnedRows,
-                suppressOverlays: ["noRows"],
+                pinnedTopRowData: tradeTotalRows,
                 rowSelection: {
                   mode: "multiRow", headerCheckbox: true, enableClickSelection: false, hideDisabledCheckboxes: true,
                   isRowSelectable: (node) => Boolean(node.data && !node.rowPinned && !node.data.is_group),
                 },
-                selectionColumnDef: gridSelectionColumn,
                 rowDragManaged: true,
                 suppressMoveWhenRowDragging: true,
                 suppressRowDrag: saving || sortActive,
+                alignedGrids: () => [accountGridRef.current],
+                onGridReady: ({ api }) => {
+                  tradeGridRef.current.api = api;
+                },
                 onSortChanged: ({ api }) => setSortActive(api.getColumnState().some((column) => column.sort != null)),
                 onRowDragEnd: handleRowDragEnd,
                 onSelectionChanged: ({ api }) => setCheckedKeys(api.getSelectedRows().map((row) => row.key)),
@@ -958,6 +1028,11 @@ function AccountSettingsCard({
                   const field = colDef.field;
                   if (field === "pct" || field === "amount" || field === "rounds") {
                     updateRow(data.key, { [field]: String(newValue ?? "").trim() });
+                  }
+                  // readOnlyEdit 라 공용 메모 컬럼의 valueSetter 가 불리지 않는다 — 여기서 같은 저장 경로로 보낸다.
+                  if (field === "memo" && !data.is_label) {
+                    const memo = String(newValue ?? "").trim();
+                    if (memo !== (data.memo ?? "")) void saveMemo(data.ticker, memo);
                   }
                 },
                 onRowClicked: ({ data, node }) => {
@@ -1247,7 +1322,7 @@ function StrategySection({
                   ) : null}
                 </td>
                 <td style={tdStyle}>{row.held ? `${formatNumber(row.quantity)}주` : "-"}</td>
-                <td style={tdStyle}>{formatPrice(amounts.cost, currency)}</td>
+                <td style={tdStyle}>{formatAmount(amounts.cost, currency)}</td>
                 <td style={{ ...tdStyle, color: signColor(amounts.pnl), fontWeight: 700 }}>
                   {formatSignedAmount(amounts.pnl, currency)}
                 </td>

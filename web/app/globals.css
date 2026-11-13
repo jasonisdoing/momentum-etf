@@ -4885,6 +4885,18 @@ a {
   background: color-mix(in srgb, var(--tblr-primary, #206bc4) 12%, transparent);
 }
 
+/* 사고팔기 계좌 행 그리드(합계·현금·기타 종목) — 행이 모두 위 고정 행이라 본문이 비어 있다.
+   autoHeight 의 빈 본문 최소 높이와 가로 스크롤바(아래 그리드와 alignedGrids 로 같이 움직인다)를
+   없애 아래 그리드에 붙인다. */
+.strategyTradeAccountGrid .ag-center-cols-viewport,
+.strategyTradeAccountGrid .ag-center-cols-container {
+  min-height: 0 !important;
+}
+
+.strategyTradeAccountGrid .ag-body-horizontal-scroll {
+  display: none;
+}
+
 /* 전략·순위 화면의 보유 종목 차트 격자 — 최대 2열이고 좁아지면 1열이다.
    auto-fit 로 두면 넓은 모니터에서 3열 이상으로 벌어져 캔들이 작아진다. */
 .appChartGrid {
