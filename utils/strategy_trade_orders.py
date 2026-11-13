@@ -33,7 +33,7 @@ from services.broker_trade_service import (
 from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
 from utils.db_manager import get_db_connection
 from utils.strategy_trade_config import round_buy_quantity
-from utils.strategy_trade_ledger import LOOKBACK_DAYS, REGULAR_SELL, is_buy
+from utils.strategy_trade_ledger import REGULAR_SELL, is_buy
 from utils.strategy_trade_market import (
     broker_order_date,
     close_text,
@@ -455,14 +455,14 @@ def pair_records(pair_id: str) -> list[dict[str, Any]]:
     return sorted(_orders().find({"pair_id": pair_id}), key=lambda record: record["side"] != "sell")
 
 
-def read_trade_history_orders(account_id: str, as_of: date) -> list[dict[str, Any]]:
-    """회차 체결 이력과 대조할 기간 내 전략 주문을 읽는다."""
+def read_trade_history_orders(account_id: str, start: date, as_of: date) -> list[dict[str, Any]]:
+    """회차 체결 이력과 대조할 ``start`` ~ ``as_of`` 의 전략 주문을 읽는다."""
     return list(
         _orders().find(
             {
                 "account_id": account_id,
                 "created_at": {
-                    "$gte": (as_of - timedelta(days=LOOKBACK_DAYS)).isoformat(),
+                    "$gte": start.isoformat(),
                     "$lt": (as_of + timedelta(days=1)).isoformat(),
                 },
                 "round": {"$ne": None},

@@ -163,20 +163,25 @@ def _day_trades(
     return [trade for _, trade in sorted(trades, key=lambda item: item[0])]
 
 
-def read_cached_trade_days(account_id: str, as_of: date) -> dict[date, list[dict[str, Any]]]:
-    """화면 이력에 쓸 최근 일별 체결 캐시만 읽는다."""
-    start = as_of - timedelta(days=LOOKBACK_DAYS)
+def history_start(ledger: Ledger) -> date:
+    """화면 이력의 시작일 — 최근 `LOOKBACK_DAYS` 일, 지금 보유 중 가장 먼저 산 날(지금 사이클 1호)이 더 이르면 그날부터."""
+    window = ledger.as_of - timedelta(days=LOOKBACK_DAYS)
+    return min([window, *(date.fromisoformat(lot.day) for lot in ledger.lots)])
+
+
+def read_cached_trade_days(account_id: str, start: date, as_of: date) -> dict[date, list[dict[str, Any]]]:
+    """화면 이력에 쓸 일별 체결 캐시를 ``start`` 부터 ``as_of`` 전날까지 읽는다."""
     prefix = f"{account_id}:"
     days = _cache().find({"_id": {"$gte": f"{prefix}{start:%Y%m%d}", "$lt": f"{prefix}{as_of:%Y%m%d}"}})
     return {date.fromisoformat(doc["_id"].removeprefix(prefix)): doc["rows"] for doc in days}
 
 
 def recent_trades(ledger: Ledger, ticker: str, cached_days: dict[date, list[dict[str, Any]]]) -> list[Trade]:
-    """최근 `LOOKBACK_DAYS` 일의 체결(오래된 순) — 원장 체결 앞에 일별 캐시의 과거 체결을 이어 붙인다.
+    """`history_start` 부터의 체결(오래된 순) — 원장 체결 앞에 일별 캐시의 과거 체결을 이어 붙인다.
 
     사이클(보유가 비는 시점)로 자르지 않는다. 캐시가 비거나 창 이전 보유를 넘어서는 체결이 나오면 그 이전으로 넘어가지 않는다.
     """
-    start = ledger.as_of - timedelta(days=LOOKBACK_DAYS)
+    start = history_start(ledger)
     start_iso = start.isoformat()
     trades = tuple(trade for trade in ledger.trades if trade.day >= start_iso)
     day = (date.fromisoformat(trades[0].day) if trades else ledger.as_of) - timedelta(days=1)

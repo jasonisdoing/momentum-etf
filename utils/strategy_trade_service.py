@@ -27,6 +27,7 @@ from utils.strategy_trade_ledger import (
     LedgerError,
     Trade,
     forget_ledgers,
+    history_start,
     read_cached_trade_days,
     read_ledgers,
     recent_trades,
@@ -1054,8 +1055,16 @@ def _build_views(
                 if include_trade_history:
                     cache_key = (account_id, ledger.as_of)
                     if cache_key not in cached_days_by_account:
-                        cached_days_by_account[cache_key] = read_cached_trade_days(*cache_key)
-                        history_orders_by_account[cache_key] = read_trade_history_orders(*cache_key)
+                        # 계좌의 종목들 중 가장 이른 이력 시작일부터 한 번에 읽는다.
+                        start = min(
+                            history_start(item)
+                            for item in account_ledgers.values()
+                            if isinstance(item, Ledger) and item.as_of == ledger.as_of
+                        )
+                        cached_days_by_account[cache_key] = read_cached_trade_days(account_id, start, ledger.as_of)
+                        history_orders_by_account[cache_key] = read_trade_history_orders(
+                            account_id, start, ledger.as_of
+                        )
                     orders = [
                         order for order in history_orders_by_account[cache_key] if order["ticker"] == view["ticker"]
                     ]
