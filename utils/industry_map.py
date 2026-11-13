@@ -81,7 +81,7 @@ def us_display_sector(sector: str, industry: str) -> str:
 
 
 def _pool_industry_map(pool: str, *, group: bool = False) -> dict[str, str]:
-    """한 풀의 종목 문서에서 티커 → 업종을 읽는다 (한국·호주용).
+    """한 풀의 종목 문서에서 ETF를 제외하고 티커 → 업종을 읽는다 (한국·호주용).
 
     `group=True` 면 yfinance 분류를 계열로 묶는다(호주) — 미국과 같은 세밀도가 되도록.
     한국은 네이버 분류라 묶지 않는다(체계가 달라 접미어 규칙이 맞지 않는다).
@@ -90,6 +90,8 @@ def _pool_industry_map(pool: str, *, group: bool = False) -> dict[str, str]:
 
     result: dict[str, str] = {}
     for item in _load_ticker_type_stocks_raw(pool):
+        if item.get("is_etf"):
+            continue
         ticker = str(item.get("ticker") or "").strip()
         industry = str(item.get("industry") or "").strip()
         if ticker and industry:
@@ -113,6 +115,8 @@ def industry_map(pool: str) -> dict[str, str]:
         warnings.warn(f"종목풀 '{pool}' 이 없어 업종을 채우지 못했습니다: {error}", stacklevel=2)
         logger.warning("종목풀 '%s' 이 없어 업종을 채우지 못했습니다: %s", pool, error)
         return {}
+    if str(settings.get("pool_kind") or "").strip().lower() == "etf":
+        return {}
     country = str(settings.get("country_code") or "").strip().lower()
 
     if country != "us":
@@ -122,7 +126,7 @@ def industry_map(pool: str) -> dict[str, str]:
 
 
 def industry_map_for_country(country_code: str) -> dict[str, str]:
-    """티커 → 업종 — **그 국가의 모든 종목풀**을 합친다.
+    """티커 → 업종 — 그 국가의 종목풀에서 개별주 분류를 합친다.
 
     종목풀에 매이지 않는 화면(예: `/kor-market-stock` 은 시장 전체 상위 종목을
     직접 받아 온다)이 쓴다. 특정 풀 이름을 코드에 박으면 그 풀을 지우거나 이름을
@@ -144,6 +148,8 @@ def industry_map_for_country(country_code: str) -> dict[str, str]:
         except Exception:
             continue
         if str(settings.get("country_code") or "").strip().lower() != country:
+            continue
+        if str(settings.get("pool_kind") or "").strip().lower() == "etf":
             continue
         for ticker, industry in _pool_industry_map(pool, group=country == "au").items():
             result.setdefault(ticker, industry)
