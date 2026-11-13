@@ -522,20 +522,22 @@ const MEMO_CELL_CLASS = "appMemoCell";
 
 export function stockMemoColumn<T>(options: {
   field: ColDefField<T>;
-  width?: number;
   editable?: (row: T | undefined) => boolean;
   cellClass?: (row: T | undefined) => string | undefined;
   onSave?: (row: T, memo: string) => void;
   /** 특정 행에서 메모 칸 대신 다른 내용을 그릴 때(예: 순위 화면의 추가 행 버튼). null 이면 기본 표시. */
   renderRow?: (row: T) => ReactNode | null;
 }): ColDef<T> {
-  const { field, width = 150, editable, cellClass, onSave, renderRow } = options;
+  const { field, editable, cellClass, onSave, renderRow } = options;
   const canEdit = (row: T | undefined) => (editable ? editable(row) : true);
   const column: ColDef<T> = {
     field,
     headerName: "메모",
     headerTooltip: "종목에 붙는 메모 — 자산 관리·순위·전략 화면이 같은 값을 본다",
-    width,
+    width: 170,
+    minWidth: 170,
+    maxWidth: 170,
+    resizable: false,
     // 빈 문자열이 많아 자동 추론이 흔들린다 — 문자열 에디터를 명시한다.
     cellDataType: "text",
     editable: (params) => canEdit(params.data),

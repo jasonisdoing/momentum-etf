@@ -1049,7 +1049,6 @@ export function AccountHoldingsDetailPanel({
     // 폭 164 = 한글 10자(14px × 10) + 셀 좌우 패딩(24px). 넘치면 말줄임.
     stockMemoColumn<GridRow>({
       field: "memo",
-      width: 164,
       editable: (row) => isEditableHoldingRow(row) && processingId !== row?.id,
       cellClass: (row) => {
         if (!isEditableHoldingRow(row)) return undefined;
