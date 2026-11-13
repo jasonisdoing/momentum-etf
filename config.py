@@ -175,7 +175,6 @@ MARKET_SCHEDULES = {
     "kor": {
         "open": time(9, 0),
         "close": time(15, 30),
-        "open_offset_minutes": 30,
         "close_offset_minutes": 30,
         "premarket_open": time(8, 0),
         "aftermarket_close": time(20, 0),
@@ -189,7 +188,6 @@ MARKET_SCHEDULES = {
     "us": {
         "open": time(9, 30),
         "close": time(16, 0),
-        "open_offset_minutes": 30,
         "close_offset_minutes": 30,
         "premarket_open": time(4, 0),
         "aftermarket_close": time(20, 0),
@@ -205,7 +203,6 @@ MARKET_SCHEDULES = {
     "au": {
         "open": time(10, 0),
         "close": time(16, 0),
-        "open_offset_minutes": 30,
         "close_offset_minutes": 30,
         "timezone": "Australia/Sydney",
         "name": "호주",

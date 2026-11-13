@@ -5,7 +5,6 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from math import isfinite
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from config import CACHE_TTL_COMPUTE, CACHE_TTL_LIVE, MARKET_SCHEDULES
 from utils.data_loader import (
@@ -14,7 +13,6 @@ from utils.data_loader import (
     fetch_naver_stock_realtime_snapshot,
     fetch_naver_worldstock_snapshot,
     fetch_toss_us_stock_snapshot,
-    get_latest_trading_day,
 )
 from utils.data_loader import (
     get_exchange_rate_series as load_exchange_rate_series,
@@ -682,36 +680,6 @@ def _reuse_stale_fx_cache(cache_key: str, exc: Exception) -> dict[str, Any] | No
 
 def _get_realtime_ttl_seconds(country: str) -> int:
     return 60
-
-
-def _is_market_active(country: str) -> bool:
-    schedule = MARKET_SCHEDULES.get(country)
-    if not schedule:
-        raise ValueError(f"시장 스케줄이 없습니다: {country}")
-
-    timezone_name = str(schedule.get("timezone") or "").strip()
-    if not timezone_name:
-        raise ValueError(f"시장 타임존이 없습니다: {country}")
-
-    now_local = datetime.now(ZoneInfo(timezone_name))
-    latest_trading_day = get_latest_trading_day(country).normalize()
-    if latest_trading_day.date() != now_local.date():
-        return False
-
-    open_time = schedule.get("open")
-    close_time = schedule.get("close")
-    open_offset_minutes = int(schedule.get("open_offset_minutes") or 0)
-    close_offset_minutes = int(schedule.get("close_offset_minutes") or 0)
-    if open_time is None or close_time is None:
-        raise ValueError(f"시장 시간이 없습니다: {country}")
-
-    market_open_dt = datetime.combine(now_local.date(), open_time, tzinfo=now_local.tzinfo) - timedelta(
-        minutes=open_offset_minutes
-    )
-    market_close_dt = datetime.combine(now_local.date(), close_time, tzinfo=now_local.tzinfo) + timedelta(
-        minutes=close_offset_minutes
-    )
-    return market_open_dt <= now_local <= market_close_dt
 
 
 # 지원 통화 → 야후 심볼. 조회 대상은 호출부가 고른다 — 8개를 전부 받는 데 실측 3.7초가
