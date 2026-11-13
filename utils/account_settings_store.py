@@ -49,6 +49,9 @@ EDITABLE_KEYS: tuple[str, ...] = (
     # 합성 전략 사용 여부 — 계좌 설정에서는 이 체크만 하고, 실제 조합(전략·종목풀·배분)은
     # `/strategy-mix` 화면에서 정한다. 조합과 배분은 함께 보며 맞추는 값이라 한 화면에 둔다.
     "mix_enabled",
+    # 전략 사고팔기 사용 여부 — 켠 계좌만 `/strategy-trade` 계좌 선택·알림·주문 대상이 된다.
+    # 증권사 API 가 연동된 사고팔기 국가(`TRADE_COUNTRIES`) 계좌만 켤 수 있다.
+    "trade_enabled",
     # 자산 화면·계좌 선택·집계·배치에서 숨김 — 현금·보유·원금이 모두 0인 운영 계좌만 켠다.
     "hidden",
     # 합성 슬리브 목록 — 슬롯마다 (전략, 종목풀, 표시 이름, 배분%). 슬롯 수가 늘어도
@@ -368,6 +371,7 @@ def _validate_broker_account_type(
 #: 모의 계좌에는 켤 수 없는 설정 — 합성·사고팔기·보유종목 알림은 운영 계좌 전용이다.
 _LIVE_ONLY_KEYS = (
     "mix_enabled",
+    "trade_enabled",
     "hidden",
     "mix_slack_enabled",
     "ma_alarm_enabled",
@@ -460,6 +464,8 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
         elif key == "mix_enabled":
             # 켜면 `/strategy-mix` 목록에 오른다. 조합이 아직 없으면 그 화면에서 고르게 한다.
             cleaned[key] = bool(raw)
+        elif key == "trade_enabled":
+            cleaned[key] = bool(raw)
         elif key == "hidden":
             cleaned[key] = bool(raw)
             if cleaned[key]:
@@ -550,9 +556,23 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
         raise AccountSettingsStoreError(
             f"'{account_id}' 의 API 주문을 켜려면 하루 주문 건수·금액 한도를 먼저 입력해야 합니다."
         )
+    if merged.get("trade_enabled"):
+        _require_trade_capable(account_id, merged)
     if not cleaned:
         raise AccountSettingsStoreError("저장할 값이 없습니다.")
     return cleaned
+
+
+def _require_trade_capable(account_id: str, merged: dict[str, Any]) -> None:
+    """사고팔기는 증권사 API 가 연동된 사고팔기 국가 계좌에서만 켤 수 있다."""
+    from utils.strategy_trade_config import TRADE_COUNTRIES
+
+    if not (merged.get("broker_api") or {}).get("provider"):
+        raise AccountSettingsStoreError(f"'{account_id}' 의 사고팔기를 켜려면 증권사 API 를 먼저 연동해야 합니다.")
+    if str(merged.get("country_code") or "").strip().lower() not in TRADE_COUNTRIES:
+        raise AccountSettingsStoreError(
+            f"'{account_id}' 는 사고팔기 국가({', '.join(TRADE_COUNTRIES)}) 계좌가 아니라 사고팔기를 켤 수 없습니다."
+        )
 
 
 def save_account_settings(account_id: str, values: dict[str, Any], save_method: str = "사용자") -> dict[str, Any]:

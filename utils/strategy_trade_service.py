@@ -55,8 +55,12 @@ def _load_settings_document() -> dict[str, Any]:
 
 
 def load_settings() -> dict[str, Any]:
-    """계좌별 슬랙 설정과 전략별 가격 출처·파라미터를 반환한다."""
+    """계좌별 슬랙 설정과 전략별 가격 출처·파라미터를 반환한다.
+
+    계좌 설정에서 사고팔기를 끈 계좌의 설정·전략은 빼고 준다 — 화면·알림·주문·원장 배치가 모두 이 함수를 거친다.
+    """
     doc = _load_settings_document()
+    enabled = {item["account_id"] for item in _trade_account_docs()}
     stored = doc.get("strategies")
     if not isinstance(stored, dict):
         raise RuntimeError(
@@ -66,6 +70,8 @@ def load_settings() -> dict[str, Any]:
 
     accounts: dict[str, dict[str, Any]] = {}
     for account_id, entry in (doc.get("accounts") or {}).items():
+        if account_id not in enabled:
+            continue
         if not isinstance(entry, dict) or not isinstance(entry.get("slack_enabled"), bool):
             raise RuntimeError(f"'{account_id}' 계좌의 사고팔기 설정이 올바르지 않습니다 — 화면에서 다시 저장하세요.")
         accounts[str(account_id)] = {"slack_enabled": entry["slack_enabled"], "groups": entry.get("groups", [])}
@@ -78,6 +84,8 @@ def load_settings() -> dict[str, Any]:
         ticker = str(entry.get("ticker") or "").strip()
         name = str(entry.get("name") or "").strip()
         account_id = str(entry.get("account_id") or "").strip()
+        if account_id and account_id not in enabled:
+            continue
         if not pool or not ticker or not name or not account_id:
             raise RuntimeError(f"'{sid}' 전략의 종목풀·운용 계좌·종목이 없습니다 — 화면에서 골라 저장하세요.")
         try:
@@ -225,7 +233,7 @@ def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any, gro
 
     account = next((item for item in _trade_account_docs() if item["account_id"] == account_id), None)
     if account is None:
-        raise ValueError(f"'{account_id}' 는 사고팔기를 운영할 수 있는 계좌가 아닙니다(증권사 API 연동 필요).")
+        raise ValueError(f"'{account_id}' 는 사고팔기를 켠 계좌가 아닙니다(계좌 설정에서 사고팔기를 켜세요).")
     country = str(account["country_code"]).strip().lower()
     if not isinstance(slack_enabled, bool):
         raise ValueError("slack_enabled 는 참·거짓이어야 합니다.")
@@ -999,15 +1007,10 @@ def strategy_entry(strategy_id: str) -> dict[str, Any]:
 
 
 def _trade_account_docs() -> list[dict[str, Any]]:
-    """증권사 API가 연동된 운영 계좌(국가는 `TRADE_COUNTRIES`)."""
+    """계좌 설정에서 사고팔기를 켠 운영 계좌 — 켤 때 증권사 API 연동·국가(`TRADE_COUNTRIES`)를 검증한다."""
     from utils.account_settings_store import load_live_account_docs
 
-    return [
-        doc
-        for doc in load_live_account_docs()
-        if (doc.get("broker_api") or {}).get("provider")
-        and str(doc.get("country_code") or "").strip().lower() in TRADE_COUNTRIES
-    ]
+    return [doc for doc in load_live_account_docs() if doc.get("trade_enabled")]
 
 
 def _config_quotes(mine: dict[str, dict[str, Any]], country: str | None) -> dict[str, dict[str, float | None]]:
@@ -1042,7 +1045,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
     """
     docs = _trade_account_docs()
     if account_id is not None and account_id not in {doc["account_id"] for doc in docs}:
-        raise ValueError(f"'{account_id}' 는 사고팔기를 운영할 수 있는 계좌가 아닙니다(증권사 API 연동 필요).")
+        raise ValueError(f"'{account_id}' 는 사고팔기를 켠 계좌가 아닙니다(계좌 설정에서 사고팔기를 켜세요).")
     selected = account_id if account_id is not None else (docs[0]["account_id"] if docs else None)
     country = next((str(doc["country_code"]).strip().lower() for doc in docs if doc["account_id"] == selected), None)
     settings = load_settings()
