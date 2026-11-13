@@ -1084,7 +1084,7 @@ export function MomentumClient() {
                         <span className="appLabeledFieldLabel">{industryCapLabel(selectedPoolOption)}</span>
                         <select
                           className="form-select form-select-sm"
-                          style={{ width: 88 }}
+                          style={{ width: 128 }}
                           value={draftIndustryCap}
                           onChange={(e) => setDraftIndustryCap(e.target.value)}
                           title="같은 업종(미국은 섹터)이 차지할 수 있는 슬롯 = 내림(종목 수 × %), 최소 1. 진입할 때 상한에 걸린 후보는 건너뛰고 다음 순위로 채운다. 100% = 상한 없음. 분류가 빈 종목은 상한을 적용하지 않는다."
