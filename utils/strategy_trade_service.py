@@ -291,9 +291,7 @@ def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any, gro
     notes = {
         sid: note for sid, entry in current.items() if sid in planned and (note := _change_note(entry, planned[sid]))
     }
-    _withdraw_changed_signals(
-        collection, sent_log, notes, {sid: planned[sid]["name"] for sid in notes}, account["name"]
-    )
+    _withdraw_changed_signals(collection, sent_log, notes)
 
 
 def _change_note(previous: dict[str, Any], target: dict[str, Any]) -> str | None:
@@ -306,27 +304,19 @@ def _change_note(previous: dict[str, Any], target: dict[str, Any]) -> str | None
     return " · ".join(parts) or None
 
 
-def _withdraw_changed_signals(
-    collection: Any, sent_log: dict[str, Any], notes: dict[str, str], names: dict[str, str], account_name: str
-) -> None:
+def _withdraw_changed_signals(collection: Any, sent_log: dict[str, Any], notes: dict[str, str]) -> None:
     """설정이 바뀐 전략의 미사용 신호(주문이 걸리지 않은 것)를 회수하고 발송 기록을 지워 새 설정으로 다시 판정·발송되게 한다.
 
-    이미 주문이 걸린 신호 스레드와 체결된 회차는 그대로 둔다. 회수 본문에는 무엇이 바뀌었는지 남긴다.
+    이미 주문이 걸린 신호 스레드와 체결된 회차는 그대로 둔다. 회수 한 줄의 상세에 무엇이 바뀌었는지 남긴다.
     """
-    from utils.strategy_trade_threads import claim_signal_withdrawal, finish_signal_withdrawal
+    from utils.strategy_trade_threads import withdraw_signal
 
-    now = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     unset: dict[str, str] = {}
     for sid, change in notes.items():
-        note = (
-            f"↩️ *{names[sid]} 사고팔기 신호 회수* · {account_name}\n"
-            f"설정이 바뀌어 신호를 회수했습니다. {change} · {now} KST\n새 설정으로 다시 판정해 필요하면 신호를 다시 보냅니다."
-        )
         withdrawn: set[str] = set()
         for root in {e["signal_ts"] for key, e in sent_log.items() if key.startswith(f"{sid}:") and e.get("signal_ts")}:
             try:
-                if claim_signal_withdrawal(root, note):
-                    finish_signal_withdrawal(root, note)
+                if withdraw_signal(root, "settings_changed", change):
                     withdrawn.add(root)
             except ValueError:
                 logger.exception("설정 변경 신호 회수 실패: %s", root)

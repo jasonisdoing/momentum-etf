@@ -8,7 +8,7 @@ from utils.strategy_trade_service import (
     load_strategy_trade_view,
     save_account_trade,
 )
-from utils.strategy_trade_threads import delete_signal_thread
+from utils.strategy_trade_threads import withdraw_signal_by_key
 
 router = APIRouter(prefix="/internal/strategy-trade", tags=["strategy-trade"])
 
@@ -38,19 +38,19 @@ def put_strategy_trade_settings(
     return mark_sent_rounds(load_strategy_trade_view(account_id))
 
 
-@router.post("/delete-signal")
-def post_strategy_trade_delete_signal(
+@router.post("/withdraw-signal")
+def post_strategy_trade_withdraw_signal(
     payload: dict = Body(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """슬랙으로 나간 신호 한 건을 지운다 — 주문이 없을 때만.
+    """슬랙으로 나간 신호 한 건을 회수한다 — 주문이 없을 때만.
 
-    body: ``{"key": 화면이 준 발송 기록 키}``. 슬랙 스레드 전체와 우리 쪽 기록을 함께 지운다.
+    body: ``{"key": 화면이 준 발송 기록 키}``. 본문은 표준 회수 한 줄로 바뀌고 앱 답글과 발송 기록은 지운다.
     """
     key = str(payload.get("key") or "").strip()
     if not key:
         raise ValueError("key 가 필요합니다.")
-    return delete_signal_thread(key)
+    return withdraw_signal_by_key(key)
 
 
 @router.post("/slack-test")

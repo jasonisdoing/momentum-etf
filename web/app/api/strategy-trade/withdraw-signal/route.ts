@@ -4,8 +4,8 @@ export const dynamic = "force-dynamic";
 
 const proxy = createFastApiProxy({
   POST: {
-    path: "/internal/strategy-trade/delete-signal",
-    error: "슬랙 신호를 지우지 못했습니다.",
+    path: "/internal/strategy-trade/withdraw-signal",
+    error: "슬랙 신호를 회수하지 못했습니다.",
     forwardBody: true,
   },
 });

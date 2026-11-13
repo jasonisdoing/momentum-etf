@@ -105,7 +105,7 @@ export type RoundRow = {
   // 이 회차를 팔면 다음 매수선이 매도가 이상이라 바로 다시 사게 된다 — 신호를 '매도 후 재매수'로 낸다.
   rebuy_after_sell: boolean;
   sell_reached: boolean;
-  // 오늘 슬랙 신호가 나간 방향(key: 지울 때 쓰는 발송 기록 키, has_ts: 슬랙 메시지 기록이 있어 지울 수 있음), 아직 끝나지 않은 주문의 방향.
+  // 오늘 슬랙 신호가 나간 방향(key: 회수할 때 쓰는 발송 기록 키, has_ts: 슬랙 메시지 기록이 있어 회수할 수 있음), 아직 끝나지 않은 주문의 방향.
   slack_signals: SlackSignal[];
   order_sides: Array<"buy" | "sell">;
   // 증권사 앱(MTS)에 걸려 있는 미체결 수동 주문 — 슬랙 주문을 막는다.
@@ -262,8 +262,8 @@ function StatusBadge({ color, children }: { color: string; children: React.React
 const SIDE_WORDS = { buy: "매수", sell: "매도" } as const;
 
 /** 상태 칸 — 지정가에 닿았으면 도달(빨강), 슬랙 신호·주문이 나갔으면 방향을 붙여 매도슬랙·매수주문처럼(녹색).
- *  슬랙 뱃지는 슬랙 메시지 기록이 있으면 눌러서 지울 수 있다(주문이 있으면 서버가 막는다). */
-function RoundStatus({ row, onDeleteSignal }: { row: RoundRow; onDeleteSignal: (signal: SlackSignal, label: string) => void }) {
+ *  슬랙 뱃지는 슬랙 메시지 기록이 있으면 눌러서 회수할 수 있다(주문이 있으면 서버가 막는다). */
+function RoundStatus({ row, onWithdrawSignal }: { row: RoundRow; onWithdrawSignal: (signal: SlackSignal, label: string) => void }) {
   const currency = useTradeCurrency();
   return (
     <span style={{ display: "inline-flex", gap: 4 }}>
@@ -275,8 +275,8 @@ function RoundStatus({ row, onDeleteSignal }: { row: RoundRow; onDeleteSignal: (
           <button
             key={`slack-${signal.side}`}
             type="button"
-            title="눌러서 이 슬랙 신호 지우기"
-            onClick={() => onDeleteSignal(signal, label)}
+            title="눌러서 이 슬랙 신호 회수"
+            onClick={() => onWithdrawSignal(signal, label)}
             style={{ all: "unset", cursor: "pointer" }}
           >
             {badge}
@@ -444,13 +444,13 @@ function AccountSettingsCard({
   accountId,
   onAccountChange,
   onSaved,
-  onDeleteSignal,
+  onWithdrawSignal,
 }: {
   view: View;
   accountId: string;
   onAccountChange: (accountId: string) => void;
   onSaved: (next: View) => void;
-  onDeleteSignal: (signal: SlackSignal, label: string) => void;
+  onWithdrawSignal: (signal: SlackSignal, label: string) => void;
 }) {
   const toast = useToast();
   const currency = useTradeCurrency();
@@ -875,7 +875,7 @@ function AccountSettingsCard({
               key={details.strategy_id}
               view={details}
               poolLabel={poolLabel(details.pool)}
-              onDeleteSignal={onDeleteSignal}
+              onWithdrawSignal={onWithdrawSignal}
             />
           ) : (
             <div className="card appCard"><div className="card-body appCardBodyTight tableMuted">
@@ -925,12 +925,12 @@ function AccountSettingsCard({
 function StrategySection({
   view,
   poolLabel,
-  onDeleteSignal,
+  onWithdrawSignal,
 }: {
   view: StrategyView | FailedStrategy;
   /** 전략의 가격 출처 표기. */
   poolLabel: string;
-  onDeleteSignal: (signal: SlackSignal, label: string) => void;
+  onWithdrawSignal: (signal: SlackSignal, label: string) => void;
 }) {
   const currency = useTradeCurrency();
   if ("error" in view) {
@@ -1117,7 +1117,7 @@ function StrategySection({
                   ) : null}
                 </td>
                 <td style={{ ...tdStyle, textAlign: "left" }}>
-                  <RoundStatus row={row} onDeleteSignal={onDeleteSignal} />
+                  <RoundStatus row={row} onWithdrawSignal={onWithdrawSignal} />
                 </td>
                 <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatPrice(view.position_prices[String(position)], currency)}</td>
                 <td style={tdStyle}>
@@ -1178,8 +1178,8 @@ export function StrategyTradeClient() {
   const toast = useToast();
   const [view, setView] = useState<View | null>(null);
   const [loading, setLoading] = useState(true);
-  const [deleting, setDeleting] = useState<{ key: string; label: string } | null>(null);
-  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [withdrawing, setWithdrawing] = useState<{ key: string; label: string } | null>(null);
+  const [withdrawBusy, setWithdrawBusy] = useState(false);
 
   const load = useCallback(
     async (accountId: string | null, remembered = false) => {
@@ -1202,30 +1202,30 @@ export function StrategyTradeClient() {
     [toast],
   );
 
-  const askDeleteSignal = useCallback((signal: SlackSignal, label: string) => {
-    setDeleting({ key: signal.key, label });
+  const askWithdrawSignal = useCallback((signal: SlackSignal, label: string) => {
+    setWithdrawing({ key: signal.key, label });
   }, []);
 
-  const confirmDeleteSignal = useCallback(async () => {
-    if (!deleting) return;
-    setDeleteBusy(true);
+  const confirmWithdrawSignal = useCallback(async () => {
+    if (!withdrawing) return;
+    setWithdrawBusy(true);
     try {
-      const resp = await fetch("/api/strategy-trade/delete-signal", {
+      const resp = await fetch("/api/strategy-trade/withdraw-signal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: deleting.key }),
+        body: JSON.stringify({ key: withdrawing.key }),
       });
       const payload = await resp.json();
-      if (!resp.ok) throw new Error(payload?.error ?? "슬랙 신호를 지우지 못했습니다.");
-      toast.success("슬랙 신호를 지웠습니다.");
-      setDeleting(null);
+      if (!resp.ok) throw new Error(payload?.error ?? "슬랙 신호를 회수하지 못했습니다.");
+      toast.success("슬랙 신호를 회수했습니다.");
+      setWithdrawing(null);
       await load(view?.account_id ?? null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "슬랙 신호를 지우지 못했습니다.");
+      toast.error(error instanceof Error ? error.message : "슬랙 신호를 회수하지 못했습니다.");
     } finally {
-      setDeleteBusy(false);
+      setWithdrawBusy(false);
     }
-  }, [deleting, load, toast, view?.account_id]);
+  }, [withdrawing, load, toast, view?.account_id]);
 
   useEffect(() => {
     // 마지막으로 고른 계좌는 브라우저에 기억한다(사고팔기 화면 전용 키).
@@ -1275,28 +1275,28 @@ export function StrategyTradeClient() {
           accountId={view.account_id}
           onAccountChange={(next) => void load(next)}
           onSaved={setView}
-          onDeleteSignal={askDeleteSignal}
+          onWithdrawSignal={askWithdrawSignal}
         />
       </div>
 
       <AppModal
-        open={deleting !== null}
-        title="슬랙 신호 지우기"
-        onClose={() => setDeleting(null)}
+        open={withdrawing !== null}
+        title="슬랙 신호 회수"
+        onClose={() => setWithdrawing(null)}
         footer={
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, width: "100%" }}>
-            <button type="button" className="btn" onClick={() => setDeleting(null)} disabled={deleteBusy}>
+            <button type="button" className="btn" onClick={() => setWithdrawing(null)} disabled={withdrawBusy}>
               취소
             </button>
-            <button type="button" className="btn btn-danger" onClick={() => void confirmDeleteSignal()} disabled={deleteBusy}>
-              {deleteBusy ? "지우는 중…" : "지우기"}
+            <button type="button" className="btn btn-danger" onClick={() => void confirmWithdrawSignal()} disabled={withdrawBusy}>
+              {withdrawBusy ? "회수 중…" : "회수"}
             </button>
           </div>
         }
       >
         <p style={{ margin: 0 }}>
-          {deleting?.label} 메시지와 그 스레드(주문·체결 알림)를 슬랙에서 지우고 발송 기록도 지웁니다.
-          같은 메시지로 나간 다른 신호도 함께 지워지며, 이 신호로 낸 주문이 있으면 지우지 않습니다.
+          {withdrawing?.label} 메시지를 회수 한 줄로 바꾸고 그 스레드 답글과 발송 기록을 지웁니다.
+          같은 메시지로 나간 다른 신호도 함께 회수되며, 이 신호로 낸 주문이 있으면 회수하지 않습니다.
         </p>
       </AppModal>
      </TradeCurrencyContext.Provider>
