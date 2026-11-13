@@ -132,6 +132,15 @@ def _pool_countries(countries: tuple[str, ...]) -> dict[str, ladder.Country]:
     }
 
 
+def trade_display_name(ticker: str, name: str, country: str) -> str:
+    """사고팔기 화면·슬랙·주문 기록에 쓰는 종목 표시 이름 — 한국은 종목명, 미국은 티커."""
+    if country == "us":
+        return ticker
+    if country == "kor":
+        return name
+    raise ValueError(f"사고팔기 표시 이름을 정할 수 없는 국가입니다: {country}")
+
+
 def _pool_tickers(pool: str, kind: ladder.InstrumentKind) -> dict[str, str]:
     from utils.stock_list_io import get_etfs
 
@@ -706,7 +715,7 @@ def _build_strategy_view(
     """전략 하나의 운용 현황(회차 표·상태)을 회차 원장에서 만든다."""
     pool = str(strategy_settings["pool"])
     ticker = str(strategy_settings["ticker"])
-    name = str(strategy_settings["name"])
+    name = trade_display_name(ticker, str(strategy_settings["name"]), country)
     trigger_pct = float(strategy_settings["trigger_pct"])
     round_size = int(strategy_settings["round_size"])
     rate = krw_rate(country)
@@ -957,18 +966,25 @@ def refresh_all_ledgers() -> dict[str, str]:
     return failed
 
 
-def _failed_view(strategy_id: str, entry: dict[str, Any], error: LedgerError | str) -> dict[str, Any]:
-    """운용 현황을 만들 수 없는 전략 — 회차 표 없이 이유만 담는다(다른 전략은 그대로 본다)."""
+def _failed_view(
+    strategy_id: str, entry: dict[str, Any], error: LedgerError | str, country: str | None
+) -> dict[str, Any]:
+    """운용 현황을 만들 수 없는 전략 — 회차 표 없이 이유만 담는다(다른 전략은 그대로 본다).
+
+    가격 출처 풀이 사라져 국가를 모르면(`country` 가 None) 저장된 종목명을 그대로 보인다.
+    """
+    name = str(entry["name"])
+    label = name if country is None else trade_display_name(str(entry["ticker"]), name, country)
     return {
         "strategy_id": strategy_id,
-        "label": str(entry["name"]),
+        "label": label,
         "pool": str(entry["pool"]),
         "ticker": str(entry["ticker"]),
         "config": {
             "trigger_pct": entry["trigger_pct"],
             "round_size": entry["round_size"],
             "rounds": entry["rounds"],
-            "index_name": str(entry["name"]),
+            "index_name": label,
         },
         "error": str(error),
         "rounds": [],
@@ -1034,12 +1050,15 @@ def _build_views(
     for sid, entry in strategies.items():
         account_id = entry["account_id"]
         account_ledgers = ledgers[account_id]
+        country = pool_countries.get(entry["pool"])
         if entry["ticker"] not in source_tickers.get(entry["pool"], {}):
-            view = _failed_view(sid, entry, f"가격 출처 '{entry['pool']}'에 종목이 없습니다. 종목을 다시 선택하세요.")
+            view = _failed_view(
+                sid, entry, f"가격 출처 '{entry['pool']}'에 종목이 없습니다. 종목을 다시 선택하세요.", country
+            )
         elif isinstance(account_ledgers, str):
-            view = _failed_view(sid, entry, account_ledgers)
+            view = _failed_view(sid, entry, account_ledgers, country)
         elif isinstance(ledger := account_ledgers[entry["ticker"]], LedgerError):
-            view = _failed_view(sid, entry, ledger)
+            view = _failed_view(sid, entry, ledger, country)
         else:
             state = states[account_id]
             try:
@@ -1070,7 +1089,7 @@ def _build_views(
                     ]
                     _attach_trade_history(view, ledger, cached_days_by_account[cache_key], orders)
             except (RuntimeError, ValueError) as error:
-                view = _failed_view(sid, entry, str(error))
+                view = _failed_view(sid, entry, str(error), country)
         # 운용 계좌 — 화면 카드 머리·슬랙 문구·주문 계좌가 이것을 쓴다.
         views.append({**view, "account_id": account_id, "account_name": names.get(account_id, account_id)})
     return views

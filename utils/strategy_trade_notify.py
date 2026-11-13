@@ -2,15 +2,14 @@
 
 거래시간 중 2분마다 실행돼, **매수·매도 지정가에 현재가가 닿은 회차가 있을 때만**
 슬랙을 보낸다. 트리거가 없으면 아무것도 보내지 않는다. 메시지는 **전략(종목)마다 따로**
-보내고, 보낼 것(신호·재알림·체결 확인)이 있는 전략에만 보낸다. 보유 0 인 전략은 가격과 상관없이
+보내고, 보낼 것(신호·체결 확인)이 있는 전략에만 보낸다. 보유 0 인 전략은 가격과 상관없이
 정해진 1호 매수 구간 안의 배치에서 1호 매수 신호가 난다(서비스가 판정).
 
 중복 방지 · 체결 확인
 --------------------
 2분 간격으로 판정하므로 같은 조건이 유지되면 하루에 수십 번 발송될 수 있다. 그래서
-``전략:회차-동작`` 단위로 처음 한 번만 전체 메시지를 보내고, 신호가 살아 있는 동안에는
-한 시간 간격으로 한 줄 리마인더만 보낸다 — 리마인더는 처음 신호를 보낸 메시지(``signal_ts``)의
-스레드에 단다. 발송 이력은
+``전략:회차-동작`` 단위로 그날 처음 한 번만 메시지를 보내고 다시 알리지 않는다. 체결 확인은
+처음 신호를 보낸 메시지(``signal_ts``)의 스레드에 단다. 발송 이력은
 ``system_config.strategy_trade_settings.sent_log`` 에
 ``{"kospi200:2-buy": {"at": ..., "strategy_id": ..., "ticker": ..., "name": ..., "round": ...,
 "index_text": ..., "signal_ts": ..., "held_count": ...}}`` 형태로 남기며, 발송에 성공했을 때만 갱신한다.
@@ -70,9 +69,6 @@ def _save_sent_log(sent_log: dict[str, dict[str, Any]]) -> None:
     )
 
 
-# 같은 신호가 계속 살아 있을 때 다시 알리는 주기. 2분마다 도는 배치가 매번 보내면
-# 소음이라 첫 발송 뒤에는 이 간격으로만 한 줄 리마인더를 보낸다.
-_REPEAT_INTERVAL_SECONDS = 60 * 60
 _WITHDRAWAL_GAP_FRACTION = 0.20
 
 
@@ -152,31 +148,6 @@ def _confirm_line(pending: dict[str, Any], index: dict[str, Any] | None, country
     if pending.get("arbitrary_id"):
         return f"✅ {pending['name']} 임의 매도 확인 · {detail}"
     return build_confirm_line(f"{pending['round']}호 {pending['name']}", pending["action"], detail)
-
-
-def _reach_text(trigger: dict[str, Any]) -> str:
-    """신호가 난 까닭 — 지정가 도달, 또는 정해진 시각(한국시간)의 1호 매수."""
-    return (
-        f"{trigger['entry_time']} 매수"
-        if trigger.get("close_entry")
-        else f"{_level(trigger['index_level'], trigger['country'])} 도달"
-    )
-
-
-def build_repeat_line(trigger: dict[str, Any]) -> str:
-    """재알림 한 줄 — 무엇을 얼마에 사고팔지만 담는다. 본문은 첫 발송에서 이미 보냈다."""
-    if trigger.get("arbitrary_id"):
-        return (
-            f"<!channel> 🔴 *{trigger['name']} 임의 매도 · {trigger['quantity']:,}주* "
-            f"{_reach_text(trigger)} (매수 {_level(trigger['fill_price'], trigger['country'])})"
-        )
-    emoji = "🔴" if trigger["action"] == "sell" else "🔵"
-    word = "지금 매도 후 재매수!" if trigger["rebuy"] else "지금 매도!" if trigger["action"] == "sell" else "지금 매수!"
-    return (
-        f"<!channel> {emoji} *{trigger['round']}호 {trigger['name']} {trigger['quantity']:,}주 {word}* "
-        f"{_reach_text(trigger)} "
-        f"(현재 {_index_text(trigger['index'], trigger['country'])})"
-    )
 
 
 def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
@@ -489,7 +460,7 @@ def _send_order_messages(strategy_view: dict[str, Any], triggers: list[dict[str,
 
 
 def _log_entry(trigger: dict[str, Any], held_counts: dict[str, int], stamp: str, signal_ts: str) -> dict[str, Any]:
-    """발송 이력 한 건 — signal_ts 는 이 신호를 처음 알린 메시지(재알림이 달리는 스레드의 뿌리)다."""
+    """발송 이력 한 건 — signal_ts 는 이 신호를 처음 알린 메시지(체결 확인이 달리는 스레드의 뿌리)다."""
     return {
         "at": stamp,
         "action": trigger["action"],
@@ -559,43 +530,6 @@ def _send_confirms(
             failed += 1
             sent_log.update({_trigger_key(pending): pending for pending in group})
     return sent, failed
-
-
-def _send_repeats(
-    strategy_view: dict[str, Any],
-    repeats: list[dict[str, Any]],
-    sent_log: dict[str, dict[str, Any]],
-    held_counts: dict[str, int],
-    stamp: str,
-) -> tuple[int, int, int, list[dict[str, Any]]]:
-    """재알림을 신호를 처음 알린 메시지의 스레드로 보낸다 — (보낸 메시지 수, 실패 수, 주문 메시지 실패 수, 보낸 신호).
-
-    뿌리 메시지가 기록에 없는 옛 이력은 채널에 새로 올리고 그 메시지를 뿌리로 삼는다.
-    """
-    from utils.strategy_trade_threads import record_signal_thread
-
-    groups: dict[str | None, list[dict[str, Any]]] = {}
-    for trigger in repeats:
-        groups.setdefault(sent_log[_trigger_key(trigger)].get("signal_ts"), []).append(trigger)
-    sent = failed = order_failed = 0
-    delivered: list[dict[str, Any]] = []
-    for root, group in groups.items():
-        ts = _send_live_message(
-            strategy_view, "\n".join(build_repeat_line(trigger) for trigger in group), thread_ts=root
-        )
-        if not ts:
-            failed += 1
-            continue
-        sent += 1
-        thread_ts = root or ts
-        entries = [_log_entry(trigger, held_counts, stamp, thread_ts) for trigger in group]
-        if root is None:
-            record_signal_thread(thread_ts, entries)
-        order_failed += _send_order_messages(strategy_view, group, thread_ts)
-        for entry in entries:
-            sent_log[_trigger_key(entry)] = entry
-        delivered.extend(group)
-    return sent, failed, order_failed, delivered
 
 
 def _price_returned(entries: list[dict[str, Any]], strategy: dict[str, Any], now: datetime) -> str | None:
@@ -734,7 +668,7 @@ def notify_strategy_trade() -> dict[str, Any]:
     }
     triggers = [trigger for strategy in open_strategies for trigger in collect_triggers(strategy)]
     if triggers:
-        # 주문이 진행 중이면 최초 신호와 재알림 모두 생략한다. 매도 후 재매수는 양쪽을 확인한다.
+        # 주문이 진행 중이면 신호를 생략한다. 매도 후 재매수는 양쪽을 확인한다.
         in_flight = active_order_keys([strategy["strategy_id"] for strategy in open_strategies])
         triggers = [
             trigger
@@ -745,10 +679,8 @@ def notify_strategy_trade() -> dict[str, Any]:
         ]
     today = now.strftime("%Y-%m-%d")
 
-    # 처음 보는 신호는 전 회차 현황이 담긴 본문으로, 이미 보낸 신호는 아직 살아 있는 동안
-    # 한 시간마다 한 줄 리마인더로 보낸다. 지정가에 닿아 있는데 주문을 안 넣은 채로
-    # 하루가 지나가는 것을 막기 위한 것이다. 메시지는 **전략(종목)마다 따로**, 보낼 것이 있는
-    # 전략에만 보낸다.
+    # 그날 처음 보는 신호만 전 회차 현황이 담긴 본문으로 보낸다(이미 보낸 신호는 다시 알리지 않는다).
+    # 메시지는 **전략(종목)마다 따로**, 보낼 것이 있는 전략에만 보낸다.
     # ① 요청해 둔 주문이 체결됐는지 먼저 본다. 체결됐으면 확인 한 줄을 보내고 기록을 지운다 —
     #    지워야 다음에 같은 회차 신호가 나면 다시 전체 메시지로 나간다.
     #    이 검사는 트리거 유무와 무관하게 돌아야 한다: 주문을 넣는 순간 그 회차가 보유로 바뀌어
@@ -771,19 +703,15 @@ def notify_strategy_trade() -> dict[str, Any]:
 
     sent_count = failed_count = order_failed = 0
     fresh_all: list[dict[str, Any]] = []
-    repeats_all: list[dict[str, Any]] = []
     stamp = now.isoformat()
     for strategy_view in open_strategies:
         sid = strategy_view["strategy_id"]
-        # ② 남은 신호 — 처음이면 전체 메시지, 이미 보냈으면 한 시간 간격으로 재알림.
+        # ② 남은 신호 — 그날 처음 보는 신호만 보낸다.
         fresh: list[dict[str, Any]] = []
-        repeats: list[dict[str, Any]] = []
         for trigger in (t for t in triggers if t["strategy_id"] == sid):
             last = _parse_sent_at((sent_log.get(_trigger_key(trigger)) or {}).get("at"))
             if last is None or last.strftime("%Y-%m-%d") != today:
                 fresh.append(trigger)
-            elif (now - last).total_seconds() >= _REPEAT_INTERVAL_SECONDS:
-                repeats.append(trigger)
 
         own_confirmed = [pending for pending in confirmed if str(pending.get("strategy_id")) == sid]
         # 신호 메시지가 기록된 확인은 그 스레드로, 없는 확인(옛 기록)은 새 신호 본문과 함께 채널로 보낸다.
@@ -812,11 +740,6 @@ def notify_strategy_trade() -> dict[str, Any]:
             fresh_all.extend(fresh)
             for entry in entries:
                 sent_log[_trigger_key(entry)] = entry
-        sent, failed, order_failed_here, delivered = _send_repeats(strategy_view, repeats, sent_log, held_counts, stamp)
-        sent_count += sent
-        failed_count += failed
-        order_failed += order_failed_here
-        repeats_all.extend(delivered)
         _keep_latest_buy(sent_log, sid)
 
     if not sent_count and not failed_count:
@@ -840,10 +763,8 @@ def notify_strategy_trade() -> dict[str, Any]:
         parts.append(f"체결확인 {len(confirmed)}건")
     if fresh_all:
         parts.append(f"신호 {len(fresh_all)}건")
-    if repeats_all:
-        parts.append(f"재알림 {len(repeats_all)}건")
     if failed_count:
         parts.append(f"슬랙 전송 실패 {failed_count}건")
     if order_failed:
         parts.append(f"주문 메시지 실패 {order_failed}건")
-    return {"sent": sent_count > 0, "reason": " · ".join(parts), "triggers": fresh_all or repeats_all or triggers}
+    return {"sent": sent_count > 0, "reason": " · ".join(parts), "triggers": fresh_all or triggers}

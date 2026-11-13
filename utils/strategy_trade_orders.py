@@ -629,24 +629,10 @@ def _config():
     return db[_CONFIG_COLLECTION]
 
 
-def register_signal_thread(channel: str, thread_ts: str, message_count: int) -> bool:
-    """신호 메시지 스레드와 그 안의 주문 메시지 수를 기록한다 — 메시지가 모두 체결되면 스레드를 완료로 본다.
-
-    재알림처럼 이미 기록된 스레드에 주문 메시지가 더해지면 수를 늘리고 미완료로 되돌린다.
-    완료였던 스레드를 다시 연 경우 True 를 돌려준다.
-    """
+def register_signal_thread(channel: str, thread_ts: str, message_count: int) -> None:
+    """새 신호 메시지 스레드와 그 안의 주문 메시지 수를 기록한다 — 메시지가 모두 체결되면 스레드를 완료로 본다."""
     today = _now().strftime("%Y-%m-%d")
     config = _config()
-    doc = config.find_one({"_id": _SETTINGS_KEY}, {"signal_threads": 1}) or {}
-    existing = next(
-        (t for t in doc.get("signal_threads") or [] if t["channel"] == channel and t["thread_ts"] == thread_ts), None
-    )
-    if existing is not None:
-        config.update_one(
-            {"_id": _SETTINGS_KEY, "signal_threads.thread_ts": thread_ts},
-            {"$inc": {"signal_threads.$.message_count": message_count}, "$set": {"signal_threads.$.completed": False}},
-        )
-        return bool(existing["completed"])
     config.update_one({"_id": _SETTINGS_KEY}, {"$pull": {"signal_threads": {"date": {"$lt": today}}}}, upsert=True)
     thread = {
         "channel": channel,
@@ -656,7 +642,6 @@ def register_signal_thread(channel: str, thread_ts: str, message_count: int) -> 
         "completed": False,
     }
     config.update_one({"_id": _SETTINGS_KEY}, {"$push": {"signal_threads": thread}}, upsert=True)
-    return False
 
 
 def filled_signal_threads() -> list[dict[str, Any]]:
