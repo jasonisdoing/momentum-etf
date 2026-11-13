@@ -163,7 +163,7 @@ def current_positions(settings: dict[str, Any] | None = None) -> dict[str, Any]:
 def _current_positions(settings: dict[str, Any], *, start_date: str | None, market: dict[str, Any]) -> dict[str, Any]:
     pool = settings["pool"]
     context = load_context(settings)
-    # 확정 실행 — 이 결과의 daily 를 페이로드에 실어 합성 슬리브 몫이 같은 실행을 읽는다.
+    # 확정 실행 — 화면·합성이 같은 실행 결과를 읽는다.
     try:
         simulated = run_backtest(DEFAULT_BACKTEST_MONTHS, settings, context, start_date=start_date, market=market)
     except RuntimeError as error:
@@ -178,7 +178,6 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             "planned_exits": [],
             "planned_entries": [],
             "planned_entry_weights": {},
-            "daily": [],
         }
     name_by, industry_by = context["name_by"], context["industry_by"]
     panel, signals = context["panel"], context["signals"]
@@ -300,9 +299,6 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     target_entries = [dict(row) for row in entries]
     for held in holdings:
         held["is_exit_forecast"] = False
-    # 합성 슬리브 몫이 읽는 일별 곡선 — 이 현황을 만든 **같은 실행**의 값이다(strategy_logic.md 「장중 잠정 실행」).
-    # 장중이면 아래에서 잠정 실행의 곡선(오늘 잠정 봉 포함)으로 바뀐다.
-    engine_daily = simulated["daily"]
 
     if quotes["live"]:
         # ── 장중 실행 — 실시간 가격을 **마지막 봉**으로 붙인 같은 엔진의 잠정 실행이다
@@ -342,7 +338,6 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         )
         holdings = live_result["open_positions"]
         exited_today = live_result["exited_today"]
-        engine_daily = live_result["daily"]
         mark_engine_statuses(holdings, live_result["planned_exits"])
         for held in holdings:
             if held["status"] == "sell":
@@ -470,8 +465,6 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         "holdings": holdings,
         "target_holdings": target_holdings,
         "target_entries": target_entries,
-        # 이 현황을 만든 엔진 실행의 일별 곡선 — 합성 슬리브 몫이 같은 실행 결과를 읽는다.
-        "daily": engine_daily,
         # 순위는 잠정 진입 자격 기준이라 체결 예정 종목이 오늘 자격 밖이면 값이 없다.
         "planned_entries": [{**row, "rank": rank_by_ticker.get(row["ticker"])} for row in entries],
         "exited_today": exited_today,

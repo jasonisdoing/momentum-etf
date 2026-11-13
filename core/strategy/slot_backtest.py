@@ -404,7 +404,7 @@ def run_slot_backtest(
     # 체결 목록·거래 통계에 **보유중 행도 포함**한다(2026-09) — 청산분만 보여주면 장기
     # 이평 설정에서 승자(계속 보유)는 표·통계에서 빠지고 먼저 꺾인 패자만 잡혀, 총수익은
     # 큰데 승률·평균이익이 초라해 보이는 착시가 났다. 보유중 행은 청산일 없음·청산가
-    # 자리에 현재가(마지막 봉)·수익률은 평가 기준이다. 합성 체결 목록과 같은 형태다.
+    # 자리에 현재가(마지막 봉)·수익률은 평가 기준이다.
     open_trade_rows = [
         {
             "ticker": row["ticker"],
@@ -457,8 +457,6 @@ def run_slot_backtest(
         "pending_entries": [
             {"ticker": ticker, "sleeve_weight_pct": pending_entry_weights[ticker]} for ticker in pending_entry_tickers
         ],
-        # 빈 슬롯·잔여 현금 비중 — 종목 비중과 합쳐 100 이 된다. 반올림 없음(계산 소비자용).
-        "sleeve_cash_weight_pct": cash / sleeve_value * 100 if sleeve_value > 0 else 100.0,
         "exited_today": [t for t in trades if t["exit_date"] == str(last_day.date())],
         # 소수 6자리 — 화면은 2자리로 보여주지만, 연간·월간·주간 표와 튜닝 지표는 이 값을
         # **복리로 합성**한다. 2자리로 잘라 보내면 하루치 오차가 250일 쌓여 합계가 총수익과

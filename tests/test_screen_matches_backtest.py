@@ -348,7 +348,6 @@ class PortfolioMixStateTest(unittest.TestCase):
         if frame.iloc[0].isna().any():
             self.assertAlmostEqual(result["daily"][0]["cash_weight_pct"], 60)
             self.assertEqual([t["date"] for t in result["trades"] if t["ticker"] == "B"], [dates[-1]])
-        self.assertEqual(screen["sleeve_cash_weight_pct"], result["sleeve_cash_weight_pct"])
         spec = SleeveSpec("a", "portfolio", "test", settings)
         with (
             patch("utils.mix_sleeve.current_state", return_value=screen),
@@ -360,8 +359,8 @@ class PortfolioMixStateTest(unittest.TestCase):
             self.assertEqual(source["sleeve_weight_pct"], target["drift_pct"])
             self.assertEqual(source["price"], target["price"])
             self.assertGreaterEqual(target["drift_pct"], 0)
-        self.assertGreaterEqual(result["sleeve_cash_weight_pct"], 0)
-        self.assertAlmostEqual(sum(t["drift_pct"] for t in state.targets) + result["sleeve_cash_weight_pct"], 100)
+        # 종목 비중 합은 100 을 넘지 않는다(나머지는 슬리브 현금).
+        self.assertLessEqual(sum(t["drift_pct"] for t in state.targets), 100 + 1e-9)
         if cash == 0:
             self.assertFalse([trade for trade in result["trades"] if trade["reason"] == "리밸런싱"])
             self.assertEqual([round(t["drift_pct"], 6) for t in state.targets], [36, 32, 32])
