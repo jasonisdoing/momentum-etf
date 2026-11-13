@@ -29,8 +29,8 @@ from utils.strategy_trade_ledger import (
     forget_ledgers,
     read_cached_trade_days,
     read_ledgers,
+    recent_trades,
     refresh_ledgers,
-    round_history,
 )
 from utils.strategy_trade_market import krw_rate
 
@@ -541,30 +541,52 @@ def _paired_trade_rounds(trades: list[Trade], orders: list[dict[str, Any]]) -> d
     }
 
 
+def _trade_cycles(history: list[Trade], quantity_now: int) -> tuple[int, float | None, list[str]]:
+    """체결 목록의 사이클 — (마지막 사이클의 첫 체결 위치, 그 사이클 1호 체결가, 보유가 모두 빈 날짜들).
+
+    사이클은 보유 0에서 산 1호부터 보유가 다시 0이 될 때까지다. 창 이전부터 이어진 사이클은 1호 체결가를 몰라 None 이다.
+    """
+    quantity = quantity_now - sum(trade.shares if trade.buy else -trade.shares for trade in history)
+    start, first_price, ended = 0, None, []
+    for index, trade in enumerate(history):
+        if trade.buy and quantity == 0:
+            start, first_price = index, trade.price
+        quantity += trade.shares if trade.buy else -trade.shares
+        if not trade.buy and quantity == 0:
+            ended.append(trade.day)
+    return start, first_price, sorted(set(ended))
+
+
 def _attach_trade_history(
     view: dict[str, Any], ledger: Ledger, cached_days: dict[date, list[dict[str, Any]]], orders: list[dict[str, Any]]
 ) -> None:
-    """사다리 위치별 가격(`position_prices`)과 날짜별 매수·매도를 체결가의 위치마다 체결 순서대로 붙인다.
+    """최근 30일 체결을 사다리 위치별·날짜별로 붙인다 — 사이클이 바뀌어도 이어서 보여 준다.
 
-    ``trades_by_position`` = {위치: {날짜: ["buy", "sell", …]}}. 위치는 지금 1호 체결가 기준으로 체결가에 가장 가까운
-    칸이다. 같은 날 체결된 매도·재매수 주문 쌍은 해당 회차의 칸에 함께 표시한다.
-    지금 사이클의 체결만 담는다 — 1호를 마지막으로 판 체결(그때 보유가 모두 비었다) 뒤부터다. 보유가 없으면 비어 있다.
+    ``trades_by_position`` = {위치: {날짜: ["buy", "sell", …]}}. 위치 기준(`position_prices`)은 보유 중이면 지금 1호
+    체결가, 보유가 없으면 직전 사이클의 1호 체결가(`history_base`)다. 지난 사이클의 체결은 회차가 아니라 체결가에
+    가장 가까운 칸에 놓인다. 같은 날 체결된 매도·재매수 주문 쌍은 지금 사이클 안에서만 해당 회차의 칸에 함께 표시한다.
+    ``cycle_end_days`` 는 보유가 모두 빈 날짜다.
     """
     trades: dict[int, dict[str, list[str]]] = {}
     view["trades_by_position"] = trades
+    history = recent_trades(ledger, view["ticker"], cached_days)
+    cycle_start, last_first_price, view["cycle_end_days"] = _trade_cycles(history, ledger.quantity)
     first = next((row for row in view["rounds"] if row["round"] == 1 and row["held"]), None)
-    if first is None:
-        # 보유가 없으면 사다리 기준(1호 체결가)이 없어 위치 가격도 없다.
+    view["history_base"] = "current" if first is not None else "last_cycle"
+    base_price = first["fill_price"] if first is not None else last_first_price
+    if base_price is None:
+        # 기준이 될 1호 체결가가 없다(30일 안에 1호 매수가 없다) — 위치를 지어내지 않는다.
         view["position_prices"] = {}
         return
     trigger_pct = float(view["config"]["trigger_pct"])
-    history = round_history(ledger, view["ticker"], cached_days)
-    paired_rounds = _paired_trade_rounds(history, orders)
+    # 회차 쌍 연결은 지금 보유 중인 사이클에만 쓴다 — 지난 사이클의 회차 번호는 지금 회차 위치와 다르다.
+    current = history[cycle_start:] if first is not None else []
+    paired_rounds = {cycle_start + index: round_no for index, round_no in _paired_trade_rounds(current, orders).items()}
     round_positions = {row["round"]: row["position"] for row in view["rounds"]}
     for index, trade in enumerate(history):
         position = round_positions.get(paired_rounds.get(index))
         if position is None:
-            position = ladder.ladder_position(trade.price, first["fill_price"], trigger_pct)
+            position = ladder.ladder_position(trade.price, base_price, trigger_pct)
         badges = trades.setdefault(position, {}).setdefault(trade.day, [])
         side = "buy" if trade.buy else "sell"
         if trade.shares > trade.arbitrary_shares:
@@ -575,7 +597,7 @@ def _attach_trade_history(
     positions = [row["position"] for row in view["rounds"]] + list(trades)
     view["position_prices"] = {
         position: ladder.round_to_tick(
-            first["fill_price"] * ladder.down_ratio(trigger_pct) ** (position - 1),
+            base_price * ladder.down_ratio(trigger_pct) ** (position - 1),
             kind=view["instrument_kind"],
             country=view["country"],
         )

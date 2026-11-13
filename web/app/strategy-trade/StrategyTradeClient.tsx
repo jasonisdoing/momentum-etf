@@ -130,10 +130,14 @@ export type StrategyView = {
   index: IndexStatus;
   status: Status;
   arbitrary_lots: Array<{ id: string; quantity: number; fill_price: number; bought_on: string; sell_limit: number }>;
-  /** 사다리 위치별 · 날짜별 매수·매도(체결 순서). 같은 날 체결된 매도·재매수 쌍은 회차별로 묶는다. */
+  /** 최근 30일 사다리 위치별 · 날짜별 매수·매도(체결 순서). 지난 사이클의 체결은 체결가에 가장 가까운 위치에 놓인다. */
   trades_by_position: Record<string, Record<string, TradeSide[]>>;
-  /** 사다리 위치별 가격 — 1호 체결가 × (1 − 간격%)^(위치−1)을 호가로 맞춘 값(보유가 없으면 회차의 1호 진입 미리보기 지정가). */
+  /** 사다리 위치별 가격 — 기준 1호 체결가 × (1 − 간격%)^(위치−1)을 호가로 맞춘 값. 기준이 없으면 비어 있다. */
   position_prices: Record<string, number>;
+  /** 위치 기준 — 지금 보유 중인 1호(current) 또는 직전 사이클의 1호(last_cycle). */
+  history_base: "current" | "last_cycle";
+  /** 보유가 모두 빈 날짜(사이클 종료) — 표의 날짜 칸 오른쪽에 경계선을 긋는다. */
+  cycle_end_days: string[];
   // 체결 이력(회차 원장)을 계산한 시각 — 사고팔기 알림 배치가 갱신한다(KST ISO).
   ledger_at: string;
   rounds: RoundRow[];
@@ -949,6 +953,10 @@ function StrategySection({
     ...new Set(Object.values(view.trades_by_position).flatMap((byDay) => Object.keys(byDay))),
   ].sort();
   const columnCount = 6 + tradeDays.length;
+  const cycleEnds = new Set(view.cycle_end_days);
+  // 사이클이 끝난 날 칸 오른쪽에 경계선 — 그 뒤 체결은 새 사이클이다.
+  const cycleEndStyle = (day: string): React.CSSProperties =>
+    cycleEnds.has(day) ? { borderRight: "2px solid var(--text-muted)" } : {};
   const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
   // 사다리 위치마다 한 행 — 회차가 없는 위치(건너뛴 칸)도 그 가격대의 매매와 함께 행으로 둬 간격을 보여 준다.
   const positions = [...view.rounds.map((row) => row.position), ...Object.keys(view.trades_by_position).map(Number)];
@@ -989,6 +997,9 @@ function StrategySection({
         ) : null}
         <span style={{ color: "var(--text-muted)" }}>
           체결 이력 {view.ledger_at.slice(5, 16).replace("T", " ")} 기준
+          {view.history_base === "last_cycle" && Object.keys(view.position_prices).length > 0
+            ? " · 위치는 직전 사이클 1호 체결가 기준"
+            : ""}
         </span>
         {status.waiting_first_entry ? (
           <span style={{ fontWeight: 700 }}>
@@ -1051,13 +1062,14 @@ function StrategySection({
               {tradeDays.map((day) => (
                 <th
                   key={day}
-                  title={day}
+                  title={cycleEnds.has(day) ? `${day} · 보유가 모두 비었습니다(사이클 종료)` : day}
                   style={{
                     ...thStyle,
                     textAlign: "center",
                     whiteSpace: "nowrap",
                     minWidth: ROUND_TABLE_DAY_MIN_WIDTH,
                     ...(day === today ? { color: TODAY_COLOR, fontWeight: 800 } : null),
+                    ...cycleEndStyle(day),
                   }}
                 >
                   {Number(day.slice(5, 7))}월 {Number(day.slice(8, 10))}일({WEEKDAY_NAMES[new Date(`${day}T00:00:00Z`).getUTCDay()]})
@@ -1069,7 +1081,7 @@ function StrategySection({
             <RecentPriceRow index={index} columnCount={columnCount} kind="high" />
             {slots.map(({ position, row, trades }, rowIdx) => {
               const tradeCells = tradeDays.map((day) => (
-                <td key={day} style={{ ...tdStyle, textAlign: "center" }}>
+                <td key={day} style={{ ...tdStyle, textAlign: "center", ...cycleEndStyle(day) }}>
                   {trades[day] ? <DailyTradeBadges sides={trades[day]} /> : null}
                 </td>
               ));

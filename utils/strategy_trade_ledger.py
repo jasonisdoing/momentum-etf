@@ -171,8 +171,11 @@ def read_cached_trade_days(account_id: str, as_of: date) -> dict[date, list[dict
     return {date.fromisoformat(doc["_id"].removeprefix(prefix)): doc["rows"] for doc in days}
 
 
-def round_history(ledger: Ledger, ticker: str, cached_days: dict[date, list[dict[str, Any]]]) -> list[Trade]:
-    """원장에 이어지는 과거 체결을 붙여 회차를 재생한다. 캐시가 비면 그 이전으로 넘어가지 않는다."""
+def recent_trades(ledger: Ledger, ticker: str, cached_days: dict[date, list[dict[str, Any]]]) -> list[Trade]:
+    """최근 `LOOKBACK_DAYS` 일의 체결(오래된 순) — 원장 체결 앞에 일별 캐시의 과거 체결을 이어 붙인다.
+
+    사이클(보유가 비는 시점)로 자르지 않는다. 캐시가 비거나 창 이전 보유를 넘어서는 체결이 나오면 그 이전으로 넘어가지 않는다.
+    """
     start = ledger.as_of - timedelta(days=LOOKBACK_DAYS)
     start_iso = start.isoformat()
     trades = tuple(trade for trade in ledger.trades if trade.day >= start_iso)
@@ -194,15 +197,7 @@ def round_history(ledger: Ledger, ticker: str, cached_days: dict[date, list[dict
             if opening < 0:
                 break
         day -= timedelta(days=1)
-
-    cycle: list[Trade] = []
-    quantity = ledger.quantity
-    for trade in (*reversed(trades), *past):
-        if quantity == 0:
-            break
-        cycle.append(trade)
-        quantity += -trade.shares if trade.buy else trade.shares
-    return list(reversed(cycle))
+    return [*reversed(past), *trades]
 
 
 REGULAR_SELL = "regular"
