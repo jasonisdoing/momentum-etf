@@ -250,7 +250,7 @@ function StatusBadge({ color, compact, children }: { color: string; compact?: bo
   return (
     <span
       style={{
-        padding: compact ? "0 3px" : "1px 5px",
+        padding: compact ? "0 2px" : "1px 5px",
         borderRadius: compact ? 3 : 4,
         fontSize: compact ? 11 : "var(--fs-sm)",
         lineHeight: compact ? 1.4 : undefined,
@@ -272,7 +272,8 @@ function hasRoundStatus(row: RoundRow): boolean {
 }
 
 /** 상태 칸 — 지정가에 닿았으면 도달(빨강), 슬랙 신호·주문이 나갔으면 방향을 붙여 매도슬랙·매수주문처럼(녹색).
- *  슬랙 뱃지는 슬랙 메시지 기록이 있으면 눌러서 회수할 수 있다(주문이 있으면 서버가 막는다). */
+ *  슬랙 뱃지는 슬랙 메시지 기록이 있으면 눌러서 회수할 수 있다(주문이 있으면 서버가 막는다).
+ *  `compact` 는 좁은 칸용 — 회차 번호를 글자로 앞에 두고 뱃지 여백·간격을 줄인다. */
 function RoundStatus({
   row,
   compact,
@@ -283,41 +284,42 @@ function RoundStatus({
   onWithdrawSignal: (signal: SlackSignal, label: string) => void;
 }) {
   const currency = useTradeCurrency();
+  const badges = [
+    ...(row.buy_reached || row.sell_reached
+      ? [<StatusBadge key="reached" color="var(--up-color, #d64545)" compact={compact}>도달</StatusBadge>]
+      : []),
+    ...row.slack_signals.map((signal) => {
+      const label = `${SIDE_WORDS[signal.side]}슬랙`;
+      const badge = <StatusBadge color="var(--tblr-green, #2fb344)" compact={compact}>{label}</StatusBadge>;
+      return signal.has_ts ? (
+        <button
+          key={`slack-${signal.side}`}
+          type="button"
+          title="눌러서 이 슬랙 신호 회수"
+          onClick={() => onWithdrawSignal(signal, label)}
+          style={{ all: "unset", cursor: "pointer" }}
+        >
+          {badge}
+        </button>
+      ) : (
+        <span key={`slack-${signal.side}`}>{badge}</span>
+      );
+    }),
+    ...row.order_sides.map((side) => (
+      <StatusBadge key={`order-${side}`} color="var(--tblr-green, #2fb344)" compact={compact}>
+        {SIDE_WORDS[side]}주문
+      </StatusBadge>
+    )),
+    ...row.manual_orders.map((order, index) => (
+      <span key={`manual-${index}`} title={`${formatCurrencyPrice(order.price, currency)} · ${order.quantity.toLocaleString()}주`}>
+        <StatusBadge color="var(--tblr-green, #2fb344)" compact={compact}>수동{SIDE_WORDS[order.side]}주문</StatusBadge>
+      </span>
+    )),
+  ];
   return (
-    <span style={{ display: "inline-flex", gap: 4 }}>
-      {/* 좁은 칸(compact)은 회차 번호를 도달 뱃지에 합쳐 `2호도달`로, 도달 전이면 번호만 글자로 앞에 둔다. */}
-      {row.buy_reached || row.sell_reached ? (
-        <StatusBadge color="var(--up-color, #d64545)" compact={compact}>{compact ? `${row.round}호도달` : "도달"}</StatusBadge>
-      ) : compact ? (
-        <span>{row.round}호</span>
-      ) : null}
-      {row.slack_signals.map((signal) => {
-        const label = `${SIDE_WORDS[signal.side]}슬랙`;
-        const badge = <StatusBadge color="var(--tblr-green, #2fb344)" compact={compact}>{label}</StatusBadge>;
-        return signal.has_ts ? (
-          <button
-            key={`slack-${signal.side}`}
-            type="button"
-            title="눌러서 이 슬랙 신호 회수"
-            onClick={() => onWithdrawSignal(signal, label)}
-            style={{ all: "unset", cursor: "pointer" }}
-          >
-            {badge}
-          </button>
-        ) : (
-          <span key={`slack-${signal.side}`}>{badge}</span>
-        );
-      })}
-      {row.order_sides.map((side) => (
-        <StatusBadge key={`order-${side}`} color="var(--tblr-green, #2fb344)" compact={compact}>
-          {SIDE_WORDS[side]}주문
-        </StatusBadge>
-      ))}
-      {row.manual_orders.map((order, index) => (
-        <span key={`manual-${index}`} title={`${formatCurrencyPrice(order.price, currency)} · ${order.quantity.toLocaleString()}주`}>
-          <StatusBadge color="var(--tblr-green, #2fb344)" compact={compact}>수동{SIDE_WORDS[order.side]}주문</StatusBadge>
-        </span>
-      ))}
+    <span style={{ display: "inline-flex", gap: compact ? 2 : 4, alignItems: "center" }}>
+      {compact ? <span>{row.round}호</span> : null}
+      {badges}
     </span>
   );
 }
@@ -667,10 +669,11 @@ function AccountSettingsCard({
       colId: "roundStatus",
       headerName: "상태",
       headerTooltip: "아래 회차 표의 상태 — 상태가 있는 회차만 회차 번호와 함께 보인다",
-      // 작은 뱃지로 도달·슬랙·주문이 한 회차에 같이 붙어도 들어가는 폭 — 넘치면 옆 칸을 덮지 않고 잘라낸다.
-      width: 170,
+      // `2호 도달 매수슬랙 매수주문`(11px 작은 뱃지)이 들어가는 폭 — 칸 좌우 여백을 6px 로 줄였다.
+      // 넘치면 옆 칸을 덮지 않고 잘라낸다.
+      width: 165,
       sortable: false,
-      cellStyle: { overflow: "hidden" },
+      cellStyle: { overflow: "hidden", paddingLeft: 6, paddingRight: 6 },
       cellRenderer: ({ data }: { data?: TradeListRow }) => (
         <span style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap", fontSize: 11 }}>
           {(data?.statusRounds ?? []).map((row) => (
