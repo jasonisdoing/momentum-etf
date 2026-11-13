@@ -580,8 +580,8 @@ def _attach_account_targets(
     target_shares: dict[str, int] | None = None,
     *,
     capital_krw: float,
-) -> list[dict[str, Any]]:
-    """계좌 보유와 목표를 대조해 수량 지시를 붙인다. 전량 매도 요약 목록을 돌려준다.
+) -> None:
+    """계좌 보유와 목표를 대조해 수량 지시를 붙인다.
 
     종목별 목표 금액·주수 → 현재 보유와의 차이가 그대로 매매 지시가 된다.
     행이 종목 단위라 계좌 보유와 1:1 로 비교된다(겹치는 종목도 한 번만 센다).
@@ -650,12 +650,10 @@ def _attach_account_targets(
         if target_qty is not None and price_krw:
             row["target_amount"] = round(target_qty * price_krw, 2)
     target_tickers = {row["ticker"] for row in holdings}
-    sell_all: list[dict[str, Any]] = []
     for ticker, item in sorted(account["holdings"].items()):
         if ticker in target_tickers:
             continue
         value = item.get("value")
-        sell_all.append({"ticker": ticker, "name": item["name"], "quantity": item["quantity"], "value": value})
         holdings.append(
             {
                 "ticker": ticker,
@@ -686,7 +684,24 @@ def _attach_account_targets(
                 "trade_quantity": -int(item["quantity"]),
             }
         )
-    return sell_all
+
+
+def _block_trade_strategy_sells(holdings: list[dict[str, Any]], account_id: str) -> None:
+    """사고팔기 전략에 등록된 종목은 합성이 팔지 않는다 — 행에 표시하고 표의 매도 수량을 0 으로 둔다.
+
+    사고팔기가 그 종목의 회차를 계좌 체결로 세므로, 합성이 팔면 사고팔기 원장이 깨진다.
+    액션(화면·슬랙)에서의 제외는 `build_action_groups` 가 이 표시를 보고 한다.
+    """
+    from utils.strategy_trade_service import trade_tickers
+
+    blocked = trade_tickers(account_id)
+    for row in holdings:
+        if row.get("ticker") not in blocked:
+            continue
+        row["is_trade_strategy"] = True
+        for key in ("trade_quantity", "forecast_trade_quantity"):
+            if (row.get(key) or 0) < 0:
+                row[key] = 0
 
 
 def mix_positions(account_id: str | None = None) -> dict[str, Any]:
@@ -877,7 +892,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         adjustment_day=adjustment_day,
     )
     target_shares = target_schedule[max(target_schedule)]["quantities"]
-    account["sell_all"] = _attach_account_targets(
+    _attach_account_targets(
         holdings,
         account,
         krw_rate,
@@ -1010,6 +1025,8 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         # 매매수량(예상) — 이대로 끝나면 오늘 할 일: 팔 게 남았으면 그 수량, 이미 반영됐으면
         # 0 (매수는 유예되므로 부족분을 사라는 지시가 아니다).
         row["forecast_trade_quantity"] = -slot_qty if slot_qty > 0 else 0
+
+    _block_trade_strategy_sells(payload["holdings"], ctx["account_id"])
 
     # 오늘의 액션 — 화면·슬랙 알람이 같은 결과를 쓴다(조립 단일 소스).
     currency = ctx["currency"]

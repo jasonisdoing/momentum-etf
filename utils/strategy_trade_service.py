@@ -998,6 +998,11 @@ def load_views_where(keep: Callable[[dict[str, Any]], bool], *, fresh: bool) -> 
     }
 
 
+def trade_tickers(account_id: str) -> set[str]:
+    """그 계좌에 사고팔기 전략으로 등록된 종목 — 합성은 이 종목을 매도하지 않는다."""
+    return {entry["ticker"] for entry in load_settings()["strategies"].values() if entry["account_id"] == account_id}
+
+
 def strategy_entry(strategy_id: str) -> dict[str, Any]:
     """저장된 전략 설정 하나 — 없으면 에러."""
     entry = load_settings()["strategies"].get(strategy_id)

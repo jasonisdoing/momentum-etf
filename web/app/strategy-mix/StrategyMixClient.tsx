@@ -242,6 +242,8 @@ type Holding = {
   current_long_pct?: number | null;
   /** 목표 포트폴리오에 없는 보유 종목 — 목표 비중 0% 행으로 표 하단에 온다. */
   is_sell_all?: boolean;
+  /** 전략 사고팔기에 등록된 종목 — 합성이 매도하지 않는다(액션·슬랙 제외). */
+  is_trade_strategy?: boolean;
   /** 고정 자산(IS) 행 — 총자산에는 들어가지만 합성이 사고팔지 않는다. */
   is_fixed_asset?: boolean;
 };
@@ -255,13 +257,6 @@ type AccountState = {
   /** 고정 자산(IS) — 총자산에는 들어가지만 합성이 매매하지 않는다. 없는 계좌는 0. */
   fixed_asset_value?: number;
   fixed_asset_pct?: number;
-  /** 목표에 없는 보유 종목 = 전량 매도 대상. */
-  sell_all: {
-    ticker: string;
-    name: string;
-    quantity: number;
-    value: number | null;
-  }[];
 };
 
 type Positions = {
@@ -1160,6 +1155,7 @@ export function StrategyMixClient() {
         if (p.data.is_total || p.data.is_group) return p.data.group_note ?? "";
         if (p.data.is_cash) return "미배분 현금";
         if (p.data.is_fixed_asset) return "고정 자산 (합성이 매매하지 않음)";
+        if (p.data.is_sell_all && p.data.is_trade_strategy) return "사고팔기 종목 (합성이 매도하지 않음)";
         if (p.data.is_sell_all) return "전량 매도 (목표에 없음)";
         const parts = slotKeys
           .map((slot) => {
