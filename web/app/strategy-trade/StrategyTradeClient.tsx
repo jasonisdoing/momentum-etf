@@ -130,12 +130,10 @@ export type StrategyView = {
   index: IndexStatus;
   status: Status;
   arbitrary_lots: Array<{ id: string; quantity: number; fill_price: number; bought_on: string; sell_limit: number }>;
-  /** 사다리 위치별 · 날짜별 매수·매도(체결 순서) — 보유 중이면 지금 사이클, 보유가 없으면 다 판 날까지 1주일. */
+  /** 사다리 위치별 · 날짜별 매수·매도(체결 순서) — 지금 사이클, 오늘 리셋됐으면 오늘까지 1주일. */
   trades_by_position: Record<string, Record<string, TradeSide[]>>;
-  /** 사다리 위치별 가격 — 기준 1호 체결가 × (1 − 간격%)^(위치−1)을 호가로 맞춘 값. 기준이 없으면 비어 있다. */
+  /** 사다리 위치별 가격 — 지금 1호 체결가 × (1 − 간격%)^(위치−1)을 호가로 맞춘 값. 보유가 없으면 비어 있다. */
   position_prices: Record<string, number>;
-  /** 위치 기준 — 지금 보유 중인 1호(current) 또는 직전 사이클의 1호(last_cycle). */
-  history_base: "current" | "last_cycle";
   /** 보유가 모두 빈 날짜(사이클 종료) — 표의 날짜 칸 오른쪽에 경계선을 긋는다. */
   cycle_end_days: string[];
   // 체결 이력(회차 원장)을 계산한 시각 — 사고팔기 알림 배치가 갱신한다(KST ISO).
@@ -997,9 +995,6 @@ function StrategySection({
         ) : null}
         <span style={{ color: "var(--text-muted)" }}>
           체결 이력 {view.ledger_at.slice(5, 16).replace("T", " ")} 기준
-          {view.history_base === "last_cycle" && Object.keys(view.position_prices).length > 0
-            ? " · 위치는 직전 사이클 1호 체결가 기준"
-            : ""}
         </span>
         {status.waiting_first_entry ? (
           <span style={{ fontWeight: 700 }}>

@@ -541,66 +541,63 @@ def _paired_trade_rounds(trades: list[Trade], orders: list[dict[str, Any]]) -> d
     }
 
 
-#: 보유가 없을 때 보여 주는 체결 범위 — 마지막으로 다 판 날을 포함한 달력 일수(공휴일이 없으면 5거래일).
+#: 오늘 리셋된 전략에서 지난 사이클 체결을 함께 보여 주는 범위 — 오늘을 포함한 달력 일수(공휴일이 없으면 5거래일).
 EMPTIED_HISTORY_DAYS = 7
 
 
-def _trade_cycles(history: list[Trade], quantity_now: int) -> tuple[int, float | None, list[str]]:
-    """체결 목록의 사이클 — (마지막 사이클의 첫 체결 위치, 그 사이클 1호 체결가, 보유가 모두 빈 날짜들).
+def _trade_cycles(history: list[Trade], quantity_now: int) -> tuple[int, list[str]]:
+    """체결 목록의 사이클 — (지금 사이클의 첫 체결 위치, 보유가 모두 빈 날짜들).
 
-    사이클은 보유 0에서 산 1호부터 보유가 다시 0이 될 때까지다. 창 이전부터 이어진 사이클은 1호 체결가를 몰라 None 이다.
+    사이클은 보유 0에서 산 1호부터 보유가 다시 0이 될 때까지다.
     """
     quantity = quantity_now - sum(trade.shares if trade.buy else -trade.shares for trade in history)
-    start, first_price, ended = 0, None, []
+    start, ended = 0, []
     for index, trade in enumerate(history):
         if trade.buy and quantity == 0:
-            start, first_price = index, trade.price
+            start = index
         quantity += trade.shares if trade.buy else -trade.shares
         if not trade.buy and quantity == 0:
             ended.append(trade.day)
-    return start, first_price, sorted(set(ended))
+    return start, sorted(set(ended))
 
 
 def _attach_trade_history(
     view: dict[str, Any], ledger: Ledger, cached_days: dict[date, list[dict[str, Any]]], orders: list[dict[str, Any]]
 ) -> None:
-    """체결을 사다리 위치별·날짜별로 붙인다.
+    """보유 중인 전략의 체결을 사다리 위치별·날짜별로 붙인다.
 
-    보여 주는 범위: 보유 중이면 지금 사이클(1호 매수부터, 최대 30일), 보유가 없으면 마지막으로 다 판 날을 포함한
-    달력 7일(`EMPTIED_HISTORY_DAYS`). ``trades_by_position`` = {위치: {날짜: ["buy", "sell", …]}}. 위치 기준(`position_prices`)은
-    보유 중이면 지금 1호 체결가, 보유가 없으면 직전 사이클의 1호 체결가(`history_base`)다. 보유가 없을 때의 체결은
-    회차가 아니라 체결가에 가장 가까운 칸에 놓인다. 같은 날 체결된 매도·재매수 주문 쌍은 지금 사이클 안에서만 해당
-    회차의 칸에 함께 표시한다. ``cycle_end_days`` 는 보유가 없을 때 보여 주는 범위 안에서 보유가 모두 빈 날짜다.
+    보여 주는 범위: 지금 사이클(1호 매수부터, 최대 30일). 오늘 다 팔고 1호를 다시 샀으면(오늘 리셋) 오늘을 포함한
+    달력 7일(`EMPTIED_HISTORY_DAYS`)을 보여 준다.
+    ``trades_by_position`` = {위치: {날짜: ["buy", "sell", …]}}. 위치 기준(`position_prices`)은 지금 1호 체결가다.
+    지난 사이클의 체결은 회차가 아니라 체결가에 가장 가까운 칸에 놓인다. 같은 날 체결된 매도·재매수 주문 쌍은 지금
+    사이클 안에서만 해당 회차의 칸에 함께 표시한다. ``cycle_end_days`` 는 보여 주는 범위 안에서 보유가 모두 빈 날짜다.
+    보유가 없으면(1호 매수 구간에 바로 다시 사므로 잠깐뿐이다) 기준이 없어 비운다.
     """
     trades: dict[int, dict[str, list[str]]] = {}
     view["trades_by_position"] = trades
-    history = recent_trades(ledger, view["ticker"], cached_days)
-    cycle_start, last_first_price, cycle_end_days = _trade_cycles(history, ledger.quantity)
+    view["cycle_end_days"] = []
     first = next((row for row in view["rounds"] if row["round"] == 1 and row["held"]), None)
-    view["history_base"] = "current" if first is not None else "last_cycle"
-    if first is not None:
-        shown = history[cycle_start:]
-    elif cycle_end_days:
-        emptied = date.fromisoformat(cycle_end_days[-1])
-        since = (emptied - timedelta(days=EMPTIED_HISTORY_DAYS - 1)).isoformat()
-        shown = [trade for trade in history if trade.day >= since]
-    else:
-        shown = []
-    # 보유 중이면 지금 사이클 하나뿐이라 경계가 없다(시작일에 앞 사이클을 판 체결은 보여 주지 않는다).
-    since_day = shown[0].day if shown else None
-    view["cycle_end_days"] = (
-        [] if first is not None or since_day is None else [day for day in cycle_end_days if day >= since_day]
-    )
-    base_price = first["fill_price"] if first is not None else last_first_price
-    if base_price is None:
-        # 기준이 될 1호 체결가가 없다(30일 안에 1호 매수가 없다) — 위치를 지어내지 않는다.
+    if first is None:
         view["position_prices"] = {}
         return
+    history = recent_trades(ledger, view["ticker"], cached_days)
+    cycle_start, cycle_end_days = _trade_cycles(history, ledger.quantity)
+    # 범위 시작 — 지금 사이클 시작. 오늘 다 팔고 1호를 다시 샀으면(오늘 리셋) 오늘 포함 7일 전부터.
+    # 경계선도 오늘 리셋됐을 때만 긋는다 — 아니면 앞 사이클을 판 체결이 표에 없다.
+    shown_from = cycle_start
+    if cycle_end_days and cycle_end_days[-1] == ledger.market_date:
+        since = (ledger.as_of - timedelta(days=EMPTIED_HISTORY_DAYS - 1)).isoformat()
+        shown_from = min(shown_from, next(index for index, trade in enumerate(history) if trade.day >= since))
+        view["cycle_end_days"] = [day for day in cycle_end_days if day >= since]
+    base_price = first["fill_price"]
     trigger_pct = float(view["config"]["trigger_pct"])
-    # 회차 쌍 연결은 지금 보유 중인 사이클에만 쓴다 — 지난 사이클의 회차 번호는 지금 회차 위치와 다르다.
-    paired_rounds = _paired_trade_rounds(shown, orders) if first is not None else {}
+    # 회차 쌍 연결은 지금 사이클에만 쓴다 — 지난 사이클의 회차 번호는 지금 회차 위치와 다르다.
+    paired_rounds = {
+        cycle_start + index: round_no for index, round_no in _paired_trade_rounds(history[cycle_start:], orders).items()
+    }
     round_positions = {row["round"]: row["position"] for row in view["rounds"]}
-    for index, trade in enumerate(shown):
+    for index in range(shown_from, len(history)):
+        trade = history[index]
         position = round_positions.get(paired_rounds.get(index))
         if position is None:
             position = ladder.ladder_position(trade.price, base_price, trigger_pct)
