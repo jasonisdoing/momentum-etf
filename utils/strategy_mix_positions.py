@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, NamedTuple
 
 from core.strategy.mix.actions import build_action_groups
 from core.strategy.mix.targets import dated_target_shares
@@ -435,26 +435,77 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     겹치는 종목은 한 행으로 합친다 — 계좌에는 그 종목이 하나뿐이라, 슬리브별로 나누면
     보유 수량이 두 번 세어지고 매매 지시가 반대로 나온다.
     """
-    import pandas as pd
-
     from utils.mix_sleeve import slot_state
+    from utils.strategy_settings import require_start_date
+    from utils.strategy_trade_service import trade_tickers
 
     ctx = resolve_mix_account(account_id)
     slots: list[SleeveSpec] = ctx["slots"]
     keys = [spec.key for spec in slots]
-    labels = _slot_labels(slots, ctx["account_id"])
-    from utils.strategy_settings import require_start_date
-
     for spec in slots:
         require_start_date(spec.settings)
     states = {spec.key: slot_state(spec) for spec in slots}
-
-    from core.strategy.mix.capital_policy import internal_target_weights
+    _apply_target_weights(slots, states)
 
     base_weights = mix_weights_for_account(ctx["account_id"])
-    reserved_cash_share = base_weights["cash_pct"]
     shares = {key: base_weights[f"{key}_pct"] for key in keys}
-    # 엔진은 종목·시점을 정하고 합성은 고정 배정 비중을 적용한다.
+    holdings = _merge_sleeve_targets(states, shares, keys)
+    dates = _action_dates(ctx["country"], states)
+    capital = _apply_account_capital(ctx, states, holdings, shares, dates)
+
+    # 추세 이탈(행 전체 회색)용 — 행이 속한 슬리브의 **종목풀 설정** 이평선 기준.
+    _attach_disparity(holdings, {spec.key: spec.pool for spec in slots})
+    _attach_industry(holdings, ctx["country"])
+    # 종목 메모 — 계좌가 아니라 **종목**에 붙는다(utils/stock_memo_store). 전량 매도 행까지 붙은 뒤에 한 번에 읽는다.
+    attach_stock_memos(holdings)
+    summary = _summary(holdings, capital.shares, states, keys)
+
+    slot_actions = _slot_actions(states, _slot_labels(slots, ctx["account_id"]), keys)
+    _attach_exit_forecast(holdings, slot_actions, keys)
+    # 사고팔기 종목 — 보유가 없어도 등록돼 있으면 화면이 현금 몫 안의 사고팔기 칸을 보여준다.
+    blocked = trade_tickers(ctx["account_id"])
+    _block_trade_strategy_sells(holdings, blocked)
+    # 오늘의 액션 — 화면·슬랙 알람이 같은 결과를 쓴다(조립 단일 소스). 슬리브별 값이 평평한 행을 읽는다.
+    actions: dict[str, Any] = {"slots": slot_actions}
+    actions["groups"] = build_action_groups(
+        holdings,
+        actions,
+        dates.next_trading_day,
+        harvest_pct=ctx["mix_harvest_pct"],
+        refill_pct=ctx["mix_refill_pct"],
+        cash_balance=capital.account["cash_balance"] / capital.krw_rate,
+        currency=ctx["currency"],
+        adjustment_day=dates.adjustment_day,
+        adjustment_intraday=dates.adjustment_intraday,
+        today=dates.today,
+        target_schedule=capital.target_schedule,
+    )
+    return {
+        "computed_at": datetime.now().astimezone().isoformat(),
+        "currency": ctx["currency"],
+        "krw_rate": capital.krw_rate,
+        "capital_krw": capital.capital_krw,
+        "account_id": ctx["account_id"],
+        # 화면이 표시용 시세를 60초마다 갱신할 때 쓴다(시세 소스가 국가별로 다르다).
+        "country": ctx["country"],
+        "account": capital.account,
+        # 데이터 기준일 — 그 값을 주는 전략이 있으면 그걸 쓰고, 없으면 오늘이다.
+        "as_of": next((states[key].as_of for key in keys if states[key].as_of), None) or dates.today,
+        "next_trading_day": dates.next_trading_day,
+        # 장중 반영은 그 정보를 주는 전략에서만 온다. 슬리브 어디에도 없으면 거짓이다.
+        "live": any(states[key].live for key in keys),
+        "summary": summary,
+        # 슬리브별 값을 `slots[키]` 로 모아 내보낸다 — 화면은 슬롯 키를 돌며 읽는다.
+        "holdings": [_holding_payload(row, keys) for row in holdings],
+        "actions": actions,
+        "trade_tickers": blocked,
+    }
+
+
+def _apply_target_weights(slots: list[SleeveSpec], states: dict[str, Any]) -> None:
+    """엔진 목표에 합성 배정 비중(`drift_pct`)을 붙인다 — 엔진은 종목·시점, 합성은 고정 배정 비중을 정한다."""
+    from core.strategy.mix.capital_policy import internal_target_weights
+
     for spec in slots:
         weights = internal_target_weights(strategy=spec.strategy, settings=spec.settings)
         for target in states[spec.key].targets:
@@ -463,126 +514,145 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
             if spec.strategy == "portfolio":
                 target["status"] = f"설정 비중 {weight:.2f}%"
 
+
+def _merge_sleeve_targets(
+    states: dict[str, Any], shares: dict[str, float], keys: Sequence[str]
+) -> list[dict[str, Any]]:
+    """슬리브 목표를 종목 한 행으로 합친다 — 비중은 더하고 슬리브별 값은 `{키}_{필드}` 로 평평하게 든다.
+
+    매도 예정(자격 상실·이탈)은 목표 비중 0 이다 — 다음 시가에 전량 팔고 그 슬롯은
+    다음 교체까지 현금이다. 비중을 남겨두면 팔아야 할 종목의 매매수량이 0 으로 보인다.
+    """
     holdings: list[dict[str, Any]] = []
     by_ticker: dict[str, dict[str, Any]] = {}
-
-    def add_target(source: str, target: dict[str, Any], weight: float) -> None:
-        ticker = str(target["ticker"]).strip()
-        row = by_ticker.get(ticker)
-        if row is None:
-            row = {
-                "ticker": ticker,
-                "name": target.get("name") or ticker,
-                "sources": [],
-                "weight_pct": 0.0,
-            }
-            # 슬리브별 값 — 현금 비중·화면 요약·툴팁이 슬롯 키로 읽는다.
-            for key in keys:
-                row[f"{key}_weight"] = 0.0
-                row[f"{key}_status"] = None
-                # 각 전략 화면과 같은 상태 컬럼이 쓰는 값 — 문구는 화면이 공용 함수로 만든다.
-                row[f"{key}_plan"] = None
-                row[f"{key}_days"] = None
-                row[f"{key}_is_new"] = None
-                row[f"{key}_exit_reason"] = None
-                # 전략 수익률(이론값) — 그 전략이 잡은 편입가 대비.
-                row[f"{key}_return_pct"] = None
-                # 보유 기간 표기 — 전략마다 단위가 다르다("3주" vs "12일"). 슬롯에 어느
-                # 전략이 오든 맞게 읽히도록 숫자가 아니라 완성된 문자열로 내려준다.
-                row[f"{key}_held_label"] = None
-                # 차트의 진입 화살표 — 슬리브마다 편입 시점이 다르므로 슬롯별로 들고 간다.
-                row[f"{key}_entry_date"] = None
-                row[f"{key}_entry_price"] = None
-                row[f"{key}_fill_date"] = None
-            row["price"] = target.get("price")
-            row["change_pct"] = target.get("change_pct")
-            by_ticker[ticker] = row
-            holdings.append(row)
-        if source not in row["sources"]:
-            row["sources"].append(source)
-        row["weight_pct"] += weight
-        row[f"{source}_weight"] += weight
-        if row.get("price") is None:
-            row["price"] = target.get("price")
-        if row.get("change_pct") is None:
-            row["change_pct"] = target.get("change_pct")
-        row[f"{source}_status"] = target.get("status")
-        row[f"{source}_plan"] = target.get("plan")
-        row[f"{source}_days"] = target.get("days")
-        row[f"{source}_is_new"] = bool(target.get("is_new"))
-        row[f"{source}_exit_reason"] = target.get("exit_reason")
-        if target.get("return_pct") is not None:
-            row[f"{source}_return_pct"] = round(float(target["return_pct"]), 2)
-        if target.get("held_label"):
-            row[f"{source}_held_label"] = target["held_label"]
-        if target.get("entry_date"):
-            row[f"{source}_entry_date"] = str(target["entry_date"])[:10]
-        if target.get("entry_price") is not None:
-            row[f"{source}_entry_price"] = float(target["entry_price"])
-        if target.get("fill_date"):
-            row[f"{source}_fill_date"] = str(target["fill_date"])[:10]
-
-    # 매도 예정(자격 상실·이탈)은 목표 비중 0 이다 — 다음 시가에 전량 팔고 그 슬롯은
-    # 다음 교체까지 현금이다. 비중을 남겨두면 팔아야 할 종목의 매매수량이 0 으로 보인다.
     for key in keys:
-        state = states[key]
-        for target in state.targets:
+        for target in states[key].targets:
             if target["is_exiting"]:
                 weight = 0.0
             elif target.get("drift_pct") is not None:
                 weight = shares[key] * float(target["drift_pct"]) / 100.0
             else:
                 raise ValueError(f"{key}: 종목 기준 비중이 없습니다.")
-            add_target(key, target, weight)
+            ticker = str(target["ticker"]).strip()
+            row = by_ticker.get(ticker)
+            if row is None:
+                row = _new_holding_row(ticker, target, keys)
+                by_ticker[ticker] = row
+                holdings.append(row)
+            _add_slot_target(row, key, target, weight)
+    return holdings
 
-    # 매월 첫 거래일 = 슬리브 배분 리밸런싱 날 (그 시장 달력 기준).
+
+def _new_holding_row(ticker: str, target: dict[str, Any], keys: Sequence[str]) -> dict[str, Any]:
+    """합친 행의 빈 틀 — 슬리브마다 `_SLOT_ROW_FIELDS` 칸을 만든다(몫은 0, 나머지는 빈 값)."""
+    row: dict[str, Any] = {
+        "ticker": ticker,
+        "name": target.get("name") or ticker,
+        "sources": [],
+        "weight_pct": 0.0,
+        "price": target.get("price"),
+        "change_pct": target.get("change_pct"),
+    }
+    for key in keys:
+        for field in _SLOT_ROW_FIELDS:
+            row[f"{key}_{field}"] = 0.0 if field == "weight" else None
+    return row
+
+
+def _add_slot_target(row: dict[str, Any], key: str, target: dict[str, Any], weight: float) -> None:
+    """슬리브 하나의 목표를 행에 더한다 — 상태 컬럼·보유 기간·차트 진입 화살표 값은 그 슬리브 칸에 담는다."""
+    if key not in row["sources"]:
+        row["sources"].append(key)
+    row["weight_pct"] += weight
+    row[f"{key}_weight"] += weight
+    if row.get("price") is None:
+        row["price"] = target.get("price")
+    if row.get("change_pct") is None:
+        row["change_pct"] = target.get("change_pct")
+    row[f"{key}_status"] = target.get("status")
+    row[f"{key}_plan"] = target.get("plan")
+    row[f"{key}_days"] = target.get("days")
+    row[f"{key}_is_new"] = bool(target.get("is_new"))
+    row[f"{key}_exit_reason"] = target.get("exit_reason")
+    if target.get("return_pct") is not None:
+        row[f"{key}_return_pct"] = round(float(target["return_pct"]), 2)
+    # 보유 기간 표기 — 전략마다 단위가 달라("3주" vs "12일") 완성된 문자열로 받는다.
+    if target.get("held_label"):
+        row[f"{key}_held_label"] = target["held_label"]
+    if target.get("entry_date"):
+        row[f"{key}_entry_date"] = str(target["entry_date"])[:10]
+    if target.get("entry_price") is not None:
+        row[f"{key}_entry_price"] = float(target["entry_price"])
+    if target.get("fill_date"):
+        row[f"{key}_fill_date"] = str(target["fill_date"])[:10]
+
+
+class _ActionDates(NamedTuple):
+    """액션 묶음의 날짜 — 모두 그 시장 현지 날짜(YYYY-MM-DD)."""
+
+    today: str
+    # 엔진 판정이 체결되는 다음 시가 거래일.
+    next_trading_day: str
+    # 목표·보유 차이 조정을 낼 날 — 오늘 마감 전이면 오늘, 아니면 다음 거래일.
+    adjustment_day: str
+    # 조정일이 오늘이고 정규장이 이미 열렸는지 — 그룹 제목이 '시가'가 아니라 '장중'이 된다.
+    adjustment_intraday: bool
+
+
+def _action_dates(country: str, states: dict[str, Any]) -> _ActionDates:
+    """오늘·다음 체결일·조정일·장중 여부를 정한다."""
+    import pandas as pd
+
     from config import MARKET_SCHEDULES
-    from utils.trading_calendar import get_trading_days
+    from utils.trading_calendar import get_trading_days, is_market_day_completed, is_market_day_started
 
-    country = ctx["country"]
-    # 종목 가격의 통화 — 계좌 원장(원화)과 맞추려면 환율이 필요하다.
-    pool_currency = ctx["currency"]
     tz_name = str((MARKET_SCHEDULES.get(country) or {}).get("timezone") or "Asia/Seoul")
     today_local = pd.Timestamp.now(tz=tz_name).date()
-
-    # 다음 거래일 — 모든 체결은 시가라 액션 묶음의 실제 날짜가 된다. 연휴가 끼면
-    # 이 날짜가 교체일과 같아질 수 있고, 그러면 화면이 한 묶음으로 합친다.
-    ahead = get_trading_days(
-        today_local.strftime("%Y-%m-%d"), (today_local + timedelta(days=21)).strftime("%Y-%m-%d"), country
-    )
-    # 체결일 표기가 없는 예정 행(엔진의 잠정 판정)이 체결되는 날 — **슬리브 엔진이 낸 값 그대로**
-    # (`slot_positions.next_fill_session` / `_next_session`, 전략 화면의 `next_session`). 합성이 따로
-    # 셈하면 같은 예정이 화면마다 다른 날로 갈린다(2026-10-26 전략 10/27·합성 10/26).
-    sessions = {states[spec.key].next_session for spec in slots}
+    today = today_local.strftime("%Y-%m-%d")
+    # 다음 체결일은 **슬리브 엔진이 낸 값 그대로**(`slot_positions.next_fill_session` / `_next_session`,
+    # 전략 화면의 `next_session`). 합성이 따로 셈하면 같은 예정이 화면마다 다른 날로 갈린다(2026-10-26).
+    sessions = {state.next_session for state in states.values()}
     if len(sessions) != 1:
         raise RuntimeError(f"슬리브마다 다음 체결일이 다릅니다: {sorted(str(s) for s in sessions)}")
     next_trading_day = sessions.pop()
-
-    # 이벤트 없는 조정(목표·보유 차이)의 기준일 — 시가 체결 신호가 아니라 "지금 낼" 주문이다.
-    # 오늘이 거래일이고 아직 마감 전이면(개장 전=오늘 시가, 장중=즉시) 오늘, 마감 후·휴장은
-    # 다음 거래일. 예전에는 장중이면 다음 거래일로 밀려, 이미 벌어진 수량 차이의 매수 지시가
-    # 하루 뒤 시가로 나왔다.
-    from utils.trading_calendar import is_market_day_completed
-
+    # 조정(목표·보유 차이)은 시가 체결 신호가 아니라 "지금 낼" 주문이다 — 오늘이 거래일이고 마감 전이면
+    # (개장 전=오늘 시가, 장중=즉시) 오늘, 마감 후·휴장은 다음 거래일.
+    ahead = get_trading_days(today, (today_local + timedelta(days=21)).strftime("%Y-%m-%d"), country)
     today_is_trading = bool(ahead) and ahead[0].date() == today_local
     adjustment_day = (
-        today_local.strftime("%Y-%m-%d")
+        today
         if today_is_trading and not is_market_day_completed(country, pd.Timestamp(today_local))
         else next_trading_day
     )
-    # 장중 조정이면 그룹 제목이 '시가'가 아니라 '장중'이어야 한다 — 정규장이 이미 열렸는지로 본다.
-    # (개장 전이면 오늘 시가 주문이다. 체결일 비교로 정하면 개장 전에도 '장중'이 됐다.)
-    from utils.trading_calendar import is_market_day_started
+    # 장중 여부는 정규장이 이미 열렸는지로 본다(체결일 비교로 정하면 개장 전에도 '장중'이 됐다).
+    adjustment_intraday = adjustment_day == today and is_market_day_started(country, pd.Timestamp(today_local))
+    return _ActionDates(today, next_trading_day, adjustment_day, adjustment_intraday)
 
-    adjustment_intraday = adjustment_day == today_local.strftime("%Y-%m-%d") and is_market_day_started(
-        country, pd.Timestamp(today_local)
-    )
 
-    # ── 적용 계좌 — 이 계산의 기준 계좌 그대로다(슬리브별 풀이 여기서 나왔다).
+class _Capital(NamedTuple):
+    """계좌 평가 결과와 그 기준의 목표 주수."""
+
+    account: dict[str, Any]
+    krw_rate: float
+    # 운용 기준금액 = 확정일 계좌 평가액(현금 포함).
+    capital_krw: float
+    # IS 고정 자산 몫을 뺀 슬리브 몫(%).
+    shares: dict[str, float]
+    target_schedule: dict[str, Any]
+
+
+def _apply_account_capital(
+    ctx: dict[str, Any],
+    states: dict[str, Any],
+    holdings: list[dict[str, Any]],
+    shares: dict[str, float],
+    dates: _ActionDates,
+) -> _Capital:
+    """계좌를 평가해 목표 주수를 행에 붙인다 — IS 고정 자산은 현재 비중을 목표에도 보존하고 나머지만 배정한다."""
     account = _load_account_state(ctx["account_id"])
-    krw_rate = _krw_rate(pool_currency)
+    krw_rate = _krw_rate(ctx["currency"])
     if krw_rate <= 0:
-        raise RuntimeError(f"{pool_currency} 환율을 읽을 수 없습니다.")
+        raise RuntimeError(f"{ctx['currency']} 환율을 읽을 수 없습니다.")
     # 목표와 같은 확정일로 계좌를 평가한다. 표시용 실시간 가격은 수량 계산에 넣지 않는다.
     valuation_date = min(state.as_of for state in states.values() if state.as_of)
     _value_account(
@@ -596,141 +666,112 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     if capital_krw <= 0:
         raise RuntimeError(f"'{ctx['account_id']}' 계좌 평가액이 없어 운용 기준금액을 정할 수 없습니다.")
 
-    # IS는 매매하지 않고 현재 비중을 목표에도 보존한다. 남은 몫만 슬리브와 현금에 배정한다.
+    keys = list(shares)
     fixed_pct = float(account["fixed_asset_pct"])
     investable_ratio = 1.0 - fixed_pct / 100.0
-    shares = {key: value * investable_ratio for key, value in shares.items()}
-    reserved_cash_share *= investable_ratio
+    scaled = {key: value * investable_ratio for key, value in shares.items()}
     for row in holdings:
         row["weight_pct"] *= investable_ratio
         for key in keys:
             row[f"{key}_weight"] *= investable_ratio
-    sleeve_amount_krw = {key: capital_krw * shares[key] / 100.0 for key in keys}
     target_schedule = dated_target_shares(
         {key: state.targets for key, state in states.items()},
-        sleeve_amount_krw,
+        {key: capital_krw * scaled[key] / 100.0 for key in keys},
         krw_rate,
         capital_krw,
-        next_trading_day,
-        adjustment_day=adjustment_day,
+        dates.next_trading_day,
+        adjustment_day=dates.adjustment_day,
     )
-    target_shares = target_schedule[max(target_schedule)]["quantities"]
     _attach_account_targets(
         holdings,
         account,
         krw_rate,
         slot_keys=keys,
-        target_shares=target_shares,
+        target_shares=target_schedule[max(target_schedule)]["quantities"],
         capital_krw=capital_krw,
     )
-
     if account["fixed_asset_value"]:
-        holdings.append(
-            {
-                "ticker": FIXED_ASSET_TICKER,
-                "name": FIXED_ASSET_NAME,
-                "sources": [],
-                "is_fixed_asset": True,
-                "price": None,
-                "weight_pct": fixed_pct,
-                "actual_weight_pct": fixed_pct,
-                "held_value": account["fixed_asset_value"],
-                "current_weight_pct": fixed_pct,
-                "target_amount": capital_krw * fixed_pct / 100.0,
-                "held_quantity": None,
-                "target_quantity": None,
-                "trade_quantity": None,
-                **{f"{key}_weight": 0.0 for key in keys},
-            }
-        )
+        holdings.append(_fixed_asset_row(account, fixed_pct, capital_krw, keys))
+    return _Capital(account, krw_rate, capital_krw, scaled, target_schedule)
 
-    # 비중 합계·슬리브 현금 — 고정 자산 축소가 끝난 뒤의 값이라야 실제 계좌와 맞는다.
+
+def _fixed_asset_row(
+    account: dict[str, Any], fixed_pct: float, capital_krw: float, keys: Sequence[str]
+) -> dict[str, Any]:
+    """IS 고정 자산 행 — 합성이 사고팔지 않으므로 수량·매매 칸은 비운다."""
+    return {
+        "ticker": FIXED_ASSET_TICKER,
+        "name": FIXED_ASSET_NAME,
+        "sources": [],
+        "is_fixed_asset": True,
+        "price": None,
+        "weight_pct": fixed_pct,
+        "actual_weight_pct": fixed_pct,
+        "held_value": account["fixed_asset_value"],
+        "current_weight_pct": fixed_pct,
+        "target_amount": capital_krw * fixed_pct / 100.0,
+        "held_quantity": None,
+        "target_quantity": None,
+        "trade_quantity": None,
+        **{f"{key}_weight": 0.0 for key in keys},
+    }
+
+
+def _summary(
+    holdings: list[dict[str, Any]], shares: dict[str, float], states: dict[str, Any], keys: Sequence[str]
+) -> dict[str, Any]:
+    """비중 합계·슬리브별 현황 — 고정 자산 축소가 끝난 뒤의 값이라야 실제 계좌와 맞는다."""
     stock_pct = sum(row["weight_pct"] for row in holdings)
     # 실제 가능한 주식 비중 — 단주로 못 채운 나머지는 전부 현금이다.
     actual_stock_pct = sum(float(row.get("actual_weight_pct") or 0) for row in holdings)
-    # 슬리브 현금 = 그 슬리브 몫에서 담긴 종목 비중을 뺀 나머지. 빈 슬롯 수로 세면
-    # 흘러간 비중과 맞지 않는다(종목이 오르면 남는 현금은 그만큼 줄어든다).
-    sleeve_cash = {key: max(shares[key] - sum(row[f"{key}_weight"] for row in holdings), 0.0) for key in keys}
-
-    # 추세 이탈(행 전체 회색)용 — 행이 속한 슬리브의 **종목풀 설정** 이평선 기준.
-    _attach_disparity(holdings, {spec.key: spec.pool for spec in slots})
-    _attach_industry(holdings, ctx["country"])
-
-    # 종목 메모 — 계좌가 아니라 **종목**에 붙는다(utils/stock_memo_store). 순위·자산 관리·
-    # 모멘텀 화면과 같은 값이다. 전량 매도 행까지 붙은 뒤에 한 번에 읽는다.
-    attach_stock_memos(holdings)
-
-    # 장중 반영은 그 정보를 주는 전략에서만 온다(신고가). 슬리브 어디에도 없으면 거짓이다.
-    live = any(states[key].live for key in keys)
-    # 데이터 기준일 — 그 값을 주는 전략(신고가)이 있으면 그걸 쓰고, 없으면 오늘이다.
-    as_of_value = next((states[key].as_of for key in keys if states[key].as_of), None) or str(today_local)
-
-    payload = {
-        "computed_at": datetime.now().astimezone().isoformat(),
-        "currency": ctx["currency"],
-        "krw_rate": krw_rate,
-        "capital_krw": capital_krw,
-        "account_id": ctx["account_id"],
-        # 화면이 표시용 시세를 60초마다 갱신할 때 쓴다(시세 소스가 국가별로 다르다).
-        "country": country,
-        "account": account,
-        "as_of": as_of_value,
-        "next_trading_day": next_trading_day,
-        "live": live,
-        "summary": {
-            "stock_pct": round(stock_pct, 2),
-            "cash_pct": round(100 - stock_pct, 2),
-            # 계좌 금액·단주를 감안해 **실제로 도달할 수 있는** 비중. 목표(위)와의 차이가
-            # 곧 단주로 못 채워 현금으로 남는 몫이다.
-            "actual_stock_pct": round(actual_stock_pct, 2),
-            "actual_cash_pct": round(100 - actual_stock_pct, 2),
-            # 총 현금 중 **두 전략에 아예 주지 않고 비워 둔 몫**. 나머지는 빈 슬롯에서 생긴다.
-            "reserved_cash_pct": round(reserved_cash_share, 2),
-            # 월초에 되돌릴 배분 — 화면이 "지금 몫"과 "목표 배분"을 함께 보여준다.
-            "base_weights": {name: round(value, 2) for name, value in base_weights.items()},
-            # 슬리브별 현황 — 슬롯 키로 담는다(화면이 키 목록을 돌며 그린다).
-            # slots_used = 목표가 찬 슬롯, held_count = 지금 실제로 들고 있는 종목 수.
-            # 둘이 다르면 아직 체결 전이라는 뜻이라 화면이 구분해서 보여준다.
-            "slots": {
-                key: {
-                    "alloc_pct": round(shares[key], 2),
-                    "slots_used": states[key].active_count,
-                    "held_count": states[key].held_count,
-                    "top_n": states[key].top_n,
-                    "cash_pct": round(sleeve_cash[key], 2),
-                }
-                for key in keys
-            },
-        },
-        # 슬리브별 값은 여기서는 평평한 채로 둔다 — 아래 액션 조립이 그 형태를 읽는다.
-        # 화면 형태(`slots`)로 모으는 것은 return 직전이다.
-        "holdings": holdings,
-        "actions": {
-            # 슬리브별 액션 — 슬롯 키로 담는다. 전략에 없는 항목은 빈 목록/None 이다.
-            "slots": {
-                key: {
-                    "label": labels[key],
-                    # 장중 판정을 쓰는 전략인지 — 그 슬리브의 매도는 아직 '예상'이다.
-                    "live": states[key].live,
-                    # 다음 거래일 시가 매도(확정) — 자격 상실·이탈.
-                    "sells": states[key].sells,
-                    # 장중 판정 기준 이탈 **예상** — 오늘 종가로 확정된다. 화면 전용.
-                    "exit_forecast": states[key].exit_forecast,
-                    # 다음 거래일 시가에 새로 담는 것.
-                    "entries": states[key].entries,
-                    "engine_trades": states[key].engine_trades,
-                }
-                for key in keys
-            },
+    return {
+        "stock_pct": round(stock_pct, 2),
+        "cash_pct": round(100 - stock_pct, 2),
+        # 계좌 금액·단주를 감안해 **실제로 도달할 수 있는** 비중. 목표(위)와의 차이가
+        # 곧 단주로 못 채워 현금으로 남는 몫이다.
+        "actual_stock_pct": round(actual_stock_pct, 2),
+        "actual_cash_pct": round(100 - actual_stock_pct, 2),
+        # slots_used = 목표가 찬 슬롯, held_count = 지금 실제로 들고 있는 종목 수. 둘이 다르면 아직 체결 전이다.
+        # 슬리브 현금 = 그 슬리브 몫에서 담긴 종목 비중을 뺀 나머지(빈 슬롯 수로 세면 흘러간 비중과 맞지 않는다).
+        "slots": {
+            key: {
+                "alloc_pct": round(shares[key], 2),
+                "slots_used": states[key].active_count,
+                "held_count": states[key].held_count,
+                "top_n": states[key].top_n,
+                "cash_pct": round(max(shares[key] - sum(row[f"{key}_weight"] for row in holdings), 0.0), 2),
+            }
+            for key in keys
         },
     }
-    # 주중 이탈 예상 — 표의 매매수량·상태 칸에 예상을 겹쳐 보여주기 위한 행 플래그.
-    # 목표수량·목표비중은 확정 기준 그대로 둔다(장중 값으로 표 전체를 뒤집지 않는다).
-    forecast_by_ticker: dict[str, str] = {}
-    for key in keys:
-        for row in payload["actions"]["slots"][key]["exit_forecast"]:
-            forecast_by_ticker[row["ticker"]] = key
-    for row in payload["holdings"]:
+
+
+def _slot_actions(states: dict[str, Any], labels: dict[str, str], keys: Sequence[str]) -> dict[str, Any]:
+    """슬리브별 액션 — 전략에 없는 항목은 빈 목록/None 이다."""
+    return {
+        key: {
+            "label": labels[key],
+            # 장중 판정을 쓰는 전략인지 — 그 슬리브의 매도는 아직 '예상'이다.
+            "live": states[key].live,
+            # 다음 거래일 시가 매도(확정) — 자격 상실·이탈.
+            "sells": states[key].sells,
+            # 장중 판정 기준 이탈 **예상** — 오늘 종가로 확정된다. 화면 전용.
+            "exit_forecast": states[key].exit_forecast,
+            # 다음 거래일 시가에 새로 담는 것.
+            "entries": states[key].entries,
+            "engine_trades": states[key].engine_trades,
+        }
+        for key in keys
+    }
+
+
+def _attach_exit_forecast(holdings: list[dict[str, Any]], slot_actions: dict[str, Any], keys: Sequence[str]) -> None:
+    """장중 이탈 예상 — 표의 매매수량·상태 칸에 예상을 겹쳐 보여주기 위한 행 플래그.
+
+    목표수량·목표비중은 확정 기준 그대로 둔다(장중 값으로 표 전체를 뒤집지 않는다).
+    """
+    forecast_by_ticker = {row["ticker"]: key for key in keys for row in slot_actions[key]["exit_forecast"]}
+    for row in holdings:
         slot = forecast_by_ticker.get(row["ticker"])
         if slot is None or float(row.get("held_quantity") or 0) <= 0:
             continue
@@ -742,38 +783,10 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         remain_qty = round(target_qty * (weight_all - slot_w) / weight_all) if weight_all > 0 else 0
         slot_qty = int(round(held_qty - remain_qty))
         row["is_exit_forecast"] = True
-        # 이탈 후 남을 목표수량 — 화면이 목표수량 칸에 이 값을 '(예상)' 으로 겹쳐 쓴다.
-        # 확정 목표(target_quantity)는 그대로 둔다: 예상이 풀리면 그 값으로 돌아간다.
+        # 이탈 후 남을 목표수량 — 화면이 목표수량 칸에 '(예상)' 으로 겹쳐 쓴다. 확정 목표는 그대로 둔다.
         row["forecast_target_quantity"] = int(remain_qty)
-        # 매매수량(예상) — 이대로 끝나면 오늘 할 일: 팔 게 남았으면 그 수량, 이미 반영됐으면
-        # 0 (매수는 유예되므로 부족분을 사라는 지시가 아니다).
+        # 매매수량(예상) — 팔 게 남았으면 그 수량, 이미 반영됐으면 0(매수는 유예되므로 부족분을 사라는 지시가 아니다).
         row["forecast_trade_quantity"] = -slot_qty if slot_qty > 0 else 0
-
-    from utils.strategy_trade_service import trade_tickers
-
-    # 사고팔기 종목 — 보유가 없어도 등록돼 있으면 화면이 현금 몫 안의 사고팔기 칸을 보여준다.
-    blocked = trade_tickers(ctx["account_id"])
-    payload["trade_tickers"] = blocked
-    _block_trade_strategy_sells(payload["holdings"], blocked)
-
-    # 오늘의 액션 — 화면·슬랙 알람이 같은 결과를 쓴다(조립 단일 소스).
-    currency = ctx["currency"]
-    payload["actions"]["groups"] = build_action_groups(
-        payload["holdings"],
-        payload["actions"],
-        next_trading_day,
-        harvest_pct=ctx["mix_harvest_pct"],
-        refill_pct=ctx["mix_refill_pct"],
-        cash_balance=account["cash_balance"] / krw_rate,
-        currency=currency,
-        adjustment_day=adjustment_day,
-        adjustment_intraday=adjustment_intraday,
-        today=today_local.strftime("%Y-%m-%d"),
-        target_schedule=target_schedule,
-    )
-    # 슬리브별 값을 `slots[키]` 로 모아 내보낸다 — 화면은 슬롯 키를 돌며 읽는다.
-    payload["holdings"] = [_holding_payload(row, keys) for row in payload["holdings"]]
-    return payload
 
 
 def _value_account(

@@ -227,16 +227,12 @@ type Positions = {
     /** 계좌 금액·단주를 감안해 실제로 도달할 수 있는 비중(%). 목표와의 차이가 현금으로 남는다. */
     actual_stock_pct: number;
     actual_cash_pct: number;
-    /** 총 현금 중 두 전략에 주지 않고 비워 둔 몫(%). 나머지는 빈 슬롯에서 생긴다. */
-    reserved_cash_pct: number;
-    /** 월초에 되돌릴 배분(%) — 화면 헤더에서 저장한 값. `{슬롯키}_pct` 와 `cash_pct`. */
-    base_weights: Record<string, number>;
     /** 슬리브별 현황 — 슬롯 키로 담긴다.
      *  slots_used = 목표가 찬 슬롯, held_count = 지금 실제로 들고 있는 종목 수. */
     slots: Record<
       string,
       {
-        /** 슬리브 몫(%) — 월초 배분에서 흘러간 비율. */
+        /** 슬리브 몫(%) — 저장 배분에서 IS 고정 자산 몫을 뺀 비율. */
         alloc_pct: number;
         slots_used: number;
         held_count: number;
