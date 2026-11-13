@@ -61,7 +61,14 @@ _SUBMIT_TIMEOUT_SECONDS = 120
 
 
 class RoundNotOrderableError(BrokerApiError):
-    """주문하려던 회차가 이미 주문 대상이 아니다(보유 상태가 바뀜) — 다시 눌러도 같은 결과라 슬랙 버튼을 되살리지 않는다."""
+    """주문하려던 회차가 이미 주문 대상이 아니다(보유 상태가 바뀜) — 다시 눌러도 같은 결과라 슬랙 버튼을 되살리지 않는다.
+
+    ``done`` 은 그 회차가 이미 처리됐는지(다른 주문으로 체결됨)다 — 참이면 실패가 아니라 완료로 다룬다.
+    """
+
+    def __init__(self, message: str, *, done: bool) -> None:
+        super().__init__(message)
+        self.done = done
 
 
 _index_ready = False
@@ -94,7 +101,10 @@ def _require_round_state(strategy: dict[str, Any], side: str, round_no: int) -> 
     orderable = row["held"] and round_no == strategy["status"]["held_count"] if side == "sell" else row["is_next"]
     if not orderable:
         word = "매도" if side == "sell" else "매수"
-        raise RoundNotOrderableError(f"{strategy['label']} {round_no}호는 지금 {word}할 수 있는 회차가 아닙니다.")
+        raise RoundNotOrderableError(
+            f"{strategy['label']} {round_no}호는 지금 {word}할 수 있는 회차가 아닙니다.",
+            done=round_done(strategy, {"side": side, "round": round_no}),
+        )
     return row
 
 
@@ -218,12 +228,12 @@ def resolve_order(
             raise BrokerApiError("임의 매도는 임의 매수 건만 지정할 수 있습니다.")
         row = next((lot for lot in strategy["arbitrary_lots"] if lot["id"] == arbitrary_id), None)
         if row is None:
-            raise RoundNotOrderableError(f"{strategy['label']} 임의 매수 건의 잔여 수량이 없습니다.")
+            raise RoundNotOrderableError(f"{strategy['label']} 임의 매수 건의 잔여 수량이 없습니다.", done=True)
         signal_price = row["sell_limit"]
     elif side == "sell" and target_round is None:
         target_round = strategy["status"]["held_count"]
         if not target_round:
-            raise RoundNotOrderableError(f"{strategy['label']}에 매도할 보유 회차가 없습니다.")
+            raise RoundNotOrderableError(f"{strategy['label']}에 매도할 보유 회차가 없습니다.", done=True)
     if arbitrary_id is None:
         row = _require_round_state(strategy, side, target_round) if target_round is not None else None
     if round_no is not None:
@@ -304,7 +314,7 @@ def resolve_swap(account_id: str, pool: str, strategy_id: str, round_no: int, *,
     _require_no_manual_order(strategy, "buy")
     row = _require_round_state(strategy, "sell", round_no)
     if not row["rebuy_after_sell"]:
-        raise RoundNotOrderableError(f"{strategy['label']} {round_no}호는 매도 후 재매수 대상이 아닙니다.")
+        raise RoundNotOrderableError(f"{strategy['label']} {round_no}호는 매도 후 재매수 대상이 아닙니다.", done=False)
     venue = _order_venue(strategy)
     quote = fetch_best_quote(strategy["account_id"], strategy["ticker"], venue)
     _require_valid_quote(strategy, "매도 1호가", quote["ask"])
@@ -630,10 +640,17 @@ def _config():
     return db[_CONFIG_COLLECTION]
 
 
-def register_signal_thread(channel: str, thread_ts: str, message_count: int) -> None:
-    """새 신호 메시지 스레드와 그 안의 주문 메시지 수를 기록한다 — 메시지가 모두 체결되면 스레드를 완료로 본다.
+#: 신호 스레드의 주문 메시지 상태 — 진행 중 · 완료(체결 또는 이미 처리된 회차) · 실패(체결 없이 끝남) · 아직 손대지 않음.
+MESSAGE_PENDING = "pending"
+MESSAGE_DONE = "done"
+MESSAGE_FAILED = "failed"
+MESSAGE_OPEN = "open"
 
-    완료되지 않은 채 남은 기록은 슬랙 메시지 기록과 같은 보존 기간이 지나면 지운다(그 뒤로는 스레드를 찾을 수 없다).
+
+def register_signal_thread(channel: str, thread_ts: str, messages: list[dict[str, Any]]) -> None:
+    """새 신호 메시지 스레드와 그 안의 주문 메시지(`{"ts", "request"}`)를 기록한다 — 반응·마감 정리가 이 기록을 쓴다.
+
+    끝나지 않은 채 남은 기록은 슬랙 메시지 기록과 같은 보존 기간이 지나면 지운다(그 뒤로는 스레드를 찾을 수 없다).
     """
     today = _now().date()
     oldest = (today - timedelta(days=SIGNAL_RETENTION_DAYS)).isoformat()
@@ -642,45 +659,125 @@ def register_signal_thread(channel: str, thread_ts: str, message_count: int) -> 
     thread = {
         "channel": channel,
         "thread_ts": thread_ts,
-        "message_count": message_count,
+        "messages": messages,
+        "settled": [],
+        "reaction": None,
         "date": today.isoformat(),
     }
     config.update_one({"_id": _SETTINGS_KEY}, {"$push": {"signal_threads": thread}}, upsert=True)
 
 
-def filled_signal_threads() -> list[dict[str, Any]]:
-    """모든 주문 메시지가 체결된 신호 스레드. 매도 후 재매수는 같은 짝의 양쪽이 체결되어야 한다."""
+def signal_threads() -> list[dict[str, Any]]:
     doc = _config().find_one({"_id": _SETTINGS_KEY}, {"signal_threads": 1}) or {}
-    result = []
-    for thread in doc.get("signal_threads") or []:
-        orders = _orders().find(
-            {
-                "slack.channel": thread["channel"],
-                "slack.thread_ts": thread["thread_ts"],
-                "status": {"$in": ["filled", *ACTIVE_STATUSES]},
-            },
-            {"slack.message_ts": 1, "status": 1, "side": 1, "pair_id": 1},
-        )
-        filled_messages: set[str] = set()
-        active_messages: set[str] = set()
-        filled_pair_sides: dict[tuple[str, str], set[str]] = {}
-        for order in orders:
-            message_ts = order["slack"]["message_ts"]
-            if order["status"] != "filled":
-                active_messages.add(message_ts)
-            elif (pair_id := order.get("pair_id")) is None:
-                filled_messages.add(message_ts)
-            else:
-                filled_pair_sides.setdefault((message_ts, pair_id), set()).add(order["side"])
-        filled_messages.update(ts for (ts, _), sides in filled_pair_sides.items() if sides == {"buy", "sell"})
-        if not active_messages and len(filled_messages) >= thread["message_count"]:
-            result.append(thread)
-    return result
+    return list(doc.get("signal_threads") or [])
 
 
-def mark_signal_thread_completed(thread_ts: str) -> None:
-    """완료한 스레드는 더 추적할 일이 없어 목록에서 지운다."""
+def find_signal_thread(thread_ts: str) -> dict[str, Any] | None:
+    return next((thread for thread in signal_threads() if thread["thread_ts"] == thread_ts), None)
+
+
+def settle_signal_message(thread_ts: str, message_ts: str, outcome: str) -> None:
+    """주문 없이 끝난 주문 메시지의 결과를 남긴다 — 이미 처리된 회차(완료) 또는 주문 불가·장 마감(실패)."""
+    if outcome not in (MESSAGE_DONE, MESSAGE_FAILED):
+        raise ValueError(f"알 수 없는 주문 메시지 결과입니다: {outcome}")
+    _config().update_one(
+        {"_id": _SETTINGS_KEY, "signal_threads.thread_ts": thread_ts},
+        {"$push": {"signal_threads.$.settled": {"ts": message_ts, "outcome": outcome}}},
+    )
+
+
+def set_signal_thread_reaction(thread_ts: str, reaction: str | None) -> None:
+    _config().update_one(
+        {"_id": _SETTINGS_KEY, "signal_threads.thread_ts": thread_ts},
+        {"$set": {"signal_threads.$.reaction": reaction}},
+    )
+
+
+def forget_signal_thread(thread_ts: str) -> None:
+    """끝난 스레드는 더 추적할 일이 없어 목록에서 지운다."""
     _config().update_one({"_id": _SETTINGS_KEY}, {"$pull": {"signal_threads": {"thread_ts": thread_ts}}})
+
+
+def _orders_outcome(orders: list[dict[str, Any]]) -> str:
+    """한 주문 메시지의 마지막 주문(매도 후 재매수는 마지막 짝)의 결과 — 다시 주문하기로 낸 주문이 앞 주문을 대신한다."""
+    latest = max(orders, key=lambda order: order["created_at"])
+    pair_id = latest.get("pair_id")
+    group = [order for order in orders if pair_id is not None and order.get("pair_id") == pair_id] or [latest]
+    if any(order["status"] in ACTIVE_STATUSES for order in group):
+        return MESSAGE_PENDING
+    if pair_id is not None:
+        return (
+            MESSAGE_DONE if {o["side"] for o in group if o["status"] == "filled"} == {"buy", "sell"} else MESSAGE_FAILED
+        )
+    return MESSAGE_DONE if latest["status"] == "filled" else MESSAGE_FAILED
+
+
+def signal_message_states(thread: dict[str, Any]) -> dict[str, str]:
+    """스레드의 주문 메시지별 상태 — 주문이 있으면 주문 결과, 없으면 남긴 결과(`settled`), 둘 다 없으면 손대지 않음."""
+    by_message: dict[str, list[dict[str, Any]]] = {}
+    for order in _orders().find(
+        {"slack.channel": thread["channel"], "slack.thread_ts": thread["thread_ts"]},
+        {"slack.message_ts": 1, "status": 1, "side": 1, "pair_id": 1, "created_at": 1},
+    ):
+        by_message.setdefault(order["slack"]["message_ts"], []).append(order)
+    settled = {item["ts"]: item["outcome"] for item in thread["settled"]}
+    states = {}
+    for message in thread["messages"]:
+        ts = message["ts"]
+        if ts in by_message:
+            states[ts] = _orders_outcome(by_message[ts])
+        else:
+            states[ts] = settled.get(ts, MESSAGE_OPEN)
+    return states
+
+
+def reorderable_signal_messages(thread: dict[str, Any]) -> set[str]:
+    """다시 주문하기 버튼이 남은 주문 메시지 — 마지막 주문이 하나도 체결되지 않고 취소된 단건 주문(`_finish` 와 같은 조건)."""
+    latest: dict[str, dict[str, Any]] = {}
+    for order in _orders().find(
+        {"slack.channel": thread["channel"], "slack.thread_ts": thread["thread_ts"]},
+        {"slack.message_ts": 1, "status": 1, "filled_quantity": 1, "pair_id": 1, "created_at": 1},
+    ):
+        ts = order["slack"]["message_ts"]
+        if ts not in latest or order["created_at"] > latest[ts]["created_at"]:
+            latest[ts] = order
+    return {
+        ts
+        for ts, order in latest.items()
+        if order.get("pair_id") is None and order["status"] == "canceled" and order["filled_quantity"] == 0
+    }
+
+
+def signal_thread_state(states: dict[str, str]) -> str | None:
+    """신호 메시지 반응 하나 — 진행 중(⏳) · 완료(✅) · 실패(❌) · 없음(None) 중 하나만 정한다.
+
+    진행 중인 주문이 있거나 일부만 끝났으면 진행 중, 전부 완료면 완료, 손댄 것 없이 열려 있으면 없음,
+    열린 것 없이 끝났는데 완료가 아닌 메시지가 있으면 실패다.
+    """
+    values = set(states.values())
+    if MESSAGE_PENDING in values:
+        return MESSAGE_PENDING
+    if values == {MESSAGE_DONE}:
+        return MESSAGE_DONE
+    if MESSAGE_OPEN in values:
+        return MESSAGE_PENDING if values - {MESSAGE_OPEN} else None
+    return MESSAGE_FAILED
+
+
+def round_done(strategy: dict[str, Any], request: dict[str, Any]) -> bool:
+    """주문 메시지가 노린 회차가 이미 처리됐는지 — 매수 N호는 보유 회차가 N 이상, 매도 N호는 N 미만, 임의 매도는 그 건이 없음.
+
+    매도 후 재매수는 보유 회차 수로 끝났는지 알 수 없어 그 메시지의 주문 결과로만 판정한다(여기서는 처리되지 않은 것이다).
+    """
+    if request.get("rebuy"):
+        return False
+    if request.get("arbitrary_id") is not None:
+        return all(lot["id"] != request["arbitrary_id"] for lot in strategy["arbitrary_lots"])
+    held = int(strategy["status"]["held_count"])
+    round_no = request["round"]
+    if round_no is None:
+        return request["side"] == "sell" and held == 0
+    return held < round_no if request["side"] == "sell" else held >= round_no
 
 
 def close_warning_slack_orders() -> list[dict[str, Any]]:

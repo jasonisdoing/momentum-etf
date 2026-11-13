@@ -29,14 +29,18 @@ from utils.settings_loader import get_slack_channel
 from utils.strategy_trade_market import format_money
 from utils.strategy_trade_orders import (
     FINISHED_STATUSES,
+    MESSAGE_DONE,
+    MESSAGE_FAILED,
+    MESSAGE_OPEN,
+    MESSAGE_PENDING,
     RoundNotOrderableError,
     cancel_record,
     close_warning_slack_orders,
     close_warning_text,
-    filled_signal_threads,
     find_duplicate_order,
+    find_signal_thread,
     finished_slack_orders,
-    mark_signal_thread_completed,
+    forget_signal_thread,
     mark_slack_close_warned,
     mark_slack_notified,
     pair_records,
@@ -47,7 +51,13 @@ from utils.strategy_trade_orders import (
     register_signal_thread,
     resolve_order,
     resolve_swap,
+    round_done,
     serialize_order,
+    set_signal_thread_reaction,
+    settle_signal_message,
+    signal_message_states,
+    signal_thread_state,
+    signal_threads,
 )
 from utils.strategy_trade_threads import send_thread_message
 
@@ -62,12 +72,13 @@ _SIDE_LABELS = {"buy": "매수", "sell": "매도"}
 _QUOTE_LABELS = {"buy": "매도 1호가", "sell": "매수 1호가"}
 #: 주문 기록(`slack`)에 남기는 슬랙 위치 — 버튼이 있는 메시지(`message_ts`)와 결과를 달 스레드 뿌리(`thread_ts`).
 SLACK_TARGET_KEYS = ("channel", "message_ts", "thread_ts")
-# 신호 메시지 반응 — 스레드에서 첫 주문이 접수되면 모래시계, 주문 메시지가 전부 체결되면 완료 표시,
-# 주문하려는 순간 그 회차가 이미 주문 대상이 아니면(보유 상태 변경) ❌.
-REACTION_PENDING = "hourglass_flowing_sand"
-REACTION_DONE = "white_check_mark"
-REACTION_EXPIRED = "x"
+#: 신호 메시지 반응 — 스레드 상태(`signal_thread_state`)마다 하나만 단다: 진행 중 ⏳ · 완료 ✅ · 실패 ❌.
+REACTIONS = {MESSAGE_PENDING: "hourglass_flowing_sand", MESSAGE_DONE: "white_check_mark", MESSAGE_FAILED: "x"}
 _REACTION_NOOP_ERRORS = ("already_reacted", "no_reaction")
+#: 장이 닫혀 주문하지 못한 메시지에 남기는 문구.
+_SESSION_CLOSED_NOTE = "⌛ 장 마감으로 주문 불가"
+#: 다른 주문으로 이미 처리된 회차의 메시지에 남기는 문구.
+_ALREADY_DONE_NOTE = "✅ 이미 처리된 회차라 주문하지 않음"
 
 
 def _env_word(env: str) -> str:
@@ -209,10 +220,11 @@ def send_order_message(
     *,
     rebuy: bool,
     arbitrary_id: str | None = None,
-) -> None:
+) -> dict[str, Any]:
     """주문 메시지를 슬랙으로 보낸다(thread_ts 가 있으면 그 스레드에) — 주문은 슬랙에서 버튼과 모달 확인을 거쳐야 나간다.
 
     ``rebuy`` 는 매도 후 재매수 한 짝의 메시지다(회차 매도 신호 중 팔자마자 다시 사게 되는 경우).
+    보낸 메시지의 ``{"ts", "request"}`` 를 돌려준다(신호 스레드 기록이 버튼을 다시 그릴 때 쓴다).
     """
     env = account_env(account_id)
     if rebuy:
@@ -236,8 +248,10 @@ def send_order_message(
         "rebuy": rebuy,
         "arbitrary_id": arbitrary_id,
     }
-    if not send_thread_message(f"[{_env_word(env)}] {_order_text(request)}", _open_blocks(request), thread_ts):
+    ts = send_thread_message(f"[{_env_word(env)}] {_order_text(request)}", _open_blocks(request), thread_ts)
+    if not ts:
         raise BrokerApiError("슬랙으로 주문 메시지를 보내지 못했습니다.")
+    return {"ts": ts, "request": request}
 
 
 # --- 모달 -----------------------------------------------------------------------------------------------
@@ -424,14 +438,42 @@ def _report_open_failure(target: dict[str, Any], exc: Exception) -> None:
     send_thread_message(f"❌ {side} 주문 확인을 열 수 없습니다: {exc}", thread_ts=target["thread_ts"])
 
 
-def _expire(target: dict[str, Any], exc: Exception) -> None:
-    """회차가 더는 주문 대상이 아니면 다시 눌러도 같은 결과이므로 버튼을 되살리지 않고 신호 메시지에 ❌ 를 단다."""
+def _expire(target: dict[str, Any], exc: RoundNotOrderableError) -> None:
+    """회차가 더는 주문 대상이 아니면 다시 눌러도 같은 결과이므로 버튼을 되살리지 않는다.
+
+    다른 주문으로 이미 처리된 회차면 실패가 아니라 완료로 남기고(스레드 알림 없음), 아니면 주문 불가를 알린다.
+    """
     request = target["request"]
+    if exc.done:
+        _update_message(target, _note_blocks(request, _ALREADY_DONE_NOTE))
+        _settle_message(target, MESSAGE_DONE)
+        return
     side = f"{_env_word(request['env'])} {_action_word(request)}"
-    send_thread_message(f"❌ {side} 주문 실패: {exc}", thread_ts=target["thread_ts"])
+    send_thread_message(f"❌ {side} 주문 불가: {exc}", thread_ts=target["thread_ts"])
     _update_message(target, _note_blocks(request, "⌛ 보유 상태가 바뀌어 주문 불가"))
-    if target["thread_ts"] != target["message_ts"]:
-        _react("reactions_add", target["channel"], target["thread_ts"], REACTION_EXPIRED)
+    _settle_message(target, MESSAGE_FAILED)
+
+
+def _settle_message(target: dict[str, Any], outcome: str) -> None:
+    """주문 없이 끝난 신호 스레드의 주문 메시지 결과를 남기고 신호 메시지 반응을 맞춘다(신호 스레드가 아니면 할 일 없음)."""
+    thread = find_signal_thread(target["thread_ts"])
+    if thread is None or all(message["ts"] != target["message_ts"] for message in thread["messages"]):
+        return
+    settle_signal_message(target["thread_ts"], target["message_ts"], outcome)
+    _sync_thread(target["thread_ts"])
+
+
+def _sync_thread(thread_ts: str) -> None:
+    thread = find_signal_thread(thread_ts)
+    if thread is not None:
+        sync_signal_thread(thread)
+
+
+def _release_reservation(target: dict[str, Any]) -> None:
+    """주문이 나가지 못하고 버튼을 되살릴 때 — 이 스레드에 주문이 없으면 신호를 미사용으로 되돌려 장 마감 회수가 버튼을 걷게 한다."""
+    from utils.strategy_trade_threads import release_signal_reservation
+
+    release_signal_reservation(target["thread_ts"])
 
 
 def _place_swap(target: dict[str, Any]) -> None:
@@ -454,6 +496,7 @@ def _place_swap(target: dict[str, Any]) -> None:
         logger.exception("슬랙 매도 후 재매수 처리 실패")
         send_thread_message(f"❌ {word} 주문 실패: {exc}", thread_ts=target["thread_ts"])
         _update_message(target, _open_blocks(request))
+        _release_reservation(target)
         return
     sell, buy = result["sell"], result["buy"]
     text = f"✅ {word} 접수: {sell['strategy_label']} — 매도 {sell['quantity']:,}주 × {format_money(sell['price'], sell['country'])}"
@@ -463,8 +506,7 @@ def _place_swap(target: dict[str, Any]) -> None:
         text += f"\n⚠️ 매수 주문은 실패했습니다(매도만 걸림): {result['buy_error']}"
     send_thread_message(text, thread_ts=target["thread_ts"])
     _update_message(target, _pair_blocks(request, sell["pair_id"], None))
-    if target["thread_ts"] != target["message_ts"]:
-        _react("reactions_add", target["channel"], target["thread_ts"], REACTION_PENDING)
+    _sync_thread(target["thread_ts"])
 
 
 def _place(target: dict[str, Any]) -> None:
@@ -492,6 +534,7 @@ def _place(target: dict[str, Any]) -> None:
         logger.exception("슬랙 모의 주문 처리 실패")
         send_thread_message(f"❌ {side} 주문 실패: {exc}", thread_ts=target["thread_ts"])
         _update_message(target, _open_blocks(request))
+        _release_reservation(target)
         return
     gap_pct = _signal_gap_pct(order)
     gap = f" · 신호 대비 {gap_pct:+.2f}%" if gap_pct is not None else ""
@@ -500,9 +543,7 @@ def _place(target: dict[str, Any]) -> None:
         thread_ts=target["thread_ts"],
     )
     _update_message(target, _cancel_blocks(request, order["id"]))
-    # 신호 스레드의 첫 주문이 접수되면 신호 메시지에 모래시계를 단다(이미 달려 있으면 무시된다).
-    if target["thread_ts"] != target["message_ts"]:
-        _react("reactions_add", target["channel"], target["thread_ts"], REACTION_PENDING)
+    _sync_thread(target["thread_ts"])
 
 
 def _cancel(target: dict[str, Any]) -> None:
@@ -617,14 +658,65 @@ def _react(method: str, channel: str, ts: str, name: str) -> None:
             logger.error("슬랙 반응 %s(%s) 실패: %s", method, name, error)
 
 
-def notify_completed_threads() -> int:
-    """주문 메시지가 모두 체결된 신호 스레드의 신호 메시지에서 모래시계를 떼고 완료(✅)를 단다 — 완료한 스레드 수."""
-    threads = filled_signal_threads()
-    for thread in threads:
-        _react("reactions_remove", thread["channel"], thread["thread_ts"], REACTION_PENDING)
-        _react("reactions_add", thread["channel"], thread["thread_ts"], REACTION_DONE)
-        mark_signal_thread_completed(thread["thread_ts"])
-    return len(threads)
+def sync_signal_thread(thread: dict[str, Any]) -> str | None:
+    """신호 메시지 반응을 스레드 상태 하나(⏳·✅·❌·없음)로 맞춘다 — 다른 반응은 뗀다. 완료한 스레드는 추적을 끝낸다.
+
+    반응을 다는 곳은 이 함수 하나다. 상태는 주문 메시지별 주문 결과와 남긴 결과로 정한다(`signal_thread_state`).
+    """
+    state = signal_thread_state(signal_message_states(thread))
+    channel, thread_ts = thread["channel"], thread["thread_ts"]
+    if state != thread["reaction"]:
+        for key, name in REACTIONS.items():
+            if key != state:
+                _react("reactions_remove", channel, thread_ts, name)
+        if state is not None:
+            _react("reactions_add", channel, thread_ts, REACTIONS[state])
+        set_signal_thread_reaction(thread_ts, state)
+    if state == MESSAGE_DONE:
+        forget_signal_thread(thread_ts)
+    return state
+
+
+def sync_signal_threads() -> int:
+    """추적 중인 신호 스레드의 반응을 모두 맞춘다(체결·취소 결과가 반영된 뒤) — 완료한 스레드 수."""
+    return sum(sync_signal_thread(thread) == MESSAGE_DONE for thread in signal_threads())
+
+
+def close_session_threads(strategies: list[dict[str, Any]]) -> int:
+    """세션이 닫힌 전략의 신호 스레드에서 남은 주문 버튼을 걷는다 — 정리한 메시지 수.
+
+    주문 없이 열린 버튼은 이미 처리된 회차면 완료, 아니면 장 마감 실패로 남기고, 체결 없이 취소돼 다시 주문하기
+    버튼이 남은 메시지도 장 마감 문구로 바꾼다. 진행 중인 주문이 없는 스레드는 반응을 맞춘 뒤 추적을 끝낸다.
+    주문이 하나도 없는 미사용 신호는 회수(`withdraw_signal`)가 먼저 정리한다.
+    """
+    from utils.strategy_trade_orders import reorderable_signal_messages
+
+    by_id = {strategy["strategy_id"]: strategy for strategy in strategies if "error" not in strategy}
+    closed = 0
+    for thread in signal_threads():
+        strategy = by_id.get(thread["messages"][0]["request"]["strategy_id"])
+        if strategy is None:
+            continue
+        thread_ts = thread["thread_ts"]
+        states = signal_message_states(thread)
+        settled = {item["ts"] for item in thread["settled"]}
+        reorderable = reorderable_signal_messages(thread)
+        for message in thread["messages"]:
+            ts, request = message["ts"], message["request"]
+            target = {"request": request, "channel": thread["channel"], "message_ts": ts, "thread_ts": thread_ts}
+            if states[ts] == MESSAGE_OPEN:
+                done = round_done(strategy, request)
+                _update_message(target, _note_blocks(request, _ALREADY_DONE_NOTE if done else _SESSION_CLOSED_NOTE))
+                settle_signal_message(thread_ts, ts, MESSAGE_DONE if done else MESSAGE_FAILED)
+                closed += 1
+            elif ts in reorderable and ts not in settled:
+                _update_message(target, _note_blocks(request, _SESSION_CLOSED_NOTE))
+                settle_signal_message(thread_ts, ts, MESSAGE_FAILED)
+                closed += 1
+        refreshed = find_signal_thread(thread_ts)
+        if refreshed is not None and sync_signal_thread(refreshed) != MESSAGE_PENDING:
+            forget_signal_thread(thread_ts)
+    return closed
 
 
 def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dict[str, Any]], signal_ts: str) -> int:
@@ -640,10 +732,10 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
         # 매도 후 재매수는 같은 회차의 매수 주문도 걸리므로 그쪽 중복도 본다.
         and not (trigger["rebuy"] and find_duplicate_order(account_id, trigger["strategy_id"], "buy") is not None)
     ]
-    sent = 0
+    messages: list[dict[str, Any]] = []
     try:
         for trigger in pending:
-            send_order_message(
+            message = send_order_message(
                 account_id,
                 strategy_view["pool"],
                 trigger["strategy_id"],
@@ -653,9 +745,9 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
                 rebuy=trigger["rebuy"],
                 arbitrary_id=trigger.get("arbitrary_id"),
             )
-            sent += 1
+            messages.append(message)
     finally:
         # 중간에 실패해도 이미 보낸 메시지는 스레드로 추적한다.
-        if sent:
-            register_signal_thread(get_slack_channel(), signal_ts, sent)
-    return sent
+        if messages:
+            register_signal_thread(get_slack_channel(), signal_ts, messages)
+    return len(messages)

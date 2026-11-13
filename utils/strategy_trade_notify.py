@@ -669,6 +669,12 @@ def notify_strategy_trade() -> dict[str, Any]:
         _save_sent_log(sent_log)
     if expired or withdrawn:
         logger.info("사고팔기 신호 회수 — 장중·제외 %s건, 장 마감 미사용 %s건", withdrawn, expired)
+    # 주문이 있던(회수 대상이 아닌) 신호 스레드의 남은 버튼은 세션이 닫히면 걷는다.
+    from utils.slack_mock_orders import close_session_threads
+
+    closed_messages = close_session_threads([s for s in view["strategies"] if _session_closed(s, now)])
+    if closed_messages:
+        logger.info("사고팔기 장 마감 — 남은 주문 버튼 %s건 정리", closed_messages)
     if not view["strategies"] and not view["errors"]:
         return {"sent": False, "reason": "슬랙이 켜진 계좌를 고른 사고팔기 전략이 없습니다.", "triggers": []}
     for sid, message in view["errors"].items():

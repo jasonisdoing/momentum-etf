@@ -82,6 +82,14 @@ def reserve_signal_for_order(signal_ts: str) -> bool:
     )
 
 
+def release_signal_reservation(signal_ts: str) -> None:
+    """주문 요청이 주문을 내지 못하고 끝났을 때 선점을 푼다 — 이 스레드에 주문이 하나도 없을 때만(회수가 버튼을 걷게)."""
+    from utils.strategy_trade_orders import _orders
+
+    if _orders().find_one({"slack.thread_ts": signal_ts}, {"_id": 1}) is None:
+        _messages().update_one({"thread_ts": signal_ts, "ts": signal_ts}, {"$unset": {"signal_used": ""}})
+
+
 def open_signal_threads(active_roots: set[str]) -> list[dict[str, Any]]:
     return list(
         _messages().find(
