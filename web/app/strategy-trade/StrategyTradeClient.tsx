@@ -255,6 +255,8 @@ function StatusBadge({ color, compact, children }: { color: string; compact?: bo
         fontSize: compact ? 11 : "var(--fs-sm)",
         lineHeight: compact ? 1.4 : undefined,
         fontWeight: 700,
+        // 뱃지 글자는 줄바꿈하지 않는다 — 좁은 칸에서 `매수슬/랙`처럼 쪼개지지 않게.
+        whiteSpace: "nowrap",
         color,
         border: `1px solid ${color}`,
       }}
@@ -317,7 +319,7 @@ function RoundStatus({
     )),
   ];
   return (
-    <span style={{ display: "inline-flex", gap: compact ? 2 : 4, alignItems: "center" }}>
+    <span style={{ display: "inline-flex", gap: compact ? 2 : 4, alignItems: "center", whiteSpace: "nowrap" }}>
       {compact ? <span>{row.round}호</span> : null}
       {badges}
     </span>
