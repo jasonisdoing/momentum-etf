@@ -272,7 +272,7 @@ function StatusBadge({ color, compact, children }: { color: string; compact?: bo
       style={{
         padding: compact ? "0 2px" : "1px 5px",
         borderRadius: compact ? 3 : 4,
-        fontSize: compact ? 11 : "var(--fs-sm)",
+        fontSize: compact ? "var(--fs-xs)" : "var(--fs-sm)",
         lineHeight: compact ? 1.4 : undefined,
         fontWeight: 700,
         // 뱃지 글자는 줄바꿈하지 않는다 — 좁은 칸에서 `매수슬/랙`처럼 쪼개지지 않게.
@@ -754,13 +754,13 @@ function AccountSettingsCard({
       colId: "roundStatus",
       headerName: "상태",
       headerTooltip: "아래 회차 표의 상태 — 상태가 있는 회차만 회차 번호와 함께 보인다",
-      // `2호 도달 매수슬랙 매수주문`(11px 작은 뱃지)이 들어가는 폭 — 칸 좌우 여백을 6px 로 줄였다.
+      // `2호 도달 매수슬랙 매수주문`(--fs-xs 작은 뱃지)이 들어가는 폭 — 칸 좌우 여백을 6px 로 줄였다.
       // 넘치면 옆 칸을 덮지 않고 잘라낸다.
       width: 165,
       sortable: false,
       cellStyle: { overflow: "hidden", paddingLeft: 6, paddingRight: 6 },
       cellRenderer: ({ data }: { data?: TradeListRow }) => (
-        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap", fontSize: 11 }}>
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap", fontSize: "var(--fs-xs)" }}>
           {(data?.statusRounds ?? []).map((row) => (
             <RoundStatus key={row.round} row={row} compact onWithdrawSignal={onWithdrawSignal} />
           ))}
