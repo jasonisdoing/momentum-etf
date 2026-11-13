@@ -626,13 +626,16 @@ export function StrategyMixClient() {
   // 사고팔기 사용량 — 합성 현금 몫 안에서 사고팔기 보유가 차지하는 비중. 사고팔기 매수는 계좌 예수금을
   // 그대로 쓰므로(한도로 묶지 않는다) 현금 몫을 넘을 수 있고, 넘으면 화면이 경고한다.
   // 표시 여부는 등록 종목 유무(구조)로 정한다 — 보유가 0 이어도 칸은 남는다.
+  // 비교 기준은 오늘의 현금 목표(빈 슬롯 현금 포함) — 설정 영역과 보유 표가 같은 값을 쓴다.
   const tradeUsage = useMemo(() => {
     if (!positions?.trade_tickers?.length) return null;
     const held = positions.holdings
       .filter((holding) => holding.is_trade_strategy)
       .reduce((acc, holding) => acc + (holding.held_value ?? 0), 0);
     const pct = positions.capital_krw > 0 ? (held / positions.capital_krw) * 100 : null;
-    return { held, pct };
+    const cashTarget = positions.summary.cash_pct;
+    const remain = pct == null ? null : cashTarget - pct;
+    return { held, pct, cashTarget, remain, over: remain != null && remain < 0 };
   }, [positions]);
 
   const positionRows = useMemo<PositionRow[]>(() => {
@@ -780,9 +783,7 @@ export function StrategyMixClient() {
       Boolean(tradeUsage && holding.is_trade_strategy && (holding.sources ?? []).length === 0);
     const tradeRows: PositionRow[] = [];
     if (tradeUsage) {
-      const cashTarget = positions.summary.cash_pct;
-      const remain = tradeUsage.pct == null ? null : cashTarget - tradeUsage.pct;
-      const over = remain != null && remain < 0;
+      const { cashTarget, remain, over } = tradeUsage;
       tradeRows.push(
         {
           ticker: "__trade_group__",
@@ -1682,10 +1683,9 @@ export function StrategyMixClient() {
                     </span>
                   </div>
                   {/* 사고팔기 — 현금 몫 안에서 쓰는 금액(현재 보유 평가액). 입력이 아니라 표시만 한다.
-                      사고팔기 매수는 계좌 예수금을 그대로 쓰므로 현금 몫을 넘으면 빨갛게 경고한다. */}
+                      사고팔기 매수는 계좌 예수금을 그대로 쓰므로 오늘 현금 목표를 넘으면 빨갛게 경고한다. */}
                   {tradeUsage && (() => {
-                    const remain = tradeUsage.pct == null ? null : Number(cashPct) - tradeUsage.pct;
-                    const over = remain != null && remain < 0;
+                    const { remain, over } = tradeUsage;
                     const warn: React.CSSProperties = over ? { color: "var(--up-color, #d64545)", fontWeight: 700 } : {};
                     return (
                       <>
@@ -1712,7 +1712,9 @@ export function StrategyMixClient() {
                           </span>
                           <span />
                           <span className="mixSleeveSettings" style={warn}>
-                            {over ? "⚠ 사고팔기가 현금 몫을 넘어 슬리브 몫을 쓰고 있습니다" : ""}
+                            {over
+                              ? `⚠ 오늘 현금 목표 ${tradeUsage.cashTarget.toFixed(1)}% 를 넘어 슬리브 몫을 쓰고 있습니다`
+                              : `오늘 현금 목표 ${tradeUsage.cashTarget.toFixed(1)}% 기준(빈 슬롯 현금 포함, 저장 후 반영)`}
                           </span>
                         </div>
                       </>
