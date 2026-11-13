@@ -31,6 +31,7 @@ from utils.strategy_trade_ledger import (
     read_ledgers,
     recent_trades,
     refresh_ledgers,
+    trade_pairs,
 )
 from utils.strategy_trade_market import krw_rate
 
@@ -560,12 +561,12 @@ def _attach_trade_history(
 
     보여 주는 범위: 보유 중이면 지금 사이클(1호 매수부터, 최대 30일). 오늘 다 팔았으면(다시 1호를 샀든 아직이든)
     오늘을 포함한 달력 7일(`EMPTIED_HISTORY_DAYS`)을 보여 주고, 그 안에서 보유가 모두 빈 날짜(``cycle_end_days``)에
-    경계선을 긋는다. ``trades_by_position`` = {위치: {날짜: ["buy", "sell", …]}}. 위치 기준(`position_prices`)은 지금
+    경계선을 긋는다. ``trades_by_position`` = {위치: {날짜: [뱃지, …]}}(`_trade_badges`). 위치 기준(`position_prices`)은 지금
     1호 체결가, 오늘 다 판 뒤 아직 안 샀으면 방금 끝난 사이클의 1호 체결가다. 지난 사이클의 체결은 회차가 아니라
     체결가에 가장 가까운 칸에 놓인다. 같은 날 체결된 매도·재매수 주문 쌍은 지금 사이클 안에서만 해당 회차의 칸에
     함께 표시한다. 그 밖에 보유가 없으면 기준이 없어 비운다.
     """
-    trades: dict[int, dict[str, list[str]]] = {}
+    trades: dict[int, dict[str, list[dict[str, Any]]]] = {}
     view["trades_by_position"] = trades
     view["cycle_end_days"] = []
     view["position_prices"] = {}
@@ -599,17 +600,23 @@ def _attach_trade_history(
         for index, round_no in _paired_trade_rounds(history[current_start:], orders).items()
     }
     round_positions = {row["round"]: row["position"] for row in view["rounds"]}
+    opening = ledger.quantity - sum(trade.shares if trade.buy else -trade.shares for trade in history)
+    sold_lots = trade_pairs(history, opening)
+    # 짝 번호 — 표에 보이는 매수에 체결 순서대로 1부터. 그 매수를 판 매도가 같은 번호를 쓴다.
+    pair_numbers = {
+        index: number
+        for number, index in enumerate(
+            (index for index in range(shown_from, len(history)) if history[index].buy), start=1
+        )
+    }
     for index in range(shown_from, len(history)):
         trade = history[index]
         position = round_positions.get(paired_rounds.get(index))
         if position is None:
             position = ladder.ladder_position(trade.price, base_price, trigger_pct)
-        badges = trades.setdefault(position, {}).setdefault(trade.day, [])
-        side = "buy" if trade.buy else "sell"
-        if trade.shares > trade.arbitrary_shares:
-            badges.append(side)
-        if trade.arbitrary_shares:
-            badges.append(f"arbitrary_{side}")
+        trades.setdefault(position, {}).setdefault(trade.day, []).extend(
+            _trade_badges(trade, pair_numbers.get(index), sold_lots[index], pair_numbers, history)
+        )
     # 위치 가격 — 회차·매매가 있는 위치 범위 전체(빈 칸 포함). 1호 체결가 × (1 − 간격%)^(k−1) 를 호가로 맞춘 값.
     positions = [row["position"] for row in view["rounds"]] + list(trades)
     view["position_prices"] = {
@@ -620,6 +627,35 @@ def _attach_trade_history(
         )
         for position in range(min(positions), max(positions) + 1)
     }
+
+
+def _trade_badges(
+    trade: Trade,
+    number: int | None,
+    sold_lots: list[tuple[int | None, bool]],
+    pair_numbers: dict[int, int],
+    history: list[Trade],
+) -> list[dict[str, Any]]:
+    """체결 한 건의 회차 표 뱃지 — 방향(`side`)·짝 번호(`pairs`)·표 밖에서 산 매수 날짜(`outside`).
+
+    매수는 자기 번호, 매도는 차감한 매수의 번호다. 표에 안 보이는 매수를 판 몫은 번호 대신 산 날짜(모르면 None)를 둔다.
+    일반 몫과 임의 몫은 뱃지를 나눈다.
+    """
+    side = "buy" if trade.buy else "sell"
+    badges: list[dict[str, Any]] = []
+    for arbitrary, shares in ((False, trade.shares - trade.arbitrary_shares), (True, trade.arbitrary_shares)):
+        if not shares:
+            continue
+        if trade.buy:
+            pairs, outside = ([number] if number is not None else []), []
+        else:
+            origins = [origin for origin, lot_arbitrary in sold_lots if lot_arbitrary == arbitrary]
+            pairs = list(dict.fromkeys(pair_numbers[o] for o in origins if o in pair_numbers))
+            outside = list(
+                dict.fromkeys(None if o is None else history[o].day for o in origins if o not in pair_numbers)
+            )
+        badges.append({"side": f"arbitrary_{side}" if arbitrary else side, "pairs": pairs, "outside": outside})
+    return badges
 
 
 def _realized_summary(ledger: Ledger) -> dict[str, Any]:

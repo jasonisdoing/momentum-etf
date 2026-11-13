@@ -70,6 +70,9 @@ type Status = {
 };
 
 type TradeSide = "buy" | "sell" | "arbitrary_buy" | "arbitrary_sell";
+/** 회차 표의 체결 뱃지 — 짝 번호(`pairs`)는 매수는 자기 번호, 매도는 판 매수의 번호다.
+ *  표에 안 보이는 매수를 판 몫은 번호 대신 그 매수 날짜(`outside`, 모르면 null)를 둔다. */
+type TradeBadge = { side: TradeSide; pairs: number[]; outside: Array<string | null> };
 
 const FILL_LABELS = {
   buy: "매수",
@@ -132,7 +135,7 @@ export type StrategyView = {
   status: Status;
   arbitrary_lots: Array<{ id: string; quantity: number; fill_price: number; bought_on: string; sell_limit: number }>;
   /** 사다리 위치별 · 날짜별 매수·매도(체결 순서) — 지금 사이클, 오늘 리셋됐으면 오늘까지 1주일. */
-  trades_by_position: Record<string, Record<string, TradeSide[]>>;
+  trades_by_position: Record<string, Record<string, TradeBadge[]>>;
   /** 사다리 위치별 가격 — 지금 1호 체결가 × (1 − 간격%)^(위치−1)을 호가로 맞춘 값. 보유가 없으면 비어 있다. */
   position_prices: Record<string, number>;
   /** 보유가 모두 빈 날짜(사이클 종료) — 표의 날짜 칸 오른쪽에 경계선을 긋는다. */
@@ -218,7 +221,8 @@ const SELL_BADGE_COLOR = "var(--up-color, #d64545)";
 const thStyle: React.CSSProperties = { padding: "4px 8px", textAlign: "right" };
 // 회차 표 고정 열(위치~손익)의 폭 — 날짜 열이 몇 개든 같은 폭이고, 날짜가 적으면 오른쪽이 비어 보인다.
 // 상태 열은 `도달 매수슬랙 매수주문` 세 뱃지가 한 줄에 들어가는 폭이다(뱃지는 줄바꿈하지 않는다).
-const ROUND_TABLE_FIXED_WIDTHS = [56, 80, 210, 100, 150, 84] as const;
+// 순서: 위치·회차·상태·위치 가격·체결가·수량·금액·평가손익·손익.
+const ROUND_TABLE_FIXED_WIDTHS = [56, 80, 210, 100, 150, 72, 110, 100, 84] as const;
 // 날짜 열의 최소 폭 — 그날 매매가 많으면 배지만큼 넓어진다.
 const ROUND_TABLE_DAY_MIN_WIDTH = 108;
 const WEEKDAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"] as const;
@@ -239,6 +243,21 @@ function formatNumber(value: number | null | undefined, digits = 0): string {
 function formatSigned(value: number | null | undefined, digits = 2): string {
   if (value == null || !Number.isFinite(value)) return "-";
   return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}%`;
+}
+
+/** 부호 붙은 금액 — 가격과 같은 소수 자리(원 0자리·달러 2자리). */
+function formatSignedAmount(value: number | null, currency: string): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return `${value > 0 ? "+" : ""}${formatPrice(value, currency)}`;
+}
+
+/** 보유 회차의 금액(체결가 × 수량)·평가손익((현재가 − 체결가) × 수량) — 안 산 회차는 null. */
+function heldRoundAmounts(row: RoundRow): { cost: number | null; pnl: number | null } {
+  if (!row.held || row.fill_price == null) return { cost: null, pnl: null };
+  return {
+    cost: row.fill_price * row.quantity,
+    pnl: row.close == null ? null : (row.close - row.fill_price) * row.quantity,
+  };
 }
 
 function signColor(value: number | null | undefined): string {
@@ -333,13 +352,24 @@ const FILL_COLORS = { buy: "var(--tblr-purple, #ae3ec9)", sell: "var(--tblr-oran
 const FILL_SOURCE_WORDS = { slack: "슬랙", manual: "수동" } as const;
 const BOUGHT_SOURCE_WORDS = { ...FILL_SOURCE_WORDS, mixed: "혼합" } as const;
 
-function DailyTradeBadges({ sides }: { sides: TradeSide[] }) {
+/** 표 밖 매수를 판 매도의 안내 — 산 날짜(MM-DD), 모르면 '조회 기간 이전'. */
+function outsideTitle(outside: Array<string | null>): string | undefined {
+  if (!outside.length) return undefined;
+  const days = outside.map((day) => (day ? day.slice(5) : "조회 기간 이전")).join(", ");
+  return `표 범위 밖 매수(${days}) 매도`;
+}
+
+function DailyTradeBadges({ badges }: { badges: TradeBadge[] }) {
   return (
     <span style={{ display: "inline-flex", gap: 4, whiteSpace: "nowrap" }}>
-      {sides.map((side, idx) => (
-        <StatusBadge key={idx} color={FILL_COLORS[side.endsWith("buy") ? "buy" : "sell"]}>
-          {FILL_LABELS[side]}
-        </StatusBadge>
+      {badges.map((badge, idx) => (
+        <span key={idx} title={outsideTitle(badge.outside)}>
+          <StatusBadge color={FILL_COLORS[badge.side.endsWith("buy") ? "buy" : "sell"]}>
+            {FILL_LABELS[badge.side]}
+            {badge.pairs.join("·")}
+            {badge.outside.length ? "·" : ""}
+          </StatusBadge>
+        </span>
       ))}
     </span>
   );
@@ -1015,7 +1045,7 @@ function StrategySection({
   const tradeDays = [
     ...new Set(Object.values(view.trades_by_position).flatMap((byDay) => Object.keys(byDay))),
   ].sort();
-  const columnCount = 6 + tradeDays.length;
+  const columnCount = ROUND_TABLE_FIXED_WIDTHS.length + tradeDays.length;
   const cycleEnds = new Set(view.cycle_end_days);
   // 사이클이 끝난 날 칸 오른쪽에 경계선 — 그 뒤 체결은 새 사이클이다.
   const cycleEndStyle = (day: string): React.CSSProperties =>
@@ -1030,6 +1060,14 @@ function StrategySection({
     row: view.rounds.find((item) => item.position === firstPosition + idx) ?? null,
     trades: view.trades_by_position[String(firstPosition + idx)] ?? {},
   }));
+  // 최근 저점 선 — 행 가격이 저점 아래로 처음 내려가는 행 앞에 긋는다(모든 행이 저점 이상이면 맨 아래).
+  // 행 가격은 표에 보이는 위치 가격이다 — 체결 뱃지도 이 칸에 놓이므로, 저점 날 산 체결이 선 위에 보인다.
+  // 위치 가격이 없는 표(보유가 없어 기준이 없음)는 회차 매수선으로 판정한다.
+  const hasPositionPrices = Object.keys(view.position_prices).length > 0;
+  const lowLineIndex = slots.findIndex(({ position, row }) => {
+    const level = hasPositionPrices ? view.position_prices[String(position)] : row?.buy_index;
+    return level != null && level < index.recent_low;
+  });
   const firstRoundPrice = view.rounds.find((row) => row.round === 1)?.buy_index;
   const aboveFirstRound = firstRoundPrice != null && firstRoundPrice > 0 && index.recent_high > 0
     ? { round: 1, pct: Number(((index.recent_high / firstRoundPrice - 1) * 100).toFixed(2)) }
@@ -1118,6 +1156,9 @@ function StrategySection({
               <th style={{ ...thStyle, textAlign: "left" }}>상태</th>
               <th style={thStyle}>위치 가격</th>
               <th style={thStyle}>체결가</th>
+              <th style={thStyle}>수량</th>
+              <th style={thStyle} title="체결가 × 수량">금액</th>
+              <th style={thStyle} title="(현재가 − 체결가) × 수량">평가손익</th>
               <th style={thStyle}>손익</th>
               {tradeDays.map((day) => (
                 <th
@@ -1142,35 +1183,29 @@ function StrategySection({
             {slots.map(({ position, row, trades }, rowIdx) => {
               const tradeCells = tradeDays.map((day) => (
                 <td key={day} style={{ ...tdStyle, textAlign: "center", ...cycleEndStyle(day) }}>
-                  {trades[day] ? <DailyTradeBadges sides={trades[day]} /> : null}
+                  {trades[day] ? <DailyTradeBadges badges={trades[day]} /> : null}
                 </td>
               ));
+              const lowLine = rowIdx === lowLineIndex ? <RecentPriceRow index={index} columnCount={columnCount} kind="low" /> : null;
               if (row === null) {
                 return (
-                  <tr key={`empty-${position}`} style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
+                  <React.Fragment key={`empty-${position}`}>
+                  {lowLine}
+                  <tr style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
                     <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)" }}>{position}</td>
                     <td colSpan={2} style={tdStyle} />
                     <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatPrice(view.position_prices[String(position)], currency)}</td>
-                    <td colSpan={2} style={tdStyle} />
+                    <td colSpan={5} style={tdStyle} />
                     {tradeCells}
                   </tr>
+                  </React.Fragment>
                 );
               }
-              // 최근 저점 라인: 이 행의 지수 환산이 저점 아래로 처음 내려가는 지점 앞에 긋는다.
-              // (마지막 행까지 저점 위면 맨 아래에) — 값이 없는 행은 판정에서 건너뛴다.
-              const prevLevels = slots
-                .slice(0, rowIdx)
-                .map((slot) => slot.row?.buy_index)
-                .filter((v): v is number => v != null);
-              const ownLevel = row.buy_index;
-              const lowLineHere =
-                ownLevel != null &&
-                ownLevel < index.recent_low &&
-                (prevLevels.length === 0 || prevLevels[prevLevels.length - 1] >= index.recent_low);
+              const amounts = heldRoundAmounts(row);
               return (
               <React.Fragment key={row.round}>
               {row.round === 1 && aboveFirstRound ? <PriceGapRow gap={aboveFirstRound} columnCount={columnCount} /> : null}
-              {lowLineHere ? <RecentPriceRow index={index} columnCount={columnCount} kind="low" /> : null}
+              {lowLine}
               <tr style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
                 <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)" }}>{position}</td>
                 <td style={{ ...tdStyle, textAlign: "left", fontWeight: 700 }}>
@@ -1217,6 +1252,11 @@ function StrategySection({
                     </span>
                   ) : null}
                 </td>
+                <td style={tdStyle}>{row.held ? `${formatNumber(row.quantity)}주` : "-"}</td>
+                <td style={tdStyle}>{formatPrice(amounts.cost, currency)}</td>
+                <td style={{ ...tdStyle, color: signColor(amounts.pnl), fontWeight: 700 }}>
+                  {formatSignedAmount(amounts.pnl, currency)}
+                </td>
                 <td style={{ ...tdStyle, color: signColor(row.profit_pct), fontWeight: 700 }}>
                   {formatSigned(row.profit_pct)}
                 </td>
@@ -1225,8 +1265,7 @@ function StrategySection({
               </React.Fragment>
               );
             })}
-            {view.rounds.length > 0 &&
-            view.rounds.every((r) => r.buy_index == null || r.buy_index >= index.recent_low) ? (
+            {slots.length > 0 && lowLineIndex < 0 ? (
               <>
                 {belowLastRound ? <PriceGapRow gap={belowLastRound} columnCount={columnCount} /> : null}
                 <RecentPriceRow index={index} columnCount={columnCount} kind="low" />

@@ -203,10 +203,21 @@ def recent_trades(ledger: Ledger, ticker: str, cached_days: dict[date, list[dict
 REGULAR_SELL = "regular"
 
 
-def _replay(lots: list[Lot], trades: list[Trade], recorded: list[Trade] | None = None) -> list[Lot]:
-    """실제 체결을 순서대로 반영한다. 수동 매도는 가장 최근 임의 매수부터 차감한다."""
+def _replay(
+    lots: list[Lot],
+    trades: list[Trade],
+    recorded: list[Trade] | None = None,
+    pairs: list[list[tuple[int | None, bool]]] | None = None,
+) -> list[Lot]:
+    """실제 체결을 순서대로 반영한다. 수동 매도는 가장 최근 임의 매수부터 차감한다.
+
+    ``pairs`` 를 주면 체결마다 차감한 로트의 (산 체결의 ``trades`` 순번 — 처음 받은 로트면 None, 임의 로트 여부)를 담는다.
+    """
     lots = list(lots)
+    # 로트마다 그 로트를 만든 매수 체결의 순번 — 처음 받은 로트는 None. `lots` 와 같은 순서로 움직인다.
+    origins: list[int | None] = [None] * len(lots)
     for index, trade in enumerate(trades):
+        taken: list[tuple[int | None, bool]] = []
         arbitrary_shares = 0
         if trade.buy:
             last = next((lot for lot in reversed(lots) if lot.arbitrary_id is None), None)
@@ -216,6 +227,7 @@ def _replay(lots: list[Lot], trades: list[Trade], recorded: list[Trade] | None =
                 arbitrary_id = f"{trade.day}:{order}"
                 arbitrary_shares = trade.shares
             lots.append(Lot(trade.shares, trade.price, trade.day, trade.source, arbitrary_id))
+            origins.append(index)
         remaining = 0 if trade.buy else trade.shares
         realized: float | None = None if trade.buy else 0.0
         while remaining > 0:
@@ -235,14 +247,28 @@ def _replay(lots: list[Lot], trades: list[Trade], recorded: list[Trade] | None =
                 realized += take * (trade.price - top.price)
             if top.arbitrary_id is not None:
                 arbitrary_shares += take
+            taken.append((origins[target], top.arbitrary_id is not None))
             if take == top.shares:
                 lots.pop(target)
+                origins.pop(target)
             else:
                 lots[target] = replace(top, shares=top.shares - take)
             remaining -= take
         if recorded is not None:
             recorded.append(replace(trade, arbitrary_shares=arbitrary_shares, realized=realized))
+        if pairs is not None:
+            pairs.append(taken)
     return lots
+
+
+def trade_pairs(trades: list[Trade], opening: int) -> list[list[tuple[int | None, bool]]]:
+    """체결마다 차감한 매수 — (``trades`` 안 매수 순번, 목록 이전에 산 것이면 None, 임의 로트 여부). 매수는 빈 목록.
+
+    원장과 같은 `_replay` 로 정한다. ``opening`` 은 목록 처음 체결 직전 보유 수량이다(체결가 모름 로트로 둔다).
+    """
+    pairs: list[list[tuple[int | None, bool]]] = []
+    _replay([Lot(opening, 0.0, "", _SOURCE_UNKNOWN)] if opening else [], trades, None, pairs)
+    return pairs
 
 
 def _anchor_lots(rows: list[dict[str, Any]]) -> list[Lot]:
