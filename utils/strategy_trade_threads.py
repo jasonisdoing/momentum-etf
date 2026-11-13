@@ -21,8 +21,9 @@ from utils.settings_loader import get_slack_channel
 
 KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_slack_messages"
-# 신호가 살아 있는 동안만 필요하다 — 오래된 기록은 DB 가 스스로 지운다.
-_RETENTION_SECONDS = 7 * 24 * 3600
+# 신호가 살아 있는 동안만 필요하다 — 오래된 기록은 DB 가 스스로 지운다. 신호 스레드 체결 추적도 같은 기간만 둔다.
+SIGNAL_RETENTION_DAYS = 7
+_RETENTION_SECONDS = SIGNAL_RETENTION_DAYS * 24 * 3600
 # 이미 지워진 메시지는 실패로 보지 않는다(사용자가 슬랙에서 직접 지웠을 수 있다).
 _ALREADY_GONE = "message_not_found"
 

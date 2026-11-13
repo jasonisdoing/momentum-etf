@@ -8,8 +8,8 @@
 중복 방지 · 체결 확인
 --------------------
 2분 간격으로 판정하므로 같은 조건이 유지되면 하루에 수십 번 발송될 수 있다. 그래서
-``전략:회차-동작`` 단위로 그날 처음 한 번만 메시지를 보내고 다시 알리지 않는다. 체결 확인은
-처음 신호를 보낸 메시지(``signal_ts``)의 스레드에 단다. 발송 이력은
+``전략:회차-동작`` 단위로 거래 세션마다 처음 한 번만 메시지를 보내고 다시 알리지 않는다. 날짜가 바뀌어도
+세션이 이어지면 같은 신호이며, 체결 확인은 처음 신호를 보낸 메시지(``signal_ts``)의 스레드에 단다. 발송 이력은
 ``system_config.strategy_trade_settings.sent_log`` 에
 ``{"kospi200:2-buy": {"at": ..., "strategy_id": ..., "ticker": ..., "name": ..., "round": ...,
 "index_text": ..., "signal_ts": ..., "held_count": ...}}`` 형태로 남기며, 발송에 성공했을 때만 갱신한다.
@@ -80,17 +80,6 @@ def _withdrawal_price(base: float, gap_pct: float, *, buy: bool) -> float:
 def _trigger_key(trigger: dict[str, Any]) -> str:
     target = trigger.get("arbitrary_id") or trigger["round"]
     return f"{trigger['strategy_id']}:{target}-{trigger['action']}"
-
-
-def _parse_sent_at(value: str | None) -> datetime | None:
-    """발송 시각. 날짜만 담긴 옛 기록은 그날 자정으로 읽어 하루 뒤 자연히 정리되게 둔다."""
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(str(value))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=KST)
 
 
 def _level(value: float | None, country: str) -> str:
@@ -237,7 +226,7 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
-    """화면용 — 회차마다 오늘 슬랙 신호가 나간 방향·발송 기록 키·슬랙 메시지 기록 유무(`slack_signals`)와
+    """화면용 — 회차마다 이번 세션에 슬랙 신호가 나간 방향·발송 기록 키·슬랙 메시지 기록 유무(`slack_signals`)와
     아직 끝나지 않은 주문의 방향(`order_sides`)을 행에 적는다. 회차 원장을 못 만든 전략(`error`)은 건너뛴다.
 
     지정가에 닿아 있는지와 무관하다 — 신호·주문이 나간 뒤 가격이 물러나도 표시가 남아야 한다.
@@ -246,7 +235,6 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
     """
     from utils.strategy_trade_orders import active_order_keys
 
-    today = datetime.now(KST).strftime("%Y-%m-%d")
     held_counts = _held_counts(view)
     held_fills = _held_fills(view)
     sent_log = _load_sent_log()
@@ -261,8 +249,7 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
         for key, entry in sent_log.items()
         # 이 화면에 없는 전략의 기록은 어차피 행에 닿지 않는다 — 보유 수를 모르니 판정 없이 뺀다.
         if entry.get("strategy_id") in held_counts
-        and (sent_at := _parse_sent_at(entry.get("at"))) is not None
-        and sent_at.strftime("%Y-%m-%d") == today
+        and not entry.get("session_closed")
         and not _round_filled(entry, held_counts[entry["strategy_id"]], held_fills[entry["strategy_id"]])
     }
     strategy_ids = [strategy_view["strategy_id"] for strategy_view in view["strategies"]]
@@ -532,17 +519,16 @@ def _send_confirms(
     return sent, failed
 
 
-def _price_returned(entries: list[dict[str, Any]], strategy: dict[str, Any], now: datetime) -> str | None:
-    """오늘 보낸 신호들이 모두 회수 기준까지 되돌아왔으면 회수 한 줄의 상세(현재가), 아니면 None."""
+def _price_returned(entries: list[dict[str, Any]], strategy: dict[str, Any]) -> str | None:
+    """보낸 신호들이 모두 회수 기준까지 되돌아왔으면 회수 한 줄의 상세(현재가), 아니면 None."""
     country = strategy["country"]
     current = strategy["index"]["close"]
     if current <= 0:
         return None
     for entry in entries:
-        sent_at = _parse_sent_at(entry.get("at"))
         threshold = entry.get("withdrawal_price")
         target = entry.get("limit_price")
-        if sent_at is None or sent_at.date() != now.date() or threshold is None or target is None:
+        if threshold is None or target is None:
             return None
         buy = entry["action"] == "buy"
         if buy and not (current >= threshold and current > target):
@@ -593,7 +579,7 @@ def _settle_unused_signals(
         if strategy is None:
             continue
         after_close = _session_closed(strategy, now)
-        detail = None if after_close else _price_returned(entries, strategy, now)
+        detail = None if after_close else _price_returned(entries, strategy)
         if not after_close and (detail is None or not _can_notify(strategy, now)):
             continue
         held = strategy["status"]["held_count"]
@@ -626,6 +612,37 @@ def _settle_unused_signals(
     return len(expired), len(withdrawn)
 
 
+def _close_sessions(
+    strategies: list[dict[str, Any]], sent_log: dict[str, dict[str, Any]], now: datetime, configured: set[str]
+) -> bool:
+    """신호의 수명을 날짜가 아니라 거래 세션으로 끊는다 — 기록이 바뀌었으면 True.
+
+    같은 신호는 세션이 이어지는 동안 날짜가 바뀌어도 처음 보낸 스레드 하나로 이어진다. 세션이 닫힌 전략의 기록에는
+    `session_closed` 표시만 남기고(닫힌 동안 체결 확인을 보낼 수 없으므로 지우지 않는다), 다음 세션이 열리면
+    체결 확인을 먼저 처리한 뒤 `_drop_closed_session_signals` 가 지운다. 사고팔기 설정에서 빠진 전략의 기록은 지운다.
+    """
+    changed = False
+    for key in [key for key, entry in sent_log.items() if entry.get("strategy_id") not in configured]:
+        del sent_log[key]
+        changed = True
+    closed = {strategy["strategy_id"] for strategy in strategies if _session_closed(strategy, now)}
+    for entry in sent_log.values():
+        if entry.get("strategy_id") in closed and not entry.get("session_closed"):
+            entry["session_closed"] = True
+            changed = True
+    return changed
+
+
+def _drop_closed_session_signals(sent_log: dict[str, dict[str, Any]], open_ids: set[str]) -> bool:
+    """지난 세션에 보낸 신호 기록을 지운다(다시 열린 전략만) — 이번 세션의 같은 회차 신호는 새 스레드로 나간다."""
+    stale = [
+        key for key, entry in sent_log.items() if entry.get("session_closed") and entry.get("strategy_id") in open_ids
+    ]
+    for key in stale:
+        del sent_log[key]
+    return bool(stale)
+
+
 def notify_strategy_trade() -> dict[str, Any]:
     """트리거를 판정해 필요할 때만 슬랙을 보낸다 — 사고팔기 슬랙이 켜진 계좌의 전략만.
 
@@ -646,9 +663,11 @@ def notify_strategy_trade() -> dict[str, Any]:
     after_close = now.time() >= first_close or not is_instrument_trading_time("us", "etf", now=now)
     view = load_views_where(lambda entry: after_close or entry["account_id"] in enabled, fresh=False)
     sent_log = _load_sent_log()
-    expired, withdrawn = _settle_unused_signals(view["strategies"], sent_log, now, set(load_settings()["strategies"]))
-    if expired or withdrawn:
+    configured = set(load_settings()["strategies"])
+    expired, withdrawn = _settle_unused_signals(view["strategies"], sent_log, now, configured)
+    if _close_sessions(view["strategies"], sent_log, now, configured) or expired or withdrawn:
         _save_sent_log(sent_log)
+    if expired or withdrawn:
         logger.info("사고팔기 신호 회수 — 장중·제외 %s건, 장 마감 미사용 %s건", withdrawn, expired)
     if not view["strategies"] and not view["errors"]:
         return {"sent": False, "reason": "슬랙이 켜진 계좌를 고른 사고팔기 전략이 없습니다.", "triggers": []}
@@ -663,9 +682,6 @@ def notify_strategy_trade() -> dict[str, Any]:
             "거래 가능 시간인 사고팔기 종목이 없습니다." if view["strategies"] else "운용 현황을 확인할 수 없습니다."
         )
         return {"sent": False, "reason": reason, "triggers": []}
-    deferred_ids = {strategy["strategy_id"] for strategy in view["strategies"] if strategy["account_id"] in enabled} - {
-        strategy["strategy_id"] for strategy in open_strategies
-    }
     triggers = [trigger for strategy in open_strategies for trigger in collect_triggers(strategy)]
     if triggers:
         # 주문이 진행 중이면 신호를 생략한다. 매도 후 재매수는 양쪽을 확인한다.
@@ -677,10 +693,9 @@ def notify_strategy_trade() -> dict[str, Any]:
             not in in_flight
             and not (trigger["rebuy"] and (trigger["strategy_id"], trigger["round"], "buy") in in_flight)
         ]
-    today = now.strftime("%Y-%m-%d")
 
-    # 그날 처음 보는 신호만 전 회차 현황이 담긴 본문으로 보낸다(이미 보낸 신호는 다시 알리지 않는다).
-    # 메시지는 **전략(종목)마다 따로**, 보낼 것이 있는 전략에만 보낸다.
+    # 이번 세션에 처음 보는 신호만 전 회차 현황이 담긴 본문으로 보낸다 — 이미 보낸 신호는 날짜가 바뀌어도
+    # 다시 알리지 않고 처음 스레드를 그대로 쓴다. 메시지는 **전략(종목)마다 따로**, 보낼 것이 있는 전략에만 보낸다.
     # ① 요청해 둔 주문이 체결됐는지 먼저 본다. 체결됐으면 확인 한 줄을 보내고 기록을 지운다 —
     #    지워야 다음에 같은 회차 신호가 나면 다시 전체 메시지로 나간다.
     #    이 검사는 트리거 유무와 무관하게 돌아야 한다: 주문을 넣는 순간 그 회차가 보유로 바뀌어
@@ -700,18 +715,15 @@ def notify_strategy_trade() -> dict[str, Any]:
             else _round_filled(pending, held_counts[pending["strategy_id"]], held_fills[pending["strategy_id"]])
         ),
     )
+    dropped = _drop_closed_session_signals(sent_log, {strategy["strategy_id"] for strategy in open_strategies})
 
     sent_count = failed_count = order_failed = 0
     fresh_all: list[dict[str, Any]] = []
     stamp = now.isoformat()
     for strategy_view in open_strategies:
         sid = strategy_view["strategy_id"]
-        # ② 남은 신호 — 그날 처음 보는 신호만 보낸다.
-        fresh: list[dict[str, Any]] = []
-        for trigger in (t for t in triggers if t["strategy_id"] == sid):
-            last = _parse_sent_at((sent_log.get(_trigger_key(trigger)) or {}).get("at"))
-            if last is None or last.strftime("%Y-%m-%d") != today:
-                fresh.append(trigger)
+        # ② 남은 신호 — 기록에 없는(이번 세션에 처음 보는) 신호만 보낸다.
+        fresh = [t for t in triggers if t["strategy_id"] == sid and _trigger_key(t) not in sent_log]
 
         own_confirmed = [pending for pending in confirmed if str(pending.get("strategy_id")) == sid]
         # 신호 메시지가 기록된 확인은 그 스레드로, 없는 확인(옛 기록)은 새 신호 본문과 함께 채널로 보낸다.
@@ -743,19 +755,12 @@ def notify_strategy_trade() -> dict[str, Any]:
         _keep_latest_buy(sent_log, sid)
 
     if not sent_count and not failed_count:
-        if not triggers and not confirmed:
+        if not triggers and not confirmed and not dropped:
             # 확인할 체결도 신호도 없다 — 2분마다 도는 배치라 여기서 DB 를 건드리면 무의미한 쓰기만 쌓인다.
             return {"sent": False, "reason": "매수·매도 신호가 없습니다.", "triggers": []}
         _save_sent_log(sent_log)
-        return {"sent": False, "reason": "오늘 이미 발송한 신호입니다.", "triggers": triggers}
+        return {"sent": False, "reason": "이번 세션에 이미 발송한 신호입니다.", "triggers": triggers}
 
-    # 장이 닫힌 종목과 발송에 실패한 체결 확인은 다음 배치에서 다시 처리한다.
-    retry_keys = {_trigger_key(pending) for pending in confirmed}
-    sent_log = {
-        key: entry
-        for key, entry in sent_log.items()
-        if str(entry.get("at", "")).startswith(today) or entry.get("strategy_id") in deferred_ids or key in retry_keys
-    }
     _save_sent_log(sent_log)
 
     parts = [f"메시지 {sent_count}건 발송"]

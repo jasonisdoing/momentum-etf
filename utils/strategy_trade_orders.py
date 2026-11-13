@@ -45,10 +45,11 @@ from utils.strategy_trade_market import (
     session_trade_date,
 )
 from utils.strategy_trade_service import load_views_where
+from utils.strategy_trade_threads import SIGNAL_RETENTION_DAYS
 
 KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_orders"
-# 신호 스레드 기록은 사고팔기 설정 문서의 `signal_threads` 목록에 둔다(오늘 것만 남긴다).
+# 신호 스레드 기록은 사고팔기 설정 문서의 `signal_threads` 목록에 둔다 — 완료하면 지우고, 날짜가 바뀌어도 이어 추적한다.
 _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "strategy_trade_settings"
 #: 아직 끝나지 않은 상태 — 이 동안 체결 조회로 상태를 갱신한다.
@@ -630,16 +631,19 @@ def _config():
 
 
 def register_signal_thread(channel: str, thread_ts: str, message_count: int) -> None:
-    """새 신호 메시지 스레드와 그 안의 주문 메시지 수를 기록한다 — 메시지가 모두 체결되면 스레드를 완료로 본다."""
-    today = _now().strftime("%Y-%m-%d")
+    """새 신호 메시지 스레드와 그 안의 주문 메시지 수를 기록한다 — 메시지가 모두 체결되면 스레드를 완료로 본다.
+
+    완료되지 않은 채 남은 기록은 슬랙 메시지 기록과 같은 보존 기간이 지나면 지운다(그 뒤로는 스레드를 찾을 수 없다).
+    """
+    today = _now().date()
+    oldest = (today - timedelta(days=SIGNAL_RETENTION_DAYS)).isoformat()
     config = _config()
-    config.update_one({"_id": _SETTINGS_KEY}, {"$pull": {"signal_threads": {"date": {"$lt": today}}}}, upsert=True)
+    config.update_one({"_id": _SETTINGS_KEY}, {"$pull": {"signal_threads": {"date": {"$lt": oldest}}}}, upsert=True)
     thread = {
         "channel": channel,
         "thread_ts": thread_ts,
         "message_count": message_count,
-        "date": today,
-        "completed": False,
+        "date": today.isoformat(),
     }
     config.update_one({"_id": _SETTINGS_KEY}, {"$push": {"signal_threads": thread}}, upsert=True)
 
@@ -649,8 +653,6 @@ def filled_signal_threads() -> list[dict[str, Any]]:
     doc = _config().find_one({"_id": _SETTINGS_KEY}, {"signal_threads": 1}) or {}
     result = []
     for thread in doc.get("signal_threads") or []:
-        if thread["completed"]:
-            continue
         orders = _orders().find(
             {
                 "slack.channel": thread["channel"],
@@ -677,10 +679,8 @@ def filled_signal_threads() -> list[dict[str, Any]]:
 
 
 def mark_signal_thread_completed(thread_ts: str) -> None:
-    _config().update_one(
-        {"_id": _SETTINGS_KEY, "signal_threads.thread_ts": thread_ts},
-        {"$set": {"signal_threads.$.completed": True}},
-    )
+    """완료한 스레드는 더 추적할 일이 없어 목록에서 지운다."""
+    _config().update_one({"_id": _SETTINGS_KEY}, {"$pull": {"signal_threads": {"thread_ts": thread_ts}}})
 
 
 def close_warning_slack_orders() -> list[dict[str, Any]]:
