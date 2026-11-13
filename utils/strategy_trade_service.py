@@ -580,6 +580,8 @@ def _attach_trade_history(
         # 오늘 다 판 뒤 1호 매수 구간 전 — 방금 끝난 사이클의 1호 체결가를 기준으로 쓴다.
         base_price = history[cycle_start].price
     else:
+        # 표에 보이는 체결이 없다 — 요약도 보유(없음) 기준으로만 낸다.
+        view["history_summary"] = _history_summary(view, ledger, history, [], len(history))
         return
     # 지금 사이클 시작 — 보유가 없으면 없고(목록 끝), 목록 이전부터 이어졌으면 목록 처음이다.
     if first is None:
@@ -617,6 +619,7 @@ def _attach_trade_history(
         trades.setdefault(position, {}).setdefault(trade.day, []).extend(
             _trade_badges(trade, pair_numbers.get(index), sold_lots[index], pair_numbers, history)
         )
+    view["history_summary"] = _history_summary(view, ledger, history, sold_lots, shown_from)
     # 위치 가격 — 회차·매매가 있는 위치 범위 전체(빈 칸 포함). 1호 체결가 × (1 − 간격%)^(k−1) 를 호가로 맞춘 값.
     positions = [row["position"] for row in view["rounds"]] + list(trades)
     view["position_prices"] = {
@@ -629,10 +632,42 @@ def _attach_trade_history(
     }
 
 
+def _history_summary(
+    view: dict[str, Any],
+    ledger: Ledger,
+    history: list[Trade],
+    sold_lots: list[list[tuple[int | None, bool, int]]],
+    shown_from: int,
+) -> dict[str, Any]:
+    """회차 표 범위의 손익 요약(종목 통화) — 평가 금액·실현손익·평가손익·합계.
+
+    실현손익은 표 범위 매도를 짝 매수(`trade_pairs`) 체결가와 비교한다. 조회 기간 이전에 산 몫은 체결가를 몰라
+    빼고 그 수량을 ``excluded_shares`` 로 알린다. 평가는 지금 보유 로트(임의 매수 포함) 전체다.
+    """
+    close = float(view["index"]["close"])
+    realized = 0.0
+    excluded = 0
+    for index in range(shown_from, len(history)):
+        sell = history[index]
+        for origin, _, shares in sold_lots[index]:
+            if origin is None:
+                excluded += shares
+            else:
+                realized += shares * (sell.price - history[origin].price)
+    unrealized = sum(lot.shares * (close - lot.price) for lot in ledger.lots)
+    return {
+        "market_value": ledger.quantity * close,
+        "realized": realized,
+        "unrealized": unrealized,
+        "total": realized + unrealized,
+        "excluded_shares": excluded,
+    }
+
+
 def _trade_badges(
     trade: Trade,
     number: int | None,
-    sold_lots: list[tuple[int | None, bool]],
+    sold_lots: list[tuple[int | None, bool, int]],
     pair_numbers: dict[int, int],
     history: list[Trade],
 ) -> list[dict[str, Any]]:
@@ -649,7 +684,7 @@ def _trade_badges(
         if trade.buy:
             pairs, outside = ([number] if number is not None else []), []
         else:
-            origins = [origin for origin, lot_arbitrary in sold_lots if lot_arbitrary == arbitrary]
+            origins = [origin for origin, lot_arbitrary, _ in sold_lots if lot_arbitrary == arbitrary]
             pairs = list(dict.fromkeys(pair_numbers[o] for o in origins if o in pair_numbers))
             outside = list(
                 dict.fromkeys(None if o is None else history[o].day for o in origins if o not in pair_numbers)

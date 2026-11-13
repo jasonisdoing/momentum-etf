@@ -60,13 +60,6 @@ type Status = {
   next_ticker: string | null;
   next_name: string | null;
   last_buy_price: number | null;
-  // 다음 회차 매수까지 남은 하락률(%, 음수). 도달했으면 0 이상. 다음 회차 없으면 null.
-  next_buy_drop_pct: number | null;
-  // 가장 가까운 매도 회차와 목표까지 남은 상승률(%, 양수). 0 이하면 도달. 보유 없으면 null.
-  next_sell_round: number | null;
-  next_sell_rise_pct: number | null;
-  // 매도가 먼저 닿아 있어 다음 회차 매수를 그 매도가 체결될 때까지 미루는 중 — 신호는 한 번에 하나다.
-  sell_pending: boolean;
 };
 
 type TradeSide = "buy" | "sell" | "arbitrary_buy" | "arbitrary_sell";
@@ -138,6 +131,8 @@ export type StrategyView = {
   trades_by_position: Record<string, Record<string, TradeBadge[]>>;
   /** 사다리 위치별 가격 — 지금 1호 체결가 × (1 − 간격%)^(위치−1)을 호가로 맞춘 값. 보유가 없으면 비어 있다. */
   position_prices: Record<string, number>;
+  /** 회차 표 범위의 손익 요약(종목 통화). `excluded_shares` 는 조회 기간 이전에 사서 실현손익에서 뺀 매도 수량. */
+  history_summary: { market_value: number; realized: number; unrealized: number; total: number; excluded_shares: number };
   /** 보유가 모두 빈 날짜(사이클 종료) — 표의 날짜 칸 오른쪽에 경계선을 긋는다. */
   cycle_end_days: string[];
   // 체결 이력(회차 원장)을 계산한 시각 — 사고팔기 알림 배치가 갱신한다(KST ISO).
@@ -371,6 +366,33 @@ function DailyTradeBadges({ badges }: { badges: TradeBadge[] }) {
           </StatusBadge>
         </span>
       ))}
+    </span>
+  );
+}
+
+/** 회차 표 범위의 손익 요약 — 평가 금액·실현손익·평가손익·합계. 실현은 짝 매수 체결가 기준이다. */
+function HistorySummary({ summary }: { summary: StrategyView["history_summary"] }) {
+  const currency = useTradeCurrency();
+  const signed = (label: string, value: number, title?: string) => (
+    <span title={title}>
+      {label} <b style={{ color: signColor(value) }}>{formatSignedAmount(value, currency)}</b>
+    </span>
+  );
+  return (
+    <span style={{ display: "inline-flex", gap: 10, flexWrap: "wrap", alignItems: "baseline" }}>
+      <span>
+        평가 금액 <b>{formatPrice(summary.market_value, currency)}</b>
+      </span>
+      {signed(
+        "실현손익",
+        summary.realized,
+        "표 범위 매도 − 짝 매수 체결가(수수료·세금 제외)",
+      )}
+      {summary.excluded_shares > 0 ? (
+        <span style={{ color: "var(--text-muted)" }}>(조회 기간 이전 매수 {formatNumber(summary.excluded_shares)}주 제외)</span>
+      ) : null}
+      {signed("평가손익", summary.unrealized)}
+      {signed("합계 손익", summary.total)}
     </span>
   );
 }
@@ -1112,22 +1134,8 @@ function StrategySection({
           <span style={actionBadgeStyle("var(--text-muted)")}>⏸ {status.next_round}호 한도 소진 — 현금 부족</span>
         ) : nextRow?.close_entry ? (
           <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>📉 {status.next_round}호 {status.first_entry_time} 매수!</span>
-        ) : status.next_buy_drop_pct != null ? (
-          <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>
-            {status.next_buy_drop_pct >= 0
-              ? status.sell_pending
-                ? `📉 ${status.next_round}호 매수가 도달 — ${status.next_sell_round}호 매도 체결 뒤 매수`
-                : `📉 ${status.next_round}호 매수가 도달!`
-              : `📉 ${status.next_round}호 매수까지 ${Math.abs(status.next_buy_drop_pct).toFixed(2)}% 하락`}
-          </span>
         ) : null}
-        {status.next_sell_rise_pct != null ? (
-          <span style={actionBadgeStyle(SELL_BADGE_COLOR)}>
-            {status.next_sell_rise_pct <= 0
-              ? `📈 ${status.next_sell_round}호 매도가 도달!`
-              : `📈 ${status.next_sell_round}호 매도까지 ${status.next_sell_rise_pct.toFixed(2)}% 상승`}
-          </span>
-        ) : null}
+        <HistorySummary summary={view.history_summary} />
       </div>
 
       {view.arbitrary_lots.map((lot) => (
