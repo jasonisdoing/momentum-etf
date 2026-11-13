@@ -130,7 +130,7 @@ export type StrategyView = {
   index: IndexStatus;
   status: Status;
   arbitrary_lots: Array<{ id: string; quantity: number; fill_price: number; bought_on: string; sell_limit: number }>;
-  /** 최근 30일 사다리 위치별 · 날짜별 매수·매도(체결 순서). 지난 사이클의 체결은 체결가에 가장 가까운 위치에 놓인다. */
+  /** 사다리 위치별 · 날짜별 매수·매도(체결 순서) — 보유 중이면 지금 사이클, 보유가 없으면 다 판 날까지 1주일. */
   trades_by_position: Record<string, Record<string, TradeSide[]>>;
   /** 사다리 위치별 가격 — 기준 1호 체결가 × (1 − 간격%)^(위치−1)을 호가로 맞춘 값. 기준이 없으면 비어 있다. */
   position_prices: Record<string, number>;
