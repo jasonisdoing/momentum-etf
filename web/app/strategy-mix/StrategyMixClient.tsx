@@ -300,6 +300,8 @@ type Positions = {
     >;
   };
   holdings: Holding[];
+  /** 이 계좌에 등록된 사고팔기 종목 — 비어 있지 않으면 현금 몫 안의 사고팔기 칸을 보여준다(보유 유무와 무관). */
+  trade_tickers: string[];
   actions: {
     /** 슬리브별 액션 — 슬롯 키(a/b)로 담긴다. 그 전략에 없는 항목은 빈 목록/null 이다. */
     slots: Record<string, SlotActions>;
@@ -354,6 +356,10 @@ type PositionRow = Holding & {
   group_slot?: string;
   /** 그룹·합계 행의 상태 칸 문구(슬롯 n/n · 현금 % 등). */
   group_note?: string;
+  /** 사고팔기 그룹 행 — 현금 몫 안에서 사고팔기가 쓰는 금액을 묶는다. */
+  is_trade_group?: boolean;
+  /** 사고팔기 보유가 현금 몫을 넘었다 — 빨간 경고로 표시한다. */
+  trade_over_cash?: boolean;
   /** 여러 슬리브에 걸친 종목의 이 슬리브 몫 비율(0~1) — 금액 분할에 쓴 값. */
   split_factor?: number;
   /** 그룹·합계 행의 전략수익률(몫 가중 평균) — 종목 행은 slots 에서 계산한다. */
@@ -617,6 +623,18 @@ export function StrategyMixClient() {
     (positions?.holdings ?? []).map((row) => row.ticker),
   );
 
+  // 사고팔기 사용량 — 합성 현금 몫 안에서 사고팔기 보유가 차지하는 비중. 사고팔기 매수는 계좌 예수금을
+  // 그대로 쓰므로(한도로 묶지 않는다) 현금 몫을 넘을 수 있고, 넘으면 화면이 경고한다.
+  // 표시 여부는 등록 종목 유무(구조)로 정한다 — 보유가 0 이어도 칸은 남는다.
+  const tradeUsage = useMemo(() => {
+    if (!positions?.trade_tickers?.length) return null;
+    const held = positions.holdings
+      .filter((holding) => holding.is_trade_strategy)
+      .reduce((acc, holding) => acc + (holding.held_value ?? 0), 0);
+    const pct = positions.capital_krw > 0 ? (held / positions.capital_krw) * 100 : null;
+    return { held, pct };
+  }, [positions]);
+
   const positionRows = useMemo<PositionRow[]>(() => {
     if (!positions) return [];
     // 현금은 빈 슬롯마다 나누지 않고 한 행으로 맨 위에 둔다 — 계좌 현금은 한 덩어리다.
@@ -757,11 +775,50 @@ export function StrategyMixClient() {
       );
     }
 
+    // 사고팔기 그룹 — 현금 행 바로 아래. 슬리브 목표에 없는 사고팔기 보유를 모은다.
+    const isTradeMember = (holding: Holding) =>
+      Boolean(tradeUsage && holding.is_trade_strategy && (holding.sources ?? []).length === 0);
+    const tradeRows: PositionRow[] = [];
+    if (tradeUsage) {
+      const cashTarget = positions.summary.cash_pct;
+      const remain = tradeUsage.pct == null ? null : cashTarget - tradeUsage.pct;
+      const over = remain != null && remain < 0;
+      tradeRows.push(
+        {
+          ticker: "__trade_group__",
+          row_key: "__trade_group__",
+          name: "└ 사고팔기",
+          is_group: true,
+          is_trade_group: true,
+          trade_over_cash: over,
+          sources: [],
+          slots: {},
+          weight_pct: 0,
+          price: null,
+          change_pct: null,
+          amount: null,
+          shares: null,
+          held_value: tradeUsage.held,
+          current_weight_pct: tradeUsage.pct ?? undefined,
+          actual_weight_pct: null,
+          group_note:
+            remain == null
+              ? "계좌 평가액이 없어 비중을 계산할 수 없습니다"
+              : over
+                ? `⚠ 현금 몫 ${cashTarget.toFixed(1)}% 를 ${(-remain).toFixed(1)}%p 초과 — 사고팔기가 슬리브 몫을 쓰고 있습니다`
+                : `현금 몫 ${cashTarget.toFixed(1)}% · 남은 현금 ${remain.toFixed(1)}%` +
+                  (totalAsset == null ? "" : ` ${formatAmount((positions.capital_krw * remain) / 100)}`),
+        },
+        ...positions.holdings.filter(isTradeMember).map(toRow),
+      );
+    }
+
     // 전량 매도·고정 자산·소속 슬리브 없는 행 — 어느 그룹에도 안 들어가 맨 아래에 둔다.
     const leftoverRows = positions.holdings
       .filter(
         (holding) =>
-          holding.is_sell_all || holding.is_fixed_asset || (holding.sources ?? []).length === 0,
+          !isTradeMember(holding) &&
+          (holding.is_sell_all || holding.is_fixed_asset || (holding.sources ?? []).length === 0),
       )
       .map(toRow);
 
@@ -792,9 +849,9 @@ export function StrategyMixClient() {
       group_note: `주식 ${positions.summary.stock_pct.toFixed(1)}% · 현금 ${positions.summary.cash_pct.toFixed(1)}%`,
     };
 
-    return [totalRow, cashRow, ...groupedRows, ...leftoverRows];
+    return [totalRow, cashRow, ...tradeRows, ...groupedRows, ...leftoverRows];
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
-  }, [positions, quotes, quoteMissing, totalAsset, sleeves, formatAmount]);
+  }, [positions, quotes, quoteMissing, totalAsset, sleeves, formatAmount, tradeUsage]);
 
   // ── 차트 탭 (공용 HoldingChart — 슬리브별 기준선은 백엔드가 내려준다) ──
   const [holdingsTab, setHoldingsTab] = useState<HoldingsTab>("list");
@@ -911,6 +968,7 @@ export function StrategyMixClient() {
         // 굵기는 주지 않는다 — 다른 화면의 종목명과 같은 무게로 보여야 표가 한 벌로 읽힌다.
         // (합계·그룹 행만 굵게 — 종목이 아니라 구분선이다.)
         cellStyle: (p): CellStyle | null => {
+          if (p.data?.trade_over_cash) return { fontWeight: 700, color: "var(--up-color, #d64545)" };
           if (p.data?.is_group || p.data?.is_total) return { fontWeight: 700 };
           if (p.data?.is_cash) return { color: "var(--text-muted)" };
           return null;
@@ -968,7 +1026,10 @@ export function StrategyMixClient() {
         type: "numericColumn",
         valueFormatter: (p) =>
           p.value == null ? "-" : `${(p.value as number).toFixed(2)}%`,
-        cellStyle: (p) => {
+        cellStyle: (p): CellStyle | null => {
+          if (p.data?.trade_over_cash) return { color: "var(--up-color, #d64545)", fontWeight: 700 };
+          // 사고팔기 그룹은 목표가 없다(현금 몫 안의 사용량) — 목표 대비 흐림 표시를 하지 않는다.
+          if (p.data?.is_trade_group) return null;
           const current = p.value as number | null;
           const target = p.data?.weight_pct;
           if (current == null || target == null) return null;
@@ -1171,6 +1232,7 @@ export function StrategyMixClient() {
         return parts.join(" · ");
       },
       cellStyle: (p) => {
+        if (p.data?.trade_over_cash) return { color: "var(--up-color, #d64545)", fontWeight: 700 };
         const text = String(p.value ?? "");
         if (text.includes("매도"))
           return { color: "var(--down-color, #2f6fd0)", fontWeight: 600 };
@@ -1619,6 +1681,43 @@ export function StrategyMixClient() {
                       {weightOk ? " ✓" : " (100% 필요)"}
                     </span>
                   </div>
+                  {/* 사고팔기 — 현금 몫 안에서 쓰는 금액(현재 보유 평가액). 입력이 아니라 표시만 한다.
+                      사고팔기 매수는 계좌 예수금을 그대로 쓰므로 현금 몫을 넘으면 빨갛게 경고한다. */}
+                  {tradeUsage && (() => {
+                    const remain = tradeUsage.pct == null ? null : Number(cashPct) - tradeUsage.pct;
+                    const over = remain != null && remain < 0;
+                    const warn: React.CSSProperties = over ? { color: "var(--up-color, #d64545)", fontWeight: 700 } : {};
+                    return (
+                      <>
+                        <div className="mixSleeveRow">
+                          <span className="mixSleeveMark" style={{ ...hintStyle, ...warn }}>└ 사고팔기</span>
+                          <span />
+                          <span />
+                          <span />
+                          <span className="mixSleeveWeight" style={warn}>
+                            {tradeUsage.pct == null ? "-" : `${tradeUsage.pct.toFixed(1)}%`}
+                          </span>
+                          <span />
+                          <span className="mixSleeveSettings" style={{ ...hintStyle, ...warn }}>
+                            현재 보유 평가액 {formatAmount(tradeUsage.held)}
+                          </span>
+                        </div>
+                        <div className="mixSleeveRow">
+                          <span className="mixSleeveMark" style={{ ...hintStyle, ...warn }}>└ 남은 현금</span>
+                          <span />
+                          <span />
+                          <span />
+                          <span className="mixSleeveWeight" style={warn}>
+                            {remain == null ? "-" : `${remain.toFixed(1)}%`}
+                          </span>
+                          <span />
+                          <span className="mixSleeveSettings" style={warn}>
+                            {over ? "⚠ 사고팔기가 현금 몫을 넘어 슬리브 몫을 쓰고 있습니다" : ""}
+                          </span>
+                        </div>
+                      </>
+                    );
+                  })()}
                   {draftSleeves.map((sleeve, index) => {
                     const { strategy, pool, name } = sleeve;
                     // 계좌와 국가가 같은 풀만 — 거래 달력·통화가 갈리면 합성이 성립하지 않는다.
@@ -1863,6 +1962,8 @@ export function StrategyMixClient() {
                       // 고정 자산은 사고팔 수 없는 줄이라 전체를 노랗게 구분한다.
                       if (params.data?.is_fixed_asset) return FIXED_ASSET_ROW_CLASS;
                       const held = Number(params.data?.held_quantity ?? 0) > 0;
+                      // 사고팔기 종목은 목표에 없어도 전량 매도 대상이 아니다 — 회색으로 누르지 않는다.
+                      if (params.data?.is_trade_strategy) return stockRowClass({ held });
                       if (params.data?.is_sell_all) return stockRowClass({ held, trendBroken: true });
                       const status = slotKeys
                         .map((slot) => params.data?.slots?.[slot]?.status ?? "")

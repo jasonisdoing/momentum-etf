@@ -686,15 +686,12 @@ def _attach_account_targets(
         )
 
 
-def _block_trade_strategy_sells(holdings: list[dict[str, Any]], account_id: str) -> None:
+def _block_trade_strategy_sells(holdings: list[dict[str, Any]], blocked: set[str]) -> None:
     """사고팔기 전략에 등록된 종목은 합성이 사고팔지 않는다 — 행에 표시하고 표의 매매 수량을 0 으로 둔다.
 
     사고팔기가 그 종목의 회차를 계좌 체결로 세므로, 합성이 팔면 사고팔기 원장이 깨진다.
     액션(화면·슬랙)에서의 제외는 `build_action_groups` 가 이 표시를 보고 한다.
     """
-    from utils.strategy_trade_service import trade_tickers
-
-    blocked = trade_tickers(account_id)
     for row in holdings:
         if row.get("ticker") not in blocked:
             continue
@@ -1026,7 +1023,12 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         # 0 (매수는 유예되므로 부족분을 사라는 지시가 아니다).
         row["forecast_trade_quantity"] = -slot_qty if slot_qty > 0 else 0
 
-    _block_trade_strategy_sells(payload["holdings"], ctx["account_id"])
+    from utils.strategy_trade_service import trade_tickers
+
+    # 사고팔기 종목 — 보유가 없어도 등록돼 있으면 화면이 현금 몫 안의 사고팔기 칸을 보여준다.
+    blocked = trade_tickers(ctx["account_id"])
+    payload["trade_tickers"] = sorted(blocked)
+    _block_trade_strategy_sells(payload["holdings"], blocked)
 
     # 오늘의 액션 — 화면·슬랙 알람이 같은 결과를 쓴다(조립 단일 소스).
     currency = ctx["currency"]
