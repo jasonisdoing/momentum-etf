@@ -88,7 +88,7 @@ def mix_accounts() -> list[dict[str, Any]]:
     **조합이 아직 없어도 목록에 올린다** — 그래야 그 화면에서 고를 수 있다. 계산은
     `_resolve_mix_account` 가 조합이 갖춰졌는지 확인하고, 없으면 명시적으로 알린다.
     """
-    from utils.account_settings_store import mix_sleeves_of
+    from utils.account_settings_store import MIX_SLEEVE_KEYS, TRADE_SLOT_MARK, mix_sleeves_of, mix_slot_marks
     from utils.settings_loader import get_account_settings, list_available_accounts
 
     pool_names = {option["ticker_type"]: option for option in pool_options(_all_active_pools())}
@@ -112,6 +112,7 @@ def mix_accounts() -> list[dict[str, Any]]:
             }
             for row in mix_sleeves_of(inner)
         ]
+        marks = mix_slot_marks(account_id)
         accounts.append(
             {
                 "account_id": account_id,
@@ -129,6 +130,10 @@ def mix_accounts() -> list[dict[str, Any]]:
                 **{key: inner.get(key) for key in ("mix_harvest_pct", "mix_refill_pct")},
                 # 비워 두는 현금 몫(%) — 슬리브 배분은 sleeves 안에 있다.
                 "mix_cash_pct": mix_weights(inner)["cash_pct"],
+                # 슬롯 키 → 표시 기호. 사고팔기가 있으면 사고팔기가 A 라 슬리브는 B 부터다.
+                "slot_marks": marks,
+                # 사고팔기 기호 — 사고팔기 종목이 없는 계좌는 None(사고팔기 칸이 없다).
+                "trade_mark": TRADE_SLOT_MARK if marks[MIX_SLEEVE_KEYS[0]] != TRADE_SLOT_MARK else None,
             }
         )
     accounts.sort(key=lambda item: (item["order"] is None, item["order"]))
@@ -385,9 +390,15 @@ def _load_account_state(account_id: str) -> dict[str, Any]:
     }
 
 
-def _slot_labels(slots: list[SleeveSpec]) -> dict[str, str]:
-    """슬롯 표시 이름 — 「A. 모멘텀」. 같은 전략이 두 슬롯에 올 수 있어 기호를 앞에 둔다."""
-    return {spec.key: f"{spec.key.upper()}. {spec.label}" for spec in slots}
+def _slot_labels(slots: list[SleeveSpec], account_id: str) -> dict[str, str]:
+    """슬롯 표시 이름 — 「A. 모멘텀」. 같은 전략이 두 슬롯에 올 수 있어 기호를 앞에 둔다.
+
+    사고팔기가 있는 계좌는 사고팔기가 A 라 슬리브 기호가 B 부터다(`mix_slot_marks`).
+    """
+    from utils.account_settings_store import mix_slot_marks
+
+    marks = mix_slot_marks(account_id)
+    return {spec.key: f"{marks[spec.key]}. {spec.label}" for spec in slots}
 
 
 def _attach_industry(holdings: list[dict[str, Any]], country: str) -> None:
@@ -686,7 +697,7 @@ def _attach_account_targets(
         )
 
 
-def _block_trade_strategy_sells(holdings: list[dict[str, Any]], blocked: set[str]) -> None:
+def _block_trade_strategy_sells(holdings: list[dict[str, Any]], blocked: list[str]) -> None:
     """사고팔기 전략에 등록된 종목은 합성이 사고팔지 않는다 — 행에 표시하고 표의 매매 수량을 0 으로 둔다.
 
     사고팔기가 그 종목의 회차를 계좌 체결로 세므로, 합성이 팔면 사고팔기 원장이 깨진다.
@@ -716,7 +727,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     ctx = _resolve_mix_account(account_id)
     slots: list[SleeveSpec] = ctx["slots"]
     keys = [spec.key for spec in slots]
-    labels = _slot_labels(slots)
+    labels = _slot_labels(slots, ctx["account_id"])
     from utils.strategy_settings import require_start_date
 
     for spec in slots:
@@ -1027,7 +1038,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
 
     # 사고팔기 종목 — 보유가 없어도 등록돼 있으면 화면이 현금 몫 안의 사고팔기 칸을 보여준다.
     blocked = trade_tickers(ctx["account_id"])
-    payload["trade_tickers"] = sorted(blocked)
+    payload["trade_tickers"] = blocked
     _block_trade_strategy_sells(payload["holdings"], blocked)
 
     # 오늘의 액션 — 화면·슬랙 알람이 같은 결과를 쓴다(조립 단일 소스).
@@ -1265,7 +1276,7 @@ def run_mix_backtest(account_id: str | None = None, months: int | None = None) -
     logger.info(
         "[STRATEGY-MIX] %s 합성 백테스트 시작 (%s, %d개월)",
         ctx["account_id"],
-        " · ".join(f"{_slot_labels(ctx['slots'])[spec.key]}/{spec.pool}" for spec in ctx["slots"]),
+        " · ".join(f"{_slot_labels(ctx['slots'], ctx['account_id'])[spec.key]}/{spec.pool}" for spec in ctx["slots"]),
         months,
     )
     # 슬리브별 준비물·백테스트 — 어댑터가 두 엔진의 차이를 흡수한다.

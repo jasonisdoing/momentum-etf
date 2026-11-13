@@ -97,6 +97,10 @@ type AccountOption = AccountOptionBase & {
   sleeves: MixSleeve[];
   /** 조합이 다 정해졌는지 — 아니면 계산 대신 "고르세요" 를 보여준다. */
   mix_ready: boolean;
+  /** 슬롯 키 → 표시 기호(백엔드 `mix_slot_marks` 단일 소스). 사고팔기가 있으면 슬리브는 B 부터다. */
+  slot_marks: Record<string, string>;
+  /** 사고팔기 기호(A) — 사고팔기 종목이 없는 계좌는 null. */
+  trade_mark: string | null;
   country_code: string;
   /** 오늘의 액션 슬랙 알람 — 새 지시·수량 증가 시 발송. */
   mix_slack_enabled?: boolean;
@@ -454,9 +458,11 @@ export function StrategyMixClient() {
   );
   /** 슬롯(a/b/c) → 「A. 모멘텀」처럼 슬롯 기호 + 계좌가 고른 전략 이름.
    *  슬리브가 같은 전략일 수 있으므로 전략 이름만으로는 구분되지 않는다. */
+  const slotMark = (slot: string) => selectedAccount?.slot_marks[slot] ?? "";
+  const tradeLabel = `${selectedAccount?.trade_mark ?? ""}. 사고팔기`;
   const slotLabel = (slot: string) => {
     const sleeve = sleeves.find((row) => row.key === slot);
-    const mark = slot.toUpperCase();
+    const mark = slotMark(slot);
     if (!sleeve) return mark;
     return sleeve.label ? `${mark}. ${sleeve.label}` : mark;
   };
@@ -788,7 +794,7 @@ export function StrategyMixClient() {
         {
           ticker: "__trade_group__",
           row_key: "__trade_group__",
-          name: "└ 사고팔기",
+          name: tradeLabel,
           is_group: true,
           is_trade_group: true,
           trade_over_cash: over,
@@ -810,7 +816,11 @@ export function StrategyMixClient() {
                 : `현금 몫 ${cashTarget.toFixed(1)}% · 남은 현금 ${remain.toFixed(1)}%` +
                   (totalAsset == null ? "" : ` ${formatAmount((positions.capital_krw * remain) / 100)}`),
         },
-        ...positions.holdings.filter(isTradeMember).map(toRow),
+        // 종목 순서는 사고팔기 화면 순서(trade_tickers) 그대로.
+        ...positions.holdings
+          .filter(isTradeMember)
+          .sort((a, b) => positions.trade_tickers.indexOf(a.ticker) - positions.trade_tickers.indexOf(b.ticker))
+          .map(toRow),
       );
     }
 
@@ -852,7 +862,7 @@ export function StrategyMixClient() {
 
     return [totalRow, cashRow, ...tradeRows, ...groupedRows, ...leftoverRows];
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
-  }, [positions, quotes, quoteMissing, totalAsset, sleeves, formatAmount, tradeUsage]);
+  }, [positions, quotes, quoteMissing, totalAsset, sleeves, formatAmount, tradeUsage, tradeLabel]);
 
   // ── 차트 탭 (공용 HoldingChart — 슬리브별 기준선은 백엔드가 내려준다) ──
   const [holdingsTab, setHoldingsTab] = useState<HoldingsTab>("list");
@@ -1690,8 +1700,8 @@ export function StrategyMixClient() {
                     return (
                       <>
                         <div className="mixSleeveRow">
-                          <span className="mixSleeveMark" style={{ ...hintStyle, ...warn }}>└ 사고팔기</span>
-                          <span />
+                          <span className="mixSleeveMark" style={warn}>{selectedAccount?.trade_mark}</span>
+                          <span style={warn}>사고팔기</span>
                           <span />
                           <span />
                           <span className="mixSleeveWeight" style={warn}>
@@ -1699,22 +1709,10 @@ export function StrategyMixClient() {
                           </span>
                           <span />
                           <span className="mixSleeveSettings" style={{ ...hintStyle, ...warn }}>
-                            현재 보유 평가액 {formatAmount(tradeUsage.held)}
-                          </span>
-                        </div>
-                        <div className="mixSleeveRow">
-                          <span className="mixSleeveMark" style={{ ...hintStyle, ...warn }}>└ 남은 현금</span>
-                          <span />
-                          <span />
-                          <span />
-                          <span className="mixSleeveWeight" style={warn}>
-                            {remain == null ? "-" : `${remain.toFixed(1)}%`}
-                          </span>
-                          <span />
-                          <span className="mixSleeveSettings" style={warn}>
+                            {`보유 평가액 ${formatAmount(tradeUsage.held)} · `}
                             {over
                               ? `⚠ 오늘 현금 목표 ${tradeUsage.cashTarget.toFixed(1)}% 를 넘어 슬리브 몫을 쓰고 있습니다`
-                              : `오늘 현금 목표 ${tradeUsage.cashTarget.toFixed(1)}% 기준(빈 슬롯 현금 포함, 저장 후 반영)`}
+                              : `남은 현금 ${remain == null ? "-" : `${remain.toFixed(1)}%`} (오늘 현금 목표 ${tradeUsage.cashTarget.toFixed(1)}% 기준, 빈 슬롯 현금 포함·저장 후 반영)`}
                           </span>
                         </div>
                       </>
@@ -1728,7 +1726,7 @@ export function StrategyMixClient() {
                     );
                     return (
                       <div key={sleeve.key} className="mixSleeveRow">
-                        <span className="mixSleeveMark">{sleeve.key.toUpperCase()}</span>
+                        <span className="mixSleeveMark">{slotMark(sleeve.key)}</span>
                         <select
                           className="form-select form-select-sm"
                           style={{ width: "auto" }}
@@ -1780,7 +1778,7 @@ export function StrategyMixClient() {
                             step={0.1}
                             value={String(sleeve.weight_pct)}
                             disabled={settingsSaving}
-                            title={`${sleeve.key.toUpperCase()} 슬리브에 배분할 몫(%).`}
+                            title={`${slotMark(sleeve.key)} 슬리브에 배분할 몫(%).`}
                             onChange={(event) => updateSleeve(index, { weight_pct: Number(event.target.value) })}
                           />
                           <span style={hintStyle}>%</span>

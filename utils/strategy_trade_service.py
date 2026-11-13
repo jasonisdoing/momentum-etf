@@ -1092,9 +1092,15 @@ def load_views_where(keep: Callable[[dict[str, Any]], bool], *, fresh: bool) -> 
     }
 
 
-def trade_tickers(account_id: str) -> set[str]:
-    """그 계좌에 사고팔기 전략으로 등록된 종목 — 합성은 이 종목을 사고팔지 않는다."""
-    return {entry["ticker"] for entry in load_settings()["strategies"].values() if entry["account_id"] == account_id}
+def _ordered_strategies(strategies: dict[str, dict[str, Any]], account_id: str) -> list[tuple[str, dict[str, Any]]]:
+    """그 계좌의 사고팔기 전략을 화면 순서대로 — 순서를 저장한 적 없는 전략끼리는 문서 순서를 유지한다."""
+    mine = [(sid, entry) for sid, entry in strategies.items() if entry["account_id"] == account_id]
+    return sorted(mine, key=lambda item: (item[1]["sort_order"] is None, item[1]["sort_order"]))
+
+
+def trade_tickers(account_id: str) -> list[str]:
+    """그 계좌에 사고팔기 전략으로 등록된 종목(사고팔기 화면 순서) — 합성은 이 종목을 사고팔지 않는다."""
+    return [entry["ticker"] for _, entry in _ordered_strategies(load_settings()["strategies"], account_id)]
 
 
 def strategy_entry(strategy_id: str) -> dict[str, Any]:
@@ -1149,9 +1155,8 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
     country = next((str(doc["country_code"]).strip().lower() for doc in docs if doc["account_id"] == selected), None)
     settings = load_settings()
     account = settings["accounts"].get(selected or "", {"slack_enabled": False})
-    mine = {sid: entry for sid, entry in settings["strategies"].items() if entry["account_id"] == selected}
-    # 순서를 저장한 적 없는 전략끼리는 기존 문서 순서를 유지한다.
-    configs = sorted(mine.items(), key=lambda item: (item[1]["sort_order"] is None, item[1]["sort_order"]))
+    configs = _ordered_strategies(settings["strategies"], selected or "")
+    mine = dict(configs)
     from utils.pool_strategy_use import pool_options
 
     pools = _eligible_pool_kinds((country,)) if selected is not None else {}

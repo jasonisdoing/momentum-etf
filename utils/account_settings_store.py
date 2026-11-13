@@ -80,6 +80,18 @@ MIN_MIX_SLEEVES = 1
 MAX_MIX_SLEEVES = 4
 MIX_SLEEVE_KEYS: tuple[str, ...] = ("a", "b", "c", "d")
 
+# 사고팔기가 있는 계좌는 사고팔기가 첫 기호(A)를 쓰고 슬리브 기호는 그다음부터다.
+TRADE_SLOT_MARK = "A"
+
+
+def mix_slot_marks(account_id: str) -> dict[str, str]:
+    """슬롯 키 → 화면·슬랙 표시 기호. 사고팔기 종목이 있는 계좌는 A 를 사고팔기에 주고 슬리브는 B 부터다."""
+    from utils.strategy_trade_service import trade_tickers
+
+    offset = 1 if trade_tickers(account_id) else 0
+    return {key: chr(ord(TRADE_SLOT_MARK) + index + offset) for index, key in enumerate(MIX_SLEEVE_KEYS)}
+
+
 # 슬리브 항목의 필드 — 전략·종목풀·표시 이름·배분(%).
 MIX_SLEEVE_FIELDS: tuple[str, ...] = ("strategy", "pool", "name", "weight_pct")
 # 이름 길이 상한 — 표 헤더·액션 문구에 들어가므로 짧게 제한한다.
@@ -238,8 +250,9 @@ def _validate_mix_sleeves(
 
     sleeves: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
+    marks = mix_slot_marks(account_id)
     for index, item in enumerate(raw):
-        label = MIX_SLEEVE_KEYS[index].upper()
+        label = marks[MIX_SLEEVE_KEYS[index]]
         if not isinstance(item, dict):
             raise AccountSettingsStoreError(f"'{account_id}' 의 {label} 슬리브는 객체여야 합니다.")
 
@@ -537,7 +550,8 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             f"'{account_id}' 의 합성 배분은 mix_sleeves 와 mix_cash_pct 를 함께 보내야 합니다."
         )
     if "mix_sleeves" in cleaned:
-        parts = [(MIX_SLEEVE_KEYS[i].upper(), row["weight_pct"]) for i, row in enumerate(cleaned["mix_sleeves"])]
+        marks = mix_slot_marks(account_id)
+        parts = [(marks[MIX_SLEEVE_KEYS[i]], row["weight_pct"]) for i, row in enumerate(cleaned["mix_sleeves"])]
         total = sum(pct for _, pct in parts) + float(cleaned["mix_cash_pct"])
         # 0.01 은 소수 둘째 자리 반올림 오차만 허용하는 폭이다(예: 33.33+33.33+33.34).
         if abs(total - 100.0) > 0.01:
