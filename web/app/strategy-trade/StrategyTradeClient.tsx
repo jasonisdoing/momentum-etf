@@ -264,6 +264,11 @@ function StatusBadge({ color, children }: { color: string; children: React.React
 
 const SIDE_WORDS = { buy: "매수", sell: "매도" } as const;
 
+/** 회차 상태 칸에 보일 것이 있는지 — 설정 표의 상태 요약도 같은 기준을 쓴다. */
+function hasRoundStatus(row: RoundRow): boolean {
+  return row.buy_reached || row.sell_reached || row.slack_signals.length > 0 || row.order_sides.length > 0 || row.manual_orders.length > 0;
+}
+
 /** 상태 칸 — 지정가에 닿았으면 도달(빨강), 슬랙 신호·주문이 나갔으면 방향을 붙여 매도슬랙·매수주문처럼(녹색).
  *  슬랙 뱃지는 슬랙 메시지 기록이 있으면 눌러서 회수할 수 있다(주문이 있으면 서버가 막는다). */
 function RoundStatus({ row, onWithdrawSignal }: { row: RoundRow; onWithdrawSignal: (signal: SlackSignal, label: string) => void }) {
@@ -397,7 +402,14 @@ function comparableDrafts(rows: DraftRow[]) {
   ]);
 }
 
-type TradeListRow = DraftRow & { held: boolean; heldRounds: string; roundQuantity?: number | null; is_label?: boolean } & Partial<HoldingsRow>;
+type TradeListRow = DraftRow & {
+  held: boolean;
+  heldRounds: string;
+  roundQuantity?: number | null;
+  is_label?: boolean;
+  /** 상태(도달·슬랙·주문)가 있는 회차 — 아래 회차 표의 상태 칸과 같은 값. */
+  statusRounds?: RoundRow[];
+} & Partial<HoldingsRow>;
 const tradeGridTheme = createAppGridTheme();
 const { weight: tradeWeightColumn, dailyChange, currentPrice, quantity, returnPct, pnl, valuation } = holdingMetricColumns<TradeListRow>(true);
 const TOTAL_ROW_KEY = "__total__";
@@ -554,6 +566,7 @@ function AccountSettingsCard({
         ...accountAssets?.holdings.get(row.ticker),
         ...row,
         memo: memos[row.ticker] ?? "",
+        statusRounds: strategy && strategy.ticker === row.ticker && !("error" in strategy) ? strategy.rounds.filter(hasRoundStatus) : [],
         current_price: price == null ? undefined : String(price),
         daily_change_pct: quote?.change_pct,
         currency,
@@ -635,6 +648,23 @@ function AccountSettingsCard({
       editable: (row) => Boolean(row && !row.is_label),
       onSave: (row, memo) => void saveMemo(row.ticker, memo),
     }),
+    {
+      colId: "roundStatus",
+      headerName: "상태",
+      headerTooltip: "아래 회차 표의 상태 — 상태가 있는 회차만 회차 번호와 함께 보인다",
+      width: 140,
+      sortable: false,
+      cellRenderer: ({ data }: { data?: TradeListRow }) => (
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap" }}>
+          {(data?.statusRounds ?? []).map((row) => (
+            <span key={row.round} style={{ display: "inline-flex", gap: 3, alignItems: "center" }}>
+              {row.round}호
+              <RoundStatus row={row} onWithdrawSignal={onWithdrawSignal} />
+            </span>
+          ))}
+        </span>
+      ),
+    },
     dailyChange,
     currentPrice,
     tradeWeightColumn,
@@ -660,7 +690,7 @@ function AccountSettingsCard({
     ]),
     { ...quantity, headerName: "보유수량", width: 88 },
     returnPct, pnl, valuation,
-  ], [saving, saveMemo]);
+  ], [saving, saveMemo, onWithdrawSignal]);
 
   const handleRowDragEnd = ({ api }: RowDragEndEvent<TradeListRow>) => {
     // 그리드가 드롭을 반영한 다음 종목 순서와 그룹 위치를 함께 읽는다.
