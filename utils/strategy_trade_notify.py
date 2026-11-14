@@ -501,7 +501,12 @@ def _send_live_message(strategy_view: dict[str, Any], text: str, *, thread_ts: s
 def _send_confirms(
     strategy_view: dict[str, Any], pendings: list[dict[str, Any]], sent_log: dict[str, dict[str, Any]]
 ) -> tuple[int, int]:
-    """체결 확인을 신호를 알린 메시지의 스레드로 보낸다 — (보낸 메시지 수, 실패 수). 못 보낸 확인은 기록에 되돌린다."""
+    """체결 확인을 신호를 알린 메시지의 스레드로 보낸다 — (보낸 메시지 수, 실패 수). 못 보낸 확인은 기록에 되돌린다.
+
+    그 스레드의 슬랙 주문이 체결됐으면 주문 결과 알림이 이미 체결을 알렸으므로 확인을 보내지 않는다 — 증권사 앱에서
+    직접 산 것처럼 슬랙 주문 없이 회차가 채워졌을 때만 확인이 나간다.
+    """
+    from utils.strategy_trade_orders import thread_has_filled_order
     from utils.strategy_trade_threads import mark_signal_thread_used
 
     groups: dict[str, list[dict[str, Any]]] = {}
@@ -510,6 +515,8 @@ def _send_confirms(
     sent = failed = 0
     for root, group in groups.items():
         mark_signal_thread_used(root)
+        if thread_has_filled_order(root):
+            continue
         text = "\n".join(_confirm_line(pending, strategy_view["index"], strategy_view["country"]) for pending in group)
         if _send_live_message(strategy_view, text, thread_ts=root):
             sent += 1

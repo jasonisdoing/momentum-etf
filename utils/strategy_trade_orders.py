@@ -115,6 +115,11 @@ def find_duplicate_order(account_id: str, strategy_id: str, side: str) -> dict[s
     )
 
 
+def thread_has_filled_order(thread_ts: str) -> bool:
+    """이 신호 스레드로 낸 주문 중 체결된 것이 있는지 — 있으면 체결 결과는 주문 결과 알림(`notify_finished_orders`)이 이미 알린다."""
+    return _orders().find_one({"slack.thread_ts": thread_ts, "filled_quantity": {"$gt": 0}}, {"_id": 1}) is not None
+
+
 def active_order_keys(strategy_ids: list[str]) -> set[tuple[str, int | str, str]]:
     """이 전략들의 아직 끝나지 않은 신호 주문 — (전략, 회차, 구분) 집합(화면 표시용)."""
     records = _orders().find(

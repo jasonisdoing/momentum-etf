@@ -346,8 +346,48 @@ def parse_payload(raw_body: str) -> dict[str, Any]:
     return json.loads(values[0])
 
 
-def open_confirm_modal(payload: dict[str, Any]) -> None:
-    """버튼을 누른 사용자에게 확인 모달을 연다 — trigger_id 는 3초 안에 써야 한다."""
+def _resolve_request(request: dict[str, Any], *, fresh: bool) -> dict[str, Any]:
+    """주문 메시지의 주문 내용을 지금 보유 상태로 다시 계산한다 — 주문할 수 없는 회차면 `RoundNotOrderableError`."""
+    if _is_swap(request):
+        return resolve_swap(
+            request["account_id"], request["pool"], request["strategy_id"], request["round"], fresh=fresh
+        )
+    return resolve_order(
+        request["account_id"],
+        request["pool"],
+        request["strategy_id"],
+        request["side"],
+        request["round"],
+        fresh=fresh,
+        arbitrary_id=request.get("arbitrary_id"),
+    )
+
+
+def recheck_round_state(target: dict[str, Any]) -> None:
+    """저장된 원장으로는 주문할 수 없다고 나온 버튼을 원장을 새로 계산해 다시 판정한다 — 응답 뒤 백그라운드에서 돈다.
+
+    새 원장으로도 주문할 수 없으면 그때 버튼을 걷고(`_expire`), 주문할 수 있으면 버튼을 두고 다시 누르라고 알린다.
+    """
+    try:
+        _resolve_request(target["request"], fresh=True)
+    except RoundNotOrderableError as exc:
+        _expire(target, exc)
+        return
+    except Exception as exc:  # 슬랙 요청은 이미 응답했으므로 실패도 스레드로 알린다.
+        logger.exception("슬랙 주문 회차 재확인 실패")
+        _report_open_failure(target, exc)
+        return
+    send_thread_message(
+        "⚠️ 보유 상태가 막 바뀌어 주문 확인을 열지 못했습니다 — 버튼을 다시 눌러 주세요.", thread_ts=target["thread_ts"]
+    )
+
+
+def open_confirm_modal(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """버튼을 누른 사용자에게 확인 모달을 연다 — trigger_id 는 3초 안에 써야 한다.
+
+    저장된 원장으로 주문할 수 없는 회차로 나오면 모달을 열지 않고, 새 원장으로 다시 판정할 대상(`recheck_round_state`)을
+    돌려준다 — 저장본은 배치 주기만큼 늦을 수 있어 그것만으로 버튼을 걷지 않는다.
+    """
     action = payload["actions"][0]
     value = json.loads(action["value"])
     request = {**value["request"], "env": account_env(value["request"]["account_id"])}
@@ -362,33 +402,20 @@ def open_confirm_modal(payload: dict[str, Any]) -> None:
     if action["action_id"] == OPEN_ACTION_ID:
         try:
             # 슬랙 trigger_id 는 3초 안에 써야 해서 저장된 원장으로 연다 — 실제 주문 직전 검증은 `place_order` 가 새로 계산한다.
-            if _is_swap(request):
-                order = resolve_swap(
-                    request["account_id"], request["pool"], request["strategy_id"], request["round"], fresh=False
-                )
-            else:
-                order = resolve_order(
-                    request["account_id"],
-                    request["pool"],
-                    request["strategy_id"],
-                    request["side"],
-                    request["round"],
-                    fresh=False,
-                    arbitrary_id=request.get("arbitrary_id"),
-                )
-        except RoundNotOrderableError as exc:
-            _expire(target, exc)
-            return
+            order = _resolve_request(request, fresh=False)
+        except RoundNotOrderableError:
+            return target
         except BrokerApiError as exc:
             # 다시 누르면 될 수 있는 실패(수동 미체결 주문·호가 없음·연동 오류 등) — 버튼은 두고 이유만 스레드에 남긴다.
             _report_open_failure(target, exc)
-            return
+            return None
         view = _swap_view(request, order, target) if _is_swap(request) else _order_view(request, order, target)
     elif action["action_id"] == CANCEL_ACTION_ID:
         view = _cancel_view(request, {**target, "order_id": value["order_id"]})
     else:
         raise BrokerApiError(f"알 수 없는 슬랙 버튼입니다: {action['action_id']}")
     WebClient(token=_require_env("SLACK_BOT_TOKEN")).views_open(trigger_id=payload["trigger_id"], view=view)
+    return None
 
 
 def submitted_request(payload: dict[str, Any]) -> dict[str, Any]:

@@ -13,6 +13,7 @@ from services.broker_api_service import BrokerApiError
 from utils.slack_mock_orders import (
     open_confirm_modal,
     parse_payload,
+    recheck_round_state,
     run_submission,
     submitted_request,
     verify_signature,
@@ -37,7 +38,8 @@ def post_interaction(
         verify_signature(body.raw_body, body.timestamp, body.signature)
         payload = parse_payload(body.raw_body)
         if payload["type"] == "block_actions":
-            open_confirm_modal(payload)
+            if (recheck := open_confirm_modal(payload)) is not None:
+                background.add_task(recheck_round_state, recheck)
         elif payload["type"] == "view_submission":
             background.add_task(run_submission, submitted_request(payload))
         else:
