@@ -137,8 +137,7 @@ SCHEDULE_ROWS = [
         "target": "API 연동(broker_api) 저장된 계좌",
         "cadence": "월~토 24시간 10분 간격 KST (08·18·…·58분)",
         "command": "python scripts/broker_balance_sync.py",
-        # 데이터 집계(00·10·…분) 2분 전에 돌아 집계가 막 동기화된 잔고를 쓴다. 증권사 점검 시간의 실패는
-        # 실패 시작·복구 슬랙 1회씩으로 남는다.
+        # 데이터 집계(00·10·…분) 2분 전에 실행한다. 메리츠 서비스 시간 외에는 해당 계좌 동기화를 건너뛴다.
         "schedule": {"minutes": list(range(8, 60, 10)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {

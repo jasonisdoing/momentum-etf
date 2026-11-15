@@ -25,7 +25,9 @@ def main() -> int:
         print("[broker_balance_sync] 연동된 계좌 없음")
         return 0
     for row in rows:
-        if row["ok"] and not row.get("changed"):
+        if row.get("skipped"):
+            print(f"[broker_balance_sync] {row['account_id']} 메리츠 서비스 시간 외 — 동기화 건너뜀")
+        elif row["ok"] and not row.get("changed"):
             print(f"[broker_balance_sync] {row['account_id']} 변화 없음 — 저장·알림 생략")
         elif row["ok"]:
             print(

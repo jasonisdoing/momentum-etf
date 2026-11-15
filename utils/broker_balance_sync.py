@@ -8,15 +8,19 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, time
 from time import sleep
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
 
 _STATE_KEY = "broker_balance_sync_state"
+_KST = ZoneInfo("Asia/Seoul")
+_MERITZ_BALANCE_OPEN = time(0, 15)
+_MERITZ_BALANCE_CLOSE = time(23, 50)
 # 메리츠 토큰 만료 오류는 재발급 직후에도 일시적으로 이어질 수 있다 — 1·2·3분 간격으로 다시 조회한다(누적 6분,
 # 다음 배치 10분 전에 끝난다). 재시도가 한 번이라도 있었으면 결과와 무관하게 슬랙으로 알린다.
 _MERITZ_RETRY_DELAYS_SECONDS = (60, 120, 180)
@@ -214,6 +218,7 @@ def _retry_lines(history: dict[str, list[str]], account_id: str) -> str:
 
 def sync_all() -> dict[str, Any]:
     """연동 계좌를 동기화하고, 메리츠 토큰 만료 오류만 1·2·3분 간격으로 다시 조회한다."""
+    from services.broker_api_service import MERITZ_PROVIDER
     from services.meritz_api_service import MeritzTokenExpiredError
     from utils.account_settings_store import load_live_account_docs
 
@@ -229,6 +234,11 @@ def sync_all() -> dict[str, Any]:
 
     def attempt(account_id: str, provider: str) -> bool:
         """동기화 한 번 — 토큰 만료로 다시 시도할 계좌면 True. 그 밖의 실패는 바로 확정한다."""
+        if provider == MERITZ_PROVIDER and not (
+            _MERITZ_BALANCE_OPEN <= datetime.now(_KST).time() < _MERITZ_BALANCE_CLOSE
+        ):
+            results[account_id] = {"account_id": account_id, "ok": True, "skipped": True}
+            return False
         try:
             results[account_id] = _sync_account(account_id, provider)
         except Exception as exc:  # noqa: BLE001 — 계좌별로 실패를 격리한다.
@@ -259,7 +269,9 @@ def sync_all() -> dict[str, Any]:
         if not _load_failing(account_id):
             new_failures.append((account_id, provider, message))
 
-    retried_ok = [account_id for account_id in history if results[account_id]["ok"]]
+    retried_ok = [
+        account_id for account_id in history if results[account_id]["ok"] and not results[account_id].get("skipped")
+    ]
     if retried_ok:
         body = "\n".join(f"• {account_id}\n{_retry_lines(history, account_id)}" for account_id in retried_ok)
         _notify(f"ℹ️ *증권사 잔고 동기화 — 토큰 만료로 재시도 후 성공 ({len(retried_ok)}개 계좌)*\n{body}")
