@@ -19,7 +19,9 @@ from config import (
     LEVERAGE_DOUBLE_RE,
     LEVERAGE_TICKERS,
     LEVERAGE_TRIPLE_RE,
-    RECOMMENDED_GAP_MAX_MULT,
+    RECOMMENDED_GAP_MAX_PCT_1X,
+    RECOMMENDED_GAP_MAX_PCT_2X,
+    RECOMMENDED_GAP_MAX_PCT_3X,
     RECOMMENDED_GAP_MIN_PCT_1X,
     RECOMMENDED_GAP_MIN_PCT_2X,
     RECOMMENDED_GAP_MIN_PCT_3X,
@@ -125,11 +127,11 @@ def ladder_position(price: float, first_fill: float, trigger_pct: float) -> int:
     return round(log(price / first_fill) / log(down_ratio(trigger_pct))) + 1
 
 
-# 권장 간격의 기간·배수별 범위는 `config.RECOMMENDED_GAP_*` 가 단일 소스다. 배수 → 최소 간격(%).
-_RECOMMENDED_GAP_MIN_BY_MULTIPLE = {
-    1: RECOMMENDED_GAP_MIN_PCT_1X,
-    2: RECOMMENDED_GAP_MIN_PCT_2X,
-    3: RECOMMENDED_GAP_MIN_PCT_3X,
+# 권장 간격의 기간·배수별 범위는 `config.RECOMMENDED_GAP_*` 가 단일 소스다. 배수 → (최소, 최대) 간격(%).
+_RECOMMENDED_GAP_RANGE_BY_MULTIPLE = {
+    1: (RECOMMENDED_GAP_MIN_PCT_1X, RECOMMENDED_GAP_MAX_PCT_1X),
+    2: (RECOMMENDED_GAP_MIN_PCT_2X, RECOMMENDED_GAP_MAX_PCT_2X),
+    3: (RECOMMENDED_GAP_MIN_PCT_3X, RECOMMENDED_GAP_MAX_PCT_3X),
 }
 
 
@@ -160,11 +162,10 @@ def max_drawdown(closes: Sequence[float]) -> float:
 
 
 def recommended_gap_range(multiple: int) -> tuple[int, int]:
-    """배수별 권장 간격 범위(%) — (최소, 최소 × `RECOMMENDED_GAP_MAX_MULT`)."""
-    if multiple not in _RECOMMENDED_GAP_MIN_BY_MULTIPLE:
+    """배수별 권장 간격 범위(%) — (최소, 최대)."""
+    if multiple not in _RECOMMENDED_GAP_RANGE_BY_MULTIPLE:
         raise ValueError(f"권장 간격 범위가 없는 배수입니다: {multiple}")
-    low = _RECOMMENDED_GAP_MIN_BY_MULTIPLE[multiple]
-    return low, low * RECOMMENDED_GAP_MAX_MULT
+    return _RECOMMENDED_GAP_RANGE_BY_MULTIPLE[multiple]
 
 
 def recommended_gap_pct(drawdown: float, rounds: int, multiple: int) -> float:

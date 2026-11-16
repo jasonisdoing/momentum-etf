@@ -26,12 +26,14 @@ LEVERAGE_NAME_RE = re.compile("|".join(_LEVERAGE_RULES[key] for key in ("triple"
 LEVERAGE_TICKERS = frozenset(_LEVERAGE_RULES["double_tickers"])
 
 # 사고팔기 권장 간격 — 최근 이 기간(거래일)의 고점 이후 최대 하락을 회차들이 복리로 덮는 간격을
-# 종목 배수(1·2·3배)별 최소로 자르고, 최대는 최소의 RECOMMENDED_GAP_MAX_MULT 배다(1배 2~6%, 2배 3~9%, 3배 5~15%).
+# 종목 배수(1·2·3배)별 최소·최대(%)로 자른다.
 RECOMMENDED_GAP_WINDOW_DAYS = 63
 RECOMMENDED_GAP_MIN_PCT_1X = 2
 RECOMMENDED_GAP_MIN_PCT_2X = 3
 RECOMMENDED_GAP_MIN_PCT_3X = 5
-RECOMMENDED_GAP_MAX_MULT = 3
+RECOMMENDED_GAP_MAX_PCT_1X = 10
+RECOMMENDED_GAP_MAX_PCT_2X = 10
+RECOMMENDED_GAP_MAX_PCT_3X = 10
 
 # python scripts/update_market_calendars.py CACHE_START_DATE 변경시 실행
 CACHE_START_DATE = "2018-12-31"
