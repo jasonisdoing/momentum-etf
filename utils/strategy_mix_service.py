@@ -47,7 +47,7 @@ def mix_accounts() -> list[dict[str, Any]]:
     **조합이 아직 없어도 목록에 올린다** — 그래야 그 화면에서 고를 수 있다. 계산은
     `resolve_mix_account` 가 조합이 갖춰졌는지 확인하고, 없으면 명시적으로 알린다.
     """
-    from utils.account_settings_store import MIX_SLEEVE_KEYS, TRADE_SLOT_MARK, mix_sleeves_of, mix_slot_marks
+    from utils.account_settings_store import mix_sleeves_of, mix_slot_marks
     from utils.settings_loader import get_account_settings, list_available_accounts
 
     pool_names = {option["ticker_type"]: option for option in pool_options(_all_active_pools())}
@@ -71,7 +71,6 @@ def mix_accounts() -> list[dict[str, Any]]:
             }
             for row in mix_sleeves_of(inner)
         ]
-        marks = mix_slot_marks(account_id)
         accounts.append(
             {
                 "account_id": account_id,
@@ -89,10 +88,8 @@ def mix_accounts() -> list[dict[str, Any]]:
                 **{key: inner.get(key) for key in ("mix_harvest_pct", "mix_refill_pct")},
                 # 비워 두는 현금 몫(%) — 슬리브 배분은 sleeves 안에 있다.
                 "mix_cash_pct": mix_weights(inner)["cash_pct"],
-                # 슬롯 키 → 표시 기호. 사고팔기가 있으면 사고팔기가 A 라 슬리브는 B 부터다.
-                "slot_marks": marks,
-                # 사고팔기 기호 — 사고팔기 종목이 없는 계좌는 None(사고팔기 칸이 없다).
-                "trade_mark": TRADE_SLOT_MARK if marks[MIX_SLEEVE_KEYS[0]] != TRADE_SLOT_MARK else None,
+                # 슬롯 키 → 표시 기호(A 부터).
+                "slot_marks": mix_slot_marks(),
             }
         )
     accounts.sort(key=lambda item: (item["order"] is None, item["order"]))

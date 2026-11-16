@@ -105,14 +105,11 @@ def _load_account_state(account_id: str) -> dict[str, Any]:
     }
 
 
-def _slot_labels(slots: list[SleeveSpec], account_id: str) -> dict[str, str]:
-    """슬롯 표시 이름 — 「A. 모멘텀」. 같은 전략이 두 슬롯에 올 수 있어 기호를 앞에 둔다.
-
-    사고팔기가 있는 계좌는 사고팔기가 A 라 슬리브 기호가 B 부터다(`mix_slot_marks`).
-    """
+def _slot_labels(slots: list[SleeveSpec]) -> dict[str, str]:
+    """슬롯 표시 이름 — 「A. 모멘텀」. 같은 전략이 두 슬롯에 올 수 있어 기호를 앞에 둔다(`mix_slot_marks`)."""
     from utils.account_settings_store import mix_slot_marks
 
-    marks = mix_slot_marks(account_id)
+    marks = mix_slot_marks()
     return {spec.key: f"{marks[spec.key]}. {spec.label}" for spec in slots}
 
 
@@ -460,7 +457,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
     attach_stock_memos(holdings)
     summary = _summary(holdings, capital.shares, states, keys)
 
-    slot_actions = _slot_actions(states, _slot_labels(slots, ctx["account_id"]), keys)
+    slot_actions = _slot_actions(states, _slot_labels(slots), keys)
     _attach_exit_forecast(holdings, slot_actions, keys)
     # 사고팔기 종목 — 보유가 없어도 등록돼 있으면 화면이 현금 몫 안의 사고팔기 칸을 보여준다.
     blocked = trade_tickers(ctx["account_id"])

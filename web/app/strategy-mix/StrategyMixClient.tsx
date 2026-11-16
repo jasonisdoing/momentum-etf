@@ -93,10 +93,8 @@ type AccountOption = AccountOptionBase & {
   sleeves: MixSleeve[];
   /** 조합이 다 정해졌는지 — 아니면 계산 대신 "고르세요" 를 보여준다. */
   mix_ready: boolean;
-  /** 슬롯 키 → 표시 기호(백엔드 `mix_slot_marks` 단일 소스). 사고팔기가 있으면 슬리브는 B 부터다. */
+  /** 슬롯 키 → 표시 기호(백엔드 `mix_slot_marks` 단일 소스, A 부터). */
   slot_marks: Record<string, string>;
-  /** 사고팔기 기호(A) — 사고팔기 종목이 없는 계좌는 null. */
-  trade_mark: string | null;
   country_code: string;
   /** 오늘의 액션 슬랙 알람 — 새 지시·수량 증가 시 발송. */
   mix_slack_enabled?: boolean;
@@ -395,7 +393,10 @@ export function StrategyMixClient() {
   /** 슬롯(a/b/c) → 「A. 모멘텀」처럼 슬롯 기호 + 계좌가 고른 전략 이름.
    *  슬리브가 같은 전략일 수 있으므로 전략 이름만으로는 구분되지 않는다. */
   const slotMark = (slot: string) => selectedAccount?.slot_marks[slot] ?? "";
-  const tradeLabel = `${selectedAccount?.trade_mark ?? ""}. 사고팔기`;
+  // 사고팔기 기호 — 마지막 슬리브 기호 다음 알파벳(A·B·C 면 D). 표는 저장된 슬리브, 설정 칸은 편집 중 슬리브 기준.
+  const tradeMarkAfter = (keys: string[]): string =>
+    keys.length ? String.fromCharCode(slotMark(keys[keys.length - 1]).charCodeAt(0) + 1) : "";
+  const tradeLabel = `${tradeMarkAfter(sleeves.map((sleeve) => sleeve.key))}. 사고팔기`;
   const slotLabel = (slot: string) => {
     const sleeve = sleeves.find((row) => row.key === slot);
     const mark = slotMark(slot);
@@ -678,7 +679,7 @@ export function StrategyMixClient() {
       );
     }
 
-    // 사고팔기 그룹 — 현금 행 바로 아래. 슬리브 목표에 없는 사고팔기 보유를 모은다.
+    // 사고팔기 그룹 — 마지막 슬리브 그룹 다음(기호도 마지막 슬리브 다음 알파벳). 슬리브 목표에 없는 사고팔기 보유를 모은다.
     const isTradeMember = (holding: Holding) =>
       Boolean(tradeUsage && holding.is_trade_strategy && (holding.sources ?? []).length === 0);
     const tradeRows: PositionRow[] = [];
@@ -754,7 +755,7 @@ export function StrategyMixClient() {
       group_note: `주식 ${positions.summary.stock_pct.toFixed(1)}% · 현금 ${positions.summary.cash_pct.toFixed(1)}%`,
     };
 
-    return [totalRow, cashRow, ...tradeRows, ...groupedRows, ...leftoverRows];
+    return [totalRow, cashRow, ...groupedRows, ...tradeRows, ...leftoverRows];
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slotLabel 은 sleeves 에서 파생된다
   }, [positions, quotes, quoteMissing, totalAsset, sleeves, formatAmount, tradeUsage, tradeLabel]);
 
@@ -1513,32 +1514,6 @@ export function StrategyMixClient() {
                       {weightOk ? " ✓" : " (100% 필요)"}
                     </span>
                   </div>
-                  {/* 사고팔기 — 현금 몫 안에서 쓰는 금액(현재 보유 평가액). 입력이 아니라 표시만 한다.
-                      사고팔기 매수는 계좌 예수금을 그대로 쓰므로 오늘 현금 목표를 넘으면 빨갛게 경고한다. */}
-                  {tradeUsage && (() => {
-                    const { remain, over } = tradeUsage;
-                    const warn: React.CSSProperties = over ? { color: "var(--up-color, #d64545)", fontWeight: 700 } : {};
-                    return (
-                      <>
-                        <div className="mixSleeveRow">
-                          <span className="mixSleeveMark" style={warn}>{selectedAccount?.trade_mark}</span>
-                          <span style={warn}>사고팔기</span>
-                          <span />
-                          <span />
-                          <span className="mixSleeveWeight" style={warn}>
-                            {tradeUsage.pct == null ? "-" : `${tradeUsage.pct.toFixed(1)}%`}
-                          </span>
-                          <span />
-                          <span className="mixSleeveSettings" style={{ ...hintStyle, ...warn }}>
-                            {`보유 평가액 ${formatAmount(tradeUsage.held)} · `}
-                            {over
-                              ? `⚠ 오늘 현금 목표 ${tradeUsage.cashTarget.toFixed(1)}% 를 넘어 슬리브 몫을 쓰고 있습니다`
-                              : `남은 현금 ${remain == null ? "-" : `${remain.toFixed(1)}%`} (오늘 현금 목표 ${tradeUsage.cashTarget.toFixed(1)}% 기준, 빈 슬롯 현금 포함·저장 후 반영)`}
-                          </span>
-                        </div>
-                      </>
-                    );
-                  })()}
                   {draftSleeves.map((sleeve, index) => {
                     const { strategy, pool, name } = sleeve;
                     // 계좌와 국가가 같은 풀만 — 거래 달력·통화가 갈리면 합성이 성립하지 않는다.
@@ -1639,6 +1614,32 @@ export function StrategyMixClient() {
                       </button>
                     </div>
                   ) : null}
+                  {/* 사고팔기 — 슬리브 다음 기호로 맨 아래. 현금 몫 안에서 쓰는 금액(현재 보유 평가액)이라 입력이 아니라 표시만 한다.
+                      사고팔기 매수는 계좌 예수금을 그대로 쓰므로 오늘 현금 목표를 넘으면 빨갛게 경고한다. */}
+                  {tradeUsage && (() => {
+                    const { remain, over } = tradeUsage;
+                    const warn: React.CSSProperties = over ? { color: "var(--up-color, #d64545)", fontWeight: 700 } : {};
+                    return (
+                      <div className="mixSleeveRow">
+                        <span className="mixSleeveMark" style={warn}>
+                          {tradeMarkAfter(draftSleeves.map((sleeve) => sleeve.key))}
+                        </span>
+                        <span style={warn}>사고팔기</span>
+                        <span />
+                        <span />
+                        <span className="mixSleeveWeight" style={warn}>
+                          {tradeUsage.pct == null ? "-" : `${tradeUsage.pct.toFixed(1)}%`}
+                        </span>
+                        <span />
+                        <span className="mixSleeveSettings" style={{ ...hintStyle, ...warn }}>
+                          {`보유 평가액 ${formatAmount(tradeUsage.held)} · `}
+                          {over
+                            ? `⚠ 오늘 현금 목표 ${tradeUsage.cashTarget.toFixed(1)}% 를 넘어 슬리브 몫을 쓰고 있습니다`
+                            : `남은 현금 ${remain == null ? "-" : `${remain.toFixed(1)}%`} (오늘 현금 목표 ${tradeUsage.cashTarget.toFixed(1)}% 기준, 빈 슬롯 현금 포함·저장 후 반영)`}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <span style={hintStyle}>계좌 설정에서 «합성» 을 켠 계좌가 여기 보입니다.</span>
