@@ -1,8 +1,8 @@
 """사고팔기 간격 실험용 1분봉 데이터 준비 — 종목마다 상승·횡보·하락 3개월 구간을 골라 토스 1분봉을 저장한다.
 
-실행: ``python backtest/fetch_minutes.py`` (이미 받은 구간 파일은 건너뛴다. 다시 받으려면 파일을 지운다)
+실행: ``python backtest/fetch_minutes.py`` (이미 받은 파일이 같은 구간이면 건너뛰고, 구간이 바뀌었으면 다시 받는다)
 
-- 구간은 최근 2년 일봉(가격 캐시)에서 63거래일 구간을 모두 훑어 고른다 — 상승은 수익률 최고, 하락은 최저,
+- 구간은 `WINDOW_SINCE` 이후 일봉(가격 캐시)에서 63거래일 구간을 모두 훑어 고른다 — 상승은 수익률 최고, 하락은 최저,
   횡보는 수익률 ±3% 이내 중 고점~저점 폭이 가장 좁은 구간.
 - 1분봉은 토스 c-chart(`from` 커서로 과거를 이어 받음). 미장은 프리·정규·애프터·데이장이 모두 들어 있다.
 - 저장: ``backtest/data/{ticker}/{regime}.json`` — 구간 정보와 ``bars``([utc_ms, 현지 시각 ISO, 시가, 고가, 저가, 종가]).
@@ -37,7 +37,7 @@ TICKERS: dict[str, str] = {
 }
 DATA_DIR = Path(__file__).resolve().parent / "data"
 WINDOW_DAYS = 63  # 3개월(거래일)
-LOOKBACK_YEARS = 2
+WINDOW_SINCE = date(2025, 1, 1)  # 이 날 이후의 구간만 고른다
 SIDEWAYS_MAX_RETURN_PCT = 3.0
 PAGE_SIZE = 400  # 토스 c-chart 한 번에 받는 최대 개수(500 이상은 400 Bad Request)
 REGIMES = ("up", "side", "down")
@@ -45,12 +45,11 @@ _ZONES = {"kor": ZoneInfo("Asia/Seoul"), "us": ZoneInfo("America/New_York")}
 
 
 def select_windows(ticker: str) -> dict[str, dict]:
-    """최근 2년 일봉에서 상승·횡보·하락 63거래일 구간을 고른다 — {regime: {start, end, return_pct, range_pct}}."""
+    """`WINDOW_SINCE` 이후 일봉에서 상승·횡보·하락 63거래일 구간을 고른다 — {regime: {start, end, return_pct, range_pct}}."""
     frame = load_cached_frames_bulk_from_all_ticker_types([ticker]).get(ticker)
     if frame is None or frame.empty:
         raise RuntimeError(f"{ticker} 일봉 캐시가 없습니다.")
-    since = date.today() - timedelta(days=365 * LOOKBACK_YEARS)
-    frame = frame.loc[str(since) :]
+    frame = frame.loc[WINDOW_SINCE.isoformat() :]
     windows = []
     for i in range(len(frame) - WINDOW_DAYS + 1):
         part = frame.iloc[i : i + WINDOW_DAYS]
@@ -132,8 +131,10 @@ def main() -> int:
             path = DATA_DIR / ticker / f"{regime}.json"
             window = windows[regime]
             if path.exists():
-                print(f"{ticker} {regime}: 이미 있음 — 건너뜀 ({path})")
-                continue
+                saved = json.loads(path.read_text())
+                if (saved["start"], saved["end"]) == (window["start"], window["end"]):
+                    print(f"{ticker} {regime}: 같은 구간 — 건너뜀 ({window['start']}~{window['end']})")
+                    continue
             bars = fetch_bars(ticker, country, *_bounds(country, window["start"], window["end"]))
             if not bars:
                 raise RuntimeError(f"{ticker} {regime} 분봉을 받지 못했습니다.")
