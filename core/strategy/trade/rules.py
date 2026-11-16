@@ -15,6 +15,8 @@ from collections.abc import Sequence
 from math import isfinite, log
 from typing import Literal
 
+from config import LEVERAGE_DOUBLE_RE, LEVERAGE_TICKERS, LEVERAGE_TRIPLE_RE
+
 InstrumentKind = Literal["stock", "etf"]
 Country = Literal["kor", "us"]
 
@@ -115,10 +117,23 @@ def ladder_position(price: float, first_fill: float, trigger_pct: float) -> int:
     return round(log(price / first_fill) / log(down_ratio(trigger_pct))) + 1
 
 
-#: 권장 간격(표시용) — 최근 3개월(거래일) 고점 이후 최대 하락(MDD)을 회차들이 복리로 덮는 간격, 이 범위로 자른다.
+#: 권장 간격 — 최근 3개월(거래일) 고점 이후 최대 하락(MDD)을 회차들이 복리로 덮는 간격.
+#: 종목 배수(`leverage_multiple`)별 최소 간격으로 자르고, 최대는 최소의 `RECOMMENDED_GAP_MAX_MULT` 배다.
 RECOMMENDED_GAP_WINDOW_DAYS = 63
-RECOMMENDED_GAP_MIN_PCT = 2.0
-RECOMMENDED_GAP_MAX_PCT = 10.0
+RECOMMENDED_GAP_MIN_PCT: dict[int, float] = {1: 2.0, 2: 3.0, 3: 5.0}
+RECOMMENDED_GAP_MAX_MULT = 3.0
+
+
+def leverage_multiple(ticker: str, name: str) -> int:
+    """종목 배수 — 이름에 3X 면 3, 2X·레버리지·Geared·Ultra 이거나 2배 티커면 2, 아니면 1.
+
+    인버스 여부와 무관하게 배수만 본다(인버스2X 는 2, 인버스는 1). 규칙은 `web/lib/leverage_name.json` 단일 소스.
+    """
+    if LEVERAGE_TRIPLE_RE.search(name):
+        return 3
+    if LEVERAGE_DOUBLE_RE.search(name) or ticker in LEVERAGE_TICKERS:
+        return 2
+    return 1
 
 
 def max_drawdown(closes: Sequence[float]) -> float:
@@ -135,14 +150,23 @@ def max_drawdown(closes: Sequence[float]) -> float:
     return worst
 
 
-def recommended_gap_pct(drawdown: float, rounds: int) -> float:
-    """``drawdown``(0~1)을 ``rounds − 1`` 번의 간격이 복리로 덮는 간격(%) — 최소·최대 범위로 자른다.
+def recommended_gap_range(multiple: int) -> tuple[float, float]:
+    """배수별 권장 간격 범위(%) — (최소, 최소 × `RECOMMENDED_GAP_MAX_MULT`)."""
+    if multiple not in RECOMMENDED_GAP_MIN_PCT:
+        raise ValueError(f"권장 간격 범위가 없는 배수입니다: {multiple}")
+    low = RECOMMENDED_GAP_MIN_PCT[multiple]
+    return low, low * RECOMMENDED_GAP_MAX_MULT
 
-    간격 = 1 − (1 − MDD)^(1 / (회차 수 − 1)). 화면이 사람에게 보여 주는 참고값이며 매매 판정에는 쓰지 않는다.
+
+def recommended_gap_pct(drawdown: float, rounds: int, multiple: int) -> float:
+    """``drawdown``(0~1)을 ``rounds − 1`` 번의 간격이 복리로 덮는 간격(%) — 배수별 범위(`recommended_gap_range`)로 자른다.
+
+    간격 = 1 − (1 − MDD)^(1 / (회차 수 − 1)).
     """
     if rounds < 2:
         raise ValueError(f"권장 간격은 회차가 2개 이상일 때만 계산합니다: {rounds}")
     if not 0.0 <= drawdown < 1.0:
         raise ValueError(f"최대 하락은 0 이상 1 미만이어야 합니다: {drawdown}")
     gap = (1.0 - (1.0 - drawdown) ** (1.0 / (rounds - 1))) * 100.0
-    return round(min(max(gap, RECOMMENDED_GAP_MIN_PCT), RECOMMENDED_GAP_MAX_PCT), 2)
+    low, high = recommended_gap_range(multiple)
+    return round(min(max(gap, low), high), 2)

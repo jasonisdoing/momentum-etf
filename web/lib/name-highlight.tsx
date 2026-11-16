@@ -8,8 +8,9 @@
 import type { ReactNode } from "react";
 import leverageName from "./leverage_name.json";
 
-const LEVERAGE_NAME_RE = new RegExp(leverageName.pattern, "i");
-const LEVERAGE_TICKERS = new Set(leverageName.tickers);
+// 레버리지 여부는 3배·2배·인버스 규칙을 합쳐 본다(백엔드 `config.LEVERAGE_NAME_RE` 와 같은 파일).
+const LEVERAGE_NAME_RE = new RegExp([leverageName.triple, leverageName.double, leverageName.inverse].join("|"), "i");
+const LEVERAGE_TICKERS = new Set(leverageName.double_tickers);
 
 const NEW_LISTING_BADGE = "🆕";
 

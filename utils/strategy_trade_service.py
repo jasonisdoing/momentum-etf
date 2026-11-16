@@ -1184,9 +1184,11 @@ def _config_quotes(mine: dict[str, dict[str, Any]], country: str | None) -> dict
 
     tickers_by_pool: dict[str, list[str]] = defaultdict(list)
     rounds_by_ticker: dict[str, int] = {}
+    multiple_by_ticker: dict[str, int] = {}
     for entry in mine.values():
         tickers_by_pool[entry["pool"]].append(entry["ticker"])
         rounds_by_ticker[entry["ticker"]] = int(entry["rounds"])
+        multiple_by_ticker[entry["ticker"]] = ladder.leverage_multiple(entry["ticker"], str(entry["name"]))
 
     snapshot = get_realtime_snapshot(country, sorted({entry["ticker"] for entry in mine.values()}))
     latest_day = get_latest_trading_day(country).normalize()
@@ -1206,8 +1208,12 @@ def _config_quotes(mine: dict[str, dict[str, Any]], country: str | None) -> dict
                 "change_pct": quote.get("changeRate") if isinstance(quote, dict) else None,
                 "drawdown_pct": round(drawdown * 100, 2) if drawdown is not None else None,
                 "recommended_gap_pct": (
-                    ladder.recommended_gap_pct(drawdown, rounds_by_ticker[ticker]) if drawdown is not None else None
+                    ladder.recommended_gap_pct(drawdown, rounds_by_ticker[ticker], multiple_by_ticker[ticker])
+                    if drawdown is not None
+                    else None
                 ),
+                "leverage_multiple": multiple_by_ticker[ticker],
+                "gap_range_pct": ladder.recommended_gap_range(multiple_by_ticker[ticker]),
                 "gap_days": len(window) if drawdown is not None else None,
                 "gap_partial": drawdown is not None and len(window) < ladder.RECOMMENDED_GAP_WINDOW_DAYS,
             }
@@ -1281,6 +1287,8 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
                 "recommended_gap_pct": quotes.get(entry["ticker"], {}).get("recommended_gap_pct"),
                 "gap_days": quotes.get(entry["ticker"], {}).get("gap_days"),
                 "gap_partial": quotes.get(entry["ticker"], {}).get("gap_partial"),
+                "leverage_multiple": quotes.get(entry["ticker"], {}).get("leverage_multiple"),
+                "gap_range_pct": quotes.get(entry["ticker"], {}).get("gap_range_pct"),
             }
             for sid, entry in configs
         ],

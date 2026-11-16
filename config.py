@@ -12,13 +12,18 @@ SLACK_CHANNEL_IDS = {
 SLACK_CHANNEL = SLACK_CHANNEL_IDS["#momentum-etf"]
 SLACK_ASSET_SUMMARY_CHANNEL = SLACK_CHANNEL_IDS["#momentum-etf-summary"]
 
-# 화면과 슬랙 자산 요약이 같은 종목명·티커 규칙을 사용한다.
+# 화면과 슬랙 자산 요약이 같은 종목명·티커 규칙을 사용한다 — 3배·2배·인버스로 나눠 두고,
+# 레버리지 여부(`LEVERAGE_NAME_RE`)는 셋을 합쳐 본다. 배수(`LEVERAGE_TRIPLE_RE`·`LEVERAGE_DOUBLE_RE`)는
+# 사고팔기 권장 간격이 쓴다(`core.strategy.trade.rules.leverage_multiple`).
 with (Path(__file__).resolve().parent / "web" / "lib" / "leverage_name.json").open(
     encoding="utf-8"
 ) as leverage_name_file:
     _LEVERAGE_RULES = json.load(leverage_name_file)
-LEVERAGE_NAME_RE = re.compile(_LEVERAGE_RULES["pattern"], re.IGNORECASE)
-LEVERAGE_TICKERS = frozenset(_LEVERAGE_RULES["tickers"])
+LEVERAGE_TRIPLE_RE = re.compile(_LEVERAGE_RULES["triple"], re.IGNORECASE)
+LEVERAGE_DOUBLE_RE = re.compile(_LEVERAGE_RULES["double"], re.IGNORECASE)
+LEVERAGE_NAME_RE = re.compile("|".join(_LEVERAGE_RULES[key] for key in ("triple", "double", "inverse")), re.IGNORECASE)
+# 이름으로는 알 수 없는 2배 종목 티커.
+LEVERAGE_TICKERS = frozenset(_LEVERAGE_RULES["double_tickers"])
 
 # python scripts/update_market_calendars.py CACHE_START_DATE 변경시 실행
 CACHE_START_DATE = "2018-12-31"

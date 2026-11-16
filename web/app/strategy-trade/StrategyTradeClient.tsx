@@ -12,6 +12,7 @@ import { renderStockNameCell } from "@/lib/name-highlight";
 import { CASH_ROW_TICKER, type AccountSummary, type HoldingsResponse, type HoldingsRow } from "../assets/assets-helpers";
 import { holdingMetricColumns } from "../assets/holding-metric-columns";
 import AccountSelect, { type AccountOptionBase } from "../components/AccountSelect";
+import { LabeledSwitchField } from "../components/LabeledSwitchField";
 import { SlackAlarmField } from "../components/SlackAlarmField";
 import { readRememberedTradeAccountId, writeRememberedTradeAccountId } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -170,6 +171,9 @@ type StrategyConfigRow = {
   /** 계산에 쓴 거래일 수 — 3개월치가 없으면 있는 기간만 쓰고 `gap_partial` 이 참이다. */
   gap_days: number | null;
   gap_partial: boolean | null;
+  /** 종목 배수(이름 규칙 `leverage_name.json`)와 그 배수의 권장 간격 범위 [최소, 최대](%). */
+  leverage_multiple: number | null;
+  gap_range_pct: [number, number] | null;
 };
 
 type TickerOption = { ticker: string; name: string; pools: string[]; kind: "stock" | "etf" };
@@ -183,6 +187,8 @@ type View = {
   country_code: string | null;
   /** 이 계좌의 사고팔기 슬랙 스위치(합성 슬랙과 별개). */
   slack_enabled: boolean;
+  /** 이 계좌 전략들이 간격 대신 매일의 권장 간격을 쓰는지 — 켜면 간격 칸은 보관만 하고 잠근다. */
+  recommended_gap_enabled: boolean;
   groups: HoldingsGroup[];
   pool_options: PoolLabelSource[];
   default_round_size: number;
@@ -513,6 +519,8 @@ type TradeListRow = DraftRow & {
   recommended_gap_pct?: number | null;
   gap_days?: number | null;
   gap_partial?: boolean | null;
+  leverage_multiple?: number | null;
+  gap_range_pct?: [number, number] | null;
   roundQuantity?: number | null;
   is_label?: boolean;
   /** 상태(도달·슬랙·주문)가 있는 회차 — 아래 회차 표의 상태 칸과 같은 값. */
@@ -569,13 +577,13 @@ function recommendedGapColumn(): ColDef<TradeListRow> {
     pinned: "left",
     type: "numericColumn",
     headerTooltip:
-      "최근 3개월(확정 종가) 고점 이후 최대 하락을 회차들이 복리로 덮는 간격(2~10%). 간격 설정을 바꿀 때 참고하는 값입니다.",
-    tooltipValueGetter: ({ data }) =>
-      data?.drawdown_pct == null
-        ? undefined
-        : data.gap_partial
-          ? `최근 ${data.gap_days}거래일(3개월 미만) 최대 하락 ${data.drawdown_pct.toFixed(1)}%`
-          : `3개월 최대 하락 ${data.drawdown_pct.toFixed(1)}%`,
+      "최근 3개월(확정 종가) 고점 이후 최대 하락을 회차들이 복리로 덮는 간격 — 종목 배수(1·2·3배)별 범위로 자른다.",
+    tooltipValueGetter: ({ data }) => {
+      if (data?.drawdown_pct == null || data.gap_range_pct == null) return undefined;
+      const period = data.gap_partial ? `최근 ${data.gap_days}거래일(3개월 미만)` : "3개월";
+      const [low, high] = data.gap_range_pct;
+      return `${period} 최대 하락 ${data.drawdown_pct.toFixed(1)}% · ${data.leverage_multiple}배 범위 ${low}~${high}%`;
+    },
     valueFormatter: ({ value }) => (value == null ? "-" : `${Number(value).toFixed(2)}%`),
     // 3개월치가 없어 있는 기간으로 낸 값은 순위 화면의 기간 미달 값과 같은 색으로 칠한다.
     cellStyle: ({ data }) => (data?.gap_partial ? PARTIAL_PERIOD_CELL_STYLE : { color: "var(--text-muted)" }),
@@ -629,6 +637,7 @@ function AccountSettingsCard({
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<{ accountId: string; ticker: string } | null>(null);
   const [slack, setSlack] = useState(view.slack_enabled);
+  const [useRecommendedGap, setUseRecommendedGap] = useState(view.recommended_gap_enabled);
   const [slackTesting, setSlackTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [accountAssets, setAccountAssets] = useState<{ summary: AccountSummary; holdings: Map<string, HoldingsRow> } | null>(null);
@@ -646,6 +655,7 @@ function AccountSettingsCard({
     setGroups(view.groups ?? EMPTY_GROUPS);
     setPickerOpen(false);
     setSlack(view.slack_enabled);
+    setUseRecommendedGap(view.recommended_gap_enabled);
     setMemos(view.memos);
   }, [view]);
 
@@ -678,6 +688,7 @@ function AccountSettingsCard({
 
   const isDirty =
     slack !== view.slack_enabled ||
+    useRecommendedGap !== view.recommended_gap_enabled ||
     JSON.stringify(groups) !== JSON.stringify(view.groups ?? EMPTY_GROUPS) ||
     JSON.stringify(comparableDrafts(drafts)) !== JSON.stringify(comparableDrafts(view.configs.map(rowFromConfig)));
 
@@ -735,6 +746,8 @@ function AccountSettingsCard({
         recommended_gap_pct: quote?.recommended_gap_pct,
         gap_days: quote?.gap_days,
         gap_partial: quote?.gap_partial,
+        leverage_multiple: quote?.leverage_multiple,
+        gap_range_pct: quote?.gap_range_pct,
         currency,
         // 현재가 기준 회차 수량 — 서버 `round_buy_quantity` 와 같은 식(회차 금액 ÷ (현재가 × 환율), 내림).
         roundQuantity:
@@ -845,12 +858,23 @@ function AccountSettingsCard({
     tradeWeightColumn,
     { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
     ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => [
-      {
-        ...column,
-        type: "rightAligned",
-        editable: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group,
-        cellClass: ({ node, data }) => !saving && !node.rowPinned && !data?.is_group ? "appEditableCell" : undefined,
-      },
+      // 권장 간격을 쓰는 동안 간격 칸은 잠근다 — 저장된 값은 보관만 하고, 끄면 다시 이 값을 쓴다.
+      ...(column.field === "pct" && useRecommendedGap
+        ? [{
+            ...column,
+            type: "rightAligned",
+            headerTooltip: "권장 간격 사용 중 — 이 값은 보관만 하고 매매에는 왼쪽 권장 간격을 씁니다",
+            editable: false,
+            cellStyle: { color: "var(--text-muted)" },
+          } satisfies ColDef<TradeListRow>]
+        : [{
+            ...column,
+            type: "rightAligned",
+            editable: ({ node, data }: { node: { rowPinned?: unknown }; data?: TradeListRow }) =>
+              !saving && !node.rowPinned && !data?.is_group,
+            cellClass: ({ node, data }: { node: { rowPinned?: unknown }; data?: TradeListRow }) =>
+              !saving && !node.rowPinned && !data?.is_group ? "appEditableCell" : undefined,
+          } as ColDef<TradeListRow>]),
       // 회차금액 옆 읽기 전용 — 지금 현재가로 그 금액이 몇 주인지.
       ...(column.field === "amount"
         ? [{
@@ -867,7 +891,7 @@ function AccountSettingsCard({
     returnPct, valuation, pnl,
     { ...pnl, colId: "realized_krw", headerName: "실현손익", headerTooltip: "회차 기준 — 아래 손익 요약과 같은 값", valueGetter: ({ data }) => data?.realized_krw },
     { ...pnl, colId: "total_krw", headerName: "합계 손익", headerTooltip: "평가손익 + 실현손익", valueGetter: ({ data }) => data?.total_krw },
-  ], [saving, onWithdrawSignal]);
+  ], [saving, onWithdrawSignal, useRecommendedGap]);
 
   const tradeRowClass = ({ data }: RowClassParams<TradeListRow>) => [
     data?.is_group || data?.key === TOTAL_ROW_KEY || data?.key === TRADE_TOTAL_ROW_KEY ? "assetsGroupRow" : "",
@@ -970,7 +994,13 @@ function AccountSettingsCard({
       const resp = await fetch("/api/strategy-trade", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_id: accountId, slack_enabled: slack, strategies, groups }),
+        body: JSON.stringify({
+          account_id: accountId,
+          slack_enabled: slack,
+          recommended_gap_enabled: useRecommendedGap,
+          strategies,
+          groups,
+        }),
       });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
@@ -1013,6 +1043,13 @@ function AccountSettingsCard({
                   value={accountId}
                   onChange={handleAccountChange}
                   disabled={saving}
+                />
+                <LabeledSwitchField
+                  label="권장 간격 사용"
+                  checked={useRecommendedGap}
+                  onChange={setUseRecommendedGap}
+                  disabled={saving}
+                  title="켜면 이 계좌 전략들이 간격 대신 매일의 권장 간격(최근 3개월 최대 하락 기준)을 씁니다. 저장 버튼을 눌러야 반영된다."
                 />
                 <SlackAlarmField
                   checked={slack}
