@@ -363,30 +363,56 @@ def _resolve_request(request: dict[str, Any], *, fresh: bool) -> dict[str, Any]:
     )
 
 
-def recheck_round_state(target: dict[str, Any]) -> None:
-    """저장된 원장으로는 주문할 수 없다고 나온 버튼을 원장을 새로 계산해 다시 판정한다 — 응답 뒤 백그라운드에서 돈다.
+def _status_view(request: dict[str, Any], target: dict[str, Any], note: str) -> dict[str, Any]:
+    """제출 버튼 없는 확인 모달 — 버튼에 담긴 주문 내용과 상태 한 줄(확인 중·주문 불가·오류)만 보인다."""
+    # 제목은 채워진 뒤의 확인 모달(`_order_view`·`_swap_view`)과 같다 — 열리고 나서 제목이 바뀌지 않게.
+    env = _env_word(request["env"])
+    title = f"{env} 매도 후 재매수 확인" if _is_swap(request) else f"{env} {_action_word(request)} 주문 확인"
+    view = _modal_view(ORDER_CALLBACK_ID, title, "확인", f"*{_order_text(request)}*\n{note}", target)
+    del view["submit"]
+    return view
 
-    새 원장으로도 주문할 수 없으면 그때 버튼을 걷고(`_expire`), 주문할 수 있으면 버튼을 두고 다시 누르라고 알린다.
-    """
+
+def _update_view(view_id: str, view: dict[str, Any]) -> None:
+    """열린 모달을 바꾼다 — 사용자가 그 사이 모달을 닫았으면(not_found) 할 일이 없다."""
     try:
-        _resolve_request(target["request"], fresh=True)
+        WebClient(token=_require_env("SLACK_BOT_TOKEN")).views_update(view_id=view_id, view=view)
+    except SlackApiError as exc:
+        if exc.response.get("error") != "not_found":
+            raise
+
+
+def fill_confirm_modal(job: dict[str, Any]) -> None:
+    """먼저 연 확인 모달에 호가·수량·신호 대비를 채운다 — 응답 뒤 백그라운드에서 돌아 3초 제한을 받지 않는다.
+
+    저장된 원장으로 주문할 수 없다고 나오면(배치 주기만큼 늦을 수 있다) 새 원장으로 다시 판정하고, 그래도 주문할 수
+    없으면 모달을 「주문 불가」로 바꾸고 버튼을 걷는다(`_expire`). 다른 실패는 이유를 모달에 보이고 버튼은 둔다.
+    """
+    target, view_id = job["target"], job["view_id"]
+    request = target["request"]
+    try:
+        try:
+            order = _resolve_request(request, fresh=False)
+        except RoundNotOrderableError:
+            order = _resolve_request(request, fresh=True)
     except RoundNotOrderableError as exc:
+        note = _ALREADY_DONE_NOTE if exc.done else f"⌛ 주문할 수 없는 회차입니다: {exc}"
+        _update_view(view_id, _status_view(request, target, note))
         _expire(target, exc)
         return
-    except Exception as exc:  # 슬랙 요청은 이미 응답했으므로 실패도 스레드로 알린다.
-        logger.exception("슬랙 주문 회차 재확인 실패")
-        _report_open_failure(target, exc)
+    except Exception as exc:  # 모달은 이미 열렸다 — 실패 이유를 모달에 보이고 버튼은 다시 누를 수 있게 둔다.
+        logger.exception("슬랙 주문 확인 모달 채우기 실패")
+        _update_view(view_id, _status_view(request, target, f"❌ 주문 확인을 열 수 없습니다: {exc}"))
         return
-    send_thread_message(
-        "⚠️ 보유 상태가 막 바뀌어 주문 확인을 열지 못했습니다 — 버튼을 다시 눌러 주세요.", thread_ts=target["thread_ts"]
-    )
+    view = _swap_view(request, order, target) if _is_swap(request) else _order_view(request, order, target)
+    _update_view(view_id, view)
 
 
 def open_confirm_modal(payload: dict[str, Any]) -> dict[str, Any] | None:
     """버튼을 누른 사용자에게 확인 모달을 연다 — trigger_id 는 3초 안에 써야 한다.
 
-    저장된 원장으로 주문할 수 없는 회차로 나오면 모달을 열지 않고, 새 원장으로 다시 판정할 대상(`recheck_round_state`)을
-    돌려준다 — 저장본은 배치 주기만큼 늦을 수 있어 그것만으로 버튼을 걷지 않는다.
+    주문 버튼은 계산 없이 버튼에 담긴 주문 내용으로 「확인 중」 모달을 바로 열고, 호가·수량을 채울 일
+    (`fill_confirm_modal` 에 넘길 {target, view_id})을 돌려준다. 취소 버튼은 계산할 것이 없어 바로 연다.
     """
     action = payload["actions"][0]
     value = json.loads(action["value"])
@@ -399,23 +425,19 @@ def open_confirm_modal(payload: dict[str, Any]) -> dict[str, Any] | None:
         # 스레드 답글이면 최상위 메시지의 ts, 최상위 메시지면 자기 ts 가 스레드의 뿌리다.
         "thread_ts": message.get("thread_ts") or message["ts"],
     }
+    client = WebClient(token=_require_env("SLACK_BOT_TOKEN"))
     if action["action_id"] == OPEN_ACTION_ID:
-        try:
-            # 슬랙 trigger_id 는 3초 안에 써야 해서 저장된 원장으로 연다 — 실제 주문 직전 검증은 `place_order` 가 새로 계산한다.
-            order = _resolve_request(request, fresh=False)
-        except RoundNotOrderableError:
-            return target
-        except BrokerApiError as exc:
-            # 다시 누르면 될 수 있는 실패(수동 미체결 주문·호가 없음·연동 오류 등) — 버튼은 두고 이유만 스레드에 남긴다.
-            _report_open_failure(target, exc)
-            return None
-        view = _swap_view(request, order, target) if _is_swap(request) else _order_view(request, order, target)
-    elif action["action_id"] == CANCEL_ACTION_ID:
-        view = _cancel_view(request, {**target, "order_id": value["order_id"]})
-    else:
-        raise BrokerApiError(f"알 수 없는 슬랙 버튼입니다: {action['action_id']}")
-    WebClient(token=_require_env("SLACK_BOT_TOKEN")).views_open(trigger_id=payload["trigger_id"], view=view)
-    return None
+        opened = client.views_open(
+            trigger_id=payload["trigger_id"],
+            view=_status_view(request, target, "⏳ 호가와 보유 회차를 확인하는 중…"),
+        )
+        return {"target": target, "view_id": opened["view"]["id"]}
+    if action["action_id"] == CANCEL_ACTION_ID:
+        client.views_open(
+            trigger_id=payload["trigger_id"], view=_cancel_view(request, {**target, "order_id": value["order_id"]})
+        )
+        return None
+    raise BrokerApiError(f"알 수 없는 슬랙 버튼입니다: {action['action_id']}")
 
 
 def submitted_request(payload: dict[str, Any]) -> dict[str, Any]:
@@ -456,13 +478,6 @@ def _finish(target: dict[str, Any], order: dict[str, Any]) -> None:
         _update_message(target, [*_open_blocks(request, "다시 주문하기"), _note(text)])
     else:
         _update_message(target, _note_blocks(request, text))
-
-
-def _report_open_failure(target: dict[str, Any], exc: Exception) -> None:
-    """버튼을 눌렀는데 확인 모달을 열 수 없을 때 — 이유를 스레드에 남긴다(응답 없이 끝나지 않게)."""
-    request = target["request"]
-    side = f"{_env_word(request['env'])} {_action_word(request)}"
-    send_thread_message(f"❌ {side} 주문 확인을 열 수 없습니다: {exc}", thread_ts=target["thread_ts"])
 
 
 def _expire(target: dict[str, Any], exc: RoundNotOrderableError) -> None:
