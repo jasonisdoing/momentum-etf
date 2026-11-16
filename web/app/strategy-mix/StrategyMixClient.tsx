@@ -95,6 +95,8 @@ type AccountOption = AccountOptionBase & {
   mix_ready: boolean;
   /** 슬롯 키 → 표시 기호(백엔드 `mix_slot_marks` 단일 소스, A 부터). */
   slot_marks: Record<string, string>;
+  /** 사고팔기 줄의 표시 이름 — 비어 있으면 "사고팔기". */
+  mix_trade_name: string;
   country_code: string;
   /** 오늘의 액션 슬랙 알람 — 새 지시·수량 증가 시 발송. */
   mix_slack_enabled?: boolean;
@@ -271,6 +273,8 @@ type SlotActions = {
 
 /** 슬롯 키는 순서가 정한다 — 백엔드 `MIX_SLEEVE_KEYS` 와 같은 순서여야 한다. */
 const SLOT_KEY_ORDER = ["a", "b", "c", "d"] as const;
+/** 사고팔기 줄 이름을 비워 두면 쓰는 이름. */
+const TRADE_DEFAULT_NAME = "사고팔기";
 
 
 /** 보유 표 행 — 현금 행도 같은 표에 넣는다 (비중 합이 100%임을 한눈에 보이게). */
@@ -396,7 +400,7 @@ export function StrategyMixClient() {
   // 사고팔기 기호 — 마지막 슬리브 기호 다음 알파벳(A·B·C 면 D). 표는 저장된 슬리브, 설정 칸은 편집 중 슬리브 기준.
   const tradeMarkAfter = (keys: string[]): string =>
     keys.length ? String.fromCharCode(slotMark(keys[keys.length - 1]).charCodeAt(0) + 1) : "";
-  const tradeLabel = `${tradeMarkAfter(sleeves.map((sleeve) => sleeve.key))}. 사고팔기`;
+  const tradeLabel = `${tradeMarkAfter(sleeves.map((sleeve) => sleeve.key))}. ${selectedAccount?.mix_trade_name || TRADE_DEFAULT_NAME}`;
   const slotLabel = (slot: string) => {
     const sleeve = sleeves.find((row) => row.key === slot);
     const mark = slotMark(slot);
@@ -1174,6 +1178,8 @@ export function StrategyMixClient() {
   const [draftSleeves, setDraftSleeves] = useState<MixSleeve[]>([]);
   const [cashPct, setCashPct] = useState("0");
   const [settingsSaving, setSettingsSaving] = useState(false);
+  // 사고팔기 줄 이름 초안 — 슬리브 이름처럼 헤더 저장으로 함께 저장한다.
+  const [draftTradeName, setDraftTradeName] = useState("");
   const [slackTesting, setSlackTesting] = useState(false);
   // 슬롯 개수 제한 — 백엔드 상수가 단일 소스(응답으로 받는다).
   const minSleeves = meta?.min_sleeves ?? 1;
@@ -1187,6 +1193,7 @@ export function StrategyMixClient() {
     setHarvestMode(savedAdjustmentMode(harvest, "off"));
     setRefillMode(savedAdjustmentMode(selectedAccount?.mix_refill_pct, 100));
     setDraftSleeves(sleeves.map((row) => ({ ...row })));
+    setDraftTradeName(selectedAccount?.mix_trade_name ?? "");
     setCashPct(selectedAccount ? String(selectedAccount.mix_cash_pct) : "0");
   }, [selectedAccount, sleeves]);
 
@@ -1259,6 +1266,7 @@ export function StrategyMixClient() {
         refillValue !== selectedAccount.mix_refill_pct ||
         harvestMode !== savedAdjustmentMode(selectedAccount.mix_harvest_pct, "off") ||
         refillMode !== savedAdjustmentMode(selectedAccount.mix_refill_pct, 100) ||
+        draftTradeName.trim() !== selectedAccount.mix_trade_name ||
         draftSleeves.length !== sleeves.length ||
         draftSleeves.some((row, index) => {
           const saved = sleeves[index];
@@ -1305,6 +1313,7 @@ export function StrategyMixClient() {
               weight_pct: row.weight_pct,
             })),
             mix_cash_pct: Number(cashPct),
+            mix_trade_name: draftTradeName.trim() || null,
           },
         }),
       });
@@ -1327,6 +1336,7 @@ export function StrategyMixClient() {
                 })),
                 mix_ready: draftSleeves.every((row) => row.strategy && row.pool),
                 mix_cash_pct: Number(cashPct),
+                mix_trade_name: draftTradeName.trim(),
               }
             : option,
         ),
@@ -1624,14 +1634,24 @@ export function StrategyMixClient() {
                         <span className="mixSleeveMark" style={warn}>
                           {tradeMarkAfter(draftSleeves.map((sleeve) => sleeve.key))}
                         </span>
-                        {/* 슬리브 줄과 같은 칸을 쓰되 잠근다 — 사고팔기는 여기서 고치는 값이 없다. */}
+                        {/* 슬리브 줄과 같은 칸을 쓴다 — 전략·종목풀·비중은 잠그고 표시 이름만 고친다. */}
                         <select className="form-select form-select-sm" style={{ width: "auto" }} disabled value="trade">
-                          <option value="trade">사고팔기</option>
+                          <option value="trade">{TRADE_DEFAULT_NAME}</option>
                         </select>
                         <select className="form-select form-select-sm" style={{ width: "auto" }} disabled value="">
                           <option value="">계좌 등록 종목</option>
                         </select>
-                        <input className="form-control form-control-sm" style={{ width: 140 }} type="text" disabled value="" />
+                        <input
+                          className="form-control form-control-sm"
+                          style={{ width: 140 }}
+                          type="text"
+                          maxLength={20}
+                          value={draftTradeName}
+                          disabled={settingsSaving}
+                          placeholder={TRADE_DEFAULT_NAME}
+                          title="비우면 사고팔기로 보입니다."
+                          onChange={(event) => setDraftTradeName(event.target.value)}
+                        />
                         <span className="mixSleeveWeight">
                           <input
                             className="form-control form-control-sm"

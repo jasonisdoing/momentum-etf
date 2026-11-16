@@ -57,6 +57,8 @@ EDITABLE_KEYS: tuple[str, ...] = (
     # 합성 슬리브 목록 — 슬롯마다 (전략, 종목풀, 표시 이름, 배분%). 슬롯 수가 늘어도
     # 필드를 추가하지 않도록 배열 하나로 둔다. 순서가 곧 슬롯 순서(A·B·C)다.
     "mix_sleeves",
+    # 합성 화면 사고팔기 줄의 표시 이름 — 비우면 "사고팔기". 슬리브 이름과 같은 길이 제한.
+    "mix_trade_name",
     "mix_slack_enabled",
     "mix_harvest_pct",
     "mix_refill_pct",
@@ -471,6 +473,14 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             cleaned[key] = {"ticker": ticker, "name": bench_name}
         elif key == "mix_sleeves":
             cleaned[key] = _validate_mix_sleeves(account_id, raw, values, existing_doc)
+        elif key == "mix_trade_name":
+            name = str(raw or "").strip()
+            if len(name) > MIX_SLEEVE_NAME_MAX_LEN:
+                raise AccountSettingsStoreError(
+                    f"'{account_id}' 의 사고팔기 이름은 {MIX_SLEEVE_NAME_MAX_LEN}자 이내여야 합니다: {name}"
+                )
+            # 빈 이름은 None — 화면이 "사고팔기"를 대신 쓴다.
+            cleaned[key] = name or None
         elif key == "mix_enabled":
             # 켜면 `/strategy-mix` 목록에 오른다. 조합이 아직 없으면 그 화면에서 고르게 한다.
             cleaned[key] = bool(raw)

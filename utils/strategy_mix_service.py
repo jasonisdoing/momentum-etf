@@ -90,6 +90,8 @@ def mix_accounts() -> list[dict[str, Any]]:
                 "mix_cash_pct": mix_weights(inner)["cash_pct"],
                 # 슬롯 키 → 표시 기호(A 부터).
                 "slot_marks": mix_slot_marks(),
+                # 사고팔기 줄의 표시 이름 — 비어 있으면 화면이 "사고팔기"를 쓴다.
+                "mix_trade_name": str(inner.get("mix_trade_name") or ""),
             }
         )
     accounts.sort(key=lambda item: (item["order"] is None, item["order"]))
