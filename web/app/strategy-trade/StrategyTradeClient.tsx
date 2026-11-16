@@ -3,7 +3,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef, GridApi, GridOptions, RowClassParams, RowDragEndEvent } from "ag-grid-community";
 
-import { gridRowDragColumn, gridSelectionColumn, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn, volatilityColumn } from "@/lib/grid-cells";
+import { gridRowDragColumn, gridSelectionColumn, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
 import type { HoldingsGroup } from "@/lib/holdings-store";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 import { formatCurrencyPrice, formatPrice } from "@/lib/price-format";
@@ -163,7 +163,10 @@ type StrategyConfigRow = {
   /** 현재가·일간(%) — 공통 시세 경로 값. 못 받으면 null. */
   price: number | null;
   change_pct: number | null;
-  volatility_pct: number | null;
+  /** 확정 봉 최근 3개월 고점 이후 최대 하락(%) — 3개월치 종가가 없으면 null. */
+  drawdown_pct: number | null;
+  /** 권장 간격(%) — 위 하락을 회차들이 복리로 덮는 간격(2~10%, `rules.recommended_gap_pct`). 참고값. */
+  recommended_gap_pct: number | null;
 };
 
 type TickerOption = { ticker: string; name: string; pools: string[]; kind: "stock" | "etf" };
@@ -503,7 +506,8 @@ function comparableDrafts(rows: DraftRow[]) {
 type TradeListRow = DraftRow & {
   held: boolean;
   heldRounds: string;
-  volatility_pct?: number | null;
+  drawdown_pct?: number | null;
+  recommended_gap_pct?: number | null;
   roundQuantity?: number | null;
   is_label?: boolean;
   /** 상태(도달·슬랙·주문)가 있는 회차 — 아래 회차 표의 상태 칸과 같은 값. */
@@ -546,6 +550,25 @@ function sumTradeHoldings(rows: HoldingsRow[]) {
     valuation_krw: totals.valuation_krw,
     pnl_krw: totals.pnl_krw,
     return_pct: totals.buyAmount > 0 ? (totals.pnl_krw / totals.buyAmount) * 100 : undefined,
+  };
+}
+
+/** 권장 간격 컬럼 — 이 화면에만 있는 참고값이라 공용 컬럼 없이 여기서 정의한다(폭·표기는 변동성 컬럼과 같다). */
+function recommendedGapColumn(): ColDef<TradeListRow> {
+  return {
+    colId: "recommended_gap_pct",
+    field: "recommended_gap_pct",
+    headerName: "권장 간격",
+    width: 84,
+    minWidth: 72,
+    pinned: "left",
+    type: "numericColumn",
+    headerTooltip:
+      "최근 3개월(확정 종가) 고점 이후 최대 하락을 회차들이 복리로 덮는 간격(2~10%). 간격 설정을 바꿀 때 참고하는 값입니다.",
+    tooltipValueGetter: ({ data }) =>
+      data?.drawdown_pct == null ? undefined : `3개월 최대 하락 ${data.drawdown_pct.toFixed(1)}%`,
+    valueFormatter: ({ value }) => (value == null ? "-" : `${Number(value).toFixed(2)}%`),
+    cellStyle: { color: "var(--text-muted)" },
   };
 }
 
@@ -698,7 +721,8 @@ function AccountSettingsCard({
         statusRounds: strategy && strategy.ticker === row.ticker && !("error" in strategy) ? strategy.rounds.filter(hasRoundStatus) : [],
         current_price: price == null ? undefined : String(price),
         daily_change_pct: quote?.change_pct,
-        volatility_pct: quote?.volatility_pct,
+        drawdown_pct: quote?.drawdown_pct,
+        recommended_gap_pct: quote?.recommended_gap_pct,
         currency,
         // 현재가 기준 회차 수량 — 서버 `round_buy_quantity` 와 같은 식(회차 금액 ÷ (현재가 × 환율), 내림).
         roundQuantity:
@@ -769,7 +793,7 @@ function AccountSettingsCard({
 
   const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
     gridRowDragColumn<TradeListRow>(({ node }) => !node.rowPinned, 36),
-    { ...volatilityColumn<TradeListRow>(), pinned: "left" },
+    recommendedGapColumn(),
     tickerColumn<TradeListRow>(),
     stockNameColumn<TradeListRow>({
       cellRenderer: ({ data, value }) => data?.is_group ? (

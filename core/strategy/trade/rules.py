@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from math import isfinite, log
 from typing import Literal
 
@@ -112,3 +113,36 @@ def ladder_position(price: float, first_fill: float, trigger_pct: float) -> int:
     1호보다 비싸면 0 이하가 된다(그 위 칸).
     """
     return round(log(price / first_fill) / log(down_ratio(trigger_pct))) + 1
+
+
+#: 권장 간격(표시용) — 최근 3개월(거래일) 고점 이후 최대 하락(MDD)을 회차들이 복리로 덮는 간격, 이 범위로 자른다.
+RECOMMENDED_GAP_WINDOW_DAYS = 63
+RECOMMENDED_GAP_MIN_PCT = 2.0
+RECOMMENDED_GAP_MAX_PCT = 10.0
+
+
+def max_drawdown(closes: Sequence[float]) -> float:
+    """종가들의 고점 이후 최대 하락(0~1) — 그때까지의 최고가 대비 가장 크게 빠진 비율.
+
+    저점이 고점보다 먼저 온 상승은 하락으로 치지 않는다.
+    """
+    peak = worst = 0.0
+    for price in closes:
+        if not isfinite(price) or price <= 0:
+            raise ValueError(f"종가는 유한한 양수여야 합니다: {price}")
+        peak = max(peak, price)
+        worst = max(worst, 1.0 - price / peak)
+    return worst
+
+
+def recommended_gap_pct(drawdown: float, rounds: int) -> float:
+    """``drawdown``(0~1)을 ``rounds − 1`` 번의 간격이 복리로 덮는 간격(%) — 최소·최대 범위로 자른다.
+
+    간격 = 1 − (1 − MDD)^(1 / (회차 수 − 1)). 화면이 사람에게 보여 주는 참고값이며 매매 판정에는 쓰지 않는다.
+    """
+    if rounds < 2:
+        raise ValueError(f"권장 간격은 회차가 2개 이상일 때만 계산합니다: {rounds}")
+    if not 0.0 <= drawdown < 1.0:
+        raise ValueError(f"최대 하락은 0 이상 1 미만이어야 합니다: {drawdown}")
+    gap = (1.0 - (1.0 - drawdown) ** (1.0 / (rounds - 1))) * 100.0
+    return round(min(max(gap, RECOMMENDED_GAP_MIN_PCT), RECOMMENDED_GAP_MAX_PCT), 2)
