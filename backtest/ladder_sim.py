@@ -38,6 +38,8 @@ DATA_DIR = Path(__file__).resolve().parent / "data"
 ZONES = {"kor": "Asia/Seoul", "us": "America/New_York"}
 WINDOW_DAYS = 63  # 3개월(세션 수)
 STEP_DAYS = 21  # 구간을 한 달씩 민다
+# 이 날 이후에 시작하는 구간만 돌린다 — 2025년은 상승장 비중이 커서 뺀다(분봉은 그 전부터 받아 둔다).
+SIM_SINCE = date(2026, 1, 1)
 REGIME_PCT = 5.0  # 구간 수익률 +5% 이상 상승, −5% 이하 하락, 그 사이 횡보
 FILL_DELAY_MINUTES = 0
 #: 체결 금액 대비 수수료(매수·매도 각각) — 국장 0, 미장 0.07%.
@@ -48,10 +50,12 @@ GROUPS: dict[str, str] = {
     "229200": "국장 1배",
     "122630": "국장 레버리지",
     "233740": "국장 레버리지",
+    "114800": "국장 인버스",
     "QQQM": "미장 1배",
     "QLD": "미장 레버리지",
     "TQQQ": "미장 레버리지",
     "SOXL": "미장 레버리지",
+    "PSQ": "미장 인버스",
 }
 
 #: 비교할 안 — 모든 종목에 같은 규칙을 쓴다. ``base`` 는 첫 간격(%) 또는
@@ -63,7 +67,7 @@ GROUPS: dict[str, str] = {
 #: · avg(2호~그 회차 매수 간격의 평균). 매도 간격은 회차를 살 때 정해 그 회차에 저장한다.
 VOL_BASE = "vol"
 MDD_BASE = "mdd"
-MDD_WINDOW_DAYS = 63  # 최근 3개월(거래일) 고점 이후 최대 하락
+# MDD 안은 ``mdd_days``(최근 몇 거래일의 고점 이후 최대 하락)를 안마다 정한다 — 3개월 63, 6개월 126.
 #: 종목 레버리지 배수 — 배수별 간격 범위를 쓰는 MDD 안(⑧·⑨)에 쓴다.
 LEVERAGE: dict[str, int] = {
     "069500": 1,
@@ -74,6 +78,8 @@ LEVERAGE: dict[str, int] = {
     "QLD": 2,
     "TQQQ": 3,
     "SOXL": 3,
+    "114800": 1,
+    "PSQ": 1,
 }
 LEVERAGE_GAP_MAX_MULT = 3.0
 VARIANTS: list[dict] = [
@@ -85,7 +91,24 @@ VARIANTS: list[dict] = [
     {"id": "6", "name": "⑥ 변동성 고정", "base": VOL_BASE, "step": 0.0, "sell": "fixed"},
     {"id": "f5", "name": "고정 5%", "base": 5.0, "step": 0.0, "sell": "fixed"},
     {"id": "f7.5", "name": "고정 7.5%", "base": 7.5, "step": 0.0, "sell": "fixed"},
-    {"id": "7", "name": "⑦ MDD 회차별", "base": MDD_BASE, "step": 0.0, "sell": "own", "bounds": (2.0, 10.0)},
+    {
+        "id": "7",
+        "name": "⑦ MDD 6개월 회차별",
+        "base": MDD_BASE,
+        "step": 0.0,
+        "sell": "own",
+        "bounds": (2.0, 10.0),
+        "mdd_days": 126,
+    },
+    {
+        "id": "7q",
+        "name": "⑦ MDD 3개월(이전)",
+        "base": MDD_BASE,
+        "step": 0.0,
+        "sell": "own",
+        "bounds": (2.0, 10.0),
+        "mdd_days": 63,
+    },
     {
         "id": "8",
         "name": "⑧ MDD·배수 2/4/6%",
@@ -93,6 +116,7 @@ VARIANTS: list[dict] = [
         "step": 0.0,
         "sell": "own",
         "bounds": {1: 2.0, 2: 4.0, 3: 6.0},
+        "mdd_days": 63,
     },
     {
         "id": "9",
@@ -101,6 +125,7 @@ VARIANTS: list[dict] = [
         "step": 0.0,
         "sell": "own",
         "bounds": {1: 2.0, 2: 3.0, 3: 5.0},
+        "mdd_days": 63,
     },
 ]
 
@@ -153,7 +178,7 @@ def gap_bounds(variant: dict, cfg: dict) -> tuple[float, float]:
 
 def mdd_gap(variant: dict, cfg: dict, day: date) -> float:
     """전날까지 3개월 MDD 를 (회차 수 − 1)번의 간격이 복리로 덮는 간격(%) — 안의 범위(`gap_bounds`)로 자른다."""
-    mdd = cfg["mdd_by_day"][day]
+    mdd = cfg["mdd_by_day"][variant["mdd_days"]][day]
     gap = (1 - (1 - mdd) ** (1 / (cfg["rounds"] - 1))) * 100
     low, high = gap_bounds(variant, cfg)
     return min(max(gap, low), high)
@@ -186,8 +211,8 @@ def load_ticker(ticker: str, country: str) -> dict[str, list]:
 
 
 def session_windows(days: list[date]) -> list[tuple[int, int]]:
-    """세션 63개짜리 구간을 21세션씩 밀며 — [(시작 분봉 위치, 끝 분봉 위치(포함 안 함))]."""
-    starts: list[int] = [0] + [i for i in range(1, len(days)) if days[i] != days[i - 1]]
+    """`SIM_SINCE` 이후 세션부터 63개짜리 구간을 21세션씩 밀며 — [(시작 분봉 위치, 끝 분봉 위치(포함 안 함))]."""
+    starts: list[int] = [i for i in range(len(days)) if (i == 0 or days[i] != days[i - 1]) and days[i] >= SIM_SINCE]
     bounds = [*starts, len(days)]
     return [(bounds[i], bounds[i + WINDOW_DAYS]) for i in range(0, len(starts) - WINDOW_DAYS + 1, STEP_DAYS)]
 
@@ -273,7 +298,11 @@ def ticker_configs() -> dict[str, dict]:
             # 순위 화면 변동성과 같은 함수 — 날짜별 20일 일간 수익률 표준편차(%).
             "volatility": daily_volatility_pct(pd.to_numeric(frame["Close"], errors="coerce")),
             "leverage": LEVERAGE[ticker] if ticker in LEVERAGE else None,
-            "mdd": rolling_mdd(pd.to_numeric(frame["Close"], errors="coerce").dropna(), MDD_WINDOW_DAYS),
+            # 안들이 쓰는 MDD 기간마다 날짜별 MDD.
+            "mdd": {
+                days: rolling_mdd(pd.to_numeric(frame["Close"], errors="coerce").dropna(), days)
+                for days in {v["mdd_days"] for v in VARIANTS if v["base"] == MDD_BASE}
+            },
         }
     return configs
 
@@ -284,12 +313,15 @@ def regime_of(data: dict[str, list], lo: int, hi: int) -> str:
 
 
 def day_lookups(cfg: dict, days: list[date]) -> dict:
-    """세션 날짜별 '전날까지의' 20일 변동성·3개월 MDD — 분봉마다 찾지 않도록 날짜당 한 번 계산한다."""
+    """세션 날짜별 '전날까지의' 20일 변동성·MDD(기간별) — 분봉마다 찾지 않도록 날짜당 한 번 계산한다."""
     unique = sorted(set(days))
     return {
         **cfg,
         "vol_by_day": {day: value_before(cfg["volatility"], day, "20일 변동성") for day in unique},
-        "mdd_by_day": {day: value_before(cfg["mdd"], day, "3개월 MDD") for day in unique},
+        "mdd_by_day": {
+            window: {day: value_before(series, day, f"{window}거래일 MDD") for day in unique}
+            for window, series in cfg["mdd"].items()
+        },
     }
 
 

@@ -28,12 +28,14 @@ TICKERS: dict[str, str] = {
     "229200": "kor",
     "122630": "kor",
     "233740": "kor",
+    "114800": "kor",
     "QQQM": "us",
     "QLD": "us",
     "TQQQ": "us",
     "SOXL": "us",
+    "PSQ": "us",
 }
-SINCE = date(2025, 1, 1)
+SINCE = date(2026, 1, 1)  # 시뮬레이션 구간(`ladder_sim.SIM_SINCE`)과 같다 — MDD·변동성은 일봉 캐시로 계산한다
 DATA_DIR = Path(__file__).resolve().parent / "data"
 PAGE_SIZE = 400  # 토스 c-chart 한 번에 받는 최대 개수(500 이상은 400 Bad Request)
 ZONES = {"kor": ZoneInfo("Asia/Seoul"), "us": ZoneInfo("America/New_York")}
