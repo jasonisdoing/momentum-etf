@@ -187,7 +187,38 @@ type View = {
   strategies: Array<StrategyView | FailedStrategy>;
   /** 종목 메모(티커 → 메모) — 메모가 없는 종목은 빠진다. */
   memos: Record<string, string>;
+  /** 오늘 API 주문 한도와 사용량(금액은 원화, 순매수) — 계좌가 없으면 null. 한도를 비운 칸은 null. */
+  order_limit: {
+    enabled: boolean;
+    max_count: number | null;
+    used_count: number;
+    max_amount: number | null;
+    used_amount: number;
+  } | null;
 };
+
+/** 오늘 API 주문 한도·사용량 — 주문 직전 검사와 같은 값이다. 다 쓴 항목은 빨갛게. */
+function OrderLimitField({ limit }: { limit: NonNullable<View["order_limit"]> }) {
+  const full = (used: number, max: number | null) => (max != null && used >= max ? { color: "var(--up-color, #d64545)" } : {});
+  return (
+    <div className="appLabeledField" style={{ marginBottom: 0 }}>
+      <span className="appLabeledFieldLabel">오늘 주문 한도</span>
+      <span
+        style={{ display: "inline-flex", alignItems: "center", gap: 10, minHeight: 32, fontSize: "var(--fs-sm)" }}
+        title="계좌 설정의 하루 API 주문 건수·금액 한도 — 금액은 오늘 순매수(매수 − 매도)를 원화로 센다."
+      >
+        {!limit.enabled ? <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}>API 주문 꺼짐</span> : null}
+        <span style={full(limit.used_count, limit.max_count)}>
+          횟수 <b>{limit.used_count}</b> / {limit.max_count == null ? "미설정" : `${limit.max_count}건`}
+        </span>
+        <span style={full(limit.used_amount, limit.max_amount)}>
+          금액 <b>{formatCurrencyPrice(limit.used_amount, "KRW")}</b> /{" "}
+          {limit.max_amount == null ? "미설정" : formatCurrencyPrice(limit.max_amount, "KRW")}
+        </span>
+      </span>
+    </div>
+  );
+}
 
 // 편집 파라미터는 매매 간격(trigger_pct) 하나 — 백엔드 EDITABLE_PCT_KEYS 와 동일.
 const PCT_MIN = 0.1;
@@ -951,6 +982,7 @@ function AccountSettingsCard({
                   testing={slackTesting}
                   onTest={() => void sendSlackTest()}
                 />
+                {view.order_limit ? <OrderLimitField limit={view.order_limit} /> : null}
               </div>
               <div className="appMainHeaderRight">
                 <UnsavedChangesBadge show={isDirty} />

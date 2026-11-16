@@ -4,6 +4,7 @@ from fastapi import APIRouter, Body, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
 from utils.strategy_trade_notify import mark_sent_rounds, send_test
+from utils.strategy_trade_orders import order_limit_usage
 from utils.strategy_trade_service import (
     load_strategy_trade_view,
     save_account_trade,
@@ -11,6 +12,13 @@ from utils.strategy_trade_service import (
 from utils.strategy_trade_threads import withdraw_signal_by_key
 
 router = APIRouter(prefix="/internal/strategy-trade", tags=["strategy-trade"])
+
+
+def _screen_view(account_id: str | None) -> dict:
+    """화면 데이터 — 운용 현황에 슬랙 신호 표시와 오늘 API 주문 한도·사용량(`order_limit`)을 붙인다."""
+    view = mark_sent_rounds(load_strategy_trade_view(account_id))
+    view["order_limit"] = order_limit_usage(view["account_id"]) if view["account_id"] else None
+    return view
 
 
 @router.get("")
@@ -22,7 +30,7 @@ def get_strategy_trade(
 
     ``account_id`` 를 안 주면 첫 계좌다.
     """
-    return mark_sent_rounds(load_strategy_trade_view(account_id))
+    return _screen_view(account_id)
 
 
 @router.put("/settings")
@@ -35,7 +43,7 @@ def put_strategy_trade_settings(
     if not account_id or payload.get("strategies") is None or "slack_enabled" not in payload:
         raise ValueError("account_id·slack_enabled·strategies 가 모두 필요합니다.")
     save_account_trade(account_id, payload["slack_enabled"], payload["strategies"], payload.get("groups"))
-    return mark_sent_rounds(load_strategy_trade_view(account_id))
+    return _screen_view(account_id)
 
 
 @router.post("/withdraw-signal")

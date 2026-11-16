@@ -157,6 +157,44 @@ def _require_no_manual_order(strategy: dict[str, Any], side: str) -> None:
         )
 
 
+def _today_api_orders(account_id: str) -> list[dict[str, Any]]:
+    """오늘 API 로 낸 주문 중 한도에 세는 것 — 진행 중이거나 체결된 주문."""
+    today = _now().strftime("%Y-%m-%d")
+    return list(
+        _orders().find(
+            {
+                "account_id": account_id,
+                "created_at": {"$gte": today},
+                "status": {"$in": [*ACTIVE_STATUSES, "filled"]},
+            }
+        )
+    )
+
+
+def _net_buy_krw(account_id: str, orders: list[dict[str, Any]]) -> int:
+    """주문들의 순매수(매수 − 매도, 0 미만은 0)를 원화로 — 금액 한도에 세는 사용량. 순매수가 없으면 환율을 읽지 않는다."""
+    signed = sum(record["price"] * record["quantity"] * (1 if record["side"] == "buy" else -1) for record in orders)
+    if signed <= 0:
+        return 0
+    return round(signed * krw_rate(account_country(account_id)))
+
+
+def order_limit_usage(account_id: str) -> dict[str, Any]:
+    """오늘 API 주문 한도와 사용량(화면 표시용) — 주문 직전 검사(`_require_order_allowed`)와 같은 계산이다.
+
+    한도를 비워 두면 None 이다(그 계좌는 주문이 막힌다). 금액은 원화다.
+    """
+    doc = next(doc for doc in load_account_docs() if doc["account_id"] == account_id)
+    used = _today_api_orders(account_id)
+    return {
+        "enabled": bool(doc.get("api_order_enabled")),
+        "max_count": doc.get("api_order_max_count"),
+        "used_count": len(used),
+        "max_amount": doc.get("api_order_max_amount"),
+        "used_amount": _net_buy_krw(account_id, used),
+    }
+
+
 def _require_order_allowed(account_id: str, env: str, amount: int, count: int) -> None:
     """운영 계좌의 주문 안전 장치 — 계좌의 API 주문 스위치, 정규장, 하루 주문 건수·금액 한도. 모의 계좌는 막지 않는다.
 
@@ -174,25 +212,14 @@ def _require_order_allowed(account_id: str, env: str, amount: int, count: int) -
     max_count, max_amount = doc.get("api_order_max_count"), doc.get("api_order_max_amount")
     if not max_count or not max_amount:
         raise BrokerApiError(f"'{doc['account_id']}' 계좌의 하루 주문 건수·금액 한도가 설정돼 있지 않습니다.")
-    today = _now().strftime("%Y-%m-%d")
-    used = list(
-        _orders().find(
-            {
-                "account_id": account_id,
-                "created_at": {"$gte": today},
-                "status": {"$in": [*ACTIVE_STATUSES, "filled"]},
-            }
-        )
-    )
+    used = _today_api_orders(account_id)
     if len(used) + count > max_count:
         raise BrokerApiError(f"오늘 주문 건수 한도({max_count}건)를 넘습니다 — 이미 {len(used)}건입니다.")
     # 순매도 주문은 금액 한도를 넘길 수 없다 — 한도를 낮춘 뒤에도 매도는 나가야 한다(환율도 필요 없다).
     if amount <= 0:
         return
-    rate = krw_rate(account_country(account_id))
-    signed = sum(record["price"] * record["quantity"] * (1 if record["side"] == "buy" else -1) for record in used)
-    used_krw = round(max(0, signed) * rate)
-    amount_krw = round(amount * rate)
+    used_krw = _net_buy_krw(account_id, used)
+    amount_krw = round(amount * krw_rate(account_country(account_id)))
     if used_krw + amount_krw > max_amount:
         raise BrokerApiError(
             f"오늘 주문 금액 한도({max_amount:,}원)를 넘습니다 — 순매수 이미 {used_krw:,}원, 이번 {amount_krw:,}원입니다."
