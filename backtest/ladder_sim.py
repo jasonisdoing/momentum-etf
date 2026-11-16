@@ -1,7 +1,7 @@
 """사고팔기 간격 방식 비교 — `fetch_minutes.py` 가 받아 둔 월별 1분봉을 이어 붙여 3개월 구간을 한 달씩 밀며
 안(`VARIANTS`)들을 돌리고, 종목·묶음별로 평균·최악·국면별 성과를 비교한다.
 
-실행: ``python backtest/ladder_sim.py`` (종목만: ``python backtest/ladder_sim.py QLD 069500``)
+실행: ``python backtest/ladder_sim.py`` (종목·안 고르기: ``python backtest/ladder_sim.py QLD 069500 --variants 1,6,7``)
 
 시뮬레이션 규칙(사고팔기 운용 규칙을 1분 단위로 흉내 낸다):
 - 1분마다 그 분의 종가를 현재가로 본다. 매수선·매도선에 닿으면 `FILL_DELAY_MINUTES` 뒤 분의 종가로 체결한다
@@ -21,6 +21,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -53,19 +54,54 @@ GROUPS: dict[str, str] = {
     "SOXL": "미장 레버리지",
 }
 
-#: 비교할 안 — 모든 종목에 같은 규칙을 쓴다. ``base`` 는 첫 간격(%) 또는 ``VOL_BASE``(1호를 산 날 전날까지의
-#: 20일 변동성 — 사이클마다 정해 전량 매도까지 고정), ``step`` 은 회차마다 늘리는 간격(%p),
-#: ``sell`` 은 매도 간격: fixed(첫 간격 고정) · own(그 회차의 매수 간격) · avg(2호~그 회차 매수 간격의 평균).
+#: 비교할 안 — 모든 종목에 같은 규칙을 쓴다. ``base`` 는 첫 간격(%) 또는
+#: ``VOL_BASE``(1호를 산 날 전날까지의 20일 변동성 — 사이클마다 정해 전량 매도까지 고정) 또는
+#: ``MDD_BASE``(회차를 살 때마다 전날까지 3개월 MDD 를 10회차가 덮는 간격 — `mdd_gap`). MDD 안은 ``bounds`` 로
+#: 간격 범위를 정한다 — (최소, 최대) 고정값 또는 {배수: 최소}(최대는 최소 × `LEVERAGE_GAP_MAX_MULT`, `gap_bounds`).
+#: ``id`` 는 ``--variants`` 로 돌릴 안을 고를 때 쓴다.
+#: ``step`` 은 회차마다 늘리는 간격(%p), ``sell`` 은 매도 간격: fixed(첫 간격 고정) · own(그 회차의 매수 간격)
+#: · avg(2호~그 회차 매수 간격의 평균). 매도 간격은 회차를 살 때 정해 그 회차에 저장한다.
 VOL_BASE = "vol"
+MDD_BASE = "mdd"
+MDD_WINDOW_DAYS = 63  # 최근 3개월(거래일) 고점 이후 최대 하락
+#: 종목 레버리지 배수 — 배수별 간격 범위를 쓰는 MDD 안(⑧·⑨)에 쓴다.
+LEVERAGE: dict[str, int] = {
+    "069500": 1,
+    "229200": 1,
+    "122630": 2,
+    "233740": 2,
+    "QQQM": 1,
+    "QLD": 2,
+    "TQQQ": 3,
+    "SOXL": 3,
+}
+LEVERAGE_GAP_MAX_MULT = 3.0
 VARIANTS: list[dict] = [
-    {"name": "① 고정 2.5%", "base": 2.5, "step": 0.0, "sell": "fixed"},
-    {"name": "② 동적·동적", "base": 2.5, "step": 0.5, "sell": "own"},
-    {"name": "③ 동적·매도 고정", "base": 2.5, "step": 0.5, "sell": "fixed"},
-    {"name": "④ 동적·간격 평균", "base": 2.5, "step": 0.5, "sell": "avg"},
-    {"name": "⑤ 1%+1%·간격 평균", "base": 1.0, "step": 1.0, "sell": "avg"},
-    {"name": "⑥ 변동성 고정", "base": VOL_BASE, "step": 0.0, "sell": "fixed"},
-    {"name": "고정 5%", "base": 5.0, "step": 0.0, "sell": "fixed"},
-    {"name": "고정 7.5%", "base": 7.5, "step": 0.0, "sell": "fixed"},
+    {"id": "1", "name": "① 고정 2.5%", "base": 2.5, "step": 0.0, "sell": "fixed"},
+    {"id": "2", "name": "② 동적·동적", "base": 2.5, "step": 0.5, "sell": "own"},
+    {"id": "3", "name": "③ 동적·매도 고정", "base": 2.5, "step": 0.5, "sell": "fixed"},
+    {"id": "4", "name": "④ 동적·간격 평균", "base": 2.5, "step": 0.5, "sell": "avg"},
+    {"id": "5", "name": "⑤ 1%+1%·간격 평균", "base": 1.0, "step": 1.0, "sell": "avg"},
+    {"id": "6", "name": "⑥ 변동성 고정", "base": VOL_BASE, "step": 0.0, "sell": "fixed"},
+    {"id": "f5", "name": "고정 5%", "base": 5.0, "step": 0.0, "sell": "fixed"},
+    {"id": "f7.5", "name": "고정 7.5%", "base": 7.5, "step": 0.0, "sell": "fixed"},
+    {"id": "7", "name": "⑦ MDD 회차별", "base": MDD_BASE, "step": 0.0, "sell": "own", "bounds": (2.0, 10.0)},
+    {
+        "id": "8",
+        "name": "⑧ MDD·배수 2/4/6%",
+        "base": MDD_BASE,
+        "step": 0.0,
+        "sell": "own",
+        "bounds": {1: 2.0, 2: 4.0, 3: 6.0},
+    },
+    {
+        "id": "9",
+        "name": "⑨ MDD·배수 2/3/5%",
+        "base": MDD_BASE,
+        "step": 0.0,
+        "sell": "own",
+        "bounds": {1: 2.0, 2: 3.0, 3: 5.0},
+    },
 ]
 
 
@@ -85,14 +121,52 @@ def sell_gap(variant: dict, base: float, round_no: int) -> float:
     raise ValueError(f"알 수 없는 매도 방식입니다: {variant['sell']}")
 
 
-def cycle_base(variant: dict, volatility: Any, day: date) -> float:
-    """사이클(1호 매수)마다 정하는 첫 간격(%) — 변동성 안은 ``day`` 전날까지의 20일 변동성, 나머지는 안의 값."""
-    if variant["base"] != VOL_BASE:
-        return float(variant["base"])
-    before = volatility[volatility.index < pd.Timestamp(day)].dropna()
+def value_before(series: Any, day: date, label: str) -> float:
+    """``day`` 전날까지의 마지막 값 — 그날 장중 값은 쓰지 않는다."""
+    before = series[series.index < pd.Timestamp(day)].dropna()
     if before.empty:
-        raise RuntimeError(f"{day} 전날까지의 20일 변동성이 없습니다.")
+        raise RuntimeError(f"{day} 전날까지의 {label} 값이 없습니다.")
     return float(before.iloc[-1])
+
+
+def cycle_base(variant: dict, cfg: dict, day: date) -> float:
+    """사이클(1호 매수)마다 정하는 첫 간격(%) — 변동성·MDD 안은 ``day`` 전날까지의 값, 나머지는 안의 값."""
+    if variant["base"] == VOL_BASE:
+        return cfg["vol_by_day"][day]
+    if variant["base"] == MDD_BASE:
+        return mdd_gap(variant, cfg, day)
+    return float(variant["base"])
+
+
+def gap_bounds(variant: dict, cfg: dict) -> tuple[float, float]:
+    """MDD 안의 간격 범위(%) — (최소, 최대) 고정값이거나, 종목 배수별 최소 ~ 그 `LEVERAGE_GAP_MAX_MULT` 배."""
+    bounds = variant["bounds"]
+    if isinstance(bounds, dict):
+        if cfg["leverage"] not in bounds:
+            raise RuntimeError(
+                f"레버리지 배수 {cfg['leverage']} 의 최소 간격이 없습니다 — LEVERAGE·bounds 를 확인하세요."
+            )
+        low = bounds[cfg["leverage"]]
+        return low, low * LEVERAGE_GAP_MAX_MULT
+    return bounds
+
+
+def mdd_gap(variant: dict, cfg: dict, day: date) -> float:
+    """전날까지 3개월 MDD 를 (회차 수 − 1)번의 간격이 복리로 덮는 간격(%) — 안의 범위(`gap_bounds`)로 자른다."""
+    mdd = cfg["mdd_by_day"][day]
+    gap = (1 - (1 - mdd) ** (1 / (cfg["rounds"] - 1))) * 100
+    low, high = gap_bounds(variant, cfg)
+    return min(max(gap, low), high)
+
+
+def rolling_mdd(close: Any, window: int) -> Any:
+    """날짜별 최근 ``window`` 거래일 안의 고점 이후 최대 하락(0~1) — 기간이 모자란 앞쪽은 NaN."""
+    values = close.to_numpy(dtype=float)
+    out = np.full(len(values), np.nan)
+    for t in range(window - 1, len(values)):
+        part = values[t - window + 1 : t + 1]
+        out[t] = float(np.max(1 - part / np.maximum.accumulate(part)))
+    return pd.Series(out, index=close.index)
 
 
 def load_ticker(ticker: str, country: str) -> dict[str, list]:
@@ -123,8 +197,11 @@ def simulate(data: dict[str, list], lo: int, hi: int, variant: dict, cfg: dict) 
     country, kind, rounds = cfg["country"], cfg["kind"], cfg["rounds"]
     close, days, entry = data["close"], data["day"], data["entry"]
     fee = FEE_RATE[country]
-    held: list[tuple[int, float, int]] = []  # (회차, 체결가, 수량)
+    is_mdd = variant["base"] == MDD_BASE
+    held: list[tuple[float, int, float]] = []  # (체결가, 수량, 매도 간격%) — 매도 간격은 살 때 정한다
     realized, sells, base, sold_out_day = 0.0, 0, 0.0, None
+    # 매도선·매수선은 보유가 바뀌거나 날짜가 바뀔 때만 다시 정한다(MDD 간격은 날짜마다 바뀐다).
+    sell_line, buy_line, gap, lines_day = 0.0, None, 0.0, None
 
     def tick(value: float) -> float:
         return round_to_tick(value, kind=kind, country=country)
@@ -132,38 +209,46 @@ def simulate(data: dict[str, list], lo: int, hi: int, variant: dict, cfg: dict) 
     def fill_at(i: int) -> int:
         return min(i + FILL_DELAY_MINUTES, hi - 1)
 
+    def buy(j: int, sell_pct: float) -> None:
+        nonlocal realized
+        quantity = int(cfg["size"] // close[j])
+        held.append((close[j], quantity, sell_pct))
+        realized -= close[j] * quantity * fee
+
     i = lo
     while i < hi:
         price, day = close[i], days[i]
         if not held:
             if entry[i] and day != sold_out_day:
-                base = cycle_base(variant, cfg["volatility"], day)
+                base = cycle_base(variant, cfg, day)
                 j = fill_at(i)
-                quantity = int(cfg["size"] // close[j])
-                held.append((1, close[j], quantity))
-                realized -= close[j] * quantity * fee
-                i = j
+                buy(j, base)
+                lines_day, i = None, j
             i += 1
             continue
-        round_no, fill, quantity = held[-1]
-        if price >= tick(fill * (1 + sell_gap(variant, base, round_no) / 100)):
+        if lines_day != day:
+            fill, _, own_sell = held[-1]
+            next_round = len(held) + 1
+            gap = mdd_gap(variant, cfg, day) if is_mdd else buy_gap(variant, base, next_round)
+            sell_line = tick(fill * (1 + own_sell / 100))
+            buy_line = tick(fill * (1 - gap / 100)) if next_round <= rounds else None
+            lines_day = day
+        if price >= sell_line:
             j = fill_at(i)
-            held.pop()
+            fill, quantity, _ = held.pop()
             realized += (close[j] - fill) * quantity - close[j] * quantity * fee
             sells += 1
             if not held:
                 sold_out_day = days[j]
-            i = j + 1
+            lines_day, i = None, j + 1
             continue
-        if len(held) < rounds and price <= tick(fill * (1 - buy_gap(variant, base, len(held) + 1) / 100)):
+        if buy_line is not None and price <= buy_line:
             j = fill_at(i)
-            quantity = int(cfg["size"] // close[j])
-            held.append((len(held) + 1, close[j], quantity))
-            realized -= close[j] * quantity * fee
-            i = j
+            buy(j, gap if is_mdd else sell_gap(variant, base, len(held) + 1))
+            lines_day, i = None, j
         i += 1
     last = close[hi - 1]
-    unrealized = sum((last - fill) * quantity for _, fill, quantity in held)
+    unrealized = sum((last - fill) * quantity for fill, quantity, _ in held)
     return {"pct": (realized + unrealized) / (cfg["size"] * rounds) * 100, "sells": sells}
 
 
@@ -187,6 +272,8 @@ def ticker_configs() -> dict[str, dict]:
             "size": size_krw / krw_rate(country),
             # 순위 화면 변동성과 같은 함수 — 날짜별 20일 일간 수익률 표준편차(%).
             "volatility": daily_volatility_pct(pd.to_numeric(frame["Close"], errors="coerce")),
+            "leverage": LEVERAGE[ticker] if ticker in LEVERAGE else None,
+            "mdd": rolling_mdd(pd.to_numeric(frame["Close"], errors="coerce").dropna(), MDD_WINDOW_DAYS),
         }
     return configs
 
@@ -196,13 +283,24 @@ def regime_of(data: dict[str, list], lo: int, hi: int) -> str:
     return "상승" if change >= REGIME_PCT else "하락" if change <= -REGIME_PCT else "횡보"
 
 
-def run_ticker(ticker: str, cfg: dict) -> dict[str, list[dict]]:
+def day_lookups(cfg: dict, days: list[date]) -> dict:
+    """세션 날짜별 '전날까지의' 20일 변동성·3개월 MDD — 분봉마다 찾지 않도록 날짜당 한 번 계산한다."""
+    unique = sorted(set(days))
+    return {
+        **cfg,
+        "vol_by_day": {day: value_before(cfg["volatility"], day, "20일 변동성") for day in unique},
+        "mdd_by_day": {day: value_before(cfg["mdd"], day, "3개월 MDD") for day in unique},
+    }
+
+
+def run_ticker(ticker: str, cfg: dict, variants: list[dict]) -> dict[str, list[dict]]:
     """종목 하나 — 안 이름 → 구간별 결과 [{pct, sells, regime, start}]."""
     data = load_ticker(ticker, cfg["country"])
-    results: dict[str, list[dict]] = {variant["name"]: [] for variant in VARIANTS}
+    cfg = day_lookups(cfg, data["day"])
+    results: dict[str, list[dict]] = {variant["name"]: [] for variant in variants}
     for lo, hi in session_windows(data["day"]):
         regime = regime_of(data, lo, hi)
-        for variant in VARIANTS:
+        for variant in variants:
             result = simulate(data, lo, hi, variant, cfg)
             results[variant["name"]].append({**result, "regime": regime, "start": data["day"][lo]})
     return results
@@ -216,11 +314,14 @@ def summary_table(title: str, per_variant: dict[str, list[dict]]) -> None:
     """안별 평균·중앙값·최악·국면별 평균·평균 순위(구간마다 안끼리 순위)."""
     names = list(per_variant)
     count = len(per_variant[names[0]])
-    ranks: dict[str, list[int]] = {name: [] for name in names}
+    ranks: dict[str, list[float]] = {name: [] for name in names}
     for k in range(count):
-        order = sorted(names, key=lambda name: -per_variant[name][k]["pct"])
-        for rank, name in enumerate(order, start=1):
-            ranks[name].append(rank)
+        # 같은 손익(소수 넷째 자리까지)은 같은 순위 — 동점들이 차지하는 순위의 평균을 준다.
+        scores = {name: round(per_variant[name][k]["pct"], 4) for name in names}
+        for name in names:
+            better = sum(1 for other in names if scores[other] > scores[name])
+            tied = sum(1 for other in names if scores[other] == scores[name])
+            ranks[name].append(better + (tied + 1) / 2)
     regimes = [row["regime"] for row in per_variant[names[0]]]
     print(
         f"\n### {title} — 구간 {count}개 (상승 {regimes.count('상승')} · 횡보 {regimes.count('횡보')} · 하락 {regimes.count('하락')})"
@@ -237,14 +338,24 @@ def summary_table(title: str, per_variant: dict[str, list[dict]]) -> None:
         )
 
 
-def main(selected: list[str]) -> int:
+def main(args: list[str]) -> int:
+    """인자: 종목들(없으면 데이터가 있는 전 종목), ``--variants 1,6,7`` (없으면 전 안)."""
+    variant_ids = None
+    if "--variants" in args:
+        at = args.index("--variants")
+        variant_ids = args[at + 1].split(",")
+        args = args[:at] + args[at + 2 :]
+    variants = VARIANTS if variant_ids is None else [v for v in VARIANTS if v["id"] in variant_ids]
+    unknown = set(variant_ids or []) - {v["id"] for v in VARIANTS}
+    if unknown:
+        raise RuntimeError(f"없는 안입니다: {', '.join(sorted(unknown))}")
     configs = ticker_configs()
-    tickers = selected or sorted(path.name for path in DATA_DIR.iterdir() if path.is_dir())
+    tickers = args or sorted(path.name for path in DATA_DIR.iterdir() if path.is_dir())
     grouped: dict[str, dict[str, list[dict]]] = {}
     for ticker in tickers:
         if ticker not in configs:
             raise RuntimeError(f"{ticker} 는 사고팔기에 등록된 종목이 아니라 설정(회차·금액)이 없습니다.")
-        results = run_ticker(ticker, configs[ticker])
+        results = run_ticker(ticker, configs[ticker], variants)
         summary_table(ticker, results)
         group = grouped.setdefault(GROUPS[ticker], {name: [] for name in results})
         for name, rows in results.items():
