@@ -1465,6 +1465,19 @@ export function StrategyMixClient() {
                 {/* 저장은 세 전략 화면 모두 메인 헤더 오른쪽 끝에 둔다. */}
                 {selectedAccount ? (
                   <div className="appMainHeaderRight">
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-dark"
+                      disabled={settingsSaving || draftSleeves.length >= maxSleeves}
+                      title={
+                        draftSleeves.length >= maxSleeves
+                          ? `슬리브는 최대 ${maxSleeves}개입니다.`
+                          : `슬리브를 추가합니다 (최대 ${maxSleeves}개). 배분 합이 100%가 되게 다시 나눠주세요.`
+                      }
+                      onClick={addSleeve}
+                    >
+                      + 슬리브
+                    </button>
                     <UnsavedChangesBadge show={settingsDirty} />
                     <button
                       type="button"
@@ -1601,19 +1614,6 @@ export function StrategyMixClient() {
                       </div>
                     );
                   })}
-                  {draftSleeves.length < maxSleeves ? (
-                    <div className="mixSleeveRow mixSleeveAddRow">
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-dark"
-                        disabled={settingsSaving}
-                        title={`슬리브를 추가합니다 (최대 ${maxSleeves}개). 배분 합이 100%가 되게 다시 나눠주세요.`}
-                        onClick={addSleeve}
-                      >
-                        + 슬리브
-                      </button>
-                    </div>
-                  ) : null}
                   {/* 사고팔기 — 슬리브 다음 기호로 맨 아래. 현금 몫 안에서 쓰는 금액(현재 보유 평가액)이라 입력이 아니라 표시만 한다.
                       사고팔기 매수는 계좌 예수금을 그대로 쓰므로 오늘 현금 목표를 넘으면 빨갛게 경고한다. */}
                   {tradeUsage && (() => {
@@ -1624,11 +1624,24 @@ export function StrategyMixClient() {
                         <span className="mixSleeveMark" style={warn}>
                           {tradeMarkAfter(draftSleeves.map((sleeve) => sleeve.key))}
                         </span>
-                        <span style={warn}>사고팔기</span>
-                        <span />
-                        <span />
-                        <span className="mixSleeveWeight" style={warn}>
-                          {tradeUsage.pct == null ? "-" : `${tradeUsage.pct.toFixed(1)}%`}
+                        {/* 슬리브 줄과 같은 칸을 쓰되 잠근다 — 사고팔기는 여기서 고치는 값이 없다. */}
+                        <select className="form-select form-select-sm" style={{ width: "auto" }} disabled value="trade">
+                          <option value="trade">사고팔기</option>
+                        </select>
+                        <select className="form-select form-select-sm" style={{ width: "auto" }} disabled value="">
+                          <option value="">계좌 등록 종목</option>
+                        </select>
+                        <input className="form-control form-control-sm" style={{ width: 140 }} type="text" disabled value="" />
+                        <span className="mixSleeveWeight">
+                          <input
+                            className="form-control form-control-sm"
+                            style={{ width: 72, textAlign: "right", ...warn }}
+                            type="text"
+                            readOnly
+                            value={tradeUsage.pct == null ? "-" : tradeUsage.pct.toFixed(1)}
+                            title="사고팔기 보유 평가액이 계좌에서 차지하는 비중 — 입력이 아니라 현재 값이다."
+                          />
+                          <span style={hintStyle}>%</span>
                         </span>
                         <span />
                         <span className="mixSleeveSettings" style={{ ...hintStyle, ...warn }}>
