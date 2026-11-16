@@ -17,6 +17,7 @@ import {
   tradeValueMultColumn,
   maExitGapColumn,
   volatilityColumn,
+  PARTIAL_PERIOD_CELL_STYLE,
   marketCapRankColumn,
   prevDayChangeColumn,
   rankColumn,
@@ -1280,7 +1281,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellStyle: (params: { data?: RankGridRow }) => {
           const stats = params.data?.backtest_stats;
           if (stats?.is_partial) {
-            return { color: "#ca8a04", fontWeight: 700 };
+            return PARTIAL_PERIOD_CELL_STYLE;
           }
           return null;
         },
@@ -1302,7 +1303,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellStyle: (params: { data?: RankGridRow }) => {
           const stats = params.data?.backtest_stats;
           if (stats?.is_partial) {
-            return { color: "#ca8a04", fontWeight: 700 };
+            return PARTIAL_PERIOD_CELL_STYLE;
           }
           return null;
         },
@@ -1320,7 +1321,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
         cellStyle: (params: { data?: RankGridRow }) => {
           if (params.data?.backtest_stats?.is_partial) {
-            return { color: "#ca8a04", fontWeight: 700 };
+            return PARTIAL_PERIOD_CELL_STYLE;
           }
           return null;
         },

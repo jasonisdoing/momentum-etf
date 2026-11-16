@@ -405,6 +405,9 @@ export function tradeValueMultColumn<T>(options?: {
   };
 }
 
+/** 기간 미달 값의 셀 스타일 — 계산 기준 기간보다 짧은 이력으로 낸 값(순위 MDD·소르티노·칼마, 사고팔기 권장 간격). */
+export const PARTIAL_PERIOD_CELL_STYLE = { color: "#ca8a04", fontWeight: 700 } as const;
+
 /** 변동성 컬럼 — 순위·모멘텀·신고가 공용. 최근 20일 일간 수익률 표준편차(%).
  *  모멘텀 진입 문턱(배수 × 이 값)의 기준값과 **같은 계산**이다.
  *  표준 배치는 「현재가 → 변동성 → 거래대금」 — 현재가 바로 뒤에 둔다. */

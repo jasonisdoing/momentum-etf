@@ -1172,7 +1172,7 @@ def _config_quotes(mine: dict[str, dict[str, Any]], country: str | None) -> dict
     """편집 표의 현재가·일간·권장 간격 — 원장과 별개로 공통 시세와 종목풀 일봉에서 읽는다.
 
     권장 간격은 확정 봉(`bar_anchor` 까지, 진행 중인 세션 제외)의 최근 3개월 종가 MDD 로 계산한다
-    (`ladder.recommended_gap_pct`). 종가가 3개월치보다 적으면 비운다.
+    (`ladder.recommended_gap_pct`). 3개월치보다 짧으면 있는 기간으로 계산하고 기간 미달로 표시한다.
     """
     if country is None or not mine:
         return {}
@@ -1199,11 +1199,8 @@ def _config_quotes(mine: dict[str, dict[str, Any]], country: str | None) -> dict
             close = slice_close_series_to_date(closes.get(ticker), latest_day)
             confirmed = close.loc[:last_bar].dropna() if close is not None else None
             window = confirmed.iloc[-ladder.RECOMMENDED_GAP_WINDOW_DAYS :] if confirmed is not None else None
-            drawdown = (
-                ladder.max_drawdown(window.tolist())
-                if window is not None and len(window) == ladder.RECOMMENDED_GAP_WINDOW_DAYS
-                else None
-            )
+            # 3개월치가 없으면 있는 기간으로 계산하고 기간 미달(`gap_partial`)로 표시한다. 종가가 2개 미만이면 비운다.
+            drawdown = ladder.max_drawdown(window.tolist()) if window is not None and len(window) >= 2 else None
             quotes[ticker] = {
                 "price": quote.get("nowVal") if isinstance(quote, dict) else None,
                 "change_pct": quote.get("changeRate") if isinstance(quote, dict) else None,
@@ -1211,6 +1208,8 @@ def _config_quotes(mine: dict[str, dict[str, Any]], country: str | None) -> dict
                 "recommended_gap_pct": (
                     ladder.recommended_gap_pct(drawdown, rounds_by_ticker[ticker]) if drawdown is not None else None
                 ),
+                "gap_days": len(window) if drawdown is not None else None,
+                "gap_partial": drawdown is not None and len(window) < ladder.RECOMMENDED_GAP_WINDOW_DAYS,
             }
     return quotes
 
@@ -1280,6 +1279,8 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
                 "change_pct": quotes.get(entry["ticker"], {}).get("change_pct"),
                 "drawdown_pct": quotes.get(entry["ticker"], {}).get("drawdown_pct"),
                 "recommended_gap_pct": quotes.get(entry["ticker"], {}).get("recommended_gap_pct"),
+                "gap_days": quotes.get(entry["ticker"], {}).get("gap_days"),
+                "gap_partial": quotes.get(entry["ticker"], {}).get("gap_partial"),
             }
             for sid, entry in configs
         ],
