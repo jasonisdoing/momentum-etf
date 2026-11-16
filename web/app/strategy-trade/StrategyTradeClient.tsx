@@ -856,7 +856,6 @@ function AccountSettingsCard({
     },
     dailyChange,
     currentPrice,
-    tradeWeightColumn,
     { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
     ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => [
       // 권장 간격을 쓰는 동안은 간격 칸 자리에 실제로 쓰이는 권장 간격을 둔다 — 저장된 간격은 보관만 하고, 끄면 다시 쓴다.
@@ -883,6 +882,7 @@ function AccountSettingsCard({
         : []),
     ]),
     { ...quantity, headerName: "보유수량", width: 88 },
+    tradeWeightColumn,
     returnPct, valuation, pnl,
     { ...pnl, colId: "realized_krw", headerName: "실현손익", headerTooltip: "회차 기준 — 아래 손익 요약과 같은 값", valueGetter: ({ data }) => data?.realized_krw },
     { ...pnl, colId: "total_krw", headerName: "합계 손익", headerTooltip: "평가손익 + 실현손익", valueGetter: ({ data }) => data?.total_krw },
