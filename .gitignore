@@ -21,8 +21,6 @@ web/next-env.d.ts
 
 # 백테스트 결과
 leverage/zresults
-# 사고팔기 간격 실험 분봉 데이터 — `backtest/fetch_minutes.py` 로 다시 받는다
-backtest/data/
 
 
 # 노트 파일
