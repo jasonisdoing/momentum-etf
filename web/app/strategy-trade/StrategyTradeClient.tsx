@@ -134,6 +134,8 @@ export type StrategyView = {
   history_summary: { market_value: number; realized: number; unrealized: number; total: number };
   /** 보유가 모두 빈 날짜(사이클 종료) — 표의 날짜 칸 오른쪽에 경계선을 긋는다. */
   cycle_end_days: string[];
+  /** 체결 날짜별 그 종목의 일간 등락률(%) — 오늘은 현재가 등락률, 직전 종가가 없으면 null. */
+  trade_day_change_pcts: Record<string, number | null>;
   // 체결 이력(회차 원장)을 계산한 시각 — 사고팔기 알림 배치가 갱신한다(KST ISO).
   ledger_at: string;
   rounds: RoundRow[];
@@ -1242,7 +1244,11 @@ function StrategySection({
                     ...cycleEndStyle(day),
                   }}
                 >
-                  {Number(day.slice(5, 7))}월 {Number(day.slice(8, 10))}일({WEEKDAY_NAMES[new Date(`${day}T00:00:00Z`).getUTCDay()]})
+                  {Number(day.slice(5, 7))}월 {Number(day.slice(8, 10))}일({WEEKDAY_NAMES[new Date(`${day}T00:00:00Z`).getUTCDay()]})(
+                  <span style={{ color: signColor(view.trade_day_change_pcts[day]) }}>
+                    {formatSigned(view.trade_day_change_pcts[day])}
+                  </span>
+                  )
                 </th>
               ))}
             </tr>

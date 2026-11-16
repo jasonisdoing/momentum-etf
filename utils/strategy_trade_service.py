@@ -416,6 +416,43 @@ def _load_unheld_closes(tickers: list[str], pool: str, country: ladder.Country) 
 RECENT_PRICE_MONTHS = 12
 
 
+def _cached_closes(pool: str, ticker: str, name: str) -> Any:
+    """종목의 확정 종가 시계열(가격 캐시) — 두 개 미만이면 에러."""
+    import pandas as pd
+
+    from utils.cache_utils import load_cached_frames_bulk_from_ticker_types
+
+    frame = load_cached_frames_bulk_from_ticker_types([pool], [ticker]).get(ticker)
+    if frame is None or frame.empty or "Close" not in frame.columns:
+        raise RuntimeError(f"{name}({ticker}) 가격 캐시를 불러올 수 없습니다.")
+    close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+    if len(close) < 2:
+        raise RuntimeError(f"{name}({ticker}) 종가 데이터가 부족합니다.")
+    return close
+
+
+def _day_change_pcts(view: dict[str, Any], days: set[str]) -> dict[str, float | None]:
+    """체결 날짜별 그 종목의 일간 등락률(%) — 그 시장의 오늘은 현재가 등락률(`index.change_pct`), 지난 날은 확정 종가로 계산한다.
+
+    직전 거래일 종가가 캐시에 없는 날은 값이 없다(None).
+    """
+    from utils.market_session import market_today
+
+    today = market_today(view["country"]).isoformat()
+    close = _cached_closes(view["pool"], view["ticker"], view["label"])
+    closes = {stamp.strftime("%Y-%m-%d"): float(value) for stamp, value in close.items()}
+    ordered = sorted(closes)
+    result: dict[str, float | None] = {}
+    for day in days:
+        if day == today:
+            result[day] = view["index"]["change_pct"]
+        elif day in closes and (position := ordered.index(day)) > 0:
+            result[day] = round((closes[day] / closes[ordered[position - 1]] - 1.0) * 100.0, 2)
+        else:
+            result[day] = None
+    return result
+
+
 def _load_ticker_status(
     pool: str,
     ticker: str,
@@ -432,15 +469,7 @@ def _load_ticker_status(
     """
     import pandas as pd
 
-    from utils.cache_utils import load_cached_frames_bulk_from_ticker_types
-
-    frames = load_cached_frames_bulk_from_ticker_types([pool], [ticker])
-    frame = frames.get(ticker)
-    if frame is None or frame.empty or "Close" not in frame.columns:
-        raise RuntimeError(f"{name}({ticker}) 가격 캐시를 불러올 수 없습니다.")
-    close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
-    if len(close) < 2:
-        raise RuntimeError(f"{name}({ticker}) 종가 데이터가 부족합니다.")
+    close = _cached_closes(pool, ticker, name)
 
     # 1호 진입 판정의 기준은 **직전 거래일 종가**다. 현재가에 -간격% 를 걸면 값이
     # 내릴 때마다 기준선도 같이 내려가 영영 닿지 않는다(움직이는 과녁).
@@ -573,6 +602,7 @@ def _attach_trade_history(
     """
     trades: dict[int, dict[str, list[dict[str, Any]]]] = {}
     view["trades_by_position"] = trades
+    view["trade_day_change_pcts"] = {}
     view["cycle_end_days"] = []
     view["position_prices"] = {}
     first = next((row for row in view["rounds"] if row["round"] == 1 and row["held"]), None)
@@ -615,6 +645,7 @@ def _attach_trade_history(
             _trade_badges(trade, pair_numbers.get(index), sold_lots[index], pair_numbers)
         )
     view["history_summary"] = _history_summary(view, ledger, history, sold_lots)
+    view["trade_day_change_pcts"] = _day_change_pcts(view, {day for by_day in trades.values() for day in by_day})
     # 위치 가격 — 회차·매매가 있는 위치 범위 전체(빈 칸 포함). 1호 체결가 × (1 − 간격%)^(k−1) 를 호가로 맞춘 값.
     positions = [row["position"] for row in view["rounds"]] + list(trades)
     view["position_prices"] = {
