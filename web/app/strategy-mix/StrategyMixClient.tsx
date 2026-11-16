@@ -1410,7 +1410,8 @@ export function StrategyMixClient() {
                           style={{ ...hintStyle, display: "inline-block", minWidth: 120 }}
                           title="현금 포함 계좌 평가액이 운용 기준금액이다. IS 고정 자산을 뺀 나머지를 슬리브 비중대로 배정한다."
                         >
-                          {positions ? `${formatAmount(positions.capital_krw)}원` : "-"}
+                          {/* 계좌 통화와 무관하게 원화로 보인다(capital_krw 는 원화 금액). */}
+                          {positions ? formatCurrencyPrice(positions.capital_krw, "KRW") : "-"}
                         </span>
                       </label>
                       {[
