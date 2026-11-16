@@ -1254,6 +1254,14 @@ export function StrategyMixClient() {
       : Math.round(parts.reduce((a, b) => a + b, 0) * 100) / 100;
   }, [draftSleeves, cashPct]);
   const weightOk = weightSum !== null && Math.abs(weightSum - 100) <= 0.01;
+  const fixedAssetPct = positions?.account?.fixed_asset_pct;
+  const allocationCapital = positions && fixedAssetPct != null
+    ? positions.capital_krw * (1 - fixedAssetPct / 100)
+    : null;
+  const formatAllocation = (pct: number | null) =>
+    allocationCapital == null || pct == null || !Number.isFinite(pct)
+      ? "-"
+      : formatCurrencyPrice((allocationCapital * pct) / 100, "KRW");
   const harvestValue = harvestMode === "immediate" ? 0 : harvestMode === "threshold" ? Number(harvestPct) : harvestMode === "off" ? "off" : null;
   const refillValue = refillMode === "immediate" ? 0 : refillMode === "threshold" ? Number(refillPct) : refillMode === "off" ? 100 : null;
   const settingsDirty = Boolean(
@@ -1528,6 +1536,9 @@ export function StrategyMixClient() {
                       />
                       <span style={hintStyle}>%</span>
                     </span>
+                    <span className="mixSleeveAmount" title="현금 배정액 (원화)">
+                      {formatAllocation(cashPct === "" ? null : Number(cashPct))}
+                    </span>
                     <span />
                     <span
                       className="mixSleeveSettings"
@@ -1602,6 +1613,9 @@ export function StrategyMixClient() {
                           />
                           <span style={hintStyle}>%</span>
                         </span>
+                        <span className="mixSleeveAmount" title="슬리브 배정액 (원화)">
+                          {formatAllocation(sleeve.weight_pct)}
+                        </span>
                         {/* 슬롯 삭제 — 최소 개수까지만. 지우면 남은 슬롯이 A·B 로 다시 매겨진다. */}
                         <button
                           type="button"
@@ -1663,9 +1677,11 @@ export function StrategyMixClient() {
                           />
                           <span style={hintStyle}>%</span>
                         </span>
+                        <span className="mixSleeveAmount" style={warn} title="사고팔기 보유 평가액 (원화)">
+                          {formatCurrencyPrice(tradeUsage.held, "KRW")}
+                        </span>
                         <span />
                         <span className="mixSleeveSettings" style={{ ...hintStyle, ...warn }}>
-                          {`보유 평가액 ${formatAmount(tradeUsage.held)} · `}
                           {over
                             ? `⚠ 오늘 현금 목표 ${tradeUsage.cashTarget.toFixed(1)}% 를 넘어 슬리브 몫을 쓰고 있습니다`
                             : `남은 현금 ${remain == null ? "-" : `${remain.toFixed(1)}%`} (오늘 현금 목표 ${tradeUsage.cashTarget.toFixed(1)}% 기준, 빈 슬롯 현금 포함·저장 후 반영)`}

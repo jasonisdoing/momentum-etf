@@ -4495,10 +4495,10 @@ a {
    전략·종목풀·이름·배분이 짝지어 읽힌다(헤더에 늘어놓으면 짝이 안 보인다). */
 /* 슬리브 표 — 현금 행과 A·B·C 가 **같은 열**에 맞아야 비중 칸이 세로로 정렬된다.
    flex 로 두면 종목풀 이름 길이에 따라 행마다 칸이 밀렸다(긴 이름 행만 어긋났다).
-   열: 슬롯기호 · 전략 · 종목풀 · 이름 · 비중 · 삭제 · 저장 설정 */
+   열: 슬롯기호 · 전략 · 종목풀 · 이름 · 비중 · 원화 금액 · 삭제 · 저장 설정 */
 .mixSleeveRows {
   display: grid;
-  grid-template-columns: auto auto auto auto auto auto minmax(0, 1fr);
+  grid-template-columns: auto auto auto auto auto max-content auto minmax(0, 1fr);
   align-items: center;
   gap: 0.375rem;
   margin-top: 0.5rem;
@@ -4557,6 +4557,14 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
+}
+
+.mixSleeveAmount {
+  color: var(--tblr-secondary-color);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .appInlineField {
