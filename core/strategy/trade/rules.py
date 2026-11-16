@@ -15,7 +15,13 @@ from collections.abc import Sequence
 from math import isfinite, log
 from typing import Literal
 
-from config import LEVERAGE_DOUBLE_RE, LEVERAGE_TICKERS, LEVERAGE_TRIPLE_RE
+from config import (
+    LEVERAGE_DOUBLE_RE,
+    LEVERAGE_TICKERS,
+    LEVERAGE_TRIPLE_RE,
+    RECOMMENDED_GAP_MAX_MULT,
+    RECOMMENDED_GAP_MIN_PCT,
+)
 
 InstrumentKind = Literal["stock", "etf"]
 Country = Literal["kor", "us"]
@@ -117,11 +123,7 @@ def ladder_position(price: float, first_fill: float, trigger_pct: float) -> int:
     return round(log(price / first_fill) / log(down_ratio(trigger_pct))) + 1
 
 
-#: 권장 간격 — 최근 3개월(거래일) 고점 이후 최대 하락(MDD)을 회차들이 복리로 덮는 간격.
-#: 종목 배수(`leverage_multiple`)별 최소 간격으로 자르고, 최대는 최소의 `RECOMMENDED_GAP_MAX_MULT` 배다.
-RECOMMENDED_GAP_WINDOW_DAYS = 63
-RECOMMENDED_GAP_MIN_PCT: dict[int, float] = {1: 2.0, 2: 3.0, 3: 5.0}
-RECOMMENDED_GAP_MAX_MULT = 3.0
+# 권장 간격의 기간·배수별 범위는 `config.RECOMMENDED_GAP_*` 가 단일 소스다.
 
 
 def leverage_multiple(ticker: str, name: str) -> int:
@@ -150,7 +152,7 @@ def max_drawdown(closes: Sequence[float]) -> float:
     return worst
 
 
-def recommended_gap_range(multiple: int) -> tuple[float, float]:
+def recommended_gap_range(multiple: int) -> tuple[int, int]:
     """배수별 권장 간격 범위(%) — (최소, 최소 × `RECOMMENDED_GAP_MAX_MULT`)."""
     if multiple not in RECOMMENDED_GAP_MIN_PCT:
         raise ValueError(f"권장 간격 범위가 없는 배수입니다: {multiple}")

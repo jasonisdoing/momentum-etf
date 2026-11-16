@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from config import RECOMMENDED_GAP_WINDOW_DAYS
 from core.strategy.trade import rules as ladder
 from services.broker_trade_service import resolve_us_exchange
 from utils.logger import get_app_logger
@@ -1234,7 +1235,7 @@ def recommended_gaps(entries: dict[str, dict[str, Any]], country: str) -> dict[s
             multiple = ladder.leverage_multiple(ticker, str(entry["name"]))
             close = slice_close_series_to_date(closes.get(ticker), latest_day)
             confirmed = close.loc[:last_bar].dropna() if close is not None else None
-            window = confirmed.iloc[-ladder.RECOMMENDED_GAP_WINDOW_DAYS :] if confirmed is not None else None
+            window = confirmed.iloc[-RECOMMENDED_GAP_WINDOW_DAYS:] if confirmed is not None else None
             drawdown = ladder.max_drawdown(window.tolist()) if window is not None and len(window) >= 2 else None
             gaps[sid] = {
                 "drawdown_pct": round(drawdown * 100, 2) if drawdown is not None else None,
@@ -1246,7 +1247,7 @@ def recommended_gaps(entries: dict[str, dict[str, Any]], country: str) -> dict[s
                 "leverage_multiple": multiple,
                 "gap_range_pct": ladder.recommended_gap_range(multiple),
                 "gap_days": len(window) if drawdown is not None else None,
-                "gap_partial": drawdown is not None and len(window) < ladder.RECOMMENDED_GAP_WINDOW_DAYS,
+                "gap_partial": drawdown is not None and len(window) < RECOMMENDED_GAP_WINDOW_DAYS,
             }
     return gaps
 
