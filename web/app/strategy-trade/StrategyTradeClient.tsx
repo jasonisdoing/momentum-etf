@@ -818,7 +818,8 @@ function AccountSettingsCard({
 
   const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
     gridRowDragColumn<TradeListRow>(({ node }) => !node.rowPinned, 36),
-    recommendedGapColumn(),
+    // 권장 간격을 쓰지 않을 때는 맨 왼쪽 참고 칸으로 둔다(쓰면 간격 칸 자리로 옮긴다).
+    ...(useRecommendedGap ? [] : [recommendedGapColumn()]),
     tickerColumn<TradeListRow>(),
     stockNameColumn<TradeListRow>({
       cellRenderer: ({ data, value }) => data?.is_group ? (
@@ -858,15 +859,9 @@ function AccountSettingsCard({
     tradeWeightColumn,
     { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
     ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => [
-      // 권장 간격을 쓰는 동안 간격 칸은 잠근다 — 저장된 값은 보관만 하고, 끄면 다시 이 값을 쓴다.
+      // 권장 간격을 쓰는 동안은 간격 칸 자리에 실제로 쓰이는 권장 간격을 둔다 — 저장된 간격은 보관만 하고, 끄면 다시 쓴다.
       ...(column.field === "pct" && useRecommendedGap
-        ? [{
-            ...column,
-            type: "rightAligned",
-            headerTooltip: "권장 간격 사용 중 — 이 값은 보관만 하고 매매에는 왼쪽 권장 간격을 씁니다",
-            editable: false,
-            cellStyle: { color: "var(--text-muted)" },
-          } satisfies ColDef<TradeListRow>]
+        ? [{ ...recommendedGapColumn(), pinned: undefined }]
         : [{
             ...column,
             type: "rightAligned",
@@ -1011,7 +1006,7 @@ function AccountSettingsCard({
     } finally {
       setSaving(false);
     }
-  }, [accountId, drafts, groups, onSaved, slack, toast]);
+  }, [accountId, drafts, groups, onSaved, slack, toast, useRecommendedGap]);
 
   const sendSlackTest = useCallback(async () => {
     setSlackTesting(true);
