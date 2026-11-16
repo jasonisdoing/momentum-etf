@@ -74,9 +74,17 @@ def load_settings() -> dict[str, Any]:
     for account_id, entry in (doc.get("accounts") or {}).items():
         if account_id not in enabled:
             continue
-        if not isinstance(entry, dict) or not isinstance(entry.get("slack_enabled"), bool):
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("slack_enabled"), bool)
+            or not isinstance(entry.get("recommended_gap_enabled"), bool)
+        ):
             raise RuntimeError(f"'{account_id}' 계좌의 사고팔기 설정이 올바르지 않습니다 — 화면에서 다시 저장하세요.")
-        accounts[str(account_id)] = {"slack_enabled": entry["slack_enabled"], "groups": entry.get("groups", [])}
+        accounts[str(account_id)] = {
+            "slack_enabled": entry["slack_enabled"],
+            "recommended_gap_enabled": entry["recommended_gap_enabled"],
+            "groups": entry.get("groups", []),
+        }
 
     strategies: dict[str, dict[str, Any]] = {}
     for sid, entry in stored.items():
@@ -238,8 +246,10 @@ def _normalize_trade_groups(groups: Any) -> list[dict[str, str | None]]:
     return result
 
 
-def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any, groups: Any = None) -> None:
-    """계좌의 슬랙 설정과 전략 목록을 검증한 뒤 한 번에 저장한다."""
+def save_account_trade(
+    account_id: str, slack_enabled: Any, recommended_gap_enabled: Any, strategies: Any, groups: Any = None
+) -> None:
+    """계좌의 슬랙·권장 간격 사용 설정과 전략 목록을 검증한 뒤 한 번에 저장한다."""
     from uuid import uuid4
 
     account = next((item for item in _trade_account_docs() if item["account_id"] == account_id), None)
@@ -248,6 +258,8 @@ def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any, gro
     country = str(account["country_code"]).strip().lower()
     if not isinstance(slack_enabled, bool):
         raise ValueError("slack_enabled 는 참·거짓이어야 합니다.")
+    if not isinstance(recommended_gap_enabled, bool):
+        raise ValueError("recommended_gap_enabled 는 참·거짓이어야 합니다.")
     if not isinstance(strategies, list):
         raise ValueError("strategies 형식이 올바르지 않습니다.")
     options = _ticker_options(_eligible_pool_kinds((country,)))
@@ -275,7 +287,10 @@ def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any, gro
     collection = _settings_collection()
     stored = collection.find_one({"_id": _SETTINGS_KEY}, {"sent_log": 1, "accounts": 1}) or {}
     sent_log = stored.get("sent_log") or {}
-    account_settings: dict[str, Any] = {"slack_enabled": slack_enabled}
+    account_settings: dict[str, Any] = {
+        "slack_enabled": slack_enabled,
+        "recommended_gap_enabled": recommended_gap_enabled,
+    }
     if groups is None:
         groups = ((stored.get("accounts") or {}).get(account_id) or {}).get("groups", [])
     account_settings["groups"] = _normalize_trade_groups(groups)
@@ -1043,6 +1058,24 @@ def _account_ledgers(
     return ledgers
 
 
+def _account_recommended_gaps(
+    strategies: dict[str, dict[str, Any]], pool_countries: dict[str, ladder.Country]
+) -> dict[str, dict[str, Any]]:
+    """「권장 간격 사용」을 켠 계좌의 전략들만 권장 간격을 계산한다 — 전략 id → `recommended_gaps` 결과."""
+    accounts = load_settings()["accounts"]
+    targets = {
+        sid: entry
+        for sid, entry in strategies.items()
+        if accounts.get(entry["account_id"], {}).get("recommended_gap_enabled") and entry["pool"] in pool_countries
+    }
+    gaps: dict[str, dict[str, Any]] = {}
+    for country in {pool_countries[entry["pool"]] for entry in targets.values()}:
+        gaps.update(
+            recommended_gaps({sid: e for sid, e in targets.items() if pool_countries[e["pool"]] == country}, country)
+        )
+    return gaps
+
+
 def _build_views(
     strategies: dict[str, dict[str, Any]], *, fresh: bool, include_trade_history: bool
 ) -> list[dict[str, Any]]:
@@ -1075,6 +1108,7 @@ def _build_views(
         pool: _pool_tickers(pool, active_pools[pool])
         for pool in {entry["pool"] for entry in strategies.values()} & active_pools.keys()
     }
+    gaps = _account_recommended_gaps(strategies, pool_countries)
     views: list[dict[str, Any]] = []
     cached_days_by_account: dict[tuple[str, date], dict[date, list[dict[str, Any]]]] = {}
     history_orders_by_account: dict[tuple[str, date], list[dict[str, Any]]] = {}
@@ -1090,7 +1124,13 @@ def _build_views(
             view = _failed_view(sid, entry, account_ledgers, country)
         elif isinstance(ledger := account_ledgers[entry["ticker"]], LedgerError):
             view = _failed_view(sid, entry, ledger, country)
+        elif sid in gaps and gaps[sid]["recommended_gap_pct"] is None:
+            # 「권장 간격 사용」 계좌인데 권장 간격을 낼 일봉이 없다 — 저장된 간격으로 대신하지 않고 막는다.
+            view = _failed_view(sid, entry, "권장 간격을 계산할 일봉이 없습니다(종가 2개 미만).", country)
         else:
+            if sid in gaps:
+                # 「권장 간격 사용」 계좌 — 저장된 간격 자리에 오늘의 권장 간격을 넣는다(화면·신호·주문이 모두 이 값).
+                entry = {**entry, "trigger_pct": gaps[sid]["recommended_gap_pct"]}
             state = states[account_id]
             try:
                 view = _build_strategy_view(
@@ -1168,55 +1208,66 @@ def _trade_account_docs() -> list[dict[str, Any]]:
     return [doc for doc in load_live_account_docs() if doc.get("trade_enabled")]
 
 
-def _config_quotes(mine: dict[str, dict[str, Any]], country: str | None) -> dict[str, dict[str, float | None]]:
-    """편집 표의 현재가·일간·권장 간격 — 원장과 별개로 공통 시세와 종목풀 일봉에서 읽는다.
+def recommended_gaps(entries: dict[str, dict[str, Any]], country: str) -> dict[str, dict[str, Any]]:
+    """같은 국가 전략들의 권장 간격 — 전략 id → {drawdown_pct, recommended_gap_pct, leverage_multiple, gap_range_pct, gap_days, gap_partial}.
 
-    권장 간격은 확정 봉(`bar_anchor` 까지, 진행 중인 세션 제외)의 최근 3개월 종가 MDD 로 계산한다
-    (`ladder.recommended_gap_pct`). 3개월치보다 짧으면 있는 기간으로 계산하고 기간 미달로 표시한다.
+    확정 봉(`bar_anchor` 까지, 진행 중인 세션 제외)의 최근 3개월 종가 MDD 를 종목 배수별 범위로 자른 간격이다
+    (`ladder.recommended_gap_pct`). 3개월치보다 짧으면 있는 기간으로 계산하고 기간 미달(`gap_partial`)로 표시하며,
+    종가가 2개 미만이면 간격을 비운다(None). 편집 표 컬럼과 「권장 간격 사용」 계좌의 실제 간격이 이 함수 하나를 쓴다.
     """
-    if country is None or not mine:
-        return {}
-    from services.price_service import get_realtime_snapshot
     from utils.cache_utils import load_cached_close_series_bulk_with_fallback
     from utils.data_loader import get_latest_trading_day
     from utils.effective_prices import bar_anchor
     from utils.rankings import slice_close_series_to_date
 
-    tickers_by_pool: dict[str, list[str]] = defaultdict(list)
-    rounds_by_ticker: dict[str, int] = {}
-    multiple_by_ticker: dict[str, int] = {}
-    for entry in mine.values():
-        tickers_by_pool[entry["pool"]].append(entry["ticker"])
-        rounds_by_ticker[entry["ticker"]] = int(entry["rounds"])
-        multiple_by_ticker[entry["ticker"]] = ladder.leverage_multiple(entry["ticker"], str(entry["name"]))
-
-    snapshot = get_realtime_snapshot(country, sorted({entry["ticker"] for entry in mine.values()}))
+    sids_by_pool: dict[str, list[str]] = defaultdict(list)
+    for sid, entry in entries.items():
+        sids_by_pool[entry["pool"]].append(sid)
     latest_day = get_latest_trading_day(country).normalize()
     last_bar = bar_anchor(country)
-    quotes = {}
-    for pool, tickers in tickers_by_pool.items():
-        closes = load_cached_close_series_bulk_with_fallback(pool, tickers)
-        for ticker in tickers:
-            quote = snapshot.get(ticker)
+    gaps: dict[str, dict[str, Any]] = {}
+    for pool, sids in sids_by_pool.items():
+        closes = load_cached_close_series_bulk_with_fallback(pool, sorted({entries[sid]["ticker"] for sid in sids}))
+        for sid in sids:
+            entry = entries[sid]
+            ticker = entry["ticker"]
+            multiple = ladder.leverage_multiple(ticker, str(entry["name"]))
             close = slice_close_series_to_date(closes.get(ticker), latest_day)
             confirmed = close.loc[:last_bar].dropna() if close is not None else None
             window = confirmed.iloc[-ladder.RECOMMENDED_GAP_WINDOW_DAYS :] if confirmed is not None else None
-            # 3개월치가 없으면 있는 기간으로 계산하고 기간 미달(`gap_partial`)로 표시한다. 종가가 2개 미만이면 비운다.
             drawdown = ladder.max_drawdown(window.tolist()) if window is not None and len(window) >= 2 else None
-            quotes[ticker] = {
-                "price": quote.get("nowVal") if isinstance(quote, dict) else None,
-                "change_pct": quote.get("changeRate") if isinstance(quote, dict) else None,
+            gaps[sid] = {
                 "drawdown_pct": round(drawdown * 100, 2) if drawdown is not None else None,
                 "recommended_gap_pct": (
-                    ladder.recommended_gap_pct(drawdown, rounds_by_ticker[ticker], multiple_by_ticker[ticker])
+                    ladder.recommended_gap_pct(drawdown, int(entry["rounds"]), multiple)
                     if drawdown is not None
                     else None
                 ),
-                "leverage_multiple": multiple_by_ticker[ticker],
-                "gap_range_pct": ladder.recommended_gap_range(multiple_by_ticker[ticker]),
+                "leverage_multiple": multiple,
+                "gap_range_pct": ladder.recommended_gap_range(multiple),
                 "gap_days": len(window) if drawdown is not None else None,
                 "gap_partial": drawdown is not None and len(window) < ladder.RECOMMENDED_GAP_WINDOW_DAYS,
             }
+    return gaps
+
+
+def _config_quotes(mine: dict[str, dict[str, Any]], country: str | None) -> dict[str, dict[str, Any]]:
+    """편집 표의 현재가·일간(공통 시세)과 권장 간격(`recommended_gaps`)."""
+    if country is None or not mine:
+        return {}
+    from services.price_service import get_realtime_snapshot
+
+    snapshot = get_realtime_snapshot(country, sorted({entry["ticker"] for entry in mine.values()}))
+    gaps = recommended_gaps(mine, country)
+    quotes = {}
+    for sid, gap in gaps.items():
+        ticker = mine[sid]["ticker"]
+        quote = snapshot.get(ticker)
+        quotes[ticker] = {
+            "price": quote.get("nowVal") if isinstance(quote, dict) else None,
+            "change_pct": quote.get("changeRate") if isinstance(quote, dict) else None,
+            **gap,
+        }
     return quotes
 
 
@@ -1242,7 +1293,8 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
     selected = account_id if account_id is not None else (docs[0]["account_id"] if docs else None)
     country = next((str(doc["country_code"]).strip().lower() for doc in docs if doc["account_id"] == selected), None)
     settings = load_settings()
-    account = settings["accounts"].get(selected or "", {"slack_enabled": False})
+    # 아직 한 번도 저장하지 않은 계좌는 두 스위치 모두 꺼진 상태로 보인다(저장하면 생긴다).
+    account = settings["accounts"].get(selected or "", {"slack_enabled": False, "recommended_gap_enabled": False})
     configs = _ordered_strategies(settings["strategies"], selected or "")
     mine = dict(configs)
     from utils.pool_strategy_use import pool_options
@@ -1266,6 +1318,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
         "account_id": selected,
         "country_code": country,
         "slack_enabled": account["slack_enabled"],
+        "recommended_gap_enabled": account["recommended_gap_enabled"],
         "groups": _normalize_trade_groups(account.get("groups", [])),
         "pool_options": pool_options(list(pools)),
         "ticker_options": [options[ticker] for ticker in sorted(options)],
