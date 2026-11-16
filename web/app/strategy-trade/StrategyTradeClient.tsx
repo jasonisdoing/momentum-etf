@@ -1101,6 +1101,42 @@ function AccountSettingsCard({
   );
 }
 
+/** 회차 표 앞쪽 고정 칸(위치~손익)의 왼쪽 위치 — 머리행 칸의 실제 위치를 잰다.
+ *  내용에 따라 칸이 폭 상수보다 넓어질 수 있어 상수로 계산하면 고정 칸이 겹친다. */
+function useStickyLefts(count: number) {
+  const [lefts, setLefts] = useState<number[]>([]);
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const headRowRef = useCallback(
+    (row: HTMLTableRowElement | null) => {
+      observerRef.current?.disconnect();
+      observerRef.current = null;
+      if (!row) return;
+      const measure = () => {
+        const next = Array.from(row.children)
+          .slice(0, count)
+          .map((cell) => (cell as HTMLElement).offsetLeft);
+        setLefts((prev) => (prev.length === next.length && prev.every((value, idx) => value === next[idx]) ? prev : next));
+      };
+      measure();
+      observerRef.current = new ResizeObserver(measure);
+      observerRef.current.observe(row);
+    },
+    [count],
+  );
+  /** `start` 칸부터 `span` 칸을 차지하는 고정 칸 스타일 — 마지막 고정 칸 오른쪽에 경계선을 긋는다. */
+  const stickyCell = (start: number, span = 1): React.CSSProperties =>
+    lefts.length === count
+      ? {
+          position: "sticky",
+          left: lefts[start],
+          zIndex: 1,
+          background: "var(--panel)",
+          ...(start + span === count ? { boxShadow: "inset -2px 0 0 rgba(148,163,184,0.35)" } : null),
+        }
+      : {};
+  return { headRowRef, stickyCell };
+}
+
 /** 선택한 전략의 운용 현황과 회차 표. */
 function StrategySection({
   view,
@@ -1113,6 +1149,8 @@ function StrategySection({
   onWithdrawSignal: (signal: SlackSignal, label: string) => void;
 }) {
   const currency = useTradeCurrency();
+  // 위치~손익 칸은 고정하고 날짜별 칸만 가로로 움직인다.
+  const { headRowRef, stickyCell } = useStickyLefts(ROUND_TABLE_FIXED_WIDTHS.length);
   if ("error" in view) {
     return (
       <div className="card appCard" style={cardStyle}>
@@ -1221,16 +1259,16 @@ function StrategySection({
             ))}
           </colgroup>
           <thead>
-            <tr style={{ color: "var(--text-muted)" }}>
-              <th style={{ ...thStyle, textAlign: "left" }}>위치</th>
-              <th style={{ ...thStyle, textAlign: "left" }}>회차</th>
-              <th style={{ ...thStyle, textAlign: "left" }}>상태</th>
-              <th style={thStyle}>위치 가격</th>
-              <th style={thStyle}>체결가</th>
-              <th style={thStyle}>수량</th>
-              <th style={thStyle} title="체결가 × 수량">금액</th>
-              <th style={thStyle} title="(현재가 − 체결가) × 수량">평가손익</th>
-              <th style={thStyle}>손익</th>
+            <tr ref={headRowRef} style={{ color: "var(--text-muted)" }}>
+              <th style={{ ...thStyle, textAlign: "left", ...stickyCell(0) }}>위치</th>
+              <th style={{ ...thStyle, textAlign: "left", ...stickyCell(1) }}>회차</th>
+              <th style={{ ...thStyle, textAlign: "left", ...stickyCell(2) }}>상태</th>
+              <th style={{ ...thStyle, ...stickyCell(3) }}>위치 가격</th>
+              <th style={{ ...thStyle, ...stickyCell(4) }}>체결가</th>
+              <th style={{ ...thStyle, ...stickyCell(5) }}>수량</th>
+              <th style={{ ...thStyle, ...stickyCell(6) }} title="체결가 × 수량">금액</th>
+              <th style={{ ...thStyle, ...stickyCell(7) }} title="(현재가 − 체결가) × 수량">평가손익</th>
+              <th style={{ ...thStyle, ...stickyCell(8) }}>손익</th>
               {tradeDays.map((day) => (
                 <th
                   key={day}
@@ -1266,10 +1304,10 @@ function StrategySection({
                   <React.Fragment key={`empty-${position}`}>
                   {lowLine}
                   <tr style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
-                    <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)" }}>{position}</td>
-                    <td colSpan={2} style={tdStyle} />
-                    <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatPrice(view.position_prices[String(position)], currency)}</td>
-                    <td colSpan={5} style={tdStyle} />
+                    <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)", ...stickyCell(0) }}>{position}</td>
+                    <td colSpan={2} style={{ ...tdStyle, ...stickyCell(1, 2) }} />
+                    <td style={{ ...tdStyle, color: "var(--text-muted)", ...stickyCell(3) }}>{formatPrice(view.position_prices[String(position)], currency)}</td>
+                    <td colSpan={5} style={{ ...tdStyle, ...stickyCell(4, 5) }} />
                     {tradeCells}
                   </tr>
                   </React.Fragment>
@@ -1281,8 +1319,8 @@ function StrategySection({
               {row.round === 1 && aboveFirstRound ? <PriceGapRow gap={aboveFirstRound} columnCount={columnCount} /> : null}
               {lowLine}
               <tr style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
-                <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)" }}>{position}</td>
-                <td style={{ ...tdStyle, textAlign: "left", fontWeight: 700 }}>
+                <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)", ...stickyCell(0) }}>{position}</td>
+                <td style={{ ...tdStyle, textAlign: "left", fontWeight: 700, ...stickyCell(1) }}>
                   {row.round}호
                   {row.is_next ? (
                     <span style={{ marginLeft: 5, color: "var(--text-muted)", fontSize: "var(--fs-sm)", fontWeight: 400 }}>
@@ -1290,11 +1328,11 @@ function StrategySection({
                     </span>
                   ) : null}
                 </td>
-                <td style={{ ...tdStyle, textAlign: "left" }}>
+                <td style={{ ...tdStyle, textAlign: "left", ...stickyCell(2) }}>
                   <RoundStatus row={row} compact={false} onWithdrawSignal={onWithdrawSignal} />
                 </td>
-                <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatPrice(view.position_prices[String(position)], currency)}</td>
-                <td style={tdStyle}>
+                <td style={{ ...tdStyle, color: "var(--text-muted)", ...stickyCell(3) }}>{formatPrice(view.position_prices[String(position)], currency)}</td>
+                <td style={{ ...tdStyle, ...stickyCell(4) }}>
                   {row.held ? (
                     <>
                       <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
@@ -1326,12 +1364,12 @@ function StrategySection({
                     </span>
                   ) : null}
                 </td>
-                <td style={tdStyle}>{row.held ? `${formatNumber(row.quantity)}주` : "-"}</td>
-                <td style={tdStyle}>{formatAmount(amounts.cost, currency)}</td>
-                <td style={{ ...tdStyle, color: signColor(amounts.pnl), fontWeight: 700 }}>
+                <td style={{ ...tdStyle, ...stickyCell(5) }}>{row.held ? `${formatNumber(row.quantity)}주` : "-"}</td>
+                <td style={{ ...tdStyle, ...stickyCell(6) }}>{formatAmount(amounts.cost, currency)}</td>
+                <td style={{ ...tdStyle, color: signColor(amounts.pnl), fontWeight: 700, ...stickyCell(7) }}>
                   {formatSignedAmount(amounts.pnl, currency)}
                 </td>
-                <td style={{ ...tdStyle, color: signColor(row.profit_pct), fontWeight: 700 }}>
+                <td style={{ ...tdStyle, color: signColor(row.profit_pct), fontWeight: 700, ...stickyCell(8) }}>
                   {formatSigned(row.profit_pct)}
                 </td>
                 {tradeCells}
