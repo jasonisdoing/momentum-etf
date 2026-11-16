@@ -1244,11 +1244,10 @@ function StrategySection({
                     ...cycleEndStyle(day),
                   }}
                 >
-                  {Number(day.slice(5, 7))}월 {Number(day.slice(8, 10))}일({WEEKDAY_NAMES[new Date(`${day}T00:00:00Z`).getUTCDay()]})(
+                  {Number(day.slice(5, 7))}월 {Number(day.slice(8, 10))}일({WEEKDAY_NAMES[new Date(`${day}T00:00:00Z`).getUTCDay()]}){" "}
                   <span style={{ color: signColor(view.trade_day_change_pcts[day]) }}>
                     {formatSigned(view.trade_day_change_pcts[day])}
                   </span>
-                  )
                 </th>
               ))}
             </tr>
