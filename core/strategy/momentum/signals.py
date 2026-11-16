@@ -19,6 +19,17 @@ def daily_volatility_pct(close):
     return close.pct_change().rolling(ENTRY_VOL_WINDOW).std() * 100
 
 
+def latest_volatility_pct(close: pd.Series | None) -> float | None:
+    """표시용 최근 변동성(%) — 유효한 일봉이 부족하면 빈 값으로 둔다."""
+    if close is None:
+        return None
+    series = pd.to_numeric(close, errors="coerce").dropna()
+    if len(series) <= ENTRY_VOL_WINDOW:
+        return None
+    value = daily_volatility_pct(series).iloc[-1]
+    return round(float(value), 2) if pd.notna(value) else None
+
+
 def entry_signal(
     close_df: pd.DataFrame, signals: dict[str, pd.DataFrame], entry_vol_mult: float | None
 ) -> pd.DataFrame:

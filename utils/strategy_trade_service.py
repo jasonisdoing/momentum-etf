@@ -1169,17 +1169,36 @@ def _trade_account_docs() -> list[dict[str, Any]]:
 
 
 def _config_quotes(mine: dict[str, dict[str, Any]], country: str | None) -> dict[str, dict[str, float | None]]:
-    """편집 표의 현재가·일간 — 원장 계산 여부와 무관하게 설정 행마다 공통 시세 경로에서 읽는다. 못 받은 종목은 빠진다."""
+    """편집 표의 현재가·일간·변동성 — 원장과 별개로 공통 시세와 종목풀 일봉에서 읽는다."""
     if country is None or not mine:
         return {}
+    from core.strategy.momentum.signals import latest_volatility_pct
     from services.price_service import get_realtime_snapshot
+    from utils.cache_utils import load_cached_close_series_bulk_with_fallback
+    from utils.data_loader import get_latest_trading_day
+    from utils.effective_prices import bar_anchor
+    from utils.rankings import build_effective_close_series, slice_close_series_to_date
+
+    tickers_by_pool: dict[str, list[str]] = defaultdict(list)
+    for entry in mine.values():
+        tickers_by_pool[entry["pool"]].append(entry["ticker"])
 
     snapshot = get_realtime_snapshot(country, sorted({entry["ticker"] for entry in mine.values()}))
-    return {
-        ticker: {"price": entry.get("nowVal"), "change_pct": entry.get("changeRate")}
-        for ticker, entry in snapshot.items()
-        if isinstance(entry, dict)
-    }
+    latest_day = get_latest_trading_day(country).normalize()
+    last_bar = bar_anchor(country)
+    quotes = {}
+    for pool, tickers in tickers_by_pool.items():
+        closes = load_cached_close_series_bulk_with_fallback(pool, tickers)
+        for ticker in tickers:
+            quote = snapshot.get(ticker)
+            close = slice_close_series_to_date(closes.get(ticker), latest_day)
+            effective = build_effective_close_series(close, quote, country, last_bar=last_bar)
+            quotes[ticker] = {
+                "price": quote.get("nowVal") if isinstance(quote, dict) else None,
+                "change_pct": quote.get("changeRate") if isinstance(quote, dict) else None,
+                "volatility_pct": latest_volatility_pct(effective),
+            }
+    return quotes
 
 
 def _view_krw_rate(country: str | None) -> float | None:
@@ -1245,6 +1264,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
                 "rounds": entry["rounds"],
                 "price": quotes.get(entry["ticker"], {}).get("price"),
                 "change_pct": quotes.get(entry["ticker"], {}).get("change_pct"),
+                "volatility_pct": quotes.get(entry["ticker"], {}).get("volatility_pct"),
             }
             for sid, entry in configs
         ],

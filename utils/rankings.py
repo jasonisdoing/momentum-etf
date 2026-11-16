@@ -234,7 +234,7 @@ def _expected_cache_trading_day(country_code: str, latest_trading_day: pd.Timest
     return max(previous).normalize() if previous else latest_trading_day
 
 
-def _slice_close_series_to_date(close_series: pd.Series | None, cutoff_date: pd.Timestamp) -> pd.Series | None:
+def slice_close_series_to_date(close_series: pd.Series | None, cutoff_date: pd.Timestamp) -> pd.Series | None:
     if close_series is None or close_series.empty:
         return close_series
 
@@ -400,15 +400,12 @@ def _extract_price_metrics_from_close_series(
     # 고점 대비(%) — 모멘텀 전략과 **같은 함수**(core.strategy.scoring.drawdown_from_high_pct).
     drawdown = drawdown_from_high_pct(series, current_price)
 
-    from core.strategy.momentum.signals import daily_volatility_pct
-
-    volatility = daily_volatility_pct(series)
-    latest_volatility = float(volatility.iloc[-1]) if len(volatility) and pd.notna(volatility.iloc[-1]) else None
+    from core.strategy.momentum.signals import latest_volatility_pct
 
     return {
         "현재가": current_price,
         # 20일 일간 수익률 표준편차(%) — 모멘텀 진입 문턱 판정과 같은 정의(화면 공용 컬럼).
-        "변동성": round(latest_volatility, 2) if latest_volatility is not None else None,
+        "변동성": latest_volatility_pct(series),
         "일간(%)": daily_pct,
         "전거래일(%)": None,
         "1주(%)": _calc_period_return(series, 5),
@@ -852,7 +849,7 @@ def build_ticker_type_rankings(
         cached_close_series = cached_close_series_map.get(ticker)
         realtime_entry = realtime_snapshot.get(ticker)
         preprocess_started_at = perf_counter()
-        base_close_series = _slice_close_series_to_date(cached_close_series, latest_trading_day)
+        base_close_series = slice_close_series_to_date(cached_close_series, latest_trading_day)
         effective_close_series = build_effective_close_series(
             base_close_series, realtime_entry, country_code, last_bar=pool_last_bar
         )

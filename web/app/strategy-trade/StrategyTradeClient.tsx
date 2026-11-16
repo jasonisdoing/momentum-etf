@@ -3,7 +3,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef, GridApi, GridOptions, RowClassParams, RowDragEndEvent } from "ag-grid-community";
 
-import { gridRowDragColumn, gridSelectionColumn, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
+import { gridRowDragColumn, gridSelectionColumn, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn, volatilityColumn } from "@/lib/grid-cells";
 import type { HoldingsGroup } from "@/lib/holdings-store";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 import { formatCurrencyPrice, formatPrice } from "@/lib/price-format";
@@ -163,6 +163,7 @@ type StrategyConfigRow = {
   /** 현재가·일간(%) — 공통 시세 경로 값. 못 받으면 null. */
   price: number | null;
   change_pct: number | null;
+  volatility_pct: number | null;
 };
 
 type TickerOption = { ticker: string; name: string; pools: string[]; kind: "stock" | "etf" };
@@ -502,6 +503,7 @@ function comparableDrafts(rows: DraftRow[]) {
 type TradeListRow = DraftRow & {
   held: boolean;
   heldRounds: string;
+  volatility_pct?: number | null;
   roundQuantity?: number | null;
   is_label?: boolean;
   /** 상태(도달·슬랙·주문)가 있는 회차 — 아래 회차 표의 상태 칸과 같은 값. */
@@ -696,6 +698,7 @@ function AccountSettingsCard({
         statusRounds: strategy && strategy.ticker === row.ticker && !("error" in strategy) ? strategy.rounds.filter(hasRoundStatus) : [],
         current_price: price == null ? undefined : String(price),
         daily_change_pct: quote?.change_pct,
+        volatility_pct: quote?.volatility_pct,
         currency,
         // 현재가 기준 회차 수량 — 서버 `round_buy_quantity` 와 같은 식(회차 금액 ÷ (현재가 × 환율), 내림).
         roundQuantity:
@@ -766,6 +769,7 @@ function AccountSettingsCard({
 
   const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
     gridRowDragColumn<TradeListRow>(({ node }) => !node.rowPinned, 36),
+    { ...volatilityColumn<TradeListRow>(), pinned: "left" },
     tickerColumn<TradeListRow>(),
     stockNameColumn<TradeListRow>({
       cellRenderer: ({ data, value }) => data?.is_group ? (
