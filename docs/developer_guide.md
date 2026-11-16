@@ -16,6 +16,7 @@
 | 배치 | `scripts/` + `infra/cron/crontab` + `infra/server_scheduler.py` | 운영은 [server_infrastructure.md](server_infrastructure.md) |
 | 정적 데이터 | `data/` | 거래일 캘린더 등 연 단위로만 바뀌는 것. 서버에선 읽기 전용 마운트 |
 | 레버리지 | `leverage/` | 폐기된 `leverage-switching` 앱에서 이전. 자체 엔진, 시세·슬랙은 `utils` 재사용 |
+| 사고팔기 실험 | `backtest/` | 운영 경로가 아닌 간격 방식 비교용 도구. 토스 1분봉(`fetch_minutes.py`, 데이터는 `backtest/data/` git 제외)으로 `ladder_sim.py` 가 회차 규칙을 흉내 낸다 — 사고팔기 운영 엔진·화면과 무관 |
 
 기존 파일은 옮기지 않는다 — 신규 코드부터 위 기준으로 수렴시킨다.
 
