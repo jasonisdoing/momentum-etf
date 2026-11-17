@@ -1430,6 +1430,14 @@ export function StrategyMixClient() {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "슬랙 신호를 회수하지 못했습니다.");
+      setPositions((current) => {
+        if (current?.account_id !== targetAccount || current.order_signals[item.key]?.withdraw_key !== key) {
+          return current;
+        }
+        const orderSignals = { ...current.order_signals };
+        delete orderSignals[item.key];
+        return { ...current, order_signals: orderSignals };
+      });
       toast.success("슬랙 신호를 회수했습니다.");
       setWithdrawingAction(null);
     } catch (error) {
@@ -1437,7 +1445,6 @@ export function StrategyMixClient() {
       setWithdrawingAction(null);
     } finally {
       setWithdrawBusy(false);
-      setPositionsReloadKey((key) => key + 1);
     }
   }
 
