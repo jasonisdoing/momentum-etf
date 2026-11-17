@@ -104,7 +104,7 @@
 ## 6. 작업 방식
 
 1. 기본은 순차 처리다.
-2. Frontend·Backend 가 함께 있으면 **UI 를 먼저 만들어 확인받은 뒤** Backend 를 만든다.
+2. Frontend·Backend가 함께 바뀌는 큰 변경은 **UI를 먼저 만들어 확인받은 뒤** Backend를 만든다. 작은 변경은 별도 UI 확인 없이 구현·검증까지 한 번에 마친다.
 3. Implementation Plan·Task·Walkthrough 같은 중간 산출물 문서는 만들지 않는다.
    사용자 요청이나 꼭 필요한 경우에만 짧게 쓴다.
 

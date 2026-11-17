@@ -86,3 +86,22 @@ def post_order_signal(payload: OrderSignalPayload, _: None = Depends(require_int
         return send_mix_order_signal(**payload.model_dump())
     except (BrokerApiError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class WithdrawOrderSignalPayload(BaseModel):
+    account_id: str
+    ticker: str
+    key: str
+
+
+@router.post("/withdraw-signal")
+def post_withdraw_signal(payload: WithdrawOrderSignalPayload, _: None = Depends(require_internal_token)) -> dict:
+    """합성의 미사용 주문 신호 한 건을 회수한다."""
+    from services.broker_api_service import BrokerApiError
+    from utils.strategy_mix_orders import withdraw_mix_order_signal
+
+    try:
+        withdraw_mix_order_signal(payload.account_id, payload.ticker, payload.key)
+    except (BrokerApiError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True}

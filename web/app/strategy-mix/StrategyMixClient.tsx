@@ -246,7 +246,7 @@ type Positions = {
     >;
   };
   holdings: Holding[];
-  order_signals: Record<string, "sent" | "sending">;
+  order_signals: Record<string, { state: "sent" | "sending"; withdraw_key: string | null }>;
   /** 이 계좌에 등록된 사고팔기 종목 — 비어 있지 않으면 현금 몫 안의 사고팔기 칸을 보여준다(보유 유무와 무관). */
   trade_tickers: string[];
   actions: {
@@ -339,7 +339,7 @@ function ActionGroupList({ groups, signals, onSelect, onWithdraw }: {
   groups: ActionGroup[];
   signals?: Positions["order_signals"];
   onSelect?: (item: ActionItem) => void;
-  onWithdraw?: (item: ActionItem) => void;
+  onWithdraw?: (item: ActionItem, key: string) => void;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -357,6 +357,7 @@ function ActionGroupList({ groups, signals, onSelect, onWithdraw }: {
             {group.items.map((item) => {
               const signal = signals?.[item.key];
               const direction = item.side === "sell" ? "매도" : "매수";
+              const withdrawKey = signal?.withdraw_key;
               return (
                 <li key={item.key}>
                   <strong style={{
@@ -367,9 +368,9 @@ function ActionGroupList({ groups, signals, onSelect, onWithdraw }: {
                   — {item.text}
                   {signal ? (
                     <span style={{ marginInlineStart: 8 }}>
-                      {signal === "sent" ? (
+                      {signal.state === "sent" ? (
                         <SlackSignalBadge label="슬랙 발송됨" compact showWithdraw
-                          onWithdraw={onWithdraw ? () => onWithdraw(item) : undefined} />
+                          onWithdraw={onWithdraw && withdrawKey ? () => onWithdraw(item, withdrawKey) : undefined} />
                       ) : (
                         <StatusBadge compact color="var(--text-muted)">슬랙 발송 확인 필요</StatusBadge>
                       )}
@@ -440,7 +441,8 @@ export function StrategyMixClient() {
   // 운용 현황 탭.
   const [positions, setPositions] = useState<Positions | null>(null);
   const [selectedAction, setSelectedAction] = useState<{ item: ActionItem; accountId: string; accountLabel: string } | null>(null);
-  const [withdrawingAction, setWithdrawingAction] = useState<ActionItem | null>(null);
+  const [withdrawingAction, setWithdrawingAction] = useState<{ accountId: string; item: ActionItem; key: string } | null>(null);
+  const [withdrawBusy, setWithdrawBusy] = useState(false);
   const [sendingAction, setSendingAction] = useState(false);
   const [sendActionError, setSendActionError] = useState<string | null>(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
@@ -1416,6 +1418,29 @@ export function StrategyMixClient() {
   // 내일의 액션 = 다음 거래일(연휴면 실제로는 며칠 뒤 — 세부 날짜는 그룹 제목에).
   const todayActionGroups = actionGroups.filter((group) => group.section === "today");
 
+  async function confirmWithdrawAction() {
+    if (!withdrawingAction || withdrawBusy || withdrawingAction.accountId !== accountId) return;
+    setWithdrawBusy(true);
+    try {
+      const { accountId: targetAccount, item, key } = withdrawingAction;
+      const response = await fetch("/api/strategy-mix/withdraw-signal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_id: targetAccount, ticker: item.ticker, key }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "슬랙 신호를 회수하지 못했습니다.");
+      toast.success("슬랙 신호를 회수했습니다.");
+      setWithdrawingAction(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "슬랙 신호를 회수하지 못했습니다.");
+      setWithdrawingAction(null);
+    } finally {
+      setWithdrawBusy(false);
+      setPositionsReloadKey((key) => key + 1);
+    }
+  }
+
   async function sendSelectedAction() {
     if (!selectedAction || sendingAction || selectedAction.accountId !== accountId) return;
     setSendingAction(true);
@@ -1430,7 +1455,7 @@ export function StrategyMixClient() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "슬랙 주문 신호를 보내지 못했습니다.");
       setPositions((current) => current?.account_id === targetAccount
-        ? { ...current, order_signals: { ...current.order_signals, [item.key]: "sent" } }
+        ? { ...current, order_signals: { ...current.order_signals, [item.key]: result.signal } }
         : current);
       toast.success(result.already_sent ? "이미 슬랙으로 발송된 신호입니다." : "슬랙 주문 신호를 보냈습니다.");
       setSelectedAction(null);
@@ -1931,7 +1956,8 @@ export function StrategyMixClient() {
                       </div>
                     ) : (
                       <ActionGroupList groups={todayActionGroups} signals={positions?.order_signals}
-                        onWithdraw={positions?.account_id === accountId ? setWithdrawingAction : undefined}
+                        onWithdraw={positions?.account_id === accountId ? (item, key) =>
+                          setWithdrawingAction({ accountId, item, key }) : undefined}
                         onSelect={positions?.account_id === accountId ? (item) => {
                           setSendActionError(null);
                           setSelectedAction({ item, accountId, accountLabel });
@@ -1984,10 +2010,8 @@ export function StrategyMixClient() {
           {sendActionError ? <p role="alert" className="text-danger mb-0">{sendActionError}</p> : null}
         </> : null}
       </AppModal>
-      <SlackWithdrawModal label={withdrawingAction?.text ?? null}
-        busy={false} onClose={() => setWithdrawingAction(null)}>
-        {" "}회수 버튼은 서버 연결 후 사용할 수 있습니다.
-      </SlackWithdrawModal>
+      <SlackWithdrawModal label={withdrawingAction?.accountId === accountId ? withdrawingAction.item.text : null}
+        busy={withdrawBusy} onClose={() => setWithdrawingAction(null)} onConfirm={() => void confirmWithdrawAction()} />
     </PageFrame>
   );
 }

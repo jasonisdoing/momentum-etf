@@ -23,7 +23,7 @@ from utils.strategy_trade_orders import (
     submit_order_record,
 )
 from utils.strategy_trade_signal_lock import signal_lock
-from utils.strategy_trade_threads import send_thread_message
+from utils.strategy_trade_threads import can_withdraw_signal, send_thread_message, withdraw_signal
 from utils.ticker_resolver import resolve_ticker_meta
 
 COLLECTION = "strategy_mix_order_signals"
@@ -118,7 +118,38 @@ def _current_signal(request: dict, thread_ts: str) -> None:
         raise RoundNotOrderableError("이미 종료되었거나 다른 신호로 대체된 주문입니다.", done=False)
 
 
-def mix_order_signals(account_id: str, groups: list[dict]) -> dict[str, str]:
+def _signal_status(record: dict) -> dict[str, str | None]:
+    thread_ts = record.get("thread_ts")
+    return {
+        "state": record["state"],
+        "withdraw_key": thread_ts
+        if record["state"] == "sent" and thread_ts and can_withdraw_signal(thread_ts, allow_unregistered=True)
+        else None,
+    }
+
+
+@signal_lock()
+def withdraw_mix_order_signal(account_id: str, ticker: str, thread_ts: str) -> None:
+    """같은 종목의 새 발송과 경합해도 확인창이 가리키는 메시지만 회수한다."""
+    collection = _signals()
+    query = {"_id": _signal_id(account_id, ticker), "thread_ts": thread_ts, "state": "sent"}
+    record = collection.find_one(query)
+    if record is None:
+        raise BrokerApiError("이미 회수됐거나 다른 신호로 바뀌었습니다.")
+    name = record.get("name")
+    if not name:
+        # 기존 발송본은 스레드의 주문 등록에서 종목명을 읽는다.
+        from utils.strategy_trade_orders import find_signal_thread
+
+        thread = find_signal_thread(thread_ts)
+        name = next((item["request"]["label"] for item in thread["messages"]), ticker) if thread else ticker
+    entry = {"strategy_id": "mix", "name": name, "round": None, "action": record["side"], "origin": "manual"}
+    if not withdraw_signal(thread_ts, "manual", None, entry=entry):
+        raise BrokerApiError("이 신호로 낸 주문이 있거나 이미 사용되어 회수할 수 없습니다.")
+    collection.delete_one(query)
+
+
+def mix_order_signals(account_id: str, groups: list[dict]) -> dict[str, dict[str, str | None]]:
     """오늘 화면에 남아 있는 신호의 발송 상태를 조회한다."""
     actions = {item["key"]: item["side"] for group in groups if group["section"] == "today" for item in group["items"]}
     if not actions:
@@ -127,7 +158,7 @@ def mix_order_signals(account_id: str, groups: list[dict]) -> dict[str, str]:
     for record in _signals().find({"account_id": account_id, "action_key": {"$in": list(actions)}}):
         key = record["action_key"]
         if record["side"] == actions[key] and record["state"] != "closed" and not _used_signal(record):
-            result[key] = record["state"]
+            result[key] = _signal_status(record)
     return result
 
 
@@ -152,7 +183,7 @@ def send_mix_order_signal(account_id: str, action_key: str, side: str, quantity:
         and not _used_signal(current)
     ):
         if current["state"] == "sent":
-            return {"already_sent": True}
+            return {"already_sent": True, "signal": _signal_status(current)}
         raise BrokerApiError("이 신호의 발송 결과를 확인해야 합니다. Slack을 확인하세요.")
     _require_no_open_order(account_id, ticker, country)
     _checked_balance(positions, ticker)
@@ -173,7 +204,14 @@ def send_mix_order_signal(account_id: str, action_key: str, side: str, quantity:
     account_name = get_account_settings(account_id).get("name") or account_id
     collection.replace_one(
         {"_id": key},
-        {"_id": key, "account_id": account_id, "action_key": action_key, "side": side, "state": "sending"},
+        {
+            "_id": key,
+            "account_id": account_id,
+            "action_key": action_key,
+            "side": side,
+            "state": "sending",
+            "name": request["label"],
+        },
         upsert=True,
     )
     thread_ts = send_thread_message(format_action_message(account_name, [{**group, "items": [item]}]))
@@ -183,7 +221,7 @@ def send_mix_order_signal(account_id: str, action_key: str, side: str, quantity:
     message = send_order_request(request, thread_ts)
     register_signal_thread(get_slack_channel(), thread_ts, [message])
     collection.update_one({"_id": key}, {"$set": {"state": "sent"}})
-    return {"already_sent": False}
+    return {"already_sent": False, "signal": _signal_status({"state": "sent", "thread_ts": thread_ts})}
 
 
 def resolve_mix_order(request: dict[str, Any], thread_ts: str) -> dict:

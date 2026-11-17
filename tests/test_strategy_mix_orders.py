@@ -9,6 +9,7 @@ from services.broker_api_service import BrokerApiError, OrderUncertainError
 from utils import slack_mock_orders as slack
 from utils import strategy_mix_orders as mix
 from utils import strategy_trade_orders as order_store
+from utils import strategy_trade_threads as threads
 from utils.strategy_trade_orders import RoundNotOrderableError
 
 
@@ -56,6 +57,7 @@ class MixOrderTest(TestCase):
             patch.object(slack, "_account_line", return_value="계좌 a1"),
             patch.object(mix, "_signals", return_value=self.db),
             patch.object(mix, "_orders", return_value=self.orders),
+            patch.object(mix, "can_withdraw_signal", return_value=True),
             patch.object(mix, "mix_positions", return_value=self.positions),
             patch.object(mix, "account_env", return_value="live"),
             patch.object(mix, "_require_order_allowed"),
@@ -93,6 +95,49 @@ class MixOrderTest(TestCase):
             with self.assertRaisesRegex(BrokerApiError, "발송 결과"):
                 mix.send_mix_order_signal.__wrapped__("a1", "action", "buy", 36)
         send.assert_not_called()
+
+    def test_withdraw_reuses_slack_path_for_existing_signal(self):
+        self.signal["name"] = "종목"
+        messages = Mock()
+        messages.find_one.return_value = {}
+        messages.update_one.return_value = SimpleNamespace(matched_count=1)
+        with (
+            patch.object(threads, "_messages", return_value=messages),
+            patch.object(threads, "_signal_thread_has_orders", return_value=False),
+            patch.object(threads, "resume_withdrawal") as resume,
+        ):
+            mix.withdraw_mix_order_signal.__wrapped__("a1", "ETF", "root")
+        claim = messages.update_one.call_args.args[1]["$set"]
+        self.assertIn("종목 매수", claim["withdrawal_text"])
+        self.assertNotIn("None호", claim["withdrawal_text"])
+        resume.assert_called_once_with("root")
+        self.db.delete_one.assert_called_once_with(
+            {
+                "_id": {"account_id": "a1", "ticker": "ETF"},
+                "thread_ts": "root",
+                "state": "sent",
+            }
+        )
+
+    def test_stale_or_ordered_signal_cannot_be_withdrawn(self):
+        with patch.object(mix, "withdraw_signal") as withdraw:
+            self.db.find_one.return_value = None
+            with self.assertRaisesRegex(BrokerApiError, "다른 신호"):
+                mix.withdraw_mix_order_signal.__wrapped__("a1", "ETF", "old")
+            withdraw.assert_not_called()
+            self.db.find_one.return_value = {**self.signal, "name": "종목"}
+            withdraw.return_value = False
+            with self.assertRaisesRegex(BrokerApiError, "회수할 수 없습니다"):
+                mix.withdraw_mix_order_signal.__wrapped__("a1", "ETF", "root")
+        self.db.delete_one.assert_not_called()
+
+    def test_screen_hides_withdraw_when_order_already_exists(self):
+        self.db.find.return_value = [self.signal]
+        with patch.object(mix, "can_withdraw_signal", return_value=False):
+            self.assertEqual(
+                mix.mix_order_signals("a1", [self.group]),
+                {"action": {"state": "sent", "withdraw_key": None}},
+            )
 
     def test_tomorrows_action_cannot_be_ordered(self):
         self.group["section"] = "later"

@@ -25,7 +25,7 @@ export function SlackWithdrawModal({ label, busy, onClose, onConfirm, children }
   label: string | null;
   busy: boolean;
   onClose: () => void;
-  onConfirm?: () => void;
+  onConfirm: () => void;
   children?: ReactNode;
 }) {
   return (
@@ -36,7 +36,7 @@ export function SlackWithdrawModal({ label, busy, onClose, onConfirm, children }
       footer={
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, width: "100%" }}>
           <button type="button" className="btn" onClick={onClose} disabled={busy}>취소</button>
-          <button type="button" className="btn btn-danger" onClick={onConfirm} disabled={busy || !onConfirm}>
+          <button type="button" className="btn btn-danger" onClick={onConfirm} disabled={busy}>
             {busy ? "회수 중…" : "회수"}
           </button>
         </div>

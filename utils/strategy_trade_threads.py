@@ -171,11 +171,18 @@ def _withdrawable_root(signal_ts: str) -> dict[str, Any]:
     }
 
 
-def can_withdraw_signal(signal_ts: str) -> bool:
-    """화면에서 회수 가능한 신호인지 기존 주문과 신호 상태로 판정한다."""
-    return _messages().find_one(
-        _withdrawable_root(signal_ts), {"_id": 1}
-    ) is not None and not _signal_thread_has_orders(signal_ts)
+def can_withdraw_signal(signal_ts: str, *, allow_unregistered: bool = False) -> bool:
+    """주문 기록이 없는 신호와 중단된 화면 회수의 재시도를 허용한다."""
+    query = _withdrawable_root(signal_ts)
+    if allow_unregistered:
+        del query["signal_entries"]
+    collection = _messages()
+    eligible = collection.find_one(query, {"_id": 1})
+    if eligible is None and allow_unregistered:
+        eligible = collection.find_one(
+            {"thread_ts": signal_ts, "ts": signal_ts, "withdrawal_text": {"$exists": True}}, {"_id": 1}
+        )
+    return eligible is not None and not _signal_thread_has_orders(signal_ts)
 
 
 #: 회수 사유 — 슬랙 회수 한 줄에 들어가는 표시 문구의 단일 소스.
@@ -193,14 +200,17 @@ def withdrawal_line(entries: list[dict[str, Any]], reason: str, detail: str | No
     items = ", ".join(
         "임의 매도"
         if entry.get("arbitrary_id")
-        else f"{entry['round']}호 {'매수' if entry['action'] == 'buy' else '매도'}"
+        else (
+            (f"{entry['round']}호 " if entry["round"] is not None else "")
+            + ("매수" if entry["action"] == "buy" else "매도")
+        )
         for entry in entries
     )
     parts = ["↩️ 회수", f"{entries[0]['name']} {items}", WITHDRAW_REASONS[reason], *([detail] if detail else [])]
     return " · ".join([*parts, f"{now.astimezone(KST):%m-%d %H:%M}"])
 
 
-def withdraw_signal(signal_ts: str, reason: str, detail: str | None) -> bool:
+def withdraw_signal(signal_ts: str, reason: str, detail: str | None, *, entry: dict[str, Any] | None = None) -> bool:
     """신호를 회수한다 — 사고팔기 슬랙 회수는 모두 이 함수 하나를 거친다.
 
     본문을 표준 한 줄(`withdrawal_line`)로 바꿔 회수 기록을 남기고 앱이 단 답글은 지운다. 이 신호 스레드로 낸 주문이
@@ -210,19 +220,26 @@ def withdraw_signal(signal_ts: str, reason: str, detail: str | None) -> bool:
     if reason not in WITHDRAW_REASONS:
         raise ValueError(f"알 수 없는 회수 사유입니다: {reason}")
     root = {"thread_ts": signal_ts, "ts": signal_ts}
-    record = _messages().find_one(root, {"signal_entries": 1})
-    if record is None or not record.get("signal_entries"):
+    collection = _messages()
+    record = collection.find_one(root, {"signal_entries": 1, "withdrawal_text": 1, "withdrawal_done": 1})
+    entries = record.get("signal_entries") if record else None
+    if record is None or not (entries or entry):
         raise ValueError("회수할 슬랙 신호 기록을 찾을 수 없습니다.")
-    if reason != "manual" and any(e.get("origin") == "manual" for e in record["signal_entries"]):
-        return False
     if _signal_thread_has_orders(signal_ts):
         mark_signal_thread_used(signal_ts)
         return False
-    note = withdrawal_line(record["signal_entries"], reason, detail, datetime.now(UTC))
-    claimed = _messages().update_one(
-        _withdrawable_root(signal_ts),
-        {"$set": {"withdrawal_text": note}},
-    )
+    if entry is not None and record.get("withdrawal_text"):
+        if not record.get("withdrawal_done"):
+            resume_withdrawal(signal_ts)
+        return True
+    entries = entries or [entry]
+    if reason != "manual" and any(item.get("origin") == "manual" for item in entries):
+        return False
+    note = withdrawal_line(entries, reason, detail, datetime.now(UTC))
+    query = _withdrawable_root(signal_ts)
+    if entry is not None:
+        del query["signal_entries"]
+    claimed = collection.update_one(query, {"$set": {"withdrawal_text": note, "signal_entries": entries}})
     if not claimed.matched_count:
         return False
     resume_withdrawal(signal_ts)
