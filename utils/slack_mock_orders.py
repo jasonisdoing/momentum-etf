@@ -322,13 +322,14 @@ QUOTE_DEPTH_SHOWN = 3
 
 
 def _quote_depth_text(order: dict[str, Any], marks: dict[tuple[str, int], str]) -> str:
-    """확인 모달의 호가 표 — 매도 3호가→1호가, 매수 1호가→3호가와 잔량. ``marks`` 는 (asks·bids, 단계) → 주문 표시.
+    """확인 모달의 호가 표 — 매도 3호가→1호가, 매수 1호가→3호가와 전일 종가 대비 %·잔량. ``marks`` 는 (asks·bids, 단계) → 주문 표시.
 
     증권사 연동이 단계 호가를 주지 않으면(나무) 그 사실을 한 줄로 보인다.
     """
     depth = order["quote_depth"]
     if depth is None:
         return "호가 단계: 이 증권사 연동은 단계 호가를 받지 않습니다."
+    prev_close = depth["prev_close"]
     lines = []
     for side, word, levels in (
         ("asks", "매도", list(enumerate(depth["asks"][:QUOTE_DEPTH_SHOWN], 1))[::-1]),
@@ -337,8 +338,14 @@ def _quote_depth_text(order: dict[str, Any], marks: dict[tuple[str, int], str]) 
         for level, row in levels:
             mark = marks.get((side, level), "")
             price = format_money(row["price"], order["country"])
-            lines.append(f"{word}{level} {price:>11} {row['quantity']:>9,}주{f'  ← {mark}' if mark else ''}")
-    return "```" + "\n".join(lines) + "```"
+            change = f"{(row['price'] / prev_close - 1) * 100:+.2f}%" if prev_close else "-"
+            lines.append(
+                f"{word}{level} {price:>11} {change:>8} {row['quantity']:>9,}주{f'  ← {mark}' if mark else ''}"
+            )
+    basis = (
+        f"전일 종가 {format_money(prev_close, order['country'])} 대비" if prev_close else "전일 종가를 받지 못해 % 없음"
+    )
+    return f"{basis}\n```" + "\n".join(lines) + "```"
 
 
 def _order_price_details(request: dict[str, Any], order: dict[str, Any]) -> str:

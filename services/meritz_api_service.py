@@ -389,9 +389,15 @@ def fetch_balance(account_id: str, country_code: str) -> dict[str, Any]:
 _QUOTE_DEPTH_LEVELS = 10
 
 
-def _quote_depth(data: dict[str, Any], price_key: Callable[[str, int], str], cast: Callable[[Any], Any]) -> dict:
-    """호가 응답의 단계별 가격·잔량 — {"asks": [{price, quantity}, …1호가부터], "bids": […]}. 가격이 0 인 단계는 뺀다."""
-    depth: dict[str, list[dict[str, Any]]] = {}
+def _quote_depth(
+    data: dict[str, Any], price_key: Callable[[str, int], str], cast: Callable[[Any], Any], prev_close_key: str
+) -> dict:
+    """호가 응답의 단계별 가격·잔량과 전일 종가 — {"asks": [{price, quantity}, …1호가부터], "bids": […], "prev_close"}.
+
+    가격이 0 인 단계는 빼고, 전일 종가가 0 이면(장 밖 등) None 이다 — 지어내지 않는다.
+    """
+    prev_close = cast(data[prev_close_key])
+    depth: dict[str, Any] = {"prev_close": prev_close if prev_close > 0 else None}
     for side, prefix in (("asks", "askp"), ("bids", "bidp")):
         levels = []
         for level in range(1, _QUOTE_DEPTH_LEVELS + 1):
@@ -422,7 +428,8 @@ def fetch_best_quote(account_id: str, ticker: str, venue: str) -> dict[str, Any]
         "bid": int(data["bidp"]),
         "at": str(data["prpr_hour"]),
         # 국내 응답은 1호가만 번호 없이(askp·bidp) 오고 2호가부터 번호가 붙는다.
-        "depth": _quote_depth(data, lambda prefix, level: prefix if level == 1 else f"{prefix}{level}", int),
+        # 기준가(sdpr) — 국내 등락률의 기준인 전일 종가.
+        "depth": _quote_depth(data, lambda prefix, level: prefix if level == 1 else f"{prefix}{level}", int, "sdpr"),
     }
     if result["ask"] <= 0 or result["bid"] <= 0:
         raise BrokerApiError(
@@ -625,7 +632,7 @@ def fetch_us_best_quote(account_id: str, ticker: str, exchange: str) -> dict[str
         "ask": float(data["askp1"]),
         "bid": float(data["bidp1"]),
         "at": str(data["korea_hour"]),
-        "depth": _quote_depth(data, lambda prefix, level: f"{prefix}{level}", float),
+        "depth": _quote_depth(data, lambda prefix, level: f"{prefix}{level}", float, "prdy_clpr"),
     }
     if result["ask"] <= 0 or result["bid"] <= 0:
         raise BrokerApiError(
