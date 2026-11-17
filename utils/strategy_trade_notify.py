@@ -264,14 +264,14 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
-    """화면용 — 회차마다 이번 세션에 슬랙 신호가 나간 방향·발송 기록 키·슬랙 메시지 기록 유무(`slack_signals`)와
+    """화면용 — 회차마다 활성 슬랙 신호의 방향·발송 기록 키·회수 가능 여부(`slack_signals`)와
     아직 끝나지 않은 주문의 방향(`order_sides`)을 행에 적는다. 회차 원장을 못 만든 전략(`error`)은 건너뛴다.
 
     지정가에 닿아 있는지와 무관하다 — 신호·주문이 나간 뒤 가격이 물러나도 표시가 남아야 한다.
-    활성 상태는 배치와 같은 체결 판정으로 걸러내고, 완료된 수동 신호는 완료 표시로 남긴다.
+    활성 상태는 배치와 같은 체결 판정으로 걸러낸다.
     """
     from utils.strategy_trade_orders import active_order_keys
-    from utils.strategy_trade_threads import _messages
+    from utils.strategy_trade_threads import can_withdraw_signal
 
     held_counts = _held_counts(view)
     held_fills = _held_fills(view)
@@ -285,28 +285,14 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
         sid = entry.get("strategy_id")
         if sid not in held_counts or entry.get("session_closed"):
             continue
-        completed = _entry_filled(entry, held_counts[sid], held_fills[sid], events[sid])
-        manual = entry.get("origin") == "manual"
-        if completed and not manual:
+        if _entry_filled(entry, held_counts[sid], held_fills[sid], events[sid]):
             continue
+        signal_ts = entry.get("signal_ts")
         slack_keys[(sid, entry["round"], entry["action"])] = {
             "key": key,
-            "has_ts": bool(entry.get("signal_ts")),
-            "manual": manual,
-            "completed": completed,
+            "can_withdraw": bool(signal_ts and can_withdraw_signal(signal_ts)),
+            "manual": entry.get("origin") == "manual",
         }
-    completed_records = _messages().find(
-        {
-            "signal_completed": True,
-            "signal_entries.origin": "manual",
-            "signal_entries.strategy_id": {"$in": list(held_counts)},
-        }
-    )
-    for record in completed_records.sort("created_at", 1):
-        for entry in record["signal_entries"]:
-            key = (entry["strategy_id"], entry["round"], entry["action"])
-            if key[0] in held_counts and (key not in slack_keys or slack_keys[key]["completed"]):
-                slack_keys[key] = {"key": record["thread_ts"], "has_ts": True, "manual": True, "completed": True}
     strategy_ids = [strategy_view["strategy_id"] for strategy_view in view["strategies"]]
     order_keys = active_order_keys(strategy_ids)
     for strategy_view in view["strategies"]:

@@ -102,7 +102,7 @@ export type RoundRow = {
   // 이 회차를 팔면 다음 매수선이 매도가 이상이라 바로 다시 사게 된다 — 신호를 '매도 후 재매수'로 낸다.
   rebuy_after_sell: boolean;
   sell_reached: boolean;
-  // 오늘 슬랙 신호가 나간 방향(key: 회수할 때 쓰는 발송 기록 키, has_ts: 슬랙 메시지 기록이 있어 회수할 수 있음), 아직 끝나지 않은 주문의 방향.
+  // 활성 슬랙 신호와 아직 끝나지 않은 주문의 방향.
   slack_signals: SlackSignal[];
   order_sides: Array<"buy" | "sell">;
   // 증권사 앱(MTS)에 걸려 있는 미체결 수동 주문 — 슬랙 주문을 막는다.
@@ -110,7 +110,7 @@ export type RoundRow = {
   is_next: boolean;
 };
 
-export type SlackSignal = { side: "buy" | "sell"; key: string; has_ts: boolean; manual: boolean; completed: boolean };
+export type SlackSignal = { side: "buy" | "sell"; key: string; can_withdraw: boolean; manual: boolean };
 
 export type StrategyView = {
   strategy_id: string;
@@ -340,7 +340,7 @@ function hasRoundStatus(row: RoundRow): boolean {
 }
 
 /** 상태 칸 — 지정가에 닿았으면 도달(빨강), 슬랙 신호·주문이 나갔으면 방향을 붙여 매도슬랙·매수주문처럼(녹색).
- *  슬랙 뱃지는 슬랙 메시지 기록이 있으면 눌러서 회수할 수 있다(주문이 있으면 서버가 막는다).
+ *  회수할 수 있는 신호에만 버튼을 표시한다.
  *  `compact` 는 좁은 칸용 — 회차 번호를 글자로 앞에 두고 뱃지 여백·간격을 줄인다. */
 function RoundStatus({
   row,
@@ -357,9 +357,9 @@ function RoundStatus({
       ? [<StatusBadge key="reached" color="var(--up-color, #d64545)" compact={compact}>도달</StatusBadge>]
       : []),
     ...row.slack_signals.map((signal) => {
-      const label = signal.completed ? "체결 완료" : signal.manual ? "수동 슬랙 발송됨" : `${SIDE_WORDS[signal.side]}슬랙`;
+      const label = signal.manual ? "수동 슬랙 발송됨" : `${SIDE_WORDS[signal.side]}슬랙`;
       const badge = <StatusBadge color="var(--tblr-green, #2fb344)" compact={compact}>{label}</StatusBadge>;
-      return signal.has_ts && !signal.completed ? (
+      return signal.can_withdraw ? (
         <button
           key={`slack-${signal.side}`}
           type="button"
@@ -1257,7 +1257,7 @@ function ManualSignalButton({ view, row, onSent }: { view: StrategyView; row: Ro
   const [busy, setBusy] = useState(false);
   const side = row.held && row.round === view.status.held_count ? "sell" : row.is_next ? "buy" : null;
   if (side === null) return null;
-  const active = row.slack_signals.some((signal) => signal.side === side && !signal.completed);
+  const active = row.slack_signals.some((signal) => signal.side === side);
   const ordered = row.order_sides.includes(side) || row.manual_orders.some((order) => order.side === side);
   const request = { account_id: view.account_id, strategy_id: view.strategy_id, round: row.round, side };
   const call = async (path: string, body: object) => {

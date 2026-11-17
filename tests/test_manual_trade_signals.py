@@ -20,11 +20,6 @@ _REAL_CLOSE_THREADS = slack.close_session_threads
 _REAL_SEND_THREAD_MESSAGE = threads.send_thread_message
 
 
-class MemoryCursor(list):
-    def sort(self, field, direction):
-        return MemoryCursor(sorted(self, key=lambda doc: doc.get(field, ""), reverse=direction < 0))
-
-
 class MemoryCollection:
     """테스트에서 실제 선점 경합을 만드는 최소 원자 저장소."""
 
@@ -51,7 +46,7 @@ class MemoryCollection:
 
     def find(self, query):
         with self.lock:
-            return MemoryCursor(deepcopy([d for d in self.docs if self.matches(d, query)]))
+            return deepcopy([d for d in self.docs if self.matches(d, query)])
 
     def find_one(self, query, projection=None):
         result = self.find(query)
@@ -385,23 +380,19 @@ class ManualSignalsTest(TestCase):
             self.assertEqual(_REAL_CLOSE_THREADS([self.strategy]), 0)
         update.assert_not_called()
 
-    def test_screen_shows_manual_sent_and_completed(self):
+    def test_screen_hides_withdraw_after_order_and_signal_after_fill(self):
         self.manual()
         result = notify.mark_sent_rounds({"strategies": [deepcopy(self.strategy)]})
         signal = result["strategies"][0]["rounds"][0]["slack_signals"][0]
         self.assertTrue(signal["manual"])
-        self.assertFalse(signal["completed"])
-        self.orders.insert_one(
-            {
-                "round": 1,
-                "side": "buy",
-                "slack": {"thread_ts": "1", "message_ts": "1"},
-                "status": "filled",
-                "filled_quantity": 10,
-            }
-        )
+        self.assertTrue(signal["can_withdraw"])
+        order = {"round": 1, "side": "buy", "slack": {"thread_ts": "1", "message_ts": "1"}}
+        self.orders.insert_one({**order, "status": "pending", "filled_quantity": 4})
         result = notify.mark_sent_rounds({"strategies": [deepcopy(self.strategy)]})
-        self.assertTrue(result["strategies"][0]["rounds"][0]["slack_signals"][0]["completed"])
+        self.assertFalse(result["strategies"][0]["rounds"][0]["slack_signals"][0]["can_withdraw"])
+        self.orders.update_one({"slack.message_ts": "1"}, {"$set": {"status": "filled", "filled_quantity": 10}})
+        result = notify.mark_sent_rounds({"strategies": [deepcopy(self.strategy)]})
+        self.assertEqual(result["strategies"][0]["rounds"][0]["slack_signals"], [])
 
     def test_filled_message_does_not_block_other_automatic_message(self):
         self.manual()

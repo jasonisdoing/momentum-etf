@@ -158,10 +158,24 @@ def open_signal_threads(active_roots: set[str]) -> list[dict[str, Any]]:
 def _signal_thread_has_orders(signal_ts: str) -> bool:
     from utils.strategy_trade_orders import _orders
 
-    if _orders().find_one({"slack.thread_ts": signal_ts}, {"_id": 1}) is not None:
-        mark_signal_thread_used(signal_ts)
-        return True
-    return False
+    return _orders().find_one({"slack.thread_ts": signal_ts}, {"_id": 1}) is not None
+
+
+def _withdrawable_root(signal_ts: str) -> dict[str, Any]:
+    return {
+        "thread_ts": signal_ts,
+        "ts": signal_ts,
+        "signal_entries": {"$exists": True},
+        "signal_used": {"$ne": True},
+        "withdrawal_text": {"$exists": False},
+    }
+
+
+def can_withdraw_signal(signal_ts: str) -> bool:
+    """화면에서 회수 가능한 신호인지 기존 주문과 신호 상태로 판정한다."""
+    return _messages().find_one(
+        _withdrawable_root(signal_ts), {"_id": 1}
+    ) is not None and not _signal_thread_has_orders(signal_ts)
 
 
 #: 회수 사유 — 슬랙 회수 한 줄에 들어가는 표시 문구의 단일 소스.
@@ -202,10 +216,11 @@ def withdraw_signal(signal_ts: str, reason: str, detail: str | None) -> bool:
     if reason != "manual" and any(e.get("origin") == "manual" for e in record["signal_entries"]):
         return False
     if _signal_thread_has_orders(signal_ts):
+        mark_signal_thread_used(signal_ts)
         return False
     note = withdrawal_line(record["signal_entries"], reason, detail, datetime.now(UTC))
     claimed = _messages().update_one(
-        {**root, "signal_used": {"$ne": True}, "withdrawal_text": {"$exists": False}},
+        _withdrawable_root(signal_ts),
         {"$set": {"withdrawal_text": note}},
     )
     if not claimed.matched_count:
