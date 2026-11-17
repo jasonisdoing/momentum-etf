@@ -472,6 +472,7 @@ def mix_positions(account_id: str | None = None) -> dict[str, Any]:
         refill_pct=ctx["mix_refill_pct"],
         cash_balance=capital.account["cash_balance"] / capital.krw_rate,
         currency=ctx["currency"],
+        krw_rate=capital.krw_rate,
         adjustment_day=dates.adjustment_day,
         adjustment_intraday=dates.adjustment_intraday,
         today=dates.today,

@@ -9,6 +9,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from utils.formatters import format_price
+
 _WEEKDAYS_KO = ("월", "화", "수", "목", "금", "토", "일")
 
 
@@ -27,7 +29,7 @@ def _is_forecast(slot: dict[str, Any], event: dict[str, Any]) -> bool:
     return bool(slot.get("live")) and not event.get("fill_date")
 
 
-def _action_reasons(ticker: str, side: str, actions: dict[str, Any]) -> list[dict[str, str]]:
+def _action_reasons(ticker: str, side: str, actions: dict[str, Any]) -> list[str]:
     """주문 원인을 추측하지 않고 엔진 이벤트와 배분 일정만 함께 표시한다."""
     reasons = []
     for slot in actions["slots"].values():
@@ -36,16 +38,10 @@ def _action_reasons(ticker: str, side: str, actions: dict[str, Any]) -> list[dic
         if events:
             signal = "진입" if side == "buy" else "청산"
             forecast = " 예상" if all(_is_forecast(slot, row) for row in events) else ""
-            reasons.append({"code": "strategy_signal", "label": f"{slot['label']} {signal}{forecast}"})
+            reasons.append(f"{slot['label']} {signal}{forecast}")
         for trade in slot.get("engine_trades", []):
             if trade["ticker"] == ticker and trade["side"] == side:
-                reasons.append(
-                    {
-                        "code": "engine_trade",
-                        "label": f"{slot['label']} {trade['date']} 엔진 {trade['reason']} 반영",
-                    }
-                )
-    reasons.append({"code": "target_difference", "label": "목표 수량과 실제 보유 차이"})
+                reasons.append(f"{slot['label']} {trade['date']} 엔진 {trade['reason']} 반영")
     return reasons
 
 
@@ -61,7 +57,8 @@ def build_action_groups(
     adjustment_day: str | None = None,
     adjustment_intraday: bool = False,
     today: str | None = None,
-    currency: str = "KRW",
+    currency: str,
+    krw_rate: float,
 ) -> list[dict[str, Any]]:
     """날짜별 엔진 목표 차이를 주문으로 만든다. 이후 주문은 앞선 목표 달성을 전제로 한다.
 
@@ -73,6 +70,8 @@ def build_action_groups(
     실행일이 오늘이면 "today"(오늘의 액션: 개장 전 시가 체결·장중 지금 주문), 그 뒤면
     "later"(내일의 액션 — 다음 거래일, 연휴면 실제로는 며칠 뒤). 화면은 두 섹션으로
     나눠 보여주고, 슬랙 알람은 "today" 만 보낸다. 미지정(None)이면 전부 "later" 다."""
+    if not math.isfinite(krw_rate) or krw_rate <= 0:
+        raise ValueError(f"{currency} 원화 환산 환율이 올바르지 않습니다.")
     baseline_day = adjustment_day or next_trading_day
     # 다른 종목의 오늘 주문 때문에 미래 진입 종목을 오늘의 0주 목표로 먼저 청산하지 않는다.
     first_event: dict[str, str] = {}
@@ -141,7 +140,7 @@ def build_action_groups(
             refill_pct=refill_pct,
             cash_balance=projected_cash,
         )
-        stage_groups = _build_action_group_stage(stage_rows, stage_actions, day, currency=currency)
+        stage_groups = _build_action_group_stage(stage_rows, stage_actions, day, currency=currency, krw_rate=krw_rate)
         if projected_cash < -0.01 and stage_groups:
             # 체결가·수수료를 추정해 목표를 줄이지 않는다. 부족분은 주문과 함께 명시한다.
             stage_groups[0]["funding_warning"] = (
@@ -198,7 +197,8 @@ def _build_action_group_stage(
     actions: dict[str, Any],
     next_trading_day: str | None,
     *,
-    currency: str = "KRW",
+    currency: str,
+    krw_rate: float,
 ) -> list[dict[str, Any]]:
     """공통 회수·채우기 판정을 통과한 수량을 화면·슬랙의 날짜별 문구로 만든다."""
     slots: dict[str, dict[str, Any]] = actions["slots"]
@@ -222,9 +222,8 @@ def _build_action_group_stage(
             if live_tag:
                 forecast_sell_tickers.add(row["ticker"])
 
-    def label(ticker: str, name: str, quantity: float | None) -> str:
-        base = f"{name}({ticker})"
-        return base if not quantity else f"{base} {abs(int(quantity)):,}주"
+    def describe(row: dict[str, Any], trade: int) -> str:
+        return _action_summary(row, trade, currency=currency, krw_rate=krw_rate)
 
     row_by_ticker = {row["ticker"]: row for row in holdings}
     items: list[dict[str, Any]] = []
@@ -251,24 +250,16 @@ def _build_action_group_stage(
             title = "진입(예상)" if ticker in live_entry_tickers else "진입"
         else:
             title = "신규 매수"
-        after = f" → 목표 {int(row['target_quantity']):,}주" if row.get("target_quantity") is not None else ""
-        amount = _format_trade_amount(trade, row.get("price"), currency)
-        amount_note = f" · {amount}" if amount else ""
-        if row.get("retained_excess_quantity"):
-            amount_note += f" · 목표 초과 {row['retained_excess_quantity']:,}주 허용"
+        text = describe(row, trade)
         if sell_reason_applies:
-            note = f"{after} ({reason}){amount_note}".strip()
-        elif row.get("is_sell_all"):
-            note = f"· 목표에 없는 보유 종목{amount_note}"
-        else:
-            note = f"{after} · {weight:.2f}%{amount_note}".strip()
+            text += f" · {reason}"
         items.append(
             {
                 "key": f"act-{ticker}",
                 "ticker": ticker,
                 "side": "buy" if trade > 0 else "sell",
                 "title": title,
-                "text": f"{label(ticker, row.get('name') or ticker, trade)} {note}".strip(),
+                "text": text,
                 "date": date,
                 # 알람 비교용 — 새 지시·수량 증가만 발송하고 감소(체결 반영)는 조용히 넘긴다.
                 "quantity": abs(int(trade)),
@@ -283,32 +274,25 @@ def _build_action_group_stage(
         row = row_by_ticker.get(ticker)
         if not row or float(row.get("held_quantity") or 0) <= 0 or float(row.get("weight_pct") or 0) > 0:
             continue
+        quantity = int(row["held_quantity"])
         items.append(
             {
                 "key": f"act-{ticker}",
                 "ticker": ticker,
                 "side": "sell",
                 "title": "매도 예정",
-                "text": (
-                    f"{label(ticker, row.get('name') or ticker, row.get('held_quantity'))}"
-                    f" ({sell_reason.get(ticker) or '이탈'})"
-                    + (
-                        f" · {amt}"
-                        if (amt := _format_trade_amount(row.get("held_quantity"), row.get("price"), currency))
-                        else ""
-                    )
-                ),
+                "text": f"{describe(row, -quantity)} · {sell_reason[ticker]}",
                 "date": next_trading_day,
-                "quantity": abs(int(float(row.get("held_quantity") or 0))),
+                "quantity": quantity,
             }
         )
         seen_keys.add(f"act-{ticker}")
 
     by_date: dict[str, list[dict[str, Any]]] = {}
     for item in items:
-        item["reasons"] = _action_reasons(item["ticker"], item["side"], actions)
-        reason_text = " · ".join(reason["label"] for reason in item["reasons"])
-        item["text"] += f" · 사유: {reason_text}"
+        reasons = _action_reasons(item["ticker"], item["side"], actions)
+        if reasons:
+            item["text"] += f" · {' · '.join(reasons)}"
         by_date.setdefault(item["date"] or "", []).append(item)
     # 그룹 안 순서는 **보유 표(그리드) 순서** 그대로다(2026-09) — 예전에는 매도 먼저·티커순
     # 이었는데, 표에서 종목을 찾아가며 주문하기에는 표와 같은 순서가 읽기 쉽다.
@@ -340,7 +324,6 @@ def _build_action_group_stage(
 
     confirmed_sells = {item["ticker"] for group in groups for item in group["items"] if item["side"] == "sell"}
     forecast_items = []
-    forecast_slot_by_ticker: dict[str, str] = {}
     for key, row in forecast_rows:
         ticker = row["ticker"]
         held = row_by_ticker.get(ticker)
@@ -358,17 +341,13 @@ def _build_action_group_stage(
             continue
         both = slot_weight > 0 and (weight_all - slot_weight) > 0
         reason = f"{row.get('reason')} · {slots[key]['label']} 몫" if both else str(row.get("reason"))
-        forecast_slot_by_ticker[ticker] = key
         forecast_items.append(
             {
                 "key": f"forecast-{ticker}",
                 "ticker": ticker,
                 "side": "sell",
                 "title": "매도 예정(예상)",
-                "text": (
-                    f"{label(ticker, row.get('name') or ticker, slot_qty)} ({reason})"
-                    + (f" · {amt}" if (amt := _format_trade_amount(slot_qty, held.get("price"), currency)) else "")
-                ),
+                "text": f"{describe(held, -slot_qty)} · {reason}",
                 "date": next_trading_day,
                 # 알람 상태 비교용 — 예상도 '처음 등장할 때 1건' 발송되도록 실제 수량을 싣는다.
                 "quantity": abs(slot_qty),
@@ -403,19 +382,26 @@ def _build_action_group_stage(
     return groups
 
 
-def _format_trade_amount(quantity: float | None, price: float | None, currency: str) -> str:
-    """지시 금액 표기 — 원화는 'N억 1,234만원', 미국·호주는 현지 통화($ / A$)."""
-    if not quantity or not price or float(price) <= 0:
-        return ""
-    amount = abs(float(quantity)) * float(price)
-    code = str(currency or "KRW").strip().upper()
-    if code == "KRW":
-        if amount >= 1_0000_0000:
-            uk = int(amount // 1_0000_0000)
-            man = int(round((amount - uk * 1_0000_0000) / 1_0000))
-            return f"{uk}억 {man:,}만원" if man else f"{uk}억원"
-        if amount >= 1_0000:
-            return f"{int(round(amount / 1_0000)):,}만원"
-        return f"{amount:,.0f}원"
-    symbol = {"USD": "$", "AUD": "A$"}.get(code, f"{code} ")
-    return f"{symbol}{amount:,.0f}"
+def _action_summary(row: dict[str, Any], trade: int, *, currency: str, krw_rate: float) -> str:
+    """같은 기준가로 이번 주문 금액과 주문 후 예상 평가액을 표시한다."""
+    ticker = row["ticker"]
+    name = row.get("name")
+    label = f"{name}({ticker})" if name and name != ticker else ticker
+    price = row.get("price")
+    after = int(row["held_quantity"]) + trade
+    order_amount = _action_value(abs(trade), price, currency=currency, krw_rate=krw_rate)
+    after_amount = _action_value(after, price, currency=currency, krw_rate=krw_rate)
+    return (
+        f"{label} · {abs(trade):,}주 × {format_price(price, currency)} = {order_amount}"
+        f" → 주문 후 예상 {after:,}주 · {after_amount}"
+    )
+
+
+def _action_value(quantity: int, price: float | None, *, currency: str, krw_rate: float) -> str:
+    if price is None and quantity != 0:
+        return "-"
+    amount = quantity * float(price) if quantity else 0
+    display = format_price(amount, currency)
+    if currency != "KRW":
+        return f"{display} (약 {format_price(amount * krw_rate, 'KRW')})"
+    return display

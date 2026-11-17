@@ -531,6 +531,10 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
             actions,
             "2026-09-07",
             currency="USD",
+            krw_rate=1400,
+            harvest_pct=0,
+            refill_pct=0,
+            cash_balance=10000,
             target_schedule={
                 "2026-09-04": {
                     "quantities": {"T2": 1},
@@ -549,7 +553,7 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
         items = {item["ticker"]: item for group in groups for item in group["items"]}
         for ticker in ("T1", "T2"):
             self.assertEqual(items[ticker]["date"], result["as_of"])
-            self.assertNotIn("예상", items[ticker]["title"] + items[ticker]["text"])
+            self.assertNotIn("예상", items[ticker]["title"] + items[ticker]["text"].replace("주문 후 예상", ""))
         self.assertEqual(items["T4"]["date"], "2026-09-07")
         self.assertIn("예상", items["T4"]["title"])
         # 같은 종목의 날짜별 목표를 슬리브 배분에서 산출한다. 실제 보유는 차이 계산에만 쓴다.
@@ -602,7 +606,15 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
                     }
                 ]
                 groups = build_action_groups(
-                    rows, {"slots": event_slots}, "2026-09-07", target_schedule=schedule, currency="USD"
+                    rows,
+                    {"slots": event_slots},
+                    "2026-09-07",
+                    target_schedule=schedule,
+                    currency="USD",
+                    krw_rate=1400,
+                    harvest_pct=0,
+                    refill_pct=0,
+                    cash_balance=10000,
                 )
                 orders = [item for group in groups for item in group["items"]]
                 self.assertEqual(
@@ -610,14 +622,22 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
                 )
                 self.assertEqual([item["date"] for item in orders], ["2026-09-04", "2026-09-07"])
                 self.assertEqual(len({item["key"] for item in orders}), 2)
-                self.assertNotIn("예상", orders[0]["text"])
-                self.assertIn("예상", orders[1]["text"])
+                self.assertNotIn("예상", orders[0]["text"].replace("주문 후 예상", ""))
+                self.assertIn("예상", orders[1]["text"].replace("주문 후 예상", ""))
                 self.assertEqual(held_qty + sum(expected_trades), final.get("SAME", 0))
                 if first_plan == second_plan == "buy":
                     complete = [{**rows[0], "held_quantity": final["SAME"]}]
                     self.assertEqual(
                         build_action_groups(
-                            complete, {"slots": event_slots}, "2026-09-07", target_schedule=schedule, currency="USD"
+                            complete,
+                            {"slots": event_slots},
+                            "2026-09-07",
+                            target_schedule=schedule,
+                            currency="USD",
+                            krw_rate=1400,
+                            harvest_pct=0,
+                            refill_pct=0,
+                            cash_balance=10000,
                         ),
                         [],
                     )
@@ -625,7 +645,15 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
                 # 앞선 목표를 이미 맞췄다면 다음 날짜 주문만 남고 키·수량도 유지된다.
                 rows[0]["held_quantity"] = schedule["2026-09-04"]["quantities"].get("SAME", 0)
                 remaining = build_action_groups(
-                    rows, {"slots": event_slots}, "2026-09-07", target_schedule=schedule, currency="USD"
+                    rows,
+                    {"slots": event_slots},
+                    "2026-09-07",
+                    target_schedule=schedule,
+                    currency="USD",
+                    krw_rate=1400,
+                    harvest_pct=0,
+                    refill_pct=0,
+                    cash_balance=10000,
                 )
                 remaining_items = [item for group in remaining for item in group["items"]]
                 self.assertEqual(len(remaining_items), 1)
@@ -665,7 +693,15 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
                     {"ticker": "139260", "price": 100, "held_quantity": already_held, "target_quantity": 34},
                 ]
                 groups = build_action_groups(
-                    rows, future_actions, "2026-09-09", target_schedule=future_schedule, currency="KRW"
+                    rows,
+                    future_actions,
+                    "2026-09-09",
+                    target_schedule=future_schedule,
+                    currency="KRW",
+                    krw_rate=1,
+                    harvest_pct=0,
+                    refill_pct=0,
+                    cash_balance=10000,
                 )
                 orders = [item for group in groups for item in group["items"] if item["ticker"] == "139260"]
                 if difference == 0:
@@ -689,6 +725,10 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
                 "2026-09-07",
                 target_schedule=schedule,
                 currency="USD",
+                krw_rate=1400,
+                harvest_pct=0,
+                refill_pct=0,
+                cash_balance=10000,
             ),
             [],
         )
@@ -712,6 +752,9 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
             target_schedule=schedule,
             harvest_pct=20,
             currency="USD",
+            krw_rate=1400,
+            refill_pct=0,
+            cash_balance=10000,
         )
         self.assertEqual(schedule, original_schedule)
         self.assertEqual(rows, original_rows)
