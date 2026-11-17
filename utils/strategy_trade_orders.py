@@ -32,6 +32,7 @@ from services.broker_trade_service import (
 )
 from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
 from utils.db_manager import get_db_connection
+from utils.market_session import is_instrument_trading_time
 from utils.strategy_trade_config import round_buy_quantity
 from utils.strategy_trade_ledger import REGULAR_SELL, is_buy
 from utils.strategy_trade_market import (
@@ -196,7 +197,7 @@ def order_limit_usage(account_id: str) -> dict[str, Any]:
 
 
 def _require_order_allowed(account_id: str, env: str, amount: int, count: int) -> None:
-    """운영 계좌의 주문 안전 장치 — 계좌의 API 주문 스위치, 정규장, 하루 주문 건수·금액 한도. 모의 계좌는 막지 않는다.
+    """운영 계좌의 주문 안전 장치 — 계좌의 API 주문 스위치와 하루 주문 건수·금액 한도. 모의 계좌는 막지 않는다.
 
     ``count`` 는 이번에 낼 주문 건수(매도 후 재매수는 2건), ``amount`` 는 이번 주문의 순금액(종목 통화)이다 — 매수는 +, 매도는 −.
     금액 한도는 원화로 입력하며, 오늘 API 로 낸 주문의 순매수(매수 − 매도, 0 미만은 0)를 원화로 환산해 비교한다.
@@ -252,6 +253,7 @@ def resolve_order(
     if side not in ("buy", "sell"):
         raise BrokerApiError(f"알 수 없는 주문 구분입니다: {side}")
     strategy = _order_strategy(account_id, pool, strategy_id, fresh=fresh)
+    require_order_session(strategy, now=_now())
     _require_no_manual_order(strategy, side)
     signal_price = None
     target_round = round_no
@@ -291,7 +293,7 @@ def resolve_order(
 
 def resolve_order_quote(strategy: dict[str, Any], side: str) -> tuple[str, str, int | float]:
     """단건 주문은 공통 거래소 판정과 상대 1호가를 사용한다."""
-    venue = _order_venue(strategy)
+    venue = _order_venue(strategy, now=_now())
     quote = fetch_best_quote(strategy["account_id"], strategy["ticker"], venue)
     label, price = ("매도 1호가", quote["ask"]) if side == "buy" else ("매수 1호가", quote["bid"])
     _require_valid_quote(strategy, label, price)
@@ -311,10 +313,16 @@ def _buy_quantity(strategy: dict[str, Any], price: int, account_id: str) -> int:
     return quantity
 
 
-def _order_venue(strategy: dict[str, Any]) -> str:
+def require_order_session(instrument: dict[str, Any], *, now: datetime) -> None:
+    """수동 신호 발송과 주문 확인은 종목별 공통 거래 시간을 따른다."""
+    if not is_instrument_trading_time(instrument["country"], instrument["instrument_kind"], now=now):
+        raise BrokerApiError("지금은 이 종목의 거래 시간이 아닙니다.")
+
+
+def _order_venue(strategy: dict[str, Any], *, now: datetime) -> str:
     """지금 이 전략 종목에 주문을 낼 거래소(국장 KRX·NXT, 미장은 종목의 거래소 코드) — 거래 시간 밖이면 주문할 수 없어 막는다."""
     try:
-        return order_venue(strategy["country"], strategy["instrument_kind"], strategy.get("exchange"), now=_now())
+        return order_venue(strategy["country"], strategy["instrument_kind"], strategy.get("exchange"), now=now)
     except ValueError as exc:
         raise BrokerApiError(f"{strategy['label']}: {exc}") from exc
 
@@ -348,12 +356,13 @@ def resolve_swap(account_id: str, pool: str, strategy_id: str, round_no: int, *,
     (`rebuy_after_sell`). 매도는 회차의 남은 수량, 재매수는 회차 금액과 매수 1호가로 계산한다.
     """
     strategy = _order_strategy(account_id, pool, strategy_id, fresh=fresh)
+    require_order_session(strategy, now=_now())
     _require_no_manual_order(strategy, "sell")
     _require_no_manual_order(strategy, "buy")
     row = _require_round_state(strategy, "sell", round_no)
     if not row["rebuy_after_sell"]:
         raise RoundNotOrderableError(f"{strategy['label']} {round_no}호는 매도 후 재매수 대상이 아닙니다.", done=False)
-    venue = _order_venue(strategy)
+    venue = _order_venue(strategy, now=_now())
     quote = fetch_best_quote(strategy["account_id"], strategy["ticker"], venue)
     _require_valid_quote(strategy, "매도 1호가", quote["ask"])
     _require_valid_quote(strategy, "매수 1호가", quote["bid"])
@@ -482,6 +491,9 @@ def _record_base(
 def submit_order_record(base: dict[str, Any], side: str, price: int | float) -> dict[str, Any]:
     """기록을 남기고 증권사에 지정가 주문을 보낸다 → 기록(직렬화). 실패는 기록에 남기고 그대로 올린다."""
     now = _now()
+    instrument = {**base, "label": base["strategy_label"], "exchange": base["venue"]}
+    if _order_venue(instrument, now=now) != base["venue"]:
+        raise BrokerApiError("주문 거래소가 바뀌었습니다. 호가를 다시 확인하세요.")
     doc = {
         **base,
         "side": side,

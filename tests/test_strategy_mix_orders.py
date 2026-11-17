@@ -1,9 +1,11 @@
 """합성 액션의 Slack 발송과 기존 주문 스레드 연결을 외부 접속 없이 검증한다."""
 
 import json
+from datetime import datetime
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
+from zoneinfo import ZoneInfo
 
 from services.broker_api_service import BrokerApiError, OrderUncertainError
 from utils import slack_mock_orders as slack
@@ -61,7 +63,9 @@ class MixOrderTest(TestCase):
             patch.object(mix, "mix_positions", return_value=self.positions),
             patch.object(mix, "account_env", return_value="live"),
             patch.object(mix, "_require_order_allowed"),
-            patch.object(mix, "market_session", return_value={"session": mix.REGULAR}),
+            patch.object(mix, "account_country", return_value="kor"),
+            patch.object(order_store, "is_instrument_trading_time", return_value=True),
+            patch.object(order_store, "_order_venue", return_value="KRX"),
             patch.object(mix, "fetch_broker_balance", return_value=self.balance),
             patch.object(mix, "list_day_orders", return_value=[]),
             patch.object(mix, "resolve_ticker_meta", return_value={"is_etf": True, "name": "종목"}),
@@ -138,6 +142,50 @@ class MixOrderTest(TestCase):
                 mix.mix_order_signals("a1", [self.group]),
                 {"action": {"state": "sent", "withdraw_key": None}},
             )
+
+    def test_closed_session_blocks_send_and_previously_sent_order(self):
+        with (
+            patch.object(order_store, "is_instrument_trading_time", return_value=False),
+            patch.object(mix, "send_thread_message") as send,
+            patch.object(mix, "resolve_order_quote") as quote,
+            patch.object(mix, "submit_order_record") as submit,
+        ):
+            with self.assertRaisesRegex(BrokerApiError, "거래 시간이 아닙니다"):
+                mix.send_mix_order_signal.__wrapped__("a1", "action", "buy", 36)
+            with self.assertRaisesRegex(BrokerApiError, "거래 시간이 아닙니다"):
+                mix.resolve_mix_order(self.request, "root")
+            with self.assertRaisesRegex(BrokerApiError, "거래 시간이 아닙니다"):
+                mix.place_mix_order(self.request, self.target, {}, "view")
+        send.assert_not_called()
+        quote.assert_not_called()
+        submit.assert_not_called()
+
+    def test_us_extended_sessions_use_common_schedule(self):
+        from utils.market_session import is_instrument_trading_time
+
+        zone = ZoneInfo("America/New_York")
+        self.positions["country"] = "us"
+        for hour, minute in ((7, 0), (17, 0), (21, 0)):
+            with (
+                self.subTest(hour=hour),
+                patch.object(mix, "account_country", return_value="us"),
+                patch.object(mix, "_now", return_value=datetime(2026, 11, 17, hour, minute, tzinfo=zone)),
+                patch("utils.trading_calendar.get_trading_days", return_value=[True]),
+                patch.object(order_store, "is_instrument_trading_time", side_effect=is_instrument_trading_time),
+                patch.object(mix, "resolve_us_exchange", return_value="OQ"),
+            ):
+                self.assertEqual(mix.resolve_mix_order(self.request, "root")["quantity"], 36)
+
+    def test_submit_rechecks_venue_after_confirmation(self):
+        with (
+            patch.object(order_store, "_order_venue", return_value="KRX"),
+            patch.object(order_store, "_orders") as records,
+            patch.object(order_store, "place_limit_order") as place,
+        ):
+            with self.assertRaisesRegex(BrokerApiError, "거래소가 바뀌었습니다"):
+                order_store.submit_order_record({"venue": "NXT", "strategy_label": "종목"}, "buy", 100)
+        records.assert_not_called()
+        place.assert_not_called()
 
     def test_tomorrows_action_cannot_be_ordered(self):
         self.group["section"] = "later"

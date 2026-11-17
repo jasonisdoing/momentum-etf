@@ -130,6 +130,7 @@ class ManualSignalsTest(TestCase):
             patch.object(notify, "_save_sent_log", side_effect=self.save),
             patch.object(notify, "build_message", return_value="신호"),
             patch.object(orders, "find_duplicate_order", return_value=None),
+            patch.object(orders, "is_instrument_trading_time", return_value=True),
             patch.object(orders, "active_order_keys", return_value=set()),
             patch.object(notify, "refresh_all_ledgers", return_value={}),
             patch.object(notify, "_slack_enabled_accounts", return_value={"a1"}),
@@ -297,6 +298,22 @@ class ManualSignalsTest(TestCase):
         self.assertFalse(threads.reserve_signal_for_order("1", "1"))
         self.assertTrue(self.manual()["sent"])
         self.assertEqual(self.sender.call_count, 2)
+
+    def test_closed_session_blocks_preview_send_and_existing_slack_order(self):
+        preview = notify.preview_manual_signal(self.payload)
+        with (
+            patch.object(orders, "is_instrument_trading_time", return_value=False),
+            patch.object(orders, "fetch_best_quote") as quote,
+        ):
+            with self.assertRaisesRegex(orders.BrokerApiError, "거래 시간이 아닙니다"):
+                notify.preview_manual_signal(self.payload)
+            with self.assertRaisesRegex(orders.BrokerApiError, "거래 시간이 아닙니다"):
+                notify.send_manual_signal(preview)
+            with self.assertRaisesRegex(orders.BrokerApiError, "거래 시간이 아닙니다"):
+                orders.resolve_order("a1", "test", "s1", "buy", 1, fresh=False)
+        self.sender.assert_not_called()
+        quote.assert_not_called()
+        self.assertFalse(self.sent)
 
     def test_manual_sell_is_single_sell_and_only_last_round(self):
         self.strategy["status"]["held_count"] = 1

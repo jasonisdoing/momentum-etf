@@ -1,8 +1,9 @@
 """전략 사고팔기(분할 매수/매도) 운용 현황 API — 계좌별 종목 전략."""
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from fastapi_app.dependencies import require_internal_token
+from services.broker_api_service import BrokerApiError
 from utils.strategy_trade_notify import mark_sent_rounds, preview_manual_signal, send_manual_signal, send_test
 from utils.strategy_trade_orders import order_limit_usage
 from utils.strategy_trade_service import (
@@ -89,10 +90,16 @@ def post_strategy_trade_slack_test(
 @router.post("/manual-signal/preview")
 def post_manual_signal_preview(payload: dict = Body(...), _: None = Depends(require_internal_token)) -> dict:
     """회차 신호의 계좌·종목·가격·수량을 서버에서 확인한다."""
-    return preview_manual_signal(payload)
+    try:
+        return preview_manual_signal(payload)
+    except BrokerApiError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/manual-signal")
 def post_manual_signal(payload: dict = Body(...), _: None = Depends(require_internal_token)) -> dict:
     """확인한 수동 신호를 Slack으로만 보낸다."""
-    return send_manual_signal(payload)
+    try:
+        return send_manual_signal(payload)
+    except BrokerApiError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

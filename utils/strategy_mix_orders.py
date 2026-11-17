@@ -5,9 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from services.broker_api_service import BrokerApiError, OrderUncertainError, fetch_broker_balance
-from services.broker_trade_service import account_env, list_day_orders, resolve_us_exchange
+from services.broker_trade_service import account_country, account_env, list_day_orders, resolve_us_exchange
 from utils.db_manager import get_db_connection
-from utils.market_session import REGULAR, market_session
 from utils.settings_loader import get_account_settings, get_slack_channel
 from utils.strategy_mix_notify import format_action_message
 from utils.strategy_mix_positions import mix_positions
@@ -19,6 +18,7 @@ from utils.strategy_trade_orders import (
     _orders,
     _require_order_allowed,
     register_signal_thread,
+    require_order_session,
     resolve_order_quote,
     submit_order_record,
 )
@@ -162,6 +162,19 @@ def mix_order_signals(account_id: str, groups: list[dict]) -> dict[str, dict[str
     return result
 
 
+def _mix_order_instrument(account_id: str, ticker: str, country: str) -> dict:
+    meta = resolve_ticker_meta(f"{country.upper()}:{ticker}")
+    instrument = {
+        "account_id": account_id,
+        "ticker": ticker,
+        "country": country,
+        "label": meta["name"],
+        "instrument_kind": "etf" if meta["is_etf"] else "stock",
+    }
+    require_order_session(instrument, now=_now())
+    return instrument
+
+
 @signal_lock()
 def send_mix_order_signal(account_id: str, action_key: str, side: str, quantity: int) -> dict:
     """웹에서 다시 확인한 오늘의 지시 한 건을 Slack 주문 스레드로 보낸다."""
@@ -172,6 +185,7 @@ def send_mix_order_signal(account_id: str, action_key: str, side: str, quantity:
         raise BrokerApiError("오늘의 액션이 바뀌었습니다. 새로 불러온 뒤 확인하세요.")
     env = _require_live_account(account_id)
     ticker, country = item["ticker"], positions["country"]
+    instrument = _mix_order_instrument(account_id, ticker, country)
     key = _signal_id(account_id, ticker)
     collection = _signals()
     current = collection.find_one({"_id": key})
@@ -202,6 +216,7 @@ def send_mix_order_signal(account_id: str, action_key: str, side: str, quantity:
         "mix_action_key": action_key,
     }
     account_name = get_account_settings(account_id).get("name") or account_id
+    require_order_session(instrument, now=_now())
     collection.replace_one(
         {"_id": key},
         {
@@ -228,24 +243,15 @@ def resolve_mix_order(request: dict[str, Any], thread_ts: str) -> dict:
     """합성의 최신 지시와 증권사 잔고·호가로 확인창에 표시할 주문을 계산한다."""
     _current_signal(request, thread_ts)
     account_id, side, ticker = request["account_id"], request["side"], request["ticker"]
+    country = account_country(account_id)
+    instrument = _mix_order_instrument(account_id, ticker, country)
     positions, _, item = _today_action(account_id, request["mix_action_key"])
     if item["side"] != side or item["ticker"] != ticker:
         raise RoundNotOrderableError("오늘의 액션 방향이 달라졌습니다.", done=False)
     env = _require_live_account(account_id)
-    country = positions["country"]
-    if market_session(country, now=_now())["session"] != REGULAR:
-        raise BrokerApiError("합성 주문은 해당 시장 정규장에만 가능합니다.")
     _require_no_open_order(account_id, ticker, country)
     balance = _checked_balance(positions, ticker)
-    meta = resolve_ticker_meta(f"{country.upper()}:{ticker}")
-    instrument = {
-        "account_id": account_id,
-        "ticker": ticker,
-        "country": country,
-        "label": meta["name"],
-        "instrument_kind": "etf" if meta["is_etf"] else "stock",
-        "exchange": resolve_us_exchange(account_id, ticker) if country == "us" else None,
-    }
+    instrument["exchange"] = resolve_us_exchange(account_id, ticker) if country == "us" else None
     venue, quote_label, price = resolve_order_quote(instrument, side)
     quantity = item["quantity"]
     amount = price * quantity
@@ -261,7 +267,7 @@ def resolve_mix_order(request: dict[str, Any], thread_ts: str) -> dict:
         "mix_action_key": request["mix_action_key"],
         "ticker": ticker,
         "instrument_kind": instrument["instrument_kind"],
-        "strategy_label": meta["name"],
+        "strategy_label": instrument["label"],
         "country": country,
         "quantity": quantity,
         "price": price,

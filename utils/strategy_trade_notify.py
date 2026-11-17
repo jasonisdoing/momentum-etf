@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from config import INSTRUMENT_TRADING_WINDOWS
 from utils.logger import get_app_logger
-from utils.market_session import REGULAR, is_instrument_trading_time, market_session
+from utils.market_session import is_instrument_trading_time
 from utils.order_confirm import build_confirm_line, pop_filled
 from utils.strategy_trade_market import format_level, format_money
 from utils.strategy_trade_service import load_settings, load_views_where, refresh_all_ledgers
@@ -477,7 +477,7 @@ def _send_order_messages(strategy_view: dict[str, Any], triggers: list[dict[str,
     """신호 메시지(signal_ts)에 실린 신호의 회차별 주문 메시지를 그 스레드로 보낸다(주문이 이미 있는 회차는 제외) — 신호 메시지는 이미 나갔으므로 실패해도 신호는 유지하고 실패 건수를 돌려준다."""
     from utils.slack_mock_orders import send_signal_order_messages
 
-    if not triggers or not _orders_allowed(strategy_view, datetime.now(KST)):
+    if not triggers:
         return 0
     try:
         send_signal_order_messages(strategy_view, triggers, signal_ts)
@@ -515,14 +515,6 @@ def _log_entry(trigger: dict[str, Any], held_counts: dict[str, int], stamp: str,
 
 def _can_notify(strategy_view: dict[str, Any], now: datetime) -> bool:
     return is_instrument_trading_time(strategy_view["country"], strategy_view["instrument_kind"], now=now)
-
-
-def _orders_allowed(strategy_view: dict[str, Any], now: datetime) -> bool:
-    """주문 메시지를 붙일 수 있는 때 — 국장은 정규장만, 미장은 프리·정규·애프터·데이장 모두 거래 시간이면 된다."""
-    country = strategy_view["country"]
-    if country == "kor":
-        return market_session("kor", now=now)["session"] == REGULAR
-    return _can_notify(strategy_view, now)
 
 
 def _session_closed(strategy_view: dict[str, Any], now: datetime) -> bool:
@@ -864,7 +856,12 @@ def _manual_signal(payload: dict[str, Any], *, fresh: bool) -> tuple[dict[str, A
     from copy import deepcopy
     from hashlib import sha256
 
-    from utils.strategy_trade_orders import _order_strategy, _require_no_manual_order, _require_round_state
+    from utils.strategy_trade_orders import (
+        _order_strategy,
+        _require_no_manual_order,
+        _require_round_state,
+        require_order_session,
+    )
 
     account_id, sid = payload.get("account_id"), payload.get("strategy_id")
     side, round_no = payload.get("side"), payload.get("round")
@@ -879,6 +876,7 @@ def _manual_signal(payload: dict[str, Any], *, fresh: bool) -> tuple[dict[str, A
     if setting is None or setting["account_id"] != account_id:
         raise ValueError("계좌의 전략을 찾을 수 없습니다.")
     strategy = _order_strategy(account_id, setting["pool"], sid, fresh=fresh)
+    require_order_session(strategy, now=datetime.now(KST))
     row = _require_round_state(strategy, side, round_no)
     _require_no_manual_order(strategy, side)
     if row["quantity"] <= 0 or (side == "buy" and (row["cash_short"] or row["budget_short"])):
@@ -919,7 +917,7 @@ def preview_manual_signal(payload: dict[str, Any]) -> dict[str, Any]:
 def send_manual_signal(payload: dict[str, Any]) -> dict[str, Any]:
     """서버 선점 뒤 Slack 메시지만 발송한다. 증권사 주문은 Slack 확인 경로만 사용한다."""
     from utils.slack_mock_orders import send_signal_order_messages
-    from utils.strategy_trade_orders import find_duplicate_order
+    from utils.strategy_trade_orders import find_duplicate_order, require_order_session
     from utils.strategy_trade_threads import complete_signal_thread, record_signal_thread, send_thread_message
 
     strategy, trigger, preview = _manual_signal(payload, fresh=True)
@@ -938,6 +936,7 @@ def send_manual_signal(payload: dict[str, Any]) -> dict[str, Any]:
         sent_log.pop(_trigger_key(previous), None)
     if find_duplicate_order(strategy["account_id"], strategy["strategy_id"], trigger["action"]) is not None:
         raise ValueError("같은 방향의 주문이 진행 중입니다.")
+    require_order_session(strategy, now=datetime.now(KST))
     held_counts = {strategy["strategy_id"]: strategy["status"]["held_count"]}
     entry = _log_entry(trigger, held_counts, datetime.now(KST).isoformat(), "")
     sent_log[key] = entry
