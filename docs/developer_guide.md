@@ -41,7 +41,7 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 | `/strategy-mix` | 계좌 평가액 기준 합성 운용 — 회수·채우기(합성 백테스트 없음, 백테스트는 각 전략 화면에만 있다) | `utils/strategy_mix_service.py`(계좌·슬리브 설정), `utils/strategy_mix_positions.py`(목표·액션), `utils/mix_sleeve.py`(전략별 현재 상태 어댑터) |
 | `/strategy-trade` | 계좌별 분할 매매 전략(합성과 별도, 백테스트 없음). 설정은 `system_config.strategy_trade_settings`, 판단·가격·호가는 `core/strategy/trade/rules.py`와 `strategy_trade_market.py`가 단일 소스다. 회차는 증권사 체결을 재생한 원장(`strategy_trade_ledgers`)으로 정하며, 기준점(`strategy_trade_ledger_anchors`)·일별 체결(`strategy_trade_day_fills`)을 계좌별로 보관한다. 배치는 원장을 갱신하고 화면은 저장본을 읽으며 실제 주문 직전에는 다시 검증한다. 잔고와 원장이 맞지 않으면 오류로 막는다. 자동·수동 신호는 같은 Slack 주문·회수 경로를 사용하며 수동 발송 API는 증권사 주문을 실행하지 않는다. | `utils/strategy_trade_service.py`, `strategy_trade_notify.py`, `strategy_trade_threads.py`, `strategy_trade_ledger.py`, `core/strategy/trade/` |
 | `/leverage-settings` | 레버리지 이동평균 크로스 설정·튜닝 | `leverage/` |
-| `/account-settings` | 계좌 메타(숨김 `hidden` 계좌는 `load_live_account_docs`에서 빠져 자산·선택·집계·배치 어디에도 안 나오며, 현금·보유·원금이 모두 0일 때만 켠다)·증권사 연동·합성 슬리브별 종목풀·보유종목 알림 On/Off. 증권사 연동 커넥터는 `broker_api_service.PROVIDERS` 가 단일 소스다 — 나무증권은 키 하나로 여러 계좌를 보므로 연동에 증권사 계좌번호(`account_no`)를 저장하고, 메리츠증권은 키가 계좌에 묶여(`per_account_keys`, 키 이름 `{계좌ID}_API_KEY`) API 가 계좌번호를 주지 않아 사용자가 입력한 표시용 마스킹 번호(`account_mask`)만 저장한다. 메리츠는 잔고 동기화(국내·미국 계좌 — 계좌 국가와 다른 잔고, 계좌 현금 통화에 없는 예수금, 소수점 잔고는 오류로 막는다)와 국내주식 사고팔기 주문(호가·KRX 지정가·취소·주문내역, 증권사 경고 응답은 자동 재전송하지 않는다)이 붙어 있고 모의투자 서버가 없어 운영 계좌만 연동된다(`services/meritz_api_service.py`, 토큰은 `system_config` 의 `meritz_token:{계좌ID}` 로 공유). 계좌에는 구분(`env`: 운영 `live`·모의 `mock`, 만든 뒤 변경 불가)이 있고 **모의 계좌는 이 화면에만 나온다** — 계좌 목록을 쓰는 곳은 `load_live_account_docs`·`settings_loader`(운영만)를 거치며, 운영 계좌의 API 주문은 계좌 스위치·정규장·하루 건수/금액 한도를 통과해야 나간다(`strategy_trade_orders._require_order_allowed`, 모의 계좌는 적용 안 함). 모의 계좌에는 합성·사고팔기·알림을 켤 수 없고, 모의 계좌는 증권사 `03` 계좌만·운영 계좌는 그 밖만 연동된다. 사고팔기 주문 경로(잔고·호가·주문·취소·주문내역)는 계좌 ID 로 증권사를 고르는 `services/broker_trade_service.py` 하나를 거치고 주문 기록·회차 원장도 계좌 ID 로 묶는다. 계좌 행의 「API 주문」 모달은 연동된 계좌로 사고팔기 상대 1호가 지정가 주문·취소·상태 확인을 한다(모달의 직접 주문은 매도만, 매수는 슬랙 주문 메시지의 확인 모달로만) — **운영 계좌는 실제 주문이 나가며**(빨강 테두리·배지), 모의 계좌는 모의투자 서버로만 간다(초록). 나무증권 서버는 요청이 아니라 계좌 구분(`account_env`: 계좌 설정에 연동돼 있고 구분이 증권사 계좌구분 03 과 맞아야 통과)으로 정하며, SDK 는 서버를 전역 환경변수로 읽어 조회와 섞이므로 쓰지 않고 **직접 요청**한다, 주문 기록은 `strategy_trade_orders` 컬렉션. 슬랙 버튼→모달→웹훅(`/api/slack/interactions`, 로그인 제외·서명 검증은 FastAPI) 왕복도 같은 모의 주문 경로를 타며, 모든 액션(주문·취소)은 확인 모달을 거치고 메시지 버튼이 상태에 따라 바뀐다. 접수 뒤 체결·취소·거부·만료(미체결은 당일 주문이라 접수일이 지났거나 정규장이 끝났으면 만료로 본다)는 `slack_mock_order_notify` 배치(1분)가 스레드로 알리고 메시지 버튼을 걷어내며, 마감(15:30) 직전(15:20~)까지 미체결인 주문은 한 번 경고하고 취소 버튼을 다시 띄운다 | `utils/account_settings_store.py`, `utils/holdings_alarm_service.py`, `services/broker_api_service.py`, `services/meritz_api_service.py`, `services/broker_order_service.py`, `services/broker_trade_service.py`, `utils/strategy_trade_orders.py`, `utils/slack_mock_orders.py` |
+| `/account-settings` | 계좌 메타·증권사 연동·합성 슬리브·보유종목 알림. 운영 계좌 목록은 `load_live_account_docs`를 공유하며 숨김 계좌를 제외한다. 현금·보유·원금이 모두 0인 계좌만 숨길 수 있다. | `utils/account_settings_store.py`, `utils/holdings_alarm_service.py`, `services/broker_api_service.py` |
 | `/assets`, `/holdings*` | 자산·보유 | `utils/holdings_detail_service.py`, `portfolio_master` |
 | `/daily`, `/weekly`, `/monthly`, `/yearly`, `/dashboard`, `/snapshots` | 일별 원장과 집계 | `utils/daily_fund_service.py` 등 |
 | `/market-trend`, `/market-calendar`, `/market`, `/live-24h` | 시장 지수 추세·캘린더·지표 | `utils/market_trend_service.py`, `utils/market_calendar_service.py`, `services/toss_market_service.py` 등 |
@@ -59,6 +59,16 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 - 전략 시작일은 모멘텀의 `pool_settings.MOMENTUM_START_DATE`, 신고가·포트폴리오의 풀별 `start_date`에 저장한다. 검증은 `utils/strategy_settings.py`, 개별 운용 현황과 합성은 같은 저장일로 계산한다.
 - `utils/strategy_settings.py` — 선택지 밖 저장값을 첫 선택지로 보정하고 내역을 돌려준다(화면만; 배치·백테스트는 엄격 검증).
 - `utils/strategy_tuning.py` — 선택지 전 조합 백테스트의 지표·축별 평균·병렬 실행. 부모가 데이터를 프리로드해 spawn 워커에 넘기며, 서버 전체에 튜닝 하나만 허용한다. 새 실행·중단 API는 기존 프로세스 풀을 직접 종료한다.
+
+### Slack 주문과 증권사 API
+
+- 사고팔기의 Slack 주문·확인·취소는 `utils/slack_mock_orders.py`와 서명을 검증하는 `/api/slack/interactions`를 거친다. 주문은 사용자 확인 뒤 `strategy_trade_orders`에 기록한다. 접수와 체결은 별도 상태이며, `slack_mock_order_notify`는 증권사 조회 결과를 같은 스레드로 알린다. 접수 여부를 확인할 수 없으면 재전송하지 않고 기존 기록을 조회한다.
+- 계좌 ID로 증권사를 선택하는 잔고·호가·지정가 주문·취소·주문내역 경로는 `services/broker_trade_service.py`다. 연동 설정은 `broker_api_service.PROVIDERS`가 단일 소스다. 나무는 계좌번호를 저장하고 운영·모의 서버는 변경 불가능한 계좌 구분으로 결정한다. 메리츠는 계좌별 키를 쓰며 운영 계좌만 지원한다. 모의 계좌는 계좌 설정의 주문 시험에만 쓰고 합성·사고팔기 운용 계좌 목록에서 제외한다. 운영 API 주문의 계좌 스위치와 일일 한도는 `strategy_trade_orders._require_order_allowed`에서 확인한다.
+- 합성의 주문 대상·수량은 화면과 Slack 알림이 공유하는 `core/strategy/mix/actions.py`의 오늘 액션이 단일 소스다. 사고팔기는 회차 원장으로 주문 대상을 정한다. 두 전략이 주문 흐름을 공유하더라도 메인 메시지와 전략별 주문 재검증은 각각의 계산 결과를 사용한다. 현재 합성 Slack은 오늘 액션 알림을 보낸다.
+
+사고팔기 신호는 `strategy_trade_signal_lock`의 MongoDB 선점으로 자동 배치·수동 발송·회수·설정 변경·Slack 제출을 직렬화한다. 계좌·종목·회차·방향의 활성 신호는 하나이며 발송 예약을 전송 전에 저장한다. 전송 결과가 불명확하면 자동 재발송하지 않는다. 프로세스 강제 종료로 남은 `system_config.strategy_trade_signal_lock`은 실행 중인 작업과 Slack 발송 기록을 확인한 뒤 제거해야 한다.
+
+`strategy_trade_slack_messages`의 신호 원본은 완료·회수 여부의 단일 소스이며 완료 후에도 재주문 방지를 위해 보존한다. 수동 신호와 답글은 TTL·세션 정리에서 제외한다. 자동 일반 답글은 `expires_at` TTL을 사용하며 기존 `created_at` TTL은 초기화 시 교체한다. 체결 출처는 주문 기록에서 원장으로 전달하며 직접 거래와 수동 Slack은 수동 거래로, 자동 Slack은 자동 거래로 분류한다.
 
 ## 3. DB 단일 소스
 
@@ -138,7 +148,3 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 
 합성 계좌 설정은 `mix_harvest_pct`·`mix_refill_pct`를 함께 저장한다. 운용 기준금액은 저장하지 않고 계좌 평가액에서 계산한다.
 `mix/capital_policy.py`가 화면·슬랙의 단일 판정 경로다. 미설정 계좌는 주문을 생성하지 않는다.
-
-사고팔기 신호는 `strategy_trade_signal_lock`의 MongoDB 선점으로 자동 배치·수동 발송·회수·설정 변경·Slack 제출을 직렬화한다. 계좌·종목·회차·방향의 활성 신호는 하나이며 발송 예약을 전송 전에 저장한다. 전송 결과가 불명확하면 자동 재발송하지 않는다. 프로세스 강제 종료로 남은 `system_config.strategy_trade_signal_lock`은 실행 중인 작업과 Slack 발송 기록을 확인한 뒤 제거해야 한다.
-
-`strategy_trade_slack_messages`의 신호 원본은 완료·회수 여부의 단일 소스이며 완료 후에도 재주문 방지를 위해 보존한다. 수동 신호와 답글은 TTL·세션 정리에서 제외한다. 자동 일반 답글은 `expires_at` TTL을 사용하며 기존 `created_at` TTL은 초기화 시 교체한다. 체결 출처는 주문 기록에서 원장으로 전달하며 직접 거래와 수동 Slack은 수동 거래로, 자동 Slack은 자동 거래로 분류한다.

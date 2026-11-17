@@ -14,6 +14,7 @@ import {
   writeRememberedMomentumEtfAccountId,
 } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { AppModal } from "../components/AppModal";
 import { SlackAlarmField } from "../components/SlackAlarmField";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { updateStockMemo } from "@/lib/stocks-store";
@@ -317,6 +318,7 @@ type ActionItem = {
   side: "sell" | "buy";
   title: string;
   text: string;
+  quantity: number;
   /** 정렬용 — 표(티커 순)와 같은 기준으로 세운다. */
   ticker: string;
 };
@@ -330,7 +332,7 @@ type ActionGroup = {
 };
 
 /** 액션 그룹 목록 — 오늘·내일 두 섹션이 같은 모양으로 그린다. */
-function ActionGroupList({ groups }: { groups: ActionGroup[] }) {
+function ActionGroupList({ groups, onSelect }: { groups: ActionGroup[]; onSelect?: (item: ActionItem) => void }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {groups.map((group, groupIndex) => (
@@ -344,8 +346,8 @@ function ActionGroupList({ groups }: { groups: ActionGroup[] }) {
             </span>
           </div>
           <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
-            {group.items.map((item) => (
-              <li key={item.key}>
+            {group.items.map((item) => {
+              const summary = <>
                 <strong
                   style={{
                     color: item.side === "sell" ? "var(--down-color, #2f6fd0)" : "var(--up-color, #d64545)",
@@ -354,8 +356,19 @@ function ActionGroupList({ groups }: { groups: ActionGroup[] }) {
                   {item.title}
                 </strong>{" "}
                 — {item.text}
-              </li>
-            ))}
+              </>;
+              return (
+                <li key={item.key}>
+                  {onSelect ? (
+                    <button type="button" className="btn btn-link p-0 text-reset text-start"
+                      style={{ display: "inline", fontSize: "inherit", whiteSpace: "normal" }}
+                      onClick={() => onSelect(item)}>
+                      {summary}
+                    </button>
+                  ) : summary}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ))}
@@ -412,6 +425,7 @@ export function StrategyMixClient() {
 
   // 운용 현황 탭.
   const [positions, setPositions] = useState<Positions | null>(null);
+  const [selectedAction, setSelectedAction] = useState<{ item: ActionItem; accountLabel: string } | null>(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
   const [positionsError, setPositionsError] = useState<string | null>(null);
   const [positionsProgress, setPositionsProgress] =
@@ -1872,7 +1886,8 @@ export function StrategyMixClient() {
                         오늘은 할 일이 없습니다 — 보유 목록을 그대로 유지하세요.
                       </div>
                     ) : (
-                      <ActionGroupList groups={todayActionGroups} />
+                      <ActionGroupList groups={todayActionGroups}
+                        onSelect={(item) => setSelectedAction({ item, accountLabel })} />
                     )}
                     {/* 월초 슬리브 리밸런싱 안내문은 제거했다 — 실제 할 일은 위 지시 목록에
                         이미 나오는데 "다시 맞추세요" 명령문이 별도 수동 작업처럼 읽혔다. */}
@@ -1898,6 +1913,25 @@ export function StrategyMixClient() {
         </section>
 
       </div>
+      <AppModal
+        open={selectedAction !== null}
+        title={`${selectedAction?.item.side === "sell" ? "매도" : "매수"} 슬랙 발송 확인`}
+        onClose={() => setSelectedAction(null)}
+        footer={<div style={{ display: "flex", justifyContent: "flex-end", gap: 8, width: "100%" }}>
+          <button type="button" className="btn" onClick={() => setSelectedAction(null)}>취소</button>
+          <button type="button" className="btn btn-primary" disabled>확인 후 발송</button>
+        </div>}
+      >
+        {selectedAction ? <>
+          <dl style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 8 }}>
+            <dt>계좌</dt><dd>{selectedAction.accountLabel}</dd>
+            <dt>오늘의 액션</dt><dd>{selectedAction.item.title} — {selectedAction.item.text}</dd>
+            <dt>예상 수량</dt><dd>{selectedAction.item.quantity.toLocaleString()}주</dd>
+          </dl>
+          <p>실제 주문 가격과 수량은 Slack에서 최종 확인합니다.</p>
+          <p style={{ ...hintStyle, marginBottom: 0 }}>UI 검토 중입니다. 서버 연결 후 발송할 수 있습니다.</p>
+        </> : null}
+      </AppModal>
     </PageFrame>
   );
 }
