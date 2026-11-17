@@ -112,6 +112,8 @@ def _order_text(request: dict[str, Any]) -> str:
         buy = f"{buy_quantity:,}주 재매수" if buy_quantity is not None else "재매수"
         return f"{_round_text(request['round'])}{request['label']} · {sell} 후 {buy}"
     side = _action_word(request)
+    if request.get("mix_action_key") is not None:
+        return f"{request['label']} · {request['quantity']:,}주 {side}"
     return f"{_round_text(request['round'])}{request['label']} · {request['quantity']:,}주 × {_QUOTE_LABELS[request['side']]} 지정가 {side}"
 
 
@@ -126,17 +128,19 @@ def _action_word(request: dict[str, Any]) -> str:
 
 
 def _section(request: dict[str, Any]) -> dict[str, Any]:
+    if request.get("mix_action_key") is not None:
+        detail = "확인창에서 주문 지정가를 확인합니다"
+    elif _is_swap(request):
+        detail = "매도 1호가에 매도, 매수 1호가에 재매수 주문을 함께 겁니다"
+    else:
+        detail = f"버튼을 확정하는 순간의 {_QUOTE_LABELS[request['side']]}로 냅니다"
     return {
         "type": "section",
         "text": {
             "type": "mrkdwn",
             "text": (
                 f"*[{_env_word(request['env'])}] {_action_word(request)} 주문*\n{_order_text(request)}\n"
-                + (
-                    f"매도 1호가에 매도, 매수 1호가에 재매수 주문을 함께 겁니다 ({request['ticker']})"
-                    if _is_swap(request)
-                    else f"버튼을 확정하는 순간의 {_QUOTE_LABELS[request['side']]}로 냅니다 ({request['ticker']})"
-                )
+                f"{detail} ({request['ticker']})"
             ),
         },
     }
@@ -313,23 +317,29 @@ def _gap_label(side: str, gap_pct: float) -> str:
     return "⚠️ 신호보다 불리" if unfavorable else "신호보다 유리"
 
 
-def _order_view(request: dict[str, Any], order: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
-    side = _action_word(request)
+def _order_price_details(request: dict[str, Any], order: dict[str, Any]) -> str:
+    price = format_money(order["price"], order["country"])
+    if request.get("mix_action_key") is not None:
+        return f"지정가 {price}\n확인한 수량이나 지정가가 바뀌면 다시 확인해야 합니다."
     gap_pct = _signal_gap_pct(order)
     if gap_pct is None:
-        gap = f"{order['quote_label']} {format_money(order['price'], order['country'])} (신호 가격 비교 없음)"
+        gap = f"{order['quote_label']} {price} (신호 가격 비교 없음)"
     else:
         gap = (
             f"*신호 대비 {gap_pct:+.2f}%* — {_gap_label(request['side'], gap_pct)}\n"
-            f"신호 {format_money(order['signal_price'], order['country'])} · {order['quote_label']} {format_money(order['price'], order['country'])}"
+            f"신호 {format_money(order['signal_price'], order['country'])} · {order['quote_label']} {price}"
         )
     guide = (
         f"주문을 확정하는 순간의 {order['quote_label']}로 {_env_word(request['env'])} 계좌에 보냅니다. "
         "호가가 움직이면 가격과 매수 수량이 달라질 수 있습니다."
     )
-    if request.get("mix_action_key") is not None:
-        guide = "확인한 수량이나 지정가가 바뀌면 다시 확인해야 합니다."
-    body = f"*{_order_text({**request, 'quantity': order['quantity']})}*\n{_account_line(request)}\n{gap}\n{guide}"
+    return f"{gap}\n{guide}"
+
+
+def _order_view(request: dict[str, Any], order: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+    side = _action_word(request)
+    summary = _order_text({**request, "quantity": order["quantity"]})
+    body = f"*{summary}*\n{_account_line(request)}\n{_order_price_details(request, order)}"
     return _modal_view(ORDER_CALLBACK_ID, f"{_env_word(request['env'])} {side} 주문 확인", f"{side} 주문", body, target)
 
 

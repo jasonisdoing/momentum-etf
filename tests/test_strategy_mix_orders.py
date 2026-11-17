@@ -103,7 +103,13 @@ class MixOrderTest(TestCase):
         self.item["quantity"] = 16
         with patch.object(slack, "_update_view") as update:
             slack.fill_confirm_modal({"target": self.target, "view_id": "view"})
-        metadata = json.loads(update.call_args.args[1]["private_metadata"])
+        view = update.call_args.args[1]
+        summary = view["blocks"][0]["text"]["text"]
+        self.assertIn("16주 매수", summary)
+        self.assertIn("지정가 100원", summary)
+        self.assertNotIn("1호가", summary)
+        self.assertNotIn("신호 가격 비교 없음", summary)
+        metadata = json.loads(view["private_metadata"])
         self.assertEqual(metadata["confirmed"], {"quantity": 16, "price": 100, "venue": "KRX"})
         self.assertEqual(metadata["confirmation_id"], "view")
 
