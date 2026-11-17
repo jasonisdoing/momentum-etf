@@ -203,6 +203,7 @@ def load_ticker(ticker: str, country: str) -> dict[str, list]:
     stamps = pd.to_datetime([bar[0] for bar in bars], unit="ms", utc=True).tz_convert(ZONES[country])
     windows = FIRST_ENTRY_WINDOWS[country]
     return {
+        "ms": [bar[0] for bar in bars],
         "open": [bar[1] for bar in bars],
         "close": [bar[4] for bar in bars],
         "day": [session_trade_date(country, at.to_pydatetime()) for at in stamps],
@@ -225,6 +226,7 @@ def simulate(data: dict[str, list], lo: int, hi: int, variant: dict, cfg: dict) 
     is_mdd = variant["base"] == MDD_BASE
     held: list[tuple[float, int, float]] = []  # (체결가, 수량, 매도 간격%) — 매도 간격은 살 때 정한다
     realized, sells, base, sold_out_day = 0.0, 0, 0.0, None
+    max_cost = 0.0  # 구간 중 보유 원가가 가장 컸던 때 — 실제로 필요했던 현금
     # 매도선·매수선은 보유가 바뀌거나 날짜가 바뀔 때만 다시 정한다(MDD 간격은 날짜마다 바뀐다).
     sell_line, buy_line, gap, lines_day = 0.0, None, 0.0, None
 
@@ -235,10 +237,11 @@ def simulate(data: dict[str, list], lo: int, hi: int, variant: dict, cfg: dict) 
         return min(i + FILL_DELAY_MINUTES, hi - 1)
 
     def buy(j: int, sell_pct: float) -> None:
-        nonlocal realized
+        nonlocal realized, max_cost
         quantity = int(cfg["size"] // close[j])
         held.append((close[j], quantity, sell_pct))
         realized -= close[j] * quantity * fee
+        max_cost = max(max_cost, sum(fill * qty for fill, qty, _ in held))
 
     i = lo
     while i < hi:
@@ -274,7 +277,8 @@ def simulate(data: dict[str, list], lo: int, hi: int, variant: dict, cfg: dict) 
         i += 1
     last = close[hi - 1]
     unrealized = sum((last - fill) * quantity for fill, quantity, _ in held)
-    return {"pct": (realized + unrealized) / (cfg["size"] * rounds) * 100, "sells": sells}
+    pnl = realized + unrealized
+    return {"pct": pnl / (cfg["size"] * rounds) * 100, "sells": sells, "pnl": pnl, "max_cost": max_cost}
 
 
 def ticker_configs() -> dict[str, dict]:
