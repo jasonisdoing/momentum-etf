@@ -124,7 +124,12 @@ class ManualSignalsTest(TestCase):
             patch.object(orders, "_orders", return_value=self.orders),
             patch.object(orders, "_order_strategy", side_effect=lambda *a, **k: deepcopy(self.strategy)),
             patch.object(
-                notify, "load_settings", return_value={"strategies": {"s1": {"account_id": "a1", "pool": "test"}}}
+                notify,
+                "load_settings",
+                return_value={
+                    "strategies": {"s1": {"account_id": "a1", "pool": "test"}},
+                    "accounts": {"a1": {"slack_enabled": True}},
+                },
             ),
             patch.object(notify, "_load_sent_log", side_effect=lambda: deepcopy(self.sent)),
             patch.object(notify, "_save_sent_log", side_effect=self.save),
@@ -133,7 +138,6 @@ class ManualSignalsTest(TestCase):
             patch.object(orders, "is_instrument_trading_time", return_value=True),
             patch.object(orders, "active_order_keys", return_value=set()),
             patch.object(notify, "refresh_all_ledgers", return_value={}),
-            patch.object(notify, "_slack_enabled_accounts", return_value={"a1"}),
             patch.object(
                 notify,
                 "load_views_where",
@@ -202,22 +206,69 @@ class ManualSignalsTest(TestCase):
 
         def worker():
             try:
-                self.manual()
+                notify.notify_strategy_trade()
             except Exception as exc:
                 failures.append(exc)
+
+        insert = self.config.insert_one
+
+        def release_on_contention(doc):
+            try:
+                insert(doc)
+            except DuplicateKeyError:
+                release.set()
+                raise
 
         worker_thread = Thread(target=worker)
         worker_thread.start()
         try:
             self.assertTrue(entered.wait(5))
-            with self.assertRaisesRegex(ValueError, "다른 신호 작업"):
-                notify.notify_strategy_trade()
+            with patch.object(self.config, "insert_one", side_effect=release_on_contention) as attempted:
+                self.assertTrue(self.manual()["duplicate"])
+            self.assertGreaterEqual(attempted.call_count, 2)
         finally:
             release.set()
             worker_thread.join(5)
         self.assertFalse(failures)
-        notify.notify_strategy_trade()
         self.assertEqual(self.sender.call_count, 1)
+
+    def test_batch_preparation_does_not_block_manual_send(self):
+        preparing, release = Event(), Event()
+        failures = []
+
+        def refresh():
+            preparing.set()
+            if not release.wait(5):
+                raise AssertionError("대기 시간 초과")
+            return {}
+
+        def worker():
+            try:
+                notify.notify_strategy_trade()
+            except Exception as exc:
+                failures.append(exc)
+
+        with patch.object(notify, "refresh_all_ledgers", side_effect=refresh):
+            batch = Thread(target=worker)
+            batch.start()
+            try:
+                self.assertTrue(preparing.wait(5))
+                self.assertEqual(self.config.docs, [])
+                self.assertTrue(self.manual()["sent"])
+            finally:
+                release.set()
+                batch.join(5)
+        self.assertFalse(failures)
+        self.assertEqual(self.sender.call_count, 1)
+
+    def test_lock_timeout_does_not_retry_sending(self):
+        from utils import strategy_trade_signal_lock as locking
+
+        with locking.signal_lock():
+            with patch.object(locking, "monotonic", side_effect=[0, 5]):
+                with self.assertRaisesRegex(ValueError, "다른 신호 작업"):
+                    self.manual()
+        self.sender.assert_not_called()
 
     def test_next_day_price_return_and_settings_keep_manual(self):
         self.manual()

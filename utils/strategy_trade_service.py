@@ -1024,6 +1024,7 @@ def refresh_all_ledgers() -> dict[str, str]:
     """
     from services.broker_api_service import BrokerApiError
 
+    started_at = datetime.now(KST).isoformat()
     strategies = load_settings()["strategies"]
     failed: dict[str, str] = {}
     for account_id, tickers in _tickers_by_account(strategies).items():
@@ -1035,7 +1036,7 @@ def refresh_all_ledgers() -> dict[str, str]:
         for ticker, ledger in ledgers.items():
             if isinstance(ledger, LedgerError):
                 failed[f"{account_id}:{ticker}"] = str(ledger)
-        forget_ledgers(account_id, tickers)
+        forget_ledgers(account_id, tickers, before=started_at)
     return failed
 
 

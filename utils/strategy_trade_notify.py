@@ -443,13 +443,6 @@ def build_message(strategy_view: dict[str, Any], triggers: list[dict[str, Any]])
     return "\n".join(lines)
 
 
-def _slack_enabled_accounts() -> set[str]:
-    """사고팔기 슬랙이 켜진 계좌 — 사고팔기 화면의 계좌별 스위치(합성 슬랙과 별개)."""
-    from utils.strategy_trade_service import load_settings
-
-    return {account_id for account_id, entry in load_settings()["accounts"].items() if entry["slack_enabled"]}
-
-
 def send_test(account_id: str) -> dict[str, Any]:
     """그 계좌를 고른 사고팔기 전략의 현재 상태를 즉시 보낸다(사고팔기 화면의 슬랙 테스트 버튼).
 
@@ -697,26 +690,40 @@ def _drop_closed_session_signals(sent_log: dict[str, dict[str, Any]], open_ids: 
     return bool(stale)
 
 
-@signal_lock()
 def notify_strategy_trade() -> dict[str, Any]:
-    """트리거를 판정해 필요할 때만 슬랙을 보낸다 — 사고팔기 슬랙이 켜진 계좌의 전략만.
-
-    Returns:
-        ``{"sent": bool, "reason": str, "triggers": [...]}``
-    """
-    from utils.strategy_trade_orders import active_order_keys
-    from utils.strategy_trade_threads import mark_signal_thread_used, record_signal_thread
-
-    # 화면이 읽는 회차 원장을 슬랙 스위치와 무관하게 먼저 새로 계산해 저장한다 — 아래 판정도 이 저장본을 쓴다.
+    """증권사 원장과 운용 현황을 먼저 준비한 뒤 Slack 신호를 처리한다."""
+    snapshot_at = datetime.now(KST).isoformat()
     for key, message in refresh_all_ledgers().items():
         logger.error("사고팔기 회차 원장 실패(%s) — 이 종목은 건너뜁니다: %s", key, message)
 
-    enabled = _slack_enabled_accounts()
-    now = datetime.now(KST)
-    # 국장 마감 후이거나 미장이 거래 시간이 아니면 슬랙 스위치와 무관하게 모든 계좌의 미사용 신호를 정리한다.
+    settings_at_read = load_settings()
     view = load_views_where(lambda entry: True, fresh=False)
+    with signal_lock():
+        return _notify_prepared_view(view, settings_at_read, snapshot_at)
+
+
+def _notify_prepared_view(view: dict[str, Any], settings_at_read: dict[str, Any], snapshot_at: str) -> dict[str, Any]:
+    """공유 잠금 아래 최신 발송 기록을 읽어 회수·체결 확인·발송을 처리한다."""
+    from utils.strategy_trade_orders import active_order_keys
+    from utils.strategy_trade_threads import mark_signal_thread_used, record_signal_thread
+
+    now = datetime.now(KST)
     sent_log = _load_sent_log()
-    configured = set(load_settings()["strategies"])
+    current_settings = load_settings()
+    enabled = {account_id for account_id, entry in current_settings["accounts"].items() if entry["slack_enabled"]}
+    configured = set(current_settings["strategies"])
+    # 준비하는 동안 바뀐 전략은 이전 현황을 사용하지 않고 다음 배치에서 다시 계산한다.
+    stable_ids = {
+        sid
+        for sid, entry in settings_at_read["strategies"].items()
+        if entry == current_settings["strategies"].get(sid)
+        and settings_at_read["accounts"].get(entry["account_id"])
+        == current_settings["accounts"].get(entry["account_id"])
+    }
+    view = {
+        "strategies": [s for s in view["strategies"] if s["strategy_id"] in stable_ids],
+        "errors": {sid: message for sid, message in view["errors"].items() if sid in stable_ids},
+    }
     expired, withdrawn = _settle_unused_signals(view["strategies"], sent_log, now, configured)
     if _close_sessions(view["strategies"], sent_log, now, configured) or expired or withdrawn:
         _save_sent_log(sent_log)
@@ -771,7 +778,9 @@ def notify_strategy_trade() -> dict[str, Any]:
     }
     confirmed = pop_filled(
         sent_log,
+        # 준비 이후 수동으로 보낸 신호는 이전 원장으로 체결 판정하지 않는다.
         lambda pending: str(pending.get("strategy_id")) in held_counts
+        and pending.get("at", "") <= snapshot_at
         and (
             pending["arbitrary_id"] not in arbitrary_ids[pending["strategy_id"]]
             if pending.get("arbitrary_id")

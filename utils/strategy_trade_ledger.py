@@ -24,6 +24,8 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from pymongo.errors import DuplicateKeyError
+
 from services.broker_api_service import BrokerApiError
 from services.broker_trade_service import account_country, fetch_order_balance, list_day_orders
 from utils.db_manager import get_db_connection
@@ -401,7 +403,9 @@ def _consistent_snapshot(account_id: str, today: date) -> tuple[dict[str, tuple[
     raise BrokerApiError(f"'{account_id}' 잔고가 조회 중에 계속 바뀌어(체결 진행 중) 회차 원장을 계산하지 못했습니다.")
 
 
-def compute_ledgers(account_id: str, tickers: list[str]) -> dict[str, tuple[Ledger | LedgerError, dict | None]]:
+def compute_ledgers(
+    account_id: str, tickers: list[str], *, computed_at: str
+) -> dict[str, tuple[Ledger | LedgerError, dict | None]]:
     """계좌의 종목들(`tickers`)마다 회차 원장과 새 기준점(전 거래일 마감 로트, 못 정하면 None)을 만든다.
 
     체결 조회는 날짜당 한 번이라 종목 수와 무관하다. 체결 이력이 잔고와 맞지 않아 만들 수 없는 종목은 원장 대신
@@ -409,7 +413,6 @@ def compute_ledgers(account_id: str, tickers: list[str]) -> dict[str, tuple[Ledg
     """
     from utils.strategy_trade_orders import order_sources
 
-    computed_at = datetime.now(KST).isoformat()
     country = account_country(account_id)
     today = session_trade_date(country, datetime.now(KST))
     balance, today_rows = _consistent_snapshot(account_id, today)
@@ -504,26 +507,42 @@ def _from_doc(doc: dict[str, Any]) -> Ledger | LedgerError:
     )
 
 
+def _not_newer_than(computed_at: str) -> dict[str, Any]:
+    # 이전 저장 형식의 기준점과 오류 문서에는 계산 시각이 없다.
+    return {"$or": [{"computed_at": {"$lte": computed_at}}, {"computed_at": {"$exists": False}}]}
+
+
+def _replace_ledger_document(collection: Any, document: dict[str, Any]) -> None:
+    """느린 조회가 나중에 끝나도 더 최근에 시작한 조회의 저장본을 덮지 않는다."""
+    query = {"_id": document["_id"], **_not_newer_than(document["computed_at"])}
+    try:
+        collection.replace_one(query, document, upsert=True)
+    except DuplicateKeyError:
+        # 같은 키가 먼저 생겼으면 시각 조건으로 다시 판정한다.
+        collection.replace_one(query, document)
+
+
 def refresh_ledgers(account_id: str, tickers: list[str]) -> dict[str, Ledger | LedgerError]:
     """원장을 새로 계산해 저장하고, 확정한 종목은 기준점(전 거래일 마감 로트)도 갱신한다."""
-    results = compute_ledgers(account_id, tickers)
+    computed_at = datetime.now(KST).isoformat()
+    results = compute_ledgers(account_id, tickers, computed_at=computed_at)
     snapshots, anchors = _snapshots(), _anchors()
     for ticker, (ledger, anchor) in results.items():
-        doc = _to_doc(account_id, ticker, ledger)
-        snapshots.replace_one({"_id": doc["_id"]}, doc, upsert=True)
+        doc = {**_to_doc(account_id, ticker, ledger), "computed_at": computed_at}
+        _replace_ledger_document(snapshots, doc)
         if anchor is not None:
-            anchors.replace_one(
-                {"_id": doc["_id"]},
-                {"_id": doc["_id"], "account_id": account_id, "ticker": ticker, **anchor},
-                upsert=True,
+            _replace_ledger_document(
+                anchors,
+                {"_id": doc["_id"], "account_id": account_id, "ticker": ticker, "computed_at": computed_at, **anchor},
             )
     return {ticker: ledger for ticker, (ledger, _) in results.items()}
 
 
-def forget_ledgers(account_id: str, keep: list[str]) -> None:
-    """더 이상 전략이 없는 종목의 저장된 원장과 기준점을 지운다."""
-    _snapshots().delete_many({"account_id": account_id, "ticker": {"$nin": keep}})
-    _anchors().delete_many({"account_id": account_id, "ticker": {"$nin": keep}})
+def forget_ledgers(account_id: str, keep: list[str], *, before: str) -> None:
+    """전략 목록을 읽은 뒤 갱신된 원장·기준점은 그대로 둔다."""
+    query = {"account_id": account_id, "ticker": {"$nin": keep}, **_not_newer_than(before)}
+    _snapshots().delete_many(query)
+    _anchors().delete_many(query)
 
 
 def read_ledgers(account_id: str, tickers: list[str]) -> dict[str, Ledger | LedgerError]:
