@@ -16,6 +16,7 @@ import {
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
 import { StatusBadge } from "../components/StatusBadge";
+import { SlackSignalBadge, SlackWithdrawModal } from "../components/SlackSignalControls";
 import { SlackAlarmField } from "../components/SlackAlarmField";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { updateStockMemo } from "@/lib/stocks-store";
@@ -334,10 +335,11 @@ type ActionGroup = {
 };
 
 /** 액션 그룹 목록 — 오늘·내일 두 섹션이 같은 모양으로 그린다. */
-function ActionGroupList({ groups, signals, onSelect }: {
+function ActionGroupList({ groups, signals, onSelect, onWithdraw }: {
   groups: ActionGroup[];
   signals?: Positions["order_signals"];
   onSelect?: (item: ActionItem) => void;
+  onWithdraw?: (item: ActionItem) => void;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -365,9 +367,12 @@ function ActionGroupList({ groups, signals, onSelect }: {
                   — {item.text}
                   {signal ? (
                     <span style={{ marginInlineStart: 8 }}>
-                      <StatusBadge compact color={signal === "sent" ? "var(--tblr-green, #2fb344)" : "var(--text-muted)"}>
-                        {signal === "sent" ? "슬랙 발송됨" : "슬랙 발송 확인 필요"}
-                      </StatusBadge>
+                      {signal === "sent" ? (
+                        <SlackSignalBadge label="슬랙 발송됨" compact showWithdraw
+                          onWithdraw={onWithdraw ? () => onWithdraw(item) : undefined} />
+                      ) : (
+                        <StatusBadge compact color="var(--text-muted)">슬랙 발송 확인 필요</StatusBadge>
+                      )}
                     </span>
                   ) : onSelect ? (
                     <button type="button" className="btn btn-sm" style={{ marginInlineStart: 8 }}
@@ -435,6 +440,7 @@ export function StrategyMixClient() {
   // 운용 현황 탭.
   const [positions, setPositions] = useState<Positions | null>(null);
   const [selectedAction, setSelectedAction] = useState<{ item: ActionItem; accountId: string; accountLabel: string } | null>(null);
+  const [withdrawingAction, setWithdrawingAction] = useState<ActionItem | null>(null);
   const [sendingAction, setSendingAction] = useState(false);
   const [sendActionError, setSendActionError] = useState<string | null>(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
@@ -1925,6 +1931,7 @@ export function StrategyMixClient() {
                       </div>
                     ) : (
                       <ActionGroupList groups={todayActionGroups} signals={positions?.order_signals}
+                        onWithdraw={positions?.account_id === accountId ? setWithdrawingAction : undefined}
                         onSelect={positions?.account_id === accountId ? (item) => {
                           setSendActionError(null);
                           setSelectedAction({ item, accountId, accountLabel });
@@ -1977,6 +1984,10 @@ export function StrategyMixClient() {
           {sendActionError ? <p role="alert" className="text-danger mb-0">{sendActionError}</p> : null}
         </> : null}
       </AppModal>
+      <SlackWithdrawModal label={withdrawingAction?.text ?? null}
+        busy={false} onClose={() => setWithdrawingAction(null)}>
+        {" "}회수 버튼은 서버 연결 후 사용할 수 있습니다.
+      </SlackWithdrawModal>
     </PageFrame>
   );
 }

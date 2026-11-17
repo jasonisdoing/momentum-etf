@@ -21,6 +21,7 @@ import { GridToolbarButton } from "../components/GridToolbarButton";
 import { HoldingsGroupButton, HoldingsGroupDialog, HoldingsGroupName, type HoldingsGroupDraft } from "../components/HoldingsGroupControls";
 import { AppModal } from "../components/AppModal";
 import { StatusBadge } from "../components/StatusBadge";
+import { SlackSignalBadge, SlackWithdrawModal } from "../components/SlackSignalControls";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { useStockMemoSave } from "../components/useStockMemoSave";
@@ -338,19 +339,9 @@ function RoundStatus({
       : []),
     ...row.slack_signals.map((signal) => {
       const label = signal.manual ? "수동 슬랙 발송됨" : `${SIDE_WORDS[signal.side]}슬랙`;
-      const badge = <StatusBadge color="var(--tblr-green, #2fb344)" compact={compact}>{label}</StatusBadge>;
-      return signal.can_withdraw ? (
-        <button
-          key={`slack-${signal.side}`}
-          type="button"
-          title="눌러서 이 슬랙 신호 회수"
-          onClick={() => onWithdrawSignal(signal, label)}
-          style={{ all: "unset", cursor: "pointer" }}
-        >
-          {badge}{signal.manual ? <span style={{ marginLeft: 4, textDecoration: "underline" }}>회수</span> : null}
-        </button>
-      ) : (
-        <span key={`slack-${signal.side}`}>{badge}</span>
+      return (
+        <SlackSignalBadge key={`slack-${signal.side}`} label={label} compact={compact} showWithdraw={signal.manual}
+          onWithdraw={signal.can_withdraw ? () => onWithdrawSignal(signal, label) : undefined} />
       );
     }),
     ...row.order_sides.map((side) => (
@@ -1662,26 +1653,10 @@ export function StrategyTradeClient() {
         />
       </div>
 
-      <AppModal
-        open={withdrawing !== null}
-        title="슬랙 신호 회수"
-        onClose={() => setWithdrawing(null)}
-        footer={
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, width: "100%" }}>
-            <button type="button" className="btn" onClick={() => setWithdrawing(null)} disabled={withdrawBusy}>
-              취소
-            </button>
-            <button type="button" className="btn btn-danger" onClick={() => void confirmWithdrawSignal()} disabled={withdrawBusy}>
-              {withdrawBusy ? "회수 중…" : "회수"}
-            </button>
-          </div>
-        }
-      >
-        <p style={{ margin: 0 }}>
-          {withdrawing?.label} 메시지를 회수 한 줄로 바꾸고 그 스레드 답글과 발송 기록을 지웁니다.
-          같은 메시지로 나간 다른 신호도 함께 회수되며, 이 신호로 낸 주문이 있으면 회수하지 않습니다.
-        </p>
-      </AppModal>
+      <SlackWithdrawModal label={withdrawing?.label ?? null}
+        busy={withdrawBusy} onClose={() => setWithdrawing(null)} onConfirm={() => void confirmWithdrawSignal()}>
+        {" "}같은 메시지로 나간 다른 신호도 함께 회수됩니다.
+      </SlackWithdrawModal>
      </TradeCurrencyContext.Provider>
     </PageFrame>
   );
