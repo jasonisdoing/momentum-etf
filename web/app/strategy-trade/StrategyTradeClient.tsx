@@ -20,6 +20,7 @@ import { createAppGridTheme } from "../components/app-grid-theme";
 import { GridToolbarButton } from "../components/GridToolbarButton";
 import { HoldingsGroupButton, HoldingsGroupDialog, HoldingsGroupName, type HoldingsGroupDraft } from "../components/HoldingsGroupControls";
 import { AppModal } from "../components/AppModal";
+import { StatusBadge } from "../components/StatusBadge";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { useStockMemoSave } from "../components/useStockMemoSave";
@@ -309,27 +310,6 @@ function heldRoundAmounts(row: RoundRow): { cost: number | null; pnl: number | n
 function signColor(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value) || value === 0) return "inherit";
   return value > 0 ? "var(--up-color, #d64545)" : "var(--down-color, #2f6fd0)";
-}
-
-/** 상태 뱃지 — `compact` 는 설정 표의 상태 요약처럼 좁은 그리드 칸에 넣을 때 쓴다. */
-function StatusBadge({ color, compact, children }: { color: string; compact?: boolean; children: React.ReactNode }) {
-  return (
-    <span
-      style={{
-        padding: compact ? "0 2px" : "1px 5px",
-        borderRadius: compact ? 3 : 4,
-        fontSize: compact ? "var(--fs-xs)" : "var(--fs-sm)",
-        lineHeight: compact ? 1.4 : undefined,
-        fontWeight: 700,
-        // 뱃지 글자는 줄바꿈하지 않는다 — 좁은 칸에서 `매수슬/랙`처럼 쪼개지지 않게.
-        whiteSpace: "nowrap",
-        color,
-        border: `1px solid ${color}`,
-      }}
-    >
-      {children}
-    </span>
-  );
 }
 
 const SIDE_WORDS = { buy: "매수", sell: "매도" } as const;

@@ -15,6 +15,7 @@ import {
 } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
+import { StatusBadge } from "../components/StatusBadge";
 import { SlackAlarmField } from "../components/SlackAlarmField";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { updateStockMemo } from "@/lib/stocks-store";
@@ -352,29 +353,28 @@ function ActionGroupList({ groups, signals, onSelect }: {
           </div>
           <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
             {group.items.map((item) => {
-              const summary = <>
-                <strong
-                  style={{
-                    color: item.side === "sell" ? "var(--down-color, #2f6fd0)" : "var(--up-color, #d64545)",
-                  }}
-                >
-                  {item.title}
-                </strong>{" "}
-                — {item.text}
-              </>;
               const signal = signals?.[item.key];
+              const direction = item.side === "sell" ? "매도" : "매수";
               return (
                 <li key={item.key}>
-                  {onSelect && !signal ? (
-                    <button type="button" className="btn btn-link p-0 text-reset text-start"
-                      style={{ display: "inline", fontSize: "inherit", whiteSpace: "normal" }}
-                      onClick={() => onSelect(item)}>
-                      {summary}
+                  <strong style={{
+                    color: item.side === "sell" ? "var(--down-color, #2f6fd0)" : "var(--up-color, #d64545)",
+                  }}>
+                    {item.title}
+                  </strong>{" "}
+                  — {item.text}
+                  {signal ? (
+                    <span style={{ marginInlineStart: 8 }}>
+                      <StatusBadge compact color={signal === "sent" ? "var(--tblr-green, #2fb344)" : "var(--text-muted)"}>
+                        {signal === "sent" ? "슬랙 발송됨" : "슬랙 발송 확인 필요"}
+                      </StatusBadge>
+                    </span>
+                  ) : onSelect ? (
+                    <button type="button" className="btn btn-sm" style={{ marginInlineStart: 8 }}
+                      aria-label={`${item.ticker} ${direction} 슬랙 발송`} onClick={() => onSelect(item)}>
+                      {direction}
                     </button>
-                  ) : summary}
-                  {signal ? <span style={{ ...hintStyle, marginLeft: 8 }}>
-                    {signal === "sent" ? "슬랙 발송됨" : "슬랙 발송 확인 필요"}
-                  </span> : null}
+                  ) : null}
                 </li>
               );
             })}
