@@ -1,26 +1,9 @@
-"""전략 사고팔기 슬랙 알림.
+"""사고팔기 자동·수동 Slack 신호의 공통 생명주기.
 
-거래시간 중 2분마다 실행돼, **매수·매도 지정가에 현재가가 닿은 회차가 있을 때만**
-슬랙을 보낸다. 트리거가 없으면 아무것도 보내지 않는다. 메시지는 **전략(종목)마다 따로**
-보내고, 보낼 것(신호·체결 확인)이 있는 전략에만 보낸다. 보유 0 인 전략은 가격과 상관없이
-정해진 1호 매수 구간 안의 배치에서 1호 매수 신호가 난다(서비스가 판정).
-
-중복 방지 · 체결 확인
---------------------
-2분 간격으로 판정하므로 같은 조건이 유지되면 하루에 수십 번 발송될 수 있다. 그래서
-``전략:회차-동작`` 단위로 거래 세션마다 처음 한 번만 메시지를 보내고 다시 알리지 않는다. 날짜가 바뀌어도
-세션이 이어지면 같은 신호이며, 체결 확인은 처음 신호를 보낸 메시지(``signal_ts``)의 스레드에 단다. 발송 이력은
-``system_config.strategy_trade_settings.sent_log`` 에
-``{"kospi200:2-buy": {"at": ..., "strategy_id": ..., "ticker": ..., "name": ..., "round": ...,
-"index_text": ..., "signal_ts": ..., "held_count": ...}}`` 형태로 남기며, 발송에 성공했을 때만 갱신한다.
-
-이력에 남은 주문이 실제로 체결되면 확인 한 줄을 보내고 이력을 지운다. 이 확인은
-**신호가 없어도** 매번 검사한다 — 주문을 넣는 순간 그 회차가 보유로 바뀌어 바로 그 신호가
-사라지기 때문에, 신호가 있을 때만 검사하면 확인은 영영 나가지 못한다.
-
-체결 판정은 **보유 회차 수**로 한다. 전략마다 종목이 하나뿐이라(같은 종목을 회차로
-나눠 담는다) 티커 증감으로는 어느 회차가 사고팔렸는지 알 수 없다 — 매수 N호는 보유
-회차 수가 N 에 닿았는지, 매도 N호는 N 미만으로 줄었는지로 본다.
+자동 신호는 거래 시간과 가격 조건을 따르고 세션·가격 복귀 때 미사용 메시지를 회수한다.
+수동 신호는 직접 회수 전까지 유지한다. 발송·회수는 DB 선점으로 직렬화하고,
+발송 전에 예약을 기록해 응답 불명 상태의 재전송을 막는다.
+체결은 주문 기록과 원장 체결 순서로 판정하며 완료된 메시지의 재주문을 금지한다.
 """
 
 from __future__ import annotations
@@ -35,6 +18,7 @@ from utils.market_session import REGULAR, is_instrument_trading_time, market_ses
 from utils.order_confirm import build_confirm_line, pop_filled
 from utils.strategy_trade_market import format_level, format_money
 from utils.strategy_trade_service import load_settings, load_views_where, refresh_all_ledgers
+from utils.strategy_trade_signal_lock import signal_lock
 
 KST = ZoneInfo("Asia/Seoul")
 logger = get_app_logger()
@@ -80,6 +64,24 @@ def _withdrawal_price(base: float, gap_pct: float, *, buy: bool) -> float:
 def _trigger_key(trigger: dict[str, Any]) -> str:
     target = trigger.get("arbitrary_id") or trigger["round"]
     return f"{trigger['strategy_id']}:{target}-{trigger['action']}"
+
+
+def _matching_signal(sent_log: dict[str, dict[str, Any]], trigger: dict[str, Any]) -> dict[str, Any] | None:
+    """전략 ID가 바뀌어도 계좌·종목·회차·방향이 같으면 활성 신호 하나만 허용한다."""
+    for entry in sent_log.values():
+        same_target = entry.get("strategy_id") == trigger["strategy_id"] or (
+            entry.get("account_id") is not None
+            and entry["account_id"] == trigger.get("account_id")
+            and entry["ticker"] == trigger["ticker"]
+        )
+        if (
+            same_target
+            and entry["round"] == trigger["round"]
+            and entry["action"] == trigger["action"]
+            and entry.get("arbitrary_id") == trigger.get("arbitrary_id")
+        ):
+            return entry
+    return None
 
 
 def _level(value: float | None, country: str) -> str:
@@ -129,6 +131,37 @@ def _round_filled(pending: dict[str, Any], held_count: int, fills: dict[int, int
     return held_count >= round_no
 
 
+def _entry_filled(
+    pending: dict[str, Any], held_count: int, fills: dict[int, int], events: list[dict[str, Any]]
+) -> bool:
+    """부분 체결은 완료가 아니다. 주문 기록이 없을 때만 공통 회차 판정을 쓴다."""
+    from utils.strategy_trade_orders import ACTIVE_STATUSES, _orders
+    from utils.strategy_trade_threads import _messages
+
+    root = pending.get("signal_ts")
+    if root:
+        if _messages().find_one({"thread_ts": root, "ts": root, "signal_completed": True}):
+            return True
+        query = {"slack.thread_ts": root, "round": pending["round"]}
+        if not pending.get("rebuy"):
+            query["side"] = pending["action"]
+        orders = list(_orders().find(query))
+        if any(o["status"] in ACTIVE_STATUSES for o in orders):
+            return False
+        if any(o["status"] == "filled" for o in orders):
+            return True
+    # 이전 형식의 기록은 회차 상태로 판정하고 새 신호는 주문번호로 사이클을 구분한다.
+    if "fill_cursor" in pending and not pending.get("rebuy") and not pending.get("arbitrary_id"):
+        filled = sum(
+            event["quantity"]
+            for event in events
+            if event["cursor"] > pending["fill_cursor"] and event["buy"] == (pending["action"] == "buy")
+        )
+        if filled >= (1 if pending["action"] == "buy" else pending["quantity"]):
+            return True
+    return _round_filled(pending, held_count, fills)
+
+
 def _confirm_line(pending: dict[str, Any], index: dict[str, Any] | None, country: str) -> str:
     """`✅ 2호 KODEX 200 매수 확인 · 요청 시 … → 지금 …`."""
     now_text = _index_text(index, country) if index else "-"
@@ -153,6 +186,7 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
             triggers.append(
                 {
                     "strategy_id": sid,
+                    "account_id": strategy_view["account_id"],
                     "strategy_label": label,
                     "country": country,
                     "action": "sell",
@@ -177,6 +211,7 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
             triggers.append(
                 {
                     "strategy_id": sid,
+                    "account_id": strategy_view["account_id"],
                     "strategy_label": label,
                     "country": country,
                     "action": "buy",
@@ -201,6 +236,7 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
     triggers.extend(
         {
             "strategy_id": sid,
+            "account_id": strategy_view["account_id"],
             "strategy_label": label,
             "country": country,
             "ticker": strategy_view["ticker"],
@@ -222,6 +258,8 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
         for lot in strategy_view["arbitrary_lots"]
         if index["close"] >= lot["sell_limit"]
     )
+    for trigger in triggers:
+        trigger["fill_cursor"] = max((event["cursor"] for event in strategy_view["fill_events"]), default=["", 0])
     return triggers
 
 
@@ -230,28 +268,45 @@ def mark_sent_rounds(view: dict[str, Any]) -> dict[str, Any]:
     아직 끝나지 않은 주문의 방향(`order_sides`)을 행에 적는다. 회차 원장을 못 만든 전략(`error`)은 건너뛴다.
 
     지정가에 닿아 있는지와 무관하다 — 신호·주문이 나간 뒤 가격이 물러나도 표시가 남아야 한다.
-    체결된 주문과 이미 체결된 신호의 슬랙 기록은 더 표시하지 않는다 — 기록은 배치가 체결을 확인해 지우기까지
-    최대 한 배치 주기 남으므로, 화면도 배치와 같은 판정(`_round_filled`)으로 먼저 걸러낸다.
+    활성 상태는 배치와 같은 체결 판정으로 걸러내고, 완료된 수동 신호는 완료 표시로 남긴다.
     """
     from utils.strategy_trade_orders import active_order_keys
+    from utils.strategy_trade_threads import _messages
 
     held_counts = _held_counts(view)
     held_fills = _held_fills(view)
+    events = {s["strategy_id"]: s["fill_events"] for s in view["strategies"] if "error" not in s}
     sent_log = _load_sent_log()
     for strategy_id in held_counts:
         _keep_latest_buy(sent_log, strategy_id)
     # (전략, 회차, 구분) → 발송 기록 — 화면이 기록 키로 신호를 회수한다.
-    slack_keys = {
-        (entry.get("strategy_id"), entry.get("round"), entry.get("action")): {
+    slack_keys = {}
+    for key, entry in sent_log.items():
+        sid = entry.get("strategy_id")
+        if sid not in held_counts or entry.get("session_closed"):
+            continue
+        completed = _entry_filled(entry, held_counts[sid], held_fills[sid], events[sid])
+        manual = entry.get("origin") == "manual"
+        if completed and not manual:
+            continue
+        slack_keys[(sid, entry["round"], entry["action"])] = {
             "key": key,
             "has_ts": bool(entry.get("signal_ts")),
+            "manual": manual,
+            "completed": completed,
         }
-        for key, entry in sent_log.items()
-        # 이 화면에 없는 전략의 기록은 어차피 행에 닿지 않는다 — 보유 수를 모르니 판정 없이 뺀다.
-        if entry.get("strategy_id") in held_counts
-        and not entry.get("session_closed")
-        and not _round_filled(entry, held_counts[entry["strategy_id"]], held_fills[entry["strategy_id"]])
-    }
+    completed_records = _messages().find(
+        {
+            "signal_completed": True,
+            "signal_entries.origin": "manual",
+            "signal_entries.strategy_id": {"$in": list(held_counts)},
+        }
+    )
+    for record in completed_records.sort("created_at", 1):
+        for entry in record["signal_entries"]:
+            key = (entry["strategy_id"], entry["round"], entry["action"])
+            if key[0] in held_counts and (key not in slack_keys or slack_keys[key]["completed"]):
+                slack_keys[key] = {"key": record["thread_ts"], "has_ts": True, "manual": True, "completed": True}
     strategy_ids = [strategy_view["strategy_id"] for strategy_view in view["strategies"]]
     order_keys = active_order_keys(strategy_ids)
     for strategy_view in view["strategies"]:
@@ -273,7 +328,7 @@ def _keep_latest_buy(sent_log: dict[str, dict[str, Any]], strategy_id: str) -> N
     buys = {
         key: entry
         for key, entry in sent_log.items()
-        if entry.get("strategy_id") == strategy_id and entry.get("action") == "buy"
+        if entry.get("strategy_id") == strategy_id and entry.get("action") == "buy" and entry.get("origin") != "manual"
     }
     if len(buys) <= 1:
         return
@@ -450,6 +505,9 @@ def _log_entry(trigger: dict[str, Any], held_counts: dict[str, int], stamp: str,
     """발송 이력 한 건 — signal_ts 는 이 신호를 처음 알린 메시지(체결 확인이 달리는 스레드의 뿌리)다."""
     return {
         "at": stamp,
+        "origin": trigger.get("origin", "auto"),
+        "fill_cursor": trigger["fill_cursor"],
+        "account_id": trigger.get("account_id"),
         "action": trigger["action"],
         "strategy_id": trigger["strategy_id"],
         "ticker": trigger["ticker"],
@@ -507,14 +565,17 @@ def _send_confirms(
     직접 산 것처럼 슬랙 주문 없이 회차가 채워졌을 때만 확인이 나간다.
     """
     from utils.strategy_trade_orders import thread_has_filled_order
-    from utils.strategy_trade_threads import mark_signal_thread_used
+    from utils.strategy_trade_threads import complete_signal_thread, mark_signal_thread_used, signal_is_manual
 
     groups: dict[str, list[dict[str, Any]]] = {}
     for pending in pendings:
         groups.setdefault(pending["signal_ts"], []).append(pending)
     sent = failed = 0
     for root, group in groups.items():
-        mark_signal_thread_used(root)
+        if signal_is_manual(root):
+            complete_signal_thread(root)
+        else:
+            mark_signal_thread_used(root)
         if thread_has_filled_order(root):
             continue
         text = "\n".join(_confirm_line(pending, strategy_view["index"], strategy_view["country"]) for pending in group)
@@ -575,6 +636,8 @@ def _settle_unused_signals(
                     logger.exception("사고팔기 신호 회수 마무리 실패: %s", root)
             continue
         entries = thread["signal_entries"]
+        if any(entry.get("origin") == "manual" for entry in entries):
+            continue
         if all(entry["strategy_id"] not in configured for entry in entries):
             try:
                 if withdraw_signal(root, "removed", None):
@@ -629,12 +692,16 @@ def _close_sessions(
     체결 확인을 먼저 처리한 뒤 `_drop_closed_session_signals` 가 지운다. 사고팔기 설정에서 빠진 전략의 기록은 지운다.
     """
     changed = False
-    for key in [key for key, entry in sent_log.items() if entry.get("strategy_id") not in configured]:
+    for key in [
+        key
+        for key, entry in sent_log.items()
+        if entry.get("strategy_id") not in configured and entry.get("origin") != "manual"
+    ]:
         del sent_log[key]
         changed = True
     closed = {strategy["strategy_id"] for strategy in strategies if _session_closed(strategy, now)}
     for entry in sent_log.values():
-        if entry.get("strategy_id") in closed and not entry.get("session_closed"):
+        if entry.get("origin") != "manual" and entry.get("strategy_id") in closed and not entry.get("session_closed"):
             entry["session_closed"] = True
             changed = True
     return changed
@@ -643,13 +710,16 @@ def _close_sessions(
 def _drop_closed_session_signals(sent_log: dict[str, dict[str, Any]], open_ids: set[str]) -> bool:
     """지난 세션에 보낸 신호 기록을 지운다(다시 열린 전략만) — 이번 세션의 같은 회차 신호는 새 스레드로 나간다."""
     stale = [
-        key for key, entry in sent_log.items() if entry.get("session_closed") and entry.get("strategy_id") in open_ids
+        key
+        for key, entry in sent_log.items()
+        if entry.get("origin") != "manual" and entry.get("session_closed") and entry.get("strategy_id") in open_ids
     ]
     for key in stale:
         del sent_log[key]
     return bool(stale)
 
 
+@signal_lock()
 def notify_strategy_trade() -> dict[str, Any]:
     """트리거를 판정해 필요할 때만 슬랙을 보낸다 — 사고팔기 슬랙이 켜진 계좌의 전략만.
 
@@ -665,10 +735,8 @@ def notify_strategy_trade() -> dict[str, Any]:
 
     enabled = _slack_enabled_accounts()
     now = datetime.now(KST)
-    first_close = min(max(end for _, end in windows) for windows in INSTRUMENT_TRADING_WINDOWS["kor"].values())
     # 국장 마감 후이거나 미장이 거래 시간이 아니면 슬랙 스위치와 무관하게 모든 계좌의 미사용 신호를 정리한다.
-    after_close = now.time() >= first_close or not is_instrument_trading_time("us", "etf", now=now)
-    view = load_views_where(lambda entry: after_close or entry["account_id"] in enabled, fresh=False)
+    view = load_views_where(lambda entry: True, fresh=False)
     sent_log = _load_sent_log()
     configured = set(load_settings()["strategies"])
     expired, withdrawn = _settle_unused_signals(view["strategies"], sent_log, now, configured)
@@ -687,15 +755,18 @@ def notify_strategy_trade() -> dict[str, Any]:
     for sid, message in view["errors"].items():
         logger.error("사고팔기 운용 현황 실패(%s) — 이 전략은 건너뜁니다: %s", sid, message)
 
-    open_strategies = [
-        strategy for strategy in view["strategies"] if strategy["account_id"] in enabled and _can_notify(strategy, now)
-    ]
+    open_strategies = [strategy for strategy in view["strategies"] if _can_notify(strategy, now)]
     if not open_strategies:
         reason = (
             "거래 가능 시간인 사고팔기 종목이 없습니다." if view["strategies"] else "운용 현황을 확인할 수 없습니다."
         )
         return {"sent": False, "reason": reason, "triggers": []}
-    triggers = [trigger for strategy in open_strategies for trigger in collect_triggers(strategy)]
+    triggers = [
+        trigger
+        for strategy in open_strategies
+        if strategy["account_id"] in enabled
+        for trigger in collect_triggers(strategy)
+    ]
     if triggers:
         # 주문이 진행 중이면 신호를 생략한다. 매도 후 재매수는 양쪽을 확인한다.
         in_flight = active_order_keys([strategy["strategy_id"] for strategy in open_strategies])
@@ -716,6 +787,7 @@ def notify_strategy_trade() -> dict[str, Any]:
     #    지금 전략 목록에 없는 전략의 기록은 체결 여부를 알 수 없어 건드리지 않는다.
     held_counts = _held_counts({"strategies": open_strategies})
     held_fills = _held_fills({"strategies": open_strategies})
+    events = {s["strategy_id"]: s["fill_events"] for s in open_strategies}
     arbitrary_ids = {
         strategy["strategy_id"]: {lot["id"] for lot in strategy["arbitrary_lots"]} for strategy in open_strategies
     }
@@ -725,7 +797,12 @@ def notify_strategy_trade() -> dict[str, Any]:
         and (
             pending["arbitrary_id"] not in arbitrary_ids[pending["strategy_id"]]
             if pending.get("arbitrary_id")
-            else _round_filled(pending, held_counts[pending["strategy_id"]], held_fills[pending["strategy_id"]])
+            else _entry_filled(
+                pending,
+                held_counts[pending["strategy_id"]],
+                held_fills[pending["strategy_id"]],
+                events[pending["strategy_id"]],
+            )
         ),
     )
     dropped = _drop_closed_session_signals(sent_log, {strategy["strategy_id"] for strategy in open_strategies})
@@ -736,7 +813,7 @@ def notify_strategy_trade() -> dict[str, Any]:
     for strategy_view in open_strategies:
         sid = strategy_view["strategy_id"]
         # ② 남은 신호 — 기록에 없는(이번 세션에 처음 보는) 신호만 보낸다.
-        fresh = [t for t in triggers if t["strategy_id"] == sid and _trigger_key(t) not in sent_log]
+        fresh = [t for t in triggers if t["strategy_id"] == sid and _matching_signal(sent_log, t) is None]
 
         own_confirmed = [pending for pending in confirmed if str(pending.get("strategy_id")) == sid]
         # 신호 메시지가 기록된 확인은 그 스레드로, 없는 확인(옛 기록)은 새 신호 본문과 함께 채널로 보낸다.
@@ -749,6 +826,10 @@ def notify_strategy_trade() -> dict[str, Any]:
         if fresh:
             lines.append(build_message(strategy_view, fresh))
         if lines:
+            for trigger in fresh:
+                sent_log[_trigger_key(trigger)] = _log_entry(trigger, held_counts, stamp, "")
+            if fresh:
+                _save_sent_log(sent_log)
             signal_ts = _send_live_message(strategy_view, "\n".join(lines))
             if not signal_ts:
                 failed_count += 1
@@ -761,6 +842,9 @@ def notify_strategy_trade() -> dict[str, Any]:
                 record_signal_thread(signal_ts, entries)
                 if own_confirmed:
                     mark_signal_thread_used(signal_ts)
+            for entry in entries:
+                sent_log[_trigger_key(entry)] = entry
+            _save_sent_log(sent_log)
             order_failed += _send_order_messages(strategy_view, fresh, signal_ts)
             fresh_all.extend(fresh)
             for entry in entries:
@@ -786,3 +870,104 @@ def notify_strategy_trade() -> dict[str, Any]:
     if order_failed:
         parts.append(f"주문 메시지 실패 {order_failed}건")
     return {"sent": sent_count > 0, "reason": " · ".join(parts), "triggers": fresh_all or triggers}
+
+
+def _manual_signal(payload: dict[str, Any], *, fresh: bool) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """공통 회차 판정·트리거 생성으로 수동 신호와 서버 확인 내용을 만든다."""
+    import json
+    from copy import deepcopy
+    from hashlib import sha256
+
+    from utils.strategy_trade_orders import _order_strategy, _require_no_manual_order, _require_round_state
+
+    account_id, sid = payload.get("account_id"), payload.get("strategy_id")
+    side, round_no = payload.get("side"), payload.get("round")
+    if (
+        not isinstance(account_id, str)
+        or not isinstance(sid, str)
+        or side not in ("buy", "sell")
+        or type(round_no) is not int
+    ):
+        raise ValueError("account_id·strategy_id·매매 방향·정수 회차가 필요합니다.")
+    setting = load_settings()["strategies"].get(sid)
+    if setting is None or setting["account_id"] != account_id:
+        raise ValueError("계좌의 전략을 찾을 수 없습니다.")
+    strategy = _order_strategy(account_id, setting["pool"], sid, fresh=fresh)
+    row = _require_round_state(strategy, side, round_no)
+    _require_no_manual_order(strategy, side)
+    if row["quantity"] <= 0 or (side == "buy" and (row["cash_short"] or row["budget_short"])):
+        raise ValueError("주문 가능한 수량 또는 예수금이 부족합니다.")
+    forced = deepcopy(strategy)
+    forced["arbitrary_lots"] = []
+    for item in forced["rounds"]:
+        item["buy_reached"] = item["round"] == round_no and side == "buy"
+        item["sell_reached"] = item["round"] == round_no and side == "sell"
+        item["rebuy_after_sell"] = False
+        if item["round"] == round_no and side == "buy" and item["buy_limit"] is None:
+            item["close_entry"] = True
+    trigger = collect_triggers(forced)[0]
+    trigger.update(origin="manual", account_id=account_id)
+    price = trigger["limit_price"] if trigger["limit_price"] is not None else trigger["close"]
+    if price is None or price <= 0:
+        raise ValueError("신호 가격을 확인할 수 없습니다.")
+    preview = {
+        "account_id": account_id,
+        "account_name": strategy["account_name"],
+        "strategy_id": sid,
+        "ticker": strategy["ticker"],
+        "name": row["name"],
+        "round": round_no,
+        "side": side,
+        "price": price,
+        "quantity": row["quantity"],
+    }
+    preview["token"] = sha256(json.dumps([preview, trigger["fill_cursor"]], sort_keys=True).encode()).hexdigest()
+    return strategy, trigger, preview
+
+
+def preview_manual_signal(payload: dict[str, Any]) -> dict[str, Any]:
+    return _manual_signal(payload, fresh=False)[2]
+
+
+@signal_lock()
+def send_manual_signal(payload: dict[str, Any]) -> dict[str, Any]:
+    """서버 선점 뒤 Slack 메시지만 발송한다. 증권사 주문은 Slack 확인 경로만 사용한다."""
+    from utils.slack_mock_orders import send_signal_order_messages
+    from utils.strategy_trade_orders import find_duplicate_order
+    from utils.strategy_trade_threads import complete_signal_thread, record_signal_thread, send_thread_message
+
+    strategy, trigger, preview = _manual_signal(payload, fresh=True)
+    if payload.get("token") != preview["token"]:
+        raise ValueError("회차 가격·수량이 변경됐습니다. 확인창을 다시 열어 확인하세요.")
+    key = _trigger_key(trigger)
+    sent_log = _load_sent_log()
+    previous = _matching_signal(sent_log, trigger)
+    if previous is not None:
+        held = strategy["status"]["held_count"]
+        fills = {r["round"]: r["fill_price"] for r in strategy["rounds"] if r["held"]}
+        if not _entry_filled(previous, held, fills, strategy["fill_events"]):
+            return {"sent": False, "duplicate": True}
+        if previous.get("signal_ts"):
+            complete_signal_thread(previous["signal_ts"])
+        sent_log.pop(_trigger_key(previous), None)
+    if find_duplicate_order(strategy["account_id"], strategy["strategy_id"], trigger["action"]) is not None:
+        raise ValueError("같은 방향의 주문이 진행 중입니다.")
+    held_counts = {strategy["strategy_id"]: strategy["status"]["held_count"]}
+    entry = _log_entry(trigger, held_counts, datetime.now(KST).isoformat(), "")
+    sent_log[key] = entry
+    _save_sent_log(sent_log)
+    word = "매수" if trigger["action"] == "buy" else "매도"
+    text = build_message(strategy, [trigger]) + (
+        f"\n*수동 슬랙 발송* · {trigger['round']}호 {word} · "
+        f"{_level(preview['price'], strategy['country'])} · {preview['quantity']:,}주 · 직접 회수 전까지 유지됩니다."
+    )
+    signal_ts = send_thread_message(text)
+    if not signal_ts:
+        raise ValueError(
+            "Slack 발송 결과를 확인하지 못했습니다. 중복 방지를 위해 재발송을 막았습니다. 발송 기록을 확인하세요."
+        )
+    entry["signal_ts"] = signal_ts
+    record_signal_thread(signal_ts, [entry])
+    _save_sent_log(sent_log)
+    send_signal_order_messages(strategy, [trigger], signal_ts)
+    return {"sent": True, "duplicate": False}

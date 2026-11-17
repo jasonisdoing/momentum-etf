@@ -141,7 +141,7 @@ def _past_fills(account_id: str, day: date) -> list[dict[str, Any]]:
 
 
 def _day_trades(
-    rows: list[dict[str, Any]], ticker: str, day: date, sources: dict[tuple[str, str], tuple[bool, str | None]]
+    rows: list[dict[str, Any]], ticker: str, day: date, sources: dict[tuple[str, str], tuple[str, str | None]]
 ) -> list[Trade]:
     """그날 그 종목의 체결 — 주문번호 순(같은 날 안의 순서)."""
     trades: list[tuple[int, Trade]] = []
@@ -149,7 +149,7 @@ def _day_trades(
         if row["ticker"] != ticker:
             continue
         order = sources.get((f"{day:%Y%m%d}", row["order_no"]))
-        source = SOURCE_SLACK if order and order[0] else SOURCE_MANUAL
+        source = order[0] if order else SOURCE_MANUAL
         trade = Trade(
             day.isoformat(),
             is_buy(row),
@@ -176,7 +176,12 @@ def read_cached_trade_days(account_id: str, start: date, as_of: date) -> dict[da
     return {date.fromisoformat(doc["_id"].removeprefix(prefix)): doc["rows"] for doc in days}
 
 
-def recent_trades(ledger: Ledger, ticker: str, cached_days: dict[date, list[dict[str, Any]]]) -> list[Trade]:
+def recent_trades(
+    ledger: Ledger,
+    ticker: str,
+    cached_days: dict[date, list[dict[str, Any]]],
+    sources: dict[tuple[str, str], tuple[str, str]],
+) -> list[Trade]:
     """`history_start` 부터의 체결(오래된 순) — 원장 체결 앞에 일별 캐시의 과거 체결을 이어 붙인다.
 
     사이클(보유가 비는 시점)로 자르지 않는다. 캐시가 비거나 창 이전 보유를 넘어서는 체결이 나오면 그 이전으로 넘어가지 않는다.
@@ -192,7 +197,7 @@ def recent_trades(ledger: Ledger, ticker: str, cached_days: dict[date, list[dict
             rows = cached_days.get(day)
             if rows is None:
                 break
-            day_trades = _day_trades(rows, ticker, day, {})
+            day_trades = _day_trades(rows, ticker, day, sources)
             reversed_trades = list(reversed(day_trades))
             for trade in reversed_trades:
                 opening += -trade.shares if trade.buy else trade.shares
@@ -349,7 +354,7 @@ def _from_window(history: _History, ticker: str, quantity: int) -> tuple[list[Tr
 def _manual_orders(
     today_rows: list[dict[str, Any]],
     tickers: list[str],
-    sources: dict[tuple[str, str], tuple[bool, str | None]],
+    sources: dict[tuple[str, str], tuple[str, str | None]],
     today: date,
 ) -> dict[str, list[dict[str, Any]]]:
     orders: dict[str, list[dict[str, Any]]] = {ticker: [] for ticker in tickers}
@@ -542,7 +547,9 @@ def read_ledgers(account_id: str, tickers: list[str]) -> dict[str, Ledger | Ledg
         day = ledger.as_of.isoformat()
         recorded = [trade for trade in ledger.trades if trade.day < day]
         today = [
-            replace(trade, sell_target=REGULAR_SELL) if not trade.buy and trade.source == SOURCE_SLACK else trade
+            replace(trade, sell_target=REGULAR_SELL)
+            if not trade.buy and trade.source in (SOURCE_SLACK, "manual_slack")
+            else trade
             for trade in ledger.trades
             if trade.day == day
         ]

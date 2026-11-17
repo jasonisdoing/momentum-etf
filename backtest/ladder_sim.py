@@ -334,7 +334,9 @@ def run_ticker(ticker: str, cfg: dict, variants: list[dict]) -> dict[str, list[d
         regime = regime_of(data, lo, hi)
         for variant in variants:
             result = simulate(data, lo, hi, variant, cfg)
-            results[variant["name"]].append({**result, "regime": regime, "start": data["day"][lo]})
+            results[variant["name"]].append(
+                {**result, "regime": regime, "start": data["day"][lo], "end": data["day"][hi - 1]}
+            )
     return results
 
 

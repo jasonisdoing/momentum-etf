@@ -8,20 +8,22 @@
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from pymongo.errors import OperationFailure
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 from utils.db_manager import get_db_connection
 from utils.notification import send_slack_message_v2, update_slack_message
 from utils.settings_loader import get_slack_channel
+from utils.strategy_trade_signal_lock import signal_lock
 
 KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_slack_messages"
-# 신호가 살아 있는 동안만 필요하다 — 오래된 기록은 DB 가 스스로 지운다. 신호 스레드 체결 추적도 같은 기간만 둔다.
+# 자동 신호의 일반 답글 보존 기간. 신호 원본과 수동 신호 답글은 주문 검증·회수를 위해 보존한다.
 SIGNAL_RETENTION_DAYS = 7
 _RETENTION_SECONDS = SIGNAL_RETENTION_DAYS * 24 * 3600
 # 이미 지워진 메시지는 실패로 보지 않는다(사용자가 슬랙에서 직접 지웠을 수 있다).
@@ -37,7 +39,19 @@ def _messages():
         raise RuntimeError("MongoDB 연결에 실패했습니다.")
     collection = db[COLLECTION]
     if not _index_ready:
-        collection.create_index("created_at", expireAfterSeconds=_RETENTION_SECONDS)
+        # 수동 신호와 완료 표시는 날짜가 지나도 주문 검증에 필요하다.
+        indexes = collection.index_information()
+        if "created_at_1" in indexes:
+            try:
+                collection.drop_index("created_at_1")
+            except OperationFailure as exc:
+                if exc.code != 27:
+                    raise
+        collection.update_many(
+            {"signal_entries": {"$exists": False}, "expires_at": {"$exists": False}, "manual": {"$ne": True}},
+            [{"$set": {"expires_at": {"$add": ["$created_at", _RETENTION_SECONDS * 1000]}}}],
+        )
+        collection.create_index("expires_at", expireAfterSeconds=0)
         collection.create_index("thread_ts")
         _index_ready = True
     return collection
@@ -47,6 +61,7 @@ def send_thread_message(
     text: str, blocks: list[dict[str, Any]] | None = None, thread_ts: str | None = None
 ) -> str | None:
     """사고팔기 슬랙 메시지를 보내고 그 ts 를 스레드 기록에 남긴다 — `thread_ts` 가 없으면 새 스레드의 뿌리 메시지다."""
+    manual = bool(thread_ts and signal_is_manual(thread_ts))
     ts = send_slack_message_v2(text, blocks, thread_ts)
     if ts:
         _messages().insert_one(
@@ -55,6 +70,11 @@ def send_thread_message(
                 "thread_ts": thread_ts or ts,
                 "ts": ts,
                 "created_at": datetime.now(UTC),
+                **(
+                    {"manual": True}
+                    if manual
+                    else {"expires_at": datetime.now(UTC) + timedelta(seconds=_RETENTION_SECONDS)}
+                ),
             }
         )
     return ts
@@ -64,7 +84,7 @@ def record_signal_thread(signal_ts: str, entries: list[dict[str, Any]]) -> None:
     """새 신호를 스레드에 연결한다. 같은 회차에서 다음 신호가 나가도 이 기록은 남는다."""
     _messages().update_one(
         {"thread_ts": signal_ts, "ts": signal_ts},
-        {"$set": {"signal_entries": entries}},
+        {"$set": {"signal_entries": entries}, "$unset": {"expires_at": ""}},
     )
 
 
@@ -72,13 +92,45 @@ def mark_signal_thread_used(signal_ts: str) -> None:
     _messages().update_one({"thread_ts": signal_ts, "ts": signal_ts}, {"$set": {"signal_used": True}})
 
 
-def reserve_signal_for_order(signal_ts: str) -> bool:
+def reserve_signal_for_order(signal_ts: str, message_ts: str) -> bool:
     """주문 요청과 신호 회수 중 먼저 기록된 쪽이 진행한다."""
     root = {"thread_ts": signal_ts, "ts": signal_ts}
-    updated = _messages().update_one({**root, "withdrawal_text": {"$exists": False}}, {"$set": {"signal_used": True}})
-    return (
-        bool(updated.matched_count)
-        or _messages().find_one({**root, "withdrawal_text": {"$exists": True}}, {"_id": 1}) is None
+    from utils.strategy_trade_orders import _orders
+
+    if (
+        _orders().find_one({"slack.thread_ts": signal_ts, "slack.message_ts": message_ts, "status": "filled"})
+        is not None
+    ):
+        if signal_is_manual(signal_ts):
+            complete_signal_thread(signal_ts)
+        return False
+    updated = _messages().update_one(
+        {
+            **root,
+            "withdrawal_text": {"$exists": False},
+            "signal_completed": {"$ne": True},
+            "order_reserved": {"$ne": True},
+        },
+        {"$set": {"signal_used": True, "order_reserved": True}},
+    )
+    return bool(updated.matched_count)
+
+
+def finish_order_reservation(signal_ts: str) -> None:
+    """동시 주문 선점만 해제한다. 완료·회수 표시는 그대로 남긴다."""
+    _messages().update_one({"thread_ts": signal_ts, "ts": signal_ts}, {"$unset": {"order_reserved": ""}})
+
+
+def signal_is_manual(signal_ts: str) -> bool:
+    record = _messages().find_one({"thread_ts": signal_ts, "ts": signal_ts})
+    return bool(record and any(e.get("origin") == "manual" for e in record.get("signal_entries", [])))
+
+
+def complete_signal_thread(signal_ts: str) -> None:
+    """메시지는 보존하고 이후 사이클에서도 같은 신호의 재주문을 막는다."""
+    _messages().update_one(
+        {"thread_ts": signal_ts, "ts": signal_ts},
+        {"$set": {"signal_used": True, "signal_completed": True}, "$unset": {"expires_at": ""}},
     )
 
 
@@ -147,6 +199,8 @@ def withdraw_signal(signal_ts: str, reason: str, detail: str | None) -> bool:
     record = _messages().find_one(root, {"signal_entries": 1})
     if record is None or not record.get("signal_entries"):
         raise ValueError("회수할 슬랙 신호 기록을 찾을 수 없습니다.")
+    if reason != "manual" and any(e.get("origin") == "manual" for e in record["signal_entries"]):
+        return False
     if _signal_thread_has_orders(signal_ts):
         return False
     note = withdrawal_line(record["signal_entries"], reason, detail, datetime.now(UTC))
@@ -201,6 +255,7 @@ def _forget_replies(signal_ts: str) -> None:
     _config().update_one({"_id": _SETTINGS_KEY}, {"$pull": {"signal_threads": {"thread_ts": signal_ts}}})
 
 
+@signal_lock()
 def withdraw_signal_by_key(key: str) -> dict[str, Any]:
     """화면에서 발송 기록 한 건(`key`)의 신호를 회수한다 — 같은 메시지로 나간 발송 기록도 함께 지운다."""
     from utils.strategy_trade_notify import _load_sent_log, _save_sent_log

@@ -59,6 +59,7 @@ from utils.strategy_trade_orders import (
     signal_thread_state,
     signal_threads,
 )
+from utils.strategy_trade_signal_lock import signal_lock
 from utils.strategy_trade_threads import send_thread_message
 
 logger = logging.getLogger(__name__)
@@ -226,13 +227,28 @@ def send_order_message(
     ``rebuy`` 는 매도 후 재매수 한 짝의 메시지다(회차 매도 신호 중 팔자마자 다시 사게 되는 경우).
     보낸 메시지의 ``{"ts", "request"}`` 를 돌려준다(신호 스레드 기록이 버튼을 다시 그릴 때 쓴다).
     """
-    env = account_env(account_id)
     if rebuy:
         if side != "sell" or round_no is None:
             raise BrokerApiError("매도 후 재매수는 회차 매도 신호에만 보냅니다.")
         order = resolve_swap(account_id, pool, strategy_id, round_no, fresh=False)
     else:
         order = resolve_order(account_id, pool, strategy_id, side, round_no, fresh=False, arbitrary_id=arbitrary_id)
+    return _send_order_request(account_id, pool, strategy_id, side, round_no, thread_ts, rebuy, arbitrary_id, order)
+
+
+def _send_order_request(
+    account_id: str,
+    pool: str,
+    strategy_id: str,
+    side: str,
+    round_no: int | None,
+    thread_ts: str | None,
+    rebuy: bool,
+    arbitrary_id: str | None,
+    order: dict[str, Any],
+) -> dict[str, Any]:
+    """확정된 표시 내용으로 기존 주문 버튼을 만든다. 실제 호가는 Slack 확인 시 조회한다."""
+    env = account_env(account_id)
     request = {
         "env": env,
         "round": round_no,
@@ -615,14 +631,20 @@ def _cancel(target: dict[str, Any]) -> None:
 def run_submission(target: dict[str, Any]) -> None:
     """확인된 주문·취소를 처리한다 — 응답 뒤 백그라운드에서 돈다."""
     try:
-        if target["kind"] == "order":
-            from utils.strategy_trade_threads import reserve_signal_for_order
+        with signal_lock():
+            if target["kind"] == "order":
+                from utils.strategy_trade_threads import reserve_signal_for_order
 
-            if not reserve_signal_for_order(target["thread_ts"]):
-                return
-            _place(target)
-        else:
-            _cancel(target)
+                if not reserve_signal_for_order(target["thread_ts"], target["message_ts"]):
+                    return
+                try:
+                    _place(target)
+                finally:
+                    from utils.strategy_trade_threads import finish_order_reservation
+
+                    finish_order_reservation(target["thread_ts"])
+            else:
+                _cancel(target)
     except Exception as exc:
         logger.exception("슬랙 모의 주문 후속 처리 실패")
         send_thread_message(f"⚠️ 처리 중 오류로 멈춥니다: {exc}", thread_ts=target["thread_ts"])
@@ -715,6 +737,9 @@ def sync_signal_thread(thread: dict[str, Any]) -> str | None:
             _react("reactions_add", channel, thread_ts, REACTIONS[state])
         set_signal_thread_reaction(thread_ts, state)
     if state == MESSAGE_DONE:
+        from utils.strategy_trade_threads import complete_signal_thread
+
+        complete_signal_thread(thread_ts)
         forget_signal_thread(thread_ts)
     return state
 
@@ -740,6 +765,10 @@ def close_session_threads(strategies: list[dict[str, Any]]) -> int:
         if strategy is None:
             continue
         thread_ts = thread["thread_ts"]
+        from utils.strategy_trade_threads import signal_is_manual
+
+        if signal_is_manual(thread_ts):
+            continue
         states = signal_message_states(thread)
         settled = {item["ts"] for item in thread["settled"]}
         reorderable = reorderable_signal_messages(thread)
@@ -777,6 +806,24 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
     messages: list[dict[str, Any]] = []
     try:
         for trigger in pending:
+            if trigger.get("origin") == "manual":
+                message = _send_order_request(
+                    account_id,
+                    strategy_view["pool"],
+                    trigger["strategy_id"],
+                    trigger["action"],
+                    trigger["round"],
+                    signal_ts,
+                    False,
+                    None,
+                    {
+                        "strategy_label": strategy_view["label"],
+                        "ticker": trigger["ticker"],
+                        "quantity": trigger["quantity"],
+                    },
+                )
+                messages.append(message)
+                continue
             message = send_order_message(
                 account_id,
                 strategy_view["pool"],

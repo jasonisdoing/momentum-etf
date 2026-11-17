@@ -419,6 +419,26 @@ def place_swap(account_id: str, pool: str, strategy_id: str, round_no: int, slac
     return {"sell": sell, "buy": buy, "buy_error": None, "signal_price": order["signal_price"]}
 
 
+def _require_current_signal(signal_ts: str, account_id: str, pool: str, strategy_id: str, round_no: int) -> None:
+    """직전 갱신된 원장으로 신호 이후 체결을 확인해 이전 사이클의 주문을 막는다."""
+    from utils.strategy_trade_notify import _entry_filled
+    from utils.strategy_trade_threads import _messages, complete_signal_thread
+
+    root = _messages().find_one({"thread_ts": signal_ts, "ts": signal_ts})
+    if root is None or root.get("withdrawal_text") or root.get("signal_completed"):
+        raise RoundNotOrderableError("이미 종료되었거나 확인할 수 없는 신호입니다.", done=True)
+    strategy = _order_strategy(account_id, pool, strategy_id, fresh=False)
+    fills = {row["round"]: row["fill_price"] for row in strategy["rounds"] if row["held"]}
+    if any(
+        _entry_filled(entry, strategy["status"]["held_count"], fills, strategy["fill_events"])
+        for entry in root.get("signal_entries", [])
+        if entry["round"] == round_no
+    ):
+        if any(entry.get("origin") == "manual" for entry in root.get("signal_entries", [])):
+            complete_signal_thread(signal_ts)
+        raise RoundNotOrderableError("이 신호의 회차는 이미 체결됐습니다. 새 신호를 사용하세요.", done=True)
+
+
 def _record_base(
     env: str,
     account_id: str,
@@ -429,7 +449,13 @@ def _record_base(
     slack: dict[str, str] | None,
 ) -> dict[str, Any]:
     """주문 기록의 공통 필드 — 구분·가격·상태는 `_submit` 이 채운다."""
+    from utils.strategy_trade_threads import signal_is_manual
+
+    if slack is not None and round_no is not None:
+        _require_current_signal(slack["thread_ts"], account_id, pool, strategy_id, round_no)
+    origin = "manual_slack" if slack and signal_is_manual(slack["thread_ts"]) else "slack"
     return {
+        "signal_origin": origin,
         "env": env,
         "account_id": account_id,
         "pool": pool,
@@ -520,6 +546,9 @@ def read_trade_history_orders(account_id: str, start: date, as_of: date) -> list
                 "pair_id": 1,
                 "filled_quantity": 1,
                 "average_fill_price": 1,
+                "signal_origin": 1,
+                "country": 1,
+                "arbitrary_id": 1,
             },
         )
     )
@@ -687,7 +716,13 @@ def register_signal_thread(channel: str, thread_ts: str, messages: list[dict[str
     today = _now().date()
     oldest = (today - timedelta(days=SIGNAL_RETENTION_DAYS)).isoformat()
     config = _config()
-    config.update_one({"_id": _SETTINGS_KEY}, {"$pull": {"signal_threads": {"date": {"$lt": oldest}}}}, upsert=True)
+    config.update_one(
+        {"_id": _SETTINGS_KEY},
+        {"$pull": {"signal_threads": {"date": {"$lt": oldest}, "manual": {"$ne": True}}}},
+        upsert=True,
+    )
+    from utils.strategy_trade_threads import signal_is_manual
+
     thread = {
         "channel": channel,
         "thread_ts": thread_ts,
@@ -695,6 +730,7 @@ def register_signal_thread(channel: str, thread_ts: str, messages: list[dict[str
         "settled": [],
         "reaction": None,
         "date": today.isoformat(),
+        "manual": signal_is_manual(thread_ts),
     }
     config.update_one({"_id": _SETTINGS_KEY}, {"$push": {"signal_threads": thread}}, upsert=True)
 
@@ -862,19 +898,26 @@ def broker_orders_today(account_id: str) -> list[dict[str, Any]]:
     return list_day_orders(account_id, _now().strftime("%Y%m%d"))
 
 
-def order_sources(account_id: str, today_rows: list[dict[str, Any]]) -> dict[tuple[str, str], tuple[bool, str]]:
-    """우리가 증권사에 낸 주문의 (날짜 YYYYMMDD, 주문번호) → 슬랙 신호 주문 여부 — 회차 원장이 체결의 출처를 가릴 때 쓴다.
+def _fill_source(record: dict[str, Any]) -> str:
+    """기존 신호 주문은 자동 슬랙, 신호가 없는 API 주문은 직접 거래다."""
+    if record["round"] is None and not record.get("arbitrary_id"):
+        return "manual"
+    return record.get("signal_origin", "slack")
+
+
+def order_sources(account_id: str, today_rows: list[dict[str, Any]]) -> dict[tuple[str, str], tuple[str, str]]:
+    """우리가 증권사에 낸 주문의 (날짜 YYYYMMDD, 주문번호) → 체결 출처와 매도 대상 — 회차 원장이 체결의 출처를 가릴 때 쓴다.
 
     증권사가 주문을 받은 뒤 우리 기록에 주문번호가 적히기 전(`submitting`)에 원장이 계산되면 우리 주문이 수동으로 잡힌다 —
     그 틈에는 오늘 증권사 주문(``today_rows``) 중 종목·구분·수량·가격이 같은 것을 그 기록의 주문으로 본다.
     """
     records = _orders().find(
         {"account_id": account_id, "order_no": {"$ne": None}},
-        {"order_no": 1, "round": 1, "created_at": 1, "arbitrary_id": 1, "country": 1},
+        {"order_no": 1, "round": 1, "created_at": 1, "arbitrary_id": 1, "country": 1, "signal_origin": 1},
     )
     sources = {
         (_order_date(record), str(int(record["order_no"]))): (
-            record["round"] is not None or bool(record.get("arbitrary_id")),
+            _fill_source(record),
             record.get("arbitrary_id") or REGULAR_SELL,
         )
         for record in records
@@ -888,7 +931,7 @@ def order_sources(account_id: str, today_rows: list[dict[str, Any]]) -> dict[tup
             "status": "submitting",
             "created_at": {"$gte": f"{today:%Y-%m-%d}"},
         },
-        {"ticker": 1, "side": 1, "quantity": 1, "price": 1, "round": 1, "arbitrary_id": 1},
+        {"ticker": 1, "side": 1, "quantity": 1, "price": 1, "round": 1, "arbitrary_id": 1, "signal_origin": 1},
     )
     for record in submitting:
         match = next(
@@ -906,7 +949,7 @@ def order_sources(account_id: str, today_rows: list[dict[str, Any]]) -> dict[tup
         if match is not None:
             target = record.get("arbitrary_id")
             sources[(today_key, match["order_no"])] = (
-                record["round"] is not None or bool(target),
+                _fill_source(record),
                 target or REGULAR_SELL,
             )
     return sources

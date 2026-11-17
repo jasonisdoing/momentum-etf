@@ -65,7 +65,7 @@ type Status = {
 
 type TradeSide = "buy" | "sell" | "arbitrary_buy" | "arbitrary_sell";
 /** 회차 표의 체결 뱃지 — 짝 번호(`pairs`)는 매수는 자기 번호, 매도는 판 매수의 번호다(최근 30일 안 매수만). */
-type TradeBadge = { side: TradeSide; pairs: number[] };
+type TradeBadge = { side: TradeSide; pairs: number[]; source: "slack" | "manual" | "manual_slack" };
 
 const FILL_LABELS = {
   buy: "매수",
@@ -86,7 +86,7 @@ export type RoundRow = {
   // 실제 체결가·산 날짜·출처 — 사다리 선(buy_index)과 별개다. 안 산 회차는 null.
   fill_price: number | null;
   bought_on: string | null;
-  source: "slack" | "manual" | "mixed" | null;
+  source: "slack" | "manual" | "manual_slack" | "mixed" | null;
   close: number | null;
   profit_pct: number | null;
   buy_limit: number | null;
@@ -110,7 +110,7 @@ export type RoundRow = {
   is_next: boolean;
 };
 
-export type SlackSignal = { side: "buy" | "sell"; key: string; has_ts: boolean };
+export type SlackSignal = { side: "buy" | "sell"; key: string; has_ts: boolean; manual: boolean; completed: boolean };
 
 export type StrategyView = {
   strategy_id: string;
@@ -357,9 +357,9 @@ function RoundStatus({
       ? [<StatusBadge key="reached" color="var(--up-color, #d64545)" compact={compact}>도달</StatusBadge>]
       : []),
     ...row.slack_signals.map((signal) => {
-      const label = `${SIDE_WORDS[signal.side]}슬랙`;
+      const label = signal.completed ? "체결 완료" : signal.manual ? "수동 슬랙 발송됨" : `${SIDE_WORDS[signal.side]}슬랙`;
       const badge = <StatusBadge color="var(--tblr-green, #2fb344)" compact={compact}>{label}</StatusBadge>;
-      return signal.has_ts ? (
+      return signal.has_ts && !signal.completed ? (
         <button
           key={`slack-${signal.side}`}
           type="button"
@@ -367,7 +367,7 @@ function RoundStatus({
           onClick={() => onWithdrawSignal(signal, label)}
           style={{ all: "unset", cursor: "pointer" }}
         >
-          {badge}
+          {badge}{signal.manual ? <span style={{ marginLeft: 4, textDecoration: "underline" }}>회수</span> : null}
         </button>
       ) : (
         <span key={`slack-${signal.side}`}>{badge}</span>
@@ -395,7 +395,7 @@ function RoundStatus({
 // 매수는 보라, 매도는 주황 — 빨강·파랑은 상승·하락 손익색이라 헷갈리고 초록은 슬랙·주문 표시가 쓴다.
 const FILL_COLORS = { buy: "var(--tblr-purple, #ae3ec9)", sell: "var(--tblr-orange, #f76707)" } as const;
 
-const FILL_SOURCE_WORDS = { slack: "슬랙", manual: "수동" } as const;
+const FILL_SOURCE_WORDS = { slack: "자동 슬랙", manual: "직접 거래", manual_slack: "수동 슬랙" } as const;
 const BOUGHT_SOURCE_WORDS = { ...FILL_SOURCE_WORDS, mixed: "혼합" } as const;
 
 function DailyTradeBadges({ badges }: { badges: TradeBadge[] }) {
@@ -404,7 +404,7 @@ function DailyTradeBadges({ badges }: { badges: TradeBadge[] }) {
       {badges.map((badge, idx) => (
         <StatusBadge key={idx} color={FILL_COLORS[badge.side.endsWith("buy") ? "buy" : "sell"]}>
           {FILL_LABELS[badge.side]}
-          {badge.pairs.join("·")}
+          {badge.pairs.join("·")} · {badge.source !== "slack" ? "수동 · " : ""}{FILL_SOURCE_WORDS[badge.source]}
         </StatusBadge>
       ))}
     </span>
@@ -619,12 +619,14 @@ function AccountSettingsCard({
   onAccountChange,
   onSaved,
   onWithdrawSignal,
+  onSignalSent,
 }: {
   view: View;
   accountId: string;
   onAccountChange: (accountId: string) => void;
   onSaved: (next: View) => void;
   onWithdrawSignal: (signal: SlackSignal, label: string) => void;
+  onSignalSent: () => Promise<void>;
 }) {
   const toast = useToast();
   const currency = useTradeCurrency();
@@ -856,7 +858,6 @@ function AccountSettingsCard({
     },
     dailyChange,
     currentPrice,
-    { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
     ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => [
       // 권장 간격을 쓰는 동안은 간격 칸 자리에 실제로 쓰이는 권장 간격을 둔다 — 저장된 간격은 보관만 하고, 끄면 다시 쓴다.
       ...(column.field === "pct" && useRecommendedGap
@@ -881,6 +882,7 @@ function AccountSettingsCard({
           } satisfies ColDef<TradeListRow>]
         : []),
     ]),
+    { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
     { ...quantity, headerName: "보유수량", width: 88 },
     tradeWeightColumn,
     returnPct, valuation, pnl,
@@ -1160,6 +1162,7 @@ function AccountSettingsCard({
               view={details}
               poolLabel={poolLabel(details.pool)}
               onWithdrawSignal={onWithdrawSignal}
+              onSignalSent={onSignalSent}
             />
           ) : (
             <div className="card appCard"><div className="card-body appCardBodyTight tableMuted">
@@ -1241,16 +1244,90 @@ function useStickyLefts(count: number) {
   return { headRowRef, stickyCell };
 }
 
+type ManualSignalPreview = {
+  account_id: string; account_name: string; strategy_id: string; ticker: string; name: string;
+  round: number; side: "buy" | "sell"; price: number; quantity: number; token: string;
+};
+
+/** 서버에서 확인한 수동 신호만 발송한다. 실제 주문은 Slack 확인을 거친다. */
+function ManualSignalButton({ view, row, onSent }: { view: StrategyView; row: RoundRow; onSent: () => Promise<void> }) {
+  const currency = useTradeCurrency();
+  const toast = useToast();
+  const [preview, setPreview] = useState<ManualSignalPreview | null>(null);
+  const [busy, setBusy] = useState(false);
+  const side = row.held && row.round === view.status.held_count ? "sell" : row.is_next ? "buy" : null;
+  if (side === null) return null;
+  const active = row.slack_signals.some((signal) => signal.side === side && !signal.completed);
+  const ordered = row.order_sides.includes(side) || row.manual_orders.some((order) => order.side === side);
+  const request = { account_id: view.account_id, strategy_id: view.strategy_id, round: row.round, side };
+  const call = async (path: string, body: object) => {
+    const response = await fetch(`/api/strategy-trade/manual-signal${path}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error ?? "수동 슬랙 신호를 처리하지 못했습니다.");
+    return result;
+  };
+  const prepare = async () => {
+    setBusy(true);
+    try { setPreview(await call("/preview", request)); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "신호 확인 실패"); }
+    finally { setBusy(false); }
+  };
+  const send = async () => {
+    if (!preview) return;
+    setBusy(true);
+    try {
+      const result = await call("", preview);
+      toast.success(result.duplicate ? "이미 발송된 신호가 있습니다." : "수동 Slack 신호를 발송했습니다.");
+      setPreview(null);
+      await onSent();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "신호 발송 실패");
+      setPreview(null);
+      await onSent();
+    } finally { setBusy(false); }
+  };
+  return (
+    <>
+      <button type="button" className="btn btn-sm" disabled={active || ordered || busy}
+        title={active ? "이미 발송된 신호가 있습니다" : ordered ? "진행 중인 주문이 있습니다" : "수동 Slack 신호 발송"}
+        onClick={() => void prepare()}>{SIDE_WORDS[side]}</button>
+      <AppModal open={preview !== null} title={`${SIDE_WORDS[side]} 슬랙 발송 확인`}
+        onClose={() => { if (!busy) setPreview(null); }}
+        footer={<div style={{ display: "flex", justifyContent: "flex-end", gap: 8, width: "100%" }}>
+          <button type="button" className="btn" disabled={busy} onClick={() => setPreview(null)}>취소</button>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void send()}>
+            {busy ? "발송 중…" : "확인 후 발송"}
+          </button>
+        </div>}>
+        {preview ? <dl style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 8 }}>
+          <dt>계좌</dt><dd>{preview.account_name}</dd>
+          <dt>종목</dt><dd>{preview.name} ({preview.ticker})</dd>
+          <dt>회차</dt><dd>{preview.round}호</dd>
+          <dt>방향</dt><dd>{SIDE_WORDS[preview.side]}</dd>
+          <dt>신호 가격</dt><dd>{formatPrice(preview.price, currency)}</dd>
+          <dt>예상 수량</dt><dd>{preview.quantity.toLocaleString()}주</dd>
+        </dl> : null}
+        <p>Slack 주문 메시지를 보냅니다. 실제 주문 가격·수량은 Slack 주문 확인 단계에서 확인합니다.</p>
+        <p style={{ color: "var(--text-muted)", marginBottom: 0 }}>수동 신호는 직접 회수할 때까지 유지되며, 체결 후에는 재주문할 수 없습니다.</p>
+      </AppModal>
+    </>
+  );
+}
+
 /** 선택한 전략의 운용 현황과 회차 표. */
 function StrategySection({
   view,
   poolLabel,
   onWithdrawSignal,
+  onSignalSent,
 }: {
   view: StrategyView | FailedStrategy;
   /** 전략의 가격 출처 표기. */
   poolLabel: string;
   onWithdrawSignal: (signal: SlackSignal, label: string) => void;
+  onSignalSent: () => Promise<void>;
 }) {
   const currency = useTradeCurrency();
   // 위치~손익 칸은 고정하고 날짜별 칸만 가로로 움직인다.
@@ -1435,7 +1512,12 @@ function StrategySection({
                 <td style={{ ...tdStyle, textAlign: "left", ...stickyCell(2) }}>
                   <RoundStatus row={row} compact={false} onWithdrawSignal={onWithdrawSignal} />
                 </td>
-                <td style={{ ...tdStyle, color: "var(--text-muted)", ...stickyCell(3) }}>{formatPrice(view.position_prices[String(position)], currency)}</td>
+                <td style={{ ...tdStyle, color: "var(--text-muted)", ...stickyCell(3) }}>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                    <span>{formatPrice(view.position_prices[String(position)], currency)}</span>
+                    <ManualSignalButton view={view} row={row} onSent={onSignalSent} />
+                  </div>
+                </td>
                 <td style={{ ...tdStyle, ...stickyCell(4) }}>
                   {row.held ? (
                     <>
@@ -1596,6 +1678,7 @@ export function StrategyTradeClient() {
           onAccountChange={(next) => void load(next)}
           onSaved={setView}
           onWithdrawSignal={askWithdrawSignal}
+          onSignalSent={() => load(view.account_id)}
         />
       </div>
 

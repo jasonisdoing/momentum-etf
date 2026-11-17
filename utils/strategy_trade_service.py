@@ -36,6 +36,7 @@ from utils.strategy_trade_ledger import (
     trade_pairs,
 )
 from utils.strategy_trade_market import krw_rate
+from utils.strategy_trade_signal_lock import signal_lock
 
 KST = ZoneInfo("Asia/Seoul")
 _CONFIG_COLLECTION = "system_config"
@@ -222,7 +223,11 @@ def _validated_target(
 
 def _sent_log_unset(sent_log: dict[str, Any], strategy_id: str) -> dict[str, str]:
     """그 전략의 알림 중복 방지 기록을 지우는 $unset 항목."""
-    return {f"sent_log.{key}": "" for key in sent_log if str(key).startswith(f"{strategy_id}:")}
+    return {
+        f"sent_log.{key}": ""
+        for key, entry in sent_log.items()
+        if str(key).startswith(f"{strategy_id}:") and entry.get("origin") != "manual"
+    }
 
 
 def _normalize_trade_groups(groups: Any) -> list[dict[str, str | None]]:
@@ -247,6 +252,7 @@ def _normalize_trade_groups(groups: Any) -> list[dict[str, str | None]]:
     return result
 
 
+@signal_lock()
 def save_account_trade(
     account_id: str, slack_enabled: Any, recommended_gap_enabled: Any, strategies: Any, groups: Any = None
 ) -> None:
@@ -575,7 +581,11 @@ def _paired_trade_rounds(trades: list[Trade], orders: list[dict[str, Any]]) -> d
             # 기존 원장에는 주문번호가 없다. 양쪽 기록에서 유일한 슬랙 체결만 연결한다.
             signature = (trade.day, trade.buy, trade.shares, trade.price)
             matches = by_fill.get(signature, [])
-            order = matches[0] if trade.source == "slack" and fill_counts[signature] == len(matches) == 1 else None
+            order = (
+                matches[0]
+                if trade.source in ("slack", "manual_slack") and fill_counts[signature] == len(matches) == 1
+                else None
+            )
         if order is not None and (pair_id := order.get("pair_id")):
             paired[(trade.day, pair_id, order["round"])].append(index)
 
@@ -622,7 +632,13 @@ def _attach_trade_history(
     view["cycle_end_days"] = []
     view["position_prices"] = {}
     first = next((row for row in view["rounds"] if row["round"] == 1 and row["held"]), None)
-    history = recent_trades(ledger, view["ticker"], cached_days)
+    from utils.strategy_trade_orders import _fill_source, _order_date
+
+    sources = {
+        (_order_date(order), str(int(order["order_no"]))): (_fill_source(order), order.get("arbitrary_id") or "regular")
+        for order in orders
+    }
+    history = recent_trades(ledger, view["ticker"], cached_days, sources)
     cycle_start, cycle_end_days = _trade_cycles(history, ledger.quantity)
     if first is not None:
         base_price = first["fill_price"]
@@ -721,7 +737,7 @@ def _trade_badges(
         else:
             origins = [origin for origin, lot_arbitrary, _ in sold_lots if lot_arbitrary == arbitrary]
             pairs = list(dict.fromkeys(pair_numbers[o] for o in origins if o is not None))
-        badges.append({"side": f"arbitrary_{side}" if arbitrary else side, "pairs": pairs})
+        badges.append({"side": f"arbitrary_{side}" if arbitrary else side, "pairs": pairs, "source": trade.source})
     return badges
 
 
@@ -968,6 +984,16 @@ def _build_strategy_view(
         "manual_orders": list(ledger.manual_orders),
         # 이 현황의 체결 이력을 계산한 시각 — 화면이 기준 시점을 보여 준다.
         "ledger_at": ledger.computed_at,
+        # 회차 번호가 재사용돼도 신호 이후의 정규 체결을 식별한다.
+        "fill_events": [
+            {
+                "cursor": [trade.day, int(trade.order_no)],
+                "buy": trade.buy,
+                "quantity": trade.shares - trade.arbitrary_shares,
+            }
+            for trade in ledger.trades
+            if trade.order_no is not None
+        ],
         "arbitrary_lots": [
             {
                 "id": lot.arbitrary_id,
