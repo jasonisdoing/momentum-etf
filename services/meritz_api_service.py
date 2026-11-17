@@ -18,6 +18,7 @@ import os
 import re
 import threading
 import time
+from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -384,8 +385,25 @@ def fetch_balance(account_id: str, country_code: str) -> dict[str, Any]:
 # ── 국내주식 주문(사고팔기) ─────────────────────────────────────────────────
 
 
+#: 호가 응답에 오는 단계 수 — 국내·미국 모두 매도·매수 10단계와 잔량을 준다.
+_QUOTE_DEPTH_LEVELS = 10
+
+
+def _quote_depth(data: dict[str, Any], price_key: Callable[[str, int], str], cast: Callable[[Any], Any]) -> dict:
+    """호가 응답의 단계별 가격·잔량 — {"asks": [{price, quantity}, …1호가부터], "bids": […]}. 가격이 0 인 단계는 뺀다."""
+    depth: dict[str, list[dict[str, Any]]] = {}
+    for side, prefix in (("asks", "askp"), ("bids", "bidp")):
+        levels = []
+        for level in range(1, _QUOTE_DEPTH_LEVELS + 1):
+            price = cast(data[price_key(prefix, level)])
+            if price > 0:
+                levels.append({"price": price, "quantity": int(float(data[f"{prefix}_rsqn{level}"]))})
+        depth[side] = levels
+    return depth
+
+
 def fetch_best_quote(account_id: str, ticker: str, venue: str) -> dict[str, Any]:
-    """KRX 1호가 — 매도·매수 1호가와 호가 시각. 호가가 비어 있으면 주문 가격을 못 정해 오류다(나무와 같은 표준형)."""
+    """KRX 1호가 — 매도·매수 1호가와 호가 시각, 10단계 호가(`depth`). 호가가 비어 있으면 주문 가격을 못 정해 오류다(나무와 같은 표준형)."""
     data = (
         _request(
             account_id,
@@ -403,6 +421,8 @@ def fetch_best_quote(account_id: str, ticker: str, venue: str) -> dict[str, Any]
         "ask": int(data["askp"]),
         "bid": int(data["bidp"]),
         "at": str(data["prpr_hour"]),
+        # 국내 응답은 1호가만 번호 없이(askp·bidp) 오고 2호가부터 번호가 붙는다.
+        "depth": _quote_depth(data, lambda prefix, level: prefix if level == 1 else f"{prefix}{level}", int),
     }
     if result["ask"] <= 0 or result["bid"] <= 0:
         raise BrokerApiError(
@@ -585,7 +605,7 @@ def resolve_us_exchange(account_id: str, ticker: str) -> str:
 
 
 def fetch_us_best_quote(account_id: str, ticker: str, exchange: str) -> dict[str, Any]:
-    """미국 종목 1호가 — 매도·매수 1호가(달러)와 호가 시각(한국시간 HHMMSS). 호가가 비어 있으면 주문 가격을 못 정해 오류다."""
+    """미국 종목 1호가 — 매도·매수 1호가(달러)와 호가 시각(한국시간 HHMMSS), 10단계 호가(`depth`). 호가가 비어 있으면 주문 가격을 못 정해 오류다."""
     data = (
         _request(
             account_id,
@@ -601,7 +621,12 @@ def fetch_us_best_quote(account_id: str, ticker: str, exchange: str) -> dict[str
         ).get("data")
         or {}
     )
-    result = {"ask": float(data["askp1"]), "bid": float(data["bidp1"]), "at": str(data["korea_hour"])}
+    result = {
+        "ask": float(data["askp1"]),
+        "bid": float(data["bidp1"]),
+        "at": str(data["korea_hour"]),
+        "depth": _quote_depth(data, lambda prefix, level: f"{prefix}{level}", float),
+    }
     if result["ask"] <= 0 or result["bid"] <= 0:
         raise BrokerApiError(
             f"{ticker} 의 매도·매수 1호가가 없어 주문 가격을 정할 수 없습니다 (매도 {result['ask']}, 매수 {result['bid']})."

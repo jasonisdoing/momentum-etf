@@ -205,6 +205,8 @@ def fetch_best_quote(account_no: str, ticker: str, venue: str) -> dict[str, Any]
         "ask": int(quote["askp1"]),
         "bid": int(quote["bidp1"]),
         "at": str(quote["hoga_bsop_hour"]),
+        # 나무 호가 응답의 2호가 이하 필드는 확인하지 못해(연동 계좌 없음) 단계 호가를 주지 않는다.
+        "depth": None,
     }
     if result["ask"] <= 0 or result["bid"] <= 0:
         raise BrokerApiError(

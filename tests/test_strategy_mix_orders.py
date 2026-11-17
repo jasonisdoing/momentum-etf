@@ -69,7 +69,7 @@ class MixOrderTest(TestCase):
             patch.object(mix, "fetch_broker_balance", return_value=self.balance),
             patch.object(mix, "list_day_orders", return_value=[]),
             patch.object(mix, "resolve_ticker_meta", return_value={"is_etf": True, "name": "종목"}),
-            patch.object(mix, "resolve_order_quote", return_value=("KRX", "매도 1호가", 100)),
+            patch.object(mix, "resolve_order_quote", return_value=("KRX", "매도 1호가", 100, None)),
         ]
         for p in patches:
             p.start()
@@ -254,7 +254,7 @@ class MixOrderTest(TestCase):
             "status": "pending",
         }
         with (
-            patch.object(mix, "resolve_order_quote", return_value=("KRX", "매수 1호가", 100)),
+            patch.object(mix, "resolve_order_quote", return_value=("KRX", "매수 1호가", 100, None)),
             patch.object(order_store, "_orders", return_value=store),
             patch.object(order_store, "place_limit_order", return_value={"order_no": "123", "message": ""}) as broker,
             patch.object(slack, "_update_message") as update,

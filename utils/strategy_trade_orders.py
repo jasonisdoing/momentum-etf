@@ -272,7 +272,7 @@ def resolve_order(
         row = _require_round_state(strategy, side, target_round) if target_round is not None else None
     if round_no is not None:
         signal_price = row["sell_limit"] if side == "sell" else (None if row["close_entry"] else row["buy_limit"])
-    venue, label, price = resolve_order_quote(strategy, side)
+    venue, label, price, depth = resolve_order_quote(strategy, side)
     if side == "buy":
         quantity = _buy_quantity(strategy, price, account_id)
     else:
@@ -284,6 +284,7 @@ def resolve_order(
         "price": price,
         "signal_price": signal_price,
         "quote_label": label,
+        "quote_depth": depth,
         "venue": venue,
         "country": strategy["country"],
         "instrument_kind": strategy["instrument_kind"],
@@ -291,13 +292,13 @@ def resolve_order(
     }
 
 
-def resolve_order_quote(strategy: dict[str, Any], side: str) -> tuple[str, str, int | float]:
-    """단건 주문은 공통 거래소 판정과 상대 1호가를 사용한다."""
+def resolve_order_quote(strategy: dict[str, Any], side: str) -> tuple[str, str, int | float, dict | None]:
+    """단건 주문은 공통 거래소 판정과 상대 1호가를 사용한다 — (거래소, 호가 이름, 가격, 단계 호가(확인창 표시용))."""
     venue = _order_venue(strategy, now=_now())
     quote = fetch_best_quote(strategy["account_id"], strategy["ticker"], venue)
     label, price = ("매도 1호가", quote["ask"]) if side == "buy" else ("매수 1호가", quote["bid"])
     _require_valid_quote(strategy, label, price)
-    return venue, label, price
+    return venue, label, price, quote["depth"]
 
 
 def _buy_quantity(strategy: dict[str, Any], price: int, account_id: str) -> int:
@@ -373,6 +374,7 @@ def resolve_swap(account_id: str, pool: str, strategy_id: str, round_no: int, *,
         "buy_quantity": _buy_quantity(strategy, quote["bid"], account_id),
         "sell_price": quote["ask"],
         "buy_price": quote["bid"],
+        "quote_depth": quote["depth"],
         "signal_price": row["sell_limit"],
         "venue": venue,
         "country": strategy["country"],

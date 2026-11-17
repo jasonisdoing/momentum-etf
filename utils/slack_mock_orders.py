@@ -317,10 +317,36 @@ def _gap_label(side: str, gap_pct: float) -> str:
     return "⚠️ 신호보다 불리" if unfavorable else "신호보다 유리"
 
 
+#: 확인 모달에 보이는 호가 단계 수 — 매도·매수 각각.
+QUOTE_DEPTH_SHOWN = 3
+
+
+def _quote_depth_text(order: dict[str, Any], marks: dict[tuple[str, int], str]) -> str:
+    """확인 모달의 호가 표 — 매도 3호가→1호가, 매수 1호가→3호가와 잔량. ``marks`` 는 (asks·bids, 단계) → 주문 표시.
+
+    증권사 연동이 단계 호가를 주지 않으면(나무) 그 사실을 한 줄로 보인다.
+    """
+    depth = order["quote_depth"]
+    if depth is None:
+        return "호가 단계: 이 증권사 연동은 단계 호가를 받지 않습니다."
+    lines = []
+    for side, word, levels in (
+        ("asks", "매도", list(enumerate(depth["asks"][:QUOTE_DEPTH_SHOWN], 1))[::-1]),
+        ("bids", "매수", list(enumerate(depth["bids"][:QUOTE_DEPTH_SHOWN], 1))),
+    ):
+        for level, row in levels:
+            mark = marks.get((side, level), "")
+            price = format_money(row["price"], order["country"])
+            lines.append(f"{word}{level} {price:>11} {row['quantity']:>9,}주{f'  ← {mark}' if mark else ''}")
+    return "```" + "\n".join(lines) + "```"
+
+
 def _order_price_details(request: dict[str, Any], order: dict[str, Any]) -> str:
     price = format_money(order["price"], order["country"])
+    # 매수는 매도 1호가, 매도는 매수 1호가로 낸다 — 표에서 그 줄을 짚는다.
+    depth = _quote_depth_text(order, {("asks", 1) if request["side"] == "buy" else ("bids", 1): "주문 가격"})
     if request.get("mix_action_key") is not None:
-        return f"지정가 {price}\n확인한 수량이나 지정가가 바뀌면 다시 확인해야 합니다."
+        return f"지정가 {price}\n{depth}\n확인한 수량이나 지정가가 바뀌면 다시 확인해야 합니다."
     gap_pct = _signal_gap_pct(order)
     if gap_pct is None:
         gap = f"{order['quote_label']} {price} (신호 가격 비교 없음)"
@@ -333,7 +359,7 @@ def _order_price_details(request: dict[str, Any], order: dict[str, Any]) -> str:
         f"주문을 확정하는 순간의 {order['quote_label']}로 {_env_word(request['env'])} 계좌에 보냅니다. "
         "호가가 움직이면 가격과 매수 수량이 달라질 수 있습니다."
     )
-    return f"{gap}\n{guide}"
+    return f"{gap}\n{depth}\n{guide}"
 
 
 def _order_view(request: dict[str, Any], order: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
@@ -349,6 +375,7 @@ def _swap_view(request: dict[str, Any], order: dict[str, Any], target: dict[str,
         f"*{_order_text({**request, **order})}*\n{_account_line(request)}\n"
         f"매도 {format_money(order['sell_price'], order['country'])}(매도 1호가) · 매수 {format_money(order['buy_price'], order['country'])}(매수 1호가)\n"
         f"매도 신호 {format_money(order['signal_price'], order['country'])} 대비 {signal_gap:+.2f}%\n"
+        f"{_quote_depth_text(order, {('asks', 1): '매도', ('bids', 1): '재매수'})}\n"
         f"확정하는 순간의 호가로 {_env_word(request['env'])} 계좌에 매도·매수 지정가를 함께 겁니다. "
         "호가가 움직이면 가격과 재매수 수량이 달라질 수 있습니다."
     )

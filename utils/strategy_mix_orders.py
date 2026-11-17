@@ -252,7 +252,7 @@ def resolve_mix_order(request: dict[str, Any], thread_ts: str) -> dict:
     _require_no_open_order(account_id, ticker, country)
     balance = _checked_balance(positions, ticker)
     instrument["exchange"] = resolve_us_exchange(account_id, ticker) if country == "us" else None
-    venue, quote_label, price = resolve_order_quote(instrument, side)
+    venue, quote_label, price, depth = resolve_order_quote(instrument, side)
     quantity = item["quantity"]
     amount = price * quantity
     if side == "buy" and amount > balance["cash"]:
@@ -273,6 +273,7 @@ def resolve_mix_order(request: dict[str, Any], thread_ts: str) -> dict:
         "price": price,
         "venue": venue,
         "quote_label": quote_label,
+        "quote_depth": depth,
         "signal_price": None,
     }
 
