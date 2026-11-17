@@ -244,6 +244,7 @@ type Positions = {
     >;
   };
   holdings: Holding[];
+  order_signals: Record<string, "sent" | "sending">;
   /** 이 계좌에 등록된 사고팔기 종목 — 비어 있지 않으면 현금 몫 안의 사고팔기 칸을 보여준다(보유 유무와 무관). */
   trade_tickers: string[];
   actions: {
@@ -332,7 +333,11 @@ type ActionGroup = {
 };
 
 /** 액션 그룹 목록 — 오늘·내일 두 섹션이 같은 모양으로 그린다. */
-function ActionGroupList({ groups, onSelect }: { groups: ActionGroup[]; onSelect?: (item: ActionItem) => void }) {
+function ActionGroupList({ groups, signals, onSelect }: {
+  groups: ActionGroup[];
+  signals?: Positions["order_signals"];
+  onSelect?: (item: ActionItem) => void;
+}) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       {groups.map((group, groupIndex) => (
@@ -357,15 +362,19 @@ function ActionGroupList({ groups, onSelect }: { groups: ActionGroup[]; onSelect
                 </strong>{" "}
                 — {item.text}
               </>;
+              const signal = signals?.[item.key];
               return (
                 <li key={item.key}>
-                  {onSelect ? (
+                  {onSelect && !signal ? (
                     <button type="button" className="btn btn-link p-0 text-reset text-start"
                       style={{ display: "inline", fontSize: "inherit", whiteSpace: "normal" }}
                       onClick={() => onSelect(item)}>
                       {summary}
                     </button>
                   ) : summary}
+                  {signal ? <span style={{ ...hintStyle, marginLeft: 8 }}>
+                    {signal === "sent" ? "슬랙 발송됨" : "슬랙 발송 확인 필요"}
+                  </span> : null}
                 </li>
               );
             })}
@@ -425,7 +434,9 @@ export function StrategyMixClient() {
 
   // 운용 현황 탭.
   const [positions, setPositions] = useState<Positions | null>(null);
-  const [selectedAction, setSelectedAction] = useState<{ item: ActionItem; accountLabel: string } | null>(null);
+  const [selectedAction, setSelectedAction] = useState<{ item: ActionItem; accountId: string; accountLabel: string } | null>(null);
+  const [sendingAction, setSendingAction] = useState(false);
+  const [sendActionError, setSendActionError] = useState<string | null>(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
   const [positionsError, setPositionsError] = useState<string | null>(null);
   const [positionsProgress, setPositionsProgress] =
@@ -1398,6 +1409,33 @@ export function StrategyMixClient() {
   // 오늘의 액션 = 실행일이 그 시장의 현지 오늘(개장 전 시가 체결·장중 지금 주문),
   // 내일의 액션 = 다음 거래일(연휴면 실제로는 며칠 뒤 — 세부 날짜는 그룹 제목에).
   const todayActionGroups = actionGroups.filter((group) => group.section === "today");
+
+  async function sendSelectedAction() {
+    if (!selectedAction || sendingAction || selectedAction.accountId !== accountId) return;
+    setSendingAction(true);
+    setSendActionError(null);
+    try {
+      const { item, accountId: targetAccount } = selectedAction;
+      const response = await fetch("/api/strategy-mix/order-signal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_id: targetAccount, action_key: item.key, side: item.side, quantity: item.quantity }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "슬랙 주문 신호를 보내지 못했습니다.");
+      setPositions((current) => current?.account_id === targetAccount
+        ? { ...current, order_signals: { ...current.order_signals, [item.key]: "sent" } }
+        : current);
+      toast.success(result.already_sent ? "이미 슬랙으로 발송된 신호입니다." : "슬랙 주문 신호를 보냈습니다.");
+      setSelectedAction(null);
+    } catch (error) {
+      setSendActionError(error instanceof Error ? error.message : "슬랙 주문 신호를 보내지 못했습니다.");
+      setPositionsReloadKey((key) => key + 1);
+    } finally {
+      setSendingAction(false);
+    }
+  }
+
   const laterActionGroups = actionGroups.filter((group) => group.section !== "today");
 
   return (
@@ -1886,8 +1924,11 @@ export function StrategyMixClient() {
                         오늘은 할 일이 없습니다 — 보유 목록을 그대로 유지하세요.
                       </div>
                     ) : (
-                      <ActionGroupList groups={todayActionGroups}
-                        onSelect={(item) => setSelectedAction({ item, accountLabel })} />
+                      <ActionGroupList groups={todayActionGroups} signals={positions?.order_signals}
+                        onSelect={positions?.account_id === accountId ? (item) => {
+                          setSendActionError(null);
+                          setSelectedAction({ item, accountId, accountLabel });
+                        } : undefined} />
                     )}
                     {/* 월초 슬리브 리밸런싱 안내문은 제거했다 — 실제 할 일은 위 지시 목록에
                         이미 나오는데 "다시 맞추세요" 명령문이 별도 수동 작업처럼 읽혔다. */}
@@ -1916,10 +1957,14 @@ export function StrategyMixClient() {
       <AppModal
         open={selectedAction !== null}
         title={`${selectedAction?.item.side === "sell" ? "매도" : "매수"} 슬랙 발송 확인`}
-        onClose={() => setSelectedAction(null)}
+        onClose={() => { if (!sendingAction) setSelectedAction(null); }}
         footer={<div style={{ display: "flex", justifyContent: "flex-end", gap: 8, width: "100%" }}>
-          <button type="button" className="btn" onClick={() => setSelectedAction(null)}>취소</button>
-          <button type="button" className="btn btn-primary" disabled>확인 후 발송</button>
+          <button type="button" className="btn" disabled={sendingAction} onClick={() => setSelectedAction(null)}>취소</button>
+          <button type="button" className="btn btn-primary"
+            disabled={sendingAction || selectedAction?.accountId !== accountId}
+            onClick={() => void sendSelectedAction()}>
+            {sendingAction ? "발송 중…" : "확인 후 발송"}
+          </button>
         </div>}
       >
         {selectedAction ? <>
@@ -1929,7 +1974,7 @@ export function StrategyMixClient() {
             <dt>예상 수량</dt><dd>{selectedAction.item.quantity.toLocaleString()}주</dd>
           </dl>
           <p>실제 주문 가격과 수량은 Slack에서 최종 확인합니다.</p>
-          <p style={{ ...hintStyle, marginBottom: 0 }}>UI 검토 중입니다. 서버 연결 후 발송할 수 있습니다.</p>
+          {sendActionError ? <p role="alert" className="text-danger mb-0">{sendActionError}</p> : null}
         </> : null}
       </AppModal>
     </PageFrame>

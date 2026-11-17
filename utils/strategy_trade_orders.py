@@ -270,10 +270,7 @@ def resolve_order(
         row = _require_round_state(strategy, side, target_round) if target_round is not None else None
     if round_no is not None:
         signal_price = row["sell_limit"] if side == "sell" else (None if row["close_entry"] else row["buy_limit"])
-    venue = _order_venue(strategy)
-    quote = fetch_best_quote(strategy["account_id"], strategy["ticker"], venue)
-    label, price = ("매도 1호가", quote["ask"]) if side == "buy" else ("매수 1호가", quote["bid"])
-    _require_valid_quote(strategy, label, price)
+    venue, label, price = resolve_order_quote(strategy, side)
     if side == "buy":
         quantity = _buy_quantity(strategy, price, account_id)
     else:
@@ -290,6 +287,15 @@ def resolve_order(
         "instrument_kind": strategy["instrument_kind"],
         "arbitrary_id": arbitrary_id,
     }
+
+
+def resolve_order_quote(strategy: dict[str, Any], side: str) -> tuple[str, str, int | float]:
+    """단건 주문은 공통 거래소 판정과 상대 1호가를 사용한다."""
+    venue = _order_venue(strategy)
+    quote = fetch_best_quote(strategy["account_id"], strategy["ticker"], venue)
+    label, price = ("매도 1호가", quote["ask"]) if side == "buy" else ("매수 1호가", quote["bid"])
+    _require_valid_quote(strategy, label, price)
+    return venue, label, price
 
 
 def _buy_quantity(strategy: dict[str, Any], price: int, account_id: str) -> int:
@@ -390,7 +396,7 @@ def place_order(
     sign = 1 if side == "buy" else -1
     _require_order_allowed(account_id, env, sign * order["price"] * order["quantity"], 1)
     base = _record_base(env, account_id, pool, strategy_id, round_no, order, slack)
-    return {**_submit(base, side, order["price"]), "signal_price": order["signal_price"]}
+    return {**submit_order_record(base, side, order["price"]), "signal_price": order["signal_price"]}
 
 
 def place_swap(account_id: str, pool: str, strategy_id: str, round_no: int, slack: dict[str, str]) -> dict[str, Any]:
@@ -411,9 +417,9 @@ def place_swap(account_id: str, pool: str, strategy_id: str, round_no: int, slac
         env, account_id, pool, strategy_id, round_no, {**order, "quantity": order["sell_quantity"]}, slack
     )
     base["pair_id"] = uuid4().hex
-    sell = _submit(base, "sell", order["sell_price"])
+    sell = submit_order_record(base, "sell", order["sell_price"])
     try:
-        buy = _submit({**base, "quantity": order["buy_quantity"]}, "buy", order["buy_price"])
+        buy = submit_order_record({**base, "quantity": order["buy_quantity"]}, "buy", order["buy_price"])
     except BrokerApiError as exc:
         return {"sell": sell, "buy": None, "buy_error": str(exc), "signal_price": order["signal_price"]}
     return {"sell": sell, "buy": buy, "buy_error": None, "signal_price": order["signal_price"]}
@@ -448,7 +454,7 @@ def _record_base(
     order: dict[str, Any],
     slack: dict[str, str] | None,
 ) -> dict[str, Any]:
-    """주문 기록의 공통 필드 — 구분·가격·상태는 `_submit` 이 채운다."""
+    """주문 기록의 공통 필드 — 구분·가격·상태는 `submit_order_record` 이 채운다."""
     from utils.strategy_trade_threads import signal_is_manual
 
     if slack is not None and round_no is not None:
@@ -473,7 +479,7 @@ def _record_base(
     }
 
 
-def _submit(base: dict[str, Any], side: str, price: int) -> dict[str, Any]:
+def submit_order_record(base: dict[str, Any], side: str, price: int | float) -> dict[str, Any]:
     """기록을 남기고 증권사에 지정가 주문을 보낸다 → 기록(직렬화). 실패는 기록에 남기고 그대로 올린다."""
     now = _now()
     doc = {
@@ -611,6 +617,9 @@ def refresh_account_orders(account_id: str) -> None:
         update: dict[str, Any] = {}
         if not record.get("order_no"):
             age = (now - datetime.fromisoformat(record["created_at"])).total_seconds()
+            if record.get("mix_action_key") is not None:
+                # 주문번호 없는 합성 주문은 증권사 접수 여부를 확인하기 전까지 중복을 막는다.
+                continue
             if age > _SUBMIT_TIMEOUT_SECONDS:
                 update = {
                     "status": "rejected",

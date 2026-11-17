@@ -117,7 +117,7 @@ def _confirm_line(entry: dict[str, Any], held: dict[str, int]) -> str:
     return build_confirm_line(label, entry["action"], detail)
 
 
-def _format_message(account_name: str, groups: list[dict[str, Any]]) -> str:
+def format_action_message(account_name: str, groups: list[dict[str, Any]]) -> str:
     lines = [f"🧭 합성 오늘의 액션 — {account_name}"]
     for group in groups:
         lines.append(f"*{group['title']}*")
@@ -178,7 +178,7 @@ def notify_all(country: str | None = None) -> dict[str, Any]:
         grown = {key: qty for key, qty in current.items() if qty > int(stored.get(key, 0))}
         lines = [_confirm_line(entry, held) for entry in confirmed]
         if grown:
-            lines.append(_format_message(target["name"], groups))
+            lines.append(format_action_message(target["name"], groups))
             _remember_orders(pending, groups, positions)
         if lines:
             send_slack_message_v2("\n".join(lines))
@@ -214,7 +214,7 @@ def send_test(account_id: str) -> dict[str, Any]:
     # 실제 알람과 같은 범위 — 오늘의 액션만.
     groups = [group for group in positions["actions"]["groups"] if group.get("section") == "today"]
     name = str(settings.get("name") or account_id)
-    message = _format_message(name, groups) if groups else f"🧭 합성 오늘의 액션 — {name}\n(지시 없음)"
+    message = format_action_message(name, groups) if groups else f"🧭 합성 오늘의 액션 — {name}\n(지시 없음)"
     send_slack_message_v2("[테스트] " + message)
     item_count = sum(len(group["items"]) for group in groups)
     return {"sent": True, "items": item_count}

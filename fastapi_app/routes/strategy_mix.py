@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, PositiveInt
 
 from config import HOLDING_CHART_MONTHS
 from fastapi_app.dependencies import require_internal_token
@@ -25,9 +27,12 @@ def get_strategy_mix_positions(
     _: None = Depends(require_internal_token),
 ) -> dict:
     """오늘 기준 합성 운영 상태 — 보유 목록(목표 비중)·현금 비중·오늘의 액션."""
+    from utils.strategy_mix_orders import mix_order_signals
     from utils.strategy_mix_positions import mix_positions
 
-    return mix_positions(account_id)
+    positions = mix_positions(account_id)
+    positions["order_signals"] = mix_order_signals(positions["account_id"], positions["actions"]["groups"])
+    return positions
 
 
 class SlackTestPayload(BaseModel):
@@ -61,4 +66,23 @@ def post_slack_test(payload: SlackTestPayload, _: None = Depends(require_interna
     try:
         return send_test(payload.account_id)
     except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class OrderSignalPayload(BaseModel):
+    account_id: str
+    action_key: str
+    side: Literal["buy", "sell"]
+    quantity: PositiveInt
+
+
+@router.post("/order-signal")
+def post_order_signal(payload: OrderSignalPayload, _: None = Depends(require_internal_token)) -> dict:
+    """오늘의 액션 한 건을 Slack 주문 신호로 보낸다."""
+    from services.broker_api_service import BrokerApiError
+    from utils.strategy_mix_orders import send_mix_order_signal
+
+    try:
+        return send_mix_order_signal(**payload.model_dump())
+    except (BrokerApiError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -22,7 +22,7 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from slack_sdk.signature import SignatureVerifier
 
-from services.broker_api_service import BrokerApiError
+from services.broker_api_service import BrokerApiError, OrderUncertainError
 from services.broker_trade_service import account_env
 from utils.account_settings_store import ACCOUNT_ENV_MOCK
 from utils.settings_loader import get_slack_channel
@@ -264,7 +264,12 @@ def _send_order_request(
         "rebuy": rebuy,
         "arbitrary_id": arbitrary_id,
     }
-    ts = send_thread_message(f"[{_env_word(env)}] {_order_text(request)}", _open_blocks(request), thread_ts)
+    return send_order_request(request, thread_ts)
+
+
+def send_order_request(request: dict[str, Any], thread_ts: str | None) -> dict[str, Any]:
+    """전략에서 구성한 주문 요청을 공통 Slack 버튼으로 보낸다."""
+    ts = send_thread_message(f"[{_env_word(request['env'])}] {_order_text(request)}", _open_blocks(request), thread_ts)
     if not ts:
         raise BrokerApiError("슬랙으로 주문 메시지를 보내지 못했습니다.")
     return {"ts": ts, "request": request}
@@ -322,6 +327,8 @@ def _order_view(request: dict[str, Any], order: dict[str, Any], target: dict[str
         f"주문을 확정하는 순간의 {order['quote_label']}로 {_env_word(request['env'])} 계좌에 보냅니다. "
         "호가가 움직이면 가격과 매수 수량이 달라질 수 있습니다."
     )
+    if request.get("mix_action_key") is not None:
+        guide = "확인한 수량이나 지정가가 바뀌면 다시 확인해야 합니다."
     body = f"*{_order_text({**request, 'quantity': order['quantity']})}*\n{_account_line(request)}\n{gap}\n{guide}"
     return _modal_view(ORDER_CALLBACK_ID, f"{_env_word(request['env'])} {side} 주문 확인", f"{side} 주문", body, target)
 
@@ -362,8 +369,12 @@ def parse_payload(raw_body: str) -> dict[str, Any]:
     return json.loads(values[0])
 
 
-def _resolve_request(request: dict[str, Any], *, fresh: bool) -> dict[str, Any]:
+def _resolve_request(request: dict[str, Any], thread_ts: str, *, fresh: bool) -> dict[str, Any]:
     """주문 메시지의 주문 내용을 지금 보유 상태로 다시 계산한다 — 주문할 수 없는 회차면 `RoundNotOrderableError`."""
+    if request.get("mix_action_key") is not None:
+        from utils.strategy_mix_orders import resolve_mix_order
+
+        return resolve_mix_order(request, thread_ts)
     if _is_swap(request):
         return resolve_swap(
             request["account_id"], request["pool"], request["strategy_id"], request["round"], fresh=fresh
@@ -408,11 +419,13 @@ def fill_confirm_modal(job: dict[str, Any]) -> None:
     request = target["request"]
     try:
         try:
-            order = _resolve_request(request, fresh=False)
+            order = _resolve_request(request, target["thread_ts"], fresh=False)
         except RoundNotOrderableError:
-            order = _resolve_request(request, fresh=True)
+            if request.get("mix_action_key") is not None:
+                raise
+            order = _resolve_request(request, target["thread_ts"], fresh=True)
     except RoundNotOrderableError as exc:
-        note = _ALREADY_DONE_NOTE if exc.done else f"⌛ 주문할 수 없는 회차입니다: {exc}"
+        note = _ALREADY_DONE_NOTE if exc.done else f"⌛ 주문할 수 없는 신호입니다: {exc}"
         _update_view(view_id, _status_view(request, target, note))
         _expire(target, exc)
         return
@@ -420,6 +433,11 @@ def fill_confirm_modal(job: dict[str, Any]) -> None:
         logger.exception("슬랙 주문 확인 모달 채우기 실패")
         _update_view(view_id, _status_view(request, target, f"❌ 주문 확인을 열 수 없습니다: {exc}"))
         return
+    if request.get("mix_action_key") is not None:
+        from utils.strategy_mix_orders import mix_order_terms, save_mix_confirmation
+
+        save_mix_confirmation(request, target["thread_ts"], view_id)
+        target = {**target, "confirmed": mix_order_terms(order), "confirmation_id": view_id}
     view = _swap_view(request, order, target) if _is_swap(request) else _order_view(request, order, target)
     _update_view(view_id, view)
 
@@ -445,7 +463,7 @@ def open_confirm_modal(payload: dict[str, Any]) -> dict[str, Any] | None:
     if action["action_id"] == OPEN_ACTION_ID:
         opened = client.views_open(
             trigger_id=payload["trigger_id"],
-            view=_status_view(request, target, "⏳ 호가와 보유 회차를 확인하는 중…"),
+            view=_status_view(request, target, "⏳ 호가와 주문 가능 수량을 확인하는 중…"),
         )
         return {"target": target, "view_id": opened["view"]["id"]}
     if action["action_id"] == CANCEL_ACTION_ID:
@@ -502,6 +520,10 @@ def _expire(target: dict[str, Any], exc: RoundNotOrderableError) -> None:
     다른 주문으로 이미 처리된 회차면 실패가 아니라 완료로 남기고(스레드 알림 없음), 아니면 주문 불가를 알린다.
     """
     request = target["request"]
+    if request.get("mix_action_key") is not None:
+        from utils.strategy_mix_orders import close_mix_signal
+
+        close_mix_signal(request, target["thread_ts"])
     if exc.done:
         _update_message(target, _note_blocks(request, _ALREADY_DONE_NOTE))
         _settle_message(target, MESSAGE_DONE)
@@ -576,15 +598,26 @@ def _place(target: dict[str, Any]) -> None:
     # 처리하는 동안 같은 메시지로 또 주문하지 못하게 버튼부터 걷어낸다.
     _update_message(target, _note_blocks(request, "⏳ 주문 처리 중…"))
     try:
-        order = place_order(
-            request["account_id"],
-            request["pool"],
-            request["strategy_id"],
-            request["side"],
-            request["round"],
-            {key: target[key] for key in SLACK_TARGET_KEYS},
-            arbitrary_id=request.get("arbitrary_id"),
-        )
+        slack = {key: target[key] for key in SLACK_TARGET_KEYS}
+        if request.get("mix_action_key") is not None:
+            from utils.strategy_mix_orders import place_mix_order
+
+            order = place_mix_order(request, slack, target["confirmed"], target["confirmation_id"])
+        else:
+            order = place_order(
+                request["account_id"],
+                request["pool"],
+                request["strategy_id"],
+                request["side"],
+                request["round"],
+                slack,
+                arbitrary_id=request.get("arbitrary_id"),
+            )
+    except OrderUncertainError:
+        text = "⚠️ 증권사 접수 여부를 확인 중입니다. 주문내역을 확인하세요."
+        send_thread_message(text, thread_ts=target["thread_ts"])
+        _update_message(target, _note_blocks(request, text))
+        return
     except RoundNotOrderableError as exc:
         _expire(target, exc)
         return
@@ -635,6 +668,11 @@ def run_submission(target: dict[str, Any]) -> None:
             if target["kind"] == "order":
                 from utils.strategy_trade_threads import reserve_signal_for_order
 
+                if target["request"].get("mix_action_key") is not None:
+                    from utils.strategy_mix_orders import mix_submission_open
+
+                    if not mix_submission_open(target["request"], target["thread_ts"], target["confirmation_id"]):
+                        return
                 if not reserve_signal_for_order(target["thread_ts"], target["message_ts"]):
                     return
                 try:
@@ -665,6 +703,7 @@ def _request_of(record: dict[str, Any]) -> dict[str, Any]:
         "quantity": record["quantity"],
         "rebuy": swap,
         "arbitrary_id": record.get("arbitrary_id"),
+        **({"mix_action_key": record["mix_action_key"]} if "mix_action_key" in record else {}),
     }
 
 

@@ -62,11 +62,13 @@ python infra/server_scheduler.py   # 배치 스케줄러 (crontab 파싱 → APS
 
 ### Slack 주문과 증권사 API
 
-- 사고팔기의 Slack 주문·확인·취소는 `utils/slack_mock_orders.py`와 서명을 검증하는 `/api/slack/interactions`를 거친다. 주문은 사용자 확인 뒤 `strategy_trade_orders`에 기록한다. 접수와 체결은 별도 상태이며, `slack_mock_order_notify`는 증권사 조회 결과를 같은 스레드로 알린다. 접수 여부를 확인할 수 없으면 재전송하지 않고 기존 기록을 조회한다.
+- 합성과 사고팔기의 Slack 주문·확인·취소는 `utils/slack_mock_orders.py`와 서명을 검증하는 `/api/slack/interactions`를 거친다. 주문은 사용자 확인 뒤 `strategy_trade_orders`에 기록한다. 접수와 체결은 별도 상태이며, `slack_mock_order_notify`는 증권사 조회 결과를 같은 스레드로 알린다. 접수 여부를 확인할 수 없으면 재전송하지 않고 기존 기록을 조회한다.
 - 계좌 ID로 증권사를 선택하는 잔고·호가·지정가 주문·취소·주문내역 경로는 `services/broker_trade_service.py`다. 연동 설정은 `broker_api_service.PROVIDERS`가 단일 소스다. 나무는 계좌번호를 저장하고 운영·모의 서버는 변경 불가능한 계좌 구분으로 결정한다. 메리츠는 계좌별 키를 쓰며 운영 계좌만 지원한다. 모의 계좌는 계좌 설정의 주문 시험에만 쓰고 합성·사고팔기 운용 계좌 목록에서 제외한다. 운영 API 주문의 계좌 스위치와 일일 한도는 `strategy_trade_orders._require_order_allowed`에서 확인한다.
-- 합성의 주문 대상·수량은 화면과 Slack 알림이 공유하는 `core/strategy/mix/actions.py`의 오늘 액션이 단일 소스다. 사고팔기는 회차 원장으로 주문 대상을 정한다. 두 전략이 주문 흐름을 공유하더라도 메인 메시지와 전략별 주문 재검증은 각각의 계산 결과를 사용한다. 현재 합성 Slack은 오늘 액션 알림을 보낸다.
+- 합성의 주문 대상·수량은 화면과 Slack 알림이 공유하는 `core/strategy/mix/actions.py`의 오늘 액션이 단일 소스다. 사고팔기는 회차 원장으로 주문 대상을 정한다. 메인 메시지와 주문 재검증은 각 전략이 담당한다. 합성은 주문 직전에 같은 날의 액션·증권사 보유·미체결 주문·호가를 다시 확인하며, Slack에서 승인한 가격이나 수량이 바뀌면 다시 승인받는다.
 
-사고팔기 신호는 `strategy_trade_signal_lock`의 MongoDB 선점으로 자동 배치·수동 발송·회수·설정 변경·Slack 제출을 직렬화한다. 계좌·종목·회차·방향의 활성 신호는 하나이며 발송 예약을 전송 전에 저장한다. 전송 결과가 불명확하면 자동 재발송하지 않는다. 프로세스 강제 종료로 남은 `system_config.strategy_trade_signal_lock`은 실행 중인 작업과 Slack 발송 기록을 확인한 뒤 제거해야 한다.
+합성의 활성 신호와 일회용 확인 상태는 `strategy_mix_order_signals`에 계좌·종목별로 둔다. 주문번호가 없는 합성 주문은 증권사 접수 여부를 확인하기 전까지 진행 중으로 남겨 중복 주문을 막는다.
+
+사고팔기와 합성 신호는 `strategy_trade_signal_lock`의 MongoDB 선점으로 자동 배치·수동 발송·회수·설정 변경·Slack 제출을 직렬화한다. 계좌·종목·회차·방향의 활성 신호는 하나이며 발송 예약을 전송 전에 저장한다. 전송 결과가 불명확하면 자동 재발송하지 않는다. 프로세스 강제 종료로 남은 `system_config.strategy_trade_signal_lock`은 실행 중인 작업과 Slack 발송 기록을 확인한 뒤 제거해야 한다.
 
 `strategy_trade_slack_messages`의 신호 원본은 완료·회수 여부의 단일 소스이며 완료 후에도 재주문 방지를 위해 보존한다. 수동 신호와 답글은 TTL·세션 정리에서 제외한다. 자동 일반 답글은 `expires_at` TTL을 사용하며 기존 `created_at` TTL은 초기화 시 교체한다. 체결 출처는 주문 기록에서 원장으로 전달하며 직접 거래와 수동 Slack은 수동 거래로, 자동 Slack은 자동 거래로 분류한다.
 
