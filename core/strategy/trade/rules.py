@@ -147,20 +147,6 @@ def leverage_multiple(ticker: str, name: str) -> int:
     return 1
 
 
-def max_drawdown(closes: Sequence[float]) -> float:
-    """종가들의 고점 이후 최대 하락(0~1) — 그때까지의 최고가 대비 가장 크게 빠진 비율.
-
-    저점이 고점보다 먼저 온 상승은 하락으로 치지 않는다.
-    """
-    peak = worst = 0.0
-    for price in closes:
-        if not isfinite(price) or price <= 0:
-            raise ValueError(f"종가는 유한한 양수여야 합니다: {price}")
-        peak = max(peak, price)
-        worst = max(worst, 1.0 - price / peak)
-    return worst
-
-
 def recommended_gap_range(multiple: int) -> tuple[int, int]:
     """배수별 권장 간격 범위(%) — (최소, 최대)."""
     if multiple not in _RECOMMENDED_GAP_RANGE_BY_MULTIPLE:

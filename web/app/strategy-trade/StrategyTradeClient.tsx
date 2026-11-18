@@ -3,7 +3,17 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef, GridApi, GridOptions, RowClassParams, RowDragEndEvent } from "ag-grid-community";
 
-import { gridRowDragColumn, gridSelectionColumn, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn, PARTIAL_PERIOD_CELL_STYLE } from "@/lib/grid-cells";
+import {
+  gridRowDragColumn,
+  gridSelectionColumn,
+  highDrawdownColumn,
+  mddColumn,
+  stockMemoColumn,
+  stockNameColumn,
+  stockRowClass,
+  tickerColumn,
+  PARTIAL_PERIOD_CELL_STYLE,
+} from "@/lib/grid-cells";
 import type { HoldingsGroup } from "@/lib/holdings-store";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 import { formatCurrencyPrice, formatPrice } from "@/lib/price-format";
@@ -166,8 +176,12 @@ type StrategyConfigRow = {
   /** 현재가·일간(%) — 공통 시세 경로 값. 못 받으면 null. */
   price: number | null;
   change_pct: number | null;
-  /** 확정 봉 최근 3개월 고점 이후 최대 하락(%) — 3개월치가 없으면 있는 기간, 종가가 2개 미만이면 null. */
+  /** 확정 봉 최근 12개월 고점 이후 최대 하락(%) — 12개월치가 없으면 있는 기간, 종가가 2개 미만이면 null. */
   drawdown_pct: number | null;
+  /** 종목풀 순위(`/pools-rank`)와 같은 12개월 MDD(%, 음수). */
+  mdd_pct: number | null;
+  /** 종목풀 순위(`/pools-rank`)와 같은 최근 12개월 고점 대비 현재가(%). */
+  high_drawdown_pct: number | null;
   /** 권장 간격(%) — 위 하락을 회차들이 복리로 덮는 간격(2~10%, `rules.recommended_gap_pct`). 참고값. */
   recommended_gap_pct: number | null;
   /** 계산에 쓴 거래일 수 — 3개월치가 없으면 있는 기간만 쓰고 `gap_partial` 이 참이다. */
@@ -489,6 +503,8 @@ type TradeListRow = DraftRow & {
   held: boolean;
   heldRounds: string;
   drawdown_pct?: number | null;
+  mdd_pct?: number | null;
+  high_drawdown_pct?: number | null;
   recommended_gap_pct?: number | null;
   gap_days?: number | null;
   gap_partial?: boolean | null;
@@ -718,6 +734,8 @@ function AccountSettingsCard({
         current_price: price == null ? undefined : String(price),
         daily_change_pct: quote?.change_pct,
         drawdown_pct: quote?.drawdown_pct,
+        mdd_pct: quote?.mdd_pct,
+        high_drawdown_pct: quote?.high_drawdown_pct,
         recommended_gap_pct: quote?.recommended_gap_pct,
         gap_days: quote?.gap_days,
         gap_partial: quote?.gap_partial,
@@ -795,6 +813,12 @@ function AccountSettingsCard({
     gridRowDragColumn<TradeListRow>(({ node }) => !node.rowPinned, 36),
     // 권장 간격을 쓰지 않을 때는 맨 왼쪽 참고 칸으로 둔다(쓰면 간격 칸 자리로 옮긴다).
     ...(useRecommendedGap ? [] : [recommendedGapColumn(view.recommended_gap_months, view.recommended_gap_rounds)]),
+    highDrawdownColumn<TradeListRow>("high_drawdown_pct"),
+    mddColumn<TradeListRow>({
+      valueGetter: (row) => (row?.is_label || row?.key === TOTAL_ROW_KEY || row?.key === TRADE_TOTAL_ROW_KEY ? null : row?.mdd_pct),
+      isPartial: (row) => Boolean(row?.gap_partial),
+      pinned: "left",
+    }),
     tickerColumn<TradeListRow>(),
     stockNameColumn<TradeListRow>({
       cellRenderer: ({ data, value }) => data?.is_group ? (

@@ -25,12 +25,11 @@ LEVERAGE_NAME_RE = re.compile("|".join(_LEVERAGE_RULES[key] for key in ("triple"
 # 이름으로는 알 수 없는 2배 종목 티커.
 LEVERAGE_TICKERS = frozenset(_LEVERAGE_RULES["double_tickers"])
 
-# 사고팔기 권장 간격 — 최근 이 기간(개월)의 고점 이후 최대 하락을 회차들이 복리로 덮는 간격을
+# 사고팔기 권장 간격 — 최근 `METRIC_WINDOW_MONTHS`(12개월)의 고점 이후 최대 하락을 `RECOMMENDED_GAP_ROUNDS`회차가 복리로 덮는 간격을
 # 종목 배수(1·2·3배)별 최소·최대(%)로 자른다.
 # 참고 — 10회차(간격 9번, 복리)일 때 간격별로 1호 대비 덮는 최대 하락 = 1 − (1 − 간격)^9:
 #   1% → 8.6%   2% → 16.6%   3% → 24.0%   4% → 30.7%   5% → 37.0%
 #   6% → 42.7%  7% → 48.0%   8% → 52.8%   9% → 57.2%   10% → 61.3%
-RECOMMENDED_GAP_WINDOW_MONTHS = 6
 RECOMMENDED_GAP_ROUNDS = 10
 RECOMMENDED_GAP_MIN_PCT_1X = 2
 RECOMMENDED_GAP_MIN_PCT_2X = 3

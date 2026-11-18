@@ -14,6 +14,7 @@ import {
   sectorColumn,
   marketBadgeCellStyle,
   highDrawdownColumn,
+  mddColumn,
   tradeValueMultColumn,
   maExitGapColumn,
   volatilityColumn,
@@ -1264,28 +1265,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellRenderer: (params: { value: string | null | undefined }) => String(params.value ?? "-"),
       },
       // MDD·소르티노 — 기본 모드에서 옮겨 왔다. 노랑 = 상장 기간이 기준 창보다 짧은 종목(🆕과 같은 기준).
-      {
-        headerName: "MDD",
-        minWidth: 80,
-        width: 80,
-        type: "rightAligned",
-        valueGetter: (params) => {
-          const stats = params.data?.backtest_stats;
-          const val = stats?.mdd;
-          return val != null ? val : null;
-        },
-        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
-          if (params.value == null) return "-";
-          return `${params.value.toFixed(2)}%`;
-        },
-        cellStyle: (params: { data?: RankGridRow }) => {
-          const stats = params.data?.backtest_stats;
-          if (stats?.is_partial) {
-            return PARTIAL_PERIOD_CELL_STYLE;
-          }
-          return null;
-        },
-      },
+      mddColumn<RankGridRow>({
+        valueGetter: (row) => row?.backtest_stats?.mdd,
+        isPartial: (row) => Boolean(row?.backtest_stats?.is_partial),
+      }),
       {
         headerName: "소르티노",
         minWidth: 80,

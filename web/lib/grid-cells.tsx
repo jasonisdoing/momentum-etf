@@ -599,6 +599,26 @@ export function highDrawdownColumn<T>(
   };
 }
 
+/** 12개월 MDD(%) 공용 컬럼 — 순위 화면(`/pools-rank`)과 사고팔기 화면이 같은 폭·표기·기간미달 노랑 스타일을 쓴다. */
+export function mddColumn<T>(options: {
+  valueGetter: (row: T | undefined) => number | null | undefined;
+  isPartial?: (row: T | undefined) => boolean;
+  pinned?: "left" | "right";
+}): ColDef<T> {
+  return {
+    colId: "mdd",
+    headerName: "MDD",
+    minWidth: 80,
+    width: 80,
+    ...(options.pinned ? { pinned: options.pinned } : {}),
+    type: "rightAligned",
+    valueGetter: ({ data }) => options.valueGetter(data) ?? null,
+    cellRenderer: (params: { value: number | null | undefined }) =>
+      params.value == null ? "-" : `${params.value.toFixed(2)}%`,
+    cellStyle: (params: { data?: T }) => (options.isPartial?.(params.data) ? PARTIAL_PERIOD_CELL_STYLE : null),
+  };
+}
+
 /**
  * 슬롯 전략의 **상태** 컬럼 — 신고가·모멘텀이 같은 폭·같은 문구를 쓴다.
  *
