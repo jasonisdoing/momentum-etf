@@ -563,29 +563,23 @@ function sumTradeHoldings(rows: HoldingsRow[]) {
   };
 }
 
-/** 권장 간격 컬럼 — 이 화면에만 있는 참고값이라 공용 컬럼 없이 여기서 정의한다(폭·표기는 변동성 컬럼과 같다). */
-function recommendedGapColumn(gapMonths: number, gapRounds: number, gapMode: RecommendedGapMode): ColDef<TradeListRow> {
-  const isHalf = gapMode === "half";
+/** 권장 간격 컬럼 — 토글 상태와 무관하게 맨 왼쪽에 고정 표시한다. */
+function recommendedGapColumn(gapMonths: number, gapRounds: number): ColDef<TradeListRow> {
   return {
     colId: "recommended_gap_pct",
     field: "recommended_gap_pct",
-    headerName: isHalf ? "권장 50%" : "권장 간격",
+    headerName: "권장 간격",
     width: 84,
     minWidth: 72,
     pinned: "left",
     type: "numericColumn",
     headerTooltip:
-      `최근 ${gapMonths}개월(확정 종가) 고점 이후 최대 하락을 ${gapRounds}회가 복리로 덮는 간격 — 종목 배수(1·2·3배)별 범위로 자른다.${isHalf ? " (절반 적용)" : ""}`,
+      `최근 ${gapMonths}개월(확정 종가) 고점 이후 최대 하락을 ${gapRounds}회가 복리로 덮는 간격 — 종목 배수(1·2·3배)별 범위로 자른다.`,
     tooltipValueGetter: ({ data }) => {
       if (data?.drawdown_pct == null || data.gap_range_pct == null) return undefined;
       const period = data.gap_partial ? `최근 ${data.gap_days}거래일(${gapMonths}개월 미만)` : `${gapMonths}개월`;
       const [low, high] = data.gap_range_pct;
       return `${period} 최대 하락 ${data.drawdown_pct.toFixed(1)}% · ${data.leverage_multiple}배 범위 ${low}~${high}%`;
-    },
-    valueGetter: ({ data }) => {
-      const raw = data?.recommended_gap_pct;
-      if (raw == null) return null;
-      return isHalf ? Number((raw / 2).toFixed(2)) : raw;
     },
     valueFormatter: ({ value }) => (value == null ? "-" : `${Number(value).toFixed(2)}%`),
     // 기준 기간이 없어 있는 기간으로 낸 값은 순위 화면의 기간 미달 값과 같은 색으로 칠한다.
@@ -893,8 +887,8 @@ function AccountSettingsCard({
 
   const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
     gridRowDragColumn<TradeListRow>(({ node }) => !node.rowPinned, 36),
-    // 수동간격일 때는 맨 왼쪽 참고 칸으로 둔다(권장 간격·50% 모드면 간격 칸 자리로 옮긴다).
-    ...(gapMode === "off" ? [recommendedGapColumn(view.recommended_gap_months, view.recommended_gap_rounds, gapMode)] : []),
+    // 권장 간격은 토글 값과 무관하게 맨 왼쪽에 고정한다.
+    recommendedGapColumn(view.recommended_gap_months, view.recommended_gap_rounds),
     highDrawdownColumn<TradeListRow>("high_drawdown_pct"),
     mddColumn<TradeListRow>({
       valueGetter: (row) => (row?.is_label || row?.key === TOTAL_ROW_KEY || row?.key === TRADE_TOTAL_ROW_KEY ? null : row?.mdd_pct),
@@ -938,9 +932,19 @@ function AccountSettingsCard({
     dailyChange,
     currentPrice,
     ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => [
-      // 권장 간격(전체·50%)을 쓰는 동안은 간격 칸 자리에 실제로 쓰이는 권장 간격을 둔다 — 저장된 간격은 보관만 하고, 끄면 다시 쓴다.
+      // 권장 간격(전체·50%)을 쓰는 동안은 간격(%) 칸에 선택한 간격을 채우고 편집을 막는다(녹색 배경 제거).
       ...(column.field === "pct" && gapMode !== "off"
-        ? [{ ...recommendedGapColumn(view.recommended_gap_months, view.recommended_gap_rounds, gapMode), pinned: undefined }]
+        ? [{
+          ...column,
+          type: "rightAligned",
+          editable: false,
+          valueGetter: ({ data, node }: { data?: TradeListRow; node?: { rowPinned?: unknown } | null }) => {
+            if (node?.rowPinned || data?.is_group) return "";
+            const raw = data?.recommended_gap_pct;
+            if (raw == null) return "-";
+            return gapMode === "half" ? Number((raw / 2).toFixed(2)) : raw;
+          },
+        } as ColDef<TradeListRow>]
         : [{
           ...column,
           type: "rightAligned",
