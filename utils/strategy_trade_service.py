@@ -827,15 +827,20 @@ def _build_strategy_view(
         if held:
             fill = regular_lots[round_no - 1]
             sell_limit = ladder.sell_limit(fill.price, trigger_pct, kind=kind, country=country)
-            # 이 회차를 팔면 다음 매수선은 앞 회차 체결가 −간격%다. 그게 매도가 이상이면 팔자마자 다시 사게 된다 —
-            # 신호를 '매도 후 재매수' 한 짝으로 낸다.
-            rebuy_after_sell = bool(
-                round_no == held_rounds
-                and round_no >= 2
-                and ladder.projected_buy_limit(
+            next_buy_after_sell = (
+                ladder.projected_buy_limit(
                     regular_lots[round_no - 2].price, 1, trigger_pct, kind=kind, country=country
                 )
-                >= sell_limit
+                if round_no >= 2
+                else None
+            )
+            # 이 회차를 팔면 다음 매수선은 앞 회차 체결가 −간격%다. 그게 매도가 이상이면 팔자마자 다시 사게 된다 —
+            # 신호를 '매도 후 재매수' 한 짝으로 낸다. 단, 현재가가 이미 다음 매수선을 넘은 갭상승이면 일반 매도만 한다.
+            rebuy_after_sell = bool(
+                round_no == held_rounds
+                and next_buy_after_sell is not None
+                and next_buy_after_sell >= sell_limit
+                and (close <= 0 or close <= next_buy_after_sell)
                 and 0 < (rebuy_quantity := round_buy_quantity(round_size, sell_limit, rate))
                 and rebuy_quantity * sell_limit <= cash
             )
