@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 from urllib.parse import quote_plus
 
@@ -11,11 +12,11 @@ load_dotenv()
 
 _db_connection = None
 _mongo_client: MongoClient | None = None
+_conn_lock = threading.Lock()
 logger = get_app_logger()
 
 
-def _reset_connection() -> None:
-    """캐시된 Mongo 연결을 닫고 초기화한다."""
+def _reset_connection_unlocked() -> None:
     global _db_connection, _mongo_client
     _db_connection = None
     if _mongo_client is not None:
@@ -24,6 +25,12 @@ def _reset_connection() -> None:
         except Exception:
             pass
     _mongo_client = None
+
+
+def _reset_connection() -> None:
+    """캐시된 Mongo 연결을 닫고 초기화한다."""
+    with _conn_lock:
+        _reset_connection_unlocked()
 
 
 def _get_required_env(name: str) -> str:
@@ -46,15 +53,16 @@ def _build_client(connection_string: str) -> MongoClient:
     return MongoClient(
         connection_string,
         maxPoolSize=10,
-        minPoolSize=0,
+        minPoolSize=1,
         retryWrites=True,
         retryReads=True,
-        serverSelectionTimeoutMS=10_000,
+        serverSelectionTimeoutMS=5_000,
         connectTimeoutMS=10_000,
         socketTimeoutMS=10_000,
         heartbeatFrequencyMS=10_000,
-        maxIdleTimeMS=60_000,
+        maxIdleTimeMS=300_000,
         waitQueueTimeoutMS=15_000,
+        compressors="zlib",
         appname="momentum-etf",
     )
 
@@ -65,35 +73,39 @@ def get_db_connection():
     """
     global _db_connection, _mongo_client
 
-    # 이미 연결이 설정되어 있으면, 기존 연결을 반환합니다.
+    # 이미 연결이 설정되어 있으면, 락 없이 기존 연결을 바로 반환합니다.
     if _db_connection is not None:
         return _db_connection
 
-    try:
-        connection_string = _resolve_connection_string()
-    except RuntimeError as exc:
-        logger.error("오류: MongoDB 연결 정보가 설정되지 않았습니다. %s", exc)
-        return None
-    db_name = _get_required_env("MONGO_DB_NAME")
-
-    last_error: Exception | None = None
-    for attempt, wait_seconds in enumerate((0, 1.5, 4.0), start=1):
-        try:
-            if wait_seconds > 0:
-                time.sleep(wait_seconds)
-
-            if _mongo_client is None:
-                _mongo_client = _build_client(connection_string)
-
-            client = _mongo_client
-            client.admin.command("ping")
-            _db_connection = client[db_name]
-            logger.debug("MongoDB에 성공적으로 연결되었습니다. (attempt=%s)", attempt)
+    with _conn_lock:
+        if _db_connection is not None:
             return _db_connection
-        except Exception as exc:
-            last_error = exc
-            logger.warning("MongoDB 연결 재시도 %s/3 실패: %s", attempt, exc)
-            _reset_connection()
 
-    logger.error("오류: MongoDB 연결에 실패했습니다: %s", last_error)
-    return None
+        try:
+            connection_string = _resolve_connection_string()
+        except RuntimeError as exc:
+            logger.error("오류: MongoDB 연결 정보가 설정되지 않았습니다. %s", exc)
+            return None
+        db_name = _get_required_env("MONGO_DB_NAME")
+
+        last_error: Exception | None = None
+        for attempt, wait_seconds in enumerate((0, 1.5, 4.0), start=1):
+            try:
+                if wait_seconds > 0:
+                    time.sleep(wait_seconds)
+
+                if _mongo_client is None:
+                    _mongo_client = _build_client(connection_string)
+
+                client = _mongo_client
+                client.admin.command("ping")
+                _db_connection = client[db_name]
+                logger.debug("MongoDB에 성공적으로 연결되었습니다. (attempt=%s)", attempt)
+                return _db_connection
+            except Exception as exc:
+                last_error = exc
+                logger.warning("MongoDB 연결 재시도 %s/3 실패: %s", attempt, exc)
+                _reset_connection_unlocked()
+
+        logger.error("오류: MongoDB 연결에 실패했습니다: %s", last_error)
+        return None
