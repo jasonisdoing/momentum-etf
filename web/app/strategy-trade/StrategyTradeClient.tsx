@@ -198,7 +198,7 @@ type RecommendedGapMode = "off" | "full" | "half";
 const RECOMMENDED_GAP_MODE_LABELS: Record<RecommendedGapMode, string> = {
   off: "수동간격",
   full: "권장 간격",
-  half: "권장 간격(50%)",
+  half: "권장 50%",
 };
 
 type View = {
@@ -569,8 +569,8 @@ function recommendedGapColumn(gapMonths: number, gapRounds: number, gapMode: Rec
   return {
     colId: "recommended_gap_pct",
     field: "recommended_gap_pct",
-    headerName: isHalf ? "권장 간격(50%)" : "권장 간격",
-    width: isHalf ? 108 : 84,
+    headerName: isHalf ? "권장 50%" : "권장 간격",
+    width: 84,
     minWidth: 72,
     pinned: "left",
     type: "numericColumn",
@@ -622,7 +622,7 @@ function RecommendedGapModeToggle({
       onClick={() => !disabled && onChange(nextMode)}
       disabled={disabled}
       aria-label={`간격 모드: ${RECOMMENDED_GAP_MODE_LABELS[mode]}`}
-      title="클릭할 때마다 수동간격 → 권장 간격 → 권장 간격(50%) 순으로 전환됩니다. 저장 버튼을 눌러야 반영됩니다."
+      title="클릭할 때마다 수동간격 → 권장 간격 → 권장 50% 순으로 전환됩니다. 저장 버튼을 눌러야 반영됩니다."
     >
       <span className="appLabeledFieldLabel">{RECOMMENDED_GAP_MODE_LABELS[mode]}</span>
       <span style={{ display: "inline-flex", alignItems: "center", minHeight: 32 }}>
@@ -683,6 +683,8 @@ const tradeSettingColumns = [
 function AccountSettingsCard({
   view,
   accountId,
+  selectedAccountId,
+  switching,
   onAccountChange,
   onSaved,
   onWithdrawSignal,
@@ -690,6 +692,8 @@ function AccountSettingsCard({
 }: {
   view: View;
   accountId: string;
+  selectedAccountId: string;
+  switching: boolean;
   onAccountChange: (accountId: string) => void;
   onSaved: (next: View) => void;
   onWithdrawSignal: (signal: SlackSignal, label: string) => void;
@@ -1112,10 +1116,15 @@ function AccountSettingsCard({
               <div className="appMainHeaderLeft">
                 <AccountSelect
                   accounts={view.account_options}
-                  value={accountId}
+                  value={selectedAccountId}
                   onChange={handleAccountChange}
-                  disabled={saving}
+                  disabled={saving || switching}
                 />
+                {switching ? (
+                  <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", whiteSpace: "nowrap" }}>
+                    불러오는 중…
+                  </span>
+                ) : null}
                 <RecommendedGapModeToggle
                   mode={gapMode}
                   modes={view.recommended_gap_modes}
@@ -1654,25 +1663,35 @@ export function StrategyTradeClient() {
   const toast = useToast();
   const [view, setView] = useState<View | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pendingAccountId, setPendingAccountId] = useState<string | null>(null);
+  const requestSeqRef = useRef(0);
   const [withdrawing, setWithdrawing] = useState<{ key: string; label: string } | null>(null);
   const [withdrawBusy, setWithdrawBusy] = useState(false);
 
   const load = useCallback(
     async (accountId: string | null, remembered = false) => {
+      const seq = ++requestSeqRef.current;
       setLoading(true);
+      setPendingAccountId(accountId);
       try {
         const query = accountId ? `?account_id=${encodeURIComponent(accountId)}` : "";
         const resp = await fetch(`/api/strategy-trade${query}`, { cache: "no-store" });
         const payload = await resp.json();
+        if (seq !== requestSeqRef.current) return;
         // 기억해 둔 계좌가 더는 운영 가능한 계좌가 아니면 첫 계좌로 연다(다른 화면과 같은 방식).
         if (!resp.ok && remembered) return await load(null);
         if (!resp.ok) throw new Error(payload?.error ?? "운용 현황을 불러오지 못했습니다.");
         setView(payload as View);
         writeRememberedTradeAccountId((payload as View).account_id);
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "운용 현황을 불러오지 못했습니다.");
+        if (seq === requestSeqRef.current) {
+          toast.error(error instanceof Error ? error.message : "운용 현황을 불러오지 못했습니다.");
+        }
       } finally {
-        setLoading(false);
+        if (seq === requestSeqRef.current) {
+          setLoading(false);
+          setPendingAccountId(null);
+        }
       }
     },
     [toast],
@@ -1749,6 +1768,8 @@ export function StrategyTradeClient() {
             key={view.account_id}
             view={view}
             accountId={view.account_id}
+            selectedAccountId={pendingAccountId ?? view.account_id}
+            switching={loading}
             onAccountChange={(next) => void load(next)}
             onSaved={setView}
             onWithdrawSignal={askWithdrawSignal}
