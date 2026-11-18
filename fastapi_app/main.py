@@ -113,8 +113,10 @@ app.include_router(strategy_portfolio_router)
 app.include_router(strategy_momentum_router)
 app.include_router(strategy_trade_router)
 from fastapi import Request
-from pymongo.errors import NetworkTimeout, PyMongoError
+from pymongo.errors import ConnectionFailure, NetworkTimeout, PyMongoError, ServerSelectionTimeoutError
 from starlette.responses import JSONResponse
+
+from utils.db_manager import _reset_connection
 
 
 @app.middleware("http")
@@ -123,17 +125,16 @@ async def catch_mongodb_errors(request: Request, call_next):
         response = await call_next(request)
         return response
     except Exception as exc:
-        is_db_timeout = False
-        if isinstance(exc, NetworkTimeout):
-            is_db_timeout = True
-        elif isinstance(exc, PyMongoError) and "time out" in str(exc).lower():
-            is_db_timeout = True
-        elif "pymongo" in str(exc).lower() and "timeout" in str(exc).lower():
-            is_db_timeout = True
+        msg = str(exc).lower()
+        is_db_timeout = isinstance(exc, (NetworkTimeout, ServerSelectionTimeoutError, ConnectionFailure)) or (
+            isinstance(exc, PyMongoError) and ("timed out" in msg or "time out" in msg)
+        )
 
         if is_db_timeout:
             global _LAST_DB_ERROR_TIME
             _LAST_DB_ERROR_TIME = time.time()
+            # 끊어진 MongoClient 를 초기화해 다음 요청에서 새 연결로 바로 복구되게 한다.
+            _reset_connection()
             return JSONResponse(
                 status_code=503, content={"detail": "몽고디비 서버 연결 지연(타임아웃)이 발생했습니다."}
             )
