@@ -22,7 +22,6 @@ import { renderStockNameCell } from "@/lib/name-highlight";
 import { CASH_ROW_TICKER, type AccountSummary, type HoldingsResponse, type HoldingsRow } from "../assets/assets-helpers";
 import { holdingMetricColumns } from "../assets/holding-metric-columns";
 import AccountSelect, { type AccountOptionBase } from "../components/AccountSelect";
-import { LabeledSwitchField } from "../components/LabeledSwitchField";
 import { SlackAlarmField } from "../components/SlackAlarmField";
 import { readRememberedTradeAccountId, writeRememberedTradeAccountId } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -194,6 +193,14 @@ type StrategyConfigRow = {
 
 type TickerOption = { ticker: string; name: string; pools: string[]; kind: "stock" | "etf" };
 
+type RecommendedGapMode = "off" | "full" | "half";
+
+const RECOMMENDED_GAP_MODE_LABELS: Record<RecommendedGapMode, string> = {
+  off: "수동간격",
+  full: "권장 간격",
+  half: "권장 간격(50%)",
+};
+
 type View = {
   /** 사고팔기를 운영할 수 있는 계좌 — 증권사 API 가 연동된 운영 계좌. */
   account_options: Array<AccountOptionBase & { country_code: string }>;
@@ -203,8 +210,9 @@ type View = {
   country_code: string | null;
   /** 이 계좌의 사고팔기 슬랙 스위치(합성 슬랙과 별개). */
   slack_enabled: boolean;
-  /** 이 계좌 전략들이 간격 대신 매일의 권장 간격을 쓰는지 — 켜면 간격 칸은 보관만 하고 잠근다. */
-  recommended_gap_enabled: boolean;
+  /** 이 계좌 전략들의 간격 모드 — off(수동간격) · full(권장 간격) · half(권장 간격 50%). */
+  recommended_gap_mode: RecommendedGapMode;
+  recommended_gap_modes: RecommendedGapMode[];
   groups: HoldingsGroup[];
   pool_options: PoolLabelSource[];
   default_round_size: number;
@@ -556,27 +564,97 @@ function sumTradeHoldings(rows: HoldingsRow[]) {
 }
 
 /** 권장 간격 컬럼 — 이 화면에만 있는 참고값이라 공용 컬럼 없이 여기서 정의한다(폭·표기는 변동성 컬럼과 같다). */
-function recommendedGapColumn(gapMonths: number, gapRounds: number): ColDef<TradeListRow> {
+function recommendedGapColumn(gapMonths: number, gapRounds: number, gapMode: RecommendedGapMode): ColDef<TradeListRow> {
+  const isHalf = gapMode === "half";
   return {
     colId: "recommended_gap_pct",
     field: "recommended_gap_pct",
-    headerName: "권장 간격",
-    width: 84,
+    headerName: isHalf ? "권장 간격(50%)" : "권장 간격",
+    width: isHalf ? 108 : 84,
     minWidth: 72,
     pinned: "left",
     type: "numericColumn",
     headerTooltip:
-      `최근 ${gapMonths}개월(확정 종가) 고점 이후 최대 하락을 ${gapRounds}회가 복리로 덮는 간격 — 종목 배수(1·2·3배)별 범위로 자른다.`,
+      `최근 ${gapMonths}개월(확정 종가) 고점 이후 최대 하락을 ${gapRounds}회가 복리로 덮는 간격 — 종목 배수(1·2·3배)별 범위로 자른다.${isHalf ? " (절반 적용)" : ""}`,
     tooltipValueGetter: ({ data }) => {
       if (data?.drawdown_pct == null || data.gap_range_pct == null) return undefined;
       const period = data.gap_partial ? `최근 ${data.gap_days}거래일(${gapMonths}개월 미만)` : `${gapMonths}개월`;
       const [low, high] = data.gap_range_pct;
       return `${period} 최대 하락 ${data.drawdown_pct.toFixed(1)}% · ${data.leverage_multiple}배 범위 ${low}~${high}%`;
     },
+    valueGetter: ({ data }) => {
+      const raw = data?.recommended_gap_pct;
+      if (raw == null) return null;
+      return isHalf ? Number((raw / 2).toFixed(2)) : raw;
+    },
     valueFormatter: ({ value }) => (value == null ? "-" : `${Number(value).toFixed(2)}%`),
     // 기준 기간이 없어 있는 기간으로 낸 값은 순위 화면의 기간 미달 값과 같은 색으로 칠한다.
     cellStyle: ({ data }) => (data?.gap_partial ? PARTIAL_PERIOD_CELL_STYLE : { color: "var(--text-muted)" }),
   };
+}
+
+/** 3단 간격 모드 토글 — 수동간격(off) → 권장 간격(full) → 권장 간격(50%)(half) 순환. */
+function RecommendedGapModeToggle({
+  mode,
+  modes,
+  onChange,
+  disabled,
+}: {
+  mode: RecommendedGapMode;
+  modes: RecommendedGapMode[];
+  onChange: (next: RecommendedGapMode) => void;
+  disabled: boolean;
+}) {
+  const index = Math.max(0, modes.indexOf(mode));
+  const nextMode = modes[(index + 1) % modes.length];
+  const knobLeft = index === 0 ? 2 : index === 1 ? 13 : 24;
+  const trackBg =
+    mode === "off"
+      ? "rgba(148, 163, 184, 0.45)"
+      : mode === "full"
+        ? "var(--bs-primary, #0d6efd)"
+        : "#6366f1";
+  return (
+    <button
+      type="button"
+      className="appLabeledField"
+      style={{ marginBottom: 0, background: "none", border: "none", padding: 0, cursor: disabled ? "not-allowed" : "pointer", textAlign: "left" }}
+      onClick={() => !disabled && onChange(nextMode)}
+      disabled={disabled}
+      aria-label={`간격 모드: ${RECOMMENDED_GAP_MODE_LABELS[mode]}`}
+      title="클릭할 때마다 수동간격 → 권장 간격 → 권장 간격(50%) 순으로 전환됩니다. 저장 버튼을 눌러야 반영됩니다."
+    >
+      <span className="appLabeledFieldLabel">{RECOMMENDED_GAP_MODE_LABELS[mode]}</span>
+      <span style={{ display: "inline-flex", alignItems: "center", minHeight: 32 }}>
+        <span
+          style={{
+            position: "relative",
+            display: "inline-block",
+            width: 42,
+            height: 20,
+            borderRadius: 999,
+            background: trackBg,
+            transition: "background 0.15s ease",
+            opacity: disabled ? 0.6 : 1,
+          }}
+        >
+          <span
+            style={{
+              position: "absolute",
+              top: 2,
+              left: knobLeft,
+              width: 16,
+              height: 16,
+              borderRadius: "50%",
+              background: "#fff",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
+              transition: "left 0.15s ease",
+            }}
+          />
+        </span>
+      </span>
+    </button>
+  );
 }
 
 function displayWeights(values: number[], total: number): number[] {
@@ -628,7 +706,7 @@ function AccountSettingsCard({
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<{ accountId: string; ticker: string } | null>(null);
   const [slack, setSlack] = useState(view.slack_enabled);
-  const [useRecommendedGap, setUseRecommendedGap] = useState(view.recommended_gap_enabled);
+  const [gapMode, setGapMode] = useState<RecommendedGapMode>(view.recommended_gap_mode);
   const [slackTesting, setSlackTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [accountAssets, setAccountAssets] = useState<{ summary: AccountSummary; holdings: Map<string, HoldingsRow> } | null>(null);
@@ -646,7 +724,7 @@ function AccountSettingsCard({
     setGroups(view.groups ?? EMPTY_GROUPS);
     setPickerOpen(false);
     setSlack(view.slack_enabled);
-    setUseRecommendedGap(view.recommended_gap_enabled);
+    setGapMode(view.recommended_gap_mode);
     setMemos(view.memos);
   }, [view]);
 
@@ -679,7 +757,7 @@ function AccountSettingsCard({
 
   const isDirty =
     slack !== view.slack_enabled ||
-    useRecommendedGap !== view.recommended_gap_enabled ||
+    gapMode !== view.recommended_gap_mode ||
     JSON.stringify(groups) !== JSON.stringify(view.groups ?? EMPTY_GROUPS) ||
     JSON.stringify(comparableDrafts(drafts)) !== JSON.stringify(comparableDrafts(view.configs.map(rowFromConfig)));
 
@@ -811,8 +889,8 @@ function AccountSettingsCard({
 
   const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
     gridRowDragColumn<TradeListRow>(({ node }) => !node.rowPinned, 36),
-    // 권장 간격을 쓰지 않을 때는 맨 왼쪽 참고 칸으로 둔다(쓰면 간격 칸 자리로 옮긴다).
-    ...(useRecommendedGap ? [] : [recommendedGapColumn(view.recommended_gap_months, view.recommended_gap_rounds)]),
+    // 수동간격일 때는 맨 왼쪽 참고 칸으로 둔다(권장 간격·50% 모드면 간격 칸 자리로 옮긴다).
+    ...(gapMode === "off" ? [recommendedGapColumn(view.recommended_gap_months, view.recommended_gap_rounds, gapMode)] : []),
     highDrawdownColumn<TradeListRow>("high_drawdown_pct"),
     mddColumn<TradeListRow>({
       valueGetter: (row) => (row?.is_label || row?.key === TOTAL_ROW_KEY || row?.key === TRADE_TOTAL_ROW_KEY ? null : row?.mdd_pct),
@@ -856,9 +934,9 @@ function AccountSettingsCard({
     dailyChange,
     currentPrice,
     ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => [
-      // 권장 간격을 쓰는 동안은 간격 칸 자리에 실제로 쓰이는 권장 간격을 둔다 — 저장된 간격은 보관만 하고, 끄면 다시 쓴다.
-      ...(column.field === "pct" && useRecommendedGap
-        ? [{ ...recommendedGapColumn(view.recommended_gap_months, view.recommended_gap_rounds), pinned: undefined }]
+      // 권장 간격(전체·50%)을 쓰는 동안은 간격 칸 자리에 실제로 쓰이는 권장 간격을 둔다 — 저장된 간격은 보관만 하고, 끄면 다시 쓴다.
+      ...(column.field === "pct" && gapMode !== "off"
+        ? [{ ...recommendedGapColumn(view.recommended_gap_months, view.recommended_gap_rounds, gapMode), pinned: undefined }]
         : [{
           ...column,
           type: "rightAligned",
@@ -885,7 +963,7 @@ function AccountSettingsCard({
     returnPct, valuation, pnl,
     { ...pnl, colId: "realized_krw", headerName: "실현손익", headerTooltip: "회차 기준 — 아래 손익 요약과 같은 값", valueGetter: ({ data }) => data?.realized_krw },
     { ...pnl, colId: "total_krw", headerName: "합계 손익", headerTooltip: "평가손익 + 실현손익", valueGetter: ({ data }) => data?.total_krw },
-  ], [saving, onWithdrawSignal, useRecommendedGap, view.recommended_gap_months, view.recommended_gap_rounds]);
+  ], [saving, onWithdrawSignal, gapMode, view.recommended_gap_months, view.recommended_gap_rounds]);
 
   const tradeRowClass = ({ data }: RowClassParams<TradeListRow>) => [
     data?.is_group || data?.key === TOTAL_ROW_KEY || data?.key === TRADE_TOTAL_ROW_KEY ? "assetsGroupRow" : "",
@@ -991,7 +1069,7 @@ function AccountSettingsCard({
         body: JSON.stringify({
           account_id: accountId,
           slack_enabled: slack,
-          recommended_gap_enabled: useRecommendedGap,
+          recommended_gap_mode: gapMode,
           strategies,
           groups,
         }),
@@ -1005,7 +1083,7 @@ function AccountSettingsCard({
     } finally {
       setSaving(false);
     }
-  }, [accountId, drafts, groups, onSaved, slack, toast, useRecommendedGap, view.pct_max, view.pct_min, view.rounds_max, view.rounds_min]);
+  }, [accountId, drafts, gapMode, groups, onSaved, slack, toast, view.pct_max, view.pct_min, view.rounds_max, view.rounds_min]);
 
   const sendSlackTest = useCallback(async () => {
     setSlackTesting(true);
@@ -1038,12 +1116,11 @@ function AccountSettingsCard({
                   onChange={handleAccountChange}
                   disabled={saving}
                 />
-                <LabeledSwitchField
-                  label="권장 간격 사용"
-                  checked={useRecommendedGap}
-                  onChange={setUseRecommendedGap}
+                <RecommendedGapModeToggle
+                  mode={gapMode}
+                  modes={view.recommended_gap_modes}
+                  onChange={setGapMode}
                   disabled={saving}
-                  title="켜면 이 계좌 전략들이 간격 대신 매일의 권장 간격(최근 3개월 최대 하락 기준)을 씁니다. 저장 버튼을 눌러야 반영된다."
                 />
                 <SlackAlarmField
                   checked={slack}

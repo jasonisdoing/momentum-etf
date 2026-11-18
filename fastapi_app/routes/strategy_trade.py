@@ -41,13 +41,13 @@ def put_strategy_trade_settings(
 ) -> dict:
     """한 계좌의 슬랙 설정과 전략 목록을 저장하고 갱신된 화면 데이터를 반환한다."""
     account_id = str(payload.get("account_id") or "").strip()
-    required = ("slack_enabled", "recommended_gap_enabled")
+    required = ("slack_enabled", "recommended_gap_mode")
     if not account_id or payload.get("strategies") is None or any(key not in payload for key in required):
-        raise ValueError("account_id·slack_enabled·recommended_gap_enabled·strategies 가 모두 필요합니다.")
+        raise ValueError("account_id·slack_enabled·recommended_gap_mode·strategies 가 모두 필요합니다.")
     save_account_trade(
         account_id,
         payload["slack_enabled"],
-        payload["recommended_gap_enabled"],
+        payload["recommended_gap_mode"],
         payload["strategies"],
         payload.get("groups"),
     )

@@ -19,6 +19,7 @@ from utils.strategy_trade_config import (
     FIRST_ENTRY_WINDOWS,
     PCT_MAX,
     PCT_MIN,
+    RECOMMENDED_GAP_MODES,
     ROUNDS_MAX,
     ROUNDS_MIN,
     TRADE_COUNTRIES,
@@ -80,15 +81,18 @@ def load_settings() -> dict[str, Any]:
     for account_id, entry in (doc.get("accounts") or {}).items():
         if account_id not in enabled:
             continue
+        mode = entry.get("recommended_gap_mode") if isinstance(entry, dict) else None
+        if mode is None and isinstance(entry, dict) and isinstance(entry.get("recommended_gap_enabled"), bool):
+            mode = "full" if entry["recommended_gap_enabled"] else "off"
         if (
             not isinstance(entry, dict)
             or not isinstance(entry.get("slack_enabled"), bool)
-            or not isinstance(entry.get("recommended_gap_enabled"), bool)
+            or mode not in RECOMMENDED_GAP_MODES
         ):
             raise RuntimeError(f"'{account_id}' 계좌의 사고팔기 설정이 올바르지 않습니다 — 화면에서 다시 저장하세요.")
         accounts[str(account_id)] = {
             "slack_enabled": entry["slack_enabled"],
-            "recommended_gap_enabled": entry["recommended_gap_enabled"],
+            "recommended_gap_mode": mode,
             "groups": entry.get("groups", []),
         }
 
@@ -258,7 +262,7 @@ def _normalize_trade_groups(groups: Any) -> list[dict[str, str | None]]:
 
 @signal_lock()
 def save_account_trade(
-    account_id: str, slack_enabled: Any, recommended_gap_enabled: Any, strategies: Any, groups: Any = None
+    account_id: str, slack_enabled: Any, recommended_gap_mode: Any, strategies: Any, groups: Any = None
 ) -> None:
     """계좌의 슬랙·권장 간격 사용 설정과 전략 목록을 검증한 뒤 한 번에 저장한다."""
     from uuid import uuid4
@@ -269,8 +273,8 @@ def save_account_trade(
     country = str(account["country_code"]).strip().lower()
     if not isinstance(slack_enabled, bool):
         raise ValueError("slack_enabled 는 참·거짓이어야 합니다.")
-    if not isinstance(recommended_gap_enabled, bool):
-        raise ValueError("recommended_gap_enabled 는 참·거짓이어야 합니다.")
+    if not isinstance(recommended_gap_mode, str) or recommended_gap_mode not in RECOMMENDED_GAP_MODES:
+        raise ValueError(f"recommended_gap_mode 는 {RECOMMENDED_GAP_MODES} 중 하나여야 합니다.")
     if not isinstance(strategies, list):
         raise ValueError("strategies 형식이 올바르지 않습니다.")
     options = _ticker_options(_eligible_pool_kinds((country,)))
@@ -300,7 +304,7 @@ def save_account_trade(
     sent_log = stored.get("sent_log") or {}
     account_settings: dict[str, Any] = {
         "slack_enabled": slack_enabled,
-        "recommended_gap_enabled": recommended_gap_enabled,
+        "recommended_gap_mode": recommended_gap_mode,
     }
     if groups is None:
         groups = ((stored.get("accounts") or {}).get(account_id) or {}).get("groups", [])
@@ -1091,14 +1095,16 @@ def _account_ledgers(
 
 
 def _account_recommended_gaps(
-    strategies: dict[str, dict[str, Any]], pool_countries: dict[str, ladder.Country]
+    strategies: dict[str, dict[str, Any]],
+    pool_countries: dict[str, ladder.Country],
+    accounts: dict[str, dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
-    """「권장 간격 사용」을 켠 계좌의 전략들만 권장 간격을 계산한다 — 전략 id → `recommended_gaps` 결과."""
-    accounts = load_settings()["accounts"]
+    """「권장 간격 사용」을 켠(권장 간격·절반) 계좌의 전략들만 권장 간격을 계산한다 — 전략 id → `recommended_gaps` 결과."""
     targets = {
         sid: entry
         for sid, entry in strategies.items()
-        if accounts.get(entry["account_id"], {}).get("recommended_gap_enabled") and entry["pool"] in pool_countries
+        if accounts.get(entry["account_id"], {}).get("recommended_gap_mode") in ("full", "half")
+        and entry["pool"] in pool_countries
     }
     gaps: dict[str, dict[str, Any]] = {}
     for country in {pool_countries[entry["pool"]] for entry in targets.values()}:
@@ -1140,7 +1146,8 @@ def _build_views(
         pool: _pool_tickers(pool, active_pools[pool])
         for pool in {entry["pool"] for entry in strategies.values()} & active_pools.keys()
     }
-    gaps = _account_recommended_gaps(strategies, pool_countries)
+    accounts = load_settings()["accounts"]
+    gaps = _account_recommended_gaps(strategies, pool_countries, accounts)
     views: list[dict[str, Any]] = []
     cached_days_by_account: dict[tuple[str, date], dict[date, list[dict[str, Any]]]] = {}
     history_orders_by_account: dict[tuple[str, date], list[dict[str, Any]]] = {}
@@ -1161,8 +1168,11 @@ def _build_views(
             view = _failed_view(sid, entry, "권장 간격을 계산할 일봉이 없습니다(종가 2개 미만).", country)
         else:
             if sid in gaps:
-                # 「권장 간격 사용」 계좌 — 저장된 간격 자리에 오늘의 권장 간격을 넣는다(화면·신호·주문이 모두 이 값).
-                entry = {**entry, "trigger_pct": gaps[sid]["recommended_gap_pct"]}
+                # 「권장 간격 사용」 계좌 — 저장된 간격 자리에 오늘의 권장 간격(전체 또는 50%)을 넣는다(화면·신호·주문이 모두 이 값).
+                gap_pct = float(gaps[sid]["recommended_gap_pct"])
+                mode = accounts.get(account_id, {}).get("recommended_gap_mode", "off")
+                effective_gap = round(gap_pct / 2.0, 2) if mode == "half" else gap_pct
+                entry = {**entry, "trigger_pct": effective_gap}
             state = states[account_id]
             try:
                 view = _build_strategy_view(
@@ -1355,7 +1365,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
     country = next((str(doc["country_code"]).strip().lower() for doc in docs if doc["account_id"] == selected), None)
     settings = load_settings()
     # 아직 한 번도 저장하지 않은 계좌는 두 스위치 모두 꺼진 상태로 보인다(저장하면 생긴다).
-    account = settings["accounts"].get(selected or "", {"slack_enabled": False, "recommended_gap_enabled": False})
+    account = settings["accounts"].get(selected or "", {"slack_enabled": False, "recommended_gap_mode": "off"})
     configs = _ordered_strategies(settings["strategies"], selected or "")
     mine = dict(configs)
     from utils.pool_strategy_use import pool_options
@@ -1379,7 +1389,8 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
         "account_id": selected,
         "country_code": country,
         "slack_enabled": account["slack_enabled"],
-        "recommended_gap_enabled": account["recommended_gap_enabled"],
+        "recommended_gap_mode": account["recommended_gap_mode"],
+        "recommended_gap_modes": list(RECOMMENDED_GAP_MODES),
         "groups": _normalize_trade_groups(account.get("groups", [])),
         "pool_options": pool_options(list(pools)),
         "ticker_options": [options[ticker] for ticker in sorted(options)],
