@@ -194,7 +194,6 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
                     "ticker": row["ticker"],
                     "name": row["name"],
                     "limit_price": row["sell_limit"],
-                    "withdrawal_price": _withdrawal_price(row["fill_price"], gap_pct, buy=False),
                     "close": row["close"],
                     "quantity": row["quantity"],
                     "index_level": row["sell_index"],
@@ -219,7 +218,6 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
                     "ticker": row["ticker"],
                     "name": row["name"],
                     "limit_price": row["buy_limit"],
-                    "withdrawal_price": None if row["close_entry"] else _withdrawal_price(buy_base, gap_pct, buy=True),
                     "close": row["close"],
                     "quantity": row["quantity"],
                     "index_level": row["buy_index"],
@@ -246,7 +244,6 @@ def collect_triggers(strategy_view: dict[str, Any]) -> list[dict[str, Any]]:
             "arbitrary_id": lot["id"],
             "quantity": lot["quantity"],
             "limit_price": lot["sell_limit"],
-            "withdrawal_price": _withdrawal_price(lot["fill_price"], gap_pct, buy=False),
             "index_level": lot["sell_limit"],
             "close": index["close"],
             "index": index,
@@ -495,7 +492,6 @@ def _log_entry(trigger: dict[str, Any], held_counts: dict[str, int], stamp: str,
         "arbitrary_id": trigger.get("arbitrary_id"),
         "quantity": trigger["quantity"],
         "limit_price": trigger["limit_price"],
-        "withdrawal_price": trigger["withdrawal_price"],
         "index_text": _index_text(trigger["index"], trigger["country"]),
         "signal_ts": signal_ts,
         # 발송 시점의 보유 회차 수 — 체결 확인은 회차 수 증감으로 판정한다(참고 기록).
@@ -558,17 +554,39 @@ def _send_confirms(
     return sent, failed
 
 
+def _entry_withdrawal_bounds(entry: dict[str, Any], strategy: dict[str, Any]) -> tuple[float, float] | None:
+    """현재 전략 설정(`trigger_pct`)과 회차 현황 기준으로 (회수 기준가, 신호 기준가)를 실시간 계산한다."""
+    gap_pct = float(strategy["config"]["trigger_pct"])
+    if entry.get("arbitrary_id") is not None:
+        lot = next((item for item in strategy["arbitrary_lots"] if item["id"] == entry["arbitrary_id"]), None)
+        if lot is None:
+            return None
+        return _withdrawal_price(lot["fill_price"], gap_pct, buy=False), lot["sell_limit"]
+    if entry["action"] == "buy":
+        row = next((r for r in strategy["rounds"] if r["round"] == entry["round"]), None)
+        if row is None or row["close_entry"] or row["buy_limit"] is None:
+            return None
+        prev = next((r for r in strategy["rounds"] if r["round"] == entry["round"] - 1 and r["held"]), None)
+        if prev is None:
+            return None
+        return _withdrawal_price(prev["fill_price"], gap_pct, buy=True), row["buy_limit"]
+    row = next((r for r in strategy["rounds"] if r["round"] == entry["round"] and r["held"]), None)
+    if row is None or row["sell_limit"] is None:
+        return None
+    return _withdrawal_price(row["fill_price"], gap_pct, buy=False), row["sell_limit"]
+
+
 def _price_returned(entries: list[dict[str, Any]], strategy: dict[str, Any]) -> str | None:
-    """보낸 신호들이 모두 회수 기준까지 되돌아왔으면 회수 한 줄의 상세(현재가), 아니면 None."""
+    """보낸 신호들이 모두 현재 기준 회수가까지 되돌아왔으면 회수 한 줄의 상세(현재가), 아니면 None."""
     country = strategy["country"]
     current = strategy["index"]["close"]
     if current <= 0:
         return None
     for entry in entries:
-        threshold = entry.get("withdrawal_price")
-        target = entry.get("limit_price")
-        if threshold is None or target is None:
+        bounds = _entry_withdrawal_bounds(entry, strategy)
+        if bounds is None:
             return None
+        threshold, target = bounds
         buy = entry["action"] == "buy"
         if buy and not (current >= threshold and current > target):
             return None
