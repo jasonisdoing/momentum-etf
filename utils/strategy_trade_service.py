@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from config import RECOMMENDED_GAP_WINDOW_MONTHS
+from config import RECOMMENDED_GAP_ROUNDS, RECOMMENDED_GAP_WINDOW_MONTHS
 from core.strategy.trade import rules as ladder
 from services.broker_trade_service import resolve_us_exchange
 from utils.logger import get_app_logger
@@ -1279,7 +1279,7 @@ def recommended_gaps(entries: dict[str, dict[str, Any]], country: str) -> dict[s
             gaps[sid] = {
                 "drawdown_pct": round(drawdown * 100, 2) if drawdown is not None else None,
                 "recommended_gap_pct": (
-                    ladder.recommended_gap_pct(drawdown, int(entry["rounds"]), multiple)
+                    ladder.recommended_gap_pct(drawdown, RECOMMENDED_GAP_ROUNDS, multiple)
                     if drawdown is not None
                     else None
                 ),
@@ -1368,6 +1368,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
         "rounds_min": ROUNDS_MIN,
         "rounds_max": ROUNDS_MAX,
         "recommended_gap_months": RECOMMENDED_GAP_WINDOW_MONTHS,
+        "recommended_gap_rounds": RECOMMENDED_GAP_ROUNDS,
         "krw_rate": _view_krw_rate(country),
         # 편집 표의 행 — 저장된 전략 설정 그대로.
         "configs": [
