@@ -1229,6 +1229,17 @@ def load_views_where(keep: Callable[[dict[str, Any]], bool], *, fresh: bool) -> 
     }
 
 
+def load_strategy_view(strategy_id: str, *, fresh: bool) -> dict[str, Any] | None:
+    """단일 전략(``strategy_id``)의 운용 현황만 계산한다 — 확인창·단건 주문 시 다른 종목 조회를 건너뛴다."""
+    entry = load_settings()["strategies"].get(strategy_id)
+    if entry is None:
+        return None
+    view = _build_views({strategy_id: entry}, fresh=fresh, include_trade_history=False)[0]
+    if "error" in view:
+        return {"error": view["error"]}
+    return view
+
+
 def _ordered_strategies(strategies: dict[str, dict[str, Any]], account_id: str) -> list[tuple[str, dict[str, Any]]]:
     """그 계좌의 사고팔기 전략을 화면 순서대로 — 순서를 저장한 적 없는 전략끼리는 문서 순서를 유지한다."""
     mine = [(sid, entry) for sid, entry in strategies.items() if entry["account_id"] == account_id]

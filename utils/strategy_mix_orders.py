@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from services.broker_api_service import BrokerApiError, OrderUncertainError, fetch_broker_balance
@@ -249,10 +250,22 @@ def resolve_mix_order(request: dict[str, Any], thread_ts: str) -> dict:
     if item["side"] != side or item["ticker"] != ticker:
         raise RoundNotOrderableError("오늘의 액션 방향이 달라졌습니다.", done=False)
     env = _require_live_account(account_id)
-    _require_no_open_order(account_id, ticker, country)
-    balance = _checked_balance(positions, ticker)
-    instrument["exchange"] = resolve_us_exchange(account_id, ticker) if country == "us" else None
-    venue, quote_label, price, depth = resolve_order_quote(instrument, side)
+
+    def _quote_step() -> tuple[str, str, int | float, dict | None]:
+        inst = {
+            **instrument,
+            "exchange": resolve_us_exchange(account_id, ticker) if country == "us" else None,
+        }
+        return resolve_order_quote(inst, side)
+
+    # 미체결·잔고·호가 조회는 서로 독립적이므로 병렬로 호출해 모달 대기 시간을 줄인다.
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        open_order_fut = executor.submit(_require_no_open_order, account_id, ticker, country)
+        balance_fut = executor.submit(_checked_balance, positions, ticker)
+        quote_fut = executor.submit(_quote_step)
+        open_order_fut.result()
+        balance = balance_fut.result()
+        venue, quote_label, price, depth = quote_fut.result()
     quantity = item["quantity"]
     amount = price * quantity
     if side == "buy" and amount > balance["cash"]:

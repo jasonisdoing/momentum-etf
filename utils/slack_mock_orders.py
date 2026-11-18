@@ -33,6 +33,7 @@ from utils.strategy_trade_orders import (
     MESSAGE_FAILED,
     MESSAGE_OPEN,
     MESSAGE_PENDING,
+    MESSAGE_PLACED,
     RoundNotOrderableError,
     cancel_record,
     close_warning_slack_orders,
@@ -77,8 +78,13 @@ _SIDE_LABELS = {"buy": "매수", "sell": "매도"}
 _QUOTE_LABELS = {"buy": "매수 1호가", "sell": "매도 1호가"}
 #: 주문 기록(`slack`)에 남기는 슬랙 위치 — 버튼이 있는 메시지(`message_ts`)와 결과를 달 스레드 뿌리(`thread_ts`).
 SLACK_TARGET_KEYS = ("channel", "message_ts", "thread_ts")
-#: 신호 메시지 반응 — 스레드 상태(`signal_thread_state`)마다 하나만 단다: 진행 중 ⏳ · 완료 ✅ · 실패 ❌.
-REACTIONS = {MESSAGE_PENDING: "hourglass_flowing_sand", MESSAGE_DONE: "white_check_mark", MESSAGE_FAILED: "x"}
+#: 신호 메시지 반응 — 스레드 상태(`signal_thread_state`)마다 하나만 단다: 처리 중 ⏳ · 접수됨 🎯 · 완료 ✅ · 실패 ❌.
+REACTIONS = {
+    MESSAGE_PENDING: "hourglass_flowing_sand",
+    MESSAGE_PLACED: "dart",
+    MESSAGE_DONE: "white_check_mark",
+    MESSAGE_FAILED: "x",
+}
 _REACTION_NOOP_ERRORS = ("already_reacted", "no_reaction")
 #: 장이 닫혀 주문하지 못한 메시지에 남기는 문구.
 _SESSION_CLOSED_NOTE = "⌛ 장 마감으로 주문 불가"
@@ -946,7 +952,7 @@ def close_session_threads(strategies: list[dict[str, Any]]) -> int:
                 settle_signal_message(thread_ts, ts, MESSAGE_FAILED)
                 closed += 1
         refreshed = find_signal_thread(thread_ts)
-        if refreshed is not None and sync_signal_thread(refreshed) != MESSAGE_PENDING:
+        if refreshed is not None and sync_signal_thread(refreshed) not in (MESSAGE_PENDING, MESSAGE_PLACED):
             forget_signal_thread(thread_ts)
     return closed
 

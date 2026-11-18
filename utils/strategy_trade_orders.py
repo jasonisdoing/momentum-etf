@@ -46,7 +46,7 @@ from utils.strategy_trade_market import (
     order_venue,
     session_trade_date,
 )
-from utils.strategy_trade_service import load_views_where
+from utils.strategy_trade_service import load_strategy_view, load_views_where
 from utils.strategy_trade_threads import SIGNAL_RETENTION_DAYS
 
 KST = ZoneInfo("Asia/Seoul")
@@ -337,13 +337,12 @@ def _require_valid_quote(strategy: dict[str, Any], label: str, price: int) -> No
 
 
 def _order_strategy(account_id: str, pool: str, strategy_id: str, *, fresh: bool) -> dict[str, Any]:
-    """주문할 전략의 운용 현황 — 회차 원장을 못 만들었거나 전략이 없거나 다른 운영 계좌면 막는다."""
-    views = load_views_where(lambda entry: entry["pool"] == pool, fresh=fresh)
-    if strategy_id in views["errors"]:
-        raise BrokerApiError(f"'{strategy_id}' 전략의 보유 회차를 확인할 수 없습니다: {views['errors'][strategy_id]}")
-    strategy = next((row for row in views["strategies"] if row["strategy_id"] == strategy_id), None)
-    if strategy is None:
+    """주문할 전략의 운용 현황 — 단건 전략만 조회해 불필요한 풀 전체 원장·시세 계산을 막는다."""
+    strategy = load_strategy_view(strategy_id, fresh=fresh)
+    if strategy is None or (isinstance(strategy, dict) and "error" not in strategy and strategy.get("pool") != pool):
         raise BrokerApiError(f"{pool} 종목풀에 '{strategy_id}' 전략이 없습니다.")
+    if "error" in strategy:
+        raise BrokerApiError(f"'{strategy_id}' 전략의 보유 회차를 확인할 수 없습니다: {strategy['error']}")
     if account_env(account_id) != ACCOUNT_ENV_MOCK and account_id != strategy["account_id"]:
         raise BrokerApiError(
             f"{strategy['label']} 전략의 운용 계좌는 '{strategy['account_id']}' 입니다 — 다른 운영 계좌로는 주문하지 않습니다."
@@ -781,8 +780,9 @@ def _config():
     return db[_CONFIG_COLLECTION]
 
 
-#: 신호 스레드의 주문 메시지 상태 — 진행 중 · 완료(체결 또는 이미 처리된 회차) · 실패(체결 없이 끝남) · 아직 손대지 않음.
+#: 신호 스레드의 주문 메시지 상태 — 처리 중 · 접수됨(체결 대기) · 완료(체결 또는 이미 처리된 회차) · 실패(체결 없이 끝남) · 아직 손대지 않음.
 MESSAGE_PENDING = "pending"
+MESSAGE_PLACED = "placed"
 MESSAGE_DONE = "done"
 MESSAGE_FAILED = "failed"
 MESSAGE_OPEN = "open"
@@ -852,7 +852,7 @@ def _orders_outcome(orders: list[dict[str, Any]]) -> str:
     pair_id = latest.get("pair_id")
     group = [order for order in orders if pair_id is not None and order.get("pair_id") == pair_id] or [latest]
     if any(order["status"] in ACTIVE_STATUSES for order in group):
-        return MESSAGE_PENDING
+        return MESSAGE_PLACED if any(order.get("order_no") for order in group if order["status"] in ACTIVE_STATUSES) else MESSAGE_PENDING
     if pair_id is not None:
         return (
             MESSAGE_DONE if {o["side"] for o in group if o["status"] == "filled"} == {"buy", "sell"} else MESSAGE_FAILED
@@ -865,7 +865,7 @@ def signal_message_states(thread: dict[str, Any]) -> dict[str, str]:
     by_message: dict[str, list[dict[str, Any]]] = {}
     for order in _orders().find(
         {"slack.channel": thread["channel"], "slack.thread_ts": thread["thread_ts"]},
-        {"slack.message_ts": 1, "status": 1, "side": 1, "pair_id": 1, "created_at": 1},
+        {"slack.message_ts": 1, "status": 1, "side": 1, "pair_id": 1, "order_no": 1, "created_at": 1},
     ):
         by_message.setdefault(order["slack"]["message_ts"], []).append(order)
     settled = {item["ts"]: item["outcome"] for item in thread["settled"]}
@@ -897,14 +897,16 @@ def reorderable_signal_messages(thread: dict[str, Any]) -> set[str]:
 
 
 def signal_thread_state(states: dict[str, str]) -> str | None:
-    """신호 메시지 반응 하나 — 진행 중(⏳) · 완료(✅) · 실패(❌) · 없음(None) 중 하나만 정한다.
+    """신호 메시지 반응 하나 — 처리 중(⏳) · 접수됨(🎯) · 완료(✅) · 실패(❌) · 없음(None) 중 하나만 정한다.
 
-    진행 중인 주문이 있거나 일부만 끝났으면 진행 중, 전부 완료면 완료, 손댄 것 없이 열려 있으면 없음,
-    열린 것 없이 끝났는데 완료가 아닌 메시지가 있으면 실패다.
+    처리 중인 주문이 있거나 일부만 끝났으면 처리 중, 접수돼 체결 대기 중이면 접수됨, 전부 완료면 완료,
+    손댄 것 없이 열려 있으면 없음, 열린 것 없이 끝났는데 완료가 아닌 메시지가 있으면 실패다.
     """
     values = set(states.values())
     if MESSAGE_PENDING in values:
         return MESSAGE_PENDING
+    if MESSAGE_PLACED in values:
+        return MESSAGE_PLACED
     if values == {MESSAGE_DONE}:
         return MESSAGE_DONE
     if MESSAGE_OPEN in values:
