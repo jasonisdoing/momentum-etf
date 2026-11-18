@@ -362,7 +362,11 @@ function RoundStatus({
       ? [<StatusBadge key="reached" color="var(--up-color, #d64545)" compact={compact}>도달</StatusBadge>]
       : []),
     ...row.slack_signals.map((signal) => {
-      const label = signal.manual ? "수동 슬랙 발송됨" : `${SIDE_WORDS[signal.side]}슬랙`;
+      const label = signal.manual
+        ? "수동슬랙"
+        : signal.side === "sell" && row.rebuy_after_sell
+          ? "매도·재매수 슬랙"
+          : `${SIDE_WORDS[signal.side]}슬랙`;
       return (
         <SlackSignalBadge key={`slack-${signal.side}`} label={label} compact={compact} showWithdraw={signal.manual}
           onWithdraw={signal.can_withdraw ? () => onWithdrawSignal(signal, label) : undefined} />
@@ -581,7 +585,7 @@ function recommendedGapColumn(gapMonths: number, gapRounds: number): ColDef<Trad
       const [low, high] = data.gap_range_pct;
       return `${period} 최대 하락 ${data.drawdown_pct.toFixed(1)}% · ${data.leverage_multiple}배 범위 ${low}~${high}%`;
     },
-    valueFormatter: ({ value }) => (value == null ? "-" : `${Number(value).toFixed(2)}%`),
+    valueFormatter: ({ value }) => (value == null ? "-" : `${Number(value).toFixed(1)}%`),
     // 기준 기간이 없어 있는 기간으로 낸 값은 순위 화면의 기간 미달 값과 같은 색으로 칠한다.
     cellStyle: ({ data }) => (data?.gap_partial ? PARTIAL_PERIOD_CELL_STYLE : { color: "var(--text-muted)" }),
   };
@@ -931,40 +935,57 @@ function AccountSettingsCard({
     },
     dailyChange,
     currentPrice,
-    ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => [
+    ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => {
+      const pctFormatter =
+        column.field === "pct"
+          ? {
+            valueFormatter: ({ value, node }: { value?: unknown; node?: { rowPinned?: unknown } | null }) => {
+              if (node?.rowPinned || value == null || value === "" || value === "-") return String(value ?? "");
+              const num = Number(value);
+              return Number.isFinite(num) ? `${num.toFixed(1)}%` : String(value);
+            },
+          }
+          : {};
       // 권장 간격(전체·50%)을 쓰는 동안은 간격(%) 칸에 선택한 간격을 채우고 편집을 막는다(녹색 배경 제거).
-      ...(column.field === "pct" && gapMode !== "off"
-        ? [{
+      if (column.field === "pct" && gapMode !== "off") {
+        return [{
           ...column,
+          ...pctFormatter,
           type: "rightAligned",
           editable: false,
+          cellStyle: { fontWeight: 700 },
           valueGetter: ({ data, node }: { data?: TradeListRow; node?: { rowPinned?: unknown } | null }) => {
             if (node?.rowPinned || data?.is_group) return "";
             const raw = data?.recommended_gap_pct;
             if (raw == null) return "-";
             return gapMode === "half" ? Number((raw / 2).toFixed(2)) : raw;
           },
-        } as ColDef<TradeListRow>]
-        : [{
+        } as ColDef<TradeListRow>];
+      }
+      return [
+        {
           ...column,
+          ...pctFormatter,
           type: "rightAligned",
+          ...(column.field === "pct" ? { cellStyle: { fontWeight: 700 } } : {}),
           editable: ({ node, data }: { node: { rowPinned?: unknown }; data?: TradeListRow }) =>
             !saving && !node.rowPinned && !data?.is_group,
           cellClass: ({ node, data }: { node: { rowPinned?: unknown }; data?: TradeListRow }) =>
             !saving && !node.rowPinned && !data?.is_group ? "appEditableCell" : undefined,
-        } as ColDef<TradeListRow>]),
-      // 회차금액 옆 읽기 전용 — 지금 현재가로 그 금액이 몇 주인지.
-      ...(column.field === "amount"
-        ? [{
-          field: "roundQuantity",
-          headerName: "회차수량",
-          headerTooltip: "회차금액 ÷ (현재가 × 환율), 내림 — 현재가 기준 참고값",
-          width: 88,
-          type: "rightAligned",
-          valueFormatter: ({ value, node }) => (node?.rowPinned || value == null ? "" : `${formatNumber(value)}주`),
-        } satisfies ColDef<TradeListRow>]
-        : []),
-    ]),
+        } as ColDef<TradeListRow>,
+        // 회차금액 옆 읽기 전용 — 지금 현재가로 그 금액이 몇 주인지.
+        ...(column.field === "amount"
+          ? [{
+            field: "roundQuantity",
+            headerName: "회차수량",
+            headerTooltip: "회차금액 ÷ (현재가 × 환율), 내림 — 현재가 기준 참고값",
+            width: 88,
+            type: "rightAligned",
+            valueFormatter: ({ value, node }) => (node?.rowPinned || value == null ? "" : `${formatNumber(value)}주`),
+          } satisfies ColDef<TradeListRow>]
+          : []),
+      ];
+    }),
     { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
     { ...quantity, headerName: "보유수량", width: 88 },
     tradeWeightColumn,
