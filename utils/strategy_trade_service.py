@@ -17,6 +17,10 @@ from utils.strategy_trade_config import (
     DEFAULT_ROUND_SIZE,
     EDITABLE_CONFIG_KEYS,
     FIRST_ENTRY_WINDOWS,
+    PCT_MAX,
+    PCT_MIN,
+    ROUNDS_MAX,
+    ROUNDS_MIN,
     TRADE_COUNTRIES,
     TRADE_CURRENCIES,
     round_buy_quantity,
@@ -1351,6 +1355,10 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
         "pool_options": pool_options(list(pools)),
         "ticker_options": [options[ticker] for ticker in sorted(options)],
         "default_round_size": DEFAULT_ROUND_SIZE,
+        "pct_min": PCT_MIN,
+        "pct_max": PCT_MAX,
+        "rounds_min": ROUNDS_MIN,
+        "rounds_max": ROUNDS_MAX,
         "krw_rate": _view_krw_rate(country),
         # 편집 표의 행 — 저장된 전략 설정 그대로.
         "configs": [

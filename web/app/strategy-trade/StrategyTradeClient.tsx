@@ -194,6 +194,10 @@ type View = {
   groups: HoldingsGroup[];
   pool_options: PoolLabelSource[];
   default_round_size: number;
+  pct_min: number;
+  pct_max: number;
+  rounds_min: number;
+  rounds_max: number;
   /** 종목 통화→원 환율(국장 1) — 회차수량 컬럼용. 못 받았으면 null. */
   krw_rate: number | null;
   ticker_options: TickerOption[];
@@ -234,10 +238,6 @@ function OrderLimitField({ limit }: { limit: NonNullable<View["order_limit"]> })
     </div>
   );
 }
-
-// 편집 파라미터는 매매 간격(trigger_pct) 하나 — 백엔드 EDITABLE_PCT_KEYS 와 동일.
-const PCT_MIN = 0.1;
-const PCT_MAX = 50;
 
 const cardStyle: React.CSSProperties = {
   padding: 10,
@@ -942,12 +942,12 @@ function AccountSettingsCard({
       const pct = Number(row.pct);
       const amount = Number(row.amount);
       const rounds = Number(row.rounds);
-      if (!Number.isFinite(pct) || pct < PCT_MIN || pct > PCT_MAX) {
-        return void toast.error(`${label}: 매매 간격은 ${PCT_MIN}~${PCT_MAX} 사이 숫자여야 합니다.`);
+      if (!Number.isFinite(pct) || pct < view.pct_min || pct > view.pct_max) {
+        return void toast.error(`${label}: 매매 간격은 ${view.pct_min}~${view.pct_max} 사이 숫자여야 합니다.`);
       }
       if (!Number.isSafeInteger(amount) || !Number.isSafeInteger(amount * 10_000) || amount < 1) return void toast.error(`${label}: 회차금액(만원)은 1 이상의 정수여야 합니다.`);
-      if (!Number.isInteger(rounds) || rounds < 1 || rounds > 20) {
-        return void toast.error(`${label}: 회차 수는 1~20 사이 정수여야 합니다.`);
+      if (!Number.isInteger(rounds) || rounds < view.rounds_min || rounds > view.rounds_max) {
+        return void toast.error(`${label}: 회차 수는 ${view.rounds_min}~${view.rounds_max} 사이 정수여야 합니다.`);
       }
       strategies.push({
         ...(row.strategy_id ? { strategy_id: row.strategy_id } : {}),
@@ -979,7 +979,7 @@ function AccountSettingsCard({
     } finally {
       setSaving(false);
     }
-  }, [accountId, drafts, groups, onSaved, slack, toast, useRecommendedGap]);
+  }, [accountId, drafts, groups, onSaved, slack, toast, useRecommendedGap, view.pct_max, view.pct_min, view.rounds_max, view.rounds_min]);
 
   const sendSlackTest = useCallback(async () => {
     setSlackTesting(true);
