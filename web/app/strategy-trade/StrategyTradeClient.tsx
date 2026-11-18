@@ -12,6 +12,7 @@ import {
   stockNameColumn,
   stockRowClass,
   tickerColumn,
+  volatilityColumn,
   PARTIAL_PERIOD_CELL_STYLE,
 } from "@/lib/grid-cells";
 import type { HoldingsGroup } from "@/lib/holdings-store";
@@ -181,6 +182,8 @@ type StrategyConfigRow = {
   mdd_pct: number | null;
   /** 종목풀 순위(`/pools-rank`)와 같은 최근 12개월 고점 대비 현재가(%). */
   high_drawdown_pct: number | null;
+  /** 종목풀 순위(`/pools-rank`)와 같은 최근 20일 일간 수익률 표준편차(%). */
+  volatility_pct: number | null;
   /** 권장 간격(%) — 위 하락을 회차들이 복리로 덮는 간격(2~10%, `rules.recommended_gap_pct`). 참고값. */
   recommended_gap_pct: number | null;
   /** 계산에 쓴 거래일 수 — 3개월치가 없으면 있는 기간만 쓰고 `gap_partial` 이 참이다. */
@@ -517,6 +520,7 @@ type TradeListRow = DraftRow & {
   drawdown_pct?: number | null;
   mdd_pct?: number | null;
   high_drawdown_pct?: number | null;
+  volatility_pct?: number | null;
   recommended_gap_pct?: number | null;
   gap_days?: number | null;
   gap_partial?: boolean | null;
@@ -816,6 +820,7 @@ function AccountSettingsCard({
         drawdown_pct: quote?.drawdown_pct,
         mdd_pct: quote?.mdd_pct,
         high_drawdown_pct: quote?.high_drawdown_pct,
+        volatility_pct: quote?.volatility_pct,
         recommended_gap_pct: quote?.recommended_gap_pct,
         gap_days: quote?.gap_days,
         gap_partial: quote?.gap_partial,
@@ -891,14 +896,6 @@ function AccountSettingsCard({
 
   const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
     gridRowDragColumn<TradeListRow>(({ node }) => !node.rowPinned, 36),
-    // 권장 간격은 토글 값과 무관하게 맨 왼쪽에 고정한다.
-    recommendedGapColumn(view.recommended_gap_months, view.recommended_gap_rounds),
-    highDrawdownColumn<TradeListRow>("high_drawdown_pct"),
-    mddColumn<TradeListRow>({
-      valueGetter: (row) => (row?.is_label || row?.key === TOTAL_ROW_KEY || row?.key === TRADE_TOTAL_ROW_KEY ? null : row?.mdd_pct),
-      isPartial: (row) => Boolean(row?.gap_partial),
-      pinned: "left",
-    }),
     tickerColumn<TradeListRow>(),
     stockNameColumn<TradeListRow>({
       cellRenderer: ({ data, value }) => data?.is_group ? (
@@ -916,25 +913,6 @@ function AccountSettingsCard({
       field: "memo",
       editable: (row) => Boolean(row && !row.is_label),
     }),
-    {
-      colId: "roundStatus",
-      headerName: "상태",
-      headerTooltip: "아래 회차 표의 상태 — 상태가 있는 회차만 회차 번호와 함께 보인다",
-      // `2호 도달 매수슬랙 매수주문`(--fs-xs 작은 뱃지)이 들어가는 폭 — 칸 좌우 여백을 6px 로 줄였다.
-      // 넘치면 옆 칸을 덮지 않고 잘라낸다.
-      width: 165,
-      sortable: false,
-      cellStyle: { overflow: "hidden", paddingLeft: 6, paddingRight: 6 },
-      cellRenderer: ({ data }: { data?: TradeListRow }) => (
-        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap", fontSize: "var(--fs-xs)" }}>
-          {(data?.statusRounds ?? []).map((row) => (
-            <RoundStatus key={row.round} row={row} compact onWithdrawSignal={onWithdrawSignal} />
-          ))}
-        </span>
-      ),
-    },
-    dailyChange,
-    currentPrice,
     ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => {
       const pctFormatter =
         column.field === "pct"
@@ -986,12 +964,38 @@ function AccountSettingsCard({
           : []),
       ];
     }),
-    { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
+    {
+      colId: "roundStatus",
+      headerName: "상태",
+      headerTooltip: "아래 회차 표의 상태 — 상태가 있는 회차만 회차 번호와 함께 보인다",
+      // `2호 도달 매수슬랙 매수주문`(--fs-xs 작은 뱃지)이 들어가는 폭 — 칸 좌우 여백을 6px 로 줄였다.
+      // 넘치면 옆 칸을 덮지 않고 잘라낸다.
+      width: 165,
+      sortable: false,
+      cellStyle: { overflow: "hidden", paddingLeft: 6, paddingRight: 6 },
+      cellRenderer: ({ data }: { data?: TradeListRow }) => (
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap", fontSize: "var(--fs-xs)" }}>
+          {(data?.statusRounds ?? []).map((row) => (
+            <RoundStatus key={row.round} row={row} compact onWithdrawSignal={onWithdrawSignal} />
+          ))}
+        </span>
+      ),
+    },
+    dailyChange,
+    currentPrice,
+    { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned", cellStyle: { fontWeight: 700 } },
     { ...quantity, headerName: "보유수량", width: 88 },
     tradeWeightColumn,
     returnPct, valuation, pnl,
     { ...pnl, colId: "realized_krw", headerName: "실현손익", headerTooltip: "회차 기준 — 아래 손익 요약과 같은 값", valueGetter: ({ data }) => data?.realized_krw },
     { ...pnl, colId: "total_krw", headerName: "합계 손익", headerTooltip: "평가손익 + 실현손익", valueGetter: ({ data }) => data?.total_krw },
+    volatilityColumn<TradeListRow>(),
+    { ...recommendedGapColumn(view.recommended_gap_months, view.recommended_gap_rounds), pinned: undefined },
+    { ...highDrawdownColumn<TradeListRow>("high_drawdown_pct"), pinned: undefined },
+    mddColumn<TradeListRow>({
+      valueGetter: (row) => (row?.is_label || row?.key === TOTAL_ROW_KEY || row?.key === TRADE_TOTAL_ROW_KEY ? null : row?.mdd_pct),
+      isPartial: (row) => Boolean(row?.gap_partial),
+    }),
   ], [saving, onWithdrawSignal, gapMode, view.recommended_gap_months, view.recommended_gap_rounds]);
 
   const tradeRowClass = ({ data }: RowClassParams<TradeListRow>) => [

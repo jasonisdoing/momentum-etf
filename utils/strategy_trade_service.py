@@ -1266,6 +1266,7 @@ def recommended_gaps(
     """
     import pandas as pd
 
+    from core.strategy.momentum.signals import latest_volatility_pct
     from core.strategy.scoring import drawdown_from_high_pct
     from utils.cache_utils import load_cached_close_series_bulk_with_fallback
     from utils.data_loader import get_latest_trading_day
@@ -1309,6 +1310,7 @@ def recommended_gaps(
                 "drawdown_pct": round(abs(mdd_pct), 2) if mdd_pct is not None else None,
                 "mdd_pct": mdd_pct,
                 "high_drawdown_pct": round(high_drawdown_pct, 2) if high_drawdown_pct is not None else None,
+                "volatility_pct": latest_volatility_pct(confirmed) if confirmed is not None and not confirmed.empty else None,
                 "recommended_gap_pct": (
                     ladder.recommended_gap_pct(drawdown, RECOMMENDED_GAP_ROUNDS, multiple)
                     if drawdown is not None
@@ -1422,6 +1424,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
                 "drawdown_pct": quotes.get(entry["ticker"], {}).get("drawdown_pct"),
                 "mdd_pct": quotes.get(entry["ticker"], {}).get("mdd_pct"),
                 "high_drawdown_pct": quotes.get(entry["ticker"], {}).get("high_drawdown_pct"),
+                "volatility_pct": quotes.get(entry["ticker"], {}).get("volatility_pct"),
                 "recommended_gap_pct": quotes.get(entry["ticker"], {}).get("recommended_gap_pct"),
                 "gap_days": quotes.get(entry["ticker"], {}).get("gap_days"),
                 "gap_partial": quotes.get(entry["ticker"], {}).get("gap_partial"),
