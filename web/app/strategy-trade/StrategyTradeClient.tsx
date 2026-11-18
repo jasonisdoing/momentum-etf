@@ -894,7 +894,7 @@ function AccountSettingsCard({
     };
   }, [accountAssets, drafts, groups, sortActive, strategiesById, quotesByTicker, currency, view.krw_rate, memos]);
 
-  const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
+  const tradeListColumns = useMemo((): ColDef<TradeListRow>[] => [
     gridRowDragColumn<TradeListRow>(({ node }) => !node.rowPinned, 36),
     tickerColumn<TradeListRow>(),
     stockNameColumn<TradeListRow>({
@@ -980,10 +980,10 @@ function AccountSettingsCard({
           ))}
         </span>
       ),
-    },
+    } satisfies ColDef<TradeListRow>,
     dailyChange,
     currentPrice,
-    { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned", cellStyle: { fontWeight: 700 } },
+    { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned", cellStyle: { fontWeight: 700 } } satisfies ColDef<TradeListRow>,
     { ...quantity, headerName: "보유수량", width: 88 },
     tradeWeightColumn,
     returnPct, valuation, pnl,
