@@ -12,6 +12,7 @@ import { ensureAsxPrefix } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { ApiOrderModal } from "./ApiOrderModal";
+import { maskedBrokerAccount } from "./broker-label";
 
 type Benchmark = { ticker?: string; name?: string };
 type MarketIndexOption = { ticker: string; name: string };
@@ -32,8 +33,13 @@ type AccountEntry = {
   /** 합성 슬리브별 종목풀 — 모멘텀·신고가가 서로 다른 풀을 볼 수 있다(계좌와 같은 국가). */
   /** 합성 전략 사용 여부 — 실제 조합(전략·종목풀·배분)은 `/strategy-mix` 에서 정한다. */
   mix_enabled?: boolean;
+  /** 전략 사고팔기 사용 여부 — 켠 계좌만 `/strategy-trade` 에서 고를 수 있다. */
+  trade_enabled?: boolean;
+  /** 자산 화면·계좌 선택·집계에서 숨김 — 현금·보유·원금이 모두 0인 계좌만 켤 수 있다. */
+  hidden?: boolean;
   /** 증권사 API 연동 — 잔고 수동 불러오기·배치 동기화가 이 값으로 동작한다. */
-  broker_api?: { provider: string; account_no: string } | null;
+  /** 계좌별 키 커넥터(메리츠)는 `account_no` 대신 사용자가 입력한 표시용 마스킹 번호(`account_mask`)를 저장한다. */
+  broker_api?: { provider: string; account_no?: string; account_mask?: string } | null;
   URL?: string;
   /** 보유종목 알림 — 이동선 이탈은 On/Off 만(기준은 종목의 종목풀 이평선). */
   ma_alarm_enabled?: boolean;
@@ -42,12 +48,13 @@ type AccountEntry = {
   /** API 주문 안전 장치(운영 계좌) — 켜져 있어야 주문이 나가고, 하루 건수·금액 한도를 넘으면 막힌다. */
   api_order_enabled?: boolean;
   api_order_max_count?: number | null;
-  api_order_max_amount_krw?: number | null;
+  api_order_max_amount?: number | null;
   updated_at?: string | null;
   save_method?: string | null;
 };
 
-type BrokerProvider = { id: string; name: string; env_ok: boolean };
+/** 커넥터 — `per_account_keys` 면 키가 이 계좌에 묶여(`{계좌ID}_API_KEY`) 증권사 계좌를 고르지 않는다. */
+type BrokerProvider = { id: string; name: string; env_ok: boolean; per_account_keys: boolean; env_key_name: string };
 type BrokerAccountRow = {
   account_no: string;
   masked: string;
@@ -63,8 +70,9 @@ type BrokerAccountRow = {
 
 type BrokerHolding = { ticker: string; name: string; quantity: number; average_buy_price: number };
 type BrokerBalanceDiff = {
-  fetched: { cash: number; cash_d0: number; holdings: BrokerHolding[] };
-  current: { cash: number; holdings: BrokerHolding[] };
+  /** 현금은 통화별(계좌 현금 통화) — 미국 계좌는 USD·KRW 를 함께 담을 수 있다. */
+  fetched: { cash_map: Record<string, number>; holdings: BrokerHolding[] };
+  current: { cash_map: Record<string, number>; holdings: BrokerHolding[] };
 };
 
 type ApiResponse = {
@@ -108,14 +116,18 @@ type AccountDraft = {
   benchmarkName: string;
   regimeTicker: string;
   mix_enabled: boolean;
+  trade_enabled: boolean;
+  hidden: boolean;
   brokerProvider: string;
   brokerAccountNo: string;
+  /** 메리츠 계좌번호(표시용 수기 입력) — 증권사 API 로 대조할 수 없는 값이다. */
+  brokerAccountMask: string;
   URL: string;
   ma_alarm_enabled: boolean;
   stoploss_alarm_enabled: boolean;
   api_order_enabled: boolean;
   api_order_max_count: string;
-  api_order_max_amount_krw: string;
+  api_order_max_amount: string;
 };
 
 /** 그리드 행 — 편집 중인 초안 그대로에 표시용 필드를 얹는다. */
@@ -143,14 +155,17 @@ function toDraft(account: AccountEntry): AccountDraft {
     // 시장 레짐 지수(필수) — 미설정 계좌는 S&P 500 기본값으로 시작.
     regimeTicker: account.market_regime_index?.ticker || DEFAULT_REGIME_TICKER,
     mix_enabled: Boolean(account.mix_enabled),
+    trade_enabled: Boolean(account.trade_enabled),
+    hidden: Boolean(account.hidden),
     brokerProvider: account.broker_api?.provider ?? "",
     brokerAccountNo: account.broker_api?.account_no ?? "",
+    brokerAccountMask: account.broker_api?.account_mask ?? "",
     URL: account.URL ?? "",
     ma_alarm_enabled: Boolean(account.ma_alarm_enabled),
     stoploss_alarm_enabled: Boolean(account.stoploss_alarm_enabled),
     api_order_enabled: Boolean(account.api_order_enabled),
     api_order_max_count: account.api_order_max_count == null ? "" : String(account.api_order_max_count),
-    api_order_max_amount_krw: account.api_order_max_amount_krw == null ? "" : String(account.api_order_max_amount_krw),
+    api_order_max_amount: account.api_order_max_amount == null ? "" : String(account.api_order_max_amount),
   };
 }
 
@@ -174,17 +189,19 @@ function draftToValues(draft: AccountDraft, marketIndices: MarketIndexOption[]):
     },
     // 합성 전략 종목풀 — 없음이면 null 로 저장한다(그 계좌는 합성 화면에 안 뜬다).
     mix_enabled: draft.mix_enabled,
-    // 증권사 API 연동 — provider·계좌 둘 다 있어야 저장, 아니면 해제(null).
-    broker_api:
-      draft.brokerProvider && draft.brokerAccountNo
-        ? { provider: draft.brokerProvider, account_no: draft.brokerAccountNo }
-        : null,
+    trade_enabled: draft.trade_enabled,
+    hidden: draft.hidden,
+    // 증권사 API 연동 — 커넥터를 고르면 그대로 보낸다. 계좌번호가 필요한지(나무)·없어야 하는지(메리츠)는
+    // 백엔드가 커넥터별로 검증해 저장을 막는다(빠진 값을 조용히 해제하지 않는다).
+    broker_api: draft.brokerProvider
+      ? { provider: draft.brokerProvider, account_no: draft.brokerAccountNo, account_mask: draft.brokerAccountMask.trim() }
+      : null,
     URL: draft.URL.trim(),
     ma_alarm_enabled: draft.ma_alarm_enabled,
     stoploss_alarm_enabled: draft.stoploss_alarm_enabled,
     api_order_enabled: draft.api_order_enabled,
     api_order_max_count: draft.api_order_max_count === "" ? null : Number(draft.api_order_max_count),
-    api_order_max_amount_krw: draft.api_order_max_amount_krw === "" ? null : Number(draft.api_order_max_amount_krw),
+    api_order_max_amount: draft.api_order_max_amount === "" ? null : Number(draft.api_order_max_amount),
   };
   // 벤치마크는 선택 — 둘 다 채워졌을 때만 저장(빈 값이면 백엔드 검증에 걸리므로 생략).
   if (draft.benchmarkTicker.trim() && draft.benchmarkName.trim()) {
@@ -204,13 +221,13 @@ function isDirty(draft: AccountDraft, account: AccountEntry): boolean {
  */
 function AccountDetailModal({
   draft,
-  savedBrokerAccountNo,
+  savedBrokerProvider,
   onChange,
   onClose,
 }: {
   draft: AccountDraft;
   /** 저장된 연동이 있어야 잔고를 불러올 수 있다 — 셀렉트만 바꾼 상태에서는 먼저 저장. */
-  savedBrokerAccountNo: string;
+  savedBrokerProvider: string;
   onChange: (patch: Partial<AccountDraft>) => void;
   onClose: () => void;
 }) {
@@ -228,11 +245,13 @@ function AccountDetailModal({
 
   useEffect(() => {
     // 커넥터 목록 — 등록된 것만 셀렉트에 올려 오타를 원천 차단한다.
-    fetch("/api/broker-api/providers", { cache: "no-store" })
+    // 키 등록 여부는 계좌마다 다르다(메리츠는 `{계좌ID}_API_KEY`) — 이 계좌 기준으로 받는다.
+    fetch(`/api/broker-api/providers?account_id=${encodeURIComponent(draft.account_id)}`, { cache: "no-store" })
       .then((resp) => resp.json())
       .then((data: { providers?: BrokerProvider[] }) => setBrokerProviders(data.providers ?? []))
       .catch(() => setBrokerProviders([]));
-  }, []);
+  }, [draft.account_id]);
+  const selectedProvider = brokerProviders.find((provider) => provider.id === draft.brokerProvider) ?? null;
 
   // 현금 잔액 토글. 주 통화는 항상 포함(해제 불가).
   const toggleCashCurrency = (code: string) => {
@@ -443,7 +462,7 @@ function AccountDetailModal({
           style={{ width: 200 }}
           value={draft.brokerProvider}
           onChange={(e) => {
-            onChange({ brokerProvider: e.target.value, brokerAccountNo: "" });
+            onChange({ brokerProvider: e.target.value, brokerAccountNo: "", brokerAccountMask: "" });
             setBrokerAccounts(null);
           }}
           title="증권사 API 연동 — 잔고 불러오기·배치 동기화가 이 연동으로 동작한다."
@@ -452,11 +471,26 @@ function AccountDetailModal({
           {brokerProviders.map((provider) => (
             <option key={provider.id} value={provider.id} disabled={!provider.env_ok}>
               {provider.name}
-              {provider.env_ok ? "" : " (.env 키 없음)"}
+              {provider.env_ok ? "" : ` (.env ${provider.env_key_name} 없음)`}
             </option>
           ))}
         </select>
-        {draft.brokerProvider ? (
+        {/* 계좌별 키 커넥터(메리츠) — 키가 이 계좌에 묶여 있어 증권사 계좌를 고르지 않는다. 키 이름만 보여 준다. */}
+        {selectedProvider?.per_account_keys ? (
+          <>
+            <input
+              className="form-control form-control-sm"
+              style={{ width: 140 }}
+              value={draft.brokerAccountMask}
+              placeholder="예: 3082****01"
+              onChange={(e) => onChange({ brokerAccountMask: e.target.value })}
+              title="표시용 계좌번호 — 증권사 API 가 계좌번호를 주지 않아 대조할 수 없는 수기 값입니다."
+            />
+            <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)" }}>
+              키 {selectedProvider.env_key_name} {selectedProvider.env_ok ? "등록됨" : "없음"}
+            </span>
+          </>
+        ) : draft.brokerProvider ? (
           <button type="button" className="btn btn-sm btn-outline-secondary" disabled={brokerChecking} onClick={() => void checkBroker()}>
             {brokerChecking ? "확인 중…" : "확인"}
           </button>
@@ -485,10 +519,10 @@ function AccountDetailModal({
           </select>
         ) : draft.brokerAccountNo ? (
           <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)" }}>
-            저장된 계좌: {draft.brokerAccountNo.slice(0, 4)}***{draft.brokerAccountNo.slice(-2)}
+            저장된 계좌: {maskedBrokerAccount(draft.brokerAccountNo, null)}
           </span>
         ) : null}
-        {savedBrokerAccountNo && draft.env !== ENV_MOCK ? (
+        {savedBrokerProvider && draft.env !== ENV_MOCK ? (
           <button type="button" className="btn btn-sm btn-outline-primary" disabled={balanceLoading} onClick={() => void fetchBalance()}>
             {balanceLoading ? "동기화 중…" : "잔고 동기화"}
           </button>
@@ -501,17 +535,26 @@ function AccountDetailModal({
             const fetchedBy = new Map(balanceDiff.fetched.holdings.map((h) => [h.ticker, h]));
             const currentBy = new Map(balanceDiff.current.holdings.map((h) => [h.ticker, h]));
             const tickers = [...new Set([...fetchedBy.keys(), ...currentBy.keys()])].sort();
+            // 평단 비교는 소수 4자리 — 동기화 배치의 슬랙 비교(`broker_balance_sync._AVG_DIGITS`)와 같은 기준.
+            const avgDiffers = (f: BrokerHolding, c: BrokerHolding) =>
+              f.average_buy_price.toFixed(4) !== c.average_buy_price.toFixed(4);
             const stateOf = (tk: string): string => {
               const f = fetchedBy.get(tk);
               const c = currentBy.get(tk);
               if (!c) return "추가";
               if (!f) return "삭제";
               if (f.quantity !== c.quantity) return "수량 차이";
-              if (Math.round(f.average_buy_price) !== Math.round(c.average_buy_price)) return "평단 차이";
+              if (avgDiffers(f, c)) return "평단 차이";
               return "일치";
             };
             const diffCount = tickers.filter((tk) => stateOf(tk) !== "일치").length;
-            const cashChanged = Math.round(balanceDiff.fetched.cash) !== Math.round(balanceDiff.current.cash);
+            // 통화별 현금 비교 — 원화는 원, 외화는 센트 단위(동기화 배치의 비교와 같은 기준).
+            const cashDigits = (code: string) => (code === "KRW" ? 0 : 2);
+            const cashCodes = Object.keys(balanceDiff.fetched.cash_map);
+            const cashDiffers = (code: string) =>
+              balanceDiff.fetched.cash_map[code].toFixed(cashDigits(code)) !==
+              (balanceDiff.current.cash_map[code] ?? 0).toFixed(cashDigits(code));
+            const cashChanged = cashCodes.some(cashDiffers);
             const number = (v: number | undefined) => (v == null ? "-" : v.toLocaleString("ko-KR"));
             const cellStyle: React.CSSProperties = { padding: "2px 10px 2px 0", textAlign: "right" };
             const diffColor = "var(--bs-danger, #dc3545)";
@@ -523,9 +566,11 @@ function AccountDetailModal({
                     (현금은 D+2 예수금 기준 · 종목 차이 {diffCount}건{cashChanged ? " · 현금 차이" : ""})
                   </span>
                 </div>
-                <div style={{ marginBottom: 6, color: cashChanged ? diffColor : "var(--text-muted)" }}>
-                  현금 — 시스템 {number(balanceDiff.current.cash)} · API {number(balanceDiff.fetched.cash)}
-                </div>
+                {cashCodes.map((code) => (
+                  <div key={code} style={{ marginBottom: 6, color: cashDiffers(code) ? diffColor : "var(--text-muted)" }}>
+                    현금 {code} — 시스템 {number(balanceDiff.current.cash_map[code])} · API {number(balanceDiff.fetched.cash_map[code])}
+                  </div>
+                ))}
                 <div style={{ overflowX: "auto" }}>
                   <table style={{ borderCollapse: "collapse", whiteSpace: "nowrap" }}>
                     <thead>
@@ -545,7 +590,7 @@ function AccountDetailModal({
                         const state = stateOf(tk);
                         const changed = state !== "일치";
                         const qtyDiff = f && c && f.quantity !== c.quantity;
-                        const avgDiff = f && c && Math.round(f.average_buy_price) !== Math.round(c.average_buy_price);
+                        const avgDiff = f && c && avgDiffers(f, c);
                         return (
                           <tr key={tk} style={changed ? { fontWeight: 600 } : undefined}>
                             <td style={{ ...cellStyle, textAlign: "left" }}>{(f?.name || c?.name || tk)}({tk})</td>
@@ -732,8 +777,8 @@ export function AccountSettingsManager() {
         return {
           ...draft,
           __dirty: isDirty(draft, account),
-          // 저장된 증권사 연동 — API 주문은 저장된 계좌번호로 연다.
-          __brokerLinked: Boolean(account.broker_api?.account_no),
+          // 저장된 증권사 연동(나무·메리츠) — API 주문은 저장된 연동으로 연다.
+          __brokerLinked: Boolean(account.broker_api?.provider),
           __updatedAt: account.updated_at, __saveMethod: account.save_method };
       }),
     [drafts, rows],
@@ -865,7 +910,7 @@ export function AccountSettingsManager() {
    * 이 컬럼을 건너뛴다 — 저장은 valueSetter 가 이미 했다.)
    */
   const numberCol = (
-    field: "order" | "api_order_max_count" | "api_order_max_amount_krw",
+    field: "order" | "api_order_max_count" | "api_order_max_amount",
     headerName: string,
     width: number,
     liveOnly = false,
@@ -901,7 +946,7 @@ export function AccountSettingsManager() {
    *  않았다(값은 바뀌어 저장은 됐다). 초안 값을 그대로 그리고 onChange 로만 바꾸면
    *  화면과 값이 항상 같다. */
   const booleanCol = (
-    field: "mix_enabled" | "ma_alarm_enabled" | "stoploss_alarm_enabled" | "api_order_enabled",
+    field: "mix_enabled" | "trade_enabled" | "hidden" | "ma_alarm_enabled" | "stoploss_alarm_enabled" | "api_order_enabled",
     headerName: string,
     width: number,
     headerTooltip: string,
@@ -932,6 +977,37 @@ export function AccountSettingsManager() {
   const columnDefs: ColDef<AccountGridRow>[] = [
     { field: "account_id", headerName: "ID", width: 130 },
     { field: "name", headerName: "이름", width: 150, editable: true },
+    {
+      headerName: "상세",
+      width: 64,
+      sortable: false,
+      headerClass: "settingsCenterHeader",
+      cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
+      // 셀 한 칸에 담기지 않는 설정(현금·벤치마크·증권사 API·잔고 동기화)을 여기서 연다.
+      cellRenderer: (params: ICellRendererParams<AccountGridRow>) =>
+        params.data ? (
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            style={{ padding: "0 8px", lineHeight: 1.4 }}
+            onClick={() => setDetailId(params.data!.account_id)}
+          >
+            열기
+          </button>
+        ) : null,
+    },
+    {
+      field: "brokerProvider",
+      headerName: "증권사 API",
+      width: 190,
+      sortable: false,
+      valueFormatter: (params) => {
+        const row = params.data;
+        if (!row?.brokerProvider) return "없음";
+        const masked = maskedBrokerAccount(row.brokerAccountNo, row.brokerAccountMask);
+        return masked ? `${row.brokerProvider} · ${masked}` : row.brokerProvider;
+      },
+    },
     {
       field: "env",
       headerName: "구분",
@@ -971,19 +1047,18 @@ export function AccountSettingsManager() {
       76,
       "합성 전략을 운용할 계좌입니다. 전략·종목풀·배분은 /strategy-mix 에서 정합니다.",
     ),
-    {
-      field: "brokerProvider",
-      headerName: "증권사 API",
-      width: 190,
-      sortable: false,
-      valueFormatter: (params) => {
-        const row = params.data;
-        if (!row?.brokerProvider) return "없음";
-        return row.brokerAccountNo
-          ? `${row.brokerProvider} · ${row.brokerAccountNo.slice(0, 4)}***${row.brokerAccountNo.slice(-2)}`
-          : `${row.brokerProvider} (계좌 미선택)`;
-      },
-    },
+    booleanCol(
+      "trade_enabled",
+      "사고팔기",
+      88,
+      "전략 사고팔기를 운용할 계좌입니다. 켠 계좌만 /strategy-trade 에서 고를 수 있습니다. 증권사 API 가 연동된 한국·미국 계좌만 켤 수 있습니다.",
+    ),
+    booleanCol(
+      "hidden",
+      "숨김",
+      70,
+      "자산 화면·계좌 선택·집계에서 이 계좌를 숨깁니다. 현금·보유 종목·원금이 모두 0일 때만 켤 수 있습니다.",
+    ),
     booleanCol(
       "ma_alarm_enabled",
       "이평선🔔",
@@ -1003,7 +1078,7 @@ export function AccountSettingsManager() {
       "운영 계좌의 API 주문 스위치 — 꺼져 있으면 주문이 나가지 않습니다. 켜려면 아래 하루 한도를 먼저 입력하세요.",
     ),
     numberCol("api_order_max_count", "일 건수", 78, true, "하루 API 주문 건수 한도(운영 계좌). 비우면 주문이 막힙니다."),
-    numberCol("api_order_max_amount_krw", "일 금액(원)", 120, true, "하루 API 주문 금액 한도(원, 운영 계좌). 비우면 주문이 막힙니다."),
+    numberCol("api_order_max_amount", "일매수한도(원)", 120, true, "하루 API 주문 순매수 금액 한도(운영 계좌, 매수 − 매도) — 모든 계좌 원화로 입력하며 미장은 환율로 환산해 비교합니다. 비우면 주문이 막힙니다."),
     {
       headerName: "API 주문",
       width: 104,
@@ -1027,25 +1102,6 @@ export function AccountSettingsManager() {
           </button>
         );
       },
-    },
-    {
-      headerName: "상세",
-      width: 64,
-      sortable: false,
-      headerClass: "settingsCenterHeader",
-      cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
-      // 셀 한 칸에 담기지 않는 설정(현금·벤치마크·증권사 API·잔고 동기화)을 여기서 연다.
-      cellRenderer: (params: ICellRendererParams<AccountGridRow>) =>
-        params.data ? (
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-secondary"
-            style={{ padding: "0 8px", lineHeight: 1.4 }}
-            onClick={() => setDetailId(params.data!.account_id)}
-          >
-            열기
-          </button>
-        ) : null,
     },
     {
       // 마지막 컬럼이 남는 가로를 채운다 — 오른쪽에 빈 공간이 남지 않게.
@@ -1181,7 +1237,7 @@ export function AccountSettingsManager() {
       {detailId && detailDraft ? (
         <AccountDetailModal
           draft={detailDraft}
-          savedBrokerAccountNo={detailAccount?.broker_api?.account_no ?? ""}
+          savedBrokerProvider={detailAccount?.broker_api?.provider ?? ""}
           onChange={(patch) => updateDraft(detailId, patch)}
           onClose={() => setDetailId(null)}
         />
@@ -1190,8 +1246,12 @@ export function AccountSettingsManager() {
       {mockOrderId ? (
         <ApiOrderModal
           isLive={accounts.find((account) => account.account_id === mockOrderId)?.env === ENV_LIVE}
+          accountId={mockOrderId}
           accountName={accounts.find((account) => account.account_id === mockOrderId)?.name ?? mockOrderId}
-          accountNo={accounts.find((account) => account.account_id === mockOrderId)?.broker_api?.account_no ?? ""}
+          accountLabel={(() => {
+            const broker = accounts.find((account) => account.account_id === mockOrderId)?.broker_api;
+            return `${broker?.provider ?? ""} · ${maskedBrokerAccount(broker?.account_no, broker?.account_mask)}`;
+          })()}
           onClose={() => setMockOrderId(null)}
         />
       ) : null}

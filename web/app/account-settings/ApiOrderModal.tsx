@@ -7,11 +7,10 @@ import { formatPrice } from "@/lib/price-format";
 import { formatKrw } from "../assets/assets-helpers";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
-import type { FailedStrategy, StrategyView } from "../strategy-trade/StrategyTradeClient";
+import { CURRENCY_BY_COUNTRY, type FailedStrategy, type StrategyView } from "../strategy-trade/StrategyTradeClient";
 
 /** 증권사 서버 주소 — 서버가 계좌 구분(운영·모의)으로 정한다. 화면은 안내 문구로만 쓴다. */
 const MOCK_DOMAIN = "moapi.nhplug.com:8443";
-const LIVE_DOMAIN = "api.nhplug.com:8443";
 
 type Side = "buy" | "sell";
 
@@ -103,19 +102,22 @@ function StatusChip({ status }: { status: OrderStatus }) {
 /** 계좌 한 곳으로 사고팔기 전략 종목의 상대 1호가 지정가 주문·취소·상태 확인을 시험하는 모달(운영은 실제 주문) — 슬랙 버튼 주문의 서버 쪽 주문 경로를 검증한다. */
 export function ApiOrderModal({
   isLive,
+  accountId,
   accountName,
-  accountNo,
+  accountLabel,
   onClose,
 }: {
   /** 운영 계좌 — 실제 주문이 나간다. 모의 계좌는 모의투자 서버로만 간다. */
   isLive: boolean;
+  /** 운영 계좌는 이 계좌를 운용 계좌로 고른 전략만 주문할 수 있다(서버도 같은 규칙으로 막는다). */
+  accountId: string;
   accountName: string;
-  accountNo: string;
+  /** 증권사와 표시용 계좌번호 — 예: `MERITZ · 3082****01`. */
+  accountLabel: string;
   onClose: () => void;
 }) {
   const toast = useToast();
   const [strategies, setStrategies] = useState<StrategyView[] | null>(null);
-  const [pool, setPool] = useState("");
   const [strategyId, setStrategyId] = useState("");
   const [side, setSide] = useState<Side>("buy");
   const [balance, setBalance] = useState<MockBalance | null>(null);
@@ -129,17 +131,17 @@ export function ApiOrderModal({
   const loadStrategies = useCallback(async () => {
     setLoadingStrategies(true);
     try {
-      const resp = await fetch("/api/strategy-trade", { cache: "no-store" });
+      // 운영 계좌는 그 계좌의 사고팔기 전략, 모의 계좌는 주문 경로 시험용이라 첫 사고팔기 계좌의 전략을 쓴다.
+      const query = isLive ? `?account_id=${encodeURIComponent(accountId)}` : "";
+      const resp = await fetch(`/api/strategy-trade${query}`, { cache: "no-store" });
       const data = (await resp.json()) as {
         strategies?: Array<StrategyView | FailedStrategy>;
-        pool?: string | null;
         error?: string;
       };
       if (!resp.ok || data.error) throw new Error(data.error ?? "사고팔기 전략을 불러오지 못했습니다.");
       // 보유 회차를 맞추지 못한 전략은 주문 대상에서 뺀다 — 그 이유는 /strategy-trade 화면이 보여 준다.
       const list = (data.strategies ?? []).filter((row): row is StrategyView => !("error" in row));
       setStrategies(list);
-      setPool(data.pool ?? "");
       setStrategyId((current) => (list.some((row) => row.strategy_id === current) ? current : (list[0]?.strategy_id ?? "")));
     } catch (err) {
       setStrategies((current) => current ?? []);
@@ -147,7 +149,7 @@ export function ApiOrderModal({
     } finally {
       setLoadingStrategies(false);
     }
-  }, [toast]);
+  }, [accountId, isLive, toast]);
 
   useEffect(() => {
     void loadStrategies();
@@ -155,7 +157,7 @@ export function ApiOrderModal({
   }, []);
 
   const strategy = useMemo(() => (strategies ?? []).find((row) => row.strategy_id === strategyId), [strategies, strategyId]);
-  const quantity = strategy?.config.round_quantity ?? null;
+  const sellQuantity = strategy?.rounds.find((row) => row.round === strategy.status.held_count)?.quantity;
 
   const run = useCallback(
     async (key: string, work: () => Promise<void>) => {
@@ -171,7 +173,7 @@ export function ApiOrderModal({
     [toast],
   );
 
-  const query = `account_no=${encodeURIComponent(accountNo)}`;
+  const query = `account_id=${encodeURIComponent(accountId)}`;
   const loadBalance = () =>
     run("balance", async () => {
       setBalance(await requestJson<MockBalance>(`/api/broker-api/mock/balance?${query}`));
@@ -187,26 +189,20 @@ export function ApiOrderModal({
 
   // 계좌를 고르면 잔고와 주문 기록을 함께 읽는다.
   useEffect(() => {
-    if (!accountNo) {
-      setBalance(null);
-      setOrders([]);
-      setBrokerOrders(null);
-      return;
-    }
     // 모의투자 서버는 호출 간격을 두고 직렬로 받으므로 순서대로 읽는다.
     void (async () => {
       await loadBalance();
       await loadOrders();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountNo]);
+  }, [accountId]);
 
   const placeOrder = () =>
     run("order", async () => {
       const data = await requestJson<{ order: OrderRecord }>("/api/broker-api/mock/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_no: accountNo, pool, strategy_id: strategyId, side }),
+        body: JSON.stringify({ account_id: accountId, pool: strategy?.pool, strategy_id: strategyId, side }),
       });
       toast.success(`${data.order.strategy_label} ${side === "buy" ? "매수" : "매도"} 주문을 접수했습니다.`);
       setOrders((await requestJson<{ orders: OrderRecord[] }>(`/api/broker-api/mock/orders?${query}`)).orders);
@@ -219,7 +215,7 @@ export function ApiOrderModal({
       await requestJson("/api/broker-api/mock/slack-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_no: accountNo, pool, strategy_id: strategyId, side }),
+        body: JSON.stringify({ account_id: accountId, pool: strategy?.pool, strategy_id: strategyId, side }),
       });
       toast.success(`${strategy?.label ?? ""} ${side === "buy" ? "매수" : "매도"} 주문 메시지를 슬랙으로 보냈습니다.`);
     });
@@ -236,7 +232,7 @@ export function ApiOrderModal({
       setBalance(await requestJson<MockBalance>(`/api/broker-api/mock/balance?${query}`));
     });
 
-  const canOrder = Boolean(accountNo && pool && strategy && quantity && busy === null && !loadingStrategies);
+  const canOrder = Boolean(strategy && (side === "buy" || sellQuantity) && busy === null && !loadingStrategies);
 
   return (
     <AppModal
@@ -246,7 +242,7 @@ export function ApiOrderModal({
       badge={isLive ? "운영 · 실제 주문" : "모의"}
       subtitle={
         isLive
-          ? `운영 서버(${LIVE_DOMAIN})로 실제 주문이 나갑니다. 체결되면 실제 돈이 오갑니다.`
+          ? "증권사 운영 서버로 실제 주문이 나갑니다. 체결되면 실제 돈이 오갑니다."
           : `모의투자 서버(${MOCK_DOMAIN})로만 보냅니다.`
       }
       onClose={onClose}
@@ -262,15 +258,13 @@ export function ApiOrderModal({
       <div style={fieldStyle}>
         <span style={labelStyle}>{isLive ? "운영 계좌" : "모의 계좌"}</span>
         <strong>{accountName}</strong>
-        <span style={mutedStyle}>
-          {accountNo.slice(0, 4)}***{accountNo.slice(-2)}
-        </span>
+        <span style={mutedStyle}>{accountLabel}</span>
       </div>
 
       <div style={{ ...sectionStyle, marginTop: 4 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
           <span style={{ fontWeight: 700 }}>잔고</span>
-          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={!accountNo || busy !== null} onClick={() => void loadBalance()}>
+          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={busy !== null} onClick={() => void loadBalance()}>
             {busy === "balance" ? "불러오는 중…" : "잔고 새로고침"}
           </button>
           <span style={{ marginLeft: "auto", ...mutedStyle }}>
@@ -329,7 +323,7 @@ export function ApiOrderModal({
             {strategies !== null && strategies.length === 0 ? <option value="">사고팔기 전략 없음</option> : null}
             {(strategies ?? []).map((row) => (
               <option key={row.strategy_id} value={row.strategy_id}>
-                {row.label} ({row.ticker})
+                {row.label} ({row.ticker}) · {row.account_name}
               </option>
             ))}
           </select>
@@ -356,16 +350,18 @@ export function ApiOrderModal({
         <div style={fieldStyle}>
           <span style={labelStyle}>주문 내용</span>
           <span style={{ fontSize: "var(--fs-base)" }}>
-            {strategy && quantity
-              ? `${strategy.label} · ${quantity.toLocaleString("ko-KR")}주 × ${side === "buy" ? "매도" : "매수"} 1호가 지정가 ${side === "buy" ? "매수" : "매도"}`
-              : "-"}
+            {strategy && side === "buy"
+              ? `${strategy.label} · 회차 금액 ${strategy.config.round_size.toLocaleString("ko-KR")}만원 · 매도 1호가 지정가 매수`
+              : strategy && sellQuantity
+                ? `${strategy.label} · ${sellQuantity.toLocaleString("ko-KR")}주 × 매수 1호가 지정가 매도`
+                : "-"}
           </span>
           <button type="button" className="btn btn-sm btn-outline-secondary" disabled={loadingStrategies || busy !== null} onClick={() => void loadStrategies()}>
             {loadingStrategies ? "불러오는 중…" : "새로고침"}
           </button>
         </div>
         <div style={{ ...mutedStyle, marginBottom: 10 }}>
-          수량은 전략의 회차당 수량이고, 가격은 주문 순간의 상대 1호가(매수는 매도 1호가, 매도는 매수 1호가)로 서버가 정합니다(직접 입력 없음). 모달의 직접 주문은 매도만 되고, 매수는 슬랙 주문 메시지로 냅니다.
+          직접 주문은 마지막 보유 회차의 남은 수량을 주문 순간의 매수 1호가로 매도합니다. 매수는 슬랙 주문 메시지에서 진행합니다.
         </div>
         {/* 모달의 직접 주문은 매도만 — 매수는 슬랙 주문 메시지의 사람 리뷰를 거친다. */}
         {side === "sell" ? (
@@ -387,7 +383,7 @@ export function ApiOrderModal({
       <div style={sectionStyle}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
           <span style={{ fontWeight: 700 }}>주문 기록</span>
-          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={!accountNo || busy !== null} onClick={() => void loadOrders()}>
+          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={busy !== null} onClick={() => void loadOrders()}>
             {busy === "orders" ? "불러오는 중…" : "상태 새로고침"}
           </button>
           <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
@@ -451,7 +447,7 @@ export function ApiOrderModal({
       <details style={sectionStyle}>
         <summary style={{ fontWeight: 700, cursor: "pointer" }}>증권사 주문내역 (오늘)</summary>
         <div style={{ marginTop: 10 }}>
-          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={!accountNo || busy !== null} onClick={() => void loadBrokerOrders()}>
+          <button type="button" className="btn btn-sm btn-outline-secondary" disabled={busy !== null} onClick={() => void loadBrokerOrders()}>
             {busy === "broker" ? "불러오는 중…" : "증권사 내역 불러오기"}
           </button>
           <span style={{ ...mutedStyle, marginLeft: 10 }}>우리 기록과 대조합니다 — 보내지 않은 주문이나 상태가 다른 주문을 찾는 용도입니다.</span>

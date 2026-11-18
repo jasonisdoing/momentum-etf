@@ -21,6 +21,7 @@ from time import monotonic
 from typing import Any
 
 from config import CACHE_TTL_LIVE
+from core.strategy.mix.capital_policy import HARVEST_OFF
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -48,9 +49,16 @@ EDITABLE_KEYS: tuple[str, ...] = (
     # 합성 전략 사용 여부 — 계좌 설정에서는 이 체크만 하고, 실제 조합(전략·종목풀·배분)은
     # `/strategy-mix` 화면에서 정한다. 조합과 배분은 함께 보며 맞추는 값이라 한 화면에 둔다.
     "mix_enabled",
+    # 전략 사고팔기 사용 여부 — 켠 계좌만 `/strategy-trade` 계좌 선택·알림·주문 대상이 된다.
+    # 증권사 API 가 연동된 사고팔기 국가(`TRADE_COUNTRIES`) 계좌만 켤 수 있다.
+    "trade_enabled",
+    # 자산 화면·계좌 선택·집계·배치에서 숨김 — 현금·보유·원금이 모두 0인 운영 계좌만 켠다.
+    "hidden",
     # 합성 슬리브 목록 — 슬롯마다 (전략, 종목풀, 표시 이름, 배분%). 슬롯 수가 늘어도
     # 필드를 추가하지 않도록 배열 하나로 둔다. 순서가 곧 슬롯 순서(A·B·C)다.
     "mix_sleeves",
+    # 합성 화면 사고팔기 줄의 표시 이름 — 비우면 "사고팔기". 슬리브 이름과 같은 길이 제한.
+    "mix_trade_name",
     "mix_slack_enabled",
     "mix_harvest_pct",
     "mix_refill_pct",
@@ -65,7 +73,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
     # API 주문 안전 장치 — 운영 계좌만. 켜려면 하루 주문 건수·금액 한도가 먼저 있어야 한다(없으면 주문이 막힌다).
     "api_order_enabled",
     "api_order_max_count",
-    "api_order_max_amount_krw",
+    "api_order_max_amount",
 )
 
 # 합성 슬롯 — 최소 하나(전략 하나만 계좌에서 굴리는 용도도 허용, 2026-09), 최대 넷.
@@ -73,6 +81,15 @@ EDITABLE_KEYS: tuple[str, ...] = (
 MIN_MIX_SLEEVES = 1
 MAX_MIX_SLEEVES = 4
 MIX_SLEEVE_KEYS: tuple[str, ...] = ("a", "b", "c", "d")
+
+
+def mix_slot_marks() -> dict[str, str]:
+    """슬롯 키 → 화면·슬랙 표시 기호(A·B·C…) — 슬리브는 언제나 A 부터다.
+
+    사고팔기는 화면이 마지막 슬리브 기호 다음 알파벳을 붙인다(편집 중 슬리브 수를 따라가야 해서).
+    """
+    return {key: key.upper() for key in MIX_SLEEVE_KEYS}
+
 
 # 슬리브 항목의 필드 — 전략·종목풀·표시 이름·배분(%).
 MIX_SLEEVE_FIELDS: tuple[str, ...] = ("strategy", "pool", "name", "weight_pct")
@@ -141,11 +158,12 @@ def load_account_docs() -> list[dict[str, Any]]:
 
 
 def load_live_account_docs() -> list[dict[str, Any]]:
-    """운영 계좌 문서만 order 순으로 반환한다 — 집계·알림·배치·사고팔기는 모두 이쪽을 쓴다.
+    """보이는 운영 계좌 문서만 order 순으로 반환한다 — 자산·계좌 선택·집계·알림·배치·사고팔기는 모두 이쪽을 쓴다.
 
-    모의 계좌는 API 주문 시험용이라 계좌 설정 편집 화면(`load_account_docs`)에만 나온다.
+    모의 계좌는 API 주문 시험용이고 숨김 계좌(`hidden`)는 쓰지 않는 계좌라, 둘 다 계좌 설정 편집 화면
+    (`load_account_docs`)에만 나온다.
     """
-    return [doc for doc in load_account_docs() if doc["env"] == ACCOUNT_ENV_LIVE]
+    return [doc for doc in load_account_docs() if doc["env"] == ACCOUNT_ENV_LIVE and not doc["hidden"]]
 
 
 def _validate_order_limit(account_id: str, key: str, raw: Any) -> int | None:
@@ -212,28 +230,6 @@ def _validate_mix_pool(
     return pool
 
 
-def _validate_trade_sleeve(account_id: str, label: str, pool: str) -> None:
-    """사고팔기 슬리브 — 사고팔기를 켠 풀이어야 하고, 한 종목풀은 한 계좌에만 붙일 수 있다.
-
-    운용 계좌는 슬리브가 붙은 계좌로 정해지므로(전략마다 계좌를 따로 고르지 않는다) 두 계좌가
-    같은 풀을 가지면 어느 계좌의 보유로 회차를 세야 할지 알 수 없다.
-    """
-    from utils.mix_sleeve import STRATEGY_TRADE
-    from utils.pool_strategy_use import pools_using
-
-    if pool not in pools_using(STRATEGY_TRADE):
-        raise AccountSettingsStoreError(
-            f"'{account_id}' 의 {label} 사고팔기는 종목풀 설정에서 사고팔기를 켠 풀만 고를 수 있습니다: {pool}"
-        )
-    for doc in load_live_account_docs():
-        if doc["account_id"] == account_id:
-            continue
-        if any(sleeve["strategy"] == STRATEGY_TRADE and sleeve["pool"] == pool for sleeve in mix_sleeves_of(doc)):
-            raise AccountSettingsStoreError(
-                f"{pool} 종목풀의 사고팔기는 이미 '{doc['account_id']}' 계좌에 붙어 있습니다 — 한 풀은 한 계좌에만 붙입니다."
-            )
-
-
 def _validate_mix_sleeves(
     account_id: str, raw: Any, values: dict[str, Any], existing_doc: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -242,7 +238,7 @@ def _validate_mix_sleeves(
     순서가 곧 슬롯 순서다(첫째 A, 둘째 B, 셋째 C). 키는 저장하지 않고 읽을 때 순서로
     붙인다(`mix_sleeves_of`) — 저장된 키와 순서가 어긋날 여지를 아예 없앤다.
     """
-    from utils.mix_sleeve import STRATEGY_OPTIONS, STRATEGY_TRADE
+    from utils.mix_sleeve import STRATEGY_OPTIONS
 
     if not isinstance(raw, list):
         raise AccountSettingsStoreError(f"'{account_id}' 의 mix_sleeves 는 목록이어야 합니다.")
@@ -253,8 +249,9 @@ def _validate_mix_sleeves(
 
     sleeves: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
+    marks = mix_slot_marks()
     for index, item in enumerate(raw):
-        label = MIX_SLEEVE_KEYS[index].upper()
+        label = marks[MIX_SLEEVE_KEYS[index]]
         if not isinstance(item, dict):
             raise AccountSettingsStoreError(f"'{account_id}' 의 {label} 슬리브는 객체여야 합니다.")
 
@@ -273,8 +270,6 @@ def _validate_mix_sleeves(
                 f"{strategy}({pool})"
             )
         seen.add((strategy, pool))
-        if strategy == STRATEGY_TRADE:
-            _validate_trade_sleeve(account_id, label, pool)
 
         name = str(item.get("name") or "").strip()
         if len(name) > MIX_SLEEVE_NAME_MAX_LEN:
@@ -318,6 +313,51 @@ def mix_sleeves_of(account_settings: dict[str, Any]) -> list[dict[str, Any]]:
     return sleeves
 
 
+def _validate_broker_api(account_id: str, existing_doc: dict[str, Any], raw: dict[str, Any]) -> dict[str, str]:
+    """증권사 API 연동 값 검증 — 커넥터마다 저장하는 모양이 다르다.
+
+    - 키 하나로 여러 계좌를 보는 커넥터(나무): {provider, account_no}. 계좌번호는 화면의 '확인' 이
+      나열한 목록에서 고른 값이고, 계좌 구분(운영·모의)이 맞는지 본다.
+    - 키가 계좌에 묶인 커넥터(메리츠): {provider, account_mask}. 키 `{계좌ID}_API_KEY/SECRET` 가 있어야 하고,
+      모의투자 서버가 없어 운영 계좌만 연동한다. API 가 계좌번호를 주지 않아 `account_mask` 는 사용자가
+      입력한 표시용 마스킹 번호(예: 3082****01)다 — 증권사와 대조하지 않는다.
+    """
+    from services.broker_api_service import PROVIDERS, BrokerApiError, provider_spec, require_env_keys
+
+    provider = str(raw.get("provider") or "").strip().upper()
+    account_no = str(raw.get("account_no") or "").strip()
+    account_mask = str(raw.get("account_mask") or "").strip()
+    try:
+        spec = provider_spec(provider)
+    except BrokerApiError as error:
+        allowed = ", ".join(sorted(p["id"] for p in PROVIDERS))
+        raise AccountSettingsStoreError(
+            f"'{account_id}' 의 broker_api.provider 는 {allowed} 중 하나여야 합니다: {raw}"
+        ) from error
+    if spec["per_account_keys"]:
+        if account_no:
+            raise AccountSettingsStoreError(f"'{account_id}' 의 {spec['name']} 연동은 계좌번호를 저장하지 않습니다.")
+        if not account_mask:
+            raise AccountSettingsStoreError(
+                f"'{account_id}' 의 {spec['name']} 표시용 계좌번호를 입력하세요(예: 3082****01)."
+            )
+        if existing_doc["env"] == ACCOUNT_ENV_MOCK:
+            raise AccountSettingsStoreError(f"{spec['name']}는 모의투자 서버가 없어 운영 계좌만 연동할 수 있습니다.")
+        try:
+            require_env_keys(provider, account_id)
+        except BrokerApiError as error:
+            raise AccountSettingsStoreError(f"'{account_id}' {spec['name']} 연동: {error}") from error
+        return {"provider": provider, "account_mask": account_mask}
+    if account_mask:
+        raise AccountSettingsStoreError(f"'{account_id}' 의 {spec['name']} 연동은 표시용 계좌번호를 쓰지 않습니다.")
+    if not account_no:
+        raise AccountSettingsStoreError(
+            f"'{account_id}' 의 broker_api.account_no 가 비어 있습니다 — 계좌를 선택하세요."
+        )
+    _validate_broker_account_type(account_id, existing_doc, provider, account_no)
+    return {"provider": provider, "account_no": account_no}
+
+
 def _validate_broker_account_type(
     account_id: str, existing_doc: dict[str, Any], provider: str, account_no: str
 ) -> None:
@@ -343,6 +383,8 @@ def _validate_broker_account_type(
 #: 모의 계좌에는 켤 수 없는 설정 — 합성·사고팔기·보유종목 알림은 운영 계좌 전용이다.
 _LIVE_ONLY_KEYS = (
     "mix_enabled",
+    "trade_enabled",
+    "hidden",
     "mix_slack_enabled",
     "ma_alarm_enabled",
     "stoploss_alarm_enabled",
@@ -431,13 +473,30 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             cleaned[key] = {"ticker": ticker, "name": bench_name}
         elif key == "mix_sleeves":
             cleaned[key] = _validate_mix_sleeves(account_id, raw, values, existing_doc)
+        elif key == "mix_trade_name":
+            name = str(raw or "").strip()
+            if len(name) > MIX_SLEEVE_NAME_MAX_LEN:
+                raise AccountSettingsStoreError(
+                    f"'{account_id}' 의 사고팔기 이름은 {MIX_SLEEVE_NAME_MAX_LEN}자 이내여야 합니다: {name}"
+                )
+            # 빈 이름은 None — 화면이 "사고팔기"를 대신 쓴다.
+            cleaned[key] = name or None
         elif key == "mix_enabled":
             # 켜면 `/strategy-mix` 목록에 오른다. 조합이 아직 없으면 그 화면에서 고르게 한다.
             cleaned[key] = bool(raw)
+        elif key == "trade_enabled":
+            cleaned[key] = bool(raw)
+        elif key == "hidden":
+            cleaned[key] = bool(raw)
+            if cleaned[key]:
+                _require_empty_account(account_id)
         elif key == "mix_slack_enabled":
             # 합성 오늘의 액션 슬랙 알람 — 새 지시·수량 증가가 생기면 발송한다.
             cleaned[key] = bool(raw)
         elif key in {"mix_harvest_pct", "mix_refill_pct"}:
+            if key == "mix_harvest_pct" and raw == HARVEST_OFF:
+                cleaned[key] = HARVEST_OFF
+                continue
             try:
                 amount = float(raw)
             except (TypeError, ValueError) as error:
@@ -445,33 +504,19 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             if isinstance(raw, bool) or not math.isfinite(amount) or amount < 0:
                 raise AccountSettingsStoreError(f"{key}: 유한한 0 이상의 숫자가 필요합니다.")
             if key == "mix_refill_pct" and amount > 100:
-                raise AccountSettingsStoreError("채우기 기준은 0~100%입니다. 100%는 채우기 끔입니다.")
+                raise AccountSettingsStoreError("추가 매수 부족률은 0~100%입니다.")
             cleaned[key] = amount
         elif key == "mix_cash_pct":
             # 합성에서 비워 두는 현금 몫(%). 슬리브 배분과의 합이 100 인지는 아래에서 본다.
             cleaned[key] = _validate_pct(account_id, key, raw)
         elif key == "broker_api":
-            # 증권사 API 연동 — {provider, account_no}. 없음이면 null.
-            # provider 는 커넥터 레지스트리에 있어야 하고, 계좌번호는 화면의 '확인' 이
-            # API 로 나열한 목록에서 고른 값이다(형식 검증만 하고 실조회는 하지 않는다).
+            # 증권사 API 연동. 없음이면 null.
             if raw in (None, "", {}):
                 cleaned[key] = None
                 continue
             if not isinstance(raw, dict):
                 raise AccountSettingsStoreError(f"'{account_id}' 의 broker_api 는 객체여야 합니다.")
-            provider = str(raw.get("provider") or "").strip().upper()
-            account_no = str(raw.get("account_no") or "").strip()
-            from services.broker_api_service import PROVIDERS
-
-            allowed_providers = {p["id"] for p in PROVIDERS}
-            if provider not in allowed_providers:
-                raise AccountSettingsStoreError(
-                    f"'{account_id}' 의 broker_api.provider 는 {', '.join(sorted(allowed_providers))} 중 하나여야 합니다: {raw}"
-                )
-            if not account_no:
-                raise AccountSettingsStoreError(f"'{account_id}' 의 broker_api.account_no 가 비어 있습니다.")
-            _validate_broker_account_type(account_id, existing_doc, provider, account_no)
-            cleaned[key] = {"provider": provider, "account_no": account_no}
+            cleaned[key] = _validate_broker_api(account_id, existing_doc, raw)
         elif key == "market_regime_index":
             # 계좌별 시장 레짐 판정 지수 — 시장추세 지수(INDICES) 중 하나(필수, {ticker, name}).
             if not isinstance(raw, dict):
@@ -496,7 +541,7 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             cleaned[key] = str(raw or "").strip()
         elif key == "api_order_enabled":
             cleaned[key] = bool(raw)
-        elif key in {"api_order_max_count", "api_order_max_amount_krw"}:
+        elif key in {"api_order_max_count", "api_order_max_amount"}:
             cleaned[key] = _validate_order_limit(account_id, key, raw)
         elif key == "ma_alarm_enabled":
             cleaned[key] = bool(raw)
@@ -504,7 +549,7 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             cleaned[key] = bool(raw)
     capital_keys = {"mix_harvest_pct", "mix_refill_pct"}
     if capital_keys.intersection(cleaned) and not capital_keys.issubset(cleaned):
-        raise AccountSettingsStoreError("회수 기준·채우기 기준을 함께 저장하세요.")
+        raise AccountSettingsStoreError("초과 비중 매도와 보유 종목 추가 매수 방식을 함께 저장하세요.")
     # 슬리브 배분과 현금은 한 묶음이다 — 하나만 바꾸면 나머지와 합이 어긋난 채로 저장된다.
     # 슬리브별 (전략, 종목풀) 중복 검사는 `_validate_mix_sleeves` 가 이미 했다.
     if ("mix_sleeves" in cleaned) != ("mix_cash_pct" in cleaned):
@@ -512,7 +557,8 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             f"'{account_id}' 의 합성 배분은 mix_sleeves 와 mix_cash_pct 를 함께 보내야 합니다."
         )
     if "mix_sleeves" in cleaned:
-        parts = [(MIX_SLEEVE_KEYS[i].upper(), row["weight_pct"]) for i, row in enumerate(cleaned["mix_sleeves"])]
+        marks = mix_slot_marks()
+        parts = [(marks[MIX_SLEEVE_KEYS[i]], row["weight_pct"]) for i, row in enumerate(cleaned["mix_sleeves"])]
         total = sum(pct for _, pct in parts) + float(cleaned["mix_cash_pct"])
         # 0.01 은 소수 둘째 자리 반올림 오차만 허용하는 폭이다(예: 33.33+33.33+33.34).
         if abs(total - 100.0) > 0.01:
@@ -526,14 +572,28 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
         _validate_mock_limits(account_id, cleaned)
     merged = {**existing_doc, **cleaned}
     if merged.get("api_order_enabled") and not (
-        merged.get("api_order_max_count") and merged.get("api_order_max_amount_krw")
+        merged.get("api_order_max_count") and merged.get("api_order_max_amount")
     ):
         raise AccountSettingsStoreError(
             f"'{account_id}' 의 API 주문을 켜려면 하루 주문 건수·금액 한도를 먼저 입력해야 합니다."
         )
+    if merged.get("trade_enabled"):
+        _require_trade_capable(account_id, merged)
     if not cleaned:
         raise AccountSettingsStoreError("저장할 값이 없습니다.")
     return cleaned
+
+
+def _require_trade_capable(account_id: str, merged: dict[str, Any]) -> None:
+    """사고팔기는 증권사 API 가 연동된 사고팔기 국가 계좌에서만 켤 수 있다."""
+    from utils.strategy_trade_config import TRADE_COUNTRIES
+
+    if not (merged.get("broker_api") or {}).get("provider"):
+        raise AccountSettingsStoreError(f"'{account_id}' 의 사고팔기를 켜려면 증권사 API 를 먼저 연동해야 합니다.")
+    if str(merged.get("country_code") or "").strip().lower() not in TRADE_COUNTRIES:
+        raise AccountSettingsStoreError(
+            f"'{account_id}' 는 사고팔기 국가({', '.join(TRADE_COUNTRIES)}) 계좌가 아니라 사고팔기를 켤 수 없습니다."
+        )
 
 
 def save_account_settings(account_id: str, values: dict[str, Any], save_method: str = "사용자") -> dict[str, Any]:
@@ -605,6 +665,7 @@ def create_account(
         "env": env,
         "country_code": ccode,
         "currency": curr,
+        "hidden": False,
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
         "save_method": "계좌 추가",
@@ -622,6 +683,28 @@ def create_account(
         get_app_logger().warning("[계좌 추가] portfolio_master 시드 실패 (%s): %s", norm_id, exc)
 
     return {"account_id": norm_id, "name": name_norm}
+
+
+def _require_empty_account(account_id: str) -> None:
+    """숨기려는 계좌의 현금(전 통화)·보유 종목·원금·해외주식 평가금이 모두 0인지 확인한다 — 남은 항목을 알려 준다."""
+    doc = _db()["portfolio_master"].find_one({"master_id": "GLOBAL"}, {"accounts": 1}) or {}
+    account = next(
+        (acc for acc in doc.get("accounts") or [] if str(acc.get("account_id") or "").strip().lower() == account_id),
+        {},
+    )
+    cash = account.get("cash") or {}
+    holdings = [h for h in account.get("holdings") or [] if str((h or {}).get("ticker") or "").strip()]
+    remaining = {
+        "현금": bool(float(account.get("cash_balance") or 0)) or any(float(value or 0) for value in cash.values()),
+        "보유 종목": bool(holdings),
+        "원금": bool(float(account.get("total_principal") or 0)),
+        "해외주식 평가금": bool(float(account.get("intl_shares_value") or 0)),
+    }
+    left = [label for label, present in remaining.items() if present]
+    if left:
+        raise AccountSettingsStoreError(
+            f"'{account_id}' 은(는) {', '.join(left)}이(가) 0이 아니라 숨길 수 없습니다. 모두 0이 된 뒤에 숨기세요."
+        )
 
 
 def _account_holding_count(account_id: str) -> int:

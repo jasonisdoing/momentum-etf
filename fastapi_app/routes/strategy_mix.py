@@ -1,9 +1,11 @@
-"""합성 전략(SM + 신고가 + 비워 두는 현금) 백테스트 API — `/strategy-mix` 화면."""
+"""합성 전략 운용 API — `/strategy-mix` 화면(계좌 목록·운용 현황·차트·슬랙 테스트)."""
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, PositiveInt
 
 from config import HOLDING_CHART_MONTHS
 from fastapi_app.dependencies import require_internal_token
@@ -25,24 +27,12 @@ def get_strategy_mix_positions(
     _: None = Depends(require_internal_token),
 ) -> dict:
     """오늘 기준 합성 운영 상태 — 보유 목록(목표 비중)·현금 비중·오늘의 액션."""
-    from utils.strategy_mix_service import mix_positions
+    from utils.strategy_mix_orders import mix_order_signals
+    from utils.strategy_mix_positions import mix_positions
 
-    return mix_positions(account_id)
-
-
-@router.get("/backtest")
-def get_strategy_mix_backtest(
-    account_id: str | None = Query(default=None),
-    months: int | None = Query(default=None),
-    _: None = Depends(require_internal_token),
-) -> dict:
-    """선택한 계좌의 슬리브별 풀 저장 설정·배분으로 두 전략을 백테스트해 합성 결과를 돌려준다.
-
-    캐시는 없다 — 각 전략 화면의 백테스트와 같은 요청 시 계산이라 수 분 걸릴 수 있다.
-    """
-    from utils.strategy_mix_service import run_mix_backtest
-
-    return run_mix_backtest(account_id, months)
+    positions = mix_positions(account_id)
+    positions["order_signals"] = mix_order_signals(positions["account_id"], positions["actions"]["groups"])
+    return positions
 
 
 class SlackTestPayload(BaseModel):
@@ -55,7 +45,7 @@ def post_strategy_mix_charts(
     _: None = Depends(require_internal_token),
 ) -> dict:
     """보유 종목 일봉 + 슬리브별 기준 이평선. body: ``{"account_id": "...", "tickers": [...]}``."""
-    from utils.strategy_mix_service import holding_charts_for_account
+    from utils.strategy_mix_positions import holding_charts_for_account
 
     account_id = payload.get("account_id") if isinstance(payload, dict) else None
     tickers = payload.get("tickers") if isinstance(payload, dict) else None
@@ -77,3 +67,41 @@ def post_slack_test(payload: SlackTestPayload, _: None = Depends(require_interna
         return send_test(payload.account_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class OrderSignalPayload(BaseModel):
+    account_id: str
+    action_key: str
+    side: Literal["buy", "sell"]
+    quantity: PositiveInt
+
+
+@router.post("/order-signal")
+def post_order_signal(payload: OrderSignalPayload, _: None = Depends(require_internal_token)) -> dict:
+    """오늘의 액션 한 건을 Slack 주문 신호로 보낸다."""
+    from services.broker_api_service import BrokerApiError
+    from utils.strategy_mix_orders import send_mix_order_signal
+
+    try:
+        return send_mix_order_signal(**payload.model_dump())
+    except (BrokerApiError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class WithdrawOrderSignalPayload(BaseModel):
+    account_id: str
+    ticker: str
+    key: str
+
+
+@router.post("/withdraw-signal")
+def post_withdraw_signal(payload: WithdrawOrderSignalPayload, _: None = Depends(require_internal_token)) -> dict:
+    """합성의 미사용 주문 신호 한 건을 회수한다."""
+    from services.broker_api_service import BrokerApiError
+    from utils.strategy_mix_orders import withdraw_mix_order_signal
+
+    try:
+        withdraw_mix_order_signal(payload.account_id, payload.ticker, payload.key)
+    except (BrokerApiError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True}

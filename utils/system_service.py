@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from utils.batch_queue import LOCAL_ONLY_JOBS
+from utils.batch_queue import LOCAL_ONLY_JOBS, lane_of
 from utils.db_manager import get_db_connection
 from utils.env import load_env_if_present
 from utils.ticker_registry import load_ticker_type_configs
@@ -50,21 +50,21 @@ _WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
 _WEEKDAYS_TUE_SAT = [1, 2, 3, 4, 5]
 _WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6]
 
-# 증권사 잔고 동기화 — 평일 09:00~15:40 5분 간격. 마지막 회는 장 마감 후다.
-_BROKER_SYNC_SLOTS = [
-    {"hour": hour, "minute": minute}
-    for hour in range(9, 16)
-    for minute in range(0, 60, 5)
-    if (hour, minute) <= (15, 40)
-]
 
-# 미국 장중 10분 슬롯 — 22:40~23:50 + 00:00~05:50 KST. 서머타임(22:30~05:00)과 겨울(23:30~06:00) 정규장을
-# 모두 덮는다 — 장 밖·개장 직후는 스크립트가 현지 시간표로 건너뛴다. 자정을 넘는 구간이라 요일은 월~토로 잡는다.
+# 미국 장중 10분 슬롯 — 평일 22:40~23:50 + 화~토 00:00~05:50 KST(크론과 같다). 서머타임(22:30~05:00)과
+# 겨울(23:30~06:00) 정규장을 모두 덮는다 — 장 밖·개장 직후는 스크립트가 현지 시간표로 건너뛴다.
 _US_INTRADAY_10MIN_SLOTS = [
-    {"hour": hour, "minute": minute}
-    for hour in (22, 23, 0, 1, 2, 3, 4, 5)
-    for minute in range(0, 60, 10)
-    if (hour, minute) >= (22, 40) or hour < 6
+    *(
+        {"hour": hour, "minute": minute, "weekdays": _WEEKDAYS_MON_FRI}
+        for hour in (22, 23)
+        for minute in range(0, 60, 10)
+        if (hour, minute) >= (22, 40)
+    ),
+    *(
+        {"hour": hour, "minute": minute, "weekdays": _WEEKDAYS_TUE_SAT}
+        for hour in range(6)
+        for minute in range(0, 60, 10)
+    ),
 ]
 
 # 장중 10분 슬롯 — 평일 09:10~15:20. 한국 장중(09:00~15:30)에서 개시 직후·마감 직전을 뺀 구간.
@@ -128,31 +128,42 @@ SCHEDULE_ROWS = [
         "command": "python scripts/stock_price_cache_updater.py --country au",
         "schedule": {"minutes": [35], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
-    # ② 슬랙 주문 연동 — 슬랙으로 낸 모의 주문의 결과 처리.
+    # ② 증권사 연동 — 잔고 동기화 → 사고팔기 신호·주문 버튼 → 슬랙 주문 결과 순서로 이어진다.
     {
         "no": 5,
-        "key": "slack_mock_order_notify",
-        "group": "슬랙 주문 연동",
-        "job": "슬랙 주문 결과 알림",
-        "target": "슬랙 메시지로 낸 주문 — 운영·모의 (진행 중인 것이 없으면 조회 없이 종료)",
-        "cadence": "평일 09:00~15:59 KST 1분 간격",
-        "command": "python scripts/slack_mock_order_notify.py",
-        "schedule": {"minutes": list(range(60)), "hours": list(range(9, 16)), "weekdays": _WEEKDAYS_MON_FRI},
-    },
-    # ③ 장중 실행 — 장중에 도는 것들. 알림과 데이터 동기화가 섞여 있다.
-    {
-        "no": 6,
         "key": "broker_balance_sync",
-        "group": "장중 실행",
+        "group": "증권사 연동",
         "job": "증권사 잔고 동기화",
         "target": "API 연동(broker_api) 저장된 계좌",
-        "cadence": "평일 09:00~15:40 KST 5분 간격",
+        "cadence": "월~토 24시간 10분 간격 KST (08·18·…·58분)",
         "command": "python scripts/broker_balance_sync.py",
-        # 15:40 마지막 회가 마감(15:30) 후 확정 상태를 담는다. 실패 슬랙은 시작·복구 1회씩.
-        "schedule": {"slots": _BROKER_SYNC_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+        # 데이터 집계(00·10·…분) 2분 전에 실행한다. 메리츠 서비스 시간 외에는 해당 계좌 동기화를 건너뛴다.
+        "schedule": {"minutes": list(range(8, 60, 10)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
+    },
+    {
+        "no": 6,
+        "key": "strategy_trade_notify",
+        "group": "증권사 연동",
+        "job": "전략 사고팔기 알림",
+        "target": "계좌에 등록한 종목별 사고팔기 전략 (슬랙 켠 계좌만 발송, 원장은 전 계좌 계산)",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "월~토 24시간 2분 간격 KST (01·03·…·59분)",
+        "command": "python scripts/strategy_trade_notify.py",
+        "schedule": {"minutes": list(range(1, 60, 2)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
         "no": 7,
+        "key": "slack_mock_order_notify",
+        "group": "증권사 연동",
+        "job": "슬랙 주문 결과 알림",
+        "target": "슬랙 메시지로 낸 주문 — 운영·모의 (진행 중인 것이 없으면 조회 없이 종료)",
+        "cadence": "월~토 24시간 1분 간격 KST",
+        "command": "python scripts/slack_mock_order_notify.py",
+        "schedule": {"minutes": list(range(60)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
+    },
+    # ③ 장중 실행 — 장중에 도는 알림들.
+    {
+        "no": 8,
         "key": "strategy_mix_notify_kor",
         "group": "장중 실행",
         "job": "한국 합성 액션 알림",
@@ -164,7 +175,7 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "no": 8,
+        "no": 9,
         "key": "strategy_mix_notify_us",
         "group": "장중 실행",
         "job": "미국 합성 액션 알림",
@@ -173,18 +184,6 @@ SCHEDULE_ROWS = [
         "cadence": "평일 22:40~05:50 KST 10분 간격",
         "command": "python scripts/strategy_mix_notify.py us",
         "schedule": {"slots": _US_INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_SAT},
-    },
-    {
-        "no": 9,
-        "key": "strategy_trade_notify",
-        "group": "장중 실행",
-        "job": "전략 사고팔기 알림",
-        "target": "화면에서 정한 전략별 ETF 1종 (운용 계좌도 전략별)",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:10~15:20 KST 10분 간격",
-        "command": "python scripts/strategy_trade_notify.py",
-        # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
-        "schedule": {"slots": _INTRADAY_10MIN_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "no": 10,
@@ -218,18 +217,9 @@ SCHEDULE_ROWS = [
         "group": "장중 실행",
         "job": "전체 자산 요약 알림",
         "target": "전체 계좌",
-        "cadence": "평일 09:40 · 16:10 / 토 09:40 KST",
+        "cadence": "월~토 24시간 10분 간격 KST (02·12·…·52분)",
         "command": "python scripts/slack_asset_summary.py",
-        # 토요일 09:40 은 금요일 미국 장 마감(한국시간 토 05~06시)을 반영하기 위한 것이다.
-        # 그 시각이면 `가격 캐시 업데이트`·`데이터 집계`(둘 다 월~토 매시)가 이미 여러 번
-        # 돈 뒤다. 토요일 16:10 은 양쪽 장이 모두 닫혀 09:40 과 같은 값이라 두지 않는다.
-        "schedule": {
-            "slots": [
-                {"hour": 9, "minute": 40, "weekdays": _WEEKDAYS_MON_SAT},
-                {"hour": 16, "minute": 10, "weekdays": _WEEKDAYS_MON_FRI},
-            ],
-            "weekdays": _WEEKDAYS_MON_SAT,
-        },
+        "schedule": {"minutes": list(range(2, 60, 10)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     # ④ 마감 후 지표 — 하루 1~2회.
     {
@@ -1313,9 +1303,13 @@ def load_system_data() -> dict[str, object]:
 
     return {
         "pool_rows": _build_pool_summary_rows(),
-        # 실행 위치는 큐의 LOCAL_ONLY_JOBS 가 단일 소스 — 로컬 전용이 아니면 서버·로컬 둘 다 잡는다.
+        # 실행 위치는 큐의 LOCAL_ONLY_JOBS, 레인은 큐의 `lane_of` 가 단일 소스 — 로컬 전용이 아니면 서버·로컬 둘 다 잡는다.
         "schedule_rows": [
-            {**row, "run_location": "LOCAL" if row["key"] in LOCAL_ONLY_JOBS else "SERVER/LOCAL"}
+            {
+                **row,
+                "run_location": "LOCAL" if row["key"] in LOCAL_ONLY_JOBS else "SERVER/LOCAL",
+                "lane": lane_of(row["key"]),
+            }
             for row in SCHEDULE_ROWS
         ],
         # 한 줄이 한 항목이다(화면이 줄바꿈으로 나눠 글머리 목록으로 보여 준다). 화면 폭이 좁아도 한 줄에 들어가게 짧게 쓴다.

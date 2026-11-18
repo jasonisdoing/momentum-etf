@@ -636,8 +636,8 @@ export function LeverageSettingsClient() {
           </div>
         </section>
         <div style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", gap: 16, minHeight: 0 }}>
-          <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-            <div style={{ flex: "1 1 340px", minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="appEqualSplit">
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div className="card appCard" style={{ minWidth: 0 }}>
               <div className="card-body">
                 <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 800, marginBottom: 4 }}>전략 설정</h2>
@@ -727,7 +727,7 @@ export function LeverageSettingsClient() {
             </div>
             </div>
 
-            <div style={{ flex: "1 1 340px", minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div className="card appCard" style={{ minWidth: 0 }}>
               <div className="card-body">
                 <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 800, marginBottom: 4 }}>슬랙 알람</h2>

@@ -5,7 +5,6 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from math import isfinite
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from config import CACHE_TTL_COMPUTE, CACHE_TTL_LIVE, MARKET_SCHEDULES
 from utils.data_loader import (
@@ -14,7 +13,6 @@ from utils.data_loader import (
     fetch_naver_stock_realtime_snapshot,
     fetch_naver_worldstock_snapshot,
     fetch_toss_us_stock_snapshot,
-    get_latest_trading_day,
 )
 from utils.data_loader import (
     get_exchange_rate_series as load_exchange_rate_series,
@@ -85,7 +83,7 @@ def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str
 
     # 만료 종목만 벌크 조회
     try:
-        fetched_data, source = _fetch_realtime_snapshot(country, expired_tickers)
+        fetched_data, sources = _fetch_realtime_snapshot(country, expired_tickers)
     except Exception as exc:
         # 조회 실패 시 stale 캐시 재사용
         stale_result = _reuse_stale_ticker_cache(country, expired_tickers, exc)
@@ -99,7 +97,7 @@ def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str
             "data": data,
             "fetched_at": fetched_at,
             "expires_at": expires_at,
-            "source": source,
+            "source": sources[ticker],
             "session": session,
             "is_stale": False,
         }
@@ -110,6 +108,7 @@ def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str
         cache_key = f"{country}:{ticker}"
         entry = _TICKER_PRICE_CACHE.get(cache_key)
         if entry and entry.get("session") == session and "data" in entry:
+            entry["is_stale"] = True
             cached_result[ticker] = entry["data"]
 
     # 캐시 히트 + 새로 조회한 데이터 병합
@@ -372,7 +371,7 @@ def get_realtime_snapshot_meta(country_code: str, tickers: Sequence[str]) -> dic
     # 종목별 캐시에서 가장 최근 fetched_at을 찾는다
     latest_fetched_at: datetime | None = None
     latest_expires_at: datetime | None = None
-    latest_source: str | None = None
+    sources: set[str] = set()
     is_any_stale = False
     count = 0
 
@@ -381,23 +380,26 @@ def get_realtime_snapshot_meta(country_code: str, tickers: Sequence[str]) -> dic
         if not entry:
             continue
         count += 1
+        source = entry.get("source")
+        if source:
+            sources.add(source)
         fetched_at = entry.get("fetched_at")
         if isinstance(fetched_at, datetime):
             if latest_fetched_at is None or fetched_at > latest_fetched_at:
                 latest_fetched_at = fetched_at
                 latest_expires_at = entry.get("expires_at")
-                latest_source = entry.get("source")
         if entry.get("is_stale"):
             is_any_stale = True
 
     if count == 0:
         return None
 
+    source = next(iter(sources)) if len(sources) == 1 else "mixed" if sources else None
     return {
         "fetched_at": latest_fetched_at,
         "expires_at": latest_expires_at,
         "is_stale": is_any_stale,
-        "source": latest_source,
+        "source": source,
         "size": count,
     }
 
@@ -584,11 +586,13 @@ def get_confirmed_regular_close(country: str, ticker: str) -> tuple[float | None
     return result
 
 
-def _fetch_realtime_snapshot(country: str, tickers: Sequence[str]) -> tuple[dict[str, dict[str, float]], str]:
-    snapshot, source = _fetch_quotes_by_country(country, tickers)
+def _fetch_realtime_snapshot(
+    country: str, tickers: Sequence[str]
+) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
+    snapshot, sources = _fetch_quotes_by_country(country, tickers)
     _normalize_closed_prices(country, snapshot)
     _fill_missing_change_rate(country, snapshot)
-    return snapshot, source
+    return snapshot, sources
 
 
 def _normalize_closed_prices(country: str, snapshot: dict[str, dict[str, Any]]) -> None:
@@ -621,25 +625,26 @@ def _normalize_closed_prices(country: str, snapshot: dict[str, dict[str, Any]]) 
         # 소스가 주지 못한 종목만 `_fill_missing_change_rate` 가 확정 봉으로 채운다.
 
 
-def _fetch_quotes_by_country(country: str, tickers: Sequence[str]) -> tuple[dict[str, dict[str, float]], str]:
+def _fetch_quotes_by_country(
+    country: str, tickers: Sequence[str]
+) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
     if country == "kor":
         etf_snapshot = fetch_naver_etf_inav_snapshot(tickers)
         missing_tickers = [ticker for ticker in tickers if ticker not in etf_snapshot]
-        if not missing_tickers:
-            return etf_snapshot, "naver_etf"
-
-        stock_snapshot = fetch_naver_stock_realtime_snapshot(missing_tickers)
-        merged_snapshot = dict(etf_snapshot)
-        merged_snapshot.update(stock_snapshot)
-        return merged_snapshot, "mixed"
-
+        stock_snapshot = fetch_naver_stock_realtime_snapshot(missing_tickers) if missing_tickers else {}
+        return {**etf_snapshot, **stock_snapshot}, {
+            **dict.fromkeys(etf_snapshot, "naver_etf"),
+            **dict.fromkeys(stock_snapshot, "naver_stock"),
+        }
     if country == "au":
-        return fetch_au_quoteapi_snapshot(tickers), "au_quoteapi"
-
-    if country == "us":
-        return fetch_toss_us_stock_snapshot(tickers), "toss_invest"
-
-    raise ValueError(f"지원하지 않는 country_code입니다: {country}")
+        snapshot = fetch_au_quoteapi_snapshot(tickers)
+        source = "au_quoteapi"
+    elif country == "us":
+        snapshot = fetch_toss_us_stock_snapshot(tickers)
+        source = "toss_invest"
+    else:
+        raise ValueError(f"지원하지 않는 country_code입니다: {country}")
+    return snapshot, dict.fromkeys(snapshot, source)
 
 
 def _reuse_stale_ticker_cache(
@@ -677,36 +682,6 @@ def _get_realtime_ttl_seconds(country: str) -> int:
     return 60
 
 
-def _is_market_active(country: str) -> bool:
-    schedule = MARKET_SCHEDULES.get(country)
-    if not schedule:
-        raise ValueError(f"시장 스케줄이 없습니다: {country}")
-
-    timezone_name = str(schedule.get("timezone") or "").strip()
-    if not timezone_name:
-        raise ValueError(f"시장 타임존이 없습니다: {country}")
-
-    now_local = datetime.now(ZoneInfo(timezone_name))
-    latest_trading_day = get_latest_trading_day(country).normalize()
-    if latest_trading_day.date() != now_local.date():
-        return False
-
-    open_time = schedule.get("open")
-    close_time = schedule.get("close")
-    open_offset_minutes = int(schedule.get("open_offset_minutes") or 0)
-    close_offset_minutes = int(schedule.get("close_offset_minutes") or 0)
-    if open_time is None or close_time is None:
-        raise ValueError(f"시장 시간이 없습니다: {country}")
-
-    market_open_dt = datetime.combine(now_local.date(), open_time, tzinfo=now_local.tzinfo) - timedelta(
-        minutes=open_offset_minutes
-    )
-    market_close_dt = datetime.combine(now_local.date(), close_time, tzinfo=now_local.tzinfo) + timedelta(
-        minutes=close_offset_minutes
-    )
-    return market_open_dt <= now_local <= market_close_dt
-
-
 # 지원 통화 → 야후 심볼. 조회 대상은 호출부가 고른다 — 8개를 전부 받는 데 실측 3.7초가
 # 들었고(통화당 ~0.39초 순차), 국내 구성종목뿐인 ETF 상세는 그 결과를 하나도 쓰지 않았다.
 _FX_SYMBOL_BY_CODE: dict[str, str] = {
@@ -731,15 +706,19 @@ def _fetch_exchange_rates(currencies: Sequence[str] | None = None) -> dict[str, 
     if not mapping:
         return {"updated_at": datetime.now()}
 
-    def _put(currency: str, current_rate: float, previous_close: float) -> None:
-        change_pct = ((current_rate - previous_close) / previous_close * 100.0) if previous_close > 0 else 0.0
+    def _put(currency: str, quote: dict[str, Any]) -> None:
+        current_rate = float(quote.get("regularMarketPrice") or 0)
+        previous_close = float(quote.get("regularMarketPreviousClose") or 0)
+        if current_rate <= 0 or previous_close <= 0:
+            # 값이 빠진 응답은 실패로 본다 — 재시도 후에도 없으면 호출부가 직전 캐시를 쓴다.
+            raise ValueError(f"시세 필드 없음 (현재가={current_rate}, 전일 종가={previous_close})")
+        change_pct = (current_rate - previous_close) / previous_close * 100.0
         rates[currency] = {"rate": current_rate, "change_pct": change_pct}
 
     rates: dict[str, Any] = {}
-    # 통화별 quote 요약(fast_info)으로 (현재가, 전일 종가)를 받는다. 예전엔 일봉 일괄
-    # 조회(_fetch_bulk_fx_closes)로 요청 수를 줄였는데, 야후 일봉의 직전 봉 종가가 실제
-    # 공식 전일 종가보다 하루 이상 뒤처져 변동률이 크게 부풀었다(관측: USD +1.65% vs
-    # 실제 +0.27%, 2026-09-16). 레이트리밋은 아래 재시도 + TTL 캐시로 감당한다.
+    # 통화별 시세(`info` 의 regularMarketPrice·regularMarketPreviousClose)로 현재가·전일 종가를 받는다.
+    # 일봉에서 뽑는 값(fast_info·일봉 일괄 조회)은 야후 환율 일봉이 장중에 멈춰 현재가가 뒤처졌다
+    # (관측: USD 1,356.34 vs 시세 1,363.65, 2026-11-07). 레이트리밋은 아래 재시도 + TTL 캐시로 감당한다.
     pending = dict(mapping)
     errors: dict[str, str] = {}
     for attempt in range(1, _FX_FETCH_MAX_ATTEMPTS + 1):
@@ -747,8 +726,7 @@ def _fetch_exchange_rates(currencies: Sequence[str] | None = None) -> dict[str, 
         for currency, symbol in pending.items():
             try:
                 with yfinance_lock():
-                    ticker = yf.Ticker(symbol)
-                    _put(currency, float(ticker.fast_info.last_price), float(ticker.fast_info.previous_close))
+                    _put(currency, yf.Ticker(symbol).info)
             except Exception as exc:
                 errors[currency] = f"{type(exc).__name__}: {str(exc)[:240]}"
                 if attempt >= _FX_FETCH_MAX_ATTEMPTS:

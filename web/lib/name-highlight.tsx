@@ -6,8 +6,11 @@
  */
 
 import type { ReactNode } from "react";
+import leverageName from "./leverage_name.json";
 
-const LEVERAGE_NAME_RE = /인버스|레버리지|Geared|3X|2X|Ultra|Short/i;
+// 레버리지 여부는 3배·2배·인버스 규칙을 합쳐 본다(백엔드 `config.LEVERAGE_NAME_RE` 와 같은 파일).
+const LEVERAGE_NAME_RE = new RegExp([leverageName.triple, leverageName.double, leverageName.inverse].join("|"), "i");
+const LEVERAGE_TICKERS = new Set(leverageName.double_tickers);
 
 const NEW_LISTING_BADGE = "🆕";
 
@@ -44,11 +47,15 @@ export function entryGapOk(
   return longDisparity > floor && shortDisparity >= floor;
 }
 
-export function isLeverageName(name: string | null | undefined): boolean {
-  return LEVERAGE_NAME_RE.test(name ?? "");
+export function isLeveragedSecurity(
+  name: string | null | undefined,
+  ticker: string | null | undefined,
+): boolean {
+  return LEVERAGE_TICKERS.has(ticker?.trim().toUpperCase() ?? "") || LEVERAGE_NAME_RE.test(name ?? "");
 }
 
 export type StockNameOptions = {
+  ticker?: string | null;
   /** 실제 계좌 보유 종목이면 종목명 뒤 배지의 맨 앞에 ✅를 붙인다. */
   isHeld?: boolean;
   /** 상장 기간이 백테스트 기준 창보다 짧은 종목 */
@@ -87,7 +94,8 @@ export function renderNameWithLeverageHighlight(
   name: string,
   options?: StockNameOptions,
 ): ReactNode {
-  const badges = [options?.isHeld ? "✅" : null, isLeverageName(name) ? "💣" : null]
+  const leveraged = isLeveragedSecurity(name, options?.ticker);
+  const badges = [options?.isHeld ? "✅" : null, leveraged ? "💣" : null]
     .filter(Boolean)
     .join("");
   const newBadge = options?.isNew ? (
@@ -97,7 +105,7 @@ export function renderNameWithLeverageHighlight(
   ) : null;
 
   const highlightedName = renderTextWithSearchHighlight(name, options?.searchQuery);
-  const displayName = isLeverageName(name) ? <span className="appLeverageName">{highlightedName}</span> : highlightedName;
+  const displayName = leveraged ? <span className="appLeverageName">{highlightedName}</span> : highlightedName;
   return <>{displayName}{badges ? ` ${badges}` : null}{newBadge}</>;
 }
 

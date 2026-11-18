@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 
 function parseEnvLine(line) {
   const trimmed = line.trim();
@@ -67,7 +67,50 @@ function validateStartEnv() {
   requireEnv("APP_BASE_URL");
 }
 
-function main() {
+function listeningPids(port) {
+  try {
+    const out = execFileSync("lsof", ["-ti", `tcp:${port}`, "-sTCP:LISTEN"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return [...new Set(out.split(/\s+/).map(Number).filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid))];
+  } catch {
+    return [];
+  }
+}
+
+async function freePort(port) {
+  const pids = listeningPids(port);
+  if (pids.length === 0) {
+    return;
+  }
+
+  console.log(`${port} 포트를 사용 중인 기존 프로세스를 종료합니다: PID ${pids.join(", ")}`);
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // 이미 종료된 프로세스는 무시
+    }
+  }
+
+  for (let i = 0; i < 15; i += 1) {
+    if (listeningPids(port).length === 0) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  for (const pid of listeningPids(port)) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // 이미 종료된 프로세스는 무시
+    }
+  }
+}
+
+async function main() {
   const nextCommand = process.argv[2];
   const nextArgs = process.argv.slice(3);
 
@@ -81,7 +124,15 @@ function main() {
     validateStartEnv();
   }
 
-  const child = spawn("next", [nextCommand, ...nextArgs], {
+  const finalArgs = [...nextArgs];
+  if (nextCommand === "dev") {
+    await freePort(3000);
+    if (!finalArgs.includes("-p") && !finalArgs.includes("--port")) {
+      finalArgs.push("-p", "3000");
+    }
+  }
+
+  const child = spawn("next", [nextCommand, ...finalArgs], {
     stdio: "inherit",
     shell: true,
     env: process.env,
@@ -92,4 +143,4 @@ function main() {
   });
 }
 
-main();
+void main();

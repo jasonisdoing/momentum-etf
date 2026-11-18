@@ -7,7 +7,7 @@ const proxy = createFastApiProxy({
   GET: {
     path: "/internal/broker-api/mock/broker-orders",
     error: "증권사 주문내역을 불러오지 못했습니다.",
-    forwardQuery: ["account_no"],
+    forwardQuery: ["account_id"],
   },
 });
 

@@ -29,7 +29,7 @@ export function SystemPageClient() {
   );
 
   return (
-    <PageFrame title="배치" titleRight={titleRight}>
+    <PageFrame title="배치" fullWidth titleRight={titleRight}>
       <SystemManager onHeaderSummaryChange={setSummary} />
     </PageFrame>
   );

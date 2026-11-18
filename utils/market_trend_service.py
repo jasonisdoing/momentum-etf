@@ -22,8 +22,6 @@ from config import (
     CACHE_TTL_LIVE,
     MARKET_TREND_SCORE_ANCHOR_PERCENTILE,
     MARKET_TREND_SCORE_MA_DAYS,
-    MARKET_TREND_SUPERTREND_MULTIPLIER,
-    MARKET_TREND_SUPERTREND_MULTIPLIER_POOL,
     MARKET_TREND_SUPERTREND_PERIOD,
     METRIC_WINDOW_MONTHS,
     TRADING_DAYS_PER_MONTH,
@@ -373,8 +371,7 @@ def _build_item(
 
     # 최근 12개월 일별 레짐을 ST(SuperTrend)로 계산한다.
     try:
-        st_period, st_multiplier = _resolve_supertrend_params(yf_ticker)
-        st_df = _calculate_supertrend(full_df, period=st_period, multiplier=st_multiplier)
+        st_df = _calculate_supertrend(full_df)
         st_dir = st_df["direction"]
     except Exception:
         st_df = None
@@ -485,21 +482,9 @@ def _trend_pct_at(
     return (price / ma_value - 1.0) * 100.0
 
 
-def _resolve_supertrend_params(yf_ticker: str) -> tuple[int, float]:
-    """차트 표시용 SuperTrend 기간/곱수를 반환한다."""
-    # 풀 합성 지수는 동적이라 개별 등록 대신 공통 곱수(config)를 쓴다.
-    if pool_of_market_key(yf_ticker) is not None:
-        return MARKET_TREND_SUPERTREND_PERIOD, MARKET_TREND_SUPERTREND_MULTIPLIER_POOL
-    if yf_ticker not in MARKET_TREND_SUPERTREND_MULTIPLIER:
-        raise ValueError(
-            f"MARKET_TREND_SUPERTREND_MULTIPLIER 에 지수 '{yf_ticker}' 의 곱수가 등록되지 않았습니다. "
-            "config.py 에 해당 지수를 등록해주세요."
-        )
-    return MARKET_TREND_SUPERTREND_PERIOD, MARKET_TREND_SUPERTREND_MULTIPLIER[yf_ticker]
-
-
-def _calculate_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float = 3.0) -> pd.DataFrame:
-    """차트 표시용 SuperTrend 지표를 계산한다."""
+def _calculate_supertrend(df: pd.DataFrame) -> pd.DataFrame:
+    """차트와 시장 추세 판정에 쓰는 공통 SuperTrend를 계산한다."""
+    multiplier = 3.0
     high = df["High"]
     low = df["Low"]
     close = df["Close"]
@@ -508,7 +493,7 @@ def _calculate_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float 
     tr2 = (high - close.shift(1)).abs()
     tr3 = (low - close.shift(1)).abs()
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    atr = tr.ewm(alpha=1.0 / period, adjust=False).mean()
+    atr = tr.ewm(alpha=1.0 / MARKET_TREND_SUPERTREND_PERIOD, adjust=False).mean()
 
     hl2 = (high + low) / 2.0
     basic_upper = hl2 + multiplier * atr
@@ -694,8 +679,7 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
     ma_short_series = calculate_moving_average(close_series, ma_short_days, min_periods=ma_short_days)
 
     try:
-        st_period, st_multiplier = _resolve_supertrend_params(yf_ticker)
-        st_df = _calculate_supertrend(df, period=st_period, multiplier=st_multiplier)
+        st_df = _calculate_supertrend(df)
     except Exception:
         logger.exception("차트 표시용 SuperTrend 계산 실패: %s", yf_ticker)
         st_df = None

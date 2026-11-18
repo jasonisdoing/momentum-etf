@@ -2,7 +2,7 @@
 
 전략 규칙
 --------
-1. 유니버스: 설정에서 고른 종목풀 1개. 제외(exclude_from_ranking)는 제외.
+1. 유니버스: 설정에서 고른 종목풀 1개. 거래 제외(exclude_from_trading)는 순위 번호만 받고 매매에서 뺀다.
 2. 진입: 그날 종가로 **장기 이격 > 0 그리고 단기 이격 >= 0**. 다음 거래일 **시가** 체결.
    자리가 모자라면 **장기 이격률**이 큰 순으로 담는다(순위 화면과 같은 `rank_score`).
 3. 청산: 둘 중 하나라도 깨진 날. 판정은 종가, 체결은 다음 거래일 시가.
@@ -30,9 +30,11 @@ from core.strategy.price_panel import build_price_panel
 from core.strategy.scoring import drawdown_from_high_pct, is_new_listing, listing_months, rank_numbers
 from core.strategy.slot_backtest import run_slot_backtest
 from utils.effective_prices import apply_realtime_closes, previous_day_change_pct, prior_day_shown
+from utils.industry_map import cap_group_map
 from utils.logger import get_app_logger
 from utils.momentum_service import (
     adr_market_of_pool,
+    excluded_tickers,
     load_price_frames,
     load_settings,
     load_universe,
@@ -70,17 +72,23 @@ def load_context(settings: dict[str, Any]) -> dict[str, Any]:
     pool = settings["pool"]
     universe = load_universe(pool)
     panel = build_price_panel(universe, load_price_frames(universe))
+    excluded = excluded_tickers(universe)
     return {
         "pool": pool,
         "universe": universe,
+        # 거래 제외 — 순위 번호는 받지만 진입하지 못한다(장중 잠정 신호도 같은 집합을 쓴다).
+        "excluded": excluded,
         "name_by": {row["ticker"]: row["name"] for row in universe},
         "industry_by": {row["ticker"]: row.get("industry", "") for row in universe},
+        # 업종(한국)·섹터(미국) 상한의 분류 — 화면 업종·섹터 칸과 같은 표시명.
+        "group_by": cap_group_map(pool),
         "panel": panel,
         "signals": momentum_signals.compute_signals(
             panel,
             int(settings["short_ma_days"]),
             int(settings["long_ma_days"]),
             pool_moving_average_type(pool),
+            excluded=excluded,
         ),
     }
 
@@ -118,6 +126,8 @@ def run_backtest(
         name_by=context["name_by"],
         industry_by=context["industry_by"],
         exit_reason="이탈",
+        group_of=context["group_by"],
+        group_cap_pct=settings["industry_cap_pct"],
         **market,
     )
 
@@ -158,7 +168,7 @@ def current_positions(settings: dict[str, Any] | None = None) -> dict[str, Any]:
 def _current_positions(settings: dict[str, Any], *, start_date: str | None, market: dict[str, Any]) -> dict[str, Any]:
     pool = settings["pool"]
     context = load_context(settings)
-    # 확정 실행 — 이 결과의 daily 를 페이로드에 실어 합성 슬리브 몫이 같은 실행을 읽는다.
+    # 확정 실행 — 화면·합성이 같은 실행 결과를 읽는다.
     try:
         simulated = run_backtest(DEFAULT_BACKTEST_MONTHS, settings, context, start_date=start_date, market=market)
     except RuntimeError as error:
@@ -173,7 +183,6 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             "planned_exits": [],
             "planned_entries": [],
             "planned_entry_weights": {},
-            "daily": [],
         }
     name_by, industry_by = context["name_by"], context["industry_by"]
     panel, signals = context["panel"], context["signals"]
@@ -295,9 +304,6 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     target_entries = [dict(row) for row in entries]
     for held in holdings:
         held["is_exit_forecast"] = False
-    # 합성 슬리브 몫이 읽는 일별 곡선 — 이 현황을 만든 **같은 실행**의 값이다(strategy_logic.md 「장중 잠정 실행」).
-    # 장중이면 아래에서 잠정 실행의 곡선(오늘 잠정 봉 포함)으로 바뀐다.
-    engine_daily = simulated["daily"]
 
     if quotes["live"]:
         # ── 장중 실행 — 실시간 가격을 **마지막 봉**으로 붙인 같은 엔진의 잠정 실행이다
@@ -318,6 +324,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             int(settings["short_ma_days"]),
             int(settings["long_ma_days"]),
             pool_moving_average_type(pool),
+            excluded=context["excluded"],
         )
         eff_entry = momentum_signals.entry_signal(eff_close, eff, settings["entry_vol_mult"])
         live_result = run_slot_backtest(
@@ -331,12 +338,13 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             name_by=name_by,
             industry_by=industry_by,
             exit_reason="이탈",
+            group_of=context["group_by"],
+            group_cap_pct=settings["industry_cap_pct"],
             provisional_last_bar=True,
             **market,
         )
         holdings = live_result["open_positions"]
         exited_today = live_result["exited_today"]
-        engine_daily = live_result["daily"]
         mark_engine_statuses(holdings, live_result["planned_exits"])
         for held in holdings:
             if held["status"] == "sell":
@@ -430,6 +438,12 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     # 반영되지 않는다. 실계좌에 있으면 어떤 행이든 보유 표시(녹색)가 붙어야 한다.
     for item in [*rows, *holdings, *exited_today, *entries]:
         item["account_held"] = str(item.get("ticker") or "").strip().upper() in account_held
+    # 실제 수익률용 평단 — 전 계좌 수량 가중 통합 평균(그 풀 통화 보유분만). 화면이 실시간 현재가로 다시 계산한다.
+    from utils.portfolio_io import average_buy_price_by_ticker
+
+    average_by_ticker = average_buy_price_by_ticker([h["ticker"] for h in holdings], info["currency"])
+    for item in holdings:
+        item["average_buy_price"] = average_by_ticker.get(str(item["ticker"]).strip().upper())
 
     held_tickers = {h["ticker"] for h in holdings}
     entry_tickers = {row["ticker"] for row in entries}
@@ -458,14 +472,12 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         "holdings": holdings,
         "target_holdings": target_holdings,
         "target_entries": target_entries,
-        # 이 현황을 만든 엔진 실행의 일별 곡선 — 합성 슬리브 몫이 같은 실행 결과를 읽는다.
-        "daily": engine_daily,
         # 순위는 잠정 진입 자격 기준이라 체결 예정 종목이 오늘 자격 밖이면 값이 없다.
         "planned_entries": [{**row, "rank": rank_by_ticker.get(row["ticker"])} for row in entries],
         "exited_today": exited_today,
         "candidates": candidates,
         "adr_gate": adr_gate,
-        "universe_count": len(rows),
+        "universe_count": sum(1 for row in rows if row["ticker"] not in context["excluded"]),
         "refreshed_at": _cache_refreshed_at(pool),
         "live": quotes["live"],
         "pre_market": quotes["pre_market"],

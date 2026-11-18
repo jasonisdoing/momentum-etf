@@ -107,6 +107,9 @@ def run_backtest(
         name_by=context["name_by"],
         industry_by=context["industry_by"],
         exit_reason="이탈",
+        # 신고가는 분류 상한을 쓰지 않는다.
+        group_of={},
+        group_cap_pct=None,
         **market,
     )
 
@@ -159,7 +162,7 @@ def current_positions(settings: dict[str, Any] | None = None) -> dict[str, Any]:
 def _current_positions(settings: dict[str, Any], *, start_date: str | None, market: dict[str, Any]) -> dict[str, Any]:
     pool = settings["pool"]
     context = load_context(settings)
-    # 확정 실행 — 이 결과의 daily 를 페이로드에 실어 합성 슬리브 몫이 같은 실행을 읽는다.
+    # 확정 실행 — 화면·합성이 같은 실행 결과를 읽는다.
     try:
         simulated = run_backtest(DEFAULT_BACKTEST_MONTHS, settings, context, start_date=start_date, market=market)
     except RuntimeError as error:
@@ -174,7 +177,6 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             "planned_exits": [],
             "planned_entries": [],
             "planned_entry_weights": {},
-            "daily": [],
         }
     universe = context["universe"]
     name_by, industry_by = context["name_by"], context["industry_by"]
@@ -215,7 +217,7 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     disparity_short = disparity_long = None
     if ma_short and ma_long:
         disparity = momentum_signals.compute_signals(
-            {"close": close_df}, int(ma_short), int(ma_long), pool_moving_average_type(pool)
+            {"close": close_df}, int(ma_short), int(ma_long), pool_moving_average_type(pool), excluded=frozenset()
         )
         disparity_short = disparity["short"].loc[last]
         disparity_long = disparity["long"].loc[last]
@@ -365,9 +367,6 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
     # 실시간 표시·장중 예상이 기준일 목표의 가격과 판정을 바꾸지 못하게 분리한다.
     target_holdings = [dict(row) for row in holdings]
     target_entries = [dict(row) for row in entries]
-    # 합성 슬리브 몫이 읽는 일별 곡선 — 이 현황을 만든 **같은 실행**의 값이다(strategy_logic.md 「장중 잠정 실행」).
-    # 장중이면 아래에서 잠정 실행의 곡선(오늘 잠정 봉 포함)으로 바뀐다.
-    engine_daily = simulated["daily"]
 
     if quotes["live"]:
         # ── 장중 실행 — 실시간 가격을 **마지막 봉**으로 붙인 같은 엔진의 잠정 실행이다
@@ -437,12 +436,13 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
             name_by=name_by,
             industry_by=industry_by,
             exit_reason="이탈",
+            group_of={},
+            group_cap_pct=None,
             provisional_last_bar=True,
             **market,
         )
         holdings = live_result["open_positions"]
         simulated["exited_today"] = live_result["exited_today"]
-        engine_daily = live_result["daily"]
         mark_engine_statuses(holdings, live_result["planned_exits"])
 
         realtime_missing_tickers = _apply_display_quotes(rows, holdings, quotes["by_ticker"])
@@ -478,7 +478,11 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         # 추세 이탈 이격도 잠정 봉 기준으로 갱신 — 합성 화면과 같은 실시간 기준(strategy_logic.md 「장중 잠정 실행」).
         if ma_short and ma_long:
             eff_disparity = momentum_signals.compute_signals(
-                {"close": eff_close}, int(ma_short), int(ma_long), pool_moving_average_type(pool)
+                {"close": eff_close},
+                int(ma_short),
+                int(ma_long),
+                pool_moving_average_type(pool),
+                excluded=frozenset(),
             )
             eff_disp_short = eff_disparity["short"].loc[session_ts]
             eff_disp_long = eff_disparity["long"].loc[session_ts]
@@ -599,8 +603,6 @@ def _current_positions(settings: dict[str, Any], *, start_date: str | None, mark
         "holdings": holdings,
         "target_holdings": target_holdings,
         "target_entries": target_entries,
-        # 이 현황을 만든 엔진 실행의 일별 곡선 — 합성 슬리브 몫이 같은 실행 결과를 읽는다.
-        "daily": engine_daily,
         # 내일 시가에 살 종목 (자리·자격·우선순위를 모두 적용한 결과).
         "planned_entries": entries,
         # ADR 게이트 — 하한 미설정이면 None. blocked=True 면 오늘은 신규 진입이 없다.

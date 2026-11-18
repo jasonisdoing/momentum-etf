@@ -1,9 +1,42 @@
 """프로젝트 전역에서 사용하는 설정 값 정의."""
 
 import json
+import re
 from pathlib import Path
 
-SLACK_CHANNEL = "C0A0X2LTS3X"
+# 슬랙 채널 이름과 발송·수정 API에 전달할 채널 ID.
+SLACK_CHANNEL_IDS = {
+    "#momentum-etf": "C0A0X2LTS3X",
+    "#momentum-etf-summary": "C0CGCUETNKT",
+}
+SLACK_CHANNEL = SLACK_CHANNEL_IDS["#momentum-etf"]
+SLACK_ASSET_SUMMARY_CHANNEL = SLACK_CHANNEL_IDS["#momentum-etf-summary"]
+
+# 화면과 슬랙 자산 요약이 같은 종목명·티커 규칙을 사용한다 — 3배·2배·인버스로 나눠 두고,
+# 레버리지 여부(`LEVERAGE_NAME_RE`)는 셋을 합쳐 본다. 배수(`LEVERAGE_TRIPLE_RE`·`LEVERAGE_DOUBLE_RE`)는
+# 사고팔기 권장 간격이 쓴다(`core.strategy.trade.rules.leverage_multiple`).
+with (Path(__file__).resolve().parent / "web" / "lib" / "leverage_name.json").open(
+    encoding="utf-8"
+) as leverage_name_file:
+    _LEVERAGE_RULES = json.load(leverage_name_file)
+LEVERAGE_TRIPLE_RE = re.compile(_LEVERAGE_RULES["triple"], re.IGNORECASE)
+LEVERAGE_DOUBLE_RE = re.compile(_LEVERAGE_RULES["double"], re.IGNORECASE)
+LEVERAGE_NAME_RE = re.compile("|".join(_LEVERAGE_RULES[key] for key in ("triple", "double", "inverse")), re.IGNORECASE)
+# 이름으로는 알 수 없는 2배 종목 티커.
+LEVERAGE_TICKERS = frozenset(_LEVERAGE_RULES["double_tickers"])
+
+# 사고팔기 권장 간격 — 최근 `METRIC_WINDOW_MONTHS`(12개월)의 고점 이후 최대 하락을 `RECOMMENDED_GAP_ROUNDS`회차가 복리로 덮는 간격을
+# 종목 배수(1·2·3배)별 최소·최대(%)로 자른다.
+# 참고 — 10회차(간격 9번, 복리)일 때 간격별로 1호 대비 덮는 최대 하락 = 1 − (1 − 간격)^9:
+#   1% → 8.6%   2% → 16.6%   3% → 24.0%   4% → 30.7%   5% → 37.0%
+#   6% → 42.7%  7% → 48.0%   8% → 52.8%   9% → 57.2%   10% → 61.3%
+RECOMMENDED_GAP_ROUNDS = 10
+RECOMMENDED_GAP_MIN_PCT_1X = 3
+RECOMMENDED_GAP_MIN_PCT_2X = 4
+RECOMMENDED_GAP_MIN_PCT_3X = 5
+RECOMMENDED_GAP_MAX_PCT_1X = 6
+RECOMMENDED_GAP_MAX_PCT_2X = 8
+RECOMMENDED_GAP_MAX_PCT_3X = 10
 
 # python scripts/update_market_calendars.py CACHE_START_DATE 변경시 실행
 CACHE_START_DATE = "2018-12-31"
@@ -160,7 +193,6 @@ MARKET_SCHEDULES = {
     "kor": {
         "open": time(9, 0),
         "close": time(15, 30),
-        "open_offset_minutes": 30,
         "close_offset_minutes": 30,
         "premarket_open": time(8, 0),
         "aftermarket_close": time(20, 0),
@@ -174,7 +206,6 @@ MARKET_SCHEDULES = {
     "us": {
         "open": time(9, 30),
         "close": time(16, 0),
-        "open_offset_minutes": 30,
         "close_offset_minutes": 30,
         "premarket_open": time(4, 0),
         "aftermarket_close": time(20, 0),
@@ -190,11 +221,32 @@ MARKET_SCHEDULES = {
     "au": {
         "open": time(10, 0),
         "close": time(16, 0),
-        "open_offset_minutes": 30,
         "close_offset_minutes": 30,
         "timezone": "Australia/Sydney",
         "name": "호주",
     },
+}
+
+# 종목 종류별 매매 가능 구간(시장 현지 시각, 종료 시각 미포함).
+# 한국 개별주의 시간외 구간은 NXT 체결 시간, 한국 ETF는 사고팔기 정책상 KRX 정규장만 사용한다.
+_KOR_REGULAR_WINDOW = (MARKET_SCHEDULES["kor"]["open"], MARKET_SCHEDULES["kor"]["close"])
+_US_EQUITY_WINDOWS = (
+    (MARKET_SCHEDULES["us"]["premarket_open"], MARKET_SCHEDULES["us"]["open"]),
+    (MARKET_SCHEDULES["us"]["open"], MARKET_SCHEDULES["us"]["close"]),
+    (MARKET_SCHEDULES["us"]["close"], MARKET_SCHEDULES["us"]["aftermarket_close"]),
+)
+_AU_EQUITY_WINDOWS = ((MARKET_SCHEDULES["au"]["open"], MARKET_SCHEDULES["au"]["close"]),)
+INSTRUMENT_TRADING_WINDOWS = {
+    "kor": {
+        "etf": (_KOR_REGULAR_WINDOW,),
+        "stock": (
+            (MARKET_SCHEDULES["kor"]["premarket_open"], time(8, 50)),
+            _KOR_REGULAR_WINDOW,
+            (time(15, 40), MARKET_SCHEDULES["kor"]["aftermarket_close"]),
+        ),
+    },
+    "us": {"etf": _US_EQUITY_WINDOWS, "stock": _US_EQUITY_WINDOWS},
+    "au": {"etf": _AU_EQUITY_WINDOWS, "stock": _AU_EQUITY_WINDOWS},
 }
 
 # 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
@@ -430,6 +482,11 @@ FORWARD_DAY_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60)
 # 85~95 는 코스닥 검증에서 확인된 유효 구간 — 100 은 중앙값 부근이라 상시 껌뻑여 제외.
 ADR_FLOOR_OPTIONS: tuple[int | None, ...] = (None, 85, 90, 95)
 
+# 모멘텀 업종(한국)·섹터(미국) 상한(%) — 같은 분류가 차지할 수 있는 슬롯 = 내림(슬롯 수 × %), 최소 1.
+# 진입할 때 상한에 걸린 후보는 건너뛰고 다음 순위로 채운다. 100 = 상한 없음.
+# 분류가 빈 종목은 상한을 적용하지 않는다. 개별주 풀에만 쓴다(ETF 는 분류를 두지 않는다).
+INDUSTRY_CAP_PCT_OPTIONS: tuple[int, ...] = (40, 60, 80, 100)
+
 # 거래대금 하한 — 평소(20일 평균) 대비 몇 배 이상이어야 신호로 인정할지. None = 제한 없음.
 # **국가별**이다 — 이평선 선택지(SHORT_MA_DAYS_BY_COUNTRY)와 같은 방식으로, 신고가의
 # 화면 셀렉트·튜닝 축·저장 검증이 풀 국가의 목록을 쓴다(`utils/new_high_service` 가 골라 준다).
@@ -483,32 +540,8 @@ MARKET_TREND_SCORE_MA_DAYS = 20
 # 나스닥 100 선물과 종목풀 합성 지수는 알림 대상이 아니다.
 MARKET_TREND_ALERT_TICKERS: tuple[str, ...] = ("^KS11", "^KQ11", "^SOX", "^DJI", "^GSPC", "^NDX", "KRW=X")
 
-# 슈퍼트렌드(SuperTrend) 지표 설정.
-# 차트 보조선/화살표 표시 전용이다. 레짐 판정과 현금비중에는 쓰지 않는다.
-# ATR 계산 기간(PERIOD)은 전 지수 공통. 곱수(MULTIPLIER)는 지수마다 개별 등록한다.
+# 시장 추세 슈퍼트렌드의 공통 ATR 기간.
 MARKET_TREND_SUPERTREND_PERIOD = 10
-
-# 지수별 슈퍼트렌드 곱수 (yf_ticker → multiplier). 사용하는 모든 지수를 반드시 등록한다.
-# 값↑=방향 전환이 뜸해져 휩쏘↓(지연 없음) / 값↓=추세 전환에 민감. 지수마다 변동성이 달라 개별 설정.
-# yf_ticker: ^KS11=코스피, ^KQ11=코스닥, ^DJI=다우존스, ^GSPC=S&P500,
-#            ^NDX=나스닥100, ^SOX=필라델피아 반도체, NQ=F=나스닥100 선물.
-MARKET_TREND_SUPERTREND_MULTIPLIER: dict[str, float] = {
-    "^KS11": 1.5,  # 코스피 (빠른 대응이 필요)
-    "^KQ11": 1.5,  # 코스닥 (빠른 대응이 필요)
-    "^DJI": 3.0,  # 다우존스
-    "^GSPC": 3.0,  # S&P500
-    "^NDX": 3.0,  # 나스닥100
-    "^SOX": 1.5,  # 필라델피아 반도체 (빠른 대응이 필요)
-    "NQ=F": 3.0,  # 나스닥100 선물
-    # 원/달러 — 변동성이 지수보다 낮아 같은 곱수라도 국면이 훨씬 길게 유지된다.
-    # 24개월 실측 평균 지속일: 1.5배 19일 / 2.0배 35일 / 3.0배 58일.
-    # 1.5 를 쓰면 코스피(12일)와 S&P500(28일) 사이에 들어와 다른 지수와 비슷하게 읽힌다.
-    "KRW=X": 1.5,  # 미국달러
-}
-
-# 풀 합성 지수(pool:<풀>)의 슈퍼트렌드 곱수 — 풀은 동적이라 지수처럼 개별 등록할 수 없어
-# 공통 하나를 쓴다. 동일가중 평균이라 개별주 지수보다 변동이 완만해 지수 표준값(3.0)을 따른다.
-MARKET_TREND_SUPERTREND_MULTIPLIER_POOL = 3.0
 
 # ADR(등락비율, Advance-Decline Ratio) 설정.
 # ADR = 기간 내 상승종목수 합 / 하락종목수 합 × 100. 지수는 대형주 몇 종목에 끌려가지만

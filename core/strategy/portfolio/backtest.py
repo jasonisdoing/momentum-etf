@@ -119,5 +119,4 @@ def simulate_portfolio(
         "cash_curve": cash_curve,
         "trades": trades,
         "shares": shares,
-        "cash": cash,
     }

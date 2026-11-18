@@ -3,14 +3,14 @@
  * 셀의 단일 소스. 화면별 고유 스타일(클래스 기반 색 등)은 각 화면에 남긴다.
  */
 
-import type { ColDef, ColDefField } from "ag-grid-community";
+import type { ColDef, ColDefField, SelectionColumnDef } from "ag-grid-community";
 import type React from "react";
 import type { ReactNode } from "react";
 
 import { TickerDetailLink } from "@/app/components/TickerDetailLink";
 import { BUCKET_THEME } from "@/lib/bucket-theme";
 import { formatSlashDateWithWeekday } from "@/lib/datetime";
-import { isLeverageName, renderStockNameCell, type StockNameOptions } from "@/lib/name-highlight";
+import { isLeveragedSecurity, renderStockNameCell, type StockNameOptions } from "@/lib/name-highlight";
 
 /** 자산 도우미·포트폴리오가 공유하는 읽기 전용 버킷 컬럼. */
 export function bucketColumn<T extends { bucket?: number | null }>(): ColDef<T> {
@@ -84,6 +84,35 @@ export function stockRowClass(options: {
   return classes.join(" ");
 }
 
+/** 그리드 왼쪽에 고정하는 선택 체크박스 열. */
+export const gridSelectionColumn: SelectionColumnDef = {
+  width: 52,
+  minWidth: 52,
+  maxWidth: 52,
+  pinned: "left",
+  sortable: false,
+  resizable: false,
+  suppressMovable: true,
+  headerName: "",
+};
+
+/** 사용자 지정 행 순서를 바꾸는 왼쪽 고정 손잡이. */
+export function gridRowDragColumn<T>(rowDrag: NonNullable<ColDef<T>["rowDrag"]>, width: number): ColDef<T> {
+  return {
+    colId: "drag",
+    headerName: "",
+    width,
+    maxWidth: width,
+    pinned: "left",
+    sortable: false,
+    resizable: false,
+    suppressMovable: true,
+    rowDrag,
+    cellClass: "assetsDragCell",
+    valueGetter: () => "",
+  };
+}
+
 /** 티커 컬럼 — 티커·종목명 쌍이 있는 모든 화면이 이걸 쓴다(`stockNameColumn` 과 세트).
  *
  *  화면마다 폭·col-id·렌더러가 제각각이면 보유 강조·배지 같은 공통 변경이 한 번에 안 된다.
@@ -111,9 +140,13 @@ export function tickerColumn<T>(options?: {
     // 티커·종목명(과 그 앞 컬럼들)은 왼쪽 고정 — 가로 스크롤에도 어떤 종목의 행인지 보인다.
     pinned: "left",
     sortable: options?.sortable,
-    cellClass: ({ data }) => {
+    cellClass: ({ data, value }) => {
       const name = (data as Record<string, unknown> | undefined)?.[options?.nameField ?? "name"];
-      return [options?.cellClass, isLeverageName(typeof name === "string" ? name : null) ? "appLeverageTickerCell" : null]
+      const leveraged = isLeveragedSecurity(
+        typeof name === "string" ? name : null,
+        typeof value === "string" ? value : null,
+      );
+      return [options?.cellClass, leveraged ? "appLeverageTickerCell" : null]
         .filter(Boolean).join(" ");
     },
     cellStyle: options?.mono
@@ -154,7 +187,13 @@ export function stockNameColumn<T>(options?: {
     tooltipValueGetter: options?.tooltipValueGetter,
     cellRenderer:
       options?.cellRenderer ??
-      ((p: { value?: string | null; data?: T }) => renderStockNameCell(p.value, options?.nameOptions?.(p.data))),
+      ((p: { value?: string | null; data?: T }) => {
+        const ticker = (p.data as Record<string, unknown> | undefined)?.ticker;
+        return renderStockNameCell(p.value, {
+          ticker: typeof ticker === "string" ? ticker : null,
+          ...options?.nameOptions?.(p.data),
+        });
+      }),
   };
 }
 
@@ -366,6 +405,9 @@ export function tradeValueMultColumn<T>(options?: {
   };
 }
 
+/** 기간 미달 값의 셀 스타일 — 계산 기준 기간보다 짧은 이력으로 낸 값(순위 MDD·소르티노·칼마, 사고팔기 권장 간격). */
+export const PARTIAL_PERIOD_CELL_STYLE = { color: "#ca8a04", fontWeight: 700 } as const;
+
 /** 변동성 컬럼 — 순위·모멘텀·신고가 공용. 최근 20일 일간 수익률 표준편차(%).
  *  모멘텀 진입 문턱(배수 × 이 값)의 기준값과 **같은 계산**이다.
  *  표준 배치는 「현재가 → 변동성 → 거래대금」 — 현재가 바로 뒤에 둔다. */
@@ -425,7 +467,7 @@ export function prevDayChangeColumn<T>(field: ColDefField<T>): ColDef<T> {
 }
 
 /** 종목풀 순위 — 순위·모멘텀·자산 관리 공용. 폭·굵기·빈 값 표기가 한 곳에서 정해진다.
- *  `badge` 는 순위 화면처럼 번호 앞에 표시를 붙일 때만 준다(랭킹 제외 📌). */
+ *  `badge` 는 순위 화면처럼 번호 앞에 표시를 붙일 때만 준다(거래 제외 📌). */
 export function rankColumn<T>(
   getRank: (row: T | undefined) => number | null | undefined,
   options: { badge?: (row: T | undefined) => "excluded" | null } = {},
@@ -441,7 +483,7 @@ export function rankColumn<T>(
     cellStyle: { display: "flex", alignItems: "center", justifyContent: "center" },
     cellRenderer: (params: { data?: T; value?: number | null }) => {
       const badge = options.badge?.(params.data) ?? null;
-      const title = badge === "excluded" ? "랭킹 제외 종목" : undefined;
+      const title = badge === "excluded" ? "거래 제외 종목" : undefined;
       return (
         <span style={{ fontWeight: 700, whiteSpace: "nowrap" }} title={title}>
           {badge === "excluded" ? "📌 " : ""}
@@ -483,20 +525,22 @@ const MEMO_CELL_CLASS = "appMemoCell";
 
 export function stockMemoColumn<T>(options: {
   field: ColDefField<T>;
-  width?: number;
   editable?: (row: T | undefined) => boolean;
   cellClass?: (row: T | undefined) => string | undefined;
   onSave?: (row: T, memo: string) => void;
   /** 특정 행에서 메모 칸 대신 다른 내용을 그릴 때(예: 순위 화면의 추가 행 버튼). null 이면 기본 표시. */
   renderRow?: (row: T) => ReactNode | null;
 }): ColDef<T> {
-  const { field, width = 150, editable, cellClass, onSave, renderRow } = options;
+  const { field, editable, cellClass, onSave, renderRow } = options;
   const canEdit = (row: T | undefined) => (editable ? editable(row) : true);
   const column: ColDef<T> = {
     field,
     headerName: "메모",
     headerTooltip: "종목에 붙는 메모 — 자산 관리·순위·전략 화면이 같은 값을 본다",
-    width,
+    width: 170,
+    minWidth: 170,
+    maxWidth: 170,
+    resizable: false,
     // 빈 문자열이 많아 자동 추론이 흔들린다 — 문자열 에디터를 명시한다.
     cellDataType: "text",
     editable: (params) => canEdit(params.data),
@@ -552,6 +596,26 @@ export function highDrawdownColumn<T>(
     type: "rightAligned",
     cellRenderer: (p: { data?: T; value?: number | null }) =>
       renderHighDrawdownCell(options.isTouched?.(p.data) ? 0 : p.value),
+  };
+}
+
+/** 12개월 MDD(%) 공용 컬럼 — 순위 화면(`/pools-rank`)과 사고팔기 화면이 같은 폭·표기·기간미달 노랑 스타일을 쓴다. */
+export function mddColumn<T>(options: {
+  valueGetter: (row: T | undefined) => number | null | undefined;
+  isPartial?: (row: T | undefined) => boolean;
+  pinned?: "left" | "right";
+}): ColDef<T> {
+  return {
+    colId: "mdd",
+    headerName: "MDD",
+    minWidth: 80,
+    width: 80,
+    ...(options.pinned ? { pinned: options.pinned } : {}),
+    type: "rightAligned",
+    valueGetter: ({ data }) => options.valueGetter(data) ?? null,
+    cellRenderer: (params: { value: number | null | undefined }) =>
+      params.value == null ? "-" : `${params.value.toFixed(2)}%`,
+    cellStyle: (params: { data?: T }) => (options.isPartial?.(params.data) ? PARTIAL_PERIOD_CELL_STYLE : null),
   };
 }
 

@@ -4,8 +4,8 @@
 정한 비중대로 사고(슬리피지 부담), 이후에는 시세대로
 흘러가게 둔다 — 그게 이 전략의 전부다.
 
-결과 형태는 신고가·모멘텀과 같다(`start_date`·`strategy_total_pct`·`daily` …). 화면과
-합성 어댑터가 전략을 가리지 않고 같은 키를 읽기 때문이다.
+결과 형태는 신고가·모멘텀과 같다(`start_date`·`strategy_total_pct`·`daily` …) — 화면이 전략을
+가리지 않고 같은 키를 읽는다.
 """
 
 from __future__ import annotations
@@ -184,7 +184,6 @@ def run_backtest(
     cash_curve = simulated["cash_curve"]
     trades = simulated["trades"]
     shares = simulated["shares"]
-    cash = simulated["cash"]
     # 벤치마크는 **시작일 시가**를 1 로 둔다 — 전략도 그날 시가에 사기 때문이다(공용 함수).
     from utils.benchmark_curve import benchmark_growth
 
@@ -227,7 +226,6 @@ def run_backtest(
             for ticker in tickers
             if shares.get(ticker, 0.0) > 0
         ],
-        "sleeve_cash_weight_pct": cash / float(strategy.iloc[-1]) * 100.0,
         "end_date": str(index[-1].date()),
         "months": months,
         "strategy_total_pct": round(strategy_total, 2),
@@ -258,7 +256,7 @@ def run_backtest(
     }
 
 
-# 설정이 같으면 결과도 같으므로 짧게 재사용한다 — 개별 화면과 합성(목표·슬리브 몫)이
+# 설정이 같으면 결과도 같으므로 짧게 재사용한다 — 개별 화면과 합성(목표)이
 # 같은 실행 결과를 읽고, 같은 요청 흐름에서 엔진을 여러 번 돌리지 않는다.
 _POSITIONS_CACHE = TtlCache(CACHE_TTL_COMPUTE, name="portfolio_positions")
 
@@ -268,7 +266,6 @@ def current_positions(settings: dict[str, Any]) -> dict[str, Any]:
 
     장중이면 실시간 가격을 마지막 봉으로 쓴 같은 엔진의 상태다(strategy_logic.md 「장중 잠정 실행」) —
     보유 비중이 실시간 기준으로 움직이고, 종가 확정 후 백테스트와 일치한다.
-    ``daily`` 는 이 상태를 만든 실행의 일별 곡선 — 합성 슬리브 몫이 같은 실행 결과를 읽는다.
     """
     from utils.strategy_settings import require_start_date
 
@@ -283,9 +280,7 @@ def current_positions(settings: dict[str, Any]) -> dict[str, Any]:
                 "live",
                 "open_positions",
                 "target_positions",
-                "sleeve_cash_weight_pct",
                 "trades",
-                "daily",
             )
         }
         # 다음 시가 체결일 — 판정에 쓴 마지막 봉(`as_of`)의 다음 거래일. 전략 화면·합성 공용 규칙(`_next_session`).

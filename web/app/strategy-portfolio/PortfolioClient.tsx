@@ -24,7 +24,7 @@ import { UnsavedChangesBadge } from "../components/UnsavedChangesBadge";
 import { useToast } from "../components/ToastProvider";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { createAppGridTheme } from "../components/app-grid-theme";
-import { bucketColumn, formatSignedPct, highDrawdownColumn, rankColumn, signColor, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
+import { bucketColumn, formatSignedPct, gridRowDragColumn, gridSelectionColumn, highDrawdownColumn, rankColumn, signColor, stockMemoColumn, stockNameColumn, stockRowClass, tickerColumn } from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { useStockMemoSave, withTickerMemo } from "../components/useStockMemoSave";
@@ -514,20 +514,11 @@ export function PortfolioClient() {
 
   const columns = useMemo<ColDef<WeightRow>[]>(
     () => [
-      {
-        colId: "drag",
-        headerName: "",
-        width: 36,
-        maxWidth: 36,
-        pinned: "left",
-        sortable: false,
-        resizable: false,
-        suppressMovable: true,
-        // 현금 고정행·추가행은 드래그 불가. 확정된 종목만 순서 변경.
-        rowDrag: (params) => Boolean(params.data && !params.data.is_adding && params.data.ticker !== CASH_TICKER),
-        cellClass: "assetsDragCell",
-        valueGetter: () => "",
-      },
+      // 현금 고정행·추가행은 드래그 불가. 확정된 종목만 순서 변경.
+      gridRowDragColumn<WeightRow>(
+        ({ data }) => Boolean(data && !data.is_adding && data.ticker !== CASH_TICKER),
+        36,
+      ),
       // 티커·종목명 — 공용 컬럼(col-id 표준). 추가 행 입력칸·현금 행만 화면 고유 표기다.
       // 순위·고점 — 순위·모멘텀·신고가와 같은 공용 컬럼(고점 0 이면 ⭐신고점). 순위 화면처럼 버킷 왼쪽.
       rankColumn<WeightRow>((row) => row?.rank),
@@ -584,7 +575,11 @@ export function PortfolioClient() {
             );
           }
           if (row.ticker === CASH_TICKER) return <span style={{ color: "var(--text-muted)" }}>현금</span>;
-          return renderStockNameCell(params.value, { isNew: Boolean(row.new_listing), newMonths: row.listing_months ?? null });
+          return renderStockNameCell(params.value, {
+            ticker: row.ticker,
+            isNew: Boolean(row.new_listing),
+            newMonths: row.listing_months ?? null,
+          });
         },
       }),
       // 종목 메모 — 전 화면 공용 컬럼(`@/lib/grid-cells`). 순위·자산 관리 화면과 같은 값이고
@@ -819,16 +814,7 @@ export function PortfolioClient() {
                   enableClickSelection: false,
                 },
                 rowDragManaged: true,
-                selectionColumnDef: {
-                  width: 52,
-                  minWidth: 52,
-                  maxWidth: 52,
-                  pinned: "left",
-                  sortable: false,
-                  resizable: false,
-                  headerName: "",
-                  cellClass: "assetsSelectCell",
-                },
+                selectionColumnDef: gridSelectionColumn,
                 onSelectionChanged: (event) =>
                   setSelected(
                     event.api

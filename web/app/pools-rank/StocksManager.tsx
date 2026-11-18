@@ -14,9 +14,11 @@ import {
   sectorColumn,
   marketBadgeCellStyle,
   highDrawdownColumn,
+  mddColumn,
   tradeValueMultColumn,
   maExitGapColumn,
   volatilityColumn,
+  PARTIAL_PERIOD_CELL_STYLE,
   marketCapRankColumn,
   prevDayChangeColumn,
   rankColumn,
@@ -134,7 +136,7 @@ type RankRow = {
   보수: number | null;
   순자산총액: number | null;
   "전일 거래량(주)": number | null;
-  exclude_from_ranking?: boolean;
+  exclude_from_trading?: boolean;
 };
 
 type RankResponse = {
@@ -316,7 +318,9 @@ function getBucketName(bucketId: number): string {
 }
 
 function getBucketIdByName(bucketName: string): number {
-  return BUCKET_OPTIONS.find((option) => option.name === bucketName)?.id ?? BUCKET_OPTIONS[0]?.id ?? 1;
+  const option = BUCKET_OPTIONS.find((item) => item.name === bucketName);
+  if (!option) throw new Error(`알 수 없는 버킷 이름: ${bucketName}`);
+  return option.id;
 }
 
 function buildDirtyCellKey(rowId: string, field: string): string {
@@ -814,7 +818,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         보수: null,
         순자산총액: null,
         "전일 거래량(주)": null,
-        exclude_from_ranking: false,
+        exclude_from_trading: false,
       }
     ));
     return [...addingGridRows, ...rows];
@@ -829,9 +833,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
     const leadingColumns: ColDef<RankGridRow>[] = [
-      // 순위 — 공용 컬럼(자산 관리·모멘텀과 같은 폭·굵기). 랭킹 제외 📌 만 이 화면이 붙인다.
+      // 순위 — 공용 컬럼(자산 관리·모멘텀과 같은 폭·굵기). 거래 제외 📌 만 이 화면이 붙인다.
       rankColumn<RankGridRow>((row) => row?.순위, {
-        badge: (row) => (pageMode === "rank" && row?.exclude_from_ranking ? "excluded" : null),
+        badge: (row) => (pageMode === "rank" && row?.exclude_from_trading ? "excluded" : null),
       }),
       rankChangeColumn("전거래일변동", "전거래일", "직전 거래일 순위 대비 상승분", "이전순위"),
       rankChangeColumn("1주순위변동", "1주변동", "5거래일 전 순위 대비 상승분", "1주순위"),
@@ -894,8 +898,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ...(pageMode === "manage"
         ? [
           {
-            field: "exclude_from_ranking",
-            headerName: "제외 종목",
+            field: "exclude_from_trading",
+            headerName: "거래 제외",
             pinned: "left",
             minWidth: 84,
             width: 84,
@@ -1032,6 +1036,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             return <span className="text-muted">티커 확인 후 종목명이 표시됩니다.</span>;
           }
           return renderStockNameCell(params.value, {
+            ticker: params.data?.티커,
             isHeld: Boolean(String(params.data?.보유 ?? "").trim()),
             // MDD·소르티노 노란색과 같은 기준 — 상장 기간이 백테스트 기준 창(METRIC_WINDOW_MONTHS)보다 짧은 종목.
             isNew: params.data?.backtest_stats?.is_partial === true,
@@ -1260,28 +1265,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellRenderer: (params: { value: string | null | undefined }) => String(params.value ?? "-"),
       },
       // MDD·소르티노 — 기본 모드에서 옮겨 왔다. 노랑 = 상장 기간이 기준 창보다 짧은 종목(🆕과 같은 기준).
-      {
-        headerName: "MDD",
-        minWidth: 80,
-        width: 80,
-        type: "rightAligned",
-        valueGetter: (params) => {
-          const stats = params.data?.backtest_stats;
-          const val = stats?.mdd;
-          return val != null ? val : null;
-        },
-        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
-          if (params.value == null) return "-";
-          return `${params.value.toFixed(2)}%`;
-        },
-        cellStyle: (params: { data?: RankGridRow }) => {
-          const stats = params.data?.backtest_stats;
-          if (stats?.is_partial) {
-            return { color: "#ca8a04", fontWeight: 700 };
-          }
-          return null;
-        },
-      },
+      mddColumn<RankGridRow>({
+        valueGetter: (row) => row?.backtest_stats?.mdd,
+        isPartial: (row) => Boolean(row?.backtest_stats?.is_partial),
+      }),
       {
         headerName: "소르티노",
         minWidth: 80,
@@ -1299,7 +1286,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellStyle: (params: { data?: RankGridRow }) => {
           const stats = params.data?.backtest_stats;
           if (stats?.is_partial) {
-            return { color: "#ca8a04", fontWeight: 700 };
+            return PARTIAL_PERIOD_CELL_STYLE;
           }
           return null;
         },
@@ -1317,7 +1304,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
         cellStyle: (params: { data?: RankGridRow }) => {
           if (params.data?.backtest_stats?.is_partial) {
-            return { color: "#ca8a04", fontWeight: 700 };
+            return PARTIAL_PERIOD_CELL_STYLE;
           }
           return null;
         },
@@ -1466,7 +1453,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     }
     setRows((prev) =>
       prev.map((currentRow) =>
-        getRowId(currentRow) === row.id ? { ...currentRow, exclude_from_ranking: excluded } : currentRow,
+        getRowId(currentRow) === row.id ? { ...currentRow, exclude_from_trading: excluded } : currentRow,
       ),
     );
     setDirtyRowIds((prev) => (prev.includes(row.id) ? prev : [...prev, row.id]));
@@ -1563,7 +1550,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         await updateStockBucket(selectedTickerType, ticker, Number(row.bucket ?? 1));
       }
       if (dirtyCellKeys.includes(buildDirtyCellKey(rowId, "제외"))) {
-        await updateStockExclude(selectedTickerType, ticker, Boolean(row.exclude_from_ranking));
+        await updateStockExclude(selectedTickerType, ticker, Boolean(row.exclude_from_trading));
       }
     }
   }
@@ -1730,7 +1717,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [blockedMessage, toast]);
 
   const headerSummary = useMemo<RankHeaderSummary>(() => {
-    const candidateRows = gridRows.filter((r) => !r.exclude_from_ranking);
+    const candidateRows = gridRows.filter((r) => !r.exclude_from_trading);
     const totalCount = candidateRows.length;
     // 진입 가능 — 미보유 행 회색 판정과 같은 기준(0선 + 진입 문턱). 옛 '매수 후보'(장기>0)를 대체.
     const mult = entryVolMult === "" ? null : Number(entryVolMult);
@@ -2006,7 +1993,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                     } else if (!entryGapOk(params.data?.이격, params.data?.단기이격, params.data?.변동성, mult)) {
                       classes.push("appEntryBlockedRow");
                     }
-                    if (params.data?.exclude_from_ranking) {
+                    if (params.data?.exclude_from_trading) {
                       classes.push("rankFixedRow");
                     }
                     // 실제 보유 중인 종목 — 공통 규칙으로 티커·종목명 칸만 녹색으로 표시한다.
@@ -2064,10 +2051,15 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       );
                     },
                     onCellValueChanged: (params: {
+                      colDef?: { field?: string };
                       data?: RankGridRow;
                       newValue?: unknown;
                       oldValue?: unknown;
                     }) => {
+                      // 버킷 컬럼 편집만 버킷 변경이다 — 메모 등 다른 컬럼 편집에 반응하면 안 된다.
+                      if (params.colDef?.field !== "버킷") {
+                        return;
+                      }
                       if (pageMode !== "manage" || !params.data || params.data.__isAddingRow || params.newValue === params.oldValue) {
                         return;
                       }

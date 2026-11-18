@@ -14,12 +14,13 @@ import { IconLoader2 } from "@tabler/icons-react";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AccountMemoSection } from "./AccountMemoSection";
 import { GridToolbarButton } from "../components/GridToolbarButton";
+import { HoldingsGroupButton, HoldingsGroupDialog, HoldingsGroupName, type HoldingsGroupDraft } from "../components/HoldingsGroupControls";
 import { StableInlineInput } from "../components/StableInlineInput";
 import { AppLoadingState } from "../components/AppLoadingState";
 import { AppModal } from "../components/AppModal";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { renderStockNameCell } from "@/lib/name-highlight";
-import { highDrawdownColumn, rankColumn, signColor, stockMemoColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
+import { gridRowDragColumn, highDrawdownColumn, rankColumn, signColor, stockMemoColumn, stockNameColumn, tickerColumn } from "@/lib/grid-cells";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { reorderHoldings, saveHoldingsGroups, type HoldingsGroup } from "@/lib/holdings-store";
@@ -49,8 +50,6 @@ import {
   buildGridRowId,
   buildHoldingEditableSnapshot,
   buildSyncedHoldingRows,
-  formatHiddenAmount,
-  formatKrw,
   formatPrice,
   getBucketCellClass,
   getPreviewValuationKrw,
@@ -64,6 +63,7 @@ import {
   stopActionButtonClick,
   stopActionButtonMouseDown,
 } from "./assets-helpers";
+import { holdingMetricColumns, renderHoldingWeight } from "./holding-metric-columns";
 
 type PoolRank = { rank: number | null };
 
@@ -275,7 +275,7 @@ export function AccountHoldingsDetailPanel({
   const [sortActive, setSortActive] = useState(() =>
     Boolean(SORT_STATE_BY_ACCOUNT.get(summary.account_id)?.length),
   );
-  const [groupModal, setGroupModal] = useState<{ id: string | null; name: string } | null>(null);
+  const [groupModal, setGroupModal] = useState<HoldingsGroupDraft | null>(null);
   // 메모 패널 폭 — null 이면 자동(남는 폭, 최소 300px). 경계선 드래그로 수동 조절하고,
   // 더블클릭하면 자동으로 되돌린다. 선호는 브라우저에 저장(표시 전용).
   // v2 — 옛 드래그 구현이 남긴 저장값(자동 배분 도입 전)을 무시하기 위해 키를 올렸다.
@@ -910,22 +910,13 @@ export function AccountHoldingsDetailPanel({
     scheduleSilentRowSave(row.id);
   }, [isCashGridRow, isEditableHoldingRow, onRowsSync, scheduleSilentRowSave, summary]);
 
+  const metrics = useMemo(() => holdingMetricColumns<GridRow>(showAmounts), [showAmounts]);
   const columns = useMemo<ColDef<GridRow>[]>(() => [
-    {
-      colId: "drag",
-      headerName: "",
-      width: 42,
-      maxWidth: 42,
-      pinned: "left",
-      sortable: false,
-      resizable: false,
-      suppressMovable: true,
-      rowDrag: (params) =>
-        Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== CASH_ROW_TICKER),
-      // 그룹 헤더 행도 같은 손잡이로 옮긴다 — 아래 첫 종목이 새 앵커가 된다.
-      cellClass: "assetsDragCell",
-      valueGetter: () => "",
-    },
+    // 그룹 헤더 행도 같은 손잡이로 옮긴다 — 아래 첫 종목이 새 앵커가 된다.
+    gridRowDragColumn<GridRow>(
+      ({ data }) => Boolean(data && data.id !== "__adding__" && data.ticker !== CASH_ROW_TICKER),
+      42,
+    ),
     rankColumn<GridRow>((row) => row ? poolRanks[poolRankKey(row.ticker_type, row.ticker)]?.rank : null),
     // 고점 대비 — 순위 화면과 같은 공용 컬럼(같은 판정·같은 표기).
     {
@@ -1032,30 +1023,11 @@ export function AccountHoldingsDetailPanel({
         if (params.data?.is_group) {
           const group = params.data;
           return (
-            <span className="assetsGroupName">
-              <span
-                role="button"
-                title="이름 수정"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setGroupModal({ id: group.id, name: String(group.name || "") });
-                }}
-              >
-                {String(group.name || "그룹")}
-              </span>
-              <button
-                type="button"
-                className="btn btn-sm btn-link p-0 assetsGroupDelete"
-                title="그룹 삭제"
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  persistGroups((GROUPS_BY_ACCOUNT.get(summary.account_id) ?? groups).filter((g) => g.id !== group.id));
-                }}
-              >
-                ✕
-              </button>
-            </span>
+            <HoldingsGroupName
+              name={group.name || "그룹"}
+              onEdit={() => setGroupModal({ id: group.id, name: group.name })}
+              onDelete={() => persistGroups((GROUPS_BY_ACCOUNT.get(summary.account_id) ?? groups).filter((g) => g.id !== group.id))}
+            />
           );
         }
         if (isFixedAssetTicker(params.data?.ticker)) {
@@ -1063,6 +1035,7 @@ export function AccountHoldingsDetailPanel({
         }
         // 종목명 표기 규칙은 전 화면 공통(`@/lib/name-highlight`).
         return renderStockNameCell(params.value, {
+          ticker: params.data?.ticker,
           isHeld: Number(params.data?.quantity ?? 0) > 0,
           isNew: normalizeBadgeTicker(params.data?.ticker ?? "") in newListingMonths,
           newMonths: newListingMonths[normalizeBadgeTicker(params.data?.ticker ?? "")] ?? null,
@@ -1076,60 +1049,23 @@ export function AccountHoldingsDetailPanel({
     // 폭 164 = 한글 10자(14px × 10) + 셀 좌우 패딩(24px). 넘치면 말줄임.
     stockMemoColumn<GridRow>({
       field: "memo",
-      width: 164,
       editable: (row) => isEditableHoldingRow(row) && processingId !== row?.id,
       cellClass: (row) => {
         if (!isEditableHoldingRow(row)) return undefined;
         return isDirtyEditableCell(row?.id, "memo") ? "appEditableCell appDirtyCell" : "appEditableCell";
       },
     }),
+    metrics.dailyChange,
+    metrics.currentPrice,
     {
-      field: "daily_change_pct",
-      headerName: "일간(%)",
-      width: 88,
-      type: "rightAligned",
-      cellRenderer: (params: { value?: number | null }) => (
-        <span className={getSignedClass(params.value ?? 0)}>
-          {params.value === null || params.value === undefined
-            ? "-"
-            : `${params.value.toFixed(2)}%`}
-        </span>
-      ),
+      ...metrics.weight,
+      cellRenderer: ({ data }: { data?: GridRow }) =>
+        data ? renderHoldingWeight(getPreviewWeightPct(data, rowsRef.current, summaryRef.current)) : "-",
     },
     {
-      field: "current_price",
-      headerName: "현재가",
-      width: 96,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow; value?: string }) => (
-        <span>{formatPrice(safeParseFloat(params.value), params.data?.currency || "KRW")}</span>
-      ),
-    },
-    {
-      field: "weight_pct",
-      // 값("100.00%")이 헤더보다 넓다 — 폭은 값 기준으로 잡는다.
-      headerName: "비중",
-      width: 82,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow }) => {
-        if (!params.data) {
-          return "-";
-        }
-
-        const weightPct = getPreviewWeightPct(params.data, rowsRef.current, summaryRef.current);
-        return (
-          <span style={{ color: "#000000", fontWeight: 700 }}>
-            {weightPct.toFixed(2)}%
-          </span>
-        );
-      },
-    },
-    {
+      ...metrics.quantity,
       field: "quantity",
-      // 다섯 자리 + 천 단위 쉼표("12,345")까지 안 잘리게. 헤더보다 값이 넓다.
-      headerName: "수량",
-      width: 72,
-      type: "rightAligned",
+      valueGetter: undefined,
       editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
       cellClass: (params) => {
         if (!isEditableHoldingRow(params.data)) {
@@ -1145,7 +1081,7 @@ export function AccountHoldingsDetailPanel({
           integer: true,
           onReject: (message) => toast.error(message),
         }),
-      cellRenderer: (params: { data?: GridRow; value?: number }) => {
+      cellRenderer: (params: { data?: GridRow; valueFormatted?: string }) => {
         const row = params.data;
         if (!row) {
           return null;
@@ -1165,7 +1101,7 @@ export function AccountHoldingsDetailPanel({
             />
           );
         }
-        return <span>{new Intl.NumberFormat("ko-KR").format(params.value ?? 0)}</span>;
+        return <span>{params.valueFormatted}</span>;
       },
     },
     {
@@ -1210,42 +1146,15 @@ export function AccountHoldingsDetailPanel({
         return <span>{formatPrice(safeParseFloat(params.value), row.currency || "KRW")}</span>;
       },
     },
+    metrics.returnPct,
+    metrics.pnl,
     {
-      field: "return_pct",
-      headerName: "수익률",
-      width: 88,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow; value?: number }) => (
-        params.data?.ticker === CASH_ROW_TICKER ? <span>-</span> :
-          <span className={getSignedClass(params.value ?? 0)}>
-            {(params.value ?? 0).toFixed(2)}%
-          </span>
-      ),
-    },
-    {
-      field: "pnl_krw",
-      headerName: "평가손익",
-      width: 120,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow; value?: number }) => (
-        params.data?.ticker === CASH_ROW_TICKER ? <span>-</span> :
-          <span className={getSignedClass(params.value ?? 0)}>{formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0))}</span>
-      ),
-    },
-    {
-      field: "valuation_krw",
-      headerName: "평가 금액",
-      width: 124,
-      type: "rightAligned",
-      // 수량/평균매입가 변경 시 평가금액 셀이 즉시 재렌더되도록 valueGetter 로 라이브 계산.
-      valueGetter: (params) => (params.data ? getPreviewValuationKrw(params.data) : null),
-      // 현금 입력은 상단 통화별 박스로 이전됨 — 그리드 현금 셀 편집은 막고 편집 스타일도 제거한다.
+      ...metrics.valuation,
+      // 수량·평균매입가를 편집하는 동안에도 평가금액을 즉시 갱신한다.
+      valueGetter: ({ data }) => data ? getPreviewValuationKrw(data) : null,
       editable: false,
-      cellRenderer: (params: { data?: GridRow }) => (
-        <span className="appGridNumericValue">{params.data ? formatHiddenAmount(showAmounts, formatKrw(getPreviewValuationKrw(params.data))) : "-"}</span>
-      ),
     },
-  ], [addingRow, alertBadges, handleValidateTicker, highDrawdownByTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, poolRanks, processingId, showAmounts]);
+  ], [addingRow, alertBadges, metrics, handleValidateTicker, highDrawdownByTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, poolRanks, processingId]);
 
   return (
     <div className="assetsDetailPanel">
@@ -1362,18 +1271,7 @@ export function AccountHoldingsDetailPanel({
             ) : null}
           </div>
           <div className="d-flex align-items-center gap-2 ms-auto">
-            <button
-              type="button"
-              className="btn btn-outline-secondary btn-sm"
-              title="표시용 그룹 구분선 추가 — 드래그로 위치를 옮기고, 이름을 클릭해 수정합니다."
-              onMouseDown={stopActionButtonMouseDown}
-              onClick={(event) => {
-                stopActionButtonClick(event);
-                setGroupModal({ id: null, name: "" });
-              }}
-            >
-              그룹
-            </button>
+            <HoldingsGroupButton onAdd={() => setGroupModal({ id: null, name: "" })} />
             <GridToolbarButton
               variant="add"
               onMouseDown={stopActionButtonMouseDown}
@@ -1406,53 +1304,20 @@ export function AccountHoldingsDetailPanel({
           </div>
         </div>
       </div>
-      <AppModal
-        open={groupModal !== null}
-        title={groupModal?.id ? "그룹 이름 수정" : "그룹 추가"}
-        subtitle="표시용 구분선입니다 — 계산·백테스트에는 영향이 없습니다."
-        onClose={() => setGroupModal(null)}
-        footer={(
-          <>
-            <button type="button" className="btn btn-outline-secondary" onClick={() => setGroupModal(null)}>
-              취소
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={!groupModal?.name.trim()}
-              onClick={() => {
-                if (!groupModal || !groupModal.name.trim()) return;
-                const current = GROUPS_BY_ACCOUNT.get(summary.account_id) ?? groups;
-                if (groupModal.id) {
-                  persistGroups(current.map((g) => (g.id === groupModal.id ? { ...g, name: groupModal.name.trim() } : g)));
-                } else {
-                  const firstTicker =
-                    rowsRef.current.map((row) => String(row.ticker || "").trim().toUpperCase()).find((t) => t && t !== "IS") ?? null;
-                  persistGroups([...current, { id: `group-${Date.now()}`, name: groupModal.name.trim(), before_ticker: firstTicker }]);
-                }
-                setGroupModal(null);
-              }}
-            >
-              저장
-            </button>
-          </>
-        )}
-      >
-        <input
-          className="form-control"
-          autoFocus
-          placeholder="그룹 이름"
-          value={groupModal?.name ?? ""}
-          onChange={(event) => setGroupModal((prev) => (prev ? { ...prev, name: event.target.value } : prev))}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && groupModal?.name.trim()) {
-              (event.currentTarget.closest(".modal") ?? document)
-                .querySelectorAll("button.btn-primary")
-                .forEach((b) => (b as HTMLButtonElement).click());
-            }
-          }}
-        />
-      </AppModal>
+      <HoldingsGroupDialog
+        draft={groupModal}
+        onChange={setGroupModal}
+        onSave={({ id, name }) => {
+          const current = GROUPS_BY_ACCOUNT.get(summary.account_id) ?? groups;
+          if (id) {
+            persistGroups(current.map((g) => g.id === id ? { ...g, name } : g));
+          } else {
+            const firstTicker =
+              rowsRef.current.map((row) => String(row.ticker || "").trim().toUpperCase()).find((t) => t && t !== "IS") ?? null;
+            persistGroups([...current, { id: `group-${Date.now()}`, name, before_ticker: firstTicker }]);
+          }
+        }}
+      />
       <AppModal
         open={deleteConfirmOpen}
         title="종목 삭제 확인"

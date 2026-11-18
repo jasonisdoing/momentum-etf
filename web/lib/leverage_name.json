@@ -1,0 +1,8 @@
+{
+  "triple": "3X",
+  "double": "2X|레버리지|Geared|Ultra",
+  "inverse": "인버스|Short|-[123]X",
+  "double_tickers": [
+    "GDE"
+  ]
+}

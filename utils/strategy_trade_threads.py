@@ -1,26 +1,31 @@
 """사고팔기 슬랙 신호 스레드의 메시지 기록과 삭제.
 
 신호·주문·알림 메시지를 이 모듈의 `send_thread_message` 로 보내면 스레드별 메시지 ts 가 컬렉션에 남는다.
-`delete_signal_thread` 는 주문이 없는 신호만 슬랙 메시지(스레드 전체)와 우리 쪽 기록을 함께 지운다 —
-메시지 ts 가 없는 옛 신호(기록 도입 전)는 지우지 않는다.
+신호 회수는 모두 `withdraw_signal` 하나를 거친다 — 주문이 없는 신호만 본문을 표준 한 줄로 바꿔 기록을 남기고
+앱이 단 답글은 지운다.
 """
 
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from pymongo.errors import OperationFailure
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 from utils.db_manager import get_db_connection
-from utils.notification import send_slack_message_v2
+from utils.notification import send_slack_message_v2, update_slack_message
 from utils.settings_loader import get_slack_channel
+from utils.strategy_trade_signal_lock import signal_lock
 
+KST = ZoneInfo("Asia/Seoul")
 COLLECTION = "strategy_trade_slack_messages"
-# 신호가 살아 있는 동안만 필요하다 — 오래된 기록은 DB 가 스스로 지운다.
-_RETENTION_SECONDS = 7 * 24 * 3600
+# 자동 신호의 일반 답글 보존 기간. 신호 원본과 수동 신호 답글은 주문 검증·회수를 위해 보존한다.
+SIGNAL_RETENTION_DAYS = 7
+_RETENTION_SECONDS = SIGNAL_RETENTION_DAYS * 24 * 3600
 # 이미 지워진 메시지는 실패로 보지 않는다(사용자가 슬랙에서 직접 지웠을 수 있다).
 _ALREADY_GONE = "message_not_found"
 
@@ -34,7 +39,19 @@ def _messages():
         raise RuntimeError("MongoDB 연결에 실패했습니다.")
     collection = db[COLLECTION]
     if not _index_ready:
-        collection.create_index("created_at", expireAfterSeconds=_RETENTION_SECONDS)
+        # 수동 신호와 완료 표시는 날짜가 지나도 주문 검증에 필요하다.
+        indexes = collection.index_information()
+        if "created_at_1" in indexes:
+            try:
+                collection.drop_index("created_at_1")
+            except OperationFailure as exc:
+                if exc.code != 27:
+                    raise
+        collection.update_many(
+            {"signal_entries": {"$exists": False}, "expires_at": {"$exists": False}, "manual": {"$ne": True}},
+            [{"$set": {"expires_at": {"$add": ["$created_at", _RETENTION_SECONDS * 1000]}}}],
+        )
+        collection.create_index("expires_at", expireAfterSeconds=0)
         collection.create_index("thread_ts")
         _index_ready = True
     return collection
@@ -44,6 +61,7 @@ def send_thread_message(
     text: str, blocks: list[dict[str, Any]] | None = None, thread_ts: str | None = None
 ) -> str | None:
     """사고팔기 슬랙 메시지를 보내고 그 ts 를 스레드 기록에 남긴다 — `thread_ts` 가 없으면 새 스레드의 뿌리 메시지다."""
+    manual = bool(thread_ts and signal_is_manual(thread_ts))
     ts = send_slack_message_v2(text, blocks, thread_ts)
     if ts:
         _messages().insert_one(
@@ -52,37 +70,205 @@ def send_thread_message(
                 "thread_ts": thread_ts or ts,
                 "ts": ts,
                 "created_at": datetime.now(UTC),
+                **(
+                    {"manual": True}
+                    if manual
+                    else {"expires_at": datetime.now(UTC) + timedelta(seconds=_RETENTION_SECONDS)}
+                ),
             }
         )
     return ts
 
 
-def _require_no_orders(signal_ts: str) -> None:
-    """이 신호의 스레드로 낸 주문이 있으면 지우지 않는다 — 접수·체결 추적과 스레드 완료 표시가 끊긴다.
+def record_signal_thread(signal_ts: str, entries: list[dict[str, Any]]) -> None:
+    """새 신호를 스레드에 연결한다. 같은 회차에서 다음 신호가 나가도 이 기록은 남는다."""
+    _messages().update_one(
+        {"thread_ts": signal_ts, "ts": signal_ts},
+        {"$set": {"signal_entries": entries}, "$unset": {"expires_at": ""}},
+    )
 
-    같은 날 같은 전략·회차·구분의 다른 신호로 낸 주문은 상관없다(회차는 하루에도 여러 번 되풀이된다).
-    접수 전 거부는 주문이 아니다.
-    """
+
+def mark_signal_thread_used(signal_ts: str) -> None:
+    _messages().update_one({"thread_ts": signal_ts, "ts": signal_ts}, {"$set": {"signal_used": True}})
+
+
+def reserve_signal_for_order(signal_ts: str, message_ts: str) -> bool:
+    """주문 요청과 신호 회수 중 먼저 기록된 쪽이 진행한다."""
+    root = {"thread_ts": signal_ts, "ts": signal_ts}
     from utils.strategy_trade_orders import _orders
 
-    today = datetime.now().strftime("%Y-%m-%d")
-    found = _orders().find_one(
-        {"created_at": {"$gte": today}, "status": {"$ne": "rejected"}, "slack.thread_ts": signal_ts}
+    if (
+        _orders().find_one({"slack.thread_ts": signal_ts, "slack.message_ts": message_ts, "status": "filled"})
+        is not None
+    ):
+        if signal_is_manual(signal_ts):
+            complete_signal_thread(signal_ts)
+        return False
+    updated = _messages().update_one(
+        {
+            **root,
+            "withdrawal_text": {"$exists": False},
+            "signal_completed": {"$ne": True},
+            "order_reserved": {"$ne": True},
+        },
+        {"$set": {"signal_used": True, "order_reserved": True}},
     )
-    if found is not None:
-        raise ValueError("이 신호로 낸 주문이 있어 삭제할 수 없습니다.")
+    return bool(updated.matched_count)
 
 
-def _delete_slack_thread(signal_ts: str) -> None:
-    """스레드의 기록된 메시지를 답글부터 지우고 뿌리를 마지막에 지운다 — 실패한 것이 있으면 에러로 알린다."""
-    records = list(_messages().find({"thread_ts": signal_ts}))
-    targets = {record["ts"]: record["channel"] for record in records if record["ts"] != signal_ts}
-    # 답글은 최신 것부터, 뿌리는 마지막.
-    ordered = [(ts, targets[ts]) for ts in sorted(targets, reverse=True)]
-    ordered.append((signal_ts, next((r["channel"] for r in records if r["ts"] == signal_ts), get_slack_channel())))
+def finish_order_reservation(signal_ts: str) -> None:
+    """동시 주문 선점만 해제한다. 완료·회수 표시는 그대로 남긴다."""
+    _messages().update_one({"thread_ts": signal_ts, "ts": signal_ts}, {"$unset": {"order_reserved": ""}})
+
+
+def signal_is_manual(signal_ts: str) -> bool:
+    record = _messages().find_one({"thread_ts": signal_ts, "ts": signal_ts})
+    return bool(record and any(e.get("origin") == "manual" for e in record.get("signal_entries", [])))
+
+
+def complete_signal_thread(signal_ts: str) -> None:
+    """메시지는 보존하고 이후 사이클에서도 같은 신호의 재주문을 막는다."""
+    _messages().update_one(
+        {"thread_ts": signal_ts, "ts": signal_ts},
+        {"$set": {"signal_used": True, "signal_completed": True}, "$unset": {"expires_at": ""}},
+    )
+
+
+def release_signal_reservation(signal_ts: str) -> None:
+    """주문 요청이 주문을 내지 못하고 끝났을 때 선점을 푼다 — 이 스레드에 주문이 하나도 없을 때만(회수가 버튼을 걷게)."""
+    from utils.strategy_trade_orders import _orders
+
+    if _orders().find_one({"slack.thread_ts": signal_ts}, {"_id": 1}) is None:
+        _messages().update_one({"thread_ts": signal_ts, "ts": signal_ts}, {"$unset": {"signal_used": ""}})
+
+
+def open_signal_threads(active_roots: set[str]) -> list[dict[str, Any]]:
+    return list(
+        _messages().find(
+            {
+                "signal_entries": {"$exists": True},
+                "signal_used": {"$ne": True},
+                "$or": [{"withdrawal_done": {"$ne": True}}, {"thread_ts": {"$in": list(active_roots)}}],
+            },
+            {"_id": 0, "thread_ts": 1, "signal_entries": 1, "withdrawal_text": 1, "withdrawal_done": 1},
+        )
+    )
+
+
+def _signal_thread_has_orders(signal_ts: str) -> bool:
+    from utils.strategy_trade_orders import _orders
+
+    return _orders().find_one({"slack.thread_ts": signal_ts}, {"_id": 1}) is not None
+
+
+def _withdrawable_root(signal_ts: str) -> dict[str, Any]:
+    return {
+        "thread_ts": signal_ts,
+        "ts": signal_ts,
+        "signal_entries": {"$exists": True},
+        "signal_used": {"$ne": True},
+        "withdrawal_text": {"$exists": False},
+    }
+
+
+def can_withdraw_signal(signal_ts: str, *, allow_unregistered: bool = False) -> bool:
+    """주문 기록이 없는 신호와 중단된 화면 회수의 재시도를 허용한다."""
+    query = _withdrawable_root(signal_ts)
+    if allow_unregistered:
+        del query["signal_entries"]
+    collection = _messages()
+    eligible = collection.find_one(query, {"_id": 1})
+    if eligible is None and allow_unregistered:
+        eligible = collection.find_one(
+            {"thread_ts": signal_ts, "ts": signal_ts, "withdrawal_text": {"$exists": True}}, {"_id": 1}
+        )
+    return eligible is not None and not _signal_thread_has_orders(signal_ts)
+
+
+#: 회수 사유 — 슬랙 회수 한 줄에 들어가는 표시 문구의 단일 소스.
+WITHDRAW_REASONS: dict[str, str] = {
+    "price_returned": "가격 복귀",
+    "settings_changed": "설정 변경",
+    "removed": "사고팔기에서 제외",
+    "session_closed": "장 마감 미사용",
+    "manual": "화면에서 회수",
+}
+
+
+def withdrawal_line(entries: list[dict[str, Any]], reason: str, detail: str | None, now: datetime) -> str:
+    """회수 표준 한 줄 — `↩️ 회수 · 종목 1호 매수 · 사유[ · 상세] · MM-DD HH:MM`(한국시간)."""
+    items = ", ".join(
+        "임의 매도"
+        if entry.get("arbitrary_id")
+        else (
+            (f"{entry['round']}호 " if entry["round"] is not None else "")
+            + ("매수" if entry["action"] == "buy" else "매도")
+        )
+        for entry in entries
+    )
+    parts = ["↩️ 회수", f"{entries[0]['name']} {items}", WITHDRAW_REASONS[reason], *([detail] if detail else [])]
+    return " · ".join([*parts, f"{now.astimezone(KST):%m-%d %H:%M}"])
+
+
+def withdraw_signal(signal_ts: str, reason: str, detail: str | None, *, entry: dict[str, Any] | None = None) -> bool:
+    """신호를 회수한다 — 사고팔기 슬랙 회수는 모두 이 함수 하나를 거친다.
+
+    본문을 표준 한 줄(`withdrawal_line`)로 바꿔 회수 기록을 남기고 앱이 단 답글은 지운다. 이 신호 스레드로 낸 주문이
+    있거나 이미 쓰인·회수된 신호면 건드리지 않고 False 를 돌려준다. 회수를 먼저 기록(선점)한 뒤 슬랙을 고치므로,
+    중간에 끊겨도 `resume_withdrawal` 이 마저 끝낸다.
+    """
+    if reason not in WITHDRAW_REASONS:
+        raise ValueError(f"알 수 없는 회수 사유입니다: {reason}")
+    root = {"thread_ts": signal_ts, "ts": signal_ts}
+    collection = _messages()
+    record = collection.find_one(root, {"signal_entries": 1, "withdrawal_text": 1, "withdrawal_done": 1})
+    entries = record.get("signal_entries") if record else None
+    if record is None or not (entries or entry):
+        raise ValueError("회수할 슬랙 신호 기록을 찾을 수 없습니다.")
+    if _signal_thread_has_orders(signal_ts):
+        mark_signal_thread_used(signal_ts)
+        return False
+    if entry is not None and record.get("withdrawal_text"):
+        if not record.get("withdrawal_done"):
+            resume_withdrawal(signal_ts)
+        return True
+    entries = entries or [entry]
+    if reason != "manual" and any(item.get("origin") == "manual" for item in entries):
+        return False
+    note = withdrawal_line(entries, reason, detail, datetime.now(UTC))
+    query = _withdrawable_root(signal_ts)
+    if entry is not None:
+        del query["signal_entries"]
+    claimed = collection.update_one(query, {"$set": {"withdrawal_text": note, "signal_entries": entries}})
+    if not claimed.matched_count:
+        return False
+    resume_withdrawal(signal_ts)
+    return True
+
+
+def resume_withdrawal(signal_ts: str) -> None:
+    """회수를 선점한 신호의 본문을 회수 한 줄로 바꾸고 앱이 보낸 답글만 지운다."""
+    root = {"thread_ts": signal_ts, "ts": signal_ts}
+    record = _messages().find_one(root, {"channel": 1, "withdrawal_text": 1})
+    if record is None or not record.get("withdrawal_text"):
+        raise ValueError("회수를 기록한 슬랙 메시지를 찾을 수 없습니다.")
+    try:
+        update_slack_message(record["withdrawal_text"], channel=record["channel"], message_ts=signal_ts, blocks=[])
+    except SlackApiError as exc:
+        if exc.response.get("error") != _ALREADY_GONE:
+            raise ValueError("회수한 슬랙 본문을 수정하지 못했습니다.") from exc
+    _delete_replies(signal_ts)
+    _forget_replies(signal_ts)
+    _messages().update_one(root, {"$set": {"withdrawal_done": True}})
+
+
+def _delete_replies(signal_ts: str) -> None:
+    """스레드에 기록된 앱 답글을 최신 것부터 지운다(본문은 남긴다) — 실패한 것이 있으면 에러로 알린다."""
+    records = _messages().find({"thread_ts": signal_ts, "ts": {"$ne": signal_ts}})
+    targets = sorted(((record["ts"], record["channel"]) for record in records), reverse=True)
     client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
     failed: list[str] = []
-    for ts, channel in ordered:
+    for ts, channel in targets:
         try:
             client.chat_delete(channel=channel, ts=ts)
         except SlackApiError as exc:
@@ -90,32 +276,32 @@ def _delete_slack_thread(signal_ts: str) -> None:
             if error != _ALREADY_GONE:
                 failed.append(error)
     if failed:
-        raise ValueError(f"슬랙 메시지를 모두 지우지 못했습니다: {', '.join(sorted(set(failed)))}")
+        raise ValueError(f"슬랙 답글을 모두 지우지 못했습니다: {', '.join(sorted(set(failed)))}")
 
 
-def _forget_thread(signal_ts: str) -> None:
-    """스레드의 메시지 기록과 스레드 추적 기록을 지운다."""
+def _forget_replies(signal_ts: str) -> None:
+    """스레드의 답글 기록과 스레드 추적 기록을 지운다 — 본문 기록(회수 기록)은 남긴다."""
     from utils.strategy_trade_orders import _SETTINGS_KEY, _config
 
-    _messages().delete_many({"thread_ts": signal_ts})
+    _messages().delete_many({"thread_ts": signal_ts, "ts": {"$ne": signal_ts}})
     _config().update_one({"_id": _SETTINGS_KEY}, {"$pull": {"signal_threads": {"thread_ts": signal_ts}}})
 
 
-def delete_signal_thread(key: str) -> dict[str, Any]:
-    """발송 기록 한 건(`key`)의 신호를 지운다 — 주문이 없을 때만. 슬랙 스레드 전체와 같은 스레드의 발송 기록을 함께 지운다."""
+@signal_lock()
+def withdraw_signal_by_key(key: str) -> dict[str, Any]:
+    """화면에서 발송 기록 한 건(`key`)의 신호를 회수한다 — 같은 메시지로 나간 발송 기록도 함께 지운다."""
     from utils.strategy_trade_notify import _load_sent_log, _save_sent_log
 
     sent_log = _load_sent_log()
     entry = sent_log.get(key)
     if entry is None:
-        raise ValueError("이미 지워진 신호입니다.")
+        raise ValueError("이미 정리된 신호입니다.")
     signal_ts = entry.get("signal_ts")
     if not signal_ts:
-        raise ValueError("슬랙 메시지 기록이 없는 신호는 지울 수 없습니다.")
+        raise ValueError("슬랙 메시지 기록이 없는 신호는 회수할 수 없습니다.")
+    if not withdraw_signal(signal_ts, "manual", None):
+        raise ValueError("이 신호로 낸 주문이 있거나 이미 쓰인·회수된 신호라 회수할 수 없습니다.")
     doomed = [k for k, value in sent_log.items() if value.get("signal_ts") == signal_ts]
-    _require_no_orders(signal_ts)
-    _delete_slack_thread(signal_ts)
-    _forget_thread(signal_ts)
     for doomed_key in doomed:
         del sent_log[doomed_key]
     _save_sent_log(sent_log)

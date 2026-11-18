@@ -4,7 +4,7 @@
 `<PROVIDER>_API_SECRET` 규칙을 따른다 (예: NAMU_PLUG_API_KEY).
 
 지금은 나무증권(NH PLUG, `nhplug` SDK) 하나다. 여기 조회는 전부 읽기 전용이고 운영 도메인으로 간다 —
-주문은 `services/broker_order_service.py`(모의투자 서버 직접 요청)가 따로 다루고, 이체 API 는 다루지 않는다.
+사고팔기 주문은 `services/broker_trade_service.py`(계좌 ID 로 나무 `broker_order_service`·메리츠 `meritz_api_service` 선택)가 따로 다루고, 이체 API 는 다루지 않는다.
 """
 
 from __future__ import annotations
@@ -43,7 +43,15 @@ MOCK_ACCOUNT_TYPE = "03"
 _MAX_PAGES = 20
 
 # 등록된 커넥터 — 화면 셀렉트가 이 목록을 그대로 쓴다.
-PROVIDERS: tuple[dict[str, str], ...] = ({"id": "NAMU_PLUG", "name": "나무증권 (NH PLUG)"},)
+# `per_account_keys` — 키가 증권사 계좌 하나에 묶이는 커넥터(메리츠). 키 이름이 우리 계좌 ID 를 따르고
+# (`{계좌ID}_API_KEY`), 요청에 계좌번호가 없어 연동에 증권사 계좌번호를 저장하지 않는다.
+# 나무증권은 키 하나로 여러 계좌를 보므로 `{커넥터}_API_KEY` 한 쌍 + 계좌번호로 고른다.
+NAMU_PROVIDER = "NAMU_PLUG"
+MERITZ_PROVIDER = "MERITZ"
+PROVIDERS: tuple[dict[str, Any], ...] = (
+    {"id": NAMU_PROVIDER, "name": "나무증권 (NH PLUG)", "per_account_keys": False},
+    {"id": MERITZ_PROVIDER, "name": "메리츠증권", "per_account_keys": True},
+)
 
 
 def is_business_success(rsp_cd: str | None, rsp_msg: str | None) -> bool:
@@ -62,16 +70,48 @@ class BrokerApiError(RuntimeError):
     """커넥터 검증/조회 오류 — 화면에 그대로 보여줄 한국어 메시지를 담는다."""
 
 
+class OrderUncertainError(BrokerApiError):
+    """주문 요청이 접수됐는지 알 수 없다(네트워크 오류·보류 응답) — 주문이 들어갔을 수도 있어 실패로 단정하면 안 된다."""
+
+
 def _env_keys(provider: str) -> tuple[str, str]:
     return f"{provider}_API_KEY", f"{provider}_API_SECRET"
 
 
-def list_providers() -> list[dict[str, Any]]:
-    """커넥터 목록 + 환경변수 존재 여부 (값은 내려보내지 않는다)."""
+def provider_spec(provider: str) -> dict[str, Any]:
+    """등록된 커넥터 한 건 — 없으면 오류."""
+    spec = next((item for item in PROVIDERS if item["id"] == provider), None)
+    if spec is None:
+        raise BrokerApiError(f"등록되지 않은 커넥터입니다: {provider}")
+    return spec
+
+
+def env_key_names(provider: str, account_id: str) -> tuple[str, str]:
+    """이 계좌가 쓸 키·시크릿 환경변수 이름 — 계좌별 키 커넥터는 계좌 ID, 아니면 커넥터 ID 를 따른다."""
+    return _env_keys(account_id if provider_spec(provider)["per_account_keys"] else provider)
+
+
+def require_env_keys(provider: str, account_id: str) -> tuple[str, str]:
+    """이 계좌의 키·시크릿 값 — 하나라도 없으면 어느 이름이 필요한지 알려 주는 오류."""
+    key_name, secret_name = env_key_names(provider, account_id)
+    key, secret = os.environ.get(key_name), os.environ.get(secret_name)
+    if not key or not secret:
+        raise BrokerApiError(f".env 에 {key_name} / {secret_name} 가 필요합니다.")
+    return key, secret
+
+
+def list_providers(account_id: str) -> list[dict[str, Any]]:
+    """커넥터 목록 + 이 계좌가 쓸 환경변수의 존재 여부·이름 (값은 내려보내지 않는다)."""
     rows = []
     for provider in PROVIDERS:
-        key_name, secret_name = _env_keys(provider["id"])
-        rows.append({**provider, "env_ok": bool(os.environ.get(key_name)) and bool(os.environ.get(secret_name))})
+        key_name, secret_name = env_key_names(provider["id"], account_id)
+        rows.append(
+            {
+                **provider,
+                "env_ok": bool(os.environ.get(key_name)) and bool(os.environ.get(secret_name)),
+                "env_key_name": key_name,
+            }
+        )
     return rows
 
 
@@ -287,8 +327,8 @@ def list_broker_accounts(provider: str) -> list[dict[str, Any]]:
 
     화면의 '확인' 버튼이 부른다 — 토큰 발급까지 실제로 수행해 키가 유효한지 검증된다.
     """
-    if provider != "NAMU_PLUG":
-        raise BrokerApiError(f"등록되지 않은 커넥터입니다: {provider}")
+    if provider != NAMU_PROVIDER:
+        raise BrokerApiError(f"계좌 나열은 나무증권만 합니다(계좌별 키 커넥터는 고를 계좌가 없습니다): {provider}")
 
     accounts = _namu_call("/n2/acctinfo", {}).get("Output_0", [])
     rows: list[dict[str, Any]] = []
@@ -370,39 +410,121 @@ def parse_balance(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def fetch_broker_balance(provider: str, account_no: str) -> dict[str, Any]:
-    """잔고를 표준형으로 정규화해 돌려주고, '적용' 용으로 잠시 캐시한다.
+def linked_provider(account_settings: dict[str, Any]) -> str:
+    """계좌 설정에 저장된 증권사 API 연동의 커넥터 id — 연동이 없으면 오류."""
+    provider = str((account_settings.get("broker_api") or {}).get("provider") or "").strip().upper()
+    if not provider:
+        raise BrokerApiError(f"'{account_settings.get('account_id')}' 에 증권사 API 연동이 저장돼 있지 않습니다.")
+    return provider
 
-    필드 근거 (공식 openapi.json — /krstock/inquiry/v1/balance):
-      - 현금 = `nxt2_dd_dca` (D+2 예수금) — 미결제 매수·매도가 반영된 실질 현금.
-        `dca`(예수금)는 결제 전 금액이라 매수 직후에는 실제보다 크게 나온다.
-      - 수량 = `rsdl_qty` (잔량수량) — 미결제 포함 현재 잔량.
-      - 평단 = `phs_pr` (매입가격).
+
+def _provider_balance(account_id: str, account_settings: dict[str, Any], provider: str) -> dict[str, Any]:
+    """커넥터별 잔고 조회 → 표준형(통화별 현금 `cash_map`·총자산·보유)."""
+    if provider == NAMU_PROVIDER:
+        # 필드 근거 (공식 openapi.json — /krstock/inquiry/v1/balance):
+        #   현금 = `nxt2_dd_dca`(D+2 예수금, 미결제 반영) · 수량 = `rsdl_qty` · 평단 = `phs_pr`.
+        account_no = str((account_settings.get("broker_api") or {}).get("account_no") or "").strip()
+        if not account_no:
+            raise BrokerApiError(f"'{account_id}' 의 나무증권 연동에 계좌번호가 없습니다.")
+        parsed = parse_balance(_namu_balance(account_no))
+        return {
+            "cash_map": {"KRW": parsed["cash"]},
+            "total_asset": parsed["total_asset"],
+            "holdings": parsed["holdings"],
+        }
+    if provider == MERITZ_PROVIDER:
+        from services.meritz_api_service import fetch_balance
+
+        return fetch_balance(account_id, str(account_settings.get("country_code") or ""))
+    raise BrokerApiError(f"등록되지 않은 커넥터입니다: {provider}")
+
+
+def _account_cash_map(
+    account_id: str, account_settings: dict[str, Any], broker_cash: dict[str, float]
+) -> dict[str, float]:
+    """증권사 통화별 현금 → 이 계좌가 담는 통화(`cash_currencies`)의 현금 맵.
+
+    계좌에 없는 통화에 돈이 있으면 버리지 않고 막는다 — 현금 통화에 추가하라고 알린다.
+    증권사가 주지 않은 계좌 통화는 0 이다(그 통화 예수금이 없다는 응답).
     """
-    if provider != "NAMU_PLUG":
-        raise BrokerApiError(f"등록되지 않은 커넥터입니다: {provider}")
-    result = {"provider": provider, "account_no": account_no, **parse_balance(_namu_balance(account_no))}
-    _FETCH_CACHE.set(_FETCH_CACHE.make_key(provider, account_no), result)
+    from utils.cash_model import resolve_cash_currencies
+
+    currencies = resolve_cash_currencies(account_settings)
+    stray = {code: amount for code, amount in broker_cash.items() if code not in currencies and amount != 0}
+    if stray:
+        listed = ", ".join(f"{code} {amount:,.2f}" for code, amount in stray.items())
+        raise BrokerApiError(
+            f"'{account_id}' 의 현금 통화({', '.join(currencies)})에 없는 예수금이 있습니다: {listed} — 계좌 설정의 현금 통화에 추가하세요."
+        )
+    return {code: float(broker_cash.get(code, 0.0)) for code in currencies}
+
+
+def _require_pool_holdings(account_id: str, holdings: list[dict[str, Any]]) -> None:
+    """증권사 보유 종목이 모두 종목풀에 있어야 한다 — 화면에서 종목을 담을 때와 같은 해석(`resolve_ticker_meta`).
+
+    종목풀에 없는 종목은 이름·가격 캐시·버킷이 없어 평가가 비고 자산 요약이 깨진다. 저장하지 않고 알린다.
+    """
+    from utils.ticker_resolver import resolve_ticker_meta
+
+    missing = []
+    for row in holdings:
+        try:
+            resolve_ticker_meta(row["ticker"], account_id=account_id)
+        except (RuntimeError, ValueError):
+            missing.append(f"{row['name']}({row['ticker']})")
+    if missing:
+        raise BrokerApiError(
+            f"'{account_id}' 의 증권사 보유 중 종목풀에 없는 종목이 있습니다: {', '.join(missing)} — "
+            "'종목 순위' 화면에서 먼저 종목풀에 추가하세요."
+        )
+
+
+def fetch_broker_balance(account_id: str) -> dict[str, Any]:
+    """계좌 설정의 연동으로 잔고를 불러와 표준형으로 돌려주고, '적용' 용으로 잠시 캐시한다.
+
+    `cash_map` 은 계좌 현금 통화별 금액, `cash` 는 그중 계좌 통화(주 통화) 금액이다.
+    """
+    from utils.settings_loader import get_account_settings
+
+    account_settings = get_account_settings(account_id)
+    provider = linked_provider(account_settings)
+    balance = _provider_balance(account_id, account_settings, provider)
+    _require_pool_holdings(account_id, balance["holdings"])
+    cash_map = _account_cash_map(account_id, account_settings, balance["cash_map"])
+    currency = str(account_settings["currency"]).strip().upper()
+    result = {
+        "provider": provider,
+        "account_id": account_id,
+        "currency": currency,
+        "cash": cash_map[currency],
+        "cash_map": cash_map,
+        "total_asset": balance["total_asset"],
+        "holdings": balance["holdings"],
+    }
+    _FETCH_CACHE.set(_FETCH_CACHE.make_key(account_id), result)
     return result
 
 
-def cached_broker_balance(provider: str, account_no: str) -> dict[str, Any] | None:
+def cached_broker_balance(account_id: str) -> dict[str, Any] | None:
     """가장 최근 불러오기 결과 — '적용' 이 재호출 없이 쓴다. 없으면 None."""
-    return _FETCH_CACHE.get(_FETCH_CACHE.make_key(provider, account_no))
+    return _FETCH_CACHE.get(_FETCH_CACHE.make_key(account_id))
 
 
 def apply_fetched_balance(account_id: str, provider: str, fetched: dict[str, Any]) -> dict[str, Any]:
     """불러온 잔고를 portfolio_master 에 반영한다 — 수동 '덮어쓰기' 와 배치가 공용.
 
     기존 보유의 메모·매수일·정렬은 보존하고 수량·평단·현금만 증권사 값으로 바꾼다.
-    변경 주체(updated_by)는 커넥터 id 로 남는다.
+    현금은 통화별 맵 전체를 바꾸고, 레거시 원화 합계(`cash_balance`)는 자산 화면 수기 저장과 같이
+    맵을 현재 환율로 환산한 값이다. 변경 주체(updated_by)는 커넥터 id 로 남는다.
     """
+    from services.price_service import get_exchange_rates
+    from utils.cash_model import cash_total_krw
     from utils.portfolio_io import load_portfolio_master, save_portfolio_master
-    from utils.settings_loader import get_account_settings
 
     current = load_portfolio_master(account_id) or {"holdings": []}
     existing_by_ticker = {str(row.get("ticker") or ""): row for row in current.get("holdings") or []}
-    currency = str((get_account_settings(account_id) or {}).get("currency") or "KRW").strip().upper()
+    currency = fetched["currency"]
+    cash_map = fetched["cash_map"]
 
     holdings = []
     for index, row in enumerate(fetched["holdings"]):
@@ -421,12 +543,14 @@ def apply_fetched_balance(account_id: str, provider: str, fetched: dict[str, Any
             }
         )
 
+    foreign = [code for code in cash_map if code != "KRW"]
+    rates = get_exchange_rates(foreign) if foreign else {}
     ok = save_portfolio_master(
         account_id,
         holdings,
-        cash_balance=fetched["cash"],
-        # 자산 화면이 우선하는 다통화 맵도 함께 — 계좌 통화만 갱신(다른 통화 잔액 보존).
-        cash_map={currency: fetched["cash"]},
+        cash_balance=round(cash_total_krw(cash_map, rates), 2),
+        cash_balance_native=fetched["cash"],
+        cash_map=cash_map,
         updated_by=provider,
     )
     if not ok:

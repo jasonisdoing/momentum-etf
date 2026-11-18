@@ -11,7 +11,7 @@ from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.monthly_service import _load_monthly_docs as _load_monthly_docs_with_running
 from utils.normalization import normalize_number, to_iso_string
-from utils.portfolio_io import load_real_holdings_table
+from utils.portfolio_io import get_latest_daily_snapshot, load_real_holdings_table
 from utils.yearly_service import _load_yearly_docs as _load_yearly_docs_with_running
 
 logger = get_app_logger()
@@ -197,6 +197,15 @@ def _calculate_weekly_docs(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def account_period_profit_and_base(
+    total_assets: float, total_principal: float, previous_snapshot: dict[str, Any]
+) -> tuple[float, float]:
+    """입출금을 제외한 손익과 수익률 분모를 반환한다. 인출은 분모에서 차감하지 않는다."""
+    previous_assets = normalize_number(previous_snapshot.get("total_assets"))
+    deposit = total_principal - normalize_number(previous_snapshot.get("total_principal"))
+    return total_assets - previous_assets - deposit, previous_assets + max(deposit, 0.0)
+
+
 def load_dashboard_data() -> dict[str, Any]:
     db = get_db_connection()
     if db is None:
@@ -204,14 +213,13 @@ def load_dashboard_data() -> dict[str, Any]:
 
     configs = load_account_configs()
     portfolio_doc = db.portfolio_master.find_one({"master_id": "GLOBAL"}) or {}
-    snapshot_docs = list(db.daily_snapshots.find().sort("snapshot_date", -1).limit(2))
+    latest_snapshot = db.daily_snapshots.find_one(sort=[("snapshot_date", -1)])
+    previous_snapshot = get_latest_daily_snapshot("TOTAL", before_today=True)
     weekly_base_snapshot = _find_latest_snapshot_before_week_start(db)
     weekly_docs = [
         doc for doc in db.weekly_fund_data.find().sort("week_date", -1) if normalize_number(doc.get("total_assets")) > 0
     ]
 
-    latest_snapshot = snapshot_docs[0] if snapshot_docs else None
-    previous_snapshot = snapshot_docs[1] if len(snapshot_docs) > 1 else None
     latest_weekly = _calculate_weekly_docs(weekly_docs)[0] if weekly_docs else None
 
     portfolio_accounts = {
@@ -268,33 +276,22 @@ def load_dashboard_data() -> dict[str, Any]:
         net_profit = total_assets - total_principal
         net_profit_pct = (net_profit / total_principal) * 100 if total_principal > 0 else 0.0
         cash_ratio = (cash_balance / total_assets) * 100 if total_assets > 0 else 0.0
-        previous_total_assets = normalize_number(previous_snapshot_account.get("total_assets"))
-        weekly_base_total_assets = normalize_number(weekly_base_snapshot_account.get("total_assets"))
-        # daily_profit / weekly_profit 은 입출금 영향을 제거한 시장 변동분만 계산한다.
-        previous_account_principal = normalize_number(previous_snapshot_account.get("total_principal"))
-        weekly_base_account_principal = normalize_number(weekly_base_snapshot_account.get("total_principal"))
         # 전일 스냅샷에 계좌가 없으면(생성 첫날) 전일 자산·원금을 0으로 보고 계산한다 —
         # 첫날 손익 = 총자산 − 원금, 수익률 분모 = 당일 입금(원금). 0 처리하면 첫날이 공백이 된다.
-        daily_deposit = total_principal - previous_account_principal
-        weekly_deposit = total_principal - weekly_base_account_principal
-        daily_profit = total_assets - previous_total_assets - daily_deposit
-        weekly_profit = total_assets - weekly_base_total_assets - weekly_deposit
-
-        # 수익률 분모 = 직전 자산 + 당일(주간) 입금 — 신규 계좌(전일 0)나 큰 입금이 있는
-        # 날에도 유입 자금 기준의 수익률이 나온다. 인출(음수)은 분모에서 빼지 않는다
-        # (인출한 돈도 그 시점까지는 운용됐으므로). Modified Dietz 의 단순형.
-        daily_return_pct_acc = calculate_period_return_pct(
-            daily_profit, previous_total_assets + max(daily_deposit, 0.0)
+        daily_profit, daily_base = account_period_profit_and_base(
+            total_assets, total_principal, previous_snapshot_account
         )
-        weekly_return_pct_acc = calculate_period_return_pct(
-            weekly_profit, weekly_base_total_assets + max(weekly_deposit, 0.0)
+        weekly_profit, weekly_base = account_period_profit_and_base(
+            total_assets, total_principal, weekly_base_snapshot_account
         )
+        daily_return_pct_acc = calculate_period_return_pct(daily_profit, daily_base)
+        weekly_return_pct_acc = calculate_period_return_pct(weekly_profit, weekly_base)
         # 합계용 누적 — 분자(손익)만 더하면 수익률 분모가 없다. 계좌별과 같은 분모
         # (직전 자산 + 당일 입금)를 함께 모아 합계 수익률도 같은 정의로 낸다.
         totals_daily_profit += daily_profit
-        totals_daily_base += previous_total_assets + max(daily_deposit, 0.0)
+        totals_daily_base += daily_base
         totals_weekly_profit += weekly_profit
-        totals_weekly_base += weekly_base_total_assets + max(weekly_deposit, 0.0)
+        totals_weekly_base += weekly_base
         accounts.append(
             {
                 "account_id": config["account_id"],

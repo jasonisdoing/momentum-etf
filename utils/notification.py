@@ -108,6 +108,8 @@ def app_link(path: str, label: str) -> str:
 def _send_slack_message_via_bot(
     payload: dict[str, Any] | str,
     thread_ts: str | None = None,
+    *,
+    channel: str | None,
 ) -> str | None:
     """
     전달받은 페이로드를 슬랙으로 전송합니다.
@@ -121,7 +123,8 @@ def _send_slack_message_via_bot(
         text = str(payload.get("text", ""))
         blocks = payload.get("blocks")
 
-    channel = get_slack_channel()
+    if channel is None:
+        channel = get_slack_channel()
     token = os.environ.get("SLACK_BOT_TOKEN")
 
     if not channel:
@@ -164,12 +167,24 @@ def send_slack_message_v2(
     text: str,
     blocks: list[dict[str, Any]] | None = None,
     thread_ts: str | None = None,
+    *,
+    channel: str | None = None,
 ) -> str | None:
     """
     범용 슬랙 메시지 전송 함수 (WebClient 기반).
     메시지의 ts(timestamp)를 반환합니다.
     """
-    return _send_slack_message_via_bot({"text": text, "blocks": blocks}, thread_ts=thread_ts)
+    return _send_slack_message_via_bot({"text": text, "blocks": blocks}, thread_ts=thread_ts, channel=channel)
+
+
+def update_slack_message(
+    text: str, *, channel: str, message_ts: str, blocks: list[dict[str, Any]] | None = None
+) -> None:
+    """봇이 보낸 메시지를 수정한다. 호출자가 슬랙 오류에 따라 처리할 수 있게 예외를 전달한다."""
+    token = os.environ.get("SLACK_BOT_TOKEN")
+    if not token or WebClient is None:
+        raise RuntimeError("슬랙 메시지를 수정할 봇 토큰 또는 SDK가 없습니다.")
+    WebClient(token=token).chat_update(channel=channel, ts=message_ts, text=text, blocks=blocks)
 
 
 def _format_shares_for_country(quantity: Any) -> str:

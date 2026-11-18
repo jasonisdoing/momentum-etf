@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from fastapi_app.dependencies import require_internal_token
 from services.broker_api_service import BrokerApiError
 from utils.slack_mock_orders import (
+    fill_confirm_modal,
     open_confirm_modal,
     parse_payload,
     run_submission,
@@ -37,7 +38,8 @@ def post_interaction(
         verify_signature(body.raw_body, body.timestamp, body.signature)
         payload = parse_payload(body.raw_body)
         if payload["type"] == "block_actions":
-            open_confirm_modal(payload)
+            if (job := open_confirm_modal(payload)) is not None:
+                background.add_task(fill_confirm_modal, job)
         elif payload["type"] == "view_submission":
             background.add_task(run_submission, submitted_request(payload))
         else:

@@ -15,7 +15,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from config import MARKET_SCHEDULES
+from config import INSTRUMENT_TRADING_WINDOWS, MARKET_SCHEDULES
 
 # 세션 코드 — 화면 문구는 프론트가 정한다(여기서는 상태만 준다).
 PREMARKET = "premarket"
@@ -103,6 +103,57 @@ def trading_day_today(country: str, now: datetime | None = None) -> date | None:
     """그 시장의 현지 오늘이 거래일이면 그 날짜, 휴장일이면 None."""
     today = market_today(country, now=now)
     return today if _is_trading_day(country, today) else None
+
+
+def _in_us_daymarket(local: datetime) -> date | None:
+    """미국 데이장(오버나이트) 안이면 그 구간이 속한 **다음 거래일**, 아니면 None.
+
+    20:00 ET 부터 다음 날 03:50 ET 까지라 자정을 넘긴다. 일요일 저녁~금요일 새벽이 한국의 월~금 낮이므로
+    거래일 판정은 구간이 끝나는 날(다음 날) 기준이다 — 금요일 저녁 구간은 토요일이라 거래일이 아니다.
+    """
+    schedule = _schedule("us")
+    if local.time() >= schedule["daymarket_open"]:
+        return local.date() + timedelta(days=1)
+    if local.time() < schedule["daymarket_close"]:
+        return local.date()
+    return None
+
+
+def is_instrument_trading_time(country: str, instrument_kind: str, *, now: datetime) -> bool:
+    """현지 거래일의 종목 종류별 매매 구간에 들어 있는지 확인한다. 미국은 데이장(자정을 넘는 구간)도 매매 구간이다."""
+    from utils.trading_calendar import get_trading_days
+
+    schedule = _schedule(country)
+    market = country.strip().lower()
+    try:
+        windows = INSTRUMENT_TRADING_WINDOWS[market][instrument_kind]
+    except KeyError as error:
+        raise ValueError(f"종목 종류별 거래 시간표가 없습니다: {market}/{instrument_kind}") from error
+    local = now.astimezone(ZoneInfo(schedule["timezone"]))
+    if market == "us" and (daymarket_day := _in_us_daymarket(local)) is not None:
+        day = daymarket_day.isoformat()
+        return bool(get_trading_days(day, day, market))
+    if not any(start <= local.time() < end for start, end in windows):
+        return False
+    day = local.date().isoformat()
+    return bool(get_trading_days(day, day, market))
+
+
+#: 국장 주문 거래소 — 정규장은 KRX, 개별주의 정규장 밖(프리·애프터) 거래는 대체거래소(NXT)다. ETF 는 KRX 에만 있다.
+VENUE_KRX = "KRX"
+VENUE_NXT = "NXT"
+
+
+def kor_order_venue(instrument_kind: str, *, now: datetime) -> str:
+    """지금 국장 종목에 주문을 낼 거래소 — 정규장이면 KRX, 개별주의 프리·애프터마켓이면 NXT.
+
+    그 종목 종류의 거래 시간 밖이면 낼 곳이 없어 ValueError 다(ETF 는 정규장만).
+    """
+    if not is_instrument_trading_time("kor", instrument_kind, now=now):
+        raise ValueError("지금은 이 종목의 거래 시간이 아닙니다.")
+    start, end = INSTRUMENT_TRADING_WINDOWS["kor"]["etf"][0]
+    local = now.astimezone(ZoneInfo(_schedule("kor")["timezone"])).time()
+    return VENUE_KRX if start <= local < end else VENUE_NXT
 
 
 def aftermarket_in_daily_change(country: str) -> bool:

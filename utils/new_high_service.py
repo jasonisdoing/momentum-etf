@@ -2,7 +2,7 @@
 
 전략 규칙
 --------
-1. 유니버스: 설정에서 고른 종목풀 1개. 제외(exclude_from_ranking)는 제외.
+1. 유니버스: 설정에서 고른 종목풀 1개. 제외(exclude_from_trading)는 제외.
 2. 진입: 종가가 **직전 52주 최고가**를 넘어선 날(돌파). 다음 거래일 **시가** 체결.
    창은 거래일 수가 아니라 **달력 52주**다(`HIGH_WINDOW_WEEKS`). 화면 문구도 이
    값에서 만들어, 창을 바꾸면 문구가 따라온다.
@@ -109,11 +109,11 @@ def pool_options() -> list[dict[str, Any]]:
     return build_pool_options(available_pools())
 
 
-def load_universe(pool: str) -> list[dict[str, str]]:
-    """선택한 종목풀의 투자 후보 목록 — 정의는 `utils.stock_list_io` 한 곳이다."""
+def load_universe(pool: str) -> list[dict[str, Any]]:
+    """선택한 종목풀의 투자 후보 목록(거래 제외 종목 뺌) — 정의는 `utils.stock_list_io` 한 곳이다."""
     from utils.stock_list_io import load_pool_universe
 
-    return load_pool_universe(pool)
+    return load_pool_universe(pool, include_excluded=False)
 
 
 def load_price_frames(universe: list[dict[str, str]]) -> dict[str, pd.DataFrame]:

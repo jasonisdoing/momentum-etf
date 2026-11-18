@@ -1,7 +1,7 @@
 """데이터 소스 카탈로그 — 어떤 데이터를 어디서 가져오는지 한곳에 정리한다.
 
 화면(`/data_source`)이 읽는 단일 소스다. 새 외부 소스를 붙이거나 기존 소스를
-교체하면 여기도 함께 고친다. 목록은 사람이 관리하는 정적 정의이고, 호주 ETF
+교체하면 여기도 함께 고친다. 목록은 사람이 관리하는 정적 정의이고, 미국·호주 ETF
 구성종목 수집 현황만 실제 캐시에서 집계해 붙인다(발행사마다 성공/실패가 갈리므로).
 """
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+from config import AU_QUOTEAPI_URL, NAVER_FINANCE_CHART_API_URL, NAVER_FINANCE_ETF_API_URL, TOSS_INVEST_API_BASE_URL
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -42,6 +43,7 @@ HOLDINGS_SOURCE_LABELS: dict[str, str] = {
     "wisdomtree_us_api": "WisdomTree 미국 공식 API",
     "schwab_us_html": "Schwab 미국 공식 전체 보유",
     "proshares_us_html": "ProShares 미국 공식 전체 보유",
+    "amplify_us_api": "Amplify 미국 공식 전체 보유",
     "yfinance_holdings": "yfinance (상위 10종목)",
     "naver_etf_component": "네이버 ETF 구성종목",
 }
@@ -56,34 +58,34 @@ DATA_SOURCES: list[dict[str, Any]] = [
         "provider": "네이버 증권",
         "endpoint": "stock.naver.com/api/polling/domestic/stock",
         "usage": "한국 개별주 실시간 가격·등락률",
-        "code_ref": "utils/data_loader.py",
-        "note": "ETF 는 iNAV API 를 먼저 쓰고, 없으면 이 API 로 보완한다.",
+        "code_ref": "utils/realtime_quotes.py",
+        "note": "ETF 목록에서 시세를 받지 못한 종목도 이 경로에서 조회한다.",
     },
     {
         "category": "실시간 시세",
         "country": "kor",
         "provider": "네이버 증권",
-        "endpoint": "stock.naver.com/api/domestic/detail/{ticker}/ETFBase",
-        "usage": "한국 ETF iNAV·괴리율",
-        "code_ref": "services/etf_meta_service.py",
-        "note": None,
+        "endpoint": NAVER_FINANCE_ETF_API_URL,
+        "usage": "한국 ETF 현재가·등락률·iNAV",
+        "code_ref": "utils/realtime_quotes.py",
+        "note": "전체 ETF 목록을 한 번에 조회한다. 실시간 괴리율은 현재가와 iNAV로 계산한다.",
     },
     {
         "category": "실시간 시세",
         "country": "us",
         "provider": "토스증권",
-        "endpoint": "wts-info-api.tossinvest.com",
+        "endpoint": f"{TOSS_INVEST_API_BASE_URL}/api/v3/stock-prices/details",
         "usage": "미국 주식·ETF 실시간 가격",
-        "code_ref": "utils/data_loader.py",
+        "code_ref": "utils/realtime_quotes.py",
         "note": "심볼→상품코드 매핑을 먼저 조회한 뒤 50개씩 묶어 시세를 받는다.",
     },
     {
         "category": "실시간 시세",
         "country": "au",
         "provider": "Market Index (QuoteAPI)",
-        "endpoint": "quoteapi.com/api/v5/symbols",
+        "endpoint": AU_QUOTEAPI_URL,
         "usage": "호주 주식·ETF 실시간 가격",
-        "code_ref": "utils/data_loader.py",
+        "code_ref": "utils/realtime_quotes.py",
         "note": "티커는 ASX: 접두사를 벗기고 소문자 + .asx 형식으로 보낸다.",
     },
     {
@@ -92,26 +94,35 @@ DATA_SOURCES: list[dict[str, Any]] = [
         "provider": "네이버 증권",
         "endpoint": "stock.naver.com/api/polling/worldstock/stock",
         "usage": "해외 상장 종목(미국 외) 가격 보완",
-        "code_ref": "utils/data_loader.py",
+        "code_ref": "utils/realtime_quotes.py",
         "note": "ETF 구성종목 중 유럽·일본 등 미국 외 종목에 쓴다.",
     },
     # ── 시세 (과거) ──────────────────────────────────────────────────
     {
         "category": "과거 시세",
+        "country": "kor",
+        "provider": "pykrx (KRX)",
+        "endpoint": "pykrx 국내 주식·ETF·ETN 일봉 조회",
+        "usage": "한국 종목 정규장 일봉 — 순위·백테스트·비교용 캐시",
+        "code_ref": "utils/data_loader.py",
+        "note": None,
+    },
+    {
+        "category": "과거 시세",
         "country": "all",
         "provider": "yfinance (Yahoo Finance)",
         "endpoint": "yfinance 라이브러리",
-        "usage": "일별 OHLCV 캐시 — 순위·백테스트·비교 화면의 기반 데이터",
+        "usage": "미국·호주 종목과 지수의 일봉 — 순위·백테스트·비교용 캐시",
         "code_ref": "utils/data_loader.py",
-        "note": "호주는 ASX:NAB → NAB.AX, 한국은 069500.KS 형태로 변환해 조회한다.",
+        "note": "호주 종목은 Yahoo 티커 형식(예: NAB.AX)으로 조회한다.",
     },
     {
         "category": "과거 시세",
         "country": "kor",
         "provider": "네이버 금융",
-        "endpoint": "fchart.stock.naver.com/sise.nhn",
-        "usage": "한국 종목 차트 데이터 보완",
-        "code_ref": "config.py",
+        "endpoint": NAVER_FINANCE_CHART_API_URL,
+        "usage": "한국 종목 일봉 — 차트·확정 정규장 종가 조회",
+        "code_ref": "utils/naver_chart.py",
         "note": None,
     },
     {
@@ -197,6 +208,15 @@ DATA_SOURCES: list[dict[str, Any]] = [
         "category": "ETF 상세 - 한국",
         "country": "kor",
         "provider": "네이버 증권",
+        "endpoint": "stock.naver.com/api/domestic/detail/{ticker}/ETFBase",
+        "usage": "한국 ETF 운용보수·순자산·상장일 등 기본정보",
+        "code_ref": "services/etf_meta_service.py",
+        "note": None,
+    },
+    {
+        "category": "ETF 상세 - 한국",
+        "country": "kor",
+        "provider": "네이버 증권",
         "endpoint": "stock.naver.com/api/domestic/detail/{ticker}/ETFComponent",
         "usage": "한국 ETF 구성종목 전체",
         "code_ref": "services/etf_holdings_service.py",
@@ -273,6 +293,7 @@ US_HOLDINGS_FALLBACK_ORDER: list[str] = [
     "wisdomtree_us_api",
     "schwab_us_html",
     "proshares_us_html",
+    "amplify_us_api",
     "yfinance_holdings",
 ]
 
@@ -358,6 +379,7 @@ US_OFFICIAL_SOURCES: dict[str, str] = {
     "WisdomTree": "wisdomtree_us_api",
     "Schwab": "schwab_us_html",
     "ProShares": "proshares_us_html",
+    "Amplify": "amplify_us_api",
 }
 
 
@@ -408,8 +430,12 @@ def _load_etf_rows(ticker_type: str) -> list[dict[str, Any]]:
 
 # 발행사별 행에 붙일 호출 대상·코드 위치 (수집 소스 기준).
 _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
+    "amplify_us_api": (
+        "firestore.googleapis.com → amplify-etfs-data-feed/funds/DIVO/holdings",
+        "services/amplify_us_service.py",
+    ),
     "proshares_us_html": (
-        "www.proshares.com/our-etfs/strategic/nobl (공식 전체 보유 표)",
+        "www.proshares.com/our-etfs/ → strategic/nobl · leveraged-and-inverse/rom",
         "services/proshares_us_service.py",
     ),
     "vaneck_au_xlsx": (
@@ -512,7 +538,8 @@ _SOURCE_ENDPOINTS: dict[str, tuple[str, str]] = {
     ),
 }
 _SOURCE_NOTES: dict[str, str] = {
-    "proshares_us_html": "NOBL 공식 전체 보유 표의 종목·기타 순자산과 공시 비중을 받는다. 미공시 비중은 그대로 유지한다. 미등록 ProShares ETF는 기존 Yahoo 경로를 사용하며, 공식 수집 실패 시 기존 데이터를 유지한다.",
+    "amplify_us_api": "DIVO 공식 전체 보유내역을 읽고 옵션·현금과 공시 비중을 보존한다. 미연동 Amplify ETF는 Yahoo 경로를 사용한다.",
+    "proshares_us_html": "NOBL·ROM의 공식 전체 보유 표를 읽고 주식·스왑·국채 등과 공시 비중을 그대로 저장한다. 미등록 상품은 Yahoo 경로를 사용하며, 공식 수집 실패 시 기존 데이터를 유지한다.",
     "schwab_us_html": "사이트맵의 공식 상품 페이지로 ETF를 확인하고 전체 보유 페이지를 끝까지 넘겨 주식·현금 전체를 받는다(브라우저 흉내 요청). 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "wisdomtree_us_api": "공식 ETF 목록에서 상품 ID를 확인하고 전체 주식·현금·선물 목록을 받는다(Cloudflare 때문에 브라우저 흉내 요청). 원본 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",
     "vaneck_au_xlsx": "공식 ETF 목록에서 상품을 확인하고 전체 보유 XLSX(파일명·제목 기준일 일치 확인)로 주식·현금 전체를 받는다. 공시 비중을 유지하며 공식 수집 실패 시 기존 데이터를 유지한다.",

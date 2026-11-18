@@ -10,16 +10,17 @@
 | 컨테이너 | `momentum-etf-app-1`(Node, 80) · `momentum-etf-fastapi_app-1`(FastAPI, 8000, 내부) · MongoDB · `nginx-proxy` · `nginx-proxy-acme` |
 | 서버 `data/` | 읽기 전용 마운트 — 서버에서 갱신돼야 하는 데이터는 파일이 아니라 DB(`index_constituents` 등) |
 
-VM 의 역할은 컨테이너 가동뿐이다. 자동 배치는 돌지 않는다.
+VM 호스트의 시스템 cron은 사용하지 않는다.
 
 ## 배치
 
-- **모든 자동 배치는 로컬(Mac)** 의 `infra/server_scheduler.py` 가 `infra/cron/crontab` 을 파싱해 APScheduler 로 실행한다. VM cron 은 CPU 100% 다운이 반복돼 제거했다(`infra/cron/install.sh --uninstall`).
+- 자동 배치는 서버의 `scheduler` 컨테이너가 `infra/cron/crontab`을 읽어 큐에 등록한다. 로컬 스케줄러는 큐의 작업만 처리한다.
 - `crontab` 이 배치 정의의 단일 소스. 잡 이름 = action 키. 비활성화는 주석이 아니라 **라인 삭제**(과거 파서가 주석 라인을 등록한 적 있음). 스크립트 뒤 인자는 전달되지만 `-m` 은 안 된다.
 - 락: Mongo `batch_locks`(`_id=<job>`). 로컬 자동 실행과 `/batch` 수동 실행이 같은 락을 쓴다. 소유자는 `APP_TYPE`(`Local` / 미설정=PROD). 꺼져 있던 시간의 누락분은 따라잡지 않는다.
 - 큐(`batch_queue`)는 대기·실행 중 항목을 24시간 TTL로, 끝난 항목은 30일(`RUN_HISTORY_DAYS`) 보관한다. 이 이력 전체의 평균이 `/batch`의 대기·예상시간의 원천이다.
 - 큐는 서버·로컬이 공유. 로컬에만 결과가 남는 잡은 `utils/batch_queue.LOCAL_ONLY_JOBS` 에 등록하면 서버 워커가 claim 하지 않는다.
-- 배치 코드는 Docker 이미지에 포함 → 변경 시 재배포. `crontab`/`run_batch` 는 마운트라 즉시 반영.
+- 배치 코드는 Docker 이미지에 포함되므로 변경 시 재배포한다. 스케줄러는 시작할 때 `infra/cron/crontab`을 읽으므로 시간표 변경 후 다시 시작해야 한다.
+- 미장까지 다루는 배치(잔고 동기화·사고팔기 알림·슬랙 주문 결과 알림 등)는 월~토 24시간 돈다 — 종목마다 그 시장의 거래일·거래 시간을 배치 안에서 판정하고, 아니면 바로 끝난다.
 - 로그: `logs/cron/<job>.log`. 실패 시에만 래퍼 슬랙 알림. 환율 실패 예외에는 통화·Yahoo 심볼·시도 횟수·원본 오류가 포함된다.
 - 배치 추가·삭제 시 함께 고칠 7곳은 [developer_guide.md](developer_guide.md) §4.
 - 미국 가격 캐시는 야후 수집 뒤 네이버로 빈 OHLC를 복구하고, 토스로 최근 완료 거래일의 빈 거래량을 복구한 다음 `stock_meta` 가격 파생값을 계산한다. 복구 실패 항목은 가격 캐시 점검 알림에 포함한다.
@@ -32,7 +33,7 @@ VM 의 역할은 컨테이너 가동뿐이다. 자동 배치는 돌지 않는다
 | `reference_meta_updater` | `stock_reference_meta_updater.py` | 배치 B: 식별·상세 메타, ETF 구성종목·배당 |
 | `price_metrics_updater` | `stock_price_metrics_updater.py` | 배치 A: 거래량·기간수익률 등 가격 파생 |
 | `data_aggregate` | `collect_data.py` | 일별 원장 → 주/월 재집계 |
-| `asset_summary` | `slack_asset_summary.py` | 자산 요약 슬랙 |
+| `asset_summary` | `slack_asset_summary.py` | 전용 슬랙 채널의 한국시간 날짜별 자산 요약 본문과 스레드 갱신. 메시지 ID는 `system_config.asset_summary_slack`에 저장 |
 | `market_hours_analysis` | `analyze_market_hours.py` | |
 | `us_market_stocks` / `aus_market_stocks` | `update_us_market_stocks.py` / `update_aus_market_stocks.py` | `index_constituents` 갱신. 구성종목 수가 범위 밖이면 저장 안 하고 실패. 미국 배치는 S&P500(SPY 공식 구성종목)·나스닥100(나스닥 공식 API)을 적재하고, 두 명단 중 종목풀 미등록 종목을 슬랙으로 알림 |
 | `kor_market_stocks` | `update_kor_market_stocks.py` | 한국 지수 명단 갱신 후 시장 화면 「통합」 명단(코스피·코스닥 시총 상위) 중 종목풀 미등록 종목을 슬랙으로 알림 |
@@ -40,6 +41,8 @@ VM 의 역할은 컨테이너 가동뿐이다. 자동 배치는 돌지 않는다
 | `market_breadth` | `collect_market_breadth.py` | 한국 마감 후·미국 마감 후 |
 | `db_backup` | `backup_mongo_full.py` | 로컬 폴더라 LOCAL 전용 |
 | `holdings_alarm`, `strategy_mix_notify`, `strategy_trade_notify`, `slack_mock_order_notify`, `live_24h_slack`, `leverage_ma_cross`, `broker_balance_sync` 등 | 동명 스크립트 | 알림·동기화 |
+
+- `strategy_trade_notify`는 종목의 마지막 거래 구간이 끝나면 주문·체결에 사용되지 않은 자동 슬랙 신호 스레드를 정리한다. 수동 신호는 세션 정리에서 제외한다. 시간은 `config.INSTRUMENT_TRADING_WINDOWS`를 사용한다.
 
 ## 배포
 
@@ -74,6 +77,9 @@ Cloudflare 프록시(주황 구름)는 쓰지 않는다 — HTTP-01 검증이 �
 | `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` | 알림 |
 | `SLACK_SIGNING_SECRET` | 슬랙 인터랙션 웹훅(`/api/slack/interactions`) 서명 검증. 슬랙 앱의 Interactivity Request URL 이 `{APP_BASE_URL}/api/slack/interactions` |
 | `DART_API_KEY` | OpenDART 재무 조회 |
+| `NAMU_PLUG_API_KEY`, `NAMU_PLUG_API_SECRET` | 나무증권 API — 키 하나로 여러 계좌(연동에 계좌번호 저장) |
+| `{계좌ID}_API_KEY`, `{계좌ID}_API_SECRET` | 메리츠증권 API — 키가 증권사 계좌 하나에 묶여 우리 계좌 ID 를 이름으로 쓴다(예: `m_1_API_KEY`, 대소문자 그대로) |
+| `MERITZ_MAC_ADDRESS` | 메리츠 요청 필수 헤더 `mac_address`(대문자 16진수 12자리). 프로세스가 읽는 MAC 은 실행마다 달라 고정값으로 둔다 |
 | `KRX_DATA_ID`, `KRX_DATA_PW` | KRX 로그인 헬퍼(보관용, 자동 수집은 약관 금지) |
 | MongoDB 접속 | `utils/db_manager.py` 참조 |
 

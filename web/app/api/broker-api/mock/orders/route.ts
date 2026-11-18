@@ -7,7 +7,7 @@ const proxy = createFastApiProxy({
   GET: {
     path: "/internal/broker-api/mock/orders",
     error: "주문 기록을 불러오지 못했습니다.",
-    forwardQuery: ["account_no"],
+    forwardQuery: ["account_id"],
   },
   POST: {
     path: "/internal/broker-api/mock/orders",

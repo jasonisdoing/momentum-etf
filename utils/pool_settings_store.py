@@ -4,7 +4,7 @@ MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 
 
     구조: ticker_type, name, icon, order, country_code, currency, pool_kind
     편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, MOVING_AVERAGE_TYPE,  ← 전략 공용 설정
-          ADR_FLOOR, ENTRY_VOL_MULT,                             ← 모멘텀 전용
+          ADR_FLOOR, ENTRY_VOL_MULT, INDUSTRY_CAP_PCT,           ← 모멘텀 전용
           BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, STOPLOSS_THRESHOLD_PCT,
           BENCHMARK, MARKET_REGIME_INDEX (선택 — 비우면 미설정)
 
@@ -32,6 +32,7 @@ from typing import Any
 
 from config import (
     ADR_FLOOR_OPTIONS,
+    INDUSTRY_CAP_PCT_OPTIONS,
     MOVING_AVERAGE_TYPE_OPTIONS,
     POOL_KIND_OPTIONS,
     SLIPPAGE_PCT_OPTIONS,
@@ -70,6 +71,7 @@ MOMENTUM_KEYS: tuple[str, ...] = (
     "MOMENTUM_START_DATE",
     "ADR_FLOOR",  # None = 게이트 없음 (모멘텀 ADR 하한 — 시장은 MARKET_REGIME_INDEX 를 따름)
     "ENTRY_VOL_MULT",  # None = 문턱 없음 (진입 이격 ≥ 배수 × 20일 변동성 — 청산은 불변)
+    "INDUSTRY_CAP_PCT",  # 업종(한국)·섹터(미국) 상한(%) — 개별주 풀만, 100 = 없음. ETF 풀은 None
 )
 
 # 보유종목 손절 알림 기준(%). 이평선과 같은 성격의 **종목 판정 기준**이라 계좌가 아니라
@@ -369,6 +371,13 @@ def _validate_values(values: dict[str, Any], *, check_options: bool = True) -> d
             allowed = ", ".join("없음" if v is None else f"{v:g}" for v in ENTRY_VOL_MULT_ANY_COUNTRY)
             raise PoolSettingsError(f"ENTRY_VOL_MULT 는 {allowed} 중 하나여야 합니다: {raw}")
         cleaned["ENTRY_VOL_MULT"] = mult
+    if "INDUSTRY_CAP_PCT" in values:
+        raw = values["INDUSTRY_CAP_PCT"]
+        cap = None if raw in (None, "", "none") else int(raw)
+        if check_options and cap is not None and cap not in INDUSTRY_CAP_PCT_OPTIONS:
+            allowed = ", ".join(str(v) for v in INDUSTRY_CAP_PCT_OPTIONS)
+            raise PoolSettingsError(f"INDUSTRY_CAP_PCT 는 {allowed} 중 하나여야 합니다: {raw}")
+        cleaned["INDUSTRY_CAP_PCT"] = cap
 
     for key in _FLOAT_KEYS:
         if key not in values:

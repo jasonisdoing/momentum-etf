@@ -11,7 +11,6 @@ from pydantic import BaseModel
 from fastapi_app.dependencies import require_internal_token
 from services.broker_api_service import (
     BrokerApiError,
-    apply_fetched_balance,
     cached_broker_balance,
     fetch_broker_balance,
     list_broker_accounts,
@@ -22,8 +21,9 @@ router = APIRouter(prefix="/internal/broker-api", tags=["broker-api"])
 
 
 @router.get("/providers")
-def get_providers(_: None = Depends(require_internal_token)) -> dict:
-    return {"providers": list_providers()}
+def get_providers(account_id: str = Query(...), _: None = Depends(require_internal_token)) -> dict:
+    """커넥터 목록 — 키 등록 여부는 계좌마다 다르다(계좌별 키 커넥터)."""
+    return {"providers": list_providers(account_id.strip())}
 
 
 @router.get("/accounts")
@@ -38,46 +38,25 @@ def get_accounts(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def _linked_account(account_id: str) -> tuple[str, str]:
-    """계좌 설정에서 연동 정보(provider, account_no)를 찾는다 — 없으면 400."""
-    from utils.settings_loader import get_account_settings
-
-    try:
-        settings = get_account_settings(account_id)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"계좌 설정을 찾을 수 없습니다: {account_id}") from exc
-    linked = settings.get("broker_api") or {}
-    provider = str(linked.get("provider") or "").strip().upper()
-    account_no = str(linked.get("account_no") or "").strip()
-    if not provider or not account_no:
-        raise HTTPException(status_code=400, detail=f"'{account_id}' 에 증권사 API 연동이 저장돼 있지 않습니다.")
-    return provider, account_no
-
-
 @router.get("/balance")
 def get_balance(
     account_id: str = Query(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
     """연동 계좌의 잔고를 불러와 현재 저장값과 나란히 돌려준다 — 화면이 차이를 보여준다."""
+    from utils.broker_balance_sync import stored_cash_map
     from utils.portfolio_io import load_portfolio_master
 
-    provider, account_no = _linked_account(account_id)
     try:
-        fetched = fetch_broker_balance(provider, account_no)
+        fetched = fetch_broker_balance(account_id)
     except BrokerApiError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     current = load_portfolio_master(account_id) or {"cash_balance": 0.0, "holdings": []}
-    # 현금은 자산 화면과 같은 기준 — 다통화 맵의 계좌 통화 값 우선, 없으면 레거시.
-    from utils.settings_loader import get_account_settings
-
-    currency = str((get_account_settings(account_id) or {}).get("currency") or "KRW").strip().upper()
-    cash_map = current.get("cash") or {}
-    current_cash = float(cash_map.get(currency, current.get("cash_balance") or 0))
     return {
         "fetched": fetched,
         "current": {
-            "cash": current_cash,
+            # 증권사 값과 같은 통화들의 저장 현금 — 동기화 배치의 비교와 같은 기준.
+            "cash_map": stored_cash_map(current, list(fetched["cash_map"])),
             "holdings": [
                 {
                     "ticker": str(row.get("ticker") or ""),
@@ -104,13 +83,15 @@ def apply_balance(payload: ApplyPayload, _: None = Depends(require_internal_toke
     값이 어긋나면 안 된다.
     기존 보유의 메모·매수일·정렬은 보존하고, 수량·평단·현금만 API 값으로 바꾼다.
     """
-    provider, account_no = _linked_account(payload.account_id)
-    fetched = cached_broker_balance(provider, account_no)
+    fetched = cached_broker_balance(payload.account_id)
     if fetched is None:
         raise HTTPException(status_code=409, detail="불러온 잔고가 만료됐습니다 — '잔고 불러오기'를 다시 눌러주세요.")
 
+    from utils.broker_balance_sync import apply_broker_balance
+
     try:
-        result = apply_fetched_balance(payload.account_id, provider, fetched)
+        # 사람이 누른 덮어쓰기도 배치와 같이 — 바뀐 게 있으면 슬랙으로 알린다.
+        result = apply_broker_balance(payload.account_id, fetched, trigger="수동 덮어쓰기")
     except BrokerApiError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {"ok": True, **result}

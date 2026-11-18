@@ -7,7 +7,7 @@ const proxy = createFastApiProxy({
   GET: {
     path: "/internal/broker-api/mock/balance",
     error: "모의 계좌 잔고를 불러오지 못했습니다.",
-    forwardQuery: ["account_no"],
+    forwardQuery: ["account_id"],
   },
 });
 

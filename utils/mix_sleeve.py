@@ -1,14 +1,7 @@
-"""합성 슬리브 어댑터 — 모멘텀·신고가 엔진을 **같은 얼굴**로 감싼다.
+"""합성 슬리브 어댑터 — 모멘텀·신고가·포트폴리오 엔진의 현재 상태를 **같은 얼굴**로 감싼다.
 
-합성(`utils/strategy_mix_service`)은 예전에 슬리브 둘을 `sm`/`nh` 로 하드코딩했다. 그래서
-"모멘텀 2개" 나 "신고가 2개" 같은 조합을 만들 수 없었다. 여기서 두 엔진의 차이를 흡수해,
-합성은 **슬롯 목록**만 알고 어느 전략인지는 신경 쓰지 않게 한다.
-
-전략마다 다른 점(이 모듈이 흡수하는 것):
-  - 상태·백테스트 함수의 인자와 반환 형태 (포트폴리오는 슬롯·보유 기간 개념이 없다)
-  - 사전 준비 — 모멘텀·신고가만 가격 패널(`load_context`)이 필요하다
-
-일별 곡선은 **누적 배수**(시작 1.0)로 통일해서 돌려준다 — 합성이 형태를 다시 따질 일이 없다.
+엔진마다 다른 상태 함수의 인자와 반환 형태(포트폴리오는 슬롯·보유 기간 개념이 없다)를 여기서 흡수해,
+합성(`utils/strategy_mix_service`)은 **슬롯 목록**만 알고 어느 전략인지는 신경 쓰지 않게 한다.
 """
 
 from __future__ import annotations
@@ -23,17 +16,13 @@ logger = get_app_logger()
 MOMENTUM = "momentum"
 NEW_HIGH = "new_high"
 PORTFOLIO = "portfolio"
-# 사고팔기 — 종목별 사다리를 지정가로 직접 운용한다. 합성은 슬리브 몫(한도)과 보유 표시만 맡고
-# 주문은 만들지 않는다(`SlotState.self_managed`).
-STRATEGY_TRADE = "strategy_trade"
 
 # 화면 셀렉트·라벨의 단일 소스. 값은 계좌 설정에 그대로 저장된다.
-STRATEGY_OPTIONS: tuple[str, ...] = (MOMENTUM, NEW_HIGH, PORTFOLIO, STRATEGY_TRADE)
+STRATEGY_OPTIONS: tuple[str, ...] = (MOMENTUM, NEW_HIGH, PORTFOLIO)
 STRATEGY_LABELS: dict[str, str] = {
     MOMENTUM: "모멘텀",
     NEW_HIGH: "신고가",
     PORTFOLIO: "포트폴리오",
-    STRATEGY_TRADE: "사고팔기",
 }
 
 
@@ -77,13 +66,6 @@ def settings_map(strategy: str) -> dict[str, Any]:
         from utils.portfolio_service import load_settings_map as portfolio_map
 
         return dict(portfolio_map())
-    if strategy == STRATEGY_TRADE:
-        from utils.strategy_trade_service import load_settings as load_trade_settings
-
-        by_pool: dict[str, list[dict[str, Any]]] = {}
-        for sid, entry in load_trade_settings()["strategies"].items():
-            by_pool.setdefault(entry["pool"], []).append({"strategy_id": sid, **entry})
-        return {pool: {"strategies": strategies} for pool, strategies in by_pool.items()}
     from utils.new_high_service import load_settings_map
 
     return dict(load_settings_map())
@@ -98,6 +80,8 @@ def settings_summary(strategy: str, settings: dict[str, Any]) -> list[dict[str, 
     """
     strategy = normalize_strategy(strategy)
 
+    from utils.momentum_service import pool_has_industry_cap
+
     def optional(value: Any, suffix: str = "", *, empty: str = "없음") -> str:
         return empty if value is None else f"{value:g}{suffix}" if isinstance(value, (int, float)) else str(value)
 
@@ -107,6 +91,12 @@ def settings_summary(strategy: str, settings: dict[str, Any]) -> list[dict[str, 
             {"label": "이평선", "value": f"{settings.get('short_ma_days')}/{settings.get('long_ma_days')}일"},
             {"label": "진입 문턱", "value": optional(settings.get("entry_vol_mult"), "×")},
             {"label": "ADR 하한", "value": optional(settings.get("adr_floor"))},
+            # 업종·섹터 상한 — 개별주 풀에만 있는 설정이다(ETF 풀은 항목 자체가 없다).
+            *(
+                [{"label": "업종·섹터 상한", "value": optional(settings["industry_cap_pct"], "%")}]
+                if pool_has_industry_cap(settings["pool"])
+                else []
+            ),
         ]
     if strategy == NEW_HIGH:
         return [
@@ -114,16 +104,6 @@ def settings_summary(strategy: str, settings: dict[str, Any]) -> list[dict[str, 
             {"label": "이탈 이평", "value": optional(settings.get("exit_ma_days"), "일")},
             {"label": "거래대금 하한", "value": optional(settings.get("min_value_mult"), "배")},
             {"label": "ADR 하한", "value": optional(settings.get("adr_floor"))},
-        ]
-    if strategy == STRATEGY_TRADE:
-        strategies = list(settings.get("strategies") or [])
-        return [
-            {"label": "종목 수", "value": f"{len(strategies)}개"},
-            {
-                "label": "매매 간격",
-                "value": "/".join(f"{pct:g}%" for pct in sorted({s["trigger_pct"] for s in strategies})),
-            },
-            {"label": "회차 수", "value": "/".join(f"{n}회" for n in sorted({s["rounds"] for s in strategies}))},
         ]
     weights = list(settings.get("weights") or [])
     return [
@@ -142,33 +122,9 @@ def validate_settings(strategy: str, settings: dict[str, Any]) -> dict[str, Any]
         from utils.portfolio_service import validate_settings as validate_portfolio
 
         return validate_portfolio(settings)
-    if strategy == STRATEGY_TRADE:
-        # 전략 설정은 사고팔기 화면이 저장할 때 이미 검증한다 — 여기서는 전략이 있는지만 본다.
-        if not settings.get("strategies"):
-            raise ValueError(
-                f"{settings.get('pool')} 종목풀에 사고팔기 전략이 없습니다 — 사고팔기 화면에서 추가하세요."
-            )
-        return settings
     from utils.new_high_service import validate_settings as validate
 
     return validate(settings)
-
-
-def load_context(spec: SleeveSpec) -> dict[str, Any] | None:
-    """백테스트·현재 상태가 함께 쓰는 무거운 준비물(가격 패널). 필요 없는 전략은 None.
-
-    패널 생성이 이 계산에서 가장 비싼 부분이라, 한 번 만들어 재사용해야 한다. 모멘텀·신고가는
-    같은 슬롯 엔진을 쓰므로 둘 다 필요하고, 포트폴리오는 백테스트가 직접 가격을 읽는다.
-    """
-    if spec.strategy == MOMENTUM:
-        from utils.momentum_backtest import load_context as sm_load_context
-
-        return sm_load_context(spec.settings)
-    if spec.strategy == NEW_HIGH:
-        from utils.new_high_backtest import load_context as nh_load_context
-
-        return nh_load_context(spec.settings)
-    return None
 
 
 def current_state(spec: SleeveSpec) -> dict[str, Any]:
@@ -181,8 +137,6 @@ def current_state(spec: SleeveSpec) -> dict[str, Any]:
         from utils.portfolio_backtest import current_positions as portfolio_positions
 
         return portfolio_positions(spec.settings)
-    if spec.strategy == STRATEGY_TRADE:
-        raise ValueError("사고팔기는 엔진 상태를 따로 내지 않는다 — slot_state 가 운용 현황에서 만든다.")
     from utils.new_high_backtest import current_positions
 
     return current_positions(spec.settings)
@@ -238,14 +192,10 @@ class SlotState:
     live: bool = False
     # 체결일 표기가 없는 예정(잠정 판정)이 체결되는 날 — 그 전략 엔진이 낸 `next_session` 그대로다.
     next_session: str | None = None
-    # 합성이 주문을 만들지 않는 슬리브 — 보유 표시와 슬리브 몫(한도)만 맡는다(사고팔기).
-    self_managed: bool = False
 
 
 def slot_state(spec: SleeveSpec) -> SlotState:
     """엔진 원본 상태를 `SlotState` 로 정규화한다 — 합성이 전략을 가리지 않게."""
-    if spec.strategy == STRATEGY_TRADE:
-        return _trade_slot_state(spec)
     raw = current_state(spec)
     # 포트폴리오는 슬롯 개수 개념이 없다 — 담은 종목 수가 곧 슬롯 수다.
     top_n = len(spec.settings.get("weights") or []) if spec.strategy == PORTFOLIO else int(spec.settings["top_n"])
@@ -253,58 +203,6 @@ def slot_state(spec: SleeveSpec) -> SlotState:
         return _portfolio_slot_state(spec, raw)
     # 모멘텀·신고가는 같은 슬롯 엔진이라 상태 형태도 같다.
     return _slot_state_from_positions(spec, raw, top_n)
-
-
-def _trade_slot_state(spec: SleeveSpec) -> SlotState:
-    """사고팔기 운용 현황을 슬롯 상태로 — 보유 회차를 보여주기만 하고 주문은 만들지 않는다.
-
-    목표 수량은 합성이 정하지 않는다(`self_managed`). 합성은 이 종목들의 현재 보유를 목표로 두고,
-    슬리브 비중만큼의 몫을 한도로 남겨 둔다. 지정가 주문은 사고팔기 화면·슬랙이 맡는다.
-    """
-    import pandas as pd
-
-    from utils.settings_loader import get_ticker_type_settings
-    from utils.slot_positions import next_fill_session
-    from utils.strategy_trade_service import load_pool_views
-
-    views = load_pool_views(spec.pool)
-    targets = []
-    for view in views:
-        status = view["status"]
-        blocked = " · 한도 도달" if status["limit_blocked"] else ""
-        targets.append(
-            {
-                "ticker": view["ticker"],
-                "name": view["label"],
-                "price": view["index"]["close"],
-                "change_pct": view["index"]["change_pct"],
-                "status": f"{status['held_count']}/{view['config']['rounds']}회차{blocked}",
-                "plan": "hold",
-                "days": None,
-                "is_new": False,
-                "exit_reason": None,
-                "return_pct": None,
-                "held_label": f"{status['held_count']}회차" if status["held_count"] else "",
-                "entry_date": None,
-                "entry_price": None,
-                "is_exiting": False,
-            }
-        )
-    held_count = sum(1 for view in views if view["status"]["held_count"] > 0)
-    last_bar = max(pd.Timestamp(view["index"]["as_of"]) for view in views)
-    return SlotState(
-        spec=spec,
-        top_n=len(targets),
-        currency=str((get_ticker_type_settings(spec.pool) or {}).get("currency") or "KRW").strip().upper(),
-        targets=targets,
-        held_tickers={view["ticker"] for view in views if view["status"]["held_count"] > 0},
-        held_count=held_count,
-        active_count=held_count,
-        as_of=str(last_bar.date()),
-        live=False,
-        next_session=next_fill_session(spec.pool, {"live": False}, last_bar),
-        self_managed=True,
-    )
 
 
 def _portfolio_slot_state(spec: SleeveSpec, raw: dict[str, Any]) -> SlotState:
@@ -480,73 +378,3 @@ def _slot_state_from_positions(spec: SleeveSpec, raw: dict[str, Any], top_n: int
         live=bool(raw.get("live")),
         next_session=raw.get("next_session"),
     )
-
-
-def run_backtest(
-    spec: SleeveSpec, months: int, context: dict[str, Any] | None = None, *, start_date: str | None = None
-) -> dict[str, Any]:
-    """이 슬리브를 **혼자** 굴린 백테스트 — 엔진 원본 형태 그대로."""
-    if spec.strategy == PORTFOLIO:
-        from utils.portfolio_backtest import run_backtest as portfolio_backtest
-
-        return portfolio_backtest(months, spec.settings, start_date=start_date)
-    if spec.strategy == MOMENTUM:
-        from utils.momentum_backtest import run_backtest as sm_backtest
-
-        return sm_backtest(months, spec.settings, context, start_date=start_date)
-    if spec.strategy == STRATEGY_TRADE:
-        from utils.strategy_trade_backtest import run_for_mix
-
-        return run_for_mix(spec.pool, months)
-    from utils.new_high_backtest import run_backtest as nh_backtest
-
-    return nh_backtest(months, spec.settings, context, start_date=start_date)
-
-
-def trade_rows(spec: SleeveSpec, result: dict[str, Any]) -> list[dict[str, Any]]:
-    """백테스트 결과의 체결을 **한 형태로** 맞춘다 — 합성 화면의 체결 목록이 이걸 쓴다.
-
-    모멘텀·신고가는 같은 슬롯 엔진이라 형태가 같다(`trades` 에 보유중·청산 행이 함께 온다).
-    포트폴리오만 '보유 기간' 개념이 없다 — 체결이 종목 교체가 아니라 **비중 되돌리기**라
-    진입·청산일이 같은 한 줄로 만든다(매매 기록으로 읽힌다).
-
-    공통 키: ticker · name · entry_date · entry_price · exit_date · exit_price ·
-             return_pct · days · reason
-    """
-    if spec.strategy == PORTFOLIO:
-        rows: list[dict[str, Any]] = []
-        for row in result.get("trades") or []:
-            side = "매수" if row.get("side") == "buy" else "매도"
-            rows.append(
-                {
-                    "ticker": row["ticker"],
-                    "name": row.get("name") or row["ticker"],
-                    "entry_date": row["date"],
-                    "entry_price": row.get("price"),
-                    "exit_date": row["date"],
-                    "exit_price": row.get("price"),
-                    "return_pct": None,
-                    "days": None,
-                    "reason": f"{row.get('reason') or '리밸런싱'} {side} "
-                    f"({row.get('weight_before_pct')}% → {row.get('weight_after_pct')}%)",
-                }
-            )
-        return rows
-
-    # 슬롯 엔진(모멘텀·신고가)은 보유중 행을 `trades` 에 이미 포함한다(엔진 단일 소스,
-    # 2026-09) — 여기서 open_positions 를 다시 합치면 보유 행이 이중으로 나온다.
-    return [dict(row) for row in result.get("trades") or []]
-
-
-def daily_curve(spec: SleeveSpec, result: dict[str, Any]) -> dict[str, float]:
-    """백테스트 결과의 일별을 **누적 배수(시작 1.0)** 로 통일한다.
-
-    세 엔진 모두 구간 시작 대비 누적(%)을 주므로 그대로 배수로 바꾼다.
-    """
-    del spec
-    rows = sorted(result.get("daily") or [], key=lambda row: row["date"])
-    curve: dict[str, float] = {}
-    for row in rows:
-        if row.get("strategy_pct") is not None:
-            curve[row["date"]] = 1 + row["strategy_pct"] / 100
-    return curve

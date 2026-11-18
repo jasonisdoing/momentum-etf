@@ -992,15 +992,14 @@ def save_daily_snapshot(
 
 
 def get_latest_daily_snapshot(account_id: str, before_today: bool = True) -> dict[str, Any] | None:
-    """Retrieve the latest daily snapshot for an account from the consolidated documents."""
+    """통합 스냅샷에서 최신 기록을 읽는다. before_today면 현재 자산 집계 거래일보다 앞선 기록을 읽는다."""
     db = get_db_connection()
     if db is None:
         return None
 
     query = {}
     if before_today:
-        today_str = _now_kst().strftime("%Y-%m-%d")
-        query["snapshot_date"] = {"$lt": today_str}
+        query["snapshot_date"] = {"$lt": _resolve_snapshot_date()}
 
     try:
         cursor = db.daily_snapshots.find(query).sort("snapshot_date", -1).limit(1)

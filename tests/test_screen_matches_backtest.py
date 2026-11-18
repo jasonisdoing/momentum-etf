@@ -31,7 +31,7 @@ def _mix_account() -> str:
     검증 대상은 '합성 = 슬리브 백테스트' 관계지 특정 계좌가 아니다. 계좌 설정 토글에
     테스트가 좌우되면 안 된다. 켜진 계좌가 없으면 건너뛴다.
     """
-    from utils.strategy_mix_service import _resolve_mix_account
+    from utils.strategy_mix_service import resolve_mix_account
 
     candidates = [MIX_ACCOUNT]
     try:
@@ -42,7 +42,7 @@ def _mix_account() -> str:
         pass
     for account_id in candidates:
         try:
-            _resolve_mix_account(account_id)
+            resolve_mix_account(account_id)
         except Exception:  # noqa: BLE001 - 조합 미완성 계좌는 다음 후보로
             continue
         return account_id
@@ -88,7 +88,7 @@ def _expected_mix_targets(ctx: dict[str, Any]) -> set[str]:
     확정·장중 어느 경우든 유효하다: 보유에서 매도(체결 예정·잠정 예정 포함)를 빼고
     진입 예정(빈 자리만큼)을 더한 '다음 시가 이후의 보유'다.
     """
-    from utils.mix_sleeve import PORTFOLIO, STRATEGY_TRADE, current_state
+    from utils.mix_sleeve import PORTFOLIO, current_state
     from utils.strategy_mix_service import mix_weights_for_account
 
     weights = mix_weights_for_account(ctx["account_id"])
@@ -96,10 +96,6 @@ def _expected_mix_targets(ctx: dict[str, Any]) -> set[str]:
     for spec in ctx["slots"]:
         # 계좌 비중 0% 슬리브 — 배분이 없으니 목표 주수도 0 이 맞다(화면과 동일 기준).
         if float(weights.get(f"{spec.key}_pct") or 0) <= 0:
-            continue
-        if spec.strategy == STRATEGY_TRADE:
-            # 사고팔기는 엔진 판정이 없다 — 합성은 슬리브에 속한 전략의 종목을 보유 표에 올리기만 한다.
-            expected |= {str(row["ticker"]) for row in spec.settings["strategies"]}
             continue
         positions = current_state(spec)
         if spec.strategy == PORTFOLIO:
@@ -189,11 +185,12 @@ class MixScreenMatchesSleeveBacktests(unittest.TestCase):
 
     def test_target_tickers_come_from_sleeve_backtests(self) -> None:
         _load_env()
-        from utils.strategy_mix_service import _resolve_mix_account, mix_positions
+        from utils.strategy_mix_positions import mix_positions
+        from utils.strategy_mix_service import resolve_mix_account
 
         try:
             account_id = _mix_account()
-            ctx = _resolve_mix_account(account_id)
+            ctx = resolve_mix_account(account_id)
             screen = mix_positions(account_id)
             expected = _expected_mix_targets(ctx)
         except Exception as error:  # noqa: BLE001
@@ -224,7 +221,8 @@ class IntradayScreenMixConsistencyTest(unittest.TestCase):
         _load_env()
         import utils.momentum_backtest as momentum_backtest
         import utils.new_high_backtest as new_high_backtest
-        from utils.strategy_mix_service import _resolve_mix_account, mix_positions
+        from utils.strategy_mix_positions import mix_positions
+        from utils.strategy_mix_service import resolve_mix_account
 
         def fake_quotes(pool: str, tickers: list[str]) -> dict[str, Any]:
             # 모의 세션은 내일로 고정해 오늘 시작한 전략도 잠정 실행에 포함한다.
@@ -266,17 +264,13 @@ class IntradayScreenMixConsistencyTest(unittest.TestCase):
                 patch.object(new_high_backtest, "_live_quotes", fake_quotes),
                 patch("utils.slot_positions._live_quotes", fake_quotes),
             ):
-                from utils.mix_sleeve import PORTFOLIO, STRATEGY_TRADE, current_state
+                from utils.mix_sleeve import PORTFOLIO, current_state
 
                 account_id = _mix_account()
-                ctx = _resolve_mix_account(account_id)
+                ctx = resolve_mix_account(account_id)
                 mix = mix_positions(account_id)
                 expected = _expected_mix_targets(ctx)
-                slot_positions = {
-                    spec.key: current_state(spec)
-                    for spec in ctx["slots"]
-                    if spec.strategy not in (PORTFOLIO, STRATEGY_TRADE)
-                }
+                slot_positions = {spec.key: current_state(spec) for spec in ctx["slots"] if spec.strategy != PORTFOLIO}
         except Exception as error:  # noqa: BLE001
             _skip_if_unavailable(error)
         finally:
@@ -356,7 +350,6 @@ class PortfolioMixStateTest(unittest.TestCase):
         if frame.iloc[0].isna().any():
             self.assertAlmostEqual(result["daily"][0]["cash_weight_pct"], 60)
             self.assertEqual([t["date"] for t in result["trades"] if t["ticker"] == "B"], [dates[-1]])
-        self.assertEqual(screen["sleeve_cash_weight_pct"], result["sleeve_cash_weight_pct"])
         spec = SleeveSpec("a", "portfolio", "test", settings)
         with (
             patch("utils.mix_sleeve.current_state", return_value=screen),
@@ -368,397 +361,11 @@ class PortfolioMixStateTest(unittest.TestCase):
             self.assertEqual(source["sleeve_weight_pct"], target["drift_pct"])
             self.assertEqual(source["price"], target["price"])
             self.assertGreaterEqual(target["drift_pct"], 0)
-        self.assertGreaterEqual(result["sleeve_cash_weight_pct"], 0)
-        self.assertAlmostEqual(sum(t["drift_pct"] for t in state.targets) + result["sleeve_cash_weight_pct"], 100)
+        # 종목 비중 합은 100 을 넘지 않는다(나머지는 슬리브 현금).
+        self.assertLessEqual(sum(t["drift_pct"] for t in state.targets), 100 + 1e-9)
         if cash == 0:
             self.assertFalse([trade for trade in result["trades"] if trade["reason"] == "리밸런싱"])
             self.assertEqual([round(t["drift_pct"], 6) for t in state.targets], [36, 32, 32])
-
-
-class MixCapitalScreenMatchesBacktest(unittest.TestCase):
-    def test_harvest_proceeds_stay_in_cash_and_fund_refill(self):
-        from core.strategy.mix.capital_replay import replay_capital
-
-        index = pd.date_range("2026-09-01", periods=3)
-        replay = replay_capital(
-            close=pd.DataFrame({"X": [100, 150, 150], "Y": [100] * 3}, index=index),
-            opened=pd.DataFrame({"X": [100, 150, 150], "Y": [100] * 3}, index=index),
-            fx=pd.Series(1.0, index=index),
-            targets={str(day.date()): {"X": 500, "Y": 500} for day in index},
-            capital_krw=1000,
-            harvest_pct=20,
-            refill_pct=20,
-            costs={"X": (0, 0), "Y": (0, 0)},
-        )
-        # 평가액이 1250 으로 늘어 목표가 각 625 로 커진다 — X 는 회수 경계에 닿아 1주 팔고, 그 대금이 Y 채우기에 쓰인다.
-        self.assertNotIn("withdrawn_curve", replay)
-        self.assertEqual(
-            [(row["date"], row["ticker"], row["side"], row["quantity"]) for row in replay["executions"][2:]],
-            [("2026-09-03", "X", "sell", 1), ("2026-09-03", "Y", "buy", 1)],
-        )
-        self.assertEqual(replay["cash"], 50)
-        self.assertAlmostEqual(replay["curve"].iloc[-1], 1.25)
-
-    def test_delayed_harvest_sells_on_first_open_day(self):
-        from core.strategy.mix.capital_replay import replay_capital
-
-        index = pd.date_range("2026-09-01", periods=4)
-        replay = replay_capital(
-            close=pd.DataFrame({"X": [100, 150, 150, 150], "Y": [100] * 4}, index=index),
-            opened=pd.DataFrame({"X": [100, 150, float("nan"), 150], "Y": [100] * 4}, index=index),
-            fx=pd.Series(1.0, index=index),
-            targets={str(day.date()): {"X": 500, "Y": 500} for day in index},
-            capital_krw=1000,
-            harvest_pct=20,
-            refill_pct=20,
-            costs={"X": (0, 0), "Y": (0, 0)},
-        )
-        sells = [(row["date"], row["quantity"]) for row in replay["executions"] if row["side"] == "sell"]
-        self.assertEqual(sells, [("2026-09-04", 1)])
-
-    def test_higher_rank_candidate_does_not_replace_held_position(self):
-        from core.strategy.slot_backtest import run_slot_backtest
-
-        index = pd.date_range("2026-09-01", periods=4)
-        close = pd.DataFrame({"A": [100] * 4, "B": [100] * 4}, index=index)
-        entry = pd.DataFrame({"A": [True] * 4, "B": [False, True, True, True]}, index=index)
-        result = run_slot_backtest(
-            months=1,
-            panel={"close": close, "open": close},
-            entry=entry,
-            exit_signal=pd.DataFrame(False, index=index, columns=close.columns),
-            priority=pd.DataFrame({"A": [2, 1, 1, 1], "B": [0, 3, 3, 3]}, index=index),
-            slots=1,
-            name_by={"A": "A", "B": "B"},
-            industry_by={},
-            exit_reason="이탈",
-            buy_slippage=0,
-            sell_slippage=0,
-            initial_capital=1000,
-            entry_blocked=lambda day: False,
-            adr_at=lambda day: None,
-            benchmark_growth=lambda days: pd.Series(1.0, index=days),
-            benchmark_name="기준",
-        )
-        self.assertEqual([row["ticker"] for row in result["open_positions"]], ["A"])
-        self.assertEqual(result["planned_exits"], [])
-        self.assertEqual(result["planned_entries"], [])
-
-    def test_slot_exit_waits_for_first_available_open(self):
-        from core.strategy.slot_backtest import run_slot_backtest
-
-        index = pd.date_range("2026-09-01", periods=6)
-        close = pd.DataFrame({"X": [100, 100, 100, 100, 110, 110]}, index=index)
-        opened = pd.DataFrame({"X": [100, 100, 100, float("nan"), 110, 110]}, index=index)
-        entry = pd.DataFrame({"X": [True, False, False, False, False, False]}, index=index)
-        exit_signal = pd.DataFrame({"X": [False, False, True, False, False, False]}, index=index)
-        result = run_slot_backtest(
-            months=1,
-            panel={"close": close, "open": opened},
-            entry=entry,
-            exit_signal=exit_signal,
-            priority=pd.DataFrame({"X": [1] * 6}, index=index),
-            slots=1,
-            name_by={"X": "X"},
-            industry_by={},
-            exit_reason="청산",
-            buy_slippage=0,
-            sell_slippage=0,
-            initial_capital=1000,
-            entry_blocked=lambda day: False,
-            adr_at=lambda day: None,
-            benchmark_growth=lambda days: pd.Series(1.0, index=days),
-            benchmark_name="기준",
-        )
-        exits = [row for row in result["trades"] if row["exit_date"] is not None]
-        self.assertEqual([(row["exit_date"], row["exit_price"]) for row in exits], [("2026-09-05", 110)])
-
-    def test_replay_missing_open_matches_slot_fill_rules(self):
-        from core.strategy.mix.capital_replay import replay_capital
-
-        index = pd.date_range("2026-09-01", periods=5)
-        replay = replay_capital(
-            close=pd.DataFrame({"X": [100, 120, 120, 120, 120], "Y": [100] * 5}, index=index),
-            opened=pd.DataFrame({"X": [100, 0, 0, 100, 100], "Y": [100, 0, 100, 100, 100]}, index=index),
-            fx=pd.Series(1.0, index=index),
-            targets={str(day.date()): {"X": 1000, "Y": 1000 if i else 0} for i, day in enumerate(index)},
-            capital_krw=3000,
-            harvest_pct=10,
-            refill_pct=0,
-            costs={"X": (0, 0), "Y": (0, 0)},
-        )
-        executions = replay["executions"]
-        self.assertIn(
-            {"date": "2026-09-04", "ticker": "X", "side": "sell", "quantity": 2, "price": 100.0},
-            executions,
-        )
-        self.assertFalse(
-            any(row["ticker"] == "X" and row["date"] in ("2026-09-02", "2026-09-03") for row in executions)
-        )
-        self.assertIn(
-            {"date": "2026-09-03", "ticker": "Y", "side": "buy", "quantity": 10, "price": 100.0},
-            executions,
-        )
-
-    def test_screen_actions_match_capital_replay(self):
-        from core.strategy.mix.actions import build_action_groups
-        from core.strategy.mix.capital_replay import replay_capital
-
-        index = pd.date_range("2026-09-01", periods=5)
-        close = pd.DataFrame({"A": [100, 120, 90, 70, 70]}, index=index)
-        opened = pd.DataFrame({"A": [100, 100, 120, 90, 70]}, index=index)
-        fx = pd.Series([1.0, 1.1, 1.1, 1.0, 1.0], index=index)
-        amounts = {str(day.date()): {"A": 1000.0} for day in index}
-        for refill in (0, 20, 100):
-            with self.subTest(refill=refill):
-                replay = replay_capital(
-                    close=close,
-                    opened=opened,
-                    fx=fx,
-                    targets=amounts,
-                    capital_krw=10000,
-                    harvest_pct=10,
-                    refill_pct=refill,
-                    costs={"A": (0, 0)},
-                )
-                held = 0
-                expected = []
-                for i, day in enumerate(index):
-                    date = str(day.date())
-                    rate = float(fx.iloc[max(i - 1, 0)])
-                    price = float(close.iloc[i - 1]["A"]) if i else 100.0
-                    # 목표 금액은 전일 종가 평가액 비율만큼 움직인다 — 화면은 그날의 계좌 평가액으로 같은 값을 얻는다.
-                    amount = 1000 * (float(replay["curve"].iloc[i - 1]) if i else 1.0)
-                    target = int(amount / rate / price)
-                    groups = build_action_groups(
-                        [{"ticker": "A", "price": price, "held_quantity": held, "target_quantity": target}],
-                        {"slots": {}},
-                        date,
-                        harvest_pct=10,
-                        refill_pct=refill,
-                        cash_balance=10000,
-                        target_schedule={
-                            date: {
-                                "quantities": {"A": target},
-                                "weights": {"A": 10},
-                                "amounts": {"A": amount / rate},
-                                "previous_amounts": {"A": amount / rate},
-                            }
-                        },
-                    )
-                    for group in groups:
-                        for item in group["items"]:
-                            expected.append((date, item["side"], item["quantity"]))
-                            held += item["quantity"] * (1 if item["side"] == "buy" else -1)
-                self.assertEqual(expected, [(r["date"], r["side"], r["quantity"]) for r in replay["executions"]])
-                if refill == 100:
-                    self.assertEqual(expected, [])
-
-    def test_minimum_one_share_screen_orders_match_capital_replay(self):
-        from core.strategy.mix.actions import build_action_groups
-        from core.strategy.mix.capital_replay import replay_capital
-        from core.strategy.mix.targets import sleeve_target_shares
-
-        prices = {f"C{i}": 10_000.0 for i in range(9)} | {"EXP": 300_000.0}
-        targets = {
-            "a": [
-                {"ticker": ticker, "price": price, "drift_pct": 10.0, "plan": "buy", "is_exiting": False}
-                for ticker, price in prices.items()
-            ]
-        }
-        quantities = sleeve_target_shares(targets, {"a": 1_000_000.0}, 1.0)
-        self.assertEqual(quantities["EXP"], 1)
-        self.assertTrue(all(quantity >= 1 for quantity in quantities.values()))
-        self.assertLessEqual(sum(quantities[ticker] * price for ticker, price in prices.items()), 1_000_000)
-
-        index = pd.date_range("2026-09-01", periods=2)
-        close = pd.DataFrame({ticker: [price, price] for ticker, price in prices.items()}, index=index)
-        opened = close.copy()
-        amounts = {str(day.date()): {ticker: 100_000.0 for ticker in prices} for day in index}
-        replay = replay_capital(
-            close=close,
-            opened=opened,
-            fx=pd.Series(1.0, index=index),
-            targets=amounts,
-            capital_krw=1_000_000,
-            harvest_pct=30,
-            refill_pct=0,
-            costs={ticker: (0, 0) for ticker in prices},
-        )
-        day = str(index[0].date())
-        groups = build_action_groups(
-            [
-                {
-                    "ticker": ticker,
-                    "name": ticker,
-                    "price": price,
-                    "held_quantity": 0,
-                    "target_quantity": quantities[ticker],
-                }
-                for ticker, price in prices.items()
-            ],
-            {"slots": {}},
-            day,
-            harvest_pct=30,
-            refill_pct=0,
-            cash_balance=1_000_000,
-            target_schedule={
-                day: {
-                    "quantities": quantities,
-                    "weights": {ticker: 10.0 for ticker in prices},
-                    "amounts": {ticker: 100_000.0 for ticker in prices},
-                    "previous_amounts": {},
-                }
-            },
-        )
-        screen_buys = sorted(
-            (item["ticker"], item["quantity"]) for group in groups for item in group["items"] if item["side"] == "buy"
-        )
-        replay_buys = sorted(
-            (trade["ticker"], trade["quantity"]) for trade in replay["executions"] if trade["side"] == "buy"
-        )
-        self.assertEqual(screen_buys, replay_buys)
-
-    def test_sleeve_exit_net_amount_matches_replay(self):
-        from core.strategy.mix.actions import build_action_groups
-        from core.strategy.mix.capital_replay import replay_capital
-        from core.strategy.mix.targets import dated_target_shares
-
-        index = pd.to_datetime(["2026-09-01", "2026-09-02"])
-        for after, expected in [(0, -12), (500, -7), (1000, 0), (1500, 4)]:
-            with self.subTest(after=after):
-                targets = {
-                    "a": [
-                        {
-                            "ticker": "X",
-                            "price": 100,
-                            "drift_pct": 100,
-                            "plan": "sell",
-                            "is_exiting": True,
-                            "fill_date": "2026-09-02",
-                        }
-                    ],
-                    "b": [
-                        {
-                            "ticker": "X",
-                            "price": 100,
-                            "drift_pct": 100,
-                            "plan": "buy",
-                            "is_exiting": False,
-                            "fill_date": "2026-09-02",
-                        }
-                    ],
-                }
-                replay = replay_capital(
-                    close=pd.DataFrame({"X": [100, 100]}, index=index),
-                    opened=pd.DataFrame({"X": [80, 100]}, index=index),
-                    fx=pd.Series(1.0, index=index),
-                    targets={"2026-09-01": {"X": 1000}, "2026-09-02": {"X": after}},
-                    capital_krw=3000,
-                    harvest_pct=50,
-                    refill_pct=0,
-                    costs={"X": (0, 0)},
-                )
-                # 둘째 날 목표는 첫날 종가 평가액 비율만큼 커진다 — 화면은 그날의 계좌 평가액으로 같은 값을 얻는다.
-                scale = float(replay["curve"].iloc[0])
-                schedule = dated_target_shares(
-                    targets, {"a": 1000 * scale, "b": after * scale}, 1, 3000 * scale, "2026-09-02"
-                )
-                actions = {
-                    "slots": {
-                        "a": {
-                            "label": "A",
-                            "live": False,
-                            "entries": [],
-                            "sells": [{"ticker": "X", "reason": "청산", "fill_date": "2026-09-02"}],
-                            "exit_forecast": [],
-                        },
-                        "b": {
-                            "label": "B",
-                            "live": False,
-                            "entries": [{"ticker": "X", "fill_date": "2026-09-02"}],
-                            "sells": [],
-                            "exit_forecast": [],
-                        },
-                    }
-                }
-                groups = build_action_groups(
-                    [{"ticker": "X", "price": 100, "held_quantity": 12, "target_quantity": int(after * scale) // 100}],
-                    actions,
-                    "2026-09-02",
-                    harvest_pct=50,
-                    refill_pct=0,
-                    cash_balance=2040,
-                    target_schedule=schedule,
-                )
-                screen = sum(
-                    item["quantity"] * (1 if item["side"] == "buy" else -1)
-                    for group in groups
-                    for item in group["items"]
-                )
-                executed = sum(
-                    row["quantity"] * (1 if row["side"] == "buy" else -1)
-                    for row in replay["executions"]
-                    if row["date"] == "2026-09-02"
-                )
-                self.assertEqual(screen, expected)
-                self.assertEqual(executed, expected)
-
-    def test_first_price_and_threshold_match_screen(self):
-        from core.strategy.mix.actions import build_action_groups
-        from core.strategy.mix.capital_replay import replay_capital
-
-        index = pd.date_range("2026-09-01", periods=3)
-        cases = [
-            # 늦게 상장한 종목은 첫날 시가에 매수하고 채우기 100이면 매수하지 않는다.
-            ([float("nan"), 100, 110], [float("nan"), 100, 110], 2000, 1000, 20, "2026-09-02", 0, 100, 10),
-            ([float("nan"), 100, 110], [float("nan"), 100, 110], 2000, 1000, 100, "2026-09-02", 0, 100, 0),
-            # 회수 경계에 닿은 값과 못 미친 값을 구별한다 — 목표는 전일 종가 평가액 비율만큼 커진다.
-            ([10, 12.2, 12.2], [10, 10, 12.2], 210, 100, 20, "2026-09-03", 10, 12.2, -1),
-            ([10, 12.0, 12.0], [10, 10, 12.0], 210, 100, 20, "2026-09-03", 10, 12.0, 0),
-        ]
-        for closes, opens, capital, amount, refill, day, held, price, expected in cases:
-            with self.subTest(amount=amount, refill=refill, price=price):
-                replay = replay_capital(
-                    close=pd.DataFrame({"X": closes}, index=index),
-                    opened=pd.DataFrame({"X": opens}, index=index),
-                    fx=pd.Series(1.0, index=index),
-                    targets={str(d.date()): {"X": amount} for d in index},
-                    capital_krw=capital,
-                    harvest_pct=10,
-                    refill_pct=refill,
-                    costs={"X": (0, 0)},
-                )
-                position = list(index.strftime("%Y-%m-%d")).index(day)
-                scaled = amount * (float(replay["curve"].iloc[position - 1]) if position else 1.0)
-                groups = build_action_groups(
-                    [{"ticker": "X", "price": price, "held_quantity": held, "target_quantity": int(scaled / price)}],
-                    {"slots": {}},
-                    day,
-                    harvest_pct=10,
-                    refill_pct=refill,
-                    cash_balance=2000,
-                    target_schedule={
-                        day: {
-                            "quantities": {"X": int(scaled / price)},
-                            "weights": {"X": 50},
-                            "amounts": {"X": scaled},
-                            "previous_amounts": {"X": scaled},
-                        }
-                    },
-                )
-                screen = sum(
-                    item["quantity"] * (1 if item["side"] == "buy" else -1)
-                    for group in groups
-                    for item in group["items"]
-                )
-                executed = sum(
-                    row["quantity"] * (1 if row["side"] == "buy" else -1)
-                    for row in replay["executions"]
-                    if row["date"] == day
-                )
-                self.assertEqual(screen, expected)
-                self.assertEqual(executed, expected)
 
 
 class SlotEngineProvisionalBarTest(unittest.TestCase):
@@ -811,6 +418,8 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
             adr_at=lambda day: None,
             benchmark_growth=lambda index: pd.Series(1.0, index=index),
             benchmark_name="BM",
+            group_of={},
+            group_cap_pct=None,
             start_date="2026-09-01",
             provisional_last_bar=True,
         )
@@ -922,6 +531,10 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
             actions,
             "2026-09-07",
             currency="USD",
+            krw_rate=1400,
+            harvest_pct=0,
+            refill_pct=0,
+            cash_balance=10000,
             target_schedule={
                 "2026-09-04": {
                     "quantities": {"T2": 1},
@@ -940,7 +553,7 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
         items = {item["ticker"]: item for group in groups for item in group["items"]}
         for ticker in ("T1", "T2"):
             self.assertEqual(items[ticker]["date"], result["as_of"])
-            self.assertNotIn("예상", items[ticker]["title"] + items[ticker]["text"])
+            self.assertNotIn("예상", items[ticker]["title"] + items[ticker]["text"].replace("주문 후 예상", ""))
         self.assertEqual(items["T4"]["date"], "2026-09-07")
         self.assertIn("예상", items["T4"]["title"])
         # 같은 종목의 날짜별 목표를 슬리브 배분에서 산출한다. 실제 보유는 차이 계산에만 쓴다.
@@ -993,7 +606,15 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
                     }
                 ]
                 groups = build_action_groups(
-                    rows, {"slots": event_slots}, "2026-09-07", target_schedule=schedule, currency="USD"
+                    rows,
+                    {"slots": event_slots},
+                    "2026-09-07",
+                    target_schedule=schedule,
+                    currency="USD",
+                    krw_rate=1400,
+                    harvest_pct=0,
+                    refill_pct=0,
+                    cash_balance=10000,
                 )
                 orders = [item for group in groups for item in group["items"]]
                 self.assertEqual(
@@ -1001,14 +622,22 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
                 )
                 self.assertEqual([item["date"] for item in orders], ["2026-09-04", "2026-09-07"])
                 self.assertEqual(len({item["key"] for item in orders}), 2)
-                self.assertNotIn("예상", orders[0]["text"])
-                self.assertIn("예상", orders[1]["text"])
+                self.assertNotIn("예상", orders[0]["text"].replace("주문 후 예상", ""))
+                self.assertIn("예상", orders[1]["text"].replace("주문 후 예상", ""))
                 self.assertEqual(held_qty + sum(expected_trades), final.get("SAME", 0))
                 if first_plan == second_plan == "buy":
                     complete = [{**rows[0], "held_quantity": final["SAME"]}]
                     self.assertEqual(
                         build_action_groups(
-                            complete, {"slots": event_slots}, "2026-09-07", target_schedule=schedule, currency="USD"
+                            complete,
+                            {"slots": event_slots},
+                            "2026-09-07",
+                            target_schedule=schedule,
+                            currency="USD",
+                            krw_rate=1400,
+                            harvest_pct=0,
+                            refill_pct=0,
+                            cash_balance=10000,
                         ),
                         [],
                     )
@@ -1016,7 +645,15 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
                 # 앞선 목표를 이미 맞췄다면 다음 날짜 주문만 남고 키·수량도 유지된다.
                 rows[0]["held_quantity"] = schedule["2026-09-04"]["quantities"].get("SAME", 0)
                 remaining = build_action_groups(
-                    rows, {"slots": event_slots}, "2026-09-07", target_schedule=schedule, currency="USD"
+                    rows,
+                    {"slots": event_slots},
+                    "2026-09-07",
+                    target_schedule=schedule,
+                    currency="USD",
+                    krw_rate=1400,
+                    harvest_pct=0,
+                    refill_pct=0,
+                    cash_balance=10000,
                 )
                 remaining_items = [item for group in remaining for item in group["items"]]
                 self.assertEqual(len(remaining_items), 1)
@@ -1056,7 +693,15 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
                     {"ticker": "139260", "price": 100, "held_quantity": already_held, "target_quantity": 34},
                 ]
                 groups = build_action_groups(
-                    rows, future_actions, "2026-09-09", target_schedule=future_schedule, currency="KRW"
+                    rows,
+                    future_actions,
+                    "2026-09-09",
+                    target_schedule=future_schedule,
+                    currency="KRW",
+                    krw_rate=1,
+                    harvest_pct=0,
+                    refill_pct=0,
+                    cash_balance=10000,
                 )
                 orders = [item for group in groups for item in group["items"] if item["ticker"] == "139260"]
                 if difference == 0:
@@ -1080,6 +725,10 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
                 "2026-09-07",
                 target_schedule=schedule,
                 currency="USD",
+                krw_rate=1400,
+                harvest_pct=0,
+                refill_pct=0,
+                cash_balance=10000,
             ),
             [],
         )
@@ -1103,6 +752,9 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
             target_schedule=schedule,
             harvest_pct=20,
             currency="USD",
+            krw_rate=1400,
+            refill_pct=0,
+            cash_balance=10000,
         )
         self.assertEqual(schedule, original_schedule)
         self.assertEqual(rows, original_rows)
@@ -1124,6 +776,67 @@ class SlotEngineProvisionalBarTest(unittest.TestCase):
         self.assertEqual(
             (rows[2]["status"], rows[2]["exit_reason"], rows[2]["is_exit_forecast"]), ("hold", None, False)
         )
+
+    def test_higher_rank_candidate_does_not_replace_held_position(self):
+        from core.strategy.slot_backtest import run_slot_backtest
+
+        index = pd.date_range("2026-09-01", periods=4)
+        close = pd.DataFrame({"A": [100] * 4, "B": [100] * 4}, index=index)
+        entry = pd.DataFrame({"A": [True] * 4, "B": [False, True, True, True]}, index=index)
+        result = run_slot_backtest(
+            months=1,
+            panel={"close": close, "open": close},
+            entry=entry,
+            exit_signal=pd.DataFrame(False, index=index, columns=close.columns),
+            priority=pd.DataFrame({"A": [2, 1, 1, 1], "B": [0, 3, 3, 3]}, index=index),
+            slots=1,
+            name_by={"A": "A", "B": "B"},
+            industry_by={},
+            exit_reason="이탈",
+            buy_slippage=0,
+            sell_slippage=0,
+            initial_capital=1000,
+            entry_blocked=lambda day: False,
+            adr_at=lambda day: None,
+            benchmark_growth=lambda days: pd.Series(1.0, index=days),
+            benchmark_name="기준",
+            group_of={},
+            group_cap_pct=None,
+        )
+        self.assertEqual([row["ticker"] for row in result["open_positions"]], ["A"])
+        self.assertEqual(result["planned_exits"], [])
+        self.assertEqual(result["planned_entries"], [])
+
+    def test_slot_exit_waits_for_first_available_open(self):
+        from core.strategy.slot_backtest import run_slot_backtest
+
+        index = pd.date_range("2026-09-01", periods=6)
+        close = pd.DataFrame({"X": [100, 100, 100, 100, 110, 110]}, index=index)
+        opened = pd.DataFrame({"X": [100, 100, 100, float("nan"), 110, 110]}, index=index)
+        entry = pd.DataFrame({"X": [True, False, False, False, False, False]}, index=index)
+        exit_signal = pd.DataFrame({"X": [False, False, True, False, False, False]}, index=index)
+        result = run_slot_backtest(
+            months=1,
+            panel={"close": close, "open": opened},
+            entry=entry,
+            exit_signal=exit_signal,
+            priority=pd.DataFrame({"X": [1] * 6}, index=index),
+            slots=1,
+            name_by={"X": "X"},
+            industry_by={},
+            exit_reason="청산",
+            buy_slippage=0,
+            sell_slippage=0,
+            initial_capital=1000,
+            entry_blocked=lambda day: False,
+            adr_at=lambda day: None,
+            benchmark_growth=lambda days: pd.Series(1.0, index=days),
+            benchmark_name="기준",
+            group_of={},
+            group_cap_pct=None,
+        )
+        exits = [row for row in result["trades"] if row["exit_date"] is not None]
+        self.assertEqual([(row["exit_date"], row["exit_price"]) for row in exits], [("2026-09-05", 110)])
 
 
 if __name__ == "__main__":
