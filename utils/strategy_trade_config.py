@@ -62,7 +62,7 @@ PCT_MIN, PCT_MAX = 0.1, 50.0
 ROUND_SIZE_UNIT_KRW = 10_000
 DEFAULT_ROUND_SIZE = 100
 ROUND_SIZE_MAX = (2**53 - 1) // ROUND_SIZE_UNIT_KRW
-ROUNDS_MIN, ROUNDS_MAX = 1, 20
+ROUNDS_MIN, ROUNDS_MAX = 2, 20
 
 
 def validate_strategy_trade_config(values: dict[str, Any]) -> dict[str, float | int]:
