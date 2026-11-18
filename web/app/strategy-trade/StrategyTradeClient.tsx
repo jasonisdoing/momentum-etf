@@ -365,7 +365,7 @@ function RoundStatus({
       const label = signal.manual
         ? "수동슬랙"
         : signal.side === "sell" && row.rebuy_after_sell
-          ? "매도·재매수 슬랙"
+          ? "매도후재매수 슬랙"
           : `${SIDE_WORDS[signal.side]}슬랙`;
       return (
         <SlackSignalBadge key={`slack-${signal.side}`} label={label} compact={compact} showWithdraw={signal.manual}
