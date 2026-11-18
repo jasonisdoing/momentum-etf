@@ -73,8 +73,8 @@ ORDER_CALLBACK_ID = "mock_order_confirm"
 MODIFY_CALLBACK_ID = "mock_order_modify_confirm"
 CANCEL_CALLBACK_ID = "mock_order_cancel_confirm"
 _SIDE_LABELS = {"buy": "매수", "sell": "매도"}
-#: 주문 가격으로 쓰는 상대 1호가 — 매수는 파는 쪽(매도 1호가)에, 매도는 사는 쪽(매수 1호가)에 맞춘다.
-_QUOTE_LABELS = {"buy": "매도 1호가", "sell": "매수 1호가"}
+#: 주문 가격으로 쓰는 같은 쪽 1호가 — 매수는 매수 1호가, 매도는 매도 1호가에 맞춘다.
+_QUOTE_LABELS = {"buy": "매수 1호가", "sell": "매도 1호가"}
 #: 주문 기록(`slack`)에 남기는 슬랙 위치 — 버튼이 있는 메시지(`message_ts`)와 결과를 달 스레드 뿌리(`thread_ts`).
 SLACK_TARGET_KEYS = ("channel", "message_ts", "thread_ts")
 #: 신호 메시지 반응 — 스레드 상태(`signal_thread_state`)마다 하나만 단다: 진행 중 ⏳ · 완료 ✅ · 실패 ❌.
@@ -371,8 +371,8 @@ def _quote_depth_text(order: dict[str, Any], marks: dict[tuple[str, int], str]) 
 
 def _order_price_details(request: dict[str, Any], order: dict[str, Any]) -> str:
     price = format_money(order["price"], order["country"])
-    # 매수는 매도 1호가, 매도는 매수 1호가로 낸다 — 표에서 그 줄을 짚는다.
-    depth = _quote_depth_text(order, {("asks", 1) if request["side"] == "buy" else ("bids", 1): "주문 가격"})
+    # 매수는 매수 1호가, 매도는 매도 1호가로 낸다 — 표에서 그 줄을 짚는다.
+    depth = _quote_depth_text(order, {("bids", 1) if request["side"] == "buy" else ("asks", 1): "주문 가격"})
     if request.get("mix_action_key") is not None:
         return f"지정가 {price}\n{depth}\n확인한 수량이나 지정가가 바뀌면 다시 확인해야 합니다."
     gap_pct = _signal_gap_pct(order)

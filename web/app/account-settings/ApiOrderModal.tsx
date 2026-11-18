@@ -351,9 +351,9 @@ export function ApiOrderModal({
           <span style={labelStyle}>주문 내용</span>
           <span style={{ fontSize: "var(--fs-base)" }}>
             {strategy && side === "buy"
-              ? `${strategy.label} · 회차 금액 ${strategy.config.round_size.toLocaleString("ko-KR")}만원 · 매도 1호가 지정가 매수`
+              ? `${strategy.label} · 회차 금액 ${strategy.config.round_size.toLocaleString("ko-KR")}만원 · 매수 1호가 지정가 매수`
               : strategy && sellQuantity
-                ? `${strategy.label} · ${sellQuantity.toLocaleString("ko-KR")}주 × 매수 1호가 지정가 매도`
+                ? `${strategy.label} · ${sellQuantity.toLocaleString("ko-KR")}주 × 매도 1호가 지정가 매도`
                 : "-"}
           </span>
           <button type="button" className="btn btn-sm btn-outline-secondary" disabled={loadingStrategies || busy !== null} onClick={() => void loadStrategies()}>
@@ -361,7 +361,7 @@ export function ApiOrderModal({
           </button>
         </div>
         <div style={{ ...mutedStyle, marginBottom: 10 }}>
-          직접 주문은 마지막 보유 회차의 남은 수량을 주문 순간의 매수 1호가로 매도합니다. 매수는 슬랙 주문 메시지에서 진행합니다.
+          직접 주문은 마지막 보유 회차의 남은 수량을 주문 순간의 매도 1호가로 매도합니다. 매수는 슬랙 주문 메시지에서 진행합니다.
         </div>
         {/* 모달의 직접 주문은 매도만 — 매수는 슬랙 주문 메시지의 사람 리뷰를 거친다. */}
         {side === "sell" ? (
