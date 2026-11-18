@@ -308,13 +308,26 @@ def mix_submission_open(request: dict, thread_ts: str, confirmation_id: str) -> 
     )
 
 
+_MAX_PRICE_DRIFT_PCT = 0.5
+
+
 def mix_order_terms(order: dict) -> dict:
     return {key: order[key] for key in ("quantity", "price", "venue")}
 
 
+def _terms_within_tolerance(confirmed: dict, current: dict) -> bool:
+    if confirmed.get("venue") != current.get("venue") or confirmed.get("quantity") != current.get("quantity"):
+        return False
+    base = float(confirmed.get("price") or 0)
+    if base <= 0:
+        return False
+    drift_pct = abs(float(current["price"]) - base) / base * 100.0
+    return drift_pct <= _MAX_PRICE_DRIFT_PCT
+
+
 def place_mix_order(request: dict, slack: dict, confirmed: dict, confirmation_id: str) -> dict:
     order = resolve_mix_order(request, slack["thread_ts"])
-    if confirmed != mix_order_terms(order):
+    if not _terms_within_tolerance(confirmed, mix_order_terms(order)):
         raise MixOrderChangedError("수량 또는 호가가 바뀌었습니다. 주문 버튼을 다시 눌러 확인하세요.")
     claimed = _signals().update_one(
         {
