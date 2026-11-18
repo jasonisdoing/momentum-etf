@@ -101,6 +101,25 @@ def place_limit_order(
     return meritz_api_service.place_limit_order(account_id, side, ticker, quantity, int(price), venue)
 
 
+def modify_order(
+    account_id: str, order_no: str, ticker: str, quantity: int, price: int | float, venue: str
+) -> dict[str, str]:
+    """주문을 지정가로 정정한다."""
+    from services import broker_order_service, meritz_api_service
+
+    doc = _account_doc(account_id)
+    account_env(account_id)
+    if _provider(doc) == NAMU_PROVIDER:
+        if int(price) != price:
+            raise BrokerApiError(f"국내 주문 가격은 정수여야 합니다: {price}")
+        return broker_order_service.modify_order(_namu_account_no(doc), order_no, ticker, int(price), venue)
+    if _is_us(doc):
+        return meritz_api_service.modify_us_order(account_id, order_no, ticker, quantity, float(price))
+    if int(price) != price:
+        raise BrokerApiError(f"국내 주문 가격은 정수여야 합니다: {price}")
+    return meritz_api_service.modify_order(account_id, order_no, ticker, quantity, int(price), venue)
+
+
 def cancel_order(account_id: str, order_no: str, ticker: str, venue: str) -> dict[str, str]:
     """주문을 전량 취소한다."""
     from services import broker_order_service, meritz_api_service

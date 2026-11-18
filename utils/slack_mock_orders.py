@@ -43,9 +43,11 @@ from utils.strategy_trade_orders import (
     forget_signal_thread,
     mark_slack_close_warned,
     mark_slack_notified,
+    modify_record,
     pair_records,
     place_order,
     place_swap,
+    preview_modify_record,
     refresh_slack_order_accounts,
     refreshed_order,
     register_signal_thread,
@@ -65,8 +67,10 @@ from utils.strategy_trade_threads import send_thread_message
 logger = logging.getLogger(__name__)
 
 OPEN_ACTION_ID = "mock_order_open"
+MODIFY_ACTION_ID = "mock_order_modify"
 CANCEL_ACTION_ID = "mock_order_cancel"
 ORDER_CALLBACK_ID = "mock_order_confirm"
+MODIFY_CALLBACK_ID = "mock_order_modify_confirm"
 CANCEL_CALLBACK_ID = "mock_order_cancel_confirm"
 _SIDE_LABELS = {"buy": "매수", "sell": "매도"}
 #: 주문 가격으로 쓰는 상대 1호가 — 매수는 파는 쪽(매도 1호가)에, 매도는 사는 쪽(매수 1호가)에 맞춘다.
@@ -170,11 +174,35 @@ def _open_blocks(request: dict[str, Any], label: str = "주문하기") -> list[d
     return [_section(request), _button(OPEN_ACTION_ID, f"{_action_word(request)} {label}", style, {"request": request})]
 
 
+def _order_action_buttons(
+    request: dict[str, Any], order_id: str, prefix: str = ""
+) -> dict[str, Any]:
+    return {
+        "type": "actions",
+        "elements": [
+            {
+                "type": "button",
+                "action_id": MODIFY_ACTION_ID,
+                "text": {"type": "plain_text", "text": f"{prefix}호가 정정"},
+                "style": "primary",
+                "value": json.dumps({"request": request, "order_id": order_id}, ensure_ascii=False),
+            },
+            {
+                "type": "button",
+                "action_id": CANCEL_ACTION_ID,
+                "text": {"type": "plain_text", "text": f"{prefix}주문 취소하기"},
+                "style": "danger",
+                "value": json.dumps({"request": request, "order_id": order_id}, ensure_ascii=False),
+            },
+        ],
+    }
+
+
 def _cancel_blocks(request: dict[str, Any], order_id: str) -> list[dict[str, Any]]:
     side = _SIDE_LABELS[request["side"]]
     return [
         _section(request),
-        _button(CANCEL_ACTION_ID, f"{side} 주문 취소하기", "danger", {"request": request, "order_id": order_id}),
+        _order_action_buttons(request, order_id, f"{side} "),
     ]
 
 
@@ -192,14 +220,7 @@ def _pair_blocks(request: dict[str, Any], pair_id: str, note: str | None) -> lis
         if order["status"] in FINISHED_STATUSES:
             continue
         single = {**request, "side": order["side"], "quantity": order["quantity"], "rebuy": False}
-        blocks.append(
-            _button(
-                CANCEL_ACTION_ID,
-                f"{_SIDE_LABELS[order['side']]} 주문 취소하기",
-                "danger",
-                {"request": single, "order_id": order["id"]},
-            )
-        )
+        blocks.append(_order_action_buttons(single, order["id"], f"{_SIDE_LABELS[order['side']]} "))
     if note:
         blocks.append(_note(note))
     return blocks
@@ -391,6 +412,26 @@ def _swap_view(request: dict[str, Any], order: dict[str, Any], target: dict[str,
     )
 
 
+def _modify_view(request: dict[str, Any], preview: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+    side = _SIDE_LABELS[request["side"]]
+    country = preview["order"]["country"]
+    depth = _quote_depth_lines(preview.get("quote_depth"), country)
+    body = "\n".join(
+        [
+            f"*{_order_text(request)}*",
+            _account_line(request),
+            f"남은 수량: *{preview['remaining_quantity']:,}주*",
+            f"현재 주문가: {format_money(preview['current_price'], country)}",
+            f"정정 가격({preview['quote_label']}): *{format_money(preview['target_price'], country)}*",
+            *([f"\n{depth}"] if depth else []),
+            f"\n접수된 {_env_word(request['env'])} {side} 주문을 현재 상대 1호가로 정정합니다.",
+        ]
+    )
+    return _modal_view(
+        MODIFY_CALLBACK_ID, f"{_env_word(request['env'])} {side} 호가 정정 확인", "호가 정정", body, target
+    )
+
+
 def _cancel_view(request: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
     side = _SIDE_LABELS[request["side"]]
     body = f"*{_order_text(request)}*\n{_account_line(request)}\n접수된 {_env_word(request['env'])} {side} 주문을 취소합니다(일부 체결됐다면 남은 수량만 취소됩니다)."
@@ -461,6 +502,15 @@ def fill_confirm_modal(job: dict[str, Any]) -> None:
     """
     target, view_id = job["target"], job["view_id"]
     request = target["request"]
+    if job.get("kind") == "modify":
+        try:
+            preview = preview_modify_record(target["order_id"])
+        except Exception as exc:
+            logger.exception("슬랙 호가 정정 확인 모달 채우기 실패")
+            _update_view(view_id, _status_view(request, target, f"❌ 호가 정정을 열 수 없습니다: {exc}"))
+            return
+        _update_view(view_id, _modify_view(request, preview, target))
+        return
     try:
         try:
             order = _resolve_request(request, target["thread_ts"], fresh=False)
@@ -510,6 +560,12 @@ def open_confirm_modal(payload: dict[str, Any]) -> dict[str, Any] | None:
             view=_status_view(request, target, "⏳ 호가와 주문 가능 수량을 확인하는 중…"),
         )
         return {"target": target, "view_id": opened["view"]["id"]}
+    if action["action_id"] == MODIFY_ACTION_ID:
+        opened = client.views_open(
+            trigger_id=payload["trigger_id"],
+            view=_status_view(request, target, "⏳ 정정 호가와 잔여 수량을 확인하는 중…"),
+        )
+        return {"kind": "modify", "target": {**target, "order_id": value["order_id"]}, "view_id": opened["view"]["id"]}
     if action["action_id"] == CANCEL_ACTION_ID:
         client.views_open(
             trigger_id=payload["trigger_id"], view=_cancel_view(request, {**target, "order_id": value["order_id"]})
@@ -519,9 +575,9 @@ def open_confirm_modal(payload: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def submitted_request(payload: dict[str, Any]) -> dict[str, Any]:
-    """모달 제출 payload 에서 처리할 일(주문·취소)과 대상 메시지를 꺼낸다."""
+    """모달 제출 payload 에서 처리할 일(주문·정정·취소)과 대상 메시지를 꺼낸다."""
     view = payload["view"]
-    kinds = {ORDER_CALLBACK_ID: "order", CANCEL_CALLBACK_ID: "cancel"}
+    kinds = {ORDER_CALLBACK_ID: "order", MODIFY_CALLBACK_ID: "modify", CANCEL_CALLBACK_ID: "cancel"}
     if view["callback_id"] not in kinds:
         raise BrokerApiError(f"알 수 없는 슬랙 모달입니다: {view['callback_id']}")
     return {**json.loads(view["private_metadata"]), "kind": kinds[view["callback_id"]]}
@@ -681,6 +737,34 @@ def _place(target: dict[str, Any]) -> None:
     _sync_thread(target["thread_ts"])
 
 
+def _restore_order_buttons(target: dict[str, Any], order: dict[str, Any], note: str | None = None) -> None:
+    request = target["request"]
+    if order["pair_id"] is not None:
+        swap = {**request, "side": "sell", "rebuy": True}
+        _update_message({**target, "request": swap}, _pair_blocks(swap, order["pair_id"], note))
+    elif order["status"] in FINISHED_STATUSES:
+        _update_message(target, _note_blocks(request, note or "⏳ 결과 확인 중…"))
+    else:
+        blocks = _cancel_blocks(request, order["id"])
+        _update_message(target, [*blocks, _note(note)] if note else blocks)
+
+
+def _modify(target: dict[str, Any]) -> None:
+    request = target["request"]
+    side = f"{_env_word(request['env'])} {_SIDE_LABELS[request['side']]}"
+    _update_message(target, _note_blocks(request, "⏳ 호가 정정 처리 중…"))
+    try:
+        modified = modify_record(target["order_id"])
+    except Exception as exc:
+        logger.exception("슬랙 주문 호가 정정 실패")
+        send_thread_message(f"❌ {side} 호가 정정 실패: {exc}", thread_ts=target["thread_ts"])
+        _restore_order_buttons(target, refreshed_order(request["account_id"], target["order_id"]))
+        return
+    text = f"✏️ {side} 호가 정정 요청: {format_money(modified['price'], modified['country'])}"
+    send_thread_message(text, thread_ts=target["thread_ts"])
+    _restore_order_buttons(target, modified, text)
+
+
 def _cancel(target: dict[str, Any]) -> None:
     request = target["request"]
     side = f"{_env_word(request['env'])} {_SIDE_LABELS[request['side']]}"
@@ -691,22 +775,14 @@ def _cancel(target: dict[str, Any]) -> None:
         logger.exception("슬랙 모의 주문 취소 실패")
         send_thread_message(f"❌ {side} 주문 취소 실패: {exc}", thread_ts=target["thread_ts"])
         # 그 사이 주문이 끝났을 수 있다 — 끝났으면 결과 알림은 배치가 하고, 아니면 취소 버튼을 되살린다.
-        order = refreshed_order(request["account_id"], target["order_id"])
-        if order["pair_id"] is not None:
-            # 매도 후 재매수 메시지 — 다른 쪽 취소 버튼까지 다시 그린다.
-            swap = {**request, "side": "sell", "rebuy": True}
-            _update_message({**target, "request": swap}, _pair_blocks(swap, order["pair_id"], None))
-        elif order["status"] in FINISHED_STATUSES:
-            _update_message(target, _note_blocks(request, "⏳ 결과 확인 중…"))
-        else:
-            _update_message(target, _cancel_blocks(request, target["order_id"]))
+        _restore_order_buttons(target, refreshed_order(request["account_id"], target["order_id"]))
         return
     send_thread_message(f"🚫 {side} 주문 취소를 요청했습니다.", thread_ts=target["thread_ts"])
     # 취소 결과(체결 수량 포함)로 메시지를 마무리하는 일은 배치(`notify_finished_orders`)가 한다.
 
 
 def run_submission(target: dict[str, Any]) -> None:
-    """확인된 주문·취소를 처리한다 — 응답 뒤 백그라운드에서 돈다."""
+    """확인된 주문·정정·취소를 처리한다 — 응답 뒤 백그라운드에서 돈다."""
     try:
         with signal_lock():
             if target["kind"] == "order":
@@ -725,6 +801,8 @@ def run_submission(target: dict[str, Any]) -> None:
                     from utils.strategy_trade_threads import finish_order_reservation
 
                     finish_order_reservation(target["thread_ts"])
+            elif target["kind"] == "modify":
+                _modify(target)
             else:
                 _cancel(target)
     except Exception as exc:

@@ -38,6 +38,7 @@ OVERSEAS_HOLDINGS_PATH = "/accounts/v1/me/overseas/holdings"
 CURRENCIES_PATH = "/accounts/v1/me/overseas/currencies"
 ORDERBOOK_PATH = "/market/v1/orderbook"
 ORDER_PATH = {"buy": "/trading/v1/orders/buy", "sell": "/trading/v1/orders/sell"}
+MODIFY_PATH = "/trading/v1/orders/modify"
 CANCEL_PATH = "/trading/v1/orders/cancel"
 ORDER_HISTORY_PATH = "/trading/v1/orders/history"
 
@@ -484,6 +485,30 @@ def place_limit_order(account_id: str, side: str, ticker: str, quantity: int, pr
     return {"order_no": _accepted_order_no(data, "주문"), "message": str(data.get("rsp_msg") or "")}
 
 
+def modify_order(account_id: str, order_no: str, ticker: str, quantity: int, price: int, venue: str) -> dict[str, str]:
+    """KRX 주문을 전량 지정가 정정한다 — 돌려주는 번호는 정정 요청의 새 주문번호다."""
+    if quantity <= 0 or price <= 0:
+        raise BrokerApiError("정정 수량과 가격은 0보다 커야 합니다.")
+    data = _request(
+        account_id,
+        "POST",
+        MODIFY_PATH,
+        success=_ORDER_CODES,
+        body={
+            "iscd": f"A{ticker}",
+            "oder_unpr": int(price),
+            "odqt": int(quantity),
+            "oder_cls_code": _KR_LIMIT_ORDER,
+            "oder_cond_cls_code": _KR_NO_CONDITION,
+            "orgl_oder_no": int(order_no),
+            "whol_rctf_cncl_yn": "Y",
+            "warn_cnfr_yn": "N",
+            "exch_kind_code": _EXCHANGE_CODES[venue],
+        },
+    )
+    return {"modify_order_no": _accepted_order_no(data, "정정"), "message": str(data.get("rsp_msg") or "")}
+
+
 def cancel_order(account_id: str, order_no: str, ticker: str, venue: str) -> dict[str, str]:
     """주문을 전량 취소한다 — 돌려주는 번호는 취소 요청 자체의 주문번호다. ``venue`` 는 원주문의 거래소다(필수)."""
     data = _request(
@@ -558,6 +583,7 @@ def day_order_rows(account_id: str, yyyymmdd: str) -> list[dict[str, Any]]:
 # 세션(프리·정규·애프터·데이장)은 주문 요청에 구분이 없다 — 같은 지정가 주문이 세션에 맞게 접수된다.
 
 OVERSEAS_ORDER_PATH = {"buy": "/trading/v1/overseas/orders/buy", "sell": "/trading/v1/overseas/orders/sell"}
+OVERSEAS_MODIFY_PATH = "/trading/v1/overseas/orders/modify"
 OVERSEAS_CANCEL_PATH = "/trading/v1/overseas/orders/cancel"
 OVERSEAS_ORDERBOOK_PATH = "/market/v1/overseas/orderbook"
 OVERSEAS_PRICE_PATH = "/market/v1/overseas/prices"
@@ -759,6 +785,32 @@ def us_day_order_rows(account_id: str, yyyymmdd: str) -> list[dict[str, Any]]:
             }
         )
     return result
+
+
+def modify_us_order(account_id: str, order_no: str, ticker: str, quantity: int, price: float) -> dict[str, str]:
+    """미국 주문을 지정가 정정한다 — 주문일자는 당일 주문내역에서 찾는다."""
+    if quantity <= 0 or price <= 0:
+        raise BrokerApiError("정정 수량과 가격은 0보다 커야 합니다.")
+    rows = _us_order_rows(account_id, _us_today())
+    target = next((row for row in rows if str(row["order_no"]) == order_no and row["symbol"] == ticker), None)
+    if target is None:
+        raise BrokerApiError(f"오늘 주문내역에서 {ticker} 주문 {order_no} 을 찾을 수 없습니다 — 정정하지 않았습니다.")
+    data = _request(
+        account_id,
+        "POST",
+        OVERSEAS_MODIFY_PATH,
+        success=_ORDER_CODES,
+        body={
+            "oder_date": target["date"],
+            "orgl_oder_no": int(order_no),
+            "oder_cls_code": _OVERSEAS_LIMIT_ORDER,
+            "odqt": int(quantity),
+            "ovrs_stck_oder_prc": f"{price:.4f}",
+            "oder_cond_cls_code": _OVERSEAS_NO_CONDITION,
+            "warn_cnfr_yn": "N",
+        },
+    )
+    return {"modify_order_no": _accepted_order_no(data, "정정"), "message": str(data.get("rsp_msg") or "")}
 
 
 def cancel_us_order(account_id: str, order_no: str, ticker: str) -> dict[str, str]:

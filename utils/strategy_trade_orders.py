@@ -28,6 +28,7 @@ from services.broker_trade_service import (
     cancel_order,
     fetch_best_quote,
     list_day_orders,
+    modify_order as broker_modify_order,
     place_limit_order,
 )
 from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
@@ -580,6 +581,62 @@ def _current_order_no(record: dict[str, Any]) -> str:
         if row["order_no"] == record["order_no"]:
             return row["current_order_no"]
     raise BrokerApiError("증권사 주문내역에서 이 주문번호를 찾지 못했습니다.")
+
+
+def preview_modify_record(order_id: str) -> dict[str, Any]:
+    """대기중·부분체결 주문의 현재 상대 1호가 정정 내용을 미리 계산한다."""
+    record = _orders().find_one({"_id": ObjectId(order_id)})
+    if record is None:
+        raise BrokerApiError("주문 기록을 찾을 수 없습니다.")
+    if record["status"] not in ("pending", "partial") or not record.get("order_no"):
+        raise BrokerApiError("대기중이거나 부분체결인 주문만 호가를 정정할 수 있습니다.")
+    if record.get("pair_id") is not None:
+        active_pair = [item for item in pair_records(record["pair_id"]) if item["status"] in ACTIVE_STATUSES]
+        if len(active_pair) > 1:
+            raise BrokerApiError(
+                "매도·재매수 주문이 모두 미체결 상태라 상대 1호가로 정정할 수 없습니다(자전거래 방지)."
+            )
+    require_order_session({"country": record["country"], "instrument_kind": record["instrument_kind"]}, now=_now())
+    quote = fetch_best_quote(record["account_id"], record["ticker"], record["venue"])
+    label, target_price = ("매도 1호가", quote["ask"]) if record["side"] == "buy" else ("매수 1호가", quote["bid"])
+    if not is_valid_quote(target_price, kind=record["instrument_kind"], country=record["country"]):
+        raise BrokerApiError(
+            f"{record['ticker']} {label} {format_money(target_price, record['country'])}이 호가 단위와 맞지 않습니다."
+        )
+    remaining = int(record["quantity"]) - int(record.get("filled_quantity") or 0)
+    if remaining <= 0:
+        raise BrokerApiError("정정할 미체결 수량이 없습니다.")
+    return {
+        "order": serialize_order(record),
+        "current_price": record["price"],
+        "target_price": target_price,
+        "quote_label": label,
+        "quote_depth": quote["depth"],
+        "remaining_quantity": remaining,
+    }
+
+
+def modify_record(order_id: str) -> dict[str, Any]:
+    """대기중·부분체결 주문을 현재 상대 1호가로 정정하고 상태를 다시 읽는다."""
+    orders = _orders()
+    preview = preview_modify_record(order_id)
+    record = orders.find_one({"_id": ObjectId(order_id)})
+    if record is None:
+        raise BrokerApiError("주문 기록을 찾을 수 없습니다.")
+    modified = broker_modify_order(
+        record["account_id"],
+        _current_order_no(record),
+        record["ticker"],
+        preview["remaining_quantity"],
+        preview["target_price"],
+        record["venue"],
+    )
+    orders.update_one(
+        {"_id": record["_id"]},
+        {"$set": {"price": preview["target_price"], "message": modified["message"], "updated_at": _now().isoformat()}},
+    )
+    refresh_account_orders(record["account_id"])
+    return serialize_order(orders.find_one({"_id": record["_id"]}))
 
 
 def cancel_record(order_id: str) -> dict[str, Any]:

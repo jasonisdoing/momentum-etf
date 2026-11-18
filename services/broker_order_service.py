@@ -46,6 +46,7 @@ _PRICE_TYPE_LIMIT = "01"  # 호가유형 — 보통가(지정가)
 _NO_CONDITION = "00"  # 주문조건 없음 / 공매도 구분 정상
 
 ORDER_PATH = {"buy": "/krstock/order/v1/cashBuy", "sell": "/krstock/order/v1/cashSell"}
+MODIFY_PATH = "/krstock/order/v1/modify"
 CANCEL_PATH = "/krstock/order/v1/cancel"
 # 체결 조회에 그날 주문이 하나도 없을 때 오는 응답 코드(데이터가 존재하지 않습니다) — 오류가 아니라 빈 목록이다.
 NO_DATA_CODE = "11512"
@@ -270,6 +271,26 @@ def place_limit_order(account_no: str, side: str, ticker: str, quantity: int, pr
         },
     )
     return {"order_no": _accepted_order_no(data, "주문"), "message": str(data.get("rsp_msg") or "")}
+
+
+def modify_order(account_no: str, order_no: str, ticker: str, price: int, venue: str) -> dict[str, str]:
+    """원주문을 전량 지정가 정정한다 — 돌려주는 번호는 정정 요청의 새 시장주문번호다."""
+    if price <= 0:
+        raise BrokerApiError("정정 가격은 0보다 커야 합니다.")
+    data, _ = _post(
+        _base_url(account_no),
+        MODIFY_PATH,
+        {
+            "act_no": account_no,
+            "org_mkt_orr_no": int(order_no),
+            "all_pat_dit_cd": "1",
+            "iem_cd": ticker,
+            "cor_pr": int(price),
+            "rmt_mkt_cd": venue,
+            "sor_mkt_sli_yn": "N",
+        },
+    )
+    return {"modify_order_no": _accepted_order_no(data, "정정"), "message": str(data.get("rsp_msg") or "")}
 
 
 def cancel_order(account_no: str, order_no: str, ticker: str) -> dict[str, str]:
