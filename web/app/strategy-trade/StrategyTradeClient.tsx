@@ -680,10 +680,10 @@ function AccountSettingsCard({
   const usedTickers = new Set(drafts.map((row) => row.ticker));
   const candidates = pickerOpen
     ? view.ticker_options.filter(
-        (option) =>
-          !usedTickers.has(option.ticker) &&
-          (option.ticker.toLowerCase().includes(query) || option.name.toLowerCase().includes(query)),
-      )
+      (option) =>
+        !usedTickers.has(option.ticker) &&
+        (option.ticker.toLowerCase().includes(query) || option.name.toLowerCase().includes(query)),
+    )
     : [];
   const selectedRow =
     (selection?.accountId === accountId ? drafts.find((row) => row.ticker === selection.ticker) : undefined) ??
@@ -834,23 +834,23 @@ function AccountSettingsCard({
       ...(column.field === "pct" && useRecommendedGap
         ? [{ ...recommendedGapColumn(), pinned: undefined }]
         : [{
-            ...column,
-            type: "rightAligned",
-            editable: ({ node, data }: { node: { rowPinned?: unknown }; data?: TradeListRow }) =>
-              !saving && !node.rowPinned && !data?.is_group,
-            cellClass: ({ node, data }: { node: { rowPinned?: unknown }; data?: TradeListRow }) =>
-              !saving && !node.rowPinned && !data?.is_group ? "appEditableCell" : undefined,
-          } as ColDef<TradeListRow>]),
+          ...column,
+          type: "rightAligned",
+          editable: ({ node, data }: { node: { rowPinned?: unknown }; data?: TradeListRow }) =>
+            !saving && !node.rowPinned && !data?.is_group,
+          cellClass: ({ node, data }: { node: { rowPinned?: unknown }; data?: TradeListRow }) =>
+            !saving && !node.rowPinned && !data?.is_group ? "appEditableCell" : undefined,
+        } as ColDef<TradeListRow>]),
       // 회차금액 옆 읽기 전용 — 지금 현재가로 그 금액이 몇 주인지.
       ...(column.field === "amount"
         ? [{
-            field: "roundQuantity",
-            headerName: "회차수량",
-            headerTooltip: "회차금액 ÷ (현재가 × 환율), 내림 — 현재가 기준 참고값",
-            width: 88,
-            type: "rightAligned",
-            valueFormatter: ({ value, node }) => (node?.rowPinned || value == null ? "" : `${formatNumber(value)}주`),
-          } satisfies ColDef<TradeListRow>]
+          field: "roundQuantity",
+          headerName: "회차수량",
+          headerTooltip: "회차금액 ÷ (현재가 × 환율), 내림 — 현재가 기준 참고값",
+          width: 88,
+          type: "rightAligned",
+          valueFormatter: ({ value, node }) => (node?.rowPinned || value == null ? "" : `${formatNumber(value)}주`),
+        } satisfies ColDef<TradeListRow>]
         : []),
     ]),
     { field: "heldRounds", headerName: "보유", headerTooltip: "보유 회차 / 저장된 전체 회차", width: 64, type: "rightAligned" },
@@ -946,8 +946,8 @@ function AccountSettingsCard({
         return void toast.error(`${label}: 매매 간격은 ${PCT_MIN}~${PCT_MAX} 사이 숫자여야 합니다.`);
       }
       if (!Number.isSafeInteger(amount) || !Number.isSafeInteger(amount * 10_000) || amount < 1) return void toast.error(`${label}: 회차금액(만원)은 1 이상의 정수여야 합니다.`);
-      if (!Number.isInteger(rounds) || rounds < 1 || rounds > 12) {
-        return void toast.error(`${label}: 회차 수는 1~12 사이 정수여야 합니다.`);
+      if (!Number.isInteger(rounds) || rounds < 1 || rounds > 20) {
+        return void toast.error(`${label}: 회차 수는 1~20 사이 정수여야 합니다.`);
       }
       strategies.push({
         ...(row.strategy_id ? { strategy_id: row.strategy_id } : {}),
@@ -1205,12 +1205,12 @@ function useStickyLefts(count: number) {
   const stickyCell = (start: number, span = 1): React.CSSProperties =>
     lefts.length === count
       ? {
-          position: "sticky",
-          left: lefts[start],
-          zIndex: 1,
-          background: "var(--panel)",
-          ...(start + span === count ? { boxShadow: "inset -2px 0 0 rgba(148,163,184,0.35)" } : null),
-        }
+        position: "sticky",
+        left: lefts[start],
+        zIndex: 1,
+        background: "var(--panel)",
+        ...(start + span === count ? { boxShadow: "inset -2px 0 0 rgba(148,163,184,0.35)" } : null),
+      }
       : {};
   return { headRowRef, stickyCell };
 }
@@ -1353,9 +1353,9 @@ function StrategySection({
   const belowLastRound =
     lastLeveledRound?.buy_index != null && lastLeveledRound.buy_index > 0
       ? {
-          round: lastLeveledRound.round,
-          pct: Number(((index.recent_low / lastLeveledRound.buy_index - 1) * 100).toFixed(2)),
-        }
+        round: lastLeveledRound.round,
+        pct: Number(((index.recent_low / lastLeveledRound.buy_index - 1) * 100).toFixed(2)),
+      }
       : null;
 
   return (
@@ -1454,84 +1454,84 @@ function StrategySection({
               if (row === null) {
                 return (
                   <React.Fragment key={`empty-${position}`}>
-                  {lowLine}
-                  <tr style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
-                    <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)", ...stickyCell(0) }}>{position}</td>
-                    <td colSpan={2} style={{ ...tdStyle, ...stickyCell(1, 2) }} />
-                    <td style={{ ...tdStyle, color: "var(--text-muted)", ...stickyCell(3) }}>{formatPrice(view.position_prices[String(position)], currency)}</td>
-                    <td colSpan={5} style={{ ...tdStyle, ...stickyCell(4, 5) }} />
-                    {tradeCells}
-                  </tr>
+                    {lowLine}
+                    <tr style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
+                      <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)", ...stickyCell(0) }}>{position}</td>
+                      <td colSpan={2} style={{ ...tdStyle, ...stickyCell(1, 2) }} />
+                      <td style={{ ...tdStyle, color: "var(--text-muted)", ...stickyCell(3) }}>{formatPrice(view.position_prices[String(position)], currency)}</td>
+                      <td colSpan={5} style={{ ...tdStyle, ...stickyCell(4, 5) }} />
+                      {tradeCells}
+                    </tr>
                   </React.Fragment>
                 );
               }
               const amounts = heldRoundAmounts(row);
               return (
-              <React.Fragment key={row.round}>
-              {row.round === 1 && aboveFirstRound ? <PriceGapRow gap={aboveFirstRound} columnCount={columnCount} /> : null}
-              {lowLine}
-              <tr style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
-                <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)", ...stickyCell(0) }}>{position}</td>
-                <td style={{ ...tdStyle, textAlign: "left", fontWeight: 700, ...stickyCell(1) }}>
-                  {row.round}호
-                  {row.is_next ? (
-                    <span style={{ marginLeft: 5, color: "var(--text-muted)", fontSize: "var(--fs-sm)", fontWeight: 400 }}>
-                      다음
-                    </span>
-                  ) : null}
-                </td>
-                <td style={{ ...tdStyle, textAlign: "left", ...stickyCell(2) }}>
-                  <RoundStatus row={row} compact={false} onWithdrawSignal={onWithdrawSignal} />
-                </td>
-                <td style={{ ...tdStyle, color: "var(--text-muted)", ...stickyCell(3) }}>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                    <span>{formatPrice(view.position_prices[String(position)], currency)}</span>
-                    <ManualSignalButton view={view} row={row} onSent={onSignalSent} />
-                  </div>
-                </td>
-                <td style={{ ...tdStyle, ...stickyCell(4) }}>
-                  {row.held ? (
-                    <>
-                      <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
-                        <b>{formatPrice(row.fill_price, currency)}</b>
-                        {row.bought_on != null && row.source != null ? (
-                          <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-xs, 11px)" }}>
-                            {row.bought_on.slice(5)} · {BOUGHT_SOURCE_WORDS[row.source]}
+                <React.Fragment key={row.round}>
+                  {row.round === 1 && aboveFirstRound ? <PriceGapRow gap={aboveFirstRound} columnCount={columnCount} /> : null}
+                  {lowLine}
+                  <tr style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
+                    <td style={{ ...tdStyle, textAlign: "left", color: "var(--text-muted)", ...stickyCell(0) }}>{position}</td>
+                    <td style={{ ...tdStyle, textAlign: "left", fontWeight: 700, ...stickyCell(1) }}>
+                      {row.round}호
+                      {row.is_next ? (
+                        <span style={{ marginLeft: 5, color: "var(--text-muted)", fontSize: "var(--fs-sm)", fontWeight: 400 }}>
+                          다음
+                        </span>
+                      ) : null}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: "left", ...stickyCell(2) }}>
+                      <RoundStatus row={row} compact={false} onWithdrawSignal={onWithdrawSignal} />
+                    </td>
+                    <td style={{ ...tdStyle, color: "var(--text-muted)", ...stickyCell(3) }}>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                        <span>{formatPrice(view.position_prices[String(position)], currency)}</span>
+                        <ManualSignalButton view={view} row={row} onSent={onSignalSent} />
+                      </div>
+                    </td>
+                    <td style={{ ...tdStyle, ...stickyCell(4) }}>
+                      {row.held ? (
+                        <>
+                          <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
+                            <b>{formatPrice(row.fill_price, currency)}</b>
+                            {row.bought_on != null && row.source != null ? (
+                              <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-xs, 11px)" }}>
+                                {row.bought_on.slice(5)} · {BOUGHT_SOURCE_WORDS[row.source]}
+                              </span>
+                            ) : null}
                           </span>
-                        ) : null}
-                      </span>
-                      {/* 팔 수 있는 회차(가장 깊은 보유)만 실제 매도 지정가 — 체결가 +간격%. */}
-                      {row.round === status.held_count && row.sell_limit != null ? (
-                        <div style={{ color: SELL_BADGE_COLOR, fontSize: "var(--fs-xs, 11px)", fontWeight: 700 }}>
-                          매도 {formatPrice(row.sell_limit, currency)}
-                          {row.rebuy_after_sell ? " 후 재매수" : ""}
-                        </div>
+                          {/* 팔 수 있는 회차(가장 깊은 보유)만 실제 매도 지정가 — 체결가 +간격%. */}
+                          {row.round === status.held_count && row.sell_limit != null ? (
+                            <div style={{ color: SELL_BADGE_COLOR, fontSize: "var(--fs-xs, 11px)", fontWeight: 700 }}>
+                              매도 {formatPrice(row.sell_limit, currency)}
+                              {row.rebuy_after_sell ? " 후 재매수" : ""}
+                            </div>
+                          ) : null}
+                        </>
+                      ) : row.is_next ? (
+                        // 다음 회차의 실제 매수 지정가 — 마지막 체결가 −간격%(위치 가격과 조금 다를 수 있다).
+                        // 보유가 없으면 가격이 없고 다음 1호 매수 시각(한국시간)을 적는다.
+                        <span style={{ color: BUY_BADGE_COLOR, fontWeight: 700 }}>
+                          {row.buy_limit != null
+                            ? `다음 매수 ${formatPrice(row.buy_limit, currency)}`
+                            : `${status.first_entry_time} 매수 예정`}
+                          {row.cash_short ? (
+                            <span style={{ marginLeft: 6, color: "var(--text-muted)", fontWeight: 400 }}>한도 소진</span>
+                          ) : null}
+                        </span>
                       ) : null}
-                    </>
-                  ) : row.is_next ? (
-                    // 다음 회차의 실제 매수 지정가 — 마지막 체결가 −간격%(위치 가격과 조금 다를 수 있다).
-                    // 보유가 없으면 가격이 없고 다음 1호 매수 시각(한국시간)을 적는다.
-                    <span style={{ color: BUY_BADGE_COLOR, fontWeight: 700 }}>
-                      {row.buy_limit != null
-                        ? `다음 매수 ${formatPrice(row.buy_limit, currency)}`
-                        : `${status.first_entry_time} 매수 예정`}
-                      {row.cash_short ? (
-                        <span style={{ marginLeft: 6, color: "var(--text-muted)", fontWeight: 400 }}>한도 소진</span>
-                      ) : null}
-                    </span>
-                  ) : null}
-                </td>
-                <td style={{ ...tdStyle, ...stickyCell(5) }}>{row.held ? `${formatNumber(row.quantity)}주` : "-"}</td>
-                <td style={{ ...tdStyle, ...stickyCell(6) }}>{formatAmount(amounts.cost, currency)}</td>
-                <td style={{ ...tdStyle, color: signColor(amounts.pnl), fontWeight: 700, ...stickyCell(7) }}>
-                  {formatSignedAmount(amounts.pnl, currency)}
-                </td>
-                <td style={{ ...tdStyle, color: signColor(row.profit_pct), fontWeight: 700, ...stickyCell(8) }}>
-                  {formatSigned(row.profit_pct)}
-                </td>
-                {tradeCells}
-              </tr>
-              </React.Fragment>
+                    </td>
+                    <td style={{ ...tdStyle, ...stickyCell(5) }}>{row.held ? `${formatNumber(row.quantity)}주` : "-"}</td>
+                    <td style={{ ...tdStyle, ...stickyCell(6) }}>{formatAmount(amounts.cost, currency)}</td>
+                    <td style={{ ...tdStyle, color: signColor(amounts.pnl), fontWeight: 700, ...stickyCell(7) }}>
+                      {formatSignedAmount(amounts.pnl, currency)}
+                    </td>
+                    <td style={{ ...tdStyle, color: signColor(row.profit_pct), fontWeight: 700, ...stickyCell(8) }}>
+                      {formatSigned(row.profit_pct)}
+                    </td>
+                    {tradeCells}
+                  </tr>
+                </React.Fragment>
               );
             })}
             {slots.length > 0 && lowLineIndex < 0 ? (
@@ -1640,24 +1640,24 @@ export function StrategyTradeClient() {
 
   return (
     <PageFrame title="전략 사고팔기" fullWidth>
-     <TradeCurrencyContext.Provider value={currency}>
-      <div className="appPageStack">
-        <AccountSettingsCard
-          key={view.account_id}
-          view={view}
-          accountId={view.account_id}
-          onAccountChange={(next) => void load(next)}
-          onSaved={setView}
-          onWithdrawSignal={askWithdrawSignal}
-          onSignalSent={() => load(view.account_id)}
-        />
-      </div>
+      <TradeCurrencyContext.Provider value={currency}>
+        <div className="appPageStack">
+          <AccountSettingsCard
+            key={view.account_id}
+            view={view}
+            accountId={view.account_id}
+            onAccountChange={(next) => void load(next)}
+            onSaved={setView}
+            onWithdrawSignal={askWithdrawSignal}
+            onSignalSent={() => load(view.account_id)}
+          />
+        </div>
 
-      <SlackWithdrawModal label={withdrawing?.label ?? null}
-        busy={withdrawBusy} onClose={() => setWithdrawing(null)} onConfirm={() => void confirmWithdrawSignal()}>
-        {" "}같은 메시지로 나간 다른 신호도 함께 회수됩니다.
-      </SlackWithdrawModal>
-     </TradeCurrencyContext.Provider>
+        <SlackWithdrawModal label={withdrawing?.label ?? null}
+          busy={withdrawBusy} onClose={() => setWithdrawing(null)} onConfirm={() => void confirmWithdrawSignal()}>
+          {" "}같은 메시지로 나간 다른 신호도 함께 회수됩니다.
+        </SlackWithdrawModal>
+      </TradeCurrencyContext.Provider>
     </PageFrame>
   );
 }
