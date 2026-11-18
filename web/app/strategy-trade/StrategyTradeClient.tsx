@@ -198,6 +198,7 @@ type View = {
   pct_max: number;
   rounds_min: number;
   rounds_max: number;
+  recommended_gap_months: number;
   /** 종목 통화→원 환율(국장 1) — 회차수량 컬럼용. 못 받았으면 null. */
   krw_rate: number | null;
   ticker_options: TickerOption[];
@@ -538,7 +539,7 @@ function sumTradeHoldings(rows: HoldingsRow[]) {
 }
 
 /** 권장 간격 컬럼 — 이 화면에만 있는 참고값이라 공용 컬럼 없이 여기서 정의한다(폭·표기는 변동성 컬럼과 같다). */
-function recommendedGapColumn(): ColDef<TradeListRow> {
+function recommendedGapColumn(gapMonths: number): ColDef<TradeListRow> {
   return {
     colId: "recommended_gap_pct",
     field: "recommended_gap_pct",
@@ -548,15 +549,15 @@ function recommendedGapColumn(): ColDef<TradeListRow> {
     pinned: "left",
     type: "numericColumn",
     headerTooltip:
-      "최근 3개월(확정 종가) 고점 이후 최대 하락을 회차들이 복리로 덮는 간격 — 종목 배수(1·2·3배)별 범위로 자른다.",
+      `최근 ${gapMonths}개월(확정 종가) 고점 이후 최대 하락을 회차들이 복리로 덮는 간격 — 종목 배수(1·2·3배)별 범위로 자른다.`,
     tooltipValueGetter: ({ data }) => {
       if (data?.drawdown_pct == null || data.gap_range_pct == null) return undefined;
-      const period = data.gap_partial ? `최근 ${data.gap_days}거래일(3개월 미만)` : "3개월";
+      const period = data.gap_partial ? `최근 ${data.gap_days}거래일(${gapMonths}개월 미만)` : `${gapMonths}개월`;
       const [low, high] = data.gap_range_pct;
       return `${period} 최대 하락 ${data.drawdown_pct.toFixed(1)}% · ${data.leverage_multiple}배 범위 ${low}~${high}%`;
     },
     valueFormatter: ({ value }) => (value == null ? "-" : `${Number(value).toFixed(2)}%`),
-    // 3개월치가 없어 있는 기간으로 낸 값은 순위 화면의 기간 미달 값과 같은 색으로 칠한다.
+    // 기준 기간이 없어 있는 기간으로 낸 값은 순위 화면의 기간 미달 값과 같은 색으로 칠한다.
     cellStyle: ({ data }) => (data?.gap_partial ? PARTIAL_PERIOD_CELL_STYLE : { color: "var(--text-muted)" }),
   };
 }
@@ -792,7 +793,7 @@ function AccountSettingsCard({
   const tradeListColumns = useMemo<ColDef<TradeListRow>[]>(() => [
     gridRowDragColumn<TradeListRow>(({ node }) => !node.rowPinned, 36),
     // 권장 간격을 쓰지 않을 때는 맨 왼쪽 참고 칸으로 둔다(쓰면 간격 칸 자리로 옮긴다).
-    ...(useRecommendedGap ? [] : [recommendedGapColumn()]),
+    ...(useRecommendedGap ? [] : [recommendedGapColumn(view.recommended_gap_months)]),
     tickerColumn<TradeListRow>(),
     stockNameColumn<TradeListRow>({
       cellRenderer: ({ data, value }) => data?.is_group ? (
@@ -832,7 +833,7 @@ function AccountSettingsCard({
     ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => [
       // 권장 간격을 쓰는 동안은 간격 칸 자리에 실제로 쓰이는 권장 간격을 둔다 — 저장된 간격은 보관만 하고, 끄면 다시 쓴다.
       ...(column.field === "pct" && useRecommendedGap
-        ? [{ ...recommendedGapColumn(), pinned: undefined }]
+        ? [{ ...recommendedGapColumn(view.recommended_gap_months), pinned: undefined }]
         : [{
           ...column,
           type: "rightAligned",
@@ -859,7 +860,7 @@ function AccountSettingsCard({
     returnPct, valuation, pnl,
     { ...pnl, colId: "realized_krw", headerName: "실현손익", headerTooltip: "회차 기준 — 아래 손익 요약과 같은 값", valueGetter: ({ data }) => data?.realized_krw },
     { ...pnl, colId: "total_krw", headerName: "합계 손익", headerTooltip: "평가손익 + 실현손익", valueGetter: ({ data }) => data?.total_krw },
-  ], [saving, onWithdrawSignal, useRecommendedGap]);
+  ], [saving, onWithdrawSignal, useRecommendedGap, view.recommended_gap_months]);
 
   const tradeRowClass = ({ data }: RowClassParams<TradeListRow>) => [
     data?.is_group || data?.key === TOTAL_ROW_KEY || data?.key === TRADE_TOTAL_ROW_KEY ? "assetsGroupRow" : "",

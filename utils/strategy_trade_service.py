@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from config import RECOMMENDED_GAP_WINDOW_DAYS
+from config import RECOMMENDED_GAP_WINDOW_MONTHS
 from core.strategy.trade import rules as ladder
 from services.broker_trade_service import resolve_us_exchange
 from utils.logger import get_app_logger
@@ -1243,10 +1243,12 @@ def _trade_account_docs() -> list[dict[str, Any]]:
 def recommended_gaps(entries: dict[str, dict[str, Any]], country: str) -> dict[str, dict[str, Any]]:
     """같은 국가 전략들의 권장 간격 — 전략 id → {drawdown_pct, recommended_gap_pct, leverage_multiple, gap_range_pct, gap_days, gap_partial}.
 
-    확정 봉(`bar_anchor` 까지, 진행 중인 세션 제외)의 최근 3개월 종가 MDD 를 종목 배수별 범위로 자른 간격이다
-    (`ladder.recommended_gap_pct`). 3개월치보다 짧으면 있는 기간으로 계산하고 기간 미달(`gap_partial`)로 표시하며,
+    확정 봉(`bar_anchor` 까지, 진행 중인 세션 제외)의 최근 `RECOMMENDED_GAP_WINDOW_MONTHS`개월 종가 MDD 를 종목 배수별 범위로 자른 간격이다
+    (`ladder.recommended_gap_pct`). 기준 기간보다 짧으면 있는 기간으로 계산하고 기간 미달(`gap_partial`)로 표시하며,
     종가가 2개 미만이면 간격을 비운다(None). 편집 표 컬럼과 「권장 간격 사용」 계좌의 실제 간격이 이 함수 하나를 쓴다.
     """
+    import pandas as pd
+
     from utils.cache_utils import load_cached_close_series_bulk_with_fallback
     from utils.data_loader import get_latest_trading_day
     from utils.effective_prices import bar_anchor
@@ -1266,7 +1268,13 @@ def recommended_gaps(entries: dict[str, dict[str, Any]], country: str) -> dict[s
             multiple = ladder.leverage_multiple(ticker, str(entry["name"]))
             close = slice_close_series_to_date(closes.get(ticker), latest_day)
             confirmed = close.loc[:last_bar].dropna() if close is not None else None
-            window = confirmed.iloc[-RECOMMENDED_GAP_WINDOW_DAYS:] if confirmed is not None else None
+            if confirmed is not None and not confirmed.empty:
+                cutoff = confirmed.index[-1] - pd.DateOffset(months=RECOMMENDED_GAP_WINDOW_MONTHS)
+                window = confirmed[confirmed.index >= cutoff]
+                gap_partial = len(window) >= 2 and confirmed.index[0] > cutoff
+            else:
+                window = None
+                gap_partial = False
             drawdown = ladder.max_drawdown(window.tolist()) if window is not None and len(window) >= 2 else None
             gaps[sid] = {
                 "drawdown_pct": round(drawdown * 100, 2) if drawdown is not None else None,
@@ -1278,7 +1286,7 @@ def recommended_gaps(entries: dict[str, dict[str, Any]], country: str) -> dict[s
                 "leverage_multiple": multiple,
                 "gap_range_pct": ladder.recommended_gap_range(multiple),
                 "gap_days": len(window) if drawdown is not None else None,
-                "gap_partial": drawdown is not None and len(window) < RECOMMENDED_GAP_WINDOW_DAYS,
+                "gap_partial": drawdown is not None and gap_partial,
             }
     return gaps
 
@@ -1359,6 +1367,7 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
         "pct_max": PCT_MAX,
         "rounds_min": ROUNDS_MIN,
         "rounds_max": ROUNDS_MAX,
+        "recommended_gap_months": RECOMMENDED_GAP_WINDOW_MONTHS,
         "krw_rate": _view_krw_rate(country),
         # 편집 표의 행 — 저장된 전략 설정 그대로.
         "configs": [
