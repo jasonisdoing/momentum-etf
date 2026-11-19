@@ -247,6 +247,7 @@ type Positions = {
   };
   holdings: Holding[];
   order_signals: Record<string, { state: "sent" | "sending"; withdraw_key: string | null }>;
+  can_order: boolean;
   /** 이 계좌에 등록된 사고팔기 종목 — 비어 있지 않으면 현금 몫 안의 사고팔기 칸을 보여준다(보유 유무와 무관). */
   trade_tickers: string[];
   actions: {
@@ -1963,9 +1964,9 @@ export function StrategyMixClient() {
                       </div>
                     ) : (
                       <ActionGroupList groups={todayActionGroups} signals={positions?.order_signals}
-                        onWithdraw={positions?.account_id === accountId ? (item, key) =>
+                        onWithdraw={positions?.account_id === accountId && positions.can_order ? (item, key) =>
                           setWithdrawingAction({ accountId, item, key }) : undefined}
-                        onSelect={positions?.account_id === accountId ? (item) => {
+                        onSelect={positions?.account_id === accountId && positions.can_order ? (item) => {
                           setSendActionError(null);
                           setSelectedAction({ item, accountId, accountLabel });
                         } : undefined} />

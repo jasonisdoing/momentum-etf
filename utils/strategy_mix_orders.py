@@ -58,6 +58,14 @@ def _today_action(account_id: str, action_key: str) -> tuple[dict, dict, dict]:
     raise RoundNotOrderableError("이 종목은 더 이상 오늘의 주문 대상이 아닙니다.", done=False)
 
 
+def can_order_account(account_id: str) -> bool:
+    """메리츠·나무 API 가 연동된 운영 계좌인지 — 화면의 매수·매도 슬랙 발송 버튼 노출 여부."""
+    try:
+        return account_env(account_id) == "live"
+    except BrokerApiError:
+        return False
+
+
 def _require_live_account(account_id: str) -> str:
     env = account_env(account_id)
     if env != "live":

@@ -27,11 +27,15 @@ def get_strategy_mix_positions(
     _: None = Depends(require_internal_token),
 ) -> dict:
     """오늘 기준 합성 운영 상태 — 보유 목록(목표 비중)·현금 비중·오늘의 액션."""
-    from utils.strategy_mix_orders import mix_order_signals
+    from utils.strategy_mix_orders import can_order_account, mix_order_signals
     from utils.strategy_mix_positions import mix_positions
 
     positions = mix_positions(account_id)
-    positions["order_signals"] = mix_order_signals(positions["account_id"], positions["actions"]["groups"])
+    can_order = can_order_account(positions["account_id"])
+    positions["can_order"] = can_order
+    positions["order_signals"] = (
+        mix_order_signals(positions["account_id"], positions["actions"]["groups"]) if can_order else {}
+    )
     return positions
 
 
