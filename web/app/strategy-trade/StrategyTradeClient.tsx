@@ -243,67 +243,53 @@ type View = {
   } | null;
 };
 
-/** 오늘 API 주문 한도·사용량 — 주문 직전 검사와 같은 값이다. 다 쓴 항목은 빨갛게. */
-function OrderLimitField({ limit }: { limit: NonNullable<View["order_limit"]> }) {
+/** 오늘 API 주문 한도·사용량 + 보유 주식 + 남은 현금 — 본문 그리드 위 3줄 요약. */
+function AccountStatusSummary({
+  limit,
+  totals,
+  summary,
+}: {
+  limit: View["order_limit"];
+  totals: { buy_amount_krw: number; valuation_krw: number; pnl_krw: number } | null;
+  summary: AccountSummary | null;
+}) {
   const full = (used: number, max: number | null) => (max != null && used >= max ? { color: "var(--up-color, #d64545)" } : {});
-  return (
-    <div className="appLabeledField" style={{ marginBottom: 0 }}>
-      <span className="appLabeledFieldLabel">오늘 주문 한도</span>
-      <span
-        style={{ display: "inline-flex", alignItems: "center", gap: 10, minHeight: 32, fontSize: "var(--fs-sm)" }}
-        title="계좌 설정의 하루 API 주문 건수·금액 한도 — 금액은 오늘 순매수(매수 − 매도)를 원화로 센다."
-      >
-        {!limit.enabled ? <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}>API 주문 꺼짐</span> : null}
-        <span style={full(limit.used_count, limit.max_count)}>
-          횟수 <b>{limit.used_count}</b> / {limit.max_count == null ? "미설정" : `${limit.max_count}건`}
-        </span>
-        <span style={full(limit.used_amount, limit.max_amount)}>
-          금액 <b>{formatCurrencyPrice(limit.used_amount, "KRW")}</b> /{" "}
-          {limit.max_amount == null ? "미설정" : formatCurrencyPrice(limit.max_amount, "KRW")}
-        </span>
-      </span>
-    </div>
-  );
-}
-
-/** 총자산 대비 원화 기준 남은 현금 비율과 금액. */
-function RemainingCashField({ summary }: { summary: AccountSummary | null }) {
   const cashKrw = summary?.cash_balance_krw;
   const totalKrw = summary?.total_assets_krw;
   const ratioPct = cashKrw != null && totalKrw != null && totalKrw > 0 ? (cashKrw / totalKrw) * 100 : null;
+  const rowStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+    fontSize: "var(--fs-sm)",
+    lineHeight: 1.4,
+  };
+  const labelStyle: React.CSSProperties = {
+    color: "var(--text-muted)",
+    fontWeight: 600,
+    minWidth: 88,
+  };
   return (
-    <div className="appLabeledField" style={{ marginBottom: 0 }}>
-      <span className="appLabeledFieldLabel">남은 현금</span>
-      <span
-        style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 32, fontSize: "var(--fs-sm)" }}
-        title="계좌 총자산 대비 원화 기준 남은 현금 비율과 금액"
-      >
-        {cashKrw == null ? (
-          "-"
-        ) : (
-          <>
-            <b>{ratioPct != null ? `${ratioPct.toFixed(2)}%` : "-"}</b>
-            <span>({formatCurrencyPrice(cashKrw, "KRW")})</span>
-          </>
-        )}
-      </span>
-    </div>
-  );
-}
-
-/** 원화 기준 보유 주식 매수원금 · 평가금액 · 평가손익. */
-function HoldingsSummaryField({
-  totals,
-}: {
-  totals: { buy_amount_krw: number; valuation_krw: number; pnl_krw: number } | null;
-}) {
-  return (
-    <div className="appLabeledField" style={{ marginBottom: 0 }}>
-      <span className="appLabeledFieldLabel">보유 주식</span>
-      <span
-        style={{ display: "inline-flex", alignItems: "center", gap: 10, minHeight: 32, fontSize: "var(--fs-sm)" }}
-        title="현재 보유 중인 주식 전체의 원화 기준 매수원금 · 평가금액 · 평가손익"
-      >
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "2px 4px 6px" }}>
+      {limit ? (
+        <div
+          style={rowStyle}
+          title="계좌 설정의 하루 API 주문 건수·금액 한도 — 금액은 오늘 순매수(매수 − 매도)를 원화로 센다."
+        >
+          <span style={labelStyle}>오늘 주문 한도</span>
+          {!limit.enabled ? <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}>API 주문 꺼짐</span> : null}
+          <span style={full(limit.used_count, limit.max_count)}>
+            횟수 <b>{limit.used_count}</b> / {limit.max_count == null ? "미설정" : `${limit.max_count}건`}
+          </span>
+          <span style={full(limit.used_amount, limit.max_amount)}>
+            금액 <b>{formatCurrencyPrice(limit.used_amount, "KRW")}</b> /{" "}
+            {limit.max_amount == null ? "미설정" : formatCurrencyPrice(limit.max_amount, "KRW")}
+          </span>
+        </div>
+      ) : null}
+      <div style={rowStyle} title="현재 보유 중인 주식 전체의 원화 기준 매수원금 · 평가금액 · 평가손익">
+        <span style={labelStyle}>보유 주식</span>
         <span>
           매수원금 <b>{totals ? formatCurrencyPrice(totals.buy_amount_krw, "KRW") : "-"}</b>
         </span>
@@ -316,7 +302,17 @@ function HoldingsSummaryField({
             {totals ? formatSignedAmount(totals.pnl_krw, "KRW") : "-"}
           </b>
         </span>
-      </span>
+      </div>
+      <div style={rowStyle} title="계좌 총자산 대비 원화 기준 남은 현금 비율과 금액">
+        <span style={labelStyle}>남은 현금</span>
+        {cashKrw == null ? (
+          <span>-</span>
+        ) : (
+          <span>
+            <b>{ratioPct != null ? `${ratioPct.toFixed(2)}%` : "-"}</b> ({formatCurrencyPrice(cashKrw, "KRW")})
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -1236,9 +1232,6 @@ function AccountSettingsCard({
                   testing={slackTesting}
                   onTest={() => void sendSlackTest()}
                 />
-                {view.order_limit ? <OrderLimitField limit={view.order_limit} /> : null}
-                {view.account_id ? <HoldingsSummaryField totals={totalHoldings} /> : null}
-                {view.account_id ? <RemainingCashField summary={accountAssets?.summary ?? null} /> : null}
               </div>
               <div className="appMainHeaderRight">
                 <UnsavedChangesBadge show={isDirty} />
@@ -1264,6 +1257,7 @@ function AccountSettingsCard({
       <section className="appSection appPageStack strategyTradeGrid">
         <aside className="card appCard" aria-label="종목 목록">
           <div className="card-body appCardBodyTight">
+            <AccountStatusSummary limit={view.order_limit} totals={totalHoldings} summary={accountAssets?.summary ?? null} />
             {/* 계좌 행(합계·현금·기타 종목)과 사고팔기 행을 헤더가 따로 보이는 두 그리드로 나눈다.
                 두 그리드는 같은 컬럼을 쓰고 `alignedGrids` 로 칸 폭·가로 스크롤을 함께 움직인다. */}
             <AppAgGrid
