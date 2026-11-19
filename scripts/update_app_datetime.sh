@@ -1,6 +1,6 @@
 #!/bin/bash
 SETTINGS_FILE="utils/logger.py"
-CURRENT_TIME=$(date +"%Y-%m-%d-%H")
+CURRENT_TIME=$(date +"%Y-%m-%d-%H-%M")
 
 if grep -q '^APP_VERSION = ' "$SETTINGS_FILE"; then
   if sed --version >/dev/null 2>&1; then

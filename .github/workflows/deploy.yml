@@ -63,7 +63,7 @@ jobs:
             {
               echo "rollback_status=${rb_status}"
               echo "rollback_sha=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
-              echo "rollback_version=$(git log -1 --format="%cd-%h" --date=format:"%Y-%m-%d" 2>/dev/null || echo unknown)"
+              echo "rollback_version=$(.venv/bin/python -c "from pathlib import Path; import re; m = re.search(r'APP_VERSION\s*=\s*[\'\"]([^\'\"]+)[\'\"]', Path('utils/logger.py').read_text(encoding='utf-8')); print(m.group(1) if m else 'unknown')")"
               echo "rollback_msg=$(git log -1 --pretty=%s 2>/dev/null || echo "")"
             } >> "$GITHUB_OUTPUT"
             echo ">>> 직전 커밋(${PREV_SHA})으로 롤백 완료 (status=${rb_status})" >&2
@@ -133,7 +133,7 @@ jobs:
         shell: bash
         run: |
           cd "$APP_DIR"
-          VERSION=$(git log -1 --format="%cd-%h" --date=format:"%Y-%m-%d" 2>/dev/null || echo "unknown")
+          VERSION=$(.venv/bin/python -c "from pathlib import Path; import re; m = re.search(r'APP_VERSION\s*=\s*[\'\"]([^\'\"]+)[\'\"]', Path('utils/logger.py').read_text(encoding='utf-8')); print(m.group(1) if m else 'unknown')")
           COMMIT_MSG=$(git log -1 --pretty=%s "${{ github.sha }}" 2>/dev/null || echo "")
           DISK_FREE=$(df -h /System/Volumes/Data | awk 'NR==2 {print $4}')
           DISK_USE=$(df -h /System/Volumes/Data | awk 'NR==2 {print $5}')
