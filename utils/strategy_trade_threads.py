@@ -13,11 +13,10 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from pymongo.errors import OperationFailure
-from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 from utils.db_manager import get_db_connection
-from utils.notification import send_slack_message_v2, update_slack_message
+from utils.notification import get_slack_client, send_slack_message_v2, update_slack_message
 from utils.settings_loader import get_slack_channel
 from utils.strategy_trade_signal_lock import signal_lock
 
@@ -266,7 +265,7 @@ def _delete_replies(signal_ts: str) -> None:
     """스레드에 기록된 앱 답글을 최신 것부터 지운다(본문은 남긴다) — 실패한 것이 있으면 에러로 알린다."""
     records = _messages().find({"thread_ts": signal_ts, "ts": {"$ne": signal_ts}})
     targets = sorted(((record["ts"], record["channel"]) for record in records), reverse=True)
-    client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+    client = get_slack_client(os.environ["SLACK_BOT_TOKEN"])
     failed: list[str] = []
     for ts, channel in targets:
         try:

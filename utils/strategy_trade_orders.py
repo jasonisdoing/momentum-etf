@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -28,8 +29,10 @@ from services.broker_trade_service import (
     cancel_order,
     fetch_best_quote,
     list_day_orders,
-    modify_order as broker_modify_order,
     place_limit_order,
+)
+from services.broker_trade_service import (
+    modify_order as broker_modify_order,
 )
 from utils.account_settings_store import ACCOUNT_ENV_MOCK, load_account_docs
 from utils.db_manager import get_db_connection
@@ -46,7 +49,7 @@ from utils.strategy_trade_market import (
     order_venue,
     session_trade_date,
 )
-from utils.strategy_trade_service import load_strategy_view, load_views_where
+from utils.strategy_trade_service import load_strategy_view
 from utils.strategy_trade_threads import SIGNAL_RETENTION_DAYS
 
 KST = ZoneInfo("Asia/Seoul")
@@ -273,10 +276,16 @@ def resolve_order(
         row = _require_round_state(strategy, side, target_round) if target_round is not None else None
     if round_no is not None:
         signal_price = row["sell_limit"] if side == "sell" else (None if row["close_entry"] else row["buy_limit"])
-    venue, label, price, depth = resolve_order_quote(strategy, side)
     if side == "buy":
-        quantity = _buy_quantity(strategy, price, account_id)
+        # 호가(증권사 API)와 환율 조회는 독립적이므로 병렬로 호출해 모달 대기 시간을 줄인다.
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            quote_fut = executor.submit(resolve_order_quote, strategy, side)
+            rate_fut = executor.submit(krw_rate, strategy["country"])
+            venue, label, price, depth = quote_fut.result()
+            rate = rate_fut.result()
+        quantity = _buy_quantity(strategy, price, account_id, rate)
     else:
+        venue, label, price, depth = resolve_order_quote(strategy, side)
         quantity = row["quantity"]
     return {
         "strategy_label": strategy["label"],
@@ -302,9 +311,9 @@ def resolve_order_quote(strategy: dict[str, Any], side: str) -> tuple[str, str, 
     return venue, label, price, quote["depth"]
 
 
-def _buy_quantity(strategy: dict[str, Any], price: int, account_id: str) -> int:
+def _buy_quantity(strategy: dict[str, Any], price: int, account_id: str, rate: float) -> int:
     size = strategy["config"]["round_size"]
-    quantity = round_buy_quantity(size, price, krw_rate(strategy["country"]))
+    quantity = round_buy_quantity(size, price, rate)
     if quantity == 0:
         raise BrokerApiError(
             f"{strategy['label']}: 회차 금액 {size:,}만원으로 "
@@ -364,14 +373,19 @@ def resolve_swap(account_id: str, pool: str, strategy_id: str, round_no: int, *,
     if not row["rebuy_after_sell"]:
         raise RoundNotOrderableError(f"{strategy['label']} {round_no}호는 매도 후 재매수 대상이 아닙니다.", done=False)
     venue = _order_venue(strategy, now=_now())
-    quote = fetch_best_quote(strategy["account_id"], strategy["ticker"], venue)
+    # 호가(증권사 API)와 환율 조회는 독립적이므로 병렬로 호출한다.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        quote_fut = executor.submit(fetch_best_quote, strategy["account_id"], strategy["ticker"], venue)
+        rate_fut = executor.submit(krw_rate, strategy["country"])
+        quote = quote_fut.result()
+        rate = rate_fut.result()
     _require_valid_quote(strategy, "매도 1호가", quote["ask"])
     _require_valid_quote(strategy, "매수 1호가", quote["bid"])
     return {
         "strategy_label": strategy["label"],
         "ticker": strategy["ticker"],
         "sell_quantity": row["quantity"],
-        "buy_quantity": _buy_quantity(strategy, quote["bid"], account_id),
+        "buy_quantity": _buy_quantity(strategy, quote["bid"], account_id, rate),
         "sell_price": quote["ask"],
         "buy_price": quote["bid"],
         "quote_depth": quote["depth"],
@@ -852,7 +866,11 @@ def _orders_outcome(orders: list[dict[str, Any]]) -> str:
     pair_id = latest.get("pair_id")
     group = [order for order in orders if pair_id is not None and order.get("pair_id") == pair_id] or [latest]
     if any(order["status"] in ACTIVE_STATUSES for order in group):
-        return MESSAGE_PLACED if any(order.get("order_no") for order in group if order["status"] in ACTIVE_STATUSES) else MESSAGE_PENDING
+        return (
+            MESSAGE_PLACED
+            if any(order.get("order_no") for order in group if order["status"] in ACTIVE_STATUSES)
+            else MESSAGE_PENDING
+        )
     if pair_id is not None:
         return (
             MESSAGE_DONE if {o["side"] for o in group if o["status"] == "filled"} == {"buy", "sell"} else MESSAGE_FAILED

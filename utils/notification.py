@@ -6,6 +6,7 @@ import os
 import re
 from typing import Any
 
+import httpx
 import requests
 
 try:
@@ -28,6 +29,55 @@ from utils.settings_loader import get_slack_channel
 
 _LAST_ERROR: str | None = None
 logger = get_app_logger()
+
+# 슬랙 API 호출마다 TCP/TLS 핸드셰이크를 반복하지 않도록 전역 커넥션 풀을 재사용한다.
+_SLACK_HTTP_CLIENT = httpx.Client(
+    base_url="https://slack.com/api/",
+    timeout=30.0,
+    limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+)
+
+_SLACK_METHOD_PATHS = {
+    "chat_postMessage": "chat.postMessage",
+    "chat_update": "chat.update",
+    "chat_delete": "chat.delete",
+    "views_open": "views.open",
+    "views_update": "views.update",
+    "reactions_add": "reactions.add",
+    "reactions_remove": "reactions.remove",
+}
+
+
+class PooledSlackClient:
+    """전역 `httpx.Client` 커넥션 풀을 공유하는 Slack Web API 경량 클라이언트."""
+
+    def __init__(self, token: str) -> None:
+        self._token = token
+
+    def _call(self, api_method: str, **kwargs: Any) -> dict[str, Any]:
+        payload = {key: value for key, value in kwargs.items() if value is not None}
+        response = _SLACK_HTTP_CLIENT.post(
+            api_method,
+            headers={"Authorization": f"Bearer {self._token}"},
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if not data.get("ok"):
+            raise SlackApiError(f"Slack API error ({api_method}): {data.get('error')}", data)
+        return data
+
+    def __getattr__(self, name: str):
+        api_method = _SLACK_METHOD_PATHS.get(name)
+        if api_method is None:
+            raise AttributeError(f"지원하지 않는 슬랙 API 메서드입니다: {name}")
+        return lambda **kwargs: self._call(api_method, **kwargs)
+
+
+def get_slack_client(token: str) -> PooledSlackClient:
+    """커넥션 풀을 재사용하는 슬랙 클라이언트를 반환한다."""
+    return PooledSlackClient(token)
+
 
 # 배치가 스스로 슬랙 알림을 보냈을 때 쓰는 종료 코드.
 # `infra/cron/run_batch.py` 래퍼가 이 코드를 보면 로그 꼬리를 붙인 일반 실패 알림을 보내지 않는다.
@@ -135,11 +185,7 @@ def _send_slack_message_via_bot(
         logger.warning("SLACK_BOT_TOKEN 이 설정되지 않아 전송을 건너뜁니다.")
         return None
 
-    if WebClient is None:
-        logger.warning("slack_sdk 가 설치되어 있지 않아 슬랙 전송을 건너뜁니다.")
-        return None
-
-    client = WebClient(token=token)
+    client = get_slack_client(token)
 
     try:
         response = client.chat_postMessage(
@@ -182,9 +228,9 @@ def update_slack_message(
 ) -> None:
     """봇이 보낸 메시지를 수정한다. 호출자가 슬랙 오류에 따라 처리할 수 있게 예외를 전달한다."""
     token = os.environ.get("SLACK_BOT_TOKEN")
-    if not token or WebClient is None:
-        raise RuntimeError("슬랙 메시지를 수정할 봇 토큰 또는 SDK가 없습니다.")
-    WebClient(token=token).chat_update(channel=channel, ts=message_ts, text=text, blocks=blocks)
+    if not token:
+        raise RuntimeError("슬랙 메시지를 수정할 봇 토큰이 없습니다.")
+    get_slack_client(token).chat_update(channel=channel, ts=message_ts, text=text, blocks=blocks)
 
 
 def _format_shares_for_country(quantity: Any) -> str:

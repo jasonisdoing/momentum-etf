@@ -15,16 +15,17 @@ from __future__ import annotations
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import parse_qs
 
-from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from slack_sdk.signature import SignatureVerifier
 
 from services.broker_api_service import BrokerApiError, OrderUncertainError
 from services.broker_trade_service import account_env
 from utils.account_settings_store import ACCOUNT_ENV_MOCK
+from utils.notification import get_slack_client
 from utils.settings_loader import get_slack_channel
 from utils.strategy_trade_market import format_money
 from utils.strategy_trade_orders import (
@@ -180,9 +181,7 @@ def _open_blocks(request: dict[str, Any], label: str = "주문하기") -> list[d
     return [_section(request), _button(OPEN_ACTION_ID, f"{_action_word(request)} {label}", style, {"request": request})]
 
 
-def _order_action_buttons(
-    request: dict[str, Any], order_id: str, prefix: str = ""
-) -> dict[str, Any]:
+def _order_action_buttons(request: dict[str, Any], order_id: str, prefix: str = "") -> dict[str, Any]:
     return {
         "type": "actions",
         "elements": [
@@ -232,9 +231,13 @@ def _pair_blocks(request: dict[str, Any], pair_id: str, note: str | None) -> lis
     return blocks
 
 
+def _slack_client():
+    return get_slack_client(_require_env("SLACK_BOT_TOKEN"))
+
+
 def _update_message(target: dict[str, Any], blocks: list[dict[str, Any]]) -> None:
     """원 메시지의 버튼·상태 줄을 교체한다."""
-    WebClient(token=_require_env("SLACK_BOT_TOKEN")).chat_update(
+    _slack_client().chat_update(
         channel=target["channel"],
         ts=target["message_ts"],
         text=f"[{_env_word(target['request']['env'])}] {_order_text(target['request'])}",
@@ -421,7 +424,10 @@ def _swap_view(request: dict[str, Any], order: dict[str, Any], target: dict[str,
 def _modify_view(request: dict[str, Any], preview: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
     side = _SIDE_LABELS[request["side"]]
     country = preview["order"]["country"]
-    depth = _quote_depth_lines(preview.get("quote_depth"), country)
+    depth = _quote_depth_text(
+        {"quote_depth": preview.get("quote_depth"), "country": country},
+        {("bids", 1) if request["side"] == "buy" else ("asks", 1): "정정 가격"},
+    )
     body = "\n".join(
         [
             f"*{_order_text(request)}*",
@@ -494,7 +500,7 @@ def _status_view(request: dict[str, Any], target: dict[str, Any], note: str) -> 
 def _update_view(view_id: str, view: dict[str, Any]) -> None:
     """열린 모달을 바꾼다 — 사용자가 그 사이 모달을 닫았으면(not_found) 할 일이 없다."""
     try:
-        WebClient(token=_require_env("SLACK_BOT_TOKEN")).views_update(view_id=view_id, view=view)
+        _slack_client().views_update(view_id=view_id, view=view)
     except SlackApiError as exc:
         if exc.response.get("error") != "not_found":
             raise
@@ -559,7 +565,7 @@ def open_confirm_modal(payload: dict[str, Any]) -> dict[str, Any] | None:
         # 스레드 답글이면 최상위 메시지의 ts, 최상위 메시지면 자기 ts 가 스레드의 뿌리다.
         "thread_ts": message.get("thread_ts") or message["ts"],
     }
-    client = WebClient(token=_require_env("SLACK_BOT_TOKEN"))
+    client = _slack_client()
     if action["action_id"] == OPEN_ACTION_ID:
         opened = client.views_open(
             trigger_id=payload["trigger_id"],
@@ -662,6 +668,25 @@ def _release_reservation(target: dict[str, Any]) -> None:
     release_signal_reservation(target["thread_ts"])
 
 
+def _run_post_order_updates(target: dict[str, Any], thread_text: str, blocks: list[dict[str, Any]]) -> None:
+    """주문 접수 직후 독립적인 슬랙 알림·버튼 전환·반응 동기화를 병렬로 처리한다."""
+
+    def _safe(fn, *args, **kwargs) -> None:
+        try:
+            fn(*args, **kwargs)
+        except Exception:
+            logger.exception("슬랙 주문 후속 업데이트 실패")
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [
+            executor.submit(_safe, send_thread_message, thread_text, thread_ts=target["thread_ts"]),
+            executor.submit(_safe, _update_message, target, blocks),
+            executor.submit(_safe, _sync_thread, target["thread_ts"]),
+        ]
+        for future in futures:
+            future.result()
+
+
 def _place_swap(target: dict[str, Any]) -> None:
     """매도 후 재매수 한 짝을 낸다 — 결과를 스레드로 알리고 메시지에 양쪽 취소 버튼을 단다."""
     request = target["request"]
@@ -690,9 +715,7 @@ def _place_swap(target: dict[str, Any]) -> None:
         text += f" · 매수 {buy['quantity']:,}주 × {format_money(buy['price'], buy['country'])}"
     else:
         text += f"\n⚠️ 매수 주문은 실패했습니다(매도만 걸림): {result['buy_error']}"
-    send_thread_message(text, thread_ts=target["thread_ts"])
-    _update_message(target, _pair_blocks(request, sell["pair_id"], None))
-    _sync_thread(target["thread_ts"])
+    _run_post_order_updates(target, text, _pair_blocks(request, sell["pair_id"], None))
 
 
 def _place(target: dict[str, Any]) -> None:
@@ -735,12 +758,11 @@ def _place(target: dict[str, Any]) -> None:
         return
     gap_pct = _signal_gap_pct(order)
     gap = f" · 신호 대비 {gap_pct:+.2f}%" if gap_pct is not None else ""
-    send_thread_message(
+    _run_post_order_updates(
+        target,
         f"✅ {side} 주문 접수: {order['strategy_label']} {order['quantity']:,}주 × {format_money(order['price'], order['country'])} (지정가){gap}",
-        thread_ts=target["thread_ts"],
+        _cancel_blocks(request, order["id"]),
     )
-    _update_message(target, _cancel_blocks(request, order["id"]))
-    _sync_thread(target["thread_ts"])
 
 
 def _restore_order_buttons(target: dict[str, Any], order: dict[str, Any], note: str | None = None) -> None:
@@ -880,7 +902,7 @@ def notify_close_approaching() -> int:
 
 def _react(method: str, channel: str, ts: str, name: str) -> None:
     """메시지 반응을 달거나 뗀다 — 반응은 부가 표시라 실패해도 로그만 남기고 흐름을 막지 않는다(권한: reactions:write)."""
-    client = WebClient(token=_require_env("SLACK_BOT_TOKEN"))
+    client = _slack_client()
     try:
         getattr(client, method)(channel=channel, timestamp=ts, name=name)
     except SlackApiError as exc:
@@ -897,9 +919,13 @@ def sync_signal_thread(thread: dict[str, Any]) -> str | None:
     state = signal_thread_state(signal_message_states(thread))
     channel, thread_ts = thread["channel"], thread["thread_ts"]
     if state != thread["reaction"]:
-        for key, name in REACTIONS.items():
-            if key != state:
-                _react("reactions_remove", channel, thread_ts, name)
+        to_remove = [name for key, name in REACTIONS.items() if key != state]
+        if to_remove:
+            with ThreadPoolExecutor(max_workers=len(to_remove)) as executor:
+                for future in [
+                    executor.submit(_react, "reactions_remove", channel, thread_ts, name) for name in to_remove
+                ]:
+                    future.result()
         if state is not None:
             _react("reactions_add", channel, thread_ts, REACTIONS[state])
         set_signal_thread_reaction(thread_ts, state)
