@@ -49,12 +49,51 @@ def _get_required_env(name: str) -> str:
     return value
 
 
-def _resolve_connection_string() -> str:
+def _build_connection_string(host: str) -> str:
     user = quote_plus(_get_required_env("MONGO_DB_USER"))
     password = quote_plus(_get_required_env("MONGO_DB_PASSWORD"))
-    host = _get_required_env("MONGO_DB_HOST")
     auth_source = _get_required_env("MONGO_DB_AUTH_SOURCE")
     return f"mongodb://{user}:{password}@{host}/?authSource={quote_plus(auth_source)}"
+
+
+def _local_lan_prefix() -> str | None:
+    """현재 머신의 사설 IPv4 /24 prefix(예: '192.168.68')를 반환한다."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("192.0.2.1", 80))
+        ip = sock.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        sock.close()
+    try:
+        ip_obj = ipaddress.ip_address(ip)
+    except ValueError:
+        return None
+    if not ip_obj.is_private or ip_obj.is_loopback:
+        return None
+    return ".".join(ip.split(".")[:3])
+
+
+def _scan_lan_mongo_hosts(prefix: str, port: int = 27017, *, exclude_ip: str | None = None) -> list[str]:
+    """같은 /24 대역에서 MongoDB 포트가 열린 호스트 목록(`ip:port`)을 찾는다."""
+
+    def _probe(ip: str) -> str | None:
+        if exclude_ip and ip == exclude_ip:
+            return None
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.35)
+        try:
+            if sock.connect_ex((ip, port)) == 0:
+                return f"{ip}:{port}"
+        except OSError:
+            pass
+        finally:
+            sock.close()
+        return None
+
+    with ThreadPoolExecutor(max_workers=64) as executor:
+        return [res for res in executor.map(_probe, [f"{prefix}.{i}" for i in range(1, 255)]) if res]
 
 
 def _build_client(connection_string: str) -> MongoClient:
@@ -101,25 +140,19 @@ def _detect_lan_mongo_host(configured_host: str) -> str | None:
     _last_scan_at = now
 
     prefix = ".".join(host_only.split(".")[:3])
+    found = _scan_lan_mongo_hosts(prefix, port, exclude_ip=host_only)
+    _detected_mongo_host_hint = found[0] if found else None
+    return _detected_mongo_host_hint
 
-    def _probe(ip: str) -> str | None:
-        if ip == host_only:
-            return None
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(0.35)
-        try:
-            if sock.connect_ex((ip, port)) == 0:
-                return f"{ip}:{port}"
-        except OSError:
-            pass
-        finally:
-            sock.close()
-        return None
 
-    with ThreadPoolExecutor(max_workers=64) as executor:
-        found = next((res for res in executor.map(_probe, [f"{prefix}.{i}" for i in range(1, 255)]) if res), None)
-    _detected_mongo_host_hint = found
-    return found
+def _discover_local_mongo_hosts() -> list[str]:
+    """`MONGO_DB_HOST` 미설정 시 로컬 머신이면 LAN 스캔, 서버면 127.0.0.1:27017 을 반환한다."""
+    if (os.environ.get("APP_TYPE") or "").strip().lower() != "local":
+        return ["127.0.0.1:27017"]
+    prefix = _local_lan_prefix()
+    if not prefix:
+        return []
+    return _scan_lan_mongo_hosts(prefix, 27017)
 
 
 def get_db_connection_diagnostic() -> dict[str, str | None]:
@@ -159,30 +192,42 @@ def get_db_connection():
         if time.monotonic() - _last_connect_failure_at < _CONNECT_FAILURE_COOLDOWN_SEC:
             return None
 
+        configured_host = (os.environ.get("MONGO_DB_HOST") or "").strip()
         try:
-            connection_string = _resolve_connection_string()
+            db_name = _get_required_env("MONGO_DB_NAME")
+            candidates = [configured_host] if configured_host else _discover_local_mongo_hosts()
         except RuntimeError as exc:
-            logger.error("오류: MongoDB 연결 정보가 설정되지 않았습니다. %s", exc)
-            return None
-        db_name = _get_required_env("MONGO_DB_NAME")
-
-        try:
-            if _mongo_client is None:
-                _mongo_client = _build_client(connection_string)
-
-            client = _mongo_client
-            client.admin.command("ping")
-            _db_connection = client[db_name]
-            _last_connect_failure_at = 0.0
-            _last_connect_error_detail = None
-            _detected_mongo_host_hint = None
-            logger.debug("MongoDB에 성공적으로 연결되었습니다.")
-            return _db_connection
-        except Exception as exc:
             _last_connect_failure_at = time.monotonic()
             _last_connect_error_detail = str(exc)
-            configured_host = _get_required_env("MONGO_DB_HOST")
-            _detect_lan_mongo_host(configured_host)
-            logger.error("오류: MongoDB 연결에 실패했습니다: %s", exc)
-            _reset_connection_unlocked()
+            logger.error("오류: MongoDB 연결 정보가 설정되지 않았습니다. %s", exc)
             return None
+
+        if not candidates:
+            _last_connect_failure_at = time.monotonic()
+            _last_connect_error_detail = "내부망에서 MongoDB(27017) 호스트를 찾지 못했습니다."
+            logger.error("오류: %s", _last_connect_error_detail)
+            return None
+
+        last_exc: Exception | None = None
+        for host in candidates:
+            try:
+                connection_string = _build_connection_string(host)
+                client = _build_client(connection_string)
+                client.admin.command("ping")
+                _mongo_client = client
+                _db_connection = client[db_name]
+                _last_connect_failure_at = 0.0
+                _last_connect_error_detail = None
+                _detected_mongo_host_hint = None
+                logger.info("MongoDB 연결 완료 (%s)", host)
+                return _db_connection
+            except Exception as exc:
+                last_exc = exc
+                _reset_connection_unlocked()
+
+        _last_connect_failure_at = time.monotonic()
+        _last_connect_error_detail = str(last_exc) if last_exc else "DB 연결 실패"
+        if configured_host:
+            _detect_lan_mongo_host(configured_host)
+        logger.error("오류: MongoDB 연결에 실패했습니다: %s", _last_connect_error_detail)
+        return None
