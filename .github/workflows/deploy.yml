@@ -87,12 +87,14 @@ jobs:
         shell: bash
         run: |
           cd "$APP_DIR"
-          VERSION=$(.venv/bin/python -c "from pathlib import Path; import re; m = re.search(r'APP_VERSION\s*=\s*[\'\"]([^\'\"]+)[\'\"]', Path('utils/logger.py').read_text(encoding='utf-8')); print(m.group(1) if m else 'unknown')")
+          VERSION=$(git log -1 --format="%cd-%h" --date=format:"%Y-%m-%d" 2>/dev/null || echo "unknown")
+          COMMIT_MSG=$(git log -1 --pretty=%s 2>/dev/null || echo "")
           DISK_FREE=$(df -h /System/Volumes/Data | awk 'NR==2 {print $4}')
           DISK_USE=$(df -h /System/Volumes/Data | awk 'NR==2 {print $5}')
           APP_SIZE=$(du -sh "$APP_DIR" 2>/dev/null | awk '{print $1}')
           DB_SIZE=$(du -sh /opt/homebrew/var/mongodb 2>/dev/null | awk '{print $1}')
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "commit_msg=${COMMIT_MSG}" >> "$GITHUB_OUTPUT"
           echo "disk_free=${DISK_FREE:-unknown}" >> "$GITHUB_OUTPUT"
           echo "disk_use=${DISK_USE:-unknown}" >> "$GITHUB_OUTPUT"
           echo "app_size=${APP_SIZE:-unknown}" >> "$GITHUB_OUTPUT"
@@ -100,16 +102,57 @@ jobs:
 
       - name: Notify Slack (deploy succeeded)
         if: ${{ success() }}
+        env:
+          SLACK_WEBHOOK: ${{ secrets.LOGS_SLACK_WEBHOOK }}
+          APP_VERSION: ${{ steps.meta.outputs.version }}
+          COMMIT_MSG: ${{ steps.meta.outputs.commit_msg }}
+          DISK_FREE: ${{ steps.meta.outputs.disk_free }}
+          DISK_USE: ${{ steps.meta.outputs.disk_use }}
+          APP_SIZE: ${{ steps.meta.outputs.app_size }}
+          DB_SIZE: ${{ steps.meta.outputs.db_size }}
         shell: bash
         run: |
-          curl -fsS -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"✅ Mac Mini (momentum-etf) 배포 완료 (branch: upgrade)\nAPP_VERSION: ${{ steps.meta.outputs.version }}\nDISK_FREE: ${{ steps.meta.outputs.disk_free }}\nDISK_USE: ${{ steps.meta.outputs.disk_use }}\nAPP_SIZE: ${{ steps.meta.outputs.app_size }} / DB_SIZE: ${{ steps.meta.outputs.db_size }}\"}" \
-            "${{ secrets.LOGS_SLACK_WEBHOOK }}"
+          cd "$APP_DIR"
+          PAYLOAD=$(.venv/bin/python - << 'EOF'
+          import json, os
+          lines = [
+              "✅ Mac Mini (momentum-etf) 배포 완료 (branch: upgrade)",
+              f"APP_VERSION: {os.environ['APP_VERSION']}",
+              f"COMMIT: {os.environ['COMMIT_MSG']}",
+              f"DISK_FREE: {os.environ['DISK_FREE']}",
+              f"DISK_USE: {os.environ['DISK_USE']}",
+              f"APP_SIZE: {os.environ['APP_SIZE']} / DB_SIZE: {os.environ['DB_SIZE']}",
+          ]
+          print(json.dumps({"text": "\n".join(lines)}, ensure_ascii=False))
+          EOF
+          )
+          curl -fsS -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK"
 
       - name: Notify Slack (deploy failed)
         if: ${{ failure() }}
+        env:
+          SLACK_WEBHOOK: ${{ secrets.LOGS_SLACK_WEBHOOK }}
+          COMMIT_MSG: ${{ steps.meta.outputs.commit_msg }}
+          DISK_FREE: ${{ steps.meta.outputs.disk_free }}
+          DISK_USE: ${{ steps.meta.outputs.disk_use }}
+          APP_SIZE: ${{ steps.meta.outputs.app_size }}
+          DB_SIZE: ${{ steps.meta.outputs.db_size }}
         shell: bash
         run: |
-          curl -fsS -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"<!channel> ❌ Mac Mini (momentum-etf) 배포 실패 (branch: upgrade)\nRepo: ${{ github.repository }}\nCommit: ${{ github.sha }}\nDISK_FREE: ${{ steps.meta.outputs.disk_free }}\nDISK_USE: ${{ steps.meta.outputs.disk_use }}\nAPP_SIZE: ${{ steps.meta.outputs.app_size }} / DB_SIZE: ${{ steps.meta.outputs.db_size }}\nRun: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
-            "${{ secrets.LOGS_SLACK_WEBHOOK }}"
+          cd "$APP_DIR"
+          PAYLOAD=$(.venv/bin/python - << 'EOF'
+          import json, os
+          lines = [
+              "<!channel> ❌ Mac Mini (momentum-etf) 배포 실패 (branch: upgrade)",
+              f"Repo: {os.environ['GITHUB_REPOSITORY']}",
+              f"Commit: {os.environ['GITHUB_SHA']}",
+              f"Message: {os.environ['COMMIT_MSG']}",
+              f"DISK_FREE: {os.environ['DISK_FREE']}",
+              f"DISK_USE: {os.environ['DISK_USE']}",
+              f"APP_SIZE: {os.environ['APP_SIZE']} / DB_SIZE: {os.environ['DB_SIZE']}",
+              f"Run: https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+          ]
+          print(json.dumps({"text": "\n".join(lines)}, ensure_ascii=False))
+          EOF
+          )
+          curl -fsS -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK"
