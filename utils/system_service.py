@@ -818,6 +818,10 @@ def extract_job_logs_for_run(
                 pass
         cur_date += timedelta(days=1)
 
+    if not found_any_file or not collected:
+        db_log = _read_queue_error_log(job_key, started_kst)
+        if db_log is not None:
+            return db_log
     if not found_any_file:
         return None
     header = (
@@ -828,6 +832,37 @@ def extract_job_logs_for_run(
         f"# ─────────────────────────────────────────────────────\n"
     )
     return header + "\n".join(collected) + "\n"
+
+
+def _read_queue_error_log(job_key: str, started_kst: datetime) -> str | None:
+    """로컬 로그 파일에 없을 때(서버 실행 등) DB `batch_queue.error_log` 에서 실패 로그를 조회한다."""
+    from utils.batch_queue import BATCH_QUEUE_COLLECTION
+
+    db = get_db_connection()
+    if db is None:
+        return None
+    started_utc = started_kst.astimezone(timezone.utc)
+    doc = db[BATCH_QUEUE_COLLECTION].find_one(
+        {
+            "job_name": {"$regex": f"^{re.escape(job_key)}(:|$)"},
+            "error_log": {"$exists": True, "$ne": ""},
+            "started_at": {
+                "$gte": started_utc - timedelta(minutes=2),
+                "$lte": started_utc + timedelta(minutes=2),
+            },
+        },
+        {"_id": 0, "error_log": 1, "app_type": 1},
+        sort=[("started_at", -1)],
+    )
+    if not doc:
+        return None
+    app_label = doc.get("app_type") or "Server"
+    return (
+        f"# Job: {job_key} ({app_label} · DB 저장 로그)\n"
+        f"# Started: {started_kst.isoformat()}\n"
+        f"# ─────────────────────────────────────────────────────\n"
+        f"{doc['error_log']}"
+    )
 
 
 def _read_last_job_run_from_log(job_key: str) -> tuple[str, datetime] | None:

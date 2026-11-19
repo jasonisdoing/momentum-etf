@@ -24,6 +24,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -87,6 +88,91 @@ def _append_log_line(job_name: str, text: str) -> None:
         handle.write(text)
         if not text.endswith("\n"):
             handle.write("\n")
+
+
+def _persist_and_upload_failure(
+    job_name: str,
+    full_log: str,
+    summary_text: str,
+    app_label: str,
+    started_wall: datetime,
+    suffix: str,
+) -> None:
+    """실패 로그를 batch_queue DB에 저장하고 슬랙에 파일로 업로드한다."""
+    item_id_raw = os.environ.get("BATCH_QUEUE_ITEM_ID", "").strip()
+    if item_id_raw and full_log:
+        try:
+            from bson import ObjectId
+
+            from utils.batch_queue import save_error_log
+
+            save_error_log(ObjectId(item_id_raw), full_log)
+        except Exception:
+            pass
+
+    if full_log:
+        try:
+            from utils.notification import upload_slack_file
+
+            stamp = started_wall.strftime("%Y%m%d_%H%M%S")
+            if upload_slack_file(
+                full_log,
+                filename=f"{job_name}_{stamp}_{suffix}.log",
+                title=f"[{app_label}] {job_name} 오류 로그",
+                initial_comment=summary_text,
+            ):
+                return
+        except Exception:
+            pass
+    _notify(summary_text)
+
+
+def _run_and_stream(
+    job_name: str,
+    command: list[str],
+    env: dict[str, str],
+    timeout_sec: int,
+) -> tuple[int, str, bool]:
+    """자식 프로세스를 실행하며 출력을 실시간으로 로그 파일과 메모리에 기록한다."""
+    LOCK_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = LOCK_DIR / f"{job_name}.log"
+    collected: list[str] = []
+    timed_out = threading.Event()
+
+    proc = subprocess.Popen(
+        command,
+        cwd=str(PROJECT_ROOT),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+
+    def _on_timeout() -> None:
+        timed_out.set()
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+    timer = threading.Timer(timeout_sec, _on_timeout)
+    timer.start()
+    try:
+        with log_path.open("a", encoding="utf-8") as handle:
+            if proc.stdout is not None:
+                for line in proc.stdout:
+                    sys.stdout.write(line)
+                    handle.write(line)
+                    handle.flush()
+                    collected.append(line)
+        exit_code = proc.wait()
+    finally:
+        timer.cancel()
+
+    return exit_code, "".join(collected), timed_out.is_set()
 
 
 def _acquire_db_lock(job_name: str, ttl_seconds: int | None = None) -> tuple[object, str] | None:
@@ -246,58 +332,54 @@ def main(argv: list[str]) -> int:
     _append_log_line(job_name, start_line)
 
     try:
-        result = subprocess.run(
-            command,
-            cwd=str(PROJECT_ROOT),
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-            # 외부 API hang 등 무한 대기 방지. timeout 초과 시 자식 프로세스에
-            # 자동으로 SIGKILL 이 전달되고 TimeoutExpired 가 raise 된다.
-            timeout=_timeout_for(job_name),
-        )
-    except subprocess.TimeoutExpired as exc:
-        elapsed = time.monotonic() - started_monotonic
-        job_display = _format_job_display(job_name)
-        timeout_line = (
-            f"[run_batch] TIMEOUT job={job_name} elapsed={elapsed:.1f}s "
-            f"limit={_timeout_for(job_name)}s — 자식 프로세스 SIGKILL 처리됨"
-        )
-        _append_log_line(job_name, timeout_line)
-        # 자식 stdout 일부 (디버깅용)
-        try:
-            tail_stdout = (exc.stdout or "")[-2000:] if isinstance(exc.stdout, str) else ""
-            if tail_stdout:
-                _append_log_line(job_name, f"[run_batch] TIMEOUT stdout tail: {tail_stdout}")
-        except Exception:
-            pass
-        app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
-        _notify(
-            f"<!channel>\n"
-            f"⏰ *[{app_label}] 배치 타임아웃*: {job_display}\n"
-            f"• 시작: {started_at}\n"
-            f"• 소요: {_format_duration(elapsed)} (제한 {_format_duration(_timeout_for(job_name))})\n"
-            f"• 자식 프로세스는 SIGKILL 로 강제 종료됨"
-        )
-        print(timeout_line, file=sys.stderr)
-        _release_db_lock(db_lock)
-        return 124  # 표준 timeout exit code (Linux timeout(1) 호환)
+        exit_code, output_text, was_timed_out = _run_and_stream(job_name, command, env, _timeout_for(job_name))
+        if was_timed_out:
+            elapsed = time.monotonic() - started_monotonic
+            job_display = _format_job_display(job_name)
+            timeout_line = (
+                f"[run_batch] TIMEOUT job={job_name} elapsed={elapsed:.1f}s "
+                f"limit={_timeout_for(job_name)}s — 자식 프로세스 SIGKILL 처리됨"
+            )
+            _append_log_line(job_name, timeout_line)
+            app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
+            full_log = f"{start_line}\n{output_text}\n{timeout_line}\n"
+            _persist_and_upload_failure(
+                job_name,
+                full_log,
+                (
+                    f"<!channel>\n"
+                    f"⏰ *[{app_label}] 배치 타임아웃*: {job_display}\n"
+                    f"• 시작: {started_at}\n"
+                    f"• 소요: {_format_duration(elapsed)} (제한 {_format_duration(_timeout_for(job_name))})\n"
+                    f"• 자식 프로세스는 SIGKILL 로 강제 종료됨"
+                ),
+                app_label,
+                started_wall,
+                "timeout",
+            )
+            print(timeout_line, file=sys.stderr)
+            return 124
     except FileNotFoundError as exc:
         elapsed = time.monotonic() - started_monotonic
         job_display = _format_job_display(job_name)
         fail_line = f"[run_batch] FAIL {exc}"
         _append_log_line(job_name, fail_line)
         app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
-        _notify(
-            f"<!channel>\n"
-            f"❌ *[{app_label}] 배치 실행 불가*: {job_display}\n"
-            f"• 시작: {started_at}\n"
-            f"• 소요: {elapsed:.1f}s\n"
-            f"• 에러: `{exc}`"
+        _persist_and_upload_failure(
+            job_name,
+            f"{start_line}\n{fail_line}\n",
+            (
+                f"<!channel>\n"
+                f"❌ *[{app_label}] 배치 실행 불가*: {job_display}\n"
+                f"• 시작: {started_at}\n"
+                f"• 소요: {elapsed:.1f}s\n"
+                f"• 에러: `{exc}`"
+            ),
+            app_label,
+            started_wall,
+            "error",
         )
         print(fail_line, file=sys.stderr)
-        _release_db_lock(db_lock)
         return 127
     except Exception as exc:
         elapsed = time.monotonic() - started_monotonic
@@ -305,34 +387,31 @@ def main(argv: list[str]) -> int:
         exception_line = f"[run_batch] EXCEPTION {exc}"
         _append_log_line(job_name, exception_line)
         app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
-        _notify(
-            f"<!channel>\n"
-            f"❌ *[{app_label}] 배치 예외*: {job_display}\n"
-            f"• 시작: {started_at}\n"
-            f"• 소요: {elapsed:.1f}s\n"
-            f"• 에러: `{exc}`"
+        _persist_and_upload_failure(
+            job_name,
+            f"{start_line}\n{exception_line}\n",
+            (
+                f"<!channel>\n"
+                f"❌ *[{app_label}] 배치 예외*: {job_display}\n"
+                f"• 시작: {started_at}\n"
+                f"• 소요: {elapsed:.1f}s\n"
+                f"• 에러: `{exc}`"
+            ),
+            app_label,
+            started_wall,
+            "exception",
         )
         print(exception_line, file=sys.stderr)
-        _release_db_lock(db_lock)
         return 1
     finally:
         _release_db_lock(db_lock)
 
     elapsed = time.monotonic() - started_monotonic
-    exit_code = result.returncode
     success = exit_code == 0
-
-    # 원본 출력은 그대로 stdout/stderr 로 흘려서 cron 로그파일에도 남김
-    if result.stdout:
-        sys.stdout.write(result.stdout)
-        _append_log_line(job_name, result.stdout)
-    if result.stderr:
-        sys.stderr.write(result.stderr)
-        _append_log_line(job_name, result.stderr)
 
     emoji = "✅" if success else "❌"
     status = "성공" if success else "실패"
-    tail = _format_tail(result.stdout, result.stderr)
+    tail = _format_tail(output_text, "")
     app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
 
     already_notified_failure = exit_code == EXIT_ALREADY_NOTIFIED
@@ -342,21 +421,30 @@ def main(argv: list[str]) -> int:
     if slept:
         _append_log_line(job_name, "[run_batch] SKIP-NOTIFY 시스템 잠자기로 중단된 실패 — 알림 생략")
     should_notify = (not success) and (not already_notified_failure) and (not slept)
-    if should_notify:
-        job_display = _format_job_display(job_name)
-        _notify(
-            f"<!channel>\n"
-            f"{emoji} *[{app_label}] 배치 {status}*: {job_display}\n"
-            f"• 시작: {started_at}\n"
-            f"• 소요: {elapsed:.1f}s\n"
-            f"• exit: {exit_code}\n"
-            f"```\n{tail}\n```"
-        )
 
     ended_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
     end_line = f"[run_batch] END job={job_name} status={status} exit={exit_code} elapsed={elapsed:.1f}s at={ended_at}"
     print(end_line)
     _append_log_line(job_name, end_line)
+
+    if should_notify:
+        job_display = _format_job_display(job_name)
+        full_log = f"{start_line}\n{output_text}\n{end_line}\n"
+        _persist_and_upload_failure(
+            job_name,
+            full_log,
+            (
+                f"<!channel>\n"
+                f"{emoji} *[{app_label}] 배치 {status}*: {job_display}\n"
+                f"• 시작: {started_at}\n"
+                f"• 소요: {elapsed:.1f}s\n"
+                f"• exit: {exit_code}\n"
+                f"```\n{tail}\n```"
+            ),
+            app_label,
+            started_wall,
+            "error",
+        )
     return exit_code
 
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from pymongo.errors import DuplicateKeyError
@@ -297,8 +298,95 @@ def mark_failed(item_id: Any, error: str) -> None:
     )
 
 
-def reap_stale_running() -> int:
-    """heartbeat 가 끊긴 running 항목을 failed 로 마킹.
+MAX_ERROR_LOG_CHARS = 64_000
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def save_error_log(item_id: Any, log_text: str) -> None:
+    """실패·중단된 배치의 로그 본문을 `batch_queue` 문서에 저장한다(서버/로컬 공용 열람용)."""
+    if not item_id or not log_text:
+        return
+    db = get_db_connection()
+    if db is None:
+        return
+    trimmed = log_text[-MAX_ERROR_LOG_CHARS:] if len(log_text) > MAX_ERROR_LOG_CHARS else log_text
+    db[BATCH_QUEUE_COLLECTION].update_one(
+        {"_id": item_id},
+        {"$set": {"error_log": trimmed}},
+    )
+
+
+def is_deploy_locked() -> bool:
+    """배포 진행 중(`batch_locks.__deploy__`)인지 확인한다."""
+    db = get_db_connection()
+    if db is None:
+        return False
+    return bool(db["batch_locks"].find_one({"_id": "__deploy__", "expires_at": {"$gt": datetime.utcnow()}}))
+
+
+def _read_unclosed_cron_log(job_name: str) -> str | None:
+    """`logs/cron/<job>.log` 에서 END 없이 끊긴 마지막 실행 구간 로그를 읽는다."""
+    log_path = _PROJECT_ROOT / "logs" / "cron" / f"{job_name}.log"
+    if not log_path.exists():
+        return None
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+    marker = f"[run_batch] START job={job_name} "
+    idx = text.rfind(marker)
+    if idx == -1:
+        return None
+    segment = text[idx:]
+    if f"[run_batch] END job={job_name} " in segment:
+        return None
+    return segment[-MAX_ERROR_LOG_CHARS:] if len(segment) > MAX_ERROR_LOG_CHARS else segment
+
+
+def _notify_stale_interrupted(doc: dict[str, Any], my_app_type: str | None) -> None:
+    """재부팅·워커 중단으로 끊긴 배치의 로그를 DB 저장 후 슬랙 파일로 알린다."""
+    from utils.notification import send_slack_message_v2, upload_slack_file
+
+    job_name = str(doc.get("job_name") or "unknown")
+    app_label = str(doc.get("app_type") or "Server")
+    started_at = doc.get("started_at")
+    started_str = (
+        started_at.replace(tzinfo=timezone.utc)
+        .astimezone(timezone(timedelta(hours=9)))
+        .strftime("%Y-%m-%d %H:%M:%S KST")
+        if isinstance(started_at, datetime)
+        else "-"
+    )
+
+    same_machine = not my_app_type or app_label.lower() == my_app_type.lower()
+    log_text = _read_unclosed_cron_log(job_name) if same_machine else None
+    if log_text:
+        save_error_log(doc["_id"], log_text)
+        stamp = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d_%H%M%S")
+        uploaded = upload_slack_file(
+            log_text,
+            filename=f"{job_name}_{stamp}_interrupted.log",
+            title=f"[{app_label}] {job_name} 중단 로그",
+            initial_comment=(
+                f"<!channel>\n"
+                f"⚠️ *[{app_label}] 배치 중단 (재부팅·워커 종료 추정)*: `{job_name}`\n"
+                f"• 시작: {started_str}\n"
+                f"• 중단 전까지 기록된 로그를 첨부합니다."
+            ),
+        )
+        if uploaded:
+            return
+
+    send_slack_message_v2(
+        f"<!channel>\n"
+        f"⚠️ *[{app_label}] 배치 중단 (재부팅·워커 종료 추정)*: `{job_name}`\n"
+        f"• 시작: {started_str}\n"
+        f"• 사유: heartbeat 5분 이상 끊김"
+    )
+
+
+def reap_stale_running(my_app_type: str | None = None) -> int:
+    """heartbeat 가 끊긴 running 항목을 failed 로 마킹하고 중단 로그를 알린다.
 
     워커 시작 시점과 주기적으로 호출. 반환: 처리한 건수.
     """
@@ -306,27 +394,39 @@ def reap_stale_running() -> int:
     if db is None:
         return 0
     coll = db[BATCH_QUEUE_COLLECTION]
-    threshold = _now_utc() - timedelta(minutes=_HEARTBEAT_STALE_MINUTES)
-    result = coll.update_many(
-        {
-            "status": STATUS_RUNNING,
-            "$or": [
-                {"last_heartbeat": {"$lt": threshold}},
-                {"last_heartbeat": None},
-            ],
-        },
-        {
-            "$set": {
-                "status": STATUS_FAILED,
-                "ended_at": _now_utc(),
-                "error": "워커가 끊긴 것으로 추정 (heartbeat 5분 이상 없음)",
-                "expires_at": _now_utc() + timedelta(days=RUN_HISTORY_DAYS),
-            }
-        },
-    )
-    if result.modified_count > 0:
-        logger.warning("Stale running 항목 %d건 → failed 마킹", result.modified_count)
-    return result.modified_count
+    now = _now_utc()
+    threshold = now - timedelta(minutes=_HEARTBEAT_STALE_MINUTES)
+    stale_query = {
+        "status": STATUS_RUNNING,
+        "$or": [
+            {"last_heartbeat": {"$lt": threshold}},
+            {"last_heartbeat": None},
+        ],
+    }
+    candidates = list(coll.find(stale_query))
+    reaped_count = 0
+    for item in candidates:
+        claimed = coll.find_one_and_update(
+            {"_id": item["_id"], "status": STATUS_RUNNING},
+            {
+                "$set": {
+                    "status": STATUS_FAILED,
+                    "ended_at": now,
+                    "error": "워커가 끊긴 것으로 추정 (heartbeat 5분 이상 없음)",
+                    "expires_at": now + timedelta(days=RUN_HISTORY_DAYS),
+                }
+            },
+        )
+        if claimed is None:
+            continue
+        reaped_count += 1
+        try:
+            _notify_stale_interrupted(claimed, my_app_type)
+        except Exception:
+            logger.exception("중단 배치 알림/로그 처리 실패: %s", claimed.get("job_name"))
+    if reaped_count > 0:
+        logger.warning("Stale running 항목 %d건 → failed 마킹", reaped_count)
+    return reaped_count
 
 
 def list_queue(limit: int = 50) -> list[dict[str, Any]]:

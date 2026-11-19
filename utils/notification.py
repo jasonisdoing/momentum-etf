@@ -231,6 +231,69 @@ def update_slack_message(
     get_slack_client(token).chat_update(channel=channel, ts=message_ts, text=text, blocks=blocks)
 
 
+def upload_slack_file(
+    content: str,
+    *,
+    filename: str,
+    title: str,
+    initial_comment: str | None = None,
+    channel: str | None = None,
+) -> bool:
+    """텍스트 로그를 슬랙 채널에 파일로 업로드한다 (`files:write` 권한 필요)."""
+    target_channel = channel or get_slack_channel()
+    token = os.environ.get("SLACK_BOT_TOKEN")
+    if not target_channel or not token:
+        logger.warning("슬랙 파일 업로드를 건너뜁니다 (채널 또는 봇 토큰 없음).")
+        return False
+
+    raw = (content if content.strip() else "(내용 없음)\n").encode("utf-8")
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        # files.getUploadURLExternal 은 form-encoded 파라미터를 사용한다.
+        url_resp = _SLACK_HTTP_SESSION.post(
+            "https://slack.com/api/files.getUploadURLExternal",
+            headers=headers,
+            data={"filename": filename, "length": len(raw)},
+            timeout=30.0,
+        )
+        url_resp.raise_for_status()
+        url_data = url_resp.json()
+        if not url_data.get("ok"):
+            logger.error("슬랙 업로드 URL 발급 실패: %s", url_data.get("error"))
+            return False
+
+        upload_resp = _SLACK_HTTP_SESSION.post(
+            url_data["upload_url"],
+            data=raw,
+            headers={"Content-Type": "text/plain; charset=utf-8"},
+            timeout=30.0,
+        )
+        upload_resp.raise_for_status()
+
+        complete_payload: dict[str, Any] = {
+            "files": [{"id": url_data["file_id"], "title": title}],
+            "channel_id": target_channel,
+        }
+        if initial_comment:
+            complete_payload["initial_comment"] = initial_comment
+        complete_resp = _SLACK_HTTP_SESSION.post(
+            "https://slack.com/api/files.completeUploadExternal",
+            headers=headers,
+            json=complete_payload,
+            timeout=30.0,
+        )
+        complete_resp.raise_for_status()
+        complete_data = complete_resp.json()
+        if not complete_data.get("ok"):
+            logger.error("슬랙 파일 업로드 완료 실패: %s", complete_data.get("error"))
+            return False
+        logger.info("Slack 파일 업로드 완료 (channel=%s, filename=%s)", target_channel, filename)
+        return True
+    except Exception:
+        logger.error("Slack 파일 업로드 중 오류 발생", exc_info=True)
+        return False
+
+
 def _format_shares_for_country(quantity: Any) -> str:
     if not isinstance(quantity, (int, float)):
         return str(quantity)

@@ -158,6 +158,8 @@ def _run_subprocess(job_name: str, script_path: str, arguments: list[str] | None
     env = os.environ.copy()
     env.setdefault("APP_TYPE", "Local")
     env.setdefault("PYTHONUNBUFFERED", "1")
+    if item_id is not None:
+        env["BATCH_QUEUE_ITEM_ID"] = str(item_id)
     sys.path.insert(0, str(ROOT_DIR))
     from utils.batch_queue import is_cancel_requested
 
@@ -242,12 +244,14 @@ def _queue_worker_loop(stop_event: threading.Event) -> None:
     from utils.batch_queue import (
         claim_next_pending,
         ensure_indexes,
+        is_deploy_locked,
         reap_stale_running,
     )
 
+    my_app_type = (os.environ.get("APP_TYPE") or "Server").strip() or "Server"
     ensure_indexes()
     # 시작 시 stale running 정리 (워커가 죽었던 경우 회복)
-    reaped = reap_stale_running()
+    reaped = reap_stale_running(my_app_type=my_app_type)
     if reaped > 0:
         log.warning("워커 시작 시점 stale running %d건 → failed 마킹", reaped)
 
@@ -257,11 +261,14 @@ def _queue_worker_loop(stop_event: threading.Event) -> None:
     while not stop_event.is_set():
         try:
             job_threads = [thread for thread in job_threads if thread.is_alive()]
+            if is_deploy_locked():
+                stop_event.wait(2.0)
+                continue
             item = claim_next_pending()
             if item is None:
                 # 주기적으로 stale running 청소 (1분마다)
                 if time.monotonic() - last_stale_check > 60:
-                    reap_stale_running()
+                    reap_stale_running(my_app_type=my_app_type)
                     last_stale_check = time.monotonic()
                 stop_event.wait(1.0)
                 continue

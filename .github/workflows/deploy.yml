@@ -50,7 +50,17 @@ jobs:
             npm --prefix web run build || true
             launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.fastapi" || true
             launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.web" || true
-            launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.scheduler" || true
+            # 실행 중인 서버 배치가 있으면 강제 종료로 실패하지 않도록 최대 120초까지 종료를 기다린다.
+          for i in $(seq 1 60); do
+            RUNNING_CNT=$(.venv/bin/python -c "from utils.db_manager import get_db_connection; db=get_db_connection(); print(db.batch_queue.count_documents({'status':'running','app_type':'Server'}) if db else 0)" 2>/dev/null || echo 0)
+            if [ "${RUNNING_CNT}" = "0" ]; then
+              break
+            fi
+            echo ">>> 실행 중인 서버 배치 ${RUNNING_CNT}건 종료 대기 (${i}/60)..."
+            sleep 2
+          done
+
+          launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.scheduler" || true
 
             local rb_status="failed"
             for i in $(seq 1 20); do
@@ -122,6 +132,16 @@ jobs:
               exit 1
             fi
             sleep 1
+          done
+
+          # 실행 중인 서버 배치가 있으면 강제 종료로 실패하지 않도록 최대 120초까지 종료를 기다린다.
+          for i in $(seq 1 60); do
+            RUNNING_CNT=$(.venv/bin/python -c "from utils.db_manager import get_db_connection; db=get_db_connection(); print(db.batch_queue.count_documents({'status':'running','app_type':'Server'}) if db else 0)" 2>/dev/null || echo 0)
+            if [ "${RUNNING_CNT}" = "0" ]; then
+              break
+            fi
+            echo ">>> 실행 중인 서버 배치 ${RUNNING_CNT}건 종료 대기 (${i}/60)..."
+            sleep 2
           done
 
           launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.scheduler"
