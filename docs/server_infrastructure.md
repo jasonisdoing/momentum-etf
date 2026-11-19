@@ -4,22 +4,23 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 호스트 | OCI 춘천, 1 OCPU ARM, Ubuntu, 사용자 `ubuntu` |
-| 접속 | `ssh -i {SSH 키} ubuntu@{IP}` |
-| 앱 경로 | `/home/ubuntu/apps/momentum-etf` |
-| 컨테이너 | `momentum-etf-app-1`(Node, 80) · `momentum-etf-fastapi_app-1`(FastAPI, 8000, 내부) · MongoDB · `nginx-proxy` · `nginx-proxy-acme` |
-| 서버 `data/` | 읽기 전용 마운트 — 서버에서 갱신돼야 하는 데이터는 파일이 아니라 DB(`index_constituents` 등) |
+| 호스트 | Mac mini (macOS, 24시간 상시 운영 — 자동 잠자기 끄기 · 정전 후 자동 시동) |
+| 앱 경로 | `/Users/jason/DEV/momentum-etf` |
+| `launchd` 서비스 | `com.momentum-etf.web`(Next.js `:3000`) · `com.momentum-etf.fastapi`(FastAPI `:8000`) · `com.momentum-etf.scheduler`(`server_scheduler.py`) · `cloudflared` |
+| MongoDB | 맥미니 로컬(`:27017`, Homebrew) — 맥북 프로는 LAN IP(`192.168.68.55:27017`)로 직접 연결 |
+| 로컬 개발 | `run_local_dev.py`(`APP_TYPE=Local`, cron 비활성) |
 
-VM 호스트의 시스템 cron은 사용하지 않는다.
+호스트의 시스템 cron은 사용하지 않는다.
 
 ## 배치
 
-- 자동 배치는 서버의 `scheduler` 컨테이너가 `infra/cron/crontab`을 읽어 큐에 등록한다. 로컬 스케줄러는 큐의 작업만 처리한다.
+- 자동 배치는 맥미니의 `com.momentum-etf.scheduler`(`infra/cron/server_scheduler.py`)가 `infra/cron/crontab`을 읽어 큐(`batch_queue`)에 등록하고 처리한다.
+- 로컬 워커(`APP_TYPE=Local`)는 `config.LOCAL_QUEUE_WORKER_ENABLED`에 따라 동작한다: `False`(기본)면 `LOCAL_ONLY_JOBS`(`db_backup`)만 claim하고 나머지는 맥미니 서버만 처리하며, `True`면 일반 배치도 서버·로컬이 함께 처리한다.
 - `crontab` 이 배치 정의의 단일 소스. 잡 이름 = action 키. 비활성화는 주석이 아니라 **라인 삭제**(과거 파서가 주석 라인을 등록한 적 있음). 스크립트 뒤 인자는 전달되지만 `-m` 은 안 된다.
-- 락: Mongo `batch_locks`(`_id=<job>`). 로컬 자동 실행과 `/batch` 수동 실행이 같은 락을 쓴다. 소유자는 `APP_TYPE`(`Local` / 미설정=PROD). 꺼져 있던 시간의 누락분은 따라잡지 않는다.
-- 큐(`batch_queue`)는 대기·실행 중 항목을 24시간 TTL로, 끝난 항목은 30일(`RUN_HISTORY_DAYS`) 보관한다. 이 이력 전체의 평균이 `/batch`의 대기·예상시간의 원천이다.
+- 락: Mongo `batch_locks`(`_id=<job>`). 자동 실행과 `/batch` 수동 실행이 같은 락을 쓴다. 소유자는 `APP_TYPE`(`Local` / 미설정=PROD). 꺼져 있던 시간의 누락분은 따라잡지 않는다.
+- 큐(`batch_queue`)는 대기·실행 중 항목을 24시간 TTL로, 끝난 항목은 30일(`RUN_HISTORY_DAYS`) 보관한다. 이 이력 전체(최근 30일)의 평균이 `/batch`의 대기·예상시간의 원천이다.
 - 큐는 서버·로컬이 공유. 로컬에만 결과가 남는 잡은 `utils/batch_queue.LOCAL_ONLY_JOBS` 에 등록하면 서버 워커가 claim 하지 않는다.
-- 배치 코드는 Docker 이미지에 포함되므로 변경 시 재배포한다. 스케줄러는 시작할 때 `infra/cron/crontab`을 읽으므로 시간표 변경 후 다시 시작해야 한다.
+- 스케줄러는 시작할 때 `infra/cron/crontab`을 읽으므로 시간표·코드 변경 후 재시작(또는 배포)해야 반영된다.
 - 미장까지 다루는 배치(잔고 동기화·사고팔기 알림·슬랙 주문 결과 알림 등)는 월~토 24시간 돈다 — 종목마다 그 시장의 거래일·거래 시간을 배치 안에서 판정하고, 아니면 바로 끝난다.
 - 로그: `logs/cron/<job>.log`. 실패 시에만 래퍼 슬랙 알림. 환율 실패 예외에는 통화·Yahoo 심볼·시도 횟수·원본 오류가 포함된다.
 - 배치 추가·삭제 시 함께 고칠 7곳은 [developer_guide.md](developer_guide.md) §4.
@@ -46,13 +47,10 @@ VM 호스트의 시스템 cron은 사용하지 않는다.
 
 ## 배포
 
-- Node 앱이 내부 네트워크로 FastAPI 호출. nginx-proxy 가 도메인 요청을 Node 컨테이너로 프록시, acme-companion 이 Let's Encrypt 인증서 자동 갱신.
-- GitHub Actions(`.github/workflows/`)로 배포. 배포 실패 시 앱이 죽어야 한다 — rollback·build-first 로 가리지 않는다.
+- Node 앱(`:3000`)이 로컬 FastAPI(`:8000`)를 호출한다.
+- GitHub Actions([deploy.yml](../.github/workflows/deploy.yml), `upgrade` 브랜치 push · `workflow_dispatch`)가 맥미니 Self-Hosted Runner(`runs-on: self-hosted`)에서 직접 실행한다: `git reset --hard origin/upgrade` → `requirements.txt`·`package*.json` 변경 시 의존성 설치 → `npm --prefix web run build` → `launchctl kickstart -k` 로 `fastapi` → `web` → `scheduler` 순차 재시작 및 헬스체크.
+- 배포 실패 시 앱이 죽어야 한다 — rollback·build-first 로 가리지 않는다.
 - 폐기된 기능은 배포 때 서버 DB 문서·crontab 라인도 같이 지운다.
-
-### nginx-proxy 커스텀 설정
-
-호스트 `/home/ubuntu/apps/nginx-proxy/vhost.d/` — `{domain}`(server 블록), `{domain}_location`, `{domain}_location_override`. **파일명이 곧 호스트명**. 수정 후 `docker restart nginx-proxy`(reload 로는 템플릿이 재렌더링되지 않음).
 
 ## 도메인 · DNS · 인증서
 
@@ -61,12 +59,10 @@ VM 호스트의 시스템 cron은 사용하지 않는다.
 | 서비스 주소 | https://invest.jason.ai.kr |
 | 등록기관 | 가비아 (`jason.ai.kr`) |
 | DNS 관리 | Cloudflare — **레코드는 여기서만**(가비아 DNS 화면은 반영 안 됨) |
-| 레코드 | A `invest` → 서버 IP, **DNS 전용(회색 구름)** |
-| 인증서 | Let's Encrypt, acme-companion |
+| 레코드 · 터널 | CNAME `invest` → Cloudflare Tunnel(`cloudflared`) → 맥미니 `http://127.0.0.1:3000` |
+| 인증서 | Cloudflare Edge SSL/TLS |
 
-Cloudflare 프록시(주황 구름)는 쓰지 않는다 — HTTP-01 검증이 리다이렉트로 실패하고 Flexible SSL 이면 무한 리다이렉트.
-
-코드에 도메인을 적지 않는다. 서버 `.env` 의 **`APP_BASE_URL` 하나**가 단일 소스(슬랙 링크 `utils/notification.app_link`, 구글 OAuth 콜백 `web/lib/auth.ts`). 예외는 `docker-compose.yml` 의 `VIRTUAL_HOST`·`LETSENCRYPT_HOST` 와 `vhost.d/` 파일명. 구글 OAuth 콘솔의 리디렉션 URI 도 같은 주소.
+코드에 도메인을 적지 않는다. 서버 `.env` 의 **`APP_BASE_URL` 하나**가 단일 소스(슬랙 링크 `utils/notification.app_link`, 구글 OAuth 콜백 `web/lib/auth.ts`). 구글 OAuth 콘솔의 리디렉션 URI 도 같은 주소.
 
 ## 환경변수 (`.env`)
 
@@ -87,11 +83,6 @@ Cloudflare 프록시(주황 구름)는 쓰지 않는다 — HTTP-01 검증이 �
 
 | 증상 | 원인 | 조치 |
 | --- | --- | --- |
-| 서버에서 KOR 가격 캐시가 30종목쯤에서 hang | KRX 호출 빈도 IP 차단(서버는 응답이 빨라 분당 600회) | `stock_price_cache_updater.py` 의 `KOR_FETCH_TARGET_SECONDS` 로 종목당 최소 간격. 차단되면 값을 늘린다 |
-| VM 에서 배치 돌리면 시스템 다운 | 1 OCPU ARM CPU 100% | VM cron 제거, 로컬 스케줄러 |
-| 호스트 변경 후 인증서 미발급 | acme-companion 이 옛 컨테이너 데이터 보유 | `/app/letsencrypt_service_data` 정리 후 재시작 |
-| 로그인만 `redirect_uri_mismatch` | `node_app` 이 옛 `APP_BASE_URL` | 컨테이너 재생성 |
-| robots.txt 가 404 HTML | `vhost.d/` 파일명이 옛 도메인 | 파일명을 새 호스트로 |
+| KOR 가격 캐시가 30종목쯤에서 hang | KRX 호출 빈도 IP 차단(분당 수백 회 요청) | `stock_price_cache_updater.py` 의 `KOR_FETCH_TARGET_SECONDS` 로 종목당 최소 간격 유지. 차단되면 값을 늘린다 |
+| 로그인만 `redirect_uri_mismatch` | 웹 프로세스가 옛 `APP_BASE_URL` 을 물고 있음 | `.env` 수정 후 `com.momentum-etf.web` 재시작 |
 | DNS 레코드가 반영 안 됨 | 가비아에 등록함 | Cloudflare 에 등록 |
-| 배포 실패 `DISK_USE: 100%` | compose 가 `:latest` 를 참조해 배포마다 직전 이미지가 dangling 으로 남는데 정리하는 곳이 없었다(2026-04 에 넣은 `prune -af` 를 2026-05 에 부하 때문에 제거). 3개월간 1,140개 32.6GB 누적 | 배포 끝에 `docker image prune -f` 복원(`-a` 없이 — 태그 이미지까지 지우면 다음 배포에 다시 받아 1 OCPU 에 부하). 배포 **전** 디스크 5GB 미만이면 서버를 건드리기 전에 실패 |
-| 디스크를 비웠는데도 배포가 계속 실패 (fastapi 헬스체크 30초 초과) | 디스크 100% 때 mongodb 컨테이너가 재시작하며 네트워크 엔드포인트를 못 붙였다. `inspect` 에 네트워크 이름은 있는데 **IP 가 빈 값**이라 `mongodb` DNS 해석 실패 | `docker compose up -d --force-recreate mongodb` 로 컨테이너 재생성(데이터는 볼륨이라 보존). `docker network inspect momentum-etf_default` 의 Containers 목록에 mongodb 가 있는지로 판별 |
