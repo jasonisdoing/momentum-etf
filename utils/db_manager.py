@@ -56,6 +56,18 @@ def _build_connection_string(host: str) -> str:
     return f"mongodb://{user}:{password}@{host}/?authSource={quote_plus(auth_source)}"
 
 
+def resolve_connection_string() -> str:
+    """외부 도구(mongodump 등)용 MongoDB 접속 URI 를 반환한다."""
+    configured_host = (os.environ.get("MONGO_DB_HOST") or "").strip()
+    if configured_host:
+        return _build_connection_string(configured_host)
+    db = get_db_connection()
+    if db is None or db.client.address is None:
+        raise RuntimeError("MongoDB 호스트를 찾지 못했습니다.")
+    host, port = db.client.address
+    return _build_connection_string(f"{host}:{port}")
+
+
 def _local_lan_prefix() -> str | None:
     """현재 머신의 사설 IPv4 /24 prefix(예: '192.168.68')를 반환한다."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

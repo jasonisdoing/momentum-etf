@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # noqa: E402
 
-from utils.db_manager import _resolve_connection_string  # noqa: E402
+from utils.db_manager import resolve_connection_string  # noqa: E402
 from utils.env import load_env_if_present  # noqa: E402
 
 _BACKUP_ROOT = Path("backups")
@@ -72,7 +72,7 @@ def main() -> None:
     args = parser.parse_args()
 
     load_env_if_present()
-    uri = _resolve_connection_string()
+    uri = resolve_connection_string()
     db_name = _require_env("MONGO_DB_NAME")
 
     out_dir = _BACKUP_ROOT / datetime.now().strftime("%Y%m%d")
