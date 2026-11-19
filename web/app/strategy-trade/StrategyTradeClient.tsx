@@ -266,6 +266,31 @@ function OrderLimitField({ limit }: { limit: NonNullable<View["order_limit"]> })
   );
 }
 
+/** 총자산 대비 원화 기준 남은 현금 비율과 금액. */
+function RemainingCashField({ summary }: { summary: AccountSummary | null }) {
+  const cashKrw = summary?.cash_balance_krw;
+  const totalKrw = summary?.total_assets_krw;
+  const ratioPct = cashKrw != null && totalKrw != null && totalKrw > 0 ? (cashKrw / totalKrw) * 100 : null;
+  return (
+    <div className="appLabeledField" style={{ marginBottom: 0 }}>
+      <span className="appLabeledFieldLabel">남은 현금</span>
+      <span
+        style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 32, fontSize: "var(--fs-sm)" }}
+        title="계좌 총자산 대비 원화 기준 남은 현금 비율과 금액"
+      >
+        {cashKrw == null ? (
+          "-"
+        ) : (
+          <>
+            <b>{ratioPct != null ? `${ratioPct.toFixed(2)}%` : "-"}</b>
+            <span>({formatCurrencyPrice(cashKrw, "KRW")})</span>
+          </>
+        )}
+      </span>
+    </div>
+  );
+}
+
 const cardStyle: React.CSSProperties = {
   padding: 10,
   display: "flex",
@@ -1169,6 +1194,7 @@ function AccountSettingsCard({
                   onTest={() => void sendSlackTest()}
                 />
                 {view.order_limit ? <OrderLimitField limit={view.order_limit} /> : null}
+                {view.account_id ? <RemainingCashField summary={accountAssets?.summary ?? null} /> : null}
               </div>
               <div className="appMainHeaderRight">
                 <UnsavedChangesBadge show={isDirty} />
