@@ -333,7 +333,7 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
     headerName: "예상시간(서버)",
     minWidth: 110,
     width: 118,
-    tooltipValueGetter: () => "서버에서 성공한 최근 5건의 평균 실행 시간. 출처: batch_queue",
+    tooltipValueGetter: () => "서버에서 성공한 최근 30일의 평균 실행 시간. 출처: batch_queue",
     cellRenderer: (params: { value: string }) => params.value || "-",
   },
   {
@@ -341,7 +341,7 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
     headerName: "예상시간(로컬)",
     minWidth: 110,
     width: 118,
-    tooltipValueGetter: () => "로컬에서 성공한 최근 5건의 평균 실행 시간. 출처: batch_queue",
+    tooltipValueGetter: () => "로컬에서 성공한 최근 30일의 평균 실행 시간. 출처: batch_queue",
     cellRenderer: (params: { value: string }) => params.value || "-",
   },
   {
@@ -350,7 +350,7 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
     minWidth: 85,
     width: 95,
     tooltipValueGetter: () =>
-      "크론이 걸거나 사람이 누른 뒤 실제 실행이 시작되기까지의 평균 (최근 5건). 앞선 배치가 돌고 있으면 그만큼 늘어난다. 출처: batch_queue",
+      "크론이 걸거나 사람이 누른 뒤 실제 실행이 시작되기까지의 평균 (최근 30일). 앞선 배치가 돌고 있으면 그만큼 늘어난다. 출처: batch_queue",
     cellRenderer: (params: { value: string }) => params.value || "-",
   },
   {

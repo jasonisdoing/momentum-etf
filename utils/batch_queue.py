@@ -11,7 +11,7 @@
       가능. MongoDB find_one_and_update 로 동시 claim 안전.
     - 중복 enqueue 무시 (같은 job_name 이 pending/running 이면 추가 안 함)
     - 대기·실행 중 항목은 24시간 TTL — 워커가 꺼져 있는 동안 무한 누적되는 것 방지.
-      **끝난 항목은 30일 보관**(`RUN_HISTORY_DAYS`) — 화면의 예상·대기시간 평균(최근 10회)의 이력이다.
+      **끝난 항목은 30일 보관**(`RUN_HISTORY_DAYS`) — 화면의 예상·대기시간 평균(최근 30일)의 이력이다.
     - heartbeat: 워커가 30초마다 last_heartbeat 갱신
     - 워커 시작 시 stale running (heartbeat 5분 이상 끊김) → failed 자동 마킹
 
