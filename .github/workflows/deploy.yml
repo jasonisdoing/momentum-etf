@@ -1,227 +1,111 @@
-name: Build & Deploy to Oracle VM
+name: Deploy to Mac Mini
 
 on:
-  workflow_dispatch:   # 맥미니 이전 중 오라클 VM 자동 재배포 방지 (6단계에서 Self-Hosted Runner로 전환 예정)
+  push:
+    branches:
+      - upgrade
+  workflow_dispatch:
 
-# 배포 직렬화 — 연달아 푸시하면 실행 2개가 서버에서 동시에 compose up 을 돌리고,
-# 한쪽의 유령 컨테이너 제거가 다른 쪽 recreate 의 임시 컨테이너(<hash>_이름)를 지워
-# "No such container" 로 실패한다. 진행 중 배포는 취소하지 않고(서버가 반쯤 교체된
-# 채 끊기면 안 된다) 뒤 실행이 끝나기를 기다렸다가 돈다.
 concurrency:
-  group: deploy-oracle-vm
+  group: deploy-mac-mini
   cancel-in-progress: false
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_FASTAPI: ghcr.io/${{ github.repository_owner }}/momentum-etf-fastapi
-  IMAGE_NODE: ghcr.io/${{ github.repository_owner }}/momentum-etf-node
+  APP_DIR: /Users/jason/DEV/momentum-etf
 
 jobs:
-  build-and-push:
-    # 서버(Oracle Ampere A1, ARM64) 네이티브 빌드 — 무료 ARM 러너 사용
-    runs-on: ubuntu-24.04-arm
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build & push fastapi image (linux/arm64)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.fastapi
-          platforms: linux/arm64
-          push: true
-          tags: |
-            ${{ env.IMAGE_FASTAPI }}:latest
-            ${{ env.IMAGE_FASTAPI }}:${{ github.sha }}
-          cache-from: type=gha,scope=fastapi-arm64
-          cache-to: type=gha,mode=max,scope=fastapi-arm64
-
-      - name: Build & push node image (linux/arm64)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: web/Dockerfile
-          platforms: linux/arm64
-          push: true
-          tags: |
-            ${{ env.IMAGE_NODE }}:latest
-            ${{ env.IMAGE_NODE }}:${{ github.sha }}
-          cache-from: type=gha,scope=node-arm64
-          cache-to: type=gha,mode=max,scope=node-arm64
-
-      # 빌드가 깨지면 `deploy` 잡은 needs 로 스킵돼 그 안의 알림 스텝이 아예 안 돈다.
-      # 그래서 빌드 실패는 여기서 직접 알린다(어느 잡이 깨져도 슬랙은 정확히 1건).
-      - name: Notify Slack (build failed)
-        if: ${{ failure() }}
-        run: |
-          curl -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"<!channel> ❌ Oracle VM (momentum-etf) 이미지 빌드 실패 — 배포 안 됨 (branch: upgrade)\nRepo: ${{ github.repository }}\nCommit: ${{ github.sha }}\nRun: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
-            ${{ secrets.LOGS_SLACK_WEBHOOK }}
-
   deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    timeout-minutes: 15
     steps:
-      # 서버를 건드리기 **전에** 디스크를 본다. 여유가 없으면 이미지를 받다가 중간에 터져
-      # 컨테이너가 반쯤 교체된 채 죽는다. 아무것도 손대지 않은 상태로 실패시키는 편이 낫다.
-      - name: Check Oracle VM free disk
-        env:
-          ORACLE_VM_HOST: ${{ secrets.ORACLE_VM_HOST }}
-          ORACLE_VM_USERNAME: ${{ secrets.ORACLE_VM_USERNAME }}
-          ORACLE_VM_SSH_KEY: ${{ secrets.ORACLE_VM_SSH_KEY }}
-          # fastapi(624MB) + node(889MB) 를 받고 압축을 푸는 동안 그 이상을 쓴다. 3배 여유.
-          MIN_FREE_MB: "5000"
+      - name: Pull, build, and restart launchd services
+        shell: bash
         run: |
           set -euo pipefail
-          KEY_PATH="$(mktemp)"
-          printf '%s\n' "$ORACLE_VM_SSH_KEY" > "$KEY_PATH"
-          chmod 600 "$KEY_PATH"
-          AVAIL_MB=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no \
-            "$ORACLE_VM_USERNAME@$ORACLE_VM_HOST" "df -Pm / | awk 'NR==2 {print \$4}'")
-          rm -f "$KEY_PATH"
-          echo "free disk: ${AVAIL_MB}MB (minimum ${MIN_FREE_MB}MB)"
-          if [ "${AVAIL_MB:-0}" -lt "$MIN_FREE_MB" ]; then
-            echo "::error::Oracle VM 디스크 여유 ${AVAIL_MB}MB — ${MIN_FREE_MB}MB 미만이라 배포를 중단합니다."
-            exit 1
+          export PATH="/Users/jason/DEV/momentum-etf/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+          cd "$APP_DIR"
+
+          set -a
+          source .env
+          set +a
+
+          .venv/bin/python infra/cron/deploy_flag_set.py || echo ">>> deploy 플래그 설정 실패 (계속 진행)"
+          trap 'cd "$APP_DIR" && .venv/bin/python infra/cron/deploy_flag_clear.py || true' EXIT
+
+          PREV_SHA="$(git rev-parse HEAD)"
+          git fetch origin upgrade
+          git reset --hard origin/upgrade
+          NEW_SHA="$(git rev-parse HEAD)"
+
+          if [ "$PREV_SHA" != "$NEW_SHA" ] && git diff --name-only "$PREV_SHA" "$NEW_SHA" | grep -q '^requirements\.txt$'; then
+            echo ">>> requirements.txt 변경 감지 — pip install 실행"
+            .venv/bin/pip install -q -r requirements.txt
           fi
 
-      - name: Deploy to Oracle VM (pull & up)
-        uses: appleboy/ssh-action@master
-        # scheduler 컨테이너의 stop_grace_period (30분) 동안 진행 중 배치가 끝나길 기다리므로,
-        # 배포 액션 timeout 은 그것보다 충분히 커야 한다 (grace 30분 + 여유 10분 = 40분).
-        timeout-minutes: 40
-        with:
-          host: ${{ secrets.ORACLE_VM_HOST }}
-          username: ${{ secrets.ORACLE_VM_USERNAME }}
-          key: ${{ secrets.ORACLE_VM_SSH_KEY }}
-          timeout: 60s
-          # scheduler 의 stop_grace_period(30m) + 여유. 8분이면 scheduler 교체 중 SSH 가 끊김.
-          command_timeout: 35m
-          script: |
-            set -euo pipefail
-            echo ">>> Connecting to Oracle VM and starting deployment..."
-            cd ~/apps/momentum-etf
-            # 서버 쪽 직렬화 — 워크플로 concurrency 가 막지 못하는 겹침(수동 배포 등)까지
-            # 잠근다. 30분(scheduler stop_grace)보다 짧게 기다렸다가 못 잡으면 실패시킨다.
-            exec 9>/tmp/momentum-etf-deploy.lock
-            flock -w 1500 9 || { echo "::error::다른 배포가 진행 중입니다 — 락 대기 초과"; exit 1; }
-            export COMPOSE_PARALLEL_LIMIT=1
-            # 배포 진행 플래그 — fastapi_app 컨테이너 안에서 헬퍼 스크립트 실행.
-            sudo docker compose exec -T -w /app fastapi_app env PYTHONPATH=/app python infra/cron/deploy_flag_set.py \
-              || echo ">>> deploy 플래그 설정 실패 (계속 진행)"
-            # 어떤 경로로 빠져나가도 플래그는 반드시 제거
-            trap 'cd $HOME/apps/momentum-etf && sudo docker compose exec -T -w /app fastapi_app env PYTHONPATH=/app python infra/cron/deploy_flag_clear.py || true' EXIT
-            # stale rename 유령 컨테이너 선별 제거
-            sudo docker ps -a --format '{{.ID}} {{.Names}}' \
-              | awk '$2 ~ /^[0-9a-f]{12}_momentum-etf-/ { print $1 }' \
-              | xargs -r sudo docker rm -f
-            # docker-compose.yml / infra/cron / nginx 등 설정 파일 갱신
-            if [ ! -d .git ]; then
-              git clone https://github.com/jasonisdoing/momentum-etf.git .
-            else
-              git fetch origin upgrade
-              git reset --hard origin/upgrade
-            fi
-            # GHCR 이미지도 순차로 받는다. A1 1 OCPU에서는 병렬 pull/압축 해제가 배포 중 CPU 피크를 만든다.
-            sudo docker compose pull fastapi_app
-            sudo docker compose pull node_app
-            # scheduler 는 fastapi 와 같은 이미지를 쓰므로 pull 은 캐시 hit (실제 다운로드 없음).
-            sudo docker compose pull scheduler
-            # 앱 서비스만 순차 교체한다. MongoDB는 배포마다 건드리지 않는다.
-            sudo docker compose up -d --no-deps fastapi_app
-            for i in $(seq 1 30); do
-              if sudo docker compose exec -T fastapi_app python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/internal/health', timeout=2)" >/dev/null 2>&1; then
-                echo ">>> fastapi_app health check passed"
-                break
-              fi
-              if [ "$i" -eq 30 ]; then
-                echo "fastapi_app health check failed" >&2
-                sudo docker compose logs --tail=80 fastapi_app >&2
-                exit 1
-              fi
-              sleep 1
-            done
-            sudo docker compose up -d --no-deps node_app
-            for i in $(seq 1 30); do
-              if sudo docker compose exec -T node_app node -e "fetch('http://127.0.0.1:3000/api/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
-                echo ">>> node_app live check passed"
-                break
-              fi
-              if [ "$i" -eq 30 ]; then
-                echo "node_app live check failed" >&2
-                sudo docker compose logs --tail=80 node_app >&2
-                exit 1
-              fi
-              sleep 1
-            done
-            sudo docker compose up -d --no-deps hybrid_proxy
-            # scheduler 도 새 이미지로 재배포. fastapi 가 health check 통과한 다음에 띄워
-            # mongodb/fastapi 가 안정된 후 worker 가 큐 처리를 시작하도록 한다.
-            sudo docker compose up -d --no-deps scheduler
-            # 방금 태그를 잃은 옛 이미지를 지운다. compose 가 :latest 를 참조해, 배포마다
-            # 직전 이미지가 <none> 으로 남는다 — 안 지우면 배포 1회당 2개씩 쌓여 디스크가 찬다.
-            # `-a` 는 쓰지 않는다. 컨테이너가 안 쓰는 **태그 이미지까지** 지워서 다음 배포에
-            # 다시 받게 되고, 그게 1 OCPU 에서 부하가 됐다(2026-05-20 에 -af 를 뺀 이유).
-            # dangling 만이면 고유분 50MB 남짓이라 체감이 없다.
-            sudo docker image prune -f
-            # ⚠️ VM cron 자동 설치 비활성화. 자동 배치는 서버 scheduler 컨테이너
-            # (`infra/server_scheduler.py`) 의 APScheduler 가 큐에 enqueue 한다.
-            # 과거: bash infra/cron/install.sh (VM 1 OCPU 부하로 비활성)
-            echo ">>> Oracle VM deployment completed."
+          if [ "$PREV_SHA" != "$NEW_SHA" ] && git diff --name-only "$PREV_SHA" "$NEW_SHA" | grep -qE '^web/package(-lock)?\.json$'; then
+            echo ">>> web/package*.json 변경 감지 — npm ci 실행"
+            npm --prefix web ci
+          fi
 
-      - name: Collect Oracle VM disk usage
+          npm --prefix web run build
+
+          UID_NUM="$(id -u)"
+          launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.fastapi"
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 2 http://127.0.0.1:8000/internal/health >/dev/null 2>&1; then
+              echo ">>> fastapi health check passed"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "fastapi health check failed" >&2
+              tail -n 60 logs/launchd-fastapi.err.log >&2 || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.web"
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 2 http://127.0.0.1:3000/api/live >/dev/null 2>&1; then
+              echo ">>> web live check passed"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "web live check failed" >&2
+              tail -n 60 logs/launchd-web.err.log >&2 || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.scheduler"
+          echo ">>> Mac Mini deployment completed."
+
+      - name: Collect Mac Mini metrics
         if: ${{ always() }}
-        id: disk_usage
-        env:
-          ORACLE_VM_HOST: ${{ secrets.ORACLE_VM_HOST }}
-          ORACLE_VM_USERNAME: ${{ secrets.ORACLE_VM_USERNAME }}
-          ORACLE_VM_SSH_KEY: ${{ secrets.ORACLE_VM_SSH_KEY }}
+        id: meta
+        shell: bash
         run: |
-          KEY_PATH="$RUNNER_TEMP/oracle_vm_key"
-          printf '%s\n' "$ORACLE_VM_SSH_KEY" > "$KEY_PATH"
-          chmod 600 "$KEY_PATH"
-          DISK_FREE=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$ORACLE_VM_USERNAME@$ORACLE_VM_HOST" "df -h / | awk 'NR==2 {print \$4}'" || true)
-          DISK_USE=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$ORACLE_VM_USERNAME@$ORACLE_VM_HOST" "df -h / | awk 'NR==2 {print \$5}'" || true)
+          cd "$APP_DIR"
+          VERSION=$(.venv/bin/python -c "from pathlib import Path; import re; m = re.search(r'APP_VERSION\s*=\s*[\'\"]([^\'\"]+)[\'\"]', Path('utils/logger.py').read_text(encoding='utf-8')); print(m.group(1) if m else 'unknown')")
+          DISK_FREE=$(df -h / | awk 'NR==2 {print $4}')
+          DISK_USE=$(df -h / | awk 'NR==2 {print $5}')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "disk_free=${DISK_FREE:-unknown}" >> "$GITHUB_OUTPUT"
           echo "disk_use=${DISK_USE:-unknown}" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout for version extraction
-        uses: actions/checkout@v5
-
-      - name: Extract APP_VERSION
-        id: app_version
-        run: |
-          VERSION=$(python -c "from pathlib import Path; import re; content = Path('utils/logger.py').read_text(encoding='utf-8'); match = re.search(r'APP_VERSION\s*=\s*[\'\"]([^\'\"]+)[\'\"]', content); print(match.group(1) if match else '')")
-          if [ -z "$VERSION" ]; then
-            echo 'APP_VERSION not found' >&2
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Notify Slack (deploy succeeded)
         if: ${{ success() }}
+        shell: bash
         run: |
-          curl -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"✅ Oracle VM (momentum-etf) 배포 완료 (branch: upgrade)\nAPP_VERSION: ${{ steps.app_version.outputs.version }}\nDISK_FREE: ${{ steps.disk_usage.outputs.disk_free }}\nDISK_USE: ${{ steps.disk_usage.outputs.disk_use }}\"}" \
-            ${{ secrets.LOGS_SLACK_WEBHOOK }}
+          curl -fsS -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"✅ Mac Mini (momentum-etf) 배포 완료 (branch: upgrade)\nAPP_VERSION: ${{ steps.meta.outputs.version }}\nDISK_FREE: ${{ steps.meta.outputs.disk_free }}\nDISK_USE: ${{ steps.meta.outputs.disk_use }}\"}" \
+            "${{ secrets.LOGS_SLACK_WEBHOOK }}"
 
       - name: Notify Slack (deploy failed)
         if: ${{ failure() }}
+        shell: bash
         run: |
-          curl -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"<!channel> ❌ Oracle VM (momentum-etf) 배포 실패 (branch: upgrade)\nRepo: ${{ github.repository }}\nCommit: ${{ github.sha }}\nDISK_FREE: ${{ steps.disk_usage.outputs.disk_free }}\nDISK_USE: ${{ steps.disk_usage.outputs.disk_use }}\nRun: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
-            ${{ secrets.LOGS_SLACK_WEBHOOK }}
+          curl -fsS -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"<!channel> ❌ Mac Mini (momentum-etf) 배포 실패 (branch: upgrade)\nRepo: ${{ github.repository }}\nCommit: ${{ github.sha }}\nDISK_FREE: ${{ steps.meta.outputs.disk_free }}\nDISK_USE: ${{ steps.meta.outputs.disk_use }}\nRun: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+            "${{ secrets.LOGS_SLACK_WEBHOOK }}"

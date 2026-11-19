@@ -46,8 +46,8 @@
 - [x] 맥북 프로(`APP_TYPE=Local`)와 맥미니 동시 사용 시 락·큐 충돌 없음 확인 (`LOCAL_QUEUE_WORKER_ENABLED=False` 기본값 적용)
 
 ### 6단계: GitHub Self-Hosted Runner 자동 배포
-- [ ] 맥미니에 GitHub Actions Self-Hosted Runner 설치 및 `launchd` 서비스 등록
-- [ ] `.github/workflows/deploy.yml`을 맥미니 러너(`runs-on: self-hosted`) 기반 `git pull` → 빌드/재시작으로 전환
+- [x] 맥미니에 GitHub Actions Self-Hosted Runner 설치 및 `launchd` 서비스 등록
+- [x] `.github/workflows/deploy.yml`을 맥미니 러너(`runs-on: self-hosted`) 기반 `git pull` → 빌드/재시작으로 전환
 - [ ] 테스트 커밋 push 후 자동 배포 정상 완료 확인
 
 ### 7단계: 마무리 및 정리
