@@ -49,7 +49,7 @@
 
 - Node 앱(`:3000`)이 로컬 FastAPI(`:8000`)를 호출한다.
 - GitHub Actions([deploy.yml](../.github/workflows/deploy.yml), `upgrade` 브랜치 push · `workflow_dispatch`)가 맥미니 Self-Hosted Runner(`runs-on: self-hosted`)에서 직접 실행한다: `git reset --hard origin/upgrade` → `requirements.txt`·`package*.json` 변경 시 의존성 설치 → `npm --prefix web run build` → `launchctl kickstart -k` 로 `fastapi` → `web` → `scheduler` 순차 재시작 및 헬스체크.
-- 배포 실패 시 앱이 죽어야 한다 — rollback·build-first 로 가리지 않는다.
+- 배포 중 빌드·헬스체크가 실패하면 직전 커밋(`PREV_SHA`)으로 자동 롤백·재시작해 앱과 배치를 복구하고 슬랙 실패 알림을 보낸다.
 - 폐기된 기능은 배포 때 서버 DB 문서·crontab 라인도 같이 지운다.
 
 ## 도메인 · DNS · 인증서
