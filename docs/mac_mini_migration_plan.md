@@ -25,7 +25,7 @@
 - [x] 오라클 VM(또는 기존 `27017` 터널)에서 전체 백업: `mongodump`
 - [x] 맥미니 MongoDB로 복원: `mongorestore`
 - [x] 컬렉션 건수·인덱스·`.env` 접속 정보(`MONGO_DB_*`) 검증
-- [ ] 맥북 프로 `.env`의 `MONGO_DB_HOST`를 맥미니 LAN IP(`192.168.68.55`)로 변경해 접속 테스트
+- [x] 맥북 프로 `.env`의 `MONGO_DB_HOST`를 맥미니 LAN IP(`192.168.68.55`)로 변경해 접속 테스트
 
 ### 3단계: 앱 및 24시간 배치 실행
 - [ ] 맥미니에 `momentum-etf` 저장소 클론 (`upgrade` 브랜치) 및 `.env` 배치 (`APP_BASE_URL=https://invest.jason.ai.kr`)
