@@ -37,15 +37,21 @@
 - [x] 터널 라우팅 설정: `https://invest.jason.ai.kr` → 맥미니 `http://127.0.0.1:3000`
 - [x] Cloudflare DNS에서 `invest` 레코드를 기존 오라클 VM A 레코드에서 **Cloudflare Tunnel CNAME**으로 전환
 - [x] `cloudflared`를 `launchd` 서비스로 등록(재부팅 시 자동 시작)
-- [ ] 외부 네트워크(모바일 등)에서 `https://invest.jason.ai.kr` 접속 · 구글 로그인 · 슬랙 버튼(`/api/slack/interactions`) 동작 확인
 
-### 5단계: GitHub Self-Hosted Runner 자동 배포
+### 5단계: 운영 안정성 점검 (외부 접속·배치·중복·연동 확인)
+- [x] 슬랙 버튼(`/api/slack/interactions`) 동작 확인 *(외부 웹 접속·구글 로그인은 추후 확인)*
+- [x] 오라클 VM 잔여 배치/컨테이너(`scheduler` 등) 완전 중지 확인 — 중복 슬랙 발송 차단
+- [ ] 맥미니 `launchd` 서비스(FastAPI·Next·`server_scheduler.py`·`cloudflared`) 로그 및 에러 유무 점검
+- [ ] 한국장·미국장 주요 배치(`cache_refresh_*`, `strategy_trade_notify`, `strategy_mix_notify`, `broker_balance_sync`, `slack_mock_order_notify` 등) 정상 실행·중복 없음 확인
+- [ ] 맥북 프로(`APP_TYPE=Local`)와 맥미니 동시 사용 시 락·큐 충돌 없음 확인
+
+### 6단계: GitHub Self-Hosted Runner 자동 배포
 - [ ] 맥미니에 GitHub Actions Self-Hosted Runner 설치 및 `launchd` 서비스 등록
 - [ ] `.github/workflows/deploy.yml`을 맥미니 러너(`runs-on: self-hosted`) 기반 `git pull` → 빌드/재시작으로 전환
 - [ ] 테스트 커밋 push 후 자동 배포 정상 완료 확인
 
-### 6단계: 마무리 및 정리
+### 7단계: 마무리 및 정리
 - [ ] 맥미니에서 하루(한국장·미국장 배치 포함) 이상 무중단 동작 확인
-- [ ] 오라클 VM에서 기존 `momentum-etf` 컨테이너 및 cron 중지
+- [ ] 오라클 VM에서 기존 `momentum-etf` 잔여 리소스 최종 정리
 - [ ] `docs/server_infrastructure.md`에 맥미니·Cloudflare Tunnel·Self-Hosted Runner 구성 반영
 - [ ] 이 임시 문서(`docs/mac_mini_migration_plan.md`) 삭제

@@ -1,9 +1,7 @@
 name: Build & Deploy to Oracle VM
 
 on:
-  push:
-    branches:
-      - upgrade   # upgrade 브랜치에 push 시 자동 배포
+  workflow_dispatch:   # 맥미니 이전 중 오라클 VM 자동 재배포 방지 (6단계에서 Self-Hosted Runner로 전환 예정)
 
 # 배포 직렬화 — 연달아 푸시하면 실행 2개가 서버에서 동시에 compose up 을 돌리고,
 # 한쪽의 유령 컨테이너 제거가 다른 쪽 recreate 의 임시 컨테이너(<hash>_이름)를 지워
