@@ -82,7 +82,7 @@ class OrderSignalPayload(BaseModel):
 
 @router.post("/order-signal")
 def post_order_signal(payload: OrderSignalPayload, _: None = Depends(require_internal_token)) -> dict:
-    """오늘의 액션 한 건을 Slack 주문 신호로 보낸다."""
+    """합성 액션(오늘·내일) 한 건을 Slack 주문 신호로 보낸다."""
     from services.broker_api_service import BrokerApiError
     from utils.strategy_mix_orders import send_mix_order_signal
 

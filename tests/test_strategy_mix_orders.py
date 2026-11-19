@@ -12,7 +12,6 @@ from utils import slack_mock_orders as slack
 from utils import strategy_mix_orders as mix
 from utils import strategy_trade_orders as order_store
 from utils import strategy_trade_threads as threads
-from utils.strategy_trade_orders import RoundNotOrderableError
 
 
 class MixOrderTest(TestCase):
@@ -187,10 +186,9 @@ class MixOrderTest(TestCase):
         records.assert_not_called()
         place.assert_not_called()
 
-    def test_tomorrows_action_cannot_be_ordered(self):
+    def test_tomorrows_action_can_be_ordered(self):
         self.group["section"] = "later"
-        with self.assertRaises(RoundNotOrderableError):
-            mix.resolve_mix_order(self.request, "root")
+        self.assertEqual(mix.resolve_mix_order(self.request, "root")["quantity"], 36)
 
     def test_common_slack_modal_uses_latest_quantity_and_terms(self):
         self.item["quantity"] = 16

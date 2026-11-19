@@ -117,8 +117,15 @@ def _confirm_line(entry: dict[str, Any], held: dict[str, int]) -> str:
     return build_confirm_line(label, entry["action"], detail)
 
 
+# 액션 구간(`core/strategy/mix/actions.py` 의 section) → 화면·슬랙 제목.
+ACTION_SECTION_TITLES = {"today": "오늘의 액션", "later": "내일의 액션"}
+
+
 def format_action_message(account_name: str, groups: list[dict[str, Any]]) -> str:
-    lines = [f"🧭 합성 오늘의 액션 — {account_name}"]
+    sections = {group["section"] for group in groups}
+    if len(sections) != 1:
+        raise ValueError(f"한 메시지에는 한 구간의 액션만 담습니다: {sorted(sections)}")
+    lines = [f"🧭 합성 {ACTION_SECTION_TITLES[sections.pop()]} — {account_name}"]
     for group in groups:
         lines.append(f"*{group['title']}*")
         if group.get("funding_warning"):

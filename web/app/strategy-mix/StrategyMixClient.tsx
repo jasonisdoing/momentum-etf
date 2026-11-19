@@ -377,7 +377,14 @@ function ActionGroupList({ groups, signals, onSelect, onWithdraw }: {
                       )}
                     </span>
                   ) : onSelect ? (
-                    <button type="button" className="btn btn-sm" style={{ marginInlineStart: 8 }}
+                    // 줄 높이를 늘리지 않게 발송됨 뱃지(StatusBadge compact)와 같은 크기로 그린다.
+                    <button type="button" className="btn btn-sm" style={{
+                      marginInlineStart: 8, padding: "0 4px", minHeight: 0, borderRadius: 3,
+                      fontSize: "var(--fs-sm)", lineHeight: 1.4, verticalAlign: "baseline",
+                      ...(item.side === "buy"
+                        ? { color: "var(--tblr-orange, #f76707)", borderColor: "var(--tblr-orange, #f76707)" }
+                        : null),
+                    }}
                       aria-label={`${item.ticker} ${direction} 슬랙 발송`} onClick={() => onSelect(item)}>
                       {direction}
                     </button>
@@ -1476,6 +1483,17 @@ export function StrategyMixClient() {
   }
 
   const laterActionGroups = actionGroups.filter((group) => group.section !== "today");
+  // 오늘·내일 액션 공통 — 슬랙 발송 상태·발송·회수(내일의 액션도 미리 발송할 수 있다).
+  const canSendAction = positions?.account_id === accountId && positions.can_order;
+  const actionSignalProps = {
+    signals: positions?.order_signals,
+    onWithdraw: canSendAction
+      ? (item: ActionItem, key: string) => setWithdrawingAction({ accountId, item, key }) : undefined,
+    onSelect: canSendAction ? (item: ActionItem) => {
+      setSendActionError(null);
+      setSelectedAction({ item, accountId, accountLabel });
+    } : undefined,
+  };
 
   return (
     <PageFrame title="합성 전략" fullWidth>
@@ -1963,29 +1981,23 @@ export function StrategyMixClient() {
                         오늘은 할 일이 없습니다 — 보유 목록을 그대로 유지하세요.
                       </div>
                     ) : (
-                      <ActionGroupList groups={todayActionGroups} signals={positions?.order_signals}
-                        onWithdraw={positions?.account_id === accountId && positions.can_order ? (item, key) =>
-                          setWithdrawingAction({ accountId, item, key }) : undefined}
-                        onSelect={positions?.account_id === accountId && positions.can_order ? (item) => {
-                          setSendActionError(null);
-                          setSelectedAction({ item, accountId, accountLabel });
-                        } : undefined} />
+                      <ActionGroupList groups={todayActionGroups} {...actionSignalProps} />
                     )}
                     {/* 월초 슬리브 리밸런싱 안내문은 제거했다 — 실제 할 일은 위 지시 목록에
                         이미 나오는데 "다시 맞추세요" 명령문이 별도 수동 작업처럼 읽혔다. */}
                   </div>
 
                   {/* ⑤ 내일의 액션 — 다음 거래일 주문. 장중에는 잠정 판정이라 마감까지 바뀔 수
-                      있고, 슬랙 알림은 실행일이 오늘이 되는 아침에 발송된다. */}
+                      있고, 자동 슬랙 알림은 실행일이 오늘이 되는 아침에 발송된다. 버튼 발송은 오늘과 같다. */}
                   {laterActionGroups.length > 0 ? (
                     <div>
                       <div style={{ fontWeight: 700, marginBottom: 6 }}>
                         내일의 액션
                         <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
-                          다음 거래일 주문 — 장중에는 잠정 판정이라 마감까지 바뀔 수 있습니다 · 슬랙 알림은 실행일 아침에 발송
+                          다음 거래일 주문 — 장중에는 잠정 판정이라 마감까지 바뀔 수 있습니다 · 자동 슬랙 알림은 실행일 아침에 발송(버튼으로 미리 발송 가능)
                         </span>
                       </div>
-                      <ActionGroupList groups={laterActionGroups} />
+                      <ActionGroupList groups={laterActionGroups} {...actionSignalProps} />
                     </div>
                   ) : null}
                 </div>
@@ -2011,7 +2023,7 @@ export function StrategyMixClient() {
         {selectedAction ? <>
           <dl style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 8 }}>
             <dt>계좌</dt><dd>{selectedAction.accountLabel}</dd>
-            <dt>오늘의 액션</dt><dd>{selectedAction.item.title} — {selectedAction.item.text}</dd>
+            <dt>액션</dt><dd>{selectedAction.item.title} — {selectedAction.item.text}</dd>
             <dt>예상 수량</dt><dd>{selectedAction.item.quantity.toLocaleString()}주</dd>
           </dl>
           <p>실제 주문 가격과 수량은 Slack에서 최종 확인합니다.</p>

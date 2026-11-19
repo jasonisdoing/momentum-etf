@@ -45,17 +45,16 @@ def _signal_id(account_id: str, ticker: str) -> dict[str, str]:
     return {"account_id": account_id, "ticker": ticker}
 
 
-def _today_action(account_id: str, action_key: str) -> tuple[dict, dict, dict]:
+def _current_action(account_id: str, action_key: str) -> tuple[dict, dict, dict]:
+    """화면의 오늘·내일 액션 중 ``action_key`` 지시 — 내일의 액션도 미리 발송할 수 있다."""
     positions = mix_positions(account_id)
     if positions["account_id"] != account_id:
         raise BrokerApiError("선택한 합성 계좌를 확인할 수 없습니다.")
     for group in positions["actions"]["groups"]:
-        if group["section"] != "today":
-            continue
         for item in group["items"]:
             if item["key"] == action_key and item["quantity"] > 0:
                 return positions, group, item
-    raise RoundNotOrderableError("이 종목은 더 이상 오늘의 주문 대상이 아닙니다.", done=False)
+    raise RoundNotOrderableError("이 종목은 더 이상 합성 액션의 주문 대상이 아닙니다.", done=False)
 
 
 def can_order_account(account_id: str) -> bool:
@@ -159,8 +158,8 @@ def withdraw_mix_order_signal(account_id: str, ticker: str, thread_ts: str) -> N
 
 
 def mix_order_signals(account_id: str, groups: list[dict]) -> dict[str, dict[str, str | None]]:
-    """오늘 화면에 남아 있는 신호의 발송 상태를 조회한다."""
-    actions = {item["key"]: item["side"] for group in groups if group["section"] == "today" for item in group["items"]}
+    """화면(오늘·내일 액션)에 남아 있는 신호의 발송 상태를 조회한다."""
+    actions = {item["key"]: item["side"] for group in groups for item in group["items"]}
     if not actions:
         return {}
     result = {}
@@ -186,12 +185,12 @@ def _mix_order_instrument(account_id: str, ticker: str, country: str) -> dict:
 
 @signal_lock()
 def send_mix_order_signal(account_id: str, action_key: str, side: str, quantity: int) -> dict:
-    """웹에서 다시 확인한 오늘의 지시 한 건을 Slack 주문 스레드로 보낸다."""
+    """웹에서 다시 확인한 합성 액션(오늘·내일) 한 건을 Slack 주문 스레드로 보낸다."""
     from utils.slack_mock_orders import send_order_request
 
-    positions, group, item = _today_action(account_id, action_key)
+    positions, group, item = _current_action(account_id, action_key)
     if item["side"] != side or item["quantity"] != quantity:
-        raise BrokerApiError("오늘의 액션이 바뀌었습니다. 새로 불러온 뒤 확인하세요.")
+        raise BrokerApiError("합성 액션이 바뀌었습니다. 새로 불러온 뒤 확인하세요.")
     env = _require_live_account(account_id)
     ticker, country = item["ticker"], positions["country"]
     instrument = _mix_order_instrument(account_id, ticker, country)
@@ -254,9 +253,9 @@ def resolve_mix_order(request: dict[str, Any], thread_ts: str) -> dict:
     account_id, side, ticker = request["account_id"], request["side"], request["ticker"]
     country = account_country(account_id)
     instrument = _mix_order_instrument(account_id, ticker, country)
-    positions, _, item = _today_action(account_id, request["mix_action_key"])
+    positions, _, item = _current_action(account_id, request["mix_action_key"])
     if item["side"] != side or item["ticker"] != ticker:
-        raise RoundNotOrderableError("오늘의 액션 방향이 달라졌습니다.", done=False)
+        raise RoundNotOrderableError("합성 액션 방향이 달라졌습니다.", done=False)
     env = _require_live_account(account_id)
 
     def _quote_step() -> tuple[str, str, int | float, dict | None]:
