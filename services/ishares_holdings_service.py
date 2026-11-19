@@ -129,6 +129,9 @@ def _parse_holdings_section(rows: list[list[str]], date_format: str) -> tuple[st
     for row in rows[header_index + 1 :]:
         if not row or all(not cell.strip() for cell in row):
             continue
+        # 표 끝에 붙는 1컬럼 면책·각주 행은 구성종목 표 종료로 본다.
+        if items and len(row) == 1:
+            break
         if len(row) != len(headers):
             raise ValueError("iShares 구성종목 CSV 행의 컬럼 수가 다릅니다.")
         items.append(_normalize_holding(dict(zip(headers, row)), weight_column))

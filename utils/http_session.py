@@ -63,8 +63,8 @@ _browser_sessions: dict[str, object] = {}
 _preferred_profile: dict[str, str] = {}
 
 
-def browser_get(url: str, *, timeout: float):
-    """브라우저 지문을 바꿔 가며 GET — 모든 지문이 403 이면 마지막 오류를 낸다. 403 외 오류는 바로 낸다."""
+def browser_request(method: str, url: str, *, timeout: float, **kwargs):
+    """브라우저 지문을 바꿔 가며 요청 — 403/429 외 오류는 바로 낸다."""
     from urllib.parse import urlparse
 
     from curl_cffi import requests as curl_requests
@@ -77,10 +77,15 @@ def browser_get(url: str, *, timeout: float):
         session = _browser_sessions.get(profile)
         if session is None:
             session = _browser_sessions[profile] = curl_requests.Session(impersonate=profile)
-        response = session.get(url, timeout=timeout)
-        if response.status_code != 403:
+        response = session.request(method, url, timeout=timeout, **kwargs)
+        if response.status_code not in (403, 429):
             response.raise_for_status()
             _preferred_profile[host] = profile
             return response
     response.raise_for_status()
     return response
+
+
+def browser_get(url: str, *, timeout: float):
+    """브라우저 지문을 바꿔 가며 GET — 모든 지문이 403/429 이면 마지막 오류를 낸다."""
+    return browser_request("GET", url, timeout=timeout)

@@ -7,6 +7,7 @@ import io
 import json
 import math
 import re
+import threading
 from datetime import datetime, timezone
 from typing import Any
 
@@ -16,20 +17,26 @@ from config import CACHE_TTL_SLOW
 from services.component_price_service import infer_yahoo_symbol_currency
 from services.globalx_page_service import iter_globalx_page_props, read_globalx_page_records
 from utils.asx_ticker import ensure_asx_prefix
-from utils.http_session import request_with_retry
+from utils.http_session import browser_request
 from utils.normalization import resolve_bloomberg_listing
 from utils.ttl_cache import TtlCache
 from utils.us_etf_market_service import load_us_security_exchange_map
 
 _BASE_URL = "https://www.globalxetfs.com"
 _PRODUCT_MAP_CACHE = TtlCache(CACHE_TTL_SLOW, name="globalx_us_products", max_entries=1)
+_PRODUCT_MAP_LOCK = threading.Lock()
 _FOOTER = (
     "The information contained herein may not be reproduced, redistributed or used to create any derivative works."
 )
 
 
+def _request_globalx(method: str, url: str, **kwargs):
+    """Global X 요청 — 브라우저 TLS 지문으로 WAF 403/429 차단을 피한다."""
+    return browser_request(method, url, **kwargs)
+
+
 def _fetch_product_map() -> dict[str, str]:
-    response = request_with_retry("GET", f"{_BASE_URL}/explore", timeout=25)
+    response = _request_globalx("GET", f"{_BASE_URL}/explore", timeout=25)
     response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")
     tables = [
@@ -79,7 +86,7 @@ def _find_holdings_download(html: str, ticker: str) -> tuple[str, str]:
 
 def _download_csv(url: str, ticker: str, action_id: str) -> str:
     """공식 CSV 버튼과 같은 공개 요청을 보내고 길이 지정 문자열을 읽는다."""
-    response = request_with_retry(
+    response = _request_globalx(
         "POST",
         url,
         headers={"Next-Action": action_id, "Content-Type": "text/plain;charset=UTF-8", "Accept": "text/x-component"},
@@ -175,10 +182,11 @@ def fetch_globalx_us_holdings(ticker: str) -> dict[str, Any] | None:
     ticker_norm = str(ticker).strip().upper()
     if not ticker_norm:
         raise ValueError("Global X 구성종목 조회에 티커가 필요합니다.")
-    url = _PRODUCT_MAP_CACHE.get_or_compute("products", _fetch_product_map).get(ticker_norm)
+    with _PRODUCT_MAP_LOCK:
+        url = _PRODUCT_MAP_CACHE.get_or_compute("products", _fetch_product_map).get(ticker_norm)
     if url is None:
         return None
-    response = request_with_retry("GET", url, timeout=25)
+    response = _request_globalx("GET", url, timeout=25)
     response.raise_for_status()
     action_id, reference_date = _find_holdings_download(response.text, ticker_norm)
     rows = _parse_holdings(_download_csv(url, ticker_norm, action_id), ticker_norm)
