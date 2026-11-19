@@ -117,7 +117,7 @@ def _persist_and_upload_failure(
             stamp = started_wall.strftime("%Y%m%d_%H%M%S")
             if upload_slack_file(
                 full_log,
-                filename=f"{job_name}_{stamp}_{suffix}.log",
+                filename=f"{job_name}_{stamp}_{suffix}.txt",
                 title=f"[{app_label}] {job_name} 오류 로그",
                 initial_comment=summary_text,
             ):

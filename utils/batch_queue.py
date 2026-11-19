@@ -365,7 +365,7 @@ def _notify_stale_interrupted(doc: dict[str, Any], my_app_type: str | None) -> N
         stamp = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d_%H%M%S")
         uploaded = upload_slack_file(
             log_text,
-            filename=f"{job_name}_{stamp}_interrupted.log",
+            filename=f"{job_name}_{stamp}_interrupted.txt",
             title=f"[{app_label}] {job_name} 중단 로그",
             initial_comment=(
                 f"<!channel>\n"

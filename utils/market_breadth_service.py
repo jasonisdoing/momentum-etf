@@ -183,7 +183,7 @@ def _download_us_closes(tickers: list[str], period: str) -> pd.DataFrame:
                     group_by="column",
                     progress=False,
                     auto_adjust=True,
-                    threads=True,
+                    threads=4,
                 )
         except Exception:
             logger.exception("[market_breadth] yfinance 묶음 조회 실패 (%s…)", batch[0])
