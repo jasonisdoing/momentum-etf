@@ -50,6 +50,7 @@ load_env_if_present()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Momentum ETF Internal API")
+raise RuntimeError("배포 롤백 테스트용 의도적 실패")
 
 
 @app.exception_handler(ValueError)
