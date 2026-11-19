@@ -6,8 +6,8 @@ import os
 import re
 from typing import Any
 
-import httpx
 import requests
+from requests.adapters import HTTPAdapter
 
 try:
     from slack_sdk import WebClient  # type: ignore
@@ -31,11 +31,8 @@ _LAST_ERROR: str | None = None
 logger = get_app_logger()
 
 # 슬랙 API 호출마다 TCP/TLS 핸드셰이크를 반복하지 않도록 전역 커넥션 풀을 재사용한다.
-_SLACK_HTTP_CLIENT = httpx.Client(
-    base_url="https://slack.com/api/",
-    timeout=30.0,
-    limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
-)
+_SLACK_HTTP_SESSION = requests.Session()
+_SLACK_HTTP_SESSION.mount("https://", HTTPAdapter(pool_connections=10, pool_maxsize=20))
 
 _SLACK_METHOD_PATHS = {
     "chat_postMessage": "chat.postMessage",
@@ -49,17 +46,18 @@ _SLACK_METHOD_PATHS = {
 
 
 class PooledSlackClient:
-    """전역 `httpx.Client` 커넥션 풀을 공유하는 Slack Web API 경량 클라이언트."""
+    """전역 `requests.Session` 커넥션 풀을 공유하는 Slack Web API 경량 클라이언트."""
 
     def __init__(self, token: str) -> None:
         self._token = token
 
     def _call(self, api_method: str, **kwargs: Any) -> dict[str, Any]:
         payload = {key: value for key, value in kwargs.items() if value is not None}
-        response = _SLACK_HTTP_CLIENT.post(
-            api_method,
+        response = _SLACK_HTTP_SESSION.post(
+            f"https://slack.com/api/{api_method}",
             headers={"Authorization": f"Bearer {self._token}"},
             json=payload,
+            timeout=30.0,
         )
         response.raise_for_status()
         data = response.json()
