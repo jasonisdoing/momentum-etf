@@ -48,7 +48,7 @@
 ### 6단계: GitHub Self-Hosted Runner 자동 배포
 - [x] 맥미니에 GitHub Actions Self-Hosted Runner 설치 및 `launchd` 서비스 등록
 - [x] `.github/workflows/deploy.yml`을 맥미니 러너(`runs-on: self-hosted`) 기반 `git pull` → 빌드/재시작으로 전환
-- [ ] 테스트 커밋 push 후 자동 배포 정상 완료 확인
+- [x] 테스트 커밋 push 후 자동 배포 정상 완료 확인
 
 ### 7단계: 마무리 및 정리
 - [ ] 맥미니에서 하루(한국장·미국장 배치 포함) 이상 무중단 동작 확인

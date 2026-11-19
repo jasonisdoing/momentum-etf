@@ -88,18 +88,22 @@ jobs:
         run: |
           cd "$APP_DIR"
           VERSION=$(.venv/bin/python -c "from pathlib import Path; import re; m = re.search(r'APP_VERSION\s*=\s*[\'\"]([^\'\"]+)[\'\"]', Path('utils/logger.py').read_text(encoding='utf-8')); print(m.group(1) if m else 'unknown')")
-          DISK_FREE=$(df -h / | awk 'NR==2 {print $4}')
-          DISK_USE=$(df -h / | awk 'NR==2 {print $5}')
+          DISK_FREE=$(df -h /System/Volumes/Data | awk 'NR==2 {print $4}')
+          DISK_USE=$(df -h /System/Volumes/Data | awk 'NR==2 {print $5}')
+          APP_SIZE=$(du -sh "$APP_DIR" 2>/dev/null | awk '{print $1}')
+          DB_SIZE=$(du -sh /opt/homebrew/var/mongodb 2>/dev/null | awk '{print $1}')
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "disk_free=${DISK_FREE:-unknown}" >> "$GITHUB_OUTPUT"
           echo "disk_use=${DISK_USE:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "app_size=${APP_SIZE:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "db_size=${DB_SIZE:-unknown}" >> "$GITHUB_OUTPUT"
 
       - name: Notify Slack (deploy succeeded)
         if: ${{ success() }}
         shell: bash
         run: |
           curl -fsS -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"✅ Mac Mini (momentum-etf) 배포 완료 (branch: upgrade)\nAPP_VERSION: ${{ steps.meta.outputs.version }}\nDISK_FREE: ${{ steps.meta.outputs.disk_free }}\nDISK_USE: ${{ steps.meta.outputs.disk_use }}\"}" \
+            --data "{\"text\":\"✅ Mac Mini (momentum-etf) 배포 완료 (branch: upgrade)\nAPP_VERSION: ${{ steps.meta.outputs.version }}\nDISK_FREE: ${{ steps.meta.outputs.disk_free }}\nDISK_USE: ${{ steps.meta.outputs.disk_use }}\nAPP_SIZE: ${{ steps.meta.outputs.app_size }} / DB_SIZE: ${{ steps.meta.outputs.db_size }}\"}" \
             "${{ secrets.LOGS_SLACK_WEBHOOK }}"
 
       - name: Notify Slack (deploy failed)
@@ -107,5 +111,5 @@ jobs:
         shell: bash
         run: |
           curl -fsS -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"<!channel> ❌ Mac Mini (momentum-etf) 배포 실패 (branch: upgrade)\nRepo: ${{ github.repository }}\nCommit: ${{ github.sha }}\nDISK_FREE: ${{ steps.meta.outputs.disk_free }}\nDISK_USE: ${{ steps.meta.outputs.disk_use }}\nRun: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+            --data "{\"text\":\"<!channel> ❌ Mac Mini (momentum-etf) 배포 실패 (branch: upgrade)\nRepo: ${{ github.repository }}\nCommit: ${{ github.sha }}\nDISK_FREE: ${{ steps.meta.outputs.disk_free }}\nDISK_USE: ${{ steps.meta.outputs.disk_use }}\nAPP_SIZE: ${{ steps.meta.outputs.app_size }} / DB_SIZE: ${{ steps.meta.outputs.db_size }}\nRun: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
             "${{ secrets.LOGS_SLACK_WEBHOOK }}"
