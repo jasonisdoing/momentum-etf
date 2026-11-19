@@ -330,10 +330,10 @@ function AccountStatusSummary({
         )}
       </div>
       {signedCell("오늘 실현손익", realizedTodayKrw, "오늘 매도 체결된 사고팔기 전략의 원화 기준 실현손익 합계")}
-      {signedCell("오늘 합계 손익", totalTodayKrw, "전일 자산 스냅샷 대비 오늘 계좌 전체 순손익 (실현 + 평가변동 + 입출금 보정)")}
-
-      {/* 2행: 최근 30일 실현손익 / 최근 30일 합계손익 / 남은 현금 */}
       {signedCell("최근 30일 실현손익", realizedRecentKrw, "최근 30일 안에서 사고판 사고팔기 전략의 원화 기준 실현손익 합계")}
+
+      {/* 2행: 오늘 합계 손익 / 최근 30일 합계손익 / 남은 현금 */}
+      {signedCell("오늘 합계 손익", totalTodayKrw, "전일 자산 스냅샷 대비 오늘 계좌 전체 순손익 (실현 + 평가변동 + 입출금 보정)")}
       {signedCell("최근 30일 합계손익", totalRecentKrw, "30일 전 자산 스냅샷 대비 최근 30일 계좌 전체 순손익 (실현 + 평가변동 + 입출금 보정)")}
       <div style={cellStyle} title="계좌 총자산 대비 원화 기준 남은 현금 금액과 비율">
         <span style={labelStyle}>남은 현금</span>
