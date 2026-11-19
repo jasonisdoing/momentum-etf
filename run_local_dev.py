@@ -108,10 +108,16 @@ def main() -> int:
     print("Next dev 서버를 시작합니다: http://localhost:3000")
     next_process = _start_next_dev()
 
-    # 큐 워커도 함께 띄워 사용자는 명령 하나로 fastapi/next/worker 모두 운영.
-    # cron 트리거는 서버 scheduler 컨테이너만 담당하므로 로컬에서는 worker 만 동작.
-    print("큐 워커를 시작합니다 (APP_TYPE=Local — cron 비활성, worker 만 동작)")
-    worker_process = _start_queue_worker()
+    from config import LOCAL_QUEUE_WORKER_ENABLED
+
+    if LOCAL_QUEUE_WORKER_ENABLED:
+        # 큐 워커도 함께 띄워 사용자는 명령 하나로 fastapi/next/worker 모두 운영.
+        # cron 트리거는 서버(맥미니) scheduler 만 담당하므로 로컬에서는 worker 만 동작.
+        print("큐 워커를 시작합니다 (APP_TYPE=Local — cron 비활성, worker 만 동작)")
+        worker_process = _start_queue_worker()
+    else:
+        print("큐 워커는 비활성입니다 (config.LOCAL_QUEUE_WORKER_ENABLED=False — 맥미니에서만 실행)")
+        worker_process = None
 
     try:
         while True:
@@ -127,7 +133,7 @@ def main() -> int:
                 _terminate_process(fastapi_process, "FastAPI 서버")
                 return next_process.returncode or 1
 
-            if worker_process.poll() is not None:
+            if worker_process is not None and worker_process.poll() is not None:
                 # 워커는 일시적으로 죽어도 dev 환경 자체를 종료시킬 정도는 아님.
                 # 종료 코드를 로깅만 하고 fastapi/next 는 계속 동작하게 둔다.
                 print(
