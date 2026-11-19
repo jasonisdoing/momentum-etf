@@ -52,6 +52,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAmounts, setShowAmounts] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [parentDirtyCellKeys, setParentDirtyCellKeys] = useState<string[]>([]);
   const [editingParentId, setEditingParentId] = useState<string | null>(null);
   const summariesRef = useRef<AccountSummary[]>([]);
@@ -67,6 +68,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     const silent = Boolean(options?.silent);
     if (!silent) {
       setLoading(true);
+      setLoadError(null);
     }
     try {
       const [response, dashResponse] = await Promise.all([
@@ -75,6 +77,9 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ]);
       const payload = (await response.json()) as HoldingsResponse;
       if (!response.ok) {
+        if (response.status >= 500) {
+          window.dispatchEvent(new Event("db_error_occurred"));
+        }
         throw new Error(payload.error ?? "자산 정보를 불러오지 못했습니다.");
       }
       const dashData = dashResponse?.ok ? await dashResponse.json() : null;
@@ -106,8 +111,10 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         setEditingParentId(null);
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : "자산 정보를 불러오지 못했습니다.";
       if (!silent) {
-        toast.error(error instanceof Error ? error.message : "자산 정보를 불러오지 못했습니다.");
+        setLoadError(message);
+        toast.error(message);
       }
     } finally {
       if (!silent) {
@@ -703,6 +710,21 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       <div className="appPageStack">
         <div className="appPageLoading">
           <AppLoadingState label="자산 정보를 불러오는 중..." />
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError && !summaries.length) {
+    return (
+      <div className="appPageStack">
+        <div className="card appCard shadow-sm">
+          <div className="card-body" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ color: "var(--up-color, #d64545)", fontWeight: 600 }}>⚠️ {loadError}</span>
+            <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => void load()}>
+              다시 시도
+            </button>
+          </div>
         </div>
       </div>
     );

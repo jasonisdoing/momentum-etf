@@ -12,6 +12,8 @@ load_dotenv()
 
 _db_connection = None
 _mongo_client: MongoClient | None = None
+_last_connect_failure_at: float = 0.0
+_CONNECT_FAILURE_COOLDOWN_SEC = 5.0
 _conn_lock = threading.Lock()
 logger = get_app_logger()
 
@@ -56,8 +58,8 @@ def _build_client(connection_string: str) -> MongoClient:
         minPoolSize=1,
         retryWrites=True,
         retryReads=True,
-        serverSelectionTimeoutMS=5_000,
-        connectTimeoutMS=10_000,
+        serverSelectionTimeoutMS=2_500,
+        connectTimeoutMS=3_000,
         socketTimeoutMS=10_000,
         heartbeatFrequencyMS=10_000,
         maxIdleTimeMS=300_000,
@@ -71,15 +73,21 @@ def get_db_connection():
     """
     MongoDB 클라이언트 연결을 생성하고, 전역 변수에 저장하여 재사용합니다.
     """
-    global _db_connection, _mongo_client
+    global _db_connection, _mongo_client, _last_connect_failure_at
 
     # 이미 연결이 설정되어 있으면, 락 없이 기존 연결을 바로 반환합니다.
     if _db_connection is not None:
         return _db_connection
 
+    # 직전에 연결 실패했다면 쿨다운 동안 락 대기·재시도를 생략해 화면/헬스체크가 밀리지 않게 한다.
+    if time.monotonic() - _last_connect_failure_at < _CONNECT_FAILURE_COOLDOWN_SEC:
+        return None
+
     with _conn_lock:
         if _db_connection is not None:
             return _db_connection
+        if time.monotonic() - _last_connect_failure_at < _CONNECT_FAILURE_COOLDOWN_SEC:
+            return None
 
         try:
             connection_string = _resolve_connection_string()
@@ -88,24 +96,18 @@ def get_db_connection():
             return None
         db_name = _get_required_env("MONGO_DB_NAME")
 
-        last_error: Exception | None = None
-        for attempt, wait_seconds in enumerate((0, 1.5, 4.0), start=1):
-            try:
-                if wait_seconds > 0:
-                    time.sleep(wait_seconds)
+        try:
+            if _mongo_client is None:
+                _mongo_client = _build_client(connection_string)
 
-                if _mongo_client is None:
-                    _mongo_client = _build_client(connection_string)
-
-                client = _mongo_client
-                client.admin.command("ping")
-                _db_connection = client[db_name]
-                logger.debug("MongoDB에 성공적으로 연결되었습니다. (attempt=%s)", attempt)
-                return _db_connection
-            except Exception as exc:
-                last_error = exc
-                logger.warning("MongoDB 연결 재시도 %s/3 실패: %s", attempt, exc)
-                _reset_connection_unlocked()
-
-        logger.error("오류: MongoDB 연결에 실패했습니다: %s", last_error)
-        return None
+            client = _mongo_client
+            client.admin.command("ping")
+            _db_connection = client[db_name]
+            _last_connect_failure_at = 0.0
+            logger.debug("MongoDB에 성공적으로 연결되었습니다.")
+            return _db_connection
+        except Exception as exc:
+            _last_connect_failure_at = time.monotonic()
+            logger.error("오류: MongoDB 연결에 실패했습니다: %s", exc)
+            _reset_connection_unlocked()
+            return None

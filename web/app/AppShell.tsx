@@ -287,7 +287,10 @@ export function AppShell({ children }: AppShellProps) {
 
     async function checkHealth() {
       try {
-        const res = await fetch("/api/health", { cache: "no-store" });
+        const res = await fetch("/api/health", {
+          cache: "no-store",
+          signal: AbortSignal.timeout(5000),
+        });
         // 401(로그인 필요)은 DB 이슈가 아님 — 무시
         if (res.status === 401) {
           setIsDbError(false);
