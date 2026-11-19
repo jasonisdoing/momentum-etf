@@ -202,10 +202,15 @@ def claim_next_pending() -> dict[str, Any] | None:
     coll = db[BATCH_QUEUE_COLLECTION]
     now = _now_utc()
     worker_app_type = (os.environ.get("APP_TYPE") or "").strip() or "Server"
-    # 로컬 워커가 아니면 local_only 잡(튜닝/백테스트)은 픽하지 않는다.
+    from config import LOCAL_QUEUE_WORKER_ENABLED
+
+    # 로컬 워커가 아니면 local_only 잡(db_backup)은 픽하지 않는다.
+    # 로컬 워커라도 LOCAL_QUEUE_WORKER_ENABLED=False 면 local_only 잡만 픽한다.
     claim_filter: dict[str, Any] = {"status": STATUS_PENDING}
     if worker_app_type != "Local":
         claim_filter["local_only"] = {"$ne": True}
+    elif not LOCAL_QUEUE_WORKER_ENABLED:
+        claim_filter["local_only"] = True
 
     busy_lanes: set[str] = set()
     skipped_ids: list[Any] = []  # lane 필드가 없는 옛 문서는 레인 제외 조건에 안 걸려 id 로 뺀다

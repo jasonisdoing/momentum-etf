@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
+from config import LOCAL_QUEUE_WORKER_ENABLED
 from utils.batch_queue import LOCAL_ONLY_JOBS, lane_of
 from utils.db_manager import get_db_connection
 from utils.env import load_env_if_present
@@ -1303,11 +1304,15 @@ def load_system_data() -> dict[str, object]:
 
     return {
         "pool_rows": _build_pool_summary_rows(),
-        # 실행 위치는 큐의 LOCAL_ONLY_JOBS, 레인은 큐의 `lane_of` 가 단일 소스 — 로컬 전용이 아니면 서버·로컬 둘 다 잡는다.
+        # 실행 위치는 큐의 LOCAL_ONLY_JOBS 와 config.LOCAL_QUEUE_WORKER_ENABLED 가 단일 소스다.
         "schedule_rows": [
             {
                 **row,
-                "run_location": "LOCAL" if row["key"] in LOCAL_ONLY_JOBS else "SERVER/LOCAL",
+                "run_location": (
+                    "LOCAL"
+                    if row["key"] in LOCAL_ONLY_JOBS
+                    else ("SERVER/LOCAL" if LOCAL_QUEUE_WORKER_ENABLED else "SERVER")
+                ),
                 "lane": lane_of(row["key"]),
             }
             for row in SCHEDULE_ROWS

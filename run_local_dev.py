@@ -110,14 +110,11 @@ def main() -> int:
 
     from config import LOCAL_QUEUE_WORKER_ENABLED
 
-    if LOCAL_QUEUE_WORKER_ENABLED:
-        # 큐 워커도 함께 띄워 사용자는 명령 하나로 fastapi/next/worker 모두 운영.
-        # cron 트리거는 서버(맥미니) scheduler 만 담당하므로 로컬에서는 worker 만 동작.
-        print("큐 워커를 시작합니다 (APP_TYPE=Local — cron 비활성, worker 만 동작)")
-        worker_process = _start_queue_worker()
-    else:
-        print("큐 워커는 비활성입니다 (config.LOCAL_QUEUE_WORKER_ENABLED=False — 맥미니에서만 실행)")
-        worker_process = None
+    # 큐 워커도 함께 띄워 사용자는 명령 하나로 fastapi/next/worker 모두 운영.
+    # cron 트리거는 서버(맥미니) scheduler 만 담당하고, 로컬에서는 플래그에 따라 전체 또는 LOCAL 전용(db_backup)만 처리한다.
+    mode_label = "모든 배치 처리" if LOCAL_QUEUE_WORKER_ENABLED else "LOCAL 전용(db_backup)만 처리"
+    print(f"큐 워커를 시작합니다 (APP_TYPE=Local — cron 비활성, {mode_label})")
+    worker_process = _start_queue_worker()
 
     try:
         while True:

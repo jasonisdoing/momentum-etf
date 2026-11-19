@@ -250,8 +250,12 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
     cellRenderer: (p: { value?: string }) =>
       p.value === "LOCAL" ? (
         <span style={{ fontWeight: 700, color: "#b45309" }}>로컬 전용</span>
-      ) : (
+      ) : p.value === "SERVER" ? (
+        <span style={{ color: "var(--text-muted)" }}>서버</span>
+      ) : p.value === "SERVER/LOCAL" ? (
         <span style={{ color: "var(--text-muted)" }}>서버·로컬</span>
+      ) : (
+        ""
       ),
   },
   {
