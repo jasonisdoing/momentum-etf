@@ -66,6 +66,7 @@ type Status = {
   // 증권사 계좌 평균단가(이동평균)와 현재가 대비 수익률(%) — 보유가 없으면 null.
   average_price: number | null;
   average_profit_pct: number | null;
+  realized_today?: number;
   // 다음 회차를 살 계좌 현금이 없어 매수를 멈췄다(한도 소진).
   cash_short: boolean;
   budget_short: boolean;
@@ -249,13 +250,17 @@ type View = {
   } | null;
 };
 
-/** 오늘 API 주문 한도·사용량 + 보유 주식 + 남은 현금 — 본문 그리드 위 3줄 요약. */
+/** 오늘 API 주문 한도 · 실현손익(오늘/30일) · 보유 주식 · 남은 현금 — 본문 그리드 위 3줄 5항목 고정 폭 요약. */
 function AccountStatusSummary({
   limit,
+  realizedTodayKrw,
+  realizedRecentKrw,
   totals,
   summary,
 }: {
   limit: View["order_limit"];
+  realizedTodayKrw: number | undefined;
+  realizedRecentKrw: number | undefined;
   totals: { buy_amount_krw: number; valuation_krw: number; pnl_krw: number } | null;
   summary: AccountSummary | null;
 }) {
@@ -263,7 +268,7 @@ function AccountStatusSummary({
   const cashKrw = summary?.cash_balance_krw;
   const totalKrw = summary?.total_assets_krw;
   const ratioPct = cashKrw != null && totalKrw != null && totalKrw > 0 ? (cashKrw / totalKrw) * 100 : null;
-  const rowStyle: React.CSSProperties = {
+  const cellStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
     gap: 10,
@@ -271,19 +276,35 @@ function AccountStatusSummary({
     fontSize: "var(--fs-sm)",
     lineHeight: 1.4,
   };
-  const labelStyle: React.CSSProperties = {
+  const leftLabelStyle: React.CSSProperties = {
     color: "var(--text-muted)",
     fontWeight: 600,
-    minWidth: 88,
+    width: 96,
+    flexShrink: 0,
+  };
+  const rightLabelStyle: React.CSSProperties = {
+    color: "var(--text-muted)",
+    fontWeight: 600,
+    width: 124,
+    flexShrink: 0,
   };
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "2px 4px 6px" }}>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "minmax(460px, max-content) minmax(260px, max-content)",
+        rowGap: 4,
+        columnGap: 24,
+        padding: "2px 4px 6px",
+        overflowX: "auto",
+      }}
+    >
       {limit ? (
         <div
-          style={rowStyle}
+          style={{ ...cellStyle, gridColumn: "1 / -1" }}
           title="계좌 설정의 하루 API 주문 건수·금액 한도 — 금액은 오늘 순매수(매수 − 매도)를 원화로 센다."
         >
-          <span style={labelStyle}>오늘 주문 한도</span>
+          <span style={leftLabelStyle}>오늘 주문 한도</span>
           {!limit.enabled ? <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}>API 주문 꺼짐</span> : null}
           <span style={full(limit.used_count, limit.max_count)}>
             횟수 <b>{limit.used_count}</b> / {limit.max_count == null ? "미설정" : `${limit.max_count}건`}
@@ -294,8 +315,22 @@ function AccountStatusSummary({
           </span>
         </div>
       ) : null}
-      <div style={rowStyle} title="현재 보유 중인 주식 전체의 원화 기준 매수원금 · 평가금액 · 평가손익">
-        <span style={labelStyle}>보유 주식</span>
+
+      <div style={cellStyle} title="오늘 매도 체결된 사고팔기 전략의 원화 기준 실현손익 합계">
+        <span style={leftLabelStyle}>오늘 실현손익</span>
+        <b style={{ color: realizedTodayKrw != null ? signColor(realizedTodayKrw) : "inherit" }}>
+          {realizedTodayKrw != null ? formatSignedAmount(realizedTodayKrw, "KRW") : "-"}
+        </b>
+      </div>
+      <div style={cellStyle} title="최근 30일 안에서 사고판 사고팔기 전략의 원화 기준 실현손익 합계">
+        <span style={rightLabelStyle}>최근 30일 실현손익</span>
+        <b style={{ color: realizedRecentKrw != null ? signColor(realizedRecentKrw) : "inherit" }}>
+          {realizedRecentKrw != null ? formatSignedAmount(realizedRecentKrw, "KRW") : "-"}
+        </b>
+      </div>
+
+      <div style={cellStyle} title="현재 보유 중인 주식 전체의 원화 기준 매수원금 · 평가금액 · 평가손익">
+        <span style={leftLabelStyle}>보유 주식</span>
         <span>
           매수원금 <b>{totals ? formatCurrencyPrice(totals.buy_amount_krw, "KRW") : "-"}</b>
         </span>
@@ -309,8 +344,8 @@ function AccountStatusSummary({
           </b>
         </span>
       </div>
-      <div style={rowStyle} title="계좌 총자산 대비 원화 기준 남은 현금 비율과 금액">
-        <span style={labelStyle}>남은 현금</span>
+      <div style={cellStyle} title="계좌 총자산 대비 원화 기준 남은 현금 비율과 금액">
+        <span style={rightLabelStyle}>남은 현금</span>
         {cashKrw == null ? (
           <span>-</span>
         ) : (
@@ -865,7 +900,7 @@ function AccountSettingsCard({
   const selectedStrategy = selectedRow?.strategy_id ? strategiesById.get(selectedRow.strategy_id) : undefined;
   const details = selectedStrategy?.ticker === selectedRow?.ticker ? selectedStrategy : undefined;
   const quotesByTicker = useMemo(() => new Map(view.configs.map((config) => [config.ticker, config])), [view.configs]);
-  const { gridRows, pinnedRows, totalHoldings } = useMemo(() => {
+  const { gridRows, pinnedRows, totalHoldings, realizedTodayKrw, realizedRecentKrw } = useMemo(() => {
     const stockRows = drafts.map((row): TradeListRow => {
       const strategy = row.strategy_id ? strategiesById.get(row.strategy_id) : undefined;
       const quote = quotesByTicker.get(row.ticker);
@@ -917,6 +952,14 @@ function AccountSettingsCard({
     // 사고팔기 합계의 손익은 종목 행(회차 기준)의 합이다.
     const tradePnl = sumAll(stockRows.map((row) => row.pnl_krw));
     const tradeRealized = sumAll(stockRows.map((row) => row.realized_krw));
+    const tradeRealizedToday = sumAll(
+      drafts.map((row) => {
+        const strategy = row.strategy_id ? strategiesById.get(row.strategy_id) : undefined;
+        const rate = view.krw_rate;
+        if (!strategy || strategy.ticker !== row.ticker || "error" in strategy || rate == null) return undefined;
+        return strategy.status.realized_today != null ? strategy.status.realized_today * rate : undefined;
+      }),
+    );
     const tradeTotal = sumAll(stockRows.map((row) => row.total_krw));
     const weights = summary && summary.total_assets_krw > 0 && otherValue != null
       ? displayWeights([summary.cash_balance_krw, otherValue, ...stockValues], summary.total_assets_krw)
@@ -947,7 +990,15 @@ function AccountSettingsCard({
     ];
     const weightedRows = stockRows.map((row, index) => ({ ...row, weight_pct: weights[index + 2] }));
     const totalHoldingsResult = totalHoldings ?? null;
-    if (sortActive || !groups.length) return { gridRows: weightedRows, pinnedRows, totalHoldings: totalHoldingsResult };
+    if (sortActive || !groups.length) {
+      return {
+        gridRows: weightedRows,
+        pinnedRows,
+        totalHoldings: totalHoldingsResult,
+        realizedTodayKrw: tradeRealizedToday,
+        realizedRecentKrw: tradeRealized,
+      };
+    }
 
     const tickers = new Set(weightedRows.map((row) => row.ticker));
     const byAnchor = new Map<string | null, TradeListRow[]>();
@@ -961,6 +1012,8 @@ function AccountSettingsCard({
       gridRows: [...weightedRows.flatMap((row) => [...(byAnchor.get(row.ticker) ?? []), row]), ...(byAnchor.get(null) ?? [])],
       pinnedRows,
       totalHoldings: totalHoldingsResult,
+      realizedTodayKrw: tradeRealizedToday,
+      realizedRecentKrw: tradeRealized,
     };
   }, [accountAssets, drafts, groups, sortActive, strategiesById, quotesByTicker, currency, view.krw_rate, memos]);
 
@@ -1275,7 +1328,13 @@ function AccountSettingsCard({
       <section className="appSection appPageStack strategyTradeGrid">
         <aside className="card appCard" aria-label="종목 목록">
           <div className="card-body appCardBodyTight">
-            <AccountStatusSummary limit={view.order_limit} totals={totalHoldings} summary={accountAssets?.summary ?? null} />
+            <AccountStatusSummary
+              limit={view.order_limit}
+              realizedTodayKrw={realizedTodayKrw}
+              realizedRecentKrw={realizedRecentKrw}
+              totals={totalHoldings}
+              summary={accountAssets?.summary ?? null}
+            />
             {/* 계좌 행(합계·현금·기타 종목)과 사고팔기 행을 헤더가 따로 보이는 두 그리드로 나눈다.
                 두 그리드는 같은 컬럼을 쓰고 `alignedGrids` 로 칸 폭·가로 스크롤을 함께 움직인다. */}
             <AppAgGrid

@@ -124,11 +124,11 @@ jobs:
             sleep 1
           done
 
-          # 프론트(web/)·문서·워크플로우만 바뀐 배포에서는 scheduler 재시작을 건너뛴다.
-          if [ "$PREV_SHA" = "$NEW_SHA" ] || git diff --name-only "$PREV_SHA" "$NEW_SHA" | grep -qvE '^(web/|docs/|\.github/|README\.md$)'; then
+          # 프론트(web/)·문서·워크플로우·APP_VERSION 만 바뀐 배포에서는 scheduler 재시작을 건너뛴다.
+          if [ "$PREV_SHA" = "$NEW_SHA" ] || git diff --name-only "$PREV_SHA" "$NEW_SHA" | grep -qvE '^(web/|docs/|\.github/|README\.md$|utils/logger\.py$)'; then
             # 실행 중인 서버 배치가 있으면 최대 600초(10분)까지 자연 종료를 기다린다.
             for i in $(seq 1 120); do
-              RUNNING_CNT=$(.venv/bin/python -c "from utils.db_manager import get_db_connection; db=get_db_connection(); print(db.batch_queue.count_documents({'status':'running','app_type':'Server'}) if db else 0)" 2>/dev/null || echo 0)
+              RUNNING_CNT=$(.venv/bin/python -c "from utils.db_manager import get_db_connection; db=get_db_connection(); print(db.batch_queue.count_documents({'status':'running','app_type':'Server'}) if db is not None else 0)" 2>/dev/null || echo 0)
               if [ "${RUNNING_CNT}" = "0" ]; then
                 break
               fi
