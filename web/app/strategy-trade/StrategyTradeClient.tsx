@@ -204,6 +204,12 @@ const RECOMMENDED_GAP_MODE_LABELS: Record<RecommendedGapMode, string> = {
   half: "합성 간격",
 };
 
+const RECOMMENDED_GAP_MODE_DESCRIPTIONS: Record<RecommendedGapMode, string> = {
+  off: "수동간격: 종목별 매매 간격(%)을 직접 입력해 조정합니다.",
+  full: "권장 간격: 최근 12개월 최대 하락(MDD)을 회차로 분할하고 배수별 범위로 맞춘 값",
+  half: "합성 간격: 변동성과 권장 간격 중 더 작은 값",
+};
+
 type View = {
   /** 사고팔기를 운영할 수 있는 계좌 — 증권사 API 가 연동된 운영 계좌. */
   account_options: Array<AccountOptionBase & { country_code: string }>;
@@ -1242,7 +1248,7 @@ function AccountSettingsCard({
                   onTest={() => void sendSlackTest()}
                 />
                 <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", whiteSpace: "nowrap" }}>
-                  합성 간격: 변동성·권장 간격 중 작은 값
+                  {RECOMMENDED_GAP_MODE_DESCRIPTIONS[gapMode]}
                 </span>
               </div>
               <div className="appMainHeaderRight">
