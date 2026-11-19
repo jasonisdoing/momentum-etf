@@ -250,17 +250,21 @@ type View = {
   } | null;
 };
 
-/** 오늘 API 주문 한도 · 실현손익(오늘/30일) · 보유 주식 · 남은 현금 — 본문 그리드 위 3줄 5항목 고정 폭 요약. */
+/** 오늘 API 주문 한도 · 실현손익/합계손익(오늘·30일) · 보유 주식(매수원금·평가금액·평가손익) · 남은 현금 — 3×3 고정 폭 요약. */
 function AccountStatusSummary({
   limit,
   realizedTodayKrw,
+  totalTodayKrw,
   realizedRecentKrw,
+  totalRecentKrw,
   totals,
   summary,
 }: {
   limit: View["order_limit"];
   realizedTodayKrw: number | undefined;
+  totalTodayKrw: number | undefined;
   realizedRecentKrw: number | undefined;
+  totalRecentKrw: number | undefined;
   totals: { buy_amount_krw: number; valuation_krw: number; pnl_krw: number } | null;
   summary: AccountSummary | null;
 }) {
@@ -272,80 +276,65 @@ function AccountStatusSummary({
     display: "flex",
     alignItems: "center",
     gap: 10,
-    flexWrap: "wrap",
+    flexWrap: "nowrap",
     fontSize: "var(--fs-sm)",
     lineHeight: 1.4,
+    whiteSpace: "nowrap",
   };
-  const leftLabelStyle: React.CSSProperties = {
+  const labelStyle: React.CSSProperties = {
     color: "var(--text-muted)",
     fontWeight: 600,
-    width: 96,
+    width: 120,
     flexShrink: 0,
   };
-  const rightLabelStyle: React.CSSProperties = {
-    color: "var(--text-muted)",
-    fontWeight: 600,
-    width: 124,
-    flexShrink: 0,
-  };
+  const signedCell = (label: string, value: number | undefined, title: string) => (
+    <div style={cellStyle} title={title}>
+      <span style={labelStyle}>{label}</span>
+      <b style={{ color: value != null ? signColor(value) : "inherit" }}>
+        {value != null ? formatSignedAmount(value, "KRW") : "-"}
+      </b>
+    </div>
+  );
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "minmax(460px, max-content) minmax(260px, max-content)",
+        gridTemplateColumns: "minmax(340px, max-content) minmax(240px, max-content) minmax(240px, max-content)",
         rowGap: 4,
         columnGap: 24,
         padding: "2px 4px 6px",
         overflowX: "auto",
       }}
     >
-      {limit ? (
-        <div
-          style={{ ...cellStyle, gridColumn: "1 / -1" }}
-          title="계좌 설정의 하루 API 주문 건수·금액 한도 — 금액은 오늘 순매수(매수 − 매도)를 원화로 센다."
-        >
-          <span style={leftLabelStyle}>오늘 주문 한도</span>
-          {!limit.enabled ? <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}>API 주문 꺼짐</span> : null}
-          <span style={full(limit.used_count, limit.max_count)}>
-            횟수 <b>{limit.used_count}</b> / {limit.max_count == null ? "미설정" : `${limit.max_count}건`}
-          </span>
-          <span style={full(limit.used_amount, limit.max_amount)}>
-            금액 <b>{formatCurrencyPrice(limit.used_amount, "KRW")}</b> /{" "}
-            {limit.max_amount == null ? "미설정" : formatCurrencyPrice(limit.max_amount, "KRW")}
-          </span>
-        </div>
-      ) : null}
+      {/* 1행: 오늘 주문 한도 / 오늘 실현손익 / 오늘 합계 손익 */}
+      <div
+        style={cellStyle}
+        title="계좌 설정의 하루 API 주문 건수·금액 한도 — 금액은 오늘 순매수(매수 − 매도)를 원화로 센다."
+      >
+        <span style={labelStyle}>오늘 주문 한도</span>
+        {limit ? (
+          <>
+            {!limit.enabled ? <span style={{ color: "var(--up-color, #d64545)", fontWeight: 700 }}>API 주문 꺼짐</span> : null}
+            <span style={full(limit.used_count, limit.max_count)}>
+              횟수 <b>{limit.used_count}</b> / {limit.max_count == null ? "미설정" : `${limit.max_count}건`}
+            </span>
+            <span style={full(limit.used_amount, limit.max_amount)}>
+              금액 <b>{formatCurrencyPrice(limit.used_amount, "KRW")}</b> /{" "}
+              {limit.max_amount == null ? "미설정" : formatCurrencyPrice(limit.max_amount, "KRW")}
+            </span>
+          </>
+        ) : (
+          <span>-</span>
+        )}
+      </div>
+      {signedCell("오늘 실현손익", realizedTodayKrw, "오늘 매도 체결된 사고팔기 전략의 원화 기준 실현손익 합계")}
+      {signedCell("오늘 합계 손익", totalTodayKrw, "전일 자산 스냅샷 대비 오늘 계좌 전체 순손익 (실현 + 평가변동 + 입출금 보정)")}
 
-      <div style={cellStyle} title="오늘 매도 체결된 사고팔기 전략의 원화 기준 실현손익 합계">
-        <span style={leftLabelStyle}>오늘 실현손익</span>
-        <b style={{ color: realizedTodayKrw != null ? signColor(realizedTodayKrw) : "inherit" }}>
-          {realizedTodayKrw != null ? formatSignedAmount(realizedTodayKrw, "KRW") : "-"}
-        </b>
-      </div>
-      <div style={cellStyle} title="최근 30일 안에서 사고판 사고팔기 전략의 원화 기준 실현손익 합계">
-        <span style={rightLabelStyle}>최근 30일 실현손익</span>
-        <b style={{ color: realizedRecentKrw != null ? signColor(realizedRecentKrw) : "inherit" }}>
-          {realizedRecentKrw != null ? formatSignedAmount(realizedRecentKrw, "KRW") : "-"}
-        </b>
-      </div>
-
-      <div style={cellStyle} title="현재 보유 중인 주식 전체의 원화 기준 매수원금 · 평가금액 · 평가손익">
-        <span style={leftLabelStyle}>보유 주식</span>
-        <span>
-          매수원금 <b>{totals ? formatCurrencyPrice(totals.buy_amount_krw, "KRW") : "-"}</b>
-        </span>
-        <span>
-          평가금액 <b>{totals ? formatCurrencyPrice(totals.valuation_krw, "KRW") : "-"}</b>
-        </span>
-        <span>
-          평가손익{" "}
-          <b style={{ color: totals ? signColor(totals.pnl_krw) : "inherit" }}>
-            {totals ? formatSignedAmount(totals.pnl_krw, "KRW") : "-"}
-          </b>
-        </span>
-      </div>
+      {/* 2행: 최근 30일 실현손익 / 최근 30일 합계손익 / 남은 현금 */}
+      {signedCell("최근 30일 실현손익", realizedRecentKrw, "최근 30일 안에서 사고판 사고팔기 전략의 원화 기준 실현손익 합계")}
+      {signedCell("최근 30일 합계손익", totalRecentKrw, "30일 전 자산 스냅샷 대비 최근 30일 계좌 전체 순손익 (실현 + 평가변동 + 입출금 보정)")}
       <div style={cellStyle} title="계좌 총자산 대비 원화 기준 남은 현금 비율과 금액">
-        <span style={rightLabelStyle}>남은 현금</span>
+        <span style={labelStyle}>남은 현금</span>
         {cashKrw == null ? (
           <span>-</span>
         ) : (
@@ -354,6 +343,17 @@ function AccountStatusSummary({
           </span>
         )}
       </div>
+
+      {/* 3행: 매수원금 / 평가금액 / 평가손익 */}
+      <div style={cellStyle} title="현재 보유 중인 주식 전체의 원화 기준 매수원금">
+        <span style={labelStyle}>매수원금</span>
+        <b>{totals ? formatCurrencyPrice(totals.buy_amount_krw, "KRW") : "-"}</b>
+      </div>
+      <div style={cellStyle} title="현재 보유 중인 주식 전체의 원화 기준 평가금액">
+        <span style={labelStyle}>평가금액</span>
+        <b>{totals ? formatCurrencyPrice(totals.valuation_krw, "KRW") : "-"}</b>
+      </div>
+      {signedCell("평가손익", totals?.pnl_krw, "현재 보유 중인 주식 전체의 원화 기준 평가손익")}
     </div>
   );
 }
@@ -818,7 +818,12 @@ function AccountSettingsCard({
   const [gapMode, setGapMode] = useState<RecommendedGapMode>(view.recommended_gap_mode);
   const [slackTesting, setSlackTesting] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [accountAssets, setAccountAssets] = useState<{ summary: AccountSummary; holdings: Map<string, HoldingsRow> } | null>(null);
+  const [accountAssets, setAccountAssets] = useState<{
+    summary: AccountSummary;
+    holdings: Map<string, HoldingsRow>;
+    dailyProfit?: number;
+    days30Profit?: number;
+  } | null>(null);
   const [memos, setMemos] = useState(view.memos);
   // 두 그리드(계좌 행·사고팔기 행)를 서로 맞추는 참조 — `alignedGrids` 가 읽는다.
   const accountGridRef = useRef<{ api: GridApi<TradeListRow> | null }>({ api: null });
@@ -842,18 +847,32 @@ function AccountSettingsCard({
     const errorMessage = "계좌 보유 지표를 불러오지 못했습니다.";
     async function loadHoldings() {
       try {
-        const response = await fetch(`/api/assets?account=${encodeURIComponent(accountId)}`, {
-          cache: "no-store",
-          signal: controller.signal,
-        });
+        const [response, dashResponse] = await Promise.all([
+          fetch(`/api/assets?account=${encodeURIComponent(accountId)}`, {
+            cache: "no-store",
+            signal: controller.signal,
+          }),
+          fetch("/api/dashboard", { cache: "no-store", signal: controller.signal }).catch(() => null),
+        ]);
         const payload = (await response.json()) as HoldingsResponse;
         const summary = payload.account_summaries?.find((row) => row.account_id === accountId);
         if (!response.ok || !payload.rows || !summary) {
           throw new Error(payload.error ?? errorMessage);
         }
+        const dashPayload = dashResponse?.ok
+          ? ((await dashResponse.json().catch(() => null)) as {
+              accounts?: Array<{ account_id: string; daily_profit?: number; days30_profit?: number }>;
+            } | null)
+          : null;
+        const dashAccount = dashPayload?.accounts?.find((row) => row.account_id === accountId);
         if (controller.signal.aborted) return;
         const rows = payload.rows.filter((row) => row.account_id === accountId);
-        setAccountAssets({ summary, holdings: new Map(rows.map((row) => [row.ticker, row])) });
+        setAccountAssets({
+          summary,
+          holdings: new Map(rows.map((row) => [row.ticker, row])),
+          dailyProfit: dashAccount?.daily_profit,
+          days30Profit: dashAccount?.days30_profit,
+        });
       } catch (error) {
         if (controller.signal.aborted) return;
         setAccountAssets(null);
@@ -1331,7 +1350,9 @@ function AccountSettingsCard({
             <AccountStatusSummary
               limit={view.order_limit}
               realizedTodayKrw={realizedTodayKrw}
+              totalTodayKrw={accountAssets?.dailyProfit}
               realizedRecentKrw={realizedRecentKrw}
+              totalRecentKrw={accountAssets?.days30Profit}
               totals={totalHoldings}
               summary={accountAssets?.summary ?? null}
             />

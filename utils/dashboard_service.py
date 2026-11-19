@@ -116,10 +116,22 @@ def _get_week_start_date_kst() -> str:
     return week_start.isoformat()
 
 
-def _find_latest_snapshot_before_week_start(db: Any) -> dict[str, Any] | None:
-    week_start = _get_week_start_date_kst()
+def _find_latest_snapshot_before_date(db: Any, date_iso: str) -> dict[str, Any] | None:
     return db.daily_snapshots.find_one(
-        {"snapshot_date": {"$lt": week_start}},
+        {"snapshot_date": {"$lt": date_iso}},
+        sort=[("snapshot_date", -1)],
+    )
+
+
+def _find_latest_snapshot_before_week_start(db: Any) -> dict[str, Any] | None:
+    return _find_latest_snapshot_before_date(db, _get_week_start_date_kst())
+
+
+def _find_snapshot_days_ago(db: Any, days: int) -> dict[str, Any] | None:
+    """오늘로부터 ``days`` 일 전 날짜(이하 중 가장 최근) 스냅샷을 반환한다."""
+    cutoff = (datetime.now().astimezone().date() - timedelta(days=days)).isoformat()
+    return db.daily_snapshots.find_one(
+        {"snapshot_date": {"$lte": cutoff}},
         sort=[("snapshot_date", -1)],
     )
 
@@ -216,6 +228,7 @@ def load_dashboard_data() -> dict[str, Any]:
     latest_snapshot = db.daily_snapshots.find_one(sort=[("snapshot_date", -1)])
     previous_snapshot = get_latest_daily_snapshot("TOTAL", before_today=True)
     weekly_base_snapshot = _find_latest_snapshot_before_week_start(db)
+    days30_base_snapshot = _find_snapshot_days_ago(db, 30)
     weekly_docs = [
         doc for doc in db.weekly_fund_data.find().sort("week_date", -1) if normalize_number(doc.get("total_assets")) > 0
     ]
@@ -235,6 +248,11 @@ def load_dashboard_data() -> dict[str, Any]:
     weekly_base_snapshot_accounts = {
         str(account.get("account_id") or ""): account
         for account in ((weekly_base_snapshot or {}).get("accounts") or [])
+        if isinstance(account, dict)
+    }
+    days30_base_snapshot_accounts = {
+        str(account.get("account_id") or ""): account
+        for account in ((days30_base_snapshot or {}).get("accounts") or [])
         if isinstance(account, dict)
     }
 
@@ -271,6 +289,7 @@ def load_dashboard_data() -> dict[str, Any]:
             else {}
         )
         weekly_base_snapshot_account = weekly_base_snapshot_accounts.get(config["account_id"], {})
+        days30_base_snapshot_account = days30_base_snapshot_accounts.get(config["account_id"], {})
 
         total_assets = valuation_krw + cash_balance
         net_profit = total_assets - total_principal
@@ -284,6 +303,7 @@ def load_dashboard_data() -> dict[str, Any]:
         weekly_profit, weekly_base = account_period_profit_and_base(
             total_assets, total_principal, weekly_base_snapshot_account
         )
+        days30_profit, _ = account_period_profit_and_base(total_assets, total_principal, days30_base_snapshot_account)
         daily_return_pct_acc = calculate_period_return_pct(daily_profit, daily_base)
         weekly_return_pct_acc = calculate_period_return_pct(weekly_profit, weekly_base)
         # 합계용 누적 — 분자(손익)만 더하면 수익률 분모가 없다. 계좌별과 같은 분모
@@ -315,6 +335,7 @@ def load_dashboard_data() -> dict[str, Any]:
                 ),
                 "weekly_profit": weekly_profit,
                 "weekly_return_pct": weekly_return_pct_acc,
+                "days30_profit": days30_profit,
                 "_df_live": df_live,  # 버킷 계산을 위해 임시 보관
             }
         )
