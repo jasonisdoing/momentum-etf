@@ -188,6 +188,9 @@ export function AppShell({ children }: AppShellProps) {
   const [showRailPeriod, setShowRailPeriod] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => getDefaultOpenGroups(pathname));
   const [isDbError, setIsDbError] = useState(false);
+  const [dbSuggestedEnv, setDbSuggestedEnv] = useState<string | null>(null);
+  const [dbErrorDetail, setDbErrorDetail] = useState<string | null>(null);
+  const [dbCopied, setDbCopied] = useState(false);
   const isLoginPage = pathname === "/login";
   // 모바일 전용 화면(/m)은 데스크톱 레이아웃(사이드바·상단 지표바)을 쓰지 않는다.
   const isMobileApp = pathname === "/m" || Boolean(pathname?.startsWith("/m/"));
@@ -268,11 +271,41 @@ export function AppShell({ children }: AppShellProps) {
     };
   }, [loadTopBarData]);
 
+  const checkHealth = useCallback(async () => {
+    if (isBareLayout) return;
+    try {
+      const res = await fetch("/api/health", {
+        cache: "no-store",
+        signal: AbortSignal.timeout(5000),
+      });
+      // 401(로그인 필요)은 DB 이슈가 아님 — 무시
+      if (res.status === 401) {
+        setIsDbError(false);
+        setDbSuggestedEnv(null);
+        setDbErrorDetail(null);
+        return;
+      }
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string; suggested_env?: string | null } | null;
+        setIsDbError(true);
+        setDbSuggestedEnv(data?.suggested_env ?? null);
+        setDbErrorDetail(data?.error ?? null);
+        return;
+      }
+      setIsDbError(false);
+      setDbSuggestedEnv(null);
+      setDbErrorDetail(null);
+    } catch {
+      setIsDbError(true);
+    }
+  }, [isBareLayout]);
+
   useEffect(() => {
     if (isBareLayout) return;
 
     const errorHandler = () => {
       setIsDbError(true);
+      void checkHealth();
     };
 
     window.addEventListener("db_error_occurred", errorHandler);
@@ -280,30 +313,11 @@ export function AppShell({ children }: AppShellProps) {
     return () => {
       window.removeEventListener("db_error_occurred", errorHandler);
     };
-  }, [isLoginPage]);
+  }, [checkHealth, isBareLayout, isLoginPage]);
 
   useEffect(() => {
-    if (isBareLayout) return;
-
-    async function checkHealth() {
-      try {
-        const res = await fetch("/api/health", {
-          cache: "no-store",
-          signal: AbortSignal.timeout(5000),
-        });
-        // 401(로그인 필요)은 DB 이슈가 아님 — 무시
-        if (res.status === 401) {
-          setIsDbError(false);
-          return;
-        }
-        setIsDbError(!res.ok);
-      } catch {
-        setIsDbError(true);
-      }
-    }
-
     void checkHealth();
-  }, [isLoginPage]);
+  }, [checkHealth, isLoginPage]);
 
   useEffect(() => {
     setSidebarOpen(false);
@@ -535,8 +549,49 @@ export function AppShell({ children }: AppShellProps) {
             </div>
             <div className="topbarFx">
               {isDbError && (
-                <span className="topbarFxItem" style={{ color: "#e03131", fontWeight: 600, background: "#ffe3e3", padding: "2px 8px", borderRadius: "4px" }}>
-                  ⚠️ 몽고디비 이슈
+                <span
+                  className="topbarFxItem"
+                  title={dbErrorDetail ?? "MongoDB 연결 오류"}
+                  style={{
+                    color: "#e03131",
+                    fontWeight: 600,
+                    background: "#ffe3e3",
+                    padding: "2px 8px",
+                    borderRadius: "4px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  <span>⚠️ 몽고디비 이슈</span>
+                  {dbSuggestedEnv ? (
+                    <>
+                      <code style={{ fontSize: "var(--fs-xs)", color: "#7f1d1d", background: "#fff5f5", padding: "1px 5px", borderRadius: 3 }}>
+                        {dbSuggestedEnv}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(dbSuggestedEnv).then(() => {
+                            setDbCopied(true);
+                            setTimeout(() => setDbCopied(false), 2000);
+                          });
+                        }}
+                        style={{
+                          border: "1px solid #f5b5b5",
+                          background: "#ffffff",
+                          color: "#b91c1c",
+                          borderRadius: 4,
+                          padding: "1px 6px",
+                          fontSize: "var(--fs-xs)",
+                          cursor: "pointer",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {dbCopied ? "복사됨" : "복사"}
+                      </button>
+                    </>
+                  ) : null}
                 </span>
               )}
               <span className="topbarFxItem topbarTickerSearchItem" data-fit-priority={8}>

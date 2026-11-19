@@ -1,6 +1,9 @@
+import ipaddress
 import os
+import socket
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
@@ -13,7 +16,11 @@ load_dotenv()
 _db_connection = None
 _mongo_client: MongoClient | None = None
 _last_connect_failure_at: float = 0.0
+_last_connect_error_detail: str | None = None
+_detected_mongo_host_hint: str | None = None
+_last_scan_at: float = 0.0
 _CONNECT_FAILURE_COOLDOWN_SEC = 5.0
+_SCAN_COOLDOWN_SEC = 30.0
 _conn_lock = threading.Lock()
 logger = get_app_logger()
 
@@ -69,11 +76,74 @@ def _build_client(connection_string: str) -> MongoClient:
     )
 
 
+def _detect_lan_mongo_host(configured_host: str) -> str | None:
+    """로컬 환경에서 사설 IP 접속 실패 시 같은 /24 대역에서 27017이 열린 다른 호스트를 찾는다."""
+    global _last_scan_at, _detected_mongo_host_hint
+
+    if (os.environ.get("APP_TYPE") or "").strip().lower() != "local":
+        return None
+    host_only = configured_host.split(":", 1)[0].strip()
+    port = (
+        int(configured_host.split(":", 1)[1])
+        if ":" in configured_host and configured_host.split(":", 1)[1].isdigit()
+        else 27017
+    )
+    try:
+        ip_obj = ipaddress.ip_address(host_only)
+    except ValueError:
+        return None
+    if not ip_obj.is_private:
+        return None
+
+    now = time.monotonic()
+    if now - _last_scan_at < _SCAN_COOLDOWN_SEC:
+        return _detected_mongo_host_hint
+    _last_scan_at = now
+
+    prefix = ".".join(host_only.split(".")[:3])
+
+    def _probe(ip: str) -> str | None:
+        if ip == host_only:
+            return None
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.35)
+        try:
+            if sock.connect_ex((ip, port)) == 0:
+                return f"{ip}:{port}"
+        except OSError:
+            pass
+        finally:
+            sock.close()
+        return None
+
+    with ThreadPoolExecutor(max_workers=64) as executor:
+        found = next((res for res in executor.map(_probe, [f"{prefix}.{i}" for i in range(1, 255)]) if res), None)
+    _detected_mongo_host_hint = found
+    return found
+
+
+def get_db_connection_diagnostic() -> dict[str, str | None]:
+    """최근 MongoDB 연결 실패 원인과 로컬 IP 변경 감지 힌트를 반환한다."""
+    hint = _detected_mongo_host_hint
+    detail = _last_connect_error_detail or "DB 연결 실패"
+    if hint:
+        detail = f"{detail} (감지된 호스트: {hint})"
+    return {
+        "detail": detail,
+        "suggested_env": f"MONGO_DB_HOST={hint}" if hint else None,
+    }
+
+
 def get_db_connection():
     """
     MongoDB 클라이언트 연결을 생성하고, 전역 변수에 저장하여 재사용합니다.
     """
-    global _db_connection, _mongo_client, _last_connect_failure_at
+    global \
+        _db_connection, \
+        _mongo_client, \
+        _last_connect_failure_at, \
+        _last_connect_error_detail, \
+        _detected_mongo_host_hint
 
     # 이미 연결이 설정되어 있으면, 락 없이 기존 연결을 바로 반환합니다.
     if _db_connection is not None:
@@ -104,10 +174,15 @@ def get_db_connection():
             client.admin.command("ping")
             _db_connection = client[db_name]
             _last_connect_failure_at = 0.0
+            _last_connect_error_detail = None
+            _detected_mongo_host_hint = None
             logger.debug("MongoDB에 성공적으로 연결되었습니다.")
             return _db_connection
         except Exception as exc:
             _last_connect_failure_at = time.monotonic()
+            _last_connect_error_detail = str(exc)
+            configured_host = _get_required_env("MONGO_DB_HOST")
+            _detect_lan_mongo_host(configured_host)
             logger.error("오류: MongoDB 연결에 실패했습니다: %s", exc)
             _reset_connection_unlocked()
             return None

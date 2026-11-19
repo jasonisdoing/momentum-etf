@@ -159,13 +159,21 @@ def report_error() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/internal/health/diagnostic")
+def health_diagnostic() -> dict[str, str | None]:
+    from utils.db_manager import get_db_connection_diagnostic
+
+    return get_db_connection_diagnostic()
+
+
 @app.get("/internal/health")
 def health() -> dict[str, str]:
-    from utils.db_manager import get_db_connection
+    from utils.db_manager import get_db_connection, get_db_connection_diagnostic
 
     db = get_db_connection()
     if db is None:
-        return JSONResponse(status_code=503, content={"status": "error", "detail": "DB 연결 실패"})
+        diag = get_db_connection_diagnostic()
+        return JSONResponse(status_code=503, content={"status": "error", **diag})
 
     if time.time() - _LAST_DB_ERROR_TIME < 60:
         return JSONResponse(

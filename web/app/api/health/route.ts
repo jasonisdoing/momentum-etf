@@ -10,7 +10,14 @@ export async function GET() {
     return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Health check failed";
+    const diag = await fetchFastApiJson<{ detail?: string; suggested_env?: string | null }>(
+      "/internal/health/diagnostic",
+      { cache: "no-store" },
+    ).catch(() => null);
     // 에러 발생하더라도 503을 줘서 클라이언트가 catch하게
-    return NextResponse.json({ error: message }, { status: 503 });
+    return NextResponse.json(
+      { error: diag?.detail ?? message, suggested_env: diag?.suggested_env ?? null },
+      { status: 503 },
+    );
   }
 }
