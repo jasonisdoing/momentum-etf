@@ -439,13 +439,14 @@ function DailyTradeBadges({ badges }: { badges: TradeBadge[] }) {
 }
 
 /** 회차 표 범위의 손익 요약 — 평가 금액·실현손익·평가손익·합계. 실현은 짝 매수 체결가 기준이다. */
-function HistorySummary({ summary }: { summary: StrategyView["history_summary"] }) {
+function HistorySummary({ summary, krwRate }: { summary: StrategyView["history_summary"]; krwRate: number | null }) {
   const currency = useTradeCurrency();
-  const signed = (label: string, value: number, title?: string) => (
+  const signed = (label: string, value: number, displayCurrency: string, title?: string) => (
     <span title={title}>
-      {label} <b style={{ color: signColor(value) }}>{formatSignedAmount(value, currency)}</b>
+      {label} <b style={{ color: signColor(value) }}>{formatSignedAmount(value, displayCurrency)}</b>
     </span>
   );
+  const showKrw = currency !== "KRW" && krwRate != null;
   return (
     <span style={{ display: "inline-flex", gap: 10, flexWrap: "wrap", alignItems: "baseline" }}>
       <span>
@@ -454,10 +455,19 @@ function HistorySummary({ summary }: { summary: StrategyView["history_summary"] 
       {signed(
         "실현손익",
         summary.realized,
+        currency,
         "최근 30일 안에서 사고판 몫 — 매도 − 짝 매수 체결가(수수료·세금 제외)",
       )}
-      {signed("평가손익", summary.unrealized)}
-      {signed("합계 손익", summary.total)}
+      {signed("평가손익", summary.unrealized, currency)}
+      {signed("합계 손익", summary.total, currency)}
+      {showKrw ? (
+        <>
+          <span style={{ color: "var(--text-muted)" }}>|</span>
+          {signed("실현손익", summary.realized * krwRate, "KRW")}
+          {signed("평가손익", summary.unrealized * krwRate, "KRW")}
+          {signed("합계 손익", summary.total * krwRate, "KRW")}
+        </>
+      ) : null}
     </span>
   );
 }
@@ -1299,6 +1309,7 @@ function AccountSettingsCard({
               key={details.strategy_id}
               view={details}
               poolLabel={poolLabel(details.pool)}
+              krwRate={view.krw_rate}
               onWithdrawSignal={onWithdrawSignal}
               onSignalSent={onSignalSent}
             />
@@ -1458,12 +1469,14 @@ function ManualSignalButton({ view, row, onSent }: { view: StrategyView; row: Ro
 function StrategySection({
   view,
   poolLabel,
+  krwRate,
   onWithdrawSignal,
   onSignalSent,
 }: {
   view: StrategyView | FailedStrategy;
   /** 전략의 가격 출처 표기. */
   poolLabel: string;
+  krwRate: number | null;
   onWithdrawSignal: (signal: SlackSignal, label: string) => void;
   onSignalSent: () => Promise<void>;
 }) {
@@ -1555,7 +1568,7 @@ function StrategySection({
         ) : nextRow?.close_entry ? (
           <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>📉 {status.next_round}호 {status.first_entry_time} 매수!</span>
         ) : null}
-        <HistorySummary summary={view.history_summary} />
+        <HistorySummary summary={view.history_summary} krwRate={krwRate} />
       </div>
 
       {view.arbitrary_lots.map((lot) => (
