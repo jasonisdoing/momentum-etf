@@ -17,6 +17,7 @@ ADR 값만 남기면 창에서 빠지는 20일 전 카운트가 없어 매번 20
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import pandas as pd
@@ -115,8 +116,14 @@ def _index_trading_days(spec: dict[str, Any], count: int = _HISTORY_DAYS) -> lis
             raise RuntimeError(f"{symbol} 지수 일봉을 조회하지 못해 거래일을 정할 수 없습니다.")
         return [str(index)[:10] for index in ohlc.index]
 
-    with yfinance_lock():
-        frame = yf.download(symbol, period="2y", interval="1d", progress=False, auto_adjust=True)
+    frame = None
+    for attempt in range(2):
+        with yfinance_lock():
+            frame = yf.download(symbol, period="2y", interval="1d", progress=False, auto_adjust=True, threads=False)
+        if frame is not None and not frame.empty:
+            break
+        if attempt == 0:
+            time.sleep(1.5)
     if frame is None or frame.empty:
         raise RuntimeError(f"{symbol} 지수 일봉을 조회하지 못해 거래일을 정할 수 없습니다.")
     days = [str(pd.Timestamp(index).date()) for index in frame.index]
@@ -183,7 +190,7 @@ def _download_us_closes(tickers: list[str], period: str) -> pd.DataFrame:
                     group_by="column",
                     progress=False,
                     auto_adjust=True,
-                    threads=4,
+                    threads=False,
                 )
         except Exception:
             logger.exception("[market_breadth] yfinance 묶음 조회 실패 (%s…)", batch[0])
