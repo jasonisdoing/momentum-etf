@@ -8,17 +8,15 @@
     "SFMono-Regular", "SF Mono", "JetBrains Mono", "Fira Code", "Menlo", "Monaco", "Consolas",
     "Liberation Mono", monospace;
 
-  /* 글자 크기 6단계. 새 font-size 는 반드시 이 토큰만 쓴다 — 원시 px/rem 금지.
+  /* 글자 크기 5단계. 새 font-size 는 반드시 이 토큰만 쓴다 — 원시 px/rem 및 14px 미만 금지.
      루트(html)는 브라우저 기본 16px 그대로 둔다(건드리면 Tabler 내부까지 흔들린다).
 
      기준 16px 는 브라우저 기본값이자 접근성 권장치다. 단계는 Tailwind 와 같은
-     12/14/16/18/20/24 를 쓴다 — 널리 쓰여 눈에 익고 rem 값도 딱 떨어진다.
-     크기를 바꿀 일이 생기면 --fs-base 만 고치지 말고 여섯 줄을 같이 조정한다.
+     14/16/18/20/24 를 쓴다 — 널리 쓰여 눈에 익고 rem 값도 딱 떨어진다.
+     크기를 바꿀 일이 생기면 --fs-base 만 고치지 말고 다섯 줄을 같이 조정한다.
      (단계 간격이 무너지면 토큰을 나눠 둔 의미가 없어진다) */
-  --fs-xs: 0.75rem;
-  /* 12px — 본문 아님. 접기 화살표 같은 글리프, 첨자(sub/sup) */
   --fs-sm: 0.875rem;
-  /* 14px — 보조 라벨, 캡션, 표(그리드) 전체 */
+  /* 14px — 최소 크기. 보조 라벨, 캡션, 표(그리드) 전체, 뱃지, 첨자(sub/sup) */
   --fs-base: 1rem;
   /* 16px — 본문, 입력, 버튼, 카드 (기준) */
   --fs-lg: 1.125rem;
@@ -136,7 +134,7 @@ h6 {
 /* 상대값(em)으로 지정돼 부모에 따라 표준 밖 크기가 나오는 태그들. */
 sub,
 sup {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
 }
 
 code,

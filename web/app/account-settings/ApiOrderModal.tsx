@@ -422,7 +422,7 @@ export function ApiOrderModal({
                   <td>
                     <StatusChip status={row.status} />
                     {row.message ? (
-                      <div style={{ ...mutedStyle, fontSize: "var(--fs-xs, 0.75rem)", whiteSpace: "normal" }}>{row.message}</div>
+                      <div style={{ ...mutedStyle, fontSize: "var(--fs-sm)", whiteSpace: "normal" }}>{row.message}</div>
                     ) : null}
                   </td>
                   <td>

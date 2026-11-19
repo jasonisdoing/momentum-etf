@@ -1041,13 +1041,13 @@ function AccountSettingsCard({
       colId: "roundStatus",
       headerName: "상태",
       headerTooltip: "아래 회차 표의 상태 — 상태가 있는 회차만 회차 번호와 함께 보인다",
-      // `2호 도달 매수슬랙 매수주문`(--fs-xs 작은 뱃지)이 들어가는 폭 — 칸 좌우 여백을 6px 로 줄였다.
+      // `2호 도달 매수슬랙 매수주문`(--fs-sm 뱃지)이 들어가는 폭 — 칸 좌우 여백을 6px 로 줄였다.
       // 넘치면 옆 칸을 덮지 않고 잘라낸다.
-      width: 165,
+      width: 185,
       sortable: false,
       cellStyle: { overflow: "hidden", paddingLeft: 6, paddingRight: 6 },
       cellRenderer: ({ data }: { data?: TradeListRow }) => (
-        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap", fontSize: "var(--fs-xs)" }}>
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap", fontSize: "var(--fs-sm)" }}>
           {(data?.statusRounds ?? []).map((row) => (
             <RoundStatus key={row.round} row={row} compact onWithdrawSignal={onWithdrawSignal} />
           ))}
@@ -1241,7 +1241,7 @@ function AccountSettingsCard({
                   testing={slackTesting}
                   onTest={() => void sendSlackTest()}
                 />
-                <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-xs)", whiteSpace: "nowrap" }}>
+                <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", whiteSpace: "nowrap" }}>
                   합성 간격: 변동성·권장 간격 중 작은 값
                 </span>
               </div>
@@ -1715,14 +1715,14 @@ function StrategySection({
                           <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
                             <b>{formatPrice(row.fill_price, currency)}</b>
                             {row.bought_on != null && row.source != null ? (
-                              <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-xs, 11px)" }}>
+                              <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
                                 {row.bought_on.slice(5)} · {BOUGHT_SOURCE_WORDS[row.source]}
                               </span>
                             ) : null}
                           </span>
                           {/* 팔 수 있는 회차(가장 깊은 보유)만 실제 매도 지정가 — 체결가 +간격%. */}
                           {row.round === status.held_count && row.sell_limit != null ? (
-                            <div style={{ color: SELL_BADGE_COLOR, fontSize: "var(--fs-xs, 11px)", fontWeight: 700 }}>
+                            <div style={{ color: SELL_BADGE_COLOR, fontSize: "var(--fs-sm)", fontWeight: 700 }}>
                               매도 {formatPrice(row.sell_limit, currency)}
                               {row.rebuy_after_sell ? " 후 재매수" : ""}
                             </div>

@@ -25,7 +25,7 @@ export function LastSavedCell({ value, method }: { value?: string | null; method
             marginRight: 6,
             padding: "0 5px",
             borderRadius: 4,
-            fontSize: "var(--fs-xs)",
+            fontSize: "var(--fs-sm)",
             fontWeight: 700,
             background: "rgba(148,163,184,0.18)",
             color: "var(--text-muted)",

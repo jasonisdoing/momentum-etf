@@ -566,7 +566,7 @@ export function AppShell({ children }: AppShellProps) {
                   <span>⚠️ 몽고디비 이슈</span>
                   {dbSuggestedEnv ? (
                     <>
-                      <code style={{ fontSize: "var(--fs-xs)", color: "#7f1d1d", background: "#fff5f5", padding: "1px 5px", borderRadius: 3 }}>
+                      <code style={{ fontSize: "var(--fs-sm)", color: "#7f1d1d", background: "#fff5f5", padding: "1px 5px", borderRadius: 3 }}>
                         {dbSuggestedEnv}
                       </code>
                       <button
@@ -583,7 +583,7 @@ export function AppShell({ children }: AppShellProps) {
                           color: "#b91c1c",
                           borderRadius: 4,
                           padding: "1px 6px",
-                          fontSize: "var(--fs-xs)",
+                          fontSize: "var(--fs-sm)",
                           cursor: "pointer",
                           fontWeight: 600,
                         }}

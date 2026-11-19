@@ -77,6 +77,8 @@ const CSS_RAW = /font-size:\s*(-?[0-9.]+(?:px|rem|em|pt|%))/g;
 const JSX_STRING_RAW = /fontSize:\s*(["']-?[0-9.]+(?:px|rem|em|pt)?["'])/g;
 /** JSX `fontSize: 14` — 숫자. NUMERIC_ALLOWED 파일에서만 허용한다. */
 const JSX_NUMERIC_RAW = /fontSize:\s*(-?[0-9.]+)\s*[,}\n]/g;
+/** 14px 미만(--fs-xs)은 더 이상 사용하지 않는다. */
+const DISALLOWED_XS = /(--fs-xs)\b/g;
 
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir)) {
@@ -93,7 +95,9 @@ for (const dir of SCAN_DIRS) {
   for (const full of walk(join(WEB_ROOT, dir))) {
     const rel = relative(WEB_ROOT, full);
     const numericOk = NUMERIC_ALLOWED.some((a) => a.file === rel);
-    const patterns = numericOk ? [CSS_RAW, JSX_STRING_RAW] : [CSS_RAW, JSX_STRING_RAW, JSX_NUMERIC_RAW];
+    const patterns = numericOk
+      ? [CSS_RAW, JSX_STRING_RAW, DISALLOWED_XS]
+      : [CSS_RAW, JSX_STRING_RAW, JSX_NUMERIC_RAW, DISALLOWED_XS];
     const lines = readFileSync(full, "utf8").split("\n");
     lines.forEach((line, i) => {
       for (const pattern of patterns) {
