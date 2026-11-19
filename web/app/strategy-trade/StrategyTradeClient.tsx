@@ -973,10 +973,13 @@ function AccountSettingsCard({
     }),
     // 종목 메모 — 순위·전략·자산 관리 화면과 같은 값(종목에 붙는다). 그리드가 readOnlyEdit 라
     // 저장은 onCellEditRequest 가 한다(셀을 벗어나면 저장).
-    stockMemoColumn<TradeListRow>({
-      field: "memo",
-      editable: (row) => Boolean(row && !row.is_label),
-    }),
+    {
+      ...stockMemoColumn<TradeListRow>({
+        field: "memo",
+        editable: (row) => Boolean(row && !row.is_label),
+      }),
+      pinned: "left",
+    },
     ...tradeSettingColumns.flatMap((column): ColDef<TradeListRow>[] => {
       const pctFormatter =
         column.field === "pct"
@@ -993,6 +996,7 @@ function AccountSettingsCard({
         return [{
           ...column,
           ...pctFormatter,
+          pinned: "left",
           type: "rightAligned",
           editable: false,
           cellStyle: { fontWeight: 700 },
@@ -1008,6 +1012,7 @@ function AccountSettingsCard({
         {
           ...column,
           ...pctFormatter,
+          pinned: "left",
           type: "rightAligned",
           ...(column.field === "pct" ? { cellStyle: { fontWeight: 700 } } : {}),
           editable: ({ node, data }: { node: { rowPinned?: unknown }; data?: TradeListRow }) =>
