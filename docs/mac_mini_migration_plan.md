@@ -15,16 +15,17 @@
 ## 단계별 진행 체크리스트
 
 ### 1단계: 사전 준비 (맥북 프로 + 맥미니)
-- [ ] 맥북 프로에서 현재 작업 중인 변경사항을 `upgrade` 브랜치에 커밋·푸시
-- [ ] 맥미니 시스템 설정: 전원 어댑터 연결 시 **자동 잠자기 끄기** + **정전 후 자동 시동** 활성화
-- [ ] 맥미니 기본 도구 확인/설치: `git`, `python 3.12`, `node`, `docker`(Docker 방식 사용 시) 또는 `.venv`
+- [x] 맥북 프로에서 현재 작업 중인 변경사항을 `upgrade` 브랜치에 커밋·푸시
+- [x] 맥미니 시스템 설정: 전원 어댑터 연결 시 **자동 잠자기 끄기** + **정전 후 자동 시동** 활성화
+- [x] 맥미니 기본 도구 확인/설치: `git`, `python 3.12`, `node`, `docker`(Docker 방식 사용 시) 또는 `.venv`
 
 ### 2단계: MongoDB 데이터 이전
-- [ ] 맥미니에 MongoDB 실행 (포트 `27017`)
-- [ ] 오라클 VM(또는 기존 `27017` 터널)에서 전체 백업: `mongodump`
-- [ ] 맥미니 MongoDB로 복원: `mongorestore`
-- [ ] 컬렉션 건수·인덱스·`.env` 접속 정보(`MONGO_DB_*`) 검증
-- [ ] 맥북 프로 `.env`의 `MONGO_DB_HOST`를 맥미니 LAN IP로 변경해 접속 테스트
+- [x] 맥미니에 MongoDB 실행 (포트 `27017`)
+- [x] 오라클 VM에서 쓰기/배치 컨테이너(`scheduler`, `fastapi_app`, `node_app`) 중지 (`mongodb`만 유지해 정합성 보장)
+- [x] 오라클 VM(또는 기존 `27017` 터널)에서 전체 백업: `mongodump`
+- [x] 맥미니 MongoDB로 복원: `mongorestore`
+- [x] 컬렉션 건수·인덱스·`.env` 접속 정보(`MONGO_DB_*`) 검증
+- [ ] 맥북 프로 `.env`의 `MONGO_DB_HOST`를 맥미니 LAN IP(`192.168.68.55`)로 변경해 접속 테스트
 
 ### 3단계: 앱 및 24시간 배치 실행
 - [ ] 맥미니에 `momentum-etf` 저장소 클론 (`upgrade` 브랜치) 및 `.env` 배치 (`APP_BASE_URL=https://invest.jason.ai.kr`)
