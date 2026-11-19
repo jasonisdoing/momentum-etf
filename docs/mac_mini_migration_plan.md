@@ -29,14 +29,14 @@
 
 ### 3단계: 앱 및 24시간 배치 실행
 - [x] 맥미니에 `momentum-etf` 저장소 클론 (`upgrade` 브랜치) 및 `.env` 배치 (`APP_BASE_URL=https://invest.jason.ai.kr`)
-- [x] 실행 방식 확정 및 `launchd` / Docker Compose 상시 실행 등록 (웹·FastAPI·배치 Cron/Worker)
-- [ ] 맥미니 로컬(`http://localhost:3000`)에서 대시보드·사고팔기 화면 정상 동작 확인
+- [x] 실행 방식 확정 및 `launchd` 상시 실행 등록 (FastAPI `:8000` · Next.js `:3000` · 배치 `server_scheduler.py`)
+- [x] 맥미니 로컬 서비스·배치 동작 확인 (`http://127.0.0.1:8000/docs` · `http://127.0.0.1:3000/login` `HTTP 200`, 스케줄러 큐 워커/크론 기동) — *Google OAuth 로그인 후 대시보드·사고팔기 화면은 4단계 터널 연결 후 확인*
 
 ### 4단계: Cloudflare Tunnel (`cloudflared`) 연결
-- [ ] 맥미니에 `cloudflared` 설치 및 Cloudflare 로그인·터널 생성
-- [ ] 터널 라우팅 설정: `https://invest.jason.ai.kr` → 맥미니 `http://127.0.0.1:3000`
-- [ ] Cloudflare DNS에서 `invest` 레코드를 기존 오라클 VM A 레코드에서 **Cloudflare Tunnel CNAME**으로 전환
-- [ ] `cloudflared`를 `launchd` 서비스로 등록(재부팅 시 자동 시작)
+- [x] 맥미니에 `cloudflared` 설치 및 Cloudflare 로그인·터널 생성
+- [x] 터널 라우팅 설정: `https://invest.jason.ai.kr` → 맥미니 `http://127.0.0.1:3000`
+- [x] Cloudflare DNS에서 `invest` 레코드를 기존 오라클 VM A 레코드에서 **Cloudflare Tunnel CNAME**으로 전환
+- [x] `cloudflared`를 `launchd` 서비스로 등록(재부팅 시 자동 시작)
 - [ ] 외부 네트워크(모바일 등)에서 `https://invest.jason.ai.kr` 접속 · 구글 로그인 · 슬랙 버튼(`/api/slack/interactions`) 동작 확인
 
 ### 5단계: GitHub Self-Hosted Runner 자동 배포
