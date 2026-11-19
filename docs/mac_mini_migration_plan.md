@@ -28,8 +28,8 @@
 - [x] 맥북 프로 `.env`의 `MONGO_DB_HOST`를 맥미니 LAN IP(`192.168.68.55`)로 변경해 접속 테스트
 
 ### 3단계: 앱 및 24시간 배치 실행
-- [ ] 맥미니에 `momentum-etf` 저장소 클론 (`upgrade` 브랜치) 및 `.env` 배치 (`APP_BASE_URL=https://invest.jason.ai.kr`)
-- [ ] 실행 방식 확정 및 `launchd` / Docker Compose 상시 실행 등록 (웹·FastAPI·배치 Cron/Worker)
+- [x] 맥미니에 `momentum-etf` 저장소 클론 (`upgrade` 브랜치) 및 `.env` 배치 (`APP_BASE_URL=https://invest.jason.ai.kr`)
+- [x] 실행 방식 확정 및 `launchd` / Docker Compose 상시 실행 등록 (웹·FastAPI·배치 Cron/Worker)
 - [ ] 맥미니 로컬(`http://localhost:3000`)에서 대시보드·사고팔기 화면 정상 동작 확인
 
 ### 4단계: Cloudflare Tunnel (`cloudflared`) 연결
