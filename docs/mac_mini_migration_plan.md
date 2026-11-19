@@ -41,8 +41,8 @@
 ### 5단계: 운영 안정성 점검 (외부 접속·배치·중복·연동 확인)
 - [x] 슬랙 버튼(`/api/slack/interactions`) 동작 확인 *(외부 웹 접속·구글 로그인은 추후 확인)*
 - [x] 오라클 VM 잔여 배치/컨테이너(`scheduler` 등) 완전 중지 확인 — 중복 슬랙 발송 차단
-- [ ] 맥미니 `launchd` 서비스(FastAPI·Next·`server_scheduler.py`·`cloudflared`) 로그 및 에러 유무 점검
-- [ ] 한국장·미국장 주요 배치(`cache_refresh_*`, `strategy_trade_notify`, `strategy_mix_notify`, `broker_balance_sync`, `slack_mock_order_notify` 등) 정상 실행·중복 없음 확인
+- [x] 맥미니 `launchd` 서비스(FastAPI·Next·`server_scheduler.py`·`cloudflared`) 로그 및 에러 유무 점검
+- [x] 한국장·미국장 주요 배치(`cache_refresh_*`, `strategy_trade_notify`, `strategy_mix_notify`, `broker_balance_sync`, `slack_mock_order_notify` 등) 정상 실행·중복 없음 확인
 - [x] 맥북 프로(`APP_TYPE=Local`)와 맥미니 동시 사용 시 락·큐 충돌 없음 확인 (`LOCAL_QUEUE_WORKER_ENABLED=False` 기본값 적용)
 
 ### 6단계: GitHub Self-Hosted Runner 자동 배포
