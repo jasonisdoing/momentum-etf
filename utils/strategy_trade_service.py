@@ -828,9 +828,7 @@ def _build_strategy_view(
             fill = regular_lots[round_no - 1]
             sell_limit = ladder.sell_limit(fill.price, trigger_pct, kind=kind, country=country)
             next_buy_after_sell = (
-                ladder.projected_buy_limit(
-                    regular_lots[round_no - 2].price, 1, trigger_pct, kind=kind, country=country
-                )
+                ladder.projected_buy_limit(regular_lots[round_no - 2].price, 1, trigger_pct, kind=kind, country=country)
                 if round_no >= 2
                 else None
             )
@@ -1173,10 +1171,13 @@ def _build_views(
             view = _failed_view(sid, entry, "권장 간격을 계산할 일봉이 없습니다(종가 2개 미만).", country)
         else:
             if sid in gaps:
-                # 「권장 간격 사용」 계좌 — 저장된 간격 자리에 오늘의 권장 간격(전체 또는 50%)을 넣는다(화면·신호·주문이 모두 이 값).
+                # 「권장 간격 사용」 계좌 — 권장 간격(full) 또는 합성 간격(half: 변동성·권장 간격 중 작은 값)을 넣는다(화면·신호·주문이 모두 이 값).
                 gap_pct = float(gaps[sid]["recommended_gap_pct"])
+                vol_pct = gaps[sid].get("volatility_pct")
                 mode = accounts.get(account_id, {}).get("recommended_gap_mode", "off")
-                effective_gap = round(gap_pct / 2.0, 2) if mode == "half" else gap_pct
+                effective_gap = (
+                    round(min(gap_pct, float(vol_pct)), 2) if mode == "half" and vol_pct is not None else gap_pct
+                )
                 entry = {**entry, "trigger_pct": effective_gap}
             state = states[account_id]
             try:
@@ -1321,7 +1322,9 @@ def recommended_gaps(
                 "drawdown_pct": round(abs(mdd_pct), 2) if mdd_pct is not None else None,
                 "mdd_pct": mdd_pct,
                 "high_drawdown_pct": round(high_drawdown_pct, 2) if high_drawdown_pct is not None else None,
-                "volatility_pct": latest_volatility_pct(confirmed) if confirmed is not None and not confirmed.empty else None,
+                "volatility_pct": latest_volatility_pct(confirmed)
+                if confirmed is not None and not confirmed.empty
+                else None,
                 "recommended_gap_pct": (
                     ladder.recommended_gap_pct(drawdown, RECOMMENDED_GAP_ROUNDS, multiple)
                     if drawdown is not None

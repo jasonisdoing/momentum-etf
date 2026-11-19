@@ -201,7 +201,7 @@ type RecommendedGapMode = "off" | "full" | "half";
 const RECOMMENDED_GAP_MODE_LABELS: Record<RecommendedGapMode, string> = {
   off: "수동간격",
   full: "권장 간격",
-  half: "권장 50%",
+  half: "합성 간격",
 };
 
 type View = {
@@ -686,7 +686,7 @@ function RecommendedGapModeToggle({
       onClick={() => !disabled && onChange(nextMode)}
       disabled={disabled}
       aria-label={`간격 모드: ${RECOMMENDED_GAP_MODE_LABELS[mode]}`}
-      title="클릭할 때마다 수동간격 → 권장 간격 → 권장 50% 순으로 전환됩니다. 저장 버튼을 눌러야 반영됩니다."
+      title="클릭할 때마다 수동간격 → 권장 간격 → 합성 간격 순으로 전환됩니다. 저장 버튼을 눌러야 반영됩니다."
     >
       <span className="appLabeledFieldLabel">{RECOMMENDED_GAP_MODE_LABELS[mode]}</span>
       <span style={{ display: "inline-flex", alignItems: "center", minHeight: 32 }}>
@@ -991,7 +991,7 @@ function AccountSettingsCard({
             },
           }
           : {};
-      // 권장 간격(전체·50%)을 쓰는 동안은 간격(%) 칸에 선택한 간격을 채우고 편집을 막는다(녹색 배경 제거).
+      // 권장 간격(전체·합성)을 쓰는 동안은 간격(%) 칸에 선택한 간격을 채우고 편집을 막는다(녹색 배경 제거).
       if (column.field === "pct" && gapMode !== "off") {
         return [{
           ...column,
@@ -1004,7 +1004,11 @@ function AccountSettingsCard({
             if (node?.rowPinned || data?.is_group) return "";
             const raw = data?.recommended_gap_pct;
             if (raw == null) return "-";
-            return gapMode === "half" ? Number((raw / 2).toFixed(2)) : raw;
+            if (gapMode === "half") {
+              const vol = data?.volatility_pct;
+              return vol != null ? Number(Math.min(raw, vol).toFixed(2)) : raw;
+            }
+            return raw;
           },
         } as ColDef<TradeListRow>];
       }
@@ -1237,6 +1241,9 @@ function AccountSettingsCard({
                   testing={slackTesting}
                   onTest={() => void sendSlackTest()}
                 />
+                <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-xs)", whiteSpace: "nowrap" }}>
+                  합성 간격: 변동성·권장 간격 중 작은 값
+                </span>
               </div>
               <div className="appMainHeaderRight">
                 <UnsavedChangesBadge show={isDirty} />
