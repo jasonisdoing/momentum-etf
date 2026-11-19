@@ -291,6 +291,36 @@ function RemainingCashField({ summary }: { summary: AccountSummary | null }) {
   );
 }
 
+/** 원화 기준 보유 주식 매수원금 · 평가금액 · 평가손익. */
+function HoldingsSummaryField({
+  totals,
+}: {
+  totals: { buy_amount_krw: number; valuation_krw: number; pnl_krw: number } | null;
+}) {
+  return (
+    <div className="appLabeledField" style={{ marginBottom: 0 }}>
+      <span className="appLabeledFieldLabel">보유 주식</span>
+      <span
+        style={{ display: "inline-flex", alignItems: "center", gap: 10, minHeight: 32, fontSize: "var(--fs-sm)" }}
+        title="현재 보유 중인 주식 전체의 원화 기준 매수원금 · 평가금액 · 평가손익"
+      >
+        <span>
+          매수원금 <b>{totals ? formatCurrencyPrice(totals.buy_amount_krw, "KRW") : "-"}</b>
+        </span>
+        <span>
+          평가금액 <b>{totals ? formatCurrencyPrice(totals.valuation_krw, "KRW") : "-"}</b>
+        </span>
+        <span>
+          평가손익{" "}
+          <b style={{ color: totals ? signColor(totals.pnl_krw) : "inherit" }}>
+            {totals ? formatSignedAmount(totals.pnl_krw, "KRW") : "-"}
+          </b>
+        </span>
+      </span>
+    </div>
+  );
+}
+
 const cardStyle: React.CSSProperties = {
   padding: 10,
   display: "flex",
@@ -600,6 +630,7 @@ function sumTradeHoldings(rows: HoldingsRow[]) {
     return sum;
   }, { valuation_krw: 0, buyAmount: 0, pnl_krw: 0 });
   return {
+    buy_amount_krw: totals.buyAmount,
     valuation_krw: totals.valuation_krw,
     pnl_krw: totals.pnl_krw,
     return_pct: totals.buyAmount > 0 ? (totals.pnl_krw / totals.buyAmount) * 100 : undefined,
@@ -832,7 +863,7 @@ function AccountSettingsCard({
   const selectedStrategy = selectedRow?.strategy_id ? strategiesById.get(selectedRow.strategy_id) : undefined;
   const details = selectedStrategy?.ticker === selectedRow?.ticker ? selectedStrategy : undefined;
   const quotesByTicker = useMemo(() => new Map(view.configs.map((config) => [config.ticker, config])), [view.configs]);
-  const { gridRows, pinnedRows } = useMemo(() => {
+  const { gridRows, pinnedRows, totalHoldings } = useMemo(() => {
     const stockRows = drafts.map((row): TradeListRow => {
       const strategy = row.strategy_id ? strategiesById.get(row.strategy_id) : undefined;
       const quote = quotesByTicker.get(row.ticker);
@@ -913,7 +944,8 @@ function AccountSettingsCard({
       },
     ];
     const weightedRows = stockRows.map((row, index) => ({ ...row, weight_pct: weights[index + 2] }));
-    if (sortActive || !groups.length) return { gridRows: weightedRows, pinnedRows };
+    const totalHoldingsResult = totalHoldings ?? null;
+    if (sortActive || !groups.length) return { gridRows: weightedRows, pinnedRows, totalHoldings: totalHoldingsResult };
 
     const tickers = new Set(weightedRows.map((row) => row.ticker));
     const byAnchor = new Map<string | null, TradeListRow[]>();
@@ -926,6 +958,7 @@ function AccountSettingsCard({
     return {
       gridRows: [...weightedRows.flatMap((row) => [...(byAnchor.get(row.ticker) ?? []), row]), ...(byAnchor.get(null) ?? [])],
       pinnedRows,
+      totalHoldings: totalHoldingsResult,
     };
   }, [accountAssets, drafts, groups, sortActive, strategiesById, quotesByTicker, currency, view.krw_rate, memos]);
 
@@ -1204,6 +1237,7 @@ function AccountSettingsCard({
                   onTest={() => void sendSlackTest()}
                 />
                 {view.order_limit ? <OrderLimitField limit={view.order_limit} /> : null}
+                {view.account_id ? <HoldingsSummaryField totals={totalHoldings} /> : null}
                 {view.account_id ? <RemainingCashField summary={accountAssets?.summary ?? null} /> : null}
               </div>
               <div className="appMainHeaderRight">

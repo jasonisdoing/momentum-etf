@@ -24,7 +24,7 @@ export function SlackAlarmField({
   return (
     <LabeledSwitchField label={label} checked={checked} onChange={onChange} disabled={disabled} title={title}>
       <button type="button" className="btn btn-sm btn-outline-secondary" disabled={testing} onClick={onTest}>
-        {testing ? "발송 중…" : "지금 발송(테스트)"}
+        {testing ? "발송 중…" : "테스트"}
       </button>
     </LabeledSwitchField>
   );
