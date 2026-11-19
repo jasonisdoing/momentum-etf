@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Pull, build, and restart launchd services
+        id: deploy
         shell: bash
         run: |
           set -euo pipefail
@@ -50,7 +51,22 @@ jobs:
             launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.fastapi" || true
             launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.web" || true
             launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.scheduler" || true
-            echo ">>> 직전 커밋(${PREV_SHA})으로 롤백 완료" >&2
+
+            local rb_status="failed"
+            for i in $(seq 1 20); do
+              if curl -fsS --max-time 2 http://127.0.0.1:8000/internal/health >/dev/null 2>&1; then
+                rb_status="succeeded"
+                break
+              fi
+              sleep 1
+            done
+            {
+              echo "rollback_status=${rb_status}"
+              echo "rollback_sha=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+              echo "rollback_version=$(git log -1 --format="%cd-%h" --date=format:"%Y-%m-%d" 2>/dev/null || echo unknown)"
+              echo "rollback_msg=$(git log -1 --pretty=%s 2>/dev/null || echo "")"
+            } >> "$GITHUB_OUTPUT"
+            echo ">>> 직전 커밋(${PREV_SHA})으로 롤백 완료 (status=${rb_status})" >&2
           }
 
           on_exit() {
@@ -167,6 +183,10 @@ jobs:
           DISK_USE: ${{ steps.meta.outputs.disk_use }}
           APP_SIZE: ${{ steps.meta.outputs.app_size }}
           DB_SIZE: ${{ steps.meta.outputs.db_size }}
+          ROLLBACK_STATUS: ${{ steps.deploy.outputs.rollback_status }}
+          ROLLBACK_SHA: ${{ steps.deploy.outputs.rollback_sha }}
+          ROLLBACK_VERSION: ${{ steps.deploy.outputs.rollback_version }}
+          ROLLBACK_MSG: ${{ steps.deploy.outputs.rollback_msg }}
         shell: bash
         run: |
           cd "$APP_DIR"
@@ -177,7 +197,6 @@ jobs:
               f"Repo: {os.environ['GITHUB_REPOSITORY']}",
               f"Commit: {os.environ['GITHUB_SHA']}",
               f"Message: {os.environ['COMMIT_MSG']}",
-              "Status: 직전 정상 커밋으로 자동 롤백·재시작 완료",
               f"DISK_FREE: {os.environ['DISK_FREE']}",
               f"DISK_USE: {os.environ['DISK_USE']}",
               f"APP_SIZE: {os.environ['APP_SIZE']} / DB_SIZE: {os.environ['DB_SIZE']}",
@@ -187,3 +206,24 @@ jobs:
           EOF
           )
           curl -fsS -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK"
+
+          if [ -n "${ROLLBACK_STATUS:-}" ]; then
+            ROLLBACK_PAYLOAD=$(.venv/bin/python - << 'EOF'
+          import json, os
+          status = os.environ["ROLLBACK_STATUS"]
+          header = (
+              "↩️ Mac Mini (momentum-etf) 직전 커밋으로 자동 복원 완료"
+              if status == "succeeded"
+              else "<!channel> ⚠️ Mac Mini (momentum-etf) 자동 복원 실패 (수동 확인 필요)"
+          )
+          lines = [
+              header,
+              f"APP_VERSION: {os.environ.get('ROLLBACK_VERSION', 'unknown')}",
+              f"Commit: {os.environ.get('ROLLBACK_SHA', 'unknown')}",
+              f"Message: {os.environ.get('ROLLBACK_MSG', '')}",
+          ]
+          print(json.dumps({"text": "\n".join(lines)}, ensure_ascii=False))
+          EOF
+          )
+            curl -fsS -X POST -H 'Content-type: application/json' --data "$ROLLBACK_PAYLOAD" "$SLACK_WEBHOOK"
+          fi
