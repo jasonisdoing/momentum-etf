@@ -16,7 +16,7 @@ env:
 jobs:
   deploy:
     runs-on: self-hosted
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Pull, build, and restart launchd services
         id: deploy
@@ -50,17 +50,7 @@ jobs:
             npm --prefix web run build || true
             launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.fastapi" || true
             launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.web" || true
-            # 실행 중인 서버 배치가 있으면 강제 종료로 실패하지 않도록 최대 120초까지 종료를 기다린다.
-          for i in $(seq 1 60); do
-            RUNNING_CNT=$(.venv/bin/python -c "from utils.db_manager import get_db_connection; db=get_db_connection(); print(db.batch_queue.count_documents({'status':'running','app_type':'Server'}) if db else 0)" 2>/dev/null || echo 0)
-            if [ "${RUNNING_CNT}" = "0" ]; then
-              break
-            fi
-            echo ">>> 실행 중인 서버 배치 ${RUNNING_CNT}건 종료 대기 (${i}/60)..."
-            sleep 2
-          done
-
-          launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.scheduler" || true
+            launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.scheduler" || true
 
             local rb_status="failed"
             for i in $(seq 1 20); do
@@ -134,17 +124,21 @@ jobs:
             sleep 1
           done
 
-          # 실행 중인 서버 배치가 있으면 강제 종료로 실패하지 않도록 최대 120초까지 종료를 기다린다.
-          for i in $(seq 1 60); do
-            RUNNING_CNT=$(.venv/bin/python -c "from utils.db_manager import get_db_connection; db=get_db_connection(); print(db.batch_queue.count_documents({'status':'running','app_type':'Server'}) if db else 0)" 2>/dev/null || echo 0)
-            if [ "${RUNNING_CNT}" = "0" ]; then
-              break
-            fi
-            echo ">>> 실행 중인 서버 배치 ${RUNNING_CNT}건 종료 대기 (${i}/60)..."
-            sleep 2
-          done
-
-          launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.scheduler"
+          # 프론트(web/)·문서·워크플로우만 바뀐 배포에서는 scheduler 재시작을 건너뛴다.
+          if [ "$PREV_SHA" = "$NEW_SHA" ] || git diff --name-only "$PREV_SHA" "$NEW_SHA" | grep -qvE '^(web/|docs/|\.github/|README\.md$)'; then
+            # 실행 중인 서버 배치가 있으면 최대 600초(10분)까지 자연 종료를 기다린다.
+            for i in $(seq 1 120); do
+              RUNNING_CNT=$(.venv/bin/python -c "from utils.db_manager import get_db_connection; db=get_db_connection(); print(db.batch_queue.count_documents({'status':'running','app_type':'Server'}) if db else 0)" 2>/dev/null || echo 0)
+              if [ "${RUNNING_CNT}" = "0" ]; then
+                break
+              fi
+              echo ">>> 실행 중인 서버 배치 ${RUNNING_CNT}건 종료 대기 (${i}/120)..."
+              sleep 5
+            done
+            launchctl kickstart -k "gui/$UID_NUM/com.momentum-etf.scheduler"
+          else
+            echo ">>> Python/배치 변경 없음 — scheduler 재시작 생략"
+          fi
           echo ">>> Mac Mini deployment completed."
 
       - name: Collect Mac Mini metrics
