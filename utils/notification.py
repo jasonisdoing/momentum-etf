@@ -238,13 +238,13 @@ def upload_slack_file(
     title: str,
     initial_comment: str | None = None,
     channel: str | None = None,
-) -> bool:
-    """텍스트 로그를 슬랙 채널에 파일로 업로드한다 (`files:write` 권한 필요)."""
+) -> str | None:
+    """텍스트 로그를 슬랙 채널에 파일로 업로드하고 permalink URL 을 반환한다 (`files:write` 권한 필요)."""
     target_channel = channel or get_slack_channel()
     token = os.environ.get("SLACK_BOT_TOKEN")
     if not target_channel or not token:
         logger.warning("슬랙 파일 업로드를 건너뜁니다 (채널 또는 봇 토큰 없음).")
-        return False
+        return None
 
     raw = (content if content.strip() else "(내용 없음)\n").encode("utf-8")
     headers = {"Authorization": f"Bearer {token}"}
@@ -260,7 +260,7 @@ def upload_slack_file(
         url_data = url_resp.json()
         if not url_data.get("ok"):
             logger.error("슬랙 업로드 URL 발급 실패: %s", url_data.get("error"))
-            return False
+            return None
 
         upload_resp = _SLACK_HTTP_SESSION.post(
             url_data["upload_url"],
@@ -286,12 +286,16 @@ def upload_slack_file(
         complete_data = complete_resp.json()
         if not complete_data.get("ok"):
             logger.error("슬랙 파일 업로드 완료 실패: %s", complete_data.get("error"))
-            return False
-        logger.info("Slack 파일 업로드 완료 (channel=%s, filename=%s)", target_channel, filename)
-        return True
+            return None
+        files = complete_data.get("files") or []
+        permalink = str(files[0].get("permalink") or "").strip() if files and isinstance(files[0], dict) else ""
+        logger.info(
+            "Slack 파일 업로드 완료 (channel=%s, filename=%s, permalink=%s)", target_channel, filename, permalink
+        )
+        return permalink or None
     except Exception:
         logger.error("Slack 파일 업로드 중 오류 발생", exc_info=True)
-        return False
+        return None
 
 
 def _format_shares_for_country(quantity: Any) -> str:

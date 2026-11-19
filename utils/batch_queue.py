@@ -302,18 +302,20 @@ MAX_ERROR_LOG_CHARS = 64_000
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def save_error_log(item_id: Any, log_text: str) -> None:
-    """실패·중단된 배치의 로그 본문을 `batch_queue` 문서에 저장한다(서버/로컬 공용 열람용)."""
-    if not item_id or not log_text:
+def save_error_log(item_id: Any, log_text: str, *, slack_url: str | None = None) -> None:
+    """실패·중단된 배치의 로그 본문과 슬랙 파일 URL 을 `batch_queue` 문서에 저장한다."""
+    if not item_id or (not log_text and not slack_url):
         return
     db = get_db_connection()
     if db is None:
         return
-    trimmed = log_text[-MAX_ERROR_LOG_CHARS:] if len(log_text) > MAX_ERROR_LOG_CHARS else log_text
-    db[BATCH_QUEUE_COLLECTION].update_one(
-        {"_id": item_id},
-        {"$set": {"error_log": trimmed}},
-    )
+    updates: dict[str, Any] = {}
+    if log_text:
+        updates["error_log"] = log_text[-MAX_ERROR_LOG_CHARS:] if len(log_text) > MAX_ERROR_LOG_CHARS else log_text
+    if slack_url:
+        updates["slack_url"] = slack_url
+    if updates:
+        db[BATCH_QUEUE_COLLECTION].update_one({"_id": item_id}, {"$set": updates})
 
 
 def is_deploy_locked() -> bool:
@@ -361,9 +363,8 @@ def _notify_stale_interrupted(doc: dict[str, Any], my_app_type: str | None) -> N
     same_machine = not my_app_type or app_label.lower() == my_app_type.lower()
     log_text = _read_unclosed_cron_log(job_name) if same_machine else None
     if log_text:
-        save_error_log(doc["_id"], log_text)
         stamp = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d_%H%M%S")
-        uploaded = upload_slack_file(
+        slack_url = upload_slack_file(
             log_text,
             filename=f"{job_name}_{stamp}_interrupted.txt",
             title=f"[{app_label}] {job_name} 중단 로그",
@@ -374,7 +375,8 @@ def _notify_stale_interrupted(doc: dict[str, Any], my_app_type: str | None) -> N
                 f"• 중단 전까지 기록된 로그를 첨부합니다."
             ),
         )
-        if uploaded:
+        save_error_log(doc["_id"], log_text, slack_url=slack_url)
+        if slack_url:
             return
 
     send_slack_message_v2(

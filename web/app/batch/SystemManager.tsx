@@ -26,6 +26,7 @@ type SystemLastRunInfo = {
   owner_app_type?: string | null;
   started_at?: string | null;
   ended_at?: string | null;
+  slack_url?: string | null;
   is_clickable?: boolean;
 };
 
@@ -96,6 +97,7 @@ type SystemScheduleGridRow = SystemScheduleRow & {
   lastRunClickable: boolean;          // 현재 인스턴스에서 다운로드 가능?
   lastRunStartedAt: string | null;    // ISO — 로그 다운로드 파라미터
   lastRunEndedAt: string | null;
+  lastRunSlackUrl: string | null;     // 슬랙 오류 로그 permalink
   waitDisplay: string;
   serverDisplay: string;
   localDisplay: string;
@@ -283,6 +285,9 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
     tooltipValueGetter: (params) => {
       const row = params.data as SystemScheduleGridRow | undefined;
       if (!row || !row.lastRunOwner) return "";
+      if (row.lastRunSlackUrl) {
+        return "클릭하면 슬랙에 올라간 오류 로그를 새 창에서 엽니다.";
+      }
       if (row.lastRunClickable) {
         return `클릭하면 [${row.lastRunOwner.toUpperCase()}] 의 실행 로그를 다운로드합니다.`;
       }
@@ -290,13 +295,18 @@ const scheduleColumns: ColDef<ScheduleGridRow>[] = [
     },
     cellStyle: (params): CellStyle => {
       const row = params.data as SystemScheduleGridRow | undefined;
-      return row && row.lastRunClickable && row.lastRunStartedAt
+      return row && row.lastRunClickable && (row.lastRunSlackUrl || row.lastRunStartedAt)
         ? { cursor: "pointer", textDecoration: "underline" }
         : { cursor: "default" };
     },
     onCellClicked: async (event) => {
       const row = event.data as SystemScheduleGridRow | undefined;
-      if (!row || !row.lastRunClickable || !row.lastRunStartedAt) return;
+      if (!row || !row.lastRunClickable) return;
+      if (row.lastRunSlackUrl) {
+        window.open(row.lastRunSlackUrl, "_blank", "noopener,noreferrer");
+        return;
+      }
+      if (!row.lastRunStartedAt) return;
       const params = new URLSearchParams({ key: row.key, started_at: row.lastRunStartedAt });
       if (row.lastRunEndedAt) params.set("ended_at", row.lastRunEndedAt);
       try {
@@ -552,6 +562,7 @@ export function SystemManager({
       lastRunClickable: Boolean(lastRunByJob[row.key]?.is_clickable),
       lastRunStartedAt: lastRunByJob[row.key]?.started_at ?? null,
       lastRunEndedAt: lastRunByJob[row.key]?.ended_at ?? null,
+      lastRunSlackUrl: lastRunByJob[row.key]?.slack_url ?? null,
       waitDisplay: String(estimatedByJob[row.key]?.wait_display ?? "-"),
       serverDisplay: String(estimatedByJob[row.key]?.server_display ?? "-"),
       localDisplay: String(estimatedByJob[row.key]?.local_display ?? "-"),

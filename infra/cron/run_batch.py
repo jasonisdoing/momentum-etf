@@ -98,33 +98,35 @@ def _persist_and_upload_failure(
     started_wall: datetime,
     suffix: str,
 ) -> None:
-    """실패 로그를 batch_queue DB에 저장하고 슬랙에 파일로 업로드한다."""
-    item_id_raw = os.environ.get("BATCH_QUEUE_ITEM_ID", "").strip()
-    if item_id_raw and full_log:
-        try:
-            from bson import ObjectId
-
-            from utils.batch_queue import save_error_log
-
-            save_error_log(ObjectId(item_id_raw), full_log)
-        except Exception:
-            pass
-
+    """실패 로그를 슬랙에 파일로 업로드하고 batch_queue DB에 로그와 슬랙 URL 을 저장한다."""
+    slack_url: str | None = None
     if full_log:
         try:
             from utils.notification import upload_slack_file
 
             stamp = started_wall.strftime("%Y%m%d_%H%M%S")
-            if upload_slack_file(
+            slack_url = upload_slack_file(
                 full_log,
                 filename=f"{job_name}_{stamp}_{suffix}.txt",
                 title=f"[{app_label}] {job_name} 오류 로그",
                 initial_comment=summary_text,
-            ):
-                return
+            )
+        except Exception:
+            slack_url = None
+
+    item_id_raw = os.environ.get("BATCH_QUEUE_ITEM_ID", "").strip()
+    if item_id_raw and (full_log or slack_url):
+        try:
+            from bson import ObjectId
+
+            from utils.batch_queue import save_error_log
+
+            save_error_log(ObjectId(item_id_raw), full_log, slack_url=slack_url)
         except Exception:
             pass
-    _notify(summary_text)
+
+    if not slack_url:
+        _notify(summary_text)
 
 
 def _run_and_stream(

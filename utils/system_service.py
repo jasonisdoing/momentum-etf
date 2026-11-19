@@ -903,8 +903,8 @@ def _read_last_job_run_from_log(job_key: str) -> tuple[str, datetime] | None:
 
 def _read_last_job_run_from_queue(
     job_key: str,
-) -> tuple[str, datetime, str | None, datetime | None] | None:
-    """batch_queue 에서 가장 최근 종료된(done/failed) 항목의 (status, started_at, app_type, ended_at) 반환.
+) -> tuple[str, datetime, str | None, datetime | None, str | None, bool] | None:
+    """batch_queue 에서 가장 최근 종료된(done/failed) 항목의 (status, started_at, app_type, ended_at, slack_url, has_error_log) 반환.
 
     wrapper 가 SIGKILL/배포로 외부 종료되면 logs/cron/{job}.log 에 END 라인이 남지
     않으므로 batch_queue 의 ended_at + status 가 더 정확한 최근 정보를 갖는다.
@@ -924,7 +924,15 @@ def _read_last_job_run_from_queue(
                 "ended_at": {"$ne": None},
             },
             sort=[("ended_at", -1)],
-            projection={"_id": 0, "status": 1, "started_at": 1, "ended_at": 1, "app_type": 1},
+            projection={
+                "_id": 0,
+                "status": 1,
+                "started_at": 1,
+                "ended_at": 1,
+                "app_type": 1,
+                "slack_url": 1,
+                "error_log": 1,
+            },
         )
         if not isinstance(doc, dict):
             return None
@@ -947,7 +955,9 @@ def _read_last_job_run_from_queue(
             )
         status = "success" if str(doc.get("status")) == "done" else "failure"
         app_type = str(doc.get("app_type") or "").strip() or None
-        return (status, started_at, app_type, ended_at)
+        slack_url = str(doc.get("slack_url") or "").strip() or None
+        has_error_log = bool(doc.get("error_log"))
+        return (status, started_at, app_type, ended_at, slack_url, has_error_log)
     except Exception as exc:
         _logger.warning("batch_queue 최근 종료 조회 실패 (job=%s): %s", job_key, exc)
         return None
@@ -976,6 +986,8 @@ def _read_last_job_run(job_key: str) -> dict[str, object | None]:
     chosen_started_at: datetime | None = None
     chosen_ended_at: datetime | None = None
     chosen_owner: str | None = None
+    chosen_slack_url: str | None = None
+    chosen_has_error_log = False
 
     if log_result and queue_result:
         if log_result[1] >= queue_result[1]:
@@ -990,8 +1002,13 @@ def _read_last_job_run(job_key: str) -> dict[str, object | None]:
     if chosen_source == "log" and log_result:
         chosen_status, chosen_started_at = log_result
         chosen_owner = my_app_type  # logs/cron 에 END 라인이 있다는 건 이 환경의 worker 가 처리했다는 뜻
+        if queue_result and abs((queue_result[1] - chosen_started_at).total_seconds()) <= 120:
+            chosen_slack_url = queue_result[4]
+            chosen_has_error_log = queue_result[5]
     elif chosen_source == "queue" and queue_result:
-        chosen_status, chosen_started_at, chosen_owner, chosen_ended_at = queue_result
+        chosen_status, chosen_started_at, chosen_owner, chosen_ended_at, chosen_slack_url, chosen_has_error_log = (
+            queue_result
+        )
         chosen_owner = chosen_owner or my_app_type
 
     if not chosen_status or not chosen_started_at:
@@ -1001,16 +1018,18 @@ def _read_last_job_run(job_key: str) -> dict[str, object | None]:
             "owner_app_type": None,
             "started_at": None,
             "ended_at": None,
+            "slack_url": None,
             "is_clickable": False,
         }
     icon = "✅" if chosen_status == "success" else "❌"
-    is_clickable = (chosen_owner or "").lower() == my_app_type.lower()
+    is_clickable = bool(chosen_slack_url) or chosen_has_error_log or (chosen_owner or "").lower() == my_app_type.lower()
     return {
         "status": chosen_status,
         "display": f"{icon} {_format_elapsed_since(chosen_started_at)}",
         "owner_app_type": chosen_owner,
         "started_at": chosen_started_at.isoformat(),
         "ended_at": chosen_ended_at.isoformat() if chosen_ended_at else None,
+        "slack_url": chosen_slack_url,
         "is_clickable": is_clickable,
     }
 
