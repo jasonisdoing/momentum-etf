@@ -3,17 +3,18 @@ import type { ReactNode } from "react";
 import { AppModal } from "./AppModal";
 import { StatusBadge } from "./StatusBadge";
 
-export function SlackSignalBadge({ label, compact, showWithdraw, onWithdraw }: {
+export function SlackSignalBadge({ label, compact, showWithdraw, title = "눌러서 이 슬랙 신호 회수", onWithdraw }: {
   label: string;
   compact: boolean;
   showWithdraw: boolean;
+  title?: string;
   onWithdraw?: () => void;
 }) {
   const badge = <StatusBadge color="var(--tblr-green, #2fb344)" compact={compact}>{label}</StatusBadge>;
   if (!onWithdraw) return <span>{badge}</span>;
 
   return (
-    <button type="button" title="눌러서 이 슬랙 신호 회수" onClick={onWithdraw}
+    <button type="button" title={title} onClick={onWithdraw}
       style={{ all: "unset", cursor: "pointer", whiteSpace: "nowrap" }}>
       {badge}
       {showWithdraw ? <span style={{ marginLeft: 4, textDecoration: "underline" }}>회수</span> : null}
