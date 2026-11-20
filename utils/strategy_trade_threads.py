@@ -134,10 +134,8 @@ def complete_signal_thread(signal_ts: str) -> None:
 
 
 def release_signal_reservation(signal_ts: str) -> None:
-    """주문 요청이 주문을 내지 못하고 끝났을 때 선점을 푼다 — 이 스레드에 주문이 하나도 없을 때만(회수가 버튼을 걷게)."""
-    from utils.strategy_trade_orders import _orders
-
-    if _orders().find_one({"slack.thread_ts": signal_ts}, {"_id": 1}) is None:
+    """주문 요청이 주문을 내지 못했거나 체결 없이 취소됐을 때 선점을 푼다 — 회수를 막는 주문이 없을 때만(회수가 버튼을 걷게)."""
+    if not _signal_thread_has_orders(signal_ts):
         _messages().update_one({"thread_ts": signal_ts, "ts": signal_ts}, {"$unset": {"signal_used": ""}})
 
 
@@ -157,7 +155,17 @@ def open_signal_threads(active_roots: set[str]) -> list[dict[str, Any]]:
 def _signal_thread_has_orders(signal_ts: str) -> bool:
     from utils.strategy_trade_orders import _orders
 
-    return _orders().find_one({"slack.thread_ts": signal_ts}, {"_id": 1}) is not None
+    # 체결 없이 취소된 주문은 아무 일도 일어나지 않은 것이라 회수를 막지 않는다.
+    return (
+        _orders().find_one(
+            {
+                "slack.thread_ts": signal_ts,
+                "$nor": [{"status": "canceled", "filled_quantity": 0}],
+            },
+            {"_id": 1},
+        )
+        is not None
+    )
 
 
 def _withdrawable_root(signal_ts: str) -> dict[str, Any]:

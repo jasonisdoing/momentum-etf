@@ -622,6 +622,7 @@ def _finish(target: dict[str, Any], order: dict[str, Any]) -> None:
     if order["status"] == "canceled" and order["filled_quantity"] == 0:
         # 다시 주문해도 서버가 회차 보유 상태·중복·안전 장치를 처음 주문과 똑같이 검사한다.
         _update_message(target, [*_open_blocks(request, "다시 주문하기"), _note(text)])
+        _release_reservation(target)
     else:
         _update_message(target, _note_blocks(request, text))
 
@@ -662,7 +663,7 @@ def _sync_thread(thread_ts: str) -> None:
 
 
 def _release_reservation(target: dict[str, Any]) -> None:
-    """주문이 나가지 못하고 버튼을 되살릴 때 — 이 스레드에 주문이 없으면 신호를 미사용으로 되돌려 장 마감 회수가 버튼을 걷게 한다."""
+    """주문이 나가지 못했거나 체결 없이 취소돼 버튼을 되살릴 때 — 회수를 막는 주문이 없으면 신호를 미사용으로 되돌려 장 마감 회수가 버튼을 걷게 한다."""
     from utils.strategy_trade_threads import release_signal_reservation
 
     release_signal_reservation(target["thread_ts"])
