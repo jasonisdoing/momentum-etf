@@ -250,6 +250,7 @@ class MixOrderTest(TestCase):
             "filled_quantity": 0,
             "average_fill_price": 0,
             "status": "pending",
+            "venue": "KRX",
         }
         with (
             patch.object(mix, "resolve_order_quote", return_value=("KRX", "매수 1호가", 100, None)),

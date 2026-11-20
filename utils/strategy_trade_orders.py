@@ -761,6 +761,8 @@ def serialize_order(record: dict[str, Any]) -> dict[str, Any]:
         # 매도 후 재매수 한 짝이면 그 짝의 id — 단독 주문은 None.
         "pair_id": record.get("pair_id"),
         "arbitrary_id": record.get("arbitrary_id"),
+        # 주문을 낸 거래소(국장 KRX·NXT, 미장 거래소 코드) — 슬랙 주문 메시지 제목에 붙는다.
+        "venue": record["venue"],
     }
 
 

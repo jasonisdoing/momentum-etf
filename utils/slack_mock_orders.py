@@ -180,11 +180,22 @@ def _section(request: dict[str, Any]) -> dict[str, Any]:
         "text": {
             "type": "mrkdwn",
             "text": (
-                f"*{_auto_tag(request)}[{_env_word(request['env'])}] {_action_word(request)} 주문*\n{_order_text(request)}\n"
+                f"*{_auto_tag(request)}[{_env_word(request['env'])}] {_action_word(request)} 주문{_venue_text(request)}*\n"
+                f"{_order_text(request)}\n"
                 f"{detail} ({request['ticker']})"
             ),
         },
     }
+
+
+def _venue_text(request: dict[str, Any]) -> str:
+    # 거래소는 주문을 낸 뒤에야 정해진다(주문 순간의 시간대로 고른다) — 낸 주문의 메시지에만 붙인다.
+    return f"({request['venue']})" if request.get("venue") else ""
+
+
+def _with_venue(request: dict[str, Any], venue: str) -> dict[str, Any]:
+    """낸 주문의 거래소를 실은 주문 내용 — 이후 정정·취소 버튼과 메시지 제목이 이 값을 쓴다."""
+    return {**request, "venue": venue}
 
 
 def _button(action_id: str, text: str, style: str, value: dict[str, Any]) -> dict[str, Any]:
@@ -207,6 +218,8 @@ def _note(text: str) -> dict[str, Any]:
 
 
 def _open_blocks(request: dict[str, Any], label: str = "주문하기") -> list[dict[str, Any]]:
+    # 새로 낼 주문은 누르는 순간의 거래소로 나가므로 앞 주문의 거래소를 지운다.
+    request = {key: value for key, value in request.items() if key != "venue"}
     style = "primary" if request["side"] == "buy" and not _is_swap(request) else "danger"
     return [_section(request), _button(OPEN_ACTION_ID, f"{_action_word(request)} {label}", style, {"request": request})]
 
@@ -784,7 +797,8 @@ def _place_swap(target: dict[str, Any], *, reraise: bool = False) -> dict[str, A
         text += f" · 매수 {buy['quantity']:,}주 × {format_money(buy['price'], buy['country'])}"
     else:
         text += f"\n⚠️ 매수 주문은 실패했습니다(매도만 걸림): {result['buy_error']}"
-    _run_post_order_updates(target, text, _pair_blocks(request, sell["pair_id"], None))
+    request = _with_venue(request, sell["venue"])
+    _run_post_order_updates({**target, "request": request}, text, _pair_blocks(request, sell["pair_id"], None))
     return sell
 
 
@@ -833,8 +847,9 @@ def _place(target: dict[str, Any], *, reraise: bool = False) -> dict[str, Any] |
         return None
     gap_pct = _signal_gap_pct(order)
     gap = f" · 신호 대비 {gap_pct:+.2f}%" if gap_pct is not None else ""
+    request = _with_venue(request, order["venue"])
     _run_post_order_updates(
-        target,
+        {**target, "request": request},
         f"✅ {side} 주문 접수: {order['strategy_label']} {order['quantity']:,}주 × {format_money(order['price'], order['country'])} (지정가){gap}",
         _cancel_blocks(request, order["id"]),
     )
@@ -940,6 +955,7 @@ def _request_of(record: dict[str, Any]) -> dict[str, Any]:
         "arbitrary_id": record.get("arbitrary_id"),
         # 자동 주문 표시가 생기기 전 주문 기록에는 키가 없다 — 그것들은 모두 수동 주문이다.
         "auto": record["slack"].get("auto") is True,
+        "venue": record["venue"],
         **({"mix_action_key": record["mix_action_key"]} if "mix_action_key" in record else {}),
     }
 
