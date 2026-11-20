@@ -13,14 +13,16 @@ from config import MARKET_SCHEDULES
 from utils.market_session import (
     _in_us_daymarket,
     is_instrument_trading_time,
+    is_kor_venue_open,
     kor_order_venue,
 )
 
 #: 국장 거래소별 마감 경고 구간 — 이 시각부터 그 거래소 마감까지 아직 체결되지 않은 슬랙 주문을 한 번 경고한다.
-#: KRX 는 정규장 마감 15:30, NXT 는 애프터마켓 마감 20:00(개별주의 정규장 밖 주문).
-KOR_CLOSE_WARNING_WINDOWS = {"KRX": (time(15, 20), time(15, 30)), "NXT": (time(19, 50), time(20, 0))}
-#: 국장 거래소별로 주문이 살아 있는 거래 시간표의 종목 종류 — KRX 는 정규장(ETF 시간표), NXT 는 개별주 시간표.
-KOR_VENUE_WINDOW_KIND = {"KRX": "etf", "NXT": "stock"}
+#: KRX 는 정규장 마감 15:30·애프터마켓 마감 20:00(개별주), NXT 는 애프터마켓 마감 20:00.
+KOR_CLOSE_WARNING_WINDOWS = {
+    "KRX": ((time(15, 20), time(15, 30)), (time(19, 50), time(20, 0))),
+    "NXT": ((time(19, 50), time(20, 0)),),
+}
 #: 미장 마감 경고 구간(ET) — 애프터마켓 마감 20:00 전, 데이장 마감 03:50 전 각 10분.
 US_CLOSE_WARNING_WINDOWS = ((time(19, 50), time(20, 0)), (time(3, 40), time(3, 50)))
 
@@ -85,29 +87,23 @@ def order_venue(country: str, kind: str, exchange: str | None, *, now: datetime)
 def is_order_open(country: str, venue: str, kind: str, *, now: datetime) -> bool:
     """그 주문이 낸 거래소가 지금도 거래 중인지 — 끝났으면 미체결 당일 주문은 만료다."""
     if country == "kor":
-        return is_instrument_trading_time("kor", KOR_VENUE_WINDOW_KIND[venue], now=now)
+        # NXT 에는 개별주만 있다 — ETF 주문은 늘 KRX 다.
+        return is_kor_venue_open(venue, kind, now=now)
     return is_instrument_trading_time(country, kind, now=now)
 
 
 def closing_windows(country: str, kind: str, venue: str, *, now: datetime) -> tuple[time, time] | None:
     """지금이 그 거래소의 마감 경고 구간이면 (시작, 종료) 현지 시각, 아니면 None."""
     local = now.astimezone(_zone(country))
-    if country == "kor":
-        start, end = KOR_CLOSE_WARNING_WINDOWS[venue]
-        windows = ((start, end),)
-        window_kind = KOR_VENUE_WINDOW_KIND[venue]
-    else:
-        windows = US_CLOSE_WARNING_WINDOWS
-        window_kind = kind
-    if not is_instrument_trading_time(country, window_kind, now=now):
+    windows = KOR_CLOSE_WARNING_WINDOWS[venue] if country == "kor" else US_CLOSE_WARNING_WINDOWS
+    if not is_order_open(country, venue, kind, now=now):
         return None
     return next(((start, end) for start, end in windows if start <= local.time() < end), None)
 
 
 def close_text(country: str, venue: str, *, now: datetime) -> str:
     """마감 경고 문구용 — `15:30 KRX` · `20:00 ET`."""
-    if country == "kor":
-        return f"{KOR_CLOSE_WARNING_WINDOWS[venue][1]:%H:%M} {venue}"
     local = now.astimezone(_zone(country)).time()
-    end = next(end for start, end in US_CLOSE_WARNING_WINDOWS if start <= local < end)
-    return f"{end:%H:%M} ET"
+    windows = KOR_CLOSE_WARNING_WINDOWS[venue] if country == "kor" else US_CLOSE_WARNING_WINDOWS
+    end = next(end for start, end in windows if start <= local < end)
+    return f"{end:%H:%M} {venue}" if country == "kor" else f"{end:%H:%M} ET"

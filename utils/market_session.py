@@ -15,7 +15,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from config import INSTRUMENT_TRADING_WINDOWS, MARKET_SCHEDULES
+from config import INSTRUMENT_TRADING_WINDOWS, KOR_KRX_ORDER_WINDOWS, KOR_VENUE_OPEN_WINDOWS, MARKET_SCHEDULES
 
 # 세션 코드 — 화면 문구는 프론트가 정한다(여기서는 상태만 준다).
 PREMARKET = "premarket"
@@ -139,21 +139,41 @@ def is_instrument_trading_time(country: str, instrument_kind: str, *, now: datet
     return bool(get_trading_days(day, day, market))
 
 
-#: 국장 주문 거래소 — 정규장은 KRX, 개별주의 정규장 밖(프리·애프터) 거래는 대체거래소(NXT)다. ETF 는 KRX 에만 있다.
+#: 국장 주문 거래소 — 정규장과 개별주의 KRX 애프터마켓(16:00~20:00)은 KRX, 개별주의 그 밖 거래 시간(프리·15:30~16:00)은
+#: 대체거래소(NXT)다(`config.KOR_KRX_ORDER_WINDOWS`). ETF 는 KRX 정규장에만 있다.
 VENUE_KRX = "KRX"
 VENUE_NXT = "NXT"
 
 
 def kor_order_venue(instrument_kind: str, *, now: datetime) -> str:
-    """지금 국장 종목에 주문을 낼 거래소 — 정규장이면 KRX, 개별주의 프리·애프터마켓이면 NXT.
+    """지금 국장 종목에 주문을 낼 거래소 — KRX 주문 구간(`KOR_KRX_ORDER_WINDOWS`)이면 KRX, 그 밖 개별주 거래 시간이면 NXT.
 
     그 종목 종류의 거래 시간 밖이면 낼 곳이 없어 ValueError 다(ETF 는 정규장만).
     """
     if not is_instrument_trading_time("kor", instrument_kind, now=now):
         raise ValueError("지금은 이 종목의 거래 시간이 아닙니다.")
-    start, end = INSTRUMENT_TRADING_WINDOWS["kor"]["etf"][0]
+    return VENUE_KRX if is_krx_order_time(instrument_kind, now=now) else VENUE_NXT
+
+
+def is_kor_venue_open(venue: str, instrument_kind: str, *, now: datetime) -> bool:
+    """이미 낸 국장 주문이 그 거래소에서 지금도 살아 있는 구간인지(`KOR_VENUE_OPEN_WINDOWS`, 거래일 포함)."""
+    from utils.trading_calendar import get_trading_days
+
+    try:
+        windows = KOR_VENUE_OPEN_WINDOWS[venue][instrument_kind]
+    except KeyError as error:
+        raise ValueError(f"거래소·종목 종류별 주문 유지 시간표가 없습니다: {venue}/{instrument_kind}") from error
+    local = now.astimezone(ZoneInfo(_schedule("kor")["timezone"]))
+    if not any(start <= local.time() < end for start, end in windows):
+        return False
+    day = local.date().isoformat()
+    return bool(get_trading_days(day, day, "kor"))
+
+
+def is_krx_order_time(instrument_kind: str, *, now: datetime) -> bool:
+    """지금이 그 종목 종류를 KRX 로 주문하는 구간인지(거래일 여부는 호출하는 쪽이 본다)."""
     local = now.astimezone(ZoneInfo(_schedule("kor")["timezone"])).time()
-    return VENUE_KRX if start <= local < end else VENUE_NXT
+    return any(start <= local < end for start, end in KOR_KRX_ORDER_WINDOWS[instrument_kind])
 
 
 def aftermarket_in_daily_change(country: str) -> bool:

@@ -217,9 +217,13 @@ MARKET_SCHEDULES = {
     },
 }
 
-# 종목 종류별 매매 가능 구간(시장 현지 시각, 종료 시각 미포함).
-# 한국 개별주의 시간외 구간은 NXT 체결 시간, 한국 ETF는 사고팔기 정책상 KRX 정규장만 사용한다.
+# 종목 종류별 새 주문(신호·주문 접수) 구간(시장 현지 시각, 종료 시각 미포함).
+# 한국은 KRX 단일가 구간(08:50~09:00 시가, 15:20~15:30 종가)에는 1호가 지정가를 정할 수 없어 새 주문을 내지 않는다.
+# 개별주는 NXT 프리(08:00~08:50)·정규(09:00~15:20)·애프터(15:30~20:00, 16:00 부터는 KRX 애프터마켓도 — 2026-09-14 신설),
+# ETF 는 KRX 정규장만 사용한다(KRX 애프터마켓은 ETF·ETN 제외).
+_KOR_REGULAR_ORDER_WINDOW = (MARKET_SCHEDULES["kor"]["open"], time(15, 20))
 _KOR_REGULAR_WINDOW = (MARKET_SCHEDULES["kor"]["open"], MARKET_SCHEDULES["kor"]["close"])
+_KOR_KRX_AFTER_WINDOW = (time(16, 0), MARKET_SCHEDULES["kor"]["aftermarket_close"])
 _US_EQUITY_WINDOWS = (
     (MARKET_SCHEDULES["us"]["premarket_open"], MARKET_SCHEDULES["us"]["open"]),
     (MARKET_SCHEDULES["us"]["open"], MARKET_SCHEDULES["us"]["close"]),
@@ -228,15 +232,31 @@ _US_EQUITY_WINDOWS = (
 _AU_EQUITY_WINDOWS = ((MARKET_SCHEDULES["au"]["open"], MARKET_SCHEDULES["au"]["close"]),)
 INSTRUMENT_TRADING_WINDOWS = {
     "kor": {
-        "etf": (_KOR_REGULAR_WINDOW,),
+        "etf": (_KOR_REGULAR_ORDER_WINDOW,),
         "stock": (
             (MARKET_SCHEDULES["kor"]["premarket_open"], time(8, 50)),
-            _KOR_REGULAR_WINDOW,
-            (time(15, 40), MARKET_SCHEDULES["kor"]["aftermarket_close"]),
+            _KOR_REGULAR_ORDER_WINDOW,
+            (MARKET_SCHEDULES["kor"]["close"], MARKET_SCHEDULES["kor"]["aftermarket_close"]),
         ),
     },
     "us": {"etf": _US_EQUITY_WINDOWS, "stock": _US_EQUITY_WINDOWS},
     "au": {"etf": _AU_EQUITY_WINDOWS, "stock": _AU_EQUITY_WINDOWS},
+}
+# 한국 종목을 KRX 로 주문하는 구간 — 이 밖의 개별주 새 주문 구간(프리·15:30~16:00)은 NXT 로 주문한다.
+KOR_KRX_ORDER_WINDOWS = {
+    "etf": (_KOR_REGULAR_ORDER_WINDOW,),
+    "stock": (_KOR_REGULAR_ORDER_WINDOW, _KOR_KRX_AFTER_WINDOW),
+}
+# 한국 거래소별로 이미 낸 주문이 살아 있는 구간 — 미체결 주문 만료·마감 경고가 쓴다. 새 주문 구간보다 넓다
+# (15:20 전에 낸 KRX 주문은 종가 단일가 15:30 까지, NXT 주문은 15:20~15:30 거래정지 중에도 유지된다).
+KOR_VENUE_OPEN_WINDOWS = {
+    "KRX": {"etf": (_KOR_REGULAR_WINDOW,), "stock": (_KOR_REGULAR_WINDOW, _KOR_KRX_AFTER_WINDOW)},
+    "NXT": {
+        "stock": (
+            (MARKET_SCHEDULES["kor"]["premarket_open"], time(8, 50)),
+            (MARKET_SCHEDULES["kor"]["open"], MARKET_SCHEDULES["kor"]["aftermarket_close"]),
+        )
+    },
 }
 
 # 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
