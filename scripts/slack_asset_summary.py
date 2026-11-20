@@ -39,6 +39,7 @@ from utils.portfolio_io import (
 from utils.report import format_kr_money, format_kr_money_man
 from utils.strategy_trade_ledger import LOOKBACK_DAYS, REALIZED_RECORDED_SINCE
 from utils.strategy_trade_summary import load_trade_summaries
+from utils.trading_calendar import resolve_active_trading_date
 from utils.weekly_service import _apply_running_total_principal as _apply_weekly_running
 from utils.yearly_service import (
     YEARLY_COLLECTION,
@@ -464,8 +465,9 @@ def main():
         acc_cash_pct = (acc["cash"] / acc["total_assets"] * 100) if acc["total_assets"] > 0 else 0.0
         cash_ratio_details.append(f"• {acc['name']}: {acc_cash_pct:.1f}%")
 
+    # 메시지 하나 = 일별 행 하나 — 토요일처럼 직전 거래일 행이 계속 갱신되는 동안은 그 날의 메시지를 수정한다.
     _publish_daily_summary(
-        now.date().isoformat(),
+        resolve_active_trading_date(),
         main_text,
         {
             "pnl": pnl_text,
