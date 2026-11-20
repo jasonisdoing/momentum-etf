@@ -55,7 +55,6 @@ FIRST_ENTRY_WINDOWS: dict[str, tuple[tuple[time, time], ...]] = {
 
 # 화면에서 편집하는 파라미터 키 — DB 문서에 이 키로 저장된다.
 EDITABLE_CONFIG_KEYS: tuple[str, ...] = ("trigger_pct", "round_size", "rounds")
-RECOMMENDED_GAP_MODES: tuple[str, ...] = ("off", "full", "half")
 
 # 편집 가능 범위 — 화면 입력과 API 가 같은 한계를 쓴다.
 PCT_MIN, PCT_MAX = 0.1, 50.0

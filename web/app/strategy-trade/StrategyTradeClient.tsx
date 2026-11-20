@@ -203,20 +203,6 @@ type StrategyConfigRow = {
 
 type TickerOption = { ticker: string; name: string; pools: string[]; kind: "stock" | "etf" };
 
-type RecommendedGapMode = "off" | "full" | "half";
-
-const RECOMMENDED_GAP_MODE_LABELS: Record<RecommendedGapMode, string> = {
-  off: "수동간격",
-  full: "권장 간격",
-  half: "합성 간격",
-};
-
-const RECOMMENDED_GAP_MODE_DESCRIPTIONS: Record<RecommendedGapMode, string> = {
-  off: "수동간격: 종목별 매매 간격(%)을 직접 입력해 조정합니다.",
-  full: "권장 간격: 최근 12개월 최대 하락(MDD)을 회차로 분할하고 배수별 범위로 맞춘 값",
-  half: "합성 간격: 변동성과 권장 간격 중 더 작은 값",
-};
-
 type View = {
   /** 사고팔기를 운영할 수 있는 계좌 — 증권사 API 가 연동된 운영 계좌. */
   account_options: Array<AccountOptionBase & { country_code: string }>;
@@ -226,9 +212,6 @@ type View = {
   country_code: string | null;
   /** 이 계좌의 사고팔기 슬랙 스위치(합성 슬랙과 별개). */
   slack_enabled: boolean;
-  /** 이 계좌 전략들의 간격 모드 — off(수동간격) · full(권장 간격) · half(권장 간격 50%). */
-  recommended_gap_mode: RecommendedGapMode;
-  recommended_gap_modes: RecommendedGapMode[];
   groups: HoldingsGroup[];
   pool_options: PoolLabelSource[];
   default_round_size: number;
@@ -696,7 +679,7 @@ function sumTradeHoldings(rows: HoldingsRow[]) {
   };
 }
 
-/** 권장 간격 컬럼 — 토글 상태와 무관하게 맨 왼쪽에 고정 표시한다. */
+/** 권장 간격 컬럼 — 간격 입력을 돕는 참고값(전략에는 적용하지 않는다). */
 function recommendedGapColumn(gapMonths: number, gapRounds: number): ColDef<TradeListRow> {
   return {
     colId: "recommended_gap_pct",
@@ -718,70 +701,6 @@ function recommendedGapColumn(gapMonths: number, gapRounds: number): ColDef<Trad
     // 기준 기간이 없어 있는 기간으로 낸 값은 순위 화면의 기간 미달 값과 같은 색으로 칠한다.
     cellStyle: ({ data }) => (data?.gap_partial ? PARTIAL_PERIOD_CELL_STYLE : { color: "var(--text-muted)" }),
   };
-}
-
-/** 3단 간격 모드 토글 — 수동간격(off) → 권장 간격(full) → 권장 간격(50%)(half) 순환. */
-function RecommendedGapModeToggle({
-  mode,
-  modes,
-  onChange,
-  disabled,
-}: {
-  mode: RecommendedGapMode;
-  modes: RecommendedGapMode[];
-  onChange: (next: RecommendedGapMode) => void;
-  disabled: boolean;
-}) {
-  const index = Math.max(0, modes.indexOf(mode));
-  const nextMode = modes[(index + 1) % modes.length];
-  const knobLeft = index === 0 ? 2 : index === 1 ? 13 : 24;
-  const trackBg =
-    mode === "off"
-      ? "rgba(148, 163, 184, 0.45)"
-      : mode === "full"
-        ? "var(--bs-primary, #0d6efd)"
-        : "#6366f1";
-  return (
-    <button
-      type="button"
-      className="appLabeledField"
-      style={{ marginBottom: 0, background: "none", border: "none", padding: 0, cursor: disabled ? "not-allowed" : "pointer", textAlign: "left" }}
-      onClick={() => !disabled && onChange(nextMode)}
-      disabled={disabled}
-      aria-label={`간격 모드: ${RECOMMENDED_GAP_MODE_LABELS[mode]}`}
-      title="클릭할 때마다 수동간격 → 권장 간격 → 합성 간격 순으로 전환됩니다. 저장 버튼을 눌러야 반영됩니다."
-    >
-      <span className="appLabeledFieldLabel">{RECOMMENDED_GAP_MODE_LABELS[mode]}</span>
-      <span style={{ display: "inline-flex", alignItems: "center", minHeight: 32 }}>
-        <span
-          style={{
-            position: "relative",
-            display: "inline-block",
-            width: 42,
-            height: 20,
-            borderRadius: 999,
-            background: trackBg,
-            transition: "background 0.15s ease",
-            opacity: disabled ? 0.6 : 1,
-          }}
-        >
-          <span
-            style={{
-              position: "absolute",
-              top: 2,
-              left: knobLeft,
-              width: 16,
-              height: 16,
-              borderRadius: "50%",
-              background: "#fff",
-              boxShadow: "0 1px 2px rgba(0,0,0,0.25)",
-              transition: "left 0.15s ease",
-            }}
-          />
-        </span>
-      </span>
-    </button>
-  );
 }
 
 function displayWeights(values: number[], total: number): number[] {
@@ -837,7 +756,6 @@ function AccountSettingsCard({
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<{ accountId: string; ticker: string } | null>(null);
   const [slack, setSlack] = useState(view.slack_enabled);
-  const [gapMode, setGapMode] = useState<RecommendedGapMode>(view.recommended_gap_mode);
   const [slackTesting, setSlackTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [accountAssets, setAccountAssets] = useState<{
@@ -860,7 +778,6 @@ function AccountSettingsCard({
     setGroups(view.groups ?? EMPTY_GROUPS);
     setPickerOpen(false);
     setSlack(view.slack_enabled);
-    setGapMode(view.recommended_gap_mode);
     setMemos(view.memos);
   }, [view]);
 
@@ -907,7 +824,6 @@ function AccountSettingsCard({
 
   const isDirty =
     slack !== view.slack_enabled ||
-    gapMode !== view.recommended_gap_mode ||
     JSON.stringify(groups) !== JSON.stringify(view.groups ?? EMPTY_GROUPS) ||
     JSON.stringify(comparableDrafts(drafts)) !== JSON.stringify(comparableDrafts(view.configs.map(rowFromConfig)));
 
@@ -1092,27 +1008,6 @@ function AccountSettingsCard({
             },
           }
           : {};
-      // 권장 간격(전체·합성)을 쓰는 동안은 간격(%) 칸에 선택한 간격을 채우고 편집을 막는다(녹색 배경 제거).
-      if (column.field === "pct" && gapMode !== "off") {
-        return [{
-          ...column,
-          ...pctFormatter,
-          pinned: "left",
-          type: "rightAligned",
-          editable: false,
-          cellStyle: { fontWeight: 700 },
-          valueGetter: ({ data, node }: { data?: TradeListRow; node?: { rowPinned?: unknown } | null }) => {
-            if (node?.rowPinned || data?.is_group) return "";
-            const raw = data?.recommended_gap_pct;
-            if (raw == null) return "-";
-            if (gapMode === "half") {
-              const vol = data?.volatility_pct;
-              return vol != null ? Number(Math.min(raw, vol).toFixed(2)) : raw;
-            }
-            return raw;
-          },
-        } as ColDef<TradeListRow>];
-      }
       return [
         {
           ...column,
@@ -1170,7 +1065,7 @@ function AccountSettingsCard({
       valueGetter: (row) => (row?.is_label || row?.key === TOTAL_ROW_KEY || row?.key === TRADE_TOTAL_ROW_KEY ? null : row?.mdd_pct),
       isPartial: (row) => Boolean(row?.gap_partial),
     }),
-  ], [saving, onOpenSignal, gapMode, view.recommended_gap_months, view.recommended_gap_rounds]);
+  ], [saving, onOpenSignal, view.recommended_gap_months, view.recommended_gap_rounds]);
 
   const tradeRowClass = ({ data }: RowClassParams<TradeListRow>) => [
     data?.is_group || data?.key === TOTAL_ROW_KEY || data?.key === TRADE_TOTAL_ROW_KEY ? "assetsGroupRow" : "",
@@ -1276,7 +1171,6 @@ function AccountSettingsCard({
         body: JSON.stringify({
           account_id: accountId,
           slack_enabled: slack,
-          recommended_gap_mode: gapMode,
           strategies,
           groups,
         }),
@@ -1290,7 +1184,7 @@ function AccountSettingsCard({
     } finally {
       setSaving(false);
     }
-  }, [accountId, drafts, gapMode, groups, onSaved, slack, toast, view.pct_max, view.pct_min, view.rounds_max, view.rounds_min]);
+  }, [accountId, drafts, groups, onSaved, slack, toast, view.pct_max, view.pct_min, view.rounds_max, view.rounds_min]);
 
   const sendSlackTest = useCallback(async () => {
     setSlackTesting(true);
@@ -1328,12 +1222,6 @@ function AccountSettingsCard({
                     불러오는 중…
                   </span>
                 ) : null}
-                <RecommendedGapModeToggle
-                  mode={gapMode}
-                  modes={view.recommended_gap_modes}
-                  onChange={setGapMode}
-                  disabled={saving}
-                />
                 <SlackAlarmField
                   checked={slack}
                   onChange={setSlack}
@@ -1342,9 +1230,6 @@ function AccountSettingsCard({
                   testing={slackTesting}
                   onTest={() => void sendSlackTest()}
                 />
-                <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", whiteSpace: "nowrap" }}>
-                  {RECOMMENDED_GAP_MODE_DESCRIPTIONS[gapMode]}
-                </span>
               </div>
               <div className="appMainHeaderRight">
                 <UnsavedChangesBadge show={isDirty} />
