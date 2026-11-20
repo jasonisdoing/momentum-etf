@@ -44,6 +44,8 @@ class MemoryCollection:
                         return False
                     if op == "$gt" and (value is None or value <= target):
                         return False
+                    if op == "$lt" and (value is None or value >= target):
+                        return False
             elif value != expected:
                 return False
         return True
@@ -64,7 +66,11 @@ class MemoryCollection:
 
     def delete_one(self, query):
         with self.lock:
-            self.docs = [d for d in self.docs if not self.matches(d, query)]
+            index = next((i for i, d in enumerate(self.docs) if self.matches(d, query)), None)
+            if index is None:
+                return SimpleNamespace(deleted_count=0)
+            del self.docs[index]
+            return SimpleNamespace(deleted_count=1)
 
     def update_one(self, query, update):
         with self.lock:
@@ -269,7 +275,8 @@ class ManualSignalsTest(TestCase):
         from utils import strategy_trade_signal_lock as locking
 
         with locking.signal_lock():
-            with patch.object(locking, "monotonic", side_effect=[0, 5]):
+            # 대기 한도를 넘긴 시각을 바로 돌려줘 실제로 기다리지 않는다.
+            with patch.object(locking, "monotonic", side_effect=[0, locking._LOCK_WAIT_SECONDS + 1]):
                 with self.assertRaisesRegex(ValueError, "다른 신호 작업"):
                     self.manual()
         self.sender.assert_not_called()
