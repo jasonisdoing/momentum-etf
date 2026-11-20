@@ -49,7 +49,7 @@
 
 - Node 앱(`:3000`)이 로컬 FastAPI(`:8000`)를 호출한다.
 - GitHub Actions([deploy.yml](../.github/workflows/deploy.yml), `upgrade` 브랜치 push · `workflow_dispatch`)가 맥미니 Self-Hosted Runner(`runs-on: self-hosted`)에서 직접 실행한다: `git reset --hard origin/upgrade` → `requirements.txt`·`package*.json` 변경 시 의존성 설치 → `npm --prefix web run build` → `launchctl kickstart -k` 로 `fastapi` → `web` → `scheduler` 순차 재시작 및 헬스체크.
-- scheduler 재시작은 실행 중 배치를 끊지 않는다: 배포 잠금(`batch_locks.__deploy__`, 설정 실패 시 배포 중단)을 재시작 직전에 다시 걸고(잠금 뒤의 claim 은 워커가 pending 으로 되돌림), 실행 중 서버 배치가 10분 안에 안 끝나면 재시작을 보류하고 배포 실패(롤백 없음)로 알린다 — 이때 scheduler 는 배치 종료 후 직접 재시작한다. 끊긴 배치는 재시도하지 않는다(2026-11-20 `market_breadth` 끊김).
+- scheduler 는 종료 신호(배포·재시작)를 받으면 새 배치를 더 가져가지 않고, data 레인 배치는 바로 중단해 대기열 맨 앞으로 되돌려 새 scheduler 가 먼저 다시 실행하며, light 레인(알림·주문, 수 초~1분)은 중간에 끊으면 정합성이 깨질 수 있어 끝날 때까지 기다린다(`infra/server_scheduler.py`). launchd `ExitTimeOut` 이 이보다 짧으면 강제 종료되니 맥미니 설정을 맞춘다(`docs/to_do.md`). 배포 플래그(`batch_locks.__deploy__`)는 화면 「배포 중」 표시용이다.
 - 배포 중 빌드·헬스체크가 실패하면 직전 커밋(`PREV_SHA`)으로 자동 롤백·재시작해 앱과 배치를 복구하고 슬랙 실패 알림을 보낸다.
 - 폐기된 기능은 배포 때 서버 DB 문서·crontab 라인도 같이 지운다.
 

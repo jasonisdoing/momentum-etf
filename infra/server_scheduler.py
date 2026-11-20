@@ -26,7 +26,9 @@
 특징:
   • crontab 파일을 그대로 파싱 — 주석(`#`, `# PAUSED`)은 모두 활성으로 간주.
   • 노트북이 꺼져 있는 시각의 미실행 분은 무시(misfire_grace_time=0).
-  • Ctrl+C / SIGTERM 으로 깔끔히 종료.
+  • Ctrl+C / SIGTERM 으로 종료 — 새 배치를 더 가져가지 않고, 실행 중인 data 레인 배치는 바로 중단해
+    대기열 맨 앞으로 되돌리며(새 워커가 먼저 다시 실행), light 레인 배치(수 초~1분)는 끝까지 기다린다.
+    light 는 알림·주문이라 중간에 끊으면 메시지 중복 등 정합성이 깨질 수 있다. 배포 재시작도 이 경로다.
 """
 
 from __future__ import annotations
@@ -152,8 +154,39 @@ def _enqueue_from_schedule(job_name: str, script_path: str, arguments: list[str]
         log.exception("스케줄 enqueue 실패: %s — %s", job_name, exc)
 
 
-def _run_subprocess(job_name: str, script_path: str, arguments: list[str] | None = None, item_id: Any = None) -> int:
-    """run_batch.py 래퍼를 통해 배치 1건 실행하고 exit code 반환."""
+# 실행 중 배치 — item_id → {"lane", "proc", "requeued"}. 종료 신호 처리(`_interrupt_for_shutdown`)가 쓴다.
+_RUNNING: dict[Any, dict[str, Any]] = {}
+_RUNNING_LOCK = threading.Lock()
+_shutting_down = False
+#: 종료 때 중단하고 다시 실행하는 레인 — 수집·캐시처럼 다시 돌리면 끝까지 채워지는 배치다.
+_REQUEUE_ON_SHUTDOWN_LANES = frozenset({"data"})
+
+
+def _interrupt_for_shutdown() -> None:
+    """워커 종료 — data 레인 배치를 대기열로 되돌리고 중단한다(light 레인은 끝까지 둔다)."""
+    global _shutting_down
+    from utils.batch_queue import requeue_interrupted
+
+    with _RUNNING_LOCK:
+        _shutting_down = True
+        targets = [
+            (item_id, entry) for item_id, entry in _RUNNING.items() if entry["lane"] in _REQUEUE_ON_SHUTDOWN_LANES
+        ]
+        for _, entry in targets:
+            entry["requeued"] = True
+    for item_id, entry in targets:
+        # 상태를 먼저 되돌린다 — 자식이 끝난 뒤 done/failed 로 마킹하지 않는다(`_execute_queue_item`).
+        requeue_interrupted(item_id)
+        proc = entry["proc"]
+        if proc is not None and proc.poll() is None:
+            log.warning("종료 신호 → data 배치 중단 후 대기열로 되돌림: %s", entry["job_name"])
+            proc.terminate()
+
+
+def _run_subprocess(
+    job_name: str, script_path: str, arguments: list[str] | None, item_id: Any, entry: dict[str, Any]
+) -> int | None:
+    """run_batch.py 래퍼를 통해 배치 1건 실행하고 exit code 반환 — 종료 중이라 띄우지 않았으면 None."""
     log.info("배치 시작: %s (%s, args=%s)", job_name, script_path, arguments)
     env = os.environ.copy()
     env.setdefault("APP_TYPE", "Local")
@@ -167,15 +200,27 @@ def _run_subprocess(job_name: str, script_path: str, arguments: list[str] | None
     if arguments:
         cmd.extend(arguments)
 
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=str(ROOT_DIR),
-            env=env,
-        )
-    except Exception as exc:
-        log.exception("배치 실행 실패: %s — %s", job_name, exc)
-        return 1
+    with _RUNNING_LOCK:
+        if _shutting_down:
+            # 종료 신호 뒤에 claim 된 배치는 띄우지 않고 그대로 대기열로 되돌린다(레인 무관 — 시작 전이라 안전).
+            entry["requeued"] = True
+        else:
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=str(ROOT_DIR),
+                    env=env,
+                )
+            except Exception as exc:
+                log.exception("배치 실행 실패: %s — %s", job_name, exc)
+                return 1
+            entry["proc"] = proc
+    if entry["requeued"] and entry["proc"] is None:
+        from utils.batch_queue import requeue_interrupted
+
+        requeue_interrupted(item_id)
+        log.info("종료 중이라 실행하지 않고 대기열로 되돌림: %s", job_name)
+        return None
 
     # 자식 프로세스가 끝날 때까지 wait — 단 5초마다 batch_queue 의 cancel 플래그를 확인한다.
     # cancel 요청이 들어오면 SIGTERM, 5초 뒤에도 안 죽으면 SIGKILL 로 강제 종료.
@@ -221,13 +266,20 @@ def _execute_queue_item(item: dict[str, Any]) -> None:
     hb_thread = threading.Thread(target=_heartbeat, daemon=True)
     hb_thread.start()
 
+    entry: dict[str, Any] = {"job_name": job_name, "lane": item["lane"], "proc": None, "requeued": False}
+    with _RUNNING_LOCK:
+        _RUNNING[item_id] = entry
     try:
-        exit_code = _run_subprocess(job_name, item["script_path"], item.get("arguments"), item_id)
-        mark_done(item_id, exit_code)
+        exit_code = _run_subprocess(job_name, item["script_path"], item.get("arguments"), item_id, entry)
+        # 종료 신호로 대기열에 되돌린 배치는 새 워커가 다시 실행한다 — 결과로 마킹하지 않는다.
+        if not entry["requeued"]:
+            mark_done(item_id, exit_code)
     except Exception as exc:
         log.exception("큐 항목 처리 실패: %s — %s", job_name, exc)
         mark_failed(item_id, str(exc))
     finally:
+        with _RUNNING_LOCK:
+            _RUNNING.pop(item_id, None)
         hb_stop.set()
         hb_thread.join(timeout=2)
 
@@ -244,7 +296,6 @@ def _queue_worker_loop(stop_event: threading.Event) -> None:
     from utils.batch_queue import (
         claim_next_pending,
         ensure_indexes,
-        is_deploy_locked,
         reap_stale_running,
     )
 
@@ -261,9 +312,6 @@ def _queue_worker_loop(stop_event: threading.Event) -> None:
     while not stop_event.is_set():
         try:
             job_threads = [thread for thread in job_threads if thread.is_alive()]
-            if is_deploy_locked():
-                stop_event.wait(2.0)
-                continue
             item = claim_next_pending()
             if item is None:
                 # 주기적으로 stale running 청소 (1분마다)
@@ -385,6 +433,11 @@ def main() -> int:
     def _shutdown(signum: int, _frame) -> None:
         log.info("신호 %s 수신 — 스케줄러/워커 종료", signum)
         stop_event.set()
+        try:
+            _interrupt_for_shutdown()
+        except Exception:
+            # 되돌리지 못한 배치는 새 워커의 stale 정리(heartbeat 5분)가 failed 로 알린다.
+            log.exception("종료 시 data 배치 되돌리기 실패")
         if sched is not None:
             try:
                 sched.shutdown(wait=False)
