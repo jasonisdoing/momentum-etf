@@ -664,6 +664,13 @@ function sumAll(values: Array<number | undefined>): number | undefined {
   return values.every((value): value is number => value != null) ? values.reduce((sum, value) => sum + value, 0) : undefined;
 }
 
+/** 값이 있는 항목만 합산 — 미저장·오류 행 하나 때문에 전체 합계가 비지 않게 한다. */
+function sumDefined(values: Array<number | undefined>): number | undefined {
+  if (values.length === 0) return 0;
+  const present = values.filter((value): value is number => value != null);
+  return present.length > 0 ? present.reduce((sum, value) => sum + value, 0) : undefined;
+}
+
 function sumTradeHoldings(rows: HoldingsRow[]) {
   const totals = rows.reduce((sum, row) => {
     sum.valuation_krw += row.valuation_krw;
@@ -973,10 +980,10 @@ function AccountSettingsCard({
     const otherHoldings = holdings ? sumTradeHoldings(holdings.filter((row) => !strategyTickers.has(row.ticker))) : undefined;
     const tradeHoldings = holdings ? sumTradeHoldings(holdings.filter((row) => strategyTickers.has(row.ticker))) : undefined;
     const otherValue = otherHoldings?.valuation_krw;
-    // 사고팔기 합계의 손익은 종목 행(회차 기준)의 합이다.
-    const tradePnl = sumAll(stockRows.map((row) => row.pnl_krw));
-    const tradeRealized = sumAll(stockRows.map((row) => row.realized_krw));
-    const tradeRealizedToday = sumAll(
+    // 사고팔기 합계의 손익은 값이 있는 종목 행(회차 기준)의 합이다 — 미저장·오류 행 하나 때문에 전체 합계를 비우지 않는다.
+    const tradePnl = sumDefined(stockRows.map((row) => row.pnl_krw));
+    const tradeRealized = sumDefined(stockRows.map((row) => row.realized_krw));
+    const tradeRealizedToday = sumDefined(
       drafts.map((row) => {
         const strategy = row.strategy_id ? strategiesById.get(row.strategy_id) : undefined;
         const rate = view.krw_rate;
@@ -984,7 +991,7 @@ function AccountSettingsCard({
         return strategy.status.realized_today != null ? strategy.status.realized_today * rate : undefined;
       }),
     );
-    const tradeTotal = sumAll(stockRows.map((row) => row.total_krw));
+    const tradeTotal = sumDefined(stockRows.map((row) => row.total_krw));
     const weights = summary && summary.total_assets_krw > 0 && otherValue != null
       ? displayWeights([summary.cash_balance_krw, otherValue, ...stockValues], summary.total_assets_krw)
       : [];
