@@ -49,6 +49,7 @@
 
 - Node 앱(`:3000`)이 로컬 FastAPI(`:8000`)를 호출한다.
 - GitHub Actions([deploy.yml](../.github/workflows/deploy.yml), `upgrade` 브랜치 push · `workflow_dispatch`)가 맥미니 Self-Hosted Runner(`runs-on: self-hosted`)에서 직접 실행한다: `git reset --hard origin/upgrade` → `requirements.txt`·`package*.json` 변경 시 의존성 설치 → `npm --prefix web run build` → `launchctl kickstart -k` 로 `fastapi` → `web` → `scheduler` 순차 재시작 및 헬스체크.
+- scheduler 재시작은 배포 잠금(`batch_locks.__deploy__`, 설정 실패 시 배포 중단)을 재시작 직전에 다시 건 뒤 실행 중 서버 배치가 끝나기를 기다린다 — 잠금 없이 재시작하면 막 시작한 배치가 끊긴다(2026-11-20 `market_breadth`). 끊긴 배치는 재시도하지 않는다.
 - 배포 중 빌드·헬스체크가 실패하면 직전 커밋(`PREV_SHA`)으로 자동 롤백·재시작해 앱과 배치를 복구하고 슬랙 실패 알림을 보낸다.
 - 폐기된 기능은 배포 때 서버 DB 문서·crontab 라인도 같이 지운다.
 
