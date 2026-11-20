@@ -424,7 +424,9 @@ class ManualSignalsTest(TestCase):
         )
         self.assertEqual(orders._fill_source(base), "manual_slack")
         self.assertEqual(orders._fill_source({"round": 1}), "slack")
-        self.assertEqual(orders._fill_source({"round": None}), "manual")
+        # 회차 없는 주문은 API 주문 모달, 자동 주문 표시가 있으면 자동이다.
+        self.assertEqual(orders._fill_source({"round": None}), "api")
+        self.assertEqual(orders._fill_source({"round": 1, "slack": {"auto": True}}), "auto")
 
     def test_manual_message_uses_order_buttons_without_quote_or_order(self):
         _, trigger, _ = notify._manual_signal(self.payload, fresh=False)

@@ -42,8 +42,14 @@ REALIZED_RECORDED_SINCE = "2026-11-12"
 #: 기간 전 보유(체결가 모름)를 담는 로트의 출처 — 재생 뒤 남아 있으면 확정할 수 없다.
 _SOURCE_UNKNOWN = "unknown"
 
-SOURCE_SLACK = "slack"
-SOURCE_MANUAL = "manual"
+# 체결 출처 — 화면 표시는 AUTO(auto)·SLACK(slack)·MANUAL(manual_slack·api)·MTS(manual).
+SOURCE_AUTO = "auto"  # 「자동」 켠 전략이 신호와 함께 바로 낸 주문
+SOURCE_SLACK = "slack"  # 자동 신호를 사람이 슬랙 버튼으로 낸 주문
+SOURCE_MANUAL_SLACK = "manual_slack"  # 화면에서 보낸 수동 신호를 슬랙 버튼으로 낸 주문
+SOURCE_API = "api"  # 회차 없이 앱의 API 주문 모달로 낸 주문
+SOURCE_MANUAL = "manual"  # 앱 주문 기록이 없는 체결(MTS·HTS 직접 주문)
+#: 신호 스레드로 낸 주문의 출처 — 회차 매도로 본다.
+SIGNAL_SOURCES = (SOURCE_AUTO, SOURCE_SLACK, SOURCE_MANUAL_SLACK)
 
 #: 캐시·재생에 필요한 체결 행의 필드.
 _FILL_FIELDS = ("order_no", "ticker", "side_label", "filled_quantity", "average_fill_price")
@@ -566,9 +572,7 @@ def read_ledgers(account_id: str, tickers: list[str]) -> dict[str, Ledger | Ledg
         day = ledger.as_of.isoformat()
         recorded = [trade for trade in ledger.trades if trade.day < day]
         today = [
-            replace(trade, sell_target=REGULAR_SELL)
-            if not trade.buy and trade.source in (SOURCE_SLACK, "manual_slack")
-            else trade
+            replace(trade, sell_target=REGULAR_SELL) if not trade.buy and trade.source in SIGNAL_SOURCES else trade
             for trade in ledger.trades
             if trade.day == day
         ]

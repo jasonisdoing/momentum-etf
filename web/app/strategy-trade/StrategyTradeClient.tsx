@@ -79,7 +79,9 @@ type Status = {
 
 type TradeSide = "buy" | "sell" | "arbitrary_buy" | "arbitrary_sell";
 /** 회차 표의 체결 뱃지 — 짝 번호(`pairs`)는 매수는 자기 번호, 매도는 판 매수의 번호다(최근 30일 안 매수만). */
-type TradeBadge = { side: TradeSide; pairs: number[]; source: "slack" | "manual" | "manual_slack" };
+/** 체결 출처 — 백엔드 `strategy_trade_ledger.SOURCE_*`. */
+type FillSource = "auto" | "slack" | "manual_slack" | "api" | "manual";
+type TradeBadge = { side: TradeSide; pairs: number[]; source: FillSource };
 
 const FILL_LABELS = {
   buy: "매수",
@@ -100,7 +102,7 @@ export type RoundRow = {
   // 실제 체결가·산 날짜·출처 — 사다리 선(buy_index)과 별개다. 안 산 회차는 null.
   fill_price: number | null;
   bought_on: string | null;
-  source: "slack" | "manual" | "manual_slack" | "mixed" | null;
+  source: FillSource | null;
   close: number | null;
   profit_pct: number | null;
   buy_limit: number | null;
@@ -487,8 +489,14 @@ function RoundStatus({
 // 매수는 보라, 매도는 주황 — 빨강·파랑은 상승·하락 손익색이라 헷갈리고 초록은 슬랙·주문 표시가 쓴다.
 const FILL_COLORS = { buy: "var(--tblr-purple, #ae3ec9)", sell: "var(--tblr-orange, #f76707)" } as const;
 
-const FILL_SOURCE_WORDS = { slack: "자동 슬랙", manual: "직접 거래", manual_slack: "수동 슬랙" } as const;
-const BOUGHT_SOURCE_WORDS = { ...FILL_SOURCE_WORDS, mixed: "혼합" } as const;
+// AUTO 자동 주문 · SLACK 자동 신호를 버튼으로 · MANUAL 앱 안 수동(수동 신호·API 주문 모달) · MTS 앱 기록 없는 직접 주문.
+const FILL_SOURCE_WORDS: Record<FillSource, string> = {
+  auto: "AUTO",
+  slack: "SLACK",
+  manual_slack: "MANUAL",
+  api: "MANUAL",
+  manual: "MTS",
+};
 
 function DailyTradeBadges({ badges }: { badges: TradeBadge[] }) {
   return (
@@ -496,7 +504,7 @@ function DailyTradeBadges({ badges }: { badges: TradeBadge[] }) {
       {badges.map((badge, idx) => (
         <StatusBadge key={idx} color={FILL_COLORS[badge.side.endsWith("buy") ? "buy" : "sell"]}>
           {FILL_LABELS[badge.side]}
-          {badge.pairs.join("·")} · {badge.source !== "slack" ? "수동 · " : ""}{FILL_SOURCE_WORDS[badge.source]}
+          {badge.pairs.join("·")} · {FILL_SOURCE_WORDS[badge.source]}
         </StatusBadge>
       ))}
     </span>
@@ -1730,7 +1738,7 @@ function StrategySection({
                             <b>{formatPrice(row.fill_price, currency)}</b>
                             {row.bought_on != null && row.source != null ? (
                               <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
-                                {row.bought_on.slice(5)} · {BOUGHT_SOURCE_WORDS[row.source]}
+                                {row.bought_on.slice(5)} · {FILL_SOURCE_WORDS[row.source]}
                               </span>
                             ) : null}
                           </span>

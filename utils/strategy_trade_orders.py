@@ -39,7 +39,7 @@ from utils.db_manager import get_db_connection
 from utils.market_session import is_instrument_trading_time
 from utils.portfolio_io import return_pct_from_avg_price
 from utils.strategy_trade_config import round_buy_quantity
-from utils.strategy_trade_ledger import REGULAR_SELL, is_buy
+from utils.strategy_trade_ledger import REGULAR_SELL, SOURCE_API, SOURCE_AUTO, is_buy
 from utils.strategy_trade_market import (
     broker_order_date,
     close_text,
@@ -1014,9 +1014,11 @@ def broker_orders_today(account_id: str) -> list[dict[str, Any]]:
 
 
 def _fill_source(record: dict[str, Any]) -> str:
-    """기존 신호 주문은 자동 슬랙, 신호가 없는 API 주문은 직접 거래다."""
+    """우리 주문 기록의 체결 출처(`strategy_trade_ledger.SOURCE_*`) — 회차 없는 주문은 API 주문 모달, 자동 주문 표시가 있으면 자동."""
     if record["round"] is None and not record.get("arbitrary_id"):
-        return "manual"
+        return SOURCE_API
+    if (record.get("slack") or {}).get("auto") is True:
+        return SOURCE_AUTO
     return record.get("signal_origin", "slack")
 
 
@@ -1028,7 +1030,15 @@ def order_sources(account_id: str, today_rows: list[dict[str, Any]]) -> dict[tup
     """
     records = _orders().find(
         {"account_id": account_id, "order_no": {"$ne": None}},
-        {"order_no": 1, "round": 1, "created_at": 1, "arbitrary_id": 1, "country": 1, "signal_origin": 1},
+        {
+            "order_no": 1,
+            "round": 1,
+            "created_at": 1,
+            "arbitrary_id": 1,
+            "country": 1,
+            "signal_origin": 1,
+            "slack.auto": 1,
+        },
     )
     sources = {
         (_order_date(record), str(int(record["order_no"]))): (
@@ -1046,7 +1056,16 @@ def order_sources(account_id: str, today_rows: list[dict[str, Any]]) -> dict[tup
             "status": "submitting",
             "created_at": {"$gte": f"{today:%Y-%m-%d}"},
         },
-        {"ticker": 1, "side": 1, "quantity": 1, "price": 1, "round": 1, "arbitrary_id": 1, "signal_origin": 1},
+        {
+            "ticker": 1,
+            "side": 1,
+            "quantity": 1,
+            "price": 1,
+            "round": 1,
+            "arbitrary_id": 1,
+            "signal_origin": 1,
+            "slack.auto": 1,
+        },
     )
     for record in submitting:
         match = next(

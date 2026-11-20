@@ -28,6 +28,7 @@ from utils.strategy_trade_config import (
 )
 from utils.strategy_trade_ledger import (
     REALIZED_RECORDED_SINCE,
+    SIGNAL_SOURCES,
     Ledger,
     LedgerError,
     Trade,
@@ -574,9 +575,7 @@ def _paired_trade_rounds(trades: list[Trade], orders: list[dict[str, Any]]) -> d
             signature = (trade.day, trade.buy, trade.shares, trade.price)
             matches = by_fill.get(signature, [])
             order = (
-                matches[0]
-                if trade.source in ("slack", "manual_slack") and fill_counts[signature] == len(matches) == 1
-                else None
+                matches[0] if trade.source in SIGNAL_SOURCES and fill_counts[signature] == len(matches) == 1 else None
             )
         if order is not None and (pair_id := order.get("pair_id")):
             paired[(trade.day, pair_id, order["round"])].append(index)
