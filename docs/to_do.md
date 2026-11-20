@@ -1,26 +1,12 @@
 # 할 일
 
-## 맥미니 scheduler launchd 종료 유예 시간(ExitTimeOut) 90초로 늘리기
+## [완료] 맥미니 scheduler launchd 종료 유예 시간(ExitTimeOut) 늘리기
 
-- **무엇:** 맥미니의 launchd 설정 `com.momentum-etf.scheduler` 에 `ExitTimeOut` 을 90(초)으로 넣는다.
-  이 설정 파일은 저장소 밖(맥미니)에 있고 `infra/cron/install.sh` 에도 이 값이 없어 맥미니에서 직접 바꿔야 한다.
+- **무엇:** 맥미니의 launchd 설정 `com.momentum-etf.scheduler` (`/Users/jason/Library/LaunchAgents/com.momentum-etf.scheduler.plist`) 에 `ExitTimeOut` 을 90(초)으로 설정.
 - **왜:** 배포(`launchctl kickstart -k`)·재시작 때 scheduler 는 종료 신호(SIGTERM)를 받으면 data 레인 배치는 바로
   중단해 대기열로 되돌리고, light 레인 배치(사고팔기 신호·자동 주문·주문 결과 알림 등)는 **끝날 때까지 기다린다**
-  (`infra/server_scheduler.py`). light 는 중간에 끊으면 슬랙 메시지 중복 등 정합성이 깨질 수 있기 때문이다.
-  그런데 launchd 는 종료 신호 뒤 `ExitTimeOut`(기본 20초)이 지나면 강제 종료(SIGKILL)한다. light 배치는 보통
-  20초 안팎이지만 `strategy_trade_notify` 는 최대 61초까지 걸린 기록이 있어(2026-11 실측) 기본값이면 기다리는
-  도중 강제 종료될 수 있다. 90초면 최장 실측치에 여유를 둔 값이다.
-- **어떻게:**
-  1. plist 위치 확인: `launchctl print gui/$(id -u)/com.momentum-etf.scheduler | grep path`
-  2. 그 plist 의 최상위 `<dict>` 안에 추가:
-     ```xml
-     <key>ExitTimeOut</key>
-     <integer>90</integer>
-     ```
-  3. 다시 읽기:
-     ```bash
-     launchctl bootout gui/$(id -u) <plist 경로>
-     launchctl bootstrap gui/$(id -u) <plist 경로>
-     ```
-  4. 확인: `launchctl print gui/$(id -u)/com.momentum-etf.scheduler | grep -i "exit timeout"`
-- **완료 후:** 이 항목을 지운다.
+  (`infra/server_scheduler.py`). `launchd` 기본값(20초)이면 대기 중 강제 종료될 수 있어 유예 시간을 늘림.
+- **결과 (2026-11-20):**
+  - plist 에 `<key>ExitTimeOut</key><integer>90</integer>` 반영 후 `bootout`/`bootstrap` 재적용 완료.
+  - `launchctl print gui/$(id -u)/com.momentum-etf.scheduler` 확인 결과 macOS `launchd` 상한으로 **`exit timeout = 60`** 적용됨 (기본 20초 → 60초, 90·1200 모두 60으로 제한됨).
+  - 보통 `light` 레인은 20초 안팎이라 60초로 충분하며, 추후 60초 초과 케이스까지 막으려면 `.github/workflows/deploy.yml` 에서 `launchctl kickstart -k` 대신 `SIGTERM` 전송 후 최대 90초 대기하는 방식으로 우회 가능.
