@@ -15,10 +15,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import parse_qs
 
+from bson import ObjectId
 from slack_sdk.errors import SlackApiError
 from slack_sdk.signature import SignatureVerifier
 
@@ -29,6 +31,7 @@ from utils.notification import get_slack_client
 from utils.settings_loader import get_slack_channel
 from utils.strategy_trade_market import format_money
 from utils.strategy_trade_orders import (
+    ACTIVE_STATUSES,
     FINISHED_STATUSES,
     MESSAGE_DONE,
     MESSAGE_FAILED,
@@ -36,6 +39,7 @@ from utils.strategy_trade_orders import (
     MESSAGE_PENDING,
     MESSAGE_PLACED,
     RoundNotOrderableError,
+    _orders,
     cancel_record,
     close_warning_slack_orders,
     close_warning_text,
@@ -64,7 +68,12 @@ from utils.strategy_trade_orders import (
     signal_threads,
 )
 from utils.strategy_trade_signal_lock import signal_lock
-from utils.strategy_trade_threads import send_thread_message
+from utils.strategy_trade_threads import (
+    can_withdraw_signal,
+    finish_order_reservation,
+    reserve_signal_for_order,
+    send_thread_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -688,7 +697,7 @@ def _run_post_order_updates(target: dict[str, Any], thread_text: str, blocks: li
             future.result()
 
 
-def _place_swap(target: dict[str, Any]) -> None:
+def _place_swap(target: dict[str, Any], *, reraise: bool = False) -> dict[str, Any] | None:
     """매도 후 재매수 한 짝을 낸다 — 결과를 스레드로 알리고 메시지에 양쪽 취소 버튼을 단다."""
     request = target["request"]
     word = f"{_env_word(request['env'])} 매도 후 재매수"
@@ -703,13 +712,17 @@ def _place_swap(target: dict[str, Any]) -> None:
         )
     except RoundNotOrderableError as exc:
         _expire(target, exc)
-        return
+        if reraise:
+            raise BrokerApiError(str(exc)) from exc
+        return None
     except Exception as exc:  # 슬랙 요청은 이미 응답했으므로 실패도 스레드로 알린다.
         logger.exception("슬랙 매도 후 재매수 처리 실패")
         send_thread_message(f"❌ {word} 주문 실패: {exc}", thread_ts=target["thread_ts"])
         _update_message(target, _open_blocks(request))
         _release_reservation(target)
-        return
+        if reraise:
+            raise
+        return None
     sell, buy = result["sell"], result["buy"]
     text = f"✅ {word} 접수: {sell['strategy_label']} — 매도 {sell['quantity']:,}주 × {format_money(sell['price'], sell['country'])}"
     if buy is not None:
@@ -717,13 +730,13 @@ def _place_swap(target: dict[str, Any]) -> None:
     else:
         text += f"\n⚠️ 매수 주문은 실패했습니다(매도만 걸림): {result['buy_error']}"
     _run_post_order_updates(target, text, _pair_blocks(request, sell["pair_id"], None))
+    return sell
 
 
 def _place(target: dict[str, Any], *, reraise: bool = False) -> dict[str, Any] | None:
     request = target["request"]
     if _is_swap(request):
-        _place_swap(target)
-        return None
+        return _place_swap(target, reraise=reraise)
     side = f"{_env_word(request['env'])} {_action_word(request)}"
     # 처리하는 동안 같은 메시지로 또 주문하지 못하게 버튼부터 걷어낸다.
     _update_message(target, _note_blocks(request, "⏳ 주문 처리 중…"))
@@ -1047,3 +1060,242 @@ def send_signal_order_messages(strategy_view: dict[str, Any], triggers: list[dic
         if messages:
             register_signal_thread(get_slack_channel(), signal_ts, messages)
     return len(messages)
+
+
+# --- 웹 통합 모달 공용 조회·실행 (합성 전략·전략 사고팔기 공용) ------------------------------------------
+
+
+def order_summary(order: dict[str, Any]) -> dict[str, Any]:
+    filled = int(order.get("filled_quantity") or 0)
+    quantity = int(order["quantity"])
+    return {
+        "id": order.get("id") or str(order["_id"]),
+        "status": order["status"],
+        "price": order["price"],
+        "quantity": quantity,
+        "filled_quantity": filled,
+        "remaining_quantity": max(quantity - filled, 0),
+        "country": order["country"],
+    }
+
+
+def _match_thread_message(
+    thread: dict[str, Any],
+    *,
+    side: str | None = None,
+    round_no: int | None = None,
+    ticker: str | None = None,
+) -> dict[str, Any] | None:
+    for item in thread.get("messages") or []:
+        req = item.get("request") or {}
+        if side is not None and req.get("side") != side:
+            continue
+        if round_no is not None and req.get("round") != round_no:
+            continue
+        if ticker is not None and req.get("ticker") != ticker:
+            continue
+        return item
+    return (thread.get("messages") or [None])[0]
+
+
+def describe_slack_thread_action(
+    account_id: str,
+    thread_ts: str,
+    *,
+    side: str | None = None,
+    round_no: int | None = None,
+    ticker: str | None = None,
+    allow_unregistered_withdraw: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
+    """슬랙 스레드 기반 웹 모달의 현재 상태(주문 전·미체결·처리 완료)를 공용 판정한다.
+
+    반환: ``(state_dict, request_or_none, resolved_order_or_none)``.
+    """
+    order_query: dict[str, Any] = {"slack.thread_ts": thread_ts, "account_id": account_id}
+    if ticker is not None:
+        order_query["ticker"] = ticker
+    if side is not None:
+        order_query["side"] = side
+    if round_no is not None:
+        order_query["round"] = round_no
+    latest = _orders().find_one(order_query, sort=[("_id", -1)])
+    if latest and latest["status"] in ACTIVE_STATUSES:
+        refreshed = refreshed_order(account_id, str(latest["_id"]))
+        if refreshed["status"] in ACTIVE_STATUSES:
+            preview = None
+            modify_error = None
+            try:
+                preview = preview_modify_record(refreshed["id"])
+            except BrokerApiError as exc:
+                modify_error = str(exc)
+            return (
+                {
+                    "phase": "active_order",
+                    "status_label": "미체결 진행 중",
+                    "thread_ts": thread_ts,
+                    "order": order_summary(refreshed),
+                    "modify_preview": {
+                        "target_price": preview["target_price"],
+                        "quote_label": preview["quote_label"],
+                        "remaining_quantity": preview["remaining_quantity"],
+                    }
+                    if preview
+                    else None,
+                    "modify_error": modify_error,
+                    "withdraw_key": None,
+                },
+                None,
+                None,
+            )
+        latest = refreshed
+    elif latest:
+        latest = serialize_order(latest)
+
+    if latest and (int(latest.get("filled_quantity") or 0) > 0 or latest["status"] in ("filled", "expired")):
+        return (
+            {
+                "phase": "completed",
+                "status_label": "처리 완료",
+                "reason": f"이미 주문({latest['status']})이 처리되었습니다.",
+                "order": order_summary(latest),
+                "withdraw_key": None,
+            },
+            None,
+            None,
+        )
+
+    withdraw_key = thread_ts if can_withdraw_signal(thread_ts, allow_unregistered=allow_unregistered_withdraw) else None
+    thread = find_signal_thread(thread_ts)
+    message = _match_thread_message(thread, side=side, round_no=round_no, ticker=ticker) if thread else None
+    if not message:
+        return (
+            {
+                "phase": "completed",
+                "status_label": "신호 정보 없음",
+                "reason": "슬랙 스레드 정보를 찾을 수 없습니다.",
+                "withdraw_key": withdraw_key,
+            },
+            None,
+            None,
+        )
+
+    request = message["request"]
+    try:
+        try:
+            order = _resolve_request(request, thread_ts, fresh=False)
+        except RoundNotOrderableError:
+            if request.get("mix_action_key") is not None:
+                raise
+            order = _resolve_request(request, thread_ts, fresh=True)
+    except RoundNotOrderableError as exc:
+        return (
+            {
+                "phase": "completed",
+                "status_label": "주문 불가",
+                "reason": str(exc),
+                "withdraw_key": withdraw_key,
+            },
+            request,
+            None,
+        )
+    except BrokerApiError as exc:
+        return (
+            {
+                "phase": "ready_to_order",
+                "status_label": "주문 대기",
+                "thread_ts": thread_ts,
+                "order_error": str(exc),
+                "withdraw_key": withdraw_key,
+            },
+            request,
+            None,
+        )
+
+    if _is_swap(request):
+        price = order["sell_price"]
+        quote_label = "매도 1호가 · 재매수 1호가"
+        venue = order["venue"]
+    else:
+        price = order["price"]
+        quote_label = order.get("quote_label") or ("매도 1호가" if request["side"] == "buy" else "매수 1호가")
+        venue = order["venue"]
+
+    return (
+        {
+            "phase": "ready_to_order",
+            "status_label": "주문 대기",
+            "thread_ts": thread_ts,
+            "order_preview": {
+                "quantity": order["quantity"],
+                "price": price,
+                "amount": price * order["quantity"],
+                "quote_label": quote_label,
+                "venue": venue,
+                "country": order["country"],
+            },
+            "withdraw_key": withdraw_key,
+        },
+        request,
+        order,
+    )
+
+
+def execute_slack_thread_action(
+    kind: str,
+    account_id: str,
+    thread_ts: str,
+    *,
+    order_id: str | None = None,
+    ticker: str | None = None,
+    side: str | None = None,
+    round_no: int | None = None,
+    confirmed: dict[str, Any] | None = None,
+    confirmation_id: str | None = None,
+    before_order: Callable[[dict[str, Any], dict[str, Any]], None] | None = None,
+) -> None:
+    """웹 통합 모달의 주문·호가정정·취소를 슬랙과 동일한 락·스레드 동기화 경로로 실행한다."""
+    with signal_lock():
+        if kind in ("modify", "cancel"):
+            if not order_id:
+                raise BrokerApiError("대상 주문 ID가 없습니다.")
+            query: dict[str, Any] = {"_id": ObjectId(order_id), "account_id": account_id}
+            if ticker is not None:
+                query["ticker"] = ticker
+            record = _orders().find_one(query)
+            if record is None:
+                raise BrokerApiError("주문 기록을 찾을 수 없습니다.")
+            refreshed = refreshed_order(account_id, order_id)
+            if refreshed["status"] not in ACTIVE_STATUSES:
+                raise BrokerApiError("이미 체결되었거나 취소된 주문입니다.")
+            target = {**_target_of(record), "order_id": order_id}
+            if kind == "modify":
+                _modify(target, reraise=True)
+            else:
+                _cancel(target, reraise=True)
+            return
+
+        if kind != "order":
+            raise BrokerApiError(f"지원하지 않는 요청 종류입니다: {kind}")
+        thread = find_signal_thread(thread_ts)
+        message = _match_thread_message(thread, side=side, round_no=round_no, ticker=ticker) if thread else None
+        if not thread or not message:
+            raise BrokerApiError("이미 회수되었거나 스레드 정보를 찾을 수 없습니다.")
+        request = message["request"]
+        if before_order is not None:
+            before_order(thread, message)
+        if not reserve_signal_for_order(thread_ts, message["ts"]):
+            raise BrokerApiError("이미 다른 주문이 진행 중입니다. 잠시 후 다시 확인하세요.")
+        target: dict[str, Any] = {
+            "request": request,
+            "channel": thread["channel"],
+            "message_ts": message["ts"],
+            "thread_ts": thread_ts,
+        }
+        if confirmed is not None:
+            target["confirmed"] = confirmed
+        if confirmation_id is not None:
+            target["confirmation_id"] = confirmation_id
+        try:
+            _place(target, reraise=True)
+        finally:
+            finish_order_reservation(thread_ts)

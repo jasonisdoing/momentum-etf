@@ -31,7 +31,7 @@ import { GridToolbarButton } from "../components/GridToolbarButton";
 import { HoldingsGroupButton, HoldingsGroupDialog, HoldingsGroupName, type HoldingsGroupDraft } from "../components/HoldingsGroupControls";
 import { AppModal } from "../components/AppModal";
 import { StatusBadge } from "../components/StatusBadge";
-import { SlackSignalBadge, SlackWithdrawModal } from "../components/SlackSignalControls";
+import { SlackSignalActionModal, SlackSignalBadge, type SlackSignalActionTarget } from "../components/SlackSignalControls";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { useStockMemoSave } from "../components/useStockMemoSave";
@@ -450,11 +450,11 @@ function hasRoundStatus(row: RoundRow): boolean {
 function RoundStatus({
   row,
   compact,
-  onWithdrawSignal,
+  onOpenSignal,
 }: {
   row: RoundRow;
   compact: boolean;
-  onWithdrawSignal: (signal: SlackSignal, label: string) => void;
+  onOpenSignal: (row: RoundRow, signal: SlackSignal, label: string) => void;
 }) {
   const currency = useTradeCurrency();
   const badges = [
@@ -468,8 +468,12 @@ function RoundStatus({
           ? "매도후재매수 슬랙"
           : `${SIDE_WORDS[signal.side]}슬랙`;
       return (
-        <SlackSignalBadge key={`slack-${signal.side}`} label={label} compact={compact} showWithdraw={signal.manual}
-          onWithdraw={signal.can_withdraw ? () => onWithdrawSignal(signal, label) : undefined} />
+        <SlackSignalBadge
+          key={`slack-${signal.side}`}
+          label={label}
+          compact={compact}
+          onClick={() => onOpenSignal(row, signal, label)}
+        />
       );
     }),
     ...row.order_sides.map((side) => (
@@ -804,7 +808,7 @@ function AccountSettingsCard({
   switching,
   onAccountChange,
   onSaved,
-  onWithdrawSignal,
+  onOpenSignal,
   onSignalSent,
 }: {
   view: View;
@@ -813,7 +817,7 @@ function AccountSettingsCard({
   switching: boolean;
   onAccountChange: (accountId: string) => void;
   onSaved: (next: View) => void;
-  onWithdrawSignal: (signal: SlackSignal, label: string) => void;
+  onOpenSignal: (row: RoundRow, signal: SlackSignal, label: string) => void;
   onSignalSent: () => Promise<void>;
 }) {
   const toast = useToast();
@@ -1140,7 +1144,7 @@ function AccountSettingsCard({
       cellRenderer: ({ data }: { data?: TradeListRow }) => (
         <span style={{ display: "inline-flex", gap: 6, alignItems: "center", whiteSpace: "nowrap", fontSize: "var(--fs-sm)" }}>
           {(data?.statusRounds ?? []).map((row) => (
-            <RoundStatus key={row.round} row={row} compact onWithdrawSignal={onWithdrawSignal} />
+            <RoundStatus key={row.round} row={row} compact onOpenSignal={onOpenSignal} />
           ))}
         </span>
       ),
@@ -1160,7 +1164,7 @@ function AccountSettingsCard({
       valueGetter: (row) => (row?.is_label || row?.key === TOTAL_ROW_KEY || row?.key === TRADE_TOTAL_ROW_KEY ? null : row?.mdd_pct),
       isPartial: (row) => Boolean(row?.gap_partial),
     }),
-  ], [saving, onWithdrawSignal, gapMode, view.recommended_gap_months, view.recommended_gap_rounds]);
+  ], [saving, onOpenSignal, gapMode, view.recommended_gap_months, view.recommended_gap_rounds]);
 
   const tradeRowClass = ({ data }: RowClassParams<TradeListRow>) => [
     data?.is_group || data?.key === TOTAL_ROW_KEY || data?.key === TRADE_TOTAL_ROW_KEY ? "assetsGroupRow" : "",
@@ -1450,7 +1454,7 @@ function AccountSettingsCard({
               view={details}
               poolLabel={poolLabel(details.pool)}
               krwRate={view.krw_rate}
-              onWithdrawSignal={onWithdrawSignal}
+              onOpenSignal={onOpenSignal}
               onSignalSent={onSignalSent}
             />
           ) : (
@@ -1610,14 +1614,14 @@ function StrategySection({
   view,
   poolLabel,
   krwRate,
-  onWithdrawSignal,
+  onOpenSignal,
   onSignalSent,
 }: {
   view: StrategyView | FailedStrategy;
   /** 전략의 가격 출처 표기. */
   poolLabel: string;
   krwRate: number | null;
-  onWithdrawSignal: (signal: SlackSignal, label: string) => void;
+  onOpenSignal: (row: RoundRow, signal: SlackSignal, label: string) => void;
   onSignalSent: () => Promise<void>;
 }) {
   const currency = useTradeCurrency();
@@ -1801,7 +1805,7 @@ function StrategySection({
                       ) : null}
                     </td>
                     <td style={{ ...tdStyle, textAlign: "left", ...stickyCell(2) }}>
-                      <RoundStatus row={row} compact={false} onWithdrawSignal={onWithdrawSignal} />
+                      <RoundStatus row={row} compact={false} onOpenSignal={onOpenSignal} />
                     </td>
                     <td style={{ ...tdStyle, color: "var(--text-muted)", ...stickyCell(3) }}>
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
@@ -1873,8 +1877,7 @@ export function StrategyTradeClient() {
   const [loading, setLoading] = useState(true);
   const [pendingAccountId, setPendingAccountId] = useState<string | null>(null);
   const requestSeqRef = useRef(0);
-  const [withdrawing, setWithdrawing] = useState<{ key: string; label: string } | null>(null);
-  const [withdrawBusy, setWithdrawBusy] = useState(false);
+  const [managingSignal, setManagingSignal] = useState<SlackSignalActionTarget | null>(null);
 
   const load = useCallback(
     async (accountId: string | null, remembered = false) => {
@@ -1905,30 +1908,44 @@ export function StrategyTradeClient() {
     [toast],
   );
 
-  const askWithdrawSignal = useCallback((signal: SlackSignal, label: string) => {
-    setWithdrawing({ key: signal.key, label });
-  }, []);
-
-  const confirmWithdrawSignal = useCallback(async () => {
-    if (!withdrawing) return;
-    setWithdrawBusy(true);
-    try {
-      const resp = await fetch("/api/strategy-trade/withdraw-signal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: withdrawing.key }),
+  const openSignalModal = useCallback(
+    (row: RoundRow, signal: SlackSignal, label: string) => {
+      if (!view?.account_id) return;
+      const currentCurrency = view.country_code ? CURRENCY_BY_COUNTRY[view.country_code] ?? "KRW" : "KRW";
+      const accountOption = view.account_options.find((account) => account.account_id === view.account_id);
+      const accountLabel = accountOption ? `${accountOption.name} (${accountOption.account_id})` : view.account_id;
+      const sideLabel = signal.side === "sell" && row.rebuy_after_sell ? "매도후재매수" : SIDE_WORDS[signal.side];
+      const params = new URLSearchParams({
+        account_id: view.account_id,
+        thread_ts: signal.key,
+        side: signal.side,
+        round_no: String(row.round),
+        ticker: row.ticker,
       });
-      const payload = await resp.json();
-      if (!resp.ok) throw new Error(payload?.error ?? "슬랙 신호를 회수하지 못했습니다.");
-      toast.success("슬랙 신호를 회수했습니다.");
-      setWithdrawing(null);
-      await load(view?.account_id ?? null);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "슬랙 신호를 회수하지 못했습니다.");
-    } finally {
-      setWithdrawBusy(false);
-    }
-  }, [withdrawing, load, toast, view?.account_id]);
+      setManagingSignal({
+        accountId: view.account_id,
+        accountLabel,
+        currency: currentCurrency,
+        title: `${row.round}호 ${row.name}(${row.ticker})`,
+        text: `${label} · ${row.quantity.toLocaleString()}주`,
+        sideLabel,
+        sideColor: signal.side === "sell" ? "var(--down-color, #2f6fd0)" : "var(--up-color, #d64545)",
+        withdrawKey: signal.can_withdraw ? signal.key : null,
+        statusUrl: `/api/strategy-trade/signal-action?${params.toString()}`,
+        actionUrl: "/api/strategy-trade/signal-action",
+        withdrawUrl: "/api/strategy-trade/withdraw-signal",
+        actionPayload: {
+          account_id: view.account_id,
+          thread_ts: signal.key,
+          side: signal.side,
+          round_no: row.round,
+          ticker: row.ticker,
+        },
+        withdrawPayload: {},
+      });
+    },
+    [view],
+  );
 
   useEffect(() => {
     // 마지막으로 고른 계좌는 브라우저에 기억한다(사고팔기 화면 전용 키).
@@ -1980,15 +1997,16 @@ export function StrategyTradeClient() {
             switching={loading}
             onAccountChange={(next) => void load(next)}
             onSaved={setView}
-            onWithdrawSignal={askWithdrawSignal}
+            onOpenSignal={openSignalModal}
             onSignalSent={() => load(view.account_id)}
           />
         </div>
 
-        <SlackWithdrawModal label={withdrawing?.label ?? null}
-          busy={withdrawBusy} onClose={() => setWithdrawing(null)} onConfirm={() => void confirmWithdrawSignal()}>
-          {" "}같은 메시지로 나간 다른 신호도 함께 회수됩니다.
-        </SlackWithdrawModal>
+        <SlackSignalActionModal
+          target={managingSignal?.accountId === view.account_id ? managingSignal : null}
+          onClose={() => setManagingSignal(null)}
+          onChanged={() => void load(view.account_id)}
+        />
       </TradeCurrencyContext.Provider>
     </PageFrame>
   );

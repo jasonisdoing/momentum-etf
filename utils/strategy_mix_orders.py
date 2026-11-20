@@ -6,8 +6,6 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from uuid import uuid4
 
-from bson import ObjectId
-
 from services.broker_api_service import BrokerApiError, OrderUncertainError, fetch_broker_balance
 from services.broker_trade_service import account_country, account_env, list_day_orders, resolve_us_exchange
 from utils.db_manager import get_db_connection
@@ -21,23 +19,13 @@ from utils.strategy_trade_orders import (
     _now,
     _orders,
     _require_order_allowed,
-    find_signal_thread,
-    preview_modify_record,
-    refreshed_order,
     register_signal_thread,
     require_order_session,
     resolve_order_quote,
-    serialize_order,
     submit_order_record,
 )
 from utils.strategy_trade_signal_lock import signal_lock
-from utils.strategy_trade_threads import (
-    can_withdraw_signal,
-    finish_order_reservation,
-    reserve_signal_for_order,
-    send_thread_message,
-    withdraw_signal,
-)
+from utils.strategy_trade_threads import can_withdraw_signal, send_thread_message, withdraw_signal
 from utils.ticker_resolver import resolve_ticker_meta
 
 COLLECTION = "strategy_mix_order_signals"
@@ -383,22 +371,10 @@ def place_mix_order(request: dict, slack: dict, confirmed: dict, confirmation_id
     return {**placed, "signal_price": order["signal_price"]}
 
 
-def _order_summary(order: dict[str, Any]) -> dict[str, Any]:
-    filled = int(order.get("filled_quantity") or 0)
-    quantity = int(order["quantity"])
-    return {
-        "id": order.get("id") or str(order["_id"]),
-        "status": order["status"],
-        "price": order["price"],
-        "quantity": quantity,
-        "filled_quantity": filled,
-        "remaining_quantity": max(quantity - filled, 0),
-        "country": order["country"],
-    }
-
-
 def get_mix_signal_action_state(account_id: str, ticker: str, action_key: str) -> dict[str, Any]:
     """웹 통합 모달용 합성 슬랙 신호의 현재 상태(주문 전·미체결·처리 완료)를 조회한다."""
+    from utils.slack_mock_orders import describe_slack_thread_action
+
     record = _signals().find_one({"_id": _signal_id(account_id, ticker)})
     if not record or record.get("action_key") != action_key:
         return {
@@ -411,92 +387,23 @@ def get_mix_signal_action_state(account_id: str, ticker: str, action_key: str) -
         label = "종료됨" if record["state"] == "closed" else "발송 확인 중"
         reason = "이미 종료된 신호입니다." if record["state"] == "closed" else "슬랙 발송 결과를 확인해야 합니다."
         return {"phase": "completed", "status_label": label, "reason": reason, "withdraw_key": None}
-
     thread_ts = record.get("thread_ts")
-    latest = _orders().find_one({"slack.thread_ts": thread_ts}, sort=[("_id", -1)]) if thread_ts else None
-    if latest and latest["status"] in ACTIVE_STATUSES:
-        refreshed = refreshed_order(account_id, str(latest["_id"]))
-        if refreshed["status"] in ACTIVE_STATUSES:
-            preview = None
-            modify_error = None
-            try:
-                preview = preview_modify_record(refreshed["id"])
-            except BrokerApiError as exc:
-                modify_error = str(exc)
-            return {
-                "phase": "active_order",
-                "status_label": "미체결 진행 중",
-                "thread_ts": thread_ts,
-                "order": _order_summary(refreshed),
-                "modify_preview": {
-                    "target_price": preview["target_price"],
-                    "quote_label": preview["quote_label"],
-                    "remaining_quantity": preview["remaining_quantity"],
-                }
-                if preview
-                else None,
-                "modify_error": modify_error,
-                "withdraw_key": None,
-            }
-        latest = refreshed
-    elif latest:
-        latest = serialize_order(latest)
-
-    if latest and (int(latest.get("filled_quantity") or 0) > 0 or latest["status"] in ("filled", "expired")):
-        return {
-            "phase": "completed",
-            "status_label": "처리 완료",
-            "reason": f"이미 주문({latest['status']})이 처리되었습니다.",
-            "order": _order_summary(latest),
-            "withdraw_key": None,
-        }
-
-    withdraw_key = thread_ts if thread_ts and can_withdraw_signal(thread_ts, allow_unregistered=True) else None
-    thread = find_signal_thread(thread_ts) if thread_ts else None
-    if not thread or not thread.get("messages"):
+    if not thread_ts:
         return {
             "phase": "completed",
             "status_label": "신호 정보 없음",
             "reason": "슬랙 스레드 정보를 찾을 수 없습니다.",
-            "withdraw_key": withdraw_key,
+            "withdraw_key": None,
         }
-    request = thread["messages"][0]["request"]
-    try:
-        order = resolve_mix_order(request, thread_ts)
-    except RoundNotOrderableError as exc:
-        return {
-            "phase": "completed",
-            "status_label": "주문 불가",
-            "reason": str(exc),
-            "withdraw_key": withdraw_key,
-        }
-    except BrokerApiError as exc:
-        return {
-            "phase": "ready_to_order",
-            "status_label": "주문 대기",
-            "thread_ts": thread_ts,
-            "order_error": str(exc),
-            "withdraw_key": withdraw_key,
-        }
-
-    confirmation_id = f"web-{uuid4().hex}"
-    save_mix_confirmation(request, thread_ts, confirmation_id)
-    return {
-        "phase": "ready_to_order",
-        "status_label": "주문 대기",
-        "thread_ts": thread_ts,
-        "confirmation_id": confirmation_id,
-        "confirmed": mix_order_terms(order),
-        "order_preview": {
-            "quantity": order["quantity"],
-            "price": order["price"],
-            "amount": order["price"] * order["quantity"],
-            "quote_label": order["quote_label"],
-            "venue": order["venue"],
-            "country": order["country"],
-        },
-        "withdraw_key": withdraw_key,
-    }
+    state, request, order = describe_slack_thread_action(
+        account_id, thread_ts, ticker=ticker, allow_unregistered_withdraw=True
+    )
+    if state["phase"] == "ready_to_order" and order is not None and request is not None:
+        confirmation_id = f"web-{uuid4().hex}"
+        save_mix_confirmation(request, thread_ts, confirmation_id)
+        state["confirmation_id"] = confirmation_id
+        state["confirmed"] = mix_order_terms(order)
+    return state
 
 
 def execute_mix_web_order(
@@ -508,63 +415,40 @@ def execute_mix_web_order(
     confirmed: dict[str, Any],
 ) -> dict[str, Any]:
     """웹 통합 모달에서 합성 주문을 실행하고 슬랙 메시지도 함께 갱신한다."""
-    from utils.slack_mock_orders import _place
+    from utils.slack_mock_orders import execute_slack_thread_action
 
-    with signal_lock():
+    def _check(thread: dict[str, Any], message: dict[str, Any]) -> None:
         record = _signals().find_one({"_id": _signal_id(account_id, ticker), "thread_ts": thread_ts, "state": "sent"})
-        thread = find_signal_thread(thread_ts)
-        if not record or record.get("action_key") != action_key or not thread or not thread.get("messages"):
+        if not record or record.get("action_key") != action_key:
             raise BrokerApiError("이미 회수되었거나 다른 신호로 변경되었습니다. 상태를 새로고침하세요.")
-        message = thread["messages"][0]
-        request = message["request"]
-        if not mix_submission_open(request, thread_ts, confirmation_id):
+        if not mix_submission_open(message["request"], thread_ts, confirmation_id):
             raise BrokerApiError(
                 "이미 슬랙 등에서 주문이 진행되었거나 확인창이 만료되었습니다. 새로고침 후 다시 확인하세요."
             )
-        if not reserve_signal_for_order(thread_ts, message["ts"]):
-            raise BrokerApiError("이미 다른 주문이 진행 중입니다. 잠시 후 다시 확인하세요.")
-        target = {
-            "request": request,
-            "channel": thread["channel"],
-            "message_ts": message["ts"],
-            "thread_ts": thread_ts,
-            "confirmed": confirmed,
-            "confirmation_id": confirmation_id,
-        }
-        try:
-            _place(target, reraise=True)
-        finally:
-            finish_order_reservation(thread_ts)
+
+    execute_slack_thread_action(
+        "order",
+        account_id,
+        thread_ts,
+        ticker=ticker,
+        confirmed=confirmed,
+        confirmation_id=confirmation_id,
+        before_order=_check,
+    )
     return get_mix_signal_action_state(account_id, ticker, action_key)
-
-
-def _active_web_order_target(account_id: str, ticker: str, order_id: str) -> dict[str, Any]:
-    record = _orders().find_one({"_id": ObjectId(order_id), "account_id": account_id, "ticker": ticker})
-    if record is None:
-        raise BrokerApiError("주문 기록을 찾을 수 없습니다.")
-    refreshed = refreshed_order(account_id, order_id)
-    if refreshed["status"] not in ACTIVE_STATUSES:
-        raise BrokerApiError("이미 체결되었거나 취소된 주문입니다.")
-    from utils.slack_mock_orders import _target_of
-
-    return {**_target_of(record), "order_id": order_id}
 
 
 def execute_mix_web_modify(account_id: str, ticker: str, action_key: str, order_id: str) -> dict[str, Any]:
     """웹 통합 모달에서 미체결 주문 호가를 정정하고 슬랙 메시지도 함께 갱신한다."""
-    from utils.slack_mock_orders import _modify
+    from utils.slack_mock_orders import execute_slack_thread_action
 
-    with signal_lock():
-        target = _active_web_order_target(account_id, ticker, order_id)
-        _modify(target, reraise=True)
+    execute_slack_thread_action("modify", account_id, "", order_id=order_id, ticker=ticker)
     return get_mix_signal_action_state(account_id, ticker, action_key)
 
 
 def execute_mix_web_cancel(account_id: str, ticker: str, action_key: str, order_id: str) -> dict[str, Any]:
     """웹 통합 모달에서 미체결 주문을 취소하고 슬랙 메시지도 함께 갱신한다."""
-    from utils.slack_mock_orders import _cancel
+    from utils.slack_mock_orders import execute_slack_thread_action
 
-    with signal_lock():
-        target = _active_web_order_target(account_id, ticker, order_id)
-        _cancel(target, reraise=True)
+    execute_slack_thread_action("cancel", account_id, "", order_id=order_id, ticker=ticker)
     return get_mix_signal_action_state(account_id, ticker, action_key)

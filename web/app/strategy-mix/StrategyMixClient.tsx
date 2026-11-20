@@ -16,8 +16,7 @@ import {
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
 import { StatusBadge } from "../components/StatusBadge";
-import { SlackSignalBadge } from "../components/SlackSignalControls";
-import { MixSlackActionModal, type MixSlackActionTarget } from "./MixSlackActionModal";
+import { SlackSignalActionModal, SlackSignalBadge, type SlackSignalActionTarget } from "../components/SlackSignalControls";
 import { SlackAlarmField } from "../components/SlackAlarmField";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { updateStockMemo } from "@/lib/stocks-store";
@@ -374,9 +373,8 @@ function ActionGroupList({ groups, signals, onSelect, onManageSignal }: {
                         <SlackSignalBadge
                           label="슬랙 발송됨"
                           compact
-                          showWithdraw={false}
                           title="눌러서 주문·정정·취소·회수"
-                          onWithdraw={onManageSignal ? () => onManageSignal(item, withdrawKey) : undefined}
+                          onClick={onManageSignal ? () => onManageSignal(item, withdrawKey) : undefined}
                         />
                       ) : (
                         <StatusBadge compact color="var(--text-muted)">슬랙 발송 확인 필요</StatusBadge>
@@ -455,8 +453,7 @@ export function StrategyMixClient() {
   // 운용 현황 탭.
   const [positions, setPositions] = useState<Positions | null>(null);
   const [selectedAction, setSelectedAction] = useState<{ item: ActionItem; accountId: string; accountLabel: string } | null>(null);
-  const [managingSignal, setManagingSignal] = useState<MixSlackActionTarget | null>(null);
-  const [withdrawBusy, setWithdrawBusy] = useState(false);
+  const [managingSignal, setManagingSignal] = useState<SlackSignalActionTarget | null>(null);
   const [sendingAction, setSendingAction] = useState(false);
   const [sendActionError, setSendActionError] = useState<string | null>(null);
   const [positionsLoading, setPositionsLoading] = useState(false);
@@ -1432,34 +1429,6 @@ export function StrategyMixClient() {
   // 내일의 액션 = 다음 거래일(연휴면 실제로는 며칠 뒤 — 세부 날짜는 그룹 제목에).
   const todayActionGroups = actionGroups.filter((group) => group.section === "today");
 
-  async function confirmWithdrawAction(target: MixSlackActionTarget, key: string) {
-    if (withdrawBusy || target.accountId !== accountId) return;
-    setWithdrawBusy(true);
-    try {
-      const { accountId: targetAccount, ticker } = target;
-      const response = await fetch("/api/strategy-mix/withdraw-signal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_id: targetAccount, ticker, key }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? "슬랙 신호를 회수하지 못했습니다.");
-      setPositions((current) => {
-        if (current?.account_id !== targetAccount) return current;
-        const orderSignals = { ...current.order_signals };
-        delete orderSignals[target.actionKey];
-        return { ...current, order_signals: orderSignals };
-      });
-      toast.success("슬랙 신호를 회수했습니다.");
-      setManagingSignal(null);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "슬랙 신호를 회수하지 못했습니다.");
-      setManagingSignal(null);
-    } finally {
-      setWithdrawBusy(false);
-    }
-  }
-
   async function sendSelectedAction() {
     if (!selectedAction || sendingAction || selectedAction.accountId !== accountId) return;
     setSendingAction(true);
@@ -1492,19 +1461,28 @@ export function StrategyMixClient() {
   const actionSignalProps = {
     signals: positions?.order_signals,
     onManageSignal: canSendAction && positions
-      ? (item: ActionItem, withdrawKey: string | null) =>
+      ? (item: ActionItem, withdrawKey: string | null) => {
+          const params = new URLSearchParams({
+            account_id: accountId,
+            ticker: item.ticker,
+            action_key: item.key,
+          });
           setManagingSignal({
             accountId,
             accountLabel,
             currency: positions.currency,
-            actionKey: item.key,
-            ticker: item.ticker,
             title: item.title,
             text: item.text,
-            side: item.side,
-            quantity: item.quantity,
+            sideLabel: item.side === "sell" ? "매도" : "매수",
+            sideColor: item.side === "sell" ? "var(--down-color, #2f6fd0)" : "var(--up-color, #d64545)",
             withdrawKey,
-          })
+            statusUrl: `/api/strategy-mix/signal-action?${params.toString()}`,
+            actionUrl: "/api/strategy-mix/signal-action",
+            withdrawUrl: "/api/strategy-mix/withdraw-signal",
+            actionPayload: { account_id: accountId, ticker: item.ticker, action_key: item.key },
+            withdrawPayload: { account_id: accountId, ticker: item.ticker },
+          });
+        }
       : undefined,
     onSelect: canSendAction ? (item: ActionItem) => {
       setSendActionError(null);
@@ -2047,11 +2025,9 @@ export function StrategyMixClient() {
           {sendActionError ? <p role="alert" className="text-danger mb-0">{sendActionError}</p> : null}
         </> : null}
       </AppModal>
-      <MixSlackActionModal
+      <SlackSignalActionModal
         target={managingSignal?.accountId === accountId ? managingSignal : null}
-        withdrawBusy={withdrawBusy}
         onClose={() => setManagingSignal(null)}
-        onWithdraw={(target, key) => void confirmWithdrawAction(target, key)}
         onChanged={() => setPositionsReloadKey((key) => key + 1)}
       />
     </PageFrame>
