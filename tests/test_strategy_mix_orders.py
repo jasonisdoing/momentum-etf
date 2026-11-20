@@ -263,7 +263,9 @@ class MixOrderTest(TestCase):
         broker.assert_called_once_with("a1", "sell", "ETF", 36, 100, "KRX")
         self.assertEqual(store.insert_one.call_args.args[0]["mix_action_key"], "action")
         self.assertIn("주문 접수", send.call_args.args[0])
-        self.assertEqual(update.call_args.args[1][-1]["elements"][0]["action_id"], slack.CANCEL_ACTION_ID)
+        # 접수 뒤 메시지에는 공용 주문 조작 버튼(호가 정정·주문 취소)이 남는다.
+        actions = [element["action_id"] for element in update.call_args.args[1][-1]["elements"]]
+        self.assertEqual(actions, [slack.MODIFY_ACTION_ID, slack.CANCEL_ACTION_ID])
 
     def test_indeterminate_record_remains_active_after_refresh(self):
         self.orders.find.return_value = [
