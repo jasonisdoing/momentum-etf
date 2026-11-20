@@ -1181,6 +1181,11 @@ function AccountSettingsCard({
       if (!Number.isInteger(rounds) || rounds < view.rounds_min || rounds > view.rounds_max) {
         return void toast.error(`${label}: 회차 수는 ${view.rounds_min}~${view.rounds_max} 사이 정수여야 합니다.`);
       }
+      // 이어서 운용하는 전략은 보유 회차보다 적게 줄일 수 없다(서버도 같은 검사를 한다).
+      const strategy = row.strategy_id ? strategiesById.get(row.strategy_id) : undefined;
+      if (strategy && !("error" in strategy) && strategy.ticker === row.ticker && rounds < strategy.status.held_count) {
+        return void toast.error(`${label}: 회차 수는 보유 회차(${strategy.status.held_count}) 이상이어야 합니다.`);
+      }
       strategies.push({
         ...(row.strategy_id ? { strategy_id: row.strategy_id } : {}),
         ticker: row.ticker,
@@ -1211,7 +1216,7 @@ function AccountSettingsCard({
     } finally {
       setSaving(false);
     }
-  }, [accountId, drafts, groups, onSaved, slack, toast, view.pct_max, view.pct_min, view.rounds_max, view.rounds_min]);
+  }, [accountId, drafts, groups, onSaved, slack, strategiesById, toast, view.pct_max, view.pct_min, view.rounds_max, view.rounds_min]);
 
   const sendSlackTest = useCallback(async () => {
     setSlackTesting(true);

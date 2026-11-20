@@ -221,6 +221,20 @@ def _validated_target(
     return target
 
 
+def _require_rounds_cover_held(account_id: str, kept: dict[str, dict[str, Any]]) -> None:
+    """이어서 운용하는 전략의 회차 수가 지금 보유 회차 수보다 작으면 막는다 — 보유는 배치가 저장한 회차 원장이 정한다."""
+    if not kept:
+        return
+    ledgers = read_ledgers(account_id, sorted({entry["ticker"] for entry in kept.values()}))
+    for entry in kept.values():
+        ledger = ledgers[entry["ticker"]]
+        if isinstance(ledger, LedgerError):
+            raise ValueError(f"{entry['name']}: 보유 회차를 확인할 수 없어 저장하지 않습니다 — {ledger}")
+        held = sum(1 for lot in ledger.lots if lot.arbitrary_id is None)
+        if entry["rounds"] < held:
+            raise ValueError(f"{entry['name']}: 회차 수는 보유 회차({held}) 이상이어야 합니다.")
+
+
 def _sent_log_unset(sent_log: dict[str, Any], strategy_id: str) -> dict[str, str]:
     """그 전략의 알림 중복 방지 기록을 지우는 $unset 항목."""
     return {
@@ -286,6 +300,7 @@ def save_account_trade(account_id: str, slack_enabled: Any, strategies: Any, gro
         # 종목이 바뀌면 이전 주문 버튼이 새 종목을 가리키지 않도록 별도 전략으로 저장한다.
         target_id = sid if previous and previous["ticker"] == target["ticker"] else f"s{uuid4().hex[:8]}"
         planned[target_id] = {**target, "sort_order": sort_order}
+    _require_rounds_cover_held(account_id, {sid: planned[sid] for sid in planned if sid in current})
 
     collection = _settings_collection()
     stored = collection.find_one({"_id": _SETTINGS_KEY}, {"sent_log": 1, "accounts": 1}) or {}

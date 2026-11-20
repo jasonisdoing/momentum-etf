@@ -57,7 +57,7 @@ FIRST_ENTRY_WINDOWS: dict[str, tuple[tuple[time, time], ...]] = {
 EDITABLE_CONFIG_KEYS: tuple[str, ...] = ("trigger_pct", "round_size", "rounds", "auto_order")
 
 # 편집 가능 범위 — 화면 입력과 API 가 같은 한계를 쓴다.
-PCT_MIN, PCT_MAX = 0.1, 50.0
+PCT_MIN, PCT_MAX = 2.0, 50.0
 # 회차 크기(`round_size`) — 국가와 무관하게 원화 금액(만원) 정수로 저장한다. 미장은 환율로 달러 수량을 환산한다.
 ROUND_SIZE_UNIT_KRW = 10_000
 DEFAULT_ROUND_SIZE = 100
