@@ -191,14 +191,11 @@ type StrategyConfigRow = {
   high_drawdown_pct: number | null;
   /** 종목풀 순위(`/pools-rank`)와 같은 최근 20일 일간 수익률 표준편차(%). */
   volatility_pct: number | null;
-  /** 권장 간격(%) — 위 하락을 회차들이 복리로 덮는 간격(2~10%, `rules.recommended_gap_pct`). 참고값. */
+  /** 권장 간격(%) — 위 하락을 회차들이 복리로 덮는 간격(`rules.recommended_gap_pct`, 제한 없음). 참고값. */
   recommended_gap_pct: number | null;
   /** 계산에 쓴 거래일 수 — 3개월치가 없으면 있는 기간만 쓰고 `gap_partial` 이 참이다. */
   gap_days: number | null;
   gap_partial: boolean | null;
-  /** 종목 배수(이름 규칙 `leverage_name.json`)와 그 배수의 권장 간격 범위 [최소, 최대](%). */
-  leverage_multiple: number | null;
-  gap_range_pct: [number, number] | null;
 };
 
 type TickerOption = { ticker: string; name: string; pools: string[]; kind: "stock" | "etf" };
@@ -624,8 +621,6 @@ type TradeListRow = DraftRow & {
   recommended_gap_pct?: number | null;
   gap_days?: number | null;
   gap_partial?: boolean | null;
-  leverage_multiple?: number | null;
-  gap_range_pct?: [number, number] | null;
   roundQuantity?: number | null;
   is_label?: boolean;
   /** 상태(도달·슬랙·주문)가 있는 회차 — 아래 회차 표의 상태 칸과 같은 값. */
@@ -690,12 +685,11 @@ function recommendedGapColumn(gapMonths: number, gapRounds: number): ColDef<Trad
     pinned: "left",
     type: "numericColumn",
     headerTooltip:
-      `최근 ${gapMonths}개월(확정 종가) 고점 이후 최대 하락을 ${gapRounds}회가 복리로 덮는 간격 — 종목 배수(1·2·3배)별 범위로 자른다.`,
+      `최근 ${gapMonths}개월(확정 종가) 고점 이후 최대 하락을 ${gapRounds}회가 복리로 덮는 간격(최소·최대 제한 없음).`,
     tooltipValueGetter: ({ data }) => {
-      if (data?.drawdown_pct == null || data.gap_range_pct == null) return undefined;
+      if (data?.drawdown_pct == null) return undefined;
       const period = data.gap_partial ? `최근 ${data.gap_days}거래일(${gapMonths}개월 미만)` : `${gapMonths}개월`;
-      const [low, high] = data.gap_range_pct;
-      return `${period} 최대 하락 ${data.drawdown_pct.toFixed(1)}% · ${data.leverage_multiple}배 범위 ${low}~${high}%`;
+      return `${period} 최대 하락 ${data.drawdown_pct.toFixed(1)}%`;
     },
     valueFormatter: ({ value }) => (value == null ? "-" : `${Number(value).toFixed(1)}%`),
     // 기준 기간이 없어 있는 기간으로 낸 값은 순위 화면의 기간 미달 값과 같은 색으로 칠한다.
@@ -884,8 +878,6 @@ function AccountSettingsCard({
         recommended_gap_pct: quote?.recommended_gap_pct,
         gap_days: quote?.gap_days,
         gap_partial: quote?.gap_partial,
-        leverage_multiple: quote?.leverage_multiple,
-        gap_range_pct: quote?.gap_range_pct,
         currency,
         // 현재가 기준 회차 수량 — 서버 `round_buy_quantity` 와 같은 식(회차 금액 ÷ (현재가 × 환율), 내림).
         roundQuantity:

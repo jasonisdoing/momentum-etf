@@ -1220,10 +1220,10 @@ def _trade_account_docs() -> list[dict[str, Any]]:
 def recommended_gaps(
     entries: dict[str, dict[str, Any]], country: str, live_prices: dict[str, float] | None = None
 ) -> dict[str, dict[str, Any]]:
-    """같은 국가 전략들의 권장 간격·고점·MDD — 전략 id → {drawdown_pct, mdd_pct, high_drawdown_pct, recommended_gap_pct, leverage_multiple, gap_range_pct, gap_days, gap_partial}.
+    """같은 국가 전략들의 권장 간격·고점·MDD — 전략 id → {drawdown_pct, mdd_pct, high_drawdown_pct, recommended_gap_pct, gap_days, gap_partial}.
 
     확정 봉(`bar_anchor` 까지, 진행 중인 세션 제외)의 최근 `METRIC_WINDOW_MONTHS`(12개월) MDD 를 종목풀 순위(`single_stock_backtest_stats`)와
-    동일한 방식으로 계산하고 종목 배수별 범위로 자른다(`ladder.recommended_gap_pct`).
+    동일한 방식으로 계산한다(`ladder.recommended_gap_pct`, 최소·최대 제한 없음).
     기준 기간보다 짧으면 있는 기간으로 계산하고 기간 미달(`gap_partial`)로 표시하며, 종가가 2개 미만이면 비운다(None).
     """
     import pandas as pd
@@ -1247,7 +1247,6 @@ def recommended_gaps(
         for sid in sids:
             entry = entries[sid]
             ticker = entry["ticker"]
-            multiple = ladder.leverage_multiple(ticker, str(entry["name"]))
             close = slice_close_series_to_date(closes.get(ticker), latest_day)
             confirmed = close.loc[:last_bar].dropna() if close is not None else None
             live_price = live_prices.get(ticker) if live_prices else None
@@ -1276,12 +1275,8 @@ def recommended_gaps(
                 if confirmed is not None and not confirmed.empty
                 else None,
                 "recommended_gap_pct": (
-                    ladder.recommended_gap_pct(drawdown, RECOMMENDED_GAP_ROUNDS, multiple)
-                    if drawdown is not None
-                    else None
+                    ladder.recommended_gap_pct(drawdown, RECOMMENDED_GAP_ROUNDS) if drawdown is not None else None
                 ),
-                "leverage_multiple": multiple,
-                "gap_range_pct": ladder.recommended_gap_range(multiple),
                 "gap_days": gap_days,
                 "gap_partial": gap_partial,
             }
@@ -1390,8 +1385,6 @@ def load_strategy_trade_view(account_id: str | None) -> dict[str, Any]:
                 "recommended_gap_pct": quotes.get(entry["ticker"], {}).get("recommended_gap_pct"),
                 "gap_days": quotes.get(entry["ticker"], {}).get("gap_days"),
                 "gap_partial": quotes.get(entry["ticker"], {}).get("gap_partial"),
-                "leverage_multiple": quotes.get(entry["ticker"], {}).get("leverage_multiple"),
-                "gap_range_pct": quotes.get(entry["ticker"], {}).get("gap_range_pct"),
             }
             for sid, entry in configs
         ],

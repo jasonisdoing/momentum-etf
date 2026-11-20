@@ -13,30 +13,20 @@ SLACK_CHANNEL = SLACK_CHANNEL_IDS["#momentum-etf"]
 SLACK_ASSET_SUMMARY_CHANNEL = SLACK_CHANNEL_IDS["#momentum-etf-summary"]
 
 # 화면과 슬랙 자산 요약이 같은 종목명·티커 규칙을 사용한다 — 3배·2배·인버스로 나눠 두고,
-# 레버리지 여부(`LEVERAGE_NAME_RE`)는 셋을 합쳐 본다. 배수(`LEVERAGE_TRIPLE_RE`·`LEVERAGE_DOUBLE_RE`)는
-# 사고팔기 권장 간격이 쓴다(`core.strategy.trade.rules.leverage_multiple`).
+# 레버리지 여부(`LEVERAGE_NAME_RE`)는 셋을 합쳐 본다.
 with (Path(__file__).resolve().parent / "web" / "lib" / "leverage_name.json").open(
     encoding="utf-8"
 ) as leverage_name_file:
     _LEVERAGE_RULES = json.load(leverage_name_file)
-LEVERAGE_TRIPLE_RE = re.compile(_LEVERAGE_RULES["triple"], re.IGNORECASE)
-LEVERAGE_DOUBLE_RE = re.compile(_LEVERAGE_RULES["double"], re.IGNORECASE)
 LEVERAGE_NAME_RE = re.compile("|".join(_LEVERAGE_RULES[key] for key in ("triple", "double", "inverse")), re.IGNORECASE)
 # 이름으로는 알 수 없는 2배 종목 티커.
 LEVERAGE_TICKERS = frozenset(_LEVERAGE_RULES["double_tickers"])
 
-# 사고팔기 권장 간격 — 최근 `METRIC_WINDOW_MONTHS`(12개월)의 고점 이후 최대 하락을 `RECOMMENDED_GAP_ROUNDS`회차가 복리로 덮는 간격을
-# 종목 배수(1·2·3배)별 최소·최대(%)로 자른다.
+# 사고팔기 권장 간격 — 최근 `METRIC_WINDOW_MONTHS`(12개월)의 고점 이후 최대 하락을 `RECOMMENDED_GAP_ROUNDS`회차가 복리로 덮는 간격.
 # 참고 — 10회차(간격 9번, 복리)일 때 간격별로 1호 대비 덮는 최대 하락 = 1 − (1 − 간격)^9:
 #   1% → 8.6%   2% → 16.6%   3% → 24.0%   4% → 30.7%   5% → 37.0%
 #   6% → 42.7%  7% → 48.0%   8% → 52.8%   9% → 57.2%   10% → 61.3%
 RECOMMENDED_GAP_ROUNDS = 10
-RECOMMENDED_GAP_MIN_PCT_1X = 2
-RECOMMENDED_GAP_MIN_PCT_2X = 3
-RECOMMENDED_GAP_MIN_PCT_3X = 4
-RECOMMENDED_GAP_MAX_PCT_1X = 4
-RECOMMENDED_GAP_MAX_PCT_2X = 6
-RECOMMENDED_GAP_MAX_PCT_3X = 8
 
 # python scripts/update_market_calendars.py CACHE_START_DATE 변경시 실행
 CACHE_START_DATE = "2018-12-31"

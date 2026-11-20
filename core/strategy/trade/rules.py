@@ -11,21 +11,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from math import isfinite, log
 from typing import Literal
-
-from config import (
-    LEVERAGE_DOUBLE_RE,
-    LEVERAGE_TICKERS,
-    LEVERAGE_TRIPLE_RE,
-    RECOMMENDED_GAP_MAX_PCT_1X,
-    RECOMMENDED_GAP_MAX_PCT_2X,
-    RECOMMENDED_GAP_MAX_PCT_3X,
-    RECOMMENDED_GAP_MIN_PCT_1X,
-    RECOMMENDED_GAP_MIN_PCT_2X,
-    RECOMMENDED_GAP_MIN_PCT_3X,
-)
 
 InstrumentKind = Literal["stock", "etf"]
 Country = Literal["kor", "us"]
@@ -127,35 +114,8 @@ def ladder_position(price: float, first_fill: float, trigger_pct: float) -> int:
     return round(log(price / first_fill) / log(down_ratio(trigger_pct))) + 1
 
 
-# 권장 간격의 기간·배수별 범위는 `config.RECOMMENDED_GAP_*` 가 단일 소스다. 배수 → (최소, 최대) 간격(%).
-_RECOMMENDED_GAP_RANGE_BY_MULTIPLE = {
-    1: (RECOMMENDED_GAP_MIN_PCT_1X, RECOMMENDED_GAP_MAX_PCT_1X),
-    2: (RECOMMENDED_GAP_MIN_PCT_2X, RECOMMENDED_GAP_MAX_PCT_2X),
-    3: (RECOMMENDED_GAP_MIN_PCT_3X, RECOMMENDED_GAP_MAX_PCT_3X),
-}
-
-
-def leverage_multiple(ticker: str, name: str) -> int:
-    """종목 배수 — 이름에 3X 면 3, 2X·레버리지·Geared·Ultra 이거나 2배 티커면 2, 아니면 1.
-
-    인버스 여부와 무관하게 배수만 본다(인버스2X 는 2, 인버스는 1). 규칙은 `web/lib/leverage_name.json` 단일 소스.
-    """
-    if LEVERAGE_TRIPLE_RE.search(name):
-        return 3
-    if LEVERAGE_DOUBLE_RE.search(name) or ticker in LEVERAGE_TICKERS:
-        return 2
-    return 1
-
-
-def recommended_gap_range(multiple: int) -> tuple[int, int]:
-    """배수별 권장 간격 범위(%) — (최소, 최대)."""
-    if multiple not in _RECOMMENDED_GAP_RANGE_BY_MULTIPLE:
-        raise ValueError(f"권장 간격 범위가 없는 배수입니다: {multiple}")
-    return _RECOMMENDED_GAP_RANGE_BY_MULTIPLE[multiple]
-
-
-def recommended_gap_pct(drawdown: float, rounds: int, multiple: int) -> float:
-    """``drawdown``(0~1)을 ``rounds − 1`` 번의 간격이 복리로 덮는 간격(%) — 배수별 범위(`recommended_gap_range`)로 자른다.
+def recommended_gap_pct(drawdown: float, rounds: int) -> float:
+    """``drawdown``(0~1)을 ``rounds − 1`` 번의 간격이 복리로 덮는 간격(%).
 
     간격 = 1 − (1 − MDD)^(1 / (회차 수 − 1)).
     """
@@ -164,5 +124,4 @@ def recommended_gap_pct(drawdown: float, rounds: int, multiple: int) -> float:
     if not 0.0 <= drawdown < 1.0:
         raise ValueError(f"최대 하락은 0 이상 1 미만이어야 합니다: {drawdown}")
     gap = (1.0 - (1.0 - drawdown) ** (1.0 / (rounds - 1))) * 100.0
-    low, high = recommended_gap_range(multiple)
-    return round(min(max(gap, low), high), 2)
+    return round(gap, 2)
