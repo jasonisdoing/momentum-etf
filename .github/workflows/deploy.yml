@@ -25,6 +25,9 @@ jobs:
           set -euo pipefail
           export PATH="/Users/jason/DEV/momentum-etf/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
           cd "$APP_DIR"
+          # 배포 잠금 스크립트(`infra/cron/deploy_flag_*.py`)는 코드 갱신 **전** 디스크의 파일로 실행된다 — 그 파일이
+          # 저장소 루트를 import 경로에 넣지 않아도 `utils` 를 찾도록 이 단계 전체에 루트를 지정한다.
+          export PYTHONPATH="$APP_DIR"
 
           set -a
           source .env
