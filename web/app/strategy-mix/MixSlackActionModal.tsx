@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { formatCurrencyPrice } from "@/lib/price-format";
 
 import { AppModal } from "../components/AppModal";
 import { StatusBadge } from "../components/StatusBadge";
+import { useToast } from "../components/ToastProvider";
 
 export type MixSlackPhase = "ready_to_order" | "active_order" | "completed";
 
@@ -13,6 +14,7 @@ export type MixSlackActionTarget = {
   accountId: string;
   accountLabel: string;
   currency: string;
+  actionKey: string;
   ticker: string;
   title: string;
   text: string;
@@ -21,40 +23,151 @@ export type MixSlackActionTarget = {
   withdrawKey: string | null;
 };
 
+type SignalActionState = {
+  phase: MixSlackPhase;
+  status_label: string;
+  thread_ts?: string | null;
+  reason?: string;
+  order_error?: string;
+  confirmation_id?: string;
+  confirmed?: Record<string, unknown>;
+  order_preview?: {
+    quantity: number;
+    price: number;
+    amount: number;
+    quote_label: string;
+    venue: string;
+    country: string;
+  };
+  order?: {
+    id: string;
+    status: string;
+    price: number;
+    quantity: number;
+    filled_quantity: number;
+    remaining_quantity: number;
+    country: string;
+  };
+  modify_preview?: {
+    target_price: number;
+    quote_label: string;
+    remaining_quantity: number;
+  } | null;
+  modify_error?: string | null;
+  withdraw_key: string | null;
+};
+
 type Props = {
   target: MixSlackActionTarget | null;
-  busy: boolean;
+  withdrawBusy: boolean;
   onClose: () => void;
-  onWithdraw: (target: MixSlackActionTarget) => void;
+  onWithdraw: (target: MixSlackActionTarget, withdrawKey: string) => void;
+  onChanged: () => void;
 };
 
-const PHASE_LABELS: Record<MixSlackPhase, { label: string; color: string }> = {
-  ready_to_order: { label: "주문 대기", color: "var(--tblr-green, #2fb344)" },
-  active_order: { label: "미체결 진행 중", color: "var(--tblr-orange, #f76707)" },
-  completed: { label: "처리 완료", color: "var(--text-muted)" },
+const PHASE_COLORS: Record<MixSlackPhase, string> = {
+  ready_to_order: "var(--tblr-green, #2fb344)",
+  active_order: "var(--tblr-orange, #f76707)",
+  completed: "var(--text-muted)",
 };
-
-const PHASE_TABS: Array<{ key: MixSlackPhase; label: string }> = [
-  { key: "ready_to_order", label: "1. 주문 전" },
-  { key: "active_order", label: "2. 미체결 (정정·취소)" },
-  { key: "completed", label: "3. 이미 처리됨" },
-];
 
 /**
  * 슬랙 발송됨 통합 액션 모달 — 슬랙에서 가능한 주문·호가정정·취소·회수를 웹에서도 처리한다.
- * 1단계 UI 확인용으로 상태별 화면 전환 미리보기를 포함한다.
+ * 열릴 때마다 서버에서 최신 상태를 조회해 슬랙과 동시 작업 시 중복 실행을 막는다.
  */
-export function MixSlackActionModal({ target, busy, onClose, onWithdraw }: Props) {
-  const [phase, setPhase] = useState<MixSlackPhase>("ready_to_order");
-  const [notice, setNotice] = useState<string | null>(null);
+export function MixSlackActionModal({ target, withdrawBusy, onClose, onWithdraw, onChanged }: Props) {
+  const toast = useToast();
+  const [state, setState] = useState<SignalActionState | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadState = useCallback(async (current: MixSlackActionTarget) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({
+        account_id: current.accountId,
+        ticker: current.ticker,
+        action_key: current.actionKey,
+      });
+      const response = await fetch(`/api/strategy-mix/signal-action?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "슬랙 발송 주문 상태를 조회하지 못했습니다.");
+      setState(result as SignalActionState);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "슬랙 발송 주문 상태를 조회하지 못했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!target) {
+      setState(null);
+      setError(null);
+      return;
+    }
+    void loadState(target);
+  }, [target, loadState]);
 
   if (!target) return null;
 
+  const busy = loading || submitting || withdrawBusy;
   const sideLabel = target.side === "sell" ? "매도" : "매수";
-  const phaseMeta = PHASE_LABELS[phase];
-  const samplePrice = target.currency === "USD" ? 102.4 : 11660;
-  const sampleModifyPrice = target.currency === "USD" ? 102.6 : 11670;
-  const sampleAmount = samplePrice * target.quantity;
+  const phaseColor = state ? PHASE_COLORS[state.phase] : "var(--text-muted)";
+  const effectiveWithdrawKey = state ? state.withdraw_key : target.withdrawKey;
+
+  async function runAction(kind: "order" | "modify" | "cancel") {
+    if (!target || !state || busy) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const body =
+        kind === "order"
+          ? {
+              kind,
+              account_id: target.accountId,
+              ticker: target.ticker,
+              action_key: target.actionKey,
+              thread_ts: state.thread_ts,
+              confirmation_id: state.confirmation_id,
+              confirmed: state.confirmed,
+            }
+          : {
+              kind,
+              account_id: target.accountId,
+              ticker: target.ticker,
+              action_key: target.actionKey,
+              order_id: state.order?.id,
+            };
+      const response = await fetch("/api/strategy-mix/signal-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        await loadState(target);
+        throw new Error(result.error ?? "요청을 처리하지 못했습니다.");
+      }
+      setState(result as SignalActionState);
+      onChanged();
+      toast.success(
+        kind === "order"
+          ? `${sideLabel} 주문을 접수했습니다.`
+          : kind === "modify"
+            ? "호가 정정을 요청했습니다."
+            : "주문 취소를 요청했습니다.",
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "요청을 처리하지 못했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   const dlStyle: React.CSSProperties = {
     display: "grid",
@@ -74,24 +187,24 @@ export function MixSlackActionModal({ target, busy, onClose, onWithdraw }: Props
   const footer = (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, width: "100%" }}>
       <div>
-        {phase === "ready_to_order" && target.withdrawKey ? (
+        {state?.phase === "ready_to_order" && effectiveWithdrawKey ? (
           <button
             type="button"
             className="btn btn-outline-danger"
             disabled={busy}
-            onClick={() => onWithdraw(target)}
+            onClick={() => onWithdraw(target, effectiveWithdrawKey)}
           >
-            {busy ? "회수 중…" : "신호 회수"}
+            {withdrawBusy ? "회수 중…" : "신호 회수"}
           </button>
         ) : null}
-        {phase === "active_order" ? (
+        {state?.phase === "active_order" && state.order ? (
           <button
             type="button"
             className="btn btn-outline-danger"
             disabled={busy}
-            onClick={() => setNotice("주문 취소 요청은 백엔드 연동 단계에서 실제 증권사 취소로 연결됩니다.")}
+            onClick={() => void runAction("cancel")}
           >
-            주문 취소
+            {submitting ? "처리 중…" : "주문 취소"}
           </button>
         ) : null}
       </div>
@@ -99,32 +212,32 @@ export function MixSlackActionModal({ target, busy, onClose, onWithdraw }: Props
         <button type="button" className="btn" disabled={busy} onClick={onClose}>
           닫기
         </button>
-        {phase === "ready_to_order" ? (
+        {state?.phase === "ready_to_order" && state.order_preview ? (
           <button
             type="button"
             className="btn btn-primary"
             disabled={busy}
-            onClick={() => setNotice("주문 실행은 백엔드 연동 단계에서 슬랙과 동일한 주문 경로로 연결됩니다.")}
+            onClick={() => void runAction("order")}
           >
-            {sideLabel} 주문하기
+            {submitting ? "주문 중…" : `${sideLabel} 주문하기`}
           </button>
         ) : null}
-        {phase === "active_order" ? (
+        {state?.phase === "active_order" && state.order ? (
           <button
             type="button"
             className="btn btn-primary"
-            disabled={busy}
-            onClick={() => setNotice("호가 정정 요청은 백엔드 연동 단계에서 실제 정정 경로로 연결됩니다.")}
+            disabled={busy || !state.modify_preview}
+            onClick={() => void runAction("modify")}
           >
-            호가 정정
+            {submitting ? "정정 중…" : "호가 정정"}
           </button>
         ) : null}
-        {phase === "completed" ? (
+        {state?.phase === "completed" ? (
           <button
             type="button"
             className="btn btn-outline-secondary"
             disabled={busy}
-            onClick={() => setNotice("상태 새로고침은 백엔드 상태 조회 API 연결 후 동작합니다.")}
+            onClick={() => void loadState(target)}
           >
             상태 새로고침
           </button>
@@ -140,29 +253,6 @@ export function MixSlackActionModal({ target, busy, onClose, onWithdraw }: Props
       onClose={() => { if (!busy) onClose(); }}
       footer={footer}
     >
-      {/* 1단계 UI 확인용 상태 전환 바 — 2단계 백엔드 연동 시 실제 조회 상태로 대체한다. */}
-      <div
-        role="tablist"
-        aria-label="상태 미리보기"
-        style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}
-      >
-        {PHASE_TABS.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            role="tab"
-            aria-selected={phase === tab.key}
-            className={`btn btn-sm ${phase === tab.key ? "btn-primary" : "btn-outline-secondary"}`}
-            onClick={() => {
-              setPhase(tab.key);
-              setNotice(null);
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
       <dl style={dlStyle}>
         <dt>계좌</dt>
         <dd style={{ margin: 0 }}>{target.accountLabel}</dd>
@@ -175,43 +265,59 @@ export function MixSlackActionModal({ target, busy, onClose, onWithdraw }: Props
         </dd>
         <dt>현재 상태</dt>
         <dd style={{ margin: 0 }}>
-          <StatusBadge compact color={phaseMeta.color}>{phaseMeta.label}</StatusBadge>
+          <StatusBadge compact color={phaseColor}>
+            {loading ? "확인 중…" : state?.status_label ?? "확인 실패"}
+          </StatusBadge>
         </dd>
       </dl>
 
-      {phase === "ready_to_order" ? (
+      {state?.phase === "ready_to_order" ? (
         <div style={boxStyle}>
-          <div style={{ fontWeight: 600, marginBottom: 8, fontSize: "var(--fs-sm)" }}>
-            주문 확인 (슬랙 주문하기 모달과 동일 기준)
-          </div>
-          <dl style={dlStyle}>
-            <dt>주문 수량</dt>
-            <dd style={{ margin: 0 }}>{target.quantity.toLocaleString()}주</dd>
-            <dt>지정가(호가)</dt>
-            <dd style={{ margin: 0 }}>{formatCurrencyPrice(samplePrice, target.currency)} (최우선 호가)</dd>
-            <dt>예상 금액</dt>
-            <dd style={{ margin: 0 }}>{formatCurrencyPrice(sampleAmount, target.currency)}</dd>
-            <dt>신호 대비</dt>
-            <dd style={{ margin: 0 }}>+0.00%</dd>
-          </dl>
-          <p style={{ margin: "8px 0 0", color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
-            실행 시 슬랙과 같은 락·중복 검사 후 주문을 접수하고 슬랙 스레드 버튼도 함께 갱신합니다.
-          </p>
+          {state.order_preview ? (
+            <>
+              <div style={{ fontWeight: 600, marginBottom: 8, fontSize: "var(--fs-sm)" }}>
+                주문 확인 (슬랙 주문하기와 동일 기준)
+              </div>
+              <dl style={dlStyle}>
+                <dt>주문 수량</dt>
+                <dd style={{ margin: 0 }}>{state.order_preview.quantity.toLocaleString()}주</dd>
+                <dt>지정가(호가)</dt>
+                <dd style={{ margin: 0 }}>
+                  {formatCurrencyPrice(state.order_preview.price, target.currency)} ({state.order_preview.quote_label})
+                </dd>
+                <dt>예상 금액</dt>
+                <dd style={{ margin: 0 }}>{formatCurrencyPrice(state.order_preview.amount, target.currency)}</dd>
+              </dl>
+              <p style={{ margin: "8px 0 0", color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
+                실행 시 슬랙과 같은 락·중복 검사 후 주문을 접수하고 슬랙 스레드 버튼도 함께 갱신합니다.
+              </p>
+            </>
+          ) : (
+            <p style={{ margin: 0, fontSize: "var(--fs-sm)" }} className="text-danger">
+              {state.order_error ?? "주문 가능 정보를 확인할 수 없습니다."}
+            </p>
+          )}
         </div>
       ) : null}
 
-      {phase === "active_order" ? (
+      {state?.phase === "active_order" && state.order ? (
         <div style={boxStyle}>
           <div style={{ fontWeight: 600, marginBottom: 8, fontSize: "var(--fs-sm)" }}>
             미체결 주문 현황 (정정·취소)
           </div>
           <dl style={dlStyle}>
             <dt>접수 주문가</dt>
-            <dd style={{ margin: 0 }}>{formatCurrencyPrice(samplePrice, target.currency)}</dd>
+            <dd style={{ margin: 0 }}>{formatCurrencyPrice(state.order.price, target.currency)}</dd>
             <dt>체결 / 잔여</dt>
-            <dd style={{ margin: 0 }}>0주 체결 · {target.quantity.toLocaleString()}주 미체결</dd>
+            <dd style={{ margin: 0 }}>
+              {state.order.filled_quantity.toLocaleString()}주 체결 · {state.order.remaining_quantity.toLocaleString()}주 미체결
+            </dd>
             <dt>정정 예정가</dt>
-            <dd style={{ margin: 0 }}>{formatCurrencyPrice(sampleModifyPrice, target.currency)} (현재 호가 기준)</dd>
+            <dd style={{ margin: 0 }}>
+              {state.modify_preview
+                ? `${formatCurrencyPrice(state.modify_preview.target_price, target.currency)} (${state.modify_preview.quote_label})`
+                : state.modify_error ?? "정정 불가"}
+            </dd>
           </dl>
           <p style={{ margin: "8px 0 0", color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
             정정 또는 취소 전 증권사 최신 미체결 잔량을 다시 확인한 뒤 반영합니다.
@@ -219,20 +325,29 @@ export function MixSlackActionModal({ target, busy, onClose, onWithdraw }: Props
         </div>
       ) : null}
 
-      {phase === "completed" ? (
+      {state?.phase === "completed" ? (
         <div style={boxStyle}>
           <div style={{ fontWeight: 600, marginBottom: 6, fontSize: "var(--fs-sm)" }}>
-            이미 처리된 신호입니다
+            {state.status_label}
           </div>
           <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
-            슬랙 또는 웹에서 이미 체결 완료·취소·만료·회수된 건은 중복 주문을 막기 위해 실행 버튼이 비활성화됩니다.
+            {state.reason ?? "이미 처리된 신호입니다."}
           </p>
+          {state.order ? (
+            <dl style={{ ...dlStyle, marginTop: 8 }}>
+              <dt>주문 내역</dt>
+              <dd style={{ margin: 0 }}>
+                {state.order.filled_quantity.toLocaleString()} / {state.order.quantity.toLocaleString()}주 ×{" "}
+                {formatCurrencyPrice(state.order.price, target.currency)} ({state.order.status})
+              </dd>
+            </dl>
+          ) : null}
         </div>
       ) : null}
 
-      {notice ? (
-        <p role="status" className="text-info mb-0" style={{ marginTop: 10, fontSize: "var(--fs-sm)" }}>
-          {notice}
+      {error ? (
+        <p role="alert" className="text-danger mb-0" style={{ marginTop: 10, fontSize: "var(--fs-sm)" }}>
+          {error}
         </p>
       ) : null}
     </AppModal>

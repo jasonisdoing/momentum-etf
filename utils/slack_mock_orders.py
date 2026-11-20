@@ -719,11 +719,11 @@ def _place_swap(target: dict[str, Any]) -> None:
     _run_post_order_updates(target, text, _pair_blocks(request, sell["pair_id"], None))
 
 
-def _place(target: dict[str, Any]) -> None:
+def _place(target: dict[str, Any], *, reraise: bool = False) -> dict[str, Any] | None:
     request = target["request"]
     if _is_swap(request):
         _place_swap(target)
-        return
+        return None
     side = f"{_env_word(request['env'])} {_action_word(request)}"
     # 처리하는 동안 같은 메시지로 또 주문하지 못하게 버튼부터 걷어낸다.
     _update_message(target, _note_blocks(request, "⏳ 주문 처리 중…"))
@@ -743,20 +743,26 @@ def _place(target: dict[str, Any]) -> None:
                 slack,
                 arbitrary_id=request.get("arbitrary_id"),
             )
-    except OrderUncertainError:
+    except OrderUncertainError as exc:
         text = "⚠️ 증권사 접수 여부를 확인 중입니다. 주문내역을 확인하세요."
         send_thread_message(text, thread_ts=target["thread_ts"])
         _update_message(target, _note_blocks(request, text))
-        return
+        if reraise:
+            raise BrokerApiError(str(exc)) from exc
+        return None
     except RoundNotOrderableError as exc:
         _expire(target, exc)
-        return
+        if reraise:
+            raise BrokerApiError(str(exc)) from exc
+        return None
     except Exception as exc:  # 슬랙 요청은 이미 응답했으므로 실패도 스레드로 알린다.
         logger.exception("슬랙 모의 주문 처리 실패")
         send_thread_message(f"❌ {side} 주문 실패: {exc}", thread_ts=target["thread_ts"])
         _update_message(target, _open_blocks(request))
         _release_reservation(target)
-        return
+        if reraise:
+            raise
+        return None
     gap_pct = _signal_gap_pct(order)
     gap = f" · 신호 대비 {gap_pct:+.2f}%" if gap_pct is not None else ""
     _run_post_order_updates(
@@ -764,6 +770,7 @@ def _place(target: dict[str, Any]) -> None:
         f"✅ {side} 주문 접수: {order['strategy_label']} {order['quantity']:,}주 × {format_money(order['price'], order['country'])} (지정가){gap}",
         _cancel_blocks(request, order["id"]),
     )
+    return order
 
 
 def _restore_order_buttons(target: dict[str, Any], order: dict[str, Any], note: str | None = None) -> None:
@@ -778,7 +785,7 @@ def _restore_order_buttons(target: dict[str, Any], order: dict[str, Any], note: 
         _update_message(target, [*blocks, _note(note)] if note else blocks)
 
 
-def _modify(target: dict[str, Any]) -> None:
+def _modify(target: dict[str, Any], *, reraise: bool = False) -> dict[str, Any] | None:
     request = target["request"]
     side = f"{_env_word(request['env'])} {_SIDE_LABELS[request['side']]}"
     _update_message(target, _note_blocks(request, "⏳ 호가 정정 처리 중…"))
@@ -788,26 +795,32 @@ def _modify(target: dict[str, Any]) -> None:
         logger.exception("슬랙 주문 호가 정정 실패")
         send_thread_message(f"❌ {side} 호가 정정 실패: {exc}", thread_ts=target["thread_ts"])
         _restore_order_buttons(target, refreshed_order(request["account_id"], target["order_id"]))
-        return
+        if reraise:
+            raise
+        return None
     text = f"✏️ {side} 호가 정정 요청: {format_money(modified['price'], modified['country'])}"
     send_thread_message(text, thread_ts=target["thread_ts"])
     _restore_order_buttons(target, modified, text)
+    return modified
 
 
-def _cancel(target: dict[str, Any]) -> None:
+def _cancel(target: dict[str, Any], *, reraise: bool = False) -> dict[str, Any] | None:
     request = target["request"]
     side = f"{_env_word(request['env'])} {_SIDE_LABELS[request['side']]}"
     _update_message(target, _note_blocks(request, "⏳ 취소 처리 중…"))
     try:
-        cancel_record(target["order_id"])
+        cancelled = cancel_record(target["order_id"])
     except Exception as exc:
         logger.exception("슬랙 모의 주문 취소 실패")
         send_thread_message(f"❌ {side} 주문 취소 실패: {exc}", thread_ts=target["thread_ts"])
         # 그 사이 주문이 끝났을 수 있다 — 끝났으면 결과 알림은 배치가 하고, 아니면 취소 버튼을 되살린다.
         _restore_order_buttons(target, refreshed_order(request["account_id"], target["order_id"]))
-        return
+        if reraise:
+            raise
+        return None
     send_thread_message(f"🚫 {side} 주문 취소를 요청했습니다.", thread_ts=target["thread_ts"])
     # 취소 결과(체결 수량 포함)로 메시지를 마무리하는 일은 배치(`notify_finished_orders`)가 한다.
+    return cancelled
 
 
 def run_submission(target: dict[str, Any]) -> None:

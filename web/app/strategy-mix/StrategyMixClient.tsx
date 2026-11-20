@@ -1432,11 +1432,11 @@ export function StrategyMixClient() {
   // 내일의 액션 = 다음 거래일(연휴면 실제로는 며칠 뒤 — 세부 날짜는 그룹 제목에).
   const todayActionGroups = actionGroups.filter((group) => group.section === "today");
 
-  async function confirmWithdrawAction(target: MixSlackActionTarget) {
-    if (withdrawBusy || target.accountId !== accountId || !target.withdrawKey) return;
+  async function confirmWithdrawAction(target: MixSlackActionTarget, key: string) {
+    if (withdrawBusy || target.accountId !== accountId) return;
     setWithdrawBusy(true);
     try {
-      const { accountId: targetAccount, ticker, withdrawKey: key } = target;
+      const { accountId: targetAccount, ticker } = target;
       const response = await fetch("/api/strategy-mix/withdraw-signal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1446,10 +1446,8 @@ export function StrategyMixClient() {
       if (!response.ok) throw new Error(result.error ?? "슬랙 신호를 회수하지 못했습니다.");
       setPositions((current) => {
         if (current?.account_id !== targetAccount) return current;
-        const entry = Object.entries(current.order_signals).find(([, value]) => value.withdraw_key === key);
-        if (!entry) return current;
         const orderSignals = { ...current.order_signals };
-        delete orderSignals[entry[0]];
+        delete orderSignals[target.actionKey];
         return { ...current, order_signals: orderSignals };
       });
       toast.success("슬랙 신호를 회수했습니다.");
@@ -1499,6 +1497,7 @@ export function StrategyMixClient() {
             accountId,
             accountLabel,
             currency: positions.currency,
+            actionKey: item.key,
             ticker: item.ticker,
             title: item.title,
             text: item.text,
@@ -2050,9 +2049,10 @@ export function StrategyMixClient() {
       </AppModal>
       <MixSlackActionModal
         target={managingSignal?.accountId === accountId ? managingSignal : null}
-        busy={withdrawBusy}
+        withdrawBusy={withdrawBusy}
         onClose={() => setManagingSignal(null)}
-        onWithdraw={(target) => void confirmWithdrawAction(target)}
+        onWithdraw={(target, key) => void confirmWithdrawAction(target, key)}
+        onChanged={() => setPositionsReloadKey((key) => key + 1)}
       />
     </PageFrame>
   );

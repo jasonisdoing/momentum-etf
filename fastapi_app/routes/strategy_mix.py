@@ -109,3 +109,62 @@ def post_withdraw_signal(payload: WithdrawOrderSignalPayload, _: None = Depends(
     except (BrokerApiError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True}
+
+
+@router.get("/signal-action")
+def get_signal_action(
+    account_id: str = Query(...),
+    ticker: str = Query(...),
+    action_key: str = Query(...),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """웹 통합 모달에서 슬랙 발송 신호의 실시간 상태·미리보기를 조회한다."""
+    from services.broker_api_service import BrokerApiError
+    from utils.strategy_mix_orders import get_mix_signal_action_state
+
+    try:
+        return get_mix_signal_action_state(account_id, ticker, action_key)
+    except (BrokerApiError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class MixSignalActionPayload(BaseModel):
+    kind: Literal["order", "modify", "cancel"]
+    account_id: str
+    ticker: str
+    action_key: str
+    thread_ts: str | None = None
+    confirmation_id: str | None = None
+    confirmed: dict | None = None
+    order_id: str | None = None
+
+
+@router.post("/signal-action")
+def post_signal_action(payload: MixSignalActionPayload, _: None = Depends(require_internal_token)) -> dict:
+    """웹 통합 모달에서 슬랙 주문·호가정정·취소를 실행한다."""
+    from services.broker_api_service import BrokerApiError
+    from utils.strategy_mix_orders import (
+        execute_mix_web_cancel,
+        execute_mix_web_modify,
+        execute_mix_web_order,
+    )
+
+    try:
+        if payload.kind == "order":
+            if not payload.thread_ts or not payload.confirmation_id or not payload.confirmed:
+                raise ValueError("주문 실행에 필요한 확인 정보가 부족합니다.")
+            return execute_mix_web_order(
+                payload.account_id,
+                payload.ticker,
+                payload.action_key,
+                payload.thread_ts,
+                payload.confirmation_id,
+                payload.confirmed,
+            )
+        if not payload.order_id:
+            raise ValueError("대상 주문 ID가 없습니다.")
+        if payload.kind == "modify":
+            return execute_mix_web_modify(payload.account_id, payload.ticker, payload.action_key, payload.order_id)
+        return execute_mix_web_cancel(payload.account_id, payload.ticker, payload.action_key, payload.order_id)
+    except (BrokerApiError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
