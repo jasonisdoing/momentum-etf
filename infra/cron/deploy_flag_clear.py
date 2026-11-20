@@ -1,12 +1,17 @@
 """배포 진행 플래그를 MongoDB batch_locks 에서 제거한다.
 
-deploy.yml 의 trap quote escape 문제를 회피하기 위해 별도 파일로 분리.
-fastapi_app 컨테이너 안에서 실행된다.
+deploy.yml 의 trap quote escape 문제를 회피하기 위해 별도 파일로 분리. 맥미니 배포 셸에서 스크립트로 실행되므로
+저장소 루트를 import 경로에 넣는다(넣지 않으면 `utils` 를 못 찾아 잠금이 걸리지 않는다).
 """
 
 from __future__ import annotations
 
-from utils.db_manager import get_db_connection
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from utils.db_manager import get_db_connection  # noqa: E402
 
 
 def main() -> None:
